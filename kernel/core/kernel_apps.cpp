@@ -28,6 +28,7 @@
 #include "../../gxos_tls_prerequisites.h"
 #include "../../guide_web_http_shared.h"
 #include "../../desktop_theme.h"
+#include "../../desktop_control_theme.h"
 
 #include <string.h>
 
@@ -259,7 +260,7 @@ static uint32_t kernelNotepadEditorColor()
 {
     if (!kernelSciFiThemeActive()) return rgb(45, 45, 55);
     const DesktopTheme& theme = GetCurrentDesktopTheme();
-    return kernelThemeBlend(theme.windowBackground, theme.taskbarBackground, 8);
+    return GetBareMetalControlTheme(theme).recessedField;
 }
 
 static uint32_t kernelNotepadEditorBorderColor()
@@ -272,7 +273,7 @@ static uint32_t kernelNotepadEditorBorderColor()
 static uint32_t kernelNotepadTextColor()
 {
     if (!kernelSciFiThemeActive()) return rgb(220, 220, 235);
-    return GetCurrentDesktopTheme().titleBarText;
+    return GetBareMetalControlTheme(GetCurrentDesktopTheme()).primaryText;
 }
 
 static uint32_t kernelNotepadCaretColor()
@@ -285,8 +286,8 @@ static uint32_t kernelNotepadSelectionColor()
 {
     if (!kernelSciFiThemeActive()) return rgb(42, 91, 154);
     const DesktopTheme& theme = GetCurrentDesktopTheme();
-    const uint32_t editor = kernelThemeBlend(theme.windowBackground, theme.taskbarBackground, 8);
-    return kernelThemeBlend(editor, theme.accent, 48);
+    const BareMetalControlTheme roles = GetBareMetalControlTheme(theme);
+    return BareMetalSelectionFillColor(theme, roles.recessedField, true);
 }
 
 static uint32_t kernelNotepadContextShadowColor()
@@ -306,8 +307,7 @@ static uint32_t kernelCalculatorBodyColor()
 static uint32_t kernelCalculatorDisplayColor()
 {
     if (!kernelSciFiThemeActive()) return rgb(30, 35, 45);
-    const DesktopTheme& theme = GetCurrentDesktopTheme();
-    return kernelThemeBlend(theme.windowBackground, theme.taskbarBackground, 8);
+    return GetBareMetalControlTheme(GetCurrentDesktopTheme()).recessedField;
 }
 
 static uint32_t kernelCalculatorDisplayBorderColor()
@@ -320,7 +320,7 @@ static uint32_t kernelCalculatorDisplayBorderColor()
 static uint32_t kernelCalculatorDisplayTextColor()
 {
     if (!kernelSciFiThemeActive()) return rgb(200, 220, 255);
-    return GetCurrentDesktopTheme().titleBarText;
+    return GetBareMetalControlTheme(GetCurrentDesktopTheme()).primaryText;
 }
 
 static uint32_t css_color_or(uint32_t fallback, const gxos::web::WebStyle& style) {
@@ -4417,48 +4417,46 @@ static bool kernelFileExplorerSciFiThemeActive()
 static uint32_t kernelFileExplorerClientColor()
 {
     if (!kernelFileExplorerSciFiThemeActive()) return rgb(246, 246, 246);
-    const DesktopTheme& theme = GetCurrentDesktopTheme();
-    return kernelThemeBlend(theme.windowBackground, theme.taskbarBackground, 12);
+    const BareMetalControlTheme roles = GetBareMetalControlTheme(GetCurrentDesktopTheme());
+    return kernelThemeBlend(roles.panelBackground, roles.raisedPanel, 12);
 }
 
 static uint32_t kernelFileExplorerToolbarColor()
 {
     if (!kernelFileExplorerSciFiThemeActive()) return rgb(246, 246, 246);
-    const DesktopTheme& theme = GetCurrentDesktopTheme();
-    return kernelThemeBlend(theme.taskbarBackground, theme.windowBackground, 24);
+    const BareMetalControlTheme roles = GetBareMetalControlTheme(GetCurrentDesktopTheme());
+    return kernelThemeBlend(roles.raisedPanel, roles.panelBackground, 24);
 }
 
 static uint32_t kernelFileExplorerAddressColor()
 {
     if (!kernelFileExplorerSciFiThemeActive()) return rgb(255, 255, 255);
-    const DesktopTheme& theme = GetCurrentDesktopTheme();
-    return kernelThemeBlend(theme.windowBackground, theme.taskbarBackground, 5);
+    const BareMetalControlTheme roles = GetBareMetalControlTheme(GetCurrentDesktopTheme());
+    return kernelThemeBlend(roles.panelBackground, roles.raisedPanel, 5);
 }
 
 static uint32_t kernelFileExplorerAddressLabelColor()
 {
     if (!kernelFileExplorerSciFiThemeActive()) return rgb(70, 70, 70);
-    const DesktopTheme& theme = GetCurrentDesktopTheme();
-    return kernelThemeBlend(theme.titleBarText, theme.windowBackground, 34);
+    return GetBareMetalControlTheme(GetCurrentDesktopTheme()).secondaryText;
 }
 
 static uint32_t kernelFileExplorerPrimaryTextColor()
 {
     if (!kernelFileExplorerSciFiThemeActive()) return rgb(20, 20, 20);
-    return GetCurrentDesktopTheme().titleBarText;
+    return GetBareMetalControlTheme(GetCurrentDesktopTheme()).primaryText;
 }
 
 static uint32_t kernelFileExplorerPathTextColor()
 {
     if (!kernelFileExplorerSciFiThemeActive()) return rgb(30, 30, 30);
-    return GetCurrentDesktopTheme().titleBarText;
+    return GetBareMetalControlTheme(GetCurrentDesktopTheme()).primaryText;
 }
 
 static uint32_t kernelFileExplorerSecondaryTextColor()
 {
     if (!kernelFileExplorerSciFiThemeActive()) return rgb(70, 70, 70);
-    const DesktopTheme& theme = GetCurrentDesktopTheme();
-    return kernelThemeBlend(theme.titleBarText, theme.windowBackground, 34);
+    return GetBareMetalControlTheme(GetCurrentDesktopTheme()).secondaryText;
 }
 
 static uint32_t kernelFileExplorerMutedTextColor()
@@ -4471,14 +4469,14 @@ static uint32_t kernelFileExplorerMutedTextColor()
 static uint32_t kernelFileExplorerNavigationColor()
 {
     if (!kernelFileExplorerSciFiThemeActive()) return rgb(238, 238, 238);
-    const DesktopTheme& theme = GetCurrentDesktopTheme();
-    return kernelThemeBlend(theme.windowBackground, theme.taskbarBackground, 18);
+    const BareMetalControlTheme roles = GetBareMetalControlTheme(GetCurrentDesktopTheme());
+    return kernelThemeBlend(roles.panelBackground, roles.raisedPanel, 18);
 }
 
 static uint32_t kernelFileExplorerNavigationHeadingColor()
 {
     if (!kernelFileExplorerSciFiThemeActive()) return rgb(40, 40, 40);
-    return GetCurrentDesktopTheme().titleBarText;
+    return GetBareMetalControlTheme(GetCurrentDesktopTheme()).primaryText;
 }
 
 static uint32_t kernelFileExplorerNavigationItemColor()
@@ -4498,8 +4496,7 @@ static uint32_t kernelFileExplorerNoMountsColor()
 static uint32_t kernelFileExplorerListColor()
 {
     if (!kernelFileExplorerSciFiThemeActive()) return rgb(255, 255, 255);
-    const DesktopTheme& theme = GetCurrentDesktopTheme();
-    return kernelThemeBlend(theme.windowBackground, theme.taskbarBackground, 8);
+    return GetBareMetalControlTheme(GetCurrentDesktopTheme()).recessedField;
 }
 
 static uint32_t kernelFileExplorerHeaderColor()
@@ -4519,9 +4516,8 @@ static uint32_t kernelFileExplorerHeaderTextColor()
 static uint32_t kernelFileExplorerSelectionColor(bool focused)
 {
     if (!kernelFileExplorerSciFiThemeActive()) return rgb(200, 220, 245);
-    const DesktopTheme& theme = GetCurrentDesktopTheme();
-    const uint32_t base = focused ? theme.accent : theme.mutedAccent;
-    return kernelThemeBlend(theme.windowBackground, base, focused ? 48 : 42);
+    const BareMetalControlTheme roles = GetBareMetalControlTheme(GetCurrentDesktopTheme());
+    return focused ? roles.selectionActive : roles.selectionInactive;
 }
 
 static uint32_t kernelFileExplorerScrollbarTrackColor()

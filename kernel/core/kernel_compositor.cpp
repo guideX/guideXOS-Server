@@ -10,6 +10,7 @@
 #include "include/kernel/image_adapter.h"
 #include "include/kernel/serial_debug.h"
 #include "../../desktop_theme.h"
+#include "../../desktop_control_theme.h"
 
 namespace kernel {
 namespace compositor {
@@ -1050,7 +1051,9 @@ void KernelCompositor::drawWidget(app::KernelWindow* window, app::Widget* widget
     switch (widget->type) {
         case app::WidgetType::Label:
             drawText(x, y + (h - kGlyphH) / 2, widget->text,
-                     calculatorWindow && sciFiTheme ? theme.titleBarText : widget->fgColor);
+                     calculatorWindow && sciFiTheme
+                         ? GetBareMetalControlTheme(theme).primaryText
+                         : widget->fgColor);
             break;
             
         case app::WidgetType::Button: {
@@ -1077,11 +1080,10 @@ void KernelCompositor::drawWidget(app::KernelWindow* window, app::Widget* widget
                     baseColor = BlendDesktopThemeColor(theme.taskbarBackground, theme.windowBorder, 20);
                 }
 
-                bgColor = widget->pressed
-                    ? BlendDesktopThemeColor(baseColor, theme.accent, 24)
-                    : (widget->hover
-                        ? BlendDesktopThemeColor(baseColor, theme.mutedAccent, 16)
-                        : baseColor);
+                const BareMetalButtonSurfaceRoles buttonRoles =
+                    GetBareMetalButtonSurfaceRoles(theme, baseColor, 16, 24);
+                bgColor = widget->pressed ? buttonRoles.pressed
+                    : (widget->hover ? buttonRoles.hover : buttonRoles.normal);
                 borderColor = operatorButton || equalsButton
                     ? BlendDesktopThemeColor(theme.windowBorder, theme.accent, 36)
                     : (clearButton
@@ -1092,21 +1094,20 @@ void KernelCompositor::drawWidget(app::KernelWindow* window, app::Widget* widget
                 } else if (widget->hover) {
                     borderColor = BlendDesktopThemeColor(borderColor, theme.titleBarText, 12);
                 }
-                textColor = theme.titleBarText;
+                textColor = buttonRoles.text;
             } else if (fileExplorerWindow && sciFiTheme) {
                 const uint32_t baseColor = BlendDesktopThemeColor(
                     theme.taskbarBackground, theme.windowBackground, 24);
-                bgColor = widget->pressed
-                    ? BlendDesktopThemeColor(baseColor, theme.accent, 24)
-                    : (widget->hover
-                        ? BlendDesktopThemeColor(baseColor, theme.mutedAccent, 18)
-                        : baseColor);
+                const BareMetalButtonSurfaceRoles buttonRoles =
+                    GetBareMetalButtonSurfaceRoles(theme, baseColor, 18, 24);
+                bgColor = widget->pressed ? buttonRoles.pressed
+                    : (widget->hover ? buttonRoles.hover : buttonRoles.normal);
                 borderColor = widget->pressed
                     ? BlendDesktopThemeColor(theme.windowBorder, theme.accent, 34)
                     : (widget->hover
                         ? BlendDesktopThemeColor(theme.windowBorder, theme.mutedAccent, 30)
                         : BlendDesktopThemeColor(theme.windowBorder, theme.taskbarBorder, 20));
-                textColor = theme.titleBarText;
+                textColor = buttonRoles.text;
             }
             fillRect(x, y, w, h, bgColor);
             drawRect(x, y, w, h, borderColor);

@@ -1075,6 +1075,49 @@ QMP input proof confirmed launch from the desktop icon, a populated root list, r
 
 Remaining gaps are bounded to larger bare-metal application interiors, generic-control parity, icon/font integration, and settings/system application coverage. Generic lists, generic scrollbars, generic buttons, menus, dialogs, and icon integration remain out of scope unless separately authorized.
 
+## Phase 8C — Bare-Metal Shared Control Theme Foundation
+
+Phase 8C audits the repeated Sci-Fi color decisions established by the bare-metal shell, Calculator, Notepad, File Explorer, shell-owned popups, and compositor widgets. It deliberately extracts only color roles that the existing code has already earned. No new widget framework, layout system, theme observer, compositor protocol, or application registry was introduced.
+
+### Audit Findings and Architecture Decision
+
+The bare-metal application interiors do not share one renderer. `NotepadApp`, `CalculatorApp`, and `FileExplorerApp` own separate framebuffer paint paths in `kernel/core/kernel_apps.cpp`. The existing shared boundary is narrower: `KernelCompositor::drawWidget()` paints the existing widget primitive used by Calculator buttons and File Explorer toolbar buttons, with explicit owner guards for their semantic differences. The shell desktop in `kernel/core/desktop.cpp` owns its taskbar, Start-menu, context-menu, notification-toast, and shutdown-dialog paint helpers. Those surfaces have related palette inputs but different semantic roles and no shared control renderer.
+
+The hosted `WindowRenderer` has a useful analogous blend helper, but it is coupled to hosted GDI types and hosted chrome behavior. It was not refactored or imported into the freestanding path. No clean shared bare-metal scrollbar boundary exists: File Explorer owns the only audited bare-metal scrollbar renderer, so no generic scrollbar role or control was created.
+
+**Architecture decision: Only minimal helper extraction justified.** A small stateless color-role layer is justified for repeated panel/text/selection relationships and repeated button surface state transitions. A broader shared control foundation would force application-specific formulas and shell semantics together, so it was intentionally not created.
+
+### Foundation and Narrow Migration
+
+`desktop_control_theme.h` adds the allocation-free `BareMetalControlTheme` role map, `BareMetalSelectionFillColor()`, and `BareMetalButtonSurfaceRoles`. The helpers take the current `DesktopTheme`, return colors only, use the existing integer `BlendDesktopThemeColor()` relationship, and contain no geometry, input, ownership, filesystem, hosted, or architecture-specific behavior.
+
+The formalized roles are:
+
+* panel background, raised panel, and recessed/input field relationships;
+* border, primary text, secondary text, and selection text;
+* active and inactive selection fills;
+* button normal, hover, pressed, and text surfaces, while leaving border formulas and semantic bases with each caller.
+
+The representative migration is intentionally small. Calculator and File Explorer button surface state transitions now use the shared button-surface helper at the existing compositor widget boundary, with their existing normal bases and hover percentages preserved. Calculator display and Notepad editor fields use the shared recessed-field role. Calculator, Notepad, and File Explorer primary text use the shared text role. File Explorer address/secondary text, list selection, and its panel relationships use the shared roles. Notepad selection uses the same shared active-selection relationship over its existing editor-owned base.
+
+Classic branches remain local and unchanged. Sci-Fi application-specific roles remain local, including Calculator numeric/operator/equals/clear semantic bases and borders; Notepad menus, caret, context shadow, and editor border; File Explorer toolbar/address/header/footer/menu/dialog formulas, icons, local scrollbar, and application overlays; and all Start-menu, shell context-menu, notification, and shutdown-dialog formulas. No separate selected-text renderer exists on the migrated bare-metal surfaces, so `selectionText` is descriptive and does not alter selection behavior.
+
+### Equivalence, Geometry, and Behavior
+
+The migrated Sci-Fi expressions are formula-equivalent to their pre-Phase-8C code: the shared recessed field remains `Blend(windowBackground, taskbarBackground, 8)`, primary text remains `theme.titleBarText`, secondary text remains the existing 34-percent blend, active/inactive File Explorer selection remains the existing 48/42-percent blend, Notepad selection remains its existing editor-base 48-percent blend, and Calculator/File Explorer button surface state uses the existing 16/18-percent hover and 24-percent pressed blends. Existing Phase 8A Calculator/Notepad and Phase 8B File Explorer Classic/Sci-Fi captures remain the visual baseline; this pass did not add a new look or geometry.
+
+No window or control dimensions, spacing, hit regions, text positions, focus logic, input routing, selection behavior, scrolling, callbacks, filesystem behavior, arithmetic, caret behavior, or close/reopen behavior changed. The helper layer is freestanding-safe, deterministic, integer-only, allocation-free, and contains no dynamic framework machinery or hosted dependency.
+
+### Phase 8C Validation Record
+
+The exact workspace passed `.\build.bat`, `mingw32-make -C kernel ARCH=amd64 -j2`, and `.\build.ps1 -Arch amd64`. `smoke-theme-system.ps1 -SkipBuild`, `smoke-live-directory-desktop-status.ps1 -SkipBuild`, `smoke-hosted-display-runtime.ps1`, `smoke-bootinfo-framebuffer-array.ps1`, and `smoke-virtio-gpu-input-routing.ps1` passed. The standalone `tests/file_explorer_navigation_test.cpp` and `tests/window_ui_regression_test.cpp` passed. `smoke-desktop-startup-sync.ps1` reproduced the known harness limitation: QEMU reached the UEFI shell because the workspace ESP has no tracked `startup.nsh`; no startup source or runtime configuration was changed. Build-generated PacMan/ESP/display-options validation artifacts were restored afterward, and logs/screenshots were kept out of the change.
+
+Fresh pixel-targeted QEMU interaction proof was not completed in this consolidation pass. The proof is therefore source/formula-equivalence plus the prior Phase 8A/8B Classic and Sci-Fi captures, rather than a new post-consolidation screenshot set. This is a proof limitation, not a reported visual regression.
+
+### Remaining Control Gaps
+
+No general bare-metal button renderer, generic list/textbox/dialog framework, generic scrollbar, shared shell-popup renderer, icon/font role system, larger application interior abstraction, or settings/system-application theme pass was added. These remain separate future work. Phase 8D is not started.
+
 ## Manual Validation Runbook
 
 * Start the hosted server executable.
