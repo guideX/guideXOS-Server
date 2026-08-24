@@ -64,6 +64,51 @@ public static unsafe class Program
     }
 #endif
 
+#if HOSTLOGPROOF_C011EC38
+    [DllImport("__Internal", EntryPoint = "guideXosNativeAotC011EC38BeforeAllocation")]
+    private static extern int GuideXosNativeAotC011EC38BeforeAllocation(
+        uint ordinal,
+        uint payloadSize);
+
+    [DllImport("__Internal", EntryPoint = "guideXosNativeAotC011EC38AfterAllocation")]
+    private static extern int GuideXosNativeAotC011EC38AfterAllocation(
+        nint objectAddress);
+
+    [DllImport("__Internal", EntryPoint = "guideXosNativeAotC011EC38Finish")]
+    private static extern int GuideXosNativeAotC011EC38Finish();
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static int RunC011EC38OneAllocation(uint ordinal)
+    {
+        if (GuideXosNativeAotC011EC38BeforeAllocation(ordinal, 64u) != 0)
+        {
+            return -1;
+        }
+
+        byte[] value = new byte[64];
+        nint objectAddress = Unsafe.As<byte[], nint>(ref value);
+        int status = GuideXosNativeAotC011EC38AfterAllocation(objectAddress);
+        GC.KeepAlive(value);
+        return status;
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static int RunC011EC38AllocationReuse()
+    {
+        // Eight fixed calls are the complete bounded reuse window. Each call
+        // uses the ordinary managed new-array path and retains no diagnostic
+        // object or allocator handle.
+        for (uint ordinal = 0u; ordinal < 8u; ordinal++)
+        {
+            if (RunC011EC38OneAllocation(ordinal) != 0)
+            {
+                return -1;
+            }
+        }
+        return GuideXosNativeAotC011EC38Finish();
+    }
+#endif
+
     private readonly struct ShortWeakLifetimeSetup
     {
         internal readonly nint Target;
@@ -595,8 +640,18 @@ public static unsafe class Program
                 // This scalar increment is the deterministic managed
                 // continuation checkpoint. It does not allocate or retain a
                 // new object before the native observer records success.
+#if HOSTLOGPROOF_C011EC38
+                int checkpointStatus = RunC011EC37ManagedCheckpoint();
+                if (checkpointStatus != 0)
+                {
+                    return GxAbi.ErrorInvalidArgument;
+                }
+                return RunC011EC38AllocationReuse() == 0
+                    ? 0 : GxAbi.ErrorInvalidArgument;
+#else
                 int checkpointStatus = RunC011EC37ManagedCheckpoint();
                 return checkpointStatus == 0 ? 0 : GxAbi.ErrorInvalidArgument;
+#endif
             }
 #endif
             bool sentinelsValid = ValidateSample(sentinel0, 0u) &&

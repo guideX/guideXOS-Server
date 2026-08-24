@@ -402,6 +402,114 @@ typedef struct guidexos_nativeaot_c011ec35_relocated_handle_record {
     uintptr_t nextPhaseAddress;
 } guidexos_nativeaot_c011ec35_relocated_handle_record;
 
+/* C011EC38 authentic Workstation region-sweep reclamation evidence.  This is
+ * scalar, append-only proof storage.  The collector callbacks only copy
+ * values already exposed by the locked GC source; they never create free
+ * objects, touch headers, or traverse arbitrary heap contents. */
+typedef struct guidexos_nativeaot_c011ec38_reclamation_record {
+    uint32_t preflightEmitted;
+    uint32_t collectionPathObserved;
+    uint32_t actualCompacting;
+    uint32_t sweepEntered;
+    uint32_t sweepReturned;
+    uint32_t targetObserved;
+    uint32_t targetDeadRecognized;
+    uint32_t targetMarkedBeforeSweep;
+    uint32_t targetFullyContained;
+    uint32_t coalescedWithNeighbors;
+    uint32_t reclaimedEmitted;
+    uint32_t generationPublished;
+    uint32_t regionFreeListCountBefore;
+    uint32_t regionFreeListCountAfter;
+    uint32_t regionFreeObjCountBefore;
+    uint32_t regionFreeObjCountAfter;
+    uint32_t freeListCountBefore;
+    uint32_t freeListCountAfter;
+    uint32_t allocationTestAttempted;
+    uint32_t allocationCount;
+    uint32_t allocationPath;
+    uint32_t sameReclaimedSpanConsumed;
+    uint32_t oldTargetExtentOverlap;
+    uint32_t exactStartReuse;
+    uint32_t residualFreeSpanValid;
+    uint32_t weakSlotCleared;
+    uint32_t staleTargetReferences;
+    uint32_t relocationResurrectionCount;
+    uint32_t collection3Triggered;
+    uint32_t allocatorIntegrityFailures;
+    uint32_t safeStopReason;
+    uint32_t managedMarkerEmitted;
+    uint32_t completionMarkerEmitted;
+    uint32_t managedCheckpoint;
+    uint32_t allocationRequestedPayload;
+    uint32_t allocationElementCount;
+    uint32_t allocationRequestedCount;
+    uint32_t reserved[3];
+
+    uintptr_t originalTarget;
+    uintptr_t relocatedTarget;
+    uintptr_t targetType;
+    uintptr_t targetEEType;
+    uintptr_t targetStart;
+    uintptr_t targetEnd;
+    uintptr_t targetRawSize;
+    uintptr_t targetAlignedSize;
+    uintptr_t targetArrayHeaderSize;
+    uintptr_t targetBaseSize;
+    uintptr_t targetComponentSize;
+    uintptr_t targetLogicalPayloadSize;
+    uintptr_t targetElementCount;
+    uintptr_t weakSlot;
+    uintptr_t segment;
+    uintptr_t segmentStart;
+    uintptr_t segmentEnd;
+    uintptr_t segmentAllocatedBefore;
+    uintptr_t segmentAllocatedAfter;
+    uintptr_t segmentCommitted;
+    uintptr_t segmentReserved;
+    uintptr_t segmentUsed;
+    uintptr_t heapNumber;
+    uintptr_t generation;
+    uintptr_t planGeneration;
+    uintptr_t brickAddress;
+    uintptr_t brickIndex;
+    uintptr_t sweepEntryAddress;
+    uintptr_t sweepReturnAddress;
+    uintptr_t generationAddress;
+    uintptr_t generationAllocator;
+
+    uintptr_t regionFreeListHeadBefore;
+    uintptr_t regionFreeListTailBefore;
+    uintptr_t regionFreeListHeadAfter;
+    uintptr_t regionFreeListTailAfter;
+    uintptr_t regionFreeListBytesBefore;
+    uintptr_t regionFreeListBytesAfter;
+    uintptr_t regionFreeObjBytesBefore;
+    uintptr_t regionFreeObjBytesAfter;
+    uintptr_t generationFreeListBytesBefore;
+    uintptr_t generationFreeListBytesAfter;
+    uintptr_t generationFreeObjBytesBefore;
+    uintptr_t generationFreeObjBytesAfter;
+    uintptr_t reclaimedStart;
+    uintptr_t reclaimedEnd;
+    uintptr_t reclaimedBytes;
+    uintptr_t targetSpecificReclaimBytes;
+    uintptr_t deadRangeStart;
+    uintptr_t deadRangeEnd;
+    uintptr_t deadRangeBytes;
+
+    uintptr_t allocationSelectedStart;
+    uintptr_t allocationSelectedEnd;
+    uintptr_t allocationAddress;
+    uintptr_t allocationEnd;
+    uintptr_t allocationResidualStart;
+    uintptr_t allocationResidualEnd;
+    uintptr_t allocationRequestedSize;
+    uintptr_t allocationAlignedSize;
+    uintptr_t allocationFreeBytesBefore;
+    uintptr_t allocationFreeBytesAfter;
+} guidexos_nativeaot_c011ec38_reclamation_record;
+
 typedef struct guidexos_nativeaot_allocation_diagnostics {
     uint32_t schemaVersion;
     uint32_t heapInitialized;
@@ -2244,6 +2352,8 @@ typedef struct guidexos_nativeaot_allocation_diagnostics {
     guidexos_nativeaot_c011ec34_relocation_record c011ec34Relocation;
     /* C011EC35 surviving short-weak handle relocation evidence. */
     guidexos_nativeaot_c011ec35_relocated_handle_record c011ec35RelocatedHandle;
+    /* C011EC38 dead-object physical reclamation/reuse evidence. */
+    guidexos_nativeaot_c011ec38_reclamation_record c011ec38Reclamation;
 } guidexos_nativeaot_allocation_diagnostics;
 
 enum {
