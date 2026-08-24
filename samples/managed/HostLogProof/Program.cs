@@ -131,6 +131,47 @@ public static unsafe class Program
     }
 #endif
 
+#if HOSTLOGPROOF_C011EC40
+    [DllImport("__Internal", EntryPoint = "guideXosNativeAotC011EC40BeforeAllocation")]
+    private static extern int GuideXosNativeAotC011EC40BeforeAllocation(
+        uint ordinal,
+        uint payloadSize);
+
+    [DllImport("__Internal", EntryPoint = "guideXosNativeAotC011EC40AfterAllocation")]
+    private static extern int GuideXosNativeAotC011EC40AfterAllocation(
+        nint objectAddress);
+
+    [DllImport("__Internal", EntryPoint = "guideXosNativeAotC011EC40Finish")]
+    private static extern int GuideXosNativeAotC011EC40Finish();
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static int RunC011EC40AllocationReuse()
+    {
+        for (uint ordinal = 0u; ordinal < 8u; ordinal++)
+        {
+            int before = GuideXosNativeAotC011EC40BeforeAllocation(ordinal, 64u);
+            if (before < 0)
+            {
+                return -1;
+            }
+            if (before > 0)
+            {
+                break;
+            }
+
+            byte[] value = new byte[64];
+            nint objectAddress = Unsafe.As<byte[], nint>(ref value);
+            if (GuideXosNativeAotC011EC40AfterAllocation(objectAddress) != 0)
+            {
+                return -1;
+            }
+            value[0] = (byte)ordinal;
+            GC.KeepAlive(value);
+        }
+        return GuideXosNativeAotC011EC40Finish();
+    }
+#endif
+
     private readonly struct ShortWeakLifetimeSetup
     {
         internal readonly nint Target;
@@ -662,7 +703,15 @@ public static unsafe class Program
                 // This scalar increment is the deterministic managed
                 // continuation checkpoint. It does not allocate or retain a
                 // new object before the native observer records success.
-#if HOSTLOGPROOF_C011EC39
+#if HOSTLOGPROOF_C011EC40
+                int checkpointStatus = RunC011EC37ManagedCheckpoint();
+                if (checkpointStatus != 0)
+                {
+                    return GxAbi.ErrorInvalidArgument;
+                }
+                return RunC011EC40AllocationReuse() == 0
+                    ? 0 : GxAbi.ErrorInvalidArgument;
+#elif HOSTLOGPROOF_C011EC39
                 int checkpointStatus = RunC011EC37ManagedCheckpoint();
                 if (checkpointStatus != 0)
                 {

@@ -789,7 +789,7 @@ extern "C" int32_t guidexos_nativeaot_gc_describe_object(
     gx_uintptr* heapAllocated,
     gx_uintptr* heapReserved,
     gx_uint32* heapOwned);
-#if defined(GUIDEXOS_NATIVEAOT_SEGMENT_BOUNDARY_ALLOCATION)
+#if defined(GUIDEXOS_NATIVEAOT_SEGMENT_BOUNDARY_ALLOCATION) || defined(GUIDEXOS_NATIVEAOT_C011EC40_COMPACTION_RECLAMATION)
 extern "C" int32_t guidexos_nativeaot_gc_describe_segment(
     void* object,
     gx_uintptr* segmentIdentity,
@@ -13000,6 +13000,446 @@ guideXosNativeAotC011EC39Finish() {
 }
 #endif
 
+#if defined(GUIDEXOS_NATIVEAOT_C011EC40_COMPACTION_RECLAMATION)
+static bool guideXosNativeAotC011EC40RangeOverlaps(
+    uintptr_t start, uintptr_t end, uintptr_t otherStart, uintptr_t otherEnd) {
+    return start < end && otherStart < otherEnd &&
+        start < otherEnd && otherStart < end;
+}
+
+static void guideXosNativeAotC011EC40CaptureTarget() {
+    guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    guidexos_nativeaot_c011ec40_compaction_record& r = d.c011ec40Compaction;
+    const uintptr_t target = d.c011ec33TargetAfterCollection1;
+    if (target == 0u) return;
+
+    r.originalTarget = d.c011ec33InitialTarget;
+    r.relocatedTarget = target;
+    r.targetType = d.c011ec33TargetType;
+    r.targetEEType = d.c011ec33TargetType;
+    r.weakSlot = d.c011ec33WeakHandleSlot;
+    r.targetStart = target;
+    r.targetArrayHeaderSize = 0x10u;
+    r.targetLogicalPayloadSize = 64u;
+    r.targetElementCount = 64u;
+    if (r.targetType != 0u) {
+        MethodTable* targetMethodTable =
+            reinterpret_cast<MethodTable*>(r.targetType);
+        r.targetBaseSize = targetMethodTable->GetBaseSize();
+        r.targetComponentSize = targetMethodTable->RawGetComponentSize();
+        r.targetRawSize = r.targetBaseSize +
+            (r.targetComponentSize * r.targetElementCount);
+        r.targetAlignedSize = (r.targetRawSize + 7u) &
+            ~static_cast<uintptr_t>(7u);
+        r.targetEnd = r.targetStart + r.targetAlignedSize;
+    }
+
+    uintptr_t segment = 0u;
+    uintptr_t segmentBase = 0u;
+    uintptr_t segmentAllocated = 0u;
+    uintptr_t segmentCommitted = 0u;
+    uintptr_t segmentReserved = 0u;
+    gx_uint32 segmentFlags = 0u;
+    gx_uint32 segmentGeneration = 0u;
+    if (r.targetAlignedSize != 0u &&
+        guidexos_nativeaot_gc_describe_segment(
+            reinterpret_cast<void*>(target), &segment, &segmentBase,
+            &segmentAllocated, &segmentCommitted, &segmentReserved,
+            &segmentFlags, &segmentGeneration) == 0 && segment != 0u) {
+        r.segment = segment;
+        r.segmentStart = segmentBase;
+        r.segmentEnd = segmentReserved;
+        r.segmentCommitted = segmentCommitted;
+        r.segmentReserved = segmentReserved;
+        r.segmentAllocatedBefore = segmentAllocated;
+        r.segmentUsedBefore = segmentAllocated;
+        r.heapNumber = 0u;
+        r.generation = segmentGeneration;
+    }
+    r.targetMarkedBeforeCompact =
+        d.c011ec33Collections[1].targetMarked != 0u ? 1u : 0u;
+    r.targetDeadRecognized =
+        (d.c011ec33Collections[1].targetRootMatches == 0u &&
+         d.c011ec33Collections[1].targetPromoteCount == 0u &&
+         d.c011ec33Collections[1].targetMarked == 0u &&
+         d.c011ec33Collections[1].deadDecisions != 0u &&
+         d.c011ec33Collections[1].clearedCount != 0u) ? 1u : 0u;
+    r.weakSlotCleared = r.weakSlot != 0u &&
+        *reinterpret_cast<const uintptr_t*>(r.weakSlot) == 0u ? 1u : 0u;
+    r.targetObserved = r.segment != 0u && r.targetEnd > r.targetStart ? 1u : 0u;
+    (void)segmentFlags;
+}
+
+static void guideXosNativeAotC011EC40EmitRecord(
+    const char* marker,
+    const guidexos_nativeaot_c011ec40_compaction_record& r,
+    const guidexos_nativeaot_allocation_diagnostics& d) {
+    suspendEeSerialPutString(
+        "[nativeaot-gc-short-weak-lifetime] ");
+    suspendEeSerialPutString(marker);
+#define C40P32(name, value) \
+    suspendEeSerialPutString(" " name "="); suspendEeSerialPutHex32(value)
+#define C40P64(name, value) \
+    suspendEeSerialPutString(" " name "="); suspendEeSerialPutHex64(value)
+    C40P32("successLevel", r.successLevel);
+    C40P32("compactEntry", r.compactEntryObserved);
+    C40P32("compactReturned", r.compactReturned);
+    C40P32("generationPublished", r.generationPublished);
+    C40P32("targetObserved", r.targetObserved);
+    C40P32("targetDead", r.targetDeadRecognized);
+    C40P32("targetMarked", r.targetMarkedBeforeCompact);
+    C40P32("targetLivePlug", r.targetLivePlugMembership);
+    C40P32("targetRelocationCallbacks", r.targetRelocationCallbackCount);
+    C40P32("targetCopyMoves", r.targetCopyMoveCount);
+    C40P32("livePlugCount", r.livePlugCount);
+    C40P32("deadGapCount", r.deadGapCount);
+    C40P32("targetDeadGap", r.targetDeadGapObserved);
+    C40P32("holeClosure", r.holeClosureObserved);
+    C40P32("destinationOverlapsTarget", r.destinationOverlapsTarget);
+    C40P32("frontierValid", r.frontierValid);
+    C40P32("frontierReduced", r.frontierReduced);
+    C40P32("allocatorVisibleTail", r.allocatorVisibleTail);
+    C40P32("allocationTestAttempted", r.allocationTestAttempted);
+    C40P32("allocationCount", r.allocationCount);
+    C40P32("allocationRequestedCount", r.allocationRequestedCount);
+    C40P32("allocationRequestedPayload", r.allocationRequestedPayload);
+    C40P32("allocationConsumedTail", r.allocationConsumedTail);
+    C40P32("oldTargetExtentOverlap", r.oldTargetExtentOverlap);
+    C40P32("exactStartReuse", r.exactStartReuse);
+    C40P32("weakSlotCleared", r.weakSlotCleared);
+    C40P32("staleTargetReferences", r.staleTargetReferences);
+    C40P32("relocationResurrectionCount", r.relocationResurrectionCount);
+    C40P32("collection3Triggered", r.collection3Triggered);
+    C40P32("compactIntegrityFailures", r.compactIntegrityFailures);
+    C40P32("allocatorIntegrityFailures", r.allocatorIntegrityFailures);
+    C40P32("preflight", r.preflightEmitted);
+    C40P32("reclaimed", r.reclaimedEmitted);
+    C40P32("completionMarker", r.completionMarkerEmitted);
+    C40P32("safeStopReason", r.safeStopReason);
+    C40P32("condemnedGeneration", d.c011ec39Plan.condemnedGeneration);
+    C40P32("finalDecision", d.c011ec39Plan.finalDecision);
+    C40P32("actualPhase", d.c011ec39Plan.actualPhase);
+    C40P32("c37Collection2Completed", d.c011ec33Collections[1].collectionCompleted);
+    C40P32("c37RestartEE", d.c011ec33Collections[1].eeRestartReturns != 0u ? 1u : 0u);
+    C40P32("c37ManagedResume", d.c011ec33Collections[1].managedResumeCount != 0u ? 1u : 0u);
+    C40P64("originalTarget", r.originalTarget);
+    C40P64("relocatedTarget", r.relocatedTarget);
+    C40P64("targetEEType", r.targetEEType);
+    C40P64("targetPayload", r.targetLogicalPayloadSize);
+    C40P64("targetSize", r.targetAlignedSize);
+    C40P64("targetStart", r.targetStart);
+    C40P64("targetEnd", r.targetEnd);
+    C40P64("weakSlot", r.weakSlot);
+    C40P64("weakValue", r.weakSlot == 0u ? 0u :
+        *reinterpret_cast<const uintptr_t*>(r.weakSlot));
+    C40P64("heap", r.heapNumber);
+    C40P64("segment", r.segment);
+    C40P64("segmentStart", r.segmentStart);
+    C40P64("segmentEnd", r.segmentEnd);
+    C40P64("segmentCommitted", r.segmentCommitted);
+    C40P64("segmentReserved", r.segmentReserved);
+    C40P64("generation", r.generation);
+    C40P64("planGeneration", r.planGeneration);
+    C40P64("deadGapStart", r.deadGapStart);
+    C40P64("deadGapEnd", r.deadGapEnd);
+    C40P64("deadGapSize", r.deadGapBytes);
+    C40P64("totalDeadBytes", r.totalCompactedAwayDeadBytes);
+    C40P64("neighborSourceStart", r.neighboringLiveSourceStart);
+    C40P64("neighborSourceEnd", r.neighboringLiveSourceEnd);
+    C40P64("neighborDestinationStart", r.neighboringLiveDestinationStart);
+    C40P64("neighborDestinationEnd", r.neighboringLiveDestinationEnd);
+    C40P64("neighborShift", r.neighboringLiveShift);
+    C40P64("liveSourceStart", r.liveSourceStart);
+    C40P64("liveSourceEnd", r.liveSourceEnd);
+    C40P64("liveDestinationStart", r.liveDestinationStart);
+    C40P64("liveDestinationEnd", r.liveDestinationEnd);
+    C40P64("liveShift", r.liveShift);
+    C40P64("oldFrontier", r.oldCompactedFrontier);
+    C40P64("newFrontier", r.newCompactedFrontier);
+    C40P64("frontierDelta", r.frontierDelta);
+    C40P64("freeTailStart", r.freeTailStart);
+    C40P64("freeTailEnd", r.freeTailEnd);
+    C40P64("freeTailSize", r.freeTailSize);
+    C40P64("allocationAddress", r.allocationAddress);
+    C40P64("allocationEnd", r.allocationEnd);
+    C40P64("allocationSize", r.allocationAlignedSize);
+    C40P32("allocationPath", r.allocationPath);
+#undef C40P32
+#undef C40P64
+    suspendEeSerialPutString("\n");
+}
+
+static void guideXosNativeAotC011EC40EmitPreflightAndReclaimed() {
+    guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    guidexos_nativeaot_c011ec40_compaction_record& r = d.c011ec40Compaction;
+    const bool ready = d.c011ec37CompletionMarkerEmitted != 0u &&
+        d.c011ec33Collections[1].collectionCompleted != 0u &&
+        d.c011ec33Collections[1].eeRestartReturns != 0u &&
+        d.c011ec33Collections[1].managedResumeCount != 0u &&
+        d.c011ec39Plan.finalDecisionObserved != 0u &&
+        d.c011ec39Plan.finalDecision == 1u &&
+        d.c011ec39Plan.actualPhase == 1u &&
+        r.compactEntryObserved != 0u && r.compactReturned != 0u &&
+        r.targetObserved != 0u && r.targetDeadRecognized != 0u &&
+        r.targetMarkedBeforeCompact == 0u && r.weakSlotCleared != 0u &&
+        r.targetDeadGapObserved != 0u &&
+        r.targetLivePlugMembership == 0u &&
+        r.targetRelocationCallbackCount == 0u &&
+        r.targetCopyMoveCount == 0u;
+    if (!ready) {
+        r.safeStopReason = 0xC0400001u;
+        guideXosNativeAotC011EC40EmitRecord(
+            "BLOCKED marker=C011EC40-BLOCKED", r, d);
+        return;
+    }
+    if (r.preflightEmitted == 0u) {
+        r.preflightEmitted = 1u;
+        guideXosNativeAotC011EC40EmitRecord(
+            "PREFLIGHT marker=C011EC40-PREFLIGHT", r, d);
+    }
+    const bool reclaimed = r.generationPublished != 0u &&
+        r.frontierValid != 0u && r.allocatorVisibleTail != 0u &&
+        r.frontierReduced != 0u && r.holeClosureObserved != 0u;
+    if (reclaimed && r.reclaimedEmitted == 0u) {
+        r.reclaimedEmitted = 1u;
+        guideXosNativeAotC011EC40EmitRecord(
+            "RECLAIMED marker=C011EC40-RECLAIMED", r, d);
+    }
+}
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC40CompactEntryObserved(uint32_t condemnedGeneration) {
+    if (condemnedGeneration != 1u) return;
+    guidexos_nativeaot_c011ec40_compaction_record& r =
+        g_guideXosAllocationDiagnostics.c011ec40Compaction;
+    r.compactEntryObserved = 1u;
+    guideXosNativeAotC011EC40CaptureTarget();
+}
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC40CompactionSegmentObserved(
+    uintptr_t segment, uintptr_t segmentStart, uintptr_t segmentAllocated,
+    uintptr_t segmentPlanAllocated, uintptr_t segmentCommitted,
+    uintptr_t segmentReserved, uintptr_t segmentUsed, uint32_t generation) {
+    guidexos_nativeaot_c011ec40_compaction_record& r =
+        g_guideXosAllocationDiagnostics.c011ec40Compaction;
+    if (r.compactEntryObserved == 0u || segment != r.segment) return;
+    r.segmentStart = segmentStart;
+    r.segmentCommitted = segmentCommitted;
+    r.segmentReserved = segmentReserved;
+    r.generation = generation;
+    if (r.segmentAllocatedBefore == 0u)
+        r.segmentAllocatedBefore = segmentAllocated;
+    r.segmentPlanAllocatedBefore = segmentPlanAllocated;
+    r.segmentUsedBefore = segmentUsed;
+    r.oldCompactedFrontier = segmentAllocated;
+    r.frontierValid = segmentAllocated >= segmentStart ? 1u : 0u;
+}
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC40DeadGapObserved(
+    uintptr_t previousPlugStart, uintptr_t gapStart, uintptr_t gapEnd,
+    uintptr_t nextPlugStart, uintptr_t nextPlugDestination,
+    uintptr_t gapBytes) {
+    guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    guidexos_nativeaot_c011ec40_compaction_record& r = d.c011ec40Compaction;
+    if (r.compactEntryObserved == 0u || gapBytes == 0u ||
+        gapEnd <= gapStart || r.segment == 0u ||
+        gapStart < r.segmentStart || gapEnd > r.segmentAllocatedBefore) return;
+    ++r.deadGapCount;
+    r.totalCompactedAwayDeadBytes += gapBytes;
+    if (r.targetStart >= gapStart && r.targetEnd <= gapEnd) {
+        r.targetDeadGapObserved = 1u;
+        r.deadGapStart = gapStart;
+        r.deadGapEnd = gapEnd;
+        r.deadGapBytes = gapBytes;
+        r.neighboringLiveSourceStart = nextPlugStart;
+        r.neighboringLiveDestinationStart = nextPlugDestination;
+        r.neighboringLiveShift = nextPlugStart >= nextPlugDestination
+            ? nextPlugStart - nextPlugDestination : 0u;
+    }
+    (void)previousPlugStart;
+}
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC40LivePlugObserved(
+    uintptr_t sourceStart, uintptr_t sourceEnd, uintptr_t destinationStart,
+    uintptr_t destinationEnd) {
+    guidexos_nativeaot_c011ec40_compaction_record& r =
+        g_guideXosAllocationDiagnostics.c011ec40Compaction;
+    if (r.compactEntryObserved == 0u || sourceEnd <= sourceStart ||
+        sourceStart < r.segmentStart || sourceEnd > r.segmentAllocatedBefore)
+        return;
+    ++r.livePlugCount;
+    const uintptr_t sourceSize = sourceEnd - sourceStart;
+    if (destinationStart > sourceStart || destinationEnd < destinationStart ||
+        destinationEnd - destinationStart != sourceSize)
+        ++r.compactIntegrityFailures;
+    if (guideXosNativeAotC011EC40RangeOverlaps(
+            sourceStart, sourceEnd, r.targetStart, r.targetEnd)) {
+        r.targetLivePlugMembership = 1u;
+        ++r.targetRelocationCallbackCount;
+        ++r.targetCopyMoveCount;
+    }
+    if (r.targetDeadGapObserved != 0u &&
+        sourceStart == r.neighboringLiveSourceStart) {
+        r.holeClosureObserved = 1u;
+        r.neighboringLiveSourceEnd = sourceEnd;
+        r.neighboringLiveDestinationEnd = destinationEnd;
+        r.neighboringLiveShift = sourceStart >= destinationStart
+            ? sourceStart - destinationStart : 0u;
+        r.liveSourceStart = sourceStart;
+        r.liveSourceEnd = sourceEnd;
+        r.liveDestinationStart = destinationStart;
+        r.liveDestinationEnd = destinationEnd;
+        r.liveShift = r.neighboringLiveShift;
+        if (guideXosNativeAotC011EC40RangeOverlaps(
+                destinationStart, destinationEnd,
+                r.targetStart, r.targetEnd))
+            r.destinationOverlapsTarget = 1u;
+    }
+}
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC40CompactReturned() {
+    guidexos_nativeaot_c011ec40_compaction_record& r =
+        g_guideXosAllocationDiagnostics.c011ec40Compaction;
+    if (r.compactEntryObserved != 0u) r.compactReturned = 1u;
+}
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC40GenerationPublished() {
+    guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    guidexos_nativeaot_c011ec40_compaction_record& r = d.c011ec40Compaction;
+    if (r.compactReturned == 0u || r.relocatedTarget == 0u) return;
+    uintptr_t segment = 0u;
+    uintptr_t segmentBase = 0u;
+    uintptr_t segmentAllocated = 0u;
+    uintptr_t segmentCommitted = 0u;
+    uintptr_t segmentReserved = 0u;
+    gx_uint32 segmentFlags = 0u;
+    gx_uint32 segmentGeneration = 0u;
+    if (guidexos_nativeaot_gc_describe_segment(
+            reinterpret_cast<void*>(r.relocatedTarget), &segment, &segmentBase,
+            &segmentAllocated, &segmentCommitted, &segmentReserved,
+            &segmentFlags, &segmentGeneration) != 0 || segment != r.segment)
+        return;
+    r.generationPublished = 1u;
+    r.segmentStart = segmentBase;
+    r.segmentCommitted = segmentCommitted;
+    r.segmentReserved = segmentReserved;
+    r.segmentAllocatedAfter = segmentAllocated;
+    r.segmentUsedAfter = segmentAllocated;
+    r.newCompactedFrontier = segmentAllocated;
+    r.segmentPlanAllocatedAfter = segmentAllocated;
+    r.compactedLiveEnd = segmentAllocated;
+    if (r.oldCompactedFrontier >= r.newCompactedFrontier) {
+        r.frontierDelta = r.oldCompactedFrontier - r.newCompactedFrontier;
+        r.frontierValid = 1u;
+        r.frontierReduced = r.frontierDelta != 0u ? 1u : 0u;
+    }
+    r.freeTailStart = r.newCompactedFrontier;
+    r.freeTailEnd = r.segmentCommitted;
+    r.freeTailSize = r.freeTailEnd >= r.freeTailStart
+        ? r.freeTailEnd - r.freeTailStart : 0u;
+    r.allocatorVisibleTail = r.freeTailSize != 0u ? 1u : 0u;
+    (void)segmentFlags;
+    (void)segmentGeneration;
+    (void)d;
+}
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC40Collection3Observed() {
+    guidexos_nativeaot_c011ec40_compaction_record& r =
+        g_guideXosAllocationDiagnostics.c011ec40Compaction;
+    if (r.allocationTestAttempted != 0u) r.collection3Triggered = 1u;
+}
+
+extern "C" __declspec(dllexport) int __cdecl
+guideXosNativeAotC011EC40BeforeAllocation(
+    uint32_t ordinal, uint32_t payloadSize) {
+    guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    guidexos_nativeaot_c011ec40_compaction_record& r = d.c011ec40Compaction;
+    if (ordinal >= 8u || payloadSize != 64u || r.generationPublished == 0u) {
+        r.safeStopReason = 0xC0400002u;
+        return -1;
+    }
+    if (r.collection3Triggered != 0u) return 1;
+    r.allocationTestAttempted = 1u;
+    r.allocationRequestedPayload = payloadSize;
+    r.allocationRequestedCount = ordinal + 1u;
+    r.allocationAlignedSize = r.targetAlignedSize;
+    if (r.managedMarkerEmitted == 0u) {
+        r.managedMarkerEmitted = 1u;
+        suspendEeSerialPutString(
+            "[nativeaot-gc-short-weak-lifetime] MANAGED marker=C011EC40-MANAGED");
+        suspendEeSerialPutString(" method=RunC011EC40AllocationReuse\n");
+    }
+    return 0;
+}
+
+extern "C" __declspec(dllexport) int __cdecl
+guideXosNativeAotC011EC40AfterAllocation(uintptr_t objectAddress) {
+    guidexos_nativeaot_c011ec40_compaction_record& r =
+        g_guideXosAllocationDiagnostics.c011ec40Compaction;
+    if (objectAddress == 0u || r.targetAlignedSize == 0u) {
+        ++r.allocatorIntegrityFailures;
+        return -1;
+    }
+    r.allocationAddress = objectAddress;
+    r.allocationEnd = objectAddress + r.targetAlignedSize;
+    r.allocationPath = static_cast<uintptr_t>(-1);
+    if (r.freeTailStart != 0u && r.freeTailEnd > r.freeTailStart &&
+        objectAddress >= r.freeTailStart && r.allocationEnd <= r.freeTailEnd)
+        r.allocationConsumedTail = 1u;
+    if (guideXosNativeAotC011EC40RangeOverlaps(
+            objectAddress, r.allocationEnd, r.targetStart, r.targetEnd))
+        r.oldTargetExtentOverlap = 1u;
+    if (objectAddress == r.targetStart) r.exactStartReuse = 1u;
+    ++r.allocationCount;
+    return 0;
+}
+
+extern "C" __declspec(dllexport) int __cdecl
+guideXosNativeAotC011EC40Finish() {
+    guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    guidexos_nativeaot_c011ec40_compaction_record& r = d.c011ec40Compaction;
+    r.weakSlotCleared = r.weakSlot != 0u &&
+        *reinterpret_cast<const uintptr_t*>(r.weakSlot) == 0u ? 1u : 0u;
+    r.staleTargetReferences = d.c011ec37StaleWeakPointerCount;
+    r.relocationResurrectionCount = d.c011ec37DeadTargetRerootCount;
+    guideXosNativeAotC011EC40EmitPreflightAndReclaimed();
+    if (r.preflightEmitted == 0u || r.reclaimedEmitted == 0u ||
+        r.collection3Triggered != 0u || r.compactIntegrityFailures != 0u ||
+        r.allocatorIntegrityFailures != 0u ||
+        r.staleTargetReferences != 0u ||
+        r.relocationResurrectionCount != 0u) {
+        if (r.safeStopReason == 0u) r.safeStopReason = 0xC0400003u;
+        guideXosNativeAotC011EC40EmitRecord(
+            "BLOCKED marker=C011EC40-BLOCKED", r, d);
+        return -1;
+    }
+    r.successLevel = 1u;
+    if (r.allocationTestAttempted != 0u &&
+        r.allocationConsumedTail != 0u &&
+        r.allocationCount == r.allocationRequestedCount) {
+        r.successLevel = 2u;
+    }
+    if (r.successLevel >= 2u && r.oldTargetExtentOverlap != 0u)
+        r.successLevel = 3u;
+    r.completionMarkerEmitted = 1u;
+    guideXosNativeAotC011EC40EmitRecord(
+        "COMPLETE marker=C011EC40 outcome=C", r, d);
+    return 0;
+}
+#endif
+
 #if defined(GUIDEXOS_NATIVEAOT_C011EC38_DEAD_OBJECT_RECLAMATION)
 static void guideXosNativeAotC011EC38EmitPreflight() {
     const guidexos_nativeaot_allocation_diagnostics& d =
@@ -15923,8 +16363,18 @@ extern "C" void* __pinvoke_HostLogProof__Module____Internal__guideXosManagedThre
 extern "C" void* __pinvoke_HostLogProof__Module____Internal__guideXosManagedThreadStaticProofReadback__Ansi;
 #endif
 #if defined(GUIDEXOS_NATIVEAOT_C011EC39_PLAN_PROVENANCE)
+#if !defined(GUIDEXOS_NATIVEAOT_C011EC40_COMPACTION_RECLAMATION)
 extern "C" void* __pinvoke_HostLogProof__Module____Internal__guideXosNativeAotC011EC39Finish__Ansi;
+#endif
 extern "C" __declspec(dllexport) int __cdecl guideXosNativeAotC011EC39Finish();
+#endif
+#if defined(GUIDEXOS_NATIVEAOT_C011EC40_COMPACTION_RECLAMATION)
+extern "C" void* __pinvoke_HostLogProof__Module____Internal__guideXosNativeAotC011EC40BeforeAllocation__Ansi;
+extern "C" void* __pinvoke_HostLogProof__Module____Internal__guideXosNativeAotC011EC40AfterAllocation__Ansi;
+extern "C" void* __pinvoke_HostLogProof__Module____Internal__guideXosNativeAotC011EC40Finish__Ansi;
+extern "C" __declspec(dllexport) int __cdecl guideXosNativeAotC011EC40BeforeAllocation(uint32_t ordinal, uint32_t payloadSize);
+extern "C" __declspec(dllexport) int __cdecl guideXosNativeAotC011EC40AfterAllocation(uintptr_t objectAddress);
+extern "C" __declspec(dllexport) int __cdecl guideXosNativeAotC011EC40Finish();
 #endif
 #endif
 #endif
@@ -17470,10 +17920,26 @@ extern "C" __declspec(noinline) void __cdecl RhpReversePInvoke(void* frame) {
         reinterpret_cast<void*>(static_cast<GuideXosNativeAotC011EC37ManagedCheckpointFn>(
             guideXosNativeAotC011EC37ManagedCheckpoint));
 #if defined(GUIDEXOS_NATIVEAOT_C011EC39_PLAN_PROVENANCE)
+#if !defined(GUIDEXOS_NATIVEAOT_C011EC40_COMPACTION_RECLAMATION)
     using GuideXosNativeAotC011EC39FinishFn = int (__cdecl*)(void);
     __pinvoke_HostLogProof__Module____Internal__guideXosNativeAotC011EC39Finish__Ansi =
         reinterpret_cast<void*>(static_cast<GuideXosNativeAotC011EC39FinishFn>(
             ::guideXosNativeAotC011EC39Finish));
+#endif
+#endif
+#if defined(GUIDEXOS_NATIVEAOT_C011EC40_COMPACTION_RECLAMATION)
+    using GuideXosNativeAotC011EC40BeforeAllocationFn = int (__cdecl*)(uint32_t, uint32_t);
+    using GuideXosNativeAotC011EC40AfterAllocationFn = int (__cdecl*)(uintptr_t);
+    using GuideXosNativeAotC011EC40FinishFn = int (__cdecl*)(void);
+    __pinvoke_HostLogProof__Module____Internal__guideXosNativeAotC011EC40BeforeAllocation__Ansi =
+        reinterpret_cast<void*>(static_cast<GuideXosNativeAotC011EC40BeforeAllocationFn>(
+            ::guideXosNativeAotC011EC40BeforeAllocation));
+    __pinvoke_HostLogProof__Module____Internal__guideXosNativeAotC011EC40AfterAllocation__Ansi =
+        reinterpret_cast<void*>(static_cast<GuideXosNativeAotC011EC40AfterAllocationFn>(
+            ::guideXosNativeAotC011EC40AfterAllocation));
+    __pinvoke_HostLogProof__Module____Internal__guideXosNativeAotC011EC40Finish__Ansi =
+        reinterpret_cast<void*>(static_cast<GuideXosNativeAotC011EC40FinishFn>(
+            ::guideXosNativeAotC011EC40Finish));
 #endif
 #if defined(GUIDEXOS_NATIVEAOT_C011EC38_DEAD_OBJECT_RECLAMATION)
     using GuideXosNativeAotC011EC38BeforeAllocationFn = int (__cdecl*)(

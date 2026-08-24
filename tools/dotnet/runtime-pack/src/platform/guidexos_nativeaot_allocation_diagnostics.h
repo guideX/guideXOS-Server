@@ -607,6 +607,109 @@ typedef struct guidexos_nativeaot_c011ec39_plan_record {
     uintptr_t sweepPhaseAddress;
 } guidexos_nativeaot_c011ec39_plan_record;
 
+/* C011EC40 authentic Workstation compaction reclamation evidence.  The GC
+ * callbacks record only bounded scalar facts supplied by the locked plug tree
+ * and segment/frontier helpers.  A target-specific 0x58 extent is kept
+ * separate from aggregate dead-gap bytes so the latter is never over-attributed
+ * to the target. */
+typedef struct guidexos_nativeaot_c011ec40_compaction_record {
+    uint32_t compactEntryObserved;
+    uint32_t compactReturned;
+    uint32_t generationPublished;
+    uint32_t targetObserved;
+    uint32_t targetDeadRecognized;
+    uint32_t targetMarkedBeforeCompact;
+    uint32_t targetLivePlugMembership;
+    uint32_t targetRelocationCallbackCount;
+    uint32_t targetCopyMoveCount;
+    uint32_t livePlugCount;
+    uint32_t deadGapCount;
+    uint32_t targetDeadGapObserved;
+    uint32_t holeClosureObserved;
+    uint32_t destinationOverlapsTarget;
+    uint32_t frontierValid;
+    uint32_t frontierReduced;
+    uint32_t allocatorVisibleTail;
+    uint32_t allocationTestAttempted;
+    uint32_t allocationCount;
+    uint32_t allocationRequestedCount;
+    uint32_t allocationRequestedPayload;
+    uint32_t allocationConsumedTail;
+    uint32_t oldTargetExtentOverlap;
+    uint32_t exactStartReuse;
+    uint32_t weakSlotCleared;
+    uint32_t staleTargetReferences;
+    uint32_t relocationResurrectionCount;
+    uint32_t collection3Triggered;
+    uint32_t compactIntegrityFailures;
+    uint32_t allocatorIntegrityFailures;
+    uint32_t safeStopReason;
+    uint32_t preflightEmitted;
+    uint32_t reclaimedEmitted;
+    uint32_t managedMarkerEmitted;
+    uint32_t completionMarkerEmitted;
+    uint32_t successLevel;
+    uint32_t reserved[3];
+
+    uintptr_t originalTarget;
+    uintptr_t relocatedTarget;
+    uintptr_t targetType;
+    uintptr_t targetEEType;
+    uintptr_t targetStart;
+    uintptr_t targetEnd;
+    uintptr_t targetRawSize;
+    uintptr_t targetAlignedSize;
+    uintptr_t targetArrayHeaderSize;
+    uintptr_t targetBaseSize;
+    uintptr_t targetComponentSize;
+    uintptr_t targetLogicalPayloadSize;
+    uintptr_t targetElementCount;
+    uintptr_t weakSlot;
+    uintptr_t heapNumber;
+    uintptr_t generation;
+    uintptr_t planGeneration;
+
+    uintptr_t segment;
+    uintptr_t segmentStart;
+    uintptr_t segmentEnd;
+    uintptr_t segmentCommitted;
+    uintptr_t segmentReserved;
+    uintptr_t segmentUsedBefore;
+    uintptr_t segmentUsedAfter;
+    uintptr_t segmentAllocatedBefore;
+    uintptr_t segmentAllocatedAfter;
+    uintptr_t segmentPlanAllocatedBefore;
+    uintptr_t segmentPlanAllocatedAfter;
+    uintptr_t compactedLiveEnd;
+
+    uintptr_t liveSourceStart;
+    uintptr_t liveSourceEnd;
+    uintptr_t liveDestinationStart;
+    uintptr_t liveDestinationEnd;
+    uintptr_t liveShift;
+    uintptr_t deadGapStart;
+    uintptr_t deadGapEnd;
+    uintptr_t deadGapBytes;
+    uintptr_t totalCompactedAwayDeadBytes;
+    uintptr_t neighboringLiveSourceStart;
+    uintptr_t neighboringLiveSourceEnd;
+    uintptr_t neighboringLiveDestinationStart;
+    uintptr_t neighboringLiveDestinationEnd;
+    uintptr_t neighboringLiveShift;
+
+    uintptr_t oldCompactedFrontier;
+    uintptr_t newCompactedFrontier;
+    uintptr_t frontierDelta;
+    uintptr_t freeTailStart;
+    uintptr_t freeTailEnd;
+    uintptr_t freeTailSize;
+
+    uintptr_t allocationAddress;
+    uintptr_t allocationEnd;
+    uintptr_t allocationAlignedSize;
+    uintptr_t allocationPath;
+} guidexos_nativeaot_c011ec40_compaction_record;
+
 typedef struct guidexos_nativeaot_allocation_diagnostics {
     uint32_t schemaVersion;
     uint32_t heapInitialized;
@@ -2453,6 +2556,8 @@ typedef struct guidexos_nativeaot_allocation_diagnostics {
     guidexos_nativeaot_c011ec38_reclamation_record c011ec38Reclamation;
     /* C011EC39 authoritative Collection-2 planner provenance. */
     guidexos_nativeaot_c011ec39_plan_record c011ec39Plan;
+    /* C011EC40 authentic compacting reclamation provenance. */
+    guidexos_nativeaot_c011ec40_compaction_record c011ec40Compaction;
 } guidexos_nativeaot_allocation_diagnostics;
 
 enum {
