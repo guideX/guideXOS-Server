@@ -54,8 +54,13 @@ struct NavigatorResourceTelemetry {
 	uint32_t    schedulerOrdinal = 0;
 	int         blockIndex = -1;
 	int         blockY = -1;
+	int         blockTop = -1;
+	int         blockBottom = -1;
 	int         displayWidth = 0;
 	int         displayHeight = 0;
+	int         viewportTop = 0;
+	int         viewportBottom = -1;
+	int         distanceFromViewport = -1;
 	int         viewportRelation = static_cast<int>(NavigatorResourceViewportRelation::Unknown);
 	bool        likelyVisible = false;
 	std::string urlHash;
@@ -74,6 +79,8 @@ struct NavigatorResourceTelemetry {
 	uint64_t    displayPixelBytes = 0;
 	int         redirectCount = 0;
 	uint32_t    priority = 0;
+	uint32_t    priorityBeforeViewport = 0;
+	bool        admittedDueToViewportPriority = false;
 	NavigatorResourceSchedulerState schedulerState = NavigatorResourceSchedulerState::Empty;
 	uint64_t    budgetRequestedBytes = 0;
 	uint64_t    budgetAcceptedBytes = 0;
@@ -138,6 +145,27 @@ struct NavigatorResourceAggregateCounters {
 	uint64_t deniedAllocationBytes = 0;
 	uint64_t totalLoadedDecodedBytes = 0;
 	uint64_t totalDeniedRequestedBytes = 0;
+	int32_t viewportTop = 0;
+	int32_t viewportBottom = -1;
+	int32_t viewportWidth = 0;
+	int32_t viewportHeight = 0;
+	int32_t initialScrollOffset = 0;
+	int32_t preloadMargin = 0;
+	uint32_t visibleReferences = 0;
+	uint32_t nearReferences = 0;
+	uint32_t farReferences = 0;
+	uint32_t unknownViewportReferences = 0;
+	uint32_t visibleLoaded = 0;
+	uint32_t visibleBudgetDenied = 0;
+	uint32_t nearLoaded = 0;
+	uint32_t nearBudgetDenied = 0;
+	uint32_t farLoaded = 0;
+	uint32_t farBudgetDenied = 0;
+	uint32_t visiblePriorityAdmissions = 0;
+	uint32_t offscreenBudgetDenied = 0;
+	uint64_t decodedBytesVisible = 0;
+	uint64_t decodedBytesNear = 0;
+	uint64_t decodedBytesFar = 0;
 };
 
 struct NavigatorPageMetadata {

@@ -15,12 +15,7 @@ namespace apps {
 static const uint32_t kNavigatorMaxResourceTelemetryRecords =
     kNavigatorMaxResourceReferences;
 
-enum class NavigatorResourceViewportRelation : uint8_t {
-    Unknown = 0,
-    InitialViewport,
-    AboveInitialViewport,
-    BelowInitialViewport,
-};
+using NavigatorResourceViewportRelation = NavigatorResourceViewportClass;
 
 // Fixed-size bare-metal record. It is a member of NavigatorApp, never a boot
 // stack allocation, and is bounded to the same 96-reference document limit.
@@ -37,6 +32,11 @@ struct NavigatorResourceTelemetryRecord {
     uint32_t activeBytesBefore = 0;
     uint32_t budgetHeadroomBefore = 0;
     uint32_t displayPixelBytes = 0;
+    int32_t viewportTop = 0;
+    int32_t viewportBottom = -1;
+    int32_t blockTop = -1;
+    int32_t blockBottom = -1;
+    int32_t distanceFromViewport = -1;
     int32_t blockIndex = -1;
     int32_t blockY = -1;
     uint16_t displayWidth = 0;
@@ -48,12 +48,14 @@ struct NavigatorResourceTelemetryRecord {
     uint8_t sameOrigin = 0;
     uint8_t likelyVisible = 0;
     uint8_t viewportRelation = static_cast<uint8_t>(NavigatorResourceViewportRelation::Unknown);
+    uint8_t priorityBeforeViewport = 0;
+    uint8_t admittedDueToViewportPriority = 0;
     uint8_t duplicate = 0;
     char host[40] = {};
     char reason[48] = {};
 };
 
-static_assert(sizeof(NavigatorResourceTelemetryRecord) <= 160u,
+static_assert(sizeof(NavigatorResourceTelemetryRecord) <= 176u,
     "Navigator telemetry records must remain compact");
 
 enum class NavigatorResourceTransportFailure : uint8_t {

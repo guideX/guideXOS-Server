@@ -53,6 +53,10 @@ function Set-EnvFlag {
 
 $python = Find-Python
 if (-not $python) { throw "python not found; required for local Navigator POST smoke server." }
+$persistentFixtureGenerator = Join-Path $Root "scripts\generate-navigator-persistent-fixtures.py"
+$persistentFixtureDir = Join-Path $Root "navigator-smoke\generated"
+& $python $persistentFixtureGenerator --output-dir $persistentFixtureDir
+if ($LASTEXITCODE -ne 0) { throw "deterministic Navigator viewport fixture generation failed." }
 
 $httpLog = Join-Path $LogDir "navigator-hosted-http-$stamp.log"
 $httpErrLog = Join-Path $LogDir "navigator-hosted-http-$stamp.err.log"

@@ -18,12 +18,12 @@ def png_chunk(kind: bytes, payload: bytes) -> bytes:
     return struct.pack(">I", len(payload)) + kind + payload + struct.pack(">I", binascii.crc32(kind + payload) & 0xFFFFFFFF)
 
 
-def write_png(path: Path, rgba: tuple[int, int, int, int]) -> None:
+def write_png(path: Path, rgba: tuple[int, int, int, int], width: int = WIDTH, height: int = HEIGHT) -> None:
     pixel = bytes(rgba)
-    row = b"\x00" + pixel * WIDTH
-    raw = row * HEIGHT
+    row = b"\x00" + pixel * width
+    raw = row * height
     png = b"\x89PNG\r\n\x1a\n"
-    png += png_chunk(b"IHDR", struct.pack(">IIBBBBB", WIDTH, HEIGHT, 8, 6, 0, 0, 0))
+    png += png_chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 6, 0, 0, 0))
     png += png_chunk(b"IDAT", zlib.compress(raw, 9))
     png += png_chunk(b"IEND", b"")
     path.write_bytes(png)
@@ -78,6 +78,56 @@ def write_pages(output_dir: Path) -> None:
     (output_dir / "HEAVY.HTM").write_text(heavy, encoding="ascii", newline="\n")
     (output_dir / "TINY.HTM").write_text(tiny, encoding="ascii", newline="\n")
     (output_dir / "FAIL.HTM").write_text(failure, encoding="ascii", newline="\n")
+
+    # Phase 8T: far resources deliberately appear first in source order but
+    # are absolutely positioned below the initial content viewport.  Smaller
+    # visible/near images follow them, giving the scheduler a real geometry
+    # competition without changing the fixed 64 MiB policy.
+    viewport_colors = (
+        (24, 96, 156, 255),
+        (42, 132, 88, 255),
+        (162, 92, 34, 255),
+        (118, 62, 148, 255),
+    )
+    for index, color in enumerate(viewport_colors, 1):
+        write_png(output_dir / f"viewport-visible-{index:02d}.png", color, 1024, 1024)
+        write_png(output_dir / f"viewport-near-{index:02d}.png", color, 1024, 1024)
+        write_png(output_dir / f"viewport-far-{index:02d}.png", color, WIDTH, HEIGHT)
+        write_png(output_dir / f"VPV{index:02d}.PNG", color, 1024, 1024)
+        write_png(output_dir / f"VPN{index:02d}.PNG", color, 1024, 1024)
+        write_png(output_dir / f"VPF{index:02d}.PNG", color, WIDTH, HEIGHT)
+    viewport_css = "".join(
+        f".visible-pressure-{index:02d}{{position:absolute;top:{120 + (index - 1) * 90}px;left:{24 + (index - 1) * 150}px;}}"
+        for index in range(1, 5)
+    ) + "".join(
+        f".far-pressure-{index:02d}{{position:absolute;top:{2400 + (index - 1) * 140}px;left:24px;}}"
+        for index in range(1, 5)
+    ) + "".join(
+        f".near-pressure-{index:02d}{{position:absolute;top:{700 + (index - 1) * 100}px;left:180px;}}"
+        for index in range(1, 5)
+    )
+    far_tags = "".join(
+        f'<img class="far-pressure-{index:02d}" src="VPF{index:02d}.PNG" width="128" height="128" '
+        f'alt="far pressure image {index}">' for index in range(1, 5)
+    )
+    visible_tags = "".join(
+        f'<img class="visible-pressure-{index:02d}" src="VPV{index:02d}.PNG" width="128" height="96" '
+        f'alt="visible pressure image {index}">' for index in range(1, 5)
+    )
+    near_tags = "".join(
+        f'<img class="near-pressure-{index:02d}" src="VPN{index:02d}.PNG" width="128" height="96" '
+        f'alt="near pressure image {index}">' for index in range(1, 5)
+    )
+    viewport = (
+        "<!doctype html><html><head><title>Navigator Viewport Pressure Fixture</title>"
+        f"<style>{viewport_css}</style></head>"
+        "<body><h1>Viewport-aware image admission</h1>"
+        "<p>Four far 2048px images precede smaller visible and near images in source order.</p>"
+        + far_tags + visible_tags + near_tags
+        + "</body></html>"
+    )
+    (output_dir / "viewport-pressure.html").write_text(viewport, encoding="ascii", newline="\n")
+    (output_dir / "VPRESS.HTM").write_text(viewport, encoding="ascii", newline="\n")
 
 
 def main() -> int:

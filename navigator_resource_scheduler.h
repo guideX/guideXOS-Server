@@ -24,6 +24,89 @@ static const uint32_t kNavigatorMaxActiveResources = 64u;
 static const uint64_t kNavigatorDecodedImageBudgetBytes = 64ull * 1024ull * 1024ull;
 static const uint64_t kNavigatorMaxDecodedImageBytes = 2048ull * 2048ull * 4ull;
 
+// Phase 8T keeps initial admission finite and deterministic.  The first
+// viewport is supplied by the embedding Navigator because chrome consumes part
+// of the framebuffer; callers must not silently substitute the full window.
+enum class NavigatorResourceViewportClass : uint8_t {
+    Visible = 0,
+    Near = 1,
+    Far = 2,
+    Unknown = 3,
+    Unsupported = 4,
+};
+
+struct NavigatorResourceViewportGeometry {
+    int32_t viewportTop = 0;
+    int32_t viewportBottom = -1;
+    int32_t viewportWidth = 0;
+    int32_t viewportHeight = 0;
+    int32_t scrollOffset = 0;
+    int32_t preloadMargin = 0;
+};
+
+inline const char* navigatorResourceViewportClassName(NavigatorResourceViewportClass value)
+{
+    switch (value) {
+    case NavigatorResourceViewportClass::Visible: return "visible";
+    case NavigatorResourceViewportClass::Near: return "near";
+    case NavigatorResourceViewportClass::Far: return "far";
+    case NavigatorResourceViewportClass::Unknown: return "unknown";
+    case NavigatorResourceViewportClass::Unsupported: return "unsupported";
+    default: return "unknown";
+    }
+}
+
+inline NavigatorResourceViewportClass navigatorBestViewportClass(
+    NavigatorResourceViewportClass left, NavigatorResourceViewportClass right)
+{
+    return static_cast<uint8_t>(left) <= static_cast<uint8_t>(right) ? left : right;
+}
+
+inline NavigatorResourceViewportClass navigatorClassifyViewportRect(
+    int32_t blockTop, int32_t blockBottom,
+    const NavigatorResourceViewportGeometry& viewport, int32_t* outDistance = nullptr)
+{
+    if (outDistance) *outDistance = -1;
+    if (blockTop < 0 || blockBottom < blockTop || viewport.viewportBottom < viewport.viewportTop ||
+        viewport.viewportWidth <= 0 || viewport.viewportHeight <= 0) {
+        return NavigatorResourceViewportClass::Unknown;
+    }
+    const int64_t top = blockTop;
+    const int64_t bottom = blockBottom;
+    const int64_t viewportTop = viewport.viewportTop;
+    const int64_t viewportBottom = viewport.viewportBottom;
+    if (bottom >= viewportTop && top <= viewportBottom) {
+        if (outDistance) *outDistance = 0;
+        return NavigatorResourceViewportClass::Visible;
+    }
+    const int64_t distance = bottom < viewportTop ? viewportTop - bottom : top - viewportBottom;
+    if (outDistance && distance <= 0x7fffffffll) *outDistance = static_cast<int32_t>(distance);
+    const int64_t margin = viewport.preloadMargin > 0 ? viewport.preloadMargin : 0;
+    return distance <= margin ? NavigatorResourceViewportClass::Near
+        : NavigatorResourceViewportClass::Far;
+}
+
+// formatHint follows the existing compact scheduler encoding: PNG=1,
+// JPEG=2, unknown existing image=0, known unsupported=3.
+inline uint8_t navigatorResourceFormatRank(uint8_t formatHint)
+{
+    return (formatHint == 1u || formatHint == 2u) ? 0u : (formatHint == 3u ? 3u : 1u);
+}
+
+inline uint8_t navigatorResourcePriorityBeforeViewport(uint8_t formatHint)
+{
+    return formatHint == 3u ? 3u : navigatorResourceFormatRank(formatHint);
+}
+
+inline uint8_t navigatorResourcePriorityWithViewport(
+    NavigatorResourceViewportClass viewportClass, uint8_t formatHint)
+{
+    if (viewportClass == NavigatorResourceViewportClass::Unsupported || formatHint == 3u)
+        return 0xFFu;
+    const uint8_t classRank = static_cast<uint8_t>(viewportClass);
+    return static_cast<uint8_t>(classRank * 4u + navigatorResourceFormatRank(formatHint));
+}
+
 enum class NavigatorResourceSchedulerState : uint8_t {
     Empty = 0,
     Discovered,
@@ -74,13 +157,19 @@ struct NavigatorResourceReferenceMetadata {
     uint32_t budgetAcceptedBytes = 0;
     uint32_t activeBytesBefore = 0;
     uint32_t budgetHeadroomBefore = 0;
+    int32_t blockTop = -1;
+    int32_t blockBottom = -1;
+    int32_t distanceFromViewport = -1;
     uint8_t priority = 0;
+    uint8_t priorityBeforeViewport = 0;
     uint8_t formatHint = 0;
     uint8_t state = static_cast<uint8_t>(NavigatorResourceSchedulerState::Empty);
     uint8_t classification = 0;
+    uint8_t viewportClass = static_cast<uint8_t>(NavigatorResourceViewportClass::Unknown);
+    uint8_t admittedDueToViewportPriority = 0;
 };
 
-static_assert(sizeof(NavigatorResourceReferenceMetadata) <= 32u,
+static_assert(sizeof(NavigatorResourceReferenceMetadata) <= 64u,
     "Navigator resource metadata must remain compact");
 
 inline uint32_t navigatorDecodedSizeBucket(uint64_t bytes);
@@ -111,6 +200,27 @@ struct NavigatorResourceSchedulerStats {
     uint64_t deniedAllocationBytes = 0;
     uint64_t totalLoadedDecodedBytes = 0;
     uint64_t totalDeniedRequestedBytes = 0;
+    int32_t viewportTop = 0;
+    int32_t viewportBottom = -1;
+    int32_t viewportWidth = 0;
+    int32_t viewportHeight = 0;
+    int32_t initialScrollOffset = 0;
+    int32_t preloadMargin = 0;
+    uint32_t visibleReferences = 0;
+    uint32_t nearReferences = 0;
+    uint32_t farReferences = 0;
+    uint32_t unknownViewportReferences = 0;
+    uint32_t visibleLoaded = 0;
+    uint32_t visibleBudgetDenied = 0;
+    uint32_t nearLoaded = 0;
+    uint32_t nearBudgetDenied = 0;
+    uint32_t farLoaded = 0;
+    uint32_t farBudgetDenied = 0;
+    uint32_t visiblePriorityAdmissions = 0;
+    uint32_t offscreenBudgetDenied = 0;
+    uint64_t decodedBytesVisible = 0;
+    uint64_t decodedBytesNear = 0;
+    uint64_t decodedBytesFar = 0;
     uint32_t loadedDecodedSizeBuckets[6] = {};
     uint32_t deniedDecodedSizeBuckets[6] = {};
 

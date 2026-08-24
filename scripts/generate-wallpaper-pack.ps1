@@ -1300,6 +1300,12 @@ $configNavigatorDir = Join-Path $configDir "navigator"
 New-Item -ItemType Directory -Force -Path $configNavigatorDir | Out-Null
 
 if ($env:GXOS_NAVIGATOR_PERSISTENT_NAVIGATION -eq "1") {
+    # Keep a short compatibility token early in the generated directory.  The
+    # freestanding FAT reader used by the smoke boot can expose the first
+    # directory sector reliably even when later LFN entries are unavailable.
+    $persistentNavigationMarkerEarly = Join-Path $configNavigatorDir "00PERSNAV.TXT"
+    [System.IO.File]::WriteAllText($persistentNavigationMarkerEarly, "enabled`n", [System.Text.Encoding]::ASCII)
+    $staged += Get-Item $persistentNavigationMarkerEarly
     $persistentNavigationMarker = Join-Path $configNavigatorDir "persistent-navigation-enabled.txt"
     [System.IO.File]::WriteAllText($persistentNavigationMarker, "enabled`n", [System.Text.Encoding]::ASCII)
     $staged += Get-Item $persistentNavigationMarker

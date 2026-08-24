@@ -2085,6 +2085,8 @@ namespace {
 	static NavigatorResourceSchedulerStats s_resourceScheduler;
 	static NavigatorResourceMemoryAccounting s_resourceMemory;
 	static bool s_resourceSchedulerPrepared = false;
+	static bool s_resourceAdmissionPlanning = false;
+	static ImageInfo s_resourcePlanningInfo;
 	static ImageInfo s_resourceOverflowInfo;
 
 	static size_t imagePixelBytes(const ImageInfo& info)
@@ -2110,10 +2112,19 @@ namespace {
 		s_resourceScheduler = NavigatorResourceSchedulerStats{};
 		s_resourceMemory.reset();
 		s_resourceSchedulerPrepared = false;
+		s_resourceAdmissionPlanning = false;
+		s_resourcePlanningInfo = ImageInfo{};
 	}
 	static const ImageInfo& imageInfoForBlock(const DocBlock& block);
-	static void prepareDocumentResources(const WebDocument& doc);
+	static void prepareDocumentResources(const WebDocument& doc, int scrollOffset);
 	static int resourceReferenceIndexForBlock(int blockIndex);
+	static void ensureCssMarginLayout(const WebDocument& doc);
+	static void ensureCssFlexLayout(const WebDocument& doc);
+	static void ensureCssFloatLayout(const WebDocument& doc);
+	static void ensureInlineLayout(const WebDocument& doc);
+	static void ensureCssPositionLayout(const WebDocument& doc);
+	static void ensureCssScrollLayout(const WebDocument& doc, int scrollOffset);
+	static CssBlockGeometry cssGeometryForBlock(const WebDocument& doc, int blockIndex);
 	static void imageDisplaySize(const DocBlock& block, int availableWidth, int& outW, int& outH,
 		bool* outConstrained = nullptr, bool* outAspectPreserved = nullptr, bool* outClamped = nullptr);
 	static int cssWidthPx(const WebStyle& style, int availableWidth, int fallbackValue);
@@ -2933,10 +2944,11 @@ namespace {
 	static void fillDocumentCounts(NavigatorPageMetadata& metadata, const WebDocument& doc,
 		int scrollOffset)
 	{
-		// Resource discovery and scheduling happen before any layout pass can
-		// lazily request an image.  This makes fetch order deterministic and
-		// prevents paint/layout traversal from becoming an accidental scheduler.
-		prepareDocumentResources(doc);
+		// Admission first builds a placeholder-only layout to obtain bounded
+		// block geometry, then fetches in deterministic relevance order.  The
+		// resource-independent layout is rebuilt after admission so natural
+		// dimensions still drive final paint/layout.
+		prepareDocumentResources(doc, scrollOffset);
 		ensureCssMarginLayout(doc);
 		ensureCssFlexLayout(doc);
 		ensureCssFloatLayout(doc);
@@ -2991,6 +3003,27 @@ namespace {
 		metadata.resourceCounters.deniedAllocationBytes = s_resourceMemory.deniedAllocationBytes;
 		metadata.resourceCounters.totalLoadedDecodedBytes = s_resourceScheduler.totalLoadedDecodedBytes;
 		metadata.resourceCounters.totalDeniedRequestedBytes = s_resourceScheduler.totalDeniedRequestedBytes;
+		metadata.resourceCounters.viewportTop = s_resourceScheduler.viewportTop;
+		metadata.resourceCounters.viewportBottom = s_resourceScheduler.viewportBottom;
+		metadata.resourceCounters.viewportWidth = s_resourceScheduler.viewportWidth;
+		metadata.resourceCounters.viewportHeight = s_resourceScheduler.viewportHeight;
+		metadata.resourceCounters.initialScrollOffset = s_resourceScheduler.initialScrollOffset;
+		metadata.resourceCounters.preloadMargin = s_resourceScheduler.preloadMargin;
+		metadata.resourceCounters.visibleReferences = s_resourceScheduler.visibleReferences;
+		metadata.resourceCounters.nearReferences = s_resourceScheduler.nearReferences;
+		metadata.resourceCounters.farReferences = s_resourceScheduler.farReferences;
+		metadata.resourceCounters.unknownViewportReferences = s_resourceScheduler.unknownViewportReferences;
+		metadata.resourceCounters.visibleLoaded = s_resourceScheduler.visibleLoaded;
+		metadata.resourceCounters.visibleBudgetDenied = s_resourceScheduler.visibleBudgetDenied;
+		metadata.resourceCounters.nearLoaded = s_resourceScheduler.nearLoaded;
+		metadata.resourceCounters.nearBudgetDenied = s_resourceScheduler.nearBudgetDenied;
+		metadata.resourceCounters.farLoaded = s_resourceScheduler.farLoaded;
+		metadata.resourceCounters.farBudgetDenied = s_resourceScheduler.farBudgetDenied;
+		metadata.resourceCounters.visiblePriorityAdmissions = s_resourceScheduler.visiblePriorityAdmissions;
+		metadata.resourceCounters.offscreenBudgetDenied = s_resourceScheduler.offscreenBudgetDenied;
+		metadata.resourceCounters.decodedBytesVisible = s_resourceScheduler.decodedBytesVisible;
+		metadata.resourceCounters.decodedBytesNear = s_resourceScheduler.decodedBytesNear;
+		metadata.resourceCounters.decodedBytesFar = s_resourceScheduler.decodedBytesFar;
 		metadata.allocatedImageBytes = 0;
 		metadata.releasedImageResources = s_releasedImageResources;
 		metadata.releasedImageBytes = s_releasedImageBytes;
@@ -3883,20 +3916,27 @@ namespace {
 			telemetry.schedulerOrdinal = reference ? reference->sourceOrdinal : telemetry.ordinal;
 			telemetry.blockIndex = static_cast<int>(&block - doc.blocks.data());
 			telemetry.blockY = geometry.outerY;
+			telemetry.blockTop = reference ? reference->blockTop : geometry.outerY;
+			telemetry.blockBottom = reference && reference->blockBottom >= 0
+				? reference->blockBottom : geometry.outerY + std::max(0, geometry.outerHeight);
 			telemetry.displayWidth = imageW;
 			telemetry.displayHeight = imageH;
 			telemetry.displayPixelBytes = static_cast<uint64_t>(std::max(0, imageW)) *
 				static_cast<uint64_t>(std::max(0, imageH)) * 4u;
-			const int initialViewportTop = kContentY;
-			const int initialViewportBottom = kContentY + kContentH;
-			const int blockBottom = geometry.outerY + std::max(0, geometry.outerHeight);
-			if (blockBottom > initialViewportTop && geometry.outerY < initialViewportBottom) {
-				telemetry.viewportRelation = static_cast<int>(NavigatorResourceViewportRelation::InitialViewport);
-				telemetry.likelyVisible = true;
-			} else if (blockBottom <= initialViewportTop) {
-				telemetry.viewportRelation = static_cast<int>(NavigatorResourceViewportRelation::AboveInitialViewport);
-			} else {
-				telemetry.viewportRelation = static_cast<int>(NavigatorResourceViewportRelation::BelowInitialViewport);
+			telemetry.viewportTop = reference ? s_resourceScheduler.viewportTop : kContentY;
+			telemetry.viewportBottom = reference ? s_resourceScheduler.viewportBottom : kContentY + kContentH;
+			const int finalBlockBottom = geometry.outerY + std::max(0, geometry.outerHeight);
+			telemetry.likelyVisible = finalBlockBottom >= telemetry.viewportTop &&
+				geometry.outerY <= telemetry.viewportBottom;
+			telemetry.viewportRelation = reference
+				? static_cast<int>(static_cast<NavigatorResourceViewportClass>(reference->viewportClass))
+				: static_cast<int>(navigatorClassifyViewportRect(
+					geometry.outerY, finalBlockBottom,
+					NavigatorResourceViewportGeometry{
+						telemetry.viewportTop, telemetry.viewportBottom, kContentW, kContentH,
+						0, kContentH}, &telemetry.distanceFromViewport));
+			if (reference) {
+				telemetry.distanceFromViewport = reference->distanceFromViewport;
 			}
 			std::ostringstream hash;
 			hash << "fnv1a64:" << std::hex << fnv1a64(resourceKey);
@@ -3915,6 +3955,8 @@ namespace {
 			telemetry.budgetHeadroomBefore = reference ? reference->budgetHeadroomBefore : info.budgetHeadroomBefore;
 			telemetry.redirectCount = info.redirectCount;
 			telemetry.priority = reference ? reference->priority : 0;
+			telemetry.priorityBeforeViewport = reference ? reference->priorityBeforeViewport : 0;
+			telemetry.admittedDueToViewportPriority = reference && reference->admittedDueToViewportPriority != 0;
 			telemetry.schedulerState = reference
 				? static_cast<NavigatorResourceSchedulerState>(reference->state)
 				: NavigatorResourceSchedulerState::Failed;
@@ -12310,17 +12352,96 @@ namespace {
 		const NavigatorResourceReferenceMetadata& right)
 	{
 		if (left.priority != right.priority) return left.priority < right.priority;
-		return left.sourceOrdinal < right.sourceOrdinal;
+		if (left.sourceOrdinal != right.sourceOrdinal) return left.sourceOrdinal < right.sourceOrdinal;
+		return left.normalizedUrlHash < right.normalizedUrlHash;
 	}
 
-	static void prepareDocumentResources(const WebDocument& doc)
+	static void noteViewportReferenceClass(NavigatorResourceSchedulerStats& stats,
+		NavigatorResourceViewportClass viewportClass)
+	{
+		switch (viewportClass) {
+		case NavigatorResourceViewportClass::Visible: ++stats.visibleReferences; break;
+		case NavigatorResourceViewportClass::Near: ++stats.nearReferences; break;
+		case NavigatorResourceViewportClass::Far: ++stats.farReferences; break;
+		case NavigatorResourceViewportClass::Unknown: ++stats.unknownViewportReferences; break;
+		default: break;
+		}
+	}
+
+	static void noteViewportLoad(NavigatorResourceSchedulerStats& stats,
+		NavigatorResourceViewportClass viewportClass, uint64_t decodedBytes)
+	{
+		switch (viewportClass) {
+		case NavigatorResourceViewportClass::Visible:
+			++stats.visibleLoaded;
+			if (stats.decodedBytesVisible <= UINT64_MAX - decodedBytes)
+				stats.decodedBytesVisible += decodedBytes;
+			break;
+		case NavigatorResourceViewportClass::Near:
+			++stats.nearLoaded;
+			if (stats.decodedBytesNear <= UINT64_MAX - decodedBytes)
+				stats.decodedBytesNear += decodedBytes;
+			break;
+		case NavigatorResourceViewportClass::Far:
+			++stats.farLoaded;
+			if (stats.decodedBytesFar <= UINT64_MAX - decodedBytes)
+				stats.decodedBytesFar += decodedBytes;
+			break;
+		default: break;
+		}
+	}
+
+	static void noteViewportBudgetDenial(NavigatorResourceSchedulerStats& stats,
+		NavigatorResourceViewportClass viewportClass)
+	{
+		switch (viewportClass) {
+		case NavigatorResourceViewportClass::Visible: ++stats.visibleBudgetDenied; break;
+		case NavigatorResourceViewportClass::Near: ++stats.nearBudgetDenied; break;
+		case NavigatorResourceViewportClass::Far:
+			++stats.farBudgetDenied;
+			++stats.offscreenBudgetDenied;
+			break;
+		default: break;
+		}
+	}
+
+	static void prepareDocumentResources(const WebDocument& doc, int scrollOffset)
 	{
 		if (s_resourceSchedulerPrepared) return;
 		s_resourceSchedulerPrepared = true;
 		s_resourceScheduler = NavigatorResourceSchedulerStats{};
 		for (uint32_t i = 0; i < kNavigatorMaxResourceReferences; ++i)
-			s_resourceReferences[i] = NavigatorResourceReferenceMetadata{};
+			 s_resourceReferences[i] = NavigatorResourceReferenceMetadata{};
 		s_resourceOverflowInfo = ImageInfo{};
+
+		// The existing layout code asks for natural image dimensions while
+		// computing block heights.  A placeholder-only pass gives admission a
+		// real, bounded block geometry without allowing source-order image fetches
+		// to happen before the scheduler has selected a candidate.
+		s_resourceAdmissionPlanning = true;
+		s_resourcePlanningInfo = ImageInfo{};
+		s_resourcePlanningInfo.naturalW = 220;
+		s_resourcePlanningInfo.naturalH = 64;
+		ensureCssMarginLayout(doc);
+		ensureCssFlexLayout(doc);
+		ensureCssFloatLayout(doc);
+		ensureInlineLayout(doc);
+		ensureCssPositionLayout(doc);
+		ensureCssScrollLayout(doc, scrollOffset);
+
+		NavigatorResourceViewportGeometry viewport;
+		viewport.viewportTop = kContentY + std::max(0, scrollOffset);
+		viewport.viewportBottom = viewport.viewportTop + kContentH;
+		viewport.viewportWidth = kContentW;
+		viewport.viewportHeight = kContentH;
+		viewport.scrollOffset = std::max(0, scrollOffset);
+		viewport.preloadMargin = kContentH;
+		s_resourceScheduler.viewportTop = viewport.viewportTop;
+		s_resourceScheduler.viewportBottom = viewport.viewportBottom;
+		s_resourceScheduler.viewportWidth = viewport.viewportWidth;
+		s_resourceScheduler.viewportHeight = viewport.viewportHeight;
+		s_resourceScheduler.initialScrollOffset = viewport.scrollOffset;
+		s_resourceScheduler.preloadMargin = viewport.preloadMargin;
 
 		uint32_t referenceCount = 0;
 		for (int blockIndex = 0; blockIndex < static_cast<int>(doc.blocks.size()); ++blockIndex) {
@@ -12336,13 +12457,35 @@ namespace {
 			reference.blockIndex = static_cast<uint16_t>(blockIndex);
 			const std::string key = resourceCacheKey(block.url);
 			reference.normalizedUrlHash = static_cast<uint32_t>(fnv1a64(key) & 0xFFFFFFFFu);
+			const CssBlockGeometry geometry = cssGeometryForBlock(doc, blockIndex);
+			const CssPositionedRecord* positioned = cssPositionedRecordForBlock(doc, blockIndex);
+			if (positioned) {
+				// Positioned layout owns the final document/viewport rectangle.  The
+				// ordinary margin-flow snapshot intentionally retains the normal-flow
+				// placeholder for out-of-flow blocks, so using it here would make a
+				// far absolute image look visible during admission planning.
+				reference.blockTop = cssPositionedScreenYForDocument(doc, *positioned, 0);
+				reference.blockBottom = reference.blockTop >= 0 && positioned->usedHeight > 0
+					? reference.blockTop + positioned->usedHeight : -1;
+			} else {
+				reference.blockTop = geometry.outerY;
+				reference.blockBottom = geometry.outerY >= 0 && geometry.outerHeight > 0
+					? geometry.outerY + geometry.outerHeight : -1;
+			}
+			reference.viewportClass = static_cast<uint8_t>(navigatorClassifyViewportRect(
+				reference.blockTop, reference.blockBottom, viewport, &reference.distanceFromViewport));
 			std::string knownFormat;
 			const bool knownUnsupported = knownUnsupportedResourceFormat(block.url, knownFormat);
 			reference.formatHint = static_cast<uint8_t>(knownUnsupported ? 3u :
 				resourceImageFormat(block.url) == NavigatorResourceImageFormat::Png ? 1u :
 				resourceImageFormat(block.url) == NavigatorResourceImageFormat::Jpeg ? 2u : 0u);
-			reference.priority = knownUnsupported ? 3u :
-				(reference.formatHint == 1u || reference.formatHint == 2u ? 0u : 1u);
+			if (knownUnsupported)
+				reference.viewportClass = static_cast<uint8_t>(NavigatorResourceViewportClass::Unsupported);
+			reference.priorityBeforeViewport = navigatorResourcePriorityBeforeViewport(reference.formatHint);
+			reference.priority = navigatorResourcePriorityWithViewport(
+				static_cast<NavigatorResourceViewportClass>(reference.viewportClass), reference.formatHint);
+			noteViewportReferenceClass(s_resourceScheduler,
+				static_cast<NavigatorResourceViewportClass>(reference.viewportClass));
 			reference.state = static_cast<uint8_t>(NavigatorResourceSchedulerState::Discovered);
 			int duplicateOf = -1;
 			for (uint32_t prior = 0; prior < referenceCount; ++prior) {
@@ -12357,6 +12500,18 @@ namespace {
 				reference.duplicateOf = static_cast<uint16_t>(duplicateOf);
 				reference.state = static_cast<uint8_t>(NavigatorResourceSchedulerState::Deduplicated);
 				++s_resourceScheduler.duplicateReferences;
+				NavigatorResourceReferenceMetadata& canonical = s_resourceReferences[duplicateOf];
+				const NavigatorResourceViewportClass duplicateClass =
+					static_cast<NavigatorResourceViewportClass>(reference.viewportClass);
+				const NavigatorResourceViewportClass canonicalClass =
+					static_cast<NavigatorResourceViewportClass>(canonical.viewportClass);
+				if (static_cast<uint8_t>(duplicateClass) < static_cast<uint8_t>(canonicalClass)) {
+					canonical.viewportClass = reference.viewportClass;
+					canonical.priority = reference.priority;
+					canonical.blockTop = reference.blockTop;
+					canonical.blockBottom = reference.blockBottom;
+					canonical.distanceFromViewport = reference.distanceFromViewport;
+				}
 			} else {
 				reference.state = static_cast<uint8_t>(NavigatorResourceSchedulerState::Pending);
 				++s_resourceScheduler.uniqueReferences;
@@ -12365,6 +12520,7 @@ namespace {
 			}
 			++referenceCount;
 		}
+		s_resourceAdmissionPlanning = false;
 
 		for (;;) {
 			int selected = -1;
@@ -12379,6 +12535,16 @@ namespace {
 			NavigatorResourceReferenceMetadata& reference = s_resourceReferences[selected];
 			if (s_resourceScheduler.pending > 0) --s_resourceScheduler.pending;
 			reference.state = static_cast<uint8_t>(NavigatorResourceSchedulerState::Fetching);
+			for (uint32_t i = 0; i < referenceCount; ++i) {
+				const NavigatorResourceReferenceMetadata& other = s_resourceReferences[i];
+				if (other.state != static_cast<uint8_t>(NavigatorResourceSchedulerState::Pending) ||
+					other.sourceOrdinal >= reference.sourceOrdinal) continue;
+				if (reference.priority < other.priority) {
+					reference.admittedDueToViewportPriority = 1;
+					++s_resourceScheduler.visiblePriorityAdmissions;
+					break;
+				}
+			}
 			const DocBlock& block = doc.blocks[static_cast<size_t>(reference.blockIndex)];
 			const ImageInfo& info = imageInfoForBlock(block);
 			reference.budgetRequestedBytes = info.budgetRequestedBytes;
@@ -12386,7 +12552,16 @@ namespace {
 			reference.activeBytesBefore = static_cast<uint32_t>(std::min<uint64_t>(info.activeBytesBefore, UINT32_MAX));
 			reference.budgetHeadroomBefore = static_cast<uint32_t>(std::min<uint64_t>(info.budgetHeadroomBefore, UINT32_MAX));
 			reference.classification = static_cast<uint8_t>(info.classification);
-			reference.state = static_cast<uint8_t>(schedulerStateForImage(info));
+		reference.state = static_cast<uint8_t>(schedulerStateForImage(info));
+			const NavigatorResourceViewportClass viewportClass =
+				static_cast<NavigatorResourceViewportClass>(reference.viewportClass);
+			if (info.ok) {
+				noteViewportLoad(s_resourceScheduler, viewportClass,
+					info.budgetAcceptedBytes > 0 ? info.budgetAcceptedBytes : imagePixelBytes(info));
+			} else if (static_cast<NavigatorResourceSchedulerState>(reference.state) ==
+				NavigatorResourceSchedulerState::BudgetDenied) {
+				noteViewportBudgetDenial(s_resourceScheduler, viewportClass);
+			}
 		}
 		for (uint32_t i = 0; i < referenceCount; ++i) {
 			NavigatorResourceReferenceMetadata& reference = s_resourceReferences[i];
@@ -12399,10 +12574,35 @@ namespace {
 				reference.budgetHeadroomBefore = canonical.budgetHeadroomBefore;
 			}
 		}
+		s_resourceScheduler.activeBytes = s_resourceMemory.activeDecodedBytes;
+		s_resourceScheduler.activeCount = std::min<uint64_t>(s_resourceScheduler.activeCount,
+			kNavigatorMaxActiveResources);
+
+		// Natural dimensions are now available.  Rebuild all layout snapshots so
+		// final paint and hit testing use the same geometry as the admitted image.
+		s_inlineLayoutDirty = true;
+		s_inlineLayoutSnapshot = InlineLayoutSnapshot{};
+		s_cssMarginLayoutSnapshot = CssMarginLayoutSnapshot{};
+		s_cssFloatLayoutSnapshot = CssFloatLayoutSnapshot{};
+		s_cssFlexLayoutSnapshot = CssFlexLayoutSnapshot{};
+		s_cssPositionLayoutSnapshot = CssPositionLayoutSnapshot{};
+		s_cssScrollLayoutSnapshot = CssScrollLayoutSnapshot{};
+		ensureCssMarginLayout(doc);
+		ensureCssFlexLayout(doc);
+		ensureCssFloatLayout(doc);
+		ensureInlineLayout(doc);
+		ensureCssPositionLayout(doc);
+		ensureCssScrollLayout(doc, scrollOffset);
 	}
 
 	static const ImageInfo& imageInfoForBlock(const DocBlock& block)
 	{
+		if (s_resourceAdmissionPlanning) {
+			// Layout may query image dimensions while building the admission
+			// geometry.  Do not fetch here: the placeholder is intentionally the
+			// same bounded fallback used by imageDisplaySize for an unknown image.
+			return s_resourcePlanningInfo;
+		}
 		const std::string requestedUrl = block.url.empty() ? block.src : block.url;
 		const std::string key = resourceCacheKey(requestedUrl);
 		auto found = s_imageCache.find(key);
@@ -15406,6 +15606,27 @@ std::string Navigator::SmokePageDiagnostics()
 	out << "denied_allocation_bytes=" << c.deniedAllocationBytes << "\n";
 	out << "total_loaded_decoded_bytes=" << c.totalLoadedDecodedBytes << "\n";
 	out << "total_denied_requested_bytes=" << c.totalDeniedRequestedBytes << "\n";
+	out << "viewport_top=" << c.viewportTop << "\n";
+	out << "viewport_bottom=" << c.viewportBottom << "\n";
+	out << "viewport_width=" << c.viewportWidth << "\n";
+	out << "viewport_height=" << c.viewportHeight << "\n";
+	out << "initial_scroll_offset=" << c.initialScrollOffset << "\n";
+	out << "viewport_preload_margin=" << c.preloadMargin << "\n";
+	out << "visible_references=" << c.visibleReferences << "\n";
+	out << "near_references=" << c.nearReferences << "\n";
+	out << "far_references=" << c.farReferences << "\n";
+	out << "unknown_viewport_references=" << c.unknownViewportReferences << "\n";
+	out << "visible_loaded=" << c.visibleLoaded << "\n";
+	out << "visible_budget_denied=" << c.visibleBudgetDenied << "\n";
+	out << "near_loaded=" << c.nearLoaded << "\n";
+	out << "near_budget_denied=" << c.nearBudgetDenied << "\n";
+	out << "far_loaded=" << c.farLoaded << "\n";
+	out << "far_budget_denied=" << c.farBudgetDenied << "\n";
+	out << "visible_priority_admissions=" << c.visiblePriorityAdmissions << "\n";
+	out << "offscreen_budget_denied=" << c.offscreenBudgetDenied << "\n";
+	out << "decoded_bytes_visible=" << c.decodedBytesVisible << "\n";
+	out << "decoded_bytes_near=" << c.decodedBytesNear << "\n";
+	out << "decoded_bytes_far=" << c.decodedBytesFar << "\n";
 	for (size_t bucket = 0; bucket < 6; ++bucket) {
 		out << "loaded_size_bucket_" << bucket << "=" << m.resourceScheduler.loadedDecodedSizeBuckets[bucket] << "\n";
 		out << "denied_size_bucket_" << bucket << "=" << m.resourceScheduler.deniedDecodedSizeBuckets[bucket] << "\n";
@@ -15430,8 +15651,13 @@ std::string Navigator::SmokePageDiagnostics()
 		out << "resource[" << resource.ordinal << "].url_hash=" << resource.urlHash << "\n";
 		out << "resource[" << resource.ordinal << "].block_index=" << resource.blockIndex << "\n";
 		out << "resource[" << resource.ordinal << "].block_y=" << resource.blockY << "\n";
+		out << "resource[" << resource.ordinal << "].block_top=" << resource.blockTop << "\n";
+		out << "resource[" << resource.ordinal << "].block_bottom=" << resource.blockBottom << "\n";
 		out << "resource[" << resource.ordinal << "].display_dimensions=" << resource.displayWidth << "x" << resource.displayHeight << "\n";
+		out << "resource[" << resource.ordinal << "].viewport_top=" << resource.viewportTop << "\n";
+		out << "resource[" << resource.ordinal << "].viewport_bottom=" << resource.viewportBottom << "\n";
 		out << "resource[" << resource.ordinal << "].viewport_relation=" << resource.viewportRelation << "\n";
+		out << "resource[" << resource.ordinal << "].distance_from_viewport=" << resource.distanceFromViewport << "\n";
 		out << "resource[" << resource.ordinal << "].likely_visible=" << yesNo(resource.likelyVisible) << "\n";
 		out << "resource[" << resource.ordinal << "].origin_host=" << resource.originHost << "\n";
 		out << "resource[" << resource.ordinal << "].same_origin=" << yesNo(resource.sameOrigin) << "\n";
@@ -15444,6 +15670,8 @@ std::string Navigator::SmokePageDiagnostics()
 		out << "resource[" << resource.ordinal << "].redirects=" << resource.redirectCount << "\n";
 		out << "resource[" << resource.ordinal << "].scheduler_ordinal=" << resource.schedulerOrdinal << "\n";
 		out << "resource[" << resource.ordinal << "].priority=" << resource.priority << "\n";
+		out << "resource[" << resource.ordinal << "].priority_before_viewport=" << resource.priorityBeforeViewport << "\n";
+		out << "resource[" << resource.ordinal << "].admitted_due_to_viewport_priority=" << yesNo(resource.admittedDueToViewportPriority) << "\n";
 		out << "resource[" << resource.ordinal << "].scheduler_state=" <<
 			navigatorResourceSchedulerStateName(resource.schedulerState) << "\n";
 		out << "resource[" << resource.ordinal << "].budget_requested=" << resource.budgetRequestedBytes << "\n";

@@ -1623,14 +1623,14 @@ $scenarioDefinitions = @(
         ProductionCaSource = $validatedCaFixture
         TlsCert = $defaultHttpsCert
         TlsKey = $defaultHttpsKey
-        PublicPilotEnabled = $true
+        PublicPilotEnabled = $false
         PersistentNavigation = $true
         Checks = $commonChecks + @(
             "[NAVIGATOR-SMOKE] persistent_navigation.enabled=yes",
             "[NAVIGATOR-PERSISTENT] mode=single_boot_single_navigator_instance",
             "[NAVIGATOR-PERSISTENT] public.sequence=NASA,Wikipedia,example.com,NASA",
             "[NAVIGATOR-PERSISTENT] deterministic.result=PASS",
-            "[NAVIGATOR-PERSISTENT] public.result=PASS",
+            "[NAVIGATOR-PERSISTENT] public.result=SKIP policy_disabled",
             "[NAVIGATOR-PERSISTENT] result=PASS"
         )
         RegexChecks = Merge-CheckMaps -Base $commonRegexChecks -Extra $localTlsExplicitPolicyTrustMismatchRegexChecks

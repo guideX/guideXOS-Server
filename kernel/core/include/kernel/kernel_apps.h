@@ -47,6 +47,8 @@ struct WebStyle {
     int      marginLeft = -1;
     int      padding = -1;
     int      fontScaleOrSize = -1;
+    bool     absolutePosition = false;
+    int      positionTop = -1;
     GenericFontFamily genericFontFamily = GenericFontFamily::Inherit;
 };
 

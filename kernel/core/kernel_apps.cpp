@@ -7638,6 +7638,34 @@ bool NavigatorApp::smokePersistentNavigationLifecycle()
             if (bucket) serial::putc(',');
             serial_put_dec(record.deniedSizeBuckets[bucket]);
         }
+        serial::puts("\n[NAVIGATOR-PERSISTENT] stage_viewport top=");
+        serial_put_dec(app->m_resourceScheduler.viewportTop);
+        serial::puts(" bottom=");
+        serial_put_dec(app->m_resourceScheduler.viewportBottom);
+        serial::puts(" width=");
+        serial_put_dec(app->m_resourceScheduler.viewportWidth);
+        serial::puts(" height=");
+        serial_put_dec(app->m_resourceScheduler.viewportHeight);
+        serial::puts(" scroll=");
+        serial_put_dec(app->m_resourceScheduler.initialScrollOffset);
+        serial::puts(" visible_refs=");
+        serial_put_dec(app->m_resourceScheduler.visibleReferences);
+        serial::puts(" near_refs=");
+        serial_put_dec(app->m_resourceScheduler.nearReferences);
+        serial::puts(" far_refs=");
+        serial_put_dec(app->m_resourceScheduler.farReferences);
+        serial::puts(" visible_loaded=");
+        serial_put_dec(app->m_resourceScheduler.visibleLoaded);
+        serial::puts(" near_loaded=");
+        serial_put_dec(app->m_resourceScheduler.nearLoaded);
+        serial::puts(" far_loaded=");
+        serial_put_dec(app->m_resourceScheduler.farLoaded);
+        serial::puts(" far_budget_denied=");
+        serial_put_dec(app->m_resourceScheduler.farBudgetDenied);
+        serial::puts(" visible_priority_admissions=");
+        serial_put_dec(app->m_resourceScheduler.visiblePriorityAdmissions);
+        serial::puts(" active_bytes=");
+        serial_put_dec64(app->m_resourceScheduler.activeBytes);
         const bool invariantOk = record.activeBytes <= gxos::apps::kNavigatorDecodedImageBudgetBytes &&
             record.activeImages <= gxos::apps::kNavigatorMaxActiveResources &&
             record.resourceReferences <= gxos::apps::kNavigatorMaxResourceReferences &&
@@ -7675,6 +7703,38 @@ bool NavigatorApp::smokePersistentNavigationLifecycle()
             record.activeImagesBefore == 0 && record.activeBytesBefore == 0;
         return cleared && (released || noOp);
     };
+
+    auto viewportPressureExpected = [&]() {
+        const gxos::apps::NavigatorResourceSchedulerStats& stats = app->m_resourceScheduler;
+        return stats.viewportWidth > 0 && stats.viewportHeight > 0 &&
+            stats.initialScrollOffset == 0 && stats.visibleReferences >= 4 &&
+            stats.nearReferences >= 4 && stats.farReferences >= 4 &&
+            stats.visibleLoaded >= 4 && stats.nearLoaded >= 4 &&
+            stats.farLoaded > 0 && stats.farBudgetDenied > 0 &&
+            stats.visiblePriorityAdmissions > 0 &&
+            stats.activeBytes <= gxos::apps::kNavigatorDecodedImageBudgetBytes &&
+            stats.activeCount <= gxos::apps::kNavigatorMaxActiveResources &&
+            latest().imagePaintObserved;
+    };
+
+    app->navigateTo("http://10.0.2.2:8080/navigator-smoke/generated/VPRESS.HTM");
+    bool viewportFirstExpected = emitRecord("viewport_pressure_1", true) && viewportPressureExpected();
+    serial::puts("[NAVIGATOR-PERSISTENT] viewport_pressure_1.result=");
+    serial::puts(viewportFirstExpected ? "PASS\n" : "FAIL\n");
+    deterministicOk = deterministicOk && viewportFirstExpected;
+
+    app->navigateTo("http://10.0.2.2:8080/navigator-smoke/generated/TINY.HTM");
+    bool viewportTinyExpected = emitRecord("viewport_tiny", true) && transitionReleased(latest()) &&
+        latest().activeImages == 0 && latest().activeBytes == 0;
+    serial::puts("[NAVIGATOR-PERSISTENT] viewport_tiny.result=");
+    serial::puts(viewportTinyExpected ? "PASS\n" : "FAIL\n");
+    deterministicOk = deterministicOk && viewportTinyExpected;
+
+    app->navigateTo("http://10.0.2.2:8080/navigator-smoke/generated/VPRESS.HTM");
+    bool viewportSecondExpected = emitRecord("viewport_pressure_2", true) && viewportPressureExpected();
+    serial::puts("[NAVIGATOR-PERSISTENT] viewport_pressure_2.result=");
+    serial::puts(viewportSecondExpected ? "PASS\n" : "FAIL\n");
+    deterministicOk = deterministicOk && viewportSecondExpected;
 
     app->navigateTo("http://10.0.2.2:8080/navigator-smoke/generated/HEAVY.HTM");
     bool heavyExpected = true;
@@ -9387,6 +9447,8 @@ static void nav_style_merge(gxos::web::WebStyle& base, const gxos::web::WebStyle
     if (overrideStyle.marginLeft >= 0) base.marginLeft = overrideStyle.marginLeft;
     if (overrideStyle.padding >= 0) base.padding = overrideStyle.padding;
     if (overrideStyle.fontScaleOrSize >= 0) base.fontScaleOrSize = overrideStyle.fontScaleOrSize;
+    if (overrideStyle.absolutePosition) base.absolutePosition = true;
+    if (overrideStyle.positionTop >= 0) base.positionTop = overrideStyle.positionTop;
     if (overrideStyle.genericFontFamily != gxos::web::GenericFontFamily::Inherit)
         base.genericFontFamily = overrideStyle.genericFontFamily;
 }
@@ -9472,6 +9534,11 @@ static void nav_apply_css_decl(gxos::web::WebStyle& style, const char* propStart
     else if (streq_local(prop, "margin-left")) { int px = nav_parse_css_px(value, ok); if (ok) style.marginLeft = px; else ++diag.unsupportedDeclarationCount; }
     else if (streq_local(prop, "padding")) { int px = nav_parse_css_px(value, ok); if (ok) style.padding = px; else ++diag.unsupportedDeclarationCount; }
     else if (streq_local(prop, "font-size")) { int px = nav_parse_css_px(value, ok); if (ok) style.fontScaleOrSize = px; else ++diag.unsupportedDeclarationCount; }
+    else if (streq_local(prop, "position")) {
+        if (streq_local(value, "absolute") || streq_local(value, "fixed")) style.absolutePosition = true;
+        else if (!streq_local(value, "static")) ++diag.unsupportedDeclarationCount;
+    }
+    else if (streq_local(prop, "top")) { int px = nav_parse_css_px(value, ok); if (ok) style.positionTop = px; else ++diag.unsupportedDeclarationCount; }
     else { ++diag.unsupportedDeclarationCount; }
 }
 
@@ -12324,6 +12391,59 @@ void NavigatorApp::prepareImageResources()
         m_resourceReferences[ref] = gxos::apps::NavigatorResourceReferenceMetadata{};
     for (uint32_t ref = 0; ref < gxos::apps::kNavigatorMaxResourceReferences; ++ref)
         m_resourceOrder[ref] = 0;
+    gxos::apps::NavigatorResourceViewportGeometry viewport{};
+    viewport.viewportTop = CONTENT_Y;
+    viewport.viewportBottom = m_window ? m_window->h - STATUS_H - 8 : -1;
+    viewport.viewportWidth = m_window ? m_window->w - CONTENT_X * 2 - 32 : 0;
+    if (viewport.viewportWidth < 0) viewport.viewportWidth = 0;
+    viewport.viewportHeight = viewport.viewportBottom >= viewport.viewportTop
+        ? viewport.viewportBottom - viewport.viewportTop : 0;
+    viewport.scrollOffset = m_scrollY > 0 ? m_scrollY : 0;
+    viewport.preloadMargin = viewport.viewportHeight;
+    m_resourceScheduler.viewportTop = viewport.viewportTop;
+    m_resourceScheduler.viewportBottom = viewport.viewportBottom;
+    m_resourceScheduler.viewportWidth = viewport.viewportWidth;
+    m_resourceScheduler.viewportHeight = viewport.viewportHeight;
+    m_resourceScheduler.initialScrollOffset = viewport.scrollOffset;
+    m_resourceScheduler.preloadMargin = viewport.preloadMargin;
+    const int geometryWidth = viewport.viewportWidth > 0 ? viewport.viewportWidth : 480;
+    auto noteViewportReferenceClass = [&](gxos::apps::NavigatorResourceViewportClass viewportClass) {
+        switch (viewportClass) {
+        case gxos::apps::NavigatorResourceViewportClass::Visible: ++m_resourceScheduler.visibleReferences; break;
+        case gxos::apps::NavigatorResourceViewportClass::Near: ++m_resourceScheduler.nearReferences; break;
+        case gxos::apps::NavigatorResourceViewportClass::Far: ++m_resourceScheduler.farReferences; break;
+        case gxos::apps::NavigatorResourceViewportClass::Unknown: ++m_resourceScheduler.unknownViewportReferences; break;
+        default: break;
+        }
+    };
+    auto noteViewportLoad = [&](gxos::apps::NavigatorResourceViewportClass viewportClass, uint64_t decodedBytes) {
+        switch (viewportClass) {
+        case gxos::apps::NavigatorResourceViewportClass::Visible:
+            ++m_resourceScheduler.visibleLoaded;
+            m_resourceScheduler.decodedBytesVisible += decodedBytes;
+            break;
+        case gxos::apps::NavigatorResourceViewportClass::Near:
+            ++m_resourceScheduler.nearLoaded;
+            m_resourceScheduler.decodedBytesNear += decodedBytes;
+            break;
+        case gxos::apps::NavigatorResourceViewportClass::Far:
+            ++m_resourceScheduler.farLoaded;
+            m_resourceScheduler.decodedBytesFar += decodedBytes;
+            break;
+        default: break;
+        }
+    };
+    auto noteViewportBudgetDenial = [&](gxos::apps::NavigatorResourceViewportClass viewportClass) {
+        switch (viewportClass) {
+        case gxos::apps::NavigatorResourceViewportClass::Visible: ++m_resourceScheduler.visibleBudgetDenied; break;
+        case gxos::apps::NavigatorResourceViewportClass::Near: ++m_resourceScheduler.nearBudgetDenied; break;
+        case gxos::apps::NavigatorResourceViewportClass::Far:
+            ++m_resourceScheduler.farBudgetDenied;
+            ++m_resourceScheduler.offscreenBudgetDenied;
+            break;
+        default: break;
+        }
+    };
     uint32_t referenceCount = 0;
     for (int blockIndex = 0; blockIndex < m_blockCount; ++blockIndex) {
         if (m_blocks[blockIndex].kind != BLOCK_IMAGE) continue;
@@ -12346,12 +12466,30 @@ void NavigatorApp::prepareImageResources()
             nav_url_path_ends_with_extension(m_blocks[blockIndex].url, ".webp") ||
             nav_url_path_ends_with_extension(m_blocks[blockIndex].url, ".avif") ||
             nav_url_path_ends_with_extension(m_blocks[blockIndex].url, ".gif");
-        reference.priority = knownUnsupported ? 3u :
-            (nav_url_path_ends_with_png(m_blocks[blockIndex].url) ||
-             nav_url_path_ends_with_jpeg(m_blocks[blockIndex].url) ? 0u : 1u);
         reference.formatHint = knownUnsupported ? 3u :
             (nav_url_path_ends_with_png(m_blocks[blockIndex].url) ? 1u :
              nav_url_path_ends_with_jpeg(m_blocks[blockIndex].url) ? 2u : 0u);
+        const int blockTop = blockY(blockIndex, geometryWidth);
+        int blockHeightValue = blockHeight(m_blocks[blockIndex], geometryWidth);
+        if (m_blocks[blockIndex].kind == BLOCK_IMAGE && m_blocks[blockIndex].style.absolutePosition) {
+            int absoluteImageHeight = m_blocks[blockIndex].height > 0 ? m_blocks[blockIndex].height : 64;
+            if (absoluteImageHeight > 420) absoluteImageHeight = 420;
+            blockHeightValue = css_margin_top_or(m_blocks[blockIndex].style, 6) + absoluteImageHeight +
+                css_margin_bottom_or(m_blocks[blockIndex].style, 6);
+        }
+        if (blockTop >= 0 && blockHeightValue >= 0 &&
+            static_cast<int64_t>(blockTop) + static_cast<int64_t>(blockHeightValue) <= 0x7FFFFFFFll) {
+            reference.blockTop = blockTop;
+            reference.blockBottom = blockTop + blockHeightValue;
+        }
+        gxos::apps::NavigatorResourceViewportClass viewportClass =
+            gxos::apps::navigatorClassifyViewportRect(
+                reference.blockTop, reference.blockBottom, viewport, &reference.distanceFromViewport);
+        if (knownUnsupported) viewportClass = gxos::apps::NavigatorResourceViewportClass::Unsupported;
+        reference.viewportClass = static_cast<uint8_t>(viewportClass);
+        reference.priorityBeforeViewport = gxos::apps::navigatorResourcePriorityBeforeViewport(reference.formatHint);
+        reference.priority = gxos::apps::navigatorResourcePriorityWithViewport(viewportClass, reference.formatHint);
+        noteViewportReferenceClass(viewportClass);
         reference.state = static_cast<uint8_t>(gxos::apps::NavigatorResourceSchedulerState::Pending);
         int duplicateOf = -1;
         for (uint32_t prior = 0; prior < referenceCount; ++prior) {
@@ -12365,6 +12503,17 @@ void NavigatorApp::prepareImageResources()
             reference.duplicateOf = static_cast<uint16_t>(duplicateOf);
             reference.state = static_cast<uint8_t>(gxos::apps::NavigatorResourceSchedulerState::Deduplicated);
             ++m_resourceScheduler.duplicateReferences;
+            gxos::apps::NavigatorResourceReferenceMetadata& canonical = m_resourceReferences[duplicateOf];
+            const gxos::apps::NavigatorResourceViewportClass canonicalClass =
+                static_cast<gxos::apps::NavigatorResourceViewportClass>(canonical.viewportClass);
+            if (static_cast<uint8_t>(viewportClass) < static_cast<uint8_t>(canonicalClass)) {
+                canonical.viewportClass = reference.viewportClass;
+                canonical.priority = gxos::apps::navigatorResourcePriorityWithViewport(
+                    viewportClass, canonical.formatHint);
+                canonical.blockTop = reference.blockTop;
+                canonical.blockBottom = reference.blockBottom;
+                canonical.distanceFromViewport = reference.distanceFromViewport;
+            }
         } else {
             ++m_resourceScheduler.uniqueReferences;
             ++m_resourceScheduler.pending;
@@ -12373,9 +12522,9 @@ void NavigatorApp::prepareImageResources()
         ++referenceCount;
     }
 
-    // Bare metal uses the same deterministic format priority as hosted
-    // Navigator. Stable source order remains the tie breaker; this is not
-    // viewport scheduling and does not change any policy limits.
+    // Bare metal uses the shared viewport-aware priority policy. Stable source
+    // order remains the tie breaker; viewport relevance changes admission order
+    // only and does not change any policy limits.
     for (uint32_t ref = 0; ref < referenceCount; ++ref)
         m_resourceOrder[ref] = static_cast<uint16_t>(ref);
     for (uint32_t start = 0; start < referenceCount; ++start) {
@@ -12384,7 +12533,9 @@ void NavigatorApp::prepareImageResources()
             const gxos::apps::NavigatorResourceReferenceMetadata& left = m_resourceReferences[m_resourceOrder[candidate]];
             const gxos::apps::NavigatorResourceReferenceMetadata& right = m_resourceReferences[m_resourceOrder[selected]];
             if (left.priority < right.priority ||
-                (left.priority == right.priority && left.sourceOrdinal < right.sourceOrdinal))
+                (left.priority == right.priority && left.sourceOrdinal < right.sourceOrdinal) ||
+                (left.priority == right.priority && left.sourceOrdinal == right.sourceOrdinal &&
+                 left.normalizedUrlHash < right.normalizedUrlHash))
                 selected = candidate;
         }
         const uint16_t orderValue = m_resourceOrder[start];
@@ -12452,7 +12603,19 @@ void NavigatorApp::prepareImageResources()
             continue;
         }
         if (referenceIndex >= 0) {
-            m_resourceReferences[referenceIndex].state = static_cast<uint8_t>(gxos::apps::NavigatorResourceSchedulerState::Fetching);
+            gxos::apps::NavigatorResourceReferenceMetadata& reference = m_resourceReferences[referenceIndex];
+            reference.state = static_cast<uint8_t>(gxos::apps::NavigatorResourceSchedulerState::Fetching);
+            for (uint32_t candidateIndex = 0; candidateIndex < referenceCount; ++candidateIndex) {
+                const gxos::apps::NavigatorResourceReferenceMetadata& earlier =
+                    m_resourceReferences[candidateIndex];
+                if (earlier.state != static_cast<uint8_t>(gxos::apps::NavigatorResourceSchedulerState::Pending) ||
+                    earlier.sourceOrdinal >= reference.sourceOrdinal) continue;
+                if (reference.priority < earlier.priority) {
+                    reference.admittedDueToViewportPriority = 1;
+                    ++m_resourceScheduler.visiblePriorityAdmissions;
+                    break;
+                }
+            }
         }
 
         const bool knownUnsupported =
@@ -12517,6 +12680,10 @@ void NavigatorApp::prepareImageResources()
                 m_resourceScheduler.noteDeniedDecoded(localDecodedBytes);
                 m_resourceScheduler.deniedAllocationBytes += localDecodedBytes;
                 if (referenceIndex >= 0) {
+                    noteViewportBudgetDenial(static_cast<gxos::apps::NavigatorResourceViewportClass>(
+                        m_resourceReferences[referenceIndex].viewportClass));
+                }
+                if (referenceIndex >= 0) {
                     m_resourceReferences[referenceIndex].state = static_cast<uint8_t>(gxos::apps::NavigatorResourceSchedulerState::BudgetDenied);
                     m_resourceReferences[referenceIndex].budgetRequestedBytes = static_cast<uint32_t>(localDecodedBytes);
                     m_resourceReferences[referenceIndex].activeBytesBefore = static_cast<uint32_t>(m_resourceMemory.activeDecodedBytes);
@@ -12545,6 +12712,10 @@ void NavigatorApp::prepareImageResources()
                 ++m_resourceScheduler.attached;
                 ++m_resourceScheduler.activeCount;
                 m_resourceScheduler.noteLoadedDecoded(localDecodedBytes);
+                if (referenceIndex >= 0) {
+                    noteViewportLoad(static_cast<gxos::apps::NavigatorResourceViewportClass>(
+                        m_resourceReferences[referenceIndex].viewportClass), localDecodedBytes);
+                }
                 m_resourceScheduler.activeBytes = m_resourceMemory.activeDecodedBytes;
                 m_resourceScheduler.peakActiveBytes = m_resourceScheduler.peakActiveBytes > m_resourceScheduler.activeBytes
                     ? m_resourceScheduler.peakActiveBytes : m_resourceScheduler.activeBytes;
@@ -12718,6 +12889,10 @@ void NavigatorApp::prepareImageResources()
             m_resourceScheduler.noteDeniedDecoded(requestedDecodedBytes);
             m_resourceScheduler.deniedAllocationBytes += requestedDecodedBytes;
             if (referenceIndex >= 0) {
+                noteViewportBudgetDenial(static_cast<gxos::apps::NavigatorResourceViewportClass>(
+                    m_resourceReferences[referenceIndex].viewportClass));
+            }
+            if (referenceIndex >= 0) {
                 m_resourceReferences[referenceIndex].state = static_cast<uint8_t>(gxos::apps::NavigatorResourceSchedulerState::BudgetDenied);
                 m_resourceReferences[referenceIndex].budgetRequestedBytes =
                     static_cast<uint32_t>(requestedDecodedBytes > UINT32_MAX ? UINT32_MAX : requestedDecodedBytes);
@@ -12767,6 +12942,10 @@ void NavigatorApp::prepareImageResources()
             ++m_resourceScheduler.attached;
             ++m_resourceScheduler.activeCount;
             m_resourceScheduler.noteLoadedDecoded(requestedDecodedBytes);
+            if (referenceIndex >= 0) {
+                noteViewportLoad(static_cast<gxos::apps::NavigatorResourceViewportClass>(
+                    m_resourceReferences[referenceIndex].viewportClass), requestedDecodedBytes);
+            }
             m_resourceScheduler.activeBytes = m_resourceMemory.activeDecodedBytes;
             m_resourceScheduler.peakActiveBytes = m_resourceScheduler.peakActiveBytes > m_resourceScheduler.activeBytes
                 ? m_resourceScheduler.peakActiveBytes : m_resourceScheduler.activeBytes;
@@ -12990,18 +13169,18 @@ void NavigatorApp::refreshImageResourceMetadata()
         record.displayHeight = displayHeight > 65535 ? 65535u : static_cast<uint16_t>(displayHeight);
         record.displayPixelBytes = static_cast<uint64_t>(displayWidth) * displayHeight * 4ull;
         record.blockY = m_window ? blockY(i, maxWidth) : -1;
-        if (record.blockY >= 0 && m_window) {
-            const int viewportBottom = m_window->h - STATUS_H - 8;
-            const int blockBottom = record.blockY + displayHeight;
-            if (blockBottom > CONTENT_Y && record.blockY < viewportBottom) {
-                record.viewportRelation = static_cast<uint8_t>(gxos::apps::NavigatorResourceViewportRelation::InitialViewport);
-                record.likelyVisible = 1u;
-            } else if (blockBottom <= CONTENT_Y) {
-                record.viewportRelation = static_cast<uint8_t>(gxos::apps::NavigatorResourceViewportRelation::AboveInitialViewport);
-            } else {
-                record.viewportRelation = static_cast<uint8_t>(gxos::apps::NavigatorResourceViewportRelation::BelowInitialViewport);
-            }
-        }
+        record.viewportTop = m_resourceScheduler.viewportTop;
+        record.viewportBottom = m_resourceScheduler.viewportBottom;
+        record.blockTop = reference ? reference->blockTop : record.blockY;
+        record.blockBottom = reference ? reference->blockBottom :
+            (record.blockY >= 0 ? record.blockY + displayHeight : -1);
+        record.distanceFromViewport = reference ? reference->distanceFromViewport : -1;
+        record.priorityBeforeViewport = reference ? reference->priorityBeforeViewport : 0;
+        record.admittedDueToViewportPriority = reference ? reference->admittedDueToViewportPriority : 0;
+        record.viewportRelation = reference ? reference->viewportClass :
+            static_cast<uint8_t>(gxos::apps::NavigatorResourceViewportRelation::Unknown);
+        record.likelyVisible = record.viewportRelation ==
+            static_cast<uint8_t>(gxos::apps::NavigatorResourceViewportRelation::Visible) ? 1u : 0u;
         KernelHttpUrl resourceUrl;
         if (nav_starts_with(block.url, "https://")) {
             if (parse_https_url_kernel(block.url, &resourceUrl))
@@ -13065,6 +13244,27 @@ void NavigatorApp::refreshImageResourceMetadata()
     serial::puts(" released_decoded_bytes="); serial_put_dec64(m_resourceMemory.releasedDecodedBytes);
     serial::puts(" total_loaded_decoded_bytes="); serial_put_dec64(m_resourceScheduler.totalLoadedDecodedBytes);
     serial::puts(" total_denied_requested_bytes="); serial_put_dec64(m_resourceScheduler.totalDeniedRequestedBytes);
+    serial::puts(" viewport_top="); serial_put_dec(m_resourceScheduler.viewportTop);
+    serial::puts(" viewport_bottom="); serial_put_dec(m_resourceScheduler.viewportBottom);
+    serial::puts(" viewport_width="); serial_put_dec(m_resourceScheduler.viewportWidth);
+    serial::puts(" viewport_height="); serial_put_dec(m_resourceScheduler.viewportHeight);
+    serial::puts(" initial_scroll="); serial_put_dec(m_resourceScheduler.initialScrollOffset);
+    serial::puts(" preload_margin="); serial_put_dec(m_resourceScheduler.preloadMargin);
+    serial::puts(" visible_refs="); serial_put_dec(m_resourceScheduler.visibleReferences);
+    serial::puts(" near_refs="); serial_put_dec(m_resourceScheduler.nearReferences);
+    serial::puts(" far_refs="); serial_put_dec(m_resourceScheduler.farReferences);
+    serial::puts(" unknown_viewport_refs="); serial_put_dec(m_resourceScheduler.unknownViewportReferences);
+    serial::puts(" visible_loaded="); serial_put_dec(m_resourceScheduler.visibleLoaded);
+    serial::puts(" visible_budget_denied="); serial_put_dec(m_resourceScheduler.visibleBudgetDenied);
+    serial::puts(" near_loaded="); serial_put_dec(m_resourceScheduler.nearLoaded);
+    serial::puts(" near_budget_denied="); serial_put_dec(m_resourceScheduler.nearBudgetDenied);
+    serial::puts(" far_loaded="); serial_put_dec(m_resourceScheduler.farLoaded);
+    serial::puts(" far_budget_denied="); serial_put_dec(m_resourceScheduler.farBudgetDenied);
+    serial::puts(" visible_priority_admissions="); serial_put_dec(m_resourceScheduler.visiblePriorityAdmissions);
+    serial::puts(" offscreen_budget_denied="); serial_put_dec(m_resourceScheduler.offscreenBudgetDenied);
+    serial::puts(" decoded_bytes_visible="); serial_put_dec64(m_resourceScheduler.decodedBytesVisible);
+    serial::puts(" decoded_bytes_near="); serial_put_dec64(m_resourceScheduler.decodedBytesNear);
+    serial::puts(" decoded_bytes_far="); serial_put_dec64(m_resourceScheduler.decodedBytesFar);
     serial::puts("\n");
     for (uint32_t bucket = 0; bucket < 6; ++bucket) {
         serial::puts("[NAVIGATOR-RESOURCE] size_bucket="); serial_put_dec(bucket);
@@ -13089,9 +13289,16 @@ void NavigatorApp::refreshImageResourceMetadata()
         serial::puts(" headroom="); serial_put_dec64(record.budgetHeadroomBefore);
         serial::puts(" display="); serial_put_dec(record.displayWidth); serial::putc('x'); serial_put_dec(record.displayHeight);
         serial::puts(" display_rgba="); serial_put_dec64(record.displayPixelBytes);
+        serial::puts(" viewport_top="); serial_put_dec(record.viewportTop);
+        serial::puts(" viewport_bottom="); serial_put_dec(record.viewportBottom);
+        serial::puts(" block_top="); serial_put_dec(record.blockTop);
+        serial::puts(" block_bottom="); serial_put_dec(record.blockBottom);
+        serial::puts(" distance="); serial_put_dec(record.distanceFromViewport);
         serial::puts(" y="); serial_put_dec((uint32_t)(record.blockY < 0 ? 0 : record.blockY));
         serial::puts(" viewport="); serial_put_dec(record.viewportRelation);
         serial::puts(" visible="); serial::puts(record.likelyVisible ? "yes" : "no");
+        serial::puts(" priority_before="); serial_put_dec(record.priorityBeforeViewport);
+        serial::puts(" admitted_due_to_viewport="); serial::puts(record.admittedDueToViewportPriority ? "yes" : "no");
         serial::puts(" duplicate="); serial::puts(record.duplicate ? "yes" : "no");
         serial::puts(" owner="); serial_put_dec(record.sharedOwnerOrdinal);
         serial::puts(" reason="); serial::puts(record.reason);
@@ -14231,6 +14438,10 @@ void NavigatorApp::loadUrl(const char* url)
     char normalized[MAX_URL_LEN];
     normalizeUrl(url && url[0] ? url : "about:navigator", normalized, MAX_URL_LEN);
     beginLifecycleGeneration(normalized);
+    // Phase 8T classifies the document against the normal top-of-document
+    // viewport.  Keep the prior generation's scroll position only in its
+    // lifecycle record; it must not affect this generation's admission pass.
+    m_scrollY = 0;
     m_loading = true;
     m_throbberFrame = 0;
     m_loadingStartTick = (uint32_t)kernel::pit::ticks();
@@ -14497,6 +14708,7 @@ void NavigatorApp::focusNextFormBlock()
 
 int NavigatorApp::blockHeight(const DocBlock& block, int maxChars) const
 {
+    if (block.style.absolutePosition) return 0;
     int lines = navigatorWrappedLineCount(block.text, maxChars, block.style);
     if (block.kind == BLOCK_IMAGE) {
         int imageH = block.height > 0 ? block.height : (block.naturalHeight > 0 ? block.naturalHeight : 64);
@@ -14752,6 +14964,11 @@ void NavigatorApp::selectAllDocumentText()
 
 int NavigatorApp::blockY(int index, int maxChars) const
 {
+    if (index >= 0 && index < m_blockCount && m_blocks[index].style.absolutePosition &&
+        m_blocks[index].style.positionTop >= 0) {
+        return CONTENT_Y + 12 + css_margin_top_or(m_bodyStyle, 0) +
+            m_blocks[index].style.positionTop - m_scrollY;
+    }
     int y = CONTENT_Y + 12 + css_margin_top_or(m_bodyStyle, 0) - m_scrollY;
     for (int i = 0; i < index && i < m_blockCount; ++i) {
         y += blockHeight(m_blocks[i], maxChars);
@@ -18931,21 +19148,40 @@ static bool printNavigatorHttpSmokeCases()
     httpOk = printNavigatorFormsLitePostSmokeCase("forms_post_redirect_hostname", "http://10.0.2.2:8080/forms/post-redirect-hostname",
         "http://guidexos.test:8080/forms/post-echo", 1, "10.0.2.2") && httpOk;
     char persistentToken[32];
-    const bool persistentMarkerEnabled = nav_smoke_read_vfs_token_file(
+    auto persistentTokenIsEnabled = [](const char* primaryPath, const char* compatPath,
+                                       char* token, int tokenSize) {
+        if (!nav_smoke_read_vfs_token_file(primaryPath, compatPath, token, tokenSize)) {
+            return false;
+        }
+        return nav_smoke_text_equals_insensitive(token, "enabled") ||
+            nav_smoke_text_equals_insensitive(token, "1") ||
+            nav_smoke_text_equals_insensitive(token, "true") ||
+            nav_smoke_text_equals_insensitive(token, "yes");
+    };
+    bool persistentMarkerEnabled = persistentTokenIsEnabled(
         kNavigatorPersistentNavigationPath, "/config/navigator/PERSNAV.TXT",
-        persistentToken, sizeof(persistentToken)) &&
-        (nav_smoke_text_equals_insensitive(persistentToken, "enabled") ||
-         nav_smoke_text_equals_insensitive(persistentToken, "1") ||
-         nav_smoke_text_equals_insensitive(persistentToken, "true") ||
-         nav_smoke_text_equals_insensitive(persistentToken, "yes"));
+        persistentToken, sizeof(persistentToken));
+    if (!persistentMarkerEnabled) {
+        // The boot ramdisk is mounted at /system and then exposed through a
+        // VFS alias.  Retry the canonical boot-image path when a generated
+        // FAT directory exposes only the alias's partial name view.
+        persistentMarkerEnabled = persistentTokenIsEnabled(
+            "/system/config/navigator/persistent-navigation-enabled.txt",
+            "/system/config/navigator/PERSNAV.TXT",
+            persistentToken, sizeof(persistentToken));
+    }
+    if (!persistentMarkerEnabled) {
+        persistentMarkerEnabled = persistentTokenIsEnabled(
+            "/config/navigator/00PERSNAV.TXT",
+            "/system/config/navigator/00PERSNAV.TXT",
+            persistentToken, sizeof(persistentToken));
+    }
     // The ProductionValidated public-pilot token is read through the shared
     // TLS policy loader before this smoke report.  Use it as a second, stable
-    // trigger for the dedicated public lifecycle lane because the FAT alias
-    // can expose only part of a generated config directory to the bare-metal
-    // Navigator VFS.  This keeps the lifecycle proof tied to the explicit
-    // public-pilot scenario without changing HTTPS or scheduler policy.
-    const bool persistentPolicyEnabled = publicPolicy.broadPublicHttpsEnabled &&
-        publicPolicy.publicHttpsPilotRequested;
+    // trigger for the dedicated deterministic lifecycle lane.  The explicit
+    // pilot token selects the smoke sequence; broad public trust still gates
+    // the external NASA/Wikipedia/example.com requests inside that sequence.
+    const bool persistentPolicyEnabled = publicPolicy.publicHttpsPilotRequested;
     const bool persistentEnabled = persistentMarkerEnabled || persistentPolicyEnabled;
     serial::puts("[NAVIGATOR-SMOKE] persistent_navigation.enabled=");
     serial::puts(persistentEnabled ? "yes\n" : "no\n");

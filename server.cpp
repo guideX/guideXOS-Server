@@ -3846,6 +3846,48 @@ static std::string navigatorHostedSmokeDiagnostic() {
         contains(remoteJpegPageInfo, "JPEG loaded: 1"),
         "expected one loaded remote JPEG");
 
+    bool viewportPressureLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet(
+        "http://127.0.0.1:8080/navigator-smoke/generated/VPRESS.HTM");
+    const std::string viewportPressureReport = gxos::apps::Navigator::SmokePageDiagnostics();
+    auto viewportMetric = [&](const char* name) {
+        const std::string prefix = std::string(name) + "=";
+        const size_t start = viewportPressureReport.find(prefix);
+        if (start == std::string::npos) return std::string("missing");
+        const size_t valueStart = start + prefix.size();
+        const size_t valueEnd = viewportPressureReport.find_first_of("\r\n ", valueStart);
+        return viewportPressureReport.substr(valueStart, valueEnd == std::string::npos
+            ? std::string::npos : valueEnd - valueStart);
+    };
+    add("hosted viewport-pressure admission prioritizes visible and near images",
+        viewportPressureLoaded &&
+        contains(viewportPressureReport, "viewport_width=872") &&
+        contains(viewportPressureReport, "viewport_height=528") &&
+        contains(viewportPressureReport, "initial_scroll_offset=0") &&
+        contains(viewportPressureReport, "visible_references=4") &&
+        contains(viewportPressureReport, "near_references=4") &&
+        contains(viewportPressureReport, "far_references=4") &&
+        contains(viewportPressureReport, "visible_loaded=4") &&
+        contains(viewportPressureReport, "near_loaded=4") &&
+        contains(viewportPressureReport, "far_loaded=2") &&
+        contains(viewportPressureReport, "far_budget_denied=2") &&
+        contains(viewportPressureReport, "decoded_bytes_visible=16777216") &&
+        contains(viewportPressureReport, "active_image_bytes=67108864") &&
+        contains(viewportPressureReport, "visible_priority_admissions=8"),
+        std::string("viewport pressure metrics=") +
+        "refs:" + viewportMetric("resource_total_references") +
+        ",visible:" + viewportMetric("visible_references") +
+        ",near:" + viewportMetric("near_references") +
+        ",far:" + viewportMetric("far_references") +
+        ",loaded:" + viewportMetric("resource_loaded") +
+        ",visible_loaded:" + viewportMetric("visible_loaded") +
+        ",near_loaded:" + viewportMetric("near_loaded") +
+        ",far_loaded:" + viewportMetric("far_loaded") +
+        ",far_denied:" + viewportMetric("far_budget_denied") +
+        ",active_bytes:" + viewportMetric("active_image_bytes") +
+        ",visible_admissions:" + viewportMetric("visible_priority_admissions") +
+        ",viewport:" + viewportMetric("viewport_top") + ".." + viewportMetric("viewport_bottom") +
+        ",report=" + summarizeText(viewportPressureReport, 500));
+
     bool httpsRemotePngLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("https://localhost:8443/navigator-smoke/image-relative.html");
     bool httpsRemotePngPageInfoLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("about:page-info");
     std::string httpsRemotePngPageInfo = gxos::apps::Navigator::SmokeCurrentDocumentText();
