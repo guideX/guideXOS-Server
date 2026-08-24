@@ -7541,6 +7541,8 @@ static void draw_right_click_menu()
 {
     if (!s_rightClickMenuOpen) return;
 
+    const DesktopTheme& theme = GetCurrentDesktopTheme();
+    const bool sciFi = theme.id == DesktopThemeId::SciFi;
     uint32_t menuH;
     uint32_t mx;
     uint32_t my;
@@ -7548,9 +7550,14 @@ static void draw_right_click_menu()
     int hoveredItem = s_rightClickHover;
 
     // Background with shadow
-    framebuffer::fill_rect(mx + 2, my + 2, kContextMenuW, menuH, rgb(20, 20, 25));
-    framebuffer::fill_rect(mx, my, kContextMenuW, menuH, rgb(45, 45, 55));
-    draw_rect(mx, my, kContextMenuW, menuH, rgb(80, 90, 110));
+    framebuffer::fill_rect(mx + 2, my + 2, kContextMenuW, menuH,
+                           sciFi ? BlendDesktopThemeColor(theme.desktopBackground, theme.windowBackground, 34) : rgb(20, 20, 25));
+    const uint32_t menuBackground = sciFi
+        ? BlendDesktopThemeColor(theme.windowBackground, theme.desktopBackground, 18)
+        : rgb(45, 45, 55);
+    framebuffer::fill_rect(mx, my, kContextMenuW, menuH, menuBackground);
+    draw_rect(mx, my, kContextMenuW, menuH,
+              sciFi ? BlendDesktopThemeColor(theme.windowBorder, theme.accent, 38) : rgb(80, 90, 110));
 
     int itemCount = context_menu_item_count();
     for (int i = 0; i < itemCount; i++) {
@@ -7558,16 +7565,20 @@ static void draw_right_click_menu()
         const bool isStartMenuSeparator = s_contextMenuMode == ContextMenuMode::StartMenuApp && !s_startMenuAllProgs && i == 2;
 
         if (isStartMenuSeparator) {
-            framebuffer::fill_rect(mx + 1, itemY, kContextMenuW - 2, kContextMenuItemH, rgb(45, 45, 55));
-            hline(mx + 8, itemY + kContextMenuItemH / 2, kContextMenuW - 16, rgb(70, 70, 78));
+            framebuffer::fill_rect(mx + 1, itemY, kContextMenuW - 2, kContextMenuItemH, menuBackground);
+            hline(mx + 8, itemY + kContextMenuItemH / 2, kContextMenuW - 16,
+                  sciFi ? BlendDesktopThemeColor(theme.taskbarBorder, theme.accent, 22) : rgb(70, 70, 78));
             continue;
         }
 
         if (i == hoveredItem) {
-            framebuffer::fill_rect(mx + 1, itemY, kContextMenuW - 2, kContextMenuItemH, rgb(45, 95, 180));
-            draw_rect(mx + 2, itemY + 1, kContextMenuW - 4, kContextMenuItemH - 2, rgb(120, 165, 230));
+            framebuffer::fill_rect(mx + 1, itemY, kContextMenuW - 2, kContextMenuItemH,
+                                   sciFi ? BlendDesktopThemeColor(menuBackground, theme.accent, 38) : rgb(45, 95, 180));
+            draw_rect(mx + 2, itemY + 1, kContextMenuW - 4, kContextMenuItemH - 2,
+                      sciFi ? BlendDesktopThemeColor(theme.windowBorder, theme.accent, 58) : rgb(120, 165, 230));
         } else if (i % 2 == 0) {
-            framebuffer::fill_rect(mx + 1, itemY, kContextMenuW - 2, kContextMenuItemH, rgb(48, 48, 58));
+            framebuffer::fill_rect(mx + 1, itemY, kContextMenuW - 2, kContextMenuItemH,
+                                   sciFi ? BlendDesktopThemeColor(menuBackground, theme.windowBackground, 26) : rgb(48, 48, 58));
         }
 
         const char* label = "";
@@ -7611,11 +7622,14 @@ static void draw_right_click_menu()
         }
         if (!label || !label[0]) continue;
         draw_text(mx + 12, itemY + kContextMenuTextTopPadding,
-                  label, i == hoveredItem ? rgb(255, 255, 255) : rgb(210, 210, 225), 1);
+                  label, i == hoveredItem
+                      ? (sciFi ? theme.titleBarText : rgb(255, 255, 255))
+                      : (sciFi ? BlendDesktopThemeColor(theme.titleBarText, menuBackground, 24) : rgb(210, 210, 225)), 1);
 
         // Separator after "Auto Arrange" (index 3)
         if (s_contextMenuMode == ContextMenuMode::Desktop && i == 3) {
-            hline(mx + 4, itemY + kContextMenuItemH - kContextMenuSeparatorHeight, kContextMenuW - 8, rgb(60, 65, 80));
+            hline(mx + 4, itemY + kContextMenuItemH - kContextMenuSeparatorHeight, kContextMenuW - 8,
+                  sciFi ? BlendDesktopThemeColor(theme.taskbarBorder, theme.windowBorder, 26) : rgb(60, 65, 80));
         }
     }
 }
@@ -7912,35 +7926,47 @@ static void draw_notifications()
 {
     if (!s_notification.visible) return;
 
+    const DesktopTheme& theme = GetCurrentDesktopTheme();
+    const bool sciFi = theme.id == DesktopThemeId::SciFi;
     uint32_t toastW = 260;
     uint32_t toastH = 60;
     uint32_t toastX = s_screenW - toastW - 12;
     uint32_t toastY = 12;
 
     // Shadow
-    framebuffer::fill_rect(toastX + 3, toastY + 3, toastW, toastH, rgb(15, 15, 20));
+    framebuffer::fill_rect(toastX + 3, toastY + 3, toastW, toastH,
+                           sciFi ? BlendDesktopThemeColor(theme.desktopBackground, theme.windowBackground, 34) : rgb(15, 15, 20));
 
     // Toast background
-    framebuffer::fill_rect(toastX, toastY, toastW, toastH, rgb(50, 55, 65));
-    draw_rect(toastX, toastY, toastW, toastH, rgb(80, 100, 150));
+    const uint32_t toastBackground = sciFi
+        ? BlendDesktopThemeColor(theme.taskbarBackground, theme.windowBackground, 22)
+        : rgb(50, 55, 65);
+    framebuffer::fill_rect(toastX, toastY, toastW, toastH, toastBackground);
+    draw_rect(toastX, toastY, toastW, toastH,
+              sciFi ? BlendDesktopThemeColor(theme.windowBorder, theme.accent, 38) : rgb(80, 100, 150));
 
     // Accent bar on left
-    framebuffer::fill_rect(toastX + 1, toastY + 1, 4, toastH - 2, rgb(70, 130, 220));
+    framebuffer::fill_rect(toastX + 1, toastY + 1, 4, toastH - 2,
+                           sciFi ? BlendDesktopThemeColor(theme.accent, theme.mutedAccent, 16) : rgb(70, 130, 220));
 
     // Title
-    draw_text(toastX + 12, toastY + 10, s_notification.title, rgb(230, 230, 245), 1);
+    draw_text(toastX + 12, toastY + 10, s_notification.title,
+              sciFi ? theme.titleBarText : rgb(230, 230, 245), 1);
 
 
     // Message
-    draw_text(toastX + 12, toastY + 26, s_notification.message, rgb(170, 175, 190), 1);
+    draw_text(toastX + 12, toastY + 26, s_notification.message,
+              sciFi ? BlendDesktopThemeColor(theme.titleBarText, toastBackground, 34) : rgb(170, 175, 190), 1);
 
     // Close button (X) in top-right corner
     uint32_t closeX = toastX + toastW - 16;
     uint32_t closeY = toastY + 4;
-    draw_text(closeX, closeY, "x", rgb(160, 160, 175), 1);
+    draw_text(closeX, closeY, "x",
+              sciFi ? BlendDesktopThemeColor(theme.titleBarText, toastBackground, 38) : rgb(160, 160, 175), 1);
 
     // Timestamp
-    draw_text(toastX + 12, toastY + 42, "Just now", rgb(120, 125, 140), 1);
+    draw_text(toastX + 12, toastY + 42, "Just now",
+              sciFi ? BlendDesktopThemeColor(theme.titleBarText, theme.taskbarBackground, 50) : rgb(120, 125, 140), 1);
 }
 
 // ============================================================
@@ -7956,43 +7982,72 @@ static void draw_shutdown_dialog()
 {
     if (!s_shutdownDialogOpen) return;
 
+    const DesktopTheme& theme = GetCurrentDesktopTheme();
+    const bool sciFi = theme.id == DesktopThemeId::SciFi;
+
     // Center the dialog on screen
     uint32_t dlgX = (s_screenW - kShutdownDlgW) / 2;
     uint32_t dlgY = (s_screenH - kShutdownDlgH) / 2;
 
     // Shadow
-    framebuffer::fill_rect(dlgX + 4, dlgY + 4, kShutdownDlgW, kShutdownDlgH, rgb(10, 10, 15));
+    framebuffer::fill_rect(dlgX + 4, dlgY + 4, kShutdownDlgW, kShutdownDlgH,
+                           sciFi ? BlendDesktopThemeColor(theme.desktopBackground, theme.windowBackground, 40) : rgb(10, 10, 15));
 
     // Dialog background
-    framebuffer::fill_rect(dlgX, dlgY, kShutdownDlgW, kShutdownDlgH, rgb(45, 45, 55));
+    framebuffer::fill_rect(dlgX, dlgY, kShutdownDlgW, kShutdownDlgH,
+                           sciFi ? theme.windowBackground : rgb(45, 45, 55));
 
     // Border
-    draw_rect(dlgX, dlgY, kShutdownDlgW, kShutdownDlgH, rgb(80, 100, 140));
+    draw_rect(dlgX, dlgY, kShutdownDlgW, kShutdownDlgH,
+              sciFi ? BlendDesktopThemeColor(theme.windowBorder, theme.accent, 38) : rgb(80, 100, 140));
 
     // Title bar
-    framebuffer::fill_rect(dlgX + 1, dlgY + 1, kShutdownDlgW - 2, 28, rgb(50, 70, 110));
-    draw_text(dlgX + 12, dlgY + 8, "Confirm Shutdown", rgb(220, 225, 240), 1);
+    framebuffer::fill_rect(dlgX + 1, dlgY + 1, kShutdownDlgW - 2, 28,
+                           sciFi ? theme.titleBarBackground : rgb(50, 70, 110));
+    draw_text(dlgX + 12, dlgY + 8, "Confirm Shutdown",
+              sciFi ? theme.titleBarText : rgb(220, 225, 240), 1);
 
     // Message
-    draw_text(dlgX + 30, dlgY + 50, "Are you sure you want to", rgb(200, 205, 220), 1);
-    draw_text(dlgX + 30, dlgY + 68, "shut down the system?", rgb(200, 205, 220), 1);
+    const uint32_t dialogBodyText = sciFi
+        ? BlendDesktopThemeColor(theme.titleBarText, theme.windowBackground, 24)
+        : rgb(200, 205, 220);
+    draw_text(dlgX + 30, dlgY + 50, "Are you sure you want to", dialogBodyText, 1);
+    draw_text(dlgX + 30, dlgY + 68, "shut down the system?", dialogBodyText, 1);
 
     // Buttons
     uint32_t btnY = dlgY + kShutdownDlgH - kShutdownBtnH - 16;
     uint32_t yesX = dlgX + kShutdownDlgW / 2 - kShutdownBtnW - 10;
     uint32_t noX = dlgX + kShutdownDlgW / 2 + 10;
 
-    // Yes button
-    uint32_t yesBg = (s_shutdownDialogHover == 0) ? rgb(70, 120, 180) : rgb(50, 90, 150);
+    // Yes button retains the destructive-action red semantic in Sci-Fi.
+    const uint32_t dangerBase = sciFi
+        ? BlendDesktopThemeColor(theme.windowBackground, rgb(140, 50, 50), 68)
+        : 0;
+    uint32_t yesBg = sciFi
+        ? (s_shutdownDialogHover == 0
+            ? BlendDesktopThemeColor(dangerBase, rgb(180, 80, 80), 28)
+            : dangerBase)
+        : ((s_shutdownDialogHover == 0) ? rgb(70, 120, 180) : rgb(50, 90, 150));
     framebuffer::fill_rect(yesX, btnY, kShutdownBtnW, kShutdownBtnH, yesBg);
-    draw_rect(yesX, btnY, kShutdownBtnW, kShutdownBtnH, rgb(100, 140, 200));
-    draw_text_centered(yesX, btnY, kShutdownBtnW, kShutdownBtnH, "Yes", rgb(220, 230, 250), 1);
+    draw_rect(yesX, btnY, kShutdownBtnW, kShutdownBtnH,
+              sciFi ? BlendDesktopThemeColor(theme.windowBorder, rgb(180, 80, 80), 62) : rgb(100, 140, 200));
+    draw_text_centered(yesX, btnY, kShutdownBtnW, kShutdownBtnH, "Yes",
+                       sciFi ? BlendDesktopThemeColor(theme.titleBarText, rgb(255, 190, 190), 24) : rgb(220, 230, 250), 1);
 
-    // No button
-    uint32_t noBg = (s_shutdownDialogHover == 1) ? rgb(90, 60, 60) : rgb(70, 50, 50);
+    // No button remains the neutral/cancel action in Sci-Fi.
+    const uint32_t neutralBase = sciFi
+        ? BlendDesktopThemeColor(theme.taskbarBackground, theme.windowBackground, 34)
+        : 0;
+    uint32_t noBg = sciFi
+        ? (s_shutdownDialogHover == 1
+            ? BlendDesktopThemeColor(neutralBase, theme.accent, 28)
+            : neutralBase)
+        : ((s_shutdownDialogHover == 1) ? rgb(90, 60, 60) : rgb(70, 50, 50));
     framebuffer::fill_rect(noX, btnY, kShutdownBtnW, kShutdownBtnH, noBg);
-    draw_rect(noX, btnY, kShutdownBtnW, kShutdownBtnH, rgb(140, 90, 90));
-    draw_text_centered(noX, btnY, kShutdownBtnW, kShutdownBtnH, "No", rgb(240, 210, 210), 1);
+    draw_rect(noX, btnY, kShutdownBtnW, kShutdownBtnH,
+              sciFi ? BlendDesktopThemeColor(theme.taskbarBorder, theme.windowBorder, 34) : rgb(140, 90, 90));
+    draw_text_centered(noX, btnY, kShutdownBtnW, kShutdownBtnH, "No",
+                       sciFi ? BlendDesktopThemeColor(theme.titleBarText, theme.taskbarBackground, 24) : rgb(240, 210, 210), 1);
 }
 
 // Hit test shutdown dialog buttons: returns 0=Yes, 1=No, -1=none
