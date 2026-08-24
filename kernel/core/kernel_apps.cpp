@@ -7172,7 +7172,9 @@ NavigatorApp::NavigatorApp()
       m_bookmarksBtnId(-1), m_addBookmarkBtnId(-1),
       m_loading(false), m_throbberFrame(0), m_loadingStartTick(0),
       m_documentGeneration(0),
-      m_focusedFormBlock(-1), m_formCaret(0)
+      m_focusedFormBlock(-1), m_formCaret(0),
+      m_lifecycleGenerationCount(0), m_currentLifecycleGenerationIndex(0),
+      m_injectNextImageFailure(false)
 {
     for (int i = 0; i < MAX_BLOCKS; ++i) m_imagePaintLogged[i] = false;
     for (uint32_t i = 0; i < gxos::apps::kNavigatorMaxResourceReferences; ++i)
@@ -7184,6 +7186,8 @@ NavigatorApp::NavigatorApp()
     m_resourceTelemetryCount = 0;
     m_resourceScheduler = gxos::apps::NavigatorResourceSchedulerStats{};
     m_resourceMemory.reset();
+    for (uint32_t i = 0; i < MAX_LIFECYCLE_GENERATIONS; ++i)
+        m_lifecycleGenerations[i] = NavigationGenerationRecord{};
     strcopy(m_status, "Ready", MAX_STATUS_LEN);
     strcopy(m_currentUrl, "about:navigator", MAX_URL_LEN);
     strcopy(m_title, "guideXOS Navigator", MAX_TITLE_LEN_NAV);
@@ -7414,6 +7418,9 @@ void NavigatorApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h)
     appDrawText(x + 10, y + h - STATUS_H + 8, statusLine, rgb(222, 226, 236));
 }
 
+static void serial_put_dec64(uint64_t value);
+static bool nav_starts_with(const char* value, const char* prefix);
+
 bool NavigatorApp::smokeTypographyPhase7A()
 {
     NavigatorApp app;
@@ -7520,6 +7527,290 @@ bool NavigatorApp::smokeTypographyPhase7A()
 
     app.m_window = nullptr;
     return pass;
+}
+
+bool NavigatorApp::smokePersistentNavigationLifecycle()
+{
+    serial::puts("[NAVIGATOR-PERSISTENT] mode=single_boot_single_navigator_instance\n");
+    NavigatorApp* app = new NavigatorApp();
+    if (!app) {
+        serial::puts("[NAVIGATOR-PERSISTENT] result=FAIL reason=instance_allocation\n");
+        return false;
+    }
+
+    // The smoke owns exactly one heap Navigator for the complete sequence.
+    // The window is only a bounded draw target; no compositor registration is
+    // needed for this non-interactive proof.
+    app::KernelWindow smokeWindow{};
+    smokeWindow.w = 920;
+    smokeWindow.h = 640;
+    app->m_window = &smokeWindow;
+    app->m_state = app::AppState::Running;
+
+    bool deterministicOk = true;
+    bool publicOk = true;
+    bool publicEnabled = false;
+
+    auto emitRecord = [&](const char* stage, bool expected) -> bool {
+        app->drawDocument(0, 0, smokeWindow.w, smokeWindow.h);
+        app->finishLifecycleGeneration();
+        if (app->m_lifecycleGenerationCount == 0) {
+            serial::puts("[NAVIGATOR-PERSISTENT] result=FAIL reason=no_generation_record\n");
+            return false;
+        }
+        const NavigationGenerationRecord& record =
+            app->m_lifecycleGenerations[app->m_currentLifecycleGenerationIndex];
+        char safeTitle[96];
+        char safeVisible[96];
+        nav_copy_serial_safe_text(record.title, safeTitle, sizeof(safeTitle));
+        nav_copy_serial_safe_text(record.visibleText, safeVisible, sizeof(safeVisible));
+        serial::puts("[NAVIGATOR-PERSISTENT] stage=");
+        serial::puts(stage ? stage : "unknown");
+        serial::puts(" generation=");
+        serial_put_dec(record.generation);
+        serial::puts(" requested=");
+        serial::puts(record.requestedUrl);
+        serial::puts(" final=");
+        serial::puts(record.finalUrl[0] ? record.finalUrl : "(none)");
+        serial::puts(" title=");
+        serial::puts(safeTitle[0] ? safeTitle : "(none)");
+        serial::puts("\n[NAVIGATOR-PERSISTENT] stage_visible=");
+        serial::puts(safeVisible[0] ? safeVisible : "(none)");
+        serial::puts(" status=");
+        serial_put_dec((uint32_t)(app->m_metaHttpStatusCode > 0 ? app->m_metaHttpStatusCode : 0));
+        serial::puts(" blocks=");
+        serial_put_dec(record.documentBlocks);
+        serial::puts(" decoded_html=");
+        serial_put_dec(record.decodedDocumentBytes);
+        serial::puts("\n[NAVIGATOR-PERSISTENT] stage_transition released=");
+        serial_put_dec(record.releasedResources);
+        serial::puts(" released_bytes=");
+        serial_put_dec64(record.releasedBytes);
+        serial::puts(" active_before=");
+        serial_put_dec(record.activeImagesBefore);
+        serial::puts(" active_bytes_before=");
+        serial_put_dec64(record.activeBytesBefore);
+        serial::puts(" active_after_release=");
+        serial_put_dec(record.activeImagesAfterRelease);
+        serial::puts(" active_bytes_after_release=");
+        serial_put_dec64(record.activeBytesAfterRelease);
+        serial::puts(" stale_refs=");
+        serial_put_dec(record.staleReferencesAfterRelease);
+        serial::puts(" stale_duplicates=");
+        serial_put_dec(record.staleDuplicateOwnersAfterRelease);
+        serial::puts(" stale_pointers=");
+        serial_put_dec(record.staleImagePointersAfterRelease);
+        serial::puts("\n[NAVIGATOR-PERSISTENT] stage_scheduler refs=");
+        serial_put_dec(record.resourceReferences);
+        serial::puts(" unique=");
+        serial_put_dec(record.uniqueReferences);
+        serial::puts(" duplicate=");
+        serial_put_dec(record.duplicateReferences);
+        serial::puts(" candidates=");
+        serial_put_dec(record.schedulerCandidates);
+        serial::puts(" loaded=");
+        serial_put_dec(record.loadedResources);
+        serial::puts(" failed=");
+        serial_put_dec(record.failedResources);
+        serial::puts(" budget_denied=");
+        serial_put_dec(record.budgetDenials);
+        serial::puts(" duplicate_network_fetches=");
+        serial_put_dec(record.duplicateNetworkFetches);
+        serial::puts(" active_images=");
+        serial_put_dec(record.activeImages);
+        serial::puts(" active_bytes=");
+        serial_put_dec64(record.activeBytes);
+        serial::puts(" peak_bytes=");
+        serial_put_dec64(record.peakBytes);
+        serial::puts(" denied_bytes=");
+        serial_put_dec64(record.deniedBytes);
+        serial::puts(" encoded_failures=");
+        serial_put_dec64(record.encodedBodyFailures);
+        serial::puts(" injected_failure=");
+        serial::puts(record.injectedImageFailure ? "yes" : "no");
+        serial::puts("\n[NAVIGATOR-PERSISTENT] stage_buckets loaded=");
+        for (uint32_t bucket = 0; bucket < 6; ++bucket) {
+            if (bucket) serial::putc(',');
+            serial_put_dec(record.loadedSizeBuckets[bucket]);
+        }
+        serial::puts(" denied=");
+        for (uint32_t bucket = 0; bucket < 6; ++bucket) {
+            if (bucket) serial::putc(',');
+            serial_put_dec(record.deniedSizeBuckets[bucket]);
+        }
+        const bool invariantOk = record.activeBytes <= gxos::apps::kNavigatorDecodedImageBudgetBytes &&
+            record.activeImages <= gxos::apps::kNavigatorMaxActiveResources &&
+            record.resourceReferences <= gxos::apps::kNavigatorMaxResourceReferences &&
+            record.activeImagesAfterRelease == 0 && record.activeBytesAfterRelease == 0 &&
+            record.staleReferencesAfterRelease == 0 &&
+            record.staleDuplicateOwnersAfterRelease == 0 &&
+            record.staleImagePointersAfterRelease == 0 &&
+            record.parserCompleted && record.documentCreated;
+        const bool pass = expected && invariantOk;
+        serial::puts("\n[NAVIGATOR-PERSISTENT] stage_result=");
+        serial::puts(pass ? "PASS\n" : "FAIL\n");
+        return pass;
+    };
+
+    auto latest = [&]() -> const NavigationGenerationRecord& {
+        return app->m_lifecycleGenerations[app->m_currentLifecycleGenerationIndex];
+    };
+    auto startsWith = [](const char* value, const char* prefix) {
+        return value && prefix && nav_starts_with(value, prefix);
+    };
+    auto transitionReleased = [&](const NavigationGenerationRecord& record) {
+        return record.releasedResources > 0 && record.releasedBytes > 0 &&
+            record.activeImagesAfterRelease == 0 && record.activeBytesAfterRelease == 0 &&
+            record.staleReferencesAfterRelease == 0 &&
+            record.staleDuplicateOwnersAfterRelease == 0 &&
+            record.staleImagePointersAfterRelease == 0;
+    };
+    auto transitionClearedOrNoop = [&](const NavigationGenerationRecord& record) {
+        const bool cleared = record.activeImagesAfterRelease == 0 && record.activeBytesAfterRelease == 0 &&
+            record.staleReferencesAfterRelease == 0 &&
+            record.staleDuplicateOwnersAfterRelease == 0 &&
+            record.staleImagePointersAfterRelease == 0;
+        const bool released = record.releasedResources > 0 && record.releasedBytes > 0;
+        const bool noOp = record.releasedResources == 0 && record.releasedBytes == 0 &&
+            record.activeImagesBefore == 0 && record.activeBytesBefore == 0;
+        return cleared && (released || noOp);
+    };
+
+    app->navigateTo("http://10.0.2.2:8080/navigator-smoke/generated/HEAVY.HTM");
+    bool heavyExpected = true;
+    const NavigationGenerationRecord* heavyFirst = nullptr;
+    heavyExpected = emitRecord("deterministic_heavy_1", true);
+    if (heavyExpected) {
+        heavyFirst = &latest();
+        heavyExpected = heavyFirst->resourceReferences >= 32 &&
+            heavyFirst->uniqueReferences >= 5 && heavyFirst->duplicateReferences > 0 &&
+            heavyFirst->loadedResources >= 4 && heavyFirst->budgetDenials > 0 &&
+            heavyFirst->activeBytes > 0 && heavyFirst->peakBytes >= heavyFirst->activeBytes &&
+            heavyFirst->imagePaintObserved;
+    }
+    serial::puts("[NAVIGATOR-PERSISTENT] deterministic.heavy_1.result=");
+    serial::puts(heavyExpected ? "PASS\n" : "FAIL\n");
+    deterministicOk = heavyExpected;
+    const uint32_t firstDenials = heavyFirst ? heavyFirst->budgetDenials : 0;
+
+    app->navigateTo("http://10.0.2.2:8080/navigator-smoke/generated/TINY.HTM");
+    bool tinyAfterFirstExpected = emitRecord("deterministic_tiny_1", true);
+    if (tinyAfterFirstExpected) tinyAfterFirstExpected = transitionReleased(latest()) &&
+        latest().resourceReferences == 0 && latest().activeImages == 0 && latest().activeBytes == 0;
+    serial::puts("[NAVIGATOR-PERSISTENT] deterministic.tiny_after_heavy.result=");
+    serial::puts(tinyAfterFirstExpected ? "PASS\n" : "FAIL\n");
+    deterministicOk = deterministicOk && tinyAfterFirstExpected;
+
+    app->navigateTo("http://10.0.2.2:8080/navigator-smoke/generated/HEAVY.HTM");
+    bool heavySecondExpected = emitRecord("deterministic_heavy_2", true);
+    const NavigationGenerationRecord* heavySecond = nullptr;
+    if (heavySecondExpected) {
+        heavySecond = &latest();
+        heavySecondExpected = heavySecond->resourceReferences >= 32 &&
+            heavySecond->uniqueReferences == (heavyFirst ? heavyFirst->uniqueReferences : 0) &&
+            heavySecond->duplicateReferences == (heavyFirst ? heavyFirst->duplicateReferences : 0) &&
+            heavySecond->loadedResources == (heavyFirst ? heavyFirst->loadedResources : 0) &&
+            heavySecond->budgetDenials == firstDenials &&
+            heavySecond->activeBytes == (heavyFirst ? heavyFirst->activeBytes : 0) &&
+            heavySecond->imagePaintObserved;
+    }
+    serial::puts("[NAVIGATOR-PERSISTENT] deterministic.heavy_2.result=");
+    serial::puts(heavySecondExpected ? "PASS\n" : "FAIL\n");
+    deterministicOk = deterministicOk && heavySecondExpected;
+
+    app->m_injectNextImageFailure = true;
+    app->navigateTo("http://10.0.2.2:8080/navigator-smoke/generated/FAIL.HTM");
+    bool injectedExpected = emitRecord("deterministic_injected_failure", true);
+    if (injectedExpected) injectedExpected = latest().injectedImageFailure &&
+        latest().failedResources > 0 && latest().activeImages == 0 && latest().activeBytes == 0;
+    serial::puts("[NAVIGATOR-PERSISTENT] deterministic.injected_failure.result=");
+    serial::puts(injectedExpected ? "PASS\n" : "FAIL\n");
+    deterministicOk = deterministicOk && injectedExpected;
+
+    app->navigateTo("http://10.0.2.2:8080/navigator-smoke/generated/TINY.HTM");
+    bool tinyAfterFailureExpected = emitRecord("deterministic_tiny_after_failure", true);
+    if (tinyAfterFailureExpected) tinyAfterFailureExpected = transitionClearedOrNoop(latest()) &&
+        latest().activeImages == 0 && latest().activeBytes == 0;
+    serial::puts("[NAVIGATOR-PERSISTENT] deterministic.tiny_after_failure.result=");
+    serial::puts(tinyAfterFailureExpected ? "PASS\n" : "FAIL\n");
+    deterministicOk = deterministicOk && tinyAfterFailureExpected;
+
+    app->navigateTo("http://10.0.2.2:8080/navigator-smoke/generated/HEAVY.HTM");
+    bool heavyRecoveryExpected = emitRecord("deterministic_heavy_after_failure", true);
+    if (heavyRecoveryExpected) heavyRecoveryExpected = latest().budgetDenials == firstDenials &&
+        latest().activeBytes == (heavyFirst ? heavyFirst->activeBytes : 0) &&
+        latest().imagePaintObserved;
+    serial::puts("[NAVIGATOR-PERSISTENT] deterministic.heavy_after_failure.result=");
+    serial::puts(heavyRecoveryExpected ? "PASS\n" : "FAIL\n");
+    deterministicOk = deterministicOk && heavyRecoveryExpected;
+    serial::puts("[NAVIGATOR-PERSISTENT] deterministic.result=");
+    serial::puts(deterministicOk ? "PASS\n" : "FAIL\n");
+
+    const gxos::GxosValidatedHttpsPolicyInfo publicPolicy = gxos::gxos_validated_https_policy_info();
+    publicEnabled = publicPolicy.broadPublicHttpsEnabled;
+    serial::puts("[NAVIGATOR-PERSISTENT] public.sequence=NASA,Wikipedia,example.com,NASA\n");
+    serial::puts("[NAVIGATOR-PERSISTENT] public.enabled=");
+    serial::puts(publicEnabled ? "yes\n" : "no\n");
+    if (publicEnabled) {
+        static const char* kPublicUrls[] = {
+            "https://www.nasa.gov/",
+            "https://en.wikipedia.org/",
+            "https://example.com/",
+            "https://www.nasa.gov/"
+        };
+        static const char* kPublicPrefixes[] = {
+            "https://www.nasa.gov/",
+            "https://en.wikipedia.org/",
+            "https://example.com/",
+            "https://www.nasa.gov/"
+        };
+        static const char* kPublicStages[] = {
+            "public_nasa_1",
+            "public_wikipedia",
+            "public_example",
+            "public_nasa_2"
+        };
+        for (uint32_t i = 0; i < 4; ++i) {
+            app->navigateTo(kPublicUrls[i]);
+            bool expected = emitRecord(kPublicStages[i], true);
+            const NavigationGenerationRecord& record = latest();
+            expected = expected && startsWith(record.finalUrl, kPublicPrefixes[i]) &&
+                app->m_metaHttpStatusCode == 200 && app->m_metaTlsUsed &&
+                app->m_metaTlsValidated && app->m_metaTlsHostnameValidated;
+            serial::puts("[NAVIGATOR-PERSISTENT] public.stage=");
+            serial::puts(kPublicStages[i]);
+            serial::puts(" tls=");
+            serial::puts(app->m_metaTlsUsed ? "yes" : "no");
+            serial::puts(" tls_validated=");
+            serial::puts(app->m_metaTlsValidated ? "yes" : "no");
+            serial::puts(" hostname_validated=");
+            serial::puts(app->m_metaTlsHostnameValidated ? "yes" : "no");
+            serial::puts(" sni=");
+            serial::puts(app->m_metaTlsSniHost[0] ? app->m_metaTlsSniHost : "(none)");
+            serial::puts(" origin=");
+            serial::puts(app->m_metaTlsHostname[0] ? app->m_metaTlsHostname : "(none)");
+            serial::puts(" result=");
+            serial::puts(expected ? "PASS\n" : "FAIL\n");
+            publicOk = publicOk && expected;
+        }
+    } else {
+        serial::puts("[NAVIGATOR-PERSISTENT] public.result=SKIP policy_disabled\n");
+    }
+    if (publicEnabled) {
+        serial::puts("[NAVIGATOR-PERSISTENT] public.result=");
+        serial::puts(publicOk ? "PASS\n" : "EXTERNAL_BLOCKED_OR_FAILED\n");
+    }
+
+    // Release the final document before ending the one-instance smoke.  The
+    // destructor repeats the idempotent release guard, so this cannot double
+    // free an owner or leave a decoded-byte reservation charged.
+    app->releaseImageResources();
+    app->m_window = nullptr;
+    delete app;
+    const bool result = deterministicOk && (!publicEnabled || publicOk);
+    serial::puts("[NAVIGATOR-PERSISTENT] result=");
+    serial::puts(result ? "PASS\n" : "FAIL\n");
+    return result;
 }
 
 void NavigatorApp::onMouseMove(int x, int y)
@@ -9554,6 +9845,7 @@ static const char* kNavigatorPublicPilotHttpsHost = "public-pilot.guidexos.test"
 static const char* kNavigatorPublicPilotPathPrefix = "/navigator-public-pilot/";
 static const char* kNavigatorHttpsSmokeFaultModePath = "/config/navigator/https-fault-mode.txt";
 static const char* kNavigatorHttpsSmokeFaultModeCompatPath = "/config/navigator/HTTPSFLT.TXT";
+static const char* kNavigatorPersistentNavigationPath = "/config/navigator/persistent-navigation-enabled.txt";
 static const char* kNavigatorRealPublicProbeTargetPath = "/config/navigator/real-public-https-probe-url.txt";
 static const char* kNavigatorRealPublicProbeTargetCompatPath = "/config/navigator/RPUBURL.TXT";
 static const char* kNavigatorRealPublicProbeRequirePath = "/config/navigator/real-public-https-probe-required.txt";
@@ -11848,6 +12140,114 @@ static bool nav_mime_is(const char* actual, const char* expected)
 static const int kNavigatorUrlStorageBytes = 512;
 static void nav_push_url(char stack[][kNavigatorUrlStorageBytes], int& count, const char* url);
 
+uint32_t NavigatorApp::countLiveResourceReferences() const
+{
+    uint32_t count = 0;
+    for (uint32_t i = 0; i < gxos::apps::kNavigatorMaxResourceReferences; ++i) {
+        if (m_resourceReferences[i].state !=
+            static_cast<uint8_t>(gxos::apps::NavigatorResourceSchedulerState::Empty)) {
+            ++count;
+        }
+    }
+    return count;
+}
+
+uint32_t NavigatorApp::countDuplicateOwners() const
+{
+    uint32_t count = 0;
+    for (uint32_t i = 0; i < gxos::apps::kNavigatorMaxResourceReferences; ++i) {
+        if (m_resourceReferences[i].state !=
+                static_cast<uint8_t>(gxos::apps::NavigatorResourceSchedulerState::Empty) &&
+            m_resourceReferences[i].duplicateOf != 0xFFFFu) {
+            ++count;
+        }
+    }
+    return count;
+}
+
+uint32_t NavigatorApp::countLiveImagePointers() const
+{
+    uint32_t count = 0;
+    for (int i = 0; i < m_blockCount; ++i) {
+        if (m_blocks[i].kind == BLOCK_IMAGE && m_blocks[i].imagePixels) ++count;
+    }
+    return count;
+}
+
+void NavigatorApp::beginLifecycleGeneration(const char* requestedUrl)
+{
+    uint32_t index = m_lifecycleGenerationCount;
+    if (index >= MAX_LIFECYCLE_GENERATIONS) index = MAX_LIFECYCLE_GENERATIONS - 1;
+    else ++m_lifecycleGenerationCount;
+    m_currentLifecycleGenerationIndex = index;
+    NavigationGenerationRecord& record = m_lifecycleGenerations[index];
+    record = NavigationGenerationRecord{};
+    record.generation = m_documentGeneration;
+    strcopy(record.requestedUrl, requestedUrl ? requestedUrl : "", sizeof(record.requestedUrl));
+    record.activeImagesBefore = m_resourceScheduler.activeCount;
+    record.activeBytesBefore = m_resourceMemory.activeDecodedBytes;
+    record.referencesBefore = countLiveResourceReferences();
+    record.duplicateOwnersBefore = countDuplicateOwners();
+    record.scrollBefore = m_scrollY;
+
+    const uint32_t releasedBefore = m_resourceScheduler.released;
+    const uint64_t releasedBytesBefore = m_resourceMemory.releasedDecodedBytes;
+    releaseImageResources();
+    record.releasedResources = m_resourceScheduler.released >= releasedBefore
+        ? m_resourceScheduler.released - releasedBefore : 0;
+    record.releasedBytes = m_resourceMemory.releasedDecodedBytes >= releasedBytesBefore
+        ? m_resourceMemory.releasedDecodedBytes - releasedBytesBefore : 0;
+    record.activeImagesAfterRelease = m_resourceScheduler.activeCount;
+    record.activeBytesAfterRelease = m_resourceMemory.activeDecodedBytes;
+    record.staleReferencesAfterRelease = countLiveResourceReferences();
+    record.staleDuplicateOwnersAfterRelease = countDuplicateOwners();
+    record.staleImagePointersAfterRelease = countLiveImagePointers();
+
+    // The release evidence is copied into the fixed record above.  The next
+    // document starts with a genuinely fresh scheduler/memory generation;
+    // peak values remain historical only inside the completed record.
+    m_resourceScheduler = gxos::apps::NavigatorResourceSchedulerStats{};
+    m_resourceMemory.reset();
+    m_resourceTelemetryCount = 0;
+}
+
+void NavigatorApp::finishLifecycleGeneration()
+{
+    if (m_currentLifecycleGenerationIndex >= m_lifecycleGenerationCount) return;
+    NavigationGenerationRecord& record = m_lifecycleGenerations[m_currentLifecycleGenerationIndex];
+    strcopy(record.finalUrl, m_metaFinalUrl[0] ? m_metaFinalUrl : m_currentUrl, sizeof(record.finalUrl));
+    strcopy(record.title, m_title, sizeof(record.title));
+    strcopy(record.visibleText, m_metaVisibleText, sizeof(record.visibleText));
+    record.documentBlocks = m_blockCount > 0 ? static_cast<uint32_t>(m_blockCount) : 0;
+    record.decodedDocumentBytes = m_metaDecodedBodyBytes > 0 ? static_cast<uint32_t>(m_metaDecodedBodyBytes) : 0;
+    record.resourceReferences = m_resourceScheduler.referencesDiscovered;
+    record.uniqueReferences = m_resourceScheduler.uniqueReferences;
+    record.duplicateReferences = m_resourceScheduler.duplicateReferences;
+    record.schedulerCandidates = m_resourceScheduler.schedulerCandidates;
+    record.loadedResources = m_resourceScheduler.attached;
+    record.failedResources = m_metaResourceFailed;
+    record.budgetDenials = m_resourceScheduler.budgetDenied;
+    record.duplicateNetworkFetches = m_metaDuplicateNetworkFetches;
+    record.activeImages = m_resourceScheduler.activeCount;
+    record.activeBytes = m_resourceMemory.activeDecodedBytes;
+    record.peakBytes = m_resourceMemory.peakDecodedBytes;
+    record.deniedBytes = m_resourceMemory.deniedAllocationBytes;
+    for (uint32_t bucket = 0; bucket < 6; ++bucket) {
+        record.loadedSizeBuckets[bucket] = m_resourceScheduler.loadedDecodedSizeBuckets[bucket];
+        record.deniedSizeBuckets[bucket] = m_resourceScheduler.deniedDecodedSizeBuckets[bucket];
+    }
+    record.encodedBodyFailures = 0;
+    for (int i = 0; i < m_blockCount; ++i) {
+        if (streq_local(m_blocks[i].resourceClassification, "body_too_large_encoded"))
+            ++record.encodedBodyFailures;
+        if (m_blocks[i].kind == BLOCK_IMAGE && m_imagePaintLogged[i])
+            record.imagePaintObserved = true;
+    }
+    record.parserCompleted = m_metaParserCompleted;
+    record.documentCreated = m_metaDocumentCreated;
+    record.scrollAfter = m_scrollY;
+}
+
 void NavigatorApp::releaseImageResources()
 {
     for (int i = 0; i < m_blockCount; ++i) {
@@ -11878,6 +12278,11 @@ void NavigatorApp::releaseImageResources()
     m_resourceScheduler.activeCount = 0;
     m_resourceScheduler.activeBytes = 0;
     m_resourceMemory.activeDecodedBytes = 0;
+    for (uint32_t ref = 0; ref < gxos::apps::kNavigatorMaxResourceReferences; ++ref) {
+        m_resourceReferences[ref] = gxos::apps::NavigatorResourceReferenceMetadata{};
+        m_resourceOrder[ref] = 0;
+    }
+    m_resourceTelemetryCount = 0;
 }
 
 void NavigatorApp::prepareImageResources()
@@ -12066,6 +12471,18 @@ void NavigatorApp::prepareImageResources()
             ++m_resourceScheduler.unsupportedSkipped;
             if (referenceIndex >= 0)
                 m_resourceReferences[referenceIndex].state = static_cast<uint8_t>(gxos::apps::NavigatorResourceSchedulerState::UnsupportedSkipped);
+            continue;
+        }
+
+        if (m_injectNextImageFailure) {
+            m_injectNextImageFailure = false;
+            m_blocks[i].imageStatus = static_cast<int>(gxos::gui::ImageLoadStatus::OutOfMemory);
+            setClassification(m_blocks[i], NavigatorResourceClassification::ImageAllocationFailed,
+                "Deterministic persistent-smoke image allocation failure.");
+            if (referenceIndex >= 0)
+                m_resourceReferences[referenceIndex].state = static_cast<uint8_t>(gxos::apps::NavigatorResourceSchedulerState::Failed);
+            if (m_currentLifecycleGenerationIndex < m_lifecycleGenerationCount)
+                m_lifecycleGenerations[m_currentLifecycleGenerationIndex].injectedImageFailure = true;
             continue;
         }
 
@@ -13811,16 +14228,13 @@ void NavigatorApp::loadUrl(const char* url)
         serial::puts("[NAVIGATOR] throbber_animation=passive_elapsed_time\n");
         animationOwnerLogged = true;
     }
+    char normalized[MAX_URL_LEN];
+    normalizeUrl(url && url[0] ? url : "about:navigator", normalized, MAX_URL_LEN);
+    beginLifecycleGeneration(normalized);
     m_loading = true;
-    // A new navigation ends the previous document lifetime. Remote image
-    // pixels must not accumulate while the bounded shared HTTP buffers are
-    // reused for the next transaction.
-    releaseImageResources();
     m_throbberFrame = 0;
     m_loadingStartTick = (uint32_t)kernel::pit::ticks();
     invalidate();
-    char normalized[MAX_URL_LEN];
-    normalizeUrl(url && url[0] ? url : "about:navigator", normalized, MAX_URL_LEN);
     clearSelection();
     if (streq_local(normalized, "about:navigator")) {
         buildAboutNavigatorDocument();
@@ -13849,6 +14263,7 @@ void NavigatorApp::loadUrl(const char* url)
     blurFormBlock();
     setStatus("Ready");
     m_loading = false;
+    finishLifecycleGeneration();
     serial::puts("[NAVIGATOR-LOAD] complete\n");
 
 }
@@ -18515,6 +18930,30 @@ static bool printNavigatorHttpSmokeCases()
         "http://10.0.2.2:8080/forms/post-echo", 1) && httpOk;
     httpOk = printNavigatorFormsLitePostSmokeCase("forms_post_redirect_hostname", "http://10.0.2.2:8080/forms/post-redirect-hostname",
         "http://guidexos.test:8080/forms/post-echo", 1, "10.0.2.2") && httpOk;
+    char persistentToken[32];
+    const bool persistentMarkerEnabled = nav_smoke_read_vfs_token_file(
+        kNavigatorPersistentNavigationPath, "/config/navigator/PERSNAV.TXT",
+        persistentToken, sizeof(persistentToken)) &&
+        (nav_smoke_text_equals_insensitive(persistentToken, "enabled") ||
+         nav_smoke_text_equals_insensitive(persistentToken, "1") ||
+         nav_smoke_text_equals_insensitive(persistentToken, "true") ||
+         nav_smoke_text_equals_insensitive(persistentToken, "yes"));
+    // The ProductionValidated public-pilot token is read through the shared
+    // TLS policy loader before this smoke report.  Use it as a second, stable
+    // trigger for the dedicated public lifecycle lane because the FAT alias
+    // can expose only part of a generated config directory to the bare-metal
+    // Navigator VFS.  This keeps the lifecycle proof tied to the explicit
+    // public-pilot scenario without changing HTTPS or scheduler policy.
+    const bool persistentPolicyEnabled = publicPolicy.broadPublicHttpsEnabled &&
+        publicPolicy.publicHttpsPilotRequested;
+    const bool persistentEnabled = persistentMarkerEnabled || persistentPolicyEnabled;
+    serial::puts("[NAVIGATOR-SMOKE] persistent_navigation.enabled=");
+    serial::puts(persistentEnabled ? "yes\n" : "no\n");
+    serial::puts("[NAVIGATOR-SMOKE] persistent_navigation.trigger=");
+    serial::puts(persistentMarkerEnabled ? "config-marker\n" :
+        (persistentPolicyEnabled ? "public-pilot-policy\n" : "disabled\n"));
+    if (persistentEnabled)
+        httpOk = NavigatorApp::smokePersistentNavigationLifecycle() && httpOk;
     return httpOk;
 }
 

@@ -1299,6 +1299,30 @@ if ($userCaSource) {
 $configNavigatorDir = Join-Path $configDir "navigator"
 New-Item -ItemType Directory -Force -Path $configNavigatorDir | Out-Null
 
+if ($env:GXOS_NAVIGATOR_PERSISTENT_NAVIGATION -eq "1") {
+    $persistentNavigationMarker = Join-Path $configNavigatorDir "persistent-navigation-enabled.txt"
+    [System.IO.File]::WriteAllText($persistentNavigationMarker, "enabled`n", [System.Text.Encoding]::ASCII)
+    $staged += Get-Item $persistentNavigationMarker
+    $persistentNavigationMarkerCompat = Join-Path $configNavigatorDir "PERSNAV.TXT"
+    [System.IO.File]::WriteAllText($persistentNavigationMarkerCompat, "enabled`n", [System.Text.Encoding]::ASCII)
+    $staged += Get-Item $persistentNavigationMarkerCompat
+    Write-Host "      staged Navigator persistent-navigation smoke marker" -ForegroundColor Yellow
+
+    $persistentFixtureSourceDir = Join-Path $RootDir "navigator-smoke\generated"
+    foreach ($persistentFixtureName in @(
+            "HEAVY.HTM", "TINY.HTM", "FAIL.HTM",
+            "HEAVY01.PNG", "HEAVY02.PNG", "HEAVY03.PNG", "HEAVY04.PNG", "HEAVY05.PNG")) {
+        $persistentFixtureSource = Join-Path $persistentFixtureSourceDir $persistentFixtureName
+        if (-not (Test-Path -LiteralPath $persistentFixtureSource -PathType Leaf)) {
+            throw "Persistent Navigator fixture is missing: $persistentFixtureSource"
+        }
+        $persistentFixtureTarget = Join-Path $configNavigatorDir $persistentFixtureName
+        Copy-Item -LiteralPath $persistentFixtureSource -Destination $persistentFixtureTarget -Force
+        $staged += Get-Item $persistentFixtureTarget
+    }
+    Write-Host "      staged short-name persistent Navigator fixtures under /config/navigator" -ForegroundColor Yellow
+}
+
 $navigatorChromeAssets = [ordered]@{
     "nav-back.png"      = "assets\Images\NuoveXT\PNG\32\above_thearrow_10194.png"
     "nav-next.png"      = "assets\Images\NuoveXT\PNG\32\Next_arrow_10211.png"

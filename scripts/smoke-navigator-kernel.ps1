@@ -23,6 +23,7 @@ Normalize-ProcessEnvironment
 $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
 $downloadsState = Save-NavigatorSmokeDirectoryState -LiteralPath (Join-Path $Root "downloads")
 $ramdiskState = Save-NavigatorSmokeFileState -LiteralPath (Join-Path $Root "ESP\\ramdisk.img")
+$persistentFixtureEspState = Save-NavigatorSmokeDirectoryState -LiteralPath (Join-Path $Root "ESP\\navigator-smoke\\generated")
 $wallpaperPackState = Save-NavigatorSmokeDirectoryState -LiteralPath (Join-Path $Root "out\\wallpaper-pack")
 $wallpaperPackCaBundleState = Save-NavigatorSmokeFileState -LiteralPath (Join-Path $Root "out\\wallpaper-pack\\certs\\ca-bundle.pem")
 
@@ -177,6 +178,11 @@ function Clear-NavigatorKernelSmokePortConflicts {
 
 $python = Find-Python
 if (-not $python) { throw "python not found; required for local Navigator HTTP smoke server." }
+
+$persistentFixtureGenerator = Join-Path $Root "scripts\generate-navigator-persistent-fixtures.py"
+$persistentFixtureDir = Join-Path $Root "navigator-smoke\generated"
+& $python $persistentFixtureGenerator --output-dir $persistentFixtureDir
+if ($LASTEXITCODE -ne 0) { throw "deterministic Navigator persistent fixture generation failed." }
 
 Write-Host "Building kernel with active Navigator HTTP/PNG smoke diagnostics..."
 $oldSmokeCaFixture = $env:GXOS_NAVIGATOR_SMOKE_CA_FIXTURE
@@ -368,6 +374,7 @@ $navigatorSmokeEnvNames = @(
     "GXOS_NAVIGATOR_SMOKE_REAL_PUBLIC_HTTPS_URL",
     "GXOS_NAVIGATOR_SMOKE_REAL_PUBLIC_HTTPS_TARGET",
     "GXOS_NAVIGATOR_SMOKE_REAL_PUBLIC_HTTPS_CA_BUNDLE_SOURCE",
+    "GXOS_NAVIGATOR_PERSISTENT_NAVIGATION",
     "GXOS_NAVIGATOR_TLS_DIAGNOSTICS"
 )
 $navigatorSmokeEnvOriginal = @{}
@@ -410,6 +417,7 @@ function Invoke-NavigatorKernelSmokeRamdiskStage {
         [bool]$UseSmokeFixture,
         [bool]$EnableRealPublicProbe = $false,
         [bool]$RequireRealPublicProbe = $false,
+        [bool]$EnablePersistentNavigation = $false,
         [AllowNull()][string]$RealPublicProbeTarget = $null,
         [AllowNull()][string]$RealPublicProbeCaBundleSource = $null
     )
@@ -434,6 +442,7 @@ function Invoke-NavigatorKernelSmokeRamdiskStage {
     # the final ramdisk, otherwise the earlier smoke-fixture build can leave a
     # production-looking host staging directory paired with an old guest image.
     Set-ProcessEnvValue -Name "GXOS_NAVIGATOR_SMOKE_REAL_PUBLIC_HTTPS_CA_BUNDLE_SOURCE" -Value ($(if ($EnableRealPublicProbe) { $RealPublicProbeCaBundleSource } else { $null }))
+    Set-ProcessEnvValue -Name "GXOS_NAVIGATOR_PERSISTENT_NAVIGATION" -Value ($(if ($EnablePersistentNavigation) { "1" } else { $null }))
 
     Wait-NavigatorSmokeFileUnlock -LiteralPath (Join-Path $Root "ESP\\ramdisk.img")
     $packScript = Join-Path $Root "scripts\generate-wallpaper-pack.ps1"
@@ -1586,6 +1595,7 @@ $scenarioDefinitions = @(
         TlsCert = $defaultHttpsCert
         TlsKey = $defaultHttpsKey
         PublicPilotEnabled = $true
+        PersistentNavigation = $true
         Checks = $commonChecks + @(
             "[NAVIGATOR-SMOKE] tls_prereq.root_ca_path=/certs/ca-bundle.pem",
             "[NAVIGATOR-SMOKE] tls_prereq.root_ca_fixture=normal",
@@ -1601,6 +1611,27 @@ $scenarioDefinitions = @(
             "[NAVIGATOR-SMOKE] tls_readiness=yes",
             "[NAVIGATOR-SMOKE] https.case.policy_validated.enabled=yes",
             "[NAVIGATOR-SMOKE] https.case.policy_validated.result=PASS"
+        )
+        RegexChecks = Merge-CheckMaps -Base $commonRegexChecks -Extra $localTlsExplicitPolicyTrustMismatchRegexChecks
+    },
+    [pscustomobject]@{
+        Name = "persistent_navigation_scheduler"
+        HttpsPolicy = "production-validated`npublic-https-pilot=enabled"
+        HttpsFaultMode = $null
+        UseSmokeFixture = $false
+        UserCaSource = $null
+        ProductionCaSource = $validatedCaFixture
+        TlsCert = $defaultHttpsCert
+        TlsKey = $defaultHttpsKey
+        PublicPilotEnabled = $true
+        PersistentNavigation = $true
+        Checks = $commonChecks + @(
+            "[NAVIGATOR-SMOKE] persistent_navigation.enabled=yes",
+            "[NAVIGATOR-PERSISTENT] mode=single_boot_single_navigator_instance",
+            "[NAVIGATOR-PERSISTENT] public.sequence=NASA,Wikipedia,example.com,NASA",
+            "[NAVIGATOR-PERSISTENT] deterministic.result=PASS",
+            "[NAVIGATOR-PERSISTENT] public.result=PASS",
+            "[NAVIGATOR-PERSISTENT] result=PASS"
         )
         RegexChecks = Merge-CheckMaps -Base $commonRegexChecks -Extra $localTlsExplicitPolicyTrustMismatchRegexChecks
     },
@@ -1675,7 +1706,8 @@ $scenarioDefinitions = @(
 )
 
 $publicPilotScenarioNames = @(
-    "production_public_pilot_enabled"
+    "production_public_pilot_enabled",
+    "persistent_navigation_scheduler"
 )
 
 function Get-NavigatorKernelSmokeScenarioLane {
@@ -1799,12 +1831,19 @@ try {
             -UserManifestMode $(if ($scenario.UserManifestMode) { [string]$scenario.UserManifestMode } else { "normal" }) `
             -ProductionManifestMode $(if ($scenario.ProductionManifestMode) { [string]$scenario.ProductionManifestMode } else { "normal" }) `
             -UseSmokeFixture $scenario.UseSmokeFixture `
+            -EnablePersistentNavigation:($scenario.PSObject.Properties.Match("PersistentNavigation").Count -gt 0 -and $scenario.PersistentNavigation) `
             -EnableRealPublicProbe:$enableRealPublicProbeForScenario `
             -RequireRealPublicProbe:($enableRealPublicProbeForScenario -and $realPublicProbeRequired) `
             -RealPublicProbeTarget $(if ($enableRealPublicProbeForScenario) { $realPublicProbeTarget } else { $null }) `
             -RealPublicProbeCaBundleSource $(if ($enableRealPublicProbeForScenario) { $realPublicProbeCaBundleSource } else { $null })
 
         try {
+            if ($scenario.PSObject.Properties.Match("PersistentNavigation").Count -gt 0 -and $scenario.PersistentNavigation) {
+                $persistentFixtureEspDir = Join-Path $Root "ESP\\navigator-smoke\\generated"
+                New-Item -ItemType Directory -Force -Path $persistentFixtureEspDir | Out-Null
+                Copy-Item -Path (Join-Path $persistentFixtureDir "*") -Destination $persistentFixtureEspDir -Recurse -Force
+                Write-Host "  staged deterministic persistent Navigator fixtures into ESP FAT root"
+            }
             $policyHost = Get-NavigatorKernelSmokePolicyHost -Scenario $scenario
             $policyCertPair = Get-NavigatorKernelSmokePolicyCertPair -Scenario $scenario
             $publicPilotHost = Get-NavigatorKernelSmokePublicPilotHost -Scenario $scenario
@@ -1875,6 +1914,7 @@ try {
     Restore-NormalKernelBuild
     Restore-NavigatorSmokeDirectoryState -State $downloadsState
     Restore-NavigatorSmokeFileState -State $ramdiskState
+    Restore-NavigatorSmokeDirectoryState -State $persistentFixtureEspState
     Restore-NavigatorSmokeDirectoryState -State $wallpaperPackState
     Restore-NavigatorSmokeFileState -State $wallpaperPackCaBundleState
     if (Test-Path $oversizedCaFixture) {

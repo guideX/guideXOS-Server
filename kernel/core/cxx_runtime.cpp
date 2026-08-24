@@ -208,10 +208,16 @@ char* strstr(const char* haystack, const char* needle)
 // ============================================================================
 
 namespace {
-    // 32 MB kernel heap - large enough for wallpaper-sized decoded PNGs.
-    // A 1536x1024 RGBA image is about 6 MB, and the loader may briefly need
-    // extra slack for STBI bookkeeping and app/window allocations.
+    // Keep production bare metal bounded to the original 32 MiB arena.  The
+    // opt-in Navigator HTTP smoke intentionally retains several 2048x2048
+    // decoded fixtures at once so it can exercise the shared 64 MiB document
+    // budget; give that diagnostic image enough physical heap to reach the
+    // policy boundary instead of faulting inside STBI first.
+#if defined(GXOS_NAVIGATOR_HTTP_SMOKE_ACTIVE)
+    static constexpr size_t KERNEL_HEAP_SIZE = 128u * 1024u * 1024u;
+#else
     static constexpr size_t KERNEL_HEAP_SIZE = 32u * 1024u * 1024u;
+#endif
     static constexpr size_t KERNEL_HEAP_ALIGNMENT = 8u;
 
     struct KernelHeapBlock {

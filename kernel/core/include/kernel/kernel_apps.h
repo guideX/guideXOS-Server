@@ -577,6 +577,10 @@ public:
 
     static app::KernelApp* create() { return new NavigatorApp(); }
     static bool smokeTypographyPhase7A();
+    // Phase 8S.2: one bounded smoke-owned Navigator instance runs the
+    // deterministic pressure/reuse sequence and, when public HTTPS is
+    // enabled, the reviewed NASA -> Wikipedia -> example.com -> NASA lane.
+    static bool smokePersistentNavigationLifecycle();
     static bool smokeHttpFetch(const char* url, int* statusCode, char* contentType,
                                int contentTypeLen, int* bodyBytes, int* parsedBlocks,
                                char* error, int errorLen, char* finalUrl = nullptr,
@@ -702,6 +706,7 @@ private:
     static const int MAX_SOURCE_PREVIEW = 2048;
     static const int MAX_FORM_OPTIONS = 8;
     static const int MAX_FORM_VALUE = 320;
+    static const uint32_t MAX_LIFECYCLE_GENERATIONS = 12;
     static const int TOOLBAR_H = 48;
     static const int STATUS_H = 24;
     static const int BUTTON_H = 22;
@@ -789,6 +794,51 @@ private:
     struct SelectionPosition {
         int blockIndex;
         int offset;
+    };
+
+    // Compact, fixed-capacity evidence for one top-level navigation.  This is
+    // deliberately kept on the heap-owned NavigatorApp object rather than on
+    // the 16 KiB boot stack, and stores no document body or resource URL list.
+    struct NavigationGenerationRecord {
+        uint32_t generation = 0;
+        char requestedUrl[128] = {};
+        char finalUrl[128] = {};
+        char title[96] = {};
+        char visibleText[96] = {};
+        uint32_t activeImagesBefore = 0;
+        uint64_t activeBytesBefore = 0;
+        uint32_t referencesBefore = 0;
+        uint32_t duplicateOwnersBefore = 0;
+        uint32_t releasedResources = 0;
+        uint64_t releasedBytes = 0;
+        uint32_t activeImagesAfterRelease = 0;
+        uint64_t activeBytesAfterRelease = 0;
+        uint32_t staleReferencesAfterRelease = 0;
+        uint32_t staleDuplicateOwnersAfterRelease = 0;
+        uint32_t staleImagePointersAfterRelease = 0;
+        uint32_t documentBlocks = 0;
+        uint32_t decodedDocumentBytes = 0;
+        uint32_t resourceReferences = 0;
+        uint32_t uniqueReferences = 0;
+        uint32_t duplicateReferences = 0;
+        uint32_t schedulerCandidates = 0;
+        uint32_t loadedResources = 0;
+        uint32_t failedResources = 0;
+        uint32_t budgetDenials = 0;
+        uint32_t duplicateNetworkFetches = 0;
+        uint32_t activeImages = 0;
+        uint64_t activeBytes = 0;
+        uint64_t peakBytes = 0;
+        uint64_t deniedBytes = 0;
+        uint64_t encodedBodyFailures = 0;
+        uint32_t loadedSizeBuckets[6] = {};
+        uint32_t deniedSizeBuckets[6] = {};
+        int scrollBefore = 0;
+        int scrollAfter = 0;
+        bool parserCompleted = false;
+        bool documentCreated = false;
+        bool imagePaintObserved = false;
+        bool injectedImageFailure = false;
     };
 
     char m_status[MAX_STATUS_LEN];
@@ -925,6 +975,10 @@ private:
     uint32_t m_resourceTelemetryCount;
     gxos::apps::NavigatorResourceSchedulerStats m_resourceScheduler;
     gxos::apps::NavigatorResourceMemoryAccounting m_resourceMemory;
+    NavigationGenerationRecord m_lifecycleGenerations[MAX_LIFECYCLE_GENERATIONS];
+    uint32_t m_lifecycleGenerationCount;
+    uint32_t m_currentLifecycleGenerationIndex;
+    bool m_injectNextImageFailure;
     char m_metaScheme[8];
     bool m_metaDnsUsed;
     char m_metaDnsHost[gxos::web::kHttpSharedMaxHostnameBytes + 1];
@@ -1065,6 +1119,11 @@ private:
     void releaseImageResources();
     void prepareImageResources();
     void refreshImageResourceMetadata();
+    uint32_t countLiveResourceReferences() const;
+    uint32_t countDuplicateOwners() const;
+    uint32_t countLiveImagePointers() const;
+    void beginLifecycleGeneration(const char* requestedUrl);
+    void finishLifecycleGeneration();
     void resolveHref(const char* baseUrl, const char* href, char* out, int outSize) const;
     void rememberDownload(const DownloadRecord& record);
     void clearPageDownloadMetadata();

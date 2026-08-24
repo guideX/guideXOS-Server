@@ -1999,7 +1999,12 @@ class NavigatorSmokeHandler(BaseHTTPRequestHandler):
             self.write_bytes(403, "text/plain", b"Forbidden")
             return
         if file_path.is_file():
-            content_type = "text/html" if file_path.suffix.lower() in (".html", ".htm") else "text/plain"
+            suffix = file_path.suffix.lower()
+            content_type = (
+                "text/html" if suffix in (".html", ".htm") else
+                "image/png" if suffix == ".png" else
+                "text/plain"
+            )
             self.write_bytes(200, content_type, file_path.read_bytes())
             return
         self.write_bytes(404, "text/html", b"<html><body><h1>Missing</h1></body></html>")

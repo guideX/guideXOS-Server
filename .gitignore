@@ -39,3 +39,5 @@
 /out/wallpaper-pack/config/certs/ca-bundle.manifest
 /scripts/fixtures/public-roots/*.local
 /bkup/gfx
+/navigator-smoke/generated/
+/ESP/navigator-smoke/
