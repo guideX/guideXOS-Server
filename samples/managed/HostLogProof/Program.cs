@@ -64,6 +64,28 @@ public static unsafe class Program
     }
 #endif
 
+#if HOSTLOGPROOF_C011EC39
+    [DllImport("__Internal", EntryPoint = "guideXosNativeAotC011EC39Finish")]
+    private static extern int GuideXosNativeAotC011EC39Finish();
+
+#if HOSTLOGPROOF_C011EC39_C38_VARIANT
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static int RunC011EC39C38VariantWorkload()
+    {
+        // C38's eight ordinary post-Collection-2 byte[64] allocations are
+        // retained as a workload delta only.  C39 does not call the C38
+        // allocator observer and does not gate or force any allocation path.
+        for (int ordinal = 0; ordinal < 8; ordinal++)
+        {
+            byte[] value = new byte[64];
+            value[0] = (byte)ordinal;
+            GC.KeepAlive(value);
+        }
+        return 0;
+    }
+#endif
+#endif
+
 #if HOSTLOGPROOF_C011EC38
     [DllImport("__Internal", EntryPoint = "guideXosNativeAotC011EC38BeforeAllocation")]
     private static extern int GuideXosNativeAotC011EC38BeforeAllocation(
@@ -640,7 +662,21 @@ public static unsafe class Program
                 // This scalar increment is the deterministic managed
                 // continuation checkpoint. It does not allocate or retain a
                 // new object before the native observer records success.
-#if HOSTLOGPROOF_C011EC38
+#if HOSTLOGPROOF_C011EC39
+                int checkpointStatus = RunC011EC37ManagedCheckpoint();
+                if (checkpointStatus != 0)
+                {
+                    return GxAbi.ErrorInvalidArgument;
+                }
+#if HOSTLOGPROOF_C011EC39_C38_VARIANT
+                if (RunC011EC39C38VariantWorkload() != 0)
+                {
+                    return GxAbi.ErrorInvalidArgument;
+                }
+#endif
+                return GuideXosNativeAotC011EC39Finish() == 0
+                    ? 0 : GxAbi.ErrorInvalidArgument;
+#elif HOSTLOGPROOF_C011EC38
                 int checkpointStatus = RunC011EC37ManagedCheckpoint();
                 if (checkpointStatus != 0)
                 {

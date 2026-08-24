@@ -12570,6 +12570,436 @@ guideXosNativeAotC011EC37ManagedCheckpoint(
 }
 #endif
 
+#if defined(GUIDEXOS_NATIVEAOT_C011EC39_PLAN_PROVENANCE)
+static const uintptr_t guideXosNativeAotC011EC39Unavailable =
+    static_cast<uintptr_t>(-1);
+
+static bool guideXosNativeAotC011EC39IsCollection2(
+    uint32_t condemnedGeneration, uint32_t collectionReason) {
+    /* The locked plan callbacks run before the C37 collection record is
+     * published.  Gen1 is the stable C2 discriminator here; the production
+     * reason is captured independently because the C37 request-side reason
+     * field is not the planner's settings.reason field. */
+    (void)collectionReason;
+    return condemnedGeneration == 1u;
+}
+
+static void guideXosNativeAotC011EC39InitializeUnavailable(
+    guidexos_nativeaot_c011ec39_plan_record& r) {
+    r.entryAvailablePhysicalMemory = guideXosNativeAotC011EC39Unavailable;
+    r.fragmentation = guideXosNativeAotC011EC39Unavailable;
+    r.generationSizes = guideXosNativeAotC011EC39Unavailable;
+    r.fragmentationThreshold = guideXosNativeAotC011EC39Unavailable;
+    r.fragmentationBurdenPpm = guideXosNativeAotC011EC39Unavailable;
+    r.fragmentationBurdenThresholdPpm = guideXosNativeAotC011EC39Unavailable;
+    r.generationSize = guideXosNativeAotC011EC39Unavailable;
+    r.generationPlanSize = guideXosNativeAotC011EC39Unavailable;
+    r.generationFreeListBytes = guideXosNativeAotC011EC39Unavailable;
+    r.generationFreeObjBytes = guideXosNativeAotC011EC39Unavailable;
+    r.generationCondemnedAllocated = guideXosNativeAotC011EC39Unavailable;
+    r.generationSweepAllocated = guideXosNativeAotC011EC39Unavailable;
+    r.generationPinnedCompactBytes = guideXosNativeAotC011EC39Unavailable;
+    r.generationPinnedSweepBytes = guideXosNativeAotC011EC39Unavailable;
+    r.promotedBytes = guideXosNativeAotC011EC39Unavailable;
+    r.survivedBytes = guideXosNativeAotC011EC39Unavailable;
+    r.desiredAllocation = guideXosNativeAotC011EC39Unavailable;
+    r.newAllocation = guideXosNativeAotC011EC39Unavailable;
+    r.currentSize = guideXosNativeAotC011EC39Unavailable;
+    r.gen0DesiredAllocation = guideXosNativeAotC011EC39Unavailable;
+    r.gen0NewAllocation = guideXosNativeAotC011EC39Unavailable;
+    r.gen0CurrentSize = guideXosNativeAotC011EC39Unavailable;
+    r.gen1DesiredAllocation = guideXosNativeAotC011EC39Unavailable;
+    r.gen1NewAllocation = guideXosNativeAotC011EC39Unavailable;
+    r.gen1CurrentSize = guideXosNativeAotC011EC39Unavailable;
+    r.segmentCount = guideXosNativeAotC011EC39Unavailable;
+    r.compactionSpaceGen0Size = guideXosNativeAotC011EC39Unavailable;
+    r.compactionSpaceSweepFreeBytes = guideXosNativeAotC011EC39Unavailable;
+    r.compactionSpacePinnedFreeBytes = guideXosNativeAotC011EC39Unavailable;
+    r.compactionSpaceEndGen0Bytes = guideXosNativeAotC011EC39Unavailable;
+}
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC39PlannerEntryObserved(
+    uint32_t condemnedGeneration, uint32_t collectionReason,
+    uint32_t heapNumber, uint32_t maximumGeneration, uint32_t compacting,
+    uint32_t promotion, uint32_t concurrent, uint32_t pauseMode,
+    uint32_t entryMemoryLoad, uintptr_t entryAvailablePhysicalMemory,
+    uint32_t gen0ReductionCount, uint32_t provisionalMode,
+    uint32_t pmTriggerFullGc) {
+    if (!guideXosNativeAotC011EC39IsCollection2(
+            condemnedGeneration, collectionReason)) {
+        return;
+    }
+    guidexos_nativeaot_c011ec39_plan_record& r =
+        g_guideXosAllocationDiagnostics.c011ec39Plan;
+    if (r.plannerEntryObserved == 0u) {
+        guideXosNativeAotC011EC39InitializeUnavailable(r);
+    }
+    r.plannerEntryObserved = 1u;
+    ++r.plannerEntryCount;
+    r.condemnedGeneration = condemnedGeneration;
+    r.collectionReason = collectionReason;
+    r.heapNumber = heapNumber;
+    r.maximumGeneration = maximumGeneration;
+    r.prePlanCompacting = compacting;
+    r.prePlanPromotion = promotion;
+    r.prePlanConcurrent = concurrent;
+    r.prePlanPauseMode = pauseMode;
+    r.entryMemoryLoad = entryMemoryLoad;
+    r.entryAvailablePhysicalMemory = entryAvailablePhysicalMemory;
+    r.gen0ReductionCount = gen0ReductionCount;
+    r.provisionalMode = provisionalMode;
+    r.pmTriggerFullGc = pmTriggerFullGc;
+    r.plannerEntryAddress = reinterpret_cast<uintptr_t>(_ReturnAddress());
+}
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC39DecideObserved(
+    uint32_t finalDecision, uint32_t condemnedGeneration,
+    uint32_t collectionReason, uintptr_t fragmentation,
+    uintptr_t generationSizes, uintptr_t fragmentationThreshold,
+    uintptr_t fragmentationBurdenPpm,
+    uintptr_t fragmentationBurdenThresholdPpm, uintptr_t generationSize,
+    uintptr_t generationPlanSize, uintptr_t generationFreeListBytes,
+    uintptr_t generationFreeObjBytes, uintptr_t generationCondemnedAllocated,
+    uintptr_t generationSweepAllocated, uintptr_t generationPinnedCompactBytes,
+    uintptr_t generationPinnedSweepBytes, uintptr_t promotedBytes,
+    uintptr_t survivedBytes, uintptr_t desiredAllocation,
+    uintptr_t newAllocation, uintptr_t currentSize, uint32_t forceCompact,
+    uint32_t lastGcBeforeOom, uint32_t inducedCompacting,
+    uint32_t inducedAggressive, uint32_t pmFullGcReason,
+    uint32_t provisionalMode, uint32_t lowEphemeral,
+    uint32_t fragmentationExceeded, uint32_t highMemory,
+    uint32_t ensureGapForcedCompaction, uint32_t compactionMechanism,
+    uint32_t entryMemoryLoad, uintptr_t entryAvailablePhysicalMemory) {
+    if (!guideXosNativeAotC011EC39IsCollection2(
+            condemnedGeneration, collectionReason)) {
+        return;
+    }
+    guidexos_nativeaot_c011ec39_plan_record& r =
+        g_guideXosAllocationDiagnostics.c011ec39Plan;
+    if (r.plannerEntryObserved == 0u) {
+        guideXosNativeAotC011EC39InitializeUnavailable(r);
+    }
+    r.decideObserved = 1u;
+    ++r.decideCount;
+    r.condemnedGeneration = condemnedGeneration;
+    r.collectionReason = collectionReason;
+    r.finalDecision = finalDecision;
+    r.fragmentation = fragmentation;
+    r.generationSizes = generationSizes;
+    r.fragmentationThreshold = fragmentationThreshold;
+    r.fragmentationBurdenPpm = fragmentationBurdenPpm;
+    r.fragmentationBurdenThresholdPpm = fragmentationBurdenThresholdPpm;
+    r.generationSize = generationSize;
+    r.generationPlanSize = generationPlanSize;
+    r.generationFreeListBytes = generationFreeListBytes;
+    r.generationFreeObjBytes = generationFreeObjBytes;
+    r.generationCondemnedAllocated = generationCondemnedAllocated;
+    r.generationSweepAllocated = generationSweepAllocated;
+    r.generationPinnedCompactBytes = generationPinnedCompactBytes;
+    r.generationPinnedSweepBytes = generationPinnedSweepBytes;
+    r.promotedBytes = promotedBytes;
+    r.survivedBytes = survivedBytes;
+    r.desiredAllocation = desiredAllocation;
+    r.newAllocation = newAllocation;
+    r.currentSize = currentSize;
+    r.forceCompact = forceCompact;
+    r.lastGcBeforeOom = lastGcBeforeOom;
+    r.inducedCompacting = inducedCompacting;
+    r.inducedAggressive = inducedAggressive;
+    r.pmFullGcReason = pmFullGcReason;
+    r.provisionalMode = provisionalMode;
+    r.lowEphemeral = lowEphemeral;
+    r.fragmentationExceeded = fragmentationExceeded;
+    r.highMemory = highMemory;
+    r.ensureGapForcedCompaction = ensureGapForcedCompaction;
+    r.compactionMechanism = compactionMechanism;
+    r.entryMemoryLoad = entryMemoryLoad;
+    r.entryAvailablePhysicalMemory = entryAvailablePhysicalMemory;
+    r.decideAddress = reinterpret_cast<uintptr_t>(_ReturnAddress());
+}
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC39CompactionSpaceObserved(
+    uint32_t condemnedGeneration, uintptr_t gen0Size, uintptr_t sweepFreeBytes,
+    uint32_t sweepSufficient, uintptr_t pinnedFreeBytes,
+    uintptr_t endGen0Bytes, uint32_t largeChunkFound,
+    uint32_t compactSufficient, uint32_t decision) {
+    if (!guideXosNativeAotC011EC39IsCollection2(condemnedGeneration, 0u)) {
+        return;
+    }
+    guidexos_nativeaot_c011ec39_plan_record& r =
+        g_guideXosAllocationDiagnostics.c011ec39Plan;
+    if (r.plannerEntryObserved == 0u) {
+        guideXosNativeAotC011EC39InitializeUnavailable(r);
+    }
+    r.compactionSpaceObserved = 1u;
+    r.compactionSpaceGen0Size = gen0Size;
+    r.compactionSpaceSweepFreeBytes = sweepFreeBytes;
+    r.compactionSpaceSweepSufficient = sweepSufficient;
+    r.compactionSpacePinnedFreeBytes = pinnedFreeBytes;
+    r.compactionSpaceEndGen0Bytes = endGen0Bytes;
+    r.compactionSpaceLargeChunkFound = largeChunkFound;
+    r.compactionSpaceCompactSufficient = compactSufficient;
+    r.finalDecision = decision;
+}
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC39CompactionSpaceDecisionObserved(
+    uint32_t condemnedGeneration, uint32_t decision) {
+    if (!guideXosNativeAotC011EC39IsCollection2(condemnedGeneration, 0u)) {
+        return;
+    }
+    guidexos_nativeaot_c011ec39_plan_record& r =
+        g_guideXosAllocationDiagnostics.c011ec39Plan;
+    if (r.plannerEntryObserved == 0u) {
+        guideXosNativeAotC011EC39InitializeUnavailable(r);
+    }
+    r.compactionSpaceDecisionObserved = 1u;
+    r.compactionSpaceDecision = decision;
+}
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC39EnsureGapObserved(
+    uint32_t condemnedGeneration, uint32_t available) {
+    if (!guideXosNativeAotC011EC39IsCollection2(condemnedGeneration, 0u)) {
+        return;
+    }
+    guidexos_nativeaot_c011ec39_plan_record& r =
+        g_guideXosAllocationDiagnostics.c011ec39Plan;
+    if (r.plannerEntryObserved == 0u) {
+        guideXosNativeAotC011EC39InitializeUnavailable(r);
+    }
+    r.ensureGapObserved = 1u;
+    r.ensureGapAvailable = available;
+}
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC39FinalPauseModeObserved(
+    uint32_t condemnedGeneration, uint32_t pauseMode) {
+    if (!guideXosNativeAotC011EC39IsCollection2(condemnedGeneration, 0u)) {
+        return;
+    }
+    guidexos_nativeaot_c011ec39_plan_record& r =
+        g_guideXosAllocationDiagnostics.c011ec39Plan;
+    if (r.plannerEntryObserved == 0u) {
+        guideXosNativeAotC011EC39InitializeUnavailable(r);
+    }
+    r.finalPauseMode = pauseMode;
+}
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC39FinalDecisionObserved(
+    uint32_t finalDecision, uint32_t condemnedGeneration,
+    uint32_t collectionReason, uint32_t compactingState, uint32_t promotion,
+    uint32_t pmTriggerFullGc, uint32_t compactionMechanism) {
+    if (!guideXosNativeAotC011EC39IsCollection2(
+            condemnedGeneration, collectionReason)) {
+        return;
+    }
+    guidexos_nativeaot_c011ec39_plan_record& r =
+        g_guideXosAllocationDiagnostics.c011ec39Plan;
+    if (r.plannerEntryObserved == 0u) {
+        guideXosNativeAotC011EC39InitializeUnavailable(r);
+    }
+    r.finalDecisionObserved = 1u;
+    ++r.finalDecisionCount;
+    r.finalDecision = finalDecision;
+    r.dispatchPriorCompacting = compactingState;
+    r.finalCompacting = finalDecision;
+    r.finalRelocatingDerived = finalDecision;
+    r.prePlanPromotion = promotion;
+    r.pmTriggerFullGc = pmTriggerFullGc;
+    r.compactionMechanism = compactionMechanism;
+    r.finalDecisionAddress = reinterpret_cast<uintptr_t>(_ReturnAddress());
+}
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC39PhaseEntered(uint32_t phase) {
+    guidexos_nativeaot_c011ec39_plan_record& r =
+        g_guideXosAllocationDiagnostics.c011ec39Plan;
+    if (r.finalDecisionObserved == 0u) return;
+    r.actualPhaseObserved = 1u;
+    r.actualPhase = phase;
+    if (phase == 1u) {
+        ++r.compactPhaseCount;
+        r.compactPhaseAddress = reinterpret_cast<uintptr_t>(_ReturnAddress());
+    } else if (phase == 2u) {
+        ++r.sweepPhaseCount;
+        r.sweepPhaseAddress = reinterpret_cast<uintptr_t>(_ReturnAddress());
+    }
+}
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC39CollectionEntered(
+    uint32_t generation, uint32_t collectionReason) {
+    guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    guidexos_nativeaot_c011ec39_plan_record& r = d.c011ec39Plan;
+    if (r.finalDecisionObserved != 0u &&
+        d.c011ec33ManagedResumeCount >= 2u &&
+        d.c011ec33Collections[1].collectionCompleted != 0u) {
+        r.collection3Triggered = 1u;
+    }
+    (void)generation;
+    (void)collectionReason;
+}
+
+static void guideXosNativeAotC011EC39EmitRecord(
+    const char* marker, const guidexos_nativeaot_c011ec39_plan_record& r,
+    const guidexos_nativeaot_allocation_diagnostics& d) {
+    suspendEeSerialPutString(
+        "[nativeaot-gc-short-weak-lifetime] ");
+    suspendEeSerialPutString(marker);
+#define C39P32(name, value) \
+    suspendEeSerialPutString(" " name "="); suspendEeSerialPutHex32(value)
+#define C39P64(name, value) \
+    suspendEeSerialPutString(" " name "="); suspendEeSerialPutHex64(value)
+    C39P32("plannerEntry", r.plannerEntryObserved);
+    C39P32("decideObserved", r.decideObserved);
+    C39P32("finalDecisionObserved", r.finalDecisionObserved);
+    C39P32("actualPhaseObserved", r.actualPhaseObserved);
+    C39P32("finalDecision", r.finalDecision);
+    C39P32("actualPhase", r.actualPhase);
+    C39P32("condemnedGeneration", r.condemnedGeneration);
+    C39P32("collectionReason", r.collectionReason);
+    C39P32("plannerCondemnedGeneration", r.condemnedGeneration);
+    C39P32("plannerCollectionReason", r.collectionReason);
+    C39P32("heapNumber", r.heapNumber);
+    C39P32("maximumGeneration", r.maximumGeneration);
+    C39P32("prePlanCompacting", r.prePlanCompacting);
+    C39P32("prePlanPromotion", r.prePlanPromotion);
+    C39P32("prePlanConcurrent", r.prePlanConcurrent);
+    C39P32("prePlanPauseMode", r.prePlanPauseMode);
+    C39P32("finalPauseMode", r.finalPauseMode);
+    C39P32("dispatchPriorCompacting", r.dispatchPriorCompacting);
+    C39P32("finalCompacting", r.finalCompacting);
+    C39P32("finalRelocatingDerived", r.finalRelocatingDerived);
+    C39P32("plannerEntryCount", r.plannerEntryCount);
+    C39P32("decideCount", r.decideCount);
+    C39P32("finalDecisionCount", r.finalDecisionCount);
+    C39P32("compactPhaseCount", r.compactPhaseCount);
+    C39P32("sweepPhaseCount", r.sweepPhaseCount);
+    C39P32("forceCompact", r.forceCompact);
+    C39P32("lastGcBeforeOom", r.lastGcBeforeOom);
+    C39P32("inducedCompacting", r.inducedCompacting);
+    C39P32("inducedAggressive", r.inducedAggressive);
+    C39P32("pmFullGcReason", r.pmFullGcReason);
+    C39P32("provisionalMode", r.provisionalMode);
+    C39P32("lowEphemeral", r.lowEphemeral);
+    C39P32("fragmentationExceeded", r.fragmentationExceeded);
+    C39P32("highMemory", r.highMemory);
+    C39P32("ensureGapForcedCompaction", r.ensureGapForcedCompaction);
+    C39P32("compactionMechanism", r.compactionMechanism);
+    C39P32("entryMemoryLoad", r.entryMemoryLoad);
+    C39P32("gen0ReductionCount", r.gen0ReductionCount);
+    C39P32("pmTriggerFullGc", r.pmTriggerFullGc);
+    C39P32("sensitiveAllocations", d.c011ec29SensitiveAllocationCount);
+    C39P32("plannerMutations", r.plannerMutations);
+    C39P32("managedReentryWhileSuspended", d.c011ec29ManagedEntryAttempts);
+    C39P32("collection3Triggered", r.collection3Triggered);
+    C39P32("preflight", r.preflightEmitted);
+    C39P32("completionMarker", r.completionMarkerEmitted);
+    C39P32("safeStopReason", r.safeStopReason);
+    C39P32("segmentCountAvailable", r.segmentCountAvailable);
+    C39P32("ensureGapObserved", r.ensureGapObserved);
+    C39P32("ensureGapAvailable", r.ensureGapAvailable);
+    C39P32("compactionSpaceObserved", r.compactionSpaceObserved);
+    C39P32("compactionSpaceDecisionObserved", r.compactionSpaceDecisionObserved);
+    C39P32("compactionSpaceDecision", r.compactionSpaceDecision);
+    C39P32("compactionSpaceSweepSufficient", r.compactionSpaceSweepSufficient);
+    C39P32("compactionSpaceCompactSufficient", r.compactionSpaceCompactSufficient);
+    C39P32("compactionSpaceLargeChunkFound", r.compactionSpaceLargeChunkFound);
+    C39P64("entryAvailablePhysicalMemory", r.entryAvailablePhysicalMemory);
+    C39P64("fragmentation", r.fragmentation);
+    C39P64("generationSizes", r.generationSizes);
+    C39P64("fragmentationThreshold", r.fragmentationThreshold);
+    C39P64("fragmentationBurdenPpm", r.fragmentationBurdenPpm);
+    C39P64("fragmentationBurdenThresholdPpm", r.fragmentationBurdenThresholdPpm);
+    C39P64("generationSize", r.generationSize);
+    C39P64("generationPlanSize", r.generationPlanSize);
+    C39P64("generationFreeListBytes", r.generationFreeListBytes);
+    C39P64("generationFreeObjBytes", r.generationFreeObjBytes);
+    C39P64("generationCondemnedAllocated", r.generationCondemnedAllocated);
+    C39P64("generationSweepAllocated", r.generationSweepAllocated);
+    C39P64("generationPinnedCompactBytes", r.generationPinnedCompactBytes);
+    C39P64("generationPinnedSweepBytes", r.generationPinnedSweepBytes);
+    C39P64("promotedBytes", r.promotedBytes);
+    C39P64("survivedBytes", r.survivedBytes);
+    C39P64("desiredAllocation", r.desiredAllocation);
+    C39P64("newAllocation", r.newAllocation);
+    C39P64("currentSize", r.currentSize);
+    C39P64("segmentCount", r.segmentCount);
+    C39P64("compactionSpaceGen0Size", r.compactionSpaceGen0Size);
+    C39P64("compactionSpaceSweepFreeBytes", r.compactionSpaceSweepFreeBytes);
+    C39P64("compactionSpacePinnedFreeBytes", r.compactionSpacePinnedFreeBytes);
+    C39P64("compactionSpaceEndGen0Bytes", r.compactionSpaceEndGen0Bytes);
+    C39P64("plannerEntryPC", r.plannerEntryAddress);
+    C39P64("decidePC", r.decideAddress);
+    C39P64("finalDecisionPC", r.finalDecisionAddress);
+    C39P64("compactPhasePC", r.compactPhaseAddress);
+    C39P64("sweepPhasePC", r.sweepPhaseAddress);
+    C39P32("c37ReportedCompacting", d.c011ec33Collections[1].compacting);
+    C39P32("c37ReportedRelocating", d.c011ec33Collections[1].relocating);
+    C39P32("collection2Completed", d.c011ec33Collections[1].collectionCompleted);
+    C39P32("collection2CondemnedGeneration", d.c011ec33Collections[1].condemnedGeneration);
+    C39P32("collection2CollectionReason", d.c011ec33Collections[1].collectionReason);
+    C39P32("targetDead", d.c011ec33Collections[1].deadDecisions != 0u ? 1u : 0u);
+    C39P32("weakSlotCleared", d.c011ec33Collections[1].clearedCount != 0u ? 1u : 0u);
+    C39P32("restartEE", d.c011ec33Collections[1].eeRestartReturns != 0u ? 1u : 0u);
+    C39P32("managedResume", d.c011ec33Collections[1].managedResumeCount != 0u ? 1u : 0u);
+#undef C39P32
+#undef C39P64
+    suspendEeSerialPutString("\n");
+}
+
+extern "C" __declspec(dllexport) int __cdecl
+guideXosNativeAotC011EC39Finish() {
+    guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    guidexos_nativeaot_c011ec39_plan_record& r = d.c011ec39Plan;
+    const guidexos_nativeaot_c011ec33_collection_record& c2 =
+        d.c011ec33Collections[1];
+    const uintptr_t weakValue = d.c011ec33WeakHandleSlot == 0u ? 0u :
+        *reinterpret_cast<const uintptr_t*>(d.c011ec33WeakHandleSlot);
+    r.sensitiveAllocations = d.c011ec29SensitiveAllocationCount;
+    const bool preflightReady = d.c011ec37CompletionMarkerEmitted != 0u &&
+        r.plannerEntryObserved != 0u && r.finalDecisionObserved != 0u &&
+        r.actualPhaseObserved != 0u;
+    if (!preflightReady) {
+        r.safeStopReason = 0xC0390001u;
+        guideXosNativeAotC011EC39EmitRecord(
+            "BLOCKED marker=C011EC39-BLOCKED", r, d);
+        return -1;
+    }
+    r.preflightEmitted = 1u;
+    guideXosNativeAotC011EC39EmitRecord(
+        "PREFLIGHT marker=C011EC39-PREFLIGHT", r, d);
+    const bool valid =
+        c2.collectionCompleted != 0u && c2.condemnedGeneration == 1u &&
+        r.condemnedGeneration == 1u && c2.eeRestartReturns != 0u &&
+        c2.managedResumeCount != 0u && c2.deadDecisions != 0u &&
+        c2.clearedCount != 0u && weakValue == 0u &&
+        ((r.finalDecision != 0u && r.actualPhase == 1u) ||
+         (r.finalDecision == 0u && r.actualPhase == 2u)) &&
+        r.compactPhaseCount + r.sweepPhaseCount == 1u &&
+        r.collection3Triggered == 0u && r.sensitiveAllocations == 0u &&
+        d.c011ec29ManagedEntryAttempts == 0u && r.plannerMutations == 0u;
+    if (!valid) {
+        r.safeStopReason = 0xC0390001u;
+        guideXosNativeAotC011EC39EmitRecord(
+            "BLOCKED marker=C011EC39-BLOCKED", r, d);
+        return -1;
+    }
+    r.safeStopReason = 0u;
+    r.completionMarkerEmitted = 1u;
+    guideXosNativeAotC011EC39EmitRecord(
+        "COMPLETE marker=C011EC39 outcome=C", r, d);
+    return 0;
+}
+#endif
+
 #if defined(GUIDEXOS_NATIVEAOT_C011EC38_DEAD_OBJECT_RECLAMATION)
 static void guideXosNativeAotC011EC38EmitPreflight() {
     const guidexos_nativeaot_allocation_diagnostics& d =
@@ -15492,6 +15922,10 @@ extern "C" void* __pinvoke_HostLogProof__Module____Internal__guideXosManagedAllo
 extern "C" void* __pinvoke_HostLogProof__Module____Internal__guideXosManagedThreadStaticProofAssigned__Ansi;
 extern "C" void* __pinvoke_HostLogProof__Module____Internal__guideXosManagedThreadStaticProofReadback__Ansi;
 #endif
+#if defined(GUIDEXOS_NATIVEAOT_C011EC39_PLAN_PROVENANCE)
+extern "C" void* __pinvoke_HostLogProof__Module____Internal__guideXosNativeAotC011EC39Finish__Ansi;
+extern "C" __declspec(dllexport) int __cdecl guideXosNativeAotC011EC39Finish();
+#endif
 #endif
 #endif
 
@@ -17035,6 +17469,12 @@ extern "C" __declspec(noinline) void __cdecl RhpReversePInvoke(void* frame) {
     __pinvoke_HostLogProof__Module____Internal__guideXosNativeAotC011EC37ManagedCheckpoint__Ansi =
         reinterpret_cast<void*>(static_cast<GuideXosNativeAotC011EC37ManagedCheckpointFn>(
             guideXosNativeAotC011EC37ManagedCheckpoint));
+#if defined(GUIDEXOS_NATIVEAOT_C011EC39_PLAN_PROVENANCE)
+    using GuideXosNativeAotC011EC39FinishFn = int (__cdecl*)(void);
+    __pinvoke_HostLogProof__Module____Internal__guideXosNativeAotC011EC39Finish__Ansi =
+        reinterpret_cast<void*>(static_cast<GuideXosNativeAotC011EC39FinishFn>(
+            ::guideXosNativeAotC011EC39Finish));
+#endif
 #if defined(GUIDEXOS_NATIVEAOT_C011EC38_DEAD_OBJECT_RECLAMATION)
     using GuideXosNativeAotC011EC38BeforeAllocationFn = int (__cdecl*)(
         uint32_t, uint32_t);

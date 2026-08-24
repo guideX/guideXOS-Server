@@ -510,6 +510,103 @@ typedef struct guidexos_nativeaot_c011ec38_reclamation_record {
     uintptr_t allocationFreeBytesAfter;
 } guidexos_nativeaot_c011ec38_reclamation_record;
 
+/* C011EC39 locked Workstation plan provenance.  This record is deliberately
+ * bounded and scalar-only.  The GC-side callbacks copy planner values into
+ * this record while the EE is suspended; serial emission happens only after
+ * the C37 managed continuation has resumed.  UINTPTR_MAX means that the
+ * locked source did not expose that metric at the chosen observation point. */
+typedef struct guidexos_nativeaot_c011ec39_plan_record {
+    uint32_t plannerEntryObserved;
+    uint32_t decideObserved;
+    uint32_t finalDecisionObserved;
+    uint32_t actualPhaseObserved;
+    uint32_t finalDecision;
+    uint32_t actualPhase;
+    uint32_t condemnedGeneration;
+    uint32_t collectionReason;
+    uint32_t heapNumber;
+    uint32_t maximumGeneration;
+    uint32_t prePlanCompacting;
+    uint32_t prePlanPromotion;
+    uint32_t prePlanConcurrent;
+    uint32_t prePlanPauseMode;
+    uint32_t finalPauseMode;
+    uint32_t dispatchPriorCompacting;
+    uint32_t finalCompacting;
+    uint32_t finalRelocatingDerived;
+    uint32_t plannerEntryCount;
+    uint32_t decideCount;
+    uint32_t finalDecisionCount;
+    uint32_t compactPhaseCount;
+    uint32_t sweepPhaseCount;
+    uint32_t forceCompact;
+    uint32_t lastGcBeforeOom;
+    uint32_t inducedCompacting;
+    uint32_t inducedAggressive;
+    uint32_t pmFullGcReason;
+    uint32_t provisionalMode;
+    uint32_t lowEphemeral;
+    uint32_t fragmentationExceeded;
+    uint32_t highMemory;
+    uint32_t ensureGapForcedCompaction;
+    uint32_t compactionMechanism;
+    uint32_t entryMemoryLoad;
+    uint32_t gen0ReductionCount;
+    uint32_t pmTriggerFullGc;
+    uint32_t sensitiveAllocations;
+    uint32_t plannerMutations;
+    uint32_t managedReentryWhileSuspended;
+    uint32_t collection3Triggered;
+    uint32_t preflightEmitted;
+    uint32_t completionMarkerEmitted;
+    uint32_t safeStopReason;
+    uint32_t segmentCountAvailable;
+    uint32_t ensureGapObserved;
+    uint32_t ensureGapAvailable;
+    uint32_t compactionSpaceObserved;
+    uint32_t compactionSpaceDecisionObserved;
+    uint32_t compactionSpaceDecision;
+    uint32_t compactionSpaceSweepSufficient;
+    uint32_t compactionSpaceCompactSufficient;
+    uint32_t compactionSpaceLargeChunkFound;
+
+    uintptr_t entryAvailablePhysicalMemory;
+    uintptr_t fragmentation;
+    uintptr_t generationSizes;
+    uintptr_t fragmentationThreshold;
+    uintptr_t fragmentationBurdenPpm;
+    uintptr_t fragmentationBurdenThresholdPpm;
+    uintptr_t generationSize;
+    uintptr_t generationPlanSize;
+    uintptr_t generationFreeListBytes;
+    uintptr_t generationFreeObjBytes;
+    uintptr_t generationCondemnedAllocated;
+    uintptr_t generationSweepAllocated;
+    uintptr_t generationPinnedCompactBytes;
+    uintptr_t generationPinnedSweepBytes;
+    uintptr_t promotedBytes;
+    uintptr_t survivedBytes;
+    uintptr_t desiredAllocation;
+    uintptr_t newAllocation;
+    uintptr_t currentSize;
+    uintptr_t gen0DesiredAllocation;
+    uintptr_t gen0NewAllocation;
+    uintptr_t gen0CurrentSize;
+    uintptr_t gen1DesiredAllocation;
+    uintptr_t gen1NewAllocation;
+    uintptr_t gen1CurrentSize;
+    uintptr_t segmentCount;
+    uintptr_t compactionSpaceGen0Size;
+    uintptr_t compactionSpaceSweepFreeBytes;
+    uintptr_t compactionSpacePinnedFreeBytes;
+    uintptr_t compactionSpaceEndGen0Bytes;
+    uintptr_t plannerEntryAddress;
+    uintptr_t decideAddress;
+    uintptr_t finalDecisionAddress;
+    uintptr_t compactPhaseAddress;
+    uintptr_t sweepPhaseAddress;
+} guidexos_nativeaot_c011ec39_plan_record;
+
 typedef struct guidexos_nativeaot_allocation_diagnostics {
     uint32_t schemaVersion;
     uint32_t heapInitialized;
@@ -2354,6 +2451,8 @@ typedef struct guidexos_nativeaot_allocation_diagnostics {
     guidexos_nativeaot_c011ec35_relocated_handle_record c011ec35RelocatedHandle;
     /* C011EC38 dead-object physical reclamation/reuse evidence. */
     guidexos_nativeaot_c011ec38_reclamation_record c011ec38Reclamation;
+    /* C011EC39 authoritative Collection-2 planner provenance. */
+    guidexos_nativeaot_c011ec39_plan_record c011ec39Plan;
 } guidexos_nativeaot_allocation_diagnostics;
 
 enum {

@@ -65,6 +65,14 @@
     <DefineConstants>$(DefineConstants);HOSTLOGPROOF_FIRST_COLLECTION_BOUNDARY_ALLOCATION;HOSTLOGPROOF_SHORT_WEAK_LIFETIME;HOSTLOGPROOF_C011EC37;HOSTLOGPROOF_C011EC38</DefineConstants>
   </PropertyGroup>
 
+  <PropertyGroup Condition="'$(HostLogProofMode)' == 'CollectionPlanC37'">
+    <DefineConstants>$(DefineConstants);HOSTLOGPROOF_FIRST_COLLECTION_BOUNDARY_ALLOCATION;HOSTLOGPROOF_SHORT_WEAK_LIFETIME;HOSTLOGPROOF_C011EC37;HOSTLOGPROOF_C011EC39</DefineConstants>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(HostLogProofMode)' == 'CollectionPlanC38'">
+    <DefineConstants>$(DefineConstants);HOSTLOGPROOF_FIRST_COLLECTION_BOUNDARY_ALLOCATION;HOSTLOGPROOF_SHORT_WEAK_LIFETIME;HOSTLOGPROOF_C011EC37;HOSTLOGPROOF_C011EC39;HOSTLOGPROOF_C011EC39_C38_VARIANT</DefineConstants>
+  </PropertyGroup>
+
   <PropertyGroup Condition="'$(HostLogProofMode)' == 'FirstNonNullRoot'">
     <DefineConstants>$(DefineConstants);HOSTLOGPROOF_FIRST_COLLECTION_BOUNDARY_ALLOCATION;HOSTLOGPROOF_FIRST_NON_NULL_ROOT</DefineConstants>
   </PropertyGroup>
