@@ -22,6 +22,8 @@ enum class ParserErrorCode : std::uint8_t {
     TooManyStatements,
     TooManyParameters,
     TooManyArguments,
+    TooManyObjectProperties,
+    TooManyArrayElements,
     AllocationFailure,
 };
 
@@ -40,6 +42,8 @@ constexpr std::size_t kDefaultMaxJavaScriptFunctionParameters = 64u;
 constexpr std::size_t kDefaultMaxJavaScriptCallArguments = 64u;
 constexpr std::size_t kDefaultMaxJavaScriptBlockNesting = 128u;
 constexpr std::size_t kDefaultMaxJavaScriptExpressionNesting = 256u;
+constexpr std::size_t kDefaultMaxJavaScriptObjectLiteralProperties = 256u;
+constexpr std::size_t kDefaultMaxJavaScriptArrayLiteralElements = 1024u;
 
 struct ParserLimits {
     std::size_t maxAstNodes = kDefaultMaxJavaScriptAstNodes;
@@ -49,6 +53,10 @@ struct ParserLimits {
     std::size_t maxCallArguments = kDefaultMaxJavaScriptCallArguments;
     std::size_t maxBlockNesting = kDefaultMaxJavaScriptBlockNesting;
     std::size_t maxExpressionNesting = kDefaultMaxJavaScriptExpressionNesting;
+    std::size_t maxObjectLiteralProperties =
+        kDefaultMaxJavaScriptObjectLiteralProperties;
+    std::size_t maxArrayLiteralElements =
+        kDefaultMaxJavaScriptArrayLiteralElements;
 };
 
 struct ParseResult {

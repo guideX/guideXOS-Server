@@ -223,14 +223,14 @@ void testNegativeRuntimeCases()
     expectError("return 1;", RuntimeErrorCode::IllegalReturn, "illegal return");
     expectError("foo();", RuntimeErrorCode::UnknownIdentifier,
         "unknown function identifier");
-    expectError("foo.bar;", RuntimeErrorCode::UnsupportedFeature,
-        "member access before object support");
+    expectError("var foo = null; foo.bar;", RuntimeErrorCode::CannotReadProperty,
+        "null member access");
     expectError("new Foo();", RuntimeErrorCode::UnsupportedFeature,
         "new before object support");
     expectError("this;", RuntimeErrorCode::UnsupportedFeature,
         "this before host policy");
     expectError("var foo = 1; foo.bar = 2;",
-        RuntimeErrorCode::InvalidAssignmentTarget, "member assignment target");
+        RuntimeErrorCode::NotObject, "non-object member assignment");
 
     RuntimeContext lexical;
     const ScriptResult lexicalResult = execute(lexical, "@");
@@ -241,6 +241,179 @@ void testNegativeRuntimeCases()
     const ScriptResult parseResult = execute(parse, "var = 1;");
     expect(parseResult.status == ScriptStatus::ParseFailure,
         "parse failure is distinct");
+}
+
+void testObjectsAndProperties()
+{
+    RuntimeContext context;
+    const ScriptResult result = execute(context,
+        "var obj = { x: 10, y: 20 }; obj.x += 5;"
+        "var result = obj.x + obj.y;"
+        "var key = \"x\"; var computed = obj[key];"
+        "obj[1] = 8; var numeric = obj[\"1\"];"
+        "var missing = obj.missing;");
+    expect(result.succeeded(), "objects: basic properties succeed");
+    expectType(context, "obj", ValueType::Object, "objects: object value");
+    expectNumber(context, "result", 35.0, "objects: member arithmetic");
+    expectNumber(context, "computed", 15.0, "objects: computed read");
+    expectNumber(context, "numeric", 8.0, "objects: numeric key coercion");
+    expectType(context, "missing", ValueType::Undefined,
+        "objects: missing property is Undefined");
+    expect(context.objectCount() == 1 && context.propertyCount() == 3,
+        "objects: bounded pool and duplicate-free properties");
+
+    const ScriptResult duplicate = execute(context,
+        "var order = 0; function record(v) { order = order * 10 + v; return v; }"
+        "var duplicate = { x: record(1), x: record(2) };"
+        "var duplicateValue = duplicate.x;");
+    expect(duplicate.succeeded(), "objects: literal evaluation order succeeds");
+    expectNumber(context, "order", 12.0, "objects: properties initialize left-to-right");
+    expectNumber(context, "duplicateValue", 2.0,
+        "objects: latest duplicate property wins");
+
+    const ScriptResult aliases = execute(context,
+        "var a = { x: 1 }; var b = a; b.x = 5; var aliasResult = a.x;"
+        "var c = {}; var distinct = a === c; var same = a === b;");
+    expect(aliases.succeeded(), "objects: aliases succeed");
+    expectNumber(context, "aliasResult", 5.0, "objects: alias mutation");
+    expect(binding(context, "same")->booleanValue(),
+        "objects: aliases compare by identity");
+    expect(!binding(context, "distinct")->booleanValue(),
+        "objects: distinct objects compare unequal");
+
+    const ScriptResult nested = execute(context,
+        "var nested = { inner: { value: 1 } };"
+        "nested.inner.value = 8; var nestedResult = nested[\"inner\"][\"value\"];"
+        "var post = nested.inner.value++; var prefix = ++nested.inner.value;");
+    expect(nested.succeeded(), "objects: nested members and updates succeed");
+    expectNumber(context, "nestedResult", 8.0, "objects: nested read");
+    expectNumber(context, "post", 8.0, "objects: postfix member update");
+    expectNumber(context, "prefix", 10.0, "objects: prefix member update");
+}
+
+void testArrays()
+{
+    RuntimeContext context;
+    const ScriptResult result = execute(context,
+        "var values = [10, 20, 30]; values[1] = 99;"
+        "var result = values[1]; var len = values.length;"
+        "values[5] = 7; var grown = values.length;"
+        "var hole = values[3]; var same = values === values;");
+    expect(result.succeeded(), "arrays: indexing and assignment succeed");
+    expectType(context, "values", ValueType::Object, "arrays: array is object value");
+    expectNumber(context, "result", 99.0, "arrays: indexed read");
+    expectNumber(context, "len", 3.0, "arrays: length read");
+    expectNumber(context, "grown", 6.0, "arrays: bounded dense growth");
+    expectType(context, "hole", ValueType::Undefined,
+        "arrays: grown holes are Undefined");
+    expect(binding(context, "same")->booleanValue(),
+        "arrays: identity equality");
+
+    const ScriptResult loop = execute(context,
+        "var a = [1, 2, 3, 4]; var sum = 0;"
+        "for (var i = 0; i < a.length; i++) { sum += a[i]; }");
+    expect(loop.succeeded(), "arrays: indexed loop succeeds");
+    expectNumber(context, "sum", 10.0, "arrays: indexed loop result");
+
+    const ScriptResult ordinary = execute(context,
+        "var a = []; a.name = \"test\"; var name = a.name;"
+        "var independent = []; var distinct = a === independent;");
+    expect(ordinary.succeeded(), "arrays: ordinary properties succeed");
+    expectString(context, "name", "test", "arrays: ordinary property");
+    expect(!binding(context, "distinct")->booleanValue(),
+        "arrays: distinct arrays compare unequal");
+}
+
+void testObjectFunctionInteraction()
+{
+    RuntimeContext context;
+    const ScriptResult result = execute(context,
+        "function update(obj) { obj.value = obj.value + 1; }"
+        "var target = { value: 4 }; update(target); var result = target.value;"
+        "function make() { return { value: 12 }; }"
+        "var returned = make(); var returnedValue = returned.value;"
+        "var directReturnedValue = make().value;"
+        "function makeArray() { return [4, 5, 6]; }"
+        "var values = makeArray(); var arrayValue = values[2];");
+    expect(result.succeeded(), "objects: function interaction succeeds");
+    expectNumber(context, "result", 5.0, "objects: passed object is aliased");
+    expectNumber(context, "returnedValue", 12.0, "objects: returned object survives");
+    expectNumber(context, "directReturnedValue", 12.0,
+        "objects: direct returned member read");
+    expectNumber(context, "arrayValue", 6.0, "arrays: returned array survives");
+
+    const ScriptResult closure = execute(context,
+        "function makeBox() { var box = { value: 0 };"
+        " function next() { box.value++; return box.value; } return next; }"
+        "var next = makeBox(); var first = next(); var second = next();");
+    expect(closure.succeeded(), "objects: closure interaction succeeds");
+    expectNumber(context, "first", 1.0, "objects: first closure mutation");
+    expectNumber(context, "second", 2.0, "objects: retained object mutation");
+
+    const ScriptResult functionProperty = execute(context,
+        "function getValue() { return 8; } var obj = {}; obj.f = getValue;"
+        "var f = obj.f; var result = f(); var same = obj.f === getValue;");
+    expect(functionProperty.succeeded(), "objects: function-valued property succeeds");
+    expectNumber(context, "result", 8.0, "objects: function-valued property call");
+    expect(binding(context, "same")->booleanValue(),
+        "objects: function property preserves identity");
+    expectError("var obj = {}; obj.f();", RuntimeErrorCode::UnsupportedFeature,
+        "objects: member call has no receiver semantics");
+}
+
+void testObjectArrayLimitsAndReset()
+{
+    RuntimeLimits objects;
+    objects.maxObjects = 1;
+    expectError("var a = {}; var b = {};", RuntimeErrorCode::ObjectLimitExceeded,
+        "objects: object limit", objects);
+
+    RuntimeLimits properties;
+    properties.maxPropertiesPerObject = 1;
+    expectError("var a = {}; a.x = 1; a.y = 2;",
+        RuntimeErrorCode::PropertyLimitExceeded, "objects: property limit", properties);
+
+    RuntimeLimits totalProperties;
+    totalProperties.maxTotalProperties = 1;
+    expectError("var a = {}; a.x = 1; var b = {}; b.y = 2;",
+        RuntimeErrorCode::PropertyLimitExceeded,
+        "objects: total property limit", totalProperties);
+
+    RuntimeLimits propertyName;
+    propertyName.maxPropertyNameLength = 2;
+    expectError("var a = {}; a.long = 1;",
+        RuntimeErrorCode::PropertyNameTooLong, "objects: property name limit", propertyName);
+
+    RuntimeLimits arrays;
+    arrays.maxArrayElements = 2;
+    expectError("var a = []; a[2] = 1;", RuntimeErrorCode::ArrayLimitExceeded,
+        "arrays: element limit", arrays);
+
+    RuntimeLimits totalArrays;
+    totalArrays.maxTotalArrayElements = 2;
+    expectError("var a = [1, 2]; var b = [3];",
+        RuntimeErrorCode::ArrayLimitExceeded, "arrays: total element limit", totalArrays);
+
+    RuntimeLimits index;
+    index.maxArrayIndex = 2;
+    expectError("var a = []; a[3] = 1;", RuntimeErrorCode::ArrayIndexOutOfRange,
+        "arrays: index limit", index);
+
+    RuntimeLimits budget;
+    budget.maxExecutionSteps = 3;
+    expectError("var a = {}; a.x = 1;", RuntimeErrorCode::ExecutionBudgetExceeded,
+        "objects: operations share execution budget", budget);
+
+    RuntimeContext context;
+    expect(execute(context, "var a = { x: 1 }; a.x = 2; var b = [3];").succeeded(),
+        "reset: objects and arrays setup succeeds");
+    expect(context.objectCount() == 2, "reset: objects are retained before reset");
+    context.reset();
+    expect(context.objectCount() == 0 && context.propertyCount() == 0 &&
+        context.arrayElementCount() == 0, "reset: object pools are cleared");
+    expect(execute(context, "var result = 7;").succeeded(),
+        "reset: new script after object reset succeeds");
+    expectNumber(context, "result", 7.0, "reset: new script result");
 }
 
 void testFunctionsAndLexicalScope()
@@ -520,6 +693,10 @@ int main()
     testFunctionsAndLexicalScope();
     testFunctionLimitsAndFailures();
     testFunctionClosureAndResetLifetime();
+    testObjectsAndProperties();
+    testArrays();
+    testObjectFunctionInteraction();
+    testObjectArrayLimitsAndReset();
     testLimitsAndBudget();
     testContextOwnsSource();
 

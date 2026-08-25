@@ -12,6 +12,7 @@ enum class ValueType : std::uint8_t {
     Number,
     String,
     Function,
+    Object,
 };
 
 using RuntimeStringId = std::uint32_t;
@@ -19,6 +20,9 @@ constexpr RuntimeStringId kInvalidRuntimeStringId = 0xffffffffu;
 
 using RuntimeFunctionId = std::uint32_t;
 constexpr RuntimeFunctionId kInvalidRuntimeFunctionId = 0xffffffffu;
+
+using RuntimeObjectId = std::uint32_t;
+constexpr RuntimeObjectId kInvalidRuntimeObjectId = 0xffffffffu;
 
 // A Value is a small tagged runtime value. String values contain an index into
 // the owning RuntimeContext string store and function values contain a stable
@@ -35,6 +39,7 @@ public:
     static Value number(double value);
     static Value string(RuntimeStringId id);
     static Value function(RuntimeFunctionId id);
+    static Value object(RuntimeObjectId id);
 
     ValueType type() const { return type_; }
     bool isUndefined() const { return type_ == ValueType::Undefined; }
@@ -43,11 +48,13 @@ public:
     bool isNumber() const { return type_ == ValueType::Number; }
     bool isString() const { return type_ == ValueType::String; }
     bool isFunction() const { return type_ == ValueType::Function; }
+    bool isObject() const { return type_ == ValueType::Object; }
 
     bool booleanValue() const { return booleanValue_; }
     double numberValue() const { return numberValue_; }
     RuntimeStringId stringId() const { return stringId_; }
     RuntimeFunctionId functionId() const { return functionId_; }
+    RuntimeObjectId objectId() const { return objectId_; }
 
 private:
     ValueType type_ = ValueType::Undefined;
@@ -55,6 +62,7 @@ private:
     double numberValue_ = 0.0;
     RuntimeStringId stringId_ = kInvalidRuntimeStringId;
     RuntimeFunctionId functionId_ = kInvalidRuntimeFunctionId;
+    RuntimeObjectId objectId_ = kInvalidRuntimeObjectId;
 };
 
 const char* valueTypeName(ValueType type);

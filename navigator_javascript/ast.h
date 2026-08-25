@@ -43,6 +43,9 @@ enum class AstNodeKind : std::uint8_t {
     CallExpression,
     MemberExpression,
     NewExpression,
+    ObjectLiteral,
+    ObjectProperty,
+    ArrayLiteral,
 };
 
 enum class AstUnaryOperator : std::uint8_t {
@@ -112,6 +115,7 @@ struct AstNode {
     AstNodeId callee = kInvalidAstNodeId;
     AstNodeId object = kInvalidAstNodeId;
     AstNodeId property = kInvalidAstNodeId;
+    AstNodeId key = kInvalidAstNodeId;
 
     AstUnaryOperator unaryOperator = AstUnaryOperator::LogicalNot;
     AstBinaryOperator binaryOperator = AstBinaryOperator::Add;

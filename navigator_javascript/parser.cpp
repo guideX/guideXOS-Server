@@ -881,6 +881,8 @@ private:
         }
         if (at(TokenType::KeywordNull)) return makeLeaf(AstNodeKind::NullLiteral, advance());
         if (at(TokenType::KeywordThis)) return makeLeaf(AstNodeKind::ThisExpression, advance());
+        if (at(TokenType::LeftBrace)) return parseObjectLiteral();
+        if (at(TokenType::LeftBracket)) return parseArrayLiteral();
         if (at(TokenType::LeftParen)) {
             const Token open = advance();
             const AstNodeId expression = parseExpression();
@@ -900,6 +902,99 @@ private:
                 TokenType::Identifier, false);
         }
         return kInvalidAstNodeId;
+    }
+
+    AstNodeId parseObjectLiteral()
+    {
+        const Token open = advance();
+        std::vector<AstNodeId> properties;
+        while (!at(TokenType::RightBrace)) {
+            if (at(TokenType::EndOfInput)) {
+                // Preserve the parser's established invalid-expression
+                // diagnostic for a brace that cannot begin a complete
+                // literal, while still reporting bounded literal errors.
+                fail(ParserErrorCode::InvalidExpression, open.location,
+                    TokenType::Identifier, false);
+                return kInvalidAstNodeId;
+            }
+            if (properties.size() >= limits_.maxObjectLiteralProperties) {
+                fail(ParserErrorCode::TooManyObjectProperties, current().location,
+                    TokenType::RightBrace, true);
+                return kInvalidAstNodeId;
+            }
+
+            Token keyToken;
+            if (at(TokenType::Identifier) || at(TokenType::StringLiteral)) {
+                keyToken = advance();
+            } else {
+                fail(ParserErrorCode::ExpectedToken, current().location,
+                    TokenType::Identifier, true);
+                return kInvalidAstNodeId;
+            }
+            const AstNodeId key = makeLeaf(
+                keyToken.type == TokenType::StringLiteral
+                    ? AstNodeKind::StringLiteral : AstNodeKind::Identifier,
+                keyToken);
+            if (key == kInvalidAstNodeId || !expect(TokenType::Colon)) {
+                return kInvalidAstNodeId;
+            }
+            const AstNodeId initializer = parseExpression();
+            if (initializer == kInvalidAstNodeId) return kInvalidAstNodeId;
+            const AstNodeId property = makeNode(AstNodeKind::ObjectProperty,
+                spanLocation(keyToken.location, ast_.node(initializer).location));
+            if (property == kInvalidAstNodeId) return property;
+            ast_.node(property).key = key;
+            ast_.node(property).initializer = initializer;
+            properties.push_back(property);
+
+            if (!at(TokenType::Comma)) break;
+            advance();
+            if (at(TokenType::RightBrace)) break;
+        }
+        if (!expect(TokenType::RightBrace)) return kInvalidAstNodeId;
+        const Token close = tokens_[pos_ - 1];
+        const AstNodeId object = makeNode(AstNodeKind::ObjectLiteral,
+            spanLocation(open.location, close.location));
+        if (object != kInvalidAstNodeId && !setChildren(object, properties)) {
+            fail(ParserErrorCode::AstNodeLimitExceeded, close.location,
+                TokenType::EndOfInput, false);
+            return kInvalidAstNodeId;
+        }
+        return object;
+    }
+
+    AstNodeId parseArrayLiteral()
+    {
+        const Token open = advance();
+        std::vector<AstNodeId> elements;
+        while (!at(TokenType::RightBracket)) {
+            if (at(TokenType::EndOfInput)) {
+                fail(ParserErrorCode::UnexpectedEndOfInput, current().location,
+                    TokenType::RightBracket, true);
+                return kInvalidAstNodeId;
+            }
+            if (elements.size() >= limits_.maxArrayLiteralElements) {
+                fail(ParserErrorCode::TooManyArrayElements, current().location,
+                    TokenType::RightBracket, true);
+                return kInvalidAstNodeId;
+            }
+            const AstNodeId element = parseExpression();
+            if (element == kInvalidAstNodeId) return kInvalidAstNodeId;
+            elements.push_back(element);
+            if (!at(TokenType::Comma)) break;
+            advance();
+            if (at(TokenType::RightBracket)) break;
+        }
+        if (!expect(TokenType::RightBracket)) return kInvalidAstNodeId;
+        const Token close = tokens_[pos_ - 1];
+        const AstNodeId array = makeNode(AstNodeKind::ArrayLiteral,
+            spanLocation(open.location, close.location));
+        if (array != kInvalidAstNodeId && !setChildren(array, elements)) {
+            fail(ParserErrorCode::AstNodeLimitExceeded, close.location,
+                TokenType::EndOfInput, false);
+            return kInvalidAstNodeId;
+        }
+        return array;
     }
 
     bool isAssignable(AstNodeId expression) const
@@ -1037,6 +1132,10 @@ const char* parserErrorCodeName(ParserErrorCode code)
     case ParserErrorCode::TooManyStatements: return "TooManyStatements";
     case ParserErrorCode::TooManyParameters: return "TooManyParameters";
     case ParserErrorCode::TooManyArguments: return "TooManyArguments";
+    case ParserErrorCode::TooManyObjectProperties:
+        return "TooManyObjectProperties";
+    case ParserErrorCode::TooManyArrayElements:
+        return "TooManyArrayElements";
     case ParserErrorCode::AllocationFailure: return "AllocationFailure";
     }
     return "Unknown";

@@ -565,6 +565,126 @@ builds. Tier 2 remains an attempted guideXOS/Navigator integration check; it
 does not change page behavior and does not weaken unrelated Mbed TLS, MSVC,
 or QEMU requirements.
 
+## Phase JS5: objects, arrays, and property semantics
+
+JS5 extends the same standalone evaluator with native JavaScript object and
+array values. It does not create a second runtime model:
+
+```text
+source -> lexer -> bounded AST -> RuntimeContext
+                              -> tagged Value
+                              -> object ID -> context-owned object record
+                              -> own properties / bounded array elements
+```
+
+`ValueType::Object` carries a stable `RuntimeObjectId`. The ID is an index into
+a context-owned object pool and is valid only until `RuntimeContext::reset()`.
+Object records are never addressed through pointers retained by values, so
+vector relocation cannot invalidate an alias. Ordinary objects and arrays are
+both runtime-owned objects; an object record has an explicit array kind and
+arrays use a separate bounded dense element vector.
+
+The property model is deliberately small: own enumerable data properties only,
+represented by a string key and a `Value`. Replacing an existing key updates
+the existing entry, so duplicate object-literal keys and repeated assignment
+do not create unreachable duplicate entries. Object literals evaluate and
+initialize properties left-to-right, with the last duplicate assignment
+winning. String and identifier literal keys are supported; computed literal
+property names, methods, getters, setters, descriptors, and spread are not.
+
+Member reads support both `obj.x` and `obj[key]`. Missing own properties return
+`Undefined`. Member writes create or replace own properties. Computed keys
+support String, Number, Boolean, Null, and Undefined values using bounded,
+locale-independent primitive spelling; `-0` becomes `"0"`. Function and
+object keys are rejected with `InvalidPropertyKey`. A plain object's numeric
+key is therefore shared with its string spelling, while an array treats only
+canonical decimal spellings (`0` or a non-zero decimal string without leading
+zeroes) within the configured index bound as dense indices. Spellings such as
+`"01"`, `"-1"`, and `"1.5"` remain ordinary string properties.
+
+Arrays expose a special read-only `length` value. Literal elements and indexed
+writes use a bounded dense-growth policy: assigning beyond the current length
+fills intervening positions with `Undefined`, then sets `length` to index plus
+one. Array ordinary string properties are supported, but `length` is not a
+writable ordinary property. Indexed reads outside the current length return
+`Undefined`; absurd canonical indices fail with `ArrayIndexOutOfRange`, and
+growth failures use `ArrayLimitExceeded`.
+
+Objects and arrays are passed through bindings, parameters, returns, and
+closures by identity. A function-valued property can be read into a variable
+and called. Member-call syntax is intentionally rejected with
+`UnsupportedFeature`, because JS5 does not define a receiver or `this`
+policy. Primitive boxing is also unsupported, so property access on primitive
+values fails with `NotObject` (and access on Null or Undefined fails with
+`CannotReadProperty`).
+
+The object pool, property storage, array storage, strings, functions, and
+retained environments are all owned by the runtime context and retained until
+reset. There is no object garbage collector yet: unreachable objects can
+remain in the bounded pool until reset. Failed allocation or limit checks do
+not expose a partially initialized value. JavaScript objects remain separate
+from future Navigator host objects; JS5 does not expose `window`, `document`,
+DOM wrappers, page scripts, events, timers, networking APIs, storage, cookies,
+or console.
+
+### Effective JS1-JS5 limits
+
+All limits are finite and configurable through `LexerLimits`, `ParserLimits`,
+or `RuntimeLimits`:
+
+| Resource | Default limit |
+| --- | ---: |
+| Source bytes | 1 MiB |
+| Emitted tokens, including EOF | 8,192 |
+| Token/literal span | 64 KiB |
+| AST nodes | 16,384 |
+| Parser recursion depth | 256 |
+| Statements | 4,096 |
+| Function parameters | 64 |
+| Call arguments | 64 |
+| Block nesting | 128 |
+| Expression nesting | 256 |
+| Object-literal properties | 256 |
+| Array-literal elements | 1,024 |
+| Global bindings | 256 |
+| Function-environment bindings | 256 |
+| Binding-name length | 256 bytes |
+| Runtime string length | 64 KiB |
+| Total runtime string bytes | 256 KiB |
+| Runtime string values | 4,096 |
+| Function values | 4,096 |
+| Retained environments, including global | 256 |
+| Call depth | 64 |
+| Live context-owned objects | 1,024 |
+| Own properties per object | 256 |
+| Total own properties | 4,096 |
+| Property-name length | 256 bytes |
+| Total property-key bytes | 256 KiB |
+| Elements per array | 1,024 |
+| Total array elements | 4,096 |
+| Maximum dense array index | 1,023 |
+| Shared execution steps | 100,000 |
+
+Object/property/array errors are explicit and source-located:
+`NotObject`, `CannotReadProperty`, `CannotWriteProperty`,
+`ObjectLimitExceeded`, `PropertyLimitExceeded`, `PropertyNameTooLong`,
+`ArrayLimitExceeded`, `ArrayIndexOutOfRange`, and `InvalidPropertyKey`.
+Object and array creation plus property operations consume the existing shared
+execution budget; they do not have an unbounded side path.
+
+**The standalone guideXOS JavaScript engine now supports native JavaScript objects and arrays, but Navigator web pages still do not execute JavaScript and no DOM objects are exposed.**
+
+### JS5 validation boundary
+
+Tier 1 proves object identity, own-property reads and writes, computed keys,
+missing-property `Undefined`, object literals, arrays, indexed assignment,
+length and bounded growth, nested members, function arguments and returns,
+function-valued properties, closure/object retention, limit failures, reset
+cleanup, all JS1-JS4 regressions, strict warning-as-error compilation, and
+deterministic execution-budget behavior. Tier 2 remains an attempted normal
+guideXOS/Navigator build and smoke check; JS5 does not alter Navigator page
+execution or browser behavior.
+
 ## Roadmap
 
 ```text
@@ -582,8 +702,8 @@ JS lexer
   -> increasingly capable web APIs
 ```
 
-The next milestone is **Phase JS5 — Objects, Arrays & Property Semantics**:
-object values, stable object identity, bounded property storage, arrays,
-indexed elements, object and array literals, member reads and assignments,
-computed members, array length, and function/object interaction. JS5 still
-must not expose the DOM itself. Full ECMAScript compatibility is not promised.
+The next milestone is **Phase JS6 — Core Built-ins & Prototype Foundation**:
+prototype links, Object and Array prototype foundations, native/built-in
+function values, a small Math subset, String/Array helpers, callable native
+functions, and basic constructor groundwork. JS6 still must not expose the DOM
+itself. Full ECMAScript compatibility is not promised.

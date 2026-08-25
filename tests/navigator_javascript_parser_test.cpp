@@ -385,6 +385,50 @@ void testAdditionalExpressions()
     });
 }
 
+void testObjectAndArrayLiterals()
+{
+    const std::string source =
+        "var obj = { x: 1, \"hello\": [2, 3] };"
+        "var values = [{ a: 4 }, [5, 6]];";
+    expectSuccess(source, "object and array literals", [](const Ast& ast) {
+        const AstNodeId objectDeclaration = ast.childAt(ast.root(), 0);
+        const AstNodeId objectDeclarator = ast.childAt(objectDeclaration, 0);
+        const AstNodeId object = ast.node(objectDeclarator).initializer;
+        expectKind(ast, object, AstNodeKind::ObjectLiteral,
+            "object literal: root");
+        expect(ast.childCount(object) == 2, "object literal: property count");
+        const AstNodeId firstProperty = ast.childAt(object, 0);
+        expectKind(ast, firstProperty, AstNodeKind::ObjectProperty,
+            "object literal: first property");
+        expect(text(ast, ast.node(firstProperty).key) == "x",
+            "object literal: identifier key");
+        expectKind(ast, ast.node(firstProperty).initializer,
+            AstNodeKind::NumericLiteral, "object literal: first value");
+        const AstNodeId secondProperty = ast.childAt(object, 1);
+        expect(text(ast, ast.node(secondProperty).key) == "\"hello\"",
+            "object literal: string key");
+        expectKind(ast, ast.node(secondProperty).initializer,
+            AstNodeKind::ArrayLiteral, "object literal: nested array");
+        expect(ast.childCount(ast.node(secondProperty).initializer) == 2,
+            "array literal: nested element count");
+
+        const AstNodeId valuesDeclaration = ast.childAt(ast.root(), 1);
+        const AstNodeId values = ast.node(ast.childAt(valuesDeclaration, 0)).initializer;
+        expectKind(ast, values, AstNodeKind::ArrayLiteral,
+            "array literal: root");
+        expect(ast.childCount(values) == 2, "array literal: element count");
+        expectKind(ast, ast.childAt(values, 0), AstNodeKind::ObjectLiteral,
+            "array literal: nested object");
+        expectKind(ast, ast.childAt(values, 1), AstNodeKind::ArrayLiteral,
+            "array literal: nested array");
+    });
+
+    expectError("var x = { a: 1;", ParserErrorCode::ExpectedToken, 14,
+        "malformed object literal");
+    expectError("var x = [1, 2;", ParserErrorCode::ExpectedToken, 13,
+        "malformed array literal");
+}
+
 void testNegativeSyntax()
 {
     expectError("var = 1;", ParserErrorCode::ExpectedToken, 4,
@@ -438,6 +482,17 @@ void testLimits()
     arguments.maxCallArguments = 2;
     expectError("foo(a, b, c);", ParserErrorCode::TooManyArguments, 10,
         "argument limit", arguments);
+
+    ParserLimits properties;
+    properties.maxObjectLiteralProperties = 1;
+    expectError("var x = { a: 1, b: 2 };",
+        ParserErrorCode::TooManyObjectProperties, 16,
+        "object literal property limit", properties);
+
+    ParserLimits elements;
+    elements.maxArrayLiteralElements = 1;
+    expectError("var x = [1, 2];", ParserErrorCode::TooManyArrayElements, 12,
+        "array literal element limit", elements);
 }
 
 void testLocationsAndLexerPropagation()
@@ -477,6 +532,7 @@ int main()
     testMemberCall();
     testPrecedence();
     testAdditionalExpressions();
+    testObjectAndArrayLiterals();
     testNegativeSyntax();
     testLimits();
     testLocationsAndLexerPropagation();

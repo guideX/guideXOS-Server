@@ -6,6 +6,7 @@
 #include "value.h"
 
 #include <cstddef>
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -33,6 +34,15 @@ enum class RuntimeErrorCode : std::uint8_t {
     IllegalReturn,
     InvalidAstState,
     AllocationFailure,
+    NotObject,
+    CannotReadProperty,
+    CannotWriteProperty,
+    ObjectLimitExceeded,
+    PropertyLimitExceeded,
+    PropertyNameTooLong,
+    ArrayLimitExceeded,
+    ArrayIndexOutOfRange,
+    InvalidPropertyKey,
 };
 
 struct RuntimeError {
@@ -67,6 +77,14 @@ constexpr std::size_t kDefaultJavaScriptExecutionSteps = 100000u;
 constexpr std::size_t kDefaultMaxJavaScriptCallDepth = 64u;
 constexpr std::size_t kDefaultMaxJavaScriptEnvironments = 256u;
 constexpr std::size_t kDefaultMaxJavaScriptFunctionValues = 4096u;
+constexpr std::size_t kDefaultMaxJavaScriptRuntimeObjects = 1024u;
+constexpr std::size_t kDefaultMaxJavaScriptPropertiesPerObject = 256u;
+constexpr std::size_t kDefaultMaxJavaScriptRuntimeProperties = 4096u;
+constexpr std::size_t kDefaultMaxJavaScriptPropertyNameLength = 256u;
+constexpr std::size_t kDefaultMaxJavaScriptPropertyKeyBytes = 256u * 1024u;
+constexpr std::size_t kDefaultMaxJavaScriptArrayElements = 1024u;
+constexpr std::size_t kDefaultMaxJavaScriptArrayElementCount = 4096u;
+constexpr std::size_t kDefaultMaxJavaScriptArrayIndex = 1023u;
 
 struct RuntimeLimits {
     LexerLimits lexer;
@@ -94,6 +112,18 @@ struct RuntimeLimits {
     // environment bound for the context lifetime.
     std::size_t maxEnvironments = kDefaultMaxJavaScriptEnvironments;
     std::size_t maxFunctions = kDefaultMaxJavaScriptFunctionValues;
+    std::size_t maxObjects = kDefaultMaxJavaScriptRuntimeObjects;
+    std::size_t maxPropertiesPerObject =
+        kDefaultMaxJavaScriptPropertiesPerObject;
+    std::size_t maxTotalProperties = kDefaultMaxJavaScriptRuntimeProperties;
+    std::size_t maxPropertyNameLength =
+        kDefaultMaxJavaScriptPropertyNameLength;
+    std::size_t maxTotalPropertyKeyBytes =
+        kDefaultMaxJavaScriptPropertyKeyBytes;
+    std::size_t maxArrayElements = kDefaultMaxJavaScriptArrayElements;
+    std::size_t maxTotalArrayElements =
+        kDefaultMaxJavaScriptArrayElementCount;
+    std::size_t maxArrayIndex = kDefaultMaxJavaScriptArrayIndex;
 };
 
 // A context is an independent, resettable bounded JavaScript realm.  execute() copies a
@@ -127,6 +157,9 @@ public:
     std::size_t runtimeStringValueCount() const { return strings_.size(); }
     std::size_t environmentCount() const { return 1u + environments_.size(); }
     std::size_t functionValueCount() const { return functions_.size(); }
+    std::size_t objectCount() const { return objects_.size(); }
+    std::size_t propertyCount() const { return totalPropertyCount_; }
+    std::size_t arrayElementCount() const { return totalArrayElements_; }
     std::size_t activeCallFrameCount() const { return activeCallFrames_; }
 
 private:
@@ -138,6 +171,17 @@ private:
         EnvironmentId closureEnvironment = kInvalidEnvironmentId;
     };
 
+    struct RuntimeProperty {
+        std::string key;
+        Value value;
+    };
+
+    struct RuntimeObject {
+        bool array = false;
+        std::vector<RuntimeProperty> properties;
+        std::vector<Value> elements;
+    };
+
     bool createString(SourceView text, Value& value, RuntimeErrorCode& error);
     const std::string* stringData(const Value& value) const;
     bool createEnvironment(EnvironmentId parent, EnvironmentId& result,
@@ -147,6 +191,14 @@ private:
     bool createFunction(AstNodeId declaration, EnvironmentId closure,
         RuntimeFunctionId& result, RuntimeErrorCode& error);
     const FunctionRecord* functionAt(RuntimeFunctionId id) const;
+    bool createObject(bool array, const std::vector<Value>& initialElements,
+        RuntimeObjectId& result, RuntimeErrorCode& error);
+    RuntimeObject* objectAt(RuntimeObjectId id);
+    const RuntimeObject* objectAt(RuntimeObjectId id) const;
+    bool readProperty(RuntimeObjectId object, const std::string& key,
+        Value& value, RuntimeErrorCode& error) const;
+    bool writeProperty(RuntimeObjectId object, const std::string& key,
+        Value value, RuntimeErrorCode& error);
     void setRuntimeError(RuntimeErrorCode code, SourceLocation location);
     bool consumeStep(SourceLocation location);
 
@@ -157,7 +209,11 @@ private:
     std::vector<Environment> environments_;
     std::vector<FunctionRecord> functions_;
     std::vector<std::string> strings_;
+    std::vector<RuntimeObject> objects_;
     std::size_t totalStringBytes_ = 0;
+    std::size_t totalPropertyCount_ = 0;
+    std::size_t totalPropertyKeyBytes_ = 0;
+    std::size_t totalArrayElements_ = 0;
     std::size_t executionSteps_ = 0;
     ScriptResult result_;
     Value finalValue_;

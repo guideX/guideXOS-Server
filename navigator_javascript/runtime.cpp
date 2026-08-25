@@ -173,6 +173,34 @@ std::string numberToString(double value, bool& succeeded)
     return std::string(buffer.data(), conversion.ptr);
 }
 
+bool isCanonicalArrayIndexSpelling(const std::string& key)
+{
+    if (key.empty()) return false;
+    if (key == "0") return true;
+    if (key[0] == '0') return false;
+    for (const char character : key) {
+        if (!isAsciiDigit(character)) return false;
+    }
+    return true;
+}
+
+bool parseBoundedArrayIndex(const std::string& key, std::size_t maximum,
+    std::size_t& index)
+{
+    if (!isCanonicalArrayIndexSpelling(key)) return false;
+    std::size_t value = 0;
+    for (const char character : key) {
+        const std::size_t digit = static_cast<std::size_t>(character - '0');
+        if (value > maximum / 10u ||
+            (value == maximum / 10u && digit > maximum % 10u)) {
+            return false;
+        }
+        value = value * 10u + digit;
+    }
+    index = value;
+    return true;
+}
+
 } // namespace
 
 class RuntimeContext::Evaluator {
@@ -221,6 +249,12 @@ private:
         EnvironmentId environment = kInvalidEnvironmentId;
         EnvironmentId callerEnvironment = kInvalidEnvironmentId;
         SourceLocation callSite;
+    };
+
+    struct MemberReference {
+        RuntimeObjectId object = kInvalidRuntimeObjectId;
+        std::string key;
+        SourceLocation location;
     };
 
     bool validNode(AstNodeId id, SourceLocation location)
@@ -583,6 +617,174 @@ private:
         return true;
     }
 
+    bool propertyKeyFromValue(const Value& value, std::string& key,
+        SourceLocation location)
+    {
+        if (value.isObject() || value.isFunction()) {
+            fail(RuntimeErrorCode::InvalidPropertyKey, location);
+            return false;
+        }
+        if (!primitiveString(value, key)) {
+            if (context_.result_.runtimeError.code == RuntimeErrorCode::None) {
+                fail(RuntimeErrorCode::InvalidPropertyKey, location);
+            }
+            return false;
+        }
+        if (value.isNumber() && value.numberValue() == 0.0) key = "0";
+        return true;
+    }
+
+    bool resolveMember(AstNodeId id, MemberReference& reference,
+        bool forWrite = false)
+    {
+        if (!validNode(id, SourceLocation())) return false;
+        const AstNode& node = context_.ast_.node(id);
+        if (node.kind != AstNodeKind::MemberExpression ||
+            !validNode(node.object, node.location) ||
+            !validNode(node.property, node.location)) {
+            fail(RuntimeErrorCode::InvalidAstState, node.location);
+            return false;
+        }
+        Value object;
+        if (!evalExpression(node.object, object)) return false;
+        if (!object.isObject()) {
+            fail(object.isNull() || object.isUndefined()
+                ? (forWrite ? RuntimeErrorCode::CannotWriteProperty
+                    : RuntimeErrorCode::CannotReadProperty)
+                : RuntimeErrorCode::NotObject, node.location);
+            return false;
+        }
+        if (context_.objectAt(object.objectId()) == nullptr) {
+            fail(RuntimeErrorCode::CannotReadProperty, node.location);
+            return false;
+        }
+
+        std::string key;
+        if (!node.computed) {
+            SourceView keyView;
+            if (!identifierName(node.property, keyView)) return false;
+            try {
+                key.assign(keyView.data, keyView.length);
+            } catch (const std::bad_alloc&) {
+                fail(RuntimeErrorCode::AllocationFailure, node.location);
+                return false;
+            }
+        } else {
+            Value property;
+            if (!evalExpression(node.property, property) ||
+                !propertyKeyFromValue(property, key, node.location)) return false;
+        }
+        reference.object = object.objectId();
+        reference.key = std::move(key);
+        reference.location = node.location;
+        return true;
+    }
+
+    bool readMember(const MemberReference& reference, Value& value)
+    {
+        if (!context_.consumeStep(reference.location)) return false;
+        RuntimeErrorCode error = RuntimeErrorCode::None;
+        if (context_.readProperty(reference.object, reference.key, value, error)) {
+            return true;
+        }
+        fail(error, reference.location);
+        return false;
+    }
+
+    bool writeMember(const MemberReference& reference, Value value)
+    {
+        if (!context_.consumeStep(reference.location)) return false;
+        RuntimeErrorCode error = RuntimeErrorCode::None;
+        if (context_.writeProperty(reference.object, reference.key, value, error)) {
+            return true;
+        }
+        fail(error, reference.location);
+        return false;
+    }
+
+    bool evalObjectLiteral(AstNodeId id, const AstNode& node, Value& result)
+    {
+        if (!context_.consumeStep(node.location)) return false;
+        const std::vector<Value> noElements;
+        RuntimeObjectId object = kInvalidRuntimeObjectId;
+        RuntimeErrorCode error = RuntimeErrorCode::None;
+        if (!context_.createObject(false, noElements, object, error)) {
+            fail(error, node.location);
+            return false;
+        }
+        result = Value::object(object);
+        for (std::size_t index = 0; index < node.childCount; ++index) {
+            const AstNodeId propertyId = context_.ast_.childAt(id, index);
+            if (!validNode(propertyId, node.location)) return false;
+            const AstNode& property = context_.ast_.node(propertyId);
+            if (property.kind != AstNodeKind::ObjectProperty ||
+                !validNode(property.key, property.location) ||
+                !validNode(property.initializer, property.location)) {
+                fail(RuntimeErrorCode::InvalidAstState, property.location);
+                return false;
+            }
+            std::string key;
+            if (context_.ast_.node(property.key).kind == AstNodeKind::Identifier) {
+                SourceView keyView;
+                if (!identifierName(property.key, keyView)) return false;
+                try {
+                    key.assign(keyView.data, keyView.length);
+                } catch (const std::bad_alloc&) {
+                    fail(RuntimeErrorCode::AllocationFailure, property.location);
+                    return false;
+                }
+            } else if (context_.ast_.node(property.key).kind == AstNodeKind::StringLiteral) {
+                Value keyValue;
+                if (!decodeString(property.key, keyValue)) return false;
+                const std::string* keyText = context_.stringData(keyValue);
+                if (keyText == nullptr) {
+                    fail(RuntimeErrorCode::InvalidAstState, property.location);
+                    return false;
+                }
+                key = *keyText;
+            } else {
+                fail(RuntimeErrorCode::InvalidAstState, property.location);
+                return false;
+            }
+            Value value;
+            if (!evalExpression(property.initializer, value)) return false;
+            if (!context_.consumeStep(property.location)) return false;
+            error = RuntimeErrorCode::None;
+            if (!context_.writeProperty(object, key, value, error)) {
+                fail(error, property.location);
+                return false;
+            }
+        }
+        return true;
+    }
+
+    bool evalArrayLiteral(AstNodeId id, const AstNode& node, Value& result)
+    {
+        std::vector<Value> elements;
+        try {
+            elements.reserve(node.childCount);
+            for (std::size_t index = 0; index < node.childCount; ++index) {
+                const AstNodeId elementId = context_.ast_.childAt(id, index);
+                if (!validNode(elementId, node.location)) return false;
+                Value element;
+                if (!evalExpression(elementId, element)) return false;
+                elements.push_back(element);
+            }
+        } catch (const std::bad_alloc&) {
+            fail(RuntimeErrorCode::AllocationFailure, node.location);
+            return false;
+        }
+        if (!context_.consumeStep(node.location)) return false;
+        RuntimeObjectId array = kInvalidRuntimeObjectId;
+        RuntimeErrorCode error = RuntimeErrorCode::None;
+        if (!context_.createObject(true, elements, array, error)) {
+            fail(error, node.location);
+            return false;
+        }
+        result = Value::object(array);
+        return true;
+    }
+
     bool evalExpression(AstNodeId id, Value& value)
     {
         if (!beginNode(id)) return false;
@@ -624,8 +826,17 @@ private:
             return evalUpdate(node, value);
         case AstNodeKind::CallExpression:
             return evalCall(id, node, value);
-        case AstNodeKind::MemberExpression:
-        case AstNodeKind::NewExpression:
+        case AstNodeKind::MemberExpression: {
+            MemberReference reference;
+            if (!resolveMember(id, reference)) return false;
+            return readMember(reference, value);
+        }
+        case AstNodeKind::ObjectLiteral:
+            return evalObjectLiteral(id, node, value);
+        case AstNodeKind::ArrayLiteral:
+            return evalArrayLiteral(id, node, value);
+        case AstNodeKind::ObjectProperty:
+            case AstNodeKind::NewExpression:
             fail(RuntimeErrorCode::UnsupportedFeature, node.location);
             return false;
         default:
@@ -637,6 +848,10 @@ private:
     bool evalCall(AstNodeId callId, const AstNode& node, Value& result)
     {
         if (!validNode(node.callee, node.location)) return false;
+        if (context_.ast_.node(node.callee).kind == AstNodeKind::MemberExpression) {
+            fail(RuntimeErrorCode::UnsupportedFeature, node.location);
+            return false;
+        }
         if (node.childCount > context_.limits_.parser.maxCallArguments) {
             fail(RuntimeErrorCode::InvalidAstState, node.location);
             return false;
@@ -802,6 +1017,9 @@ private:
         case ValueType::Function:
             number = std::numeric_limits<double>::quiet_NaN();
             return true;
+        case ValueType::Object:
+            number = std::numeric_limits<double>::quiet_NaN();
+            return true;
         }
         fail(RuntimeErrorCode::InvalidOperandType, SourceLocation());
         return false;
@@ -832,6 +1050,9 @@ private:
             return true;
         }
         case ValueType::Function:
+            fail(RuntimeErrorCode::InvalidOperandType, SourceLocation());
+            return false;
+        case ValueType::Object:
             fail(RuntimeErrorCode::InvalidOperandType, SourceLocation());
             return false;
         }
@@ -1028,10 +1249,45 @@ private:
     {
         if (!validNode(node.left, node.location) ||
             !validNode(node.right, node.location)) return false;
-        if (context_.ast_.node(node.left).kind != AstNodeKind::Identifier) {
+        const AstNodeKind leftKind = context_.ast_.node(node.left).kind;
+        if (leftKind != AstNodeKind::Identifier &&
+            leftKind != AstNodeKind::MemberExpression) {
             fail(RuntimeErrorCode::InvalidAssignmentTarget, node.location);
             return false;
         }
+
+        if (leftKind == AstNodeKind::MemberExpression) {
+            MemberReference reference;
+            if (!resolveMember(node.left, reference, true)) return false;
+            Value right;
+            if (node.assignmentOperator == AstAssignmentOperator::Assign) {
+                if (!evalExpression(node.right, right) ||
+                    !writeMember(reference, right)) return false;
+                result = right;
+                return true;
+            }
+            Value left;
+            if (!readMember(reference, left) ||
+                !evalExpression(node.right, right)) return false;
+            AstBinaryOperator binary = AstBinaryOperator::Add;
+            switch (node.assignmentOperator) {
+            case AstAssignmentOperator::Add: binary = AstBinaryOperator::Add; break;
+            case AstAssignmentOperator::Subtract: binary = AstBinaryOperator::Subtract; break;
+            case AstAssignmentOperator::Multiply: binary = AstBinaryOperator::Multiply; break;
+            case AstAssignmentOperator::Divide: binary = AstBinaryOperator::Divide; break;
+            case AstAssignmentOperator::Remainder: binary = AstBinaryOperator::Remainder; break;
+            case AstAssignmentOperator::Assign:
+                fail(RuntimeErrorCode::InvalidAstState, node.location);
+                return false;
+            }
+            if (binary == AstBinaryOperator::Add) {
+                if (!addValues(left, right, result, node.location)) return false;
+            } else if (!numericBinary(binary, left, right, result, node.location)) {
+                return false;
+            }
+            return writeMember(reference, result);
+        }
+
         SourceView name;
         if (!identifierName(node.left, name)) return false;
 
@@ -1074,9 +1330,25 @@ private:
     bool evalUpdate(const AstNode& node, Value& result)
     {
         if (!validNode(node.argument, node.location)) return false;
-        if (context_.ast_.node(node.argument).kind != AstNodeKind::Identifier) {
+        const AstNodeKind argumentKind = context_.ast_.node(node.argument).kind;
+        if (argumentKind != AstNodeKind::Identifier &&
+            argumentKind != AstNodeKind::MemberExpression) {
             fail(RuntimeErrorCode::InvalidAssignmentTarget, node.location);
             return false;
+        }
+        if (argumentKind == AstNodeKind::MemberExpression) {
+            MemberReference reference;
+            if (!resolveMember(node.argument, reference, true)) return false;
+            Value old;
+            if (!readMember(reference, old)) return false;
+            double number = 0.0;
+            if (!toNumber(old, number)) return false;
+            const double updated = node.updateOperator == AstUpdateOperator::Increment
+                ? number + 1.0 : number - 1.0;
+            const Value newValue = Value::number(updated);
+            if (!writeMember(reference, newValue)) return false;
+            result = node.prefix ? newValue : old;
+            return true;
         }
         SourceView name;
         if (!identifierName(node.argument, name)) return false;
@@ -1270,6 +1542,8 @@ private:
         }
         case ValueType::Function:
             return true;
+        case ValueType::Object:
+            return true;
         }
         return false;
     }
@@ -1296,6 +1570,9 @@ private:
         case ValueType::Function:
             return left.functionId() != kInvalidRuntimeFunctionId &&
                 left.functionId() == right.functionId();
+        case ValueType::Object:
+            return left.objectId() != kInvalidRuntimeObjectId &&
+                left.objectId() == right.objectId();
         }
         return false;
     }
@@ -1348,7 +1625,11 @@ void RuntimeContext::reset()
     environments_.clear();
     functions_.clear();
     strings_.clear();
+    objects_.clear();
     totalStringBytes_ = 0;
+    totalPropertyCount_ = 0;
+    totalPropertyKeyBytes_ = 0;
+    totalArrayElements_ = 0;
     executionSteps_ = 0;
     result_ = ScriptResult();
     finalValue_ = Value::undefined();
@@ -1460,6 +1741,168 @@ const RuntimeContext::FunctionRecord* RuntimeContext::functionAt(
         return nullptr;
     }
     return &functions_[id];
+}
+
+bool RuntimeContext::createObject(bool array,
+    const std::vector<Value>& initialElements, RuntimeObjectId& result,
+    RuntimeErrorCode& error)
+{
+    error = RuntimeErrorCode::None;
+    if (objects_.size() >= limits_.maxObjects ||
+        objects_.size() >= static_cast<std::size_t>(kInvalidRuntimeObjectId)) {
+        error = RuntimeErrorCode::ObjectLimitExceeded;
+        return false;
+    }
+    if (!array && !initialElements.empty()) {
+        error = RuntimeErrorCode::InvalidAstState;
+        return false;
+    }
+    if (array && (initialElements.size() > limits_.maxArrayElements ||
+        initialElements.size() > limits_.maxTotalArrayElements ||
+        totalArrayElements_ > limits_.maxTotalArrayElements -
+            initialElements.size())) {
+        error = RuntimeErrorCode::ArrayLimitExceeded;
+        return false;
+    }
+    try {
+        RuntimeObject object;
+        object.array = array;
+        if (array) object.elements = initialElements;
+        objects_.push_back(std::move(object));
+    } catch (const std::bad_alloc&) {
+        error = RuntimeErrorCode::AllocationFailure;
+        return false;
+    }
+    result = static_cast<RuntimeObjectId>(objects_.size() - 1u);
+    if (array) totalArrayElements_ += initialElements.size();
+    return true;
+}
+
+RuntimeContext::RuntimeObject* RuntimeContext::objectAt(RuntimeObjectId id)
+{
+    if (id == kInvalidRuntimeObjectId || id >= objects_.size()) return nullptr;
+    return &objects_[id];
+}
+
+const RuntimeContext::RuntimeObject* RuntimeContext::objectAt(
+    RuntimeObjectId id) const
+{
+    if (id == kInvalidRuntimeObjectId || id >= objects_.size()) return nullptr;
+    return &objects_[id];
+}
+
+bool RuntimeContext::readProperty(RuntimeObjectId objectId,
+    const std::string& key, Value& value, RuntimeErrorCode& error) const
+{
+    error = RuntimeErrorCode::None;
+    const RuntimeObject* object = objectAt(objectId);
+    if (object == nullptr) {
+        error = RuntimeErrorCode::CannotReadProperty;
+        return false;
+    }
+    if (key.size() > limits_.maxPropertyNameLength) {
+        error = RuntimeErrorCode::PropertyNameTooLong;
+        return false;
+    }
+    if (object->array && key == "length") {
+        value = Value::number(static_cast<double>(object->elements.size()));
+        return true;
+    }
+    if (object->array && isCanonicalArrayIndexSpelling(key)) {
+        std::size_t index = 0;
+        if (!parseBoundedArrayIndex(key, limits_.maxArrayIndex, index)) {
+            error = RuntimeErrorCode::ArrayIndexOutOfRange;
+            return false;
+        }
+        value = index < object->elements.size()
+            ? object->elements[index] : Value::undefined();
+        return true;
+    }
+    for (const RuntimeProperty& property : object->properties) {
+        if (property.key == key) {
+            value = property.value;
+            return true;
+        }
+    }
+    value = Value::undefined();
+    return true;
+}
+
+bool RuntimeContext::writeProperty(RuntimeObjectId objectId,
+    const std::string& key, Value value, RuntimeErrorCode& error)
+{
+    error = RuntimeErrorCode::None;
+    RuntimeObject* object = objectAt(objectId);
+    if (object == nullptr) {
+        error = RuntimeErrorCode::CannotWriteProperty;
+        return false;
+    }
+    if (key.size() > limits_.maxPropertyNameLength) {
+        error = RuntimeErrorCode::PropertyNameTooLong;
+        return false;
+    }
+    if (object->array && key == "length") {
+        error = RuntimeErrorCode::CannotWriteProperty;
+        return false;
+    }
+    if (object->array && isCanonicalArrayIndexSpelling(key)) {
+        std::size_t index = 0;
+        if (!parseBoundedArrayIndex(key, limits_.maxArrayIndex, index)) {
+            error = RuntimeErrorCode::ArrayIndexOutOfRange;
+            return false;
+        }
+        if (index >= limits_.maxArrayElements) {
+            error = RuntimeErrorCode::ArrayLimitExceeded;
+            return false;
+        }
+        const std::size_t newLength = index + 1u;
+        if (newLength > object->elements.size()) {
+            const std::size_t growth = newLength - object->elements.size();
+            if (growth > limits_.maxTotalArrayElements ||
+                totalArrayElements_ > limits_.maxTotalArrayElements - growth) {
+                error = RuntimeErrorCode::ArrayLimitExceeded;
+                return false;
+            }
+            try {
+                object->elements.resize(newLength, Value::undefined());
+            } catch (const std::bad_alloc&) {
+                error = RuntimeErrorCode::AllocationFailure;
+                return false;
+            }
+            totalArrayElements_ += growth;
+        }
+        object->elements[index] = value;
+        return true;
+    }
+
+    for (RuntimeProperty& property : object->properties) {
+        if (property.key == key) {
+            property.value = value;
+            return true;
+        }
+    }
+    if (object->properties.size() >= limits_.maxPropertiesPerObject ||
+        totalPropertyCount_ >= limits_.maxTotalProperties) {
+        error = RuntimeErrorCode::PropertyLimitExceeded;
+        return false;
+    }
+    if (key.size() > limits_.maxTotalPropertyKeyBytes ||
+        totalPropertyKeyBytes_ > limits_.maxTotalPropertyKeyBytes - key.size()) {
+        error = RuntimeErrorCode::PropertyLimitExceeded;
+        return false;
+    }
+    try {
+        RuntimeProperty property;
+        property.key = key;
+        property.value = value;
+        object->properties.push_back(std::move(property));
+    } catch (const std::bad_alloc&) {
+        error = RuntimeErrorCode::AllocationFailure;
+        return false;
+    }
+    ++totalPropertyCount_;
+    totalPropertyKeyBytes_ += key.size();
+    return true;
 }
 
 const std::string* RuntimeContext::stringData(const Value& value) const
@@ -1577,6 +2020,17 @@ const char* runtimeErrorCodeName(RuntimeErrorCode code)
     case RuntimeErrorCode::IllegalReturn: return "IllegalReturn";
     case RuntimeErrorCode::InvalidAstState: return "InvalidAstState";
     case RuntimeErrorCode::AllocationFailure: return "AllocationFailure";
+    case RuntimeErrorCode::NotObject: return "NotObject";
+    case RuntimeErrorCode::CannotReadProperty: return "CannotReadProperty";
+    case RuntimeErrorCode::CannotWriteProperty: return "CannotWriteProperty";
+    case RuntimeErrorCode::ObjectLimitExceeded: return "ObjectLimitExceeded";
+    case RuntimeErrorCode::PropertyLimitExceeded:
+        return "PropertyLimitExceeded";
+    case RuntimeErrorCode::PropertyNameTooLong: return "PropertyNameTooLong";
+    case RuntimeErrorCode::ArrayLimitExceeded: return "ArrayLimitExceeded";
+    case RuntimeErrorCode::ArrayIndexOutOfRange:
+        return "ArrayIndexOutOfRange";
+    case RuntimeErrorCode::InvalidPropertyKey: return "InvalidPropertyKey";
     }
     return "Invalid";
 }
