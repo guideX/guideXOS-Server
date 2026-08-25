@@ -702,8 +702,128 @@ JS lexer
   -> increasingly capable web APIs
 ```
 
-The next milestone is **Phase JS6 — Core Built-ins & Prototype Foundation**:
-prototype links, Object and Array prototype foundations, native/built-in
-function values, a small Math subset, String/Array helpers, callable native
-functions, and basic constructor groundwork. JS6 still must not expose the DOM
-itself. Full ECMAScript compatibility is not promised.
+### Phase JS6: core built-ins, native functions, and prototypes
+
+JS6 extends the existing bounded runtime in place. It does not introduce a
+second evaluator or a host/browser object path:
+
+```text
+Value(Function)
+  -> stable RuntimeFunctionId
+  -> User declaration or bounded NativeFunctionId
+
+Value(Object)
+  -> stable RuntimeObjectId
+  -> own properties / array elements / prototype RuntimeObjectId
+```
+
+User functions and native functions are both ordinary callable `Function`
+values. Native records use a fixed enum-like callable ID and are installed once
+per context, so repeated reads such as `Math.abs === Math.abs` preserve
+identity. Calls evaluate arguments left-to-right before invocation, bind
+missing user parameters to `Undefined`, respect the parser argument bound, and
+propagate native failures through the same `RuntimeError` model. Native entry
+and bounded internal argument work consume the shared execution budget and
+native calls participate in call-depth accounting.
+
+Member calls preserve the base object as a receiver. In `obj.method()`, both
+user and native functions receive `this = obj`; extracting `var f = obj.method`
+and calling `f()` does not retain the receiver. A plain call uses
+`this = Undefined`, including calls through a higher-order function. Top-level
+`this` follows the same standalone policy. This is deliberately not browser
+global-object behavior.
+
+Runtime objects have an optional ID-based prototype link. Reads search the own
+property first, then each prototype, and finally return `Undefined`. Writes
+always create or update an own property, so assigning `a.push = 5` shadows the
+shared method without changing another array. Traversal is bounded by
+`maxPrototypeDepth` (32 by default); overflow and cyclic chains terminate with
+`PrototypeChainExceeded`, and every visited link consumes execution work.
+There are no script-facing prototype mutation APIs yet.
+
+Fresh contexts initialize these bounded built-ins in deterministic order:
+
+```text
+Object.prototype -> null
+Array.prototype  -> Object.prototype
+Math             -> Object.prototype
+array instance   -> Array.prototype
+ordinary object  -> Object.prototype
+```
+
+`Object.prototype.hasOwnProperty` is the minimal shared object method.
+`Array.prototype.push` and `pop` are receiver-checked native methods. `push`
+supports multiple already-evaluated arguments and uses an all-or-nothing
+capacity check; `pop` returns `Undefined` for an empty array. `Math` is a
+normal runtime object with `abs`, `min`, `max`, `floor`, `ceil`, and `round`.
+`Math.min()` and `Math.max()` return positive and negative infinity,
+respectively. Numeric coercion uses the JS3 primitive rules; `round` uses the
+host-independent `std::round` policy (ties away from zero). `Math.random` is
+absent. Primitive strings support the direct read-only `length` property and
+are not boxed.
+
+Built-in initialization consumes ordinary bounded resources: three runtime
+objects, nine own properties, one global `Math` binding, and nine native
+function values are installed by default. User functions remain bounded by
+`maxFunctions` (4,096); native functions use the separate
+`maxNativeFunctions` limit (64). If object, property, binding, native-function,
+or related limits cannot accommodate initialization, reset reports
+`BuiltInInitializationFailed` and clears the partial state. Successful reset
+recreates the same built-in IDs and prototype graph. All values remain owned
+by the context until reset; there is no garbage collector.
+
+The effective JS1-JS6 defaults are finite:
+
+| Resource | Default limit |
+| --- | ---: |
+| Source bytes | 1 MiB |
+| Emitted tokens, including EOF | 8,192 |
+| Token/literal span | 64 KiB |
+| AST nodes | 16,384 |
+| Parser recursion depth | 256 |
+| Statements | 4,096 |
+| Function parameters | 64 |
+| Call arguments | 64 |
+| Block nesting | 128 |
+| Expression nesting | 256 |
+| Global bindings | 256 |
+| Function-environment bindings | 256 |
+| Binding-name length | 256 bytes |
+| Runtime string length | 64 KiB |
+| Total runtime string bytes | 256 KiB |
+| Runtime string values | 4,096 |
+| User function values | 4,096 |
+| Native function values | 64 |
+| Retained environments, including global | 256 |
+| Logical call depth | 64 |
+| Live context-owned objects | 1,024 |
+| Own properties per object | 256 |
+| Total own properties | 4,096 |
+| Property-name length | 256 bytes |
+| Total property-key bytes | 256 KiB |
+| Elements per array | 1,024 |
+| Total array elements | 4,096 |
+| Maximum dense array index | 1,023 |
+| Prototype-chain depth | 32 |
+| Shared execution steps | 100,000 |
+
+JS6 Tier 1 covers native identity and values, argument order, native errors,
+receiver-aware user/native calls, detached method behavior, prototype
+structure and shadowing, bounded lookup/cycle safety, built-in resource
+failure, array push/pop and receiver validation, Math integration, primitive
+string length, reset/lifetime behavior, and JS1-JS5 regressions. The focused
+suite is `scripts/smoke-navigator-javascript-js6.ps1`.
+
+**The standalone guideXOS JavaScript engine now supports native built-ins,
+receiver-aware method calls, and prototype-backed properties, but Navigator web
+pages still do not execute JavaScript and no DOM/browser objects are exposed.**
+
+Constructors and `new` remain unsupported, as do `Object.create`,
+`Object.setPrototypeOf`, `__proto__`, browser globals, DOM objects, events,
+timers, networking APIs, storage, cookies, and page-script execution. The
+prototype/native machinery is intentionally reusable by the future Navigator
+host-object adapter without enabling that adapter in JS6.
+
+The next milestone is **Phase JS7 — Script Host Contract & Navigator
+Integration Boundary**: a generic bounded host-object interface, host
+properties and receiver-aware host methods, and page/realm lifetime controls.

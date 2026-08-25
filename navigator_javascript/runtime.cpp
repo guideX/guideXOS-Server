@@ -249,10 +249,13 @@ private:
         EnvironmentId environment = kInvalidEnvironmentId;
         EnvironmentId callerEnvironment = kInvalidEnvironmentId;
         SourceLocation callSite;
+        Value thisValue = Value::undefined();
     };
 
     struct MemberReference {
         RuntimeObjectId object = kInvalidRuntimeObjectId;
+        Value receiver = Value::undefined();
+        bool stringPrimitive = false;
         std::string key;
         SourceLocation location;
     };
@@ -647,14 +650,14 @@ private:
         }
         Value object;
         if (!evalExpression(node.object, object)) return false;
-        if (!object.isObject()) {
+        if (!object.isObject() && !object.isString()) {
             fail(object.isNull() || object.isUndefined()
                 ? (forWrite ? RuntimeErrorCode::CannotWriteProperty
                     : RuntimeErrorCode::CannotReadProperty)
                 : RuntimeErrorCode::NotObject, node.location);
             return false;
         }
-        if (context_.objectAt(object.objectId()) == nullptr) {
+        if (object.isObject() && context_.objectAt(object.objectId()) == nullptr) {
             fail(RuntimeErrorCode::CannotReadProperty, node.location);
             return false;
         }
@@ -674,7 +677,17 @@ private:
             if (!evalExpression(node.property, property) ||
                 !propertyKeyFromValue(property, key, node.location)) return false;
         }
-        reference.object = object.objectId();
+        if (object.isString()) {
+            if (forWrite) {
+                fail(RuntimeErrorCode::NotObject, node.location);
+                return false;
+            }
+            reference.stringPrimitive = true;
+            reference.receiver = object;
+        } else {
+            reference.object = object.objectId();
+            reference.receiver = object;
+        }
         reference.key = std::move(key);
         reference.location = node.location;
         return true;
@@ -683,8 +696,16 @@ private:
     bool readMember(const MemberReference& reference, Value& value)
     {
         if (!context_.consumeStep(reference.location)) return false;
+        if (reference.stringPrimitive) {
+            value = reference.key == "length"
+                ? Value::number(static_cast<double>(
+                    context_.stringValue(reference.receiver).size()))
+                : Value::undefined();
+            return true;
+        }
         RuntimeErrorCode error = RuntimeErrorCode::None;
-        if (context_.readProperty(reference.object, reference.key, value, error)) {
+        if (context_.readProperty(reference.object, reference.key, value, error,
+            reference.location)) {
             return true;
         }
         fail(error, reference.location);
@@ -693,6 +714,10 @@ private:
 
     bool writeMember(const MemberReference& reference, Value value)
     {
+        if (reference.stringPrimitive) {
+            fail(RuntimeErrorCode::NotObject, reference.location);
+            return false;
+        }
         if (!context_.consumeStep(reference.location)) return false;
         RuntimeErrorCode error = RuntimeErrorCode::None;
         if (context_.writeProperty(reference.object, reference.key, value, error)) {
@@ -812,8 +837,8 @@ private:
             value = Value::nullValue();
             return true;
         case AstNodeKind::ThisExpression:
-            fail(RuntimeErrorCode::UnsupportedFeature, node.location);
-            return false;
+            value = currentThis_;
+            return true;
         case AstNodeKind::UnaryExpression:
             return evalUnary(node, value);
         case AstNodeKind::BinaryExpression:
@@ -848,17 +873,21 @@ private:
     bool evalCall(AstNodeId callId, const AstNode& node, Value& result)
     {
         if (!validNode(node.callee, node.location)) return false;
-        if (context_.ast_.node(node.callee).kind == AstNodeKind::MemberExpression) {
-            fail(RuntimeErrorCode::UnsupportedFeature, node.location);
-            return false;
-        }
         if (node.childCount > context_.limits_.parser.maxCallArguments) {
             fail(RuntimeErrorCode::InvalidAstState, node.location);
             return false;
         }
 
         Value callee;
-        if (!evalExpression(node.callee, callee)) return false;
+        Value receiver = Value::undefined();
+        if (context_.ast_.node(node.callee).kind == AstNodeKind::MemberExpression) {
+            MemberReference reference;
+            if (!resolveMember(node.callee, reference)) return false;
+            if (!readMember(reference, callee)) return false;
+            receiver = reference.receiver;
+        } else if (!evalExpression(node.callee, callee)) {
+            return false;
+        }
         if (!callee.isFunction()) {
             fail(RuntimeErrorCode::NotCallable, node.location);
             return false;
@@ -879,13 +908,14 @@ private:
             return false;
         }
         return invokeFunction(callee.functionId(), arguments, node.location,
-            result);
+            result, receiver);
     }
 
     void unwindFrame(EnvironmentId callerEnvironment,
-        std::size_t previousFrameCount)
+        Value callerThis, std::size_t previousFrameCount)
     {
         currentEnvironment_ = callerEnvironment;
+        currentThis_ = callerThis;
         if (frames_.size() > previousFrameCount) {
             frames_.resize(previousFrameCount);
         }
@@ -894,12 +924,18 @@ private:
 
     bool invokeFunction(RuntimeFunctionId functionId,
         const std::vector<Value>& arguments, SourceLocation callSite,
-        Value& result)
+        Value& result, Value receiver = Value::undefined())
     {
         const RuntimeContext::FunctionRecord* function =
             context_.functionAt(functionId);
-        if (function == nullptr ||
-            function->declaration == kInvalidAstNodeId ||
+        if (function == nullptr) {
+            fail(RuntimeErrorCode::InvalidFunction, callSite);
+            return false;
+        }
+        if (function->kind == RuntimeContext::FunctionRecord::Kind::Native) {
+            return invokeNative(*function, arguments, callSite, receiver, result);
+        }
+        if (function->declaration == kInvalidAstNodeId ||
             function->closureEnvironment == kInvalidEnvironmentId) {
             fail(RuntimeErrorCode::InvalidFunction, callSite);
             return false;
@@ -924,6 +960,7 @@ private:
         }
 
         const EnvironmentId callerEnvironment = currentEnvironment_;
+        const Value callerThis = currentThis_;
         const std::size_t previousFrameCount = frames_.size();
         try {
             CallFrame frame;
@@ -931,6 +968,7 @@ private:
             frame.environment = callEnvironment;
             frame.callerEnvironment = callerEnvironment;
             frame.callSite = callSite;
+            frame.thisValue = receiver;
             frames_.push_back(frame);
         } catch (const std::bad_alloc&) {
             fail(RuntimeErrorCode::AllocationFailure, callSite);
@@ -938,33 +976,34 @@ private:
         }
         context_.activeCallFrames_ = frames_.size();
         currentEnvironment_ = callEnvironment;
+        currentThis_ = receiver;
 
         for (std::size_t index = 0; index < declaration.childCount; ++index) {
             const AstNodeId parameterId = context_.ast_.childAt(
                 function->declaration, index);
             SourceView name;
             if (!identifierName(parameterId, name)) {
-                unwindFrame(callerEnvironment, previousFrameCount);
+                unwindFrame(callerEnvironment, callerThis, previousFrameCount);
                 return false;
             }
             const Value argument = index < arguments.size()
                 ? arguments[index] : Value::undefined();
             if (!declareIn(callEnvironment, name, argument,
                 context_.ast_.node(parameterId).location)) {
-                unwindFrame(callerEnvironment, previousFrameCount);
+                unwindFrame(callerEnvironment, callerThis, previousFrameCount);
                 return false;
             }
             Environment* target = context_.environmentAt(callEnvironment);
             if (target == nullptr || !target->assign(name, argument)) {
                 fail(RuntimeErrorCode::InvalidAstState,
                     context_.ast_.node(parameterId).location);
-                unwindFrame(callerEnvironment, previousFrameCount);
+                unwindFrame(callerEnvironment, callerThis, previousFrameCount);
                 return false;
             }
         }
 
         if (!instantiateDeclarations(declaration.body, callEnvironment)) {
-            unwindFrame(callerEnvironment, previousFrameCount);
+            unwindFrame(callerEnvironment, callerThis, previousFrameCount);
             return false;
         }
 
@@ -972,7 +1011,7 @@ private:
         const bool executed = executeStatement(declaration.body, false, true,
             control);
         if (!executed) {
-            unwindFrame(callerEnvironment, previousFrameCount);
+            unwindFrame(callerEnvironment, callerThis, previousFrameCount);
             return false;
         }
         if (control.kind == ControlKind::Return) {
@@ -981,11 +1020,209 @@ private:
             result = Value::undefined();
         } else {
             fail(RuntimeErrorCode::InvalidAstState, declaration.location);
-            unwindFrame(callerEnvironment, previousFrameCount);
+            unwindFrame(callerEnvironment, callerThis, previousFrameCount);
             return false;
         }
-        unwindFrame(callerEnvironment, previousFrameCount);
+        unwindFrame(callerEnvironment, callerThis, previousFrameCount);
         return true;
+    }
+
+    bool hasOwnProperty(RuntimeObjectId objectId, const std::string& key) const
+    {
+        const RuntimeContext::RuntimeObject* object =
+            context_.objectAt(objectId);
+        if (object == nullptr) return false;
+        if (object->array && key == "length") return true;
+        if (object->array && isCanonicalArrayIndexSpelling(key)) {
+            std::size_t index = 0;
+            if (parseBoundedArrayIndex(key, context_.limits_.maxArrayIndex,
+                index)) {
+                return index < object->elements.size();
+            }
+            return false;
+        }
+        for (const RuntimeContext::RuntimeProperty& property :
+            object->properties) {
+            if (property.key == key) return true;
+        }
+        return false;
+    }
+
+    bool invokeNative(const RuntimeContext::FunctionRecord& function,
+        const std::vector<Value>& arguments, SourceLocation callSite,
+        Value receiver, Value& result)
+    {
+        if (frames_.size() >= context_.limits_.maxCallDepth) {
+            fail(RuntimeErrorCode::CallDepthExceeded, callSite);
+            return false;
+        }
+        if (!context_.consumeStep(callSite)) return false;
+
+        const Value callerThis = currentThis_;
+        const std::size_t previousFrameCount = frames_.size();
+        try {
+            CallFrame frame;
+            frame.function = static_cast<RuntimeFunctionId>(
+                function.nativeFunction);
+            frame.callerEnvironment = currentEnvironment_;
+            frame.callSite = callSite;
+            frame.thisValue = receiver;
+            frames_.push_back(frame);
+        } catch (const std::bad_alloc&) {
+            fail(RuntimeErrorCode::AllocationFailure, callSite);
+            return false;
+        }
+        context_.activeCallFrames_ = frames_.size();
+        currentThis_ = receiver;
+
+        bool succeeded = true;
+        const auto argumentOrUndefined = [&arguments](std::size_t index) {
+            return index < arguments.size() ? arguments[index]
+                : Value::undefined();
+        };
+        const auto numericArgument = [this, &argumentOrUndefined,
+            callSite](std::size_t index, double& number) {
+            if (!context_.consumeStep(callSite)) return false;
+            return toNumber(argumentOrUndefined(index), number);
+        };
+
+        switch (static_cast<RuntimeContext::NativeFunctionId>(
+            function.nativeFunction)) {
+        case RuntimeContext::NativeFunctionId::ObjectHasOwnProperty: {
+            if (!receiver.isObject() ||
+                context_.objectAt(receiver.objectId()) == nullptr) {
+                fail(RuntimeErrorCode::InvalidReceiver, callSite);
+                succeeded = false;
+                break;
+            }
+            std::string key;
+            if (!propertyKeyFromValue(argumentOrUndefined(0), key, callSite)) {
+                succeeded = false;
+                break;
+            }
+            result = Value::boolean(hasOwnProperty(receiver.objectId(), key));
+            break;
+        }
+        case RuntimeContext::NativeFunctionId::ArrayPush: {
+            RuntimeContext::RuntimeObject* object = receiver.isObject()
+                ? context_.objectAt(receiver.objectId()) : nullptr;
+            if (object == nullptr || !object->array) {
+                fail(RuntimeErrorCode::InvalidReceiver, callSite);
+                succeeded = false;
+                break;
+            }
+            const std::size_t oldLength = object->elements.size();
+            if (arguments.size() > context_.limits_.maxArrayElements -
+                (oldLength > context_.limits_.maxArrayElements
+                    ? context_.limits_.maxArrayElements : oldLength)) {
+                fail(RuntimeErrorCode::ArrayLimitExceeded, callSite);
+                succeeded = false;
+                break;
+            }
+            if (arguments.size() > context_.limits_.maxTotalArrayElements ||
+                context_.totalArrayElements_ >
+                    context_.limits_.maxTotalArrayElements - arguments.size()) {
+                fail(RuntimeErrorCode::ArrayLimitExceeded, callSite);
+                succeeded = false;
+                break;
+            }
+            if (arguments.size() > context_.limits_.maxArrayIndex + 1u ||
+                oldLength > context_.limits_.maxArrayIndex + 1u -
+                    arguments.size()) {
+                fail(RuntimeErrorCode::ArrayIndexOutOfRange, callSite);
+                succeeded = false;
+                break;
+            }
+            for (std::size_t index = 0; index < arguments.size(); ++index) {
+                if (!context_.consumeStep(callSite)) {
+                    succeeded = false;
+                    break;
+                }
+            }
+            if (!succeeded) break;
+            try {
+                object->elements.resize(oldLength + arguments.size());
+                for (std::size_t index = 0; index < arguments.size(); ++index) {
+                    object->elements[oldLength + index] = arguments[index];
+                }
+            } catch (const std::bad_alloc&) {
+                fail(RuntimeErrorCode::AllocationFailure, callSite);
+                succeeded = false;
+                break;
+            }
+            context_.totalArrayElements_ += arguments.size();
+            result = Value::number(static_cast<double>(object->elements.size()));
+            break;
+        }
+        case RuntimeContext::NativeFunctionId::ArrayPop: {
+            RuntimeContext::RuntimeObject* object = receiver.isObject()
+                ? context_.objectAt(receiver.objectId()) : nullptr;
+            if (object == nullptr || !object->array) {
+                fail(RuntimeErrorCode::InvalidReceiver, callSite);
+                succeeded = false;
+                break;
+            }
+            if (object->elements.empty()) {
+                result = Value::undefined();
+                break;
+            }
+            result = object->elements.back();
+            object->elements.pop_back();
+            --context_.totalArrayElements_;
+            break;
+        }
+        case RuntimeContext::NativeFunctionId::MathAbs: {
+            double number = 0.0;
+            succeeded = numericArgument(0, number);
+            if (succeeded) result = Value::number(std::fabs(number));
+            break;
+        }
+        case RuntimeContext::NativeFunctionId::MathMin:
+        case RuntimeContext::NativeFunctionId::MathMax: {
+            const bool minimum = static_cast<RuntimeContext::NativeFunctionId>(
+                function.nativeFunction) == RuntimeContext::NativeFunctionId::MathMin;
+            double best = minimum ? std::numeric_limits<double>::infinity()
+                : -std::numeric_limits<double>::infinity();
+            for (std::size_t index = 0; index < arguments.size(); ++index) {
+                double number = 0.0;
+                if (!numericArgument(index, number)) {
+                    succeeded = false;
+                    break;
+                }
+                if (std::isnan(number)) {
+                    best = number;
+                    break;
+                }
+                best = minimum ? std::min(best, number) : std::max(best, number);
+            }
+            if (succeeded) result = Value::number(best);
+            break;
+        }
+        case RuntimeContext::NativeFunctionId::MathFloor:
+        case RuntimeContext::NativeFunctionId::MathCeil:
+        case RuntimeContext::NativeFunctionId::MathRound: {
+            double number = 0.0;
+            if (!numericArgument(0, number)) {
+                succeeded = false;
+                break;
+            }
+            const RuntimeContext::NativeFunctionId native =
+                static_cast<RuntimeContext::NativeFunctionId>(
+                    function.nativeFunction);
+            result = Value::number(native ==
+                RuntimeContext::NativeFunctionId::MathFloor ? std::floor(number) :
+                native == RuntimeContext::NativeFunctionId::MathCeil
+                    ? std::ceil(number) : std::round(number));
+            break;
+        }
+        default:
+            fail(RuntimeErrorCode::InvalidNativeFunction, callSite);
+            succeeded = false;
+            break;
+        }
+
+        unwindFrame(currentEnvironment_, callerThis, previousFrameCount);
+        return succeeded;
     }
 
     bool toNumber(const Value& input, double& number)
@@ -1606,6 +1843,7 @@ private:
 
     RuntimeContext& context_;
     EnvironmentId currentEnvironment_ = kGlobalEnvironmentId;
+    Value currentThis_ = Value::undefined();
     std::vector<CallFrame> frames_;
 };
 
@@ -1615,9 +1853,10 @@ RuntimeContext::RuntimeContext(RuntimeLimits limits)
       environment_(EnvironmentLimits{limits.maxBindings,
           limits.maxBindingNameLength})
 {
+    reset();
 }
 
-void RuntimeContext::reset()
+void RuntimeContext::clearRuntimeState()
 {
     ast_.reset();
     sourceStorage_.clear();
@@ -1630,10 +1869,31 @@ void RuntimeContext::reset()
     totalPropertyCount_ = 0;
     totalPropertyKeyBytes_ = 0;
     totalArrayElements_ = 0;
+    userFunctionCount_ = 0;
+    nativeFunctionCount_ = 0;
     executionSteps_ = 0;
-    result_ = ScriptResult();
     finalValue_ = Value::undefined();
     activeCallFrames_ = 0;
+    objectPrototype_ = kInvalidRuntimeObjectId;
+    arrayPrototype_ = kInvalidRuntimeObjectId;
+    mathObject_ = kInvalidRuntimeObjectId;
+    builtInsInitialized_ = false;
+}
+
+void RuntimeContext::reset()
+{
+    clearRuntimeState();
+    result_ = ScriptResult();
+
+    RuntimeErrorCode error = RuntimeErrorCode::None;
+    if (!initializeBuiltIns(error)) {
+        // Initialization is transactional from the caller's perspective:
+        // a context with insufficient limits has no partially usable globals
+        // or prototype objects after reset.
+        clearRuntimeState();
+        setRuntimeError(RuntimeErrorCode::BuiltInInitializationFailed,
+            SourceLocation());
+    }
 }
 
 bool RuntimeContext::createString(SourceView text, Value& value,
@@ -1715,7 +1975,7 @@ bool RuntimeContext::createFunction(AstNodeId declaration,
         error = RuntimeErrorCode::InvalidFunction;
         return false;
     }
-    if (functions_.size() >= limits_.maxFunctions ||
+    if (userFunctionCount_ >= limits_.maxFunctions ||
         functions_.size() >=
             static_cast<std::size_t>(kInvalidRuntimeFunctionId)) {
         error = RuntimeErrorCode::FunctionLimitExceeded;
@@ -1723,6 +1983,7 @@ bool RuntimeContext::createFunction(AstNodeId declaration,
     }
     try {
         FunctionRecord function;
+        function.kind = FunctionRecord::Kind::User;
         function.declaration = declaration;
         function.closureEnvironment = closure;
         functions_.push_back(function);
@@ -1730,6 +1991,31 @@ bool RuntimeContext::createFunction(AstNodeId declaration,
         error = RuntimeErrorCode::AllocationFailure;
         return false;
     }
+    ++userFunctionCount_;
+    result = static_cast<RuntimeFunctionId>(functions_.size() - 1u);
+    return true;
+}
+
+bool RuntimeContext::createNativeFunction(NativeFunctionId native,
+    RuntimeFunctionId& result, RuntimeErrorCode& error)
+{
+    error = RuntimeErrorCode::None;
+    if (nativeFunctionCount_ >= limits_.maxNativeFunctions ||
+        functions_.size() >=
+            static_cast<std::size_t>(kInvalidRuntimeFunctionId)) {
+        error = RuntimeErrorCode::NativeFunctionLimitExceeded;
+        return false;
+    }
+    try {
+        FunctionRecord function;
+        function.kind = FunctionRecord::Kind::Native;
+        function.nativeFunction = static_cast<std::uint8_t>(native);
+        functions_.push_back(function);
+    } catch (const std::bad_alloc&) {
+        error = RuntimeErrorCode::AllocationFailure;
+        return false;
+    }
+    ++nativeFunctionCount_;
     result = static_cast<RuntimeFunctionId>(functions_.size() - 1u);
     return true;
 }
@@ -1745,7 +2031,7 @@ const RuntimeContext::FunctionRecord* RuntimeContext::functionAt(
 
 bool RuntimeContext::createObject(bool array,
     const std::vector<Value>& initialElements, RuntimeObjectId& result,
-    RuntimeErrorCode& error)
+    RuntimeErrorCode& error, RuntimeObjectId prototype)
 {
     error = RuntimeErrorCode::None;
     if (objects_.size() >= limits_.maxObjects ||
@@ -1767,6 +2053,11 @@ bool RuntimeContext::createObject(bool array,
     try {
         RuntimeObject object;
         object.array = array;
+        object.prototype = prototype;
+        if (object.prototype == kInvalidRuntimeObjectId &&
+            builtInsInitialized_) {
+            object.prototype = array ? arrayPrototype_ : objectPrototype_;
+        }
         if (array) object.elements = initialElements;
         objects_.push_back(std::move(object));
     } catch (const std::bad_alloc&) {
@@ -1775,6 +2066,53 @@ bool RuntimeContext::createObject(bool array,
     }
     result = static_cast<RuntimeObjectId>(objects_.size() - 1u);
     if (array) totalArrayElements_ += initialElements.size();
+    return true;
+}
+
+bool RuntimeContext::initializeBuiltIns(RuntimeErrorCode& error)
+{
+    error = RuntimeErrorCode::None;
+    const std::vector<Value> noElements;
+
+    if (!createObject(false, noElements, objectPrototype_, error,
+        kInvalidRuntimeObjectId)) return false;
+    if (!createObject(false, noElements, arrayPrototype_, error,
+        objectPrototype_)) return false;
+    if (!createObject(false, noElements, mathObject_, error,
+        objectPrototype_)) return false;
+
+    const auto install = [this](RuntimeObjectId object, const char* name,
+        NativeFunctionId native, RuntimeErrorCode& installError) {
+        RuntimeFunctionId function = kInvalidRuntimeFunctionId;
+        if (!createNativeFunction(native, function, installError)) return false;
+        return writeProperty(object, std::string(name),
+            Value::function(function), installError);
+    };
+
+    if (!install(objectPrototype_, "hasOwnProperty",
+        NativeFunctionId::ObjectHasOwnProperty, error)) return false;
+    if (!install(arrayPrototype_, "push", NativeFunctionId::ArrayPush, error) ||
+        !install(arrayPrototype_, "pop", NativeFunctionId::ArrayPop, error)) {
+        return false;
+    }
+    if (!install(mathObject_, "abs", NativeFunctionId::MathAbs, error) ||
+        !install(mathObject_, "min", NativeFunctionId::MathMin, error) ||
+        !install(mathObject_, "max", NativeFunctionId::MathMax, error) ||
+        !install(mathObject_, "floor", NativeFunctionId::MathFloor, error) ||
+        !install(mathObject_, "ceil", NativeFunctionId::MathCeil, error) ||
+        !install(mathObject_, "round", NativeFunctionId::MathRound, error)) {
+        return false;
+    }
+
+    const char mathName[] = "Math";
+    EnvironmentError environmentError;
+    if (!environment_.declare(
+        SourceView(mathName, sizeof(mathName) - 1u), Value::object(mathObject_),
+        environmentError)) {
+        error = RuntimeErrorCode::BuiltInInitializationFailed;
+        return false;
+    }
+    builtInsInitialized_ = true;
     return true;
 }
 
@@ -1791,41 +2129,79 @@ const RuntimeContext::RuntimeObject* RuntimeContext::objectAt(
     return &objects_[id];
 }
 
-bool RuntimeContext::readProperty(RuntimeObjectId objectId,
-    const std::string& key, Value& value, RuntimeErrorCode& error) const
+RuntimeObjectId RuntimeContext::prototypeOf(RuntimeObjectId object) const
 {
-    error = RuntimeErrorCode::None;
-    const RuntimeObject* object = objectAt(objectId);
-    if (object == nullptr) {
-        error = RuntimeErrorCode::CannotReadProperty;
+    const RuntimeObject* record = objectAt(object);
+    return record == nullptr ? kInvalidRuntimeObjectId : record->prototype;
+}
+
+bool RuntimeContext::setPrototypeForTesting(RuntimeObjectId object,
+    RuntimeObjectId prototype)
+{
+    RuntimeObject* record = objectAt(object);
+    if (record == nullptr) return false;
+    if (prototype != kInvalidRuntimeObjectId && objectAt(prototype) == nullptr) {
         return false;
     }
+    record->prototype = prototype;
+    return true;
+}
+
+bool RuntimeContext::readPropertyForTesting(RuntimeObjectId object,
+    const std::string& key, Value& value, RuntimeErrorCode& error)
+{
+    return readProperty(object, key, value, error, SourceLocation());
+}
+
+bool RuntimeContext::readProperty(RuntimeObjectId objectId,
+    const std::string& key, Value& value, RuntimeErrorCode& error,
+    SourceLocation location)
+{
+    error = RuntimeErrorCode::None;
     if (key.size() > limits_.maxPropertyNameLength) {
         error = RuntimeErrorCode::PropertyNameTooLong;
         return false;
     }
-    if (object->array && key == "length") {
-        value = Value::number(static_cast<double>(object->elements.size()));
-        return true;
-    }
-    if (object->array && isCanonicalArrayIndexSpelling(key)) {
-        std::size_t index = 0;
-        if (!parseBoundedArrayIndex(key, limits_.maxArrayIndex, index)) {
-            error = RuntimeErrorCode::ArrayIndexOutOfRange;
+    RuntimeObjectId current = objectId;
+    for (std::size_t depth = 0; depth < limits_.maxPrototypeDepth; ++depth) {
+        if (!consumeStep(location)) {
+            error = RuntimeErrorCode::ExecutionBudgetExceeded;
             return false;
         }
-        value = index < object->elements.size()
-            ? object->elements[index] : Value::undefined();
-        return true;
-    }
-    for (const RuntimeProperty& property : object->properties) {
-        if (property.key == key) {
-            value = property.value;
+        const RuntimeObject* object = objectAt(current);
+        if (object == nullptr) {
+            error = RuntimeErrorCode::CannotReadProperty;
+            return false;
+        }
+        if (object->array && key == "length") {
+            value = Value::number(static_cast<double>(object->elements.size()));
             return true;
         }
+        if (object->array && isCanonicalArrayIndexSpelling(key)) {
+            std::size_t index = 0;
+            if (!parseBoundedArrayIndex(key, limits_.maxArrayIndex, index)) {
+                error = RuntimeErrorCode::ArrayIndexOutOfRange;
+                return false;
+            }
+            if (index < object->elements.size()) {
+                value = object->elements[index];
+                return true;
+            }
+        }
+        for (const RuntimeProperty& property : object->properties) {
+            if (property.key == key) {
+                value = property.value;
+                return true;
+            }
+        }
+        if (object->prototype == kInvalidRuntimeObjectId) {
+            value = Value::undefined();
+            return true;
+        }
+        current = object->prototype;
     }
-    value = Value::undefined();
-    return true;
+    error = RuntimeErrorCode::PrototypeChainExceeded;
+    return false;
 }
 
 bool RuntimeContext::writeProperty(RuntimeObjectId objectId,
@@ -1942,6 +2318,7 @@ bool RuntimeContext::consumeStep(SourceLocation location)
 ScriptResult RuntimeContext::execute(SourceView source)
 {
     reset();
+    if (!builtInsInitialized_) return result_;
     try {
         if (source.data == nullptr && source.length != 0) {
             Lexer lexer(limits_.lexer);
@@ -2031,6 +2408,14 @@ const char* runtimeErrorCodeName(RuntimeErrorCode code)
     case RuntimeErrorCode::ArrayIndexOutOfRange:
         return "ArrayIndexOutOfRange";
     case RuntimeErrorCode::InvalidPropertyKey: return "InvalidPropertyKey";
+    case RuntimeErrorCode::InvalidReceiver: return "InvalidReceiver";
+    case RuntimeErrorCode::NativeFunctionLimitExceeded:
+        return "NativeFunctionLimitExceeded";
+    case RuntimeErrorCode::InvalidNativeFunction: return "InvalidNativeFunction";
+    case RuntimeErrorCode::PrototypeChainExceeded:
+        return "PrototypeChainExceeded";
+    case RuntimeErrorCode::BuiltInInitializationFailed:
+        return "BuiltInInitializationFailed";
     }
     return "Invalid";
 }

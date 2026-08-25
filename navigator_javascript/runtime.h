@@ -43,6 +43,11 @@ enum class RuntimeErrorCode : std::uint8_t {
     ArrayLimitExceeded,
     ArrayIndexOutOfRange,
     InvalidPropertyKey,
+    InvalidReceiver,
+    NativeFunctionLimitExceeded,
+    InvalidNativeFunction,
+    PrototypeChainExceeded,
+    BuiltInInitializationFailed,
 };
 
 struct RuntimeError {
@@ -85,6 +90,8 @@ constexpr std::size_t kDefaultMaxJavaScriptPropertyKeyBytes = 256u * 1024u;
 constexpr std::size_t kDefaultMaxJavaScriptArrayElements = 1024u;
 constexpr std::size_t kDefaultMaxJavaScriptArrayElementCount = 4096u;
 constexpr std::size_t kDefaultMaxJavaScriptArrayIndex = 1023u;
+constexpr std::size_t kDefaultMaxJavaScriptNativeFunctionValues = 64u;
+constexpr std::size_t kDefaultMaxJavaScriptPrototypeDepth = 32u;
 
 struct RuntimeLimits {
     LexerLimits lexer;
@@ -112,6 +119,8 @@ struct RuntimeLimits {
     // environment bound for the context lifetime.
     std::size_t maxEnvironments = kDefaultMaxJavaScriptEnvironments;
     std::size_t maxFunctions = kDefaultMaxJavaScriptFunctionValues;
+    std::size_t maxNativeFunctions =
+        kDefaultMaxJavaScriptNativeFunctionValues;
     std::size_t maxObjects = kDefaultMaxJavaScriptRuntimeObjects;
     std::size_t maxPropertiesPerObject =
         kDefaultMaxJavaScriptPropertiesPerObject;
@@ -124,6 +133,7 @@ struct RuntimeLimits {
     std::size_t maxTotalArrayElements =
         kDefaultMaxJavaScriptArrayElementCount;
     std::size_t maxArrayIndex = kDefaultMaxJavaScriptArrayIndex;
+    std::size_t maxPrototypeDepth = kDefaultMaxJavaScriptPrototypeDepth;
 };
 
 // A context is an independent, resettable bounded JavaScript realm.  execute() copies a
@@ -157,18 +167,51 @@ public:
     std::size_t runtimeStringValueCount() const { return strings_.size(); }
     std::size_t environmentCount() const { return 1u + environments_.size(); }
     std::size_t functionValueCount() const { return functions_.size(); }
+    std::size_t userFunctionCount() const { return userFunctionCount_; }
+    std::size_t nativeFunctionCount() const { return nativeFunctionCount_; }
     std::size_t objectCount() const { return objects_.size(); }
     std::size_t propertyCount() const { return totalPropertyCount_; }
     std::size_t arrayElementCount() const { return totalArrayElements_; }
     std::size_t activeCallFrameCount() const { return activeCallFrames_; }
+
+    RuntimeObjectId objectPrototypeId() const { return objectPrototype_; }
+    RuntimeObjectId arrayPrototypeId() const { return arrayPrototype_; }
+    RuntimeObjectId mathObjectId() const { return mathObject_; }
+    RuntimeObjectId prototypeOf(RuntimeObjectId object) const;
+    // Test/diagnostic hook for proving cycle protection.  Script code has no
+    // prototype mutation API; production host code should not use this hook.
+    bool setPrototypeForTesting(RuntimeObjectId object,
+        RuntimeObjectId prototype);
+    bool readPropertyForTesting(RuntimeObjectId object, const std::string& key,
+        Value& value, RuntimeErrorCode& error);
+    bool builtInsInitialized() const { return builtInsInitialized_; }
 
 private:
     class Evaluator;
     friend class Evaluator;
 
     struct FunctionRecord {
+        enum class Kind : std::uint8_t {
+            User = 0,
+            Native,
+        };
+
+        Kind kind = Kind::User;
         AstNodeId declaration = kInvalidAstNodeId;
         EnvironmentId closureEnvironment = kInvalidEnvironmentId;
+        std::uint8_t nativeFunction = 0;
+    };
+
+    enum class NativeFunctionId : std::uint8_t {
+        ObjectHasOwnProperty = 0,
+        ArrayPush,
+        ArrayPop,
+        MathAbs,
+        MathMin,
+        MathMax,
+        MathFloor,
+        MathCeil,
+        MathRound,
     };
 
     struct RuntimeProperty {
@@ -178,6 +221,7 @@ private:
 
     struct RuntimeObject {
         bool array = false;
+        RuntimeObjectId prototype = kInvalidRuntimeObjectId;
         std::vector<RuntimeProperty> properties;
         std::vector<Value> elements;
     };
@@ -190,15 +234,21 @@ private:
     const Environment* environmentAt(EnvironmentId id) const;
     bool createFunction(AstNodeId declaration, EnvironmentId closure,
         RuntimeFunctionId& result, RuntimeErrorCode& error);
+    bool createNativeFunction(NativeFunctionId native,
+        RuntimeFunctionId& result, RuntimeErrorCode& error);
     const FunctionRecord* functionAt(RuntimeFunctionId id) const;
     bool createObject(bool array, const std::vector<Value>& initialElements,
-        RuntimeObjectId& result, RuntimeErrorCode& error);
+        RuntimeObjectId& result, RuntimeErrorCode& error,
+        RuntimeObjectId prototype = kInvalidRuntimeObjectId);
     RuntimeObject* objectAt(RuntimeObjectId id);
     const RuntimeObject* objectAt(RuntimeObjectId id) const;
     bool readProperty(RuntimeObjectId object, const std::string& key,
-        Value& value, RuntimeErrorCode& error) const;
+        Value& value, RuntimeErrorCode& error,
+        SourceLocation location = SourceLocation());
     bool writeProperty(RuntimeObjectId object, const std::string& key,
         Value value, RuntimeErrorCode& error);
+    bool initializeBuiltIns(RuntimeErrorCode& error);
+    void clearRuntimeState();
     void setRuntimeError(RuntimeErrorCode code, SourceLocation location);
     bool consumeStep(SourceLocation location);
 
@@ -214,10 +264,16 @@ private:
     std::size_t totalPropertyCount_ = 0;
     std::size_t totalPropertyKeyBytes_ = 0;
     std::size_t totalArrayElements_ = 0;
+    std::size_t userFunctionCount_ = 0;
+    std::size_t nativeFunctionCount_ = 0;
     std::size_t executionSteps_ = 0;
     ScriptResult result_;
     Value finalValue_;
     std::size_t activeCallFrames_ = 0;
+    RuntimeObjectId objectPrototype_ = kInvalidRuntimeObjectId;
+    RuntimeObjectId arrayPrototype_ = kInvalidRuntimeObjectId;
+    RuntimeObjectId mathObject_ = kInvalidRuntimeObjectId;
+    bool builtInsInitialized_ = false;
 };
 
 ScriptResult executeScript(SourceView source, RuntimeContext& context);

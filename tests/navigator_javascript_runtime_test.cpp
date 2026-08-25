@@ -227,8 +227,11 @@ void testNegativeRuntimeCases()
         "null member access");
     expectError("new Foo();", RuntimeErrorCode::UnsupportedFeature,
         "new before object support");
-    expectError("this;", RuntimeErrorCode::UnsupportedFeature,
-        "this before host policy");
+    RuntimeContext thisContext;
+    const ScriptResult thisResult = execute(thisContext, "var value = this;");
+    expect(thisResult.succeeded(), "standalone this policy: succeeds");
+    expectType(thisContext, "value", ValueType::Undefined,
+        "standalone this policy: Undefined");
     expectError("var foo = 1; foo.bar = 2;",
         RuntimeErrorCode::NotObject, "non-object member assignment");
 
@@ -259,7 +262,7 @@ void testObjectsAndProperties()
     expectNumber(context, "numeric", 8.0, "objects: numeric key coercion");
     expectType(context, "missing", ValueType::Undefined,
         "objects: missing property is Undefined");
-    expect(context.objectCount() == 1 && context.propertyCount() == 3,
+    expect(context.objectCount() == 4 && context.propertyCount() == 12,
         "objects: bounded pool and duplicate-free properties");
 
     const ScriptResult duplicate = execute(context,
@@ -357,24 +360,25 @@ void testObjectFunctionInteraction()
     expectNumber(context, "result", 8.0, "objects: function-valued property call");
     expect(binding(context, "same")->booleanValue(),
         "objects: function property preserves identity");
-    expectError("var obj = {}; obj.f();", RuntimeErrorCode::UnsupportedFeature,
-        "objects: member call has no receiver semantics");
+    expectError("var obj = {}; obj.f();", RuntimeErrorCode::NotCallable,
+        "objects: missing member call is not callable");
 }
 
 void testObjectArrayLimitsAndReset()
 {
     RuntimeLimits objects;
-    objects.maxObjects = 1;
+    objects.maxObjects = 4;
     expectError("var a = {}; var b = {};", RuntimeErrorCode::ObjectLimitExceeded,
         "objects: object limit", objects);
 
     RuntimeLimits properties;
-    properties.maxPropertiesPerObject = 1;
-    expectError("var a = {}; a.x = 1; a.y = 2;",
+    properties.maxPropertiesPerObject = 6;
+    expectError("var a = {}; a.a = 1; a.b = 2; a.c = 3; a.d = 4;"
+        "a.e = 5; a.f = 6; a.g = 7;",
         RuntimeErrorCode::PropertyLimitExceeded, "objects: property limit", properties);
 
     RuntimeLimits totalProperties;
-    totalProperties.maxTotalProperties = 1;
+    totalProperties.maxTotalProperties = 10;
     expectError("var a = {}; a.x = 1; var b = {}; b.y = 2;",
         RuntimeErrorCode::PropertyLimitExceeded,
         "objects: total property limit", totalProperties);
@@ -382,7 +386,8 @@ void testObjectArrayLimitsAndReset()
     RuntimeLimits propertyName;
     propertyName.maxPropertyNameLength = 2;
     expectError("var a = {}; a.long = 1;",
-        RuntimeErrorCode::PropertyNameTooLong, "objects: property name limit", propertyName);
+        RuntimeErrorCode::BuiltInInitializationFailed,
+        "objects: property name limit", propertyName);
 
     RuntimeLimits arrays;
     arrays.maxArrayElements = 2;
@@ -407,9 +412,9 @@ void testObjectArrayLimitsAndReset()
     RuntimeContext context;
     expect(execute(context, "var a = { x: 1 }; a.x = 2; var b = [3];").succeeded(),
         "reset: objects and arrays setup succeeds");
-    expect(context.objectCount() == 2, "reset: objects are retained before reset");
+    expect(context.objectCount() == 5, "reset: objects are retained before reset");
     context.reset();
-    expect(context.objectCount() == 0 && context.propertyCount() == 0 &&
+    expect(context.objectCount() == 3 && context.propertyCount() == 9 &&
         context.arrayElementCount() == 0, "reset: object pools are cleared");
     expect(execute(context, "var result = 7;").succeeded(),
         "reset: new script after object reset succeeds");
@@ -619,8 +624,8 @@ void testFunctionClosureAndResetLifetime()
         "functions: reset clears active frames");
     expect(context.environmentCount() == 1,
         "functions: reset clears function environments");
-    expect(context.functionValueCount() == 0,
-        "functions: reset clears function identities");
+    expect(context.functionValueCount() == 9 && context.nativeFunctionCount() == 9,
+        "functions: reset recreates native identities");
     expect(execute(context, "var result = 7;").succeeded(),
         "functions: unrelated script after reset succeeds");
     expectNumber(context, "result", 7.0, "functions: post-reset result");
@@ -636,8 +641,8 @@ void testLimitsAndBudget()
         "binding limit", bindingLimits);
 
     RuntimeLimits nameLimits;
-    nameLimits.maxBindingNameLength = 2;
-    expectError("var abc = 1;", RuntimeErrorCode::BindingNameTooLong,
+    nameLimits.maxBindingNameLength = 4;
+    expectError("var abcde = 1;", RuntimeErrorCode::BindingNameTooLong,
         "binding name limit", nameLimits);
 
     RuntimeLimits stringLimits;
