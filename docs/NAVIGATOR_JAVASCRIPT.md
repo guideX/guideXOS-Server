@@ -827,3 +827,171 @@ host-object adapter without enabling that adapter in JS6.
 The next milestone is **Phase JS7 — Script Host Contract & Navigator
 Integration Boundary**: a generic bounded host-object interface, host
 properties and receiver-aware host methods, and page/realm lifetime controls.
+
+### Phase JS7: bounded script-host contract
+
+JS7 adds a generic boundary between the JavaScript runtime and an externally
+owned synchronous host adapter. It does not add a second evaluator and it does
+not put Navigator-specific conditions in the evaluator:
+
+```text
+JavaScript source
+  -> lexer / parser / AST
+  -> RuntimeContext evaluator
+  -> Value(HostObject)
+  -> bounded host registry
+  -> HostAdapter
+  -> external page or application state
+```
+
+`ValueType::HostObject` is distinct from `ValueType::Object`. A host value
+contains only an opaque `RuntimeHostObjectId`; it never contains a Navigator
+pointer or any other external pointer. The ID encodes a registry slot and a
+realm generation. Host objects therefore remain aliases to external state,
+while ordinary object literals and arrays continue to use the JS object pool.
+Host objects are truthy, compare strictly by stable handle identity, and do
+not use ordinary JS prototype chains.
+
+#### Adapter and ownership contract
+
+`navigator_javascript/host.h` defines the small `HostAdapter` interface:
+
+```text
+validate(reference)
+getProperty(reference, name, result)
+setProperty(reference, name, value)
+call(optional receiver, methodId, arguments, result)
+```
+
+The adapter is externally owned and must outlive its `RuntimeContext`. The
+context owns the bounded registry, host handles, host method wrappers, and
+JavaScript values. It never destroys the adapter or the host objects behind
+it. Multiple contexts may use different adapters without process-global host
+state. `HostObjectReference` carries an adapter-owned instance ID and kind
+plus the context generation supplied by the runtime.
+
+`RuntimeContext::installHostGlobal("host", instance, kind, error)` is the
+embedding API. The language does not hardcode the name `host`; a future
+embedding can install `document` through the same mechanism. Host globals are
+ordinary environment bindings whose values are HostObjects. `reset()` clears
+the host registry and host globals, and `execute()` retains the existing JS
+reset semantics while replaying explicitly installed host-global descriptors
+for that next execution.
+
+#### Properties and methods
+
+Host property reads and writes use the same member-expression path as ordinary
+objects. The runtime validates the handle, charges one host operation, and
+asks the adapter. A missing read returns `Undefined`; a missing write is
+decided by the adapter and is never silently converted into a JS shadow
+property. The test adapter permits `counter`, `name`, and child `value`, and
+rejects `readOnlyValue` with `HostPropertyReadOnly`.
+
+Host methods are returned as cached ordinary callable `Function` values backed
+by the existing function dispatch path. The adapter returns a stable method ID
+and says whether it requires a receiver. `host.increment()` supplies the
+HostObject receiver; extracting it and calling `f()` supplies `Undefined` and
+returns `InvalidReceiver`. The test adapter's `add` method is explicitly
+receiver-independent, so `var f = host.add; f(4, 5)` is valid. Repeated reads
+of the same method on the same host handle preserve function identity.
+
+Host errors are source-located runtime errors, including
+`InvalidHostObject`, `StaleHostObject`, `HostPropertyReadOnly`,
+`HostPropertyWriteFailed`, `HostCallFailed`, `HostOperationBudgetExceeded`,
+`HostReentryUnsupported`, `HostObjectLimitExceeded`, and
+`InvalidHostReturn`. Host adapter failures after a partial mutation are not
+rolled back by the runtime; adapters own their transaction semantics.
+
+#### Value conversion
+
+The boundary supports Undefined, Null, Boolean, Number, String, ordinary JS
+Object IDs, and HostObject references. Ordinary JS objects passed to a host
+call are synchronous read-only identity views represented by a
+`RuntimeObjectId`; JS7 does not deep-copy arbitrary graphs. Functions are not
+passed to the test adapter. Host-returned strings are copied immediately into
+the context-owned bounded string store, so adapter stack or temporary string
+storage cannot escape. Host-returned HostObjects are registered and validated
+before becoming JavaScript values. Invalid object IDs, stale generations,
+oversized strings, and malformed host returns fail deterministically.
+
+#### Identity, registry, and lifetime safety
+
+The registry has a finite `maxHostObjects` bound. Dead slots may be reused,
+but a reused handle carries the new generation and cannot match an old value.
+`invalidateHostGeneration()` marks all prior entries dead and advances the
+generation. Any old property read, write, host method call, or closure access
+then fails as `StaleHostObject`; it can never observe a new object that reused
+the slot. Reset advances the generation as well as clearing the registry,
+globals, method wrappers, and host operation counters.
+
+The intended future page model is:
+
+```text
+Page A: RuntimeContext A + HostGeneration A
+  navigate -> invalidate A -> reset/destroy realm
+Page B: RuntimeContext B + HostGeneration B
+```
+
+The generic contract is context-owned, so a future controlled Navigator
+harness can keep one realm for multiple explicitly submitted scripts and
+share its bindings, functions, host identities, and page generation. JS7 does
+not implement script-tag sequencing or navigation execution.
+
+Host operations have their own finite budget of 10,000 by default. Reads,
+writes, calls, and host-object registration/returned-object lookup consume
+that budget in addition to the shared 100,000 execution-step budget. Adapter
+calls are synchronous and non-reentrant. There are no async callbacks,
+timers, promises, events, network operations, or host-to-JS callbacks.
+
+#### Navigator boundary and deliberate non-goals
+
+`navigator_script_host.h/.cpp` provides an inert Navigator-facing adapter
+shell. It validates page-generation tokens but exposes no properties or
+methods yet. The evaluator knows only `HostAdapter`, never `WebDocument`,
+`Navigator`, layout nodes, or property names such as `textContent`.
+
+The intended future mapping is architectural only:
+
+```text
+document                         -> HostObject
+DOM element                      -> HostObject
+element.textContent              -> HostProperty
+element.getAttribute(...)        -> HostMethod
+document.getElementById(...)     -> HostMethod returning HostObject
+```
+
+JS7 deliberately does not expose a full DOM, browser globals (`window`,
+`document`, `location`, `navigator`, `history`, `console`), page JavaScript,
+HTML `<script>` execution, inline event attributes, timers, async I/O,
+networking, storage, or DOM mutation. Existing HTML script tags remain inert.
+
+The required bounded proof is in
+`scripts/smoke-navigator-javascript-js7.ps1` and
+`tests/navigator_javascript_js7_test.cpp`. It covers host reads and writes,
+strings, missing properties, read-only errors, child and method identity,
+receiver-aware and detached calls, host values through functions and
+closures, ordinary-object independence, stale generation after slot reuse,
+stale closure access, host limits, operation budgets, reset, invalid adapter
+returns, and multiple-context isolation.
+
+#### Effective JS7 additions to the finite limits
+
+The JS1-JS6 limits above remain unchanged. JS7 adds:
+
+| Resource | Default limit |
+| --- | ---: |
+| Live HostObject registry entries | 1,024 |
+| Host property-name length | 256 bytes |
+| Host operations per execution/context phase | 10,000 |
+| Host generations | 4,096 |
+| Cached host method values | 64 |
+| Host method arguments | 64, via the existing call-argument bound |
+| Host reentry depth | 0; synchronous adapter calls are non-reentrant |
+
+All host IDs, slots, generations, method wrappers, property names, strings,
+arguments, adapter spans, and operation counts remain bounded. The focused JS7
+test is compiled with strict C++17 `-Wall -Wextra -Werror -pedantic` settings.
+
+**The guideXOS JavaScript runtime can now communicate through a bounded generic
+script-host contract, but Navigator still does not automatically execute page
+JavaScript and no full DOM API is exposed.**

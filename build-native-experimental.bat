@@ -85,10 +85,12 @@ navigator_file_io.cpp ^
 navigator_html_parser.cpp ^
 navigator_javascript/ast.cpp ^
 navigator_javascript/value.cpp ^
+navigator_javascript/host.cpp ^
 navigator_javascript/environment.cpp ^
 navigator_javascript/runtime.cpp ^
 navigator_javascript/lexer.cpp ^
 navigator_javascript/parser.cpp ^
+navigator_javascript/navigator_script_host.cpp ^
 native_app_debug_log.cpp ^
 native_app_process_table.cpp ^
 native_app_runtime.cpp ^

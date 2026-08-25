@@ -54,6 +54,23 @@ bool textEquals(SourceView text, const char* spelling)
     return true;
 }
 
+RuntimeHostObjectId makeHostObjectId(std::size_t slot,
+    HostGenerationId generation)
+{
+    return (static_cast<RuntimeHostObjectId>(generation) << 32u) |
+        static_cast<RuntimeHostObjectId>(slot);
+}
+
+std::size_t hostObjectSlot(RuntimeHostObjectId id)
+{
+    return static_cast<std::size_t>(id & 0xffffffffull);
+}
+
+HostGenerationId hostObjectGeneration(RuntimeHostObjectId id)
+{
+    return static_cast<HostGenerationId>(id >> 32u);
+}
+
 // This parser intentionally does not call locale-sensitive strtod.  It is
 // used for both lexer-approved numeric literals and the JS3 primitive subset
 // of string-to-number conversion.
@@ -231,6 +248,21 @@ public:
             control.kind == ControlKind::Normal;
     }
 
+    bool invokeForTesting(RuntimeFunctionId function,
+        const std::vector<Value>& arguments, Value& result,
+        RuntimeErrorCode& error)
+    {
+        if (function == kInvalidRuntimeFunctionId) {
+            error = RuntimeErrorCode::InvalidFunction;
+            fail(error, SourceLocation());
+            return false;
+        }
+        const bool succeeded = invokeFunction(function, arguments,
+            SourceLocation(), result);
+        error = context_.result_.runtimeError.code;
+        return succeeded;
+    }
+
 private:
     enum class ControlKind : std::uint8_t {
         Normal = 0,
@@ -254,8 +286,10 @@ private:
 
     struct MemberReference {
         RuntimeObjectId object = kInvalidRuntimeObjectId;
+        RuntimeHostObjectId hostObject = kInvalidRuntimeHostObjectId;
         Value receiver = Value::undefined();
         bool stringPrimitive = false;
+        bool hostObjectValue = false;
         std::string key;
         SourceLocation location;
     };
@@ -650,7 +684,7 @@ private:
         }
         Value object;
         if (!evalExpression(node.object, object)) return false;
-        if (!object.isObject() && !object.isString()) {
+        if (!object.isObject() && !object.isHostObject() && !object.isString()) {
             fail(object.isNull() || object.isUndefined()
                 ? (forWrite ? RuntimeErrorCode::CannotWriteProperty
                     : RuntimeErrorCode::CannotReadProperty)
@@ -684,6 +718,10 @@ private:
             }
             reference.stringPrimitive = true;
             reference.receiver = object;
+        } else if (object.isHostObject()) {
+            reference.hostObject = object.hostObjectId();
+            reference.hostObjectValue = true;
+            reference.receiver = object;
         } else {
             reference.object = object.objectId();
             reference.receiver = object;
@@ -703,6 +741,13 @@ private:
                 : Value::undefined();
             return true;
         }
+        if (reference.hostObjectValue) {
+            RuntimeErrorCode error = RuntimeErrorCode::None;
+            if (context_.readHostProperty(reference.hostObject, reference.key,
+                value, error, reference.location)) return true;
+            fail(error, reference.location);
+            return false;
+        }
         RuntimeErrorCode error = RuntimeErrorCode::None;
         if (context_.readProperty(reference.object, reference.key, value, error,
             reference.location)) {
@@ -719,6 +764,13 @@ private:
             return false;
         }
         if (!context_.consumeStep(reference.location)) return false;
+        if (reference.hostObjectValue) {
+            RuntimeErrorCode error = RuntimeErrorCode::None;
+            if (context_.writeHostProperty(reference.hostObject, reference.key,
+                value, error, reference.location)) return true;
+            fail(error, reference.location);
+            return false;
+        }
         RuntimeErrorCode error = RuntimeErrorCode::None;
         if (context_.writeProperty(reference.object, reference.key, value, error)) {
             return true;
@@ -934,6 +986,10 @@ private:
         }
         if (function->kind == RuntimeContext::FunctionRecord::Kind::Native) {
             return invokeNative(*function, arguments, callSite, receiver, result);
+        }
+        if (function->kind == RuntimeContext::FunctionRecord::Kind::Host) {
+            return context_.invokeHostMethod(*function, arguments, receiver,
+                callSite, result);
         }
         if (function->declaration == kInvalidAstNodeId ||
             function->closureEnvironment == kInvalidEnvironmentId) {
@@ -1257,6 +1313,9 @@ private:
         case ValueType::Object:
             number = std::numeric_limits<double>::quiet_NaN();
             return true;
+        case ValueType::HostObject:
+            number = std::numeric_limits<double>::quiet_NaN();
+            return true;
         }
         fail(RuntimeErrorCode::InvalidOperandType, SourceLocation());
         return false;
@@ -1290,6 +1349,9 @@ private:
             fail(RuntimeErrorCode::InvalidOperandType, SourceLocation());
             return false;
         case ValueType::Object:
+            fail(RuntimeErrorCode::InvalidOperandType, SourceLocation());
+            return false;
+        case ValueType::HostObject:
             fail(RuntimeErrorCode::InvalidOperandType, SourceLocation());
             return false;
         }
@@ -1781,6 +1843,8 @@ private:
             return true;
         case ValueType::Object:
             return true;
+        case ValueType::HostObject:
+            return true;
         }
         return false;
     }
@@ -1810,6 +1874,9 @@ private:
         case ValueType::Object:
             return left.objectId() != kInvalidRuntimeObjectId &&
                 left.objectId() == right.objectId();
+        case ValueType::HostObject:
+            return left.hostObjectId() != kInvalidRuntimeHostObjectId &&
+                left.hostObjectId() == right.hostObjectId();
         }
         return false;
     }
@@ -1847,6 +1914,20 @@ private:
     std::vector<CallFrame> frames_;
 };
 
+bool RuntimeContext::invokeFunctionForTesting(const Value& function,
+    const std::vector<Value>& arguments, Value& result, RuntimeErrorCode& error)
+{
+    error = RuntimeErrorCode::None;
+    if (!function.isFunction()) {
+        error = RuntimeErrorCode::NotCallable;
+        setRuntimeError(error, SourceLocation());
+        return false;
+    }
+    Evaluator evaluator(*this);
+    return evaluator.invokeForTesting(function.functionId(), arguments, result,
+        error);
+}
+
 RuntimeContext::RuntimeContext(RuntimeLimits limits)
     : limits_(limits),
       ast_(),
@@ -1871,6 +1952,7 @@ void RuntimeContext::clearRuntimeState()
     totalArrayElements_ = 0;
     userFunctionCount_ = 0;
     nativeFunctionCount_ = 0;
+    hostMethodCount_ = 0;
     executionSteps_ = 0;
     finalValue_ = Value::undefined();
     activeCallFrames_ = 0;
@@ -1878,12 +1960,25 @@ void RuntimeContext::clearRuntimeState()
     arrayPrototype_ = kInvalidRuntimeObjectId;
     mathObject_ = kInvalidRuntimeObjectId;
     builtInsInitialized_ = false;
+    hostObjects_.clear();
+    hostMethods_.clear();
+    hostGlobalSpecs_.clear();
+    liveHostObjectCount_ = 0;
+    hostOperations_ = 0;
+    hostCallActive_ = false;
 }
 
 void RuntimeContext::reset()
 {
+    const bool advanced = advanceHostGeneration(result_.runtimeError.code);
     clearRuntimeState();
     result_ = ScriptResult();
+
+    if (!advanced) {
+        setRuntimeError(RuntimeErrorCode::HostGenerationLimitExceeded,
+            SourceLocation());
+        return;
+    }
 
     RuntimeErrorCode error = RuntimeErrorCode::None;
     if (!initializeBuiltIns(error)) {
@@ -2016,6 +2111,46 @@ bool RuntimeContext::createNativeFunction(NativeFunctionId native,
         return false;
     }
     ++nativeFunctionCount_;
+    result = static_cast<RuntimeFunctionId>(functions_.size() - 1u);
+    return true;
+}
+
+bool RuntimeContext::createHostMethod(RuntimeHostObjectId object,
+    std::uint32_t method, bool requiresReceiver, RuntimeFunctionId& result,
+    RuntimeErrorCode& error)
+{
+    error = RuntimeErrorCode::None;
+    for (const HostMethodRecord& record : hostMethods_) {
+        if (record.hostObject == object && record.method == method &&
+            record.requiresReceiver == requiresReceiver) {
+            result = record.function;
+            return true;
+        }
+    }
+    if (hostMethodCount_ >= limits_.maxHostMethodValues ||
+        functions_.size() >= static_cast<std::size_t>(kInvalidRuntimeFunctionId)) {
+        error = RuntimeErrorCode::HostMethodLimitExceeded;
+        return false;
+    }
+    try {
+        FunctionRecord function;
+        function.kind = FunctionRecord::Kind::Host;
+        function.hostObject = object;
+        function.hostMethod = method;
+        function.hostMethodRequiresReceiver = requiresReceiver;
+        functions_.push_back(function);
+
+        HostMethodRecord record;
+        record.hostObject = object;
+        record.method = method;
+        record.requiresReceiver = requiresReceiver;
+        record.function = static_cast<RuntimeFunctionId>(functions_.size() - 1u);
+        hostMethods_.push_back(record);
+    } catch (const std::bad_alloc&) {
+        error = RuntimeErrorCode::AllocationFailure;
+        return false;
+    }
+    ++hostMethodCount_;
     result = static_cast<RuntimeFunctionId>(functions_.size() - 1u);
     return true;
 }
@@ -2281,6 +2416,585 @@ bool RuntimeContext::writeProperty(RuntimeObjectId objectId,
     return true;
 }
 
+RuntimeErrorCode RuntimeContext::mapHostResult(HostResultCode code) const
+{
+    switch (code) {
+    case HostResultCode::Success: return RuntimeErrorCode::None;
+    case HostResultCode::PropertyNotFound:
+        return RuntimeErrorCode::HostPropertyNotFound;
+    case HostResultCode::PropertyReadOnly:
+        return RuntimeErrorCode::HostPropertyReadOnly;
+    case HostResultCode::PropertyWriteFailed:
+        return RuntimeErrorCode::HostPropertyWriteFailed;
+    case HostResultCode::InvalidObject:
+        return RuntimeErrorCode::InvalidHostObject;
+    case HostResultCode::StaleObject:
+        return RuntimeErrorCode::StaleHostObject;
+    case HostResultCode::CallFailed:
+        return RuntimeErrorCode::HostCallFailed;
+    case HostResultCode::ReentryUnsupported:
+        return RuntimeErrorCode::HostReentryUnsupported;
+    case HostResultCode::InvalidReturn:
+        return RuntimeErrorCode::InvalidHostReturn;
+    }
+    return RuntimeErrorCode::HostCallFailed;
+}
+
+bool RuntimeContext::consumeHostOperation(SourceLocation location)
+{
+    if (hostOperations_ >= limits_.maxHostOperations) {
+        setRuntimeError(RuntimeErrorCode::HostOperationBudgetExceeded, location);
+        return false;
+    }
+    ++hostOperations_;
+    return true;
+}
+
+bool RuntimeContext::resolveHostObject(RuntimeHostObjectId object,
+    HostObjectReference& reference, RuntimeErrorCode& error) const
+{
+    error = RuntimeErrorCode::None;
+    if (object == kInvalidRuntimeHostObjectId) {
+        error = RuntimeErrorCode::InvalidHostObject;
+        return false;
+    }
+    if (hostObjectGeneration(object) != hostGeneration_) {
+        error = RuntimeErrorCode::StaleHostObject;
+        return false;
+    }
+    const std::size_t slot = hostObjectSlot(object);
+    if (slot >= hostObjects_.size()) {
+        error = RuntimeErrorCode::InvalidHostObject;
+        return false;
+    }
+    const HostObjectRecord& record = hostObjects_[slot];
+    if (!record.live || record.reference.generation != hostGeneration_) {
+        error = RuntimeErrorCode::StaleHostObject;
+        return false;
+    }
+    reference = record.reference;
+    return true;
+}
+
+bool RuntimeContext::validateAdapterReference(
+    const HostObjectReference& reference, RuntimeErrorCode& error)
+{
+    error = RuntimeErrorCode::None;
+    if (hostAdapter_ == nullptr) {
+        error = RuntimeErrorCode::InvalidHostObject;
+        return false;
+    }
+    if (hostCallActive_) {
+        error = RuntimeErrorCode::HostReentryUnsupported;
+        return false;
+    }
+
+    HostResult result;
+    hostCallActive_ = true;
+    try {
+        result = hostAdapter_->validate(reference);
+    } catch (const std::bad_alloc&) {
+        hostCallActive_ = false;
+        error = RuntimeErrorCode::HostCallFailed;
+        return false;
+    } catch (...) {
+        hostCallActive_ = false;
+        error = RuntimeErrorCode::HostCallFailed;
+        return false;
+    }
+    hostCallActive_ = false;
+    if (!result.succeeded()) {
+        error = mapHostResult(result.code);
+        return false;
+    }
+    return true;
+}
+
+bool RuntimeContext::createHostObject(const HostObjectReference& input,
+    RuntimeHostObjectId& result, RuntimeErrorCode& error, bool validateAdapter)
+{
+    error = RuntimeErrorCode::None;
+    if (!input.valid() || input.generation != hostGeneration_) {
+        error = input.valid() ? RuntimeErrorCode::StaleHostObject
+            : RuntimeErrorCode::InvalidHostObject;
+        return false;
+    }
+    if (!consumeHostOperation(SourceLocation())) return false;
+    if (validateAdapter && !validateAdapterReference(input, error)) return false;
+
+    for (std::size_t index = 0; index < hostObjects_.size(); ++index) {
+        const HostObjectRecord& record = hostObjects_[index];
+        if (record.live && record.reference == input) {
+            result = makeHostObjectId(index, hostGeneration_);
+            return true;
+        }
+    }
+
+    std::size_t slot = hostObjects_.size();
+    for (std::size_t index = 0; index < hostObjects_.size(); ++index) {
+        if (!hostObjects_[index].live) {
+            slot = index;
+            break;
+        }
+    }
+    if (slot == hostObjects_.size() &&
+        hostObjects_.size() >= limits_.maxHostObjects) {
+        error = RuntimeErrorCode::HostObjectLimitExceeded;
+        return false;
+    }
+    try {
+        if (slot == hostObjects_.size()) hostObjects_.push_back(HostObjectRecord());
+        hostObjects_[slot].live = true;
+        hostObjects_[slot].reference = input;
+    } catch (const std::bad_alloc&) {
+        error = RuntimeErrorCode::AllocationFailure;
+        return false;
+    }
+    ++liveHostObjectCount_;
+    result = makeHostObjectId(slot, hostGeneration_);
+    return true;
+}
+
+bool RuntimeContext::registerHostObject(HostInstanceId instance,
+    HostObjectKind kind, RuntimeHostObjectId& result, RuntimeErrorCode& error)
+{
+    HostObjectReference reference;
+    reference.instanceId = instance;
+    reference.generation = hostGeneration_;
+    reference.kind = kind;
+    return createHostObject(reference, result, error, true);
+}
+
+bool RuntimeContext::installHostGlobalInternal(const HostGlobalSpec& spec,
+    RuntimeErrorCode& error, bool recordSpec)
+{
+    error = RuntimeErrorCode::None;
+    if (spec.name.size() > limits_.maxBindingNameLength) {
+        error = RuntimeErrorCode::BindingNameTooLong;
+        return false;
+    }
+    RuntimeHostObjectId object = kInvalidRuntimeHostObjectId;
+    if (!registerHostObject(spec.instance, spec.kind, object, error)) return false;
+    const Value value = Value::hostObject(object);
+    const SourceView name(spec.name.data(), spec.name.size());
+    EnvironmentError environmentError;
+    if (environment_.lookup(name) != nullptr) {
+        if (!environment_.assign(name, value)) {
+            error = RuntimeErrorCode::InvalidAstState;
+            return false;
+        }
+    } else if (!environment_.declare(name, value, environmentError)) {
+        switch (environmentError.code) {
+        case EnvironmentErrorCode::BindingLimitExceeded:
+            error = RuntimeErrorCode::BindingLimitExceeded;
+            break;
+        case EnvironmentErrorCode::BindingNameTooLong:
+            error = RuntimeErrorCode::BindingNameTooLong;
+            break;
+        case EnvironmentErrorCode::AllocationFailure:
+            error = RuntimeErrorCode::AllocationFailure;
+            break;
+        case EnvironmentErrorCode::None:
+            error = RuntimeErrorCode::InvalidAstState;
+            break;
+        }
+        return false;
+    }
+
+    if (recordSpec) {
+        try {
+            bool replaced = false;
+            for (HostGlobalSpec& existing : hostGlobalSpecs_) {
+                if (existing.name == spec.name) {
+                    existing = spec;
+                    replaced = true;
+                    break;
+                }
+            }
+            if (!replaced) hostGlobalSpecs_.push_back(spec);
+        } catch (const std::bad_alloc&) {
+            error = RuntimeErrorCode::AllocationFailure;
+            return false;
+        }
+    }
+    return true;
+}
+
+bool RuntimeContext::installHostGlobal(const std::string& name,
+    HostInstanceId instance, HostObjectKind kind, RuntimeErrorCode& error)
+{
+    HostGlobalSpec spec;
+    spec.name = name;
+    spec.instance = instance;
+    spec.kind = kind;
+    return installHostGlobalInternal(spec, error, true);
+}
+
+bool RuntimeContext::advanceHostGeneration(RuntimeErrorCode& error)
+{
+    error = RuntimeErrorCode::None;
+    if (limits_.maxHostGenerations == 0 ||
+        hostGeneration_ >= limits_.maxHostGenerations ||
+        hostGeneration_ == std::numeric_limits<HostGenerationId>::max()) {
+        error = RuntimeErrorCode::HostGenerationLimitExceeded;
+        return false;
+    }
+    ++hostGeneration_;
+    return true;
+}
+
+bool RuntimeContext::invalidateHostGeneration(RuntimeErrorCode& error)
+{
+    if (!advanceHostGeneration(error)) return false;
+    for (HostObjectRecord& record : hostObjects_) record.live = false;
+    liveHostObjectCount_ = 0;
+    hostMethods_.clear();
+    hostMethodCount_ = 0;
+    hostOperations_ = 0;
+    return true;
+}
+
+bool RuntimeContext::readHostProperty(RuntimeHostObjectId object,
+    const std::string& key, Value& value, RuntimeErrorCode& error,
+    SourceLocation location)
+{
+    error = RuntimeErrorCode::None;
+    if (key.size() > limits_.maxHostPropertyNameLength) {
+        error = RuntimeErrorCode::PropertyNameTooLong;
+        return false;
+    }
+    if (!consumeHostOperation(location)) {
+        error = RuntimeErrorCode::HostOperationBudgetExceeded;
+        return false;
+    }
+    HostObjectReference reference;
+    if (!resolveHostObject(object, reference, error)) return false;
+    if (hostAdapter_ == nullptr) {
+        error = RuntimeErrorCode::InvalidHostObject;
+        return false;
+    }
+    if (hostCallActive_) {
+        error = RuntimeErrorCode::HostReentryUnsupported;
+        return false;
+    }
+
+    HostResult validation;
+    HostResult operation;
+    HostValue hostValue;
+    hostCallActive_ = true;
+    try {
+        validation = hostAdapter_->validate(reference);
+        if (validation.succeeded()) {
+            operation = hostAdapter_->getProperty(reference,
+                SourceView(key.data(), key.size()), hostValue);
+        }
+    } catch (const std::bad_alloc&) {
+        hostCallActive_ = false;
+        error = RuntimeErrorCode::HostCallFailed;
+        return false;
+    } catch (...) {
+        hostCallActive_ = false;
+        error = RuntimeErrorCode::HostCallFailed;
+        return false;
+    }
+    hostCallActive_ = false;
+    if (!validation.succeeded()) {
+        error = mapHostResult(validation.code);
+        return false;
+    }
+    if (!operation.succeeded()) {
+        if (operation.code == HostResultCode::PropertyNotFound) {
+            value = Value::undefined();
+            return true;
+        }
+        error = mapHostResult(operation.code);
+        return false;
+    }
+    return convertHostValue(hostValue, object, value, error, location);
+}
+
+bool RuntimeContext::writeHostProperty(RuntimeHostObjectId object,
+    const std::string& key, Value value, RuntimeErrorCode& error,
+    SourceLocation location)
+{
+    error = RuntimeErrorCode::None;
+    if (key.size() > limits_.maxHostPropertyNameLength) {
+        error = RuntimeErrorCode::PropertyNameTooLong;
+        return false;
+    }
+    if (!consumeHostOperation(location)) {
+        error = RuntimeErrorCode::HostOperationBudgetExceeded;
+        return false;
+    }
+    HostObjectReference reference;
+    if (!resolveHostObject(object, reference, error)) return false;
+    HostValue hostValue;
+    if (!convertValueToHost(value, hostValue, error, location)) return false;
+    if (hostAdapter_ == nullptr) {
+        error = RuntimeErrorCode::InvalidHostObject;
+        return false;
+    }
+    if (hostCallActive_) {
+        error = RuntimeErrorCode::HostReentryUnsupported;
+        return false;
+    }
+    HostResult validation;
+    HostResult operation;
+    hostCallActive_ = true;
+    try {
+        validation = hostAdapter_->validate(reference);
+        if (validation.succeeded()) {
+            operation = hostAdapter_->setProperty(reference,
+                SourceView(key.data(), key.size()), hostValue);
+        }
+    } catch (const std::bad_alloc&) {
+        hostCallActive_ = false;
+        error = RuntimeErrorCode::HostCallFailed;
+        return false;
+    } catch (...) {
+        hostCallActive_ = false;
+        error = RuntimeErrorCode::HostCallFailed;
+        return false;
+    }
+    hostCallActive_ = false;
+    if (!validation.succeeded()) {
+        error = mapHostResult(validation.code);
+        return false;
+    }
+    if (!operation.succeeded()) {
+        error = mapHostResult(operation.code);
+        return false;
+    }
+    return true;
+}
+
+bool RuntimeContext::convertValueToHost(const Value& value, HostValue& result,
+    RuntimeErrorCode& error, SourceLocation location)
+{
+    error = RuntimeErrorCode::None;
+    switch (value.type()) {
+    case ValueType::Undefined:
+        result = HostValue::undefined();
+        return true;
+    case ValueType::Null:
+        result = HostValue::nullValue();
+        return true;
+    case ValueType::Boolean:
+        result = HostValue::boolean(value.booleanValue());
+        return true;
+    case ValueType::Number:
+        result = HostValue::number(value.numberValue());
+        return true;
+    case ValueType::String: {
+        const std::string* text = stringData(value);
+        if (text == nullptr) {
+            error = RuntimeErrorCode::HostCallFailed;
+            return false;
+        }
+        result = HostValue::string(SourceView(text->data(), text->size()));
+        return true;
+    }
+    case ValueType::Object:
+        if (objectAt(value.objectId()) == nullptr) {
+            error = RuntimeErrorCode::HostCallFailed;
+            return false;
+        }
+        result = HostValue::object(value.objectId());
+        return true;
+    case ValueType::HostObject: {
+        HostObjectReference reference;
+        if (!resolveHostObject(value.hostObjectId(), reference, error)) return false;
+        result.type = HostValueType::HostObject;
+        result.hostObject = reference;
+        return true;
+    }
+    case ValueType::Function:
+        error = RuntimeErrorCode::HostCallFailed;
+        return false;
+    }
+    error = RuntimeErrorCode::HostCallFailed;
+    (void)location;
+    return false;
+}
+
+bool RuntimeContext::convertHostValue(const HostValue& value,
+    RuntimeHostObjectId methodOwner, Value& result, RuntimeErrorCode& error,
+    SourceLocation location)
+{
+    error = RuntimeErrorCode::None;
+    switch (value.type) {
+    case HostValueType::Undefined:
+        result = Value::undefined();
+        return true;
+    case HostValueType::Null:
+        result = Value::nullValue();
+        return true;
+    case HostValueType::Boolean:
+        result = Value::boolean(value.booleanValue);
+        return true;
+    case HostValueType::Number:
+        result = Value::number(value.numberValue);
+        return true;
+    case HostValueType::String: {
+        if (value.stringValue.data == nullptr && value.stringValue.length != 0) {
+            error = RuntimeErrorCode::InvalidHostReturn;
+            return false;
+        }
+        if (!createString(value.stringValue, result, error)) return false;
+        return true;
+    }
+    case HostValueType::Object:
+        if (objectAt(value.objectId) == nullptr) {
+            error = RuntimeErrorCode::InvalidHostReturn;
+            return false;
+        }
+        result = Value::object(value.objectId);
+        return true;
+    case HostValueType::HostObject: {
+        if (!value.hostObject.valid() ||
+            value.hostObject.generation != hostGeneration_) {
+            error = RuntimeErrorCode::InvalidHostReturn;
+            return false;
+        }
+        RuntimeHostObjectId object = kInvalidRuntimeHostObjectId;
+        if (!createHostObject(value.hostObject, object, error, true)) return false;
+        result = Value::hostObject(object);
+        return true;
+    }
+    case HostValueType::Method: {
+        if (methodOwner == kInvalidRuntimeHostObjectId) {
+            error = RuntimeErrorCode::InvalidHostReturn;
+            return false;
+        }
+        RuntimeFunctionId function = kInvalidRuntimeFunctionId;
+        if (!createHostMethod(methodOwner, value.methodId,
+            value.methodRequiresReceiver, function, error)) return false;
+        result = Value::function(function);
+        return true;
+    }
+    }
+    error = RuntimeErrorCode::InvalidHostReturn;
+    (void)location;
+    return false;
+}
+
+bool RuntimeContext::invokeHostMethod(const FunctionRecord& function,
+    const std::vector<Value>& arguments, Value receiver,
+    SourceLocation location, Value& result)
+{
+    if (activeCallFrames_ >= limits_.maxCallDepth) {
+        setRuntimeError(RuntimeErrorCode::CallDepthExceeded, location);
+        return false;
+    }
+    HostObjectReference owner;
+    RuntimeErrorCode error = RuntimeErrorCode::None;
+    if (!resolveHostObject(function.hostObject, owner, error)) {
+        setRuntimeError(error, location);
+        return false;
+    }
+
+    const HostObjectReference* receiverReference = nullptr;
+    HostObjectReference target = owner;
+    if (function.hostMethodRequiresReceiver) {
+        if (!receiver.isHostObject()) {
+            setRuntimeError(RuntimeErrorCode::InvalidReceiver, location);
+            return false;
+        }
+        if (receiver.hostObjectId() != function.hostObject) {
+            setRuntimeError(RuntimeErrorCode::InvalidReceiver, location);
+            return false;
+        }
+        if (!resolveHostObject(receiver.hostObjectId(), target, error)) {
+            setRuntimeError(error, location);
+            return false;
+        }
+        receiverReference = &target;
+    }
+    if (arguments.size() > limits_.parser.maxCallArguments) {
+        setRuntimeError(RuntimeErrorCode::HostCallFailed, location);
+        return false;
+    }
+    std::vector<HostValue> hostArguments;
+    try {
+        hostArguments.reserve(arguments.size());
+        for (const Value& argument : arguments) {
+            HostValue hostArgument;
+            if (!convertValueToHost(argument, hostArgument, error, location)) {
+                setRuntimeError(error, location);
+                return false;
+            }
+            hostArguments.push_back(hostArgument);
+        }
+    } catch (const std::bad_alloc&) {
+        setRuntimeError(RuntimeErrorCode::AllocationFailure, location);
+        return false;
+    }
+    if (!consumeHostOperation(location)) return false;
+    if (hostAdapter_ == nullptr) {
+        setRuntimeError(RuntimeErrorCode::InvalidHostObject, location);
+        return false;
+    }
+    if (hostCallActive_) {
+        setRuntimeError(RuntimeErrorCode::HostReentryUnsupported, location);
+        return false;
+    }
+
+    ++activeCallFrames_;
+    HostResult validation;
+    HostResult operation;
+    HostValue hostResult;
+    hostCallActive_ = true;
+    try {
+        validation = hostAdapter_->validate(target);
+        if (validation.succeeded()) {
+            operation = hostAdapter_->call(receiverReference, function.hostMethod,
+                hostArguments.empty() ? nullptr : hostArguments.data(),
+                hostArguments.size(), hostResult);
+        }
+    } catch (const std::bad_alloc&) {
+        hostCallActive_ = false;
+        --activeCallFrames_;
+        setRuntimeError(RuntimeErrorCode::HostCallFailed, location);
+        return false;
+    } catch (...) {
+        hostCallActive_ = false;
+        --activeCallFrames_;
+        setRuntimeError(RuntimeErrorCode::HostCallFailed, location);
+        return false;
+    }
+    hostCallActive_ = false;
+    if (!validation.succeeded()) {
+        --activeCallFrames_;
+        setRuntimeError(mapHostResult(validation.code), location);
+        return false;
+    }
+    if (!operation.succeeded()) {
+        --activeCallFrames_;
+        setRuntimeError(mapHostResult(operation.code), location);
+        return false;
+    }
+    const bool converted = convertHostValue(hostResult, function.hostObject,
+        result, error, location);
+    --activeCallFrames_;
+    if (!converted) {
+        setRuntimeError(error, location);
+        return false;
+    }
+    return true;
+}
+
+bool RuntimeContext::readHostPropertyForTesting(RuntimeHostObjectId object,
+    const std::string& key, Value& value, RuntimeErrorCode& error)
+{
+    return readHostProperty(object, key, value, error, SourceLocation());
+}
+
+bool RuntimeContext::writeHostPropertyForTesting(RuntimeHostObjectId object,
+    const std::string& key, Value value, RuntimeErrorCode& error)
+{
+    return writeHostProperty(object, key, value, error, SourceLocation());
+}
+
 const std::string* RuntimeContext::stringData(const Value& value) const
 {
     if (!value.isString() || value.stringId() >= strings_.size()) return nullptr;
@@ -2317,8 +3031,17 @@ bool RuntimeContext::consumeStep(SourceLocation location)
 
 ScriptResult RuntimeContext::execute(SourceView source)
 {
+    const std::vector<HostGlobalSpec> hostGlobals = hostGlobalSpecs_;
     reset();
     if (!builtInsInitialized_) return result_;
+    for (const HostGlobalSpec& spec : hostGlobals) {
+        RuntimeErrorCode hostError = RuntimeErrorCode::None;
+        if (!installHostGlobalInternal(spec, hostError, false)) {
+            setRuntimeError(hostError, SourceLocation());
+            return result_;
+        }
+    }
+    hostGlobalSpecs_ = hostGlobals;
     try {
         if (source.data == nullptr && source.length != 0) {
             Lexer lexer(limits_.lexer);
@@ -2416,6 +3139,30 @@ const char* runtimeErrorCodeName(RuntimeErrorCode code)
         return "PrototypeChainExceeded";
     case RuntimeErrorCode::BuiltInInitializationFailed:
         return "BuiltInInitializationFailed";
+    case RuntimeErrorCode::HostObjectLimitExceeded:
+        return "HostObjectLimitExceeded";
+    case RuntimeErrorCode::InvalidHostObject:
+        return "InvalidHostObject";
+    case RuntimeErrorCode::StaleHostObject:
+        return "StaleHostObject";
+    case RuntimeErrorCode::HostPropertyNotFound:
+        return "HostPropertyNotFound";
+    case RuntimeErrorCode::HostPropertyReadOnly:
+        return "HostPropertyReadOnly";
+    case RuntimeErrorCode::HostPropertyWriteFailed:
+        return "HostPropertyWriteFailed";
+    case RuntimeErrorCode::HostCallFailed:
+        return "HostCallFailed";
+    case RuntimeErrorCode::HostOperationBudgetExceeded:
+        return "HostOperationBudgetExceeded";
+    case RuntimeErrorCode::HostReentryUnsupported:
+        return "HostReentryUnsupported";
+    case RuntimeErrorCode::HostGenerationLimitExceeded:
+        return "HostGenerationLimitExceeded";
+    case RuntimeErrorCode::InvalidHostReturn:
+        return "InvalidHostReturn";
+    case RuntimeErrorCode::HostMethodLimitExceeded:
+        return "HostMethodLimitExceeded";
     }
     return "Invalid";
 }

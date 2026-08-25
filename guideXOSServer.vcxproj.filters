@@ -615,7 +615,13 @@
     <ClInclude Include="navigator_javascript\environment.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="navigator_javascript\host.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="navigator_javascript\lexer.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="navigator_javascript\navigator_script_host.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="navigator_javascript\parser.h">
@@ -1397,7 +1403,13 @@
     <ClCompile Include="navigator_javascript\environment.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="navigator_javascript\host.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="navigator_javascript\lexer.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="navigator_javascript\navigator_script_host.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="navigator_javascript\parser.cpp">

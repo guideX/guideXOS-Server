@@ -13,6 +13,7 @@ enum class ValueType : std::uint8_t {
     String,
     Function,
     Object,
+    HostObject,
 };
 
 using RuntimeStringId = std::uint32_t;
@@ -23,6 +24,13 @@ constexpr RuntimeFunctionId kInvalidRuntimeFunctionId = 0xffffffffu;
 
 using RuntimeObjectId = std::uint32_t;
 constexpr RuntimeObjectId kInvalidRuntimeObjectId = 0xffffffffu;
+
+// Host handles are opaque, context-owned tokens. The upper 32 bits carry a
+// bounded realm generation and the lower 32 bits carry a registry slot. No
+// external pointer is ever stored in a JavaScript Value.
+using RuntimeHostObjectId = std::uint64_t;
+constexpr RuntimeHostObjectId kInvalidRuntimeHostObjectId =
+    0xffffffffffffffffull;
 
 // A Value is a small tagged runtime value. String values contain an index into
 // the owning RuntimeContext string store and function values contain a stable
@@ -40,6 +48,7 @@ public:
     static Value string(RuntimeStringId id);
     static Value function(RuntimeFunctionId id);
     static Value object(RuntimeObjectId id);
+    static Value hostObject(RuntimeHostObjectId id);
 
     ValueType type() const { return type_; }
     bool isUndefined() const { return type_ == ValueType::Undefined; }
@@ -49,12 +58,14 @@ public:
     bool isString() const { return type_ == ValueType::String; }
     bool isFunction() const { return type_ == ValueType::Function; }
     bool isObject() const { return type_ == ValueType::Object; }
+    bool isHostObject() const { return type_ == ValueType::HostObject; }
 
     bool booleanValue() const { return booleanValue_; }
     double numberValue() const { return numberValue_; }
     RuntimeStringId stringId() const { return stringId_; }
     RuntimeFunctionId functionId() const { return functionId_; }
     RuntimeObjectId objectId() const { return objectId_; }
+    RuntimeHostObjectId hostObjectId() const { return hostObjectId_; }
 
 private:
     ValueType type_ = ValueType::Undefined;
@@ -63,6 +74,7 @@ private:
     RuntimeStringId stringId_ = kInvalidRuntimeStringId;
     RuntimeFunctionId functionId_ = kInvalidRuntimeFunctionId;
     RuntimeObjectId objectId_ = kInvalidRuntimeObjectId;
+    RuntimeHostObjectId hostObjectId_ = kInvalidRuntimeHostObjectId;
 };
 
 const char* valueTypeName(ValueType type);

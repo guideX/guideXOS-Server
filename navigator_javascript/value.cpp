@@ -55,6 +55,14 @@ Value Value::object(RuntimeObjectId id)
     return value;
 }
 
+Value Value::hostObject(RuntimeHostObjectId id)
+{
+    Value value;
+    value.type_ = ValueType::HostObject;
+    value.hostObjectId_ = id;
+    return value;
+}
+
 const char* valueTypeName(ValueType type)
 {
     switch (type) {
@@ -65,6 +73,7 @@ const char* valueTypeName(ValueType type)
     case ValueType::String: return "String";
     case ValueType::Function: return "Function";
     case ValueType::Object: return "Object";
+    case ValueType::HostObject: return "HostObject";
     }
     return "Invalid";
 }

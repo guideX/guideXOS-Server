@@ -2,6 +2,7 @@
 
 #include "ast.h"
 #include "environment.h"
+#include "host.h"
 #include "parser.h"
 #include "value.h"
 
@@ -48,6 +49,18 @@ enum class RuntimeErrorCode : std::uint8_t {
     InvalidNativeFunction,
     PrototypeChainExceeded,
     BuiltInInitializationFailed,
+    HostObjectLimitExceeded,
+    InvalidHostObject,
+    StaleHostObject,
+    HostPropertyNotFound,
+    HostPropertyReadOnly,
+    HostPropertyWriteFailed,
+    HostCallFailed,
+    HostOperationBudgetExceeded,
+    HostReentryUnsupported,
+    HostGenerationLimitExceeded,
+    InvalidHostReturn,
+    HostMethodLimitExceeded,
 };
 
 struct RuntimeError {
@@ -92,6 +105,11 @@ constexpr std::size_t kDefaultMaxJavaScriptArrayElementCount = 4096u;
 constexpr std::size_t kDefaultMaxJavaScriptArrayIndex = 1023u;
 constexpr std::size_t kDefaultMaxJavaScriptNativeFunctionValues = 64u;
 constexpr std::size_t kDefaultMaxJavaScriptPrototypeDepth = 32u;
+constexpr std::size_t kDefaultMaxJavaScriptHostObjects = 1024u;
+constexpr std::size_t kDefaultMaxJavaScriptHostPropertyNameLength = 256u;
+constexpr std::size_t kDefaultMaxJavaScriptHostOperations = 10000u;
+constexpr std::size_t kDefaultMaxJavaScriptHostGenerations = 4096u;
+constexpr std::size_t kDefaultMaxJavaScriptHostMethodValues = 64u;
 
 struct RuntimeLimits {
     LexerLimits lexer;
@@ -134,6 +152,12 @@ struct RuntimeLimits {
         kDefaultMaxJavaScriptArrayElementCount;
     std::size_t maxArrayIndex = kDefaultMaxJavaScriptArrayIndex;
     std::size_t maxPrototypeDepth = kDefaultMaxJavaScriptPrototypeDepth;
+    std::size_t maxHostObjects = kDefaultMaxJavaScriptHostObjects;
+    std::size_t maxHostPropertyNameLength =
+        kDefaultMaxJavaScriptHostPropertyNameLength;
+    std::size_t maxHostOperations = kDefaultMaxJavaScriptHostOperations;
+    std::size_t maxHostGenerations = kDefaultMaxJavaScriptHostGenerations;
+    std::size_t maxHostMethodValues = kDefaultMaxJavaScriptHostMethodValues;
 };
 
 // A context is an independent, resettable bounded JavaScript realm.  execute() copies a
@@ -184,6 +208,25 @@ public:
         RuntimeObjectId prototype);
     bool readPropertyForTesting(RuntimeObjectId object, const std::string& key,
         Value& value, RuntimeErrorCode& error);
+    bool readHostPropertyForTesting(RuntimeHostObjectId object,
+        const std::string& key, Value& value, RuntimeErrorCode& error);
+    bool writeHostPropertyForTesting(RuntimeHostObjectId object,
+        const std::string& key, Value value, RuntimeErrorCode& error);
+    bool invokeFunctionForTesting(const Value& function,
+        const std::vector<Value>& arguments, Value& result,
+        RuntimeErrorCode& error);
+
+    void setHostAdapter(HostAdapter* adapter) { hostAdapter_ = adapter; }
+    HostAdapter* hostAdapter() const { return hostAdapter_; }
+    bool registerHostObject(HostInstanceId instance, HostObjectKind kind,
+        RuntimeHostObjectId& result, RuntimeErrorCode& error);
+    bool installHostGlobal(const std::string& name, HostInstanceId instance,
+        HostObjectKind kind, RuntimeErrorCode& error);
+    bool invalidateHostGeneration(RuntimeErrorCode& error);
+    HostGenerationId hostGeneration() const { return hostGeneration_; }
+    std::size_t hostObjectCount() const { return liveHostObjectCount_; }
+    std::size_t hostOperationCount() const { return hostOperations_; }
+    std::size_t hostMethodCount() const { return hostMethodCount_; }
     bool builtInsInitialized() const { return builtInsInitialized_; }
 
 private:
@@ -194,12 +237,16 @@ private:
         enum class Kind : std::uint8_t {
             User = 0,
             Native,
+            Host,
         };
 
         Kind kind = Kind::User;
         AstNodeId declaration = kInvalidAstNodeId;
         EnvironmentId closureEnvironment = kInvalidEnvironmentId;
         std::uint8_t nativeFunction = 0;
+        RuntimeHostObjectId hostObject = kInvalidRuntimeHostObjectId;
+        std::uint32_t hostMethod = 0;
+        bool hostMethodRequiresReceiver = false;
     };
 
     enum class NativeFunctionId : std::uint8_t {
@@ -226,6 +273,24 @@ private:
         std::vector<Value> elements;
     };
 
+    struct HostObjectRecord {
+        bool live = false;
+        HostObjectReference reference;
+    };
+
+    struct HostMethodRecord {
+        RuntimeHostObjectId hostObject = kInvalidRuntimeHostObjectId;
+        std::uint32_t method = 0;
+        bool requiresReceiver = false;
+        RuntimeFunctionId function = kInvalidRuntimeFunctionId;
+    };
+
+    struct HostGlobalSpec {
+        std::string name;
+        HostInstanceId instance = 0;
+        HostObjectKind kind = 0;
+    };
+
     bool createString(SourceView text, Value& value, RuntimeErrorCode& error);
     const std::string* stringData(const Value& value) const;
     bool createEnvironment(EnvironmentId parent, EnvironmentId& result,
@@ -236,6 +301,9 @@ private:
         RuntimeFunctionId& result, RuntimeErrorCode& error);
     bool createNativeFunction(NativeFunctionId native,
         RuntimeFunctionId& result, RuntimeErrorCode& error);
+    bool createHostMethod(RuntimeHostObjectId object, std::uint32_t method,
+        bool requiresReceiver, RuntimeFunctionId& result,
+        RuntimeErrorCode& error);
     const FunctionRecord* functionAt(RuntimeFunctionId id) const;
     bool createObject(bool array, const std::vector<Value>& initialElements,
         RuntimeObjectId& result, RuntimeErrorCode& error,
@@ -248,6 +316,29 @@ private:
     bool writeProperty(RuntimeObjectId object, const std::string& key,
         Value value, RuntimeErrorCode& error);
     bool initializeBuiltIns(RuntimeErrorCode& error);
+    bool installHostGlobalInternal(const HostGlobalSpec& spec,
+        RuntimeErrorCode& error, bool recordSpec);
+    bool createHostObject(const HostObjectReference& reference,
+        RuntimeHostObjectId& result, RuntimeErrorCode& error,
+        bool validateAdapter);
+    bool resolveHostObject(RuntimeHostObjectId object,
+        HostObjectReference& reference, RuntimeErrorCode& error) const;
+    bool consumeHostOperation(SourceLocation location);
+    bool readHostProperty(RuntimeHostObjectId object, const std::string& key,
+        Value& value, RuntimeErrorCode& error, SourceLocation location);
+    bool writeHostProperty(RuntimeHostObjectId object, const std::string& key,
+        Value value, RuntimeErrorCode& error, SourceLocation location);
+    bool invokeHostMethod(const FunctionRecord& function,
+        const std::vector<Value>& arguments, Value receiver,
+        SourceLocation location, Value& result);
+    bool convertValueToHost(const Value& value, HostValue& result,
+        RuntimeErrorCode& error, SourceLocation location);
+    bool convertHostValue(const HostValue& value, RuntimeHostObjectId methodOwner,
+        Value& result, RuntimeErrorCode& error, SourceLocation location);
+    bool validateAdapterReference(const HostObjectReference& reference,
+        RuntimeErrorCode& error);
+    RuntimeErrorCode mapHostResult(HostResultCode code) const;
+    bool advanceHostGeneration(RuntimeErrorCode& error);
     void clearRuntimeState();
     void setRuntimeError(RuntimeErrorCode code, SourceLocation location);
     bool consumeStep(SourceLocation location);
@@ -266,6 +357,7 @@ private:
     std::size_t totalArrayElements_ = 0;
     std::size_t userFunctionCount_ = 0;
     std::size_t nativeFunctionCount_ = 0;
+    std::size_t hostMethodCount_ = 0;
     std::size_t executionSteps_ = 0;
     ScriptResult result_;
     Value finalValue_;
@@ -274,6 +366,14 @@ private:
     RuntimeObjectId arrayPrototype_ = kInvalidRuntimeObjectId;
     RuntimeObjectId mathObject_ = kInvalidRuntimeObjectId;
     bool builtInsInitialized_ = false;
+    HostAdapter* hostAdapter_ = nullptr;
+    HostGenerationId hostGeneration_ = kInvalidHostGenerationId;
+    std::vector<HostObjectRecord> hostObjects_;
+    std::vector<HostMethodRecord> hostMethods_;
+    std::vector<HostGlobalSpec> hostGlobalSpecs_;
+    std::size_t liveHostObjectCount_ = 0;
+    std::size_t hostOperations_ = 0;
+    bool hostCallActive_ = false;
 };
 
 ScriptResult executeScript(SourceView source, RuntimeContext& context);
