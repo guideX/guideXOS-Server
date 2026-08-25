@@ -543,6 +543,21 @@ function Invoke-NavigatorKernelSmokeQemuPass {
         )
         $args += Get-GxosQemuSecureRngArguments
 
+        $stagedArtifacts = @(
+            [pscustomobject]@{ Name = "bootloader"; Path = $bootloader },
+            [pscustomobject]@{ Name = "kernel"; Path = (Join-Path $esp "kernel.elf") },
+            [pscustomobject]@{ Name = "ramdisk"; Path = (Join-Path $esp "ramdisk.img") }
+        )
+        foreach ($artifact in $stagedArtifacts) {
+            if (-not (Test-Path -LiteralPath $artifact.Path -PathType Leaf)) {
+                throw "QEMU staging artifact missing: $($artifact.Path)"
+            }
+            $artifactFile = Get-Item -LiteralPath $artifact.Path
+            $artifactHash = (Get-FileHash -LiteralPath $artifact.Path -Algorithm SHA256).Hash.ToLowerInvariant()
+            Write-Host ("[NAVIGATOR-STAGED-ARTIFACT] name={0} path={1} bytes={2} sha256={3}" -f `
+                $artifact.Name, $artifactFile.FullName, $artifactFile.Length, $artifactHash)
+        }
+
         $netDumpPath = [Environment]::GetEnvironmentVariable("GXOS_NAVIGATOR_QEMU_NET_DUMP", "Process")
         if (-not [string]::IsNullOrWhiteSpace($netDumpPath)) {
             $args += @("-object", "filter-dump,id=phase8h_dump,netdev=net0,file=`"$netDumpPath`"")

@@ -25,7 +25,10 @@ SECTIONS
     {
         *(.text)
         *(.text.*)
+        *(.text$*)
     }
+    __text_start = ADDR(.text);
+    __text_end = ADDR(.text) + SIZEOF(.text);
     
     /* Read-only data */
     .rodata ALIGN(4096) :

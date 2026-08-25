@@ -24,6 +24,7 @@
 #include "include/kernel/dns.h"
 #include "include/kernel/virtio_rng.h"
 #include "include/kernel/virtio_gpu.h"
+#include "include/kernel/kernel_text_guard.h"
 #include "../../built_in_app_metadata.h"
 #include "../../gxos_tls_foundation.h"
 #include "../../gxos_tls_prerequisites.h"
@@ -7533,6 +7534,7 @@ bool NavigatorApp::smokeTypographyPhase7A()
 
 bool NavigatorApp::smokePersistentNavigationLifecycle()
 {
+    gxos_kernel_text_guard_set_context("persistent_navigation_scheduler", "smokePersistentNavigationLifecycle");
     serial::puts("[NAVIGATOR-PERSISTENT] mode=single_boot_single_navigator_instance\n");
     NavigatorApp* app = new NavigatorApp();
     if (!app) {
