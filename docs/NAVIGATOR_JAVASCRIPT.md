@@ -5,10 +5,10 @@
 Navigator currently has a reusable HTML document/parser layer in
 `guide_web_document.*` and `guide_web_html_parser.*`, with Navigator-specific
 navigation and rendering in `navigator.*`. The independent JavaScript
-subsystem now contains a bounded lexer, parser/AST, and standalone runtime
-core. It still has no DOM abstraction, event scripting system, or `<script>`
-execution path. The existing HTML parser intentionally strips `<script>`
-content.
+subsystem now contains a bounded lexer, parser/AST, runtime core, and the JS8
+controlled document bridge described below. It still has no event scripting
+system or automatic `<script>` execution path. The existing HTML parser
+intentionally strips `<script>` content.
 
 JavaScript is therefore a separate subsystem. It must not become an implicit
 part of HTML parsing or page loading. Phase JS1 accepts source text and
@@ -945,12 +945,13 @@ timers, promises, events, network operations, or host-to-JS callbacks.
 
 #### Navigator boundary and deliberate non-goals
 
-`navigator_script_host.h/.cpp` provides an inert Navigator-facing adapter
-shell. It validates page-generation tokens but exposes no properties or
-methods yet. The evaluator knows only `HostAdapter`, never `WebDocument`,
-`Navigator`, layout nodes, or property names such as `textContent`.
+Before JS8, `navigator_script_host.h/.cpp` provided only an inert
+Navigator-facing adapter shell. JS8 extends that boundary with the deliberately
+small real-document mapping described below. The evaluator still knows only
+`HostAdapter`, never `WebDocument`, `Navigator`, layout nodes, or property names
+such as `textContent`.
 
-The intended future mapping is architectural only:
+The JS7-to-JS8 mapping is:
 
 ```text
 document                         -> HostObject
@@ -995,3 +996,175 @@ test is compiled with strict C++17 `-Wall -Wextra -Werror -pedantic` settings.
 **The guideXOS JavaScript runtime can now communicate through a bounded generic
 script-host contract, but Navigator still does not automatically execute page
 JavaScript and no full DOM API is exposed.**
+
+## Phase JS8: minimal document host and controlled execution
+
+JS8 is the first intentional JavaScript-to-Navigator document mutation
+milestone. The bridge is implemented by
+`navigator_javascript/navigator_script_host.*` and uses the JS7 `HostAdapter`
+boundary:
+
+```text
+WebDocument / structural element serial
+        ↑
+NavigatorScriptHostAdapter
+        ↑
+RuntimeContext HostObject registry
+        ↑
+controlled JavaScript source
+```
+
+The existing Navigator document is a bounded compact model, not a retained
+general-purpose DOM. `WebDocument::structuralElements` is the authoritative
+node metadata table; its `HtmlElementRef::serial`, parent serial, tag name, and
+ID are the node identity used by JS8. Renderable text remains in the existing
+`WebInlineItem`/`DocBlock` streams. JS8 adds no JavaScript-side tree and no
+raw node pointer to a JavaScript `Value`.
+
+The controlled realm installs one `document` HostObject through
+`RuntimeContext::installHostGlobal`. Its fixed adapter instance is paired with
+the current JS7 host generation. A returned Element HostObject carries the
+authoritative structural serial and the same generation. Runtime registry
+deduplication therefore gives repeated lookup of one node stable strict
+identity, while a generation advance makes every old document and element
+handle stale. `RuntimeContext::reset()` is the normal replacement boundary;
+`invalidateHostGeneration()` is also available for the explicit stale-closure
+proof before a new realm is installed.
+
+### Supported surface
+
+The complete JS8 public surface is intentionally only:
+
+```text
+document.getElementById(id)
+
+Element.id             read-only String
+Element.tagName        read-only uppercase canonical String
+Element.textContent    read/write bounded String/primitive text
+```
+
+`getElementById` requires a document receiver, accepts only a bounded String ID,
+searches the authoritative structural-element table in document order, and
+returns `Null` when no ID matches. It never returns `Undefined` for a missing
+element. The traversal is capped by the document-node limit. `id` is read-only
+because changing it would require safely updating future ID indexes. `tagName`
+is canonicalized to uppercase (`DIV`, `SPAN`, `P`). Unknown reads return the
+generic JS7 `Undefined`; unknown writes are rejected and do not create shadow
+properties. Detached `getElementById` calls fail with `InvalidReceiver`.
+
+`textContent` reads the bounded decoded text runs belonging to the element and
+its structural descendants in document order, including bounded forced breaks.
+The existing compact parser stream is the source of truth; this is not a
+claim of full browser DOM whitespace or node semantics. Where one compact
+render block directly owns the element, its normalized parser text is used.
+Text aggregation has an explicit operation and byte bound.
+
+Assignments are validated before mutation. String, Number, Boolean, Null, and
+Undefined are converted using deterministic primitive spelling (`123` becomes
+`"123"`, `null` becomes `"null"`, and `undefined` becomes `"undefined"`).
+Arbitrary object/function stringification is not supported. The assignment
+bound is 64 KiB by default (and is lowered by any smaller configured runtime
+or document bound). A successful write updates the existing `DocBlock` and
+inline text stream, increments the document mutation count, and sets the
+authoritative `WebDocument::layoutDirty` flag. Oversized or over-budget writes
+fail before changing document content; earlier successful writes remain.
+
+### Layout and controlled harness
+
+`NavigatorScriptExecutionHarness` is the deterministic proof path:
+
+```text
+parse known HTML fixture
+  -> install document HostObject
+  -> execute explicit source in the current realm
+  -> inspect WebDocument independently
+  -> if layoutDirty, request one explicit relayout
+```
+
+The harness never reads or executes HTML `<script>` elements. Multiple calls
+to its explicit execution API use `RuntimeContext::executeInSameRealm`, which
+preserves global bindings, closures, HostObject identity, and shared execution
+and host-operation budgets. Same-realm source and AST storage is cumulative and
+bounded. Document replacement resets the realm and advances the host
+generation, so old handles cannot retarget a new document.
+
+The normal Navigator layout path observes the same `WebDocument::layoutDirty`
+signal. Its existing inline-layout rebuild clears the signal only after the
+real layout pipeline has consumed the changed document and records a bounded
+layout revision/extent. The standalone harness uses the same document model
+and an explicit bounded extent checkpoint for Tier 1 proof; it does not copy
+renderer code or trigger a re-layout after every property write.
+
+### Deliberate non-goals
+
+The following remain disabled in JS8:
+
+```text
+Automatic <script> execution: DISABLED
+Inline event handlers: DISABLED
+External script loading: DISABLED
+window: DISABLED
+navigator / guideXOS globals: DISABLED
+innerHTML, attributes, style, node creation, DOM traversal: DISABLED
+events, addEventListener, timers, async callbacks: DISABLED
+location, history, navigation, fetch, XHR, WebSocket: DISABLED
+cookies, localStorage, sessionStorage, console: DISABLED
+```
+
+Normal page loading therefore remains inert with respect to JavaScript. No
+public-site JavaScript compatibility is claimed. JS9 will define tightly
+bounded inline `<script>` source preservation and sequencing on this same
+document realm; it should not add external scripts, events, timers, or network
+execution in its first proof.
+
+### JS8 effective limits
+
+JS1–JS7 defaults remain in force. The consolidated defaults relevant to JS8
+are:
+
+| Resource | Default |
+| --- | ---: |
+| Source bytes | 1 MiB |
+| Tokens, including EOF | 8,192 |
+| Token/literal bytes | 64 KiB |
+| AST nodes per script | 16,384 |
+| Parser depth | 256 |
+| Statements | 4,096 |
+| Function parameters / call arguments | 64 / 64 |
+| Block nesting / expression nesting | 128 / 256 |
+| Object literal properties / array literal elements | 256 / 1,024 |
+| Runtime bindings / function environments | 256 / 256 |
+| Runtime environments / functions | 256 / 4,096 |
+| Runtime strings / total string bytes | 4,096 / 256 KiB |
+| Runtime objects / properties per object / total properties | 1,024 / 256 / 4,096 |
+| Runtime arrays / total elements / maximum index | 1,024 / 4,096 / 1,023 |
+| Prototype depth | 32 |
+| Execution steps | 100,000 |
+| Host objects / host operations | 1,024 / 10,000 |
+| Host generations / cached host methods | 4,096 / 64 |
+| Same-realm cumulative source | 1 MiB |
+| Document ID length | 256 bytes |
+| Exported Element HostObjects | 1,024 runtime host entries |
+| TextContent assignment | 64 KiB |
+| Text aggregation operations | 1,024 inline items |
+| DOM mutations per controlled document execution | 1,024 |
+| Document/node lookup table | 1,024 structural nodes |
+
+All limits are finite and failures are typed. Host operations for document
+lookup, property reads/writes, returned Element registration, and method calls
+continue to consume the JS7 host-operation budget; DOM code cannot reset or
+bypass the 100,000-step execution budget.
+
+The focused proof is
+`tests/navigator_javascript_js8_test.cpp`, run by
+`scripts/smoke-navigator-javascript-js8.ps1`. It covers real parsed
+`WebDocument` lookup and mutation, missing IDs, stable document/element
+identity, read-only properties, canonical tags, text reads/writes, primitive
+conversion, independent host inspection, dirty/re-layout state, measurable
+text extent change, function and closure mutation, stale document/element
+handles, stale closures, same-realm scripts, inert page scripts, mutation and
+text bounds, and host-operation exhaustion.
+
+**guideXOS Navigator now has a controlled JavaScript-to-document bridge capable
+of bounded text mutation, but normal web pages still do not automatically
+execute JavaScript.**

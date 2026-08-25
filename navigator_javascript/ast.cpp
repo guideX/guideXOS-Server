@@ -13,6 +13,58 @@ void Ast::reset(SourceView source)
     children_.clear();
 }
 
+bool Ast::appendFrom(const Ast& source, std::size_t sourceOffset,
+    std::size_t lineOffset, AstNodeId& appendedRoot)
+{
+    appendedRoot = kInvalidAstNodeId;
+    if (source.root_ == kInvalidAstNodeId ||
+        source.root_ >= source.nodes_.size() ||
+        nodes_.size() > static_cast<std::size_t>(kInvalidAstNodeId) -
+            source.nodes_.size() ||
+        children_.size() > static_cast<std::size_t>(kInvalidAstNodeId) -
+            source.children_.size()) return false;
+
+    const AstNodeId nodeBase = static_cast<AstNodeId>(nodes_.size());
+    const std::uint32_t childBase = static_cast<std::uint32_t>(children_.size());
+    const auto remap = [nodeBase](AstNodeId id) {
+        return id == kInvalidAstNodeId ? id :
+            static_cast<AstNodeId>(nodeBase + id);
+    };
+    try {
+        nodes_.reserve(nodes_.size() + source.nodes_.size());
+        children_.reserve(children_.size() + source.children_.size());
+        for (const AstNode& sourceNode : source.nodes_) {
+            AstNode node = sourceNode;
+            node.location.offset += sourceOffset;
+            node.location.line += lineOffset;
+            node.name = remap(node.name);
+            node.initializer = remap(node.initializer);
+            node.expression = remap(node.expression);
+            node.argument = remap(node.argument);
+            node.left = remap(node.left);
+            node.right = remap(node.right);
+            node.test = remap(node.test);
+            node.consequent = remap(node.consequent);
+            node.alternate = remap(node.alternate);
+            node.init = remap(node.init);
+            node.update = remap(node.update);
+            node.body = remap(node.body);
+            node.callee = remap(node.callee);
+            node.object = remap(node.object);
+            node.property = remap(node.property);
+            node.key = remap(node.key);
+            if (node.childCount != 0)
+                node.childOffset += childBase;
+            nodes_.push_back(node);
+        }
+        for (AstNodeId child : source.children_) children_.push_back(remap(child));
+    } catch (...) {
+        return false;
+    }
+    appendedRoot = remap(source.root_);
+    return true;
+}
+
 AstNodeId Ast::addNode(const AstNode& nodeValue)
 {
     if (nodes_.size() >= static_cast<std::size_t>(kInvalidAstNodeId)) {

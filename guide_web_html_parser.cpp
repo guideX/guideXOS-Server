@@ -6113,7 +6113,14 @@ static void flushText(ParserState& st)
 		return;
 	}
 	std::vector<HtmlElementRef> ancestors = captureBlockAncestors(st);
-	const HtmlElementRef elementMetadata = activeBlockElement(st);
+	const HtmlElementRef activeElement = activeBlockElement(st);
+	// Text directly owned by a structural element (for example the JS8
+	// fixture's <div id="status">Waiting</div>) has no block-tag context.
+	// Preserve that existing node's serial on the compact render block so a
+	// Navigator host mutation can update the authoritative block without
+	// manufacturing a second DOM node.
+	const HtmlElementRef elementMetadata = activeElement.serial != 0
+		? activeElement : (owner != nullptr ? *owner : HtmlElementRef());
 	const size_t blockStart = st.doc.blocks.size();
 
 	switch (st.open) {
@@ -6276,7 +6283,7 @@ static void flushText(ParserState& st)
 	default:
 		// Text outside a known block: emit as paragraph if body is active.
 		if (st.bodyReached)
-			st.doc.blocks.push_back(makeTextBlock(BlockType::Paragraph, "p", t, "", "", "", ancestors, st.styleBuf));
+			st.doc.blocks.push_back(makeTextBlock(BlockType::Paragraph, "p", t, "", "", "", ancestors, st.styleBuf, elementMetadata));
 		break;
 	}
 	markInlineFlowOnNewBlocks(st, blockStart, flowSerial);

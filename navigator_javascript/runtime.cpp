@@ -1941,6 +1941,8 @@ void RuntimeContext::clearRuntimeState()
 {
     ast_.reset();
     sourceStorage_.clear();
+    realmSourceStorage_.clear();
+    realmSourceLineCount_ = 0;
     environment_.reset();
     environments_.clear();
     functions_.clear();
@@ -2436,6 +2438,14 @@ RuntimeErrorCode RuntimeContext::mapHostResult(HostResultCode code) const
         return RuntimeErrorCode::HostReentryUnsupported;
     case HostResultCode::InvalidReturn:
         return RuntimeErrorCode::InvalidHostReturn;
+    case HostResultCode::InvalidValue:
+        return RuntimeErrorCode::HostInvalidValue;
+    case HostResultCode::DocumentLookupLimitExceeded:
+        return RuntimeErrorCode::DocumentLookupLimitExceeded;
+    case HostResultCode::DocumentTextLimitExceeded:
+        return RuntimeErrorCode::DocumentTextLimitExceeded;
+    case HostResultCode::DocumentMutationLimitExceeded:
+        return RuntimeErrorCode::DocumentMutationLimitExceeded;
     }
     return RuntimeErrorCode::HostCallFailed;
 }
@@ -3087,6 +3097,103 @@ ScriptResult RuntimeContext::execute(SourceView source)
     }
 }
 
+ScriptResult RuntimeContext::executeInSameRealm(SourceView source)
+{
+    result_ = ScriptResult();
+    finalValue_ = Value::undefined();
+    activeCallFrames_ = 0;
+    try {
+        if (!builtInsInitialized_) {
+            setRuntimeError(RuntimeErrorCode::BuiltInInitializationFailed,
+                SourceLocation());
+            return result_;
+        }
+        if (source.data == nullptr && source.length != 0) {
+            Lexer lexer(limits_.lexer);
+            const LexResult lexed = lexer.tokenize(source);
+            result_.lexerError = lexed.error;
+            result_.status = ScriptStatus::LexicalFailure;
+            return result_;
+        }
+        if (source.length > limits_.lexer.maxSourceBytes) {
+            Lexer lexer(limits_.lexer);
+            const LexResult lexed = lexer.tokenize(source);
+            result_.lexerError = lexed.error;
+            result_.status = ScriptStatus::LexicalFailure;
+            return result_;
+        }
+        sourceStorage_.assign(source.data == nullptr ? "" : source.data,
+            source.length);
+        const SourceView ownedSource(sourceStorage_.data(), sourceStorage_.size());
+        Lexer lexer(limits_.lexer);
+        const LexResult lexed = lexer.tokenize(ownedSource);
+        if (!lexed.succeeded()) {
+            result_.lexerError = lexed.error;
+            result_.status = ScriptStatus::LexicalFailure;
+            return result_;
+        }
+        Parser parser(limits_.parser);
+        ParseResult parsed = parser.parse(ownedSource, lexed);
+        if (!parsed.succeeded()) {
+            result_.parserError = parsed.error;
+            result_.status = ScriptStatus::ParseFailure;
+            return result_;
+        }
+
+        // If a caller used execute() once before entering a same-realm phase,
+        // preserve that script's AST/source as the first realm segment.
+        if (realmSourceStorage_.empty() && ast_.nodeCount() != 0) {
+            realmSourceStorage_ = sourceStorage_;
+            realmSourceLineCount_ = static_cast<std::size_t>(std::count(
+                realmSourceStorage_.begin(), realmSourceStorage_.end(), '\n'));
+            ast_.setSource(SourceView(realmSourceStorage_.data(),
+                realmSourceStorage_.size()));
+        }
+
+        const bool hasPriorSource = !realmSourceStorage_.empty();
+        const std::size_t separatorBytes = hasPriorSource ? 1u : 0u;
+        if (realmSourceStorage_.size() > limits_.maxRealmSourceBytes ||
+            separatorBytes > limits_.maxRealmSourceBytes -
+                realmSourceStorage_.size() ||
+            source.length > limits_.maxRealmSourceBytes -
+                realmSourceStorage_.size() - separatorBytes) {
+            setRuntimeError(RuntimeErrorCode::RealmSourceLimitExceeded,
+                SourceLocation());
+            return result_;
+        }
+        const std::size_t sourceOffset = realmSourceStorage_.size() +
+            separatorBytes;
+        const std::size_t lineOffset = realmSourceLineCount_ +
+            (hasPriorSource ? 1u : 0u);
+        if (hasPriorSource) realmSourceStorage_.push_back('\n');
+        realmSourceStorage_ += sourceStorage_;
+        realmSourceLineCount_ += static_cast<std::size_t>(std::count(
+            sourceStorage_.begin(), sourceStorage_.end(), '\n')) +
+            (hasPriorSource ? 1u : 0u);
+
+        AstNodeId root = kInvalidAstNodeId;
+        if (!ast_.appendFrom(parsed.ast, sourceOffset, lineOffset, root)) {
+            setRuntimeError(RuntimeErrorCode::AllocationFailure,
+                SourceLocation());
+            return result_;
+        }
+        ast_.setSource(SourceView(realmSourceStorage_.data(),
+            realmSourceStorage_.size()));
+        if (!ast_.setRoot(root)) {
+            setRuntimeError(RuntimeErrorCode::InvalidAstState,
+                SourceLocation());
+            return result_;
+        }
+        Evaluator evaluator(*this);
+        if (!evaluator.run()) return result_;
+        result_.status = ScriptStatus::Success;
+        return result_;
+    } catch (const std::bad_alloc&) {
+        setRuntimeError(RuntimeErrorCode::AllocationFailure, SourceLocation());
+        return result_;
+    }
+}
+
 ScriptResult executeScript(SourceView source, RuntimeContext& context)
 {
     return context.execute(source);
@@ -3163,6 +3270,16 @@ const char* runtimeErrorCodeName(RuntimeErrorCode code)
         return "InvalidHostReturn";
     case RuntimeErrorCode::HostMethodLimitExceeded:
         return "HostMethodLimitExceeded";
+    case RuntimeErrorCode::HostInvalidValue:
+        return "HostInvalidValue";
+    case RuntimeErrorCode::DocumentLookupLimitExceeded:
+        return "DocumentLookupLimitExceeded";
+    case RuntimeErrorCode::DocumentTextLimitExceeded:
+        return "DocumentTextLimitExceeded";
+    case RuntimeErrorCode::DocumentMutationLimitExceeded:
+        return "DocumentMutationLimitExceeded";
+    case RuntimeErrorCode::RealmSourceLimitExceeded:
+        return "RealmSourceLimitExceeded";
     }
     return "Invalid";
 }

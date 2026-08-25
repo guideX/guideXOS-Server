@@ -30,6 +30,13 @@ const char* hostResultCodeName(HostResultCode code)
     case HostResultCode::CallFailed: return "CallFailed";
     case HostResultCode::ReentryUnsupported: return "ReentryUnsupported";
     case HostResultCode::InvalidReturn: return "InvalidReturn";
+    case HostResultCode::InvalidValue: return "InvalidValue";
+    case HostResultCode::DocumentLookupLimitExceeded:
+        return "DocumentLookupLimitExceeded";
+    case HostResultCode::DocumentTextLimitExceeded:
+        return "DocumentTextLimitExceeded";
+    case HostResultCode::DocumentMutationLimitExceeded:
+        return "DocumentMutationLimitExceeded";
     }
     return "Invalid";
 }

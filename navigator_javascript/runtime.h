@@ -61,6 +61,11 @@ enum class RuntimeErrorCode : std::uint8_t {
     HostGenerationLimitExceeded,
     InvalidHostReturn,
     HostMethodLimitExceeded,
+    HostInvalidValue,
+    DocumentLookupLimitExceeded,
+    DocumentTextLimitExceeded,
+    DocumentMutationLimitExceeded,
+    RealmSourceLimitExceeded,
 };
 
 struct RuntimeError {
@@ -110,6 +115,7 @@ constexpr std::size_t kDefaultMaxJavaScriptHostPropertyNameLength = 256u;
 constexpr std::size_t kDefaultMaxJavaScriptHostOperations = 10000u;
 constexpr std::size_t kDefaultMaxJavaScriptHostGenerations = 4096u;
 constexpr std::size_t kDefaultMaxJavaScriptHostMethodValues = 64u;
+constexpr std::size_t kDefaultMaxJavaScriptRealmSourceBytes = 1u * 1024u * 1024u;
 
 struct RuntimeLimits {
     LexerLimits lexer;
@@ -158,6 +164,8 @@ struct RuntimeLimits {
     std::size_t maxHostOperations = kDefaultMaxJavaScriptHostOperations;
     std::size_t maxHostGenerations = kDefaultMaxJavaScriptHostGenerations;
     std::size_t maxHostMethodValues = kDefaultMaxJavaScriptHostMethodValues;
+    // Cumulative explicit-script source retained by a same-document realm.
+    std::size_t maxRealmSourceBytes = kDefaultMaxJavaScriptRealmSourceBytes;
 };
 
 // A context is an independent, resettable bounded JavaScript realm.  execute() copies a
@@ -175,6 +183,9 @@ public:
     RuntimeContext& operator=(RuntimeContext&&) = delete;
 
     ScriptResult execute(SourceView source);
+    // Execute another explicit script without resetting globals, closures,
+    // host handles, or the shared execution/host-operation budgets.
+    ScriptResult executeInSameRealm(SourceView source);
     void reset();
 
     const RuntimeLimits& limits() const { return limits_; }
@@ -345,6 +356,8 @@ private:
 
     RuntimeLimits limits_;
     std::string sourceStorage_;
+    std::string realmSourceStorage_;
+    std::size_t realmSourceLineCount_ = 0;
     Ast ast_;
     Environment environment_;
     std::vector<Environment> environments_;

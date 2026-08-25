@@ -14454,12 +14454,31 @@ namespace {
 
 	static void ensureInlineLayout(const WebDocument& doc)
 	{
-		if (!s_inlineLayoutDirty && s_inlineLayoutSnapshot.valid &&
+		if (!s_inlineLayoutDirty && !doc.layoutDirty && s_inlineLayoutSnapshot.valid &&
 			s_inlineLayoutSnapshot.url == doc.url &&
 			s_inlineLayoutSnapshot.blockCount == doc.blocks.size() &&
 			s_inlineLayoutSnapshot.itemCount == doc.inlineItems.size()) return;
 		rebuildInlineLayout(doc, s_inlineLayoutSnapshot);
 		s_inlineLayoutDirty = false;
+		if (doc.layoutDirty) {
+			// Navigator owns the mutable document passed to this helper.  The
+			// adapter marks that same document dirty; clear the signal only after
+			// the normal inline-layout pipeline has consumed the mutation.
+			WebDocument& mutableDocument = const_cast<WebDocument&>(doc);
+			std::size_t extent = 0;
+			for (const InlineFlowLayout& flow : s_inlineLayoutSnapshot.flows) {
+				for (const InlineFragmentLayout& fragment : flow.fragments) {
+					const int right = fragment.x + std::max(fragment.w,
+						fragment.boxWidth);
+					if (right > 0) extent = std::max(extent,
+						static_cast<std::size_t>(right));
+				}
+			}
+			mutableDocument.layoutTextExtent = std::min<std::size_t>(
+				8192u, extent);
+			mutableDocument.layoutDirty = false;
+			++mutableDocument.layoutRevision;
+		}
 	}
 
 	static const InlineFlowLayout* inlineFlowForBlock(const WebDocument& doc, int blockIndex)

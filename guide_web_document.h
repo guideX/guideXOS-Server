@@ -11,6 +11,7 @@
 // It depends only on the C++ standard library.
 
 #include <cstdint>
+#include <cstddef>
 #include <array>
 #include <string>
 #include <vector>
@@ -1171,6 +1172,14 @@ struct WebDocument {
 	FormsDiagnostics      formsDiagnostics;
 	std::vector<FormContainerMetadata> formContainers;
 	FormRuntimeStateTable formRuntimeState;
+	// JS8 keeps mutation and layout state on the authoritative compact
+	// document model.  These fields are lifecycle state, not a JavaScript DOM
+	// copy: Navigator and the controlled script harness both observe the same
+	// document and can invalidate/rebuild its existing layout.
+	bool                 layoutDirty = false;
+	uint64_t             layoutRevision = 0;
+	std::size_t          layoutTextExtent = 0;
+	std::size_t          scriptMutationCount = 0;
 };
 
 } // namespace web

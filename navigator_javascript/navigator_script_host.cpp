@@ -1,47 +1,582 @@
 #include "navigator_script_host.h"
 
+#include "guide_web_html_parser.h"
+
+#include <algorithm>
+#include <array>
+#include <charconv>
+#include <cmath>
+#include <cctype>
+#include <limits>
+#include <utility>
+
 namespace gxos {
 namespace javascript {
+
+namespace {
+
+bool textEquals(SourceView text, const char* expected)
+{
+    const std::size_t length = std::char_traits<char>::length(expected);
+    return text.data != nullptr && text.length == length &&
+        std::string(text.data, text.length) == expected;
+}
+
+const gxos::web::HtmlElementRef* findElementInDocument(
+    const gxos::web::WebDocument& document, HostInstanceId serial,
+    std::size_t nodeLimit)
+{
+    const std::size_t count = std::min(nodeLimit,
+        document.structuralElements.size());
+    for (std::size_t index = 0; index < count; ++index) {
+        const gxos::web::HtmlElementRef& element =
+            document.structuralElements[index];
+        if (element.serial == serial) return &element;
+    }
+    return nullptr;
+}
+
+bool isDescendantInDocument(const gxos::web::WebDocument& document,
+    std::uint64_t serial, std::uint64_t ancestorSerial,
+    std::size_t nodeLimit)
+{
+    if (serial == 0 || ancestorSerial == 0) return false;
+    std::uint64_t current = serial;
+    for (std::size_t steps = 0; steps < nodeLimit && current != 0; ++steps) {
+        if (current == ancestorSerial) return true;
+        const gxos::web::HtmlElementRef* element = findElementInDocument(
+            document, current, nodeLimit);
+        if (element == nullptr) return false;
+        current = element->parentSerial;
+    }
+    return false;
+}
+
+bool appendBounded(std::string& target, const std::string& text,
+    std::size_t& operations, std::size_t maxOperations, std::size_t maxBytes)
+{
+    if (operations >= maxOperations) return false;
+    ++operations;
+    if (text.size() > maxBytes || target.size() > maxBytes - text.size())
+        return false;
+    target += text;
+    return true;
+}
+
+std::string canonicalTagName(const std::string& tagName)
+{
+    std::string result = tagName;
+    for (char& character : result) {
+        character = static_cast<char>(std::toupper(
+            static_cast<unsigned char>(character)));
+    }
+    return result;
+}
+
+} // namespace
+
+NavigatorScriptHostAdapter::NavigatorScriptHostAdapter(
+    HostGenerationId generation, NavigatorScriptHostLimits limits)
+    : generation_(generation), limits_(limits)
+{
+}
+
+NavigatorScriptHostAdapter::NavigatorScriptHostAdapter(
+    gxos::web::WebDocument& document, HostGenerationId generation,
+    NavigatorScriptHostLimits limits)
+    : document_(&document), generation_(generation), limits_(limits)
+{
+}
+
+void NavigatorScriptHostAdapter::attachDocument(
+    gxos::web::WebDocument& document, HostGenerationId generation)
+{
+    document_ = &document;
+    generation_ = generation;
+    returnBuffer_.clear();
+}
+
+void NavigatorScriptHostAdapter::detachDocument()
+{
+    document_ = nullptr;
+    returnBuffer_.clear();
+}
+
+gxos::web::HtmlElementRef* NavigatorScriptHostAdapter::findElement(
+    HostInstanceId serial)
+{
+    if (document_ == nullptr) return nullptr;
+    const std::size_t count = std::min(limits_.maxDocumentNodes,
+        document_->structuralElements.size());
+    for (std::size_t index = 0; index < count; ++index) {
+        if (document_->structuralElements[index].serial == serial)
+            return &document_->structuralElements[index];
+    }
+    return nullptr;
+}
+
+const gxos::web::HtmlElementRef* NavigatorScriptHostAdapter::findElement(
+    HostInstanceId serial) const
+{
+    if (document_ == nullptr) return nullptr;
+    const std::size_t count = std::min(limits_.maxDocumentNodes,
+        document_->structuralElements.size());
+    for (std::size_t index = 0; index < count; ++index) {
+        if (document_->structuralElements[index].serial == serial)
+            return &document_->structuralElements[index];
+    }
+    return nullptr;
+}
+
+bool NavigatorScriptHostAdapter::isKnownElementSerial(
+    HostInstanceId serial) const
+{
+    return findElement(serial) != nullptr;
+}
+
+bool NavigatorScriptHostAdapter::isDescendantOrSelf(
+    std::uint64_t serial, std::uint64_t ancestorSerial) const
+{
+    return document_ != nullptr && isDescendantInDocument(*document_, serial,
+        ancestorSerial, limits_.maxDocumentNodes);
+}
 
 HostResult NavigatorScriptHostAdapter::validate(
     const HostObjectReference& object)
 {
-    if (object.valid() && object.generation == generation_) {
+    if (!object.valid()) return HostResult{HostResultCode::InvalidObject};
+    if (object.generation != generation_)
+        return HostResult{HostResultCode::StaleObject};
+    if (document_ == nullptr) return HostResult{HostResultCode::InvalidObject};
+    if (object.kind == kNavigatorDocumentHostKind &&
+        object.instanceId == kNavigatorDocumentHostInstance) {
         return HostResult();
     }
-    return HostResult{object.generation == generation_
-        ? HostResultCode::InvalidObject : HostResultCode::StaleObject};
+    if (object.kind == kNavigatorElementHostKind &&
+        isKnownElementSerial(object.instanceId)) {
+        return HostResult();
+    }
+    return HostResult{HostResultCode::InvalidObject};
 }
 
 HostResult NavigatorScriptHostAdapter::getProperty(
     const HostObjectReference& object, SourceView property, HostValue& result)
 {
-    (void)object;
-    (void)property;
-    result = HostValue::undefined();
+    const HostResult validation = validate(object);
+    if (!validation.succeeded()) return validation;
+
+    if (object.kind == kNavigatorDocumentHostKind) {
+        if (textEquals(property, "getElementById")) {
+            result = HostValue::method(kNavigatorGetElementByIdMethod, true);
+            return HostResult();
+        }
+        return HostResult{HostResultCode::PropertyNotFound};
+    }
+
+    const gxos::web::HtmlElementRef* element = findElement(object.instanceId);
+    if (element == nullptr) return HostResult{HostResultCode::InvalidObject};
+    if (textEquals(property, "id")) {
+        result = HostValue::string(SourceView(element->id.data(),
+            element->id.size()));
+        return HostResult();
+    }
+    if (textEquals(property, "tagName")) {
+        returnBuffer_ = canonicalTagName(element->tagName);
+        result = HostValue::string(SourceView(returnBuffer_.data(),
+            returnBuffer_.size()));
+        return HostResult();
+    }
+    if (textEquals(property, "textContent")) {
+        std::string text;
+        const HostResult content = textContentForElement(element->serial, text);
+        if (!content.succeeded()) return content;
+        returnBuffer_ = std::move(text);
+        result = HostValue::string(SourceView(returnBuffer_.data(),
+            returnBuffer_.size()));
+        return HostResult();
+    }
     return HostResult{HostResultCode::PropertyNotFound};
+}
+
+HostResult NavigatorScriptHostAdapter::convertTextValue(
+    const HostValue& value, std::string& result) const
+{
+    switch (value.type) {
+    case HostValueType::String:
+        if (value.stringValue.data == nullptr && value.stringValue.length != 0)
+            return HostResult{HostResultCode::InvalidValue};
+        result.assign(value.stringValue.data == nullptr ? "" :
+            value.stringValue.data, value.stringValue.length);
+        return HostResult();
+    case HostValueType::Number: {
+        if (std::isnan(value.numberValue)) {
+            result = "NaN";
+            return HostResult();
+        }
+        if (std::isinf(value.numberValue)) {
+            result = std::signbit(value.numberValue) ? "-Infinity" :
+                "Infinity";
+            return HostResult();
+        }
+        if (value.numberValue == 0.0) {
+            result = "0";
+            return HostResult();
+        }
+        std::array<char, 128> buffer{};
+        const auto conversion = std::to_chars(buffer.data(),
+            buffer.data() + buffer.size(), value.numberValue);
+        if (conversion.ec != std::errc())
+            return HostResult{HostResultCode::InvalidValue};
+        result.assign(buffer.data(), conversion.ptr);
+        return HostResult();
+    }
+    case HostValueType::Boolean:
+        result = value.booleanValue ? "true" : "false";
+        return HostResult();
+    case HostValueType::Null:
+        result = "null";
+        return HostResult();
+    case HostValueType::Undefined:
+        result = "undefined";
+        return HostResult();
+    case HostValueType::Object:
+    case HostValueType::HostObject:
+    case HostValueType::Method:
+        return HostResult{HostResultCode::InvalidValue};
+    }
+    return HostResult{HostResultCode::InvalidValue};
+}
+
+HostResult NavigatorScriptHostAdapter::appendBoundedText(
+    std::string& target, const std::string& text, std::size_t& operations) const
+{
+    if (!appendBounded(target, text, operations,
+        limits_.maxTextAggregationOperations,
+        limits_.maxTextContentAssignment)) {
+        return HostResult{HostResultCode::DocumentTextLimitExceeded};
+    }
+    return HostResult();
+}
+
+HostResult NavigatorScriptHostAdapter::textContentForElement(
+    std::uint64_t serial, std::string& result) const
+{
+    if (document_ == nullptr || !isKnownElementSerial(serial))
+        return HostResult{HostResultCode::InvalidObject};
+    result.clear();
+    const gxos::web::DocBlock* directBlock = nullptr;
+    std::size_t directBlockCount = 0;
+    for (const gxos::web::DocBlock& block : document_->blocks) {
+        if (block.elementMetadata.serial != serial) continue;
+        directBlock = &block;
+        ++directBlockCount;
+    }
+    if (directBlockCount == 1u && directBlock != nullptr) {
+        if (directBlock->text.size() > limits_.maxTextContentAssignment)
+            return HostResult{HostResultCode::DocumentTextLimitExceeded};
+        result = directBlock->text;
+        return HostResult();
+    }
+    std::size_t operations = 0;
+    bool matchedRun = false;
+    for (const gxos::web::WebInlineItem& item : document_->inlineItems) {
+        if (operations >= limits_.maxTextAggregationOperations)
+            return HostResult{HostResultCode::DocumentTextLimitExceeded};
+        ++operations;
+        if (item.kind != gxos::web::InlineItemKind::TextRun &&
+            item.kind != gxos::web::InlineItemKind::ForcedBreak) continue;
+        if (!isDescendantOrSelf(item.ownerSerial, serial)) continue;
+        matchedRun = true;
+        const std::string text = item.kind == gxos::web::InlineItemKind::ForcedBreak
+            ? "\n" : item.text;
+        if (text.size() > limits_.maxTextContentAssignment ||
+            result.size() > limits_.maxTextContentAssignment - text.size()) {
+            return HostResult{HostResultCode::DocumentTextLimitExceeded};
+        }
+        result += text;
+    }
+    if (matchedRun) return HostResult();
+
+    // A few existing compact blocks (notably table cells and controls) do not
+    // emit a text-run item. Keep the host view authoritative for those blocks
+    // without pretending that they are a general DOM tree.
+    for (const gxos::web::DocBlock& block : document_->blocks) {
+        bool matches = block.elementMetadata.serial == serial;
+        if (!matches) {
+            for (const gxos::web::HtmlElementRef& ancestor : block.ancestors) {
+                if (ancestor.serial == serial) {
+                    matches = true;
+                    break;
+                }
+            }
+        }
+        if (!matches) continue;
+        const HostResult appended = appendBoundedText(result, block.text,
+            operations);
+        if (!appended.succeeded()) return appended;
+    }
+    return HostResult();
+}
+
+HostResult NavigatorScriptHostAdapter::setElementTextContent(
+    std::uint64_t serial, const std::string& text)
+{
+    if (document_ == nullptr || !isKnownElementSerial(serial))
+        return HostResult{HostResultCode::InvalidObject};
+    if (text.size() > limits_.maxTextContentAssignment)
+        return HostResult{HostResultCode::DocumentTextLimitExceeded};
+    if (document_->scriptMutationCount >= limits_.maxDocumentMutations)
+        return HostResult{HostResultCode::DocumentMutationLimitExceeded};
+
+    std::vector<std::size_t> matchingItems;
+    matchingItems.reserve(4u);
+    std::size_t itemOperations = 0;
+    for (std::size_t index = 0; index < document_->inlineItems.size(); ++index) {
+        if (itemOperations >= limits_.maxTextAggregationOperations)
+            return HostResult{HostResultCode::DocumentTextLimitExceeded};
+        ++itemOperations;
+        const gxos::web::WebInlineItem& item = document_->inlineItems[index];
+        if ((item.kind == gxos::web::InlineItemKind::TextRun ||
+                item.kind == gxos::web::InlineItemKind::ForcedBreak) &&
+            isDescendantOrSelf(item.ownerSerial, serial)) {
+            matchingItems.push_back(index);
+        }
+    }
+
+    std::vector<std::size_t> matchingBlocks;
+    matchingBlocks.reserve(4u);
+    for (std::size_t index = 0; index < document_->blocks.size(); ++index) {
+        const gxos::web::DocBlock& block = document_->blocks[index];
+        bool matches = block.elementMetadata.serial != 0 &&
+            isDescendantOrSelf(block.elementMetadata.serial, serial);
+        if (!matches) {
+            for (const gxos::web::HtmlElementRef& ancestor : block.ancestors) {
+                if (ancestor.serial == serial) {
+                    matches = true;
+                    break;
+                }
+            }
+        }
+        if (matches) matchingBlocks.push_back(index);
+    }
+
+    // Check vector capacity before changing anything. A successful mutation
+    // is intentionally all-or-nothing for the host's bounded representation.
+    if (matchingItems.empty() && !text.empty() &&
+        document_->inlineItems.size() >= 2048u) {
+        return HostResult{HostResultCode::DocumentMutationLimitExceeded};
+    }
+
+    if (!matchingItems.empty()) {
+        const std::size_t first = matchingItems.front();
+        gxos::web::WebInlineItem& item = document_->inlineItems[first];
+        item.kind = gxos::web::InlineItemKind::TextRun;
+        item.text = text;
+        item.ownerSerial = serial;
+        const gxos::web::HtmlElementRef* element = findElement(serial);
+        item.parentSerial = element == nullptr ? 0 : element->parentSerial;
+        for (std::size_t position = 1; position < matchingItems.size(); ++position)
+            document_->inlineItems[matchingItems[position]].text.clear();
+    } else if (!text.empty()) {
+        gxos::web::WebInlineItem item;
+        item.kind = gxos::web::InlineItemKind::TextRun;
+        item.ownerSerial = serial;
+        item.flowSerial = serial;
+        item.text = text;
+        document_->inlineItems.push_back(std::move(item));
+    }
+
+    if (!matchingBlocks.empty()) {
+        document_->blocks[matchingBlocks.front()].text = text;
+        for (std::size_t position = 1; position < matchingBlocks.size(); ++position)
+            document_->blocks[matchingBlocks[position]].text.clear();
+    }
+
+    ++document_->scriptMutationCount;
+    document_->layoutDirty = true;
+    return HostResult();
 }
 
 HostResult NavigatorScriptHostAdapter::setProperty(
     const HostObjectReference& object, SourceView property,
     const HostValue& value)
 {
-    (void)object;
-    (void)property;
-    (void)value;
-    return HostResult{HostResultCode::PropertyWriteFailed};
+    const HostResult validation = validate(object);
+    if (!validation.succeeded()) return validation;
+    if (object.kind != kNavigatorElementHostKind)
+        return HostResult{HostResultCode::PropertyWriteFailed};
+    if (textEquals(property, "id") || textEquals(property, "tagName"))
+        return HostResult{HostResultCode::PropertyReadOnly};
+    if (!textEquals(property, "textContent"))
+        return HostResult{HostResultCode::PropertyWriteFailed};
+
+    std::string text;
+    const HostResult conversion = convertTextValue(value, text);
+    if (!conversion.succeeded()) return conversion;
+    return setElementTextContent(object.instanceId, text);
+}
+
+HostResult NavigatorScriptHostAdapter::validateDocumentReceiver(
+    const HostObjectReference* receiver)
+{
+    if (receiver == nullptr || receiver->kind != kNavigatorDocumentHostKind ||
+        receiver->instanceId != kNavigatorDocumentHostInstance)
+        return HostResult{HostResultCode::InvalidObject};
+    return validate(*receiver);
 }
 
 HostResult NavigatorScriptHostAdapter::call(const HostObjectReference* receiver,
     std::uint32_t methodId, const HostValue* arguments,
     std::size_t argumentCount, HostValue& result)
 {
-    (void)receiver;
-    (void)methodId;
-    (void)arguments;
-    (void)argumentCount;
-    result = HostValue::undefined();
-    return HostResult{HostResultCode::CallFailed};
+    const HostResult receiverResult = validateDocumentReceiver(receiver);
+    if (!receiverResult.succeeded()) return receiverResult;
+    if (methodId != kNavigatorGetElementByIdMethod || argumentCount != 1u ||
+        arguments == nullptr || arguments[0].type != HostValueType::String) {
+        return HostResult{HostResultCode::CallFailed};
+    }
+    if (arguments[0].stringValue.data == nullptr &&
+        arguments[0].stringValue.length != 0) {
+        return HostResult{HostResultCode::InvalidValue};
+    }
+    if (arguments[0].stringValue.length > limits_.maxDocumentIdLength)
+        return HostResult{HostResultCode::DocumentLookupLimitExceeded};
+    const std::string id(arguments[0].stringValue.data == nullptr ? "" :
+        arguments[0].stringValue.data, arguments[0].stringValue.length);
+
+    const std::size_t count = std::min(limits_.maxDocumentNodes,
+        document_->structuralElements.size());
+    for (std::size_t index = 0; index < count; ++index) {
+        const gxos::web::HtmlElementRef& element =
+            document_->structuralElements[index];
+        if (element.serial != 0 && element.id == id) {
+            result = HostValue::fromHostObject(HostObjectReference{
+                element.serial, generation_, kNavigatorElementHostKind});
+            return HostResult();
+        }
+    }
+    if (document_->structuralElements.size() > limits_.maxDocumentNodes)
+        return HostResult{HostResultCode::DocumentLookupLimitExceeded};
+    // DOM-like getElementById uses Null for not found; Undefined is reserved
+    // for an unknown host property in the generic JS7 contract.
+    result = HostValue::nullValue();
+    return HostResult();
+}
+
+bool navigatorScriptElementTextContent(
+    const gxos::web::WebDocument& document, std::uint64_t serial,
+    std::string& result, std::size_t maxOperations, std::size_t maxBytes)
+{
+    if (findElementInDocument(document, serial, document.structuralElements.size()) == nullptr)
+        return false;
+    result.clear();
+    const gxos::web::DocBlock* directBlock = nullptr;
+    std::size_t directBlockCount = 0;
+    for (const gxos::web::DocBlock& block : document.blocks) {
+        if (block.elementMetadata.serial != serial) continue;
+        directBlock = &block;
+        ++directBlockCount;
+    }
+    if (directBlockCount == 1u && directBlock != nullptr) {
+        if (directBlock->text.size() > maxBytes) return false;
+        result = directBlock->text;
+        return true;
+    }
+    std::size_t operations = 0;
+    bool matched = false;
+    for (const gxos::web::WebInlineItem& item : document.inlineItems) {
+        if (operations >= maxOperations) return false;
+        ++operations;
+        if (item.kind != gxos::web::InlineItemKind::TextRun &&
+            item.kind != gxos::web::InlineItemKind::ForcedBreak) continue;
+        if (!isDescendantInDocument(document, item.ownerSerial, serial,
+            document.structuralElements.size())) continue;
+        matched = true;
+        const std::string text = item.kind == gxos::web::InlineItemKind::ForcedBreak
+            ? "\n" : item.text;
+        if (text.size() > maxBytes || result.size() > maxBytes - text.size())
+            return false;
+        result += text;
+    }
+    return matched || result.empty();
+}
+
+NavigatorScriptExecutionHarness::NavigatorScriptExecutionHarness(
+    RuntimeLimits runtimeLimits, NavigatorScriptHostLimits hostLimits)
+    : runtime_(runtimeLimits), adapter_(1u, hostLimits)
+{
+    runtime_.setHostAdapter(&adapter_);
+}
+
+bool NavigatorScriptExecutionHarness::installDocumentGlobal(
+    RuntimeErrorCode& error)
+{
+    return runtime_.installHostGlobal("document",
+        kNavigatorDocumentHostInstance, kNavigatorDocumentHostKind, error);
+}
+
+bool NavigatorScriptExecutionHarness::loadParsedDocument(
+    gxos::web::WebDocument document, bool resetRealm, RuntimeErrorCode& error)
+{
+    error = RuntimeErrorCode::None;
+    if (resetRealm) {
+        runtime_.reset();
+        if (!runtime_.lastResult().succeeded()) {
+            error = runtime_.lastResult().runtimeError.code;
+            return false;
+        }
+    }
+    document_ = std::move(document);
+    adapter_.attachDocument(document_, runtime_.hostGeneration());
+    if (!installDocumentGlobal(error)) return false;
+    loaded_ = true;
+    return true;
+}
+
+bool NavigatorScriptExecutionHarness::loadHtml(const std::string& url,
+    const std::string& html, RuntimeErrorCode& error)
+{
+    const gxos::web::WebDocument document = gxos::web::parseHtml(url, html);
+    return loadParsedDocument(document, loaded_, error);
+}
+
+bool NavigatorScriptExecutionHarness::replaceHtml(const std::string& url,
+    const std::string& html, RuntimeErrorCode& error)
+{
+    const gxos::web::WebDocument document = gxos::web::parseHtml(url, html);
+    return loadParsedDocument(document, true, error);
+}
+
+bool NavigatorScriptExecutionHarness::invalidateDocumentGeneration(
+    RuntimeErrorCode& error)
+{
+    if (!runtime_.invalidateHostGeneration(error)) return false;
+    adapter_.setGeneration(runtime_.hostGeneration());
+    return true;
+}
+
+ScriptResult NavigatorScriptExecutionHarness::execute(SourceView source)
+{
+    return runtime_.executeInSameRealm(source);
+}
+
+ScriptResult NavigatorScriptExecutionHarness::execute(const std::string& source)
+{
+    return execute(SourceView(source.data(), source.size()));
+}
+
+bool NavigatorScriptExecutionHarness::relayout()
+{
+    if (!loaded_) return false;
+    if (!document_.layoutDirty && document_.layoutRevision != 0) return true;
+    gxos::web::recomputeDocumentStyles(document_);
+    std::size_t extent = 0;
+    for (const gxos::web::DocBlock& block : document_.blocks)
+        extent = std::max(extent, block.text.size());
+    document_.layoutTextExtent = std::min<std::size_t>(8192u, extent);
+    document_.layoutDirty = false;
+    ++document_.layoutRevision;
+    return true;
 }
 
 } // namespace javascript

@@ -136,6 +136,13 @@ public:
     Ast& operator=(Ast&&) noexcept = default;
 
     void reset(SourceView source = SourceView());
+    void setSource(SourceView source) { source_ = source; }
+
+    // Append a parsed program while preserving the stable IDs of existing
+    // nodes. sourceOffset/lineOffset rebase diagnostics onto a cumulative
+    // realm source buffer; the returned root is suitable for setRoot().
+    bool appendFrom(const Ast& source, std::size_t sourceOffset,
+        std::size_t lineOffset, AstNodeId& appendedRoot);
 
     AstNodeId addNode(const AstNode& node);
     bool setChildren(AstNodeId parent, const AstNodeId* children,

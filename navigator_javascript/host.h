@@ -135,6 +135,10 @@ enum class HostResultCode : std::uint8_t {
     CallFailed,
     ReentryUnsupported,
     InvalidReturn,
+    InvalidValue,
+    DocumentLookupLimitExceeded,
+    DocumentTextLimitExceeded,
+    DocumentMutationLimitExceeded,
 };
 
 struct HostResult {
