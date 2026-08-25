@@ -7762,13 +7762,21 @@ bool NavigatorApp::smokePersistentNavigationLifecycle()
     }
 
     // The smoke owns exactly one heap Navigator for the complete sequence.
-    // The window is only a bounded draw target; no compositor registration is
-    // needed for this non-interactive proof.
+    // Its bounded window is registered so the same production compositor
+    // pointer boundary can drive the viewport transitions below.
     app::KernelWindow smokeWindow{};
+    smokeWindow.x = 96;
+    smokeWindow.y = 72;
     smokeWindow.w = 920;
     smokeWindow.h = 640;
+    strcopy(smokeWindow.title, "Navigator", app::MAX_TITLE_LEN);
+    smokeWindow.owner = app;
     app->m_window = &smokeWindow;
     app->m_state = app::AppState::Running;
+    const bool pointerWindowRegistered =
+        compositor::KernelCompositor::registerWindow(&smokeWindow);
+    serial::puts("[NAVIGATOR-POINTER-8U] window_registration=");
+    serial::puts(pointerWindowRegistered ? "PASS\n" : "FAIL\n");
 
     bool deterministicOk = true;
     bool publicOk = true;
@@ -8044,6 +8052,77 @@ bool NavigatorApp::smokePersistentNavigationLifecycle()
         return pass;
     };
 
+    const int kPointerTitlebarHeight = 24;
+    const auto pointerScreenX = [&](int localX) {
+        return smokeWindow.x + localX;
+    };
+    const auto pointerScreenY = [&](int localY) {
+        return smokeWindow.y + kPointerTitlebarHeight + localY;
+    };
+    auto pointerScrollToOffset = [&](const char* stage, int requestedScroll) -> bool {
+        int trackStart = 0;
+        int trackCross = 0;
+        int trackExtent = 0;
+        int thumbExtent = 0;
+        int thumbTravel = 0;
+        int maxScrollValue = 0;
+        const bool geometry = pointerWindowRegistered &&
+            app->rootScrollbarGeometry(false, trackStart, trackCross, trackExtent,
+                                       thumbExtent, thumbTravel, maxScrollValue);
+        const int current = app->m_scrollY;
+        const int target = geometry
+            ? navigator_scrollbar::clamp_scroll(requestedScroll, maxScrollValue) : 0;
+        const int targetThumbOffset = geometry
+            ? navigator_scrollbar::thumb_offset(target, maxScrollValue, thumbTravel) : 0;
+        const int expectedScroll = geometry
+            ? navigator_scrollbar::scroll_from_thumb_offset(targetThumbOffset,
+                                                             maxScrollValue, thumbTravel) : 0;
+        const int startPointer = geometry
+            ? trackStart + navigator_scrollbar::thumb_offset(current, maxScrollValue, thumbTravel) + thumbExtent / 2 : 0;
+        const int endPointer = geometry
+            ? trackStart + targetThumbOffset + thumbExtent / 2 : 0;
+        const uint32_t admissionPassesBefore = app->m_resourceScheduler.viewportAdmissionPasses;
+
+        if (geometry) {
+            const int pointerX = trackCross + 3;
+            compositor::KernelCompositor::handleMouseMove(
+                pointerScreenX(pointerX), pointerScreenY(startPointer));
+            compositor::KernelCompositor::handleMouseDown(
+                pointerScreenX(pointerX), pointerScreenY(startPointer), 0x01);
+            compositor::KernelCompositor::handleMouseMove(
+                pointerScreenX(pointerX), pointerScreenY(endPointer));
+            compositor::KernelCompositor::handleMouseUp(
+                pointerScreenX(pointerX), pointerScreenY(endPointer), 0x01);
+            compositor::KernelCompositor::drawAllWindows();
+        }
+
+        const int actualScroll = app->m_scrollY;
+        const bool admissionPass = app->m_resourceScheduler.viewportAdmissionPasses > admissionPassesBefore &&
+            app->m_resourceScheduler.currentScrollOffset == actualScroll;
+        const bool changed = actualScroll != current;
+        const bool pass = geometry && thumbTravel > 0 && changed && actualScroll == expectedScroll &&
+            admissionPass;
+        serial::puts("[NAVIGATOR-POINTER-8U] stage=");
+        serial::puts(stage ? stage : "unknown");
+        serial::puts(" pointer_start=");
+        serial_put_dec(startPointer);
+        serial::puts(" pointer_end=");
+        serial_put_dec(endPointer);
+        serial::puts(" old=");
+        serial_put_dec(current < 0 ? 0u : static_cast<uint32_t>(current));
+        serial::puts(" new=");
+        serial_put_dec(actualScroll < 0 ? 0u : static_cast<uint32_t>(actualScroll));
+        serial::puts(" requested=");
+        serial_put_dec(target < 0 ? 0u : static_cast<uint32_t>(target));
+        serial::puts(" maxScrollY=");
+        serial_put_dec(maxScrollValue < 0 ? 0u : static_cast<uint32_t>(maxScrollValue));
+        serial::puts(" viewport_admission=");
+        serial::puts(admissionPass ? "PASS" : "FAIL");
+        serial::puts(" result=");
+        serial::puts(pass ? "PASS\n" : "FAIL\n");
+        return pass;
+    };
+
     app->navigateTo("http://10.0.2.2:8080/navigator-smoke/generated/VPRESS.HTM");
     bool viewportFirstExpected = emitRecord("viewport_pressure_1", true) && viewportPressureExpected();
     serial::puts("[NAVIGATOR-PERSISTENT] viewport_pressure_1.result=");
@@ -8066,32 +8145,28 @@ bool NavigatorApp::smokePersistentNavigationLifecycle()
     app->navigateTo("http://10.0.2.2:8080/navigator-smoke/generated/VP8U.HTM");
     // Positioned image rectangles are retained document geometry, but the
     // legacy bare-metal maxScroll() extent is intentionally independent of
-    // out-of-flow boxes.  These offsets are derived from the fixture's stable
-    // A/B/C top coordinates and remain input-equivalent scroll positions.
-    const int phase8uMiddle = 850;
-    const int phase8uBottom = 1650;
+    // out-of-flow boxes. These legal root offsets select the stable A/B/C
+    // fixture regions through the production root scrollbar thumb path.
+    const int phase8uMiddle = 600;
+    const int phase8uBottom = app->maxScroll();
     bool phase8uA = emitScrollStage("phase8u_A_initial", true);
     const uint32_t phase8uAdmissionsBefore = app->m_resourceScheduler.scrollTriggeredAdmissions;
-    app->m_scrollY = phase8uMiddle;
-    app->m_resourceViewportDirty = true;
-    bool phase8uB = emitScrollStage("phase8u_B_middle", true) &&
+    bool phase8uBPointer = pointerScrollToOffset("phase8u_B_middle", phase8uMiddle);
+    bool phase8uB = phase8uBPointer && emitScrollStage("phase8u_B_middle", true) &&
         app->m_resourceScheduler.scrollTriggeredAdmissions > phase8uAdmissionsBefore;
     serial::puts("[NAVIGATOR-PERSISTENT] phase8u_B_middle.admission=");
     serial::puts(phase8uB ? "PASS\n" : "FAIL\n");
     const uint32_t phase8uEvictionsBefore = app->m_resourceScheduler.evictions;
-    app->m_scrollY = phase8uBottom;
-    app->m_resourceViewportDirty = true;
-    bool phase8uC = emitScrollStage("phase8u_C_bottom", true) &&
+    bool phase8uCPointer = pointerScrollToOffset("phase8u_C_bottom", phase8uBottom);
+    bool phase8uC = phase8uCPointer && emitScrollStage("phase8u_C_bottom", true) &&
         app->m_resourceScheduler.evictions > phase8uEvictionsBefore;
     serial::puts("[NAVIGATOR-PERSISTENT] phase8u_C_bottom.eviction=");
     serial::puts(phase8uC ? "PASS\n" : "FAIL\n");
-    app->m_scrollY = phase8uMiddle;
-    app->m_resourceViewportDirty = true;
-    bool phase8uBReturn = emitScrollStage("phase8u_B_return", true);
+    bool phase8uBReturnPointer = pointerScrollToOffset("phase8u_B_return", phase8uMiddle);
+    bool phase8uBReturn = phase8uBReturnPointer && emitScrollStage("phase8u_B_return", true);
     const uint32_t phase8uReadmissionsBefore = app->m_resourceScheduler.reAdmissions;
-    app->m_scrollY = 0;
-    app->m_resourceViewportDirty = true;
-    bool phase8uAFinal = emitScrollStage("phase8u_A_final", true) &&
+    bool phase8uAFinalPointer = pointerScrollToOffset("phase8u_A_final", 0);
+    bool phase8uAFinal = phase8uAFinalPointer && emitScrollStage("phase8u_A_final", true) &&
         app->m_resourceScheduler.reAdmissions > phase8uReadmissionsBefore;
     bool phase8uARepaired = false;
     for (uint32_t ref = 0; ref < gxos::apps::kNavigatorMaxResourceReferences; ++ref) {
@@ -8137,9 +8212,8 @@ bool NavigatorApp::smokePersistentNavigationLifecycle()
 
     app->navigateTo("http://10.0.2.2:8080/navigator-smoke/generated/VP8U.HTM");
     bool phase8uReuseA = emitScrollStage("phase8u_reuse_A", true);
-    app->m_scrollY = phase8uMiddle;
-    app->m_resourceViewportDirty = true;
-    bool phase8uReuseB = emitScrollStage("phase8u_reuse_B", true);
+    bool phase8uReuseB = pointerScrollToOffset("phase8u_reuse_B", phase8uMiddle) &&
+        emitScrollStage("phase8u_reuse_B", true);
     const bool phase8uReuse = phase8uReuseA && phase8uReuseB &&
         app->m_resourceMemory.activeDecodedBytes <= gxos::apps::kNavigatorDecodedImageBudgetBytes;
     serial::puts("[NAVIGATOR-PERSISTENT] phase8u_reuse.result=");
@@ -8275,6 +8349,9 @@ bool NavigatorApp::smokePersistentNavigationLifecycle()
     // destructor repeats the idempotent release guard, so this cannot double
     // free an owner or leave a decoded-byte reservation charged.
     app->releaseImageResources();
+    if (pointerWindowRegistered) {
+        compositor::KernelCompositor::unregisterWindow(&smokeWindow);
+    }
     app->m_window = nullptr;
     delete app;
     const bool result = deterministicOk && (!publicEnabled || publicOk);

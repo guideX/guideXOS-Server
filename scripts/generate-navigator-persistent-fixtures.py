@@ -143,7 +143,7 @@ def write_pages(output_dir: Path) -> None:
         (24, 142, 112, 255), (156, 70, 106, 255), (88, 108, 42, 255), (44, 92, 132, 255),
     )
     region_names = ("A", "B", "C")
-    region_tops = {"A": 120, "B": 900, "C": 1680}
+    region_tops = {"A": 120, "B": 500, "C": 1250}
     region_tags = []
     for region_index, region_name in enumerate(region_names):
         region_tags.append(
@@ -181,7 +181,7 @@ def write_pages(output_dir: Path) -> None:
         for region_name in region_names
     )
     # Absolutely positioned content does not extend the bare-metal document
-    # flow extent.  Keep a bounded ordinary-flow tail so the same fixture has
+    # flow extent. Keep a bounded ordinary-flow tail so the same fixture has
     # a real scrollbar/maxScroll() in QEMU while all image rectangles remain
     # sourced from the retained positioned layout geometry.
     flow_extent = "".join(

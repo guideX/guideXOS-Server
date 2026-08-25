@@ -1645,6 +1645,12 @@ $scenarioDefinitions = @(
         Checks = $commonChecks + @(
             "[NAVIGATOR-SMOKE] persistent_navigation.enabled=yes",
             "[NAVIGATOR-PERSISTENT] mode=single_boot_single_navigator_instance",
+            "[NAVIGATOR-POINTER-8U] window_registration=PASS",
+            "[NAVIGATOR-POINTER-8U] stage=phase8u_B_middle",
+            "[NAVIGATOR-POINTER-8U] stage=phase8u_C_bottom",
+            "[NAVIGATOR-POINTER-8U] stage=phase8u_B_return",
+            "[NAVIGATOR-POINTER-8U] stage=phase8u_A_final",
+            "[NAVIGATOR-POINTER-8U] stage=phase8u_reuse_B",
             "[NAVIGATOR-PERSISTENT] public.sequence=NASA,Wikipedia,example.com,NASA",
             "[NAVIGATOR-PERSISTENT] deterministic.result=PASS",
             "[NAVIGATOR-PERSISTENT] scroll_stage_result stage=phase8u_A_initial result=PASS",

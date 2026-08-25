@@ -22,6 +22,9 @@ $NavigatorCaBundleManifestScript = Join-Path $ScriptDir "validate-navigator-ca-b
 $NavigatorProductionCaBundleSourcePath = Join-Path $RootDir "assets\certs\mozilla-cacert-2026-08-13.pem"
 $NavigatorProductionCaBundleGeneratedUtc = "2026-08-13T03:12:01.0000000Z"
 $NavigatorProductionCaBundleRotationId = "mozilla-2026-08-13"
+# Fixture manifests are payload inputs, so keep their provenance timestamp
+# stable across repeated smoke staging. Production uses its own pinned value.
+$NavigatorFixtureCaBundleGeneratedUtc = "2026-08-13T03:12:02.0000000Z"
 . (Join-Path $ScriptDir "navigator-public-https-reviewed-targets.ps1")
 $ImageViewerRuntimeSmokePath = if ([string]::IsNullOrWhiteSpace($ImageViewerRuntimeSmokePath)) {
     $env:GXOS_IMAGEVIEWER_RUNTIME_SMOKE_PNG_PATH
@@ -1136,7 +1139,8 @@ if ($SmokeCaFixture -or $env:GXOS_NAVIGATOR_SMOKE_CA_FIXTURE -eq "1") {
         -BundlePath $targetCa `
         -BundleType $smokeManifestProfile.BundleType `
         -OutputManifestPath $targetCaManifest `
-        -SourceDescription $smokeManifestProfile.SourceDescription
+        -SourceDescription $smokeManifestProfile.SourceDescription `
+        -GeneratedUtc $NavigatorFixtureCaBundleGeneratedUtc
     Copy-Item -LiteralPath $targetCaManifest -Destination $targetCaManifestCompat -Force
     $staged += Get-Item $targetCa
     $staged += Get-Item $targetCaManifest
@@ -1272,7 +1276,8 @@ if ($userCaSource) {
             -OutputManifestPath $targetUserManifest `
             -SourceDescription $userManifestProfile.SourceDescription `
             -RotationId $userManifestProfile.RotationId `
-            -ProductionReady $userManifestProfile.ProductionReady
+            -ProductionReady $userManifestProfile.ProductionReady `
+            -GeneratedUtc $NavigatorFixtureCaBundleGeneratedUtc
         Update-NavigatorCaBundleManifestMode -ManifestPath $targetUserManifest -Mode $userManifestMode
         if (Test-Path -LiteralPath $targetUserManifest -PathType Leaf) {
             Copy-Item -LiteralPath $targetUserManifest -Destination $targetUserManifestCompat -Force

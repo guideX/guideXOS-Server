@@ -559,6 +559,13 @@ private:
 // app-model implementation. This kernel-side app keeps the same user-facing
 // shape where platform facilities exist, and reports honest unsupported
 // capability documents/placeholders where they do not.
+//
+// Navigator v0.2 bare-metal release scope is the production root vertical
+// scrollbar: pointer hit testing, paging, thumb dragging, bounded clamps, and
+// viewport-driven image admission. Horizontal scrollbar interaction and
+// independently owned nested overflow scrollbars remain intentional v0.3
+// layout-model limitations because this flat DocBlock model has neither
+// authoritative horizontal extents nor nested scroll-owner identities.
 struct KernelHttpResponse;
 
 class NavigatorApp : public app::KernelApp {
