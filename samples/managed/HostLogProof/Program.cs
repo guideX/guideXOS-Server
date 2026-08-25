@@ -172,6 +172,59 @@ public static unsafe class Program
     }
 #endif
 
+#if HOSTLOGPROOF_C011EC42
+    [DllImport("__Internal", EntryPoint = "guideXosNativeAotC011EC42Start")]
+    private static extern int GuideXosNativeAotC011EC42Start();
+
+    [DllImport("__Internal", EntryPoint = "guideXosNativeAotC011EC42BeforeAllocation")]
+    private static extern int GuideXosNativeAotC011EC42BeforeAllocation(
+        uint ordinal,
+        uint payloadSize);
+
+    [DllImport("__Internal", EntryPoint = "guideXosNativeAotC011EC42AfterAllocation")]
+    private static extern int GuideXosNativeAotC011EC42AfterAllocation(
+        nint objectAddress);
+
+    [DllImport("__Internal", EntryPoint = "guideXosNativeAotC011EC42Finish")]
+    private static extern int GuideXosNativeAotC011EC42Finish();
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static int RunC011EC42ReclaimedGen1Lifecycle()
+    {
+        const uint payloadSize = 65536u;
+        const uint hardLimit = 256u;
+        if (GuideXosNativeAotC011EC42Start() != 0)
+        {
+            return -1;
+        }
+
+        for (uint ordinal = 0u; ordinal < hardLimit; ordinal++)
+        {
+            int before = GuideXosNativeAotC011EC42BeforeAllocation(
+                ordinal, payloadSize);
+            if (before < 0)
+            {
+                return -1;
+            }
+            if (before > 0)
+            {
+                break;
+            }
+
+            byte[] value = new byte[payloadSize];
+            value[0] = (byte)ordinal;
+            nint objectAddress = Unsafe.As<byte[], nint>(ref value);
+            if (GuideXosNativeAotC011EC42AfterAllocation(objectAddress) != 0)
+            {
+                return -1;
+            }
+            GC.KeepAlive(value);
+        }
+
+        return GuideXosNativeAotC011EC42Finish();
+    }
+#endif
+
     private readonly struct ShortWeakLifetimeSetup
     {
         internal readonly nint Target;
@@ -709,8 +762,17 @@ public static unsafe class Program
                 {
                     return GxAbi.ErrorInvalidArgument;
                 }
-                return RunC011EC40AllocationReuse() == 0
+                int c40Status = RunC011EC40AllocationReuse();
+                if (c40Status != 0)
+                {
+                    return GxAbi.ErrorInvalidArgument;
+                }
+#if HOSTLOGPROOF_C011EC42
+                return RunC011EC42ReclaimedGen1Lifecycle() == 0
                     ? 0 : GxAbi.ErrorInvalidArgument;
+#else
+                return 0;
+#endif
 #elif HOSTLOGPROOF_C011EC39
                 int checkpointStatus = RunC011EC37ManagedCheckpoint();
                 if (checkpointStatus != 0)

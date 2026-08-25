@@ -835,6 +835,119 @@ typedef struct guidexos_nativeaot_c011ec41_provenance_record {
         GUIDEXOS_NATIVEAOT_C011EC41_MAX_ALLOCATIONS];
 } guidexos_nativeaot_c011ec41_provenance_record;
 
+enum {
+    GUIDEXOS_NATIVEAOT_C011EC42_MAX_ALLOCATIONS = 256u
+};
+
+/* C011EC42 bounded natural post-Collection-3 lifecycle evidence.  The
+ * workload records each ordinary pressure allocation in fixed storage.  The
+ * collector callbacks publish only scalar state; they do not select a
+ * segment, force a collection, or retain a managed object. */
+typedef struct guidexos_nativeaot_c011ec42_allocation_record {
+    uint32_t observed;
+    uint32_t ordinal;
+    uint32_t requestedPayload;
+    uint32_t requestedSize;
+    uint32_t fastPath;
+    uint32_t rarePath;
+    uint32_t collectionBefore;
+    uint32_t collectionAfter;
+    uint32_t postCollection;
+    uint32_t pointerInTailBefore;
+    uint32_t objectInTail;
+    uint32_t contextAfterInTail;
+    uint32_t heapOwned;
+    uint32_t invariantFailures;
+    uint32_t reserved0;
+    uint32_t reserved1;
+
+    uintptr_t objectAddress;
+    uintptr_t objectEnd;
+    uintptr_t contextBefore;
+    uintptr_t limitBefore;
+    uintptr_t contextAfter;
+    uintptr_t limitAfter;
+    uintptr_t allocBytesBefore;
+    uintptr_t allocBytesAfter;
+    uintptr_t threadIdentity;
+    uintptr_t contextIdentity;
+    uintptr_t heapIdentity;
+    uintptr_t segmentIdentity;
+    uintptr_t segmentBase;
+    uintptr_t segmentAllocated;
+    uintptr_t segmentCommitted;
+    uintptr_t segmentReserved;
+    uintptr_t segmentGeneration;
+} guidexos_nativeaot_c011ec42_allocation_record;
+
+typedef struct guidexos_nativeaot_c011ec42_lifecycle_record {
+    uint32_t started;
+    uint32_t preflightEmitted;
+    uint32_t collectionEntryObserved;
+    uint32_t plannerDecisionObserved;
+    uint32_t phaseObserved;
+    uint32_t restartObserved;
+    uint32_t managedResumeObserved;
+    uint32_t completionMarkerEmitted;
+    uint32_t allocationCount;
+    uint32_t allocationsBeforeCollection;
+    uint32_t allocationsAfterCollection;
+    uint32_t postCollectionAllocationCount;
+    uint32_t collectionCountBefore;
+    uint32_t collectionCountAfter;
+    uint32_t condemnedGeneration;
+    uint32_t collectionReason;
+    uint32_t plannerDecision;
+    uint32_t actualPhase;
+    uint32_t tailEligible;
+    uint32_t tailConsidered;
+    uint32_t tailConsumed;
+    uint32_t tailStillMapped;
+    uint32_t tailGenerationBefore;
+    uint32_t tailGenerationAfter;
+    uint32_t ephemeralBoundaryObserved;
+    uint32_t safeStopReason;
+    uint32_t invariantFailures;
+    uint32_t sensitiveDiagnosticAllocations;
+    uint32_t requestActive;
+    uint32_t currentOrdinal;
+    uint32_t reserved[5];
+
+    uintptr_t threadIdentity;
+    uintptr_t contextIdentity;
+    uintptr_t homeHeap;
+    uintptr_t initialAllocPtr;
+    uintptr_t initialAllocLimit;
+    uintptr_t finalAllocPtr;
+    uintptr_t finalAllocLimit;
+
+    uintptr_t tailSegment;
+    uintptr_t tailStart;
+    uintptr_t tailEnd;
+    uintptr_t tailSize;
+    uintptr_t tailSegmentBaseBefore;
+    uintptr_t tailSegmentCommittedBefore;
+    uintptr_t tailSegmentReservedBefore;
+    uintptr_t tailSegmentAfter;
+    uintptr_t tailSegmentBaseAfter;
+    uintptr_t tailSegmentCommittedAfter;
+    uintptr_t tailSegmentReservedAfter;
+
+    uintptr_t ephemeralLowBefore;
+    uintptr_t ephemeralHighBefore;
+    uintptr_t ephemeralSegmentBefore;
+    uintptr_t ephemeralLowAfter;
+    uintptr_t ephemeralHighAfter;
+    uintptr_t ephemeralSegmentAfter;
+    uintptr_t ephemeralSegmentBaseAfter;
+    uintptr_t ephemeralSegmentAllocatedAfter;
+    uintptr_t ephemeralSegmentCommittedAfter;
+    uintptr_t ephemeralSegmentReservedAfter;
+
+    guidexos_nativeaot_c011ec42_allocation_record allocations[
+        GUIDEXOS_NATIVEAOT_C011EC42_MAX_ALLOCATIONS];
+} guidexos_nativeaot_c011ec42_lifecycle_record;
+
 typedef struct guidexos_nativeaot_allocation_diagnostics {
     uint32_t schemaVersion;
     uint32_t heapInitialized;
@@ -2685,6 +2798,8 @@ typedef struct guidexos_nativeaot_allocation_diagnostics {
     guidexos_nativeaot_c011ec40_compaction_record c011ec40Compaction;
     /* C011EC41 authentic post-GC allocation-context provenance. */
     guidexos_nativeaot_c011ec41_provenance_record c011ec41Provenance;
+    /* C011EC42 bounded natural post-Collection-3 lifecycle evidence. */
+    guidexos_nativeaot_c011ec42_lifecycle_record c011ec42Lifecycle;
 } guidexos_nativeaot_allocation_diagnostics;
 
 enum {

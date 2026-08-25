@@ -45,7 +45,14 @@ struct WinCriticalState {
     uint64_t owner;
     uint32_t recursion;
 };
-WinCriticalState g_winCriticalStates[32] = {};
+// The bounded C011EC42 experiment deliberately reaches one natural
+// Collection-3 path after the earlier C37-C41 setup.  Keep the test-only PAL
+// lock registry fixed-size, but leave enough entries for that additional
+// collector lifecycle without changing the production GC.  Open addressing
+// keeps lookups bounded without repeatedly scanning the whole registry.
+static constexpr size_t kWinCriticalStateCount = 16384u;
+static constexpr uintptr_t kWinCriticalStateTombstone = 1u;
+WinCriticalState g_winCriticalStates[kWinCriticalStateCount] = {};
 
 void* allocateNative(size_t size) {
     ++g_nativeStartupAllocationCalls;
@@ -67,14 +74,26 @@ uint64_t startupThreadId() {
 }
 
 WinCriticalState* criticalState(void* storage, bool create) {
-    for (WinCriticalState& state : g_winCriticalStates) {
+    const uintptr_t value = reinterpret_cast<uintptr_t>(storage) >> 4;
+    const uintptr_t mixed = value * static_cast<uintptr_t>(0x9E3779B97F4A7C15ull);
+    const size_t mask = kWinCriticalStateCount - 1u;
+    const size_t start = static_cast<size_t>(mixed) & mask;
+    WinCriticalState* tombstone = nullptr;
+    for (size_t offset = 0; offset < kWinCriticalStateCount; ++offset) {
+        WinCriticalState& state = g_winCriticalStates[(start + offset) & mask];
         if (state.storage == storage) return &state;
-    }
-    if (!create) return nullptr;
-    for (WinCriticalState& state : g_winCriticalStates) {
+        if (state.storage == reinterpret_cast<void*>(kWinCriticalStateTombstone)) {
+            if (tombstone == nullptr) tombstone = &state;
+            continue;
+        }
         if (state.storage == nullptr) {
-            state.storage = storage;
-            return &state;
+            if (!create) return nullptr;
+            WinCriticalState* result = tombstone == nullptr ? &state : tombstone;
+            result->storage = storage;
+            result->held = 0;
+            result->owner = 0;
+            result->recursion = 0;
+            return result;
         }
     }
     return nullptr;
@@ -196,11 +215,19 @@ extern "C" void LeaveCriticalSection(void* storage) {
     if (--state->recursion == 0) {
         state->owner = 0;
         _InterlockedExchange(&state->held, 0);
+        // This is a single-thread QEMU startup shim.  Once the lock is
+        // released, its identity is no longer needed; recycle the bounded
+        // slot so repeated runtime setup does not exhaust the registry.
+        state->storage = reinterpret_cast<void*>(kWinCriticalStateTombstone);
     }
 }
 extern "C" void DeleteCriticalSection(void* storage) {
     WinCriticalState* state = criticalState(storage, false);
-    if (state != nullptr && state->held == 0) *state = WinCriticalState{};
+    if (state != nullptr && state->held == 0) {
+        state->storage = reinterpret_cast<void*>(kWinCriticalStateTombstone);
+        state->owner = 0;
+        state->recursion = 0;
+    }
 }
 
 extern "C" void* GetModuleHandleW(const wchar_t*) { return nullptr; }

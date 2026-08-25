@@ -4,7 +4,7 @@ param(
     [int]$TimeoutSeconds = 90,
     [int]$FreshBootCount = 3,
     [switch]$SkipManagedBuild,
-    [ValidateSet("single-thread-suspend-ee", "allocation-context-fixup-root-boundary", "first-per-thread-root-provider", "first-root-candidate-load", "first-non-null-root-callback-boundary", "first-root-callback-entry", "first-root-membership-classification", "first-root-heap-resolution", "first-root-condemned-generation-decision", "first-root-pre-mark-boundary", "first-root-first-mark-mutation", "first-root-post-queue-mark-decision", "first-root-first-non-null-old-o", "next-genuine-root-provider", "stack-provider-transition-failfast", "stack-provider-code-manager-registration", "stack-provider-transition-frame-control-pc", "stack-provider-unwind-gc-info", "stack-provider-unwind-caller-frame", "stack-provider-native-transition-continuation", "stack-provider-native-caller-provenance", "stack-provider-native-kernel-entry-boundary", "stack-provider-native-kernel-stack-completion", "post-root-queue-mark-processing", "mark-queue-closure", "post-mark-short-weak-handle", "short-weak-handle-operation", "short-weak-live-handle", "short-weak-dead-handle", "short-weak-lifetime-transition", "relocation-root-update", "relocated-handle-update", "lifetime-transition-complete", "second-collection-completion", "dead-object-reclamation", "collection-plan-mode-provenance-c37", "collection-plan-mode-provenance-c38", "compaction-reclamation", "post-gc-allocator-provenance")]
+    [ValidateSet("single-thread-suspend-ee", "allocation-context-fixup-root-boundary", "first-per-thread-root-provider", "first-root-candidate-load", "first-non-null-root-callback-boundary", "first-root-callback-entry", "first-root-membership-classification", "first-root-heap-resolution", "first-root-condemned-generation-decision", "first-root-pre-mark-boundary", "first-root-first-mark-mutation", "first-root-post-queue-mark-decision", "first-root-first-non-null-old-o", "next-genuine-root-provider", "stack-provider-transition-failfast", "stack-provider-code-manager-registration", "stack-provider-transition-frame-control-pc", "stack-provider-unwind-gc-info", "stack-provider-unwind-caller-frame", "stack-provider-native-transition-continuation", "stack-provider-native-caller-provenance", "stack-provider-native-kernel-entry-boundary", "stack-provider-native-kernel-stack-completion", "post-root-queue-mark-processing", "mark-queue-closure", "post-mark-short-weak-handle", "short-weak-handle-operation", "short-weak-live-handle", "short-weak-dead-handle", "short-weak-lifetime-transition", "relocation-root-update", "relocated-handle-update", "lifetime-transition-complete", "second-collection-completion", "dead-object-reclamation", "collection-plan-mode-provenance-c37", "collection-plan-mode-provenance-c38", "compaction-reclamation", "post-gc-allocator-provenance", "post-gc-reclaimed-gen1-lifecycle")]
     [string]$ProofMode = "single-thread-suspend-ee"
 )
 
@@ -75,6 +75,8 @@ if ([string]::IsNullOrWhiteSpace($EvidenceRoot)) {
         Join-Path $root "out\dotnet\c011ec40-compaction-reclamation"
     } elseif ($ProofMode -eq "post-gc-allocator-provenance") {
         Join-Path $root "out\dotnet\c011ec41-post-gc-allocator-provenance"
+    } elseif ($ProofMode -eq "post-gc-reclaimed-gen1-lifecycle") {
+        Join-Path $root "out\dotnet\c011ec42-reclaimed-gen1-lifecycle"
     } elseif ($ProofMode -eq "post-mark-short-weak-handle") {
         Join-Path $root "out\dotnet\c011ec29-post-mark-short-weak-handle"
     } elseif ($ProofMode -eq "first-root-post-queue-mark-decision") {
@@ -114,9 +116,10 @@ $isCodeManagerRegistration = $ProofMode -eq "stack-provider-code-manager-registr
 $isTransitionFrameControlPc = $ProofMode -eq "stack-provider-transition-frame-control-pc"
 $isC011EC36 = $ProofMode -eq "lifetime-transition-complete"
 $isC011EC38 = $ProofMode -eq "dead-object-reclamation"
-$isC011EC41 = $ProofMode -eq "post-gc-allocator-provenance"
-$isC011EC40 = $ProofMode -in @("compaction-reclamation", "post-gc-allocator-provenance")
-$isC011EC39 = $ProofMode -in @("collection-plan-mode-provenance-c37", "collection-plan-mode-provenance-c38", "compaction-reclamation", "post-gc-allocator-provenance")
+$isC011EC42 = $ProofMode -eq "post-gc-reclaimed-gen1-lifecycle"
+$isC011EC41 = $ProofMode -in @("post-gc-allocator-provenance", "post-gc-reclaimed-gen1-lifecycle")
+$isC011EC40 = $ProofMode -in @("compaction-reclamation", "post-gc-allocator-provenance", "post-gc-reclaimed-gen1-lifecycle")
+$isC011EC39 = $ProofMode -in @("collection-plan-mode-provenance-c37", "collection-plan-mode-provenance-c38", "compaction-reclamation", "post-gc-allocator-provenance", "post-gc-reclaimed-gen1-lifecycle")
 $isC011EC39C38Variant = $ProofMode -eq "collection-plan-mode-provenance-c38"
 $isC011EC37 = $ProofMode -in @("second-collection-completion", "dead-object-reclamation") -or $isC011EC39
 $isC011EC35 = $ProofMode -in @("relocated-handle-update", "lifetime-transition-complete", "second-collection-completion", "dead-object-reclamation")
@@ -196,8 +199,9 @@ $proofDefine = if ($isNextGenuineRootProvider -or $isC011EC39) {
     $c39Define = if ($isC011EC39) { " /DGUIDEXOS_NATIVEAOT_C011EC39_PLAN_PROVENANCE" } else { "" }
     $c40Define = if ($isC011EC40) { " /DGUIDEXOS_NATIVEAOT_C011EC40_COMPACTION_RECLAMATION" } else { "" }
     $c41Define = if ($isC011EC41) { " /DGUIDEXOS_NATIVEAOT_C011EC41_POST_GC_ALLOCATOR_PROVENANCE" } else { "" }
+    $c42Define = if ($isC011EC42) { " /DGUIDEXOS_NATIVEAOT_C011EC42_RECLAIMED_GEN1_LIFECYCLE" } else { "" }
     $firstNonNullDefine = if ($isC011EC31 -or $isC011EC32) { "" } else { " /DGUIDEXOS_NATIVEAOT_FIRST_NON_NULL_ROOT_ALLOCATION" }
-    "/DGUIDEXOS_NATIVEAOT_ALLOCATION_CONTEXT_FIXUP_ROOT_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_PER_THREAD_ROOT_PROVIDER_ALLOCATION$firstNonNullDefine /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CALLBACK_ENTRY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_MEMBERSHIP_CLASSIFICATION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_HEAP_RESOLUTION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CONDEMNED_GENERATION_DECISION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_PRE_MARK_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_NON_NULL_OLD_O_ALLOCATION /DGUIDEXOS_NATIVEAOT_NEXT_GENUINE_ROOT_PROVIDER_ALLOCATION$minimalDefine$codeManagerDefine$c19Define$c20Define$c21Define$c23Define$c24Define$c25Define$c26Define$c27Define$c28Define$c29Define$c31Define$c32Define$c33Define$c34Define$c35Define$c36Define$c37Define$c38Define$c39Define$c40Define$c41Define"
+    "/DGUIDEXOS_NATIVEAOT_ALLOCATION_CONTEXT_FIXUP_ROOT_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_PER_THREAD_ROOT_PROVIDER_ALLOCATION$firstNonNullDefine /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CALLBACK_ENTRY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_MEMBERSHIP_CLASSIFICATION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_HEAP_RESOLUTION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CONDEMNED_GENERATION_DECISION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_PRE_MARK_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_NON_NULL_OLD_O_ALLOCATION /DGUIDEXOS_NATIVEAOT_NEXT_GENUINE_ROOT_PROVIDER_ALLOCATION$minimalDefine$codeManagerDefine$c19Define$c20Define$c21Define$c23Define$c24Define$c25Define$c26Define$c27Define$c28Define$c29Define$c31Define$c32Define$c33Define$c34Define$c35Define$c36Define$c37Define$c38Define$c39Define$c40Define$c41Define$c42Define"
 } elseif ($isFirstRootFirstNonNullOldO) {
     "/DGUIDEXOS_NATIVEAOT_ALLOCATION_CONTEXT_FIXUP_ROOT_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_PER_THREAD_ROOT_PROVIDER_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_NON_NULL_ROOT_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CALLBACK_ENTRY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_MEMBERSHIP_CLASSIFICATION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_HEAP_RESOLUTION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CONDEMNED_GENERATION_DECISION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_PRE_MARK_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_NON_NULL_OLD_O_ALLOCATION"
 } elseif ($isFirstRootPostQueueMarkDecision) {
@@ -532,6 +536,11 @@ extern "C" void __cdecl guideXosNativeAotC011EC33GcDoneEntered(int condemned);
 extern "C" void __cdecl guideXosNativeAotC011EC33RestartEEEntered(int finishedGc);
 extern "C" void __cdecl guideXosNativeAotC011EC33RestartEEReturned(int finishedGc);
 '@.TrimEnd()
+            if ($isC011EC42) {
+                $declaration += [Environment]::NewLine + @'
+extern "C" void __cdecl guideXosNativeAotC011EC42RestartEEReturned();
+'@.TrimEnd()
+            }
             if ($isC011EC34) {
                 $declaration += [Environment]::NewLine + @'
 extern "C" void __cdecl guideXosNativeAotC011EC34GcScanRootsEntered(int condemned, int maxGeneration, uintptr_t scanContext, uintptr_t callback);
@@ -571,7 +580,7 @@ extern "C" __declspec(noreturn) void __cdecl guideXosNativeAotC011EC27PostRootAf
         $injectedText = [regex]::Replace($injectedText, $restartPattern, $restartReplacement, 1)
         $injectedText = $injectedText.Replace(
             '    FireEtwGCRestartEEEnd_V1(GetClrInstanceId());',
-            '    FireEtwGCRestartEEEnd_V1(GetClrInstanceId());' + [Environment]::NewLine + '    guideXosNativeAotC011EC33RestartEEReturned(1);')
+            '    FireEtwGCRestartEEEnd_V1(GetClrInstanceId());' + [Environment]::NewLine + '    guideXosNativeAotC011EC33RestartEEReturned(1);' + $(if ($isC011EC42) { [Environment]::NewLine + '    guideXosNativeAotC011EC42RestartEEReturned();' } else { '' }))
         $injectedText = $injectedText.Replace(
             'void GCToEEInterface::GcDone(int condemned)' + [Environment]::NewLine + '{',
             'void GCToEEInterface::GcDone(int condemned)' + [Environment]::NewLine + '{' + [Environment]::NewLine + '    guideXosNativeAotC011EC33GcDoneEntered(condemned);')
@@ -788,6 +797,11 @@ extern "C" uint32_t __cdecl guideXosNativeAotC011EC23TryNativeUnwind(
 extern "C" void __cdecl guideXosNativeAotC011EC26IteratorCompleted();
 '@
         }
+        if ($isC011EC42) {
+            $stackFrameIteratorDeclarations += @'
+extern "C" void __cdecl guideXosNativeAotC011EC42StackSafetyBoundary();
+'@
+        }
         $stackFrameIteratorText = $stackFrameIteratorText.Replace(
             '#include "StackFrameIterator.h"',
             '#include "StackFrameIterator.h"' + $stackFrameIteratorDeclarations.TrimEnd())
@@ -879,6 +893,7 @@ extern "C" void __cdecl guideXosNativeAotC011EC26IteratorCompleted();
 '@
         $iteratorLookupReplacement = @'
         m_pCodeManager = dac_cast<PTR_ICodeManager>(m_pInstance->GetCodeManagerForAddress(m_ControlPC));
+        GUIDEXOS_C011EC42_STACK_SAFETY_HOOK
         guideXosNativeAotC011EC18IteratorCodeManagerLookup(
             reinterpret_cast<uintptr_t>(m_ControlPC),
             static_cast<uintptr_t>(m_RegDisplay.GetSP()),
@@ -888,12 +903,30 @@ extern "C" void __cdecl guideXosNativeAotC011EC26IteratorCompleted();
 
         const bool guideXosC011EC18FindMethodInfoResult =
             m_pCodeManager->FindMethodInfo(m_ControlPC, &m_methodInfo);
-        guideXosNativeAotC011EC18IteratorFindMethodInfo(
+            guideXosNativeAotC011EC18IteratorFindMethodInfo(
             reinterpret_cast<uintptr_t>(m_ControlPC),
             reinterpret_cast<uintptr_t>(&m_methodInfo),
             guideXosC011EC18FindMethodInfoResult ? 1u : 0u);
+        GUIDEXOS_C011EC42_FIND_METHOD_SAFETY_HOOK
         FAILFAST_OR_DAC_FAIL(guideXosC011EC18FindMethodInfoResult);
 '@
+        $c42StackSafetyHook = if ($isC011EC42) {
+            '        if (m_pCodeManager == nullptr)' + [Environment]::NewLine +
+            '            guideXosNativeAotC011EC42StackSafetyBoundary();' + [Environment]::NewLine
+        } else { '' }
+        $c42FindMethodSafetyHook = if ($isC011EC42) {
+            '        if (!guideXosC011EC18FindMethodInfoResult)' + [Environment]::NewLine +
+            '            guideXosNativeAotC011EC42StackSafetyBoundary();' + [Environment]::NewLine
+        } else { '' }
+        $iteratorLookupReplacement = $iteratorLookupReplacement.Replace(
+            'GUIDEXOS_C011EC42_STACK_SAFETY_HOOK',
+            $c42StackSafetyHook.TrimEnd())
+        $iteratorLookupReplacement = $iteratorLookupReplacement.Replace(
+            'GUIDEXOS_C011EC42_FIND_METHOD_SAFETY_HOOK',
+            $c42FindMethodSafetyHook.TrimEnd())
+        if ($iteratorLookupReplacement -match 'GUIDEXOS_C011EC42_(STACK|FIND_METHOD)_SAFETY_HOOK') {
+            throw "C011EC42 StackFrameIterator safety-hook placeholder was not replaced."
+        }
         if (-not $stackFrameIteratorText.Contains($iteratorLookupNeedle)) {
             throw "C011EC18 StackFrameIterator code-manager injection point was not found."
         }
@@ -912,6 +945,7 @@ extern "C" void __cdecl guideXosNativeAotC011EC26IteratorCompleted();
             $stackFrameIteratorText -notmatch 'guideXosNativeAotC011EC18IteratorFindMethodInfo' -or
             $stackFrameIteratorText -notmatch 'guideXosNativeAotC011EC18IteratorFramePointer' -or
             $stackFrameIteratorText -notmatch 'guideXosNativeAotC011EC18IteratorUnwind' -or
+            ($isC011EC42 -and $stackFrameIteratorText -notmatch 'guideXosNativeAotC011EC42StackSafetyBoundary') -or
             ($isC011EC23 -and $stackFrameIteratorText -notmatch 'guideXosNativeAotC011EC23TryNativeUnwind')) {
             throw "C011EC18 StackFrameIterator source injection did not match all required iterator boundaries."
         }
@@ -1360,6 +1394,7 @@ extern "C" __declspec(noreturn) void __cdecl guideXosNativeAotC011EC20SafeStop(u
         Require-File $lockedGcPrivPath "Locked Workstation GC gcpriv.h source"
         $gcWksText = (Get-Content -LiteralPath $lockedGcwksPath -Raw).Replace([string]([char]13) + [string]([char]10), [string][char]10)
         $gcCppText = (Get-Content -LiteralPath $lockedGcCppPath -Raw).Replace([string]([char]13) + [string]([char]10), [string][char]10)
+        $lockedSourceNewLine = "`n"
         if ($isC011EC38) {
             $c38GcDeclaration = @'
 extern "C" void __cdecl guideXosNativeAotC011EC38SweepDecisionObserved(uint32_t compacting, uint32_t condemnedGeneration);
@@ -1400,6 +1435,35 @@ extern "C" void __cdecl guideXosNativeAotC011EC40GenerationPublished();
 extern "C" void __cdecl guideXosNativeAotC011EC40Collection3Observed();
 '@
             $gcCppText = $gcCppText.Replace('#include "gcpriv.h"', '#include "gcpriv.h"' + [Environment]::NewLine + [Environment]::NewLine + $c40GcDeclaration.TrimEnd())
+        }
+        if ($isC011EC42) {
+            $c42GcDeclaration = @'
+extern "C" void __cdecl guideXosNativeAotC011EC42PlannerDecisionObserved(uint32_t finalDecision, uint32_t condemnedGeneration, uint32_t collectionReason);
+extern "C" void __cdecl guideXosNativeAotC011EC42PhaseEntered(uint32_t phase);
+extern "C" void __cdecl guideXosNativeAotC011EC42EphemeralBoundaryObserved(uintptr_t ephemeralLow, uintptr_t ephemeralHigh, uintptr_t ephemeralSegment, uintptr_t segmentBase, uintptr_t segmentAllocated, uintptr_t segmentCommitted, uintptr_t segmentReserved, uint32_t segmentGeneration);
+'@
+            $gcCppText = $gcCppText.Replace('#include "gcpriv.h"', '#include "gcpriv.h"' + [Environment]::NewLine + [Environment]::NewLine + $c42GcDeclaration.TrimEnd())
+            $ephemeralBoundaryNeedle = '    dprintf (2, ("ephemeral_low = %p, ephemeral_high = %p, gc_low = %p, gc_high = %p", (uint8_t*)ephemeral_low, (uint8_t*)ephemeral_high, gc_low, gc_high));' + $lockedSourceNewLine
+            $ephemeralBoundaryReplacement = $ephemeralBoundaryNeedle + @'
+#ifdef USE_REGIONS
+    guideXosNativeAotC011EC42EphemeralBoundaryObserved(
+        reinterpret_cast<uintptr_t>((uint8_t*)ephemeral_low),
+        reinterpret_cast<uintptr_t>((uint8_t*)ephemeral_high),
+        reinterpret_cast<uintptr_t>(ephemeral_heap_segment),
+        reinterpret_cast<uintptr_t>(ephemeral_heap_segment == nullptr
+            ? nullptr : heap_segment_mem(ephemeral_heap_segment)),
+        reinterpret_cast<uintptr_t>(ephemeral_heap_segment == nullptr
+            ? nullptr : heap_segment_allocated(ephemeral_heap_segment)),
+        reinterpret_cast<uintptr_t>(ephemeral_heap_segment == nullptr
+            ? nullptr : heap_segment_committed(ephemeral_heap_segment)),
+        reinterpret_cast<uintptr_t>(ephemeral_heap_segment == nullptr
+            ? nullptr : heap_segment_reserved(ephemeral_heap_segment)),
+        ephemeral_heap_segment == nullptr
+            ? 0u : static_cast<uint32_t>(heap_segment_gen_num(ephemeral_heap_segment)));
+#endif // USE_REGIONS
+'@.TrimEnd() + $lockedSourceNewLine
+            if (-not $gcCppText.Contains($ephemeralBoundaryNeedle)) { throw "C011EC42 ephemeral-boundary source callback point was not found." }
+            $gcCppText = $gcCppText.Replace($ephemeralBoundaryNeedle, $ephemeralBoundaryReplacement)
         }
         if ($isC011EC34) {
             $gcCppDeclaration = @'
@@ -3106,6 +3170,15 @@ void gc_heap::drain_mark_queue ()
         pm_trigger_full_gc ? 1u : 0u,
         static_cast<uint32_t>(get_gc_data_per_heap()->get_mechanism(gc_heap_compact)));
 '@.TrimEnd() + $lockedSourceNewLine + $finalDecisionNeedle
+            if ($isC011EC42) {
+                $finalDecisionReplacement = $finalDecisionReplacement.Replace(
+                    $finalDecisionNeedle,
+                    '    guideXosNativeAotC011EC42PlannerDecisionObserved(' + $lockedSourceNewLine +
+                    '        should_compact ? 1u : 0u,' + $lockedSourceNewLine +
+                    '        static_cast<uint32_t>(condemned_gen_number),' + $lockedSourceNewLine +
+                    '        static_cast<uint32_t>(settings.reason));' + $lockedSourceNewLine +
+                    $finalDecisionNeedle)
+            }
             $planStart = $gcWksInjected.IndexOf('void gc_heap::plan_phase (int condemned_gen_number)')
             $planEnd = $gcWksInjected.IndexOf('void gc_heap::relocate_phase', $planStart)
             if ($planStart -lt 0 -or $planEnd -le $planStart) { throw "C011EC39 plan_phase final dispatch boundary was not found." }
@@ -3115,16 +3188,16 @@ void gc_heap::drain_mark_queue ()
             $gcWksInjected = $gcWksInjected.Substring(0, $planStart) + $planFunction + $gcWksInjected.Substring($planEnd)
 
             $relocateNeedle = '        relocate_phase (condemned_gen_number, first_condemned_address);' + $lockedSourceNewLine
-            $relocateReplacement = '        guideXosNativeAotC011EC39PhaseEntered(1u);' + $lockedSourceNewLine + $relocateNeedle
+            $relocateReplacement = '        guideXosNativeAotC011EC39PhaseEntered(1u);' + $(if ($isC011EC42) { $lockedSourceNewLine + '        guideXosNativeAotC011EC42PhaseEntered(1u);' } else { '' }) + $lockedSourceNewLine + $relocateNeedle
             if (-not $gcWksInjected.Contains($relocateNeedle)) { throw "C011EC39 relocate phase boundary was not found." }
             $gcWksInjected = $gcWksInjected.Replace($relocateNeedle, $relocateReplacement)
             $sweepNeedle = '        make_free_lists (condemned_gen_number);' + $lockedSourceNewLine
-            $sweepReplacement = '        guideXosNativeAotC011EC39PhaseEntered(2u);' + $lockedSourceNewLine + $sweepNeedle
+            $sweepReplacement = '        guideXosNativeAotC011EC39PhaseEntered(2u);' + $(if ($isC011EC42) { $lockedSourceNewLine + '        guideXosNativeAotC011EC42PhaseEntered(2u);' } else { '' }) + $lockedSourceNewLine + $sweepNeedle
             if (-not $gcWksInjected.Contains($sweepNeedle)) { throw "C011EC39 sweep phase boundary was not found." }
             $gcWksInjected = $gcWksInjected.Replace($sweepNeedle, $sweepReplacement)
 
             $gc3Needle = "GCHeap::GarbageCollectGeneration (unsigned int gen, gc_reason reason)" + $lockedSourceNewLine + "{" + $lockedSourceNewLine
-            $gc3Replacement = $gc3Needle + "    guideXosNativeAotC011EC39CollectionEntered(gen, static_cast<uint32_t>(reason));" + $lockedSourceNewLine
+            $gc3Replacement = $gc3Needle + "    guideXosNativeAotC011EC39CollectionEntered(gen, static_cast<uint32_t>(reason));" + $(if ($isC011EC42) { $lockedSourceNewLine + '    guideXosNativeAotC011EC42CollectionEntered(gen, static_cast<uint32_t>(reason));' } else { '' }) + $lockedSourceNewLine
             if (-not $gcWksInjected.Contains($gc3Needle)) { throw "C011EC39 collection-entry boundary was not found." }
             $gcWksInjected = $gcWksInjected.Replace($gc3Needle, $gc3Replacement)
 
@@ -3199,6 +3272,19 @@ void gc_heap::drain_mark_queue ()
 
             foreach ($requiredC40Text in @('guideXosNativeAotC011EC40CompactEntryObserved','guideXosNativeAotC011EC40CompactionSegmentObserved','guideXosNativeAotC011EC40DeadGapObserved','guideXosNativeAotC011EC40LivePlugObserved','guideXosNativeAotC011EC40CompactReturned','guideXosNativeAotC011EC40GenerationPublished','guideXosNativeAotC011EC40Collection3Observed')) {
                 if ($gcWksInjected -notmatch [regex]::Escape($requiredC40Text)) { throw "C011EC40 locked-source injection missing $requiredC40Text." }
+            }
+        }
+        if ($isC011EC42) {
+            $c42GcDeclaration = @'
+extern "C" void __cdecl guideXosNativeAotC011EC42CollectionEntered(uint32_t generation, uint32_t collectionReason);
+extern "C" void __cdecl guideXosNativeAotC011EC42PlannerDecisionObserved(uint32_t finalDecision, uint32_t condemnedGeneration, uint32_t collectionReason);
+extern "C" void __cdecl guideXosNativeAotC011EC42PhaseEntered(uint32_t phase);
+'@
+            $gcWksInjected = $gcWksInjected.Replace(
+                '#include "gcpriv.h"',
+                '#include "gcpriv.h"' + [Environment]::NewLine + [Environment]::NewLine + $c42GcDeclaration.TrimEnd())
+            foreach ($requiredC42Text in @('guideXosNativeAotC011EC42CollectionEntered','guideXosNativeAotC011EC42PlannerDecisionObserved','guideXosNativeAotC011EC42PhaseEntered')) {
+                if ($gcWksInjected -notmatch [regex]::Escape($requiredC42Text)) { throw "C011EC42 locked-source injection missing $requiredC42Text." }
             }
         }
         if ($isC011EC29) {
@@ -4107,7 +4193,7 @@ exit /b 0
     } else {
         ""
     }
-    $managedProofMode = if ($isC011EC41) { "PostGcAllocatorProvenance" } elseif ($isC011EC40) { "CompactionReclamation" } elseif ($isC011EC39C38Variant) { "CollectionPlanC38" } elseif ($isC011EC39) { "CollectionPlanC37" } elseif ($isC011EC38) { "DeadObjectReclamation" } elseif ($isC011EC37) { "LifetimeTransitionSecondCollection" } elseif ($isC011EC33) { "LifetimeTransition" } elseif ($isC011EC31) { "ShortWeakLive" } elseif ($isC011EC32) { "ShortWeakDead" } elseif ($isFirstRootFirstNonNullOldO) { "FirstNonNullOldO" } elseif ($isFirstNonNullRoot -or $isFirstRootCallbackEntry) { "FirstNonNullRoot" } else { "FirstCollectionBoundary" }
+    $managedProofMode = if ($isC011EC42) { "PostGcReclaimedGen1Lifecycle" } elseif ($isC011EC41) { "PostGcAllocatorProvenance" } elseif ($isC011EC40) { "CompactionReclamation" } elseif ($isC011EC39C38Variant) { "CollectionPlanC38" } elseif ($isC011EC39) { "CollectionPlanC37" } elseif ($isC011EC38) { "DeadObjectReclamation" } elseif ($isC011EC37) { "LifetimeTransitionSecondCollection" } elseif ($isC011EC33) { "LifetimeTransition" } elseif ($isC011EC31) { "ShortWeakLive" } elseif ($isC011EC32) { "ShortWeakDead" } elseif ($isFirstRootFirstNonNullOldO) { "FirstNonNullOldO" } elseif ($isFirstNonNullRoot -or $isFirstRootCallbackEntry) { "FirstNonNullRoot" } else { "FirstCollectionBoundary" }
     $managedRuntimePackProperty = if ($isTransitionFrameControlPc -or $isC011EC19) {
         "-p:HostLogProofRuntimePackObj=$managedRuntimePackObj"
     } else {
@@ -4635,6 +4721,9 @@ exit /b %errorlevel%
     if ($isC011EC37) {
         $requiredSymbols += "guideXosNativeAotC011EC37ManagedCheckpoint"
     }
+    if ($isC011EC42) {
+        $requiredSymbols += @("guideXosNativeAotC011EC42Start","guideXosNativeAotC011EC42BeforeAllocation","guideXosNativeAotC011EC42AfterAllocation","guideXosNativeAotC011EC42Finish","guideXosNativeAotC011EC42CollectionEntered","guideXosNativeAotC011EC42PlannerDecisionObserved","guideXosNativeAotC011EC42PhaseEntered","guideXosNativeAotC011EC42RestartEEReturned","guideXosNativeAotC011EC42StackSafetyBoundary")
+    }
     if ($isC011EC30) {
         $requiredSymbols += @("guideXosNativeAotC011EC30HandleScanEntered","guideXosNativeAotC011EC30HandleMapRootRead","guideXosNativeAotC011EC30BucketVisited","guideXosNativeAotC011EC30HandleTableVisited","guideXosNativeAotC011EC30SegmentVisited","guideXosNativeAotC011EC30BlockVisited","guideXosNativeAotC011EC30HandleSlotInspected","guideXosNativeAotC011EC30HandleSlotCandidate","guideXosNativeAotC011EC30LivenessCheckEntered","guideXosNativeAotC011EC30LivenessDecisionObserved","guideXosNativeAotC011EC30LivenessDecisionCompleted","guideXosNativeAotC011EC30HandleScanCompleted")
     }
@@ -4721,7 +4810,9 @@ exit /b %errorlevel%
                     $normalizedLiveText = ($normalizedLiveText -creplace '(?<=[0-9])(?=[a-z])', ' ') -replace '\s+', ' '
                     $normalizedLiveText = $normalizedLiveText -replace '\b(c\d+)\s+(ec\d+)', '$1$2'
                     $normalizedLiveText = $normalizedLiveText -replace '\s*=\s*', '='
-                    $stopPattern = if ($isC011EC41) {
+                    $stopPattern = if ($isC011EC42) {
+                        'marker=C011EC42 outcome=[BCD]|marker=C011EC42-BLOCKED'
+                    } elseif ($isC011EC41) {
                         'marker=C011EC41 outcome=C|marker=C011EC41-BLOCKED'
                     } elseif ($isC011EC40) {
                         'marker=C011EC40 outcome=C|marker=C011EC40-BLOCKED'
@@ -4827,6 +4918,49 @@ exit /b %errorlevel%
         $validationText = $validationText -replace '\b(c\d+)\s+(ec\d+)', '$1$2'
         $validationText = $validationText -replace '\s*=\s*', '='
         $validationText = $validationText -replace '\s*-\s*', '-'
+        if ($isC011EC42) {
+            $c37CompleteStart = $validationText.IndexOf('[nativeaot-gc-short-weak-lifetime] COMPLETE marker=C011EC37')
+            $c40ManagedStart = $validationText.IndexOf('[nativeaot-gc-short-weak-lifetime] MANAGED marker=C011EC40-MANAGED')
+            $c40PreflightStart = $validationText.IndexOf('[nativeaot-gc-short-weak-lifetime] PREFLIGHT marker=C011EC40-PREFLIGHT')
+            $c40ReclaimedStart = $validationText.IndexOf('[nativeaot-gc-short-weak-lifetime] RECLAIMED marker=C011EC40-RECLAIMED')
+            $c40CompleteStart = $validationText.IndexOf('[nativeaot-gc-short-weak-lifetime] COMPLETE marker=C011EC40')
+            $c41PreflightStart = $validationText.IndexOf('[nativeaot-gc-short-weak-lifetime] PREFLIGHT marker=C011EC41-PREFLIGHT')
+            $c41ProvenanceStart = $validationText.IndexOf('[nativeaot-gc-short-weak-lifetime] PROVENANCE marker=C011EC41-PROVENANCE')
+            $c41CompleteStart = $validationText.IndexOf('[nativeaot-gc-short-weak-lifetime] COMPLETE marker=C011EC41')
+            $c42PreflightStart = $validationText.IndexOf('[nativeaot-gc-short-weak-lifetime] PREFLIGHT marker=C011EC42-PREFLIGHT')
+            $c42EligibilityStart = $validationText.IndexOf('[nativeaot-gc-short-weak-lifetime] ELIGIBILITY marker=C011EC42-ELIGIBILITY')
+            $c42CompleteStart = $validationText.IndexOf('[nativeaot-gc-short-weak-lifetime] COMPLETE marker=C011EC42')
+            $c42BlockedStart = $validationText.IndexOf('[nativeaot-gc-short-weak-lifetime] BLOCKED marker=C011EC42-BLOCKED')
+            if ($c42CompleteStart -lt 0 -and $c42BlockedStart -lt 0) {
+                $c42Evidence = @($c42EligibilityStart, $c42PreflightStart, $c41CompleteStart, $c40CompleteStart, $c37CompleteStart | Where-Object { $_ -ge 0 } | Sort-Object | Select-Object -First 1)
+                $c42Marker = if ($c42Evidence.Count -ne 0) { $validationText.Substring([int]$c42Evidence[0]) } else { $validationText.Substring([Math]::Max(0, $validationText.Length - 16000)) }
+                $runResults += [ordered]@{ name=$name; serial=$serialPath; serialSha256=(Hash-File $serialPath); safeStopMarker='C011EC42-TIMEOUT'; outcome='D / C011EC42 lifecycle did not reach a bounded completion marker'; successLevel=0; harnessTerminated=$true; markerLine=$c42Marker; eligibilityMarkerLine=if($c42EligibilityStart -ge 0){$validationText.Substring($c42EligibilityStart)}else{$null}; earlyFailure=$earlyFailure; serialTail=if($validationText.Length -gt 16000){$validationText.Substring($validationText.Length - 16000)}else{$validationText} }
+                continue
+            }
+            if ($c42BlockedStart -ge 0 -and ($c42CompleteStart -lt 0 -or $c42BlockedStart -lt $c42CompleteStart)) {
+                $c42Marker = $validationText.Substring($c42BlockedStart)
+                $runResults += [ordered]@{ name=$name; serial=$serialPath; serialSha256=(Hash-File $serialPath); safeStopMarker='C011EC42-BLOCKED'; outcome='D / C011EC42 bounded natural lifecycle stopped safely'; successLevel=1; harnessTerminated=$true; markerLine=$c42Marker; eligibilityMarkerLine=if($c42EligibilityStart -ge 0){$validationText.Substring($c42EligibilityStart)}else{$null}; earlyFailure=$earlyFailure }
+                continue
+            }
+            if ($c37CompleteStart -lt 0 -or $c40ManagedStart -lt $c37CompleteStart -or $c40PreflightStart -lt $c40ManagedStart -or $c40ReclaimedStart -lt $c40PreflightStart -or $c41PreflightStart -lt $c40ReclaimedStart -or $c40CompleteStart -lt $c41PreflightStart -or $c41ProvenanceStart -lt $c40CompleteStart -or $c41CompleteStart -lt $c41ProvenanceStart -or $c42PreflightStart -lt $c41CompleteStart -or $c42EligibilityStart -lt $c42PreflightStart -or $c42CompleteStart -lt $c42EligibilityStart) { throw "C011EC42 predecessor/lifecycle chronology was incomplete in $name." }
+            $c42MarkerLine = $validationText.Substring($c42CompleteStart)
+            $c42EligibilityLine = $validationText.Substring($c42EligibilityStart)
+            $c42OutcomeMatch = [regex]::Match($c42MarkerLine, 'marker=C011EC42 outcome=(?<outcome>[BCD])')
+            if (-not $c42OutcomeMatch.Success) { throw "C011EC42 completion outcome was missing in $name." }
+            $c42Read = { param([string]$Field) $v=Get-MarkerField $c42EligibilityLine $Field; if($null -eq $v){throw "C011EC42 missing field $Field in $name."}; [Convert]::ToUInt64($v.Substring(2),16) }
+            foreach ($check in @(
+                @('preflight',1), @('collectionEntry',1), @('plannerDecisionObserved',1), @('phaseObserved',1), @('restart',1), @('managedResume',1), @('collectionBefore',2), @('collectionAfter',3), @('postCollectionAllocations',4), @('tailEligible',1), @('invariantFailures',0), @('sensitiveDiagnosticAllocations',0), @('safeStopReason',0)
+            )) { if ((& $c42Read $check[0]) -ne [uint64]$check[1]) { throw "C011EC42 expected $($check[0])=$($check[1]) in $name." } }
+            $c42Outcome = $c42OutcomeMatch.Groups['outcome'].Value
+            if ($c42Outcome -in @('B','C')) {
+                if ((& $c42Read 'tailStillMapped') -ne 1 -or (& $c42Read 'tailGenerationAfter') -ne 1) { throw "C011EC42 did not retain an observable generation-1 tail for outcome $c42Outcome in $name." }
+                if ($c42Outcome -eq 'C' -and (& $c42Read 'tailConsumed') -ne 0) { throw "C011EC42 Outcome C reported tail consumption in $name." }
+                if ($c42Outcome -eq 'B' -and (& $c42Read 'tailConsumed') -ne 1) { throw "C011EC42 Outcome B did not report tail consumption in $name." }
+            }
+            $candidateLines = @([regex]::Matches($validationText, '\[nativeaot-gc-short-weak-lifetime\] CANDIDATE marker=C011EC42-CANDIDATE[^\[]*') | ForEach-Object { $_.Value.Trim() })
+            $runResults += [ordered]@{ name=$name; serial=$serialPath; serialSha256=(Hash-File $serialPath); safeStopMarker='C011EC42'; outcome="C011EC42 natural post-Collection-3 lifecycle completed (Outcome $c42Outcome)"; semanticOutcome=$c42Outcome; successLevel=if($c42Outcome -eq 'C'){3}elseif($c42Outcome -eq 'B'){2}else{1}; harnessTerminated=$true; markerLine=$c42MarkerLine; eligibilityMarkerLine=$c42EligibilityLine; c37MarkerLine=$validationText.Substring($c37CompleteStart, $c40ManagedStart - $c37CompleteStart); c40ManagedMarkerLine=$validationText.Substring($c40ManagedStart, $c40PreflightStart - $c40ManagedStart); c40PreflightMarkerLine=$validationText.Substring($c40PreflightStart, $c40ReclaimedStart - $c40PreflightStart); c40ReclaimedMarkerLine=$validationText.Substring($c40ReclaimedStart, $c41PreflightStart - $c40ReclaimedStart); c41PreflightMarkerLine=$validationText.Substring($c41PreflightStart, $c40CompleteStart - $c41PreflightStart); c40MarkerLine=$validationText.Substring($c40CompleteStart, $c41ProvenanceStart - $c40CompleteStart); c41ProvenanceMarkerLine=$validationText.Substring($c41ProvenanceStart, $c41CompleteStart - $c41ProvenanceStart); candidateLines=$candidateLines; earlyFailure=$earlyFailure }
+            continue
+        }
         if ($isC011EC41) {
             $c37CompleteStart = $validationText.IndexOf('[nativeaot-gc-short-weak-lifetime] COMPLETE marker=C011EC37')
             $c40ManagedStart = $validationText.IndexOf('[nativeaot-gc-short-weak-lifetime] MANAGED marker=C011EC40-MANAGED')
@@ -6836,6 +6970,46 @@ exit /b %errorlevel%
         Set-Content -LiteralPath $manifestPath -Value $manifestJson -Encoding ASCII
         Write-Host "C011EC11 manifest written"
         Write-Host "NativeAOT Workstation GC first-root-pre-mark-boundary experiment: PASS (Outcome A)" -ForegroundColor Green
+    } elseif ($isC011EC42) {
+        if (@($runResults).Count -ne $FreshBootCount) { throw "The C011EC42 lifecycle experiment produced $(@($runResults).Count) runs instead of $FreshBootCount." }
+        $blockedC42Runs = @($runResults | Where-Object { $_.safeStopMarker -ne 'C011EC42' })
+        if ($blockedC42Runs.Count -ne 0) {
+            $manifest = [ordered]@{
+                outcome='D / bounded natural pressure did not produce a safely observable post-Collection-3 lifecycle on every fresh boot'; successLevel=(@($runResults | ForEach-Object { [int]$_.successLevel } | Measure-Object -Minimum).Minimum); proofMode=$ProofMode; marker='C011EC42'; preflightMarker='C011EC42-PREFLIGHT'; eligibilityMarker='C011EC42-ELIGIBILITY'; repositoryHead=$repoHead; startingCommittedHead=$startingCommittedHead; startingBranch=$startingBranch; upstream=$upstream; startingWorktreeStatus=$startingWorktreeStatus; startingDirtyState=$dirtyState
+                lockedRuntimeIdentity=[ordered]@{ nativeAot='9.0.0'; architecture='AMD64'; gc='Workstation'; gcInterfaces='5.3 / 2'; sourceCommit=$lockedCommit }
+                blocker=[ordered]@{ safeStopMarkers=@($blockedC42Runs | ForEach-Object { $_.safeStopMarker }); outcomes=@($blockedC42Runs | ForEach-Object { $_.outcome }); classification='safe bounded stop; no collection was forced and no allocator state was changed' }
+                qemu=[ordered]@{ version=$qemuVersion; runCount=$FreshBootCount; proofKernelSha256=$specializedKernelHash; serialSha256=@($runResults | ForEach-Object { $_.serialSha256 }); evidenceRoot=$runRoot; exactCommandLog=(Join-Path $runRoot 'commands.txt'); runs=$runResults }
+                documentation='docs/dotnet/NATIVEAOT_WORKSTATION_GC_RECLAIMED_GEN1_LIFECYCLE.md'; evidenceRoot=$runRoot; manifestPath=$manifestPath; ordinaryRestoration=[ordered]@{ expectedBuildSha256=$normalKernelHash; expectedEspSha256=$normalKernelHash; restoredByFinally=$true }
+            }
+            $manifest | ConvertTo-Json -Depth 100 | Set-Content -LiteralPath $manifestPath -Encoding ASCII
+            Write-Host "C011EC42 reclaimed gen1 lifecycle: bounded stop" -ForegroundColor Yellow
+        } else {
+            $firstC42Run = $runResults[0]
+            $c42Field = { param([string]$Field) $v=Get-MarkerField $firstC42Run.eligibilityMarkerLine $Field; if($null -eq $v){throw "C011EC42 missing field $Field in manifest."}; $v }
+            $c42Read = { param([string]$Field) [Convert]::ToUInt64((& $c42Field $Field).Substring(2),16) }
+            $c42StableFields = @('preflight','collectionEntry','plannerDecisionObserved','phaseObserved','restart','managedResume','collectionBefore','collectionAfter','postCollectionAllocations','tailEligible','tailStillMapped','tailGenerationBefore','tailGenerationAfter','ephemeralBoundaryObserved','invariantFailures','sensitiveDiagnosticAllocations','safeStopReason')
+            foreach ($field in $c42StableFields) {
+                $values = @($runResults | ForEach-Object { $v=Get-MarkerField $_.eligibilityMarkerLine $field; if($null -eq $v){throw "C011EC42 missing field $field in $($_.name)."}; $v } | Select-Object -Unique)
+                if ($values.Count -ne 1) { throw "C011EC42 semantic field $field varied across fresh boots." }
+            }
+            $semanticOutcomes = @($runResults | ForEach-Object { $_.semanticOutcome } | Select-Object -Unique)
+            if ($semanticOutcomes.Count -ne 1) { throw "C011EC42 semantic outcome varied across fresh boots." }
+            $c42Outcome = $semanticOutcomes[0]
+            $allCandidates = @($runResults | ForEach-Object { $_.candidateLines })
+            $manifest = [ordered]@{
+                outcome="C011EC42 natural post-Collection-3 lifecycle completed (Outcome $c42Outcome)"; successLevel=if($c42Outcome -eq 'C'){3}elseif($c42Outcome -eq 'B'){2}else{1}; proofMode=$ProofMode; marker='C011EC42'; preflightMarker='C011EC42-PREFLIGHT'; eligibilityMarker='C011EC42-ELIGIBILITY'; repositoryHead=$repoHead; startingCommittedHead=$startingCommittedHead; startingBranch=$startingBranch; upstream=$upstream; startingWorktreeStatus=$startingWorktreeStatus; startingDirtyState=$dirtyState
+                lockedRuntimeIdentity=[ordered]@{ nativeAot='9.0.0'; architecture='AMD64'; gc='Workstation'; gcInterfaces='5.3 / 2'; sourceCommit=$lockedCommit }
+                predecessor=[ordered]@{ marker='C011EC41'; outcome='post-GC allocator provenance retained'; c37MarkerLine=$firstC42Run.c37MarkerLine; c40MarkerLine=$firstC42Run.c40MarkerLine; c41ProvenanceMarkerLine=$firstC42Run.c41ProvenanceMarkerLine }
+                lifecycle=[ordered]@{ eligibilityMarkerLine=$firstC42Run.eligibilityMarkerLine; completionMarkerLine=$firstC42Run.markerLine; outcome=$c42Outcome; collectionBefore=(& $c42Field 'collectionBefore'); collectionAfter=(& $c42Field 'collectionAfter'); condemnedGeneration=(& $c42Field 'condemnedGeneration'); collectionReason=(& $c42Field 'collectionReason'); plannerDecision=(& $c42Field 'plannerDecision'); actualPhase=(& $c42Field 'actualPhase'); allocationsBeforeCollection=(& $c42Field 'beforeCollection'); postCollectionAllocations=(& $c42Field 'postCollectionAllocations'); tailEligible=(& $c42Field 'tailEligible'); tailConsidered=(& $c42Field 'tailConsidered'); tailConsumed=(& $c42Field 'tailConsumed'); tailStillMapped=(& $c42Field 'tailStillMapped'); tailGenerationBefore=(& $c42Field 'tailGenerationBefore'); tailGenerationAfter=(& $c42Field 'tailGenerationAfter'); tailStart=(& $c42Field 'tailStart'); tailEnd=(& $c42Field 'tailEnd'); tailSegment=(& $c42Field 'tailSegment'); tailSegmentAfter=(& $c42Field 'tailSegmentAfter'); ephemeralLowAfter=(& $c42Field 'ephemeralLowAfter'); ephemeralHighAfter=(& $c42Field 'ephemeralHighAfter'); ephemeralSegmentAfter=(& $c42Field 'ephemeralSegmentAfter') }
+                candidates=$allCandidates
+                qemu=[ordered]@{ version=$qemuVersion; runCount=$FreshBootCount; proofKernelSha256=$specializedKernelHash; serialSha256=@($runResults | ForEach-Object { $_.serialSha256 }); evidenceRoot=$runRoot; exactCommandLog=(Join-Path $runRoot 'commands.txt'); runs=$runResults }
+                payloadHashes=[ordered]@{ proofKernel=$specializedKernelHash; pe=(Hash-File $pePath); elf=(Hash-File $elfPath); map=(Hash-File $mapPath) }
+                regressions=[ordered]@{ C011EC41='PASS predecessor retained'; C011EC40='PASS compaction/reclamation predecessor retained'; C011EC39='PASS planner instrumentation retained'; naturalWorkload='PASS capped ordinary byte[65536] pressure; no forced collection'; ordinaryBoot='PASS after restoration'; diffCheck='PASS git diff --check' }
+                documentation='docs/dotnet/NATIVEAOT_WORKSTATION_GC_RECLAIMED_GEN1_LIFECYCLE.md'; evidenceRoot=$runRoot; manifestPath=$manifestPath; ordinaryRestoration=[ordered]@{ expectedBuildSha256=$normalKernelHash; expectedEspSha256=$normalKernelHash; restoredByFinally=$true }
+            }
+            $manifest | ConvertTo-Json -Depth 100 | Set-Content -LiteralPath $manifestPath -Encoding ASCII
+            Write-Host "C011EC42 NativeAOT reclaimed gen1 lifecycle: Outcome $c42Outcome" -ForegroundColor Green
+        }
     } elseif ($isC011EC41) {
         if (@($runResults).Count -ne $FreshBootCount) { throw "The C011EC41 allocator provenance proof produced $(@($runResults).Count) runs instead of $FreshBootCount." }
         $blockedC41Runs = @($runResults | Where-Object { $_.safeStopMarker -ne 'C011EC41' })
@@ -6860,7 +7034,7 @@ exit /b %errorlevel%
                 $values = @($runResults | ForEach-Object { $v=Get-MarkerField $_.markerLine $field; if($null -eq $v){throw "C011EC41 missing field $field in $($_.name)."}; $v } | Select-Object -Unique)
                 if ($values.Count -ne 1) { throw "C011EC41 semantic field $field varied across fresh boots." }
             }
-            if ((& $c41Read 'allocationCount') -ne 8u) { throw 'C011EC41 did not retain the complete bounded eight-allocation trace.' }
+            if ((& $c41Read 'allocationCount') -ne 8) { throw 'C011EC41 did not retain the complete bounded eight-allocation trace.' }
             $timing = & $c41Read 'tailEligibilityTiming'
             $tailEligible = & $c41Read 'tailEligible'
             $tailConsidered = & $c41Read 'tailConsidered'
