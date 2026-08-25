@@ -1264,6 +1264,52 @@ typedef struct guidexos_nativeaot_c011ec47_provenance_record {
         GUIDEXOS_NATIVEAOT_C011EC47_MAX_ROOT_UPDATE_RECORDS];
 } guidexos_nativeaot_c011ec47_provenance_record;
 
+enum {
+    GUIDEXOS_NATIVEAOT_C011EC48_MAX_OWNERSHIP_RECORDS = 16u,
+    GUIDEXOS_NATIVEAOT_C011EC48_FP_CLEAR = 1u,
+    GUIDEXOS_NATIVEAOT_C011EC48_FP_IN = 2u,
+    GUIDEXOS_NATIVEAOT_C011EC48_FP_PREPARE = 3u,
+    GUIDEXOS_NATIVEAOT_C011EC48_FP_REHOME = 4u,
+    GUIDEXOS_NATIVEAOT_C011EC48_FP_CONSUME = 5u
+};
+
+/* C011EC48 records the pointer-to-storage ownership transfer without
+ * dereferencing any address other than the live REGDISPLAY pRbp source that
+ * production GetFP() already consumes.  The reverse consume record is called
+ * only after the production slot read has completed. */
+typedef struct guidexos_nativeaot_c011ec48_ownership_record {
+    uint32_t observed;
+    uint32_t phase;
+    uint32_t gcOrdinal;
+    uint32_t iteratorFlags;
+
+    uintptr_t controlPc;
+    uintptr_t sp;
+    uintptr_t incomingRbpPointer;
+    uintptr_t incomingFp;
+    uintptr_t framePointerBefore;
+    uintptr_t sourceFp;
+    uintptr_t framePointerAfter;
+    uintptr_t rehomeRbpPointer;
+    uintptr_t getFpAfterRehome;
+    uintptr_t methodInfo;
+    uintptr_t slotOffset;
+    uintptr_t slotAddress;
+    uintptr_t slotValue;
+    uintptr_t basePointer;
+    uintptr_t transitionFrame;
+} guidexos_nativeaot_c011ec48_ownership_record;
+
+typedef struct guidexos_nativeaot_c011ec48_provenance_record {
+    uint32_t recordCount;
+    uint32_t sensitiveDiagnosticAllocations;
+    uint32_t invariantFailures;
+    uint32_t reserved;
+
+    guidexos_nativeaot_c011ec48_ownership_record records[
+        GUIDEXOS_NATIVEAOT_C011EC48_MAX_OWNERSHIP_RECORDS];
+} guidexos_nativeaot_c011ec48_provenance_record;
+
 typedef struct guidexos_nativeaot_allocation_diagnostics {
     uint32_t schemaVersion;
     uint32_t heapInitialized;
@@ -3125,6 +3171,8 @@ typedef struct guidexos_nativeaot_allocation_diagnostics {
     guidexos_nativeaot_c011ec46_provenance_record c011ec46Provenance;
     /* C011EC47 post-root-scan reverse-slot page-fault provenance. */
     guidexos_nativeaot_c011ec47_provenance_record c011ec47Provenance;
+    /* C011EC48 iterator-owned FP publication and reverse-slot consumption. */
+    guidexos_nativeaot_c011ec48_provenance_record c011ec48Provenance;
 } guidexos_nativeaot_allocation_diagnostics;
 
 enum {

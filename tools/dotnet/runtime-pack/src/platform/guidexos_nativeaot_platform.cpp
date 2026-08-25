@@ -5738,6 +5738,136 @@ extern "C" void __cdecl guideXosNativeAotC011EC47ReverseSlotPreRead(
 }
 #endif
 
+#if defined(GUIDEXOS_NATIVEAOT_C011EC48_PROVENANCE)
+static void c011ec48CaptureOwnership(
+    uint32_t phase, uintptr_t controlPc, uintptr_t sp,
+    uintptr_t incomingRbpPointer, uintptr_t incomingFp,
+    uintptr_t framePointerBefore, uintptr_t sourceFp,
+    uintptr_t framePointerAfter, uintptr_t rehomeRbpPointer,
+    uintptr_t getFpAfterRehome, uintptr_t iteratorFlags,
+    uintptr_t methodInfo) {
+    guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    guidexos_nativeaot_c011ec48_provenance_record& r =
+        d.c011ec48Provenance;
+    const uint32_t index = r.recordCount <
+        GUIDEXOS_NATIVEAOT_C011EC48_MAX_OWNERSHIP_RECORDS
+        ? r.recordCount
+        : GUIDEXOS_NATIVEAOT_C011EC48_MAX_OWNERSHIP_RECORDS - 1u;
+    guidexos_nativeaot_c011ec48_ownership_record& record =
+        r.records[index];
+    if (r.recordCount < GUIDEXOS_NATIVEAOT_C011EC48_MAX_OWNERSHIP_RECORDS) {
+        ++r.recordCount;
+    }
+    record = {};
+    record.observed = 1u;
+    record.phase = phase;
+    record.gcOrdinal = d.c011ec42Lifecycle.collectionCountBefore;
+    record.iteratorFlags = static_cast<uint32_t>(iteratorFlags);
+    record.controlPc = controlPc;
+    record.sp = sp;
+    record.incomingRbpPointer = incomingRbpPointer;
+    record.incomingFp = incomingFp;
+    record.framePointerBefore = framePointerBefore;
+    record.sourceFp = sourceFp;
+    record.framePointerAfter = framePointerAfter;
+    record.rehomeRbpPointer = rehomeRbpPointer;
+    record.getFpAfterRehome = getFpAfterRehome;
+    record.methodInfo = methodInfo;
+
+    const char* marker = "C011EC48";
+    if (phase == GUIDEXOS_NATIVEAOT_C011EC48_FP_CLEAR) {
+        marker = "C011EC48-C47-CLEAR";
+    } else if (phase == GUIDEXOS_NATIVEAOT_C011EC48_FP_IN) {
+        marker = "C011EC48-FP-IN";
+    } else if (phase == GUIDEXOS_NATIVEAOT_C011EC48_FP_PREPARE) {
+        marker = "C011EC48-FP-PREPARE";
+    } else if (phase == GUIDEXOS_NATIVEAOT_C011EC48_FP_REHOME) {
+        marker = "C011EC48-FP-REHOME";
+    } else if (phase == GUIDEXOS_NATIVEAOT_C011EC48_FP_CONSUME) {
+        marker = "C011EC48-FP-CONSUME";
+    }
+
+    suspendEeSerialPutString("[nativeaot-c011ec48] phase=");
+    suspendEeSerialPutHex32(phase);
+    suspendEeSerialPutString(" ord=");
+    suspendEeSerialPutHex32(record.gcOrdinal);
+    suspendEeSerialPutString(" pc=");
+    suspendEeSerialPutHex64(controlPc);
+    suspendEeSerialPutString(" sp=");
+    suspendEeSerialPutHex64(sp);
+    suspendEeSerialPutString(" incomingP=");
+    suspendEeSerialPutHex64(incomingRbpPointer);
+    suspendEeSerialPutString(" incomingFp=");
+    suspendEeSerialPutHex64(incomingFp);
+    suspendEeSerialPutString(" before=");
+    suspendEeSerialPutHex64(framePointerBefore);
+    suspendEeSerialPutString(" sourceFp=");
+    suspendEeSerialPutHex64(sourceFp);
+    suspendEeSerialPutString(" after=");
+    suspendEeSerialPutHex64(framePointerAfter);
+    suspendEeSerialPutString(" rehomeP=");
+    suspendEeSerialPutHex64(rehomeRbpPointer);
+    suspendEeSerialPutString(" getFp=");
+    suspendEeSerialPutHex64(getFpAfterRehome);
+    suspendEeSerialPutString(" flags=");
+    suspendEeSerialPutHex64(iteratorFlags);
+    suspendEeSerialPutString(" method=");
+    suspendEeSerialPutHex64(methodInfo);
+    suspendEeSerialPutString(" marker=");
+    suspendEeSerialPutString(marker);
+    suspendEeSerialPutString("\n");
+}
+
+extern "C" void __cdecl guideXosNativeAotC011EC48Ownership(
+    uint32_t phase, uintptr_t controlPc, uintptr_t sp,
+    uintptr_t incomingRbpPointer, uintptr_t incomingFp,
+    uintptr_t framePointerBefore, uintptr_t sourceFp,
+    uintptr_t framePointerAfter, uintptr_t rehomeRbpPointer,
+    uintptr_t getFpAfterRehome, uintptr_t iteratorFlags,
+    uintptr_t methodInfo) {
+    c011ec48CaptureOwnership(
+        phase, controlPc, sp, incomingRbpPointer, incomingFp,
+        framePointerBefore, sourceFp, framePointerAfter, rehomeRbpPointer,
+        getFpAfterRehome, iteratorFlags, methodInfo);
+}
+
+extern "C" void __cdecl guideXosNativeAotC011EC48ReverseConsume(
+    uintptr_t methodInfo, uintptr_t controlPc, uintptr_t sp,
+    uintptr_t fp, uintptr_t pRbp, uintptr_t basePointer,
+    uintptr_t slotOffset, uintptr_t slotAddress, uintptr_t slotValue,
+    uintptr_t transitionFrame, uintptr_t iteratorFlags) {
+    c011ec48CaptureOwnership(
+        GUIDEXOS_NATIVEAOT_C011EC48_FP_CONSUME, controlPc, sp,
+        pRbp, fp, 0u, fp, fp, pRbp, fp, iteratorFlags, methodInfo);
+    guidexos_nativeaot_c011ec48_provenance_record& r =
+        g_guideXosAllocationDiagnostics.c011ec48Provenance;
+    const uint32_t index = r.recordCount == 0u ? 0u : r.recordCount - 1u;
+    guidexos_nativeaot_c011ec48_ownership_record& record = r.records[index];
+    record.basePointer = basePointer;
+    record.slotOffset = slotOffset;
+    record.slotAddress = slotAddress;
+    record.slotValue = slotValue;
+    record.transitionFrame = transitionFrame;
+
+    suspendEeSerialPutString("[nativeaot-c011ec48] fp=");
+    suspendEeSerialPutHex64(fp);
+    suspendEeSerialPutString(" pRbp=");
+    suspendEeSerialPutHex64(pRbp);
+    suspendEeSerialPutString(" base=");
+    suspendEeSerialPutHex64(basePointer);
+    suspendEeSerialPutString(" off=");
+    suspendEeSerialPutHex64(slotOffset);
+    suspendEeSerialPutString(" slot=");
+    suspendEeSerialPutHex64(slotAddress);
+    suspendEeSerialPutString(" value=");
+    suspendEeSerialPutHex64(slotValue);
+    suspendEeSerialPutString(" transition=");
+    suspendEeSerialPutHex64(transitionFrame);
+    suspendEeSerialPutString(" marker=C011EC48-FP-CONSUME\n");
+}
+#endif
+
 static void c011ec44ThreadSlots(
     uintptr_t threadAddress,
     uintptr_t* live,
