@@ -2086,6 +2086,25 @@ static std::string navigatorHostedSmokeDiagnostic() {
     gxos::apps::Navigator::SmokeSetElementScrollOffsetById("phase6c-vertical", 0, 0);
     cssPhase6cRect("phase6c-vertical", false, false, phase6cVtx, phase6cVty, phase6cVtw, phase6cVth);
     cssPhase6cRect("phase6c-vertical", false, true, phase6cVx, phase6cVy, phase6cVw, phase6cVh);
+    const int phase6cDeterministicVtx = phase6cVtx;
+    const int phase6cDeterministicVty = phase6cVty;
+    const int phase6cDeterministicVtw = phase6cVtw;
+    const int phase6cDeterministicVth = phase6cVth;
+    const int phase6cDeterministicVx = phase6cVx;
+    const int phase6cDeterministicVy = phase6cVy;
+    const int phase6cDeterministicVw = phase6cVw;
+    const int phase6cDeterministicVh = phase6cVh;
+    int phase6cRepeatVtx = 0, phase6cRepeatVty = 0, phase6cRepeatVtw = 0, phase6cRepeatVth = 0;
+    int phase6cRepeatVx = 0, phase6cRepeatVy = 0, phase6cRepeatVw = 0, phase6cRepeatVh = 0;
+    const bool phase6cDeterministicGeometry =
+        cssPhase6cRect("phase6c-vertical", false, false, phase6cRepeatVtx, phase6cRepeatVty,
+            phase6cRepeatVtw, phase6cRepeatVth) &&
+        cssPhase6cRect("phase6c-vertical", false, true, phase6cRepeatVx, phase6cRepeatVy,
+            phase6cRepeatVw, phase6cRepeatVh) &&
+        phase6cRepeatVtx == phase6cDeterministicVtx && phase6cRepeatVty == phase6cDeterministicVty &&
+        phase6cRepeatVtw == phase6cDeterministicVtw && phase6cRepeatVth == phase6cDeterministicVth &&
+        phase6cRepeatVx == phase6cDeterministicVx && phase6cRepeatVy == phase6cDeterministicVy &&
+        phase6cRepeatVw == phase6cDeterministicVw && phase6cRepeatVh == phase6cDeterministicVh;
     const int phase6cVerticalGrab = phase6cVy - phase6cVty + std::max(0, phase6cVh / 2);
     const int phase6cVerticalEndPointer = phase6cVty + phase6cVth - phase6cVh + phase6cVerticalGrab;
     const bool phase6cVerticalDragInput =
@@ -2111,6 +2130,18 @@ static std::string navigatorHostedSmokeDiagnostic() {
         gxos::apps::Navigator::SmokePointerInput(phase6cVtx + std::max(1, phase6cVtw / 2), phase6cVty + phase6cVth - 2, 1, "down") &&
         gxos::apps::Navigator::SmokePointerInput(phase6cVtx + std::max(1, phase6cVtw / 2), phase6cVty + phase6cVth - 2, 1, "up");
     const int phase6cVerticalAfterForwardClick = gxos::apps::Navigator::SmokeElementScrollOffsetYById("phase6c-vertical");
+    const bool phase6cTrackRepeatedForwardInput =
+        gxos::apps::Navigator::SmokePointerInput(phase6cVtx + std::max(1, phase6cVtw / 2), phase6cVty + phase6cVth - 2, 1, "down") &&
+        gxos::apps::Navigator::SmokePointerInput(phase6cVtx + std::max(1, phase6cVtw / 2), phase6cVty + phase6cVth - 2, 1, "up") &&
+        gxos::apps::Navigator::SmokePointerInput(phase6cVtx + std::max(1, phase6cVtw / 2), phase6cVty + phase6cVth - 2, 1, "down") &&
+        gxos::apps::Navigator::SmokePointerInput(phase6cVtx + std::max(1, phase6cVtw / 2), phase6cVty + phase6cVth - 2, 1, "up");
+    const int phase6cVerticalAfterRepeatedForwardClick = gxos::apps::Navigator::SmokeElementScrollOffsetYById("phase6c-vertical");
+    gxos::apps::Navigator::SmokeSetElementScrollOffsetById("phase6c-vertical", 0, 0);
+    const int phase6cVerticalMinimumBefore = gxos::apps::Navigator::SmokeElementScrollOffsetYById("phase6c-vertical");
+    const bool phase6cTrackMinimumInput =
+        gxos::apps::Navigator::SmokePointerInput(phase6cVtx + std::max(1, phase6cVtw / 2), phase6cVty + 2, 1, "down") &&
+        gxos::apps::Navigator::SmokePointerInput(phase6cVtx + std::max(1, phase6cVtw / 2), phase6cVty + 2, 1, "up");
+    const int phase6cVerticalMinimumAfter = gxos::apps::Navigator::SmokeElementScrollOffsetYById("phase6c-vertical");
 
     gxos::apps::Navigator::SmokeSetElementScrollOffsetById("phase6c-horizontal", 0, 0);
     cssPhase6cRect("phase6c-horizontal", true, false, phase6cHtx, phase6cHty, phase6cHtw, phase6cHth);
@@ -2132,6 +2163,13 @@ static std::string navigatorHostedSmokeDiagnostic() {
     const bool phase6cHorizontalDragReachedEnd = phase6cHorizontalDragInput &&
         gxos::apps::Navigator::SmokeElementScrollOffsetXById("phase6c-horizontal") == phase6cHorizontalMax &&
         phase6cHorizontalEndThumbX + phase6cHorizontalEndThumbW == phase6cHtx + phase6cHtw;
+    const bool phase6cHorizontalRepeatedEndpointInput =
+        gxos::apps::Navigator::SmokePointerInput(phase6cHtx + phase6cHtw - 2,
+            phase6cHy + std::max(1, phase6cHh / 2), 1, "down") &&
+        gxos::apps::Navigator::SmokePointerInput(phase6cHtx + phase6cHtw - 2,
+            phase6cHy + std::max(1, phase6cHh / 2), 1, "up");
+    const int phase6cHorizontalAfterRepeatedEndpoint =
+        gxos::apps::Navigator::SmokeElementScrollOffsetXById("phase6c-horizontal");
 
     gxos::apps::Navigator::SmokeSetElementScrollOffsetById("phase6c-vertical", 0, 0);
     const std::string phase6cUrlBeforeScrollbarLink = gxos::apps::Navigator::SmokeCurrentUrl();
@@ -2185,6 +2223,34 @@ static std::string navigatorHostedSmokeDiagnostic() {
     const bool phase6cNestedOuterOwned = phase6cNestedOuterDragInput &&
         gxos::apps::Navigator::SmokeElementScrollOffsetYById("phase6c-nested-outer") == phase6cOuterMax &&
         gxos::apps::Navigator::SmokeElementScrollOffsetYById("phase6c-nested-inner") == 0;
+
+    gxos::apps::Navigator::SmokeSetElementScrollOffsetById("phase6c-nested-outer", 0, 0);
+    gxos::apps::Navigator::SmokeSetElementScrollOffsetById("phase6c-nested-inner", 0, 0);
+    int phase6cNestedOuterHTx = 0, phase6cNestedOuterHTy = 0, phase6cNestedOuterHTw = 0, phase6cNestedOuterHTh = 0;
+    int phase6cNestedOuterHx = 0, phase6cNestedOuterHy = 0, phase6cNestedOuterHw = 0, phase6cNestedOuterHh = 0;
+    const bool phase6cNestedOuterHorizontalBar =
+        cssPhase6cRect("phase6c-nested-outer", true, false, phase6cNestedOuterHTx,
+            phase6cNestedOuterHTy, phase6cNestedOuterHTw, phase6cNestedOuterHTh) &&
+        cssPhase6cRect("phase6c-nested-outer", true, true, phase6cNestedOuterHx,
+            phase6cNestedOuterHy, phase6cNestedOuterHw, phase6cNestedOuterHh);
+    const int phase6cNestedOuterHorizontalMax = gxos::apps::Navigator::SmokeElementMaxScrollXById("phase6c-nested-outer");
+    const int phase6cNestedInnerHorizontalBefore = gxos::apps::Navigator::SmokeElementScrollOffsetXById("phase6c-nested-inner");
+    const int phase6cNestedOuterHorizontalGrab = phase6cNestedOuterHx - phase6cNestedOuterHTx +
+        std::max(0, phase6cNestedOuterHw / 2);
+    const int phase6cNestedOuterHorizontalEndPointer = phase6cNestedOuterHTx + phase6cNestedOuterHTw -
+        phase6cNestedOuterHw + phase6cNestedOuterHorizontalGrab;
+    const bool phase6cNestedOuterHorizontalDragInput = phase6cNestedOuterHorizontalBar &&
+        gxos::apps::Navigator::SmokePointerInput(phase6cNestedOuterHx + std::max(1, phase6cNestedOuterHw / 2),
+            phase6cNestedOuterHy + std::max(1, phase6cNestedOuterHh / 2), 1, "down") &&
+        gxos::apps::Navigator::SmokePointerInput(phase6cNestedOuterHorizontalEndPointer,
+            phase6cNestedOuterHy + std::max(1, phase6cNestedOuterHh / 2), 0, "move") &&
+        gxos::apps::Navigator::SmokePointerInput(phase6cNestedOuterHorizontalEndPointer,
+            phase6cNestedOuterHy + std::max(1, phase6cNestedOuterHh / 2), 1, "up");
+    const bool phase6cNestedOuterHorizontalOwned = phase6cNestedOuterHorizontalDragInput &&
+        gxos::apps::Navigator::SmokeElementScrollOffsetXById("phase6c-nested-outer") == phase6cNestedOuterHorizontalMax &&
+        gxos::apps::Navigator::SmokeElementScrollOffsetXById("phase6c-nested-inner") == phase6cNestedInnerHorizontalBefore;
+    gxos::apps::Navigator::SmokeSetElementScrollOffsetById("phase6c-nested-inner", 0, -100000);
+    const int phase6cNestedInnerMinimum = gxos::apps::Navigator::SmokeElementScrollOffsetYById("phase6c-nested-inner");
 
     int phase6cClipX = 0, phase6cClipY = 0, phase6cClipW = 0, phase6cClipH = 0;
     gxos::apps::Navigator::SmokeSetScrollOffset(1550);
@@ -2285,6 +2351,73 @@ static std::string navigatorHostedSmokeDiagnostic() {
         !cssPhase6cRect("phase6c-tiny", true, false, phase6cVtx, phase6cVty, phase6cVtw, phase6cVth) &&
         contains(cssPhase6cFinalReport, "css_scrollbar_visibility_convergence=bounded-two-pass-overlay-stable"),
         "tiny=no-interactive-bars;convergence=bounded");
+    add("CSS phase 6C focused vertical track click before thumb",
+        phase6cTrackBackwardInput && phase6cVerticalBeforeBackClick == phase6cVerticalMax &&
+        phase6cVerticalAfterBackClick >= 0 && phase6cVerticalAfterBackClick < phase6cVerticalBeforeBackClick,
+        "before=" + std::to_string(phase6cVerticalBeforeBackClick) + ";after=" +
+        std::to_string(phase6cVerticalAfterBackClick));
+    add("CSS phase 6C focused vertical track click after thumb",
+        phase6cTrackForwardInput && phase6cVerticalAfterForwardClick >= phase6cVerticalAfterBackClick &&
+        phase6cVerticalAfterForwardClick <= phase6cVerticalMax,
+        "after=" + std::to_string(phase6cVerticalAfterForwardClick) + ";max=" +
+        std::to_string(phase6cVerticalMax));
+    add("CSS phase 6C focused vertical minimum endpoint clamp",
+        phase6cTrackMinimumInput && phase6cVerticalMinimumBefore == 0 && phase6cVerticalMinimumAfter == 0,
+        "before=" + std::to_string(phase6cVerticalMinimumBefore) + ";after=" +
+        std::to_string(phase6cVerticalMinimumAfter));
+    add("CSS phase 6C focused vertical maximum endpoint clamp",
+        phase6cTrackForwardInput && phase6cVerticalAfterForwardClick == phase6cVerticalMax,
+        "after=" + std::to_string(phase6cVerticalAfterForwardClick) + ";max=" +
+        std::to_string(phase6cVerticalMax));
+    add("CSS phase 6C focused repeated vertical endpoint remains clamped",
+        phase6cTrackRepeatedForwardInput && phase6cVerticalAfterRepeatedForwardClick == phase6cVerticalMax,
+        "after=" + std::to_string(phase6cVerticalAfterRepeatedForwardClick) + ";max=" +
+        std::to_string(phase6cVerticalMax));
+    add("CSS phase 6C focused horizontal logical maximum",
+        phase6cHorizontalDragReachedEnd &&
+        gxos::apps::Navigator::SmokeElementScrollOffsetXById("phase6c-horizontal") == phase6cHorizontalMax,
+        "range=" + std::to_string(gxos::apps::Navigator::SmokeElementScrollOffsetXById("phase6c-horizontal")) +
+        "/" + std::to_string(phase6cHorizontalMax));
+    add("CSS phase 6C focused horizontal thumb endpoint",
+        phase6cHorizontalDragReachedEnd && phase6cHorizontalEndThumbX + phase6cHorizontalEndThumbW == phase6cHtx + phase6cHtw,
+        "thumbEnd=" + std::to_string(phase6cHorizontalEndThumbX + phase6cHorizontalEndThumbW) + ";trackEnd=" +
+        std::to_string(phase6cHtx + phase6cHtw));
+    add("CSS phase 6C focused repeated horizontal endpoint remains clamped",
+        phase6cHorizontalRepeatedEndpointInput && phase6cHorizontalAfterRepeatedEndpoint == phase6cHorizontalMax,
+        "after=" + std::to_string(phase6cHorizontalAfterRepeatedEndpoint) + ";max=" +
+        std::to_string(phase6cHorizontalMax));
+    add("CSS phase 6C focused scrollbar click wins over link",
+        phase6cScrollbarInterceptedLink && hasPositiveCount(cssPhase6cFinalReport,
+            "Current Document.css_scrollbar_hit_test_interceptions="),
+        std::string("url-unchanged=") + yesNo(phase6cScrollbarInterceptedLink));
+    add("CSS phase 6C focused adjacent content remains clickable",
+        phase6cVisibleLinkHit,
+        std::string("visible-link=") + yesNo(phase6cVisibleLinkHit));
+    add("CSS phase 6C focused nested inner vertical ownership",
+        phase6cNestedInnerOwned,
+        std::string("inner-owned=") + yesNo(phase6cNestedInnerOwned));
+    add("CSS phase 6C focused nested outer vertical ownership",
+        phase6cNestedOuterOwned,
+        std::string("outer-owned=") + yesNo(phase6cNestedOuterOwned));
+    add("CSS phase 6C focused nested inner maximum clamp",
+        phase6cNestedInnerOwned && phase6cNestedInnerMax > 0,
+        "inner-max=" + std::to_string(phase6cNestedInnerMax));
+    add("CSS phase 6C focused nested inner minimum clamp",
+        phase6cNestedInnerMinimum == 0,
+        "inner-min=" + std::to_string(phase6cNestedInnerMinimum));
+    add("CSS phase 6C focused nested interaction does not leak to ancestor",
+        phase6cNestedInnerOwned && phase6cNestedOuterOwned,
+        std::string("inner/outer=") + yesNo(phase6cNestedInnerOwned) + "/" + yesNo(phase6cNestedOuterOwned));
+    add("CSS phase 6C focused fit container has no scrollbar controls",
+        phase6cFitHasNoBars,
+        std::string("fit-no-bars=") + yesNo(phase6cFitHasNoBars));
+    add("CSS phase 6C focused geometry is deterministic",
+        phase6cDeterministicGeometry,
+        std::string("repeat=") + yesNo(phase6cDeterministicGeometry));
+    add("CSS phase 6C focused nested horizontal ownership",
+        phase6cNestedOuterHorizontalOwned && phase6cNestedOuterHorizontalMax > 0,
+        std::string("outer-horizontal=") + yesNo(phase6cNestedOuterHorizontalOwned) + ";max=" +
+        std::to_string(phase6cNestedOuterHorizontalMax));
 
     const bool typographyPhase7aLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/typography-phase7a.html");
     const std::string typographyPhase7aText = gxos::apps::Navigator::SmokeCurrentDocumentText();

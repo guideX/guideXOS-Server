@@ -973,6 +973,29 @@ namespace {
 	static CssScrollLayoutSnapshot s_cssScrollLayoutSnapshot;
 	static std::unordered_map<uint64_t, std::pair<int, int>> s_cssScrollState;
 
+	static void resetCssScrollLayoutSnapshot(bool preserveInteractionDiagnostics)
+	{
+		const bool priorValid = preserveInteractionDiagnostics && s_cssScrollLayoutSnapshot.valid;
+		const std::string priorUrl = preserveInteractionDiagnostics ? s_cssScrollLayoutSnapshot.url : std::string();
+		const uint64_t priorGeneration = preserveInteractionDiagnostics ? s_cssScrollLayoutSnapshot.generation : 0;
+		const int priorThumbDragOperations = preserveInteractionDiagnostics
+			? s_cssScrollLayoutSnapshot.scrollbarThumbDragOperations : 0;
+		const int priorTrackClickOperations = preserveInteractionDiagnostics
+			? s_cssScrollLayoutSnapshot.scrollbarTrackClickOperations : 0;
+		const int priorNestedOperations = preserveInteractionDiagnostics
+			? s_cssScrollLayoutSnapshot.scrollbarNestedOperations : 0;
+		const int priorHitTestInterceptions = preserveInteractionDiagnostics
+			? s_cssScrollLayoutSnapshot.scrollbarHitTestInterceptions : 0;
+		s_cssScrollLayoutSnapshot = CssScrollLayoutSnapshot{};
+		s_cssScrollLayoutSnapshot.scrollbarThumbDragOperations = priorThumbDragOperations;
+		s_cssScrollLayoutSnapshot.scrollbarTrackClickOperations = priorTrackClickOperations;
+		s_cssScrollLayoutSnapshot.scrollbarNestedOperations = priorNestedOperations;
+		s_cssScrollLayoutSnapshot.scrollbarHitTestInterceptions = priorHitTestInterceptions;
+		s_cssScrollLayoutSnapshot.valid = priorValid;
+		s_cssScrollLayoutSnapshot.url = priorUrl;
+		s_cssScrollLayoutSnapshot.generation = priorGeneration;
+	}
+
 	constexpr int kCssClipStackDepth = 16;
 	static std::array<CssPaintRect, kCssClipStackDepth> s_cssClipStack{};
 	static int s_cssClipDepth = 0;
@@ -10248,6 +10271,14 @@ namespace {
 			std::max(kCssScrollbarMinimumThumb, proportional)));
 	}
 
+	static int cssClampScrollOffset(int64_t requested, int maxScroll)
+	{
+		const int legalMax = std::max(0, maxScroll);
+		if (requested <= 0) return 0;
+		if (requested >= legalMax) return legalMax;
+		return static_cast<int>(requested);
+	}
+
 	static void cssResolveScrollbarGeometry(CssScrollContainerRecord& record,
 		CssScrollLayoutSnapshot& snapshot)
 	{
@@ -10362,8 +10393,8 @@ namespace {
 	static bool cssSetScrollContainerOffset(CssScrollContainerRecord& record,
 		int requestedX, int requestedY)
 	{
-		const int nextX = std::max(0, std::min(requestedX, std::max(0, record.maxScrollX)));
-		const int nextY = std::max(0, std::min(requestedY, std::max(0, record.maxScrollY)));
+		const int nextX = cssClampScrollOffset(static_cast<int64_t>(requestedX), record.maxScrollX);
+		const int nextY = cssClampScrollOffset(static_cast<int64_t>(requestedY), record.maxScrollY);
 		if (nextX != requestedX || nextY != requestedY) record.clamped = true;
 		const bool changed = nextX != record.scrollX || nextY != record.scrollY;
 		if (changed) ++s_cssScrollLayoutSnapshot.localScrollOperations;
@@ -12627,7 +12658,7 @@ namespace {
 		s_cssFloatLayoutSnapshot = CssFloatLayoutSnapshot{};
 		s_cssFlexLayoutSnapshot = CssFlexLayoutSnapshot{};
 		s_cssPositionLayoutSnapshot = CssPositionLayoutSnapshot{};
-		s_cssScrollLayoutSnapshot = CssScrollLayoutSnapshot{};
+		resetCssScrollLayoutSnapshot(true);
 		ensureCssMarginLayout(doc);
 		ensureCssFlexLayout(doc);
 		ensureCssFloatLayout(doc);
@@ -12936,7 +12967,7 @@ namespace {
 		s_cssFloatLayoutSnapshot = CssFloatLayoutSnapshot{};
 		s_cssFlexLayoutSnapshot = CssFlexLayoutSnapshot{};
 		s_cssPositionLayoutSnapshot = CssPositionLayoutSnapshot{};
-		s_cssScrollLayoutSnapshot = CssScrollLayoutSnapshot{};
+		resetCssScrollLayoutSnapshot(true);
 	}
 
 	static const ImageInfo& imageInfoForBlock(const DocBlock& block)
@@ -18525,8 +18556,10 @@ void Navigator::handleMouseInput(int x, int y, int button, const std::string& ac
 			const int trackStart = horizontal ? trackScreen.x : trackScreen.y;
 			const int travel = horizontal ? record->horizontalThumbTravel : record->verticalThumbTravel;
 			const int pointer = horizontal ? x : y;
-			const int desired = pointer - s_scrollbarDragGrabOffset - trackStart;
-			const int thumbOffset = std::max(0, std::min(desired, std::max(0, travel)));
+			const int64_t desired = static_cast<int64_t>(pointer) -
+				static_cast<int64_t>(s_scrollbarDragGrabOffset) - trackStart;
+			const int thumbOffset = static_cast<int>(std::max<int64_t>(0,
+				std::min<int64_t>(desired, std::max(0, travel))));
 			const int maxScroll = horizontal ? record->maxScrollX : record->maxScrollY;
 			const int requested = (travel > 0 && maxScroll > 0)
 				? static_cast<int>(std::max<int64_t>(0, std::min<int64_t>(maxScroll,
@@ -18647,9 +18680,14 @@ void Navigator::handleMouseInput(int x, int y, int button, const std::string& ac
 				const int pointer = horizontal ? x : y;
 				const int thumbStart = horizontal ? thumbScreen.x : thumbScreen.y;
 				const int page = std::max(1, horizontal ? record->paddingBox.w : record->paddingBox.h);
-				const int requested = pointer < thumbStart
-					? (horizontal ? record->scrollX - page : record->scrollY - page)
-					: (horizontal ? record->scrollX + page : record->scrollY + page);
+				const int maxScroll = horizontal ? record->maxScrollX : record->maxScrollY;
+				const int current = horizontal ? record->scrollX : record->scrollY;
+				// Track paging is one viewport toward the clicked side.  Compute in
+				// 64-bit, then clamp once to the axis's legal range so neither a
+				// large geometry value nor a repeated endpoint click can escape it.
+				const int requested = cssClampScrollOffset(
+					static_cast<int64_t>(current) + (pointer < thumbStart ? -static_cast<int64_t>(page) :
+						static_cast<int64_t>(page)), maxScroll);
 				const int requestedX = horizontal ? requested : record->scrollX;
 				const int requestedY = horizontal ? record->scrollY : requested;
 				cssSetScrollContainerOffset(*record, requestedX, requestedY);
@@ -19970,11 +20008,11 @@ Navigator::HitTarget Navigator::hitTest(int x, int y, int& outLinkBlockIndex)
 	}
 
 	// Element scrollbar chrome is owner-level UI and wins before controls,
-	// positioned content, or links at the same visible location. Shallower
-	// owners paint last when nested tracks overlap; later same-depth records
+	// positioned content, or links at the same visible location. The deepest
+	// valid owner wins when nested tracks overlap; later same-depth records
 	// follow the shared document paint order.
 	int bestScrollbarIndex = -1;
-	int bestScrollbarDepth = std::numeric_limits<int>::max();
+	int bestScrollbarDepth = -1;
 	bool bestScrollbarThumb = false;
 	ScrollbarAxis bestScrollbarAxis = ScrollbarAxis::None;
 	for (int index = 0; index < static_cast<int>(s_cssScrollLayoutSnapshot.records.size()); ++index) {
@@ -19986,9 +20024,9 @@ Navigator::HitTarget Navigator::hitTest(int x, int y, int& outLinkBlockIndex)
 			const bool thumb = cssScrollbarPointInRect(s_currentDoc, record, horizontal, true, x, y, s_scrollOffset);
 			const bool track = thumb || cssScrollbarPointInRect(s_currentDoc, record, horizontal, false, x, y, s_scrollOffset);
 			if (!track) continue;
-			const bool wins = bestScrollbarIndex < 0 || record.depth < bestScrollbarDepth ||
-				(record.depth == bestScrollbarDepth && index >= bestScrollbarIndex) ||
-				(record.depth == bestScrollbarDepth && index == bestScrollbarIndex && thumb && !bestScrollbarThumb);
+			const bool wins = bestScrollbarIndex < 0 || record.depth > bestScrollbarDepth ||
+				(record.depth == bestScrollbarDepth &&
+					(index > bestScrollbarIndex || (index == bestScrollbarIndex && thumb && !bestScrollbarThumb)));
 			if (!wins) continue;
 			bestScrollbarIndex = index;
 			bestScrollbarDepth = record.depth;
