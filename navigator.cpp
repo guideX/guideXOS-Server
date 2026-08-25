@@ -74,6 +74,7 @@ using gxos::web::InlineItemKind;
 using gxos::web::WebInlineItem;
 using gxos::web::HtmlElementRef;
 using gxos::web::TableCellContentItem;
+using gxos::javascript::RuntimeErrorCode;
 
 uint64_t           Navigator::s_windowId        = 0;
 int                Navigator::s_scrollOffset    = 0;
@@ -82,6 +83,9 @@ std::string        Navigator::s_statusText      = "Ready";
 std::string        Navigator::s_hoverStatusText;
 int                Navigator::s_hitLinkBlockIndex = -1;
 WebDocument        Navigator::s_currentDoc;
+gxos::javascript::RuntimeContext Navigator::s_scriptRuntime;
+gxos::javascript::NavigatorScriptHostAdapter Navigator::s_scriptHostAdapter;
+std::string        Navigator::s_lastJavaScriptError;
 WebDocument        Navigator::s_inspectedDoc;
 NavigatorPageMetadata Navigator::s_pageMetadata;
 NavigatorLifecycleDiagnostics Navigator::s_lifecycleDiagnostics;
@@ -156,6 +160,69 @@ constexpr uint64_t kNavigatorLifecycleCounterCap = 1000000;
 static void incrementLifecycleCounter(uint64_t& value)
 {
 	if (value < kNavigatorLifecycleCounterCap) ++value;
+}
+
+void Navigator::recordJavaScriptError(const std::string& phase,
+	gxos::javascript::RuntimeErrorCode error)
+{
+	if (error == gxos::javascript::RuntimeErrorCode::None) return;
+	std::string diagnostic = phase + ": " +
+		gxos::javascript::runtimeErrorCodeName(error);
+	if (diagnostic.size() > 512u) diagnostic.resize(512u);
+	s_lastJavaScriptError = std::move(diagnostic);
+	Logger::write(LogLevel::Warn, "Navigator JavaScript " + s_lastJavaScriptError);
+}
+
+bool Navigator::resetJavaScriptRealmForNavigation()
+{
+	s_lastJavaScriptError.clear();
+	s_scriptHostAdapter.detachDocument();
+	s_scriptRuntime.setHostAdapter(&s_scriptHostAdapter);
+	s_scriptRuntime.reset();
+	if (s_scriptRuntime.lastResult().succeeded()) return true;
+	recordJavaScriptError("realm reset", s_scriptRuntime.lastResult().runtimeError.code);
+	return false;
+}
+
+void Navigator::executeJavaScriptDocumentScripts()
+{
+	if (!s_scriptRuntime.builtInsInitialized()) return;
+	RuntimeErrorCode error = RuntimeErrorCode::None;
+	if (!s_scriptRuntime.installHostGlobal("document",
+		gxos::javascript::kNavigatorDocumentHostInstance,
+		gxos::javascript::kNavigatorDocumentHostKind, error)) {
+		recordJavaScriptError("document global", error);
+		return;
+	}
+	for (std::size_t index = 0; index < s_currentDoc.scriptSources.size(); ++index) {
+		const std::string& source = s_currentDoc.scriptSources[index];
+		const gxos::javascript::ScriptResult result = s_scriptRuntime.executeInSameRealm(
+			gxos::javascript::SourceView(source.data(), source.size()));
+		if (result.succeeded()) continue;
+		if (result.runtimeError.code != RuntimeErrorCode::None) {
+			recordJavaScriptError("script[" + std::to_string(index) + "]",
+				result.runtimeError.code);
+		} else {
+			std::string diagnostic = "script[" + std::to_string(index) +
+				"] status=" + std::to_string(static_cast<int>(result.status));
+			if (diagnostic.size() > 512u) diagnostic.resize(512u);
+			s_lastJavaScriptError = std::move(diagnostic);
+			Logger::write(LogLevel::Warn, "Navigator JavaScript " + s_lastJavaScriptError);
+		}
+	}
+}
+
+bool Navigator::dispatchJavaScriptClick(int blockIndex)
+{
+	if (blockIndex < 0 || blockIndex >= static_cast<int>(s_currentDoc.blocks.size()))
+		return false;
+	const std::uint64_t serial = s_currentDoc.blocks[
+		static_cast<std::size_t>(blockIndex)].elementMetadata.serial;
+	if (serial == 0 || !s_scriptHostAdapter.hasClickHandler(serial)) return false;
+	RuntimeErrorCode error = RuntimeErrorCode::None;
+	if (!s_scriptHostAdapter.dispatchClick(s_scriptRuntime, serial, error))
+		recordJavaScriptError("click", error);
+	return true;
 }
 
 static bool navigatorSmokeProgressEnabled()
@@ -15347,6 +15414,26 @@ std::string Navigator::SmokeCurrentDocumentText()
 	return extractDocumentText(s_currentDoc);
 }
 
+uint64_t Navigator::SmokeDocumentLayoutRevision()
+{
+	return s_currentDoc.layoutRevision;
+}
+
+bool Navigator::SmokeDocumentDirty()
+{
+	return s_currentDoc.layoutDirty;
+}
+
+size_t Navigator::SmokeJavaScriptHandlerCount()
+{
+	return s_scriptHostAdapter.clickHandlerCount();
+}
+
+std::string Navigator::SmokeJavaScriptLastError()
+{
+	return s_lastJavaScriptError;
+}
+
 const char* Navigator::documentCategoryName(NavigatorDocumentCategory category)
 {
 	switch (category) {
@@ -18036,6 +18123,17 @@ bool Navigator::smokeClickBlock(int blockIndex, bool label)
 
 void Navigator::handleDocumentClick(HitTarget target, int linkBlockIndex)
 {
+	const bool callbackRegistered =
+		(target == HitTarget::Link || target == HitTarget::FormLabel ||
+		 target == HitTarget::FormCheckbox || target == HitTarget::FormRadio ||
+		 target == HitTarget::FormSelect || target == HitTarget::FormSubmit) &&
+		linkBlockIndex >= 0 &&
+		linkBlockIndex < static_cast<int>(s_currentDoc.blocks.size()) &&
+		dispatchJavaScriptClick(linkBlockIndex);
+	if (callbackRegistered && s_currentDoc.layoutDirty) updateDisplay();
+
+	// JS9 policy: dispatch the direct onclick first, then preserve the
+	// pre-existing activation behavior for links and controls.
 	if (target == HitTarget::Link &&
 		linkBlockIndex >= 0 &&
 		linkBlockIndex < static_cast<int>(s_currentDoc.blocks.size()))
@@ -19978,6 +20076,14 @@ void Navigator::loadUrl(const std::string& url, bool updateDisplayAfterLoad,
 	NavigatorTransitionCategory transition)
 {
 	Logger::write(LogLevel::Info, std::string("Navigator loadUrl: ") + url);
+	// Navigation is the active JavaScript realm boundary. Clear the bounded
+	// onclick table before replacing the document so old function IDs cannot
+	// observe or retarget the new page.
+	if (!resetJavaScriptRealmForNavigation()) {
+		// Keep navigation itself alive if the bounded script realm cannot be
+		// reset; the replacement document simply has no active JS handlers.
+		s_scriptHostAdapter.detachDocument();
+	}
 	navigatorSmokeProgress("navigation-start");
 	const std::string requestedDocumentUrl = url.empty() ? "about:navigator" : url;
 	if (transition == NavigatorTransitionCategory::Navigation) {
@@ -20112,6 +20218,8 @@ void Navigator::loadUrl(const std::string& url, bool updateDisplayAfterLoad,
 	}
 	recomputeFormControlStyles();
 	navigatorSmokeProgress("style-resolution-complete");
+	s_scriptHostAdapter.attachDocument(s_currentDoc, s_scriptRuntime.hostGeneration());
+	executeJavaScriptDocumentScripts();
 	if (!s_currentDoc.url.empty()) {
 		s_visitedUrls.insert(s_currentDoc.url);
 	}

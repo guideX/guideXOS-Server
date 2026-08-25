@@ -11,6 +11,7 @@ const char* hostValueTypeName(HostValueType type)
     case HostValueType::Boolean: return "Boolean";
     case HostValueType::Number: return "Number";
     case HostValueType::String: return "String";
+    case HostValueType::Function: return "Function";
     case HostValueType::Object: return "Object";
     case HostValueType::HostObject: return "HostObject";
     case HostValueType::Method: return "Method";
@@ -37,6 +38,8 @@ const char* hostResultCodeName(HostResultCode code)
         return "DocumentTextLimitExceeded";
     case HostResultCode::DocumentMutationLimitExceeded:
         return "DocumentMutationLimitExceeded";
+    case HostResultCode::CallbackLimitExceeded:
+        return "CallbackLimitExceeded";
     }
     return "Invalid";
 }

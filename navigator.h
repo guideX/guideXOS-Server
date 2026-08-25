@@ -4,6 +4,7 @@
 #include "guide_web_document.h"   // BlockType, DocBlock, WebDocument (gxos::web)
 #include "navigator_resource_diagnostics.h"
 #include "navigator_resource_scheduler.h"
+#include "navigator_javascript/navigator_script_host.h"
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -843,6 +844,10 @@ public:
 	static std::string SmokeCurrentUrl();
 	static int SmokeCurrentBlockCount();
 	static std::string SmokeCurrentDocumentText();
+	static uint64_t SmokeDocumentLayoutRevision();
+	static bool SmokeDocumentDirty();
+	static size_t SmokeJavaScriptHandlerCount();
+	static std::string SmokeJavaScriptLastError();
 	static std::string SmokeCurrentLinkUrl(const std::string& text);
 	static bool SmokeClickFormControlById(const std::string& id);
 	static bool SmokeClickFormLabelById(const std::string& id);
@@ -1011,6 +1016,11 @@ private:
 	static void handleToolbarAction(int widgetId);
 	static void handleDocumentClick(HitTarget target, int linkBlockIndex);
 	static void handleMouseInput(int x, int y, int button, const std::string& action);
+	static bool resetJavaScriptRealmForNavigation();
+	static void executeJavaScriptDocumentScripts();
+	static bool dispatchJavaScriptClick(int blockIndex);
+	static void recordJavaScriptError(const std::string& phase,
+		gxos::javascript::RuntimeErrorCode error);
 	static void handleKeyPress(int keyCode, const std::string& action);
 	static void focusDocumentInput(int blockIndex,
 		gxos::web::FormFocusOrigin origin = gxos::web::FormFocusOrigin::ProgrammaticInternalSmoke);
@@ -1111,6 +1121,9 @@ private:
 	static std::string          s_hoverStatusText;
 	static int                  s_hitLinkBlockIndex; // index of the link under the cursor
 	static WebDocument          s_currentDoc;
+	static gxos::javascript::RuntimeContext s_scriptRuntime;
+	static gxos::javascript::NavigatorScriptHostAdapter s_scriptHostAdapter;
+	static std::string          s_lastJavaScriptError;
 	static WebDocument          s_inspectedDoc;
 	static NavigatorPageMetadata s_pageMetadata;
 	static NavigatorLifecycleDiagnostics s_lifecycleDiagnostics;

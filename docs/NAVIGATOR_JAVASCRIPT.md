@@ -189,7 +189,7 @@ programs:
 - dot and computed member access, calls with bounded argument lists, and
   bounded `new` expressions
 
-Function expressions, arrays, object literals, regular-expression literals,
+Named function expressions, arrays, object literals, regular-expression literals,
 conditional expressions, comma expressions, bitwise operators, `typeof`,
 `void`, `delete`, `let`, `const`, labels, `switch`, exceptions, and other
 ECMAScript features remain deliberately unsupported. JS1's conservative
@@ -547,9 +547,10 @@ offset, line, and column. `IllegalReturn` continues to reject top-level
 
 ### Deliberately unsupported constructs
 
-Function expressions, arrow functions, async functions, generators, default or
-rest parameters, destructuring, methods, classes, spread arguments, and the
-`arguments` object remain unsupported. Objects, arrays, member reads/writes,
+Anonymous function expressions are added only as the narrow JS9 `onclick`
+prerequisite. Named function expressions, arrow functions, async functions,
+generators, default or rest parameters, destructuring, methods, classes, spread
+arguments, and the `arguments` object remain unsupported. Objects, arrays, member reads/writes,
 member calls, `new`, and browser `this` semantics remain outside JS4. The
 standalone runtime does not expose `window`, `document`, the DOM, events,
 timers, networking APIs, storage, cookies, or `console`.
@@ -1168,3 +1169,106 @@ text bounds, and host-operation exhaustion.
 **guideXOS Navigator now has a controlled JavaScript-to-document bridge capable
 of bounded text mutation, but normal web pages still do not automatically
 execute JavaScript.**
+
+## Phase JS9: minimal direct click callbacks
+
+JS9 extends the JS8 Navigator boundary with one deliberately narrow interaction
+path. It is not DOM Events compatibility and it is not a general browser event
+system.
+
+```text
+rendered element
+  -> existing Navigator hit test
+  -> handleDocumentClick(element block)
+  -> NavigatorScriptHostAdapter::dispatchClick(serial)
+  -> RuntimeContext::invokeFunctionInSameRealm()
+  -> Element.textContent mutation
+  -> WebDocument::layoutDirty
+  -> existing controlled relayout/repaint
+```
+
+### JS9 API and semantics
+
+The supported surface is now:
+
+```text
+document.getElementById(id)
+
+Element.id             read-only String
+Element.tagName        read-only uppercase String
+Element.textContent    read/write bounded String/primitive text
+Element.onclick        read/write Function or Null
+```
+
+`onclick` accepts a JavaScript function value and installs or replaces the one
+direct callback for that element. Reading an unassigned handler returns `null`.
+Assigning `null` clears it. Unsupported non-callable values fail with the
+bounded `HostInvalidValue` runtime error and do not change an existing handler.
+There is no `addEventListener` implementation in JS9.
+
+The callback is invoked with zero arguments. There is no Event object. A
+callback replacement made during its own execution becomes effective on the
+next click; the currently copied function ID completes once. Reentrant event
+dispatch is rejected by the adapter, and relayout never synthesizes another
+click. A callback runtime error is contained, recorded in the existing bounded
+script diagnostic path, and is not automatically retried.
+
+Navigator dispatches `onclick` before the pre-existing activation behavior. A
+link therefore runs its direct callback first and then retains normal link
+navigation; form controls retain their existing activation behavior. JS9 adds
+no bubbling, capturing, parent traversal, propagation, keyboard, pointer,
+hover, touch, timer, asynchronous, promise, or navigation event APIs.
+
+### Same-realm ownership and generation safety
+
+The adapter retains only a `RuntimeFunctionId` plus the stable
+`HtmlElementRef::serial` in a fixed callback table. It never retains a raw
+function pointer, closure pointer, layout pointer, or temporary host value.
+The function ID remains valid because the active `RuntimeContext` owns its
+function table and captured environments until the realm is reset. The table
+is cleared on document attach/detach, realm reset, and host-generation change.
+Navigation resets the runtime and advances its host generation, so old Element
+values and old callback records cannot execute against a replacement document.
+
+Inline `<script>` sources are preserved by the bounded HTML parser in source
+order and submitted to the existing same realm after the current document host
+is installed. At most 16 inline scripts of at most 64 KiB each are retained.
+They execute synchronously in source order; the realm is not rebuilt between
+scripts or clicks. This page-loading path is separate from the JS8
+`NavigatorScriptExecutionHarness`, whose explicit-script API still does not
+execute fixture HTML script tags.
+
+### Bounds and cost
+
+The maximum active handler count is 64. Each callback record is 16 bytes on the
+current 64-bit ABI (`HostInstanceId` plus `RuntimeFunctionId` and alignment),
+so the fixed table contributes 1,024 bytes of static adapter storage. A new
+assignment does not allocate another callback record; replacing a handler is a
+linear scan of at most 64 records. Dispatch performs one serial lookup and at
+most one callback invocation. Runtime function, closure/environment, AST,
+source, host-object, operation, document-node, text, mutation, call-depth, and
+execution-step limits remain the JS1-JS8 limits listed above; retained function
+values remain bounded by the existing 4,096-function runtime limit.
+
+### JS9 proof fixtures and results
+
+`navigator-smoke/javascript-js9.html` contains two rendered buttons. Its
+first handler closes over a counter and changes its own `textContent`; the
+second changes only its own text. The required sequence is A → A → B → A,
+observing `1`, `2`, `B clicked`, and `3`. The hosted smoke extends
+`navigator.smoke` with rendered geometry, Navigator form hit-target, callback
+count, mutation, layout-revision, clean-layout, and same-realm checks.
+
+The focused JS9 smoke passes with strict C++17 diagnostics. It covers handler
+property/readback, function expressions, replacement, non-callable rejection,
+matching and non-matching dispatch, closure persistence, DOM mutation and
+controlled relayout, independent elements, error containment, self-replacement,
+navigation cleanup, stale-generation safety, the 64-record limit, links, and
+missing elements. The hosted smoke is integrated but cannot be executed in the
+current checkout because the full native build stops before producing the
+server executable at the pre-existing missing `third_party/mbedtls` dependency;
+JS9 did not introduce a new native build error.
+
+Intentional JS9 non-goals remain full EventTarget behavior, `addEventListener`,
+event objects, bubbling/capture, `preventDefault`, dynamic DOM creation,
+attributes, CSSOM, timers, async work, promises, modules, and navigation APIs.

@@ -66,6 +66,7 @@ enum class RuntimeErrorCode : std::uint8_t {
     DocumentTextLimitExceeded,
     DocumentMutationLimitExceeded,
     RealmSourceLimitExceeded,
+    HostCallbackLimitExceeded,
 };
 
 struct RuntimeError {
@@ -224,6 +225,12 @@ public:
     bool writeHostPropertyForTesting(RuntimeHostObjectId object,
         const std::string& key, Value value, RuntimeErrorCode& error);
     bool invokeFunctionForTesting(const Value& function,
+        const std::vector<Value>& arguments, Value& result,
+        RuntimeErrorCode& error);
+    // Invoke a retained same-realm function from a synchronous host event.
+    // Diagnostics are reset for this event, so a failing callback cannot
+    // poison a later independent click.
+    bool invokeFunctionInSameRealm(const Value& function,
         const std::vector<Value>& arguments, Value& result,
         RuntimeErrorCode& error);
 

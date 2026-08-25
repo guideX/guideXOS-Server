@@ -591,6 +591,68 @@ static std::string navigatorHostedSmokeDiagnostic() {
         return report.substr(pos, end == std::string::npos ? std::string::npos : end - pos);
     };
 
+    const bool js9Loaded = gxos::apps::Navigator::SmokeNavigateToQuiet(
+        "http://127.0.0.1:8080/navigator-smoke/javascript-js9.html");
+    const std::string js9InitialText =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    const uint64_t js9InitialRevision =
+        gxos::apps::Navigator::SmokeDocumentLayoutRevision();
+    int js9AX = 0;
+    int js9AY = 0;
+    int js9AW = 0;
+    int js9AH = 0;
+    const bool js9AHasGeometry = gxos::apps::Navigator::SmokeBlockGeometryById(
+        "js9-a", js9AX, js9AY, js9AW, js9AH);
+    const bool js9AHit = gxos::apps::Navigator::SmokeFormHitTargetById("js9-a");
+    const size_t js9Handlers =
+        gxos::apps::Navigator::SmokeJavaScriptHandlerCount();
+    const bool js9ClickA1 =
+        gxos::apps::Navigator::SmokeClickFormControlById("js9-a");
+    const std::string js9AfterA1 =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    const uint64_t js9RevisionAfterA1 =
+        gxos::apps::Navigator::SmokeDocumentLayoutRevision();
+    const bool js9ClickA2 =
+        gxos::apps::Navigator::SmokeClickFormControlById("js9-a");
+    const std::string js9AfterA2 =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    const bool js9ClickB =
+        gxos::apps::Navigator::SmokeClickFormControlById("js9-b");
+    const std::string js9AfterB =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    const bool js9ClickA3 =
+        gxos::apps::Navigator::SmokeClickFormControlById("js9-a");
+    const std::string js9AfterA3 =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    const bool js9CleanAfterClicks =
+        !gxos::apps::Navigator::SmokeDocumentDirty();
+    const std::string js9Error =
+        gxos::apps::Navigator::SmokeJavaScriptLastError();
+    add("JS9 hosted fixture loads and registers scripts",
+        js9Loaded && contains(js9InitialText, "Navigator JavaScript JS9") &&
+        contains(js9InitialText, "0") && contains(js9InitialText, "B initial") &&
+        js9Handlers == 2u && js9Error.empty(),
+        "loaded=" + yesNo(js9Loaded) + ",handlers=" +
+        std::to_string(js9Handlers) + ",error=" + (js9Error.empty() ? "none" : js9Error));
+    add("JS9 hosted click uses Navigator hit test",
+        js9AHasGeometry && js9AW > 0 && js9AH > 0 && js9AHit && js9ClickA1 &&
+        contains(js9AfterA1, "1"),
+        "geometry=" + yesNo(js9AHasGeometry) + ",hit=" + yesNo(js9AHit) +
+        ",click=" + yesNo(js9ClickA1));
+    add("JS9 hosted same-realm state persists",
+        js9ClickA2 && contains(js9AfterA2, "2") && js9ClickA3 &&
+        contains(js9AfterA3, "3"),
+        "a2=" + yesNo(js9ClickA2) + ",a3=" + yesNo(js9ClickA3));
+    add("JS9 hosted handlers remain independent",
+        js9ClickB && contains(js9AfterB, "B clicked") &&
+        contains(js9AfterB, "2"),
+        "b=" + yesNo(js9ClickB));
+    add("JS9 hosted mutation relayouts and repaints",
+        js9RevisionAfterA1 > js9InitialRevision && js9CleanAfterClicks,
+        "revision=" + std::to_string(js9InitialRevision) + "->" +
+        std::to_string(js9RevisionAfterA1) + ",dirty=" +
+        yesNo(!js9CleanAfterClicks));
+
     bool cssInlineLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-inline.html");
     std::string cssInlineText = gxos::apps::Navigator::SmokeCurrentDocumentText();
     std::string cssInlineReport = gxos::apps::Navigator::SmokeRuntimeReport();

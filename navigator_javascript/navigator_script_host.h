@@ -4,6 +4,7 @@
 #include "host.h"
 #include "runtime.h"
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <string>
@@ -26,6 +27,7 @@ constexpr std::size_t kNavigatorScriptMaxTextAggregationOperations = 1024u;
 constexpr std::size_t kNavigatorScriptMaxElementHostObjects = 1024u;
 constexpr std::size_t kNavigatorScriptMaxDocumentMutations = 1024u;
 constexpr std::size_t kNavigatorScriptMaxDocumentNodes = 1024u;
+constexpr std::size_t kNavigatorScriptMaxClickHandlers = 64u;
 
 struct NavigatorScriptHostLimits {
     std::size_t maxDocumentIdLength = kNavigatorScriptMaxDocumentIdLength;
@@ -35,6 +37,7 @@ struct NavigatorScriptHostLimits {
         kNavigatorScriptMaxTextAggregationOperations;
     std::size_t maxDocumentMutations = kNavigatorScriptMaxDocumentMutations;
     std::size_t maxDocumentNodes = kNavigatorScriptMaxDocumentNodes;
+    std::size_t maxClickHandlers = kNavigatorScriptMaxClickHandlers;
 };
 
 // The adapter never stores a JavaScript pointer and never creates a
@@ -51,7 +54,7 @@ public:
     void attachDocument(gxos::web::WebDocument& document,
         HostGenerationId generation);
     void detachDocument();
-    void setGeneration(HostGenerationId generation) { generation_ = generation; }
+    void setGeneration(HostGenerationId generation);
     HostGenerationId generation() const { return generation_; }
     gxos::web::WebDocument* document() const { return document_; }
     const NavigatorScriptHostLimits& limits() const { return limits_; }
@@ -65,7 +68,25 @@ public:
         std::uint32_t methodId, const HostValue* arguments,
         std::size_t argumentCount, HostValue& result) override;
 
+    // Navigator calls this only after its normal hit test has selected a
+    // document element serial. The callback is invoked in the supplied,
+    // already-installed realm; no source is reparsed and no new realm is
+    // created for the click.
+    bool dispatchClick(RuntimeContext& runtime, HostInstanceId serial,
+        RuntimeErrorCode& error);
+    bool hasClickHandler(HostInstanceId serial) const;
+    std::size_t clickHandlerCount() const { return clickHandlerCount_; }
+    void clearClickHandlers();
+
 private:
+    struct ClickHandlerRecord {
+        HostInstanceId serial = 0;
+        RuntimeFunctionId function = kInvalidRuntimeFunctionId;
+    };
+
+    std::size_t callbackLimit() const;
+    ClickHandlerRecord* clickHandlerFor(HostInstanceId serial);
+    const ClickHandlerRecord* clickHandlerFor(HostInstanceId serial) const;
     gxos::web::HtmlElementRef* findElement(HostInstanceId serial);
     const gxos::web::HtmlElementRef* findElement(HostInstanceId serial) const;
     bool isKnownElementSerial(HostInstanceId serial) const;
@@ -84,6 +105,10 @@ private:
     gxos::web::WebDocument* document_ = nullptr;
     HostGenerationId generation_ = 1u;
     NavigatorScriptHostLimits limits_;
+    std::array<ClickHandlerRecord, kNavigatorScriptMaxClickHandlers>
+        clickHandlers_{};
+    std::size_t clickHandlerCount_ = 0;
+    bool clickDispatchActive_ = false;
     // Returned strings are copied synchronously by RuntimeContext. Keeping
     // one adapter-owned scratch value avoids exposing mutable document memory.
     mutable std::string returnBuffer_;
@@ -107,6 +132,9 @@ public:
 
     ScriptResult execute(SourceView source);
     ScriptResult execute(const std::string& source);
+    // Production-boundary proof hook: feed the authoritative document
+    // element serial returned by a Navigator hit test into the real adapter.
+    bool dispatchClick(std::uint64_t serial, RuntimeErrorCode& error);
     bool relayout();
 
     RuntimeContext& runtime() { return runtime_; }

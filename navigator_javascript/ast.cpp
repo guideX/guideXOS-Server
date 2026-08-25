@@ -168,6 +168,7 @@ const char* astNodeKindName(AstNodeKind kind)
     case AstNodeKind::BreakStatement: return "BreakStatement";
     case AstNodeKind::ContinueStatement: return "ContinueStatement";
     case AstNodeKind::FunctionDeclaration: return "FunctionDeclaration";
+    case AstNodeKind::FunctionExpression: return "FunctionExpression";
     case AstNodeKind::Identifier: return "Identifier";
     case AstNodeKind::NumericLiteral: return "NumericLiteral";
     case AstNodeKind::StringLiteral: return "StringLiteral";

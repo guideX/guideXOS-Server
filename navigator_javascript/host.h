@@ -48,6 +48,7 @@ enum class HostValueType : std::uint8_t {
     Boolean,
     Number,
     String,
+    Function,
     Object,
     HostObject,
     Method,
@@ -55,12 +56,14 @@ enum class HostValueType : std::uint8_t {
 
 // Strings are borrowed only for the duration of the adapter call. The
 // runtime copies successful returned strings into its bounded string store.
-// Object is a runtime-owned object ID valid only for the synchronous call.
+// Object and Function are runtime-owned IDs. A callback-capable host may
+// retain a Function ID only under an explicit bounded same-realm contract.
 struct HostValue {
     HostValueType type = HostValueType::Undefined;
     bool booleanValue = false;
     double numberValue = 0.0;
     SourceView stringValue;
+    RuntimeFunctionId functionId = kInvalidRuntimeFunctionId;
     RuntimeObjectId objectId = kInvalidRuntimeObjectId;
     HostObjectReference hostObject;
     std::uint32_t methodId = 0;
@@ -96,6 +99,14 @@ struct HostValue {
         HostValue result;
         result.type = HostValueType::String;
         result.stringValue = value;
+        return result;
+    }
+
+    static HostValue function(RuntimeFunctionId value)
+    {
+        HostValue result;
+        result.type = HostValueType::Function;
+        result.functionId = value;
         return result;
     }
 
@@ -139,6 +150,7 @@ enum class HostResultCode : std::uint8_t {
     DocumentLookupLimitExceeded,
     DocumentTextLimitExceeded,
     DocumentMutationLimitExceeded,
+    CallbackLimitExceeded,
 };
 
 struct HostResult {
@@ -149,7 +161,8 @@ struct HostResult {
 
 // The adapter is externally owned and must outlive the RuntimeContext using
 // it. Calls are synchronous. An adapter must not retain SourceView spans,
-// HostValue strings, runtime IDs, or argument arrays after a call returns.
+// HostValue strings or argument arrays after a call returns. A callback host
+// may retain Function IDs only while its bounded same-realm contract is active.
 class HostAdapter {
 public:
     virtual ~HostAdapter() = default;

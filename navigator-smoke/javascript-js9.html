@@ -1,0 +1,22 @@
+<!doctype html>
+<html>
+<head><title>Navigator JavaScript JS9</title></head>
+<body>
+<h1>Navigator JavaScript JS9</h1>
+<p>These controls are driven by the bounded same-realm click bridge.</p>
+<button id="js9-a" type="button">0</button>
+<button id="js9-b" type="button">B initial</button>
+<script>
+var js9Count = 0;
+var js9A = document.getElementById("js9-a");
+var js9B = document.getElementById("js9-b");
+js9A.onclick = function () {
+    js9Count = js9Count + 1;
+    js9A.textContent = js9Count;
+};
+js9B.onclick = function () {
+    js9B.textContent = "B clicked";
+};
+</script>
+</body>
+</html>

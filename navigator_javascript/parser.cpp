@@ -423,6 +423,51 @@ private:
         return function;
     }
 
+    // JS9 only needs anonymous function expressions for direct onclick
+    // assignment. Keep the existing declaration grammar and bounds, without
+    // adding named expressions or broader function syntax.
+    AstNodeId parseFunctionExpression()
+    {
+        const Token keyword = advance();
+        if (!expect(TokenType::LeftParen)) return kInvalidAstNodeId;
+
+        std::vector<AstNodeId> parameters;
+        while (!at(TokenType::RightParen)) {
+            if (at(TokenType::EndOfInput)) {
+                fail(ParserErrorCode::UnexpectedEndOfInput, current().location,
+                    TokenType::RightParen, true);
+                return kInvalidAstNodeId;
+            }
+            if (parameters.size() >= limits_.maxFunctionParameters) {
+                fail(ParserErrorCode::TooManyParameters, current().location,
+                    TokenType::Identifier, true);
+                return kInvalidAstNodeId;
+            }
+            Token parameterToken;
+            if (!expectIdentifier(parameterToken)) return kInvalidAstNodeId;
+            const AstNodeId parameter = makeLeaf(AstNodeKind::Identifier,
+                parameterToken);
+            if (parameter == kInvalidAstNodeId) return kInvalidAstNodeId;
+            parameters.push_back(parameter);
+            if (!at(TokenType::Comma)) break;
+            advance();
+        }
+        if (!expect(TokenType::RightParen)) return kInvalidAstNodeId;
+        const AstNodeId body = parseBlock();
+        if (body == kInvalidAstNodeId) return kInvalidAstNodeId;
+
+        const AstNodeId function = makeNode(AstNodeKind::FunctionExpression,
+            spanLocation(keyword.location, ast_.node(body).location));
+        if (function == kInvalidAstNodeId) return kInvalidAstNodeId;
+        ast_.node(function).body = body;
+        if (!setChildren(function, parameters)) {
+            fail(ParserErrorCode::AstNodeLimitExceeded, keyword.location,
+                TokenType::EndOfInput, false);
+            return kInvalidAstNodeId;
+        }
+        return function;
+    }
+
     AstNodeId parseReturnStatement()
     {
         const Token keyword = advance();
@@ -873,6 +918,7 @@ private:
 
     AstNodeId parsePrimaryExpression()
     {
+        if (at(TokenType::KeywordFunction)) return parseFunctionExpression();
         if (at(TokenType::Identifier)) return makeLeaf(AstNodeKind::Identifier, advance());
         if (at(TokenType::NumericLiteral)) return makeLeaf(AstNodeKind::NumericLiteral, advance());
         if (at(TokenType::StringLiteral)) return makeLeaf(AstNodeKind::StringLiteral, advance());

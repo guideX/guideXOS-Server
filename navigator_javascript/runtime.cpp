@@ -466,6 +466,9 @@ private:
             // Only declarations directly in a program or function body are
             // supported.  A block reached through if/while/for passes false.
             return validateFunctionPolicy(node.body, true);
+        case AstNodeKind::FunctionExpression:
+            return validNode(node.body, node.location) &&
+                validateFunctionPolicy(node.body, true);
         case AstNodeKind::IfStatement:
             if (!validNode(node.consequent, node.location) ||
                 !validateFunctionPolicy(node.consequent, false)) return false;
@@ -515,6 +518,9 @@ private:
             return true;
         case AstNodeKind::FunctionDeclaration:
             // A nested function's var bindings belong to its invocation.
+            return true;
+        case AstNodeKind::FunctionExpression:
+            // An expression function's var bindings belong to its invocation.
             return true;
         case AstNodeKind::IfStatement:
             if (!hoistVariables(node.consequent, environment)) return false;
@@ -903,6 +909,17 @@ private:
             return evalUpdate(node, value);
         case AstNodeKind::CallExpression:
             return evalCall(id, node, value);
+        case AstNodeKind::FunctionExpression: {
+            RuntimeFunctionId function = kInvalidRuntimeFunctionId;
+            RuntimeErrorCode error = RuntimeErrorCode::None;
+            if (!context_.createFunction(id, currentEnvironment_, function,
+                error)) {
+                fail(error, node.location);
+                return false;
+            }
+            value = Value::function(function);
+            return true;
+        }
         case AstNodeKind::MemberExpression: {
             MemberReference reference;
             if (!resolveMember(id, reference)) return false;
@@ -997,7 +1014,8 @@ private:
             return false;
         }
         const AstNode& declaration = context_.ast_.node(function->declaration);
-        if (declaration.kind != AstNodeKind::FunctionDeclaration ||
+        if ((declaration.kind != AstNodeKind::FunctionDeclaration &&
+            declaration.kind != AstNodeKind::FunctionExpression) ||
             !validNode(declaration.body, callSite)) {
             fail(RuntimeErrorCode::InvalidFunction, callSite);
             return false;
@@ -1819,6 +1837,9 @@ private:
             // Direct declarations were installed by declaration
             // instantiation before statement execution.
             return true;
+        case AstNodeKind::FunctionExpression:
+            fail(RuntimeErrorCode::InvalidAstState, node.location);
+            return false;
         default:
             fail(RuntimeErrorCode::InvalidAstState, node.location);
             return false;
@@ -1926,6 +1947,18 @@ bool RuntimeContext::invokeFunctionForTesting(const Value& function,
     Evaluator evaluator(*this);
     return evaluator.invokeForTesting(function.functionId(), arguments, result,
         error);
+}
+
+bool RuntimeContext::invokeFunctionInSameRealm(const Value& function,
+    const std::vector<Value>& arguments, Value& result, RuntimeErrorCode& error)
+{
+    result_ = ScriptResult();
+    finalValue_ = Value::undefined();
+    activeCallFrames_ = 0;
+    const bool succeeded = invokeFunctionForTesting(function, arguments, result,
+        error);
+    if (!succeeded) result_.status = ScriptStatus::RuntimeFailure;
+    return succeeded;
 }
 
 RuntimeContext::RuntimeContext(RuntimeLimits limits)
@@ -2067,7 +2100,8 @@ bool RuntimeContext::createFunction(AstNodeId declaration,
 {
     error = RuntimeErrorCode::None;
     if (declaration == kInvalidAstNodeId || declaration >= ast_.nodeCount() ||
-        ast_.node(declaration).kind != AstNodeKind::FunctionDeclaration ||
+        (ast_.node(declaration).kind != AstNodeKind::FunctionDeclaration &&
+            ast_.node(declaration).kind != AstNodeKind::FunctionExpression) ||
         environmentAt(closure) == nullptr) {
         error = RuntimeErrorCode::InvalidFunction;
         return false;
@@ -2446,6 +2480,8 @@ RuntimeErrorCode RuntimeContext::mapHostResult(HostResultCode code) const
         return RuntimeErrorCode::DocumentTextLimitExceeded;
     case HostResultCode::DocumentMutationLimitExceeded:
         return RuntimeErrorCode::DocumentMutationLimitExceeded;
+    case HostResultCode::CallbackLimitExceeded:
+        return RuntimeErrorCode::HostCallbackLimitExceeded;
     }
     return RuntimeErrorCode::HostCallFailed;
 }
@@ -2819,8 +2855,12 @@ bool RuntimeContext::convertValueToHost(const Value& value, HostValue& result,
         return true;
     }
     case ValueType::Function:
-        error = RuntimeErrorCode::HostCallFailed;
-        return false;
+        if (functionAt(value.functionId()) == nullptr) {
+            error = RuntimeErrorCode::InvalidFunction;
+            return false;
+        }
+        result = HostValue::function(value.functionId());
+        return true;
     }
     error = RuntimeErrorCode::HostCallFailed;
     (void)location;
@@ -2853,6 +2893,13 @@ bool RuntimeContext::convertHostValue(const HostValue& value,
         if (!createString(value.stringValue, result, error)) return false;
         return true;
     }
+    case HostValueType::Function:
+        if (functionAt(value.functionId) == nullptr) {
+            error = RuntimeErrorCode::InvalidHostReturn;
+            return false;
+        }
+        result = Value::function(value.functionId);
+        return true;
     case HostValueType::Object:
         if (objectAt(value.objectId) == nullptr) {
             error = RuntimeErrorCode::InvalidHostReturn;
@@ -3278,6 +3325,8 @@ const char* runtimeErrorCodeName(RuntimeErrorCode code)
         return "DocumentTextLimitExceeded";
     case RuntimeErrorCode::DocumentMutationLimitExceeded:
         return "DocumentMutationLimitExceeded";
+    case RuntimeErrorCode::HostCallbackLimitExceeded:
+        return "HostCallbackLimitExceeded";
     case RuntimeErrorCode::RealmSourceLimitExceeded:
         return "RealmSourceLimitExceeded";
     }

@@ -93,13 +93,84 @@ void NavigatorScriptHostAdapter::attachDocument(
 {
     document_ = &document;
     generation_ = generation;
+    clearClickHandlers();
     returnBuffer_.clear();
 }
 
 void NavigatorScriptHostAdapter::detachDocument()
 {
     document_ = nullptr;
+    clearClickHandlers();
     returnBuffer_.clear();
+}
+
+void NavigatorScriptHostAdapter::setGeneration(HostGenerationId generation)
+{
+    if (generation_ != generation) clearClickHandlers();
+    generation_ = generation;
+}
+
+std::size_t NavigatorScriptHostAdapter::callbackLimit() const
+{
+    return std::min(limits_.maxClickHandlers, clickHandlers_.size());
+}
+
+NavigatorScriptHostAdapter::ClickHandlerRecord*
+NavigatorScriptHostAdapter::clickHandlerFor(HostInstanceId serial)
+{
+    for (std::size_t index = 0; index < clickHandlerCount_; ++index) {
+        if (clickHandlers_[index].serial == serial) return &clickHandlers_[index];
+    }
+    return nullptr;
+}
+
+const NavigatorScriptHostAdapter::ClickHandlerRecord*
+NavigatorScriptHostAdapter::clickHandlerFor(HostInstanceId serial) const
+{
+    for (std::size_t index = 0; index < clickHandlerCount_; ++index) {
+        if (clickHandlers_[index].serial == serial) return &clickHandlers_[index];
+    }
+    return nullptr;
+}
+
+bool NavigatorScriptHostAdapter::hasClickHandler(HostInstanceId serial) const
+{
+    return clickHandlerFor(serial) != nullptr;
+}
+
+void NavigatorScriptHostAdapter::clearClickHandlers()
+{
+    for (ClickHandlerRecord& record : clickHandlers_) record = ClickHandlerRecord();
+    clickHandlerCount_ = 0;
+    clickDispatchActive_ = false;
+}
+
+bool NavigatorScriptHostAdapter::dispatchClick(RuntimeContext& runtime,
+    HostInstanceId serial, RuntimeErrorCode& error)
+{
+    error = RuntimeErrorCode::None;
+    if (document_ == nullptr || findElement(serial) == nullptr) {
+        error = RuntimeErrorCode::StaleHostObject;
+        return false;
+    }
+    const ClickHandlerRecord* record = clickHandlerFor(serial);
+    if (record == nullptr) return true;
+    if (clickDispatchActive_) {
+        error = RuntimeErrorCode::HostReentryUnsupported;
+        return false;
+    }
+
+    // Copy the function ID before entering user code. If the callback assigns
+    // a replacement to onclick, the replacement is therefore used only by a
+    // subsequent click.
+    const RuntimeFunctionId function = record->function;
+    clickDispatchActive_ = true;
+    std::vector<Value> noArguments;
+    Value ignored;
+    const bool succeeded = runtime.invokeFunctionInSameRealm(
+        Value::function(function), noArguments, ignored, error);
+    clickDispatchActive_ = false;
+    return succeeded;
 }
 
 gxos::web::HtmlElementRef* NavigatorScriptHostAdapter::findElement(
@@ -195,6 +266,12 @@ HostResult NavigatorScriptHostAdapter::getProperty(
             returnBuffer_.size()));
         return HostResult();
     }
+    if (textEquals(property, "onclick")) {
+        const ClickHandlerRecord* record = clickHandlerFor(element->serial);
+        result = record == nullptr ? HostValue::nullValue() :
+            HostValue::function(record->function);
+        return HostResult();
+    }
     return HostResult{HostResultCode::PropertyNotFound};
 }
 
@@ -242,6 +319,7 @@ HostResult NavigatorScriptHostAdapter::convertTextValue(
     case HostValueType::Object:
     case HostValueType::HostObject:
     case HostValueType::Method:
+    case HostValueType::Function:
         return HostResult{HostResultCode::InvalidValue};
     }
     return HostResult{HostResultCode::InvalidValue};
@@ -407,6 +485,32 @@ HostResult NavigatorScriptHostAdapter::setProperty(
         return HostResult{HostResultCode::PropertyWriteFailed};
     if (textEquals(property, "id") || textEquals(property, "tagName"))
         return HostResult{HostResultCode::PropertyReadOnly};
+    if (textEquals(property, "onclick")) {
+        if (value.type == HostValueType::Null) {
+            for (std::size_t index = 0; index < clickHandlerCount_; ++index) {
+                if (clickHandlers_[index].serial != object.instanceId) continue;
+                for (std::size_t move = index + 1; move < clickHandlerCount_; ++move)
+                    clickHandlers_[move - 1] = clickHandlers_[move];
+                clickHandlers_[clickHandlerCount_ - 1] = ClickHandlerRecord();
+                --clickHandlerCount_;
+                break;
+            }
+            return HostResult();
+        }
+        if (value.type != HostValueType::Function ||
+            value.functionId == kInvalidRuntimeFunctionId) {
+            return HostResult{HostResultCode::InvalidValue};
+        }
+        if (ClickHandlerRecord* record = clickHandlerFor(object.instanceId)) {
+            record->function = value.functionId;
+            return HostResult();
+        }
+        if (clickHandlerCount_ >= callbackLimit())
+            return HostResult{HostResultCode::CallbackLimitExceeded};
+        clickHandlers_[clickHandlerCount_++] = ClickHandlerRecord{
+            object.instanceId, value.functionId};
+        return HostResult();
+    }
     if (!textEquals(property, "textContent"))
         return HostResult{HostResultCode::PropertyWriteFailed};
 
@@ -563,6 +667,12 @@ ScriptResult NavigatorScriptExecutionHarness::execute(SourceView source)
 ScriptResult NavigatorScriptExecutionHarness::execute(const std::string& source)
 {
     return execute(SourceView(source.data(), source.size()));
+}
+
+bool NavigatorScriptExecutionHarness::dispatchClick(std::uint64_t serial,
+    RuntimeErrorCode& error)
+{
+    return adapter_.dispatchClick(runtime_, serial, error);
 }
 
 bool NavigatorScriptExecutionHarness::relayout()

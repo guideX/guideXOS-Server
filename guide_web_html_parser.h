@@ -37,7 +37,7 @@
 //   <button type="submit">Text</button>
 //                    – bounded visual button block
 //
-// Ignored with content stripped:
+// Preserved as bounded source text, but not executed by parseHtml:
 //   <script>
 //
 // Parsed for CSS-lite rules:

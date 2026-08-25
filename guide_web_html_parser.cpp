@@ -80,6 +80,8 @@ namespace {
 	constexpr size_t kCssLiteMaxVisibleTextBytesPerElement = 1024;
 	constexpr size_t kCssLiteMaxInlineItems = 2048;
 	constexpr size_t kCssLiteMaxInlineTextBytes = 4096;
+	constexpr size_t kNavigatorMaxInlineScripts = 16;
+	constexpr size_t kNavigatorMaxInlineScriptBytes = 64u * 1024u;
 	constexpr size_t kCssLiteMaxRecoveryAttemptsPerGroup = 16;
 	constexpr size_t kCssLiteMaxEvidenceTokenBytes = 64;
 	constexpr size_t kTableMaxCellContents = 64;
@@ -5499,6 +5501,7 @@ struct StructuralChildCounter {
 struct ParserState {
 	WebDocument  doc;
 	std::string  textBuf;   // accumulated character data for current block
+	std::string  scriptBuf; // bounded source text for the open <script>
 	std::string  hrefBuf;   // href of the open <a> tag
 	std::string  classBuf;
 	std::string  idBuf;
@@ -6314,7 +6317,12 @@ static void handleOpenTag(ParserState& st, const std::string& tagBody)
 	HtmlElementRef elementRef = elementRefFromTagBody(name, tagBody);
 
 	// Handle skip-content blocks first.
-	if (name == "script") { flushText(st); st.inScript = true; return; }
+	if (name == "script") {
+		flushText(st);
+		st.scriptBuf.clear();
+		st.inScript = true;
+		return;
+	}
 	if (name == "style")  { flushText(st); st.inStyle  = true; return; }
 	if (name == "link") {
 		std::string rel = toLower(trim(extractAttr(tagBody, "rel")));
@@ -6933,7 +6941,16 @@ static void handleCloseTag(ParserState& st, const std::string& tagName)
 {
 	std::string name = toLower(tagName);
 
-	if (name == "script") { st.inScript = false; st.textBuf.clear(); return; }
+	if (name == "script") {
+		if (st.inScript && st.scriptBuf.size() <= kNavigatorMaxInlineScriptBytes &&
+			st.doc.scriptSources.size() < kNavigatorMaxInlineScripts) {
+			st.doc.scriptSources.push_back(std::move(st.scriptBuf));
+		}
+		st.scriptBuf.clear();
+		st.inScript = false;
+		st.textBuf.clear();
+		return;
+	}
 	if (name == "style")  {
 		parseEmbeddedCss(st.doc, st.textBuf);
 		st.inStyle  = false;
@@ -7426,7 +7443,10 @@ WebDocument parseHtml(const std::string& pageUrl,
 		// ----------------------------------------------------------------
 		// Character data
 		// ----------------------------------------------------------------
-		if (!st.inScript) {
+		if (st.inScript) {
+			if (st.scriptBuf.size() < kNavigatorMaxInlineScriptBytes)
+				st.scriptBuf.push_back(c);
+		} else {
 			// Inside <pre>, preserve all characters including newlines/spaces.
 			// Inside <style>, preserve the raw stylesheet so CSS-lite can parse
 			// it when </style> closes. Outside <pre>, flushText() will collapse
@@ -7434,6 +7454,14 @@ WebDocument parseHtml(const std::string& pageUrl,
 			st.textBuf += c;
 		}
 		++i;
+	}
+
+	// Preserve a bounded unterminated script as source too; Navigator will
+	// report any resulting JavaScript parse/runtime error without crashing the
+	// document.
+	if (st.inScript && st.scriptBuf.size() <= kNavigatorMaxInlineScriptBytes &&
+		st.doc.scriptSources.size() < kNavigatorMaxInlineScripts) {
+		st.doc.scriptSources.push_back(std::move(st.scriptBuf));
 	}
 
 	// Flush any trailing text not closed by a tag.

@@ -28,6 +28,7 @@ enum class AstNodeKind : std::uint8_t {
     BreakStatement,
     ContinueStatement,
     FunctionDeclaration,
+    FunctionExpression,
 
     Identifier,
     NumericLiteral,
@@ -92,7 +93,8 @@ enum class AstUpdateOperator : std::uint8_t {
 // Relationships are represented by stable indices into Ast::nodes(), never
 // by pointers into parser-owned storage.  childOffset/childCount describe a
 // contiguous range in Ast's child index storage for Program, BlockStatement,
-// VariableDeclaration, FunctionDeclaration, and CallExpression nodes.
+// VariableDeclaration, FunctionDeclaration, FunctionExpression, and
+// CallExpression nodes.
 struct AstNode {
     AstNodeKind kind = AstNodeKind::Invalid;
     SourceLocation location;

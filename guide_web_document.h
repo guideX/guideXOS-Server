@@ -1152,6 +1152,10 @@ struct DocBlock {
 struct WebDocument {
 	std::string           url;
 	std::string           title;
+	// Bounded inline script sources are retained in source order. The generic
+	// parser does not execute them; Navigator's JS9 page path submits these
+	// sources to its existing same-realm runtime after document installation.
+	std::vector<std::string> scriptSources;
 	std::vector<DocBlock> blocks;
 	std::vector<WebInlineItem> inlineItems;
 	HtmlElementRef        documentElement;
