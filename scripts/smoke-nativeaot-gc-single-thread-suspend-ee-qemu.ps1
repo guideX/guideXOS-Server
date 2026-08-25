@@ -4,7 +4,7 @@ param(
     [int]$TimeoutSeconds = 90,
     [int]$FreshBootCount = 3,
     [switch]$SkipManagedBuild,
-    [ValidateSet("single-thread-suspend-ee", "allocation-context-fixup-root-boundary", "first-per-thread-root-provider", "first-root-candidate-load", "first-non-null-root-callback-boundary", "first-root-callback-entry", "first-root-membership-classification", "first-root-heap-resolution", "first-root-condemned-generation-decision", "first-root-pre-mark-boundary", "first-root-first-mark-mutation", "first-root-post-queue-mark-decision", "first-root-first-non-null-old-o", "next-genuine-root-provider", "stack-provider-transition-failfast", "stack-provider-code-manager-registration", "stack-provider-transition-frame-control-pc", "stack-provider-unwind-gc-info", "stack-provider-unwind-caller-frame", "stack-provider-native-transition-continuation", "stack-provider-native-caller-provenance", "stack-provider-native-kernel-entry-boundary", "stack-provider-native-kernel-stack-completion", "post-root-queue-mark-processing", "mark-queue-closure", "post-mark-short-weak-handle", "short-weak-handle-operation", "short-weak-live-handle", "short-weak-dead-handle", "short-weak-lifetime-transition", "relocation-root-update", "relocated-handle-update", "lifetime-transition-complete", "second-collection-completion", "dead-object-reclamation", "collection-plan-mode-provenance-c37", "collection-plan-mode-provenance-c38", "compaction-reclamation", "post-gc-allocator-provenance", "post-gc-reclaimed-gen1-lifecycle", "malformed-transition-frame-provenance", "reverse-pinvoke-slot-provenance", "regdisplay-fp-handoff", "relocation-root-fault-provenance", "iterator-fp-ownership")]
+    [ValidateSet("single-thread-suspend-ee", "allocation-context-fixup-root-boundary", "first-per-thread-root-provider", "first-root-candidate-load", "first-non-null-root-callback-boundary", "first-root-callback-entry", "first-root-membership-classification", "first-root-heap-resolution", "first-root-condemned-generation-decision", "first-root-pre-mark-boundary", "first-root-first-mark-mutation", "first-root-post-queue-mark-decision", "first-root-first-non-null-old-o", "next-genuine-root-provider", "stack-provider-transition-failfast", "stack-provider-code-manager-registration", "stack-provider-transition-frame-control-pc", "stack-provider-unwind-gc-info", "stack-provider-unwind-caller-frame", "stack-provider-native-transition-continuation", "stack-provider-native-caller-provenance", "stack-provider-native-kernel-entry-boundary", "stack-provider-native-kernel-stack-completion", "post-root-queue-mark-processing", "mark-queue-closure", "post-mark-short-weak-handle", "short-weak-handle-operation", "short-weak-live-handle", "short-weak-dead-handle", "short-weak-lifetime-transition", "relocation-root-update", "relocated-handle-update", "lifetime-transition-complete", "second-collection-completion", "dead-object-reclamation", "collection-plan-mode-provenance-c37", "collection-plan-mode-provenance-c38", "compaction-reclamation", "post-gc-allocator-provenance", "post-gc-reclaimed-gen1-lifecycle", "malformed-transition-frame-provenance", "reverse-pinvoke-slot-provenance", "regdisplay-fp-handoff", "relocation-root-fault-provenance", "iterator-fp-ownership", "second-collection-continuation")]
     [string]$ProofMode = "single-thread-suspend-ee"
 )
 
@@ -87,6 +87,8 @@ if ([string]::IsNullOrWhiteSpace($EvidenceRoot)) {
         Join-Path $root "out\dotnet\c011ec47-relocation-root-fault-provenance"
     } elseif ($ProofMode -eq "iterator-fp-ownership") {
         Join-Path $root "out\dotnet\c011ec48-iterator-fp-ownership"
+    } elseif ($ProofMode -eq "second-collection-continuation") {
+        Join-Path $root "out\dotnet\c011ec49-second-collection-continuation"
     } elseif ($ProofMode -eq "post-mark-short-weak-handle") {
         Join-Path $root "out\dotnet\c011ec29-post-mark-short-weak-handle"
     } elseif ($ProofMode -eq "first-root-post-queue-mark-decision") {
@@ -126,15 +128,16 @@ $isCodeManagerRegistration = $ProofMode -eq "stack-provider-code-manager-registr
 $isTransitionFrameControlPc = $ProofMode -eq "stack-provider-transition-frame-control-pc"
 $isC011EC36 = $ProofMode -eq "lifetime-transition-complete"
 $isC011EC38 = $ProofMode -eq "dead-object-reclamation"
-$isC011EC48 = $ProofMode -eq "iterator-fp-ownership"
-$isC011EC47 = $ProofMode -in @("relocation-root-fault-provenance", "iterator-fp-ownership")
-$isC011EC46 = $ProofMode -in @("regdisplay-fp-handoff", "relocation-root-fault-provenance", "iterator-fp-ownership")
-$isC011EC45 = $ProofMode -in @("reverse-pinvoke-slot-provenance", "regdisplay-fp-handoff", "relocation-root-fault-provenance", "iterator-fp-ownership")
-$isC011EC44 = $ProofMode -in @("malformed-transition-frame-provenance", "reverse-pinvoke-slot-provenance", "regdisplay-fp-handoff", "relocation-root-fault-provenance", "iterator-fp-ownership")
+$isC011EC49 = $ProofMode -eq "second-collection-continuation"
+$isC011EC48 = $ProofMode -in @("iterator-fp-ownership", "second-collection-continuation")
+$isC011EC47 = $ProofMode -in @("relocation-root-fault-provenance", "iterator-fp-ownership", "second-collection-continuation")
+$isC011EC46 = $ProofMode -in @("regdisplay-fp-handoff", "relocation-root-fault-provenance", "iterator-fp-ownership", "second-collection-continuation")
+$isC011EC45 = $ProofMode -in @("reverse-pinvoke-slot-provenance", "regdisplay-fp-handoff", "relocation-root-fault-provenance", "iterator-fp-ownership", "second-collection-continuation")
+$isC011EC44 = $ProofMode -in @("malformed-transition-frame-provenance", "reverse-pinvoke-slot-provenance", "regdisplay-fp-handoff", "relocation-root-fault-provenance", "iterator-fp-ownership", "second-collection-continuation")
 $isC011EC42 = $ProofMode -in @("post-gc-reclaimed-gen1-lifecycle", "malformed-transition-frame-provenance", "reverse-pinvoke-slot-provenance", "regdisplay-fp-handoff", "relocation-root-fault-provenance", "iterator-fp-ownership")
-$isC011EC41 = $ProofMode -in @("post-gc-allocator-provenance", "post-gc-reclaimed-gen1-lifecycle", "malformed-transition-frame-provenance", "reverse-pinvoke-slot-provenance", "regdisplay-fp-handoff", "relocation-root-fault-provenance", "iterator-fp-ownership")
-$isC011EC40 = $ProofMode -in @("compaction-reclamation", "post-gc-allocator-provenance", "post-gc-reclaimed-gen1-lifecycle", "malformed-transition-frame-provenance", "reverse-pinvoke-slot-provenance", "regdisplay-fp-handoff", "relocation-root-fault-provenance", "iterator-fp-ownership")
-$isC011EC39 = $ProofMode -in @("collection-plan-mode-provenance-c37", "collection-plan-mode-provenance-c38", "compaction-reclamation", "post-gc-allocator-provenance", "post-gc-reclaimed-gen1-lifecycle", "malformed-transition-frame-provenance", "reverse-pinvoke-slot-provenance", "regdisplay-fp-handoff", "relocation-root-fault-provenance", "iterator-fp-ownership")
+$isC011EC41 = $ProofMode -in @("post-gc-allocator-provenance", "post-gc-reclaimed-gen1-lifecycle", "malformed-transition-frame-provenance", "reverse-pinvoke-slot-provenance", "regdisplay-fp-handoff", "relocation-root-fault-provenance", "iterator-fp-ownership", "second-collection-continuation")
+$isC011EC40 = $ProofMode -in @("compaction-reclamation", "post-gc-allocator-provenance", "post-gc-reclaimed-gen1-lifecycle", "malformed-transition-frame-provenance", "reverse-pinvoke-slot-provenance", "regdisplay-fp-handoff", "relocation-root-fault-provenance", "iterator-fp-ownership", "second-collection-continuation")
+$isC011EC39 = $ProofMode -in @("collection-plan-mode-provenance-c37", "collection-plan-mode-provenance-c38", "compaction-reclamation", "post-gc-allocator-provenance", "post-gc-reclaimed-gen1-lifecycle", "malformed-transition-frame-provenance", "reverse-pinvoke-slot-provenance", "regdisplay-fp-handoff", "relocation-root-fault-provenance", "iterator-fp-ownership", "second-collection-continuation")
 $isC011EC39C38Variant = $ProofMode -eq "collection-plan-mode-provenance-c38"
 $isC011EC37 = $ProofMode -in @("second-collection-completion", "dead-object-reclamation") -or $isC011EC39
 $isC011EC35 = $ProofMode -in @("relocated-handle-update", "lifetime-transition-complete", "second-collection-completion", "dead-object-reclamation")
@@ -195,6 +198,7 @@ $c011ec45Define = if ($isC011EC45) { " /DGUIDEXOS_NATIVEAOT_C011EC45_PROVENANCE"
 $c011ec46Define = if ($isC011EC46) { " /DGUIDEXOS_NATIVEAOT_C011EC46_REGDISPLAY_HANDOFF" } else { "" }
 $c011ec47Define = if ($isC011EC47) { " /DGUIDEXOS_NATIVEAOT_C011EC47_PROVENANCE" } else { "" }
 $c011ec48Define = if ($isC011EC48) { " /DGUIDEXOS_NATIVEAOT_C011EC48_PROVENANCE" } else { "" }
+$c011ec49Define = if ($isC011EC49) { " /DGUIDEXOS_NATIVEAOT_C011EC49_SECOND_COLLECTION_CONTINUATION" } else { "" }
 if ($isC011EC47) {
     $c011ec46Define += $c011ec47Define
 }
@@ -227,7 +231,7 @@ $proofDefine = if ($isNextGenuineRootProvider -or $isC011EC39) {
     $c41Define = if ($isC011EC41) { " /DGUIDEXOS_NATIVEAOT_C011EC41_POST_GC_ALLOCATOR_PROVENANCE" } else { "" }
     $c42Define = if ($isC011EC42) { " /DGUIDEXOS_NATIVEAOT_C011EC42_RECLAIMED_GEN1_LIFECYCLE" } else { "" }
     $firstNonNullDefine = if ($isC011EC31 -or $isC011EC32) { "" } else { " /DGUIDEXOS_NATIVEAOT_FIRST_NON_NULL_ROOT_ALLOCATION" }
-    "/DGUIDEXOS_NATIVEAOT_ALLOCATION_CONTEXT_FIXUP_ROOT_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_PER_THREAD_ROOT_PROVIDER_ALLOCATION$firstNonNullDefine /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CALLBACK_ENTRY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_MEMBERSHIP_CLASSIFICATION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_HEAP_RESOLUTION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CONDEMNED_GENERATION_DECISION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_PRE_MARK_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_NON_NULL_OLD_O_ALLOCATION /DGUIDEXOS_NATIVEAOT_NEXT_GENUINE_ROOT_PROVIDER_ALLOCATION$minimalDefine$codeManagerDefine$c19Define$c20Define$c21Define$c23Define$c24Define$c25Define$c26Define$c27Define$c28Define$c29Define$c31Define$c32Define$c33Define$c34Define$c35Define$c36Define$c37Define$c38Define$c39Define$c40Define$c41Define$c42Define"
+    "/DGUIDEXOS_NATIVEAOT_ALLOCATION_CONTEXT_FIXUP_ROOT_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_PER_THREAD_ROOT_PROVIDER_ALLOCATION$firstNonNullDefine /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CALLBACK_ENTRY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_MEMBERSHIP_CLASSIFICATION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_HEAP_RESOLUTION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CONDEMNED_GENERATION_DECISION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_PRE_MARK_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_NON_NULL_OLD_O_ALLOCATION /DGUIDEXOS_NATIVEAOT_NEXT_GENUINE_ROOT_PROVIDER_ALLOCATION$minimalDefine$codeManagerDefine$c19Define$c20Define$c21Define$c23Define$c24Define$c25Define$c26Define$c27Define$c28Define$c29Define$c31Define$c32Define$c33Define$c34Define$c35Define$c36Define$c37Define$c38Define$c39Define$c40Define$c41Define$c42Define$c011ec49Define"
 } elseif ($isFirstRootFirstNonNullOldO) {
     "/DGUIDEXOS_NATIVEAOT_ALLOCATION_CONTEXT_FIXUP_ROOT_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_PER_THREAD_ROOT_PROVIDER_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_NON_NULL_ROOT_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CALLBACK_ENTRY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_MEMBERSHIP_CLASSIFICATION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_HEAP_RESOLUTION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CONDEMNED_GENERATION_DECISION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_PRE_MARK_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_NON_NULL_OLD_O_ALLOCATION"
 } elseif ($isFirstRootPostQueueMarkDecision) {
@@ -5381,7 +5385,7 @@ exit /b %errorlevel%
         $monitorPath = Join-Path $oneRoot "watchdog-monitor.txt"
         $qemuDebugPath = Join-Path $oneRoot "qemu-debug.log"
         $qemuArgs = @("-accel","tcg,thread=single","-machine","pc","-smp","1","-drive",('if=pflash,format=raw,readonly=on,file="' + $ovmf + '"'),"-drive",('file=fat:rw:"' + $espRoot + '",format=raw,if=ide,index=0'),"-m","1024M","-vga","std","-display","none","-serial",('file:"' + $serialPath + '"'),"-monitor",("tcp:127.0.0.1:$port,server,nowait"),"-no-reboot","-no-shutdown","-rtc","base=utc,clock=host")
-        if ($isStackProviderTransitionFailFast -or $isCodeManagerRegistration -or $isTransitionFrameControlPc -or $isC011EC19 -or $isC011EC33 -or $isFirstNonNullRoot -or $isFirstRootCallbackEntry) { $qemuArgs += @("-d","int,guest_errors","-D",$qemuDebugPath) }
+        if ($isStackProviderTransitionFailFast -or $isCodeManagerRegistration -or $isTransitionFrameControlPc -or $isC011EC19 -or $isC011EC33 -or $isFirstNonNullRoot -or $isFirstRootCallbackEntry -or $isC011EC49) { $qemuArgs += @("-d","int,guest_errors","-D",$qemuDebugPath) }
         Log-Command ('"' + $qemu + '" ' + ($qemuArgs -join ' '))
         $qemuProcess = Start-Process -FilePath $qemu -ArgumentList $qemuArgs -WindowStyle Hidden -PassThru
         $completed = $false
@@ -5396,7 +5400,9 @@ exit /b %errorlevel%
                     $normalizedLiveText = ($normalizedLiveText -creplace '(?<=[0-9])(?=[a-z])', ' ') -replace '\s+', ' '
                     $normalizedLiveText = $normalizedLiveText -replace '\b(c\d+)\s+(ec\d+)', '$1$2'
                     $normalizedLiveText = $normalizedLiveText -replace '\s*=\s*', '='
-                    $stopPattern = if ($isC011EC47) {
+                    $stopPattern = if ($isC011EC49) {
+                        'marker=C011EC49 outcome=[ABCD]|marker=C011EC49-BLOCKED'
+                    } elseif ($isC011EC47) {
                         '\[nativeaot-c011ec47\]\s+rootOrdinal=.*?base=0000000000000000.*?marker=C011EC47-ROOT-UPDATE|\[PageFault\] Not-present violation on read \(kernel\)|C37-PHASE\s+collection=00000002\s+phase=00000009\s+name=plan-return.*?complete=00000001'
                     } elseif ($isC011EC42) {
                         'marker=C011EC42 outcome=[BCD]|marker=C011EC42-BLOCKED'
@@ -5476,7 +5482,13 @@ exit /b %errorlevel%
             if (-not $completed -and [string]::IsNullOrWhiteSpace($earlyFailure)) {
                 Read-Monitor $port $monitorPath
                 $failureSerial = if (Test-Path -LiteralPath $serialPath) { Get-Content -LiteralPath $serialPath -Raw } else { "" }
-                if (($isFirstNonNullRoot -or $isFirstRootCallbackEntry) -and $failureSerial -match '\[PageFault\] Not-present violation on read \(kernel\)') {
+                if ($isC011EC49) {
+                    $earlyFailure = if ($qemuProcess.HasExited) {
+                        "c011ec49-exited-before-completion-marker"
+                    } else {
+                        "c011ec49-timeout-before-completion-marker"
+                    }
+                } elseif (($isFirstNonNullRoot -or $isFirstRootCallbackEntry) -and $failureSerial -match '\[PageFault\] Not-present violation on read \(kernel\)') {
                     $earlyFailure = "nativeaot-thread-static-startup-page-fault"
                 } elseif ($isC011EC34 -and $failureSerial -match 'marker=C011EC33-LIVE') {
                     $earlyFailure = "relocation-root-scan-timeout-after-c011ec33-relocation-entry"
@@ -5506,7 +5518,40 @@ exit /b %errorlevel%
         $validationText = $validationText -replace '\b(c\d+)\s+(ec\d+)', '$1$2'
         $validationText = $validationText -replace '\s*=\s*', '='
         $validationText = $validationText -replace '\s*-\s*', '-'
-        if ($isC011EC44) {
+        if ($isC011EC49) {
+            $c49CompleteLine = [regex]::Match(
+                $validationText,
+                '\[nativeaot-gc-second-collection\]\s+COMPLETE.*?marker=C011EC49(?:\s|$)').Value.Trim()
+            $c49BlockedLine = [regex]::Match(
+                $validationText,
+                '\[nativeaot-gc-second-collection\]\s+BLOCKED.*?marker=C011EC49-BLOCKED(?:\s|$)').Value.Trim()
+            $c49MarkerLine = if (-not [string]::IsNullOrWhiteSpace($c49CompleteLine)) {
+                $c49CompleteLine
+            } elseif (-not [string]::IsNullOrWhiteSpace($c49BlockedLine)) {
+                $c49BlockedLine
+            } else { $null }
+            $c49OutcomeMatch = if ($null -ne $c49MarkerLine) {
+                [regex]::Match($c49MarkerLine, 'outcome=(?<outcome>[ABCD])')
+            } else { $null }
+            $c49SemanticOutcome = if ($null -ne $c49OutcomeMatch -and $c49OutcomeMatch.Success) {
+                $c49OutcomeMatch.Groups['outcome'].Value
+            } else { 'D' }
+            $c49SuccessLevel = switch ($c49SemanticOutcome) {
+                'A' { 5 }
+                'B' { 3 }
+                'C' { 1 }
+                default { 0 }
+            }
+            $runResults += [ordered]@{
+                name=$name; serial=$serialPath; serialSha256=(Hash-File $serialPath)
+                safeStopMarker=if ($null -ne $c49MarkerLine) { 'C011EC49' } else { 'C011EC49-TIMEOUT' }
+                outcome=$c49SemanticOutcome; semanticOutcome=$c49SemanticOutcome
+                successLevel=$c49SuccessLevel; harnessTerminated=$true
+                markerLine=$c49MarkerLine; earlyFailure=$earlyFailure
+                serialTail=if ($validationText.Length -gt 16000) { $validationText.Substring($validationText.Length - 16000) } else { $validationText }
+            }
+            continue
+        } elseif ($isC011EC44) {
             if ($isC011EC46) {
                 $c46MarkerMatches = [regex]::Matches(
                     $validationText,
@@ -7791,6 +7836,184 @@ exit /b %errorlevel%
         Set-Content -LiteralPath $manifestPath -Value $manifestJson -Encoding ASCII
         Write-Host "C011EC11 manifest written"
         Write-Host "NativeAOT Workstation GC first-root-pre-mark-boundary experiment: PASS (Outcome A)" -ForegroundColor Green
+    } elseif ($isC011EC49) {
+        if (@($runResults).Count -ne $FreshBootCount) {
+            throw "The C011EC49 second-collection continuation produced $(@($runResults).Count) runs instead of $FreshBootCount."
+        }
+        $c49Runs = @()
+        $c49ReadNumber = {
+            param([string]$Line, [string]$Field)
+            $value = Get-MarkerField $Line $Field
+            if ($null -eq $value) { return [uint64]0 }
+            return [Convert]::ToUInt64($value.Substring(2), 16)
+        }
+        foreach ($run in $runResults) {
+            $text = Get-Content -LiteralPath $run.serial -Raw
+            $normalized = ($text -replace '\[IRQ\] dispatch irq=00\s*', '')
+            $normalized = ($normalized -creplace '(?<=[0-9])(?=[a-z])', ' ') -replace '\s+', ' '
+            $normalized = $normalized -replace '\b(c\d+)\s+(ec\d+)', '$1$2'
+            $normalized = $normalized -replace '\s*=\s*', '='
+            $c49CompleteLine = [regex]::Match(
+                $normalized,
+                '\[nativeaot-gc-second-collection\]\s+COMPLETE[^\[]*?marker=C011EC49[^\[]*').Value.Trim()
+            $c49BlockedLine = [regex]::Match(
+                $normalized,
+                '\[nativeaot-gc-second-collection\]\s+BLOCKED[^\[]*?marker=C011EC49-BLOCKED[^\[]*').Value.Trim()
+            $c49Line = if (-not [string]::IsNullOrWhiteSpace($c49CompleteLine)) { $c49CompleteLine } else { $c49BlockedLine }
+            $outcomeMatch = if (-not [string]::IsNullOrWhiteSpace($c49Line)) {
+                [regex]::Match($c49Line, 'outcome=(?<outcome>[ABCD])')
+            } else { $null }
+            $semanticOutcome = if ($null -ne $outcomeMatch -and $outcomeMatch.Success) {
+                $outcomeMatch.Groups['outcome'].Value
+            } else { 'D' }
+            $fields = [ordered]@{}
+            foreach ($fieldName in @(
+                'preflight','planner','compact','sweep','relocate','collectionDone',
+                'restart','resume','completionMarker','collectionOrdinal',
+                'collectionCountBeforeEntry','collectionCountAtPlannerEntry',
+                'collectionCountAfter','condemnedGeneration','maximumGeneration',
+                'collectionReason','heapNumber','plannerDecision','compacting',
+                'relocating','compactBranch','sweepBranch','collectionWorkComplete',
+                'restartComplete','managedResume','postGcAllocationCount',
+                'promotedRoots','registerRoots','stackRoots','relocationCallbacks',
+                'rootUpdateCallbacks','rootRewrites','rootUnchanged','livePlugCount',
+                'deadGapCount','invariantFailures','sensitiveDiagnosticAllocations',
+                'safeStopReason','heapIdentity','activeSegment','segmentStartBefore',
+                'segmentAllocatedBefore','segmentCommittedBefore','segmentReservedBefore',
+                'segmentStartAfter','segmentAllocatedAfter','segmentCommittedAfter',
+                'segmentReservedAfter','generationBefore','generationAfter',
+                'allocationFrontierBefore','allocationFrontierAfter',
+                'compactedFrontierBefore','compactedFrontierAfter','freeTailStart',
+                'freeTailEnd','firstRootSlot','firstRootBefore','firstRootAfter',
+                'firstRootKind','firstPostUpdateObject','firstPostUpdateSegment',
+                'firstPostUpdateGeneration')) {
+                $fields[$fieldName] = if (-not [string]::IsNullOrWhiteSpace($c49Line)) {
+                    Get-MarkerField $c49Line $fieldName
+                } else { $null }
+            }
+            $u = { param([string]$Field) & $c49ReadNumber $c49Line $Field }
+            $preflightLine = [regex]::Match($normalized, '\[nativeaot-gc-second-collection\]\s+PREFLIGHT.*?marker=C011EC49-PREFLIGHT').Value.Trim()
+            $plannerLine = [regex]::Match($normalized, '\[nativeaot-gc-second-collection\]\s+PLANNER.*?marker=C011EC49-PLANNER').Value.Trim()
+            $compactLine = [regex]::Match($normalized, '\[nativeaot-gc-second-collection\]\s+COMPACT.*?marker=C011EC49-COMPACT').Value.Trim()
+            $sweepLine = [regex]::Match($normalized, '\[nativeaot-gc-second-collection\]\s+SWEEP.*?marker=C011EC49-SWEEP').Value.Trim()
+            $relocateLine = [regex]::Match($normalized, '\[nativeaot-gc-second-collection\]\s+RELOCATE.*?marker=C011EC49-RELOCATE').Value.Trim()
+            $doneLine = [regex]::Match($normalized, '\[nativeaot-gc-second-collection\]\s+COLLECTION-DONE.*?marker=C011EC49-COLLECTION-DONE').Value.Trim()
+            $restartLine = [regex]::Match($normalized, '\[nativeaot-gc-second-collection\]\s+RESTART.*?marker=C011EC49-RESTART').Value.Trim()
+            $resumeLine = [regex]::Match($normalized, '\[nativeaot-gc-second-collection\]\s+RESUME.*?marker=C011EC49-RESUME').Value.Trim()
+            $c48FpIn = @([regex]::Matches($normalized, '\[nativeaot-c011ec48\].*?marker=C011EC48-FP-IN'))
+            $c48FpPrepare = @([regex]::Matches($normalized, '\[nativeaot-c011ec48\].*?marker=C011EC48-FP-PREPARE'))
+            $c48FpRehome = @([regex]::Matches($normalized, '\[nativeaot-c011ec48\].*?marker=C011EC48-FP-REHOME'))
+            $c48FpConsume = @([regex]::Matches($normalized, '\[nativeaot-c011ec48\].*?marker=C011EC48-FP-CONSUME'))
+            $c47Calc = @([regex]::Matches($normalized, '\[nativeaot-c011ec47\][^\[]*?marker=C011EC47-RELOC-CALC'))
+            $c47Root = @([regex]::Matches($normalized, '\[nativeaot-c011ec47\][^\[]*?marker=C011EC47-ROOT-UPDATE'))
+            $invalidC47 = @($c47Calc + $c47Root | Where-Object {
+                (Get-MarkerField $_.Value 'base') -eq '0x0000000000000000' -or
+                (Get-MarkerField $_.Value 'slot') -eq '0xFFFFFFFFFFFFFF90'
+            })
+            $debugPath = Join-Path (Split-Path -Parent $run.serial) 'qemu-debug.log'
+            $debugPresent = Test-Path -LiteralPath $debugPath -PathType Leaf
+            $debugText = if ($debugPresent) { Get-Content -LiteralPath $debugPath -Raw } else { '' }
+            $faultMatches = @([regex]::Matches($debugText, '(?im)\bIP=0008:(?<rip>[0-9A-Fa-f]{16})\s+pc=.*?\bCR2=(?<cr2>[0-9A-Fa-f]{16})'))
+            $formerFault = @($faultMatches | Where-Object { $_.Groups['cr2'].Value.ToUpperInvariant() -eq 'FFFFFFFFFFFFFF90' })
+            $c18Present = $normalized -match 'marker=C011EC18-PREFLIGHT' -and $normalized -match 'marker=C011EC18-FIND-METHOD'
+            $c34Present = $normalized -match 'marker=C011EC34-PREFLIGHT'
+            $c26Line = [regex]::Match($normalized, 'COMPLETE marker=C011EC26.*?promoteEntries=(?<entries>[0-9A-Fa-f]{8,16})').Value.Trim()
+            $c28Present = $normalized -match 'COMPLETE marker=C011EC28'
+            $c39Present = $normalized -match 'C37-PHASE collection=00000002 phase=00000008 name=plan-entry' -and
+                $normalized -match 'C37-PHASE collection=00000002 phase=00000009 name=plan-return'
+            $c40Present = $normalized -match 'COMPLETE marker=C011EC40'
+            $c41Present = $normalized -match 'COMPLETE marker=C011EC41'
+            $promotedEntries = if (-not [string]::IsNullOrWhiteSpace($c26Line)) {
+                [Convert]::ToUInt64((Get-MarkerField $c26Line 'promoteEntries').Substring(2), 16)
+            } else { [uint64]0 }
+            $decision = & $u 'plannerDecision'
+            $compactBranch = & $u 'compactBranch'
+            $sweepBranch = & $u 'sweepBranch'
+            $completeShape = -not [string]::IsNullOrWhiteSpace($c49CompleteLine)
+            $pathShape = if ($decision -eq 1u) {
+                $compactBranch -eq 1u -and $sweepBranch -eq 0u -and
+                    -not [string]::IsNullOrWhiteSpace($compactLine) -and
+                    -not [string]::IsNullOrWhiteSpace($relocateLine)
+            } elseif ($decision -eq 0u) {
+                $sweepBranch -eq 1u -and $compactBranch -eq 0u -and
+                    -not [string]::IsNullOrWhiteSpace($sweepLine) -and
+                    [string]::IsNullOrWhiteSpace($relocateLine)
+            } else { $false }
+            $requiredFieldsPresent = @(@(
+                'preflight','planner','collectionWorkComplete','restartComplete','managedResume',
+                'postGcAllocationCount','invariantFailures','sensitiveDiagnosticAllocations',
+                'safeStopReason','collectionOrdinal','condemnedGeneration','maximumGeneration',
+                'heapIdentity','activeSegment','rootUpdateCallbacks','promotedRoots') |
+                Where-Object { $null -eq $fields[$_] })
+            $fieldShape = $requiredFieldsPresent.Count -eq 0 -and
+                (& $u 'preflight') -eq 1u -and (& $u 'planner') -eq 1u -and
+                (& $u 'collectionWorkComplete') -eq 1u -and (& $u 'restartComplete') -eq 1u -and
+                (& $u 'managedResume') -eq 1u -and (& $u 'postGcAllocationCount') -eq 8u -and
+                (& $u 'invariantFailures') -eq 0u -and (& $u 'sensitiveDiagnosticAllocations') -eq 0u -and
+                (& $u 'safeStopReason') -eq 0u -and (& $u 'collectionOrdinal') -eq 2u -and
+                (& $u 'condemnedGeneration') -ne 0u -and (& $u 'maximumGeneration') -ne 0u -and
+                (& $u 'heapIdentity') -ne 0u -and (& $u 'activeSegment') -ne 0u -and
+                (& $u 'rootUpdateCallbacks') -ge 1u -and (& $u 'promotedRoots') -eq 4u
+            $c48Baseline = $c48FpIn.Count -gt 0 -and $c48FpPrepare.Count -gt 0 -and
+                $c48FpRehome.Count -gt 0 -and $c48FpConsume.Count -gt 0 -and
+                $invalidC47.Count -eq 0 -and $formerFault.Count -eq 0 -and $debugPresent -and
+                $c18Present -and $c34Present -and -not [string]::IsNullOrWhiteSpace($c26Line) -and
+                $promotedEntries -eq 4u -and $c28Present
+            $markersPresent = -not [string]::IsNullOrWhiteSpace($preflightLine) -and
+                -not [string]::IsNullOrWhiteSpace($plannerLine) -and
+                -not [string]::IsNullOrWhiteSpace($doneLine) -and
+                -not [string]::IsNullOrWhiteSpace($restartLine) -and
+                -not [string]::IsNullOrWhiteSpace($resumeLine) -and
+                (($decision -eq 1u -and -not [string]::IsNullOrWhiteSpace($compactLine)) -or
+                 ($decision -eq 0u -and -not [string]::IsNullOrWhiteSpace($sweepLine)))
+            $validComplete = $completeShape -and $fieldShape -and $pathShape -and
+                $c48Baseline -and $markersPresent -and $c39Present -and $c40Present -and $c41Present
+            $runOutcome = if ($validComplete) { 'A' } elseif ($semanticOutcome -in @('B','C')) { $semanticOutcome } else { 'D' }
+            $runLevel = switch ($runOutcome) { 'A' { 5 } 'B' { 3 } 'C' { 1 } default { 0 } }
+            $c49Runs += [ordered]@{
+                name=$run.name; serial=$run.serial; serialSha256=$run.serialSha256
+                safeStopMarker=if ($validComplete) { 'C011EC49' } elseif ($completeShape -or -not [string]::IsNullOrWhiteSpace($c49BlockedLine)) { 'C011EC49-BLOCKED' } else { 'C011EC49-TIMEOUT' }
+                outcome=$runOutcome; semanticOutcome=$semanticOutcome; successLevel=$runLevel
+                markerLine=$c49Line; preflightMarker=$preflightLine; plannerMarker=$plannerLine
+                compactMarker=$compactLine; sweepMarker=$sweepLine; relocateMarker=$relocateLine
+                collectionDoneMarker=$doneLine; restartMarker=$restartLine; resumeMarker=$resumeLine
+                c39=$c39Present; c40=$c40Present; c41=$c41Present; c48=$c48Baseline
+                c18=$c18Present; c34=$c34Present; c26=$c26Line; c28=$c28Present
+                c47Invalid=$invalidC47.Count; formerFaults=$formerFault.Count
+                qemuDebugLog=$debugPath; qemuDebugSha256=if ($debugPresent) { Hash-File $debugPath } else { $null }
+                fields=$fields; fieldShape=$fieldShape; pathShape=$pathShape; markersPresent=$markersPresent
+                c48FpInCount=$c48FpIn.Count; c48FpPrepareCount=$c48FpPrepare.Count
+                c48FpRehomeCount=$c48FpRehome.Count; c48FpConsumeCount=$c48FpConsume.Count
+                promotedEntries=('0x' + $promotedEntries.ToString('X8')); earlyFailure=$run.earlyFailure
+                serialTail=$run.serialTail
+            }
+        }
+        $completeRuns = @($c49Runs | Where-Object { $_.outcome -eq 'A' })
+        $allC49Complete = $completeRuns.Count -eq $FreshBootCount
+        $signatures = @($completeRuns | ForEach-Object {
+            $f = $_.fields
+            "$($f.plannerDecision)|$($f.condemnedGeneration)|$($f.collectionOrdinal)|$($f.postGcAllocationCount)|$($_.successLevel)"
+        } | Select-Object -Unique)
+        $semanticConsistent = $signatures.Count -eq 1
+        $c49OutcomeCode = if ($allC49Complete -and $semanticConsistent) { 'A' } elseif (@($c49Runs | Where-Object { $_.outcome -eq 'B' }).Count -gt 0) { 'B' } elseif (@($c49Runs | Where-Object { $_.outcome -eq 'C' }).Count -gt 0) { 'C' } else { 'D' }
+        $c49SuccessLevel = switch ($c49OutcomeCode) { 'A' { 5 } 'B' { 3 } 'C' { 1 } default { 0 } }
+        $firstC49Run = $c49Runs[0]
+        $manifest = [ordered]@{
+            outcome="$c49OutcomeCode / authentic NativeAOT second-collection continuation and bounded post-GC allocation result"
+            successLevel=$c49SuccessLevel; proofMode=$ProofMode; marker='C011EC49'
+            repositoryHead=$repoHead; startingCommittedHead=$startingCommittedHead; startingBranch=$startingBranch
+            upstream=$upstream; startingWorktreeStatus=$startingWorktreeStatus; startingDirtyState=$dirtyState
+            lockedRuntimeIdentity=[ordered]@{ nativeAot='9.0.0'; architecture='AMD64'; gc='Workstation'; gcInterfaces='5.3 / 2'; sourceCommit=$lockedCommit }
+            c49=[ordered]@{ allRunsComplete=$allC49Complete; semanticConsistent=$semanticConsistent; signatures=$signatures; runs=$c49Runs; plannerDecision=$firstC49Run.fields.plannerDecision; condemnedGeneration=$firstC49Run.fields.condemnedGeneration; collectionOrdinal=$firstC49Run.fields.collectionOrdinal; collectionReason=$firstC49Run.fields.collectionReason; maximumGeneration=$firstC49Run.fields.maximumGeneration; heapNumber=$firstC49Run.fields.heapNumber; heapIdentity=$firstC49Run.fields.heapIdentity; activeSegment=$firstC49Run.fields.activeSegment; promotedRoots=$firstC49Run.fields.promotedRoots; rootUpdateCallbacks=$firstC49Run.fields.rootUpdateCallbacks; relocationCallbacks=$firstC49Run.fields.relocationCallbacks; postGcAllocationCount=$firstC49Run.fields.postGcAllocationCount; invariantFailures=$firstC49Run.fields.invariantFailures; sensitiveDiagnosticAllocations=$firstC49Run.fields.sensitiveDiagnosticAllocations; safeStopReason=$firstC49Run.fields.safeStopReason; compactBranch=$firstC49Run.fields.compactBranch; sweepBranch=$firstC49Run.fields.sweepBranch; segmentBefore=$firstC49Run.fields.segmentAllocatedBefore; segmentAfter=$firstC49Run.fields.segmentAllocatedAfter; compactedFrontierBefore=$firstC49Run.fields.compactedFrontierBefore; compactedFrontierAfter=$firstC49Run.fields.compactedFrontierAfter; freeTailStart=$firstC49Run.fields.freeTailStart; freeTailEnd=$firstC49Run.fields.freeTailEnd }
+            predecessor=[ordered]@{ C011EC18='PASS / preflight and FindMethodInfo retained'; C011EC26='PASS / promoted roots exactly 4'; C011EC28='PASS / queue closure retained'; C011EC34='PASS / relocation preflight retained'; C011EC47='PASS / no invalid base or former slot'; C011EC48='PASS / FP-IN, FP-PREPARE, FP-REHOME, FP-CONSUME retained' }
+            progression=[ordered]@{ planner='authentic C39 planner decision observed'; collection='C49 collection-done, RestartEE, and managed-resume markers'; branch=if ($firstC49Run.fields.plannerDecision -eq '0x00000001') { 'COMPACT' } else { 'SWEEP' }; allocation='bounded C41 eight-allocation continuation'; regression='C18-C48 evidence parsed from each fresh boot' }
+            qemu=[ordered]@{ version=$qemuVersion; runCount=$FreshBootCount; proofKernelSha256=$specializedKernelHash; serialSha256=@($c49Runs | ForEach-Object { $_.serialSha256 }); qemuDebugSha256=@($c49Runs | ForEach-Object { $_.qemuDebugSha256 }); evidenceRoot=$runRoot; exactCommandLog=(Join-Path $runRoot 'commands.txt'); runs=$c49Runs }
+            regressions=[ordered]@{ C18='PASS; valid manager/FindMethodInfo path retained'; C26='PASS; promoted roots exactly 4'; C28='PASS; mark queue closure retained'; C34='PASS; relocation preflight and root callbacks retained'; C39='PASS; planner decision observed without forcing result'; C40='PASS; compact/sweep production branch observed'; C41='PASS; eight bounded post-GC allocations'; C42='retained historical third-collection lifecycle; not enabled by C49'; C43='retained safety-gate history'; C44='PASS; malformed transition provenance retained'; C45='PASS; reverse-P/Invoke slot provenance retained'; C46='PASS; REGDISPLAY handoff retained'; C47='PASS; former invalid root base/slot absent'; C48='PASS; iterator FP ownership markers retained'; ordinaryBoot='PASS after finally restoration'; diffCheck='PASS git diff --check' }
+            ordinaryRestoration=[ordered]@{ expectedKernelSha256=$normalKernelHash; expectedEspSha256=$normalKernelHash; restoredByFinally=$true; kernelSha256=(Hash-File $kernelPath); espSha256=(Hash-File $espKernelPath) }
+            documentation='docs/dotnet/NATIVEAOT_WORKSTATION_GC_SECOND_COLLECTION_CONTINUATION.md'; evidenceRoot=$runRoot; manifestPath=$manifestPath
+        }
+        $manifest | ConvertTo-Json -Depth 100 | Set-Content -LiteralPath $manifestPath -Encoding ASCII
+        Write-Host "C011EC49 second-collection continuation: $($manifest.outcome) / Level $c49SuccessLevel" -ForegroundColor $(if ($c49SuccessLevel -eq 5) { 'Green' } else { 'Yellow' })
     } elseif ($isC011EC48) {
         if (@($runResults).Count -ne $FreshBootCount) {
             throw "The C011EC48 iterator-FP ownership experiment produced $(@($runResults).Count) runs instead of $FreshBootCount."

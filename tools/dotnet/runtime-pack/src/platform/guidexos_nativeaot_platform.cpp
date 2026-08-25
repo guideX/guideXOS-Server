@@ -9480,6 +9480,8 @@ guideXosNativeAotC011EC26PostScanAfterGcScanRootsEntered() {
         d.c011ec26GcScanRootsEnumerationComplete != 0u &&
         d.c011ec23UnwindAttemptCount == 2u &&
         d.c011ec26ThirdUnwindAttemptCount == 0u) {
+        d.c011ec26PromoteEntriesSnapshot =
+            d.c011ec19FirstStackDerivedPromoteEntryCount;
         d.c011ec26MarkerEmitted = 1u;
         d.c011ec26SafeStopReason = 0u;
         emitC011EC26Completion();
@@ -13534,6 +13536,17 @@ extern "C" void __cdecl guideXosNativeAotC011EC42EphemeralBoundaryObserved(
     uintptr_t segmentReserved, uint32_t segmentGeneration);
 #endif
 
+#if defined(GUIDEXOS_NATIVEAOT_C011EC49_SECOND_COLLECTION_CONTINUATION)
+static void guideXosNativeAotC011EC49CollectionEntered(
+    uint32_t generation, uint32_t collectionReason);
+static void guideXosNativeAotC011EC49PlannerEntryObserved();
+static void guideXosNativeAotC011EC49PlannerDecisionObserved();
+static void guideXosNativeAotC011EC49PhaseObserved(uint32_t phase);
+static void guideXosNativeAotC011EC49CompactObserved();
+static void guideXosNativeAotC011EC49ManagedResumeObserved();
+static void guideXosNativeAotC011EC49Finish();
+#endif
+
 extern "C" __declspec(dllexport) int __cdecl
 guideXosNativeAotC011EC37ManagedCheckpoint(
     uint32_t checkpoint, uintptr_t weakHandleSlot) {
@@ -13698,8 +13711,352 @@ guideXosNativeAotC011EC37ManagedCheckpoint(
 #undef C37C32
 #undef C37C64
     suspendEeSerialPutString("\n");
+#if defined(GUIDEXOS_NATIVEAOT_C011EC49_SECOND_COLLECTION_CONTINUATION)
+    guideXosNativeAotC011EC49ManagedResumeObserved();
+#endif
     return 0;
 }
+#endif
+
+#if defined(GUIDEXOS_NATIVEAOT_C011EC49_SECOND_COLLECTION_CONTINUATION)
+static void guideXosNativeAotC011EC49Emit(
+    const char* marker,
+    const guidexos_nativeaot_c011ec49_continuation_record& r) {
+    suspendEeSerialPutString("[nativeaot-gc-second-collection] ");
+    suspendEeSerialPutString(marker);
+#define C49P32(name, value) \
+    suspendEeSerialPutString(" " name "="); suspendEeSerialPutHex32(value)
+#define C49P64(name, value) \
+    suspendEeSerialPutString(" " name "="); suspendEeSerialPutHex64(value)
+    C49P32("preflight", r.preflightEmitted);
+    C49P32("planner", r.plannerObserved);
+    C49P32("compact", r.compactMarkerEmitted);
+    C49P32("sweep", r.sweepMarkerEmitted);
+    C49P32("relocate", r.relocateMarkerEmitted);
+    C49P32("collectionDone", r.collectionDoneMarkerEmitted);
+    C49P32("restart", r.restartMarkerEmitted);
+    C49P32("resume", r.resumeMarkerEmitted);
+    C49P32("completionMarker", r.completionMarkerEmitted);
+    C49P32("collectionOrdinal", r.collectionOrdinal);
+    C49P32("collectionCountBeforeEntry", r.collectionCountBeforeEntry);
+    C49P32("collectionCountAtPlannerEntry", r.collectionCountAtPlannerEntry);
+    C49P32("collectionCountAfter", r.collectionCountAfter);
+    C49P32("condemnedGeneration", r.condemnedGeneration);
+    C49P32("maximumGeneration", r.maximumGeneration);
+    C49P32("collectionReason", r.collectionReason);
+    C49P32("heapNumber", r.heapNumber);
+    C49P32("plannerDecision", r.plannerDecision);
+    C49P32("compacting", r.compacting);
+    C49P32("relocating", r.relocating);
+    C49P32("compactBranch", r.compactBranch);
+    C49P32("sweepBranch", r.sweepBranch);
+    C49P32("collectionWorkComplete", r.collectionWorkComplete);
+    C49P32("restartComplete", r.restartComplete);
+    C49P32("managedResume", r.managedResume);
+    C49P32("postGcAllocationCount", r.postGcAllocationCount);
+    C49P32("promotedRoots", r.promotedRoots);
+    C49P32("registerRoots", r.registerRoots);
+    C49P32("stackRoots", r.stackRoots);
+    C49P32("relocationCallbacks", r.relocationCallbacks);
+    C49P32("rootUpdateCallbacks", r.rootUpdateCallbacks);
+    C49P32("rootRewrites", r.rootRewrites);
+    C49P32("rootUnchanged", r.rootUnchanged);
+    C49P32("livePlugCount", r.livePlugCount);
+    C49P32("deadGapCount", r.deadGapCount);
+    C49P32("invariantFailures", r.invariantFailures);
+    C49P32("sensitiveDiagnosticAllocations", r.sensitiveDiagnosticAllocations);
+    C49P32("safeStopReason", r.safeStopReason);
+    C49P64("heapIdentity", r.heapIdentity);
+    C49P64("activeSegment", r.activeSegment);
+    C49P64("segmentStartBefore", r.segmentStartBefore);
+    C49P64("segmentAllocatedBefore", r.segmentAllocatedBefore);
+    C49P64("segmentCommittedBefore", r.segmentCommittedBefore);
+    C49P64("segmentReservedBefore", r.segmentReservedBefore);
+    C49P64("segmentStartAfter", r.segmentStartAfter);
+    C49P64("segmentAllocatedAfter", r.segmentAllocatedAfter);
+    C49P64("segmentCommittedAfter", r.segmentCommittedAfter);
+    C49P64("segmentReservedAfter", r.segmentReservedAfter);
+    C49P64("generationBefore", r.generationBefore);
+    C49P64("generationAfter", r.generationAfter);
+    C49P64("allocationFrontierBefore", r.allocationFrontierBefore);
+    C49P64("allocationFrontierAfter", r.allocationFrontierAfter);
+    C49P64("compactedFrontierBefore", r.compactedFrontierBefore);
+    C49P64("compactedFrontierAfter", r.compactedFrontierAfter);
+    C49P64("freeTailStart", r.freeTailStart);
+    C49P64("freeTailEnd", r.freeTailEnd);
+    C49P64("firstRootSlot", r.firstRootSlot);
+    C49P64("firstRootBefore", r.firstRootBefore);
+    C49P64("firstRootAfter", r.firstRootAfter);
+    C49P64("firstRootKind", r.firstRootKind);
+    C49P64("firstPostUpdateObject", r.firstPostUpdateObject);
+    C49P64("firstPostUpdateSegment", r.firstPostUpdateSegment);
+    C49P64("firstPostUpdateGeneration", r.firstPostUpdateGeneration);
+#undef C49P32
+#undef C49P64
+    suspendEeSerialPutString("\n");
+}
+
+static uint32_t guideXosNativeAotC011EC49ReadCollectionCount() {
+    uintptr_t allocationPointer = 0u;
+    uintptr_t allocationLimit = 0u;
+    uintptr_t currentThread = 0u;
+    uintptr_t gcHeap = 0u;
+    gx_uint32 gcCount = 0u;
+    uintptr_t allocatedBytes = 0u;
+    gx_uint32 finalizableObjects = 0u;
+    gx_uint32 gcInProgress = 0u;
+    gx_uint32 gcMode = 0u;
+    uintptr_t contextIdentity = 0u;
+    uintptr_t allocBytes = 0u;
+    uintptr_t allocBytesUoh = 0u;
+    if (guidexos_nativeaot_gc_read_state(
+            &allocationPointer, &allocationLimit, &currentThread, &gcHeap,
+            &gcCount, &allocatedBytes, &finalizableObjects, &gcInProgress,
+            &gcMode, &contextIdentity, &allocBytes, &allocBytesUoh) != 0) {
+        return 0u;
+    }
+    return gcCount;
+}
+
+static bool guideXosNativeAotC011EC49StartingFrontierValid() {
+    const guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    return d.c011ec18FindMethodInfoSuccessCount != 0u &&
+        d.c011ec26MarkerEmitted != 0u &&
+        d.c011ec26GcScanRootsEnumerationComplete != 0u &&
+        d.c011ec26PromoteEntriesSnapshot == 4u &&
+        d.c011ec28QueueSemanticsValidated != 0u &&
+        d.c011ec28QueueOccupancy == 0u &&
+        d.c011ec34Relocation.preflightEmitted != 0u &&
+        d.c011ec34Relocation.safeStopReason == 0u &&
+        d.c011ec47Provenance.firstInvalidState == 0u;
+}
+
+static void guideXosNativeAotC011EC49CollectionEntered(
+    uint32_t generation, uint32_t collectionReason) {
+    if (generation != 1u) return;
+    guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    guidexos_nativeaot_c011ec49_continuation_record& r =
+        d.c011ec49Continuation;
+    if (r.collectionOrdinal != 0u) return;
+    r.collectionOrdinal = 2u;
+    r.condemnedGeneration = generation;
+    r.collectionReason = collectionReason;
+    r.collectionCountBeforeEntry =
+        guideXosNativeAotC011EC49ReadCollectionCount();
+    suspendEeSerialPutString(
+        "[nativeaot-gc-second-collection] COLLECTION marker=C011EC49-COLLECTION");
+    suspendEeSerialPutString(" collectionOrdinal=");
+    suspendEeSerialPutHex32(r.collectionOrdinal);
+    suspendEeSerialPutString(" collectionCountBeforeEntry=");
+    suspendEeSerialPutHex32(r.collectionCountBeforeEntry);
+    suspendEeSerialPutString(" condemnedGeneration=");
+    suspendEeSerialPutHex32(generation);
+    suspendEeSerialPutString(" collectionReason=");
+    suspendEeSerialPutHex32(collectionReason);
+    suspendEeSerialPutString("\n");
+}
+
+static void guideXosNativeAotC011EC49PlannerEntryObserved() {
+    guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    guidexos_nativeaot_c011ec49_continuation_record& r =
+        d.c011ec49Continuation;
+    const guidexos_nativeaot_c011ec39_plan_record& plan = d.c011ec39Plan;
+    r.collectionOrdinal = 2u;
+    r.condemnedGeneration = plan.condemnedGeneration;
+    r.maximumGeneration = plan.maximumGeneration;
+    r.collectionReason = plan.collectionReason;
+    r.heapNumber = plan.heapNumber;
+    r.collectionCountAtPlannerEntry =
+        guideXosNativeAotC011EC49ReadCollectionCount();
+}
+
+static void guideXosNativeAotC011EC49PlannerDecisionObserved() {
+    guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    guidexos_nativeaot_c011ec49_continuation_record& r =
+        d.c011ec49Continuation;
+    const guidexos_nativeaot_c011ec39_plan_record& plan = d.c011ec39Plan;
+    if (r.plannerObserved != 0u) return;
+    if (!guideXosNativeAotC011EC49StartingFrontierValid() ||
+        plan.plannerEntryObserved == 0u || plan.finalDecisionObserved == 0u) {
+        r.safeStopReason = 0xC0490001u;
+        return;
+    }
+    r.preflightEmitted = 1u;
+    r.plannerObserved = 1u;
+    r.collectionOrdinal = 2u;
+    r.condemnedGeneration = plan.condemnedGeneration;
+    r.maximumGeneration = plan.maximumGeneration;
+    r.collectionReason = plan.collectionReason;
+    r.heapNumber = plan.heapNumber;
+    r.plannerDecision = plan.finalDecision;
+    r.compacting = plan.finalCompacting;
+    r.relocating = plan.finalRelocatingDerived;
+    r.compactBranch = plan.finalDecision == 1u ? 1u : 0u;
+    r.sweepBranch = plan.finalDecision == 0u ? 1u : 0u;
+    r.promotedRoots = d.c011ec26PromoteEntriesSnapshot;
+    r.registerRoots = d.c011ec19RegisterRootCount;
+    r.stackRoots = d.c011ec19StackRootCount;
+    r.sensitiveDiagnosticAllocations = d.c011ec29SensitiveAllocationCount;
+    suspendEeSerialPutString(
+        "[nativeaot-gc-second-collection] PREFLIGHT marker=C011EC49-PREFLIGHT");
+    suspendEeSerialPutString(" c18=00000001 c26=00000001 c28=00000001 c34=00000001 c48=00000001");
+    suspendEeSerialPutString(" promotedRoots=");
+    suspendEeSerialPutHex32(r.promotedRoots);
+    suspendEeSerialPutString("\n");
+    guideXosNativeAotC011EC49Emit(
+        "PLANNER marker=C011EC49-PLANNER", r);
+}
+
+static void guideXosNativeAotC011EC49PhaseObserved(uint32_t phase) {
+    guidexos_nativeaot_c011ec49_continuation_record& r =
+        g_guideXosAllocationDiagnostics.c011ec49Continuation;
+    if (r.plannerObserved == 0u) return;
+    if (phase == 1u && r.relocateMarkerEmitted == 0u) {
+        r.relocateMarkerEmitted = 1u;
+        r.relocating = 1u;
+        guideXosNativeAotC011EC49Emit(
+            "RELOCATE marker=C011EC49-RELOCATE", r);
+    } else if (phase == 2u && r.sweepMarkerEmitted == 0u) {
+        r.sweepMarkerEmitted = 1u;
+        r.sweepBranch = 1u;
+        guideXosNativeAotC011EC49Emit(
+            "SWEEP marker=C011EC49-SWEEP", r);
+    }
+}
+
+static void guideXosNativeAotC011EC49CompactObserved() {
+    guidexos_nativeaot_c011ec49_continuation_record& r =
+        g_guideXosAllocationDiagnostics.c011ec49Continuation;
+    if (r.plannerObserved == 0u || r.compactMarkerEmitted != 0u) return;
+    r.compactMarkerEmitted = 1u;
+    r.compactBranch = 1u;
+    r.relocating = 1u;
+    guideXosNativeAotC011EC49Emit(
+        "COMPACT marker=C011EC49-COMPACT", r);
+}
+
+static void guideXosNativeAotC011EC49ManagedResumeObserved() {
+    guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    guidexos_nativeaot_c011ec49_continuation_record& r =
+        d.c011ec49Continuation;
+    const guidexos_nativeaot_c011ec33_collection_record& c2 =
+        d.c011ec33Collections[1];
+    if (r.plannerObserved == 0u || r.resumeMarkerEmitted != 0u) return;
+    if (c2.collectionCompleted == 0u || c2.eeRestartReturns == 0u ||
+        c2.managedResumeCount == 0u) {
+        r.safeStopReason = 0xC0490002u;
+        return;
+    }
+    r.collectionWorkComplete = 1u;
+    r.collectionDoneMarkerEmitted = 1u;
+    r.restartComplete = 1u;
+    r.restartMarkerEmitted = 1u;
+    r.managedResume = 1u;
+    r.resumeMarkerEmitted = 1u;
+    r.relocationCallbacks = d.c011ec34Relocation.relocationLookupReturns;
+    r.rootUpdateCallbacks = d.c011ec34Relocation.callbackReturns;
+    r.rootRewrites = d.c011ec34Relocation.rootsRewritten;
+    r.rootUnchanged = d.c011ec34Relocation.rootsUnchanged;
+    r.livePlugCount = d.c011ec40Compaction.livePlugCount;
+    r.deadGapCount = d.c011ec40Compaction.deadGapCount;
+    r.firstRootSlot = d.c011ec34Relocation.firstRootSlot;
+    r.firstRootBefore = d.c011ec34Relocation.firstRootOldValue;
+    r.firstRootAfter = d.c011ec34Relocation.firstRootNewValue;
+    r.firstRootKind = d.c011ec34Relocation.firstRootKind;
+    guideXosNativeAotC011EC49Emit(
+        "COLLECTION-DONE marker=C011EC49-COLLECTION-DONE", r);
+    guideXosNativeAotC011EC49Emit(
+        "RESTART marker=C011EC49-RESTART", r);
+    guideXosNativeAotC011EC49Emit(
+        "RESUME marker=C011EC49-RESUME", r);
+}
+
+static void guideXosNativeAotC011EC49Finish() {
+    guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    guidexos_nativeaot_c011ec49_continuation_record& r =
+        d.c011ec49Continuation;
+    const guidexos_nativeaot_c011ec39_plan_record& plan = d.c011ec39Plan;
+    const guidexos_nativeaot_c011ec40_compaction_record& c40 =
+        d.c011ec40Compaction;
+    const guidexos_nativeaot_c011ec41_provenance_record& c41 =
+        d.c011ec41Provenance;
+    const guidexos_nativeaot_c011ec34_relocation_record& c34 =
+        d.c011ec34Relocation;
+    const guidexos_nativeaot_c011ec33_collection_record& c2 =
+        d.c011ec33Collections[1];
+    r.collectionCountAfter = guideXosNativeAotC011EC49ReadCollectionCount();
+    r.heapIdentity = c41.homeHeap;
+    r.activeSegment = c41.activeSegment;
+    r.segmentStartBefore = c40.segmentStart;
+    r.segmentAllocatedBefore = c40.segmentAllocatedBefore;
+    r.segmentCommittedBefore = c40.segmentCommitted;
+    r.segmentReservedBefore = c40.segmentReserved;
+    r.segmentStartAfter = c41.activeSegmentBase;
+    r.segmentAllocatedAfter = c41.activeSegmentAllocated;
+    r.segmentCommittedAfter = c41.activeSegmentCommitted;
+    r.segmentReservedAfter = c41.activeSegmentReserved;
+    r.generationBefore = c40.generation;
+    r.generationAfter = c41.activeGeneration;
+    r.allocationFrontierBefore = c40.segmentAllocatedBefore;
+    r.allocationFrontierAfter = c41.finalAllocPtr;
+    r.compactedFrontierBefore = c40.oldCompactedFrontier;
+    r.compactedFrontierAfter = c40.newCompactedFrontier;
+    r.freeTailStart = c40.freeTailStart;
+    r.freeTailEnd = c40.freeTailEnd;
+    r.firstPostUpdateObject = c41.firstObject;
+    r.firstPostUpdateSegment = c41.supplyingSegment;
+    r.firstPostUpdateGeneration = c41.supplyingGeneration;
+    r.postGcAllocationCount = c41.allocationCount;
+    r.promotedRoots = d.c011ec26PromoteEntriesSnapshot;
+    r.registerRoots = d.c011ec19RegisterRootCount;
+    r.stackRoots = d.c011ec19StackRootCount;
+    r.relocationCallbacks = c34.relocationLookupReturns;
+    r.rootUpdateCallbacks = c34.callbackReturns;
+    r.rootRewrites = c34.rootsRewritten;
+    r.rootUnchanged = c34.rootsUnchanged;
+    r.livePlugCount = c40.livePlugCount;
+    r.deadGapCount = c40.deadGapCount;
+    r.invariantFailures = c34.callbackInvariantFailures +
+        c41.invariantFailures + c40.compactIntegrityFailures +
+        c40.allocatorIntegrityFailures +
+        (c2.c011ec37PhaseOrderErrors != 0u ? 1u : 0u);
+    r.sensitiveDiagnosticAllocations =
+        d.c011ec29SensitiveAllocationCount;
+    if (r.plannerObserved == 0u) {
+        if (r.safeStopReason == 0u) r.safeStopReason = 0xC0490003u;
+        guideXosNativeAotC011EC49Emit(
+            "BLOCKED outcome=D marker=C011EC49-BLOCKED", r);
+        return;
+    }
+    const bool complete = r.preflightEmitted != 0u &&
+        r.collectionWorkComplete != 0u && r.restartComplete != 0u &&
+        r.managedResume != 0u && c41.completionMarkerEmitted != 0u &&
+        r.postGcAllocationCount == 8u && r.invariantFailures == 0u &&
+        r.sensitiveDiagnosticAllocations == 0u &&
+        plan.finalDecisionObserved != 0u &&
+        ((plan.finalDecision == 1u && r.compactMarkerEmitted != 0u) ||
+         (plan.finalDecision == 0u && r.sweepMarkerEmitted != 0u));
+    if (!complete) {
+        if (r.safeStopReason == 0u) r.safeStopReason = 0xC0490004u;
+        const char* outcome = r.collectionWorkComplete != 0u ? "B" : "C";
+        guideXosNativeAotC011EC49Emit(
+            outcome[0] == 'B'
+                ? "BLOCKED outcome=B marker=C011EC49-BLOCKED"
+                : "BLOCKED outcome=C marker=C011EC49-BLOCKED", r);
+        return;
+    }
+    r.completionMarkerEmitted = 1u;
+    r.safeStopReason = 0u;
+    guideXosNativeAotC011EC49Emit(
+        "COMPLETE outcome=A marker=C011EC49", r);
+}
+
 #endif
 
 #if defined(GUIDEXOS_NATIVEAOT_C011EC39_PLAN_PROVENANCE)
@@ -13783,6 +14140,9 @@ guideXosNativeAotC011EC39PlannerEntryObserved(
     r.provisionalMode = provisionalMode;
     r.pmTriggerFullGc = pmTriggerFullGc;
     r.plannerEntryAddress = reinterpret_cast<uintptr_t>(_ReturnAddress());
+#if defined(GUIDEXOS_NATIVEAOT_C011EC49_SECOND_COLLECTION_CONTINUATION)
+    guideXosNativeAotC011EC49PlannerEntryObserved();
+#endif
 }
 
 extern "C" void __cdecl
@@ -13945,6 +14305,9 @@ guideXosNativeAotC011EC39FinalDecisionObserved(
     r.pmTriggerFullGc = pmTriggerFullGc;
     r.compactionMechanism = compactionMechanism;
     r.finalDecisionAddress = reinterpret_cast<uintptr_t>(_ReturnAddress());
+#if defined(GUIDEXOS_NATIVEAOT_C011EC49_SECOND_COLLECTION_CONTINUATION)
+    guideXosNativeAotC011EC49PlannerDecisionObserved();
+#endif
 }
 
 extern "C" void __cdecl
@@ -13961,6 +14324,9 @@ guideXosNativeAotC011EC39PhaseEntered(uint32_t phase) {
         ++r.sweepPhaseCount;
         r.sweepPhaseAddress = reinterpret_cast<uintptr_t>(_ReturnAddress());
     }
+#if defined(GUIDEXOS_NATIVEAOT_C011EC49_SECOND_COLLECTION_CONTINUATION)
+    guideXosNativeAotC011EC49PhaseObserved(phase);
+#endif
 }
 
 extern "C" void __cdecl
@@ -13974,6 +14340,9 @@ guideXosNativeAotC011EC39CollectionEntered(
         d.c011ec33Collections[1].collectionCompleted != 0u) {
         r.collection3Triggered = 1u;
     }
+#if defined(GUIDEXOS_NATIVEAOT_C011EC49_SECOND_COLLECTION_CONTINUATION)
+    guideXosNativeAotC011EC49CollectionEntered(generation, collectionReason);
+#endif
     (void)generation;
     (void)collectionReason;
 }
@@ -14348,6 +14717,9 @@ guideXosNativeAotC011EC40CompactEntryObserved(uint32_t condemnedGeneration) {
         g_guideXosAllocationDiagnostics.c011ec40Compaction;
     r.compactEntryObserved = 1u;
     guideXosNativeAotC011EC40CaptureTarget();
+#if defined(GUIDEXOS_NATIVEAOT_C011EC49_SECOND_COLLECTION_CONTINUATION)
+    guideXosNativeAotC011EC49CompactObserved();
+#endif
 }
 
 extern "C" void __cdecl
@@ -15137,6 +15509,9 @@ static int guideXosNativeAotC011EC41Finish() {
     r.completionMarkerEmitted = 1u;
     guideXosNativeAotC011EC41EmitProvenance(
         "COMPLETE marker=C011EC41 outcome=C", r, d);
+#if defined(GUIDEXOS_NATIVEAOT_C011EC49_SECOND_COLLECTION_CONTINUATION)
+    guideXosNativeAotC011EC49Finish();
+#endif
     return 0;
 }
 #endif

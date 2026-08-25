@@ -1310,6 +1310,79 @@ typedef struct guidexos_nativeaot_c011ec48_provenance_record {
         GUIDEXOS_NATIVEAOT_C011EC48_MAX_OWNERSHIP_RECORDS];
 } guidexos_nativeaot_c011ec48_provenance_record;
 
+/* C011EC49 bounded second-collection continuation evidence.  The record is
+ * deliberately a fixed scalar snapshot assembled from the already-proven
+ * C18-C48 records.  It observes the production planner, collection phases,
+ * root-update completion, RestartEE, managed resume, and the existing small
+ * post-GC allocation workload; it does not select a plan or retain a managed
+ * reference. */
+typedef struct guidexos_nativeaot_c011ec49_continuation_record {
+    uint32_t preflightEmitted;
+    uint32_t plannerObserved;
+    uint32_t compactMarkerEmitted;
+    uint32_t sweepMarkerEmitted;
+    uint32_t relocateMarkerEmitted;
+    uint32_t collectionDoneMarkerEmitted;
+    uint32_t restartMarkerEmitted;
+    uint32_t resumeMarkerEmitted;
+    uint32_t completionMarkerEmitted;
+    uint32_t collectionOrdinal;
+    uint32_t collectionCountBeforeEntry;
+    uint32_t collectionCountAtPlannerEntry;
+    uint32_t collectionCountAfter;
+    uint32_t condemnedGeneration;
+    uint32_t maximumGeneration;
+    uint32_t collectionReason;
+    uint32_t heapNumber;
+    uint32_t plannerDecision;
+    uint32_t compacting;
+    uint32_t relocating;
+    uint32_t compactBranch;
+    uint32_t sweepBranch;
+    uint32_t collectionWorkComplete;
+    uint32_t restartComplete;
+    uint32_t managedResume;
+    uint32_t postGcAllocationCount;
+    uint32_t promotedRoots;
+    uint32_t registerRoots;
+    uint32_t stackRoots;
+    uint32_t relocationCallbacks;
+    uint32_t rootUpdateCallbacks;
+    uint32_t rootRewrites;
+    uint32_t rootUnchanged;
+    uint32_t livePlugCount;
+    uint32_t deadGapCount;
+    uint32_t invariantFailures;
+    uint32_t sensitiveDiagnosticAllocations;
+    uint32_t safeStopReason;
+
+    uintptr_t heapIdentity;
+    uintptr_t activeSegment;
+    uintptr_t segmentStartBefore;
+    uintptr_t segmentAllocatedBefore;
+    uintptr_t segmentCommittedBefore;
+    uintptr_t segmentReservedBefore;
+    uintptr_t segmentStartAfter;
+    uintptr_t segmentAllocatedAfter;
+    uintptr_t segmentCommittedAfter;
+    uintptr_t segmentReservedAfter;
+    uintptr_t generationBefore;
+    uintptr_t generationAfter;
+    uintptr_t allocationFrontierBefore;
+    uintptr_t allocationFrontierAfter;
+    uintptr_t compactedFrontierBefore;
+    uintptr_t compactedFrontierAfter;
+    uintptr_t freeTailStart;
+    uintptr_t freeTailEnd;
+    uintptr_t firstRootSlot;
+    uintptr_t firstRootBefore;
+    uintptr_t firstRootAfter;
+    uintptr_t firstRootKind;
+    uintptr_t firstPostUpdateObject;
+    uintptr_t firstPostUpdateSegment;
+    uintptr_t firstPostUpdateGeneration;
+} guidexos_nativeaot_c011ec49_continuation_record;
+
 typedef struct guidexos_nativeaot_allocation_diagnostics {
     uint32_t schemaVersion;
     uint32_t heapInitialized;
@@ -2749,6 +2822,7 @@ typedef struct guidexos_nativeaot_allocation_diagnostics {
     uint32_t c011ec26StackScanPromoteAttemptCount;
     uint32_t c011ec26StackScanPromoteEntryCount;
     uint32_t c011ec26StackScanPromoteReturnCount;
+    uint32_t c011ec26PromoteEntriesSnapshot;
     uint32_t c011ec26SafeStopReason;
     uint32_t c011ec26Reserved[2];
 
@@ -3173,6 +3247,8 @@ typedef struct guidexos_nativeaot_allocation_diagnostics {
     guidexos_nativeaot_c011ec47_provenance_record c011ec47Provenance;
     /* C011EC48 iterator-owned FP publication and reverse-slot consumption. */
     guidexos_nativeaot_c011ec48_provenance_record c011ec48Provenance;
+    /* C011EC49 second-collection planner/continuation evidence. */
+    guidexos_nativeaot_c011ec49_continuation_record c011ec49Continuation;
 } guidexos_nativeaot_allocation_diagnostics;
 
 enum {
