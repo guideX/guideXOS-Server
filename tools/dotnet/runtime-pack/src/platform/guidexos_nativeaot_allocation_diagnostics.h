@@ -1121,6 +1121,72 @@ typedef struct guidexos_nativeaot_c011ec45_provenance_record {
         GUIDEXOS_NATIVEAOT_C011EC45_MAX_UNWIND_RECORDS];
 } guidexos_nativeaot_c011ec45_provenance_record;
 
+enum {
+    GUIDEXOS_NATIVEAOT_C011EC46_MAX_SNAPSHOTS = 7u,
+    GUIDEXOS_NATIVEAOT_C011EC46_UNWIND_ENTRY = 1u,
+    GUIDEXOS_NATIVEAOT_C011EC46_AFTER_SAVED_REGISTERS = 2u,
+    GUIDEXOS_NATIVEAOT_C011EC46_AFTER_CALLER_SP = 3u,
+    GUIDEXOS_NATIVEAOT_C011EC46_AFTER_CALLER_FP = 4u,
+    GUIDEXOS_NATIVEAOT_C011EC46_BEFORE_UNWIND_RETURN = 5u,
+    GUIDEXOS_NATIVEAOT_C011EC46_ITERATOR_CONSUMED = 6u,
+    GUIDEXOS_NATIVEAOT_C011EC46_BEFORE_REVERSE_SLOT = 7u
+};
+
+/* C011EC46 records only the production REGDISPLAY locations and scalar
+ * values at the seven handoff boundaries.  The fixed storage is deliberately
+ * allocation-free and does not dereference a pointer outside the normal
+ * GetFP()/unwind contract already used by the stack walker. */
+typedef struct guidexos_nativeaot_c011ec46_snapshot {
+    uint32_t observed;
+    uint32_t stage;
+    uint32_t reserved0;
+    uint32_t reserved1;
+
+    uintptr_t methodInfo;
+    uintptr_t controlPc;
+    uintptr_t sp;
+    uintptr_t fp;
+    uintptr_t fpPointer;
+    uintptr_t logicalFramePointer;
+    uintptr_t transitionFrame;
+    uintptr_t callerPc;
+    uintptr_t callerSp;
+    uintptr_t slotOffset;
+    uintptr_t baseAddress;
+    uintptr_t slotAddress;
+    uintptr_t slotValue;
+    uintptr_t restoredRbpSource;
+    uintptr_t restoredRbpValue;
+} guidexos_nativeaot_c011ec46_snapshot;
+
+typedef struct guidexos_nativeaot_c011ec46_provenance_record {
+    uint32_t snapshotCount;
+    uint32_t unwindCount;
+    uint32_t handoffCount;
+    uint32_t correctHandoffCount;
+    uint32_t invariantFailures;
+    uint32_t sensitiveDiagnosticAllocations;
+    uint32_t deferredReverseRead;
+    uint32_t reserved;
+
+    uintptr_t oldFp;
+    uintptr_t oldFpPointer;
+    uintptr_t correctCallerFp;
+    uintptr_t correctCallerFpPointer;
+    uintptr_t restoredCallerRbpSource;
+    uintptr_t restoredCallerRbpValue;
+    uintptr_t slotOffset;
+    uintptr_t wrongSlotAddress;
+    uintptr_t wrongSlotValue;
+    uintptr_t correctSlotAddress;
+    uintptr_t correctSlotValue;
+    uintptr_t reconstructedTransitionFrame;
+    uintptr_t reconstructedPc;
+
+    guidexos_nativeaot_c011ec46_snapshot snapshots[
+        GUIDEXOS_NATIVEAOT_C011EC46_MAX_SNAPSHOTS];
+} guidexos_nativeaot_c011ec46_provenance_record;
+
 typedef struct guidexos_nativeaot_allocation_diagnostics {
     uint32_t schemaVersion;
     uint32_t heapInitialized;
@@ -2978,6 +3044,8 @@ typedef struct guidexos_nativeaot_allocation_diagnostics {
     guidexos_nativeaot_c011ec44_provenance_record c011ec44Provenance;
     /* C011EC45 reverse-P/Invoke slot layout, register, and unwind provenance. */
     guidexos_nativeaot_c011ec45_provenance_record c011ec45Provenance;
+    /* C011EC46 REGDISPLAY caller-frame FP handoff provenance. */
+    guidexos_nativeaot_c011ec46_provenance_record c011ec46Provenance;
 } guidexos_nativeaot_allocation_diagnostics;
 
 enum {

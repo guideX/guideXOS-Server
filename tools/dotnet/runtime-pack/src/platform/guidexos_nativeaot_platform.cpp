@@ -5446,6 +5446,117 @@ static void c011ec45CaptureUnwind(
     suspendEeSerialPutString(" prev="); suspendEeSerialPutHex64(previousTransitionFrame);
     suspendEeSerialPutString(" marker=C011EC45-UNWIND\n");
 }
+
+#if defined(GUIDEXOS_NATIVEAOT_C011EC46_REGDISPLAY_HANDOFF)
+static void c011ec46Capture(
+    uint32_t stage, uintptr_t methodInfo, uintptr_t controlPc, uintptr_t sp,
+    uintptr_t fp, uintptr_t fpPointer, uintptr_t logicalFramePointer,
+    uintptr_t transitionFrame, uintptr_t callerPc, uintptr_t callerSp,
+    uintptr_t slotOffset, uintptr_t baseAddress, uintptr_t slotAddress,
+    uintptr_t slotValue, uintptr_t restoredRbpSource,
+    uintptr_t restoredRbpValue) {
+    if (stage < GUIDEXOS_NATIVEAOT_C011EC46_UNWIND_ENTRY ||
+        stage > GUIDEXOS_NATIVEAOT_C011EC46_BEFORE_REVERSE_SLOT) {
+        return;
+    }
+    guidexos_nativeaot_c011ec46_provenance_record& r =
+        g_guideXosAllocationDiagnostics.c011ec46Provenance;
+    guidexos_nativeaot_c011ec46_snapshot& snapshot = r.snapshots[stage - 1u];
+    const bool first = snapshot.observed == 0u;
+    snapshot = {};
+    snapshot.observed = 1u;
+    snapshot.stage = stage;
+    snapshot.methodInfo = methodInfo;
+    snapshot.controlPc = controlPc;
+    snapshot.sp = sp;
+    snapshot.fp = fp;
+    snapshot.fpPointer = fpPointer;
+    snapshot.logicalFramePointer = logicalFramePointer;
+    snapshot.transitionFrame = transitionFrame;
+    snapshot.callerPc = callerPc;
+    snapshot.callerSp = callerSp;
+    snapshot.slotOffset = slotOffset;
+    snapshot.baseAddress = baseAddress;
+    snapshot.slotAddress = slotAddress;
+    snapshot.slotValue = slotValue;
+    snapshot.restoredRbpSource = restoredRbpSource;
+    snapshot.restoredRbpValue = restoredRbpValue;
+    if (first && r.snapshotCount < GUIDEXOS_NATIVEAOT_C011EC46_MAX_SNAPSHOTS) {
+        ++r.snapshotCount;
+    }
+    ++r.handoffCount;
+    if (stage == GUIDEXOS_NATIVEAOT_C011EC46_UNWIND_ENTRY && r.oldFp == 0u) {
+        r.oldFp = fp;
+        r.oldFpPointer = fpPointer;
+    }
+    if (stage == GUIDEXOS_NATIVEAOT_C011EC46_AFTER_CALLER_FP) {
+        r.correctCallerFp = fp;
+        r.correctCallerFpPointer = fpPointer;
+        r.restoredCallerRbpSource = restoredRbpSource;
+        r.restoredCallerRbpValue = restoredRbpValue;
+        if (fp != 0u && fpPointer != 0u && fpPointer != r.oldFpPointer) {
+            ++r.correctHandoffCount;
+        }
+    }
+    if (stage == GUIDEXOS_NATIVEAOT_C011EC46_BEFORE_REVERSE_SLOT) {
+        r.deferredReverseRead = 1u;
+        r.slotOffset = slotOffset;
+        r.correctSlotAddress = slotAddress;
+        r.correctSlotValue = slotValue;
+        r.reconstructedTransitionFrame = slotValue;
+    }
+    if (stage == GUIDEXOS_NATIVEAOT_C011EC46_BEFORE_UNWIND_RETURN) {
+        r.reconstructedPc = callerPc;
+    }
+    /* Emit only the first observation of each checkpoint, plus the first
+     * reverse-slot checkpoint.  The fixed seven-slot record retains the last
+     * scalar state without allowing serial output to grow with the walk. */
+    const bool correctedFrameState =
+        (stage == GUIDEXOS_NATIVEAOT_C011EC46_AFTER_CALLER_SP ||
+         stage == GUIDEXOS_NATIVEAOT_C011EC46_AFTER_CALLER_FP ||
+         stage == GUIDEXOS_NATIVEAOT_C011EC46_BEFORE_UNWIND_RETURN) &&
+        fp != 0u && fp != r.oldFp && fpPointer != 0u &&
+        fpPointer != r.oldFpPointer;
+    const bool interestingEntry =
+        stage == GUIDEXOS_NATIVEAOT_C011EC46_UNWIND_ENTRY &&
+        slotValue > 0x10000u;
+    if (!first && stage != GUIDEXOS_NATIVEAOT_C011EC46_BEFORE_REVERSE_SLOT &&
+        !correctedFrameState && !interestingEntry) {
+        return;
+    }
+    suspendEeSerialPutString("[nativeaot-code-manager] C011EC46-REGDISPLAY stage=");
+    suspendEeSerialPutHex32(stage);
+    suspendEeSerialPutString(" method="); suspendEeSerialPutHex64(methodInfo);
+    suspendEeSerialPutString(" pc="); suspendEeSerialPutHex64(controlPc);
+    suspendEeSerialPutString(" sp="); suspendEeSerialPutHex64(sp);
+    suspendEeSerialPutString(" fp="); suspendEeSerialPutHex64(fp);
+    suspendEeSerialPutString(" pRbp="); suspendEeSerialPutHex64(fpPointer);
+    suspendEeSerialPutString(" logical="); suspendEeSerialPutHex64(logicalFramePointer);
+    suspendEeSerialPutString(" tf="); suspendEeSerialPutHex64(transitionFrame);
+    suspendEeSerialPutString(" callerPc="); suspendEeSerialPutHex64(callerPc);
+    suspendEeSerialPutString(" callerSp="); suspendEeSerialPutHex64(callerSp);
+    suspendEeSerialPutString(" rbpSrc="); suspendEeSerialPutHex64(restoredRbpSource);
+    suspendEeSerialPutString(" rbpVal="); suspendEeSerialPutHex64(restoredRbpValue);
+    suspendEeSerialPutString(" off="); suspendEeSerialPutHex64(slotOffset);
+    suspendEeSerialPutString(" base="); suspendEeSerialPutHex64(baseAddress);
+    suspendEeSerialPutString(" slot="); suspendEeSerialPutHex64(slotAddress);
+    suspendEeSerialPutString(" val="); suspendEeSerialPutHex64(slotValue);
+    suspendEeSerialPutString(" marker=C011EC46-REGDISPLAY\n");
+}
+
+extern "C" void __cdecl guideXosNativeAotC011EC46Stage(
+    uint32_t stage, uintptr_t methodInfo, uintptr_t controlPc, uintptr_t sp,
+    uintptr_t fp, uintptr_t fpPointer, uintptr_t logicalFramePointer,
+    uintptr_t transitionFrame, uintptr_t callerPc, uintptr_t callerSp,
+    uintptr_t slotOffset, uintptr_t baseAddress, uintptr_t slotAddress,
+    uintptr_t slotValue, uintptr_t restoredRbpSource,
+    uintptr_t restoredRbpValue) {
+    c011ec46Capture(
+        stage, methodInfo, controlPc, sp, fp, fpPointer, logicalFramePointer,
+        transitionFrame, callerPc, callerSp, slotOffset, baseAddress,
+        slotAddress, slotValue, restoredRbpSource, restoredRbpValue);
+}
+#endif
 #endif
 
 static void c011ec44ThreadSlots(
