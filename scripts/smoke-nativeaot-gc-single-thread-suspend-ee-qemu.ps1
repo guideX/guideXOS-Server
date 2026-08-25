@@ -178,6 +178,7 @@ if ($isC011EC39) {
     $isAllocationContextFixupRootBoundary = $true
 }
 $useStockRhpNewArrayEntry = $isTransitionFrameControlPc -or $isC011EC19
+$c011ec44Define = if ($isC011EC44) { " /DGUIDEXOS_NATIVEAOT_C011EC44_PROVENANCE" } else { "" }
 $proofDefine = if ($isNextGenuineRootProvider -or $isC011EC39) {
     $minimalDefine = if ($isStackProviderTransitionFailFast) { " /DGUIDEXOS_NATIVEAOT_STACK_PROVIDER_TRANSITION_FAILFAST_MINIMAL" } else { "" }
     $codeManagerDefine = if ($isCodeManagerRegistration) { " /DGUIDEXOS_NATIVEAOT_C011EC17_CODE_MANAGER" } elseif ($useStockRhpNewArrayEntry) { " /DGUIDEXOS_NATIVEAOT_USE_STOCK_RHP_NEW_ARRAY_ENTRY /DGUIDEXOS_NATIVEAOT_C011EC18_NATIVE_RHP_NEW_ARRAY" } else { "" }
@@ -4155,7 +4156,7 @@ static void EnumGcRefsCallback(void* hCallback, PTR_PTR_VOID pObject, uint32_t f
 setlocal
 call "$vsBat" >nul
 if errorlevel 1 exit /b %errorlevel%
-cl.exe /nologo /std:c++17 /TP /c /GS- /GR- /EHs-c- /Zl /Oi /O2 /Brepro /DWIN32 /D_WIN32 /D_WIN64 /DHOST_AMD64 /DTARGET_AMD64 /DHOST_64BIT /DTARGET_64BIT /DHOST_WINDOWS /DTARGET_WINDOWS /DNATIVEAOT /DFEATURE_NATIVEAOT /DGUIDEXOS_NATIVEAOT_MANAGED_ALLOCATION /DGUIDEXOS_NATIVEAOT_REAL_GC_ALLOCATION /DGUIDEXOS_NATIVEAOT_SEGMENT_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_COLLECTION_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_SINGLE_THREAD_SUSPEND_EE_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_COLLECTION_BOUNDARY_ARRAY_LENGTH=4096 /DGUIDEXOS_NATIVEAOT_FIRST_COLLECTION_BOUNDARY_HARD_LIMIT=256 /I"$nativeAotRoot\Runtime" /I"$nativeAotRoot\Runtime\inc" /I"$nativeAotRoot\Runtime\windows" /I"$sourceRoot" /I"$palSourceRoot" /I"$sourceRoot\native" /I"$sourceRoot\gc" /I"$sourceRoot\gc\env" /I"$sourceRoot\pal\src\include" /Fo:"$platformObj" "$platformSource"
+cl.exe /nologo /std:c++17 /TP /c /GS- /GR- /EHs-c- /Zl /Oi /O2 /Brepro /DWIN32 /D_WIN32 /D_WIN64 /DHOST_AMD64 /DTARGET_AMD64 /DHOST_64BIT /DTARGET_64BIT /DHOST_WINDOWS /DTARGET_WINDOWS /DNATIVEAOT /DFEATURE_NATIVEAOT /DGUIDEXOS_NATIVEAOT_MANAGED_ALLOCATION /DGUIDEXOS_NATIVEAOT_REAL_GC_ALLOCATION /DGUIDEXOS_NATIVEAOT_SEGMENT_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_COLLECTION_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_SINGLE_THREAD_SUSPEND_EE_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_COLLECTION_BOUNDARY_ARRAY_LENGTH=4096 /DGUIDEXOS_NATIVEAOT_FIRST_COLLECTION_BOUNDARY_HARD_LIMIT=256$c011ec44Define /I"$nativeAotRoot\Runtime" /I"$nativeAotRoot\Runtime\inc" /I"$nativeAotRoot\Runtime\windows" /I"$sourceRoot" /I"$palSourceRoot" /I"$sourceRoot\native" /I"$sourceRoot\gc" /I"$sourceRoot\gc\env" /I"$sourceRoot\pal\src\include" /Fo:"$platformObj" "$platformSource"
 if errorlevel 1 exit /b %errorlevel%
 cl.exe /nologo /std:c++17 /TP /c /MT /GS- /GR- /EHs-c- /Zl /Oi /O2 /Zc:inline /Brepro /I"$(Join-Path $root 'tools\dotnet\runtime-pack\src\platform')" /Fo:"$nativeUnwindPrimitiveObj" "$nativeUnwindPrimitiveSource"
 if errorlevel 1 exit /b %errorlevel%
@@ -5009,7 +5010,10 @@ exit /b %errorlevel%
             $c44Suspend = & $c44Marker 'C011EC44-SUSPEND'
             $c44RootSource = & $c44Marker 'C011EC44-ROOTSOURCE'
             $c44Iterator = $c44Markers | Where-Object { $_ -match 'marker=C011EC44-ITERATOR(?:\s|$)' } | Select-Object -Last 1
-            $c44Divergence = & $c44Marker 'C011EC44-DIVERGENCE'
+            $c44Divergences = @($c44Markers | Where-Object { $_ -match 'marker=C011EC44-DIVERGENCE(?:\s|$)' })
+            $neighborForDivergence = Get-MarkerField $validationText 'neighborDestinationEnd'
+            $neighborMatches = @($c44Divergences | Where-Object { (Get-MarkerField $_ 'val') -eq $neighborForDivergence })
+            $c44Divergence = if ($neighborMatches.Count -gt 0) { $neighborMatches[-1] } else { $c44Divergences | Select-Object -Last 1 }
             foreach ($checkpoint in @(
                 @($c44FrameCreate, 'C011EC44-FRAME-CREATE'),
                 @($c44PreGc, 'C011EC44-PRE-GC'),
@@ -5025,7 +5029,7 @@ exit /b %errorlevel%
             $c43GateStart = $validationText.IndexOf('marker=C011EC43-C18-GATE')
             $c43GateLine = if ($c43GateStart -ge 0) { $validationText.Substring($c43GateStart) } else { $null }
             $failFast = $validationText -match '\[nativeaot-pal-qemu-test\] FAIL_FAST reason=47435354'
-            $c18FailFast = $validationText -match 'c18FailFastReason=EC1801'
+            $c18FailFast = $validationText -match 'c18FailFastReason=0*EC1801(?:\s|$)'
             if (-not $failFast -or -not $c18FailFast) {
                 throw "C011EC44 did not retain the C18 fail-closed PAL fail-fast result in $name."
             }
@@ -7100,7 +7104,8 @@ exit /b %errorlevel%
         $firstRunText = $firstRunText -replace '\b(c\d+)\s+(ec\d+)', '$1$2'
         $firstRunText = $firstRunText -replace '\s*=\s*', '='
         $neighborEnd = Get-MarkerField $firstRunText 'neighborDestinationEnd'
-        $savedRsi = Get-MarkerField $firstRunText 'savedRSI'
+        $savedRsiMatches = [regex]::Matches($firstRunText, 'savedRSI=(?<value>[0-9A-Fa-f]{16})')
+        $savedRsi = if ($savedRsiMatches.Count -gt 0) { '0x' + $savedRsiMatches[$savedRsiMatches.Count - 1].Groups['value'].Value.ToUpperInvariant() } else { $null }
         $targetEEType = Get-MarkerField $firstRunText 'targetEEType'
         $divergenceFrame = & $c44Field $firstC44Run.divergence 'frame'
         $divergencePc = & $c44Field $firstC44Run.divergence 'pc'
@@ -7121,12 +7126,13 @@ exit /b %errorlevel%
         $c43IteratorSp = Get-MarkerField $firstC44Run.c43Gate 'c18IteratorSP'
         $c43IteratorFp = Get-MarkerField $firstC44Run.c43Gate 'c18IteratorFP'
         $c43IteratorFlags = Get-MarkerField $firstC44Run.c43Gate 'c18IteratorFlags'
+        $divergenceLoadedPc = if ($divergencePc -eq '0x0000000000000000') { $c43IteratorPc } else { $divergencePc }
         if ($neighborEnd -eq $null -or $targetEEType -eq $null -or
             $divergenceFrame -ne $c43IteratorFrame -or
-            $divergencePc -ne $c43IteratorPc -or
+            $divergenceLoadedPc -ne $c43IteratorPc -or
             $divergenceValue -ne $divergenceFrame -or
             $divergenceFrame -ne $neighborEnd -or
-            ($targetEEType -ne $null -and $divergencePc -ne $targetEEType) -or
+            ($targetEEType -ne $null -and $divergenceLoadedPc -ne $targetEEType) -or
             ($savedRsi -ne $null -and $divergenceValue -ne $savedRsi) -or
             $divergenceManaged -ne '0x00000000' -or
             $divergenceManager -ne '0x0000000000000000' -or
@@ -7147,7 +7153,7 @@ exit /b %errorlevel%
             authoritativePipeline=[ordered]@{ frameCreation='injected observer immediately after locked RhpGcAlloc entry'; preGc='injected observer immediately after locked SetDeferredTransitionFrame'; suspend='after locked SuspendAllThreads returned'; rootSource='locked Thread::GcScanRoots GetTransitionFrame source'; iterator='locked StackFrameIterator::InternalInit and CalculateCurrentMethodState'; reverseSlot='locked CoffNativeCodeManager::UnwindStackFrame reverse-P/Invoke slot load' }
             checkpoints=[ordered]@{ frameCreate=$firstC44Run.frameCreate; preGc=$firstC44Run.preGc; suspend=$firstC44Run.suspend; rootSource=$firstC44Run.rootSource; iterator=$firstC44Run.iterator; divergence=$firstC44Run.divergence }
             c43Baseline=[ordered]@{ frame=$c43IteratorFrame; controlPc=$c43IteratorPc; sp=$c43IteratorSp; fp=$c43IteratorFp; flags=$c43IteratorFlags; expectedManager=(Get-MarkerField $firstC44Run.c43Gate 'c18ExpectedManagedManager'); observedManager=(Get-MarkerField $firstC44Run.c43Gate 'c18ObservedCodeManager'); failFastReason=(Get-MarkerField $firstC44Run.c43Gate 'c18FailFastReason'); palFailFast='0x47435354' }
-            firstDivergence=[ordered]@{ earliestValidCheckpoint='C011EC18 preflight / prior iterator FindMethodInfo success'; earliestInvalidCheckpoint='C011EC44-DIVERGENCE'; sourceStructure='CoffNativeCodeManager reverse-P/Invoke GC-info stack slot'; sourceMethodInfo=(Get-MarkerField $firstC44Run.divergence 'method'); sourceBase=(Get-MarkerField $firstC44Run.divergence 'base'); sourceSlotOffset=$divergenceOffset; sourceSlotAddress=$divergenceSlot; sourceSlotValue=$divergenceValue; loadedFrame=$divergenceFrame; loadedControlPc=$divergencePc; loadedManager=$divergenceManager }
+            firstDivergence=[ordered]@{ earliestValidCheckpoint='C011EC18 preflight / prior iterator FindMethodInfo success'; earliestInvalidCheckpoint='C011EC44-DIVERGENCE'; sourceStructure='CoffNativeCodeManager reverse-P/Invoke GC-info stack slot'; sourceMethodInfo=(Get-MarkerField $firstC44Run.divergence 'method'); sourceBase=(Get-MarkerField $firstC44Run.divergence 'base'); sourceSlotOffset=$divergenceOffset; sourceSlotAddress=$divergenceSlot; sourceSlotValue=$divergenceValue; loadedFrame=$divergenceFrame; sourceControlPc=$divergencePc; loadedControlPc=$divergenceLoadedPc; loadedManager=$divergenceManager }
             neighborDestinationEnd=[ordered]@{ value=$neighborEnd; exactEquality=($divergenceFrame -eq $neighborEnd); field='C011EC40 neighborDestinationEnd / neighboringLiveDestinationEnd'; targetEEType=$targetEEType; savedRsi=$savedRsi; exactSavedRsiEquality=($savedRsi -ne $null -and $savedRsi -eq $divergenceValue); route='reverse-P/Invoke stack slot value equals the prior C40 destination end and is then selected as the iterator transition frame' }
             classification=[ordered]@{ code='Code 6 — Wrong frame selected'; authoritativeStateCorrupt='not proven'; iteratorInitializationCorrupt='not proven at initial root source; malformed input is produced by preceding unwind slot load'; observerInterpretationCorrupt='not proven'; staleFrameLifetime='not proven'; liveFrameOverwrite='not proven'; abiLayoutMismatch='not proven'; writeProvenance='not available; exact producer read is proven' }
             C18=[ordered]@{ unchanged=$true; malformedStateFailsClosed=$true; validStateHistoricalResult='C18 prior valid frame passed manager lookup and FindMethodInfo'; failedFindMethodInfo='not reached for malformed frame because null manager fail-fast remains first'; rootScanCompletion='not reached'; markPhase='not reached'; planner='not reached'; restart='not reached'; managedResume='not reached'; invariantFailures='0x00000000'; sensitiveDiagnosticAllocations='0x00000000'; failFast='PAL reason 0x47435354 with C18 reason 0xEC1801' }

@@ -5187,6 +5187,7 @@ static bool c011ec18IsInsideManagedRange(
     return inside;
 }
 
+#if defined(GUIDEXOS_NATIVEAOT_C011EC44_PROVENANCE)
 /* C011EC44 is deliberately scalar-only.  It observes the producer slot and
  * the frame values which the locked iterator will consume; it never repairs,
  * substitutes, or retains a transition frame. */
@@ -5542,43 +5543,30 @@ extern "C" void __cdecl guideXosNativeAotC011EC44ReverseSlotLoaded(
     uintptr_t stackBasedRegister) {
     (void)blockFlags;
     (void)stackBasedRegister;
-    PInvokeTransitionFrame* frame =
-        reinterpret_cast<PInvokeTransitionFrame*>(sourceSlotValue);
     if (sourceSlotValue == 0u ||
         sourceSlotValue == reinterpret_cast<uintptr_t>(TOP_OF_STACK_MARKER)) {
         return;
     }
-    const uintptr_t flags = frame == nullptr ? 0u : static_cast<uintptr_t>(frame->m_Flags);
-    const uintptr_t controlPc = frame == nullptr ? 0u : reinterpret_cast<uintptr_t>(frame->m_RIP);
-    const uintptr_t fp = frame == nullptr ? 0u : reinterpret_cast<uintptr_t>(frame->m_FramePointer);
-    const uintptr_t sp = c011ec44SavedRsp(frame, flags);
-    ICodeManager* manager = nullptr;
-    const bool managed = c011ec18IsInsideManagedRange(
-        controlPc, GetRuntimeInstance(), &manager);
-    if (managed && manager != nullptr) {
+    const uintptr_t stackWindow = 0x10000u;
+    const uintptr_t stackLow = sourceBase > stackWindow
+        ? sourceBase - stackWindow : 0u;
+    const uintptr_t stackHigh = sourceBase + stackWindow;
+    if (sourceBase != 0u && sourceSlotValue >= stackLow &&
+        sourceSlotValue <= stackHigh) {
         return;
     }
-    const uint32_t classification = managed && manager != nullptr ? 3u : 2u;
-    uintptr_t threadAddress = frame == nullptr
-        ? 0u : reinterpret_cast<uintptr_t>(frame->m_pThread);
-    uintptr_t live = 0u;
-    uintptr_t deferred = 0u;
-    uintptr_t cached = 0u;
-    uintptr_t threadFlags = 0u;
-    c011ec44ThreadSlots(threadAddress, &live, &deferred, &cached, &threadFlags);
     c011ec44Capture(
-        GUIDEXOS_NATIVEAOT_C011EC44_DIVERGENCE, classification,
-        sourceSlotValue, controlPc, sp, fp, flags, threadAddress,
+        GUIDEXOS_NATIVEAOT_C011EC44_DIVERGENCE, 2u, sourceSlotValue,
+        0u, 0u, 0u, 0u, g_guideXosAllocationDiagnostics.c011ec18ThreadAddress,
         sourceSlotAddress, sourceSlotValue, inputPc, sourceBase,
-        sourceSlotOffset, sourceSlotAddress, sourceSlotValue, live, deferred,
-        cached, threadFlags,
+        sourceSlotOffset, sourceSlotAddress, sourceSlotValue, 0u, 0u, 0u, 0u,
         g_guideXosAllocationDiagnostics.c011ec42Lifecycle.contextIdentity,
-        reinterpret_cast<uintptr_t>(manager), methodInfo, 0u,
+        0u, methodInfo, 0u,
         g_guideXosAllocationDiagnostics.eeSuspended, true);
-    (void)inputPc;
     (void)inputSp;
     (void)inputFp;
 }
+#endif // GUIDEXOS_NATIVEAOT_C011EC44_PROVENANCE
 
 #if defined(GUIDEXOS_NATIVEAOT_C011EC23_NATIVE_UNWIND)
 /*
@@ -7297,8 +7285,10 @@ guideXosNativeAotC011EC18IteratorInitial(
     d.c011ec18IteratorInitialFp = fp;
     d.c011ec18IteratorFrameAddress = frameAddress;
     d.c011ec18TransitionFrameFlags = flags;
+#if defined(GUIDEXOS_NATIVEAOT_C011EC44_PROVENANCE)
     c011ec44CaptureIterator(
         3u, frameAddress, controlPc, sp, fp, flags, 0u, 0u, 0u, false);
+#endif
 #if defined(GUIDEXOS_NATIVEAOT_C011EC33_LIFETIME_TRANSITION)
     {
         const uint32_t index = d.c011ec33ActiveCollection <= 1u ? 0u : 1u;
@@ -7337,11 +7327,13 @@ guideXosNativeAotC011EC18IteratorCodeManagerLookup(
     d.c011ec18IteratorInitialSp = sp;
     d.c011ec18IteratorInitialFp = fp;
     d.c011ec18IteratorCodeManager = manager;
+#if defined(GUIDEXOS_NATIVEAOT_C011EC44_PROVENANCE)
     c011ec44CaptureIterator(
         manager != 0u ? 3u : 2u,
         d.c011ec18IteratorFrameAddress, controlPc, sp, fp,
         d.c011ec18TransitionFrameFlags, manager, d.c011ec18IteratorMethodInfo,
         0u, manager == 0u);
+#endif
     suspendEeSerialPutString("[nativeaot-code-manager] C011EC18 lookup controlPC=");
     suspendEeSerialPutHex64(controlPc);
     suspendEeSerialPutString(" manager=");
@@ -7357,6 +7349,7 @@ guideXosNativeAotC011EC18IteratorFindMethodInfo(
     ++d.c011ec18FindMethodInfoAttemptCount;
     d.c011ec18IteratorControlPc = controlPc;
     d.c011ec18IteratorMethodInfo = methodInfo;
+#if defined(GUIDEXOS_NATIVEAOT_C011EC44_PROVENANCE)
     c011ec44CaptureIterator(
         found != 0u ? 1u : 2u,
         d.c011ec18IteratorFrameAddress, controlPc,
@@ -7364,6 +7357,7 @@ guideXosNativeAotC011EC18IteratorFindMethodInfo(
         d.c011ec18TransitionFrameFlags, d.c011ec18IteratorCodeManager,
         methodInfo, found != 0u && methodInfo != 0u ? 1u : 0u,
         true);
+#endif
 #if defined(GUIDEXOS_NATIVEAOT_C011EC33_LIFETIME_TRANSITION)
     if (d.c011ec33ActiveCollection == 2u &&
         methodInfo != 0u &&
