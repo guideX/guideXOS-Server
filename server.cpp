@@ -653,6 +653,113 @@ static std::string navigatorHostedSmokeDiagnostic() {
         std::to_string(js9RevisionAfterA1) + ",dirty=" +
         yesNo(!js9CleanAfterClicks));
 
+    const bool js10Loaded = gxos::apps::Navigator::SmokeNavigateToQuiet(
+        "http://127.0.0.1:8080/navigator-smoke/javascript-js10.html");
+    const std::string js10InitialText =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    const uint64_t js10InitialRevision =
+        gxos::apps::Navigator::SmokeDocumentLayoutRevision();
+    int js10AX = 0;
+    int js10AY = 0;
+    int js10AW = 0;
+    int js10AH = 0;
+    const bool js10AHasGeometry = gxos::apps::Navigator::SmokeBlockGeometryById(
+        "js10-a", js10AX, js10AY, js10AW, js10AH);
+    const bool js10AHit = gxos::apps::Navigator::SmokeFormHitTargetById("js10-a");
+    const size_t js10Handlers =
+        gxos::apps::Navigator::SmokeJavaScriptHandlerCount();
+    const size_t js10Listeners =
+        gxos::apps::Navigator::SmokeJavaScriptListenerCount();
+    const std::string js10InitialError =
+        gxos::apps::Navigator::SmokeJavaScriptLastError();
+    const bool js10ClickA1 =
+        gxos::apps::Navigator::SmokeClickFormControlById("js10-a");
+    const std::string js10AfterA1 =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    const uint64_t js10RevisionAfterA1 =
+        gxos::apps::Navigator::SmokeDocumentLayoutRevision();
+    const bool js10ClickA2 =
+        gxos::apps::Navigator::SmokeClickFormControlById("js10-a");
+    const std::string js10AfterA2 =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    const bool js10ClickA3 =
+        gxos::apps::Navigator::SmokeClickFormControlById("js10-a");
+    const std::string js10AfterA3 =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    const bool js10ClickB1 =
+        gxos::apps::Navigator::SmokeClickFormControlById("js10-b");
+    const std::string js10AfterB1 =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    const bool js10ClickBad =
+        gxos::apps::Navigator::SmokeClickFormControlById("js10-bad");
+    const std::string js10Error =
+        gxos::apps::Navigator::SmokeJavaScriptLastError();
+    const bool js10ClickB2 =
+        gxos::apps::Navigator::SmokeClickFormControlById("js10-b");
+    const std::string js10AfterB2 =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    const bool js10CleanAfterClicks =
+        !gxos::apps::Navigator::SmokeDocumentDirty();
+    add("JS10 hosted fixture resolves and registers bounded listeners",
+        js10Loaded && contains(js10InitialText, "Navigator JavaScript JS10") &&
+        js10Handlers == 3u && js10Listeners == 3u && js10InitialError.empty(),
+        std::string("loaded=") + yesNo(js10Loaded) + ",records=" +
+        std::to_string(js10Handlers) + ",listeners=" +
+        std::to_string(js10Listeners) + ",error=" +
+        (js10InitialError.empty() ? "none" : js10InitialError));
+    add("JS10 hosted physical click reaches the listener",
+        js10AHasGeometry && js10AW > 0 && js10AH > 0 && js10AHit &&
+        js10ClickA1 && contains(js10AfterA1, "Count 1") &&
+        contains(js10AfterA1, "ol"),
+        std::string("geometry=") + yesNo(js10AHasGeometry) + ",hit=" +
+        yesNo(js10AHit) + ",click=" + yesNo(js10ClickA1));
+    add("JS10 hosted same-realm closure persists 1 to 2 to 3",
+        js10ClickA2 && contains(js10AfterA2, "Count 2") &&
+        js10ClickA3 && contains(js10AfterA3, "Count 3") &&
+        contains(js10AfterA3, "ololol"),
+        std::string("a2=") + yesNo(js10ClickA2) + ",a3=" +
+        yesNo(js10ClickA3));
+    add("JS10 hosted onclick precedes addEventListener",
+        contains(js10AfterA3, "ololol"),
+        "expected visible order marker ololol");
+    add("JS10 hosted independent listener state remains isolated",
+        js10ClickB1 && contains(js10AfterB1, "B 12") &&
+        contains(js10AfterB1, "Count 3") && js10ClickB2 &&
+        contains(js10AfterB2, "B 14") && contains(js10AfterB2, "Count 3"),
+        std::string("b1=") + yesNo(js10ClickB1) + ",b2=" +
+        yesNo(js10ClickB2));
+    add("JS10 hosted callback errors are contained",
+        js10ClickBad && contains(js10Error, "UnknownIdentifier") &&
+        js10ClickB2 && contains(js10AfterB2, "B 14"),
+        std::string("bad-click=") + yesNo(js10ClickBad) + ",error=" +
+        (js10Error.empty() ? "none" : js10Error));
+    add("JS10 hosted mutation triggers relayout",
+        js10RevisionAfterA1 > js10InitialRevision && js10CleanAfterClicks,
+        "revision=" + std::to_string(js10InitialRevision) + "->" +
+        std::to_string(js10RevisionAfterA1) + ",dirty=" +
+        yesNo(!js10CleanAfterClicks));
+    const bool js10LinkHit =
+        gxos::apps::Navigator::SmokeHitLinkById("js10-link");
+    // This fixture contains one ordinary link.  SmokeHitLinkById validates
+    // the shared hit-test path; SmokeClickFirstLink performs the authentic
+    // mouse down/up navigation through that hit-tested link.
+    const bool js10LinkClick =
+        js10LinkHit && gxos::apps::Navigator::SmokeClickFirstLink();
+    const std::string js10TargetText =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS10 ordinary link navigation remains functional",
+        js10LinkHit && js10LinkClick &&
+        gxos::apps::Navigator::SmokeCurrentUrl() ==
+            "http://127.0.0.1:8080/navigator-smoke/javascript-js10-target.html" &&
+        contains(js10TargetText, "Navigator JavaScript JS10 Target"),
+        std::string("hit=") + yesNo(js10LinkHit) + ",link=" +
+        yesNo(js10LinkClick) + ",url=" +
+        gxos::apps::Navigator::SmokeCurrentUrl());
+    add("JS10 navigation removes old listeners",
+        gxos::apps::Navigator::SmokeJavaScriptHandlerCount() == 0u &&
+        gxos::apps::Navigator::SmokeJavaScriptListenerCount() == 0u,
+        "expected document-scoped listener storage to reset");
+
     bool cssInlineLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-inline.html");
     std::string cssInlineText = gxos::apps::Navigator::SmokeCurrentDocumentText();
     std::string cssInlineReport = gxos::apps::Navigator::SmokeRuntimeReport();

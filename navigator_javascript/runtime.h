@@ -320,7 +320,8 @@ private:
     bool createNativeFunction(NativeFunctionId native,
         RuntimeFunctionId& result, RuntimeErrorCode& error);
     bool createHostMethod(RuntimeHostObjectId object, std::uint32_t method,
-        bool requiresReceiver, RuntimeFunctionId& result,
+        bool requiresReceiver, bool sharedAcrossReceivers,
+        RuntimeFunctionId& result,
         RuntimeErrorCode& error);
     const FunctionRecord* functionAt(RuntimeFunctionId id) const;
     bool createObject(bool array, const std::vector<Value>& initialElements,

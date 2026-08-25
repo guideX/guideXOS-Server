@@ -15429,6 +15429,11 @@ size_t Navigator::SmokeJavaScriptHandlerCount()
 	return s_scriptHostAdapter.clickHandlerCount();
 }
 
+size_t Navigator::SmokeJavaScriptListenerCount()
+{
+	return s_scriptHostAdapter.clickListenerCount();
+}
+
 std::string Navigator::SmokeJavaScriptLastError()
 {
 	return s_lastJavaScriptError;

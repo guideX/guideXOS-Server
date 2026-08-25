@@ -1,0 +1,38 @@
+<!doctype html>
+<html>
+<head><title>Navigator JavaScript JS10</title></head>
+<body>
+<h1>Navigator JavaScript JS10</h1>
+<p>These controls use the bounded same-realm click-listener bridge.</p>
+<button id="js10-a" type="button">0</button>
+<button id="js10-b" type="button">B 10</button>
+<button id="js10-bad" type="button">Bad</button>
+<p id="js10-order">order</p>
+<a id="js10-link" href="/navigator-smoke/javascript-js10-target.html">Navigate after JS10</a>
+<script>
+var js10Count = 0;
+var js10BCount = 10;
+var js10Order = "";
+var js10A = document.getElementById("js10-a");
+var js10B = document.getElementById("js10-b");
+var js10Bad = document.getElementById("js10-bad");
+var js10OrderElement = document.getElementById("js10-order");
+js10A.onclick = function () {
+    js10Order = js10Order + "o";
+};
+js10A.addEventListener("click", function () {
+    js10Count = js10Count + 1;
+    js10Order = js10Order + "l";
+    js10A.textContent = "Count " + js10Count;
+    js10OrderElement.textContent = js10Order;
+});
+js10B.addEventListener("click", function () {
+    js10BCount = js10BCount + 2;
+    js10B.textContent = "B " + js10BCount;
+});
+js10Bad.addEventListener("click", function () {
+    js10MissingFunction();
+});
+</script>
+</body>
+</html>

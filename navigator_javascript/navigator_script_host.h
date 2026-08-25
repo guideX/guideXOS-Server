@@ -20,6 +20,7 @@ constexpr HostObjectKind kNavigatorElementHostKind = 0x4A530802u;
 constexpr HostInstanceId kNavigatorDocumentHostInstance = 1u;
 
 constexpr std::uint32_t kNavigatorGetElementByIdMethod = 1u;
+constexpr std::uint32_t kNavigatorAddEventListenerMethod = 2u;
 
 constexpr std::size_t kNavigatorScriptMaxDocumentIdLength = 256u;
 constexpr std::size_t kNavigatorScriptMaxTextContentAssignment = 64u * 1024u;
@@ -38,6 +39,7 @@ struct NavigatorScriptHostLimits {
     std::size_t maxDocumentMutations = kNavigatorScriptMaxDocumentMutations;
     std::size_t maxDocumentNodes = kNavigatorScriptMaxDocumentNodes;
     std::size_t maxClickHandlers = kNavigatorScriptMaxClickHandlers;
+    std::size_t maxClickListeners = kNavigatorScriptMaxClickHandlers;
 };
 
 // The adapter never stores a JavaScript pointer and never creates a
@@ -75,18 +77,24 @@ public:
     bool dispatchClick(RuntimeContext& runtime, HostInstanceId serial,
         RuntimeErrorCode& error);
     bool hasClickHandler(HostInstanceId serial) const;
+    std::size_t clickListenerCount() const { return clickListenerCount_; }
     std::size_t clickHandlerCount() const { return clickHandlerCount_; }
     void clearClickHandlers();
 
 private:
     struct ClickHandlerRecord {
         HostInstanceId serial = 0;
-        RuntimeFunctionId function = kInvalidRuntimeFunctionId;
+        RuntimeFunctionId onclickFunction = kInvalidRuntimeFunctionId;
+        RuntimeFunctionId listenerFunction = kInvalidRuntimeFunctionId;
     };
+    static_assert(sizeof(ClickHandlerRecord) == 16u,
+        "Navigator click records must remain 16 bytes");
 
     std::size_t callbackLimit() const;
+    std::size_t listenerLimit() const;
     ClickHandlerRecord* clickHandlerFor(HostInstanceId serial);
     const ClickHandlerRecord* clickHandlerFor(HostInstanceId serial) const;
+    void removeEmptyClickHandler(HostInstanceId serial);
     gxos::web::HtmlElementRef* findElement(HostInstanceId serial);
     const gxos::web::HtmlElementRef* findElement(HostInstanceId serial) const;
     bool isKnownElementSerial(HostInstanceId serial) const;
@@ -108,6 +116,7 @@ private:
     std::array<ClickHandlerRecord, kNavigatorScriptMaxClickHandlers>
         clickHandlers_{};
     std::size_t clickHandlerCount_ = 0;
+    std::size_t clickListenerCount_ = 0;
     bool clickDispatchActive_ = false;
     // Returned strings are copied synchronously by RuntimeContext. Keeping
     // one adapter-owned scratch value avoids exposing mutable document memory.

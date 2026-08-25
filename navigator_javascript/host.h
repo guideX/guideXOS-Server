@@ -68,6 +68,10 @@ struct HostValue {
     HostObjectReference hostObject;
     std::uint32_t methodId = 0;
     bool methodRequiresReceiver = false;
+    // A bounded receiver-aware method may use one runtime wrapper for all
+    // host objects of that method. The receiver is still checked at call
+    // time; this only avoids one cached wrapper per element.
+    bool methodSharedAcrossReceivers = false;
 
     static HostValue undefined() { return HostValue(); }
 
@@ -126,12 +130,14 @@ struct HostValue {
         return result;
     }
 
-    static HostValue method(std::uint32_t value, bool requiresReceiver)
+    static HostValue method(std::uint32_t value, bool requiresReceiver,
+        bool sharedAcrossReceivers = false)
     {
         HostValue result;
         result.type = HostValueType::Method;
         result.methodId = value;
         result.methodRequiresReceiver = requiresReceiver;
+        result.methodSharedAcrossReceivers = sharedAcrossReceivers;
         return result;
     }
 };

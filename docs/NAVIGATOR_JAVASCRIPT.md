@@ -6,9 +6,11 @@ Navigator currently has a reusable HTML document/parser layer in
 `guide_web_document.*` and `guide_web_html_parser.*`, with Navigator-specific
 navigation and rendering in `navigator.*`. The independent JavaScript
 subsystem now contains a bounded lexer, parser/AST, runtime core, and the JS8
-controlled document bridge described below. It still has no event scripting
-system or automatic `<script>` execution path. The existing HTML parser
-intentionally strips `<script>` content.
+controlled document bridge described below. It has no general event system,
+but JS9/JS10 provide a deliberately bounded inline-script and synchronous
+click-callback path. The existing HTML parser preserves only the bounded
+inline script sources needed by that Navigator path; this is not browser
+script compatibility.
 
 JavaScript is therefore a separate subsystem. It must not become an implicit
 part of HTML parsing or page loading. Phase JS1 accepts source text and
@@ -1264,11 +1266,116 @@ property/readback, function expressions, replacement, non-callable rejection,
 matching and non-matching dispatch, closure persistence, DOM mutation and
 controlled relayout, independent elements, error containment, self-replacement,
 navigation cleanup, stale-generation safety, the 64-record limit, links, and
-missing elements. The hosted smoke is integrated but cannot be executed in the
-current checkout because the full native build stops before producing the
-server executable at the pre-existing missing `third_party/mbedtls` dependency;
-JS9 did not introduce a new native build error.
+missing elements. The hosted JS9 smoke is integrated into `navigator.smoke` and
+passes on the repaired hosted production path.
 
 Intentional JS9 non-goals remain full EventTarget behavior, `addEventListener`,
 event objects, bubbling/capture, `preventDefault`, dynamic DOM creation,
 attributes, CSSOM, timers, async work, promises, modules, and navigation APIs.
+
+## Phase JS10: bounded Element.addEventListener click listeners
+
+JS10 adds one narrow extension on the existing JS9 direct-click machinery:
+
+```javascript
+element.addEventListener("click", callback)
+```
+
+This is a bounded Navigator subset, not browser-complete DOM Events. The
+dispatch path remains:
+
+```text
+rendered element
+  -> existing Navigator hit test
+  -> handleDocumentClick(element block)
+  -> bounded onclick record lookup
+  -> original onclick function, if present
+  -> original addEventListener function, if present
+  -> RuntimeContext::invokeFunctionInSameRealm()
+  -> existing Element.textContent mutation / layout invalidation
+  -> existing controlled relayout/repaint
+```
+
+### JS10 contract
+
+The supported addition is exactly:
+
+```text
+Element.addEventListener("click", Function)
+```
+
+Only the exact event name `"click"` is supported. Other event names are
+rejected with the existing bounded `HostInvalidValue` runtime error and are
+never silently registered. The callback must be a callable JavaScript
+function value supported by the runtime; non-callable values fail with the
+same error and do not change an existing listener. The Element host method is
+receiver-aware, so a method retained from a stale Element cannot register on a
+new generation.
+
+The callback is invoked with zero arguments. JS10 does not create a DOM
+`Event` object. Dispatch is synchronous and has no event queue, timers,
+promises, microtasks, asynchronous callback path, bubbling, capture phase,
+propagation path, `stopPropagation`, `stopImmediatePropagation`,
+`preventDefault`, or listener option objects. Keyboard, pointer, form,
+mousemove, mousedown, mouseup, submit, change, and input event types remain
+out of scope.
+
+If an element has both JS9 `onclick` and a JS10 click listener, JS10 preserves
+both in the same bounded record and invokes `onclick` first, followed by the
+listener. Function IDs are copied before dispatch, so replacement or clearing
+during a callback takes effect on the next click. A callback error is handled
+by the existing runtime error path; the other callback is still dispatched and
+future clicks remain usable.
+
+### Same realm, lifetime, and bounds
+
+The adapter retains only the element serial and runtime-owned function IDs. It
+never reparses callback source, stores a JavaScript pointer, recreates a realm,
+or recreates a captured environment. The existing RuntimeContext owns the
+function and closure environment until the realm is reset, so a closure such
+as `count = count + 1` naturally persists across clicks.
+
+JS10 keeps the JS9 fixed table. There are at most 64 element records, each
+exactly 16 bytes (`HostInstanceId` plus two `RuntimeFunctionId` values), for a
+fixed 1,024-byte callback table. Each record has one JS9 `onclick` slot and
+one JS10 click-listener slot. JS10 permits at most 64 listener registrations
+per document and at most one listener per element. A duplicate
+`addEventListener("click", ...)` call deterministically replaces that
+element's existing listener without consuming another listener slot. The
+record table itself is shared with `onclick`; if it is full of other element
+records, a new element cannot claim another record. No per-click listener
+allocation or click-count-proportional storage is introduced.
+
+The receiver-aware `addEventListener` host method uses one bounded cached
+runtime wrapper across Element receivers, while the actual receiver is still
+validated on every call. This keeps the pre-existing 64 cached-host-method
+limit intact and does not add a dynamic dispatch or reflection system.
+
+Document attach/detach, realm reset, host-generation changes, and navigation
+clear all listener records. Old Element host objects and old callback values
+therefore cannot register into or dispatch against a replacement document.
+Stale generation failures use the existing `StaleHostObject` convention.
+
+### JS10 proof fixtures and results
+
+`tests/navigator_javascript_js10_test.cpp`, run by
+`scripts/smoke-navigator-javascript-js10.ps1`, covers method exposure,
+callable validation, unsupported event rejection, same-realm closure state,
+three counter clicks, `onclick` ordering and coexistence, independent
+listeners, callback-error containment, stale-generation cleanup, document
+replacement cleanup, duplicate replacement, and listener exhaustion. It
+proves registrations 1 through 64 succeed, registration 65 fails with the
+bounded callback-limit error, and existing listeners continue working.
+
+The hosted `navigator.smoke` path uses
+`navigator-smoke/javascript-js10.html` to prove page/script loading, Element
+method resolution, physical hit-tested clicks, `onclick` then listener order,
+closure persistence `1 -> 2 -> 3`, independent listener state, mutation and
+relayout, callback error recovery, ordinary link navigation, and listener
+cleanup after navigation. JS10-specific assertions are reported separately
+from unrelated CSS smoke phases.
+
+JS10 intentionally does not add `removeEventListener`, multiple listeners per
+element, listener options, event objects, event propagation, default-action
+control, keyboard or other event types, timers, asynchronous dispatch, or
+general browser DOM Events behavior.

@@ -2152,12 +2152,14 @@ bool RuntimeContext::createNativeFunction(NativeFunctionId native,
 }
 
 bool RuntimeContext::createHostMethod(RuntimeHostObjectId object,
-    std::uint32_t method, bool requiresReceiver, RuntimeFunctionId& result,
-    RuntimeErrorCode& error)
+    std::uint32_t method, bool requiresReceiver, bool sharedAcrossReceivers,
+    RuntimeFunctionId& result, RuntimeErrorCode& error)
 {
     error = RuntimeErrorCode::None;
+    const RuntimeHostObjectId cacheOwner = sharedAcrossReceivers
+        ? kInvalidRuntimeHostObjectId : object;
     for (const HostMethodRecord& record : hostMethods_) {
-        if (record.hostObject == object && record.method == method &&
+        if (record.hostObject == cacheOwner && record.method == method &&
             record.requiresReceiver == requiresReceiver) {
             result = record.function;
             return true;
@@ -2171,13 +2173,13 @@ bool RuntimeContext::createHostMethod(RuntimeHostObjectId object,
     try {
         FunctionRecord function;
         function.kind = FunctionRecord::Kind::Host;
-        function.hostObject = object;
+        function.hostObject = cacheOwner;
         function.hostMethod = method;
         function.hostMethodRequiresReceiver = requiresReceiver;
         functions_.push_back(function);
 
         HostMethodRecord record;
-        record.hostObject = object;
+        record.hostObject = cacheOwner;
         record.method = method;
         record.requiresReceiver = requiresReceiver;
         record.function = static_cast<RuntimeFunctionId>(functions_.size() - 1u);
@@ -2919,13 +2921,15 @@ bool RuntimeContext::convertHostValue(const HostValue& value,
         return true;
     }
     case HostValueType::Method: {
-        if (methodOwner == kInvalidRuntimeHostObjectId) {
+        if (!value.methodSharedAcrossReceivers &&
+            methodOwner == kInvalidRuntimeHostObjectId) {
             error = RuntimeErrorCode::InvalidHostReturn;
             return false;
         }
         RuntimeFunctionId function = kInvalidRuntimeFunctionId;
         if (!createHostMethod(methodOwner, value.methodId,
-            value.methodRequiresReceiver, function, error)) return false;
+            value.methodRequiresReceiver, value.methodSharedAcrossReceivers,
+            function, error)) return false;
         result = Value::function(function);
         return true;
     }
@@ -2945,7 +2949,8 @@ bool RuntimeContext::invokeHostMethod(const FunctionRecord& function,
     }
     HostObjectReference owner;
     RuntimeErrorCode error = RuntimeErrorCode::None;
-    if (!resolveHostObject(function.hostObject, owner, error)) {
+    if (function.hostObject != kInvalidRuntimeHostObjectId &&
+        !resolveHostObject(function.hostObject, owner, error)) {
         setRuntimeError(error, location);
         return false;
     }
@@ -2957,7 +2962,8 @@ bool RuntimeContext::invokeHostMethod(const FunctionRecord& function,
             setRuntimeError(RuntimeErrorCode::InvalidReceiver, location);
             return false;
         }
-        if (receiver.hostObjectId() != function.hostObject) {
+        if (function.hostObject != kInvalidRuntimeHostObjectId &&
+            receiver.hostObjectId() != function.hostObject) {
             setRuntimeError(RuntimeErrorCode::InvalidReceiver, location);
             return false;
         }

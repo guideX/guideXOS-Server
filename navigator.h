@@ -847,6 +847,7 @@ public:
 	static uint64_t SmokeDocumentLayoutRevision();
 	static bool SmokeDocumentDirty();
 	static size_t SmokeJavaScriptHandlerCount();
+	static size_t SmokeJavaScriptListenerCount();
 	static std::string SmokeJavaScriptLastError();
 	static std::string SmokeCurrentLinkUrl(const std::string& text);
 	static bool SmokeClickFormControlById(const std::string& id);

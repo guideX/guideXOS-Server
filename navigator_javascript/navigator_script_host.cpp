@@ -115,6 +115,11 @@ std::size_t NavigatorScriptHostAdapter::callbackLimit() const
     return std::min(limits_.maxClickHandlers, clickHandlers_.size());
 }
 
+std::size_t NavigatorScriptHostAdapter::listenerLimit() const
+{
+    return std::min(limits_.maxClickListeners, clickHandlers_.size());
+}
+
 NavigatorScriptHostAdapter::ClickHandlerRecord*
 NavigatorScriptHostAdapter::clickHandlerFor(HostInstanceId serial)
 {
@@ -135,14 +140,33 @@ NavigatorScriptHostAdapter::clickHandlerFor(HostInstanceId serial) const
 
 bool NavigatorScriptHostAdapter::hasClickHandler(HostInstanceId serial) const
 {
-    return clickHandlerFor(serial) != nullptr;
+    const ClickHandlerRecord* record = clickHandlerFor(serial);
+    return record != nullptr &&
+        (record->onclickFunction != kInvalidRuntimeFunctionId ||
+            record->listenerFunction != kInvalidRuntimeFunctionId);
 }
 
 void NavigatorScriptHostAdapter::clearClickHandlers()
 {
     for (ClickHandlerRecord& record : clickHandlers_) record = ClickHandlerRecord();
     clickHandlerCount_ = 0;
+    clickListenerCount_ = 0;
     clickDispatchActive_ = false;
+}
+
+void NavigatorScriptHostAdapter::removeEmptyClickHandler(HostInstanceId serial)
+{
+    for (std::size_t index = 0; index < clickHandlerCount_; ++index) {
+        ClickHandlerRecord& record = clickHandlers_[index];
+        if (record.serial != serial ||
+            record.onclickFunction != kInvalidRuntimeFunctionId ||
+            record.listenerFunction != kInvalidRuntimeFunctionId) continue;
+        for (std::size_t move = index + 1; move < clickHandlerCount_; ++move)
+            clickHandlers_[move - 1] = clickHandlers_[move];
+        clickHandlers_[clickHandlerCount_ - 1] = ClickHandlerRecord();
+        --clickHandlerCount_;
+        return;
+    }
 }
 
 bool NavigatorScriptHostAdapter::dispatchClick(RuntimeContext& runtime,
@@ -154,22 +178,37 @@ bool NavigatorScriptHostAdapter::dispatchClick(RuntimeContext& runtime,
         return false;
     }
     const ClickHandlerRecord* record = clickHandlerFor(serial);
-    if (record == nullptr) return true;
+    if (record == nullptr ||
+        (record->onclickFunction == kInvalidRuntimeFunctionId &&
+            record->listenerFunction == kInvalidRuntimeFunctionId)) return true;
     if (clickDispatchActive_) {
         error = RuntimeErrorCode::HostReentryUnsupported;
         return false;
     }
 
-    // Copy the function ID before entering user code. If the callback assigns
-    // a replacement to onclick, the replacement is therefore used only by a
-    // subsequent click.
-    const RuntimeFunctionId function = record->function;
+    // Copy both function IDs before entering user code. If either callback
+    // replaces or clears a handler, the change is therefore used only by a
+    // subsequent click. onclick intentionally runs before addEventListener.
+    const RuntimeFunctionId onclickFunction = record->onclickFunction;
+    const RuntimeFunctionId listenerFunction = record->listenerFunction;
     clickDispatchActive_ = true;
     std::vector<Value> noArguments;
     Value ignored;
-    const bool succeeded = runtime.invokeFunctionInSameRealm(
-        Value::function(function), noArguments, ignored, error);
+    bool succeeded = true;
+    RuntimeErrorCode firstError = RuntimeErrorCode::None;
+    const auto invoke = [&](RuntimeFunctionId function) {
+        if (function == kInvalidRuntimeFunctionId) return;
+        RuntimeErrorCode callbackError = RuntimeErrorCode::None;
+        if (!runtime.invokeFunctionInSameRealm(Value::function(function),
+            noArguments, ignored, callbackError)) {
+            succeeded = false;
+            if (firstError == RuntimeErrorCode::None) firstError = callbackError;
+        }
+    };
+    invoke(onclickFunction);
+    invoke(listenerFunction);
     clickDispatchActive_ = false;
+    error = firstError;
     return succeeded;
 }
 
@@ -268,8 +307,13 @@ HostResult NavigatorScriptHostAdapter::getProperty(
     }
     if (textEquals(property, "onclick")) {
         const ClickHandlerRecord* record = clickHandlerFor(element->serial);
-        result = record == nullptr ? HostValue::nullValue() :
-            HostValue::function(record->function);
+        result = record == nullptr ||
+            record->onclickFunction == kInvalidRuntimeFunctionId
+            ? HostValue::nullValue() : HostValue::function(record->onclickFunction);
+        return HostResult();
+    }
+    if (textEquals(property, "addEventListener")) {
+        result = HostValue::method(kNavigatorAddEventListenerMethod, true, true);
         return HostResult();
     }
     return HostResult{HostResultCode::PropertyNotFound};
@@ -490,14 +534,9 @@ HostResult NavigatorScriptHostAdapter::setProperty(
         return HostResult{HostResultCode::PropertyReadOnly};
     if (textEquals(property, "onclick")) {
         if (value.type == HostValueType::Null) {
-            for (std::size_t index = 0; index < clickHandlerCount_; ++index) {
-                if (clickHandlers_[index].serial != object.instanceId) continue;
-                for (std::size_t move = index + 1; move < clickHandlerCount_; ++move)
-                    clickHandlers_[move - 1] = clickHandlers_[move];
-                clickHandlers_[clickHandlerCount_ - 1] = ClickHandlerRecord();
-                --clickHandlerCount_;
-                break;
-            }
+            if (ClickHandlerRecord* record = clickHandlerFor(object.instanceId))
+                record->onclickFunction = kInvalidRuntimeFunctionId;
+            removeEmptyClickHandler(object.instanceId);
             return HostResult();
         }
         if (value.type != HostValueType::Function ||
@@ -505,13 +544,13 @@ HostResult NavigatorScriptHostAdapter::setProperty(
             return HostResult{HostResultCode::InvalidValue};
         }
         if (ClickHandlerRecord* record = clickHandlerFor(object.instanceId)) {
-            record->function = value.functionId;
+            record->onclickFunction = value.functionId;
             return HostResult();
         }
         if (clickHandlerCount_ >= callbackLimit())
             return HostResult{HostResultCode::CallbackLimitExceeded};
         clickHandlers_[clickHandlerCount_++] = ClickHandlerRecord{
-            object.instanceId, value.functionId};
+            object.instanceId, value.functionId, kInvalidRuntimeFunctionId};
         return HostResult();
     }
     if (!textEquals(property, "textContent"))
@@ -536,9 +575,43 @@ HostResult NavigatorScriptHostAdapter::call(const HostObjectReference* receiver,
     std::uint32_t methodId, const HostValue* arguments,
     std::size_t argumentCount, HostValue& result)
 {
-    const HostResult receiverResult = validateDocumentReceiver(receiver);
+    if (receiver == nullptr) return HostResult{HostResultCode::InvalidObject};
+    const HostResult receiverResult = validate(*receiver);
     if (!receiverResult.succeeded()) return receiverResult;
-    if (methodId != kNavigatorGetElementByIdMethod || argumentCount != 1u ||
+    if (methodId == kNavigatorAddEventListenerMethod) {
+        if (receiver->kind != kNavigatorElementHostKind ||
+            argumentCount != 2u || arguments == nullptr ||
+            arguments[0].type != HostValueType::String ||
+            arguments[1].type != HostValueType::Function ||
+            arguments[1].functionId == kInvalidRuntimeFunctionId) {
+            return HostResult{HostResultCode::InvalidValue};
+        }
+        if (arguments[0].stringValue.data == nullptr &&
+            arguments[0].stringValue.length != 0) {
+            return HostResult{HostResultCode::InvalidValue};
+        }
+        if (!textEquals(arguments[0].stringValue, "click"))
+            return HostResult{HostResultCode::InvalidValue};
+        ClickHandlerRecord* record = clickHandlerFor(receiver->instanceId);
+        if (record != nullptr) {
+            if (record->listenerFunction == kInvalidRuntimeFunctionId)
+                ++clickListenerCount_;
+            record->listenerFunction = arguments[1].functionId;
+            result = HostValue::undefined();
+            return HostResult();
+        }
+        if (clickHandlerCount_ >= callbackLimit() ||
+            clickListenerCount_ >= listenerLimit())
+            return HostResult{HostResultCode::CallbackLimitExceeded};
+        clickHandlers_[clickHandlerCount_++] = ClickHandlerRecord{
+            receiver->instanceId, kInvalidRuntimeFunctionId,
+            arguments[1].functionId};
+        ++clickListenerCount_;
+        result = HostValue::undefined();
+        return HostResult();
+    }
+    if (methodId != kNavigatorGetElementByIdMethod ||
+        receiver->kind != kNavigatorDocumentHostKind || argumentCount != 1u ||
         arguments == nullptr || arguments[0].type != HostValueType::String) {
         return HostResult{HostResultCode::CallFailed};
     }
