@@ -18,6 +18,12 @@ enum class RuntimeErrorCode : std::uint8_t {
     InvalidAssignmentTarget,
     InvalidOperandType,
     UnsupportedFeature,
+    UnsupportedFunctionConstruct,
+    NotCallable,
+    CallDepthExceeded,
+    EnvironmentLimitExceeded,
+    FunctionLimitExceeded,
+    InvalidFunction,
     BindingLimitExceeded,
     BindingNameTooLong,
     StringLimitExceeded,
@@ -58,12 +64,19 @@ constexpr std::size_t kDefaultMaxJavaScriptRuntimeStringLength = 64u * 1024u;
 constexpr std::size_t kDefaultMaxJavaScriptRuntimeStringBytes = 256u * 1024u;
 constexpr std::size_t kDefaultMaxJavaScriptRuntimeStringValues = 4096u;
 constexpr std::size_t kDefaultJavaScriptExecutionSteps = 100000u;
+constexpr std::size_t kDefaultMaxJavaScriptCallDepth = 64u;
+constexpr std::size_t kDefaultMaxJavaScriptEnvironments = 256u;
+constexpr std::size_t kDefaultMaxJavaScriptFunctionValues = 4096u;
 
 struct RuntimeLimits {
     LexerLimits lexer;
     ParserLimits parser;
 
     std::size_t maxBindings = kDefaultMaxJavaScriptRuntimeBindings;
+    // Global bindings retain the JS3 limit.  Each function invocation uses
+    // this separate per-environment bound.
+    std::size_t maxFunctionEnvironmentBindings =
+        kDefaultMaxJavaScriptRuntimeBindings;
     std::size_t maxBindingNameLength =
         kDefaultMaxJavaScriptBindingNameLength;
     std::size_t maxRuntimeStringLength =
@@ -75,13 +88,19 @@ struct RuntimeLimits {
     std::size_t maxRuntimeStringValues =
         kDefaultMaxJavaScriptRuntimeStringValues;
     std::size_t maxExecutionSteps = kDefaultJavaScriptExecutionSteps;
+    std::size_t maxCallDepth = kDefaultMaxJavaScriptCallDepth;
+    // Environment records are retained until reset so captured lexical
+    // parents never dangle.  This is both the live-environment and total
+    // environment bound for the context lifetime.
+    std::size_t maxEnvironments = kDefaultMaxJavaScriptEnvironments;
+    std::size_t maxFunctions = kDefaultMaxJavaScriptFunctionValues;
 };
 
-// A context is an independent, resettable JS3 realm.  execute() copies a
+// A context is an independent, resettable bounded JavaScript realm.  execute() copies a
 // bounded source view before lexing, so the resulting AST and diagnostics do
 // not borrow the caller's source lifetime.  AST nodes retain views into that
-// context-owned copy.  Environment bindings and runtime strings are cleared
-// by reset().
+// context-owned copy. Global bindings, function values, lexical environments,
+// call-frame state, and runtime strings are cleared by reset().
 class RuntimeContext {
 public:
     explicit RuntimeContext(RuntimeLimits limits = RuntimeLimits());
@@ -106,13 +125,28 @@ public:
     const std::string& stringValue(const Value& value) const;
     std::size_t runtimeStringBytes() const { return totalStringBytes_; }
     std::size_t runtimeStringValueCount() const { return strings_.size(); }
+    std::size_t environmentCount() const { return 1u + environments_.size(); }
+    std::size_t functionValueCount() const { return functions_.size(); }
+    std::size_t activeCallFrameCount() const { return activeCallFrames_; }
 
 private:
     class Evaluator;
     friend class Evaluator;
 
+    struct FunctionRecord {
+        AstNodeId declaration = kInvalidAstNodeId;
+        EnvironmentId closureEnvironment = kInvalidEnvironmentId;
+    };
+
     bool createString(SourceView text, Value& value, RuntimeErrorCode& error);
     const std::string* stringData(const Value& value) const;
+    bool createEnvironment(EnvironmentId parent, EnvironmentId& result,
+        RuntimeErrorCode& error);
+    Environment* environmentAt(EnvironmentId id);
+    const Environment* environmentAt(EnvironmentId id) const;
+    bool createFunction(AstNodeId declaration, EnvironmentId closure,
+        RuntimeFunctionId& result, RuntimeErrorCode& error);
+    const FunctionRecord* functionAt(RuntimeFunctionId id) const;
     void setRuntimeError(RuntimeErrorCode code, SourceLocation location);
     bool consumeStep(SourceLocation location);
 
@@ -120,11 +154,14 @@ private:
     std::string sourceStorage_;
     Ast ast_;
     Environment environment_;
+    std::vector<Environment> environments_;
+    std::vector<FunctionRecord> functions_;
     std::vector<std::string> strings_;
     std::size_t totalStringBytes_ = 0;
     std::size_t executionSteps_ = 0;
     ScriptResult result_;
     Value finalValue_;
+    std::size_t activeCallFrames_ = 0;
 };
 
 ScriptResult executeScript(SourceView source, RuntimeContext& context);

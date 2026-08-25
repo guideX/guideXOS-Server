@@ -292,8 +292,9 @@ Numbers use IEEE-754 `double`. Strings are not source slices: each newly
 created runtime string is copied into the context-owned string store and a
 typed `RuntimeStringId` is kept in the `Value`. String handles are valid until
 their owning context is reset or destroyed. The environment owns binding names
-and values. `var` redeclaration updates the existing entry, so repeated
-redeclaration cannot grow duplicate bindings. JS3 has no artificial block
+and values. Repeated `var` declarations reuse the existing entry, so
+redeclaration cannot grow duplicate bindings; an initializer assigns its value
+after declaration instantiation. JS3 has no artificial block
 scope; all `var` bindings are in the one global environment.
 
 `var x;` creates a binding containing `Undefined`, which is distinct from an
@@ -421,6 +422,149 @@ The JS3 runtime remains standalone. There is no `<script>` execution,
 `window`, `document`, DOM binding, events, timers, networking API, or
 page-loading hook.
 
+## Phase JS4: functions, call frames, and lexical scope
+
+Phase JS4 extends the same standalone JS3 evaluator. It does not create a
+second execution engine:
+
+```text
+source -> lexer -> bounded AST -> RuntimeContext
+                              -> tagged Value
+                              -> global environment
+                              -> function value
+                              -> call frame
+                              -> indexed lexical environment
+                              -> return/control status
+```
+
+The standalone guideXOS JavaScript engine can execute user-defined functions,
+but Navigator web pages still do not execute JavaScript.
+
+### Function values and identity
+
+`ValueType::Function` is an explicit tagged value. Its payload is a stable
+`RuntimeFunctionId` into the context-owned function table. A function record
+contains the stable `AstNodeId` of its parsed `FunctionDeclaration` and the
+`EnvironmentId` of the lexical environment captured at declaration
+instantiation. It never stores raw function source or a pointer into a
+temporary parser object.
+
+Copying a function value copies its ID, so two reads of the same binding compare
+equal with strict equality. Function instances created by nested declarations
+in separate invocations receive different IDs. Function values are ordinary
+values: they can be assigned to variables and called through any callee
+expression that evaluates to a function.
+
+### Call frames and calls
+
+Calls evaluate the callee first, reject non-functions with `NotCallable`, then
+evaluate arguments from left to right. The bounded argument vector is passed
+to an explicit call frame, which records the function ID, caller and callee
+environment IDs, call-site location, and current depth. Parameters bind in
+order; a missing argument binds `Undefined`. Extra arguments are still
+evaluated left to right and then ignored because the `arguments` object is not
+implemented. A function's body executes in a fresh environment and its return
+value is propagated to the call expression. Falling off the end and `return;`
+both produce `Undefined`.
+
+The evaluator keeps call control explicit. `Return` is a control status that
+travels through blocks, conditionals, and loops until the current function
+invocation consumes it. There is no global mutable return flag. Frame cleanup
+restores the caller environment on normal return, runtime error, call-depth
+failure, and execution-budget failure.
+
+### Lexical environments and closures
+
+The global `Environment` remains the authoritative root and retains the JS3
+public lookup behavior. Function environments are indexed records with a
+parent `EnvironmentId`. Lookup walks the current environment and then its
+lexical parents. Assignment updates the nearest existing binding, so an
+assignment without a nearer local can modify a global or outer function
+binding. A local `var` shadows that outer binding.
+
+`var` is function-scoped. Declaration instantiation scans bounded statement
+trees through blocks and control-flow bodies, but never scans into a nested
+function body. Function environments are fresh for every invocation, so local
+state is not accidentally shared. Direct nested function declarations capture
+their active lexical environment. Environment records are retained in a
+bounded context-owned pool until `RuntimeContext::reset()`; this makes escaped
+closures safe as well as active nested calls. The pool uses IDs rather than
+raw parent pointers, so no captured environment can dangle.
+
+The supported declaration policy is deliberately conservative: declarations
+at program level and directly in a function body are supported. A function
+declaration reached through an `if`, `while`, `for`, or nested block is
+rejected with `UnsupportedFunctionConstruct`; Annex B and full block-function
+semantics are not claimed.
+
+### Declaration instantiation and `var`
+
+Before executing a program or function body, JS4 establishes direct `var`
+bindings as `Undefined`, then installs the applicable direct function
+declarations. A later function declaration of the same name is the applicable
+one. Repeated `var` declarations do not erase an existing value; an initializer
+assigns its evaluated value afterward. This supports both:
+
+```javascript
+var result = add(2, 3);
+function add(a, b) { return a + b; }
+```
+
+and:
+
+```javascript
+x = 5;
+var x;
+```
+
+This is a bounded declaration subset, not a claim of complete ECMAScript
+hoisting or Annex B compatibility.
+
+### Limits and errors
+
+JS1, JS2, and JS3 limits remain in force. JS4 adds these finite defaults:
+
+| Resource | Default |
+| --- | ---: |
+| Function-environment bindings | 256 |
+| Function values | 4,096 |
+| Retained environments, including global | 256 |
+| Call depth | 64 |
+| Execution steps shared across all calls | 100,000 |
+
+The existing defaults remain 256 global bindings, 256-byte binding names,
+64 parameters, 64 call arguments, 64 KiB runtime strings, 256 KiB total
+runtime string bytes, and 4,096 runtime string values. Environment and
+function limits are configurable through `RuntimeLimits`. The shared
+execution budget is never reset by a call; recursion and loops consume the
+same context-wide counter.
+
+JS4 adds deterministic `NotCallable`, `CallDepthExceeded`,
+`EnvironmentLimitExceeded`, `FunctionLimitExceeded`, `InvalidFunction`, and
+`UnsupportedFunctionConstruct` errors. They retain the authoritative AST
+offset, line, and column. `IllegalReturn` continues to reject top-level
+`return`.
+
+### Deliberately unsupported constructs
+
+Function expressions, arrow functions, async functions, generators, default or
+rest parameters, destructuring, methods, classes, spread arguments, and the
+`arguments` object remain unsupported. Objects, arrays, member reads/writes,
+member calls, `new`, and browser `this` semantics remain outside JS4. The
+standalone runtime does not expose `window`, `document`, the DOM, events,
+timers, networking APIs, storage, cookies, or `console`.
+
+### JS4 validation boundary
+
+Tier 1 proves primitive regressions, function values and identity, declarations,
+calls through values, ordered arguments, missing and extra arguments, fresh
+locals, nested lexical lookup, shadowing, outer assignment, returns,
+recursion, call-depth protection, shared execution budget, non-callable
+errors, closure lifetime, reset cleanup, and strict MinGW/g++ warning-as-error
+builds. Tier 2 remains an attempted guideXOS/Navigator integration check; it
+does not change page behavior and does not weaken unrelated Mbed TLS, MSVC,
+or QEMU requirements.
+
 ## Roadmap
 
 ```text
@@ -438,8 +582,8 @@ JS lexer
   -> increasingly capable web APIs
 ```
 
-The next milestone is **Phase JS4 — Functions, Call Frames & Lexical Scope**:
-function values and declarations, calls, call frames, parameters, local
-environments, lexical parent chains, return propagation, recursion, and
-bounded call depth. JS4 remains without DOM integration and must build on the
-committed JS3 runtime contract. Full ECMAScript compatibility is not promised.
+The next milestone is **Phase JS5 — Objects, Arrays & Property Semantics**:
+object values, stable object identity, bounded property storage, arrays,
+indexed elements, object and array literals, member reads and assignments,
+computed members, array length, and function/object interaction. JS5 still
+must not expose the DOM itself. Full ECMAScript compatibility is not promised.

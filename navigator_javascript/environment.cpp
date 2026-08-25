@@ -11,6 +11,7 @@ const std::size_t kNotFound = static_cast<std::size_t>(-1);
 
 void Environment::reset()
 {
+    parent_ = kInvalidEnvironmentId;
     bindings_.clear();
 }
 
@@ -45,7 +46,8 @@ bool Environment::declare(SourceView name, Value value, EnvironmentError& error)
 
     const std::size_t existing = find(name);
     if (existing != kNotFound) {
-        bindings_[existing].value = value;
+        // `var` redeclaration is idempotent.  An initializer or a function
+        // declaration assigns the value explicitly after this succeeds.
         return true;
     }
     if (bindings_.size() >= limits_.maxBindings) {

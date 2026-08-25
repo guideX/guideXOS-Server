@@ -1,5 +1,6 @@
 #include "runtime.h"
 
+#include <algorithm>
 #include <array>
 #include <charconv>
 #include <cmath>
@@ -178,6 +179,14 @@ class RuntimeContext::Evaluator {
 public:
     explicit Evaluator(RuntimeContext& context) : context_(context) {}
 
+    ~Evaluator()
+    {
+        // The evaluator owns the transient call-frame vector.  Clear the
+        // public diagnostic counter even if a bounded allocation failure
+        // interrupts a call before its normal unwind path runs.
+        context_.activeCallFrames_ = 0;
+    }
+
     bool run()
     {
         if (!validNode(context_.ast_.root(), SourceLocation()) ||
@@ -186,8 +195,11 @@ public:
             fail(RuntimeErrorCode::InvalidAstState, SourceLocation());
             return false;
         }
+        if (!validateFunctionPolicy(context_.ast_.root(), true)) return false;
+        if (!instantiateDeclarations(context_.ast_.root(),
+            kGlobalEnvironmentId)) return false;
         Control control;
-        return executeStatement(context_.ast_.root(), false, control) &&
+        return executeStatement(context_.ast_.root(), false, false, control) &&
             control.kind == ControlKind::Normal;
     }
 
@@ -196,10 +208,19 @@ private:
         Normal = 0,
         Break,
         Continue,
+        Return,
     };
 
     struct Control {
         ControlKind kind = ControlKind::Normal;
+        Value value = Value::undefined();
+    };
+
+    struct CallFrame {
+        RuntimeFunctionId function = kInvalidRuntimeFunctionId;
+        EnvironmentId environment = kInvalidEnvironmentId;
+        EnvironmentId callerEnvironment = kInvalidEnvironmentId;
+        SourceLocation callSite;
     };
 
     bool validNode(AstNodeId id, SourceLocation location)
@@ -248,7 +269,7 @@ private:
     {
         SourceView name;
         if (!identifierName(id, name)) return false;
-        const Value* found = context_.environment_.lookup(name);
+        const Value* found = lookup(name);
         if (found != nullptr) {
             value = *found;
             return true;
@@ -264,10 +285,29 @@ private:
         return false;
     }
 
-    bool declare(SourceView name, Value value, SourceLocation location)
+    const Value* lookup(SourceView name) const
     {
+        EnvironmentId environment = currentEnvironment_;
+        while (environment != kInvalidEnvironmentId) {
+            const Environment* current = context_.environmentAt(environment);
+            if (current == nullptr) return nullptr;
+            const Value* found = current->lookup(name);
+            if (found != nullptr) return found;
+            environment = current->parent();
+        }
+        return nullptr;
+    }
+
+    bool declareIn(EnvironmentId environment, SourceView name, Value value,
+        SourceLocation location)
+    {
+        Environment* target = context_.environmentAt(environment);
+        if (target == nullptr) {
+            fail(RuntimeErrorCode::InvalidAstState, location);
+            return false;
+        }
         EnvironmentError error;
-        if (context_.environment_.declare(name, value, error)) return true;
+        if (target->declare(name, value, error)) return true;
         switch (error.code) {
         case EnvironmentErrorCode::BindingLimitExceeded:
             fail(RuntimeErrorCode::BindingLimitExceeded, location);
@@ -285,11 +325,203 @@ private:
         return false;
     }
 
+    bool declare(SourceView name, Value value, SourceLocation location)
+    {
+        return declareIn(currentEnvironment_, name, value, location);
+    }
+
+    bool bindValueIn(EnvironmentId environment, SourceView name, Value value,
+        SourceLocation location)
+    {
+        Environment* target = context_.environmentAt(environment);
+        if (target == nullptr) {
+            fail(RuntimeErrorCode::InvalidAstState, location);
+            return false;
+        }
+        if (target->lookup(name) != nullptr) {
+            if (!target->assign(name, value)) {
+                fail(RuntimeErrorCode::InvalidAstState, location);
+                return false;
+            }
+            return true;
+        }
+        return declareIn(environment, name, value, location);
+    }
+
     bool assign(SourceView name, Value value, SourceLocation location)
     {
-        if (context_.environment_.assign(name, value)) return true;
+        EnvironmentId environment = currentEnvironment_;
+        while (environment != kInvalidEnvironmentId) {
+            Environment* current = context_.environmentAt(environment);
+            if (current == nullptr) {
+                fail(RuntimeErrorCode::InvalidAstState, location);
+                return false;
+            }
+            if (current->lookup(name) != nullptr) {
+                if (!current->assign(name, value)) {
+                    fail(RuntimeErrorCode::InvalidAstState, location);
+                    return false;
+                }
+                return true;
+            }
+            environment = current->parent();
+        }
         fail(RuntimeErrorCode::UnknownIdentifier, location);
         return false;
+    }
+
+    bool validateFunctionPolicy(AstNodeId id, bool allowDirectFunction)
+    {
+        if (!validNode(id, SourceLocation())) return false;
+        const AstNode& node = context_.ast_.node(id);
+        switch (node.kind) {
+        case AstNodeKind::Program:
+        case AstNodeKind::BlockStatement:
+            for (std::size_t index = 0; index < node.childCount; ++index) {
+                const AstNodeId child = context_.ast_.childAt(id, index);
+                if (!validNode(child, node.location) ||
+                    !validateFunctionPolicy(child, allowDirectFunction)) {
+                    return false;
+                }
+            }
+            return true;
+        case AstNodeKind::FunctionDeclaration:
+            if (!allowDirectFunction) {
+                fail(RuntimeErrorCode::UnsupportedFunctionConstruct,
+                    node.location);
+                return false;
+            }
+            if (!validNode(node.body, node.location)) return false;
+            // Only declarations directly in a program or function body are
+            // supported.  A block reached through if/while/for passes false.
+            return validateFunctionPolicy(node.body, true);
+        case AstNodeKind::IfStatement:
+            if (!validNode(node.consequent, node.location) ||
+                !validateFunctionPolicy(node.consequent, false)) return false;
+            if (node.alternate == kInvalidAstNodeId) return true;
+            return validNode(node.alternate, node.location) &&
+                validateFunctionPolicy(node.alternate, false);
+        case AstNodeKind::WhileStatement:
+            return validNode(node.body, node.location) &&
+                validateFunctionPolicy(node.body, false);
+        case AstNodeKind::ForStatement:
+            return validNode(node.body, node.location) &&
+                validateFunctionPolicy(node.body, false);
+        default:
+            return true;
+        }
+    }
+
+    bool hoistVariables(AstNodeId id, EnvironmentId environment)
+    {
+        if (!validNode(id, SourceLocation())) return false;
+        const AstNode& node = context_.ast_.node(id);
+        switch (node.kind) {
+        case AstNodeKind::Program:
+        case AstNodeKind::BlockStatement:
+            for (std::size_t index = 0; index < node.childCount; ++index) {
+                if (!hoistVariables(context_.ast_.childAt(id, index),
+                    environment)) return false;
+            }
+            return true;
+        case AstNodeKind::VariableDeclaration:
+            for (std::size_t index = 0; index < node.childCount; ++index) {
+                const AstNodeId declaratorId = context_.ast_.childAt(id, index);
+                if (!validNode(declaratorId, node.location)) return false;
+                const AstNode& declarator = context_.ast_.node(declaratorId);
+                if (declarator.kind != AstNodeKind::VariableDeclarator ||
+                    !validNode(declarator.name, declarator.location)) {
+                    fail(RuntimeErrorCode::InvalidAstState, declarator.location);
+                    return false;
+                }
+                SourceView name;
+                if (!identifierName(declarator.name, name) ||
+                    !declareIn(environment, name, Value::undefined(),
+                        context_.ast_.node(declarator.name).location)) {
+                    return false;
+                }
+            }
+            return true;
+        case AstNodeKind::FunctionDeclaration:
+            // A nested function's var bindings belong to its invocation.
+            return true;
+        case AstNodeKind::IfStatement:
+            if (!hoistVariables(node.consequent, environment)) return false;
+            return node.alternate == kInvalidAstNodeId ||
+                hoistVariables(node.alternate, environment);
+        case AstNodeKind::WhileStatement:
+            return hoistVariables(node.body, environment);
+        case AstNodeKind::ForStatement:
+            if (node.init != kInvalidAstNodeId &&
+                !hoistVariables(node.init, environment)) return false;
+            return hoistVariables(node.body, environment);
+        default:
+            return true;
+        }
+    }
+
+    bool sameName(AstNodeId left, AstNodeId right)
+    {
+        SourceView leftName;
+        SourceView rightName;
+        return identifierName(left, leftName) && identifierName(right, rightName) &&
+            leftName.length == rightName.length &&
+            (leftName.length == 0 ||
+                std::equal(leftName.data, leftName.data + leftName.length,
+                    rightName.data));
+    }
+
+    bool hasLaterFunctionDeclaration(AstNodeId container,
+        std::size_t currentIndex, AstNodeId name)
+    {
+        const AstNode& node = context_.ast_.node(container);
+        for (std::size_t index = currentIndex + 1; index < node.childCount;
+            ++index) {
+            const AstNodeId child = context_.ast_.childAt(container, index);
+            if (!validNode(child, node.location)) return false;
+            const AstNode& candidate = context_.ast_.node(child);
+            if (candidate.kind == AstNodeKind::FunctionDeclaration &&
+                sameName(candidate.name, name)) return true;
+        }
+        return false;
+    }
+
+    bool hoistFunctions(AstNodeId container, EnvironmentId environment)
+    {
+        if (!validNode(container, SourceLocation())) return false;
+        const AstNode& node = context_.ast_.node(container);
+        if (node.kind != AstNodeKind::Program &&
+            node.kind != AstNodeKind::BlockStatement) {
+            fail(RuntimeErrorCode::InvalidAstState, node.location);
+            return false;
+        }
+        for (std::size_t index = 0; index < node.childCount; ++index) {
+            const AstNodeId child = context_.ast_.childAt(container, index);
+            if (!validNode(child, node.location)) return false;
+            const AstNode& declaration = context_.ast_.node(child);
+            if (declaration.kind != AstNodeKind::FunctionDeclaration) continue;
+            if (hasLaterFunctionDeclaration(container, index,
+                declaration.name)) continue;
+            SourceView name;
+            if (!identifierName(declaration.name, name)) return false;
+            RuntimeFunctionId function = kInvalidRuntimeFunctionId;
+            RuntimeErrorCode error = RuntimeErrorCode::None;
+            if (!context_.createFunction(child, environment, function,
+                error)) {
+                fail(error, declaration.location);
+                return false;
+            }
+            if (!bindValueIn(environment, name, Value::function(function),
+                context_.ast_.node(declaration.name).location)) return false;
+        }
+        return true;
+    }
+
+    bool instantiateDeclarations(AstNodeId container,
+        EnvironmentId environment)
+    {
+        return hoistVariables(container, environment) &&
+            hoistFunctions(container, environment);
     }
 
     bool decodeString(AstNodeId id, Value& value)
@@ -391,6 +623,7 @@ private:
         case AstNodeKind::UpdateExpression:
             return evalUpdate(node, value);
         case AstNodeKind::CallExpression:
+            return evalCall(id, node, value);
         case AstNodeKind::MemberExpression:
         case AstNodeKind::NewExpression:
             fail(RuntimeErrorCode::UnsupportedFeature, node.location);
@@ -399,6 +632,145 @@ private:
             fail(RuntimeErrorCode::InvalidAstState, node.location);
             return false;
         }
+    }
+
+    bool evalCall(AstNodeId callId, const AstNode& node, Value& result)
+    {
+        if (!validNode(node.callee, node.location)) return false;
+        if (node.childCount > context_.limits_.parser.maxCallArguments) {
+            fail(RuntimeErrorCode::InvalidAstState, node.location);
+            return false;
+        }
+
+        Value callee;
+        if (!evalExpression(node.callee, callee)) return false;
+        if (!callee.isFunction()) {
+            fail(RuntimeErrorCode::NotCallable, node.location);
+            return false;
+        }
+
+        std::vector<Value> arguments;
+        try {
+            arguments.reserve(node.childCount);
+            for (std::size_t index = 0; index < node.childCount; ++index) {
+                const AstNodeId argumentId = context_.ast_.childAt(callId, index);
+                if (!validNode(argumentId, node.location)) return false;
+                Value argument;
+                if (!evalExpression(argumentId, argument)) return false;
+                arguments.push_back(argument);
+            }
+        } catch (const std::bad_alloc&) {
+            fail(RuntimeErrorCode::AllocationFailure, node.location);
+            return false;
+        }
+        return invokeFunction(callee.functionId(), arguments, node.location,
+            result);
+    }
+
+    void unwindFrame(EnvironmentId callerEnvironment,
+        std::size_t previousFrameCount)
+    {
+        currentEnvironment_ = callerEnvironment;
+        if (frames_.size() > previousFrameCount) {
+            frames_.resize(previousFrameCount);
+        }
+        context_.activeCallFrames_ = frames_.size();
+    }
+
+    bool invokeFunction(RuntimeFunctionId functionId,
+        const std::vector<Value>& arguments, SourceLocation callSite,
+        Value& result)
+    {
+        const RuntimeContext::FunctionRecord* function =
+            context_.functionAt(functionId);
+        if (function == nullptr ||
+            function->declaration == kInvalidAstNodeId ||
+            function->closureEnvironment == kInvalidEnvironmentId) {
+            fail(RuntimeErrorCode::InvalidFunction, callSite);
+            return false;
+        }
+        const AstNode& declaration = context_.ast_.node(function->declaration);
+        if (declaration.kind != AstNodeKind::FunctionDeclaration ||
+            !validNode(declaration.body, callSite)) {
+            fail(RuntimeErrorCode::InvalidFunction, callSite);
+            return false;
+        }
+        if (frames_.size() >= context_.limits_.maxCallDepth) {
+            fail(RuntimeErrorCode::CallDepthExceeded, callSite);
+            return false;
+        }
+
+        EnvironmentId callEnvironment = kInvalidEnvironmentId;
+        RuntimeErrorCode error = RuntimeErrorCode::None;
+        if (!context_.createEnvironment(function->closureEnvironment,
+            callEnvironment, error)) {
+            fail(error, callSite);
+            return false;
+        }
+
+        const EnvironmentId callerEnvironment = currentEnvironment_;
+        const std::size_t previousFrameCount = frames_.size();
+        try {
+            CallFrame frame;
+            frame.function = functionId;
+            frame.environment = callEnvironment;
+            frame.callerEnvironment = callerEnvironment;
+            frame.callSite = callSite;
+            frames_.push_back(frame);
+        } catch (const std::bad_alloc&) {
+            fail(RuntimeErrorCode::AllocationFailure, callSite);
+            return false;
+        }
+        context_.activeCallFrames_ = frames_.size();
+        currentEnvironment_ = callEnvironment;
+
+        for (std::size_t index = 0; index < declaration.childCount; ++index) {
+            const AstNodeId parameterId = context_.ast_.childAt(
+                function->declaration, index);
+            SourceView name;
+            if (!identifierName(parameterId, name)) {
+                unwindFrame(callerEnvironment, previousFrameCount);
+                return false;
+            }
+            const Value argument = index < arguments.size()
+                ? arguments[index] : Value::undefined();
+            if (!declareIn(callEnvironment, name, argument,
+                context_.ast_.node(parameterId).location)) {
+                unwindFrame(callerEnvironment, previousFrameCount);
+                return false;
+            }
+            Environment* target = context_.environmentAt(callEnvironment);
+            if (target == nullptr || !target->assign(name, argument)) {
+                fail(RuntimeErrorCode::InvalidAstState,
+                    context_.ast_.node(parameterId).location);
+                unwindFrame(callerEnvironment, previousFrameCount);
+                return false;
+            }
+        }
+
+        if (!instantiateDeclarations(declaration.body, callEnvironment)) {
+            unwindFrame(callerEnvironment, previousFrameCount);
+            return false;
+        }
+
+        Control control;
+        const bool executed = executeStatement(declaration.body, false, true,
+            control);
+        if (!executed) {
+            unwindFrame(callerEnvironment, previousFrameCount);
+            return false;
+        }
+        if (control.kind == ControlKind::Return) {
+            result = control.value;
+        } else if (control.kind == ControlKind::Normal) {
+            result = Value::undefined();
+        } else {
+            fail(RuntimeErrorCode::InvalidAstState, declaration.location);
+            unwindFrame(callerEnvironment, previousFrameCount);
+            return false;
+        }
+        unwindFrame(callerEnvironment, previousFrameCount);
+        return true;
     }
 
     bool toNumber(const Value& input, double& number)
@@ -427,6 +799,9 @@ private:
             }
             return true;
         }
+        case ValueType::Function:
+            number = std::numeric_limits<double>::quiet_NaN();
+            return true;
         }
         fail(RuntimeErrorCode::InvalidOperandType, SourceLocation());
         return false;
@@ -456,6 +831,9 @@ private:
             text = *string;
             return true;
         }
+        case ValueType::Function:
+            fail(RuntimeErrorCode::InvalidOperandType, SourceLocation());
+            return false;
         }
         fail(RuntimeErrorCode::InvalidOperandType, SourceLocation());
         return false;
@@ -665,7 +1043,7 @@ private:
             return true;
         }
 
-        const Value* current = context_.environment_.lookup(name);
+        const Value* current = lookup(name);
         if (current == nullptr) {
             fail(RuntimeErrorCode::UnknownIdentifier,
                 context_.ast_.node(node.left).location);
@@ -702,7 +1080,7 @@ private:
         }
         SourceView name;
         if (!identifierName(node.argument, name)) return false;
-        const Value* current = context_.environment_.lookup(name);
+        const Value* current = lookup(name);
         if (current == nullptr) {
             fail(RuntimeErrorCode::UnknownIdentifier,
                 context_.ast_.node(node.argument).location);
@@ -719,7 +1097,8 @@ private:
         return true;
     }
 
-    bool executeStatement(AstNodeId id, bool inLoop, Control& control)
+    bool executeStatement(AstNodeId id, bool inLoop, bool inFunction,
+        Control& control)
     {
         if (!beginNode(id)) return false;
         const AstNode& node = context_.ast_.node(id);
@@ -729,7 +1108,7 @@ private:
             for (std::size_t index = 0; index < node.childCount; ++index) {
                 const AstNodeId child = context_.ast_.childAt(id, index);
                 if (!validNode(child, node.location)) return false;
-                if (!executeStatement(child, inLoop, control)) return false;
+                if (!executeStatement(child, inLoop, inFunction, control)) return false;
                 if (control.kind != ControlKind::Normal) return true;
             }
             return true;
@@ -752,8 +1131,7 @@ private:
                 if (declarator.initializer != kInvalidAstNodeId) {
                     if (!validNode(declarator.initializer, declarator.location)) return false;
                     if (!evalExpression(declarator.initializer, value)) return false;
-                    if (!context_.environment_.assign(name, value)) {
-                        fail(RuntimeErrorCode::InvalidAstState, declarator.location);
+                    if (!assign(name, value, declarator.location)) {
                         return false;
                     }
                 }
@@ -774,10 +1152,14 @@ private:
                 !validNode(node.consequent, node.location)) return false;
             Value test;
             if (!evalExpression(node.test, test)) return false;
-            if (truthy(test)) return executeStatement(node.consequent, inLoop, control);
+            if (truthy(test)) {
+                return executeStatement(node.consequent, inLoop, inFunction,
+                    control);
+            }
             if (node.alternate == kInvalidAstNodeId) return true;
             if (!validNode(node.alternate, node.location)) return false;
-            return executeStatement(node.alternate, inLoop, control);
+            return executeStatement(node.alternate, inLoop, inFunction,
+                control);
         }
         case AstNodeKind::WhileStatement: {
             if (!validNode(node.test, node.location) ||
@@ -787,8 +1169,13 @@ private:
                 if (!evalExpression(node.test, test)) return false;
                 if (!truthy(test)) return true;
                 Control bodyControl;
-                if (!executeStatement(node.body, true, bodyControl)) return false;
+                if (!executeStatement(node.body, true, inFunction,
+                    bodyControl)) return false;
                 if (bodyControl.kind == ControlKind::Break) return true;
+                if (bodyControl.kind == ControlKind::Return) {
+                    control = bodyControl;
+                    return true;
+                }
                 if (bodyControl.kind == ControlKind::Continue) continue;
             }
         }
@@ -797,7 +1184,8 @@ private:
                 if (!validNode(node.init, node.location)) return false;
                 Control initControl;
                 if (context_.ast_.node(node.init).kind == AstNodeKind::VariableDeclaration) {
-                    if (!executeStatement(node.init, inLoop, initControl)) return false;
+                    if (!executeStatement(node.init, inLoop, inFunction,
+                        initControl)) return false;
                 } else {
                     Value initValue;
                     if (!evalExpression(node.init, initValue)) return false;
@@ -815,8 +1203,13 @@ private:
                     if (!truthy(test)) return true;
                 }
                 Control bodyControl;
-                if (!executeStatement(node.body, true, bodyControl)) return false;
+                if (!executeStatement(node.body, true, inFunction,
+                    bodyControl)) return false;
                 if (bodyControl.kind == ControlKind::Break) return true;
+                if (bodyControl.kind == ControlKind::Return) {
+                    control = bodyControl;
+                    return true;
+                }
                 if (node.update != kInvalidAstNodeId) {
                     if (!validNode(node.update, node.location)) return false;
                     Value update;
@@ -840,12 +1233,21 @@ private:
             control.kind = ControlKind::Continue;
             return true;
         case AstNodeKind::ReturnStatement:
-            fail(RuntimeErrorCode::IllegalReturn, node.location);
-            return false;
+            if (!inFunction) {
+                fail(RuntimeErrorCode::IllegalReturn, node.location);
+                return false;
+            }
+            control.value = Value::undefined();
+            if (node.expression != kInvalidAstNodeId) {
+                if (!validNode(node.expression, node.location) ||
+                    !evalExpression(node.expression, control.value)) return false;
+            }
+            control.kind = ControlKind::Return;
+            return true;
         case AstNodeKind::FunctionDeclaration:
-        case AstNodeKind::CallExpression:
-            fail(RuntimeErrorCode::UnsupportedFeature, node.location);
-            return false;
+            // Direct declarations were installed by declaration
+            // instantiation before statement execution.
+            return true;
         default:
             fail(RuntimeErrorCode::InvalidAstState, node.location);
             return false;
@@ -866,6 +1268,8 @@ private:
             const std::string* text = context_.stringData(value);
             return text != nullptr && !text->empty();
         }
+        case ValueType::Function:
+            return true;
         }
         return false;
     }
@@ -889,6 +1293,9 @@ private:
             return leftText != nullptr && rightText != nullptr &&
                 *leftText == *rightText;
         }
+        case ValueType::Function:
+            return left.functionId() != kInvalidRuntimeFunctionId &&
+                left.functionId() == right.functionId();
         }
         return false;
     }
@@ -921,6 +1328,8 @@ private:
     }
 
     RuntimeContext& context_;
+    EnvironmentId currentEnvironment_ = kGlobalEnvironmentId;
+    std::vector<CallFrame> frames_;
 };
 
 RuntimeContext::RuntimeContext(RuntimeLimits limits)
@@ -936,11 +1345,14 @@ void RuntimeContext::reset()
     ast_.reset();
     sourceStorage_.clear();
     environment_.reset();
+    environments_.clear();
+    functions_.clear();
     strings_.clear();
     totalStringBytes_ = 0;
     executionSteps_ = 0;
     result_ = ScriptResult();
     finalValue_ = Value::undefined();
+    activeCallFrames_ = 0;
 }
 
 bool RuntimeContext::createString(SourceView text, Value& value,
@@ -968,6 +1380,86 @@ bool RuntimeContext::createString(SourceView text, Value& value,
     totalStringBytes_ += text.length;
     value = Value::string(static_cast<RuntimeStringId>(strings_.size() - 1));
     return true;
+}
+
+bool RuntimeContext::createEnvironment(EnvironmentId parent,
+    EnvironmentId& result, RuntimeErrorCode& error)
+{
+    error = RuntimeErrorCode::None;
+    if (environmentAt(parent) == nullptr) {
+        error = RuntimeErrorCode::InvalidFunction;
+        return false;
+    }
+    if (environmentCount() >= limits_.maxEnvironments ||
+        environments_.size() >=
+            static_cast<std::size_t>(kInvalidEnvironmentId - 1u)) {
+        error = RuntimeErrorCode::EnvironmentLimitExceeded;
+        return false;
+    }
+    try {
+        environments_.emplace_back(
+            EnvironmentLimits{limits_.maxFunctionEnvironmentBindings,
+                limits_.maxBindingNameLength}, parent);
+    } catch (const std::bad_alloc&) {
+        error = RuntimeErrorCode::AllocationFailure;
+        return false;
+    }
+    result = static_cast<EnvironmentId>(environments_.size());
+    return true;
+}
+
+Environment* RuntimeContext::environmentAt(EnvironmentId id)
+{
+    if (id == kGlobalEnvironmentId) return &environment_;
+    if (id == kInvalidEnvironmentId || id == 0u) return nullptr;
+    const std::size_t index = static_cast<std::size_t>(id - 1u);
+    return index < environments_.size() ? &environments_[index] : nullptr;
+}
+
+const Environment* RuntimeContext::environmentAt(EnvironmentId id) const
+{
+    if (id == kGlobalEnvironmentId) return &environment_;
+    if (id == kInvalidEnvironmentId || id == 0u) return nullptr;
+    const std::size_t index = static_cast<std::size_t>(id - 1u);
+    return index < environments_.size() ? &environments_[index] : nullptr;
+}
+
+bool RuntimeContext::createFunction(AstNodeId declaration,
+    EnvironmentId closure, RuntimeFunctionId& result, RuntimeErrorCode& error)
+{
+    error = RuntimeErrorCode::None;
+    if (declaration == kInvalidAstNodeId || declaration >= ast_.nodeCount() ||
+        ast_.node(declaration).kind != AstNodeKind::FunctionDeclaration ||
+        environmentAt(closure) == nullptr) {
+        error = RuntimeErrorCode::InvalidFunction;
+        return false;
+    }
+    if (functions_.size() >= limits_.maxFunctions ||
+        functions_.size() >=
+            static_cast<std::size_t>(kInvalidRuntimeFunctionId)) {
+        error = RuntimeErrorCode::FunctionLimitExceeded;
+        return false;
+    }
+    try {
+        FunctionRecord function;
+        function.declaration = declaration;
+        function.closureEnvironment = closure;
+        functions_.push_back(function);
+    } catch (const std::bad_alloc&) {
+        error = RuntimeErrorCode::AllocationFailure;
+        return false;
+    }
+    result = static_cast<RuntimeFunctionId>(functions_.size() - 1u);
+    return true;
+}
+
+const RuntimeContext::FunctionRecord* RuntimeContext::functionAt(
+    RuntimeFunctionId id) const
+{
+    if (id == kInvalidRuntimeFunctionId || id >= functions_.size()) {
+        return nullptr;
+    }
+    return &functions_[id];
 }
 
 const std::string* RuntimeContext::stringData(const Value& value) const
@@ -1066,6 +1558,15 @@ const char* runtimeErrorCodeName(RuntimeErrorCode code)
         return "InvalidAssignmentTarget";
     case RuntimeErrorCode::InvalidOperandType: return "InvalidOperandType";
     case RuntimeErrorCode::UnsupportedFeature: return "UnsupportedFeature";
+    case RuntimeErrorCode::UnsupportedFunctionConstruct:
+        return "UnsupportedFunctionConstruct";
+    case RuntimeErrorCode::NotCallable: return "NotCallable";
+    case RuntimeErrorCode::CallDepthExceeded: return "CallDepthExceeded";
+    case RuntimeErrorCode::EnvironmentLimitExceeded:
+        return "EnvironmentLimitExceeded";
+    case RuntimeErrorCode::FunctionLimitExceeded:
+        return "FunctionLimitExceeded";
+    case RuntimeErrorCode::InvalidFunction: return "InvalidFunction";
     case RuntimeErrorCode::BindingLimitExceeded: return "BindingLimitExceeded";
     case RuntimeErrorCode::BindingNameTooLong: return "BindingNameTooLong";
     case RuntimeErrorCode::StringLimitExceeded: return "StringLimitExceeded";

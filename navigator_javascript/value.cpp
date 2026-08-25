@@ -39,6 +39,14 @@ Value Value::string(RuntimeStringId id)
     return value;
 }
 
+Value Value::function(RuntimeFunctionId id)
+{
+    Value value;
+    value.type_ = ValueType::Function;
+    value.functionId_ = id;
+    return value;
+}
+
 const char* valueTypeName(ValueType type)
 {
     switch (type) {
@@ -47,6 +55,7 @@ const char* valueTypeName(ValueType type)
     case ValueType::Boolean: return "Boolean";
     case ValueType::Number: return "Number";
     case ValueType::String: return "String";
+    case ValueType::Function: return "Function";
     }
     return "Invalid";
 }

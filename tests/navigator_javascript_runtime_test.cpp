@@ -221,14 +221,12 @@ void testNegativeRuntimeCases()
     expectError("continue;", RuntimeErrorCode::IllegalContinue,
         "illegal continue");
     expectError("return 1;", RuntimeErrorCode::IllegalReturn, "illegal return");
-    expectError("foo();", RuntimeErrorCode::UnsupportedFeature,
-        "function call before JS4");
+    expectError("foo();", RuntimeErrorCode::UnknownIdentifier,
+        "unknown function identifier");
     expectError("foo.bar;", RuntimeErrorCode::UnsupportedFeature,
         "member access before object support");
     expectError("new Foo();", RuntimeErrorCode::UnsupportedFeature,
         "new before object support");
-    expectError("function add(a, b) { return a + b; }",
-        RuntimeErrorCode::UnsupportedFeature, "function declaration before JS4");
     expectError("this;", RuntimeErrorCode::UnsupportedFeature,
         "this before host policy");
     expectError("var foo = 1; foo.bar = 2;",
@@ -243,6 +241,218 @@ void testNegativeRuntimeCases()
     const ScriptResult parseResult = execute(parse, "var = 1;");
     expect(parseResult.status == ScriptStatus::ParseFailure,
         "parse failure is distinct");
+}
+
+void testFunctionsAndLexicalScope()
+{
+    RuntimeContext context;
+    const ScriptResult basic = execute(context,
+        "function add(a, b) { return a + b; }"
+        "var result = add(2, 3);");
+    expect(basic.succeeded(), "functions: basic call succeeds");
+    expectType(context, "add", ValueType::Function,
+        "functions: declaration creates Function value");
+    expectNumber(context, "result", 5.0, "functions: add result");
+
+    const ScriptResult hoisted = execute(context,
+        "var result = add(2, 3);"
+        "function add(a, b) { return a + b; }");
+    expect(hoisted.succeeded(), "functions: declaration hoisting succeeds");
+    expectNumber(context, "result", 5.0, "functions: hoisted call result");
+
+    const ScriptResult valueCall = execute(context,
+        "function foo() { return 9; }"
+        "var f = foo; var result = f(); var same = f === foo;");
+    expect(valueCall.succeeded(), "functions: value call succeeds");
+    expectNumber(context, "result", 9.0, "functions: value call result");
+    expect(binding(context, "same")->booleanValue(),
+        "functions: stable identity equality");
+
+    const ScriptResult argumentsResult = execute(context,
+        "function foo(a, b) { return b; }"
+        "var missing = foo(1);"
+        "function first(a) { return a; }"
+        "var extra = first(5, 6, 7);");
+    expect(argumentsResult.succeeded(), "functions: argument bounds succeed");
+    expectType(context, "missing", ValueType::Undefined,
+        "functions: missing argument is Undefined");
+    expectNumber(context, "extra", 5.0,
+        "functions: extra arguments are ignored after evaluation");
+
+    const ScriptResult order = execute(context,
+        "var x = 0;"
+        "function value(v) { x = x * 10 + v; return v; }"
+        "function pair(a, b) { return a + b; }"
+        "var result = pair(value(1), value(2));");
+    expect(order.succeeded(), "functions: argument order succeeds");
+    expectNumber(context, "x", 12.0, "functions: arguments evaluate left-to-right");
+    expectNumber(context, "result", 3.0, "functions: ordered argument result");
+
+    const ScriptResult scope = execute(context,
+        "var global = 1;"
+        "function outer() {"
+        "  var local = 2;"
+        "  function inner() { return global + local; }"
+        "  return inner();"
+        "}"
+        "var result = outer();");
+    expect(scope.succeeded(), "functions: nested lexical call succeeds");
+    expectNumber(context, "result", 3.0,
+        "functions: nested function sees lexical parents");
+
+    const ScriptResult shadow = execute(context,
+        "var x = 1;"
+        "function foo() { var x = 2; return x; }"
+        "var y = foo();");
+    expect(shadow.succeeded(), "functions: shadowing succeeds");
+    expectNumber(context, "x", 1.0, "functions: local shadow preserves global");
+    expectNumber(context, "y", 2.0, "functions: local shadow result");
+
+    const ScriptResult outerAssignment = execute(context,
+        "var x = 1; function foo() { x = 2; } foo();");
+    expect(outerAssignment.succeeded(), "functions: outer assignment succeeds");
+    expectNumber(context, "x", 2.0, "functions: assignment finds outer binding");
+
+    const ScriptResult fresh = execute(context,
+        "function foo(v) { var x = v; x++; return x; }"
+        "var a = foo(1); var b = foo(10);");
+    expect(fresh.succeeded(), "functions: fresh invocation locals succeed");
+    expectNumber(context, "a", 2.0, "functions: first local is fresh");
+    expectNumber(context, "b", 11.0, "functions: second local is fresh");
+    expect(binding(context, "x") == nullptr,
+        "functions: function var does not leak globally");
+
+    const ScriptResult returnResult = execute(context,
+        "function explicit() { return 42; }"
+        "function empty() { return; }"
+        "function falloff() { var x = 1; }"
+        "var a = explicit(); var b = empty(); var c = falloff();");
+    expect(returnResult.succeeded(), "functions: return forms succeed");
+    expectNumber(context, "a", 42.0, "functions: explicit return");
+    expectType(context, "b", ValueType::Undefined,
+        "functions: bare return is Undefined");
+    expectType(context, "c", ValueType::Undefined,
+        "functions: falloff is Undefined");
+
+    const ScriptResult propagation = execute(context,
+        "function find() { var x = 0; while (true) {"
+        "  if (x === 4) { return x; } x++;"
+        "} } var result = find();");
+    expect(propagation.succeeded(), "functions: return propagation succeeds");
+    expectNumber(context, "result", 4.0,
+        "functions: return exits nested loop and conditional");
+
+    const ScriptResult recursion = execute(context,
+        "function factorial(n) { if (n <= 1) { return 1; }"
+        " return n * factorial(n - 1); }"
+        "var result = factorial(5);");
+    expect(recursion.succeeded(), "functions: recursion succeeds");
+    expectNumber(context, "result", 120.0, "functions: factorial result");
+
+    const ScriptResult expressionCalls = execute(context,
+        "function add(a, b) { return a + b; }"
+        "function double(x) { return x * 2; }"
+        "function addOne(x) { return x + 1; }"
+        "var x = 1 + add(2, 3) * 4;"
+        "var result = double(addOne(4));");
+    expect(expressionCalls.succeeded(), "functions: expression calls succeed");
+    expectNumber(context, "x", 21.0, "functions: call precedence in expression");
+    expectNumber(context, "result", 10.0, "functions: nested call result");
+
+    const ScriptResult primitives = execute(context,
+        "function u() { return; } function n() { return null; }"
+        "function b() { return true; } function z() { return 0; }"
+        "function s() { return \"hello\"; }"
+        "var uResult = u(); var nResult = n(); var bResult = b();"
+        "var zResult = z(); var sResult = s();");
+    expect(primitives.succeeded(), "functions: primitive returns succeed");
+    expectType(context, "uResult", ValueType::Undefined, "functions: Undefined return");
+    expectType(context, "nResult", ValueType::Null, "functions: Null return");
+    expectType(context, "bResult", ValueType::Boolean, "functions: Boolean return");
+    expectNumber(context, "zResult", 0.0, "functions: Number return");
+    expectString(context, "sResult", "hello", "functions: String return");
+
+    const ScriptResult redeclaration = execute(context,
+        "function foo() { return 1; } function foo() { return 2; }"
+        "var result = foo(); var x = 1; var x;");
+    expect(redeclaration.succeeded(), "functions: redeclaration succeeds");
+    expectNumber(context, "result", 2.0,
+        "functions: latest declaration is applicable");
+    expectNumber(context, "x", 1.0, "functions: var redeclaration preserves value");
+
+    const ScriptResult assignmentHoist = execute(context,
+        "x = 5; var x;");
+    expect(assignmentHoist.succeeded(), "functions: var hoisting assignment succeeds");
+    expectNumber(context, "x", 5.0, "functions: hoisted var accepts early assignment");
+}
+
+void testFunctionLimitsAndFailures()
+{
+    expectError("var x = 123; x();", RuntimeErrorCode::NotCallable,
+        "functions: non-callable value");
+    expectError("return 5;", RuntimeErrorCode::IllegalReturn,
+        "functions: top-level return remains illegal");
+    expectError("if (true) { function nested() { return 1; } }",
+        RuntimeErrorCode::UnsupportedFunctionConstruct,
+        "functions: block declaration policy");
+
+    RuntimeLimits depth;
+    depth.maxCallDepth = 4;
+    expectError("function recurse() { return recurse(); } recurse();",
+        RuntimeErrorCode::CallDepthExceeded, "functions: call depth", depth);
+
+    RuntimeLimits budget;
+    budget.maxExecutionSteps = 48;
+    expectError("function spin() { while (true) { } } spin();",
+        RuntimeErrorCode::ExecutionBudgetExceeded,
+        "functions: shared execution budget", budget);
+
+    RuntimeLimits environments;
+    environments.maxEnvironments = 2;
+    expectError("function foo() { return 1; } foo(); foo();",
+        RuntimeErrorCode::EnvironmentLimitExceeded,
+        "functions: environment limit", environments);
+
+    RuntimeLimits functions;
+    functions.maxFunctions = 0;
+    expectError("function first() { return 1; } function second() { return 2; }",
+        RuntimeErrorCode::FunctionLimitExceeded,
+        "functions: function value limit", functions);
+}
+
+void testFunctionClosureAndResetLifetime()
+{
+    RuntimeContext context;
+    const ScriptResult closure = execute(context,
+        "function makeCounter() { var x = 0;"
+        " function next() { x++; return x; } return next; }"
+        "var counter = makeCounter(); var a = counter(); var b = counter();");
+    expect(closure.succeeded(), "functions: escaped closure succeeds safely");
+    expectNumber(context, "a", 1.0, "functions: first closure call");
+    expectNumber(context, "b", 2.0, "functions: closure retains lexical environment");
+    expect(context.activeCallFrameCount() == 0,
+        "functions: calls unwind all active frames");
+    expect(context.environmentCount() >= 4,
+        "functions: retained environment identities are bounded and stable");
+
+    const ScriptResult failed = execute(context,
+        "function fail() { return missing; } fail();");
+    expect(!failed.succeeded(), "functions: failed call reports failure");
+    expect(context.activeCallFrameCount() == 0,
+        "functions: failed call unwinds active frames");
+
+    context.reset();
+    expect(context.activeCallFrameCount() == 0,
+        "functions: reset clears active frames");
+    expect(context.environmentCount() == 1,
+        "functions: reset clears function environments");
+    expect(context.functionValueCount() == 0,
+        "functions: reset clears function identities");
+    expect(execute(context, "var result = 7;").succeeded(),
+        "functions: unrelated script after reset succeeds");
+    expectNumber(context, "result", 7.0, "functions: post-reset result");
+    expect(binding(context, "counter") == nullptr,
+        "functions: old closure binding does not survive reset");
 }
 
 void testLimitsAndBudget()
@@ -307,6 +517,9 @@ int main()
     testAssignmentAndUpdates();
     testControlFlow();
     testNegativeRuntimeCases();
+    testFunctionsAndLexicalScope();
+    testFunctionLimitsAndFailures();
+    testFunctionClosureAndResetLifetime();
     testLimitsAndBudget();
     testContextOwnsSource();
 

@@ -10,6 +10,10 @@
 namespace gxos {
 namespace javascript {
 
+using EnvironmentId = std::uint32_t;
+constexpr EnvironmentId kGlobalEnvironmentId = 0u;
+constexpr EnvironmentId kInvalidEnvironmentId = 0xffffffffu;
+
 enum class EnvironmentErrorCode : std::uint8_t {
     None = 0,
     BindingLimitExceeded,
@@ -31,16 +35,20 @@ struct Binding {
     Value value;
 };
 
-// JS3 has one global var environment.  Names are owned by the environment;
-// lookup and assignment only borrow the caller's name view for the duration
-// of the operation.  Redeclaration updates the existing entry, so the
-// binding vector cannot grow from repeated `var x` declarations.
+// Names are owned by the environment; lookup and assignment only borrow the
+// caller's name view for the duration of the operation. Environment::declare
+// is idempotent for redeclarations, allowing the evaluator to preserve an
+// existing `var` value until an initializer or function binding assigns it.
 class Environment {
 public:
-    explicit Environment(EnvironmentLimits limits = EnvironmentLimits())
-        : limits_(limits) {}
+    explicit Environment(EnvironmentLimits limits = EnvironmentLimits(),
+        EnvironmentId parent = kInvalidEnvironmentId)
+        : limits_(limits), parent_(parent) {}
 
     void reset();
+
+    EnvironmentId parent() const { return parent_; }
+    void setParent(EnvironmentId parent) { parent_ = parent; }
 
     bool declare(SourceView name, Value value, EnvironmentError& error);
     bool assign(SourceView name, Value value);
@@ -54,6 +62,7 @@ private:
     std::size_t find(SourceView name) const;
 
     EnvironmentLimits limits_;
+    EnvironmentId parent_ = kInvalidEnvironmentId;
     std::vector<Binding> bindings_;
 };
 
