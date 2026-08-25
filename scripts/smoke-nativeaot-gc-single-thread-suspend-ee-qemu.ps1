@@ -893,12 +893,12 @@ extern "C" void __cdecl guideXosNativeAotC011EC42StackSafetyBoundary();
 '@
         $iteratorLookupReplacement = @'
         m_pCodeManager = dac_cast<PTR_ICodeManager>(m_pInstance->GetCodeManagerForAddress(m_ControlPC));
-        GUIDEXOS_C011EC42_STACK_SAFETY_HOOK
         guideXosNativeAotC011EC18IteratorCodeManagerLookup(
             reinterpret_cast<uintptr_t>(m_ControlPC),
             static_cast<uintptr_t>(m_RegDisplay.GetSP()),
             static_cast<uintptr_t>(m_RegDisplay.GetFP()),
             reinterpret_cast<uintptr_t>(m_pCodeManager));
+        GUIDEXOS_C011EC42_STACK_SAFETY_HOOK
         FAILFAST_OR_DAC_FAIL(m_pCodeManager);
 
         const bool guideXosC011EC18FindMethodInfoResult =

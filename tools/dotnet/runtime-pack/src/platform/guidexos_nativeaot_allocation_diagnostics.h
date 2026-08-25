@@ -2008,6 +2008,7 @@ typedef struct guidexos_nativeaot_allocation_diagnostics {
     uintptr_t c011ec18IteratorControlPc;
     uintptr_t c011ec18IteratorInitialSp;
     uintptr_t c011ec18IteratorInitialFp;
+    uintptr_t c011ec18IteratorFrameAddress;
     uintptr_t c011ec18IteratorCodeManager;
     uintptr_t c011ec18IteratorMethodInfo;
     uintptr_t c011ec18IteratorFramePointer;

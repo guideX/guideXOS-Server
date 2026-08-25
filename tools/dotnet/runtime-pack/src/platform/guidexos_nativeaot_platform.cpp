@@ -6902,6 +6902,7 @@ guideXosNativeAotC011EC18IteratorInitial(
     d.c011ec18IteratorControlPc = controlPc;
     d.c011ec18IteratorInitialSp = sp;
     d.c011ec18IteratorInitialFp = fp;
+    d.c011ec18IteratorFrameAddress = frameAddress;
     d.c011ec18TransitionFrameFlags = flags;
 #if defined(GUIDEXOS_NATIVEAOT_C011EC33_LIFETIME_TRANSITION)
     {
@@ -14125,10 +14126,50 @@ static void guideXosNativeAotC011EC42Emit(
 
 extern "C" void __cdecl
 guideXosNativeAotC011EC42StackSafetyBoundary() {
+    guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
     guidexos_nativeaot_c011ec42_lifecycle_record& r =
         g_guideXosAllocationDiagnostics.c011ec42Lifecycle;
     if (r.started == 0u || r.safeStopReason != 0u) return;
     r.safeStopReason = 0xC0420010u;
+    suspendEeSerialPutString(
+        "[nativeaot-gc-short-weak-lifetime] C18-GATE marker=C011EC43-C18-GATE");
+#define C43G32(name, value) \
+    suspendEeSerialPutString(" " name "="); suspendEeSerialPutHex32(value)
+#define C43G64(name, value) \
+    suspendEeSerialPutString(" " name "="); suspendEeSerialPutHex64(value)
+    C43G32("collectionBefore", r.collectionCountBefore);
+    C43G32("allocationCount", r.allocationCount);
+    C43G32("collectionEntry", r.collectionEntryObserved);
+    C43G32("condemnedGeneration", r.condemnedGeneration);
+    C43G32("oldGateWouldFire", 1u);
+    C43G32("laterStateRecognized", 0u);
+    C43G32("safeRefinementPredicates", 0u);
+    C43G32("c18IteratorInitialCount", d.c011ec18IteratorInitialCount);
+    C43G32("c18LookupCount", d.c011ec18LookupCount);
+    C43G32("c18FindMethodInfoAttempts", d.c011ec18FindMethodInfoAttemptCount);
+    C43G32("c18FindMethodInfoSuccess", d.c011ec18FindMethodInfoSuccessCount);
+    C43G32("c18FailFastReason", d.c011ec18FailFastReason);
+    C43G64("thread", r.threadIdentity);
+    C43G64("context", r.contextIdentity);
+    C43G64("homeHeap", r.homeHeap);
+    C43G64("allocationPointer", r.initialAllocPtr);
+    C43G64("allocationLimit", r.initialAllocLimit);
+    C43G64("c40TailSegment", r.tailSegment);
+    C43G64("c40TailStart", r.tailStart);
+    C43G64("c40TailEnd", r.tailEnd);
+    C43G64("c18IteratorFrame", d.c011ec18IteratorFrameAddress);
+    C43G64("c18IteratorControlPC", d.c011ec18IteratorControlPc);
+    C43G64("c18IteratorSP", d.c011ec18IteratorInitialSp);
+    C43G64("c18IteratorFP", d.c011ec18IteratorInitialFp);
+    C43G64("c18IteratorFlags", d.c011ec18TransitionFrameFlags);
+    C43G64("c18ObservedCodeManager", d.c011ec18IteratorCodeManager);
+    C43G64("c18ExpectedManagedManager", d.c011ec18TransitionCodeManager);
+    C43G64("ephemeralLow", r.ephemeralLowAfter);
+    C43G64("ephemeralHigh", r.ephemeralHighAfter);
+#undef C43G32
+#undef C43G64
+    suspendEeSerialPutString("\n");
     guideXosNativeAotC011EC42Emit(
         "BLOCKED marker=C011EC42-BLOCKED", r);
 }
