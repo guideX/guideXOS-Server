@@ -632,21 +632,21 @@ static std::string navigatorHostedSmokeDiagnostic() {
         js9Loaded && contains(js9InitialText, "Navigator JavaScript JS9") &&
         contains(js9InitialText, "0") && contains(js9InitialText, "B initial") &&
         js9Handlers == 2u && js9Error.empty(),
-        "loaded=" + yesNo(js9Loaded) + ",handlers=" +
+        std::string("loaded=") + yesNo(js9Loaded) + ",handlers=" +
         std::to_string(js9Handlers) + ",error=" + (js9Error.empty() ? "none" : js9Error));
     add("JS9 hosted click uses Navigator hit test",
         js9AHasGeometry && js9AW > 0 && js9AH > 0 && js9AHit && js9ClickA1 &&
         contains(js9AfterA1, "1"),
-        "geometry=" + yesNo(js9AHasGeometry) + ",hit=" + yesNo(js9AHit) +
+        std::string("geometry=") + yesNo(js9AHasGeometry) + ",hit=" + yesNo(js9AHit) +
         ",click=" + yesNo(js9ClickA1));
     add("JS9 hosted same-realm state persists",
         js9ClickA2 && contains(js9AfterA2, "2") && js9ClickA3 &&
         contains(js9AfterA3, "3"),
-        "a2=" + yesNo(js9ClickA2) + ",a3=" + yesNo(js9ClickA3));
+        std::string("a2=") + yesNo(js9ClickA2) + ",a3=" + yesNo(js9ClickA3));
     add("JS9 hosted handlers remain independent",
         js9ClickB && contains(js9AfterB, "B clicked") &&
         contains(js9AfterB, "2"),
-        "b=" + yesNo(js9ClickB));
+        std::string("b=") + yesNo(js9ClickB));
     add("JS9 hosted mutation relayouts and repaints",
         js9RevisionAfterA1 > js9InitialRevision && js9CleanAfterClicks,
         "revision=" + std::to_string(js9InitialRevision) + "->" +

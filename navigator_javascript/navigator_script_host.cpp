@@ -466,6 +466,9 @@ HostResult NavigatorScriptHostAdapter::setElementTextContent(
 
     if (!matchingBlocks.empty()) {
         document_->blocks[matchingBlocks.front()].text = text;
+        if (document_->blocks[matchingBlocks.front()].type == gxos::web::BlockType::FormSubmit) {
+            document_->blocks[matchingBlocks.front()].submitLabel = text;
+        }
         for (std::size_t position = 1; position < matchingBlocks.size(); ++position)
             document_->blocks[matchingBlocks[position]].text.clear();
     }

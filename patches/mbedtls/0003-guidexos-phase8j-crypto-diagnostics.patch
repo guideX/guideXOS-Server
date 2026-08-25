@@ -1,288 +1,5 @@
-diff --git a/tf-psa-crypto/drivers/builtin/src/ecdsa.c b/tf-psa-crypto/drivers/builtin/src/ecdsa.c
-index 90a5fe17..1434d085 100644
---- a/tf-psa-crypto/drivers/builtin/src/ecdsa.c
-+++ b/tf-psa-crypto/drivers/builtin/src/ecdsa.c
-@@ -194,13 +203,51 @@ static void ecdsa_restart_det_free(mbedtls_ecdsa_restart_det_ctx *ctx)
- 
- #endif /* MBEDTLS_ECP_RESTARTABLE */
- 
-+/* Reduce an MPI without entering the generic long-division correction loop.
-+ * The bare-metal ECDSA path uses this for values no larger than twice the
-+ * curve order. The input is copied first because the ECDSA callers commonly
-+ * use the same MPI for input and output. The iteration count depends only on
-+ * the allocated input size, not on its value. */
-+static int ecdsa_mod_fixed(mbedtls_mpi *R,
-+                           const mbedtls_mpi *A,
-+                           const mbedtls_mpi *N)
-+{
-+    int ret = MBEDTLS_ERR_ERROR_CORRUPTION_DETECTED;
-+    mbedtls_mpi T;
-+    size_t pos;
- 
-+    mbedtls_mpi_init(&T);
- 
-+    if (mbedtls_mpi_cmp_int(N, 0) <= 0) {
-+        ret = MBEDTLS_ERR_MPI_BAD_INPUT_DATA;
-+        goto cleanup;
-+    }
- 
-+    MBEDTLS_MPI_CHK(mbedtls_mpi_copy(&T, A));
-+    T.s = 1;
-+    MBEDTLS_MPI_CHK(mbedtls_mpi_grow(R, N->n + 1));
-+    MBEDTLS_MPI_CHK(mbedtls_mpi_lset(R, 0));
- 
-+    for (pos = T.n * sizeof(mbedtls_mpi_uint) * 8u; pos > 0; --pos) {
-+        MBEDTLS_MPI_CHK(mbedtls_mpi_shift_l(R, 1));
-+        if (mbedtls_mpi_get_bit(&T, pos - 1) != 0) {
-+            MBEDTLS_MPI_CHK(mbedtls_mpi_add_int(R, R, 1));
-+        }
-+        if (mbedtls_mpi_cmp_mpi(R, N) >= 0) {
-+            MBEDTLS_MPI_CHK(mbedtls_mpi_sub_mpi(R, R, N));
-+        }
-+    }
- 
-+    if (A->s < 0 && mbedtls_mpi_cmp_int(R, 0) != 0) {
-+        MBEDTLS_MPI_CHK(mbedtls_mpi_sub_mpi(R, N, R));
-+    }
-+    R->s = 1;
- 
-+cleanup:
-+    mbedtls_mpi_free(&T);
-+    return ret;
-+}
- 
- /*
-  * Derive a suitable integer for group grp from a buffer of length len
-  * SEC1 4.1.3 step 5 aka SEC1 4.1.4 step 3
-@@ -517,18 +575,21 @@ int mbedtls_ecdsa_verify_restartable(mbedtls_ecp_group *grp,
-      */
-     ECDSA_BUDGET(MBEDTLS_ECP_OPS_CHK + MBEDTLS_ECP_OPS_INV + 2);
- 
-+    GXOS_TLS_CRYPTO_STAGE_TRACE("ecdsa_verify.inv_begin", (uint32_t) grp->pbits);
-     MBEDTLS_MPI_CHK(mbedtls_mpi_gcd_modinv_odd(NULL, &s_inv, s, &grp->N));
-     GXOS_TLS_CRYPTO_STAGE_TRACE("ecdsa_verify.inv_done", (uint32_t) grp->pbits);
- 
-     MBEDTLS_MPI_CHK(mbedtls_mpi_mul_mpi(pu1, &e, &s_inv));
--    MBEDTLS_MPI_CHK(mbedtls_mpi_mod_mpi(pu1, pu1, &grp->N));
-     GXOS_TLS_CRYPTO_STAGE_TRACE("ecdsa_verify.u1_mul_done", (uint32_t) grp->pbits);
-+    GXOS_TLS_CRYPTO_STAGE_TRACE("ecdsa_verify.u1_mod_begin", (uint32_t) grp->pbits);
-+    MBEDTLS_MPI_CHK(ecdsa_mod_fixed(pu1, pu1, &grp->N));
-     GXOS_TLS_CRYPTO_STAGE_TRACE("ecdsa_verify.u1_mod_done", (uint32_t) grp->pbits);
- 
-     MBEDTLS_MPI_CHK(mbedtls_mpi_mul_mpi(pu2, r, &s_inv));
--    MBEDTLS_MPI_CHK(mbedtls_mpi_mod_mpi(pu2, pu2, &grp->N));
-     GXOS_TLS_CRYPTO_STAGE_TRACE("ecdsa_verify.u2_mul_done", (uint32_t) grp->pbits);
-+    GXOS_TLS_CRYPTO_STAGE_TRACE("ecdsa_verify.u2_mod_begin", (uint32_t) grp->pbits);
-+    MBEDTLS_MPI_CHK(ecdsa_mod_fixed(pu2, pu2, &grp->N));
-     GXOS_TLS_CRYPTO_STAGE_TRACE("ecdsa_verify.u2_mod_done", (uint32_t) grp->pbits);
- 
- #if defined(MBEDTLS_ECP_RESTARTABLE)
-     if (rs_ctx != NULL && rs_ctx->ver != NULL) {
-@@ -535,11 +601,13 @@ muladd:
-     /*
-      * Step 5: R = u1 G + u2 Q
-      */
-+    GXOS_TLS_CRYPTO_STAGE_TRACE("ecdsa_verify.scalar_begin",
-+                                (uint32_t) grp->pbits);
-     GXOS_TLS_CRYPTO_STAGE_TRACE("ecdsa_verify.muladd_begin",
-                                 (uint32_t) grp->pbits);
-     MBEDTLS_MPI_CHK(mbedtls_ecp_muladd_restartable(grp,
-                                                    &R, pu1, &grp->G, pu2, Q, ECDSA_RS_ECP));
-     GXOS_TLS_CRYPTO_STAGE_TRACE("ecdsa_verify.muladd_done", (uint32_t) ret);
- 
-     if (mbedtls_ecp_is_zero(&R)) {
-         ret = MBEDTLS_ERR_ECP_VERIFY_FAILED;
-@@ -547,7 +618,7 @@ muladd:
-      * Step 6: convert xR to an integer (no-op)
-      * Step 7: reduce xR mod n (gives v)
-      */
--    MBEDTLS_MPI_CHK(mbedtls_mpi_mod_mpi(&R.X, &R.X, &grp->N));
-+    MBEDTLS_MPI_CHK(ecdsa_mod_fixed(&R.X, &R.X, &grp->N));
- 
-     /*
-      * Step 8: check if v (that is, R.X) is equal to r
-diff --git a/tf-psa-crypto/drivers/builtin/src/ecp.c b/tf-psa-crypto/drivers/builtin/src/ecp.c
-index 89c851ec..4c15b21b 100644
---- a/tf-psa-crypto/drivers/builtin/src/ecp.c
-+++ b/tf-psa-crypto/drivers/builtin/src/ecp.c
-@@ -1783,6 +1792,9 @@ static int ecp_precompute_comb(const mbedtls_ecp_group *grp,
- 
-     mbedtls_mpi tmp[4];
- 
-+    GXOS_TLS_CRYPTO_STAGE_TRACE("ecp.precompute.begin",
-+                                ((uint32_t) grp->pbits << 16) |
-+                                ((uint32_t) w << 8) | (uint32_t) T_size);
-     mpi_init_many(tmp, sizeof(tmp) / sizeof(mbedtls_mpi));
- 
- #if defined(MBEDTLS_ECP_RESTARTABLE)
-@@ -1925,7 +1937,8 @@ cleanup:
-     }
- #endif
- 
-+    GXOS_TLS_CRYPTO_STAGE_TRACE("ecp.precompute.done", (uint32_t) ret);
- 
-     return ret;
- }
- 
-@@ -1976,6 +1990,7 @@ static int ecp_mul_comb_core(const mbedtls_ecp_group *grp, mbedtls_ecp_point *R,
-     mbedtls_mpi tmp[4];
-     size_t i;
- 
-+    GXOS_TLS_CRYPTO_STAGE_TRACE("ecp.comb_core.begin", (uint32_t) grp->pbits);
-     mbedtls_ecp_point_init(&Txi);
-     mpi_init_many(tmp, sizeof(tmp) / sizeof(mbedtls_mpi));
- 
-@@ -2016,7 +2031,8 @@ static int ecp_mul_comb_core(const mbedtls_ecp_group *grp, mbedtls_ecp_point *R,
- 
- cleanup:
- 
-+    GXOS_TLS_CRYPTO_STAGE_TRACE("ecp.comb_core.done", (uint32_t) ret);
- 
-     mbedtls_ecp_point_free(&Txi);
-     mpi_free_many(tmp, sizeof(tmp) / sizeof(mbedtls_mpi));
- 
-@@ -2101,7 +2118,10 @@ static int ecp_mul_comb_after_precomp(const mbedtls_ecp_group *grp,
-     unsigned char k[COMB_MAX_D + 1];
-     mbedtls_ecp_point *RR = R;
- 
-+    GXOS_TLS_CRYPTO_STAGE_TRACE("ecp.comb_recode.begin",
-+                                ((uint32_t) grp->pbits << 16) |
-+                                ((uint32_t) w << 8) | (uint32_t) d);
- 
- #if defined(MBEDTLS_ECP_RESTARTABLE)
-     if (rs_ctx != NULL && rs_ctx->rsm != NULL) {
-         RR = &rs_ctx->rsm->R;
-@@ -2113,6 +2134,7 @@ static int ecp_mul_comb_after_precomp(const mbedtls_ecp_group *grp,
- 
-     MBEDTLS_MPI_CHK(ecp_comb_recode_scalar(grp, m, k, d, w,
-                                            &parity_trick));
-+    GXOS_TLS_CRYPTO_STAGE_TRACE("ecp.comb_recode.done", (uint32_t) parity_trick);
-     MBEDTLS_MPI_CHK(ecp_mul_comb_core(grp, RR, T, T_size, k, d,
-                                       f_rng, p_rng, rs_ctx));
-     MBEDTLS_MPI_CHK(ecp_safe_invert_jac(grp, RR, parity_trick));
-@@ -2125,7 +2147,9 @@ static int ecp_mul_comb_after_precomp(const mbedtls_ecp_group *grp,
- final_norm:
-     MBEDTLS_ECP_BUDGET(MBEDTLS_ECP_OPS_INV);
- #endif
-+    GXOS_TLS_CRYPTO_STAGE_TRACE("ecp.comb_normalize.begin", (uint32_t) grp->pbits);
-     MBEDTLS_MPI_CHK(ecp_normalize_jac(grp, RR));
-+    GXOS_TLS_CRYPTO_STAGE_TRACE("ecp.comb_normalize.done", (uint32_t) ret);
- 
- #if defined(MBEDTLS_ECP_RESTARTABLE)
-     if (rs_ctx != NULL && rs_ctx->rsm != NULL) {
-@@ -2207,6 +2231,7 @@ static int ecp_mul_comb(mbedtls_ecp_group *grp, mbedtls_ecp_point *R,
-     unsigned char T_size = 0, T_ok = 0;
-     mbedtls_ecp_point *T = NULL;
- 
-+    GXOS_TLS_CRYPTO_STAGE_TRACE("ecp.mul_comb.enter", (uint32_t) grp->pbits);
-     ECP_RS_ENTER(rsm);
- 
-     /* Is P the base point ? */
-@@ -2221,6 +2246,9 @@ static int ecp_mul_comb(mbedtls_ecp_group *grp, mbedtls_ecp_point *R,
-     w = ecp_pick_window_size(grp, p_eq_g);
-     T_size = 1U << (w - 1);
-     d = (grp->nbits + w - 1) / w;
-+    GXOS_TLS_CRYPTO_STAGE_TRACE("ecp.mul_comb.window",
-+                                ((uint32_t) w << 24) |
-+                                ((uint32_t) T_size << 16) | (uint32_t) d);
- 
-     /* Pre-computed table: do we have it already for the base point? */
-     if (p_eq_g && grp->T != NULL) {
-@@ -2266,11 +2294,14 @@ static int ecp_mul_comb(mbedtls_ecp_group *grp, mbedtls_ecp_point *R,
-             grp->T_size = T_size;
-         }
-     }
-+    GXOS_TLS_CRYPTO_STAGE_TRACE("ecp.mul_comb.precompute_done", T_ok);
- 
-     /* Actual comb multiplication using precomputed points */
-+    GXOS_TLS_CRYPTO_STAGE_TRACE("ecp.mul_comb.core_begin", (uint32_t) grp->pbits);
-     MBEDTLS_MPI_CHK(ecp_mul_comb_after_precomp(grp, R, m,
-                                                T, T_size, w, d,
-                                                f_rng, p_rng, rs_ctx));
-+    GXOS_TLS_CRYPTO_STAGE_TRACE("ecp.mul_comb.core_done", (uint32_t) ret);
- 
- cleanup:
- 
-@@ -2309,6 +2340,7 @@ cleanup:
-         mbedtls_ecp_point_free(R);
-     }
- 
-+    GXOS_TLS_CRYPTO_STAGE_TRACE("ecp.mul_comb.exit", (uint32_t) ret);
-     ECP_RS_LEAVE(rsm);
- 
-     return ret;
-@@ -2695,7 +2730,9 @@ int mbedtls_ecp_muladd_restartable(
-     }
- #endif /* MBEDTLS_ECP_RESTARTABLE */
- 
-+    GXOS_TLS_CRYPTO_STAGE_TRACE("ecp.muladd.u1_begin", (uint32_t) grp->pbits);
-     MBEDTLS_MPI_CHK(mbedtls_ecp_mul_shortcuts(grp, pmP, m, P, rs_ctx));
-+    GXOS_TLS_CRYPTO_STAGE_TRACE("ecp.muladd.u1_done", (uint32_t) ret);
- #if defined(MBEDTLS_ECP_RESTARTABLE)
-     if (rs_ctx != NULL && rs_ctx->ma != NULL) {
-         rs_ctx->ma->state = ecp_rsma_mul2;
-@@ -2703,7 +2740,9 @@ int mbedtls_ecp_muladd_restartable(
- 
- mul2:
- #endif
-+    GXOS_TLS_CRYPTO_STAGE_TRACE("ecp.muladd.u2_begin", (uint32_t) grp->pbits);
-     MBEDTLS_MPI_CHK(mbedtls_ecp_mul_shortcuts(grp, pR,  n, Q, rs_ctx));
-+    GXOS_TLS_CRYPTO_STAGE_TRACE("ecp.muladd.u2_done", (uint32_t) ret);
- 
- #if defined(MBEDTLS_ECP_RESTARTABLE)
-     if (rs_ctx != NULL && rs_ctx->ma != NULL) {
-@@ -2713,7 +2752,9 @@ mul2:
- add:
- #endif
-     MBEDTLS_ECP_BUDGET(MBEDTLS_ECP_OPS_ADD);
-+    GXOS_TLS_CRYPTO_STAGE_TRACE("ecp.muladd.add_begin", (uint32_t) grp->pbits);
-     MBEDTLS_MPI_CHK(ecp_add_mixed(grp, pR, pmP, pR, tmp));
-+    GXOS_TLS_CRYPTO_STAGE_TRACE("ecp.muladd.add_done", (uint32_t) ret);
- #if defined(MBEDTLS_ECP_RESTARTABLE)
-     if (rs_ctx != NULL && rs_ctx->ma != NULL) {
-         rs_ctx->ma->state = ecp_rsma_norm;
-@@ -2722,7 +2763,9 @@ add:
- norm:
- #endif
-     MBEDTLS_ECP_BUDGET(MBEDTLS_ECP_OPS_INV);
-+    GXOS_TLS_CRYPTO_STAGE_TRACE("ecp.muladd.normalize_begin", (uint32_t) grp->pbits);
-     MBEDTLS_MPI_CHK(ecp_normalize_jac(grp, pR));
-+    GXOS_TLS_CRYPTO_STAGE_TRACE("ecp.muladd.normalize_done", (uint32_t) ret);
- 
- #if defined(MBEDTLS_ECP_RESTARTABLE)
-     if (rs_ctx != NULL && rs_ctx->ma != NULL) {
-diff --git a/tf-psa-crypto/drivers/builtin/src/psa_crypto_ecp.c b/tf-psa-crypto/drivers/builtin/src/psa_crypto_ecp.c
-index 448e2979..1b576865 100644
---- a/tf-psa-crypto/drivers/builtin/src/psa_crypto_ecp.c
-+++ b/tf-psa-crypto/drivers/builtin/src/psa_crypto_ecp.c
-@@ -516,23 +530,25 @@ psa_status_t mbedtls_psa_ecdsa_verify_hash(
-     status = mbedtls_to_psa_error(mbedtls_mpi_read_binary(&s,
-                                                           signature + curve_bytes,
-                                                           curve_bytes));
-     GXOS_TLS_CRYPTO_STAGE_TRACE("psa_ecdsa_verify.s_read_done", (uint32_t) status);
-     if (status != PSA_SUCCESS) {
-         goto cleanup;
-     }
- 
-     status = mbedtls_psa_ecp_load_public_part(ecp);
-     GXOS_TLS_CRYPTO_STAGE_TRACE("psa_ecdsa_verify.public_load_done", (uint32_t) status);
-     if (status != PSA_SUCCESS) {
-         goto cleanup;
-     }
- 
-     GXOS_TLS_CRYPTO_STAGE_TRACE("psa_ecdsa_verify.ecdsa_begin",
-                                 (uint32_t) attributes->bits);
-+    GXOS_TLS_CRYPTO_STAGE_TRACE("psa_ecdsa_verify.builtin_dispatch",
-+                                (uint32_t) attributes->bits);
-     status = mbedtls_to_psa_error(mbedtls_ecdsa_verify(&ecp->grp, hash,
-                                                        hash_length, &ecp->Q,
-                                                        &r, &s));
-     GXOS_TLS_CRYPTO_STAGE_TRACE("psa_ecdsa_verify.done", (uint32_t) status);
- cleanup:
-     mbedtls_mpi_free(&r);
-     mbedtls_mpi_free(&s);
 diff --git a/tf-psa-crypto/drivers/builtin/src/bignum.c b/tf-psa-crypto/drivers/builtin/src/bignum.c
-index e2559e7d..620f4a8c 100644
+index e2559e7de..620f4a8c1 100644
 --- a/tf-psa-crypto/drivers/builtin/src/bignum.c
 +++ b/tf-psa-crypto/drivers/builtin/src/bignum.c
 @@ -1423,6 +1423,10 @@ int mbedtls_mpi_div_mpi(mbedtls_mpi *Q, mbedtls_mpi *R, const mbedtls_mpi *A,
@@ -371,8 +88,259 @@ index e2559e7d..620f4a8c 100644
  cleanup:
  
      return ret;
+diff --git a/tf-psa-crypto/drivers/builtin/src/ecdsa.c b/tf-psa-crypto/drivers/builtin/src/ecdsa.c
+index 0e47dd6c9..dff111f9b 100644
+--- a/tf-psa-crypto/drivers/builtin/src/ecdsa.c
++++ b/tf-psa-crypto/drivers/builtin/src/ecdsa.c
+@@ -203,6 +203,51 @@ static void ecdsa_restart_det_free(mbedtls_ecdsa_restart_det_ctx *ctx)
+ 
+ #endif /* MBEDTLS_ECP_RESTARTABLE */
+ 
++/* Reduce an MPI without entering the generic long-division correction loop.
++ * The bare-metal ECDSA path uses this for values no larger than twice the
++ * curve order. The input is copied first because the ECDSA callers commonly
++ * use the same MPI for input and output. The iteration count depends only on
++ * the allocated input size, not on its value. */
++static int ecdsa_mod_fixed(mbedtls_mpi *R,
++                           const mbedtls_mpi *A,
++                           const mbedtls_mpi *N)
++{
++    int ret = MBEDTLS_ERR_ERROR_CORRUPTION_DETECTED;
++    mbedtls_mpi T;
++    size_t pos;
++
++    mbedtls_mpi_init(&T);
++
++    if (mbedtls_mpi_cmp_int(N, 0) <= 0) {
++        ret = MBEDTLS_ERR_MPI_BAD_INPUT_DATA;
++        goto cleanup;
++    }
++
++    MBEDTLS_MPI_CHK(mbedtls_mpi_copy(&T, A));
++    T.s = 1;
++    MBEDTLS_MPI_CHK(mbedtls_mpi_grow(R, N->n + 1));
++    MBEDTLS_MPI_CHK(mbedtls_mpi_lset(R, 0));
++
++    for (pos = T.n * sizeof(mbedtls_mpi_uint) * 8u; pos > 0; --pos) {
++        MBEDTLS_MPI_CHK(mbedtls_mpi_shift_l(R, 1));
++        if (mbedtls_mpi_get_bit(&T, pos - 1) != 0) {
++            MBEDTLS_MPI_CHK(mbedtls_mpi_add_int(R, R, 1));
++        }
++        if (mbedtls_mpi_cmp_mpi(R, N) >= 0) {
++            MBEDTLS_MPI_CHK(mbedtls_mpi_sub_mpi(R, R, N));
++        }
++    }
++
++    if (A->s < 0 && mbedtls_mpi_cmp_int(R, 0) != 0) {
++        MBEDTLS_MPI_CHK(mbedtls_mpi_sub_mpi(R, N, R));
++    }
++    R->s = 1;
++
++cleanup:
++    mbedtls_mpi_free(&T);
++    return ret;
++}
++
+ /*
+  * Derive a suitable integer for group grp from a buffer of length len
+  * SEC1 4.1.3 step 5 aka SEC1 4.1.4 step 3
+@@ -535,12 +580,14 @@ int mbedtls_ecdsa_verify_restartable(mbedtls_ecp_group *grp,
+ 
+     MBEDTLS_MPI_CHK(mbedtls_mpi_mul_mpi(pu1, &e, &s_inv));
+     GXOS_TLS_CRYPTO_STAGE_TRACE("ecdsa_verify.u1_mul_done", (uint32_t) grp->pbits);
+-    MBEDTLS_MPI_CHK(mbedtls_mpi_mod_mpi(pu1, pu1, &grp->N));
++    GXOS_TLS_CRYPTO_STAGE_TRACE("ecdsa_verify.u1_mod_begin", (uint32_t) grp->pbits);
++    MBEDTLS_MPI_CHK(ecdsa_mod_fixed(pu1, pu1, &grp->N));
+     GXOS_TLS_CRYPTO_STAGE_TRACE("ecdsa_verify.u1_mod_done", (uint32_t) grp->pbits);
+ 
+     MBEDTLS_MPI_CHK(mbedtls_mpi_mul_mpi(pu2, r, &s_inv));
+     GXOS_TLS_CRYPTO_STAGE_TRACE("ecdsa_verify.u2_mul_done", (uint32_t) grp->pbits);
+-    MBEDTLS_MPI_CHK(mbedtls_mpi_mod_mpi(pu2, pu2, &grp->N));
++    GXOS_TLS_CRYPTO_STAGE_TRACE("ecdsa_verify.u2_mod_begin", (uint32_t) grp->pbits);
++    MBEDTLS_MPI_CHK(ecdsa_mod_fixed(pu2, pu2, &grp->N));
+     GXOS_TLS_CRYPTO_STAGE_TRACE("ecdsa_verify.u2_mod_done", (uint32_t) grp->pbits);
+ 
+ #if defined(MBEDTLS_ECP_RESTARTABLE)
+@@ -553,6 +600,8 @@ muladd:
+     /*
+      * Step 5: R = u1 G + u2 Q
+      */
++    GXOS_TLS_CRYPTO_STAGE_TRACE("ecdsa_verify.scalar_begin",
++                                (uint32_t) grp->pbits);
+     GXOS_TLS_CRYPTO_STAGE_TRACE("ecdsa_verify.muladd_begin",
+                                 (uint32_t) grp->pbits);
+     MBEDTLS_MPI_CHK(mbedtls_ecp_muladd_restartable(grp,
+@@ -568,7 +617,7 @@ muladd:
+      * Step 6: convert xR to an integer (no-op)
+      * Step 7: reduce xR mod n (gives v)
+      */
+-    MBEDTLS_MPI_CHK(mbedtls_mpi_mod_mpi(&R.X, &R.X, &grp->N));
++    MBEDTLS_MPI_CHK(ecdsa_mod_fixed(&R.X, &R.X, &grp->N));
+ 
+     /*
+      * Step 8: check if v (that is, R.X) is equal to r
+diff --git a/tf-psa-crypto/drivers/builtin/src/ecp.c b/tf-psa-crypto/drivers/builtin/src/ecp.c
+index 4ab90beab..dea4c20a4 100644
+--- a/tf-psa-crypto/drivers/builtin/src/ecp.c
++++ b/tf-psa-crypto/drivers/builtin/src/ecp.c
+@@ -1792,6 +1792,9 @@ static int ecp_precompute_comb(const mbedtls_ecp_group *grp,
+ 
+     mbedtls_mpi tmp[4];
+ 
++    GXOS_TLS_CRYPTO_STAGE_TRACE("ecp.precompute.begin",
++                                ((uint32_t) grp->pbits << 16) |
++                                ((uint32_t) w << 8) | (uint32_t) T_size);
+     mpi_init_many(tmp, sizeof(tmp) / sizeof(mbedtls_mpi));
+ 
+ #if defined(MBEDTLS_ECP_RESTARTABLE)
+@@ -1934,6 +1937,7 @@ cleanup:
+     }
+ #endif
+ 
++    GXOS_TLS_CRYPTO_STAGE_TRACE("ecp.precompute.done", (uint32_t) ret);
+     return ret;
+ }
+ 
+@@ -1985,6 +1989,7 @@ static int ecp_mul_comb_core(const mbedtls_ecp_group *grp, mbedtls_ecp_point *R,
+     mbedtls_mpi tmp[4];
+     size_t i;
+ 
++    GXOS_TLS_CRYPTO_STAGE_TRACE("ecp.comb_core.begin", (uint32_t) grp->pbits);
+     mbedtls_ecp_point_init(&Txi);
+     mpi_init_many(tmp, sizeof(tmp) / sizeof(mbedtls_mpi));
+ 
+@@ -2025,6 +2030,7 @@ static int ecp_mul_comb_core(const mbedtls_ecp_group *grp, mbedtls_ecp_point *R,
+ 
+ cleanup:
+ 
++    GXOS_TLS_CRYPTO_STAGE_TRACE("ecp.comb_core.done", (uint32_t) ret);
+     mbedtls_ecp_point_free(&Txi);
+     mpi_free_many(tmp, sizeof(tmp) / sizeof(mbedtls_mpi));
+ 
+@@ -2109,6 +2115,9 @@ static int ecp_mul_comb_after_precomp(const mbedtls_ecp_group *grp,
+     unsigned char parity_trick;
+     unsigned char k[COMB_MAX_D + 1];
+     mbedtls_ecp_point *RR = R;
++    GXOS_TLS_CRYPTO_STAGE_TRACE("ecp.comb_recode.begin",
++                                ((uint32_t) grp->pbits << 16) |
++                                ((uint32_t) w << 8) | (uint32_t) d);
+ 
+ #if defined(MBEDTLS_ECP_RESTARTABLE)
+     if (rs_ctx != NULL && rs_ctx->rsm != NULL) {
+@@ -2122,6 +2131,7 @@ static int ecp_mul_comb_after_precomp(const mbedtls_ecp_group *grp,
+ 
+     MBEDTLS_MPI_CHK(ecp_comb_recode_scalar(grp, m, k, d, w,
+                                            &parity_trick));
++    GXOS_TLS_CRYPTO_STAGE_TRACE("ecp.comb_recode.done", (uint32_t) parity_trick);
+     MBEDTLS_MPI_CHK(ecp_mul_comb_core(grp, RR, T, T_size, k, d,
+                                       f_rng, p_rng, rs_ctx));
+     MBEDTLS_MPI_CHK(ecp_safe_invert_jac(grp, RR, parity_trick));
+@@ -2134,7 +2144,9 @@ static int ecp_mul_comb_after_precomp(const mbedtls_ecp_group *grp,
+ final_norm:
+     MBEDTLS_ECP_BUDGET(MBEDTLS_ECP_OPS_INV);
+ #endif
++    GXOS_TLS_CRYPTO_STAGE_TRACE("ecp.comb_normalize.begin", (uint32_t) grp->pbits);
+     MBEDTLS_MPI_CHK(ecp_normalize_jac(grp, RR));
++    GXOS_TLS_CRYPTO_STAGE_TRACE("ecp.comb_normalize.done", (uint32_t) ret);
+ 
+ #if defined(MBEDTLS_ECP_RESTARTABLE)
+     if (rs_ctx != NULL && rs_ctx->rsm != NULL) {
+@@ -2216,6 +2228,7 @@ static int ecp_mul_comb(mbedtls_ecp_group *grp, mbedtls_ecp_point *R,
+     unsigned char T_size = 0, T_ok = 0;
+     mbedtls_ecp_point *T = NULL;
+ 
++    GXOS_TLS_CRYPTO_STAGE_TRACE("ecp.mul_comb.enter", (uint32_t) grp->pbits);
+     ECP_RS_ENTER(rsm);
+ 
+     /* Is P the base point ? */
+@@ -2230,6 +2243,9 @@ static int ecp_mul_comb(mbedtls_ecp_group *grp, mbedtls_ecp_point *R,
+     w = ecp_pick_window_size(grp, p_eq_g);
+     T_size = 1U << (w - 1);
+     d = (grp->nbits + w - 1) / w;
++    GXOS_TLS_CRYPTO_STAGE_TRACE("ecp.mul_comb.window",
++                                ((uint32_t) w << 24) |
++                                ((uint32_t) T_size << 16) | (uint32_t) d);
+ 
+     /* Pre-computed table: do we have it already for the base point? */
+     if (p_eq_g && grp->T != NULL) {
+@@ -2275,11 +2291,14 @@ static int ecp_mul_comb(mbedtls_ecp_group *grp, mbedtls_ecp_point *R,
+             grp->T_size = T_size;
+         }
+     }
++    GXOS_TLS_CRYPTO_STAGE_TRACE("ecp.mul_comb.precompute_done", T_ok);
+ 
+     /* Actual comb multiplication using precomputed points */
++    GXOS_TLS_CRYPTO_STAGE_TRACE("ecp.mul_comb.core_begin", (uint32_t) grp->pbits);
+     MBEDTLS_MPI_CHK(ecp_mul_comb_after_precomp(grp, R, m,
+                                                T, T_size, w, d,
+                                                f_rng, p_rng, rs_ctx));
++    GXOS_TLS_CRYPTO_STAGE_TRACE("ecp.mul_comb.core_done", (uint32_t) ret);
+ 
+ cleanup:
+ 
+@@ -2318,6 +2337,7 @@ cleanup:
+         mbedtls_ecp_point_free(R);
+     }
+ 
++    GXOS_TLS_CRYPTO_STAGE_TRACE("ecp.mul_comb.exit", (uint32_t) ret);
+     ECP_RS_LEAVE(rsm);
+ 
+     return ret;
+@@ -2707,7 +2727,9 @@ int mbedtls_ecp_muladd_restartable(
+     }
+ #endif /* MBEDTLS_ECP_RESTARTABLE */
+ 
++    GXOS_TLS_CRYPTO_STAGE_TRACE("ecp.muladd.u1_begin", (uint32_t) grp->pbits);
+     MBEDTLS_MPI_CHK(mbedtls_ecp_mul_shortcuts(grp, pmP, m, P, rs_ctx));
++    GXOS_TLS_CRYPTO_STAGE_TRACE("ecp.muladd.u1_done", (uint32_t) ret);
+ #if defined(MBEDTLS_ECP_RESTARTABLE)
+     if (rs_ctx != NULL && rs_ctx->ma != NULL) {
+         rs_ctx->ma->state = ecp_rsma_mul2;
+@@ -2715,7 +2737,9 @@ int mbedtls_ecp_muladd_restartable(
+ 
+ mul2:
+ #endif
++    GXOS_TLS_CRYPTO_STAGE_TRACE("ecp.muladd.u2_begin", (uint32_t) grp->pbits);
+     MBEDTLS_MPI_CHK(mbedtls_ecp_mul_shortcuts(grp, pR,  n, Q, rs_ctx));
++    GXOS_TLS_CRYPTO_STAGE_TRACE("ecp.muladd.u2_done", (uint32_t) ret);
+ 
+ #if defined(MBEDTLS_ECP_RESTARTABLE)
+     if (rs_ctx != NULL && rs_ctx->ma != NULL) {
+@@ -2725,7 +2749,9 @@ mul2:
+ add:
+ #endif
+     MBEDTLS_ECP_BUDGET(MBEDTLS_ECP_OPS_ADD);
++    GXOS_TLS_CRYPTO_STAGE_TRACE("ecp.muladd.add_begin", (uint32_t) grp->pbits);
+     MBEDTLS_MPI_CHK(ecp_add_mixed(grp, pR, pmP, pR, tmp));
++    GXOS_TLS_CRYPTO_STAGE_TRACE("ecp.muladd.add_done", (uint32_t) ret);
+ #if defined(MBEDTLS_ECP_RESTARTABLE)
+     if (rs_ctx != NULL && rs_ctx->ma != NULL) {
+         rs_ctx->ma->state = ecp_rsma_norm;
+@@ -2734,7 +2760,9 @@ add:
+ norm:
+ #endif
+     MBEDTLS_ECP_BUDGET(MBEDTLS_ECP_OPS_INV);
++    GXOS_TLS_CRYPTO_STAGE_TRACE("ecp.muladd.normalize_begin", (uint32_t) grp->pbits);
+     MBEDTLS_MPI_CHK(ecp_normalize_jac(grp, pR));
++    GXOS_TLS_CRYPTO_STAGE_TRACE("ecp.muladd.normalize_done", (uint32_t) ret);
+ 
+ #if defined(MBEDTLS_ECP_RESTARTABLE)
+     if (rs_ctx != NULL && rs_ctx->ma != NULL) {
+diff --git a/tf-psa-crypto/drivers/builtin/src/psa_crypto_ecp.c b/tf-psa-crypto/drivers/builtin/src/psa_crypto_ecp.c
+index 9e002385e..1b5768657 100644
+--- a/tf-psa-crypto/drivers/builtin/src/psa_crypto_ecp.c
++++ b/tf-psa-crypto/drivers/builtin/src/psa_crypto_ecp.c
+@@ -543,6 +543,8 @@ psa_status_t mbedtls_psa_ecdsa_verify_hash(
+ 
+     GXOS_TLS_CRYPTO_STAGE_TRACE("psa_ecdsa_verify.ecdsa_begin",
+                                 (uint32_t) attributes->bits);
++    GXOS_TLS_CRYPTO_STAGE_TRACE("psa_ecdsa_verify.builtin_dispatch",
++                                (uint32_t) attributes->bits);
+     status = mbedtls_to_psa_error(mbedtls_ecdsa_verify(&ecp->grp, hash,
+                                                        hash_length, &ecp->Q,
+                                                        &r, &s));
 diff --git a/tf-psa-crypto/drivers/p256-m/p256-m_driver_entrypoints.c b/tf-psa-crypto/drivers/p256-m/p256-m_driver_entrypoints.c
-index d272dcbb..0e2cfa24 100644
+index d272dcbb1..0e2cfa245 100644
 --- a/tf-psa-crypto/drivers/p256-m/p256-m_driver_entrypoints.c
 +++ b/tf-psa-crypto/drivers/p256-m/p256-m_driver_entrypoints.c
 @@ -14,6 +14,15 @@
@@ -435,39 +403,11 @@ index d272dcbb..0e2cfa24 100644
  
  exit:
      return status;
-diff --git a/tf-psa-crypto/core/psa_crypto_driver_wrappers.h b/tf-psa-crypto/core/psa_crypto_driver_wrappers.h
-index 37924ff4..81fa383d 100644
---- a/tf-psa-crypto/core/psa_crypto_driver_wrappers.h
-+++ b/tf-psa-crypto/core/psa_crypto_driver_wrappers.h
-@@ -388,6 +388,23 @@ static inline psa_status_t psa_driver_wrapper_verify_hash(
-                                                        hash_length,
-                                                        signature,
-                                                        signature_length );
-+                /* A transparent accelerator is not authoritative when it
-+                 * reports an invalid signature. Confirm that result with the
-+                 * constant-time built-in verifier so a driver encoding or
-+                 * ABI discrepancy cannot reject a valid signature on the
-+                 * platform. The built-in result remains authoritative for
-+                 * both acceptance and rejection. */
-+                if( status == PSA_ERROR_INVALID_SIGNATURE )
-+                {
-+                    return( psa_verify_hash_builtin( attributes,
-+                                                     key_buffer,
-+                                                     key_buffer_size,
-+                                                     alg,
-+                                                     hash,
-+                                                     hash_length,
-+                                                     signature,
-+                                                     signature_length ) );
-+                }
-                 if( status != PSA_ERROR_NOT_SUPPORTED )
-                 return( status );
-             }
 diff --git a/tf-psa-crypto/scripts/data_files/driver_templates/psa_crypto_driver_wrappers.h.jinja b/tf-psa-crypto/scripts/data_files/driver_templates/psa_crypto_driver_wrappers.h.jinja
-index 97b6b4c6a..5132e4ffd 100644
+index 97b6b4c6a..8316c0934 100644
 --- a/tf-psa-crypto/scripts/data_files/driver_templates/psa_crypto_driver_wrappers.h.jinja
 +++ b/tf-psa-crypto/scripts/data_files/driver_templates/psa_crypto_driver_wrappers.h.jinja
-@@ -365,6 +365,17 @@ static inline psa_status_t psa_driver_wrapper_verify_hash(
+@@ -365,6 +365,23 @@ static inline psa_status_t psa_driver_wrapper_verify_hash(
                                                         hash_length,
                                                         signature,
                                                         signature_length );
@@ -491,4 +431,3 @@ index 97b6b4c6a..5132e4ffd 100644
                  if( status != PSA_ERROR_NOT_SUPPORTED )
                  return( status );
              }
-
