@@ -5559,6 +5559,185 @@ extern "C" void __cdecl guideXosNativeAotC011EC46Stage(
 #endif
 #endif
 
+#if defined(GUIDEXOS_NATIVEAOT_C011EC47_PROVENANCE)
+static void c011ec47CaptureIterator(
+    uint32_t checkpoint, uintptr_t controlPc, uintptr_t sp, uintptr_t fp,
+    uintptr_t regDisplay, uintptr_t pRbp, uintptr_t framePointer,
+    uintptr_t codeManager, uintptr_t methodInfo) {
+    guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    guidexos_nativeaot_c011ec47_provenance_record& r =
+        d.c011ec47Provenance;
+    const uint32_t index = r.iteratorCount <
+        GUIDEXOS_NATIVEAOT_C011EC47_MAX_ITERATOR_RECORDS
+        ? r.iteratorCount
+        : GUIDEXOS_NATIVEAOT_C011EC47_MAX_ITERATOR_RECORDS - 1u;
+    guidexos_nativeaot_c011ec47_iterator_record& record =
+        r.iteratorRecords[index];
+    if (r.iteratorCount < GUIDEXOS_NATIVEAOT_C011EC47_MAX_ITERATOR_RECORDS) {
+        ++r.iteratorCount;
+    }
+    record = {};
+    record.observed = 1u;
+    record.checkpoint = checkpoint;
+    record.gcOrdinal = d.c011ec42Lifecycle.collectionCountBefore;
+    record.controlPc = controlPc;
+    record.sp = sp;
+    record.fp = fp;
+    record.regDisplay = regDisplay;
+    record.pRbp = pRbp;
+    record.framePointer = framePointer;
+    record.codeManager = codeManager;
+    record.methodInfo = methodInfo;
+    if (r.firstValidFramePointer == 0u && framePointer != 0u) {
+        r.firstValidFramePointer = framePointer;
+        r.firstValidP_Rbp = pRbp;
+    }
+    suspendEeSerialPutString(
+        "[nativeaot-c011ec47] checkpoint=");
+    suspendEeSerialPutHex32(checkpoint);
+    suspendEeSerialPutString(" ord=");
+    suspendEeSerialPutHex32(record.gcOrdinal);
+    suspendEeSerialPutString(" pc=");
+    suspendEeSerialPutHex64(controlPc);
+    suspendEeSerialPutString(" sp=");
+    suspendEeSerialPutHex64(sp);
+    suspendEeSerialPutString(" fp=");
+    suspendEeSerialPutHex64(fp);
+    suspendEeSerialPutString(" regDisplay=");
+    suspendEeSerialPutHex64(regDisplay);
+    suspendEeSerialPutString(" pRbp=");
+    suspendEeSerialPutHex64(pRbp);
+    suspendEeSerialPutString(" framePointer=");
+    suspendEeSerialPutHex64(framePointer);
+    suspendEeSerialPutString(" cm=");
+    suspendEeSerialPutHex64(codeManager);
+    suspendEeSerialPutString(" method=");
+    suspendEeSerialPutHex64(methodInfo);
+    suspendEeSerialPutString(" marker=C011EC47-ITERATOR\n");
+}
+
+extern "C" void __cdecl guideXosNativeAotC011EC47IteratorState(
+    uint32_t checkpoint, uintptr_t controlPc, uintptr_t sp, uintptr_t fp,
+    uintptr_t regDisplay, uintptr_t pRbp, uintptr_t framePointer,
+    uintptr_t codeManager, uintptr_t methodInfo) {
+    c011ec47CaptureIterator(
+        checkpoint, controlPc, sp, fp, regDisplay, pRbp, framePointer,
+        codeManager, methodInfo);
+}
+
+extern "C" void __cdecl guideXosNativeAotC011EC47ReverseSlotPreRead(
+    uintptr_t methodInfo, uintptr_t controlPc, uintptr_t sp,
+    uintptr_t basePointer, uintptr_t regDisplay, uintptr_t pRbp,
+    uintptr_t runtimeFunction, uintptr_t mainRuntimeFunction,
+    uintptr_t unwindInfo, uintptr_t unwindInfoSize,
+    uintptr_t gcInfoDescriptor, uintptr_t blockFlags,
+    uintptr_t stackBaseRegister, uintptr_t slotOffset,
+    uintptr_t slotAddress, uintptr_t previousTransitionFrameOut) {
+    guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    guidexos_nativeaot_c011ec47_provenance_record& r =
+        d.c011ec47Provenance;
+    const uint32_t index = r.rootUpdateCount <
+        GUIDEXOS_NATIVEAOT_C011EC47_MAX_ROOT_UPDATE_RECORDS
+        ? r.rootUpdateCount
+        : GUIDEXOS_NATIVEAOT_C011EC47_MAX_ROOT_UPDATE_RECORDS - 1u;
+    guidexos_nativeaot_c011ec47_root_update_record& record =
+        r.rootUpdateRecords[index];
+    if (r.rootUpdateCount <
+        GUIDEXOS_NATIVEAOT_C011EC47_MAX_ROOT_UPDATE_RECORDS) {
+        ++r.rootUpdateCount;
+    }
+    record = {};
+    record.observed = 1u;
+    record.checkpoint = GUIDEXOS_NATIVEAOT_C011EC47_ROOT_UPDATE_PRE_READ;
+    record.gcOrdinal = d.c011ec42Lifecycle.collectionCountBefore;
+    record.rootKind = 7u; /* transition-frame slot, not a managed object root */
+    record.pinned = 0u;
+    record.interior = 0u;
+    record.byref = 0u;
+    record.methodInfo = methodInfo;
+    record.controlPc = controlPc;
+    record.sp = sp;
+    record.basePointer = basePointer;
+    record.regDisplay = regDisplay;
+    record.pRbp = pRbp;
+    record.runtimeFunction = runtimeFunction;
+    record.mainRuntimeFunction = mainRuntimeFunction;
+    record.unwindInfo = unwindInfo;
+    record.unwindInfoSize = unwindInfoSize;
+    record.gcInfoDescriptor = gcInfoDescriptor;
+    record.blockFlags = blockFlags;
+    record.stackBaseRegister = stackBaseRegister;
+    record.slotOffset = slotOffset;
+    record.slotAddress = slotAddress;
+    record.previousTransitionFrameOut = previousTransitionFrameOut;
+    record.slotValue = 0u;
+    record.slotValueObserved = 0u;
+    if (r.firstInvalidState == 0u && basePointer == 0u) {
+        r.firstInvalidState =
+            GUIDEXOS_NATIVEAOT_C011EC47_ROOT_UPDATE_PRE_READ;
+        r.firstInvalidBase = basePointer;
+        r.firstInvalidSlotOffset = slotOffset;
+        r.firstInvalidSlotAddress = slotAddress;
+        r.firstInvalidMethodInfo = methodInfo;
+        r.firstInvalidControlPc = controlPc;
+    }
+
+    suspendEeSerialPutString(
+        "[nativeaot-c011ec47] ord=");
+    suspendEeSerialPutHex32(record.gcOrdinal);
+    suspendEeSerialPutString(" method=");
+    suspendEeSerialPutHex64(methodInfo);
+    suspendEeSerialPutString(" pc=");
+    suspendEeSerialPutHex64(controlPc);
+    suspendEeSerialPutString(" sp=");
+    suspendEeSerialPutHex64(sp);
+    suspendEeSerialPutString(" regDisplay=");
+    suspendEeSerialPutHex64(regDisplay);
+    suspendEeSerialPutString(" pRbp=");
+    suspendEeSerialPutHex64(pRbp);
+    suspendEeSerialPutString(" base=");
+    suspendEeSerialPutHex64(basePointer);
+    suspendEeSerialPutString(" sbr=");
+    suspendEeSerialPutHex64(stackBaseRegister);
+    suspendEeSerialPutString(" off=");
+    suspendEeSerialPutHex64(slotOffset);
+    suspendEeSerialPutString(" slot=");
+    suspendEeSerialPutHex64(slotAddress);
+    suspendEeSerialPutString(" value=");
+    suspendEeSerialPutHex64(0u);
+    suspendEeSerialPutString(" valueObserved=0");
+    suspendEeSerialPutString(" kind=00000007 pinned=00000000 interior=00000000 byref=00000000");
+    suspendEeSerialPutString(" rf=");
+    suspendEeSerialPutHex64(runtimeFunction);
+    suspendEeSerialPutString(" mainrf=");
+    suspendEeSerialPutHex64(mainRuntimeFunction);
+    suspendEeSerialPutString(" ui=");
+    suspendEeSerialPutHex64(unwindInfo);
+    suspendEeSerialPutString(" uis=");
+    suspendEeSerialPutHex64(unwindInfoSize);
+    suspendEeSerialPutString(" gcInfo=");
+    suspendEeSerialPutHex64(gcInfoDescriptor);
+    suspendEeSerialPutString(" bf=");
+    suspendEeSerialPutHex64(blockFlags);
+    suspendEeSerialPutString(" prevOut=");
+    suspendEeSerialPutHex64(previousTransitionFrameOut);
+    suspendEeSerialPutString(" marker=C011EC47-RELOC-CALC\n");
+
+    suspendEeSerialPutString(
+        "[nativeaot-c011ec47] rootOrdinal=FFFFFFFF rootKind=00000007 slot=");
+    suspendEeSerialPutHex64(slotAddress);
+    suspendEeSerialPutString(" value=");
+    suspendEeSerialPutHex64(0u);
+    suspendEeSerialPutString(" valueObserved=0 base=");
+    suspendEeSerialPutHex64(basePointer);
+    suspendEeSerialPutString(" off=");
+    suspendEeSerialPutHex64(slotOffset);
+    suspendEeSerialPutString(" marker=C011EC47-ROOT-UPDATE\n");
+}
+#endif
+
 static void c011ec44ThreadSlots(
     uintptr_t threadAddress,
     uintptr_t* live,

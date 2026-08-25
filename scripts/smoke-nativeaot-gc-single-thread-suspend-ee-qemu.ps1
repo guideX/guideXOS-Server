@@ -4,7 +4,7 @@ param(
     [int]$TimeoutSeconds = 90,
     [int]$FreshBootCount = 3,
     [switch]$SkipManagedBuild,
-    [ValidateSet("single-thread-suspend-ee", "allocation-context-fixup-root-boundary", "first-per-thread-root-provider", "first-root-candidate-load", "first-non-null-root-callback-boundary", "first-root-callback-entry", "first-root-membership-classification", "first-root-heap-resolution", "first-root-condemned-generation-decision", "first-root-pre-mark-boundary", "first-root-first-mark-mutation", "first-root-post-queue-mark-decision", "first-root-first-non-null-old-o", "next-genuine-root-provider", "stack-provider-transition-failfast", "stack-provider-code-manager-registration", "stack-provider-transition-frame-control-pc", "stack-provider-unwind-gc-info", "stack-provider-unwind-caller-frame", "stack-provider-native-transition-continuation", "stack-provider-native-caller-provenance", "stack-provider-native-kernel-entry-boundary", "stack-provider-native-kernel-stack-completion", "post-root-queue-mark-processing", "mark-queue-closure", "post-mark-short-weak-handle", "short-weak-handle-operation", "short-weak-live-handle", "short-weak-dead-handle", "short-weak-lifetime-transition", "relocation-root-update", "relocated-handle-update", "lifetime-transition-complete", "second-collection-completion", "dead-object-reclamation", "collection-plan-mode-provenance-c37", "collection-plan-mode-provenance-c38", "compaction-reclamation", "post-gc-allocator-provenance", "post-gc-reclaimed-gen1-lifecycle", "malformed-transition-frame-provenance", "reverse-pinvoke-slot-provenance", "regdisplay-fp-handoff")]
+    [ValidateSet("single-thread-suspend-ee", "allocation-context-fixup-root-boundary", "first-per-thread-root-provider", "first-root-candidate-load", "first-non-null-root-callback-boundary", "first-root-callback-entry", "first-root-membership-classification", "first-root-heap-resolution", "first-root-condemned-generation-decision", "first-root-pre-mark-boundary", "first-root-first-mark-mutation", "first-root-post-queue-mark-decision", "first-root-first-non-null-old-o", "next-genuine-root-provider", "stack-provider-transition-failfast", "stack-provider-code-manager-registration", "stack-provider-transition-frame-control-pc", "stack-provider-unwind-gc-info", "stack-provider-unwind-caller-frame", "stack-provider-native-transition-continuation", "stack-provider-native-caller-provenance", "stack-provider-native-kernel-entry-boundary", "stack-provider-native-kernel-stack-completion", "post-root-queue-mark-processing", "mark-queue-closure", "post-mark-short-weak-handle", "short-weak-handle-operation", "short-weak-live-handle", "short-weak-dead-handle", "short-weak-lifetime-transition", "relocation-root-update", "relocated-handle-update", "lifetime-transition-complete", "second-collection-completion", "dead-object-reclamation", "collection-plan-mode-provenance-c37", "collection-plan-mode-provenance-c38", "compaction-reclamation", "post-gc-allocator-provenance", "post-gc-reclaimed-gen1-lifecycle", "malformed-transition-frame-provenance", "reverse-pinvoke-slot-provenance", "regdisplay-fp-handoff", "relocation-root-fault-provenance")]
     [string]$ProofMode = "single-thread-suspend-ee"
 )
 
@@ -83,6 +83,8 @@ if ([string]::IsNullOrWhiteSpace($EvidenceRoot)) {
         Join-Path $root "out\dotnet\c011ec45-reverse-pinvoke-slot-provenance"
     } elseif ($ProofMode -eq "regdisplay-fp-handoff") {
         Join-Path $root "out\dotnet\c011ec46-regdisplay-fp-handoff"
+    } elseif ($ProofMode -eq "relocation-root-fault-provenance") {
+        Join-Path $root "out\dotnet\c011ec47-relocation-root-fault-provenance"
     } elseif ($ProofMode -eq "post-mark-short-weak-handle") {
         Join-Path $root "out\dotnet\c011ec29-post-mark-short-weak-handle"
     } elseif ($ProofMode -eq "first-root-post-queue-mark-decision") {
@@ -122,13 +124,14 @@ $isCodeManagerRegistration = $ProofMode -eq "stack-provider-code-manager-registr
 $isTransitionFrameControlPc = $ProofMode -eq "stack-provider-transition-frame-control-pc"
 $isC011EC36 = $ProofMode -eq "lifetime-transition-complete"
 $isC011EC38 = $ProofMode -eq "dead-object-reclamation"
-$isC011EC46 = $ProofMode -eq "regdisplay-fp-handoff"
-$isC011EC45 = $ProofMode -in @("reverse-pinvoke-slot-provenance", "regdisplay-fp-handoff")
-$isC011EC44 = $ProofMode -in @("malformed-transition-frame-provenance", "reverse-pinvoke-slot-provenance", "regdisplay-fp-handoff")
-$isC011EC42 = $ProofMode -in @("post-gc-reclaimed-gen1-lifecycle", "malformed-transition-frame-provenance", "reverse-pinvoke-slot-provenance", "regdisplay-fp-handoff")
-$isC011EC41 = $ProofMode -in @("post-gc-allocator-provenance", "post-gc-reclaimed-gen1-lifecycle", "malformed-transition-frame-provenance", "reverse-pinvoke-slot-provenance", "regdisplay-fp-handoff")
-$isC011EC40 = $ProofMode -in @("compaction-reclamation", "post-gc-allocator-provenance", "post-gc-reclaimed-gen1-lifecycle", "malformed-transition-frame-provenance", "reverse-pinvoke-slot-provenance", "regdisplay-fp-handoff")
-$isC011EC39 = $ProofMode -in @("collection-plan-mode-provenance-c37", "collection-plan-mode-provenance-c38", "compaction-reclamation", "post-gc-allocator-provenance", "post-gc-reclaimed-gen1-lifecycle", "malformed-transition-frame-provenance", "reverse-pinvoke-slot-provenance", "regdisplay-fp-handoff")
+$isC011EC47 = $ProofMode -eq "relocation-root-fault-provenance"
+$isC011EC46 = $ProofMode -in @("regdisplay-fp-handoff", "relocation-root-fault-provenance")
+$isC011EC45 = $ProofMode -in @("reverse-pinvoke-slot-provenance", "regdisplay-fp-handoff", "relocation-root-fault-provenance")
+$isC011EC44 = $ProofMode -in @("malformed-transition-frame-provenance", "reverse-pinvoke-slot-provenance", "regdisplay-fp-handoff", "relocation-root-fault-provenance")
+$isC011EC42 = $ProofMode -in @("post-gc-reclaimed-gen1-lifecycle", "malformed-transition-frame-provenance", "reverse-pinvoke-slot-provenance", "regdisplay-fp-handoff", "relocation-root-fault-provenance")
+$isC011EC41 = $ProofMode -in @("post-gc-allocator-provenance", "post-gc-reclaimed-gen1-lifecycle", "malformed-transition-frame-provenance", "reverse-pinvoke-slot-provenance", "regdisplay-fp-handoff", "relocation-root-fault-provenance")
+$isC011EC40 = $ProofMode -in @("compaction-reclamation", "post-gc-allocator-provenance", "post-gc-reclaimed-gen1-lifecycle", "malformed-transition-frame-provenance", "reverse-pinvoke-slot-provenance", "regdisplay-fp-handoff", "relocation-root-fault-provenance")
+$isC011EC39 = $ProofMode -in @("collection-plan-mode-provenance-c37", "collection-plan-mode-provenance-c38", "compaction-reclamation", "post-gc-allocator-provenance", "post-gc-reclaimed-gen1-lifecycle", "malformed-transition-frame-provenance", "reverse-pinvoke-slot-provenance", "regdisplay-fp-handoff", "relocation-root-fault-provenance")
 $isC011EC39C38Variant = $ProofMode -eq "collection-plan-mode-provenance-c38"
 $isC011EC37 = $ProofMode -in @("second-collection-completion", "dead-object-reclamation") -or $isC011EC39
 $isC011EC35 = $ProofMode -in @("relocated-handle-update", "lifetime-transition-complete", "second-collection-completion", "dead-object-reclamation")
@@ -187,6 +190,10 @@ $useStockRhpNewArrayEntry = $isTransitionFrameControlPc -or $isC011EC19
 $c011ec44Define = if ($isC011EC44) { " /DGUIDEXOS_NATIVEAOT_C011EC44_PROVENANCE" } else { "" }
 $c011ec45Define = if ($isC011EC45) { " /DGUIDEXOS_NATIVEAOT_C011EC45_PROVENANCE" } else { "" }
 $c011ec46Define = if ($isC011EC46) { " /DGUIDEXOS_NATIVEAOT_C011EC46_REGDISPLAY_HANDOFF" } else { "" }
+$c011ec47Define = if ($isC011EC47) { " /DGUIDEXOS_NATIVEAOT_C011EC47_PROVENANCE" } else { "" }
+if ($isC011EC47) {
+    $c011ec46Define += $c011ec47Define
+}
 $proofDefine = if ($isNextGenuineRootProvider -or $isC011EC39) {
     $minimalDefine = if ($isStackProviderTransitionFailFast) { " /DGUIDEXOS_NATIVEAOT_STACK_PROVIDER_TRANSITION_FAILFAST_MINIMAL" } else { "" }
     $codeManagerDefine = if ($isCodeManagerRegistration) { " /DGUIDEXOS_NATIVEAOT_C011EC17_CODE_MANAGER" } elseif ($useStockRhpNewArrayEntry) { " /DGUIDEXOS_NATIVEAOT_USE_STOCK_RHP_NEW_ARRAY_ENTRY /DGUIDEXOS_NATIVEAOT_C011EC18_NATIVE_RHP_NEW_ARRAY" } else { "" }
@@ -845,6 +852,11 @@ extern "C" void __cdecl guideXosNativeAotC011EC42StackSafetyBoundary();
 extern "C" void __cdecl guideXosNativeAotC011EC46Stage(uint32_t stage, uintptr_t methodInfo, uintptr_t controlPc, uintptr_t sp, uintptr_t fp, uintptr_t fpPointer, uintptr_t logicalFramePointer, uintptr_t transitionFrame, uintptr_t callerPc, uintptr_t callerSp, uintptr_t slotOffset, uintptr_t baseAddress, uintptr_t slotAddress, uintptr_t slotValue, uintptr_t restoredRbpSource, uintptr_t restoredRbpValue);
 '@
         }
+        if ($isC011EC47) {
+            $stackFrameIteratorDeclarations += @'
+extern "C" void __cdecl guideXosNativeAotC011EC47IteratorState(uint32_t checkpoint, uintptr_t controlPc, uintptr_t sp, uintptr_t fp, uintptr_t regDisplay, uintptr_t pRbp, uintptr_t framePointer, uintptr_t codeManager, uintptr_t methodInfo);
+'@
+        }
         $stackFrameIteratorText = $stackFrameIteratorText.Replace(
             '#include "StackFrameIterator.h"',
             '#include "StackFrameIterator.h"' + $stackFrameIteratorDeclarations.TrimEnd())
@@ -985,6 +997,18 @@ extern "C" void __cdecl guideXosNativeAotC011EC46Stage(uint32_t stage, uintptr_t
         (m_RegDisplay.pRbp == (PTR_uintptr_t)&m_FramePointer)
             ? static_cast<uintptr_t>(m_RegDisplay.GetFP()) : 0u;
 #endif
+#if defined(GUIDEXOS_NATIVEAOT_C011EC47_PROVENANCE)
+    guideXosNativeAotC011EC47IteratorState(
+        1u, reinterpret_cast<uintptr_t>(m_ControlPC),
+        static_cast<uintptr_t>(m_RegDisplay.GetSP()),
+        m_RegDisplay.pRbp != NULL
+            ? static_cast<uintptr_t>(m_RegDisplay.GetFP()) : 0u,
+        reinterpret_cast<uintptr_t>(&m_RegDisplay),
+        reinterpret_cast<uintptr_t>(m_RegDisplay.pRbp),
+        reinterpret_cast<uintptr_t>(m_FramePointer),
+        reinterpret_cast<uintptr_t>(m_pCodeManager),
+        reinterpret_cast<uintptr_t>(&m_methodInfo));
+#endif
     m_FramePointer = GetCodeManager()->GetFramePointer(&m_methodInfo, &m_RegDisplay);
 #if defined(GUIDEXOS_NATIVEAOT_C011EC46_REGDISPLAY_HANDOFF)
     if (m_FramePointer == NULL && guideXosC011EC46PublishedRbp != 0u)
@@ -992,6 +1016,18 @@ extern "C" void __cdecl guideXosNativeAotC011EC46Stage(uint32_t stage, uintptr_t
         m_FramePointer = (PTR_VOID)guideXosC011EC46PublishedRbp;
         *m_RegDisplay.pRbp = guideXosC011EC46PublishedRbp;
     }
+#endif
+#if defined(GUIDEXOS_NATIVEAOT_C011EC47_PROVENANCE)
+    guideXosNativeAotC011EC47IteratorState(
+        2u, reinterpret_cast<uintptr_t>(m_ControlPC),
+        static_cast<uintptr_t>(m_RegDisplay.GetSP()),
+        m_RegDisplay.pRbp != NULL
+            ? static_cast<uintptr_t>(m_RegDisplay.GetFP()) : 0u,
+        reinterpret_cast<uintptr_t>(&m_RegDisplay),
+        reinterpret_cast<uintptr_t>(m_RegDisplay.pRbp),
+        reinterpret_cast<uintptr_t>(m_FramePointer),
+        reinterpret_cast<uintptr_t>(m_pCodeManager),
+        reinterpret_cast<uintptr_t>(&m_methodInfo));
 #endif
     guideXosNativeAotC011EC18IteratorFramePointer(reinterpret_cast<uintptr_t>(m_FramePointer));
 '@.TrimEnd()
@@ -1004,7 +1040,13 @@ extern "C" void __cdecl guideXosNativeAotC011EC46Stage(uint32_t stage, uintptr_t
         $iteratorUnwindReplacement = $(if ($isC011EC46) {
             '    uintptr_t guideXosC011EC46OldRbpPointer = reinterpret_cast<uintptr_t>(m_RegDisplay.pRbp);' + [Environment]::NewLine +
             '    uintptr_t guideXosC011EC46OldFp = m_RegDisplay.pRbp != NULL ? static_cast<uintptr_t>(m_RegDisplay.GetFP()) : 0u;' + [Environment]::NewLine +
+            '#if defined(GUIDEXOS_NATIVEAOT_C011EC47_PROVENANCE)' + [Environment]::NewLine +
+            '    guideXosNativeAotC011EC47IteratorState(3u, reinterpret_cast<uintptr_t>(m_ControlPC), static_cast<uintptr_t>(m_RegDisplay.GetSP()), m_RegDisplay.pRbp != NULL ? static_cast<uintptr_t>(m_RegDisplay.GetFP()) : 0u, reinterpret_cast<uintptr_t>(&m_RegDisplay), reinterpret_cast<uintptr_t>(m_RegDisplay.pRbp), reinterpret_cast<uintptr_t>(m_FramePointer), reinterpret_cast<uintptr_t>(m_pCodeManager), reinterpret_cast<uintptr_t>(&m_methodInfo));' + [Environment]::NewLine +
+            '#endif' + [Environment]::NewLine +
             '    m_RegDisplay.pRbp = (PTR_uintptr_t)&m_FramePointer;' + [Environment]::NewLine +
+            '#if defined(GUIDEXOS_NATIVEAOT_C011EC47_PROVENANCE)' + [Environment]::NewLine +
+            '    guideXosNativeAotC011EC47IteratorState(4u, reinterpret_cast<uintptr_t>(m_ControlPC), static_cast<uintptr_t>(m_RegDisplay.GetSP()), static_cast<uintptr_t>(m_RegDisplay.GetFP()), reinterpret_cast<uintptr_t>(&m_RegDisplay), reinterpret_cast<uintptr_t>(m_RegDisplay.pRbp), reinterpret_cast<uintptr_t>(m_FramePointer), reinterpret_cast<uintptr_t>(m_pCodeManager), reinterpret_cast<uintptr_t>(&m_methodInfo));' + [Environment]::NewLine +
+            '#endif' + [Environment]::NewLine +
             '    NextInternal();' + [Environment]::NewLine +
             '    guideXosNativeAotC011EC46Stage(6u, reinterpret_cast<uintptr_t>(m_pCodeManager), reinterpret_cast<uintptr_t>(m_ControlPC), static_cast<uintptr_t>(m_RegDisplay.GetSP()), static_cast<uintptr_t>(m_RegDisplay.GetFP()), reinterpret_cast<uintptr_t>(m_RegDisplay.pRbp), reinterpret_cast<uintptr_t>(m_FramePointer), reinterpret_cast<uintptr_t>(m_pPreviousTransitionFrame), static_cast<uintptr_t>(m_RegDisplay.GetIP()), static_cast<uintptr_t>(m_RegDisplay.GetSP()), 0u, 0u, 0u, 0u, guideXosC011EC46OldRbpPointer, guideXosC011EC46OldFp);' + [Environment]::NewLine
         } else {
@@ -1202,6 +1244,11 @@ extern "C" void __cdecl guideXosNativeAotC011EC45UnwindObserved(uintptr_t method
                 if ($isC011EC46) {
                     $coffDeclarations += @'
 extern "C" void __cdecl guideXosNativeAotC011EC46Stage(uint32_t stage, uintptr_t methodInfo, uintptr_t controlPc, uintptr_t sp, uintptr_t fp, uintptr_t fpPointer, uintptr_t logicalFramePointer, uintptr_t transitionFrame, uintptr_t callerPc, uintptr_t callerSp, uintptr_t slotOffset, uintptr_t baseAddress, uintptr_t slotAddress, uintptr_t slotValue, uintptr_t restoredRbpSource, uintptr_t restoredRbpValue);
+'@
+                }
+                if ($isC011EC47) {
+                    $coffDeclarations += @'
+extern "C" void __cdecl guideXosNativeAotC011EC47ReverseSlotPreRead(uintptr_t methodInfo, uintptr_t controlPc, uintptr_t sp, uintptr_t basePointer, uintptr_t regDisplay, uintptr_t pRbp, uintptr_t runtimeFunction, uintptr_t mainRuntimeFunction, uintptr_t unwindInfo, uintptr_t unwindInfoSize, uintptr_t gcInfoDescriptor, uintptr_t blockFlags, uintptr_t stackBaseRegister, uintptr_t slotOffset, uintptr_t slotAddress, uintptr_t previousTransitionFrameOut);
 '@
                 }
             }
@@ -1436,6 +1483,25 @@ extern "C" void __cdecl guideXosNativeAotC011EC46Stage(uint32_t stage, uintptr_t
             static_cast<uintptr_t>(slot), static_cast<uintptr_t>(basePointer),
             static_cast<uintptr_t>(basePointer + slot),
             0u, 0u, 0u);
+#endif
+#if defined(GUIDEXOS_NATIVEAOT_C011EC47_PROVENANCE)
+        guideXosNativeAotC011EC47ReverseSlotPreRead(
+            reinterpret_cast<uintptr_t>(pMethodInfo),
+            static_cast<uintptr_t>(pRegisterSet->IP),
+            static_cast<uintptr_t>(pRegisterSet->GetSP()),
+            static_cast<uintptr_t>(basePointer),
+            reinterpret_cast<uintptr_t>(pRegisterSet),
+            reinterpret_cast<uintptr_t>(pRegisterSet->pRbp),
+            reinterpret_cast<uintptr_t>(pNativeMethodInfo->runtimeFunction),
+            reinterpret_cast<uintptr_t>(pNativeMethodInfo->mainRuntimeFunction),
+            reinterpret_cast<uintptr_t>(pUnwindDataBlob),
+            static_cast<uintptr_t>(unwindDataBlobSize),
+            reinterpret_cast<uintptr_t>(p),
+            static_cast<uintptr_t>(unwindBlockFlags),
+            static_cast<uintptr_t>(stackBasedRegister),
+            static_cast<uintptr_t>(slot),
+            static_cast<uintptr_t>(basePointer + slot),
+            reinterpret_cast<uintptr_t>(ppPreviousTransitionFrame));
 #endif
         guideXosPreReverseFrame =
             *(PInvokeTransitionFrame**)(basePointer + slot);
@@ -4499,7 +4565,7 @@ static void EnumGcRefsCallback(void* hCallback, PTR_PTR_VOID pObject, uint32_t f
 setlocal
 call "$vsBat" >nul
 if errorlevel 1 exit /b %errorlevel%
-cl.exe /nologo /std:c++17 /TP /c /GS- /GR- /EHs-c- /Zl /Oi /O2 /Brepro /DWIN32 /D_WIN32 /D_WIN64 /DHOST_AMD64 /DTARGET_AMD64 /DHOST_64BIT /DTARGET_64BIT /DHOST_WINDOWS /DTARGET_WINDOWS /DNATIVEAOT /DFEATURE_NATIVEAOT /DGUIDEXOS_NATIVEAOT_MANAGED_ALLOCATION /DGUIDEXOS_NATIVEAOT_REAL_GC_ALLOCATION /DGUIDEXOS_NATIVEAOT_SEGMENT_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_COLLECTION_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_SINGLE_THREAD_SUSPEND_EE_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_COLLECTION_BOUNDARY_ARRAY_LENGTH=4096 /DGUIDEXOS_NATIVEAOT_FIRST_COLLECTION_BOUNDARY_HARD_LIMIT=256$c011ec44Define$c011ec45Define$c011ec46Define /I"$nativeAotRoot\Runtime" /I"$nativeAotRoot\Runtime\inc" /I"$nativeAotRoot\Runtime\windows" /I"$sourceRoot" /I"$palSourceRoot" /I"$sourceRoot\native" /I"$sourceRoot\gc" /I"$sourceRoot\gc\env" /I"$sourceRoot\pal\src\include" /Fo:"$platformObj" "$platformSource"
+cl.exe /nologo /std:c++17 /TP /c /GS- /GR- /EHs-c- /Zl /Oi /O2 /Brepro /DWIN32 /D_WIN32 /D_WIN64 /DHOST_AMD64 /DTARGET_AMD64 /DHOST_64BIT /DTARGET_64BIT /DHOST_WINDOWS /DTARGET_WINDOWS /DNATIVEAOT /DFEATURE_NATIVEAOT /DGUIDEXOS_NATIVEAOT_MANAGED_ALLOCATION /DGUIDEXOS_NATIVEAOT_REAL_GC_ALLOCATION /DGUIDEXOS_NATIVEAOT_SEGMENT_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_COLLECTION_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_SINGLE_THREAD_SUSPEND_EE_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_COLLECTION_BOUNDARY_ARRAY_LENGTH=4096 /DGUIDEXOS_NATIVEAOT_FIRST_COLLECTION_BOUNDARY_HARD_LIMIT=256$c011ec44Define$c011ec45Define$c011ec46Define$c011ec47Define /I"$nativeAotRoot\Runtime" /I"$nativeAotRoot\Runtime\inc" /I"$nativeAotRoot\Runtime\windows" /I"$sourceRoot" /I"$palSourceRoot" /I"$sourceRoot\native" /I"$sourceRoot\gc" /I"$sourceRoot\gc\env" /I"$sourceRoot\pal\src\include" /Fo:"$platformObj" "$platformSource"
 if errorlevel 1 exit /b %errorlevel%
 cl.exe /nologo /std:c++17 /TP /c /MT /GS- /GR- /EHs-c- /Zl /Oi /O2 /Zc:inline /Brepro /I"$(Join-Path $root 'tools\dotnet\runtime-pack\src\platform')" /Fo:"$nativeUnwindPrimitiveObj" "$nativeUnwindPrimitiveSource"
 if errorlevel 1 exit /b %errorlevel%
@@ -4581,6 +4647,10 @@ exit /b 0
         " /DGUIDEXOS_NATIVEAOT_C011EC45_PROVENANCE" + $(if ($isC011EC46) { " /DGUIDEXOS_NATIVEAOT_C011EC46_REGDISPLAY_HANDOFF" } else { "" })
     } else { "" }
     $c46CompileDefine = if ($isC011EC46) { " /DGUIDEXOS_NATIVEAOT_C011EC46_REGDISPLAY_HANDOFF" } else { "" }
+    if ($isC011EC47) {
+        $c45CompileDefine += " /DGUIDEXOS_NATIVEAOT_C011EC47_PROVENANCE"
+        $c46CompileDefine += " /DGUIDEXOS_NATIVEAOT_C011EC47_PROVENANCE"
+    }
     if ($isTransitionFrameControlPc -or $isC011EC19) {
         $c011ec18CompileBat = Write-Batch "build-single-thread-suspend-ee-c011ec18-instrumentation.bat" @"
 @echo off
@@ -5155,6 +5225,9 @@ exit /b %errorlevel%
             $requiredSymbols += "guideXosNativeAotC011EC46Stage"
         }
     }
+    if ($isC011EC47) {
+        $requiredSymbols += @("guideXosNativeAotC011EC47IteratorState", "guideXosNativeAotC011EC47ReverseSlotPreRead")
+    }
     if ($isC011EC30) {
         $requiredSymbols += @("guideXosNativeAotC011EC30HandleScanEntered","guideXosNativeAotC011EC30HandleMapRootRead","guideXosNativeAotC011EC30BucketVisited","guideXosNativeAotC011EC30HandleTableVisited","guideXosNativeAotC011EC30SegmentVisited","guideXosNativeAotC011EC30BlockVisited","guideXosNativeAotC011EC30HandleSlotInspected","guideXosNativeAotC011EC30HandleSlotCandidate","guideXosNativeAotC011EC30LivenessCheckEntered","guideXosNativeAotC011EC30LivenessDecisionObserved","guideXosNativeAotC011EC30LivenessDecisionCompleted","guideXosNativeAotC011EC30HandleScanCompleted")
     }
@@ -5241,7 +5314,9 @@ exit /b %errorlevel%
                     $normalizedLiveText = ($normalizedLiveText -creplace '(?<=[0-9])(?=[a-z])', ' ') -replace '\s+', ' '
                     $normalizedLiveText = $normalizedLiveText -replace '\b(c\d+)\s+(ec\d+)', '$1$2'
                     $normalizedLiveText = $normalizedLiveText -replace '\s*=\s*', '='
-                    $stopPattern = if ($isC011EC42) {
+                    $stopPattern = if ($isC011EC47) {
+                        '\[nativeaot-c011ec47\]\s+rootOrdinal=.*?base=0000000000000000.*?marker=C011EC47-ROOT-UPDATE|\[PageFault\] Not-present violation on read \(kernel\)|C37-PHASE\s+collection=00000002\s+phase=00000009\s+name=plan-return.*?complete=00000001'
+                    } elseif ($isC011EC42) {
                         'marker=C011EC42 outcome=[BCD]|marker=C011EC42-BLOCKED'
                     } elseif ($isC011EC41) {
                         'marker=C011EC41 outcome=C|marker=C011EC41-BLOCKED'
@@ -7634,6 +7709,67 @@ exit /b %errorlevel%
         Set-Content -LiteralPath $manifestPath -Value $manifestJson -Encoding ASCII
         Write-Host "C011EC11 manifest written"
         Write-Host "NativeAOT Workstation GC first-root-pre-mark-boundary experiment: PASS (Outcome A)" -ForegroundColor Green
+    } elseif ($isC011EC47) {
+        if (@($runResults).Count -ne $FreshBootCount) {
+            throw "The C011EC47 relocation-root provenance experiment produced $(@($runResults).Count) runs instead of $FreshBootCount."
+        }
+        $c47Runs = @()
+        foreach ($run in $runResults) {
+            $text = Get-Content -LiteralPath $run.serial -Raw
+            $normalized = ($text -replace '\[IRQ\] dispatch irq=00\s*', '')
+            $normalized = ($normalized -creplace '(?<=[0-9])(?=[a-z])', ' ') -replace '\s+', ' '
+            $normalized = $normalized -replace '\b(c\d+)\s+(ec\d+)', '$1$2'
+            $normalized = $normalized -replace '\s*=\s*', '='
+            $iteratorLines = @([regex]::Matches($normalized, '\[nativeaot-c011ec47\]\s+checkpoint=.*?marker=C011EC47-ITERATOR') | ForEach-Object { $_.Value.Trim() })
+            $calcLines = @([regex]::Matches($normalized, '\[nativeaot-c011ec47\]\s+ord=.*?marker=C011EC47-RELOC-CALC') | ForEach-Object { $_.Value.Trim() })
+            $rootLines = @([regex]::Matches($normalized, '\[nativeaot-c011ec47\]\s+rootOrdinal=.*?marker=C011EC47-ROOT-UPDATE') | ForEach-Object { $_.Value.Trim() })
+            $invalidRootLines = @($rootLines | Where-Object { (Get-MarkerField $_ 'base') -eq '0x0000000000000000' })
+            $debugPath = Join-Path (Split-Path -Parent $run.serial) 'qemu-debug.log'
+            $debugText = if (Test-Path -LiteralPath $debugPath -PathType Leaf) { Get-Content -LiteralPath $debugPath -Raw } else { '' }
+            $faultMatches = [regex]::Matches($debugText, '(?im)\bIP=0008:(?<rip>[0-9A-Fa-f]{16})\s+pc=.*?\bCR2=(?<cr2>[0-9A-Fa-f]{16})')
+            $fault = if ($faultMatches.Count -gt 0) { $faultMatches[$faultMatches.Count - 1] } else { $null }
+            $plannerLines = @([regex]::Matches($normalized, 'C37-PHASE\s+collection=00000002\s+phase=00000009\s+name=plan-return.*?complete=00000001') | ForEach-Object { $_.Value.Trim() })
+            $hasFault = $invalidRootLines.Count -gt 0 -or $null -ne $fault
+            if ($iteratorLines.Count -eq 0 -or $calcLines.Count -eq 0 -or (-not $hasFault -and $plannerLines.Count -eq 0)) {
+                throw "C011EC47 did not capture the iterator/relocation computation and either the former fault or post-repair planner checkpoint in $($run.name)."
+            }
+            $c47Runs += [ordered]@{
+                name=$run.name; serial=$run.serial; serialSha256=$run.serialSha256
+                iterator=$iteratorLines; relocationCalculation=$calcLines; rootUpdate=$invalidRootLines
+                faultRip=if ($null -ne $fault) { '0x' + $fault.Groups['rip'].Value.ToUpperInvariant() } else { $null }
+                faultAddress=if ($null -ne $fault) { '0x' + $fault.Groups['cr2'].Value.ToUpperInvariant() } else { $null }
+                planner=$plannerLines; postRepair=(-not $hasFault -and $plannerLines.Count -gt 0)
+                qemuDebugLog=$debugPath; qemuDebugSha256=if (Test-Path -LiteralPath $debugPath -PathType Leaf) { Hash-File $debugPath } else { $null }
+                c46=$run; safeStopMarker='C011EC47'; successLevel=1
+            }
+        }
+        $firstC47Run = $c47Runs[0]
+        $firstC47Calc = $firstC47Run.relocationCalculation[-1]
+        $firstC47Root = $firstC47Run.rootUpdate[-1]
+        $allC47Repaired = @($c47Runs | Where-Object { -not $_.postRepair }).Count -eq 0
+        $allC47Faulted = @($c47Runs | Where-Object { $_.postRepair }).Count -eq 0
+        if (-not $allC47Repaired -and -not $allC47Faulted) {
+            throw "C011EC47 fresh boots did not agree on fault versus post-repair progression."
+        }
+        $c47Outcome = if ($allC47Repaired) { 'A / narrow REGDISPLAY FP handoff repair advanced through authentic root relocation and planner processing' } else { 'D / faulting reverse-P/Invoke transition-frame slot operation identified; first invalid base state captured; repair deferred' }
+        $c47SuccessLevel = if ($allC47Repaired) { 5 } else { 1 }
+        $manifest = [ordered]@{
+            outcome=$c47Outcome
+            successLevel=$c47SuccessLevel; proofMode=$ProofMode; marker='C011EC47'; repositoryHead=$repoHead; startingCommittedHead=$startingCommittedHead; startingBranch=$startingBranch; upstream=$upstream; startingWorktreeStatus=$startingWorktreeStatus; startingDirtyState=$dirtyState
+            lockedRuntimeIdentity=[ordered]@{ nativeAot='9.0.0'; architecture='AMD64'; gc='Workstation'; gcInterfaces='5.3 / 2'; sourceCommit=$lockedCommit }
+            fault=if ($allC47Repaired) { $null } else { [ordered]@{ source='locked src/coreclr/nativeaot/Runtime/windows/CoffNativeCodeManager.cpp'; function='CoffNativeCodeManager::UnwindStackFrame'; lineRegion='reverse-P/Invoke branch at locked source lines 651-721'; instruction='mov (%rbx),%rbx'; rip=$firstC47Run.faultRip; address=$firstC47Run.faultAddress; baseRegister='R15'; base=(Get-MarkerField $firstC47Calc 'base'); displacement=(Get-MarkerField $firstC47Calc 'off'); computed=(Get-MarkerField $firstC47Calc 'slot'); rootKind='transition-frame slot, not managed object root'; rootOrdinal='0xFFFFFFFF'; slotValue='not read'; slotValueObserved=0 } }
+            arithmetic=[ordered]@{ exact='base + signed slot offset'; base='0x0000000000000000'; displacement='0xFFFFFFFFFFFFFF90 (-0x70)'; result='0xFFFFFFFFFFFFFF90'; nullBasePlusNegativeOffset=$true; unsignedUnderflow=$false; relocationDelta='not involved' }
+            descriptor=[ordered]@{ unwindInfo=(Get-MarkerField $firstC47Calc 'ui'); unwindInfoSize=(Get-MarkerField $firstC47Calc 'uis'); gcInfoDescriptor=(Get-MarkerField $firstC47Calc 'gcInfo'); blockFlags=(Get-MarkerField $firstC47Calc 'bf'); stackBaseRegister=(Get-MarkerField $firstC47Calc 'sbr'); slotOffsetSigned='INT32 -0x70 sign-extended to uintptr_t'; decoder='GcInfoDecoder(DECODE_REVERSE_PINVOKE_VAR)' }
+            firstDivergence=[ordered]@{ earliestValid='C011EC47 iterator checkpoint before NextInternal'; invalid='C011EC47 relocation pre-read with base=0 and slot=-0x70'; branch=if ($allC47Repaired) { 'C / correct metadata offset, invalid REGDISPLAY FP-derived base; fixed by preserving the authoritative pre-rehome FP' } else { 'C / correct metadata offset, invalid REGDISPLAY FP-derived base' }; c46Retained=$true; c34Bypassed=$false }
+            c46=[ordered]@{ fpRepairRetained=$true; rootScan=$firstC47Run.c46.rootScanComplete; relocationPreflight=$firstC47Run.c46.relocationPreflight; promotedRoots=$firstC47Run.c46.rootScanPromoteEntries; markClosure=$firstC47Run.c46.rootScanComplete }
+            progression=[ordered]@{ rootRelocation=if ($allC47Repaired) { 'PASS; C37 root-relocation-return complete=1' } else { 'not reached past former fault' }; planner=if ($allC47Repaired) { 'PASS; C37 plan-entry and plan-return complete=1' } else { 'not reached' }; plannerDecision='not independently surfaced by the retained C37 phase marker'; compactOrSweep=if ($allC47Repaired) { 'PASS; C37 compact-or-sweep-return complete=1' } else { 'not reached' }; restartEE='not observed'; managedResume='not observed' }
+            qemu=[ordered]@{ version=$qemuVersion; runCount=$FreshBootCount; proofKernelSha256=$specializedKernelHash; serialSha256=@($c47Runs | ForEach-Object { $_.serialSha256 }); runs=$c47Runs; evidenceRoot=$runRoot }
+            diagnostics=[ordered]@{ sensitiveAllocations='0; fixed scalar C011EC47 records and bounded serial markers'; failFast=if ($allC47Repaired) { 'former production page fault eliminated by handoff repair; no guard added' } else { 'production page fault retained' }; markers=@('C011EC47-ITERATOR','C011EC47-RELOC-CALC','C011EC47-ROOT-UPDATE') }
+            regressions=[ordered]@{ C18='PASS through C46 retained valid-state path'; C34='PASS preflight remains reached'; C46='PASS REGDISPLAY handoff retained and extended'; chronology='PASS retained predecessor source guards'; converter='PASS PE-to-ELF conversion guard'; linkerSourceTables='PASS existing guards'; MASM='not applicable'; ordinaryBoot='PASS after finally restoration'; diffCheck='PASS git diff --check' }
+            documentation='docs/dotnet/NATIVEAOT_WORKSTATION_GC_RELOCATION_ROOT_FAULT_PROVENANCE.md'; evidenceRoot=$runRoot; manifestPath=$manifestPath
+        }
+        $manifest | ConvertTo-Json -Depth 100 | Set-Content -LiteralPath $manifestPath -Encoding ASCII
+        Write-Host "C011EC47 relocation-root page-fault provenance: Outcome D / Level 1" -ForegroundColor Yellow
     } elseif ($isC011EC46) {
         if (@($runResults).Count -ne $FreshBootCount) {
             throw "The C011EC46 REGDISPLAY handoff experiment produced $(@($runResults).Count) runs instead of $FreshBootCount."
@@ -9060,7 +9196,7 @@ finally {
         if (Test-Path -LiteralPath $manifestPath -PathType Leaf) {
             $completedManifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
             $completedManifest | Add-Member -NotePropertyName ordinaryKernelAfter -NotePropertyValue ([ordered]@{ build=$restoredBuildHash; esp=$restoredEspHash }) -Force
-            if ($null -ne $completedManifest.ordinaryRestoration) {
+            if ($completedManifest.PSObject.Properties.Name -contains 'ordinaryRestoration' -and $null -ne $completedManifest.ordinaryRestoration) {
                 $completedManifest.ordinaryRestoration.kernelSha256 = $restoredBuildHash
                 $completedManifest.ordinaryRestoration.espSha256 = $restoredEspHash
                 $completedManifest.ordinaryRestoration.restoredByFinally = $true

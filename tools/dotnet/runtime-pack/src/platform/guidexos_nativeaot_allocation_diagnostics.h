@@ -1187,6 +1187,83 @@ typedef struct guidexos_nativeaot_c011ec46_provenance_record {
         GUIDEXOS_NATIVEAOT_C011EC46_MAX_SNAPSHOTS];
 } guidexos_nativeaot_c011ec46_provenance_record;
 
+enum {
+    GUIDEXOS_NATIVEAOT_C011EC47_MAX_ITERATOR_RECORDS = 8u,
+    GUIDEXOS_NATIVEAOT_C011EC47_MAX_ROOT_UPDATE_RECORDS = 8u,
+    GUIDEXOS_NATIVEAOT_C011EC47_ITERATOR_PRE_METHOD_STATE = 1u,
+    GUIDEXOS_NATIVEAOT_C011EC47_ITERATOR_POST_METHOD_STATE = 2u,
+    GUIDEXOS_NATIVEAOT_C011EC47_ITERATOR_BEFORE_NEXT_INTERNAL = 3u,
+    GUIDEXOS_NATIVEAOT_C011EC47_ROOT_UPDATE_PRE_READ = 4u
+};
+
+/* C011EC47 records the state which feeds the reverse-P/Invoke transition
+ * slot read.  The records are scalar-only and deliberately do not read the
+ * slot value: the production read is the operation under investigation. */
+typedef struct guidexos_nativeaot_c011ec47_iterator_record {
+    uint32_t observed;
+    uint32_t checkpoint;
+    uint32_t gcOrdinal;
+    uint32_t reserved;
+
+    uintptr_t controlPc;
+    uintptr_t sp;
+    uintptr_t fp;
+    uintptr_t regDisplay;
+    uintptr_t pRbp;
+    uintptr_t framePointer;
+    uintptr_t codeManager;
+    uintptr_t methodInfo;
+} guidexos_nativeaot_c011ec47_iterator_record;
+
+typedef struct guidexos_nativeaot_c011ec47_root_update_record {
+    uint32_t observed;
+    uint32_t checkpoint;
+    uint32_t gcOrdinal;
+    uint32_t rootKind;
+    uint32_t slotValueObserved;
+    uint32_t pinned;
+    uint32_t interior;
+    uint32_t byref;
+
+    uintptr_t methodInfo;
+    uintptr_t controlPc;
+    uintptr_t sp;
+    uintptr_t basePointer;
+    uintptr_t regDisplay;
+    uintptr_t pRbp;
+    uintptr_t runtimeFunction;
+    uintptr_t mainRuntimeFunction;
+    uintptr_t unwindInfo;
+    uintptr_t unwindInfoSize;
+    uintptr_t gcInfoDescriptor;
+    uintptr_t blockFlags;
+    uintptr_t stackBaseRegister;
+    uintptr_t slotOffset;
+    uintptr_t slotAddress;
+    uintptr_t previousTransitionFrameOut;
+    uintptr_t slotValue;
+} guidexos_nativeaot_c011ec47_root_update_record;
+
+typedef struct guidexos_nativeaot_c011ec47_provenance_record {
+    uint32_t iteratorCount;
+    uint32_t rootUpdateCount;
+    uint32_t firstInvalidState;
+    uint32_t sensitiveDiagnosticAllocations;
+
+    uintptr_t firstValidFramePointer;
+    uintptr_t firstValidP_Rbp;
+    uintptr_t firstInvalidBase;
+    uintptr_t firstInvalidSlotOffset;
+    uintptr_t firstInvalidSlotAddress;
+    uintptr_t firstInvalidMethodInfo;
+    uintptr_t firstInvalidControlPc;
+
+    guidexos_nativeaot_c011ec47_iterator_record iteratorRecords[
+        GUIDEXOS_NATIVEAOT_C011EC47_MAX_ITERATOR_RECORDS];
+    guidexos_nativeaot_c011ec47_root_update_record rootUpdateRecords[
+        GUIDEXOS_NATIVEAOT_C011EC47_MAX_ROOT_UPDATE_RECORDS];
+} guidexos_nativeaot_c011ec47_provenance_record;
+
 typedef struct guidexos_nativeaot_allocation_diagnostics {
     uint32_t schemaVersion;
     uint32_t heapInitialized;
@@ -3046,6 +3123,8 @@ typedef struct guidexos_nativeaot_allocation_diagnostics {
     guidexos_nativeaot_c011ec45_provenance_record c011ec45Provenance;
     /* C011EC46 REGDISPLAY caller-frame FP handoff provenance. */
     guidexos_nativeaot_c011ec46_provenance_record c011ec46Provenance;
+    /* C011EC47 post-root-scan reverse-slot page-fault provenance. */
+    guidexos_nativeaot_c011ec47_provenance_record c011ec47Provenance;
 } guidexos_nativeaot_allocation_diagnostics;
 
 enum {
