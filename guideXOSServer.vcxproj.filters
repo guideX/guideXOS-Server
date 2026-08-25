@@ -612,13 +612,22 @@
     <ClInclude Include="navigator_javascript\ast.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="navigator_javascript\environment.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="navigator_javascript\lexer.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="navigator_javascript\parser.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="navigator_javascript\runtime.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="navigator_javascript\source.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="navigator_javascript\value.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="gxos_tls_prerequisites.h">
@@ -1385,10 +1394,19 @@
     <ClCompile Include="navigator_javascript\ast.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="navigator_javascript\environment.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="navigator_javascript\lexer.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="navigator_javascript\parser.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="navigator_javascript\runtime.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="navigator_javascript\value.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="gxos_tls_prerequisites.cpp">

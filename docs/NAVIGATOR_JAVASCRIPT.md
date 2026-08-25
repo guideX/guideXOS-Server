@@ -4,10 +4,11 @@
 
 Navigator currently has a reusable HTML document/parser layer in
 `guide_web_document.*` and `guide_web_html_parser.*`, with Navigator-specific
-navigation and rendering in `navigator.*`. The repository audit found no
-JavaScript lexer, parser, runtime, DOM abstraction, event scripting system, or
-`<script>` execution path. The existing HTML parser intentionally strips
-`<script>` content.
+navigation and rendering in `navigator.*`. The independent JavaScript
+subsystem now contains a bounded lexer, parser/AST, and standalone runtime
+core. It still has no DOM abstraction, event scripting system, or `<script>`
+execution path. The existing HTML parser intentionally strips `<script>`
+content.
 
 JavaScript is therefore a separate subsystem. It must not become an implicit
 part of HTML parsing or page loading. Phase JS1 accepts source text and
@@ -65,8 +66,10 @@ partially decoded: they produce an explicit unsupported-escape error.
 
 Slash is context-free in JS1. It is division, `/=`, or the start of a comment.
 Regular-expression literals are not supported and remain parser-context work.
-No parser, AST, runtime values, scopes, functions, objects, arrays, built-ins,
-DOM, events, timers, or web APIs exist in this phase.
+JS1 itself does not create an AST or runtime values and does not provide
+scopes, functions, objects, arrays, built-ins, DOM, events, timers, or web
+APIs. JS2 and JS3 add those layers only as independent host-testable
+components; they do not connect them to page loading.
 
 ## Resource limits
 
@@ -251,11 +254,161 @@ storage. Malformed input, limit exhaustion, and repeated parsing of the same
 input are bounded and deterministic; no evaluator, host callback, or assertion
 is involved.
 
+## Phase JS3 bounded execution core
+
+Phase JS3 extends the same independent `navigator_javascript/` subsystem with
+runtime values, one global `var` environment, and a bounded evaluator:
+
+```text
+source -> lexer -> tokens -> parser -> indexed Ast
+                                      |
+                                      v
+                              RuntimeContext
+                              /      |       \
+                         Value  Environment  evaluator
+                                      |
+                                bounded state
+```
+
+`RuntimeContext::execute(SourceView)` is the end-to-end API. The context first
+copies a valid source view within the lexer source limit, then runs the
+existing JS1 lexer and JS2 parser, and finally evaluates the resulting `Ast`.
+Lexical, parse, runtime, and execution-budget failures are separate result
+statuses. The context owns the copied source, AST, environment, runtime
+strings, execution step counter, final expression value, and current error.
+`reset()` clears all script state, including strings and bindings, while
+retaining configured limits. This makes separate future page-owned contexts
+possible without hidden mutable globals.
+
+### Values and ownership
+
+`Value` is an explicit tagged primitive with these types:
+
+```text
+Undefined, Null, Boolean, Number, String
+```
+
+Numbers use IEEE-754 `double`. Strings are not source slices: each newly
+created runtime string is copied into the context-owned string store and a
+typed `RuntimeStringId` is kept in the `Value`. String handles are valid until
+their owning context is reset or destroyed. The environment owns binding names
+and values. `var` redeclaration updates the existing entry, so repeated
+redeclaration cannot grow duplicate bindings. JS3 has no artificial block
+scope; all `var` bindings are in the one global environment.
+
+`var x;` creates a binding containing `Undefined`, which is distinct from an
+absent binding. JS1 keeps `undefined` as an identifier token for compatibility;
+JS3 resolves an unshadowed identifier with that spelling to the primitive
+`Undefined`, while a real binding named `undefined` takes precedence.
+
+### Number, truthiness, and coercion semantics
+
+Arithmetic uses `double` operations for `+`, `-`, `*`, `/`, and `%`. Division
+by zero follows the IEEE/JavaScript primitive result policy: non-zero divided
+by zero produces signed infinity and zero divided by zero produces `NaN`.
+Negative zero is preserved by the value representation and is falsy. `NaN` is
+represented and is falsy; strict numeric equality with `NaN` is false. Numeric
+literal and primitive string-to-number parsing is manual and ASCII-based, not
+locale-sensitive. Strings support the JS1 decoded escape subset.
+
+Falsy values are `Undefined`, `Null`, `false`, `0`, negative zero, `NaN`, and
+the empty string. Non-zero numbers, `true`, and non-empty strings are truthy.
+Unary `!`, unary `+`, and unary `-` use these explicit primitive rules.
+
+`+` concatenates when either operand is a string. The current deterministic
+primitive string forms are `undefined`, `null`, `true`/`false`, JS-style
+number text, and the string itself, so for example `"answer=" + 42` produces
+`String("answer=42")`. Other arithmetic and relational operators convert the
+current primitive subset to numbers; malformed numeric strings produce `NaN`.
+Relational comparison is numeric in JS3 rather than full ECMAScript string
+ordering.
+
+Strict equality is type-sensitive: `null === null` is true, `null ===
+undefined` is false, and `1 === "1"` is false. Loose equality deliberately
+implements only the documented primitive subset: `Undefined == Null`,
+boolean-to-number conversion, and number/string numeric conversion. It is not
+silently treated as strict equality and does not claim full ECMAScript abstract
+equality.
+
+Logical `&&` and `||` short-circuit and return an operand, so the right-hand
+side is not evaluated when the left-hand truthiness decides the result.
+
+### Executable AST and runtime-unsupported AST
+
+JS3 executes `Program`, `EmptyStatement`, `VariableDeclaration`,
+`VariableDeclarator`, `ExpressionStatement`, `BlockStatement`, `IfStatement`,
+`WhileStatement`, `ForStatement`, `BreakStatement`, `ContinueStatement`,
+identifiers, number/string/boolean/null literals, unary expressions, binary
+expressions, logical expressions, assignment expressions, and update
+expressions. It supports identifier assignment and compound assignment plus
+prefix/postfix `++` and `--`. Blocks use the same global `var` environment.
+
+The parser still accepts several constructs so later phases have stable AST
+shapes, but JS3 deliberately does not execute them. Function declarations and
+calls, `return`, `this`, member access (including computed access), `new`, and
+member/property assignment return explicit runtime errors. Top-level `break`
+and `continue` return `IllegalBreak` and `IllegalContinue`; top-level `return`
+returns `IllegalReturn`. JS4 owns function values, call frames, parameters,
+lexical scope, and return propagation.
+
+### Bounded execution and limits
+
+Every evaluated AST node consumes one step from a single context-wide budget.
+The counter is never reset by a loop. The default budget is 100,000 steps and
+exhaustion returns `ExecutionBudgetExceeded`, allowing `while (true) {}` and
+`for (;;) {}` to terminate without hanging the host. The result exposes the
+deterministic step count.
+
+The effective JS3 defaults are finite and configurable:
+
+| Resource | Default limit |
+| --- | ---: |
+| Source bytes | 1 MiB |
+| Emitted tokens, including EOF | 8,192 |
+| Token/literal span | 64 KiB |
+| AST nodes | 16,384 |
+| Parser recursion depth | 256 |
+| Statements | 4,096 |
+| Function parameters | 64 |
+| Call/new arguments | 64 |
+| Block nesting | 128 |
+| Expression nesting | 256 |
+| Runtime bindings | 256 |
+| Binding-name length | 256 bytes |
+| Runtime string length | 64 KiB |
+| Total runtime string bytes | 256 KiB |
+| Runtime string values | 4,096 |
+| Execution steps | 100,000 |
+
+There is no silent truncation. Binding and string exhaustion fails
+deterministically. Runtime errors carry a fixed error code and the source
+offset, line, and column from the authoritative AST node where available.
+The categories include `UnknownIdentifier`, `InvalidAssignmentTarget`,
+`InvalidOperandType`, `UnsupportedFeature`, `BindingLimitExceeded`,
+`BindingNameTooLong`, `StringLimitExceeded`, `ExecutionBudgetExceeded`,
+`IllegalBreak`, `IllegalContinue`, `IllegalReturn`, `InvalidAstState`, and
+`AllocationFailure`. Ordinary evaluator control flow uses explicit boolean and
+control-status propagation rather than C++ exceptions.
+
+**guideXOS now has a standalone bounded JavaScript execution core, but
+Navigator web pages still do not execute JavaScript.**
+
+### JS3 validation policy
+
+Tier 1 is the mandatory isolated proof: JS1 lexer regressions, JS2 parser
+regressions, JS3 runtime tests, strict MinGW/g++ warning-as-error builds,
+runtime resource/error tests, deterministic budget termination, build-list
+integration, and `git diff --check`. Tier 2 attempts the normal guideXOS and
+Navigator builds, hosted/bare-metal smoke, QEMU where available, and existing
+HTTP/HTTPS/TLS controls. Inherited Mbed TLS, MSBuild, or QEMU environment
+blockers remain documented and are not bypassed or weakened for this isolated
+runtime phase.
+
 ### Validation tiers
 
-Tier 1 is the mandatory isolated JavaScript-engine gate for JS2: focused
-structural AST tests, MinGW/g++ tests, MSVC `/W4 /WX` tests, deterministic
-limits and malformed-input coverage, source/build-list integration, and
+Tier 1 is the mandatory isolated JavaScript-engine gate for JS3: focused
+lexer, AST, and runtime tests, MinGW/g++ tests, MSVC `/W4 /WX` tests,
+deterministic limits and malformed-input coverage, source/build-list integration, and
 `git diff --check`. Tier 2 is the Navigator integration gate: the full guideXOS
 build, hosted Navigator regression, bare-metal/QEMU regression, layout/image/
 resource regression, and HTTP/HTTPS/TLS regression. Tier 2 is attempted when
@@ -264,9 +417,9 @@ browser behavior. Existing Mbed TLS dependency/profile and QEMU/full-project
 environment failures remain inherited integration blockers for this isolated
 phase; they do not weaken or bypass TLS/security requirements.
 
-**Navigator still does not execute JavaScript after Phase JS2.** There is no
-`<script>` execution, `window`, `document`, DOM binding, events, timers,
-networking API, or page-loading hook.
+The JS3 runtime remains standalone. There is no `<script>` execution,
+`window`, `document`, DOM binding, events, timers, networking API, or
+page-loading hook.
 
 ## Roadmap
 
@@ -285,7 +438,8 @@ JS lexer
   -> increasingly capable web APIs
 ```
 
-The next milestone is **Phase JS3 — JavaScript Runtime Values & Execution Core
-Foundation**: values, environments/scopes, expression evaluation, and bounded
-execution, still without DOM integration. Full ECMAScript compatibility is not
-promised.
+The next milestone is **Phase JS4 — Functions, Call Frames & Lexical Scope**:
+function values and declarations, calls, call frames, parameters, local
+environments, lexical parent chains, return propagation, recursion, and
+bounded call depth. JS4 remains without DOM integration and must build on the
+committed JS3 runtime contract. Full ECMAScript compatibility is not promised.

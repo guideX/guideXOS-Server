@@ -339,9 +339,12 @@
     <ClInclude Include="native_elf_launch_pipeline.h" />
     <ClInclude Include="native_elf_trampoline_win64.h" />
     <ClInclude Include="navigator_javascript\ast.h" />
+    <ClInclude Include="navigator_javascript\environment.h" />
     <ClInclude Include="navigator_javascript\lexer.h" />
     <ClInclude Include="navigator_javascript\parser.h" />
+    <ClInclude Include="navigator_javascript\runtime.h" />
     <ClInclude Include="navigator_javascript\source.h" />
+    <ClInclude Include="navigator_javascript\value.h" />
     <ClInclude Include="navigator.h" />
     <ClInclude Include="gxos_tls_foundation.h" />
     <ClInclude Include="gxos_tls_prerequisites.h" />
@@ -587,8 +590,11 @@
     <ClCompile Include="native_elf_trampoline_win64.cpp" />
     <ClCompile Include="navigator.cpp" />
     <ClCompile Include="navigator_javascript\ast.cpp" />
+    <ClCompile Include="navigator_javascript\environment.cpp" />
     <ClCompile Include="navigator_javascript\lexer.cpp" />
     <ClCompile Include="navigator_javascript\parser.cpp" />
+    <ClCompile Include="navigator_javascript\runtime.cpp" />
+    <ClCompile Include="navigator_javascript\value.cpp" />
     <ClCompile Include="gxos_tls_foundation.cpp" />
     <ClCompile Include="gxos_tls_prerequisites.cpp" />
     <ClCompile Include="notepad.cpp" />
