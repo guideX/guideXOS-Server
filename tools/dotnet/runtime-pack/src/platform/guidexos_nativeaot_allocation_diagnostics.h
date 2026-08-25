@@ -1028,6 +1028,99 @@ typedef struct guidexos_nativeaot_c011ec44_provenance_record {
         GUIDEXOS_NATIVEAOT_C011EC44_MAX_CHECKPOINTS];
 } guidexos_nativeaot_c011ec44_provenance_record;
 
+enum {
+    GUIDEXOS_NATIVEAOT_C011EC45_MAX_SNAPSHOTS = 8u,
+    GUIDEXOS_NATIVEAOT_C011EC45_MAX_UNWIND_RECORDS = 8u,
+    GUIDEXOS_NATIVEAOT_C011EC45_FRAME_CREATE = 1u,
+    GUIDEXOS_NATIVEAOT_C011EC45_PRE_GC = 2u,
+    GUIDEXOS_NATIVEAOT_C011EC45_SUSPEND = 3u,
+    GUIDEXOS_NATIVEAOT_C011EC45_ROOT_SOURCE = 4u
+};
+
+/* C011EC45 is a fixed-size, read-only image of the AMD64 transition frame.
+ * It deliberately records scalar values only.  The unwind records capture
+ * the metadata row and register image at the exact reverse-slot load. */
+typedef struct guidexos_nativeaot_c011ec45_frame_snapshot {
+    uint32_t observed;
+    uint32_t phase;
+    uint32_t gcOrdinal;
+    uint32_t reserved;
+
+    uintptr_t frameAddress;
+    uintptr_t frameBase;
+    uintptr_t frameRip;
+    uintptr_t frameRbp;
+    uintptr_t frameThread;
+    uintptr_t frameFlags;
+    uintptr_t savedRbx;
+    uintptr_t savedRsi;
+    uintptr_t savedRdi;
+    uintptr_t savedR12;
+    uintptr_t savedR13;
+    uintptr_t savedR14;
+    uintptr_t savedR15;
+    uintptr_t savedRsp;
+    uintptr_t savedRax;
+} guidexos_nativeaot_c011ec45_frame_snapshot;
+
+typedef struct guidexos_nativeaot_c011ec45_unwind_record {
+    uint32_t observed;
+    uint32_t gcOrdinal;
+    uint32_t stackBaseRegister;
+    uint32_t reserved;
+
+    uintptr_t methodInfo;
+    uintptr_t inputPc;
+    uintptr_t inputSp;
+    uintptr_t inputFp;
+    uintptr_t inputRbx;
+    uintptr_t inputRsi;
+    uintptr_t inputRdi;
+    uintptr_t inputR12;
+    uintptr_t inputR13;
+    uintptr_t inputR14;
+    uintptr_t inputR15;
+    uintptr_t runtimeFunction;
+    uintptr_t mainRuntimeFunction;
+    uintptr_t methodStart;
+    uintptr_t methodEnd;
+    uintptr_t unwindInfo;
+    uintptr_t unwindInfoSize;
+    uintptr_t blockFlags;
+    uintptr_t slotOffset;
+    uintptr_t baseAddress;
+    uintptr_t slotAddress;
+    uintptr_t slotValue;
+    uintptr_t previousTransitionFrame;
+} guidexos_nativeaot_c011ec45_unwind_record;
+
+typedef struct guidexos_nativeaot_c011ec45_provenance_record {
+    uint32_t snapshotCount;
+    uint32_t unwindCount;
+    uint32_t writeEventCount;
+    uint32_t unexplainedWriteObserved;
+    uint32_t layoutAssertionsPassed;
+    uint32_t expectedSlotKnown;
+    uint32_t branchBProven;
+    uint32_t rootCauseCode;
+
+    uintptr_t frameBase;
+    uintptr_t expectedSlotAddress;
+    uintptr_t expectedSlotOffset;
+    uintptr_t expectedSlotValue;
+    uintptr_t actualSlotAddress;
+    uintptr_t actualSlotOffset;
+    uintptr_t actualSlotValue;
+    uintptr_t actualBaseAddress;
+    uintptr_t neighboringLiveDestinationEnd;
+    uintptr_t targetEEType;
+
+    guidexos_nativeaot_c011ec45_frame_snapshot snapshots[
+        GUIDEXOS_NATIVEAOT_C011EC45_MAX_SNAPSHOTS];
+    guidexos_nativeaot_c011ec45_unwind_record unwinds[
+        GUIDEXOS_NATIVEAOT_C011EC45_MAX_UNWIND_RECORDS];
+} guidexos_nativeaot_c011ec45_provenance_record;
+
 typedef struct guidexos_nativeaot_allocation_diagnostics {
     uint32_t schemaVersion;
     uint32_t heapInitialized;
@@ -2883,6 +2976,8 @@ typedef struct guidexos_nativeaot_allocation_diagnostics {
     guidexos_nativeaot_c011ec42_lifecycle_record c011ec42Lifecycle;
     /* C011EC44 malformed transition-frame provenance. */
     guidexos_nativeaot_c011ec44_provenance_record c011ec44Provenance;
+    /* C011EC45 reverse-P/Invoke slot layout, register, and unwind provenance. */
+    guidexos_nativeaot_c011ec45_provenance_record c011ec45Provenance;
 } guidexos_nativeaot_allocation_diagnostics;
 
 enum {

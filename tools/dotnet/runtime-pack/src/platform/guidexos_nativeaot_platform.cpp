@@ -5207,6 +5207,247 @@ static uintptr_t c011ec44SavedRsp(PInvokeTransitionFrame* frame, uintptr_t flags
     return saved[7];
 }
 
+#if defined(GUIDEXOS_NATIVEAOT_C011EC45_PROVENANCE)
+static_assert(offsetof(PInvokeTransitionFrame, m_RIP) == 0x00u, "C011EC45 RIP offset changed");
+static_assert(offsetof(PInvokeTransitionFrame, m_FramePointer) == 0x08u, "C011EC45 RBP offset changed");
+static_assert(offsetof(PInvokeTransitionFrame, m_pThread) == 0x10u, "C011EC45 thread offset changed");
+static_assert(offsetof(PInvokeTransitionFrame, m_Flags) == 0x18u, "C011EC45 flags offset changed");
+static_assert(offsetof(PInvokeTransitionFrame, m_PreservedRegs) == 0x20u, "C011EC45 preserved-register offset changed");
+
+static uintptr_t c011ec45SavedRegister(
+    PInvokeTransitionFrame* frame, uintptr_t flags, uintptr_t saveFlag) {
+    if (frame == nullptr || (flags & saveFlag) == 0u) {
+        return 0u;
+    }
+    const uintptr_t* saved = reinterpret_cast<const uintptr_t*>(frame->m_PreservedRegs);
+    uintptr_t index = 0u;
+    const uintptr_t orderedFlags[] = {
+        PTFF_SAVE_RBX, PTFF_SAVE_RSI, PTFF_SAVE_RDI, PTFF_SAVE_R12,
+        PTFF_SAVE_R13, PTFF_SAVE_R14, PTFF_SAVE_R15, PTFF_SAVE_RAX,
+        PTFF_SAVE_RSP
+    };
+    for (uintptr_t orderedFlag : orderedFlags) {
+        if ((flags & orderedFlag) != 0u) {
+            if (orderedFlag == saveFlag) {
+                return saved[index];
+            }
+            ++index;
+        }
+    }
+    return 0u;
+}
+
+static void c011ec45EmitLayout() {
+    guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    if (d.c011ec45Provenance.layoutAssertionsPassed != 0u) {
+        return;
+    }
+    d.c011ec45Provenance.layoutAssertionsPassed = 1u;
+    suspendEeSerialPutString(
+        "[nativeaot-code-manager] C011EC45-LAYOUT frameRip=0x00 frameRbp=0x08 frameThread=0x10 flags=0x18 preserved=0x20 rbx=0x20 rsi=0x28 rdi=0x30 r12=0x38 r13=0x40 r14=0x48 r15=0x50 rsp=0x58 rax=0x60 max=0x68 marker=C011EC45-LAYOUT\n");
+}
+
+static void c011ec45CaptureFrame(uint32_t phase, uintptr_t frameAddress) {
+    if (phase == 0u || phase > GUIDEXOS_NATIVEAOT_C011EC45_ROOT_SOURCE ||
+        frameAddress == 0u ||
+        frameAddress == reinterpret_cast<uintptr_t>(TOP_OF_STACK_MARKER)) {
+        return;
+    }
+    PInvokeTransitionFrame* frame =
+        reinterpret_cast<PInvokeTransitionFrame*>(frameAddress);
+    const uintptr_t flags = static_cast<uintptr_t>(frame->m_Flags);
+    const uintptr_t savedRbx = c011ec45SavedRegister(frame, flags, PTFF_SAVE_RBX);
+    const uintptr_t savedRsi = c011ec45SavedRegister(frame, flags, PTFF_SAVE_RSI);
+    const uintptr_t savedRdi = c011ec45SavedRegister(frame, flags, PTFF_SAVE_RDI);
+    const uintptr_t savedR12 = c011ec45SavedRegister(frame, flags, PTFF_SAVE_R12);
+    const uintptr_t savedR13 = c011ec45SavedRegister(frame, flags, PTFF_SAVE_R13);
+    const uintptr_t savedR14 = c011ec45SavedRegister(frame, flags, PTFF_SAVE_R14);
+    const uintptr_t savedR15 = c011ec45SavedRegister(frame, flags, PTFF_SAVE_R15);
+    const uintptr_t savedRax = c011ec45SavedRegister(frame, flags, PTFF_SAVE_RAX);
+    const uintptr_t savedRsp = c011ec45SavedRegister(frame, flags, PTFF_SAVE_RSP);
+    guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    guidexos_nativeaot_c011ec45_provenance_record& r =
+        d.c011ec45Provenance;
+    guidexos_nativeaot_c011ec45_frame_snapshot& snapshot =
+        r.snapshots[phase - 1u];
+    const bool wasObserved = snapshot.observed != 0u;
+    for (uint32_t priorIndex = 0u;
+         priorIndex < GUIDEXOS_NATIVEAOT_C011EC45_MAX_SNAPSHOTS;
+         ++priorIndex) {
+        const guidexos_nativeaot_c011ec45_frame_snapshot& prior =
+            r.snapshots[priorIndex];
+        if (prior.observed != 0u && prior.frameAddress == frameAddress &&
+            (prior.frameRip != reinterpret_cast<uintptr_t>(frame->m_RIP) ||
+             prior.frameRbp != reinterpret_cast<uintptr_t>(frame->m_FramePointer) ||
+             prior.frameFlags != flags || prior.savedRbx != savedRbx ||
+             prior.savedRsi != savedRsi || prior.savedRdi != savedRdi ||
+             prior.savedR12 != savedR12 || prior.savedR13 != savedR13 ||
+             prior.savedR14 != savedR14 || prior.savedR15 != savedR15 ||
+             prior.savedRsp != savedRsp || prior.savedRax != savedRax)) {
+            ++r.writeEventCount;
+            r.unexplainedWriteObserved = 1u;
+            break;
+        }
+    }
+    if (!wasObserved) {
+        ++r.snapshotCount;
+    }
+    if (wasObserved && snapshot.frameAddress == frameAddress &&
+        (snapshot.frameRip != reinterpret_cast<uintptr_t>(frame->m_RIP) ||
+         snapshot.frameRbp != reinterpret_cast<uintptr_t>(frame->m_FramePointer) ||
+         snapshot.frameFlags != flags || snapshot.savedRbx != savedRbx ||
+         snapshot.savedRsi != savedRsi || snapshot.savedRdi != savedRdi ||
+         snapshot.savedR12 != savedR12 || snapshot.savedR13 != savedR13 ||
+         snapshot.savedR14 != savedR14 || snapshot.savedR15 != savedR15 ||
+         snapshot.savedRsp != savedRsp || snapshot.savedRax != savedRax)) {
+        ++r.writeEventCount;
+        r.unexplainedWriteObserved = 1u;
+    }
+    snapshot = {};
+    snapshot.observed = 1u;
+    snapshot.phase = phase;
+    snapshot.gcOrdinal = d.c011ec42Lifecycle.collectionCountBefore;
+    snapshot.frameAddress = frameAddress;
+    snapshot.frameBase = frameAddress;
+    snapshot.frameRip = reinterpret_cast<uintptr_t>(frame->m_RIP);
+    snapshot.frameRbp = reinterpret_cast<uintptr_t>(frame->m_FramePointer);
+    snapshot.frameThread = reinterpret_cast<uintptr_t>(frame->m_pThread);
+    snapshot.frameFlags = flags;
+    snapshot.savedRbx = savedRbx;
+    snapshot.savedRsi = savedRsi;
+    snapshot.savedRdi = savedRdi;
+    snapshot.savedR12 = savedR12;
+    snapshot.savedR13 = savedR13;
+    snapshot.savedR14 = savedR14;
+    snapshot.savedR15 = savedR15;
+    snapshot.savedRsp = savedRsp;
+    snapshot.savedRax = savedRax;
+    if (r.frameBase == 0u || snapshot.gcOrdinal >= r.snapshots[0].gcOrdinal) {
+        r.frameBase = frameAddress;
+    }
+    r.neighboringLiveDestinationEnd =
+        d.c011ec40Compaction.neighboringLiveDestinationEnd;
+    r.targetEEType = d.c011ec40Compaction.targetEEType;
+    c011ec45EmitLayout();
+    suspendEeSerialPutString("[nativeaot-code-manager] C011EC45-SNAPSHOT phase=");
+    suspendEeSerialPutHex32(phase);
+    suspendEeSerialPutString(" ord=");
+    suspendEeSerialPutHex32(snapshot.gcOrdinal);
+    suspendEeSerialPutString(" frame=");
+    suspendEeSerialPutHex64(frameAddress);
+    suspendEeSerialPutString(" rip=");
+    suspendEeSerialPutHex64(snapshot.frameRip);
+    suspendEeSerialPutString(" rbp=");
+    suspendEeSerialPutHex64(snapshot.frameRbp);
+    suspendEeSerialPutString(" thread=");
+    suspendEeSerialPutHex64(snapshot.frameThread);
+    suspendEeSerialPutString(" flags=");
+    suspendEeSerialPutHex64(flags);
+    suspendEeSerialPutString(" marker=C011EC45-SNAPSHOT\n");
+    suspendEeSerialPutString("[nativeaot-code-manager] C011EC45-REGS phase=");
+    suspendEeSerialPutHex32(phase);
+    suspendEeSerialPutString(" rbx="); suspendEeSerialPutHex64(savedRbx);
+    suspendEeSerialPutString(" rsi="); suspendEeSerialPutHex64(savedRsi);
+    suspendEeSerialPutString(" rdi="); suspendEeSerialPutHex64(savedRdi);
+    suspendEeSerialPutString(" r12="); suspendEeSerialPutHex64(savedR12);
+    suspendEeSerialPutString(" r13="); suspendEeSerialPutHex64(savedR13);
+    suspendEeSerialPutString(" r14="); suspendEeSerialPutHex64(savedR14);
+    suspendEeSerialPutString(" r15="); suspendEeSerialPutHex64(savedR15);
+    suspendEeSerialPutString(" rsp="); suspendEeSerialPutHex64(savedRsp);
+    suspendEeSerialPutString(" rax="); suspendEeSerialPutHex64(savedRax);
+    suspendEeSerialPutString(" marker=C011EC45-REGS\n");
+}
+
+static void c011ec45CaptureUnwind(
+    uintptr_t methodInfo, uintptr_t inputPc, uintptr_t inputSp,
+    uintptr_t inputFp, uintptr_t inputRbx, uintptr_t inputRsi,
+    uintptr_t inputRdi, uintptr_t inputR12, uintptr_t inputR13,
+    uintptr_t inputR14, uintptr_t inputR15, uintptr_t runtimeFunction,
+    uintptr_t mainRuntimeFunction, uintptr_t methodStart, uintptr_t methodEnd,
+    uintptr_t unwindInfo, uintptr_t unwindInfoSize, uintptr_t blockFlags,
+    uintptr_t slotOffset, uintptr_t baseAddress, uintptr_t slotAddress,
+    uintptr_t slotValue, uintptr_t previousTransitionFrame,
+    uintptr_t stackBasedRegister) {
+    guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    guidexos_nativeaot_c011ec45_provenance_record& r =
+        d.c011ec45Provenance;
+    const uint32_t index = r.unwindCount < GUIDEXOS_NATIVEAOT_C011EC45_MAX_UNWIND_RECORDS
+        ? r.unwindCount : GUIDEXOS_NATIVEAOT_C011EC45_MAX_UNWIND_RECORDS - 1u;
+    guidexos_nativeaot_c011ec45_unwind_record& record = r.unwinds[index];
+    if (r.unwindCount < GUIDEXOS_NATIVEAOT_C011EC45_MAX_UNWIND_RECORDS) {
+        ++r.unwindCount;
+    }
+    record = {};
+    record.observed = 1u;
+    record.gcOrdinal = d.c011ec42Lifecycle.collectionCountBefore;
+    record.stackBaseRegister = static_cast<uint32_t>(stackBasedRegister);
+    record.methodInfo = methodInfo;
+    record.inputPc = inputPc;
+    record.inputSp = inputSp;
+    record.inputFp = inputFp;
+    record.inputRbx = inputRbx;
+    record.inputRsi = inputRsi;
+    record.inputRdi = inputRdi;
+    record.inputR12 = inputR12;
+    record.inputR13 = inputR13;
+    record.inputR14 = inputR14;
+    record.inputR15 = inputR15;
+    record.runtimeFunction = runtimeFunction;
+    record.mainRuntimeFunction = mainRuntimeFunction;
+    record.methodStart = methodStart;
+    record.methodEnd = methodEnd;
+    record.unwindInfo = unwindInfo;
+    record.unwindInfoSize = unwindInfoSize;
+    record.blockFlags = blockFlags;
+    record.slotOffset = slotOffset;
+    record.baseAddress = baseAddress;
+    record.slotAddress = slotAddress;
+    record.slotValue = slotValue;
+    record.previousTransitionFrame = previousTransitionFrame;
+    r.actualSlotAddress = slotAddress;
+    r.actualSlotOffset = slotOffset;
+    r.actualSlotValue = slotValue;
+    r.actualBaseAddress = baseAddress;
+    /* A top-level reverse-P/Invoke has no previous transition frame.  The
+     * expected semantic value is therefore null, not a second physical slot
+     * in the current PInvokeTransitionFrame. */
+    r.expectedSlotKnown = 1u;
+    r.expectedSlotAddress = 0u;
+    r.expectedSlotOffset = 0u;
+    r.expectedSlotValue = 0u;
+    r.branchBProven = 0u;
+    suspendEeSerialPutString("[nativeaot-code-manager] C011EC45-UNWIND method=");
+    suspendEeSerialPutHex64(methodInfo);
+    suspendEeSerialPutString(" pc="); suspendEeSerialPutHex64(inputPc);
+    suspendEeSerialPutString(" sp="); suspendEeSerialPutHex64(inputSp);
+    suspendEeSerialPutString(" fp="); suspendEeSerialPutHex64(inputFp);
+    suspendEeSerialPutString(" rf="); suspendEeSerialPutHex64(runtimeFunction);
+    suspendEeSerialPutString(" mainrf="); suspendEeSerialPutHex64(mainRuntimeFunction);
+    suspendEeSerialPutString(" start="); suspendEeSerialPutHex64(methodStart);
+    suspendEeSerialPutString(" end="); suspendEeSerialPutHex64(methodEnd);
+    suspendEeSerialPutString(" ui="); suspendEeSerialPutHex64(unwindInfo);
+    suspendEeSerialPutString(" uis="); suspendEeSerialPutHex64(unwindInfoSize);
+    suspendEeSerialPutString(" bf="); suspendEeSerialPutHex64(blockFlags);
+    suspendEeSerialPutString(" base="); suspendEeSerialPutHex64(baseAddress);
+    suspendEeSerialPutString(" sbr="); suspendEeSerialPutHex64(stackBasedRegister);
+    suspendEeSerialPutString(" off="); suspendEeSerialPutHex64(slotOffset);
+    suspendEeSerialPutString(" slot="); suspendEeSerialPutHex64(slotAddress);
+    suspendEeSerialPutString(" val="); suspendEeSerialPutHex64(slotValue);
+    suspendEeSerialPutString(" rbx="); suspendEeSerialPutHex64(inputRbx);
+    suspendEeSerialPutString(" rsi="); suspendEeSerialPutHex64(inputRsi);
+    suspendEeSerialPutString(" rdi="); suspendEeSerialPutHex64(inputRdi);
+    suspendEeSerialPutString(" r12="); suspendEeSerialPutHex64(inputR12);
+    suspendEeSerialPutString(" r13="); suspendEeSerialPutHex64(inputR13);
+    suspendEeSerialPutString(" r14="); suspendEeSerialPutHex64(inputR14);
+    suspendEeSerialPutString(" r15="); suspendEeSerialPutHex64(inputR15);
+    suspendEeSerialPutString(" prev="); suspendEeSerialPutHex64(previousTransitionFrame);
+    suspendEeSerialPutString(" marker=C011EC45-UNWIND\n");
+}
+#endif
+
 static void c011ec44ThreadSlots(
     uintptr_t threadAddress,
     uintptr_t* live,
@@ -5469,6 +5710,9 @@ static void c011ec44CaptureFrame(
         sourceSlotOffset, sourceSlotAddress, sourceSlotValue, live, deferred,
         cached, threadFlags, allocationContext, codeManager, methodInfo,
         methodInfoValid, suspendState, emit);
+#if defined(GUIDEXOS_NATIVEAOT_C011EC45_PROVENANCE)
+    c011ec45CaptureFrame(kind, frameAddress);
+#endif
 }
 
 static void c011ec44CaptureIterator(
@@ -5566,6 +5810,25 @@ extern "C" void __cdecl guideXosNativeAotC011EC44ReverseSlotLoaded(
     (void)inputSp;
     (void)inputFp;
 }
+#if defined(GUIDEXOS_NATIVEAOT_C011EC45_PROVENANCE)
+extern "C" void __cdecl guideXosNativeAotC011EC45UnwindObserved(
+    uintptr_t methodInfo, uintptr_t inputPc, uintptr_t inputSp,
+    uintptr_t inputFp, uintptr_t inputRbx, uintptr_t inputRsi,
+    uintptr_t inputRdi, uintptr_t inputR12, uintptr_t inputR13,
+    uintptr_t inputR14, uintptr_t inputR15, uintptr_t runtimeFunction,
+    uintptr_t mainRuntimeFunction, uintptr_t methodStart, uintptr_t methodEnd,
+    uintptr_t unwindInfo, uintptr_t unwindInfoSize, uintptr_t blockFlags,
+    uintptr_t slotOffset, uintptr_t baseAddress, uintptr_t slotAddress,
+    uintptr_t slotValue, uintptr_t previousTransitionFrame,
+    uintptr_t stackBasedRegister) {
+    c011ec45CaptureUnwind(
+        methodInfo, inputPc, inputSp, inputFp, inputRbx, inputRsi, inputRdi,
+        inputR12, inputR13, inputR14, inputR15, runtimeFunction,
+        mainRuntimeFunction, methodStart, methodEnd, unwindInfo, unwindInfoSize,
+        blockFlags, slotOffset, baseAddress, slotAddress, slotValue,
+        previousTransitionFrame, stackBasedRegister);
+}
+#endif
 #endif // GUIDEXOS_NATIVEAOT_C011EC44_PROVENANCE
 
 #if defined(GUIDEXOS_NATIVEAOT_C011EC23_NATIVE_UNWIND)

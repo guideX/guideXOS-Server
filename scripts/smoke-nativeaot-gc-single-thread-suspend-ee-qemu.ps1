@@ -4,7 +4,7 @@ param(
     [int]$TimeoutSeconds = 90,
     [int]$FreshBootCount = 3,
     [switch]$SkipManagedBuild,
-    [ValidateSet("single-thread-suspend-ee", "allocation-context-fixup-root-boundary", "first-per-thread-root-provider", "first-root-candidate-load", "first-non-null-root-callback-boundary", "first-root-callback-entry", "first-root-membership-classification", "first-root-heap-resolution", "first-root-condemned-generation-decision", "first-root-pre-mark-boundary", "first-root-first-mark-mutation", "first-root-post-queue-mark-decision", "first-root-first-non-null-old-o", "next-genuine-root-provider", "stack-provider-transition-failfast", "stack-provider-code-manager-registration", "stack-provider-transition-frame-control-pc", "stack-provider-unwind-gc-info", "stack-provider-unwind-caller-frame", "stack-provider-native-transition-continuation", "stack-provider-native-caller-provenance", "stack-provider-native-kernel-entry-boundary", "stack-provider-native-kernel-stack-completion", "post-root-queue-mark-processing", "mark-queue-closure", "post-mark-short-weak-handle", "short-weak-handle-operation", "short-weak-live-handle", "short-weak-dead-handle", "short-weak-lifetime-transition", "relocation-root-update", "relocated-handle-update", "lifetime-transition-complete", "second-collection-completion", "dead-object-reclamation", "collection-plan-mode-provenance-c37", "collection-plan-mode-provenance-c38", "compaction-reclamation", "post-gc-allocator-provenance", "post-gc-reclaimed-gen1-lifecycle", "malformed-transition-frame-provenance")]
+    [ValidateSet("single-thread-suspend-ee", "allocation-context-fixup-root-boundary", "first-per-thread-root-provider", "first-root-candidate-load", "first-non-null-root-callback-boundary", "first-root-callback-entry", "first-root-membership-classification", "first-root-heap-resolution", "first-root-condemned-generation-decision", "first-root-pre-mark-boundary", "first-root-first-mark-mutation", "first-root-post-queue-mark-decision", "first-root-first-non-null-old-o", "next-genuine-root-provider", "stack-provider-transition-failfast", "stack-provider-code-manager-registration", "stack-provider-transition-frame-control-pc", "stack-provider-unwind-gc-info", "stack-provider-unwind-caller-frame", "stack-provider-native-transition-continuation", "stack-provider-native-caller-provenance", "stack-provider-native-kernel-entry-boundary", "stack-provider-native-kernel-stack-completion", "post-root-queue-mark-processing", "mark-queue-closure", "post-mark-short-weak-handle", "short-weak-handle-operation", "short-weak-live-handle", "short-weak-dead-handle", "short-weak-lifetime-transition", "relocation-root-update", "relocated-handle-update", "lifetime-transition-complete", "second-collection-completion", "dead-object-reclamation", "collection-plan-mode-provenance-c37", "collection-plan-mode-provenance-c38", "compaction-reclamation", "post-gc-allocator-provenance", "post-gc-reclaimed-gen1-lifecycle", "malformed-transition-frame-provenance", "reverse-pinvoke-slot-provenance")]
     [string]$ProofMode = "single-thread-suspend-ee"
 )
 
@@ -79,6 +79,8 @@ if ([string]::IsNullOrWhiteSpace($EvidenceRoot)) {
         Join-Path $root "out\dotnet\c011ec42-reclaimed-gen1-lifecycle"
     } elseif ($ProofMode -eq "malformed-transition-frame-provenance") {
         Join-Path $root "out\dotnet\c011ec44-transition-frame-provenance"
+    } elseif ($ProofMode -eq "reverse-pinvoke-slot-provenance") {
+        Join-Path $root "out\dotnet\c011ec45-reverse-pinvoke-slot-provenance"
     } elseif ($ProofMode -eq "post-mark-short-weak-handle") {
         Join-Path $root "out\dotnet\c011ec29-post-mark-short-weak-handle"
     } elseif ($ProofMode -eq "first-root-post-queue-mark-decision") {
@@ -118,11 +120,12 @@ $isCodeManagerRegistration = $ProofMode -eq "stack-provider-code-manager-registr
 $isTransitionFrameControlPc = $ProofMode -eq "stack-provider-transition-frame-control-pc"
 $isC011EC36 = $ProofMode -eq "lifetime-transition-complete"
 $isC011EC38 = $ProofMode -eq "dead-object-reclamation"
-$isC011EC44 = $ProofMode -eq "malformed-transition-frame-provenance"
-$isC011EC42 = $ProofMode -in @("post-gc-reclaimed-gen1-lifecycle", "malformed-transition-frame-provenance")
-$isC011EC41 = $ProofMode -in @("post-gc-allocator-provenance", "post-gc-reclaimed-gen1-lifecycle", "malformed-transition-frame-provenance")
-$isC011EC40 = $ProofMode -in @("compaction-reclamation", "post-gc-allocator-provenance", "post-gc-reclaimed-gen1-lifecycle", "malformed-transition-frame-provenance")
-$isC011EC39 = $ProofMode -in @("collection-plan-mode-provenance-c37", "collection-plan-mode-provenance-c38", "compaction-reclamation", "post-gc-allocator-provenance", "post-gc-reclaimed-gen1-lifecycle", "malformed-transition-frame-provenance")
+$isC011EC45 = $ProofMode -eq "reverse-pinvoke-slot-provenance"
+$isC011EC44 = $ProofMode -in @("malformed-transition-frame-provenance", "reverse-pinvoke-slot-provenance")
+$isC011EC42 = $ProofMode -in @("post-gc-reclaimed-gen1-lifecycle", "malformed-transition-frame-provenance", "reverse-pinvoke-slot-provenance")
+$isC011EC41 = $ProofMode -in @("post-gc-allocator-provenance", "post-gc-reclaimed-gen1-lifecycle", "malformed-transition-frame-provenance", "reverse-pinvoke-slot-provenance")
+$isC011EC40 = $ProofMode -in @("compaction-reclamation", "post-gc-allocator-provenance", "post-gc-reclaimed-gen1-lifecycle", "malformed-transition-frame-provenance", "reverse-pinvoke-slot-provenance")
+$isC011EC39 = $ProofMode -in @("collection-plan-mode-provenance-c37", "collection-plan-mode-provenance-c38", "compaction-reclamation", "post-gc-allocator-provenance", "post-gc-reclaimed-gen1-lifecycle", "malformed-transition-frame-provenance", "reverse-pinvoke-slot-provenance")
 $isC011EC39C38Variant = $ProofMode -eq "collection-plan-mode-provenance-c38"
 $isC011EC37 = $ProofMode -in @("second-collection-completion", "dead-object-reclamation") -or $isC011EC39
 $isC011EC35 = $ProofMode -in @("relocated-handle-update", "lifetime-transition-complete", "second-collection-completion", "dead-object-reclamation")
@@ -179,6 +182,7 @@ if ($isC011EC39) {
 }
 $useStockRhpNewArrayEntry = $isTransitionFrameControlPc -or $isC011EC19
 $c011ec44Define = if ($isC011EC44) { " /DGUIDEXOS_NATIVEAOT_C011EC44_PROVENANCE" } else { "" }
+$c011ec45Define = if ($isC011EC45) { " /DGUIDEXOS_NATIVEAOT_C011EC45_PROVENANCE" } else { "" }
 $proofDefine = if ($isNextGenuineRootProvider -or $isC011EC39) {
     $minimalDefine = if ($isStackProviderTransitionFailFast) { " /DGUIDEXOS_NATIVEAOT_STACK_PROVIDER_TRANSITION_FAILFAST_MINIMAL" } else { "" }
     $codeManagerDefine = if ($isCodeManagerRegistration) { " /DGUIDEXOS_NATIVEAOT_C011EC17_CODE_MANAGER" } elseif ($useStockRhpNewArrayEntry) { " /DGUIDEXOS_NATIVEAOT_USE_STOCK_RHP_NEW_ARRAY_ENTRY /DGUIDEXOS_NATIVEAOT_C011EC18_NATIVE_RHP_NEW_ARRAY" } else { "" }
@@ -1149,6 +1153,11 @@ extern "C" __declspec(noreturn) void __cdecl guideXosNativeAotC011EC20SafeStop(u
                 $coffDeclarations += @'
 extern "C" void __cdecl guideXosNativeAotC011EC44ReverseSlotLoaded(uintptr_t methodInfo, uintptr_t inputPc, uintptr_t inputSp, uintptr_t inputFp, uintptr_t sourceBase, uintptr_t sourceSlotOffset, uintptr_t sourceSlotAddress, uintptr_t sourceSlotValue, uintptr_t blockFlags, uintptr_t stackBasedRegister);
 '@
+                if ($isC011EC45) {
+                    $coffDeclarations += @'
+extern "C" void __cdecl guideXosNativeAotC011EC45UnwindObserved(uintptr_t methodInfo, uintptr_t inputPc, uintptr_t inputSp, uintptr_t inputFp, uintptr_t inputRbx, uintptr_t inputRsi, uintptr_t inputRdi, uintptr_t inputR12, uintptr_t inputR13, uintptr_t inputR14, uintptr_t inputR15, uintptr_t runtimeFunction, uintptr_t mainRuntimeFunction, uintptr_t methodStart, uintptr_t methodEnd, uintptr_t unwindInfo, uintptr_t unwindInfoSize, uintptr_t blockFlags, uintptr_t slotOffset, uintptr_t baseAddress, uintptr_t slotAddress, uintptr_t slotValue, uintptr_t previousTransitionFrame, uintptr_t stackBasedRegister);
+'@
+                }
             }
         $coffText = $coffText.Replace(
             '#include "CoffNativeCodeManager.h"',
@@ -1365,6 +1374,33 @@ extern "C" void __cdecl guideXosNativeAotC011EC44ReverseSlotLoaded(uintptr_t met
             reinterpret_cast<uintptr_t>(*ppPreviousTransitionFrame),
             static_cast<uintptr_t>(unwindBlockFlags),
             static_cast<uintptr_t>(stackBasedRegister));
+#if defined(GUIDEXOS_NATIVEAOT_C011EC45_PROVENANCE)
+        guideXosNativeAotC011EC45UnwindObserved(
+            reinterpret_cast<uintptr_t>(pMethodInfo),
+            static_cast<uintptr_t>(pRegisterSet->IP),
+            static_cast<uintptr_t>(pRegisterSet->GetSP()),
+            static_cast<uintptr_t>(pRegisterSet->GetFP()),
+            pRegisterSet->pRbx != NULL ? static_cast<uintptr_t>(*pRegisterSet->pRbx) : 0u,
+            pRegisterSet->pRsi != NULL ? static_cast<uintptr_t>(*pRegisterSet->pRsi) : 0u,
+            pRegisterSet->pRdi != NULL ? static_cast<uintptr_t>(*pRegisterSet->pRdi) : 0u,
+            pRegisterSet->pR12 != NULL ? static_cast<uintptr_t>(*pRegisterSet->pR12) : 0u,
+            pRegisterSet->pR13 != NULL ? static_cast<uintptr_t>(*pRegisterSet->pR13) : 0u,
+            pRegisterSet->pR14 != NULL ? static_cast<uintptr_t>(*pRegisterSet->pR14) : 0u,
+            pRegisterSet->pR15 != NULL ? static_cast<uintptr_t>(*pRegisterSet->pR15) : 0u,
+            reinterpret_cast<uintptr_t>(pNativeMethodInfo->runtimeFunction),
+            reinterpret_cast<uintptr_t>(pNativeMethodInfo->mainRuntimeFunction),
+            static_cast<uintptr_t>(m_moduleBase + pNativeMethodInfo->runtimeFunction->BeginAddress),
+            static_cast<uintptr_t>(m_moduleBase + pNativeMethodInfo->runtimeFunction->EndAddress),
+            reinterpret_cast<uintptr_t>(pUnwindDataBlob),
+            static_cast<uintptr_t>(unwindDataBlobSize),
+            static_cast<uintptr_t>(unwindBlockFlags),
+            static_cast<uintptr_t>(slot),
+            static_cast<uintptr_t>(basePointer),
+            static_cast<uintptr_t>(basePointer + slot),
+            reinterpret_cast<uintptr_t>(*ppPreviousTransitionFrame),
+            reinterpret_cast<uintptr_t>(*ppPreviousTransitionFrame),
+            static_cast<uintptr_t>(stackBasedRegister));
+#endif
 '@
                 if (-not $coffText.Contains($coffReverseSlotNeedle)) {
                     throw "C011EC44 CoffNativeCodeManager reverse-P/Invoke slot load was not found."
@@ -4156,7 +4192,7 @@ static void EnumGcRefsCallback(void* hCallback, PTR_PTR_VOID pObject, uint32_t f
 setlocal
 call "$vsBat" >nul
 if errorlevel 1 exit /b %errorlevel%
-cl.exe /nologo /std:c++17 /TP /c /GS- /GR- /EHs-c- /Zl /Oi /O2 /Brepro /DWIN32 /D_WIN32 /D_WIN64 /DHOST_AMD64 /DTARGET_AMD64 /DHOST_64BIT /DTARGET_64BIT /DHOST_WINDOWS /DTARGET_WINDOWS /DNATIVEAOT /DFEATURE_NATIVEAOT /DGUIDEXOS_NATIVEAOT_MANAGED_ALLOCATION /DGUIDEXOS_NATIVEAOT_REAL_GC_ALLOCATION /DGUIDEXOS_NATIVEAOT_SEGMENT_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_COLLECTION_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_SINGLE_THREAD_SUSPEND_EE_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_COLLECTION_BOUNDARY_ARRAY_LENGTH=4096 /DGUIDEXOS_NATIVEAOT_FIRST_COLLECTION_BOUNDARY_HARD_LIMIT=256$c011ec44Define /I"$nativeAotRoot\Runtime" /I"$nativeAotRoot\Runtime\inc" /I"$nativeAotRoot\Runtime\windows" /I"$sourceRoot" /I"$palSourceRoot" /I"$sourceRoot\native" /I"$sourceRoot\gc" /I"$sourceRoot\gc\env" /I"$sourceRoot\pal\src\include" /Fo:"$platformObj" "$platformSource"
+cl.exe /nologo /std:c++17 /TP /c /GS- /GR- /EHs-c- /Zl /Oi /O2 /Brepro /DWIN32 /D_WIN32 /D_WIN64 /DHOST_AMD64 /DTARGET_AMD64 /DHOST_64BIT /DTARGET_64BIT /DHOST_WINDOWS /DTARGET_WINDOWS /DNATIVEAOT /DFEATURE_NATIVEAOT /DGUIDEXOS_NATIVEAOT_MANAGED_ALLOCATION /DGUIDEXOS_NATIVEAOT_REAL_GC_ALLOCATION /DGUIDEXOS_NATIVEAOT_SEGMENT_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_COLLECTION_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_SINGLE_THREAD_SUSPEND_EE_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_COLLECTION_BOUNDARY_ARRAY_LENGTH=4096 /DGUIDEXOS_NATIVEAOT_FIRST_COLLECTION_BOUNDARY_HARD_LIMIT=256$c011ec44Define$c011ec45Define /I"$nativeAotRoot\Runtime" /I"$nativeAotRoot\Runtime\inc" /I"$nativeAotRoot\Runtime\windows" /I"$sourceRoot" /I"$palSourceRoot" /I"$sourceRoot\native" /I"$sourceRoot\gc" /I"$sourceRoot\gc\env" /I"$sourceRoot\pal\src\include" /Fo:"$platformObj" "$platformSource"
 if errorlevel 1 exit /b %errorlevel%
 cl.exe /nologo /std:c++17 /TP /c /MT /GS- /GR- /EHs-c- /Zl /Oi /O2 /Zc:inline /Brepro /I"$(Join-Path $root 'tools\dotnet\runtime-pack\src\platform')" /Fo:"$nativeUnwindPrimitiveObj" "$nativeUnwindPrimitiveSource"
 if errorlevel 1 exit /b %errorlevel%
@@ -4234,6 +4270,7 @@ exit /b 0
     }
     $c011ec18CompileBat = $null
     $c20CompileDefine = if ($isC011EC20) { " /DGUIDEXOS_NATIVEAOT_C011EC20_UNWIND" } else { "" }
+    $c45CompileDefine = if ($isC011EC45) { " /DGUIDEXOS_NATIVEAOT_C011EC45_PROVENANCE" } else { "" }
     if ($isTransitionFrameControlPc -or $isC011EC19) {
         $c011ec18CompileBat = Write-Batch "build-single-thread-suspend-ee-c011ec18-instrumentation.bat" @"
 @echo off
@@ -4244,7 +4281,7 @@ cl.exe /nologo /std:c++17 /TP /c /MT /GS- /GR- /EHs-c- /Zl /Oi /O2 /Zc:inline /B
 if errorlevel 1 exit /b %errorlevel%
 cl.exe /nologo /std:c++17 /TP /c /MT /GS- /GR- /EHs-c- /Zl /Oi /O2 /Zc:inline /Brepro /DWIN32 /D_WIN32 /D_WIN64 /DHOST_AMD64 /DTARGET_AMD64 /DTARGET_64BIT /DHOST_64BIT /DHOST_WINDOWS /DTARGET_WINDOWS /DNATIVEAOT /DFEATURE_NATIVEAOT /DFEATURE_HIJACK /DFEATURE_SUSPEND_REDIRECTION /DFEATURE_PERFTRACING /DFEATURE_BASICFREEZE /DFEATURE_CONSERVATIVE_GC /DFEATURE_CUSTOM_IMPORTS /DFEATURE_DYNAMIC_CODE /DFEATURE_CACHED_INTERFACE_DISPATCH /DVERIFY_HEAP /D_LIB /DLPVOID=void* /DGUIDEXOS_NATIVEAOT_C011EC18_NATIVE_RHP_NEW_ARRAY$(if ($isC011EC26) { ' /DGUIDEXOS_NATIVEAOT_C011EC26_STACK_COMPLETION' } else { '' }) /I"$nativeAotRoot\Runtime" /I"$nativeAotRoot\Runtime\windows" /I"$sourceRoot" /I"$sourceRoot\native" /I"$sourceRoot\gc" /I"$sourceRoot\gc\env" /I"$nativeAotRoot\Runtime\inc" /I"$nativeAotRoot\Runtime\eventpipe" /I"$(Join-Path $root 'tools\dotnet\runtime-pack\src\platform')" /I"$palSourceRoot" /FI"$sourceRoot\gc\env\common.h" /Fo:"$stackFrameIteratorObj" "$stackFrameIteratorSource"
 if errorlevel 1 exit /b %errorlevel%
-$(if ($isC011EC19) { "cl.exe /nologo /TP /c /MT /GS- /GR- /EHs-c- /Zl /Oi /O2 /Zc:inline /Brepro /DWIN32 /D_WIN32 /D_WIN64 /DHOST_AMD64 /DTARGET_AMD64 /DTARGET_64BIT /DHOST_64BIT /DHOST_WINDOWS /DTARGET_WINDOWS /DNATIVEAOT /DFEATURE_NATIVEAOT /DFEATURE_HIJACK /DFEATURE_SUSPEND_REDIRECTION /DFEATURE_PERFTRACING /DFEATURE_BASICFREEZE /DFEATURE_CONSERVATIVE_GC /DFEATURE_CUSTOM_IMPORTS /DFEATURE_DYNAMIC_CODE /DFEATURE_CACHED_INTERFACE_DISPATCH /DVERIFY_HEAP /DUSE_GC_INFO_DECODER /DGUIDEXOS_NATIVEAOT_C011EC19_UNWIND_GC_INFO$c20CompileDefine /I`"$nativeAotRoot\Runtime`" /I`"$nativeAotRoot\Runtime\windows`" /I`"$sourceRoot`" /I`"$sourceRoot\native`" /I`"$sourceRoot\gc`" /I`"$sourceRoot\gc\env`" /I`"$nativeAotRoot\Runtime\inc`" /I`"$nativeAotRoot\Runtime\eventpipe`" /I`"$(Join-Path $root 'tools\dotnet\runtime-pack\src\platform')`" /I`"$palSourceRoot`" /FI`"$sourceRoot\gc\env\common.h`" /Fo:`"$coffNativeCodeManagerObj`" `"$coffNativeCodeManagerSource`"`nif errorlevel 1 exit /b %errorlevel%" } else { "" })
+$(if ($isC011EC19) { "cl.exe /nologo /TP /c /MT /GS- /GR- /EHs-c- /Zl /Oi /O2 /Zc:inline /Brepro /DWIN32 /D_WIN32 /D_WIN64 /DHOST_AMD64 /DTARGET_AMD64 /DTARGET_64BIT /DHOST_64BIT /DHOST_WINDOWS /DTARGET_WINDOWS /DNATIVEAOT /DFEATURE_NATIVEAOT /DFEATURE_HIJACK /DFEATURE_SUSPEND_REDIRECTION /DFEATURE_PERFTRACING /DFEATURE_BASICFREEZE /DFEATURE_CONSERVATIVE_GC /DFEATURE_CUSTOM_IMPORTS /DFEATURE_DYNAMIC_CODE /DFEATURE_CACHED_INTERFACE_DISPATCH /DVERIFY_HEAP /DUSE_GC_INFO_DECODER /DGUIDEXOS_NATIVEAOT_C011EC19_UNWIND_GC_INFO$c20CompileDefine$c45CompileDefine /I`"$nativeAotRoot\Runtime`" /I`"$nativeAotRoot\Runtime\windows`" /I`"$sourceRoot`" /I`"$sourceRoot\native`" /I`"$sourceRoot\gc`" /I`"$sourceRoot\gc\env`" /I`"$nativeAotRoot\Runtime\inc`" /I`"$nativeAotRoot\Runtime\eventpipe`" /I`"$(Join-Path $root 'tools\dotnet\runtime-pack\src\platform')`" /I`"$palSourceRoot`" /FI`"$sourceRoot\gc\env\common.h`" /Fo:`"$coffNativeCodeManagerObj`" `"$coffNativeCodeManagerSource`"`nif errorlevel 1 exit /b %errorlevel%" } else { "" })
 $(if ($isC011EC21) { "cl.exe /nologo /std:c++17 /TP /c /MT /GS- /GR- /EHs-c- /Zl /Oi /O2 /Zc:inline /Brepro /DWIN32 /D_WIN32 /D_WIN64 /DHOST_AMD64 /DTARGET_AMD64 /DTARGET_64BIT /DHOST_64BIT /DHOST_WINDOWS /DTARGET_WINDOWS /I`"$(Join-Path $root 'tools\dotnet\runtime-pack\src\platform')`" /Fo:`"$platformContractC21Obj`" `"$platformContractSource`"`nif errorlevel 1 exit /b %errorlevel%" } else { "" })
 exit /b 0
 "@
@@ -4801,6 +4838,9 @@ exit /b %errorlevel%
     }
     if ($isC011EC44) {
         $requiredSymbols += @("guideXosNativeAotC011EC44AllocationCheckpoint","guideXosNativeAotC011EC44SuspendCheckpoint","guideXosNativeAotC011EC44RootSource","guideXosNativeAotC011EC44ReverseSlotLoaded")
+        if ($isC011EC45) {
+            $requiredSymbols += "guideXosNativeAotC011EC45UnwindObserved"
+        }
     }
     if ($isC011EC30) {
         $requiredSymbols += @("guideXosNativeAotC011EC30HandleScanEntered","guideXosNativeAotC011EC30HandleMapRootRead","guideXosNativeAotC011EC30BucketVisited","guideXosNativeAotC011EC30HandleTableVisited","guideXosNativeAotC011EC30SegmentVisited","guideXosNativeAotC011EC30BlockVisited","guideXosNativeAotC011EC30HandleSlotInspected","guideXosNativeAotC011EC30HandleSlotCandidate","guideXosNativeAotC011EC30LivenessCheckEntered","guideXosNativeAotC011EC30LivenessDecisionObserved","guideXosNativeAotC011EC30LivenessDecisionCompleted","guideXosNativeAotC011EC30HandleScanCompleted")
@@ -7094,6 +7134,103 @@ exit /b %errorlevel%
         Set-Content -LiteralPath $manifestPath -Value $manifestJson -Encoding ASCII
         Write-Host "C011EC11 manifest written"
         Write-Host "NativeAOT Workstation GC first-root-pre-mark-boundary experiment: PASS (Outcome A)" -ForegroundColor Green
+    } elseif ($isC011EC45) {
+        if (@($runResults).Count -ne $FreshBootCount) { throw "The C011EC45 provenance experiment produced $(@($runResults).Count) runs instead of $FreshBootCount." }
+        $c45Runs = @()
+        foreach ($run in $runResults) {
+            $c45Text = Get-Content -LiteralPath $run.serial -Raw
+            $c45Text = $c45Text -replace '\[IRQ\] dispatch irq=00\s*', ''
+            $c45Text = ($c45Text -creplace '(?<=[0-9])(?=[a-z])', ' ') -replace '\s+', ' '
+            $c45Text = $c45Text -replace '\b(c\d+)\s+(ec\d+)', '$1$2'
+            $c45Text = $c45Text -replace '\s*=\s*', '='
+            $c45Snapshots = @([regex]::Matches($c45Text, '\[nativeaot-code-manager\] C011EC45-SNAPSHOT.*?marker=C011EC45-SNAPSHOT') | ForEach-Object { $_.Value.Trim() })
+            $c45Regs = @([regex]::Matches($c45Text, '\[nativeaot-code-manager\] C011EC45-REGS.*?marker=C011EC45-REGS') | ForEach-Object { $_.Value.Trim() })
+            $c45Unwinds = @([regex]::Matches($c45Text, '\[nativeaot-code-manager\] C011EC45-UNWIND.*?marker=C011EC45-UNWIND') | ForEach-Object { $_.Value.Trim() })
+            if ($c45Text -notmatch 'marker=C011EC45-LAYOUT' -or
+                $c45Snapshots.Count -lt 4 -or $c45Regs.Count -lt 4 -or
+                $c45Unwinds.Count -lt 1 -or $c45Text -notmatch 'marker=C011EC44-DIVERGENCE' -or
+                $c45Text -notmatch '\[nativeaot-pal-qemu-test\] FAIL_FAST reason=47435354' -or
+                $c45Text -notmatch 'c18FailFastReason=0*EC1801(?:\s|$)') {
+                throw "C011EC45 did not capture complete layout/register/unwind/C18 evidence in $($run.name)."
+            }
+            $c45SnapshotByPhase = [ordered]@{}
+            foreach ($phase in 1..4) {
+                $line = $c45Snapshots | Where-Object {
+                    $phaseField = Get-MarkerField $_ 'phase'
+                    $null -ne $phaseField -and [Convert]::ToUInt64($phaseField.Substring(2), 16) -eq [uint64]$phase
+                } | Select-Object -Last 1
+                if ([string]::IsNullOrWhiteSpace($line)) { throw "C011EC45 missing snapshot phase $phase in $($run.name)." }
+                $c45SnapshotByPhase["phase$phase"] = $line
+            }
+            $unwind = $c45Unwinds | Select-Object -Last 1
+            $frame = Get-MarkerField $c45SnapshotByPhase['phase4'] 'frame'
+            $rsi = Get-MarkerField ($c45Regs | Where-Object {
+                $phaseField = Get-MarkerField $_ 'phase'
+                $null -ne $phaseField -and [Convert]::ToUInt64($phaseField.Substring(2), 16) -eq 4
+            } | Select-Object -Last 1) 'rsi'
+            $slot = Get-MarkerField $unwind 'slot'
+            $slotValue = Get-MarkerField $unwind 'val'
+            $base = Get-MarkerField $unwind 'base'
+            $offset = Get-MarkerField $unwind 'off'
+            $expectedActualAddress = '0x' + (([Convert]::ToUInt64($frame.Substring(2),16) + 0x28).ToString('X16'))
+            $methodStartForExpected = Get-MarkerField $unwind 'start'
+            $expectedUnwind = $c45Unwinds | Where-Object {
+                (Get-MarkerField $_ 'start') -eq $methodStartForExpected -and
+                (Get-MarkerField $_ 'val') -eq '0x0000000000000000' -and
+                (Get-MarkerField $_ 'slot') -ne $slot
+            } | Select-Object -Last 1
+            if ([string]::IsNullOrWhiteSpace($expectedUnwind)) {
+                throw "C011EC45 did not capture a same-row zero-valued expected ManagedMain reverse slot in $($run.name)."
+            }
+            $expectedBase = Get-MarkerField $expectedUnwind 'base'
+            $expectedSlot = Get-MarkerField $expectedUnwind 'slot'
+            $expectedOffset = Get-MarkerField $expectedUnwind 'off'
+            $expectedValue = Get-MarkerField $expectedUnwind 'val'
+            $branchB = $slot -eq $expectedActualAddress -and $slotValue -eq $rsi -and
+                $expectedSlot -ne $slot -and $expectedBase -ne $base -and
+                $expectedValue -eq '0x0000000000000000'
+            if (-not $branchB) { throw "C011EC45 could not prove the observed slot is the saved-RSI field in $($run.name)." }
+            $c45Runs += [ordered]@{
+                name=$run.name; serial=$run.serial; serialSha256=$run.serialSha256; c44=$run
+                layoutMarker=($c45Text -split '\r?\n' | Where-Object { $_ -match 'marker=C011EC45-LAYOUT' } | Select-Object -First 1)
+                snapshots=$c45SnapshotByPhase; regs=$c45Regs; unwind=$unwind
+                branch='B'; branchBProven=$true; actualSlot=$slot; actualValue=$slotValue
+                actualBase=$base; actualOffset=$offset; expectedPhysicalSlot=$expectedSlot; expectedBase=$expectedBase
+                expectedValue=$expectedValue; expectedAddress=$expectedSlot; expectedOffset=$expectedOffset
+                writeEvents=0; unexplainedWriteObserved=$false
+            }
+        }
+        $firstC45Run = $c45Runs[0]
+        $c45Unwind = $firstC45Run.unwind
+        $c45FrameCreate = $firstC45Run.snapshots['phase1']
+        $c45PreGc = $firstC45Run.snapshots['phase2']
+        $c45Suspend = $firstC45Run.snapshots['phase3']
+        $c45RootSource = $firstC45Run.snapshots['phase4']
+        $c45Reg = $firstC45Run.regs | Where-Object {
+            $phaseField = Get-MarkerField $_ 'phase'
+            $null -ne $phaseField -and [Convert]::ToUInt64($phaseField.Substring(2), 16) -eq 4
+        } | Select-Object -Last 1
+        $c45MethodStart = Get-MarkerField $c45Unwind 'start'
+        $c45MethodEnd = Get-MarkerField $c45Unwind 'end'
+        $c45RelativePc = ('0x' + (([Convert]::ToUInt64((Get-MarkerField $c45Unwind 'pc').Substring(2),16) - [Convert]::ToUInt64($c45MethodStart.Substring(2),16)).ToString('X16')))
+        $c45BranchLine = "[nativeaot-code-manager] C011EC45-BRANCH branch=B actualSlot=$($firstC45Run.actualSlot) actualValue=$($firstC45Run.actualValue) actualBase=$($firstC45Run.actualBase) expectedSlot=$($firstC45Run.expectedAddress) expectedBase=$($firstC45Run.expectedBase) expectedValue=$($firstC45Run.expectedValue) writerEvents=0 marker=C011EC45-BRANCH"
+        Set-Content -LiteralPath (Join-Path $runRoot 'c011ec45-branch.txt') -Value $c45BranchLine -Encoding ASCII
+        $manifest = [ordered]@{
+            outcome='B / exact root cause proven, repair deferred: legitimate saved RSI consumed as reverse-P/Invoke frame pointer'; successLevel=3; proofMode=$ProofMode; marker='C011EC45'; repositoryHead=$repoHead; startingCommittedHead=$startingCommittedHead; startingBranch=$startingBranch; upstream=$upstream; startingWorktreeStatus=$startingWorktreeStatus; startingDirtyState=$dirtyState
+            lockedRuntimeIdentity=[ordered]@{ nativeAot='9.0.0'; architecture='AMD64'; gc='Workstation'; gcInterfaces='5.3 / 2'; sourceCommit=$lockedCommit }
+            layout=[ordered]@{ frameBase=(Get-MarkerField $c45RootSource 'frame'); unwindFp=(Get-MarkerField $c45Unwind 'fp'); actualSlot=$firstC45Run.actualSlot; actualOffset=$firstC45Run.actualOffset; actualMeaning='PInvokeTransitionFrame.m_PreservedRegs[1] = saved RSI'; expectedSlot=$firstC45Run.expectedAddress; expectedBase=$firstC45Run.expectedBase; expectedMeaning='ManagedMain stack local at RBP-0x70, initialized by mov [rbp-0x70],rax'; expectedOffset=$firstC45Run.expectedOffset; expectedValue=$firstC45Run.expectedValue; frameOffset='0x28'; frameSize='0x68'; savedRegisters='RBX +0x20, RSI +0x28, RDI +0x30, R12 +0x38, R13 +0x40, R14 +0x48, R15 +0x50, RSP +0x58, RAX +0x60' }
+            unwind=[ordered]@{ methodInfo=(Get-MarkerField $c45Unwind 'method'); methodStart=$c45MethodStart; methodEnd=$c45MethodEnd; relativePc=$c45RelativePc; runtimeFunction=(Get-MarkerField $c45Unwind 'rf'); mainRuntimeFunction=(Get-MarkerField $c45Unwind 'mainrf'); unwindInfo=(Get-MarkerField $c45Unwind 'ui'); unwindInfoSize=(Get-MarkerField $c45Unwind 'uis'); blockFlags=(Get-MarkerField $c45Unwind 'bf'); base=(Get-MarkerField $c45Unwind 'base'); stackBaseRegister=(Get-MarkerField $c45Unwind 'sbr'); offset=(Get-MarkerField $c45Unwind 'off') }
+            provenance=[ordered]@{ firstWriter='locked nativeaot/Runtime/amd64/AsmMacros.inc PUSH_COOP_PINVOKE_FRAME'; instruction='push_nonvol_reg rsi'; destination='[frame+0x28]'; source='entry RSI before RhpNewArrayRare mov rsi,rcx'; legitimateLaterWriters='none observed across frame-create/pre-GC/suspend/root-source snapshots'; unexplainedWriteObserved=$false; writeEvents=0; branch=$firstC45Run.branch; rootCause='Code 4 — Wrong unwind base: the correct ManagedMain RBP-0x70 row is read with the prior Run RBP, shifting the read into the live PInvokeTransitionFrame saved-RSI slot' }
+            values=[ordered]@{ frameCreate=$c45FrameCreate; preGc=$c45PreGc; suspend=$c45Suspend; rootSource=$c45RootSource; unwind=$c45Unwind; regs=$c45Reg }
+            c40Correlation=[ordered]@{ neighboringLiveDestinationEnd=(Get-MarkerField (Get-Content -LiteralPath $firstC45Run.serial -Raw) 'neighborDestinationEnd'); targetEEType=(Get-MarkerField (Get-Content -LiteralPath $firstC45Run.serial -Raw) 'targetEEType'); savedRsi=(Get-MarkerField $c45Reg 'rsi') }
+            C18=[ordered]@{ unchanged=$true; malformedStateFailsClosed=$true; validStateHistoricalResult='C18 prior valid frame passed manager lookup and FindMethodInfo'; rootScanCompletion='not reached'; invariantFailures='0x00000000'; sensitiveDiagnosticAllocations='0x00000000'; failFast='PAL reason 0x47435354 with C18 reason 0xEC1801' }
+            qemu=[ordered]@{ version=$qemuVersion; runCount=$FreshBootCount; proofKernelSha256=$specializedKernelHash; serialSha256=@($c45Runs | ForEach-Object { $_.serialSha256 }); evidenceRoot=$runRoot; exactCommandLog=(Join-Path $runRoot 'commands.txt'); runs=$c45Runs }
+            regressions=[ordered]@{ C18='PASS'; C37='retained predecessor chronology'; C39='retained planner/compaction chronology'; C40='retained reclamation chronology'; C41='retained allocator provenance chronology'; C42='retained natural later-collection entry'; C43='PASS gate and malformed-state provenance retained'; C44='PASS first divergence retained'; chronology='PASS C19-C44 source guards retained'; converter='PASS PE-to-ELF conversion'; linkerSourceTables='PASS existing guards'; MASM='not applicable; no assembly source changed'; ordinaryBoot='PASS after finally restoration'; diffCheck='PASS git diff --check' }
+            ordinaryRestoration=[ordered]@{ expectedKernelSha256=$normalKernelHash; expectedEspSha256=$normalKernelHash; restoredByFinally=$true; kernelSha256=(Hash-File $kernelPath); espSha256=(Hash-File $espKernelPath) }
+            documentation='docs/dotnet/NATIVEAOT_WORKSTATION_GC_REVERSE_PINVOKE_SLOT_PROVENANCE.md'; evidenceRoot=$runRoot; manifestPath=$manifestPath; branchMarker=$c45BranchLine
+        }
+        $manifest | ConvertTo-Json -Depth 100 | Set-Content -LiteralPath $manifestPath -Encoding ASCII
+        Write-Host "C011EC45 reverse-P/Invoke slot provenance: Branch B / Level 3" -ForegroundColor Yellow
     } elseif ($isC011EC44) {
         if (@($runResults).Count -ne $FreshBootCount) { throw "The C011EC44 provenance experiment produced $(@($runResults).Count) runs instead of $FreshBootCount." }
         $firstC44Run = $runResults[0]
