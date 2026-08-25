@@ -194,7 +194,7 @@ $env:GXOS_NAVIGATOR_TLS_DIAGNOSTICS = "1"
 if ($ReuseActiveBuild) {
     Write-Host "Reusing the already-built active Navigator HTTP/PNG smoke kernel."
 } else {
-    Invoke-KernelBuildForSmoke "-DGXOS_NAVIGATOR_HTTP_SMOKE_ACTIVE -DGXOS_NAVIGATOR_TLS_CAPABILITY_CONTRACT_NEGATIVE_TEST_ACTIVE"
+    Invoke-KernelBuildForSmoke "-DGXOS_NAVIGATOR_HTTP_SMOKE_ACTIVE -DGXOS_NAVIGATOR_TLS_CAPABILITY_CONTRACT_NEGATIVE_TEST_ACTIVE -DGXOS_KERNEL_TEXT_WRITE_GUARD"
 }
 $env:GXOS_NAVIGATOR_SMOKE_CA_FIXTURE = $oldSmokeCaFixture
 $activeSmokeBuild = -not $ReuseActiveBuild

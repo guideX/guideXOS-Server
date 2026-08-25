@@ -18,8 +18,10 @@ extern "C" char __text_end[] __attribute__((weak));
 
 namespace {
 
+#if defined(GXOS_KERNEL_TEXT_WRITE_GUARD)
 const char* g_kernelTextGuardScenario = "boot";
 const char* g_kernelTextGuardStage = "unreported";
+#endif
 
 static uintptr_t kernel_text_start()
 {
@@ -45,6 +47,8 @@ static uintptr_t current_stack_pointer()
     return 0;
 #endif
 }
+
+#if defined(GXOS_KERNEL_TEXT_WRITE_GUARD)
 
 static bool kernel_text_range_overlaps(uintptr_t destination, size_t length,
                                        uintptr_t textStart, uintptr_t textEnd,
@@ -136,6 +140,8 @@ static void guard_kernel_text_write(const char* primitive, void* destination,
     halt_after_kernel_text_guard();
 }
 
+#endif // GXOS_KERNEL_TEXT_WRITE_GUARD
+
 } // namespace
 
 // Avoid GCC generating libstdc++ calls
@@ -145,8 +151,13 @@ extern "C" {
 
 void gxos_kernel_text_guard_set_context(const char* scenario, const char* stage)
 {
+#if defined(GXOS_KERNEL_TEXT_WRITE_GUARD)
     g_kernelTextGuardScenario = scenario ? scenario : "unknown";
     g_kernelTextGuardStage = stage ? stage : "unknown";
+#else
+    (void)scenario;
+    (void)stage;
+#endif
 }
 
 // ============================================================================
@@ -207,10 +218,12 @@ void __cxa_guard_abort(uint64_t*)
 
 void* memcpy(void* dest, const void* src, size_t n)
 {
+#if defined(GXOS_KERNEL_TEXT_WRITE_GUARD)
     guard_kernel_text_write("memcpy", dest, src, n, 0,
                             reinterpret_cast<uintptr_t>(__builtin_return_address(0)),
                             current_stack_pointer(),
                             reinterpret_cast<uintptr_t>(__builtin_frame_address(0)));
+#endif
     uint8_t* d = static_cast<uint8_t*>(dest);
     const uint8_t* s = static_cast<const uint8_t*>(src);
     for (size_t i = 0; i < n; ++i) {
@@ -221,10 +234,12 @@ void* memcpy(void* dest, const void* src, size_t n)
 
 void* memset(void* dest, int c, size_t n)
 {
+#if defined(GXOS_KERNEL_TEXT_WRITE_GUARD)
     guard_kernel_text_write("memset", dest, nullptr, n, static_cast<uint8_t>(c),
                             reinterpret_cast<uintptr_t>(__builtin_return_address(0)),
                             current_stack_pointer(),
                             reinterpret_cast<uintptr_t>(__builtin_frame_address(0)));
+#endif
     uint8_t* d = static_cast<uint8_t*>(dest);
     for (size_t i = 0; i < n; ++i) {
         d[i] = static_cast<uint8_t>(c);
@@ -234,10 +249,12 @@ void* memset(void* dest, int c, size_t n)
 
 void* memmove(void* dest, const void* src, size_t n)
 {
+#if defined(GXOS_KERNEL_TEXT_WRITE_GUARD)
     guard_kernel_text_write("memmove", dest, src, n, 0,
                             reinterpret_cast<uintptr_t>(__builtin_return_address(0)),
                             current_stack_pointer(),
                             reinterpret_cast<uintptr_t>(__builtin_frame_address(0)));
+#endif
     uint8_t* d = static_cast<uint8_t*>(dest);
     const uint8_t* s = static_cast<const uint8_t*>(src);
     
