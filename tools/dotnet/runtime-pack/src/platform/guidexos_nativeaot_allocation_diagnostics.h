@@ -948,6 +948,86 @@ typedef struct guidexos_nativeaot_c011ec42_lifecycle_record {
         GUIDEXOS_NATIVEAOT_C011EC42_MAX_ALLOCATIONS];
 } guidexos_nativeaot_c011ec42_lifecycle_record;
 
+enum {
+    GUIDEXOS_NATIVEAOT_C011EC44_MAX_CHECKPOINTS = 8u,
+    GUIDEXOS_NATIVEAOT_C011EC44_FRAME_CREATE = 1u,
+    GUIDEXOS_NATIVEAOT_C011EC44_PRE_GC = 2u,
+    GUIDEXOS_NATIVEAOT_C011EC44_SUSPEND = 3u,
+    GUIDEXOS_NATIVEAOT_C011EC44_ROOT_SOURCE = 4u,
+    GUIDEXOS_NATIVEAOT_C011EC44_ITERATOR = 5u,
+    GUIDEXOS_NATIVEAOT_C011EC44_DIVERGENCE = 6u
+};
+
+/* C011EC44 bounded transition-frame provenance.  Each checkpoint is a
+ * scalar snapshot; no frame is retained as a runtime root and no diagnostic
+ * path writes through any captured address.  The reverse-slot fields identify
+ * the exact producer load used by CoffNativeCodeManager. */
+typedef struct guidexos_nativeaot_c011ec44_checkpoint {
+    uint32_t observed;
+    uint32_t kind;
+    uint32_t classification; /* 0 unavailable, 1 valid, 2 invalid, 3 not authoritative */
+    uint32_t gcOrdinal;
+    uint32_t gcState;
+    uint32_t controlPcManaged;
+    uint32_t codeManagerResolved;
+    uint32_t methodInfoValid;
+    uint32_t suspendState;
+    uint32_t reserved[3];
+
+    uintptr_t frameAddress;
+    uintptr_t controlPc;
+    uintptr_t sp;
+    uintptr_t fp;
+    uintptr_t flags;
+    uintptr_t threadAddress;
+    uintptr_t sourcePointer;
+    uintptr_t transitionFramePointer;
+    uintptr_t savedControlPc;
+    uintptr_t sourceBase;
+    uintptr_t sourceSlotOffset;
+    uintptr_t sourceSlotAddress;
+    uintptr_t sourceSlotValue;
+    uintptr_t liveTransitionFrame;
+    uintptr_t deferredTransitionFrame;
+    uintptr_t cachedTransitionFrame;
+    uintptr_t threadStateFlags;
+    uintptr_t allocationContext;
+    uintptr_t codeManager;
+    uintptr_t methodInfo;
+} guidexos_nativeaot_c011ec44_checkpoint;
+
+typedef struct guidexos_nativeaot_c011ec44_provenance_record {
+    uint32_t checkpointCount;
+    uint32_t frameCreateCount;
+    uint32_t preGcCount;
+    uint32_t suspendCount;
+    uint32_t rootSourceCount;
+    uint32_t iteratorCount;
+    uint32_t divergenceCount;
+    uint32_t firstInvalidKind;
+    uint32_t firstValidKind;
+    uint32_t writeProvenanceAvailable;
+    uint32_t liveFrameOverwriteProven;
+    uint32_t staleFrameProven;
+    uint32_t wrongFrameProven;
+    uint32_t abiLayoutMismatchProven;
+    uint32_t invariantFailures;
+    uint32_t sensitiveDiagnosticAllocations;
+
+    uintptr_t neighborDestinationEnd;
+    uintptr_t firstFrameAddress;
+    uintptr_t firstControlPc;
+    uintptr_t firstSourcePointer;
+    uintptr_t firstDivergenceSourceSlotAddress;
+    uintptr_t firstDivergenceSourceSlotValue;
+    uintptr_t firstDivergenceFrameAddress;
+    uintptr_t firstDivergenceControlPc;
+    uintptr_t firstDivergenceCodeManager;
+
+    guidexos_nativeaot_c011ec44_checkpoint checkpoints[
+        GUIDEXOS_NATIVEAOT_C011EC44_MAX_CHECKPOINTS];
+} guidexos_nativeaot_c011ec44_provenance_record;
+
 typedef struct guidexos_nativeaot_allocation_diagnostics {
     uint32_t schemaVersion;
     uint32_t heapInitialized;
@@ -2801,6 +2881,8 @@ typedef struct guidexos_nativeaot_allocation_diagnostics {
     guidexos_nativeaot_c011ec41_provenance_record c011ec41Provenance;
     /* C011EC42 bounded natural post-Collection-3 lifecycle evidence. */
     guidexos_nativeaot_c011ec42_lifecycle_record c011ec42Lifecycle;
+    /* C011EC44 malformed transition-frame provenance. */
+    guidexos_nativeaot_c011ec44_provenance_record c011ec44Provenance;
 } guidexos_nativeaot_allocation_diagnostics;
 
 enum {

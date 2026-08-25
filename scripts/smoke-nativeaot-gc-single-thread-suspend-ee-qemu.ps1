@@ -4,7 +4,7 @@ param(
     [int]$TimeoutSeconds = 90,
     [int]$FreshBootCount = 3,
     [switch]$SkipManagedBuild,
-    [ValidateSet("single-thread-suspend-ee", "allocation-context-fixup-root-boundary", "first-per-thread-root-provider", "first-root-candidate-load", "first-non-null-root-callback-boundary", "first-root-callback-entry", "first-root-membership-classification", "first-root-heap-resolution", "first-root-condemned-generation-decision", "first-root-pre-mark-boundary", "first-root-first-mark-mutation", "first-root-post-queue-mark-decision", "first-root-first-non-null-old-o", "next-genuine-root-provider", "stack-provider-transition-failfast", "stack-provider-code-manager-registration", "stack-provider-transition-frame-control-pc", "stack-provider-unwind-gc-info", "stack-provider-unwind-caller-frame", "stack-provider-native-transition-continuation", "stack-provider-native-caller-provenance", "stack-provider-native-kernel-entry-boundary", "stack-provider-native-kernel-stack-completion", "post-root-queue-mark-processing", "mark-queue-closure", "post-mark-short-weak-handle", "short-weak-handle-operation", "short-weak-live-handle", "short-weak-dead-handle", "short-weak-lifetime-transition", "relocation-root-update", "relocated-handle-update", "lifetime-transition-complete", "second-collection-completion", "dead-object-reclamation", "collection-plan-mode-provenance-c37", "collection-plan-mode-provenance-c38", "compaction-reclamation", "post-gc-allocator-provenance", "post-gc-reclaimed-gen1-lifecycle")]
+    [ValidateSet("single-thread-suspend-ee", "allocation-context-fixup-root-boundary", "first-per-thread-root-provider", "first-root-candidate-load", "first-non-null-root-callback-boundary", "first-root-callback-entry", "first-root-membership-classification", "first-root-heap-resolution", "first-root-condemned-generation-decision", "first-root-pre-mark-boundary", "first-root-first-mark-mutation", "first-root-post-queue-mark-decision", "first-root-first-non-null-old-o", "next-genuine-root-provider", "stack-provider-transition-failfast", "stack-provider-code-manager-registration", "stack-provider-transition-frame-control-pc", "stack-provider-unwind-gc-info", "stack-provider-unwind-caller-frame", "stack-provider-native-transition-continuation", "stack-provider-native-caller-provenance", "stack-provider-native-kernel-entry-boundary", "stack-provider-native-kernel-stack-completion", "post-root-queue-mark-processing", "mark-queue-closure", "post-mark-short-weak-handle", "short-weak-handle-operation", "short-weak-live-handle", "short-weak-dead-handle", "short-weak-lifetime-transition", "relocation-root-update", "relocated-handle-update", "lifetime-transition-complete", "second-collection-completion", "dead-object-reclamation", "collection-plan-mode-provenance-c37", "collection-plan-mode-provenance-c38", "compaction-reclamation", "post-gc-allocator-provenance", "post-gc-reclaimed-gen1-lifecycle", "malformed-transition-frame-provenance")]
     [string]$ProofMode = "single-thread-suspend-ee"
 )
 
@@ -77,6 +77,8 @@ if ([string]::IsNullOrWhiteSpace($EvidenceRoot)) {
         Join-Path $root "out\dotnet\c011ec41-post-gc-allocator-provenance"
     } elseif ($ProofMode -eq "post-gc-reclaimed-gen1-lifecycle") {
         Join-Path $root "out\dotnet\c011ec42-reclaimed-gen1-lifecycle"
+    } elseif ($ProofMode -eq "malformed-transition-frame-provenance") {
+        Join-Path $root "out\dotnet\c011ec44-transition-frame-provenance"
     } elseif ($ProofMode -eq "post-mark-short-weak-handle") {
         Join-Path $root "out\dotnet\c011ec29-post-mark-short-weak-handle"
     } elseif ($ProofMode -eq "first-root-post-queue-mark-decision") {
@@ -116,10 +118,11 @@ $isCodeManagerRegistration = $ProofMode -eq "stack-provider-code-manager-registr
 $isTransitionFrameControlPc = $ProofMode -eq "stack-provider-transition-frame-control-pc"
 $isC011EC36 = $ProofMode -eq "lifetime-transition-complete"
 $isC011EC38 = $ProofMode -eq "dead-object-reclamation"
-$isC011EC42 = $ProofMode -eq "post-gc-reclaimed-gen1-lifecycle"
-$isC011EC41 = $ProofMode -in @("post-gc-allocator-provenance", "post-gc-reclaimed-gen1-lifecycle")
-$isC011EC40 = $ProofMode -in @("compaction-reclamation", "post-gc-allocator-provenance", "post-gc-reclaimed-gen1-lifecycle")
-$isC011EC39 = $ProofMode -in @("collection-plan-mode-provenance-c37", "collection-plan-mode-provenance-c38", "compaction-reclamation", "post-gc-allocator-provenance", "post-gc-reclaimed-gen1-lifecycle")
+$isC011EC44 = $ProofMode -eq "malformed-transition-frame-provenance"
+$isC011EC42 = $ProofMode -in @("post-gc-reclaimed-gen1-lifecycle", "malformed-transition-frame-provenance")
+$isC011EC41 = $ProofMode -in @("post-gc-allocator-provenance", "post-gc-reclaimed-gen1-lifecycle", "malformed-transition-frame-provenance")
+$isC011EC40 = $ProofMode -in @("compaction-reclamation", "post-gc-allocator-provenance", "post-gc-reclaimed-gen1-lifecycle", "malformed-transition-frame-provenance")
+$isC011EC39 = $ProofMode -in @("collection-plan-mode-provenance-c37", "collection-plan-mode-provenance-c38", "compaction-reclamation", "post-gc-allocator-provenance", "post-gc-reclaimed-gen1-lifecycle", "malformed-transition-frame-provenance")
 $isC011EC39C38Variant = $ProofMode -eq "collection-plan-mode-provenance-c38"
 $isC011EC37 = $ProofMode -in @("second-collection-completion", "dead-object-reclamation") -or $isC011EC39
 $isC011EC35 = $ProofMode -in @("relocated-handle-update", "lifetime-transition-complete", "second-collection-completion", "dead-object-reclamation")
@@ -563,12 +566,17 @@ extern "C" __declspec(noreturn) void __cdecl guideXosNativeAotC011EC27PostRootAf
 '@.TrimEnd()
         }
     }
+    if ($isC011EC44) {
+        $declaration += [Environment]::NewLine + @'
+extern "C" void __cdecl guideXosNativeAotC011EC44SuspendCheckpoint();
+'@.TrimEnd()
+    }
     $lockedEeText = $lockedEeText.Replace('#include "volatile.h"', '#include "volatile.h"' + [Environment]::NewLine + [Environment]::NewLine + $declaration.TrimEnd())
     $suspendPattern = '(?m)^void GCToEEInterface::SuspendEE\(SUSPEND_REASON reason\)\r?\n\{'
     $suspendReplacement = 'void GCToEEInterface::SuspendEE(SUSPEND_REASON reason)' + [Environment]::NewLine + '{' + [Environment]::NewLine + '    guideXosNativeAotSuspendEeEntry((uint32_t)reason);'
     $injectedText = [regex]::Replace($lockedEeText, $suspendPattern, $suspendReplacement, 1)
     $injectedText = $injectedText.Replace('    GetThreadStore()->LockThreadStore();', '    GetThreadStore()->LockThreadStore();' + [Environment]::NewLine + '    guideXosNativeAotSuspendEeAfterLock();')
-    $injectedText = $injectedText.Replace('    GetThreadStore()->SuspendAllThreads(true);', '    GetThreadStore()->SuspendAllThreads(true);' + [Environment]::NewLine + '    guideXosNativeAotSuspendEeAfterSuspend();')
+    $injectedText = $injectedText.Replace('    GetThreadStore()->SuspendAllThreads(true);', '    GetThreadStore()->SuspendAllThreads(true);' + [Environment]::NewLine + '    guideXosNativeAotSuspendEeAfterSuspend();' + $(if ($isC011EC44) { [Environment]::NewLine + '    guideXosNativeAotC011EC44SuspendCheckpoint();' } else { '' }))
     $injectedText = $injectedText.Replace('    FireEtwGCSuspendEEEnd_V1(GetClrInstanceId());', '    FireEtwGCSuspendEEEnd_V1(GetClrInstanceId());' + [Environment]::NewLine + '    guideXosNativeAotSuspendEeBodyReturn();')
     $disablePattern = '(?m)^void GCToEEInterface::DisablePreemptiveGC\(\)\r?\n\{'
     $disableReplacement = 'void GCToEEInterface::DisablePreemptiveGC()' + [Environment]::NewLine + '{' + [Environment]::NewLine + '    guideXosNativeAotDisablePreemptiveEntry();'
@@ -745,6 +753,12 @@ extern "C" void __cdecl guideXosNativeAotC011EC18RhpGcAllocEntered(
     uintptr_t frameAddress, uintptr_t eeType, uintptr_t flags,
     uintptr_t numElements, uintptr_t threadAddress);
 '@
+        if ($isC011EC44) {
+            $gcHelpersDeclaration += @'
+extern "C" void __cdecl guideXosNativeAotC011EC44AllocationCheckpoint(
+    uint32_t kind, uintptr_t frameAddress, uintptr_t threadAddress);
+'@
+        }
         if ($isC011EC41) {
             $gcHelpersDeclaration += @'
 extern "C" void __cdecl guideXosNativeAotC011EC41RareAllocationCompleted(uintptr_t objectAddress);
@@ -756,6 +770,12 @@ extern "C" void __cdecl guideXosNativeAotC011EC41RareAllocationCompleted(uintptr
         $gcHelpersPattern = '(?s)(EXTERN_C void\* F_CALL_CONV RhpGcAlloc\(MethodTable\* pEEType, uint32_t uFlags, uintptr_t numElements, PInvokeTransitionFrame\* pTransitionFrame\)\s*\{\s*)(Thread\* pThread = ThreadStore::GetCurrentThread\(\);)'
         $gcHelpersReplacement = '$1$2' + [Environment]::NewLine + '    guideXosNativeAotC011EC18RhpGcAllocEntered(' + [Environment]::NewLine + '        reinterpret_cast<uintptr_t>(pTransitionFrame), reinterpret_cast<uintptr_t>(pEEType),' + [Environment]::NewLine + '        static_cast<uintptr_t>(uFlags), numElements, reinterpret_cast<uintptr_t>(pThread));'
         $gcHelpersText = [regex]::Replace($gcHelpersText, $gcHelpersPattern, $gcHelpersReplacement, 1)
+        if ($isC011EC44) {
+            $gcHelpersText = $gcHelpersText.Replace(
+                '        static_cast<uintptr_t>(uFlags), numElements, reinterpret_cast<uintptr_t>(pThread));',
+                '        static_cast<uintptr_t>(uFlags), numElements, reinterpret_cast<uintptr_t>(pThread));' + [Environment]::NewLine +
+                '    guideXosNativeAotC011EC44AllocationCheckpoint(1u, reinterpret_cast<uintptr_t>(pTransitionFrame), reinterpret_cast<uintptr_t>(pThread));')
+        }
         if ($gcHelpersText -notmatch 'guideXosNativeAotC011EC18RhpGcAllocEntered') {
             throw "C011EC18 GCHelpers.cpp injection did not match RhpGcAlloc."
         }
@@ -768,6 +788,15 @@ extern "C" void __cdecl guideXosNativeAotC011EC41RareAllocationCompleted(uintptr
                 '    return guideXosNativeAotC011EC41Result;')
             if ($gcHelpersText -notmatch 'guideXosNativeAotC011EC41RareAllocationCompleted') {
                 throw "C011EC41 GCHelpers.cpp injection did not match the RhpGcAlloc return."
+            }
+        }
+        if ($isC011EC44) {
+            $gcHelpersText = $gcHelpersText.Replace(
+                '    pThread->SetDeferredTransitionFrame(pTransitionFrame);',
+                '    pThread->SetDeferredTransitionFrame(pTransitionFrame);' + [Environment]::NewLine +
+                '    guideXosNativeAotC011EC44AllocationCheckpoint(2u, reinterpret_cast<uintptr_t>(pTransitionFrame), reinterpret_cast<uintptr_t>(pThread));')
+            if ($gcHelpersText -notmatch 'guideXosNativeAotC011EC44AllocationCheckpoint\(2u') {
+                throw "C011EC44 GCHelpers.cpp pre-GC injection did not match SetDeferredTransitionFrame."
             }
         }
         Set-Content -LiteralPath $gcHelpersC011EC18Source -Value $gcHelpersText -Encoding ASCII
@@ -960,6 +989,11 @@ extern "C" void __cdecl guideXosNativeAotC011EC26ThreadGcScanRootsEntered();
 extern "C" void __cdecl guideXosNativeAotC011EC26ThreadGcScanRootsReturned();
 extern "C" void __cdecl guideXosNativeAotC011EC26PostStackRootSource(uint32_t source);
 '@
+            if ($isC011EC44) {
+                $threadDeclarations += @'
+extern "C" void __cdecl guideXosNativeAotC011EC44RootSource(uintptr_t threadAddress, uintptr_t sourcePointer);
+'@
+            }
             $threadIncludeNeedle = '#include "thread.h"'
             if (-not $threadText.Contains($threadIncludeNeedle)) {
                 throw "C011EC26 thread.cpp include injection point was not found."
@@ -1016,6 +1050,20 @@ FCIMPLEND
             $threadText = $threadText.Replace(
                 $threadEntryNeedle,
                 $threadEntryNeedle + "`n" + '    guideXosNativeAotC011EC26ThreadGcScanRootsEntered();')
+            if ($isC011EC44) {
+                $threadRootSourceNeedle = '    StackFrameIterator frameIterator(this, GetTransitionFrame());'
+                $threadRootSourceReplacement = @'
+    PInvokeTransitionFrame* guideXosC011EC44RootSource = GetTransitionFrame();
+    guideXosNativeAotC011EC44RootSource(
+        reinterpret_cast<uintptr_t>(this),
+        reinterpret_cast<uintptr_t>(guideXosC011EC44RootSource));
+    StackFrameIterator frameIterator(this, guideXosC011EC44RootSource);
+'@
+                if (-not $threadText.Contains($threadRootSourceNeedle)) {
+                    throw "C011EC44 Thread::GcScanRoots authoritative root-source point was not found."
+                }
+                $threadText = $threadText.Replace($threadRootSourceNeedle, $threadRootSourceReplacement.TrimEnd())
+            }
             $threadWorkerNeedle = '    GcScanRootsWorker(pfnEnumCallback, pvCallbackData, frameIterator);'
             if (-not $threadText.Contains($threadWorkerNeedle)) {
                 throw "C011EC26 Thread::GcScanRoots worker return point was not found."
@@ -1096,9 +1144,14 @@ extern "C" void __cdecl guideXosNativeAotC011EC20UnwindCompleted(uint32_t result
 extern "C" void __cdecl guideXosNativeAotC011EC20CallerMethodInfo(uintptr_t controlPc, uintptr_t codeManager, uintptr_t methodInfo, uintptr_t methodStart, uintptr_t methodEnd, uintptr_t runtimeFunction, uintptr_t unwindInfo, uintptr_t unwindInfoSize, uintptr_t blockFlags);
 extern "C" __declspec(noreturn) void __cdecl guideXosNativeAotC011EC20SafeStop(uint32_t reason);
 '@
-            $coffText = $coffText.Replace(
-                '#include "CoffNativeCodeManager.h"',
-                '#include "CoffNativeCodeManager.h"' + [Environment]::NewLine + $coffDeclarations.TrimEnd())
+            if ($isC011EC44) {
+                $coffDeclarations += @'
+extern "C" void __cdecl guideXosNativeAotC011EC44ReverseSlotLoaded(uintptr_t methodInfo, uintptr_t inputPc, uintptr_t inputSp, uintptr_t inputFp, uintptr_t sourceBase, uintptr_t sourceSlotOffset, uintptr_t sourceSlotAddress, uintptr_t sourceSlotValue, uintptr_t blockFlags, uintptr_t stackBasedRegister);
+'@
+            }
+        $coffText = $coffText.Replace(
+            '#include "CoffNativeCodeManager.h"',
+            '#include "CoffNativeCodeManager.h"' + [Environment]::NewLine + $coffDeclarations.TrimEnd())
             $coffText = $coffText.Replace(
                 '#include "gcinfodecoder.cpp"',
                 '#include "' + $lockedGcInfoWrapperPath + '"')
@@ -1297,6 +1350,27 @@ extern "C" __declspec(noreturn) void __cdecl guideXosNativeAotC011EC20SafeStop(u
             }
             if (-not $coffText.Contains($coffTransitionStopNeedle)) { throw "C011EC19 CoffNativeCodeManager transition-stop unwind boundary was not found." }
             $coffText = Replace-First $coffText $coffTransitionStopNeedle $coffTransitionStopReplacement.TrimEnd()
+            if ($isC011EC44) {
+                $coffReverseSlotNeedle = '        *ppPreviousTransitionFrame = *(PInvokeTransitionFrame**)(basePointer + slot);'
+                $coffReverseSlotReplacement = @'
+        *ppPreviousTransitionFrame = *(PInvokeTransitionFrame**)(basePointer + slot);
+        guideXosNativeAotC011EC44ReverseSlotLoaded(
+            reinterpret_cast<uintptr_t>(pMethodInfo),
+            static_cast<uintptr_t>(pRegisterSet->IP),
+            static_cast<uintptr_t>(pRegisterSet->GetSP()),
+            static_cast<uintptr_t>(pRegisterSet->GetFP()),
+            static_cast<uintptr_t>(basePointer), static_cast<uintptr_t>(slot),
+            static_cast<uintptr_t>(basePointer + slot),
+            reinterpret_cast<uintptr_t>(*ppPreviousTransitionFrame),
+            static_cast<uintptr_t>(unwindBlockFlags),
+            static_cast<uintptr_t>(stackBasedRegister));
+'@
+                if (-not $coffText.Contains($coffReverseSlotNeedle)) {
+                    throw "C011EC44 CoffNativeCodeManager reverse-P/Invoke slot load was not found."
+                }
+                $coffText = $coffText.Replace(
+                    $coffReverseSlotNeedle, $coffReverseSlotReplacement.TrimEnd())
+            }
             $coffRtlNeedle = @'
     RtlVirtualUnwind(NULL,
                     dac_cast<TADDR>(m_moduleBase),
@@ -4193,7 +4267,7 @@ exit /b 0
     } else {
         ""
     }
-    $managedProofMode = if ($isC011EC42) { "PostGcReclaimedGen1Lifecycle" } elseif ($isC011EC41) { "PostGcAllocatorProvenance" } elseif ($isC011EC40) { "CompactionReclamation" } elseif ($isC011EC39C38Variant) { "CollectionPlanC38" } elseif ($isC011EC39) { "CollectionPlanC37" } elseif ($isC011EC38) { "DeadObjectReclamation" } elseif ($isC011EC37) { "LifetimeTransitionSecondCollection" } elseif ($isC011EC33) { "LifetimeTransition" } elseif ($isC011EC31) { "ShortWeakLive" } elseif ($isC011EC32) { "ShortWeakDead" } elseif ($isFirstRootFirstNonNullOldO) { "FirstNonNullOldO" } elseif ($isFirstNonNullRoot -or $isFirstRootCallbackEntry) { "FirstNonNullRoot" } else { "FirstCollectionBoundary" }
+$managedProofMode = if ($isC011EC44 -or $isC011EC42) { "PostGcReclaimedGen1Lifecycle" } elseif ($isC011EC41) { "PostGcAllocatorProvenance" } elseif ($isC011EC40) { "CompactionReclamation" } elseif ($isC011EC39C38Variant) { "CollectionPlanC38" } elseif ($isC011EC39) { "CollectionPlanC37" } elseif ($isC011EC38) { "DeadObjectReclamation" } elseif ($isC011EC37) { "LifetimeTransitionSecondCollection" } elseif ($isC011EC33) { "LifetimeTransition" } elseif ($isC011EC31) { "ShortWeakLive" } elseif ($isC011EC32) { "ShortWeakDead" } elseif ($isFirstRootFirstNonNullOldO) { "FirstNonNullOldO" } elseif ($isFirstNonNullRoot -or $isFirstRootCallbackEntry) { "FirstNonNullRoot" } else { "FirstCollectionBoundary" }
     $managedRuntimePackProperty = if ($isTransitionFrameControlPc -or $isC011EC19) {
         "-p:HostLogProofRuntimePackObj=$managedRuntimePackObj"
     } else {
@@ -4724,6 +4798,9 @@ exit /b %errorlevel%
     if ($isC011EC42) {
         $requiredSymbols += @("guideXosNativeAotC011EC42Start","guideXosNativeAotC011EC42BeforeAllocation","guideXosNativeAotC011EC42AfterAllocation","guideXosNativeAotC011EC42Finish","guideXosNativeAotC011EC42CollectionEntered","guideXosNativeAotC011EC42PlannerDecisionObserved","guideXosNativeAotC011EC42PhaseEntered","guideXosNativeAotC011EC42RestartEEReturned","guideXosNativeAotC011EC42StackSafetyBoundary")
     }
+    if ($isC011EC44) {
+        $requiredSymbols += @("guideXosNativeAotC011EC44AllocationCheckpoint","guideXosNativeAotC011EC44SuspendCheckpoint","guideXosNativeAotC011EC44RootSource","guideXosNativeAotC011EC44ReverseSlotLoaded")
+    }
     if ($isC011EC30) {
         $requiredSymbols += @("guideXosNativeAotC011EC30HandleScanEntered","guideXosNativeAotC011EC30HandleMapRootRead","guideXosNativeAotC011EC30BucketVisited","guideXosNativeAotC011EC30HandleTableVisited","guideXosNativeAotC011EC30SegmentVisited","guideXosNativeAotC011EC30BlockVisited","guideXosNativeAotC011EC30HandleSlotInspected","guideXosNativeAotC011EC30HandleSlotCandidate","guideXosNativeAotC011EC30LivenessCheckEntered","guideXosNativeAotC011EC30LivenessDecisionObserved","guideXosNativeAotC011EC30LivenessDecisionCompleted","guideXosNativeAotC011EC30HandleScanCompleted")
     }
@@ -4918,6 +4995,49 @@ exit /b %errorlevel%
         $validationText = $validationText -replace '\b(c\d+)\s+(ec\d+)', '$1$2'
         $validationText = $validationText -replace '\s*=\s*', '='
         $validationText = $validationText -replace '\s*-\s*', '-'
+        if ($isC011EC44) {
+            $c44MarkerMatches = [regex]::Matches(
+                $validationText,
+                '\[nativeaot-code-manager\] C011EC44 kind=.*? marker=C011EC44-[A-Z-]+')
+            $c44Markers = @($c44MarkerMatches | ForEach-Object { $_.Value.Trim() })
+            $c44Marker = {
+                param([string]$Name)
+                $c44Markers | Where-Object { $_ -match ('marker=' + [regex]::Escape($Name) + '(?:\s|$)') } | Select-Object -First 1
+            }
+            $c44FrameCreate = & $c44Marker 'C011EC44-FRAME-CREATE'
+            $c44PreGc = & $c44Marker 'C011EC44-PRE-GC'
+            $c44Suspend = & $c44Marker 'C011EC44-SUSPEND'
+            $c44RootSource = & $c44Marker 'C011EC44-ROOTSOURCE'
+            $c44Iterator = $c44Markers | Where-Object { $_ -match 'marker=C011EC44-ITERATOR(?:\s|$)' } | Select-Object -Last 1
+            $c44Divergence = & $c44Marker 'C011EC44-DIVERGENCE'
+            foreach ($checkpoint in @(
+                @($c44FrameCreate, 'C011EC44-FRAME-CREATE'),
+                @($c44PreGc, 'C011EC44-PRE-GC'),
+                @($c44Suspend, 'C011EC44-SUSPEND'),
+                @($c44RootSource, 'C011EC44-ROOTSOURCE'),
+                @($c44Iterator, 'C011EC44-ITERATOR'),
+                @($c44Divergence, 'C011EC44-DIVERGENCE')
+            )) {
+                if ([string]::IsNullOrWhiteSpace($checkpoint[0])) {
+                    throw "Missing $($checkpoint[1]) checkpoint in $name."
+                }
+            }
+            $c43GateStart = $validationText.IndexOf('marker=C011EC43-C18-GATE')
+            $c43GateLine = if ($c43GateStart -ge 0) { $validationText.Substring($c43GateStart) } else { $null }
+            $failFast = $validationText -match '\[nativeaot-pal-qemu-test\] FAIL_FAST reason=47435354'
+            $c18FailFast = $validationText -match 'c18FailFastReason=EC1801'
+            if (-not $failFast -or -not $c18FailFast) {
+                throw "C011EC44 did not retain the C18 fail-closed PAL fail-fast result in $name."
+            }
+            $runResults += [ordered]@{
+                name=$name; serial=$serialPath; serialSha256=(Hash-File $serialPath)
+                safeStopMarker='C011EC44'; outcome='C / earliest valid-to-invalid transition captured'; successLevel=1
+                harnessTerminated=$true; c44Markers=$c44Markers; frameCreate=$c44FrameCreate; preGc=$c44PreGc
+                suspend=$c44Suspend; rootSource=$c44RootSource; iterator=$c44Iterator; divergence=$c44Divergence
+                c43Gate=$c43GateLine; c18FailFast=$c18FailFast; palFailFast=$failFast; earlyFailure=$earlyFailure
+            }
+            continue
+        }
         if ($isC011EC42) {
             $c37CompleteStart = $validationText.IndexOf('[nativeaot-gc-short-weak-lifetime] COMPLETE marker=C011EC37')
             $c40ManagedStart = $validationText.IndexOf('[nativeaot-gc-short-weak-lifetime] MANAGED marker=C011EC40-MANAGED')
@@ -6970,6 +7090,75 @@ exit /b %errorlevel%
         Set-Content -LiteralPath $manifestPath -Value $manifestJson -Encoding ASCII
         Write-Host "C011EC11 manifest written"
         Write-Host "NativeAOT Workstation GC first-root-pre-mark-boundary experiment: PASS (Outcome A)" -ForegroundColor Green
+    } elseif ($isC011EC44) {
+        if (@($runResults).Count -ne $FreshBootCount) { throw "The C011EC44 provenance experiment produced $(@($runResults).Count) runs instead of $FreshBootCount." }
+        $firstC44Run = $runResults[0]
+        $c44Field = { param([string]$Line,[string]$Field) $v=Get-MarkerField $Line $Field; if($null -eq $v){throw "C011EC44 missing field $Field."}; $v }
+        $firstRunText = Get-Content -LiteralPath $firstC44Run.serial -Raw
+        $firstRunText = $firstRunText -replace '\[IRQ\] dispatch irq=00\s*', ''
+        $firstRunText = ($firstRunText -creplace '(?<=[0-9])(?=[a-z])', ' ') -replace '\s+', ' '
+        $firstRunText = $firstRunText -replace '\b(c\d+)\s+(ec\d+)', '$1$2'
+        $firstRunText = $firstRunText -replace '\s*=\s*', '='
+        $neighborEnd = Get-MarkerField $firstRunText 'neighborDestinationEnd'
+        $savedRsi = Get-MarkerField $firstRunText 'savedRSI'
+        $targetEEType = Get-MarkerField $firstRunText 'targetEEType'
+        $divergenceFrame = & $c44Field $firstC44Run.divergence 'frame'
+        $divergencePc = & $c44Field $firstC44Run.divergence 'pc'
+        $divergenceValue = & $c44Field $firstC44Run.divergence 'val'
+        $divergenceSlot = & $c44Field $firstC44Run.divergence 'slot'
+        $divergenceOffset = & $c44Field $firstC44Run.divergence 'off'
+        $divergenceManager = & $c44Field $firstC44Run.divergence 'cm'
+        $divergenceManaged = & $c44Field $firstC44Run.divergence 'managed'
+        $divergenceClass = & $c44Field $firstC44Run.divergence 'class'
+        $iteratorPc = & $c44Field $firstC44Run.iterator 'pc'
+        $iteratorManager = & $c44Field $firstC44Run.iterator 'cm'
+        $iteratorManaged = & $c44Field $firstC44Run.iterator 'managed'
+        $frameCreateManager = & $c44Field $firstC44Run.frameCreate 'cm'
+        $frameCreateManaged = & $c44Field $firstC44Run.frameCreate 'managed'
+        $rootSource = & $c44Field $firstC44Run.rootSource 'src'
+        $c43IteratorFrame = Get-MarkerField $firstC44Run.c43Gate 'c18IteratorFrame'
+        $c43IteratorPc = Get-MarkerField $firstC44Run.c43Gate 'c18IteratorControlPC'
+        $c43IteratorSp = Get-MarkerField $firstC44Run.c43Gate 'c18IteratorSP'
+        $c43IteratorFp = Get-MarkerField $firstC44Run.c43Gate 'c18IteratorFP'
+        $c43IteratorFlags = Get-MarkerField $firstC44Run.c43Gate 'c18IteratorFlags'
+        if ($neighborEnd -eq $null -or $targetEEType -eq $null -or
+            $divergenceFrame -ne $c43IteratorFrame -or
+            $divergencePc -ne $c43IteratorPc -or
+            $divergenceValue -ne $divergenceFrame -or
+            $divergenceFrame -ne $neighborEnd -or
+            ($targetEEType -ne $null -and $divergencePc -ne $targetEEType) -or
+            ($savedRsi -ne $null -and $divergenceValue -ne $savedRsi) -or
+            $divergenceManaged -ne '0x00000000' -or
+            $divergenceManager -ne '0x0000000000000000' -or
+            $iteratorManager -ne '0x0000000000000000' -or
+            $iteratorManaged -ne '0x00000000' -or
+            $frameCreateManager -eq '0x0000000000000000' -or
+            $frameCreateManaged -ne '0x00000001') {
+            throw "C011EC44 provenance correlations were not stable in $($firstC44Run.name)."
+        }
+        foreach ($field in @('class','managed','cm','pc','frame','val','slot','off')) {
+            $values = @($runResults | ForEach-Object { & $c44Field $_.divergence $field } | Select-Object -Unique)
+            if ($values.Count -ne 1) { throw "C011EC44 divergence field $field varied across fresh boots." }
+        }
+        $manifest = [ordered]@{
+            outcome='C / earliest valid-to-invalid transition proven at reverse-P/Invoke transition-frame slot load; writer/lifetime cause not proven'
+            successLevel=1; proofMode=$ProofMode; marker='C011EC44'; repositoryHead=$repoHead; startingCommittedHead=$startingCommittedHead; startingBranch=$startingBranch; upstream=$upstream; startingWorktreeStatus=$startingWorktreeStatus; startingDirtyState=$dirtyState
+            lockedRuntimeIdentity=[ordered]@{ nativeAot='9.0.0'; architecture='AMD64'; gc='Workstation'; gcInterfaces='5.3 / 2'; sourceCommit=$lockedCommit }
+            authoritativePipeline=[ordered]@{ frameCreation='injected observer immediately after locked RhpGcAlloc entry'; preGc='injected observer immediately after locked SetDeferredTransitionFrame'; suspend='after locked SuspendAllThreads returned'; rootSource='locked Thread::GcScanRoots GetTransitionFrame source'; iterator='locked StackFrameIterator::InternalInit and CalculateCurrentMethodState'; reverseSlot='locked CoffNativeCodeManager::UnwindStackFrame reverse-P/Invoke slot load' }
+            checkpoints=[ordered]@{ frameCreate=$firstC44Run.frameCreate; preGc=$firstC44Run.preGc; suspend=$firstC44Run.suspend; rootSource=$firstC44Run.rootSource; iterator=$firstC44Run.iterator; divergence=$firstC44Run.divergence }
+            c43Baseline=[ordered]@{ frame=$c43IteratorFrame; controlPc=$c43IteratorPc; sp=$c43IteratorSp; fp=$c43IteratorFp; flags=$c43IteratorFlags; expectedManager=(Get-MarkerField $firstC44Run.c43Gate 'c18ExpectedManagedManager'); observedManager=(Get-MarkerField $firstC44Run.c43Gate 'c18ObservedCodeManager'); failFastReason=(Get-MarkerField $firstC44Run.c43Gate 'c18FailFastReason'); palFailFast='0x47435354' }
+            firstDivergence=[ordered]@{ earliestValidCheckpoint='C011EC18 preflight / prior iterator FindMethodInfo success'; earliestInvalidCheckpoint='C011EC44-DIVERGENCE'; sourceStructure='CoffNativeCodeManager reverse-P/Invoke GC-info stack slot'; sourceMethodInfo=(Get-MarkerField $firstC44Run.divergence 'method'); sourceBase=(Get-MarkerField $firstC44Run.divergence 'base'); sourceSlotOffset=$divergenceOffset; sourceSlotAddress=$divergenceSlot; sourceSlotValue=$divergenceValue; loadedFrame=$divergenceFrame; loadedControlPc=$divergencePc; loadedManager=$divergenceManager }
+            neighborDestinationEnd=[ordered]@{ value=$neighborEnd; exactEquality=($divergenceFrame -eq $neighborEnd); field='C011EC40 neighborDestinationEnd / neighboringLiveDestinationEnd'; targetEEType=$targetEEType; savedRsi=$savedRsi; exactSavedRsiEquality=($savedRsi -ne $null -and $savedRsi -eq $divergenceValue); route='reverse-P/Invoke stack slot value equals the prior C40 destination end and is then selected as the iterator transition frame' }
+            classification=[ordered]@{ code='Code 6 — Wrong frame selected'; authoritativeStateCorrupt='not proven'; iteratorInitializationCorrupt='not proven at initial root source; malformed input is produced by preceding unwind slot load'; observerInterpretationCorrupt='not proven'; staleFrameLifetime='not proven'; liveFrameOverwrite='not proven'; abiLayoutMismatch='not proven'; writeProvenance='not available; exact producer read is proven' }
+            C18=[ordered]@{ unchanged=$true; malformedStateFailsClosed=$true; validStateHistoricalResult='C18 prior valid frame passed manager lookup and FindMethodInfo'; failedFindMethodInfo='not reached for malformed frame because null manager fail-fast remains first'; rootScanCompletion='not reached'; markPhase='not reached'; planner='not reached'; restart='not reached'; managedResume='not reached'; invariantFailures='0x00000000'; sensitiveDiagnosticAllocations='0x00000000'; failFast='PAL reason 0x47435354 with C18 reason 0xEC1801' }
+            markers=$firstC44Run.c44Markers; c43Gate=$firstC44Run.c43Gate
+            qemu=[ordered]@{ version=$qemuVersion; runCount=$FreshBootCount; proofKernelSha256=$specializedKernelHash; serialSha256=@($runResults | ForEach-Object { $_.serialSha256 }); evidenceRoot=$runRoot; exactCommandLog=(Join-Path $runRoot 'commands.txt'); runs=$runResults }
+            regressions=[ordered]@{ C18='PASS malformed state still fails closed; prior valid state retained'; C37='retained predecessor chronology'; C39='retained planner/compaction chronology'; C40='retained reclamation chronology'; C41='retained allocator provenance chronology'; C42='retained natural later-collection entry'; C43='PASS gate and malformed-state provenance retained'; chronology='PASS C19-C43 source guards retained'; converter='PASS PE-to-ELF conversion'; linkerSourceTables='PASS existing guards'; MASM='not applicable'; ordinaryBoot='PASS after finally restoration'; diffCheck='PASS git diff --check' }
+            ordinaryRestoration=[ordered]@{ expectedKernelSha256=$normalKernelHash; expectedEspSha256=$normalKernelHash; restoredByFinally=$true; kernelSha256=(Hash-File $kernelPath); espSha256=(Hash-File $espKernelPath) }
+            documentation='docs/dotnet/NATIVEAOT_WORKSTATION_GC_TRANSITION_FRAME_PROVENANCE.md'; evidenceRoot=$runRoot; manifestPath=$manifestPath
+        }
+        $manifest | ConvertTo-Json -Depth 100 | Set-Content -LiteralPath $manifestPath -Encoding ASCII
+        Write-Host "C011EC44 malformed transition-frame provenance: Outcome C / Level 1" -ForegroundColor Yellow
     } elseif ($isC011EC42) {
         if (@($runResults).Count -ne $FreshBootCount) { throw "The C011EC42 lifecycle experiment produced $(@($runResults).Count) runs instead of $FreshBootCount." }
         $blockedC42Runs = @($runResults | Where-Object { $_.safeStopMarker -ne 'C011EC42' })

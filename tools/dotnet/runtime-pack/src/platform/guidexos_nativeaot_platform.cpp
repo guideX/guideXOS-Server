@@ -5187,6 +5187,399 @@ static bool c011ec18IsInsideManagedRange(
     return inside;
 }
 
+/* C011EC44 is deliberately scalar-only.  It observes the producer slot and
+ * the frame values which the locked iterator will consume; it never repairs,
+ * substitutes, or retains a transition frame. */
+static_assert(offsetof(PInvokeTransitionFrame, m_RIP) == 0x00u, "C011EC44 PInvokeTransitionFrame::m_RIP layout changed");
+static_assert(offsetof(PInvokeTransitionFrame, m_FramePointer) == 0x08u, "C011EC44 PInvokeTransitionFrame::m_FramePointer layout changed");
+static_assert(offsetof(PInvokeTransitionFrame, m_pThread) == 0x10u, "C011EC44 PInvokeTransitionFrame::m_pThread layout changed");
+static_assert(offsetof(PInvokeTransitionFrame, m_Flags) == 0x18u, "C011EC44 PInvokeTransitionFrame::m_Flags layout changed");
+static_assert(offsetof(PInvokeTransitionFrame, m_PreservedRegs) == 0x20u, "C011EC44 PInvokeTransitionFrame::m_PreservedRegs layout changed");
+static_assert(offsetof(RuntimeThreadLocals, m_pTransitionFrame) == 0x40u, "C011EC44 Thread transition-frame slot layout changed");
+static_assert(offsetof(RuntimeThreadLocals, m_pDeferredTransitionFrame) == 0x48u, "C011EC44 Thread deferred-frame slot layout changed");
+static_assert(offsetof(RuntimeThreadLocals, m_pCachedTransitionFrame) == 0x50u, "C011EC44 Thread cached-frame slot layout changed");
+static uintptr_t c011ec44SavedRsp(PInvokeTransitionFrame* frame, uintptr_t flags) {
+    if (frame == nullptr || (flags & PTFF_SAVE_RSP) == 0u) {
+        return 0u;
+    }
+    const uintptr_t* saved = reinterpret_cast<const uintptr_t*>(frame->m_PreservedRegs);
+    return saved[7];
+}
+
+static void c011ec44ThreadSlots(
+    uintptr_t threadAddress,
+    uintptr_t* live,
+    uintptr_t* deferred,
+    uintptr_t* cached,
+    uintptr_t* threadFlags) {
+    if (live != nullptr) *live = 0u;
+    if (deferred != nullptr) *deferred = 0u;
+    if (cached != nullptr) *cached = 0u;
+    if (threadFlags != nullptr) *threadFlags = 0u;
+    if (threadAddress == 0u) {
+        return;
+    }
+    RuntimeThreadLocals* locals = reinterpret_cast<RuntimeThreadLocals*>(threadAddress);
+    if (live != nullptr) *live = reinterpret_cast<uintptr_t>(locals->m_pTransitionFrame);
+    if (deferred != nullptr) *deferred = reinterpret_cast<uintptr_t>(locals->m_pDeferredTransitionFrame);
+    if (cached != nullptr) *cached = reinterpret_cast<uintptr_t>(locals->m_pCachedTransitionFrame);
+    if (threadFlags != nullptr) *threadFlags = static_cast<uintptr_t>(locals->m_ThreadStateFlags);
+}
+
+static void c011ec44Emit(
+    const char* marker,
+    const guidexos_nativeaot_c011ec44_checkpoint& checkpoint) {
+    suspendEeSerialPutString("[nativeaot-code-manager] C011EC44 kind=");
+    suspendEeSerialPutHex32(checkpoint.kind);
+    suspendEeSerialPutString(" class=");
+    suspendEeSerialPutHex32(checkpoint.classification);
+    suspendEeSerialPutString(" ord=");
+    suspendEeSerialPutHex32(checkpoint.gcOrdinal);
+    suspendEeSerialPutString(" frame=");
+    suspendEeSerialPutHex64(checkpoint.frameAddress);
+    suspendEeSerialPutString(" pc=");
+    suspendEeSerialPutHex64(checkpoint.controlPc);
+    suspendEeSerialPutString(" sp=");
+    suspendEeSerialPutHex64(checkpoint.sp);
+    suspendEeSerialPutString(" fp=");
+    suspendEeSerialPutHex64(checkpoint.fp);
+    suspendEeSerialPutString(" fl=");
+    suspendEeSerialPutHex64(checkpoint.flags);
+    suspendEeSerialPutString(" th=");
+    suspendEeSerialPutHex64(checkpoint.threadAddress);
+    suspendEeSerialPutString(" src=");
+    suspendEeSerialPutHex64(checkpoint.sourcePointer);
+    suspendEeSerialPutString(" base=");
+    suspendEeSerialPutHex64(checkpoint.sourceBase);
+    suspendEeSerialPutString(" off=");
+    suspendEeSerialPutHex64(checkpoint.sourceSlotOffset);
+    suspendEeSerialPutString(" slot=");
+    suspendEeSerialPutHex64(checkpoint.sourceSlotAddress);
+    suspendEeSerialPutString(" val=");
+    suspendEeSerialPutHex64(checkpoint.sourceSlotValue);
+    suspendEeSerialPutString(" cm=");
+    suspendEeSerialPutHex64(checkpoint.codeManager);
+    suspendEeSerialPutString(" managed=");
+    suspendEeSerialPutHex32(checkpoint.controlPcManaged);
+    suspendEeSerialPutString(" method=");
+    suspendEeSerialPutHex64(checkpoint.methodInfo);
+    suspendEeSerialPutString(" suspend=");
+    suspendEeSerialPutHex32(checkpoint.suspendState);
+    suspendEeSerialPutString(" marker=");
+    suspendEeSerialPutString(marker);
+    suspendEeSerialPutString("\n");
+}
+
+static void c011ec44Capture(
+    uint32_t kind,
+    uint32_t classification,
+    uintptr_t frameAddress,
+    uintptr_t controlPc,
+    uintptr_t sp,
+    uintptr_t fp,
+    uintptr_t flags,
+    uintptr_t threadAddress,
+    uintptr_t sourcePointer,
+    uintptr_t transitionFramePointer,
+    uintptr_t savedControlPc,
+    uintptr_t sourceBase,
+    uintptr_t sourceSlotOffset,
+    uintptr_t sourceSlotAddress,
+    uintptr_t sourceSlotValue,
+    uintptr_t liveTransitionFrame,
+    uintptr_t deferredTransitionFrame,
+    uintptr_t cachedTransitionFrame,
+    uintptr_t threadStateFlags,
+    uintptr_t allocationContext,
+    uintptr_t codeManager,
+    uintptr_t methodInfo,
+    uint32_t methodInfoValid,
+    uint32_t suspendState,
+    bool emit) {
+    guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    if (kind == 0u || kind > GUIDEXOS_NATIVEAOT_C011EC44_MAX_CHECKPOINTS) {
+        ++d.c011ec44Provenance.invariantFailures;
+        return;
+    }
+
+    RuntimeInstance* runtime = GetRuntimeInstance();
+    ICodeManager* resolvedManager = nullptr;
+    const bool managed = controlPc != 0u && c011ec18IsInsideManagedRange(
+        controlPc, runtime, &resolvedManager);
+    if (codeManager == 0u) {
+        codeManager = reinterpret_cast<uintptr_t>(resolvedManager);
+    }
+    if (classification == 0u) {
+        classification = managed && codeManager != 0u ? 3u :
+            (controlPc == 0u ? 0u : 2u);
+    }
+
+    guidexos_nativeaot_c011ec44_provenance_record& r = d.c011ec44Provenance;
+    guidexos_nativeaot_c011ec44_checkpoint& checkpoint = r.checkpoints[kind - 1u];
+    const bool wasObserved = checkpoint.observed != 0u;
+    const uint32_t gcOrdinal = d.c011ec42Lifecycle.collectionCountBefore;
+    if (wasObserved && checkpoint.gcOrdinal == gcOrdinal) {
+        if (kind != GUIDEXOS_NATIVEAOT_C011EC44_ITERATOR &&
+            kind != GUIDEXOS_NATIVEAOT_C011EC44_DIVERGENCE) {
+            return;
+        }
+        if (kind == GUIDEXOS_NATIVEAOT_C011EC44_DIVERGENCE &&
+            checkpoint.sourceSlotAddress == sourceSlotAddress &&
+            checkpoint.sourceSlotValue == sourceSlotValue &&
+            checkpoint.controlPc == controlPc) {
+            return;
+        }
+    }
+    if (!wasObserved) {
+        ++r.checkpointCount;
+    }
+    checkpoint = {};
+    checkpoint.observed = 1u;
+    checkpoint.kind = kind;
+    checkpoint.classification = classification;
+    checkpoint.gcOrdinal = gcOrdinal;
+    checkpoint.gcState = d.c011ec42Lifecycle.actualPhase;
+    checkpoint.controlPcManaged = managed ? 1u : 0u;
+    checkpoint.codeManagerResolved = codeManager != 0u ? 1u : 0u;
+    checkpoint.methodInfoValid = methodInfoValid;
+    checkpoint.suspendState = suspendState;
+    checkpoint.frameAddress = frameAddress;
+    checkpoint.controlPc = controlPc;
+    checkpoint.sp = sp;
+    checkpoint.fp = fp;
+    checkpoint.flags = flags;
+    checkpoint.threadAddress = threadAddress;
+    checkpoint.sourcePointer = sourcePointer;
+    checkpoint.transitionFramePointer = transitionFramePointer;
+    checkpoint.savedControlPc = savedControlPc;
+    checkpoint.sourceBase = sourceBase;
+    checkpoint.sourceSlotOffset = sourceSlotOffset;
+    checkpoint.sourceSlotAddress = sourceSlotAddress;
+    checkpoint.sourceSlotValue = sourceSlotValue;
+    checkpoint.liveTransitionFrame = liveTransitionFrame;
+    checkpoint.deferredTransitionFrame = deferredTransitionFrame;
+    checkpoint.cachedTransitionFrame = cachedTransitionFrame;
+    checkpoint.threadStateFlags = threadStateFlags;
+    checkpoint.allocationContext = allocationContext;
+    checkpoint.codeManager = codeManager;
+    checkpoint.methodInfo = methodInfo;
+
+    switch (kind) {
+        case GUIDEXOS_NATIVEAOT_C011EC44_FRAME_CREATE: ++r.frameCreateCount; break;
+        case GUIDEXOS_NATIVEAOT_C011EC44_PRE_GC: ++r.preGcCount; break;
+        case GUIDEXOS_NATIVEAOT_C011EC44_SUSPEND: ++r.suspendCount; break;
+        case GUIDEXOS_NATIVEAOT_C011EC44_ROOT_SOURCE: ++r.rootSourceCount; break;
+        case GUIDEXOS_NATIVEAOT_C011EC44_ITERATOR: ++r.iteratorCount; break;
+        case GUIDEXOS_NATIVEAOT_C011EC44_DIVERGENCE:
+            ++r.divergenceCount;
+            if (r.firstInvalidKind == 0u) {
+                r.firstInvalidKind = kind;
+                r.firstDivergenceSourceSlotAddress = sourceSlotAddress;
+                r.firstDivergenceSourceSlotValue = sourceSlotValue;
+                r.firstDivergenceFrameAddress = frameAddress;
+                r.firstDivergenceControlPc = controlPc;
+                r.firstDivergenceCodeManager = codeManager;
+            }
+            break;
+        default: break;
+    }
+    if (classification == 1u && r.firstValidKind == 0u) {
+        r.firstValidKind = kind;
+    }
+    if (r.firstFrameAddress == 0u && frameAddress != 0u) {
+        r.firstFrameAddress = frameAddress;
+        r.firstControlPc = controlPc;
+        r.firstSourcePointer = sourcePointer;
+    }
+    r.neighborDestinationEnd =
+        d.c011ec40Compaction.neighboringLiveDestinationEnd;
+    r.writeProvenanceAvailable = 0u;
+    r.liveFrameOverwriteProven = 0u;
+    r.staleFrameProven = 0u;
+    r.wrongFrameProven = 0u;
+    r.abiLayoutMismatchProven = 0u;
+    r.sensitiveDiagnosticAllocations =
+        d.c011ec42Lifecycle.sensitiveDiagnosticAllocations;
+
+    if (emit) {
+        const char* marker = kind == GUIDEXOS_NATIVEAOT_C011EC44_FRAME_CREATE
+            ? "C011EC44-FRAME-CREATE"
+            : kind == GUIDEXOS_NATIVEAOT_C011EC44_PRE_GC
+                ? "C011EC44-PRE-GC"
+                : kind == GUIDEXOS_NATIVEAOT_C011EC44_SUSPEND
+                    ? "C011EC44-SUSPEND"
+                    : kind == GUIDEXOS_NATIVEAOT_C011EC44_ROOT_SOURCE
+                        ? "C011EC44-ROOTSOURCE"
+                        : kind == GUIDEXOS_NATIVEAOT_C011EC44_ITERATOR
+                            ? "C011EC44-ITERATOR"
+                            : "C011EC44-DIVERGENCE";
+        c011ec44Emit(marker, checkpoint);
+    }
+}
+
+static void c011ec44CaptureFrame(
+    uint32_t kind,
+    uintptr_t frameAddress,
+    uintptr_t threadAddress,
+    uintptr_t sourcePointer,
+    uintptr_t sourceBase,
+    uintptr_t sourceSlotOffset,
+    uintptr_t sourceSlotAddress,
+    uintptr_t sourceSlotValue,
+    uint32_t classification,
+    uintptr_t codeManager,
+    uintptr_t methodInfo,
+    uint32_t methodInfoValid,
+    uint32_t suspendState,
+    bool emit) {
+    PInvokeTransitionFrame* frame =
+        reinterpret_cast<PInvokeTransitionFrame*>(frameAddress);
+    if (frameAddress == 0u ||
+        frameAddress == reinterpret_cast<uintptr_t>(TOP_OF_STACK_MARKER)) {
+        uintptr_t live = 0u;
+        uintptr_t deferred = 0u;
+        uintptr_t cached = 0u;
+        uintptr_t threadFlags = 0u;
+        c011ec44ThreadSlots(threadAddress, &live, &deferred, &cached, &threadFlags);
+        c011ec44Capture(
+            kind, 0u, frameAddress, 0u, 0u, 0u, 0u, threadAddress,
+            sourcePointer, frameAddress, 0u, sourceBase, sourceSlotOffset,
+            sourceSlotAddress, sourceSlotValue, live, deferred, cached,
+            threadFlags,
+            g_guideXosAllocationDiagnostics.c011ec42Lifecycle.contextIdentity,
+            codeManager, methodInfo, methodInfoValid, suspendState, emit);
+        return;
+    }
+    uintptr_t flags = frame == nullptr ? 0u : static_cast<uintptr_t>(frame->m_Flags);
+    uintptr_t controlPc = frame == nullptr ? 0u : reinterpret_cast<uintptr_t>(frame->m_RIP);
+    uintptr_t fp = frame == nullptr ? 0u : reinterpret_cast<uintptr_t>(frame->m_FramePointer);
+    uintptr_t sp = c011ec44SavedRsp(frame, flags);
+    uintptr_t live = 0u;
+    uintptr_t deferred = 0u;
+    uintptr_t cached = 0u;
+    uintptr_t threadFlags = 0u;
+    c011ec44ThreadSlots(threadAddress, &live, &deferred, &cached, &threadFlags);
+    const uintptr_t allocationContext =
+        g_guideXosAllocationDiagnostics.c011ec42Lifecycle.contextIdentity;
+    c011ec44Capture(
+        kind, classification, frameAddress, controlPc, sp, fp, flags,
+        threadAddress, sourcePointer, frameAddress, controlPc, sourceBase,
+        sourceSlotOffset, sourceSlotAddress, sourceSlotValue, live, deferred,
+        cached, threadFlags, allocationContext, codeManager, methodInfo,
+        methodInfoValid, suspendState, emit);
+}
+
+static void c011ec44CaptureIterator(
+    uint32_t classification,
+    uintptr_t frameAddress,
+    uintptr_t controlPc,
+    uintptr_t sp,
+    uintptr_t fp,
+    uintptr_t flags,
+    uintptr_t codeManager,
+    uintptr_t methodInfo,
+    uint32_t methodInfoValid,
+    bool emit) {
+    guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    uintptr_t live = 0u;
+    uintptr_t deferred = 0u;
+    uintptr_t cached = 0u;
+    uintptr_t threadFlags = 0u;
+    c011ec44ThreadSlots(
+        d.c011ec18ThreadAddress, &live, &deferred, &cached, &threadFlags);
+    c011ec44Capture(
+        GUIDEXOS_NATIVEAOT_C011EC44_ITERATOR, classification,
+        frameAddress, controlPc, sp, fp, flags, d.c011ec18ThreadAddress,
+        frameAddress, frameAddress, controlPc, 0u, 0u, 0u, 0u, live, deferred,
+        cached, threadFlags, d.c011ec42Lifecycle.contextIdentity, codeManager,
+        methodInfo, methodInfoValid, d.eeSuspended, emit);
+}
+
+extern "C" void __cdecl guideXosNativeAotC011EC44AllocationCheckpoint(
+    uint32_t kind,
+    uintptr_t frameAddress,
+    uintptr_t threadAddress) {
+    c011ec44CaptureFrame(
+        kind, frameAddress, threadAddress, frameAddress, 0u, 0u, 0u, 0u,
+        3u, 0u, 0u, 0u, 0u, true);
+}
+
+extern "C" void __cdecl guideXosNativeAotC011EC44SuspendCheckpoint() {
+    Thread* current = ThreadStore::GetCurrentThreadIfAvailable();
+    if (current == nullptr) {
+        return;
+    }
+    const uintptr_t threadAddress = reinterpret_cast<uintptr_t>(current);
+    RuntimeThreadLocals* locals = reinterpret_cast<RuntimeThreadLocals*>(current);
+    PInvokeTransitionFrame* source = ThreadStore::GetSuspendingThread() == current
+        ? locals->m_pDeferredTransitionFrame : locals->m_pCachedTransitionFrame;
+    c011ec44CaptureFrame(
+        GUIDEXOS_NATIVEAOT_C011EC44_SUSPEND,
+        reinterpret_cast<uintptr_t>(source), threadAddress,
+        reinterpret_cast<uintptr_t>(source), 0u, 0u, 0u, 0u, 3u, 0u, 0u, 0u,
+        1u, true);
+}
+
+extern "C" void __cdecl guideXosNativeAotC011EC44RootSource(
+    uintptr_t threadAddress, uintptr_t sourcePointer) {
+    c011ec44CaptureFrame(
+        GUIDEXOS_NATIVEAOT_C011EC44_ROOT_SOURCE, sourcePointer, threadAddress,
+        sourcePointer, 0u, 0u, 0u, 0u, 3u, 0u, 0u, 0u, 1u, true);
+}
+
+extern "C" void __cdecl guideXosNativeAotC011EC44ReverseSlotLoaded(
+    uintptr_t methodInfo,
+    uintptr_t inputPc,
+    uintptr_t inputSp,
+    uintptr_t inputFp,
+    uintptr_t sourceBase,
+    uintptr_t sourceSlotOffset,
+    uintptr_t sourceSlotAddress,
+    uintptr_t sourceSlotValue,
+    uintptr_t blockFlags,
+    uintptr_t stackBasedRegister) {
+    (void)blockFlags;
+    (void)stackBasedRegister;
+    PInvokeTransitionFrame* frame =
+        reinterpret_cast<PInvokeTransitionFrame*>(sourceSlotValue);
+    if (sourceSlotValue == 0u ||
+        sourceSlotValue == reinterpret_cast<uintptr_t>(TOP_OF_STACK_MARKER)) {
+        return;
+    }
+    const uintptr_t flags = frame == nullptr ? 0u : static_cast<uintptr_t>(frame->m_Flags);
+    const uintptr_t controlPc = frame == nullptr ? 0u : reinterpret_cast<uintptr_t>(frame->m_RIP);
+    const uintptr_t fp = frame == nullptr ? 0u : reinterpret_cast<uintptr_t>(frame->m_FramePointer);
+    const uintptr_t sp = c011ec44SavedRsp(frame, flags);
+    ICodeManager* manager = nullptr;
+    const bool managed = c011ec18IsInsideManagedRange(
+        controlPc, GetRuntimeInstance(), &manager);
+    if (managed && manager != nullptr) {
+        return;
+    }
+    const uint32_t classification = managed && manager != nullptr ? 3u : 2u;
+    uintptr_t threadAddress = frame == nullptr
+        ? 0u : reinterpret_cast<uintptr_t>(frame->m_pThread);
+    uintptr_t live = 0u;
+    uintptr_t deferred = 0u;
+    uintptr_t cached = 0u;
+    uintptr_t threadFlags = 0u;
+    c011ec44ThreadSlots(threadAddress, &live, &deferred, &cached, &threadFlags);
+    c011ec44Capture(
+        GUIDEXOS_NATIVEAOT_C011EC44_DIVERGENCE, classification,
+        sourceSlotValue, controlPc, sp, fp, flags, threadAddress,
+        sourceSlotAddress, sourceSlotValue, inputPc, sourceBase,
+        sourceSlotOffset, sourceSlotAddress, sourceSlotValue, live, deferred,
+        cached, threadFlags,
+        g_guideXosAllocationDiagnostics.c011ec42Lifecycle.contextIdentity,
+        reinterpret_cast<uintptr_t>(manager), methodInfo, 0u,
+        g_guideXosAllocationDiagnostics.eeSuspended, true);
+    (void)inputPc;
+    (void)inputSp;
+    (void)inputFp;
+}
+
 #if defined(GUIDEXOS_NATIVEAOT_C011EC23_NATIVE_UNWIND)
 /*
  * This is the narrow PAL bridge for the locked iterator's REGDISPLAY.  It
@@ -6904,6 +7297,8 @@ guideXosNativeAotC011EC18IteratorInitial(
     d.c011ec18IteratorInitialFp = fp;
     d.c011ec18IteratorFrameAddress = frameAddress;
     d.c011ec18TransitionFrameFlags = flags;
+    c011ec44CaptureIterator(
+        3u, frameAddress, controlPc, sp, fp, flags, 0u, 0u, 0u, false);
 #if defined(GUIDEXOS_NATIVEAOT_C011EC33_LIFETIME_TRANSITION)
     {
         const uint32_t index = d.c011ec33ActiveCollection <= 1u ? 0u : 1u;
@@ -6942,6 +7337,11 @@ guideXosNativeAotC011EC18IteratorCodeManagerLookup(
     d.c011ec18IteratorInitialSp = sp;
     d.c011ec18IteratorInitialFp = fp;
     d.c011ec18IteratorCodeManager = manager;
+    c011ec44CaptureIterator(
+        manager != 0u ? 3u : 2u,
+        d.c011ec18IteratorFrameAddress, controlPc, sp, fp,
+        d.c011ec18TransitionFrameFlags, manager, d.c011ec18IteratorMethodInfo,
+        0u, manager == 0u);
     suspendEeSerialPutString("[nativeaot-code-manager] C011EC18 lookup controlPC=");
     suspendEeSerialPutHex64(controlPc);
     suspendEeSerialPutString(" manager=");
@@ -6957,6 +7357,13 @@ guideXosNativeAotC011EC18IteratorFindMethodInfo(
     ++d.c011ec18FindMethodInfoAttemptCount;
     d.c011ec18IteratorControlPc = controlPc;
     d.c011ec18IteratorMethodInfo = methodInfo;
+    c011ec44CaptureIterator(
+        found != 0u ? 1u : 2u,
+        d.c011ec18IteratorFrameAddress, controlPc,
+        d.c011ec18IteratorInitialSp, d.c011ec18IteratorInitialFp,
+        d.c011ec18TransitionFrameFlags, d.c011ec18IteratorCodeManager,
+        methodInfo, found != 0u && methodInfo != 0u ? 1u : 0u,
+        true);
 #if defined(GUIDEXOS_NATIVEAOT_C011EC33_LIFETIME_TRANSITION)
     if (d.c011ec33ActiveCollection == 2u &&
         methodInfo != 0u &&
