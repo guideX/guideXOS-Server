@@ -15,6 +15,7 @@
 #include "kernel/block_device.h"
 #include "kernel/desktop.h"
 #include "kernel/image_adapter.h"
+#include "kernel/navigator_scrollbar.h"
 #include "display_configuration_service.h"
 #include "../../../../guide_web_http_shared.h"
 #include "../../../../navigator_resource_scheduler.h"
@@ -579,6 +580,7 @@ public:
 
     static app::KernelApp* create() { return new NavigatorApp(); }
     static bool smokeTypographyPhase7A();
+    static bool smokeScrollbarPointerInput();
     // Phase 8S.2: one bounded smoke-owned Navigator instance runs the
     // deterministic pressure/reuse sequence and, when public HTTPS is
     // enabled, the reviewed NASA -> Wikipedia -> example.com -> NASA lane.
@@ -862,6 +864,13 @@ private:
     int m_addressCaret;
     bool m_ctrlPressed;
     int m_scrollY;
+    int m_scrollX;
+    uint8_t m_scrollbarOwner;
+    uint8_t m_scrollbarOrientation;
+    bool m_scrollbarDragging;
+    int m_scrollbarDragPointer;
+    int m_scrollbarDragGrabOffset;
+    int m_scrollbarDragInitialScroll;
     int m_hoverLinkIndex;
     bool m_selectionActive;
     bool m_selectionDragging;
@@ -1133,7 +1142,16 @@ private:
     void rememberDownload(const DownloadRecord& record);
     void clearPageDownloadMetadata();
     int maxScroll() const;
+    int maxScrollX() const;
     void clampScroll();
+    void clampScrollOffsets();
+    bool rootScrollbarGeometry(bool horizontal, int& trackStart, int& trackCross,
+                               int& trackExtent, int& thumbExtent, int& thumbTravel,
+                               int& maxScrollValue) const;
+    bool rootScrollbarHit(int x, int y, bool& horizontal, bool& thumb,
+                          int& trackStart, int& trackCross, int& trackExtent,
+                          int& thumbExtent, int& thumbTravel, int& maxScrollValue) const;
+    void updateScrollViewport();
     bool m_resourceViewportDirty = false;
 };
 

@@ -43,6 +43,8 @@ function Invoke-KernelBuildForSmoke {
         Remove-Item -Force -ErrorAction SilentlyContinue
     Get-ChildItem -Path (Join-Path $Root "kernel\build") -Recurse -Filter "kernel_apps.o" -ErrorAction SilentlyContinue |
         Remove-Item -Force -ErrorAction SilentlyContinue
+    Get-ChildItem -Path (Join-Path $Root "kernel\build") -Recurse -Filter "cxx_runtime.o" -ErrorAction SilentlyContinue |
+        Remove-Item -Force -ErrorAction SilentlyContinue
     Get-ChildItem -Path (Join-Path $Root "kernel\build") -Recurse -Filter "gxos_tls_foundation.o" -ErrorAction SilentlyContinue |
         Remove-Item -Force -ErrorAction SilentlyContinue
     Get-ChildItem -Path (Join-Path $Root "kernel\build") -Recurse -Filter "tcp.o" -ErrorAction SilentlyContinue |
@@ -1940,8 +1942,8 @@ try {
     }
     Restore-NavigatorKernelSmokeEnvironment
     Restore-NormalKernelBuild
-    Restore-NavigatorSmokeDirectoryState -State $downloadsState
     Restore-NavigatorSmokeFileState -State $ramdiskState
+    Restore-NavigatorSmokeDirectoryState -State $downloadsState
     Restore-NavigatorSmokeDirectoryState -State $persistentFixtureEspState
     Restore-NavigatorSmokeDirectoryState -State $wallpaperPackState
     Restore-NavigatorSmokeFileState -State $wallpaperPackCaBundleState

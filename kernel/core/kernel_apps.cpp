@@ -7166,7 +7166,10 @@ void ImageViewerApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
 NavigatorApp::NavigatorApp()
     : m_blockCount(0), m_bookmarkCount(0), m_recentDownloadCount(0), m_backCount(0),
       m_forwardCount(0),
-      m_addressFocused(false), m_addressCaret(0), m_ctrlPressed(false), m_scrollY(0), m_hoverLinkIndex(-1),
+      m_addressFocused(false), m_addressCaret(0), m_ctrlPressed(false), m_scrollY(0), m_scrollX(0),
+      m_scrollbarOwner(0), m_scrollbarOrientation(0), m_scrollbarDragging(false),
+      m_scrollbarDragPointer(0), m_scrollbarDragGrabOffset(0), m_scrollbarDragInitialScroll(0),
+      m_hoverLinkIndex(-1),
       m_selectionActive(false), m_selectionDragging(false), m_selectionMoved(false), m_mouseLeftDown(false),
       m_mouseMode(NAV_MOUSE_NONE), m_mouseDownLinkIndex(-1), m_mouseDownX(0), m_mouseDownY(0), m_mouseDragThresholdExceeded(false),
       m_backBtnId(-1), m_forwardBtnId(-1), m_reloadBtnId(-1), m_homeBtnId(-1),
@@ -7388,19 +7391,33 @@ void NavigatorApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h)
         drawDocument(x, y, w, h);
     }
 
-    if (maxScroll() > 0) {
-        uint32_t trackX = x + w - 22;
-        uint32_t trackY = contentTop + 4;
-        uint32_t trackH = contentH > 8 ? contentH - 8 : contentH;
-        framebuffer::fill_rect(trackX, trackY, 6, trackH, 0xFFE0E4EB);
-        int thumbH = (int)((trackH * (contentH ? contentH : 1)) / (uint32_t)(maxScroll() + (int)contentH));
-        if (thumbH < 20) thumbH = 20;
-        int maxScrollValue = maxScroll();
-        int thumbY = (int)trackY;
-        if (maxScrollValue > 0 && (int)trackH > thumbH) {
-            thumbY += ((int)trackH - thumbH) * m_scrollY / maxScrollValue;
-        }
-        framebuffer::fill_rect(trackX, (uint32_t)thumbY, 6, (uint32_t)thumbH, 0xFF848C9C);
+    int trackStart = 0;
+    int trackCross = 0;
+    int trackExtent = 0;
+    int thumbExtent = 0;
+    int thumbTravel = 0;
+    int maxScrollValue = 0;
+    if (rootScrollbarGeometry(false, trackStart, trackCross, trackExtent,
+                               thumbExtent, thumbTravel, maxScrollValue)) {
+        const int thumbOffset = navigator_scrollbar::thumb_offset(
+            m_scrollY, maxScrollValue, thumbTravel);
+        framebuffer::fill_rect(x + trackCross, y + trackStart, 6,
+                               (uint32_t)trackExtent, 0xFFE0E4EB);
+        framebuffer::fill_rect(x + trackCross, y + trackStart + thumbOffset, 6,
+                               (uint32_t)thumbExtent,
+                               m_scrollbarDragging && m_scrollbarOrientation == 1
+                                   ? 0xFF6F86AC : 0xFF848C9C);
+    }
+    if (rootScrollbarGeometry(true, trackStart, trackCross, trackExtent,
+                              thumbExtent, thumbTravel, maxScrollValue)) {
+        const int thumbOffset = navigator_scrollbar::thumb_offset(
+            m_scrollX, maxScrollValue, thumbTravel);
+        framebuffer::fill_rect(x + trackStart, y + trackCross,
+                               (uint32_t)trackExtent, 6, 0xFFE0E4EB);
+        framebuffer::fill_rect(x + trackStart + thumbOffset, y + trackCross,
+                               (uint32_t)thumbExtent, 6,
+                               m_scrollbarDragging && m_scrollbarOrientation == 2
+                                   ? 0xFF6F86AC : 0xFF848C9C);
     }
 
     framebuffer::fill_rect(x, y + h - STATUS_H, w, STATUS_H, 0xFF262A34);
@@ -7530,6 +7547,208 @@ bool NavigatorApp::smokeTypographyPhase7A()
 
     app.m_window = nullptr;
     return pass;
+}
+
+bool NavigatorApp::smokeScrollbarPointerInput()
+{
+    serial::puts("[NAVIGATOR-POINTER] boundary=KernelCompositor::handleMouseMove/Down/Up\n");
+    if (!framebuffer::is_available()) {
+        serial::puts("[NAVIGATOR-POINTER] result=FAIL reason=framebuffer-unavailable\n");
+        return false;
+    }
+
+    static const char kFixture[] =
+        "<a href='about:bookmarks'>adjacent content link</a>"
+        "<h1>Navigator pointer scrollbar fixture</h1>"
+        "<p>scroll line 01</p><p>scroll line 02</p><p>scroll line 03</p>"
+        "<p>scroll line 04</p><p>scroll line 05</p><p>scroll line 06</p>"
+        "<p>scroll line 07</p><p>scroll line 08</p><p>scroll line 09</p>"
+        "<p>scroll line 10</p><p>scroll line 11</p><p>scroll line 12</p>"
+        "<p>scroll line 13</p><p>scroll line 14</p><p>scroll line 15</p>"
+        "<p>scroll line 16</p><p>scroll line 17</p><p>scroll line 18</p>"
+        "<p>scroll line 19</p><p>scroll line 20</p><p>scroll line 21</p>"
+        "<p>scroll line 22</p><p>scroll line 23</p><p>scroll line 24</p>"
+        "<p>scroll line 25</p><p>scroll line 26</p><p>scroll line 27</p>"
+        "<p>scroll line 28</p><p>scroll line 29</p><p>scroll line 30</p>"
+        "<p>scroll line 31</p><p>scroll line 32</p><p>scroll line 33</p>"
+        "<p>scroll line 34</p><p>scroll line 35</p><p>scroll line 36</p>"
+        "<p>scroll line 37</p><p>scroll line 38</p><p>scroll line 39</p>"
+        "<p>scroll line 40</p><p>scroll line 41</p><p>scroll line 42</p>";
+
+    NavigatorApp app;
+    app::KernelWindow smokeWindow;
+    smokeWindow.x = 96;
+    smokeWindow.y = 72;
+    smokeWindow.w = 920;
+    smokeWindow.h = 640;
+    smokeWindow.owner = &app;
+    strcopy(smokeWindow.title, "Navigator", app::MAX_TITLE_LEN);
+    app.m_window = &smokeWindow;
+    app.parseHtmlDocument("http://guidexos.test:8080/navigator-smoke/pointer.html",
+                          kFixture, "http", "text/html", 200, "OK");
+
+    if (!compositor::KernelCompositor::registerWindow(&smokeWindow)) {
+        app.m_window = nullptr;
+        serial::puts("[NAVIGATOR-POINTER] result=FAIL reason=window-registration\n");
+        return false;
+    }
+
+    const int kTitlebarHeight = 24;
+    const auto repaint = []() { compositor::KernelCompositor::drawAllWindows(); };
+    const auto screen_y = [&](int localY) { return smokeWindow.y + kTitlebarHeight + localY; };
+    const auto screen_x = [&](int localX) { return smokeWindow.x + localX; };
+    const auto pointer_move = [&](int localX, int localY) {
+        compositor::KernelCompositor::handleMouseMove(screen_x(localX), screen_y(localY));
+    };
+    const auto pointer_click = [&](int localX, int localY) {
+        pointer_move(localX, localY);
+        compositor::KernelCompositor::handleMouseDown(screen_x(localX), screen_y(localY), 0x01);
+        compositor::KernelCompositor::handleMouseUp(screen_x(localX), screen_y(localY), 0x01);
+    };
+
+    repaint();
+    int trackStart = 0;
+    int trackCross = 0;
+    int trackExtent = 0;
+    int thumbExtent = 0;
+    int thumbTravel = 0;
+    int maxScrollValue = 0;
+    const bool geometry = app.rootScrollbarGeometry(false, trackStart, trackCross,
+        trackExtent, thumbExtent, thumbTravel, maxScrollValue);
+    const int initialScroll = app.m_scrollY;
+    const auto contentPaintHash = [&]() {
+        uint32_t hash = 2166136261u;
+        const int sampleRight = smokeWindow.w - 28;
+        const int sampleBottom = smokeWindow.h - STATUS_H - 16;
+        for (int sampleY = CONTENT_Y + 4; sampleY < sampleBottom; sampleY += 16) {
+            for (int sampleX = CONTENT_X + 4; sampleX < sampleRight; sampleX += 16) {
+                hash ^= framebuffer::get_pixel(
+                    (uint32_t)(smokeWindow.x + sampleX),
+                    (uint32_t)(smokeWindow.y + kTitlebarHeight + sampleY));
+                hash *= 16777619u;
+            }
+        }
+        return hash;
+    };
+    const uint32_t paintHashBefore = contentPaintHash();
+    serial::puts("[NAVIGATOR-POINTER] root.vertical.geometry x=");
+    serial_put_dec((uint32_t)trackCross);
+    serial::puts(" y=");
+    serial_put_dec((uint32_t)trackStart);
+    serial::puts(" w=6 h=");
+    serial_put_dec((uint32_t)trackExtent);
+    serial::puts(" thumb=");
+    serial_put_dec((uint32_t)thumbExtent);
+    serial::puts(" maxScrollY=");
+    serial_put_dec((uint32_t)maxScrollValue);
+    serial::puts(" initial=");
+    serial_put_dec((uint32_t)initialScroll);
+    serial::putc('\n');
+
+    const bool geometryPass = geometry && maxScrollValue > 0 && thumbTravel > 0 && initialScroll == 0;
+    const int bottomTrackY = trackStart + trackExtent - 2;
+    pointer_click(trackCross + 3, bottomTrackY);
+    const int afterTrackClick = app.m_scrollY;
+    repaint();
+    const uint32_t paintHashAfterTrackClick = contentPaintHash();
+    const bool trackClickPass = afterTrackClick > initialScroll && afterTrackClick <= maxScrollValue &&
+        paintHashBefore != paintHashAfterTrackClick;
+    serial::puts("[NAVIGATOR-POINTER] root.vertical.track_click pointer=");
+    serial_put_dec((uint32_t)bottomTrackY);
+    serial::puts(" old=");
+    serial_put_dec((uint32_t)initialScroll);
+    serial::puts(" final=");
+    serial_put_dec((uint32_t)afterTrackClick);
+    serial::puts(" max=");
+    serial_put_dec((uint32_t)maxScrollValue);
+    serial::puts(" result=");
+    serial::puts(trackClickPass ? "PASS\n" : "FAIL\n");
+
+    for (int i = 0; i < 8; ++i) pointer_click(trackCross + 3, bottomTrackY);
+    const int repeatedBottom = app.m_scrollY;
+    const bool bottomClampPass = repeatedBottom == maxScrollValue;
+    for (int i = 0; i < 8; ++i) pointer_click(trackCross + 3, trackStart + 1);
+    const int repeatedTop = app.m_scrollY;
+    const bool topClampPass = repeatedTop == 0;
+    serial::puts("[NAVIGATOR-POINTER] root.vertical.clamp bottom=");
+    serial_put_dec((uint32_t)repeatedBottom);
+    serial::puts("/");
+    serial_put_dec((uint32_t)maxScrollValue);
+    serial::puts(" top=");
+    serial_put_dec((uint32_t)repeatedTop);
+    serial::puts(" result=");
+    serial::puts((bottomClampPass && topClampPass) ? "PASS\n" : "FAIL\n");
+
+    int dragTrackStart = 0;
+    int dragTrackCross = 0;
+    int dragTrackExtent = 0;
+    int dragThumbExtent = 0;
+    int dragTravel = 0;
+    int dragMax = 0;
+    const bool dragGeometry = app.rootScrollbarGeometry(false, dragTrackStart, dragTrackCross,
+        dragTrackExtent, dragThumbExtent, dragTravel, dragMax);
+    const int dragStartY = dragTrackStart + dragThumbExtent / 2;
+    const int dragEndY = dragTrackStart + dragTravel + dragThumbExtent / 2;
+    pointer_move(dragTrackCross + 3, dragStartY);
+    compositor::KernelCompositor::handleMouseDown(
+        screen_x(dragTrackCross + 3), screen_y(dragStartY), 0x01);
+    pointer_move(dragTrackCross + 3, dragEndY);
+    compositor::KernelCompositor::handleMouseUp(
+        screen_x(dragTrackCross + 3), screen_y(dragEndY), 0x01);
+    const int afterDrag = app.m_scrollY;
+    repaint();
+    const bool dragPass = dragGeometry && afterDrag == dragMax &&
+        app.m_scrollbarOwner == 0 && !app.m_scrollbarDragging;
+    serial::puts("[NAVIGATOR-POINTER] root.vertical.thumb_drag start=");
+    serial_put_dec((uint32_t)dragStartY);
+    serial::puts(" end=");
+    serial_put_dec((uint32_t)dragEndY);
+    serial::puts(" final=");
+    serial_put_dec((uint32_t)afterDrag);
+    serial::puts("/");
+    serial_put_dec((uint32_t)dragMax);
+    serial::puts(" result=");
+    serial::puts(dragPass ? "PASS\n" : "FAIL\n");
+
+    for (int i = 0; i < 8; ++i) pointer_click(dragTrackCross + 3, dragTrackStart + 1);
+    const bool contentOutsideScrollbarPass = app.m_scrollY == 0;
+    char beforeScrollClickUrl[MAX_URL_LEN];
+    strcopy(beforeScrollClickUrl, app.m_currentUrl, sizeof(beforeScrollClickUrl));
+    pointer_click(CONTENT_X + 40, CONTENT_Y + 8);
+    const bool scrollbarUrlUnchanged = streq_local(beforeScrollClickUrl, app.m_currentUrl);
+
+    int linkIndex = -1;
+    for (int i = 0; i < app.m_blockCount; ++i) {
+        if (app.m_blocks[i].kind == BLOCK_LINK) {
+            linkIndex = i;
+            break;
+        }
+    }
+    const int linkWidth = smokeWindow.w - CONTENT_X * 2 - 32;
+    const int linkX = CONTENT_X + 15;
+    const int linkY = linkIndex >= 0
+        ? app.blockY(linkIndex, linkWidth) + css_margin_top_or(app.m_blocks[linkIndex].style, 4) + 1
+        : -1;
+    if (linkIndex >= 0 && linkY >= 0) pointer_click(linkX, linkY);
+    const bool adjacentLinkPass = linkIndex >= 0 &&
+        streq_local(app.m_currentUrl, "about:bookmarks");
+    serial::puts("[NAVIGATOR-POINTER] priority scrollbar_url_unchanged=");
+    serial::puts(scrollbarUrlUnchanged ? "yes" : "no");
+    serial::puts(" adjacent_content_scroll_unchanged=");
+    serial::puts(contentOutsideScrollbarPass ? "yes" : "no");
+    serial::puts(" adjacent_link_activation=");
+    serial::puts(adjacentLinkPass ? "yes\n" : "no\n");
+
+    const bool result = geometryPass && trackClickPass && bottomClampPass && topClampPass &&
+        dragPass && scrollbarUrlUnchanged && contentOutsideScrollbarPass && adjacentLinkPass;
+    serial::puts("[NAVIGATOR-POINTER] framebuffer_movement=");
+    serial::puts(paintHashBefore != paintHashAfterTrackClick ? "PASS\n" : "FAIL\n");
+    serial::puts("[NAVIGATOR-POINTER] result=");
+    serial::puts(result ? "PASS\n" : "FAIL\n");
+
+    compositor::KernelCompositor::unregisterWindow(&smokeWindow);
+    app.m_window = nullptr;
+    return result;
 }
 
 bool NavigatorApp::smokePersistentNavigationLifecycle()
@@ -8066,6 +8285,30 @@ bool NavigatorApp::smokePersistentNavigationLifecycle()
 
 void NavigatorApp::onMouseMove(int x, int y)
 {
+    if (m_mouseLeftDown && m_scrollbarDragging && m_scrollbarOwner == 1 &&
+        m_scrollbarOrientation != 0) {
+        const bool horizontal = m_scrollbarOrientation == 2;
+        int trackStart = 0;
+        int trackCross = 0;
+        int trackExtent = 0;
+        int thumbExtent = 0;
+        int thumbTravel = 0;
+        int maxScrollValue = 0;
+        if (rootScrollbarGeometry(horizontal, trackStart, trackCross, trackExtent,
+                                  thumbExtent, thumbTravel, maxScrollValue) &&
+            thumbTravel > 0 && maxScrollValue > 0) {
+            const int pointer = horizontal ? x : y;
+            const int desired = pointer - m_scrollbarDragGrabOffset - trackStart;
+            const int next = navigator_scrollbar::scroll_from_thumb_offset(
+                desired, maxScrollValue, thumbTravel);
+            if (horizontal) m_scrollX = next;
+            else m_scrollY = next;
+            updateScrollViewport();
+            invalidate();
+        }
+        return;
+    }
+
     if (m_mouseLeftDown && !m_addressFocused) {
         int dx = x - m_mouseDownX;
         if (dx < 0) dx = -dx;
@@ -8115,6 +8358,57 @@ void NavigatorApp::onMouseDown(int x, int y, uint8_t button)
 {
     if ((button & 0x01) == 0 && button != 1) return;
 
+    bool horizontal = false;
+    bool thumb = false;
+    int trackStart = 0;
+    int trackCross = 0;
+    int trackExtent = 0;
+    int thumbExtent = 0;
+    int thumbTravel = 0;
+    int maxScrollValue = 0;
+    if (rootScrollbarHit(x, y, horizontal, thumb, trackStart, trackCross,
+                         trackExtent, thumbExtent, thumbTravel, maxScrollValue)) {
+        m_mouseLeftDown = true;
+        m_mouseMode = NAV_MOUSE_NONE;
+        m_mouseDownX = x;
+        m_mouseDownY = y;
+        m_mouseDownLinkIndex = -1;
+        m_scrollbarOwner = 1;
+        m_scrollbarOrientation = horizontal ? 2 : 1;
+        const int pointer = horizontal ? x : y;
+        const int current = horizontal ? m_scrollX : m_scrollY;
+        if (thumb) {
+            const int thumbStart = trackStart + navigator_scrollbar::thumb_offset(
+                current, maxScrollValue, thumbTravel);
+            m_scrollbarDragging = true;
+            m_scrollbarDragPointer = pointer;
+            m_scrollbarDragGrabOffset = pointer - thumbStart;
+            m_scrollbarDragInitialScroll = current;
+        } else {
+            m_scrollbarDragging = false;
+            const int thumbStart = trackStart + navigator_scrollbar::thumb_offset(
+                current, maxScrollValue, thumbTravel);
+            const bool beforeThumb = pointer < thumbStart;
+            const int64_t page64 = horizontal
+                ? (m_window ? static_cast<int64_t>(m_window->w) : 0)
+                : (m_window ? static_cast<int64_t>(m_window->h) - TOOLBAR_H - STATUS_H - 12 : 0);
+            const int page = page64 <= 0 ? 0 :
+                (page64 > navigator_scrollbar::kMaxCoordinate
+                    ? static_cast<int>(navigator_scrollbar::kMaxCoordinate)
+                    : static_cast<int>(page64));
+            const int next = navigator_scrollbar::page_from_track_click(
+                current, page > 0 ? page : 1, beforeThumb, maxScrollValue);
+            if (horizontal) m_scrollX = next;
+            else m_scrollY = next;
+            updateScrollViewport();
+        }
+        invalidate();
+        return;
+    }
+
+    m_scrollbarOwner = 0;
+    m_scrollbarOrientation = 0;
+    m_scrollbarDragging = false;
     m_mouseLeftDown = true;
     m_mouseMode = NAV_MOUSE_NONE;
     m_mouseDownX = x;
@@ -8187,6 +8481,15 @@ void NavigatorApp::onMouseDown(int x, int y, uint8_t button)
 void NavigatorApp::onMouseUp(int x, int y, uint8_t button)
 {
     if ((button & 0x01) == 0 && button != 1) return;
+    if (m_scrollbarOwner == 1) {
+        m_scrollbarDragging = false;
+        m_scrollbarOwner = 0;
+        m_scrollbarOrientation = 0;
+        m_mouseLeftDown = false;
+        m_mouseMode = NAV_MOUSE_NONE;
+        invalidate();
+        return;
+    }
     NavigatorMouseMode mode = m_mouseMode;
     int downLinkIndex = m_mouseDownLinkIndex;
     int upLinkIndex = hitLinkIndex(x, y);
@@ -15132,6 +15435,10 @@ void NavigatorApp::loadUrl(const char* url)
     // viewport.  Keep the prior generation's scroll position only in its
     // lifecycle record; it must not affect this generation's admission pass.
     m_scrollY = 0;
+    m_scrollX = 0;
+    m_scrollbarOwner = 0;
+    m_scrollbarOrientation = 0;
+    m_scrollbarDragging = false;
     m_loading = true;
     m_throbberFrame = 0;
     m_loadingStartTick = (uint32_t)kernel::pit::ticks();
@@ -15158,6 +15465,10 @@ void NavigatorApp::loadUrl(const char* url)
         rememberPageMetadata(normalized, normalized, "unsupported", "", "Unsupported URL scheme", nullptr, 0);
     }
     m_scrollY = 0;
+    m_scrollX = 0;
+    m_scrollbarOwner = 0;
+    m_scrollbarOrientation = 0;
+    m_scrollbarDragging = false;
     m_addressFocused = false;
     m_addressBuffer[0] = '\0';
     m_addressCaret = 0;
@@ -15944,25 +16255,141 @@ void NavigatorApp::drawDocument(uint32_t x, uint32_t y, uint32_t w, uint32_t h)
 
 int NavigatorApp::maxScroll() const
 {
-    int visible = m_window ? ((int)m_window->h - TOOLBAR_H - STATUS_H - 12) : 0;
-    int maxWidth = m_window ? ((m_window->w - CONTENT_X * 2 - 32)) : 480;
-    if (maxWidth < 32) maxWidth = 32;
-    int docHeight = 24;
+    const int64_t visible = m_window
+        ? static_cast<int64_t>(m_window->h) - TOOLBAR_H - STATUS_H - 12 : 0;
+    const int64_t windowWidth = m_window ? static_cast<int64_t>(m_window->w) : 480;
+    const int64_t maxWidth64 = windowWidth - CONTENT_X * 2 - 32;
+    const int maxWidth = maxWidth64 < 32 ? 32 :
+        (maxWidth64 > navigator_scrollbar::kMaxCoordinate
+            ? static_cast<int>(navigator_scrollbar::kMaxCoordinate)
+            : static_cast<int>(maxWidth64));
+    int64_t docHeight = 24;
     for (int i = 0; i < m_blockCount; ++i) {
-        docHeight += blockHeight(m_blocks[i], maxWidth);
+        docHeight += static_cast<int64_t>(blockHeight(m_blocks[i], maxWidth));
         // Match the pre-gap added in blockY.
         if (i + 1 < m_blockCount && m_blocks[i + 1].kind == BLOCK_HEADING)
             docHeight += 10;
     }
-    int overflow = docHeight - visible;
-    return overflow > 0 ? overflow : 0;
+    return navigator_scrollbar::bounded_max_scroll(docHeight, visible);
+}
+
+int NavigatorApp::maxScrollX() const
+{
+    // The freestanding document model currently has no CSS overflow/container
+    // records or wide-table layout source. Keep this axis explicitly disabled
+    // so a phantom horizontal bar can never intercept document input.
+    return 0;
 }
 
 void NavigatorApp::clampScroll()
 {
-    int maximum = maxScroll();
-    if (m_scrollY < 0) m_scrollY = 0;
-    if (m_scrollY > maximum) m_scrollY = maximum;
+    m_scrollY = navigator_scrollbar::clamp_scroll(m_scrollY, maxScroll());
+}
+
+void NavigatorApp::clampScrollOffsets()
+{
+    m_scrollY = navigator_scrollbar::clamp_scroll(m_scrollY, maxScroll());
+    m_scrollX = navigator_scrollbar::clamp_scroll(m_scrollX, maxScrollX());
+}
+
+bool NavigatorApp::rootScrollbarGeometry(bool horizontal, int& trackStart,
+                                         int& trackCross, int& trackExtent,
+                                         int& thumbExtent, int& thumbTravel,
+                                         int& maxScrollValue) const
+{
+    trackStart = trackCross = trackExtent = thumbExtent = thumbTravel = 0;
+    maxScrollValue = horizontal ? maxScrollX() : maxScroll();
+    if (!m_window || maxScrollValue <= 0) return false;
+
+    const int clientW = m_window->w > 0 ? m_window->w : 0;
+    const int clientH = m_window->h > 0 ? m_window->h : 0;
+    const int contentTop = TOOLBAR_H + 6;
+    const int contentH = clientH > TOOLBAR_H + STATUS_H + 12
+        ? clientH - TOOLBAR_H - STATUS_H - 12 : 0;
+    if (clientW <= 0 || contentH <= 0) return false;
+
+    const bool verticalVisible = maxScroll() > 0;
+    const bool horizontalVisible = maxScrollX() > 0;
+    if (horizontal) {
+        trackStart = CONTENT_X;
+        trackCross = contentTop + contentH - 6;
+        trackExtent = clientW - CONTENT_X - 22 - (verticalVisible ? 6 : 0);
+        if (trackExtent <= 0) return false;
+        const int viewport = clientW - CONTENT_X * 2 - 32;
+        thumbExtent = navigator_scrollbar::thumb_extent(
+            static_cast<int64_t>(viewport),
+            static_cast<int64_t>(viewport) + maxScrollX(), trackExtent);
+    } else {
+        trackStart = contentTop + 4;
+        trackCross = clientW - 22;
+        trackExtent = contentH - 8 - (horizontalVisible ? 6 : 0);
+        if (trackExtent <= 0) return false;
+        const int viewport = contentH - (horizontalVisible ? 6 : 0);
+        thumbExtent = navigator_scrollbar::thumb_extent(
+            static_cast<int64_t>(viewport),
+            static_cast<int64_t>(viewport) + maxScroll(), trackExtent);
+    }
+    thumbTravel = navigator_scrollbar::thumb_travel(trackExtent, thumbExtent);
+    return trackExtent > 0 && thumbExtent > 0;
+}
+
+bool NavigatorApp::rootScrollbarHit(int x, int y, bool& horizontal, bool& thumb,
+                                    int& trackStart, int& trackCross,
+                                    int& trackExtent, int& thumbExtent,
+                                    int& thumbTravel, int& maxScrollValue) const
+{
+    horizontal = false;
+    thumb = false;
+    int vStart = 0;
+    int vCross = 0;
+    int vExtent = 0;
+    int vThumb = 0;
+    int vTravel = 0;
+    int vMax = 0;
+    if (rootScrollbarGeometry(false, vStart, vCross, vExtent, vThumb, vTravel, vMax) &&
+        x >= vCross && x < vCross + 6 && y >= vStart && y < vStart + vExtent) {
+        trackStart = vStart;
+        trackCross = vCross;
+        trackExtent = vExtent;
+        thumbExtent = vThumb;
+        thumbTravel = vTravel;
+        maxScrollValue = vMax;
+        const int thumbStart = vStart + navigator_scrollbar::thumb_offset(
+            m_scrollY, vMax, vTravel);
+        thumb = y >= thumbStart && y < thumbStart + vThumb;
+        return true;
+    }
+
+    int hStart = 0;
+    int hCross = 0;
+    int hExtent = 0;
+    int hThumb = 0;
+    int hTravel = 0;
+    int hMax = 0;
+    if (rootScrollbarGeometry(true, hStart, hCross, hExtent, hThumb, hTravel, hMax) &&
+        x >= hStart && x < hStart + hExtent && y >= hCross && y < hCross + 6) {
+        horizontal = true;
+        trackStart = hStart;
+        trackCross = hCross;
+        trackExtent = hExtent;
+        thumbExtent = hThumb;
+        thumbTravel = hTravel;
+        maxScrollValue = hMax;
+        const int thumbStart = hStart + navigator_scrollbar::thumb_offset(
+            m_scrollX, hMax, hTravel);
+        thumb = x >= thumbStart && x < thumbStart + hThumb;
+        return true;
+    }
+    return false;
+}
+
+void NavigatorApp::updateScrollViewport()
+{
+    clampScrollOffsets();
+    m_resourceViewportDirty = true;
+    if (m_resourceScheduler.currentScrollOffset != m_scrollY) {
+        updateViewportResourceAdmission();
+    }
 }
 // ============================================================
 // App Registration
@@ -19894,12 +20321,13 @@ void printNavigatorRuntimeSmokeReport()
     bool registered = printNavigatorRuntimeSmokePreamble();
     bool typographyOk = NavigatorApp::smokeTypographyPhase7A();
 #ifdef GXOS_NAVIGATOR_HTTP_SMOKE_ACTIVE
+    bool pointerOk = NavigatorApp::smokeScrollbarPointerInput();
     const bool phase8jRawOk = gxos::gxos_tls_run_phase8j_raw_ecdsa_diagnostics();
     serial::puts(phase8jRawOk
         ? "[NAVIGATOR-SMOKE] phase8j.raw_ecdsa.result=PASS\n"
         : "[NAVIGATOR-SMOKE] phase8j.raw_ecdsa.result=FAIL\n");
     bool httpOk = printNavigatorHttpSmokeCases();
-    serial::puts((registered && typographyOk && phase8jRawOk && httpOk) ? "[NAVIGATOR-SMOKE] result=PASS\n" : "[NAVIGATOR-SMOKE] result=FAIL\n");
+    serial::puts((registered && typographyOk && pointerOk && phase8jRawOk && httpOk) ? "[NAVIGATOR-SMOKE] result=PASS\n" : "[NAVIGATOR-SMOKE] result=FAIL\n");
 #else
     serial::puts("[NAVIGATOR-SMOKE] http.active_cases=skipped\n");
     serial::puts((registered && typographyOk) ? "[NAVIGATOR-SMOKE] result=PASS\n" : "[NAVIGATOR-SMOKE] result=FAIL\n");
@@ -19911,8 +20339,9 @@ void printNavigatorHttpRuntimeSmokeReport()
 {
     bool registered = printNavigatorRuntimeSmokePreamble();
     bool typographyOk = NavigatorApp::smokeTypographyPhase7A();
+    bool pointerOk = NavigatorApp::smokeScrollbarPointerInput();
     bool httpOk = printNavigatorHttpSmokeCases();
-    serial::puts((registered && typographyOk && httpOk) ? "[NAVIGATOR-SMOKE] result=PASS\n" : "[NAVIGATOR-SMOKE] result=FAIL\n");
+    serial::puts((registered && typographyOk && pointerOk && httpOk) ? "[NAVIGATOR-SMOKE] result=PASS\n" : "[NAVIGATOR-SMOKE] result=FAIL\n");
     serial::puts("[NAVIGATOR-SMOKE] END\n");
 }
 
