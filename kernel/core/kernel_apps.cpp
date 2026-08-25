@@ -7382,6 +7382,8 @@ void NavigatorApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h)
     uint32_t contentH = h > (uint32_t)(TOOLBAR_H + STATUS_H + 12) ? h - TOOLBAR_H - STATUS_H - 12 : 0;
     if (contentH > 0) {
         framebuffer::fill_rect(x + CONTENT_X, contentTop, w - CONTENT_X * 2, contentH, css_background_or(0xFFFAFBFD, m_bodyStyle));
+        if (m_resourceViewportDirty && m_resourceScheduler.currentScrollOffset != m_scrollY)
+            updateViewportResourceAdmission();
         drawDocument(x, y, w, h);
     }
 
@@ -7717,6 +7719,110 @@ bool NavigatorApp::smokePersistentNavigationLifecycle()
             latest().imagePaintObserved;
     };
 
+    auto emitScrollStage = [&](const char* stage, bool expected) -> bool {
+        if (app->m_resourceViewportDirty &&
+            app->m_resourceScheduler.currentScrollOffset != app->m_scrollY)
+            app->updateViewportResourceAdmission();
+        app->drawDocument(0, 0, smokeWindow.w, smokeWindow.h);
+        const gxos::apps::NavigatorResourceSchedulerStats& stats = app->m_resourceScheduler;
+        uint32_t visiblePainted = 0;
+        uint32_t activePainted = 0;
+        bool readmittedAndPainted = false;
+        for (uint32_t ref = 0; ref < gxos::apps::kNavigatorMaxResourceReferences; ++ref) {
+            const gxos::apps::NavigatorResourceReferenceMetadata& metadata = app->m_resourceReferences[ref];
+            if (metadata.state == static_cast<uint8_t>(gxos::apps::NavigatorResourceSchedulerState::Empty)) continue;
+            const int blockIndex = static_cast<int>(metadata.blockIndex);
+            const bool attached = metadata.state == static_cast<uint8_t>(gxos::apps::NavigatorResourceSchedulerState::Attached) ||
+                metadata.state == static_cast<uint8_t>(gxos::apps::NavigatorResourceSchedulerState::Deduplicated);
+            const bool painted = blockIndex >= 0 && blockIndex < app->m_blockCount && app->m_imagePaintLogged[blockIndex];
+            if (attached && painted) ++activePainted;
+            if (attached && painted &&
+                metadata.viewportClass == static_cast<uint8_t>(gxos::apps::NavigatorResourceViewportClass::Visible)) {
+                ++visiblePainted;
+            }
+            if (metadata.readmissionCount > 0 && painted &&
+                (metadata.viewportClass == static_cast<uint8_t>(gxos::apps::NavigatorResourceViewportClass::Visible) ||
+                 metadata.viewportClass == static_cast<uint8_t>(gxos::apps::NavigatorResourceViewportClass::Near))) {
+                readmittedAndPainted = true;
+            }
+            serial::puts("[NAVIGATOR-PERSISTENT] scroll_stage_image stage=");
+            serial::puts(stage ? stage : "unknown");
+            serial::puts(" ref=");
+            serial_put_dec(ref);
+            serial::puts(" relation=");
+            serial::puts(gxos::apps::navigatorResourceViewportClassName(
+                static_cast<gxos::apps::NavigatorResourceViewportClass>(metadata.viewportClass)));
+            serial::puts(" previous=");
+            serial::puts(gxos::apps::navigatorResourceViewportClassName(
+                static_cast<gxos::apps::NavigatorResourceViewportClass>(metadata.previousViewportClass)));
+            serial::puts(" state=");
+            serial::puts(gxos::apps::navigatorResourceSchedulerStateName(
+                static_cast<gxos::apps::NavigatorResourceSchedulerState>(metadata.state)));
+            serial::puts(" duplicate_of=");
+            if (metadata.duplicateOf == 0xFFFFu) serial::puts("none");
+            else serial_put_dec(metadata.duplicateOf);
+            serial::puts(" top=");
+            serial_put_dec(metadata.blockTop < 0 ? 0u : static_cast<uint32_t>(metadata.blockTop));
+            serial::puts(" bottom=");
+            serial_put_dec(metadata.blockBottom < 0 ? 0u : static_cast<uint32_t>(metadata.blockBottom));
+            serial::puts(" painted=");
+            serial::puts(painted ? "yes\n" : "no\n");
+        }
+        serial::puts("[NAVIGATOR-PERSISTENT] scroll_stage stage=");
+        serial::puts(stage ? stage : "unknown");
+        serial::puts(" offset=");
+        serial_put_dec(stats.currentScrollOffset < 0 ? 0u : static_cast<uint32_t>(stats.currentScrollOffset));
+        serial::puts(" viewport_top=");
+        serial_put_dec(stats.viewportTop < 0 ? 0u : static_cast<uint32_t>(stats.viewportTop));
+        serial::puts(" viewport_bottom=");
+        serial_put_dec(stats.viewportBottom < 0 ? 0u : static_cast<uint32_t>(stats.viewportBottom));
+        serial::puts(" visible=");
+        serial_put_dec(stats.visibleReferences);
+        serial::puts(" near=");
+        serial_put_dec(stats.nearReferences);
+        serial::puts(" far=");
+        serial_put_dec(stats.farReferences);
+        serial::puts(" unknown=");
+        serial_put_dec(stats.unknownViewportReferences);
+        serial::puts(" active_images=");
+        serial_put_dec(stats.activeCount);
+        serial::puts(" active_bytes=");
+        serial_put_dec64(stats.activeBytes);
+        serial::puts(" peak_bytes=");
+        serial_put_dec64(app->m_resourceMemory.peakDecodedBytes);
+        serial::puts(" admissions=");
+        serial_put_dec(stats.scrollTriggeredAdmissions);
+        serial::puts(" reconsidered=");
+        serial_put_dec(stats.resourcesReconsidered);
+        serial::puts(" passes=");
+        serial_put_dec(stats.viewportAdmissionPasses);
+        serial::puts(" evictions=");
+        serial_put_dec(stats.evictions);
+        serial::puts(" evicted_bytes=");
+        serial_put_dec64(stats.evictedDecodedBytes);
+        serial::puts(" readmissions=");
+        serial_put_dec(stats.reAdmissions);
+        serial::puts(" visible_loaded=");
+        serial_put_dec(stats.visibleLoaded);
+        serial::puts(" visible_denied=");
+        serial_put_dec(stats.visibleBudgetDenied + stats.visibleAdmissionFailures);
+        serial::puts(" visible_painted=");
+        serial_put_dec(visiblePainted);
+        serial::puts(" active_painted=");
+        serial_put_dec(activePainted);
+        serial::puts(" readmitted_painted=");
+        serial::puts(readmittedAndPainted ? "yes\n" : "no\n");
+        const bool bounded = stats.activeBytes <= gxos::apps::kNavigatorDecodedImageBudgetBytes &&
+            stats.activeCount <= gxos::apps::kNavigatorMaxActiveResources &&
+            app->countLiveResourceReferences() <= gxos::apps::kNavigatorMaxResourceReferences;
+        const bool pass = expected && bounded && stats.visibleLoaded > 0 && visiblePainted > 0;
+        serial::puts("[NAVIGATOR-PERSISTENT] scroll_stage_result stage=");
+        serial::puts(stage ? stage : "unknown");
+        serial::puts(" result=");
+        serial::puts(pass ? "PASS\n" : "FAIL\n");
+        return pass;
+    };
+
     app->navigateTo("http://10.0.2.2:8080/navigator-smoke/generated/VPRESS.HTM");
     bool viewportFirstExpected = emitRecord("viewport_pressure_1", true) && viewportPressureExpected();
     serial::puts("[NAVIGATOR-PERSISTENT] viewport_pressure_1.result=");
@@ -7735,6 +7841,89 @@ bool NavigatorApp::smokePersistentNavigationLifecycle()
     serial::puts("[NAVIGATOR-PERSISTENT] viewport_pressure_2.result=");
     serial::puts(viewportSecondExpected ? "PASS\n" : "FAIL\n");
     deterministicOk = deterministicOk && viewportSecondExpected;
+
+    app->navigateTo("http://10.0.2.2:8080/navigator-smoke/generated/VP8U.HTM");
+    // Positioned image rectangles are retained document geometry, but the
+    // legacy bare-metal maxScroll() extent is intentionally independent of
+    // out-of-flow boxes.  These offsets are derived from the fixture's stable
+    // A/B/C top coordinates and remain input-equivalent scroll positions.
+    const int phase8uMiddle = 850;
+    const int phase8uBottom = 1650;
+    bool phase8uA = emitScrollStage("phase8u_A_initial", true);
+    const uint32_t phase8uAdmissionsBefore = app->m_resourceScheduler.scrollTriggeredAdmissions;
+    app->m_scrollY = phase8uMiddle;
+    app->m_resourceViewportDirty = true;
+    bool phase8uB = emitScrollStage("phase8u_B_middle", true) &&
+        app->m_resourceScheduler.scrollTriggeredAdmissions > phase8uAdmissionsBefore;
+    serial::puts("[NAVIGATOR-PERSISTENT] phase8u_B_middle.admission=");
+    serial::puts(phase8uB ? "PASS\n" : "FAIL\n");
+    const uint32_t phase8uEvictionsBefore = app->m_resourceScheduler.evictions;
+    app->m_scrollY = phase8uBottom;
+    app->m_resourceViewportDirty = true;
+    bool phase8uC = emitScrollStage("phase8u_C_bottom", true) &&
+        app->m_resourceScheduler.evictions > phase8uEvictionsBefore;
+    serial::puts("[NAVIGATOR-PERSISTENT] phase8u_C_bottom.eviction=");
+    serial::puts(phase8uC ? "PASS\n" : "FAIL\n");
+    app->m_scrollY = phase8uMiddle;
+    app->m_resourceViewportDirty = true;
+    bool phase8uBReturn = emitScrollStage("phase8u_B_return", true);
+    const uint32_t phase8uReadmissionsBefore = app->m_resourceScheduler.reAdmissions;
+    app->m_scrollY = 0;
+    app->m_resourceViewportDirty = true;
+    bool phase8uAFinal = emitScrollStage("phase8u_A_final", true) &&
+        app->m_resourceScheduler.reAdmissions > phase8uReadmissionsBefore;
+    bool phase8uARepaired = false;
+    for (uint32_t ref = 0; ref < gxos::apps::kNavigatorMaxResourceReferences; ++ref) {
+        const gxos::apps::NavigatorResourceReferenceMetadata& metadata = app->m_resourceReferences[ref];
+        if (metadata.duplicateOf != 0xFFFFu && metadata.readmissionCount == 0) continue;
+        const int blockIndex = static_cast<int>(metadata.blockIndex);
+        if (metadata.readmissionCount > 0 && metadata.viewportClass == static_cast<uint8_t>(gxos::apps::NavigatorResourceViewportClass::Visible) &&
+            blockIndex >= 0 && blockIndex < app->m_blockCount && app->m_blocks[blockIndex].imagePixels &&
+            app->m_imagePaintLogged[blockIndex]) {
+            phase8uARepaired = true;
+            break;
+        }
+    }
+    serial::puts("[NAVIGATOR-PERSISTENT] phase8u_A_final.readmission_paint=");
+    serial::puts(phase8uARepaired ? "PASS\n" : "FAIL\n");
+    const uint64_t phase8uPeakBytes = app->m_resourceMemory.peakDecodedBytes;
+    const bool phase8uCycle = phase8uA && phase8uB && phase8uC && phase8uBReturn && phase8uAFinal && phase8uARepaired &&
+        phase8uPeakBytes <= gxos::apps::kNavigatorDecodedImageBudgetBytes;
+    serial::puts("[NAVIGATOR-PERSISTENT] phase8u_cycle.result=");
+    serial::puts(phase8uCycle ? "PASS\n" : "FAIL\n");
+    deterministicOk = deterministicOk && phase8uCycle;
+
+    app->navigateTo("http://10.0.2.2:8080/navigator-smoke/generated/TINY.HTM");
+    const bool phase8uReset = app->m_resourceScheduler.activeCount == 0 &&
+        app->m_resourceMemory.activeDecodedBytes == 0 &&
+        app->m_resourceScheduler.evictions == 0 &&
+        app->m_resourceScheduler.reAdmissions == 0 &&
+        app->m_resourceScheduler.viewportAdmissionPasses == 0 &&
+        app->countLiveResourceReferences() == 0;
+    serial::puts("[NAVIGATOR-PERSISTENT] phase8u_tiny_reset active_images=");
+    serial_put_dec(app->m_resourceScheduler.activeCount);
+    serial::puts(" active_bytes=");
+    serial_put_dec64(app->m_resourceMemory.activeDecodedBytes);
+    serial::puts(" evictions=");
+    serial_put_dec(app->m_resourceScheduler.evictions);
+    serial::puts(" readmissions=");
+    serial_put_dec(app->m_resourceScheduler.reAdmissions);
+    serial::puts(" passes=");
+    serial_put_dec(app->m_resourceScheduler.viewportAdmissionPasses);
+    serial::puts(" result=");
+    serial::puts(phase8uReset ? "PASS\n" : "FAIL\n");
+    deterministicOk = deterministicOk && phase8uReset;
+
+    app->navigateTo("http://10.0.2.2:8080/navigator-smoke/generated/VP8U.HTM");
+    bool phase8uReuseA = emitScrollStage("phase8u_reuse_A", true);
+    app->m_scrollY = phase8uMiddle;
+    app->m_resourceViewportDirty = true;
+    bool phase8uReuseB = emitScrollStage("phase8u_reuse_B", true);
+    const bool phase8uReuse = phase8uReuseA && phase8uReuseB &&
+        app->m_resourceMemory.activeDecodedBytes <= gxos::apps::kNavigatorDecodedImageBudgetBytes;
+    serial::puts("[NAVIGATOR-PERSISTENT] phase8u_reuse.result=");
+    serial::puts(phase8uReuse ? "PASS\n" : "FAIL\n");
+    deterministicOk = deterministicOk && phase8uReuse;
 
     app->navigateTo("http://10.0.2.2:8080/navigator-smoke/generated/HEAVY.HTM");
     bool heavyExpected = true;
@@ -8144,13 +8333,16 @@ void NavigatorApp::onKeyDown(uint32_t key)
     } else if (key == shell::KEY_PGUP) {
         m_scrollY -= 48;
         clampScroll();
+        m_resourceViewportDirty = true;
         setStatus("Scrolled up");
     } else if (key == shell::KEY_PGDN) {
         m_scrollY += 48;
         clampScroll();
+        m_resourceViewportDirty = true;
         setStatus("Scrolled down");
     } else if (key == shell::KEY_HOME) {
         m_scrollY = 0;
+        m_resourceViewportDirty = true;
         setStatus("Home position");
     }
 }
@@ -12317,6 +12509,7 @@ void NavigatorApp::finishLifecycleGeneration()
 
 void NavigatorApp::releaseImageResources()
 {
+	m_resourceViewportDirty = false;
     for (int i = 0; i < m_blockCount; ++i) {
         DocBlock& block = m_blocks[i];
         const bool ownsPixels = block.imagePixels &&
@@ -12350,6 +12543,490 @@ void NavigatorApp::releaseImageResources()
         m_resourceOrder[ref] = 0;
     }
     m_resourceTelemetryCount = 0;
+}
+
+bool NavigatorApp::evictImageResource(uint32_t referenceIndex, uint8_t reason)
+{
+    if (referenceIndex >= gxos::apps::kNavigatorMaxResourceReferences) return false;
+    gxos::apps::NavigatorResourceReferenceMetadata& reference = m_resourceReferences[referenceIndex];
+    if (reference.duplicateOf != 0xFFFFu ||
+        static_cast<gxos::apps::NavigatorResourceSchedulerState>(reference.state) !=
+            gxos::apps::NavigatorResourceSchedulerState::Attached) return false;
+    const gxos::apps::NavigatorResourceViewportClass viewportClass =
+        static_cast<gxos::apps::NavigatorResourceViewportClass>(reference.viewportClass);
+    if (viewportClass == gxos::apps::NavigatorResourceViewportClass::Visible ||
+        viewportClass == gxos::apps::NavigatorResourceViewportClass::Unsupported) return false;
+    const int ownerIndex = static_cast<int>(reference.blockIndex);
+    if (ownerIndex < 0 || ownerIndex >= m_blockCount) return false;
+    DocBlock& owner = m_blocks[ownerIndex];
+    if (!owner.imagePixels || owner.imageOwnerBlockIndex != ownerIndex) return false;
+    uint64_t decodedBytes = 0;
+    if (!gxos::apps::navigatorCheckedRgbaBytes(
+            owner.naturalWidth > 0 ? static_cast<uint32_t>(owner.naturalWidth) : 0u,
+            owner.naturalHeight > 0 ? static_cast<uint32_t>(owner.naturalHeight) : 0u,
+            decodedBytes)) return false;
+    gxos::gui::ImageBitmap bitmap{};
+    bitmap.status = gxos::gui::ImageLoadStatus::Ok;
+    bitmap.pixels = owner.imagePixels;
+    bitmap.width = owner.naturalWidth > 0 ? static_cast<uint32_t>(owner.naturalWidth) : 0;
+    bitmap.height = owner.naturalHeight > 0 ? static_cast<uint32_t>(owner.naturalHeight) : 0;
+    bitmap.format = static_cast<gxos::gui::ImageFormat>(owner.imageFormat);
+    gxos::gui::ImageAdapter::Release(bitmap);
+    owner.imagePixels = nullptr;
+    owner.imageOwnerBlockIndex = -1;
+    owner.imageStatus = static_cast<int>(gxos::gui::ImageLoadStatus::NotFound);
+    m_imagePaintLogged[ownerIndex] = false;
+    for (uint32_t i = 0; i < gxos::apps::kNavigatorMaxResourceReferences; ++i) {
+        if (m_resourceReferences[i].duplicateOf == static_cast<uint16_t>(referenceIndex)) {
+            const int duplicateIndex = static_cast<int>(m_resourceReferences[i].blockIndex);
+            if (duplicateIndex >= 0 && duplicateIndex < m_blockCount) {
+                m_blocks[duplicateIndex].imagePixels = nullptr;
+                m_blocks[duplicateIndex].imageOwnerBlockIndex = -1;
+                m_blocks[duplicateIndex].imageStatus = static_cast<int>(gxos::gui::ImageLoadStatus::NotFound);
+                m_imagePaintLogged[duplicateIndex] = false;
+            }
+            m_resourceReferences[i].state = static_cast<uint8_t>(gxos::apps::NavigatorResourceSchedulerState::Evicted);
+        }
+    }
+    m_resourceMemory.releaseDecoded(decodedBytes);
+    if (m_resourceScheduler.activeCount > 0) --m_resourceScheduler.activeCount;
+    m_resourceScheduler.activeBytes = m_resourceMemory.activeDecodedBytes;
+    ++m_resourceScheduler.evictions;
+    if (m_resourceScheduler.evictedDecodedBytes <= UINT64_MAX - decodedBytes)
+        m_resourceScheduler.evictedDecodedBytes += decodedBytes;
+    reference.state = static_cast<uint8_t>(gxos::apps::NavigatorResourceSchedulerState::Evicted);
+    reference.evictionReason = reason;
+    if (reference.evictionCount < UINT16_MAX) ++reference.evictionCount;
+    return true;
+}
+
+bool NavigatorApp::admitImageResource(uint32_t referenceIndex)
+{
+    if (referenceIndex >= gxos::apps::kNavigatorMaxResourceReferences) return false;
+    gxos::apps::NavigatorResourceReferenceMetadata& reference = m_resourceReferences[referenceIndex];
+    if (reference.duplicateOf != 0xFFFFu) return false;
+    const int blockIndex = static_cast<int>(reference.blockIndex);
+    if (blockIndex < 0 || blockIndex >= m_blockCount || m_blocks[blockIndex].kind != BLOCK_IMAGE) return false;
+    DocBlock& block = m_blocks[blockIndex];
+    const bool jpegByUrl = nav_url_path_ends_with_jpeg(block.url);
+    auto setClassification = [&](NavigatorResourceClassification classification, const char* reason) {
+        strcopy(block.resourceClassification, gxos::apps::navigatorResourceClassificationName(classification), sizeof(block.resourceClassification));
+        strcopy(block.imageError, reason ? reason : "", sizeof(block.imageError));
+        block.imageStatus = static_cast<int>(gxos::gui::ImageLoadStatus::NotFound);
+    };
+    auto failDecode = [&](gxos::gui::ImageLoadStatus status, bool jpeg) {
+        block.imageStatus = static_cast<int>(status);
+        if (status == gxos::gui::ImageLoadStatus::TooLarge)
+            setClassification(NavigatorResourceClassification::ImagePixelBudgetExceeded, "Decoded image exceeded the per-image cap.");
+        else if (status == gxos::gui::ImageLoadStatus::OutOfMemory)
+            setClassification(NavigatorResourceClassification::ImageAllocationFailed, "Image allocation failed.");
+        else if (status == gxos::gui::ImageLoadStatus::UnsupportedFormat && jpeg)
+            setClassification(NavigatorResourceClassification::UnsupportedJpegVariant, "JPEG variant is unsupported.");
+        else
+            setClassification(jpeg ? NavigatorResourceClassification::JpegDecodeFailed : NavigatorResourceClassification::PngDecodeFailed,
+                jpeg ? "JPEG decode failed." : "PNG decode failed.");
+        reference.state = static_cast<uint8_t>(gxos::apps::NavigatorResourceSchedulerState::Failed);
+    };
+    gxos::gui::ImageSafetyLimits limits = nav_kernel_remote_png_limits();
+    const uint8_t* bytes = nullptr;
+    uint32_t byteCount = 0;
+    bool localFile = false;
+    char localPath[MAX_URL_LEN];
+    localPath[0] = '\0';
+    KernelHttpResponse* response = nullptr;
+    if (nav_starts_with(block.url, "file://")) {
+        localFile = true;
+        strcopy(localPath, block.url + 7, sizeof(localPath));
+        limits = gxos::gui::DefaultImageSafetyLimits();
+    } else if (nav_starts_with(block.url, "http://") || nav_starts_with(block.url, "https://")) {
+        if (m_resourceScheduler.activeCount >= gxos::apps::kNavigatorMaxActiveResources) {
+            setClassification(NavigatorResourceClassification::ResourceSlotUnavailable, "Active decoded-resource capacity reached.");
+            ++m_resourceScheduler.resourceCapDenied;
+            reference.state = static_cast<uint8_t>(gxos::apps::NavigatorResourceSchedulerState::ResourceCapDenied);
+            return false;
+        }
+        ++m_resourceScheduler.fetchStarted;
+        response = kernel_http_fetch(block.url);
+        ++m_resourceScheduler.fetchCompleted;
+        block.resourceStatusCode = response->statusCode;
+        block.resourceEncodedBytes = response->encodedBodyBytes;
+        block.resourceDecodedBytes = response->decodedBodyBytes;
+        block.resourceRedirectCount = response->redirectCount;
+        strcopy(block.resourceContentType, response->contentType, sizeof(block.resourceContentType));
+        strcopy(block.resourceContentEncoding, response->contentEncoding, sizeof(block.resourceContentEncoding));
+        if (!response->ok) {
+            setClassification(nav_classify_kernel_http_failure(*response), response->error[0] ? response->error : "Remote image fetch failed.");
+            reference.state = static_cast<uint8_t>(gxos::apps::NavigatorResourceSchedulerState::Failed);
+            return false;
+        }
+        if (response->statusCode != 200 || response->bodyBytes <= 0 || response->bodyBytes > 256 * 1024) {
+            setClassification(response->bodyBytes > 256 * 1024 ? NavigatorResourceClassification::BodyTooLargeEncoded : NavigatorResourceClassification::HttpStatusOther,
+                response->bodyBytes > 256 * 1024 ? "Remote image exceeds the encoded byte limit." : "Remote image HTTP status was not 200.");
+            reference.state = static_cast<uint8_t>(gxos::apps::NavigatorResourceSchedulerState::Failed);
+            return false;
+        }
+        const bool contentTypePng = nav_mime_is(response->contentType, "image/png");
+        const bool contentTypeJpeg = nav_mime_is(response->contentType, "image/jpeg") || nav_mime_is(response->contentType, "image/jpg");
+        if (!contentTypePng && !contentTypeJpeg) {
+            setClassification(NavigatorResourceClassification::UnsupportedMime, "Remote image MIME is unsupported.");
+            reference.state = static_cast<uint8_t>(gxos::apps::NavigatorResourceSchedulerState::UnsupportedSkipped);
+            ++m_resourceScheduler.unsupportedSkipped;
+            return false;
+        }
+        if ((contentTypePng && nav_url_path_ends_with_jpeg(response->finalUrl[0] ? response->finalUrl : block.url)) ||
+            (contentTypeJpeg && nav_url_path_ends_with_png(response->finalUrl[0] ? response->finalUrl : block.url))) {
+            setClassification(NavigatorResourceClassification::MimeExtensionDisagreement, "Image MIME and URL extension disagree.");
+            reference.state = static_cast<uint8_t>(gxos::apps::NavigatorResourceSchedulerState::Failed);
+            return false;
+        }
+        bytes = reinterpret_cast<const uint8_t*>(response->body);
+        byteCount = static_cast<uint32_t>(response->bodyBytes);
+        if ((contentTypePng && (byteCount < 8 || bytes[0] != 0x89 || bytes[1] != 'P' || bytes[2] != 'N' || bytes[3] != 'G')) ||
+            (contentTypeJpeg && (byteCount < 2 || bytes[0] != 0xFF || bytes[1] != 0xD8))) {
+            setClassification(NavigatorResourceClassification::CorruptImage, "Image signature is malformed.");
+            reference.state = static_cast<uint8_t>(gxos::apps::NavigatorResourceSchedulerState::Failed);
+            return false;
+        }
+    } else {
+        setClassification(NavigatorResourceClassification::UnsupportedScheme, "Unsupported image URL scheme.");
+        reference.state = static_cast<uint8_t>(gxos::apps::NavigatorResourceSchedulerState::Failed);
+        return false;
+    }
+    const gxos::gui::ImageProbe probe = localFile
+        ? gxos::gui::ImageAdapter::ProbeFile(localPath, limits)
+        : gxos::gui::ImageAdapter::ProbeBytes(bytes, byteCount, limits);
+    block.naturalWidth = static_cast<int>(probe.width);
+    block.naturalHeight = static_cast<int>(probe.height);
+    uint64_t requestedDecodedBytes = 0;
+    if (probe.status != gxos::gui::ImageLoadStatus::Ok ||
+        !gxos::apps::navigatorCheckedRgbaBytes(probe.width, probe.height, requestedDecodedBytes)) {
+        failDecode(probe.status == gxos::gui::ImageLoadStatus::Ok ? gxos::gui::ImageLoadStatus::TooLarge : probe.status, jpegByUrl);
+        return false;
+    }
+    reference.activeBytesBefore = static_cast<uint32_t>(m_resourceMemory.activeDecodedBytes);
+    reference.budgetHeadroomBefore = static_cast<uint32_t>(m_resourceMemory.activeDecodedBytes < gxos::apps::kNavigatorDecodedImageBudgetBytes
+        ? gxos::apps::kNavigatorDecodedImageBudgetBytes - m_resourceMemory.activeDecodedBytes : 0);
+    reference.budgetRequestedBytes = static_cast<uint32_t>(requestedDecodedBytes);
+    if (!m_resourceMemory.reserveDecoded(requestedDecodedBytes)) {
+        block.imageStatus = static_cast<int>(gxos::gui::ImageLoadStatus::TooLarge);
+        setClassification(NavigatorResourceClassification::ImageMemoryBudgetDenied, "Document decoded-image memory budget denied this resource.");
+        ++m_resourceScheduler.budgetDenied;
+        m_resourceScheduler.noteDeniedDecoded(requestedDecodedBytes);
+        reference.state = static_cast<uint8_t>(gxos::apps::NavigatorResourceSchedulerState::BudgetDenied);
+        return false;
+    }
+    reference.budgetAcceptedBytes = static_cast<uint32_t>(requestedDecodedBytes);
+    ++m_resourceScheduler.decodeStarted;
+    if (m_resourceScheduler.peakTemporaryDecodeBytes < requestedDecodedBytes)
+        m_resourceScheduler.peakTemporaryDecodeBytes = requestedDecodedBytes;
+    gxos::gui::ImageBitmap bitmap = localFile
+        ? gxos::gui::ImageAdapter::LoadFromFile(localPath, limits)
+        : gxos::gui::ImageAdapter::LoadFromBytes(bytes, byteCount, limits);
+    block.imageStatus = static_cast<int>(bitmap.status);
+    block.naturalWidth = static_cast<int>(bitmap.width);
+    block.naturalHeight = static_cast<int>(bitmap.height);
+    block.imageFormat = static_cast<int>(bitmap.format);
+    block.imagePixels = bitmap.pixels;
+    if (bitmap.status != gxos::gui::ImageLoadStatus::Ok) {
+        m_resourceMemory.releaseDecoded(requestedDecodedBytes);
+        failDecode(bitmap.status, jpegByUrl);
+        return false;
+    }
+    block.imageOwnerBlockIndex = blockIndex;
+    reference.state = static_cast<uint8_t>(gxos::apps::NavigatorResourceSchedulerState::Attached);
+    reference.classification = static_cast<uint8_t>(bitmap.format == gxos::gui::ImageFormat::Jpeg
+        ? NavigatorResourceClassification::LoadedJpeg : NavigatorResourceClassification::LoadedPng);
+    strcopy(block.resourceClassification, gxos::apps::navigatorResourceClassificationName(
+        static_cast<NavigatorResourceClassification>(reference.classification)), sizeof(block.resourceClassification));
+    block.imageError[0] = '\0';
+    ++m_resourceScheduler.decoded;
+    ++m_resourceScheduler.attached;
+    ++m_resourceScheduler.activeCount;
+    m_resourceScheduler.noteLoadedDecoded(requestedDecodedBytes);
+    m_resourceScheduler.activeBytes = m_resourceMemory.activeDecodedBytes;
+    if (m_resourceScheduler.peakActiveBytes < m_resourceScheduler.activeBytes)
+        m_resourceScheduler.peakActiveBytes = m_resourceScheduler.activeBytes;
+    return true;
+}
+
+void NavigatorApp::updateViewportResourceAdmission()
+{
+    if (m_resourceScheduler.currentScrollOffset == m_scrollY) {
+        m_resourceViewportDirty = false;
+        return;
+    }
+    m_resourceViewportDirty = false;
+    ++m_resourceScheduler.viewportGeneration;
+    ++m_resourceScheduler.viewportAdmissionPasses;
+    m_resourceScheduler.currentScrollOffset = m_scrollY > 0 ? m_scrollY : 0;
+    gxos::apps::NavigatorResourceViewportGeometry viewport{};
+    viewport.viewportTop = CONTENT_Y;
+    viewport.viewportBottom = m_window ? m_window->h - STATUS_H - 8 : -1;
+    viewport.viewportWidth = m_window ? m_window->w - CONTENT_X * 2 - 32 : 0;
+    if (viewport.viewportWidth < 0) viewport.viewportWidth = 0;
+    viewport.viewportHeight = viewport.viewportBottom >= viewport.viewportTop
+        ? viewport.viewportBottom - viewport.viewportTop : 0;
+    viewport.scrollOffset = m_resourceScheduler.currentScrollOffset;
+    viewport.preloadMargin = viewport.viewportHeight;
+    m_resourceScheduler.viewportTop = viewport.viewportTop;
+    m_resourceScheduler.viewportBottom = viewport.viewportBottom;
+    m_resourceScheduler.viewportWidth = viewport.viewportWidth;
+    m_resourceScheduler.viewportHeight = viewport.viewportHeight;
+    m_resourceScheduler.preloadMargin = viewport.preloadMargin;
+    const int geometryWidth = viewport.viewportWidth > 0 ? viewport.viewportWidth : 480;
+    const uint32_t referenceCount = countLiveResourceReferences();
+    if (referenceCount > UINT32_MAX - m_resourceScheduler.resourcesReconsidered)
+        m_resourceScheduler.resourcesReconsidered = UINT32_MAX;
+    else
+        m_resourceScheduler.resourcesReconsidered += referenceCount;
+    bool relationChanged = false;
+    for (uint32_t i = 0; i < referenceCount; ++i) {
+        gxos::apps::NavigatorResourceReferenceMetadata& reference = m_resourceReferences[i];
+        const gxos::apps::NavigatorResourceViewportClass previous =
+            static_cast<gxos::apps::NavigatorResourceViewportClass>(reference.viewportClass);
+        reference.previousViewportClass = reference.viewportClass;
+        const int blockIndex = static_cast<int>(reference.blockIndex);
+        int blockTop = -1;
+        int blockBottom = -1;
+        if (blockIndex >= 0 && blockIndex < m_blockCount) {
+            blockTop = blockY(blockIndex, geometryWidth);
+            int blockHeightValue = blockHeight(m_blocks[blockIndex], geometryWidth);
+            if (m_blocks[blockIndex].style.absolutePosition) {
+                int absoluteImageHeight = m_blocks[blockIndex].height > 0 ? m_blocks[blockIndex].height : 64;
+                if (absoluteImageHeight > 420) absoluteImageHeight = 420;
+                blockHeightValue = css_margin_top_or(m_blocks[blockIndex].style, 6) + absoluteImageHeight +
+                    css_margin_bottom_or(m_blocks[blockIndex].style, 6);
+            }
+            if (blockTop >= 0 && blockHeightValue >= 0) blockBottom = blockTop + blockHeightValue;
+        }
+        reference.blockTop = blockTop;
+        reference.blockBottom = blockBottom;
+        gxos::apps::NavigatorResourceViewportClass current = gxos::apps::navigatorClassifyViewportRect(
+            blockTop, blockBottom, viewport, &reference.distanceFromViewport);
+        if (nav_url_path_ends_with_extension(m_blocks[blockIndex].url, ".svg") ||
+            nav_url_path_ends_with_extension(m_blocks[blockIndex].url, ".webp") ||
+            nav_url_path_ends_with_extension(m_blocks[blockIndex].url, ".avif") ||
+            nav_url_path_ends_with_extension(m_blocks[blockIndex].url, ".gif"))
+            current = gxos::apps::NavigatorResourceViewportClass::Unsupported;
+        reference.viewportClass = static_cast<uint8_t>(current);
+        reference.priority = gxos::apps::navigatorResourcePriorityWithViewport(current, reference.formatHint);
+        if (previous != current) relationChanged = true;
+    }
+    for (uint32_t i = 0; i < referenceCount; ++i) {
+        gxos::apps::NavigatorResourceReferenceMetadata& reference = m_resourceReferences[i];
+        if (reference.duplicateOf == 0xFFFFu) continue;
+        gxos::apps::NavigatorResourceReferenceMetadata& canonical = m_resourceReferences[reference.duplicateOf];
+        const gxos::apps::NavigatorResourceViewportClass current =
+            static_cast<gxos::apps::NavigatorResourceViewportClass>(reference.viewportClass);
+        const gxos::apps::NavigatorResourceViewportClass canonicalClass =
+            static_cast<gxos::apps::NavigatorResourceViewportClass>(canonical.viewportClass);
+        if (static_cast<uint8_t>(current) < static_cast<uint8_t>(canonicalClass) ||
+            (current == canonicalClass && reference.distanceFromViewport >= 0 &&
+             (canonical.distanceFromViewport < 0 || reference.distanceFromViewport < canonical.distanceFromViewport))) {
+            if (canonicalClass != current) relationChanged = true;
+            canonical.viewportClass = reference.viewportClass;
+            canonical.priority = reference.priority;
+            canonical.blockTop = reference.blockTop;
+            canonical.blockBottom = reference.blockBottom;
+            canonical.distanceFromViewport = reference.distanceFromViewport;
+        }
+    }
+
+    auto refreshCurrentCounters = [&]() {
+        m_resourceScheduler.visibleReferences = 0;
+        m_resourceScheduler.nearReferences = 0;
+        m_resourceScheduler.farReferences = 0;
+        m_resourceScheduler.unknownViewportReferences = 0;
+        m_resourceScheduler.visibleLoaded = 0;
+        m_resourceScheduler.visibleBudgetDenied = 0;
+        m_resourceScheduler.nearLoaded = 0;
+        m_resourceScheduler.nearBudgetDenied = 0;
+        m_resourceScheduler.farLoaded = 0;
+        m_resourceScheduler.farBudgetDenied = 0;
+        m_resourceScheduler.decodedBytesVisible = 0;
+        m_resourceScheduler.decodedBytesNear = 0;
+        m_resourceScheduler.decodedBytesFar = 0;
+        for (uint32_t i = 0; i < referenceCount; ++i) {
+            const gxos::apps::NavigatorResourceReferenceMetadata& reference = m_resourceReferences[i];
+            const gxos::apps::NavigatorResourceViewportClass viewportClass =
+                static_cast<gxos::apps::NavigatorResourceViewportClass>(reference.viewportClass);
+            switch (viewportClass) {
+            case gxos::apps::NavigatorResourceViewportClass::Visible: ++m_resourceScheduler.visibleReferences; break;
+            case gxos::apps::NavigatorResourceViewportClass::Near: ++m_resourceScheduler.nearReferences; break;
+            case gxos::apps::NavigatorResourceViewportClass::Far: ++m_resourceScheduler.farReferences; break;
+            case gxos::apps::NavigatorResourceViewportClass::Unknown: ++m_resourceScheduler.unknownViewportReferences; break;
+            default: break;
+            }
+            if (reference.duplicateOf != 0xFFFFu) continue;
+            const gxos::apps::NavigatorResourceSchedulerState state =
+                static_cast<gxos::apps::NavigatorResourceSchedulerState>(reference.state);
+            if (state == gxos::apps::NavigatorResourceSchedulerState::BudgetDenied) {
+                if (viewportClass == gxos::apps::NavigatorResourceViewportClass::Visible) ++m_resourceScheduler.visibleBudgetDenied;
+                else if (viewportClass == gxos::apps::NavigatorResourceViewportClass::Near) ++m_resourceScheduler.nearBudgetDenied;
+                else if (viewportClass == gxos::apps::NavigatorResourceViewportClass::Far) ++m_resourceScheduler.farBudgetDenied;
+            }
+            if (state != gxos::apps::NavigatorResourceSchedulerState::Attached) continue;
+            const int blockIndex = static_cast<int>(reference.blockIndex);
+            if (blockIndex < 0 || blockIndex >= m_blockCount || !m_blocks[blockIndex].imagePixels) continue;
+            const uint64_t bytes = reference.budgetAcceptedBytes;
+            if (viewportClass == gxos::apps::NavigatorResourceViewportClass::Visible) {
+                ++m_resourceScheduler.visibleLoaded; m_resourceScheduler.decodedBytesVisible += bytes;
+            } else if (viewportClass == gxos::apps::NavigatorResourceViewportClass::Near) {
+                ++m_resourceScheduler.nearLoaded; m_resourceScheduler.decodedBytesNear += bytes;
+            } else if (viewportClass == gxos::apps::NavigatorResourceViewportClass::Far) {
+                ++m_resourceScheduler.farLoaded; m_resourceScheduler.decodedBytesFar += bytes;
+            }
+        }
+    };
+    refreshCurrentCounters();
+    if (relationChanged) {
+        uint32_t candidates[gxos::apps::kNavigatorMaxResourceReferences]{};
+        uint32_t candidateCount = 0;
+        for (uint32_t i = 0; i < referenceCount; ++i) {
+            const gxos::apps::NavigatorResourceReferenceMetadata& reference = m_resourceReferences[i];
+            const auto viewportClass = static_cast<gxos::apps::NavigatorResourceViewportClass>(reference.viewportClass);
+            const auto state = static_cast<gxos::apps::NavigatorResourceSchedulerState>(reference.state);
+            if (reference.duplicateOf == 0xFFFFu &&
+                (viewportClass == gxos::apps::NavigatorResourceViewportClass::Visible || viewportClass == gxos::apps::NavigatorResourceViewportClass::Near) &&
+                (state == gxos::apps::NavigatorResourceSchedulerState::BudgetDenied ||
+                 state == gxos::apps::NavigatorResourceSchedulerState::ResourceCapDenied ||
+                 state == gxos::apps::NavigatorResourceSchedulerState::Evicted))
+                candidates[candidateCount++] = i;
+        }
+        for (uint32_t start = 0; start < candidateCount; ++start) {
+            uint32_t selected = start;
+            for (uint32_t j = start + 1; j < candidateCount; ++j) {
+                const auto& left = m_resourceReferences[candidates[j]];
+                const auto& right = m_resourceReferences[candidates[selected]];
+                if (left.priority < right.priority ||
+                    (left.priority == right.priority && (left.sourceOrdinal < right.sourceOrdinal ||
+                     (left.sourceOrdinal == right.sourceOrdinal && left.normalizedUrlHash < right.normalizedUrlHash)))) selected = j;
+            }
+            const uint32_t tmp = candidates[start]; candidates[start] = candidates[selected]; candidates[selected] = tmp;
+        }
+        for (uint32_t c = 0; c < candidateCount; ++c) {
+            const uint32_t selected = candidates[c];
+            gxos::apps::NavigatorResourceReferenceMetadata& reference = m_resourceReferences[selected];
+            uint64_t required = reference.budgetRequestedBytes;
+            bool evictionAttempted = false;
+            while (m_resourceScheduler.activeCount >= gxos::apps::kNavigatorMaxActiveResources ||
+                (required > gxos::apps::kNavigatorDecodedImageBudgetBytes -
+                    (m_resourceMemory.activeDecodedBytes > gxos::apps::kNavigatorDecodedImageBudgetBytes
+                        ? gxos::apps::kNavigatorDecodedImageBudgetBytes : m_resourceMemory.activeDecodedBytes))) {
+                int victim = -1;
+                for (uint32_t i = 0; i < referenceCount; ++i) {
+                    const auto& candidate = m_resourceReferences[i];
+                    if (candidate.duplicateOf != 0xFFFFu || static_cast<gxos::apps::NavigatorResourceSchedulerState>(candidate.state) != gxos::apps::NavigatorResourceSchedulerState::Attached) continue;
+                    const auto vc = static_cast<gxos::apps::NavigatorResourceViewportClass>(candidate.viewportClass);
+                    if (vc == gxos::apps::NavigatorResourceViewportClass::Visible || vc == gxos::apps::NavigatorResourceViewportClass::Unsupported) continue;
+                    if (victim < 0) { victim = static_cast<int>(i); continue; }
+                    const auto& current = m_resourceReferences[victim];
+                    const uint8_t leftRank = gxos::apps::navigatorResourceEvictionClassRank(vc);
+                    const uint8_t rightRank = gxos::apps::navigatorResourceEvictionClassRank(static_cast<gxos::apps::NavigatorResourceViewportClass>(current.viewportClass));
+                    if (leftRank < rightRank || (leftRank == rightRank && (candidate.sourceOrdinal < current.sourceOrdinal ||
+                        (candidate.sourceOrdinal == current.sourceOrdinal && candidate.normalizedUrlHash < current.normalizedUrlHash)))) victim = static_cast<int>(i);
+                }
+                evictionAttempted = true;
+                if (victim < 0 || !evictImageResource(static_cast<uint32_t>(victim), 1)) break;
+            }
+            const bool cannotFit = m_resourceScheduler.activeCount >= gxos::apps::kNavigatorMaxActiveResources ||
+                (required > gxos::apps::kNavigatorDecodedImageBudgetBytes -
+                    (m_resourceMemory.activeDecodedBytes > gxos::apps::kNavigatorDecodedImageBudgetBytes
+                        ? gxos::apps::kNavigatorDecodedImageBudgetBytes : m_resourceMemory.activeDecodedBytes));
+            if (cannotFit) {
+                if (evictionAttempted) ++m_resourceScheduler.budgetDenialsAfterEvictionAttempts;
+                if (static_cast<gxos::apps::NavigatorResourceViewportClass>(reference.viewportClass) == gxos::apps::NavigatorResourceViewportClass::Visible)
+                    ++m_resourceScheduler.visibleAdmissionFailures;
+                continue;
+            }
+            const bool wasEvicted = static_cast<gxos::apps::NavigatorResourceSchedulerState>(reference.state) ==
+                gxos::apps::NavigatorResourceSchedulerState::Evicted;
+            if (admitImageResource(selected)) {
+                reference.admissionReason = 1;
+                ++m_resourceScheduler.scrollTriggeredAdmissions;
+                if (wasEvicted) {
+                    ++m_resourceScheduler.reAdmissions;
+                    if (reference.readmissionCount < UINT16_MAX) ++reference.readmissionCount;
+                }
+            } else {
+                if (static_cast<gxos::apps::NavigatorResourceViewportClass>(reference.viewportClass) == gxos::apps::NavigatorResourceViewportClass::Visible)
+                    ++m_resourceScheduler.visibleAdmissionFailures;
+                if (static_cast<gxos::apps::NavigatorResourceSchedulerState>(reference.state) == gxos::apps::NavigatorResourceSchedulerState::BudgetDenied && evictionAttempted)
+                    ++m_resourceScheduler.budgetDenialsAfterEvictionAttempts;
+            }
+        }
+    }
+    for (uint32_t i = 0; i < referenceCount; ++i) {
+        gxos::apps::NavigatorResourceReferenceMetadata& reference = m_resourceReferences[i];
+        if (reference.duplicateOf == 0xFFFFu) continue;
+        const int ownerIndex = static_cast<int>(m_resourceReferences[reference.duplicateOf].blockIndex);
+        const int duplicateIndex = static_cast<int>(reference.blockIndex);
+        if (ownerIndex < 0 || duplicateIndex < 0 || ownerIndex >= m_blockCount || duplicateIndex >= m_blockCount) continue;
+        if (m_blocks[ownerIndex].imageStatus == static_cast<int>(gxos::gui::ImageLoadStatus::Ok) && m_blocks[ownerIndex].imagePixels) {
+            m_blocks[duplicateIndex].imageStatus = m_blocks[ownerIndex].imageStatus;
+            m_blocks[duplicateIndex].naturalWidth = m_blocks[ownerIndex].naturalWidth;
+            m_blocks[duplicateIndex].naturalHeight = m_blocks[ownerIndex].naturalHeight;
+            m_blocks[duplicateIndex].imageFormat = m_blocks[ownerIndex].imageFormat;
+            m_blocks[duplicateIndex].imagePixels = m_blocks[ownerIndex].imagePixels;
+            m_blocks[duplicateIndex].imageOwnerBlockIndex = ownerIndex;
+            reference.state = static_cast<uint8_t>(gxos::apps::NavigatorResourceSchedulerState::Deduplicated);
+        } else if (static_cast<gxos::apps::NavigatorResourceSchedulerState>(m_resourceReferences[reference.duplicateOf].state) == gxos::apps::NavigatorResourceSchedulerState::Evicted) {
+            reference.state = static_cast<uint8_t>(gxos::apps::NavigatorResourceSchedulerState::Evicted);
+        }
+        reference.classification = m_resourceReferences[reference.duplicateOf].classification;
+        reference.budgetRequestedBytes = m_resourceReferences[reference.duplicateOf].budgetRequestedBytes;
+        reference.budgetAcceptedBytes = m_resourceReferences[reference.duplicateOf].budgetAcceptedBytes;
+    }
+    refreshCurrentCounters();
+    m_resourceScheduler.activeBytes = m_resourceMemory.activeDecodedBytes;
+    m_resourceScheduler.releasedDecodedBytes = m_resourceMemory.releasedDecodedBytes;
+    m_resourceScheduler.deniedAllocationBytes = m_resourceMemory.deniedAllocationBytes;
+    refreshImageResourceMetadata();
+    char viewportGenerationText[16];
+    char viewportPassText[16];
+    char scrollText[16];
+    char reconsideredText[16];
+    char admissionsText[16];
+    char evictionsText[16];
+    char readmissionsText[16];
+    char evictedBytesText[24];
+    char activeCountText[16];
+    char activeBytesText[24];
+    char peakBytesText[24];
+    nav_int_to_text((int)m_resourceScheduler.viewportGeneration, viewportGenerationText, sizeof(viewportGenerationText));
+    nav_int_to_text((int)m_resourceScheduler.viewportAdmissionPasses, viewportPassText, sizeof(viewportPassText));
+    nav_int_to_text(m_resourceScheduler.currentScrollOffset, scrollText, sizeof(scrollText));
+    nav_int_to_text((int)m_resourceScheduler.resourcesReconsidered, reconsideredText, sizeof(reconsideredText));
+    nav_int_to_text((int)m_resourceScheduler.scrollTriggeredAdmissions, admissionsText, sizeof(admissionsText));
+    nav_int_to_text((int)m_resourceScheduler.evictions, evictionsText, sizeof(evictionsText));
+    nav_int_to_text((int)m_resourceScheduler.reAdmissions, readmissionsText, sizeof(readmissionsText));
+    nav_int_to_text((int)m_resourceScheduler.evictedDecodedBytes, evictedBytesText, sizeof(evictedBytesText));
+    nav_int_to_text((int)m_resourceScheduler.activeCount, activeCountText, sizeof(activeCountText));
+    nav_int_to_text((int)m_resourceMemory.activeDecodedBytes, activeBytesText, sizeof(activeBytesText));
+    nav_int_to_text((int)m_resourceMemory.peakDecodedBytes, peakBytesText, sizeof(peakBytesText));
+    serial::puts("[NAVIGATOR-VIEWPORT] generation=");
+    serial::puts(viewportGenerationText);
+    serial::puts(" pass=");
+    serial::puts(viewportPassText);
+    serial::puts(" scroll=");
+    serial::puts(scrollText);
+    serial::puts(" reconsidered=");
+    serial::puts(reconsideredText);
+    serial::puts(" admissions=");
+    serial::puts(admissionsText);
+    serial::puts(" evictions=");
+    serial::puts(evictionsText);
+    serial::puts(" readmissions=");
+    serial::puts(readmissionsText);
+    serial::puts(" evicted_bytes=");
+    serial::puts(evictedBytesText);
+    serial::puts(" active_count=");
+    serial::puts(activeCountText);
+    serial::puts(" active_bytes=");
+    serial::puts(activeBytesText);
+    serial::puts(" peak_bytes=");
+    serial::puts(peakBytesText);
+    serial::puts("\n");
 }
 
 void NavigatorApp::prepareImageResources()
@@ -12386,6 +13063,7 @@ void NavigatorApp::prepareImageResources()
     };
     m_resourceScheduler = gxos::apps::NavigatorResourceSchedulerStats{};
     m_resourceMemory.reset();
+    m_resourceViewportDirty = false;
     m_resourceTelemetryCount = 0;
     for (uint32_t ref = 0; ref < gxos::apps::kNavigatorMaxResourceReferences; ++ref)
         m_resourceReferences[ref] = gxos::apps::NavigatorResourceReferenceMetadata{};
@@ -12405,6 +13083,7 @@ void NavigatorApp::prepareImageResources()
     m_resourceScheduler.viewportWidth = viewport.viewportWidth;
     m_resourceScheduler.viewportHeight = viewport.viewportHeight;
     m_resourceScheduler.initialScrollOffset = viewport.scrollOffset;
+    m_resourceScheduler.currentScrollOffset = viewport.scrollOffset;
     m_resourceScheduler.preloadMargin = viewport.preloadMargin;
     const int geometryWidth = viewport.viewportWidth > 0 ? viewport.viewportWidth : 480;
     auto noteViewportReferenceClass = [&](gxos::apps::NavigatorResourceViewportClass viewportClass) {
@@ -13045,11 +13724,20 @@ void NavigatorApp::refreshImageResourceMetadata()
             ++m_metaLocalImages;
         }
         const bool duplicate = priorDuplicate(i);
+        int stateReferenceIndex = -1;
+        for (uint32_t ref = 0; ref < gxos::apps::kNavigatorMaxResourceReferences; ++ref) {
+            if (m_resourceReferences[ref].state != static_cast<uint8_t>(gxos::apps::NavigatorResourceSchedulerState::Empty) &&
+                static_cast<int>(m_resourceReferences[ref].blockIndex) == i) {
+                stateReferenceIndex = static_cast<int>(ref);
+                break;
+            }
+        }
         if (duplicate) {
             ++m_metaDuplicateUrls;
             if (!classIs(block.resourceClassification, "duplicate_resource_skipped")) ++m_metaDuplicateNetworkFetches;
         }
         const bool skipped = classIs(block.resourceClassification, "duplicate_resource_skipped") ||
+            (stateReferenceIndex >= 0 && static_cast<gxos::apps::NavigatorResourceSchedulerState>(m_resourceReferences[stateReferenceIndex].state) == gxos::apps::NavigatorResourceSchedulerState::Evicted) ||
             classIs(block.resourceClassification, "resource_limit_reached") ||
             classIs(block.resourceClassification, "resource_slot_unavailable") ||
             classIs(block.resourceClassification, "image_memory_budget_denied");
@@ -13061,7 +13749,7 @@ void NavigatorApp::refreshImageResourceMetadata()
             if (duplicate) ++m_metaDuplicateDecodedImages;
             if (block.imageFormat == (int)gxos::gui::ImageFormat::Png) ++m_metaPngLoads;
             if (block.imageFormat == (int)gxos::gui::ImageFormat::Jpeg) ++m_metaJpegLoads;
-        } else {
+        } else if (!(stateReferenceIndex >= 0 && static_cast<gxos::apps::NavigatorResourceSchedulerState>(m_resourceReferences[stateReferenceIndex].state) == gxos::apps::NavigatorResourceSchedulerState::Evicted)) {
             ++m_metaFailedImages;
             if (!skipped) ++m_metaResourceFailed;
             if (!m_metaLastImageError[0]) {
@@ -15208,6 +15896,12 @@ void NavigatorApp::drawDocument(uint32_t x, uint32_t y, uint32_t w, uint32_t h)
                 bool drew = gxos::gui::ImageAdapter::DrawToFramebuffer(bitmap, textX, (uint32_t)(absY + blockMarginTop), (uint32_t)imageW, (uint32_t)imageH);
                 if (drew && !m_imagePaintLogged[i]) {
                     m_imagePaintLogged[i] = true;
+                    for (uint32_t ref = 0; ref < gxos::apps::kNavigatorMaxResourceReferences; ++ref) {
+                        if (m_resourceReferences[ref].state != static_cast<uint8_t>(gxos::apps::NavigatorResourceSchedulerState::Empty) &&
+                            static_cast<int>(m_resourceReferences[ref].blockIndex) == i) {
+                            m_resourceReferences[ref].paintObserved = 1;
+                        }
+                    }
                     char blockText[16];
                     char widthText[16];
                     char heightText[16];

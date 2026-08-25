@@ -1120,6 +1120,9 @@ private:
                            int inputBytes = -1);
     void releaseImageResources();
     void prepareImageResources();
+    void updateViewportResourceAdmission();
+    bool evictImageResource(uint32_t referenceIndex, uint8_t reason);
+    bool admitImageResource(uint32_t referenceIndex);
     void refreshImageResourceMetadata();
     uint32_t countLiveResourceReferences() const;
     uint32_t countDuplicateOwners() const;
@@ -1131,6 +1134,7 @@ private:
     void clearPageDownloadMetadata();
     int maxScroll() const;
     void clampScroll();
+    bool m_resourceViewportDirty = false;
 };
 
 // ============================================================

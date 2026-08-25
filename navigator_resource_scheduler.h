@@ -62,6 +62,22 @@ inline NavigatorResourceViewportClass navigatorBestViewportClass(
     return static_cast<uint8_t>(left) <= static_cast<uint8_t>(right) ? left : right;
 }
 
+// Eviction is deliberately a relevance policy, not a time-based cache.  The
+// lower the class rank, the more useful the resource is to the current
+// viewport; eviction therefore walks this order in reverse.  A caller still
+// supplies the stable source/hash tie-breakers so the policy is identical on
+// hosted and bare-metal Navigator.
+inline uint8_t navigatorResourceEvictionClassRank(NavigatorResourceViewportClass value)
+{
+    switch (value) {
+    case NavigatorResourceViewportClass::Far: return 0u;
+    case NavigatorResourceViewportClass::Unknown: return 1u;
+    case NavigatorResourceViewportClass::Near: return 2u;
+    case NavigatorResourceViewportClass::Visible: return 3u;
+    default: return 4u;
+    }
+}
+
 inline NavigatorResourceViewportClass navigatorClassifyViewportRect(
     int32_t blockTop, int32_t blockBottom,
     const NavigatorResourceViewportGeometry& viewport, int32_t* outDistance = nullptr)
@@ -122,6 +138,7 @@ enum class NavigatorResourceSchedulerState : uint8_t {
     ResourceCapDenied,
     UnsupportedSkipped,
     Released,
+    Evicted,
 };
 
 inline const char* navigatorResourceSchedulerStateName(NavigatorResourceSchedulerState state)
@@ -141,6 +158,7 @@ inline const char* navigatorResourceSchedulerStateName(NavigatorResourceSchedule
     case NavigatorResourceSchedulerState::ResourceCapDenied: return "resource_cap_denied";
     case NavigatorResourceSchedulerState::UnsupportedSkipped: return "unsupported_skipped";
     case NavigatorResourceSchedulerState::Released: return "released";
+    case NavigatorResourceSchedulerState::Evicted: return "evicted";
     default: return "unknown";
     }
 }
@@ -167,6 +185,12 @@ struct NavigatorResourceReferenceMetadata {
     uint8_t classification = 0;
     uint8_t viewportClass = static_cast<uint8_t>(NavigatorResourceViewportClass::Unknown);
     uint8_t admittedDueToViewportPriority = 0;
+    uint8_t previousViewportClass = static_cast<uint8_t>(NavigatorResourceViewportClass::Unknown);
+    uint8_t admissionReason = 0;
+    uint8_t evictionReason = 0;
+    uint8_t paintObserved = 0;
+    uint16_t evictionCount = 0;
+    uint16_t readmissionCount = 0;
 };
 
 static_assert(sizeof(NavigatorResourceReferenceMetadata) <= 64u,
@@ -221,6 +245,16 @@ struct NavigatorResourceSchedulerStats {
     uint64_t decodedBytesVisible = 0;
     uint64_t decodedBytesNear = 0;
     uint64_t decodedBytesFar = 0;
+    uint32_t viewportGeneration = 0;
+    uint32_t viewportAdmissionPasses = 0;
+    uint32_t scrollTriggeredAdmissions = 0;
+    uint32_t resourcesReconsidered = 0;
+    uint32_t evictions = 0;
+    uint32_t reAdmissions = 0;
+    uint32_t visibleAdmissionFailures = 0;
+    uint32_t budgetDenialsAfterEvictionAttempts = 0;
+    uint64_t evictedDecodedBytes = 0;
+    int32_t currentScrollOffset = 0;
     uint32_t loadedDecodedSizeBuckets[6] = {};
     uint32_t deniedDecodedSizeBuckets[6] = {};
 

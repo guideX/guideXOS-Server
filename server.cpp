@@ -3888,6 +3888,82 @@ static std::string navigatorHostedSmokeDiagnostic() {
         ",viewport:" + viewportMetric("viewport_top") + ".." + viewportMetric("viewport_bottom") +
         ",report=" + summarizeText(viewportPressureReport, 500));
 
+    auto reportMetric = [](const std::string& report, const char* name) {
+        const std::string prefix = std::string(name) + "=";
+        const size_t start = report.find(prefix);
+        if (start == std::string::npos) return std::string("missing");
+        const size_t valueStart = start + prefix.size();
+        const size_t valueEnd = report.find_first_of("\r\n ", valueStart);
+        return report.substr(valueStart, valueEnd == std::string::npos
+            ? std::string::npos : valueEnd - valueStart);
+    };
+    bool phase8uLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet(
+        "http://127.0.0.1:8080/navigator-smoke/generated/VP8U.HTM");
+    const std::string phase8uA = gxos::apps::Navigator::SmokePageDiagnostics();
+    gxos::apps::Navigator::SmokeSetScrollOffset(600);
+    const std::string phase8uB = gxos::apps::Navigator::SmokePageDiagnostics();
+    gxos::apps::Navigator::SmokeSetScrollOffset(100000);
+    const std::string phase8uC = gxos::apps::Navigator::SmokePageDiagnostics();
+    gxos::apps::Navigator::SmokeSetScrollOffset(600);
+    const std::string phase8uBReturn = gxos::apps::Navigator::SmokePageDiagnostics();
+    gxos::apps::Navigator::SmokeSetScrollOffset(0);
+    const std::string phase8uAFinal = gxos::apps::Navigator::SmokePageDiagnostics();
+    auto phase8uResourceSummary = [&](const std::string& report) {
+        std::string summary;
+        // Telemetry ordinals are stable source/block ordinals, not a dense
+        // 0..unique-resource index.  Walk the bounded diagnostic range and
+        // retain only present records so the hosted proof reports every
+        // canonical/duplicate reference without inventing an unbounded log.
+        for (int index = 0; index < static_cast<int>(gxos::apps::kNavigatorMaxResourceReferences); ++index) {
+            const std::string prefix = "resource[" + std::to_string(index) + "].";
+            const std::string blockIndex = reportMetric(report, (prefix + "block_index").c_str());
+            if (blockIndex == "missing") continue;
+            if (!summary.empty()) summary += ",";
+            summary += blockIndex + ":";
+            summary += reportMetric(report, (prefix + "viewport_relation").c_str());
+            summary += "/";
+            summary += reportMetric(report, (prefix + "scheduler_state").c_str());
+            summary += "/paint=";
+            summary += reportMetric(report, (prefix + "paint_observed").c_str());
+        }
+        return summary;
+    };
+    const std::string phase8uDetail =
+        "A(offset=" + reportMetric(phase8uA, "current_scroll_offset") + ",active=" + reportMetric(phase8uA, "active_image_bytes") +
+        ",visible=" + reportMetric(phase8uA, "visible_loaded") + ",denied=" + reportMetric(phase8uA, "visible_budget_denied") + ") " +
+        "B(offset=" + reportMetric(phase8uB, "current_scroll_offset") + ",active=" + reportMetric(phase8uB, "active_image_bytes") +
+        ",admit=" + reportMetric(phase8uB, "scroll_triggered_admissions") + ",evict=" + reportMetric(phase8uB, "evictions") +
+        ",readmit=" + reportMetric(phase8uB, "readmissions") + ",fetch=" + reportMetric(phase8uB, "fetch_started") +
+        ",decode=" + reportMetric(phase8uB, "decode_started") + ",peak=" + reportMetric(phase8uB, "peak_active_image_bytes") +
+        ",relations=" + reportMetric(phase8uB, "visible_references") + "/" + reportMetric(phase8uB, "near_references") + "/" + reportMetric(phase8uB, "far_references") +
+        ",denied=" + reportMetric(phase8uB, "budget_denied") + ",loaded=" + reportMetric(phase8uB, "resource_loaded") + ",resources=" + phase8uResourceSummary(phase8uB) + ") " +
+        "C(offset=" + reportMetric(phase8uC, "current_scroll_offset") + ",active=" + reportMetric(phase8uC, "active_image_bytes") +
+        ",admit=" + reportMetric(phase8uC, "scroll_triggered_admissions") + ",evict=" + reportMetric(phase8uC, "evictions") +
+        ",readmit=" + reportMetric(phase8uC, "readmissions") + ",fetch=" + reportMetric(phase8uC, "fetch_started") +
+        ",decode=" + reportMetric(phase8uC, "decode_started") + ",peak=" + reportMetric(phase8uC, "peak_active_image_bytes") +
+        ",relations=" + reportMetric(phase8uC, "visible_references") + "/" + reportMetric(phase8uC, "near_references") + "/" + reportMetric(phase8uC, "far_references") +
+        ",denied=" + reportMetric(phase8uC, "budget_denied") + ",loaded=" + reportMetric(phase8uC, "resource_loaded") + ",resources=" + phase8uResourceSummary(phase8uC) + ") " +
+        "B2(readmit=" + reportMetric(phase8uBReturn, "readmissions") + ",active=" + reportMetric(phase8uBReturn, "active_image_bytes") +
+        ",evict=" + reportMetric(phase8uBReturn, "evictions") + ",fetch=" + reportMetric(phase8uBReturn, "fetch_started") +
+        ",decode=" + reportMetric(phase8uBReturn, "decode_started") + ",resources=" + phase8uResourceSummary(phase8uBReturn) + ") " +
+        "A2(offset=" + reportMetric(phase8uAFinal, "current_scroll_offset") + ",readmit=" + reportMetric(phase8uAFinal, "readmissions") +
+        ",active=" + reportMetric(phase8uAFinal, "active_image_bytes") + ",evict=" + reportMetric(phase8uAFinal, "evictions") +
+        ",fetch=" + reportMetric(phase8uAFinal, "fetch_started") + ",decode=" + reportMetric(phase8uAFinal, "decode_started") +
+        ",peak=" + reportMetric(phase8uAFinal, "peak_active_image_bytes") + ",visible=" + reportMetric(phase8uAFinal, "visible_loaded") +
+        ",visible_denied=" + reportMetric(phase8uAFinal, "visible_budget_denied") +
+        ",passes=" + reportMetric(phase8uAFinal, "viewport_admission_passes") + ",resources=" + phase8uResourceSummary(phase8uAFinal) + ")";
+    add("hosted Phase 8U A-to-B-to-C-to-B-to-A admission cycle remains bounded",
+        phase8uLoaded &&
+        contains(phase8uA, "resource_total_references=13") &&
+        reportMetric(phase8uB, "scroll_triggered_admissions") != "0" &&
+        reportMetric(phase8uC, "scroll_triggered_admissions") != "0" &&
+        reportMetric(phase8uC, "evictions") != "0" &&
+        reportMetric(phase8uAFinal, "readmissions") != "0" &&
+        std::stoull(reportMetric(phase8uAFinal, "peak_active_image_bytes")) <= gxos::apps::kNavigatorDecodedImageBudgetBytes &&
+        std::stoull(reportMetric(phase8uAFinal, "active_image_bytes")) <= gxos::apps::kNavigatorDecodedImageBudgetBytes &&
+        std::stoull(reportMetric(phase8uAFinal, "active_image_resources")) <= gxos::apps::kNavigatorMaxActiveResources,
+        phase8uDetail);
+
     bool httpsRemotePngLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("https://localhost:8443/navigator-smoke/image-relative.html");
     bool httpsRemotePngPageInfoLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("about:page-info");
     std::string httpsRemotePngPageInfo = gxos::apps::Navigator::SmokeCurrentDocumentText();

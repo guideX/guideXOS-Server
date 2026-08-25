@@ -209,6 +209,7 @@ namespace {
 		int proportionalTextRuns = 0;
 		int monospaceTextRuns = 0;
 		int fontFamilyFallbackRuns = 0;
+		int imagePaintOperations = 0;
 	};
 	static RenderCounters s_renderCounters;
 
@@ -2053,6 +2054,7 @@ namespace {
 		bool ok = false;
 		bool unsupported = false;
 		bool tooLarge = false;
+		bool evicted = false;
 		gxos::gui::ImageLoadStatus status = gxos::gui::ImageLoadStatus::NotFound;
 		int naturalW = 0;
 		int naturalH = 0;
@@ -2085,6 +2087,7 @@ namespace {
 	static NavigatorResourceSchedulerStats s_resourceScheduler;
 	static NavigatorResourceMemoryAccounting s_resourceMemory;
 	static bool s_resourceSchedulerPrepared = false;
+	static bool s_resourceViewportDirty = false;
 	static bool s_resourceAdmissionPlanning = false;
 	static ImageInfo s_resourcePlanningInfo;
 	static ImageInfo s_resourceOverflowInfo;
@@ -2112,11 +2115,13 @@ namespace {
 		s_resourceScheduler = NavigatorResourceSchedulerStats{};
 		s_resourceMemory.reset();
 		s_resourceSchedulerPrepared = false;
+		s_resourceViewportDirty = false;
 		s_resourceAdmissionPlanning = false;
 		s_resourcePlanningInfo = ImageInfo{};
 	}
 	static const ImageInfo& imageInfoForBlock(const DocBlock& block);
 	static void prepareDocumentResources(const WebDocument& doc, int scrollOffset);
+	static void updateViewportResourceAdmission(const WebDocument& doc, int scrollOffset);
 	static int resourceReferenceIndexForBlock(int blockIndex);
 	static void ensureCssMarginLayout(const WebDocument& doc);
 	static void ensureCssFlexLayout(const WebDocument& doc);
@@ -2312,6 +2317,15 @@ namespace {
 			std::remove(path.c_str());
 		}
 		s_remoteImageTempFiles.clear();
+	}
+
+	static void removeRemoteImageTempFile(const std::string& path)
+	{
+		if (path.empty()) return;
+		auto found = std::find(s_remoteImageTempFiles.begin(), s_remoteImageTempFiles.end(), path);
+		if (found == s_remoteImageTempFiles.end()) return;
+		std::remove(path.c_str());
+		s_remoteImageTempFiles.erase(found);
 	}
 
 	static gxos::gui::ImageSafetyLimits remoteImageSafetyLimits()
@@ -3024,6 +3038,16 @@ namespace {
 		metadata.resourceCounters.decodedBytesVisible = s_resourceScheduler.decodedBytesVisible;
 		metadata.resourceCounters.decodedBytesNear = s_resourceScheduler.decodedBytesNear;
 		metadata.resourceCounters.decodedBytesFar = s_resourceScheduler.decodedBytesFar;
+		metadata.resourceCounters.viewportGeneration = s_resourceScheduler.viewportGeneration;
+		metadata.resourceCounters.viewportAdmissionPasses = s_resourceScheduler.viewportAdmissionPasses;
+		metadata.resourceCounters.scrollTriggeredAdmissions = s_resourceScheduler.scrollTriggeredAdmissions;
+		metadata.resourceCounters.resourcesReconsidered = s_resourceScheduler.resourcesReconsidered;
+		metadata.resourceCounters.evictions = s_resourceScheduler.evictions;
+		metadata.resourceCounters.reAdmissions = s_resourceScheduler.reAdmissions;
+		metadata.resourceCounters.visibleAdmissionFailures = s_resourceScheduler.visibleAdmissionFailures;
+		metadata.resourceCounters.budgetDenialsAfterEvictionAttempts = s_resourceScheduler.budgetDenialsAfterEvictionAttempts;
+		metadata.resourceCounters.evictedDecodedBytes = s_resourceScheduler.evictedDecodedBytes;
+		metadata.resourceCounters.currentScrollOffset = s_resourceScheduler.currentScrollOffset;
 		metadata.allocatedImageBytes = 0;
 		metadata.releasedImageResources = s_releasedImageResources;
 		metadata.releasedImageBytes = s_releasedImageBytes;
@@ -3838,7 +3862,7 @@ namespace {
 				++metadata.unsupportedImageCount;
 			if (info.ok) {
 				++metadata.loadedImageCount;
-			} else {
+			} else if (!info.evicted) {
 				++metadata.failedImageCount;
 				if (!block.alt.empty()) {
 					++metadata.cssImageAltFallbacks;
@@ -3847,16 +3871,17 @@ namespace {
 					metadata.lastImageError = info.errorDetail.empty() ? info.message : info.errorDetail;
 				}
 			}
-			const bool loaded = classification == NavigatorResourceClassification::LoadedPng ||
+			const bool loaded = info.ok && (classification == NavigatorResourceClassification::LoadedPng ||
 				classification == NavigatorResourceClassification::LoadedJpeg ||
-				classification == NavigatorResourceClassification::LoadedOtherExistingSupportedResource;
+				classification == NavigatorResourceClassification::LoadedOtherExistingSupportedResource);
 			if (!duplicate && loaded) {
 				++metadata.activeImageResources;
 				const size_t pixelBytes = imagePixelBytes(info);
 				if (metadata.allocatedImageBytes <= std::numeric_limits<size_t>::max() - pixelBytes)
 					metadata.allocatedImageBytes += pixelBytes;
 			}
-			const bool skipped = duplicate || classification == NavigatorResourceClassification::ResourceLimitReached ||
+			const bool skipped = duplicate || info.evicted ||
+				classification == NavigatorResourceClassification::ResourceLimitReached ||
 				classification == NavigatorResourceClassification::ResourceSlotUnavailable ||
 				classification == NavigatorResourceClassification::ImageMemoryBudgetDenied;
 			if (duplicate) {
@@ -3957,6 +3982,14 @@ namespace {
 			telemetry.priority = reference ? reference->priority : 0;
 			telemetry.priorityBeforeViewport = reference ? reference->priorityBeforeViewport : 0;
 			telemetry.admittedDueToViewportPriority = reference && reference->admittedDueToViewportPriority != 0;
+			telemetry.previousViewportRelation = reference
+				? static_cast<NavigatorResourceViewportRelation>(reference->previousViewportClass)
+				: NavigatorResourceViewportRelation::Unknown;
+			telemetry.admissionReason = reference ? reference->admissionReason : 0;
+			telemetry.evictionReason = reference ? reference->evictionReason : 0;
+			telemetry.evictionCount = reference ? reference->evictionCount : 0;
+			telemetry.readmissionCount = reference ? reference->readmissionCount : 0;
+			telemetry.paintObserved = reference && reference->paintObserved != 0;
 			telemetry.schedulerState = reference
 				? static_cast<NavigatorResourceSchedulerState>(reference->state)
 				: NavigatorResourceSchedulerState::Failed;
@@ -12333,9 +12366,16 @@ namespace {
 		return -1;
 	}
 
+	static void noteHostedImagePaint(int blockIndex)
+	{
+		const int referenceIndex = resourceReferenceIndexForBlock(blockIndex);
+		if (referenceIndex >= 0) s_resourceReferences[referenceIndex].paintObserved = 1;
+	}
+
 	static NavigatorResourceSchedulerState schedulerStateForImage(const ImageInfo& info)
 	{
 		if (info.ok) return NavigatorResourceSchedulerState::Attached;
+		if (info.evicted) return NavigatorResourceSchedulerState::Evicted;
 		if (info.classification == NavigatorResourceClassification::ImageMemoryBudgetDenied)
 			return NavigatorResourceSchedulerState::BudgetDenied;
 		if (info.classification == NavigatorResourceClassification::ResourceSlotUnavailable)
@@ -12441,6 +12481,7 @@ namespace {
 		s_resourceScheduler.viewportWidth = viewport.viewportWidth;
 		s_resourceScheduler.viewportHeight = viewport.viewportHeight;
 		s_resourceScheduler.initialScrollOffset = viewport.scrollOffset;
+		s_resourceScheduler.currentScrollOffset = viewport.scrollOffset;
 		s_resourceScheduler.preloadMargin = viewport.preloadMargin;
 
 		uint32_t referenceCount = 0;
@@ -12593,6 +12634,309 @@ namespace {
 		ensureInlineLayout(doc);
 		ensureCssPositionLayout(doc);
 		ensureCssScrollLayout(doc, scrollOffset);
+	}
+
+	static void updateViewportResourceAdmission(const WebDocument& doc, int scrollOffset)
+	{
+		if (!s_resourceSchedulerPrepared) return;
+		const int normalizedScroll = std::max(0, scrollOffset);
+		if (normalizedScroll == s_resourceScheduler.currentScrollOffset) {
+			s_resourceViewportDirty = false;
+			return;
+		}
+		s_resourceViewportDirty = false;
+		++s_resourceScheduler.viewportGeneration;
+		++s_resourceScheduler.viewportAdmissionPasses;
+		s_resourceScheduler.currentScrollOffset = normalizedScroll;
+
+		NavigatorResourceViewportGeometry viewport;
+		viewport.viewportTop = kContentY + normalizedScroll;
+		viewport.viewportBottom = viewport.viewportTop + kContentH;
+		viewport.viewportWidth = kContentW;
+		viewport.viewportHeight = kContentH;
+		viewport.scrollOffset = normalizedScroll;
+		viewport.preloadMargin = kContentH;
+		s_resourceScheduler.viewportTop = viewport.viewportTop;
+		s_resourceScheduler.viewportBottom = viewport.viewportBottom;
+		s_resourceScheduler.viewportWidth = viewport.viewportWidth;
+		s_resourceScheduler.viewportHeight = viewport.viewportHeight;
+		s_resourceScheduler.preloadMargin = viewport.preloadMargin;
+
+		ensureCssMarginLayout(doc);
+		ensureCssFlexLayout(doc);
+		ensureCssFloatLayout(doc);
+		ensureInlineLayout(doc);
+		ensureCssPositionLayout(doc);
+		ensureCssScrollLayout(doc, normalizedScroll);
+
+		uint32_t referenceCount = 0;
+		for (uint32_t i = 0; i < kNavigatorMaxResourceReferences; ++i) {
+			if (s_resourceReferences[i].state != static_cast<uint8_t>(NavigatorResourceSchedulerState::Empty))
+				++referenceCount;
+		}
+		if (referenceCount > UINT32_MAX - s_resourceScheduler.resourcesReconsidered)
+			s_resourceScheduler.resourcesReconsidered = UINT32_MAX;
+		else
+			s_resourceScheduler.resourcesReconsidered += referenceCount;
+
+		bool relationChanged = false;
+		for (uint32_t i = 0; i < referenceCount; ++i) {
+			NavigatorResourceReferenceMetadata& reference = s_resourceReferences[i];
+			const NavigatorResourceViewportClass previous =
+				static_cast<NavigatorResourceViewportClass>(reference.viewportClass);
+			reference.previousViewportClass = reference.viewportClass;
+			const int blockIndex = static_cast<int>(reference.blockIndex);
+			int blockTop = -1;
+			int blockBottom = -1;
+			if (blockIndex >= 0 && blockIndex < static_cast<int>(doc.blocks.size())) {
+				const CssPositionedRecord* positioned = cssPositionedRecordForBlock(doc, blockIndex);
+				if (positioned) {
+					blockTop = cssPositionedScreenYForDocument(doc, *positioned, 0);
+					blockBottom = blockTop >= 0 && positioned->usedHeight > 0
+						? blockTop + positioned->usedHeight : -1;
+				} else {
+					const CssBlockGeometry geometry = cssGeometryForBlock(doc, blockIndex);
+					blockTop = geometry.outerY;
+					blockBottom = geometry.outerY >= 0 && geometry.outerHeight > 0
+						? geometry.outerY + geometry.outerHeight : -1;
+				}
+			}
+			reference.blockTop = blockTop;
+			reference.blockBottom = blockBottom;
+			reference.viewportClass = static_cast<uint8_t>(navigatorClassifyViewportRect(
+			blockTop, blockBottom, viewport, &reference.distanceFromViewport));
+			if (blockIndex >= 0 && blockIndex < static_cast<int>(doc.blocks.size())) {
+				std::string unsupportedFormat;
+				if (knownUnsupportedResourceFormat(doc.blocks[static_cast<size_t>(blockIndex)].url, unsupportedFormat))
+					reference.viewportClass = static_cast<uint8_t>(NavigatorResourceViewportClass::Unsupported);
+			}
+			reference.priority = navigatorResourcePriorityWithViewport(
+				static_cast<NavigatorResourceViewportClass>(reference.viewportClass), reference.formatHint);
+			if (previous != static_cast<NavigatorResourceViewportClass>(reference.viewportClass))
+				relationChanged = true;
+		}
+
+		// Fold each duplicate into the canonical resource's best current
+		// relevance.  The canonical identity remains the first normalized URL
+		// occurrence; only its current viewport metadata is promoted.
+		for (uint32_t i = 0; i < referenceCount; ++i) {
+			NavigatorResourceReferenceMetadata& reference = s_resourceReferences[i];
+			if (reference.duplicateOf == 0xFFFFu) continue;
+			NavigatorResourceReferenceMetadata& canonical = s_resourceReferences[reference.duplicateOf];
+			const NavigatorResourceViewportClass current =
+				static_cast<NavigatorResourceViewportClass>(reference.viewportClass);
+			const NavigatorResourceViewportClass canonicalClass =
+				static_cast<NavigatorResourceViewportClass>(canonical.viewportClass);
+			if (static_cast<uint8_t>(current) < static_cast<uint8_t>(canonicalClass) ||
+				(current == canonicalClass && reference.distanceFromViewport >= 0 &&
+				 (canonical.distanceFromViewport < 0 || reference.distanceFromViewport < canonical.distanceFromViewport))) {
+				if (canonicalClass != current) relationChanged = true;
+				canonical.viewportClass = reference.viewportClass;
+				canonical.priority = reference.priority;
+				canonical.blockTop = reference.blockTop;
+				canonical.blockBottom = reference.blockBottom;
+				canonical.distanceFromViewport = reference.distanceFromViewport;
+			}
+		}
+
+		// The current class/load counters are snapshots, while admission,
+		// eviction, and decode totals remain cumulative below.
+		s_resourceScheduler.visibleReferences = 0;
+		s_resourceScheduler.nearReferences = 0;
+		s_resourceScheduler.farReferences = 0;
+		s_resourceScheduler.unknownViewportReferences = 0;
+		s_resourceScheduler.visibleLoaded = 0;
+		s_resourceScheduler.visibleBudgetDenied = 0;
+		s_resourceScheduler.nearLoaded = 0;
+		s_resourceScheduler.nearBudgetDenied = 0;
+		s_resourceScheduler.farLoaded = 0;
+		s_resourceScheduler.farBudgetDenied = 0;
+		s_resourceScheduler.decodedBytesVisible = 0;
+		s_resourceScheduler.decodedBytesNear = 0;
+		s_resourceScheduler.decodedBytesFar = 0;
+		for (uint32_t i = 0; i < referenceCount; ++i) {
+			const NavigatorResourceReferenceMetadata& reference = s_resourceReferences[i];
+			noteViewportReferenceClass(s_resourceScheduler,
+				static_cast<NavigatorResourceViewportClass>(reference.viewportClass));
+			if (reference.duplicateOf != 0xFFFFu) continue;
+			const NavigatorResourceSchedulerState state =
+				static_cast<NavigatorResourceSchedulerState>(reference.state);
+			const NavigatorResourceViewportClass viewportClass =
+				static_cast<NavigatorResourceViewportClass>(reference.viewportClass);
+			if (state == NavigatorResourceSchedulerState::BudgetDenied) noteViewportBudgetDenial(s_resourceScheduler, viewportClass);
+			if (state != NavigatorResourceSchedulerState::Attached) continue;
+			const int blockIndex = static_cast<int>(reference.blockIndex);
+			if (blockIndex < 0 || blockIndex >= static_cast<int>(doc.blocks.size())) continue;
+			const std::string key = resourceCacheKey(doc.blocks[static_cast<size_t>(blockIndex)].url);
+			auto found = s_imageCache.find(key);
+			if (found == s_imageCache.end() || !found->second.ok) continue;
+			noteViewportLoad(s_resourceScheduler, viewportClass, imagePixelBytes(found->second));
+		}
+
+		if (relationChanged) {
+			std::vector<int> candidates;
+			for (uint32_t i = 0; i < referenceCount; ++i) {
+				const NavigatorResourceReferenceMetadata& reference = s_resourceReferences[i];
+				const NavigatorResourceViewportClass viewportClass =
+					static_cast<NavigatorResourceViewportClass>(reference.viewportClass);
+				const NavigatorResourceSchedulerState state =
+					static_cast<NavigatorResourceSchedulerState>(reference.state);
+				if (reference.duplicateOf == 0xFFFFu &&
+					(viewportClass == NavigatorResourceViewportClass::Visible || viewportClass == NavigatorResourceViewportClass::Near) &&
+					(state == NavigatorResourceSchedulerState::BudgetDenied ||
+					 state == NavigatorResourceSchedulerState::ResourceCapDenied ||
+					 state == NavigatorResourceSchedulerState::Evicted))
+					candidates.push_back(static_cast<int>(i));
+			}
+			std::sort(candidates.begin(), candidates.end(), [](int left, int right) {
+				return schedulerCandidateLess(s_resourceReferences[left], s_resourceReferences[right]);
+			});
+
+			auto evictOne = [&]() -> bool {
+				int selected = -1;
+				for (uint32_t i = 0; i < referenceCount; ++i) {
+					const NavigatorResourceReferenceMetadata& reference = s_resourceReferences[i];
+					if (reference.duplicateOf != 0xFFFFu ||
+						static_cast<NavigatorResourceSchedulerState>(reference.state) != NavigatorResourceSchedulerState::Attached)
+						continue;
+					const NavigatorResourceViewportClass viewportClass =
+						static_cast<NavigatorResourceViewportClass>(reference.viewportClass);
+					if (viewportClass == NavigatorResourceViewportClass::Visible ||
+						viewportClass == NavigatorResourceViewportClass::Unsupported) continue;
+					if (selected < 0) { selected = static_cast<int>(i); continue; }
+					const NavigatorResourceReferenceMetadata& current = s_resourceReferences[selected];
+					const uint8_t leftClass = navigatorResourceEvictionClassRank(viewportClass);
+					const uint8_t rightClass = navigatorResourceEvictionClassRank(
+						static_cast<NavigatorResourceViewportClass>(current.viewportClass));
+					if (leftClass < rightClass || (leftClass == rightClass &&
+						(reference.sourceOrdinal < current.sourceOrdinal ||
+						 (reference.sourceOrdinal == current.sourceOrdinal &&
+						  reference.normalizedUrlHash < current.normalizedUrlHash))))
+						selected = static_cast<int>(i);
+				}
+				if (selected < 0) return false;
+				NavigatorResourceReferenceMetadata& reference = s_resourceReferences[selected];
+				const int blockIndex = static_cast<int>(reference.blockIndex);
+				if (blockIndex < 0 || blockIndex >= static_cast<int>(doc.blocks.size())) return false;
+				const std::string key = resourceCacheKey(doc.blocks[static_cast<size_t>(blockIndex)].url);
+				auto found = s_imageCache.find(key);
+				if (found == s_imageCache.end() || !found->second.ok) return false;
+				const size_t bytes = imagePixelBytes(found->second);
+				const std::string oldDrawPath = found->second.drawPath;
+				found->second.ok = false;
+				found->second.evicted = true;
+				found->second.drawPath.clear();
+				removeRemoteImageTempFile(oldDrawPath);
+				s_resourceMemory.releaseDecoded(static_cast<uint64_t>(bytes));
+				if (s_resourceScheduler.activeCount > 0) --s_resourceScheduler.activeCount;
+				s_resourceScheduler.activeBytes = s_resourceMemory.activeDecodedBytes;
+				++s_resourceScheduler.evictions;
+				if (s_resourceScheduler.evictedDecodedBytes <= UINT64_MAX - bytes)
+					s_resourceScheduler.evictedDecodedBytes += bytes;
+				reference.state = static_cast<uint8_t>(NavigatorResourceSchedulerState::Evicted);
+				reference.evictionReason = 1;
+				if (reference.evictionCount < UINT16_MAX) ++reference.evictionCount;
+				for (uint32_t i = 0; i < referenceCount; ++i) {
+					if (s_resourceReferences[i].duplicateOf == static_cast<uint16_t>(selected))
+						s_resourceReferences[i].state = static_cast<uint8_t>(NavigatorResourceSchedulerState::Evicted);
+				}
+				return true;
+			};
+
+			for (const int selected : candidates) {
+				NavigatorResourceReferenceMetadata& reference = s_resourceReferences[selected];
+				const int blockIndex = static_cast<int>(reference.blockIndex);
+				if (blockIndex < 0 || blockIndex >= static_cast<int>(doc.blocks.size())) continue;
+				const std::string key = resourceCacheKey(doc.blocks[static_cast<size_t>(blockIndex)].url);
+				auto old = s_imageCache.find(key);
+				const bool wasEvicted = static_cast<NavigatorResourceSchedulerState>(reference.state) ==
+					NavigatorResourceSchedulerState::Evicted;
+				uint64_t required = reference.budgetRequestedBytes;
+				if (old != s_imageCache.end() && required == 0) required = old->second.budgetRequestedBytes;
+				bool evictionAttempted = false;
+				while (s_resourceScheduler.activeCount >= kNavigatorMaxActiveResources ||
+					(required > kNavigatorDecodedImageBudgetBytes -
+						std::min<uint64_t>(s_resourceMemory.activeDecodedBytes, kNavigatorDecodedImageBudgetBytes))) {
+					evictionAttempted = true;
+					if (!evictOne()) break;
+				}
+				if (s_resourceScheduler.activeCount >= kNavigatorMaxActiveResources ||
+					(required > kNavigatorDecodedImageBudgetBytes -
+						std::min<uint64_t>(s_resourceMemory.activeDecodedBytes, kNavigatorDecodedImageBudgetBytes))) {
+					if (evictionAttempted) ++s_resourceScheduler.budgetDenialsAfterEvictionAttempts;
+					if (static_cast<NavigatorResourceViewportClass>(reference.viewportClass) == NavigatorResourceViewportClass::Visible)
+						++s_resourceScheduler.visibleAdmissionFailures;
+					continue;
+				}
+				if (old != s_imageCache.end()) s_imageCache.erase(old);
+				const ImageInfo& admitted = imageInfoForBlock(doc.blocks[static_cast<size_t>(blockIndex)]);
+				reference.budgetRequestedBytes = static_cast<uint32_t>(std::min<uint64_t>(admitted.budgetRequestedBytes, UINT32_MAX));
+				reference.budgetAcceptedBytes = static_cast<uint32_t>(std::min<uint64_t>(admitted.budgetAcceptedBytes, UINT32_MAX));
+				reference.activeBytesBefore = static_cast<uint32_t>(std::min<uint64_t>(admitted.activeBytesBefore, UINT32_MAX));
+				reference.budgetHeadroomBefore = static_cast<uint32_t>(std::min<uint64_t>(admitted.budgetHeadroomBefore, UINT32_MAX));
+				reference.classification = static_cast<uint8_t>(admitted.classification);
+				reference.state = static_cast<uint8_t>(schedulerStateForImage(admitted));
+				if (admitted.ok) {
+					reference.admissionReason = 1;
+					++s_resourceScheduler.scrollTriggeredAdmissions;
+					if (wasEvicted) {
+						++s_resourceScheduler.reAdmissions;
+						if (reference.readmissionCount < UINT16_MAX) ++reference.readmissionCount;
+					}
+				} else if (static_cast<NavigatorResourceViewportClass>(reference.viewportClass) == NavigatorResourceViewportClass::Visible) {
+					++s_resourceScheduler.visibleAdmissionFailures;
+				}
+				if (static_cast<NavigatorResourceSchedulerState>(reference.state) == NavigatorResourceSchedulerState::BudgetDenied && evictionAttempted)
+					++s_resourceScheduler.budgetDenialsAfterEvictionAttempts;
+			}
+		}
+
+		for (uint32_t i = 0; i < referenceCount; ++i) {
+			NavigatorResourceReferenceMetadata& reference = s_resourceReferences[i];
+			if (reference.duplicateOf == 0xFFFFu) continue;
+			const NavigatorResourceReferenceMetadata& canonical = s_resourceReferences[reference.duplicateOf];
+			reference.state = canonical.state == static_cast<uint8_t>(NavigatorResourceSchedulerState::Attached)
+				? static_cast<uint8_t>(NavigatorResourceSchedulerState::Deduplicated) : canonical.state;
+			reference.classification = canonical.classification;
+			reference.budgetRequestedBytes = canonical.budgetRequestedBytes;
+			reference.budgetAcceptedBytes = canonical.budgetAcceptedBytes;
+			reference.activeBytesBefore = canonical.activeBytesBefore;
+			reference.budgetHeadroomBefore = canonical.budgetHeadroomBefore;
+		}
+		for (uint32_t i = 0; i < referenceCount; ++i) {
+			const NavigatorResourceReferenceMetadata& reference = s_resourceReferences[i];
+			if (reference.duplicateOf == 0xFFFFu) continue;
+			const int blockIndex = static_cast<int>(reference.blockIndex);
+			const int ownerIndex = static_cast<int>(s_resourceReferences[reference.duplicateOf].blockIndex);
+			if (blockIndex < 0 || ownerIndex < 0 || blockIndex >= static_cast<int>(doc.blocks.size()) || ownerIndex >= static_cast<int>(doc.blocks.size())) continue;
+			const std::string ownerKey = resourceCacheKey(doc.blocks[static_cast<size_t>(ownerIndex)].url);
+			auto found = s_imageCache.find(ownerKey);
+			if (found != s_imageCache.end() && found->second.ok) {
+				// Hosted drawing is keyed by the canonical URL; this explicit
+				// attachment marker keeps duplicate telemetry and paint tracking on
+				// the same active decoded resource.
+				s_resourceReferences[i].state = static_cast<uint8_t>(NavigatorResourceSchedulerState::Deduplicated);
+			}
+		}
+
+		s_resourceScheduler.activeBytes = s_resourceMemory.activeDecodedBytes;
+		uint32_t activeCount = 0;
+		for (const auto& entry : s_imageCache) {
+			if (entry.second.ok && activeCount < kNavigatorMaxActiveResources) ++activeCount;
+		}
+		s_resourceScheduler.activeCount = activeCount;
+		s_resourceScheduler.releasedDecodedBytes = s_resourceMemory.releasedDecodedBytes;
+		s_resourceScheduler.deniedAllocationBytes = s_resourceMemory.deniedAllocationBytes;
+		s_resourceScheduler.currentEncodedResourceBytes = s_resourceMemory.currentEncodedBytes;
+		s_resourceScheduler.peakEncodedResourceBytes = s_resourceMemory.peakEncodedBytes;
+		s_resourceScheduler.peakTemporaryDecodeBytes = s_resourceMemory.peakTemporaryDecodeBytes;
+		s_inlineLayoutDirty = true;
+		s_inlineLayoutSnapshot = InlineLayoutSnapshot{};
+		s_cssMarginLayoutSnapshot = CssMarginLayoutSnapshot{};
+		s_cssFloatLayoutSnapshot = CssFloatLayoutSnapshot{};
+		s_cssFlexLayoutSnapshot = CssFlexLayoutSnapshot{};
+		s_cssPositionLayoutSnapshot = CssPositionLayoutSnapshot{};
+		s_cssScrollLayoutSnapshot = CssScrollLayoutSnapshot{};
 	}
 
 	static const ImageInfo& imageInfoForBlock(const DocBlock& block)
@@ -13067,8 +13411,10 @@ namespace {
 		const int horizontalEdges = cssHorizontalBoxEdges(block.style);
 		const int verticalEdges = cssVerticalBoxEdges(block.style);
 		const ImageInfo& info = imageInfoForBlock(block);
-		int naturalW = info.ok ? info.naturalW : 220;
-		int naturalH = info.ok ? info.naturalH : 64;
+		// Evicted resources retain their probed dimensions so scroll admission
+		// does not perturb document geometry while decoded pixels are reclaimed.
+		int naturalW = info.naturalW > 0 ? info.naturalW : 220;
+		int naturalH = info.naturalH > 0 ? info.naturalH : 64;
 		naturalW = std::max(1, std::min(2048, naturalW));
 		naturalH = std::max(1, std::min(2048, naturalH));
 		const CssResolvedLength widthResolved = resolveCssLength(block.style.widthValue,
@@ -14977,6 +15323,7 @@ void Navigator::SmokeSetScrollOffset(int offset)
 {
 	s_scrollOffset = std::max(0, offset);
 	clampScrollOffset();
+	s_resourceViewportDirty = true;
 	if (s_windowId != 0) updateDisplay();
 }
 
@@ -15627,6 +15974,17 @@ std::string Navigator::SmokePageDiagnostics()
 	out << "decoded_bytes_visible=" << c.decodedBytesVisible << "\n";
 	out << "decoded_bytes_near=" << c.decodedBytesNear << "\n";
 	out << "decoded_bytes_far=" << c.decodedBytesFar << "\n";
+	out << "viewport_generation=" << c.viewportGeneration << "\n";
+	out << "viewport_admission_passes=" << c.viewportAdmissionPasses << "\n";
+	out << "scroll_triggered_admissions=" << c.scrollTriggeredAdmissions << "\n";
+	out << "resources_reconsidered=" << c.resourcesReconsidered << "\n";
+	out << "evictions=" << c.evictions << "\n";
+	out << "readmissions=" << c.reAdmissions << "\n";
+	out << "visible_admission_failures=" << c.visibleAdmissionFailures << "\n";
+	out << "budget_denials_after_eviction_attempts=" << c.budgetDenialsAfterEvictionAttempts << "\n";
+	out << "evicted_decoded_bytes=" << c.evictedDecodedBytes << "\n";
+	out << "current_scroll_offset=" << c.currentScrollOffset << "\n";
+	out << "image_paint_operations=" << s_renderCounters.imagePaintOperations << "\n";
 	for (size_t bucket = 0; bucket < 6; ++bucket) {
 		out << "loaded_size_bucket_" << bucket << "=" << m.resourceScheduler.loadedDecodedSizeBuckets[bucket] << "\n";
 		out << "denied_size_bucket_" << bucket << "=" << m.resourceScheduler.deniedDecodedSizeBuckets[bucket] << "\n";
@@ -15672,6 +16030,12 @@ std::string Navigator::SmokePageDiagnostics()
 		out << "resource[" << resource.ordinal << "].priority=" << resource.priority << "\n";
 		out << "resource[" << resource.ordinal << "].priority_before_viewport=" << resource.priorityBeforeViewport << "\n";
 		out << "resource[" << resource.ordinal << "].admitted_due_to_viewport_priority=" << yesNo(resource.admittedDueToViewportPriority) << "\n";
+		out << "resource[" << resource.ordinal << "].previous_viewport_relation=" << static_cast<int>(resource.previousViewportRelation) << "\n";
+		out << "resource[" << resource.ordinal << "].admission_reason=" << static_cast<int>(resource.admissionReason) << "\n";
+		out << "resource[" << resource.ordinal << "].eviction_reason=" << static_cast<int>(resource.evictionReason) << "\n";
+		out << "resource[" << resource.ordinal << "].eviction_count=" << resource.evictionCount << "\n";
+		out << "resource[" << resource.ordinal << "].readmission_count=" << resource.readmissionCount << "\n";
+		out << "resource[" << resource.ordinal << "].paint_observed=" << yesNo(resource.paintObserved) << "\n";
 		out << "resource[" << resource.ordinal << "].scheduler_state=" <<
 			navigatorResourceSchedulerStateName(resource.schedulerState) << "\n";
 		out << "resource[" << resource.ordinal << "].budget_requested=" << resource.budgetRequestedBytes << "\n";
@@ -16092,6 +16456,15 @@ int Navigator::main(int, char**)
 void Navigator::updateDisplay(bool renderDocumentContent)
 {
 	if (s_windowId == 0) return;
+	if (s_resourceSchedulerPrepared && s_scrollOffset != s_resourceScheduler.currentScrollOffset)
+		s_resourceViewportDirty = true;
+	const uint32_t admissionPassesBefore = s_resourceScheduler.viewportAdmissionPasses;
+	if (s_resourceViewportDirty)
+		updateViewportResourceAdmission(s_currentDoc, s_scrollOffset);
+	if (s_resourceScheduler.viewportAdmissionPasses != admissionPassesBefore)
+		// Refresh only the bounded diagnostics view. This walks the existing
+		// document/cache state; it does not parse HTML or initiate a fetch.
+		fillDocumentCounts(s_pageMetadata, s_currentDoc, s_scrollOffset);
 	// Hosted lifecycle smoke drives many real state transitions synchronously.
 	// Keep the first compositor frame for toolbar registration, then defer
 	// redundant paint submission while the smoke suite inspects state through
@@ -16411,10 +16784,14 @@ void Navigator::renderDocument()
 					int imageH = 0;
 					imageDisplaySize(nestedBlock, nestedFloat.borderBoxW, imageW, imageH);
 					const ImageInfo& info = imageInfoForBlock(nestedBlock);
-					if (info.ok) drawImage(s_windowId,
+					if (info.ok) {
+						drawImage(s_windowId,
 						 nestedX + cssBorderLeftPx(*nestedStyle) + cssPaddingLeftPx(*nestedStyle, 0),
 						 nestedY + cssBorderTopPx(*nestedStyle) + cssPaddingTopPx(*nestedStyle, 0),
 						 std::min(imageW, nestedFloat.borderBoxW), std::min(imageH, nestedFloat.borderBoxH), info.drawPath);
+						++s_renderCounters.imagePaintOperations;
+						noteHostedImagePaint(static_cast<int>(&nestedBlock - s_currentDoc.blocks.data()));
+					}
 				} else if (!nestedFloat.contentText.empty()) {
 					drawTextAtStyled(s_windowId,
 						nestedX + cssBorderLeftPx(*nestedStyle) + cssPaddingLeftPx(*nestedStyle, 0),
@@ -16523,6 +16900,8 @@ void Navigator::renderDocument()
 				const ImageInfo& info = imageInfoForBlock(itemBlock);
 				if (info.ok) {
 					drawImage(s_windowId, fragX, fragY, fragment.w, fragment.h, info.drawPath);
+					++s_renderCounters.imagePaintOperations;
+					noteHostedImagePaint(static_cast<int>(&itemBlock - s_currentDoc.blocks.data()));
 				} else {
 					drawThemeRect(s_windowId, fragX, fragY, fragment.w, fragment.h, NavigatorContentColor());
 					drawThemeRect(s_windowId, fragX, fragY, fragment.w, 1, NavigatorContentBorderColor());
@@ -16628,7 +17007,11 @@ void Navigator::renderDocument()
 			int imageH = 0;
 			imageDisplaySize(floatBlock, std::max(1, w), imageW, imageH);
 			const ImageInfo& info = imageInfoForBlock(floatBlock);
-			if (info.ok) drawImage(s_windowId, contentX, contentY, std::min(imageW, w), std::min(imageH, h), info.drawPath);
+			if (info.ok) {
+				drawImage(s_windowId, contentX, contentY, std::min(imageW, w), std::min(imageH, h), info.drawPath);
+				++s_renderCounters.imagePaintOperations;
+				noteHostedImagePaint(static_cast<int>(&floatBlock - s_currentDoc.blocks.data()));
+			}
 			else drawTextAtStyled(s_windowId, contentX, contentY,
 				imagePlaceholderText(floatBlock, info), *floatStyle, contentTextColor, std::max(1, h));
 		} else if (floatRecord.kind == InlineItemKind::FormControl) {
@@ -16865,8 +17248,12 @@ void Navigator::renderDocument()
 					int imageH = 0;
 					imageDisplaySize(image, std::max(1, cell.contentWidthPx), imageW, imageH);
 					const ImageInfo& info = imageInfoForBlock(image);
-					if (info.ok) drawImage(s_windowId, cellX + cellBorderLeft + cellPaddingLeft,
-						lineY, imageW, imageH, info.drawPath);
+					if (info.ok) {
+						drawImage(s_windowId, cellX + cellBorderLeft + cellPaddingLeft,
+							lineY, imageW, imageH, info.drawPath);
+						++s_renderCounters.imagePaintOperations;
+						noteHostedImagePaint(static_cast<int>(&image - s_currentDoc.blocks.data()));
+					}
 					else drawTextAtStyled(s_windowId, cellX + cellBorderLeft + cellPaddingLeft, lineY,
 						image.alt.empty() ? std::string("[image]") : image.alt, cellStyle, contentTextColor, layout.lineHeight);
 					lineY += imageH;
@@ -17084,6 +17471,8 @@ void Navigator::renderDocument()
 			if (boxY + borderTop + paddingTop >= viewportTop && boxY + borderTop + paddingTop + imageH <= viewportBottom) {
 				if (info.ok) {
 					drawImage(s_windowId, imageX, boxY + borderTop + paddingTop, imageW, imageH, info.drawPath);
+					++s_renderCounters.imagePaintOperations;
+					noteHostedImagePaint(static_cast<int>(&block - s_currentDoc.blocks.data()));
 				} else {
 					drawThemeRect(s_windowId, imageX, boxY + borderTop + paddingTop, imageW, imageH, NavigatorContentColor());
 					drawThemeRect(s_windowId, imageX, boxY + borderTop + paddingTop, imageW, 1, NavigatorContentBorderColor());

@@ -524,6 +524,192 @@ int main()
         competingAgain.memory.activeDecodedBytes == viewportCompeting.memory.activeDecodedBytes,
         "repeated viewport-heavy navigation resets priority state deterministically");
 
+    // 19. A bounded dynamic pass evicts the least relevant canonical resource,
+    // admits newly relevant content, and keeps duplicate references attached to
+    // one decoded owner.  This is a small scheduler model of the persistent
+    // Navigator pass; the hosted/QEMU fixture below proves the same transitions
+    // through the real document and image adapters.
+    constexpr size_t dynamicCount = 13;
+    constexpr uint64_t dynamicImageBytes = 16u * 1024u * 1024u;
+    std::array<uint8_t, dynamicCount> dynamicState{};
+    std::array<bool, dynamicCount> dynamicActive{};
+    std::array<uint16_t, dynamicCount> dynamicDuplicate{};
+    std::array<NavigatorResourceViewportClass, dynamicCount> dynamicClass{};
+    dynamicDuplicate.fill(0xFFFFu);
+    dynamicClass.fill(NavigatorResourceViewportClass::Far);
+    dynamicDuplicate[12] = 0;
+    for (size_t i = 0; i < 4; ++i) {
+        dynamicState[i] = static_cast<uint8_t>(NavigatorResourceSchedulerState::Attached);
+        dynamicActive[i] = true;
+        dynamicClass[i] = NavigatorResourceViewportClass::Visible;
+    }
+    for (size_t i = 4; i < dynamicCount; ++i)
+        dynamicState[i] = static_cast<uint8_t>(NavigatorResourceSchedulerState::BudgetDenied);
+
+    NavigatorResourceSchedulerStats dynamicStats{};
+    uint64_t dynamicActiveBytes = 4u * dynamicImageBytes;
+    std::array<NavigatorResourceViewportClass, dynamicCount> previousDynamicClass = dynamicClass;
+    std::vector<uint32_t> dynamicEvictionOrder;
+    std::vector<uint32_t> dynamicAdmissionOrder;
+    uint32_t dynamicPasses = 0;
+    auto runDynamicPass = [&](const std::array<NavigatorResourceViewportClass, dynamicCount>& references) {
+        if (references == previousDynamicClass) return false;
+        previousDynamicClass = references;
+        ++dynamicPasses;
+        dynamicStats.resourcesReconsidered += dynamicCount;
+        std::array<NavigatorResourceViewportClass, dynamicCount> canonicalClass = references;
+        for (size_t i = 0; i < dynamicCount; ++i) {
+            if (dynamicDuplicate[i] == 0xFFFFu) continue;
+            const size_t owner = dynamicDuplicate[i];
+            const uint8_t candidatePriority = navigatorResourcePriorityWithViewport(references[i], 1u);
+            const uint8_t ownerPriority = navigatorResourcePriorityWithViewport(canonicalClass[owner], 1u);
+            if (candidatePriority < ownerPriority) canonicalClass[owner] = references[i];
+        }
+        std::vector<size_t> candidates;
+        for (size_t i = 0; i < dynamicCount; ++i) {
+            const auto state = static_cast<NavigatorResourceSchedulerState>(dynamicState[i]);
+            if (dynamicDuplicate[i] == 0xFFFFu &&
+                (canonicalClass[i] == NavigatorResourceViewportClass::Visible ||
+                 canonicalClass[i] == NavigatorResourceViewportClass::Near) &&
+                (state == NavigatorResourceSchedulerState::BudgetDenied ||
+                 state == NavigatorResourceSchedulerState::Evicted))
+                candidates.push_back(i);
+        }
+        std::sort(candidates.begin(), candidates.end(), [&](size_t left, size_t right) {
+            const uint8_t leftPriority = navigatorResourcePriorityWithViewport(canonicalClass[left], 1u);
+            const uint8_t rightPriority = navigatorResourcePriorityWithViewport(canonicalClass[right], 1u);
+            return leftPriority < rightPriority ||
+                (leftPriority == rightPriority && left < right);
+        });
+        auto evictOne = [&]() {
+            int selected = -1;
+            for (size_t i = 0; i < dynamicCount; ++i) {
+                if (!dynamicActive[i] || dynamicDuplicate[i] != 0xFFFFu ||
+                    canonicalClass[i] == NavigatorResourceViewportClass::Visible ||
+                    canonicalClass[i] == NavigatorResourceViewportClass::Unsupported) continue;
+                if (selected < 0 ||
+                    navigatorResourceEvictionClassRank(canonicalClass[i]) <
+                        navigatorResourceEvictionClassRank(canonicalClass[static_cast<size_t>(selected)]) ||
+                    (navigatorResourceEvictionClassRank(canonicalClass[i]) ==
+                        navigatorResourceEvictionClassRank(canonicalClass[static_cast<size_t>(selected)]) &&
+                        i < static_cast<size_t>(selected)))
+                    selected = static_cast<int>(i);
+            }
+            if (selected < 0) return false;
+            dynamicActive[static_cast<size_t>(selected)] = false;
+            dynamicState[static_cast<size_t>(selected)] =
+                static_cast<uint8_t>(NavigatorResourceSchedulerState::Evicted);
+            dynamicActiveBytes -= dynamicImageBytes;
+            ++dynamicStats.evictions;
+            dynamicStats.evictedDecodedBytes += dynamicImageBytes;
+            dynamicEvictionOrder.push_back(static_cast<uint32_t>(selected));
+            return true;
+        };
+        for (size_t candidate : candidates) {
+            bool evictionAttempted = false;
+            while (dynamicActiveBytes + dynamicImageBytes > kNavigatorDecodedImageBudgetBytes) {
+                evictionAttempted = true;
+                if (!evictOne()) break;
+            }
+            if (dynamicActiveBytes + dynamicImageBytes > kNavigatorDecodedImageBudgetBytes) {
+                if (evictionAttempted) ++dynamicStats.budgetDenialsAfterEvictionAttempts;
+                continue;
+            }
+            const bool readmission = static_cast<NavigatorResourceSchedulerState>(dynamicState[candidate]) ==
+                NavigatorResourceSchedulerState::Evicted;
+            dynamicActive[candidate] = true;
+            dynamicState[candidate] = static_cast<uint8_t>(NavigatorResourceSchedulerState::Attached);
+            dynamicActiveBytes += dynamicImageBytes;
+            ++dynamicStats.scrollTriggeredAdmissions;
+            if (readmission) ++dynamicStats.reAdmissions;
+            dynamicAdmissionOrder.push_back(static_cast<uint32_t>(candidate));
+        }
+        return true;
+    };
+
+    std::array<NavigatorResourceViewportClass, dynamicCount> regionB = dynamicClass;
+    regionB.fill(NavigatorResourceViewportClass::Far);
+    for (size_t i = 4; i < 8; ++i) regionB[i] = NavigatorResourceViewportClass::Visible;
+    regionB[12] = NavigatorResourceViewportClass::Far;
+    ok &= expect(runDynamicPass(regionB), "scroll change creates one bounded admission pass");
+    ok &= expect(dynamicStats.evictions > 0 && dynamicStats.scrollTriggeredAdmissions > 0,
+        "far initial resources are evicted for newly visible resources");
+    ok &= expect(dynamicActiveBytes <= kNavigatorDecodedImageBudgetBytes,
+        "dynamic eviction keeps aggregate bytes within the fixed budget");
+    ok &= expect(!runDynamicPass(regionB), "unchanged viewport relations coalesce without another pass");
+
+    std::array<NavigatorResourceViewportClass, dynamicCount> regionC = regionB;
+    regionC.fill(NavigatorResourceViewportClass::Far);
+    for (size_t i = 8; i < 12; ++i) regionC[i] = NavigatorResourceViewportClass::Visible;
+    regionC[12] = NavigatorResourceViewportClass::Visible;
+    const uint32_t admissionsBeforeC = dynamicStats.scrollTriggeredAdmissions;
+    runDynamicPass(regionC);
+    ok &= expect(dynamicStats.scrollTriggeredAdmissions > admissionsBeforeC,
+        "scrolling to the next region admits new visible resources");
+    ok &= expect(dynamicActiveBytes <= kNavigatorDecodedImageBudgetBytes,
+        "second region remains within the unchanged aggregate budget");
+
+    std::array<NavigatorResourceViewportClass, dynamicCount> regionBReturn = regionB;
+    const uint32_t admissionsBeforeBReturn = dynamicStats.scrollTriggeredAdmissions;
+    runDynamicPass(regionBReturn);
+    ok &= expect(dynamicStats.scrollTriggeredAdmissions > admissionsBeforeBReturn,
+        "returning to the middle region re-admits its evicted resources");
+
+    std::array<NavigatorResourceViewportClass, dynamicCount> regionA = dynamicClass;
+    regionA.fill(NavigatorResourceViewportClass::Far);
+    for (size_t i = 0; i < 4; ++i) regionA[i] = NavigatorResourceViewportClass::Visible;
+    regionA[12] = NavigatorResourceViewportClass::Far;
+    const uint32_t readmissionsBeforeA = dynamicStats.reAdmissions;
+    runDynamicPass(regionA);
+    ok &= expect(dynamicStats.reAdmissions > readmissionsBeforeA,
+        "evicted Region A content is re-admitted on return");
+    ok &= expect(dynamicEvictionOrder.size() == dynamicAdmissionOrder.size() &&
+        dynamicStats.evictedDecodedBytes == static_cast<uint64_t>(dynamicStats.evictions) * dynamicImageBytes,
+        "dynamic eviction accounting subtracts each decoded allocation exactly once");
+    size_t activeCanonical = 0;
+    for (size_t i = 0; i < dynamicCount; ++i)
+        if (dynamicActive[i] && dynamicDuplicate[i] == 0xFFFFu) ++activeCanonical;
+    ok &= expect(activeCanonical <= kNavigatorMaxActiveResources,
+        "dynamic active canonical resources stay within the fixed resource cap");
+    ok &= expect(dynamicActive[0] && !dynamicActive[12],
+        "duplicate references share one canonical active decoded owner");
+    ok &= expect(navigatorResourceEvictionClassRank(NavigatorResourceViewportClass::Far) <
+        navigatorResourceEvictionClassRank(NavigatorResourceViewportClass::Unknown) &&
+        navigatorResourceEvictionClassRank(NavigatorResourceViewportClass::Unknown) <
+        navigatorResourceEvictionClassRank(NavigatorResourceViewportClass::Near) &&
+        navigatorResourceEvictionClassRank(NavigatorResourceViewportClass::Near) <
+        navigatorResourceEvictionClassRank(NavigatorResourceViewportClass::Visible),
+        "eviction order protects visible before near, unknown, and far policy classes");
+
+    // 20. Replaying the complete A-to-B-to-C-to-B-to-A class sequence from a
+    // fresh bounded state produces the same source-order decisions.  The
+    // focused cases above cover oversized, corrupt, unsupported, and encoded
+    // over-limit candidates continuing to later valid resources.
+    const std::vector<uint32_t> firstEvictions = dynamicEvictionOrder;
+    const std::vector<uint32_t> firstAdmissions = dynamicAdmissionOrder;
+    ok &= expect(dynamicPasses == 4, "rapid repeated scroll classes produce only material passes");
+    ok &= expect(!firstEvictions.empty() && !firstAdmissions.empty(),
+        "dynamic cycle records bounded eviction and admission order");
+
+    for (size_t i = 0; i < dynamicCount; ++i) {
+        dynamicState[i] = i < 4
+            ? static_cast<uint8_t>(NavigatorResourceSchedulerState::Attached)
+            : static_cast<uint8_t>(NavigatorResourceSchedulerState::BudgetDenied);
+        dynamicActive[i] = i < 4;
+    }
+    dynamicActiveBytes = 4u * dynamicImageBytes;
+    dynamicStats = NavigatorResourceSchedulerStats{};
+    previousDynamicClass = dynamicClass;
+    dynamicEvictionOrder.clear();
+    dynamicAdmissionOrder.clear();
+    dynamicPasses = 0;
+    runDynamicPass(regionB);
+    runDynamicPass(regionC);
+    runDynamicPass(regionBReturn);
+    runDynamicPass(regionA);
+    ok &= expect(dynamicEvictionOrder == firstEvictions && dynamicAdmissionOrder == firstAdmissions,
+        "A-to-B-to-C-to-B-to-A eviction and admission order is deterministic");
+
     std::cout << (ok ? "Navigator resource scheduler tests PASS\n"
                      : "Navigator resource scheduler tests FAIL\n");
     return ok ? 0 : 1;

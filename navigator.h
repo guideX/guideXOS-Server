@@ -81,6 +81,12 @@ struct NavigatorResourceTelemetry {
 	uint32_t    priority = 0;
 	uint32_t    priorityBeforeViewport = 0;
 	bool        admittedDueToViewportPriority = false;
+	NavigatorResourceViewportRelation previousViewportRelation = NavigatorResourceViewportRelation::Unknown;
+	uint8_t     admissionReason = 0;
+	uint8_t     evictionReason = 0;
+	uint16_t    evictionCount = 0;
+	uint16_t    readmissionCount = 0;
+	bool        paintObserved = false;
 	NavigatorResourceSchedulerState schedulerState = NavigatorResourceSchedulerState::Empty;
 	uint64_t    budgetRequestedBytes = 0;
 	uint64_t    budgetAcceptedBytes = 0;
@@ -166,6 +172,16 @@ struct NavigatorResourceAggregateCounters {
 	uint64_t decodedBytesVisible = 0;
 	uint64_t decodedBytesNear = 0;
 	uint64_t decodedBytesFar = 0;
+	uint32_t viewportGeneration = 0;
+	uint32_t viewportAdmissionPasses = 0;
+	uint32_t scrollTriggeredAdmissions = 0;
+	uint32_t resourcesReconsidered = 0;
+	uint32_t evictions = 0;
+	uint32_t reAdmissions = 0;
+	uint32_t visibleAdmissionFailures = 0;
+	uint32_t budgetDenialsAfterEvictionAttempts = 0;
+	uint64_t evictedDecodedBytes = 0;
+	int32_t currentScrollOffset = 0;
 };
 
 struct NavigatorPageMetadata {
