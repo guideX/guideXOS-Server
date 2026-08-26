@@ -50,6 +50,7 @@ development_run_service.cpp ^
 desktop_state.cpp ^
 disk_manager.cpp ^
 display_options.cpp ^
+display_configuration_service.cpp ^
 control_panel.cpp ^
 elf_validator.cpp ^
 executable_memory.cpp ^
@@ -101,6 +102,7 @@ package_manager.cpp ^
 paint.cpp ^
 process.cpp ^
 png_loader.cpp ^
+jpeg_loader.cpp ^
 png_codec.cpp ^
 right_click_menu.cpp ^
 save_changes_dialog.cpp ^
