@@ -1,0 +1,191 @@
+<!doctype html>
+<html>
+<head><title>Navigator JavaScript JS11</title></head>
+<body>
+<h1>Navigator JavaScript JS11</h1>
+<p>This page exercises bounded click-listener removal through Navigator.</p>
+<button id="js11-main" type="button">Main 0</button>
+<button id="js11-readd" type="button">Re-add</button>
+<button id="js11-mismatch" type="button">Mismatch 0</button>
+<button id="js11-mismatch-remover" type="button">Wrong function</button>
+<button id="js11-wrong" type="button">Wrong element 0</button>
+<button id="js11-wrong-remover" type="button">Wrong target</button>
+<button id="js11-onclick" type="button">onclick</button>
+<button id="js11-onclick-change" type="button">onclick change</button>
+<button id="js11-closure" type="button">Closure 0</button>
+<button id="js11-closure-remover" type="button">Remove closure</button>
+<button id="js11-other" type="button">Other 0</button>
+<button id="js11-bad" type="button">Bad callback</button>
+<button id="js11-unsupported" type="button">Unsupported removal</button>
+<button id="js11-invalid" type="button">Invalid callback</button>
+<button id="js11-validation-target" type="button">Validation target 0</button>
+<button id="js11-noop" type="button">No-op 0</button>
+<button id="js11-repeat" type="button">Repeat 0</button>
+<p id="js11-order">order</p>
+<p id="js11-change-order">change order</p>
+<p id="js11-other-state">other state</p>
+<p id="js11-validation-state">validation 0</p>
+<a id="js11-link" href="/navigator-smoke/javascript-js11-target.html">Navigate after JS11</a>
+<script>
+var js11Main = document.getElementById("js11-main");
+var js11Readd = document.getElementById("js11-readd");
+var js11Mismatch = document.getElementById("js11-mismatch");
+var js11MismatchRemover = document.getElementById("js11-mismatch-remover");
+var js11Wrong = document.getElementById("js11-wrong");
+var js11WrongRemover = document.getElementById("js11-wrong-remover");
+var js11Onclick = document.getElementById("js11-onclick");
+var js11Change = document.getElementById("js11-onclick-change");
+var js11Closure = document.getElementById("js11-closure");
+var js11ClosureRemover = document.getElementById("js11-closure-remover");
+var js11Other = document.getElementById("js11-other");
+var js11Bad = document.getElementById("js11-bad");
+var js11Unsupported = document.getElementById("js11-unsupported");
+var js11Invalid = document.getElementById("js11-invalid");
+var js11ValidationTarget = document.getElementById("js11-validation-target");
+var js11Noop = document.getElementById("js11-noop");
+var js11Repeat = document.getElementById("js11-repeat");
+var js11Order = document.getElementById("js11-order");
+var js11ChangeOrder = document.getElementById("js11-change-order");
+var js11OtherState = document.getElementById("js11-other-state");
+var js11ValidationState = document.getElementById("js11-validation-state");
+
+var js11MainCount = 0;
+function js11MainHandler() {
+    js11MainCount = js11MainCount + 1;
+    js11Main.textContent = "Main " + js11MainCount;
+    js11Main.removeEventListener("click", js11MainHandler);
+}
+js11Main.addEventListener("click", js11MainHandler);
+
+function js11ReaddedHandler() {
+    js11MainCount = js11MainCount + 1;
+    js11Main.textContent = "Main " + js11MainCount;
+}
+function js11ReaddHandler() {
+    js11Main.addEventListener("click", js11ReaddedHandler);
+}
+js11Readd.addEventListener("click", js11ReaddHandler);
+
+var js11MismatchCount = 0;
+function js11First() {
+    js11MismatchCount = js11MismatchCount + 1;
+    js11Mismatch.textContent = "Mismatch " + js11MismatchCount;
+}
+function js11Second() {
+    js11MismatchCount = js11MismatchCount + 1;
+    js11Mismatch.textContent = "Mismatch " + js11MismatchCount;
+}
+js11Mismatch.addEventListener("click", js11First);
+function js11RemoveWrongFunction() {
+    js11Mismatch.removeEventListener("click", js11Second);
+}
+js11MismatchRemover.addEventListener("click", js11RemoveWrongFunction);
+
+var js11WrongCount = 0;
+function js11WrongHandler() {
+    js11WrongCount = js11WrongCount + 1;
+    js11Wrong.textContent = "Wrong element " + js11WrongCount;
+}
+js11Wrong.addEventListener("click", js11WrongHandler);
+function js11RemoveWrongElement() {
+    js11WrongRemover.removeEventListener("click", js11WrongHandler);
+}
+js11WrongRemover.addEventListener("click", js11RemoveWrongElement);
+
+var js11OnclickCount = 0;
+var js11ListenerCount = 0;
+var js11OrderValue = "";
+function js11OnclickHandler() {
+    js11OnclickCount = js11OnclickCount + 1;
+    js11OrderValue = js11OrderValue + "o";
+    js11Order.textContent = js11OrderValue;
+}
+function js11ListenerHandler() {
+    js11ListenerCount = js11ListenerCount + 1;
+    js11OrderValue = js11OrderValue + "l";
+    js11Order.textContent = js11OrderValue;
+    js11Onclick.removeEventListener("click", js11ListenerHandler);
+}
+js11Onclick.onclick = js11OnclickHandler;
+js11Onclick.addEventListener("click", js11ListenerHandler);
+
+var js11ChangeOrderValue = "";
+function js11ChangeOnclick() {
+    js11ChangeOrderValue = js11ChangeOrderValue + "o";
+    js11ChangeOrder.textContent = js11ChangeOrderValue;
+}
+function js11ChangeListener() {
+    js11ChangeOrderValue = js11ChangeOrderValue + "l";
+    js11ChangeOrder.textContent = js11ChangeOrderValue;
+    js11Change.onclick = null;
+}
+js11Change.onclick = js11ChangeOnclick;
+js11Change.addEventListener("click", js11ChangeListener);
+
+function js11MakeClosure(element) {
+    var localCount = 0;
+    function closure() {
+        localCount = localCount + 1;
+        element.textContent = "Closure " + localCount;
+    }
+    return closure;
+}
+var js11ClosureHandler = js11MakeClosure(js11Closure);
+js11Closure.addEventListener("click", js11ClosureHandler);
+function js11RemoveClosure() {
+    js11Closure.removeEventListener("click", js11ClosureHandler);
+}
+js11ClosureRemover.addEventListener("click", js11RemoveClosure);
+
+var js11OtherCount = 0;
+function js11OtherHandler() {
+    js11OtherCount = js11OtherCount + 1;
+    js11Other.textContent = "Other " + js11OtherCount;
+    js11OtherState.textContent = "Other count " + js11OtherCount;
+}
+js11Other.addEventListener("click", js11OtherHandler);
+
+function js11BadHandler() {
+    js11MissingFunction();
+}
+js11Bad.addEventListener("click", js11BadHandler);
+
+var js11ValidationCount = 0;
+function js11ValidationHandler() {
+    js11ValidationCount = js11ValidationCount + 1;
+    js11ValidationTarget.textContent = "Validation target " + js11ValidationCount;
+    js11ValidationState.textContent = "validation " + js11ValidationCount;
+}
+js11ValidationTarget.addEventListener("click", js11ValidationHandler);
+function js11UnsupportedHandler() {
+    js11ValidationTarget.removeEventListener("mouseover", js11ValidationHandler);
+}
+js11Unsupported.addEventListener("click", js11UnsupportedHandler);
+function js11InvalidHandler() {
+    js11Main.removeEventListener("click", 123);
+}
+js11Invalid.addEventListener("click", js11InvalidHandler);
+
+var js11NoopCount = 0;
+function js11NeverHandler() {
+    js11NoopCount = js11NoopCount + 100;
+}
+function js11NoopHandler() {
+    js11NoopCount = js11NoopCount + 1;
+    js11Noop.textContent = "No-op " + js11NoopCount;
+}
+js11Noop.removeEventListener("click", js11NeverHandler);
+js11Noop.removeEventListener("click", js11NeverHandler);
+js11Noop.addEventListener("click", js11NoopHandler);
+
+var js11RepeatCount = 0;
+function js11RepeatHandler() {
+    js11RepeatCount = js11RepeatCount + 1;
+    js11Repeat.textContent = "Repeat " + js11RepeatCount;
+    js11Repeat.removeEventListener("click", js11RepeatHandler);
+    js11Repeat.removeEventListener("click", js11RepeatHandler);
+}
+js11Repeat.addEventListener("click", js11RepeatHandler);
+</script>
+</body>
+</html>

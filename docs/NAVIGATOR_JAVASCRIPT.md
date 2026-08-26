@@ -1379,3 +1379,87 @@ JS10 intentionally does not add `removeEventListener`, multiple listeners per
 element, listener options, event objects, event propagation, default-action
 control, keyboard or other event types, timers, asynchronous dispatch, or
 general browser DOM Events behavior.
+
+## Phase JS11: remove bounded click listeners
+
+JS11 adds the matching narrow removal API:
+
+```javascript
+element.removeEventListener("click", callback)
+```
+
+The supported signature is exactly `Element.removeEventListener("click",
+Function)`. A successful removal returns the runtime's normal `undefined`
+result. Matching requires all three values in the bounded registration record:
+the target Element's current-generation identity, the exact event type
+`"click"`, and JavaScript function identity. Function source text, function
+names, and structurally identical function bodies are not compared. Two
+function objects with identical code are therefore different callbacks.
+
+Removal is a lookup-only operation. If the target has no matching listener,
+including when the callback was never registered, it is a deterministic no-op
+and does not create a record. Removing the same listener repeatedly is also
+harmless. A removed listener record is cleared, and if its `onclick` slot is
+also empty the shared record is compacted immediately. The freed listener
+slot can be reused by a later `addEventListener` call. Removal on another
+Element cannot affect the original Element.
+
+`onclick` remains an independent slot. Removing an `addEventListener` listener
+does not clear or mutate `onclick`; changing or clearing `onclick` does not
+remove the registered listener. When both are present, the existing JS10
+dispatch order remains `onclick` first and the registered listener second.
+JS10's deliberate one-listener-per-element rule remains in force: a duplicate
+`addEventListener("click", ...)` call replaces that Element's one listener;
+JS11 does not introduce multiple listeners for one Element.
+
+The listener table remains fixed and bounded at 64 records of 16 bytes each
+(1,024 bytes total). The table is shared with `onclick`, and the listener
+registration count is capped at 64. Removing a listener decrements that count
+and makes the slot reusable; repeated remove/re-add cycles do not consume
+capacity permanently. No per-removal allocation or general-purpose event
+listener heap was added.
+
+Only `"click"` is supported. Removal of another event name uses the existing
+`HostInvalidValue` runtime error convention and does not mutate click-listener
+state. A non-function callback such as `123` or `null` is rejected with the
+same `HostInvalidValue` result and does not change an existing listener. These
+validation failures are handled by the existing JavaScript/host error path.
+
+Callbacks continue to run synchronously in the already-installed, same-realm
+`RuntimeContext`, with zero arguments and no Event object. Function IDs are
+runtime-owned identities; captured environments remain owned by the runtime
+until realm reset, so removing a registration does not invalidate unrelated
+JavaScript references to that function or its closure. The bounded lifetime
+model is therefore: a registration retains only an element serial and a
+runtime function ID; document attach/detach, navigation, realm reset, or host
+generation change clears registration records, while the runtime owns function
+and closure storage until reset. A stale Element fails with the existing
+`StaleHostObject` result and cannot remove or register against a replacement
+document.
+
+The focused proof is `tests/navigator_javascript_js11_test.cpp`, run by
+`scripts/smoke-navigator-javascript-js11.ps1`. It covers identity mismatch,
+identical-code functions, wrong elements, nonexistent and repeated removal,
+onclick independence, remove/re-add, slot reuse after all 64 registrations,
+closure mutation and lifetime, unsupported and invalid values, callback-error
+containment, DOM mutation/relayout, and navigation-generation cleanup. The
+script compiles the relevant adapter/runtime path with `GXOS_BARE_METAL` and
+also performs a strict hosted syntax check.
+
+The authentic hosted proof uses
+`navigator-smoke/javascript-js11.html` and
+`navigator-smoke/javascript-js11-target.html` through the `navigator.smoke`
+aggregate. It uses Navigator's parsed page scripts, real element hit testing,
+physical click handling, callback-driven DOM mutation, listener self-removal,
+re-registration, onclick coexistence, error recovery, ordinary-link
+navigation, and document cleanup. JS11 assertions are reported separately
+from the repository's unrelated CSS smoke phases.
+
+JS11 remains intentionally incomplete browser behavior. It does not add Event
+objects or callback arguments, `target`/`currentTarget`, bubbling, capture,
+propagation controls, listener options, `{ once: true }`, multiple listeners
+per element, other event types, timers, promises, microtasks, task queues,
+asynchronous JavaScript, or broader DOM APIs. A clean next phase is JS12:
+introduce a minimal click Event object and pass it as the first callback
+argument, initially exposing only `type`, `target`, and `currentTarget`
+without propagation.

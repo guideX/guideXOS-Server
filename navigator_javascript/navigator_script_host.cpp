@@ -316,6 +316,10 @@ HostResult NavigatorScriptHostAdapter::getProperty(
         result = HostValue::method(kNavigatorAddEventListenerMethod, true, true);
         return HostResult();
     }
+    if (textEquals(property, "removeEventListener")) {
+        result = HostValue::method(kNavigatorRemoveEventListenerMethod, true, true);
+        return HostResult();
+    }
     return HostResult{HostResultCode::PropertyNotFound};
 }
 
@@ -607,6 +611,34 @@ HostResult NavigatorScriptHostAdapter::call(const HostObjectReference* receiver,
             receiver->instanceId, kInvalidRuntimeFunctionId,
             arguments[1].functionId};
         ++clickListenerCount_;
+        result = HostValue::undefined();
+        return HostResult();
+    }
+    if (methodId == kNavigatorRemoveEventListenerMethod) {
+        if (receiver->kind != kNavigatorElementHostKind ||
+            argumentCount != 2u || arguments == nullptr ||
+            arguments[0].type != HostValueType::String ||
+            arguments[1].type != HostValueType::Function ||
+            arguments[1].functionId == kInvalidRuntimeFunctionId) {
+            return HostResult{HostResultCode::InvalidValue};
+        }
+        if (arguments[0].stringValue.data == nullptr &&
+            arguments[0].stringValue.length != 0) {
+            return HostResult{HostResultCode::InvalidValue};
+        }
+        if (!textEquals(arguments[0].stringValue, "click"))
+            return HostResult{HostResultCode::InvalidValue};
+
+        // Removal is deliberately a lookup only. It never creates a record,
+        // and function IDs provide JavaScript function identity within this
+        // same realm; source text or function shape is never compared.
+        ClickHandlerRecord* record = clickHandlerFor(receiver->instanceId);
+        if (record != nullptr &&
+            record->listenerFunction == arguments[1].functionId) {
+            record->listenerFunction = kInvalidRuntimeFunctionId;
+            if (clickListenerCount_ > 0) --clickListenerCount_;
+            removeEmptyClickHandler(receiver->instanceId);
+        }
         result = HostValue::undefined();
         return HostResult();
     }

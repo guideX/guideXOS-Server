@@ -21,6 +21,7 @@ constexpr HostInstanceId kNavigatorDocumentHostInstance = 1u;
 
 constexpr std::uint32_t kNavigatorGetElementByIdMethod = 1u;
 constexpr std::uint32_t kNavigatorAddEventListenerMethod = 2u;
+constexpr std::uint32_t kNavigatorRemoveEventListenerMethod = 3u;
 
 constexpr std::size_t kNavigatorScriptMaxDocumentIdLength = 256u;
 constexpr std::size_t kNavigatorScriptMaxTextContentAssignment = 64u * 1024u;

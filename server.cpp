@@ -760,6 +760,192 @@ static std::string navigatorHostedSmokeDiagnostic() {
         gxos::apps::Navigator::SmokeJavaScriptListenerCount() == 0u,
         "expected document-scoped listener storage to reset");
 
+    const bool js11Loaded = gxos::apps::Navigator::SmokeNavigateToQuiet(
+        "http://127.0.0.1:8080/navigator-smoke/javascript-js11.html");
+    const std::string js11InitialText =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    const uint64_t js11InitialRevision =
+        gxos::apps::Navigator::SmokeDocumentLayoutRevision();
+    int js11MainX = 0;
+    int js11MainY = 0;
+    int js11MainW = 0;
+    int js11MainH = 0;
+    const bool js11MainHasGeometry = gxos::apps::Navigator::SmokeBlockGeometryById(
+        "js11-main", js11MainX, js11MainY, js11MainW, js11MainH);
+    const bool js11MainHit =
+        gxos::apps::Navigator::SmokeFormHitTargetById("js11-main");
+    const size_t js11InitialHandlers =
+        gxos::apps::Navigator::SmokeJavaScriptHandlerCount();
+    const size_t js11InitialListeners =
+        gxos::apps::Navigator::SmokeJavaScriptListenerCount();
+    const std::string js11InitialError =
+        gxos::apps::Navigator::SmokeJavaScriptLastError();
+    add("JS11 hosted fixture loads and registers listeners",
+        js11Loaded && contains(js11InitialText, "Navigator JavaScript JS11") &&
+        contains(js11InitialText, "Main 0") && js11InitialHandlers == 17u &&
+        js11InitialListeners == 17u && js11InitialError.empty(),
+        std::string("loaded=") + yesNo(js11Loaded) + ",records=" +
+        std::to_string(js11InitialHandlers) + ",listeners=" +
+        std::to_string(js11InitialListeners) + ",error=" +
+        (js11InitialError.empty() ? "none" : js11InitialError));
+
+    const bool js11MainClickOne =
+        gxos::apps::Navigator::SmokeClickFormControlById("js11-main");
+    const std::string js11AfterMainOne =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    const uint64_t js11RevisionAfterMainOne =
+        gxos::apps::Navigator::SmokeDocumentLayoutRevision();
+    add("JS11 authentic hosted click executes registered callback",
+        js11MainHasGeometry && js11MainW > 0 && js11MainH > 0 && js11MainHit &&
+        js11MainClickOne && contains(js11AfterMainOne, "Main 1"),
+        std::string("geometry=") + yesNo(js11MainHasGeometry) + ",hit=" +
+        yesNo(js11MainHit) + ",click=" + yesNo(js11MainClickOne));
+    add("JS11 callback removal stops the next authentic click",
+        gxos::apps::Navigator::SmokeClickFormControlById("js11-main") &&
+        gxos::apps::Navigator::SmokeCurrentDocumentText().find("Main 1") !=
+            std::string::npos &&
+        gxos::apps::Navigator::SmokeJavaScriptListenerCount() == 16u,
+        "self-removal leaves Main at 1 and releases one listener slot");
+    add("JS11 callback DOM mutation still relayouts",
+        js11RevisionAfterMainOne > js11InitialRevision &&
+        !gxos::apps::Navigator::SmokeDocumentDirty(),
+        "revision=" + std::to_string(js11InitialRevision) + "->" +
+        std::to_string(js11RevisionAfterMainOne));
+
+    const bool js11ReaddClick =
+        gxos::apps::Navigator::SmokeClickFormControlById("js11-readd");
+    const bool js11MainClickAfterReadd =
+        gxos::apps::Navigator::SmokeClickFormControlById("js11-main");
+    add("JS11 remove then re-add executes once",
+        js11ReaddClick && js11MainClickAfterReadd &&
+        contains(gxos::apps::Navigator::SmokeCurrentDocumentText(), "Main 2"),
+        "re-add trigger and main click both used the real Navigator path");
+
+    const bool js11MismatchRemove =
+        gxos::apps::Navigator::SmokeClickFormControlById("js11-mismatch-remover");
+    const bool js11MismatchClick =
+        gxos::apps::Navigator::SmokeClickFormControlById("js11-mismatch");
+    add("JS11 wrong function identity does not remove",
+        js11MismatchRemove && js11MismatchClick &&
+        contains(gxos::apps::Navigator::SmokeCurrentDocumentText(), "Mismatch 1"),
+        "different function with identical body leaves first callback live");
+
+    const bool js11WrongRemove =
+        gxos::apps::Navigator::SmokeClickFormControlById("js11-wrong-remover");
+    const bool js11WrongClick =
+        gxos::apps::Navigator::SmokeClickFormControlById("js11-wrong");
+    add("JS11 wrong element identity does not remove",
+        js11WrongRemove && js11WrongClick &&
+        contains(gxos::apps::Navigator::SmokeCurrentDocumentText(),
+            "Wrong element 1"),
+        "removal on another element leaves the original target callback live");
+
+    const bool js11NoopClick =
+        gxos::apps::Navigator::SmokeClickFormControlById("js11-noop");
+    add("JS11 nonexistent removal is harmless",
+        js11NoopClick &&
+        contains(gxos::apps::Navigator::SmokeCurrentDocumentText(), "No-op 1"),
+        "pre-registration removal did not create or corrupt a record");
+    const bool js11RepeatClickOne =
+        gxos::apps::Navigator::SmokeClickFormControlById("js11-repeat");
+    const bool js11RepeatClickTwo =
+        gxos::apps::Navigator::SmokeClickFormControlById("js11-repeat");
+    add("JS11 repeated removal is harmless",
+        js11RepeatClickOne && js11RepeatClickTwo &&
+        contains(gxos::apps::Navigator::SmokeCurrentDocumentText(), "Repeat 1"),
+        "self-removal followed by repeated removal fires only once");
+
+    const bool js11OnclickClickOne =
+        gxos::apps::Navigator::SmokeClickFormControlById("js11-onclick");
+    const bool js11OnclickClickTwo =
+        gxos::apps::Navigator::SmokeClickFormControlById("js11-onclick");
+    add("JS11 removal leaves onclick independent",
+        js11OnclickClickOne && js11OnclickClickTwo &&
+        contains(gxos::apps::Navigator::SmokeCurrentDocumentText(), "olo"),
+        "onclick and listener ordering is ol, then onclick-only o");
+
+    const bool js11ChangeClickOne =
+        gxos::apps::Navigator::SmokeClickFormControlById("js11-onclick-change");
+    const bool js11ChangeClickTwo =
+        gxos::apps::Navigator::SmokeClickFormControlById("js11-onclick-change");
+    add("JS11 listener survives unrelated onclick change",
+        js11ChangeClickOne && js11ChangeClickTwo &&
+        contains(gxos::apps::Navigator::SmokeCurrentDocumentText(), "oll"),
+        "listener remains after its callback clears onclick");
+
+    const bool js11ClosureClickOne =
+        gxos::apps::Navigator::SmokeClickFormControlById("js11-closure");
+    const bool js11ClosureClickTwo =
+        gxos::apps::Navigator::SmokeClickFormControlById("js11-closure");
+    const bool js11ClosureRemove =
+        gxos::apps::Navigator::SmokeClickFormControlById("js11-closure-remover");
+    const bool js11ClosureClickThree =
+        gxos::apps::Navigator::SmokeClickFormControlById("js11-closure");
+    add("JS11 closure removal after prior execution",
+        js11ClosureClickOne && js11ClosureClickTwo && js11ClosureRemove &&
+        js11ClosureClickThree &&
+        contains(gxos::apps::Navigator::SmokeCurrentDocumentText(), "Closure 2"),
+        "captured state reaches 2 and stays there after removal");
+
+    const bool js11OtherClickOne =
+        gxos::apps::Navigator::SmokeClickFormControlById("js11-other");
+    const bool js11BadClick =
+        gxos::apps::Navigator::SmokeClickFormControlById("js11-bad");
+    const std::string js11BadError =
+        gxos::apps::Navigator::SmokeJavaScriptLastError();
+    const bool js11OtherClickTwo =
+        gxos::apps::Navigator::SmokeClickFormControlById("js11-other");
+    add("JS11 callback-error containment preserves other listeners",
+        js11OtherClickOne && js11BadClick &&
+        contains(js11BadError, "UnknownIdentifier") && js11OtherClickTwo &&
+        contains(gxos::apps::Navigator::SmokeCurrentDocumentText(), "Other 2"),
+        "bad callback error is contained and independent callback reaches 2");
+
+    const bool js11UnsupportedClick =
+        gxos::apps::Navigator::SmokeClickFormControlById("js11-unsupported");
+    const std::string js11UnsupportedError =
+        gxos::apps::Navigator::SmokeJavaScriptLastError();
+    const bool js11ValidationClickOne =
+        gxos::apps::Navigator::SmokeClickFormControlById("js11-validation-target");
+    add("JS11 unsupported removal is deterministic and preserves click",
+        js11UnsupportedClick && contains(js11UnsupportedError, "HostInvalidValue") &&
+        js11ValidationClickOne &&
+        contains(gxos::apps::Navigator::SmokeCurrentDocumentText(),
+            "Validation target 1"),
+        "mouseover removal is rejected without changing the click registration");
+
+    const bool js11InvalidClick =
+        gxos::apps::Navigator::SmokeClickFormControlById("js11-invalid");
+    const std::string js11InvalidError =
+        gxos::apps::Navigator::SmokeJavaScriptLastError();
+    const bool js11ValidationClickTwo =
+        gxos::apps::Navigator::SmokeClickFormControlById("js11-validation-target");
+    add("JS11 invalid callback input is safely rejected",
+        js11InvalidClick && contains(js11InvalidError, "HostInvalidValue") &&
+        js11ValidationClickTwo &&
+        contains(gxos::apps::Navigator::SmokeCurrentDocumentText(),
+            "Validation target 2"),
+        "numeric callback rejection preserves the valid listener");
+
+    const bool js11LinkHit =
+        gxos::apps::Navigator::SmokeHitLinkById("js11-link");
+    const bool js11LinkClick =
+        js11LinkHit && gxos::apps::Navigator::SmokeClickFirstLink();
+    const std::string js11TargetText =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS11 ordinary link navigation remains functional",
+        js11LinkHit && js11LinkClick &&
+        gxos::apps::Navigator::SmokeCurrentUrl() ==
+            "http://127.0.0.1:8080/navigator-smoke/javascript-js11-target.html" &&
+        contains(js11TargetText, "Navigator JavaScript JS11 Target"),
+        std::string("hit=") + yesNo(js11LinkHit) + ",link=" +
+        yesNo(js11LinkClick) + ",url=" + gxos::apps::Navigator::SmokeCurrentUrl());
+    add("JS11 navigation clears stale listener state",
+        gxos::apps::Navigator::SmokeJavaScriptHandlerCount() == 0u &&
+        gxos::apps::Navigator::SmokeJavaScriptListenerCount() == 0u &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        "replacement document has no old callbacks, IDs, or errors");
+
     bool cssInlineLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-inline.html");
     std::string cssInlineText = gxos::apps::Navigator::SmokeCurrentDocumentText();
     std::string cssInlineReport = gxos::apps::Navigator::SmokeRuntimeReport();
