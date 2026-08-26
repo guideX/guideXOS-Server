@@ -35,7 +35,6 @@
 !/third_party/stb/
 /third_party/stb/*
 !/third_party/stb/stb_image.h
-<<<<<<< HEAD
 /dist/
 /out/release-tools/
 /out/release-iso/
