@@ -3,6 +3,7 @@
 #include "include/kernel/framebuffer.h"
 #include "include/kernel/serial_debug.h"
 #include "include/kernel/vfs.h"
+#include "../../jpeg_loader.h"
 
 namespace serial = kernel::serial;
 
@@ -11,6 +12,8 @@ namespace serial = kernel::serial;
 #define STBI_NO_HDR
 #define STBI_NO_LINEAR
 #define STBI_NO_THREAD_LOCALS
+#define STBI_NO_SIMD
+#define STB_IMAGE_STATIC
 #define STBI_ASSERT(x) do { (void)sizeof(x); } while (0)
 static void* gxos_kernel_stbi_malloc(size_t size)
 {
@@ -91,6 +94,32 @@ static bool ends_with_png(const char* path)
            (ext[3] == 'g' || ext[3] == 'G');
 }
 
+static bool ends_with_jpeg(const char* path)
+{
+    if (!path) return false;
+    uint32_t len = 0;
+    while (path[len]) ++len;
+    if (len >= 5) {
+        const char* ext = path + len - 5;
+        if (ext[0] == '.' &&
+            (ext[1] == 'j' || ext[1] == 'J') &&
+            (ext[2] == 'p' || ext[2] == 'P') &&
+            (ext[3] == 'e' || ext[3] == 'E') &&
+            (ext[4] == 'g' || ext[4] == 'G')) return true;
+    }
+    if (len < 4) return false;
+    const char* ext = path + len - 4;
+    return ext[0] == '.' &&
+           (ext[1] == 'j' || ext[1] == 'J') &&
+           (ext[2] == 'p' || ext[2] == 'P') &&
+           (ext[3] == 'g' || ext[3] == 'G');
+}
+
+static bool ends_with_supported_image(const char* path)
+{
+    return ends_with_png(path) || ends_with_jpeg(path);
+}
+
 static uint32_t be32(const uint8_t* bytes)
 {
     return ((uint32_t)bytes[0] << 24) |
@@ -117,7 +146,8 @@ static bool dimensions_within_limits(uint32_t width, uint32_t height, const Imag
     if (width == 0 || height == 0) return false;
     if (width > limits.maxWidth || height > limits.maxHeight) return false;
     uint64_t pixels = (uint64_t)width * (uint64_t)height;
-    return pixels <= limits.maxPixels;
+    if (pixels == 0 || pixels > limits.maxPixels || pixels > (uint64_t)(~0ULL / sizeof(uint32_t))) return false;
+    return pixels * sizeof(uint32_t) <= limits.maxDecodedBytes;
 }
 
 static bool estimate_image_memory(uint32_t width, uint32_t height, uint64_t& decodedBytes, uint64_t& requiredBytes)
@@ -132,6 +162,7 @@ static bool estimate_image_memory(uint32_t width, uint32_t height, uint64_t& dec
     }
 
     decodedBytes = pixels * sizeof(uint32_t);
+    if (decodedBytes > 0xFFFFFFFFULL) return false;
     if (decodedBytes > (uint64_t)(~0ULL - kKernelImageHeapSlackBytes)) {
         return false;
     }
@@ -180,6 +211,11 @@ static ImageSafetyLimits resolve_bare_metal_limits(const ImageSafetyLimits& limi
     return limits;
 }
 
+enum class KernelImageKind : uint8_t {
+    Png = 0,
+    Jpeg,
+};
+
 static ImageProbe probe_bytes_impl(const uint8_t* bytes, uint32_t byteCount, const ImageSafetyLimits& limits, const char* path)
 {
     ImageProbe probe{};
@@ -202,7 +238,30 @@ static ImageProbe probe_bytes_impl(const uint8_t* bytes, uint32_t byteCount, con
 
     uint32_t width = 0;
     uint32_t height = 0;
-    if (!png_header_size(bytes, byteCount, width, height)) {
+    KernelImageKind kind = KernelImageKind::Png;
+    JpegHeaderInfo jpegInfo{};
+    if (png_header_size(bytes, byteCount, width, height)) {
+        kind = KernelImageKind::Png;
+    } else if (IsJpegSignature(bytes, byteCount)) {
+        kind = KernelImageKind::Jpeg;
+        const JpegProbeStatus jpegProbe = InspectJpeg(bytes, byteCount, jpegInfo);
+        if (jpegProbe == JpegProbeStatus::Malformed) {
+            probe.status = ImageLoadStatus::DecodeFailed;
+            return probe;
+        }
+        width = jpegInfo.width;
+        height = jpegInfo.height;
+        if (jpegProbe == JpegProbeStatus::Unsupported) {
+            probe.width = width;
+            probe.height = height;
+            probe.status = ImageLoadStatus::UnsupportedFormat;
+            return probe;
+        }
+        if (jpegProbe != JpegProbeStatus::Valid) {
+            probe.status = ImageLoadStatus::UnsupportedFormat;
+            return probe;
+        }
+    } else {
         probe.status = ImageLoadStatus::UnsupportedFormat;
         return probe;
     }
@@ -213,7 +272,10 @@ static ImageProbe probe_bytes_impl(const uint8_t* bytes, uint32_t byteCount, con
 #if defined(GXOS_BARE_METAL)
         uint64_t decodedBytes = 0;
         uint64_t requiredBytes = 0;
-        if (!estimate_image_memory(width, height, decodedBytes, requiredBytes)) {
+        const bool estimated = kind == KernelImageKind::Jpeg
+            ? EstimateJpegAllocation(jpegInfo, limits, requiredBytes, decodedBytes)
+            : estimate_image_memory(width, height, decodedBytes, requiredBytes);
+        if (!estimated) {
             requiredBytes = 0;
         }
         log_image_rejection(path, ImageLoadStatus::TooLarge, byteCount, width, height, requiredBytes, gxos_kernel_heap_free_bytes(), gxos_kernel_heap_largest_free_bytes(), gxos_kernel_heap_total_bytes());
@@ -225,7 +287,13 @@ static ImageProbe probe_bytes_impl(const uint8_t* bytes, uint32_t byteCount, con
 #if defined(GXOS_BARE_METAL)
     uint64_t decodedBytes = 0;
     uint64_t requiredBytes = 0;
-    if (!estimate_image_memory(width, height, decodedBytes, requiredBytes)) {
+    bool estimated = false;
+    if (kind == KernelImageKind::Jpeg) {
+        estimated = EstimateJpegAllocation(jpegInfo, limits, requiredBytes, decodedBytes);
+    } else {
+        estimated = estimate_image_memory(width, height, decodedBytes, requiredBytes);
+    }
+    if (!estimated) {
         log_image_rejection(path, ImageLoadStatus::TooLarge, byteCount, width, height, 0, gxos_kernel_heap_free_bytes(), gxos_kernel_heap_largest_free_bytes(), gxos_kernel_heap_total_bytes());
         probe.status = ImageLoadStatus::TooLarge;
         return probe;
@@ -252,6 +320,7 @@ static ImageBitmap load_bytes_impl(const uint8_t* bytes, uint32_t byteCount, con
     bitmap.pixels = nullptr;
     bitmap.width = probe.width;
     bitmap.height = probe.height;
+    bitmap.format = ImageFormat::Unknown;
     if (probe.status != ImageLoadStatus::Ok) return bitmap;
     if (byteCount > 0x7FFFFFFFu) {
         bitmap.status = ImageLoadStatus::TooLarge;
@@ -267,6 +336,48 @@ static ImageBitmap load_bytes_impl(const uint8_t* bytes, uint32_t byteCount, con
     serial::put_hex32(bitmap.height);
     serial::puts("\n");
 #endif
+    // JPEG uses its own STBI_ONLY_JPEG translation unit so the existing PNG
+    // decoder remains format-isolated and its allocation/release path stays
+    // unchanged.
+    if (IsJpegSignature(bytes, byteCount)) {
+        JpegDecodedBuffer jpeg = DecodeJpegRgba(bytes, byteCount, limits);
+        if (jpeg.status != JpegDecodeStatus::Ok || !jpeg.pixels) {
+            if (jpeg.status == JpegDecodeStatus::TooLarge)
+                bitmap.status = ImageLoadStatus::TooLarge;
+            else if (jpeg.status == JpegDecodeStatus::Unsupported)
+                bitmap.status = ImageLoadStatus::UnsupportedFormat;
+            else if (jpeg.status == JpegDecodeStatus::OutOfMemory)
+                bitmap.status = ImageLoadStatus::OutOfMemory;
+            else
+                bitmap.status = ImageLoadStatus::DecodeFailed;
+#if defined(GXOS_BARE_METAL)
+            uint64_t decodedBytes = 0;
+            uint64_t requiredBytes = 0;
+            JpegHeaderInfo jpegInfo{};
+            if (InspectJpeg(bytes, byteCount, jpegInfo) == JpegProbeStatus::Valid)
+                EstimateJpegAllocation(jpegInfo, limits, requiredBytes, decodedBytes);
+            log_image_rejection(path, bitmap.status, byteCount, bitmap.width, bitmap.height, requiredBytes,
+                gxos_kernel_heap_free_bytes(), gxos_kernel_heap_largest_free_bytes(), gxos_kernel_heap_total_bytes());
+#endif
+            return bitmap;
+        }
+
+        uint8_t* pixelBytes = const_cast<uint8_t*>(jpeg.pixels);
+        const uint64_t totalPixels = static_cast<uint64_t>(jpeg.width) * static_cast<uint64_t>(jpeg.height);
+        for (uint64_t i = 0; i < totalPixels; ++i) {
+            uint8_t* px = pixelBytes + i * 4u;
+            uint8_t tmp = px[0];
+            px[0] = px[2];
+            px[2] = tmp;
+        }
+        bitmap.status = ImageLoadStatus::Ok;
+        bitmap.pixels = reinterpret_cast<const uint32_t*>(jpeg.pixels);
+        bitmap.width = jpeg.width;
+        bitmap.height = jpeg.height;
+        bitmap.format = ImageFormat::Jpeg;
+        return bitmap;
+    }
+
     int width = 0;
     int height = 0;
     int sourceChannels = 0;
@@ -321,6 +432,7 @@ static ImageBitmap load_bytes_impl(const uint8_t* bytes, uint32_t byteCount, con
     bitmap.pixels = reinterpret_cast<const uint32_t*>(decoded);
     bitmap.width = (uint32_t)width;
     bitmap.height = (uint32_t)height;
+    bitmap.format = ImageFormat::Png;
 #if defined(GXOS_IMAGEVIEWER_BARE_METAL_RUNTIME_SMOKE_ACTIVE) && defined(GXOS_BARE_METAL)
     serial::puts("[IMAGEVIEWER-RUNTIME-SMOKE] adapter stbi end status=Loaded\n");
 #endif
@@ -346,17 +458,22 @@ void ImageAdapter::Release(ImageBitmap& bitmap)
 {
 #if defined(GXOS_BARE_METAL)
     if (bitmap.status == ImageLoadStatus::Ok && bitmap.pixels) {
-        stbi_image_free(const_cast<uint32_t*>(bitmap.pixels));
+        if (bitmap.format == ImageFormat::Jpeg)
+            ReleaseJpegBuffer(reinterpret_cast<const uint8_t*>(bitmap.pixels));
+        else
+            stbi_image_free(const_cast<uint32_t*>(bitmap.pixels));
     }
     bitmap.status = ImageLoadStatus::NotFound;
     bitmap.pixels = nullptr;
     bitmap.width = 0;
     bitmap.height = 0;
+    bitmap.format = ImageFormat::Unknown;
 #else
     bitmap.image.reset();
     bitmap.status = ImageLoadStatus::NotFound;
     bitmap.width = 0;
     bitmap.height = 0;
+    bitmap.format = ImageFormat::Unknown;
     bitmap.source.clear();
 #endif
 }
@@ -376,7 +493,7 @@ ImageProbe ImageAdapter::ProbeFile(const char* path, const ImageSafetyLimits& li
     probe.height = 0;
 
     if (!path || !path[0]) return probe;
-    if (!ends_with_png(path)) {
+    if (!ends_with_supported_image(path)) {
         probe.status = ImageLoadStatus::UnsupportedFormat;
         return probe;
     }
@@ -402,22 +519,30 @@ ImageProbe ImageAdapter::ProbeFile(const char* path, const ImageSafetyLimits& li
         return probe;
     }
 
-    uint8_t header[32];
+    static uint8_t header[16u * 1024u];
 #if defined(GXOS_IMAGEVIEWER_BARE_METAL_RUNTIME_SMOKE_ACTIVE) && defined(GXOS_BARE_METAL)
     serial::puts("[IMAGEVIEWER-RUNTIME-SMOKE] probe file read header start\n");
 #endif
-    int32_t read = kernel::vfs::read_file(path, header, sizeof(header));
+    // JPEG dimension inspection validates the complete marker stream through
+    // EOI.  Read a bounded JPEG into the same 4 MiB scratch storage used by
+    // LoadFromFile so larger-than-header JPEGs do not fail before decoding.
+    const bool jpegPath = ends_with_jpeg(path);
+    uint8_t* probeBuffer = jpegPath ? s_kernelImageFileScratch : header;
+    uint32_t headerBytes = jpegPath
+        ? info.size
+        : (info.size < sizeof(header) ? info.size : static_cast<uint32_t>(sizeof(header)));
+    int32_t read = kernel::vfs::read_file(path, probeBuffer, headerBytes);
 #if defined(GXOS_IMAGEVIEWER_BARE_METAL_RUNTIME_SMOKE_ACTIVE) && defined(GXOS_BARE_METAL)
     serial::puts("[IMAGEVIEWER-RUNTIME-SMOKE] probe file read header done bytes=");
     serial::put_hex32(read < 0 ? 0u : (uint32_t)read);
     serial::puts("\n");
 #endif
-    if (read < 24) {
+    if (read <= 0) {
         probe.status = read < 0 ? ImageLoadStatus::NotFound : ImageLoadStatus::DecodeFailed;
         return probe;
     }
 
-    return probe_bytes_impl(header, (uint32_t)read, effectiveLimits, path);
+    return probe_bytes_impl(probeBuffer, (uint32_t)read, effectiveLimits, path);
 }
 
 ImageBitmap ImageAdapter::LoadFromFile(const char* path, const ImageSafetyLimits& limits)
@@ -437,7 +562,7 @@ ImageBitmap ImageAdapter::LoadFromFile(const char* path, const ImageSafetyLimits
     if (!path || !path[0]) {
         return bitmap;
     }
-    if (!ends_with_png(path)) {
+    if (!ends_with_supported_image(path)) {
         bitmap.status = ImageLoadStatus::UnsupportedFormat;
         return bitmap;
     }

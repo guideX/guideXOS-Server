@@ -1,0 +1,21 @@
+=== Phase 2I Save Ownership Evidence ===
+
+* Intended source category: local-file
+* Actual exported source category: local-file
+* Visible-text byte count: 1772
+* Generated-page exclusion: yes
+* Password redaction: yes
+* Hidden-control exclusion: yes
+* Diagnostics exclusion: yes
+* Current visible document ownership: yes
+=== Page Saved ===
+
+* Filename: index-34.txt
+* Saved path: /downloads/index-34.txt
+* Byte count: 1772
+* Mode: text
+* Source URL: file:///docs/index.html
+Open saved file [file:///downloads/index-34.txt]
+View Downloads [about:downloads]
+Page Info [about:page-info]
+Go to about:navigator [about:navigator]

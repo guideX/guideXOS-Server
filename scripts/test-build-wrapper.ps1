@@ -40,6 +40,17 @@ try {
         $combinedFlags.Contains("-DSECOND_CALLER_FLAG=1") -and
         $combinedFlags.Contains("-DGXOS_DESKTOP_CLEANUP_RUNTIME_PASS")) "caller EXTRA_CFLAGS must survive append behavior"
 
+    $buildScript = Get-Content -LiteralPath (Join-Path $Root "build.ps1") -Raw
+    Assert-BuildWrapperSelfTest ($buildScript.Contains('build\$Arch\obj\core\kernel_apps.o')) `
+        "feature-gated Navigator kernel_apps.o must be invalidated before scripted builds"
+    Assert-BuildWrapperSelfTest ($buildScript.Contains('build\$Arch\obj\core\gxos_tls_foundation.o')) `
+        "feature-gated TLS foundation object must be invalidated before scripted builds"
+    Assert-BuildWrapperSelfTest ($buildScript.Contains('-ArgumentList @("ARCH=$Arch", "EXTRA_CFLAGS=' ) -and
+        $buildScript.Contains('$KernelExtraCFlags -join')) `
+        "caller EXTRA_CFLAGS must be forwarded to the kernel make invocation"
+    Assert-BuildWrapperSelfTest ($buildScript.Contains('Remove-Item -Force -ErrorAction SilentlyContinue (Join-Path $KernelBinDir "kernel.elf")')) `
+        "stale kernel.elf must be removed before a scripted build"
+
     Write-Host "Build wrapper self-test PASS"
     exit 0
 } finally {

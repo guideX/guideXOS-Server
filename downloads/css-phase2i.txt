@@ -1,0 +1,14 @@
+=== Network Timeout ===
+
+Navigator could not load the requested URL.
+
+* Requested URL: http://127.0.0.1:8080/navigator-smoke/css-phase2i.html
+* Final URL: http://127.0.0.1:8080/navigator-smoke/css-phase2i.html
+* Scheme: http
+* Content type: (none)
+* Content encoding: (none)
+* Redirect count: 0
+* TLS succeeded before content failure: no
+* Technical error: Timeout: Connection timed out.
+Page Info [about:page-info]
+Go to about:navigator [about:navigator]

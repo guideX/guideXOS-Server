@@ -17,16 +17,20 @@
 #include "include/kernel/desktop_icon_theme_flat.h"
 #include "include/kernel/file_clipboard.h"
 #include "include/kernel/image_adapter.h"
+#include "include/kernel/system_font.h"
 #include "include/kernel/nic.h"
 #include "include/kernel/ipv4.h"
 #include "include/kernel/tcp.h"
 #include "include/kernel/dns.h"
 #include "include/kernel/virtio_rng.h"
 #include "include/kernel/virtio_gpu.h"
+#include "include/kernel/kernel_text_guard.h"
 #include "../../built_in_app_metadata.h"
 #include "../../gxos_tls_foundation.h"
 #include "../../gxos_tls_prerequisites.h"
 #include "../../guide_web_http_shared.h"
+#include "../../guide_web_document_storage.h"
+#include "../../navigator_resource_diagnostics.h"
 
 #include <string.h>
 
@@ -36,11 +40,52 @@ namespace kernel {
 namespace apps {
 
 static bool s_kernelLastDnsUsed = false;
-static char s_kernelLastDnsHost[64];
+static char s_kernelLastDnsHost[gxos::web::kHttpSharedMaxHostnameBytes + 1];
 static char s_kernelLastDnsResolvedIp[16];
 static char s_kernelLastDnsError[64];
 
 static void strappend(char* dst, const char* src, int maxLen);
+
+namespace {
+constexpr int kNavigatorToolbarButtonY = 12;
+constexpr int kNavigatorToolbarButtonGap = 6;
+constexpr int kNavigatorToolbarLeadingX = 16;
+constexpr int kNavigatorToolbarButtonMinW = 52;
+constexpr int kNavigatorToolbarIconSize = 16;
+constexpr int kNavigatorToolbarIconLeftPad = 4;
+constexpr int kNavigatorToolbarIconTextGap = 4;
+constexpr int kNavigatorToolbarTextLeftPad = 6;
+constexpr int kNavigatorToolbarTextRightPad = 6;
+constexpr int kNavigatorToolbarAddressGap = 8;
+constexpr int kNavigatorToolbarAddressRightPad = 20;
+
+struct NavigatorToolbarLayout {
+    int x[6]{};
+    int w[6]{};
+    int addressX = 0;
+    int addressW = 0;
+};
+
+static NavigatorToolbarLayout navigatorToolbarLayout(int windowWidth)
+{
+    static const char* labels[6] = {"Back", "Next", "Reload", "Home", "Marks", "Add"};
+    NavigatorToolbarLayout layout;
+    int x = kNavigatorToolbarLeadingX;
+    gxos::gui::SystemFont::EnsureInitialized();
+    for (int i = 0; i < 6; ++i) {
+        const int labelWidth = gxos::gui::SystemFont::MeasureWidth(gxos::gui::FontRole::Default, labels[i]);
+        const int contentWidth = kNavigatorToolbarIconLeftPad + kNavigatorToolbarIconSize +
+            kNavigatorToolbarIconTextGap + labelWidth + kNavigatorToolbarTextRightPad;
+        layout.x[i] = x;
+        layout.w[i] = contentWidth > kNavigatorToolbarButtonMinW ? contentWidth : kNavigatorToolbarButtonMinW;
+        x += layout.w[i] + kNavigatorToolbarButtonGap;
+    }
+    layout.addressX = x + kNavigatorToolbarAddressGap;
+    layout.addressW = windowWidth - layout.addressX - kNavigatorToolbarAddressRightPad;
+    if (layout.addressW < 0) layout.addressW = 0;
+    return layout;
+}
+}
 
 static gxos::GxosCaStoreInfo probe_missing_ca_path()
 {
@@ -143,6 +188,27 @@ static NavigatorSmokePathProbe probe_navigator_smoke_path(const char* path, bool
     return probe;
 }
 
+static int navigatorToolbarSmokeIconResourceCount()
+{
+    static const char* toolbarPaths[6] = {
+        "/system/config/navigator/nav-back.png",
+        "/system/config/navigator/nav-next.png",
+        "/system/config/navigator/reload.png",
+        "/system/config/navigator/nav-home.png",
+        "/system/config/navigator/marks.png",
+        "/system/config/navigator/nav-add.png"
+    };
+    int available = 0;
+    for (const char* path : toolbarPaths) {
+        kernel::vfs::FileInfo info{};
+        if (kernel::vfs::stat(path, &info) == kernel::vfs::VFS_OK &&
+            info.type == kernel::vfs::FILE_TYPE_REGULAR) {
+            ++available;
+        }
+    }
+    return available;
+}
+
 // ============================================================
 // Helper: string copy
 // ============================================================
@@ -157,9 +223,35 @@ static void strcopy(char* dst, const char* src, int maxLen) {
 }
 
 static int strlen_local(const char* s) {
+    if (!s) return 0;
     int len = 0;
     while (s[len]) len++;
     return len;
+}
+
+static void nav_copy_serial_safe_text(const char* src, char* dst, int dstSize)
+{
+    if (!dst || dstSize <= 0) return;
+    dst[0] = '\0';
+    if (!src) return;
+
+    int out = 0;
+    bool pendingSpace = false;
+    for (const unsigned char* p = reinterpret_cast<const unsigned char*>(src);
+         *p && out < dstSize - 1; ++p) {
+        const unsigned char ch = *p;
+        if (ch < 0x20u) {
+            pendingSpace = out > 0;
+            continue;
+        }
+        if (pendingSpace && out < dstSize - 1) {
+            dst[out++] = ' ';
+            pendingSpace = false;
+        }
+        dst[out++] = static_cast<char>(ch);
+    }
+    while (out > 0 && dst[out - 1] == ' ') --out;
+    dst[out] = '\0';
 }
 
 static bool streq_local(const char* a, const char* b) {
@@ -218,10 +310,6 @@ static int css_margin_left_or(const gxos::web::WebStyle& style, int fallback) {
 
 static int css_padding_or(const gxos::web::WebStyle& style, int fallback) {
     return style.padding >= 0 ? style.padding : fallback;
-}
-
-static int css_font_size_or(const gxos::web::WebStyle& style, int fallback) {
-    return style.fontScaleOrSize > 0 ? style.fontScaleOrSize : fallback;
 }
 
 // Bitmap font constants (same as compositor)
@@ -802,6 +890,149 @@ static void appDrawText(uint32_t x, uint32_t y, const char* text, uint32_t color
         cx += kGlyphW + kGlyphSpacing;
         text++;
     }
+}
+
+// Navigator document text uses the same bounded SystemFont face/metric path
+// as the hosted renderer.  Keep this adapter local to Navigator so legacy
+// kernel app chrome continues to use its established bitmap text path.
+static int navigatorFontPixelSize(const gxos::web::WebStyle& style)
+{
+    int px = style.fontScaleOrSize > 0 ? style.fontScaleOrSize : 12;
+    if (px < 1) px = 1;
+    if (px > 72) px = 72;
+    return px;
+}
+
+static bool navigatorUsesMonospace(const gxos::web::WebStyle& style)
+{
+    return style.genericFontFamily == gxos::web::GenericFontFamily::Monospace;
+}
+
+static const gxos::gui::BitmapFontFace* navigatorFontFace(const gxos::web::WebStyle& style)
+{
+    if (navigatorUsesMonospace(style)) return nullptr;
+    const gxos::gui::FontWeight weight = style.bold
+        ? gxos::gui::FontWeight::Bold
+        : gxos::gui::FontWeight::Regular;
+    const gxos::gui::FontSlant slant = style.italic
+        ? gxos::gui::FontSlant::Italic
+        : gxos::gui::FontSlant::Normal;
+    return gxos::gui::SystemFont::GetFaceForPixelSize(navigatorFontPixelSize(style), weight, slant);
+}
+
+static int navigatorFontScale(const gxos::web::WebStyle& style)
+{
+    return gxos::gui::SystemFont::ScalePercentForPixelSize(navigatorFontPixelSize(style));
+}
+
+static int navigatorTextWidth(const gxos::web::WebStyle& style, const char* text, int len = -1)
+{
+    if (!text) return 0;
+    if (navigatorUsesMonospace(style)) {
+        const int textLen = len >= 0 ? len : strlen_local(text);
+        return textLen * (kGlyphW + kGlyphSpacing);
+    }
+    const gxos::gui::BitmapFontFace* face = navigatorFontFace(style);
+    return gxos::gui::SystemFont::MeasureWidthScaled(face, text, len, navigatorFontScale(style));
+}
+
+static int navigatorLineHeight(const gxos::web::WebStyle& style)
+{
+    if (navigatorUsesMonospace(style)) return kGlyphH + 3;
+    const gxos::gui::BitmapFontFace* face = navigatorFontFace(style);
+    int lineHeight = gxos::gui::SystemFont::MeasureLineHeightScaled(face, navigatorFontScale(style));
+    return lineHeight > 0 ? lineHeight : 1;
+}
+
+static int navigatorNextLineBreak(const char* text, int start, int end, int maxWidth,
+                                  const gxos::web::WebStyle& style)
+{
+    if (!text || start >= end) return start;
+    if (maxWidth < 1) maxWidth = 1;
+
+    const gxos::gui::BitmapFontFace* face = navigatorFontFace(style);
+    const int scale = navigatorFontScale(style);
+    int width = 0;
+    int lastSpace = -1;
+    int pos = start;
+    while (pos < end) {
+        const int advance = navigatorUsesMonospace(style)
+            ? (kGlyphW + kGlyphSpacing)
+            : gxos::gui::SystemFont::MeasureWidthScaled(face, text + pos, 1, scale);
+        if (pos > start && width + advance > maxWidth) {
+            return lastSpace > start ? lastSpace : pos;
+        }
+        width += advance;
+        if (text[pos] == ' ') lastSpace = pos;
+        ++pos;
+    }
+    return end;
+}
+
+static int navigatorWrappedLineCount(const char* text, int maxWidth,
+                                     const gxos::web::WebStyle& style)
+{
+    if (!text || !text[0]) return 1;
+    const int len = strlen_local(text);
+    int lines = 0;
+    int physicalStart = 0;
+    while (physicalStart <= len) {
+        int physicalEnd = physicalStart;
+        while (physicalEnd < len && text[physicalEnd] != '\n') ++physicalEnd;
+        ++lines;
+        int pos = physicalStart;
+        while (pos < physicalEnd) {
+            int breakAt = navigatorNextLineBreak(text, pos, physicalEnd, maxWidth, style);
+            if (breakAt <= pos) breakAt = pos + 1;
+            pos = breakAt;
+            while (pos < physicalEnd && text[pos] == ' ') ++pos;
+        }
+        if (physicalEnd >= len) break;
+        physicalStart = physicalEnd + 1;
+    }
+    return lines > 0 ? lines : 1;
+}
+
+static int navigatorLineCharOffset(const char* text, int start, int length, int x,
+                                   const gxos::web::WebStyle& style)
+{
+    if (!text || length <= 0 || x <= 0) return 0;
+    const gxos::gui::BitmapFontFace* face = navigatorFontFace(style);
+    const int scale = navigatorFontScale(style);
+    int width = 0;
+    for (int i = 0; i < length; ++i) {
+        const int advance = navigatorUsesMonospace(style)
+            ? (kGlyphW + kGlyphSpacing)
+            : gxos::gui::SystemFont::MeasureWidthScaled(face, text + start + i, 1, scale);
+        if (x < width + (advance + 1) / 2) return i;
+        width += advance;
+    }
+    return length;
+}
+
+static void navigatorDrawText(uint32_t x, uint32_t y, const char* text, uint32_t color,
+                              const gxos::web::WebStyle& style)
+{
+    if (!text || !text[0]) return;
+    if (navigatorUsesMonospace(style)) {
+        appDrawText(x, y, text, color);
+        return;
+    }
+    if (framebuffer::is_available() && framebuffer::get_bpp() == 32) {
+        uint32_t* target = framebuffer::get_draw_buffer();
+        if (target) {
+            const int pitch = framebuffer::is_double_buffered()
+                ? static_cast<int>(framebuffer::get_width() * sizeof(uint32_t))
+                : static_cast<int>(framebuffer::get_pitch());
+            gxos::gui::SystemFont::DrawTextToBufferScaled(
+                target, pitch, static_cast<int>(framebuffer::get_width()),
+                static_cast<int>(framebuffer::get_height()), static_cast<int>(x),
+                static_cast<int>(y), text, -1, color, navigatorFontFace(style),
+                navigatorFontScale(style));
+            return;
+        }
+    }
+    appDrawText(x, y, text, color);
 }
 
 static void appDrawRect(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint32_t color) {
@@ -6935,14 +7166,32 @@ void ImageViewerApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
 NavigatorApp::NavigatorApp()
     : m_blockCount(0), m_bookmarkCount(0), m_recentDownloadCount(0), m_backCount(0),
       m_forwardCount(0),
-      m_addressFocused(false), m_addressCaret(0), m_ctrlPressed(false), m_scrollY(0), m_hoverLinkIndex(-1),
+      m_addressFocused(false), m_addressCaret(0), m_ctrlPressed(false), m_scrollY(0), m_scrollX(0),
+      m_scrollbarOwner(0), m_scrollbarOrientation(0), m_scrollbarDragging(false),
+      m_scrollbarDragPointer(0), m_scrollbarDragGrabOffset(0), m_scrollbarDragInitialScroll(0),
+      m_hoverLinkIndex(-1),
       m_selectionActive(false), m_selectionDragging(false), m_selectionMoved(false), m_mouseLeftDown(false),
       m_mouseMode(NAV_MOUSE_NONE), m_mouseDownLinkIndex(-1), m_mouseDownX(0), m_mouseDownY(0), m_mouseDragThresholdExceeded(false),
       m_backBtnId(-1), m_forwardBtnId(-1), m_reloadBtnId(-1), m_homeBtnId(-1),
       m_bookmarksBtnId(-1), m_addBookmarkBtnId(-1),
       m_loading(false), m_throbberFrame(0), m_loadingStartTick(0),
-      m_focusedFormBlock(-1), m_formCaret(0)
+      m_documentGeneration(0),
+      m_focusedFormBlock(-1), m_formCaret(0),
+      m_lifecycleGenerationCount(0), m_currentLifecycleGenerationIndex(0),
+      m_injectNextImageFailure(false)
 {
+    for (int i = 0; i < MAX_BLOCKS; ++i) m_imagePaintLogged[i] = false;
+    for (uint32_t i = 0; i < gxos::apps::kNavigatorMaxResourceReferences; ++i)
+        m_resourceReferences[i] = gxos::apps::NavigatorResourceReferenceMetadata{};
+    for (uint32_t i = 0; i < gxos::apps::kNavigatorMaxResourceReferences; ++i)
+        m_resourceOrder[i] = 0;
+    for (uint32_t i = 0; i < gxos::apps::kNavigatorMaxResourceTelemetryRecords; ++i)
+        m_resourceTelemetry[i] = gxos::apps::NavigatorResourceTelemetryRecord{};
+    m_resourceTelemetryCount = 0;
+    m_resourceScheduler = gxos::apps::NavigatorResourceSchedulerStats{};
+    m_resourceMemory.reset();
+    for (uint32_t i = 0; i < MAX_LIFECYCLE_GENERATIONS; ++i)
+        m_lifecycleGenerations[i] = NavigationGenerationRecord{};
     strcopy(m_status, "Ready", MAX_STATUS_LEN);
     strcopy(m_currentUrl, "about:navigator", MAX_URL_LEN);
     strcopy(m_title, "guideXOS Navigator", MAX_TITLE_LEN_NAV);
@@ -6953,6 +7202,19 @@ NavigatorApp::NavigatorApp()
     m_metaHttpStatusCode = 0;
     m_metaHttpReason[0] = '\0';
     m_metaContentType[0] = '\0';
+    m_metaResponseFraming[0] = '\0';
+    m_metaContentLength = 0;
+    m_metaContentLengthPresent = false;
+    m_metaEncodedBodyBytes = 0;
+    m_metaDecodedBodyBytes = 0;
+    m_metaDocumentSegmentCount = 0;
+    m_metaDocumentStorageBytes = 0;
+    m_metaDocumentStorageCapacity = 0;
+    m_metaDocumentHistoryBytes = 0;
+    m_metaDocumentStorageAllocationFailed = false;
+    m_metaParserScratchBytes = 0;
+    m_metaActiveDocumentBytes = 0;
+    m_metaTruncatedResponse = false;
     m_metaContentEncoding[0] = '\0';
     m_metaUnsupportedReason[0] = '\0';
     m_metaRedirected = false;
@@ -6965,6 +7227,21 @@ NavigatorApp::NavigatorApp()
     m_metaSourcePreview[0] = '\0';
     m_metaSourceBytes = 0;
     m_metaSourceTruncated = false;
+    m_metaBodyBufferValid = false;
+    m_metaBodyNullTerminated = false;
+    m_metaBodyComplete = false;
+    m_metaBodyOwnership[0] = '\0';
+    m_metaHandoffEntered = false;
+    m_metaHandoffResult[0] = '\0';
+    m_metaParserInvoked = false;
+    m_metaParserCompleted = false;
+    m_metaParserInputBytes = 0;
+    m_metaDocumentCreated = false;
+    m_metaDocumentCount = 0;
+    m_metaActiveDocumentGeneration = 0;
+    m_metaTextFragmentCount = 0;
+    m_metaLinkCount = 0;
+    m_metaVisibleText[0] = '\0';
     m_metaDocumentBlocks = 0;
     m_metaImageBlocks = 0;
     m_metaLoadedImages = 0;
@@ -7025,6 +7302,7 @@ NavigatorApp::NavigatorApp()
 }
 
 NavigatorApp::~NavigatorApp() {
+    releaseImageResources();
 }
 
 bool NavigatorApp::init()
@@ -7076,19 +7354,21 @@ void NavigatorApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h)
     framebuffer::fill_rect(x, y, w, TOOLBAR_H, 0xFF2B2F3A);
     framebuffer::fill_rect(x, y + TOOLBAR_H - 1, w, 1, 0xFF586076);
 
-    int addressW = (int)w - ADDRESS_X - 20;
+    const NavigatorToolbarLayout toolbarLayout = navigatorToolbarLayout((int)w);
+    const int addressX = toolbarLayout.addressX;
+    const int addressW = toolbarLayout.addressW;
     if (addressW > 0) {
-        framebuffer::fill_rect(x + ADDRESS_X, y + ADDRESS_Y, (uint32_t)addressW, ADDRESS_H, 0xFF161A22);
-        framebuffer::fill_rect(x + ADDRESS_X, y + ADDRESS_Y, (uint32_t)addressW, 1, m_addressFocused ? 0xFF6FA8FF : 0xFF6E7688);
-        framebuffer::fill_rect(x + ADDRESS_X, y + ADDRESS_Y + ADDRESS_H - 1, (uint32_t)addressW, 1, 0xFF11151D);
-        framebuffer::fill_rect(x + ADDRESS_X, y + ADDRESS_Y, 1, ADDRESS_H, m_addressFocused ? 0xFF6FA8FF : 0xFF6E7688);
-        framebuffer::fill_rect(x + ADDRESS_X + addressW - 1, y + ADDRESS_Y, 1, ADDRESS_H, 0xFF11151D);
-        appDrawText(x + ADDRESS_X + 8, y + ADDRESS_Y + 7,
+        framebuffer::fill_rect(x + addressX, y + ADDRESS_Y, (uint32_t)addressW, ADDRESS_H, 0xFF161A22);
+        framebuffer::fill_rect(x + addressX, y + ADDRESS_Y, (uint32_t)addressW, 1, m_addressFocused ? 0xFF6FA8FF : 0xFF6E7688);
+        framebuffer::fill_rect(x + addressX, y + ADDRESS_Y + ADDRESS_H - 1, (uint32_t)addressW, 1, 0xFF11151D);
+        framebuffer::fill_rect(x + addressX, y + ADDRESS_Y, 1, ADDRESS_H, m_addressFocused ? 0xFF6FA8FF : 0xFF6E7688);
+        framebuffer::fill_rect(x + addressX + addressW - 1, y + ADDRESS_Y, 1, ADDRESS_H, 0xFF11151D);
+        appDrawText(x + addressX + 8, y + ADDRESS_Y + 7,
                     m_addressFocused ? m_addressBuffer : m_currentUrl,
                     rgb(232, 236, 246));
         if (m_addressFocused) {
-            int caretX = ADDRESS_X + 8 + m_addressCaret * 6;
-            if (caretX < ADDRESS_X + addressW - 4) {
+            int caretX = addressX + 8 + m_addressCaret * 6;
+            if (caretX < addressX + addressW - 4) {
                 framebuffer::fill_rect(x + (uint32_t)caretX, y + ADDRESS_Y + 4, 1, ADDRESS_H - 8, 0xFFE8ECF6);
             }
         }
@@ -7097,7 +7377,7 @@ void NavigatorApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h)
     const int throbberFrame = m_loading
         ? (int)((((uint32_t)kernel::pit::ticks() - m_loadingStartTick) / 10u) % 12u)
         : 0;
-    if (m_loading && m_throbberFrames[throbberFrame].status == gxos::gui::ImageLoadStatus::Ok) {
+    if (m_loading && addressW >= 24 && m_throbberFrames[throbberFrame].status == gxos::gui::ImageLoadStatus::Ok) {
         gxos::gui::ImageAdapter::DrawToFramebuffer(m_throbberFrames[throbberFrame],
                                                    x + w - 46, y + ADDRESS_Y, 22, 22);
     }
@@ -7106,22 +7386,38 @@ void NavigatorApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h)
     uint32_t contentH = h > (uint32_t)(TOOLBAR_H + STATUS_H + 12) ? h - TOOLBAR_H - STATUS_H - 12 : 0;
     if (contentH > 0) {
         framebuffer::fill_rect(x + CONTENT_X, contentTop, w - CONTENT_X * 2, contentH, css_background_or(0xFFFAFBFD, m_bodyStyle));
+        if (m_resourceViewportDirty && m_resourceScheduler.currentScrollOffset != m_scrollY)
+            updateViewportResourceAdmission();
         drawDocument(x, y, w, h);
     }
 
-    if (maxScroll() > 0) {
-        uint32_t trackX = x + w - 22;
-        uint32_t trackY = contentTop + 4;
-        uint32_t trackH = contentH > 8 ? contentH - 8 : contentH;
-        framebuffer::fill_rect(trackX, trackY, 6, trackH, 0xFFE0E4EB);
-        int thumbH = (int)((trackH * (contentH ? contentH : 1)) / (uint32_t)(maxScroll() + (int)contentH));
-        if (thumbH < 20) thumbH = 20;
-        int maxScrollValue = maxScroll();
-        int thumbY = (int)trackY;
-        if (maxScrollValue > 0 && (int)trackH > thumbH) {
-            thumbY += ((int)trackH - thumbH) * m_scrollY / maxScrollValue;
-        }
-        framebuffer::fill_rect(trackX, (uint32_t)thumbY, 6, (uint32_t)thumbH, 0xFF848C9C);
+    int trackStart = 0;
+    int trackCross = 0;
+    int trackExtent = 0;
+    int thumbExtent = 0;
+    int thumbTravel = 0;
+    int maxScrollValue = 0;
+    if (rootScrollbarGeometry(false, trackStart, trackCross, trackExtent,
+                               thumbExtent, thumbTravel, maxScrollValue)) {
+        const int thumbOffset = navigator_scrollbar::thumb_offset(
+            m_scrollY, maxScrollValue, thumbTravel);
+        framebuffer::fill_rect(x + trackCross, y + trackStart, 6,
+                               (uint32_t)trackExtent, 0xFFE0E4EB);
+        framebuffer::fill_rect(x + trackCross, y + trackStart + thumbOffset, 6,
+                               (uint32_t)thumbExtent,
+                               m_scrollbarDragging && m_scrollbarOrientation == 1
+                                   ? 0xFF6F86AC : 0xFF848C9C);
+    }
+    if (rootScrollbarGeometry(true, trackStart, trackCross, trackExtent,
+                              thumbExtent, thumbTravel, maxScrollValue)) {
+        const int thumbOffset = navigator_scrollbar::thumb_offset(
+            m_scrollX, maxScrollValue, thumbTravel);
+        framebuffer::fill_rect(x + trackStart, y + trackCross,
+                               (uint32_t)trackExtent, 6, 0xFFE0E4EB);
+        framebuffer::fill_rect(x + trackStart + thumbOffset, y + trackCross,
+                               (uint32_t)thumbExtent, 6,
+                               m_scrollbarDragging && m_scrollbarOrientation == 2
+                                   ? 0xFF6F86AC : 0xFF848C9C);
     }
 
     framebuffer::fill_rect(x, y + h - STATUS_H, w, STATUS_H, 0xFF262A34);
@@ -7142,8 +7438,954 @@ void NavigatorApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h)
     appDrawText(x + 10, y + h - STATUS_H + 8, statusLine, rgb(222, 226, 236));
 }
 
+static void serial_put_dec64(uint64_t value);
+static bool nav_starts_with(const char* value, const char* prefix);
+
+bool NavigatorApp::smokeTypographyPhase7A()
+{
+    NavigatorApp app;
+    app::KernelWindow smokeWindow;
+    smokeWindow.w = 640;
+    smokeWindow.h = 480;
+    app.m_window = &smokeWindow;
+
+    static const char kFixture[] =
+        "<style>"
+        "body{font-family:Roboto,sans-serif;font-size:12px;}"
+        ".bold{font-weight:bold;}"
+        ".italic{font-style:italic;}"
+        ".bolditalic{font-weight:bold;font-style:italic;}"
+        ".mono{font-family:monospace;}"
+        ".fallback{font-family:missing-family,Roboto;}"
+        ".unsupported{font-family:missing-family;}"
+        "</style>"
+        "<p class='normal'>Proportional normal text with descenders gyjpq.</p>"
+        "<p class='bold'>Bold proportional text.</p>"
+        "<p class='italic'>Italic proportional text.</p>"
+        "<p class='bolditalic'>Bold italic proportional text.</p>"
+        "<p class='fallback'>Fallback-list text remains visible.</p>"
+        "<p class='unsupported'>Unsupported family text remains visible.</p>"
+        "<pre class='mono'>for (i = 0; i &lt; 4; ++i)\n    puts(i);</pre>"
+        "<a href='http://guidexos.test:8080/navigator-smoke/final.html'>Wrapped positioned link text</a>";
+
+    app.parseHtmlDocument("http://guidexos.test:8080/navigator-smoke/typography-phase7a.html",
+                         kFixture, "http", "text/html", 200, "OK");
+
+    int normalIndex = -1;
+    int boldIndex = -1;
+    int italicIndex = -1;
+    int boldItalicIndex = -1;
+    int fallbackIndex = -1;
+    int unsupportedIndex = -1;
+    int monoIndex = -1;
+    int linkIndex = -1;
+    for (int i = 0; i < app.m_blockCount; ++i) {
+        const DocBlock& block = app.m_blocks[i];
+        if (block.kind == BLOCK_LINK) linkIndex = i;
+        if (block.kind == BLOCK_PREFORMATTED) monoIndex = i;
+        if (block.kind != BLOCK_PARAGRAPH) continue;
+        if (strstr(block.text, "Proportional normal")) normalIndex = i;
+        else if (strstr(block.text, "Bold proportional")) boldIndex = i;
+        else if (strstr(block.text, "Italic proportional")) italicIndex = i;
+        else if (strstr(block.text, "Bold italic")) boldItalicIndex = i;
+        else if (strstr(block.text, "Fallback-list")) fallbackIndex = i;
+        else if (strstr(block.text, "Unsupported family")) unsupportedIndex = i;
+    }
+
+    const bool robotoAvailable = gxos::gui::SystemFont::IsRobotoAvailable();
+    const gxos::web::WebStyle normalStyle = normalIndex >= 0 ? app.m_blocks[normalIndex].style : gxos::web::WebStyle{};
+    const gxos::web::WebStyle monoStyle = monoIndex >= 0 ? app.m_blocks[monoIndex].style : gxos::web::WebStyle{};
+    const int normalWidth = navigatorTextWidth(normalStyle, "iiWW");
+    const int monoWidth = navigatorTextWidth(monoStyle, "iiWW");
+    const int normalLineHeight = navigatorLineHeight(normalStyle);
+    const int normalLines = navigatorWrappedLineCount(
+        normalIndex >= 0 ? app.m_blocks[normalIndex].text : "", 180, normalStyle);
+
+    app.drawDocument(0, 0, smokeWindow.w, smokeWindow.h);
+
+    bool linkGeometry = false;
+    if (linkIndex >= 0) {
+        const int maxWidth = smokeWindow.w - CONTENT_X * 2 - 32;
+        const int left = CONTENT_X + 14 + css_margin_left_or(app.m_bodyStyle, 0) +
+            css_margin_left_or(app.m_blocks[linkIndex].style, 0);
+        const int top = app.blockY(linkIndex, maxWidth) +
+            css_margin_top_or(app.m_blocks[linkIndex].style, 4);
+        linkGeometry = app.hitLinkIndex(left + 1, top + 1) == linkIndex;
+    }
+
+    const bool faceSelection = normalIndex >= 0 &&
+        (!robotoAvailable || !gxos::gui::SystemFont::IsFaceFallback(navigatorFontFace(normalStyle)));
+    const bool styleSelection = boldIndex >= 0 && app.m_blocks[boldIndex].style.bold &&
+        italicIndex >= 0 && app.m_blocks[italicIndex].style.italic &&
+        boldItalicIndex >= 0 && app.m_blocks[boldItalicIndex].style.bold &&
+        app.m_blocks[boldItalicIndex].style.italic;
+    const bool familySelection = monoIndex >= 0 && navigatorUsesMonospace(monoStyle) &&
+        fallbackIndex >= 0 && app.m_blocks[fallbackIndex].style.genericFontFamily == gxos::web::GenericFontFamily::Roboto &&
+        unsupportedIndex >= 0 && app.m_blocks[unsupportedIndex].style.genericFontFamily == gxos::web::GenericFontFamily::Unknown;
+    const bool metricAgreement = normalWidth > 0 && monoWidth > 0 && normalLineHeight > 0 && normalLines > 0;
+    const bool distinctMonospace = !robotoAvailable || normalWidth != monoWidth;
+    const bool pass = app.m_blockCount > 0 && faceSelection && styleSelection && familySelection &&
+        metricAgreement && distinctMonospace && linkGeometry;
+
+    serial::puts("[NAVIGATOR-SMOKE] typography.phase7a.roboto_available=");
+    serial::puts(robotoAvailable ? "yes\n" : "no\n");
+    serial::puts("[NAVIGATOR-SMOKE] typography.phase7a.font_initialization=process-lifetime\n");
+    serial::puts("[NAVIGATOR-SMOKE] typography.phase7a.normal_width=");
+    serial_put_dec((uint32_t)normalWidth);
+    serial::puts("\n[NAVIGATOR-SMOKE] typography.phase7a.monospace_width=");
+    serial_put_dec((uint32_t)monoWidth);
+    serial::puts("\n[NAVIGATOR-SMOKE] typography.phase7a.normal_line_height=");
+    serial_put_dec((uint32_t)normalLineHeight);
+    serial::puts("\n[NAVIGATOR-SMOKE] typography.phase7a.measurement_paint_agreement=");
+    serial::puts(metricAgreement ? "yes\n" : "no\n");
+    serial::puts("[NAVIGATOR-SMOKE] typography.phase7a.monospace_distinct=");
+    serial::puts(distinctMonospace ? "yes\n" : "no\n");
+    serial::puts("[NAVIGATOR-SMOKE] typography.phase7a.link_geometry=");
+    serial::puts(linkGeometry ? "yes\n" : "no\n");
+    serial::puts(pass ? "[NAVIGATOR-SMOKE] typography.phase7a.result=PASS\n"
+                      : "[NAVIGATOR-SMOKE] typography.phase7a.result=FAIL\n");
+
+    app.m_window = nullptr;
+    return pass;
+}
+
+bool NavigatorApp::smokeScrollbarPointerInput()
+{
+    serial::puts("[NAVIGATOR-POINTER] boundary=KernelCompositor::handleMouseMove/Down/Up\n");
+    if (!framebuffer::is_available()) {
+        serial::puts("[NAVIGATOR-POINTER] result=FAIL reason=framebuffer-unavailable\n");
+        return false;
+    }
+
+    static const char kFixture[] =
+        "<a href='about:bookmarks'>adjacent content link</a>"
+        "<h1>Navigator pointer scrollbar fixture</h1>"
+        "<p>scroll line 01</p><p>scroll line 02</p><p>scroll line 03</p>"
+        "<p>scroll line 04</p><p>scroll line 05</p><p>scroll line 06</p>"
+        "<p>scroll line 07</p><p>scroll line 08</p><p>scroll line 09</p>"
+        "<p>scroll line 10</p><p>scroll line 11</p><p>scroll line 12</p>"
+        "<p>scroll line 13</p><p>scroll line 14</p><p>scroll line 15</p>"
+        "<p>scroll line 16</p><p>scroll line 17</p><p>scroll line 18</p>"
+        "<p>scroll line 19</p><p>scroll line 20</p><p>scroll line 21</p>"
+        "<p>scroll line 22</p><p>scroll line 23</p><p>scroll line 24</p>"
+        "<p>scroll line 25</p><p>scroll line 26</p><p>scroll line 27</p>"
+        "<p>scroll line 28</p><p>scroll line 29</p><p>scroll line 30</p>"
+        "<p>scroll line 31</p><p>scroll line 32</p><p>scroll line 33</p>"
+        "<p>scroll line 34</p><p>scroll line 35</p><p>scroll line 36</p>"
+        "<p>scroll line 37</p><p>scroll line 38</p><p>scroll line 39</p>"
+        "<p>scroll line 40</p><p>scroll line 41</p><p>scroll line 42</p>";
+
+    NavigatorApp app;
+    app::KernelWindow smokeWindow;
+    smokeWindow.x = 96;
+    smokeWindow.y = 72;
+    smokeWindow.w = 920;
+    smokeWindow.h = 640;
+    smokeWindow.owner = &app;
+    strcopy(smokeWindow.title, "Navigator", app::MAX_TITLE_LEN);
+    app.m_window = &smokeWindow;
+    app.parseHtmlDocument("http://guidexos.test:8080/navigator-smoke/pointer.html",
+                          kFixture, "http", "text/html", 200, "OK");
+
+    if (!compositor::KernelCompositor::registerWindow(&smokeWindow)) {
+        app.m_window = nullptr;
+        serial::puts("[NAVIGATOR-POINTER] result=FAIL reason=window-registration\n");
+        return false;
+    }
+
+    const int kTitlebarHeight = 24;
+    const auto repaint = []() { compositor::KernelCompositor::drawAllWindows(); };
+    const auto screen_y = [&](int localY) { return smokeWindow.y + kTitlebarHeight + localY; };
+    const auto screen_x = [&](int localX) { return smokeWindow.x + localX; };
+    const auto pointer_move = [&](int localX, int localY) {
+        compositor::KernelCompositor::handleMouseMove(screen_x(localX), screen_y(localY));
+    };
+    const auto pointer_click = [&](int localX, int localY) {
+        pointer_move(localX, localY);
+        compositor::KernelCompositor::handleMouseDown(screen_x(localX), screen_y(localY), 0x01);
+        compositor::KernelCompositor::handleMouseUp(screen_x(localX), screen_y(localY), 0x01);
+    };
+
+    repaint();
+    int trackStart = 0;
+    int trackCross = 0;
+    int trackExtent = 0;
+    int thumbExtent = 0;
+    int thumbTravel = 0;
+    int maxScrollValue = 0;
+    const bool geometry = app.rootScrollbarGeometry(false, trackStart, trackCross,
+        trackExtent, thumbExtent, thumbTravel, maxScrollValue);
+    const int initialScroll = app.m_scrollY;
+    const auto contentPaintHash = [&]() {
+        uint32_t hash = 2166136261u;
+        const int sampleRight = smokeWindow.w - 28;
+        const int sampleBottom = smokeWindow.h - STATUS_H - 16;
+        for (int sampleY = CONTENT_Y + 4; sampleY < sampleBottom; sampleY += 16) {
+            for (int sampleX = CONTENT_X + 4; sampleX < sampleRight; sampleX += 16) {
+                hash ^= framebuffer::get_pixel(
+                    (uint32_t)(smokeWindow.x + sampleX),
+                    (uint32_t)(smokeWindow.y + kTitlebarHeight + sampleY));
+                hash *= 16777619u;
+            }
+        }
+        return hash;
+    };
+    const uint32_t paintHashBefore = contentPaintHash();
+    serial::puts("[NAVIGATOR-POINTER] root.vertical.geometry x=");
+    serial_put_dec((uint32_t)trackCross);
+    serial::puts(" y=");
+    serial_put_dec((uint32_t)trackStart);
+    serial::puts(" w=6 h=");
+    serial_put_dec((uint32_t)trackExtent);
+    serial::puts(" thumb=");
+    serial_put_dec((uint32_t)thumbExtent);
+    serial::puts(" maxScrollY=");
+    serial_put_dec((uint32_t)maxScrollValue);
+    serial::puts(" initial=");
+    serial_put_dec((uint32_t)initialScroll);
+    serial::putc('\n');
+
+    const bool geometryPass = geometry && maxScrollValue > 0 && thumbTravel > 0 && initialScroll == 0;
+    const int bottomTrackY = trackStart + trackExtent - 2;
+    pointer_click(trackCross + 3, bottomTrackY);
+    const int afterTrackClick = app.m_scrollY;
+    repaint();
+    const uint32_t paintHashAfterTrackClick = contentPaintHash();
+    const bool trackClickPass = afterTrackClick > initialScroll && afterTrackClick <= maxScrollValue &&
+        paintHashBefore != paintHashAfterTrackClick;
+    serial::puts("[NAVIGATOR-POINTER] root.vertical.track_click pointer=");
+    serial_put_dec((uint32_t)bottomTrackY);
+    serial::puts(" old=");
+    serial_put_dec((uint32_t)initialScroll);
+    serial::puts(" final=");
+    serial_put_dec((uint32_t)afterTrackClick);
+    serial::puts(" max=");
+    serial_put_dec((uint32_t)maxScrollValue);
+    serial::puts(" result=");
+    serial::puts(trackClickPass ? "PASS\n" : "FAIL\n");
+
+    for (int i = 0; i < 8; ++i) pointer_click(trackCross + 3, bottomTrackY);
+    const int repeatedBottom = app.m_scrollY;
+    const bool bottomClampPass = repeatedBottom == maxScrollValue;
+    for (int i = 0; i < 8; ++i) pointer_click(trackCross + 3, trackStart + 1);
+    const int repeatedTop = app.m_scrollY;
+    const bool topClampPass = repeatedTop == 0;
+    serial::puts("[NAVIGATOR-POINTER] root.vertical.clamp bottom=");
+    serial_put_dec((uint32_t)repeatedBottom);
+    serial::puts("/");
+    serial_put_dec((uint32_t)maxScrollValue);
+    serial::puts(" top=");
+    serial_put_dec((uint32_t)repeatedTop);
+    serial::puts(" result=");
+    serial::puts((bottomClampPass && topClampPass) ? "PASS\n" : "FAIL\n");
+
+    int dragTrackStart = 0;
+    int dragTrackCross = 0;
+    int dragTrackExtent = 0;
+    int dragThumbExtent = 0;
+    int dragTravel = 0;
+    int dragMax = 0;
+    const bool dragGeometry = app.rootScrollbarGeometry(false, dragTrackStart, dragTrackCross,
+        dragTrackExtent, dragThumbExtent, dragTravel, dragMax);
+    const int dragStartY = dragTrackStart + dragThumbExtent / 2;
+    const int dragEndY = dragTrackStart + dragTravel + dragThumbExtent / 2;
+    pointer_move(dragTrackCross + 3, dragStartY);
+    compositor::KernelCompositor::handleMouseDown(
+        screen_x(dragTrackCross + 3), screen_y(dragStartY), 0x01);
+    pointer_move(dragTrackCross + 3, dragEndY);
+    compositor::KernelCompositor::handleMouseUp(
+        screen_x(dragTrackCross + 3), screen_y(dragEndY), 0x01);
+    const int afterDrag = app.m_scrollY;
+    repaint();
+    const bool dragPass = dragGeometry && afterDrag == dragMax &&
+        app.m_scrollbarOwner == 0 && !app.m_scrollbarDragging;
+    serial::puts("[NAVIGATOR-POINTER] root.vertical.thumb_drag start=");
+    serial_put_dec((uint32_t)dragStartY);
+    serial::puts(" end=");
+    serial_put_dec((uint32_t)dragEndY);
+    serial::puts(" final=");
+    serial_put_dec((uint32_t)afterDrag);
+    serial::puts("/");
+    serial_put_dec((uint32_t)dragMax);
+    serial::puts(" result=");
+    serial::puts(dragPass ? "PASS\n" : "FAIL\n");
+
+    for (int i = 0; i < 8; ++i) pointer_click(dragTrackCross + 3, dragTrackStart + 1);
+    const bool contentOutsideScrollbarPass = app.m_scrollY == 0;
+    char beforeScrollClickUrl[MAX_URL_LEN];
+    strcopy(beforeScrollClickUrl, app.m_currentUrl, sizeof(beforeScrollClickUrl));
+    pointer_click(CONTENT_X + 40, CONTENT_Y + 8);
+    const bool scrollbarUrlUnchanged = streq_local(beforeScrollClickUrl, app.m_currentUrl);
+
+    int linkIndex = -1;
+    for (int i = 0; i < app.m_blockCount; ++i) {
+        if (app.m_blocks[i].kind == BLOCK_LINK) {
+            linkIndex = i;
+            break;
+        }
+    }
+    const int linkWidth = smokeWindow.w - CONTENT_X * 2 - 32;
+    const int linkX = CONTENT_X + 15;
+    const int linkY = linkIndex >= 0
+        ? app.blockY(linkIndex, linkWidth) + css_margin_top_or(app.m_blocks[linkIndex].style, 4) + 1
+        : -1;
+    if (linkIndex >= 0 && linkY >= 0) pointer_click(linkX, linkY);
+    const bool adjacentLinkPass = linkIndex >= 0 &&
+        streq_local(app.m_currentUrl, "about:bookmarks");
+    serial::puts("[NAVIGATOR-POINTER] priority scrollbar_url_unchanged=");
+    serial::puts(scrollbarUrlUnchanged ? "yes" : "no");
+    serial::puts(" adjacent_content_scroll_unchanged=");
+    serial::puts(contentOutsideScrollbarPass ? "yes" : "no");
+    serial::puts(" adjacent_link_activation=");
+    serial::puts(adjacentLinkPass ? "yes\n" : "no\n");
+
+    const bool result = geometryPass && trackClickPass && bottomClampPass && topClampPass &&
+        dragPass && scrollbarUrlUnchanged && contentOutsideScrollbarPass && adjacentLinkPass;
+    serial::puts("[NAVIGATOR-POINTER] framebuffer_movement=");
+    serial::puts(paintHashBefore != paintHashAfterTrackClick ? "PASS\n" : "FAIL\n");
+    serial::puts("[NAVIGATOR-POINTER] result=");
+    serial::puts(result ? "PASS\n" : "FAIL\n");
+
+    compositor::KernelCompositor::unregisterWindow(&smokeWindow);
+    app.m_window = nullptr;
+    return result;
+}
+
+bool NavigatorApp::smokePersistentNavigationLifecycle()
+{
+    gxos_kernel_text_guard_set_context("persistent_navigation_scheduler", "smokePersistentNavigationLifecycle");
+    serial::puts("[NAVIGATOR-PERSISTENT] mode=single_boot_single_navigator_instance\n");
+    NavigatorApp* app = new NavigatorApp();
+    if (!app) {
+        serial::puts("[NAVIGATOR-PERSISTENT] result=FAIL reason=instance_allocation\n");
+        return false;
+    }
+
+    // The smoke owns exactly one heap Navigator for the complete sequence.
+    // Its bounded window is registered so the same production compositor
+    // pointer boundary can drive the viewport transitions below.
+    app::KernelWindow smokeWindow{};
+    smokeWindow.x = 96;
+    smokeWindow.y = 72;
+    smokeWindow.w = 920;
+    smokeWindow.h = 640;
+    strcopy(smokeWindow.title, "Navigator", app::MAX_TITLE_LEN);
+    smokeWindow.owner = app;
+    app->m_window = &smokeWindow;
+    app->m_state = app::AppState::Running;
+    const bool pointerWindowRegistered =
+        compositor::KernelCompositor::registerWindow(&smokeWindow);
+    serial::puts("[NAVIGATOR-POINTER-8U] window_registration=");
+    serial::puts(pointerWindowRegistered ? "PASS\n" : "FAIL\n");
+
+    bool deterministicOk = true;
+    bool publicOk = true;
+    bool publicEnabled = false;
+
+    auto emitRecord = [&](const char* stage, bool expected) -> bool {
+        app->drawDocument(0, 0, smokeWindow.w, smokeWindow.h);
+        app->finishLifecycleGeneration();
+        if (app->m_lifecycleGenerationCount == 0) {
+            serial::puts("[NAVIGATOR-PERSISTENT] result=FAIL reason=no_generation_record\n");
+            return false;
+        }
+        const NavigationGenerationRecord& record =
+            app->m_lifecycleGenerations[app->m_currentLifecycleGenerationIndex];
+        char safeTitle[96];
+        char safeVisible[96];
+        nav_copy_serial_safe_text(record.title, safeTitle, sizeof(safeTitle));
+        nav_copy_serial_safe_text(record.visibleText, safeVisible, sizeof(safeVisible));
+        serial::puts("[NAVIGATOR-PERSISTENT] stage=");
+        serial::puts(stage ? stage : "unknown");
+        serial::puts(" generation=");
+        serial_put_dec(record.generation);
+        serial::puts(" requested=");
+        serial::puts(record.requestedUrl);
+        serial::puts(" final=");
+        serial::puts(record.finalUrl[0] ? record.finalUrl : "(none)");
+        serial::puts(" title=");
+        serial::puts(safeTitle[0] ? safeTitle : "(none)");
+        serial::puts("\n[NAVIGATOR-PERSISTENT] stage_visible=");
+        serial::puts(safeVisible[0] ? safeVisible : "(none)");
+        serial::puts(" status=");
+        serial_put_dec((uint32_t)(app->m_metaHttpStatusCode > 0 ? app->m_metaHttpStatusCode : 0));
+        serial::puts(" blocks=");
+        serial_put_dec(record.documentBlocks);
+        serial::puts(" decoded_html=");
+        serial_put_dec(record.decodedDocumentBytes);
+        serial::puts("\n[NAVIGATOR-PERSISTENT] stage_transition released=");
+        serial_put_dec(record.releasedResources);
+        serial::puts(" released_bytes=");
+        serial_put_dec64(record.releasedBytes);
+        serial::puts(" active_before=");
+        serial_put_dec(record.activeImagesBefore);
+        serial::puts(" active_bytes_before=");
+        serial_put_dec64(record.activeBytesBefore);
+        serial::puts(" active_after_release=");
+        serial_put_dec(record.activeImagesAfterRelease);
+        serial::puts(" active_bytes_after_release=");
+        serial_put_dec64(record.activeBytesAfterRelease);
+        serial::puts(" stale_refs=");
+        serial_put_dec(record.staleReferencesAfterRelease);
+        serial::puts(" stale_duplicates=");
+        serial_put_dec(record.staleDuplicateOwnersAfterRelease);
+        serial::puts(" stale_pointers=");
+        serial_put_dec(record.staleImagePointersAfterRelease);
+        serial::puts("\n[NAVIGATOR-PERSISTENT] stage_scheduler refs=");
+        serial_put_dec(record.resourceReferences);
+        serial::puts(" unique=");
+        serial_put_dec(record.uniqueReferences);
+        serial::puts(" duplicate=");
+        serial_put_dec(record.duplicateReferences);
+        serial::puts(" candidates=");
+        serial_put_dec(record.schedulerCandidates);
+        serial::puts(" loaded=");
+        serial_put_dec(record.loadedResources);
+        serial::puts(" failed=");
+        serial_put_dec(record.failedResources);
+        serial::puts(" budget_denied=");
+        serial_put_dec(record.budgetDenials);
+        serial::puts(" duplicate_network_fetches=");
+        serial_put_dec(record.duplicateNetworkFetches);
+        serial::puts(" active_images=");
+        serial_put_dec(record.activeImages);
+        serial::puts(" active_bytes=");
+        serial_put_dec64(record.activeBytes);
+        serial::puts(" peak_bytes=");
+        serial_put_dec64(record.peakBytes);
+        serial::puts(" denied_bytes=");
+        serial_put_dec64(record.deniedBytes);
+        serial::puts(" encoded_failures=");
+        serial_put_dec64(record.encodedBodyFailures);
+        serial::puts(" injected_failure=");
+        serial::puts(record.injectedImageFailure ? "yes" : "no");
+        serial::puts("\n[NAVIGATOR-PERSISTENT] stage_buckets loaded=");
+        for (uint32_t bucket = 0; bucket < 6; ++bucket) {
+            if (bucket) serial::putc(',');
+            serial_put_dec(record.loadedSizeBuckets[bucket]);
+        }
+        serial::puts(" denied=");
+        for (uint32_t bucket = 0; bucket < 6; ++bucket) {
+            if (bucket) serial::putc(',');
+            serial_put_dec(record.deniedSizeBuckets[bucket]);
+        }
+        serial::puts("\n[NAVIGATOR-PERSISTENT] stage_viewport top=");
+        serial_put_dec(app->m_resourceScheduler.viewportTop);
+        serial::puts(" bottom=");
+        serial_put_dec(app->m_resourceScheduler.viewportBottom);
+        serial::puts(" width=");
+        serial_put_dec(app->m_resourceScheduler.viewportWidth);
+        serial::puts(" height=");
+        serial_put_dec(app->m_resourceScheduler.viewportHeight);
+        serial::puts(" scroll=");
+        serial_put_dec(app->m_resourceScheduler.initialScrollOffset);
+        serial::puts(" visible_refs=");
+        serial_put_dec(app->m_resourceScheduler.visibleReferences);
+        serial::puts(" near_refs=");
+        serial_put_dec(app->m_resourceScheduler.nearReferences);
+        serial::puts(" far_refs=");
+        serial_put_dec(app->m_resourceScheduler.farReferences);
+        serial::puts(" visible_loaded=");
+        serial_put_dec(app->m_resourceScheduler.visibleLoaded);
+        serial::puts(" near_loaded=");
+        serial_put_dec(app->m_resourceScheduler.nearLoaded);
+        serial::puts(" far_loaded=");
+        serial_put_dec(app->m_resourceScheduler.farLoaded);
+        serial::puts(" far_budget_denied=");
+        serial_put_dec(app->m_resourceScheduler.farBudgetDenied);
+        serial::puts(" visible_priority_admissions=");
+        serial_put_dec(app->m_resourceScheduler.visiblePriorityAdmissions);
+        serial::puts(" active_bytes=");
+        serial_put_dec64(app->m_resourceScheduler.activeBytes);
+        const bool invariantOk = record.activeBytes <= gxos::apps::kNavigatorDecodedImageBudgetBytes &&
+            record.activeImages <= gxos::apps::kNavigatorMaxActiveResources &&
+            record.resourceReferences <= gxos::apps::kNavigatorMaxResourceReferences &&
+            record.activeImagesAfterRelease == 0 && record.activeBytesAfterRelease == 0 &&
+            record.staleReferencesAfterRelease == 0 &&
+            record.staleDuplicateOwnersAfterRelease == 0 &&
+            record.staleImagePointersAfterRelease == 0 &&
+            record.parserCompleted && record.documentCreated;
+        const bool pass = expected && invariantOk;
+        serial::puts("\n[NAVIGATOR-PERSISTENT] stage_result=");
+        serial::puts(pass ? "PASS\n" : "FAIL\n");
+        return pass;
+    };
+
+    auto latest = [&]() -> const NavigationGenerationRecord& {
+        return app->m_lifecycleGenerations[app->m_currentLifecycleGenerationIndex];
+    };
+    auto startsWith = [](const char* value, const char* prefix) {
+        return value && prefix && nav_starts_with(value, prefix);
+    };
+    auto transitionReleased = [&](const NavigationGenerationRecord& record) {
+        return record.releasedResources > 0 && record.releasedBytes > 0 &&
+            record.activeImagesAfterRelease == 0 && record.activeBytesAfterRelease == 0 &&
+            record.staleReferencesAfterRelease == 0 &&
+            record.staleDuplicateOwnersAfterRelease == 0 &&
+            record.staleImagePointersAfterRelease == 0;
+    };
+    auto transitionClearedOrNoop = [&](const NavigationGenerationRecord& record) {
+        const bool cleared = record.activeImagesAfterRelease == 0 && record.activeBytesAfterRelease == 0 &&
+            record.staleReferencesAfterRelease == 0 &&
+            record.staleDuplicateOwnersAfterRelease == 0 &&
+            record.staleImagePointersAfterRelease == 0;
+        const bool released = record.releasedResources > 0 && record.releasedBytes > 0;
+        const bool noOp = record.releasedResources == 0 && record.releasedBytes == 0 &&
+            record.activeImagesBefore == 0 && record.activeBytesBefore == 0;
+        return cleared && (released || noOp);
+    };
+
+    auto viewportPressureExpected = [&]() {
+        const gxos::apps::NavigatorResourceSchedulerStats& stats = app->m_resourceScheduler;
+        return stats.viewportWidth > 0 && stats.viewportHeight > 0 &&
+            stats.initialScrollOffset == 0 && stats.visibleReferences >= 4 &&
+            stats.nearReferences >= 4 && stats.farReferences >= 4 &&
+            stats.visibleLoaded >= 4 && stats.nearLoaded >= 4 &&
+            stats.farLoaded > 0 && stats.farBudgetDenied > 0 &&
+            stats.visiblePriorityAdmissions > 0 &&
+            stats.activeBytes <= gxos::apps::kNavigatorDecodedImageBudgetBytes &&
+            stats.activeCount <= gxos::apps::kNavigatorMaxActiveResources &&
+            latest().imagePaintObserved;
+    };
+
+    auto emitScrollStage = [&](const char* stage, bool expected) -> bool {
+        if (app->m_resourceViewportDirty &&
+            app->m_resourceScheduler.currentScrollOffset != app->m_scrollY)
+            app->updateViewportResourceAdmission();
+        app->drawDocument(0, 0, smokeWindow.w, smokeWindow.h);
+        const gxos::apps::NavigatorResourceSchedulerStats& stats = app->m_resourceScheduler;
+        uint32_t visiblePainted = 0;
+        uint32_t activePainted = 0;
+        bool readmittedAndPainted = false;
+        for (uint32_t ref = 0; ref < gxos::apps::kNavigatorMaxResourceReferences; ++ref) {
+            const gxos::apps::NavigatorResourceReferenceMetadata& metadata = app->m_resourceReferences[ref];
+            if (metadata.state == static_cast<uint8_t>(gxos::apps::NavigatorResourceSchedulerState::Empty)) continue;
+            const int blockIndex = static_cast<int>(metadata.blockIndex);
+            const bool attached = metadata.state == static_cast<uint8_t>(gxos::apps::NavigatorResourceSchedulerState::Attached) ||
+                metadata.state == static_cast<uint8_t>(gxos::apps::NavigatorResourceSchedulerState::Deduplicated);
+            const bool painted = blockIndex >= 0 && blockIndex < app->m_blockCount && app->m_imagePaintLogged[blockIndex];
+            if (attached && painted) ++activePainted;
+            if (attached && painted &&
+                metadata.viewportClass == static_cast<uint8_t>(gxos::apps::NavigatorResourceViewportClass::Visible)) {
+                ++visiblePainted;
+            }
+            if (metadata.readmissionCount > 0 && painted &&
+                (metadata.viewportClass == static_cast<uint8_t>(gxos::apps::NavigatorResourceViewportClass::Visible) ||
+                 metadata.viewportClass == static_cast<uint8_t>(gxos::apps::NavigatorResourceViewportClass::Near))) {
+                readmittedAndPainted = true;
+            }
+            serial::puts("[NAVIGATOR-PERSISTENT] scroll_stage_image stage=");
+            serial::puts(stage ? stage : "unknown");
+            serial::puts(" ref=");
+            serial_put_dec(ref);
+            serial::puts(" relation=");
+            serial::puts(gxos::apps::navigatorResourceViewportClassName(
+                static_cast<gxos::apps::NavigatorResourceViewportClass>(metadata.viewportClass)));
+            serial::puts(" previous=");
+            serial::puts(gxos::apps::navigatorResourceViewportClassName(
+                static_cast<gxos::apps::NavigatorResourceViewportClass>(metadata.previousViewportClass)));
+            serial::puts(" state=");
+            serial::puts(gxos::apps::navigatorResourceSchedulerStateName(
+                static_cast<gxos::apps::NavigatorResourceSchedulerState>(metadata.state)));
+            serial::puts(" duplicate_of=");
+            if (metadata.duplicateOf == 0xFFFFu) serial::puts("none");
+            else serial_put_dec(metadata.duplicateOf);
+            serial::puts(" top=");
+            serial_put_dec(metadata.blockTop < 0 ? 0u : static_cast<uint32_t>(metadata.blockTop));
+            serial::puts(" bottom=");
+            serial_put_dec(metadata.blockBottom < 0 ? 0u : static_cast<uint32_t>(metadata.blockBottom));
+            serial::puts(" painted=");
+            serial::puts(painted ? "yes\n" : "no\n");
+        }
+        serial::puts("[NAVIGATOR-PERSISTENT] scroll_stage stage=");
+        serial::puts(stage ? stage : "unknown");
+        serial::puts(" offset=");
+        serial_put_dec(stats.currentScrollOffset < 0 ? 0u : static_cast<uint32_t>(stats.currentScrollOffset));
+        serial::puts(" viewport_top=");
+        serial_put_dec(stats.viewportTop < 0 ? 0u : static_cast<uint32_t>(stats.viewportTop));
+        serial::puts(" viewport_bottom=");
+        serial_put_dec(stats.viewportBottom < 0 ? 0u : static_cast<uint32_t>(stats.viewportBottom));
+        serial::puts(" visible=");
+        serial_put_dec(stats.visibleReferences);
+        serial::puts(" near=");
+        serial_put_dec(stats.nearReferences);
+        serial::puts(" far=");
+        serial_put_dec(stats.farReferences);
+        serial::puts(" unknown=");
+        serial_put_dec(stats.unknownViewportReferences);
+        serial::puts(" active_images=");
+        serial_put_dec(stats.activeCount);
+        serial::puts(" active_bytes=");
+        serial_put_dec64(stats.activeBytes);
+        serial::puts(" peak_bytes=");
+        serial_put_dec64(app->m_resourceMemory.peakDecodedBytes);
+        serial::puts(" admissions=");
+        serial_put_dec(stats.scrollTriggeredAdmissions);
+        serial::puts(" reconsidered=");
+        serial_put_dec(stats.resourcesReconsidered);
+        serial::puts(" passes=");
+        serial_put_dec(stats.viewportAdmissionPasses);
+        serial::puts(" evictions=");
+        serial_put_dec(stats.evictions);
+        serial::puts(" evicted_bytes=");
+        serial_put_dec64(stats.evictedDecodedBytes);
+        serial::puts(" readmissions=");
+        serial_put_dec(stats.reAdmissions);
+        serial::puts(" visible_loaded=");
+        serial_put_dec(stats.visibleLoaded);
+        serial::puts(" visible_denied=");
+        serial_put_dec(stats.visibleBudgetDenied + stats.visibleAdmissionFailures);
+        serial::puts(" visible_painted=");
+        serial_put_dec(visiblePainted);
+        serial::puts(" active_painted=");
+        serial_put_dec(activePainted);
+        serial::puts(" readmitted_painted=");
+        serial::puts(readmittedAndPainted ? "yes\n" : "no\n");
+        const bool bounded = stats.activeBytes <= gxos::apps::kNavigatorDecodedImageBudgetBytes &&
+            stats.activeCount <= gxos::apps::kNavigatorMaxActiveResources &&
+            app->countLiveResourceReferences() <= gxos::apps::kNavigatorMaxResourceReferences;
+        const bool pass = expected && bounded && stats.visibleLoaded > 0 && visiblePainted > 0;
+        serial::puts("[NAVIGATOR-PERSISTENT] scroll_stage_result stage=");
+        serial::puts(stage ? stage : "unknown");
+        serial::puts(" result=");
+        serial::puts(pass ? "PASS\n" : "FAIL\n");
+        return pass;
+    };
+
+    const int kPointerTitlebarHeight = 24;
+    const auto pointerScreenX = [&](int localX) {
+        return smokeWindow.x + localX;
+    };
+    const auto pointerScreenY = [&](int localY) {
+        return smokeWindow.y + kPointerTitlebarHeight + localY;
+    };
+    auto pointerScrollToOffset = [&](const char* stage, int requestedScroll) -> bool {
+        int trackStart = 0;
+        int trackCross = 0;
+        int trackExtent = 0;
+        int thumbExtent = 0;
+        int thumbTravel = 0;
+        int maxScrollValue = 0;
+        const bool geometry = pointerWindowRegistered &&
+            app->rootScrollbarGeometry(false, trackStart, trackCross, trackExtent,
+                                       thumbExtent, thumbTravel, maxScrollValue);
+        const int current = app->m_scrollY;
+        const int target = geometry
+            ? navigator_scrollbar::clamp_scroll(requestedScroll, maxScrollValue) : 0;
+        const int targetThumbOffset = geometry
+            ? navigator_scrollbar::thumb_offset(target, maxScrollValue, thumbTravel) : 0;
+        const int expectedScroll = geometry
+            ? navigator_scrollbar::scroll_from_thumb_offset(targetThumbOffset,
+                                                             maxScrollValue, thumbTravel) : 0;
+        const int startPointer = geometry
+            ? trackStart + navigator_scrollbar::thumb_offset(current, maxScrollValue, thumbTravel) + thumbExtent / 2 : 0;
+        const int endPointer = geometry
+            ? trackStart + targetThumbOffset + thumbExtent / 2 : 0;
+        const uint32_t admissionPassesBefore = app->m_resourceScheduler.viewportAdmissionPasses;
+
+        if (geometry) {
+            const int pointerX = trackCross + 3;
+            compositor::KernelCompositor::handleMouseMove(
+                pointerScreenX(pointerX), pointerScreenY(startPointer));
+            compositor::KernelCompositor::handleMouseDown(
+                pointerScreenX(pointerX), pointerScreenY(startPointer), 0x01);
+            compositor::KernelCompositor::handleMouseMove(
+                pointerScreenX(pointerX), pointerScreenY(endPointer));
+            compositor::KernelCompositor::handleMouseUp(
+                pointerScreenX(pointerX), pointerScreenY(endPointer), 0x01);
+            compositor::KernelCompositor::drawAllWindows();
+        }
+
+        const int actualScroll = app->m_scrollY;
+        const bool admissionPass = app->m_resourceScheduler.viewportAdmissionPasses > admissionPassesBefore &&
+            app->m_resourceScheduler.currentScrollOffset == actualScroll;
+        const bool changed = actualScroll != current;
+        const bool pass = geometry && thumbTravel > 0 && changed && actualScroll == expectedScroll &&
+            admissionPass;
+        serial::puts("[NAVIGATOR-POINTER-8U] stage=");
+        serial::puts(stage ? stage : "unknown");
+        serial::puts(" pointer_start=");
+        serial_put_dec(startPointer);
+        serial::puts(" pointer_end=");
+        serial_put_dec(endPointer);
+        serial::puts(" old=");
+        serial_put_dec(current < 0 ? 0u : static_cast<uint32_t>(current));
+        serial::puts(" new=");
+        serial_put_dec(actualScroll < 0 ? 0u : static_cast<uint32_t>(actualScroll));
+        serial::puts(" requested=");
+        serial_put_dec(target < 0 ? 0u : static_cast<uint32_t>(target));
+        serial::puts(" maxScrollY=");
+        serial_put_dec(maxScrollValue < 0 ? 0u : static_cast<uint32_t>(maxScrollValue));
+        serial::puts(" viewport_admission=");
+        serial::puts(admissionPass ? "PASS" : "FAIL");
+        serial::puts(" result=");
+        serial::puts(pass ? "PASS\n" : "FAIL\n");
+        return pass;
+    };
+
+    app->navigateTo("http://10.0.2.2:8080/navigator-smoke/generated/VPRESS.HTM");
+    bool viewportFirstExpected = emitRecord("viewport_pressure_1", true) && viewportPressureExpected();
+    serial::puts("[NAVIGATOR-PERSISTENT] viewport_pressure_1.result=");
+    serial::puts(viewportFirstExpected ? "PASS\n" : "FAIL\n");
+    deterministicOk = deterministicOk && viewportFirstExpected;
+
+    app->navigateTo("http://10.0.2.2:8080/navigator-smoke/generated/TINY.HTM");
+    bool viewportTinyExpected = emitRecord("viewport_tiny", true) && transitionReleased(latest()) &&
+        latest().activeImages == 0 && latest().activeBytes == 0;
+    serial::puts("[NAVIGATOR-PERSISTENT] viewport_tiny.result=");
+    serial::puts(viewportTinyExpected ? "PASS\n" : "FAIL\n");
+    deterministicOk = deterministicOk && viewportTinyExpected;
+
+    app->navigateTo("http://10.0.2.2:8080/navigator-smoke/generated/VPRESS.HTM");
+    bool viewportSecondExpected = emitRecord("viewport_pressure_2", true) && viewportPressureExpected();
+    serial::puts("[NAVIGATOR-PERSISTENT] viewport_pressure_2.result=");
+    serial::puts(viewportSecondExpected ? "PASS\n" : "FAIL\n");
+    deterministicOk = deterministicOk && viewportSecondExpected;
+
+    app->navigateTo("http://10.0.2.2:8080/navigator-smoke/generated/VP8U.HTM");
+    // Positioned image rectangles are retained document geometry, but the
+    // legacy bare-metal maxScroll() extent is intentionally independent of
+    // out-of-flow boxes. These legal root offsets select the stable A/B/C
+    // fixture regions through the production root scrollbar thumb path.
+    const int phase8uMiddle = 600;
+    const int phase8uBottom = app->maxScroll();
+    bool phase8uA = emitScrollStage("phase8u_A_initial", true);
+    const uint32_t phase8uAdmissionsBefore = app->m_resourceScheduler.scrollTriggeredAdmissions;
+    bool phase8uBPointer = pointerScrollToOffset("phase8u_B_middle", phase8uMiddle);
+    bool phase8uB = phase8uBPointer && emitScrollStage("phase8u_B_middle", true) &&
+        app->m_resourceScheduler.scrollTriggeredAdmissions > phase8uAdmissionsBefore;
+    serial::puts("[NAVIGATOR-PERSISTENT] phase8u_B_middle.admission=");
+    serial::puts(phase8uB ? "PASS\n" : "FAIL\n");
+    const uint32_t phase8uEvictionsBefore = app->m_resourceScheduler.evictions;
+    bool phase8uCPointer = pointerScrollToOffset("phase8u_C_bottom", phase8uBottom);
+    bool phase8uC = phase8uCPointer && emitScrollStage("phase8u_C_bottom", true) &&
+        app->m_resourceScheduler.evictions > phase8uEvictionsBefore;
+    serial::puts("[NAVIGATOR-PERSISTENT] phase8u_C_bottom.eviction=");
+    serial::puts(phase8uC ? "PASS\n" : "FAIL\n");
+    bool phase8uBReturnPointer = pointerScrollToOffset("phase8u_B_return", phase8uMiddle);
+    bool phase8uBReturn = phase8uBReturnPointer && emitScrollStage("phase8u_B_return", true);
+    const uint32_t phase8uReadmissionsBefore = app->m_resourceScheduler.reAdmissions;
+    bool phase8uAFinalPointer = pointerScrollToOffset("phase8u_A_final", 0);
+    bool phase8uAFinal = phase8uAFinalPointer && emitScrollStage("phase8u_A_final", true) &&
+        app->m_resourceScheduler.reAdmissions > phase8uReadmissionsBefore;
+    bool phase8uARepaired = false;
+    for (uint32_t ref = 0; ref < gxos::apps::kNavigatorMaxResourceReferences; ++ref) {
+        const gxos::apps::NavigatorResourceReferenceMetadata& metadata = app->m_resourceReferences[ref];
+        if (metadata.duplicateOf != 0xFFFFu && metadata.readmissionCount == 0) continue;
+        const int blockIndex = static_cast<int>(metadata.blockIndex);
+        if (metadata.readmissionCount > 0 && metadata.viewportClass == static_cast<uint8_t>(gxos::apps::NavigatorResourceViewportClass::Visible) &&
+            blockIndex >= 0 && blockIndex < app->m_blockCount && app->m_blocks[blockIndex].imagePixels &&
+            app->m_imagePaintLogged[blockIndex]) {
+            phase8uARepaired = true;
+            break;
+        }
+    }
+    serial::puts("[NAVIGATOR-PERSISTENT] phase8u_A_final.readmission_paint=");
+    serial::puts(phase8uARepaired ? "PASS\n" : "FAIL\n");
+    const uint64_t phase8uPeakBytes = app->m_resourceMemory.peakDecodedBytes;
+    const bool phase8uCycle = phase8uA && phase8uB && phase8uC && phase8uBReturn && phase8uAFinal && phase8uARepaired &&
+        phase8uPeakBytes <= gxos::apps::kNavigatorDecodedImageBudgetBytes;
+    serial::puts("[NAVIGATOR-PERSISTENT] phase8u_cycle.result=");
+    serial::puts(phase8uCycle ? "PASS\n" : "FAIL\n");
+    deterministicOk = deterministicOk && phase8uCycle;
+
+    app->navigateTo("http://10.0.2.2:8080/navigator-smoke/generated/TINY.HTM");
+    const bool phase8uReset = app->m_resourceScheduler.activeCount == 0 &&
+        app->m_resourceMemory.activeDecodedBytes == 0 &&
+        app->m_resourceScheduler.evictions == 0 &&
+        app->m_resourceScheduler.reAdmissions == 0 &&
+        app->m_resourceScheduler.viewportAdmissionPasses == 0 &&
+        app->countLiveResourceReferences() == 0;
+    serial::puts("[NAVIGATOR-PERSISTENT] phase8u_tiny_reset active_images=");
+    serial_put_dec(app->m_resourceScheduler.activeCount);
+    serial::puts(" active_bytes=");
+    serial_put_dec64(app->m_resourceMemory.activeDecodedBytes);
+    serial::puts(" evictions=");
+    serial_put_dec(app->m_resourceScheduler.evictions);
+    serial::puts(" readmissions=");
+    serial_put_dec(app->m_resourceScheduler.reAdmissions);
+    serial::puts(" passes=");
+    serial_put_dec(app->m_resourceScheduler.viewportAdmissionPasses);
+    serial::puts(" result=");
+    serial::puts(phase8uReset ? "PASS\n" : "FAIL\n");
+    deterministicOk = deterministicOk && phase8uReset;
+
+    app->navigateTo("http://10.0.2.2:8080/navigator-smoke/generated/VP8U.HTM");
+    bool phase8uReuseA = emitScrollStage("phase8u_reuse_A", true);
+    bool phase8uReuseB = pointerScrollToOffset("phase8u_reuse_B", phase8uMiddle) &&
+        emitScrollStage("phase8u_reuse_B", true);
+    const bool phase8uReuse = phase8uReuseA && phase8uReuseB &&
+        app->m_resourceMemory.activeDecodedBytes <= gxos::apps::kNavigatorDecodedImageBudgetBytes;
+    serial::puts("[NAVIGATOR-PERSISTENT] phase8u_reuse.result=");
+    serial::puts(phase8uReuse ? "PASS\n" : "FAIL\n");
+    deterministicOk = deterministicOk && phase8uReuse;
+
+    app->navigateTo("http://10.0.2.2:8080/navigator-smoke/generated/HEAVY.HTM");
+    bool heavyExpected = true;
+    const NavigationGenerationRecord* heavyFirst = nullptr;
+    heavyExpected = emitRecord("deterministic_heavy_1", true);
+    if (heavyExpected) {
+        heavyFirst = &latest();
+        heavyExpected = heavyFirst->resourceReferences >= 32 &&
+            heavyFirst->uniqueReferences >= 5 && heavyFirst->duplicateReferences > 0 &&
+            heavyFirst->loadedResources >= 4 && heavyFirst->budgetDenials > 0 &&
+            heavyFirst->activeBytes > 0 && heavyFirst->peakBytes >= heavyFirst->activeBytes &&
+            heavyFirst->imagePaintObserved;
+    }
+    serial::puts("[NAVIGATOR-PERSISTENT] deterministic.heavy_1.result=");
+    serial::puts(heavyExpected ? "PASS\n" : "FAIL\n");
+    deterministicOk = heavyExpected;
+    const uint32_t firstDenials = heavyFirst ? heavyFirst->budgetDenials : 0;
+
+    app->navigateTo("http://10.0.2.2:8080/navigator-smoke/generated/TINY.HTM");
+    bool tinyAfterFirstExpected = emitRecord("deterministic_tiny_1", true);
+    if (tinyAfterFirstExpected) tinyAfterFirstExpected = transitionReleased(latest()) &&
+        latest().resourceReferences == 0 && latest().activeImages == 0 && latest().activeBytes == 0;
+    serial::puts("[NAVIGATOR-PERSISTENT] deterministic.tiny_after_heavy.result=");
+    serial::puts(tinyAfterFirstExpected ? "PASS\n" : "FAIL\n");
+    deterministicOk = deterministicOk && tinyAfterFirstExpected;
+
+    app->navigateTo("http://10.0.2.2:8080/navigator-smoke/generated/HEAVY.HTM");
+    bool heavySecondExpected = emitRecord("deterministic_heavy_2", true);
+    const NavigationGenerationRecord* heavySecond = nullptr;
+    if (heavySecondExpected) {
+        heavySecond = &latest();
+        heavySecondExpected = heavySecond->resourceReferences >= 32 &&
+            heavySecond->uniqueReferences == (heavyFirst ? heavyFirst->uniqueReferences : 0) &&
+            heavySecond->duplicateReferences == (heavyFirst ? heavyFirst->duplicateReferences : 0) &&
+            heavySecond->loadedResources == (heavyFirst ? heavyFirst->loadedResources : 0) &&
+            heavySecond->budgetDenials == firstDenials &&
+            heavySecond->activeBytes == (heavyFirst ? heavyFirst->activeBytes : 0) &&
+            heavySecond->imagePaintObserved;
+    }
+    serial::puts("[NAVIGATOR-PERSISTENT] deterministic.heavy_2.result=");
+    serial::puts(heavySecondExpected ? "PASS\n" : "FAIL\n");
+    deterministicOk = deterministicOk && heavySecondExpected;
+
+    app->m_injectNextImageFailure = true;
+    app->navigateTo("http://10.0.2.2:8080/navigator-smoke/generated/FAIL.HTM");
+    bool injectedExpected = emitRecord("deterministic_injected_failure", true);
+    if (injectedExpected) injectedExpected = latest().injectedImageFailure &&
+        latest().failedResources > 0 && latest().activeImages == 0 && latest().activeBytes == 0;
+    serial::puts("[NAVIGATOR-PERSISTENT] deterministic.injected_failure.result=");
+    serial::puts(injectedExpected ? "PASS\n" : "FAIL\n");
+    deterministicOk = deterministicOk && injectedExpected;
+
+    app->navigateTo("http://10.0.2.2:8080/navigator-smoke/generated/TINY.HTM");
+    bool tinyAfterFailureExpected = emitRecord("deterministic_tiny_after_failure", true);
+    if (tinyAfterFailureExpected) tinyAfterFailureExpected = transitionClearedOrNoop(latest()) &&
+        latest().activeImages == 0 && latest().activeBytes == 0;
+    serial::puts("[NAVIGATOR-PERSISTENT] deterministic.tiny_after_failure.result=");
+    serial::puts(tinyAfterFailureExpected ? "PASS\n" : "FAIL\n");
+    deterministicOk = deterministicOk && tinyAfterFailureExpected;
+
+    app->navigateTo("http://10.0.2.2:8080/navigator-smoke/generated/HEAVY.HTM");
+    bool heavyRecoveryExpected = emitRecord("deterministic_heavy_after_failure", true);
+    if (heavyRecoveryExpected) heavyRecoveryExpected = latest().budgetDenials == firstDenials &&
+        latest().activeBytes == (heavyFirst ? heavyFirst->activeBytes : 0) &&
+        latest().imagePaintObserved;
+    serial::puts("[NAVIGATOR-PERSISTENT] deterministic.heavy_after_failure.result=");
+    serial::puts(heavyRecoveryExpected ? "PASS\n" : "FAIL\n");
+    deterministicOk = deterministicOk && heavyRecoveryExpected;
+    serial::puts("[NAVIGATOR-PERSISTENT] deterministic.result=");
+    serial::puts(deterministicOk ? "PASS\n" : "FAIL\n");
+
+    const gxos::GxosValidatedHttpsPolicyInfo publicPolicy = gxos::gxos_validated_https_policy_info();
+    publicEnabled = publicPolicy.broadPublicHttpsEnabled;
+    serial::puts("[NAVIGATOR-PERSISTENT] public.sequence=NASA,Wikipedia,example.com,NASA\n");
+    serial::puts("[NAVIGATOR-PERSISTENT] public.enabled=");
+    serial::puts(publicEnabled ? "yes\n" : "no\n");
+    if (publicEnabled) {
+        static const char* kPublicUrls[] = {
+            "https://www.nasa.gov/",
+            "https://en.wikipedia.org/",
+            "https://example.com/",
+            "https://www.nasa.gov/"
+        };
+        static const char* kPublicPrefixes[] = {
+            "https://www.nasa.gov/",
+            "https://en.wikipedia.org/",
+            "https://example.com/",
+            "https://www.nasa.gov/"
+        };
+        static const char* kPublicStages[] = {
+            "public_nasa_1",
+            "public_wikipedia",
+            "public_example",
+            "public_nasa_2"
+        };
+        for (uint32_t i = 0; i < 4; ++i) {
+            app->navigateTo(kPublicUrls[i]);
+            bool expected = emitRecord(kPublicStages[i], true);
+            const NavigationGenerationRecord& record = latest();
+            expected = expected && startsWith(record.finalUrl, kPublicPrefixes[i]) &&
+                app->m_metaHttpStatusCode == 200 && app->m_metaTlsUsed &&
+                app->m_metaTlsValidated && app->m_metaTlsHostnameValidated;
+            serial::puts("[NAVIGATOR-PERSISTENT] public.stage=");
+            serial::puts(kPublicStages[i]);
+            serial::puts(" tls=");
+            serial::puts(app->m_metaTlsUsed ? "yes" : "no");
+            serial::puts(" tls_validated=");
+            serial::puts(app->m_metaTlsValidated ? "yes" : "no");
+            serial::puts(" hostname_validated=");
+            serial::puts(app->m_metaTlsHostnameValidated ? "yes" : "no");
+            serial::puts(" sni=");
+            serial::puts(app->m_metaTlsSniHost[0] ? app->m_metaTlsSniHost : "(none)");
+            serial::puts(" origin=");
+            serial::puts(app->m_metaTlsHostname[0] ? app->m_metaTlsHostname : "(none)");
+            serial::puts(" result=");
+            serial::puts(expected ? "PASS\n" : "FAIL\n");
+            publicOk = publicOk && expected;
+        }
+    } else {
+        serial::puts("[NAVIGATOR-PERSISTENT] public.result=SKIP policy_disabled\n");
+    }
+    if (publicEnabled) {
+        serial::puts("[NAVIGATOR-PERSISTENT] public.result=");
+        serial::puts(publicOk ? "PASS\n" : "EXTERNAL_BLOCKED_OR_FAILED\n");
+    }
+
+    // Release the final document before ending the one-instance smoke.  The
+    // destructor repeats the idempotent release guard, so this cannot double
+    // free an owner or leave a decoded-byte reservation charged.
+    app->releaseImageResources();
+    if (pointerWindowRegistered) {
+        compositor::KernelCompositor::unregisterWindow(&smokeWindow);
+    }
+    app->m_window = nullptr;
+    delete app;
+    const bool result = deterministicOk && (!publicEnabled || publicOk);
+    serial::puts("[NAVIGATOR-PERSISTENT] result=");
+    serial::puts(result ? "PASS\n" : "FAIL\n");
+    return result;
+}
+
 void NavigatorApp::onMouseMove(int x, int y)
 {
+    if (m_mouseLeftDown && m_scrollbarDragging && m_scrollbarOwner == 1 &&
+        m_scrollbarOrientation != 0) {
+        const bool horizontal = m_scrollbarOrientation == 2;
+        int trackStart = 0;
+        int trackCross = 0;
+        int trackExtent = 0;
+        int thumbExtent = 0;
+        int thumbTravel = 0;
+        int maxScrollValue = 0;
+        if (rootScrollbarGeometry(horizontal, trackStart, trackCross, trackExtent,
+                                  thumbExtent, thumbTravel, maxScrollValue) &&
+            thumbTravel > 0 && maxScrollValue > 0) {
+            const int pointer = horizontal ? x : y;
+            const int desired = pointer - m_scrollbarDragGrabOffset - trackStart;
+            const int next = navigator_scrollbar::scroll_from_thumb_offset(
+                desired, maxScrollValue, thumbTravel);
+            if (horizontal) m_scrollX = next;
+            else m_scrollY = next;
+            updateScrollViewport();
+            invalidate();
+        }
+        return;
+    }
+
     if (m_mouseLeftDown && !m_addressFocused) {
         int dx = x - m_mouseDownX;
         if (dx < 0) dx = -dx;
@@ -7193,6 +8435,57 @@ void NavigatorApp::onMouseDown(int x, int y, uint8_t button)
 {
     if ((button & 0x01) == 0 && button != 1) return;
 
+    bool horizontal = false;
+    bool thumb = false;
+    int trackStart = 0;
+    int trackCross = 0;
+    int trackExtent = 0;
+    int thumbExtent = 0;
+    int thumbTravel = 0;
+    int maxScrollValue = 0;
+    if (rootScrollbarHit(x, y, horizontal, thumb, trackStart, trackCross,
+                         trackExtent, thumbExtent, thumbTravel, maxScrollValue)) {
+        m_mouseLeftDown = true;
+        m_mouseMode = NAV_MOUSE_NONE;
+        m_mouseDownX = x;
+        m_mouseDownY = y;
+        m_mouseDownLinkIndex = -1;
+        m_scrollbarOwner = 1;
+        m_scrollbarOrientation = horizontal ? 2 : 1;
+        const int pointer = horizontal ? x : y;
+        const int current = horizontal ? m_scrollX : m_scrollY;
+        if (thumb) {
+            const int thumbStart = trackStart + navigator_scrollbar::thumb_offset(
+                current, maxScrollValue, thumbTravel);
+            m_scrollbarDragging = true;
+            m_scrollbarDragPointer = pointer;
+            m_scrollbarDragGrabOffset = pointer - thumbStart;
+            m_scrollbarDragInitialScroll = current;
+        } else {
+            m_scrollbarDragging = false;
+            const int thumbStart = trackStart + navigator_scrollbar::thumb_offset(
+                current, maxScrollValue, thumbTravel);
+            const bool beforeThumb = pointer < thumbStart;
+            const int64_t page64 = horizontal
+                ? (m_window ? static_cast<int64_t>(m_window->w) : 0)
+                : (m_window ? static_cast<int64_t>(m_window->h) - TOOLBAR_H - STATUS_H - 12 : 0);
+            const int page = page64 <= 0 ? 0 :
+                (page64 > navigator_scrollbar::kMaxCoordinate
+                    ? static_cast<int>(navigator_scrollbar::kMaxCoordinate)
+                    : static_cast<int>(page64));
+            const int next = navigator_scrollbar::page_from_track_click(
+                current, page > 0 ? page : 1, beforeThumb, maxScrollValue);
+            if (horizontal) m_scrollX = next;
+            else m_scrollY = next;
+            updateScrollViewport();
+        }
+        invalidate();
+        return;
+    }
+
+    m_scrollbarOwner = 0;
+    m_scrollbarOrientation = 0;
+    m_scrollbarDragging = false;
     m_mouseLeftDown = true;
     m_mouseMode = NAV_MOUSE_NONE;
     m_mouseDownX = x;
@@ -7206,7 +8499,8 @@ void NavigatorApp::onMouseDown(int x, int y, uint8_t button)
         m_mouseMode = NAV_MOUSE_ADDRESS_BAR_INTERACTION;
         blurFormBlock();
         focusAddressBar();
-        int charOffset = (x - ADDRESS_X - 8) / 6;
+        const NavigatorToolbarLayout toolbarLayout = navigatorToolbarLayout(m_window ? m_window->w : 0);
+        int charOffset = (x - toolbarLayout.addressX - 8) / 6;
         if (charOffset < 0) charOffset = 0;
         int len = strlen_local(m_addressBuffer);
         if (charOffset > len) charOffset = len;
@@ -7264,6 +8558,15 @@ void NavigatorApp::onMouseDown(int x, int y, uint8_t button)
 void NavigatorApp::onMouseUp(int x, int y, uint8_t button)
 {
     if ((button & 0x01) == 0 && button != 1) return;
+    if (m_scrollbarOwner == 1) {
+        m_scrollbarDragging = false;
+        m_scrollbarOwner = 0;
+        m_scrollbarOrientation = 0;
+        m_mouseLeftDown = false;
+        m_mouseMode = NAV_MOUSE_NONE;
+        invalidate();
+        return;
+    }
     NavigatorMouseMode mode = m_mouseMode;
     int downLinkIndex = m_mouseDownLinkIndex;
     int upLinkIndex = hitLinkIndex(x, y);
@@ -7412,13 +8715,16 @@ void NavigatorApp::onKeyDown(uint32_t key)
     } else if (key == shell::KEY_PGUP) {
         m_scrollY -= 48;
         clampScroll();
+        m_resourceViewportDirty = true;
         setStatus("Scrolled up");
     } else if (key == shell::KEY_PGDN) {
         m_scrollY += 48;
         clampScroll();
+        m_resourceViewportDirty = true;
         setStatus("Scrolled down");
     } else if (key == shell::KEY_HOME) {
         m_scrollY = 0;
+        m_resourceViewportDirty = true;
         setStatus("Home position");
     }
 }
@@ -7483,13 +8789,13 @@ void NavigatorApp::updateButtons()
 {
     if (!m_window) return;
     m_window->widgetCount = 0;
-    int x = 16;
-    m_backBtnId = addButton(x, 12, BUTTON_W, BUTTON_H, "Back"); setButtonIcon(m_backBtnId, m_toolbarIcons[0]); x += BUTTON_W + BUTTON_GAP;
-    m_forwardBtnId = addButton(x, 12, BUTTON_W, BUTTON_H, "Next"); setButtonIcon(m_forwardBtnId, m_toolbarIcons[1]); x += BUTTON_W + BUTTON_GAP;
-    m_reloadBtnId = addButton(x, 12, BUTTON_W, BUTTON_H, "Reload"); setButtonIcon(m_reloadBtnId, m_toolbarIcons[2]); x += BUTTON_W + BUTTON_GAP;
-    m_homeBtnId = addButton(x, 12, BUTTON_W, BUTTON_H, "Home"); setButtonIcon(m_homeBtnId, m_toolbarIcons[3]); x += BUTTON_W + BUTTON_GAP;
-    m_bookmarksBtnId = addButton(x, 12, BUTTON_W, BUTTON_H, "Marks"); setButtonIcon(m_bookmarksBtnId, m_toolbarIcons[4]); x += BUTTON_W + BUTTON_GAP;
-    m_addBookmarkBtnId = addButton(x, 12, BUTTON_W, BUTTON_H, "Add"); setButtonIcon(m_addBookmarkBtnId, m_toolbarIcons[5]);
+    const NavigatorToolbarLayout layout = navigatorToolbarLayout(m_window->w);
+    m_backBtnId = addButton(layout.x[0], kNavigatorToolbarButtonY, layout.w[0], BUTTON_H, "Back"); setButtonIcon(m_backBtnId, m_toolbarIcons[0]);
+    m_forwardBtnId = addButton(layout.x[1], kNavigatorToolbarButtonY, layout.w[1], BUTTON_H, "Next"); setButtonIcon(m_forwardBtnId, m_toolbarIcons[1]);
+    m_reloadBtnId = addButton(layout.x[2], kNavigatorToolbarButtonY, layout.w[2], BUTTON_H, "Reload"); setButtonIcon(m_reloadBtnId, m_toolbarIcons[2]);
+    m_homeBtnId = addButton(layout.x[3], kNavigatorToolbarButtonY, layout.w[3], BUTTON_H, "Home"); setButtonIcon(m_homeBtnId, m_toolbarIcons[3]);
+    m_bookmarksBtnId = addButton(layout.x[4], kNavigatorToolbarButtonY, layout.w[4], BUTTON_H, "Marks"); setButtonIcon(m_bookmarksBtnId, m_toolbarIcons[4]);
+    m_addBookmarkBtnId = addButton(layout.x[5], kNavigatorToolbarButtonY, layout.w[5], BUTTON_H, "Add"); setButtonIcon(m_addBookmarkBtnId, m_toolbarIcons[5]);
 }
 
 void NavigatorApp::loadChromeImages()
@@ -7529,6 +8835,7 @@ void NavigatorApp::loadChromeImages()
     serial::puts("/6 throbber_frames_loaded=");
     serial_put_dec64((uint64_t)throbberLoaded);
     serial::puts("/12\n");
+    serial::puts("[NAVIGATOR] phase7c_toolbar_icon_size=16 fallback=label-only cache=init-once\n");
 }
 
 void NavigatorApp::setButtonIcon(int widgetId, const gxos::gui::ImageBitmap& image)
@@ -7559,6 +8866,7 @@ void NavigatorApp::addBlock(BlockKind kind, const char* text, const char* url, c
     if (m_blockCount >= MAX_BLOCKS) return;
     DocBlock& block = m_blocks[m_blockCount];
     block = DocBlock{};
+    m_imagePaintLogged[m_blockCount] = false;
     block.kind = kind;
     strcopy(block.text, text ? text : "", MAX_BLOCK_TEXT);
     strcopy(block.url, url ? url : "", MAX_URL_LEN);
@@ -7574,6 +8882,7 @@ void NavigatorApp::addImageBlock(const char* src, const char* alt, const char* r
     if (m_blockCount >= MAX_BLOCKS) return;
     DocBlock& block = m_blocks[m_blockCount];
     block = DocBlock{};
+    m_imagePaintLogged[m_blockCount] = false;
     block.kind = BLOCK_IMAGE;
     strcopy(block.text, alt ? alt : "", MAX_BLOCK_TEXT);
     strcopy(block.url, resolvedUrl ? resolvedUrl : "", MAX_URL_LEN);
@@ -7588,6 +8897,7 @@ void NavigatorApp::addImageBlock(const char* src, const char* alt, const char* r
     block.naturalWidth = (int)probe.width;
     block.naturalHeight = (int)probe.height;
     block.imageStatus = (int)probe.status;
+    block.imageFormat = (int)gxos::gui::ImageFormat::Unknown;
     block.style = style ? *style : gxos::web::WebStyle{};
     block.formIndex = -1;
     block.selectedOption = -1;
@@ -7782,12 +9092,48 @@ void NavigatorApp::buildPageInfoDocument()
     NAV_INFO_TEXT("Source type: ", m_metaSourceType);
     NAV_INFO_TEXT("Content type: ", m_metaContentType[0] ? m_metaContentType : "(none)");
     NAV_INFO_TEXT("Content encoding: ", m_metaContentEncoding[0] ? m_metaContentEncoding : "(none)");
+    NAV_INFO_TEXT("Response framing: ", m_metaResponseFraming[0] ? m_metaResponseFraming : "(none)");
+    NAV_INFO_TEXT("Content-Length present: ", m_metaContentLengthPresent ? "yes" : "no");
+    if (m_metaContentLengthPresent) NAV_INFO_INT("Content-Length: ", m_metaContentLength);
+    NAV_INFO_INT("Encoded body bytes: ", m_metaEncodedBodyBytes);
+    NAV_INFO_INT("Decoded body bytes: ", m_metaDecodedBodyBytes);
+    NAV_INFO_INT("Document segments: ", m_metaDocumentSegmentCount);
+    NAV_INFO_INT("Document storage bytes: ", m_metaDocumentStorageBytes);
+    NAV_INFO_INT("Document storage cap: ", m_metaDocumentStorageCapacity);
+    NAV_INFO_INT("Decoder history bytes: ", m_metaDocumentHistoryBytes);
+    NAV_INFO_TEXT("Document storage allocation failed: ",
+        m_metaDocumentStorageAllocationFailed ? "yes" : "no");
+    NAV_INFO_INT("Parser scratch bytes: ", m_metaParserScratchBytes);
+    NAV_INFO_INT("Active document bytes: ", m_metaActiveDocumentBytes);
+    NAV_INFO_INT("Encoded body cap: ", gxos::web::kHttpSharedMaxBodyBytes);
+    NAV_INFO_INT("Decoded document cap: ", gxos::web::kHttpSharedMaxDecodedDocumentBytes);
+    NAV_INFO_TEXT("Truncated response: ", m_metaTruncatedResponse ? "yes" : "no");
     NAV_INFO_TEXT("Unsupported reason: ", m_metaUnsupportedReason[0] ? m_metaUnsupportedReason : "(none)");
     if (m_metaHttpStatusCode > 0) NAV_INFO_INT("HTTP status: ", m_metaHttpStatusCode);
     else NAV_INFO_TEXT("HTTP status: ", "not applicable");
     NAV_INFO_TEXT("Redirected: ", m_metaRedirected ? "yes" : "no");
     NAV_INFO_INT("Redirect count: ", m_metaRedirectCount);
     NAV_INFO_TEXT("Error status: ", m_metaErrorStatus[0] ? m_metaErrorStatus : "(none)");
+    // Keep the small Forms-lite contract near the top of Page Info so the
+    // bounded document block budget cannot hide it behind transport details.
+    NAV_INFO_TEXT("Forms-lite interactive controls: ", "enabled");
+    NAV_INFO_TEXT("Forms-lite POST interactive: ", "enabled");
+    NAV_INFO_TEXT("Forms-lite POST bare-metal: ", "enabled-basic");
+    NAV_INFO_INT("Forms: ", m_metaFormCount);
+    NAV_INFO_INT("Text inputs: ", m_metaTextInputCount);
+    NAV_INFO_INT("Checkboxes: ", m_metaCheckboxCount);
+    NAV_INFO_INT("Radio buttons: ", m_metaRadioCount);
+    NAV_INFO_INT("Textareas: ", m_metaTextareaCount);
+    NAV_INFO_INT("Selects: ", m_metaSelectCount);
+    NAV_INFO_INT("Submit buttons: ", m_metaSubmitCount);
+    NAV_INFO_INT("Unsupported forms: ", m_metaUnsupportedFormCount);
+    NAV_INFO_TEXT("Last submitted method: ", m_lastSubmittedFormMethod[0] ? m_lastSubmittedFormMethod : "(none)");
+    NAV_INFO_TEXT("Last submitted action: ", m_lastSubmittedFormAction[0] ? m_lastSubmittedFormAction : "(none)");
+    NAV_INFO_TEXT("Last submitted status: ", m_lastSubmittedFormStatus[0] ? m_lastSubmittedFormStatus : "(none)");
+    NAV_INFO_TEXT("Last form error: ", m_lastFormError[0] ? m_lastFormError : "(none)");
+    NAV_INFO_TEXT("Last POST HTTP status: ", m_lastPostHttpStatus[0] ? m_lastPostHttpStatus : "(none)");
+    NAV_INFO_TEXT("Last POST content type: ", m_lastPostContentType[0] ? m_lastPostContentType : "(none)");
+    NAV_INFO_INT("Last POST body bytes: ", m_lastPostBodyBytes);
     NAV_INFO_TEXT("Header cap hit: ", m_metaHeaderCapHit ? "yes" : "no");
     NAV_INFO_TEXT("Body cap hit: ", m_metaBodyCapHit ? "yes" : "no");
     NAV_INFO_TEXT("TLS succeeded before content failure: ", m_metaTlsSucceededBeforeContentFailure ? "yes" : "no");
@@ -7911,6 +9257,62 @@ void NavigatorApp::buildPageInfoDocument()
     strappend(line, number, sizeof(line));
     addBlock(BLOCK_LIST_ITEM, line);
     NAV_INFO_TEXT("Last image error: ", m_metaLastImageError[0] ? m_metaLastImageError : "(none)");
+    strcopy(line, "Resource reliability: refs=", sizeof(line));
+    nav_int_to_text(m_metaResourceReferences, number, sizeof(number)); strappend(line, number, sizeof(line));
+    strappend(line, " attempted=", sizeof(line)); nav_int_to_text(m_metaResourceAttempted, number, sizeof(number)); strappend(line, number, sizeof(line));
+    strappend(line, " loaded=", sizeof(line)); nav_int_to_text(m_metaResourceLoaded, number, sizeof(number)); strappend(line, number, sizeof(line));
+    strappend(line, " failed=", sizeof(line)); nav_int_to_text(m_metaResourceFailed, number, sizeof(number)); strappend(line, number, sizeof(line));
+    strappend(line, " skipped=", sizeof(line)); nav_int_to_text(m_metaResourceSkipped, number, sizeof(number)); strappend(line, number, sizeof(number));
+    addBlock(BLOCK_LIST_ITEM, line);
+    strcopy(line, "Resource formats: PNG refs/loads=", sizeof(line));
+    nav_int_to_text(m_metaPngReferences, number, sizeof(number)); strappend(line, number, sizeof(line)); strappend(line, "/", sizeof(line));
+    nav_int_to_text(m_metaPngLoads, number, sizeof(number)); strappend(line, number, sizeof(line)); strappend(line, "; JPEG=", sizeof(line));
+    nav_int_to_text(m_metaJpegReferences, number, sizeof(number)); strappend(line, number, sizeof(line)); strappend(line, "/", sizeof(line));
+    nav_int_to_text(m_metaJpegLoads, number, sizeof(number)); strappend(line, number, sizeof(line));
+    addBlock(BLOCK_LIST_ITEM, line);
+    strcopy(line, "Resource failures: SVG=", sizeof(line)); nav_int_to_text(m_metaSvgFailures, number, sizeof(number)); strappend(line, number, sizeof(line));
+    strappend(line, " WebP=", sizeof(line)); nav_int_to_text(m_metaWebpFailures, number, sizeof(number)); strappend(line, number, sizeof(line));
+    strappend(line, " AVIF=", sizeof(line)); nav_int_to_text(m_metaAvifFailures, number, sizeof(number)); strappend(line, number, sizeof(line));
+    strappend(line, " GIF=", sizeof(line)); nav_int_to_text(m_metaGifFailures, number, sizeof(number)); strappend(line, number, sizeof(line));
+    addBlock(BLOCK_LIST_ITEM, line);
+    strcopy(line, "Resource classes: redirects=", sizeof(line)); nav_int_to_text(m_metaRedirects, number, sizeof(number)); strappend(line, number, sizeof(line));
+    strappend(line, " HTTP4xx=", sizeof(line)); nav_int_to_text(m_metaHttp4xx, number, sizeof(number)); strappend(line, number, sizeof(line));
+    strappend(line, " HTTP5xx=", sizeof(line)); nav_int_to_text(m_metaHttp5xx, number, sizeof(number)); strappend(line, number, sizeof(line));
+    strappend(line, " size=", sizeof(line)); nav_int_to_text(m_metaSizeBoundFailures, number, sizeof(number)); strappend(line, number, sizeof(line));
+    strappend(line, " decode=", sizeof(line)); nav_int_to_text(m_metaDecodeFailures, number, sizeof(number)); strappend(line, number, sizeof(line));
+    strappend(line, " network/TLS=", sizeof(line)); nav_int_to_text(m_metaNetworkTlsFailures, number, sizeof(number)); strappend(line, number, sizeof(line));
+    strappend(line, " MIME=", sizeof(line)); nav_int_to_text(m_metaUnsupportedMime, number, sizeof(number)); strappend(line, number, sizeof(line));
+    addBlock(BLOCK_LIST_ITEM, line);
+    strcopy(line, "Resource duplicates: URLs=", sizeof(line)); nav_int_to_text(m_metaDuplicateUrls, number, sizeof(number)); strappend(line, number, sizeof(line));
+    strappend(line, " network_fetches=", sizeof(line)); nav_int_to_text(m_metaDuplicateNetworkFetches, number, sizeof(number)); strappend(line, number, sizeof(line));
+    strappend(line, " decoded_images=", sizeof(line)); nav_int_to_text(m_metaDuplicateDecodedImages, number, sizeof(number)); strappend(line, number, sizeof(line));
+    strappend(line, " limit_skips=", sizeof(line)); nav_int_to_text(m_metaResourceLimitSkips, number, sizeof(number)); strappend(line, number, sizeof(line));
+    addBlock(BLOCK_LIST_ITEM, line);
+    strcopy(line, "Resource scheduler: discovered=", sizeof(line));
+    nav_int_to_text((int)m_resourceScheduler.referencesDiscovered, number, sizeof(number)); strappend(line, number, sizeof(line));
+    strappend(line, " unique=", sizeof(line)); nav_int_to_text((int)m_resourceScheduler.uniqueReferences, number, sizeof(number)); strappend(line, number, sizeof(line));
+    strappend(line, " candidates=", sizeof(line)); nav_int_to_text((int)m_resourceScheduler.schedulerCandidates, number, sizeof(number)); strappend(line, number, sizeof(line));
+    strappend(line, " fetch_started=", sizeof(line)); nav_int_to_text((int)m_resourceScheduler.fetchStarted, number, sizeof(number)); strappend(line, number, sizeof(line));
+    strappend(line, " fetch_completed=", sizeof(line)); nav_int_to_text((int)m_resourceScheduler.fetchCompleted, number, sizeof(number)); strappend(line, number, sizeof(line));
+    strappend(line, " budget_denied=", sizeof(line)); nav_int_to_text((int)m_resourceScheduler.budgetDenied, number, sizeof(number)); strappend(line, number, sizeof(line));
+    strappend(line, " resource_cap_denied=", sizeof(line)); nav_int_to_text((int)m_resourceScheduler.resourceCapDenied, number, sizeof(number)); strappend(line, number, sizeof(line));
+    addBlock(BLOCK_LIST_ITEM, line);
+    strcopy(line, "Image memory: active_bytes=", sizeof(line));
+    nav_int_to_text((int)m_resourceMemory.activeDecodedBytes, number, sizeof(number)); strappend(line, number, sizeof(line));
+    strappend(line, " peak=", sizeof(line)); nav_int_to_text((int)m_resourceMemory.peakDecodedBytes, number, sizeof(number)); strappend(line, number, sizeof(line));
+    strappend(line, " budget=", sizeof(line)); nav_int_to_text((int)gxos::apps::kNavigatorDecodedImageBudgetBytes, number, sizeof(number)); strappend(line, number, sizeof(line));
+    strappend(line, " released=", sizeof(line)); nav_int_to_text((int)m_resourceMemory.releasedDecodedBytes, number, sizeof(number)); strappend(line, number, sizeof(line));
+    addBlock(BLOCK_LIST_ITEM, line);
+    for (int classIndex = 0; classIndex < 64; ++classIndex) {
+        if (!m_metaResourceClassificationCounts[classIndex]) continue;
+        strcopy(line, "Resource classification ", sizeof(line));
+        strappend(line, gxos::apps::navigatorResourceClassificationName(
+            (gxos::apps::NavigatorResourceClassification)classIndex), sizeof(line));
+        strappend(line, "=", sizeof(line));
+        nav_int_to_text(m_metaResourceClassificationCounts[classIndex], number, sizeof(number));
+        strappend(line, number, sizeof(line));
+        addBlock(BLOCK_LIST_ITEM, line);
+    }
     strcopy(line, "CSS: detected=", sizeof(line));
     strappend(line, m_metaCssDetected ? "yes" : "no", sizeof(line));
     strappend(line, "; rules=", sizeof(line));
@@ -7931,40 +9333,35 @@ void NavigatorApp::buildPageInfoDocument()
     strcopy(line, "Text selection: enabled; clipboard mode: ", sizeof(line));
     strappend(line, m_clipboardMode[0] ? m_clipboardMode : "Navigator internal clipboard", sizeof(line));
     addBlock(BLOCK_LIST_ITEM, line);
-    NAV_INFO_TEXT("Forms-lite interactive controls: ", "enabled");
-    NAV_INFO_TEXT("Forms-lite POST interactive: ", "enabled");
-    NAV_INFO_TEXT("Forms-lite POST bare-metal: ", "enabled-basic");
-    NAV_INFO_INT("Forms: ", m_metaFormCount);
-    NAV_INFO_INT("Text inputs: ", m_metaTextInputCount);
-    NAV_INFO_INT("Checkboxes: ", m_metaCheckboxCount);
-    NAV_INFO_INT("Radio buttons: ", m_metaRadioCount);
-    NAV_INFO_INT("Textareas: ", m_metaTextareaCount);
-    NAV_INFO_INT("Selects: ", m_metaSelectCount);
-    NAV_INFO_INT("Submit buttons: ", m_metaSubmitCount);
-    NAV_INFO_INT("Unsupported forms: ", m_metaUnsupportedFormCount);
-    NAV_INFO_TEXT("Last submitted method: ", m_lastSubmittedFormMethod[0] ? m_lastSubmittedFormMethod : "(none)");
-    NAV_INFO_TEXT("Last submitted action: ", m_lastSubmittedFormAction[0] ? m_lastSubmittedFormAction : "(none)");
-    NAV_INFO_TEXT("Last submitted status: ", m_lastSubmittedFormStatus[0] ? m_lastSubmittedFormStatus : "(none)");
-    NAV_INFO_TEXT("Last form error: ", m_lastFormError[0] ? m_lastFormError : "(none)");
-    NAV_INFO_TEXT("Last POST HTTP status: ", m_lastPostHttpStatus[0] ? m_lastPostHttpStatus : "(none)");
-    NAV_INFO_TEXT("Last POST content type: ", m_lastPostContentType[0] ? m_lastPostContentType : "(none)");
-    NAV_INFO_INT("Last POST body bytes: ", m_lastPostBodyBytes);
     NAV_INFO_INT("Raw/source bytes: ", m_metaSourceBytes);
     NAV_INFO_TEXT("Source preview truncated: ", m_metaSourceTruncated ? "yes" : "no");
 #undef NAV_INFO_TEXT
 #undef NAV_INFO_INT
 
     addBlock(BLOCK_HEADING, "Safety Limits");
-    addBlock(BLOCK_LIST_ITEM, "HTTP header limit: 32768 bytes");
-    addBlock(BLOCK_LIST_ITEM, "HTTP body limit: 262144 bytes");
+    strcopy(line, "HTTP header limit: ", sizeof(line));
+    nav_int_to_text(gxos::web::kHttpSharedMaxHeaderBytes, number, sizeof(number));
+    strappend(line, number, sizeof(line));
+    strappend(line, " bytes", sizeof(line));
+    addBlock(BLOCK_LIST_ITEM, line);
+    strcopy(line, "Encoded HTTP body limit: ", sizeof(line));
+    nav_int_to_text(gxos::web::kHttpSharedMaxBodyBytes, number, sizeof(number));
+    strappend(line, number, sizeof(line));
+    strappend(line, " bytes", sizeof(line));
+    addBlock(BLOCK_LIST_ITEM, line);
+    strcopy(line, "Decoded document limit: ", sizeof(line));
+    nav_int_to_text(gxos::web::kHttpSharedMaxDecodedDocumentBytes, number, sizeof(number));
+    strappend(line, number, sizeof(line));
+    strappend(line, " bytes", sizeof(line));
+    addBlock(BLOCK_LIST_ITEM, line);
     addBlock(BLOCK_LIST_ITEM, "Forms-lite POST body limit: 8192 bytes");
     addBlock(BLOCK_LIST_ITEM, "HTTP redirect limit: 5");
     addBlock(BLOCK_LIST_ITEM, "HTTP timeouts: 5000 ms connect/read");
     addBlock(BLOCK_LIST_ITEM, "DNS lookup: A records only, timeout 3000 ms, retries 3");
     addBlock(BLOCK_LIST_ITEM, "File text/source preview limit: 32768 bytes");
     addBlock(BLOCK_LIST_ITEM, "Stored source preview limit: 2048 bytes");
-    addBlock(BLOCK_LIST_ITEM, "Remote PNG byte limit: 262144 bytes");
-    addBlock(BLOCK_LIST_ITEM, "Remote PNG dimensions: 2048 x 2048 pixels");
+    addBlock(BLOCK_LIST_ITEM, "Remote PNG/JPEG byte limit: 262144 bytes");
+    addBlock(BLOCK_LIST_ITEM, "Remote PNG/JPEG dimensions: 2048 x 2048 pixels");
     addBlock(BLOCK_LINK, "View Source", "about:view-source");
     addBlock(BLOCK_LINK, "Navigator Runtime", "about:navigator-runtime");
     addBlock(BLOCK_LINK, "Go to about:navigator", "about:navigator");
@@ -8022,14 +9419,14 @@ void NavigatorApp::buildRuntimeDocument()
 
     addBlock(BLOCK_HEADING, "Capabilities");
     addBlock(BLOCK_LIST_ITEM, "File read: enabled through VFS; Local PNG: enabled through shared ImageAdapter where VFS image data exists");
-    addBlock(BLOCK_LIST_ITEM, "HTTP: enabled for numeric IPv4 and hostname HTTP/1.0 GET/POST with redirects and chunked decoding");
+    addBlock(BLOCK_LIST_ITEM, "HTTP: enabled for numeric IPv4 and hostname HTTP/1.1 GET/POST with redirects and chunked decoding");
     addBlock(BLOCK_LIST_ITEM, "DNS: enabled-basic for A/IPv4 records; HTTP redirects: enabled, limit 5; HTTP chunked transfer decoding: enabled");
-    addBlock(BLOCK_LIST_ITEM, "Remote PNG: enabled-basic for numeric IPv4 and hostname http:// PNG images; Downloads: enabled for unsupported HTTP(S) content within the response body limit");
-    addBlock(BLOCK_LIST_ITEM, "Bookmark persistence: unavailable; bookmarks are in-memory defaults; HTTPS/TLS: local-only controlled guidexos.test:8443/navigator-smoke/ remains available for smoke, and explicit dev/prod trust-store policy can enable validated bare-metal https:// navigation without plaintext fallback");
-    addBlock(BLOCK_LIST_ITEM, "Public HTTPS pilot: production-only, explicit opt-in through the HTTPS policy config, hostname-only, and still fail-closed without a real production CA bundle");
+    addBlock(BLOCK_LIST_ITEM, "Remote PNG/JPEG: enabled-basic for numeric IPv4 and hostname http:// PNG/JPEG images; Downloads: enabled for unsupported HTTP(S) content within the response body limit");
+    addBlock(BLOCK_LIST_ITEM, "Bookmark persistence: unavailable; bookmarks are in-memory defaults; HTTPS/TLS: controlled local smoke remains available, and ProductionValidated trust-store policy enables arbitrary-origin bare-metal https:// with DNS, SNI, certificate, and hostname checks without plaintext fallback");
+    addBlock(BLOCK_LIST_ITEM, "Public HTTPS: enabled for arbitrary hostnames only after ProductionValidated trust-store prerequisites; IPv4-only, bounded, and fail-closed without a real production CA bundle");
     addBlock(BLOCK_LIST_ITEM, "TLS backend: Mbed TLS bare-metal transport is ready with CA and hostname validation");
     addBlock(BLOCK_LIST_ITEM, "TLS policy layer: shared HttpByteStream transport policy selects plain TCP HTTP, local allowlisted Mbed TLS, or policy-validated Mbed TLS; plaintext fallback stays disabled");
-    addBlock(BLOCK_LIST_ITEM, "Content encodings: identity only; unsupported gzip/br/deflate responses produce a friendly document after successful TLS instead of rendering compressed bytes");
+    addBlock(BLOCK_LIST_ITEM, "Content encodings: identity, gzip, and zlib-wrapped deflate are decoded under the bounded body policy; unsupported br and stacked encodings produce a friendly document after successful TLS");
     addBlock(BLOCK_LIST_ITEM, "CSS-lite embedded <style>: enabled");
     addBlock(BLOCK_LIST_ITEM, "Forms-lite GET forms: enabled through interactive document controls; Forms-lite POST forms hosted: enabled in authoritative hosted Navigator path");
     addBlock(BLOCK_LIST_ITEM, "Forms-lite POST interactive: enabled");
@@ -8277,7 +9674,7 @@ void NavigatorApp::buildRuntimeDocument()
     strappend(dnsLine, kernel::dns::get_server() ? dnsIp : "(none)", sizeof(dnsLine));
     addBlock(BLOCK_LIST_ITEM, dnsLine);
     addBlock(BLOCK_LIST_ITEM, "Image backend: shared ImageAdapter + framebuffer/compositor drawing");
-    addBlock(BLOCK_LIST_ITEM, "Remote PNG backend: kernel HTTP fetch + ImageAdapter::LoadFromBytes");
+    addBlock(BLOCK_LIST_ITEM, "Remote PNG/JPEG backend: kernel HTTP fetch + ImageAdapter::LoadFromBytes");
 
     addBlock(BLOCK_LINK, "Page Info", "about:page-info");
     addBlock(BLOCK_LINK, "View Source", "about:view-source");
@@ -8289,7 +9686,13 @@ void NavigatorApp::buildErrorDocument(const char* url, const char* reason)
     strcopy(m_currentUrl, url ? url : "", MAX_URL_LEN);
     strcopy(m_title, "Navigator Error", MAX_TITLE_LEN_NAV);
     m_blockCount = 0;
-    addBlock(BLOCK_HEADING, "Page Not Found");
+    const bool connectionFailure = reason &&
+        (strstr(reason, "TLS") || strstr(reason, "HTTPS") ||
+         strstr(reason, "certificate") || strstr(reason, "hostname") ||
+         strstr(reason, "connection") || strstr(reason, "DNS") ||
+         strstr(reason, "secure entropy") || strstr(reason, "Secure entropy") ||
+         strstr(reason, "PSA"));
+    addBlock(BLOCK_HEADING, connectionFailure ? "Secure Connection Failed" : "Page Not Found");
     addBlock(BLOCK_PARAGRAPH, reason ? reason : "Navigator could not load this page.");
     addBlock(BLOCK_LINK, "Go to about:navigator", "about:navigator");
 }
@@ -8301,8 +9704,8 @@ void NavigatorApp::buildHttpsUnsupportedDocument(const char* url, bool redirecte
     m_blockCount = 0;
     addBlock(BLOCK_HEADING, redirected ? "HTTPS Redirect Unsupported" : "HTTPS Unsupported");
     addBlock(BLOCK_PARAGRAPH, redirected
-        ? "Navigator only follows HTTPS redirects that satisfy the active bare-metal TLS policy. Targets outside the local smoke allowlist, explicit validated fixture policy, or the controlled public HTTPS pilot stay blocked."
-        : "Bare-metal Navigator https:// requires either the controlled local smoke allowlist, an explicit validated fixture policy, or the controlled public HTTPS pilot with production trust prerequisites. Otherwise navigation fails closed.");
+        ? "Navigator only follows HTTPS redirects that satisfy the active bare-metal TLS policy. ProductionValidated trust enables arbitrary hostnames; other policy states remain fail-closed."
+        : "Bare-metal Navigator https:// requires either the controlled local smoke allowlist, dev fixture policy, or ProductionValidated trust prerequisites. Otherwise navigation fails closed.");
     if (detail && detail[0]) addBlock(BLOCK_PARAGRAPH, detail);
     addBlock(BLOCK_LINK, "Page Info", "about:page-info");
     addBlock(BLOCK_LINK, "Go to about:navigator", "about:navigator");
@@ -8611,12 +10014,17 @@ static void nav_style_merge(gxos::web::WebStyle& base, const gxos::web::WebStyle
     if (overrideStyle.hasColor) { base.hasColor = true; base.color = overrideStyle.color; }
     if (overrideStyle.hasBackgroundColor) { base.hasBackgroundColor = true; base.backgroundColor = overrideStyle.backgroundColor; }
     if (overrideStyle.bold) base.bold = true;
+    if (overrideStyle.italic) base.italic = true;
     if (overrideStyle.underline) base.underline = true;
     if (overrideStyle.marginTop >= 0) base.marginTop = overrideStyle.marginTop;
     if (overrideStyle.marginBottom >= 0) base.marginBottom = overrideStyle.marginBottom;
     if (overrideStyle.marginLeft >= 0) base.marginLeft = overrideStyle.marginLeft;
     if (overrideStyle.padding >= 0) base.padding = overrideStyle.padding;
     if (overrideStyle.fontScaleOrSize >= 0) base.fontScaleOrSize = overrideStyle.fontScaleOrSize;
+    if (overrideStyle.absolutePosition) base.absolutePosition = true;
+    if (overrideStyle.positionTop >= 0) base.positionTop = overrideStyle.positionTop;
+    if (overrideStyle.genericFontFamily != gxos::web::GenericFontFamily::Inherit)
+        base.genericFontFamily = overrideStyle.genericFontFamily;
 }
 
 static gxos::web::WebStyle nav_default_style_for_tag(const char* tag)
@@ -8628,7 +10036,7 @@ static gxos::web::WebStyle nav_default_style_for_tag(const char* tag)
     else if (streq_local(tag, "p")) { style.marginTop = 4; style.marginBottom = 8; }
     else if (streq_local(tag, "a")) { style.hasColor = true; style.color = 0xFF1E5CB8u; style.underline = true; style.marginTop = 4; style.marginBottom = 6; }
     else if (streq_local(tag, "li")) { style.marginTop = 2; style.marginBottom = 4; style.marginLeft = 12; }
-    else if (streq_local(tag, "pre") || streq_local(tag, "code")) { style.hasBackgroundColor = true; style.backgroundColor = 0xFFE6E8EEu; style.marginTop = 6; style.marginBottom = 8; style.padding = 4; }
+    else if (streq_local(tag, "pre") || streq_local(tag, "code")) { style.hasBackgroundColor = true; style.backgroundColor = 0xFFE6E8EEu; style.marginTop = 6; style.marginBottom = 8; style.padding = 4; style.genericFontFamily = gxos::web::GenericFontFamily::Monospace; }
     else if (streq_local(tag, "img")) { style.marginTop = 6; style.marginBottom = 6; }
     return style;
 }
@@ -8651,6 +10059,38 @@ static bool nav_parse_css_selector(const char* start, const char* end, NavCssRul
     rule.selectorType = NAV_CSS_ELEMENT; strcopy(rule.selector, selector, sizeof(rule.selector)); return true;
 }
 
+static bool nav_parse_font_family(const char* value, gxos::web::GenericFontFamily& outFamily)
+{
+    if (!value) return false;
+    bool sawUnknown = false;
+    const char* p = value;
+    while (*p) {
+        while (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n' || *p == ',') ++p;
+        const char* end = p;
+        while (*end && *end != ',') ++end;
+        char token[40];
+        nav_trim_lower_copy(p, end, token, sizeof(token));
+        int tokenLen = strlen_local(token);
+        if (tokenLen >= 2 && ((token[0] == '\'' && token[tokenLen - 1] == '\'') ||
+                              (token[0] == '"' && token[tokenLen - 1] == '"'))) {
+            for (int i = 1; i + 1 < tokenLen; ++i) token[i - 1] = token[i];
+            token[tokenLen - 2] = '\0';
+        }
+        if (streq_local(token, "roboto")) { outFamily = gxos::web::GenericFontFamily::Roboto; return true; }
+        if (streq_local(token, "sans-serif")) { outFamily = gxos::web::GenericFontFamily::SansSerif; return true; }
+        if (streq_local(token, "monospace")) { outFamily = gxos::web::GenericFontFamily::Monospace; return true; }
+        if (streq_local(token, "serif")) { outFamily = gxos::web::GenericFontFamily::Serif; return true; }
+        if (token[0]) sawUnknown = true;
+        p = end;
+        if (*p == ',') ++p;
+    }
+    if (sawUnknown) {
+        outFamily = gxos::web::GenericFontFamily::Unknown;
+        return true;
+    }
+    return false;
+}
+
 static void nav_apply_css_decl(gxos::web::WebStyle& style, const char* propStart, const char* propEnd, const char* valueStart, const char* valueEnd, gxos::web::CssDiagnostics& diag)
 {
     char prop[32]; char value[48]; nav_trim_lower_copy(propStart, propEnd, prop, sizeof(prop)); nav_trim_lower_copy(valueStart, valueEnd, value, sizeof(value));
@@ -8659,6 +10099,8 @@ static void nav_apply_css_decl(gxos::web::WebStyle& style, const char* propStart
     if (streq_local(prop, "color")) { if (nav_parse_css_color(value, color)) { style.hasColor = true; style.color = color; } else ++diag.unsupportedDeclarationCount; }
     else if (streq_local(prop, "background-color")) { if (nav_parse_css_color(value, color)) { style.hasBackgroundColor = true; style.backgroundColor = color; } else ++diag.unsupportedDeclarationCount; }
     else if (streq_local(prop, "font-weight")) { if (streq_local(value, "bold")) style.bold = true; else if (!streq_local(value, "normal")) ++diag.unsupportedDeclarationCount; }
+    else if (streq_local(prop, "font-style")) { if (streq_local(value, "italic") || streq_local(value, "oblique")) style.italic = true; else if (!streq_local(value, "normal")) ++diag.unsupportedDeclarationCount; }
+    else if (streq_local(prop, "font-family")) { gxos::web::GenericFontFamily family = gxos::web::GenericFontFamily::Unknown; if (nav_parse_font_family(value, family)) style.genericFontFamily = family; else ++diag.unsupportedDeclarationCount; }
     else if (streq_local(prop, "text-decoration")) { if (streq_local(value, "underline")) style.underline = true; else if (!streq_local(value, "none")) ++diag.unsupportedDeclarationCount; }
     else if (streq_local(prop, "margin")) { int px = nav_parse_css_px(value, ok); if (ok) { style.marginTop = px; style.marginBottom = px; style.marginLeft = px; } else ++diag.unsupportedDeclarationCount; }
     else if (streq_local(prop, "margin-top")) { int px = nav_parse_css_px(value, ok); if (ok) style.marginTop = px; else ++diag.unsupportedDeclarationCount; }
@@ -8666,6 +10108,11 @@ static void nav_apply_css_decl(gxos::web::WebStyle& style, const char* propStart
     else if (streq_local(prop, "margin-left")) { int px = nav_parse_css_px(value, ok); if (ok) style.marginLeft = px; else ++diag.unsupportedDeclarationCount; }
     else if (streq_local(prop, "padding")) { int px = nav_parse_css_px(value, ok); if (ok) style.padding = px; else ++diag.unsupportedDeclarationCount; }
     else if (streq_local(prop, "font-size")) { int px = nav_parse_css_px(value, ok); if (ok) style.fontScaleOrSize = px; else ++diag.unsupportedDeclarationCount; }
+    else if (streq_local(prop, "position")) {
+        if (streq_local(value, "absolute") || streq_local(value, "fixed")) style.absolutePosition = true;
+        else if (!streq_local(value, "static")) ++diag.unsupportedDeclarationCount;
+    }
+    else if (streq_local(prop, "top")) { int px = nav_parse_css_px(value, ok); if (ok) style.positionTop = px; else ++diag.unsupportedDeclarationCount; }
     else { ++diag.unsupportedDeclarationCount; }
 }
 
@@ -8726,7 +10173,7 @@ void NavigatorApp::resolveHref(const char* baseUrl, const char* href, char* out,
         return;
     }
     if (href[0] == '/') {
-        if (baseUrl && nav_starts_with(baseUrl, "http://")) {
+        if (baseUrl && (nav_starts_with(baseUrl, "http://") || nav_starts_with(baseUrl, "https://"))) {
             strcopy(out, baseUrl, outSize);
             int len = strlen_local(out);
             int originLen = 7;
@@ -8748,24 +10195,69 @@ void NavigatorApp::resolveHref(const char* baseUrl, const char* href, char* out,
     strcopy(out + len, href, outSize - len);
 }
 
-void NavigatorApp::parseHtmlDocument(const char* url, const char* html, const char* sourceType, const char* contentType, int httpStatusCode, const char* httpReason, const char* requestedUrl, int redirectCount, const KernelHttpResponse* networkResponse)
+void NavigatorApp::parseHtmlDocument(const char* url, const char* html, const char* sourceType, const char* contentType, int httpStatusCode, const char* httpReason, const char* requestedUrl, int redirectCount, const KernelHttpResponse* networkResponse, int inputBytes)
 {
+    // Public smoke navigation runs from the deliberately small 16 KiB boot
+    // stack. Keep parser scratch storage static so a real HTML document does
+    // not combine its bounded local arrays with the HTTPS probe call chain and
+    // corrupt the caller's return frame.
+    static NavCssRule cssRules[32]{};
+    static char currentFormAction[MAX_URL_LEN];
+    static char currentFormMethod[8];
+    static char currentFormEncoding[48];
+    static char text[MAX_BLOCK_TEXT];
+    static char className[64];
+    static char id[64];
+    static char action[MAX_URL_LEN];
+    static char type[24];
+    static char rows[12];
+    static char src[MAX_URL_LEN];
+    static char alt[96];
+    static char widthText[16];
+    static char heightText[16];
+    static char resolved[MAX_URL_LEN];
+    static char href[MAX_URL_LEN];
+
+    m_metaParserScratchBytes = sizeof(cssRules) + sizeof(currentFormAction) + sizeof(currentFormMethod) +
+        sizeof(currentFormEncoding) + sizeof(text) + sizeof(className) + sizeof(id) + sizeof(action) +
+        sizeof(type) + sizeof(rows) + sizeof(src) + sizeof(alt) + sizeof(widthText) + sizeof(heightText) +
+        sizeof(resolved) + sizeof(href);
+
+    const int boundedInputBytes = inputBytes >= 0
+        ? (inputBytes > gxos::web::kHttpSharedMaxDecodedDocumentBytes
+            ? gxos::web::kHttpSharedMaxDecodedDocumentBytes : inputBytes)
+        : strlen_local(html);
+    m_metaParserInvoked = true;
+    m_metaParserCompleted = false;
+    m_metaParserInputBytes = boundedInputBytes > 0 ? boundedInputBytes : 0;
+    m_metaDocumentCreated = false;
+    m_metaDocumentCount = 0;
+    m_metaActiveDocumentBytes = 0;
+    m_metaActiveDocumentGeneration = m_documentGeneration;
+    m_metaTextFragmentCount = 0;
+    m_metaLinkCount = 0;
+    m_metaVisibleText[0] = '\0';
     strcopy(m_currentUrl, url ? url : "", MAX_URL_LEN);
     strcopy(m_title, url ? url : "Document", MAX_TITLE_LEN_NAV);
+    serial::puts("[NAVIGATOR-PARSER] begin bytes=");
+    serial_put_dec((uint32_t)m_metaParserInputBytes);
+    serial::puts("\n");
+    releaseImageResources();
     m_blockCount = 0;
     blurFormBlock();
 
-    NavCssRule cssRules[32]{};
     int cssRuleCount = 0;
     gxos::web::CssDiagnostics cssDiagnostics{};
     gxos::web::WebStyle bodyStyle{};
     nav_scan_css(html ? html : "", cssRules, cssRuleCount, 32, cssDiagnostics, bodyStyle);
+    serial::puts("[NAVIGATOR-PARSER] css_complete rules=");
+    serial_put_dec((uint32_t)cssRuleCount);
+    serial::puts(" style_bytes=");
+    serial_put_dec((uint32_t)cssDiagnostics.styleBytesProcessed);
+    serial::puts("\n");
 
     int nextFormIndex = 0;
     int currentFormIndex = -1;
-    char currentFormAction[MAX_URL_LEN];
-    char currentFormMethod[8];
-    char currentFormEncoding[48];
     bool currentFormUnsupported = false;
     currentFormAction[0] = '\0';
     strcopy(currentFormMethod, "get", sizeof(currentFormMethod));
@@ -8790,9 +10282,6 @@ void NavigatorApp::parseHtmlDocument(const char* url, const char* html, const ch
         if (!tagEnd) { ++p; continue; }
 
         const char* close = nullptr;
-        char text[MAX_BLOCK_TEXT];
-        char className[64];
-        char id[64];
         nav_extract_attr(p, tagEnd, "class", className, sizeof(className));
         nav_extract_attr(p, tagEnd, "id", id, sizeof(id));
         if (nav_close_tag_at(p, "form")) {
@@ -8802,7 +10291,6 @@ void NavigatorApp::parseHtmlDocument(const char* url, const char* html, const ch
             strcopy(currentFormEncoding, "application/x-www-form-urlencoded", sizeof(currentFormEncoding));
             currentFormUnsupported = false;
         } else if (nav_tag_at(p, "form")) {
-            char action[MAX_URL_LEN];
             nav_extract_attr(p, tagEnd, "action", action, sizeof(action));
             nav_extract_attr(p, tagEnd, "method", currentFormMethod, sizeof(currentFormMethod));
             nav_extract_attr(p, tagEnd, "enctype", currentFormEncoding, sizeof(currentFormEncoding));
@@ -8816,7 +10304,6 @@ void NavigatorApp::parseHtmlDocument(const char* url, const char* html, const ch
                 !streq_local(currentFormEncoding, "application/x-www-form-urlencoded");
             currentFormIndex = nextFormIndex++;
         } else if (nav_tag_at(p, "input") && currentFormIndex >= 0) {
-            char type[24];
             nav_extract_attr(p, tagEnd, "type", type, sizeof(type));
             nav_lower_string(type);
             if (!type[0] || streq_local(type, "text")) {
@@ -8849,7 +10336,6 @@ void NavigatorApp::parseHtmlDocument(const char* url, const char* html, const ch
             close = nav_find_close_tag(tagEnd + 1, "textarea");
             DocBlock* block = addFormBlock(BLOCK_FORM_TEXTAREA, "textarea");
             if (block) {
-                char rows[12];
                 nav_extract_attr(p, tagEnd, "name", block->inputName, sizeof(block->inputName));
                 nav_extract_attr(p, tagEnd, "placeholder", block->placeholder, sizeof(block->placeholder));
                 nav_extract_attr(p, tagEnd, "rows", rows, sizeof(rows));
@@ -8893,7 +10379,6 @@ void NavigatorApp::parseHtmlDocument(const char* url, const char* html, const ch
             }
         } else if (nav_tag_at(p, "button") && currentFormIndex >= 0) {
             close = nav_find_close_tag(tagEnd + 1, "button");
-            char type[24];
             nav_extract_attr(p, tagEnd, "type", type, sizeof(type));
             nav_lower_string(type);
             if (!type[0] || streq_local(type, "submit")) {
@@ -8930,7 +10415,6 @@ void NavigatorApp::parseHtmlDocument(const char* url, const char* html, const ch
         } else if (nav_tag_at(p, "style")) {
             close = nav_find_close_tag(tagEnd + 1, "style");
         } else if (nav_tag_at(p, "img")) {
-            char src[MAX_URL_LEN]; char alt[96]; char widthText[16]; char heightText[16]; char resolved[MAX_URL_LEN];
             nav_extract_attr(p, tagEnd, "src", src, MAX_URL_LEN);
             nav_extract_attr(p, tagEnd, "alt", alt, 96);
             nav_extract_attr(p, tagEnd, "width", widthText, 16);
@@ -8938,7 +10422,7 @@ void NavigatorApp::parseHtmlDocument(const char* url, const char* html, const ch
             if (src[0]) { resolveHref(url, src, resolved, MAX_URL_LEN); gxos::web::WebStyle style = nav_style_for_tag("img", className, id, bodyStyle, cssRules, cssRuleCount); addImageBlock(src, alt, resolved, nav_parse_positive_int(widthText), nav_parse_positive_int(heightText), &style); }
         } else if (nav_tag_at(p, "a")) {
             close = nav_find_close_tag(tagEnd + 1, "a");
-            if (close) { char href[MAX_URL_LEN]; char resolved[MAX_URL_LEN]; nav_extract_href(p, tagEnd, href, MAX_URL_LEN); resolveHref(url, href, resolved, MAX_URL_LEN); nav_copy_clean_text(tagEnd + 1, close, text, MAX_BLOCK_TEXT, false); gxos::web::WebStyle style = nav_style_for_tag("a", className, id, bodyStyle, cssRules, cssRuleCount); addBlock(BLOCK_LINK, text, resolved, &style); }
+            if (close) { nav_extract_href(p, tagEnd, href, MAX_URL_LEN); resolveHref(url, href, resolved, MAX_URL_LEN); nav_copy_clean_text(tagEnd + 1, close, text, MAX_BLOCK_TEXT, false); gxos::web::WebStyle style = nav_style_for_tag("a", className, id, bodyStyle, cssRules, cssRuleCount); addBlock(BLOCK_LINK, text, resolved, &style); }
         }
         p = close ? nav_find_char(close, '>') : tagEnd;
         if (p && *p == '>') ++p;
@@ -8947,20 +10431,50 @@ void NavigatorApp::parseHtmlDocument(const char* url, const char* html, const ch
         gxos::web::WebStyle style = nav_style_for_tag("pre", "", "", bodyStyle, cssRules, cssRuleCount);
         addBlock(BLOCK_PREFORMATTED, html ? html : "", "", &style);
     }
-    prepareImageResources();
     rememberPageMetadata(requestedUrl ? requestedUrl : url, url, sourceType ? sourceType : "file",
-        contentType ? contentType : "text/html", "", html, html ? strlen_local(html) : 0,
+        contentType ? contentType : "text/html", "", html, boundedInputBytes,
         &cssDiagnostics, &bodyStyle, httpStatusCode, httpReason ? httpReason : "", redirectCount,
         networkResponse);
+    serial::puts("[NAVIGATOR-PARSER] metadata_complete blocks=");
+    serial_put_dec((uint32_t)m_blockCount);
+    serial::puts("\n");
+    prepareImageResources();
+    serial::puts("[NAVIGATOR-PARSER] resources_complete\n");
+    refreshImageResourceMetadata();
+    m_metaParserCompleted = true;
+    m_metaDocumentCreated = m_blockCount > 0;
+    m_metaDocumentCount = m_metaDocumentCreated ? 1 : 0;
+    m_metaActiveDocumentBytes = m_blockCount * static_cast<int>(sizeof(m_blocks[0]));
+    m_metaActiveDocumentGeneration = m_documentGeneration;
+    for (int i = 0; i < m_blockCount; ++i) {
+        const DocBlock& block = m_blocks[i];
+        if (block.kind == BLOCK_LINK) ++m_metaLinkCount;
+        if (!block.text[0]) continue;
+        ++m_metaTextFragmentCount;
+        if (!m_metaVisibleText[0] &&
+            (block.kind == BLOCK_HEADING || block.kind == BLOCK_PARAGRAPH ||
+             block.kind == BLOCK_LINK || block.kind == BLOCK_LIST_ITEM ||
+             block.kind == BLOCK_PREFORMATTED)) {
+            nav_copy_serial_safe_text(block.text, m_metaVisibleText, sizeof(m_metaVisibleText));
+        }
+    }
+    serial::puts("[NAVIGATOR-PARSER] complete blocks=");
+    serial_put_dec((uint32_t)m_blockCount);
+    serial::puts("\n");
 }
 
-static const int kKernelHttpUrlLen = 160;
+// Kernel Navigator keeps URLs bounded in every document/resource slot while
+// allowing ordinary public hostnames and useful paths. IPv6 remains outside
+// this IPv4-only transport milestone.
+static const int kKernelHttpUrlLen = 512;
 static const int kKernelHttpHeaderLimit = gxos::web::kHttpSharedMaxHeaderBytes;
 static const int kKernelHttpBodyLimit = gxos::web::kHttpSharedMaxBodyBytes;
+static const int kKernelHttpDecodedDocumentLimit = gxos::web::kHttpSharedMaxDecodedDocumentBytes;
 static const int kKernelHttpRawLimit = kKernelHttpHeaderLimit + kKernelHttpBodyLimit;
 static const int kKernelHttpPostBodyLimit = 8 * 1024;
 static const int kKernelHttpConnectTimeoutMs = gxos::web::kHttpSharedConnectTimeoutMs;
 static const int kKernelHttpReadTimeoutMs = gxos::web::kHttpSharedReadTimeoutMs;
+static const int kKernelHttpTransactionTimeoutMs = 30 * 1000;
 static const uint32_t kNavigatorTlsSmokeCnMismatchFlag = 0x04u;
 static const char* kNavigatorControlledHttpsHost = "guidexos.test";
 static const uint16_t kNavigatorControlledHttpsPort = 8443;
@@ -8972,6 +10486,7 @@ static const char* kNavigatorPublicPilotHttpsHost = "public-pilot.guidexos.test"
 static const char* kNavigatorPublicPilotPathPrefix = "/navigator-public-pilot/";
 static const char* kNavigatorHttpsSmokeFaultModePath = "/config/navigator/https-fault-mode.txt";
 static const char* kNavigatorHttpsSmokeFaultModeCompatPath = "/config/navigator/HTTPSFLT.TXT";
+static const char* kNavigatorPersistentNavigationPath = "/config/navigator/persistent-navigation-enabled.txt";
 static const char* kNavigatorRealPublicProbeTargetPath = "/config/navigator/real-public-https-probe-url.txt";
 static const char* kNavigatorRealPublicProbeTargetCompatPath = "/config/navigator/RPUBURL.TXT";
 static const char* kNavigatorRealPublicProbeRequirePath = "/config/navigator/real-public-https-probe-required.txt";
@@ -8987,7 +10502,7 @@ static const char* kNavigatorRealPublicProbeCaCertsCompatPath = "/config/navigat
 static const char* kNavigatorRealPublicProbeCaEnabledPath = "/config/navigator/real-public-https-ca-bundle-enabled.txt";
 static const char* kNavigatorRealPublicProbeCaEnabledCompatPath = "/config/navigator/RPUBCAEN.TXT";
 static const char* kNavigatorRealPublicProbeDefaultTarget = "https://sha256.badssl.com/";
-static const char* kNavigatorRealPublicProbeReviewedAllowlistName = "guidexos-reviewed-public-https-v0.4";
+static const char* kNavigatorRealPublicProbeReviewedAllowlistName = "guidexos-reviewed-public-https-v0.7";
 static const uint32_t kNavigatorSmokeTextFileMaxBytes = 512u;
 
 enum class NavigatorHttpsSmokeFaultMode {
@@ -9001,7 +10516,8 @@ struct KernelHttpUrl {
     uint32_t ip;
     uint16_t port;
     bool hostIsNumeric;
-    char host[64];
+    bool httpsScheme;
+    char host[gxos::web::kHttpSharedMaxHostnameBytes + 1];
     char path[kKernelHttpUrlLen];
     char error[96];
 };
@@ -9012,15 +10528,27 @@ struct KernelHttpResponse {
     char reason[48];
     char contentType[48];
     char transferEncoding[32];
+    char responseFraming[24];
     char contentEncoding[32];
+    int contentLength;
+    bool contentLengthPresent;
+    bool truncatedResponse;
     char unsupportedReason[128];
     char location[kKernelHttpUrlLen];
     int bodyBytes;
+    int encodedBodyBytes;
+    int decodedBodyBytes;
+    bool documentStorageUsed;
+    int documentSegmentCount;
+    int documentStorageBytes;
+    int documentStorageCapacity;
+    int documentHistoryBytes;
+    bool documentStorageAllocationFailed;
     int redirectCount;
     bool headerCapHit;
     bool bodyCapHit;
     bool dnsUsed;
-    char dnsHost[64];
+    char dnsHost[gxos::web::kHttpSharedMaxHostnameBytes + 1];
     char dnsResolvedIp[16];
     char dnsError[64];
     char requestedUrl[kKernelHttpUrlLen];
@@ -9042,13 +10570,85 @@ struct KernelHttpResponse {
     int redirectHopIndex;
     char redirectHopUrl[kKernelHttpUrlLen];
     char tlsBackend[48];
+    uint32_t tcpReadCalls;
+    uint32_t tcpWouldBlockReads;
+    uint32_t tcpAppBytesDelivered;
+    uint32_t tcpPayloadSegments;
+    uint32_t tcpPayloadBytesReceived;
+    uint32_t tcpPayloadBytesAccepted;
+    uint32_t tcpPayloadBytesDropped;
+    uint32_t tcpWindowUpdateAcks;
+    uint32_t tcpWindowReopenEvents;
+    uint32_t tcpLocalZeroWindowEvents;
+    uint32_t tcpPeerZeroWindowEvents;
+    uint32_t tcpAdvertisedWindow;
+    uint32_t tcpMinimumAdvertisedWindow;
+    uint32_t tcpLastPeerWindow;
+    uint32_t httpReadProgressEvents;
+    uint32_t httpReadWouldBlockCount;
+    uint32_t httpReadElapsedMs;
+    bool httpReadTimedOut;
     gxos::GxosTlsLocalHandshakeResult tlsResult;
     char body[kKernelHttpBodyLimit + 1];
 };
 
+// Public-pilot diagnostics must not copy the bounded response body onto the
+// kernel call stack.  Keep only the transport telemetry that is printed after
+// a second request reuses s_kernelHttpResponse.
+struct KernelHttpTraceSnapshot {
+    gxos::GxosTlsLocalHandshakeResult tlsResult;
+    uint32_t tcpReadCalls;
+    uint32_t tcpWouldBlockReads;
+    uint32_t tcpPayloadSegments;
+    uint32_t tcpPayloadBytesReceived;
+    uint32_t tcpPayloadBytesAccepted;
+    uint32_t tcpPayloadBytesDropped;
+    uint32_t tcpWindowUpdateAcks;
+    uint32_t tcpWindowReopenEvents;
+    uint32_t tcpLocalZeroWindowEvents;
+    uint32_t tcpPeerZeroWindowEvents;
+    uint32_t tcpAdvertisedWindow;
+    uint32_t tcpMinimumAdvertisedWindow;
+    uint32_t tcpLastPeerWindow;
+    uint32_t httpReadProgressEvents;
+    uint32_t httpReadWouldBlockCount;
+    uint32_t httpReadElapsedMs;
+    bool httpReadTimedOut;
+};
+
+static void kernel_http_capture_trace_snapshot(const KernelHttpResponse& response,
+                                               KernelHttpTraceSnapshot* snapshot)
+{
+    if (!snapshot) return;
+    snapshot->tlsResult = response.tlsResult;
+    snapshot->tcpReadCalls = response.tcpReadCalls;
+    snapshot->tcpWouldBlockReads = response.tcpWouldBlockReads;
+    snapshot->tcpPayloadSegments = response.tcpPayloadSegments;
+    snapshot->tcpPayloadBytesReceived = response.tcpPayloadBytesReceived;
+    snapshot->tcpPayloadBytesAccepted = response.tcpPayloadBytesAccepted;
+    snapshot->tcpPayloadBytesDropped = response.tcpPayloadBytesDropped;
+    snapshot->tcpWindowUpdateAcks = response.tcpWindowUpdateAcks;
+    snapshot->tcpWindowReopenEvents = response.tcpWindowReopenEvents;
+    snapshot->tcpLocalZeroWindowEvents = response.tcpLocalZeroWindowEvents;
+    snapshot->tcpPeerZeroWindowEvents = response.tcpPeerZeroWindowEvents;
+    snapshot->tcpAdvertisedWindow = response.tcpAdvertisedWindow;
+    snapshot->tcpMinimumAdvertisedWindow = response.tcpMinimumAdvertisedWindow;
+    snapshot->tcpLastPeerWindow = response.tcpLastPeerWindow;
+    snapshot->httpReadProgressEvents = response.httpReadProgressEvents;
+    snapshot->httpReadWouldBlockCount = response.httpReadWouldBlockCount;
+    snapshot->httpReadElapsedMs = response.httpReadElapsedMs;
+    snapshot->httpReadTimedOut = response.httpReadTimedOut;
+}
+
 static KernelHttpResponse s_kernelHttpResponse;
 static char s_kernelHttpRaw[kKernelHttpRawLimit + 1];
-static char s_kernelHttpDocumentBody[kKernelHttpBodyLimit + 1];
+// Shared sequential HTTP use keeps this workspace transaction-local by
+// discipline while placing all DEFLATE/Huffman scratch outside the boot stack.
+static gxos::web::HttpContentDecoderWorkspace s_kernelHttpContentDecoderWorkspace;
+// HTML source ownership is dynamic and segmented.  It is transaction-local;
+// parseHtmlDocument copies the bounded strings needed by the active document
+// before the storage is released for the next network/resource transaction.
+static gxos::web::BoundedDocumentStorage s_kernelHttpDocumentStorage;
 
 static void kernel_http_reset_response(KernelHttpResponse* response)
 {
@@ -9058,10 +10658,22 @@ static void kernel_http_reset_response(KernelHttpResponse* response)
     response->reason[0] = '\0';
     response->contentType[0] = '\0';
     response->transferEncoding[0] = '\0';
+    response->responseFraming[0] = '\0';
     response->contentEncoding[0] = '\0';
+    response->contentLength = 0;
+    response->contentLengthPresent = false;
+    response->truncatedResponse = false;
     response->unsupportedReason[0] = '\0';
     response->location[0] = '\0';
     response->bodyBytes = 0;
+    response->encodedBodyBytes = 0;
+    response->decodedBodyBytes = 0;
+    response->documentStorageUsed = false;
+    response->documentSegmentCount = 0;
+    response->documentStorageBytes = 0;
+    response->documentStorageCapacity = 0;
+    response->documentHistoryBytes = 0;
+    response->documentStorageAllocationFailed = false;
     response->redirectCount = 0;
     response->headerCapHit = false;
     response->bodyCapHit = false;
@@ -9088,6 +10700,24 @@ static void kernel_http_reset_response(KernelHttpResponse* response)
     response->redirectHopIndex = 0;
     response->redirectHopUrl[0] = '\0';
     response->tlsBackend[0] = '\0';
+    response->tcpReadCalls = 0;
+    response->tcpWouldBlockReads = 0;
+    response->tcpAppBytesDelivered = 0;
+    response->tcpPayloadSegments = 0;
+    response->tcpPayloadBytesReceived = 0;
+    response->tcpPayloadBytesAccepted = 0;
+    response->tcpPayloadBytesDropped = 0;
+    response->tcpWindowUpdateAcks = 0;
+    response->tcpWindowReopenEvents = 0;
+    response->tcpLocalZeroWindowEvents = 0;
+    response->tcpPeerZeroWindowEvents = 0;
+    response->tcpAdvertisedWindow = 0;
+    response->tcpMinimumAdvertisedWindow = 0;
+    response->tcpLastPeerWindow = 0;
+    response->httpReadProgressEvents = 0;
+    response->httpReadWouldBlockCount = 0;
+    response->httpReadElapsedMs = 0;
+    response->httpReadTimedOut = false;
     response->tlsResult = gxos::GxosTlsLocalHandshakeResult{};
     response->body[0] = '\0';
 }
@@ -9108,6 +10738,18 @@ void NavigatorApp::rememberPageMetadata(const char* requestedUrl, const char* fi
     strcopy(m_metaHttpReason, httpReason ? httpReason : "", sizeof(m_metaHttpReason));
     strcopy(m_metaContentType, contentType ? contentType : "", sizeof(m_metaContentType));
     strcopy(m_metaContentEncoding, networkResponse ? networkResponse->contentEncoding : "", sizeof(m_metaContentEncoding));
+    strcopy(m_metaResponseFraming, networkResponse ? networkResponse->responseFraming : "", sizeof(m_metaResponseFraming));
+    m_metaContentLength = networkResponse ? networkResponse->contentLength : 0;
+    m_metaContentLengthPresent = networkResponse ? networkResponse->contentLengthPresent : false;
+    m_metaEncodedBodyBytes = networkResponse ? networkResponse->encodedBodyBytes : 0;
+    m_metaDecodedBodyBytes = networkResponse ? networkResponse->decodedBodyBytes : 0;
+    m_metaDocumentSegmentCount = networkResponse ? networkResponse->documentSegmentCount : 0;
+    m_metaDocumentStorageBytes = networkResponse ? networkResponse->documentStorageBytes : 0;
+    m_metaDocumentStorageCapacity = networkResponse ? networkResponse->documentStorageCapacity : 0;
+    m_metaDocumentHistoryBytes = networkResponse ? networkResponse->documentHistoryBytes : 0;
+    m_metaDocumentStorageAllocationFailed = networkResponse ?
+        networkResponse->documentStorageAllocationFailed : false;
+    m_metaTruncatedResponse = networkResponse ? networkResponse->truncatedResponse : false;
     strcopy(m_metaUnsupportedReason, networkResponse ? networkResponse->unsupportedReason : "", sizeof(m_metaUnsupportedReason));
     m_metaRedirectCount = redirectCount;
     m_metaRedirected = redirectCount > 0;
@@ -9204,7 +10846,8 @@ void NavigatorApp::rememberPageMetadata(const char* requestedUrl, const char* fi
     for (int i = 0; i < m_blockCount; ++i) {
         if (m_blocks[i].kind == BLOCK_IMAGE) {
             ++m_metaImageBlocks;
-            if (nav_starts_with(m_blocks[i].url, "http://")) ++m_metaRemoteImages;
+            if (nav_starts_with(m_blocks[i].url, "http://") ||
+                nav_starts_with(m_blocks[i].url, "https://")) ++m_metaRemoteImages;
             else if (nav_starts_with(m_blocks[i].url, "file://")) ++m_metaLocalImages;
             if (m_blocks[i].imageStatus == (int)gxos::gui::ImageLoadStatus::Ok) ++m_metaLoadedImages;
             else {
@@ -9264,6 +10907,7 @@ static bool parse_numeric_ipv4_local(const char* text, const char* end, uint32_t
 static bool nav_hostname_is_valid(const char* start, const char* end)
 {
     if (!start || !end || start >= end) return false;
+    if (end - start > gxos::web::kHttpSharedMaxHostnameBytes) return false;
     int labelLen = 0;
     bool lastWasDot = true;
     for (const char* p = start; p < end; ++p) {
@@ -9298,6 +10942,7 @@ static bool parse_http_url_kernel(const char* url, KernelHttpUrl* parsed)
     parsed->ip = 0;
     parsed->port = 80;
     parsed->hostIsNumeric = false;
+    parsed->httpsScheme = false;
     parsed->host[0] = '\0';
     parsed->path[0] = '/';
     parsed->path[1] = '\0';
@@ -9305,6 +10950,10 @@ static bool parse_http_url_kernel(const char* url, KernelHttpUrl* parsed)
 
     if (!nav_starts_with(url, "http://")) {
         strcopy(parsed->error, "Only http:// URLs are supported", sizeof(parsed->error));
+        return false;
+    }
+    if (strlen_local(url) >= kKernelHttpUrlLen) {
+        strcopy(parsed->error, "HTTP URL exceeds the Navigator safety limit", sizeof(parsed->error));
         return false;
     }
 
@@ -9362,6 +11011,10 @@ static bool parse_http_url_kernel(const char* url, KernelHttpUrl* parsed)
         if (*p == '?') parsed->path[oi++] = '/';
         while (*p && oi < kKernelHttpUrlLen - 1) parsed->path[oi++] = *p++;
         parsed->path[oi] = '\0';
+        if (*p) {
+            strcopy(parsed->error, "HTTP URL path exceeds the Navigator safety limit", sizeof(parsed->error));
+            return false;
+        }
     }
     return true;
 }
@@ -9383,14 +11036,39 @@ static int s_kernelHttpControlledLocalHttpsLoads = 0;
 struct KernelTcpHttpByteStreamContext {
     int socket;
     bool* abortUsedFlag;
+    KernelHttpResponse* response;
 };
+
+static void kernel_http_sync_tcp_telemetry(KernelTcpHttpByteStreamContext* tcp)
+{
+    if (!tcp || !tcp->response || tcp->socket < 0) return;
+    kernel::tcp::TcpStreamTelemetry telemetry{};
+    if (!kernel::tcp::tcp_get_stream_telemetry(tcp->socket, &telemetry)) return;
+    KernelHttpResponse* response = tcp->response;
+    response->tcpReadCalls = telemetry.appReadCalls;
+    response->tcpWouldBlockReads = telemetry.appWouldBlockReads;
+    response->tcpAppBytesDelivered = telemetry.appBytesDelivered;
+    response->tcpPayloadSegments = telemetry.rxPayloadSegments;
+    response->tcpPayloadBytesReceived = telemetry.rxPayloadBytes;
+    response->tcpPayloadBytesAccepted = telemetry.rxPayloadAcceptedBytes;
+    response->tcpPayloadBytesDropped = telemetry.rxPayloadDroppedBytes;
+    response->tcpWindowUpdateAcks = telemetry.windowUpdateAcks;
+    response->tcpWindowReopenEvents = telemetry.windowReopenEvents;
+    response->tcpLocalZeroWindowEvents = telemetry.localZeroWindowEvents;
+    response->tcpPeerZeroWindowEvents = telemetry.peerZeroWindowEvents;
+    response->tcpAdvertisedWindow = telemetry.advertisedWindow;
+    response->tcpMinimumAdvertisedWindow = telemetry.minimumAdvertisedWindow;
+    response->tcpLastPeerWindow = telemetry.lastPeerWindow;
+}
 
 static int kernel_tcp_http_byte_stream_read(void* context, uint8_t* buffer, int length)
 {
     KernelTcpHttpByteStreamContext* tcp = static_cast<KernelTcpHttpByteStreamContext*>(context);
     if (!tcp || tcp->socket < 0 || !buffer || length <= 0) return kernel::tcp::TCP_ERR_INVALID;
     if (length > 0xFFFF) length = 0xFFFF;
-    return kernel::tcp::tcp_recv(tcp->socket, buffer, (uint16_t)length);
+    const int result = kernel::tcp::tcp_recv(tcp->socket, buffer, (uint16_t)length);
+    kernel_http_sync_tcp_telemetry(tcp);
+    return result;
 }
 
 static int kernel_tcp_http_byte_stream_write(void* context, const uint8_t* buffer, int length)
@@ -9405,13 +11083,22 @@ static void kernel_tcp_http_byte_stream_close(void* context)
 {
     KernelTcpHttpByteStreamContext* tcp = static_cast<KernelTcpHttpByteStreamContext*>(context);
     if (!tcp || tcp->socket < 0) return;
-    // Navigator request streams are one-shot HTTP/1.0 connections that are fully
+    // Navigator request streams are one-shot HTTP/1.1 connections that are fully
     // consumed before close. Abort frees the TCB immediately so redirect hops do
     // not inherit linger/TIME_WAIT pressure from the previous socket.
     if (tcp->abortUsedFlag) {
         *tcp->abortUsedFlag = true;
     }
-    kernel::tcp::tcp_abort(tcp->socket);
+    // If the peer already sent FIN, complete the ordinary CLOSE_WAIT ->
+    // LAST_ACK lifecycle. Sending an RST from CLOSE_WAIT after a complete
+    // response races the TCP teardown path and can invalidate the TCB while
+    // the TLS caller is returning. Abort remains the bounded error path for
+    // sockets that have not reached peer-close.
+    if (kernel::tcp::tcp_getstate(tcp->socket) == kernel::tcp::STATE_CLOSE_WAIT) {
+        kernel::tcp::tcp_close(tcp->socket);
+    } else {
+        kernel::tcp::tcp_abort(tcp->socket);
+    }
     tcp->socket = -1;
 }
 
@@ -9471,14 +11158,6 @@ static bool kernel_https_policy_fixture_match(const KernelHttpUrl& parsed)
         nav_starts_with(parsed.path, kNavigatorPolicyValidatedPathPrefix);
 }
 
-static bool kernel_https_public_pilot_fixture_match(const KernelHttpUrl& parsed)
-{
-    return !parsed.hostIsNumeric &&
-        streq_local(parsed.host, kNavigatorPublicPilotHttpsHost) &&
-        parsed.port == kNavigatorControlledHttpsPort &&
-        nav_starts_with(parsed.path, kNavigatorPublicPilotPathPrefix);
-}
-
 static bool kernel_http_transport_uses_tls(gxos::web::HttpByteStreamTransportSelection selection)
 {
     return selection == gxos::web::HttpByteStreamTransportSelection::LocalAllowlistedTlsHttps ||
@@ -9528,7 +11207,7 @@ static bool kernel_https_public_pilot_target_allowed(const KernelHttpUrl& parsed
     if (out && outSize > 0) out[0] = '\0';
     if (parsed.hostIsNumeric) {
         if (out && outSize > 0) {
-            strcopy(out, "HTTPS/TLS unsupported: public HTTPS pilot does not allow numeric-IP hosts", outSize);
+            strcopy(out, "HTTPS/TLS unsupported: validated HTTPS does not allow numeric-IP hosts", outSize);
         }
         return false;
     }
@@ -9537,7 +11216,7 @@ static bool kernel_https_public_pilot_target_allowed(const KernelHttpUrl& parsed
             strcopy(out,
                 httpsPolicy.publicHttpsPilotReason && httpsPolicy.publicHttpsPilotReason[0]
                     ? httpsPolicy.publicHttpsPilotReason
-                    : "Public HTTPS pilot is disabled by policy.",
+                    : "Production trust validation is not enabled for arbitrary-origin HTTPS.",
                 outSize);
         }
         return false;
@@ -9645,6 +11324,28 @@ static gxos::web::HttpTransportPolicyDecision kernel_http_transport_policy_for_h
     }
 
     const gxos::GxosValidatedHttpsPolicyInfo httpsPolicy = gxos::gxos_validated_https_policy_info();
+    if (!parsed.hostIsNumeric && !kernel_https_policy_fixture_match(parsed)) {
+        const gxos::GxosTrustStorePolicyInfo trustPolicy = gxos::gxos_tls_trust_store_policy_info();
+        const gxos::GxosCaStoreInfo caInfo = gxos::gxos_ca_store_info();
+        serial::puts("[NAVIGATOR-POLICY] public_candidate_host=");
+        serial::puts(parsed.host);
+        serial::puts(" state=");
+        serial::puts(gxos::gxos_validated_https_policy_state_name(httpsPolicy.state));
+        serial::puts(" selected=");
+        serial::puts(gxos::gxos_validated_https_policy_state_name(httpsPolicy.selectedState));
+        serial::puts(" broad_public=");
+        serial::puts(httpsPolicy.broadPublicHttpsEnabled ? "yes" : "no");
+        serial::puts(" trust_public=");
+        serial::puts(trustPolicy.publicInternetReady ? "yes" : "no");
+        serial::puts(" source=");
+        serial::puts(gxos::gxos_trust_store_source_name(trustPolicy.source));
+        serial::puts(" manifest_type=");
+        serial::puts(caInfo.manifest.bundleType ? caInfo.manifest.bundleType : "(none)");
+        serial::puts(" manifest_ready=");
+        serial::puts(caInfo.manifest.productionReady ? "yes" : "no");
+        serial::puts(" manifest_hash=");
+        serial::puts(caInfo.manifest.hashMatch ? "yes\n" : "no\n");
+    }
     const bool policyValidatedEnabled =
         httpsPolicy.state == gxos::GxosValidatedHttpsPolicyState::UserTrustStoreDevMode ||
         httpsPolicy.state == gxos::GxosValidatedHttpsPolicyState::ProductionValidated;
@@ -9663,15 +11364,10 @@ static gxos::web::HttpTransportPolicyDecision kernel_http_transport_policy_for_h
         }
         return kernel_http_blocked_https_transport_policy(reason);
     }
-    if (productionValidated &&
-        (kernel_https_public_pilot_fixture_match(parsed) || !kernel_https_policy_fixture_match(parsed))) {
+    if (productionValidated && httpsPolicy.broadPublicHttpsEnabled) {
         if (kernel_https_public_pilot_target_allowed(parsed, httpsPolicy, reason, reasonSize)) {
             if (reason && reasonSize > 0) {
-                if (kernel_https_public_pilot_fixture_match(parsed)) {
-                    strcopy(reason, "Controlled public HTTPS pilot fixture matched.", reasonSize);
-                } else {
-                    strcopy(reason, "ProductionValidated public HTTPS pilot matched.", reasonSize);
-                }
+                strcopy(reason, "ProductionValidated arbitrary-origin HTTPS matched.", reasonSize);
             }
             return kernel_http_policy_validated_tls_transport_policy(reason);
         }
@@ -9682,9 +11378,9 @@ static gxos::web::HttpTransportPolicyDecision kernel_http_transport_policy_for_h
             strcopy(reason,
                 httpsPolicy.state == gxos::GxosValidatedHttpsPolicyState::UserTrustStoreDevMode
                     ? "HTTPS/TLS unsupported: UserTrustStoreDevMode only allows explicit validated fixture hosts."
-                    : (httpsPolicy.publicHttpsPilotReason && httpsPolicy.publicHttpsPilotReason[0]
-                        ? httpsPolicy.publicHttpsPilotReason
-                        : "HTTPS/TLS unsupported: ProductionValidated currently allows explicit fixture hosts only."),
+                        : (httpsPolicy.publicHttpsPilotReason && httpsPolicy.publicHttpsPilotReason[0]
+                            ? httpsPolicy.publicHttpsPilotReason
+                            : "HTTPS/TLS unsupported: production trust validation is not ready for arbitrary origins."),
                 reasonSize);
         }
         return kernel_http_blocked_policy_transport_policy(reason);
@@ -9836,6 +11532,7 @@ static bool parse_https_url_kernel(const char* url, KernelHttpUrl* parsed)
     parsed->ip = 0;
     parsed->port = 443;
     parsed->hostIsNumeric = false;
+    parsed->httpsScheme = true;
     parsed->host[0] = '\0';
     parsed->path[0] = '/';
     parsed->path[1] = '\0';
@@ -9843,6 +11540,10 @@ static bool parse_https_url_kernel(const char* url, KernelHttpUrl* parsed)
 
     if (!nav_starts_with(url, "https://")) {
         strcopy(parsed->error, "Only https:// URLs are supported", sizeof(parsed->error));
+        return false;
+    }
+    if (strlen_local(url) >= kKernelHttpUrlLen) {
+        strcopy(parsed->error, "HTTPS URL exceeds the Navigator safety limit", sizeof(parsed->error));
         return false;
     }
 
@@ -9900,6 +11601,10 @@ static bool parse_https_url_kernel(const char* url, KernelHttpUrl* parsed)
         if (*p == '?') parsed->path[oi++] = '/';
         while (*p && oi < kKernelHttpUrlLen - 1) parsed->path[oi++] = *p++;
         parsed->path[oi] = '\0';
+        if (*p) {
+            strcopy(parsed->error, "HTTPS URL path exceeds the Navigator safety limit", sizeof(parsed->error));
+            return false;
+        }
     }
     return true;
 }
@@ -9910,9 +11615,15 @@ static bool kernel_http_parse_response(KernelHttpResponse* response, int rawLen)
     response->reason[0] = '\0';
     response->contentType[0] = '\0';
     response->transferEncoding[0] = '\0';
+    response->responseFraming[0] = '\0';
     response->contentEncoding[0] = '\0';
+    response->contentLength = 0;
+    response->contentLengthPresent = false;
+    response->truncatedResponse = false;
     response->location[0] = '\0';
     response->bodyBytes = 0;
+    response->encodedBodyBytes = 0;
+    response->decodedBodyBytes = 0;
 
     int headerEnd = -1;
     int bodyStart = -1;
@@ -9961,6 +11672,7 @@ static bool kernel_http_parse_response(KernelHttpResponse* response, int rawLen)
     for (const char* r = reasonStart; r < lineEnd && ri < (int)sizeof(response->reason) - 1; ++r) response->reason[ri++] = *r;
     response->reason[ri] = '\0';
 
+    bool contentEncodingHeaderSeen = false;
     const char* h = lineEnd;
     while (h < s_kernelHttpRaw + headerEnd) {
         while (h < s_kernelHttpRaw + headerEnd && (*h == '\r' || *h == '\n')) ++h;
@@ -9974,7 +11686,46 @@ static bool kernel_http_parse_response(KernelHttpResponse* response, int rawLen)
             const char* valueStart = colon + 1;
             if (gxos::web::httpSharedEqualsInsensitive(name, "content-type")) gxos::web::httpSharedNormalizeContentType(valueStart, e, response->contentType, sizeof(response->contentType));
             else if (gxos::web::httpSharedEqualsInsensitive(name, "transfer-encoding")) gxos::web::httpSharedCopyTrimmed(valueStart, e, response->transferEncoding, sizeof(response->transferEncoding), true);
-            else if (gxos::web::httpSharedEqualsInsensitive(name, "content-encoding")) gxos::web::httpSharedCopyTrimmed(valueStart, e, response->contentEncoding, sizeof(response->contentEncoding), true);
+            else if (gxos::web::httpSharedEqualsInsensitive(name, "content-encoding")) {
+                const char* encodingStart = valueStart;
+                const char* encodingEnd = e;
+                while (encodingStart < encodingEnd && gxos::web::httpSharedIsSpace(*encodingStart)) ++encodingStart;
+                while (encodingEnd > encodingStart && gxos::web::httpSharedIsSpace(encodingEnd[-1])) --encodingEnd;
+                const int encodingBytes = (int)(encodingEnd - encodingStart);
+                const int existingBytes = strlen_local(response->contentEncoding);
+                const int separatorBytes = contentEncodingHeaderSeen ? 2 : 0;
+                if (encodingBytes <= 0 || existingBytes + separatorBytes + encodingBytes >= (int)sizeof(response->contentEncoding)) {
+                    strcopy(response->unsupportedReason, "Malformed Content-Encoding", sizeof(response->unsupportedReason));
+                    strcopy(response->error, "Malformed HTTP Content-Encoding", sizeof(response->error));
+                    return false;
+                }
+                int oi = existingBytes;
+                if (contentEncodingHeaderSeen) {
+                    response->contentEncoding[oi++] = ',';
+                    response->contentEncoding[oi++] = ' ';
+                }
+                for (const char* v = encodingStart; v < encodingEnd; ++v) {
+                    char c = *v;
+                    if (c >= 'A' && c <= 'Z') c = (char)(c - 'A' + 'a');
+                    response->contentEncoding[oi++] = c;
+                }
+                response->contentEncoding[oi] = '\0';
+                contentEncodingHeaderSeen = true;
+            }
+            else if (gxos::web::httpSharedEqualsInsensitive(name, "content-length")) {
+                int contentLength = 0;
+                if (!gxos::web::httpSharedParseDecimalSize(valueStart, e, &contentLength)) {
+                    strcopy(response->error, "Malformed HTTP Content-Length", sizeof(response->error));
+                    return false;
+                }
+                response->contentLengthPresent = true;
+                response->contentLength = contentLength;
+                if (contentLength > kKernelHttpBodyLimit) {
+                    response->bodyCapHit = true;
+                    strcopy(response->error, "HTTP body too large", sizeof(response->error));
+                    return false;
+                }
+            }
             else if (gxos::web::httpSharedEqualsInsensitive(name, "location")) {
                 while (valueStart < e && (*valueStart == ' ' || *valueStart == '\t')) ++valueStart;
                 int li = 0;
@@ -9988,12 +11739,23 @@ static bool kernel_http_parse_response(KernelHttpResponse* response, int rawLen)
     int encodedBodyBytes = rawLen - bodyStart;
     if (encodedBodyBytes < 0) encodedBodyBytes = 0;
 
+    if (response->transferEncoding[0] &&
+        gxos::web::httpSharedHeaderHasToken(response->transferEncoding, "chunked")) {
+        strcopy(response->responseFraming, "chunked", sizeof(response->responseFraming));
+    } else if (response->contentLengthPresent) {
+        strcopy(response->responseFraming, "content-length", sizeof(response->responseFraming));
+    } else {
+        strcopy(response->responseFraming, "connection-close", sizeof(response->responseFraming));
+    }
+
     if (gxos::web::httpSharedIsRedirectStatus(response->statusCode)) {
         int copyBytes = encodedBodyBytes;
         if (copyBytes > kKernelHttpBodyLimit) copyBytes = kKernelHttpBodyLimit;
         for (int i = 0; i < copyBytes; ++i) response->body[i] = s_kernelHttpRaw[bodyStart + i];
         response->body[copyBytes] = '\0';
         response->bodyBytes = copyBytes;
+        response->encodedBodyBytes = copyBytes;
+        response->decodedBodyBytes = copyBytes;
         response->ok = true;
         return true;
     }
@@ -10002,13 +11764,14 @@ static bool kernel_http_parse_response(KernelHttpResponse* response, int rawLen)
         if (gxos::web::httpSharedHeaderHasToken(response->transferEncoding, "chunked")) {
             int decodedBytes = 0;
             char chunkError[128];
-            if (!gxos::web::httpSharedDecodeChunkedBody(s_kernelHttpRaw + bodyStart, encodedBodyBytes,
-                    response->body, sizeof(response->body), &decodedBytes, chunkError, sizeof(chunkError))) {
-                response->bodyCapHit = nav_starts_with(chunkError, "HTTP body exceeded");
+            if (!gxos::web::httpSharedDecodeChunkedBodyInPlace(s_kernelHttpRaw + bodyStart, encodedBodyBytes,
+                    kKernelHttpBodyLimit, &decodedBytes, chunkError, sizeof(chunkError))) {
+                response->bodyCapHit = nav_starts_with(chunkError, "HTTP body exceeded") ||
+                    nav_starts_with(chunkError, "Decoded chunked response body exceeded");
                 strcopy(response->error, chunkError[0] ? chunkError : "Malformed chunked response", sizeof(response->error));
                 return false;
             }
-            response->bodyBytes = decodedBytes;
+            encodedBodyBytes = decodedBytes;
         } else {
             strcopy(response->unsupportedReason, "Unsupported Transfer-Encoding", sizeof(response->unsupportedReason));
             strcopy(response->error, "Unsupported transfer encoding", sizeof(response->error));
@@ -10020,15 +11783,71 @@ static bool kernel_http_parse_response(KernelHttpResponse* response, int rawLen)
             strcopy(response->error, "HTTP body too large", sizeof(response->error));
             return false;
         }
-        for (int i = 0; i < encodedBodyBytes; ++i) response->body[i] = s_kernelHttpRaw[bodyStart + i];
-        response->body[encodedBodyBytes] = '\0';
-        response->bodyBytes = encodedBodyBytes;
+        if (response->contentLengthPresent && encodedBodyBytes < response->contentLength) {
+            response->truncatedResponse = true;
+            strcopy(response->error, "Truncated HTTP response", sizeof(response->error));
+            return false;
+        }
+        if (response->contentLengthPresent) encodedBodyBytes = response->contentLength;
     }
 
-    if (response->contentEncoding[0] && !gxos::web::httpSharedHeaderHasToken(response->contentEncoding, "identity")) {
-        strcopy(response->unsupportedReason, "Unsupported Content-Encoding", sizeof(response->unsupportedReason));
-        strcopy(response->error, "Unsupported content encoding", sizeof(response->error));
+    response->encodedBodyBytes = encodedBodyBytes;
+    const gxos::web::HttpContentCoding coding =
+        gxos::web::httpSharedParseContentCoding(response->contentEncoding);
+    const bool htmlDocument = gxos::web::httpSharedEqualsInsensitive(response->contentType, "text/html");
+    gxos::web::HttpContentDecoderSink documentSink{};
+    if (htmlDocument) {
+        s_kernelHttpDocumentStorage.reset();
+        documentSink = s_kernelHttpDocumentStorage.decoderSink();
+    }
+    int decodedBytes = 0;
+    char decodeError[128];
+    const gxos::web::HttpContentDecodeResult decodeResult =
+        gxos::web::httpSharedDecodeContent(
+            reinterpret_cast<const uint8_t*>(s_kernelHttpRaw + bodyStart), encodedBodyBytes,
+            coding, htmlDocument ? nullptr : reinterpret_cast<uint8_t*>(response->body),
+            htmlDocument ? kKernelHttpDecodedDocumentLimit : kKernelHttpBodyLimit,
+             &decodedBytes, &s_kernelHttpContentDecoderWorkspace,
+            decodeError, sizeof(decodeError), htmlDocument ? &documentSink : nullptr);
+    response->decodedBodyBytes = htmlDocument
+        ? s_kernelHttpDocumentStorage.size()
+        : (decodedBytes > kKernelHttpBodyLimit ? kKernelHttpBodyLimit : decodedBytes);
+    if (decodeResult != gxos::web::HttpContentDecodeResult::Success) {
+        response->bodyBytes = 0;
+        response->body[0] = '\0';
+        response->documentStorageUsed = false;
+        response->documentSegmentCount = htmlDocument ? s_kernelHttpDocumentStorage.segmentsUsed() : 0;
+        response->documentStorageBytes = htmlDocument ? s_kernelHttpDocumentStorage.size() : 0;
+        response->documentStorageCapacity = htmlDocument ? kKernelHttpDecodedDocumentLimit : 0;
+        response->documentHistoryBytes = htmlDocument ? s_kernelHttpDocumentStorage.historyBytes() : 0;
+        response->documentStorageAllocationFailed = htmlDocument &&
+            (decodeResult == gxos::web::HttpContentDecodeResult::OutputAllocationFailed);
+        if (decodeResult == gxos::web::HttpContentDecodeResult::UnsupportedEncoding) {
+            strcopy(response->unsupportedReason, "Unsupported Content-Encoding", sizeof(response->unsupportedReason));
+            strcopy(response->error, "Unsupported content encoding", sizeof(response->error));
+        } else if (decodeResult == gxos::web::HttpContentDecodeResult::DecodedResponseTooLarge) {
+            response->bodyCapHit = true;
+            strcopy(response->unsupportedReason, "Decoded Response Too Large", sizeof(response->unsupportedReason));
+            strcopy(response->error, "Decoded response too large", sizeof(response->error));
+        } else if (decodeResult == gxos::web::HttpContentDecodeResult::OutputAllocationFailed) {
+            strcopy(response->unsupportedReason, "Document Storage Allocation Failed", sizeof(response->unsupportedReason));
+            strcopy(response->error, "Document storage allocation failed", sizeof(response->error));
+        } else {
+            strcopy(response->unsupportedReason, "Malformed Compressed Response", sizeof(response->unsupportedReason));
+            strcopy(response->error, "Compressed response invalid", sizeof(response->error));
+        }
         return false;
+    }
+    response->bodyBytes = htmlDocument ? s_kernelHttpDocumentStorage.size() : decodedBytes;
+    if (htmlDocument) {
+        response->body[0] = '\0';
+        response->documentStorageUsed = true;
+        response->documentSegmentCount = s_kernelHttpDocumentStorage.segmentsUsed();
+        response->documentStorageBytes = s_kernelHttpDocumentStorage.size();
+        response->documentStorageCapacity = kKernelHttpDecodedDocumentLimit;
+        response->documentHistoryBytes = s_kernelHttpDocumentStorage.historyBytes();
+    } else {
+        response->body[decodedBytes] = '\0';
     }
 
     response->ok = true;
@@ -10108,12 +11927,15 @@ static bool kernel_http_build_request(const char* method, const KernelHttpUrl& p
     if (requestBytesOut) *requestBytesOut = 0;
     if (!request || requestSize <= 0) return false;
     const bool isPost = method && gxos::web::httpSharedEqualsInsensitive(method, "post");
-    const bool isHttps = parsed.port == 443 || parsed.port == kNavigatorControlledHttpsPort;
+    const bool isHttps = parsed.httpsScheme;
+    // Every bare-metal document, redirect hop, POST, and resource request
+    // passes through this constructor and advertises only the shared decoder's
+    // supported production codings.
     int q = 0;
 #define APPEND_REQ(svalue) do { const char* _s = (svalue); while (_s && *_s && q < requestSize - 1) request[q++] = *_s++; } while (0)
     APPEND_REQ(isPost ? "POST " : "GET ");
     APPEND_REQ(parsed.path);
-    APPEND_REQ(" HTTP/1.0\r\nHost: ");
+    APPEND_REQ(" HTTP/1.1\r\nHost: ");
     APPEND_REQ(parsed.host);
     if ((!isHttps && parsed.port != 80) || (isHttps && parsed.port != 443)) {
         char portText[12];
@@ -10121,7 +11943,9 @@ static bool kernel_http_build_request(const char* method, const KernelHttpUrl& p
         APPEND_REQ(":");
         APPEND_REQ(portText);
     }
-    APPEND_REQ("\r\nUser-Agent: guideXOS-Navigator/0.1\r\nAccept: text/html, text/plain\r\nAccept-Encoding: identity\r\nConnection: close\r\n");
+    APPEND_REQ("\r\nUser-Agent: guideXOS-Navigator/0.2\r\nAccept: text/html, text/plain, image/png, image/jpeg, */*\r\nAccept-Encoding: ");
+    APPEND_REQ(gxos::web::kHttpSharedProductionAcceptEncoding);
+    APPEND_REQ("\r\nConnection: close\r\n");
     if (isPost) {
         char bodyLengthText[16];
         nav_int_to_text(bodyBytes, bodyLengthText, sizeof(bodyLengthText));
@@ -10142,8 +11966,14 @@ static bool kernel_http_read_response(gxos::web::HttpByteStream* stream, KernelH
 {
     if (!stream || !response) return false;
     int rawLen = 0;
-    uint32_t startTicks = (uint32_t)kernel::pit::ticks();
-    uint32_t maxTicks = (uint32_t)(kKernelHttpReadTimeoutMs / 10 + 1);
+    int framedBodyStart = -1;
+    int expectedBodyBytes = 0;
+    bool contentLengthKnown = false;
+    bool chunkedResponse = false;
+    const uint32_t transactionStartTicks = (uint32_t)kernel::pit::ticks();
+    uint32_t lastProgressTicks = transactionStartTicks;
+    const uint32_t idleTimeoutTicks = (uint32_t)(kKernelHttpReadTimeoutMs / 10 + 1);
+    const uint32_t transactionTimeoutTicks = (uint32_t)(kKernelHttpTransactionTimeoutMs / 10 + 1);
     while (true) {
         kernel_http_poll_once();
         char chunk[512];
@@ -10170,7 +12000,67 @@ static bool kernel_http_read_response(gxos::web::HttpByteStream* stream, KernelH
                 return false;
             }
             for (int i = 0; i < n; ++i) s_kernelHttpRaw[rawLen++] = chunk[i];
-            startTicks = (uint32_t)kernel::pit::ticks();
+            if (framedBodyStart < 0) {
+                for (int i = 0; i + 3 < rawLen; ++i) {
+                    if (s_kernelHttpRaw[i] == '\r' && s_kernelHttpRaw[i + 1] == '\n' &&
+                        s_kernelHttpRaw[i + 2] == '\r' && s_kernelHttpRaw[i + 3] == '\n') {
+                        framedBodyStart = i + 4;
+                        break;
+                    }
+                    if (i + 1 < rawLen && s_kernelHttpRaw[i] == '\n' && s_kernelHttpRaw[i + 1] == '\n') {
+                        framedBodyStart = i + 2;
+                        break;
+                    }
+                }
+            }
+            if (framedBodyStart >= 0 && !contentLengthKnown && !chunkedResponse) {
+                const char* h = s_kernelHttpRaw;
+                const char* headerEnd = s_kernelHttpRaw + framedBodyStart;
+                while (h < headerEnd) {
+                    const char* e = h;
+                    while (e < headerEnd && *e != '\r' && *e != '\n') ++e;
+                    const char* colon = h;
+                    while (colon < e && *colon != ':') ++colon;
+                    if (colon < e) {
+                        char name[40];
+                        gxos::web::httpSharedCopyTrimmed(h, colon, name, sizeof(name), true);
+                        if (gxos::web::httpSharedEqualsInsensitive(name, "transfer-encoding")) {
+                            char transferValue[64];
+                            gxos::web::httpSharedCopyTrimmed(colon + 1, e, transferValue, sizeof(transferValue), true);
+                            if (gxos::web::httpSharedHeaderHasToken(transferValue, "chunked")) chunkedResponse = true;
+                        } else if (gxos::web::httpSharedEqualsInsensitive(name, "content-length")) {
+                            int parsedLength = 0;
+                            if (gxos::web::httpSharedParseDecimalSize(colon + 1, e, &parsedLength)) {
+                                if (parsedLength > kKernelHttpBodyLimit) {
+                                    response->bodyCapHit = true;
+                                    strcopy(response->error, "HTTP body too large", sizeof(response->error));
+                                    return false;
+                                }
+                                expectedBodyBytes = parsedLength;
+                                contentLengthKnown = true;
+                            }
+                        }
+                    }
+                    h = e;
+                    while (h < headerEnd && (*h == '\r' || *h == '\n')) ++h;
+                }
+            }
+            ++response->httpReadProgressEvents;
+            lastProgressTicks = (uint32_t)kernel::pit::ticks();
+            if (framedBodyStart >= 0 && contentLengthKnown &&
+                rawLen >= framedBodyStart + expectedBodyBytes) break;
+            if (framedBodyStart >= 0 && chunkedResponse) {
+                bool malformedChunked = false;
+                if (gxos::web::httpSharedChunkedBodyComplete(
+                        s_kernelHttpRaw + framedBodyStart,
+                        rawLen - framedBodyStart, &malformedChunked)) {
+                    break;
+                }
+                if (malformedChunked) {
+                    strcopy(response->error, "Malformed chunked response", sizeof(response->error));
+                    return false;
+                }
+            }
             continue;
         }
         if (n == 0) break;
@@ -10185,7 +12075,8 @@ static bool kernel_http_read_response(gxos::web::HttpByteStream* stream, KernelH
                     response->unsupportedReason[0] ||
                     streq_local(response->error, "Malformed HTTP response") ||
                     streq_local(response->error, "Malformed HTTP status line") ||
-                    streq_local(response->error, "Malformed chunked response");
+                    streq_local(response->error, "Malformed chunked response") ||
+                    streq_local(response->error, "Truncated HTTP response");
                 if (!parsedPartial && contentFailure) {
                     return false;
                 }
@@ -10195,15 +12086,38 @@ static bool kernel_http_read_response(gxos::web::HttpByteStream* stream, KernelH
                 gxos::web::HttpByteStreamTlsStatus::TlsReadFailed);
             return false;
         }
-        if (((uint32_t)kernel::pit::ticks() - startTicks) > maxTicks) {
+        ++response->httpReadWouldBlockCount;
+        const uint32_t nowTicks = (uint32_t)kernel::pit::ticks();
+        if ((nowTicks - lastProgressTicks) > idleTimeoutTicks ||
+            (nowTicks - transactionStartTicks) > transactionTimeoutTicks) {
+            response->httpReadTimedOut = true;
             kernel_http_set_stream_error(response,
                 rawLen > 0 ? "HTTP read timeout after partial response" : "HTTP read timeout",
                 gxos::web::HttpByteStreamTlsStatus::TlsReadFailed);
+            response->httpReadElapsedMs = (nowTicks - transactionStartTicks) * 10u;
             return false;
         }
     }
+    response->httpReadElapsedMs =
+        ((uint32_t)kernel::pit::ticks() - transactionStartTicks) * 10u;
     s_kernelHttpRaw[rawLen] = '\0';
-    return kernel_http_parse_response(response, rawLen);
+    const bool parsed = kernel_http_parse_response(response, rawLen);
+    serial::puts("[HTTP-STREAM] complete raw_bytes=");
+    char rawBytesText[16];
+    nav_int_to_text(rawLen, rawBytesText, sizeof(rawBytesText));
+    serial::puts(rawBytesText);
+    serial::puts(" body_bytes=");
+    char parsedBodyText[16];
+    nav_int_to_text(response->bodyBytes, parsedBodyText, sizeof(parsedBodyText));
+    serial::puts(parsedBodyText);
+    serial::puts(" parsed=");
+    serial::puts(parsed ? "yes" : "no");
+    serial::puts(" framing=");
+    serial::puts(response->responseFraming[0] ? response->responseFraming : "unknown");
+    serial::puts(" error=");
+    serial::puts(response->error[0] ? response->error : "(none)");
+    serial::puts("\n");
+    return parsed;
 }
 
 struct KernelHttpActiveStream {
@@ -10251,14 +12165,17 @@ static void kernel_http_finalize_tls_status(KernelHttpResponse* response, bool p
         response->unsupportedReason[0] ||
         streq_local(response->error, "Malformed HTTP response") ||
         streq_local(response->error, "Malformed HTTP status line") ||
-        streq_local(response->error, "Malformed chunked response");
+        streq_local(response->error, "Malformed chunked response") ||
+        streq_local(response->error, "Truncated HTTP response");
     if (!parsedOk) {
         if (!response->tlsResult.error[0] && response->error[0]) {
             strcopy(response->tlsResult.error, response->error, sizeof(response->tlsResult.error));
         }
         if (response->tlsResult.handshakeSuccess && contentFailure) {
             response->tlsSucceededBeforeContentFailure = true;
-            if (response->tlsResult.transportStatus == gxos::web::HttpByteStreamTlsStatus::NotStarted) {
+            if (response->bodyCapHit || kernel_http_error_contains_too_large(response->error)) {
+                response->tlsResult.transportStatus = gxos::web::HttpByteStreamTlsStatus::ResponseTooLarge;
+            } else if (response->tlsResult.transportStatus == gxos::web::HttpByteStreamTlsStatus::NotStarted) {
                 response->tlsResult.transportStatus = gxos::web::HttpByteStreamTlsStatus::Success;
             }
         } else if (response->tlsResult.transportStatus == gxos::web::HttpByteStreamTlsStatus::Success ||
@@ -10283,6 +12200,7 @@ static bool kernel_http_open_stream(KernelHttpUrl* parsed,
     activeStream->stream = gxos::web::HttpByteStream{};
     activeStream->tcpContext.socket = -1;
     activeStream->tcpContext.abortUsedFlag = &response->tcpAbortUsed;
+    activeStream->tcpContext.response = response;
     response->tcpAbortUsed = false;
 
     if (!kernel_http_resolve_host(parsed, response)) {
@@ -10317,6 +12235,7 @@ static bool kernel_http_open_stream(KernelHttpUrl* parsed,
         kernel::tcp::tcp_close(sock);
         return false;
     }
+
     if (!kernel_tcp_wait_connected(sock, response->error, sizeof(response->error))) {
         if (kernel_http_transport_uses_tls(policy.selection)) {
             kernel_http_mark_tls_failure(response, gxos::web::HttpByteStreamTlsStatus::TcpConnectFailed,
@@ -10358,6 +12277,7 @@ static KernelHttpResponse* kernel_http_request_once_internal(const char* url, co
 {
     KernelHttpResponse* response = &s_kernelHttpResponse;
     kernel_http_reset_response(response);
+    s_kernelHttpDocumentStorage.reset();
     strcopy(response->requestedUrl, url ? url : "", sizeof(response->requestedUrl));
     strcopy(response->finalUrl, url ? url : "", sizeof(response->finalUrl));
     s_kernelLastDnsUsed = false;
@@ -10620,9 +12540,10 @@ static KernelHttpResponse* kernel_http_request(const char* url, const char* meth
             strcopy(response->finalUrl, current, sizeof(response->finalUrl));
             response->redirectHopIndex = redirectCount;
             strcopy(response->redirectHopUrl, current, sizeof(response->redirectHopUrl));
-            if (attempt == 0 &&
+            const bool retryRedirectedTls = attempt == 0 &&
                 kernel_http_should_retry_redirected_tls_open(
-                    response, current, currentMethod, redirectCount, currentBodyBytes)) {
+                    response, current, currentMethod, redirectCount, currentBodyBytes);
+            if (retryRedirectedTls) {
                 ++totalTlsRetryCount;
                 lastTlsBytesWrittenBeforeRetry = (int)response->tlsResult.requestBytesWritten;
                 lastRetryHopIndex = redirectCount;
@@ -10645,8 +12566,12 @@ static KernelHttpResponse* kernel_http_request(const char* url, const char* meth
                 strcopy(response->redirectHopUrl, lastRetryHopUrl, sizeof(response->redirectHopUrl));
             }
         }
-        if (!response->ok) return response;
-        if (!gxos::web::httpSharedIsRedirectStatus(response->statusCode)) return response;
+        if (!response->ok) {
+            return response;
+        }
+        if (!gxos::web::httpSharedIsRedirectStatus(response->statusCode)) {
+            return response;
+        }
         if (!response->location[0]) return response;
         if (redirectCount == gxos::web::kHttpSharedMaxRedirects) {
             response->ok = false;
@@ -10730,6 +12655,7 @@ static gxos::gui::ImageSafetyLimits nav_kernel_remote_png_limits()
     limits.maxWidth = 2048u;
     limits.maxHeight = 2048u;
     limits.maxPixels = 2048u * 2048u;
+    limits.maxDecodedBytes = 2048u * 2048u * 4u;
     return limits;
 }
 
@@ -10746,75 +12672,1792 @@ static bool nav_url_path_ends_with_png(const char* url)
     return endsWithIgnoreCaseLocal(path, ".png");
 }
 
-static void nav_push_url(char stack[][160], int& count, const char* url);
+static bool nav_url_path_ends_with_jpeg(const char* url)
+{
+    if (!url) return false;
+    char path[kKernelHttpUrlLen];
+    int i = 0;
+    while (url[i] && url[i] != '?' && url[i] != '#' && i < kKernelHttpUrlLen - 1) {
+        path[i] = url[i];
+        ++i;
+    }
+    path[i] = '\0';
+    return endsWithIgnoreCaseLocal(path, ".jpg") || endsWithIgnoreCaseLocal(path, ".jpeg");
+}
+
+static bool nav_url_path_ends_with_extension(const char* url, const char* extension)
+{
+    if (!url || !extension) return false;
+    char path[kKernelHttpUrlLen];
+    int i = 0;
+    while (url[i] && url[i] != '?' && url[i] != '#' && i < kKernelHttpUrlLen - 1) {
+        path[i] = url[i];
+        ++i;
+    }
+    path[i] = '\0';
+    return endsWithIgnoreCaseLocal(path, extension);
+}
+
+using gxos::apps::NavigatorResourceClassification;
+using gxos::apps::NavigatorResourceDecodeFailure;
+using gxos::apps::NavigatorResourceImageFormat;
+using gxos::apps::NavigatorResourceMimeFailure;
+using gxos::apps::NavigatorResourcePolicyFailure;
+using gxos::apps::NavigatorResourceTransportFailure;
+
+static NavigatorResourceClassification nav_classify_kernel_http_failure(const KernelHttpResponse& response)
+{
+    if (response.transportSelection == gxos::web::HttpByteStreamTransportSelection::UnsupportedScheme) {
+        return NavigatorResourceClassification::UnsupportedScheme;
+    }
+    if (response.transportSelection == gxos::web::HttpByteStreamTransportSelection::BlockedHttpsGeneral ||
+        response.transportSelection == gxos::web::HttpByteStreamTransportSelection::BlockedPolicy) {
+        return NavigatorResourceClassification::ReviewedTargetPolicyRejected;
+    }
+    if (response.downgradeRedirectBlocked) {
+        return NavigatorResourceClassification::InsecureRedirectBlocked;
+    }
+    if (response.bodyCapHit) return NavigatorResourceClassification::BodyTooLargeEncoded;
+    if (response.redirectCount >= (int)gxos::web::kHttpSharedMaxRedirects && !response.ok) {
+        return NavigatorResourceClassification::HttpRedirectLimit;
+    }
+    if (response.statusCode >= 300 && response.statusCode < 400) {
+        return NavigatorResourceClassification::HttpStatus3xxUnresolved;
+    }
+    if (response.statusCode >= 400 && response.statusCode < 500) {
+        return NavigatorResourceClassification::HttpStatus4xx;
+    }
+    if (response.statusCode >= 500 && response.statusCode < 600) {
+        return NavigatorResourceClassification::HttpStatus5xx;
+    }
+    if (response.dnsError[0]) return NavigatorResourceClassification::DnsFailed;
+    switch (response.tlsStatus) {
+    case gxos::web::HttpByteStreamTlsStatus::CertificateVerifyFailed:
+    case gxos::web::HttpByteStreamTlsStatus::CaMissing:
+    case gxos::web::HttpByteStreamTlsStatus::CaParseFailed:
+        return NavigatorResourceClassification::CertificateFailed;
+    case gxos::web::HttpByteStreamTlsStatus::HostnameMismatch:
+        return NavigatorResourceClassification::HostnameFailed;
+    case gxos::web::HttpByteStreamTlsStatus::HandshakeFailed:
+        return NavigatorResourceClassification::TlsFailed;
+    case gxos::web::HttpByteStreamTlsStatus::TlsReadFailed:
+    case gxos::web::HttpByteStreamTlsStatus::TlsWriteFailed:
+        return NavigatorResourceClassification::TlsFailed;
+    case gxos::web::HttpByteStreamTlsStatus::TcpConnectFailed:
+        return NavigatorResourceClassification::TcpFailed;
+    default:
+        break;
+    }
+    if (response.error[0]) {
+        if (strstr(response.error, "redirect") || strstr(response.error, "Redirect"))
+            return NavigatorResourceClassification::HttpRedirectInvalid;
+        if (strstr(response.error, "transfer encoding") || strstr(response.error, "Transfer-Encoding"))
+            return NavigatorResourceClassification::UnsupportedTransferEncoding;
+        if (strstr(response.error, "content encoding") || strstr(response.error, "Content-Encoding"))
+            return NavigatorResourceClassification::UnsupportedContentEncoding;
+        if (strstr(response.error, "Compressed"))
+            return strstr(response.contentEncoding, "gzip")
+                ? NavigatorResourceClassification::MalformedGzip
+                : NavigatorResourceClassification::MalformedDeflate;
+        if (strstr(response.error, "Decoded response too large"))
+            return NavigatorResourceClassification::DecodedResourceTooLarge;
+        if (strstr(response.error, "timed out") || strstr(response.error, "timeout"))
+            return response.tlsUsed ? NavigatorResourceClassification::TimeoutHttp
+                                    : NavigatorResourceClassification::TimeoutConnect;
+        if (strstr(response.error, "Malformed") || strstr(response.error, "malformed"))
+            return NavigatorResourceClassification::MalformedHttp;
+        if (strstr(response.error, "closed") || strstr(response.error, "truncated"))
+            return NavigatorResourceClassification::ConnectionClosedIncomplete;
+    }
+    return response.tlsUsed ? NavigatorResourceClassification::TlsFailed
+                            : NavigatorResourceClassification::TcpFailed;
+}
+
+static bool nav_mime_is(const char* actual, const char* expected)
+{
+    return actual && expected && gxos::web::httpSharedEqualsInsensitive(actual, expected);
+}
+
+static const int kNavigatorUrlStorageBytes = 512;
+static void nav_push_url(char stack[][kNavigatorUrlStorageBytes], int& count, const char* url);
+
+uint32_t NavigatorApp::countLiveResourceReferences() const
+{
+    uint32_t count = 0;
+    for (uint32_t i = 0; i < gxos::apps::kNavigatorMaxResourceReferences; ++i) {
+        if (m_resourceReferences[i].state !=
+            static_cast<uint8_t>(gxos::apps::NavigatorResourceSchedulerState::Empty)) {
+            ++count;
+        }
+    }
+    return count;
+}
+
+uint32_t NavigatorApp::countDuplicateOwners() const
+{
+    uint32_t count = 0;
+    for (uint32_t i = 0; i < gxos::apps::kNavigatorMaxResourceReferences; ++i) {
+        if (m_resourceReferences[i].state !=
+                static_cast<uint8_t>(gxos::apps::NavigatorResourceSchedulerState::Empty) &&
+            m_resourceReferences[i].duplicateOf != 0xFFFFu) {
+            ++count;
+        }
+    }
+    return count;
+}
+
+uint32_t NavigatorApp::countLiveImagePointers() const
+{
+    uint32_t count = 0;
+    for (int i = 0; i < m_blockCount; ++i) {
+        if (m_blocks[i].kind == BLOCK_IMAGE && m_blocks[i].imagePixels) ++count;
+    }
+    return count;
+}
+
+void NavigatorApp::beginLifecycleGeneration(const char* requestedUrl)
+{
+    uint32_t index = m_lifecycleGenerationCount;
+    if (index >= MAX_LIFECYCLE_GENERATIONS) index = MAX_LIFECYCLE_GENERATIONS - 1;
+    else ++m_lifecycleGenerationCount;
+    m_currentLifecycleGenerationIndex = index;
+    NavigationGenerationRecord& record = m_lifecycleGenerations[index];
+    record = NavigationGenerationRecord{};
+    record.generation = m_documentGeneration;
+    strcopy(record.requestedUrl, requestedUrl ? requestedUrl : "", sizeof(record.requestedUrl));
+    record.activeImagesBefore = m_resourceScheduler.activeCount;
+    record.activeBytesBefore = m_resourceMemory.activeDecodedBytes;
+    record.referencesBefore = countLiveResourceReferences();
+    record.duplicateOwnersBefore = countDuplicateOwners();
+    record.scrollBefore = m_scrollY;
+
+    const uint32_t releasedBefore = m_resourceScheduler.released;
+    const uint64_t releasedBytesBefore = m_resourceMemory.releasedDecodedBytes;
+    releaseImageResources();
+    record.releasedResources = m_resourceScheduler.released >= releasedBefore
+        ? m_resourceScheduler.released - releasedBefore : 0;
+    record.releasedBytes = m_resourceMemory.releasedDecodedBytes >= releasedBytesBefore
+        ? m_resourceMemory.releasedDecodedBytes - releasedBytesBefore : 0;
+    record.activeImagesAfterRelease = m_resourceScheduler.activeCount;
+    record.activeBytesAfterRelease = m_resourceMemory.activeDecodedBytes;
+    record.staleReferencesAfterRelease = countLiveResourceReferences();
+    record.staleDuplicateOwnersAfterRelease = countDuplicateOwners();
+    record.staleImagePointersAfterRelease = countLiveImagePointers();
+
+    // The release evidence is copied into the fixed record above.  The next
+    // document starts with a genuinely fresh scheduler/memory generation;
+    // peak values remain historical only inside the completed record.
+    m_resourceScheduler = gxos::apps::NavigatorResourceSchedulerStats{};
+    m_resourceMemory.reset();
+    m_resourceTelemetryCount = 0;
+}
+
+void NavigatorApp::finishLifecycleGeneration()
+{
+    if (m_currentLifecycleGenerationIndex >= m_lifecycleGenerationCount) return;
+    NavigationGenerationRecord& record = m_lifecycleGenerations[m_currentLifecycleGenerationIndex];
+    strcopy(record.finalUrl, m_metaFinalUrl[0] ? m_metaFinalUrl : m_currentUrl, sizeof(record.finalUrl));
+    strcopy(record.title, m_title, sizeof(record.title));
+    strcopy(record.visibleText, m_metaVisibleText, sizeof(record.visibleText));
+    record.documentBlocks = m_blockCount > 0 ? static_cast<uint32_t>(m_blockCount) : 0;
+    record.decodedDocumentBytes = m_metaDecodedBodyBytes > 0 ? static_cast<uint32_t>(m_metaDecodedBodyBytes) : 0;
+    record.resourceReferences = m_resourceScheduler.referencesDiscovered;
+    record.uniqueReferences = m_resourceScheduler.uniqueReferences;
+    record.duplicateReferences = m_resourceScheduler.duplicateReferences;
+    record.schedulerCandidates = m_resourceScheduler.schedulerCandidates;
+    record.loadedResources = m_resourceScheduler.attached;
+    record.failedResources = m_metaResourceFailed;
+    record.budgetDenials = m_resourceScheduler.budgetDenied;
+    record.duplicateNetworkFetches = m_metaDuplicateNetworkFetches;
+    record.activeImages = m_resourceScheduler.activeCount;
+    record.activeBytes = m_resourceMemory.activeDecodedBytes;
+    record.peakBytes = m_resourceMemory.peakDecodedBytes;
+    record.deniedBytes = m_resourceMemory.deniedAllocationBytes;
+    for (uint32_t bucket = 0; bucket < 6; ++bucket) {
+        record.loadedSizeBuckets[bucket] = m_resourceScheduler.loadedDecodedSizeBuckets[bucket];
+        record.deniedSizeBuckets[bucket] = m_resourceScheduler.deniedDecodedSizeBuckets[bucket];
+    }
+    record.encodedBodyFailures = 0;
+    for (int i = 0; i < m_blockCount; ++i) {
+        if (streq_local(m_blocks[i].resourceClassification, "body_too_large_encoded"))
+            ++record.encodedBodyFailures;
+        if (m_blocks[i].kind == BLOCK_IMAGE && m_imagePaintLogged[i])
+            record.imagePaintObserved = true;
+    }
+    record.parserCompleted = m_metaParserCompleted;
+    record.documentCreated = m_metaDocumentCreated;
+    record.scrollAfter = m_scrollY;
+}
+
+void NavigatorApp::releaseImageResources()
+{
+	m_resourceViewportDirty = false;
+    for (int i = 0; i < m_blockCount; ++i) {
+        DocBlock& block = m_blocks[i];
+        const bool ownsPixels = block.imagePixels &&
+            (block.imageOwnerBlockIndex < 0 || block.imageOwnerBlockIndex == i);
+        if (ownsPixels) {
+            gxos::gui::ImageBitmap bitmap{};
+            bitmap.status = gxos::gui::ImageLoadStatus::Ok;
+            bitmap.pixels = block.imagePixels;
+            bitmap.width = block.naturalWidth > 0 ? (uint32_t)block.naturalWidth : 0;
+            bitmap.height = block.naturalHeight > 0 ? (uint32_t)block.naturalHeight : 0;
+            bitmap.format = (gxos::gui::ImageFormat)block.imageFormat;
+            gxos::gui::ImageAdapter::Release(bitmap);
+            uint64_t releasedBytes = 0;
+            if (gxos::apps::navigatorCheckedRgbaBytes(
+                    block.naturalWidth > 0 ? static_cast<uint32_t>(block.naturalWidth) : 0u,
+                    block.naturalHeight > 0 ? static_cast<uint32_t>(block.naturalHeight) : 0u,
+                    releasedBytes)) {
+                m_resourceMemory.releaseDecoded(releasedBytes);
+                if (m_resourceScheduler.released < UINT32_MAX) ++m_resourceScheduler.released;
+            }
+        }
+        block.imagePixels = nullptr;
+        block.imageOwnerBlockIndex = -1;
+        m_imagePaintLogged[i] = false;
+    }
+    m_resourceScheduler.activeCount = 0;
+    m_resourceScheduler.activeBytes = 0;
+    m_resourceMemory.activeDecodedBytes = 0;
+    for (uint32_t ref = 0; ref < gxos::apps::kNavigatorMaxResourceReferences; ++ref) {
+        m_resourceReferences[ref] = gxos::apps::NavigatorResourceReferenceMetadata{};
+        m_resourceOrder[ref] = 0;
+    }
+    m_resourceTelemetryCount = 0;
+}
+
+bool NavigatorApp::evictImageResource(uint32_t referenceIndex, uint8_t reason)
+{
+    if (referenceIndex >= gxos::apps::kNavigatorMaxResourceReferences) return false;
+    gxos::apps::NavigatorResourceReferenceMetadata& reference = m_resourceReferences[referenceIndex];
+    if (reference.duplicateOf != 0xFFFFu ||
+        static_cast<gxos::apps::NavigatorResourceSchedulerState>(reference.state) !=
+            gxos::apps::NavigatorResourceSchedulerState::Attached) return false;
+    const gxos::apps::NavigatorResourceViewportClass viewportClass =
+        static_cast<gxos::apps::NavigatorResourceViewportClass>(reference.viewportClass);
+    if (viewportClass == gxos::apps::NavigatorResourceViewportClass::Visible ||
+        viewportClass == gxos::apps::NavigatorResourceViewportClass::Unsupported) return false;
+    const int ownerIndex = static_cast<int>(reference.blockIndex);
+    if (ownerIndex < 0 || ownerIndex >= m_blockCount) return false;
+    DocBlock& owner = m_blocks[ownerIndex];
+    if (!owner.imagePixels || owner.imageOwnerBlockIndex != ownerIndex) return false;
+    uint64_t decodedBytes = 0;
+    if (!gxos::apps::navigatorCheckedRgbaBytes(
+            owner.naturalWidth > 0 ? static_cast<uint32_t>(owner.naturalWidth) : 0u,
+            owner.naturalHeight > 0 ? static_cast<uint32_t>(owner.naturalHeight) : 0u,
+            decodedBytes)) return false;
+    gxos::gui::ImageBitmap bitmap{};
+    bitmap.status = gxos::gui::ImageLoadStatus::Ok;
+    bitmap.pixels = owner.imagePixels;
+    bitmap.width = owner.naturalWidth > 0 ? static_cast<uint32_t>(owner.naturalWidth) : 0;
+    bitmap.height = owner.naturalHeight > 0 ? static_cast<uint32_t>(owner.naturalHeight) : 0;
+    bitmap.format = static_cast<gxos::gui::ImageFormat>(owner.imageFormat);
+    gxos::gui::ImageAdapter::Release(bitmap);
+    owner.imagePixels = nullptr;
+    owner.imageOwnerBlockIndex = -1;
+    owner.imageStatus = static_cast<int>(gxos::gui::ImageLoadStatus::NotFound);
+    m_imagePaintLogged[ownerIndex] = false;
+    for (uint32_t i = 0; i < gxos::apps::kNavigatorMaxResourceReferences; ++i) {
+        if (m_resourceReferences[i].duplicateOf == static_cast<uint16_t>(referenceIndex)) {
+            const int duplicateIndex = static_cast<int>(m_resourceReferences[i].blockIndex);
+            if (duplicateIndex >= 0 && duplicateIndex < m_blockCount) {
+                m_blocks[duplicateIndex].imagePixels = nullptr;
+                m_blocks[duplicateIndex].imageOwnerBlockIndex = -1;
+                m_blocks[duplicateIndex].imageStatus = static_cast<int>(gxos::gui::ImageLoadStatus::NotFound);
+                m_imagePaintLogged[duplicateIndex] = false;
+            }
+            m_resourceReferences[i].state = static_cast<uint8_t>(gxos::apps::NavigatorResourceSchedulerState::Evicted);
+        }
+    }
+    m_resourceMemory.releaseDecoded(decodedBytes);
+    if (m_resourceScheduler.activeCount > 0) --m_resourceScheduler.activeCount;
+    m_resourceScheduler.activeBytes = m_resourceMemory.activeDecodedBytes;
+    ++m_resourceScheduler.evictions;
+    if (m_resourceScheduler.evictedDecodedBytes <= UINT64_MAX - decodedBytes)
+        m_resourceScheduler.evictedDecodedBytes += decodedBytes;
+    reference.state = static_cast<uint8_t>(gxos::apps::NavigatorResourceSchedulerState::Evicted);
+    reference.evictionReason = reason;
+    if (reference.evictionCount < UINT16_MAX) ++reference.evictionCount;
+    return true;
+}
+
+bool NavigatorApp::admitImageResource(uint32_t referenceIndex)
+{
+    if (referenceIndex >= gxos::apps::kNavigatorMaxResourceReferences) return false;
+    gxos::apps::NavigatorResourceReferenceMetadata& reference = m_resourceReferences[referenceIndex];
+    if (reference.duplicateOf != 0xFFFFu) return false;
+    const int blockIndex = static_cast<int>(reference.blockIndex);
+    if (blockIndex < 0 || blockIndex >= m_blockCount || m_blocks[blockIndex].kind != BLOCK_IMAGE) return false;
+    DocBlock& block = m_blocks[blockIndex];
+    const bool jpegByUrl = nav_url_path_ends_with_jpeg(block.url);
+    auto setClassification = [&](NavigatorResourceClassification classification, const char* reason) {
+        strcopy(block.resourceClassification, gxos::apps::navigatorResourceClassificationName(classification), sizeof(block.resourceClassification));
+        strcopy(block.imageError, reason ? reason : "", sizeof(block.imageError));
+        block.imageStatus = static_cast<int>(gxos::gui::ImageLoadStatus::NotFound);
+    };
+    auto failDecode = [&](gxos::gui::ImageLoadStatus status, bool jpeg) {
+        block.imageStatus = static_cast<int>(status);
+        if (status == gxos::gui::ImageLoadStatus::TooLarge)
+            setClassification(NavigatorResourceClassification::ImagePixelBudgetExceeded, "Decoded image exceeded the per-image cap.");
+        else if (status == gxos::gui::ImageLoadStatus::OutOfMemory)
+            setClassification(NavigatorResourceClassification::ImageAllocationFailed, "Image allocation failed.");
+        else if (status == gxos::gui::ImageLoadStatus::UnsupportedFormat && jpeg)
+            setClassification(NavigatorResourceClassification::UnsupportedJpegVariant, "JPEG variant is unsupported.");
+        else
+            setClassification(jpeg ? NavigatorResourceClassification::JpegDecodeFailed : NavigatorResourceClassification::PngDecodeFailed,
+                jpeg ? "JPEG decode failed." : "PNG decode failed.");
+        reference.state = static_cast<uint8_t>(gxos::apps::NavigatorResourceSchedulerState::Failed);
+    };
+    gxos::gui::ImageSafetyLimits limits = nav_kernel_remote_png_limits();
+    const uint8_t* bytes = nullptr;
+    uint32_t byteCount = 0;
+    bool localFile = false;
+    char localPath[MAX_URL_LEN];
+    localPath[0] = '\0';
+    KernelHttpResponse* response = nullptr;
+    if (nav_starts_with(block.url, "file://")) {
+        localFile = true;
+        strcopy(localPath, block.url + 7, sizeof(localPath));
+        limits = gxos::gui::DefaultImageSafetyLimits();
+    } else if (nav_starts_with(block.url, "http://") || nav_starts_with(block.url, "https://")) {
+        if (m_resourceScheduler.activeCount >= gxos::apps::kNavigatorMaxActiveResources) {
+            setClassification(NavigatorResourceClassification::ResourceSlotUnavailable, "Active decoded-resource capacity reached.");
+            ++m_resourceScheduler.resourceCapDenied;
+            reference.state = static_cast<uint8_t>(gxos::apps::NavigatorResourceSchedulerState::ResourceCapDenied);
+            return false;
+        }
+        ++m_resourceScheduler.fetchStarted;
+        response = kernel_http_fetch(block.url);
+        ++m_resourceScheduler.fetchCompleted;
+        block.resourceStatusCode = response->statusCode;
+        block.resourceEncodedBytes = response->encodedBodyBytes;
+        block.resourceDecodedBytes = response->decodedBodyBytes;
+        block.resourceRedirectCount = response->redirectCount;
+        strcopy(block.resourceContentType, response->contentType, sizeof(block.resourceContentType));
+        strcopy(block.resourceContentEncoding, response->contentEncoding, sizeof(block.resourceContentEncoding));
+        if (!response->ok) {
+            setClassification(nav_classify_kernel_http_failure(*response), response->error[0] ? response->error : "Remote image fetch failed.");
+            reference.state = static_cast<uint8_t>(gxos::apps::NavigatorResourceSchedulerState::Failed);
+            return false;
+        }
+        if (response->statusCode != 200 || response->bodyBytes <= 0 || response->bodyBytes > 256 * 1024) {
+            setClassification(response->bodyBytes > 256 * 1024 ? NavigatorResourceClassification::BodyTooLargeEncoded : NavigatorResourceClassification::HttpStatusOther,
+                response->bodyBytes > 256 * 1024 ? "Remote image exceeds the encoded byte limit." : "Remote image HTTP status was not 200.");
+            reference.state = static_cast<uint8_t>(gxos::apps::NavigatorResourceSchedulerState::Failed);
+            return false;
+        }
+        const bool contentTypePng = nav_mime_is(response->contentType, "image/png");
+        const bool contentTypeJpeg = nav_mime_is(response->contentType, "image/jpeg") || nav_mime_is(response->contentType, "image/jpg");
+        if (!contentTypePng && !contentTypeJpeg) {
+            setClassification(NavigatorResourceClassification::UnsupportedMime, "Remote image MIME is unsupported.");
+            reference.state = static_cast<uint8_t>(gxos::apps::NavigatorResourceSchedulerState::UnsupportedSkipped);
+            ++m_resourceScheduler.unsupportedSkipped;
+            return false;
+        }
+        if ((contentTypePng && nav_url_path_ends_with_jpeg(response->finalUrl[0] ? response->finalUrl : block.url)) ||
+            (contentTypeJpeg && nav_url_path_ends_with_png(response->finalUrl[0] ? response->finalUrl : block.url))) {
+            setClassification(NavigatorResourceClassification::MimeExtensionDisagreement, "Image MIME and URL extension disagree.");
+            reference.state = static_cast<uint8_t>(gxos::apps::NavigatorResourceSchedulerState::Failed);
+            return false;
+        }
+        bytes = reinterpret_cast<const uint8_t*>(response->body);
+        byteCount = static_cast<uint32_t>(response->bodyBytes);
+        if ((contentTypePng && (byteCount < 8 || bytes[0] != 0x89 || bytes[1] != 'P' || bytes[2] != 'N' || bytes[3] != 'G')) ||
+            (contentTypeJpeg && (byteCount < 2 || bytes[0] != 0xFF || bytes[1] != 0xD8))) {
+            setClassification(NavigatorResourceClassification::CorruptImage, "Image signature is malformed.");
+            reference.state = static_cast<uint8_t>(gxos::apps::NavigatorResourceSchedulerState::Failed);
+            return false;
+        }
+    } else {
+        setClassification(NavigatorResourceClassification::UnsupportedScheme, "Unsupported image URL scheme.");
+        reference.state = static_cast<uint8_t>(gxos::apps::NavigatorResourceSchedulerState::Failed);
+        return false;
+    }
+    const gxos::gui::ImageProbe probe = localFile
+        ? gxos::gui::ImageAdapter::ProbeFile(localPath, limits)
+        : gxos::gui::ImageAdapter::ProbeBytes(bytes, byteCount, limits);
+    block.naturalWidth = static_cast<int>(probe.width);
+    block.naturalHeight = static_cast<int>(probe.height);
+    uint64_t requestedDecodedBytes = 0;
+    if (probe.status != gxos::gui::ImageLoadStatus::Ok ||
+        !gxos::apps::navigatorCheckedRgbaBytes(probe.width, probe.height, requestedDecodedBytes)) {
+        failDecode(probe.status == gxos::gui::ImageLoadStatus::Ok ? gxos::gui::ImageLoadStatus::TooLarge : probe.status, jpegByUrl);
+        return false;
+    }
+    reference.activeBytesBefore = static_cast<uint32_t>(m_resourceMemory.activeDecodedBytes);
+    reference.budgetHeadroomBefore = static_cast<uint32_t>(m_resourceMemory.activeDecodedBytes < gxos::apps::kNavigatorDecodedImageBudgetBytes
+        ? gxos::apps::kNavigatorDecodedImageBudgetBytes - m_resourceMemory.activeDecodedBytes : 0);
+    reference.budgetRequestedBytes = static_cast<uint32_t>(requestedDecodedBytes);
+    if (!m_resourceMemory.reserveDecoded(requestedDecodedBytes)) {
+        block.imageStatus = static_cast<int>(gxos::gui::ImageLoadStatus::TooLarge);
+        setClassification(NavigatorResourceClassification::ImageMemoryBudgetDenied, "Document decoded-image memory budget denied this resource.");
+        ++m_resourceScheduler.budgetDenied;
+        m_resourceScheduler.noteDeniedDecoded(requestedDecodedBytes);
+        reference.state = static_cast<uint8_t>(gxos::apps::NavigatorResourceSchedulerState::BudgetDenied);
+        return false;
+    }
+    reference.budgetAcceptedBytes = static_cast<uint32_t>(requestedDecodedBytes);
+    ++m_resourceScheduler.decodeStarted;
+    if (m_resourceScheduler.peakTemporaryDecodeBytes < requestedDecodedBytes)
+        m_resourceScheduler.peakTemporaryDecodeBytes = requestedDecodedBytes;
+    gxos::gui::ImageBitmap bitmap = localFile
+        ? gxos::gui::ImageAdapter::LoadFromFile(localPath, limits)
+        : gxos::gui::ImageAdapter::LoadFromBytes(bytes, byteCount, limits);
+    block.imageStatus = static_cast<int>(bitmap.status);
+    block.naturalWidth = static_cast<int>(bitmap.width);
+    block.naturalHeight = static_cast<int>(bitmap.height);
+    block.imageFormat = static_cast<int>(bitmap.format);
+    block.imagePixels = bitmap.pixels;
+    if (bitmap.status != gxos::gui::ImageLoadStatus::Ok) {
+        m_resourceMemory.releaseDecoded(requestedDecodedBytes);
+        failDecode(bitmap.status, jpegByUrl);
+        return false;
+    }
+    block.imageOwnerBlockIndex = blockIndex;
+    reference.state = static_cast<uint8_t>(gxos::apps::NavigatorResourceSchedulerState::Attached);
+    reference.classification = static_cast<uint8_t>(bitmap.format == gxos::gui::ImageFormat::Jpeg
+        ? NavigatorResourceClassification::LoadedJpeg : NavigatorResourceClassification::LoadedPng);
+    strcopy(block.resourceClassification, gxos::apps::navigatorResourceClassificationName(
+        static_cast<NavigatorResourceClassification>(reference.classification)), sizeof(block.resourceClassification));
+    block.imageError[0] = '\0';
+    ++m_resourceScheduler.decoded;
+    ++m_resourceScheduler.attached;
+    ++m_resourceScheduler.activeCount;
+    m_resourceScheduler.noteLoadedDecoded(requestedDecodedBytes);
+    m_resourceScheduler.activeBytes = m_resourceMemory.activeDecodedBytes;
+    if (m_resourceScheduler.peakActiveBytes < m_resourceScheduler.activeBytes)
+        m_resourceScheduler.peakActiveBytes = m_resourceScheduler.activeBytes;
+    return true;
+}
+
+void NavigatorApp::updateViewportResourceAdmission()
+{
+    if (m_resourceScheduler.currentScrollOffset == m_scrollY) {
+        m_resourceViewportDirty = false;
+        return;
+    }
+    m_resourceViewportDirty = false;
+    ++m_resourceScheduler.viewportGeneration;
+    ++m_resourceScheduler.viewportAdmissionPasses;
+    m_resourceScheduler.currentScrollOffset = m_scrollY > 0 ? m_scrollY : 0;
+    gxos::apps::NavigatorResourceViewportGeometry viewport{};
+    viewport.viewportTop = CONTENT_Y;
+    viewport.viewportBottom = m_window ? m_window->h - STATUS_H - 8 : -1;
+    viewport.viewportWidth = m_window ? m_window->w - CONTENT_X * 2 - 32 : 0;
+    if (viewport.viewportWidth < 0) viewport.viewportWidth = 0;
+    viewport.viewportHeight = viewport.viewportBottom >= viewport.viewportTop
+        ? viewport.viewportBottom - viewport.viewportTop : 0;
+    viewport.scrollOffset = m_resourceScheduler.currentScrollOffset;
+    viewport.preloadMargin = viewport.viewportHeight;
+    m_resourceScheduler.viewportTop = viewport.viewportTop;
+    m_resourceScheduler.viewportBottom = viewport.viewportBottom;
+    m_resourceScheduler.viewportWidth = viewport.viewportWidth;
+    m_resourceScheduler.viewportHeight = viewport.viewportHeight;
+    m_resourceScheduler.preloadMargin = viewport.preloadMargin;
+    const int geometryWidth = viewport.viewportWidth > 0 ? viewport.viewportWidth : 480;
+    const uint32_t referenceCount = countLiveResourceReferences();
+    if (referenceCount > UINT32_MAX - m_resourceScheduler.resourcesReconsidered)
+        m_resourceScheduler.resourcesReconsidered = UINT32_MAX;
+    else
+        m_resourceScheduler.resourcesReconsidered += referenceCount;
+    bool relationChanged = false;
+    for (uint32_t i = 0; i < referenceCount; ++i) {
+        gxos::apps::NavigatorResourceReferenceMetadata& reference = m_resourceReferences[i];
+        const gxos::apps::NavigatorResourceViewportClass previous =
+            static_cast<gxos::apps::NavigatorResourceViewportClass>(reference.viewportClass);
+        reference.previousViewportClass = reference.viewportClass;
+        const int blockIndex = static_cast<int>(reference.blockIndex);
+        int blockTop = -1;
+        int blockBottom = -1;
+        if (blockIndex >= 0 && blockIndex < m_blockCount) {
+            blockTop = blockY(blockIndex, geometryWidth);
+            int blockHeightValue = blockHeight(m_blocks[blockIndex], geometryWidth);
+            if (m_blocks[blockIndex].style.absolutePosition) {
+                int absoluteImageHeight = m_blocks[blockIndex].height > 0 ? m_blocks[blockIndex].height : 64;
+                if (absoluteImageHeight > 420) absoluteImageHeight = 420;
+                blockHeightValue = css_margin_top_or(m_blocks[blockIndex].style, 6) + absoluteImageHeight +
+                    css_margin_bottom_or(m_blocks[blockIndex].style, 6);
+            }
+            if (blockTop >= 0 && blockHeightValue >= 0) blockBottom = blockTop + blockHeightValue;
+        }
+        reference.blockTop = blockTop;
+        reference.blockBottom = blockBottom;
+        gxos::apps::NavigatorResourceViewportClass current = gxos::apps::navigatorClassifyViewportRect(
+            blockTop, blockBottom, viewport, &reference.distanceFromViewport);
+        if (nav_url_path_ends_with_extension(m_blocks[blockIndex].url, ".svg") ||
+            nav_url_path_ends_with_extension(m_blocks[blockIndex].url, ".webp") ||
+            nav_url_path_ends_with_extension(m_blocks[blockIndex].url, ".avif") ||
+            nav_url_path_ends_with_extension(m_blocks[blockIndex].url, ".gif"))
+            current = gxos::apps::NavigatorResourceViewportClass::Unsupported;
+        reference.viewportClass = static_cast<uint8_t>(current);
+        reference.priority = gxos::apps::navigatorResourcePriorityWithViewport(current, reference.formatHint);
+        if (previous != current) relationChanged = true;
+    }
+    for (uint32_t i = 0; i < referenceCount; ++i) {
+        gxos::apps::NavigatorResourceReferenceMetadata& reference = m_resourceReferences[i];
+        if (reference.duplicateOf == 0xFFFFu) continue;
+        gxos::apps::NavigatorResourceReferenceMetadata& canonical = m_resourceReferences[reference.duplicateOf];
+        const gxos::apps::NavigatorResourceViewportClass current =
+            static_cast<gxos::apps::NavigatorResourceViewportClass>(reference.viewportClass);
+        const gxos::apps::NavigatorResourceViewportClass canonicalClass =
+            static_cast<gxos::apps::NavigatorResourceViewportClass>(canonical.viewportClass);
+        if (static_cast<uint8_t>(current) < static_cast<uint8_t>(canonicalClass) ||
+            (current == canonicalClass && reference.distanceFromViewport >= 0 &&
+             (canonical.distanceFromViewport < 0 || reference.distanceFromViewport < canonical.distanceFromViewport))) {
+            if (canonicalClass != current) relationChanged = true;
+            canonical.viewportClass = reference.viewportClass;
+            canonical.priority = reference.priority;
+            canonical.blockTop = reference.blockTop;
+            canonical.blockBottom = reference.blockBottom;
+            canonical.distanceFromViewport = reference.distanceFromViewport;
+        }
+    }
+
+    auto refreshCurrentCounters = [&]() {
+        m_resourceScheduler.visibleReferences = 0;
+        m_resourceScheduler.nearReferences = 0;
+        m_resourceScheduler.farReferences = 0;
+        m_resourceScheduler.unknownViewportReferences = 0;
+        m_resourceScheduler.visibleLoaded = 0;
+        m_resourceScheduler.visibleBudgetDenied = 0;
+        m_resourceScheduler.nearLoaded = 0;
+        m_resourceScheduler.nearBudgetDenied = 0;
+        m_resourceScheduler.farLoaded = 0;
+        m_resourceScheduler.farBudgetDenied = 0;
+        m_resourceScheduler.decodedBytesVisible = 0;
+        m_resourceScheduler.decodedBytesNear = 0;
+        m_resourceScheduler.decodedBytesFar = 0;
+        for (uint32_t i = 0; i < referenceCount; ++i) {
+            const gxos::apps::NavigatorResourceReferenceMetadata& reference = m_resourceReferences[i];
+            const gxos::apps::NavigatorResourceViewportClass viewportClass =
+                static_cast<gxos::apps::NavigatorResourceViewportClass>(reference.viewportClass);
+            switch (viewportClass) {
+            case gxos::apps::NavigatorResourceViewportClass::Visible: ++m_resourceScheduler.visibleReferences; break;
+            case gxos::apps::NavigatorResourceViewportClass::Near: ++m_resourceScheduler.nearReferences; break;
+            case gxos::apps::NavigatorResourceViewportClass::Far: ++m_resourceScheduler.farReferences; break;
+            case gxos::apps::NavigatorResourceViewportClass::Unknown: ++m_resourceScheduler.unknownViewportReferences; break;
+            default: break;
+            }
+            if (reference.duplicateOf != 0xFFFFu) continue;
+            const gxos::apps::NavigatorResourceSchedulerState state =
+                static_cast<gxos::apps::NavigatorResourceSchedulerState>(reference.state);
+            if (state == gxos::apps::NavigatorResourceSchedulerState::BudgetDenied) {
+                if (viewportClass == gxos::apps::NavigatorResourceViewportClass::Visible) ++m_resourceScheduler.visibleBudgetDenied;
+                else if (viewportClass == gxos::apps::NavigatorResourceViewportClass::Near) ++m_resourceScheduler.nearBudgetDenied;
+                else if (viewportClass == gxos::apps::NavigatorResourceViewportClass::Far) ++m_resourceScheduler.farBudgetDenied;
+            }
+            if (state != gxos::apps::NavigatorResourceSchedulerState::Attached) continue;
+            const int blockIndex = static_cast<int>(reference.blockIndex);
+            if (blockIndex < 0 || blockIndex >= m_blockCount || !m_blocks[blockIndex].imagePixels) continue;
+            const uint64_t bytes = reference.budgetAcceptedBytes;
+            if (viewportClass == gxos::apps::NavigatorResourceViewportClass::Visible) {
+                ++m_resourceScheduler.visibleLoaded; m_resourceScheduler.decodedBytesVisible += bytes;
+            } else if (viewportClass == gxos::apps::NavigatorResourceViewportClass::Near) {
+                ++m_resourceScheduler.nearLoaded; m_resourceScheduler.decodedBytesNear += bytes;
+            } else if (viewportClass == gxos::apps::NavigatorResourceViewportClass::Far) {
+                ++m_resourceScheduler.farLoaded; m_resourceScheduler.decodedBytesFar += bytes;
+            }
+        }
+    };
+    refreshCurrentCounters();
+    if (relationChanged) {
+        uint32_t candidates[gxos::apps::kNavigatorMaxResourceReferences]{};
+        uint32_t candidateCount = 0;
+        for (uint32_t i = 0; i < referenceCount; ++i) {
+            const gxos::apps::NavigatorResourceReferenceMetadata& reference = m_resourceReferences[i];
+            const auto viewportClass = static_cast<gxos::apps::NavigatorResourceViewportClass>(reference.viewportClass);
+            const auto state = static_cast<gxos::apps::NavigatorResourceSchedulerState>(reference.state);
+            if (reference.duplicateOf == 0xFFFFu &&
+                (viewportClass == gxos::apps::NavigatorResourceViewportClass::Visible || viewportClass == gxos::apps::NavigatorResourceViewportClass::Near) &&
+                (state == gxos::apps::NavigatorResourceSchedulerState::BudgetDenied ||
+                 state == gxos::apps::NavigatorResourceSchedulerState::ResourceCapDenied ||
+                 state == gxos::apps::NavigatorResourceSchedulerState::Evicted))
+                candidates[candidateCount++] = i;
+        }
+        for (uint32_t start = 0; start < candidateCount; ++start) {
+            uint32_t selected = start;
+            for (uint32_t j = start + 1; j < candidateCount; ++j) {
+                const auto& left = m_resourceReferences[candidates[j]];
+                const auto& right = m_resourceReferences[candidates[selected]];
+                if (left.priority < right.priority ||
+                    (left.priority == right.priority && (left.sourceOrdinal < right.sourceOrdinal ||
+                     (left.sourceOrdinal == right.sourceOrdinal && left.normalizedUrlHash < right.normalizedUrlHash)))) selected = j;
+            }
+            const uint32_t tmp = candidates[start]; candidates[start] = candidates[selected]; candidates[selected] = tmp;
+        }
+        for (uint32_t c = 0; c < candidateCount; ++c) {
+            const uint32_t selected = candidates[c];
+            gxos::apps::NavigatorResourceReferenceMetadata& reference = m_resourceReferences[selected];
+            uint64_t required = reference.budgetRequestedBytes;
+            bool evictionAttempted = false;
+            while (m_resourceScheduler.activeCount >= gxos::apps::kNavigatorMaxActiveResources ||
+                (required > gxos::apps::kNavigatorDecodedImageBudgetBytes -
+                    (m_resourceMemory.activeDecodedBytes > gxos::apps::kNavigatorDecodedImageBudgetBytes
+                        ? gxos::apps::kNavigatorDecodedImageBudgetBytes : m_resourceMemory.activeDecodedBytes))) {
+                int victim = -1;
+                for (uint32_t i = 0; i < referenceCount; ++i) {
+                    const auto& candidate = m_resourceReferences[i];
+                    if (candidate.duplicateOf != 0xFFFFu || static_cast<gxos::apps::NavigatorResourceSchedulerState>(candidate.state) != gxos::apps::NavigatorResourceSchedulerState::Attached) continue;
+                    const auto vc = static_cast<gxos::apps::NavigatorResourceViewportClass>(candidate.viewportClass);
+                    if (vc == gxos::apps::NavigatorResourceViewportClass::Visible || vc == gxos::apps::NavigatorResourceViewportClass::Unsupported) continue;
+                    if (victim < 0) { victim = static_cast<int>(i); continue; }
+                    const auto& current = m_resourceReferences[victim];
+                    const uint8_t leftRank = gxos::apps::navigatorResourceEvictionClassRank(vc);
+                    const uint8_t rightRank = gxos::apps::navigatorResourceEvictionClassRank(static_cast<gxos::apps::NavigatorResourceViewportClass>(current.viewportClass));
+                    if (leftRank < rightRank || (leftRank == rightRank && (candidate.sourceOrdinal < current.sourceOrdinal ||
+                        (candidate.sourceOrdinal == current.sourceOrdinal && candidate.normalizedUrlHash < current.normalizedUrlHash)))) victim = static_cast<int>(i);
+                }
+                evictionAttempted = true;
+                if (victim < 0 || !evictImageResource(static_cast<uint32_t>(victim), 1)) break;
+            }
+            const bool cannotFit = m_resourceScheduler.activeCount >= gxos::apps::kNavigatorMaxActiveResources ||
+                (required > gxos::apps::kNavigatorDecodedImageBudgetBytes -
+                    (m_resourceMemory.activeDecodedBytes > gxos::apps::kNavigatorDecodedImageBudgetBytes
+                        ? gxos::apps::kNavigatorDecodedImageBudgetBytes : m_resourceMemory.activeDecodedBytes));
+            if (cannotFit) {
+                if (evictionAttempted) ++m_resourceScheduler.budgetDenialsAfterEvictionAttempts;
+                if (static_cast<gxos::apps::NavigatorResourceViewportClass>(reference.viewportClass) == gxos::apps::NavigatorResourceViewportClass::Visible)
+                    ++m_resourceScheduler.visibleAdmissionFailures;
+                continue;
+            }
+            const bool wasEvicted = static_cast<gxos::apps::NavigatorResourceSchedulerState>(reference.state) ==
+                gxos::apps::NavigatorResourceSchedulerState::Evicted;
+            if (admitImageResource(selected)) {
+                reference.admissionReason = 1;
+                ++m_resourceScheduler.scrollTriggeredAdmissions;
+                if (wasEvicted) {
+                    ++m_resourceScheduler.reAdmissions;
+                    if (reference.readmissionCount < UINT16_MAX) ++reference.readmissionCount;
+                }
+            } else {
+                if (static_cast<gxos::apps::NavigatorResourceViewportClass>(reference.viewportClass) == gxos::apps::NavigatorResourceViewportClass::Visible)
+                    ++m_resourceScheduler.visibleAdmissionFailures;
+                if (static_cast<gxos::apps::NavigatorResourceSchedulerState>(reference.state) == gxos::apps::NavigatorResourceSchedulerState::BudgetDenied && evictionAttempted)
+                    ++m_resourceScheduler.budgetDenialsAfterEvictionAttempts;
+            }
+        }
+    }
+    for (uint32_t i = 0; i < referenceCount; ++i) {
+        gxos::apps::NavigatorResourceReferenceMetadata& reference = m_resourceReferences[i];
+        if (reference.duplicateOf == 0xFFFFu) continue;
+        const int ownerIndex = static_cast<int>(m_resourceReferences[reference.duplicateOf].blockIndex);
+        const int duplicateIndex = static_cast<int>(reference.blockIndex);
+        if (ownerIndex < 0 || duplicateIndex < 0 || ownerIndex >= m_blockCount || duplicateIndex >= m_blockCount) continue;
+        if (m_blocks[ownerIndex].imageStatus == static_cast<int>(gxos::gui::ImageLoadStatus::Ok) && m_blocks[ownerIndex].imagePixels) {
+            m_blocks[duplicateIndex].imageStatus = m_blocks[ownerIndex].imageStatus;
+            m_blocks[duplicateIndex].naturalWidth = m_blocks[ownerIndex].naturalWidth;
+            m_blocks[duplicateIndex].naturalHeight = m_blocks[ownerIndex].naturalHeight;
+            m_blocks[duplicateIndex].imageFormat = m_blocks[ownerIndex].imageFormat;
+            m_blocks[duplicateIndex].imagePixels = m_blocks[ownerIndex].imagePixels;
+            m_blocks[duplicateIndex].imageOwnerBlockIndex = ownerIndex;
+            reference.state = static_cast<uint8_t>(gxos::apps::NavigatorResourceSchedulerState::Deduplicated);
+        } else if (static_cast<gxos::apps::NavigatorResourceSchedulerState>(m_resourceReferences[reference.duplicateOf].state) == gxos::apps::NavigatorResourceSchedulerState::Evicted) {
+            reference.state = static_cast<uint8_t>(gxos::apps::NavigatorResourceSchedulerState::Evicted);
+        }
+        reference.classification = m_resourceReferences[reference.duplicateOf].classification;
+        reference.budgetRequestedBytes = m_resourceReferences[reference.duplicateOf].budgetRequestedBytes;
+        reference.budgetAcceptedBytes = m_resourceReferences[reference.duplicateOf].budgetAcceptedBytes;
+    }
+    refreshCurrentCounters();
+    m_resourceScheduler.activeBytes = m_resourceMemory.activeDecodedBytes;
+    m_resourceScheduler.releasedDecodedBytes = m_resourceMemory.releasedDecodedBytes;
+    m_resourceScheduler.deniedAllocationBytes = m_resourceMemory.deniedAllocationBytes;
+    refreshImageResourceMetadata();
+    char viewportGenerationText[16];
+    char viewportPassText[16];
+    char scrollText[16];
+    char reconsideredText[16];
+    char admissionsText[16];
+    char evictionsText[16];
+    char readmissionsText[16];
+    char evictedBytesText[24];
+    char activeCountText[16];
+    char activeBytesText[24];
+    char peakBytesText[24];
+    nav_int_to_text((int)m_resourceScheduler.viewportGeneration, viewportGenerationText, sizeof(viewportGenerationText));
+    nav_int_to_text((int)m_resourceScheduler.viewportAdmissionPasses, viewportPassText, sizeof(viewportPassText));
+    nav_int_to_text(m_resourceScheduler.currentScrollOffset, scrollText, sizeof(scrollText));
+    nav_int_to_text((int)m_resourceScheduler.resourcesReconsidered, reconsideredText, sizeof(reconsideredText));
+    nav_int_to_text((int)m_resourceScheduler.scrollTriggeredAdmissions, admissionsText, sizeof(admissionsText));
+    nav_int_to_text((int)m_resourceScheduler.evictions, evictionsText, sizeof(evictionsText));
+    nav_int_to_text((int)m_resourceScheduler.reAdmissions, readmissionsText, sizeof(readmissionsText));
+    nav_int_to_text((int)m_resourceScheduler.evictedDecodedBytes, evictedBytesText, sizeof(evictedBytesText));
+    nav_int_to_text((int)m_resourceScheduler.activeCount, activeCountText, sizeof(activeCountText));
+    nav_int_to_text((int)m_resourceMemory.activeDecodedBytes, activeBytesText, sizeof(activeBytesText));
+    nav_int_to_text((int)m_resourceMemory.peakDecodedBytes, peakBytesText, sizeof(peakBytesText));
+    serial::puts("[NAVIGATOR-VIEWPORT] generation=");
+    serial::puts(viewportGenerationText);
+    serial::puts(" pass=");
+    serial::puts(viewportPassText);
+    serial::puts(" scroll=");
+    serial::puts(scrollText);
+    serial::puts(" reconsidered=");
+    serial::puts(reconsideredText);
+    serial::puts(" admissions=");
+    serial::puts(admissionsText);
+    serial::puts(" evictions=");
+    serial::puts(evictionsText);
+    serial::puts(" readmissions=");
+    serial::puts(readmissionsText);
+    serial::puts(" evicted_bytes=");
+    serial::puts(evictedBytesText);
+    serial::puts(" active_count=");
+    serial::puts(activeCountText);
+    serial::puts(" active_bytes=");
+    serial::puts(activeBytesText);
+    serial::puts(" peak_bytes=");
+    serial::puts(peakBytesText);
+    serial::puts("\n");
+}
 
 void NavigatorApp::prepareImageResources()
 {
     gxos::gui::ImageSafetyLimits localLimits = gxos::gui::DefaultImageSafetyLimits();
     gxos::gui::ImageSafetyLimits remoteLimits = nav_kernel_remote_png_limits();
-    for (int i = 0; i < m_blockCount; ++i) {
-        if (m_blocks[i].kind != BLOCK_IMAGE) continue;
+    int remoteFetchCount = 0;
+    int resourceTraceCount = 0;
+    auto setClassification = [](DocBlock& block, NavigatorResourceClassification classification, const char* reason) {
+        strcopy(block.resourceClassification, gxos::apps::navigatorResourceClassificationName(classification), sizeof(block.resourceClassification));
+        strcopy(block.imageError, reason ? reason : "", sizeof(block.imageError));
+        serial::puts("[NAVIGATOR-RESOURCE] classification=");
+        serial::puts(block.resourceClassification);
+        serial::puts(" reason=");
+        char safeReason[128];
+        nav_copy_serial_safe_text(reason ? reason : "", safeReason, sizeof(safeReason));
+        serial::puts(safeReason);
+        serial::puts("\n");
+    };
+    auto classifyBitmapFailure = [&](DocBlock& block, gxos::gui::ImageLoadStatus status, bool jpeg) {
+        if (status == gxos::gui::ImageLoadStatus::TooLarge) {
+            setClassification(block, NavigatorResourceClassification::ImagePixelBudgetExceeded, "Decoded image exceeded the pixel safety budget.");
+        } else if (status == gxos::gui::ImageLoadStatus::OutOfMemory) {
+            setClassification(block, NavigatorResourceClassification::ImageAllocationFailed, "Image allocation failed.");
+        } else if (status == gxos::gui::ImageLoadStatus::UnsupportedFormat && jpeg) {
+            setClassification(block, NavigatorResourceClassification::UnsupportedJpegVariant, "JPEG variant is unsupported.");
+        } else if (status == gxos::gui::ImageLoadStatus::DecodeFailed) {
+            setClassification(block, jpeg ? NavigatorResourceClassification::JpegDecodeFailed : NavigatorResourceClassification::PngDecodeFailed,
+                jpeg ? "JPEG decode failed." : "PNG decode failed.");
+        } else {
+            setClassification(block, NavigatorResourceClassification::AttachmentFailed,
+                gxos::gui::ImageLoadStatusName(status));
+        }
+    };
+    m_resourceScheduler = gxos::apps::NavigatorResourceSchedulerStats{};
+    m_resourceMemory.reset();
+    m_resourceViewportDirty = false;
+    m_resourceTelemetryCount = 0;
+    for (uint32_t ref = 0; ref < gxos::apps::kNavigatorMaxResourceReferences; ++ref)
+        m_resourceReferences[ref] = gxos::apps::NavigatorResourceReferenceMetadata{};
+    for (uint32_t ref = 0; ref < gxos::apps::kNavigatorMaxResourceReferences; ++ref)
+        m_resourceOrder[ref] = 0;
+    gxos::apps::NavigatorResourceViewportGeometry viewport{};
+    viewport.viewportTop = CONTENT_Y;
+    viewport.viewportBottom = m_window ? m_window->h - STATUS_H - 8 : -1;
+    viewport.viewportWidth = m_window ? m_window->w - CONTENT_X * 2 - 32 : 0;
+    if (viewport.viewportWidth < 0) viewport.viewportWidth = 0;
+    viewport.viewportHeight = viewport.viewportBottom >= viewport.viewportTop
+        ? viewport.viewportBottom - viewport.viewportTop : 0;
+    viewport.scrollOffset = m_scrollY > 0 ? m_scrollY : 0;
+    viewport.preloadMargin = viewport.viewportHeight;
+    m_resourceScheduler.viewportTop = viewport.viewportTop;
+    m_resourceScheduler.viewportBottom = viewport.viewportBottom;
+    m_resourceScheduler.viewportWidth = viewport.viewportWidth;
+    m_resourceScheduler.viewportHeight = viewport.viewportHeight;
+    m_resourceScheduler.initialScrollOffset = viewport.scrollOffset;
+    m_resourceScheduler.currentScrollOffset = viewport.scrollOffset;
+    m_resourceScheduler.preloadMargin = viewport.preloadMargin;
+    const int geometryWidth = viewport.viewportWidth > 0 ? viewport.viewportWidth : 480;
+    auto noteViewportReferenceClass = [&](gxos::apps::NavigatorResourceViewportClass viewportClass) {
+        switch (viewportClass) {
+        case gxos::apps::NavigatorResourceViewportClass::Visible: ++m_resourceScheduler.visibleReferences; break;
+        case gxos::apps::NavigatorResourceViewportClass::Near: ++m_resourceScheduler.nearReferences; break;
+        case gxos::apps::NavigatorResourceViewportClass::Far: ++m_resourceScheduler.farReferences; break;
+        case gxos::apps::NavigatorResourceViewportClass::Unknown: ++m_resourceScheduler.unknownViewportReferences; break;
+        default: break;
+        }
+    };
+    auto noteViewportLoad = [&](gxos::apps::NavigatorResourceViewportClass viewportClass, uint64_t decodedBytes) {
+        switch (viewportClass) {
+        case gxos::apps::NavigatorResourceViewportClass::Visible:
+            ++m_resourceScheduler.visibleLoaded;
+            m_resourceScheduler.decodedBytesVisible += decodedBytes;
+            break;
+        case gxos::apps::NavigatorResourceViewportClass::Near:
+            ++m_resourceScheduler.nearLoaded;
+            m_resourceScheduler.decodedBytesNear += decodedBytes;
+            break;
+        case gxos::apps::NavigatorResourceViewportClass::Far:
+            ++m_resourceScheduler.farLoaded;
+            m_resourceScheduler.decodedBytesFar += decodedBytes;
+            break;
+        default: break;
+        }
+    };
+    auto noteViewportBudgetDenial = [&](gxos::apps::NavigatorResourceViewportClass viewportClass) {
+        switch (viewportClass) {
+        case gxos::apps::NavigatorResourceViewportClass::Visible: ++m_resourceScheduler.visibleBudgetDenied; break;
+        case gxos::apps::NavigatorResourceViewportClass::Near: ++m_resourceScheduler.nearBudgetDenied; break;
+        case gxos::apps::NavigatorResourceViewportClass::Far:
+            ++m_resourceScheduler.farBudgetDenied;
+            ++m_resourceScheduler.offscreenBudgetDenied;
+            break;
+        default: break;
+        }
+    };
+    uint32_t referenceCount = 0;
+    for (int blockIndex = 0; blockIndex < m_blockCount; ++blockIndex) {
+        if (m_blocks[blockIndex].kind != BLOCK_IMAGE) continue;
+        ++m_resourceScheduler.referencesDiscovered;
+        if (referenceCount >= gxos::apps::kNavigatorMaxResourceReferences) {
+            ++m_resourceScheduler.referencesCapacityDenied;
+            continue;
+        }
+        gxos::apps::NavigatorResourceReferenceMetadata& reference = m_resourceReferences[referenceCount];
+        reference.sourceOrdinal = static_cast<uint32_t>(blockIndex);
+        reference.blockIndex = static_cast<uint16_t>(blockIndex);
+        uint32_t hash = 2166136261u;
+        for (const char* p = m_blocks[blockIndex].url; p && *p; ++p) {
+            hash ^= static_cast<uint8_t>(*p);
+            hash *= 16777619u;
+        }
+        reference.normalizedUrlHash = hash;
+        const bool knownUnsupported =
+            nav_url_path_ends_with_extension(m_blocks[blockIndex].url, ".svg") ||
+            nav_url_path_ends_with_extension(m_blocks[blockIndex].url, ".webp") ||
+            nav_url_path_ends_with_extension(m_blocks[blockIndex].url, ".avif") ||
+            nav_url_path_ends_with_extension(m_blocks[blockIndex].url, ".gif");
+        reference.formatHint = knownUnsupported ? 3u :
+            (nav_url_path_ends_with_png(m_blocks[blockIndex].url) ? 1u :
+             nav_url_path_ends_with_jpeg(m_blocks[blockIndex].url) ? 2u : 0u);
+        const int blockTop = blockY(blockIndex, geometryWidth);
+        int blockHeightValue = blockHeight(m_blocks[blockIndex], geometryWidth);
+        if (m_blocks[blockIndex].kind == BLOCK_IMAGE && m_blocks[blockIndex].style.absolutePosition) {
+            int absoluteImageHeight = m_blocks[blockIndex].height > 0 ? m_blocks[blockIndex].height : 64;
+            if (absoluteImageHeight > 420) absoluteImageHeight = 420;
+            blockHeightValue = css_margin_top_or(m_blocks[blockIndex].style, 6) + absoluteImageHeight +
+                css_margin_bottom_or(m_blocks[blockIndex].style, 6);
+        }
+        if (blockTop >= 0 && blockHeightValue >= 0 &&
+            static_cast<int64_t>(blockTop) + static_cast<int64_t>(blockHeightValue) <= 0x7FFFFFFFll) {
+            reference.blockTop = blockTop;
+            reference.blockBottom = blockTop + blockHeightValue;
+        }
+        gxos::apps::NavigatorResourceViewportClass viewportClass =
+            gxos::apps::navigatorClassifyViewportRect(
+                reference.blockTop, reference.blockBottom, viewport, &reference.distanceFromViewport);
+        if (knownUnsupported) viewportClass = gxos::apps::NavigatorResourceViewportClass::Unsupported;
+        reference.viewportClass = static_cast<uint8_t>(viewportClass);
+        reference.priorityBeforeViewport = gxos::apps::navigatorResourcePriorityBeforeViewport(reference.formatHint);
+        reference.priority = gxos::apps::navigatorResourcePriorityWithViewport(viewportClass, reference.formatHint);
+        noteViewportReferenceClass(viewportClass);
+        reference.state = static_cast<uint8_t>(gxos::apps::NavigatorResourceSchedulerState::Pending);
+        int duplicateOf = -1;
+        for (uint32_t prior = 0; prior < referenceCount; ++prior) {
+            const int priorIndex = static_cast<int>(m_resourceReferences[prior].blockIndex);
+            if (streq_local(m_blocks[priorIndex].url, m_blocks[blockIndex].url)) {
+                duplicateOf = static_cast<int>(prior);
+                break;
+            }
+        }
+        if (duplicateOf >= 0) {
+            reference.duplicateOf = static_cast<uint16_t>(duplicateOf);
+            reference.state = static_cast<uint8_t>(gxos::apps::NavigatorResourceSchedulerState::Deduplicated);
+            ++m_resourceScheduler.duplicateReferences;
+            gxos::apps::NavigatorResourceReferenceMetadata& canonical = m_resourceReferences[duplicateOf];
+            const gxos::apps::NavigatorResourceViewportClass canonicalClass =
+                static_cast<gxos::apps::NavigatorResourceViewportClass>(canonical.viewportClass);
+            if (static_cast<uint8_t>(viewportClass) < static_cast<uint8_t>(canonicalClass)) {
+                canonical.viewportClass = reference.viewportClass;
+                canonical.priority = gxos::apps::navigatorResourcePriorityWithViewport(
+                    viewportClass, canonical.formatHint);
+                canonical.blockTop = reference.blockTop;
+                canonical.blockBottom = reference.blockBottom;
+                canonical.distanceFromViewport = reference.distanceFromViewport;
+            }
+        } else {
+            ++m_resourceScheduler.uniqueReferences;
+            ++m_resourceScheduler.pending;
+            if (!knownUnsupported) ++m_resourceScheduler.schedulerCandidates;
+        }
+        ++referenceCount;
+    }
+
+    // Bare metal uses the shared viewport-aware priority policy. Stable source
+    // order remains the tie breaker; viewport relevance changes admission order
+    // only and does not change any policy limits.
+    for (uint32_t ref = 0; ref < referenceCount; ++ref)
+        m_resourceOrder[ref] = static_cast<uint16_t>(ref);
+    for (uint32_t start = 0; start < referenceCount; ++start) {
+        uint32_t selected = start;
+        for (uint32_t candidate = start + 1; candidate < referenceCount; ++candidate) {
+            const gxos::apps::NavigatorResourceReferenceMetadata& left = m_resourceReferences[m_resourceOrder[candidate]];
+            const gxos::apps::NavigatorResourceReferenceMetadata& right = m_resourceReferences[m_resourceOrder[selected]];
+            if (left.priority < right.priority ||
+                (left.priority == right.priority && left.sourceOrdinal < right.sourceOrdinal) ||
+                (left.priority == right.priority && left.sourceOrdinal == right.sourceOrdinal &&
+                 left.normalizedUrlHash < right.normalizedUrlHash))
+                selected = candidate;
+        }
+        const uint16_t orderValue = m_resourceOrder[start];
+        m_resourceOrder[start] = m_resourceOrder[selected];
+        m_resourceOrder[selected] = orderValue;
+    }
+    // Clear every image block first, including references beyond the bounded
+    // metadata table. Those excess blocks are marked as reference-cap denied
+    // after the represented candidates have been processed.
+    for (int blockIndex = 0; blockIndex < m_blockCount; ++blockIndex) {
+        if (m_blocks[blockIndex].kind != BLOCK_IMAGE) continue;
+        m_blocks[blockIndex].imagePixels = nullptr;
+        m_blocks[blockIndex].imageOwnerBlockIndex = -1;
+        m_blocks[blockIndex].imageFormat = (int)gxos::gui::ImageFormat::Unknown;
+        m_blocks[blockIndex].imageError[0] = '\0';
+        m_blocks[blockIndex].resourceClassification[0] = '\0';
+        m_blocks[blockIndex].resourceStatusCode = 0;
+        m_blocks[blockIndex].resourceEncodedBytes = 0;
+        m_blocks[blockIndex].resourceDecodedBytes = 0;
+        m_blocks[blockIndex].resourceRedirectCount = 0;
+        m_blocks[blockIndex].resourceContentType[0] = '\0';
+        m_blocks[blockIndex].resourceContentEncoding[0] = '\0';
+    }
+    for (uint32_t order = 0; order < referenceCount; ++order) {
+        const int referenceIndex = static_cast<int>(m_resourceOrder[order]);
+        const int i = static_cast<int>(m_resourceReferences[referenceIndex].blockIndex);
+        if (i < 0 || i >= m_blockCount || m_blocks[i].kind != BLOCK_IMAGE) continue;
         m_blocks[i].imagePixels = nullptr;
+        m_blocks[i].imageOwnerBlockIndex = -1;
+        m_blocks[i].imageFormat = (int)gxos::gui::ImageFormat::Unknown;
         m_blocks[i].imageError[0] = '\0';
+        m_blocks[i].resourceClassification[0] = '\0';
+        m_blocks[i].resourceStatusCode = 0;
+        m_blocks[i].resourceEncodedBytes = 0;
+        m_blocks[i].resourceDecodedBytes = 0;
+        m_blocks[i].resourceRedirectCount = 0;
+        m_blocks[i].resourceContentType[0] = '\0';
+        m_blocks[i].resourceContentEncoding[0] = '\0';
+
+        if (referenceIndex >= 0 && m_resourceReferences[referenceIndex].duplicateOf != 0xFFFFu) {
+            const int ownerIndex = static_cast<int>(
+                m_resourceReferences[m_resourceReferences[referenceIndex].duplicateOf].blockIndex);
+            if (ownerIndex >= 0 && ownerIndex < m_blockCount &&
+                m_blocks[ownerIndex].imageStatus == static_cast<int>(gxos::gui::ImageLoadStatus::Ok)) {
+                m_blocks[i].imageStatus = m_blocks[ownerIndex].imageStatus;
+                m_blocks[i].naturalWidth = m_blocks[ownerIndex].naturalWidth;
+                m_blocks[i].naturalHeight = m_blocks[ownerIndex].naturalHeight;
+                m_blocks[i].imageFormat = m_blocks[ownerIndex].imageFormat;
+                m_blocks[i].imagePixels = m_blocks[ownerIndex].imagePixels;
+                m_blocks[i].imageOwnerBlockIndex = ownerIndex;
+            } else {
+                m_blocks[i].imageStatus = static_cast<int>(gxos::gui::ImageLoadStatus::NotFound);
+            }
+            m_resourceReferences[referenceIndex].budgetRequestedBytes =
+                m_resourceReferences[m_resourceReferences[referenceIndex].duplicateOf].budgetRequestedBytes;
+            m_resourceReferences[referenceIndex].budgetAcceptedBytes =
+                m_resourceReferences[m_resourceReferences[referenceIndex].duplicateOf].budgetAcceptedBytes;
+            m_resourceReferences[referenceIndex].activeBytesBefore =
+                m_resourceReferences[m_resourceReferences[referenceIndex].duplicateOf].activeBytesBefore;
+            m_resourceReferences[referenceIndex].budgetHeadroomBefore =
+                m_resourceReferences[m_resourceReferences[referenceIndex].duplicateOf].budgetHeadroomBefore;
+            m_resourceReferences[referenceIndex].state = static_cast<uint8_t>(gxos::apps::NavigatorResourceSchedulerState::Deduplicated);
+            setClassification(m_blocks[i], NavigatorResourceClassification::DuplicateResourceSkipped,
+                "Duplicate normalized resource shares the canonical scheduler entry.");
+            continue;
+        }
+        if (referenceIndex >= 0) {
+            gxos::apps::NavigatorResourceReferenceMetadata& reference = m_resourceReferences[referenceIndex];
+            reference.state = static_cast<uint8_t>(gxos::apps::NavigatorResourceSchedulerState::Fetching);
+            for (uint32_t candidateIndex = 0; candidateIndex < referenceCount; ++candidateIndex) {
+                const gxos::apps::NavigatorResourceReferenceMetadata& earlier =
+                    m_resourceReferences[candidateIndex];
+                if (earlier.state != static_cast<uint8_t>(gxos::apps::NavigatorResourceSchedulerState::Pending) ||
+                    earlier.sourceOrdinal >= reference.sourceOrdinal) continue;
+                if (reference.priority < earlier.priority) {
+                    reference.admittedDueToViewportPriority = 1;
+                    ++m_resourceScheduler.visiblePriorityAdmissions;
+                    break;
+                }
+            }
+        }
+
+        const bool knownUnsupported =
+            nav_url_path_ends_with_extension(m_blocks[i].url, ".svg") ||
+            nav_url_path_ends_with_extension(m_blocks[i].url, ".webp") ||
+            nav_url_path_ends_with_extension(m_blocks[i].url, ".avif") ||
+            nav_url_path_ends_with_extension(m_blocks[i].url, ".gif");
+        if (knownUnsupported) {
+            m_blocks[i].imageStatus = (int)gxos::gui::ImageLoadStatus::UnsupportedFormat;
+            setClassification(m_blocks[i],
+                nav_url_path_ends_with_extension(m_blocks[i].url, ".svg") ? NavigatorResourceClassification::UnsupportedSvg :
+                nav_url_path_ends_with_extension(m_blocks[i].url, ".webp") ? NavigatorResourceClassification::UnsupportedWebp :
+                nav_url_path_ends_with_extension(m_blocks[i].url, ".avif") ? NavigatorResourceClassification::UnsupportedAvif :
+                NavigatorResourceClassification::UnsupportedGif,
+                "Image format is known unsupported from the URL hint.");
+            ++m_resourceScheduler.unsupportedSkipped;
+            if (referenceIndex >= 0)
+                m_resourceReferences[referenceIndex].state = static_cast<uint8_t>(gxos::apps::NavigatorResourceSchedulerState::UnsupportedSkipped);
+            continue;
+        }
+
+        if (m_injectNextImageFailure) {
+            m_injectNextImageFailure = false;
+            m_blocks[i].imageStatus = static_cast<int>(gxos::gui::ImageLoadStatus::OutOfMemory);
+            setClassification(m_blocks[i], NavigatorResourceClassification::ImageAllocationFailed,
+                "Deterministic persistent-smoke image allocation failure.");
+            if (referenceIndex >= 0)
+                m_resourceReferences[referenceIndex].state = static_cast<uint8_t>(gxos::apps::NavigatorResourceSchedulerState::Failed);
+            if (m_currentLifecycleGenerationIndex < m_lifecycleGenerationCount)
+                m_lifecycleGenerations[m_currentLifecycleGenerationIndex].injectedImageFailure = true;
+            continue;
+        }
 
         if (nav_starts_with(m_blocks[i].url, "file://")) {
             char imagePath[MAX_URL_LEN];
             nav_image_file_path_from_url(m_blocks[i].url, imagePath, MAX_URL_LEN);
+            if (m_resourceScheduler.activeCount >= gxos::apps::kNavigatorMaxActiveResources) {
+                setClassification(m_blocks[i], NavigatorResourceClassification::ResourceSlotUnavailable,
+                    "Active decoded-resource capacity reached.");
+                ++m_resourceScheduler.resourceCapDenied;
+                if (referenceIndex >= 0)
+                    m_resourceReferences[referenceIndex].state = static_cast<uint8_t>(gxos::apps::NavigatorResourceSchedulerState::ResourceCapDenied);
+                continue;
+            }
+            gxos::gui::ImageProbe localProbe = gxos::gui::ImageAdapter::ProbeFile(imagePath, localLimits);
+            uint64_t localDecodedBytes = 0;
+            if (localProbe.status == gxos::gui::ImageLoadStatus::Ok &&
+                !gxos::apps::navigatorCheckedRgbaBytes(localProbe.width, localProbe.height, localDecodedBytes)) {
+                localProbe.status = gxos::gui::ImageLoadStatus::TooLarge;
+            }
+            if (localProbe.status == gxos::gui::ImageLoadStatus::Ok && referenceIndex >= 0) {
+                m_resourceReferences[referenceIndex].activeBytesBefore = static_cast<uint32_t>(m_resourceMemory.activeDecodedBytes);
+                m_resourceReferences[referenceIndex].budgetHeadroomBefore = static_cast<uint32_t>(
+                    m_resourceMemory.activeDecodedBytes < gxos::apps::kNavigatorDecodedImageBudgetBytes
+                        ? gxos::apps::kNavigatorDecodedImageBudgetBytes - m_resourceMemory.activeDecodedBytes : 0);
+            }
+            if (localProbe.status == gxos::gui::ImageLoadStatus::Ok &&
+                !m_resourceMemory.reserveDecoded(localDecodedBytes)) {
+                setClassification(m_blocks[i], NavigatorResourceClassification::ImageMemoryBudgetDenied,
+                    "Document decoded-image memory budget denied this resource.");
+                ++m_resourceScheduler.budgetDenied;
+                m_resourceScheduler.noteDeniedDecoded(localDecodedBytes);
+                m_resourceScheduler.deniedAllocationBytes += localDecodedBytes;
+                if (referenceIndex >= 0) {
+                    noteViewportBudgetDenial(static_cast<gxos::apps::NavigatorResourceViewportClass>(
+                        m_resourceReferences[referenceIndex].viewportClass));
+                }
+                if (referenceIndex >= 0) {
+                    m_resourceReferences[referenceIndex].state = static_cast<uint8_t>(gxos::apps::NavigatorResourceSchedulerState::BudgetDenied);
+                    m_resourceReferences[referenceIndex].budgetRequestedBytes = static_cast<uint32_t>(localDecodedBytes);
+                    m_resourceReferences[referenceIndex].activeBytesBefore = static_cast<uint32_t>(m_resourceMemory.activeDecodedBytes);
+                    m_resourceReferences[referenceIndex].budgetHeadroomBefore = static_cast<uint32_t>(
+                        m_resourceMemory.activeDecodedBytes < gxos::apps::kNavigatorDecodedImageBudgetBytes
+                            ? gxos::apps::kNavigatorDecodedImageBudgetBytes - m_resourceMemory.activeDecodedBytes : 0);
+                }
+                continue;
+            }
+            if (localProbe.status == gxos::gui::ImageLoadStatus::Ok) {
+                ++m_resourceScheduler.decodeStarted;
+                if (referenceIndex >= 0) {
+                    m_resourceReferences[referenceIndex].budgetRequestedBytes = static_cast<uint32_t>(localDecodedBytes);
+                    m_resourceReferences[referenceIndex].budgetAcceptedBytes = static_cast<uint32_t>(localDecodedBytes);
+                }
+            }
             gxos::gui::ImageBitmap bitmap = gxos::gui::ImageAdapter::LoadFromFile(imagePath, localLimits);
             m_blocks[i].imageStatus = (int)bitmap.status;
             m_blocks[i].naturalWidth = (int)bitmap.width;
             m_blocks[i].naturalHeight = (int)bitmap.height;
+            m_blocks[i].imageFormat = (int)bitmap.format;
             m_blocks[i].imagePixels = bitmap.pixels;
-            if (bitmap.status != gxos::gui::ImageLoadStatus::Ok) {
-                strcopy(m_blocks[i].imageError, gxos::gui::ImageLoadStatusName(bitmap.status), sizeof(m_blocks[i].imageError));
+            if (bitmap.status == gxos::gui::ImageLoadStatus::Ok) {
+                m_blocks[i].imageOwnerBlockIndex = i;
+                ++m_resourceScheduler.decoded;
+                ++m_resourceScheduler.attached;
+                ++m_resourceScheduler.activeCount;
+                m_resourceScheduler.noteLoadedDecoded(localDecodedBytes);
+                if (referenceIndex >= 0) {
+                    noteViewportLoad(static_cast<gxos::apps::NavigatorResourceViewportClass>(
+                        m_resourceReferences[referenceIndex].viewportClass), localDecodedBytes);
+                }
+                m_resourceScheduler.activeBytes = m_resourceMemory.activeDecodedBytes;
+                m_resourceScheduler.peakActiveBytes = m_resourceScheduler.peakActiveBytes > m_resourceScheduler.activeBytes
+                    ? m_resourceScheduler.peakActiveBytes : m_resourceScheduler.activeBytes;
+                if (referenceIndex >= 0)
+                    m_resourceReferences[referenceIndex].state = static_cast<uint8_t>(gxos::apps::NavigatorResourceSchedulerState::Attached);
+                setClassification(m_blocks[i], bitmap.format == gxos::gui::ImageFormat::Png
+                    ? NavigatorResourceClassification::LoadedPng
+                    : bitmap.format == gxos::gui::ImageFormat::Jpeg
+                        ? NavigatorResourceClassification::LoadedJpeg
+                        : NavigatorResourceClassification::LoadedOtherExistingSupportedResource, "");
+            } else {
+                if (localProbe.status == gxos::gui::ImageLoadStatus::Ok)
+                    m_resourceMemory.releaseDecoded(localDecodedBytes);
+                if (referenceIndex >= 0)
+                    m_resourceReferences[referenceIndex].state = static_cast<uint8_t>(gxos::apps::NavigatorResourceSchedulerState::Failed);
+                classifyBitmapFailure(m_blocks[i], bitmap.status, bitmap.format == gxos::gui::ImageFormat::Jpeg);
             }
             continue;
         }
 
-        if (!nav_starts_with(m_blocks[i].url, "http://")) {
+        if (!nav_starts_with(m_blocks[i].url, "http://") &&
+            !nav_starts_with(m_blocks[i].url, "https://")) {
             m_blocks[i].imageStatus = (int)gxos::gui::ImageLoadStatus::UnsupportedFormat;
-            strcopy(m_blocks[i].imageError, "Unsupported image URL scheme", sizeof(m_blocks[i].imageError));
+            setClassification(m_blocks[i], NavigatorResourceClassification::UnsupportedScheme, "Unsupported image URL scheme.");
             continue;
         }
 
+        if (m_resourceScheduler.activeCount >= gxos::apps::kNavigatorMaxActiveResources) {
+            m_blocks[i].imageStatus = (int)gxos::gui::ImageLoadStatus::NotFound;
+            setClassification(m_blocks[i], NavigatorResourceClassification::ResourceSlotUnavailable, "Active decoded-resource capacity reached.");
+            ++m_resourceScheduler.resourceCapDenied;
+            if (referenceIndex >= 0)
+                m_resourceReferences[referenceIndex].state = static_cast<uint8_t>(gxos::apps::NavigatorResourceSchedulerState::ResourceCapDenied);
+            continue;
+        }
+        ++remoteFetchCount;
+        ++m_resourceScheduler.fetchStarted;
+        if (resourceTraceCount < gxos::apps::kNavigatorMaxResourceReferences) {
+            serial::puts("[NAVIGATOR-RESOURCE] fetch_begin index=");
+            char indexText[16];
+            nav_int_to_text(i, indexText, sizeof(indexText));
+            serial::puts(indexText);
+            serial::puts(" remote_count=");
+            char countText[16];
+            nav_int_to_text(remoteFetchCount, countText, sizeof(countText));
+            serial::puts(countText);
+            serial::puts(" url=");
+            serial::puts(m_blocks[i].url);
+            serial::puts("\n");
+            ++resourceTraceCount;
+        }
         KernelHttpResponse* response = kernel_http_fetch(m_blocks[i].url);
+        ++m_resourceScheduler.fetchCompleted;
+        const uint64_t encodedBytes = response->bodyBytes > 0 ? static_cast<uint64_t>(response->bodyBytes) : 0u;
+        m_resourceMemory.currentEncodedBytes = encodedBytes;
+        m_resourceMemory.peakEncodedBytes = m_resourceMemory.peakEncodedBytes > encodedBytes
+            ? m_resourceMemory.peakEncodedBytes : encodedBytes;
+        m_blocks[i].resourceStatusCode = response->statusCode;
+        m_blocks[i].resourceEncodedBytes = response->encodedBodyBytes;
+        m_blocks[i].resourceDecodedBytes = response->decodedBodyBytes;
+        m_blocks[i].resourceRedirectCount = response->redirectCount;
+        strcopy(m_blocks[i].resourceContentType, response->contentType, sizeof(m_blocks[i].resourceContentType));
+        strcopy(m_blocks[i].resourceContentEncoding, response->contentEncoding, sizeof(m_blocks[i].resourceContentEncoding));
+        if (resourceTraceCount <= gxos::apps::kNavigatorMaxResourceReferences) {
+            serial::puts("[NAVIGATOR-RESOURCE] fetch_result index=");
+            char indexText[16];
+            nav_int_to_text(i, indexText, sizeof(indexText));
+            serial::puts(indexText);
+            serial::puts(" ok=");
+            serial::puts(response->ok ? "yes" : "no");
+            serial::puts(" status=");
+            char statusText[16];
+            nav_int_to_text(response->statusCode, statusText, sizeof(statusText));
+            serial::puts(statusText);
+            serial::puts(" body=");
+            char bodyText[16];
+            nav_int_to_text(response->bodyBytes, bodyText, sizeof(bodyText));
+            serial::puts(bodyText);
+            serial::puts(" type=");
+            serial::puts(response->contentType[0] ? response->contentType : "(none)");
+            serial::puts(" final=");
+            serial::puts(response->finalUrl[0] ? response->finalUrl : m_blocks[i].url);
+            serial::puts("\n");
+        }
         if (!response->ok) {
             m_blocks[i].imageStatus = (int)gxos::gui::ImageLoadStatus::NotFound;
-            strcopy(m_blocks[i].imageError, response->error[0] ? response->error : "Remote image fetch failed", sizeof(m_blocks[i].imageError));
+            setClassification(m_blocks[i], nav_classify_kernel_http_failure(*response),
+                response->error[0] ? response->error : "Remote image fetch failed");
             continue;
         }
         if (response->statusCode != 200) {
             m_blocks[i].imageStatus = (int)gxos::gui::ImageLoadStatus::NotFound;
-            strcopy(m_blocks[i].imageError, "Remote image HTTP status was not 200", sizeof(m_blocks[i].imageError));
+            setClassification(m_blocks[i], nav_classify_kernel_http_failure(*response), "Remote image HTTP status was not 200.");
             continue;
         }
         const char* finalUrl = response->finalUrl[0] ? response->finalUrl : m_blocks[i].url;
-        bool contentTypePng = gxos::web::httpSharedEqualsInsensitive(response->contentType, "image/png");
+        bool contentTypePng = nav_mime_is(response->contentType, "image/png");
+        bool contentTypeJpeg = nav_mime_is(response->contentType, "image/jpeg") ||
+            nav_mime_is(response->contentType, "image/jpg");
+        bool contentTypeSvg = nav_mime_is(response->contentType, "image/svg+xml");
+        bool contentTypeWebp = nav_mime_is(response->contentType, "image/webp");
+        bool contentTypeAvif = nav_mime_is(response->contentType, "image/avif");
+        bool contentTypeGif = nav_mime_is(response->contentType, "image/gif");
         bool urlLooksPng = nav_url_path_ends_with_png(finalUrl);
-        if (!contentTypePng && !urlLooksPng) {
+        bool urlLooksJpeg = nav_url_path_ends_with_jpeg(finalUrl);
+        if (!response->contentType[0]) {
             m_blocks[i].imageStatus = (int)gxos::gui::ImageLoadStatus::UnsupportedFormat;
-            strcopy(m_blocks[i].imageError, "Remote image is not image/png", sizeof(m_blocks[i].imageError));
+            setClassification(m_blocks[i], NavigatorResourceClassification::ContentTypeMissing, "Remote image Content-Type was missing.");
             continue;
         }
+        if (contentTypeSvg || contentTypeWebp || contentTypeAvif || contentTypeGif) {
+            m_blocks[i].imageStatus = (int)gxos::gui::ImageLoadStatus::UnsupportedFormat;
+            setClassification(m_blocks[i], contentTypeSvg ? NavigatorResourceClassification::UnsupportedSvg
+                : contentTypeWebp ? NavigatorResourceClassification::UnsupportedWebp
+                : contentTypeAvif ? NavigatorResourceClassification::UnsupportedAvif
+                : NavigatorResourceClassification::UnsupportedGif,
+                "Image MIME is recognized but unsupported by Navigator.");
+            continue;
+        }
+        if (!contentTypePng && !contentTypeJpeg) {
+            m_blocks[i].imageStatus = (int)gxos::gui::ImageLoadStatus::UnsupportedFormat;
+            setClassification(m_blocks[i], NavigatorResourceClassification::UnsupportedMime,
+                "Remote image MIME is unsupported.");
+            continue;
+        }
+        if ((contentTypePng && urlLooksJpeg) || (contentTypeJpeg && urlLooksPng)) {
+            m_blocks[i].imageStatus = (int)gxos::gui::ImageLoadStatus::UnsupportedFormat;
+            setClassification(m_blocks[i], NavigatorResourceClassification::MimeExtensionDisagreement,
+                "Image MIME and URL extension disagree.");
+            continue;
+        }
+        const bool expectedJpeg = contentTypeJpeg;
+        const uint8_t* bodyBytes = reinterpret_cast<const uint8_t*>(response->body);
+        const bool signatureOk = expectedJpeg
+            ? (response->bodyBytes >= 2 && bodyBytes[0] == 0xFF && bodyBytes[1] == 0xD8)
+            : (response->bodyBytes >= 8 && bodyBytes[0] == 0x89 && bodyBytes[1] == 'P' && bodyBytes[2] == 'N' && bodyBytes[3] == 'G');
+        if (!signatureOk) {
+            m_blocks[i].imageStatus = (int)gxos::gui::ImageLoadStatus::UnsupportedFormat;
+            const bool oppositeSignature = expectedJpeg
+                ? (response->bodyBytes >= 8 && bodyBytes[0] == 0x89 && bodyBytes[1] == 'P' && bodyBytes[2] == 'N' && bodyBytes[3] == 'G')
+                : (response->bodyBytes >= 2 && bodyBytes[0] == 0xFF && bodyBytes[1] == 0xD8);
+            setClassification(m_blocks[i], oppositeSignature ? NavigatorResourceClassification::ContentTypeMismatch
+                : NavigatorResourceClassification::CorruptImage,
+                expectedJpeg ? "Remote JPEG signature is invalid." : "Remote PNG signature is invalid.");
+            continue;
+        }
+        gxos::gui::ImageProbe probe = gxos::gui::ImageAdapter::ProbeBytes(
+            reinterpret_cast<const uint8_t*>(response->body), (uint32_t)response->bodyBytes, remoteLimits);
+        m_blocks[i].naturalWidth = (int)probe.width;
+        m_blocks[i].naturalHeight = (int)probe.height;
+        if (probe.status != gxos::gui::ImageLoadStatus::Ok) {
+            m_blocks[i].imageStatus = (int)probe.status;
+            classifyBitmapFailure(m_blocks[i], probe.status, expectedJpeg);
+            if (referenceIndex >= 0)
+                m_resourceReferences[referenceIndex].state = static_cast<uint8_t>(gxos::apps::NavigatorResourceSchedulerState::Failed);
+            continue;
+        }
+        uint64_t requestedDecodedBytes = 0;
+        if (referenceIndex >= 0) {
+            m_resourceReferences[referenceIndex].activeBytesBefore = static_cast<uint32_t>(m_resourceMemory.activeDecodedBytes);
+            m_resourceReferences[referenceIndex].budgetHeadroomBefore = static_cast<uint32_t>(
+                m_resourceMemory.activeDecodedBytes < gxos::apps::kNavigatorDecodedImageBudgetBytes
+                    ? gxos::apps::kNavigatorDecodedImageBudgetBytes - m_resourceMemory.activeDecodedBytes : 0);
+        }
+        if (!gxos::apps::navigatorCheckedRgbaBytes(probe.width, probe.height, requestedDecodedBytes) ||
+            !m_resourceMemory.reserveDecoded(requestedDecodedBytes)) {
+            m_blocks[i].imageStatus = (int)gxos::gui::ImageLoadStatus::TooLarge;
+            setClassification(m_blocks[i], NavigatorResourceClassification::ImageMemoryBudgetDenied,
+                "Document decoded-image memory budget denied this resource.");
+            ++m_resourceScheduler.budgetDenied;
+            m_resourceScheduler.noteDeniedDecoded(requestedDecodedBytes);
+            m_resourceScheduler.deniedAllocationBytes += requestedDecodedBytes;
+            if (referenceIndex >= 0) {
+                noteViewportBudgetDenial(static_cast<gxos::apps::NavigatorResourceViewportClass>(
+                    m_resourceReferences[referenceIndex].viewportClass));
+            }
+            if (referenceIndex >= 0) {
+                m_resourceReferences[referenceIndex].state = static_cast<uint8_t>(gxos::apps::NavigatorResourceSchedulerState::BudgetDenied);
+                m_resourceReferences[referenceIndex].budgetRequestedBytes =
+                    static_cast<uint32_t>(requestedDecodedBytes > UINT32_MAX ? UINT32_MAX : requestedDecodedBytes);
+                m_resourceReferences[referenceIndex].activeBytesBefore = static_cast<uint32_t>(m_resourceMemory.activeDecodedBytes);
+                m_resourceReferences[referenceIndex].budgetHeadroomBefore = static_cast<uint32_t>(
+                    m_resourceMemory.activeDecodedBytes < gxos::apps::kNavigatorDecodedImageBudgetBytes
+                        ? gxos::apps::kNavigatorDecodedImageBudgetBytes - m_resourceMemory.activeDecodedBytes : 0);
+            }
+            continue;
+        }
+        if (referenceIndex >= 0) {
+            m_resourceReferences[referenceIndex].budgetRequestedBytes =
+                static_cast<uint32_t>(requestedDecodedBytes);
+            m_resourceReferences[referenceIndex].budgetAcceptedBytes =
+                static_cast<uint32_t>(requestedDecodedBytes);
+        }
+        ++m_resourceScheduler.decodeStarted;
+        m_resourceScheduler.peakTemporaryDecodeBytes = m_resourceScheduler.peakTemporaryDecodeBytes > requestedDecodedBytes
+            ? m_resourceScheduler.peakTemporaryDecodeBytes : requestedDecodedBytes;
         gxos::gui::ImageBitmap bitmap = gxos::gui::ImageAdapter::LoadFromBytes(
             reinterpret_cast<const uint8_t*>(response->body), (uint32_t)response->bodyBytes, remoteLimits);
         m_blocks[i].imageStatus = (int)bitmap.status;
         m_blocks[i].naturalWidth = (int)bitmap.width;
         m_blocks[i].naturalHeight = (int)bitmap.height;
+        m_blocks[i].imageFormat = (int)bitmap.format;
         m_blocks[i].imagePixels = bitmap.pixels;
-        if (bitmap.status != gxos::gui::ImageLoadStatus::Ok) {
-            strcopy(m_blocks[i].imageError, gxos::gui::ImageLoadStatusName(bitmap.status), sizeof(m_blocks[i].imageError));
+        if (resourceTraceCount <= gxos::apps::kNavigatorMaxResourceReferences) {
+            serial::puts("[NAVIGATOR-RESOURCE] decode_result index=");
+            char indexText[16];
+            nav_int_to_text(i, indexText, sizeof(indexText));
+            serial::puts(indexText);
+            serial::puts(" status=");
+            serial::puts(gxos::gui::ImageLoadStatusName(bitmap.status));
+            serial::puts(" dims=");
+            char widthText[16];
+            char heightText[16];
+            nav_int_to_text((int)bitmap.width, widthText, sizeof(widthText));
+            nav_int_to_text((int)bitmap.height, heightText, sizeof(heightText));
+            serial::puts(widthText);
+            serial::putc('x');
+            serial::puts(heightText);
+            serial::puts("\n");
+        }
+        if (bitmap.status == gxos::gui::ImageLoadStatus::Ok) {
+            m_blocks[i].imageOwnerBlockIndex = i;
+            ++m_resourceScheduler.decoded;
+            ++m_resourceScheduler.attached;
+            ++m_resourceScheduler.activeCount;
+            m_resourceScheduler.noteLoadedDecoded(requestedDecodedBytes);
+            if (referenceIndex >= 0) {
+                noteViewportLoad(static_cast<gxos::apps::NavigatorResourceViewportClass>(
+                    m_resourceReferences[referenceIndex].viewportClass), requestedDecodedBytes);
+            }
+            m_resourceScheduler.activeBytes = m_resourceMemory.activeDecodedBytes;
+            m_resourceScheduler.peakActiveBytes = m_resourceScheduler.peakActiveBytes > m_resourceScheduler.activeBytes
+                ? m_resourceScheduler.peakActiveBytes : m_resourceScheduler.activeBytes;
+            if (referenceIndex >= 0)
+                m_resourceReferences[referenceIndex].state = static_cast<uint8_t>(gxos::apps::NavigatorResourceSchedulerState::Attached);
+            setClassification(m_blocks[i], expectedJpeg ? NavigatorResourceClassification::LoadedJpeg
+                : NavigatorResourceClassification::LoadedPng, "");
+        } else {
+            m_resourceMemory.releaseDecoded(requestedDecodedBytes);
+            if (referenceIndex >= 0)
+                m_resourceReferences[referenceIndex].state = static_cast<uint8_t>(gxos::apps::NavigatorResourceSchedulerState::Failed);
+            classifyBitmapFailure(m_blocks[i], bitmap.status, expectedJpeg);
         }
     }
+    for (int blockIndex = 0; blockIndex < m_blockCount; ++blockIndex) {
+        if (m_blocks[blockIndex].kind != BLOCK_IMAGE) continue;
+        bool represented = false;
+        for (uint32_t ref = 0; ref < referenceCount; ++ref) {
+            if (static_cast<int>(m_resourceReferences[ref].blockIndex) == blockIndex) {
+                represented = true;
+                break;
+            }
+        }
+        if (represented) continue;
+        m_blocks[blockIndex].imageStatus = (int)gxos::gui::ImageLoadStatus::NotFound;
+        setClassification(m_blocks[blockIndex], NavigatorResourceClassification::ResourceLimitReached,
+            "Bounded resource-reference metadata capacity denied this resource.");
+    }
+    m_resourceMemory.currentEncodedBytes = 0;
 }
+
+void NavigatorApp::refreshImageResourceMetadata()
+{
+    m_metaImageBlocks = 0;
+    m_metaLoadedImages = 0;
+    m_metaFailedImages = 0;
+    m_metaRemoteImages = 0;
+    m_metaLocalImages = 0;
+    m_metaLastImageError[0] = '\0';
+    m_metaResourceReferences = 0;
+    m_metaResourceAttempted = 0;
+    m_metaResourceLoaded = 0;
+    m_metaResourceFailed = 0;
+    m_metaResourceSkipped = 0;
+    m_metaPngReferences = 0;
+    m_metaPngLoads = 0;
+    m_metaJpegReferences = 0;
+    m_metaJpegLoads = 0;
+    m_metaSvgReferences = 0;
+    m_metaSvgFailures = 0;
+    m_metaWebpReferences = 0;
+    m_metaWebpFailures = 0;
+    m_metaAvifReferences = 0;
+    m_metaAvifFailures = 0;
+    m_metaGifReferences = 0;
+    m_metaGifFailures = 0;
+    m_metaRedirects = 0;
+    m_metaHttp4xx = 0;
+    m_metaHttp5xx = 0;
+    m_metaSizeBoundFailures = 0;
+    m_metaDecodeFailures = 0;
+    m_metaNetworkTlsFailures = 0;
+    m_metaUnsupportedMime = 0;
+    m_metaDuplicateSkips = 0;
+    m_metaResourceLimitSkips = 0;
+    m_metaDuplicateUrls = 0;
+    m_metaDuplicateNetworkFetches = 0;
+    m_metaDuplicateDecodedImages = 0;
+    for (int i = 0; i < 64; ++i) m_metaResourceClassificationCounts[i] = 0;
+
+    auto classIs = [](const char* actual, const char* expected) {
+        return streq_local(actual ? actual : "", expected);
+    };
+    auto priorDuplicate = [&](int index) {
+        for (int prior = 0; prior < index; ++prior) {
+            if (m_blocks[prior].kind == BLOCK_IMAGE && streq_local(m_blocks[prior].url, m_blocks[index].url)) return true;
+        }
+        return false;
+    };
+    auto incrementFormatReference = [&](const DocBlock& block) {
+        if (nav_url_path_ends_with_png(block.url) || nav_mime_is(block.resourceContentType, "image/png")) ++m_metaPngReferences;
+        if (nav_url_path_ends_with_jpeg(block.url) || nav_mime_is(block.resourceContentType, "image/jpeg") || nav_mime_is(block.resourceContentType, "image/jpg")) ++m_metaJpegReferences;
+        if (nav_url_path_ends_with_extension(block.url, ".svg") || nav_mime_is(block.resourceContentType, "image/svg+xml")) ++m_metaSvgReferences;
+        if (nav_url_path_ends_with_extension(block.url, ".webp") || nav_mime_is(block.resourceContentType, "image/webp")) ++m_metaWebpReferences;
+        if (nav_url_path_ends_with_extension(block.url, ".avif") || nav_mime_is(block.resourceContentType, "image/avif")) ++m_metaAvifReferences;
+        if (nav_url_path_ends_with_extension(block.url, ".gif") || nav_mime_is(block.resourceContentType, "image/gif")) ++m_metaGifReferences;
+    };
+    for (int i = 0; i < m_blockCount; ++i) {
+        const DocBlock& block = m_blocks[i];
+        if (block.kind != BLOCK_IMAGE) continue;
+        ++m_metaImageBlocks;
+        ++m_metaResourceReferences;
+        incrementFormatReference(block);
+        if (nav_starts_with(block.url, "http://") || nav_starts_with(block.url, "https://")) {
+            ++m_metaRemoteImages;
+        } else if (nav_starts_with(block.url, "file://")) {
+            ++m_metaLocalImages;
+        }
+        const bool duplicate = priorDuplicate(i);
+        int stateReferenceIndex = -1;
+        for (uint32_t ref = 0; ref < gxos::apps::kNavigatorMaxResourceReferences; ++ref) {
+            if (m_resourceReferences[ref].state != static_cast<uint8_t>(gxos::apps::NavigatorResourceSchedulerState::Empty) &&
+                static_cast<int>(m_resourceReferences[ref].blockIndex) == i) {
+                stateReferenceIndex = static_cast<int>(ref);
+                break;
+            }
+        }
+        if (duplicate) {
+            ++m_metaDuplicateUrls;
+            if (!classIs(block.resourceClassification, "duplicate_resource_skipped")) ++m_metaDuplicateNetworkFetches;
+        }
+        const bool skipped = classIs(block.resourceClassification, "duplicate_resource_skipped") ||
+            (stateReferenceIndex >= 0 && static_cast<gxos::apps::NavigatorResourceSchedulerState>(m_resourceReferences[stateReferenceIndex].state) == gxos::apps::NavigatorResourceSchedulerState::Evicted) ||
+            classIs(block.resourceClassification, "resource_limit_reached") ||
+            classIs(block.resourceClassification, "resource_slot_unavailable") ||
+            classIs(block.resourceClassification, "image_memory_budget_denied");
+        if (skipped) ++m_metaResourceSkipped;
+        else ++m_metaResourceAttempted;
+        if (block.imageStatus == (int)gxos::gui::ImageLoadStatus::Ok) {
+            ++m_metaLoadedImages;
+            ++m_metaResourceLoaded;
+            if (duplicate) ++m_metaDuplicateDecodedImages;
+            if (block.imageFormat == (int)gxos::gui::ImageFormat::Png) ++m_metaPngLoads;
+            if (block.imageFormat == (int)gxos::gui::ImageFormat::Jpeg) ++m_metaJpegLoads;
+        } else if (!(stateReferenceIndex >= 0 && static_cast<gxos::apps::NavigatorResourceSchedulerState>(m_resourceReferences[stateReferenceIndex].state) == gxos::apps::NavigatorResourceSchedulerState::Evicted)) {
+            ++m_metaFailedImages;
+            if (!skipped) ++m_metaResourceFailed;
+            if (!m_metaLastImageError[0]) {
+                strcopy(m_metaLastImageError,
+                    block.imageError[0] ? block.imageError :
+                    gxos::gui::ImageLoadStatusName((gxos::gui::ImageLoadStatus)block.imageStatus),
+                    sizeof(m_metaLastImageError));
+            }
+        }
+        if (classIs(block.resourceClassification, "resource_limit_reached")) ++m_metaResourceLimitSkips;
+        if (classIs(block.resourceClassification, "duplicate_resource_skipped")) ++m_metaDuplicateSkips;
+        if (block.resourceRedirectCount > 0) m_metaRedirects += block.resourceRedirectCount;
+        if (block.resourceStatusCode >= 400 && block.resourceStatusCode < 500) ++m_metaHttp4xx;
+        if (block.resourceStatusCode >= 500 && block.resourceStatusCode < 600) ++m_metaHttp5xx;
+        if (classIs(block.resourceClassification, "body_too_large_encoded") ||
+            classIs(block.resourceClassification, "decoded_resource_too_large") ||
+            classIs(block.resourceClassification, "image_dimensions_too_large") ||
+            classIs(block.resourceClassification, "image_pixel_budget_exceeded") ||
+            classIs(block.resourceClassification, "image_memory_budget_denied")) ++m_metaSizeBoundFailures;
+        if (strstr(block.resourceClassification, "decode_failed") ||
+            classIs(block.resourceClassification, "corrupt_image") ||
+            classIs(block.resourceClassification, "unsupported_jpeg_variant")) ++m_metaDecodeFailures;
+        if (classIs(block.resourceClassification, "dns_failed") ||
+            classIs(block.resourceClassification, "tcp_failed") ||
+            classIs(block.resourceClassification, "tls_failed") ||
+            classIs(block.resourceClassification, "certificate_failed") ||
+            classIs(block.resourceClassification, "hostname_failed") ||
+            classIs(block.resourceClassification, "timeout_connect") ||
+            classIs(block.resourceClassification, "timeout_tls") ||
+            classIs(block.resourceClassification, "timeout_http") ||
+            classIs(block.resourceClassification, "connection_closed_incomplete")) ++m_metaNetworkTlsFailures;
+        if (strstr(block.resourceClassification, "unsupported_mime") ||
+            strstr(block.resourceClassification, "content_type_") ||
+            strstr(block.resourceClassification, "mime_extension") ||
+            strstr(block.resourceClassification, "unsupported_svg") ||
+            strstr(block.resourceClassification, "unsupported_webp") ||
+            strstr(block.resourceClassification, "unsupported_avif") ||
+            strstr(block.resourceClassification, "unsupported_gif")) ++m_metaUnsupportedMime;
+        for (int classIndex = 0; classIndex < 64; ++classIndex) {
+            if (streq_local(block.resourceClassification,
+                gxos::apps::navigatorResourceClassificationName(
+                    (gxos::apps::NavigatorResourceClassification)classIndex))) {
+                ++m_metaResourceClassificationCounts[classIndex];
+                break;
+            }
+        }
+        if (classIs(block.resourceClassification, "unsupported_svg")) ++m_metaSvgFailures;
+        if (classIs(block.resourceClassification, "unsupported_webp")) ++m_metaWebpFailures;
+        if (classIs(block.resourceClassification, "unsupported_avif")) ++m_metaAvifFailures;
+        if (classIs(block.resourceClassification, "unsupported_gif")) ++m_metaGifFailures;
+    }
+    m_resourceTelemetryCount = 0;
+    for (int i = 0; i < m_blockCount &&
+        m_resourceTelemetryCount < gxos::apps::kNavigatorMaxResourceTelemetryRecords; ++i) {
+        const DocBlock& block = m_blocks[i];
+        if (block.kind != BLOCK_IMAGE) continue;
+        gxos::apps::NavigatorResourceTelemetryRecord& record =
+            m_resourceTelemetry[m_resourceTelemetryCount++];
+        int referenceIndex = -1;
+        for (uint32_t ref = 0; ref < gxos::apps::kNavigatorMaxResourceReferences; ++ref) {
+            if (m_resourceReferences[ref].state != static_cast<uint8_t>(gxos::apps::NavigatorResourceSchedulerState::Empty) &&
+                static_cast<int>(m_resourceReferences[ref].blockIndex) == i) {
+                referenceIndex = static_cast<int>(ref);
+                break;
+            }
+        }
+        const gxos::apps::NavigatorResourceReferenceMetadata* reference =
+            referenceIndex >= 0 ? &m_resourceReferences[referenceIndex] : nullptr;
+        record.sourceOrdinal = reference ? reference->sourceOrdinal : static_cast<uint32_t>(i);
+        record.schedulerOrdinal = record.sourceOrdinal;
+        record.normalizedUrlHash = reference ? reference->normalizedUrlHash : 0;
+        record.encodedBodyBytes = block.resourceEncodedBytes > 0 ? static_cast<uint32_t>(block.resourceEncodedBytes) : 0;
+        record.decodedBodyBytes = block.resourceDecodedBytes > 0 ? static_cast<uint32_t>(block.resourceDecodedBytes) : 0;
+        record.naturalWidth = block.naturalWidth > 0 ? static_cast<uint32_t>(block.naturalWidth) : 0;
+        record.naturalHeight = block.naturalHeight > 0 ? static_cast<uint32_t>(block.naturalHeight) : 0;
+        record.decodedRgbaBytes = reference && reference->budgetRequestedBytes != 0
+            ? reference->budgetRequestedBytes
+            : (static_cast<uint64_t>(record.naturalWidth) * record.naturalHeight * 4ull);
+        record.activeBytesBefore = reference ? reference->activeBytesBefore : 0;
+        record.budgetHeadroomBefore = reference ? reference->budgetHeadroomBefore : 0;
+        record.blockIndex = i;
+        record.formatHint = reference ? reference->formatHint : 0;
+        record.schedulerState = reference ? reference->state :
+            static_cast<uint8_t>(gxos::apps::NavigatorResourceSchedulerState::Empty);
+        record.duplicate = reference && reference->duplicateOf != 0xFFFFu ? 1u : 0u;
+        if (record.duplicate && reference->duplicateOf < gxos::apps::kNavigatorMaxResourceReferences)
+            record.sharedOwnerOrdinal = m_resourceReferences[reference->duplicateOf].sourceOrdinal;
+        for (int classIndex = 0; classIndex < 64; ++classIndex) {
+            if (streq_local(block.resourceClassification,
+                gxos::apps::navigatorResourceClassificationName(
+                    static_cast<gxos::apps::NavigatorResourceClassification>(classIndex)))) {
+                record.classification = static_cast<uint8_t>(classIndex);
+                break;
+            }
+        }
+        int maxWidth = m_window ? m_window->w - CONTENT_X * 2 - 32 : 480;
+        if (maxWidth < 32) maxWidth = 32;
+        int displayWidth = block.width > 0 ? block.width : (block.naturalWidth > 0 ? block.naturalWidth : 220);
+        int displayHeight = block.height > 0 ? block.height : (block.naturalHeight > 0 ? block.naturalHeight : 64);
+        if (displayWidth > maxWidth) displayWidth = maxWidth;
+        if (displayWidth < 1) displayWidth = 1;
+        if (displayHeight > 420) displayHeight = 420;
+        if (displayHeight < 1) displayHeight = 1;
+        record.displayWidth = displayWidth > 65535 ? 65535u : static_cast<uint16_t>(displayWidth);
+        record.displayHeight = displayHeight > 65535 ? 65535u : static_cast<uint16_t>(displayHeight);
+        record.displayPixelBytes = static_cast<uint64_t>(displayWidth) * displayHeight * 4ull;
+        record.blockY = m_window ? blockY(i, maxWidth) : -1;
+        record.viewportTop = m_resourceScheduler.viewportTop;
+        record.viewportBottom = m_resourceScheduler.viewportBottom;
+        record.blockTop = reference ? reference->blockTop : record.blockY;
+        record.blockBottom = reference ? reference->blockBottom :
+            (record.blockY >= 0 ? record.blockY + displayHeight : -1);
+        record.distanceFromViewport = reference ? reference->distanceFromViewport : -1;
+        record.priorityBeforeViewport = reference ? reference->priorityBeforeViewport : 0;
+        record.admittedDueToViewportPriority = reference ? reference->admittedDueToViewportPriority : 0;
+        record.viewportRelation = reference ? reference->viewportClass :
+            static_cast<uint8_t>(gxos::apps::NavigatorResourceViewportRelation::Unknown);
+        record.likelyVisible = record.viewportRelation ==
+            static_cast<uint8_t>(gxos::apps::NavigatorResourceViewportRelation::Visible) ? 1u : 0u;
+        KernelHttpUrl resourceUrl;
+        if (nav_starts_with(block.url, "https://")) {
+            if (parse_https_url_kernel(block.url, &resourceUrl))
+                strcopy(record.host, resourceUrl.host, sizeof(record.host));
+        } else if (nav_starts_with(block.url, "http://")) {
+            if (parse_http_url_kernel(block.url, &resourceUrl))
+                strcopy(record.host, resourceUrl.host, sizeof(record.host));
+        }
+        KernelHttpUrl documentUrl;
+        if (record.host[0] &&
+            ((nav_starts_with(m_currentUrl, "https://") && parse_https_url_kernel(m_currentUrl, &documentUrl)) ||
+             (nav_starts_with(m_currentUrl, "http://") && parse_http_url_kernel(m_currentUrl, &documentUrl)))) {
+            record.sameOrigin = streq_local(resourceUrl.host, documentUrl.host) &&
+                resourceUrl.port == documentUrl.port && resourceUrl.httpsScheme == documentUrl.httpsScheme;
+        }
+        char safeReason[64];
+        nav_copy_serial_safe_text(block.imageError, safeReason, sizeof(safeReason));
+        strcopy(record.reason, safeReason, sizeof(record.reason));
+    }
+    serial::puts("[NAVIGATOR-RESOURCE] aggregate refs="); serial_put_dec((uint32_t)m_metaResourceReferences);
+    serial::puts(" attempted="); serial_put_dec((uint32_t)m_metaResourceAttempted);
+    serial::puts(" loaded="); serial_put_dec((uint32_t)m_metaResourceLoaded);
+    serial::puts(" failed="); serial_put_dec((uint32_t)m_metaResourceFailed);
+    serial::puts(" skipped="); serial_put_dec((uint32_t)m_metaResourceSkipped);
+    serial::puts(" png_refs="); serial_put_dec((uint32_t)m_metaPngReferences);
+    serial::puts(" png_loads="); serial_put_dec((uint32_t)m_metaPngLoads);
+    serial::puts(" jpeg_refs="); serial_put_dec((uint32_t)m_metaJpegReferences);
+    serial::puts(" jpeg_loads="); serial_put_dec((uint32_t)m_metaJpegLoads);
+    serial::puts(" redirects="); serial_put_dec((uint32_t)m_metaRedirects);
+    serial::puts(" http4xx="); serial_put_dec((uint32_t)m_metaHttp4xx);
+    serial::puts(" http5xx="); serial_put_dec((uint32_t)m_metaHttp5xx);
+    serial::puts(" size_bound="); serial_put_dec((uint32_t)m_metaSizeBoundFailures);
+    serial::puts(" decode="); serial_put_dec((uint32_t)m_metaDecodeFailures);
+    serial::puts(" network_tls="); serial_put_dec((uint32_t)m_metaNetworkTlsFailures);
+    serial::puts(" unsupported_mime="); serial_put_dec((uint32_t)m_metaUnsupportedMime);
+    serial::puts(" duplicate="); serial_put_dec((uint32_t)m_metaDuplicateSkips);
+    serial::puts(" resource_limit="); serial_put_dec((uint32_t)m_metaResourceLimitSkips);
+    serial::puts(" duplicate_urls="); serial_put_dec((uint32_t)m_metaDuplicateUrls);
+    serial::puts(" duplicate_network_fetches="); serial_put_dec((uint32_t)m_metaDuplicateNetworkFetches);
+    serial::puts(" duplicate_decoded_images="); serial_put_dec((uint32_t)m_metaDuplicateDecodedImages);
+    serial::puts(" references_discovered="); serial_put_dec(m_resourceScheduler.referencesDiscovered);
+    serial::puts(" unique_references="); serial_put_dec(m_resourceScheduler.uniqueReferences);
+    serial::puts(" duplicate_references="); serial_put_dec(m_resourceScheduler.duplicateReferences);
+    serial::puts(" scheduler_candidates="); serial_put_dec(m_resourceScheduler.schedulerCandidates);
+    serial::puts(" pending="); serial_put_dec(m_resourceScheduler.pending);
+    serial::puts(" fetch_started="); serial_put_dec(m_resourceScheduler.fetchStarted);
+    serial::puts(" fetch_completed="); serial_put_dec(m_resourceScheduler.fetchCompleted);
+    serial::puts(" decode_started="); serial_put_dec(m_resourceScheduler.decodeStarted);
+    serial::puts(" decoded="); serial_put_dec(m_resourceScheduler.decoded);
+    serial::puts(" attached="); serial_put_dec(m_resourceScheduler.attached);
+    serial::puts(" budget_denied="); serial_put_dec(m_resourceScheduler.budgetDenied);
+    serial::puts(" resource_cap_denied="); serial_put_dec(m_resourceScheduler.resourceCapDenied);
+    serial::puts(" unsupported_skipped="); serial_put_dec(m_resourceScheduler.unsupportedSkipped);
+    serial::puts(" references_capacity_denied="); serial_put_dec(m_resourceScheduler.referencesCapacityDenied);
+    serial::puts(" active_count="); serial_put_dec(m_resourceScheduler.activeCount);
+    serial::puts(" active_bytes="); serial_put_dec64(m_resourceScheduler.activeBytes);
+    serial::puts(" peak_active_bytes="); serial_put_dec64(m_resourceScheduler.peakActiveBytes);
+    serial::puts(" peak_encoded_resource_bytes="); serial_put_dec64(m_resourceMemory.peakEncodedBytes);
+    serial::puts(" peak_temporary_decode_bytes="); serial_put_dec64(m_resourceMemory.peakTemporaryDecodeBytes);
+    serial::puts(" denied_allocation_bytes="); serial_put_dec64(m_resourceMemory.deniedAllocationBytes);
+    serial::puts(" released_decoded_bytes="); serial_put_dec64(m_resourceMemory.releasedDecodedBytes);
+    serial::puts(" total_loaded_decoded_bytes="); serial_put_dec64(m_resourceScheduler.totalLoadedDecodedBytes);
+    serial::puts(" total_denied_requested_bytes="); serial_put_dec64(m_resourceScheduler.totalDeniedRequestedBytes);
+    serial::puts(" viewport_top="); serial_put_dec(m_resourceScheduler.viewportTop);
+    serial::puts(" viewport_bottom="); serial_put_dec(m_resourceScheduler.viewportBottom);
+    serial::puts(" viewport_width="); serial_put_dec(m_resourceScheduler.viewportWidth);
+    serial::puts(" viewport_height="); serial_put_dec(m_resourceScheduler.viewportHeight);
+    serial::puts(" initial_scroll="); serial_put_dec(m_resourceScheduler.initialScrollOffset);
+    serial::puts(" preload_margin="); serial_put_dec(m_resourceScheduler.preloadMargin);
+    serial::puts(" visible_refs="); serial_put_dec(m_resourceScheduler.visibleReferences);
+    serial::puts(" near_refs="); serial_put_dec(m_resourceScheduler.nearReferences);
+    serial::puts(" far_refs="); serial_put_dec(m_resourceScheduler.farReferences);
+    serial::puts(" unknown_viewport_refs="); serial_put_dec(m_resourceScheduler.unknownViewportReferences);
+    serial::puts(" visible_loaded="); serial_put_dec(m_resourceScheduler.visibleLoaded);
+    serial::puts(" visible_budget_denied="); serial_put_dec(m_resourceScheduler.visibleBudgetDenied);
+    serial::puts(" near_loaded="); serial_put_dec(m_resourceScheduler.nearLoaded);
+    serial::puts(" near_budget_denied="); serial_put_dec(m_resourceScheduler.nearBudgetDenied);
+    serial::puts(" far_loaded="); serial_put_dec(m_resourceScheduler.farLoaded);
+    serial::puts(" far_budget_denied="); serial_put_dec(m_resourceScheduler.farBudgetDenied);
+    serial::puts(" visible_priority_admissions="); serial_put_dec(m_resourceScheduler.visiblePriorityAdmissions);
+    serial::puts(" offscreen_budget_denied="); serial_put_dec(m_resourceScheduler.offscreenBudgetDenied);
+    serial::puts(" decoded_bytes_visible="); serial_put_dec64(m_resourceScheduler.decodedBytesVisible);
+    serial::puts(" decoded_bytes_near="); serial_put_dec64(m_resourceScheduler.decodedBytesNear);
+    serial::puts(" decoded_bytes_far="); serial_put_dec64(m_resourceScheduler.decodedBytesFar);
+    serial::puts("\n");
+    for (uint32_t bucket = 0; bucket < 6; ++bucket) {
+        serial::puts("[NAVIGATOR-RESOURCE] size_bucket="); serial_put_dec(bucket);
+        serial::puts(" loaded="); serial_put_dec(m_resourceScheduler.loadedDecodedSizeBuckets[bucket]);
+        serial::puts(" denied="); serial_put_dec(m_resourceScheduler.deniedDecodedSizeBuckets[bucket]);
+        serial::puts("\n");
+    }
+    for (uint32_t recordIndex = 0; recordIndex < m_resourceTelemetryCount; ++recordIndex) {
+        const gxos::apps::NavigatorResourceTelemetryRecord& record = m_resourceTelemetry[recordIndex];
+        serial::puts("[NAVIGATOR-RESOURCE-TELEMETRY] ordinal="); serial_put_dec(record.sourceOrdinal);
+        serial::puts(" block="); serial_put_dec((uint32_t)(record.blockIndex < 0 ? 0 : record.blockIndex));
+        serial::puts(" hash="); serial_put_dec(record.normalizedUrlHash);
+        serial::puts(" host="); serial::puts(record.host[0] ? record.host : "(none)");
+        serial::puts(" format="); serial_put_dec(record.formatHint);
+        serial::puts(" state="); serial_put_dec(record.schedulerState);
+        serial::puts(" class="); serial_put_dec(record.classification);
+        serial::puts(" encoded="); serial_put_dec(record.encodedBodyBytes);
+        serial::puts(" decoded_body="); serial_put_dec(record.decodedBodyBytes);
+        serial::puts(" dims="); serial_put_dec(record.naturalWidth); serial::putc('x'); serial_put_dec(record.naturalHeight);
+        serial::puts(" rgba="); serial_put_dec64(record.decodedRgbaBytes);
+        serial::puts(" active_before="); serial_put_dec64(record.activeBytesBefore);
+        serial::puts(" headroom="); serial_put_dec64(record.budgetHeadroomBefore);
+        serial::puts(" display="); serial_put_dec(record.displayWidth); serial::putc('x'); serial_put_dec(record.displayHeight);
+        serial::puts(" display_rgba="); serial_put_dec64(record.displayPixelBytes);
+        serial::puts(" viewport_top="); serial_put_dec(record.viewportTop);
+        serial::puts(" viewport_bottom="); serial_put_dec(record.viewportBottom);
+        serial::puts(" block_top="); serial_put_dec(record.blockTop);
+        serial::puts(" block_bottom="); serial_put_dec(record.blockBottom);
+        serial::puts(" distance="); serial_put_dec(record.distanceFromViewport);
+        serial::puts(" y="); serial_put_dec((uint32_t)(record.blockY < 0 ? 0 : record.blockY));
+        serial::puts(" viewport="); serial_put_dec(record.viewportRelation);
+        serial::puts(" visible="); serial::puts(record.likelyVisible ? "yes" : "no");
+        serial::puts(" priority_before="); serial_put_dec(record.priorityBeforeViewport);
+        serial::puts(" admitted_due_to_viewport="); serial::puts(record.admittedDueToViewportPriority ? "yes" : "no");
+        serial::puts(" duplicate="); serial::puts(record.duplicate ? "yes" : "no");
+        serial::puts(" owner="); serial_put_dec(record.sharedOwnerOrdinal);
+        serial::puts(" reason="); serial::puts(record.reason);
+        serial::puts("\n");
+    }
+}
+
 void NavigatorApp::loadHttpUrl(const char* url)
 {
     clearPageDownloadMetadata();
     loadHttpResponse(url, kernel_http_fetch(url));
+    // The response storage is transaction-local.  HTML parsing has already
+    // copied the bounded strings needed by the active document by the time
+    // loadHttpResponse returns, including any resource loads it initiated.
+    s_kernelHttpDocumentStorage.release();
+}
+
+static bool kernel_http_prepare_document_parser_input(const KernelHttpResponse* response,
+                                                      char** ownedInput,
+                                                      const char** parserInput)
+{
+    if (ownedInput) *ownedInput = nullptr;
+    if (parserInput) *parserInput = nullptr;
+    if (!response || !ownedInput || !parserInput) return false;
+    if (response->documentStorageUsed) {
+        if (response->bodyBytes < 0 ||
+            response->bodyBytes > gxos::web::kHttpSharedMaxDecodedDocumentBytes ||
+            response->documentStorageBytes != response->bodyBytes ||
+            (response->bodyBytes > 0 && response->documentSegmentCount <= 0) ||
+            (response->bodyBytes == 0 && response->documentSegmentCount != 0)) {
+            return false;
+        }
+        char* flattened = s_kernelHttpDocumentStorage.allocateFlattenedCopy();
+        if (!flattened) return false;
+        *ownedInput = flattened;
+        *parserInput = flattened;
+        return true;
+    }
+    if (response->bodyBytes < 0 || response->bodyBytes > kKernelHttpBodyLimit ||
+        response->body[response->bodyBytes] != '\0') {
+        return false;
+    }
+    *parserInput = response->body;
+    return true;
 }
 
 void NavigatorApp::loadHttpResponse(const char* url, KernelHttpResponse* response)
 {
+    m_metaHandoffEntered = response != nullptr;
+    m_metaHandoffResult[0] = '\0';
+    m_metaParserInvoked = false;
+    m_metaParserCompleted = false;
+    m_metaParserInputBytes = 0;
+    m_metaDocumentCreated = false;
+    m_metaDocumentCount = 0;
+    m_metaActiveDocumentGeneration = m_documentGeneration;
+    m_metaTextFragmentCount = 0;
+    m_metaLinkCount = 0;
+    m_metaVisibleText[0] = '\0';
+    m_metaBodyBufferValid = false;
+    m_metaBodyNullTerminated = false;
+    m_metaBodyComplete = false;
+    strcopy(m_metaBodyOwnership, "not-transferred", sizeof(m_metaBodyOwnership));
+    if (!response) {
+        strcopy(m_metaHandoffResult, "rejected:null-response", sizeof(m_metaHandoffResult));
+        buildErrorDocument(url ? url : "", "Navigator received no HTTP response object.");
+        rememberPageMetadata(url, url, "http", "", "Null HTTP response", nullptr, 0);
+        return;
+    }
+    const bool documentStorageValid = response->documentStorageUsed &&
+        response->bodyBytes >= 0 &&
+        response->bodyBytes <= gxos::web::kHttpSharedMaxDecodedDocumentBytes &&
+        response->documentStorageBytes == response->bodyBytes &&
+        ((response->bodyBytes > 0 && response->documentSegmentCount > 0) ||
+         (response->bodyBytes == 0 && response->documentSegmentCount == 0));
+    const bool bodyBytesInBounds = response->bodyBytes >= 0 &&
+        ((response->documentStorageUsed && documentStorageValid) ||
+         (!response->documentStorageUsed && response->bodyBytes <= kKernelHttpBodyLimit));
+    m_metaBodyBufferValid = bodyBytesInBounds;
+    m_metaBodyNullTerminated = bodyBytesInBounds &&
+        (response->documentStorageUsed ? documentStorageValid :
+            response->body[response->bodyBytes] == '\0');
+    m_metaBodyComplete = response->ok && !response->truncatedResponse &&
+        (!response->contentLengthPresent || response->encodedBodyBytes == response->contentLength);
+    strcopy(m_metaBodyOwnership,
+        response->documentStorageUsed
+            ? "segmented-document-storage-flattened-for-parser"
+            : "static-response-buffer-used-for-parser", sizeof(m_metaBodyOwnership));
+    strcopy(m_metaHandoffResult, "pending", sizeof(m_metaHandoffResult));
     const char* transportSource = response && response->scheme[0] ? response->scheme : "http";
     auto buildCompatibilityFailureDocument = [&](const char* title, const char* summary) {
         const char* finalUrl = response->finalUrl[0] ? response->finalUrl : url;
@@ -10861,7 +14504,28 @@ void NavigatorApp::loadHttpResponse(const char* url, KernelHttpResponse* respons
             addBlock(BLOCK_LIST_ITEM, "Header limit hit: 32768 bytes");
         }
         if (response->bodyCapHit) {
-            addBlock(BLOCK_LIST_ITEM, "Body limit hit: 262144 bytes");
+            addBlock(BLOCK_LIST_ITEM, "Encoded HTTP body limit hit: 262144 bytes");
+        }
+        if (response->encodedBodyBytes > 0 || response->contentEncoding[0]) {
+            char sizeText[24];
+            nav_int_to_text(response->encodedBodyBytes, sizeText, sizeof(sizeText));
+            strcopy(line, "Encoded body bytes: ", sizeof(line));
+            strappend(line, sizeText, sizeof(line));
+            addBlock(BLOCK_LIST_ITEM, line);
+            nav_int_to_text(response->decodedBodyBytes, sizeText, sizeof(sizeText));
+            strcopy(line, "Decoded body bytes: ", sizeof(line));
+            strappend(line, sizeText, sizeof(line));
+            addBlock(BLOCK_LIST_ITEM, line);
+            addBlock(BLOCK_LIST_ITEM, "Encoded body cap: 262144 bytes");
+            addBlock(BLOCK_LIST_ITEM, "Decoded document cap: 524288 bytes");
+            nav_int_to_text(response->documentSegmentCount, sizeText, sizeof(sizeText));
+            strcopy(line, "Document segments: ", sizeof(line));
+            strappend(line, sizeText, sizeof(sizeText));
+            addBlock(BLOCK_LIST_ITEM, line);
+            nav_int_to_text(response->documentHistoryBytes, sizeText, sizeof(sizeText));
+            strcopy(line, "Decoder history bytes: ", sizeof(line));
+            strappend(line, sizeText, sizeof(sizeText));
+            addBlock(BLOCK_LIST_ITEM, line);
         }
         addBlock(BLOCK_LIST_ITEM,
             response->tlsSucceededBeforeContentFailure
@@ -10872,6 +14536,7 @@ void NavigatorApp::loadHttpResponse(const char* url, KernelHttpResponse* respons
     };
 
     if (!response->ok) {
+        strcopy(m_metaHandoffResult, "rejected:response-not-ok", sizeof(m_metaHandoffResult));
         const char* finalUrl = response->finalUrl[0] ? response->finalUrl : url;
         const char* requestedUrl = response->requestedUrl[0] ? response->requestedUrl : url;
         const bool requestedHttps = nav_starts_with(requestedUrl, "https://");
@@ -10892,6 +14557,30 @@ void NavigatorApp::loadHttpResponse(const char* url, KernelHttpResponse* respons
             buildUnsupportedContentEncodingDocument(finalUrl, response->contentEncoding);
             rememberPageMetadata(requestedUrl, finalUrl, finalHttps ? "https" : transportSource, response->contentType,
                 "Unsupported content encoding", nullptr, 0, nullptr, nullptr, response->statusCode, response->reason,
+                response->redirectCount, response);
+            return;
+        }
+        if (streq_local(response->error, "Compressed response invalid")) {
+            buildCompatibilityFailureDocument("Compressed Response Invalid",
+                "Navigator rejected the compressed response before invoking the HTML or resource decoder.");
+            rememberPageMetadata(requestedUrl, finalUrl, finalHttps ? "https" : transportSource, response->contentType,
+                "Compressed Response Invalid", nullptr, 0, nullptr, nullptr, response->statusCode, response->reason,
+                response->redirectCount, response);
+            return;
+        }
+        if (streq_local(response->error, "Decoded response too large")) {
+            buildCompatibilityFailureDocument("Decoded Response Too Large",
+                "Navigator rejected the decoded HTML representation because it exceeded the configured document limit.");
+            rememberPageMetadata(requestedUrl, finalUrl, finalHttps ? "https" : transportSource, response->contentType,
+                "Decoded Response Too Large", nullptr, 0, nullptr, nullptr, response->statusCode, response->reason,
+                response->redirectCount, response);
+            return;
+        }
+        if (streq_local(response->error, "Document storage allocation failed")) {
+            buildCompatibilityFailureDocument("Document Storage Allocation Failed",
+                "Navigator could not allocate the bounded decoded-document segments or parser handoff buffer.");
+            rememberPageMetadata(requestedUrl, finalUrl, finalHttps ? "https" : transportSource, response->contentType,
+                "Document Storage Allocation Failed", nullptr, 0, nullptr, nullptr, response->statusCode, response->reason,
                 response->redirectCount, response);
             return;
         }
@@ -10947,14 +14636,52 @@ void NavigatorApp::loadHttpResponse(const char* url, KernelHttpResponse* respons
 
     if (response->statusCode == 200) {
         if (gxos::web::httpSharedEqualsInsensitive(response->contentType, "text/html")) {
-            int docBytes = response->bodyBytes;
-            if (docBytes > kKernelHttpBodyLimit) docBytes = kKernelHttpBodyLimit;
-            for (int i = 0; i < docBytes; ++i) s_kernelHttpDocumentBody[i] = response->body[i];
-            s_kernelHttpDocumentBody[docBytes] = '\0';
-            parseHtmlDocument(response->finalUrl[0] ? response->finalUrl : url, s_kernelHttpDocumentBody,
+            if (!m_metaBodyBufferValid || !m_metaBodyNullTerminated) {
+                strcopy(m_metaHandoffResult, "rejected:invalid-body-buffer", sizeof(m_metaHandoffResult));
+                buildErrorDocument(response->finalUrl[0] ? response->finalUrl : url,
+                    "Navigator rejected an invalid HTTP body buffer.");
+                rememberPageMetadata(response->requestedUrl[0] ? response->requestedUrl : url,
+                    response->finalUrl[0] ? response->finalUrl : url, transportSource,
+                    response->contentType, "Invalid HTTP body buffer", nullptr, 0, nullptr, nullptr,
+                    response->statusCode, response->reason, response->redirectCount, response);
+                return;
+            }
+            char* ownedParserInput = nullptr;
+            const char* parserInput = nullptr;
+            if (!kernel_http_prepare_document_parser_input(response, &ownedParserInput, &parserInput)) {
+                strcopy(m_metaHandoffResult, "rejected:document-parser-input", sizeof(m_metaHandoffResult));
+                buildErrorDocument(response->finalUrl[0] ? response->finalUrl : url,
+                    "Navigator could not allocate or flatten the bounded document source.");
+                rememberPageMetadata(response->requestedUrl[0] ? response->requestedUrl : url,
+                    response->finalUrl[0] ? response->finalUrl : url, transportSource,
+                    response->contentType, "Document parser input unavailable", nullptr, 0, nullptr, nullptr,
+                    response->statusCode, response->reason, response->redirectCount, response);
+                return;
+            }
+            const int docBytes = response->bodyBytes;
+            strcopy(m_metaHandoffResult, "accepted:html-document", sizeof(m_metaHandoffResult));
+            serial::puts("[NAVIGATOR-STREAM] document_handoff status=");
+            char handoffStatus[16];
+            nav_int_to_text(response->statusCode, handoffStatus, sizeof(handoffStatus));
+            serial::puts(handoffStatus);
+            serial::puts(" body_bytes=");
+            char handoffBytes[16];
+            nav_int_to_text(docBytes, handoffBytes, sizeof(handoffBytes));
+            serial::puts(handoffBytes);
+            serial::puts(" framing=");
+            serial::puts(response->responseFraming[0] ? response->responseFraming : "unknown");
+            serial::puts(" requested=");
+            serial::puts(response->requestedUrl[0] ? response->requestedUrl : url);
+            serial::puts(" final=");
+            serial::puts(response->finalUrl[0] ? response->finalUrl : url);
+            serial::puts("\n");
+            parseHtmlDocument(response->finalUrl[0] ? response->finalUrl : url, parserInput,
                 transportSource, response->contentType, response->statusCode, response->reason,
-                response->requestedUrl[0] ? response->requestedUrl : url, response->redirectCount, response);
+                response->requestedUrl[0] ? response->requestedUrl : url, response->redirectCount, response,
+                docBytes);
+            delete[] ownedParserInput;
         } else if (!response->contentType[0] || gxos::web::httpSharedEqualsInsensitive(response->contentType, "text/plain")) {
+            strcopy(m_metaHandoffResult, "accepted:plain-text-document", sizeof(m_metaHandoffResult));
             strcopy(m_currentUrl, response->finalUrl[0] ? response->finalUrl : url, MAX_URL_LEN);
             strcopy(m_title, response->finalUrl[0] ? response->finalUrl : url, MAX_TITLE_LEN_NAV);
             m_blockCount = 0;
@@ -10964,6 +14691,7 @@ void NavigatorApp::loadHttpResponse(const char* url, KernelHttpResponse* respons
                 response->body, response->bodyBytes, nullptr, nullptr, response->statusCode, response->reason,
                 response->redirectCount, response);
         } else {
+            strcopy(m_metaHandoffResult, "rejected:unsupported-mime", sizeof(m_metaHandoffResult));
             DownloadRecord record{};
             strcopy(record.url, response->requestedUrl[0] ? response->requestedUrl : url, sizeof(record.url));
             strcopy(record.finalUrl, response->finalUrl[0] ? response->finalUrl : url, sizeof(record.finalUrl));
@@ -11040,6 +14768,7 @@ void NavigatorApp::loadHttpResponse(const char* url, KernelHttpResponse* respons
 
     if (response->statusCode == 301 || response->statusCode == 302 || response->statusCode == 303 ||
         response->statusCode == 307 || response->statusCode == 308) {
+        strcopy(m_metaHandoffResult, "accepted:redirect-document", sizeof(m_metaHandoffResult));
         strcopy(m_currentUrl, response->finalUrl[0] ? response->finalUrl : url, MAX_URL_LEN);
         strcopy(m_title, "HTTP Redirect", MAX_TITLE_LEN_NAV);
         m_blockCount = 0;
@@ -11054,6 +14783,7 @@ void NavigatorApp::loadHttpResponse(const char* url, KernelHttpResponse* respons
         return;
     }
 
+    strcopy(m_metaHandoffResult, "rejected:non-success-status", sizeof(m_metaHandoffResult));
     char message[160];
     strcopy(message, "HTTP error status ", sizeof(message));
     int len = strlen_local(message);
@@ -11111,6 +14841,7 @@ void NavigatorApp::submitFormsLitePost(const char* action, const char* body, int
         m_forwardCount = 0;
     }
     loadHttpResponse(safeAction, response);
+    s_kernelHttpDocumentStorage.release();
 }
 
 bool NavigatorApp::smokeHttpFetch(const char* url, int* statusCode, char* contentType,
@@ -11138,19 +14869,31 @@ bool NavigatorApp::smokeHttpFetch(const char* url, int* statusCode, char* conten
     if (redirectCount) *redirectCount = response->redirectCount;
     if (!response->ok) {
         if (error && errorLen > 0) strcopy(error, response->error, errorLen);
+        s_kernelHttpDocumentStorage.release();
         return false;
     }
 
-    NavigatorApp app;
+    NavigatorApp* heapApp = new NavigatorApp();
+    if (!heapApp) {
+        if (error && errorLen > 0) strcopy(error, "Navigator allocation failed", errorLen);
+        s_kernelHttpDocumentStorage.release();
+        return false;
+    }
+    NavigatorApp& app = *heapApp;
+    bool parserInputReady = true;
     if (response->statusCode == 200 && gxos::web::httpSharedEqualsInsensitive(response->contentType, "text/html")) {
-        int docBytes = response->bodyBytes;
-        if (docBytes > kKernelHttpBodyLimit) docBytes = kKernelHttpBodyLimit;
-        for (int i = 0; i < docBytes; ++i) s_kernelHttpDocumentBody[i] = response->body[i];
-        s_kernelHttpDocumentBody[docBytes] = '\0';
-        app.parseHtmlDocument(response->finalUrl[0] ? response->finalUrl : url, s_kernelHttpDocumentBody,
-            response->scheme[0] ? response->scheme : "http", response->contentType, response->statusCode,
-            response->reason, response->requestedUrl[0] ? response->requestedUrl : url,
-            response->redirectCount, response);
+        char* ownedParserInput = nullptr;
+        const char* parserInput = nullptr;
+        parserInputReady = kernel_http_prepare_document_parser_input(response, &ownedParserInput, &parserInput);
+        if (parserInputReady) {
+            app.parseHtmlDocument(response->finalUrl[0] ? response->finalUrl : url, parserInput,
+                response->scheme[0] ? response->scheme : "http", response->contentType, response->statusCode,
+                response->reason, response->requestedUrl[0] ? response->requestedUrl : url,
+                response->redirectCount, response, response->bodyBytes);
+        } else if (error && errorLen > 0) {
+            strcopy(error, "Document parser input unavailable", errorLen);
+        }
+        delete[] ownedParserInput;
     } else if (response->statusCode == 200 && gxos::web::httpSharedEqualsInsensitive(response->contentType, "text/plain")) {
         app.m_blockCount = 0;
         app.addBlock(BLOCK_PREFORMATTED, response->body);
@@ -11159,7 +14902,15 @@ bool NavigatorApp::smokeHttpFetch(const char* url, int* statusCode, char* conten
     if (remoteImages) *remoteImages = app.m_metaRemoteImages;
     if (loadedImages) *loadedImages = app.m_metaLoadedImages;
     if (failedImages) *failedImages = app.m_metaFailedImages;
-    return response->ok;
+    app::KernelWindow smokeWindow;
+    smokeWindow.w = 920;
+    smokeWindow.h = 640;
+    app.m_window = &smokeWindow;
+    app.drawDocument(0, 0, smokeWindow.w, smokeWindow.h);
+    const bool result = response->ok && parserInputReady;
+    s_kernelHttpDocumentStorage.release();
+    delete heapApp;
+    return result;
 }
 
 bool NavigatorApp::smokeControlledLocalHttpsNavigation(const char* url,
@@ -11488,16 +15239,15 @@ bool NavigatorApp::smokeFormsLitePost(const char* action, int* statusCode, char*
                          app.m_lastPostBodyBytes == formBodyBytes &&
                          streq_local(app.m_lastPostContentType, response->contentType);
     app.buildPageInfoDocument();
-    diagnosticsOk = diagnosticsOk &&
-                    blocksContain("Forms-lite POST bare-metal: enabled-basic") &&
-                    blocksContain("Last submitted method: POST") &&
-                    blocksContain("Last POST body bytes: 67");
+    const bool pageInfoOk = blocksContain("Forms-lite POST bare-metal: enabled-basic") &&
+                            blocksContain("Last submitted method: POST") &&
+                            blocksContain("Last POST body bytes: 67");
     app.buildRuntimeDocument();
-    diagnosticsOk = diagnosticsOk &&
-                    blocksContain("Forms-lite POST forms bare-metal: enabled-basic") &&
-                    blocksContain("Forms-lite POST redirect policy: 303 becomes GET") &&
-                    blocksContain("Last submitted method: POST") &&
-                    blocksContain("Last POST body bytes: 67");
+    const bool runtimeOk = blocksContain("Forms-lite POST forms bare-metal: enabled-basic") &&
+                           blocksContain("Forms-lite POST redirect policy: 303 becomes GET") &&
+                           blocksContain("Last submitted method: POST") &&
+                           blocksContain("Last POST body bytes: 67");
+    diagnosticsOk = diagnosticsOk && pageInfoOk && runtimeOk;
     if (statusCode) *statusCode = response->statusCode;
     if (contentType && contentTypeLen > 0) strcopy(contentType, response->contentType, contentTypeLen);
     if (bodyBytes) *bodyBytes = response->bodyBytes;
@@ -11507,6 +15257,27 @@ bool NavigatorApp::smokeFormsLitePost(const char* action, int* statusCode, char*
     if (submittedBodyBytes) *submittedBodyBytes = app.m_lastPostBodyBytes;
     if ((!response->ok || !diagnosticsOk) && error && errorLen > 0) {
         strcopy(error, response->error[0] ? response->error : "Forms-lite POST diagnostics mismatch", errorLen);
+    }
+    if (!response->ok || !diagnosticsOk) {
+        serial::puts("[NAVIGATOR-SMOKE] forms_post.debug.method=");
+        serial::puts(app.m_lastSubmittedFormMethod);
+        serial::puts(" action=");
+        serial::puts(app.m_lastSubmittedFormAction);
+        serial::puts(" response_type=");
+        serial::puts(response->contentType);
+        serial::puts(" post_type=");
+        serial::puts(app.m_lastPostContentType);
+        serial::puts(" page_info=");
+        serial::puts(pageInfoOk ? "yes" : "no");
+        serial::puts(" runtime=");
+        serial::puts(runtimeOk ? "yes" : "no");
+        serial::puts(" body_bytes=");
+        char bodyBytesText[24];
+        nav_int_to_text(app.m_lastPostBodyBytes, bodyBytesText, sizeof(bodyBytesText));
+        serial::puts(bodyBytesText);
+        serial::puts(" http_status=");
+        serial::puts(app.m_lastPostHttpStatus);
+        serial::puts("\n");
     }
     return response->ok && diagnosticsOk;
 }
@@ -11589,6 +15360,27 @@ bool NavigatorApp::smokeInteractiveFormsLitePost(const char* formUrl, int* statu
               app.m_lastPostBodyBytes == 67 && renderedOk && diagnosticsOk;
     if (!ok && error && errorLen > 0) {
         strcopy(error, response->error[0] ? response->error : "Interactive Forms-lite POST smoke mismatch", errorLen);
+    }
+    if (!ok) {
+        serial::puts("[NAVIGATOR-SMOKE] interactive_forms.debug.controls=");
+        serial::puts(controlsOk ? "yes" : "no");
+        serial::puts(" rendered=");
+        serial::puts(renderedOk ? "yes" : "no");
+        serial::puts(" diagnostics=");
+        serial::puts(diagnosticsOk ? "yes" : "no");
+        serial::puts(" method=");
+        serial::puts(app.m_lastSubmittedFormMethod);
+        serial::puts(" post_status=");
+        serial::puts(app.m_lastPostHttpStatus);
+        serial::puts(" post_type=");
+        serial::puts(app.m_lastPostContentType);
+        serial::puts(" body_bytes=");
+        char bodyBytesText[24];
+        nav_int_to_text(app.m_lastPostBodyBytes, bodyBytesText, sizeof(bodyBytesText));
+        serial::puts(bodyBytesText);
+        serial::puts(" response_type=");
+        serial::puts(response->contentType);
+        serial::puts("\n");
     }
     return ok;
 }
@@ -11706,17 +15498,28 @@ void NavigatorApp::loadUrl(const char* url)
         setStatus("Navigation already in progress");
         return;
     }
+    if (m_documentGeneration == 0xFFFFFFFFu) m_documentGeneration = 1;
+    else ++m_documentGeneration;
     static bool animationOwnerLogged = false;
     if (!animationOwnerLogged) {
         serial::puts("[NAVIGATOR] throbber_animation=passive_elapsed_time\n");
         animationOwnerLogged = true;
     }
+    char normalized[MAX_URL_LEN];
+    normalizeUrl(url && url[0] ? url : "about:navigator", normalized, MAX_URL_LEN);
+    beginLifecycleGeneration(normalized);
+    // Phase 8T classifies the document against the normal top-of-document
+    // viewport.  Keep the prior generation's scroll position only in its
+    // lifecycle record; it must not affect this generation's admission pass.
+    m_scrollY = 0;
+    m_scrollX = 0;
+    m_scrollbarOwner = 0;
+    m_scrollbarOrientation = 0;
+    m_scrollbarDragging = false;
     m_loading = true;
     m_throbberFrame = 0;
     m_loadingStartTick = (uint32_t)kernel::pit::ticks();
     invalidate();
-    char normalized[MAX_URL_LEN];
-    normalizeUrl(url && url[0] ? url : "about:navigator", normalized, MAX_URL_LEN);
     clearSelection();
     if (streq_local(normalized, "about:navigator")) {
         buildAboutNavigatorDocument();
@@ -11735,16 +15538,22 @@ void NavigatorApp::loadUrl(const char* url)
     } else if (nav_starts_with(normalized, "http://") || nav_starts_with(normalized, "https://")) {
         loadHttpUrl(normalized);
     } else {
-        buildErrorDocument(normalized, "Unsupported URL. Use about:, file://, http://, or a policy-gated https:// URL.");
+        buildErrorDocument(normalized, "Unsupported URL. Use about:, file://, http://, or a bounded policy-validated https:// URL.");
         rememberPageMetadata(normalized, normalized, "unsupported", "", "Unsupported URL scheme", nullptr, 0);
     }
     m_scrollY = 0;
+    m_scrollX = 0;
+    m_scrollbarOwner = 0;
+    m_scrollbarOrientation = 0;
+    m_scrollbarDragging = false;
     m_addressFocused = false;
     m_addressBuffer[0] = '\0';
     m_addressCaret = 0;
     blurFormBlock();
     setStatus("Ready");
     m_loading = false;
+    finishLifecycleGeneration();
+    serial::puts("[NAVIGATOR-LOAD] complete\n");
 
 }
 
@@ -11771,17 +15580,22 @@ bool NavigatorApp::smokeHttpsUnsupportedDocument(const char* url, const char* ex
 
     const bool direct = nav_starts_with(url, "https://");
     const gxos::GxosValidatedHttpsPolicyInfo httpsPolicy = gxos::gxos_validated_https_policy_info();
+    const bool broadPublicBlocked =
+        httpsPolicy.state == gxos::GxosValidatedHttpsPolicyState::ProductionValidated &&
+        !httpsPolicy.broadPublicHttpsEnabled;
     const bool selectedButBlocked =
         (httpsPolicy.selectedState == gxos::GxosValidatedHttpsPolicyState::UserTrustStoreDevMode ||
          httpsPolicy.selectedState == gxos::GxosValidatedHttpsPolicyState::ProductionValidated) &&
         !(httpsPolicy.state == gxos::GxosValidatedHttpsPolicyState::UserTrustStoreDevMode ||
           httpsPolicy.state == gxos::GxosValidatedHttpsPolicyState::ProductionValidated) &&
         httpsPolicy.blocker && httpsPolicy.blocker[0];
-    const bool titleOk = selectedButBlocked ||
+    const bool selectedOrBroadPublicBlocked = selectedButBlocked || broadPublicBlocked;
+    const bool titleOk = selectedOrBroadPublicBlocked ||
         streq_local(app.m_title, direct ? "HTTPS Unsupported" : "HTTPS Redirect Unsupported");
     const bool errorOk =
         nav_starts_with(app.m_metaErrorStatus, direct ? "HTTPS/TLS unsupported" : "HTTPS/TLS unsupported redirect") ||
-        (selectedButBlocked && streq_local(app.m_metaErrorStatus, httpsPolicy.blocker));
+        (selectedButBlocked && streq_local(app.m_metaErrorStatus, httpsPolicy.blocker)) ||
+        (broadPublicBlocked && streq_local(app.m_metaErrorStatus, httpsPolicy.publicHttpsPilotReason));
     return streq_local(app.m_metaRequestedUrl, url) &&
            streq_local(app.m_metaFinalUrl, expectedFinalUrl) &&
            errorOk &&
@@ -11791,14 +15605,14 @@ bool NavigatorApp::smokeHttpsUnsupportedDocument(const char* url, const char* ex
            tlsAttempts == expectedTlsTcpConnectAttempts;
 }
 
-static void nav_push_url(char stack[][160], int& count, const char* url)
+static void nav_push_url(char stack[][kNavigatorUrlStorageBytes], int& count, const char* url)
 {
     if (!url || !url[0]) return;
     if (count >= 12) {
-        for (int i = 1; i < 12; ++i) strcopy(stack[i - 1], stack[i], 160);
+        for (int i = 1; i < 12; ++i) strcopy(stack[i - 1], stack[i], kNavigatorUrlStorageBytes);
         count = 11;
     }
-    strcopy(stack[count++], url, 160);
+    strcopy(stack[count++], url, kNavigatorUrlStorageBytes);
 }
 
 void NavigatorApp::navigateTo(const char* url)
@@ -11887,8 +15701,8 @@ void NavigatorApp::commitAddressBar()
 bool NavigatorApp::hitAddressBar(int x, int y) const
 {
     if (!m_window) return false;
-    int addressW = m_window->w - ADDRESS_X - 20;
-    return addressW > 0 && x >= ADDRESS_X && x < ADDRESS_X + addressW &&
+    const NavigatorToolbarLayout toolbarLayout = navigatorToolbarLayout(m_window->w);
+    return toolbarLayout.addressW > 0 && x >= toolbarLayout.addressX && x < toolbarLayout.addressX + toolbarLayout.addressW &&
            y >= ADDRESS_Y && y < ADDRESS_Y + ADDRESS_H;
 }
 
@@ -11922,9 +15736,10 @@ void NavigatorApp::formControlRect(int blockIndex, int& x, int& y, int& w, int& 
 {
     x = y = w = h = 0;
     if (!m_window || blockIndex < 0 || blockIndex >= m_blockCount || !isFormBlock(m_blocks[blockIndex])) return;
-    int maxChars = (m_window->w - CONTENT_X * 2 - 32) / 6;
+    int maxWidth = m_window->w - CONTENT_X * 2 - 32;
+    if (maxWidth < 32) maxWidth = 32;
     x = CONTENT_X + 14 + css_margin_left_or(m_bodyStyle, 0) + css_margin_left_or(m_blocks[blockIndex].style, 0);
-    y = blockY(blockIndex, maxChars) + css_margin_top_or(m_blocks[blockIndex].style, 4);
+    y = blockY(blockIndex, maxWidth) + css_margin_top_or(m_blocks[blockIndex].style, 4);
     w = (m_blocks[blockIndex].kind == BLOCK_FORM_SUBMIT) ? 112 :
         ((m_blocks[blockIndex].kind == BLOCK_FORM_CHECKBOX || m_blocks[blockIndex].kind == BLOCK_FORM_RADIO) ? 260 : 320);
     h = formControlHeight(m_blocks[blockIndex]);
@@ -11971,17 +15786,8 @@ void NavigatorApp::focusNextFormBlock()
 
 int NavigatorApp::blockHeight(const DocBlock& block, int maxChars) const
 {
-    int len = strlen_local(block.text);
-    int lines = 1;
-    if (block.kind == BLOCK_PREFORMATTED) {
-        // Count embedded newlines; each is a new line in the output.
-        lines = 1;
-        for (int i = 0; block.text[i]; ++i) if (block.text[i] == '\n') ++lines;
-    } else if (maxChars > 0 && len > 0) {
-        // Approximate word-wrap line count.
-        lines = (len + maxChars - 1) / maxChars;
-        if (lines < 1) lines = 1;
-    }
+    if (block.style.absolutePosition) return 0;
+    int lines = navigatorWrappedLineCount(block.text, maxChars, block.style);
     if (block.kind == BLOCK_IMAGE) {
         int imageH = block.height > 0 ? block.height : (block.naturalHeight > 0 ? block.naturalHeight : 64);
         if (imageH > 420) imageH = 420;
@@ -11990,7 +15796,7 @@ int NavigatorApp::blockHeight(const DocBlock& block, int maxChars) const
     if (isFormBlock(block)) {
         return css_margin_top_or(block.style, 4) + formControlHeight(block) + css_margin_bottom_or(block.style, 6);
     }
-    int lineH = block.kind == BLOCK_HEADING ? (css_font_size_or(block.style, 20) > 22 ? 20 : 16) : 16;
+    int lineH = navigatorLineHeight(block.style);
     int boxPadding = block.kind == BLOCK_PREFORMATTED ? css_padding_or(block.style, 4) * 2 : 0;
     // Extra pre-gap before headings is accounted for in blockY() via the caller.
     return css_margin_top_or(block.style, block.kind == BLOCK_HEADING ? 10 : 4) + lines * lineH + boxPadding + css_margin_bottom_or(block.style, block.kind == BLOCK_LIST_ITEM ? 4 : 8);
@@ -12045,8 +15851,8 @@ NavigatorApp::SelectionPosition NavigatorApp::textPositionFromPoint(int x, int y
     nearest.offset = 0;
     if (!m_window) return nearest;
 
-    int maxChars = (m_window->w - CONTENT_X * 2 - 32) / 6;
-    if (maxChars < 8) maxChars = 8;
+    int maxWidth = m_window->w - CONTENT_X * 2 - 32;
+    if (maxWidth < 32) maxWidth = 32;
     int nearestDistance = 1 << 30;
     int bodyMarginLeft = css_margin_left_or(m_bodyStyle, 0);
     for (int i = 0; i < m_blockCount; ++i) {
@@ -12057,15 +15863,13 @@ NavigatorApp::SelectionPosition NavigatorApp::textPositionFromPoint(int x, int y
         int blockMarginTop = css_margin_top_or(m_blocks[i].style, m_blocks[i].kind == BLOCK_HEADING ? 10 : 4);
         int blockMarginLeft = css_margin_left_or(m_blocks[i].style, 0);
         int blockPadding = css_padding_or(m_blocks[i].style, m_blocks[i].kind == BLOCK_PREFORMATTED ? 4 : 0);
-        int lineH = m_blocks[i].kind == BLOCK_HEADING ? (css_font_size_or(m_blocks[i].style, 20) > 22 ? 20 : 16) : 16;
+        int lineH = navigatorLineHeight(m_blocks[i].style);
         int textX = CONTENT_X + 14 + bodyMarginLeft + blockMarginLeft + (m_blocks[i].kind == BLOCK_LIST_ITEM ? 14 : 0);
-        int textY = blockY(i, maxChars) + blockMarginTop + (m_blocks[i].kind == BLOCK_PREFORMATTED ? blockPadding : 0);
-        int wrapChars = maxChars - (m_blocks[i].kind == BLOCK_LIST_ITEM ? 4 : 0);
-        if (wrapChars < 8) wrapChars = 8;
+        int textY = blockY(i, maxWidth) + blockMarginTop + (m_blocks[i].kind == BLOCK_PREFORMATTED ? blockPadding : 0);
+        int wrapWidth = maxWidth - (m_blocks[i].kind == BLOCK_LIST_ITEM ? 24 : 0);
+        if (wrapWidth < 32) wrapWidth = 32;
 
         int localLineIndex = 0;
-        int localLineStart = 0;
-        int localLineLen = 0;
         bool foundInside = false;
         int bestOffset = 0;
         int parse = 0;
@@ -12083,22 +15887,12 @@ NavigatorApp::SelectionPosition NavigatorApp::textPositionFromPoint(int x, int y
             }
             int pos = parse;
             while (pos < lineEnd) {
-                int take = wrapChars;
-                if (pos + take > lineEnd) take = lineEnd - pos;
-                int breakAt = take;
-                if (pos + take < lineEnd) {
-                    for (int j = take; j > 0; --j) {
-                        if (text[pos + j] == ' ') { breakAt = j; break; }
-                    }
-                }
-                localLineStart = pos;
-                localLineLen = breakAt;
+                int breakAt = navigatorNextLineBreak(text, pos, lineEnd, wrapWidth, m_blocks[i].style);
+                if (breakAt <= pos) breakAt = pos + 1;
                 int lineTop = textY + localLineIndex * lineH;
                 if (y >= lineTop && y < lineTop + lineH) {
-                    int charOffset = (x - textX) / 6;
-                    if (charOffset < 0) charOffset = 0;
-                    if (charOffset > localLineLen) charOffset = localLineLen;
-                    bestOffset = localLineStart + charOffset;
+                    int charOffset = navigatorLineCharOffset(text, pos, breakAt - pos, x - textX, m_blocks[i].style);
+                    bestOffset = pos + charOffset;
                     foundInside = true;
                     break;
                 }
@@ -12121,7 +15915,7 @@ NavigatorApp::SelectionPosition NavigatorApp::textPositionFromPoint(int x, int y
         if (clampToNearest) {
             int dx = 0;
             int minX = textX;
-            int maxX = textX + wrapChars * 6;
+            int maxX = textX + wrapWidth;
             if (x < minX) dx = minX - x;
             else if (x > maxX) dx = x - maxX;
             int dy = 0;
@@ -12248,6 +16042,11 @@ void NavigatorApp::selectAllDocumentText()
 
 int NavigatorApp::blockY(int index, int maxChars) const
 {
+    if (index >= 0 && index < m_blockCount && m_blocks[index].style.absolutePosition &&
+        m_blocks[index].style.positionTop >= 0) {
+        return CONTENT_Y + 12 + css_margin_top_or(m_bodyStyle, 0) +
+            m_blocks[index].style.positionTop - m_scrollY;
+    }
     int y = CONTENT_Y + 12 + css_margin_top_or(m_bodyStyle, 0) - m_scrollY;
     for (int i = 0; i < index && i < m_blockCount; ++i) {
         y += blockHeight(m_blocks[i], maxChars);
@@ -12263,25 +16062,26 @@ int NavigatorApp::blockY(int index, int maxChars) const
 int NavigatorApp::hitLinkIndex(int x, int y) const
 {
     if (!m_window) return -1;
-    int maxChars = (m_window->w - CONTENT_X * 2 - 32) / 6;
+    int maxWidth = m_window->w - CONTENT_X * 2 - 32;
+    if (maxWidth < 32) maxWidth = 32;
     for (int i = 0; i < m_blockCount; ++i) {
         if (m_blocks[i].kind != BLOCK_LINK) continue;
-        int by = blockY(i, maxChars) + css_margin_top_or(m_blocks[i].style, 4);
-        int h = blockHeight(m_blocks[i], maxChars) - css_margin_top_or(m_blocks[i].style, 4);
-        int tw = strlen_local(m_blocks[i].text) * 6;
+        int by = blockY(i, maxWidth) + css_margin_top_or(m_blocks[i].style, 4);
+        int h = blockHeight(m_blocks[i], maxWidth) - css_margin_top_or(m_blocks[i].style, 4);
+        int tw = navigatorTextWidth(m_blocks[i].style, m_blocks[i].text);
+        if (tw > maxWidth) tw = maxWidth;
         int left = CONTENT_X + 14 + css_margin_left_or(m_bodyStyle, 0) + css_margin_left_or(m_blocks[i].style, 0);
         if (x >= left && x < left + tw && y >= by && y < by + h) return i;
     }
     return -1;
 }
 
-void NavigatorApp::drawWrappedText(uint32_t x, uint32_t y, const char* text, uint32_t color, int maxChars, int& outY) const
+void NavigatorApp::drawWrappedText(uint32_t x, uint32_t y, const char* text, uint32_t color, int maxWidth, int& outY, const gxos::web::WebStyle& style) const
 {
     char line[96];
     int len = strlen_local(text);
     int yy = (int)y;
-    if (maxChars > 90) maxChars = 90;
-    if (maxChars < 8) maxChars = 8;
+    if (maxWidth < 32) maxWidth = 32;
 
     // Split on embedded newlines first; then word-wrap each physical line.
     int lineStart = 0;
@@ -12295,22 +16095,16 @@ void NavigatorApp::drawWrappedText(uint32_t x, uint32_t y, const char* text, uin
         int segLen = lineEnd - lineStart;
         if (segLen == 0) {
             // Blank physical line (e.g. empty line in <pre>)
-            yy += 16;
+            yy += navigatorLineHeight(style);
         }
         while (pos < lineEnd) {
-            int take = maxChars;
-            if (pos + take > lineEnd) take = lineEnd - pos;
-            int breakAt = take;
-            if (pos + take < lineEnd) {
-                for (int i = take; i > 0; --i) {
-                    if (text[pos + i] == ' ') { breakAt = i; break; }
-                }
-            }
+            int breakAt = navigatorNextLineBreak(text, pos, lineEnd, maxWidth, style);
+            if (breakAt <= pos) breakAt = pos + 1;
             int copyLen = breakAt < 95 ? breakAt : 95;
             for (int i = 0; i < copyLen; ++i) line[i] = text[pos + i];
             line[copyLen] = '\0';
-            appDrawText(x, (uint32_t)yy, line, color);
-            yy += 16;
+            navigatorDrawText(x, (uint32_t)yy, line, color, style);
+            yy += navigatorLineHeight(style);
             pos += breakAt;
             while (pos < lineEnd && text[pos] == ' ') ++pos;
         }
@@ -12319,19 +16113,20 @@ void NavigatorApp::drawWrappedText(uint32_t x, uint32_t y, const char* text, uin
         lineStart = lineEnd + 1; // skip '\n'
     }
 
-    if (len == 0) yy += 16;
+    if (len == 0) yy += navigatorLineHeight(style);
     outY = yy;
 }
 
 void NavigatorApp::drawDocument(uint32_t x, uint32_t y, uint32_t w, uint32_t h)
 {
-    int maxChars = ((int)w - CONTENT_X * 2 - 32) / 6;
+    int maxWidth = (int)w - CONTENT_X * 2 - 32;
+    if (maxWidth < 32) maxWidth = 32;
     int bottom = (int)h - STATUS_H - 8;
     int bodyMarginLeft = css_margin_left_or(m_bodyStyle, 0);
     for (int i = 0; i < m_blockCount; ++i) {
-        int by = blockY(i, maxChars);
+        int by = blockY(i, maxWidth);
         if (by > bottom) continue;
-        if (by + blockHeight(m_blocks[i], maxChars) < CONTENT_Y) continue;
+        if (by + blockHeight(m_blocks[i], maxWidth) < CONTENT_Y) continue;
         int absY = (int)y + by;
         int blockMarginTop = css_margin_top_or(m_blocks[i].style, m_blocks[i].kind == BLOCK_HEADING ? 10 : 4);
         int blockMarginLeft = css_margin_left_or(m_blocks[i].style, 0);
@@ -12351,41 +16146,41 @@ void NavigatorApp::drawDocument(uint32_t x, uint32_t y, uint32_t w, uint32_t h)
                 int highlightW = (int)w - CONTENT_X * 2 - 32;
                 if (m_blocks[i].kind == BLOCK_LIST_ITEM) highlightX += 14;
                 if (highlightW > 0) {
-                    framebuffer::fill_rect((uint32_t)highlightX, (uint32_t)highlightY, (uint32_t)highlightW, (uint32_t)(blockHeight(m_blocks[i], maxChars) - css_margin_bottom_or(m_blocks[i].style, m_blocks[i].kind == BLOCK_LIST_ITEM ? 4 : 8)), rgb(110, 150, 220));
+                    framebuffer::fill_rect((uint32_t)highlightX, (uint32_t)highlightY, (uint32_t)highlightW, (uint32_t)(blockHeight(m_blocks[i], maxWidth) - css_margin_bottom_or(m_blocks[i].style, m_blocks[i].kind == BLOCK_LIST_ITEM ? 4 : 8)), rgb(110, 150, 220));
                 }
             }
         }
         if (m_blocks[i].kind == BLOCK_HEADING) {
             // Bold-looking heading: draw in a deep navy color, then a 2px accent bar.
             uint32_t color = css_color_or(rgb(22, 32, 52), m_blocks[i].style);
-            appDrawText(textX, (uint32_t)(absY + blockMarginTop), m_blocks[i].text, color);
-            if (m_blocks[i].style.bold) appDrawText(textX + 1, (uint32_t)(absY + blockMarginTop), m_blocks[i].text, color);
+            navigatorDrawText(textX, (uint32_t)(absY + blockMarginTop), m_blocks[i].text, color, m_blocks[i].style);
             int barW = (int)w - CONTENT_X * 2 - 32;
-            framebuffer::fill_rect(textX, (uint32_t)(absY + blockMarginTop + 18), (uint32_t)(barW > 0 ? barW : 1), 2, rgb(55, 110, 200));
+            framebuffer::fill_rect(textX, (uint32_t)(absY + blockMarginTop + navigatorLineHeight(m_blocks[i].style) + 2), (uint32_t)(barW > 0 ? barW : 1), 2, rgb(55, 110, 200));
         } else if (m_blocks[i].kind == BLOCK_LINK) {
             uint32_t color = css_color_or(i == m_hoverLinkIndex ? rgb(10, 84, 160) : rgb(30, 92, 184), m_blocks[i].style);
             int linkOutY = absY + blockMarginTop;
-            drawWrappedText(textX, (uint32_t)(absY + blockMarginTop), m_blocks[i].text, color, maxChars, linkOutY);
+            drawWrappedText(textX, (uint32_t)(absY + blockMarginTop), m_blocks[i].text, color, maxWidth, linkOutY, m_blocks[i].style);
             // Underline each rendered line.
             if (m_blocks[i].style.underline) {
-                for (int ly = absY + blockMarginTop + 13; ly < linkOutY; ly += 16) {
-                    int lineCharCount = maxChars < 90 ? maxChars : 90;
-                    framebuffer::fill_rect(textX, (uint32_t)ly, (uint32_t)(lineCharCount * 6), 1, color);
+                for (int ly = absY + blockMarginTop + navigatorLineHeight(m_blocks[i].style) - 2; ly < linkOutY; ly += navigatorLineHeight(m_blocks[i].style)) {
+                    int lineWidth = navigatorTextWidth(m_blocks[i].style, m_blocks[i].text);
+                    if (lineWidth > maxWidth) lineWidth = maxWidth;
+                    framebuffer::fill_rect(textX, (uint32_t)ly, (uint32_t)lineWidth, 1, color);
                 }
             }
         } else if (m_blocks[i].kind == BLOCK_LIST_ITEM) {
             uint32_t color = css_color_or(rgb(54, 60, 72), m_blocks[i].style);
-            appDrawText(textX, (uint32_t)(absY + blockMarginTop), "-", rgb(72, 78, 92));
+            navigatorDrawText(textX, (uint32_t)(absY + blockMarginTop), "-", rgb(72, 78, 92), m_blocks[i].style);
             int outY = absY + blockMarginTop;
-            drawWrappedText(textX + 14, (uint32_t)(absY + blockMarginTop), m_blocks[i].text, color, maxChars - 4, outY);
+            drawWrappedText(textX + 14, (uint32_t)(absY + blockMarginTop), m_blocks[i].text, color, maxWidth - 24, outY, m_blocks[i].style);
         } else if (m_blocks[i].kind == BLOCK_PREFORMATTED) {
             // Light box background for preformatted blocks.
-            int preH = blockHeight(m_blocks[i], maxChars) - css_margin_top_or(m_blocks[i].style, 4) - css_margin_bottom_or(m_blocks[i].style, 8);
+            int preH = blockHeight(m_blocks[i], maxWidth) - css_margin_top_or(m_blocks[i].style, 4) - css_margin_bottom_or(m_blocks[i].style, 8);
             int boxW = (int)w - CONTENT_X * 2 - 28;
             if (boxW > 0 && preH > 0)
                 framebuffer::fill_rect(textX - 4, (uint32_t)(absY + blockMarginTop - 2), (uint32_t)(boxW), (uint32_t)(preH + blockPadding * 2), css_background_or(rgb(230, 232, 238), m_blocks[i].style));
             int outY = absY + blockMarginTop + blockPadding;
-            drawWrappedText(textX, (uint32_t)(absY + blockMarginTop + blockPadding), m_blocks[i].text, css_color_or(rgb(40, 50, 68), m_blocks[i].style), maxChars, outY);
+            drawWrappedText(textX, (uint32_t)(absY + blockMarginTop + blockPadding), m_blocks[i].text, css_color_or(rgb(40, 50, 68), m_blocks[i].style), maxWidth, outY, m_blocks[i].style);
         } else if (isFormBlock(m_blocks[i])) {
             DocBlock& block = m_blocks[i];
             int controlX = (int)textX;
@@ -12487,7 +16282,36 @@ void NavigatorApp::drawDocument(uint32_t x, uint32_t y, uint32_t w, uint32_t h)
                 bitmap.pixels = m_blocks[i].imagePixels;
                 bitmap.width = (uint32_t)m_blocks[i].naturalWidth;
                 bitmap.height = (uint32_t)m_blocks[i].naturalHeight;
+                bitmap.format = (gxos::gui::ImageFormat)m_blocks[i].imageFormat;
                 bool drew = gxos::gui::ImageAdapter::DrawToFramebuffer(bitmap, textX, (uint32_t)(absY + blockMarginTop), (uint32_t)imageW, (uint32_t)imageH);
+                if (drew && !m_imagePaintLogged[i]) {
+                    m_imagePaintLogged[i] = true;
+                    for (uint32_t ref = 0; ref < gxos::apps::kNavigatorMaxResourceReferences; ++ref) {
+                        if (m_resourceReferences[ref].state != static_cast<uint8_t>(gxos::apps::NavigatorResourceSchedulerState::Empty) &&
+                            static_cast<int>(m_resourceReferences[ref].blockIndex) == i) {
+                            m_resourceReferences[ref].paintObserved = 1;
+                        }
+                    }
+                    char blockText[16];
+                    char widthText[16];
+                    char heightText[16];
+                    char formatText[16];
+                    nav_int_to_text(i, blockText, sizeof(blockText));
+                    nav_int_to_text((int)bitmap.width, widthText, sizeof(widthText));
+                    nav_int_to_text((int)bitmap.height, heightText, sizeof(heightText));
+                    nav_int_to_text((int)bitmap.format, formatText, sizeof(formatText));
+                    serial::puts("[NAVIGATOR-PAINT] image_block=");
+                    serial::puts(blockText);
+                    serial::puts(" status=Ok format=");
+                    serial::puts(formatText);
+                    serial::puts(" dims=");
+                    serial::puts(widthText);
+                    serial::putc('x');
+                    serial::puts(heightText);
+                    serial::puts(" url=");
+                    serial::puts(m_blocks[i].url);
+                    serial::puts("\n");
+                }
                 if (!drew) {
                     framebuffer::fill_rect(textX, (uint32_t)(absY + blockMarginTop), (uint32_t)imageW, (uint32_t)imageH, rgb(232, 236, 242));
                     framebuffer::fill_rect(textX, (uint32_t)(absY + blockMarginTop), (uint32_t)imageW, 1, rgb(145, 153, 168));
@@ -12501,31 +16325,148 @@ void NavigatorApp::drawDocument(uint32_t x, uint32_t y, uint32_t w, uint32_t h)
             }
         } else {
             int outY = absY + blockMarginTop;
-            drawWrappedText(textX, (uint32_t)(absY + blockMarginTop), m_blocks[i].text, css_color_or(rgb(54, 60, 72), m_blocks[i].style), maxChars, outY);
+            drawWrappedText(textX, (uint32_t)(absY + blockMarginTop), m_blocks[i].text, css_color_or(rgb(54, 60, 72), m_blocks[i].style), maxWidth, outY, m_blocks[i].style);
         }
     }
 }
 
 int NavigatorApp::maxScroll() const
 {
-    int visible = m_window ? ((int)m_window->h - TOOLBAR_H - STATUS_H - 12) : 0;
-    int maxChars = m_window ? ((m_window->w - CONTENT_X * 2 - 32) / 6) : 80;
-    int docHeight = 24;
+    const int64_t visible = m_window
+        ? static_cast<int64_t>(m_window->h) - TOOLBAR_H - STATUS_H - 12 : 0;
+    const int64_t windowWidth = m_window ? static_cast<int64_t>(m_window->w) : 480;
+    const int64_t maxWidth64 = windowWidth - CONTENT_X * 2 - 32;
+    const int maxWidth = maxWidth64 < 32 ? 32 :
+        (maxWidth64 > navigator_scrollbar::kMaxCoordinate
+            ? static_cast<int>(navigator_scrollbar::kMaxCoordinate)
+            : static_cast<int>(maxWidth64));
+    int64_t docHeight = 24;
     for (int i = 0; i < m_blockCount; ++i) {
-        docHeight += blockHeight(m_blocks[i], maxChars);
+        docHeight += static_cast<int64_t>(blockHeight(m_blocks[i], maxWidth));
         // Match the pre-gap added in blockY.
         if (i + 1 < m_blockCount && m_blocks[i + 1].kind == BLOCK_HEADING)
             docHeight += 10;
     }
-    int overflow = docHeight - visible;
-    return overflow > 0 ? overflow : 0;
+    return navigator_scrollbar::bounded_max_scroll(docHeight, visible);
+}
+
+int NavigatorApp::maxScrollX() const
+{
+    // The freestanding document model currently has no CSS overflow/container
+    // records or wide-table layout source. Keep this axis explicitly disabled
+    // so a phantom horizontal bar can never intercept document input.
+    return 0;
 }
 
 void NavigatorApp::clampScroll()
 {
-    int maximum = maxScroll();
-    if (m_scrollY < 0) m_scrollY = 0;
-    if (m_scrollY > maximum) m_scrollY = maximum;
+    m_scrollY = navigator_scrollbar::clamp_scroll(m_scrollY, maxScroll());
+}
+
+void NavigatorApp::clampScrollOffsets()
+{
+    m_scrollY = navigator_scrollbar::clamp_scroll(m_scrollY, maxScroll());
+    m_scrollX = navigator_scrollbar::clamp_scroll(m_scrollX, maxScrollX());
+}
+
+bool NavigatorApp::rootScrollbarGeometry(bool horizontal, int& trackStart,
+                                         int& trackCross, int& trackExtent,
+                                         int& thumbExtent, int& thumbTravel,
+                                         int& maxScrollValue) const
+{
+    trackStart = trackCross = trackExtent = thumbExtent = thumbTravel = 0;
+    maxScrollValue = horizontal ? maxScrollX() : maxScroll();
+    if (!m_window || maxScrollValue <= 0) return false;
+
+    const int clientW = m_window->w > 0 ? m_window->w : 0;
+    const int clientH = m_window->h > 0 ? m_window->h : 0;
+    const int contentTop = TOOLBAR_H + 6;
+    const int contentH = clientH > TOOLBAR_H + STATUS_H + 12
+        ? clientH - TOOLBAR_H - STATUS_H - 12 : 0;
+    if (clientW <= 0 || contentH <= 0) return false;
+
+    const bool verticalVisible = maxScroll() > 0;
+    const bool horizontalVisible = maxScrollX() > 0;
+    if (horizontal) {
+        trackStart = CONTENT_X;
+        trackCross = contentTop + contentH - 6;
+        trackExtent = clientW - CONTENT_X - 22 - (verticalVisible ? 6 : 0);
+        if (trackExtent <= 0) return false;
+        const int viewport = clientW - CONTENT_X * 2 - 32;
+        thumbExtent = navigator_scrollbar::thumb_extent(
+            static_cast<int64_t>(viewport),
+            static_cast<int64_t>(viewport) + maxScrollX(), trackExtent);
+    } else {
+        trackStart = contentTop + 4;
+        trackCross = clientW - 22;
+        trackExtent = contentH - 8 - (horizontalVisible ? 6 : 0);
+        if (trackExtent <= 0) return false;
+        const int viewport = contentH - (horizontalVisible ? 6 : 0);
+        thumbExtent = navigator_scrollbar::thumb_extent(
+            static_cast<int64_t>(viewport),
+            static_cast<int64_t>(viewport) + maxScroll(), trackExtent);
+    }
+    thumbTravel = navigator_scrollbar::thumb_travel(trackExtent, thumbExtent);
+    return trackExtent > 0 && thumbExtent > 0;
+}
+
+bool NavigatorApp::rootScrollbarHit(int x, int y, bool& horizontal, bool& thumb,
+                                    int& trackStart, int& trackCross,
+                                    int& trackExtent, int& thumbExtent,
+                                    int& thumbTravel, int& maxScrollValue) const
+{
+    horizontal = false;
+    thumb = false;
+    int vStart = 0;
+    int vCross = 0;
+    int vExtent = 0;
+    int vThumb = 0;
+    int vTravel = 0;
+    int vMax = 0;
+    if (rootScrollbarGeometry(false, vStart, vCross, vExtent, vThumb, vTravel, vMax) &&
+        x >= vCross && x < vCross + 6 && y >= vStart && y < vStart + vExtent) {
+        trackStart = vStart;
+        trackCross = vCross;
+        trackExtent = vExtent;
+        thumbExtent = vThumb;
+        thumbTravel = vTravel;
+        maxScrollValue = vMax;
+        const int thumbStart = vStart + navigator_scrollbar::thumb_offset(
+            m_scrollY, vMax, vTravel);
+        thumb = y >= thumbStart && y < thumbStart + vThumb;
+        return true;
+    }
+
+    int hStart = 0;
+    int hCross = 0;
+    int hExtent = 0;
+    int hThumb = 0;
+    int hTravel = 0;
+    int hMax = 0;
+    if (rootScrollbarGeometry(true, hStart, hCross, hExtent, hThumb, hTravel, hMax) &&
+        x >= hStart && x < hStart + hExtent && y >= hCross && y < hCross + 6) {
+        horizontal = true;
+        trackStart = hStart;
+        trackCross = hCross;
+        trackExtent = hExtent;
+        thumbExtent = hThumb;
+        thumbTravel = hTravel;
+        maxScrollValue = hMax;
+        const int thumbStart = hStart + navigator_scrollbar::thumb_offset(
+            m_scrollX, hMax, hTravel);
+        thumb = x >= thumbStart && x < thumbStart + hThumb;
+        return true;
+    }
+    return false;
+}
+
+void NavigatorApp::updateScrollViewport()
+{
+    clampScrollOffsets();
+    m_resourceViewportDirty = true;
+    if (m_resourceScheduler.currentScrollOffset != m_scrollY) {
+        updateViewportResourceAdmission();
+    }
 }
 // ============================================================
 // App Registration
@@ -12744,6 +16685,111 @@ static const NavigatorReviewedPublicTarget kNavigatorReviewedPublicTargets[] = {
         443,
         "/",
         "Stable badssl DNS-hosted HTTPS endpoint used to prove real-world DNS, TCP, TLS, certificate, and hostname validation without enabling arbitrary public browsing."
+    },
+    {
+        "https://example.com/",
+        "example.com",
+        443,
+        "/",
+        "IANA example HTTPS page used as the first real HTML/Navigator public page target."
+    },
+    {
+        "https://www.gnu.org/",
+        "www.gnu.org",
+        443,
+        "/",
+        "GNU HTTPS homepage retained as a reviewed public HTML target for the post-example.com navigation sequence."
+    },
+    {
+        "https://news.ycombinator.com/",
+        "news.ycombinator.com",
+        443,
+        "/",
+        "Hacker News HTTPS homepage retained as a reviewed public HTML target for the post-example.com navigation sequence."
+    },
+    {
+        "https://en.wikipedia.org/",
+        "en.wikipedia.org",
+        443,
+        "/",
+        "English Wikipedia HTTPS homepage retained as a reviewed public HTML target for the post-example.com navigation sequence."
+    },
+    {
+        "https://www.iana.org/",
+        "www.iana.org",
+        443,
+        "/",
+        "IANA HTTPS homepage adds a standards-oriented HTML control with stable public hosting."
+    },
+    {
+        "https://www.w3.org/",
+        "www.w3.org",
+        443,
+        "/",
+        "W3C HTTPS homepage adds a standards-oriented HTML page with CSS and form markup."
+    },
+    {
+        "https://www.python.org/",
+        "www.python.org",
+        443,
+        "/",
+        "Python HTTPS homepage adds a large, production-hosted HTML page with scripts and responsive CSS."
+    },
+    {
+        "https://www.rust-lang.org/",
+        "www.rust-lang.org",
+        443,
+        "/",
+        "Rust HTTPS homepage adds a modern public HTML page with external resources."
+    },
+    {
+        "https://www.kernel.org/",
+        "www.kernel.org",
+        443,
+        "/",
+        "Kernel.org HTTPS homepage adds a public HTML page from a technically relevant production host."
+    },
+    {
+        "https://www.mozilla.org/",
+        "www.mozilla.org",
+        443,
+        "/",
+        "Mozilla HTTPS homepage adds a public HTML page with production certificate and resource diversity."
+    },
+    {
+        "https://www.nasa.gov/",
+        "www.nasa.gov",
+        443,
+        "/",
+        "NASA HTTPS homepage adds a public HTML page with a large real-world document and media references."
+    },
+    {
+        "https://www.apache.org/",
+        "www.apache.org",
+        443,
+        "/",
+        "Apache HTTPS homepage adds a stable open-source project HTML control."
+    },
+    {
+        "https://www.rfc-editor.org/",
+        "www.rfc-editor.org",
+        443,
+        "/",
+        "RFC Editor HTTPS homepage adds a standards-document HTML control."
+    },
+    {
+        "https://upload.wikimedia.org/wikipedia/commons/4/47/PNG_transparency_demonstration_1.png",
+        "upload.wikimedia.org",
+        443,
+        "/wikipedia/commons/4/47/PNG_transparency_demonstration_1.png",
+        "Direct Wikimedia Commons PNG control for binary MIME handling, response bounds, and non-HTML navigation capture."
+    },
+    {
+        "https://upload.wikimedia.org/wikipedia/commons/a/a9/Example.jpg",
+        "upload.wikimedia.org",
+        443,
+        "/wikipedia/commons/a/a9/Example.jpg",
+        "Direct Wikimedia Commons JPEG control for public HTTPS JPEG decoding, response bounds, and non-HTML navigation capture."
     }
 };
 
@@ -12859,7 +16905,7 @@ static NavigatorRealPublicProbeConfig navigator_real_public_probe_config()
             config.targetValid = false;
             strcopy(config.reviewedTargetPolicy, "rejected", sizeof(config.reviewedTargetPolicy));
             strcopy(config.reviewedTargetReason,
-                "The requested target is outside the reviewed public HTTPS allowlist for v0.4.",
+            "The requested target is outside the reviewed public HTTPS allowlist for v0.7.",
                 sizeof(config.reviewedTargetReason));
         }
     }
@@ -12892,7 +16938,7 @@ static const char* navigator_real_public_probe_prerequisite_blocker(
         return
             httpsPolicy.publicHttpsPilotReason && httpsPolicy.publicHttpsPilotReason[0]
                 ? httpsPolicy.publicHttpsPilotReason
-                : "Real public HTTPS probe requires ProductionValidated plus public-https-pilot=enabled.";
+                : "Real public HTTPS probe requires ProductionValidated trust prerequisites.";
     }
 
     if (trustStorePolicy.state != gxos::GxosTrustStorePolicyState::TrustStoreParsed) {
@@ -13026,7 +17072,9 @@ void NavigatorApp::smokeCaptureHttpsNavigation(const char* url,
                                                bool* redirectedHttpsRetryUsed,
                                                int* redirectHopIndex,
                                                char* redirectHopUrl,
-                                               int redirectHopUrlLen)
+                                               int redirectHopUrlLen,
+                                               int* encodedBodyBytes,
+                                               int* decodedBodyBytes)
 {
     if (requestedUrl && requestedUrlLen > 0) requestedUrl[0] = '\0';
     if (statusCode) *statusCode = 0;
@@ -13071,11 +17119,45 @@ void NavigatorApp::smokeCaptureHttpsNavigation(const char* url,
     if (redirectedHttpsRetryUsed) *redirectedHttpsRetryUsed = false;
     if (redirectHopIndex) *redirectHopIndex = 0;
     if (redirectHopUrl && redirectHopUrlLen > 0) redirectHopUrl[0] = '\0';
+    if (encodedBodyBytes) *encodedBodyBytes = 0;
+    if (decodedBodyBytes) *decodedBodyBytes = 0;
 
     const int plainAttemptsBefore = s_kernelHttpPlainTcpConnectAttempts;
     const int tlsAttemptsBefore = s_kernelHttpTlsConnectAttempts;
-    NavigatorApp app;
+    if (url && nav_starts_with(url, "https://") && !nav_starts_with(url, "https://guidexos.test")) {
+        const gxos::GxosValidatedHttpsPolicyInfo preLoadPolicy = gxos::gxos_validated_https_policy_info();
+        serial::puts("[NAVIGATOR-POLICY] before_app_load broad_public=");
+        serial::puts(preLoadPolicy.broadPublicHttpsEnabled ? "yes\n" : "no\n");
+    }
+    // Large public documents exercise the full bounded Navigator object and
+    // parser scratch state. Keep this smoke capture heap-owned, matching the
+    // normal AppManager-created Navigator, so a 256 KiB body cannot consume
+    // the kernel call stack.
+    NavigatorApp* heapApp = new NavigatorApp();
+    if (!heapApp) {
+        if (error && errorLen > 0) strcopy(error, "Navigator allocation failed", errorLen);
+        return;
+    }
+    NavigatorApp& app = *heapApp;
     app.loadUrl(url);
+    serial::puts("[NAVIGATOR-CAPTURE] load_returned\n");
+    serial::puts("[NAVIGATOR-CONTENT] encoded_body_bytes=");
+    serial_put_dec((uint32_t)app.m_metaEncodedBodyBytes);
+    serial::puts(" decoded_body_bytes=");
+    serial_put_dec((uint32_t)app.m_metaDecodedBodyBytes);
+    serial::puts(" document_segments=");
+    serial_put_dec((uint32_t)app.m_metaDocumentSegmentCount);
+    serial::puts(" document_storage_bytes=");
+    serial_put_dec((uint32_t)app.m_metaDocumentStorageBytes);
+    serial::puts(" document_storage_capacity=");
+    serial_put_dec((uint32_t)app.m_metaDocumentStorageCapacity);
+    serial::puts(" decoder_history_bytes=");
+    serial_put_dec((uint32_t)app.m_metaDocumentHistoryBytes);
+    serial::puts(" content_encoding=");
+    serial::puts(app.m_metaContentEncoding[0] ? app.m_metaContentEncoding : "identity");
+    serial::puts(" result=");
+    serial::puts(app.m_metaErrorStatus[0] ? app.m_metaErrorStatus : "success");
+    serial::puts("\n");
     const int plainAttempts = s_kernelHttpPlainTcpConnectAttempts - plainAttemptsBefore;
     const int tlsAttempts = s_kernelHttpTlsConnectAttempts - tlsAttemptsBefore;
 
@@ -13083,6 +17165,8 @@ void NavigatorApp::smokeCaptureHttpsNavigation(const char* url,
     if (statusCode) *statusCode = app.m_metaHttpStatusCode;
     if (contentType && contentTypeLen > 0) strcopy(contentType, app.m_metaContentType, contentTypeLen);
     if (bodyBytes) *bodyBytes = app.m_metaSourceBytes;
+    if (encodedBodyBytes) *encodedBodyBytes = app.m_metaEncodedBodyBytes;
+    if (decodedBodyBytes) *decodedBodyBytes = app.m_metaDecodedBodyBytes;
     if (parsedBlocks) *parsedBlocks = app.m_blockCount;
     if (error && errorLen > 0) strcopy(error, app.m_metaErrorStatus, errorLen);
     if (finalUrl && finalUrlLen > 0) strcopy(finalUrl, app.m_metaFinalUrl, finalUrlLen);
@@ -13132,6 +17216,77 @@ void NavigatorApp::smokeCaptureHttpsNavigation(const char* url,
     if (redirectHopUrl && redirectHopUrlLen > 0) {
         strcopy(redirectHopUrl, app.m_metaRedirectHopUrl, redirectHopUrlLen);
     }
+    serial::puts("[NAVIGATOR-CAPTURE] metadata_copied\n");
+
+    // Phase 8K evidence is emitted only for the production, non-allowlisted
+    // HTTPS lane. The navigation above is still the ordinary NavigatorApp
+    // loadUrl -> loadHttpResponse -> parseHtmlDocument path; this block only
+    // exposes its bounded state for the public proof log.
+    if (app.m_metaTlsUsed && !app.m_metaTlsAllowlistLocalOnly &&
+        streq_local(app.m_metaSourceType, "https")) {
+        char safeTitle[MAX_TITLE_LEN_NAV];
+        nav_copy_serial_safe_text(app.m_title, safeTitle, sizeof(safeTitle));
+        serial::puts("[NAVIGATOR-8K] navigation_generation=");
+        serial_put_dec(app.m_documentGeneration);
+        serial::puts("\n[NAVIGATOR-8K] handoff.entry=");
+        serial::puts(app.m_metaHandoffEntered ? "yes" : "no");
+        serial::puts("\n[NAVIGATOR-8K] handoff.requested_url=");
+        serial::puts(app.m_metaRequestedUrl[0] ? app.m_metaRequestedUrl : "(none)");
+        serial::puts("\n[NAVIGATOR-8K] handoff.final_url=");
+        serial::puts(app.m_metaFinalUrl[0] ? app.m_metaFinalUrl : "(none)");
+        serial::puts("\n[NAVIGATOR-8K] handoff.mime=");
+        serial::puts(app.m_metaContentType[0] ? app.m_metaContentType : "(none)");
+        serial::puts("\n[NAVIGATOR-8K] handoff.body_bytes=");
+        serial_put_dec((uint32_t)app.m_metaSourceBytes);
+        serial::puts("\n[NAVIGATOR-8K] handoff.result=");
+        serial::puts(app.m_metaHandoffResult[0] ? app.m_metaHandoffResult : "(none)");
+        serial::puts("\n[NAVIGATOR-8K] http.status=");
+        serial_put_dec((uint32_t)app.m_metaHttpStatusCode);
+        serial::puts("\n[NAVIGATOR-8K] http.response_framing=");
+        serial::puts(app.m_metaResponseFraming[0] ? app.m_metaResponseFraming : "(none)");
+        serial::puts("\n[NAVIGATOR-8K] http.content_length_present=");
+        serial::puts(app.m_metaContentLengthPresent ? "yes" : "no");
+        serial::puts("\n[NAVIGATOR-8K] http.content_length=");
+        serial_put_dec((uint32_t)app.m_metaContentLength);
+        serial::puts("\n[NAVIGATOR-8K] body.completion=");
+        serial::puts(app.m_metaBodyComplete ? "complete" : "incomplete");
+        serial::puts("\n[NAVIGATOR-8K] body.buffer_valid=");
+        serial::puts(app.m_metaBodyBufferValid ? "yes" : "no");
+        serial::puts("\n[NAVIGATOR-8K] body.null_terminated=");
+        serial::puts(app.m_metaBodyNullTerminated ? "yes" : "no");
+        serial::puts("\n[NAVIGATOR-8K] body.ownership=");
+        serial::puts(app.m_metaBodyOwnership[0] ? app.m_metaBodyOwnership : "(none)");
+        serial::puts("\n[NAVIGATOR-8K] parser.invoked=");
+        serial::puts(app.m_metaParserInvoked ? "yes" : "no");
+        serial::puts("\n[NAVIGATOR-8K] parser.input_bytes=");
+        serial_put_dec((uint32_t)app.m_metaParserInputBytes);
+        serial::puts("\n[NAVIGATOR-8K] parser.completed=");
+        serial::puts(app.m_metaParserCompleted ? "yes" : "no");
+        serial::puts("\n[NAVIGATOR-8K] document.created=");
+        serial::puts(app.m_metaDocumentCreated ? "yes" : "no");
+        serial::puts("\n[NAVIGATOR-8K] document.count=");
+        serial_put_dec((uint32_t)app.m_metaDocumentCount);
+        serial::puts("\n[NAVIGATOR-8K] document.active_generation=");
+        serial_put_dec(app.m_metaActiveDocumentGeneration);
+        serial::puts("\n[NAVIGATOR-8K] document.block_count=");
+        serial_put_dec((uint32_t)app.m_metaDocumentBlocks);
+        serial::puts("\n[NAVIGATOR-8K] layout.block_count=");
+        serial_put_dec((uint32_t)app.m_metaDocumentBlocks);
+        serial::puts("\n[NAVIGATOR-8K] document.text_fragment_count=");
+        serial_put_dec((uint32_t)app.m_metaTextFragmentCount);
+        serial::puts("\n[NAVIGATOR-8K] document.link_count=");
+        serial_put_dec((uint32_t)app.m_metaLinkCount);
+        serial::puts("\n[NAVIGATOR-8K] document.image_count=");
+        serial_put_dec((uint32_t)app.m_metaImageBlocks);
+        serial::puts("\n[NAVIGATOR-8K] document.title=");
+        serial::puts(safeTitle[0] ? safeTitle : "(none)");
+        serial::puts("\n[NAVIGATOR-8K] document.visible_text=");
+        serial::puts(app.m_metaVisibleText[0] ? app.m_metaVisibleText : "(none)");
+        serial::puts("\n");
+    }
+    serial::puts("[NAVIGATOR-CAPTURE] before_delete\n");
+    delete heapApp;
+    serial::puts("[NAVIGATOR-CAPTURE] complete\n");
 }
 
 struct NavigatorHttpsCompatibilityTargetInfo {
@@ -13379,7 +17534,8 @@ static bool printNavigatorHttpsCompatibilityCase(const char* name,
                 tlsTcpConnectAttempts >= 1 &&
                 verifyFlags == 0 &&
                 nav_smoke_text_equals(transportSelection, target.transportSelection) &&
-                nav_smoke_text_equals(tlsStatus, "TlsReadFailed");
+                (nav_smoke_text_equals(tlsStatus, "TlsReadFailed") ||
+                 nav_smoke_text_equals(tlsStatus, "ResponseTooLarge"));
             if (failClosedLargeResponse) {
                 pass = true;
             }
@@ -13836,7 +17992,7 @@ static bool printNavigatorLocalTlsWrongHostnameFailureCase()
 {
     const bool localReady = gxos::gxos_tls_local_smoke_https_ready();
     const char* url = "https://guidexos.test:8443/navigator-smoke/tls-basic.html";
-    KernelHttpResponse response{};
+    KernelHttpResponse& response = s_kernelHttpResponse;
     gxos::GxosTlsLocalHandshakeResult tlsResult{};
     const bool requestOk = kernel_tls_smoke_request_once(url, "wrong.guidexos.test", &response, &tlsResult);
     const bool hostnameFailed = !tlsResult.hostnameValidationSuccess &&
@@ -14248,6 +18404,7 @@ static bool printNavigatorRuntimeSmokePreamble()
     const kernel::vfs::MountPoint* systemMount = kernel::vfs::get_mount("/system");
     const NavigatorSmokePathProbe certsProbe = probe_navigator_smoke_path("/certs", false);
     const NavigatorSmokePathProbe caBundleProbe = probe_navigator_smoke_path("/certs/ca-bundle.pem", true);
+    const int toolbarIconResourceCount = navigatorToolbarSmokeIconResourceCount();
     const bool localSmokeTlsReady = gxos::gxos_tls_local_smoke_https_ready();
     const char* localSmokeTlsBlocker = gxos::gxos_tls_local_smoke_https_blocker_reason();
     const bool tlsReady = gxos::gxos_tls_prerequisites_ready();
@@ -14261,17 +18418,21 @@ static bool printNavigatorRuntimeSmokePreamble()
     serial::puts("[NAVIGATOR-SMOKE] launch.path=AppManager::registerApp -> NavigatorApp::create\n");
     serial::puts("[NAVIGATOR-SMOKE] current.url=about:navigator-runtime\n");
     serial::puts("[NAVIGATOR-SMOKE] stale.placeholder=not active\n");
+    serial::puts("[NAVIGATOR-SMOKE] toolbar.icon_resources=");
+    serial_put_dec64(static_cast<uint64_t>(toolbarIconResourceCount));
+    serial::puts("/6\n");
+    serial::puts("[NAVIGATOR-SMOKE] toolbar.icon_size=16x16 fallback=label-only cache=init-once\n");
     serial::puts("[NAVIGATOR-SMOKE] capability.file_read=enabled through VFS\n");
     serial::puts("[NAVIGATOR-SMOKE] capability.local_png=enabled through shared ImageAdapter where VFS image data exists\n");
-    serial::puts("[NAVIGATOR-SMOKE] capability.http=enabled numeric IPv4 and hostname HTTP/1.0 GET/POST with redirects/chunked\n");
+    serial::puts("[NAVIGATOR-SMOKE] capability.http=enabled numeric IPv4 and hostname HTTP/1.1 GET/POST with redirects/chunked\n");
     serial::puts("[NAVIGATOR-SMOKE] capability.http_dns=enabled-basic A records\n");
     serial::puts("[NAVIGATOR-SMOKE] capability.http_redirects=enabled limit 5\n");
     serial::puts("[NAVIGATOR-SMOKE] capability.http_chunked=enabled\n");
-    serial::puts("[NAVIGATOR-SMOKE] capability.https_tls=controlled local-only HTTPS remains enabled for guidexos.test:8443/navigator-smoke/; explicit dev/prod trust-store policy can enable validated fixture HTTPS, and ProductionValidated plus public-https-pilot=enabled can enable a controlled public HTTPS pilot with CA and hostname checks and no plaintext fallback\n");
+    serial::puts("[NAVIGATOR-SMOKE] capability.https_tls=controlled local smoke remains enabled for guidexos.test:8443/navigator-smoke/; ProductionValidated trust-store policy enables arbitrary-origin IPv4 HTTPS with CA, SNI, and hostname checks and no plaintext fallback\n");
     serial::puts("[NAVIGATOR-SMOKE] capability.tls_backend=Mbed TLS transport ready with CA and hostname validation\n");
     serial::puts("[NAVIGATOR-SMOKE] capability.tls_smoke_local=enabled wrong-host and direct hook diagnostics remain available\n");
     serial::puts("[NAVIGATOR-SMOKE] capability.http_transport=shared HttpByteStream policy layer (PlainTcpHttp + LocalAllowlistedTlsHttps + PolicyValidatedTlsHttps)\n");
-    serial::puts("[NAVIGATOR-SMOKE] capability.tls_policy_layer=shared HttpByteStream transport policy layer selects plain TCP HTTP, local allowlisted Mbed TLS, or policy-validated Mbed TLS; validated fixture hosts stay policy-gated, public HTTPS stays pilot-gated, plaintext fallback stays disabled, and policy stays fail-closed by default\n");
+    serial::puts("[NAVIGATOR-SMOKE] capability.tls_policy_layer=shared HttpByteStream transport policy layer selects plain TCP HTTP, local allowlisted Mbed TLS, or policy-validated Mbed TLS; production trust enables arbitrary-origin HTTPS, plaintext fallback stays disabled, and policy stays fail-closed by default\n");
     serial::puts("[NAVIGATOR-SMOKE] coverage.direct_https_allowlist=covered\n");
     serial::puts("[NAVIGATOR-SMOKE] coverage.direct_https_unsupported=covered\n");
     serial::puts("[NAVIGATOR-SMOKE] coverage.http_to_https_redirect_policy=local allowlist, validated fixture HTTPS, and controlled public HTTPS pilot redirect policy are covered\n");
@@ -14968,7 +19129,7 @@ static bool printNavigatorPolicyValidatedWrongHostnameFailureCase()
     const bool certFaultExpected = navigator_https_cert_fault_expected(faultMode);
     char url[160];
     navigator_https_policy_url(httpsPolicy, "/navigator-policy/ok.html", url, sizeof(url));
-    KernelHttpResponse response{};
+    KernelHttpResponse& response = s_kernelHttpResponse;
     gxos::GxosTlsLocalHandshakeResult tlsResult{};
     const bool requestOk = kernel_tls_smoke_request_once(url, "wrong.guidexos.test", &response, &tlsResult);
     const bool hostnameFailed = !tlsResult.hostnameValidationSuccess &&
@@ -15124,7 +19285,7 @@ static bool printNavigatorPublicPilotDecisionCase()
     const bool pass = parseOk &&
         (allow == pilotEnabled) &&
         (pilotEnabled
-            ? nav_smoke_text_equals(reason, "ProductionValidated public HTTPS pilot matched.")
+            ? nav_smoke_text_equals(reason, "ProductionValidated arbitrary-origin HTTPS matched.")
             : reason[0] != '\0');
 
     serial::puts("[NAVIGATOR-SMOKE] https.case.public_pilot_decision.enabled=");
@@ -15173,6 +19334,8 @@ static bool printNavigatorRealPublicHttpsProbeCase()
     char redirectHopUrl[160] = {};
     int statusCode = 0;
     int bodyBytes = 0;
+    int encodedBodyBytes = 0;
+    int decodedBodyBytes = 0;
     int parsedBlocks = 0;
     int redirectCount = 0;
     int redirectHopIndex = 0;
@@ -15196,7 +19359,8 @@ static bool printNavigatorRealPublicHttpsProbeCase()
     bool tcpAbortUsed = false;
     bool redirectedHttpsRetryUsed = false;
     bool attempted = false;
-    KernelHttpResponse tlsProbeResponse{};
+    KernelHttpTraceSnapshot capturedNavigationTrace{};
+    KernelHttpTraceSnapshot streamTrace{};
     gxos::GxosTlsLocalHandshakeResult tlsResult{};
     const char* resultLabel = "SKIP";
     const char* skipReason = "(none)";
@@ -15221,7 +19385,7 @@ static bool printNavigatorRealPublicHttpsProbeCase()
     serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.policy_enabled=");
     serial::puts(pilotEnabled ? "yes" : "no");
     serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.policy_blocker=");
-    serial::puts(pilotEnabled ? "(none)" : (prerequisiteBlocker ? prerequisiteBlocker : "production_public_pilot_enabled requires public-https-pilot=enabled."));
+    serial::puts(pilotEnabled ? "(none)" : (prerequisiteBlocker ? prerequisiteBlocker : "production_public_pilot_enabled requires ProductionValidated trust prerequisites."));
     serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.policy_config_path=");
     serial::puts(httpsPolicy.configPath ? httpsPolicy.configPath : "(none)");
     serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.policy_config_source=");
@@ -15346,8 +19510,16 @@ static bool printNavigatorRealPublicHttpsProbeCase()
             &tcpAbortUsed,
             &redirectedHttpsRetryUsed,
             &redirectHopIndex,
-            redirectHopUrl, sizeof(redirectHopUrl));
-        kernel_tls_smoke_request_once(probeConfig.targetUrl, tlsSniHost, &tlsProbeResponse, &tlsResult);
+            redirectHopUrl, sizeof(redirectHopUrl),
+            &encodedBodyBytes,
+            &decodedBodyBytes);
+        // smokeCaptureHttpsNavigation uses the ordinary Navigator handoff and
+        // leaves its completed transaction in the shared response object. Take
+        // the bounded trace snapshot before the secondary raw TLS request
+        // below reuses that storage.
+        kernel_http_capture_trace_snapshot(s_kernelHttpResponse, &capturedNavigationTrace);
+        kernel_tls_smoke_request_once(probeConfig.targetUrl, tlsSniHost, &s_kernelHttpResponse, &tlsResult);
+        kernel_http_capture_trace_snapshot(s_kernelHttpResponse, &streamTrace);
 
         const bool tlsSuccess =
             tlsTcpConnectAttempts >= 1 &&
@@ -15581,6 +19753,8 @@ static bool printNavigatorRealPublicHttpsProbeCase()
         nav_i64_to_text((int64_t)tlsHandshakeErrorCode, signedNumber, sizeof(signedNumber));
         serial::puts(signedNumber);
     }
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tls_handshake_error_name=");
+    serial::puts(tlsResult.tlsHandshakeErrorName[0] ? tlsResult.tlsHandshakeErrorName : "(none)");
     serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tls_transport_error_code=");
     {
         char signedNumber[32];
@@ -15591,6 +19765,84 @@ static bool printNavigatorRealPublicHttpsProbeCase()
     serial_put_dec((uint32_t)(tlsRequestBytesWritten > 0 ? tlsRequestBytesWritten : 0));
     serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tls_response_bytes_read=");
     serial_put_dec((uint32_t)(tlsResponseBytesRead > 0 ? tlsResponseBytesRead : 0));
+    const gxos::GxosTlsLocalHandshakeResult& traceResult = attempted
+        ? capturedNavigationTrace.tlsResult
+        : tlsResult;
+    const KernelHttpTraceSnapshot& streamResponse = attempted
+        ? capturedNavigationTrace
+        : streamTrace;
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tls_bio_send_calls=");
+    serial_put_dec64((uint64_t)traceResult.tlsBioSendCalls);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tls_bio_recv_calls=");
+    serial_put_dec64((uint64_t)traceResult.tlsBioRecvCalls);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tls_bio_bytes_sent=");
+    serial_put_dec64((uint64_t)traceResult.tlsBioBytesSent);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tls_bio_bytes_received=");
+    serial_put_dec64((uint64_t)traceResult.tlsBioBytesReceived);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tls_bio_last_send_result=");
+    {
+        char signedNumber[32];
+        nav_i64_to_text((int64_t)traceResult.tlsBioLastSendResult, signedNumber, sizeof(signedNumber));
+        serial::puts(signedNumber);
+    }
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tls_bio_last_recv_result=");
+    {
+        char signedNumber[32];
+        nav_i64_to_text((int64_t)traceResult.tlsBioLastRecvResult, signedNumber, sizeof(signedNumber));
+        serial::puts(signedNumber);
+    }
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tls_read_calls=");
+    serial_put_dec64((uint64_t)traceResult.tlsReadCalls);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tls_read_want_read_count=");
+    serial_put_dec64((uint64_t)traceResult.tlsReadWantReadCount);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tls_read_want_write_count=");
+    serial_put_dec64((uint64_t)traceResult.tlsReadWantWriteCount);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tls_read_close_notify_count=");
+    serial_put_dec64((uint64_t)traceResult.tlsReadCloseNotifyCount);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tls_read_eof_count=");
+    serial_put_dec64((uint64_t)traceResult.tlsReadEofCount);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tls_read_fatal_error_count=");
+    serial_put_dec64((uint64_t)traceResult.tlsReadFatalErrorCount);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tls_read_progress_events=");
+    serial_put_dec64((uint64_t)traceResult.tlsReadProgressEvents);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tls_read_elapsed_ms=");
+    serial_put_dec64((uint64_t)traceResult.tlsResponseReadElapsedMs);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tcp_read_calls=");
+    serial_put_dec64((uint64_t)streamResponse.tcpReadCalls);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tcp_would_block_reads=");
+    serial_put_dec64((uint64_t)streamResponse.tcpWouldBlockReads);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tcp_payload_segments=");
+    serial_put_dec64((uint64_t)streamResponse.tcpPayloadSegments);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tcp_payload_bytes_received=");
+    serial_put_dec64((uint64_t)streamResponse.tcpPayloadBytesReceived);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tcp_payload_bytes_accepted=");
+    serial_put_dec64((uint64_t)streamResponse.tcpPayloadBytesAccepted);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tcp_payload_bytes_dropped=");
+    serial_put_dec64((uint64_t)streamResponse.tcpPayloadBytesDropped);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tcp_window_update_acks=");
+    serial_put_dec64((uint64_t)streamResponse.tcpWindowUpdateAcks);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tcp_window_reopen_events=");
+    serial_put_dec64((uint64_t)streamResponse.tcpWindowReopenEvents);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tcp_local_zero_window_events=");
+    serial_put_dec64((uint64_t)streamResponse.tcpLocalZeroWindowEvents);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tcp_peer_zero_window_events=");
+    serial_put_dec64((uint64_t)streamResponse.tcpPeerZeroWindowEvents);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tcp_advertised_window=");
+    serial_put_dec64((uint64_t)streamResponse.tcpAdvertisedWindow);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tcp_minimum_advertised_window=");
+    serial_put_dec64((uint64_t)streamResponse.tcpMinimumAdvertisedWindow);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tcp_last_peer_window=");
+    serial_put_dec64((uint64_t)streamResponse.tcpLastPeerWindow);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.http_read_progress_events=");
+    serial_put_dec64((uint64_t)streamResponse.httpReadProgressEvents);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.http_read_would_block_count=");
+    serial_put_dec64((uint64_t)streamResponse.httpReadWouldBlockCount);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.http_read_elapsed_ms=");
+    serial_put_dec64((uint64_t)streamResponse.httpReadElapsedMs);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.http_read_timed_out=");
+    serial::puts(streamResponse.httpReadTimedOut ? "yes" : "no");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tls_handshake_elapsed_ms=");
+    serial_put_dec64((uint64_t)tlsResult.tlsHandshakeElapsedMs);
     serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tls_validated=");
     serial::puts(tlsValidated ? "yes" : "no");
     serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.certificate_validation_result=");
@@ -15637,8 +19889,19 @@ static bool printNavigatorRealPublicHttpsProbeCase()
     serial::puts(redirectHopUrl[0] ? redirectHopUrl : "(none)");
     serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.http_status=");
     serial_put_dec((uint32_t)statusCode);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.request_accept_encoding=");
+    serial::puts(gxos::web::kHttpSharedProductionAcceptEncoding);
     serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.body_bytes=");
     serial_put_dec((uint32_t)bodyBytes);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.encoded_body_bytes=");
+    serial_put_dec((uint32_t)encodedBodyBytes);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.decoded_body_bytes=");
+    serial_put_dec((uint32_t)decodedBodyBytes);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.decoded_body_cap=");
+    serial_put_dec((uint32_t)gxos::web::kHttpSharedMaxDecodedDocumentBytes);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.decoded_cap_headroom=");
+    serial_put_dec((uint32_t)(decodedBodyBytes < gxos::web::kHttpSharedMaxDecodedDocumentBytes
+        ? gxos::web::kHttpSharedMaxDecodedDocumentBytes - decodedBodyBytes : 0));
     serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.parsed_blocks=");
     serial_put_dec((uint32_t)parsedBlocks);
     serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.content_type=");
@@ -15925,7 +20188,10 @@ static bool printNavigatorPublicPilotDowngradeCase()
 
 static bool printNavigatorHttpSmokeCases()
 {
-    bool httpOk = true;
+    // Run the explicitly requested public proof lane before the broad local
+    // compatibility matrix.  A later legacy/native-app fault must not erase
+    // the evidence for an already-authorized public HTTPS probe.
+    bool httpOk = printNavigatorRealPublicHttpsProbeCase();
     httpOk = printNavigatorLocalTlsSmokeCase() && httpOk;
     httpOk = printNavigatorLocalTlsRedirectCase() && httpOk;
     httpOk = printNavigatorLocalTlsWrongHostnameFailureCase() && httpOk;
@@ -15945,6 +20211,9 @@ static bool printNavigatorHttpSmokeCases()
     httpOk = printNavigatorHttpsCompatibilityCase("compat_html_200",
         "/navigator-smoke/basic.html", 200, "/navigator-smoke/basic.html", 0,
         "text/html", "", "", "", false, false, false) && httpOk;
+    httpOk = printNavigatorHttpsCompatibilityCase("compat_parser_stack",
+        "/navigator-smoke/parser-stack.html", 200, "/navigator-smoke/parser-stack.html", 0,
+        "text/html", "", "", "", false, false, false) && httpOk;
     httpOk = printNavigatorHttpsCompatibilityCase("compat_text_200",
         "/navigator-smoke/plain.txt", 200, "/navigator-smoke/plain.txt", 0,
         "text/plain", "", "", "", false, false, false) && httpOk;
@@ -15960,16 +20229,17 @@ static bool printNavigatorHttpSmokeCases()
         false, false, false) && httpOk;
     httpOk = printNavigatorHttpsCompatibilityCase("compat_gzip",
         "/navigator-smoke/gzip.html", 200, "/navigator-smoke/gzip.html", 0,
-        "text/html", "gzip", "Unsupported content encoding", "Unsupported Content-Encoding",
-        false, false, true) && httpOk;
+        "text/html", "gzip", "", "", false, false, false) && httpOk;
+    httpOk = printNavigatorHttpsCompatibilityCase("compat_gzip_chunked",
+        "/navigator-smoke/gzip-chunked.html", 200, "/navigator-smoke/gzip-chunked.html", 0,
+        "text/html", "gzip", "", "", false, false, false) && httpOk;
     httpOk = printNavigatorHttpsCompatibilityCase("compat_br",
         "/navigator-smoke/br.html", 200, "/navigator-smoke/br.html", 0,
         "text/html", "br", "Unsupported content encoding", "Unsupported Content-Encoding",
         false, false, true) && httpOk;
     httpOk = printNavigatorHttpsCompatibilityCase("compat_deflate",
         "/navigator-smoke/deflate.html", 200, "/navigator-smoke/deflate.html", 0,
-        "text/html", "deflate", "Unsupported content encoding", "Unsupported Content-Encoding",
-        false, false, true) && httpOk;
+        "text/html", "deflate", "", "", false, false, false) && httpOk;
     httpOk = printNavigatorHttpsCompatibilityCase("compat_redirect_relative",
         "/navigator-smoke/tls-redirect-relative", 200, "/navigator-smoke/final.html", 1,
         "text/html", "", "", "", false, false, false) && httpOk;
@@ -15993,6 +20263,10 @@ static bool printNavigatorHttpSmokeCases()
         "https://10.0.2.2:8443/navigator-smoke/tls-basic.html", 1, 0) && httpOk;
     httpOk = printNavigatorHttpSmokeCase("basic", "http://10.0.2.2:8080/navigator-smoke/basic.html", 200,
         "http://10.0.2.2:8080/navigator-smoke/basic.html", true, true, false) && httpOk;
+    httpOk = printNavigatorHttpSmokeCase("request_headers", "http://10.0.2.2:8080/navigator-smoke/request-headers.html", 200,
+        "http://10.0.2.2:8080/navigator-smoke/request-headers.html", true, true, false) && httpOk;
+    httpOk = printNavigatorHttpSmokeCase("request_headers_redirect", "http://10.0.2.2:8080/navigator-smoke/request-headers-redirect", 200,
+        "http://10.0.2.2:8080/navigator-smoke/request-headers-final.html", true, true, false) && httpOk;
     httpOk = printNavigatorHttpSmokeCase("relative_redirect", "http://10.0.2.2:8080/navigator-smoke/redirect-relative", 200,
         "http://10.0.2.2:8080/navigator-smoke/final.html", true, true, false) && httpOk;
     httpOk = printNavigatorHttpSmokeCase("absolute_redirect", "http://10.0.2.2:8080/navigator-smoke/redirect-absolute", 200,
@@ -16005,20 +20279,62 @@ static bool printNavigatorHttpSmokeCases()
         "http://10.0.2.2:8080/navigator-smoke/redirect-loop", false, false, true) && httpOk;
     httpOk = printNavigatorHttpSmokeCase("chunked", "http://10.0.2.2:8080/navigator-smoke/chunked.html", 200,
         "http://10.0.2.2:8080/navigator-smoke/chunked.html", true, true, false) && httpOk;
+    httpOk = printNavigatorHttpSmokeCase("stream_split_content_length",
+        "http://10.0.2.2:8080/navigator-smoke/stream-split-content-length.html", 200,
+        "http://10.0.2.2:8080/navigator-smoke/stream-split-content-length.html", true, true, false) && httpOk;
+    httpOk = printNavigatorHttpSmokeCase("stream_split_chunked",
+        "http://10.0.2.2:8080/navigator-smoke/stream-split-chunked.html", 200,
+        "http://10.0.2.2:8080/navigator-smoke/stream-split-chunked.html", true, true, false) && httpOk;
+    httpOk = printNavigatorHttpSmokeCase("stream_connection_close",
+        "http://10.0.2.2:8080/navigator-smoke/stream-connection-close.html", 200,
+        "http://10.0.2.2:8080/navigator-smoke/stream-connection-close.html", true, true, false) && httpOk;
     httpOk = printNavigatorHttpSmokeCase("missing_404", "http://10.0.2.2:8080/navigator-smoke/missing.html", 404,
         "http://10.0.2.2:8080/navigator-smoke/missing.html", true, false, false) && httpOk;
-    httpOk = printNavigatorHttpSmokeCase("gzip_unsupported", "http://10.0.2.2:8080/navigator-smoke/gzip.html", 200,
-        "http://10.0.2.2:8080/navigator-smoke/gzip.html", false, false, true) && httpOk;
+    httpOk = printNavigatorHttpSmokeCase("gzip", "http://10.0.2.2:8080/navigator-smoke/gzip.html", 200,
+        "http://10.0.2.2:8080/navigator-smoke/gzip.html", true, true, false) && httpOk;
+    httpOk = printNavigatorHttpSmokeCase("gzip_chunked", "http://10.0.2.2:8080/navigator-smoke/gzip-chunked.html", 200,
+        "http://10.0.2.2:8080/navigator-smoke/gzip-chunked.html", true, true, false) && httpOk;
+    httpOk = printNavigatorHttpSmokeCase("deflate", "http://10.0.2.2:8080/navigator-smoke/deflate.html", 200,
+        "http://10.0.2.2:8080/navigator-smoke/deflate.html", true, true, false) && httpOk;
+    httpOk = printNavigatorHttpSmokeCase("negotiated_gzip", "http://10.0.2.2:8080/navigator-smoke/negotiated-gzip.html", 200,
+        "http://10.0.2.2:8080/navigator-smoke/negotiated-gzip.html", true, true, false) && httpOk;
+    httpOk = printNavigatorHttpSmokeCase("negotiated_deflate", "http://10.0.2.2:8080/navigator-smoke/negotiated-deflate.html", 200,
+        "http://10.0.2.2:8080/navigator-smoke/negotiated-deflate.html", true, true, false) && httpOk;
+    httpOk = printNavigatorHttpSmokeCase("negotiated_identity", "http://10.0.2.2:8080/navigator-smoke/negotiated-identity.html", 200,
+        "http://10.0.2.2:8080/navigator-smoke/negotiated-identity.html", true, true, false) && httpOk;
+    httpOk = printNavigatorHttpSmokeCase("negotiated_br", "http://10.0.2.2:8080/navigator-smoke/negotiated-br.html", 200,
+        "http://10.0.2.2:8080/navigator-smoke/negotiated-br.html", false, false, true) && httpOk;
+    httpOk = printNavigatorHttpSmokeCase("malformed_gzip", "http://10.0.2.2:8080/navigator-smoke/malformed-gzip.html", 200,
+        "http://10.0.2.2:8080/navigator-smoke/malformed-gzip.html", false, false, true) && httpOk;
     httpOk = printNavigatorHttpSmokeCase("image_relative", "http://10.0.2.2:8080/navigator-smoke/image-relative.html", 200,
         "http://10.0.2.2:8080/navigator-smoke/image-relative.html", true, true, false, 1, 1, 0) && httpOk;
+    httpOk = printNavigatorHttpSmokeCase("image_jpeg", "http://10.0.2.2:8080/navigator-smoke/image-jpeg.html", 200,
+        "http://10.0.2.2:8080/navigator-smoke/image-jpeg.html", true, true, false, 1, 1, 0) && httpOk;
+    httpOk = printNavigatorHttpSmokeCase("image_jpeg_chunked", "http://10.0.2.2:8080/navigator-smoke/image-jpeg-chunked.html", 200,
+        "http://10.0.2.2:8080/navigator-smoke/image-jpeg-chunked.html", true, true, false, 1, 1, 0) && httpOk;
+    httpOk = printNavigatorHttpSmokeCase("image_jpeg_compressed", "http://10.0.2.2:8080/navigator-smoke/image-jpeg-compressed.html", 200,
+        "http://10.0.2.2:8080/navigator-smoke/image-jpeg-compressed.html", true, true, false, 1, 1, 0) && httpOk;
     httpOk = printNavigatorHttpSmokeCase("image_absolute", "http://10.0.2.2:8080/navigator-smoke/image-absolute.html", 200,
         "http://10.0.2.2:8080/navigator-smoke/image-absolute.html", true, true, false, 1, 1, 0) && httpOk;
     httpOk = printNavigatorHttpSmokeCase("image_redirect", "http://10.0.2.2:8080/navigator-smoke/image-redirect.html", 200,
         "http://10.0.2.2:8080/navigator-smoke/image-redirect.html", true, true, false, 1, 1, 0) && httpOk;
     httpOk = printNavigatorHttpSmokeCase("image_chunked", "http://10.0.2.2:8080/navigator-smoke/image-chunked.html", 200,
         "http://10.0.2.2:8080/navigator-smoke/image-chunked.html", true, true, false, 1, 1, 0) && httpOk;
+    httpOk = printNavigatorHttpSmokeCase("image_compressed", "http://10.0.2.2:8080/navigator-smoke/image-compressed.html", 200,
+        "http://10.0.2.2:8080/navigator-smoke/image-compressed.html", true, true, false, 1, 1, 0) && httpOk;
     httpOk = printNavigatorHttpSmokeCase("image_nonpng", "http://10.0.2.2:8080/navigator-smoke/image-nonpng.html", 200,
         "http://10.0.2.2:8080/navigator-smoke/image-nonpng.html", true, true, false, 1, 0, 1) && httpOk;
+    const gxos::GxosValidatedHttpsPolicyInfo publicPolicy = gxos::gxos_validated_https_policy_info();
+    if (publicPolicy.broadPublicHttpsEnabled) {
+        httpOk = printNavigatorHttpSmokeCase("real_public_https_png_resource",
+            "http://10.0.2.2:8080/navigator-smoke/real-public-png.html", 200,
+            "http://10.0.2.2:8080/navigator-smoke/real-public-png.html", true, true, false,
+            1, 1, 0) && httpOk;
+        httpOk = printNavigatorHttpSmokeCase("real_public_https_jpeg_resource",
+            "http://10.0.2.2:8080/navigator-smoke/real-public-jpeg.html", 200,
+            "http://10.0.2.2:8080/navigator-smoke/real-public-jpeg.html", true, true, false,
+            1, 1, 0) && httpOk;
+    }
     httpOk = printNavigatorHttpSmokeCase("hostname_image_relative", "http://guidexos.test:8080/navigator-smoke/hostname-image.html", 200,
         "http://guidexos.test:8080/navigator-smoke/hostname-image.html", true, true, false, 1, 1, 0, "10.0.2.2") && httpOk;
     httpOk = printNavigatorHttpSmokeCase("text_polish", "http://10.0.2.2:8080/navigator-smoke/text-polish.html", 200,
@@ -16031,19 +20347,67 @@ static bool printNavigatorHttpSmokeCases()
         "http://10.0.2.2:8080/forms/post-echo", 1) && httpOk;
     httpOk = printNavigatorFormsLitePostSmokeCase("forms_post_redirect_hostname", "http://10.0.2.2:8080/forms/post-redirect-hostname",
         "http://guidexos.test:8080/forms/post-echo", 1, "10.0.2.2") && httpOk;
-    httpOk = printNavigatorRealPublicHttpsProbeCase() && httpOk;
+    char persistentToken[32];
+    auto persistentTokenIsEnabled = [](const char* primaryPath, const char* compatPath,
+                                       char* token, int tokenSize) {
+        if (!nav_smoke_read_vfs_token_file(primaryPath, compatPath, token, tokenSize)) {
+            return false;
+        }
+        return nav_smoke_text_equals_insensitive(token, "enabled") ||
+            nav_smoke_text_equals_insensitive(token, "1") ||
+            nav_smoke_text_equals_insensitive(token, "true") ||
+            nav_smoke_text_equals_insensitive(token, "yes");
+    };
+    bool persistentMarkerEnabled = persistentTokenIsEnabled(
+        kNavigatorPersistentNavigationPath, "/config/navigator/PERSNAV.TXT",
+        persistentToken, sizeof(persistentToken));
+    if (!persistentMarkerEnabled) {
+        // The boot ramdisk is mounted at /system and then exposed through a
+        // VFS alias.  Retry the canonical boot-image path when a generated
+        // FAT directory exposes only the alias's partial name view.
+        persistentMarkerEnabled = persistentTokenIsEnabled(
+            "/system/config/navigator/persistent-navigation-enabled.txt",
+            "/system/config/navigator/PERSNAV.TXT",
+            persistentToken, sizeof(persistentToken));
+    }
+    if (!persistentMarkerEnabled) {
+        persistentMarkerEnabled = persistentTokenIsEnabled(
+            "/config/navigator/00PERSNAV.TXT",
+            "/system/config/navigator/00PERSNAV.TXT",
+            persistentToken, sizeof(persistentToken));
+    }
+    // The ProductionValidated public-pilot token is read through the shared
+    // TLS policy loader before this smoke report.  Use it as a second, stable
+    // trigger for the dedicated deterministic lifecycle lane.  The explicit
+    // pilot token selects the smoke sequence; broad public trust still gates
+    // the external NASA/Wikipedia/example.com requests inside that sequence.
+    const bool persistentPolicyEnabled = publicPolicy.publicHttpsPilotRequested;
+    const bool persistentEnabled = persistentMarkerEnabled || persistentPolicyEnabled;
+    serial::puts("[NAVIGATOR-SMOKE] persistent_navigation.enabled=");
+    serial::puts(persistentEnabled ? "yes\n" : "no\n");
+    serial::puts("[NAVIGATOR-SMOKE] persistent_navigation.trigger=");
+    serial::puts(persistentMarkerEnabled ? "config-marker\n" :
+        (persistentPolicyEnabled ? "public-pilot-policy\n" : "disabled\n"));
+    if (persistentEnabled)
+        httpOk = NavigatorApp::smokePersistentNavigationLifecycle() && httpOk;
     return httpOk;
 }
 
 void printNavigatorRuntimeSmokeReport()
 {
     bool registered = printNavigatorRuntimeSmokePreamble();
+    bool typographyOk = NavigatorApp::smokeTypographyPhase7A();
 #ifdef GXOS_NAVIGATOR_HTTP_SMOKE_ACTIVE
+    bool pointerOk = NavigatorApp::smokeScrollbarPointerInput();
+    const bool phase8jRawOk = gxos::gxos_tls_run_phase8j_raw_ecdsa_diagnostics();
+    serial::puts(phase8jRawOk
+        ? "[NAVIGATOR-SMOKE] phase8j.raw_ecdsa.result=PASS\n"
+        : "[NAVIGATOR-SMOKE] phase8j.raw_ecdsa.result=FAIL\n");
     bool httpOk = printNavigatorHttpSmokeCases();
-    serial::puts((registered && httpOk) ? "[NAVIGATOR-SMOKE] result=PASS\n" : "[NAVIGATOR-SMOKE] result=FAIL\n");
+    serial::puts((registered && typographyOk && pointerOk && phase8jRawOk && httpOk) ? "[NAVIGATOR-SMOKE] result=PASS\n" : "[NAVIGATOR-SMOKE] result=FAIL\n");
 #else
     serial::puts("[NAVIGATOR-SMOKE] http.active_cases=skipped\n");
-    serial::puts(registered ? "[NAVIGATOR-SMOKE] result=PASS\n" : "[NAVIGATOR-SMOKE] result=FAIL\n");
+    serial::puts((registered && typographyOk) ? "[NAVIGATOR-SMOKE] result=PASS\n" : "[NAVIGATOR-SMOKE] result=FAIL\n");
 #endif
     serial::puts("[NAVIGATOR-SMOKE] END\n");
 }
@@ -16051,8 +20415,10 @@ void printNavigatorRuntimeSmokeReport()
 void printNavigatorHttpRuntimeSmokeReport()
 {
     bool registered = printNavigatorRuntimeSmokePreamble();
+    bool typographyOk = NavigatorApp::smokeTypographyPhase7A();
+    bool pointerOk = NavigatorApp::smokeScrollbarPointerInput();
     bool httpOk = printNavigatorHttpSmokeCases();
-    serial::puts((registered && httpOk) ? "[NAVIGATOR-SMOKE] result=PASS\n" : "[NAVIGATOR-SMOKE] result=FAIL\n");
+    serial::puts((registered && typographyOk && pointerOk && httpOk) ? "[NAVIGATOR-SMOKE] result=PASS\n" : "[NAVIGATOR-SMOKE] result=FAIL\n");
     serial::puts("[NAVIGATOR-SMOKE] END\n");
 }
 

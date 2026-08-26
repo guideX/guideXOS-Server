@@ -48,7 +48,7 @@ def main() -> int:
     request = urllib.request.Request(args.url, data=body if args.method.upper() == "POST" else None,
                                      method=args.method.upper())
     request.add_header("Host", args.host_header)
-    request.add_header("Accept-Encoding", "identity")
+    request.add_header("Accept-Encoding", "gzip, deflate")
     request.add_header("Connection", "close")
     if args.method.upper() == "POST":
         request.add_header("Content-Type", args.content_type or "application/x-www-form-urlencoded")

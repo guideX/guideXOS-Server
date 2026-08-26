@@ -277,6 +277,22 @@ struct GxosTlsLocalHandshakeResult {
     bool usedSniHostname;
     size_t requestBytesWritten;
     size_t responseBytesRead;
+    size_t tlsBioSendCalls;
+    size_t tlsBioRecvCalls;
+    size_t tlsBioBytesSent;
+    size_t tlsBioBytesReceived;
+    int tlsBioLastSendResult;
+    int tlsBioLastRecvResult;
+    size_t tlsReadCalls;
+    size_t tlsReadWantReadCount;
+    size_t tlsReadWantWriteCount;
+    size_t tlsReadCloseNotifyCount;
+    size_t tlsReadEofCount;
+    size_t tlsReadFatalErrorCount;
+    size_t tlsReadProgressEvents;
+    int tlsReadLastResult;
+    uint32_t tlsResponseReadElapsedMs;
+    uint32_t tlsHandshakeElapsedMs;
     uint32_t verifyFlags;
     int transportError;
     int mbedtlsError;
@@ -298,6 +314,7 @@ struct GxosTlsLocalHandshakeResult {
     char tlsSetupStep[32];
     int tlsSetupErrorCode;
     char tlsSetupErrorName[48];
+    char tlsHandshakeErrorName[64];
     size_t tlsSuiteContractCount;
     size_t tlsSuiteContractRealCount;
     bool tlsSuiteContractInstalled;
@@ -333,6 +350,9 @@ const char* gxos_tls_certificate_validation_policy();
 
 bool gxos_tls_prerequisites_ready();
 const char* gxos_tls_prerequisites_blocker_reason();
+
+/* Direct PSA ECDSA probes used by the Phase 8J bare-metal crypto rail. */
+bool gxos_tls_run_phase8j_raw_ecdsa_diagnostics();
 
 #if defined(GXOS_NAVIGATOR_TLS_CAPABILITY_CONTRACT_NEGATIVE_TEST_ACTIVE)
 bool gxos_tls_capability_contract_negative_test(GxosTlsLocalHandshakeResult* result);

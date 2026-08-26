@@ -7,7 +7,8 @@ param(
     [string]$CandidateBundlePath,
     [string]$CandidateRotationId,
     [switch]$CandidateReviewed,
-    [string[]]$ScenarioFilter
+    [string[]]$ScenarioFilter,
+    [switch]$ReuseActiveBuild
 )
 
 $ErrorActionPreference = "Stop"
@@ -16,11 +17,13 @@ $LogDir = Join-Path $Root "logs"
 New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
 . (Join-Path $Root "scripts\process_environment.ps1")
 Normalize-ProcessEnvironment
+. (Join-Path $Root "scripts\qemu-secure-rng-args.ps1")
 . (Join-Path $Root "scripts\navigator_smoke_repo_hygiene.ps1")
 
 $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
 $downloadsState = Save-NavigatorSmokeDirectoryState -LiteralPath (Join-Path $Root "downloads")
 $ramdiskState = Save-NavigatorSmokeFileState -LiteralPath (Join-Path $Root "ESP\\ramdisk.img")
+$persistentFixtureEspState = Save-NavigatorSmokeDirectoryState -LiteralPath (Join-Path $Root "ESP\\navigator-smoke\\generated")
 $wallpaperPackState = Save-NavigatorSmokeDirectoryState -LiteralPath (Join-Path $Root "out\\wallpaper-pack")
 $wallpaperPackCaBundleState = Save-NavigatorSmokeFileState -LiteralPath (Join-Path $Root "out\\wallpaper-pack\\certs\\ca-bundle.pem")
 
@@ -40,12 +43,36 @@ function Invoke-KernelBuildForSmoke {
         Remove-Item -Force -ErrorAction SilentlyContinue
     Get-ChildItem -Path (Join-Path $Root "kernel\build") -Recurse -Filter "kernel_apps.o" -ErrorAction SilentlyContinue |
         Remove-Item -Force -ErrorAction SilentlyContinue
+    Get-ChildItem -Path (Join-Path $Root "kernel\build") -Recurse -Filter "cxx_runtime.o" -ErrorAction SilentlyContinue |
+        Remove-Item -Force -ErrorAction SilentlyContinue
     Get-ChildItem -Path (Join-Path $Root "kernel\build") -Recurse -Filter "gxos_tls_foundation.o" -ErrorAction SilentlyContinue |
+        Remove-Item -Force -ErrorAction SilentlyContinue
+    Get-ChildItem -Path (Join-Path $Root "kernel\build") -Recurse -Filter "tcp.o" -ErrorAction SilentlyContinue |
+        Remove-Item -Force -ErrorAction SilentlyContinue
+    Get-ChildItem -Path (Join-Path $Root "kernel\build") -Recurse -File -Filter "*.o" -ErrorAction SilentlyContinue |
+        Where-Object { $_.FullName -match "[\\/]obj[\\/]third_party[\\/]" } |
         Remove-Item -Force -ErrorAction SilentlyContinue
     Get-ChildItem -Path (Join-Path $Root "kernel\build") -Recurse -Filter "main.o" -ErrorAction SilentlyContinue |
         Remove-Item -Force -ErrorAction SilentlyContinue
-    & (Join-Path $Root "build-kernel.bat")
-    $buildCode = $LASTEXITCODE
+    $kernelBuildStdout = Join-Path $LogDir "navigator-kernel-build.stdout.log"
+    $kernelBuildStderr = Join-Path $LogDir "navigator-kernel-build.stderr.log"
+    # Run the wrapper synchronously in the current shell. Start-Process -Wait
+    # with redirected output could leave this smoke runner waiting after the
+    # child build had already produced kernel.elf, preventing the authoritative
+    # public-pilot ramdisk stage from running.
+    $kernelBuildScript = Join-Path $Root "build-kernel.bat"
+    $oldBuildErrorActionPreference = $ErrorActionPreference
+    try {
+        # MinGW emits existing warnings on stderr. Keep those diagnostics in
+        # the build log without letting PowerShell's Stop preference turn a
+        # successful build into a harness failure.
+        $ErrorActionPreference = "Continue"
+        & cmd.exe /c "`"$kernelBuildScript`"" *> $kernelBuildStdout
+        $buildCode = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $oldBuildErrorActionPreference
+    }
+    Get-Content $kernelBuildStdout, $kernelBuildStderr -ErrorAction SilentlyContinue | ForEach-Object { Write-Host $_ }
     if ($null -ne $oldExtra) {
         $env:EXTRA_CFLAGS = $oldExtra
     } else {
@@ -154,14 +181,23 @@ function Clear-NavigatorKernelSmokePortConflicts {
 $python = Find-Python
 if (-not $python) { throw "python not found; required for local Navigator HTTP smoke server." }
 
+$persistentFixtureGenerator = Join-Path $Root "scripts\generate-navigator-persistent-fixtures.py"
+$persistentFixtureDir = Join-Path $Root "navigator-smoke\generated"
+& $python $persistentFixtureGenerator --output-dir $persistentFixtureDir
+if ($LASTEXITCODE -ne 0) { throw "deterministic Navigator persistent fixture generation failed." }
+
 Write-Host "Building kernel with active Navigator HTTP/PNG smoke diagnostics..."
 $oldSmokeCaFixture = $env:GXOS_NAVIGATOR_SMOKE_CA_FIXTURE
 $env:GXOS_NAVIGATOR_SMOKE_CA_FIXTURE = "1"
 $oldTlsDiagnostics = [Environment]::GetEnvironmentVariable("GXOS_NAVIGATOR_TLS_DIAGNOSTICS", "Process")
 $env:GXOS_NAVIGATOR_TLS_DIAGNOSTICS = "1"
-Invoke-KernelBuildForSmoke "-DGXOS_NAVIGATOR_HTTP_SMOKE_ACTIVE -DGXOS_NAVIGATOR_TLS_CAPABILITY_CONTRACT_NEGATIVE_TEST_ACTIVE"
+if ($ReuseActiveBuild) {
+    Write-Host "Reusing the already-built active Navigator HTTP/PNG smoke kernel."
+} else {
+    Invoke-KernelBuildForSmoke "-DGXOS_NAVIGATOR_HTTP_SMOKE_ACTIVE -DGXOS_NAVIGATOR_TLS_CAPABILITY_CONTRACT_NEGATIVE_TEST_ACTIVE -DGXOS_KERNEL_TEXT_WRITE_GUARD"
+}
 $env:GXOS_NAVIGATOR_SMOKE_CA_FIXTURE = $oldSmokeCaFixture
-$activeSmokeBuild = $true
+$activeSmokeBuild = -not $ReuseActiveBuild
 
 $ovmf = "C:\Program Files\qemu\share\edk2-x86_64-code.fd"
 if (-not (Test-Path $ovmf)) { throw "OVMF image not found: $ovmf" }
@@ -329,6 +365,7 @@ $navigatorSmokeEnvNames = @(
     "GXOS_NAVIGATOR_HTTPS_FAULT_MODE",
     "GXOS_NAVIGATOR_USER_CA_BUNDLE_SOURCE",
     "GXOS_NAVIGATOR_PRODUCTION_CA_BUNDLE_SOURCE",
+    "GXOS_NAVIGATOR_DISABLE_SHIPPED_PRODUCTION_CA",
     "GXOS_NAVIGATOR_SHIPPED_ROOT_CANDIDATE_CA_BUNDLE_SOURCE",
     "GXOS_NAVIGATOR_SHIPPED_ROOT_CANDIDATE_ROTATION_ID",
     "GXOS_NAVIGATOR_SHIPPED_ROOT_CANDIDATE_PRODUCTION_READY",
@@ -339,6 +376,7 @@ $navigatorSmokeEnvNames = @(
     "GXOS_NAVIGATOR_SMOKE_REAL_PUBLIC_HTTPS_URL",
     "GXOS_NAVIGATOR_SMOKE_REAL_PUBLIC_HTTPS_TARGET",
     "GXOS_NAVIGATOR_SMOKE_REAL_PUBLIC_HTTPS_CA_BUNDLE_SOURCE",
+    "GXOS_NAVIGATOR_PERSISTENT_NAVIGATION",
     "GXOS_NAVIGATOR_TLS_DIAGNOSTICS"
 )
 $navigatorSmokeEnvOriginal = @{}
@@ -381,7 +419,9 @@ function Invoke-NavigatorKernelSmokeRamdiskStage {
         [bool]$UseSmokeFixture,
         [bool]$EnableRealPublicProbe = $false,
         [bool]$RequireRealPublicProbe = $false,
-        [AllowNull()][string]$RealPublicProbeTarget = $null
+        [bool]$EnablePersistentNavigation = $false,
+        [AllowNull()][string]$RealPublicProbeTarget = $null,
+        [AllowNull()][string]$RealPublicProbeCaBundleSource = $null
     )
 
     Set-ProcessEnvValue -Name "GXOS_NAVIGATOR_SMOKE_CA_FIXTURE" -Value ($(if ($UseSmokeFixture) { "1" } else { $null }))
@@ -389,6 +429,7 @@ function Invoke-NavigatorKernelSmokeRamdiskStage {
     Set-ProcessEnvValue -Name "GXOS_NAVIGATOR_HTTPS_FAULT_MODE" -Value $HttpsFaultMode
     Set-ProcessEnvValue -Name "GXOS_NAVIGATOR_USER_CA_BUNDLE_SOURCE" -Value $UserCaSource
     Set-ProcessEnvValue -Name "GXOS_NAVIGATOR_PRODUCTION_CA_BUNDLE_SOURCE" -Value $ProductionCaSource
+    Set-ProcessEnvValue -Name "GXOS_NAVIGATOR_DISABLE_SHIPPED_PRODUCTION_CA" -Value $(if (-not $UseSmokeFixture -and [string]::IsNullOrWhiteSpace($ProductionCaSource) -and [string]::IsNullOrWhiteSpace($CandidateCaSource)) { "1" } else { $null })
     Set-ProcessEnvValue -Name "GXOS_NAVIGATOR_SHIPPED_ROOT_CANDIDATE_CA_BUNDLE_SOURCE" -Value $CandidateCaSource
     Set-ProcessEnvValue -Name "GXOS_NAVIGATOR_SHIPPED_ROOT_CANDIDATE_ROTATION_ID" -Value $CandidateRotationId
     Set-ProcessEnvValue -Name "GXOS_NAVIGATOR_SHIPPED_ROOT_CANDIDATE_PRODUCTION_READY" -Value ($(if ($CandidateProductionReady) { "1" } else { $null }))
@@ -398,18 +439,78 @@ function Invoke-NavigatorKernelSmokeRamdiskStage {
     Set-ProcessEnvValue -Name "GXOS_NAVIGATOR_SMOKE_REQUIRE_REAL_PUBLIC_HTTPS" -Value ($(if ($RequireRealPublicProbe) { "1" } else { $null }))
     Set-ProcessEnvValue -Name "GXOS_NAVIGATOR_SMOKE_REAL_PUBLIC_HTTPS_URL" -Value ($(if ($EnableRealPublicProbe) { $RealPublicProbeTarget } else { $null }))
     Set-ProcessEnvValue -Name "GXOS_NAVIGATOR_SMOKE_REAL_PUBLIC_HTTPS_TARGET" -Value ($(if ($EnableRealPublicProbe) { $RealPublicProbeTarget } else { $null }))
+    # Do not rely on a caller's inherited CA-source environment here. The
+    # active scenario must explicitly determine the bundle that is copied into
+    # the final ramdisk, otherwise the earlier smoke-fixture build can leave a
+    # production-looking host staging directory paired with an old guest image.
+    Set-ProcessEnvValue -Name "GXOS_NAVIGATOR_SMOKE_REAL_PUBLIC_HTTPS_CA_BUNDLE_SOURCE" -Value ($(if ($EnableRealPublicProbe) { $RealPublicProbeCaBundleSource } else { $null }))
+    Set-ProcessEnvValue -Name "GXOS_NAVIGATOR_PERSISTENT_NAVIGATION" -Value ($(if ($EnablePersistentNavigation) { "1" } else { $null }))
 
     Wait-NavigatorSmokeFileUnlock -LiteralPath (Join-Path $Root "ESP\\ramdisk.img")
     $packScript = Join-Path $Root "scripts\generate-wallpaper-pack.ps1"
-    & $packScript -InputDir (Join-Path $Root "assets\Backgrounds") `
+    $packOutput = @(& $packScript -InputDir (Join-Path $Root "assets\Backgrounds") `
         -OutputDir (Join-Path $Root "out\wallpaper-pack") `
-        -OutputImage (Join-Path $Root "ESP\ramdisk.img")
+        -OutputImage (Join-Path $Root "ESP\ramdisk.img") *>&1)
+    foreach ($line in $packOutput) {
+        Write-Host $line
+    }
     if ($LASTEXITCODE -ne 0) {
         throw "generate-wallpaper-pack.ps1 failed for the current smoke scenario."
     }
 
     $productionManifestPath = Join-Path $Root "out\wallpaper-pack\certs\ca-bundle.manifest"
     $userManifestPath = Join-Path $Root "out\wallpaper-pack\config\certs\ca-bundle.manifest"
+
+    if ($EnableRealPublicProbe) {
+        $navigatorConfigDir = Join-Path $Root "out\wallpaper-pack\config\navigator"
+        $targetPath = Join-Path $navigatorConfigDir "real-public-https-probe-url.txt"
+        $targetCompatPath = Join-Path $navigatorConfigDir "RPUBURL.TXT"
+        $requiredPath = Join-Path $navigatorConfigDir "real-public-https-probe-required.txt"
+        $requiredCompatPath = Join-Path $navigatorConfigDir "RPUBRQ.TXT"
+        $policyPath = Join-Path $navigatorConfigDir "https-policy.txt"
+        $manifest = Get-NavigatorKernelSmokeCaManifest -LiteralPath $productionManifestPath
+        if ($null -eq $manifest -or
+            [string]$manifest.bundle_type -ne "production-public-probe-merged" -or
+            [string]$manifest.production_ready -ne "yes" -or
+            [string]$manifest.test_only -ne "no") {
+            throw "Public-pilot staging produced a guest CA manifest that is not production-ready. The final ramdisk was not allowed to run."
+        }
+        if (-not (Test-Path -LiteralPath $targetPath -PathType Leaf) -or
+            -not (Test-Path -LiteralPath $targetCompatPath -PathType Leaf)) {
+            throw "Public-pilot staging omitted the requested target metadata from the final ramdisk."
+        }
+        $stagedTarget = (Get-Content -LiteralPath $targetPath -Raw).Trim()
+        $stagedCompatTarget = (Get-Content -LiteralPath $targetCompatPath -Raw).Trim()
+        if ($stagedTarget -ne $RealPublicProbeTarget.Trim() -or $stagedCompatTarget -ne $RealPublicProbeTarget.Trim()) {
+            throw "Public-pilot staging target mismatch: expected '$RealPublicProbeTarget', got '$stagedTarget' / '$stagedCompatTarget'."
+        }
+        if ($RequireRealPublicProbe) {
+            if (-not (Test-Path -LiteralPath $requiredPath -PathType Leaf) -or
+                -not (Test-Path -LiteralPath $requiredCompatPath -PathType Leaf)) {
+                throw "Public-pilot staging omitted the required-probe marker from the final ramdisk."
+            }
+        } elseif ((Test-Path -LiteralPath $requiredPath -PathType Leaf) -or
+            (Test-Path -LiteralPath $requiredCompatPath -PathType Leaf)) {
+            throw "Public-pilot staging leaked a required-probe marker from a previous target."
+        }
+        if (-not (Test-Path -LiteralPath $policyPath -PathType Leaf)) {
+            throw "Public-pilot staging omitted the HTTPS policy from the final ramdisk."
+        }
+        $stagedPolicy = Get-Content -LiteralPath $policyPath -Raw
+        if ($stagedPolicy -notmatch '(?im)^\s*production-validated\s*$' -or
+            $stagedPolicy -notmatch '(?im)^\s*public-https-pilot=enabled\s*$') {
+            throw "Public-pilot staging policy does not enable production-validated public HTTPS for the requested run."
+        }
+        $stagedPackLines = @($packOutput | ForEach-Object { [string]$_ })
+        foreach ($requiredRamdiskPath in @(
+                "added /certs/CABUNDLE.MAN",
+                "added /config/navigator/RPUBURL.TXT",
+                "added /config/navigator/https-policy.txt")) {
+            if (-not ($stagedPackLines -match [regex]::Escape($requiredRamdiskPath))) {
+                throw "Public-pilot ramdisk image did not report the required guest file: $requiredRamdiskPath"
+            }
+        }
+    }
 
     return [pscustomobject]@{
         ProductionManifestPath = $productionManifestPath
@@ -440,10 +541,30 @@ function Invoke-NavigatorKernelSmokeQemuPass {
             "-no-reboot",
             "-rtc", "base=utc,clock=host",
             "-netdev", "user,id=net0",
-            "-device", "e1000,netdev=net0",
-            "-object", "rng-builtin,id=rng0",
-            "-device", "virtio-rng-pci,rng=rng0,disable-modern=on,max-bytes=1024,period=1000"
+            "-device", "e1000,netdev=net0"
         )
+        $args += Get-GxosQemuSecureRngArguments
+
+        $stagedArtifacts = @(
+            [pscustomobject]@{ Name = "bootloader"; Path = $bootloader },
+            [pscustomobject]@{ Name = "kernel"; Path = (Join-Path $esp "kernel.elf") },
+            [pscustomobject]@{ Name = "ramdisk"; Path = (Join-Path $esp "ramdisk.img") }
+        )
+        foreach ($artifact in $stagedArtifacts) {
+            if (-not (Test-Path -LiteralPath $artifact.Path -PathType Leaf)) {
+                throw "QEMU staging artifact missing: $($artifact.Path)"
+            }
+            $artifactFile = Get-Item -LiteralPath $artifact.Path
+            $artifactHash = (Get-FileHash -LiteralPath $artifact.Path -Algorithm SHA256).Hash.ToLowerInvariant()
+            Write-Host ("[NAVIGATOR-STAGED-ARTIFACT] name={0} path={1} bytes={2} sha256={3}" -f `
+                $artifact.Name, $artifactFile.FullName, $artifactFile.Length, $artifactHash)
+        }
+
+        $netDumpPath = [Environment]::GetEnvironmentVariable("GXOS_NAVIGATOR_QEMU_NET_DUMP", "Process")
+        if (-not [string]::IsNullOrWhiteSpace($netDumpPath)) {
+            $args += @("-object", "filter-dump,id=phase8h_dump,netdev=net0,file=`"$netDumpPath`"")
+            Write-Host "QEMU packet capture enabled: $netDumpPath"
+        }
 
         $proc = Start-Process -FilePath $qemu -ArgumentList $args -PassThru -WindowStyle Hidden
         try {
@@ -571,18 +692,22 @@ function Test-NavigatorKernelSmokeOutput {
     param(
         [Parameter(Mandatory = $true)][string]$Output,
         [Parameter(Mandatory = $true)][string[]]$Contains,
-        [AllowNull()][hashtable]$RegexChecks
+    [AllowNull()][hashtable]$RegexChecks
     )
 
+    # Serial output can interleave the periodic kernel heartbeat between two
+    # Navigator puts. Remove only that bounded diagnostic record so checks
+    # continue to validate the actual Navigator line content.
+    $normalizedOutput = $Output -replace '\[KERNEL-HEARTBEAT\][^\r\n]*(?:\r?\n)?', ''
     $missing = @()
     foreach ($check in $Contains) {
-        if (-not $Output.Contains($check)) {
+        if (-not $normalizedOutput.Contains($check)) {
             $missing += $check
         }
     }
     if ($RegexChecks) {
         foreach ($pattern in $RegexChecks.Keys) {
-            if (-not [regex]::IsMatch($Output, $pattern)) {
+            if (-not [regex]::IsMatch($normalizedOutput, $pattern)) {
                 $missing += $RegexChecks[$pattern]
             }
         }
@@ -715,6 +840,20 @@ function Test-NavigatorKernelSmokeRealPublicProbeOutput {
                 '\[NAVIGATOR-SMOKE\] https\.case\.real_public_probe\.verify_flags=0',
                 '\[NAVIGATOR-SMOKE\] https\.case\.real_public_probe\.tls_tcp_connect_attempts=[1-9][0-9]*',
                 '\[NAVIGATOR-SMOKE\] https\.case\.real_public_probe\.source_type=https',
+                '\[NAVIGATOR-8K\] handoff\.entry=yes',
+                '\[NAVIGATOR-8K\] handoff\.result=accepted:html-document',
+                '\[NAVIGATOR-8K\] body\.completion=complete',
+                '\[NAVIGATOR-8K\] body\.buffer_valid=yes',
+                '\[NAVIGATOR-8K\] body\.null_terminated=yes',
+                '\[NAVIGATOR-8K\] parser\.invoked=yes',
+                '\[NAVIGATOR-8K\] parser\.input_bytes=[1-9][0-9]*',
+                '\[NAVIGATOR-8K\] parser\.completed=yes',
+                '\[NAVIGATOR-8K\] document\.created=yes',
+                '\[NAVIGATOR-8K\] document\.count=[1-9][0-9]*',
+                '\[NAVIGATOR-8K\] document\.block_count=[1-9][0-9]*',
+                '\[NAVIGATOR-8K\] layout\.block_count=[1-9][0-9]*',
+                '\[NAVIGATOR-8K\] document\.title=(?!\(none\)).+',
+                '\[NAVIGATOR-8K\] document\.visible_text=(?!\(none\)).+',
                 '\[NAVIGATOR-SMOKE\] https\.case\.real_public_probe\.header_cap_hit=(yes|no)',
                 '\[NAVIGATOR-SMOKE\] https\.case\.real_public_probe\.body_cap_hit=(yes|no)',
                 '\[NAVIGATOR-SMOKE\] https\.case\.real_public_probe\.downgrade_blocked=(yes|no)',
@@ -822,9 +961,9 @@ $commonChecks = @(
     "[NAVIGATOR-SMOKE] registered=true",
     "[NAVIGATOR-SMOKE] runtime.mode=bare-metal/kernel",
     "[NAVIGATOR-SMOKE] launch.path=AppManager::registerApp -> NavigatorApp::create",
-    "[NAVIGATOR-SMOKE] capability.http=enabled numeric IPv4 and hostname HTTP/1.0 GET/POST with redirects/chunked",
+    "[NAVIGATOR-SMOKE] capability.http=enabled numeric IPv4 and hostname HTTP/1.1 GET/POST with redirects/chunked",
     "[NAVIGATOR-SMOKE] capability.http_transport=shared HttpByteStream policy layer (PlainTcpHttp + LocalAllowlistedTlsHttps + PolicyValidatedTlsHttps)",
-    "[NAVIGATOR-SMOKE] capability.tls_policy_layer=shared HttpByteStream transport policy layer selects plain TCP HTTP, local allowlisted Mbed TLS, or policy-validated Mbed TLS; validated fixture hosts stay policy-gated, public HTTPS stays pilot-gated, plaintext fallback stays disabled, and policy stays fail-closed by default",
+    "[NAVIGATOR-SMOKE] capability.tls_policy_layer=shared HttpByteStream transport policy layer selects plain TCP HTTP, local allowlisted Mbed TLS, or policy-validated Mbed TLS; production trust enables arbitrary-origin HTTPS, plaintext fallback stays disabled, and policy stays fail-closed by default",
     "[NAVIGATOR-SMOKE] tls_prereq.rng_quality=Secure",
     "[NAVIGATOR-SMOKE] tls_prereq.wall_clock_status=Plausible",
     "[NAVIGATOR-SMOKE] tls_prereq.hostname_validation_available=yes",
@@ -844,11 +983,13 @@ $commonChecks = @(
     "[NAVIGATOR-SMOKE] https.case.public_pilot_redirect.result=PASS",
     "[NAVIGATOR-SMOKE] https.case.public_pilot_downgrade.result=PASS",
     "[NAVIGATOR-SMOKE] https.case.compat_html_200.result=PASS",
+    "[NAVIGATOR-SMOKE] https.case.compat_parser_stack.result=PASS",
     "[NAVIGATOR-SMOKE] https.case.compat_text_200.result=PASS",
     "[NAVIGATOR-SMOKE] https.case.compat_404.result=PASS",
     "[NAVIGATOR-SMOKE] https.case.compat_500.result=PASS",
     "[NAVIGATOR-SMOKE] https.case.compat_download.result=PASS",
     "[NAVIGATOR-SMOKE] https.case.compat_gzip.result=PASS",
+    "[NAVIGATOR-SMOKE] https.case.compat_gzip_chunked.result=PASS",
     "[NAVIGATOR-SMOKE] https.case.compat_br.result=PASS",
     "[NAVIGATOR-SMOKE] https.case.compat_deflate.result=PASS",
     "[NAVIGATOR-SMOKE] https.case.compat_redirect_relative.result=PASS",
@@ -857,18 +998,33 @@ $commonChecks = @(
     "[NAVIGATOR-SMOKE] https.case.compat_large_body.result=PASS",
     "[NAVIGATOR-SMOKE] https.case.compat_large_headers.result=PASS",
     "[NAVIGATOR-SMOKE] http.case.basic.result=PASS",
+    "[NAVIGATOR-SMOKE] http.case.request_headers.result=PASS",
+    "[NAVIGATOR-SMOKE] http.case.request_headers_redirect.result=PASS",
     "[NAVIGATOR-SMOKE] http.case.relative_redirect.result=PASS",
     "[NAVIGATOR-SMOKE] http.case.absolute_redirect.result=PASS",
     "[NAVIGATOR-SMOKE] http.case.hostname_basic.result=PASS",
     "[NAVIGATOR-SMOKE] http.case.hostname_redirect.result=PASS",
     "[NAVIGATOR-SMOKE] http.case.redirect_loop.result=PASS",
     "[NAVIGATOR-SMOKE] http.case.chunked.result=PASS",
+    "[NAVIGATOR-SMOKE] http.case.stream_split_content_length.result=PASS",
+    "[NAVIGATOR-SMOKE] http.case.stream_split_chunked.result=PASS",
+    "[NAVIGATOR-SMOKE] http.case.stream_connection_close.result=PASS",
     "[NAVIGATOR-SMOKE] http.case.missing_404.result=PASS",
-    "[NAVIGATOR-SMOKE] http.case.gzip_unsupported.result=PASS",
+    "[NAVIGATOR-SMOKE] http.case.gzip.result=PASS",
+    "[NAVIGATOR-SMOKE] http.case.gzip_chunked.result=PASS",
+    "[NAVIGATOR-SMOKE] http.case.deflate.result=PASS",
+    "[NAVIGATOR-SMOKE] http.case.negotiated_gzip.result=PASS",
+    "[NAVIGATOR-SMOKE] http.case.negotiated_deflate.result=PASS",
+    "[NAVIGATOR-SMOKE] http.case.negotiated_identity.result=PASS",
+    "[NAVIGATOR-SMOKE] http.case.negotiated_br.result=PASS",
     "[NAVIGATOR-SMOKE] http.case.image_relative.result=PASS",
+    "[NAVIGATOR-SMOKE] http.case.image_jpeg.result=PASS",
+    "[NAVIGATOR-SMOKE] http.case.image_jpeg_chunked.result=PASS",
+    "[NAVIGATOR-SMOKE] http.case.image_jpeg_compressed.result=PASS",
     "[NAVIGATOR-SMOKE] http.case.image_absolute.result=PASS",
     "[NAVIGATOR-SMOKE] http.case.image_redirect.result=PASS",
     "[NAVIGATOR-SMOKE] http.case.image_chunked.result=PASS",
+    "[NAVIGATOR-SMOKE] http.case.image_compressed.result=PASS",
     "[NAVIGATOR-SMOKE] http.case.image_nonpng.result=PASS",
     "[NAVIGATOR-SMOKE] http.case.hostname_image_relative.result=PASS",
     "[NAVIGATOR-SMOKE] http.case.forms_post.result=PASS",
@@ -876,7 +1032,8 @@ $commonChecks = @(
     "[NAVIGATOR-SMOKE] http.case.forms_post_redirect_303.result=PASS",
     "[NAVIGATOR-SMOKE] http.case.forms_post_redirect_307.result=PASS",
     "[NAVIGATOR-SMOKE] http.case.forms_post_redirect_hostname.result=PASS",
-    "[NAVIGATOR-SMOKE] result=PASS"
+    "[NAVIGATOR-SMOKE] result=PASS",
+    "[NAVIGATOR-SMOKE] END"
 )
 
 $manifestBlockedChecks = @(
@@ -901,6 +1058,7 @@ $commonRegexChecks = @{
     '\[NAVIGATOR-SMOKE\] https\.case\.compat_500\.enabled=(yes|no)' = "[NAVIGATOR-SMOKE] https.case.compat_500.enabled=<yes|no>"
     '\[NAVIGATOR-SMOKE\] https\.case\.compat_download\.enabled=(yes|no)' = "[NAVIGATOR-SMOKE] https.case.compat_download.enabled=<yes|no>"
     '\[NAVIGATOR-SMOKE\] https\.case\.compat_gzip\.enabled=(yes|no)' = "[NAVIGATOR-SMOKE] https.case.compat_gzip.enabled=<yes|no>"
+    '\[NAVIGATOR-SMOKE\] https\.case\.compat_gzip_chunked\.enabled=(yes|no)' = "[NAVIGATOR-SMOKE] https.case.compat_gzip_chunked.enabled=<yes|no>"
     '\[NAVIGATOR-SMOKE\] https\.case\.compat_br\.enabled=(yes|no)' = "[NAVIGATOR-SMOKE] https.case.compat_br.enabled=<yes|no>"
     '\[NAVIGATOR-SMOKE\] https\.case\.compat_deflate\.enabled=(yes|no)' = "[NAVIGATOR-SMOKE] https.case.compat_deflate.enabled=<yes|no>"
     '\[NAVIGATOR-SMOKE\] https\.case\.compat_redirect_relative\.enabled=(yes|no)' = "[NAVIGATOR-SMOKE] https.case.compat_redirect_relative.enabled=<yes|no>"
@@ -945,7 +1103,7 @@ $publicPilotDisabledChecks = @(
 $publicPilotEnabledChecks = @(
     "[NAVIGATOR-SMOKE] https.case.public_pilot_decision.enabled=yes",
     "[NAVIGATOR-SMOKE] https.case.public_pilot_decision.transport_selection=PolicyValidatedTlsHttps",
-    "[NAVIGATOR-SMOKE] https.case.public_pilot_decision.reason=ProductionValidated public HTTPS pilot matched.",
+    "[NAVIGATOR-SMOKE] https.case.public_pilot_decision.reason=ProductionValidated arbitrary-origin HTTPS matched.",
     "[NAVIGATOR-SMOKE] https.case.public_pilot_fixture.enabled=yes",
     "[NAVIGATOR-SMOKE] https.case.public_pilot_fixture.http_status=200",
     "[NAVIGATOR-SMOKE] https.case.public_pilot_fixture.tls_tcp_connect_attempts=1",
@@ -966,7 +1124,9 @@ $publicPilotEnabledChecks = @(
     "[NAVIGATOR-SMOKE] https.case.public_pilot_downgrade.tls_tcp_connect_attempts=1",
     "[NAVIGATOR-SMOKE] https.case.public_pilot_downgrade.transport_selection=BlockedPolicy",
     "[NAVIGATOR-SMOKE] https.case.public_pilot_downgrade.tls_status=PolicyBlocked",
-    "[NAVIGATOR-SMOKE] https.case.public_pilot_downgrade.error=HTTPS downgrade redirect blocked"
+    "[NAVIGATOR-SMOKE] https.case.public_pilot_downgrade.error=HTTPS downgrade redirect blocked",
+    "[NAVIGATOR-SMOKE] http.case.real_public_https_png_resource.result=PASS",
+    "[NAVIGATOR-SMOKE] http.case.real_public_https_jpeg_resource.result=PASS"
 )
 
 $realPublicProbeDisabledChecks = @(
@@ -1336,8 +1496,8 @@ $scenarioDefinitions = @(
             "[NAVIGATOR-SMOKE] tls_prereq.https_policy_validated_navigation_enabled=yes",
             "[NAVIGATOR-SMOKE] tls_prereq.https_policy_public_pilot_requested=no",
             "[NAVIGATOR-SMOKE] tls_prereq.https_policy_broad_public_enabled=no",
-            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_public_pilot_reason=Public HTTPS pilot requires public-https-pilot=enabled under ProductionValidated.",
-            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_production_ready=yes",
+            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_public_pilot_reason=Public HTTPS pilot requires a production-ready CA manifest; deterministic fixture trust is never sufficient.",
+            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_production_ready=no",
             "[NAVIGATOR-SMOKE] tls_readiness=yes",
             "[NAVIGATOR-SMOKE] tls_readiness_blocker=(none)",
             "[NAVIGATOR-SMOKE] tls_smoke.tls_status=CertificateVerifyFailed",
@@ -1452,6 +1612,7 @@ $scenarioDefinitions = @(
         TlsCert = $defaultHttpsCert
         TlsKey = $defaultHttpsKey
         PublicPilotEnabled = $true
+        PersistentNavigation = $true
         Checks = $commonChecks + @(
             "[NAVIGATOR-SMOKE] tls_prereq.root_ca_path=/certs/ca-bundle.pem",
             "[NAVIGATOR-SMOKE] tls_prereq.root_ca_fixture=normal",
@@ -1462,11 +1623,51 @@ $scenarioDefinitions = @(
             "[NAVIGATOR-SMOKE] tls_prereq.https_policy_validated_navigation_enabled=yes",
             "[NAVIGATOR-SMOKE] tls_prereq.https_policy_public_pilot_requested=yes",
             "[NAVIGATOR-SMOKE] tls_prereq.https_policy_broad_public_enabled=yes",
-            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_public_pilot_reason=Public HTTPS pilot is enabled for hostname-only HTTPS targets under ProductionValidated.",
+            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_public_pilot_reason=Arbitrary-origin HTTPS is enabled; legacy public-https-pilot proof token is present.",
             "[NAVIGATOR-SMOKE] tls_prereq.https_policy_production_ready=yes",
             "[NAVIGATOR-SMOKE] tls_readiness=yes",
             "[NAVIGATOR-SMOKE] https.case.policy_validated.enabled=yes",
             "[NAVIGATOR-SMOKE] https.case.policy_validated.result=PASS"
+        )
+        RegexChecks = Merge-CheckMaps -Base $commonRegexChecks -Extra $localTlsExplicitPolicyTrustMismatchRegexChecks
+    },
+    [pscustomobject]@{
+        Name = "persistent_navigation_scheduler"
+        HttpsPolicy = "production-validated`npublic-https-pilot=enabled"
+        HttpsFaultMode = $null
+        UseSmokeFixture = $false
+        UserCaSource = $null
+        ProductionCaSource = $validatedCaFixture
+        TlsCert = $defaultHttpsCert
+        TlsKey = $defaultHttpsKey
+        PublicPilotEnabled = $false
+        PersistentNavigation = $true
+        Checks = $commonChecks + @(
+            "[NAVIGATOR-SMOKE] persistent_navigation.enabled=yes",
+            "[NAVIGATOR-PERSISTENT] mode=single_boot_single_navigator_instance",
+            "[NAVIGATOR-POINTER-8U] window_registration=PASS",
+            "[NAVIGATOR-POINTER-8U] stage=phase8u_B_middle",
+            "[NAVIGATOR-POINTER-8U] stage=phase8u_C_bottom",
+            "[NAVIGATOR-POINTER-8U] stage=phase8u_B_return",
+            "[NAVIGATOR-POINTER-8U] stage=phase8u_A_final",
+            "[NAVIGATOR-POINTER-8U] stage=phase8u_reuse_B",
+            "[NAVIGATOR-PERSISTENT] public.sequence=NASA,Wikipedia,example.com,NASA",
+            "[NAVIGATOR-PERSISTENT] deterministic.result=PASS",
+            "[NAVIGATOR-PERSISTENT] scroll_stage_result stage=phase8u_A_initial result=PASS",
+            "[NAVIGATOR-PERSISTENT] phase8u_B_middle.admission=PASS",
+            "[NAVIGATOR-PERSISTENT] scroll_stage_result stage=phase8u_B_middle result=PASS",
+            "[NAVIGATOR-PERSISTENT] phase8u_C_bottom.eviction=PASS",
+            "[NAVIGATOR-PERSISTENT] scroll_stage_result stage=phase8u_C_bottom result=PASS",
+            "[NAVIGATOR-PERSISTENT] scroll_stage_result stage=phase8u_B_return result=PASS",
+            "[NAVIGATOR-PERSISTENT] phase8u_A_final.readmission_paint=PASS",
+            "[NAVIGATOR-PERSISTENT] scroll_stage_result stage=phase8u_A_final result=PASS",
+            "[NAVIGATOR-PERSISTENT] phase8u_cycle.result=PASS",
+            "[NAVIGATOR-PERSISTENT] phase8u_tiny_reset active_images=0 active_bytes=0 evictions=0 readmissions=0 passes=0 result=PASS",
+            "[NAVIGATOR-PERSISTENT] scroll_stage_result stage=phase8u_reuse_A result=PASS",
+            "[NAVIGATOR-PERSISTENT] scroll_stage_result stage=phase8u_reuse_B result=PASS",
+            "[NAVIGATOR-PERSISTENT] phase8u_reuse.result=PASS",
+            "[NAVIGATOR-PERSISTENT] public.result=SKIP policy_disabled",
+            "[NAVIGATOR-PERSISTENT] result=PASS"
         )
         RegexChecks = Merge-CheckMaps -Base $commonRegexChecks -Extra $localTlsExplicitPolicyTrustMismatchRegexChecks
     },
@@ -1541,7 +1742,8 @@ $scenarioDefinitions = @(
 )
 
 $publicPilotScenarioNames = @(
-    "production_public_pilot_enabled"
+    "production_public_pilot_enabled",
+    "persistent_navigation_scheduler"
 )
 
 function Get-NavigatorKernelSmokeScenarioLane {
@@ -1623,7 +1825,12 @@ if ($resolvedCandidateBundlePath) {
 Write-Host "Kernel smoke scenario selection: group=$effectiveScenarioGroup count=$($selectedScenarios.Count)"
 
 foreach ($scenario in $selectedScenarios) {
-    if ($scenario.PSObject.Properties.Match("PublicPilotEnabled").Count -gt 0 -and $scenario.PublicPilotEnabled) {
+    # Only an explicitly selected public-pilot scenario may run the local
+    # public-pilot fixture. Deterministic production-policy fixtures without a
+    # production-ready manifest must remain blocked before TLS.
+    $publicHttpsFixtureEnabled =
+        ($scenario.PSObject.Properties.Match("PublicPilotEnabled").Count -gt 0 -and $scenario.PublicPilotEnabled)
+    if ($publicHttpsFixtureEnabled) {
         $scenario.Checks = @($scenario.Checks + $publicPilotEnabledChecks)
         if (-not $realPublicProbeEnabled) {
             $scenario.Checks = @($scenario.Checks + $realPublicProbeDisabledChecks)
@@ -1660,11 +1867,19 @@ try {
             -UserManifestMode $(if ($scenario.UserManifestMode) { [string]$scenario.UserManifestMode } else { "normal" }) `
             -ProductionManifestMode $(if ($scenario.ProductionManifestMode) { [string]$scenario.ProductionManifestMode } else { "normal" }) `
             -UseSmokeFixture $scenario.UseSmokeFixture `
+            -EnablePersistentNavigation:($scenario.PSObject.Properties.Match("PersistentNavigation").Count -gt 0 -and $scenario.PersistentNavigation) `
             -EnableRealPublicProbe:$enableRealPublicProbeForScenario `
             -RequireRealPublicProbe:($enableRealPublicProbeForScenario -and $realPublicProbeRequired) `
-            -RealPublicProbeTarget $(if ($enableRealPublicProbeForScenario) { $realPublicProbeTarget } else { $null })
+            -RealPublicProbeTarget $(if ($enableRealPublicProbeForScenario) { $realPublicProbeTarget } else { $null }) `
+            -RealPublicProbeCaBundleSource $(if ($enableRealPublicProbeForScenario) { $realPublicProbeCaBundleSource } else { $null })
 
         try {
+            if ($scenario.PSObject.Properties.Match("PersistentNavigation").Count -gt 0 -and $scenario.PersistentNavigation) {
+                $persistentFixtureEspDir = Join-Path $Root "ESP\\navigator-smoke\\generated"
+                New-Item -ItemType Directory -Force -Path $persistentFixtureEspDir | Out-Null
+                Copy-Item -Path (Join-Path $persistentFixtureDir "*") -Destination $persistentFixtureEspDir -Recurse -Force
+                Write-Host "  staged deterministic persistent Navigator fixtures into ESP FAT root"
+            }
             $policyHost = Get-NavigatorKernelSmokePolicyHost -Scenario $scenario
             $policyCertPair = Get-NavigatorKernelSmokePolicyCertPair -Scenario $scenario
             $publicPilotHost = Get-NavigatorKernelSmokePublicPilotHost -Scenario $scenario
@@ -1733,8 +1948,9 @@ try {
     }
     Restore-NavigatorKernelSmokeEnvironment
     Restore-NormalKernelBuild
-    Restore-NavigatorSmokeDirectoryState -State $downloadsState
     Restore-NavigatorSmokeFileState -State $ramdiskState
+    Restore-NavigatorSmokeDirectoryState -State $downloadsState
+    Restore-NavigatorSmokeDirectoryState -State $persistentFixtureEspState
     Restore-NavigatorSmokeDirectoryState -State $wallpaperPackState
     Restore-NavigatorSmokeFileState -State $wallpaperPackCaBundleState
     if (Test-Path $oversizedCaFixture) {

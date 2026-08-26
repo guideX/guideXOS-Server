@@ -1,4 +1,5 @@
 #include "gxos_tls_foundation.h"
+#include "tests/phase8j_ecdsa_vectors.h"
 #include "gxos_tls_prerequisites.h"
 
 #if defined(GXOS_BARE_METAL)
@@ -45,10 +46,10 @@
 #if __has_include("third_party/mbedtls/tf-psa-crypto/core/tf_psa_crypto_config_check_before.h")
 #define GXOS_TLS_MBEDTLS_TF_PSA_CONFIG_CHECKS_PRESENT 1
 #endif
-#if __has_include("third_party/mbedtls/guidexos/mbedtls_config.h")
+#if __has_include("guidexos/mbedtls_config.h")
 #define GXOS_TLS_MBEDTLS_CONFIG_PRESENT 1
 #endif
-#if __has_include("third_party/mbedtls/guidexos/crypto_config.h")
+#if __has_include("guidexos/crypto_config.h")
 #define GXOS_TLS_MBEDTLS_CRYPTO_CONFIG_PRESENT 1
 #endif
 #if defined(GXOS_TLS_MBEDTLS_SOURCE_PRESENT) && defined(GXOS_TLS_MBEDTLS_TF_PSA_BUILD_INFO_PRESENT) && __has_include("third_party/mbedtls/include/mbedtls/build_info.h")
@@ -189,10 +190,33 @@ void gxos_mbedtls_platform_exit_noop(int)
 {
 }
 
+static uint32_t gxos_tls_smoke_trace_count = 0;
+
+static void gxos_tls_smoke_debug_trace_reset()
+{
+    gxos_tls_smoke_trace_count = 0;
+}
+
 void gxos_tls_smoke_debug_trace(const char* event, uint32_t value)
 {
+    /*
+     * PSA/Mbed TLS is deliberately freestanding here, so the crypto C
+     * sources cannot use the kernel logger directly.  Keep the bridge
+     * bounded: event names are fixed literals from the TLS/PSA sources and
+     * values are status/size/identifier fields only.
+     */
+    if (gxos_tls_smoke_trace_count >= 65536u) return;
+    ++gxos_tls_smoke_trace_count;
+#if defined(GXOS_BARE_METAL)
+    kernel::serial::puts("[TLS-CRYPTO] ");
+    kernel::serial::puts(event ? event : "(null)");
+    kernel::serial::puts(" value=0x");
+    kernel::serial::put_hex32(value);
+    kernel::serial::puts("\n");
+#else
     (void) event;
     (void) value;
+#endif
 }
 }
 #endif
@@ -369,10 +393,10 @@ constexpr const char* kHostedHttpsPolicySource = "hosted Schannel default";
 constexpr const char* kBareMetalMbedTlsImportPath = "third_party/mbedtls";
 constexpr const char* kBareMetalMbedTlsExpectedVersion =
     "official Mbed TLS 4.1.0 source tree with populated TF-PSA-Crypto dependency";
-constexpr const char* kBareMetalConfigPath = "third_party/mbedtls/guidexos/mbedtls_config.h";
-constexpr const char* kBareMetalCryptoConfigPath = "third_party/mbedtls/guidexos/crypto_config.h";
+constexpr const char* kBareMetalConfigPath = "guidexos/mbedtls_config.h";
+constexpr const char* kBareMetalCryptoConfigPath = "guidexos/crypto_config.h";
 constexpr const char* kBareMetalTfPsaPath = "third_party/mbedtls/tf-psa-crypto";
-constexpr const char* kBareMetalBuildPlanPath = "third_party/mbedtls/guidexos/mbedtls_sources.mk";
+constexpr const char* kBareMetalBuildPlanPath = "guidexos/mbedtls_sources.mk";
 constexpr const char* kBareMetalPlannedSubset =
     "runtime-linked Mbed TLS 4.1.0 TLS/X.509 subset with bounded allocator hooks, PSA external RNG, wall-clock callbacks, one-shot CA parsing, smoke-only local handshake coverage, and explicit-policy validated HTTPS enablement.";
 constexpr size_t kBareMetalPlannedSourceCount = 55;
@@ -1231,6 +1255,22 @@ void zero_local_handshake_result(GxosTlsLocalHandshakeResult* result)
     result->usedSniHostname = false;
     result->requestBytesWritten = 0;
     result->responseBytesRead = 0;
+    result->tlsBioSendCalls = 0;
+    result->tlsBioRecvCalls = 0;
+    result->tlsBioBytesSent = 0;
+    result->tlsBioBytesReceived = 0;
+    result->tlsBioLastSendResult = 0;
+    result->tlsBioLastRecvResult = 0;
+    result->tlsReadCalls = 0;
+    result->tlsReadWantReadCount = 0;
+    result->tlsReadWantWriteCount = 0;
+    result->tlsReadCloseNotifyCount = 0;
+    result->tlsReadEofCount = 0;
+    result->tlsReadFatalErrorCount = 0;
+    result->tlsReadProgressEvents = 0;
+    result->tlsReadLastResult = 0;
+    result->tlsResponseReadElapsedMs = 0;
+    result->tlsHandshakeElapsedMs = 0;
     result->verifyFlags = 0;
     result->transportError = 0;
     result->mbedtlsError = 0;
@@ -1252,6 +1292,7 @@ void zero_local_handshake_result(GxosTlsLocalHandshakeResult* result)
     result->tlsSetupStep[0] = '\0';
     result->tlsSetupErrorCode = 0;
     result->tlsSetupErrorName[0] = '\0';
+    result->tlsHandshakeErrorName[0] = '\0';
     result->tlsSuiteContractCount = 0;
     result->tlsSuiteContractRealCount = 0;
     result->tlsSuiteContractInstalled = false;
@@ -1275,6 +1316,7 @@ struct BareMetalTlsRuntimeState {
     bool allocatorInitialized = false;
     bool psaInitAttempted = false;
     bool psaInitialized = false;
+    bool psaCallbackMarkerEmitted = false;
     bool caChainInitialized = false;
     bool allocatorExhausted = false;
     GxosTlsHookStatus allocatorStatus = GxosTlsHookStatus::Pending;
@@ -1330,6 +1372,8 @@ struct BareMetalCaStoreState {
     char computedSha256[65] = {};
     char manifestError[160] = {};
     uint8_t manifestBytes[kGxosMaxCaManifestBytes + 1] = {};
+    bool publicInternetOptInChecked = false;
+    bool publicInternetOptInEnabled = false;
 };
 
 struct BareMetalHttpsPolicyConfigInfo {
@@ -1853,6 +1897,12 @@ const char* fallback_path_if_missing(const char* primaryPath,
 
 bool public_internet_trust_opt_in_enabled()
 {
+    BareMetalCaStoreState& caState = ca_store_state();
+    if (caState.publicInternetOptInChecked) {
+        return caState.publicInternetOptInEnabled;
+    }
+
+    caState.publicInternetOptInChecked = true;
     kernel::vfs::FileInfo info{};
     kernel::vfs::Status statStatus = kernel::vfs::VFS_ERR_INVALID;
     const char* readPath = fallback_path_if_missing(
@@ -1889,10 +1939,12 @@ bool public_internet_trust_opt_in_enabled()
 
     char token[33];
     copy_trimmed_ascii_span(token, sizeof(token), begin, end);
-    return text_equals_insensitive(token, "enabled") ||
+    const bool enabled = text_equals_insensitive(token, "enabled") ||
         text_equals_insensitive(token, "1") ||
         text_equals_insensitive(token, "true") ||
         text_equals_insensitive(token, "yes");
+    caState.publicInternetOptInEnabled = enabled;
+    return caState.publicInternetOptInEnabled;
 }
 #endif
 
@@ -1950,7 +2002,7 @@ const char* readiness_blocker_for_ca_store(const GxosCaStoreInfo& info)
     case GxosCaParseStatus::SourceMissing:
         return "Mbed TLS source import is incomplete at third_party/mbedtls";
     case GxosCaParseStatus::ConfigMissing:
-        return "guideXOS Mbed TLS 4.x config pair is incomplete under third_party/mbedtls/guidexos";
+        return "guideXOS Mbed TLS 4.x tracked config overlay is incomplete under guidexos";
     case GxosCaParseStatus::ParseError:
         return info.error ? info.error : "Root CA bundle could not be parsed";
     default:
@@ -2060,11 +2112,21 @@ GxosTrustStorePolicyInfo make_trust_store_policy_info()
             source == GxosTrustStoreSource::SmokeFixtureTrust
                 ? nullptr
                 : trust_store_manifest_blocker(caInfo);
+        const bool manifestProductionReady =
+            caInfo.manifest.status == GxosCaManifestStatus::Loaded &&
+            caInfo.manifest.productionReady &&
+            !caInfo.manifest.testOnly &&
+            caInfo.manifest.hashMatch;
+        const bool publicOptIn =
+            source == GxosTrustStoreSource::ProductionPublicProbeTrust
+                ? public_internet_trust_opt_in_enabled()
+                : false;
         const bool publicInternetReady =
-            source == GxosTrustStoreSource::ProductionPublicProbeTrust &&
             manifestBlocker == nullptr &&
-            public_internet_trust_opt_in_enabled() &&
-            caInfo.manifest.productionReady;
+            manifestProductionReady &&
+            (source == GxosTrustStoreSource::ProductionRootStore ||
+             (source == GxosTrustStoreSource::ProductionPublicProbeTrust &&
+              publicOptIn));
         if (manifestBlocker) {
             return {
                 GxosTrustStorePolicyState::TrustStoreMalformed,
@@ -2228,14 +2290,20 @@ GxosValidatedHttpsPolicyInfo make_validated_https_policy_info()
         } else {
             effectiveState = GxosValidatedHttpsPolicyState::ProductionValidated;
             validatedNavigationEnabled = true;
-            productionReady = true;
-            if (publicHttpsPilotRequested) {
-                broadPublicHttpsEnabled = true;
-                detail = "Production HTTPS prerequisites are satisfied, explicit validated fixture HTTPS navigation is enabled, and the controlled public HTTPS pilot is enabled.";
-                publicHttpsPilotReason = "Public HTTPS pilot is enabled for hostname-only HTTPS targets under ProductionValidated.";
+            productionReady = trustPolicy.publicInternetReady;
+            // A production-ready manifest is the security boundary for
+            // arbitrary origins. Deterministic non-production bundles may
+            // still exercise the explicit validated fixture rails, but they
+            // must never turn on generic public HTTPS navigation.
+            broadPublicHttpsEnabled = trustPolicy.publicInternetReady;
+            if (trustPolicy.publicInternetReady) {
+                detail = "Production HTTPS prerequisites are satisfied; arbitrary-origin HTTPS navigation is enabled with production trust and hostname validation.";
+                publicHttpsPilotReason = publicHttpsPilotRequested
+                    ? "Arbitrary-origin HTTPS is enabled; legacy public-https-pilot proof token is present."
+                    : "Arbitrary-origin HTTPS is enabled by ProductionValidated trust prerequisites; public-https-pilot is only a legacy proof token.";
             } else {
-                detail = "Production HTTPS prerequisites are satisfied and explicit validated fixture HTTPS navigation is enabled; public HTTPS pilot remains disabled until public-https-pilot=enabled.";
-                publicHttpsPilotReason = "Public HTTPS pilot requires public-https-pilot=enabled under ProductionValidated.";
+                detail = "The deterministic production-policy fixture is parsed and usable for explicit certificate-validation rails, but its manifest is not production-ready; arbitrary-origin HTTPS remains disabled.";
+                publicHttpsPilotReason = "Public HTTPS pilot requires a production-ready CA manifest; deterministic fixture trust is never sufficient.";
             }
             blocker = nullptr;
         }
@@ -2410,6 +2478,11 @@ bool ensure_psa_initialized()
         return false;
     }
 
+    if (!state.psaCallbackMarkerEmitted) {
+        state.psaCallbackMarkerEmitted = true;
+        kernel::serial::puts("[TLS-PSA] external RNG callback registered; secure entropy status=ready\n");
+    }
+
     if (state.psaInitialized) {
         state.psaStatus = GxosTlsHookStatus::Ready;
         copy_text(state.psaDetail, sizeof(state.psaDetail),
@@ -2428,6 +2501,7 @@ bool ensure_psa_initialized()
 
     state.psaInitialized = true;
     state.psaStatus = GxosTlsHookStatus::Ready;
+    kernel::serial::puts("[TLS-PSA] psa_crypto_init status=success\n");
     copy_text(state.psaDetail, sizeof(state.psaDetail),
         "psa_crypto_init() completed successfully for CA parsing.");
     return true;
@@ -2463,6 +2537,9 @@ const char* tls_setup_error_name(int code)
 #ifdef MBEDTLS_ERR_SSL_WAITING_SERVER_HELLO_RENEGO
     case MBEDTLS_ERR_SSL_WAITING_SERVER_HELLO_RENEGO: return "MBEDTLS_ERR_SSL_WAITING_SERVER_HELLO_RENEGO";
 #endif
+#ifdef MBEDTLS_ERR_PK_UNKNOWN_NAMED_CURVE
+    case MBEDTLS_ERR_PK_UNKNOWN_NAMED_CURVE: return "MBEDTLS_ERR_PK_UNKNOWN_NAMED_CURVE";
+#endif
     default: return "MBEDTLS_ERR_UNKNOWN";
     }
 }
@@ -2478,18 +2555,36 @@ void tls_set_setup_error(GxosTlsLocalHandshakeResult* result, int code, const ch
 #if defined(GXOS_BARE_METAL) && GXOS_TLS_MBEDTLS_RUNTIME_INCLUDED
 constexpr uint32_t kGxosTlsSmokeHandshakeTimeoutMs = 5000;
 constexpr uint32_t kGxosTlsSmokeIoTimeoutMs = 5000;
+constexpr uint32_t kGxosTlsSmokeResponseTransactionTimeoutMs = 30000;
 
 struct GxosTlsSmokeIoContext {
     GxosTlsByteStream stream{};
+    GxosTlsLocalHandshakeResult* result = nullptr;
     int lastTransportError = 0;
     bool tracedSend = false;
     bool tracedRecv = false;
     uint32_t sendCalls = 0;
     uint32_t recvCalls = 0;
+    size_t bytesSent = 0;
+    size_t bytesReceived = 0;
+    uint32_t lastProgressTicks = 0;
+    int lastSendResult = 0;
+    int lastRecvResult = 0;
 };
 
-void tls_trace_stage(const char*) {}
-void tls_trace_stream_io(const char*, uint32_t, int, int) {}
+void tls_trace_stage(const char* event)
+{
+    gxos_tls_smoke_debug_trace(event, static_cast<uint32_t>(kernel::pit::ticks()));
+}
+
+void tls_trace_stream_io(const char* event, uint32_t call, int requested, int result)
+{
+    /* Pack the bounded request/result pair for serial inspection. */
+    const uint32_t packed = ((static_cast<uint32_t>(requested) & 0xFFFFu) << 16) |
+        (static_cast<uint32_t>(result) & 0xFFFFu);
+    gxos_tls_smoke_debug_trace(event, packed);
+    gxos_tls_smoke_debug_trace("stream_io_call", call);
+}
 
 uint32_t tls_timeout_ticks(uint32_t timeoutMs)
 {
@@ -2514,6 +2609,13 @@ int gxos_tls_stream_send(void* context, const unsigned char* buffer, size_t leng
     int requestLength = static_cast<int>(length > 0x7FFFu ? 0x7FFFu : length);
     if (requestLength <= 0 && length != 0) requestLength = 0x7FFF;
     const int sent = io->stream.write(io->stream.context, buffer, requestLength);
+    io->lastSendResult = sent;
+    if (sent > 0) io->bytesSent += static_cast<size_t>(sent);
+    if (io->result) {
+        io->result->tlsBioSendCalls = io->sendCalls;
+        io->result->tlsBioBytesSent = io->bytesSent;
+        io->result->tlsBioLastSendResult = sent;
+    }
     if (io->sendCalls <= 8u) {
         tls_trace_stream_io("stream_send_io", io->sendCalls, requestLength, sent);
     }
@@ -2535,6 +2637,14 @@ int gxos_tls_stream_recv(void* context, unsigned char* buffer, size_t length)
     int requestLength = static_cast<int>(length > 0x7FFFu ? 0x7FFFu : length);
     if (requestLength <= 0 && length != 0) requestLength = 0x7FFF;
     const int received = io->stream.read(io->stream.context, buffer, requestLength);
+    io->lastRecvResult = received;
+    if (received > 0) io->bytesReceived += static_cast<size_t>(received);
+    if (received > 0) io->lastProgressTicks = static_cast<uint32_t>(kernel::pit::ticks());
+    if (io->result) {
+        io->result->tlsBioRecvCalls = io->recvCalls;
+        io->result->tlsBioBytesReceived = io->bytesReceived;
+        io->result->tlsBioLastRecvResult = received;
+    }
     if (io->recvCalls <= 16u || received > 0) {
         tls_trace_stream_io("stream_recv_io", io->recvCalls, requestLength, received);
     }
@@ -2560,6 +2670,19 @@ struct GxosTlsHttpByteStreamSession {
     bool closed = false;
 };
 
+bool tls_http_response_wait_until_ready(GxosTlsHttpByteStreamSession* session,
+                                        uint32_t transactionStartTicks,
+                                        uint32_t idleTimeoutTicks,
+                                        uint32_t totalTimeoutTicks)
+{
+    if (!session) return false;
+    if (session->tcpStream.poll) session->tcpStream.poll(session->tcpStream.context);
+    const uint32_t now = static_cast<uint32_t>(kernel::pit::ticks());
+    const uint32_t lastProgress = session->io.lastProgressTicks;
+    return (now - lastProgress) <= idleTimeoutTicks &&
+        (now - transactionStartTicks) <= totalTimeoutTicks;
+}
+
 /*
  * Keep the freestanding client offer explicit and limited to the four
  * TLS 1.2 suites provided by the guideXOS Mbed TLS/PSA configuration. This
@@ -2577,6 +2700,17 @@ const int kGxosTlsClientCiphersuites[] = {
 constexpr size_t kGxosTlsClientCiphersuiteCount = 4u;
 constexpr size_t kGxosTlsClientCiphersuiteMax = 4u;
 constexpr int kGxosTlsRenegotiationInfoScsv = 0x00ff;
+
+/*
+ * Keep the bounded first public-Web offer on the complete P-256 path. The
+ * build also knows X25519 for future interoperability, but selecting it here
+ * would force the freestanding software path through an unboundedly expensive
+ * curve operation on the current kernel profile.
+ */
+const uint16_t kGxosTlsClientGroups[] = {
+    MBEDTLS_SSL_IANA_TLS_GROUP_SECP256R1,
+    MBEDTLS_SSL_IANA_TLS_GROUP_NONE
+};
 
 void tls_set_transport_status(GxosTlsLocalHandshakeResult* result,
                               gxos::web::HttpByteStreamTlsStatus status,
@@ -2768,38 +2902,72 @@ int tls_http_byte_stream_read(void* context, uint8_t* buffer, int length)
     if (!session || !session->result || !buffer || length <= 0) return -1;
 
     tls_set_stage(session->result, "response_read");
-    uint32_t ioStartTicks = static_cast<uint32_t>(kernel::pit::ticks());
+    const uint32_t ioStartTicks = static_cast<uint32_t>(kernel::pit::ticks());
     const uint32_t ioTimeout = tls_timeout_ticks(kGxosTlsSmokeIoTimeoutMs);
+    const uint32_t totalTimeout = tls_timeout_ticks(kGxosTlsSmokeResponseTransactionTimeoutMs);
+    session->io.lastProgressTicks = ioStartTicks;
     for (;;) {
         const int ret = mbedtls_ssl_read(&session->ssl,
             reinterpret_cast<unsigned char*>(buffer), (size_t)length);
+        ++session->result->tlsReadCalls;
+        session->result->tlsReadLastResult = ret;
         if (ret > 0) {
             session->result->responseReadSuccess = true;
             session->result->responseBytesRead += (size_t)ret;
+            ++session->result->tlsReadProgressEvents;
             session->result->mbedtlsError = 0;
             session->result->mbedtlsState = session->ssl.MBEDTLS_PRIVATE(state);
             session->result->transportStatus = gxos::web::HttpByteStreamTlsStatus::Success;
+            session->result->tlsResponseReadElapsedMs =
+                (static_cast<uint32_t>(kernel::pit::ticks()) - ioStartTicks) * 10u;
             return ret;
         }
 
         session->result->mbedtlsError = ret;
         session->result->mbedtlsState = session->ssl.MBEDTLS_PRIVATE(state);
-        if (ret == 0 || ret == MBEDTLS_ERR_SSL_PEER_CLOSE_NOTIFY || ret == MBEDTLS_ERR_SSL_CONN_EOF) {
+        if (ret == MBEDTLS_ERR_SSL_PEER_CLOSE_NOTIFY) {
+            ++session->result->tlsReadCloseNotifyCount;
             session->result->mbedtlsError = 0;
+            session->result->tlsResponseReadElapsedMs =
+                (static_cast<uint32_t>(kernel::pit::ticks()) - ioStartTicks) * 10u;
             return 0;
         }
-        if (ret == MBEDTLS_ERR_SSL_WANT_READ || ret == MBEDTLS_ERR_SSL_WANT_WRITE) {
-            if (!tls_wait_until_ready(&session->tcpStream, ioStartTicks, ioTimeout)) {
+        if (ret == 0 || ret == MBEDTLS_ERR_SSL_CONN_EOF) {
+            ++session->result->tlsReadEofCount;
+            session->result->mbedtlsError = 0;
+            session->result->tlsResponseReadElapsedMs =
+                (static_cast<uint32_t>(kernel::pit::ticks()) - ioStartTicks) * 10u;
+            return 0;
+        }
+        if (ret == MBEDTLS_ERR_SSL_WANT_READ) {
+            ++session->result->tlsReadWantReadCount;
+            if (!tls_http_response_wait_until_ready(session, ioStartTicks, ioTimeout, totalTimeout)) {
                 tls_set_transport_status(session->result, gxos::web::HttpByteStreamTlsStatus::TlsReadFailed,
                     "TLS response read timed out.");
+                session->result->tlsResponseReadElapsedMs =
+                    (static_cast<uint32_t>(kernel::pit::ticks()) - ioStartTicks) * 10u;
+                return -1;
+            }
+            continue;
+        }
+        if (ret == MBEDTLS_ERR_SSL_WANT_WRITE) {
+            ++session->result->tlsReadWantWriteCount;
+            if (!tls_http_response_wait_until_ready(session, ioStartTicks, ioTimeout, totalTimeout)) {
+                tls_set_transport_status(session->result, gxos::web::HttpByteStreamTlsStatus::TlsReadFailed,
+                    "TLS response read timed out.");
+                session->result->tlsResponseReadElapsedMs =
+                    (static_cast<uint32_t>(kernel::pit::ticks()) - ioStartTicks) * 10u;
                 return -1;
             }
             continue;
         }
 
+        ++session->result->tlsReadFatalErrorCount;
         session->result->transportError = session->io.lastTransportError;
         tls_set_transport_status(session->result, gxos::web::HttpByteStreamTlsStatus::TlsReadFailed,
             "TLS response read failed.");
+        session->result->tlsResponseReadElapsedMs =
+            (static_cast<uint32_t>(kernel::pit::ticks()) - ioStartTicks) * 10u;
         return -1;
     }
 }
@@ -2964,7 +3132,7 @@ GxosTlsBackendInfo make_backend_info()
             GxosTlsBackendStatus::SourceMissing,
             "Mbed TLS bare-metal scaffold",
             importInfo.detectedVersion,
-            "Vendored Mbed TLS source tree is missing at third_party/mbedtls; handshake support stays disabled."
+            "Mbed TLS source tree is missing at third_party/mbedtls; run the pinned bootstrap before building."
         };
     }
     if (!importInfo.sourceReadyForCompile) {
@@ -3686,6 +3854,141 @@ GxosTlsArenaInfo gxos_tls_arena_info()
     return make_tls_arena_info();
 }
 
+bool gxos_tls_run_phase8j_raw_ecdsa_diagnostics()
+{
+#if defined(GXOS_BARE_METAL) && GXOS_TLS_MBEDTLS_RUNTIME_INCLUDED
+    if (!ensure_psa_initialized()) {
+        gxos_tls_smoke_debug_trace("phase8j.psa_init.failed", 0);
+        return false;
+    }
+
+    gxos_tls_smoke_debug_trace_reset();
+    gxos_tls_smoke_debug_trace("phase8j.raw.begin", 0);
+    gxos_tls_smoke_debug_trace("phase8j.config.nist_optim",
+#if defined(MBEDTLS_ECP_NIST_OPTIM)
+                               1u
+#else
+                               0u
+#endif
+    );
+    gxos_tls_smoke_debug_trace("phase8j.config.p256_driver",
+#if defined(MBEDTLS_PSA_P256M_DRIVER_ENABLED)
+                               1u
+#else
+                               0u
+#endif
+    );
+    gxos_tls_smoke_debug_trace("phase8j.config.restartable",
+#if defined(MBEDTLS_ECP_RESTARTABLE)
+                               1u
+#else
+                               0u
+#endif
+    );
+#if defined(MBEDTLS_ECP_WINDOW_SIZE)
+    gxos_tls_smoke_debug_trace("phase8j.config.window_size",
+                               static_cast<uint32_t>(MBEDTLS_ECP_WINDOW_SIZE));
+#else
+    gxos_tls_smoke_debug_trace("phase8j.config.window_size", 0u);
+#endif
+#if defined(MBEDTLS_ECP_FIXED_POINT_OPTIM)
+    gxos_tls_smoke_debug_trace("phase8j.config.fixed_point",
+                               static_cast<uint32_t>(MBEDTLS_ECP_FIXED_POINT_OPTIM));
+#else
+    gxos_tls_smoke_debug_trace("phase8j.config.fixed_point", 0u);
+#endif
+    gxos_tls_smoke_debug_trace("phase8j.config.mpi_uint_bytes",
+                               static_cast<uint32_t>(sizeof(mbedtls_mpi_uint)));
+
+    bool allPassed = true;
+    for (size_t i = 0; i < kGxosPhase8jEcdsaVectorCount; ++i) {
+        const GxosPhase8jEcdsaVector& vector = kGxosPhase8jEcdsaVectors[i];
+        gxos_tls_smoke_debug_trace("phase8j.vector.begin", vector.bits);
+
+        psa_key_attributes_t attributes = PSA_KEY_ATTRIBUTES_INIT;
+        psa_set_key_type(&attributes,
+                         PSA_KEY_TYPE_ECC_PUBLIC_KEY(PSA_ECC_FAMILY_SECP_R1));
+        psa_set_key_bits(&attributes, vector.bits);
+        psa_set_key_usage_flags(&attributes, PSA_KEY_USAGE_VERIFY_HASH);
+        psa_set_key_algorithm(&attributes,
+                              vector.bits == 256
+                                  ? PSA_ALG_ECDSA(PSA_ALG_SHA_256)
+                                  : PSA_ALG_ECDSA(PSA_ALG_SHA_384));
+
+        psa_key_id_t key = PSA_KEY_ID_NULL;
+        psa_status_t status = psa_import_key(&attributes,
+                                              vector.publicKey,
+                                              vector.publicKeyLength,
+                                              &key);
+        gxos_tls_smoke_debug_trace("phase8j.key_import",
+                                   static_cast<uint32_t>(status));
+        bool vectorPassed = status == PSA_SUCCESS;
+        if (vectorPassed) {
+            gxos_tls_smoke_debug_trace("phase8j.verify.entry", vector.bits);
+            status = psa_verify_hash(key,
+                                     psa_get_key_algorithm(&attributes),
+                                     vector.hash,
+                                     vector.hashLength,
+                                     vector.signature,
+                                     vector.signatureLength);
+            gxos_tls_smoke_debug_trace("phase8j.verify.return",
+                                       static_cast<uint32_t>(status));
+            vectorPassed = status == PSA_SUCCESS;
+            (void) psa_destroy_key(key);
+        }
+
+        psa_reset_key_attributes(&attributes);
+
+        uint8_t alteredSignature[96] = {};
+        if (vector.signatureLength <= sizeof(alteredSignature)) {
+            for (size_t j = 0; j < vector.signatureLength; ++j) {
+                alteredSignature[j] = vector.signature[j];
+            }
+            alteredSignature[vector.signatureLength - 1] ^= 0x01u;
+
+            attributes = PSA_KEY_ATTRIBUTES_INIT;
+            psa_set_key_type(&attributes,
+                             PSA_KEY_TYPE_ECC_PUBLIC_KEY(PSA_ECC_FAMILY_SECP_R1));
+            psa_set_key_bits(&attributes, vector.bits);
+            psa_set_key_usage_flags(&attributes, PSA_KEY_USAGE_VERIFY_HASH);
+            psa_set_key_algorithm(&attributes,
+                                  vector.bits == 256
+                                      ? PSA_ALG_ECDSA(PSA_ALG_SHA_256)
+                                      : PSA_ALG_ECDSA(PSA_ALG_SHA_384));
+            key = PSA_KEY_ID_NULL;
+            status = psa_import_key(&attributes,
+                                    vector.publicKey,
+                                    vector.publicKeyLength,
+                                    &key);
+            if (status == PSA_SUCCESS) {
+                status = psa_verify_hash(key,
+                                         psa_get_key_algorithm(&attributes),
+                                         vector.hash,
+                                         vector.hashLength,
+                                         alteredSignature,
+                                         vector.signatureLength);
+                (void) psa_destroy_key(key);
+            }
+            gxos_tls_smoke_debug_trace("phase8j.verify.altered_return",
+                                       static_cast<uint32_t>(status));
+            vectorPassed = vectorPassed && status == PSA_ERROR_INVALID_SIGNATURE;
+            psa_reset_key_attributes(&attributes);
+        } else {
+            vectorPassed = false;
+        }
+
+        gxos_tls_smoke_debug_trace("phase8j.vector.result",
+                                   vectorPassed ? 1u : 0u);
+        allPassed = allPassed && vectorPassed;
+    }
+
+    gxos_tls_smoke_debug_trace("phase8j.raw.result", allPassed ? 1u : 0u);
+    return allPassed;
+#else
+    return false;
+#endif
+}
+
 const char* gxos_tls_hook_status_name(GxosTlsHookStatus status)
 {
     switch (status) {
@@ -3782,6 +4085,7 @@ bool gxos_tls_open_http_byte_stream(const char* sniHostname,
     session->tcpStream = tcpStream;
     session->result = result;
     session->io.stream = tcpStream;
+    session->io.result = result;
     mbedtls_ssl_init(&session->ssl);
     mbedtls_ssl_config_init(&session->conf);
 
@@ -3811,6 +4115,8 @@ bool gxos_tls_open_http_byte_stream(const char* sniHostname,
         if (!tls_install_capability_contract(&session->conf, result)) {
             break;
         }
+
+        mbedtls_ssl_conf_groups(&session->conf, kGxosTlsClientGroups);
 
         mbedtls_ssl_conf_authmode(&session->conf, MBEDTLS_SSL_VERIFY_REQUIRED);
         mbedtls_ssl_conf_ca_chain(&session->conf, &runtime.caChain, nullptr);
@@ -3863,6 +4169,8 @@ bool gxos_tls_open_http_byte_stream(const char* sniHostname,
         while ((ret = mbedtls_ssl_handshake(&session->ssl)) != 0) {
             result->mbedtlsError = ret;
             result->mbedtlsState = session->ssl.MBEDTLS_PRIVATE(state);
+            tls_trace_stream_io("handshake_result", 0,
+                result->mbedtlsState, ret);
             if (ret == MBEDTLS_ERR_SSL_WANT_READ || ret == MBEDTLS_ERR_SSL_WANT_WRITE) {
                 if (!tls_wait_until_ready(&session->tcpStream, startTicks, handshakeTimeout)) {
                     tls_set_transport_status(result, gxos::web::HttpByteStreamTlsStatus::HandshakeFailed,
@@ -3874,8 +4182,12 @@ bool gxos_tls_open_http_byte_stream(const char* sniHostname,
             }
             break;
         }
+        result->tlsHandshakeElapsedMs =
+            (static_cast<uint32_t>(kernel::pit::ticks()) - startTicks) * 10u;
         if (ret != 0) {
             result->mbedtlsState = session->ssl.MBEDTLS_PRIVATE(state);
+            copy_text(result->tlsHandshakeErrorName, sizeof(result->tlsHandshakeErrorName),
+                tls_setup_error_name(ret));
             result->verifyFlags = static_cast<uint32_t>(mbedtls_ssl_get_verify_result(&session->ssl));
             result->certificateValidationSuccess = result->verifyFlags == 0;
             result->hostnameValidationSuccess = result->certificateValidationSuccess &&
@@ -4062,11 +4374,11 @@ const char* gxos_tls_certificate_validation_policy()
     if (policy.selectedState == GxosValidatedHttpsPolicyState::ProductionValidated &&
         policy.productionReady &&
         policy.broadPublicHttpsEnabled) {
-        return "production validated HTTPS pilot enabled; production CA, hostname validation, secure RNG, plausible wall clock, and explicit public-pilot selection are required, and plaintext fallback remains disabled";
+        return "production validated arbitrary-origin HTTPS enabled; production CA, hostname validation, secure RNG, and plausible wall clock are required, and plaintext fallback remains disabled";
     }
     if (policy.selectedState == GxosValidatedHttpsPolicyState::ProductionValidated &&
         policy.productionReady) {
-        return "production validated fixture HTTPS enabled; production CA, hostname validation, secure RNG, and plausible wall clock are required, public HTTPS pilot remains opt-in, and plaintext fallback remains disabled";
+        return "production validated arbitrary-origin HTTPS enabled; production CA, hostname validation, secure RNG, and plausible wall clock are required, and plaintext fallback remains disabled";
     }
     if (policy.selectedState == GxosValidatedHttpsPolicyState::ProductionValidated) {
         return "production-selected but not effective; broader validated bare-metal https:// remains fail-closed until the production CA bundle and TLS prerequisites are complete";

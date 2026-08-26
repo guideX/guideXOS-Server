@@ -21,6 +21,7 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <cmath>
 #include <cstdlib>
 #include <cstdio>
 #include <iomanip>
@@ -29,6 +30,7 @@
 #include <sstream>
 #include <unordered_map>
 #include <utility>
+#include <vector>
 
 namespace gxos {
 namespace web {
@@ -44,6 +46,9 @@ namespace {
 	constexpr int kCssLiteMaxFontSizePx = 72;
 	constexpr int kCssLiteMaxLineHeightPx = 96;
 	constexpr int kCssLiteMaxWidthPx = 2048;
+	constexpr int kCssLiteMaxPositionOffsetPx = 8192;
+	constexpr int kCssLiteMaxZIndex = 32767;
+	constexpr int kCssLiteMaxPercentage = 1000;
 	constexpr int kCssLiteMaxBorderWidthPx = 12;
 	constexpr size_t kCssLiteMaxStyleBlocks = 32;
 	constexpr size_t kCssLiteMaxRules = 256;
@@ -73,8 +78,13 @@ namespace {
 	constexpr size_t kCssLiteMaxContentAggregationOperations = 1024;
 	constexpr size_t kCssLiteMaxOpenElementDepth = 1024;
 	constexpr size_t kCssLiteMaxVisibleTextBytesPerElement = 1024;
+	constexpr size_t kCssLiteMaxInlineItems = 2048;
+	constexpr size_t kCssLiteMaxInlineTextBytes = 4096;
 	constexpr size_t kCssLiteMaxRecoveryAttemptsPerGroup = 16;
 	constexpr size_t kCssLiteMaxEvidenceTokenBytes = 64;
+	constexpr size_t kTableMaxCellContents = 64;
+	constexpr int kTableMaxColspan = 8;
+	constexpr int kTableMaxRowspan = 16;
 	constexpr size_t kFormMaxControls = 128;
 	constexpr size_t kFormMaxValueBytes = 256;
 	constexpr size_t kFormMaxPlaceholderBytes = 128;
@@ -92,6 +102,16 @@ namespace {
 		Italic,
 		TextDecoration,
 		Display,
+		Position,
+		Top,
+		Right,
+		Bottom,
+		Left,
+		ZIndex,
+		Float,
+		Clear,
+		BoxSizing,
+		MinWidth,
 		ListStyle,
 		BorderCollapse,
 		BorderSpacingHorizontal,
@@ -112,6 +132,12 @@ namespace {
 		Height,
 		MaxWidth,
 		MaxHeight,
+		MinHeight,
+		OverflowX,
+		OverflowY,
+		Visibility,
+		Opacity,
+		VerticalAlign,
 		WhiteSpace,
 		OverflowWrap,
 		WordBreak,
@@ -127,6 +153,15 @@ namespace {
 		BorderLeftWidth,
 		BorderLeftStyle,
 		BorderLeftColor,
+		// The final seven mask slots intentionally group related Flexbox
+		// longhands so the existing compact cascade remains 64-bit.
+		FlexAxes,          // flex-direction + flex-wrap + align-content
+		JustifyContent,
+		AlignItems,
+		FlexGaps,          // gap + row-gap + column-gap
+		FlexFactors,       // flex-grow + flex-shrink
+		FlexBasis,
+		FlexItemPlacement, // order + align-self
 		Count,
 	};
 
@@ -650,15 +685,62 @@ static bool parseCssNumber(const std::string& rawValue, double& out)
 	try {
 		size_t consumed = 0;
 		out = std::stod(value, &consumed);
-		return consumed == value.size();
+		return consumed == value.size() && std::isfinite(out);
 	} catch (...) {
 		return false;
 	}
 }
 
+static int parseTableSpanAttr(const std::string& tagBody, const std::string& attr,
+	int maximum, CssDiagnostics& diagnostics, bool& malformed)
+{
+	const std::string raw = trim(extractAttr(tagBody, attr));
+	malformed = false;
+	if (raw.empty()) return 1;
+	int value = 0;
+	bool sawDigit = false;
+	for (char c : raw) {
+		if (c < '0' || c > '9') {
+			malformed = true;
+			break;
+		}
+		sawDigit = true;
+		if (value > maximum) {
+			value = maximum;
+			malformed = true;
+			break;
+		}
+		value = value * 10 + (c - '0');
+		if (value > maximum) {
+			value = maximum;
+			malformed = true;
+			break;
+		}
+	}
+	if (!sawDigit || value <= 0) {
+		malformed = true;
+		value = 1;
+	}
+	if (malformed) ++diagnostics.tableMalformedFallbackCount;
+	return std::max(1, std::min(maximum, value));
+}
+
 static int roundCssNumber(double value)
 {
-	return value <= 0.0 ? 0 : static_cast<int>(value + 0.5);
+	if (!std::isfinite(value) || value <= 0.0) return 0;
+	if (value >= static_cast<double>(std::numeric_limits<int>::max() - 1))
+		return std::numeric_limits<int>::max();
+	return static_cast<int>(value + 0.5);
+}
+
+static int roundCssSignedNumber(double value)
+{
+	if (!std::isfinite(value)) return 0;
+	if (value >= static_cast<double>(std::numeric_limits<int>::max() - 1))
+		return std::numeric_limits<int>::max();
+	if (value <= static_cast<double>(std::numeric_limits<int>::min() + 1))
+		return std::numeric_limits<int>::min();
+	return static_cast<int>(value >= 0.0 ? value + 0.5 : value - 0.5);
 }
 
 static int clampCssValue(CssDiagnostics& diag, int value, int minValue, int maxValue)
@@ -729,6 +811,321 @@ static bool parseCssLengthValue(const std::string& rawValue,
 	}
 	if (!parseCssNumber(value, numeric)) return false;
 	outPx = roundCssNumber(numeric * scale);
+	return true;
+}
+
+// Margins are the first bounded CSS lengths that must retain their unit until
+// layout.  Unlike padding and dimensions, vertical margins may be negative;
+// percentages resolve against the containing-block width in the Navigator
+// layout pass rather than against a parser-time guess.
+static bool parseCssMarginValue(const std::string& rawValue,
+	CssLengthValue& out,
+	CssDiagnostics& diag)
+{
+	out = CssLengthValue();
+	std::string value = toLower(trim(rawValue));
+	if (value.empty()) return false;
+	if (value == "auto") {
+		out.type = CssLengthType::Auto;
+		out.valid = true;
+		return true;
+	}
+	bool percent = false;
+	double scale = 1.0;
+	if (value.size() >= 2 && value.substr(value.size() - 2) == "px") {
+		value = trim(value.substr(0, value.size() - 2));
+	} else if (value.size() >= 2 && value.substr(value.size() - 2) == "em") {
+		value = trim(value.substr(0, value.size() - 2));
+		scale = 16.0;
+	} else if (value.size() >= 2 && value.substr(value.size() - 2) == "pt") {
+		value = trim(value.substr(0, value.size() - 2));
+		scale = 96.0 / 72.0;
+	} else if (!value.empty() && value.back() == '%') {
+		value.pop_back();
+		percent = true;
+	}
+	if (!percent && value != "0" && value.find_first_of(".0123456789+-") == std::string::npos)
+		return false;
+	double numeric = 0.0;
+	if (!parseCssNumber(value, numeric) || !std::isfinite(numeric)) return false;
+	if (percent) {
+		int payload = roundCssSignedNumber(numeric);
+		if (payload < -kCssLiteMaxPercentage || payload > kCssLiteMaxPercentage) {
+			payload = std::max(-kCssLiteMaxPercentage, std::min(kCssLiteMaxPercentage, payload));
+			out.clamped = true;
+			++diag.clampedValueCount;
+			++diag.lengthValueClampCount;
+		}
+		out.type = payload == 0 ? CssLengthType::Zero : CssLengthType::Percent;
+		out.value = payload;
+		out.valid = true;
+		return true;
+	}
+	const double scaled = numeric * scale;
+	if (!std::isfinite(scaled)) return false;
+	int pixels = roundCssSignedNumber(scaled);
+	if (pixels < -kCssLiteMaxSpacingPx || pixels > kCssLiteMaxSpacingPx) {
+		pixels = std::max(-kCssLiteMaxSpacingPx, std::min(kCssLiteMaxSpacingPx, pixels));
+		out.clamped = true;
+		++diag.clampedValueCount;
+		++diag.lengthValueClampCount;
+	}
+	out.type = pixels == 0 ? CssLengthType::Zero : CssLengthType::Px;
+	out.value = pixels;
+	out.valid = true;
+	return true;
+}
+
+// Position offsets retain their authored unit until Navigator has a definite
+// containing-block basis.  Unlike dimensions, signed px/percentage values are
+// valid; unsupported units and calc() remain invalid rather than becoming 0.
+static bool parseCssPositionOffset(const std::string& rawValue,
+	CssLengthValue& out, CssDiagnostics& diag)
+{
+	out = CssLengthValue();
+	std::string value = toLower(trim(rawValue));
+	if (value.empty()) return false;
+	if (value == "auto") {
+		out.type = CssLengthType::Auto;
+		out.valid = true;
+		return true;
+	}
+	bool percent = false;
+	double scale = 1.0;
+	if (value.size() >= 2 && value.substr(value.size() - 2) == "px") {
+		value = trim(value.substr(0, value.size() - 2));
+	} else if (value.size() >= 2 && value.substr(value.size() - 2) == "em") {
+		value = trim(value.substr(0, value.size() - 2));
+		scale = 16.0;
+	} else if (value.size() >= 2 && value.substr(value.size() - 2) == "pt") {
+		value = trim(value.substr(0, value.size() - 2));
+		scale = 96.0 / 72.0;
+	} else if (!value.empty() && value.back() == '%') {
+		value.pop_back();
+		percent = true;
+	} else if (value != "0") {
+		return false;
+	}
+	double numeric = 0.0;
+	if (!parseCssNumber(value, numeric)) return false;
+	const double scaled = numeric * scale;
+	if (!std::isfinite(scaled)) return false;
+	int payload = roundCssSignedNumber(scaled);
+	const int limit = percent ? kCssLiteMaxPercentage : kCssLiteMaxPositionOffsetPx;
+	if (payload < -limit || payload > limit) {
+		payload = std::max(-limit, std::min(limit, payload));
+		out.clamped = true;
+		++diag.clampedValueCount;
+		++diag.lengthValueClampCount;
+	}
+	out.type = payload == 0 ? CssLengthType::Zero :
+		(percent ? CssLengthType::Percent : CssLengthType::Px);
+	out.value = payload;
+	out.valid = true;
+	return true;
+}
+
+static bool parseCssZIndexValue(const std::string& rawValue,
+	bool& outAuto, int& outValue, CssDiagnostics& diag)
+{
+	const std::string value = toLower(trim(rawValue));
+	if (value == "auto") {
+		outAuto = true;
+		outValue = 0;
+		return true;
+	}
+	double numeric = 0.0;
+	if (!parseCssNumber(value, numeric) || std::floor(numeric) != numeric) return false;
+	int parsed = roundCssSignedNumber(numeric);
+	if (parsed < -kCssLiteMaxZIndex || parsed > kCssLiteMaxZIndex) {
+		parsed = std::max(-kCssLiteMaxZIndex, std::min(kCssLiteMaxZIndex, parsed));
+		++diag.clampedValueCount;
+	}
+	outAuto = false;
+	outValue = parsed;
+	return true;
+}
+
+static bool parseCssBoundedDimension(const std::string& rawValue,
+	CssLengthValue& out,
+	CssDiagnostics& diag,
+	bool allowAuto,
+	bool allowNone,
+	bool allowPercent)
+{
+	out = CssLengthValue();
+	std::string value = toLower(trim(rawValue));
+	if (value.empty()) return false;
+	if (value == "auto") {
+		if (!allowAuto) return false;
+		out.type = CssLengthType::Auto;
+		out.valid = true;
+		return true;
+	}
+	if (value == "none") {
+		if (!allowNone) return false;
+		out.type = CssLengthType::None;
+		out.valid = true;
+		return true;
+	}
+
+	bool percent = false;
+	double scale = 1.0;
+	if (value.size() >= 2 && value.substr(value.size() - 2) == "px") {
+		value = trim(value.substr(0, value.size() - 2));
+	} else if (value.size() >= 2 && value.substr(value.size() - 2) == "em") {
+		value = trim(value.substr(0, value.size() - 2));
+		scale = 16.0;
+	} else if (value.size() >= 2 && value.substr(value.size() - 2) == "pt") {
+		value = trim(value.substr(0, value.size() - 2));
+		scale = 96.0 / 72.0;
+	} else if (!value.empty() && value.back() == '%') {
+		if (!allowPercent) return false;
+		value.pop_back();
+		percent = true;
+		scale = 1.0;
+	} else {
+		// Only unitless zero is accepted in this bounded CSS subset.
+		if (value != "0") return false;
+	}
+
+	double numeric = 0.0;
+	if (!parseCssNumber(value, numeric) || numeric < 0.0) return false;
+	if (percent) {
+		int percentValue = roundCssNumber(numeric);
+		if (percentValue > kCssLiteMaxPercentage) {
+			percentValue = kCssLiteMaxPercentage;
+			out.clamped = true;
+			++diag.clampedValueCount;
+			++diag.lengthValueClampCount;
+		}
+		out.type = CssLengthType::Percent;
+		out.value = percentValue;
+		out.valid = true;
+		return true;
+	}
+
+	const double scaled = numeric * scale;
+	if (!std::isfinite(scaled) || scaled < 0.0) return false;
+	int pixels = roundCssNumber(scaled);
+	if (pixels > kCssLiteMaxWidthPx) {
+		pixels = kCssLiteMaxWidthPx;
+		out.clamped = true;
+		++diag.clampedValueCount;
+		++diag.lengthValueClampCount;
+	}
+	out.type = pixels == 0 ? CssLengthType::Zero : CssLengthType::Px;
+	out.value = pixels;
+	out.valid = true;
+	return true;
+}
+
+static bool parseCssFlexBasisValue(const std::string& rawValue,
+	CssLengthValue& out, CssDiagnostics& diag)
+{
+	const std::string value = toLower(trim(rawValue));
+	if (value == "content") {
+		out = CssLengthValue{};
+		out.type = CssLengthType::Content;
+		out.valid = true;
+		return true;
+	}
+	return parseCssBoundedDimension(value, out, diag, true, false, true);
+}
+
+static bool parseCssNonNegativeFactor(const std::string& rawValue,
+	int& out1000, CssDiagnostics& diag)
+{
+	double numeric = 0.0;
+	if (!parseCssNumber(rawValue, numeric) || !std::isfinite(numeric) || numeric < 0.0)
+		return false;
+	int scaled = roundCssNumber(numeric * 1000.0);
+	const int bounded = clampCssValue(diag, scaled, 0, 64000);
+	out1000 = bounded;
+	return true;
+}
+
+static bool parseCssSignedInteger(const std::string& rawValue,
+	int& out, CssDiagnostics& diag)
+{
+	double numeric = 0.0;
+	if (!parseCssNumber(rawValue, numeric) || !std::isfinite(numeric) || std::floor(numeric) != numeric)
+		return false;
+	int parsed = roundCssSignedNumber(numeric);
+	out = clampCssValue(diag, parsed, -32767, 32767);
+	return true;
+}
+
+static bool parseCssOpacityValue(const std::string& rawValue, int& outPercent, CssDiagnostics& diag)
+{
+	std::string value = toLower(trim(rawValue));
+	bool percent = !value.empty() && value.back() == '%';
+	if (percent) value.pop_back();
+	double numeric = 0.0;
+	if (!parseCssNumber(value, numeric)) return false;
+	if (percent) {
+		if (numeric < 0.0 || numeric > 100.0) {
+			numeric = std::max(0.0, std::min(100.0, numeric));
+			++diag.clampedValueCount;
+		}
+	} else {
+		if (numeric < 0.0 || numeric > 1.0) {
+			numeric = std::max(0.0, std::min(1.0, numeric));
+			++diag.clampedValueCount;
+		}
+		numeric *= 100.0;
+	}
+	outPercent = std::max(0, std::min(100, roundCssNumber(numeric)));
+	return true;
+}
+
+static bool parseCssVerticalAlignValue(const std::string& rawValue,
+	VerticalAlignMode& outMode,
+	int& outValue,
+	bool& outClamped,
+	CssDiagnostics& diag)
+{
+	std::string value = toLower(trim(rawValue));
+	outMode = VerticalAlignMode::Baseline;
+	outValue = 0;
+	outClamped = false;
+	if (value == "baseline") { outMode = VerticalAlignMode::Baseline; return true; }
+	if (value == "middle") { outMode = VerticalAlignMode::Middle; return true; }
+	if (value == "top") { outMode = VerticalAlignMode::Top; return true; }
+	if (value == "bottom") { outMode = VerticalAlignMode::Bottom; return true; }
+	if (value == "text-top") { outMode = VerticalAlignMode::TextTop; return true; }
+	if (value == "text-bottom") { outMode = VerticalAlignMode::TextBottom; return true; }
+	if (value == "sub") { outMode = VerticalAlignMode::Sub; return true; }
+	if (value == "super") { outMode = VerticalAlignMode::Super; return true; }
+	if (value.empty()) return false;
+	bool percent = value.back() == '%';
+	if (percent) value.pop_back();
+	double numeric = 0.0;
+	double scale = 1.0;
+	if (!percent && value.size() >= 2 && value.substr(value.size() - 2) == "px") {
+		value = trim(value.substr(0, value.size() - 2));
+	} else if (!percent && value.size() >= 2 && value.substr(value.size() - 2) == "em") {
+		value = trim(value.substr(0, value.size() - 2));
+		scale = 16.0;
+	} else if (!percent && value.size() >= 2 && value.substr(value.size() - 2) == "pt") {
+		value = trim(value.substr(0, value.size() - 2));
+		scale = 96.0 / 72.0;
+	} else if (!percent && value != "0") {
+		return false;
+	}
+	if (!parseCssNumber(value, numeric)) return false;
+	const double scaled = numeric * scale;
+	if (!std::isfinite(scaled)) return false;
+	int bounded = scaled < 0.0
+		? -roundCssNumber(-scaled) : roundCssNumber(scaled);
+	const int maxValue = percent ? 100 : 128;
+	if (bounded < -maxValue || bounded > maxValue) {
+		bounded = std::max(-maxValue, std::min(maxValue, bounded));
+		outClamped = true;
+		++diag.clampedValueCount;
+	}
+	outValue = bounded;
+	outMode = percent ? VerticalAlignMode::Percent : VerticalAlignMode::LengthPx;
 	return true;
 }
 
@@ -1236,6 +1633,32 @@ static bool applyLengthList(WebStyle& style,
 	CssDiagnostics& diag)
 {
 	if (values.empty()) return false;
+	if (property == "margin") {
+		CssLengthValue parsed[4];
+		for (size_t i = 0; i < values.size() && i < 4; ++i) {
+			if (!parseCssMarginValue(values[i], parsed[i], diag)) {
+				++diag.unsupportedDeclarationCount;
+				return false;
+			}
+		}
+		auto assign = [&](CssLengthValue& value, int& legacy, const CssLengthValue& parsedValue) {
+			value = parsedValue;
+			legacy = parsedValue.type == CssLengthType::Auto ? -2 :
+				(parsedValue.type == CssLengthType::Px || parsedValue.type == CssLengthType::Zero
+					? parsedValue.value : -1);
+		};
+		const CssLengthValue& top = parsed[0];
+		const CssLengthValue& right = values.size() == 1 ? parsed[0] : parsed[1];
+		const CssLengthValue& bottom = values.size() == 1 ? parsed[0] :
+			(values.size() == 2 ? parsed[0] : parsed[2]);
+		const CssLengthValue& left = values.size() == 1 ? parsed[0] :
+			(values.size() == 2 ? parsed[1] : (values.size() == 3 ? parsed[1] : parsed[3]));
+		assign(style.marginTopValue, style.marginTop, top);
+		assign(style.marginRightValue, style.marginRight, right);
+		assign(style.marginBottomValue, style.marginBottom, bottom);
+		assign(style.marginLeftValue, style.marginLeft, left);
+		return true;
+	}
 	int parsed[4] = { -1, -1, -1, -1 };
 	bool autos[4] = { false, false, false, false };
 	for (size_t i = 0; i < values.size() && i < 4; ++i) {
@@ -1249,30 +1672,6 @@ static bool applyLengthList(WebStyle& style,
 		} else {
 			parsed[i] = clampCssValue(diag, parsed[i], 0, kCssLiteMaxSpacingPx);
 		}
-	}
-	if (property == "margin") {
-		if (values.size() == 1) {
-			style.marginTop = parsed[0];
-			style.marginRight = parsed[0];
-			style.marginBottom = parsed[0];
-			style.marginLeft = parsed[0];
-		} else if (values.size() == 2) {
-			style.marginTop = parsed[0];
-			style.marginBottom = parsed[0];
-			style.marginLeft = parsed[1];
-			style.marginRight = parsed[1];
-		} else if (values.size() == 3) {
-			style.marginTop = parsed[0];
-			style.marginLeft = parsed[1];
-			style.marginRight = parsed[1];
-			style.marginBottom = parsed[2];
-		} else {
-			style.marginTop = parsed[0];
-			style.marginRight = parsed[1];
-			style.marginBottom = parsed[2];
-			style.marginLeft = parsed[3];
-		}
-		return true;
 	}
 	if (property == "padding") {
 		if (values.size() == 1) {
@@ -1391,6 +1790,10 @@ static std::string stripCssQuotes(const std::string& text)
 static bool parseGenericFontFamily(const std::string& rawValue, GenericFontFamily& outFamily)
 {
 	const std::string value = toLower(trim(stripCssQuotes(rawValue)));
+	if (value == "roboto") {
+		outFamily = GenericFontFamily::Roboto;
+		return true;
+	}
 	if (value == "sans-serif") {
 		outFamily = GenericFontFamily::SansSerif;
 		return true;
@@ -1401,6 +1804,12 @@ static bool parseGenericFontFamily(const std::string& rawValue, GenericFontFamil
 	}
 	if (value == "monospace") {
 		outFamily = GenericFontFamily::Monospace;
+		return true;
+	}
+	if (!value.empty()) {
+		// Keep an unknown family request as a bounded, deterministic fallback
+		// instead of rejecting the whole declaration or probing host fonts.
+		outFamily = GenericFontFamily::Unknown;
 		return true;
 	}
 	return false;
@@ -2506,18 +2915,401 @@ static bool parseInlineStyleDeclaration(WebStyle& style,
 	if (prop == "display") {
 		std::string lower = toLower(val);
 		if (lower == "none") {
+			style.display = DisplayMode::None;
 			style.displayNone = true;
 			return accept(CssProperty::Display);
 		}
-		if (lower == "block" || lower == "inline" || lower == "inline-block") {
+		if (lower == "block" || lower == "inline" || lower == "inline-block" ||
+			lower == "flex" || lower == "inline-flex") {
+			style.display = lower == "block" ? DisplayMode::Block :
+				lower == "inline" ? DisplayMode::Inline :
+				lower == "inline-block" ? DisplayMode::InlineBlock :
+				lower == "flex" ? DisplayMode::Flex : DisplayMode::InlineFlex;
 			style.displayNone = false;
 			return accept(CssProperty::Display);
 		}
 		++diag.unsupportedDeclarationCount;
 		return false;
 	}
+	if (prop == "flex-direction" || prop == "flex-wrap") {
+		const std::string lower = toLower(val);
+		if (prop == "flex-direction") {
+			if (lower == "row") style.flexDirection = FlexDirectionMode::Row;
+			else if (lower == "row-reverse") style.flexDirection = FlexDirectionMode::RowReverse;
+			else if (lower == "column") style.flexDirection = FlexDirectionMode::Column;
+			else if (lower == "column-reverse") style.flexDirection = FlexDirectionMode::ColumnReverse;
+			else {
+				++diag.unsupportedDeclarationCount;
+				++diag.flexUnsupportedDeclarations;
+				return false;
+			}
+			style.flexDirectionSpecified = true;
+		} else {
+			if (lower == "nowrap") style.flexWrap = FlexWrapMode::NoWrap;
+			else if (lower == "wrap") style.flexWrap = FlexWrapMode::Wrap;
+			else if (lower == "wrap-reverse") style.flexWrap = FlexWrapMode::WrapReverse;
+			else {
+				++diag.unsupportedDeclarationCount;
+				++diag.flexUnsupportedDeclarations;
+				return false;
+			}
+			style.flexWrapSpecified = true;
+		}
+		return accept(CssProperty::FlexAxes);
+	}
+	if (prop == "justify-content") {
+		const std::string lower = toLower(val);
+		if (lower == "flex-start" || lower == "start") style.justifyContent = JustifyContentMode::FlexStart;
+		else if (lower == "flex-end" || lower == "end") style.justifyContent = JustifyContentMode::FlexEnd;
+		else if (lower == "center") style.justifyContent = JustifyContentMode::Center;
+		else if (lower == "space-between") style.justifyContent = JustifyContentMode::SpaceBetween;
+		else if (lower == "space-around") style.justifyContent = JustifyContentMode::SpaceAround;
+		else if (lower == "space-evenly") style.justifyContent = JustifyContentMode::SpaceEvenly;
+		else {
+			++diag.unsupportedDeclarationCount;
+			++diag.flexUnsupportedDeclarations;
+			return false;
+		}
+		style.justifyContentSpecified = true;
+		return accept(CssProperty::JustifyContent);
+	}
+	if (prop == "align-content") {
+		const std::string lower = toLower(val);
+		if (lower == "normal" || lower == "stretch") style.alignContent = AlignContentMode::Stretch;
+		else if (lower == "flex-start" || lower == "start") style.alignContent = AlignContentMode::FlexStart;
+		else if (lower == "flex-end" || lower == "end") style.alignContent = AlignContentMode::FlexEnd;
+		else if (lower == "center") style.alignContent = AlignContentMode::Center;
+		else if (lower == "space-between") style.alignContent = AlignContentMode::SpaceBetween;
+		else if (lower == "space-around") style.alignContent = AlignContentMode::SpaceAround;
+		else {
+			++diag.unsupportedDeclarationCount;
+			++diag.flexUnsupportedDeclarations;
+			return false;
+		}
+		style.alignContentSpecified = true;
+		return accept(CssProperty::FlexAxes);
+	}
+	if (prop == "align-items") {
+		const std::string lower = toLower(val);
+		if (lower == "stretch") style.alignItems = AlignItemsMode::Stretch;
+		else if (lower == "flex-start" || lower == "start") style.alignItems = AlignItemsMode::FlexStart;
+		else if (lower == "flex-end" || lower == "end") style.alignItems = AlignItemsMode::FlexEnd;
+		else if (lower == "center") style.alignItems = AlignItemsMode::Center;
+		else if (lower == "baseline") style.alignItems = AlignItemsMode::Baseline;
+		else {
+			++diag.unsupportedDeclarationCount;
+			++diag.flexUnsupportedDeclarations;
+			return false;
+		}
+		style.alignItemsSpecified = true;
+		return accept(CssProperty::AlignItems);
+	}
+	if (prop == "align-self") {
+		const std::string lower = toLower(val);
+		if (lower == "auto") style.alignSelf = AlignSelfMode::Auto;
+		else if (lower == "stretch") style.alignSelf = AlignSelfMode::Stretch;
+		else if (lower == "flex-start" || lower == "start") style.alignSelf = AlignSelfMode::FlexStart;
+		else if (lower == "flex-end" || lower == "end") style.alignSelf = AlignSelfMode::FlexEnd;
+		else if (lower == "center") style.alignSelf = AlignSelfMode::Center;
+		else if (lower == "baseline") style.alignSelf = AlignSelfMode::Baseline;
+		else {
+			++diag.unsupportedDeclarationCount;
+			++diag.flexUnsupportedDeclarations;
+			return false;
+		}
+		style.alignSelfSpecified = true;
+		return accept(CssProperty::FlexItemPlacement);
+	}
+	if (prop == "order") {
+		if (!parseCssSignedInteger(val, style.order, diag)) {
+			++diag.unsupportedDeclarationCount;
+			++diag.flexUnsupportedDeclarations;
+			return false;
+		}
+		style.orderSpecified = true;
+		return accept(CssProperty::FlexItemPlacement);
+	}
+	if (prop == "flex-grow" || prop == "flex-shrink") {
+		int factor = 0;
+		if (!parseCssNonNegativeFactor(val, factor, diag)) {
+			++diag.unsupportedDeclarationCount;
+			++diag.flexUnsupportedDeclarations;
+			return false;
+		}
+		if (prop == "flex-grow") {
+			style.flexGrow1000 = factor;
+			style.flexGrowSpecified = true;
+		} else {
+			style.flexShrink1000 = factor;
+			style.flexShrinkSpecified = true;
+		}
+		return accept(CssProperty::FlexFactors);
+	}
+	if (prop == "flex-basis") {
+		if (!parseCssFlexBasisValue(val, style.flexBasisValue, diag)) {
+			++diag.unsupportedDeclarationCount;
+			++diag.flexUnsupportedDeclarations;
+			return false;
+		}
+		style.flexBasisSpecified = true;
+		return accept(CssProperty::FlexBasis);
+	}
+	if (prop == "gap" || prop == "row-gap" || prop == "column-gap") {
+		std::vector<std::string> tokens = splitCssTokens(toLower(val));
+		if (prop != "gap") tokens = { tokens.empty() ? std::string() : tokens.front() };
+		if (tokens.empty() || tokens.size() > 2) {
+			++diag.unsupportedDeclarationCount;
+			++diag.flexUnsupportedDeclarations;
+			return false;
+		}
+		CssLengthValue first;
+		if (!parseCssBoundedDimension(tokens[0], first, diag, false, false, true)) {
+			++diag.unsupportedDeclarationCount;
+			++diag.flexUnsupportedDeclarations;
+			return false;
+		}
+		CssLengthValue second = first;
+		if (tokens.size() == 2 && !parseCssBoundedDimension(tokens[1], second, diag, false, false, true)) {
+			++diag.unsupportedDeclarationCount;
+			++diag.flexUnsupportedDeclarations;
+			return false;
+		}
+		if (prop == "gap") {
+			style.gapValue = first;
+			style.rowGapValue = first;
+			style.columnGapValue = tokens.size() == 2 ? second : first;
+			style.gapSpecified = style.rowGapSpecified = style.columnGapSpecified = true;
+		} else if (prop == "row-gap") {
+			style.rowGapValue = first;
+			style.rowGapSpecified = true;
+		} else {
+			style.columnGapValue = first;
+			style.columnGapSpecified = true;
+		}
+		return accept(CssProperty::FlexGaps);
+	}
+	if (prop == "flex") {
+		const std::string lower = toLower(trim(val));
+		if (lower == "none") {
+			style.flexGrow1000 = 0; style.flexShrink1000 = 0;
+			style.flexBasisValue = CssLengthValue{};
+			style.flexBasisValue.type = CssLengthType::Auto;
+			style.flexBasisValue.valid = true;
+			style.flexGrowSpecified = style.flexShrinkSpecified = style.flexBasisSpecified = true;
+			return acceptMask(cssPropertyBit(CssProperty::FlexFactors) | cssPropertyBit(CssProperty::FlexBasis));
+		}
+		if (lower == "auto") {
+			style.flexGrow1000 = 1000; style.flexShrink1000 = 1000;
+			style.flexBasisValue = CssLengthValue{};
+			style.flexBasisValue.type = CssLengthType::Auto;
+			style.flexBasisValue.valid = true;
+			style.flexGrowSpecified = style.flexShrinkSpecified = style.flexBasisSpecified = true;
+			return acceptMask(cssPropertyBit(CssProperty::FlexFactors) | cssPropertyBit(CssProperty::FlexBasis));
+		}
+		if (lower == "initial") {
+			style.flexGrow1000 = 0; style.flexShrink1000 = 1000;
+			style.flexBasisValue = CssLengthValue{};
+			style.flexBasisValue.type = CssLengthType::Auto;
+			style.flexBasisValue.valid = true;
+			style.flexGrowSpecified = style.flexShrinkSpecified = style.flexBasisSpecified = true;
+			return acceptMask(cssPropertyBit(CssProperty::FlexFactors) | cssPropertyBit(CssProperty::FlexBasis));
+		}
+		const std::vector<std::string> tokens = splitCssTokens(lower);
+		if (tokens.empty() || tokens.size() > 3) {
+			++diag.unsupportedDeclarationCount; ++diag.flexUnsupportedDeclarations;
+			return false;
+		}
+		int firstFactor = 0;
+		if (!parseCssNonNegativeFactor(tokens[0], firstFactor, diag)) {
+			++diag.unsupportedDeclarationCount; ++diag.flexUnsupportedDeclarations;
+			return false;
+		}
+		style.flexGrow1000 = firstFactor;
+		style.flexGrowSpecified = true;
+		style.flexShrinkSpecified = false;
+		style.flexBasisSpecified = false;
+		if (tokens.size() == 1) {
+			style.flexShrink1000 = 1000;
+			style.flexBasisValue = CssLengthValue{};
+			style.flexBasisValue.type = CssLengthType::Zero;
+			style.flexBasisValue.valid = true;
+			style.flexShrinkSpecified = style.flexBasisSpecified = true;
+		} else {
+			int secondFactor = 0;
+			if (parseCssNonNegativeFactor(tokens[1], secondFactor, diag)) {
+				style.flexShrink1000 = secondFactor;
+				style.flexShrinkSpecified = true;
+				if (tokens.size() == 3 && !parseCssFlexBasisValue(tokens[2], style.flexBasisValue, diag)) {
+					++diag.unsupportedDeclarationCount; ++diag.flexUnsupportedDeclarations;
+					return false;
+				}
+				if (tokens.size() == 3) style.flexBasisSpecified = true;
+			} else if (tokens.size() == 2 && parseCssFlexBasisValue(tokens[1], style.flexBasisValue, diag)) {
+				style.flexShrink1000 = 1000;
+				style.flexShrinkSpecified = true;
+				style.flexBasisSpecified = true;
+			} else {
+				++diag.unsupportedDeclarationCount; ++diag.flexUnsupportedDeclarations;
+				return false;
+			}
+		}
+		return acceptMask(cssPropertyBit(CssProperty::FlexFactors) | cssPropertyBit(CssProperty::FlexBasis));
+	}
+	if (prop == "position") {
+		const std::string lower = toLower(val);
+		if (lower == "static") style.position = PositionMode::Static;
+		else if (lower == "relative") style.position = PositionMode::Relative;
+		else if (lower == "absolute") style.position = PositionMode::Absolute;
+		else if (lower == "fixed") style.position = PositionMode::Fixed;
+		else if (lower == "sticky") style.position = PositionMode::Sticky;
+		else {
+			++diag.unsupportedDeclarationCount;
+			return false;
+		}
+		return accept(CssProperty::Position);
+	}
+	if (prop == "top" || prop == "right" || prop == "bottom" || prop == "left") {
+		CssLengthValue parsed;
+		if (!parseCssPositionOffset(val, parsed, diag)) {
+			++diag.unsupportedDeclarationCount;
+			return false;
+		}
+		if (prop == "top") style.topValue = parsed;
+		else if (prop == "right") style.rightValue = parsed;
+		else if (prop == "bottom") style.bottomValue = parsed;
+		else style.leftValue = parsed;
+		return accept(prop == "top" ? CssProperty::Top : prop == "right" ? CssProperty::Right :
+			prop == "bottom" ? CssProperty::Bottom : CssProperty::Left);
+	}
+	if (prop == "z-index") {
+		if (!parseCssZIndexValue(val, style.zIndexAuto, style.zIndex, diag)) {
+			++diag.unsupportedDeclarationCount;
+			return false;
+		}
+		return accept(CssProperty::ZIndex);
+	}
+	if (prop == "float") {
+		const std::string lower = toLower(val);
+		if (lower == "none") style.floatMode = FloatMode::None;
+		else if (lower == "left") style.floatMode = FloatMode::Left;
+		else if (lower == "right") style.floatMode = FloatMode::Right;
+		else {
+			// Invalid and unsupported values do not win the cascade.  In
+			// particular, inline-start/inline-end are not physical aliases.
+			++diag.unsupportedDeclarationCount;
+			return false;
+		}
+		return accept(CssProperty::Float);
+	}
+	if (prop == "clear") {
+		const std::string lower = toLower(val);
+		if (lower == "none") style.clearMode = ClearMode::None;
+		else if (lower == "left") style.clearMode = ClearMode::Left;
+		else if (lower == "right") style.clearMode = ClearMode::Right;
+		else if (lower == "both") style.clearMode = ClearMode::Both;
+		else {
+			++diag.unsupportedDeclarationCount;
+			return false;
+		}
+		return accept(CssProperty::Clear);
+	}
+	if (prop == "box-sizing") {
+		const std::string lower = toLower(val);
+		if (lower == "content-box") {
+			style.boxSizing = BoxSizingMode::ContentBox;
+			style.boxSizingSpecified = true;
+			return accept(CssProperty::BoxSizing);
+		}
+		if (lower == "border-box") {
+			style.boxSizing = BoxSizingMode::BorderBox;
+			style.boxSizingSpecified = true;
+			return accept(CssProperty::BoxSizing);
+		}
+		++diag.unsupportedDeclarationCount;
+		return false;
+	}
+	if (prop == "overflow" || prop == "overflow-x" || prop == "overflow-y") {
+		const std::vector<std::string> tokens = splitCssTokens(toLower(val));
+		if (tokens.empty() || tokens.size() > (prop == "overflow" ? 2u : 1u)) {
+			++diag.unsupportedDeclarationCount;
+			return false;
+		}
+		auto parseOverflow = [](const std::string& token, OverflowMode& mode) {
+			if (token == "visible") mode = OverflowMode::Visible;
+			else if (token == "hidden") mode = OverflowMode::Hidden;
+			else if (token == "auto") mode = OverflowMode::Auto;
+			else if (token == "scroll") mode = OverflowMode::Scroll;
+			else return false;
+			return true;
+		};
+		OverflowMode first = OverflowMode::Visible;
+		OverflowMode second = OverflowMode::Visible;
+		if (!parseOverflow(tokens[0], first) || (tokens.size() == 2 && !parseOverflow(tokens[1], second))) {
+			++diag.unsupportedDeclarationCount;
+			return false;
+		}
+		if (prop == "overflow-x") {
+			style.overflowX = first;
+			return accept(CssProperty::OverflowX);
+		}
+		if (prop == "overflow-y") {
+			style.overflowY = first;
+			return accept(CssProperty::OverflowY);
+		}
+		style.overflowX = first;
+		style.overflowY = tokens.size() == 2 ? second : first;
+		return acceptMask(cssPropertyBit(CssProperty::OverflowX) | cssPropertyBit(CssProperty::OverflowY));
+	}
+	if (prop == "visibility") {
+		const std::string lower = toLower(val);
+		if (lower == "visible") {
+			style.visibility = VisibilityMode::Visible;
+			return accept(CssProperty::Visibility);
+		}
+		if (lower == "hidden") {
+			style.visibility = VisibilityMode::Hidden;
+			return accept(CssProperty::Visibility);
+		}
+		// collapse is deliberately unsupported; it is not a hidden alias.
+		++diag.unsupportedDeclarationCount;
+		return false;
+	}
+	if (prop == "opacity") {
+		int opacity = 100;
+		if (!parseCssOpacityValue(val, opacity, diag)) {
+			++diag.unsupportedDeclarationCount;
+			return false;
+		}
+		style.opacityPercent = opacity;
+		return accept(CssProperty::Opacity);
+	}
+	if (prop == "vertical-align") {
+		if (!parseCssVerticalAlignValue(val, style.verticalAlign, style.verticalAlignValue,
+			style.verticalAlignValueClamped, diag)) {
+			++diag.unsupportedDeclarationCount;
+			return false;
+		}
+		return accept(CssProperty::VerticalAlign);
+	}
 	if (prop == "margin-top" || prop == "margin-right" || prop == "margin-bottom" || prop == "margin-left" ||
 		prop == "padding-top" || prop == "padding-right" || prop == "padding-bottom" || prop == "padding-left") {
+		if (prop == "margin-top" || prop == "margin-right" || prop == "margin-bottom" || prop == "margin-left") {
+			CssLengthValue parsed;
+			if (!parseCssMarginValue(val, parsed, diag)) {
+				++diag.unsupportedDeclarationCount;
+				return false;
+			}
+			const int legacy = parsed.type == CssLengthType::Auto ? -2 :
+				(parsed.type == CssLengthType::Px || parsed.type == CssLengthType::Zero ? parsed.value : -1);
+			if (prop == "margin-top") { style.marginTopValue = parsed; style.marginTop = legacy; }
+			else if (prop == "margin-right") { style.marginRightValue = parsed; style.marginRight = legacy; }
+			else if (prop == "margin-bottom") { style.marginBottomValue = parsed; style.marginBottom = legacy; }
+			else { style.marginLeftValue = parsed; style.marginLeft = legacy; }
+			if (prop == "margin-top") return accept(CssProperty::MarginTop);
+			if (prop == "margin-right") return accept(CssProperty::MarginRight);
+			if (prop == "margin-bottom") return accept(CssProperty::MarginBottom);
+			return accept(CssProperty::MarginLeft);
+		}
 		bool autoValue = false;
 		int px = 0;
 		if (!parseCssLengthValue(val, 320, px, autoValue, true)) {
@@ -2574,78 +3366,117 @@ static bool parseInlineStyleDeclaration(WebStyle& style,
 		std::string lower = toLower(val);
 		if (lower == "normal") {
 			style.lineHeightNormal = true;
+			style.lineHeightMode = LineHeightMode::Normal;
+			style.lineHeightValue = 0;
 			style.lineHeight = -1;
+			return accept(CssProperty::LineHeight);
+		}
+		double numeric = 0.0;
+		// A unitless line-height is a multiplier, unlike a unitless length.
+		if (parseCssNumber(val, numeric)) {
+			if (!std::isfinite(numeric) || numeric < 0.0) {
+				++diag.unsupportedDeclarationCount;
+				return false;
+			}
+			int multiplier = roundCssNumber(numeric * 1000.0);
+			if (multiplier > kCssLiteMaxLineHeightPx * 1000) {
+				multiplier = kCssLiteMaxLineHeightPx * 1000;
+				++diag.clampedValueCount;
+			}
+			style.lineHeightNormal = false;
+			style.lineHeightMode = LineHeightMode::Unitless;
+			style.lineHeightValue = multiplier;
+			style.lineHeight = std::max(0, std::min(kCssLiteMaxLineHeightPx,
+				roundCssNumber(numeric * static_cast<double>(style.fontScaleOrSize > 0 ? style.fontScaleOrSize : 16))));
+			return accept(CssProperty::LineHeight);
+		}
+		std::string unitValue = lower;
+		bool percent = !unitValue.empty() && unitValue.back() == '%';
+		if (percent) unitValue.pop_back();
+		if (percent) {
+			if (!parseCssNumber(unitValue, numeric) || !std::isfinite(numeric) || numeric < 0.0) {
+				++diag.unsupportedDeclarationCount;
+				return false;
+			}
+			int percentage = roundCssNumber(numeric);
+			if (percentage > 600) {
+				percentage = 600;
+				++diag.clampedValueCount;
+			}
+			style.lineHeightNormal = false;
+			style.lineHeightMode = LineHeightMode::Percent;
+			style.lineHeightValue = percentage;
+			style.lineHeight = std::max(0, std::min(kCssLiteMaxLineHeightPx,
+				roundCssNumber((style.fontScaleOrSize > 0 ? style.fontScaleOrSize : 16) * numeric / 100.0)));
 			return accept(CssProperty::LineHeight);
 		}
 		bool autoValue = false;
 		int px = 0;
-		const int lineHeightBase = style.fontScaleOrSize > 0 ? style.fontScaleOrSize : 16;
-		double numeric = 0.0;
-		// A unitless line-height is a multiplier, unlike a unitless length.
-		if (parseCssNumber(val, numeric)) {
-			px = roundCssNumber(numeric * static_cast<double>(lineHeightBase));
-		} else if (!parseCssLengthValue(val, lineHeightBase, px, autoValue, true)) {
+		if (!parseCssLengthValue(lower, 16, px, autoValue, false)) {
 			++diag.unsupportedDeclarationCount;
 			return false;
 		}
-		if (autoValue) {
+		if (autoValue || px < 0) {
 			++diag.unsupportedDeclarationCount;
 			return false;
 		}
 		style.lineHeightNormal = false;
+		style.lineHeightMode = LineHeightMode::Px;
+		style.lineHeightValue = clampCssValue(diag, px, 0, kCssLiteMaxLineHeightPx);
 		style.lineHeight = clampCssValue(diag, px, 8, kCssLiteMaxLineHeightPx);
 		return accept(CssProperty::LineHeight);
 	}
-	if (prop == "width" || prop == "max-width" || prop == "height" || prop == "max-height") {
-		std::string lower = toLower(val);
-		bool autoValue = false;
-		int px = 0;
-		if (lower.size() > 1 && lower.back() == '%') {
-			double numeric = 0.0;
-			if (!parseCssNumber(lower.substr(0, lower.size() - 1), numeric)) {
-				++diag.unsupportedDeclarationCount;
-				return false;
-			}
-			int percent = roundCssNumber(numeric);
-			percent = clampCssValue(diag, percent, 1, 100);
-			if (prop == "width") style.widthPercent = percent;
-			else if (prop == "max-width") style.maxWidthPercent = percent;
-			else if (prop == "height") style.heightPercent = percent;
-			else style.maxHeightPercent = percent;
-			return accept(prop == "width" ? CssProperty::Width :
-				prop == "height" ? CssProperty::Height :
-				prop == "max-width" ? CssProperty::MaxWidth : CssProperty::MaxHeight);
-		}
-		if (!parseCssLengthValue(val, 320, px, autoValue, false)) {
+	if (prop == "width" || prop == "min-width" || prop == "max-width" ||
+		prop == "height" || prop == "min-height" || prop == "max-height") {
+		const bool isMax = prop == "max-width" || prop == "max-height";
+		CssLengthValue parsed;
+		if (!parseCssBoundedDimension(val, parsed, diag, !isMax && prop != "min-width" && prop != "min-height", isMax, true)) {
 			++diag.unsupportedDeclarationCount;
+			++diag.invalidLengthValueCount;
 			return false;
 		}
-		if (autoValue) {
-			if (prop == "width") {
-				style.widthPercent = -1;
-				style.width = 0;
-			} else if (prop == "max-width") {
-				style.maxWidthPercent = -1;
-				style.maxWidth = 0;
-			} else if (prop == "height") {
-				style.heightPercent = -1;
-				style.height = 0;
+		auto setLegacy = [&](int& px, int& percent, bool* none) {
+			px = -1;
+			percent = -1;
+			if (none) *none = false;
+			if (parsed.type == CssLengthType::Auto) {
+				px = 0;
+			} else if (parsed.type == CssLengthType::None) {
+				if (none) *none = true;
+			} else if (parsed.type == CssLengthType::Percent) {
+				percent = parsed.value;
 			} else {
-				style.maxHeightPercent = -1;
-				style.maxHeight = 0;
+				px = parsed.value;
 			}
-			return accept(prop == "width" ? CssProperty::Width :
-				prop == "height" ? CssProperty::Height :
-				prop == "max-width" ? CssProperty::MaxWidth : CssProperty::MaxHeight);
+		};
+		if (prop == "width") {
+			style.widthValue = parsed;
+			setLegacy(style.width, style.widthPercent, nullptr);
+			return accept(CssProperty::Width);
 		}
-		px = clampCssValue(diag, px, 1, kCssLiteMaxWidthPx);
-		if (prop == "width") style.width = px;
-		else if (prop == "max-width") style.maxWidth = px;
-		else if (prop == "height") style.height = px;
-		else style.maxHeight = px;
-		return accept(prop == "width" ? CssProperty::Width :
-			prop == "height" ? CssProperty::Height :
-			prop == "max-width" ? CssProperty::MaxWidth : CssProperty::MaxHeight);
+		if (prop == "min-width") {
+			style.minWidthValue = parsed;
+			setLegacy(style.minWidth, style.minWidthPercent, nullptr);
+			return accept(CssProperty::MinWidth);
+		}
+		if (prop == "max-width") {
+			style.maxWidthValue = parsed;
+			setLegacy(style.maxWidth, style.maxWidthPercent, &style.maxWidthNone);
+			return accept(CssProperty::MaxWidth);
+		}
+		if (prop == "height") {
+			style.heightValue = parsed;
+			setLegacy(style.height, style.heightPercent, nullptr);
+			return accept(CssProperty::Height);
+		}
+		if (prop == "min-height") {
+			style.minHeightValue = parsed;
+			setLegacy(style.minHeight, style.minHeightPercent, nullptr);
+			return accept(CssProperty::MinHeight);
+		}
+		style.maxHeightValue = parsed;
+		setLegacy(style.maxHeight, style.maxHeightPercent, &style.maxHeightNone);
+		return accept(CssProperty::MaxHeight);
 	}
 	if (prop == "white-space") {
 		std::string lower = toLower(val);
@@ -2663,6 +3494,14 @@ static bool parseInlineStyleDeclaration(WebStyle& style,
 		}
 		if (lower == "pre-wrap") {
 			style.whiteSpace = WhiteSpaceMode::PreWrap;
+			return accept(CssProperty::WhiteSpace);
+		}
+		if (lower == "nowrap") {
+			style.whiteSpace = WhiteSpaceMode::Nowrap;
+			return accept(CssProperty::WhiteSpace);
+		}
+		if (lower == "pre-line") {
+			style.whiteSpace = WhiteSpaceMode::PreLine;
 			return accept(CssProperty::WhiteSpace);
 		}
 		++diag.unsupportedDeclarationCount;
@@ -2704,19 +3543,24 @@ static bool parseInlineStyleDeclaration(WebStyle& style,
 	}
 	if (prop == "font-family") {
 		std::vector<std::string> families = splitCssCommaTokens(val);
-		bool sawGeneric = false;
+		bool sawUnknown = false;
 		for (const std::string& family : families) {
 			GenericFontFamily genericFamily = GenericFontFamily::Inherit;
 			if (parseGenericFontFamily(family, genericFamily)) {
+				if (genericFamily == GenericFontFamily::Unknown) {
+					sawUnknown = true;
+					continue;
+				}
 				style.genericFontFamily = genericFamily;
-				sawGeneric = true;
 				return accept(CssProperty::GenericFontFamily);
 			}
 		}
-		if (!sawGeneric) {
-			++diag.unsupportedDeclarationCount;
+		if (sawUnknown) {
+			style.genericFontFamily = GenericFontFamily::Unknown;
+			return accept(CssProperty::GenericFontFamily);
 		}
-		return sawGeneric;
+		++diag.unsupportedDeclarationCount;
+		return false;
 	}
 	if (prop == "list-style" || prop == "list-style-type") {
 		std::vector<std::string> tokens = splitCssTokens(val);
@@ -2944,6 +3788,9 @@ static bool parseInlineStyleDeclaration(WebStyle& style,
 		}
 		return accept(propertyId);
 	}
+	if (prop.rfind("flex-", 0) == 0 || prop == "align-content" || prop == "place-content" ||
+		prop == "place-items" || prop == "place-self")
+		++diag.flexUnsupportedDeclarations;
 	++diag.unsupportedDeclarationCount;
 	return false;
 }
@@ -2960,7 +3807,90 @@ static void applyStyleProperty(WebStyle& destination, const WebStyle& source, Cs
 		destination.underline = source.underline;
 		destination.lineThrough = source.lineThrough;
 		break;
-	case CssProperty::Display: destination.displayNone = source.displayNone; break;
+	case CssProperty::Display:
+		destination.display = source.display;
+		destination.displayNone = source.display == DisplayMode::None;
+		break;
+	case CssProperty::FlexAxes:
+		if (source.flexDirectionSpecified) {
+			destination.flexDirection = source.flexDirection;
+			destination.flexDirectionSpecified = true;
+		}
+		if (source.flexWrapSpecified) {
+			destination.flexWrap = source.flexWrap;
+			destination.flexWrapSpecified = true;
+		}
+		if (source.alignContentSpecified) {
+			destination.alignContent = source.alignContent;
+			destination.alignContentSpecified = true;
+		}
+		break;
+	case CssProperty::JustifyContent:
+		destination.justifyContent = source.justifyContent;
+		destination.justifyContentSpecified = source.justifyContentSpecified;
+		break;
+	case CssProperty::AlignItems:
+		destination.alignItems = source.alignItems;
+		destination.alignItemsSpecified = source.alignItemsSpecified;
+		break;
+	case CssProperty::FlexGaps:
+		if (source.gapSpecified) {
+			destination.gapValue = source.gapValue;
+			destination.gapSpecified = true;
+		}
+		if (source.rowGapSpecified) {
+			destination.rowGapValue = source.rowGapValue;
+			destination.rowGapSpecified = true;
+		}
+		if (source.columnGapSpecified) {
+			destination.columnGapValue = source.columnGapValue;
+			destination.columnGapSpecified = true;
+		}
+		break;
+	case CssProperty::FlexFactors:
+		if (source.flexGrowSpecified) {
+			destination.flexGrow1000 = source.flexGrow1000;
+			destination.flexGrowSpecified = true;
+		}
+		if (source.flexShrinkSpecified) {
+			destination.flexShrink1000 = source.flexShrink1000;
+			destination.flexShrinkSpecified = true;
+		}
+		break;
+	case CssProperty::FlexBasis:
+		destination.flexBasisValue = source.flexBasisValue;
+		destination.flexBasisSpecified = source.flexBasisSpecified;
+		break;
+	case CssProperty::FlexItemPlacement:
+		if (source.orderSpecified) {
+			destination.order = source.order;
+			destination.orderSpecified = true;
+		}
+		if (source.alignSelfSpecified) {
+			destination.alignSelf = source.alignSelf;
+			destination.alignSelfSpecified = true;
+		}
+		break;
+	case CssProperty::Position: destination.position = source.position; break;
+	case CssProperty::Top: destination.topValue = source.topValue; break;
+	case CssProperty::Right: destination.rightValue = source.rightValue; break;
+	case CssProperty::Bottom: destination.bottomValue = source.bottomValue; break;
+	case CssProperty::Left: destination.leftValue = source.leftValue; break;
+	case CssProperty::ZIndex:
+		destination.zIndexAuto = source.zIndexAuto;
+		destination.zIndex = source.zIndex;
+		break;
+	case CssProperty::Float: destination.floatMode = source.floatMode; break;
+	case CssProperty::Clear: destination.clearMode = source.clearMode; break;
+	case CssProperty::BoxSizing:
+		destination.boxSizing = source.boxSizing;
+		destination.boxSizingSpecified = source.boxSizingSpecified;
+		break;
+	case CssProperty::MinWidth:
+		destination.minWidthValue = source.minWidthValue;
+		destination.minWidth = source.minWidth;
+		destination.minWidthPercent = source.minWidthPercent;
+		break;
 	case CssProperty::ListStyle:
 		destination.listStyleNone = source.listStyleNone;
 		destination.listStyleType = source.listStyleType;
@@ -2972,21 +3902,57 @@ static void applyStyleProperty(WebStyle& destination, const WebStyle& source, Cs
 	case CssProperty::TextAlign: destination.textAlign = source.textAlign; break;
 	case CssProperty::LineHeight:
 		destination.lineHeightNormal = source.lineHeightNormal;
+		destination.lineHeightMode = source.lineHeightMode;
+		destination.lineHeightValue = source.lineHeightValue;
 		destination.lineHeight = source.lineHeight;
 		break;
-	case CssProperty::MarginTop: destination.marginTop = source.marginTop; break;
-	case CssProperty::MarginRight: destination.marginRight = source.marginRight; break;
-	case CssProperty::MarginBottom: destination.marginBottom = source.marginBottom; break;
-	case CssProperty::MarginLeft: destination.marginLeft = source.marginLeft; break;
+	case CssProperty::MarginTop: destination.marginTop = source.marginTop; destination.marginTopValue = source.marginTopValue; break;
+	case CssProperty::MarginRight: destination.marginRight = source.marginRight; destination.marginRightValue = source.marginRightValue; break;
+	case CssProperty::MarginBottom: destination.marginBottom = source.marginBottom; destination.marginBottomValue = source.marginBottomValue; break;
+	case CssProperty::MarginLeft: destination.marginLeft = source.marginLeft; destination.marginLeftValue = source.marginLeftValue; break;
 	case CssProperty::PaddingTop: destination.paddingTop = source.paddingTop; break;
 	case CssProperty::PaddingRight: destination.paddingRight = source.paddingRight; break;
 	case CssProperty::PaddingBottom: destination.paddingBottom = source.paddingBottom; break;
 	case CssProperty::PaddingLeft: destination.paddingLeft = source.paddingLeft; break;
 	case CssProperty::FontSize: destination.fontScaleOrSize = source.fontScaleOrSize; break;
-	case CssProperty::Width: destination.width = source.width; destination.widthPercent = source.widthPercent; break;
-	case CssProperty::Height: destination.height = source.height; destination.heightPercent = source.heightPercent; break;
-	case CssProperty::MaxWidth: destination.maxWidth = source.maxWidth; destination.maxWidthPercent = source.maxWidthPercent; break;
-	case CssProperty::MaxHeight: destination.maxHeight = source.maxHeight; destination.maxHeightPercent = source.maxHeightPercent; break;
+	case CssProperty::Width:
+		destination.widthValue = source.widthValue;
+		destination.width = source.width;
+		destination.widthPercent = source.widthPercent;
+		break;
+	case CssProperty::Height:
+		destination.heightValue = source.heightValue;
+		destination.height = source.height;
+		destination.heightPercent = source.heightPercent;
+		break;
+	case CssProperty::MaxWidth:
+		destination.maxWidthValue = source.maxWidthValue;
+		destination.maxWidth = source.maxWidth;
+		destination.maxWidthPercent = source.maxWidthPercent;
+		destination.maxWidthNone = source.maxWidthNone;
+		break;
+	case CssProperty::MaxHeight:
+		destination.maxHeightValue = source.maxHeightValue;
+		destination.maxHeight = source.maxHeight;
+		destination.maxHeightPercent = source.maxHeightPercent;
+		destination.maxHeightNone = source.maxHeightNone;
+		break;
+	case CssProperty::MinHeight:
+		destination.minHeightValue = source.minHeightValue;
+		destination.minHeight = source.minHeight;
+		destination.minHeightPercent = source.minHeightPercent;
+		break;
+	case CssProperty::OverflowX: destination.overflowX = source.overflowX; break;
+	case CssProperty::OverflowY: destination.overflowY = source.overflowY; break;
+	case CssProperty::Visibility: destination.visibility = source.visibility; break;
+	case CssProperty::Opacity:
+		destination.opacityPercent = source.opacityPercent;
+		break;
+	case CssProperty::VerticalAlign:
+		destination.verticalAlign = source.verticalAlign;
+		destination.verticalAlignValue = source.verticalAlignValue;
+		destination.verticalAlignValueClamped = source.verticalAlignValueClamped;
+		break;
 	case CssProperty::WhiteSpace: destination.whiteSpace = source.whiteSpace; break;
 	case CssProperty::OverflowWrap: destination.overflowWrap = source.overflowWrap; break;
 	case CssProperty::WordBreak: destination.wordBreak = source.wordBreak; break;
@@ -3121,8 +4087,8 @@ static void parseCssDeclarations(const std::string& body, WebStyle& style, CssDi
 			++declarationCount;
 			saturatingIncrement(diag.declarationsProcessed);
 			WebStyle parsed;
-			// Unitless line-height is relative to the font size established by
-			// an earlier declaration in this same bounded declaration list.
+			// Preserve the unitless multiplier so inheritance can resolve it
+			// against the inheriting element's font size during inline layout.
 			parsed.fontScaleOrSize = style.fontScaleOrSize;
 			parseInlineStyleDeclaration(parsed, decl.substr(0, colon), decl.substr(colon + 1), diag);
 			mergeParsedDeclaration(style, parsed);
@@ -3149,7 +4115,101 @@ static WebStyle mergeStyles(const WebStyle& baseStyle, const WebStyle& overrideS
 		merged.underline = overrideStyle.underline;
 		merged.lineThrough = overrideStyle.lineThrough;
 	}
-	merged.displayNone = overrideStyle.displayNone ? true : merged.displayNone;
+	if ((overrideStyle.specifiedProperties & cssPropertyBit(CssProperty::Display)) != 0) {
+		merged.display = overrideStyle.display;
+		merged.displayNone = overrideStyle.display == DisplayMode::None;
+	}
+	if ((overrideStyle.specifiedProperties & cssPropertyBit(CssProperty::FlexAxes)) != 0) {
+		if (overrideStyle.flexDirectionSpecified) {
+			merged.flexDirection = overrideStyle.flexDirection;
+			merged.flexDirectionSpecified = true;
+		}
+		if (overrideStyle.flexWrapSpecified) {
+			merged.flexWrap = overrideStyle.flexWrap;
+			merged.flexWrapSpecified = true;
+		}
+		if (overrideStyle.alignContentSpecified) {
+			merged.alignContent = overrideStyle.alignContent;
+			merged.alignContentSpecified = true;
+		}
+	}
+	if ((overrideStyle.specifiedProperties & cssPropertyBit(CssProperty::JustifyContent)) != 0) {
+		merged.justifyContent = overrideStyle.justifyContent;
+		merged.justifyContentSpecified = overrideStyle.justifyContentSpecified;
+	}
+	if ((overrideStyle.specifiedProperties & cssPropertyBit(CssProperty::AlignItems)) != 0) {
+		merged.alignItems = overrideStyle.alignItems;
+		merged.alignItemsSpecified = overrideStyle.alignItemsSpecified;
+	}
+	if ((overrideStyle.specifiedProperties & cssPropertyBit(CssProperty::FlexGaps)) != 0) {
+		if (overrideStyle.gapSpecified) {
+			merged.gapValue = overrideStyle.gapValue;
+			merged.gapSpecified = true;
+		}
+		if (overrideStyle.rowGapSpecified) {
+			merged.rowGapValue = overrideStyle.rowGapValue;
+			merged.rowGapSpecified = true;
+		}
+		if (overrideStyle.columnGapSpecified) {
+			merged.columnGapValue = overrideStyle.columnGapValue;
+			merged.columnGapSpecified = true;
+		}
+	}
+	if ((overrideStyle.specifiedProperties & cssPropertyBit(CssProperty::FlexFactors)) != 0) {
+		if (overrideStyle.flexGrowSpecified) {
+			merged.flexGrow1000 = overrideStyle.flexGrow1000;
+			merged.flexGrowSpecified = true;
+		}
+		if (overrideStyle.flexShrinkSpecified) {
+			merged.flexShrink1000 = overrideStyle.flexShrink1000;
+			merged.flexShrinkSpecified = true;
+		}
+	}
+	if ((overrideStyle.specifiedProperties & cssPropertyBit(CssProperty::FlexBasis)) != 0) {
+		merged.flexBasisValue = overrideStyle.flexBasisValue;
+		merged.flexBasisSpecified = overrideStyle.flexBasisSpecified;
+	}
+	if ((overrideStyle.specifiedProperties & cssPropertyBit(CssProperty::FlexItemPlacement)) != 0) {
+		if (overrideStyle.orderSpecified) {
+			merged.order = overrideStyle.order;
+			merged.orderSpecified = true;
+		}
+		if (overrideStyle.alignSelfSpecified) {
+			merged.alignSelf = overrideStyle.alignSelf;
+			merged.alignSelfSpecified = true;
+		}
+	}
+	if ((overrideStyle.specifiedProperties & cssPropertyBit(CssProperty::Position)) != 0)
+		merged.position = overrideStyle.position;
+	if ((overrideStyle.specifiedProperties & cssPropertyBit(CssProperty::Top)) != 0)
+		merged.topValue = overrideStyle.topValue;
+	if ((overrideStyle.specifiedProperties & cssPropertyBit(CssProperty::Right)) != 0)
+		merged.rightValue = overrideStyle.rightValue;
+	if ((overrideStyle.specifiedProperties & cssPropertyBit(CssProperty::Bottom)) != 0)
+		merged.bottomValue = overrideStyle.bottomValue;
+	if ((overrideStyle.specifiedProperties & cssPropertyBit(CssProperty::Left)) != 0)
+		merged.leftValue = overrideStyle.leftValue;
+	if ((overrideStyle.specifiedProperties & cssPropertyBit(CssProperty::ZIndex)) != 0) {
+		merged.zIndexAuto = overrideStyle.zIndexAuto;
+		merged.zIndex = overrideStyle.zIndex;
+	}
+	if ((overrideStyle.specifiedProperties & cssPropertyBit(CssProperty::BoxSizing)) != 0)
+		merged.boxSizing = overrideStyle.boxSizing;
+	if ((overrideStyle.specifiedProperties & cssPropertyBit(CssProperty::BoxSizing)) != 0)
+		merged.boxSizingSpecified = overrideStyle.boxSizingSpecified;
+	if ((overrideStyle.specifiedProperties & cssPropertyBit(CssProperty::OverflowX)) != 0)
+		merged.overflowX = overrideStyle.overflowX;
+	if ((overrideStyle.specifiedProperties & cssPropertyBit(CssProperty::OverflowY)) != 0)
+		merged.overflowY = overrideStyle.overflowY;
+	if ((overrideStyle.specifiedProperties & cssPropertyBit(CssProperty::Visibility)) != 0)
+		merged.visibility = overrideStyle.visibility;
+	if ((overrideStyle.specifiedProperties & cssPropertyBit(CssProperty::Opacity)) != 0)
+		merged.opacityPercent = overrideStyle.opacityPercent;
+	if ((overrideStyle.specifiedProperties & cssPropertyBit(CssProperty::VerticalAlign)) != 0) {
+		merged.verticalAlign = overrideStyle.verticalAlign;
+		merged.verticalAlignValue = overrideStyle.verticalAlignValue;
+		merged.verticalAlignValueClamped = overrideStyle.verticalAlignValueClamped;
+	}
 	merged.listStyleNone = overrideStyle.listStyleNone ? true : merged.listStyleNone;
 	if (overrideStyle.listStyleType != ListStyleType::Inherit) {
 		merged.listStyleType = overrideStyle.listStyleType;
@@ -3170,17 +4230,26 @@ static WebStyle mergeStyles(const WebStyle& baseStyle, const WebStyle& overrideS
 	if (overrideStyle.textAlign != TextAlign::Inherit) {
 		merged.textAlign = overrideStyle.textAlign;
 	}
-	if (overrideStyle.lineHeightNormal) {
+	if ((overrideStyle.specifiedProperties & cssPropertyBit(CssProperty::LineHeight)) != 0 &&
+		overrideStyle.lineHeightNormal) {
 		merged.lineHeightNormal = true;
+		merged.lineHeightMode = LineHeightMode::Normal;
+		merged.lineHeightValue = 0;
 		merged.lineHeight = -1;
-	} else if (overrideStyle.lineHeight > 0) {
+	} else if ((overrideStyle.specifiedProperties & cssPropertyBit(CssProperty::LineHeight)) != 0) {
 		merged.lineHeightNormal = false;
+		merged.lineHeightMode = overrideStyle.lineHeightMode;
+		merged.lineHeightValue = overrideStyle.lineHeightValue;
 		merged.lineHeight = overrideStyle.lineHeight;
 	}
 	merged.marginTop = overrideStyle.marginTop != -1 ? overrideStyle.marginTop : merged.marginTop;
+	if (overrideStyle.marginTopValue.valid) merged.marginTopValue = overrideStyle.marginTopValue;
 	merged.marginRight = overrideStyle.marginRight != -1 ? overrideStyle.marginRight : merged.marginRight;
+	if (overrideStyle.marginRightValue.valid) merged.marginRightValue = overrideStyle.marginRightValue;
 	merged.marginBottom = overrideStyle.marginBottom != -1 ? overrideStyle.marginBottom : merged.marginBottom;
+	if (overrideStyle.marginBottomValue.valid) merged.marginBottomValue = overrideStyle.marginBottomValue;
 	merged.marginLeft = overrideStyle.marginLeft != -1 ? overrideStyle.marginLeft : merged.marginLeft;
+	if (overrideStyle.marginLeftValue.valid) merged.marginLeftValue = overrideStyle.marginLeftValue;
 	merged.padding = overrideStyle.padding != -1 ? overrideStyle.padding : merged.padding;
 	merged.paddingTop = overrideStyle.paddingTop != -1 ? overrideStyle.paddingTop : merged.paddingTop;
 	merged.paddingRight = overrideStyle.paddingRight != -1 ? overrideStyle.paddingRight : merged.paddingRight;
@@ -3189,12 +4258,28 @@ static WebStyle mergeStyles(const WebStyle& baseStyle, const WebStyle& overrideS
 	merged.fontScaleOrSize = overrideStyle.fontScaleOrSize > 0 ? overrideStyle.fontScaleOrSize : merged.fontScaleOrSize;
 	merged.width = overrideStyle.width != -1 ? overrideStyle.width : merged.width;
 	merged.widthPercent = overrideStyle.widthPercent != -1 ? overrideStyle.widthPercent : merged.widthPercent;
+	if (overrideStyle.widthValue.valid) merged.widthValue = overrideStyle.widthValue;
 	merged.height = overrideStyle.height != -1 ? overrideStyle.height : merged.height;
 	merged.heightPercent = overrideStyle.heightPercent != -1 ? overrideStyle.heightPercent : merged.heightPercent;
+	if (overrideStyle.heightValue.valid) merged.heightValue = overrideStyle.heightValue;
+	merged.minWidth = overrideStyle.minWidth != -1 ? overrideStyle.minWidth : merged.minWidth;
+	merged.minWidthPercent = overrideStyle.minWidthPercent != -1 ? overrideStyle.minWidthPercent : merged.minWidthPercent;
+	if (overrideStyle.minWidthValue.valid) merged.minWidthValue = overrideStyle.minWidthValue;
 	merged.maxWidth = overrideStyle.maxWidth != -1 ? overrideStyle.maxWidth : merged.maxWidth;
 	merged.maxWidthPercent = overrideStyle.maxWidthPercent != -1 ? overrideStyle.maxWidthPercent : merged.maxWidthPercent;
+	if ((overrideStyle.specifiedProperties & cssPropertyBit(CssProperty::MaxWidth)) != 0) {
+		merged.maxWidthNone = overrideStyle.maxWidthNone;
+	}
+	if (overrideStyle.maxWidthValue.valid) merged.maxWidthValue = overrideStyle.maxWidthValue;
+	merged.minHeight = overrideStyle.minHeight != -1 ? overrideStyle.minHeight : merged.minHeight;
+	merged.minHeightPercent = overrideStyle.minHeightPercent != -1 ? overrideStyle.minHeightPercent : merged.minHeightPercent;
+	if (overrideStyle.minHeightValue.valid) merged.minHeightValue = overrideStyle.minHeightValue;
 	merged.maxHeight = overrideStyle.maxHeight != -1 ? overrideStyle.maxHeight : merged.maxHeight;
 	merged.maxHeightPercent = overrideStyle.maxHeightPercent != -1 ? overrideStyle.maxHeightPercent : merged.maxHeightPercent;
+	if ((overrideStyle.specifiedProperties & cssPropertyBit(CssProperty::MaxHeight)) != 0) {
+		merged.maxHeightNone = overrideStyle.maxHeightNone;
+	}
+	if (overrideStyle.maxHeightValue.valid) merged.maxHeightValue = overrideStyle.maxHeightValue;
 	if (overrideStyle.whiteSpace != WhiteSpaceMode::Inherit) {
 		merged.whiteSpace = overrideStyle.whiteSpace;
 	}
@@ -3234,6 +4319,16 @@ static WebStyle mergeStyles(const WebStyle& baseStyle, const WebStyle& overrideS
 static WebStyle defaultStyleForTag(const std::string& tagName)
 {
 	WebStyle style;
+	style.display = DisplayMode::Block;
+	if (tagName == "a" || tagName == "span" || tagName == "strong" || tagName == "b" ||
+		tagName == "em" || tagName == "i" || tagName == "small" || tagName == "kbd" ||
+		tagName == "samp" || tagName == "cite" || tagName == "q" || tagName == "code" ||
+		tagName == "img" || tagName == "input" || tagName == "textarea" || tagName == "select") {
+		style.display = DisplayMode::Inline;
+	}
+	if (tagName == "pre" || tagName == "code") {
+		style.genericFontFamily = GenericFontFamily::Monospace;
+	}
 	if (tagName == "body") {
 		style.hasColor = true;
 		style.color = 0xFF303846u;
@@ -3486,18 +4581,23 @@ static void markDefaultStyleProperties(WebStyle& style)
 	if (style.bold) style.specifiedProperties |= cssPropertyBit(CssProperty::Bold);
 	if (style.italic) style.specifiedProperties |= cssPropertyBit(CssProperty::Italic);
 	if (style.hasTextDecoration) style.specifiedProperties |= cssPropertyBit(CssProperty::TextDecoration);
-	if (style.displayNone) style.specifiedProperties |= cssPropertyBit(CssProperty::Display);
+	if (style.display == DisplayMode::None) style.specifiedProperties |= cssPropertyBit(CssProperty::Display);
 	if (style.listStyleNone || style.listStyleType != ListStyleType::Inherit) style.specifiedProperties |= cssPropertyBit(CssProperty::ListStyle);
 	if (style.borderCollapse != TableBorderCollapseMode::Inherit) style.specifiedProperties |= cssPropertyBit(CssProperty::BorderCollapse);
 	if (style.borderSpacingHorizontal != -1) style.specifiedProperties |= cssPropertyBit(CssProperty::BorderSpacingHorizontal);
 	if (style.borderSpacingVertical != -1) style.specifiedProperties |= cssPropertyBit(CssProperty::BorderSpacingVertical);
 	if (style.genericFontFamily != GenericFontFamily::Inherit) style.specifiedProperties |= cssPropertyBit(CssProperty::GenericFontFamily);
 	if (style.textAlign != TextAlign::Inherit) style.specifiedProperties |= cssPropertyBit(CssProperty::TextAlign);
-	if (style.lineHeightNormal || style.lineHeight > 0) style.specifiedProperties |= cssPropertyBit(CssProperty::LineHeight);
+	if (style.lineHeightNormal || style.lineHeight > 0 || style.lineHeightValue > 0)
+		style.specifiedProperties |= cssPropertyBit(CssProperty::LineHeight);
 	if (style.marginTop != -1) style.specifiedProperties |= cssPropertyBit(CssProperty::MarginTop);
+	if (style.marginTopValue.valid) style.specifiedProperties |= cssPropertyBit(CssProperty::MarginTop);
 	if (style.marginRight != -1) style.specifiedProperties |= cssPropertyBit(CssProperty::MarginRight);
+	if (style.marginRightValue.valid) style.specifiedProperties |= cssPropertyBit(CssProperty::MarginRight);
 	if (style.marginBottom != -1) style.specifiedProperties |= cssPropertyBit(CssProperty::MarginBottom);
+	if (style.marginBottomValue.valid) style.specifiedProperties |= cssPropertyBit(CssProperty::MarginBottom);
 	if (style.marginLeft != -1) style.specifiedProperties |= cssPropertyBit(CssProperty::MarginLeft);
+	if (style.marginLeftValue.valid) style.specifiedProperties |= cssPropertyBit(CssProperty::MarginLeft);
 	if (style.padding != -1) style.specifiedProperties |= cssPropertyMask(CssProperty::PaddingTop, CssProperty::PaddingLeft);
 	if (style.paddingTop != -1) style.specifiedProperties |= cssPropertyBit(CssProperty::PaddingTop);
 	if (style.paddingRight != -1) style.specifiedProperties |= cssPropertyBit(CssProperty::PaddingRight);
@@ -3659,7 +4759,7 @@ static void applyInheritedProperties(WebStyle& style, const WebStyle& parent, Cs
 		CssProperty::Color, CssProperty::Bold, CssProperty::Italic,
 		CssProperty::GenericFontFamily, CssProperty::FontSize, CssProperty::LineHeight,
 		CssProperty::TextAlign, CssProperty::WhiteSpace, CssProperty::OverflowWrap,
-		CssProperty::WordBreak,
+		CssProperty::WordBreak, CssProperty::Visibility,
 	};
 	for (CssProperty property : inherited) {
 		const uint64_t bit = cssPropertyBit(property);
@@ -3709,6 +4809,31 @@ static uint32_t formRadioGroupEvidenceHash(const HtmlElementRef& element)
 	return hash;
 }
 
+static const char* cssLengthTypeName(CssLengthType type)
+{
+	switch (type) {
+	case CssLengthType::Auto: return "auto";
+	case CssLengthType::Px: return "px";
+	case CssLengthType::Percent: return "percent";
+	case CssLengthType::Zero: return "zero";
+	case CssLengthType::None: return "none";
+	case CssLengthType::Content: return "content";
+	default: return "unset";
+	}
+}
+
+static std::string cssLengthEvidence(const CssLengthValue& value)
+{
+	std::ostringstream oss;
+	oss << cssLengthTypeName(value.type);
+	if (value.type == CssLengthType::Px || value.type == CssLengthType::Percent ||
+		value.type == CssLengthType::Zero) {
+		oss << ":" << value.value;
+	}
+	if (value.clamped) oss << ":clamped";
+	return oss.str();
+}
+
 static const char* formFocusOriginName(FormFocusOrigin origin)
 {
 	switch (origin) {
@@ -3732,7 +4857,13 @@ static void appendComputedStyleEvidence(WebDocument& doc,
 		id.rfind("phase2e-", 0) != 0 && id.rfind("css2e-", 0) != 0 &&
 		id.rfind("phase2f-", 0) != 0 && id.rfind("css2f-", 0) != 0 &&
 		id.rfind("phase2g-", 0) != 0 && id.rfind("css2g-", 0) != 0 &&
-		id.rfind("phase2h-", 0) != 0 && id.rfind("css2h-", 0) != 0) return;
+		id.rfind("phase2h-", 0) != 0 && id.rfind("css2h-", 0) != 0 &&
+		id.rfind("phase3a-", 0) != 0 && id.rfind("css3a-", 0) != 0 &&
+		id.rfind("phase3e-", 0) != 0 && id.rfind("css3e-", 0) != 0 &&
+		id.rfind("phase3g-", 0) != 0 && id.rfind("css3g-", 0) != 0) return;
+	const bool phase3aEvidence = id.rfind("phase3a-", 0) == 0 || id.rfind("css3a-", 0) == 0;
+	const bool phase3eEvidence = id.rfind("phase3e-", 0) == 0 || id.rfind("css3e-", 0) == 0;
+	const bool phase3gEvidence = id.rfind("phase3g-", 0) == 0 || id.rfind("css3g-", 0) == 0;
 	const bool phase2gEvidence = id.rfind("phase2g-", 0) == 0 || id.rfind("css2g-", 0) == 0;
 	const bool phase2hEvidence = id.rfind("phase2h-", 0) == 0 || id.rfind("css2h-", 0) == 0;
 	if (std::find(doc.cssDiagnostics.computedStyleEvidenceSerials.begin(),
@@ -3821,6 +4952,60 @@ static void appendComputedStyleEvidence(WebDocument& doc,
 		<< ",runtime-checked=" << (runtime ? (runtime->checked ? "yes" : "no") : "absent")
 		<< ",runtime-activation-count=" << (runtime ? runtime->activationCount : 0)
 		<< ",runtime-metadata-valid=" << (runtime ? (runtime->metadataValid ? "yes" : "no") : "no");
+	if (phase3aEvidence) {
+		oss << ",box-sizing=" << (style.boxSizing == BoxSizingMode::BorderBox ? "border-box" : "content-box")
+			<< ",width-specified=" << cssLengthEvidence(style.widthValue)
+			<< ",height-specified=" << cssLengthEvidence(style.heightValue)
+			<< ",min-width-specified=" << cssLengthEvidence(style.minWidthValue)
+			<< ",max-width-specified=" << cssLengthEvidence(style.maxWidthValue)
+			<< ",min-height-specified=" << cssLengthEvidence(style.minHeightValue)
+			<< ",max-height-specified=" << cssLengthEvidence(style.maxHeightValue)
+			<< ",overflow-x=" << static_cast<unsigned>(style.overflowX)
+			<< ",overflow-y=" << static_cast<unsigned>(style.overflowY)
+			<< ",visibility=" << (style.visibility == VisibilityMode::Hidden ? "hidden" : "visible")
+			<< ",opacity-percent=" << style.opacityPercent
+			<< ",effective-opacity-percent=" << style.effectiveOpacityPercent
+			<< ",vertical-align=" << static_cast<unsigned>(style.verticalAlign)
+			<< ",vertical-align-value=" << style.verticalAlignValue;
+	}
+	if (phase3eEvidence) {
+		const CssCascadeWinner& floatWinner = winners[static_cast<size_t>(CssProperty::Float)];
+		const CssCascadeWinner& clearWinner = winners[static_cast<size_t>(CssProperty::Clear)];
+		oss << ",float=" << (style.floatMode == FloatMode::Left ? "left" :
+			style.floatMode == FloatMode::Right ? "right" : "none")
+			<< ",clear=" << (style.clearMode == ClearMode::Left ? "left" :
+			style.clearMode == ClearMode::Right ? "right" :
+			style.clearMode == ClearMode::Both ? "both" : "none")
+			<< ",float-specificity=" << floatWinner.specificity.idCount << "." << floatWinner.specificity.classCount << "." << floatWinner.specificity.elementCount
+			<< ",float-source-order=" << floatWinner.sourceOrder
+			<< ",float-important=" << (floatWinner.important ? "yes" : "no")
+			<< ",clear-specificity=" << clearWinner.specificity.idCount << "." << clearWinner.specificity.classCount << "." << clearWinner.specificity.elementCount
+			<< ",clear-source-order=" << clearWinner.sourceOrder
+			<< ",clear-important=" << (clearWinner.important ? "yes" : "no");
+	}
+	if (phase3gEvidence) {
+		const CssCascadeWinner& positionWinner = winners[static_cast<size_t>(CssProperty::Position)];
+		const CssCascadeWinner& topWinner = winners[static_cast<size_t>(CssProperty::Top)];
+		const CssCascadeWinner& leftWinner = winners[static_cast<size_t>(CssProperty::Left)];
+		const CssCascadeWinner& zIndexWinner = winners[static_cast<size_t>(CssProperty::ZIndex)];
+		auto positionName = [](PositionMode mode) {
+			return mode == PositionMode::Relative ? "relative" :
+				mode == PositionMode::Absolute ? "absolute" :
+				mode == PositionMode::Fixed ? "fixed" :
+				mode == PositionMode::Sticky ? "sticky" : "static";
+		};
+		oss << ",position=" << positionName(style.position)
+			<< ",top-specified=" << cssLengthEvidence(style.topValue)
+			<< ",right-specified=" << cssLengthEvidence(style.rightValue)
+			<< ",bottom-specified=" << cssLengthEvidence(style.bottomValue)
+			<< ",left-specified=" << cssLengthEvidence(style.leftValue)
+			<< ",z-index=" << (style.zIndexAuto ? "auto" : std::to_string(style.zIndex))
+			<< ",position-source-order=" << positionWinner.sourceOrder
+			<< ",position-important=" << (positionWinner.important ? "yes" : "no")
+			<< ",top-source-order=" << topWinner.sourceOrder
+			<< ",left-source-order=" << leftWinner.sourceOrder
+			<< ",z-index-source-order=" << zIndexWinner.sourceOrder;
+	}
 	if (phase2gEvidence || phase2hEvidence) {
 		oss << ",document-generation=" << doc.formRuntimeState.documentGeneration
 			<< ",focusable=" << (focusable ? "yes" : "no")
@@ -3891,6 +5076,10 @@ static WebStyle computePathStyle(WebDocument& doc,
 		parent = computePathStyle(doc, parentPath, cache);
 		applyInheritedProperties(style, parent, doc.cssDiagnostics);
 	}
+	const int parentOpacity = hasParent ? parent.effectiveOpacityPercent : 100;
+	const int localOpacity = std::max(0, std::min(100, style.opacityPercent));
+	style.effectiveOpacityPercent = std::max(0, std::min(100,
+		(parentOpacity * localOpacity + 50) / 100));
 
 	for (const WebStyleRule& rule : doc.styleRules) {
 		CssSelectorMatchTrace matchTrace;
@@ -3969,7 +5158,12 @@ static WebStyle computePathStyle(WebDocument& doc,
 			if (candidate.important) saturatingIncrement(doc.cssDiagnostics.importantDeclarationsApplied);
 		}
 	}
-	if (hasParent && parent.displayNone) style.displayNone = true;
+	style.effectiveOpacityPercent = std::max(0, std::min(100,
+		(parentOpacity * std::max(0, std::min(100, style.opacityPercent)) + 50) / 100));
+	if (hasParent && parent.displayNone) {
+		style.displayNone = true;
+		style.display = DisplayMode::None;
+	}
 	appendComputedStyleEvidence(doc, path.back(), style, winners);
 
 	cache.emplace(key, style);
@@ -3979,6 +5173,7 @@ static WebStyle computePathStyle(WebDocument& doc,
 static void applyDocumentStyles(WebDocument& doc)
 {
 	doc.cssDiagnostics.cssEnabled = true;
+	doc.computedStyles.clear();
 	std::unordered_map<std::string, WebStyle> cache;
 	for (FormContainerMetadata& container : doc.formContainers) {
 		std::vector<HtmlElementRef> path;
@@ -4041,10 +5236,18 @@ static void applyDocumentStyles(WebDocument& doc)
 				if (block.style.width == -1 && block.style.widthPercent == -1) {
 					block.style.width = ancestorStyle.width;
 					block.style.widthPercent = ancestorStyle.widthPercent;
+					block.style.widthValue = ancestorStyle.widthValue;
 				}
+				if (block.style.minWidth == -1 && block.style.minWidthPercent == -1)
+					block.style.minWidthValue = ancestorStyle.minWidthValue;
 				if (block.style.maxWidth == -1 && block.style.maxWidthPercent == -1) {
 					block.style.maxWidth = ancestorStyle.maxWidth;
 					block.style.maxWidthPercent = ancestorStyle.maxWidthPercent;
+					block.style.maxWidthNone = ancestorStyle.maxWidthNone;
+					block.style.maxWidthValue = ancestorStyle.maxWidthValue;
+				}
+				if (!block.style.boxSizingSpecified) {
+					block.style.boxSizing = ancestorStyle.boxSizing;
 				}
 				if (block.style.marginLeft == -1) block.style.marginLeft = ancestorStyle.marginLeft;
 				if (block.style.marginRight == -1) block.style.marginRight = ancestorStyle.marginRight;
@@ -4078,6 +5281,156 @@ static void applyDocumentStyles(WebDocument& doc)
 				block.style.borderLeftColor = ancestorStyle.borderLeftColor;
 			}
 		}
+	}
+
+	// Normalize the bounded display representation and establish ownership for
+	// inline-block content after cascade has resolved.  The parser emits close
+	// markers in source order; this pass either removes those markers or turns
+	// them into atomic formatting-context entries.  Descendant blocks carry only
+	// the nearest serial, never a retained child tree.
+	std::vector<uint64_t> inlineBlockSerials;
+	inlineBlockSerials.reserve(std::min<size_t>(doc.structuralElements.size(), 256));
+	for (const HtmlElementRef& element : doc.structuralElements) {
+		if (element.serial == 0 || inlineBlockSerials.size() >= 256) break;
+		std::vector<HtmlElementRef> path;
+		if (!buildStructuralPath(doc, element.serial, path)) continue;
+		const WebStyle style = computePathStyle(doc, path, cache);
+		if (style.display == DisplayMode::InlineBlock && !style.displayNone)
+			inlineBlockSerials.push_back(element.serial);
+	}
+	auto isInlineBlockSerial = [&](uint64_t serial) {
+		return serial != 0 && std::find(inlineBlockSerials.begin(), inlineBlockSerials.end(), serial) != inlineBlockSerials.end();
+	};
+	auto parentSerialFor = [&](uint64_t serial) {
+		for (const HtmlElementRef& element : doc.structuralElements)
+			if (element.serial == serial) return element.parentSerial;
+		return uint64_t(0);
+	};
+	auto nearestInlineBlock = [&](uint64_t serial, bool includeSelf) {
+		uint64_t current = serial;
+		if (!includeSelf) current = parentSerialFor(current);
+		for (int depth = 0; current != 0 && depth < 16; ++depth) {
+			if (isInlineBlockSerial(current)) return current;
+			current = parentSerialFor(current);
+		}
+		return uint64_t(0);
+	};
+	auto serialWithin = [&](uint64_t serial, uint64_t ancestor) {
+		uint64_t current = serial;
+		for (int depth = 0; current != 0 && depth < 16; ++depth) {
+			if (current == ancestor) return true;
+			current = parentSerialFor(current);
+		}
+		return false;
+	};
+	// Absolutely or fixed-positioned inline-level owners are promoted into the bounded
+	// block stream.  Their inline items are removed from the surrounding line
+	// flow so the out-of-flow box cannot leave a phantom gap or paint as a
+	// free-floating glyph run. Fixed remains viewport-positioned after promotion.
+	std::vector<uint64_t> positionedInlineOutOfFlowSerials;
+	positionedInlineOutOfFlowSerials.reserve(32);
+	for (const HtmlElementRef& element : doc.structuralElements) {
+		if (element.serial == 0 || positionedInlineOutOfFlowSerials.size() >= 256) break;
+		std::vector<HtmlElementRef> path;
+		if (!buildStructuralPath(doc, element.serial, path)) continue;
+		const WebStyle style = computePathStyle(doc, path, cache);
+		if ((style.position == PositionMode::Absolute || style.position == PositionMode::Fixed) &&
+			style.display == DisplayMode::Inline && !style.displayNone)
+			positionedInlineOutOfFlowSerials.push_back(element.serial);
+	}
+	for (uint64_t serial : positionedInlineOutOfFlowSerials) {
+		const HtmlElementRef* element = nullptr;
+		for (const HtmlElementRef& candidate : doc.structuralElements)
+			if (candidate.serial == serial) { element = &candidate; break; }
+		if (!element) continue;
+		std::vector<HtmlElementRef> path;
+		if (!buildStructuralPath(doc, serial, path)) continue;
+		const WebStyle style = computePathStyle(doc, path, cache);
+		std::string text;
+		for (const WebInlineItem& item : doc.inlineItems) {
+			if (!serialWithin(item.ownerSerial, serial)) continue;
+			if (item.kind == InlineItemKind::TextRun) text += item.text;
+			else if (item.kind == InlineItemKind::ForcedBreak) text.push_back('\n');
+			if (text.size() >= kCssLiteMaxInlineTextBytes) {
+				text.resize(kCssLiteMaxInlineTextBytes);
+				break;
+			}
+		}
+		DocBlock* existing = nullptr;
+		for (DocBlock& block : doc.blocks) {
+			if (block.elementMetadata.serial == serial) { existing = &block; break; }
+		}
+		if (!existing) {
+			DocBlock promoted;
+			promoted.type = BlockType::Paragraph;
+			promoted.tagName = element->tagName;
+			promoted.text = text;
+			promoted.className = element->className;
+			promoted.id = element->id;
+			promoted.inlineStyle = element->inlineStyle;
+			promoted.elementMetadata = *element;
+			if (path.size() > 1) promoted.ancestors.assign(path.begin(), path.end() - 1);
+			promoted.style = style;
+			promoted.style.display = DisplayMode::Block;
+			promoted.inlineFlowSerial = 0;
+			doc.blocks.push_back(std::move(promoted));
+		} else {
+			existing->style.display = DisplayMode::Block;
+			existing->inlineFlowSerial = 0;
+		}
+	}
+	for (DocBlock& block : doc.blocks) {
+		uint64_t ownerSerial = block.elementMetadata.serial;
+		uint64_t atomicSerial = nearestInlineBlock(ownerSerial, true);
+		if (atomicSerial == 0) {
+			for (auto it = block.ancestors.rbegin(); it != block.ancestors.rend(); ++it) {
+				if (isInlineBlockSerial(it->serial)) {
+					atomicSerial = it->serial;
+					break;
+				}
+			}
+		}
+		block.atomicContainerSerial = atomicSerial;
+	}
+	std::vector<WebInlineItem> normalizedInlineItems;
+	normalizedInlineItems.reserve(doc.inlineItems.size());
+	for (WebInlineItem item : doc.inlineItems) {
+		bool positionedInlineItem = false;
+		for (uint64_t serial : positionedInlineOutOfFlowSerials) {
+			if (serialWithin(item.ownerSerial, serial)) {
+				positionedInlineItem = true;
+				break;
+			}
+		}
+		if (positionedInlineItem) continue;
+		const bool isMarker = item.kind == InlineItemKind::AtomicBlock;
+		if (isMarker) {
+			if (!isInlineBlockSerial(item.ownerSerial)) continue;
+			item.atomicContainerSerial = nearestInlineBlock(item.ownerSerial, false);
+		} else {
+			item.atomicContainerSerial = nearestInlineBlock(item.ownerSerial, true);
+			if (item.atomicContainerSerial == 0 && item.blockIndex >= 0 &&
+				item.blockIndex < static_cast<int>(doc.blocks.size()))
+				item.atomicContainerSerial = doc.blocks[static_cast<size_t>(item.blockIndex)].atomicContainerSerial;
+		}
+		if (item.atomicContainerSerial != 0 && !serialWithin(item.flowSerial, item.atomicContainerSerial))
+			item.flowSerial = item.atomicContainerSerial;
+		normalizedInlineItems.push_back(std::move(item));
+	}
+	doc.inlineItems = std::move(normalizedInlineItems);
+	// Retain one bounded computed-style record per structural serial so the
+	// Navigator can resolve descendant percentages against ancestor content
+	// boxes without constructing a live DOM tree.
+	doc.computedStyles.reserve(std::min<size_t>(doc.structuralElements.size(), 1024));
+	for (const HtmlElementRef& element : doc.structuralElements) {
+		if (element.serial == 0 || doc.computedStyles.size() >= 1024) break;
+		std::vector<HtmlElementRef> path;
+		if (!buildStructuralPath(doc, element.serial, path)) continue;
+		CssComputedStyleRecord record;
+		record.serial = element.serial;
+		record.style = computePathStyle(doc, path, cache);
+		record.valid = true;
+		doc.computedStyles.push_back(std::move(record));
 	}
 	// Options do not become standalone layout blocks, but they still carry
 	// bounded state metadata.  Resolve their paths so option:checked and
@@ -4199,15 +5552,29 @@ struct ParserState {
 	std::string  currentLegendText;
 	uint64_t     currentLegendSerial = 0;
 	std::string  currentTableCellText;
+	std::string  currentTableCellClass;
+	std::string  currentTableCellId;
+	std::string  currentTableCellStyle;
 	std::string  currentTableCaptionText;
 	bool         currentTableCellHeader = false;
 	std::string  currentTableCellHref;
+	std::string  currentTableCellLinkId;
+	int          currentTableCellColSpan = 1;
+	int          currentTableCellRowSpan = 1;
+	bool         currentTableCellSpanMalformed = false;
+	std::vector<TableCellContentItem> currentTableCellContents;
 };
 
 static HtmlElementRef elementRefFromTagBody(const std::string& tagName, const std::string& tagBody)
 {
 	HtmlElementRef element;
 	element.tagName = toLower(tagName);
+	if (element.tagName == "table") element.tableRole = TableRole::Table;
+	else if (element.tagName == "caption") element.tableRole = TableRole::Caption;
+	else if (element.tagName == "thead" || element.tagName == "tbody" || element.tagName == "tfoot") element.tableRole = TableRole::RowGroup;
+	else if (element.tagName == "tr") element.tableRole = TableRole::Row;
+	else if (element.tagName == "th") element.tableRole = TableRole::HeaderCell;
+	else if (element.tagName == "td") element.tableRole = TableRole::DataCell;
 	element.className = extractAttr(tagBody, "class");
 	element.id = extractAttr(tagBody, "id");
 	element.inlineStyle = extractAttr(tagBody, "style");
@@ -4419,6 +5786,114 @@ static std::vector<HtmlElementRef> captureControlAncestors(const ParserState& st
 	return st.openElements;
 }
 
+static bool isInlineFlowBoundaryTag(const std::string& rawTag)
+{
+	const std::string tag = toLower(rawTag);
+	return tag == "body" || tag == "p" || tag == "h1" || tag == "h2" ||
+		tag == "h3" || tag == "li" || tag == "dt" || tag == "dd" ||
+		tag == "pre" || tag == "td" || tag == "th" || tag == "caption" ||
+		tag == "label";
+}
+
+static const HtmlElementRef* inlineOwnerElement(const ParserState& st)
+{
+	return st.openElements.empty() ? nullptr : &st.openElements.back();
+}
+
+static uint64_t inlineFlowSerial(const ParserState& st)
+{
+	for (auto it = st.openElements.rbegin(); it != st.openElements.rend(); ++it) {
+		if (isInlineFlowBoundaryTag(it->tagName)) return it->serial;
+	}
+	for (auto it = st.openElements.rbegin(); it != st.openElements.rend(); ++it) {
+		if (it->serial != 0) return it->serial;
+	}
+	return 0;
+}
+
+static void flushText(ParserState& st);
+
+static void appendInlineItem(ParserState& st,
+	InlineItemKind kind,
+	const std::string& text,
+	int blockIndex,
+	uint64_t flowSerial,
+	const HtmlElementRef* owner)
+{
+	if (st.doc.inlineItems.size() >= kCssLiteMaxInlineItems) {
+		saturatingIncrement(st.doc.cssDiagnostics.contentMetadataClamps);
+		return;
+	}
+	WebInlineItem item;
+	item.kind = kind;
+	item.flowSerial = flowSerial;
+	item.ownerSerial = owner ? owner->serial : 0;
+	item.parentSerial = owner ? owner->parentSerial : 0;
+	item.blockIndex = blockIndex;
+	if (text.size() > kCssLiteMaxInlineTextBytes) {
+		item.text = text.substr(0, kCssLiteMaxInlineTextBytes);
+		saturatingIncrement(st.doc.cssDiagnostics.contentMetadataClamps);
+	} else {
+		item.text = text;
+	}
+	st.doc.inlineItems.push_back(std::move(item));
+}
+
+static uint64_t inlineFlowSerialOutsideElement(const ParserState& st, uint64_t serial)
+{
+	int elementIndex = -1;
+	for (int i = static_cast<int>(st.openElements.size()) - 1; i >= 0; --i) {
+		if (st.openElements[static_cast<size_t>(i)].serial == serial) {
+			elementIndex = i;
+			break;
+		}
+	}
+	if (elementIndex < 0) return inlineFlowSerial(st);
+	for (int i = elementIndex - 1; i >= 0; --i) {
+		if (isInlineFlowBoundaryTag(st.openElements[static_cast<size_t>(i)].tagName))
+			return st.openElements[static_cast<size_t>(i)].serial;
+	}
+	return elementIndex > 0 ? st.openElements[static_cast<size_t>(elementIndex - 1)].serial : 0;
+}
+
+static void appendInlineAtomicMarker(ParserState& st, const std::string& tagName)
+{
+	const std::string wanted = toLower(tagName);
+	if (wanted == "html" || wanted == "head" || wanted == "body" || st.openElements.empty()) return;
+	// Preserve the inline owner before the closing element is popped.  This is
+	// required for text-only inline-blocks: waiting for the enclosing paragraph
+	// would otherwise assign the text to the paragraph's flow and leave the
+	// atomic context empty.
+	if (!st.textBuf.empty()) flushText(st);
+	const HtmlElementRef* element = nullptr;
+	for (auto it = st.openElements.rbegin(); it != st.openElements.rend(); ++it) {
+		if (toLower(it->tagName) == wanted) {
+			element = &*it;
+			break;
+		}
+	}
+	if (!element || element->serial == 0) return;
+	appendInlineItem(st, InlineItemKind::AtomicBlock, {}, -1,
+		inlineFlowSerialOutsideElement(st, element->serial), element);
+}
+
+static void markInlineFlowOnNewBlocks(ParserState& st,
+	size_t firstBlock,
+	uint64_t flowSerial)
+{
+	for (size_t i = firstBlock; i < st.doc.blocks.size(); ++i)
+		st.doc.blocks[i].inlineFlowSerial = flowSerial;
+}
+
+static int inlineFlowAnchorBlock(ParserState& st, uint64_t flowSerial)
+{
+	if (flowSerial == 0) return -1;
+	for (int i = 0; i < static_cast<int>(st.doc.blocks.size()); ++i) {
+		if (st.doc.blocks[static_cast<size_t>(i)].inlineFlowSerial == flowSerial) return i;
+	}
+	return -1;
+}
+
 static uint64_t nearestAncestorSerial(const ParserState& st, const std::string& tagName)
 {
 	const std::string wanted = toLower(tagName);
@@ -4584,10 +6059,13 @@ static void popElementByName(ParserState& st, const std::string& tagName)
 // Flush textBuf into a DocBlock, if non-empty.
 static void flushText(ParserState& st)
 {
+	const std::string rawDecoded = decodeEntities(st.textBuf);
+	const uint64_t flowSerial = inlineFlowSerial(st);
+	const HtmlElementRef* owner = inlineOwnerElement(st);
 	std::string t;
 	if (st.inPre || st.open == OpenTag::Textarea) {
 		// Inside <pre>: decode entities but preserve whitespace/newlines.
-		t = decodeEntities(st.textBuf);
+		t = rawDecoded;
 		if (st.inPre) {
 			// Strip a single leading newline that immediately follows <pre>
 			if (!t.empty() && t[0] == '\n') t = t.substr(1);
@@ -4607,10 +6085,26 @@ static void flushText(ParserState& st)
 			false, false, false, true);
 	}
 	st.textBuf.clear();
-	if (t.empty()) return;
+	if (t.empty()) {
+		if (!rawDecoded.empty() && st.open != OpenTag::Textarea &&
+			st.open != OpenTag::Option && st.open != OpenTag::Title &&
+			st.open != OpenTag::Legend && st.open != OpenTag::Caption &&
+			st.open != OpenTag::TableCell) {
+			appendInlineItem(st, InlineItemKind::TextRun, rawDecoded, -1, flowSerial, owner);
+		}
+		return;
+	}
 	if (st.open == OpenTag::TableCell) {
 		if (!st.currentTableCellText.empty()) st.currentTableCellText += ' ';
 		st.currentTableCellText += t;
+		if (st.currentTableCellContents.size() < kTableMaxCellContents) {
+			TableCellContentItem item;
+			item.kind = st.currentTableCellHref.empty() ? BlockType::Paragraph : BlockType::Link;
+			item.text = t;
+			item.url = st.currentTableCellHref;
+			item.id = st.currentTableCellLinkId;
+			st.currentTableCellContents.push_back(std::move(item));
+		}
 		return;
 	}
 	if (st.open == OpenTag::Caption) {
@@ -4620,6 +6114,7 @@ static void flushText(ParserState& st)
 	}
 	std::vector<HtmlElementRef> ancestors = captureBlockAncestors(st);
 	const HtmlElementRef elementMetadata = activeBlockElement(st);
+	const size_t blockStart = st.doc.blocks.size();
 
 	switch (st.open) {
 	case OpenTag::H1:
@@ -4784,6 +6279,19 @@ static void flushText(ParserState& st)
 			st.doc.blocks.push_back(makeTextBlock(BlockType::Paragraph, "p", t, "", "", "", ancestors, st.styleBuf));
 		break;
 	}
+	markInlineFlowOnNewBlocks(st, blockStart, flowSerial);
+	if (st.open == OpenTag::ButtonSubmit || st.open == OpenTag::Textarea) {
+		if (st.doc.blocks.size() > blockStart) {
+			appendInlineItem(st, InlineItemKind::FormControl, {},
+				static_cast<int>(blockStart), flowSerial, owner);
+		}
+	} else if (st.open != OpenTag::Option && st.open != OpenTag::Title &&
+		st.open != OpenTag::Legend && st.open != OpenTag::Caption &&
+		st.open != OpenTag::TableCell && !rawDecoded.empty()) {
+		appendInlineItem(st, InlineItemKind::TextRun, rawDecoded,
+			st.doc.blocks.size() > blockStart ? static_cast<int>(blockStart) : -1,
+			flowSerial, owner);
+	}
 }
 
 // Handle an opening tag.  tagBody is everything inside <...>, e.g. "a href=\"x\""
@@ -4809,6 +6317,14 @@ static void handleOpenTag(ParserState& st, const std::string& tagBody)
 
 	if (st.inScript) return;
 	if (st.inStyle) return;
+	// Common block content inside a cell remains cell-owned. The compact parser
+	// does not emit nested paragraph boxes here; it records their structural
+	// scope and keeps the text in the cell's normal-flow content stream.
+	if (st.open == OpenTag::TableCell &&
+		(name == "p" || name == "h1" || name == "h2" || name == "h3" || name == "pre")) {
+		pushElement(st, elementRef);
+		return;
+	}
 
 	// Mark body reached.
 	if (name == "body") {
@@ -4957,9 +6473,21 @@ static void handleOpenTag(ParserState& st, const std::string& tagBody)
 		st.currentTableCellText.clear();
 		st.currentTableCellHeader = (name == "th");
 		st.currentTableCellHref.clear();
-		st.classBuf = extractAttr(tagBody, "class");
-		st.idBuf = extractAttr(tagBody, "id");
-		st.styleBuf = extractAttr(tagBody, "style");
+		st.currentTableCellLinkId.clear();
+		bool colspanMalformed = false;
+		bool rowspanMalformed = false;
+		st.currentTableCellColSpan = parseTableSpanAttr(tagBody, "colspan", kTableMaxColspan,
+			st.doc.cssDiagnostics, colspanMalformed);
+		st.currentTableCellRowSpan = parseTableSpanAttr(tagBody, "rowspan", kTableMaxRowspan,
+			st.doc.cssDiagnostics, rowspanMalformed);
+		st.currentTableCellSpanMalformed = colspanMalformed || rowspanMalformed;
+		st.currentTableCellContents.clear();
+		st.currentTableCellClass = extractAttr(tagBody, "class");
+		st.currentTableCellId = extractAttr(tagBody, "id");
+		st.currentTableCellStyle = extractAttr(tagBody, "style");
+		st.classBuf = st.currentTableCellClass;
+		st.idBuf = st.currentTableCellId;
+		st.styleBuf = st.currentTableCellStyle;
 		pushElement(st, elementRef);
 		activateCurrentBlock(st);
 		return;
@@ -5066,7 +6594,12 @@ static void handleOpenTag(ParserState& st, const std::string& tagBody)
 				++st.doc.cssDiagnostics.inlineStyleCount;
 				st.doc.cssDiagnostics.cssDetected = true;
 			}
+			const uint64_t flowSerial = inlineFlowSerial(st);
+			block.inlineFlowSerial = flowSerial;
+			const int blockIndex = static_cast<int>(st.doc.blocks.size());
 			st.doc.blocks.push_back(std::move(block));
+			appendInlineItem(st, InlineItemKind::FormControl, {}, blockIndex, flowSerial,
+				findStructuralElement(st, inputElement.serial));
 			++st.doc.formsDiagnostics.textInputCount;
 		} else if (type == "checkbox" || type == "radio") {
 			DocBlock block;
@@ -5095,7 +6628,12 @@ static void handleOpenTag(ParserState& st, const std::string& tagBody)
 				++st.doc.cssDiagnostics.inlineStyleCount;
 				st.doc.cssDiagnostics.cssDetected = true;
 			}
+			const uint64_t flowSerial = inlineFlowSerial(st);
+			block.inlineFlowSerial = flowSerial;
+			const int blockIndex = static_cast<int>(st.doc.blocks.size());
 			st.doc.blocks.push_back(std::move(block));
+			appendInlineItem(st, InlineItemKind::FormControl, {}, blockIndex, flowSerial,
+				findStructuralElement(st, inputElement.serial));
 			if (type == "checkbox") ++st.doc.formsDiagnostics.checkboxCount;
 			else ++st.doc.formsDiagnostics.radioCount;
 		} else if (type == "button" || type == "submit" || type == "reset") {
@@ -5122,7 +6660,12 @@ static void handleOpenTag(ParserState& st, const std::string& tagBody)
 				++st.doc.cssDiagnostics.inlineStyleCount;
 				st.doc.cssDiagnostics.cssDetected = true;
 			}
+			const uint64_t flowSerial = inlineFlowSerial(st);
+			block.inlineFlowSerial = flowSerial;
+			const int blockIndex = static_cast<int>(st.doc.blocks.size());
 			st.doc.blocks.push_back(std::move(block));
+			appendInlineItem(st, InlineItemKind::FormControl, {}, blockIndex, flowSerial,
+				findStructuralElement(st, inputElement.serial));
 			++st.doc.formsDiagnostics.submitCount;
 			++st.doc.formsDiagnostics.htmlButtonsParsed;
 		} else {
@@ -5233,8 +6776,19 @@ static void handleOpenTag(ParserState& st, const std::string& tagBody)
 		} else if (st.open == OpenTag::TableCell) {
 			flushText(st);
 			st.currentTableCellText += ' ';
-		} else if (!trim(collapseWs(st.textBuf)).empty()) {
+		} else {
 			flushText(st);
+			const uint64_t flowSerial = inlineFlowSerial(st);
+			int anchorBlock = inlineFlowAnchorBlock(st, flowSerial);
+			if (anchorBlock < 0 && flowSerial != 0 && st.bodyReached) {
+				const size_t blockStart = st.doc.blocks.size();
+				st.doc.blocks.push_back(makeTextBlock(BlockType::Paragraph, "p", "", "", st.classBuf,
+					st.idBuf, captureBlockAncestors(st), st.styleBuf, activeBlockElement(st)));
+				markInlineFlowOnNewBlocks(st, blockStart, flowSerial);
+				anchorBlock = static_cast<int>(blockStart);
+			}
+			appendInlineItem(st, InlineItemKind::ForcedBreak, {}, anchorBlock,
+				flowSerial, inlineOwnerElement(st));
 		}
 		return;
 	}
@@ -5268,7 +6822,24 @@ static void handleOpenTag(ParserState& st, const std::string& tagBody)
 		block.imageSizeAttrClamped = widthAttrClamped || heightAttrClamped;
 		block.elementMetadata = imageElement;
 		block.ancestors = captureBlockAncestors(st);
+		const uint64_t flowSerial = inlineFlowSerial(st);
+		block.inlineFlowSerial = flowSerial;
+		const int blockIndex = static_cast<int>(st.doc.blocks.size());
+		const uint64_t containingCellSerial = nearestAncestorSerial(st, "td") != 0
+			? nearestAncestorSerial(st, "td") : nearestAncestorSerial(st, "th");
+		if (containingCellSerial != 0) {
+			block.atomicContainerSerial = containingCellSerial;
+			TableCellContentItem item;
+			item.kind = BlockType::Image;
+			item.text = alt;
+			item.url = block.url;
+			item.blockIndex = blockIndex;
+			if (st.currentTableCellContents.size() < kTableMaxCellContents)
+				st.currentTableCellContents.push_back(std::move(item));
+		}
 		st.doc.blocks.push_back(std::move(block));
+		appendInlineItem(st, InlineItemKind::ReplacedImage, {}, blockIndex, flowSerial,
+			findStructuralElement(st, imageElement.serial));
 		st.open = OpenTag::None;
 		st.hrefBuf.clear();
 		st.classBuf.clear();
@@ -5309,6 +6880,7 @@ static void handleOpenTag(ParserState& st, const std::string& tagBody)
 		if (!href.empty()) {
 			// Resolve relative URL against the document base.
 			st.hrefBuf = resolveRelativeUrl(st.doc.url, href);
+			st.currentTableCellLinkId = extractAttr(tagBody, "id");
 			elementRef.hasLinkTarget = true;
 			elementRef.visited = st.visitedUrls && st.visitedUrls->find(st.hrefBuf) != st.visitedUrls->end();
 			if (st.open == OpenTag::TableCell) {
@@ -5316,6 +6888,7 @@ static void handleOpenTag(ParserState& st, const std::string& tagBody)
 			}
 		} else {
 			st.hrefBuf.clear();
+			st.currentTableCellLinkId.clear();
 		}
 		if (st.open != OpenTag::TableCell) {
 			st.open = OpenTag::A;
@@ -5367,6 +6940,7 @@ static void handleCloseTag(ParserState& st, const std::string& tagName)
 		name == "button" || name == "textarea" || name == "option" || name == "legend" || name == "label") {
 		const uint64_t closingSerial = st.activeBlockSerial;
 		flushText(st);
+		appendInlineAtomicMarker(st, name);
 		if (name == "legend") {
 			if (FormContainerMetadata* container = findFormContainer(st, closingSerial)) {
 				container->legendText = st.currentLegendText;
@@ -5408,6 +6982,7 @@ static void handleCloseTag(ParserState& st, const std::string& tagName)
 	if (name == "a") {
 		if (st.open != OpenTag::TableCell) {
 			flushText(st);
+			appendInlineAtomicMarker(st, name);
 			popElementByName(st, name);
 			st.open = OpenTag::None;
 			st.activeBlockSerial = 0;
@@ -5416,21 +6991,32 @@ static void handleCloseTag(ParserState& st, const std::string& tagName)
 			st.idBuf.clear();
 			st.styleBuf.clear();
 		} else {
+			// A table-cell anchor shares the cell's compact content stream rather
+			// than becoming a standalone DocBlock.  Flush while its href and ID
+			// are still active so link hit-test metadata remains attached to the
+			// text item.
+			flushText(st);
 			popElementByName(st, name);
 			st.currentTableCellHref = st.currentTableCellHref.empty() ? st.hrefBuf : st.currentTableCellHref;
 			st.hrefBuf.clear();
+			st.currentTableCellLinkId.clear();
 		}
 	}
 	if (name == "blockquote" || name == "figure" || name == "dl") {
 		flushText(st);
+		appendInlineAtomicMarker(st, name);
 		popElementByName(st, name);
 	}
 	if (name == "caption") {
 		flushText(st);
+		appendInlineAtomicMarker(st, name);
 		if (!st.currentTableCaptionText.empty()) {
 			DocBlock block = makeTextBlock(BlockType::Paragraph, "caption",
 				st.currentTableCaptionText, "", st.classBuf, st.idBuf, captureBlockAncestors(st), st.styleBuf);
 			block.elementMetadata = activeBlockElement(st);
+			block.tableRole = TableRole::Caption;
+			block.tableSerial = nearestAncestorSerial(st, "table");
+			block.atomicContainerSerial = block.tableSerial;
 			st.doc.blocks.push_back(std::move(block));
 		}
 		st.currentTableCaptionText.clear();
@@ -5443,16 +7029,45 @@ static void handleCloseTag(ParserState& st, const std::string& tagName)
 	}
 	if (name == "td" || name == "th") {
 		flushText(st);
+		appendInlineAtomicMarker(st, name);
 		DocBlock block = makeTextBlock(BlockType::Paragraph, name, st.currentTableCellText, "",
-			st.classBuf, st.idBuf, captureBlockAncestors(st), st.styleBuf);
+			st.currentTableCellClass, st.currentTableCellId, captureBlockAncestors(st), st.currentTableCellStyle);
 		block.elementMetadata = activeBlockElement(st);
+		block.tableRole = st.currentTableCellHeader ? TableRole::HeaderCell : TableRole::DataCell;
+		block.tableSerial = nearestAncestorSerial(st, "table");
+		block.tableRowGroupSerial = nearestAncestorSerial(st, "thead");
+		if (block.tableRowGroupSerial == 0) block.tableRowGroupSerial = nearestAncestorSerial(st, "tbody");
+		if (block.tableRowGroupSerial == 0) block.tableRowGroupSerial = nearestAncestorSerial(st, "tfoot");
+		block.tableRowSerial = nearestAncestorSerial(st, "tr");
+		block.tableColSpan = st.currentTableCellColSpan;
+		block.tableRowSpan = st.currentTableCellRowSpan;
+		block.tableSpanMalformed = st.currentTableCellSpanMalformed;
+		block.tableContents = st.currentTableCellContents;
 		if (!st.currentTableCellHref.empty()) {
 			block.url = st.currentTableCellHref;
+		} else {
+			// Keep compact cell-link ownership robust when malformed nesting or a
+			// bounded recovery path cleared the transient href state. The content
+			// item remains authoritative for table hit testing.
+			for (const TableCellContentItem& item : block.tableContents) {
+				if (item.kind == BlockType::Link && !item.url.empty()) {
+					block.url = item.url;
+					break;
+				}
+			}
 		}
 		st.doc.blocks.push_back(std::move(block));
 		st.currentTableCellText.clear();
 		st.currentTableCellHeader = false;
 		st.currentTableCellHref.clear();
+		st.currentTableCellLinkId.clear();
+		st.currentTableCellColSpan = 1;
+		st.currentTableCellRowSpan = 1;
+		st.currentTableCellSpanMalformed = false;
+		st.currentTableCellClass.clear();
+		st.currentTableCellId.clear();
+		st.currentTableCellStyle.clear();
+		st.currentTableCellContents.clear();
 		st.open = OpenTag::None;
 		st.activeBlockSerial = 0;
 		popElementByName(st, name);
@@ -5515,7 +7130,12 @@ static void handleCloseTag(ParserState& st, const std::string& tagName)
 		block.formControl.size = st.currentSelectSize;
 		block.formControl.optionCount = static_cast<int>(block.options.size());
 		block.formControl.selectedOptionIndex = block.selectedOption;
+		const uint64_t flowSerial = inlineFlowSerial(st);
+		block.inlineFlowSerial = flowSerial;
+		const int blockIndex = static_cast<int>(st.doc.blocks.size());
 		st.doc.blocks.push_back(std::move(block));
+		appendInlineItem(st, InlineItemKind::FormControl, {}, blockIndex, flowSerial,
+			findStructuralElement(st, st.currentSelectSerial));
 		++st.doc.formsDiagnostics.selectCount;
 		st.inSelect = false;
 		st.currentSelectName.clear();
@@ -5535,6 +7155,7 @@ static void handleCloseTag(ParserState& st, const std::string& tagName)
 	}
 	if (name == "form") {
 		flushText(st);
+		appendInlineAtomicMarker(st, name);
 		st.inForm = false;
 		st.currentFormIndex = -1;
 		st.currentFormAction.clear();
@@ -5546,10 +7167,12 @@ static void handleCloseTag(ParserState& st, const std::string& tagName)
 	}
 	if (name == "fieldset") {
 		flushText(st);
+		appendInlineAtomicMarker(st, name);
 		popElementByName(st, name);
 	}
 	if (name == "pre") {
 		flushText(st);
+		appendInlineAtomicMarker(st, name);
 		st.open  = OpenTag::None;
 		st.activeBlockSerial = 0;
 		st.inPre = false;
@@ -5565,6 +7188,14 @@ static void handleCloseTag(ParserState& st, const std::string& tagName)
 		name == "header" || name == "footer" || name == "nav" || name == "main" ||
 		name == "figure" || name == "blockquote" || name == "dl") {
 		flushText(st);
+		appendInlineAtomicMarker(st, name);
+		popElementByName(st, name);
+		return;
+	}
+	if (st.open == OpenTag::TableCell &&
+		(name == "p" || name == "h1" || name == "h2" || name == "h3" || name == "pre") &&
+		(nearestAncestorSerial(st, "td") != 0 || nearestAncestorSerial(st, "th") != 0)) {
+		flushText(st);
 		popElementByName(st, name);
 		return;
 	}
@@ -5574,6 +7205,7 @@ static void handleCloseTag(ParserState& st, const std::string& tagName)
 		name == "span" ||
 		name == "table" || name == "thead" || name == "tbody" || name == "tfoot" ||
 		name == "tr" || name == "ul" || name == "ol" || name == "noscript" || name == "html" || name == "head") {
+		appendInlineAtomicMarker(st, name);
 		popElementByName(st, name);
 	}
 	// </code> inside <pre>: stay in pre context.
@@ -5641,27 +7273,77 @@ std::string resolveRelativeUrl(const std::string& base, const std::string& href)
 		if (scheme) return href;
 	}
 
-	// Root-relative: preserve the HTTP(S) origin, or use the existing file:// rule.
-	if (href[0] == '/') {
-		if (base.rfind("http://", 0) == 0 || base.rfind("https://", 0) == 0) {
-			size_t authorityStart = base.find("://") + 3;
-			size_t authorityEnd = base.find('/', authorityStart);
-			if (authorityEnd == std::string::npos) return base + href;
-			return base.substr(0, authorityEnd) + href;
-		}
-		return "file://" + href;
-	}
-
 	// Fragment-only ("#...") – stay on the same page.
 	if (href[0] == '#') return base;
 
-	// Relative: strip the last path segment from base, append href.
-	// base looks like "file:///docs/index.html" or "http://host/docs/index.html"
-	size_t end = base.find_first_of("?#");
-	std::string baseNoQuery = end == std::string::npos ? base : base.substr(0, end);
-	size_t lastSlash = baseNoQuery.rfind('/');
-	if (lastSlash == std::string::npos) return "file:///" + href;
-	return baseNoQuery.substr(0, lastSlash + 1) + href;
+	const bool httpBase = base.rfind("http://", 0) == 0 || base.rfind("https://", 0) == 0;
+	const size_t schemeEnd = base.find("://");
+	const size_t authorityStart = schemeEnd == std::string::npos ? 0 : schemeEnd + 3;
+	const size_t pathStart = httpBase ? base.find('/', authorityStart) : base.find('/', authorityStart);
+	const std::string origin = httpBase
+		? (pathStart == std::string::npos ? base : base.substr(0, pathStart))
+		: std::string();
+
+	// Protocol-relative references select their own authority.  The old path
+	// accidentally appended them to the current host (https://host//cdn...).
+	if (href.rfind("//", 0) == 0) {
+		if (schemeEnd != std::string::npos) return base.substr(0, schemeEnd + 1) + href;
+		return href;
+	}
+
+	const size_t hrefQuery = href.find('?');
+	const size_t hrefFragment = href.find('#');
+	const size_t hrefPathEnd = std::min(hrefQuery == std::string::npos ? href.size() : hrefQuery,
+		hrefFragment == std::string::npos ? href.size() : hrefFragment);
+	const std::string hrefPath = href.substr(0, hrefPathEnd);
+	const std::string hrefSuffix = href.substr(hrefPathEnd);
+	const std::string baseNoQuery = base.substr(0, base.find_first_of("?#"));
+	const size_t basePathStart = httpBase
+		? (baseNoQuery.find('/', authorityStart) == std::string::npos
+			? baseNoQuery.size() : baseNoQuery.find('/', authorityStart))
+		: baseNoQuery.find('/', authorityStart);
+	const std::string basePath = basePathStart == std::string::npos || basePathStart >= baseNoQuery.size()
+		? std::string("/") : baseNoQuery.substr(basePathStart);
+
+	auto normalizePath = [](const std::string& path) {
+			std::vector<std::string> parts;
+			size_t start = 0;
+			while (start <= path.size()) {
+				size_t slash = path.find('/', start);
+				if (slash == std::string::npos) slash = path.size();
+				const std::string part = path.substr(start, slash - start);
+				if (part.empty() || part == ".") {
+					// Empty path components are normalized away except for the
+					// leading/trailing slash represented outside this list.
+				} else if (part == "..") {
+					if (!parts.empty()) parts.pop_back();
+				} else {
+					parts.push_back(part);
+				}
+				if (slash == path.size()) break;
+				start = slash + 1;
+			}
+			std::string result = "/";
+			for (size_t i = 0; i < parts.size(); ++i) {
+				if (i != 0) result += "/";
+				result += parts[i];
+			}
+			if (path.size() > 1 && path.back() == '/') result += "/";
+			return result;
+		};
+
+	if (!hrefPath.empty() && hrefPath[0] == '/') {
+		const std::string normalized = normalizePath(hrefPath);
+		return httpBase ? origin + normalized + hrefSuffix : "file://" + normalized + hrefSuffix;
+	}
+	if (hrefPath.empty()) {
+		return (httpBase ? origin : baseNoQuery.substr(0, basePathStart)) + basePath + hrefSuffix;
+	}
+
+	const size_t lastSlash = basePath.rfind('/');
+	const std::string baseDirectory = lastSlash == std::string::npos ? "/" : basePath.substr(0, lastSlash + 1);
+	const std::string normalized = normalizePath(baseDirectory + hrefPath);
+	return (httpBase ? origin : baseNoQuery.substr(0, basePathStart)) + normalized + hrefSuffix;
 }
 
 void recomputeDocumentStyles(WebDocument& document)

@@ -19,6 +19,12 @@ $NativePackageDir = if ([string]::IsNullOrWhiteSpace($NativePackageDir)) { "" } 
 $TrackedOutputRootCaBundlePath = Join-Path $OutputDir "certs\ca-bundle.pem"
 $TrackedOutputRootCaManifestCompatPath = Join-Path $OutputDir "certs\CABUNDLE.MAN"
 $NavigatorCaBundleManifestScript = Join-Path $ScriptDir "validate-navigator-ca-bundle.ps1"
+$NavigatorProductionCaBundleSourcePath = Join-Path $RootDir "assets\certs\mozilla-cacert-2026-08-13.pem"
+$NavigatorProductionCaBundleGeneratedUtc = "2026-08-13T03:12:01.0000000Z"
+$NavigatorProductionCaBundleRotationId = "mozilla-2026-08-13"
+# Fixture manifests are payload inputs, so keep their provenance timestamp
+# stable across repeated smoke staging. Production uses its own pinned value.
+$NavigatorFixtureCaBundleGeneratedUtc = "2026-08-13T03:12:02.0000000Z"
 . (Join-Path $ScriptDir "navigator-public-https-reviewed-targets.ps1")
 $ImageViewerRuntimeSmokePath = if ([string]::IsNullOrWhiteSpace($ImageViewerRuntimeSmokePath)) {
     $env:GXOS_IMAGEVIEWER_RUNTIME_SMOKE_PNG_PATH
@@ -237,6 +243,17 @@ function Get-NavigatorCaBundleManifestProfile {
             ProductionReady = "auto"
         }
     }
+    if ($Role -eq "production" -and $SourcePath -and
+        [System.IO.Path]::GetFullPath($SourcePath).Equals(
+            [System.IO.Path]::GetFullPath($NavigatorProductionCaBundleSourcePath),
+            [System.StringComparison]::OrdinalIgnoreCase)) {
+        return [pscustomobject]@{
+            BundleType = "shipped-public"
+            SourceDescription = "curl-ca-extract:Mozilla-2026-08-13"
+            RotationId = $NavigatorProductionCaBundleRotationId
+            ProductionReady = "yes"
+        }
+    }
     return [pscustomobject]@{
         BundleType = "production-source"
         SourceDescription = "GXOS_NAVIGATOR_PRODUCTION_CA_BUNDLE_SOURCE"
@@ -386,7 +403,8 @@ function Invoke-NavigatorCaBundleManifestValidation {
         [Parameter(Mandatory = $true)][string]$OutputManifestPath,
         [Parameter(Mandatory = $true)][string]$SourceDescription,
         [AllowNull()][string]$RotationId,
-        [string]$ProductionReady = "auto"
+        [string]$ProductionReady = "auto",
+        [AllowNull()][string]$GeneratedUtc
     )
 
     if (-not (Test-Path -LiteralPath $NavigatorCaBundleManifestScript -PathType Leaf)) {
@@ -404,6 +422,9 @@ function Invoke-NavigatorCaBundleManifestValidation {
     )
     if (-not [string]::IsNullOrWhiteSpace($RotationId)) {
         $manifestArgs += @("-RotationId", $RotationId.Trim())
+    }
+    if (-not [string]::IsNullOrWhiteSpace($GeneratedUtc)) {
+        $manifestArgs += @("-GeneratedUtc", $GeneratedUtc.Trim())
     }
     if ($ProductionReady -ne "auto") {
         $manifestArgs += @("-ProductionReady", $ProductionReady)
@@ -1083,6 +1104,16 @@ $realPublicProbeCaBundleInfo = if ($realPublicProbeCaBundleSource) {
     $null
 }
 $productionCaSource = Resolve-StagedSourcePath $env:GXOS_NAVIGATOR_PRODUCTION_CA_BUNDLE_SOURCE
+$usingDefaultProductionCaSource = $false
+if (-not $productionCaSource -and
+    [string]::IsNullOrWhiteSpace($env:GXOS_NAVIGATOR_SHIPPED_ROOT_CANDIDATE_CA_BUNDLE_SOURCE) -and
+    $env:GXOS_NAVIGATOR_DISABLE_SHIPPED_PRODUCTION_CA -ne "1") {
+    if (-not (Test-Path -LiteralPath $NavigatorProductionCaBundleSourcePath -PathType Leaf)) {
+        throw "Required shipped production CA bundle is absent: $NavigatorProductionCaBundleSourcePath"
+    }
+    $productionCaSource = [System.IO.Path]::GetFullPath($NavigatorProductionCaBundleSourcePath)
+    $usingDefaultProductionCaSource = $true
+}
 $candidateCaSource = Resolve-StagedSourcePath $env:GXOS_NAVIGATOR_SHIPPED_ROOT_CANDIDATE_CA_BUNDLE_SOURCE
 $candidateRotationId = if ([string]::IsNullOrWhiteSpace($env:GXOS_NAVIGATOR_SHIPPED_ROOT_CANDIDATE_ROTATION_ID)) { $null } else { $env:GXOS_NAVIGATOR_SHIPPED_ROOT_CANDIDATE_ROTATION_ID.Trim() }
 $candidateProductionReady = $env:GXOS_NAVIGATOR_SHIPPED_ROOT_CANDIDATE_PRODUCTION_READY -eq "1"
@@ -1108,7 +1139,8 @@ if ($SmokeCaFixture -or $env:GXOS_NAVIGATOR_SMOKE_CA_FIXTURE -eq "1") {
         -BundlePath $targetCa `
         -BundleType $smokeManifestProfile.BundleType `
         -OutputManifestPath $targetCaManifest `
-        -SourceDescription $smokeManifestProfile.SourceDescription
+        -SourceDescription $smokeManifestProfile.SourceDescription `
+        -GeneratedUtc $NavigatorFixtureCaBundleGeneratedUtc
     Copy-Item -LiteralPath $targetCaManifest -Destination $targetCaManifestCompat -Force
     $staged += Get-Item $targetCa
     $staged += Get-Item $targetCaManifest
@@ -1127,11 +1159,17 @@ if ($SmokeCaFixture -or $env:GXOS_NAVIGATOR_SMOKE_CA_FIXTURE -eq "1") {
         if ($realPublicProbeCaBundleInfo) {
             if ($productionBundleSource) {
                 $baseBundle = [System.IO.File]::ReadAllText($productionBundleSource, [System.Text.Encoding]::ASCII).Trim()
+                $publicBundle = $realPublicProbeCaBundleInfo.Text.Trim()
+                $sameBundle = [string]::Equals($baseBundle, $publicBundle, [System.StringComparison]::Ordinal)
                 $merged = @(
                     $NavigatorRealPublicProbeTrustMarker
-                    $NavigatorRealPublicProbeTrustDetail
+                    $(if ($sameBundle) {
+                            "# explicit public-root input matches the staged production bundle; duplicate certificates are not embedded."
+                        } else {
+                            $NavigatorRealPublicProbeTrustDetail
+                        })
                     $baseBundle
-                    $realPublicProbeCaBundleInfo.Text.Trim()
+                    $(if ($sameBundle) { $null } else { $publicBundle })
                     ""
                 ) -join "`r`n"
             } else {
@@ -1166,7 +1204,8 @@ if ($SmokeCaFixture -or $env:GXOS_NAVIGATOR_SMOKE_CA_FIXTURE -eq "1") {
             -OutputManifestPath $targetCaManifest `
             -SourceDescription $productionManifestProfile.SourceDescription `
             -RotationId $productionManifestProfile.RotationId `
-            -ProductionReady $productionManifestProfile.ProductionReady
+            -ProductionReady $productionManifestProfile.ProductionReady `
+            -GeneratedUtc $(if ($usingDefaultProductionCaSource) { $NavigatorProductionCaBundleGeneratedUtc } else { $null })
         Update-NavigatorCaBundleManifestMode -ManifestPath $targetCaManifest -Mode $productionManifestMode
         if ($productionManifestMode -ne "missing") {
             $productionManifest = [pscustomobject]@{
@@ -1200,6 +1239,14 @@ if ($SmokeCaFixture -or $env:GXOS_NAVIGATOR_SMOKE_CA_FIXTURE -eq "1") {
     }
 }
 
+if ([string]::IsNullOrWhiteSpace($httpsPolicyToken) -and
+    $usingDefaultProductionCaSource -and
+    -not $SmokeCaFixture -and
+    $env:GXOS_NAVIGATOR_SMOKE_CA_FIXTURE -ne "1") {
+    $httpsPolicyToken = "production-validated"
+    Write-Host "      defaulting bundled Navigator HTTPS policy to ProductionValidated" -ForegroundColor Yellow
+}
+
 $userCaSource = Resolve-StagedSourcePath $env:GXOS_NAVIGATOR_USER_CA_BUNDLE_SOURCE
 if ($userCaSource) {
     if (-not (Test-Path $userCaSource)) {
@@ -1229,7 +1276,8 @@ if ($userCaSource) {
             -OutputManifestPath $targetUserManifest `
             -SourceDescription $userManifestProfile.SourceDescription `
             -RotationId $userManifestProfile.RotationId `
-            -ProductionReady $userManifestProfile.ProductionReady
+            -ProductionReady $userManifestProfile.ProductionReady `
+            -GeneratedUtc $NavigatorFixtureCaBundleGeneratedUtc
         Update-NavigatorCaBundleManifestMode -ManifestPath $targetUserManifest -Mode $userManifestMode
         if (Test-Path -LiteralPath $targetUserManifest -PathType Leaf) {
             Copy-Item -LiteralPath $targetUserManifest -Destination $targetUserManifestCompat -Force
@@ -1255,6 +1303,36 @@ if ($userCaSource) {
 
 $configNavigatorDir = Join-Path $configDir "navigator"
 New-Item -ItemType Directory -Force -Path $configNavigatorDir | Out-Null
+
+if ($env:GXOS_NAVIGATOR_PERSISTENT_NAVIGATION -eq "1") {
+    # Keep a short compatibility token early in the generated directory.  The
+    # freestanding FAT reader used by the smoke boot can expose the first
+    # directory sector reliably even when later LFN entries are unavailable.
+    $persistentNavigationMarkerEarly = Join-Path $configNavigatorDir "00PERSNAV.TXT"
+    [System.IO.File]::WriteAllText($persistentNavigationMarkerEarly, "enabled`n", [System.Text.Encoding]::ASCII)
+    $staged += Get-Item $persistentNavigationMarkerEarly
+    $persistentNavigationMarker = Join-Path $configNavigatorDir "persistent-navigation-enabled.txt"
+    [System.IO.File]::WriteAllText($persistentNavigationMarker, "enabled`n", [System.Text.Encoding]::ASCII)
+    $staged += Get-Item $persistentNavigationMarker
+    $persistentNavigationMarkerCompat = Join-Path $configNavigatorDir "PERSNAV.TXT"
+    [System.IO.File]::WriteAllText($persistentNavigationMarkerCompat, "enabled`n", [System.Text.Encoding]::ASCII)
+    $staged += Get-Item $persistentNavigationMarkerCompat
+    Write-Host "      staged Navigator persistent-navigation smoke marker" -ForegroundColor Yellow
+
+    $persistentFixtureSourceDir = Join-Path $RootDir "navigator-smoke\generated"
+    foreach ($persistentFixtureName in @(
+            "HEAVY.HTM", "TINY.HTM", "FAIL.HTM",
+            "HEAVY01.PNG", "HEAVY02.PNG", "HEAVY03.PNG", "HEAVY04.PNG", "HEAVY05.PNG")) {
+        $persistentFixtureSource = Join-Path $persistentFixtureSourceDir $persistentFixtureName
+        if (-not (Test-Path -LiteralPath $persistentFixtureSource -PathType Leaf)) {
+            throw "Persistent Navigator fixture is missing: $persistentFixtureSource"
+        }
+        $persistentFixtureTarget = Join-Path $configNavigatorDir $persistentFixtureName
+        Copy-Item -LiteralPath $persistentFixtureSource -Destination $persistentFixtureTarget -Force
+        $staged += Get-Item $persistentFixtureTarget
+    }
+    Write-Host "      staged short-name persistent Navigator fixtures under /config/navigator" -ForegroundColor Yellow
+}
 
 $navigatorChromeAssets = [ordered]@{
     "nav-back.png"      = "assets\Images\NuoveXT\PNG\32\above_thearrow_10194.png"

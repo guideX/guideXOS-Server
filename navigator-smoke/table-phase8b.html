@@ -1,0 +1,99 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Navigator HTML Table Phase 8B</title>
+  <style>
+    body { font-family: Roboto, Arial, sans-serif; margin: 12px; color: #172033; }
+    h1 { font-size: 20px; margin: 0 0 8px; }
+    h2 { font-size: 16px; margin: 18px 0 6px; }
+    p { margin: 6px 0; }
+    .case { margin: 8px 0 14px; }
+    table { border: 2px solid #334155; border-spacing: 3px; background: #f8fafc; }
+    caption { text-align: left; font-weight: bold; padding: 4px 0; color: #1d4ed8; }
+    th, td { border: 1px solid #64748b; padding: 5px 7px; vertical-align: top; }
+    th { background: #dbeafe; font-weight: bold; }
+    td { background: #ffffff; }
+    .narrow { width: 260px; }
+    .explicit { width: 560px; }
+    .wide-scroll { width: 1000px; }
+    .scroll-host { width: 300px; height: 180px; overflow: auto; border: 2px solid #b45309; padding: 4px; }
+    .flex-host { display: flex; gap: 5px; flex-wrap: wrap; }
+    .flex-item { border: 1px solid #7c3aed; padding: 3px; }
+    .positioned-cell { position: relative; min-height: 34px; }
+    .relative-descendant { position: relative; left: 3px; }
+    .absolute-descendant { position: absolute; right: 3px; top: 3px; color: #b91c1c; }
+    .empty { min-width: 20px; }
+    .following { margin-top: 8px; padding: 8px; border: 2px solid #15803d; background: #f0fdf4; }
+  </style>
+</head>
+<body>
+  <h1 id="phase8b-title">HTML Table Layout Foundation — Phase 8B</h1>
+
+  <section class="case">
+    <h2>Shared grid, caption, groups, headers, and normal flow</h2>
+    <table id="phase8b-basic" class="narrow">
+      <caption>Phase 8B shared-column caption</caption>
+      <thead>
+        <tr><th id="phase8b-head-name">Short</th><th id="phase8b-head-detail">Very long heading shared with every row</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>1</td><td>value</td></tr>
+        <tr><td>2</td><td>another value with enough text to wrap inside the negotiated second column</td></tr>
+        <tr><td>3</td><td><a id="phase8b-cell-link" href="/navigator-smoke/basic.html">ordinary cell link</a></td></tr>
+        <tr><td>4</td><td><a id="phase8b-wrapped-link" href="/navigator-smoke/basic.html">wrapped cell link text that follows the same shared column boundary across rows</a></td></tr>
+      </tbody>
+      <tfoot><tr><td>total</td><td>tfoot remains in the same grid</td></tr></tfoot>
+    </table>
+    <p id="phase8b-following" class="following">Following ordinary content must begin after the final table box.</p>
+  </section>
+
+  <section class="case">
+    <h2>Declared width, constrained width, padding, borders, and content</h2>
+    <table id="phase8b-explicit" class="explicit">
+      <caption>Explicit 560px table width</caption>
+      <tr><th>Content</th><th>Intrinsic contribution</th><th>Layout</th></tr>
+      <tr><td><img id="phase8b-image" src="/navigator-smoke/wide.png" width="52" height="30" alt="local image in a table cell"></td><td>Roboto proportional text and <code>monospace</code></td><td>image height contributes to row height</td></tr>
+      <tr><td><div id="phase8b-cell-flex" class="flex-host"><span class="flex-item">Flex A</span><span class="flex-item">Flex content inside a cell</span></div></td><td>ordinary block content</td><td class="positioned-cell"><span class="relative-descendant">relative text</span><span class="absolute-descendant">absolute</span></td></tr>
+    </table>
+    <div style="width: 210px; border: 1px dashed #64748b; padding: 4px;">
+      <table id="phase8b-constrained"><tr><td>Constrained containing width</td><td>long wrapped content demonstrates bounded shrink behavior</td></tr></table>
+    </div>
+  </section>
+
+  <section class="case" style="display:flex; gap:8px; flex-wrap:wrap;">
+    <h2 style="flex-basis:100%;">Colspan and malformed recovery</h2>
+    <table id="phase8b-spans">
+      <tr><th colspan="2">colspan=2 spanning header</th><th>third</th></tr>
+      <tr><td colspan="3">colspan=3 wide spanning data cell</td></tr>
+      <tr><td colspan="0">invalid zero fallback</td><td colspan="-4">invalid negative fallback</td><td colspan="99">bounded absurd colspan</td></tr>
+      <tr><td>uneven row only one cell</td></tr>
+      <tr><td class="empty"></td><td>empty cell sibling</td><td>final</td></tr>
+      <tr></tr>
+    </table>
+    <table id="phase8b-flex-item"><tr><td>Table as a Flexbox item</td><td>shared table measurement</td></tr></table>
+  </section>
+
+  <section class="case">
+    <h2>Wide table and horizontal scrolling</h2>
+    <div id="phase8b-wide-scroll" class="scroll-host">
+      <table id="phase8b-wide" class="wide-scroll">
+        <caption>Wide table should contribute horizontal overflow</caption>
+        <tr><th>Northwind</th><th>Southbound</th><th>Eastward</th><th>Westward</th><th>Long fifth column heading</th></tr>
+        <tr><td>Alpha</td><td>Beta</td><td>Gamma</td><td>Delta</td><td><a id="phase8b-scrolled-link" href="/navigator-smoke/basic.html">link after horizontal table scroll with a long label</a></td></tr>
+        <tr><td colspan="2">two-column span</td><td colspan="3">three-column span with readable content</td></tr>
+      </table>
+    </div>
+  </section>
+
+  <section class="case">
+    <h2>Malformed table markup and bounded column case</h2>
+    <table id="phase8b-malformed">
+      <td>cell outside an explicit row is safe fallback</td>
+      <tr><td>one</td><td>two</td><td>three</td><td>four</td><td>five</td><td>six</td><td>seven</td><td>eight</td><td>nine</td><td>ten</td></tr>
+    </table>
+    <table id="phase8b-empty"></table>
+    <p id="phase8b-end">End marker after malformed and empty tables.</p>
+  </section>
+</body>
+</html>

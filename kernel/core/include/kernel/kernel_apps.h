@@ -15,25 +15,42 @@
 #include "kernel/block_device.h"
 #include "kernel/desktop.h"
 #include "kernel/image_adapter.h"
+#include "kernel/navigator_scrollbar.h"
 #include "display_configuration_service.h"
+#include "../../../../guide_web_http_shared.h"
+#include "../../../../navigator_resource_scheduler.h"
+#include "../../../../navigator_resource_diagnostics.h"
 
 // Bare-metal Navigator is a capability-limited adapter.  It mirrors the small
 // guideWeb CSS-lite value types it needs without including the hosted
 // std::string/std::vector document model in the freestanding kernel build.
 namespace gxos {
 namespace web {
+enum class GenericFontFamily : uint8_t {
+    Inherit = 0,
+    Roboto = 1,
+    SansSerif = 2,
+    Monospace = 3,
+    Serif = 4,
+    Unknown = 5,
+};
+
 struct WebStyle {
     bool     hasColor = false;
     uint32_t color = 0;
     bool     hasBackgroundColor = false;
     uint32_t backgroundColor = 0;
     bool     bold = false;
+    bool     italic = false;
     bool     underline = false;
     int      marginTop = -1;
     int      marginBottom = -1;
     int      marginLeft = -1;
     int      padding = -1;
     int      fontScaleOrSize = -1;
+    bool     absolutePosition = false;
+    int      positionTop = -1;
+    GenericFontFamily genericFontFamily = GenericFontFamily::Inherit;
 };
 
 struct CssDiagnostics {
@@ -542,6 +559,13 @@ private:
 // app-model implementation. This kernel-side app keeps the same user-facing
 // shape where platform facilities exist, and reports honest unsupported
 // capability documents/placeholders where they do not.
+//
+// Navigator v0.2 bare-metal release scope is the production root vertical
+// scrollbar: pointer hit testing, paging, thumb dragging, bounded clamps, and
+// viewport-driven image admission. Horizontal scrollbar interaction and
+// independently owned nested overflow scrollbars remain intentional v0.3
+// layout-model limitations because this flat DocBlock model has neither
+// authoritative horizontal extents nor nested scroll-owner identities.
 struct KernelHttpResponse;
 
 class NavigatorApp : public app::KernelApp {
@@ -562,6 +586,12 @@ public:
     virtual void onKeyChar(char c) override;
 
     static app::KernelApp* create() { return new NavigatorApp(); }
+    static bool smokeTypographyPhase7A();
+    static bool smokeScrollbarPointerInput();
+    // Phase 8S.2: one bounded smoke-owned Navigator instance runs the
+    // deterministic pressure/reuse sequence and, when public HTTPS is
+    // enabled, the reviewed NASA -> Wikipedia -> example.com -> NASA lane.
+    static bool smokePersistentNavigationLifecycle();
     static bool smokeHttpFetch(const char* url, int* statusCode, char* contentType,
                                int contentTypeLen, int* bodyBytes, int* parsedBlocks,
                                char* error, int errorLen, char* finalUrl = nullptr,
@@ -665,7 +695,9 @@ public:
                                             bool* redirectedHttpsRetryUsed = nullptr,
                                             int* redirectHopIndex = nullptr,
                                             char* redirectHopUrl = nullptr,
-                                            int redirectHopUrlLen = 0);
+                                            int redirectHopUrlLen = 0,
+                                            int* encodedBodyBytes = nullptr,
+                                            int* decodedBodyBytes = nullptr);
 
 private:
     enum NavigatorMouseMode {
@@ -677,7 +709,7 @@ private:
     };
 
     static const int MAX_STATUS_LEN = 128;
-    static const int MAX_URL_LEN = 160;
+    static const int MAX_URL_LEN = 512;
     static const int MAX_TITLE_LEN_NAV = 96;
     static const int MAX_BLOCKS = 64;
     static const int MAX_BLOCK_TEXT = 320;
@@ -685,14 +717,12 @@ private:
     static const int MAX_SOURCE_PREVIEW = 2048;
     static const int MAX_FORM_OPTIONS = 8;
     static const int MAX_FORM_VALUE = 320;
+    static const uint32_t MAX_LIFECYCLE_GENERATIONS = 12;
     static const int TOOLBAR_H = 48;
     static const int STATUS_H = 24;
-    static const int BUTTON_W = 64;
     static const int BUTTON_H = 22;
-    static const int BUTTON_GAP = 6;
     static const int CONTENT_X = 16;
     static const int CONTENT_Y = 62;
-    static const int ADDRESS_X = 452;
     static const int ADDRESS_Y = 12;
     static const int ADDRESS_H = 22;
 
@@ -727,8 +757,17 @@ private:
         int naturalWidth;
         int naturalHeight;
         int imageStatus;
+        int imageFormat;
         const uint32_t* imagePixels;
+        int imageOwnerBlockIndex = -1;
         char imageError[128];
+        char resourceClassification[64];
+        int resourceStatusCode;
+        int resourceEncodedBytes;
+        int resourceDecodedBytes;
+        int resourceRedirectCount;
+        char resourceContentType[48];
+        char resourceContentEncoding[32];
         gxos::web::WebStyle style;
         int formIndex;
         char formAction[MAX_URL_LEN];
@@ -768,10 +807,56 @@ private:
         int offset;
     };
 
+    // Compact, fixed-capacity evidence for one top-level navigation.  This is
+    // deliberately kept on the heap-owned NavigatorApp object rather than on
+    // the 16 KiB boot stack, and stores no document body or resource URL list.
+    struct NavigationGenerationRecord {
+        uint32_t generation = 0;
+        char requestedUrl[128] = {};
+        char finalUrl[128] = {};
+        char title[96] = {};
+        char visibleText[96] = {};
+        uint32_t activeImagesBefore = 0;
+        uint64_t activeBytesBefore = 0;
+        uint32_t referencesBefore = 0;
+        uint32_t duplicateOwnersBefore = 0;
+        uint32_t releasedResources = 0;
+        uint64_t releasedBytes = 0;
+        uint32_t activeImagesAfterRelease = 0;
+        uint64_t activeBytesAfterRelease = 0;
+        uint32_t staleReferencesAfterRelease = 0;
+        uint32_t staleDuplicateOwnersAfterRelease = 0;
+        uint32_t staleImagePointersAfterRelease = 0;
+        uint32_t documentBlocks = 0;
+        uint32_t decodedDocumentBytes = 0;
+        uint32_t resourceReferences = 0;
+        uint32_t uniqueReferences = 0;
+        uint32_t duplicateReferences = 0;
+        uint32_t schedulerCandidates = 0;
+        uint32_t loadedResources = 0;
+        uint32_t failedResources = 0;
+        uint32_t budgetDenials = 0;
+        uint32_t duplicateNetworkFetches = 0;
+        uint32_t activeImages = 0;
+        uint64_t activeBytes = 0;
+        uint64_t peakBytes = 0;
+        uint64_t deniedBytes = 0;
+        uint64_t encodedBodyFailures = 0;
+        uint32_t loadedSizeBuckets[6] = {};
+        uint32_t deniedSizeBuckets[6] = {};
+        int scrollBefore = 0;
+        int scrollAfter = 0;
+        bool parserCompleted = false;
+        bool documentCreated = false;
+        bool imagePaintObserved = false;
+        bool injectedImageFailure = false;
+    };
+
     char m_status[MAX_STATUS_LEN];
     char m_currentUrl[MAX_URL_LEN];
     char m_title[MAX_TITLE_LEN_NAV];
     DocBlock m_blocks[MAX_BLOCKS];
+    bool m_imagePaintLogged[MAX_BLOCKS];
     int m_blockCount;
     Bookmark m_bookmarks[MAX_BOOKMARKS];
     int m_bookmarkCount;
@@ -786,6 +871,13 @@ private:
     int m_addressCaret;
     bool m_ctrlPressed;
     int m_scrollY;
+    int m_scrollX;
+    uint8_t m_scrollbarOwner;
+    uint8_t m_scrollbarOrientation;
+    bool m_scrollbarDragging;
+    int m_scrollbarDragPointer;
+    int m_scrollbarDragGrabOffset;
+    int m_scrollbarDragInitialScroll;
     int m_hoverLinkIndex;
     bool m_selectionActive;
     bool m_selectionDragging;
@@ -811,12 +903,26 @@ private:
     bool m_loading;
     int m_throbberFrame;
     uint32_t m_loadingStartTick;
+    uint32_t m_documentGeneration;
     char m_metaRequestedUrl[MAX_URL_LEN];
     char m_metaFinalUrl[MAX_URL_LEN];
     char m_metaSourceType[24];
     int m_metaHttpStatusCode;
     char m_metaHttpReason[48];
     char m_metaContentType[48];
+    char m_metaResponseFraming[24];
+    int m_metaContentLength;
+    bool m_metaContentLengthPresent;
+    int m_metaEncodedBodyBytes;
+    int m_metaDecodedBodyBytes;
+    int m_metaDocumentSegmentCount;
+    int m_metaDocumentStorageBytes;
+    int m_metaDocumentStorageCapacity;
+    int m_metaDocumentHistoryBytes;
+    bool m_metaDocumentStorageAllocationFailed;
+    int m_metaParserScratchBytes;
+    int m_metaActiveDocumentBytes;
+    bool m_metaTruncatedResponse;
     char m_metaContentEncoding[32];
     char m_metaUnsupportedReason[128];
     bool m_metaRedirected;
@@ -829,6 +935,21 @@ private:
     char m_metaSourcePreview[MAX_SOURCE_PREVIEW];
     int m_metaSourceBytes;
     bool m_metaSourceTruncated;
+    bool m_metaBodyBufferValid;
+    bool m_metaBodyNullTerminated;
+    bool m_metaBodyComplete;
+    char m_metaBodyOwnership[96];
+    bool m_metaHandoffEntered;
+    char m_metaHandoffResult[96];
+    bool m_metaParserInvoked;
+    bool m_metaParserCompleted;
+    int m_metaParserInputBytes;
+    bool m_metaDocumentCreated;
+    int m_metaDocumentCount;
+    uint32_t m_metaActiveDocumentGeneration;
+    int m_metaTextFragmentCount;
+    int m_metaLinkCount;
+    char m_metaVisibleText[160];
     int m_metaDocumentBlocks;
     int m_metaImageBlocks;
     int m_metaLoadedImages;
@@ -836,9 +957,49 @@ private:
     int m_metaRemoteImages;
     int m_metaLocalImages;
     char m_metaLastImageError[128];
+    int m_metaResourceReferences;
+    int m_metaResourceAttempted;
+    int m_metaResourceLoaded;
+    int m_metaResourceFailed;
+    int m_metaResourceSkipped;
+    int m_metaPngReferences;
+    int m_metaPngLoads;
+    int m_metaJpegReferences;
+    int m_metaJpegLoads;
+    int m_metaSvgReferences;
+    int m_metaSvgFailures;
+    int m_metaWebpReferences;
+    int m_metaWebpFailures;
+    int m_metaAvifReferences;
+    int m_metaAvifFailures;
+    int m_metaGifReferences;
+    int m_metaGifFailures;
+    int m_metaRedirects;
+    int m_metaHttp4xx;
+    int m_metaHttp5xx;
+    int m_metaSizeBoundFailures;
+    int m_metaDecodeFailures;
+    int m_metaNetworkTlsFailures;
+    int m_metaUnsupportedMime;
+    int m_metaDuplicateSkips;
+    int m_metaResourceLimitSkips;
+    int m_metaDuplicateUrls;
+    int m_metaDuplicateNetworkFetches;
+    int m_metaDuplicateDecodedImages;
+    int m_metaResourceClassificationCounts[64];
+    gxos::apps::NavigatorResourceReferenceMetadata m_resourceReferences[gxos::apps::kNavigatorMaxResourceReferences];
+    uint16_t m_resourceOrder[gxos::apps::kNavigatorMaxResourceReferences];
+    gxos::apps::NavigatorResourceTelemetryRecord m_resourceTelemetry[gxos::apps::kNavigatorMaxResourceTelemetryRecords];
+    uint32_t m_resourceTelemetryCount;
+    gxos::apps::NavigatorResourceSchedulerStats m_resourceScheduler;
+    gxos::apps::NavigatorResourceMemoryAccounting m_resourceMemory;
+    NavigationGenerationRecord m_lifecycleGenerations[MAX_LIFECYCLE_GENERATIONS];
+    uint32_t m_lifecycleGenerationCount;
+    uint32_t m_currentLifecycleGenerationIndex;
+    bool m_injectNextImageFailure;
     char m_metaScheme[8];
     bool m_metaDnsUsed;
-    char m_metaDnsHost[64];
+    char m_metaDnsHost[gxos::web::kHttpSharedMaxHostnameBytes + 1];
     char m_metaDnsResolvedIp[16];
     char m_metaDnsError[64];
     bool m_metaTlsUsed;
@@ -861,8 +1022,8 @@ private:
     char m_metaTransportSelection[40];
     char m_metaTlsStatus[40];
     char m_metaTransportPolicyReason[128];
-    char m_metaTlsHostname[64];
-    char m_metaTlsSniHost[64];
+    char m_metaTlsHostname[gxos::web::kHttpSharedMaxHostnameBytes + 1];
+    char m_metaTlsSniHost[gxos::web::kHttpSharedMaxHostnameBytes + 1];
     char m_metaTlsProtocol[32];
     char m_metaTlsCipherSuite[64];
     bool m_metaCssDetected;
@@ -936,7 +1097,7 @@ private:
     void addBookmark(const char* title, const char* url);
     void loadDefaultBookmarks();
     void drawDocument(uint32_t x, uint32_t y, uint32_t w, uint32_t h);
-    void drawWrappedText(uint32_t x, uint32_t y, const char* text, uint32_t color, int maxChars, int& outY) const;
+    void drawWrappedText(uint32_t x, uint32_t y, const char* text, uint32_t color, int maxWidth, int& outY, const gxos::web::WebStyle& style) const;
     bool isSelectableBlock(const DocBlock& block) const;
     void clearSelection();
     bool hasSelection() const;
@@ -971,13 +1132,34 @@ private:
                            const char* httpReason = "",
                            const char* requestedUrl = nullptr,
                            int redirectCount = 0,
-                           const KernelHttpResponse* networkResponse = nullptr);
+                           const KernelHttpResponse* networkResponse = nullptr,
+                           int inputBytes = -1);
+    void releaseImageResources();
     void prepareImageResources();
+    void updateViewportResourceAdmission();
+    bool evictImageResource(uint32_t referenceIndex, uint8_t reason);
+    bool admitImageResource(uint32_t referenceIndex);
+    void refreshImageResourceMetadata();
+    uint32_t countLiveResourceReferences() const;
+    uint32_t countDuplicateOwners() const;
+    uint32_t countLiveImagePointers() const;
+    void beginLifecycleGeneration(const char* requestedUrl);
+    void finishLifecycleGeneration();
     void resolveHref(const char* baseUrl, const char* href, char* out, int outSize) const;
     void rememberDownload(const DownloadRecord& record);
     void clearPageDownloadMetadata();
     int maxScroll() const;
+    int maxScrollX() const;
     void clampScroll();
+    void clampScrollOffsets();
+    bool rootScrollbarGeometry(bool horizontal, int& trackStart, int& trackCross,
+                               int& trackExtent, int& thumbExtent, int& thumbTravel,
+                               int& maxScrollValue) const;
+    bool rootScrollbarHit(int x, int y, bool& horizontal, bool& thumb,
+                          int& trackStart, int& trackCross, int& trackExtent,
+                          int& thumbExtent, int& thumbTravel, int& maxScrollValue) const;
+    void updateScrollViewport();
+    bool m_resourceViewportDirty = false;
 };
 
 // ============================================================

@@ -27,5 +27,9 @@ public:
 
 using ImagePtr = std::shared_ptr<Image>;
 
+// Test-only deterministic fault injection for the final host-side pixel
+// buffer. UINT32_MAX disables injection; zero denies the next Image buffer.
+void SetImageAllocationFailureInjection(uint32_t failAfterAllocations);
+
 } // namespace gui
 } // namespace gxos

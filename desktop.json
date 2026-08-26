@@ -21,6 +21,7 @@
   "smallLiveDesktopFolderIcons": true,
   "autoArrangeDesktopIcons": false,
   "windows": [
+    {"id": 1000, "title": "guideXOS Navigator", "x": 88, "y": 49, "w": 920, "h": 640, "minimized": false, "maximized": false, "z": 0, "focused": true, "snap": 0, "restoreX": 88, "restoreY": 49, "restoreW": 920, "restoreH": 640}
   ],
   "iconPositions": [
   ]

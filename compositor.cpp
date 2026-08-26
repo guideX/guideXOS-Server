@@ -1563,7 +1563,30 @@ namespace gxos {
         }
 #endif
 
-        static void publishOut(MsgType type, const std::string& payload, uint64_t dstPid = 0) { 
+        static bool isOneWayPaintCompletion(MsgType type, uint64_t dstPid) {
+            if (dstPid == 0) return false;
+            switch (type) {
+            case MsgType::MT_DrawText:
+            case MsgType::MT_DrawRect:
+            case MsgType::MT_DrawImage:
+            case MsgType::MT_DrawTextAt:
+            case MsgType::MT_DrawTextAtColor:
+            case MsgType::MT_DrawTextAtStyled:
+            case MsgType::MT_DrawImageAnimated:
+            case MsgType::MT_SetTitle:
+                return true;
+            default:
+                return false;
+            }
+        }
+
+        static void publishOut(MsgType type, const std::string& payload, uint64_t dstPid = 0) {
+            // Draw commands replace retained compositor state and are complete
+            // once that state has been updated. Their directed acknowledgements
+            // are not consumed by applications and can fill a synchronous
+            // painter's mailbox before it returns to its receive loop. Keep
+            // input, window-control, and lifecycle responses directed.
+            if (isOneWayPaintCompletion(type, dstPid)) return;
             if (type == MsgType::MT_Create) {
                 Logger::write(LogLevel::Info, std::string("publishOut MT_Create payload=") + payload + " dstPid=" + std::to_string(dstPid));
             }
@@ -1827,6 +1850,21 @@ namespace gxos {
         static void drawUiText(HDC dc, int x, int y, const std::string& text, COLORREF color, FontRole role = FontRole::Default)
         {
             drawUiText(dc, x, y, text.c_str(), static_cast<int>(text.size()), color, role);
+        }
+
+        static void drawStyledText(HDC dc, int x, int y, const DrawTextItem& item)
+        {
+            const COLORREF color = item.hasColor ? RGB(item.r, item.g, item.b) : RGB(220, 220, 220);
+            if (item.fontFamily == 1) {
+                BitmapFont::DrawString(dc, x, y, item.text.c_str(), static_cast<int>(item.text.size()), color);
+                return;
+            }
+            const FontWeight weight = item.fontWeight != 0 ? FontWeight::Bold : FontWeight::Regular;
+            const FontSlant slant = item.fontSlant != 0 ? FontSlant::Italic : FontSlant::Normal;
+            const int fontSize = std::max(1, std::min(72, static_cast<int>(item.fontSize)));
+            const BitmapFontFace* face = SystemFont::GetFaceForPixelSize(fontSize, weight, slant);
+            SystemFont::DrawTextScaled(dc, x, y, item.text.c_str(), static_cast<int>(item.text.size()), color,
+                face, SystemFont::ScalePercentForPixelSize(fontSize));
         }
 
         static std::vector<std::string> wrapUiTextToWidth(const std::string& text, int maxWidth, FontRole role, size_t maxLines = 3)
@@ -4589,7 +4627,8 @@ namespace gxos {
                         drawUiText(dc, textX, centeredUiTextY(wr.top, wd.h), wd.text, colorFromTheme(textColor), FontRole::Default);
                     }
                     for (const auto& tx : winfo.positionedTexts) {
-                        SystemFont::DrawText(dc, contentX + tx.x, contentY + tx.y, tx.text.c_str(), (int)tx.text.size(),
+                        if (tx.styled) drawStyledText(dc, contentX + tx.x, contentY + tx.y, tx);
+                        else SystemFont::DrawText(dc, contentX + tx.x, contentY + tx.y, tx.text.c_str(), (int)tx.text.size(),
                             tx.hasColor ? RGB(tx.r, tx.g, tx.b) : RGB(220, 220, 220), FontRole::Default);
                     }
                     int ty = contentY;
@@ -6333,6 +6372,25 @@ namespace gxos {
             case MsgType::MT_DrawText: { std::istringstream iss(s); std::string idS; std::getline(iss, idS, '|'); std::string text; std::getline(iss, text); uint64_t id = 0; uint64_t ownerPid = 0; try { id = std::stoull(idS); } catch (...) {} { std::lock_guard<std::mutex> lk(g_lock); auto it = g_windows.find(id); if (it != g_windows.end( )) { if (text == "\f") { it->second.texts.clear(); it->second.positionedTexts.clear(); it->second.rects.clear(); it->second.images.clear(); it->second.hasFrame = false; it->second.frame.pixels.clear(); } else { it->second.texts.push_back(text); } it->second.dirty = true; ownerPid = it->second.ownerPid; } } publishOut(MsgType::MT_DrawText, std::to_string(id) + "|" + text, ownerPid); invalidate(id); } break;
             case MsgType::MT_DrawTextAt: { std::istringstream iss(s); std::string idS, xs, ys; std::getline(iss, idS, '|'); std::getline(iss, xs, '|'); std::getline(iss, ys, '|'); std::string text; std::getline(iss, text); uint64_t id = 0; uint64_t ownerPid = 0; try { id = std::stoull(idS); } catch (...) {} DrawTextItem item{ std::stoi(xs), std::stoi(ys), text }; { std::lock_guard<std::mutex> lk(g_lock); auto it = g_windows.find(id); if (it != g_windows.end( )) { it->second.positionedTexts.push_back(item); it->second.dirty = true; ownerPid = it->second.ownerPid; } } publishOut(MsgType::MT_DrawTextAt, std::to_string(id), ownerPid); invalidate(id); } break;
             case MsgType::MT_DrawTextAtColor: { std::istringstream iss(s); std::string idS, xs, ys, rs, gs, bs; std::getline(iss, idS, '|'); std::getline(iss, xs, '|'); std::getline(iss, ys, '|'); std::getline(iss, rs, '|'); std::getline(iss, gs, '|'); std::getline(iss, bs, '|'); std::string text; std::getline(iss, text); uint64_t id = 0; uint64_t ownerPid = 0; try { id = std::stoull(idS); } catch (...) {} DrawTextItem item{ std::stoi(xs), std::stoi(ys), text, true, (uint8_t)std::stoi(rs), (uint8_t)std::stoi(gs), (uint8_t)std::stoi(bs) }; { std::lock_guard<std::mutex> lk(g_lock); auto it = g_windows.find(id); if (it != g_windows.end( )) { it->second.positionedTexts.push_back(item); it->second.dirty = true; ownerPid = it->second.ownerPid; } } publishOut(MsgType::MT_DrawTextAtColor, std::to_string(id), ownerPid); invalidate(id); } break;
+            case MsgType::MT_DrawTextAtStyled: {
+                DrawTextStyleSpec spec{};
+                if (!unpackDrawTextAtStyled(s, spec)) break;
+                uint64_t ownerPid = 0;
+                DrawTextItem item{spec.x, spec.y, spec.text, true, spec.r, spec.g, spec.b,
+                    static_cast<uint8_t>(spec.fontSize), static_cast<uint8_t>(spec.weight),
+                    static_cast<uint8_t>(spec.slant), static_cast<uint8_t>(spec.family), true};
+                {
+                    std::lock_guard<std::mutex> lk(g_lock);
+                    auto it = g_windows.find(spec.winId);
+                    if (it != g_windows.end()) {
+                        it->second.positionedTexts.push_back(item);
+                        it->second.dirty = true;
+                        ownerPid = it->second.ownerPid;
+                    }
+                }
+                publishOut(MsgType::MT_DrawTextAtStyled, std::to_string(spec.winId), ownerPid);
+                invalidate(spec.winId);
+            } break;
             case MsgType::MT_Close: {
                 uint64_t id = 0;
                 uint64_t ownerPid = 0;
@@ -7006,6 +7064,10 @@ namespace gxos {
                 info.w = w.w;
                 info.h = w.h;
                 info.widgetCount = static_cast<int>(w.widgets.size());
+                info.widgetIconCount = 0;
+                for (const Widget& widget : w.widgets) {
+                    if (widget.icon.status == ImageLoadStatus::Ok) ++info.widgetIconCount;
+                }
                 info.minimized = w.minimized;
                 info.visible = w.visible && !w.tombstoned;
                 out.push_back(info);
@@ -7596,6 +7658,24 @@ namespace gxos {
             fbDrawText(pixels, pitch, bufW, bufH, x, y, text.c_str(), static_cast<int>(text.size()), color, role);
         }
 
+        static void fbDrawStyledText(uint32_t* pixels, int pitch, int bufW, int bufH,
+                                     int x, int y, const DrawTextItem& item) {
+            const uint32_t color = item.hasColor ? ((static_cast<uint32_t>(item.r) << 16) |
+                (static_cast<uint32_t>(item.g) << 8) | item.b) : 0x00DCDCDC;
+            if (item.fontFamily == 1) {
+                BitmapFont::DrawStringToBuffer(pixels, pitch, bufW, bufH, x, y,
+                    item.text.c_str(), static_cast<int>(item.text.size()), color);
+                return;
+            }
+            const FontWeight weight = item.fontWeight != 0 ? FontWeight::Bold : FontWeight::Regular;
+            const FontSlant slant = item.fontSlant != 0 ? FontSlant::Italic : FontSlant::Normal;
+            const int fontSize = std::max(1, std::min(72, static_cast<int>(item.fontSize)));
+            const BitmapFontFace* face = SystemFont::GetFaceForPixelSize(fontSize, weight, slant);
+            SystemFont::DrawTextToBufferScaled(pixels, pitch, bufW, bufH, x, y,
+                item.text.c_str(), static_cast<int>(item.text.size()), color, face,
+                SystemFont::ScalePercentForPixelSize(fontSize));
+        }
+
         static std::vector<std::string> fbWrapTextToWidth(const std::string& text, int maxWidth, FontRole role, size_t maxLines = 3) {
             std::vector<std::string> lines;
             if (text.empty() || maxWidth <= 0 || maxLines == 0) return lines;
@@ -7846,7 +7926,9 @@ namespace gxos {
                             textX, wy + (wd.h - SystemFont::MeasureHeight(FontRole::Default)) / 2, wd.text, textColor, FontRole::Default);
                     }
                     for (const auto& tx : w.positionedTexts) {
-                        fbDrawText(pixels, pitch, fbW, fbH,
+                        if (tx.styled) fbDrawStyledText(pixels, pitch, fbW, fbH,
+                            contentX + tx.x, contentY + tx.y, tx);
+                        else fbDrawText(pixels, pitch, fbW, fbH,
                             contentX + tx.x, contentY + tx.y, tx.text,
                             tx.hasColor ? ((static_cast<uint32_t>(tx.r) << 16) | (static_cast<uint32_t>(tx.g) << 8) | tx.b) : 0x00DCDCDC,
                             FontRole::Default);

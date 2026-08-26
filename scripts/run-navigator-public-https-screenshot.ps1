@@ -16,6 +16,7 @@ $PackDir = Join-Path $Root "out\wallpaper-pack"
 
 . (Join-Path $ScriptDir "process_environment.ps1")
 Normalize-ProcessEnvironment
+. (Join-Path $ScriptDir "qemu-secure-rng-args.ps1")
 . (Join-Path $ScriptDir "navigator-public-https-reviewed-targets.ps1")
 # The reviewed-target helper enables strict mode in its caller. build.ps1 is a
 # normal interactive build path and currently contains non-strict display code.
@@ -240,10 +241,9 @@ $qemuArgs = @(
     "-no-reboot",
     "-rtc", "base=utc,clock=host",
     "-netdev", "user,id=net0",
-    "-device", "e1000,netdev=net0",
-    "-object", "rng-builtin,id=rng0",
-    "-device", "virtio-rng-pci,rng=rng0,disable-modern=on,max-bytes=1024,period=1000"
+    "-device", "e1000,netdev=net0"
 )
+$qemuArgs += Get-GxosQemuSecureRngArguments
 
 Push-Location $Root
 try {

@@ -41,7 +41,20 @@ namespace gxos { namespace gui {
         uint32_t pixelFormat{0};
         std::vector<uint8_t> pixels;
     };
-    struct DrawTextItem { int x; int y; std::string text; bool hasColor{false}; uint8_t r{220}; uint8_t g{220}; uint8_t b{220}; };
+    struct DrawTextItem {
+        int x;
+        int y;
+        std::string text;
+        bool hasColor{false};
+        uint8_t r{220};
+        uint8_t g{220};
+        uint8_t b{220};
+        uint8_t fontSize{16};
+        uint8_t fontWeight{0};
+        uint8_t fontSlant{0};
+        uint8_t fontFamily{0};
+        bool styled{false};
+    };
     enum class WidgetType { Button=1 };
     struct Widget { WidgetType type; int id; int x; int y; int w; int h; std::string text; std::string iconPath; ImageBitmap icon; bool hover=false; bool pressed=false; };
     struct WinInfo { 
@@ -133,6 +146,7 @@ namespace gxos { namespace gui {
         int w{0};
         int h{0};
         int widgetCount{0};
+        int widgetIconCount{0};
         bool minimized{false};
         bool visible{false};
     };

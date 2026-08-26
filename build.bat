@@ -32,7 +32,13 @@ if not exist "third_party\stb\stb_image.h" (
     exit /b 1
 )
 
-set CXXFLAGS=-std=c++17 -Wall -O2 -iquote . -Ithird_party/mbedtls/include -Ithird_party/mbedtls/tf-psa-crypto/include -Ithird_party/mbedtls/tf-psa-crypto/drivers/builtin/include -Ithird_party/mbedtls/tf-psa-crypto/drivers/builtin/src -Ithird_party/mbedtls/tf-psa-crypto/dispatch -Ithird_party/mbedtls/tf-psa-crypto/extras -Ithird_party/mbedtls/tf-psa-crypto/platform -Ithird_party/mbedtls/tf-psa-crypto/utilities -DMBEDTLS_CONFIG_FILE=\"third_party/mbedtls/guidexos/mbedtls_config.h\" -DTF_PSA_CRYPTO_CONFIG_FILE=\"third_party/mbedtls/guidexos/crypto_config.h\"
+powershell -NoProfile -ExecutionPolicy Bypass -File "scripts\verify-stb-image.ps1"
+if errorlevel 1 exit /b 1
+
+powershell -NoProfile -ExecutionPolicy Bypass -File "scripts\verify-mbedtls-profile.ps1"
+if errorlevel 1 exit /b 1
+
+set CXXFLAGS=-std=c++17 -Wall -O2 -iquote . -Ithird_party/mbedtls/include -Ithird_party/mbedtls/tf-psa-crypto/include -Ithird_party/mbedtls/tf-psa-crypto/drivers/builtin/include -Ithird_party/mbedtls/tf-psa-crypto/drivers/builtin/src -Ithird_party/mbedtls/tf-psa-crypto/dispatch -Ithird_party/mbedtls/tf-psa-crypto/extras -Ithird_party/mbedtls/tf-psa-crypto/platform -Ithird_party/mbedtls/tf-psa-crypto/utilities -DMBEDTLS_CONFIG_FILE=\"guidexos/mbedtls_config.h\" -DTF_PSA_CRYPTO_CONFIG_FILE=\"guidexos/crypto_config.h\"
 set LDFLAGS=-lws2_32 -lsecur32 -lcrypt32 -lbcrypt -lgdi32 -luser32 -lmsimg32
 
 REM Source files (exclude kernel)
@@ -102,6 +108,7 @@ package_manager.cpp ^
 paint.cpp ^
 process.cpp ^
 png_loader.cpp ^
+jpeg_loader.cpp ^
 png_codec.cpp ^
 right_click_menu.cpp ^
 save_changes_dialog.cpp ^

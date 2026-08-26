@@ -84,6 +84,10 @@ Smoke-only malformed and empty CA bundle fixtures for deterministic fail-closed 
 - `scripts/fixtures/public-roots/ca-bundle.pem.local`
   - Ignored local convention for explicit public-root material.
   - This is for manual/dev or intentionally secret-injected proof runs only; it is not a shipped trust store.
+- `scripts/reconstruct-navigator-public-root-fixture.ps1`
+  - Reconstructs the ignored local public-root fixture from the tracked Mozilla CA Extract source.
+  - Refuses source bytes whose reviewed identity does not match Mozilla rotation `mozilla-2026-08-13` (`188900` bytes, `121` certificates, SHA-256 `f66dff1bdf8f96060b8177976f8b7d9254bc89bc4db933d769f7384d28480bc9`).
+  - Performs local X.509 validation and writes an ignored manifest under `logs/`; it never downloads roots or accepts private/machine-specific material.
 
 Trust source distinction in this repository today:
 
@@ -119,6 +123,9 @@ Trust source distinction in this repository today:
 - Provide a public-root PEM bundle explicitly through either:
   - `GXOS_NAVIGATOR_SMOKE_REAL_PUBLIC_HTTPS_CA_BUNDLE_SOURCE=C:\path\to\ca-bundle.pem`, or
   - the conventional ignored local file `scripts/fixtures/public-roots/ca-bundle.pem.local` (copy `scripts/fixtures/public-roots/ca-bundle.pem.example` and replace its placeholder text with real roots).
+- For the established repository production source, reconstruct that ignored local file deterministically with:
+  - `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\reconstruct-navigator-public-root-fixture.ps1`
+  - This uses only `assets/certs/mozilla-cacert-2026-08-13.pem`; the helper verifies its reviewed bytes/hash before copying and validating the fixture.
 - The dedicated script prefers `GXOS_NAVIGATOR_SMOKE_REAL_PUBLIC_HTTPS_CA_BUNDLE_SOURCE` when both the env var path and `scripts/fixtures/public-roots/ca-bundle.pem.local` are present, and it reports that choice clearly.
 - The staging flow validates the explicit public-root PEM locally before building the ramdisk:
   - the file must exist and be readable;
@@ -155,7 +162,7 @@ Trust source distinction in this repository today:
   - `logs/navigator-public-https-proof-pack-<timestamp>/`
   - The pack includes the summary log, serial log, evidence JSON, candidate metadata when supplied, the CA bundle manifest when available, and any commit-safe promotion record.
 - The summary log uses stable `[NAVIGATOR-PUBLIC-HTTPS] key=value` lines for machine checks. PASS-critical fields include `final_result`, `result_marker`, `target_url`, `target_host`, `public_ca_source_marker`, `public_trust_ready`, `public_ca_parsed_certs`, `trust_bundle_manifest_present`, `trust_bundle_sha256`, `trust_bundle_type`, `trust_bundle_root_count`, `trust_bundle_production_ready`, `trust_bundle_test_only`, `dns_result`, `tcp_result`, `tls_result`, `certificate_validation_result`, `hostname_validation_result`, `verify_flags`, `sni_host`, `http_status`, `header_cap_hit`, `body_cap_hit`, `downgrade_blocked`, `tls_succeeded_before_content_failure`, `plaintext_fallback`, and the automated `pass_contract_assertion_result`.
-- Public pilot v0.4 classification fields separate transport proof from content/render compatibility:
+- Public pilot v0.5 classification fields separate transport proof from content/render compatibility:
   - `tls_failure_classification`
   - `tls_transport_proof_result`
   - `content_compatibility_result`
@@ -183,8 +190,12 @@ Trust source distinction in this repository today:
   - `logs/navigator-public-https-*.ca-bundle.manifest`
   - `logs/navigator-public-https-*.evidence.json`
 - The workflow writes the secret to a temporary runner file, validates it immediately with `scripts/validate-navigator-ca-bundle.ps1`, points `GXOS_NAVIGATOR_SMOKE_REAL_PUBLIC_HTTPS_CA_BUNDLE_SOURCE` at that file, and removes the file after the run where practical.
-- The reviewed target allowlist for public-pilot hardening v0.4 currently contains:
+- The reviewed target allowlist for public-pilot hardening v0.5 currently contains:
   - `https://sha256.badssl.com/`
+  - `https://example.com/`
+  - `https://www.gnu.org/`
+  - `https://news.ycombinator.com/`
+  - `https://en.wikipedia.org/`
     Stable badssl DNS-hosted HTTPS endpoint used to prove real-world DNS, TCP, TLS, certificate, and hostname validation without opening arbitrary browsing.
 - The workflow accepts `target_url` only when it matches the approved reviewed allowlist.
 - If you need another public target in GitHub Actions, update the reviewed allowlist intentionally instead of bypassing the guard.
@@ -447,7 +458,7 @@ Operator warnings:
   - Push the branch first if the workflow is new on that branch.
   - Add or confirm the repository secret `GXOS_NAVIGATOR_PUBLIC_CA_BUNDLE_PEM`.
   - Use a real public-root PEM bundle suitable for the selected approved target.
-  - The reviewed allowlist currently approves `https://sha256.badssl.com/` only.
+  - The reviewed allowlist currently approves the v0.5 target matrix listed above.
   - Start the manual run, download the uploaded summary/serial/evidence artifacts, and confirm the PASS artifact checklist.
 - Dedicated public probe smoke with an explicit bundle path:
   - `$env:GXOS_NAVIGATOR_SMOKE_REAL_PUBLIC_HTTPS_CA_BUNDLE_SOURCE="C:\path\to\ca-bundle.pem"`

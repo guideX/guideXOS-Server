@@ -23,7 +23,12 @@
 /guideXOSServer.exe
 /guideXOSServer.experimental.exe
 /logs
-/third_party
+# Keep the established Mbed TLS vendor tree ignored, but make the exact
+# stb_image dependency visible and reproducible for the PNG/JPEG image path.
+/third_party/*
+!/third_party/stb/
+/third_party/stb/*
+!/third_party/stb/stb_image.h
 /dist/
 /out/release-tools/
 /out/release-iso/
@@ -34,3 +39,5 @@
 /out/wallpaper-pack/config/certs/ca-bundle.manifest
 /scripts/fixtures/public-roots/*.local
 /bkup/gfx
+/navigator-smoke/generated/
+/ESP/navigator-smoke/

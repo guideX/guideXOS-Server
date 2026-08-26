@@ -29,11 +29,23 @@ enum class ImageLoadStatus : uint8_t {
     OutOfMemory,
 };
 
+// The two adapters share the same pixel ownership contract, but the
+// framebuffer path stores RGBA bytes as a packed 0xAARRGGBB value after the
+// decoder's in-place channel normalization.  Keeping the source format on
+// the bitmap lets Release() return JPEG and PNG allocations to their owning
+// stb translation unit without guessing from the pixel pointer.
+enum class ImageFormat : uint8_t {
+    Unknown = 0,
+    Png,
+    Jpeg,
+};
+
 struct ImageSafetyLimits {
     uint32_t maxBytes;
     uint32_t maxWidth;
     uint32_t maxHeight;
     uint32_t maxPixels;
+    uint32_t maxDecodedBytes;
 };
 
 inline ImageSafetyLimits DefaultImageSafetyLimits()
@@ -43,6 +55,7 @@ inline ImageSafetyLimits DefaultImageSafetyLimits()
     limits.maxWidth = 4096u;
     limits.maxHeight = 4096u;
     limits.maxPixels = 4096u * 4096u;
+    limits.maxDecodedBytes = 4096u * 4096u * 4u;
     return limits;
 }
 
@@ -63,6 +76,7 @@ struct ImageBitmap {
     const uint32_t* pixels;
     uint32_t width;
     uint32_t height;
+    ImageFormat format = ImageFormat::Unknown;
 };
 
 class ImageAdapter {
@@ -82,6 +96,7 @@ struct ImageBitmap {
     ImagePtr image;
     int width = 0;
     int height = 0;
+    ImageFormat format = ImageFormat::Unknown;
     std::string source;
 };
 

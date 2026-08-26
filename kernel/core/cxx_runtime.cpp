@@ -9,10 +9,156 @@
 #include <kernel/types.h>
 #include <kernel/serial_debug.h>
 
+// These symbols are authoritative linker-provided bounds for the executable
+// kernel text.  They remain weak so non-current architectures whose linker
+// scripts do not yet publish the range keep their existing runtime behavior;
+// the AMD64 and x86 RC linkers publish both symbols below.
+extern "C" char __text_start[] __attribute__((weak));
+extern "C" char __text_end[] __attribute__((weak));
+
+namespace {
+
+#if defined(GXOS_KERNEL_TEXT_WRITE_GUARD)
+const char* g_kernelTextGuardScenario = "boot";
+const char* g_kernelTextGuardStage = "unreported";
+#endif
+
+static uintptr_t kernel_text_start()
+{
+    return reinterpret_cast<uintptr_t>(__text_start);
+}
+
+static uintptr_t kernel_text_end()
+{
+    return reinterpret_cast<uintptr_t>(__text_end);
+}
+
+static uintptr_t current_stack_pointer()
+{
+#if defined(__x86_64__)
+    uintptr_t value;
+    asm volatile ("mov %%rsp, %0" : "=r"(value));
+    return value;
+#elif defined(__i386__)
+    uintptr_t value;
+    asm volatile ("mov %%esp, %0" : "=r"(value));
+    return value;
+#else
+    return 0;
+#endif
+}
+
+#if defined(GXOS_KERNEL_TEXT_WRITE_GUARD)
+
+static bool kernel_text_range_overlaps(uintptr_t destination, size_t length,
+                                       uintptr_t textStart, uintptr_t textEnd,
+                                       uintptr_t* overlapStart, uintptr_t* overlapEnd,
+                                       bool* rangeOverflow)
+{
+    *overlapStart = 0;
+    *overlapEnd = 0;
+    *rangeOverflow = false;
+    if (length == 0 || textStart == 0 || textEnd <= textStart) return false;
+
+    const uintptr_t addressMax = static_cast<uintptr_t>(~static_cast<uintptr_t>(0));
+    if (destination > addressMax - static_cast<uintptr_t>(length)) {
+        // An overflowing destination range is itself invalid.  Treat it as a
+        // fail-closed guard hit so no potentially destructive loop starts.
+        *overlapStart = destination;
+        *overlapEnd = addressMax;
+        *rangeOverflow = true;
+        return true;
+    }
+
+    const uintptr_t destinationEnd = destination + static_cast<uintptr_t>(length);
+    *overlapStart = destination > textStart ? destination : textStart;
+    *overlapEnd = destinationEnd < textEnd ? destinationEnd : textEnd;
+    return *overlapStart < *overlapEnd;
+}
+
+static void halt_after_kernel_text_guard()
+{
+    kernel::serial::puts("[KERNEL-TEXT-WRITE] action=halted_before_write\n");
+    while (1) {
+        kernel::arch::halt();
+    }
+}
+
+static void guard_kernel_text_write(const char* primitive, void* destination,
+                                    const void* source, size_t length, uint8_t fill,
+                                    uintptr_t callerReturn, uintptr_t stackPointer,
+                                    uintptr_t framePointer)
+{
+    const uintptr_t textStart = kernel_text_start();
+    const uintptr_t textEnd = kernel_text_end();
+    uintptr_t overlapStart = 0;
+    uintptr_t overlapEnd = 0;
+    bool rangeOverflow = false;
+    if (!kernel_text_range_overlaps(reinterpret_cast<uintptr_t>(destination), length,
+                                    textStart, textEnd, &overlapStart, &overlapEnd,
+                                    &rangeOverflow)) {
+        return;
+    }
+
+    kernel::serial::puts("[KERNEL-TEXT-WRITE] primitive=");
+    kernel::serial::puts(primitive);
+    kernel::serial::puts(" destination=0x");
+    kernel::serial::put_hex64(reinterpret_cast<uintptr_t>(destination));
+    kernel::serial::puts(" source=0x");
+    kernel::serial::put_hex64(reinterpret_cast<uintptr_t>(source));
+    kernel::serial::puts(" length=0x");
+    kernel::serial::put_hex64(static_cast<uint64_t>(length));
+    kernel::serial::puts(" fill=0x");
+    kernel::serial::put_hex8(fill);
+    kernel::serial::puts(" text_start=0x");
+    kernel::serial::put_hex64(textStart);
+    kernel::serial::puts(" text_end=0x");
+    kernel::serial::put_hex64(textEnd);
+    kernel::serial::puts(" overlap_start=0x");
+    kernel::serial::put_hex64(overlapStart);
+    kernel::serial::puts(" overlap_end=0x");
+    kernel::serial::put_hex64(overlapEnd);
+    kernel::serial::puts(" caller_return=0x");
+    kernel::serial::put_hex64(callerReturn);
+    kernel::serial::puts(" caller_symbol=(unavailable) caller_offset=");
+    if (callerReturn >= textStart && callerReturn < textEnd) {
+        kernel::serial::puts("0x");
+        kernel::serial::put_hex64(callerReturn - textStart);
+    } else {
+        kernel::serial::puts("outside-text");
+    }
+    kernel::serial::puts(" stack_pointer=0x");
+    kernel::serial::put_hex64(stackPointer);
+    kernel::serial::puts(" frame_pointer=0x");
+    kernel::serial::put_hex64(framePointer);
+    kernel::serial::puts(" scenario=");
+    kernel::serial::puts(g_kernelTextGuardScenario ? g_kernelTextGuardScenario : "unknown");
+    kernel::serial::puts(" stage=");
+    kernel::serial::puts(g_kernelTextGuardStage ? g_kernelTextGuardStage : "unknown");
+    kernel::serial::puts(" cpu=0 range_overflow=");
+    kernel::serial::puts(rangeOverflow ? "yes\n" : "no\n");
+    halt_after_kernel_text_guard();
+}
+
+#endif // GXOS_KERNEL_TEXT_WRITE_GUARD
+
+} // namespace
+
 // Avoid GCC generating libstdc++ calls
 #if !defined(_MSC_VER)
 
 extern "C" {
+
+void gxos_kernel_text_guard_set_context(const char* scenario, const char* stage)
+{
+#if defined(GXOS_KERNEL_TEXT_WRITE_GUARD)
+    g_kernelTextGuardScenario = scenario ? scenario : "unknown";
+    g_kernelTextGuardStage = stage ? stage : "unknown";
+#else
+    (void)scenario;
+    (void)stage;
+#endif
+}
 
 // ============================================================================
 // Static object destruction registration
@@ -72,6 +218,12 @@ void __cxa_guard_abort(uint64_t*)
 
 void* memcpy(void* dest, const void* src, size_t n)
 {
+#if defined(GXOS_KERNEL_TEXT_WRITE_GUARD)
+    guard_kernel_text_write("memcpy", dest, src, n, 0,
+                            reinterpret_cast<uintptr_t>(__builtin_return_address(0)),
+                            current_stack_pointer(),
+                            reinterpret_cast<uintptr_t>(__builtin_frame_address(0)));
+#endif
     uint8_t* d = static_cast<uint8_t*>(dest);
     const uint8_t* s = static_cast<const uint8_t*>(src);
     for (size_t i = 0; i < n; ++i) {
@@ -82,6 +234,12 @@ void* memcpy(void* dest, const void* src, size_t n)
 
 void* memset(void* dest, int c, size_t n)
 {
+#if defined(GXOS_KERNEL_TEXT_WRITE_GUARD)
+    guard_kernel_text_write("memset", dest, nullptr, n, static_cast<uint8_t>(c),
+                            reinterpret_cast<uintptr_t>(__builtin_return_address(0)),
+                            current_stack_pointer(),
+                            reinterpret_cast<uintptr_t>(__builtin_frame_address(0)));
+#endif
     uint8_t* d = static_cast<uint8_t*>(dest);
     for (size_t i = 0; i < n; ++i) {
         d[i] = static_cast<uint8_t>(c);
@@ -91,6 +249,12 @@ void* memset(void* dest, int c, size_t n)
 
 void* memmove(void* dest, const void* src, size_t n)
 {
+#if defined(GXOS_KERNEL_TEXT_WRITE_GUARD)
+    guard_kernel_text_write("memmove", dest, src, n, 0,
+                            reinterpret_cast<uintptr_t>(__builtin_return_address(0)),
+                            current_stack_pointer(),
+                            reinterpret_cast<uintptr_t>(__builtin_frame_address(0)));
+#endif
     uint8_t* d = static_cast<uint8_t*>(dest);
     const uint8_t* s = static_cast<const uint8_t*>(src);
     
@@ -208,10 +372,16 @@ char* strstr(const char* haystack, const char* needle)
 // ============================================================================
 
 namespace {
-    // 32 MB kernel heap - large enough for wallpaper-sized decoded PNGs.
-    // A 1536x1024 RGBA image is about 6 MB, and the loader may briefly need
-    // extra slack for STBI bookkeeping and app/window allocations.
+    // Keep production bare metal bounded to the original 32 MiB arena.  The
+    // opt-in Navigator HTTP smoke intentionally retains several 2048x2048
+    // decoded fixtures at once so it can exercise the shared 64 MiB document
+    // budget; give that diagnostic image enough physical heap to reach the
+    // policy boundary instead of faulting inside STBI first.
+#if defined(GXOS_NAVIGATOR_HTTP_SMOKE_ACTIVE)
+    static constexpr size_t KERNEL_HEAP_SIZE = 128u * 1024u * 1024u;
+#else
     static constexpr size_t KERNEL_HEAP_SIZE = 32u * 1024u * 1024u;
+#endif
     static constexpr size_t KERNEL_HEAP_ALIGNMENT = 8u;
 
     struct KernelHeapBlock {

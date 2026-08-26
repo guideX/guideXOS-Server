@@ -2,6 +2,8 @@
 
 #include "process.h"
 #include "guide_web_document.h"   // BlockType, DocBlock, WebDocument (gxos::web)
+#include "navigator_resource_diagnostics.h"
+#include "navigator_resource_scheduler.h"
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -44,6 +46,144 @@ struct DownloadItem {
 	std::string error;
 };
 
+// One bounded record is retained per image reference in the current document.
+// URLs are represented by a short hash in the public diagnostics surface; the
+// resource cache still owns the full URL for the duration of the document.
+struct NavigatorResourceTelemetry {
+	int         ordinal = 0;
+	uint32_t    schedulerOrdinal = 0;
+	int         blockIndex = -1;
+	int         blockY = -1;
+	int         blockTop = -1;
+	int         blockBottom = -1;
+	int         displayWidth = 0;
+	int         displayHeight = 0;
+	int         viewportTop = 0;
+	int         viewportBottom = -1;
+	int         distanceFromViewport = -1;
+	int         viewportRelation = static_cast<int>(NavigatorResourceViewportRelation::Unknown);
+	bool        likelyVisible = false;
+	std::string urlHash;
+	std::string originHost;
+	bool        sameOrigin = false;
+	int         responseStatusCode = 0;
+	std::string contentType;
+	std::string contentEncoding;
+	size_t      encodedBodyBytes = 0;
+	size_t      decodedBodyBytes = 0;
+	uint32_t    imageWidth = 0;
+	uint32_t    imageHeight = 0;
+	uint64_t    decodedRgbaBytes = 0;
+	uint64_t    activeBytesBefore = 0;
+	uint64_t    budgetHeadroomBefore = 0;
+	uint64_t    displayPixelBytes = 0;
+	int         redirectCount = 0;
+	uint32_t    priority = 0;
+	uint32_t    priorityBeforeViewport = 0;
+	bool        admittedDueToViewportPriority = false;
+	NavigatorResourceViewportRelation previousViewportRelation = NavigatorResourceViewportRelation::Unknown;
+	uint8_t     admissionReason = 0;
+	uint8_t     evictionReason = 0;
+	uint16_t    evictionCount = 0;
+	uint16_t    readmissionCount = 0;
+	bool        paintObserved = false;
+	NavigatorResourceSchedulerState schedulerState = NavigatorResourceSchedulerState::Empty;
+	uint64_t    budgetRequestedBytes = 0;
+	uint64_t    budgetAcceptedBytes = 0;
+	int         sharedResourceId = -1;
+	bool        duplicate = false;
+	NavigatorResourceClassification classification = NavigatorResourceClassification::OtherFailure;
+	std::string reason;
+};
+
+struct NavigatorResourceAggregateCounters {
+	int totalResourceReferences = 0;
+	int attempted = 0;
+	int loaded = 0;
+	int failed = 0;
+	int skipped = 0;
+	int pngReferences = 0;
+	int pngLoads = 0;
+	int jpegReferences = 0;
+	int jpegLoads = 0;
+	int svgReferences = 0;
+	int svgFailures = 0;
+	int webpReferences = 0;
+	int webpFailures = 0;
+	int avifReferences = 0;
+	int avifFailures = 0;
+	int gifReferences = 0;
+	int gifFailures = 0;
+	int redirects = 0;
+	int http4xx = 0;
+	int http5xx = 0;
+	int sizeBoundFailures = 0;
+	int decodeFailures = 0;
+	int networkTlsFailures = 0;
+	int unsupportedMime = 0;
+	int duplicateSkips = 0;
+	int resourceLimitSkips = 0;
+	int duplicateResourceUrls = 0;
+	int duplicateNetworkFetches = 0;
+	int duplicateDecodedImages = 0;
+	uint32_t referencesDiscovered = 0;
+	uint32_t uniqueReferences = 0;
+	uint32_t duplicateReferences = 0;
+	uint32_t schedulerCandidates = 0;
+	uint32_t pending = 0;
+	uint32_t fetchStarted = 0;
+	uint32_t fetchCompleted = 0;
+	uint32_t decodeStarted = 0;
+	uint32_t decoded = 0;
+	uint32_t attached = 0;
+	uint32_t budgetDenied = 0;
+	uint32_t resourceCapDenied = 0;
+	uint32_t unsupportedSkipped = 0;
+	uint32_t referencesCapacityDenied = 0;
+	uint32_t released = 0;
+	uint64_t activeCount = 0;
+	uint64_t activeBytes = 0;
+	uint64_t peakActiveBytes = 0;
+	uint64_t currentEncodedResourceBytes = 0;
+	uint64_t peakEncodedResourceBytes = 0;
+	uint64_t peakTemporaryDecodeBytes = 0;
+	uint64_t releasedDecodedBytes = 0;
+	uint64_t deniedAllocationBytes = 0;
+	uint64_t totalLoadedDecodedBytes = 0;
+	uint64_t totalDeniedRequestedBytes = 0;
+	int32_t viewportTop = 0;
+	int32_t viewportBottom = -1;
+	int32_t viewportWidth = 0;
+	int32_t viewportHeight = 0;
+	int32_t initialScrollOffset = 0;
+	int32_t preloadMargin = 0;
+	uint32_t visibleReferences = 0;
+	uint32_t nearReferences = 0;
+	uint32_t farReferences = 0;
+	uint32_t unknownViewportReferences = 0;
+	uint32_t visibleLoaded = 0;
+	uint32_t visibleBudgetDenied = 0;
+	uint32_t nearLoaded = 0;
+	uint32_t nearBudgetDenied = 0;
+	uint32_t farLoaded = 0;
+	uint32_t farBudgetDenied = 0;
+	uint32_t visiblePriorityAdmissions = 0;
+	uint32_t offscreenBudgetDenied = 0;
+	uint64_t decodedBytesVisible = 0;
+	uint64_t decodedBytesNear = 0;
+	uint64_t decodedBytesFar = 0;
+	uint32_t viewportGeneration = 0;
+	uint32_t viewportAdmissionPasses = 0;
+	uint32_t scrollTriggeredAdmissions = 0;
+	uint32_t resourcesReconsidered = 0;
+	uint32_t evictions = 0;
+	uint32_t reAdmissions = 0;
+	uint32_t visibleAdmissionFailures = 0;
+	uint32_t budgetDenialsAfterEvictionAttempts = 0;
+	uint64_t evictedDecodedBytes = 0;
+	int32_t currentScrollOffset = 0;
+};
+
 struct NavigatorPageMetadata {
 	std::string requestedUrl;
 	std::string finalUrl;
@@ -52,6 +192,17 @@ struct NavigatorPageMetadata {
 	std::string httpReasonPhrase;
 	std::string contentType;
 	std::string contentEncoding;
+	std::string responseFraming;
+	bool        contentLengthPresent = false;
+	size_t      contentLength = 0;
+	size_t      encodedBodyBytes = 0;
+	size_t      decodedBodyBytes = 0;
+	size_t      documentSegmentCount = 0;
+	size_t      documentStorageBytes = 0;
+	size_t      documentStorageCapacity = 0;
+	size_t      documentHistoryBytes = 0;
+	bool        documentStorageAllocationFailed = false;
+	bool        truncatedResponse = false;
 	bool        redirected = false;
 	int         redirectCount = 0;
 	std::string errorStatus;
@@ -97,7 +248,26 @@ struct NavigatorPageMetadata {
 		int         failedImageCount = 0;
 		int         remoteImageCount = 0;
 		int         localImageCount = 0;
+		int         jpegImageReferenceCount = 0;
+		int         jpegImageAttemptCount = 0;
+		int         jpegImageLoadCount = 0;
+		int         pngImageLoadCount = 0;
+		int         unsupportedImageCount = 0;
 		std::string lastImageError;
+		NavigatorResourceAggregateCounters resourceCounters;
+		std::vector<NavigatorResourceTelemetry> resourceTelemetry;
+		std::array<int, 64> resourceClassificationCounts{};
+		size_t activeImageResources = 0;
+		size_t activeImageBytes = 0;
+		size_t peakActiveImageBytes = 0;
+		size_t decodedImageBudgetBytes = static_cast<size_t>(kNavigatorDecodedImageBudgetBytes);
+		size_t budgetDeniedBytes = 0;
+		size_t peakEncodedResourceBytes = 0;
+		size_t releasedDecodedBytes = 0;
+		NavigatorResourceSchedulerStats resourceScheduler;
+		size_t releasedImageResources = 0;
+		size_t allocatedImageBytes = 0;
+		size_t releasedImageBytes = 0;
 		bool        cssEnabled = false;
 		bool        cssDetected = false;
 		int         styleRuleCount = 0;
@@ -120,8 +290,30 @@ struct NavigatorPageMetadata {
 		int         cssTableRowCount = 0;
 		int         cssTableCellCount = 0;
 		int         cssTableLayoutFallbackCount = 0;
+		int         cssTableLogicalColumnCount = 0;
+		int         cssTableDataCellCountPhase8B = 0;
+		int         cssTableColspanCellCount = 0;
+		int         cssTableMaximumColspan = 1;
+		int         cssTableWrappedCellCount = 0;
+		int         cssTableWideCount = 0;
+		int         cssTableMalformedFallbackCount = 0;
+		int         cssTableRowspanDeferredCount = 0;
+		int         cssTableRowspanCellCount = 0;
+		int         cssTableMaximumRowspan = 1;
+		int         cssTableOccupiedGridSkips = 0;
+		int         cssTableRowspanHeightAdjustments = 0;
+		int         cssTableCombinedSpanCount = 0;
+		int         cssTableResolvedVerticalEdgeCount = 0;
+		int         cssTableResolvedHorizontalEdgeCount = 0;
+		int         cssTableSuppressedInteriorSpanEdgeCount = 0;
+		int         cssTableBorderConflictCount = 0;
+		int         cssTableLinkHitTestEvidence = 0;
+		int         cssTableGeometryClamps = 0;
+		std::string cssTableGeometryEvidence;
 		int         cssListRenderCount = 0;
 		int         cssClampedValueCount = 0;
+		int         cssLengthValueClampCount = 0;
+		int         cssInvalidLengthValueCount = 0;
 		int         cssLineBreakCount = 0;
 		int         cssTableCaptionCount = 0;
 		int         cssTableHeaderCellCount = 0;
@@ -217,6 +409,265 @@ struct NavigatorPageMetadata {
 		int         cssFocusVisiblePseudoMatches = 0;
 		int         cssRuntimeFocusRecomputations = 0;
 		std::string cssComputedStyleEvidence;
+		// Phase 3A bounded box/clip diagnostics.  These are counters rather than
+		// per-node logs so runtime evidence stays small on large documents.
+		int         cssBoxSizingContentBox = 0;
+		int         cssBoxSizingBorderBox = 0;
+		int         cssWidthAutoResolutions = 0;
+		int         cssHeightAutoResolutions = 0;
+		int         cssPercentageWidthResolved = 0;
+		int         cssPercentageHeightResolved = 0;
+		int         cssPercentageIndefiniteBasis = 0;
+		int         cssPercentageCycleClamps = 0;
+		int         cssMinWidthConstraints = 0;
+		int         cssMaxWidthConstraints = 0;
+		int         cssMinHeightConstraints = 0;
+		int         cssMaxHeightConstraints = 0;
+		int         cssConstraintConflicts = 0;
+		int         cssOverflowVisibleBoxes = 0;
+		int         cssOverflowHiddenBoxes = 0;
+		int         cssOverflowAutoBoxes = 0;
+		int         cssOverflowScrollBoxes = 0;
+		int         cssOverflowScrollDeferred = 0;
+		int         cssActiveScrollContainers = 0;
+		int         cssClippedDescendants = 0;
+		int         cssLocalScrollOperations = 0;
+		int         cssLocalScrollWheelOperations = 0;
+		int         cssNestedScrollContainers = 0;
+		int         cssScrollClamps = 0;
+		int         cssScrollContentExtentRecords = 0;
+		int         cssLocalScrollHitTestEvidence = 0;
+		std::string cssScrollEvidence;
+		int         cssScrollbarVerticalVisibleCount = 0;
+		int         cssScrollbarHorizontalVisibleCount = 0;
+		int         cssScrollbarAutoHiddenCount = 0;
+		int         cssScrollbarScrollModeZeroRangeCount = 0;
+		int         cssScrollbarThumbDragOperations = 0;
+		int         cssScrollbarTrackClickOperations = 0;
+		int         cssScrollbarNestedOperations = 0;
+		int         cssScrollbarHitTestInterceptions = 0;
+		int         cssScrollbarExtentNeutralRecords = 0;
+		int         cssScrollbarVisibilityIterations = 0;
+		int         cssScrollbarVisibilityIterationClamps = 0;
+		std::string cssScrollbarEvidence;
+		int         cssClipIntersections = 0;
+		int         cssClipDepthClamps = 0;
+		int         cssClippedHitTargets = 0;
+		int         cssVisibilityHiddenBoxes = 0;
+		int         cssOpacityBoxes = 0;
+		int         cssOpacityZeroBoxes = 0;
+		int         cssVerticalAlignApplications = 0;
+		int         cssBoxGeometryClamps = 0;
+		int         cssLayoutPasses = 0;
+		int         cssLayoutRecomputations = 0;
+		int         cssClipRecordCount = 0;
+		int         cssHitTargetsBeforeClipping = 0;
+		int         cssHitTargetsAfterClipping = 0;
+		int         cssEvidenceRecordCount = 0;
+		int         cssOpacityImageApproximation = 0;
+		std::string cssGeometryEvidence;
+		// Phase 3B bounded inline-flow diagnostics/evidence.
+		int         cssInlineItems = 0;
+		int         cssInlineTextRuns = 0;
+		int         cssInlineWhitespaceRuns = 0;
+		int         cssInlineForcedBreaks = 0;
+		int         cssLineBoxes = 0;
+		int         cssLineWraps = 0;
+		int         cssWhitespaceCollapses = 0;
+		int         cssLeadingSpaceSuppressions = 0;
+		int         cssTrailingSpaceSuppressions = 0;
+		int         cssReplacedInlineItems = 0;
+		int         cssControlInlineItems = 0;
+		int         cssVerticalAlignAdjustments = 0;
+		int         cssLineHeightClamps = 0;
+		int         cssBaselineIterationClamps = 0;
+		int         cssInlineFragments = 0;
+		int         cssInlineFragmentClamps = 0;
+		int         cssInlineHitFragments = 0;
+		int         cssDescenderSafeLines = 0;
+		int         cssInlineBlockItems = 0;
+		int         cssInlineNestingClamps = 0;
+		int         cssInlineWrapScanClamps = 0;
+		int         cssInlineEvidenceRecordCount = 0;
+		int         cssAtomicFormattingContexts = 0;
+		int         cssAtomicContextDepthMax = 0;
+		int         cssAtomicContextDepthClamps = 0;
+		int         cssAtomicContextsDocument = 0;
+		int         cssAtomicLayoutOperations = 0;
+		int         cssAtomicLayoutOperationClamps = 0;
+		int         cssInlineBlockAutoWidths = 0;
+		int         cssInlineBlockExplicitWidths = 0;
+		int         cssInlineBlockShrinkToFit = 0;
+		int         cssInlineBlockPreferredMinClamps = 0;
+		int         cssInlineBlockPreferredWidthClamps = 0;
+		int         cssInlineBlockBaselineFromLine = 0;
+		int         cssInlineBlockBaselineFallback = 0;
+		int         cssInlineBlockNested = 0;
+		int         cssInlineBlockWraps = 0;
+		int         cssInlineBlockHitTargets = 0;
+		int         cssInlineBlockOverflowClips = 0;
+		int         cssAtomicContextIncomplete = 0;
+		std::string cssInlineEvidence;
+		int         cssAtomicEvidenceRecordCount = 0;
+		std::string cssAtomicEvidence;
+		// Bounded Flexbox diagnostics and fixture evidence.
+		int         cssFlexContainers = 0;
+		int         cssInlineFlexContainers = 0;
+		int         cssFlexItems = 0;
+		int         cssFlexAnonymousItems = 0;
+		int         cssFlexNestedContainers = 0;
+		int         cssFlexNestedMultilineContainers = 0;
+		int         cssFlexColumnWrappedContainers = 0;
+		int         cssFlexLines = 0;
+		int         cssFlexWrappedContainers = 0;
+		int         cssFlexWrapReverseContainers = 0;
+		int         cssFlexAlignContentContainers = 0;
+		int         cssFlexStretchedLines = 0;
+		int         cssFlexWrapUnsupported = 0;
+		int         cssFlexAbsoluteExcluded = 0;
+		int         cssFlexDisplayNoneExcluded = 0;
+		int         cssFlexOrderSortItems = 0;
+		int         cssFlexBaseSizeQueries = 0;
+		int         cssFlexIntrinsicQueries = 0;
+		int         cssFlexAutomaticMinimumApplied = 0;
+		int         cssFlexAutomaticMinimumZero = 0;
+		int         cssFlexGrowIterations = 0;
+		int         cssFlexShrinkIterations = 0;
+		int         cssFlexFreezeIterations = 0;
+		int         cssFlexCrossSizePasses = 0;
+		int         cssFlexBaselineItems = 0;
+		int         cssFlexAutoMarginAbsorptions = 0;
+		int         cssFlexGapClamps = 0;
+		int         cssFlexGeometryClamps = 0;
+		int         cssFlexDepthClamps = 0;
+		int         cssFlexOperationClamps = 0;
+		int         cssFlexUnsupportedDeclarations = 0;
+		int         cssFlexEvidenceRecords = 0;
+		std::string cssFlexEvidence;
+		// Phase 3D bounded margin-collapse/BFC diagnostics and fixture evidence.
+		int         cssMarginCollapseSets = 0;
+		int         cssMarginCollapseParticipants = 0;
+		int         cssMarginCollapseSibling = 0;
+		int         cssMarginCollapseParentTop = 0;
+		int         cssMarginCollapseParentBottom = 0;
+		int         cssMarginCollapseEmpty = 0;
+		int         cssMarginCollapsePositiveOnly = 0;
+		int         cssMarginCollapseNegativeOnly = 0;
+		int         cssMarginCollapseMixed = 0;
+		int         cssMarginCollapseBlockedBorder = 0;
+		int         cssMarginCollapseBlockedPadding = 0;
+		int         cssMarginCollapseBlockedBfc = 0;
+		int         cssMarginCollapseBlockedHeight = 0;
+		int         cssMarginCollapseBlockedContent = 0;
+		int         cssMarginCollapseDepthClamps = 0;
+		int         cssMarginGeometryClamps = 0;
+		int         cssBfcRoot = 0;
+		int         cssBfcInlineBlock = 0;
+		int         cssBfcOverflow = 0;
+		int         cssBfcAtomic = 0;
+		int         cssMarginCollapseEvidenceRecords = 0;
+		std::string cssMarginCollapseEvidence;
+		// Phase 3E bounded float/clear diagnostics and fixture evidence.
+		int         cssFloatLeft = 0;
+		int         cssFloatRight = 0;
+		int         cssFloatBlockifications = 0;
+		int         cssFloatRecords = 0;
+		int         cssFloatPlacementAttempts = 0;
+		int         cssFloatPlacementDownshifts = 0;
+		int         cssFloatSideBySide = 0;
+		int         cssFloatWidthOverflows = 0;
+		int         cssFloatLineExclusions = 0;
+		int         cssFloatZeroWidthLineAdvances = 0;
+		int         cssFloatBfcAvoidances = 0;
+		int         cssFloatBfcDownshifts = 0;
+		int         cssClearLeft = 0;
+		int         cssClearRight = 0;
+		int         cssClearBoth = 0;
+		int         cssClearanceApplied = 0;
+		int         cssFloatContainmentBoundaries = 0;
+		int         cssFloatScopeSuppressions = 0;
+		int         cssFloatHeightContainments = 0;
+		int         cssBfcFloatContainments = 0;
+		int         cssBfcFloatHeightExtensions = 0;
+		int         cssBfcFloatHeightNoops = 0;
+		int         cssBfcFloatAvoidanceAttempts = 0;
+		int         cssBfcFloatAvoidanceFits = 0;
+		int         cssBfcFloatAvoidanceDownshifts = 0;
+		int         cssBfcFloatTooWide = 0;
+		int         cssNestedFloatContexts = 0;
+		int         cssNestedFloatDepthClamps = 0;
+		int         cssFloatInsideInlineBlock = 0;
+		int         cssFloatInsideFloat = 0;
+		int         cssFloatListCases = 0;
+		int         cssFloatTableCellCases = 0;
+		int         cssFloatTableAvoidanceCases = 0;
+		int         cssFloatedTableUnsupported = 0;
+		int         cssFloatDocumentExtentExtensions = 0;
+		int         cssFloatGeometryClamps = 0;
+		int         cssFloatPlacementAttemptClamps = 0;
+		int         cssFloatExclusionScanClamps = 0;
+		int         cssFloatBfcDepthClamps = 0;
+		int         cssFloatEvidenceRecords = 0;
+		std::string cssFloatEvidence;
+		// Phase 3G bounded positioning diagnostics and fixture evidence.
+		int         cssPositionStatic = 0;
+		int         cssPositionRelative = 0;
+		int         cssPositionAbsolute = 0;
+		int         cssPositionFixed = 0;
+		int         cssPositionSticky = 0;
+		int         cssPositionUnsupportedFixed = 0;
+		int         cssPositionUnsupportedSticky = 0;
+		int         cssStickyElementCount = 0;
+		int         cssStickyRootCount = 0;
+		int         cssStickyLocalScrollCount = 0;
+		int         cssStickyConstrainedCount = 0;
+		int         cssStickyReleaseCount = 0;
+		int         cssStickyHorizontalCount = 0;
+		int         cssStickyFlexCount = 0;
+		int         cssStickyPositionedDescendantCount = 0;
+		int         cssStickyHyperlinkHitTestEvidence = 0;
+		std::string cssStickyEvidence;
+		int         cssRelativeOffsets = 0;
+		int         cssRelativePercentageOffsets = 0;
+		int         cssAbsoluteBoxes = 0;
+		int         cssAbsoluteBlockifications = 0;
+		int         cssPositionedContainingBlocks = 0;
+		int         cssPositionRootFallbacks = 0;
+		int         cssPositionAncestryClamps = 0;
+		int         cssAbsoluteStaticPositionUses = 0;
+		int         cssAbsoluteShrinkToFit = 0;
+		int         cssAbsoluteOutOfFlow = 0;
+		int         cssFixedViewportRecords = 0;
+		int         cssFixedAbsoluteDescendants = 0;
+		int         cssFixedFlexExclusions = 0;
+		int         cssFixedHitTestRecords = 0;
+		int         cssFixedStackingRecords = 0;
+		int         cssFixedExtentExclusions = 0;
+		int         cssPositionDocumentExtentExtensions = 0;
+		int         cssZIndexAuto = 0;
+		int         cssZIndexNegative = 0;
+		int         cssZIndexZero = 0;
+		int         cssZIndexPositive = 0;
+		int         cssPositionHitOcclusions = 0;
+		int         cssPositionGeometryClamps = 0;
+		int         cssPositionUnsupportedTable = 0;
+		int         cssPositionStackingOwners = 0;
+		int         cssPositionStackingDepthMax = 0;
+		int         cssPositionStackingDepthClamps = 0;
+		int         cssPositionNestedZRecords = 0;
+		int         cssPositionNegativeZRecords = 0;
+		int         cssPositionPositiveZRecords = 0;
+		int         cssPositionEqualZSourceOrders = 0;
+		int         cssPositionInlineFragmentOwners = 0;
+		int         cssPositionInlineFragmentsShifted = 0;
+		int         cssPositionInlineAncestryClamps = 0;
+		int         cssPositionInlineContainingBlocks = 0;
+		int         cssPositionInlineContainingBlockIncomplete = 0;
+		int         cssPositionStaticSnapshots = 0;
+		int         cssPositionStaticSnapshotFallbacks = 0;
+		int         cssPositionLifecycleResets = 0;
+		int         cssPositionedEvidenceRecords = 0;
+		std::string cssPositionedEvidence;
 	bool        downloaded = false;
 	std::string downloadSavedPath;
 	size_t      downloadByteCount = 0;
@@ -285,6 +736,78 @@ struct NavigatorPageMetadata {
 	std::string lastPostContentType;
 };
 
+// Phase 2I keeps lifecycle evidence deliberately smaller than the parsed
+// document model.  These enums are used only for bounded diagnostics and
+// deterministic smoke assertions; they are not a navigation/session model.
+enum class NavigatorDocumentCategory : uint8_t {
+	None = 0,
+	LocalFile,
+	Http,
+	Https,
+	GeneratedAbout,
+	Error,
+	Unsupported,
+};
+
+enum class NavigatorTransitionCategory : uint8_t {
+	InitialNavigation = 0,
+	Navigation,
+	SameDocumentRecomputation,
+	Reload,
+	HistoryBack,
+	HistoryForward,
+	RedirectReplacement,
+	LocalFileNavigation,
+	GeneratedAboutNavigation,
+	PageInfoGeneration,
+	SavePageTextGeneration,
+	NavigationFailure,
+	ParseFailure,
+	TlsPolicyFailure,
+	AbortedNavigation,
+	WindowDocumentTeardown,
+};
+
+struct NavigatorLifecycleDiagnostics {
+	uint64_t documentGenerationChanges = 0;
+	uint64_t sameDocumentRecomputations = 0;
+	uint64_t documentReplacements = 0;
+	uint64_t focusPreservedRecompute = 0;
+	uint64_t focusClearedReload = 0;
+	uint64_t focusClearedHistory = 0;
+	uint64_t focusClearedRedirect = 0;
+	uint64_t focusClearedGeneratedPage = 0;
+	uint64_t focusClearedNavigationFailure = 0;
+	uint64_t runtimeStateClears = 0;
+	uint64_t staleMouseReleaseBlocks = 0;
+	uint64_t staleKeyReleaseBlocks = 0;
+	uint64_t inspectedDocumentGuardPass = 0;
+	uint64_t inspectedDocumentGuardBlock = 0;
+	uint64_t pageInfoSourceValid = 0;
+	uint64_t saveTextSourceValid = 0;
+	uint64_t historyStateNonpersistent = 0;
+	uint64_t transitionMetadataClamps = 0;
+
+	uint64_t visibleDocumentGeneration = 0;
+	uint64_t inspectedDocumentGeneration = 0;
+	NavigatorDocumentCategory visibleDocumentCategory = NavigatorDocumentCategory::None;
+	NavigatorDocumentCategory inspectedSourceCategory = NavigatorDocumentCategory::None;
+	NavigatorTransitionCategory lastTransition = NavigatorTransitionCategory::InitialNavigation;
+	bool requestedFinalUrlEqual = true;
+	bool visibleDocumentGenerated = false;
+	bool visibleDocumentInspectionView = false;
+	bool sourceReferenceValid = false;
+	bool ownershipGuardPassed = false;
+
+	std::string saveTextIntendedSourceCategory = "none";
+	std::string saveTextActualSourceCategory = "none";
+	uint64_t saveTextVisibleTextByteCount = 0;
+	bool saveTextGeneratedPageExcluded = false;
+	bool saveTextPasswordRedacted = false;
+	bool saveTextHiddenControlExcluded = false;
+	bool saveTextDiagnosticsExcluded = true;
+};
+
 // =============================================================================
 // Navigator – first-class guideXOS app
 //
@@ -300,11 +823,39 @@ public:
 	static uint64_t Launch();
 	static bool SmokeNavigateTo(const std::string& url);
 	static bool SmokeNavigateToQuiet(const std::string& url);
+	static bool SmokeNavigateToWithHistory(const std::string& url);
 	static bool SmokeSubmitFirstForm(const std::string& value);
 	static int SmokeFindInPage(const std::string& query);
 	static bool SmokeClickFirstLink();
+	static bool SmokeHitLinkById(const std::string& id);
+	static bool SmokeLinkGeometryById(const std::string& id,
+		int& outPaintX, int& outPaintY, int& outPaintW, int& outPaintH,
+		int& outFinalX, int& outFinalY, int& outFinalW, int& outFinalH,
+		int& outClipX, int& outClipY, int& outClipW, int& outClipH);
+	static bool SmokeTableGeometryById(const std::string& id,
+		int& outX, int& outY, int& outW, int& outH,
+		int& outRows, int& outColumns);
+	static bool SmokeTableCellGeometryById(const std::string& id,
+		int& outX, int& outY, int& outW, int& outH,
+		int& outRow, int& outColumn, int& outRowSpan, int& outColSpan);
+	static bool SmokeBlockGeometryById(const std::string& id,
+		int& outX, int& outY, int& outW, int& outH);
+	static bool SmokeHitLinkAt(int x, int y, const std::string& id);
+	static std::string SmokeHitTargetIdAt(int x, int y);
+	static void SmokeSetScrollOffset(int offset);
+	static int SmokeScrollOffset();
+	static bool SmokeSetElementScrollOffsetById(const std::string& id, int offsetX, int offsetY);
+	static int SmokeElementScrollOffsetYById(const std::string& id);
+	static int SmokeElementMaxScrollYById(const std::string& id);
+	static bool SmokeElementScrollbarGeometryById(const std::string& id, bool horizontal,
+		bool thumb, int& outX, int& outY, int& outW, int& outH);
+	static int SmokeElementScrollOffsetXById(const std::string& id);
+	static int SmokeElementMaxScrollXById(const std::string& id);
+	static bool SmokePointerInput(int x, int y, int button, const std::string& action);
 	static bool SmokeDragFirstLinkSelectsWithoutNavigation();
 	static std::string SmokeRuntimeReport();
+	static std::string SmokePageDiagnostics();
+	static std::string SmokeLifecycleReport();
 	static std::string SmokeCurrentUrl();
 	static int SmokeCurrentBlockCount();
 	static std::string SmokeCurrentDocumentText();
@@ -329,6 +880,10 @@ public:
 	static int SmokeFormControlInputLengthById(const std::string& id);
 	static void SmokeFocusAddressBar();
 	static bool SmokeReloadCurrentDocument();
+	static bool SmokeGoBack();
+	static bool SmokeGoForward();
+	static bool SmokeMouseDownFormControlById(const std::string& id);
+	static bool SmokeMouseUp();
 	// Returns the widget IDs registered with the compositor toolbar.
 	// Used by hosted smoke to verify the full modern toolbar (7 buttons) is
 	// present and that the old stale four-button placeholder is not active.
@@ -385,6 +940,7 @@ private:
 		FormSelect,
 		FormSubmit,
 		FormLabel,
+		ElementScrollbar,
 	};
 
 	enum class MouseMode : uint8_t {
@@ -395,6 +951,13 @@ private:
 		FormInputInteraction,
 		AddressBarInteraction,
 		ToolbarInteraction,
+		ElementScrollbarInteraction,
+	};
+
+	enum class ScrollbarAxis : uint8_t {
+		None = 0,
+		Vertical,
+		Horizontal,
 	};
 
 	// -------------------------------------------------------------------------
@@ -409,7 +972,8 @@ private:
 	// loadUrl() is the raw document-loading engine.  It fetches and renders
 	// the document but does NOT modify history.  All callers that represent
 	// user navigation (links, Home, Back, Forward) go through the helpers below.
-	static void loadUrl(const std::string& url, bool updateDisplayAfterLoad = true);
+	static void loadUrl(const std::string& url, bool updateDisplayAfterLoad = true,
+		NavigatorTransitionCategory transition = NavigatorTransitionCategory::Navigation);
 
 	// navigateTo() – normal forward navigation (link clicks, Home).
 	//   Pushes the current URL onto the back stack, clears the forward stack,
@@ -450,7 +1014,7 @@ private:
 	// -------------------------------------------------------------------------
 	// Rendering
 	// -------------------------------------------------------------------------
-	static void updateDisplay();
+	static void updateDisplay(bool renderDocumentContent = true);
 	static void renderToolbar();
 	static void renderDocument();
 	static void renderStatusBar();
@@ -527,6 +1091,15 @@ private:
 	static void commitAddressBar();  // navigate to typed URL, then blur
 	static std::string normalizeUrl(const std::string& input); // scheme normalizer
 	static void storePageMetadata(NavigatorPageMetadata metadata, const WebDocument& doc);
+	static NavigatorTransitionCategory transitionCategoryForUrl(const std::string& url);
+	static NavigatorDocumentCategory documentCategoryForUrl(const std::string& url,
+		const NavigatorPageMetadata& metadata);
+	static const char* documentCategoryName(NavigatorDocumentCategory category);
+	static const char* transitionCategoryName(NavigatorTransitionCategory category);
+	static bool isGeneratedInspectionViewUrl(const std::string& url);
+	static bool visibleDocumentOwnsInspectedSource();
+	static void refreshLifecycleOwnershipEvidence();
+	static void noteFocusClearedForTransition(NavigatorTransitionCategory transition, bool hadFocus);
 
 	// -------------------------------------------------------------------------
 	// Hit testing & layout helpers
@@ -537,9 +1110,12 @@ private:
 	static Rect      linkBlockRect(int blockIndex); // absolute screen rect
 	static Rect      formControlRect(int blockIndex);
 	static Rect      selectableBlockRect(int blockIndex);
+	static bool      inlineFragmentRectForBlock(int blockIndex, bool includeWhitespace, Rect& out);
+	static bool      inlineFragmentContainsPoint(int blockIndex, int x, int y);
 	static int       computeDocumentHeight();
 	static int       maxScrollOffset();
 	static void      clampScrollOffset();
+	static void      clearScrollbarDragState();
 
 	// -------------------------------------------------------------------------
 	// State
@@ -553,6 +1129,15 @@ private:
 	static WebDocument          s_currentDoc;
 	static WebDocument          s_inspectedDoc;
 	static NavigatorPageMetadata s_pageMetadata;
+	static NavigatorLifecycleDiagnostics s_lifecycleDiagnostics;
+	static NavigatorDocumentCategory s_visibleDocumentCategory;
+	static NavigatorDocumentCategory s_inspectedSourceCategory;
+	static bool s_visibleDocumentInspectionView;
+	static uint64_t s_inspectedDocumentGeneration;
+	static std::string s_pendingDocumentUrl;
+	static NavigatorTransitionCategory s_pendingTransitionCategory;
+	static uint64_t s_staleMouseReleaseGeneration;
+	static uint64_t s_staleKeyReleaseGeneration;
 	// Navigation history – scheme-agnostic URL stacks.
 	static std::vector<std::string> s_backStack;
 	static std::vector<std::string> s_forwardStack;
@@ -590,6 +1175,12 @@ private:
 	static int         s_mouseCurrentX;
 	static int         s_mouseCurrentY;
 	static bool        s_mouseDragThresholdExceeded;
+	static uint64_t    s_scrollbarDragSerial;
+	static ScrollbarAxis s_scrollbarDragAxis;
+	static int         s_scrollbarDragGrabOffset;
+	static uint64_t    s_hitScrollbarSerial;
+	static ScrollbarAxis s_hitScrollbarAxis;
+	static bool        s_hitScrollbarThumb;
 	static bool        s_selectionBegan;
 	static bool        s_selectionActive;
 	static bool        s_selectionPending;

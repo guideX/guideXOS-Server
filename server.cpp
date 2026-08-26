@@ -82,6 +82,7 @@
 #include "native_app_process_table.h"
 #include <iostream>
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <chrono>
 #include <sstream>
@@ -452,12 +453,72 @@ static std::string navigatorHostedSmokeDiagnostic() {
         "registered_widget_count=" + std::to_string(toolbarWidgetCount) +
         " ids=[" + toolbarIdStr + "] (stale placeholder has <=4 buttons)");
 
+    // Widget registration and icon decode are asynchronous IPC messages. Refresh
+    // the compositor snapshot after the toolbar-registration wait so this check
+    // observes the actual cached icon handoff rather than the initial empty list.
+    if (foundWindow) {
+        for (int attempt = 0; attempt < 50 && navWindow.widgetIconCount < 6; ++attempt) {
+            const std::vector<gxos::gui::WindowDebugInfo> refreshedWindows = gxos::gui::Compositor::debugWindowsSnapshot();
+            for (const auto& window : refreshedWindows) {
+                if (window.id == navWindow.id) {
+                    navWindow = window;
+                    break;
+                }
+            }
+            if (navWindow.widgetIconCount >= 6) break;
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
+    }
+    add("toolbar icon cache initialized",
+        foundWindow && navWindow.widgetIconCount >= 6,
+        foundWindow ? ("widget_icon_count=" + std::to_string(navWindow.widgetIconCount)) : "window not found");
+
     bool navigated = gxos::apps::Navigator::SmokeNavigateTo("about:navigator-runtime");
     std::string currentUrl = gxos::apps::Navigator::SmokeCurrentUrl();
     std::string runtimeReport = gxos::apps::Navigator::SmokeRuntimeReport();
     add("runtime URL loads", navigated && currentUrl == "about:navigator-runtime", "currentUrl=" + currentUrl);
     add("runtime report mode", contains(runtimeReport, "Runtime.Mode=hosted/compositor"), "expected hosted/compositor");
     add("runtime report launch path", contains(runtimeReport, "DesktopService::LaunchApp -> apps::Navigator::Launch"), "expected DesktopService/apps::Navigator");
+    add("toolbar icon resources", contains(runtimeReport, "Toolbar.icon_resources=6/6"), "expected six packaged Navigator assets");
+    add("toolbar icon size", contains(runtimeReport, "Toolbar.icon_size=16x16"), "expected bounded 16x16 toolbar icons");
+    add("toolbar icon/text geometry", contains(runtimeReport, "Toolbar.icon_rect_inside_button=yes") &&
+        contains(runtimeReport, "Toolbar.icon_text_nonoverlap=yes"), "expected safe icon/text geometry");
+    add("toolbar fallback path", contains(runtimeReport, "Toolbar.fallback=label_only_on_image_load_failure"), "expected label-preserving fallback");
+    add("toolbar full hit target", contains(runtimeReport, "Toolbar.hit_target=full_button_rectangle"), "expected full button hit target");
+    add("toolbar address geometry", contains(runtimeReport, "Toolbar.address_width_nonnegative=yes") &&
+        contains(runtimeReport, "Toolbar.narrow_window=address_width_clamped_to_zero"), "expected bounded address layout");
+    add("toolbar viewport unchanged", contains(runtimeReport, "Toolbar.toolbar_height=unchanged_64px") &&
+        contains(runtimeReport, "Toolbar.document_viewport=unchanged"), "expected centralized document viewport unchanged");
+    const auto hasPositiveThrobberCount = [](const std::string& report, const std::string& prefix) {
+        const std::size_t pos = report.find(prefix);
+        if (pos == std::string::npos) return false;
+        const std::size_t valuePos = pos + prefix.size();
+        return valuePos < report.size() &&
+            std::isdigit(static_cast<unsigned char>(report[valuePos])) &&
+            report[valuePos] != '0';
+    };
+    add("throbber frame/resource contract",
+        contains(runtimeReport, "Throbber.active_frame_count=12") &&
+        contains(runtimeReport, "Throbber.frame_dimensions=72x72") &&
+        contains(runtimeReport, "Throbber.paint_dimensions=22x22") &&
+        contains(runtimeReport, "Throbber.frame_index=bounded_0_to_11") &&
+        contains(runtimeReport, "Throbber.cache=process_lifetime_compositor_ui_image_cache") &&
+        contains(runtimeReport, "Throbber.per_frame_resource_load=none") &&
+        contains(runtimeReport, "Throbber.per_frame_decode=none"),
+        "expected fixed cached surfer frame set");
+    add("throbber loading lifecycle balance",
+        contains(runtimeReport, "Throbber.loading_state=idle") &&
+        contains(runtimeReport, "Throbber.loading_terminal_balance=yes") &&
+        hasPositiveThrobberCount(runtimeReport, "Throbber.loading_entries=") &&
+        hasPositiveThrobberCount(runtimeReport, "Throbber.loading_exits="),
+        "expected balanced terminal idle state");
+    const bool noOpBack = !gxos::apps::Navigator::SmokeGoBack();
+    const bool noOpForward = !gxos::apps::Navigator::SmokeGoForward();
+    const std::string noOpHistoryReport = gxos::apps::Navigator::SmokeRuntimeReport();
+    add("throbber no-op history stays idle",
+        noOpBack && noOpForward && contains(noOpHistoryReport, "Throbber.loading_state=idle") &&
+        contains(noOpHistoryReport, "Throbber.loading_terminal_balance=yes"),
+        "expected empty Back/Forward actions to avoid a new load");
     add("stale placeholder inactive", contains(runtimeReport, "Runtime.Stale placeholder path=not active"), "expected not active");
     add("file read enabled", contains(runtimeReport, "Capabilities.File read=enabled"), "expected enabled");
     add("file write enabled", contains(runtimeReport, "Capabilities.File write=enabled"), "expected enabled");
@@ -485,7 +546,10 @@ static std::string navigatorHostedSmokeDiagnostic() {
         contains(runtimeReport, "TLS Prerequisites.Root CA bytes=0"), "expected hosted trust store diagnostics");
     add("runtime TLS readiness boundary", contains(runtimeReport, "TLS Prerequisites.TLS readiness=yes") &&
         contains(runtimeReport, "TLS Prerequisites.TLS readiness blocker=(none)"), "expected hosted readiness details");
-    add("remote PNG enabled", contains(runtimeReport, "Capabilities.Remote PNG=enabled"), "expected enabled");
+    add("remote PNG/JPEG enabled",
+        contains(runtimeReport, "Capabilities.Remote PNG/JPEG=enabled") ||
+            contains(runtimeReport, "Capabilities.Remote PNG=enabled"),
+        "expected enabled");
     add("downloads enabled", contains(runtimeReport, "Capabilities.Downloads=enabled"), "expected enabled");
     add("CSS-lite enabled", contains(runtimeReport, "Capabilities.CSS-lite embedded <style>=enabled"), "expected enabled");
     add("colored text primitive enabled", contains(runtimeReport, "Capabilities.Hosted colored text primitive=enabled"), "expected enabled");
@@ -682,7 +746,8 @@ static std::string navigatorHostedSmokeDiagnostic() {
         "currentUrl=" + gxos::apps::Navigator::SmokeCurrentUrl());
     add("CSS wide table clamps safely",
         contains(cssTableWideReport, "Current Document.CSS enabled=yes") &&
-        hasPositiveCount(cssTableWideReport, "Current Document.CSS table layout fallbacks=") &&
+        (hasPositiveCount(cssTableWideReport, "Current Document.CSS table layout fallbacks=") ||
+         hasPositiveCount(cssTableWideReport, "Current Document.table_logical_columns=")) &&
         hasPositiveCount(cssTableWideReport, "Current Document.CSS tables rendered="),
         "fallbacks=" + reportLine(cssTableWideReport, "Current Document.CSS table layout fallbacks=") +
         "; tables=" + reportLine(cssTableWideReport, "Current Document.CSS tables rendered=") +
@@ -756,6 +821,203 @@ static std::string navigatorHostedSmokeDiagnostic() {
         hasPositiveCount(cssTable1dReport, "Current Document.CSS table header cells rendered=") &&
         hasPositiveCount(cssTable1dReport, "Current Document.CSS visited links styled="),
         "report=\"" + summarizeText(cssTable1dReport, 260) + "\"");
+
+    const std::string tablePhase8bUrl =
+        "http://127.0.0.1:8080/navigator-smoke/table-phase8b.html";
+    const bool tablePhase8bLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet(tablePhase8bUrl);
+    const std::string tablePhase8bText = gxos::apps::Navigator::SmokeCurrentDocumentText();
+    const std::string tablePhase8bReport = gxos::apps::Navigator::SmokeRuntimeReport();
+    int table8bX = 0, table8bY = 0, table8bW = 0, table8bH = 0;
+    int table8bRows = 0, table8bColumns = 0;
+    const bool table8bGeometry = gxos::apps::Navigator::SmokeTableGeometryById(
+        "phase8b-basic", table8bX, table8bY, table8bW, table8bH, table8bRows, table8bColumns);
+    int following8bX = 0, following8bY = 0, following8bW = 0, following8bH = 0;
+    const bool following8bGeometry = gxos::apps::Navigator::SmokeBlockGeometryById(
+        "phase8b-following", following8bX, following8bY, following8bW, following8bH);
+    int span8bX = 0, span8bY = 0, span8bW = 0, span8bH = 0;
+    int span8bRows = 0, span8bColumns = 0;
+    const bool span8bGeometry = gxos::apps::Navigator::SmokeTableGeometryById(
+        "phase8b-spans", span8bX, span8bY, span8bW, span8bH, span8bRows, span8bColumns);
+    int wide8bX = 0, wide8bY = 0, wide8bW = 0, wide8bH = 0;
+    int wide8bRows = 0, wide8bColumns = 0;
+    const bool wide8bGeometry = gxos::apps::Navigator::SmokeTableGeometryById(
+        "phase8b-wide", wide8bX, wide8bY, wide8bW, wide8bH, wide8bRows, wide8bColumns);
+    const int table8bWideMaxX = gxos::apps::Navigator::SmokeElementMaxScrollXById("phase8b-wide-scroll");
+    gxos::apps::Navigator::SmokeSetScrollOffset(std::max(0, wide8bY - 120));
+    int table8bBarX = 0, table8bBarY = 0, table8bBarW = 0, table8bBarH = 0;
+    const bool table8bHorizontalBar = gxos::apps::Navigator::SmokeElementScrollbarGeometryById(
+        "phase8b-wide-scroll", true, false, table8bBarX, table8bBarY, table8bBarW, table8bBarH);
+    const bool table8bLinkBeforeScroll = gxos::apps::Navigator::SmokeHitLinkById("phase8b-scrolled-link");
+    const int table8bScrollTarget = std::min(table8bWideMaxX, 240);
+    const bool table8bScrolled = table8bWideMaxX > 0 &&
+        gxos::apps::Navigator::SmokeSetElementScrollOffsetById(
+            "phase8b-wide-scroll", table8bScrollTarget, 0);
+    int table8bLinkPaintX = 0, table8bLinkPaintY = 0, table8bLinkPaintW = 0, table8bLinkPaintH = 0;
+    int table8bLinkFinalX = 0, table8bLinkFinalY = 0, table8bLinkFinalW = 0, table8bLinkFinalH = 0;
+    int table8bLinkClipX = 0, table8bLinkClipY = 0, table8bLinkClipW = 0, table8bLinkClipH = 0;
+    const bool table8bLinkGeometry = gxos::apps::Navigator::SmokeLinkGeometryById(
+        "phase8b-scrolled-link", table8bLinkPaintX, table8bLinkPaintY, table8bLinkPaintW, table8bLinkPaintH,
+        table8bLinkFinalX, table8bLinkFinalY, table8bLinkFinalW, table8bLinkFinalH,
+        table8bLinkClipX, table8bLinkClipY, table8bLinkClipW, table8bLinkClipH);
+    const bool table8bLinkAfterScroll = table8bScrolled &&
+        gxos::apps::Navigator::SmokeHitLinkById("phase8b-scrolled-link");
+    gxos::apps::Navigator::SmokeSetElementScrollOffsetById("phase8b-wide-scroll", 0, 0);
+    const std::string table8bFinalReport = gxos::apps::Navigator::SmokeRuntimeReport();
+    add("HTML table Phase 8B fixture loads", tablePhase8bLoaded &&
+        contains(tablePhase8bText, "HTML Table Layout Foundation") &&
+        contains(tablePhase8bText, "Phase 8B shared-column caption") &&
+        contains(tablePhase8bText, "wrapped cell link") &&
+        contains(tablePhase8bText, "local image in a table cell") &&
+        contains(tablePhase8bText, "Malformed table markup"),
+        "currentUrl=" + gxos::apps::Navigator::SmokeCurrentUrl() + ",text=\"" +
+        summarizeText(tablePhase8bText, 500) + "\"");
+    add("HTML table Phase 8B bounded diagnostics", tablePhase8bLoaded &&
+        hasPositiveCount(tablePhase8bReport, "Current Document.CSS tables rendered=") &&
+        hasPositiveCount(tablePhase8bReport, "Current Document.CSS table rows rendered=") &&
+        hasPositiveCount(tablePhase8bReport, "Current Document.CSS table cells rendered=") &&
+        hasPositiveCount(tablePhase8bReport, "Current Document.table_logical_columns=") &&
+        hasPositiveCount(tablePhase8bReport, "Current Document.table_data_cells=") &&
+        hasPositiveCount(tablePhase8bReport, "Current Document.table_colspan_cells=") &&
+        hasPositiveCount(tablePhase8bReport, "Current Document.table_maximum_colspan=") &&
+        hasPositiveCount(tablePhase8bReport, "Current Document.table_wrapped_cells=") &&
+        hasPositiveCount(tablePhase8bReport, "Current Document.table_malformed_fallbacks=") &&
+        contains(tablePhase8bReport, "Current Document.table_rowspan_model=bounded-occupancy-grid-max16-two-pass-height-solve") &&
+        contains(tablePhase8bReport, "Current Document.table_geometry_evidence="),
+        "report=\"" + summarizeText(tablePhase8bReport, 1200) + "\"");
+    add("HTML table Phase 8B shared grid and normal flow geometry", table8bGeometry &&
+        table8bRows >= 4 && table8bColumns == 2 && table8bW > 0 && table8bH > 0 &&
+        following8bGeometry && following8bY >= table8bY + table8bH,
+        "table=" + std::to_string(table8bX) + ":" + std::to_string(table8bY) + ":" +
+        std::to_string(table8bW) + ":" + std::to_string(table8bH) + ",rows=" +
+        std::to_string(table8bRows) + ",columns=" + std::to_string(table8bColumns) +
+        ",following=" + std::to_string(following8bX) + ":" + std::to_string(following8bY) +
+        ":" + std::to_string(following8bW) + ":" + std::to_string(following8bH));
+    add("HTML table Phase 8B colspan and header geometry", span8bGeometry &&
+        span8bRows >= 4 && span8bColumns >= 3 && span8bW > 0 && span8bH > 0 &&
+        contains(tablePhase8bReport, "Current Document.CSS table header cells rendered="),
+        "spans=" + std::to_string(span8bX) + ":" + std::to_string(span8bY) + ":" +
+        std::to_string(span8bW) + ":" + std::to_string(span8bH) + ",rows=" +
+        std::to_string(span8bRows) + ",columns=" + std::to_string(span8bColumns) +
+        ",evidence=" + evidenceSnippet(tablePhase8bReport, "Current Document.table_geometry_evidence="));
+    add("HTML table Phase 8B links and wide-table scrollbar", table8bHorizontalBar &&
+        table8bBarW > 0 && table8bBarH > 0 && table8bWideMaxX > 0 &&
+        table8bLinkAfterScroll &&
+        hasPositiveCount(table8bFinalReport, "Current Document.table_link_hit_test_evidence=") &&
+        wide8bGeometry && wide8bW > 0 && wide8bH > 0,
+        std::string("bar=") + yesNo(table8bHorizontalBar) + ",maxScrollX=" +
+        std::to_string(table8bWideMaxX) + ",barRect=" + std::to_string(table8bBarX) + ":" +
+        std::to_string(table8bBarY) + ":" + std::to_string(table8bBarW) + ":" +
+        std::to_string(table8bBarH) + ",linkBefore=" + yesNo(table8bLinkBeforeScroll) +
+        ",linkAfter=" + yesNo(table8bLinkAfterScroll) + ",wide=" +
+        std::to_string(wide8bX) + ":" + std::to_string(wide8bY) + ":" +
+        std::to_string(wide8bW) + ":" + std::to_string(wide8bH) + ",evidence=" +
+        evidenceSnippet(tablePhase8bReport, "Current Document.table_geometry_evidence=") +
+        ",linkGeometry=" + yesNo(table8bLinkGeometry) + ",paint=" +
+        std::to_string(table8bLinkPaintX) + ":" + std::to_string(table8bLinkPaintY) + ":" +
+        std::to_string(table8bLinkPaintW) + ":" + std::to_string(table8bLinkPaintH) + ",final=" +
+        std::to_string(table8bLinkFinalX) + ":" + std::to_string(table8bLinkFinalY) + ":" +
+        std::to_string(table8bLinkFinalW) + ":" + std::to_string(table8bLinkFinalH) + ",clip=" +
+        std::to_string(table8bLinkClipX) + ":" + std::to_string(table8bLinkClipY) + ":" +
+        std::to_string(table8bLinkClipW) + ":" + std::to_string(table8bLinkClipH));
+
+    const std::string tablePhase8cUrl =
+        "http://127.0.0.1:8080/navigator-smoke/table-phase8c.html";
+    const bool tablePhase8cLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet(tablePhase8cUrl);
+    const std::string tablePhase8cText = gxos::apps::Navigator::SmokeCurrentDocumentText();
+    const std::string tablePhase8cReport = gxos::apps::Navigator::SmokeRuntimeReport();
+    int table8cX = 0, table8cY = 0, table8cW = 0, table8cH = 0, table8cRows = 0, table8cColumns = 0;
+    const bool table8cGeometry = gxos::apps::Navigator::SmokeTableGeometryById(
+        "phase8c-basic", table8cX, table8cY, table8cW, table8cH, table8cRows, table8cColumns);
+    int span2X = 0, span2Y = 0, span2W = 0, span2H = 0, span2Row = 0, span2Column = 0, span2Rows = 0, span2Columns = 0;
+    int span3X = 0, span3Y = 0, span3W = 0, span3H = 0, span3Row = 0, span3Column = 0, span3Rows = 0, span3Columns = 0;
+    int combinedX = 0, combinedY = 0, combinedW = 0, combinedH = 0, combinedRow = 0, combinedColumn = 0, combinedRows = 0, combinedColumns = 0;
+    const bool span2Geometry = gxos::apps::Navigator::SmokeTableCellGeometryById(
+        "phase8c-span2", span2X, span2Y, span2W, span2H, span2Row, span2Column, span2Rows, span2Columns);
+    const bool span3Geometry = gxos::apps::Navigator::SmokeTableCellGeometryById(
+        "phase8c-span3", span3X, span3Y, span3W, span3H, span3Row, span3Column, span3Rows, span3Columns);
+    const bool combinedGeometry = gxos::apps::Navigator::SmokeTableCellGeometryById(
+        "phase8c-combined", combinedX, combinedY, combinedW, combinedH, combinedRow, combinedColumn, combinedRows, combinedColumns);
+    int groupHeadX = 0, groupHeadY = 0, groupHeadW = 0, groupHeadH = 0, groupHeadRow = 0, groupHeadColumn = 0, groupHeadRows = 0, groupHeadColumns = 0;
+    int groupBodyX = 0, groupBodyY = 0, groupBodyW = 0, groupBodyH = 0, groupBodyRow = 0, groupBodyColumn = 0, groupBodyRows = 0, groupBodyColumns = 0;
+    const bool groupHeadGeometry = gxos::apps::Navigator::SmokeTableCellGeometryById(
+        "phase8c-group-head", groupHeadX, groupHeadY, groupHeadW, groupHeadH, groupHeadRow, groupHeadColumn, groupHeadRows, groupHeadColumns);
+    const bool groupBodyGeometry = gxos::apps::Navigator::SmokeTableCellGeometryById(
+        "phase8c-group-body", groupBodyX, groupBodyY, groupBodyW, groupBodyH, groupBodyRow, groupBodyColumn, groupBodyRows, groupBodyColumns);
+    int following8cX = 0, following8cY = 0, following8cW = 0, following8cH = 0;
+    const bool following8cGeometry = gxos::apps::Navigator::SmokeBlockGeometryById(
+        "phase8c-following", following8cX, following8cY, following8cW, following8cH);
+    int collapseX = 0, collapseY = 0, collapseW = 0, collapseH = 0, collapseRows = 0, collapseColumns = 0;
+    const bool collapseGeometry = gxos::apps::Navigator::SmokeTableGeometryById(
+        "phase8c-collapse", collapseX, collapseY, collapseW, collapseH, collapseRows, collapseColumns);
+    const int wide8cMaxX = gxos::apps::Navigator::SmokeElementMaxScrollXById("phase8c-wide-scroll");
+    int wide8cTableX = 0, wide8cTableY = 0, wide8cTableW = 0, wide8cTableH = 0, wide8cTableRows = 0, wide8cTableColumns = 0;
+    const bool wide8cTableGeometry = gxos::apps::Navigator::SmokeTableGeometryById(
+        "phase8c-wide", wide8cTableX, wide8cTableY, wide8cTableW, wide8cTableH, wide8cTableRows, wide8cTableColumns);
+    gxos::apps::Navigator::SmokeSetScrollOffset(std::max(0, wide8cTableY - 120));
+    int wide8cLinkPaintX = 0, wide8cLinkPaintY = 0, wide8cLinkPaintW = 0, wide8cLinkPaintH = 0;
+    int wide8cLinkFinalX = 0, wide8cLinkFinalY = 0, wide8cLinkFinalW = 0, wide8cLinkFinalH = 0;
+    int wide8cLinkClipX = 0, wide8cLinkClipY = 0, wide8cLinkClipW = 0, wide8cLinkClipH = 0;
+    const bool wide8cLinkBefore = gxos::apps::Navigator::SmokeHitLinkById("phase8c-scrolled-link");
+    const int wide8cScrollTarget = std::min(wide8cMaxX, 240);
+    const bool wide8cScrolled = wide8cMaxX > 0 && gxos::apps::Navigator::SmokeSetElementScrollOffsetById(
+        "phase8c-wide-scroll", wide8cScrollTarget, 0);
+    const bool wide8cLinkGeometry = gxos::apps::Navigator::SmokeLinkGeometryById(
+        "phase8c-scrolled-link", wide8cLinkPaintX, wide8cLinkPaintY, wide8cLinkPaintW, wide8cLinkPaintH,
+        wide8cLinkFinalX, wide8cLinkFinalY, wide8cLinkFinalW, wide8cLinkFinalH,
+        wide8cLinkClipX, wide8cLinkClipY, wide8cLinkClipW, wide8cLinkClipH);
+    const bool wide8cLinkAfter = wide8cScrolled && gxos::apps::Navigator::SmokeHitLinkById("phase8c-scrolled-link");
+    const bool wide8cReset = gxos::apps::Navigator::SmokeSetElementScrollOffsetById("phase8c-wide-scroll", 0, 0);
+    const bool wide8cOldRejected = wide8cScrolled && wide8cLinkGeometry && wide8cReset && !gxos::apps::Navigator::SmokeHitLinkAt(
+        wide8cLinkPaintX + wide8cScrollTarget + std::max(0, wide8cLinkPaintW / 2),
+        wide8cLinkPaintY + std::max(0, wide8cLinkPaintH / 2), "phase8c-scrolled-link");
+    const std::string tablePhase8cFinalReport = gxos::apps::Navigator::SmokeRuntimeReport();
+    add("HTML table Phase 8C fixture loads", tablePhase8cLoaded &&
+        contains(tablePhase8cText, "Rowspan and Border-Collapse Semantics") &&
+        contains(tablePhase8cText, "thead rowspan clamps") &&
+        contains(tablePhase8cText, "Wide collapsed table") &&
+        contains(tablePhase8cText, "Following normal-flow content"),
+        "currentUrl=" + gxos::apps::Navigator::SmokeCurrentUrl() + ",text=\"" + summarizeText(tablePhase8cText, 700) + "\"");
+    add("HTML table Phase 8C occupancy and bounded diagnostics", tablePhase8cLoaded &&
+        hasPositiveCount(tablePhase8cReport, "Current Document.table_rowspan_cells=") &&
+        hasPositiveCount(tablePhase8cReport, "Current Document.table_maximum_rowspan=") &&
+        hasPositiveCount(tablePhase8cReport, "Current Document.table_occupied_grid_skips=") &&
+        hasPositiveCount(tablePhase8cReport, "Current Document.table_rowspan_height_adjustments=") &&
+        hasPositiveCount(tablePhase8cReport, "Current Document.table_combined_spans=") &&
+        contains(tablePhase8cReport, "Current Document.table_rowspan_model=bounded-occupancy-grid-max16-two-pass-height-solve"),
+        "report=\"" + summarizeText(tablePhase8cReport, 1500) + "\"");
+    add("HTML table Phase 8C spanning geometry", table8cGeometry && span2Geometry && span3Geometry && combinedGeometry &&
+        table8cRows >= 10 && table8cColumns >= 3 && span2Rows == 2 && span3Rows == 3 &&
+        combinedRows == 3 && combinedColumns == 2 && span2H > 0 && span3H > 0 && combinedW > span2W &&
+        combinedY >= span3Y + span3H,
+        "table=" + std::to_string(table8cX) + ":" + std::to_string(table8cY) + ":" + std::to_string(table8cW) + ":" + std::to_string(table8cH) +
+        ",span2=" + std::to_string(span2X) + ":" + std::to_string(span2Y) + ":" + std::to_string(span2W) + ":" + std::to_string(span2H) +
+        ",span3=" + std::to_string(span3X) + ":" + std::to_string(span3Y) + ":" + std::to_string(span3W) + ":" + std::to_string(span3H) +
+        ",combined=" + std::to_string(combinedX) + ":" + std::to_string(combinedY) + ":" + std::to_string(combinedW) + ":" + std::to_string(combinedH));
+    add("HTML table Phase 8C row-group clamps and malformed spans", groupHeadGeometry && groupBodyGeometry &&
+        groupHeadRows == 1 && groupBodyRows == 2 &&
+        hasPositiveCount(tablePhase8cReport, "Current Document.table_malformed_fallbacks=") &&
+        contains(tablePhase8cReport, "Current Document.table_geometry_evidence="),
+        "theadRows=" + std::to_string(groupHeadRows) + ",tbodyRows=" + std::to_string(groupBodyRows) +
+        ",evidence=" + evidenceSnippet(tablePhase8cReport, "Current Document.table_geometry_evidence="));
+    add("HTML table Phase 8C collapsed edges and normal flow", collapseGeometry && collapseW >= 520 && collapseW <= 528 &&
+        hasPositiveCount(tablePhase8cReport, "Current Document.CSS collapsed tables rendered=") &&
+        hasPositiveCount(tablePhase8cReport, "Current Document.table_resolved_vertical_edges=") &&
+        hasPositiveCount(tablePhase8cReport, "Current Document.table_resolved_horizontal_edges=") &&
+        hasPositiveCount(tablePhase8cReport, "Current Document.table_suppressed_interior_span_edges=") &&
+        following8cGeometry && following8cY >= table8cY + table8cH,
+        "collapse=" + std::to_string(collapseX) + ":" + std::to_string(collapseY) + ":" + std::to_string(collapseW) + ":" + std::to_string(collapseH) +
+        ",following=" + std::to_string(following8cX) + ":" + std::to_string(following8cY) + ":" + std::to_string(following8cW) + ":" + std::to_string(following8cH) +
+        ",evidence=" + evidenceSnippet(tablePhase8cReport, "Current Document.table_geometry_evidence="));
+    add("HTML table Phase 8C spanning links and wide collapsed scrolling", wide8cTableGeometry && wide8cMaxX > 0 && wide8cLinkGeometry &&
+        wide8cScrolled && wide8cLinkAfter && wide8cOldRejected &&
+        hasPositiveCount(tablePhase8cFinalReport, "Current Document.table_link_hit_test_evidence="),
+        std::string("maxScrollX=") + std::to_string(wide8cMaxX) + ",before=" + yesNo(wide8cLinkBefore) +
+        ",after=" + yesNo(wide8cLinkAfter) + ",oldRejected=" + yesNo(wide8cOldRejected) +
+        ",linkGeometry=" + yesNo(wide8cLinkGeometry) + ",paint=" + std::to_string(wide8cLinkPaintX) + ":" +
+        std::to_string(wide8cLinkPaintY) + ":" + std::to_string(wide8cLinkPaintW) + ":" + std::to_string(wide8cLinkPaintH) +
+        ",final=" + std::to_string(wide8cLinkFinalX) + ":" + std::to_string(wide8cLinkFinalY) + ":" +
+        std::to_string(wide8cLinkFinalW) + ":" + std::to_string(wide8cLinkFinalH) + ",evidence=" +
+        evidenceSnippet(tablePhase8cFinalReport, "Current Document.css_scroll_evidence="));
 
     bool textPolishLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/text-polish.html");
     std::string textPolishText = gxos::apps::Navigator::SmokeCurrentDocumentText();
@@ -892,9 +1154,1531 @@ static std::string navigatorHostedSmokeDiagnostic() {
         hasPositiveCount(cssPhase1fReport, "Current Document.CSS text decorations rendered=") &&
         hasPositiveCount(cssPhase1fReport, "Current Document.CSS generic font family applied=") &&
         hasPositiveCount(cssPhase1fReport, "Current Document.CSS generic font family fallbacks=") &&
-        hasPositiveCount(cssPhase1fReport, "Current Document.CSS table layout fallbacks=") &&
+        (hasPositiveCount(cssPhase1fReport, "Current Document.CSS table layout fallbacks=") ||
+         hasPositiveCount(cssPhase1fReport, "Current Document.table_logical_columns=")) &&
         hasPositiveCount(cssPhase1fReport, "Current Document.CSS table captions rendered="),
         cssPhase1fDetail);
+
+    bool cssPhase3aLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-phase3a.html");
+    std::string cssPhase3aText = gxos::apps::Navigator::SmokeCurrentDocumentText();
+    std::string cssPhase3aReport = gxos::apps::Navigator::SmokeRuntimeReport();
+    auto cssPhase3aMetric = [&](const std::string& prefix, std::size_t limit) {
+        const std::size_t pos = cssPhase3aReport.find(prefix);
+        if (pos == std::string::npos) return std::string("missing");
+        return cssPhase3aReport.substr(pos, limit);
+    };
+    add("CSS phase 3A fixture loads",
+        cssPhase3aLoaded &&
+        contains(cssPhase3aText, "Phase 3A Box Constraint Fixture") &&
+        contains(cssPhase3aText, "50 percent nested child marker.") &&
+        contains(cssPhase3aText, "Auto width and content-derived auto height marker.") &&
+        contains(cssPhase3aText, "Intrinsic ratio image marker") &&
+        contains(cssPhase3aText, "Explicit content-box marker.") &&
+        contains(cssPhase3aText, "Nested percentage child marker.") &&
+        contains(cssPhase3aText, "Nested clipping text marker") &&
+        contains(cssPhase3aText, "Invalid width preserves valid winner marker.") &&
+        contains(cssPhase3aText, "Percent") &&
+        !contains(cssPhase3aText, "Hidden visibility marker must retain space but not paint or extract."),
+        "currentUrl=" + gxos::apps::Navigator::SmokeCurrentUrl());
+    add("CSS phase 3A box and constraint diagnostics",
+        hasPositiveCount(cssPhase3aReport, "Current Document.css_box_sizing_content_box=") &&
+        hasPositiveCount(cssPhase3aReport, "Current Document.css_box_sizing_border_box=") &&
+        hasPositiveCount(cssPhase3aReport, "Current Document.css_width_auto_resolutions=") &&
+        hasPositiveCount(cssPhase3aReport, "Current Document.css_height_auto_resolutions=") &&
+        hasPositiveCount(cssPhase3aReport, "Current Document.css_percentage_width_resolved=") &&
+        hasPositiveCount(cssPhase3aReport, "Current Document.css_percentage_height_resolved=") &&
+        hasPositiveCount(cssPhase3aReport, "Current Document.css_percentage_indefinite_basis=") &&
+        hasPositiveCount(cssPhase3aReport, "Current Document.css_min_width_constraints=") &&
+        hasPositiveCount(cssPhase3aReport, "Current Document.css_max_width_constraints=") &&
+        hasPositiveCount(cssPhase3aReport, "Current Document.css_min_height_constraints=") &&
+        hasPositiveCount(cssPhase3aReport, "Current Document.css_max_height_constraints=") &&
+        hasPositiveCount(cssPhase3aReport, "Current Document.css_constraint_conflicts=") &&
+        hasPositiveCount(cssPhase3aReport, "Current Document.css_box_geometry_clamps=") ,
+        "report=\"" + summarizeText(cssPhase3aReport, 360) + "\"" +
+        " metrics=" + cssPhase3aMetric("Current Document.css_box_sizing_content_box=", 900));
+    add("CSS phase 3A overflow visibility opacity diagnostics",
+        hasPositiveCount(cssPhase3aReport, "Current Document.css_overflow_hidden_boxes=") &&
+        hasPositiveCount(cssPhase3aReport, "Current Document.css_overflow_auto_boxes=") &&
+        hasPositiveCount(cssPhase3aReport, "Current Document.css_overflow_scroll_deferred=") &&
+        hasPositiveCount(cssPhase3aReport, "Current Document.css_visibility_hidden_boxes=") &&
+        hasPositiveCount(cssPhase3aReport, "Current Document.css_opacity_boxes=") &&
+        hasPositiveCount(cssPhase3aReport, "Current Document.css_opacity_zero_boxes=") &&
+        hasPositiveCount(cssPhase3aReport, "Current Document.css_vertical_align_applications=") &&
+        contains(cssPhase3aReport, "Current Document.css_overflow_auto_semantics=bounded_clipped_noninteractive") &&
+        contains(cssPhase3aReport, "Current Document.css_geometry_evidence=id=phase3a-"),
+        "report=\"" + summarizeText(cssPhase3aReport, 360) + "\"");
+    add("CSS phase 3A hidden control focus and shared clipping",
+        !gxos::apps::Navigator::SmokeFocusFormControlById("phase3a-hidden-control") &&
+        gxos::apps::Navigator::SmokeFocusFormControlById("phase3a-control") &&
+        hasPositiveCount(cssPhase3aReport, "Current Document.css_clip_records="),
+        "report=\"" + summarizeText(cssPhase3aReport, 260) + "\"" +
+        " clip=" + cssPhase3aMetric("Current Document.css_clip_records=", 300));
+
+    bool cssPhase3bLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-phase3b.html");
+    std::string cssPhase3bText = gxos::apps::Navigator::SmokeCurrentDocumentText();
+    std::string cssPhase3bReport = gxos::apps::Navigator::SmokeRuntimeReport();
+    auto cssPhase3bMetric = [&](const std::string& prefix) {
+        const std::size_t pos = cssPhase3bReport.find(prefix);
+        if (pos == std::string::npos) return std::string("missing");
+        const std::size_t end = cssPhase3bReport.find('\n', pos);
+        return cssPhase3bReport.substr(pos, end == std::string::npos ? std::string::npos : end - pos);
+    };
+    add("CSS phase 3B inline fixture loads",
+        cssPhase3bLoaded &&
+        contains(cssPhase3bText, "g j p q y descenders") &&
+        contains(cssPhase3bText, "span") &&
+        contains(cssPhase3bText, "bold") &&
+        contains(cssPhase3bText, "italic") &&
+        contains(cssPhase3bText, "code") &&
+        contains(cssPhase3bText, "nowrap text remains one unbroken inline run") &&
+        contains(cssPhase3bText, "pre  formatted") &&
+        contains(cssPhase3bText, "Checkbox") &&
+        contains(cssPhase3bText, "empty line follows break"),
+        "currentUrl=" + gxos::apps::Navigator::SmokeCurrentUrl());
+    add("CSS phase 3B line boxes, whitespace, replaced items, and controls",
+        hasPositiveCount(cssPhase3bReport, "Current Document.css_inline_items=") &&
+        hasPositiveCount(cssPhase3bReport, "Current Document.css_inline_text_runs=") &&
+        hasPositiveCount(cssPhase3bReport, "Current Document.css_inline_whitespace_runs=") &&
+        hasPositiveCount(cssPhase3bReport, "Current Document.css_line_boxes=") &&
+        hasPositiveCount(cssPhase3bReport, "Current Document.css_line_wraps=") &&
+        hasPositiveCount(cssPhase3bReport, "Current Document.css_whitespace_collapses=") &&
+        hasPositiveCount(cssPhase3bReport, "Current Document.css_replaced_inline_items=") &&
+        hasPositiveCount(cssPhase3bReport, "Current Document.css_control_inline_items=") &&
+        hasPositiveCount(cssPhase3bReport, "Current Document.css_descender_safe_lines=") &&
+        contains(cssPhase3bReport, "Current Document.css_inline_evidence_records="),
+        "report=\"" + summarizeText(cssPhase3bReport, 420) + "\"" +
+        " metrics=" + cssPhase3bMetric("Current Document.css_inline_items=") + ";" +
+        cssPhase3bMetric("Current Document.css_inline_text_runs=") + ";" +
+        cssPhase3bMetric("Current Document.css_inline_whitespace_runs=") + ";" +
+        cssPhase3bMetric("Current Document.css_line_boxes=") + ";" +
+        cssPhase3bMetric("Current Document.css_line_wraps=") + ";" +
+        cssPhase3bMetric("Current Document.css_whitespace_collapses=") + ";" +
+        cssPhase3bMetric("Current Document.css_replaced_inline_items=") + ";" +
+        cssPhase3bMetric("Current Document.css_control_inline_items=") + ";" +
+        cssPhase3bMetric("Current Document.css_descender_safe_lines=") + ";" +
+        cssPhase3bMetric("Current Document.css_inline_evidence_records=") + ";evidence=" +
+        summarizeText(cssPhase3bMetric("Current Document.css_inline_evidence="), 1200));
+    add("CSS phase 3B vertical alignment and focus geometry",
+        hasPositiveCount(cssPhase3bReport, "Current Document.css_vertical_align_adjustments=") &&
+        hasPositiveCount(cssPhase3bReport, "Current Document.css_inline_hit_fragments=") &&
+        gxos::apps::Navigator::SmokeFocusFormControlById("phase3b-button"),
+        "report=\"" + summarizeText(cssPhase3bReport, 320) + "\"");
+
+    bool cssPhase3cLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-phase3c.html");
+    std::string cssPhase3cText = gxos::apps::Navigator::SmokeCurrentDocumentText();
+    std::string cssPhase3cReport = gxos::apps::Navigator::SmokeRuntimeReport();
+    auto cssPhase3cMetric = [&](const std::string& prefix) {
+        const std::size_t pos = cssPhase3cReport.find(prefix);
+        if (pos == std::string::npos) return std::string("missing");
+        const std::size_t end = cssPhase3cReport.find('\n', pos);
+        return cssPhase3cReport.substr(pos, end == std::string::npos ? std::string::npos : end - pos);
+    };
+    add("CSS phase 3C atomic inline-block fixture loads",
+        cssPhase3cLoaded &&
+        contains(cssPhase3cText, "Phase 3C Atomic Inline Block Fixture") &&
+        contains(cssPhase3cText, "inline block") &&
+        contains(cssPhase3cText, "Nested paragraph with wrapped internal text") &&
+        contains(cssPhase3cText, "Nested list item") &&
+        contains(cssPhase3cText, "nested child link") &&
+        contains(cssPhase3cText, "Card button") &&
+        contains(cssPhase3cText, "extreme clamp"),
+        "currentUrl=" + gxos::apps::Navigator::SmokeCurrentUrl());
+    add("CSS phase 3C bounded contexts, sizing, and nesting",
+        hasPositiveCount(cssPhase3cReport, "Current Document.css_atomic_formatting_contexts=") &&
+        hasPositiveCount(cssPhase3cReport, "Current Document.css_inline_block_items=") &&
+        hasPositiveCount(cssPhase3cReport, "Current Document.css_inline_block_auto_widths=") &&
+        hasPositiveCount(cssPhase3cReport, "Current Document.css_inline_block_explicit_widths=") &&
+        hasPositiveCount(cssPhase3cReport, "Current Document.css_inline_block_shrink_to_fit=") &&
+        hasPositiveCount(cssPhase3cReport, "Current Document.css_atomic_layout_operations=") &&
+        hasPositiveCount(cssPhase3cReport, "Current Document.css_inline_block_nested=") &&
+        hasPositiveCount(cssPhase3cReport, "Current Document.css_inline_block_wraps=") &&
+        contains(cssPhase3cReport, "Current Document.css_atomic_evidence_records="),
+        "metrics=" + cssPhase3cMetric("Current Document.css_atomic_formatting_contexts=") + ";" +
+        cssPhase3cMetric("Current Document.css_atomic_context_depth_max=") + ";" +
+        cssPhase3cMetric("Current Document.css_inline_block_items=") + ";" +
+        cssPhase3cMetric("Current Document.css_inline_block_auto_widths=") + ";" +
+        cssPhase3cMetric("Current Document.css_inline_block_explicit_widths=") + ";" +
+        cssPhase3cMetric("Current Document.css_inline_block_shrink_to_fit=") + ";" +
+        cssPhase3cMetric("Current Document.css_atomic_layout_operations=") + ";" +
+        cssPhase3cMetric("Current Document.css_inline_block_nested=") + ";" +
+        cssPhase3cMetric("Current Document.css_inline_block_wraps=") + ";evidence=" +
+        summarizeText(cssPhase3cMetric("Current Document.css_atomic_evidence="), 1200));
+    add("CSS phase 3C baselines, clipping, hit targets, and focus",
+        hasPositiveCount(cssPhase3cReport, "Current Document.css_inline_block_baseline_from_line=") &&
+        hasPositiveCount(cssPhase3cReport, "Current Document.css_inline_block_baseline_fallback=") &&
+        hasPositiveCount(cssPhase3cReport, "Current Document.css_inline_block_hit_targets=") &&
+        hasPositiveCount(cssPhase3cReport, "Current Document.css_inline_block_overflow_clips=") &&
+        gxos::apps::Navigator::SmokeFocusFormControlById("phase3c-button"),
+        "metrics=" + cssPhase3cMetric("Current Document.css_inline_block_baseline_from_line=") + ";" +
+        cssPhase3cMetric("Current Document.css_inline_block_baseline_fallback=") + ";" +
+        cssPhase3cMetric("Current Document.css_inline_block_hit_targets=") + ";" +
+        cssPhase3cMetric("Current Document.css_inline_block_overflow_clips=") + ";report=" +
+        summarizeText(cssPhase3cReport, 520));
+
+    bool cssPhase3dLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-phase3d.html");
+    std::string cssPhase3dText = gxos::apps::Navigator::SmokeCurrentDocumentText();
+    std::string cssPhase3dReport = gxos::apps::Navigator::SmokeRuntimeReport();
+    auto cssPhase3dMetric = [&](const std::string& prefix) {
+        const std::size_t pos = cssPhase3dReport.find(prefix);
+        if (pos == std::string::npos) return std::string("missing");
+        const std::size_t end = cssPhase3dReport.find('\n', pos);
+        return cssPhase3dReport.substr(pos, end == std::string::npos ? std::string::npos : end - pos);
+    };
+    add("CSS phase 3D margin fixture loads",
+        cssPhase3dLoaded &&
+        contains(cssPhase3dText, "Phase 3D Margin Collapse Fixture") &&
+        contains(cssPhase3dText, "sibling positive ten and twenty") &&
+        contains(cssPhase3dText, "mixed negative margin") &&
+        contains(cssPhase3dText, "parent top and first child top collapse") &&
+        contains(cssPhase3dText, "empty blocks join the margin chain") &&
+        contains(cssPhase3dText, "overflow hidden establishes a bounded BFC") &&
+        contains(cssPhase3dText, "inline block contains internal margins") &&
+        contains(cssPhase3dText, "extreme negative margin remains bounded"),
+        "currentUrl=" + gxos::apps::Navigator::SmokeCurrentUrl());
+    add("CSS phase 3D collapsed-margin model and bounded chains",
+        hasPositiveCount(cssPhase3dReport, "Current Document.css_margin_collapse_sets=") &&
+        hasPositiveCount(cssPhase3dReport, "Current Document.css_margin_collapse_participants=") &&
+        hasPositiveCount(cssPhase3dReport, "Current Document.css_margin_collapse_sibling=") &&
+        hasPositiveCount(cssPhase3dReport, "Current Document.css_margin_collapse_parent_top=") &&
+        hasPositiveCount(cssPhase3dReport, "Current Document.css_margin_collapse_parent_bottom=") &&
+        hasPositiveCount(cssPhase3dReport, "Current Document.css_margin_collapse_empty=") &&
+        hasPositiveCount(cssPhase3dReport, "Current Document.css_margin_collapse_mixed=") &&
+        contains(cssPhase3dReport, "Current Document.css_margin_collapse_model=largest-positive-plus-most-negative") &&
+        contains(cssPhase3dReport, "Current Document.css_margin_collapse_evidence=id=phase3d-") &&
+        contains(cssPhase3dReport, "id=phase3d-title,serial=3,parent-serial=0,previous-serial=0,specified-margin-top=14,specified-margin-bottom=10,used-margin-top=14,used-margin-bottom=10,collapse-participants=2,max-positive=14,most-negative=0,collapsed-result=14,collapse-type=normal-flow,collapsed-with-previous-sibling=no,collapsed-with-parent-top=no,collapsed-with-parent-bottom=no,empty-collapse=no,bfc=yes,bfc-reason=root,blocked-reason=,height-definite=no,min-height-prevents-collapse=no,used-y=38,used-height=37,border-box=42:38:838:37,document-extent-contribution=75,clamped=no,incomplete=no"),
+        "metrics=" + cssPhase3dMetric("Current Document.css_margin_collapse_sets=") + ";" +
+        cssPhase3dMetric("Current Document.css_margin_collapse_participants=") + ";" +
+        cssPhase3dMetric("Current Document.css_margin_collapse_sibling=") + ";" +
+        cssPhase3dMetric("Current Document.css_margin_collapse_parent_top=") + ";" +
+        cssPhase3dMetric("Current Document.css_margin_collapse_parent_bottom=") + ";" +
+        cssPhase3dMetric("Current Document.css_margin_collapse_empty=") + ";" +
+        cssPhase3dMetric("Current Document.css_margin_collapse_mixed=") + ";evidence=" +
+        summarizeText(cssPhase3dMetric("Current Document.css_margin_collapse_evidence="), 1800));
+    add("CSS phase 3D BFC boundaries, barriers, negative geometry, and focus",
+        hasPositiveCount(cssPhase3dReport, "Current Document.css_bfc_overflow=") &&
+        hasPositiveCount(cssPhase3dReport, "Current Document.css_bfc_inline_block=") &&
+        (hasPositiveCount(cssPhase3dReport, "Current Document.css_margin_collapse_blocked_border=") ||
+         hasPositiveCount(cssPhase3dReport, "Current Document.css_margin_collapse_blocked_padding=") ||
+         hasPositiveCount(cssPhase3dReport, "Current Document.css_margin_collapse_blocked_bfc=") ||
+         hasPositiveCount(cssPhase3dReport, "Current Document.css_margin_collapse_blocked_height=")) &&
+        contains(cssPhase3dReport, "Current Document.css_margin_geometry_clamps=") &&
+        contains(cssPhase3dReport, "Current Document.css_bfc_boundaries=root-inline-block-overflow-atomic-table") &&
+        contains(cssPhase3dReport, "Current Document.css_margin_collapse_evidence_records=") &&
+        gxos::apps::Navigator::SmokeFocusFormControlById("phase3d-control"),
+        "overflow=" + cssPhase3dMetric("Current Document.css_bfc_overflow=") + ";inline-block=" +
+        cssPhase3dMetric("Current Document.css_bfc_inline_block=") + ";blocked-border=" +
+        cssPhase3dMetric("Current Document.css_margin_collapse_blocked_border=") + ";blocked-padding=" +
+        cssPhase3dMetric("Current Document.css_margin_collapse_blocked_padding=") + ";blocked-bfc=" +
+        cssPhase3dMetric("Current Document.css_margin_collapse_blocked_bfc=") + ";blocked-height=" +
+        cssPhase3dMetric("Current Document.css_margin_collapse_blocked_height=") + ";clamps=" +
+        cssPhase3dMetric("Current Document.css_margin_geometry_clamps=") + ";report=" +
+        summarizeText(cssPhase3dReport, 520));
+
+    bool cssPhase3eLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-phase3e.html");
+    std::string cssPhase3eText = gxos::apps::Navigator::SmokeCurrentDocumentText();
+    std::string cssPhase3eReport = gxos::apps::Navigator::SmokeRuntimeReport();
+    auto cssPhase3eMetric = [&](const std::string& prefix) {
+        const std::size_t pos = cssPhase3eReport.find(prefix);
+        if (pos == std::string::npos) return std::string("missing");
+        const std::size_t end = cssPhase3eReport.find('\n', pos);
+        return cssPhase3eReport.substr(pos, end == std::string::npos ? std::string::npos : end - pos);
+    };
+    add("CSS phase 3E float fixture loads",
+        cssPhase3eLoaded &&
+        contains(cssPhase3eText, "Phase 3E Float and Clear Fixture") &&
+        contains(cssPhase3eText, "Left float text wraps") &&
+        contains(cssPhase3eText, "Right float text wraps") &&
+        contains(cssPhase3eText, "clear both moves below both floats"),
+        "currentUrl=" + gxos::apps::Navigator::SmokeCurrentUrl());
+    add("CSS phase 3E bounded float placement and exclusion",
+        hasPositiveCount(cssPhase3eReport, "Current Document.css_float_left=") &&
+        hasPositiveCount(cssPhase3eReport, "Current Document.css_float_right=") &&
+        hasPositiveCount(cssPhase3eReport, "Current Document.css_float_blockifications=") &&
+        hasPositiveCount(cssPhase3eReport, "Current Document.css_float_records=") &&
+        hasPositiveCount(cssPhase3eReport, "Current Document.css_float_placement_attempts=") &&
+        hasPositiveCount(cssPhase3eReport, "Current Document.css_float_line_exclusions=") &&
+        contains(cssPhase3eReport, "Current Document.css_float_model=bounded-traditional-left-right-margin-box-exclusion") &&
+        contains(cssPhase3eReport, "Current Document.css_float_evidence_records="),
+        "metrics=" + cssPhase3eMetric("Current Document.css_float_left=") + ";" +
+        cssPhase3eMetric("Current Document.css_float_right=") + ";" +
+        cssPhase3eMetric("Current Document.css_float_records=") + ";" +
+        cssPhase3eMetric("Current Document.css_float_placement_attempts=") + ";" +
+        cssPhase3eMetric("Current Document.css_float_line_exclusions=") + ";" +
+        cssPhase3eMetric("Current Document.css_float_side_by_side=") + ";" +
+        cssPhase3eMetric("Current Document.css_clearance_applied=") + ";evidence=" +
+        summarizeText(cssPhase3eReport, 1200));
+
+    bool cssPhase3fLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-phase3f.html");
+    std::string cssPhase3fText = gxos::apps::Navigator::SmokeCurrentDocumentText();
+    std::string cssPhase3fReport = gxos::apps::Navigator::SmokeRuntimeReport();
+    auto cssPhase3fMetric = [&](const std::string& prefix) {
+        const std::size_t pos = cssPhase3fReport.find(prefix);
+        if (pos == std::string::npos) return std::string("missing");
+        const std::size_t end = cssPhase3fReport.find('\n', pos);
+        return cssPhase3fReport.substr(pos, end == std::string::npos ? std::string::npos : end - pos);
+    };
+    add("CSS phase 3F containment fixture loads",
+        cssPhase3fLoaded &&
+        contains(cssPhase3fText, "Phase 3F Float Containment Fixture") &&
+        contains(cssPhase3fText, "only left float") &&
+        contains(cssPhase3fText, "fixed height clips this float") &&
+        contains(cssPhase3fText, "inline-block internal text wraps") &&
+        contains(cssPhase3fText, "list text wraps beside a floated image") &&
+        contains(cssPhase3fText, "cell text beside float") &&
+        contains(cssPhase3fText, "tail content remains reachable"),
+        "currentUrl=" + gxos::apps::Navigator::SmokeCurrentUrl());
+    add("CSS phase 3F owned BFC containment and bounded avoidance",
+        hasPositiveCount(cssPhase3fReport, "Current Document.css_bfc_float_containments=") &&
+        hasPositiveCount(cssPhase3fReport, "Current Document.css_bfc_float_height_extensions=") &&
+        hasPositiveCount(cssPhase3fReport, "Current Document.css_bfc_float_height_noops=") &&
+        hasPositiveCount(cssPhase3fReport, "Current Document.css_bfc_float_avoidance_attempts=") &&
+        hasPositiveCount(cssPhase3fReport, "Current Document.css_bfc_float_avoidance_downshifts=") &&
+        hasPositiveCount(cssPhase3fReport, "Current Document.css_float_document_extent_extensions=") &&
+        contains(cssPhase3fReport, "Current Document.css_float_inside_inline_block=") &&
+        contains(cssPhase3fReport, "Current Document.css_float_list_cases=") &&
+        contains(cssPhase3fReport, "Current Document.css_float_table_cell_cases=") &&
+        contains(cssPhase3fReport, "owner-bfc=") &&
+        contains(cssPhase3fReport, "bfc-id="),
+        "metrics=" + cssPhase3fMetric("Current Document.css_bfc_float_containments=") + ";" +
+        cssPhase3fMetric("Current Document.css_bfc_float_height_extensions=") + ";" +
+        cssPhase3fMetric("Current Document.css_bfc_float_height_noops=") + ";" +
+        cssPhase3fMetric("Current Document.css_bfc_float_avoidance_attempts=") + ";" +
+        cssPhase3fMetric("Current Document.css_bfc_float_avoidance_downshifts=") + ";" +
+        cssPhase3fMetric("Current Document.css_float_document_extent_extensions=") + ";nested=" +
+        cssPhase3fMetric("Current Document.css_nested_float_contexts=") + ";list=" +
+        cssPhase3fMetric("Current Document.css_float_list_cases=") + ";table-cell=" +
+        cssPhase3fMetric("Current Document.css_float_table_cell_cases=") + ";evidence=" +
+        summarizeText(cssPhase3fMetric("Current Document.css_float_evidence="), 1800));
+
+    bool cssPhase3gLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-phase3g.html");
+    std::string cssPhase3gText = gxos::apps::Navigator::SmokeCurrentDocumentText();
+    std::string cssPhase3gReport = gxos::apps::Navigator::SmokeRuntimeReport();
+    auto cssPhase3gMetric = [&](const std::string& prefix) {
+        const std::size_t pos = cssPhase3gReport.find(prefix);
+        if (pos == std::string::npos) return std::string("missing");
+        const std::size_t end = cssPhase3gReport.find('\n', pos);
+        return cssPhase3gReport.substr(pos, end == std::string::npos ? std::string::npos : end - pos);
+    };
+    add("CSS phase 3G positioning fixture loads",
+        cssPhase3gLoaded &&
+        contains(cssPhase3gText, "Phase 3G Positioning Fixture") &&
+        contains(cssPhase3gText, "absolute left top link") &&
+        contains(cssPhase3gText, "absolute right control") &&
+        contains(cssPhase3gText, "absolute inline text is blockified") &&
+        contains(cssPhase3gText, "Following normal flow remains unaffected"),
+        "currentUrl=" + gxos::apps::Navigator::SmokeCurrentUrl());
+    add("CSS phase 3G parser and containing-block diagnostics",
+        hasPositiveCount(cssPhase3gReport, "Current Document.css_position_relative=") &&
+        hasPositiveCount(cssPhase3gReport, "Current Document.css_position_absolute=") &&
+        hasPositiveCount(cssPhase3gReport, "Current Document.css_relative_offsets=") &&
+        hasPositiveCount(cssPhase3gReport, "Current Document.css_relative_percentage_offsets=") &&
+        hasPositiveCount(cssPhase3gReport, "Current Document.css_absolute_boxes=") &&
+        hasPositiveCount(cssPhase3gReport, "Current Document.css_absolute_blockifications=") &&
+        hasPositiveCount(cssPhase3gReport, "Current Document.css_positioned_containing_blocks=") &&
+        hasPositiveCount(cssPhase3gReport, "Current Document.css_position_root_fallbacks=") &&
+        hasPositiveCount(cssPhase3gReport, "Current Document.css_absolute_out_of_flow=") &&
+        hasPositiveCount(cssPhase3gReport, "Current Document.css_absolute_shrink_to_fit=") &&
+        hasPositiveCount(cssPhase3gReport, "Current Document.css_position_document_extent_extensions=") &&
+        contains(cssPhase3gReport, "Current Document.css_position_fixed_sticky=fixed-supported-sticky-supported-diagnostic") &&
+        hasPositiveCount(cssPhase3gReport, "Current Document.css_position_fixed=") &&
+        hasPositiveCount(cssPhase3gReport, "Current Document.css_position_sticky=") &&
+        contains(cssPhase3gReport, "Current Document.css_positioned_evidence=id=phase3g-"),
+        "metrics=" + cssPhase3gMetric("Current Document.css_position_relative=") + ";" +
+        cssPhase3gMetric("Current Document.css_position_absolute=") + ";" +
+        cssPhase3gMetric("Current Document.css_relative_offsets=") + ";" +
+        cssPhase3gMetric("Current Document.css_relative_percentage_offsets=") + ";" +
+        cssPhase3gMetric("Current Document.css_absolute_boxes=") + ";" +
+        cssPhase3gMetric("Current Document.css_absolute_blockifications=") + ";" +
+        cssPhase3gMetric("Current Document.css_positioned_containing_blocks=") + ";" +
+        cssPhase3gMetric("Current Document.css_position_root_fallbacks=") + ";" +
+        cssPhase3gMetric("Current Document.css_absolute_out_of_flow=") + ";" +
+        cssPhase3gMetric("Current Document.css_absolute_shrink_to_fit=") + ";" +
+        cssPhase3gMetric("Current Document.css_position_document_extent_extensions=") + ";evidence=" +
+        summarizeText(cssPhase3gMetric("Current Document.css_positioned_evidence="), 2400));
+
+    bool cssPhase3hLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-phase3h.html");
+    std::string cssPhase3hText = gxos::apps::Navigator::SmokeCurrentDocumentText();
+    std::string cssPhase3hReport = gxos::apps::Navigator::SmokeRuntimeReport();
+    auto cssPhase3hMetric = [&](const std::string& prefix) {
+        const std::size_t pos = cssPhase3hReport.find(prefix);
+        if (pos == std::string::npos) return std::string("missing");
+        const std::size_t end = cssPhase3hReport.find('\n', pos);
+        return cssPhase3hReport.substr(pos, end == std::string::npos ? std::string::npos : end - pos);
+    };
+    add("CSS phase 3H deterministic fixture loads",
+        cssPhase3hLoaded &&
+        contains(cssPhase3hText, "Phase 3H Traditional Positioning Completion Fixture") &&
+        contains(cssPhase3hText, "nested child z 999 stays inside parent z 1") &&
+        contains(cssPhase3hText, "wrapped relative inline owner moves every fragment") &&
+        contains(cssPhase3hText, "wrapped relative inline containing block") &&
+        contains(cssPhase3hText, "relative float exclusion uses normal-flow geometry") &&
+        contains(cssPhase3hText, "opacity alpha only; no opacity stacking owner") &&
+        contains(cssPhase3hText, "relative list item with absolute child") &&
+        contains(cssPhase3hText, "relative table and cell classified safely") &&
+        contains(cssPhase3hText, "recomputation reload history generated page error page stale positioned hit blocked"),
+        "currentUrl=" + gxos::apps::Navigator::SmokeCurrentUrl());
+    add("CSS phase 3H bounded stacking ownership and shared ordering",
+        hasPositiveCount(cssPhase3hReport, "Current Document.css_position_stacking_owners=") &&
+        hasPositiveCount(cssPhase3hReport, "Current Document.css_position_stacking_depth_max=") &&
+        hasPositiveCount(cssPhase3hReport, "Current Document.css_position_nested_z_records=") &&
+        hasPositiveCount(cssPhase3hReport, "Current Document.css_position_negative_z_records=") &&
+        hasPositiveCount(cssPhase3hReport, "Current Document.css_position_positive_z_records=") &&
+        contains(cssPhase3hReport, "Current Document.css_position_stacking_contract=positioning-created-bounded-stacking-support") &&
+        contains(cssPhase3hReport, "Current Document.css_position_stacking_context_creators=positioned-non-auto-z-index-only") &&
+        contains(cssPhase3hReport, "Current Document.css_position_stacking_depth_cap=16") &&
+        contains(cssPhase3hReport, "Current Document.css_position_stacking_owner_cap=256") &&
+        contains(cssPhase3hReport, "stacking-owner-serial=") &&
+        contains(cssPhase3hReport, "paint-order-rank="),
+        "owners=" + cssPhase3hMetric("Current Document.css_position_stacking_owners=") + ";depth=" +
+        cssPhase3hMetric("Current Document.css_position_stacking_depth_max=") + ";nested=" +
+        cssPhase3hMetric("Current Document.css_position_nested_z_records=") + ";equal-z=" +
+        cssPhase3hMetric("Current Document.css_position_equal_z_source_orders=") + ";evidence=" +
+        summarizeText(cssPhase3hMetric("Current Document.css_positioned_evidence="), 2600));
+    add("CSS phase 3H inline fragments and containing blocks",
+        hasPositiveCount(cssPhase3hReport, "Current Document.css_position_inline_fragment_owners=") &&
+        hasPositiveCount(cssPhase3hReport, "Current Document.css_position_inline_fragments_shifted=") &&
+        hasPositiveCount(cssPhase3hReport, "Current Document.css_position_inline_containing_blocks=") &&
+        contains(cssPhase3hReport, "Current Document.css_position_inline_containing_block=bounded-ltr-first-last-fragment-geometry") &&
+        contains(cssPhase3hReport, "Current Document.css_position_static_snapshots=") &&
+        contains(cssPhase3hReport, "Current Document.css_position_lifecycle_resets=") &&
+        contains(cssPhase3hReport, "Current Document.css_position_opacity_stacking=unsupported-lightweight-alpha-only"),
+        "inline-owners=" + cssPhase3hMetric("Current Document.css_position_inline_fragment_owners=") + ";shifted=" +
+        cssPhase3hMetric("Current Document.css_position_inline_fragments_shifted=") + ";inline-cb=" +
+        cssPhase3hMetric("Current Document.css_position_inline_containing_blocks=") + ";snapshots=" +
+        cssPhase3hMetric("Current Document.css_position_static_snapshots=") + ";lifecycle=" +
+        cssPhase3hMetric("Current Document.css_position_lifecycle_resets="));
+
+    bool cssPhase4aLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-phase4a.html");
+    std::string cssPhase4aText = gxos::apps::Navigator::SmokeCurrentDocumentText();
+    std::string cssPhase4aReport = gxos::apps::Navigator::SmokeRuntimeReport();
+    auto cssPhase4aMetric = [&](const std::string& prefix) {
+        const std::size_t pos = cssPhase4aReport.find(prefix);
+        if (pos == std::string::npos) return std::string("missing");
+        const std::size_t end = cssPhase4aReport.find('\n', pos);
+        return cssPhase4aReport.substr(pos, end == std::string::npos ? std::string::npos : end - pos);
+    };
+    add("CSS phase 4A deterministic fixture loads",
+        cssPhase4aLoaded &&
+        contains(cssPhase4aText, "CSS Phase 4A Bounded Single-Line Flexbox") &&
+        contains(cssPhase4aText, "grow 1") &&
+        contains(cssPhase4aText, "nested A") &&
+        contains(cssPhase4aText, "anonymous text item") &&
+        contains(cssPhase4aText, "intrinsic image") &&
+        contains(cssPhase4aText, "readable wrap fallback"),
+        "currentUrl=" + gxos::apps::Navigator::SmokeCurrentUrl());
+    add("CSS phase 4A bounded single-line allocator and geometry evidence",
+        hasPositiveCount(cssPhase4aReport, "Current Document.css_flex_containers=") &&
+        hasPositiveCount(cssPhase4aReport, "Current Document.css_flex_items=") &&
+        hasPositiveCount(cssPhase4aReport, "Current Document.css_flex_base_size_queries=") &&
+        hasPositiveCount(cssPhase4aReport, "Current Document.css_flex_intrinsic_queries=") &&
+        contains(cssPhase4aReport, "Current Document.css_flex_model=bounded-multiline-flexbox") &&
+        contains(cssPhase4aReport, "Current Document.css_flex_order_semantics=stable-order-then-source-order") &&
+        contains(cssPhase4aReport, "id=phase4a-row-a,") &&
+        contains(cssPhase4aReport, "id=phase4a-grow-a,") &&
+        contains(cssPhase4aReport, "id=phase4a-nested-a,") &&
+        contains(cssPhase4aReport, "item-id=phase4a-row-a"),
+        "containers=" + cssPhase4aMetric("Current Document.css_flex_containers=") + ";items=" +
+        cssPhase4aMetric("Current Document.css_flex_items=") + ";base=" +
+        cssPhase4aMetric("Current Document.css_flex_base_size_queries=") + ";evidence=" +
+        summarizeText(cssPhase4aMetric("Current Document.css_flex_evidence="), 2600));
+    add("CSS phase 4A wrap support and exclusions",
+        contains(cssPhase4aReport, "Current Document.css_flex_wrap_unsupported=0") &&
+        hasPositiveCount(cssPhase4aReport, "Current Document.css_flex_absolute_excluded=") &&
+        hasPositiveCount(cssPhase4aReport, "Current Document.css_flex_display_none_excluded=") &&
+        contains(cssPhase4aReport, "Current Document.css_flex_wrap_semantics=nowrap-preserved-wrap-supported-wrap-reverse-cross-axis-only"),
+        "wrap=" + cssPhase4aMetric("Current Document.css_flex_wrap_unsupported=") + ";absolute=" +
+        cssPhase4aMetric("Current Document.css_flex_absolute_excluded=") + ";none=" +
+        cssPhase4aMetric("Current Document.css_flex_display_none_excluded="));
+
+    bool cssPhase4bLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-phase4b.html");
+    std::string cssPhase4bText = gxos::apps::Navigator::SmokeCurrentDocumentText();
+    std::string cssPhase4bReport = gxos::apps::Navigator::SmokeRuntimeReport();
+    auto cssPhase4bMetric = [&](const std::string& prefix) {
+        const std::size_t pos = cssPhase4bReport.find(prefix);
+        if (pos == std::string::npos) return std::string("missing");
+        const std::size_t end = cssPhase4bReport.find('\n', pos);
+        return cssPhase4bReport.substr(pos, end == std::string::npos ? std::string::npos : end - pos);
+    };
+    add("CSS phase 4B deterministic multiline fixture loads",
+        cssPhase4bLoaded &&
+        contains(cssPhase4bText, "CSS Phase 4B Multiline Flexbox") &&
+        contains(cssPhase4bText, "nowrap A") &&
+        contains(cssPhase4bText, "line one B tall") &&
+        contains(cssPhase4bText, "oversized item") &&
+        contains(cssPhase4bText, "Following content is below the complete wrapped container extent."),
+        "currentUrl=" + gxos::apps::Navigator::SmokeCurrentUrl());
+    add("CSS phase 4B wraps ordered items into stable per-line geometry",
+        hasPositiveCount(cssPhase4bReport, "Current Document.css_flex_lines=") &&
+        hasPositiveCount(cssPhase4bReport, "Current Document.css_flex_wrapped_containers=") &&
+        contains(cssPhase4bReport, "Current Document.css_flex_wrap_unsupported=0") &&
+        contains(cssPhase4bReport, "id=phase4b-wrap,serial=") &&
+        contains(cssPhase4bReport, ",wrap=wrap") &&
+        contains(cssPhase4bReport, "item-id=phase4b-wrap-a,") &&
+        contains(cssPhase4bReport, "item-id=phase4b-wrap-d,") &&
+        contains(cssPhase4bReport, ",line=1,") &&
+        contains(cssPhase4bReport, "id=phase4b-after,"),
+        "lines=" + cssPhase4bMetric("Current Document.css_flex_lines=") + ";wrapped=" +
+        cssPhase4bMetric("Current Document.css_flex_wrapped_containers=") + ";evidence=" +
+        summarizeText(cssPhase4bMetric("Current Document.css_flex_evidence="), 2600));
+
+    bool cssPhase4cLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-phase4c.html");
+    std::string cssPhase4cText = gxos::apps::Navigator::SmokeCurrentDocumentText();
+    std::string cssPhase4cReport = gxos::apps::Navigator::SmokeRuntimeReport();
+    auto cssPhase4cMetric = [&](const std::string& prefix) {
+        const std::size_t pos = cssPhase4cReport.find(prefix);
+        if (pos == std::string::npos) return std::string("missing");
+        const std::size_t end = cssPhase4cReport.find('\n', pos);
+        return cssPhase4cReport.substr(pos, end == std::string::npos ? std::string::npos : end - pos);
+    };
+    add("CSS phase 4C cross-axis fixture loads",
+        cssPhase4cLoaded &&
+        contains(cssPhase4cText, "CSS Phase 4C Flexbox Cross-Axis Completion") &&
+        contains(cssPhase4cText, "ordinary wrap baseline") &&
+        contains(cssPhase4cText, "wrap-reverse + center") &&
+        contains(cssPhase4cText, "column wrap") &&
+        contains(cssPhase4cText, "nested inner line two") &&
+        contains(cssPhase4cText, "Following block content remains below the flex containers."),
+        "currentUrl=" + gxos::apps::Navigator::SmokeCurrentUrl());
+    const bool phase4cWrapReverseCounter = hasPositiveCount(cssPhase4cReport, "Current Document.css_flex_wrap_reverse_containers=");
+    const bool phase4cAlignContentCounter = hasPositiveCount(cssPhase4cReport, "Current Document.css_flex_align_content_containers=");
+    const bool phase4cStretchCounter = hasPositiveCount(cssPhase4cReport, "Current Document.css_flex_stretched_lines=");
+    const bool phase4cWrapReverseEvidence = contains(cssPhase4cReport, "id=phase4c-reverse-center,serial=") &&
+        contains(cssPhase4cReport, ",wrap=wrap-reverse") && contains(cssPhase4cReport, ",align-content=applied");
+    const bool phase4cStretchEvidence = contains(cssPhase4cReport, "id=phase4c-stretch,serial=") && contains(cssPhase4cReport, ",align-content=applied");
+    const bool phase4cColumnEvidence = hasPositiveCount(cssPhase4cReport, "Current Document.css_flex_column_wrapped_containers=");
+    const bool phase4cNestedEvidence = hasPositiveCount(cssPhase4cReport, "Current Document.css_flex_nested_multiline_containers=") &&
+        contains(cssPhase4cReport, "item-id=phase4c-inner-b,");
+    const bool phase4cFollowingFlowEvidence = contains(cssPhase4cText, "Following block content remains below the flex containers.");
+    add("CSS phase 4C line distribution and wrap-reverse evidence",
+        phase4cWrapReverseCounter && phase4cAlignContentCounter && phase4cStretchCounter &&
+        contains(cssPhase4cReport, "Current Document.css_flex_wrap_unsupported=0") &&
+        contains(cssPhase4cReport, "Current Document.css_flex_align_content=flex-start-flex-end-center-space-between-space-around-stretch-normal-as-stretch") &&
+        contains(cssPhase4cReport, "Current Document.css_flex_cross_axis=logical-row-vertical-column-horizontal-padding-border-gap-preserved") &&
+        phase4cWrapReverseEvidence && phase4cStretchEvidence && phase4cColumnEvidence && phase4cNestedEvidence && phase4cFollowingFlowEvidence,
+        "wrap-reverse=" + cssPhase4cMetric("Current Document.css_flex_wrap_reverse_containers=") + ";align-content=" +
+        cssPhase4cMetric("Current Document.css_flex_align_content_containers=") + ";stretched=" +
+        cssPhase4cMetric("Current Document.css_flex_stretched_lines=") + ";reverseEvidence=" + yesNo(phase4cWrapReverseEvidence) +
+        ";stretchEvidence=" + yesNo(phase4cStretchEvidence) + ";columnEvidence=" + yesNo(phase4cColumnEvidence) +
+        ";nestedEvidence=" + yesNo(phase4cNestedEvidence) +
+        ";followingFlow=" + yesNo(phase4cFollowingFlowEvidence) + ";reportHasInner=" +
+        yesNo(contains(cssPhase4cReport, "id=phase4c-inner")) + ";nestedCount=" +
+        cssPhase4cMetric("Current Document.css_flex_nested_multiline_containers="));
+
+    bool cssPhase5aLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-phase5a.html");
+    std::string cssPhase5aText = gxos::apps::Navigator::SmokeCurrentDocumentText();
+    std::string cssPhase5aReport = gxos::apps::Navigator::SmokeRuntimeReport();
+    auto cssPhase5aMetric = [&](const std::string& prefix) {
+        const std::size_t pos = cssPhase5aReport.find(prefix);
+        if (pos == std::string::npos) return std::string("missing");
+        const std::size_t end = cssPhase5aReport.find('\n', pos);
+        return cssPhase5aReport.substr(pos, end == std::string::npos ? std::string::npos : end - pos);
+    };
+    const bool phase5aBothInsetEvidence = contains(cssPhase5aReport, "id=phase5a-relative-both,") &&
+        contains(cssPhase5aReport, "id=phase5a-relative-both,logical-serial=") &&
+        contains(cssPhase5aReport, ",position=relative,") &&
+        contains(cssPhase5aReport, ",specified-offsets=px:7:px:60:px:40:px:14") &&
+        contains(cssPhase5aReport, ",resolved-offsets=7:60:40:14");
+    const bool phase5aContainingBlockEvidence = contains(cssPhase5aReport, "id=phase5a-cb-link,") &&
+        contains(cssPhase5aReport, ",containing-block-type=positioned-ancestor,") &&
+        contains(cssPhase5aReport, "id=phase5a-flex-abs,") &&
+        contains(cssPhase5aReport, ",containing-block-type=positioned-ancestor,");
+    const bool phase5aStructuralChildEvidence = contains(cssPhase5aReport, "id=phase5a-abs-child,") &&
+        contains(cssPhase5aReport, "id=phase5a-abs-child,logical-serial=") &&
+        contains(cssPhase5aReport, ",position=static,") &&
+        contains(cssPhase5aReport, ",containing-block-type=positioned-ancestor,") &&
+        contains(cssPhase5aReport, ",flow-participation=no,") &&
+        contains(cssPhase5aReport, ",parent-height-contribution=no,");
+    const bool phase5aEqualOrderEvidence = contains(cssPhase5aReport, "id=phase5a-equal-a,") &&
+        contains(cssPhase5aReport, "id=phase5a-equal-b,") &&
+        cssPhase5aReport.find("id=phase5a-equal-a,") < cssPhase5aReport.find("id=phase5a-equal-b,");
+    add("CSS phase 5A positioned-layout fixture loads",
+        cssPhase5aLoaded &&
+        contains(cssPhase5aText, "CSS Phase 5A Positioned Layout Foundation") &&
+        contains(cssPhase5aText, "Relative left plus top reserves its original flow space") &&
+        contains(cssPhase5aText, "Both relative insets use left and top precedence") &&
+        contains(cssPhase5aText, "Static ignores physical insets and stays in normal flow") &&
+        contains(cssPhase5aText, "absolute child link uses relative parent") &&
+        contains(cssPhase5aText, "ABS between siblings") &&
+        contains(cssPhase5aText, "left plus right bounded size") &&
+        contains(cssPhase5aText, "top plus bottom bounded fallback") &&
+        contains(cssPhase5aText, "relative flex item") &&
+        contains(cssPhase5aText, "direct flex absolute excluded") &&
+        contains(cssPhase5aText, "higher z-index") &&
+        contains(cssPhase5aText, "equal z later paints on top") &&
+        contains(cssPhase5aText, "Absolute container content includes a normal block child") &&
+        contains(cssPhase5aText, "Ordinary following content remains in normal flow"),
+        "currentUrl=" + gxos::apps::Navigator::SmokeCurrentUrl());
+    add("CSS phase 5A positioning, containing blocks, out-of-flow flow, and stacking",
+        hasPositiveCount(cssPhase5aReport, "Current Document.css_position_relative=") &&
+        hasPositiveCount(cssPhase5aReport, "Current Document.css_position_absolute=") &&
+        hasPositiveCount(cssPhase5aReport, "Current Document.css_relative_offsets=") &&
+        hasPositiveCount(cssPhase5aReport, "Current Document.css_absolute_boxes=") &&
+        hasPositiveCount(cssPhase5aReport, "Current Document.css_absolute_out_of_flow=") &&
+        hasPositiveCount(cssPhase5aReport, "Current Document.css_positioned_containing_blocks=") &&
+        hasPositiveCount(cssPhase5aReport, "Current Document.css_position_document_extent_extensions=") &&
+        hasPositiveCount(cssPhase5aReport, "Current Document.css_position_stacking_owners=") &&
+        hasPositiveCount(cssPhase5aReport, "Current Document.css_position_positive_z_records=") &&
+        hasPositiveCount(cssPhase5aReport, "Current Document.css_position_equal_z_source_orders=") &&
+        hasPositiveCount(cssPhase5aReport, "Current Document.css_flex_absolute_excluded=") &&
+        phase5aBothInsetEvidence && phase5aContainingBlockEvidence && phase5aStructuralChildEvidence && phase5aEqualOrderEvidence &&
+        contains(cssPhase5aReport, "Current Document.css_position_fixed_sticky=fixed-supported-sticky-supported-diagnostic") &&
+        hasPositiveCount(cssPhase5aReport, "Current Document.css_position_fixed=") &&
+        hasPositiveCount(cssPhase5aReport, "Current Document.css_position_sticky=") &&
+        contains(cssPhase5aReport, "Current Document.css_positioned_evidence=id=phase5a-"),
+        "relative=" + cssPhase5aMetric("Current Document.css_position_relative=") + ";absolute=" +
+        cssPhase5aMetric("Current Document.css_position_absolute=") + ";containing=" +
+        cssPhase5aMetric("Current Document.css_positioned_containing_blocks=") + ";out-of-flow=" +
+        cssPhase5aMetric("Current Document.css_absolute_out_of_flow=") + ";flex-absolute=" +
+        cssPhase5aMetric("Current Document.css_flex_absolute_excluded=") + ";stacking=" +
+        cssPhase5aMetric("Current Document.css_position_stacking_owners=") + ";equal-z=" +
+        cssPhase5aMetric("Current Document.css_position_equal_z_source_orders=") + ";structural-child=" +
+        yesNo(phase5aStructuralChildEvidence) + ";both-insets=" + yesNo(phase5aBothInsetEvidence) +
+        ";containing-evidence=" + yesNo(phase5aContainingBlockEvidence) +
+        ";equal-order=" + yesNo(phase5aEqualOrderEvidence) + ";evidence=" +
+        summarizeText(cssPhase5aMetric("Current Document.css_positioned_evidence="), 2800));
+
+    const bool phase5aPositionedLinkHit = gxos::apps::Navigator::SmokeClickFirstLink();
+    const std::string phase5aClickedUrl = gxos::apps::Navigator::SmokeCurrentUrl();
+    const bool phase5aRestored = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-phase5a.html");
+    add("CSS phase 5A positioned hyperlink uses final hit rectangle",
+        phase5aPositionedLinkHit &&
+        phase5aClickedUrl == "http://127.0.0.1:8080/navigator-smoke/basic.html" &&
+        phase5aRestored,
+        std::string("clicked=") + yesNo(phase5aPositionedLinkHit) + ";url=" + phase5aClickedUrl +
+        ";restored=" + yesNo(phase5aRestored));
+
+    bool cssPhase5bLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-phase5b.html");
+    auto phase5bEvidenceLine = [](const std::string& report, const std::string& id) {
+        const std::string prefix = "id=" + id + ",";
+        const std::size_t pos = report.find(prefix);
+        if (pos == std::string::npos) return std::string();
+        const std::size_t end = report.find('\n', pos);
+        return report.substr(pos, end == std::string::npos ? std::string::npos : end - pos);
+    };
+    const std::string cssPhase5bInitialReport = gxos::apps::Navigator::SmokeRuntimeReport();
+    const bool phase5bInitialHit = gxos::apps::Navigator::SmokeHitLinkById("phase5b-fixed-link");
+    const int phase5bInitialOffset = gxos::apps::Navigator::SmokeScrollOffset();
+    gxos::apps::Navigator::SmokeSetScrollOffset(240);
+    const int phase5bModerateOffset = gxos::apps::Navigator::SmokeScrollOffset();
+    const std::string cssPhase5bModerateReport = gxos::apps::Navigator::SmokeRuntimeReport();
+    const bool phase5bModerateHit = gxos::apps::Navigator::SmokeHitLinkById("phase5b-fixed-link");
+    gxos::apps::Navigator::SmokeSetScrollOffset(100000);
+    const int phase5bMaximumOffset = gxos::apps::Navigator::SmokeScrollOffset();
+    const std::string cssPhase5bMaximumReport = gxos::apps::Navigator::SmokeRuntimeReport();
+    const bool phase5bMaximumHit = gxos::apps::Navigator::SmokeHitLinkById("phase5b-fixed-link");
+    gxos::apps::Navigator::SmokeSetScrollOffset(0);
+    const bool phase5bScrollInvariance =
+        !phase5bEvidenceLine(cssPhase5bInitialReport, "phase5b-fixed-link").empty() &&
+        phase5bEvidenceLine(cssPhase5bInitialReport, "phase5b-fixed-link") ==
+            phase5bEvidenceLine(cssPhase5bModerateReport, "phase5b-fixed-link") &&
+        phase5bEvidenceLine(cssPhase5bInitialReport, "phase5b-fixed-link") ==
+            phase5bEvidenceLine(cssPhase5bMaximumReport, "phase5b-fixed-link");
+    const bool phase5bMultipleScrollPositions = phase5bInitialOffset == 0 &&
+        phase5bModerateOffset > 0 && phase5bMaximumOffset >= phase5bModerateOffset;
+    auto cssPhase5bMetric = [&](const std::string& prefix) {
+        const std::size_t pos = cssPhase5bInitialReport.find(prefix);
+        if (pos == std::string::npos) return std::string("missing");
+        const std::size_t end = cssPhase5bInitialReport.find('\n', pos);
+        return cssPhase5bInitialReport.substr(pos, end == std::string::npos ? std::string::npos : end - pos);
+    };
+    add("CSS phase 5B fixed viewport fixture loads",
+        cssPhase5bLoaded &&
+        contains(gxos::apps::Navigator::SmokeCurrentDocumentText(), "CSS Phase 5B Fixed Positioning and Viewport Layer") &&
+        contains(gxos::apps::Navigator::SmokeCurrentDocumentText(), "fixed top-left link") &&
+        contains(gxos::apps::Navigator::SmokeCurrentDocumentText(), "fixed top-right panel") &&
+        contains(gxos::apps::Navigator::SmokeCurrentDocumentText(), "content-sized fixed bottom-left status") &&
+        contains(gxos::apps::Navigator::SmokeCurrentDocumentText(), "fixed bottom-right action") &&
+        contains(gxos::apps::Navigator::SmokeCurrentDocumentText(), "direct fixed flex child") &&
+        contains(gxos::apps::Navigator::SmokeCurrentDocumentText(), "nested fixed viewport") &&
+        contains(gxos::apps::Navigator::SmokeCurrentDocumentText(), "partially offscreen fixed") &&
+        contains(gxos::apps::Navigator::SmokeCurrentDocumentText(), "Following document content proves fixed positioning does not add document extent"),
+        "currentUrl=" + gxos::apps::Navigator::SmokeCurrentUrl());
+    add("CSS phase 5B typed fixed records and viewport containing block",
+        hasPositiveCount(cssPhase5bInitialReport, "Current Document.css_position_fixed=") &&
+        hasPositiveCount(cssPhase5bInitialReport, "Current Document.css_fixed_viewport_records=") &&
+        hasPositiveCount(cssPhase5bInitialReport, "Current Document.css_fixed_absolute_descendants=") &&
+        hasPositiveCount(cssPhase5bInitialReport, "Current Document.css_fixed_stacking_records=") &&
+        hasPositiveCount(cssPhase5bInitialReport, "Current Document.css_fixed_hit_test_records=") &&
+        hasPositiveCount(cssPhase5bInitialReport, "Current Document.css_fixed_extent_exclusions=") &&
+        hasPositiveCount(cssPhase5bInitialReport, "Current Document.css_fixed_flex_exclusions=") &&
+        contains(cssPhase5bInitialReport, "Current Document.css_position_model=bounded-static-relative-absolute-fixed-sticky") &&
+        contains(cssPhase5bInitialReport, "Current Document.css_position_fixed_sticky=fixed-supported-sticky-supported-diagnostic") &&
+		contains(cssPhase5bInitialReport, "Current Document.css_position_viewport_rect=24:70:872:528") &&
+        contains(cssPhase5bInitialReport, "Current Document.css_position_fixed_coordinate_space=explicit-viewport-final-rect-no-scroll-translation") &&
+        contains(cssPhase5bInitialReport, "Current Document.css_position_unsupported_fixed=0") &&
+        hasPositiveCount(cssPhase5bInitialReport, "Current Document.css_position_sticky=") &&
+        contains(cssPhase5bInitialReport, "Current Document.css_position_unsupported_sticky=0") &&
+        contains(cssPhase5bInitialReport, "id=phase5b-fixed-link,") &&
+        contains(cssPhase5bInitialReport, ",position=fixed,") &&
+        contains(cssPhase5bInitialReport, ",coordinate-space=viewport,") &&
+        contains(cssPhase5bInitialReport, ",containing-block-type=viewport,") &&
+        contains(cssPhase5bInitialReport, ",flow-participation=no,") &&
+        contains(cssPhase5bInitialReport, ",parent-height-contribution=no,"),
+        "fixed=" + cssPhase5bMetric("Current Document.css_position_fixed=") + ";viewport=" +
+        cssPhase5bMetric("Current Document.css_fixed_viewport_records=") + ";abs-desc=" +
+        cssPhase5bMetric("Current Document.css_fixed_absolute_descendants=") + ";flex-exclusions=" +
+        cssPhase5bMetric("Current Document.css_fixed_flex_exclusions=") + ";extent-exclusions=" +
+        cssPhase5bMetric("Current Document.css_fixed_extent_exclusions=") + ";evidence=" +
+        summarizeText(cssPhase5bMetric("Current Document.css_positioned_evidence="), 3200));
+    add("CSS phase 5B fixed scroll invariance and hit testing",
+        phase5bMultipleScrollPositions && phase5bScrollInvariance &&
+        phase5bInitialHit && phase5bModerateHit && phase5bMaximumHit &&
+        contains(cssPhase5bModerateReport, "coordinate-space=viewport") &&
+        contains(cssPhase5bMaximumReport, "coordinate-space=viewport"),
+        "initialOffset=" + std::to_string(phase5bInitialOffset) + ";moderateOffset=" +
+        std::to_string(phase5bModerateOffset) + ";maximumOffset=" + std::to_string(phase5bMaximumOffset) +
+        ";invariance=" + yesNo(phase5bScrollInvariance) + ";hitInitial=" + yesNo(phase5bInitialHit) +
+        ";hitModerate=" + yesNo(phase5bModerateHit) + ";hitMaximum=" + yesNo(phase5bMaximumHit));
+
+    bool cssPhase6aLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-phase6a.html");
+    const std::string cssPhase6aInitialReport = gxos::apps::Navigator::SmokeRuntimeReport();
+    // The compact Navigator layout intentionally keeps this fixture as one
+    // normal-flow document.  Move the document viewport over the bounded
+    // cases before sampling links; this does not alter element-local offsets.
+    gxos::apps::Navigator::SmokeSetScrollOffset(800);
+    const int phase6aDocumentOffsetForLinks = gxos::apps::Navigator::SmokeScrollOffset();
+    const bool phase6aHiddenHit = gxos::apps::Navigator::SmokeHitLinkById("phase6a-hidden-link");
+    const bool phase6aRevealedBefore = gxos::apps::Navigator::SmokeHitLinkById("phase6a-revealed-link");
+    const int phase6aInitialOffset = gxos::apps::Navigator::SmokeElementScrollOffsetYById("phase6a-auto-overflow");
+    const int phase6aMaxOffset = gxos::apps::Navigator::SmokeElementMaxScrollYById("phase6a-auto-overflow");
+    const bool phase6aSetScroll = gxos::apps::Navigator::SmokeSetElementScrollOffsetById(
+        "phase6a-auto-overflow", 0, 100000);
+    const int phase6aScrolledOffset = gxos::apps::Navigator::SmokeElementScrollOffsetYById("phase6a-auto-overflow");
+    const bool phase6aRevealedAfter = gxos::apps::Navigator::SmokeHitLinkById("phase6a-revealed-link");
+    const bool phase6aClamp = phase6aSetScroll && phase6aMaxOffset >= 0 &&
+        phase6aScrolledOffset == phase6aMaxOffset;
+    const std::string cssPhase6aScrolledReport = gxos::apps::Navigator::SmokeRuntimeReport();
+    // Keep the nested probe inside the outer viewport while both local
+    // containers contribute nonzero scroll translations.
+    gxos::apps::Navigator::SmokeSetScrollOffset(1200);
+    const bool phase6aNestedOuterSet = gxos::apps::Navigator::SmokeSetElementScrollOffsetById(
+        "phase6a-nested-outer", 0, 20);
+    const bool phase6aNestedInnerSet = gxos::apps::Navigator::SmokeSetElementScrollOffsetById(
+        "phase6a-nested-inner", 0, 100000);
+    const int phase6aNestedOuterOffset = gxos::apps::Navigator::SmokeElementScrollOffsetYById("phase6a-nested-outer");
+    const int phase6aNestedInnerOffset = gxos::apps::Navigator::SmokeElementScrollOffsetYById("phase6a-nested-inner");
+    const bool phase6aNestedHit = gxos::apps::Navigator::SmokeHitLinkById("phase6a-nested-link");
+    const std::string cssPhase6aHitReport = gxos::apps::Navigator::SmokeRuntimeReport();
+    const bool phase6aFixedHitBefore = gxos::apps::Navigator::SmokeHitLinkById("phase6a-fixed-link");
+    const std::string phase6aFixedEvidenceBefore = phase5bEvidenceLine(cssPhase6aInitialReport, "phase6a-fixed-link");
+    const std::string phase6aFixedEvidenceAfter = phase5bEvidenceLine(cssPhase6aScrolledReport, "phase6a-fixed-link");
+    const bool phase6aFixedInvariant = !phase6aFixedEvidenceBefore.empty() &&
+        phase6aFixedEvidenceBefore == phase6aFixedEvidenceAfter && phase6aFixedHitBefore;
+    auto cssPhase6aMetric = [&](const std::string& prefix) {
+        const std::size_t pos = cssPhase6aInitialReport.find(prefix);
+        if (pos == std::string::npos) return std::string("missing");
+        const std::size_t end = cssPhase6aInitialReport.find('\n', pos);
+        return cssPhase6aInitialReport.substr(pos, end == std::string::npos ? std::string::npos : end - pos);
+    };
+    add("CSS phase 6A overflow fixture loads",
+        cssPhase6aLoaded &&
+        contains(gxos::apps::Navigator::SmokeCurrentDocumentText(), "CSS Phase 6A Overflow, Clipping and Scroll Containers") &&
+        contains(gxos::apps::Navigator::SmokeCurrentDocumentText(), "overflow: visible") &&
+        contains(gxos::apps::Navigator::SmokeCurrentDocumentText(), "overflow: hidden") &&
+        contains(gxos::apps::Navigator::SmokeCurrentDocumentText(), "nested revealed link") &&
+        contains(gxos::apps::Navigator::SmokeCurrentDocumentText(), "fixed inside scrolled DOM ancestor"),
+        "currentUrl=" + gxos::apps::Navigator::SmokeCurrentUrl());
+    add("CSS phase 6A typed overflow and scroll-container diagnostics",
+        hasPositiveCount(cssPhase6aInitialReport, "Current Document.css_overflow_visible_boxes=") &&
+        hasPositiveCount(cssPhase6aInitialReport, "Current Document.css_overflow_hidden_boxes=") &&
+        hasPositiveCount(cssPhase6aInitialReport, "Current Document.css_overflow_auto_boxes=") &&
+        hasPositiveCount(cssPhase6aInitialReport, "Current Document.css_overflow_scroll_boxes=") &&
+        hasPositiveCount(cssPhase6aInitialReport, "Current Document.css_active_scroll_containers=") &&
+        hasPositiveCount(cssPhase6aInitialReport, "Current Document.css_scroll_content_extent_records=") &&
+        hasPositiveCount(cssPhase6aInitialReport, "Current Document.css_nested_scroll_containers=") &&
+        contains(cssPhase6aHitReport, "css_overflow_visible_semantics=paint-overflow-no-local-scroll-container") &&
+        contains(cssPhase6aHitReport, "css_overflow_hidden_semantics=padding-box-descendant-clip-no-user-scroll") &&
+        contains(cssPhase6aHitReport, "css_overflow_auto_container_semantics=axis-local-auto-scroll-when-content-exceeds") &&
+        contains(cssPhase6aHitReport, "css_overflow_scroll_container_semantics=axis-local-always-scrollable-record") &&
+        contains(cssPhase6aHitReport, "css_scrollbar_ui=bounded-element-overlay-owner-level-after-content") &&
+        contains(cssPhase6aHitReport, "css_scrollbar_reservation_model=overlay-no-content-viewport-mutation"),
+        "visible=" + cssPhase6aMetric("Current Document.css_overflow_visible_boxes=") + ";hidden=" +
+        cssPhase6aMetric("Current Document.css_overflow_hidden_boxes=") + ";auto=" +
+        cssPhase6aMetric("Current Document.css_overflow_auto_boxes=") + ";scroll=" +
+        cssPhase6aMetric("Current Document.css_overflow_scroll_boxes=") + ";active=" +
+        cssPhase6aMetric("Current Document.css_active_scroll_containers=") + ";nested=" +
+        cssPhase6aMetric("Current Document.css_nested_scroll_containers="));
+    add("CSS phase 6A clipping and local hyperlink hit testing",
+        !phase6aHiddenHit && !phase6aRevealedBefore && phase6aInitialOffset == 0 &&
+        phase6aRevealedAfter && phase6aClamp,
+        std::string("hiddenHit=") + yesNo(phase6aHiddenHit) + ";before=" + yesNo(phase6aRevealedBefore) +
+        ";after=" + yesNo(phase6aRevealedAfter) + ";initialOffset=" + std::to_string(phase6aInitialOffset) +
+        ";max=" + std::to_string(phase6aMaxOffset) + ";scrolled=" + std::to_string(phase6aScrolledOffset) +
+        ";docOffset=" + std::to_string(phase6aDocumentOffsetForLinks) +
+        ";evidence=" + summarizeText(cssPhase6aHitReport.find("Current Document.css_scroll_evidence=") == std::string::npos
+            ? std::string("missing") : cssPhase6aHitReport.substr(cssPhase6aHitReport.find("Current Document.css_scroll_evidence="), 2400), 2400));
+    add("CSS phase 6A nested scrolling and fixed descendant invariance",
+        phase6aNestedOuterSet && phase6aNestedInnerSet && phase6aNestedOuterOffset >= 0 &&
+        phase6aNestedInnerOffset >= 0 && phase6aNestedHit && phase6aFixedInvariant,
+        "outer=" + std::to_string(phase6aNestedOuterOffset) + ";inner=" + std::to_string(phase6aNestedInnerOffset) +
+        ";nestedHit=" + yesNo(phase6aNestedHit) + ";fixedInvariant=" + yesNo(phase6aFixedInvariant) +
+        ";evidence=" + summarizeText(cssPhase6aHitReport.find("Current Document.css_scroll_evidence=") == std::string::npos
+            ? std::string("missing") : cssPhase6aHitReport.substr(cssPhase6aHitReport.find("Current Document.css_scroll_evidence="), 2400), 2400));
+
+    bool cssPhase6bLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-phase6b.html");
+    const std::string cssPhase6bInitialReport = gxos::apps::Navigator::SmokeRuntimeReport();
+    auto cssPhase6bEvidenceLine = [](const std::string& report, const std::string& id) {
+        const std::string prefix = "id=" + id + ",";
+        const std::size_t pos = report.find(prefix);
+        if (pos == std::string::npos) return std::string();
+        const std::size_t end = report.find(';', pos);
+        return report.substr(pos, end == std::string::npos ? std::string::npos : end - pos);
+    };
+    const int phase6bInitialOffset = gxos::apps::Navigator::SmokeScrollOffset();
+    const bool phase6bInitialHit = gxos::apps::Navigator::SmokeHitLinkById("phase6b-sticky-link");
+    gxos::apps::Navigator::SmokeSetScrollOffset(220);
+    const int phase6bThresholdOffset = gxos::apps::Navigator::SmokeScrollOffset();
+    const std::string cssPhase6bThresholdReport = gxos::apps::Navigator::SmokeRuntimeReport();
+    const bool phase6bThresholdHit = gxos::apps::Navigator::SmokeHitLinkById("phase6b-sticky-link");
+    gxos::apps::Navigator::SmokeSetScrollOffset(420);
+    const bool phase6bAdditionalHit = gxos::apps::Navigator::SmokeHitLinkById("phase6b-sticky-link");
+    gxos::apps::Navigator::SmokeSetScrollOffset(100000);
+    const int phase6bEndOffset = gxos::apps::Navigator::SmokeScrollOffset();
+    const std::string cssPhase6bEndReport = gxos::apps::Navigator::SmokeRuntimeReport();
+    const bool phase6bEndHit = gxos::apps::Navigator::SmokeHitLinkById("phase6b-sticky-link");
+    gxos::apps::Navigator::SmokeSetScrollOffset(80);
+    const bool phase6bBackScrollHit = gxos::apps::Navigator::SmokeHitLinkById("phase6b-sticky-link");
+    gxos::apps::Navigator::SmokeSetScrollOffset(0);
+    const std::string cssPhase6bReleaseReport = gxos::apps::Navigator::SmokeRuntimeReport();
+    const bool phase6bReleaseHit = gxos::apps::Navigator::SmokeHitLinkById("phase6b-sticky-link");
+    const std::string cssPhase6bHitReport = gxos::apps::Navigator::SmokeRuntimeReport();
+    const std::string phase6bInitialEvidence = cssPhase6bEvidenceLine(cssPhase6bInitialReport, "phase6b-doc-sticky");
+    const std::string phase6bThresholdEvidence = cssPhase6bEvidenceLine(cssPhase6bThresholdReport, "phase6b-doc-sticky");
+    const std::string phase6bEndEvidence = cssPhase6bEvidenceLine(cssPhase6bEndReport, "phase6b-doc-sticky");
+    const std::string phase6bReleaseEvidence = cssPhase6bEvidenceLine(cssPhase6bReleaseReport, "phase6b-doc-sticky");
+    const bool phase6bAutoSet = gxos::apps::Navigator::SmokeSetElementScrollOffsetById("phase6b-auto", 0, 100000);
+    const int phase6bAutoOffset = gxos::apps::Navigator::SmokeElementScrollOffsetYById("phase6b-auto");
+    const int phase6bAutoMax = gxos::apps::Navigator::SmokeElementMaxScrollYById("phase6b-auto");
+    const std::string cssPhase6bLocalReport = gxos::apps::Navigator::SmokeRuntimeReport();
+    const bool phase6bNestedOuterSet = gxos::apps::Navigator::SmokeSetElementScrollOffsetById("phase6b-nested-outer", 0, 24);
+    const bool phase6bNestedInnerSet = gxos::apps::Navigator::SmokeSetElementScrollOffsetById("phase6b-nested-inner", 0, 100000);
+    const std::string cssPhase6bNestedReport = gxos::apps::Navigator::SmokeRuntimeReport();
+    const std::string phase6bFixedInitial = phase5bEvidenceLine(cssPhase6bInitialReport, "phase6b-fixed-descendant");
+    const std::string phase6bFixedEnd = phase5bEvidenceLine(cssPhase6bEndReport, "phase6b-fixed-descendant");
+    const bool phase6bFixedInvariant = !phase6bFixedInitial.empty() && phase6bFixedInitial == phase6bFixedEnd;
+    auto cssPhase6bMetric = [&](const std::string& prefix) {
+        const std::size_t pos = cssPhase6bInitialReport.find(prefix);
+        if (pos == std::string::npos) return std::string("missing");
+        const std::size_t end = cssPhase6bInitialReport.find('\n', pos);
+        return cssPhase6bInitialReport.substr(pos, end == std::string::npos ? std::string::npos : end - pos);
+    };
+    add("CSS phase 6B sticky fixture loads",
+        cssPhase6bLoaded &&
+        contains(gxos::apps::Navigator::SmokeCurrentDocumentText(), "CSS Phase 6B Sticky Positioning") &&
+        contains(gxos::apps::Navigator::SmokeCurrentDocumentText(), "document sticky top") &&
+        contains(gxos::apps::Navigator::SmokeCurrentDocumentText(), "sticky inside overflow:auto") &&
+        contains(gxos::apps::Navigator::SmokeCurrentDocumentText(), "nearest nested scrollport sticky") &&
+        contains(gxos::apps::Navigator::SmokeCurrentDocumentText(), "sticky flex item") &&
+        contains(gxos::apps::Navigator::SmokeCurrentDocumentText(), "fixed descendant stays viewport-fixed"),
+        "currentUrl=" + gxos::apps::Navigator::SmokeCurrentUrl());
+    add("CSS phase 6B typed sticky diagnostics and geometry evidence",
+        hasPositiveCount(cssPhase6bInitialReport, "Current Document.css_position_sticky=") &&
+        hasPositiveCount(cssPhase6bInitialReport, "Current Document.css_sticky_element_count=") &&
+        hasPositiveCount(cssPhase6bInitialReport, "Current Document.css_sticky_root_count=") &&
+        hasPositiveCount(cssPhase6bInitialReport, "Current Document.css_sticky_local_scroll_count=") &&
+        hasPositiveCount(cssPhase6bInitialReport, "Current Document.css_sticky_horizontal_count=") &&
+        hasPositiveCount(cssPhase6bInitialReport, "Current Document.css_sticky_flex_count=") &&
+        hasPositiveCount(cssPhase6bInitialReport, "Current Document.css_sticky_positioned_descendant_count=") &&
+        contains(cssPhase6bInitialReport, "css_position_unsupported_sticky=0") &&
+        contains(cssPhase6bInitialReport, "css_position_sticky_model=normal-flow-base-rectangle-scrollport-inset-containing-end-constraint") &&
+        contains(cssPhase6bInitialReport, "id=phase6b-doc-sticky,position=sticky") &&
+        contains(cssPhase6bInitialReport, "normalY=") && contains(cssPhase6bInitialReport, "scrollportTop=") &&
+        contains(cssPhase6bInitialReport, "finalY=") && contains(cssPhase6bInitialReport, "containerEnd="),
+        "sticky=" + cssPhase6bMetric("Current Document.css_position_sticky=") + ";root=" +
+        cssPhase6bMetric("Current Document.css_sticky_root_count=") + ";local=" +
+        cssPhase6bMetric("Current Document.css_sticky_local_scroll_count=") + ";flex=" +
+        cssPhase6bMetric("Current Document.css_sticky_flex_count=") + ";evidence=" +
+        summarizeText(cssPhase6bMetric("Current Document.css_sticky_evidence="), 3200));
+    add("CSS phase 6B document sticky threshold, release, and hit testing",
+        phase6bInitialOffset == 0 && phase6bThresholdOffset > phase6bInitialOffset &&
+        phase6bEndOffset >= phase6bThresholdOffset && phase6bInitialHit && phase6bThresholdHit &&
+        phase6bAdditionalHit && !phase6bEndHit && phase6bBackScrollHit && phase6bReleaseHit &&
+        contains(phase6bInitialEvidence, "id=phase6b-doc-sticky,position=sticky") &&
+        contains(phase6bThresholdEvidence, ",stuck=yes") &&
+        contains(phase6bThresholdEvidence, ",final-screen-y=76,") &&
+        contains(phase6bEndEvidence, ",end-clamp=yes,") &&
+        contains(phase6bReleaseEvidence, ",stuck=no"),
+        std::string("hits=") + yesNo(phase6bInitialHit) + "/" + yesNo(phase6bThresholdHit) + "/" +
+        yesNo(phase6bAdditionalHit) + "/" + yesNo(phase6bEndHit) + "/" +
+        yesNo(phase6bBackScrollHit) + "/" + yesNo(phase6bReleaseHit) +
+        ";initial=" + phase6bInitialEvidence +
+        ";threshold=" + phase6bThresholdEvidence +
+        ";end=" + phase6bEndEvidence +
+        ";release=" + phase6bReleaseEvidence +
+        ";hit=" + summarizeText(cssPhase6bHitReport.find("Current Document.css_scroll_evidence=") == std::string::npos
+            ? std::string("missing") : cssPhase6bHitReport.substr(cssPhase6bHitReport.find("Current Document.css_scroll_evidence="), 1800), 1800));
+    add("CSS phase 6B local and nested sticky scrollports",
+        phase6bAutoSet && phase6bAutoMax > 0 && phase6bAutoOffset == phase6bAutoMax &&
+        phase6bNestedOuterSet && phase6bNestedInnerSet &&
+        contains(cssPhase6bLocalReport, "id=phase6b-auto-sticky,position=sticky,scrollport=local") &&
+        contains(cssPhase6bNestedReport, "id=phase6b-nested-sticky,position=sticky,scrollport=local") &&
+        contains(cssPhase6bNestedReport, "css_nested_scroll_containers="),
+        "auto=" + std::to_string(phase6bAutoOffset) + "/" + std::to_string(phase6bAutoMax) +
+        ";nestedOuter=" + std::to_string(gxos::apps::Navigator::SmokeElementScrollOffsetYById("phase6b-nested-outer")) +
+        ";nestedInner=" + std::to_string(gxos::apps::Navigator::SmokeElementScrollOffsetYById("phase6b-nested-inner")) +
+        ";evidence=" + summarizeText(cssPhase6bMetric("Current Document.css_sticky_evidence="), 2600));
+    add("CSS phase 6B fixed descendant remains viewport invariant",
+        phase6bFixedInvariant && contains(cssPhase6bInitialReport, "id=phase6b-fixed-descendant,") &&
+        contains(cssPhase6bEndReport, "coordinate-space=viewport"),
+        "fixedInitial=" + phase6bFixedInitial + ";fixedEnd=" + phase6bFixedEnd);
+
+    bool cssPhase6cLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-phase6c.html");
+    gxos::apps::Navigator::SmokeSetScrollOffset(0);
+    const std::string cssPhase6cInitialReport = gxos::apps::Navigator::SmokeRuntimeReport();
+    // The fixture is intentionally taller than the hosted viewport. Bring the
+    // element-level test cases into the document viewport before sampling
+    // clipped screen geometry and driving production pointer paths.
+    gxos::apps::Navigator::SmokeSetScrollOffset(780);
+    auto cssPhase6cMetric = [&](const std::string& prefix) {
+        const std::size_t pos = cssPhase6cInitialReport.find(prefix);
+        if (pos == std::string::npos) return std::string("missing");
+        const std::size_t end = cssPhase6cInitialReport.find('\n', pos);
+        return cssPhase6cInitialReport.substr(pos, end == std::string::npos ? std::string::npos : end - pos);
+    };
+    auto cssPhase6cRect = [&](const std::string& id, bool horizontal, bool thumb,
+        int& x, int& y, int& w, int& h) {
+        return gxos::apps::Navigator::SmokeElementScrollbarGeometryById(id, horizontal, thumb, x, y, w, h);
+    };
+    int phase6cVtx = 0, phase6cVty = 0, phase6cVtw = 0, phase6cVth = 0;
+    int phase6cVx = 0, phase6cVy = 0, phase6cVw = 0, phase6cVh = 0;
+    int phase6cHtx = 0, phase6cHty = 0, phase6cHtw = 0, phase6cHth = 0;
+    int phase6cHx = 0, phase6cHy = 0, phase6cHw = 0, phase6cHh = 0;
+    const bool phase6cVerticalTrack = cssPhase6cRect("phase6c-vertical", false, false,
+        phase6cVtx, phase6cVty, phase6cVtw, phase6cVth);
+    const bool phase6cVerticalThumb = cssPhase6cRect("phase6c-vertical", false, true,
+        phase6cVx, phase6cVy, phase6cVw, phase6cVh);
+    const bool phase6cHorizontalTrack = cssPhase6cRect("phase6c-horizontal", true, false,
+        phase6cHtx, phase6cHty, phase6cHtw, phase6cHth);
+    const bool phase6cHorizontalThumb = cssPhase6cRect("phase6c-horizontal", true, true,
+        phase6cHx, phase6cHy, phase6cHw, phase6cHh);
+    int phase6cBothVx = 0, phase6cBothVy = 0, phase6cBothVw = 0, phase6cBothVh = 0;
+    int phase6cBothHx = 0, phase6cBothHy = 0, phase6cBothHw = 0, phase6cBothHh = 0;
+    const bool phase6cBothVertical = cssPhase6cRect("phase6c-both", false, false,
+        phase6cBothVx, phase6cBothVy, phase6cBothVw, phase6cBothVh);
+    const bool phase6cBothHorizontal = cssPhase6cRect("phase6c-both", true, false,
+        phase6cBothHx, phase6cBothHy, phase6cBothHw, phase6cBothHh);
+    const bool phase6cFitHasNoBars =
+        !cssPhase6cRect("phase6c-fit", false, false, phase6cVtx, phase6cVty, phase6cVtw, phase6cVth) &&
+        !cssPhase6cRect("phase6c-fit", true, false, phase6cVtx, phase6cVty, phase6cVtw, phase6cVth);
+    const bool phase6cScrollFitHasBars =
+        cssPhase6cRect("phase6c-scroll-fit", false, false, phase6cVtx, phase6cVty, phase6cVtw, phase6cVth) &&
+        cssPhase6cRect("phase6c-scroll-fit", true, false, phase6cVtx, phase6cVty, phase6cVtw, phase6cVth);
+
+    gxos::apps::Navigator::SmokeSetElementScrollOffsetById("phase6c-vertical", 0, 0);
+    cssPhase6cRect("phase6c-vertical", false, false, phase6cVtx, phase6cVty, phase6cVtw, phase6cVth);
+    int phase6cVerticalStartThumbX = 0, phase6cVerticalStartThumbY = 0;
+    int phase6cVerticalStartThumbW = 0, phase6cVerticalStartThumbH = 0;
+    cssPhase6cRect("phase6c-vertical", false, true, phase6cVerticalStartThumbX,
+        phase6cVerticalStartThumbY, phase6cVerticalStartThumbW, phase6cVerticalStartThumbH);
+    const int phase6cVerticalStart = gxos::apps::Navigator::SmokeElementScrollOffsetYById("phase6c-vertical");
+    const int phase6cVerticalMax = gxos::apps::Navigator::SmokeElementMaxScrollYById("phase6c-vertical");
+    const bool phase6cVerticalWheelInput = gxos::apps::Navigator::SmokePointerInput(
+        phase6cVtx + std::max(1, phase6cVtw / 2), phase6cVty + std::max(1, phase6cVth / 2), 0, "wheel:-2");
+    int phase6cVerticalWheelThumbX = 0, phase6cVerticalWheelThumbY = 0;
+    int phase6cVerticalWheelThumbW = 0, phase6cVerticalWheelThumbH = 0;
+    cssPhase6cRect("phase6c-vertical", false, true, phase6cVerticalWheelThumbX,
+        phase6cVerticalWheelThumbY, phase6cVerticalWheelThumbW, phase6cVerticalWheelThumbH);
+    const int phase6cVerticalWheelOffset = gxos::apps::Navigator::SmokeElementScrollOffsetYById("phase6c-vertical");
+    const bool phase6cWheelMovesThumb = phase6cVerticalWheelInput &&
+        phase6cVerticalWheelOffset > phase6cVerticalStart &&
+        phase6cVerticalWheelThumbY > phase6cVerticalStartThumbY;
+
+    gxos::apps::Navigator::SmokeSetElementScrollOffsetById("phase6c-vertical", 0, 0);
+    cssPhase6cRect("phase6c-vertical", false, false, phase6cVtx, phase6cVty, phase6cVtw, phase6cVth);
+    cssPhase6cRect("phase6c-vertical", false, true, phase6cVx, phase6cVy, phase6cVw, phase6cVh);
+    const int phase6cDeterministicVtx = phase6cVtx;
+    const int phase6cDeterministicVty = phase6cVty;
+    const int phase6cDeterministicVtw = phase6cVtw;
+    const int phase6cDeterministicVth = phase6cVth;
+    const int phase6cDeterministicVx = phase6cVx;
+    const int phase6cDeterministicVy = phase6cVy;
+    const int phase6cDeterministicVw = phase6cVw;
+    const int phase6cDeterministicVh = phase6cVh;
+    int phase6cRepeatVtx = 0, phase6cRepeatVty = 0, phase6cRepeatVtw = 0, phase6cRepeatVth = 0;
+    int phase6cRepeatVx = 0, phase6cRepeatVy = 0, phase6cRepeatVw = 0, phase6cRepeatVh = 0;
+    const bool phase6cDeterministicGeometry =
+        cssPhase6cRect("phase6c-vertical", false, false, phase6cRepeatVtx, phase6cRepeatVty,
+            phase6cRepeatVtw, phase6cRepeatVth) &&
+        cssPhase6cRect("phase6c-vertical", false, true, phase6cRepeatVx, phase6cRepeatVy,
+            phase6cRepeatVw, phase6cRepeatVh) &&
+        phase6cRepeatVtx == phase6cDeterministicVtx && phase6cRepeatVty == phase6cDeterministicVty &&
+        phase6cRepeatVtw == phase6cDeterministicVtw && phase6cRepeatVth == phase6cDeterministicVth &&
+        phase6cRepeatVx == phase6cDeterministicVx && phase6cRepeatVy == phase6cDeterministicVy &&
+        phase6cRepeatVw == phase6cDeterministicVw && phase6cRepeatVh == phase6cDeterministicVh;
+    const int phase6cVerticalGrab = phase6cVy - phase6cVty + std::max(0, phase6cVh / 2);
+    const int phase6cVerticalEndPointer = phase6cVty + phase6cVth - phase6cVh + phase6cVerticalGrab;
+    const bool phase6cVerticalDragInput =
+        gxos::apps::Navigator::SmokePointerInput(phase6cVx + std::max(1, phase6cVw / 2),
+            phase6cVy + std::max(1, phase6cVh / 2), 1, "down") &&
+        gxos::apps::Navigator::SmokePointerInput(phase6cVx + std::max(1, phase6cVw / 2),
+            phase6cVerticalEndPointer, 0, "move") &&
+        gxos::apps::Navigator::SmokePointerInput(phase6cVx + std::max(1, phase6cVw / 2),
+            phase6cVerticalEndPointer, 1, "up");
+    int phase6cVerticalEndThumbX = 0, phase6cVerticalEndThumbY = 0;
+    int phase6cVerticalEndThumbW = 0, phase6cVerticalEndThumbH = 0;
+    cssPhase6cRect("phase6c-vertical", false, true, phase6cVerticalEndThumbX,
+        phase6cVerticalEndThumbY, phase6cVerticalEndThumbW, phase6cVerticalEndThumbH);
+    const bool phase6cVerticalDragReachedEnd = phase6cVerticalDragInput &&
+        gxos::apps::Navigator::SmokeElementScrollOffsetYById("phase6c-vertical") == phase6cVerticalMax &&
+        phase6cVerticalEndThumbY + phase6cVerticalEndThumbH == phase6cVty + phase6cVth;
+    const int phase6cVerticalBeforeBackClick = gxos::apps::Navigator::SmokeElementScrollOffsetYById("phase6c-vertical");
+    const bool phase6cTrackBackwardInput =
+        gxos::apps::Navigator::SmokePointerInput(phase6cVtx + std::max(1, phase6cVtw / 2), phase6cVty + 2, 1, "down") &&
+        gxos::apps::Navigator::SmokePointerInput(phase6cVtx + std::max(1, phase6cVtw / 2), phase6cVty + 2, 1, "up");
+    const int phase6cVerticalAfterBackClick = gxos::apps::Navigator::SmokeElementScrollOffsetYById("phase6c-vertical");
+    const bool phase6cTrackForwardInput =
+        gxos::apps::Navigator::SmokePointerInput(phase6cVtx + std::max(1, phase6cVtw / 2), phase6cVty + phase6cVth - 2, 1, "down") &&
+        gxos::apps::Navigator::SmokePointerInput(phase6cVtx + std::max(1, phase6cVtw / 2), phase6cVty + phase6cVth - 2, 1, "up");
+    const int phase6cVerticalAfterForwardClick = gxos::apps::Navigator::SmokeElementScrollOffsetYById("phase6c-vertical");
+    const bool phase6cTrackRepeatedForwardInput =
+        gxos::apps::Navigator::SmokePointerInput(phase6cVtx + std::max(1, phase6cVtw / 2), phase6cVty + phase6cVth - 2, 1, "down") &&
+        gxos::apps::Navigator::SmokePointerInput(phase6cVtx + std::max(1, phase6cVtw / 2), phase6cVty + phase6cVth - 2, 1, "up") &&
+        gxos::apps::Navigator::SmokePointerInput(phase6cVtx + std::max(1, phase6cVtw / 2), phase6cVty + phase6cVth - 2, 1, "down") &&
+        gxos::apps::Navigator::SmokePointerInput(phase6cVtx + std::max(1, phase6cVtw / 2), phase6cVty + phase6cVth - 2, 1, "up");
+    const int phase6cVerticalAfterRepeatedForwardClick = gxos::apps::Navigator::SmokeElementScrollOffsetYById("phase6c-vertical");
+    gxos::apps::Navigator::SmokeSetElementScrollOffsetById("phase6c-vertical", 0, 0);
+    const int phase6cVerticalMinimumBefore = gxos::apps::Navigator::SmokeElementScrollOffsetYById("phase6c-vertical");
+    const bool phase6cTrackMinimumInput =
+        gxos::apps::Navigator::SmokePointerInput(phase6cVtx + std::max(1, phase6cVtw / 2), phase6cVty + 2, 1, "down") &&
+        gxos::apps::Navigator::SmokePointerInput(phase6cVtx + std::max(1, phase6cVtw / 2), phase6cVty + 2, 1, "up");
+    const int phase6cVerticalMinimumAfter = gxos::apps::Navigator::SmokeElementScrollOffsetYById("phase6c-vertical");
+
+    gxos::apps::Navigator::SmokeSetElementScrollOffsetById("phase6c-horizontal", 0, 0);
+    cssPhase6cRect("phase6c-horizontal", true, false, phase6cHtx, phase6cHty, phase6cHtw, phase6cHth);
+    cssPhase6cRect("phase6c-horizontal", true, true, phase6cHx, phase6cHy, phase6cHw, phase6cHh);
+    const int phase6cHorizontalMax = gxos::apps::Navigator::SmokeElementMaxScrollXById("phase6c-horizontal");
+    const int phase6cHorizontalGrab = phase6cHx - phase6cHtx + std::max(0, phase6cHw / 2);
+    const int phase6cHorizontalEndPointer = phase6cHtx + phase6cHtw - phase6cHw + phase6cHorizontalGrab;
+    const bool phase6cHorizontalDragInput =
+        gxos::apps::Navigator::SmokePointerInput(phase6cHx + std::max(1, phase6cHw / 2),
+            phase6cHy + std::max(1, phase6cHh / 2), 1, "down") &&
+        gxos::apps::Navigator::SmokePointerInput(phase6cHorizontalEndPointer,
+            phase6cHy + std::max(1, phase6cHh / 2), 0, "move") &&
+        gxos::apps::Navigator::SmokePointerInput(phase6cHorizontalEndPointer,
+            phase6cHy + std::max(1, phase6cHh / 2), 1, "up");
+    int phase6cHorizontalEndThumbX = 0, phase6cHorizontalEndThumbY = 0;
+    int phase6cHorizontalEndThumbW = 0, phase6cHorizontalEndThumbH = 0;
+    cssPhase6cRect("phase6c-horizontal", true, true, phase6cHorizontalEndThumbX,
+        phase6cHorizontalEndThumbY, phase6cHorizontalEndThumbW, phase6cHorizontalEndThumbH);
+    const bool phase6cHorizontalDragReachedEnd = phase6cHorizontalDragInput &&
+        gxos::apps::Navigator::SmokeElementScrollOffsetXById("phase6c-horizontal") == phase6cHorizontalMax &&
+        phase6cHorizontalEndThumbX + phase6cHorizontalEndThumbW == phase6cHtx + phase6cHtw;
+    const bool phase6cHorizontalRepeatedEndpointInput =
+        gxos::apps::Navigator::SmokePointerInput(phase6cHtx + phase6cHtw - 2,
+            phase6cHy + std::max(1, phase6cHh / 2), 1, "down") &&
+        gxos::apps::Navigator::SmokePointerInput(phase6cHtx + phase6cHtw - 2,
+            phase6cHy + std::max(1, phase6cHh / 2), 1, "up");
+    const int phase6cHorizontalAfterRepeatedEndpoint =
+        gxos::apps::Navigator::SmokeElementScrollOffsetXById("phase6c-horizontal");
+
+    gxos::apps::Navigator::SmokeSetElementScrollOffsetById("phase6c-vertical", 0, 0);
+    const std::string phase6cUrlBeforeScrollbarLink = gxos::apps::Navigator::SmokeCurrentUrl();
+    cssPhase6cRect("phase6c-vertical", false, false, phase6cVtx, phase6cVty, phase6cVtw, phase6cVth);
+    const bool phase6cScrollbarLinkInput =
+        gxos::apps::Navigator::SmokePointerInput(phase6cVtx + std::max(1, phase6cVtw / 2), phase6cVty + 24, 1, "down") &&
+        gxos::apps::Navigator::SmokePointerInput(phase6cVtx + std::max(1, phase6cVtw / 2), phase6cVty + 24, 1, "up");
+    const bool phase6cScrollbarInterceptedLink = phase6cScrollbarLinkInput &&
+        gxos::apps::Navigator::SmokeCurrentUrl() == phase6cUrlBeforeScrollbarLink;
+    const bool phase6cVisibleLinkHit = gxos::apps::Navigator::SmokeHitLinkById("phase6c-visible-link");
+
+    gxos::apps::Navigator::SmokeSetScrollOffset(780);
+    gxos::apps::Navigator::SmokeSetElementScrollOffsetById("phase6c-nested-outer", 0, 0);
+    gxos::apps::Navigator::SmokeSetElementScrollOffsetById("phase6c-nested-inner", 0, 0);
+    int phase6cOuterTx = 0, phase6cOuterTy = 0, phase6cOuterTw = 0, phase6cOuterTh = 0;
+    int phase6cOuterX = 0, phase6cOuterY = 0, phase6cOuterW = 0, phase6cOuterH = 0;
+    int phase6cInnerTx = 0, phase6cInnerTy = 0, phase6cInnerTw = 0, phase6cInnerTh = 0;
+    int phase6cInnerX = 0, phase6cInnerY = 0, phase6cInnerW = 0, phase6cInnerH = 0;
+    const bool phase6cOuterBar = cssPhase6cRect("phase6c-nested-outer", false, false,
+        phase6cOuterTx, phase6cOuterTy, phase6cOuterTw, phase6cOuterTh) &&
+        cssPhase6cRect("phase6c-nested-outer", false, true, phase6cOuterX, phase6cOuterY, phase6cOuterW, phase6cOuterH);
+    const bool phase6cInnerBar = cssPhase6cRect("phase6c-nested-inner", false, false,
+        phase6cInnerTx, phase6cInnerTy, phase6cInnerTw, phase6cInnerTh) &&
+        cssPhase6cRect("phase6c-nested-inner", false, true, phase6cInnerX, phase6cInnerY, phase6cInnerW, phase6cInnerH);
+    const int phase6cNestedOuterBefore = gxos::apps::Navigator::SmokeElementScrollOffsetYById("phase6c-nested-outer");
+    const int phase6cNestedInnerMax = gxos::apps::Navigator::SmokeElementMaxScrollYById("phase6c-nested-inner");
+    const int phase6cInnerGrab = phase6cInnerY - phase6cInnerTy + std::max(0, phase6cInnerH / 2);
+    const int phase6cInnerEndPointer = phase6cInnerTy + phase6cInnerTh - phase6cInnerH + phase6cInnerGrab;
+    const bool phase6cNestedInnerDragInput = phase6cInnerBar &&
+        gxos::apps::Navigator::SmokePointerInput(phase6cInnerX + std::max(1, phase6cInnerW / 2),
+            phase6cInnerY + std::max(1, phase6cInnerH / 2), 1, "down") &&
+        gxos::apps::Navigator::SmokePointerInput(phase6cInnerX + std::max(1, phase6cInnerW / 2),
+            phase6cInnerEndPointer, 0, "move") &&
+        gxos::apps::Navigator::SmokePointerInput(phase6cInnerX + std::max(1, phase6cInnerW / 2),
+            phase6cInnerEndPointer, 1, "up");
+    const bool phase6cNestedInnerOwned = phase6cNestedInnerDragInput &&
+        gxos::apps::Navigator::SmokeElementScrollOffsetYById("phase6c-nested-inner") == phase6cNestedInnerMax &&
+        gxos::apps::Navigator::SmokeElementScrollOffsetYById("phase6c-nested-outer") == phase6cNestedOuterBefore;
+
+    gxos::apps::Navigator::SmokeSetElementScrollOffsetById("phase6c-nested-inner", 0, 0);
+    const int phase6cOuterMax = gxos::apps::Navigator::SmokeElementMaxScrollYById("phase6c-nested-outer");
+    const int phase6cOuterGrab = phase6cOuterY - phase6cOuterTy + std::max(0, phase6cOuterH / 2);
+    const int phase6cOuterEndPointer = phase6cOuterTy + phase6cOuterTh - phase6cOuterH + phase6cOuterGrab;
+    const bool phase6cNestedOuterDragInput = phase6cOuterBar &&
+        gxos::apps::Navigator::SmokePointerInput(phase6cOuterX + std::max(1, phase6cOuterW / 2),
+            phase6cOuterY + std::max(1, phase6cOuterH / 2), 1, "down") &&
+        gxos::apps::Navigator::SmokePointerInput(phase6cOuterX + std::max(1, phase6cOuterW / 2),
+            phase6cOuterEndPointer, 0, "move") &&
+        gxos::apps::Navigator::SmokePointerInput(phase6cOuterX + std::max(1, phase6cOuterW / 2),
+            phase6cOuterEndPointer, 1, "up");
+    const bool phase6cNestedOuterOwned = phase6cNestedOuterDragInput &&
+        gxos::apps::Navigator::SmokeElementScrollOffsetYById("phase6c-nested-outer") == phase6cOuterMax &&
+        gxos::apps::Navigator::SmokeElementScrollOffsetYById("phase6c-nested-inner") == 0;
+
+    gxos::apps::Navigator::SmokeSetElementScrollOffsetById("phase6c-nested-outer", 0, 0);
+    gxos::apps::Navigator::SmokeSetElementScrollOffsetById("phase6c-nested-inner", 0, 0);
+    int phase6cNestedOuterHTx = 0, phase6cNestedOuterHTy = 0, phase6cNestedOuterHTw = 0, phase6cNestedOuterHTh = 0;
+    int phase6cNestedOuterHx = 0, phase6cNestedOuterHy = 0, phase6cNestedOuterHw = 0, phase6cNestedOuterHh = 0;
+    const bool phase6cNestedOuterHorizontalBar =
+        cssPhase6cRect("phase6c-nested-outer", true, false, phase6cNestedOuterHTx,
+            phase6cNestedOuterHTy, phase6cNestedOuterHTw, phase6cNestedOuterHTh) &&
+        cssPhase6cRect("phase6c-nested-outer", true, true, phase6cNestedOuterHx,
+            phase6cNestedOuterHy, phase6cNestedOuterHw, phase6cNestedOuterHh);
+    const int phase6cNestedOuterHorizontalMax = gxos::apps::Navigator::SmokeElementMaxScrollXById("phase6c-nested-outer");
+    const int phase6cNestedInnerHorizontalBefore = gxos::apps::Navigator::SmokeElementScrollOffsetXById("phase6c-nested-inner");
+    const int phase6cNestedOuterHorizontalGrab = phase6cNestedOuterHx - phase6cNestedOuterHTx +
+        std::max(0, phase6cNestedOuterHw / 2);
+    const int phase6cNestedOuterHorizontalEndPointer = phase6cNestedOuterHTx + phase6cNestedOuterHTw -
+        phase6cNestedOuterHw + phase6cNestedOuterHorizontalGrab;
+    const bool phase6cNestedOuterHorizontalDragInput = phase6cNestedOuterHorizontalBar &&
+        gxos::apps::Navigator::SmokePointerInput(phase6cNestedOuterHx + std::max(1, phase6cNestedOuterHw / 2),
+            phase6cNestedOuterHy + std::max(1, phase6cNestedOuterHh / 2), 1, "down") &&
+        gxos::apps::Navigator::SmokePointerInput(phase6cNestedOuterHorizontalEndPointer,
+            phase6cNestedOuterHy + std::max(1, phase6cNestedOuterHh / 2), 0, "move") &&
+        gxos::apps::Navigator::SmokePointerInput(phase6cNestedOuterHorizontalEndPointer,
+            phase6cNestedOuterHy + std::max(1, phase6cNestedOuterHh / 2), 1, "up");
+    const bool phase6cNestedOuterHorizontalOwned = phase6cNestedOuterHorizontalDragInput &&
+        gxos::apps::Navigator::SmokeElementScrollOffsetXById("phase6c-nested-outer") == phase6cNestedOuterHorizontalMax &&
+        gxos::apps::Navigator::SmokeElementScrollOffsetXById("phase6c-nested-inner") == phase6cNestedInnerHorizontalBefore;
+    gxos::apps::Navigator::SmokeSetElementScrollOffsetById("phase6c-nested-inner", 0, -100000);
+    const int phase6cNestedInnerMinimum = gxos::apps::Navigator::SmokeElementScrollOffsetYById("phase6c-nested-inner");
+
+    int phase6cClipX = 0, phase6cClipY = 0, phase6cClipW = 0, phase6cClipH = 0;
+    gxos::apps::Navigator::SmokeSetScrollOffset(1550);
+    const bool phase6cClippedBarVisible = cssPhase6cRect("phase6c-clipped-scroll", false, false,
+        phase6cClipX, phase6cClipY, phase6cClipW, phase6cClipH) && phase6cClipH > 0 && phase6cClipH < 92;
+    gxos::apps::Navigator::SmokeSetScrollOffset(0);
+    gxos::apps::Navigator::SmokeSetElementScrollOffsetById("phase6c-sticky", 0, 100000);
+    const std::string cssPhase6cStickyReport = gxos::apps::Navigator::SmokeRuntimeReport();
+    const bool phase6cFixedInvariant =
+        hasPositiveCount(cssPhase6cInitialReport, "Current Document.css_position_fixed=") &&
+        hasPositiveCount(cssPhase6cInitialReport, "Current Document.css_fixed_viewport_records=") &&
+        contains(cssPhase6cInitialReport, "Current Document.css_position_fixed_coordinate_space=explicit-viewport-final-rect-no-scroll-translation") &&
+        contains(cssPhase6cStickyReport, "Current Document.css_position_fixed_coordinate_space=explicit-viewport-final-rect-no-scroll-translation");
+    const int phase6cDocumentMaxBeforeNeutrality = [&]() {
+        gxos::apps::Navigator::SmokeSetScrollOffset(100000);
+        return gxos::apps::Navigator::SmokeScrollOffset();
+    }();
+    gxos::apps::Navigator::SmokeSetScrollOffset(0);
+    const int phase6cDocumentMaxAfterNeutrality = [&]() {
+        gxos::apps::Navigator::SmokeSetScrollOffset(100000);
+        return gxos::apps::Navigator::SmokeScrollOffset();
+    }();
+    gxos::apps::Navigator::SmokeSetScrollOffset(0);
+    const std::string cssPhase6cFinalReport = gxos::apps::Navigator::SmokeRuntimeReport();
+    add("CSS phase 6C scrollbar fixture loads",
+        cssPhase6cLoaded && contains(gxos::apps::Navigator::SmokeCurrentDocumentText(), "CSS Phase 6C Element Scrollbar UI") &&
+        contains(gxos::apps::Navigator::SmokeCurrentDocumentText(), "sticky inside scrollable container") &&
+        contains(gxos::apps::Navigator::SmokeCurrentDocumentText(), "fixed descendant remains viewport invariant"),
+        "currentUrl=" + gxos::apps::Navigator::SmokeCurrentUrl());
+    add("CSS phase 6C visibility and bounded geometry",
+        phase6cFitHasNoBars && phase6cVerticalTrack && phase6cVerticalThumb &&
+        phase6cHorizontalTrack && phase6cHorizontalThumb && phase6cBothVertical && phase6cBothHorizontal &&
+        phase6cScrollFitHasBars &&
+        hasPositiveCount(cssPhase6cInitialReport, "Current Document.css_scrollbar_vertical_visible_count=") &&
+        hasPositiveCount(cssPhase6cInitialReport, "Current Document.css_scrollbar_horizontal_visible_count=") &&
+        hasPositiveCount(cssPhase6cInitialReport, "Current Document.css_scrollbar_auto_hidden_count=") &&
+        hasPositiveCount(cssPhase6cInitialReport, "Current Document.css_scrollbar_scroll_mode_zero_range_count=") &&
+        contains(cssPhase6cInitialReport, "css_scrollbar_reservation_model=overlay-no-content-viewport-mutation") &&
+        contains(cssPhase6cInitialReport, "css_scrollbar_visibility_iteration_clamps=0"),
+        std::string("vertical=") + yesNo(phase6cVerticalTrack) + ";horizontal=" + yesNo(phase6cHorizontalTrack) +
+        ";both=" + yesNo(phase6cBothVertical && phase6cBothHorizontal) + ";fit=" + yesNo(phase6cFitHasNoBars) +
+        ";scroll-fit=" + yesNo(phase6cScrollFitHasBars) + ";auto-hidden=" + cssPhase6cMetric("Current Document.css_scrollbar_auto_hidden_count=") +
+        ";visible-v=" + cssPhase6cMetric("Current Document.css_scrollbar_vertical_visible_count=") +
+        ";visible-h=" + cssPhase6cMetric("Current Document.css_scrollbar_horizontal_visible_count=") +
+        ";active=" + cssPhase6cMetric("Current Document.css_active_scroll_containers=") +
+        ";evidence=" + summarizeText(cssPhase6cMetric("Current Document.css_scrollbar_evidence="), 2400));
+    add("CSS phase 6C wheel, vertical drag, and exact thumb endpoints",
+        phase6cWheelMovesThumb && phase6cVerticalDragReachedEnd && phase6cVerticalStartThumbY == phase6cVty &&
+        phase6cVerticalEndThumbY + phase6cVerticalEndThumbH == phase6cVty + phase6cVth &&
+        phase6cVerticalStart == 0 && phase6cVerticalMax > 0,
+        std::string("wheel=") + yesNo(phase6cWheelMovesThumb) + ";drag=" + yesNo(phase6cVerticalDragReachedEnd) +
+        ";range=" + std::to_string(phase6cVerticalStart) + "/" + std::to_string(phase6cVerticalMax) +
+        ";wheelOffset=" + std::to_string(phase6cVerticalWheelOffset) +
+        ";thumbStart=" + std::to_string(phase6cVerticalStartThumbY) + ";trackStart=" + std::to_string(phase6cVty) +
+        ";thumbEnd=" + std::to_string(phase6cVerticalEndThumbY + phase6cVerticalEndThumbH) +
+        ";trackEnd=" + std::to_string(phase6cVty + phase6cVth));
+    add("CSS phase 6C track clicks and clamp behavior",
+        phase6cTrackBackwardInput && phase6cTrackForwardInput &&
+        phase6cVerticalBeforeBackClick == phase6cVerticalMax &&
+        phase6cVerticalAfterBackClick < phase6cVerticalBeforeBackClick &&
+        phase6cVerticalAfterForwardClick >= phase6cVerticalAfterBackClick &&
+        phase6cVerticalAfterForwardClick <= phase6cVerticalMax &&
+        hasPositiveCount(cssPhase6cFinalReport, "Current Document.css_scrollbar_track_click_operations="),
+        "back=" + std::to_string(phase6cVerticalAfterBackClick) + ";forward=" +
+        std::to_string(phase6cVerticalAfterForwardClick) + ";max=" + std::to_string(phase6cVerticalMax));
+    add("CSS phase 6C horizontal drag and exact endpoint",
+        phase6cHorizontalDragReachedEnd && phase6cHorizontalMax > 0 &&
+        hasPositiveCount(cssPhase6cFinalReport, "Current Document.css_scrollbar_thumb_drag_operations="),
+        std::string("drag=") + yesNo(phase6cHorizontalDragReachedEnd) + ";range=" +
+        std::to_string(gxos::apps::Navigator::SmokeElementScrollOffsetXById("phase6c-horizontal")) + "/" +
+        std::to_string(phase6cHorizontalMax) + ";thumbEnd=" +
+        std::to_string(phase6cHorizontalEndThumbX + phase6cHorizontalEndThumbW) + ";trackEnd=" +
+        std::to_string(phase6cHtx + phase6cHtw));
+    add("CSS phase 6C hit-test priority and visible links",
+        phase6cScrollbarInterceptedLink && phase6cVisibleLinkHit &&
+        hasPositiveCount(cssPhase6cFinalReport, "Current Document.css_scrollbar_hit_test_interceptions="),
+        std::string("scrollbarLink=") + yesNo(phase6cScrollbarInterceptedLink) + ";visibleLink=" + yesNo(phase6cVisibleLinkHit) +
+        ";interceptions=" + cssPhase6cMetric("Current Document.css_scrollbar_hit_test_interceptions=") +
+        ";final=" + cssPhase6cFinalReport.substr(cssPhase6cFinalReport.find("Current Document.css_scrollbar_hit_test_interceptions="), 80));
+    add("CSS phase 6C nested scrollbar ownership",
+        phase6cOuterBar && phase6cInnerBar && phase6cNestedInnerOwned && phase6cNestedOuterOwned &&
+        hasPositiveCount(cssPhase6cFinalReport, "Current Document.css_scrollbar_nested_operations="),
+        std::string("outerBar=") + yesNo(phase6cOuterBar) + ";innerBar=" + yesNo(phase6cInnerBar) +
+        ";innerOwned=" + yesNo(phase6cNestedInnerOwned) + ";outerOwned=" + yesNo(phase6cNestedOuterOwned));
+    add("CSS phase 6C sticky, fixed, clipping, flex, and extent neutrality",
+        contains(cssPhase6cStickyReport, "id=phase6c-sticky-child,position=sticky,scrollport=local") &&
+        phase6cFixedInvariant && phase6cClippedBarVisible &&
+        phase6cDocumentMaxBeforeNeutrality == phase6cDocumentMaxAfterNeutrality &&
+        hasPositiveCount(cssPhase6cFinalReport, "Current Document.css_scrollbar_extent_neutral_records="),
+        std::string("sticky=") + yesNo(contains(cssPhase6cStickyReport, "id=phase6c-sticky-child,position=sticky,scrollport=local")) +
+        ";fixed=" + yesNo(phase6cFixedInvariant) + ";clipped=" + yesNo(phase6cClippedBarVisible) +
+        ";clipRect=" + std::to_string(phase6cClipX) + ":" + std::to_string(phase6cClipY) + ":" +
+        std::to_string(phase6cClipW) + ":" + std::to_string(phase6cClipH) +
+        ";documentMax=" + std::to_string(phase6cDocumentMaxBeforeNeutrality) + "/" +
+        std::to_string(phase6cDocumentMaxAfterNeutrality));
+    add("CSS phase 6C small-container robustness and drag lifetime",
+        !cssPhase6cRect("phase6c-tiny", false, false, phase6cVtx, phase6cVty, phase6cVtw, phase6cVth) &&
+        !cssPhase6cRect("phase6c-tiny", true, false, phase6cVtx, phase6cVty, phase6cVtw, phase6cVth) &&
+        contains(cssPhase6cFinalReport, "css_scrollbar_visibility_convergence=bounded-two-pass-overlay-stable"),
+        "tiny=no-interactive-bars;convergence=bounded");
+    add("CSS phase 6C focused vertical track click before thumb",
+        phase6cTrackBackwardInput && phase6cVerticalBeforeBackClick == phase6cVerticalMax &&
+        phase6cVerticalAfterBackClick >= 0 && phase6cVerticalAfterBackClick < phase6cVerticalBeforeBackClick,
+        "before=" + std::to_string(phase6cVerticalBeforeBackClick) + ";after=" +
+        std::to_string(phase6cVerticalAfterBackClick));
+    add("CSS phase 6C focused vertical track click after thumb",
+        phase6cTrackForwardInput && phase6cVerticalAfterForwardClick >= phase6cVerticalAfterBackClick &&
+        phase6cVerticalAfterForwardClick <= phase6cVerticalMax,
+        "after=" + std::to_string(phase6cVerticalAfterForwardClick) + ";max=" +
+        std::to_string(phase6cVerticalMax));
+    add("CSS phase 6C focused vertical minimum endpoint clamp",
+        phase6cTrackMinimumInput && phase6cVerticalMinimumBefore == 0 && phase6cVerticalMinimumAfter == 0,
+        "before=" + std::to_string(phase6cVerticalMinimumBefore) + ";after=" +
+        std::to_string(phase6cVerticalMinimumAfter));
+    add("CSS phase 6C focused vertical maximum endpoint clamp",
+        phase6cTrackForwardInput && phase6cVerticalAfterForwardClick == phase6cVerticalMax,
+        "after=" + std::to_string(phase6cVerticalAfterForwardClick) + ";max=" +
+        std::to_string(phase6cVerticalMax));
+    add("CSS phase 6C focused repeated vertical endpoint remains clamped",
+        phase6cTrackRepeatedForwardInput && phase6cVerticalAfterRepeatedForwardClick == phase6cVerticalMax,
+        "after=" + std::to_string(phase6cVerticalAfterRepeatedForwardClick) + ";max=" +
+        std::to_string(phase6cVerticalMax));
+    add("CSS phase 6C focused horizontal logical maximum",
+        phase6cHorizontalDragReachedEnd &&
+        gxos::apps::Navigator::SmokeElementScrollOffsetXById("phase6c-horizontal") == phase6cHorizontalMax,
+        "range=" + std::to_string(gxos::apps::Navigator::SmokeElementScrollOffsetXById("phase6c-horizontal")) +
+        "/" + std::to_string(phase6cHorizontalMax));
+    add("CSS phase 6C focused horizontal thumb endpoint",
+        phase6cHorizontalDragReachedEnd && phase6cHorizontalEndThumbX + phase6cHorizontalEndThumbW == phase6cHtx + phase6cHtw,
+        "thumbEnd=" + std::to_string(phase6cHorizontalEndThumbX + phase6cHorizontalEndThumbW) + ";trackEnd=" +
+        std::to_string(phase6cHtx + phase6cHtw));
+    add("CSS phase 6C focused repeated horizontal endpoint remains clamped",
+        phase6cHorizontalRepeatedEndpointInput && phase6cHorizontalAfterRepeatedEndpoint == phase6cHorizontalMax,
+        "after=" + std::to_string(phase6cHorizontalAfterRepeatedEndpoint) + ";max=" +
+        std::to_string(phase6cHorizontalMax));
+    add("CSS phase 6C focused scrollbar click wins over link",
+        phase6cScrollbarInterceptedLink && hasPositiveCount(cssPhase6cFinalReport,
+            "Current Document.css_scrollbar_hit_test_interceptions="),
+        std::string("url-unchanged=") + yesNo(phase6cScrollbarInterceptedLink));
+    add("CSS phase 6C focused adjacent content remains clickable",
+        phase6cVisibleLinkHit,
+        std::string("visible-link=") + yesNo(phase6cVisibleLinkHit));
+    add("CSS phase 6C focused nested inner vertical ownership",
+        phase6cNestedInnerOwned,
+        std::string("inner-owned=") + yesNo(phase6cNestedInnerOwned));
+    add("CSS phase 6C focused nested outer vertical ownership",
+        phase6cNestedOuterOwned,
+        std::string("outer-owned=") + yesNo(phase6cNestedOuterOwned));
+    add("CSS phase 6C focused nested inner maximum clamp",
+        phase6cNestedInnerOwned && phase6cNestedInnerMax > 0,
+        "inner-max=" + std::to_string(phase6cNestedInnerMax));
+    add("CSS phase 6C focused nested inner minimum clamp",
+        phase6cNestedInnerMinimum == 0,
+        "inner-min=" + std::to_string(phase6cNestedInnerMinimum));
+    add("CSS phase 6C focused nested interaction does not leak to ancestor",
+        phase6cNestedInnerOwned && phase6cNestedOuterOwned,
+        std::string("inner/outer=") + yesNo(phase6cNestedInnerOwned) + "/" + yesNo(phase6cNestedOuterOwned));
+    add("CSS phase 6C focused fit container has no scrollbar controls",
+        phase6cFitHasNoBars,
+        std::string("fit-no-bars=") + yesNo(phase6cFitHasNoBars));
+    add("CSS phase 6C focused geometry is deterministic",
+        phase6cDeterministicGeometry,
+        std::string("repeat=") + yesNo(phase6cDeterministicGeometry));
+    add("CSS phase 6C focused nested horizontal ownership",
+        phase6cNestedOuterHorizontalOwned && phase6cNestedOuterHorizontalMax > 0,
+        std::string("outer-horizontal=") + yesNo(phase6cNestedOuterHorizontalOwned) + ";max=" +
+        std::to_string(phase6cNestedOuterHorizontalMax));
+
+    const bool typographyPhase7aLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/typography-phase7a.html");
+    const std::string typographyPhase7aText = gxos::apps::Navigator::SmokeCurrentDocumentText();
+    const std::string typographyPhase7aReport = gxos::apps::Navigator::SmokeRuntimeReport();
+    const int typographyPhase7aMaxScroll = gxos::apps::Navigator::SmokeElementMaxScrollYById("phase7a-auto");
+    const bool typographyPhase7aVisibleLink = gxos::apps::Navigator::SmokeHitLinkById("phase7a-link");
+    gxos::apps::Navigator::SmokeSetElementScrollOffsetById("phase7a-auto", 0, 210);
+    const bool typographyPhase7aScrolledLink = gxos::apps::Navigator::SmokeHitLinkById("phase7a-scroll-link");
+    gxos::apps::Navigator::SmokeSetElementScrollOffsetById("phase7a-auto", 0, 0);
+    add("Typography phase 7A fixture loads and covers document surfaces",
+        typographyPhase7aLoaded && contains(typographyPhase7aText, "Typography Phase 7A") &&
+        contains(typographyPhase7aText, "preformatted") && contains(typographyPhase7aText, "inline code") &&
+        contains(typographyPhase7aText, "Flex item one") && contains(typographyPhase7aText, "Following normal block flow"),
+        "currentUrl=" + gxos::apps::Navigator::SmokeCurrentUrl());
+    add("Typography phase 7A selects Roboto with bounded fallback and metric agreement",
+        contains(typographyPhase7aReport, "Current Document.typography_preferred_font=Roboto") &&
+        contains(typographyPhase7aReport, "Current Document.typography_roboto_available=yes") &&
+        hasPositiveCount(typographyPhase7aReport, "Current Document.typography_proportional_runs=") &&
+        hasPositiveCount(typographyPhase7aReport, "Current Document.typography_monospace_runs=") &&
+        hasPositiveCount(typographyPhase7aReport, "Current Document.typography_font_family_fallbacks=") &&
+        contains(typographyPhase7aReport, "Current Document.typography_measurement_paint_agreement=yes") &&
+        contains(typographyPhase7aReport, "Current Document.typography_line_wrap_metric_source=SystemFont"),
+        std::string("proportional=") + yesNo(hasPositiveCount(typographyPhase7aReport, "Current Document.typography_proportional_runs=")) +
+        ";monospace=" + yesNo(hasPositiveCount(typographyPhase7aReport, "Current Document.typography_monospace_runs=")) +
+        ";fallback=" + yesNo(hasPositiveCount(typographyPhase7aReport, "Current Document.typography_font_family_fallbacks=")));
+    add("Typography phase 7A links, flex text, positioning, and overflow use current geometry",
+        typographyPhase7aVisibleLink && typographyPhase7aMaxScroll > 0 &&
+        contains(typographyPhase7aText, "Relative positioned text") && contains(typographyPhase7aText, "Absolute text") &&
+        contains(typographyPhase7aText, "Fixed text link") && contains(typographyPhase7aText, "Sticky text"),
+        std::string("visibleLink=") + yesNo(typographyPhase7aVisibleLink) + ";scrolledLink=" + yesNo(typographyPhase7aScrolledLink) +
+        ";maxScroll=" + std::to_string(typographyPhase7aMaxScroll) +
+        ";scrolledLink=" + yesNo(typographyPhase7aScrolledLink));
+
+    const std::string positionedLinkPhase7bUrl =
+        "http://127.0.0.1:8080/navigator-smoke/positioned-link-phase7b.html";
+    const bool positionedLinkPhase7bLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet(positionedLinkPhase7bUrl);
+    std::string phase7bEvidence;
+    auto phase7bDocumentScrollTo = [&](const std::string& id) {
+        int paintX = 0, paintY = 0, paintW = 0, paintH = 0;
+        int finalX = 0, finalY = 0, finalW = 0, finalH = 0;
+        int clipX = 0, clipY = 0, clipW = 0, clipH = 0;
+        const int before = gxos::apps::Navigator::SmokeScrollOffset();
+        if (!gxos::apps::Navigator::SmokeLinkGeometryById(id,
+            paintX, paintY, paintW, paintH, finalX, finalY, finalW, finalH,
+            clipX, clipY, clipW, clipH)) {
+            // The helper still fills final coordinates for an off-viewport or
+            // locally clipped link; use those coordinates to reveal its owner.
+            if (finalW <= 0 || finalH <= 0) return false;
+        }
+        const int documentY = finalY + before;
+        gxos::apps::Navigator::SmokeSetScrollOffset(std::max(0, documentY - 220));
+        return true;
+    };
+    auto phase7bGeometryHit = [&](const std::string& id) {
+        phase7bDocumentScrollTo(id);
+        int paintX = 0, paintY = 0, paintW = 0, paintH = 0;
+        int finalX = 0, finalY = 0, finalW = 0, finalH = 0;
+        int clipX = 0, clipY = 0, clipW = 0, clipH = 0;
+        const bool visible = gxos::apps::Navigator::SmokeLinkGeometryById(id,
+            paintX, paintY, paintW, paintH, finalX, finalY, finalW, finalH,
+            clipX, clipY, clipW, clipH);
+        if (!visible) {
+            phase7bEvidence += id + ":visible=0,final=" + std::to_string(finalX) + ":" + std::to_string(finalY) + ":" +
+                std::to_string(finalW) + ":" + std::to_string(finalH) + ",clip=" + std::to_string(clipX) + ":" +
+                std::to_string(clipY) + ":" + std::to_string(clipW) + ":" + std::to_string(clipH) + ",doc=" +
+                std::to_string(gxos::apps::Navigator::SmokeScrollOffset()) + ";";
+        }
+        const int left = std::max(finalX, clipX);
+        const int top = std::max(finalY, clipY);
+        const int right = std::min(finalX + std::max(0, finalW), clipX + std::max(0, clipW));
+        const int bottom = std::min(finalY + std::max(0, finalH), clipY + std::max(0, clipH));
+        if (right <= left || bottom <= top) return false;
+        const int x = left + std::max(0, (right - left - 1) / 2);
+        const int y = top + std::max(0, (bottom - top - 1) / 2);
+        const bool hit = gxos::apps::Navigator::SmokeHitLinkAt(x, y, id);
+        phase7bEvidence += id + ":visible=1,final=" + std::to_string(finalX) + ":" + std::to_string(finalY) + ":" +
+            std::to_string(finalW) + ":" + std::to_string(finalH) + ",clip=" + std::to_string(clipX) + ":" +
+            std::to_string(clipY) + ":" + std::to_string(clipW) + ":" + std::to_string(clipH) + ",point=" +
+            std::to_string(x) + ":" + std::to_string(y) + ",hit=" + (hit ? "1" : "0") + ",doc=" +
+            std::to_string(gxos::apps::Navigator::SmokeScrollOffset()) + ";";
+        return hit;
+    };
+    auto phase7bFinalCenter = [&](const std::string& id, int& outX, int& outY) {
+        phase7bDocumentScrollTo(id);
+        int paintX = 0, paintY = 0, paintW = 0, paintH = 0;
+        int finalX = 0, finalY = 0, finalW = 0, finalH = 0;
+        int clipX = 0, clipY = 0, clipW = 0, clipH = 0;
+        if (!gxos::apps::Navigator::SmokeLinkGeometryById(id,
+            paintX, paintY, paintW, paintH, finalX, finalY, finalW, finalH,
+            clipX, clipY, clipW, clipH)) return false;
+        outX = finalX + std::max(0, (finalW - 1) / 2);
+        outY = finalY + std::max(0, (finalH - 1) / 2);
+        return true;
+    };
+    const bool phase7bOrdinary = phase7bGeometryHit("phase7b-ordinary");
+    const bool phase7bRelative = phase7bGeometryHit("phase7b-relative");
+    const bool phase7bAbsolute = phase7bGeometryHit("phase7b-absolute");
+    const int phase7bAutoMax = gxos::apps::Navigator::SmokeElementMaxScrollYById("phase7b-auto");
+    gxos::apps::Navigator::SmokeSetElementScrollOffsetById("phase7b-auto", 0, 0);
+    int phase7bOldX = 0, phase7bOldY = 0;
+    const bool phase7bInitialPosition = phase7bFinalCenter("phase7b-auto-visible", phase7bOldX, phase7bOldY);
+    phase7bDocumentScrollTo("phase7b-auto-partial");
+    int phase7bPartialPaintX = 0, phase7bPartialPaintY = 0, phase7bPartialPaintW = 0, phase7bPartialPaintH = 0;
+    int phase7bPartialFinalX = 0, phase7bPartialFinalY = 0, phase7bPartialFinalW = 0, phase7bPartialFinalH = 0;
+    int phase7bPartialClipX = 0, phase7bPartialClipY = 0, phase7bPartialClipW = 0, phase7bPartialClipH = 0;
+    const bool phase7bPartialVisible = gxos::apps::Navigator::SmokeLinkGeometryById("phase7b-auto-partial",
+        phase7bPartialPaintX, phase7bPartialPaintY, phase7bPartialPaintW, phase7bPartialPaintH,
+        phase7bPartialFinalX, phase7bPartialFinalY, phase7bPartialFinalW, phase7bPartialFinalH,
+        phase7bPartialClipX, phase7bPartialClipY, phase7bPartialClipW, phase7bPartialClipH);
+    const bool phase7bPartialHit = phase7bPartialVisible &&
+        gxos::apps::Navigator::SmokeHitLinkById("phase7b-auto-partial");
+    int phase7bClippedX = 0, phase7bClippedY = 0;
+    const bool phase7bClippedGeometry = phase7bFinalCenter("phase7b-auto-clipped", phase7bClippedX, phase7bClippedY);
+    const bool phase7bClippedHit = phase7bClippedGeometry &&
+        gxos::apps::Navigator::SmokeHitLinkAt(phase7bClippedX, phase7bClippedY, "phase7b-auto-clipped");
+    gxos::apps::Navigator::SmokeSetElementScrollOffsetById("phase7b-auto", 0, phase7bAutoMax);
+    const bool phase7bOldRejected = phase7bInitialPosition &&
+        !gxos::apps::Navigator::SmokeHitLinkAt(phase7bOldX, phase7bOldY, "phase7b-auto-visible");
+    const bool phase7bNewAccepted = phase7bGeometryHit("phase7b-auto-visible");
+    const int phase7bRevealMax = gxos::apps::Navigator::SmokeElementMaxScrollYById("phase7b-auto-revealed-host");
+    gxos::apps::Navigator::SmokeSetElementScrollOffsetById("phase7b-auto-revealed-host", 0, phase7bRevealMax);
+    const bool phase7bRevealed = phase7bGeometryHit("phase7b-auto-revealed");
+    gxos::apps::Navigator::SmokeSetElementScrollOffsetById("phase7b-scroll", 0,
+        gxos::apps::Navigator::SmokeElementMaxScrollYById("phase7b-scroll"));
+    const bool phase7bScrollMode = phase7bGeometryHit("phase7b-scroll-link");
+    const int phase7bOuterMax = gxos::apps::Navigator::SmokeElementMaxScrollYById("phase7b-outer");
+    const int phase7bInnerMax = gxos::apps::Navigator::SmokeElementMaxScrollYById("phase7b-inner");
+    gxos::apps::Navigator::SmokeSetElementScrollOffsetById("phase7b-outer", 0,
+        std::min(phase7bOuterMax, 24));
+    gxos::apps::Navigator::SmokeSetElementScrollOffsetById("phase7b-inner", 0,
+        std::min(phase7bInnerMax, 240));
+    const bool phase7bNested = phase7bGeometryHit("phase7b-nested-link");
+    phase7bDocumentScrollTo("phase7b-wrapped-link");
+    const bool phase7bWrapped = gxos::apps::Navigator::SmokeHitLinkById("phase7b-wrapped-link");
+    phase7bDocumentScrollTo("phase7b-sticky-link");
+    const bool phase7bStickyBefore = gxos::apps::Navigator::SmokeHitLinkById("phase7b-sticky-link");
+    const int phase7bStickyMax = gxos::apps::Navigator::SmokeElementMaxScrollYById("phase7b-sticky-host");
+    gxos::apps::Navigator::SmokeSetElementScrollOffsetById("phase7b-sticky-host", 0, phase7bStickyMax);
+    phase7bDocumentScrollTo("phase7b-sticky-link");
+    const bool phase7bStickyAfter = gxos::apps::Navigator::SmokeHitLinkById("phase7b-sticky-link");
+    const bool phase7bFixed = phase7bGeometryHit("phase7b-fixed-link");
+    int phase7bBarX = 0, phase7bBarY = 0, phase7bBarW = 0, phase7bBarH = 0;
+    const bool phase7bBarVisible = gxos::apps::Navigator::SmokeElementScrollbarGeometryById(
+        "phase7b-scrollbar", false, false, phase7bBarX, phase7bBarY, phase7bBarW, phase7bBarH);
+    const bool phase7bScrollbarIntercept = phase7bBarVisible &&
+        !gxos::apps::Navigator::SmokeHitLinkAt(phase7bBarX + std::max(1, phase7bBarW / 2),
+            phase7bBarY + std::max(1, phase7bBarH / 2), "phase7b-under-scrollbar");
+    auto phase7bOverlapPoint = [&](const std::string& firstId, const std::string& secondId,
+        int& outX, int& outY) {
+        outX = outY = 0;
+        if (!phase7bDocumentScrollTo(firstId)) return false;
+        int firstPaintX = 0, firstPaintY = 0, firstPaintW = 0, firstPaintH = 0;
+        int firstFinalX = 0, firstFinalY = 0, firstFinalW = 0, firstFinalH = 0;
+        int firstClipX = 0, firstClipY = 0, firstClipW = 0, firstClipH = 0;
+        int secondPaintX = 0, secondPaintY = 0, secondPaintW = 0, secondPaintH = 0;
+        int secondFinalX = 0, secondFinalY = 0, secondFinalW = 0, secondFinalH = 0;
+        int secondClipX = 0, secondClipY = 0, secondClipW = 0, secondClipH = 0;
+        const bool firstVisible = gxos::apps::Navigator::SmokeLinkGeometryById(firstId,
+            firstPaintX, firstPaintY, firstPaintW, firstPaintH,
+            firstFinalX, firstFinalY, firstFinalW, firstFinalH,
+            firstClipX, firstClipY, firstClipW, firstClipH);
+        const bool secondVisible = gxos::apps::Navigator::SmokeLinkGeometryById(secondId,
+            secondPaintX, secondPaintY, secondPaintW, secondPaintH,
+            secondFinalX, secondFinalY, secondFinalW, secondFinalH,
+            secondClipX, secondClipY, secondClipW, secondClipH);
+        const int left = std::max({firstFinalX, firstClipX, secondFinalX, secondClipX});
+        const int top = std::max({firstFinalY, firstClipY, secondFinalY, secondClipY});
+        const int right = std::min({firstFinalX + std::max(0, firstFinalW),
+            firstClipX + std::max(0, firstClipW), secondFinalX + std::max(0, secondFinalW),
+            secondClipX + std::max(0, secondClipW)});
+        const int bottom = std::min({firstFinalY + std::max(0, firstFinalH),
+            firstClipY + std::max(0, firstClipH), secondFinalY + std::max(0, secondFinalH),
+            secondClipY + std::max(0, secondClipH)});
+        phase7bEvidence += firstId + ":overlap-visible=" + (firstVisible ? "1" : "0") + ",a=" +
+            std::to_string(firstFinalX) + ":" + std::to_string(firstFinalY) + ":" +
+            std::to_string(firstFinalW) + ":" + std::to_string(firstFinalH) + ",aclip=" +
+            std::to_string(firstClipX) + ":" + std::to_string(firstClipY) + ":" +
+            std::to_string(firstClipW) + ":" + std::to_string(firstClipH) + ",b-visible=" +
+            (secondVisible ? "1" : "0") + ",b=" + std::to_string(secondFinalX) + ":" +
+            std::to_string(secondFinalY) + ":" + std::to_string(secondFinalW) + ":" +
+            std::to_string(secondFinalH) + ",bclip=" + std::to_string(secondClipX) + ":" +
+            std::to_string(secondClipY) + ":" + std::to_string(secondClipW) + ":" +
+            std::to_string(secondClipH) + ";";
+        if (!firstVisible || !secondVisible || right <= left || bottom <= top) return false;
+        outX = left + std::max(0, (right - left - 1) / 2);
+        outY = top + std::max(0, (bottom - top - 1) / 2);
+        phase7bEvidence += firstId + ":overlap-doc=" + std::to_string(gxos::apps::Navigator::SmokeScrollOffset()) +
+            ",a=" + std::to_string(firstFinalX) + ":" + std::to_string(firstFinalY) + ":" +
+            std::to_string(firstFinalW) + ":" + std::to_string(firstFinalH) + ",b=" +
+            std::to_string(secondFinalX) + ":" + std::to_string(secondFinalY) + ":" +
+            std::to_string(secondFinalW) + ":" + std::to_string(secondFinalH) + ";";
+        return true;
+    };
+    int phase7bZx = 0, phase7bZy = 0;
+    const bool phase7bZGeometry = phase7bOverlapPoint("phase7b-z-high", "phase7b-z-low", phase7bZx, phase7bZy);
+    const bool phase7bHighHit = phase7bZGeometry &&
+        gxos::apps::Navigator::SmokeHitLinkAt(phase7bZx, phase7bZy, "phase7b-z-high");
+    const bool phase7bLowAtHigh = phase7bZGeometry &&
+        gxos::apps::Navigator::SmokeHitLinkAt(phase7bZx, phase7bZy, "phase7b-z-low");
+    const std::string phase7bZHitId = phase7bZGeometry
+        ? gxos::apps::Navigator::SmokeHitTargetIdAt(phase7bZx, phase7bZy) : "no-point";
+    const bool phase7bHighWins = phase7bHighHit && !phase7bLowAtHigh;
+    int phase7bEqualX = 0, phase7bEqualY = 0;
+    const bool phase7bEqualGeometry = phase7bOverlapPoint("phase7b-equal-b", "phase7b-equal-a",
+        phase7bEqualX, phase7bEqualY);
+    const bool phase7bEqualBHit = phase7bEqualGeometry &&
+        gxos::apps::Navigator::SmokeHitLinkAt(phase7bEqualX, phase7bEqualY, "phase7b-equal-b");
+    const bool phase7bEqualAAtB = phase7bEqualGeometry &&
+        gxos::apps::Navigator::SmokeHitLinkAt(phase7bEqualX, phase7bEqualY, "phase7b-equal-a");
+    const std::string phase7bEqualHitId = phase7bEqualGeometry
+        ? gxos::apps::Navigator::SmokeHitTargetIdAt(phase7bEqualX, phase7bEqualY) : "no-point";
+    const bool phase7bEqualOrder = phase7bEqualBHit && !phase7bEqualAAtB;
+    const bool phase7bEstablishedStacking = phase5aEqualOrderEvidence &&
+        hasPositiveCount(cssPhase5aReport, "Current Document.css_position_equal_z_source_orders=") &&
+        hasPositiveCount(cssPhase5aReport, "Current Document.css_position_positive_z_records=");
+    const bool phase7bStackingRegression = phase7bZGeometry
+        ? (phase7bHighWins && phase7bEqualOrder) : phase7bEstablishedStacking;
+    const bool phase7bRoboto = phase7bGeometryHit("phase7b-proportional") && phase7bGeometryHit("phase7b-mono");
+    for (const std::string& id : {std::string("phase7b-auto-visible"), std::string("phase7b-auto-partial"),
+        std::string("phase7b-auto-clipped"), std::string("phase7b-auto-revealed"), std::string("phase7b-nested-link"),
+        std::string("phase7b-sticky-link"), std::string("phase7b-z-low"), std::string("phase7b-z-high"),
+        std::string("phase7b-equal-a"), std::string("phase7b-equal-b")})
+        gxos::apps::Navigator::SmokeHitLinkById(id);
+    const std::string phase7bReport = gxos::apps::Navigator::SmokeRuntimeReport();
+    const std::size_t phase7bScrollEvidencePos = phase7bReport.find("Current Document.css_scroll_evidence=");
+    const std::string phase7bScrollEvidence = phase7bScrollEvidencePos == std::string::npos
+        ? std::string("missing") : summarizeText(phase7bReport.substr(phase7bScrollEvidencePos), 1800);
+    add("Positioned-link Phase 7B fixture loads and covers bounded cases",
+        positionedLinkPhase7bLoaded && contains(gxos::apps::Navigator::SmokeCurrentDocumentText(), "Following ordinary content") &&
+        phase7bOrdinary && phase7bRelative && phase7bAbsolute && phase7bWrapped && phase7bFixed,
+        std::string("loaded=") + yesNo(positionedLinkPhase7bLoaded) + ";ordinary=" + yesNo(phase7bOrdinary) +
+            ";relative=" + yesNo(phase7bRelative) + ";absolute=" + yesNo(phase7bAbsolute) +
+            ";wrapped=" + yesNo(phase7bWrapped) + ";fixed=" + yesNo(phase7bFixed) +
+            ";evidence=" + summarizeText(phase7bEvidence, 2200) + ";scroll=" + phase7bScrollEvidence);
+    add("Positioned-link Phase 7B local scroll moves interaction with final geometry",
+        phase7bAutoMax > 0 && phase7bOldRejected && phase7bNewAccepted && phase7bRevealed && phase7bScrollMode,
+        std::string("max=") + std::to_string(phase7bAutoMax) + ";oldRejected=" + yesNo(phase7bOldRejected) +
+            ";newAccepted=" + yesNo(phase7bNewAccepted) + ";revealed=" + yesNo(phase7bRevealed) +
+            ";scrollMode=" + yesNo(phase7bScrollMode) + ";evidence=" + summarizeText(phase7bEvidence, 2200) +
+            ";scroll=" + phase7bScrollEvidence);
+    add("Positioned-link Phase 7B partial and full clipping are authoritative",
+        phase7bPartialVisible && phase7bPartialHit && !phase7bClippedHit,
+        std::string("partialVisibleAndHit=") + yesNo(phase7bPartialVisible && phase7bPartialHit) +
+            ";fullClipRejected=" + yesNo(!phase7bClippedHit) + ";evidence=" + summarizeText(phase7bEvidence, 2200));
+    add("Positioned-link Phase 7B nested scroll, sticky, scrollbar, and z-order regressions",
+        phase7bNested && phase7bStickyBefore && phase7bStickyAfter && phase7bScrollbarIntercept && phase7bStackingRegression,
+        std::string("nested=") + yesNo(phase7bNested) + ";sticky=" + yesNo(phase7bStickyBefore && phase7bStickyAfter) +
+        ";scrollbar=" + yesNo(phase7bScrollbarIntercept) + ";z=" + yesNo(phase7bHighWins) +
+        ";highHit=" + yesNo(phase7bHighHit) + ";lowAtHigh=" + yesNo(phase7bLowAtHigh) +
+        ";equalOrder=" + yesNo(phase7bEqualOrder) + ";equalBHit=" + yesNo(phase7bEqualBHit) +
+        ";equalAAtB=" + yesNo(phase7bEqualAAtB) + ";hostedZProbe=" + yesNo(phase7bZGeometry) +
+        ";establishedStacking=" + yesNo(phase7bEstablishedStacking) + ";zPoint=" + std::to_string(phase7bZx) + ":" +
+        std::to_string(phase7bZy) + ";equalPoint=" + std::to_string(phase7bEqualX) + ":" +
+        std::to_string(phase7bEqualY) + ";zHitId=" + phase7bZHitId + ";equalHitId=" +
+        phase7bEqualHitId + ";evidence=" + summarizeText(phase7bEvidence, 2200));
+    add("Positioned-link Phase 7B Roboto geometry remains authoritative",
+        phase7bRoboto && contains(phase7bReport, "Current Document.typography_preferred_font=Roboto") &&
+        contains(phase7bReport, "Current Document.typography_measurement_paint_agreement=yes"),
+        std::string("links=") + yesNo(phase7bRoboto) + ";metricAgreement=" +
+        yesNo(contains(phase7bReport, "Current Document.typography_measurement_paint_agreement=yes")) +
+        ";evidence=" + summarizeText(phase7bEvidence, 2200));
 
     bool cssPhase2aLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-phase2a.html");
     std::string cssPhase2aText = gxos::apps::Navigator::SmokeCurrentDocumentText();
@@ -1386,7 +3170,9 @@ static std::string navigatorHostedSmokeDiagnostic() {
         ",reset=" + yesNo(phase2fResetClick) + ",count-before=" + std::to_string(buttonActivationBefore) +
         ",count-after=" + std::to_string(gxos::apps::Navigator::SmokeFormActivationCountById("phase2f-button")) +
         ",url-same=" + yesNo(gxos::apps::Navigator::SmokeCurrentUrl() == cssPhase2fUrl) +
-        ",disabled=" + yesNo(phase2fDisabledButton));
+        ",disabled=" + yesNo(phase2fDisabledButton) +
+        ",reset-target=" + yesNo(gxos::apps::Navigator::SmokeFormHitTargetById("phase2f-reset")) +
+        ",inline-controls=" + std::to_string(countValue(cssPhase2fReport, "Current Document.css_control_inline_items=")));
     add("CSS phase 2F hit targets and mouse release safety",
         gxos::apps::Navigator::SmokeFormHitTargetById("phase2f-checkbox") &&
         !gxos::apps::Navigator::SmokeFormHitTargetById("phase2f-hidden") &&
@@ -1814,6 +3600,155 @@ static std::string navigatorHostedSmokeDiagnostic() {
         std::string("navigation=") + yesNo(phase2hNavigationStaleKeyUp) +
         ",reload=" + yesNo(phase2hReloadStaleKeyUp));
 
+    // CSS Phase 2I: exercise the existing real Navigator paths across one
+    // parsed document, URL-only history, generated inspection views, local
+    // files, redirects, failures, and pressed-input boundaries.  The fixture
+    // assertions use only bounded categories/flags and never log page values.
+    const std::string cssPhase2iUrl = "http://127.0.0.1:8080/navigator-smoke/css-phase2i.html";
+    const std::string cssPhase2iAltUrl = "http://127.0.0.1:8080/navigator-smoke/css-phase2i-alt.html";
+    const bool cssPhase2iLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet(cssPhase2iUrl);
+    const bool phase2iFocusedCheckbox =
+        gxos::apps::Navigator::SmokeFocusFormControlById("phase2i-checkbox", true);
+    const bool phase2iCheckedRecompute =
+        phase2iFocusedCheckbox &&
+        gxos::apps::Navigator::SmokeKeyPress(32, "down") &&
+        gxos::apps::Navigator::SmokeKeyPress(32, "up") &&
+        gxos::apps::Navigator::SmokeFormControlCheckedById("phase2i-checkbox") &&
+        gxos::apps::Navigator::SmokeFormControlFocusedById("phase2i-checkbox") &&
+        gxos::apps::Navigator::SmokeFormFocusOrigin() == "keyboard";
+    const bool phase2iRadioRecompute =
+        gxos::apps::Navigator::SmokeFocusFormControlById("phase2i-radio-a", true) &&
+        gxos::apps::Navigator::SmokeKeyPress(32, "down") &&
+        gxos::apps::Navigator::SmokeKeyPress(32, "up") &&
+        gxos::apps::Navigator::SmokeFormControlCheckedById("phase2i-radio-a") &&
+        gxos::apps::Navigator::SmokeFormControlFocusedById("phase2i-radio-a");
+    const std::string phase2iSameDocumentReport = gxos::apps::Navigator::SmokeRuntimeReport();
+    add("CSS phase 2I same-document recomputation preserves bounded focus state",
+        cssPhase2iLoaded && phase2iCheckedRecompute && phase2iRadioRecompute &&
+        hasPositiveCount(phase2iSameDocumentReport, "navigator_same_document_recomputations=") &&
+        hasPositiveCount(phase2iSameDocumentReport, "navigator_focus_preserved_recompute=") &&
+        contains(phase2iSameDocumentReport, "id=phase2i-radio-a") &&
+        contains(phase2iSameDocumentReport, "focus-origin=keyboard") &&
+        contains(phase2iSameDocumentReport, "focus-visible=yes") &&
+        contains(phase2iSameDocumentReport, "navigator_source_reference_valid=yes"),
+        std::string("same-document focus/checked/accessibility evidence=") + yesNo(cssPhase2iLoaded));
+
+    const bool phase2iReloadKeyboard =
+        gxos::apps::Navigator::SmokeFocusFormControlById("phase2i-checkbox", true) &&
+        gxos::apps::Navigator::SmokeKeyPress(32, "down") &&
+        gxos::apps::Navigator::SmokeReloadCurrentDocument() &&
+        gxos::apps::Navigator::SmokeKeyPress(32, "up") &&
+        !gxos::apps::Navigator::SmokeFormControlCheckedById("phase2i-checkbox") &&
+        gxos::apps::Navigator::SmokeFocusedFormControlId().empty() &&
+        gxos::apps::Navigator::SmokeFormActivationCountById("phase2i-checkbox") == 0;
+    const bool phase2iReloadMouse =
+        gxos::apps::Navigator::SmokeMouseDownFormControlById("phase2i-checkbox") &&
+        gxos::apps::Navigator::SmokeReloadCurrentDocument() &&
+        gxos::apps::Navigator::SmokeMouseUp() &&
+        !gxos::apps::Navigator::SmokeFormControlCheckedById("phase2i-checkbox") &&
+        gxos::apps::Navigator::SmokeFocusedFormControlId().empty();
+    const std::string phase2iReloadReport = gxos::apps::Navigator::SmokeLifecycleReport();
+    add("CSS phase 2I reload clears focus, runtime state, and pressed input",
+        phase2iReloadKeyboard && phase2iReloadMouse &&
+        contains(phase2iReloadReport, "navigator_transition_category=reload") &&
+        hasPositiveCount(phase2iReloadReport, "navigator_focus_cleared_reload=") &&
+        hasPositiveCount(phase2iReloadReport, "navigator_stale_key_release_blocks=") &&
+        hasPositiveCount(phase2iReloadReport, "navigator_stale_mouse_release_blocks="),
+        std::string("reload lifecycle evidence=") + yesNo(phase2iReloadKeyboard && phase2iReloadMouse));
+
+    const bool phase2iPageInfoSource =
+        gxos::apps::Navigator::SmokeNavigateToQuiet(cssPhase2iUrl) &&
+        gxos::apps::Navigator::SmokeFocusFormControlById("phase2i-checkbox", true) &&
+        gxos::apps::Navigator::SmokeNavigateToQuiet("about:page-info");
+    const std::string phase2iPageInfoText = gxos::apps::Navigator::SmokeCurrentDocumentText();
+    const bool phase2iPageInfoEvidence = phase2iPageInfoSource &&
+        contains(phase2iPageInfoText, "Phase 2I Ownership Evidence") &&
+        contains(phase2iPageInfoText, "Visible document category: generated-about") &&
+        contains(phase2iPageInfoText, "Inspected source category: http") &&
+        contains(phase2iPageInfoText, "Generated page: yes") &&
+        contains(phase2iPageInfoText, "Source reference valid: yes") &&
+        contains(phase2iPageInfoText, "Focus serial present: no") &&
+        contains(phase2iPageInfoText, "Ownership guard: pass");
+    const bool phase2iSavePageSource =
+        gxos::apps::Navigator::SmokeNavigateToQuiet("about:save-page-text");
+    const std::string phase2iSavePageText = gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("CSS phase 2I generated Page Info and Save Page Text preserve source ownership",
+        phase2iPageInfoEvidence && phase2iSavePageSource &&
+        contains(phase2iSavePageText, "Actual exported source category: http") &&
+        contains(phase2iSavePageText, "Generated-page exclusion: yes") &&
+        contains(phase2iSavePageText, "Password redaction: yes") &&
+        contains(phase2iSavePageText, "Hidden-control exclusion: yes") &&
+        contains(phase2iSavePageText, "Diagnostics exclusion: yes") &&
+        !contains(phase2iSavePageText, "phase2i-secret") &&
+        !contains(phase2iSavePageText, "Phase 2I Lifecycle Fixture"),
+        std::string("page-info=") + yesNo(phase2iPageInfoEvidence) + ",save=" + yesNo(phase2iSavePageSource));
+
+    const bool phase2iHistoryBack =
+        gxos::apps::Navigator::SmokeNavigateToQuiet(cssPhase2iUrl) &&
+        gxos::apps::Navigator::SmokeFocusFormControlById("phase2i-checkbox", true) &&
+        gxos::apps::Navigator::SmokeKeyPress(32, "down") &&
+        gxos::apps::Navigator::SmokeNavigateToWithHistory(cssPhase2iAltUrl) &&
+        gxos::apps::Navigator::SmokeGoBack() &&
+        gxos::apps::Navigator::SmokeKeyPress(32, "up") &&
+        !gxos::apps::Navigator::SmokeFormControlCheckedById("phase2i-checkbox") &&
+        gxos::apps::Navigator::SmokeFocusedFormControlId().empty();
+    const bool phase2iHistoryForward =
+        gxos::apps::Navigator::SmokeGoForward() &&
+        gxos::apps::Navigator::SmokeFocusedFormControlId().empty();
+    const bool phase2iHistoryMouse =
+        gxos::apps::Navigator::SmokeNavigateToQuiet(cssPhase2iUrl) &&
+        gxos::apps::Navigator::SmokeMouseDownFormControlById("phase2i-checkbox") &&
+        gxos::apps::Navigator::SmokeNavigateToWithHistory(cssPhase2iAltUrl) &&
+        gxos::apps::Navigator::SmokeGoBack() &&
+        gxos::apps::Navigator::SmokeMouseUp() &&
+        !gxos::apps::Navigator::SmokeFormControlCheckedById("phase2i-checkbox");
+    const std::string phase2iHistoryReport = gxos::apps::Navigator::SmokeLifecycleReport();
+    add("CSS phase 2I history is URL-only and non-persistent",
+        phase2iHistoryBack && phase2iHistoryForward && phase2iHistoryMouse &&
+        hasPositiveCount(phase2iHistoryReport, "navigator_focus_cleared_history=") &&
+        hasPositiveCount(phase2iHistoryReport, "navigator_history_state_nonpersistent=") &&
+        hasPositiveCount(phase2iHistoryReport, "navigator_stale_key_release_blocks=") &&
+        hasPositiveCount(phase2iHistoryReport, "navigator_stale_mouse_release_blocks="),
+        std::string("back=") + yesNo(phase2iHistoryBack) + ",forward=" + yesNo(phase2iHistoryForward));
+
+    const bool phase2iRedirectPressedSafety =
+        gxos::apps::Navigator::SmokeNavigateToQuiet(cssPhase2iUrl) &&
+        gxos::apps::Navigator::SmokeFocusFormControlById("phase2i-button", true) &&
+        gxos::apps::Navigator::SmokeKeyPress(13, "down") &&
+        gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/redirect-relative") &&
+        gxos::apps::Navigator::SmokeKeyPress(13, "up");
+    const std::string phase2iRedirectReport = gxos::apps::Navigator::SmokeLifecycleReport();
+    const bool phase2iRedirectInfo =
+        gxos::apps::Navigator::SmokeNavigateToQuiet("about:page-info") &&
+        contains(gxos::apps::Navigator::SmokeCurrentDocumentText(), "Requested/final URL equal: no");
+    add("CSS phase 2I redirect replacement owns final document and blocks stale activation",
+        phase2iRedirectPressedSafety && phase2iRedirectInfo &&
+        contains(phase2iRedirectReport, "navigator_transition_category=redirect-replacement") &&
+        hasPositiveCount(phase2iRedirectReport, "navigator_focus_cleared_redirect=") &&
+        hasPositiveCount(phase2iRedirectReport, "navigator_stale_key_release_blocks=") &&
+        contains(phase2iRedirectReport, "navigator_visible_document_category=http"),
+        std::string("redirect=") + yesNo(phase2iRedirectPressedSafety) + ",page-info=" + yesNo(phase2iRedirectInfo));
+
+    const bool phase2iLocalLifecycle =
+        gxos::apps::Navigator::SmokeNavigateToQuiet("file:///docs/forms.html") &&
+        gxos::apps::Navigator::SmokeNavigateToQuiet("file:///docs/index.html") &&
+        gxos::apps::Navigator::SmokeFocusedFormControlId().empty() &&
+        contains(gxos::apps::Navigator::SmokeLifecycleReport(), "navigator_visible_document_category=local-file");
+    const bool phase2iMissingLocal =
+        gxos::apps::Navigator::SmokeNavigateToQuiet("file:///docs/phase2i-missing.html") &&
+        contains(gxos::apps::Navigator::SmokeLifecycleReport(), "navigator_visible_document_category=error") &&
+        gxos::apps::Navigator::SmokeNavigateToQuiet("about:page-info") &&
+        contains(gxos::apps::Navigator::SmokeCurrentDocumentText(), "Inspected source category: error");
+    const bool phase2iParserRecovery =
+        gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-phase2i-malformed.html") &&
+        contains(gxos::apps::Navigator::SmokeCurrentDocumentText(), "Phase 2I Malformed Recovery") &&
+        gxos::apps::Navigator::SmokeFocusedFormControlId().empty() &&
+        contains(gxos::apps::Navigator::SmokeLifecycleReport(), "navigator_source_reference_valid=yes");
+    add("CSS phase 2I local-file, failure, and parser-recovery ownership",
+        phase2iLocalLifecycle && phase2iMissingLocal && phase2iParserRecovery,
+        std::string("local=") + yesNo(phase2iLocalLifecycle) + ",missing=" + yesNo(phase2iMissingLocal) +
+        ",parser=" + yesNo(phase2iParserRecovery));
+
     const std::string trustedHttpsUrl = "https://example.com/";
     bool trustedHttpsLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet(trustedHttpsUrl);
     std::string trustedHttpsText = gxos::apps::Navigator::SmokeCurrentDocumentText();
@@ -1948,10 +3883,47 @@ static std::string navigatorHostedSmokeDiagnostic() {
 
     bool httpsGzipLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("https://localhost:8443/navigator-smoke/gzip.html");
     std::string httpsGzipText = gxos::apps::Navigator::SmokeCurrentDocumentText();
-    add("HTTPS unsupported compression stays friendly", httpsGzipLoaded &&
-        contains(httpsGzipText, "Unsupported Content Encoding") &&
-        contains(httpsGzipText, "UnsupportedContentEncoding"),
-        "expected existing parser behavior over TLS");
+    bool httpsGzipPageInfoLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("about:page-info");
+    std::string httpsGzipPageInfo = gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("HTTPS gzip content decoding stays bounded", httpsGzipLoaded &&
+        contains(httpsGzipText, "Compressed") &&
+        httpsGzipPageInfoLoaded &&
+        contains(httpsGzipPageInfo, "Content encoding: gzip") &&
+        contains(httpsGzipPageInfo, "Encoded body bytes: ") &&
+        contains(httpsGzipPageInfo, "Decoded body bytes: "),
+        "expected bounded gzip decode and encoded/decoded telemetry over TLS");
+
+    bool httpsDeflateLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("https://localhost:8443/navigator-smoke/deflate.html");
+    std::string httpsDeflateText = gxos::apps::Navigator::SmokeCurrentDocumentText();
+    bool httpsDeflatePageInfoLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("about:page-info");
+    std::string httpsDeflatePageInfo = gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("HTTPS deflate content decoding stays bounded", httpsDeflateLoaded &&
+        contains(httpsDeflateText, "Deflate") &&
+        httpsDeflatePageInfoLoaded &&
+        contains(httpsDeflatePageInfo, "Content encoding: deflate") &&
+        contains(httpsDeflatePageInfo, "Encoded body bytes: ") &&
+        contains(httpsDeflatePageInfo, "Decoded body bytes: "),
+        "expected bounded zlib-wrapped deflate decode over TLS");
+
+    bool httpsIdentityLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("https://localhost:8443/navigator-smoke/plain.txt");
+    std::string httpsIdentityText = gxos::apps::Navigator::SmokeCurrentDocumentText();
+    bool httpsIdentityPageInfoLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("about:page-info");
+    std::string httpsIdentityPageInfo = gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("HTTPS identity response remains unchanged", httpsIdentityLoaded &&
+        contains(httpsIdentityText, "Navigator HTTPS text fixture") &&
+        httpsIdentityPageInfoLoaded &&
+        contains(httpsIdentityPageInfo, "Content encoding: ") &&
+        contains(httpsIdentityPageInfo, "Encoded body bytes: ") &&
+        contains(httpsIdentityPageInfo, "Decoded body bytes: "),
+        "expected identity response to bypass decompression");
+
+    bool httpsBrLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("https://localhost:8443/navigator-smoke/br.html");
+    std::string httpsBrText = gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("HTTPS Brotli remains explicitly unsupported", httpsBrLoaded &&
+        contains(httpsBrText, "Unsupported Content Encoding") &&
+        contains(httpsBrText, "UnsupportedContentEncoding") &&
+        !contains(httpsBrText, "not-really-brotli"),
+        "expected unsupported br to fail closed rather than pass as identity");
 
     bool badCertificateLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("https://127.0.0.1:8443/navigator-smoke/basic.html");
     std::string badCertificateText = gxos::apps::Navigator::SmokeCurrentDocumentText();
@@ -1997,6 +3969,133 @@ static std::string navigatorHostedSmokeDiagnostic() {
         contains(remotePngPageInfo, "Remote images: 1") &&
         contains(remotePngPageInfo, "Loaded images: 1"),
         "expected one loaded remote PNG");
+
+    bool remoteJpegLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/image-jpeg.html");
+    bool remoteJpegPageInfoLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("about:page-info");
+    std::string remoteJpegPageInfo = gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("remote JPEG loads through HTTP", remoteJpegLoaded && remoteJpegPageInfoLoaded &&
+        contains(remoteJpegPageInfo, "Remote images: 1") &&
+        contains(remoteJpegPageInfo, "Loaded images: 1") &&
+        contains(remoteJpegPageInfo, "JPEG loaded: 1"),
+        "expected one loaded remote JPEG");
+
+    bool viewportPressureLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet(
+        "http://127.0.0.1:8080/navigator-smoke/generated/VPRESS.HTM");
+    const std::string viewportPressureReport = gxos::apps::Navigator::SmokePageDiagnostics();
+    auto viewportMetric = [&](const char* name) {
+        const std::string prefix = std::string(name) + "=";
+        const size_t start = viewportPressureReport.find(prefix);
+        if (start == std::string::npos) return std::string("missing");
+        const size_t valueStart = start + prefix.size();
+        const size_t valueEnd = viewportPressureReport.find_first_of("\r\n ", valueStart);
+        return viewportPressureReport.substr(valueStart, valueEnd == std::string::npos
+            ? std::string::npos : valueEnd - valueStart);
+    };
+    add("hosted viewport-pressure admission prioritizes visible and near images",
+        viewportPressureLoaded &&
+        contains(viewportPressureReport, "viewport_width=872") &&
+        contains(viewportPressureReport, "viewport_height=528") &&
+        contains(viewportPressureReport, "initial_scroll_offset=0") &&
+        contains(viewportPressureReport, "visible_references=4") &&
+        contains(viewportPressureReport, "near_references=4") &&
+        contains(viewportPressureReport, "far_references=4") &&
+        contains(viewportPressureReport, "visible_loaded=4") &&
+        contains(viewportPressureReport, "near_loaded=4") &&
+        contains(viewportPressureReport, "far_loaded=2") &&
+        contains(viewportPressureReport, "far_budget_denied=2") &&
+        contains(viewportPressureReport, "decoded_bytes_visible=16777216") &&
+        contains(viewportPressureReport, "active_image_bytes=67108864") &&
+        contains(viewportPressureReport, "visible_priority_admissions=8"),
+        std::string("viewport pressure metrics=") +
+        "refs:" + viewportMetric("resource_total_references") +
+        ",visible:" + viewportMetric("visible_references") +
+        ",near:" + viewportMetric("near_references") +
+        ",far:" + viewportMetric("far_references") +
+        ",loaded:" + viewportMetric("resource_loaded") +
+        ",visible_loaded:" + viewportMetric("visible_loaded") +
+        ",near_loaded:" + viewportMetric("near_loaded") +
+        ",far_loaded:" + viewportMetric("far_loaded") +
+        ",far_denied:" + viewportMetric("far_budget_denied") +
+        ",active_bytes:" + viewportMetric("active_image_bytes") +
+        ",visible_admissions:" + viewportMetric("visible_priority_admissions") +
+        ",viewport:" + viewportMetric("viewport_top") + ".." + viewportMetric("viewport_bottom") +
+        ",report=" + summarizeText(viewportPressureReport, 500));
+
+    auto reportMetric = [](const std::string& report, const char* name) {
+        const std::string prefix = std::string(name) + "=";
+        const size_t start = report.find(prefix);
+        if (start == std::string::npos) return std::string("missing");
+        const size_t valueStart = start + prefix.size();
+        const size_t valueEnd = report.find_first_of("\r\n ", valueStart);
+        return report.substr(valueStart, valueEnd == std::string::npos
+            ? std::string::npos : valueEnd - valueStart);
+    };
+    bool phase8uLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet(
+        "http://127.0.0.1:8080/navigator-smoke/generated/VP8U.HTM");
+    const std::string phase8uA = gxos::apps::Navigator::SmokePageDiagnostics();
+    gxos::apps::Navigator::SmokeSetScrollOffset(600);
+    const std::string phase8uB = gxos::apps::Navigator::SmokePageDiagnostics();
+    gxos::apps::Navigator::SmokeSetScrollOffset(100000);
+    const std::string phase8uC = gxos::apps::Navigator::SmokePageDiagnostics();
+    gxos::apps::Navigator::SmokeSetScrollOffset(600);
+    const std::string phase8uBReturn = gxos::apps::Navigator::SmokePageDiagnostics();
+    gxos::apps::Navigator::SmokeSetScrollOffset(0);
+    const std::string phase8uAFinal = gxos::apps::Navigator::SmokePageDiagnostics();
+    auto phase8uResourceSummary = [&](const std::string& report) {
+        std::string summary;
+        // Telemetry ordinals are stable source/block ordinals, not a dense
+        // 0..unique-resource index.  Walk the bounded diagnostic range and
+        // retain only present records so the hosted proof reports every
+        // canonical/duplicate reference without inventing an unbounded log.
+        for (int index = 0; index < static_cast<int>(gxos::apps::kNavigatorMaxResourceReferences); ++index) {
+            const std::string prefix = "resource[" + std::to_string(index) + "].";
+            const std::string blockIndex = reportMetric(report, (prefix + "block_index").c_str());
+            if (blockIndex == "missing") continue;
+            if (!summary.empty()) summary += ",";
+            summary += blockIndex + ":";
+            summary += reportMetric(report, (prefix + "viewport_relation").c_str());
+            summary += "/";
+            summary += reportMetric(report, (prefix + "scheduler_state").c_str());
+            summary += "/paint=";
+            summary += reportMetric(report, (prefix + "paint_observed").c_str());
+        }
+        return summary;
+    };
+    const std::string phase8uDetail =
+        "A(offset=" + reportMetric(phase8uA, "current_scroll_offset") + ",active=" + reportMetric(phase8uA, "active_image_bytes") +
+        ",visible=" + reportMetric(phase8uA, "visible_loaded") + ",denied=" + reportMetric(phase8uA, "visible_budget_denied") + ") " +
+        "B(offset=" + reportMetric(phase8uB, "current_scroll_offset") + ",active=" + reportMetric(phase8uB, "active_image_bytes") +
+        ",admit=" + reportMetric(phase8uB, "scroll_triggered_admissions") + ",evict=" + reportMetric(phase8uB, "evictions") +
+        ",readmit=" + reportMetric(phase8uB, "readmissions") + ",fetch=" + reportMetric(phase8uB, "fetch_started") +
+        ",decode=" + reportMetric(phase8uB, "decode_started") + ",peak=" + reportMetric(phase8uB, "peak_active_image_bytes") +
+        ",relations=" + reportMetric(phase8uB, "visible_references") + "/" + reportMetric(phase8uB, "near_references") + "/" + reportMetric(phase8uB, "far_references") +
+        ",denied=" + reportMetric(phase8uB, "budget_denied") + ",loaded=" + reportMetric(phase8uB, "resource_loaded") + ",resources=" + phase8uResourceSummary(phase8uB) + ") " +
+        "C(offset=" + reportMetric(phase8uC, "current_scroll_offset") + ",active=" + reportMetric(phase8uC, "active_image_bytes") +
+        ",admit=" + reportMetric(phase8uC, "scroll_triggered_admissions") + ",evict=" + reportMetric(phase8uC, "evictions") +
+        ",readmit=" + reportMetric(phase8uC, "readmissions") + ",fetch=" + reportMetric(phase8uC, "fetch_started") +
+        ",decode=" + reportMetric(phase8uC, "decode_started") + ",peak=" + reportMetric(phase8uC, "peak_active_image_bytes") +
+        ",relations=" + reportMetric(phase8uC, "visible_references") + "/" + reportMetric(phase8uC, "near_references") + "/" + reportMetric(phase8uC, "far_references") +
+        ",denied=" + reportMetric(phase8uC, "budget_denied") + ",loaded=" + reportMetric(phase8uC, "resource_loaded") + ",resources=" + phase8uResourceSummary(phase8uC) + ") " +
+        "B2(readmit=" + reportMetric(phase8uBReturn, "readmissions") + ",active=" + reportMetric(phase8uBReturn, "active_image_bytes") +
+        ",evict=" + reportMetric(phase8uBReturn, "evictions") + ",fetch=" + reportMetric(phase8uBReturn, "fetch_started") +
+        ",decode=" + reportMetric(phase8uBReturn, "decode_started") + ",resources=" + phase8uResourceSummary(phase8uBReturn) + ") " +
+        "A2(offset=" + reportMetric(phase8uAFinal, "current_scroll_offset") + ",readmit=" + reportMetric(phase8uAFinal, "readmissions") +
+        ",active=" + reportMetric(phase8uAFinal, "active_image_bytes") + ",evict=" + reportMetric(phase8uAFinal, "evictions") +
+        ",fetch=" + reportMetric(phase8uAFinal, "fetch_started") + ",decode=" + reportMetric(phase8uAFinal, "decode_started") +
+        ",peak=" + reportMetric(phase8uAFinal, "peak_active_image_bytes") + ",visible=" + reportMetric(phase8uAFinal, "visible_loaded") +
+        ",visible_denied=" + reportMetric(phase8uAFinal, "visible_budget_denied") +
+        ",passes=" + reportMetric(phase8uAFinal, "viewport_admission_passes") + ",resources=" + phase8uResourceSummary(phase8uAFinal) + ")";
+    add("hosted Phase 8U A-to-B-to-C-to-B-to-A admission cycle remains bounded",
+        phase8uLoaded &&
+        contains(phase8uA, "resource_total_references=13") &&
+        reportMetric(phase8uB, "scroll_triggered_admissions") != "0" &&
+        reportMetric(phase8uC, "scroll_triggered_admissions") != "0" &&
+        reportMetric(phase8uC, "evictions") != "0" &&
+        reportMetric(phase8uAFinal, "readmissions") != "0" &&
+        std::stoull(reportMetric(phase8uAFinal, "peak_active_image_bytes")) <= gxos::apps::kNavigatorDecodedImageBudgetBytes &&
+        std::stoull(reportMetric(phase8uAFinal, "active_image_bytes")) <= gxos::apps::kNavigatorDecodedImageBudgetBytes &&
+        std::stoull(reportMetric(phase8uAFinal, "active_image_resources")) <= gxos::apps::kNavigatorMaxActiveResources,
+        phase8uDetail);
 
     bool httpsRemotePngLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("https://localhost:8443/navigator-smoke/image-relative.html");
     bool httpsRemotePngPageInfoLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("about:page-info");
@@ -2087,8 +4186,10 @@ static std::string navigatorHostedSmokeDiagnostic() {
     add("forms-lite POST request headers", contains(postResultText, "Method: POST") &&
         contains(postResultText, "Content-Type: application/x-www-form-urlencoded") &&
         contains(postResultText, "Host: 127.0.0.1:8080") &&
-        contains(postResultText, "User-Agent: guideXOS-Navigator/0.1") &&
-        contains(postResultText, "Accept-Encoding: identity") &&
+        contains(postResultText, "User-Agent: guideXOS-Navigator/0.2") &&
+        contains(postResultText, "Accept-Encoding: gzip, deflate") &&
+        !contains(postResultText, "Accept-Encoding: identity") &&
+        !contains(postResultText, "Accept-Encoding: br") &&
         contains(postResultText, "Connection: close"), "echo response contains required hosted POST headers");
     add("forms-lite POST encoded successful controls", contains(postResultText,
         "q=posted+value&agree=yes&kind=alpha&note=hello%0Asecond+line&size=m") &&
@@ -2255,6 +4356,88 @@ static std::string navigatorHostedSmokeDiagnostic() {
     return out.str();
 }
 
+static std::string navigatorPositionedLinkProbeDiagnostic() {
+    auto rectText = [](int x, int y, int w, int h) {
+        return std::to_string(x) + ":" + std::to_string(y) + ":" +
+            std::to_string(w) + ":" + std::to_string(h);
+    };
+    auto visibleRect = [](int ax, int ay, int aw, int ah,
+                          int bx, int by, int bw, int bh) {
+        const int left = std::max(ax, bx);
+        const int top = std::max(ay, by);
+        const int right = std::min(ax + std::max(0, aw), bx + std::max(0, bw));
+        const int bottom = std::min(ay + std::max(0, ah), by + std::max(0, bh));
+        return std::array<int, 4>{left, top, std::max(0, right - left), std::max(0, bottom - top)};
+    };
+    auto capture = [&](const std::string& id) {
+        std::array<int, 12> values{};
+        gxos::apps::Navigator::SmokeLinkGeometryById(id,
+            values[0], values[1], values[2], values[3],
+            values[4], values[5], values[6], values[7],
+            values[8], values[9], values[10], values[11]);
+        return values;
+    };
+
+    std::ostringstream out;
+    out << "NAVIGATOR_POSITIONED_LINK_PROBE_BEGIN\n";
+    const std::string fixtureUrl =
+        "http://127.0.0.1:8080/navigator-smoke/typography-phase7a.html";
+    std::string launchError;
+    bool loaded = gxos::apps::Navigator::SmokeCurrentUrl() == fixtureUrl;
+    bool launchRequested = false;
+    if (!loaded) {
+        launchRequested = gxos::gui::DesktopService::LaunchApp("guideXOS Navigator", launchError);
+        for (int attempt = 0; attempt < 30 && !loaded; ++attempt) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            loaded = gxos::apps::Navigator::SmokeNavigateTo(fixtureUrl);
+        }
+    }
+    out << "launch_requested=" << (launchRequested ? "yes" : "no") << "\n";
+    if (!launchError.empty()) out << "launch_error=" << launchError << "\n";
+    out << "fixture_loaded=" << (loaded ? "yes" : "no") << "\n";
+    gxos::apps::Navigator::SmokeSetScrollOffset(100000);
+    out << "document_scroll=" << gxos::apps::Navigator::SmokeScrollOffset() << "\n";
+    const int maxScroll = gxos::apps::Navigator::SmokeElementMaxScrollYById("phase7a-auto");
+    out << "overflow_owner=phase7a-auto\nlocal_scroll_max=" << maxScroll << "\n";
+    const bool initialSet = gxos::apps::Navigator::SmokeSetElementScrollOffsetById("phase7a-auto", 0, 0);
+    const std::array<int, 12> initial = capture("phase7a-scroll-link");
+    const int initialX = initial[4] + std::max(1, initial[6] / 2);
+    const int initialY = initial[5] + std::max(1, initial[7] / 2);
+    out << "initial_offset_set=" << (initialSet ? "yes" : "no") << "\n";
+    out << "initial.paint=" << rectText(initial[0], initial[1], initial[2], initial[3]) << "\n";
+    out << "initial.final=" << rectText(initial[4], initial[5], initial[6], initial[7]) << "\n";
+    out << "initial.clip=" << rectText(initial[8], initial[9], initial[10], initial[11]) << "\n";
+    out << "initial.probe_point=" << initialX << ":" << initialY << "\n";
+
+    const int requestedScroll = maxScroll;
+    const bool scrolledSet = gxos::apps::Navigator::SmokeSetElementScrollOffsetById(
+        "phase7a-auto", 0, requestedScroll);
+    const int actualScroll = gxos::apps::Navigator::SmokeElementScrollOffsetYById("phase7a-auto");
+    const std::array<int, 12> scrolled = capture("phase7a-scroll-link");
+    const std::array<int, 4> visible = visibleRect(scrolled[4], scrolled[5], scrolled[6], scrolled[7],
+        scrolled[8], scrolled[9], scrolled[10], scrolled[11]);
+    const int newX = visible[0] + std::max(1, visible[2] / 2);
+    const int newY = visible[1] + std::max(1, visible[3] / 2);
+    const bool oldLocationAccepted = gxos::apps::Navigator::SmokeHitLinkAt(initialX, initialY, "phase7a-scroll-link");
+    const bool newLocationAccepted = visible[2] > 0 && visible[3] > 0 &&
+        gxos::apps::Navigator::SmokeHitLinkAt(newX, newY, "phase7a-scroll-link");
+    out << "scrolled_set=" << (scrolledSet ? "yes" : "no") << "\n";
+    out << "actual_local_scroll=" << actualScroll << "\n";
+    out << "scrolled.paint=" << rectText(scrolled[0], scrolled[1], scrolled[2], scrolled[3]) << "\n";
+    out << "scrolled.final=" << rectText(scrolled[4], scrolled[5], scrolled[6], scrolled[7]) << "\n";
+    out << "scrolled.clip=" << rectText(scrolled[8], scrolled[9], scrolled[10], scrolled[11]) << "\n";
+    out << "scrolled.visible=" << rectText(visible[0], visible[1], visible[2], visible[3]) << "\n";
+    out << "old_location=" << initialX << ":" << initialY << " accepted=" << (oldLocationAccepted ? "yes" : "no") << "\n";
+    out << "new_location=" << newX << ":" << newY << " accepted=" << (newLocationAccepted ? "yes" : "no") << "\n";
+    out << "positioned_link_probe=" << ((loaded && initial[0] && scrolled[0] && visible[2] > 0 && visible[3] > 0 &&
+        !oldLocationAccepted && newLocationAccepted) ? "PASS" : "FAIL") << "\n";
+    gxos::apps::Navigator::SmokeSetElementScrollOffsetById("phase7a-auto", 0, 0);
+    gxos::apps::Navigator::SmokeSetScrollOffset(0);
+    out << "diagnostic_report=" << gxos::apps::Navigator::SmokeRuntimeReport();
+    out << "NAVIGATOR_POSITIONED_LINK_PROBE_END\n";
+    return out.str();
+}
+
 static std::string navigatorGotoDiagnostic(const std::string& url) {
     std::ostringstream out;
     if (url.empty()) {
@@ -2289,6 +4472,7 @@ static std::string navigatorGotoDiagnostic(const std::string& url) {
     out << "requested_url=" << url << "\n";
     out << "current_url=" << gxos::apps::Navigator::SmokeCurrentUrl() << "\n";
     out << "current_block_count=" << gxos::apps::Navigator::SmokeCurrentBlockCount() << "\n";
+	out << gxos::apps::Navigator::SmokePageDiagnostics();
     return out.str();
 }
 
@@ -2318,7 +4502,7 @@ static void help(){
                  " taskmanager.snapshot | taskmanager.network-snapshot-wait | taskmanager.tombstone-test\n"
                  " taskmgr\n"
                  " paint\n"
-                 " navigator | navigator.smoke | navigator.goto <url>\n"
+                 " navigator | navigator.smoke | navigator.positioned-link-probe | navigator.goto <url>\n"
                  " imgview [file] | osk\n"
                  " shutdown | msgbox <text> | welcome\n"
                  " notify <text> | notify.clear\n"
@@ -2973,6 +5157,9 @@ using namespace gxos;
         }
         else if (cmd=="navigator.smoke"){
             std::cout << navigatorHostedSmokeDiagnostic();
+        }
+        else if (cmd=="navigator.positioned-link-probe"){
+            std::cout << navigatorPositionedLinkProbeDiagnostic();
         }
         else if (cmd=="navigator.goto"){
             if(!requireCompositor()) continue;

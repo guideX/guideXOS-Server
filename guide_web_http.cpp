@@ -1,4 +1,5 @@
 #include "guide_web_http.h"
+#include "guide_web_document_storage.h"
 #include "network_telemetry.h"
 
 #include <algorithm>
@@ -7,6 +8,7 @@
 #include <cstdlib>
 #include <iomanip>
 #include <sstream>
+#include <vector>
 
 #if defined(_WIN32)
 #ifndef WIN32_LEAN_AND_MEAN
@@ -69,6 +71,26 @@ static bool isSupportedHttpScheme(const std::string& scheme)
 	return scheme == "http" || scheme == "https";
 }
 
+static bool isValidHostname(const std::string& host)
+{
+	if (host.empty() || host.size() > static_cast<size_t>(kHttpSharedMaxHostnameBytes)) return false;
+	if (host.front() == '.' || host.back() == '.') return false;
+	size_t labelLength = 0;
+	for (char ch : host) {
+		if (ch == '.') {
+			if (labelLength == 0 || labelLength > 63) return false;
+			labelLength = 0;
+			continue;
+		}
+		const unsigned char uch = static_cast<unsigned char>(ch);
+		if (!std::isalnum(uch) && ch != '-') return false;
+		if (labelLength == 0 && ch == '-') return false;
+		++labelLength;
+		if (labelLength > 63) return false;
+	}
+	return labelLength > 0 && host.back() != '-';
+}
+
 static void setError(HttpResponse& response, HttpError error, const std::string& message)
 {
 	response.error = error;
@@ -104,6 +126,102 @@ static bool decodeChunkedBody(const std::string& encoded, std::string& decoded, 
 	return true;
 }
 
+static bool combinedHeaderValue(const HttpResponse& response, const std::string& name, std::string& combined)
+{
+	const std::string needle = toLowerAscii(name);
+	combined.clear();
+	int count = 0;
+	for (const HttpHeader& header : response.headers) {
+		if (toLowerAscii(header.name) != needle) continue;
+		if (count++ > 0) combined += ", ";
+		combined += trimAscii(header.value);
+		if (combined.size() > 64) return false;
+	}
+	return true;
+}
+
+static bool decodeContentEncoding(HttpResponse& response)
+{
+	response.encodedBodyBytes = response.body.size();
+	response.decodedBodyBytes = 0;
+	const HttpContentCoding coding = httpSharedParseContentCoding(response.contentEncoding.c_str());
+	if (coding == HttpContentCoding::Unsupported) {
+		setError(response, HttpError::UnsupportedContentEncoding,
+			"Unsupported Content-Encoding: " + response.contentEncoding);
+		return false;
+	}
+	if (coding == HttpContentCoding::Identity) {
+		response.decodedBodyBytes = response.body.size();
+		return true;
+	}
+
+	static HttpContentDecoderWorkspace workspace;
+	const bool htmlDocument = response.contentType == "text/html";
+	const std::size_t decodedLimit = htmlDocument ? kHttpMaxDecodedDocumentBytes : kHttpMaxBodyBytes;
+	BoundedDocumentStorage documentStorage;
+	HttpContentDecoderSink documentSink{};
+	std::string decoded;
+	if (htmlDocument) {
+		documentSink = documentStorage.decoderSink();
+	} else {
+		decoded.assign(decodedLimit, '\0');
+	}
+	int decodedLength = 0;
+	char error[160] = {};
+	const HttpContentDecodeResult result = httpSharedDecodeContent(
+		reinterpret_cast<const uint8_t*>(response.body.data()),
+		static_cast<int>(response.body.size()), coding,
+		htmlDocument ? nullptr : reinterpret_cast<uint8_t*>(&decoded[0]),
+		static_cast<int>(decodedLimit), &decodedLength, &workspace, error, sizeof(error),
+		htmlDocument ? &documentSink : nullptr);
+	response.decodedBodyBytes = htmlDocument
+		? static_cast<std::size_t>(documentStorage.size())
+		: (decodedLength > 0
+			? static_cast<std::size_t>(std::min(decodedLength, static_cast<int>(decodedLimit)))
+			: 0);
+	response.documentSegmentCount = htmlDocument ? static_cast<std::size_t>(documentStorage.segmentsUsed()) : 0;
+	response.documentStorageBytes = htmlDocument ? static_cast<std::size_t>(documentStorage.size()) : 0;
+	response.documentStorageCapacity = htmlDocument ? static_cast<std::size_t>(documentStorage.capacityBytes()) : 0;
+	response.documentHistoryBytes = htmlDocument ? static_cast<std::size_t>(documentStorage.historyBytes()) : 0;
+	response.documentStorageAllocationFailed = htmlDocument && documentStorage.allocationFailed;
+	if (result == HttpContentDecodeResult::DecodedResponseTooLarge) {
+		response.bodyCapHit = true;
+		setError(response, HttpError::DecodedResponseTooLarge,
+			"Decoded response exceeded the safety limit.");
+		response.body.clear();
+		return false;
+	}
+	if (result == HttpContentDecodeResult::OutputAllocationFailed) {
+		response.documentStorageAllocationFailed = true;
+		setError(response, HttpError::DocumentStorageAllocationFailed,
+			"Decoded document storage allocation failed.");
+		response.body.clear();
+		return false;
+	}
+	if (result != HttpContentDecodeResult::Success) {
+		setError(response, HttpError::MalformedCompressedResponse,
+			error[0] ? error : "Compressed response was malformed.");
+		response.body.clear();
+		return false;
+	}
+	if (htmlDocument) {
+		decoded.assign(static_cast<std::size_t>(documentStorage.size() + 1), '\0');
+		if (!documentStorage.flatten(reinterpret_cast<uint8_t*>(&decoded[0]),
+			static_cast<int>(decoded.size()))) {
+			response.documentStorageAllocationFailed = true;
+			setError(response, HttpError::DocumentStorageAllocationFailed,
+				"Decoded document flattening failed.");
+			response.body.clear();
+			return false;
+		}
+		decoded.resize(static_cast<std::size_t>(documentStorage.size()));
+	} else {
+		decoded.resize(static_cast<std::size_t>(decodedLength));
+	}
+	response.body = std::move(decoded);
+	return true;
+}
+
 static bool isRedirectStatus(int statusCode)
 {
 	return httpSharedIsRedirectStatus(statusCode);
@@ -125,13 +243,44 @@ static std::string resolveHttpReference(const std::string& baseUrl, const std::s
 	ParsedHttpUrl base = parseHttpUrl(baseUrl);
 	if (!base.valid) return ref;
 	if (ref.rfind("//", 0) == 0) return base.scheme + ":" + ref;
-	if (ref[0] == '/') return base.origin() + ref;
 	if (ref[0] == '#') return baseUrl;
 
+	const size_t query = ref.find('?');
+	const size_t fragment = ref.find('#');
+	const size_t pathEnd = std::min(query == std::string::npos ? ref.size() : query,
+		fragment == std::string::npos ? ref.size() : fragment);
+	const std::string refPath = ref.substr(0, pathEnd);
+	const std::string suffix = ref.substr(pathEnd);
+	const auto normalizePath = [](const std::string& path) {
+		std::vector<std::string> parts;
+		size_t start = 0;
+		while (start <= path.size()) {
+			size_t slash = path.find('/', start);
+			if (slash == std::string::npos) slash = path.size();
+			const std::string part = path.substr(start, slash - start);
+			if (part.empty() || part == ".") {
+			} else if (part == "..") {
+				if (!parts.empty()) parts.pop_back();
+			} else {
+				parts.push_back(part);
+			}
+			if (slash == path.size()) break;
+			start = slash + 1;
+		}
+		std::string result = "/";
+		for (size_t i = 0; i < parts.size(); ++i) {
+			if (i != 0) result += "/";
+			result += parts[i];
+		}
+		if (path.size() > 1 && path.back() == '/') result += "/";
+		return result;
+	};
+	if (!refPath.empty() && refPath[0] == '/') return base.origin() + normalizePath(refPath) + suffix;
+	if (refPath.empty()) return base.origin() + (base.path.empty() ? "/" : base.path) + suffix;
 	std::string path = base.path.empty() ? "/" : base.path;
 	size_t slash = path.rfind('/');
 	std::string dir = slash == std::string::npos ? "/" : path.substr(0, slash + 1);
-	return base.origin() + dir + ref;
+	return base.origin() + normalizePath(dir + refPath) + suffix;
 }
 
 static bool parseHttpResponse(const std::string& raw, HttpResponse& response)
@@ -181,19 +330,48 @@ static bool parseHttpResponse(const std::string& raw, HttpResponse& response)
 
 	response.contentType = firstContentTypeToken(response.headerValue("Content-Type"));
 	response.transferEncoding = toLowerAscii(trimAscii(response.headerValue("Transfer-Encoding")));
-	response.contentEncoding = toLowerAscii(trimAscii(response.headerValue("Content-Encoding")));
+	std::string combinedContentEncoding;
+	if (!combinedHeaderValue(response, "Content-Encoding", combinedContentEncoding)) {
+		setError(response, HttpError::MalformedResponse, "HTTP Content-Encoding header was too large.");
+		return false;
+	}
+	response.contentEncoding = toLowerAscii(combinedContentEncoding);
+	const std::string contentLengthHeader = trimAscii(response.headerValue("Content-Length"));
+	if (!contentLengthHeader.empty()) {
+		int contentLength = 0;
+		if (!httpSharedParseDecimalSize(contentLengthHeader.data(),
+			contentLengthHeader.data() + contentLengthHeader.size(), &contentLength)) {
+			setError(response, HttpError::MalformedResponse, "HTTP Content-Length was malformed.");
+			return false;
+		}
+		response.contentLengthPresent = true;
+		response.contentLength = static_cast<size_t>(contentLength);
+		if (response.contentLength > kHttpMaxBodyBytes) {
+			response.bodyCapHit = true;
+			response.encodedBodyBytes = response.body.size();
+			setError(response, HttpError::BodyTooLarge, "HTTP response body exceeded the safety limit.");
+			return false;
+		}
+	}
 
 	if (isRedirectStatus(response.statusCode)) {
+		response.encodedBodyBytes = response.body.size();
+		response.decodedBodyBytes = response.body.size();
+		response.responseFraming = response.transferEncoding.empty()
+			? (response.contentLengthPresent ? "content-length" : "connection-close")
+			: "chunked";
 		return true;
 	}
 
 	if (!response.transferEncoding.empty() && !hasHeaderToken(response.transferEncoding, "identity")) {
 		if (hasHeaderToken(response.transferEncoding, "chunked")) {
+			response.responseFraming = "chunked";
 			std::string decoded;
 			std::string chunkError;
 			if (!decodeChunkedBody(response.body, decoded, chunkError)) {
 				if (chunkError.find("safety limit") != std::string::npos) {
 					response.bodyCapHit = true;
+					response.encodedBodyBytes = response.body.size();
 				}
 				setError(response, chunkError.find("safety limit") != std::string::npos
 					? HttpError::BodyTooLarge
@@ -211,15 +389,20 @@ static bool parseHttpResponse(const std::string& raw, HttpResponse& response)
 		response.bodyCapHit = true;
 		setError(response, HttpError::BodyTooLarge, "HTTP response body exceeded the safety limit.");
 		return false;
+	} else if (response.contentLengthPresent) {
+		response.responseFraming = "content-length";
+		if (response.body.size() < response.contentLength) {
+			response.truncatedResponse = true;
+			setError(response, HttpError::TruncatedResponse,
+				"HTTP response ended before Content-Length bytes were received.");
+			return false;
+		}
+		if (response.body.size() > response.contentLength) response.body.resize(response.contentLength);
+	} else {
+		response.responseFraming = "connection-close";
 	}
 
-	if (!response.contentEncoding.empty() && !hasHeaderToken(response.contentEncoding, "identity")) {
-		setError(response, HttpError::UnsupportedContentEncoding,
-			"Unsupported Content-Encoding: " + response.contentEncoding);
-		return false;
-	}
-
-	return true;
+	return decodeContentEncoding(response);
 }
 
 #if defined(_WIN32)
@@ -849,16 +1032,23 @@ static HttpResponse sendSinglePythonSmokeHttpsRequest(const ParsedHttpUrl& parse
 	response.tlsCipherSuite = helperCipher.empty() ? "Hosted smoke helper" : helperCipher;
 	response.contentType = firstContentTypeToken(response.headerValue("Content-Type"));
 	response.transferEncoding = toLowerAscii(trimAscii(response.headerValue("Transfer-Encoding")));
-	response.contentEncoding = toLowerAscii(trimAscii(response.headerValue("Content-Encoding")));
-	if (isRedirectStatus(response.statusCode)) return response;
+	std::string helperContentEncoding;
+	if (!combinedHeaderValue(response, "Content-Encoding", helperContentEncoding)) {
+		setError(response, HttpError::MalformedResponse, "HTTP Content-Encoding header was too large.");
+		return response;
+	}
+	response.contentEncoding = toLowerAscii(helperContentEncoding);
+	if (isRedirectStatus(response.statusCode)) {
+		response.encodedBodyBytes = response.body.size();
+		response.decodedBodyBytes = response.body.size();
+		return response;
+	}
 	if (response.body.size() > kHttpMaxBodyBytes) {
+		response.bodyCapHit = true;
 		setError(response, HttpError::BodyTooLarge, "HTTP response body exceeded the safety limit.");
 		return response;
 	}
-	if (!response.contentEncoding.empty() && !hasHeaderToken(response.contentEncoding, "identity")) {
-		setError(response, HttpError::UnsupportedContentEncoding,
-			"Unsupported Content-Encoding: " + response.contentEncoding);
-	}
+	decodeContentEncoding(response);
 	return response;
 }
 
@@ -1278,6 +1468,16 @@ std::string ParsedHttpUrl::origin() const
 ParsedHttpUrl parseHttpUrl(const std::string& url)
 {
 	ParsedHttpUrl parsed;
+	if (url.empty() || url.size() > static_cast<size_t>(kHttpSharedMaxUrlBytes)) {
+		parsed.error = "URL exceeds the Navigator safety limit.";
+		return parsed;
+	}
+	for (char ch : url) {
+		if (static_cast<unsigned char>(ch) < 0x20 || ch == 0x7f) {
+			parsed.error = "URL contains a control character.";
+			return parsed;
+		}
+	}
 	size_t schemeEnd = url.find("://");
 	if (schemeEnd == std::string::npos) {
 		parsed.error = "URL is missing a scheme.";
@@ -1320,6 +1520,22 @@ ParsedHttpUrl parseHttpUrl(const std::string& url)
 	}
 	if (parsed.host.empty()) {
 		parsed.error = "URL host is empty.";
+		return parsed;
+	}
+	parsed.host = toLowerAscii(parsed.host);
+	bool numericHost = true;
+	for (char ch : parsed.host) {
+		if ((ch < '0' || ch > '9') && ch != '.') {
+			numericHost = false;
+			break;
+		}
+	}
+	if (!numericHost && !isValidHostname(parsed.host)) {
+		parsed.error = "URL hostname is invalid or exceeds the safety limit.";
+		return parsed;
+	}
+	if (numericHost && parsed.host.size() > 15) {
+		parsed.error = "Numeric IPv4 host is too long.";
 		return parsed;
 	}
 
@@ -1366,6 +1582,9 @@ const char* httpErrorName(HttpError error)
 	case HttpError::InsecureRedirectBlocked: return "InsecureRedirectBlocked";
 	case HttpError::UnsupportedTransferEncoding: return "UnsupportedTransferEncoding";
 	case HttpError::UnsupportedContentEncoding: return "UnsupportedContentEncoding";
+	case HttpError::MalformedCompressedResponse: return "MalformedCompressedResponse";
+	case HttpError::DecodedResponseTooLarge: return "DecodedResponseTooLarge";
+	case HttpError::DocumentStorageAllocationFailed: return "DocumentStorageAllocationFailed";
 	case HttpError::MalformedChunkedEncoding: return "MalformedChunkedEncoding";
 	case HttpError::TlsHandshakeFailed: return "TlsHandshakeFailed";
 	case HttpError::TlsCertificateValidationFailed: return "TlsCertificateValidationFailed";
@@ -1374,6 +1593,7 @@ const char* httpErrorName(HttpError error)
 	case HttpError::TlsProtocolUnsupported: return "TlsProtocolUnsupported";
 	case HttpError::TlsReadFailed: return "TlsReadFailed";
 	case HttpError::TlsWriteFailed: return "TlsWriteFailed";
+	case HttpError::TruncatedResponse: return "TruncatedResponse";
 	}
 	return "Unknown";
 }
@@ -1419,15 +1639,20 @@ static HttpResponse sendSingleHttpRequest(const std::string& url,
 	}
 
 	addrinfo hints = {};
+	hints.ai_flags = AI_ADDRCONFIG;
 	hints.ai_family = AF_INET;
 	hints.ai_socktype = SOCK_STREAM;
 	hints.ai_protocol = IPPROTO_TCP;
 
 	addrinfo* addresses = nullptr;
 	std::string portText = std::to_string(parsed.port);
+	// Winsock's resolver owns DNS retransmission/timeout policy. The network
+	// operation after resolution is explicitly bounded below; using the normal
+	// resolver here preserves system DNS search/split-DNS behavior.
 	int gai = getaddrinfo(parsed.host.c_str(), portText.c_str(), &hints, &addresses);
 	if (gai != 0 || !addresses) {
-		setError(response, HttpError::ResolveFailed, "Could not resolve host: " + parsed.host);
+		setError(response, gai == WSAETIMEDOUT ? HttpError::Timeout : HttpError::ResolveFailed,
+			gai == WSAETIMEDOUT ? "DNS resolution timed out." : "Could not resolve host: " + parsed.host);
 		return response;
 	}
 
@@ -1496,13 +1721,14 @@ static HttpResponse sendSingleHttpRequest(const std::string& url,
 
 	const bool isPost = toLowerAscii(method) == "post";
 	std::ostringstream request;
-	request << (isPost ? "POST" : "GET") << " " << parsed.requestTarget() << " HTTP/1.0\r\n"
+	request << (isPost ? "POST" : "GET") << " " << parsed.requestTarget() << " HTTP/1.1\r\n"
 		<< "Host: " << parsed.host;
 	if (!((parsed.scheme == "http" && parsed.port == 80) ||
 		(parsed.scheme == "https" && parsed.port == 443))) request << ":" << parsed.port;
 	request << "\r\n"
-		<< "User-Agent: guideXOS-Navigator/0.1\r\n"
-		<< "Accept-Encoding: identity\r\n"
+		<< "User-Agent: guideXOS-Navigator/0.2\r\n"
+		<< "Accept: text/html, text/plain, image/png, image/jpeg, */*\r\n"
+		<< "Accept-Encoding: " << kHttpSharedProductionAcceptEncoding << "\r\n"
 		<< "Connection: close\r\n";
 	if (isPost) {
 		request << "Content-Type: " << (contentType.empty() ? "application/x-www-form-urlencoded" : contentType) << "\r\n"
@@ -1532,6 +1758,8 @@ static HttpResponse sendSingleHttpRequest(const std::string& url,
 	raw.reserve(16u * 1024u);
 	bool sawHeaderEnd = false;
 	bool rawChunked = false;
+	bool contentLengthKnown = false;
+	size_t expectedBodyBytes = 0;
 	size_t headerBytes = 0;
 	char buffer[4096];
 	for (;;) {
@@ -1564,6 +1792,36 @@ static HttpResponse sendSingleHttpRequest(const std::string& url,
 				headerBytes = end + delimiterLen;
 				rawChunked = toLowerAscii(raw.substr(0, end)).find("transfer-encoding:") != std::string::npos &&
 					toLowerAscii(raw.substr(0, end)).find("chunked") != std::string::npos;
+				const std::string headerBlock = raw.substr(0, end);
+				std::istringstream headerLines(headerBlock);
+				std::string headerLine;
+				while (std::getline(headerLines, headerLine)) {
+					if (!headerLine.empty() && headerLine.back() == '\r') headerLine.pop_back();
+					const size_t colon = headerLine.find(':');
+					if (colon == std::string::npos ||
+						toLowerAscii(trimAscii(headerLine.substr(0, colon))) != "content-length") continue;
+					const std::string value = trimAscii(headerLine.substr(colon + 1));
+					int length = 0;
+					if (!httpSharedParseDecimalSize(value.data(), value.data() + value.size(), &length)) {
+						if (activeTls) copyTlsDiagnostics(response, *activeTls);
+						stream.close(stream.context);
+						setError(response, HttpError::MalformedResponse, "HTTP Content-Length was malformed.");
+						return response;
+					}
+					expectedBodyBytes = static_cast<size_t>(length);
+					contentLengthKnown = !rawChunked;
+					response.contentLengthPresent = true;
+					response.contentLength = expectedBodyBytes;
+					if (expectedBodyBytes > kHttpMaxBodyBytes) {
+						if (activeTls) copyTlsDiagnostics(response, *activeTls);
+						stream.close(stream.context);
+						response.bodyCapHit = true;
+						response.encodedBodyBytes = raw.size() > headerBytes ? raw.size() - headerBytes : 0;
+						setError(response, HttpError::BodyTooLarge, "HTTP response body exceeded the safety limit.");
+						return response;
+					}
+					break;
+				}
 			} else if (raw.size() > kHttpMaxHeaderBytes) {
 				if (activeTls) copyTlsDiagnostics(response, *activeTls);
 				stream.close(stream.context);
@@ -1577,9 +1835,11 @@ static HttpResponse sendSingleHttpRequest(const std::string& url,
 			if (activeTls) copyTlsDiagnostics(response, *activeTls);
 			stream.close(stream.context);
 			response.bodyCapHit = true;
+			response.encodedBodyBytes = raw.size() > headerBytes ? raw.size() - headerBytes : 0;
 			setError(response, HttpError::BodyTooLarge, "HTTP response body exceeded the safety limit.");
 			return response;
 		}
+		if (sawHeaderEnd && contentLengthKnown && raw.size() >= headerBytes + expectedBodyBytes) break;
 	}
 	if (activeTls) copyTlsDiagnostics(response, *activeTls);
 	stream.close(stream.context);

@@ -38,6 +38,19 @@ enum class BlockType : uint8_t {
 	FormLabel     = 12,
 };
 
+// Bounded HTML table roles. The parser records these on the compact block
+// stream so Navigator's table pass does not rediscover raw tag names while
+// painting. Arbitrary CSS display:table-* is intentionally out of scope.
+enum class TableRole : uint8_t {
+	None = 0,
+	Table,
+	Caption,
+	RowGroup,
+	Row,
+	HeaderCell,
+	DataCell,
+};
+
 // Bounded form metadata. This is a value object rather than a DOM node or a
 // live submission model. Values are retained only for the existing local
 // text-control primitive and are excluded from diagnostics/evidence.
@@ -225,11 +238,181 @@ enum class TextAlign : uint8_t {
 	Right   = 3,
 };
 
+// Phase 3A keeps CSS lengths deliberately compact.  The payload is pixels for
+// Px/Zero and a whole percentage for Percent.  Unset is the cascade sentinel;
+// Auto and None remain explicit so an accepted declaration cannot be confused
+// with an omitted property.  Parser-side validity/clamp state is retained for
+// bounded evidence and is never used to turn an unsupported unit into zero.
+enum class CssLengthType : uint8_t {
+	Unset = 0,
+	Auto,
+	Px,
+	Percent,
+	Zero,
+	None,
+	Content,
+};
+
+struct CssLengthValue {
+	CssLengthType type = CssLengthType::Unset;
+	int value = 0;
+	bool valid = false;
+	bool clamped = false;
+};
+
+enum class BoxSizingMode : uint8_t {
+	ContentBox = 0,
+	BorderBox = 1,
+};
+
+// The Navigator CSS subset keeps display as an explicit computed value.  The
+// value is intentionally narrow: unsupported layout modes never fall through
+// to inline-block by accident.
+enum class DisplayMode : uint8_t {
+	Block = 0,
+	Inline,
+	InlineBlock,
+	Flex,
+	InlineFlex,
+	None,
+};
+
+enum class FlexDirectionMode : uint8_t {
+	Row = 0,
+	RowReverse,
+	Column,
+	ColumnReverse,
+};
+
+enum class FlexWrapMode : uint8_t {
+	NoWrap = 0,
+	Wrap,
+	WrapReverse,
+};
+
+enum class AlignContentMode : uint8_t {
+	Stretch = 0,
+	FlexStart,
+	FlexEnd,
+	Center,
+	SpaceBetween,
+	SpaceAround,
+};
+
+enum class JustifyContentMode : uint8_t {
+	FlexStart = 0,
+	FlexEnd,
+	Center,
+	SpaceBetween,
+	SpaceAround,
+	SpaceEvenly,
+};
+
+enum class AlignItemsMode : uint8_t {
+	Stretch = 0,
+	FlexStart,
+	FlexEnd,
+	Center,
+	Baseline,
+};
+
+enum class AlignSelfMode : uint8_t {
+	Auto = 0,
+	Stretch,
+	FlexStart,
+	FlexEnd,
+	Center,
+	Baseline,
+};
+
+// Navigator keeps positioning to a bounded, layout-local subset. Fixed is a
+// typed viewport-layer mode and sticky is a typed normal-flow scroll-aware
+// mode; neither mode is aliased to absolute positioning.
+enum class PositionMode : uint8_t {
+	Static = 0,
+	Relative,
+	Absolute,
+	Fixed,
+	Sticky,
+};
+
+// Phase 3E keeps traditional physical floats deliberately narrow.  Logical
+// float values and other positioning modes remain unsupported and therefore
+// never fall through to a physical side by accident.
+enum class FloatMode : uint8_t {
+	None = 0,
+	Left,
+	Right,
+};
+
+enum class ClearMode : uint8_t {
+	None = 0,
+	Left,
+	Right,
+	Both,
+};
+
+enum class OverflowMode : uint8_t {
+	Inherit = 0,
+	Visible,
+	Hidden,
+	Auto,
+	Scroll,
+};
+
+enum class VisibilityMode : uint8_t {
+	Visible = 0,
+	Hidden = 1,
+};
+
+enum class VerticalAlignMode : uint8_t {
+	Inherit = 0,
+	Baseline,
+	Middle,
+	Top,
+	Bottom,
+	TextTop,
+	TextBottom,
+	Sub,
+	Super,
+	LengthPx,
+	Percent,
+};
+
 enum class WhiteSpaceMode : uint8_t {
 	Inherit = 0,
 	Normal  = 1,
-	Pre     = 2,
-	PreWrap = 3,
+	Nowrap  = 2,
+	Pre     = 3,
+	PreWrap = 4,
+	PreLine = 5,
+};
+
+enum class LineHeightMode : uint8_t {
+	Normal = 0,
+	Px,
+	Unitless,
+	Percent,
+};
+
+// Phase 3B keeps inline participation separate from the legacy block stream.
+// Items are bounded runs/atoms, never glyph objects or a retained DOM tree.
+enum class InlineItemKind : uint8_t {
+	TextRun       = 0,
+	ForcedBreak   = 1,
+	ReplacedImage = 2,
+	FormControl   = 3,
+	AtomicBlock   = 4,
+};
+
+struct WebInlineItem {
+	InlineItemKind kind = InlineItemKind::TextRun;
+	uint64_t flowSerial = 0;       // nearest block/line-flow element
+	uint64_t ownerSerial = 0;      // closest inline/replaced logical element
+	uint64_t parentSerial = 0;
+	uint64_t atomicContainerSerial = 0; // nearest bounded inline-block context
+	int      blockIndex = -1;      // legacy target identity for hit/focus routing
+	std::string text;              // bounded text run; empty for atomic items
 };
 
 enum class OverflowWrapMode : uint8_t {
@@ -277,6 +460,8 @@ enum class GenericFontFamily : uint8_t {
 	SansSerif = 1,
 	Serif     = 2,
 	Monospace = 3,
+	Roboto    = 4,
+	Unknown   = 5,
 };
 
 struct HtmlElementRef {
@@ -292,6 +477,7 @@ struct HtmlElementRef {
 	uint16_t    typeIndex = 0;
 	uint16_t    typeCount = 0;
 	uint64_t    previousSiblingSerial = 0;
+	TableRole   tableRole = TableRole::None;
 	bool        hasLinkTarget = false;
 	bool        visited = false;
 	FormControlMetadata formControl;
@@ -390,6 +576,61 @@ struct WebStyle {
 	bool     lineThrough = false;
 	bool     hasTextDecoration = false;
 	bool     displayNone = false;
+	DisplayMode display = DisplayMode::Block;
+	FlexDirectionMode flexDirection = FlexDirectionMode::Row;
+	FlexWrapMode flexWrap = FlexWrapMode::NoWrap;
+	AlignContentMode alignContent = AlignContentMode::Stretch;
+	JustifyContentMode justifyContent = JustifyContentMode::FlexStart;
+	AlignItemsMode alignItems = AlignItemsMode::Stretch;
+	AlignSelfMode alignSelf = AlignSelfMode::Auto;
+	bool     flexDirectionSpecified = false;
+	bool     flexWrapSpecified = false;
+	bool     alignContentSpecified = false;
+	bool     justifyContentSpecified = false;
+	bool     alignItemsSpecified = false;
+	bool     alignSelfSpecified = false;
+	int      flexGrow1000 = 0;
+	int      flexShrink1000 = 1000;
+	int      order = 0;
+	bool     flexGrowSpecified = false;
+	bool     flexShrinkSpecified = false;
+	bool     orderSpecified = false;
+	CssLengthValue flexBasisValue;
+	CssLengthValue gapValue;
+	CssLengthValue rowGapValue;
+	CssLengthValue columnGapValue;
+	bool     flexBasisSpecified = false;
+	bool     gapSpecified = false;
+	bool     rowGapSpecified = false;
+	bool     columnGapSpecified = false;
+	PositionMode position = PositionMode::Static;
+	CssLengthValue topValue;
+	CssLengthValue rightValue;
+	CssLengthValue bottomValue;
+	CssLengthValue leftValue;
+	bool     zIndexAuto = true;
+	int      zIndex = 0;
+	FloatMode floatMode = FloatMode::None;
+	ClearMode clearMode = ClearMode::None;
+	BoxSizingMode boxSizing = BoxSizingMode::ContentBox;
+	// box-sizing is not inherited.  This provenance bit lets the compact
+	// table renderer project a table's outer sizing model onto its cell-backed
+	// box without overwriting an explicitly styled cell.
+	bool     boxSizingSpecified = false;
+	CssLengthValue widthValue;
+	CssLengthValue heightValue;
+	CssLengthValue minWidthValue;
+	CssLengthValue maxWidthValue;
+	CssLengthValue minHeightValue;
+	CssLengthValue maxHeightValue;
+	OverflowMode overflowX = OverflowMode::Visible;
+	OverflowMode overflowY = OverflowMode::Visible;
+	VisibilityMode visibility = VisibilityMode::Visible;
+	int      opacityPercent = 100;
+	int      effectiveOpacityPercent = 100;
+	VerticalAlignMode verticalAlign = VerticalAlignMode::Baseline;
+	int      verticalAlignValue = 0;
+	bool     verticalAlignValueClamped = false;
 	bool     listStyleNone = false;
 	ListStyleType listStyleType = ListStyleType::Inherit;
 	TableBorderCollapseMode borderCollapse = TableBorderCollapseMode::Inherit;
@@ -398,10 +639,18 @@ struct WebStyle {
 	GenericFontFamily genericFontFamily = GenericFontFamily::Inherit;
 	TextAlign textAlign = TextAlign::Inherit;
 	bool     lineHeightNormal = false;
+	LineHeightMode lineHeightMode = LineHeightMode::Normal;
+	int      lineHeightValue = 0; // px, percent, or unitless multiplier ×1000
 	int      marginTop = -1;
 	int      marginRight = -1;
 	int      marginBottom = -1;
 	int      marginLeft = -1;
+	// Phase 3D keeps authored units until layout.  The legacy integer fields
+	// remain populated for existing callers and default styles.
+	CssLengthValue marginTopValue;
+	CssLengthValue marginRightValue;
+	CssLengthValue marginBottomValue;
+	CssLengthValue marginLeftValue;
 	int      padding = -1;
 	int      paddingTop = -1;
 	int      paddingRight = -1;
@@ -413,10 +662,16 @@ struct WebStyle {
 	int      widthPercent = -1;
 	int      height = -1;
 	int      heightPercent = -1;
+	int      minWidth = -1;
+	int      minWidthPercent = -1;
 	int      maxWidth = -1;
 	int      maxWidthPercent = -1;
+	bool     maxWidthNone = false;
+	int      minHeight = -1;
+	int      minHeightPercent = -1;
 	int      maxHeight = -1;
 	int      maxHeightPercent = -1;
+	bool     maxHeightNone = false;
 	WhiteSpaceMode   whiteSpace = WhiteSpaceMode::Inherit;
 	OverflowWrapMode overflowWrap = OverflowWrapMode::Inherit;
 	WordBreakMode    wordBreak = WordBreakMode::Inherit;
@@ -450,6 +705,16 @@ struct FormContainerMetadata {
 	bool metadataComplete = false;
 };
 
+// Computed styles for structural ancestors are retained in one bounded,
+// serial-addressed table.  This lets Navigator resolve descendant percentages
+// against a definite containing-block basis without adding a DOM tree or
+// duplicating a full style object on every ancestor reference.
+struct CssComputedStyleRecord {
+	uint64_t serial = 0;
+	WebStyle style;
+	bool valid = false;
+};
+
 struct WebStyleRule {
 	StyleSelectorType selectorType = StyleSelectorType::Element;
 	std::string       selector;
@@ -480,6 +745,8 @@ struct CssDiagnostics {
 	bool   styleBlockCapped = false;
 	size_t styleBytesProcessed = 0;
 	int    clampedValueCount = 0;
+	int    lengthValueClampCount = 0;
+	int    invalidLengthValueCount = 0;
 	int    borderWidthClampCount = 0;
 	int    borderSpacingClampCount = 0;
 	int    lineBreakCount = 0;
@@ -506,7 +773,58 @@ struct CssDiagnostics {
 	int    importantDeclarationsApplied = 0;
 	int    ruleCapCount = 0;
 	int    declarationCapCount = 0;
+	// Bounded Flexbox diagnostics. These counters describe the compact layout
+	// snapshot; they do not imply a retained DOM or scene graph.
+	int    flexContainers = 0;
+	int    inlineFlexContainers = 0;
+	int    flexItems = 0;
+	int    flexAnonymousItems = 0;
+	int    flexNestedContainers = 0;
+	int    flexNestedMultilineContainers = 0;
+	int    flexColumnWrappedContainers = 0;
+	int    flexLines = 0;
+	int    flexWrappedContainers = 0;
+	int    flexWrapReverseContainers = 0;
+	int    flexAlignContentContainers = 0;
+	int    flexStretchedLines = 0;
+	int    flexWrapUnsupported = 0;
+	int    flexAbsoluteExcluded = 0;
+	int    flexDisplayNoneExcluded = 0;
+	int    flexOrderSortItems = 0;
+	int    flexBaseSizeQueries = 0;
+	int    flexIntrinsicQueries = 0;
+	int    flexAutomaticMinimumApplied = 0;
+	int    flexAutomaticMinimumZero = 0;
+	int    flexGrowIterations = 0;
+	int    flexShrinkIterations = 0;
+	int    flexFreezeIterations = 0;
+	int    flexCrossSizePasses = 0;
+	int    flexBaselineItems = 0;
+	int    flexAutoMarginAbsorptions = 0;
+	int    flexGapClamps = 0;
+	int    flexGeometryClamps = 0;
+	int    flexDepthClamps = 0;
+	int    flexOperationClamps = 0;
+	int    flexUnsupportedDeclarations = 0;
+	int    flexEvidenceRecords = 0;
+	std::string flexEvidence;
 	int    declarationsProcessed = 0;
+	// Phase 8B bounded HTML table diagnostics. These are document-level
+	// counters/evidence, not per-cell logging.
+	int    tableCount = 0;
+	int    tableRowCount = 0;
+	int    tableLogicalColumnCount = 0;
+	int    tableHeaderCellCount = 0;
+	int    tableDataCellCount = 0;
+	int    tableColspanCellCount = 0;
+	int    tableMaximumColspan = 1;
+	int    tableWrappedCellCount = 0;
+	int    tableWideCount = 0;
+	int    tableMalformedFallbackCount = 0;
+	int    tableRowspanDeferredCount = 0;
+	int    tableLinkHitTestEvidence = 0;
+	int    tableGeometryClamps = 0;
+	std::string tableGeometryEvidence;
 	int    inheritanceDepthClamps = 0;
 	int    pseudoClassesParsed = 0;
 	int    structuralPseudoMatches = 0;
@@ -553,6 +871,134 @@ struct CssDiagnostics {
 	int    focusVisiblePseudoMatches = 0;
 	int    checkedRuntimeRecomputations = 0;
 	int    runtimeFocusRecomputations = 0;
+	// Phase 3D bounded block-flow diagnostics.
+	int    marginCollapseSets = 0;
+	int    marginCollapseParticipants = 0;
+	int    marginCollapseSibling = 0;
+	int    marginCollapseParentTop = 0;
+	int    marginCollapseParentBottom = 0;
+	int    marginCollapseEmpty = 0;
+	int    marginCollapsePositiveOnly = 0;
+	int    marginCollapseNegativeOnly = 0;
+	int    marginCollapseMixed = 0;
+	int    marginCollapseBlockedBorder = 0;
+	int    marginCollapseBlockedPadding = 0;
+	int    marginCollapseBlockedBfc = 0;
+	int    marginCollapseBlockedHeight = 0;
+	int    marginCollapseBlockedContent = 0;
+	int    marginCollapseDepthClamps = 0;
+	int    marginGeometryClamps = 0;
+	int    bfcRoot = 0;
+	int    bfcInlineBlock = 0;
+	int    bfcOverflow = 0;
+	int    bfcAtomic = 0;
+	// Phase 3E bounded float/clear diagnostics.
+	int    floatLeft = 0;
+	int    floatRight = 0;
+	int    floatBlockifications = 0;
+	int    floatRecords = 0;
+	int    floatPlacementAttempts = 0;
+	int    floatPlacementDownshifts = 0;
+	int    floatSideBySide = 0;
+	int    floatWidthOverflows = 0;
+	int    floatLineExclusions = 0;
+	int    floatZeroWidthLineAdvances = 0;
+	int    floatBfcAvoidances = 0;
+	int    floatBfcDownshifts = 0;
+	int    clearLeft = 0;
+	int    clearRight = 0;
+	int    clearBoth = 0;
+	int    clearanceApplied = 0;
+	int    floatContainmentBoundaries = 0;
+	int    floatScopeSuppressions = 0;
+	int    floatHeightContainments = 0;
+	int    bfcFloatContainments = 0;
+	int    bfcFloatHeightExtensions = 0;
+	int    bfcFloatHeightNoops = 0;
+	int    bfcFloatAvoidanceAttempts = 0;
+	int    bfcFloatAvoidanceFits = 0;
+	int    bfcFloatAvoidanceDownshifts = 0;
+	int    bfcFloatTooWide = 0;
+	int    nestedFloatContexts = 0;
+	int    nestedFloatDepthClamps = 0;
+	int    floatInsideInlineBlock = 0;
+	int    floatInsideFloat = 0;
+	int    floatListCases = 0;
+	int    floatTableCellCases = 0;
+	int    floatTableAvoidanceCases = 0;
+	int    floatedTableUnsupported = 0;
+	int    floatDocumentExtentExtensions = 0;
+	int    floatGeometryClamps = 0;
+	int    floatPlacementAttemptClamps = 0;
+	int    floatExclusionScanClamps = 0;
+	int    floatBfcDepthClamps = 0;
+	int    floatEvidenceRecords = 0;
+	std::string floatEvidence;
+	// Phase 3G bounded positioning diagnostics.  Geometry/evidence records are
+	// retained by Navigator; these counters stay compact and document-local.
+	int    positionStatic = 0;
+	int    positionRelative = 0;
+	int    positionAbsolute = 0;
+	int    positionFixed = 0;
+	int    positionSticky = 0;
+	int    positionUnsupportedFixed = 0;
+	int    positionUnsupportedSticky = 0;
+	int    stickyElementCount = 0;
+	int    stickyRootCount = 0;
+	int    stickyLocalScrollCount = 0;
+	int    stickyConstrainedCount = 0;
+	int    stickyReleaseCount = 0;
+	int    stickyHorizontalCount = 0;
+	int    stickyFlexCount = 0;
+	int    stickyPositionedDescendantCount = 0;
+	int    stickyHyperlinkHitTestEvidence = 0;
+	std::string stickyEvidence;
+	int    relativeOffsets = 0;
+	int    relativePercentageOffsets = 0;
+	int    absoluteBoxes = 0;
+	int    absoluteBlockifications = 0;
+	int    positionedContainingBlocks = 0;
+	int    positionRootFallbacks = 0;
+	int    positionAncestryClamps = 0;
+	int    absoluteStaticPositionUses = 0;
+	int    absoluteShrinkToFit = 0;
+	int    absoluteOutOfFlow = 0;
+	int    fixedViewportRecords = 0;
+	int    fixedAbsoluteDescendants = 0;
+	int    fixedFlexExclusions = 0;
+	int    fixedHitTestRecords = 0;
+	int    fixedStackingRecords = 0;
+	int    fixedExtentExclusions = 0;
+	int    positionDocumentExtentExtensions = 0;
+	int    zIndexAuto = 0;
+	int    zIndexNegative = 0;
+	int    zIndexZero = 0;
+	int    zIndexPositive = 0;
+	int    positionHitOcclusions = 0;
+	int    positionGeometryClamps = 0;
+	int    positionUnsupportedTable = 0;
+	// Phase 3H keeps stacking ownership bounded to positioning-created owners.
+	// These counters are evidence for the supported subset, not a general CSS
+	// stacking-context implementation.
+	int    positionStackingOwners = 0;
+	int    positionStackingDepthMax = 0;
+	int    positionStackingDepthClamps = 0;
+	int    positionNestedZRecords = 0;
+	int    positionNegativeZRecords = 0;
+	int    positionPositiveZRecords = 0;
+	int    positionEqualZSourceOrders = 0;
+	int    positionInlineFragmentOwners = 0;
+	int    positionInlineFragmentsShifted = 0;
+	int    positionInlineAncestryClamps = 0;
+	int    positionInlineContainingBlocks = 0;
+	int    positionInlineContainingBlockIncomplete = 0;
+	int    positionStaticSnapshots = 0;
+	int    positionStaticSnapshotFallbacks = 0;
+	int    positionLifecycleResets = 0;
+	int    positionedEvidenceRecords = 0;
+	std::string positionedEvidence;
+	int    marginCollapseEvidenceRecords = 0;
+	std::string marginCollapseEvidence;
 	uint32_t nextSourceOrder = 1;
 	std::string computedStyleEvidence;
 	std::vector<uint64_t> computedStyleEvidenceSerials;
@@ -640,6 +1086,17 @@ struct FormOption {
 	bool disabled = false;
 };
 
+// Compact content atom retained only for a bounded table cell. It lets the
+// table pass account for an image or link without introducing a second DOM or
+// renderer. Text remains aggregated on DocBlock::text for existing callers.
+struct TableCellContentItem {
+	BlockType kind = BlockType::Paragraph;
+	std::string text;
+	std::string url;
+	std::string id;
+	int blockIndex = -1;
+};
+
 struct DocBlock {
 	BlockType   type;
 	std::string text;  // display text; for Image this mirrors alt text
@@ -653,6 +1110,14 @@ struct DocBlock {
 	std::string className;
 	std::string id;
 	std::string inlineStyle;
+	TableRole   tableRole = TableRole::None;
+	uint64_t    tableSerial = 0;
+	uint64_t    tableRowGroupSerial = 0;
+	uint64_t    tableRowSerial = 0;
+	int         tableColSpan = 1;
+	int         tableRowSpan = 1;
+	bool        tableSpanMalformed = false;
+	std::vector<TableCellContentItem> tableContents;
 	std::vector<HtmlElementRef> ancestors;
 	HtmlElementRef elementMetadata;
 	WebStyle    style;
@@ -673,12 +1138,21 @@ struct DocBlock {
 	bool        formUnsupported = false;
 	FormControlMetadata formControl;
 	std::string labelFor;
+	// Non-zero when this legacy block was emitted from the bounded inline flow
+	// belonging to the serial.  It lets Navigator collapse adjacent parser
+	// records into one line-formatting context without changing existing block
+	// consumers.
+	uint64_t    inlineFlowSerial = 0;
+	// Non-zero when the block belongs to an embedded inline-block formatting
+	// context.  This is structural ownership metadata, not a retained DOM link.
+	uint64_t    atomicContainerSerial = 0;
 };
 
 struct WebDocument {
 	std::string           url;
 	std::string           title;
 	std::vector<DocBlock> blocks;
+	std::vector<WebInlineItem> inlineItems;
 	HtmlElementRef        documentElement;
 	bool                  hasDocumentElement = false;
 	HtmlElementRef        bodyElement;
@@ -690,6 +1164,7 @@ struct WebDocument {
 	// Bounded content summaries keyed by the same logical serials as
 	// structuralElements.  Entries are capped with the structural registry.
 	std::vector<HtmlElementContentMetadata> contentMetadata;
+	std::vector<CssComputedStyleRecord> computedStyles;
 	WebStyle              bodyStyle;
 	std::vector<WebStyleRule> styleRules;
 	CssDiagnostics        cssDiagnostics;

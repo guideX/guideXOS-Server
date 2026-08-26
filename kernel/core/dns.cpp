@@ -10,6 +10,7 @@
 #include "include/kernel/ipv4.h"
 #include "include/kernel/ethernet.h"
 #include "include/kernel/serial_debug.h"
+#include "include/kernel/pit.h"
 
 namespace kernel {
 namespace dns {
@@ -642,10 +643,10 @@ Status resolve(const char* domain, uint32_t* ipv4)
         s_stats.queriesSent++;
         
         // Wait for response (simplified polling)
-        uint32_t waitCount = 0;
-        const uint32_t maxWait = 300000;  // Approximate timeout
-        
-        while (waitCount < maxWait && !gotResponse) {
+        const uint64_t attemptStartTicks = pit::ticks();
+        const uint64_t maxWaitTicks = (QUERY_TIMEOUT_MS + 9u) / 10u;
+
+        while ((pit::ticks() - attemptStartTicks) < maxWaitTicks && !gotResponse) {
             ipv4::poll_network();
 
             socket::SockAddr fromAddr;
@@ -664,9 +665,9 @@ Status resolve(const char* domain, uint32_t* ipv4)
                 }
             }
             
-            // Small delay
+            // The PIT provides the bounded timeout; keep polling at a small
+            // deterministic cadence without an unbounded resolver loop.
             for (volatile int d = 0; d < 100; ++d) {}
-            waitCount++;
         }
         
         if (!gotResponse) {

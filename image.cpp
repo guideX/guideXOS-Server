@@ -1,9 +1,13 @@
 #include "image.h"
 #include <algorithm>
+#include <cstddef>
 #include <new>
 
 namespace gxos {
 namespace gui {
+
+static uint32_t g_imageFailAfterAllocations = 0xFFFFFFFFu;
+static uint32_t g_imageAllocationAttempts = 0;
 
 Image::Image(int width, int height, int channels)
     : Width(width)
@@ -18,7 +22,24 @@ Image::Image(int width, int height, int channels)
         return;
     }
 
-    const size_t totalBytes = static_cast<size_t>(Width) * static_cast<size_t>(Height) * static_cast<size_t>(Channels);
+    const size_t widthBytes = static_cast<size_t>(Width);
+    const size_t heightBytes = static_cast<size_t>(Height);
+    const size_t channelBytes = static_cast<size_t>(Channels);
+    if (widthBytes > static_cast<size_t>(-1) / heightBytes ||
+        widthBytes * heightBytes > static_cast<size_t>(-1) / channelBytes) {
+        Width = 0;
+        Height = 0;
+        Channels = 0;
+        return;
+    }
+    const size_t totalBytes = widthBytes * heightBytes * channelBytes;
+    if (g_imageFailAfterAllocations != 0xFFFFFFFFu &&
+        g_imageAllocationAttempts++ >= g_imageFailAfterAllocations) {
+        Width = 0;
+        Height = 0;
+        Channels = 0;
+        return;
+    }
     Pixels = new (std::nothrow) uint8_t[totalBytes];
     if (!Pixels) {
         Width = 0;
@@ -64,6 +85,12 @@ Image& Image::operator=(Image&& other) noexcept
 bool Image::isValid() const
 {
     return Width > 0 && Height > 0 && Channels > 0 && Pixels != nullptr;
+}
+
+void SetImageAllocationFailureInjection(uint32_t failAfterAllocations)
+{
+    g_imageFailAfterAllocations = failAfterAllocations;
+    g_imageAllocationAttempts = 0;
 }
 
 } // namespace gui

@@ -1,5 +1,6 @@
 param(
-    [switch]$Build
+    [switch]$Build,
+    [switch]$DisablePaintDefer
 )
 
 $ErrorActionPreference = "Stop"
@@ -52,6 +53,10 @@ function Set-EnvFlag {
 
 $python = Find-Python
 if (-not $python) { throw "python not found; required for local Navigator POST smoke server." }
+$persistentFixtureGenerator = Join-Path $Root "scripts\generate-navigator-persistent-fixtures.py"
+$persistentFixtureDir = Join-Path $Root "navigator-smoke\generated"
+& $python $persistentFixtureGenerator --output-dir $persistentFixtureDir
+if ($LASTEXITCODE -ne 0) { throw "deterministic Navigator viewport fixture generation failed." }
 
 $httpLog = Join-Path $LogDir "navigator-hosted-http-$stamp.log"
 $httpErrLog = Join-Path $LogDir "navigator-hosted-http-$stamp.err.log"
@@ -86,10 +91,13 @@ try {
     $oldTlsSmokeFlag = $env:GXOS_NAVIGATOR_SMOKE_ALLOW_SELF_SIGNED_LOCALHOST
     $oldExpectTrusted = $env:GXOS_NAVIGATOR_SMOKE_EXPECT_TRUSTED_LOCALHOST
     $oldExpectBypass = $env:GXOS_NAVIGATOR_SMOKE_EXPECT_SMOKE_LOCALHOST_BYPASS
+    $oldDeferPaint = $env:GXOS_NAVIGATOR_SMOKE_DEFER_PAINT
 
     Set-EnvFlag -Name "GXOS_NAVIGATOR_SMOKE_ALLOW_SELF_SIGNED_LOCALHOST" -Value "1"
     Set-EnvFlag -Name "GXOS_NAVIGATOR_SMOKE_EXPECT_TRUSTED_LOCALHOST" -Value $null
     Set-EnvFlag -Name "GXOS_NAVIGATOR_SMOKE_EXPECT_SMOKE_LOCALHOST_BYPASS" -Value "1"
+    $paintDeferValue = if ($DisablePaintDefer) { $null } else { "1" }
+    Set-EnvFlag -Name "GXOS_NAVIGATOR_SMOKE_DEFER_PAINT" -Value $paintDeferValue
 
     $appProc = Start-Process -FilePath $exe -PassThru -WindowStyle Hidden `
         -RedirectStandardInput $input -RedirectStandardOutput $log -RedirectStandardError $err
@@ -99,6 +107,7 @@ try {
     Set-EnvFlag -Name "GXOS_NAVIGATOR_SMOKE_ALLOW_SELF_SIGNED_LOCALHOST" -Value $oldTlsSmokeFlag
     Set-EnvFlag -Name "GXOS_NAVIGATOR_SMOKE_EXPECT_TRUSTED_LOCALHOST" -Value $oldExpectTrusted
     Set-EnvFlag -Name "GXOS_NAVIGATOR_SMOKE_EXPECT_SMOKE_LOCALHOST_BYPASS" -Value $oldExpectBypass
+    Set-EnvFlag -Name "GXOS_NAVIGATOR_SMOKE_DEFER_PAINT" -Value $oldDeferPaint
     if ($httpProc -and -not $httpProc.HasExited) {
         Stop-Process -Id $httpProc.Id -Force
     }

@@ -70,6 +70,29 @@ enum State : uint8_t {
     STATE_TIME_WAIT   = 10,
 };
 
+// Bounded per-connection receive telemetry used by the HTTP/TLS diagnostic
+// path. These counters describe transport progress only; they never retain
+// payload bytes.
+struct TcpStreamTelemetry {
+    uint32_t appReadCalls;
+    uint32_t appWouldBlockReads;
+    uint32_t appEofReads;
+    uint32_t appErrorReads;
+    uint32_t appBytesDelivered;
+    uint32_t rxPayloadSegments;
+    uint32_t rxPayloadBytes;
+    uint32_t rxPayloadAcceptedBytes;
+    uint32_t rxPayloadDroppedBytes;
+    uint32_t ackSegmentsSent;
+    uint32_t windowUpdateAcks;
+    uint32_t windowReopenEvents;
+    uint32_t localZeroWindowEvents;
+    uint32_t peerZeroWindowEvents;
+    uint32_t advertisedWindow;
+    uint32_t minimumAdvertisedWindow;
+    uint32_t lastPeerWindow;
+};
+
 // ================================================================
 // TCP Header Structure (20-60 bytes, packed)
 // ================================================================
@@ -175,6 +198,12 @@ struct TCB {
     uint16_t rxLen;
     uint16_t rxHead;
     uint16_t rxTail;
+
+    // The last receive window sent on the wire. Application reads may reopen
+    // capacity after the packet-path ACK has already advertised a small/zero
+    // window, so tcp_recv can emit a generic window-update ACK.
+    uint16_t lastAdvertisedRcvWnd;
+    TcpStreamTelemetry telemetry;
     
     // Retransmission
     uint32_t retxTime;      // Time of last transmission
@@ -341,6 +370,9 @@ State tcp_getstate(int sockfd);
 
 // Get peer address
 int tcp_getpeername(int sockfd, Endpoint* addr);
+
+// Copy bounded receive/window telemetry for a live socket.
+bool tcp_get_stream_telemetry(int sockfd, TcpStreamTelemetry* telemetry);
 
 // ================================================================
 // Internal: Packet handling

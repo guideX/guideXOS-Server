@@ -5,12 +5,62 @@
 #include "process.h"
 #include "allocator.h"
 #include "logger.h"
+#include "gui_protocol.h"
 #include <algorithm>
 #include <thread>
 #include <chrono>
 
 namespace gxos {
     namespace ipc {
+        static bool isGuiPresentationMessage(uint32_t type) {
+            switch (static_cast<gxos::gui::MsgType>(type)) {
+            case gxos::gui::MsgType::MT_SetTitle:
+            case gxos::gui::MsgType::MT_DrawText:
+            case gxos::gui::MsgType::MT_DrawRect:
+            case gxos::gui::MsgType::MT_DrawImage:
+            case gxos::gui::MsgType::MT_DrawTextAt:
+            case gxos::gui::MsgType::MT_DrawTextAtColor:
+            case gxos::gui::MsgType::MT_DrawImageAnimated:
+                return true;
+            default:
+                return false;
+            }
+        }
+
+        static bool guiWindowId(const Message& message, uint64_t& windowId) {
+            if (!isGuiPresentationMessage(message.type)) return false;
+            const std::string payload(message.data.begin(), message.data.end());
+            const std::size_t separator = payload.find('|');
+            if (separator == std::string::npos || separator == 0) return false;
+            try {
+                windowId = std::stoull(payload.substr(0, separator));
+                return windowId != 0;
+            } catch (...) {
+                return false;
+            }
+        }
+
+        static void coalesceQueuedGuiPaint(Channel& channel, const Message& message) {
+            if (channel.name != "gui.input" ||
+                message.type != static_cast<uint32_t>(gxos::gui::MsgType::MT_DrawText)) {
+                return;
+            }
+            const std::string payload(message.data.begin(), message.data.end());
+            const std::size_t separator = payload.find('|');
+            if (separator == std::string::npos || payload.substr(separator + 1) != "\f") return;
+
+            uint64_t windowId = 0;
+            if (!guiWindowId(message, windowId)) return;
+            for (auto it = channel.queue.begin(); it != channel.queue.end();) {
+                uint64_t queuedWindowId = 0;
+                if (guiWindowId(*it, queuedWindowId) && queuedWindowId == windowId) {
+                    it = channel.queue.erase(it);
+                } else {
+                    ++it;
+                }
+            }
+        }
+
         std::unordered_map < std::string, std::shared_ptr < Channel >> Bus::g;
         std::mutex Bus::gmu;
 
@@ -50,6 +100,7 @@ namespace gxos {
             Logger::write(LogLevel::Info, std::string("Bus::publish queueing msg type=") + std::to_string(msg.type) + " to channel=" + name);
             auto ch = get(name);
             std::unique_lock < std::mutex > lk(ch->mu);
+            coalesceQueuedGuiPaint(*ch, msg);
             ch->cv.wait(lk, [&] {
                 return ch->queue.size() < ch->cap;
                 });
@@ -86,6 +137,7 @@ namespace gxos {
                     if (!ch->queue.empty()) {
                         out = std::move(ch->queue.front());
                         ch->queue.pop_front();
+                        ch->cv.notify_all();
                         return true;
                     }
                 }
@@ -103,6 +155,7 @@ namespace gxos {
                 if (!ch->queue.empty()) {
                     out = std::move(ch->queue.front());
                     ch->queue.pop_front();
+                    ch->cv.notify_all();
                     return true;
                 }
             }

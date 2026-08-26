@@ -3,7 +3,11 @@
 //
 // Small synchronous HTTP/1.x client for guideWeb consumers.
 // Hosted builds support http:// and Schannel-backed https:// GET/POST.
-// Cookies, compression, caching, and JavaScript are outside this milestone.
+// Cookies, caching, and JavaScript are outside this milestone. Content-Encoding
+// decoding is bounded and limited to identity, gzip, and zlib-wrapped deflate.
+// Hosted Schannel wraps the byte stream but does not transparently decode HTTP
+// Content-Encoding; the shared decoder owns that step just as it does in the
+// bare-metal Navigator path.
 // POST redirects stay deliberately small: 303 becomes GET, while
 // 301/302/307/308 preserve the POST method and body.
 
@@ -18,6 +22,10 @@ namespace gxos {
 namespace web {
 
 constexpr std::size_t kHttpMaxHeaderBytes = static_cast<std::size_t>(kHttpSharedMaxHeaderBytes);
+constexpr std::size_t kHttpMaxEncodedBodyBytes = static_cast<std::size_t>(kHttpSharedMaxBodyBytes);
+constexpr std::size_t kHttpMaxDecodedDocumentBytes =
+	static_cast<std::size_t>(kHttpSharedMaxDecodedDocumentBytes);
+// Compatibility name for callers that mean the encoded transaction-body cap.
 constexpr std::size_t kHttpMaxBodyBytes = static_cast<std::size_t>(kHttpSharedMaxBodyBytes);
 constexpr int kHttpConnectTimeoutMs = kHttpSharedConnectTimeoutMs;
 constexpr int kHttpReadTimeoutMs = kHttpSharedReadTimeoutMs;
@@ -58,6 +66,9 @@ enum class HttpError {
 	InsecureRedirectBlocked,
 	UnsupportedTransferEncoding,
 	UnsupportedContentEncoding,
+	MalformedCompressedResponse,
+	DecodedResponseTooLarge,
+	DocumentStorageAllocationFailed,
 	MalformedChunkedEncoding,
 	TlsHandshakeFailed,
 	TlsCertificateValidationFailed,
@@ -66,6 +77,7 @@ enum class HttpError {
 	TlsProtocolUnsupported,
 	TlsReadFailed,
 	TlsWriteFailed,
+	TruncatedResponse,
 };
 
 struct HttpResponse {
@@ -77,7 +89,18 @@ struct HttpResponse {
 	std::string body;
 	std::string contentType;
 	std::string transferEncoding;
+	std::string responseFraming;
 	std::string contentEncoding;
+	bool contentLengthPresent = false;
+	std::size_t contentLength = 0;
+	std::size_t encodedBodyBytes = 0;
+	std::size_t decodedBodyBytes = 0;
+	std::size_t documentSegmentCount = 0;
+	std::size_t documentStorageBytes = 0;
+	std::size_t documentStorageCapacity = 0;
+	std::size_t documentHistoryBytes = 0;
+	bool documentStorageAllocationFailed = false;
+	bool truncatedResponse = false;
 	int redirectCount = 0;
 	std::vector<std::string> redirectChain;
 	bool headerCapHit = false;
