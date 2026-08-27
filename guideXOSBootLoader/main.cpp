@@ -38,6 +38,7 @@ Forbidden:
 #include "debug_helpers.h"     // Post-ExitBootServices debugging
 #include "paging.h"            // minimal identity page tables
 #include "pci.h"               // PCI enumeration for NIC detection
+#include "../kernel/core/native_elf/native_elf_contract.h"
 
 // MSVC intrinsics
 extern "C" void __halt(void);
@@ -388,6 +389,35 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE* SystemTable) {
     Print(L"Kernel loaded at: %p - %p\n", (VOID*)(UINTN)kernelBase, (VOID*)(UINTN)(kernelBase + kernelTotalSize));
 
     v1BootInfo->KernelPhysicalBase = kernelBase;
+
+    // Reserve the fixed NativeElf execution window before ExitBootServices.
+    // The kernel has no post-EBS physical-page allocator yet, so this bounded
+    // reservation is deliberately reused by every bootstrap invocation.
+    EFI_PHYSICAL_ADDRESS nativeElfRegion =
+        (EFI_PHYSICAL_ADDRESS)guidexos::native_elf::IMAGE_BASE;
+    const UINTN nativeElfPages =
+        (UINTN)(guidexos::native_elf::REGION_SIZE / EFI_PAGE_SIZE);
+    status = SystemTable->BootServices->AllocatePages(
+        AllocateAddress,
+        EfiLoaderData,
+        nativeElfPages,
+        &nativeElfRegion);
+    if (EFI_ERROR(status) ||
+        nativeElfRegion != (EFI_PHYSICAL_ADDRESS)guidexos::native_elf::IMAGE_BASE) {
+        Print(L"FATAL: NativeElf region 0x%lx-0x%lx could not be reserved: %r\n",
+              (UINT64)guidexos::native_elf::IMAGE_BASE,
+              (UINT64)(guidexos::native_elf::IMAGE_BASE + guidexos::native_elf::REGION_SIZE),
+              status);
+        return EFI_OUT_OF_RESOURCES;
+    }
+    SetMem((void*)(UINTN)nativeElfRegion,
+           (UINTN)guidexos::native_elf::REGION_SIZE,
+           0);
+    v1BootInfo->NativeElfRegionBase = nativeElfRegion;
+    v1BootInfo->NativeElfRegionSize = guidexos::native_elf::REGION_SIZE;
+    Print(L"Reserved NativeElf region at 0x%lx size 0x%lx\n",
+          (UINT64)nativeElfRegion,
+          (UINT64)guidexos::native_elf::REGION_SIZE);
 
     // --- Load Ramdisk ---
     EFI_PHYSICAL_ADDRESS ramdiskPhys = 0;
@@ -780,13 +810,14 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE* SystemTable) {
     sizes[rangeCount] = trampolinePages * EFI_PAGE_SIZE;
     rangeCount++;
 
-    // 11. CRITICAL: Map the allocator region the kernel will use
-    // The kernel's Allocator.Initialize() uses 0x4000000 (64MB) as the base
-    // Map a large region starting there for heap allocations
-    ranges[rangeCount] = 0x4000000ULL;  // 64MB
-    sizes[rangeCount] = 64u * 1024u * 1024u; // 64MB of heap space
+    // 11. NativeElf bootstrap region.  It was reserved above, so this
+    // identity mapping cannot alias a later UEFI or kernel allocation.
+    ranges[rangeCount] = nativeElfRegion;
+    sizes[rangeCount] = (UINTN)guidexos::native_elf::REGION_SIZE;
     rangeCount++;
-    Print(L"Mapping allocator region: 0x4000000 size 64MB\n");
+    Print(L"Mapping NativeElf region: 0x%lx size 0x%lx\n",
+          (UINT64)nativeElfRegion,
+          (UINT64)guidexos::native_elf::REGION_SIZE);
 
     // 12. Map additional stack regions we might use
     // The preferred stack location is around 2MB mark
@@ -857,6 +888,8 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE* SystemTable) {
             return st;
         }
     }
+
+    v1BootInfo->PageTableRoot = pt.Pml4Phys;
 
     Print(L"Page tables built at PML4: %p\n", (VOID*)(UINTN)pt.Pml4Phys);
 

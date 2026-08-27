@@ -60,6 +60,11 @@
 // Feature reporting
 #include "include/kernel/feature_report.h"
 
+#if defined(__x86_64__)
+#include "native_elf/native_elf_loader.h"
+#include "native_elf/native_elf_smoke.h"
+#endif
+
 #if ARCH_HAS_PIC_8259
 #include "include/kernel/multiboot.h"
 // Include BootInfo structure from bootloader (x86 / amd64 UEFI only)
@@ -199,9 +204,6 @@ static bool mount_persistent_storage()
         const kernel::block::BlockDevice* device = kernel::block::get_device(index);
         if (!device || is_transient_block_device(device) || !device->readFn || !device->writeFn) continue;
 
-        kernel::serial::puts("[KERNEL] Trying persistent storage device ");
-        kernel::serial::puts(device->name);
-        kernel::serial::puts(" at /\n");
         const uint8_t mountResult = kernel::vfs::mount("/", index);
         if (mountResult != 0xFF) {
             kernel::serial::puts("[KERNEL] Successfully mounted persistent storage from ");
@@ -363,8 +365,25 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         
         mount_persistent_storage();
 
+#if defined(__x86_64__)
+        if (is_bootinfo && bootinfo) {
+            kernel::native_elf::NativeElfExecutionContext nativeElfContext = {};
+            nativeElfContext.pageTableRoot = bootinfo->PageTableRoot;
+            nativeElfContext.regionBase = bootinfo->NativeElfRegionBase;
+            nativeElfContext.regionSize = bootinfo->NativeElfRegionSize;
+            if (kernel::native_elf::configure_execution_context(nativeElfContext)) {
+                kernel::serial::puts("[KERNEL] NativeElf execution context configured\n");
+            } else {
+                kernel::serial::puts("[KERNEL] WARNING: NativeElf execution context unavailable\n");
+            }
+        }
+#endif
+
 #if defined(GXOS_COMPILER_BOOTSTRAP_SMOKE_ACTIVE)
         kernel::compiler::run_bootstrap_smoke();
+#if defined(__x86_64__)
+        kernel::native_elf::run_bootstrap_execution_smoke();
+#endif
 #endif
 
         if (is_bootinfo && bootinfo && bootinfo->RamdiskBase != 0 && bootinfo->RamdiskSize != 0) {

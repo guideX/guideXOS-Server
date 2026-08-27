@@ -22,6 +22,9 @@
 #include "include/kernel/app_launch_target_resolver.h"
 #include "include/kernel/serial_debug.h"
 #include "compiler/compiler_driver.h"
+#if defined(__x86_64__)
+#include "native_elf/native_elf_loader.h"
+#endif
 
 // Forward declarations for power functions (defined in desktop.cpp, outside any namespace)
 extern void perform_shutdown();
@@ -341,7 +344,10 @@ static void cmd_help() {
     output_string("  rm, del        - Remove file (not impl)\n");
     output_string("  df             - Disk space usage\n");
     output_string("  stat           - File status\n");
-    output_string("  compile <src> <out> - Build bootstrap AMD64 ELF (no execution)\n");
+    output_string("  compile <src> <out> - Build bootstrap AMD64 ELF\n");
+#if defined(__x86_64__)
+    output_string("  runelf <elf>     - Validate/load/run one NativeElf\n");
+#endif
     output_string("\n");
     output_string("VFS Commands (Phase 7.5):\n");
     output_string("  vfsinfo        - Show filesystems and mounts\n");
@@ -1239,6 +1245,39 @@ static void cmd_compile(const char* sourcePath, const char* outputPath) {
         output_string("compile: FAIL (serial contains diagnostics)\n");
     }
 }
+
+#if defined(__x86_64__)
+static void cmd_runelf(const char* path) {
+    if (!path || path[0] == '\0') {
+        output_string("Usage: runelf <elf-path>\n");
+        return;
+    }
+
+    int32_t returnValue = 0;
+    native_elf::NativeElfRunReport report = {};
+    if (native_elf::run_file(path, &returnValue, &report)) {
+        output_string("runelf: PASS (returned ");
+        char digits[16];
+        uint32_t count = 0;
+        uint32_t magnitude = returnValue < 0
+            ? static_cast<uint32_t>(-(returnValue + 1)) + 1U
+            : static_cast<uint32_t>(returnValue);
+        if (magnitude == 0) digits[count++] = '0';
+        while (magnitude != 0 && count < sizeof(digits)) {
+            digits[count++] = static_cast<char>('0' + (magnitude % 10));
+            magnitude /= 10;
+        }
+        if (returnValue < 0) output_string("-");
+        while (count != 0) {
+            char digit[2] = {digits[--count], '\0'};
+            output_string(digit);
+        }
+        output_string(")\n");
+    } else {
+        output_string("runelf: FAIL (see serial ELF Loader diagnostics)\n");
+    }
+}
+#endif
 
 static void cmd_vfsmount(const char* path, const char* devIdx) {
     if (!path || path[0] == '\0') {
@@ -3148,6 +3187,11 @@ static void execute_command(const char* cmd) {
     else if (str_eq(command, "compile")) {
         cmd_compile(arg1, argCount > 2 ? args[2] : "");
     }
+#if defined(__x86_64__)
+    else if (str_eq(command, "runelf")) {
+        cmd_runelf(arg1);
+    }
+#endif
     // Network commands
     else if (str_eq(command, "ping")) {
         cmd_ping(arg1);

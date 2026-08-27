@@ -71,6 +71,11 @@ namespace guideXOS
         // NIC information (uses former Reserved space)
         NicInfo  Nic;
         uint64_t KernelPhysicalBase;
+        // Physical address of the identity-mapped PML4 installed at handoff.
+        uint64_t PageTableRoot;
+        // Bootloader-reserved reusable NativeElf execution window.
+        uint64_t NativeElfRegionBase;
+        uint64_t NativeElfRegionSize;
     };
 }
 

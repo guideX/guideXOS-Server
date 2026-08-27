@@ -60,9 +60,9 @@ The immediate comes from `FunctionIR.returnConstant`; the backend does not inspe
 
 The writer emits ELF64, little-endian, `ET_EXEC`, AMD64 (`e_machine = 62`) with one deterministic `PT_LOAD` segment. There is no `PT_INTERP`, `PT_DYNAMIC`, section table, symbol table, relocation, or debug information.
 
-The canonical image base is `0x200000`. This matches the checked-in NativeElf application direction: `Apps/ResourceViewer/bin/amd64/resourceviewer.elf` has a `PT_LOAD` beginning at `0x200000`. The historical SDK note mentioning `0x400000` is not used, and the Developer Studio hosted recipe's `0x20000000` is not a native loader contract. This bootstrap therefore does not introduce a third convention.
+At the Phase 27B commit, the bootstrap image base was `0x200000` and the entry was `0x201000`. Phase 27C's bare-metal memory audit found that the UEFI handoff stack occupies that low region and that the kernel's identity-visible virtual span can also cover `0x200000`. The shared NativeElf contract therefore migrated minimally to `0x10000000` with entry `0x10001000`; the current compiler, loader, bootloader, and regression fixtures all use that audited contract. The historical SDK note mentioning `0x400000` is not used, and the Developer Studio hosted recipe's `0x20000000` is not a native loader contract.
 
-The single segment starts at file offset 0 and virtual address `0x200000`, is readable and executable, and is aligned to `0x1000`. The six-byte body is placed at file offset `0x1000`, so the deterministic entry point is `0x201000`. For the first two examples the output is `0x1006` bytes. The validator checks header identity, bounds, segment ranges, alignment, forbidden dynamic/interpreter segments, expected base, entry placement, and exact generated code bytes.
+The single segment starts at file offset 0 and virtual address `0x10000000`, is readable and executable, and is aligned to `0x1000`. The six-byte body is placed at file offset `0x1000`, so the deterministic entry point is `0x10001000`. For the first two examples the output is `0x1006` bytes. The validator checks header identity, bounds, segment ranges, alignment, forbidden dynamic/interpreter segments, expected base, entry placement, and exact generated code bytes.
 
 ## Filesystem strategy
 

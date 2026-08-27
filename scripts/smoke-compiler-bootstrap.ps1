@@ -11,7 +11,7 @@ $espDirectory = Join-Path $root "ESP"
 $fixtureDirectory = Join-Path $root "scripts/fixtures/phase27b"
 $qemuPath = "C:\Program Files\qemu\qemu-system-x86_64.exe"
 $ovmfCodePath = Join-Path $root "OVMF.fd"
-$tempDirectory = Join-Path ([System.IO.Path]::GetTempPath()) ("guidexos-phase27b-" + [guid]::NewGuid().ToString("N"))
+$tempDirectory = Join-Path ([System.IO.Path]::GetTempPath()) ("guidexos-phase27c-" + [guid]::NewGuid().ToString("N"))
 $evidenceDirectory = Join-Path $tempDirectory "artifacts"
 $backups = @{}
 $oldExtraCFlags = $env:EXTRA_CFLAGS
@@ -78,8 +78,22 @@ function Invoke-QemuProofBoot([int]$runNumber, [string]$qemu) {
         $serial = Read-SerialText $serialPath
         if ($stderr) { [System.IO.File]::WriteAllText($stderrPath, $stderr) }
 
-        if ($serial -notmatch "Compiler: Phase 27B smoke PASS") {
-            Write-Host "QEMU boot $runNumber did not reach the compiler proof marker." -ForegroundColor Red
+        $requiredMarkers = @(
+            "Compiler: Phase 27B smoke PASS",
+            "phase27c_compile42=PASS",
+            "phase27c_execute42=PASS",
+            "phase27c_compile41=PASS",
+            "phase27c_execute41=PASS",
+            "phase27c_repeat_execution=PASS",
+            "phase27c_invalid_elf=PASS",
+            "phase27c_alternate_build_run=PASS",
+            "phase27c_kernel_survival=PASS",
+            "phase27c=PASS",
+            "ELF Loader: Phase 27C smoke PASS"
+        )
+        $missingMarkers = @($requiredMarkers | Where-Object { $serial -notmatch [regex]::Escape($_) })
+        if ($missingMarkers.Count -ne 0) {
+            Write-Host "QEMU boot $runNumber missed required Phase 27C markers: $($missingMarkers -join ', ')" -ForegroundColor Red
             if ($serial) { Write-Host $serial }
             if ($stderr) { Write-Host $stderr }
             throw "Phase 27B QEMU proof failed on boot $runNumber (exit $($process.ExitCode))"
@@ -87,7 +101,7 @@ function Invoke-QemuProofBoot([int]$runNumber, [string]$qemu) {
 
         Write-Host "--- QEMU bare-metal compiler proof boot $runNumber ---" -ForegroundColor Cyan
         $serial -split "`r?`n" |
-            Where-Object { $_ -match "Compiler:|^error:" } |
+            Where-Object { $_ -match "Compiler:|ELF Loader:|phase27c|^error:" } |
             ForEach-Object { Write-Host $_ }
     }
     finally {
@@ -136,6 +150,8 @@ try {
 
     $managedFiles = @(
         "r42.c", "r41.c", "bad.c", "r42.elf", "r42b.elf", "r41.elf", "bad.elf",
+        "p27magic.elf", "p27arch.elf", "p27entry.elf", "p27out.elf", "p27trunc.elf",
+        "p27bnd.elf", "p27addr.elf",
         "kernel.elf", "EFI/BOOT/BOOTX64.EFI", "NvVars"
     )
     foreach ($relativePath in $managedFiles) {
@@ -156,14 +172,20 @@ try {
 
     # Each boot receives a clean guest output namespace. The compiler itself
     # creates/replaces these files through guideXOS VFS path-level operations.
-    foreach ($relativePath in @("r42.elf", "r42b.elf", "r41.elf", "bad.elf")) {
+    foreach ($relativePath in @(
+        "r42.elf", "r42b.elf", "r41.elf", "bad.elf",
+        "p27magic.elf", "p27arch.elf", "p27entry.elf", "p27out.elf", "p27trunc.elf",
+        "p27bnd.elf", "p27addr.elf")) {
         $target = Join-Path $espDirectory $relativePath
         if (Test-Path $target) { Remove-Item -LiteralPath $target -Force }
     }
 
     for ($run = 1; $run -le $BootCount; ++$run) {
         if ($run -gt 1) {
-            foreach ($relativePath in @("r42.elf", "r42b.elf", "r41.elf", "bad.elf")) {
+            foreach ($relativePath in @(
+                "r42.elf", "r42b.elf", "r41.elf", "bad.elf",
+                "p27magic.elf", "p27arch.elf", "p27entry.elf", "p27out.elf", "p27trunc.elf",
+                "p27bnd.elf", "p27addr.elf")) {
                 $target = Join-Path $espDirectory $relativePath
                 if (Test-Path $target) { Remove-Item -LiteralPath $target -Force }
             }
@@ -183,10 +205,10 @@ try {
     & $readelf -h -l (Join-Path $evidenceDirectory "r42.elf")
     # The bootstrap intentionally omits section metadata. Ask objdump to audit
     # the ELF's known file-backed code range as a raw AMD64 view.
-    & $objdump -D -Mintel -b binary -m i386:x86-64 --adjust-vma=0x200000 `
-        --start-address=0x201000 --stop-address=0x201006 (Join-Path $evidenceDirectory "r42.elf")
+    & $objdump -D -Mintel -b binary -m i386:x86-64 --adjust-vma=0x10000000 `
+        --start-address=0x10001000 --stop-address=0x10001006 (Join-Path $evidenceDirectory "r42.elf")
     if ($LASTEXITCODE -ne 0) { throw "external ELF inspection failed" }
-    Write-Host "Phase 27B QEMU proof completed across $BootCount fresh boot(s)." -ForegroundColor Green
+    Write-Host "Phase 27C QEMU proof completed across $BootCount fresh boot(s)." -ForegroundColor Green
 }
 finally {
     if ($null -eq $oldExtraCFlags) { Remove-Item Env:EXTRA_CFLAGS -ErrorAction SilentlyContinue }
@@ -195,7 +217,11 @@ finally {
     # QEMU may release the FAT image handles just after it exits. Retry the
     # exact generated paths so a proof run never leaves build artifacts in ESP.
     Start-Sleep -Milliseconds 250
-    foreach ($relativePath in @("r42.c", "r41.c", "bad.c", "r42.elf", "r42b.elf", "r41.elf", "bad.elf", "kernel.elf", "EFI/BOOT/BOOTX64.EFI", "NvVars")) {
+    foreach ($relativePath in @(
+        "r42.c", "r41.c", "bad.c", "r42.elf", "r42b.elf", "r41.elf", "bad.elf",
+        "p27magic.elf", "p27arch.elf", "p27entry.elf", "p27out.elf", "p27trunc.elf",
+        "p27bnd.elf", "p27addr.elf",
+        "kernel.elf", "EFI/BOOT/BOOTX64.EFI", "NvVars")) {
         $target = Join-Path $espDirectory $relativePath
         for ($attempt = 0; $attempt -lt 5 -and (Test-Path -LiteralPath $target); ++$attempt) {
             Remove-Item -LiteralPath $target -Force -ErrorAction SilentlyContinue

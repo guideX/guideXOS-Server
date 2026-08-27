@@ -8,11 +8,12 @@
 #pragma once
 
 #include "kernel/types.h"
+#include "../native_elf/native_elf_contract.h"
 
 namespace kernel {
 namespace compiler {
 
-static const uint64_t BOOTSTRAP_IMAGE_BASE = 0x200000ULL;
+static const uint64_t BOOTSTRAP_IMAGE_BASE = guidexos::native_elf::IMAGE_BASE;
 static const uint32_t BOOTSTRAP_CODE_OFFSET = 0x1000;
 static const uint32_t BOOTSTRAP_MAX_ELF_BYTES = 8192;
 

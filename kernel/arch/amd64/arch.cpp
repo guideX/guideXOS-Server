@@ -195,6 +195,54 @@ void write_cr4(uint64_t value)
 #endif
 }
 
+bool supports_nx()
+{
+#if defined(_MSC_VER)
+    int info[4] = {0, 0, 0, 0};
+    __cpuid(info, 0x80000000);
+    const uint32_t maxExtended = static_cast<uint32_t>(info[0]);
+    if (maxExtended < 0x80000001U) return false;
+    __cpuid(info, 0x80000001);
+    return (static_cast<uint32_t>(info[3]) & (1U << 20)) != 0;
+#else
+    uint32_t maxExtended = 0;
+    uint32_t edx = 0;
+    asm volatile (
+        "cpuid"
+        : "=a"(maxExtended)
+        : "a"(0x80000000U)
+        : "rbx", "rcx", "rdx"
+    );
+    if (maxExtended < 0x80000001U) return false;
+    asm volatile (
+        "cpuid"
+        : "=d"(edx)
+        : "a"(0x80000001U)
+        : "rbx", "rcx"
+    );
+    return (edx & (1U << 20)) != 0;
+#endif
+}
+
+bool enable_nx()
+{
+    if (!supports_nx()) return false;
+    static const uint32_t EFER_MSR = 0xC0000080U;
+    static const uint64_t EFER_NXE = 1ULL << 11;
+    const uint64_t efer = read_msr(EFER_MSR);
+    if ((efer & EFER_NXE) == 0) write_msr(EFER_MSR, efer | EFER_NXE);
+    return (read_msr(EFER_MSR) & EFER_NXE) != 0;
+}
+
+void invlpg(void* address)
+{
+#if defined(_MSC_VER)
+    __invlpg(address);
+#else
+    asm volatile ("invlpg (%0)" : : "r"(address) : "memory");
+#endif
+}
+
 void init()
 {
     // TODO: Initialize AMD64-specific features

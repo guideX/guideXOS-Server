@@ -96,7 +96,7 @@ LDFLAGS := $(LINKER_SCRIPT_FLAG)arch/$(ARCH)/linker.ld $(ARCH_LDFLAGS)
 # LIBS is set per-arch in Makefile.arch
 
 # Source files
-CORE_SOURCES := $(wildcard core/*.cpp) $(wildcard core/compiler/*.cpp)
+CORE_SOURCES := $(wildcard core/*.cpp) $(wildcard core/compiler/*.cpp) $(wildcard core/native_elf/*.cpp)
 ARCH_SOURCES := $(wildcard arch/$(ARCH)/*.cpp)
 ASM_SOURCES := $(wildcard arch/$(ARCH)/*.asm) $(wildcard arch/$(ARCH)/*.s)
 MBEDTLS_C_SOURCES := $(if $(filter 1,$(MBEDTLS_GUIDEXOS_LINK_ENABLED)),$(MBEDTLS_GUIDEXOS_C_SOURCES))

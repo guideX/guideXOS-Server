@@ -38,6 +38,11 @@ void write_cr3(uint64_t value);
 uint64_t read_cr4();
 void write_cr4(uint64_t value);
 
+// Paging permission support used by the bounded NativeElf bootstrap loader.
+bool supports_nx();
+bool enable_nx();
+void invlpg(void* address);
+
 // Initialize architecture-specific features
 void init();
 
