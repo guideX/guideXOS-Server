@@ -96,7 +96,7 @@ LDFLAGS := $(LINKER_SCRIPT_FLAG)arch/$(ARCH)/linker.ld $(ARCH_LDFLAGS)
 # LIBS is set per-arch in Makefile.arch
 
 # Source files
-CORE_SOURCES := $(wildcard core/*.cpp)
+CORE_SOURCES := $(wildcard core/*.cpp) $(wildcard core/compiler/*.cpp)
 ARCH_SOURCES := $(wildcard arch/$(ARCH)/*.cpp)
 ASM_SOURCES := $(wildcard arch/$(ARCH)/*.asm) $(wildcard arch/$(ARCH)/*.s)
 MBEDTLS_C_SOURCES := $(if $(filter 1,$(MBEDTLS_GUIDEXOS_LINK_ENABLED)),$(MBEDTLS_GUIDEXOS_C_SOURCES))
@@ -165,7 +165,7 @@ $(KERNEL): $(ALL_OBJS)
 endif
 
 $(OBJ_DIR)/core/%.o: core/%.cpp
-	@$(call MKDIR,$(OBJ_DIR)/core)
+	@$(call MKDIR,$(dir $@))
 	@echo "Compiling $<..."
 	$(CXX) $(CFLAGS) $(DEPFLAGS) -c $< -o $@
 
@@ -174,7 +174,7 @@ $(OBJ_DIR)/core/gxos_tls_foundation.o: $(MBEDTLS_GUIDEXOS_IMPORT_STATE_DEPS)
 $(OBJ_DIR)/core/kernel_apps.o: $(MBEDTLS_GUIDEXOS_IMPORT_STATE_DEPS)
 
 $(OBJ_DIR)/core/%.d: core/%.cpp
-	@$(call MKDIR,$(OBJ_DIR)/core)
+	@$(call MKDIR,$(dir $@))
 	@echo "Bootstrapping dependencies for $<..."
 	$(CXX) $(CFLAGS) $(DEPFLAGS) -c $< -o $(OBJ_DIR)/core/$*.o
 

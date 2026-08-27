@@ -21,6 +21,7 @@
 #include "include/kernel/kernel_app.h"
 #include "include/kernel/app_launch_target_resolver.h"
 #include "include/kernel/serial_debug.h"
+#include "compiler/compiler_driver.h"
 
 // Forward declarations for power functions (defined in desktop.cpp, outside any namespace)
 extern void perform_shutdown();
@@ -340,6 +341,7 @@ static void cmd_help() {
     output_string("  rm, del        - Remove file (not impl)\n");
     output_string("  df             - Disk space usage\n");
     output_string("  stat           - File status\n");
+    output_string("  compile <src> <out> - Build bootstrap AMD64 ELF (no execution)\n");
     output_string("\n");
     output_string("VFS Commands (Phase 7.5):\n");
     output_string("  vfsinfo        - Show filesystems and mounts\n");
@@ -1223,6 +1225,20 @@ static void cmd_lsusb() {
 // ============================================================
 // Filesystem Test Commands (Phase 7.5)
 // ============================================================
+
+static void cmd_compile(const char* sourcePath, const char* outputPath) {
+    if (!sourcePath || sourcePath[0] == '\0' || !outputPath || outputPath[0] == '\0') {
+        output_string("Usage: compile <source-path> <output-path>\n");
+        return;
+    }
+
+    compiler::CompileSummary summary = {};
+    if (compiler::compile(sourcePath, outputPath, &summary)) {
+        output_string("compile: PASS (serial contains deterministic diagnostics)\n");
+    } else {
+        output_string("compile: FAIL (serial contains diagnostics)\n");
+    }
+}
 
 static void cmd_vfsmount(const char* path, const char* devIdx) {
     if (!path || path[0] == '\0') {
@@ -3128,6 +3144,9 @@ static void execute_command(const char* cmd) {
         cmd_vfstest();
     } else if (str_eq(command, "vfsinfo")) {
         cmd_vfsinfo();
+    }
+    else if (str_eq(command, "compile")) {
+        cmd_compile(arg1, argCount > 2 ? args[2] : "");
     }
     // Network commands
     else if (str_eq(command, "ping")) {

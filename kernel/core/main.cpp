@@ -21,6 +21,7 @@
 #include "include/kernel/serial_debug.h"
 #include "include/kernel/desktop_capabilities.h"
 #include "include/kernel/app_launch_target_resolver.h"
+#include "compiler/compiler_driver.h"
 
 // Storage subsystem
 #include "include/kernel/block_device.h"
@@ -361,6 +362,10 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         kernel::serial::putc('\n');
         
         mount_persistent_storage();
+
+#if defined(GXOS_COMPILER_BOOTSTRAP_SMOKE_ACTIVE)
+        kernel::compiler::run_bootstrap_smoke();
+#endif
 
         if (is_bootinfo && bootinfo && bootinfo->RamdiskBase != 0 && bootinfo->RamdiskSize != 0) {
             kernel::serial::puts("[KERNEL] Boot wallpaper pack found in ramdisk.img\n");
