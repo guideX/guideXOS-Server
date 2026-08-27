@@ -1290,6 +1290,7 @@ private:
             break;
         }
         case RuntimeContext::NativeFunctionId::EventStopPropagation:
+        case RuntimeContext::NativeFunctionId::EventStopImmediatePropagation:
             if (!receiver.isObject() ||
                 receiver.objectId() != context_.eventObject_ ||
                 context_.objectAt(receiver.objectId()) == nullptr) {
@@ -1299,8 +1300,14 @@ private:
             }
             // A retained Event can still call its method after dispatch, but
             // it must not set state that a later click might observe.
-            if (context_.eventDispatchActive_)
+            if (context_.eventDispatchActive_) {
                 context_.eventPropagationStopped_ = true;
+                if (static_cast<RuntimeContext::NativeFunctionId>(
+                        function.nativeFunction) ==
+                    RuntimeContext::NativeFunctionId::EventStopImmediatePropagation) {
+                    context_.eventImmediatePropagationStopped_ = true;
+                }
+            }
             result = Value::undefined();
             break;
         default:
@@ -2003,6 +2010,14 @@ bool RuntimeContext::createOrUpdateEventObject(SourceView type,
                 eventStopPropagationFunction_, error)) {
             eventObject_ = kInvalidRuntimeObjectId;
             eventStopPropagationFunction_ = kInvalidRuntimeFunctionId;
+            eventStopImmediatePropagationFunction_ = kInvalidRuntimeFunctionId;
+            return false;
+        }
+        if (!createNativeFunction(NativeFunctionId::EventStopImmediatePropagation,
+                eventStopImmediatePropagationFunction_, error)) {
+            eventObject_ = kInvalidRuntimeObjectId;
+            eventStopPropagationFunction_ = kInvalidRuntimeFunctionId;
+            eventStopImmediatePropagationFunction_ = kInvalidRuntimeFunctionId;
             return false;
         }
         if (!writeProperty(eventObject_, "type", typeValue, error, true) ||
@@ -2011,9 +2026,13 @@ bool RuntimeContext::createOrUpdateEventObject(SourceView type,
             !writeProperty(eventObject_, "currentTarget",
                 Value::hostObject(currentTargetObject), error, true) ||
             !writeProperty(eventObject_, "stopPropagation",
-                Value::function(eventStopPropagationFunction_), error, true)) {
+                Value::function(eventStopPropagationFunction_), error, true) ||
+            !writeProperty(eventObject_, "stopImmediatePropagation",
+                Value::function(eventStopImmediatePropagationFunction_), error,
+                true)) {
             eventObject_ = kInvalidRuntimeObjectId;
             eventStopPropagationFunction_ = kInvalidRuntimeFunctionId;
+            eventStopImmediatePropagationFunction_ = kInvalidRuntimeFunctionId;
             return false;
         }
     } else if (!updateExistingProperty(eventObject_, "target",
@@ -2031,12 +2050,14 @@ void RuntimeContext::beginEventDispatch()
 {
     eventDispatchActive_ = true;
     eventPropagationStopped_ = false;
+    eventImmediatePropagationStopped_ = false;
 }
 
 void RuntimeContext::endEventDispatch()
 {
     eventDispatchActive_ = false;
     eventPropagationStopped_ = false;
+    eventImmediatePropagationStopped_ = false;
 }
 
 RuntimeContext::RuntimeContext(RuntimeLimits limits)
@@ -2074,9 +2095,11 @@ void RuntimeContext::clearRuntimeState()
     mathObject_ = kInvalidRuntimeObjectId;
     eventObject_ = kInvalidRuntimeObjectId;
     eventStopPropagationFunction_ = kInvalidRuntimeFunctionId;
+    eventStopImmediatePropagationFunction_ = kInvalidRuntimeFunctionId;
     builtInsInitialized_ = false;
     eventDispatchActive_ = false;
     eventPropagationStopped_ = false;
+    eventImmediatePropagationStopped_ = false;
     hostObjects_.clear();
     hostMethods_.clear();
     hostGlobalSpecs_.clear();

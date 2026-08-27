@@ -1316,6 +1316,157 @@ static std::string navigatorHostedSmokeDiagnostic() {
         gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
         "new navigation has no stale JS14 callbacks or errors");
 
+    const bool js15Loaded = gxos::apps::Navigator::SmokeNavigateToQuiet(
+        "http://127.0.0.1:8080/navigator-smoke/javascript-js15.html");
+    const std::string js15InitialText =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    const uint64_t js15InitialRevision =
+        gxos::apps::Navigator::SmokeDocumentLayoutRevision();
+    int js15TargetX = 0;
+    int js15TargetY = 0;
+    int js15TargetW = 0;
+    int js15TargetH = 0;
+    const bool js15TargetHasGeometry =
+        gxos::apps::Navigator::SmokeBlockGeometryById(
+            "js15-target-stop", js15TargetX, js15TargetY, js15TargetW,
+            js15TargetH);
+    const bool js15TargetHit =
+        gxos::apps::Navigator::SmokeFormHitTargetById("js15-target-stop");
+    const size_t js15InitialHandlers =
+        gxos::apps::Navigator::SmokeJavaScriptHandlerCount();
+    const size_t js15InitialListeners =
+        gxos::apps::Navigator::SmokeJavaScriptListenerCount();
+    add("JS15 hosted fixture loads immediate-stop callbacks",
+        js15Loaded && contains(js15InitialText, "Navigator JavaScript JS15") &&
+        contains(js15InitialText, "stopImmediatePropagation") &&
+        js15InitialHandlers == 18u && js15InitialListeners == 18u &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("loaded=") + yesNo(js15Loaded) + ",records=" +
+        std::to_string(js15InitialHandlers) + ",listeners=" +
+        std::to_string(js15InitialListeners));
+
+    const bool js15TargetClick =
+        gxos::apps::Navigator::SmokeClickFormControlById("js15-target-stop");
+    const std::string js15AfterTarget =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS15 onclick immediate stop skips target listener and ancestors",
+        js15TargetHasGeometry && js15TargetW > 0 && js15TargetH > 0 &&
+        js15TargetHit && js15TargetClick &&
+        contains(js15AfterTarget,
+            "target:o:js15-target-stop:js15-target-stop") &&
+        !contains(js15AfterTarget, "unexpected-listener") &&
+        !contains(js15AfterTarget, "target-parent-ran") &&
+        !contains(js15AfterTarget, "target-grandparent-ran"),
+        std::string("geometry=") + yesNo(js15TargetHasGeometry) +
+        ",hit=" + yesNo(js15TargetHit) + ",click=" +
+        yesNo(js15TargetClick));
+
+    const bool js15OnclickClick =
+        gxos::apps::Navigator::SmokeClickFormControlById("js15-onclick-stop");
+    const std::string js15AfterOnclick =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS15 onclick immediate stop suppresses same-node listener",
+        js15OnclickClick && contains(js15AfterOnclick, "onclick:o") &&
+        !contains(js15AfterOnclick, "onclick:ol"),
+        "expected onclick without its registered listener");
+
+    const bool js15ListenerClick =
+        gxos::apps::Navigator::SmokeClickFormControlById("js15-listener-stop");
+    const std::string js15AfterListener =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS15 stopPropagation regression keeps same-node listener",
+        js15ListenerClick && contains(js15AfterListener, "listener:ol"),
+        "ordinary stopPropagation remains weaker than immediate stop");
+
+    const bool js15AncestorClick =
+        gxos::apps::Navigator::SmokeClickFormControlById("js15-ancestor-child");
+    const std::string js15AfterAncestor =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    const uint64_t js15RevisionAfterAncestor =
+        gxos::apps::Navigator::SmokeDocumentLayoutRevision();
+    add("JS15 parent onclick immediate stop skips parent listener and grandparent",
+        js15AncestorClick &&
+        contains(js15AfterAncestor,
+            "ancestor:cp:js15-ancestor-child:js15-ancestor-parent") &&
+        !contains(js15AfterAncestor, "unexpected-listener") &&
+        !contains(js15AfterAncestor, "ancestor:grandparent-ran"),
+        "expected child listener then parent onclick only");
+    add("JS15 immediate-stop callback mutation relayouts",
+        contains(js15AfterAncestor, "Parent") &&
+        js15RevisionAfterAncestor > js15InitialRevision &&
+        !gxos::apps::Navigator::SmokeDocumentDirty(),
+        "parent mutation settled after the immediate stop call");
+
+    const bool js15ResetOne =
+        gxos::apps::Navigator::SmokeClickFormControlById("js15-reset-child");
+    const std::string js15AfterResetOne =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    const bool js15ResetTwo =
+        gxos::apps::Navigator::SmokeClickFormControlById("js15-reset-child");
+    const std::string js15AfterResetTwo =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS15 immediate state resets per click",
+        js15ResetOne && js15ResetTwo && !contains(js15AfterResetOne, "reset:1") &&
+        contains(js15AfterResetTwo, "reset:1"),
+        "first click stops; second click reaches the parent");
+
+    const bool js15BranchAClick =
+        gxos::apps::Navigator::SmokeClickFormControlById("js15-branch-a-child");
+    const bool js15BranchBClick =
+        gxos::apps::Navigator::SmokeClickFormControlById("js15-branch-b-child");
+    const std::string js15AfterBranchB =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS15 immediate stop leaves independent branch unaffected",
+        js15BranchAClick && js15BranchBClick &&
+        contains(js15AfterBranchB, "branches:1:1"),
+        "tree B still bubbles normally after tree A stops");
+
+    const bool js15MutationClick =
+        gxos::apps::Navigator::SmokeClickFormControlById("js15-mutation-child");
+    const std::string js15AfterMutation =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS15 immediate-stop callback can mutate and suppress later work",
+        js15MutationClick && contains(js15AfterMutation, "Stopped") &&
+        contains(js15AfterMutation, "mutation:stopped") &&
+        !contains(js15AfterMutation, "mutation-listener-ran") &&
+        !contains(js15AfterMutation, "mutation:parent-ran") &&
+        !gxos::apps::Navigator::SmokeDocumentDirty(),
+        "target mutation succeeds while listener and ancestor are suppressed");
+
+    const bool js15ErrorClick =
+        gxos::apps::Navigator::SmokeClickFormControlById("js15-error-child");
+    const std::string js15AfterError =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    const std::string js15Error =
+        gxos::apps::Navigator::SmokeJavaScriptLastError();
+    add("JS15 error after immediate stop remains contained and stopped",
+        js15ErrorClick && contains(js15AfterError, "error:stopped") &&
+        !contains(js15AfterError, "error-listener-ran") &&
+        !contains(js15AfterError, "error:parent-ran") &&
+        contains(js15Error, "UnknownIdentifier"),
+        std::string("click=") + yesNo(js15ErrorClick) + ",error=" +
+        (js15Error.empty() ? "none" : js15Error));
+
+    const bool js15LinkHit =
+        gxos::apps::Navigator::SmokeHitLinkById("js15-link");
+    const bool js15LinkClick =
+        js15LinkHit && gxos::apps::Navigator::SmokeClickFirstLink();
+    const std::string js15TargetText =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS15 immediate stop does not cancel ordinary link navigation",
+        js15LinkHit && js15LinkClick &&
+        gxos::apps::Navigator::SmokeCurrentUrl() ==
+            "http://127.0.0.1:8080/navigator-smoke/javascript-js15-target.html" &&
+        contains(js15TargetText, "Navigator JavaScript JS15 Target"),
+        std::string("hit=") + yesNo(js15LinkHit) + ",link=" +
+        yesNo(js15LinkClick) + ",url=" +
+        gxos::apps::Navigator::SmokeCurrentUrl());
+    add("JS15 navigation clears old immediate-stop handlers",
+        gxos::apps::Navigator::SmokeJavaScriptHandlerCount() == 0u &&
+        gxos::apps::Navigator::SmokeJavaScriptListenerCount() == 0u &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        "replacement document has no stale JS15 callbacks or errors");
+
     bool cssInlineLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-inline.html");
     std::string cssInlineText = gxos::apps::Navigator::SmokeCurrentDocumentText();
     std::string cssInlineReport = gxos::apps::Navigator::SmokeRuntimeReport();

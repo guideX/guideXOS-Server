@@ -286,7 +286,8 @@ bool NavigatorScriptHostAdapter::dispatchClick(RuntimeContext& runtime,
         }
         arguments[0] = event;
         invoke(onclickFunction);
-        invoke(listenerFunction);
+        if (!runtime.eventImmediatePropagationStopped())
+            invoke(listenerFunction);
         if (runtime.eventPropagationStopped()) break;
     }
     runtime.endEventDispatch();

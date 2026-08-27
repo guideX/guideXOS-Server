@@ -1699,8 +1699,9 @@ the current propagation node. The adapter always invokes that node's
 stop state before reaching the next target-to-root node. Therefore an
 `onclick` that calls `stopPropagation()` still permits the node listener, while
 parent, grandparent, and all other later ancestors are skipped. This is not
-`stopImmediatePropagation()`; that method is not implemented, and current-node
-handlers still finish. It is also not `preventDefault()`: JS14 does not cancel
+`stopImmediatePropagation()`; JS14 itself did not implement that stronger
+method, and current-node handlers still finished. It is also not
+`preventDefault()`: JS14 does not cancel
 default actions, so an ordinary clicked link still navigates normally while
 its JavaScript ancestor propagation is stopped.
 
@@ -1774,12 +1775,106 @@ The JS14 implementation and focused test compile successfully with
 passes. The normal production server build passes as well.
 
 JS14 remains intentionally incomplete DOM Events compatibility. It does not
-provide `stopImmediatePropagation()`, `preventDefault()`, default-action
-cancellation, `defaultPrevented`, capture, capture listeners, event phases,
-`eventPhase`, `bubbles`, `cancelable`, listener options, multiple listeners
-per Element, `once`, passive listeners, other event types, coordinates,
-keyboard/input events, timers, promises, task queues, microtasks,
-asynchronous dispatch, or broad DOM expansion. The recommended JS15 milestone
-is `event.stopImmediatePropagation()`: finish remaining handlers on the
-current node for JS14's `stopPropagation()`, versus stopping remaining
-current-node handlers and all later ancestors for JS15's immediate variant.
+provide `preventDefault()`, `defaultPrevented`, default-action cancellation,
+capture, capture listeners, event phases, `eventPhase`, `bubbles`, `cancelable`,
+listener options, multiple listeners per Element, `once`, passive listeners,
+other event types, coordinates, keyboard/input events, timers, promises, task
+queues, microtasks, asynchronous dispatch, or broad DOM expansion.
+
+## Phase JS15: `event.stopImmediatePropagation()`
+
+JS15 adds a callable `event.stopImmediatePropagation()` method to the same
+cached click Event object. It uses the existing runtime native-function and
+read-only Event-member infrastructure, accepts extra arguments under the
+normal native call convention, and reports `InvalidReceiver` for a detached
+call such as `var stop = event.stopImmediatePropagation; stop()`. Unknown Event
+properties retain the existing missing-property behavior.
+
+The exact distinction is now:
+
+* `stopPropagation()` sets propagation-stopped state, so the current node's
+  remaining handlers finish but later ancestor nodes do not dispatch.
+* `stopImmediatePropagation()` sets both propagation-stopped and
+  immediate-propagation-stopped state, so remaining handlers on the current
+  node are skipped and later ancestor nodes do not dispatch.
+* Neither method is `preventDefault()`. JS15 does not cancel ordinary click
+  default actions such as link navigation.
+
+Navigator's bounded per-node order remains `onclick` followed by its one
+registered click listener. The adapter checks immediate-stop state after
+`onclick` and before invoking that listener, then checks propagation state
+before reaching the next target-to-root path entry. Consequently, an onclick
+that calls immediate stop suppresses its same-node listener, parent, and all
+higher ancestors; a listener-origin immediate stop still allows that listener
+to finish and suppresses later ancestors. The JavaScript callback itself
+continues executing after the method call: the method is not an exception,
+return, longjmp, or callback abort. This leaves DOM mutation after the call and
+error containment deterministic.
+
+Both flags are dispatch-scoped. `beginEventDispatch()` clears them before
+callbacks, and `endEventDispatch()` clears them on every completed or failed
+dispatch. Repeated calls are idempotent, and a weaker later
+`stopPropagation()` call cannot undo an immediate stop. A retained Event method
+called outside an active dispatch is a harmless no-op, including after
+generation invalidation, and cannot pre-stop an unrelated future click.
+Event `target`, `currentTarget`, and canonical Element identity are untouched
+by either stop method. Navigation still invalidates old generation-scoped
+Element handles and clears active dispatch state, listener registrations, and
+path ownership; stale access fails closed with `StaleHostObject`. A path that
+exceeds the fixed 32-entry snapshot still fails before callbacks with
+`PropagationPathLimitExceeded`, leaving no stop state to leak into recovery.
+
+JS15 adds no per-click Event, listener, path, or stop-state allocation. The
+new persistent RuntimeContext storage is one 4-byte RuntimeFunctionId and one
+bool (5 declared bytes before normal enclosing-object alignment), plus one
+bounded native FunctionRecord and one Event RuntimeProperty populated once per
+realm. The existing 256-byte stack-local propagation path and 64-slot,
+16-byte listener table remain unchanged. The focused stress proof confirms
+stable Event/object, host-wrapper, listener-table, and path storage over
+repeated immediate-stop clicks.
+
+### JS15 proof fixtures and results
+
+The focused proof is
+`tests/navigator_javascript_js15_test.cpp`, run by
+`scripts/smoke-navigator-javascript-js15.ps1`. It retains the JS14 coverage
+for listener identity/removal, slot reuse, 64-listener capacity, unsupported
+inputs, callback errors, retained Events, stale navigation, path overflow and
+recovery, and bounded repeated clicks. It adds direct assertions for callable
+method exposure, onclick-vs-listener suppression, parent and grandparent
+suppression, parent-origin stopping, stopPropagation regression, repeated and
+mixed calls, target/currentTarget identity, callback continuation, mutation
+before and after the call, per-dispatch reset, independent branches, zero-
+argument callbacks, immediate-stop callback errors, detached receivers, and
+outside-dispatch retained calls.
+
+The authentic hosted fixture is
+`navigator-smoke/javascript-js15.html` plus
+`navigator-smoke/javascript-js15-target.html`, exercised by `navigator.smoke`.
+It uses Navigator parsing, real DOM hierarchy and layout, hosted mouse
+down/up, authentic hit testing, production Event construction/reuse,
+target-to-root dispatch, onclick/listener ordering, actual JavaScript calls to
+`stopImmediatePropagation()`, DOM mutation and relayout, contained callback
+errors, independent branches, and ordinary link navigation. The aggregate
+check explicitly proves that immediate propagation stopping suppresses the
+link's remaining handlers without cancelling its default navigation.
+
+The complete JS1–JS15 focused set contains 13 available suites: lexer, parser,
+runtime, JS6, JS7, JS8, JS9, JS10, JS11, JS12, JS13, JS14, and JS15. All 13
+focused suites pass, including 509 JS15 checks with 0 failures. The normal
+production server build passes, the JS15 bare-metal and strict warning-as-error
+lanes pass, and the hosted aggregate is `333 passed, 7 failed`: the JS14
+baseline was `321 passed, 7 failed`, so JS15 adds 12 passing hosted checks and
+no aggregate failure. The seven known unrelated failures remain CSS 3C, CSS
+3G, CSS 6A, CSS 6B (three checks), and CSS 6C.
+
+JS15 remains intentionally incomplete DOM Events compatibility. It does not
+provide `preventDefault()`, `defaultPrevented`, default-action cancellation,
+capture, capture listeners, event phases, `eventPhase`, `bubbles`, `cancelable`,
+listener options, multiple listeners per Element, `once`, passive listeners,
+other event types, MouseEvent/PointerEvent data, coordinates/buttons,
+keyboard/input/change events, timers, promises, task queues, microtasks,
+asynchronous dispatch, or broad DOM expansion. The recommended JS16 milestone
+is `event.preventDefault()` with read-only `event.defaultPrevented` for
+cancellable click default actions, while leaving handler propagation controls
+otherwise independent.

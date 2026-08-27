@@ -1,0 +1,179 @@
+<!doctype html>
+<html>
+<head><title>Navigator JavaScript JS15</title></head>
+<body>
+<h1>Navigator JavaScript JS15</h1>
+<p>Bounded click bubbling with stopImmediatePropagation.</p>
+<div id="js15-grandparent">
+  <div id="js15-parent">
+    <div id="js15-gap"><button id="js15-target-stop" type="button">Target stop</button></div>
+  </div>
+</div>
+<button id="js15-onclick-stop" type="button">Onclick stop</button>
+<button id="js15-listener-stop" type="button">Listener stop</button>
+<div id="js15-ancestor-grandparent">
+  <div id="js15-ancestor-parent"><button id="js15-ancestor-child" type="button">Ancestor stop</button></div>
+</div>
+<div id="js15-reset-parent"><button id="js15-reset-child" type="button">Reset</button></div>
+<div id="js15-branch-a"><button id="js15-branch-a-child" type="button">Branch A</button></div>
+<div id="js15-branch-b"><button id="js15-branch-b-child" type="button">Branch B</button></div>
+<div id="js15-mutation-parent"><button id="js15-mutation-child" type="button">Mutation</button></div>
+<div id="js15-error-parent"><button id="js15-error-child" type="button">Error</button></div>
+<p id="js15-state">state</p>
+<div id="js15-link-parent"><a id="js15-link" href="/navigator-smoke/javascript-js15-target.html">Stop bubbling but navigate</a></div>
+<script>
+var js15State = document.getElementById("js15-state");
+
+var js15TargetStop = document.getElementById("js15-target-stop");
+var js15TargetParent = document.getElementById("js15-parent");
+var js15TargetGrandparent = document.getElementById("js15-grandparent");
+var js15TargetOrder = "";
+var js15TargetParentCalls = 0;
+var js15TargetGrandparentCalls = 0;
+function js15TargetListener(event) {
+    js15TargetOrder = js15TargetOrder + "c";
+    js15TargetStopTarget = event.target.id;
+    js15TargetStopCurrent = event.currentTarget.id;
+    js15TargetOrder = js15TargetOrder + "unexpected-listener";
+    js15State.textContent = "target:" + js15TargetOrder + ":" + js15TargetStopTarget + ":" + js15TargetStopCurrent;
+}
+function js15TargetParentListener(event) {
+    js15TargetParentCalls = js15TargetParentCalls + 1;
+    js15State.textContent = "target-parent-ran";
+}
+function js15TargetGrandparentListener(event) {
+    js15TargetGrandparentCalls = js15TargetGrandparentCalls + 1;
+    js15State.textContent = "target-grandparent-ran";
+}
+var js15TargetStopTarget = "";
+var js15TargetStopCurrent = "";
+js15TargetStop.onclick = function(event) {
+    js15TargetOrder = js15TargetOrder + "o";
+    js15TargetStopTarget = event.target.id;
+    js15TargetStopCurrent = event.currentTarget.id;
+    event.stopImmediatePropagation();
+    js15State.textContent = "target:" + js15TargetOrder + ":" + js15TargetStopTarget + ":" + js15TargetStopCurrent;
+};
+js15TargetStop.addEventListener("click", js15TargetListener);
+js15TargetParent.addEventListener("click", js15TargetParentListener);
+js15TargetGrandparent.addEventListener("click", js15TargetGrandparentListener);
+
+var js15OnclickStop = document.getElementById("js15-onclick-stop");
+var js15OnclickOrder = "";
+var js15OnclickParentCalls = 0;
+js15OnclickStop.onclick = function(event) {
+    js15OnclickOrder = js15OnclickOrder + "o";
+    event.stopImmediatePropagation();
+    js15State.textContent = "onclick:" + js15OnclickOrder;
+};
+js15OnclickStop.addEventListener("click", function(event) {
+    js15OnclickOrder = js15OnclickOrder + "l";
+    js15State.textContent = "onclick:" + js15OnclickOrder;
+});
+
+var js15ListenerStop = document.getElementById("js15-listener-stop");
+var js15ListenerOrder = "";
+var js15ListenerParentCalls = 0;
+js15ListenerStop.onclick = function(event) { js15ListenerOrder = js15ListenerOrder + "o"; };
+js15ListenerStop.addEventListener("click", function(event) {
+    js15ListenerOrder = js15ListenerOrder + "l";
+    event.stopPropagation();
+    js15State.textContent = "listener:" + js15ListenerOrder;
+});
+
+var js15AncestorChild = document.getElementById("js15-ancestor-child");
+var js15AncestorParent = document.getElementById("js15-ancestor-parent");
+var js15AncestorGrandparent = document.getElementById("js15-ancestor-grandparent");
+var js15AncestorOrder = "";
+var js15AncestorGrandparentCalls = 0;
+var js15AncestorTarget = "";
+var js15AncestorCurrent = "";
+js15AncestorChild.addEventListener("click", function(event) {
+    js15AncestorOrder = js15AncestorOrder + "c";
+});
+js15AncestorParent.onclick = function(event) {
+    js15AncestorOrder = js15AncestorOrder + "p";
+    js15AncestorTarget = event.target.id;
+    js15AncestorCurrent = event.currentTarget.id;
+    event.stopImmediatePropagation();
+    event.currentTarget.textContent = "Parent";
+    js15State.textContent = "ancestor:" + js15AncestorOrder + ":" +
+        js15AncestorTarget + ":" + js15AncestorCurrent;
+};
+js15AncestorParent.addEventListener("click", function(event) {
+    js15AncestorOrder = js15AncestorOrder + "unexpected-listener";
+});
+js15AncestorGrandparent.addEventListener("click", function(event) {
+    js15AncestorGrandparentCalls = js15AncestorGrandparentCalls + 1;
+    js15AncestorOrder = js15AncestorOrder + "g";
+    js15State.textContent = "ancestor:grandparent-ran";
+});
+
+var js15ResetChild = document.getElementById("js15-reset-child");
+var js15ResetParent = document.getElementById("js15-reset-parent");
+var js15ResetFirst = true;
+var js15ResetParentCalls = 0;
+js15ResetChild.addEventListener("click", function(event) {
+    if (js15ResetFirst) {
+        js15ResetFirst = false;
+        event.stopImmediatePropagation();
+    }
+});
+js15ResetParent.addEventListener("click", function(event) {
+    js15ResetParentCalls = js15ResetParentCalls + 1;
+    js15State.textContent = "reset:" + js15ResetParentCalls;
+});
+
+var js15BranchAChild = document.getElementById("js15-branch-a-child");
+var js15BranchBChild = document.getElementById("js15-branch-b-child");
+var js15BranchB = document.getElementById("js15-branch-b");
+var js15BranchACalls = 0;
+var js15BranchBCalls = 0;
+js15BranchAChild.onclick = function(event) {
+    js15BranchACalls = js15BranchACalls + 1;
+    event.stopImmediatePropagation();
+};
+js15BranchAChild.addEventListener("click", function(event) {
+    js15BranchACalls = js15BranchACalls + 100;
+});
+js15BranchB.addEventListener("click", function(event) {
+    js15BranchBCalls = js15BranchBCalls + 1;
+    js15State.textContent = "branches:" + js15BranchACalls + ":" + js15BranchBCalls;
+});
+
+var js15MutationChild = document.getElementById("js15-mutation-child");
+var js15MutationParent = document.getElementById("js15-mutation-parent");
+var js15MutationParentCalls = 0;
+js15MutationChild.onclick = function(event) {
+    event.stopImmediatePropagation();
+    event.target.textContent = "Stopped";
+    js15State.textContent = "mutation:stopped";
+};
+js15MutationChild.addEventListener("click", function(event) { js15State.textContent = "mutation-listener-ran"; });
+js15MutationParent.addEventListener("click", function(event) {
+    js15MutationParentCalls = js15MutationParentCalls + 1;
+    js15State.textContent = "mutation:parent-ran";
+});
+
+var js15ErrorChild = document.getElementById("js15-error-child");
+var js15ErrorParent = document.getElementById("js15-error-parent");
+var js15ErrorParentCalls = 0;
+js15ErrorChild.onclick = function(event) {
+    event.stopImmediatePropagation();
+    js15State.textContent = "error:stopped";
+    var x = js15UnknownIdentifier;
+};
+js15ErrorChild.addEventListener("click", function(event) { js15State.textContent = "error-listener-ran"; });
+js15ErrorParent.addEventListener("click", function(event) {
+    js15ErrorParentCalls = js15ErrorParentCalls + 1;
+    js15State.textContent = "error:parent-ran";
+});
+
+var js15Link = document.getElementById("js15-link");
+var js15LinkAncestor = document.getElementById("js15-link-parent");
+js15Link.onclick = function(event) { event.stopImmediatePropagation(); };
+js15Link.addEventListener("click", function(event) { js15State.textContent = "link-listener-ran"; });
+js15LinkAncestor.addEventListener("click", function(event) { js15State.textContent = "link-parent-ran"; });
+</script>
+</body>
+</html>
