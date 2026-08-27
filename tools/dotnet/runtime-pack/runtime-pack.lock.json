@@ -88,6 +88,39 @@
     "managedExceptions": false,
     "managedThreads": false
   },
+  "nativeAotFpRepair": {
+    "schemaVersion": 1,
+    "patchVersion": "c51-v1",
+    "patch": "patches/nativeaot-amd64-fp-handoff.patch",
+    "patchSha256": "4185495724D48E2962BA9042AF352718BF9188032DEE4C9DE6FFE9F145A1DC31",
+    "sourceCommit": "9d5a6a9aa463d6d10b0b0ba6d5982cc82f363dc3",
+    "policy": "idempotent-validating",
+    "targetFiles": {
+      "src/coreclr/nativeaot/Runtime/StackFrameIterator.cpp": {
+        "preimageSha256": "6A29A4DC9640D851934D5170843DD3A8B4EF61EE7556B36E7BF22B8ED979278E",
+        "postimageSha256": "C12CACAC444082D294094DFF79EB3C7501623378A4088701734D18A0B6FB3B80",
+        "preimageLength": 97834,
+        "postimageLength": 98959,
+        "postimageMarkers": [
+          "m_FramePointer = (PTR_VOID)m_RegDisplay.GetFP();",
+          "m_RegDisplay.pRbp = (PTR_uintptr_t)&m_FramePointer;",
+          "uintptr_t publishedFramePointer",
+          "*m_RegDisplay.pRbp = publishedFramePointer;"
+        ]
+      },
+      "src/coreclr/nativeaot/Runtime/windows/CoffNativeCodeManager.cpp": {
+        "preimageSha256": "867ABAFD8430253358C4792DD6D53523D984F878260C38676C69F99EA04836E5",
+        "postimageSha256": "5AF8B8125C45FC9F73D9C062501588D28A09A2A168FB0409B5C373E3780DEAFC",
+        "preimageLength": 43791,
+        "postimageLength": 44753,
+        "postimageMarkers": [
+          "PTR_uintptr_t callerRbpStorage = pRegisterSet->pRbp;",
+          "*callerRbpStorage = (uintptr_t)context.Rbp;",
+          "pRegisterSet->pRbp = callerRbpStorage;"
+        ]
+      }
+    }
+  },
   "adaptedWorkstationGc": {
     "identity": "guidexos-workstationgc-platform-object-v1",
     "strategy": "A-complete-gcenv-object",

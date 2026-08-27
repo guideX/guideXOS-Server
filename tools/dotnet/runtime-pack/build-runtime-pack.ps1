@@ -106,8 +106,8 @@ function Assert-StockPack([string]$Root, $Lock) {
     $nuspec = Join-Path $Root "runtime.win-x64.microsoft.dotnet.ilcompiler.nuspec"
     if (-not (Test-Path -LiteralPath $nuspec)) { throw "Runtime-pack nuspec missing: $nuspec" }
     $nuspecText = Get-Content -LiteralPath $nuspec -Raw
-    if ($nuspecText -notmatch '<version>9\.0\.0</version>') { throw "Runtime-pack version is not 9.0.0: $nuspec" }
-    if ($nuspecText -notmatch '9d5a6a9aa463d6d10b0b0ba6d5982cc82f363dc3') {
+    if ($nuspecText -notmatch ('<version>' + [regex]::Escape([string]$Lock.runtimePack.version) + '</version>')) { throw "Runtime-pack version does not match the lock: $nuspec" }
+    if ($nuspecText -notmatch [regex]::Escape([string]$Lock.runtimePack.commit)) {
         throw "Runtime-pack source commit does not match the lock file: $nuspec"
     }
 
@@ -134,6 +134,18 @@ Assert-WithinRoot $RuntimePackRoot $RepoRoot "Runtime-pack source"
 Assert-WithinRoot $OutputRoot (Join-Path $RepoRoot "out\dotnet") "Runtime-pack output"
 
 $lock = Read-Lock
+if ([string]$lock.architecture -ne "amd64" -or
+    [string]$lock.targetFramework -ne "net9.0" -or
+    [string]$lock.runtimeIdentifier -ne "win-x64" -or
+    [string]$lock.ilCompiler.version -ne "9.0.0" -or
+    [string]$lock.ilCompiler.commit -ne "9d5a6a9aa463d6d10b0b0ba6d5982cc82f363dc3" -or
+    [string]$lock.runtimePack.version -ne "9.0.0" -or
+    [string]$lock.runtimePack.commit -ne "9d5a6a9aa463d6d10b0b0ba6d5982cc82f363dc3") {
+    throw "C51 runtime identity lock mismatch: expected NativeAOT 9.0.0 AMD64 Workstation GC source 9d5a6a9aa463d6d10b0b0ba6d5982cc82f363dc3."
+}
+if ($NativeAotFpRepair -and $null -eq $lock.nativeAotFpRepair) {
+    throw "C51 NativeAOT FP repair lock section is missing."
+}
 $stockRoot = Find-StockRuntimePack $StockRuntimePackRoot
 Assert-StockPack $stockRoot $lock
 $lockedExternalRuntimeRoot = Join-Path $RepoRoot "out\dotnet\gc-feasibility-baseline\nativeaot-runtime"
@@ -141,6 +153,7 @@ if ($NativeAotFpRepair -and [string]::IsNullOrWhiteSpace($ExternalRuntimeRoot)) 
     $ExternalRuntimeRoot = $lockedExternalRuntimeRoot
 }
 $externalCommit = $null
+$externalCheckoutHead = $null
 $managedHeapBytes = if ($HeapConfiguration -eq "Primary64KiB") { 65536 } else { 4096 }
 if ($ManagedRepeatedAllocation) { $ManagedAllocation = $true }
 
@@ -151,6 +164,12 @@ if (-not [string]::IsNullOrWhiteSpace($ExternalRuntimeRoot)) {
     }
     $externalCommit = (& git -C $ExternalRuntimeRoot rev-parse HEAD).Trim()
     if ($LASTEXITCODE -ne 0) { throw "Unable to read external runtime checkout revision: $ExternalRuntimeRoot" }
+    $externalCheckoutHead = $externalCommit
+    $externalStatus = @(& git -C $ExternalRuntimeRoot status --porcelain 2>&1)
+    if ($LASTEXITCODE -ne 0) { throw "Unable to read external runtime checkout status: $ExternalRuntimeRoot" }
+    if ($externalStatus.Count -ne 0) {
+        throw "External runtime checkout is dirty; C51 requires a clean source acquisition checkout: $ExternalRuntimeRoot"
+    }
     if (-not $NativeAotFpRepair -and $externalCommit -ne $lock.ilCompiler.commit) {
         throw "External runtime checkout revision mismatch. Expected $($lock.ilCompiler.commit), got $externalCommit"
     }
@@ -166,6 +185,9 @@ if (-not [string]::IsNullOrWhiteSpace($ExternalRuntimeRoot)) {
 $source = Join-Path $RuntimePackRoot $lock.platformObject.source.Replace('/', '\')
 if (-not (Test-Path -LiteralPath $source)) { throw "Runtime-pack platform source not found: $source" }
 
+if ($NativeAotFpRepair -and (Test-Path -LiteralPath $OutputRoot) -and -not $Clean) {
+    throw "C51 stale-artifact protection: NativeAOT FP repair output already exists. Use -Clean or a fresh isolated OutputRoot: $OutputRoot"
+}
 if ($Clean -and (Test-Path -LiteralPath $OutputRoot)) { Remove-Item -LiteralPath $OutputRoot -Recurse -Force }
 New-Item -ItemType Directory -Force -Path $OutputRoot | Out-Null
 $object = Join-Path $OutputRoot "guidexos_nativeaot_platform.obj"
@@ -182,6 +204,7 @@ $fpStackSource = Join-Path $fpSourceRoot "src\coreclr\nativeaot\Runtime\StackFra
 $fpCoffSource = Join-Path $fpSourceRoot "src\coreclr\nativeaot\Runtime\windows\CoffNativeCodeManager.cpp"
 $fpStackObject = Join-Path $OutputRoot "StackFrameIterator.cpp.fp-repair.obj"
 $fpCoffObject = Join-Path $OutputRoot "CoffNativeCodeManager.cpp.fp-repair.obj"
+$fpRepairResultPath = $null
 $fpStackMember = "nativeaot\Runtime\Full\CMakeFiles\Runtime.WorkstationGC.dir\__\StackFrameIterator.cpp.obj"
 $fpCoffMember = "nativeaot\Runtime\Full\CMakeFiles\Runtime.WorkstationGC.dir\__\windows\CoffNativeCodeManager.cpp.obj"
 if ($NativeAotFpRepair) {
@@ -200,7 +223,10 @@ if ($NativeAotFpRepair) {
     if ($LASTEXITCODE -ne 0) { throw "Unable to archive locked NativeAOT FP repair sources." }
     & tar.exe -xf $fpSourceArchive -C $fpSourceRoot
     if ($LASTEXITCODE -ne 0) { throw "Unable to extract locked NativeAOT FP repair sources." }
-    & $fpApply -SourceRoot $fpSourceRoot
+    Set-Content -LiteralPath (Join-Path $fpSourceRoot ".guidexos-runtime-source-commit") -Value $lock.ilCompiler.commit -Encoding ASCII
+    $fpRepairResultPath = Join-Path $OutputRoot "nativeaot-fp-repair.result.json"
+    & $fpApply -SourceRoot $fpSourceRoot -RuntimeCommit $lock.ilCompiler.commit -LockPath (Join-Path $RuntimePackRoot "runtime-pack.lock.json") -PatchPath $fpPatch -ResultPath $fpRepairResultPath
+    if ($LASTEXITCODE -ne 0) { throw "C51 NativeAOT FP repair application failed with exit code $LASTEXITCODE" }
 }
 
 $stockSdk = Join-Path $stockRoot "sdk"
@@ -235,8 +261,9 @@ $threadRenamedMember = Join-Path $OutputRoot "thread.cpp.obj.renamed.obj"
 $ehRenamedMember = Join-Path $OutputRoot "EHHelpers.cpp.obj.renamed.obj"
 $allocFastMember = Join-Path $OutputRoot "AllocFast.asm.obj"
 $allocFastRenamedMember = Join-Path $OutputRoot "AllocFast.asm.obj.renamed.obj"
+$allocFastStockMember = "nativeaot\Runtime\Full\CMakeFiles\Runtime.WorkstationGC.dir\__\amd64\AllocFast.asm.obj"
 if ($ManagedAllocation) {
-    $removedRuntimeMembers += "nativeaot\Runtime\Full\CMakeFiles\Runtime.WorkstationGC.dir\__\amd64\AllocFast.asm.obj"
+    $removedRuntimeMembers += $allocFastStockMember
 }
 $fpExtractionLines = if ($NativeAotFpRepair) {
     @(
@@ -262,7 +289,7 @@ $sdkLines = @(
 )
 if ($ManagedAllocation) {
     $sdkLines += @(
-        "lib.exe /nologo /extract:`"$($removedRuntimeMembers[2])`" `"$stockRuntimeLibrary`" /out:`"$allocFastMember`"",
+        "lib.exe /nologo /extract:`"$allocFastStockMember`" `"$stockRuntimeLibrary`" /out:`"$allocFastMember`"",
         "if errorlevel 1 exit /b %errorlevel%"
     )
 }
@@ -328,6 +355,48 @@ $sdkLines | Set-Content -LiteralPath $sdkBatch -Encoding ASCII
 if ($LASTEXITCODE -ne 0) { throw "GuideXOS runtime-pack adapted runtime library build failed with exit code $LASTEXITCODE" }
 if (-not (Test-Path -LiteralPath $adaptedRuntimeLibrary)) { throw "Adapted runtime library was not produced: $adaptedRuntimeLibrary" }
 Normalize-CoffArchive $adaptedRuntimeLibrary
+$archiveMembersPath = Join-Path $OutputRoot "Runtime.WorkstationGC.members.txt"
+$archiveMembersBatch = Join-Path $OutputRoot "list-runtime-pack-members.bat"
+$archiveMembersLines = @(
+    "@echo off",
+    "setlocal",
+    "call `"$vcvars`" >nul",
+    "if errorlevel 1 exit /b %errorlevel%",
+    "lib.exe /nologo /list `"$adaptedRuntimeLibrary`" > `"$archiveMembersPath`"",
+    "exit /b %errorlevel%"
+)
+$archiveMembersLines | Set-Content -LiteralPath $archiveMembersBatch -Encoding ASCII
+& $archiveMembersBatch
+if ($LASTEXITCODE -ne 0) { throw "C51 archive membership listing failed with exit code $LASTEXITCODE" }
+if (-not (Test-Path -LiteralPath $archiveMembersPath -PathType Leaf)) { throw "C51 archive membership list was not produced: $archiveMembersPath" }
+$archiveMembers = @((Get-Content -LiteralPath $archiveMembersPath | ForEach-Object { $_.Trim() } | Where-Object { $_.Length -gt 0 }))
+$normalizeMember = { param([string]$Name) $Name.Trim().Replace('/', '\').ToLowerInvariant() }
+$expectedPatchedMembers = @()
+if ($NativeAotFpRepair) { $expectedPatchedMembers = @($fpStackMember, $fpCoffMember) }
+$patchedMemberCounts = [ordered]@{}
+foreach ($member in $expectedPatchedMembers) {
+    $normalized = & $normalizeMember $member
+    $count = @($archiveMembers | Where-Object { (& $normalizeMember $_) -eq $normalized }).Count
+    $patchedMemberCounts[$member] = $count
+    if ($count -ne 1) { throw "C51 archive membership validation expected exactly one patched member '$member', got $count" }
+}
+$removedMemberCounts = [ordered]@{}
+foreach ($member in $removedRuntimeMembers) {
+    $normalized = & $normalizeMember $member
+    $count = @($archiveMembers | Where-Object { (& $normalizeMember $_) -eq $normalized }).Count
+    $removedMemberCounts[$member] = $count
+    if ($count -ne 0) { throw "C51 archive membership validation found removed stock member '$member' $count time(s)" }
+}
+$archiveValidation = [ordered]@{
+    result = "PASS"
+    archive = $adaptedRuntimeLibrary
+    archiveSha256 = Get-Hash $adaptedRuntimeLibrary
+    memberList = $archiveMembersPath
+    memberCount = $archiveMembers.Count
+    patchedMemberCounts = $patchedMemberCounts
+    removedMemberCounts = $removedMemberCounts
+    duplicatePatchedMembers = (@($patchedMemberCounts.Values | Where-Object { $_ -gt 1 }).Count)
+}
 
 $lines = @(
     "@echo off",
@@ -345,9 +414,37 @@ if (-not (Test-Path -LiteralPath $object)) { throw "Runtime-pack object was not 
 $sourceHash = Get-Hash $source
 $objectHash = Get-Hash $object
 $lockPath = Join-Path $RuntimePackRoot "runtime-pack.lock.json"
+$repoHead = (& git -C $RepoRoot rev-parse HEAD).Trim()
+if ($LASTEXITCODE -ne 0) { throw "Unable to read guideXOS repository HEAD." }
+$repoSubject = (& git -C $RepoRoot log -1 --format=%s).Trim()
+$repoUpstream = (& git -C $RepoRoot rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2>$null).Trim()
+if ($LASTEXITCODE -ne 0) { $repoUpstream = $null }
+$repoAheadBehind = $null
+if ($repoUpstream) {
+    $repoAheadBehind = ((& git -C $RepoRoot rev-list --left-right --count "HEAD...$repoUpstream").Trim())
+    if ($LASTEXITCODE -ne 0) { $repoAheadBehind = $null }
+}
+$fpRepairResult = if ($NativeAotFpRepair -and (Test-Path -LiteralPath $fpRepairResultPath -PathType Leaf)) {
+    Get-Content -LiteralPath $fpRepairResultPath -Raw | ConvertFrom-Json
+} else { $null }
+if ($NativeAotFpRepair -and ($null -eq $fpRepairResult -or $fpRepairResult.stateAfter -ne "PATCHED_CORRECTLY")) {
+    throw "C51 patch result manifest does not prove PATCHED_CORRECTLY."
+}
+$sourceFileHashes = [ordered]@{}
+if ($NativeAotFpRepair) {
+    foreach ($property in $fpRepairResult.targetFiles.PSObject.Properties) {
+        $sourceFileHashes[$property.Name] = [ordered]@{
+            path = $property.Value.path
+            sha256 = $property.Value.sha256After
+        }
+    }
+}
 $manifest = [ordered]@{
-    schemaVersion = 1
+    schemaVersion = 2
+    c51Identifier = if ($NativeAotFpRepair) { "C011EC51" } else { $null }
     identity = if ($NativeAotFpRepair) { "guidexos-nativeaot-runtime-pack-amd64-workstationgc-fp-repair-v1" } elseif ($ManagedRepeatedAllocation) { "guidexos-nativeaot-runtime-pack-amd64-hostlog-repeated-allocation-nocollection-v1" } elseif ($ManagedAllocation) { "guidexos-nativeaot-runtime-pack-amd64-hostlog-allocating-nocollection-v1" } else { "guidexos-nativeaot-runtime-pack-amd64-hostlog-nonallocating-v1" }
+    repository = [ordered]@{ root = $RepoRoot; head = $repoHead; subject = $repoSubject; branch = (& git -C $RepoRoot branch --show-current).Trim(); upstream = $repoUpstream; aheadBehind = $repoAheadBehind }
+    runtimeIdentity = [ordered]@{ nativeAot = $lock.ilCompiler.version; architecture = "AMD64"; gc = "Workstation"; gcInterface = "5.3"; eeInterface = "2"; targetFramework = $lock.targetFramework; runtimeIdentifier = $lock.runtimeIdentifier; sourceCommit = $lock.ilCompiler.commit }
     architecture = $lock.architecture
     targetFramework = $lock.targetFramework
     runtimeIdentifier = $lock.runtimeIdentifier
@@ -377,14 +474,25 @@ $manifest = [ordered]@{
     stockRuntimePackVersion = $lock.runtimePack.version
     stockRuntimePackSourceCommit = $lock.runtimePack.commit
     externalRuntimeRoot = if ([string]::IsNullOrWhiteSpace($ExternalRuntimeRoot)) { $null } else { $ExternalRuntimeRoot }
+    externalRuntimeCheckoutHead = if ([string]::IsNullOrWhiteSpace($ExternalRuntimeRoot)) { $null } else { $externalCheckoutHead }
     externalRuntimeCommit = if ([string]::IsNullOrWhiteSpace($ExternalRuntimeRoot)) { $null } else { $externalCommit }
     nativeAotFpRepair = [bool]$NativeAotFpRepair
+    nativeAotFpRepairPatchVersion = if ($NativeAotFpRepair) { $lock.nativeAotFpRepair.patchVersion } else { $null }
     nativeAotFpRepairPatch = if ($NativeAotFpRepair) { $fpPatch } else { $null }
     nativeAotFpRepairPatchSha256 = if ($NativeAotFpRepair) { Get-Hash $fpPatch } else { $null }
+    nativeAotFpRepairStateBefore = if ($NativeAotFpRepair) { $fpRepairResult.stateBefore } else { $null }
+    nativeAotFpRepairStateAfter = if ($NativeAotFpRepair) { $fpRepairResult.stateAfter } else { $null }
+    nativeAotFpRepairAction = if ($NativeAotFpRepair) { $fpRepairResult.action } else { $null }
     nativeAotFpRepairSourceRoot = if ($NativeAotFpRepair) { $fpSourceRoot } else { $null }
-    nativeAotFpRepairSourceCommit = if ($NativeAotFpRepair) { $externalCommit } else { $null }
+    nativeAotFpRepairSourceCommit = if ($NativeAotFpRepair) { $lock.ilCompiler.commit } else { $null }
+    nativeAotFpRepairSourceRevisionMarker = if ($NativeAotFpRepair) { Join-Path $fpSourceRoot ".guidexos-runtime-source-commit" } else { $null }
+    nativeAotFpRepairSourceFiles = if ($NativeAotFpRepair) { $sourceFileHashes } else { $null }
     nativeAotFpRepairObjects = if ($NativeAotFpRepair) { [ordered]@{ stackFrameIterator = $fpStackObject; stackFrameIteratorSha256 = Get-Hash $fpStackObject; coffNativeCodeManager = $fpCoffObject; coffNativeCodeManagerSha256 = Get-Hash $fpCoffObject } } else { $null }
     nativeAotFpRepairMembers = if ($NativeAotFpRepair) { @($fpStackMember, $fpCoffMember) } else { @() }
+    archiveMembership = $archiveValidation
+    buildCommandIdentity = [ordered]@{ script = $MyInvocation.MyCommand.Path; scriptSha256 = Get-Hash $MyInvocation.MyCommand.Path; arguments = $MyInvocation.Line; freshOutputRoot = $true; cleanRequested = [bool]$Clean }
+    staleArtifactProtection = [ordered]@{ result = "PASS"; ownedOutputRoot = $OutputRoot; rejectedExistingOutputWithoutClean = [bool]$NativeAotFpRepair; sourceArchiveCreatedFromLockedCommit = [bool]$NativeAotFpRepair; staleTargetedIntermediatesRemoved = [bool]$Clean }
+    semanticRewriteGuard = [ordered]@{ result = "PASS"; c46SemanticCompileDefine = $false; c47SemanticCompileDefine = $false; c48SemanticCompileDefine = $false; generatedStackFrameIteratorReplacement = $false; productionizedValidationRequiresDurablePatch = [bool]$NativeAotFpRepair }
     platformObject = $lock.platformObject
     liveWindowsImportsReplaced = @("FlsGetValue", "FlsSetValue", "RhpReversePInvoke", "RhpReversePInvokeReturn")
     managedAllocation = [bool]$ManagedAllocation

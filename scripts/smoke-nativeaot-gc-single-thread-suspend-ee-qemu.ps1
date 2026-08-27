@@ -4,6 +4,7 @@ param(
     [int]$TimeoutSeconds = 90,
     [int]$FreshBootCount = 3,
     [switch]$SkipManagedBuild,
+    [string]$RuntimePackManifest = "",
     [ValidateSet("single-thread-suspend-ee", "allocation-context-fixup-root-boundary", "first-per-thread-root-provider", "first-root-candidate-load", "first-non-null-root-callback-boundary", "first-root-callback-entry", "first-root-membership-classification", "first-root-heap-resolution", "first-root-condemned-generation-decision", "first-root-pre-mark-boundary", "first-root-first-mark-mutation", "first-root-post-queue-mark-decision", "first-root-first-non-null-old-o", "next-genuine-root-provider", "stack-provider-transition-failfast", "stack-provider-code-manager-registration", "stack-provider-transition-frame-control-pc", "stack-provider-unwind-gc-info", "stack-provider-unwind-caller-frame", "stack-provider-native-transition-continuation", "stack-provider-native-caller-provenance", "stack-provider-native-kernel-entry-boundary", "stack-provider-native-kernel-stack-completion", "post-root-queue-mark-processing", "mark-queue-closure", "post-mark-short-weak-handle", "short-weak-handle-operation", "short-weak-live-handle", "short-weak-dead-handle", "short-weak-lifetime-transition", "relocation-root-update", "relocated-handle-update", "lifetime-transition-complete", "second-collection-completion", "dead-object-reclamation", "collection-plan-mode-provenance-c37", "collection-plan-mode-provenance-c38", "compaction-reclamation", "post-gc-allocator-provenance", "post-gc-reclaimed-gen1-lifecycle", "malformed-transition-frame-provenance", "reverse-pinvoke-slot-provenance", "regdisplay-fp-handoff", "relocation-root-fault-provenance", "iterator-fp-ownership", "second-collection-continuation", "productionized-second-collection")]
     [string]$ProofMode = "single-thread-suspend-ee"
 )
@@ -143,6 +144,9 @@ $isC011EC40 = $ProofMode -in @("compaction-reclamation", "post-gc-allocator-prov
 $isC011EC39 = $ProofMode -in @("collection-plan-mode-provenance-c37", "collection-plan-mode-provenance-c38", "compaction-reclamation", "post-gc-allocator-provenance", "post-gc-reclaimed-gen1-lifecycle", "malformed-transition-frame-provenance", "reverse-pinvoke-slot-provenance", "regdisplay-fp-handoff", "relocation-root-fault-provenance", "iterator-fp-ownership", "second-collection-continuation", "productionized-second-collection")
 $isC011EC39C38Variant = $ProofMode -eq "collection-plan-mode-provenance-c38"
 $useC011EC46SemanticInjection = $isC011EC46 -and -not $isC011EC50Production
+if ($isC011EC50Production -and $useC011EC46SemanticInjection) {
+    throw "C51 semantic-rewrite guard failed: C46/C47/C48 semantic injection is enabled in productionized mode."
+}
 $isC011EC37 = $ProofMode -in @("second-collection-completion", "dead-object-reclamation") -or $isC011EC39
 $isC011EC35 = $ProofMode -in @("relocated-handle-update", "lifetime-transition-complete", "second-collection-completion", "dead-object-reclamation")
 $isC011EC35Proof = $ProofMode -eq "relocated-handle-update"
@@ -781,14 +785,35 @@ extern "C" void __cdecl guideXosNativeAotC011EC44SuspendCheckpoint();
         Require-File $lockedStackFrameIteratorPath "Locked NativeAOT StackFrameIterator.cpp source"
         if ($isC011EC50Production) {
             Require-File $nativeAotFpRepairApply "Durable NativeAOT FP repair application script"
-            New-Item -ItemType Directory -Force -Path $nativeAotFpRepairSourceRoot | Out-Null
-            $durableStackPath = Join-Path $nativeAotFpRepairSourceRoot "src\coreclr\nativeaot\Runtime\StackFrameIterator.cpp"
-            $durableCoffPath = Join-Path $nativeAotFpRepairSourceRoot "src\coreclr\nativeaot\Runtime\windows\CoffNativeCodeManager.cpp"
-            New-Item -ItemType Directory -Force -Path (Split-Path $durableStackPath), (Split-Path $durableCoffPath) | Out-Null
-            Copy-Item -LiteralPath $lockedStackFrameIteratorPath -Destination $durableStackPath -Force
-            Copy-Item -LiteralPath (Join-Path $lockedSourceRoot "src\coreclr\nativeaot\Runtime\windows\CoffNativeCodeManager.cpp") -Destination $durableCoffPath -Force
-            & $nativeAotFpRepairApply -SourceRoot $nativeAotFpRepairSourceRoot
-            $lockedStackFrameIteratorPath = $durableStackPath
+            if ([string]::IsNullOrWhiteSpace($RuntimePackManifest)) {
+                throw "C51 productionized validation requires -RuntimePackManifest from the fresh NativeAOT runtime-pack build."
+            }
+            $RuntimePackManifest = [System.IO.Path]::GetFullPath($RuntimePackManifest)
+            Require-File $RuntimePackManifest "C51 runtime-pack build manifest"
+            $runtimePackBuildManifest = Get-Content -LiteralPath $RuntimePackManifest -Raw | ConvertFrom-Json
+            if ($runtimePackBuildManifest.nativeAotFpRepair -ne $true -or
+                $runtimePackBuildManifest.nativeAotFpRepairSourceCommit -ne $lockedCommit -or
+                $runtimePackBuildManifest.nativeAotFpRepairStateAfter -ne "PATCHED_CORRECTLY") {
+                throw "C51 runtime-pack manifest does not prove a correctly patched locked source."
+            }
+            $expectedPatchPath = Join-Path $root "tools\dotnet\runtime-pack\patches\nativeaot-amd64-fp-handoff.patch"
+            if ($runtimePackBuildManifest.nativeAotFpRepairPatchSha256 -ne (Hash-File $expectedPatchPath)) {
+                throw "C51 runtime-pack manifest patch identity does not match the checked-in patch."
+            }
+            $nativeAotFpRepairSourceRoot = [System.IO.Path]::GetFullPath($runtimePackBuildManifest.nativeAotFpRepairSourceRoot)
+            Require-File (Join-Path $nativeAotFpRepairSourceRoot "src\coreclr\nativeaot\Runtime\StackFrameIterator.cpp") "C51 patched StackFrameIterator source"
+            Require-File (Join-Path $nativeAotFpRepairSourceRoot "src\coreclr\nativeaot\Runtime\windows\CoffNativeCodeManager.cpp") "C51 patched CoffNativeCodeManager source"
+            foreach ($objectPath in @(
+                $runtimePackBuildManifest.nativeAotFpRepairObjects.stackFrameIterator,
+                $runtimePackBuildManifest.nativeAotFpRepairObjects.coffNativeCodeManager
+            )) {
+                Require-File $objectPath "C51 patched runtime object"
+            }
+            if ((Hash-File $runtimePackBuildManifest.nativeAotFpRepairObjects.stackFrameIterator) -ne $runtimePackBuildManifest.nativeAotFpRepairObjects.stackFrameIteratorSha256 -or
+                (Hash-File $runtimePackBuildManifest.nativeAotFpRepairObjects.coffNativeCodeManager) -ne $runtimePackBuildManifest.nativeAotFpRepairObjects.coffNativeCodeManagerSha256) {
+                throw "C51 patched runtime object hash validation failed."
+            }
+            $lockedStackFrameIteratorPath = Join-Path $nativeAotFpRepairSourceRoot "src\coreclr\nativeaot\Runtime\StackFrameIterator.cpp"
         }
 
         $gcHelpersText = (Get-Content -LiteralPath $lockedGcHelpersPath -Raw).Replace("`r`n", "`n")
@@ -4750,6 +4775,12 @@ exit /b 0
         " /DGUIDEXOS_NATIVEAOT_C011EC45_PROVENANCE" + $(if ($isC011EC46) { " /DGUIDEXOS_NATIVEAOT_C011EC46_REGDISPLAY_HANDOFF" } else { "" })
     } else { "" }
     $c46CompileDefine = if ($isC011EC46) { " /DGUIDEXOS_NATIVEAOT_C011EC46_REGDISPLAY_HANDOFF" } else { "" }
+    if ($isC011EC50Production -and
+        ($useC011EC46SemanticInjection -or
+         $c45CompileDefine -match 'C011EC4[678]|C011EC48' -or
+         $c46CompileDefine -match 'C011EC4[678]|C011EC48')) {
+        throw "C51 semantic-rewrite guard failed: productionized compile command contains a C46/C47/C48 semantic define."
+    }
     if ($isC011EC47) {
         $c45CompileDefine += " /DGUIDEXOS_NATIVEAOT_C011EC47_PROVENANCE"
         $c46CompileDefine += " /DGUIDEXOS_NATIVEAOT_C011EC47_PROVENANCE"
@@ -8051,6 +8082,9 @@ exit /b %errorlevel%
             productionized=$productionized
             semanticHarnessRewriteRequired=(-not $productionized)
             durableFpRepair=[ordered]@{ patchApplied=$productionized; sourcePath=if ($productionized) { 'tools/dotnet/runtime-pack/patches/nativeaot-amd64-fp-handoff.patch' } else { $null }; ordinaryRuntimeBuildSwitch=if ($productionized) { '-NativeAotFpRepair' } else { $null } }
+            semanticRewriteGuard=[ordered]@{ result=if ($productionized) { 'PASS' } else { 'NOT_APPLICABLE' }; c46SemanticCompileDefine=if ($productionized) { $false } else { $useC011EC46SemanticInjection }; c47SemanticCompileDefine=if ($productionized) { $false } else { $isC011EC47 }; c48SemanticCompileDefine=if ($productionized) { $false } else { $isC011EC48 }; generatedStackFrameIteratorReplacement=$false; durableRuntimeSourceUsed=if ($productionized) { $true } else { $false } }
+            runtimePackBuildManifest=if ($productionized) { $RuntimePackManifest } else { $null }
+            runtimePackBuildManifestSha256=if ($productionized) { Hash-File $RuntimePackManifest } else { $null }
             repositoryHead=$repoHead; startingCommittedHead=$startingCommittedHead; startingBranch=$startingBranch
             upstream=$upstream; startingWorktreeStatus=$startingWorktreeStatus; startingDirtyState=$dirtyState
             lockedRuntimeIdentity=[ordered]@{ nativeAot='9.0.0'; architecture='AMD64'; gc='Workstation'; gcInterfaces='5.3 / 2'; sourceCommit=$lockedCommit }
