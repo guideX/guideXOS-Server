@@ -106,6 +106,20 @@ function Write-NavigatorPublicHttpsProofPack {
         body_bytes = [string]$Fields["body_bytes"]
         encoded_body_bytes = [string]$Fields["encoded_body_bytes"]
         decoded_body_bytes = [string]$Fields["decoded_body_bytes"]
+        secure_rng_source = [string]$Fields["secure_rng_source"]
+        secure_rng_status = [string]$Fields["secure_rng_status"]
+        secure_rng_initialized = [string]$Fields["secure_rng_initialized"]
+        secure_rng_fill_requests = [string]$Fields["secure_rng_fill_requests"]
+        secure_rng_fill_failures = [string]$Fields["secure_rng_fill_failures"]
+        secure_rng_rdseed_retry_failures = [string]$Fields["secure_rng_rdseed_retry_failures"]
+        secure_rng_rdrand_retry_failures = [string]$Fields["secure_rng_rdrand_retry_failures"]
+        secure_rng_provider_fallbacks = [string]$Fields["secure_rng_provider_fallbacks"]
+        psa_rng_requests = [string]$Fields["psa_rng_requests"]
+        psa_rng_successes = [string]$Fields["psa_rng_successes"]
+        psa_rng_invalid_argument_failures = [string]$Fields["psa_rng_invalid_argument_failures"]
+        psa_rng_insufficient_entropy_failures = [string]$Fields["psa_rng_insufficient_entropy_failures"]
+        psa_rng_hardware_failures = [string]$Fields["psa_rng_hardware_failures"]
+        psa_rng_last_result = [string]$Fields["psa_rng_last_result"]
         decoded_body_cap = [string]$Fields["decoded_body_cap"]
         decoded_cap_headroom = [string]$Fields["decoded_cap_headroom"]
         page_render_result = [string]$Fields["page_render_result"]
@@ -1161,6 +1175,20 @@ $fields = [ordered]@{
     body_bytes = "0"
     encoded_body_bytes = "0"
     decoded_body_bytes = "0"
+    secure_rng_source = "(not-attempted)"
+    secure_rng_status = "(not-attempted)"
+    secure_rng_initialized = "no"
+    secure_rng_fill_requests = "0"
+    secure_rng_fill_failures = "0"
+    secure_rng_rdseed_retry_failures = "0"
+    secure_rng_rdrand_retry_failures = "0"
+    secure_rng_provider_fallbacks = "0"
+    psa_rng_requests = "0"
+    psa_rng_successes = "0"
+    psa_rng_invalid_argument_failures = "0"
+    psa_rng_insufficient_entropy_failures = "0"
+    psa_rng_hardware_failures = "0"
+    psa_rng_last_result = "NotAttempted"
     decoded_body_cap = "262144"
     decoded_cap_headroom = "262144"
     header_cap_hit = "no"
@@ -1505,6 +1533,20 @@ try {
         "tls_transport_error_code",
         "tls_request_bytes_written",
         "tls_response_bytes_read",
+        "secure_rng_source",
+        "secure_rng_status",
+        "secure_rng_initialized",
+        "secure_rng_fill_requests",
+        "secure_rng_fill_failures",
+        "secure_rng_rdseed_retry_failures",
+        "secure_rng_rdrand_retry_failures",
+        "secure_rng_provider_fallbacks",
+        "psa_rng_requests",
+        "psa_rng_successes",
+        "psa_rng_invalid_argument_failures",
+        "psa_rng_insufficient_entropy_failures",
+        "psa_rng_hardware_failures",
+        "psa_rng_last_result",
         "tcp_abort_used",
         "redirected_https_retry_used",
         "redirect_hop_index",

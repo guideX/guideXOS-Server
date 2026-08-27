@@ -49,7 +49,9 @@ bool gxos_random_bytes(void* buffer, size_t len)
     if (!kernel::secure_random::fill(buffer, len)) return false;
     if (!s_entropyReadMarkerEmitted) {
         s_entropyReadMarkerEmitted = true;
-        kernel::serial::puts("[RNG] entropy sample request success; secure source read confirmed\n");
+        kernel::serial::puts("[RNG] entropy sample request success; secure source read confirmed; provider=");
+        kernel::serial::puts(gxos_secure_random_source());
+        kernel::serial::puts("\n");
     }
     return true;
 }
@@ -94,6 +96,26 @@ bool gxos_virtio_rng_detected()
 const char* gxos_virtio_rng_status()
 {
     return kernel::virtio::rng::last_status_name();
+}
+
+GxosSecureRandomDiagnostics gxos_secure_random_diagnostics()
+{
+    const kernel::secure_random::SecureRandomDiagnostics diagnostics =
+        kernel::secure_random::diagnostics();
+    return {
+        diagnostics.initialized,
+        diagnostics.cpu.rdseed,
+        diagnostics.cpu.rdrand,
+        diagnostics.virtioDetected,
+        diagnostics.virtioReady,
+        kernel::secure_random::source_name(),
+        kernel::secure_random::status_name(),
+        diagnostics.fillRequests,
+        diagnostics.fillFailures,
+        diagnostics.rdseedRetryFailures,
+        diagnostics.rdrandRetryFailures,
+        diagnostics.providerFallbacks
+    };
 }
 
 bool gxos_wall_clock_unix_seconds(int64_t* out)
@@ -245,6 +267,41 @@ bool gxos_virtio_rng_detected()
 const char* gxos_virtio_rng_status()
 {
     return "hosted-not-applicable";
+}
+
+GxosSecureRandomDiagnostics gxos_secure_random_diagnostics()
+{
+#if defined(_WIN32)
+    return {
+        true,
+        false,
+        false,
+        false,
+        false,
+        "BCryptGenRandom system-preferred RNG",
+        "hosted-system-rng",
+        0,
+        0,
+        0,
+        0,
+        0
+    };
+#else
+    return {
+        false,
+        false,
+        false,
+        false,
+        false,
+        "none (unsupported hosted platform)",
+        "hosted-not-applicable",
+        0,
+        0,
+        0,
+        0,
+        0
+    };
+#endif
 }
 
 bool gxos_wall_clock_unix_seconds(int64_t* out)

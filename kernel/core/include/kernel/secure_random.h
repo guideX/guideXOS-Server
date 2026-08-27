@@ -33,6 +33,37 @@ struct CpuRngFeatures {
     bool rdrand;
 };
 
+struct ProviderPriority {
+    Source sources[3];
+    uint8_t count;
+};
+
+// The order is part of the secure-random contract.  It describes candidates
+// only; a provider is not considered selected for a request until it supplies
+// the complete output successfully.
+inline ProviderPriority provider_priority(CpuRngFeatures cpu, bool virtioReady)
+{
+    ProviderPriority priority = {{ SOURCE_NONE, SOURCE_NONE, SOURCE_NONE }, 0};
+    if (cpu.rdseed) priority.sources[priority.count++] = SOURCE_RDSEED;
+    if (cpu.rdrand) priority.sources[priority.count++] = SOURCE_RDRAND;
+    if (virtioReady) priority.sources[priority.count++] = SOURCE_VIRTIO_RNG;
+    return priority;
+}
+
+struct SecureRandomDiagnostics {
+    bool initialized;
+    CpuRngFeatures cpu;
+    Source selectedSource;
+    Status lastStatus;
+    bool virtioDetected;
+    bool virtioReady;
+    uint32_t fillRequests;
+    uint32_t fillFailures;
+    uint32_t rdseedRetryFailures;
+    uint32_t rdrandRetryFailures;
+    uint32_t providerFallbacks;
+};
+
 // Pure feature-mask interpretation used by the runtime detector and host
 // tests.  The caller supplies the already-validated CPUID leaf values.
 inline CpuRngFeatures cpu_rng_features_from_cpuid(uint32_t maxBasicLeaf,
@@ -58,6 +89,7 @@ const char* source_name();
 const char* status_name();
 bool rdseed_supported();
 bool rdrand_supported();
+SecureRandomDiagnostics diagnostics();
 
 } // namespace secure_random
 } // namespace kernel

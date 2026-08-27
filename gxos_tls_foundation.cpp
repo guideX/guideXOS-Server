@@ -261,6 +261,61 @@ static void gxos_report_psa_rng_failure()
 }
 #endif
 
+static gxos::GxosPsaRngDiagnostics gxos_psa_rng_diagnostics = {
+    0,
+    0,
+    0,
+    0,
+    0,
+    gxos::GxosPsaRngLastResult::NotAttempted
+};
+static bool gxos_psa_rng_success_marker_emitted = false;
+static bool gxos_psa_rng_invalid_argument_marker_emitted = false;
+static bool gxos_psa_rng_insufficient_entropy_marker_emitted = false;
+static bool gxos_psa_rng_hardware_failure_marker_emitted = false;
+
+static void gxos_psa_rng_increment(uint32_t* value)
+{
+    if (value && *value != 0xFFFFFFFFu) ++*value;
+}
+
+static void gxos_psa_rng_record(gxos::GxosPsaRngLastResult result)
+{
+    gxos_psa_rng_diagnostics.lastResult = result;
+    switch (result) {
+    case gxos::GxosPsaRngLastResult::Success:
+        gxos_psa_rng_increment(&gxos_psa_rng_diagnostics.successes);
+        if (!gxos_psa_rng_success_marker_emitted) {
+            gxos_psa_rng_success_marker_emitted = true;
+            kernel::serial::puts("[TLS-PSA] external RNG request success; secure source read confirmed\n");
+        }
+        break;
+    case gxos::GxosPsaRngLastResult::InvalidArgument:
+        gxos_psa_rng_increment(&gxos_psa_rng_diagnostics.invalidArgumentFailures);
+        if (!gxos_psa_rng_invalid_argument_marker_emitted) {
+            gxos_psa_rng_invalid_argument_marker_emitted = true;
+            kernel::serial::puts("[TLS-PSA] request rejected: PSA_ERROR_INVALID_ARGUMENT\n");
+        }
+        break;
+    case gxos::GxosPsaRngLastResult::InsufficientEntropy:
+        gxos_psa_rng_increment(&gxos_psa_rng_diagnostics.insufficientEntropyFailures);
+        if (!gxos_psa_rng_insufficient_entropy_marker_emitted) {
+            gxos_psa_rng_insufficient_entropy_marker_emitted = true;
+            kernel::serial::puts("[TLS-PSA] request rejected: PSA_ERROR_INSUFFICIENT_ENTROPY\n");
+        }
+        break;
+    case gxos::GxosPsaRngLastResult::HardwareFailure:
+        gxos_psa_rng_increment(&gxos_psa_rng_diagnostics.hardwareFailures);
+        if (!gxos_psa_rng_hardware_failure_marker_emitted) {
+            gxos_psa_rng_hardware_failure_marker_emitted = true;
+            kernel::serial::puts("[TLS-PSA] request failed: PSA_ERROR_HARDWARE_FAILURE\n");
+        }
+        break;
+    default:
+        break;
+    }
+}
+
 static bool gxos_mbedtls_utc_tm_from_unix_seconds(long long seconds, struct tm* out_tm)
 {
     if (!out_tm || seconds < 0) return false;
@@ -342,23 +397,34 @@ extern "C" psa_status_t mbedtls_psa_external_get_random(
     size_t output_size,
     size_t* output_length)
 {
-    if (!output_length) return PSA_ERROR_INVALID_ARGUMENT;
+    gxos_psa_rng_increment(&gxos_psa_rng_diagnostics.requests);
+    if (!output_length) {
+        gxos_psa_rng_record(gxos::GxosPsaRngLastResult::InvalidArgument);
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
     *output_length = 0;
 
     if (output_size == 0) {
+        gxos_psa_rng_record(gxos::GxosPsaRngLastResult::Success);
         return PSA_SUCCESS;
     }
-    if (!output) return PSA_ERROR_INVALID_ARGUMENT;
+    if (!output) {
+        gxos_psa_rng_record(gxos::GxosPsaRngLastResult::InvalidArgument);
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
     if (gxos::gxos_random_quality() != gxos::GxosRandomQuality::Secure) {
         gxos_report_psa_rng_failure();
+        gxos_psa_rng_record(gxos::GxosPsaRngLastResult::InsufficientEntropy);
         return PSA_ERROR_INSUFFICIENT_ENTROPY;
     }
     if (!gxos::gxos_random_bytes(output, output_size)) {
         gxos_report_psa_rng_failure();
+        gxos_psa_rng_record(gxos::GxosPsaRngLastResult::HardwareFailure);
         return PSA_ERROR_HARDWARE_FAILURE;
     }
 
     *output_length = output_size;
+    gxos_psa_rng_record(gxos::GxosPsaRngLastResult::Success);
     return PSA_SUCCESS;
 }
 
@@ -4022,6 +4088,33 @@ const char* gxos_tls_hook_status_name(GxosTlsHookStatus status)
 GxosTlsRuntimeHookInfo gxos_tls_runtime_hook_info()
 {
     return make_runtime_hook_info();
+}
+
+const char* gxos_psa_rng_last_result_name(GxosPsaRngLastResult result)
+{
+    switch (result) {
+    case GxosPsaRngLastResult::Success: return "Success";
+    case GxosPsaRngLastResult::InvalidArgument: return "InvalidArgument";
+    case GxosPsaRngLastResult::InsufficientEntropy: return "InsufficientEntropy";
+    case GxosPsaRngLastResult::HardwareFailure: return "HardwareFailure";
+    default: return "NotAttempted";
+    }
+}
+
+GxosPsaRngDiagnostics gxos_tls_rng_diagnostics()
+{
+#if defined(GXOS_BARE_METAL) && GXOS_TLS_MBEDTLS_RUNTIME_INCLUDED
+    return gxos_psa_rng_diagnostics;
+#else
+    return {
+        0,
+        0,
+        0,
+        0,
+        0,
+        GxosPsaRngLastResult::NotAttempted
+    };
+#endif
 }
 
 GxosTlsHostnameValidationInfo gxos_tls_hostname_validation_info()

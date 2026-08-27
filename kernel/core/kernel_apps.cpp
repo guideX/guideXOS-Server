@@ -9500,6 +9500,8 @@ void NavigatorApp::buildRuntimeDocument()
     const bool tlsReady = gxos::gxos_tls_prerequisites_ready();
     const char* tlsReadinessBlocker = gxos::gxos_tls_prerequisites_blocker_reason();
     const bool rngReadSmoke = rngQuality == gxos::GxosRandomQuality::Secure;
+    const gxos::GxosSecureRandomDiagnostics rngDiagnostics = gxos::gxos_secure_random_diagnostics();
+    const gxos::GxosPsaRngDiagnostics psaRngDiagnostics = gxos::gxos_tls_rng_diagnostics();
     const bool wallClockAvailable = gxos::gxos_wall_clock_unix_seconds(&wallClockSeconds);
     const bool wallClockUtcAvailable = gxos::gxos_wall_clock_utc_text(wallClockUtc, sizeof(wallClockUtc));
     strcopy(prerequisiteLine, "RNG: quality=", sizeof(prerequisiteLine));
@@ -9524,6 +9526,48 @@ void NavigatorApp::buildRuntimeDocument()
     addBlock(BLOCK_LIST_ITEM, prerequisiteLine);
     strcopy(prerequisiteLine, "Random read smoke: ", sizeof(prerequisiteLine));
     strappend(prerequisiteLine, rngReadSmoke ? "PASS" : "FAIL", sizeof(prerequisiteLine));
+    addBlock(BLOCK_LIST_ITEM, prerequisiteLine);
+    strcopy(prerequisiteLine, "Secure RNG telemetry: initialized=", sizeof(prerequisiteLine));
+    strappend(prerequisiteLine, rngDiagnostics.initialized ? "yes" : "no", sizeof(prerequisiteLine));
+    strappend(prerequisiteLine, "; requests=", sizeof(prerequisiteLine));
+    char rngRequests[24];
+    nav_i64_to_text(static_cast<int64_t>(rngDiagnostics.fillRequests), rngRequests, sizeof(rngRequests));
+    strappend(prerequisiteLine, rngRequests, sizeof(prerequisiteLine));
+    strappend(prerequisiteLine, "; failures=", sizeof(prerequisiteLine));
+    char rngFailures[24];
+    nav_i64_to_text(static_cast<int64_t>(rngDiagnostics.fillFailures), rngFailures, sizeof(rngFailures));
+    strappend(prerequisiteLine, rngFailures, sizeof(prerequisiteLine));
+    strappend(prerequisiteLine, "; RDSEED retry-failures=", sizeof(prerequisiteLine));
+    char rdseedRetryFailures[24];
+    nav_i64_to_text(static_cast<int64_t>(rngDiagnostics.rdseedRetryFailures), rdseedRetryFailures, sizeof(rdseedRetryFailures));
+    strappend(prerequisiteLine, rdseedRetryFailures, sizeof(prerequisiteLine));
+    strappend(prerequisiteLine, "; RDRAND retry-failures=", sizeof(prerequisiteLine));
+    char rdrandRetryFailures[24];
+    nav_i64_to_text(static_cast<int64_t>(rngDiagnostics.rdrandRetryFailures), rdrandRetryFailures, sizeof(rdrandRetryFailures));
+    strappend(prerequisiteLine, rdrandRetryFailures, sizeof(prerequisiteLine));
+    strappend(prerequisiteLine, "; fallbacks=", sizeof(prerequisiteLine));
+    char rngFallbacks[24];
+    nav_i64_to_text(static_cast<int64_t>(rngDiagnostics.providerFallbacks), rngFallbacks, sizeof(rngFallbacks));
+    strappend(prerequisiteLine, rngFallbacks, sizeof(prerequisiteLine));
+    addBlock(BLOCK_LIST_ITEM, prerequisiteLine);
+    strcopy(prerequisiteLine, "PSA RNG telemetry: requests=", sizeof(prerequisiteLine));
+    char psaRequests[24];
+    nav_i64_to_text(static_cast<int64_t>(psaRngDiagnostics.requests), psaRequests, sizeof(psaRequests));
+    strappend(prerequisiteLine, psaRequests, sizeof(prerequisiteLine));
+    strappend(prerequisiteLine, "; successes=", sizeof(prerequisiteLine));
+    char psaSuccesses[24];
+    nav_i64_to_text(static_cast<int64_t>(psaRngDiagnostics.successes), psaSuccesses, sizeof(psaSuccesses));
+    strappend(prerequisiteLine, psaSuccesses, sizeof(prerequisiteLine));
+    strappend(prerequisiteLine, "; insufficient-entropy=", sizeof(prerequisiteLine));
+    char psaInsufficient[24];
+    nav_i64_to_text(static_cast<int64_t>(psaRngDiagnostics.insufficientEntropyFailures), psaInsufficient, sizeof(psaInsufficient));
+    strappend(prerequisiteLine, psaInsufficient, sizeof(prerequisiteLine));
+    strappend(prerequisiteLine, "; hardware-failure=", sizeof(prerequisiteLine));
+    char psaHardware[24];
+    nav_i64_to_text(static_cast<int64_t>(psaRngDiagnostics.hardwareFailures), psaHardware, sizeof(psaHardware));
+    strappend(prerequisiteLine, psaHardware, sizeof(prerequisiteLine));
+    strappend(prerequisiteLine, "; last=", sizeof(prerequisiteLine));
+    strappend(prerequisiteLine, gxos::gxos_psa_rng_last_result_name(psaRngDiagnostics.lastResult), sizeof(prerequisiteLine));
     addBlock(BLOCK_LIST_ITEM, prerequisiteLine);
     strcopy(prerequisiteLine, "Wall clock: status=", sizeof(prerequisiteLine));
     strappend(prerequisiteLine, gxos::gxos_wall_clock_status_name(gxos::gxos_wall_clock_status()), sizeof(prerequisiteLine));
@@ -18380,6 +18424,8 @@ static bool printNavigatorRuntimeSmokePreamble()
     const bool rngRead1 = gxos::gxos_random_bytes(rngProbe1, sizeof(rngProbe1));
     const bool rngRead2 = gxos::gxos_random_bytes(rngProbe2, sizeof(rngProbe2));
     const gxos::GxosRandomQuality rngQuality = gxos::gxos_random_quality();
+    const gxos::GxosSecureRandomDiagnostics rngDiagnostics = gxos::gxos_secure_random_diagnostics();
+    const gxos::GxosPsaRngDiagnostics psaRngDiagnostics = gxos::gxos_tls_rng_diagnostics();
     int64_t wallClockSeconds = 0;
     char wallClockUtc[32];
     const bool wallClockAvailable = gxos::gxos_wall_clock_unix_seconds(&wallClockSeconds);
@@ -18393,7 +18439,7 @@ static bool printNavigatorRuntimeSmokePreamble()
         }
     }
     const bool rngFailsClosed = !rngRead1 && !rngRead2 &&
-        rngProbe1[0] == 0xA5 && rngProbe2[0] == 0x5A &&
+        rngProbe1[0] == 0 && rngProbe2[0] == 0 &&
         rngQuality == gxos::GxosRandomQuality::Unavailable;
     const bool rngConsistent = (rngQuality == gxos::GxosRandomQuality::Secure)
         ? (rngRead1 && rngRead2)
@@ -18521,6 +18567,30 @@ static bool printNavigatorRuntimeSmokePreamble()
     serial::puts((rngRead1 && rngRead2) ? (rngReadsIdentical ? "true" : "false") : "unknown");
     serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.rng_fail_closed=");
     serial::puts(rngFailsClosed ? "true" : "false");
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.secure_rng_initialized=");
+    serial::puts(rngDiagnostics.initialized ? "yes" : "no");
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.secure_rng_fill_requests=");
+    serial_put_dec64(static_cast<uint64_t>(rngDiagnostics.fillRequests));
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.secure_rng_fill_failures=");
+    serial_put_dec64(static_cast<uint64_t>(rngDiagnostics.fillFailures));
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.secure_rng_rdseed_retry_failures=");
+    serial_put_dec64(static_cast<uint64_t>(rngDiagnostics.rdseedRetryFailures));
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.secure_rng_rdrand_retry_failures=");
+    serial_put_dec64(static_cast<uint64_t>(rngDiagnostics.rdrandRetryFailures));
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.secure_rng_provider_fallbacks=");
+    serial_put_dec64(static_cast<uint64_t>(rngDiagnostics.providerFallbacks));
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.psa_rng_requests=");
+    serial_put_dec64(static_cast<uint64_t>(psaRngDiagnostics.requests));
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.psa_rng_successes=");
+    serial_put_dec64(static_cast<uint64_t>(psaRngDiagnostics.successes));
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.psa_rng_invalid_argument_failures=");
+    serial_put_dec64(static_cast<uint64_t>(psaRngDiagnostics.invalidArgumentFailures));
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.psa_rng_insufficient_entropy_failures=");
+    serial_put_dec64(static_cast<uint64_t>(psaRngDiagnostics.insufficientEntropyFailures));
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.psa_rng_hardware_failures=");
+    serial_put_dec64(static_cast<uint64_t>(psaRngDiagnostics.hardwareFailures));
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.psa_rng_last_result=");
+    serial::puts(gxos::gxos_psa_rng_last_result_name(psaRngDiagnostics.lastResult));
     serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.wall_clock_status=");
     serial::puts(gxos::gxos_wall_clock_status_name(wallClockStatus));
     serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.wall_clock_backend=");

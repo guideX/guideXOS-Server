@@ -35,6 +35,17 @@ static ProviderState s_state = {
 
 static bool s_cpuFailureMarkerEmitted = false;
 static bool s_noSourceFailureMarkerEmitted = false;
+static bool s_sourceSuccessMarkerEmitted[4] = { false, false, false, false };
+static uint32_t s_fillRequests = 0;
+static uint32_t s_fillFailures = 0;
+static uint32_t s_rdseedRetryFailures = 0;
+static uint32_t s_rdrandRetryFailures = 0;
+static uint32_t s_providerFallbacks = 0;
+
+static void increment_bounded(uint32_t* value)
+{
+    if (value && *value != 0xFFFFFFFFu) ++*value;
+}
 
 #if defined(ARCH_X86) || defined(ARCH_AMD64)
 static bool cpuid_available()
@@ -181,6 +192,26 @@ static void set_status(Status status)
     s_state.lastStatus = status;
 }
 
+static const char* source_name_for(Source source)
+{
+    switch (source) {
+    case SOURCE_RDSEED: return "CPU RDSEED";
+    case SOURCE_RDRAND: return "CPU RDRAND";
+    case SOURCE_VIRTIO_RNG: return "virtio-rng legacy PCI transitional";
+    default: return "none (secure entropy unavailable)";
+    }
+}
+
+static void announce_successful_source(Source source)
+{
+    const uint8_t index = static_cast<uint8_t>(source);
+    if (index >= 4 || s_sourceSuccessMarkerEmitted[index]) return;
+    s_sourceSuccessMarkerEmitted[index] = true;
+    serial::puts("[SECURE-RNG] provider=");
+    serial::puts(source_name_for(source));
+    serial::puts("; request succeeded\n");
+}
+
 static bool fill_from_virtio(void* buffer, size_t len)
 {
     uint8_t* const start = static_cast<uint8_t*>(buffer);
@@ -219,14 +250,9 @@ void init()
 
     s_state.initAttempted = true;
     s_state.cpu = detect_cpu_features();
-    if (s_state.cpu.rdseed) {
-        s_state.selectedSource = SOURCE_RDSEED;
-        set_status(STATUS_SOURCE_AVAILABLE);
-    } else if (s_state.cpu.rdrand) {
-        s_state.selectedSource = SOURCE_RDRAND;
-        set_status(STATUS_SOURCE_AVAILABLE);
-    } else if (virtio::rng::ready()) {
-        s_state.selectedSource = SOURCE_VIRTIO_RNG;
+    const ProviderPriority priority = provider_priority(s_state.cpu, virtio::rng::ready());
+    if (priority.count != 0) {
+        s_state.selectedSource = priority.sources[0];
         set_status(STATUS_SOURCE_AVAILABLE);
     } else {
         s_state.selectedSource = SOURCE_NONE;
@@ -239,36 +265,53 @@ void init()
 bool fill(void* buffer, size_t len)
 {
     if (len == 0) return true;
+    increment_bounded(&s_fillRequests);
     if (!buffer) {
         set_status(STATUS_INVALID_ARGUMENT);
+        increment_bounded(&s_fillFailures);
         return false;
     }
 
     init();
 
-    if (s_state.cpu.rdseed &&
-        fill_from_word_source(buffer, len, read_rdseed32, kHardwareRetryLimit)) {
-        s_state.selectedSource = SOURCE_RDSEED;
-        set_status(STATUS_SUCCESS);
-        return true;
-    }
+    const ProviderPriority priority = provider_priority(s_state.cpu, virtio::rng::ready());
+    bool cpuProviderFailed = false;
+    for (uint8_t index = 0; index < priority.count; ++index) {
+        const Source candidate = priority.sources[index];
+        bool success = false;
+        switch (candidate) {
+        case SOURCE_RDSEED:
+            success = fill_from_word_source(buffer, len, read_rdseed32,
+                kHardwareRetryLimit, &s_rdseedRetryFailures);
+            break;
+        case SOURCE_RDRAND:
+            success = fill_from_word_source(buffer, len, read_rdrand32,
+                kHardwareRetryLimit, &s_rdrandRetryFailures);
+            break;
+        case SOURCE_VIRTIO_RNG:
+            success = fill_from_virtio(buffer, len);
+            break;
+        default:
+            break;
+        }
 
-    if (s_state.cpu.rdrand &&
-        fill_from_word_source(buffer, len, read_rdrand32, kHardwareRetryLimit)) {
-        s_state.selectedSource = SOURCE_RDRAND;
-        set_status(STATUS_SUCCESS);
-        return true;
-    }
+        if (success) {
+            s_state.selectedSource = candidate;
+            set_status(STATUS_SUCCESS);
+            announce_successful_source(candidate);
+            return true;
+        }
 
-    if (virtio::rng::ready() && fill_from_virtio(buffer, len)) {
-        s_state.selectedSource = SOURCE_VIRTIO_RNG;
-        set_status(STATUS_SUCCESS);
-        return true;
+        if (candidate == SOURCE_RDSEED || candidate == SOURCE_RDRAND) {
+            cpuProviderFailed = true;
+        }
+        if (index + 1 < priority.count) increment_bounded(&s_providerFallbacks);
     }
 
     zero_random_bytes(static_cast<uint8_t*>(buffer), len);
+    increment_bounded(&s_fillFailures);
     s_state.selectedSource = SOURCE_NONE;
-    if (s_state.cpu.rdseed || s_state.cpu.rdrand) {
+    if (cpuProviderFailed) {
         set_status(STATUS_CPU_RNG_EXHAUSTED);
         if (!s_cpuFailureMarkerEmitted) {
             s_cpuFailureMarkerEmitted = true;
@@ -304,12 +347,7 @@ Status last_status()
 
 const char* source_name()
 {
-    switch (source()) {
-    case SOURCE_RDSEED: return "CPU RDSEED";
-    case SOURCE_RDRAND: return "CPU RDRAND";
-    case SOURCE_VIRTIO_RNG: return "virtio-rng legacy PCI transitional";
-    default: return "none (secure entropy unavailable)";
-    }
+    return source_name_for(source());
 }
 
 const char* status_name()
@@ -335,6 +373,24 @@ bool rdrand_supported()
 {
     init();
     return s_state.cpu.rdrand;
+}
+
+SecureRandomDiagnostics diagnostics()
+{
+    init();
+    return {
+        s_state.initAttempted,
+        s_state.cpu,
+        s_state.selectedSource,
+        s_state.lastStatus,
+        virtio::rng::detected(),
+        virtio::rng::ready(),
+        s_fillRequests,
+        s_fillFailures,
+        s_rdseedRetryFailures,
+        s_rdrandRetryFailures,
+        s_providerFallbacks
+    };
 }
 
 } // namespace secure_random

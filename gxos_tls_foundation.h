@@ -247,6 +247,26 @@ struct GxosTlsRuntimeHookInfo {
 const char* gxos_tls_hook_status_name(GxosTlsHookStatus status);
 GxosTlsRuntimeHookInfo gxos_tls_runtime_hook_info();
 
+enum class GxosPsaRngLastResult {
+    NotAttempted,
+    Success,
+    InvalidArgument,
+    InsufficientEntropy,
+    HardwareFailure
+};
+
+struct GxosPsaRngDiagnostics {
+    uint32_t requests;
+    uint32_t successes;
+    uint32_t invalidArgumentFailures;
+    uint32_t insufficientEntropyFailures;
+    uint32_t hardwareFailures;
+    GxosPsaRngLastResult lastResult;
+};
+
+const char* gxos_psa_rng_last_result_name(GxosPsaRngLastResult result);
+GxosPsaRngDiagnostics gxos_tls_rng_diagnostics();
+
 struct GxosTlsHostnameValidationInfo {
     bool available;
     bool sniSupported;

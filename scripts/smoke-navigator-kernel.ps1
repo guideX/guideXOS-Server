@@ -8,7 +8,8 @@ param(
     [string]$CandidateRotationId,
     [switch]$CandidateReviewed,
     [string[]]$ScenarioFilter,
-    [switch]$ReuseActiveBuild
+    [switch]$ReuseActiveBuild,
+    [switch]$DisableSecureEntropy
 )
 
 $ErrorActionPreference = "Stop"
@@ -543,7 +544,14 @@ function Invoke-NavigatorKernelSmokeQemuPass {
             "-netdev", "user,id=net0",
             "-device", "e1000,netdev=net0"
         )
-        $args += Get-GxosQemuSecureRngArguments
+        if ($DisableSecureEntropy) {
+            # Test-only failure lane: do not expose CPU RNG instructions and
+            # do not attach virtio-rng. Production code remains unchanged.
+            $args = @('-cpu', 'max,rdseed=off,rdrand=off') + $args
+            Write-Host "QEMU secure entropy disabled for fail-closed validation."
+        } else {
+            $args += Get-GxosQemuSecureRngArguments
+        }
 
         $stagedArtifacts = @(
             [pscustomobject]@{ Name = "bootloader"; Path = $bootloader },
@@ -838,6 +846,13 @@ function Test-NavigatorKernelSmokeRealPublicProbeOutput {
                 '\[NAVIGATOR-SMOKE\] https\.case\.real_public_probe\.hostname_validated=yes',
                 '\[NAVIGATOR-SMOKE\] https\.case\.real_public_probe\.hostname_validation_result=PASS',
                 '\[NAVIGATOR-SMOKE\] https\.case\.real_public_probe\.verify_flags=0',
+                '\[NAVIGATOR-SMOKE\] tls_prereq\.secure_rng_initialized=yes',
+                '\[NAVIGATOR-SMOKE\] tls_prereq\.secure_rng_source=(?!none).+',
+                '\[NAVIGATOR-SMOKE\] tls_prereq\.secure_rng_fill_requests=[1-9][0-9]*',
+                '\[NAVIGATOR-SMOKE\] tls_prereq\.psa_rng_requests=[1-9][0-9]*',
+                '\[NAVIGATOR-SMOKE\] tls_prereq\.psa_rng_successes=[1-9][0-9]*',
+                '\[NAVIGATOR-SMOKE\] tls_prereq\.psa_rng_insufficient_entropy_failures=0',
+                '\[NAVIGATOR-SMOKE\] tls_prereq\.psa_rng_hardware_failures=0',
                 '\[NAVIGATOR-SMOKE\] https\.case\.real_public_probe\.tls_tcp_connect_attempts=[1-9][0-9]*',
                 '\[NAVIGATOR-SMOKE\] https\.case\.real_public_probe\.source_type=https',
                 '\[NAVIGATOR-8K\] handoff\.entry=yes',

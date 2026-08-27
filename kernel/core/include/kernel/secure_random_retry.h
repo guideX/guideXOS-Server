@@ -22,7 +22,8 @@ inline void zero_random_bytes(uint8_t* bytes, size_t len)
 inline bool fill_from_word_source(void* buffer,
                                   size_t len,
                                   WordReader reader,
-                                  uint32_t retryLimit)
+                                  uint32_t retryLimit,
+                                  uint32_t* retryFailures = nullptr)
 {
     if (len == 0) return true;
     if (!buffer || !reader || retryLimit == 0) {
@@ -41,6 +42,7 @@ inline bool fill_from_word_source(void* buffer,
                 received = true;
                 break;
             }
+            if (retryFailures && *retryFailures != 0xFFFFFFFFu) ++*retryFailures;
         }
 
         if (!received) {

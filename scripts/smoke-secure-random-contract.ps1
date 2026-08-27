@@ -27,7 +27,15 @@ foreach ($forbidden in @('rdtsc', 'rdtscp', 'timestamp', 'deterministic', 'MAC a
         throw "Secure-random provider contains a forbidden weak-entropy fallback token: $forbidden"
     }
 }
-foreach ($required in @('kHardwareRetryLimit', 'zero_random_bytes', 'STATUS_CPU_RNG_EXHAUSTED')) {
+foreach ($required in @(
+        'kHardwareRetryLimit',
+        'zero_random_bytes',
+        'STATUS_CPU_RNG_EXHAUSTED',
+        'provider_priority',
+        's_rdseedRetryFailures',
+        's_rdrandRetryFailures',
+        's_providerFallbacks',
+        'SecureRandomDiagnostics')) {
     if ($provider -notmatch $required) {
         throw "Secure-random provider contract is missing required fail-closed behavior: $required"
     }
@@ -38,6 +46,28 @@ foreach ($required in @('mbedtls_psa_external_get_random', 'PSA_ERROR_INSUFFICIE
     if ($foundation -notmatch $required) {
         throw "PSA external RNG failure mapping is missing: $required"
     }
+}
+
+foreach ($required in @(
+        'GxosPsaRngDiagnostics',
+        'GxosPsaRngLastResult',
+        'gxos_psa_rng_record',
+        'PSA_ERROR_INVALID_ARGUMENT',
+        '*output_length = 0',
+        'external RNG request success; secure source read confirmed')) {
+    if ($foundation -notmatch [regex]::Escape($required)) {
+        throw "PSA RNG diagnostics/propagation contract is missing: $required"
+    }
+}
+
+if ($foundation -notmatch '(?s)if \(!output_length\).*?gxos_psa_rng_record\(gxos::GxosPsaRngLastResult::InvalidArgument\).*?return PSA_ERROR_INVALID_ARGUMENT') {
+    throw "PSA invalid-argument propagation is not recorded before returning."
+}
+if ($foundation -notmatch '(?s)if \(gxos::gxos_random_quality\(\) != gxos::GxosRandomQuality::Secure\).*?GxosPsaRngLastResult::InsufficientEntropy.*?return PSA_ERROR_INSUFFICIENT_ENTROPY') {
+    throw "PSA insufficient-entropy propagation is not fail-closed."
+}
+if ($foundation -notmatch '(?s)if \(!gxos::gxos_random_bytes\(output, output_size\)\).*?GxosPsaRngLastResult::HardwareFailure.*?return PSA_ERROR_HARDWARE_FAILURE') {
+    throw "PSA hardware-failure propagation is not recorded."
 }
 
 Write-Output "Secure-random contract smoke PASS"
