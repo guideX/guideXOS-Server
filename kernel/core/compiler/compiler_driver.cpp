@@ -20,7 +20,8 @@ namespace {
 
 static uint8_t s_source[COMPILER_MAX_SOURCE_BYTES + 1];
 static Token s_tokens[COMPILER_MAX_TOKENS];
-static uint8_t s_code[16];
+static uint8_t s_code[COMPILER_MAX_CODE_BYTES];
+static uint8_t s_data[COMPILER_MAX_DATA_BYTES];
 static uint8_t s_elf[COMPILER_MAX_OUTPUT_BYTES];
 static uint8_t s_reopened[COMPILER_MAX_OUTPUT_BYTES];
 static uint8_t s_compare[COMPILER_MAX_OUTPUT_BYTES];
@@ -74,6 +75,15 @@ static void print_code(const uint8_t* code, uint32_t codeBytes)
     put_decimal_u64(codeBytes);
     serial::puts(" bytes=");
     for (uint32_t i = 0; i < codeBytes; ++i) serial::put_hex8(code[i]);
+    serial::putc('\n');
+}
+
+static void print_data(const uint8_t* data, uint32_t dataBytes)
+{
+    serial::puts("Compiler: data_bytes=");
+    put_decimal_u64(dataBytes);
+    serial::puts(" data_hash=fnv1a64:");
+    put_hash(hash_bytes(data, dataBytes));
     serial::putc('\n');
 }
 
@@ -197,9 +207,18 @@ bool compile(const char* sourcePath,
     put_decimal_i32(function.returnConstant);
     serial::putc('\n');
 
+    uint32_t dataBytes = function.hasHostLog ? function.logMessageBytes + 1U : 0U;
+    if (dataBytes > sizeof(s_data)) {
+        diagnostics.error(driverLocation, "source string data exceeds compiler limit", "data");
+        return fail_build(diagnostics, summary);
+    }
+    for (uint32_t i = 0; i < dataBytes; ++i) s_data[i] = static_cast<uint8_t>(function.logMessage[i]);
+    if (dataBytes != 0) print_data(s_data, dataBytes);
+
     uint32_t codeBytes = 0;
 #if defined(__x86_64__)
-    if (!amd64::emit_function(function, s_code, sizeof(s_code), &codeBytes)) {
+    const uint64_t dataAddress = dataBytes == 0 ? 0 : BOOTSTRAP_IMAGE_BASE + BOOTSTRAP_DATA_OFFSET;
+    if (!amd64::emit_function(function, dataAddress, s_code, sizeof(s_code), &codeBytes)) {
         diagnostics.error(driverLocation, "AMD64 backend rejected target-neutral IR", "backend");
         return fail_build(diagnostics, summary);
     }
@@ -210,7 +229,8 @@ bool compile(const char* sourcePath,
     print_code(s_code, codeBytes);
 
     ElfLayout layout = {};
-    if (!write_bootstrap_elf(s_code, codeBytes, s_elf, sizeof(s_elf), &layout)) {
+    if (!write_bootstrap_elf(s_code, codeBytes, s_data, dataBytes,
+                             s_elf, sizeof(s_elf), &layout)) {
         diagnostics.error(driverLocation, "ELF writer could not construct bounded image", "elf");
         return fail_build(diagnostics, summary);
     }
@@ -218,7 +238,7 @@ bool compile(const char* sourcePath,
     ElfValidationResult producedValidation = {};
     if (!validate_bootstrap_elf(s_elf, layout.outputBytes, layout.imageBase,
                                 layout.codeOffset, s_code, codeBytes,
-                                &producedValidation)) {
+                                &producedValidation, s_data, dataBytes)) {
         diagnostics.error(driverLocation, producedValidation.error, "elf");
         return fail_build(diagnostics, summary);
     }
@@ -266,7 +286,7 @@ bool compile(const char* sourcePath,
     ElfValidationResult reopenedValidation = {};
     if (!validate_bootstrap_elf(s_reopened, static_cast<uint32_t>(reopenedBytes),
                                 layout.imageBase, layout.codeOffset, s_code, codeBytes,
-                                &reopenedValidation)) {
+                                &reopenedValidation, s_data, dataBytes)) {
         diagnostics.error(driverLocation, reopenedValidation.error, "elf");
         return fail_build(diagnostics, summary);
     }
@@ -288,11 +308,15 @@ bool compile(const char* sourcePath,
         summary->tokenCount = tokenCount;
         summary->returnConstant = function.returnConstant;
         summary->codeBytes = codeBytes;
+        summary->hasHostLog = function.hasHostLog;
         for (uint32_t i = 0; i < codeBytes && i < sizeof(summary->code); ++i) summary->code[i] = s_code[i];
         summary->outputBytes = layout.outputBytes;
+        summary->dataBytes = dataBytes;
+        for (uint32_t i = 0; i < dataBytes && i < sizeof(summary->data); ++i) summary->data[i] = s_data[i];
         summary->sourceHash = sourceHash;
         summary->outputHash = outputHash;
         summary->reopenedHash = reopenedHash;
+        summary->dataHash = hash_bytes(s_data, dataBytes);
     }
 
     serial::puts("Compiler: ELF validation PASS\n");
@@ -303,7 +327,7 @@ bool compile(const char* sourcePath,
 void run_bootstrap_smoke()
 {
     serial::puts("Compiler: Phase 27B bare-metal smoke begin\n");
-    serial::puts("Compiler: limits source=65536 tokens=256 diagnostics=8 output=8192\n");
+    serial::puts("Compiler: limits source=65536 tokens=256 diagnostics=8 output=12288\n");
 
     CompileSummary return42 = {};
     CompileSummary deterministic = {};

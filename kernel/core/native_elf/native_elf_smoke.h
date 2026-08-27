@@ -1,5 +1,5 @@
 //
-// Opt-in Phase 27C diagnostic route.  This is not the application launcher.
+// Opt-in Phase 27C/27D diagnostic route.  This is not the application launcher.
 //
 #pragma once
 

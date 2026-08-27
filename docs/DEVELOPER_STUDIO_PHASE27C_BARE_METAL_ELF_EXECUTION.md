@@ -15,7 +15,7 @@ The current NativeElf contract is intentionally narrow:
 | Architecture | AMD64, little-endian ELF64 |
 | File type | `ET_EXEC` only |
 | Image window | `0x10000000` through `0x10200000` (2 MiB) |
-| Maximum file | 8192 bytes |
+| Maximum file | 12288 bytes |
 | Maximum mapped image | 1 MiB |
 | Maximum program headers/load segments | 4 |
 | Page size | 4096 bytes |

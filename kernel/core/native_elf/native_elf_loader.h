@@ -6,6 +6,7 @@
 #include <stdint.h>
 
 #include "native_elf_validator.h"
+#include "native_elf_runtime.h"
 
 namespace kernel {
 namespace native_elf {
@@ -23,6 +24,19 @@ struct NativeElfRunReport {
     uint64_t entryPoint;
     uint64_t mappedBytes;
     bool nxEnabled;
+    bool dedicatedStackUsed;
+    bool appContextValid;
+    bool hostLogObserved;
+    bool teardownComplete;
+    uint64_t kernelRspBefore;
+    uint64_t applicationStackBase;
+    uint64_t applicationStackTop;
+    uint64_t applicationRsp;
+    uint64_t kernelRspAfter;
+    uint64_t readOnlyDataBase;
+    uint64_t readOnlyDataBytes;
+    uint32_t hostLogBytes;
+    NativeAppExecutionState finalState;
     const char* error;
 };
 
@@ -30,8 +44,9 @@ bool configure_execution_context(const NativeElfExecutionContext& context);
 bool execution_context_configured();
 
 // Loads one validated ET_EXEC NativeElf file into the reusable reserved
-// window, invokes its validated gx_main(void*) entry with nullptr, and returns
-// only after control has returned to the kernel.
+// window, invokes its validated gx_main(gx_app_context*) entry on the
+// dedicated bootstrap stack, and returns only after control has returned to
+// the kernel and teardown has completed.
 bool run_file(const char* path, int32_t* returnValue, NativeElfRunReport* report = nullptr);
 
 } // namespace native_elf

@@ -12,8 +12,15 @@ namespace compiler {
 namespace amd64 {
 
 static const uint32_t AMD64_BOOTSTRAP_CODE_BYTES = 6;
+static const uint32_t AMD64_BOOTSTRAP_MAX_CODE_BYTES = 128;
 
 bool emit_function(const FunctionIR& function,
+                   uint8_t* output,
+                   uint32_t outputCapacity,
+                   uint32_t* outputSize);
+
+bool emit_function(const FunctionIR& function,
+                   uint64_t readOnlyDataAddress,
                    uint8_t* output,
                    uint32_t outputCapacity,
                    uint32_t* outputSize);

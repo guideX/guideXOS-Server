@@ -40,7 +40,7 @@ The implementation uses fixed kernel-resident buffers and no STL, exceptions, RT
 * source: 64 KiB plus one terminator byte
 * tokens: 256, including EOF
 * diagnostics: 8
-* generated ELF: 8192 bytes
+* generated ELF: 12288 bytes maximum (the Phase 27D read-only-data extension)
 * generated bootstrap body: 6 bytes
 
 The driver uses one fixed workspace, so this first command is not reentrant or concurrent.

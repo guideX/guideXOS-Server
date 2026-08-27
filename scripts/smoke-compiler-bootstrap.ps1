@@ -9,9 +9,10 @@ $root = Split-Path -Parent $PSScriptRoot
 $kernelDirectory = Join-Path $root "kernel"
 $espDirectory = Join-Path $root "ESP"
 $fixtureDirectory = Join-Path $root "scripts/fixtures/phase27b"
+$phase27dFixtureDirectory = Join-Path $root "scripts/fixtures/phase27d"
 $qemuPath = "C:\Program Files\qemu\qemu-system-x86_64.exe"
 $ovmfCodePath = Join-Path $root "OVMF.fd"
-$tempDirectory = Join-Path ([System.IO.Path]::GetTempPath()) ("guidexos-phase27c-" + [guid]::NewGuid().ToString("N"))
+$tempDirectory = Join-Path ([System.IO.Path]::GetTempPath()) ("guidexos-phase27d-" + [guid]::NewGuid().ToString("N"))
 $evidenceDirectory = Join-Path $tempDirectory "artifacts"
 $backups = @{}
 $oldExtraCFlags = $env:EXTRA_CFLAGS
@@ -31,6 +32,25 @@ function Quote-ProcessArgument([string]$value) {
 function Read-SerialText([string]$path) {
     if (!(Test-Path $path)) { return "" }
     return [System.IO.File]::ReadAllText($path)
+}
+
+function Export-SerialArtifact([string]$serial, [string]$name, [string]$destination) {
+    $escapedName = [regex]::Escape($name)
+    $pattern = "(?s)NativeElf: artifact_begin=$escapedName bytes=([0-9A-Fa-f]{8})\r?\nNativeElf: artifact_hex=([0-9A-Fa-f]+)\r?\nNativeElf: artifact_end=$escapedName"
+    $match = [regex]::Match($serial, $pattern)
+    if (!$match.Success) { throw "serial ELF evidence missing: $name" }
+
+    $byteCount = [Convert]::ToInt32($match.Groups[1].Value, 16)
+    $hex = $match.Groups[2].Value
+    if ($byteCount -le 0 -or $hex.Length -ne ($byteCount * 2)) {
+        throw "serial ELF evidence has invalid length: $name"
+    }
+
+    $bytes = New-Object byte[] $byteCount
+    for ($index = 0; $index -lt $byteCount; ++$index) {
+        $bytes[$index] = [Convert]::ToByte($hex.Substring($index * 2, 2), 16)
+    }
+    [System.IO.File]::WriteAllBytes($destination, $bytes)
 }
 
 function Invoke-QemuProofBoot([int]$runNumber, [string]$qemu) {
@@ -89,19 +109,32 @@ function Invoke-QemuProofBoot([int]$runNumber, [string]$qemu) {
             "phase27c_alternate_build_run=PASS",
             "phase27c_kernel_survival=PASS",
             "phase27c=PASS",
-            "ELF Loader: Phase 27C smoke PASS"
+            "ELF Loader: Phase 27C smoke PASS",
+            "NativeElf host log: Hello from guideXOS!",
+            "NativeElf host log: Developer Studio native build works!",
+            "phase27d_dedicated_stack=PASS",
+            "phase27d_app_context=PASS",
+            "phase27d_host_log=PASS",
+            "phase27d_source_driven_host_call=PASS",
+            "phase27d_return_value=PASS",
+            "phase27d_repeat_lifecycle=PASS",
+            "phase27d_host_call_validation=PASS",
+            "phase27d_kernel_survival=PASS",
+            "phase27d=PASS",
+            "ELF Loader: Phase 27D smoke PASS"
         )
         $missingMarkers = @($requiredMarkers | Where-Object { $serial -notmatch [regex]::Escape($_) })
         if ($missingMarkers.Count -ne 0) {
-            Write-Host "QEMU boot $runNumber missed required Phase 27C markers: $($missingMarkers -join ', ')" -ForegroundColor Red
+            Write-Host "QEMU boot $runNumber missed required Phase 27B/27C/27D markers: $($missingMarkers -join ', ')" -ForegroundColor Red
             if ($serial) { Write-Host $serial }
             if ($stderr) { Write-Host $stderr }
-            throw "Phase 27B QEMU proof failed on boot $runNumber (exit $($process.ExitCode))"
+            throw "Phase 27B/27C/27D QEMU proof failed on boot $runNumber (exit $($process.ExitCode))"
         }
 
         Write-Host "--- QEMU bare-metal compiler proof boot $runNumber ---" -ForegroundColor Cyan
         $serial -split "`r?`n" |
-            Where-Object { $_ -match "Compiler:|ELF Loader:|phase27c|^error:" } |
+            Where-Object { $_ -notmatch "NativeElf: artifact_hex=" -and
+                           $_ -match "Compiler:|ELF Loader:|NativeElf:|phase27c|phase27d|^error:" } |
             ForEach-Object { Write-Host $_ }
     }
     finally {
@@ -152,6 +185,7 @@ try {
         "r42.c", "r41.c", "bad.c", "r42.elf", "r42b.elf", "r41.elf", "bad.elf",
         "p27magic.elf", "p27arch.elf", "p27entry.elf", "p27out.elf", "p27trunc.elf",
         "p27bnd.elf", "p27addr.elf",
+        "d27a.c", "d27b.c", "d27c.c", "d27a.elf", "d27b.elf", "d27c.elf",
         "kernel.elf", "EFI/BOOT/BOOTX64.EFI", "NvVars"
     )
     foreach ($relativePath in $managedFiles) {
@@ -167,6 +201,9 @@ try {
     Copy-Item (Join-Path $fixtureDirectory "r42.c") (Join-Path $espDirectory "r42.c") -Force
     Copy-Item (Join-Path $fixtureDirectory "r41.c") (Join-Path $espDirectory "r41.c") -Force
     Copy-Item (Join-Path $fixtureDirectory "bad.c") (Join-Path $espDirectory "bad.c") -Force
+    Copy-Item (Join-Path $phase27dFixtureDirectory "d27a.c") (Join-Path $espDirectory "d27a.c") -Force
+    Copy-Item (Join-Path $phase27dFixtureDirectory "d27b.c") (Join-Path $espDirectory "d27b.c") -Force
+    Copy-Item (Join-Path $phase27dFixtureDirectory "d27c.c") (Join-Path $espDirectory "d27c.c") -Force
     Copy-Item $kernelBinary (Join-Path $espDirectory "kernel.elf") -Force
     Copy-Item $bootloaderBinary (Join-Path $espDirectory "EFI/BOOT/BOOTX64.EFI") -Force
 
@@ -175,7 +212,7 @@ try {
     foreach ($relativePath in @(
         "r42.elf", "r42b.elf", "r41.elf", "bad.elf",
         "p27magic.elf", "p27arch.elf", "p27entry.elf", "p27out.elf", "p27trunc.elf",
-        "p27bnd.elf", "p27addr.elf")) {
+        "p27bnd.elf", "p27addr.elf", "d27a.elf", "d27b.elf", "d27c.elf")) {
         $target = Join-Path $espDirectory $relativePath
         if (Test-Path $target) { Remove-Item -LiteralPath $target -Force }
     }
@@ -185,7 +222,7 @@ try {
             foreach ($relativePath in @(
                 "r42.elf", "r42b.elf", "r41.elf", "bad.elf",
                 "p27magic.elf", "p27arch.elf", "p27entry.elf", "p27out.elf", "p27trunc.elf",
-                "p27bnd.elf", "p27addr.elf")) {
+                "p27bnd.elf", "p27addr.elf", "d27a.elf", "d27b.elf", "d27c.elf")) {
                 $target = Join-Path $espDirectory $relativePath
                 if (Test-Path $target) { Remove-Item -LiteralPath $target -Force }
             }
@@ -193,10 +230,12 @@ try {
         Invoke-QemuProofBoot $run $qemu
     }
 
-    foreach ($artifact in @("r42.elf", "r41.elf")) {
-        $sourceArtifact = Join-Path $espDirectory $artifact
-        if (!(Test-Path $sourceArtifact)) { throw "guest artifact missing after proof: $sourceArtifact" }
-        Copy-Item $sourceArtifact (Join-Path $evidenceDirectory $artifact) -Force
+    # The guest compiler writes its artifacts through the boot-time VFS.  The
+    # default smoke image is memory-backed during a boot, so the guest emits
+    # exact generated bytes over serial for independent host-side inspection.
+    $finalSerial = Read-SerialText (Join-Path $tempDirectory ("boot{0}.serial.log" -f $BootCount))
+    foreach ($artifact in @("r42", "d27a", "d27b", "d27c")) {
+        Export-SerialArtifact $finalSerial $artifact (Join-Path $evidenceDirectory ($artifact + ".elf"))
     }
 
     $readelf = Get-RequiredTool "readelf" ""
@@ -208,7 +247,12 @@ try {
     & $objdump -D -Mintel -b binary -m i386:x86-64 --adjust-vma=0x10000000 `
         --start-address=0x10001000 --stop-address=0x10001006 (Join-Path $evidenceDirectory "r42.elf")
     if ($LASTEXITCODE -ne 0) { throw "external ELF inspection failed" }
-    Write-Host "Phase 27C QEMU proof completed across $BootCount fresh boot(s)." -ForegroundColor Green
+    Write-Host "--- external audit of guest-generated d27a.elf ---" -ForegroundColor Cyan
+    & $readelf -h -l (Join-Path $evidenceDirectory "d27a.elf")
+    & $objdump -D -Mintel -b binary -m i386:x86-64 --adjust-vma=0x10000000 `
+        --start-address=0x10001000 --stop-address=0x10001022 (Join-Path $evidenceDirectory "d27a.elf")
+    if ($LASTEXITCODE -ne 0) { throw "external Phase 27D ELF inspection failed" }
+    Write-Host "Phase 27B/27C/27D QEMU proof completed across $BootCount fresh boot(s)." -ForegroundColor Green
 }
 finally {
     if ($null -eq $oldExtraCFlags) { Remove-Item Env:EXTRA_CFLAGS -ErrorAction SilentlyContinue }
@@ -218,7 +262,7 @@ finally {
     # exact generated paths so a proof run never leaves build artifacts in ESP.
     Start-Sleep -Milliseconds 250
     foreach ($relativePath in @(
-        "r42.c", "r41.c", "bad.c", "r42.elf", "r42b.elf", "r41.elf", "bad.elf",
+        "r42.c", "r41.c", "bad.c", "d27a.c", "d27b.c", "d27c.c", "r42.elf", "r42b.elf", "r41.elf", "bad.elf", "d27a.elf", "d27b.elf", "d27c.elf",
         "p27magic.elf", "p27arch.elf", "p27entry.elf", "p27out.elf", "p27trunc.elf",
         "p27bnd.elf", "p27addr.elf",
         "kernel.elf", "EFI/BOOT/BOOTX64.EFI", "NvVars")) {

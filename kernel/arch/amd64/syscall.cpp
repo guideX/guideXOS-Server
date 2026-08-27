@@ -18,6 +18,7 @@
 #include "include/arch/syscall.h"
 #include "include/arch/amd64.h"
 #include "include/arch/context_switch.h"
+#include "../../core/native_elf/native_elf_runtime.h"
 
 #if defined(_MSC_VER)
 #define GXOS_MSVC_STUB 1
@@ -343,6 +344,9 @@ void handle_syscall()
 
 void handle_page_fault(uint64_t error_code, uint64_t fault_addr)
 {
+    if (::kernel::native_elf::native_elf_execution_active()) {
+        serial_puts("[NativeElf Fault] application page fault; recovery is unavailable\n");
+    }
     serial_puts("[PageFault] ");
     serial_puts((error_code & 0x1) ? "Protection" : "Not-present");
     serial_puts(" violation on ");
@@ -362,6 +366,9 @@ void handle_page_fault(uint64_t error_code, uint64_t fault_addr)
 
 void handle_general_protection(uint64_t error_code)
 {
+    if (::kernel::native_elf::native_elf_execution_active()) {
+        serial_puts("[NativeElf Fault] application general-protection fault; recovery is unavailable\n");
+    }
     serial_puts("[GPF] General Protection Fault, error_code=");
     serial_put_hex(error_code);
     serial_puts("\n");
@@ -376,6 +383,9 @@ void handle_divide_error()
 
 void handle_invalid_opcode()
 {
+    if (::kernel::native_elf::native_elf_execution_active()) {
+        serial_puts("[NativeElf Fault] application invalid opcode; recovery is unavailable\n");
+    }
     serial_puts("[Exception] Invalid opcode\n");
     while (1) { halt(); }
 }

@@ -75,6 +75,7 @@ const char* token_kind_name(TokenKind kind)
         case TokenKind::EndOfFile: return "end-of-file";
         case TokenKind::Identifier: return "identifier";
         case TokenKind::Integer: return "integer-literal";
+        case TokenKind::StringLiteral: return "string-literal";
         case TokenKind::Star: return "'*'";
         case TokenKind::LeftParen: return "'('";
         case TokenKind::RightParen: return "')'";
@@ -83,6 +84,7 @@ const char* token_kind_name(TokenKind kind)
         case TokenKind::Semicolon: return "';'";
         case TokenKind::Minus: return "'-'";
         case TokenKind::Plus: return "'+'";
+        case TokenKind::Comma: return "','";
         default: return "unknown";
     }
 }
@@ -171,6 +173,43 @@ bool lex_source(const char* source,
             continue;
         }
 
+        if (c == '"') {
+            const SourceLocation stringLocation = location;
+            const uint32_t start = index;
+            advance(source, sourceLength, &index, &line, &column);
+            bool closed = false;
+            while (index < sourceLength) {
+                const char stringCharacter = source[index];
+                if (stringCharacter == '"') {
+                    advance(source, sourceLength, &index, &line, &column);
+                    closed = true;
+                    break;
+                }
+                if (stringCharacter == '\\') {
+                    advance(source, sourceLength, &index, &line, &column);
+                    if (index >= sourceLength ||
+                        (source[index] != 'n' && source[index] != '\\' && source[index] != '"')) {
+                        diagnostics.error(stringLocation, "unsupported string escape", "string-literal");
+                        return false;
+                    }
+                    advance(source, sourceLength, &index, &line, &column);
+                    continue;
+                }
+                if (stringCharacter < 32 || stringCharacter > 126) {
+                    diagnostics.error(stringLocation, "string literal contains a non-printable character", "string-literal");
+                    return false;
+                }
+                advance(source, sourceLength, &index, &line, &column);
+            }
+            if (!closed) {
+                diagnostics.error(stringLocation, "unterminated string literal", "string-literal");
+                return false;
+            }
+            if (!add_token(tokens, tokenCapacity, tokenCount, TokenKind::StringLiteral,
+                           stringLocation, index - start, diagnostics)) return false;
+            continue;
+        }
+
         TokenKind kind;
         switch (c) {
             case '*': kind = TokenKind::Star; break;
@@ -181,6 +220,7 @@ bool lex_source(const char* source,
             case ';': kind = TokenKind::Semicolon; break;
             case '-': kind = TokenKind::Minus; break;
             case '+': kind = TokenKind::Plus; break;
+            case ',': kind = TokenKind::Comma; break;
             default:
                 diagnostics.error(location, "unexpected character", "character");
                 advance(source, sourceLength, &index, &line, &column);

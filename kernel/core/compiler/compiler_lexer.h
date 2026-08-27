@@ -15,6 +15,7 @@ enum class TokenKind : uint8_t {
     EndOfFile,
     Identifier,
     Integer,
+    StringLiteral,
     Star,
     LeftParen,
     RightParen,
@@ -23,6 +24,7 @@ enum class TokenKind : uint8_t {
     Semicolon,
     Minus,
     Plus,
+    Comma,
 };
 
 struct Token {

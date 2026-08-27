@@ -1,5 +1,5 @@
 //
-// Opt-in Phase 27C diagnostic route.
+// Opt-in Phase 27C/27D diagnostic route.
 //
 
 #include "native_elf_smoke.h"
@@ -34,6 +34,54 @@ static bool run_expected(const char* path, int32_t expected)
     int32_t actual = 0;
     NativeElfRunReport report = {};
     return run_file(path, &actual, &report) && actual == expected;
+}
+
+static bool run_expected_with_report(const char* path,
+                                     int32_t expected,
+                                     NativeElfRunReport* report)
+{
+    int32_t actual = 0;
+    return report && run_file(path, &actual, report) && actual == expected;
+}
+
+static void print_hash_pair(const char* name, uint64_t sourceHash, uint64_t outputHash,
+                            uint64_t dataHash)
+{
+    serial::puts("NativeElf: ");
+    serial::puts(name);
+    serial::puts(" source_hash=fnv1a64:");
+    serial::put_hex64(sourceHash);
+    serial::puts(" elf_hash=fnv1a64:");
+    serial::put_hex64(outputHash);
+    serial::puts(" data_hash=fnv1a64:");
+    serial::put_hex64(dataHash);
+    serial::putc('\n');
+}
+
+static bool emit_serial_artifact(const char* path, const char* name)
+{
+    if (!path || !name) return false;
+
+    vfs::FileInfo info = {};
+    if (vfs::stat(path, &info) != vfs::VFS_OK ||
+        info.size == 0 || info.size > sizeof(s_invalidImage)) {
+        return false;
+    }
+
+    const uint32_t bytes = static_cast<uint32_t>(info.size);
+    const int32_t readBytes = vfs::read_file(path, s_invalidImage, bytes);
+    if (readBytes < 0 || static_cast<uint32_t>(readBytes) != bytes) return false;
+
+    serial::puts("NativeElf: artifact_begin=");
+    serial::puts(name);
+    serial::puts(" bytes=");
+    serial::put_hex32(bytes);
+    serial::puts("\nNativeElf: artifact_hex=");
+    for (uint32_t i = 0; i < bytes; ++i) serial::put_hex8(s_invalidImage[i]);
+    serial::puts("\nNativeElf: artifact_end=");
+    serial::puts(name);
+    serial::puts("\n");
+    return true;
 }
 
 static bool reject_variant(const char* basePath,
@@ -150,6 +198,100 @@ void run_bootstrap_execution_smoke()
     print_marker("phase27c", allPassed);
     serial::puts(allPassed ? "ELF Loader: Phase 27C smoke PASS\n"
                             : "ELF Loader: Phase 27C smoke FAIL\n");
+
+    serial::puts("ELF Loader: Phase 27D NativeElf application runtime smoke begin\n");
+    compiler::CompileSummary buildA = {};
+    compiler::CompileSummary buildB = {};
+    compiler::CompileSummary buildC = {};
+    compiler::CompileSummary buildAAgain = {};
+    NativeElfRunReport reportA = {};
+    NativeElfRunReport reportB = {};
+    NativeElfRunReport reportC = {};
+    NativeElfRunReport reportAAgain = {};
+
+    const bool buildProofA = compiler::compile("/d27a.c", "/d27a.elf", &buildA) &&
+                             buildA.hasHostLog && buildA.returnConstant == 42;
+    const bool runProofA = buildProofA &&
+                           run_expected_with_report("/d27a.elf", 42, &reportA);
+    const bool buildProofB = compiler::compile("/d27b.c", "/d27b.elf", &buildB) &&
+                             buildB.hasHostLog && buildB.returnConstant == 42;
+    const bool runProofB = buildProofB &&
+                           run_expected_with_report("/d27b.elf", 42, &reportB);
+    const bool buildProofC = compiler::compile("/d27c.c", "/d27c.elf", &buildC) &&
+                             buildC.hasHostLog && buildC.returnConstant == 41;
+    const bool runProofC = buildProofC &&
+                           run_expected_with_report("/d27c.elf", 41, &reportC);
+    const bool sourceDriven = buildProofA && buildProofB &&
+                              buildA.sourceHash != buildB.sourceHash &&
+                              buildA.outputHash != buildB.outputHash &&
+                              buildA.dataHash != buildB.dataHash &&
+                              buildA.dataBytes != 0 && buildB.dataBytes != 0;
+    print_hash_pair("source_a", buildA.sourceHash, buildA.outputHash, buildA.dataHash);
+    print_hash_pair("source_b", buildB.sourceHash, buildB.outputHash, buildB.dataHash);
+    print_marker("phase27d_source_driven_host_call", sourceDriven);
+
+    const bool returnValueProof = runProofA && runProofC &&
+                                  reportA.hostLogObserved && reportC.hostLogObserved &&
+                                  reportA.returnValue == 42 && reportC.returnValue == 41;
+    print_marker("phase27d_return_value", returnValueProof);
+
+    const bool dedicatedStackProof = runProofA && reportA.dedicatedStackUsed &&
+        reportA.applicationStackBase == APPLICATION_STACK_BASE &&
+        reportA.applicationStackTop == APPLICATION_STACK_BASE + APPLICATION_STACK_SIZE &&
+        reportA.applicationRsp > reportA.applicationStackBase &&
+        reportA.applicationRsp < reportA.applicationStackTop &&
+        reportA.kernelRspBefore == reportA.kernelRspAfter;
+    print_marker("phase27d_dedicated_stack", dedicatedStackProof);
+    const bool appContextProof = runProofA && reportA.appContextValid;
+    print_marker("phase27d_app_context", appContextProof);
+    const bool hostLogProof = runProofA && reportA.hostLogObserved && reportA.hostLogBytes != 0;
+    print_marker("phase27d_host_log", hostLogProof);
+
+    const bool repeatLifecycle = compiler::compile("/d27a.c", "/d27a.elf", &buildAAgain) &&
+        run_expected_with_report("/d27a.elf", 42, &reportAAgain) &&
+        reportA.teardownComplete && reportB.teardownComplete &&
+        reportC.teardownComplete && reportAAgain.teardownComplete &&
+        reportA.finalState == NativeAppExecutionState::Cleaned &&
+        reportB.finalState == NativeAppExecutionState::Cleaned &&
+        reportC.finalState == NativeAppExecutionState::Cleaned &&
+        reportAAgain.finalState == NativeAppExecutionState::Cleaned &&
+        reportA.applicationStackBase == reportB.applicationStackBase &&
+        reportA.applicationStackBase == reportAAgain.applicationStackBase &&
+        reportA.readOnlyDataBase == reportAAgain.readOnlyDataBase;
+    print_marker("phase27d_repeat_lifecycle", repeatLifecycle);
+
+    const bool hostCallValidation = native_elf_host_call_validation_smoke();
+    print_marker("phase27d_host_call_validation", hostCallValidation);
+
+    vfs::FileInfo phase27dInfo = {};
+    uint8_t phase27dMagic[4] = {};
+    const bool kernelSurvival27d =
+        vfs::stat("/d27a.elf", &phase27dInfo) == vfs::VFS_OK &&
+        phase27dInfo.type == vfs::FILE_TYPE_REGULAR &&
+        phase27dInfo.size != 0 &&
+        vfs::read_file("/d27a.elf", phase27dMagic, sizeof(phase27dMagic)) == sizeof(phase27dMagic) &&
+        phase27dMagic[0] == 0x7F && phase27dMagic[1] == 'E' &&
+        phase27dMagic[2] == 'L' && phase27dMagic[3] == 'F';
+    print_marker("phase27d_kernel_survival", kernelSurvival27d);
+
+    // The compiler writes into the guest VFS, which is memory-backed during
+    // this boot harness.  Emit exact generated bytes over the serial proof
+    // channel so the host harness can perform an independent ELF audit after
+    // QEMU exits without confusing host persistence with guest VFS survival.
+    const bool artifactEvidence =
+        emit_serial_artifact("/r42.elf", "r42") &&
+        emit_serial_artifact("/d27a.elf", "d27a") &&
+        emit_serial_artifact("/d27b.elf", "d27b") &&
+        emit_serial_artifact("/d27c.elf", "d27c");
+
+    const bool allPassed27d = buildProofA && runProofA && buildProofB && runProofB &&
+                               buildProofC && runProofC && sourceDriven && returnValueProof &&
+                               dedicatedStackProof && appContextProof && hostLogProof &&
+                               repeatLifecycle && hostCallValidation && kernelSurvival27d &&
+                               artifactEvidence;
+    print_marker("phase27d", allPassed27d);
+    serial::puts(allPassed27d ? "ELF Loader: Phase 27D smoke PASS\n"
+                              : "ELF Loader: Phase 27D smoke FAIL\n");
 #else
     serial::puts("ELF Loader: Phase 27C unavailable on non-AMD64\n");
 #endif
