@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\.." )).Path,
+    [string]$RepoRoot = "",
     [string]$EvidenceRoot = "",
     [int]$TimeoutSeconds = 120,
     [int]$FreshBootCount = 3
@@ -11,6 +11,7 @@ Set-StrictMode -Version Latest
 if ($FreshBootCount -lt 1) { throw "FreshBootCount must be at least 1." }
 if ($TimeoutSeconds -lt 5) { throw "TimeoutSeconds must be at least 5." }
 
+if ([string]::IsNullOrWhiteSpace($RepoRoot)) { $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\.." )).Path }
 $RepoRoot = [System.IO.Path]::GetFullPath($RepoRoot)
 if ([string]::IsNullOrWhiteSpace($EvidenceRoot)) {
     $EvidenceRoot = Join-Path $RepoRoot "out\dotnet\c51-ordinary-boot-validator"
@@ -22,7 +23,13 @@ if (-not $EvidenceRoot.StartsWith($allowedEvidenceRoot, [System.StringComparison
 }
 
 function Get-Hash([string]$Path) {
-    return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToUpperInvariant()
+    $sha256 = [System.Security.Cryptography.SHA256]::Create()
+    $stream = [System.IO.File]::Open($Path, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
+    try { return ([BitConverter]::ToString($sha256.ComputeHash($stream)) -replace '-', '').ToUpperInvariant() }
+    finally {
+        $stream.Dispose()
+        $sha256.Dispose()
+    }
 }
 
 function Require-File([string]$Path, [string]$Label) {
@@ -64,6 +71,7 @@ function Invoke-OrdinaryBoot {
         "-drive", ("file=fat:rw:" + (Quote-QemuValue $EspPath) + ",format=raw,if=ide,index=0"),
         "-m", "1024M", "-vga", "std", "-display", "none",
         "-serial", ("file:" + (Quote-QemuValue $SerialPath)),
+        "-boot", "order=c",
         "-no-reboot", "-no-shutdown", "-rtc", "base=utc,clock=host"
     )
     $process = $null
@@ -90,6 +98,11 @@ function Invoke-OrdinaryBoot {
         }
     }
 
+    $exitCode = $null
+    if ($null -ne $process) {
+        $process.Refresh()
+        $exitCode = $process.ExitCode
+    }
     $serial = if (Test-Path -LiteralPath $SerialPath) { Get-Content -LiteralPath $SerialPath -Raw -ErrorAction SilentlyContinue } else { "" }
     if ($null -eq $serial) { $serial = "" }
     $navigatorPass = $serial -match '(?m)^\[NAVIGATOR-SMOKE\] result=PASS\s*$'
@@ -107,12 +120,11 @@ function Invoke-OrdinaryBoot {
         pageFaultAbsent = -not $pageFault
         failFastAbsent = -not $failFast
         semanticProofMarkersAbsent = -not $proofRewrite
-        qemuExitCode = if ($null -eq $process) { $null } else { $process.ExitCode }
+        qemuExitCode = $exitCode
         serialPath = $SerialPath
         serialSha256 = if (Test-Path -LiteralPath $SerialPath -PathType Leaf) { Get-Hash $SerialPath } else { $null }
         stdoutPath = $StdoutPath
         stderrPath = $StderrPath
-        serial = $serial
     }
 }
 
@@ -168,7 +180,9 @@ try {
     if ($beforeHashes.kernel -ne $beforeHashes.espKernel) {
         throw "Ordinary kernel and ESP kernel differ before validation."
     }
-    Set-Content -LiteralPath (Join-Path $runRoot "qemu-version.txt") -Value ((& $qemuPath --version 2>&1 | Out-String).Trim()) -Encoding ASCII
+    $qemuVersion = (Get-Item -LiteralPath $qemuPath).VersionInfo.FileVersion
+    $qemuVersionText = if ([string]::IsNullOrWhiteSpace($qemuVersion)) { $qemuPath } else { $qemuVersion }
+    Set-Content -LiteralPath (Join-Path $runRoot "qemu-version.txt") -Value $qemuVersionText -Encoding ASCII
 
     for ($index = 1; $index -le $FreshBootCount; $index++) {
         $bootRoot = Join-Path $runRoot ("boot-{0:D2}" -f $index)

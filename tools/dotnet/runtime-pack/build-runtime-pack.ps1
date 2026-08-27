@@ -16,7 +16,9 @@ $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
 function Get-Hash([string]$Path) {
-    return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToUpperInvariant()
+    $sha256 = [System.Security.Cryptography.SHA256]::Create()
+    try { return ([BitConverter]::ToString($sha256.ComputeHash([System.IO.File]::ReadAllBytes($Path))) -replace '-', '').ToUpperInvariant() }
+    finally { $sha256.Dispose() }
 }
 
 function Normalize-CoffArchive([string]$Path) {
@@ -373,10 +375,26 @@ $archiveMembers = @((Get-Content -LiteralPath $archiveMembersPath | ForEach-Obje
 $normalizeMember = { param([string]$Name) $Name.Trim().Replace('/', '\').ToLowerInvariant() }
 $expectedPatchedMembers = @()
 if ($NativeAotFpRepair) { $expectedPatchedMembers = @($fpStackMember, $fpCoffMember) }
+$expectedPatchedArchiveMembers = @()
+if ($NativeAotFpRepair) {
+    # lib.exe stores explicitly supplied replacement object paths by their
+    # output leaf names rather than by the stock archive member paths.
+    $expectedPatchedArchiveMembers = @(
+        [System.IO.Path]::GetFileName($fpStackObject),
+        [System.IO.Path]::GetFileName($fpCoffObject)
+    )
+}
+$getMemberLeaf = { param([string]$Name) [System.IO.Path]::GetFileName($Name.Trim().Replace('/', '\')) }
 $patchedMemberCounts = [ordered]@{}
-foreach ($member in $expectedPatchedMembers) {
+for ($memberIndex = 0; $memberIndex -lt $expectedPatchedMembers.Count; $memberIndex++) {
+    $member = $expectedPatchedMembers[$memberIndex]
     $normalized = & $normalizeMember $member
     $count = @($archiveMembers | Where-Object { (& $normalizeMember $_) -eq $normalized }).Count
+    if ($count -eq 0) {
+        $archiveLeaf = $expectedPatchedArchiveMembers[$memberIndex]
+        $normalizedLeaf = & $normalizeMember $archiveLeaf
+        $count = @($archiveMembers | Where-Object { (& $normalizeMember (& $getMemberLeaf $_)) -eq $normalizedLeaf }).Count
+    }
     $patchedMemberCounts[$member] = $count
     if ($count -ne 1) { throw "C51 archive membership validation expected exactly one patched member '$member', got $count" }
 }

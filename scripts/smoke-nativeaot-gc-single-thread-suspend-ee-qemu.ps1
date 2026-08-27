@@ -305,7 +305,9 @@ function Require-File([string]$Path, [string]$Label) {
 }
 
 function Hash-File([string]$Path) {
-    return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToUpperInvariant()
+    $sha256 = [System.Security.Cryptography.SHA256]::Create()
+    try { return ([BitConverter]::ToString($sha256.ComputeHash([System.IO.File]::ReadAllBytes($Path))) -replace '-', '').ToUpperInvariant() }
+    finally { $sha256.Dispose() }
 }
 
 function Log-Command([string]$Text) {
@@ -7982,12 +7984,12 @@ exit /b %errorlevel%
             $compactBranch = & $u 'compactBranch'
             $sweepBranch = & $u 'sweepBranch'
             $completeShape = -not [string]::IsNullOrWhiteSpace($c49CompleteLine)
-            $pathShape = if ($decision -eq 1u) {
-                $compactBranch -eq 1u -and $sweepBranch -eq 0u -and
+            $pathShape = if ($decision -eq 1) {
+                $compactBranch -eq 1 -and $sweepBranch -eq 0 -and
                     -not [string]::IsNullOrWhiteSpace($compactLine) -and
                     -not [string]::IsNullOrWhiteSpace($relocateLine)
-            } elseif ($decision -eq 0u) {
-                $sweepBranch -eq 1u -and $compactBranch -eq 0u -and
+            } elseif ($decision -eq 0) {
+                $sweepBranch -eq 1 -and $compactBranch -eq 0 -and
                     -not [string]::IsNullOrWhiteSpace($sweepLine) -and
                     [string]::IsNullOrWhiteSpace($relocateLine)
             } else { $false }
@@ -7998,14 +8000,14 @@ exit /b %errorlevel%
                 'heapIdentity','activeSegment','rootUpdateCallbacks','promotedRoots') |
                 Where-Object { $null -eq $fields[$_] })
             $fieldShape = $requiredFieldsPresent.Count -eq 0 -and
-                (& $u 'preflight') -eq 1u -and (& $u 'planner') -eq 1u -and
-                (& $u 'collectionWorkComplete') -eq 1u -and (& $u 'restartComplete') -eq 1u -and
-                (& $u 'managedResume') -eq 1u -and (& $u 'postGcAllocationCount') -eq 8u -and
-                (& $u 'invariantFailures') -eq 0u -and (& $u 'sensitiveDiagnosticAllocations') -eq 0u -and
-                (& $u 'safeStopReason') -eq 0u -and (& $u 'collectionOrdinal') -eq 2u -and
-                (& $u 'condemnedGeneration') -ne 0u -and (& $u 'maximumGeneration') -ne 0u -and
-                (& $u 'heapIdentity') -ne 0u -and (& $u 'activeSegment') -ne 0u -and
-                (& $u 'rootUpdateCallbacks') -ge 1u -and (& $u 'promotedRoots') -eq 4u
+                (& $u 'preflight') -eq 1 -and (& $u 'planner') -eq 1 -and
+                (& $u 'collectionWorkComplete') -eq 1 -and (& $u 'restartComplete') -eq 1 -and
+                (& $u 'managedResume') -eq 1 -and (& $u 'postGcAllocationCount') -eq 8 -and
+                (& $u 'invariantFailures') -eq 0 -and (& $u 'sensitiveDiagnosticAllocations') -eq 0 -and
+                (& $u 'safeStopReason') -eq 0 -and (& $u 'collectionOrdinal') -eq 2 -and
+                (& $u 'condemnedGeneration') -ne 0 -and (& $u 'maximumGeneration') -ne 0 -and
+                (& $u 'heapIdentity') -ne 0 -and (& $u 'activeSegment') -ne 0 -and
+                (& $u 'rootUpdateCallbacks') -ge 1 -and (& $u 'promotedRoots') -eq 4
             $productionFpRepairStatic = if ($isC011EC50Production) {
                 $durableStackPath = Join-Path $nativeAotFpRepairSourceRoot "src\coreclr\nativeaot\Runtime\StackFrameIterator.cpp"
                 $durableCoffPath = Join-Path $nativeAotFpRepairSourceRoot "src\coreclr\nativeaot\Runtime\windows\CoffNativeCodeManager.cpp"
@@ -8022,21 +8024,21 @@ exit /b %errorlevel%
             $c48Baseline = if ($isC011EC50Production) {
                 $productionFpRepairStatic -and $formerFault.Count -eq 0 -and $debugPresent -and
                     $c18Present -and $c34Present -and -not [string]::IsNullOrWhiteSpace($c26Line) -and
-                    $promotedEntries -eq 4u -and $c28Present
+                    $promotedEntries -eq 4 -and $c28Present
             } else {
                 $c48FpIn.Count -gt 0 -and $c48FpPrepare.Count -gt 0 -and
                     $c48FpRehome.Count -gt 0 -and $c48FpConsume.Count -gt 0 -and
                     $invalidC47.Count -eq 0 -and $formerFault.Count -eq 0 -and $debugPresent -and
                     $c18Present -and $c34Present -and -not [string]::IsNullOrWhiteSpace($c26Line) -and
-                    $promotedEntries -eq 4u -and $c28Present
+                    $promotedEntries -eq 4 -and $c28Present
             }
             $markersPresent = -not [string]::IsNullOrWhiteSpace($preflightLine) -and
                 -not [string]::IsNullOrWhiteSpace($plannerLine) -and
                 -not [string]::IsNullOrWhiteSpace($doneLine) -and
                 -not [string]::IsNullOrWhiteSpace($restartLine) -and
                 -not [string]::IsNullOrWhiteSpace($resumeLine) -and
-                (($decision -eq 1u -and -not [string]::IsNullOrWhiteSpace($compactLine)) -or
-                 ($decision -eq 0u -and -not [string]::IsNullOrWhiteSpace($sweepLine)))
+                (($decision -eq 1 -and -not [string]::IsNullOrWhiteSpace($compactLine)) -or
+                 ($decision -eq 0 -and -not [string]::IsNullOrWhiteSpace($sweepLine)))
             $validComplete = $completeShape -and $fieldShape -and $pathShape -and
                 $c48Baseline -and $markersPresent -and $c39Present -and $c40Present -and $c41Present
             $runOutcome = if ($validComplete) { 'A' } elseif ($semanticOutcome -in @('B','C')) { $semanticOutcome } else { 'D' }

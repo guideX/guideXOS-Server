@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\.." )).Path,
+    [string]$RepoRoot = "",
     [string]$SourceCheckoutRoot = "",
     [string]$ResultPath = "",
     [switch]$KeepFixtures
@@ -9,6 +9,7 @@ param(
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
+if ([string]::IsNullOrWhiteSpace($RepoRoot)) { $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\.." )).Path }
 $RepoRoot = [System.IO.Path]::GetFullPath($RepoRoot)
 $runtimePackRoot = Join-Path $RepoRoot "tools\dotnet\runtime-pack"
 $helperPath = Join-Path $runtimePackRoot "apply-nativeaot-fp-repair.ps1"
@@ -30,7 +31,9 @@ if (-not (Test-Path -LiteralPath $SourceCheckoutRoot -PathType Container)) { thr
 if (-not (Test-Path -LiteralPath (Join-Path $SourceCheckoutRoot ".git"))) { throw "Source checkout is not a Git worktree: $SourceCheckoutRoot" }
 
 function Get-Hash([string]$Path) {
-    return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToUpperInvariant()
+    $sha256 = [System.Security.Cryptography.SHA256]::Create()
+    try { return ([BitConverter]::ToString($sha256.ComputeHash([System.IO.File]::ReadAllBytes($Path))) -replace '-', '').ToUpperInvariant() }
+    finally { $sha256.Dispose() }
 }
 
 function New-Fixture {
@@ -54,15 +57,35 @@ function Invoke-Repair {
         [string]$Commit = $lockedCommit,
         [string]$Patch = $patchPath
     )
-    $arguments = @(
-        "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $helperPath,
-        "-SourceRoot", $FixturePath, "-RuntimeCommit", $Commit,
-        "-LockPath", $lockPath, "-PatchPath", $Patch,
-        "-ResultPath", $InvocationResultPath
-    )
-    $output = (& powershell @arguments 2>&1 | Out-String).Trim()
+    $arguments = @{
+        SourceRoot = $FixturePath
+        RuntimeCommit = $Commit
+        LockPath = $lockPath
+        PatchPath = $Patch
+        ResultPath = $InvocationResultPath
+    }
+    $oldPreference = $ErrorActionPreference
+    try {
+        # Run the helper in-process.  This keeps the fixture harness portable
+        # across Windows PowerShell installations whose child module probing
+        # may omit Microsoft.PowerShell.Utility, while still treating the
+        # helper's terminating failure as an explicit test result.
+        $ErrorActionPreference = "Continue"
+        try {
+            $captured = @(& $helperPath @arguments 2>&1 6>&1)
+            $output = ($captured | Out-String).Trim()
+            $exitCode = 0
+        }
+        catch {
+            $output = ($_ | Out-String).Trim()
+            $exitCode = 1
+        }
+    }
+    finally {
+        $ErrorActionPreference = $oldPreference
+    }
     [pscustomobject]@{
-        ExitCode = [int]$LASTEXITCODE
+        ExitCode = $exitCode
         Output = $output
         ResultPath = $InvocationResultPath
     }
@@ -90,7 +113,7 @@ function Add-TestResult {
 $fixtureId = [guid]::NewGuid().ToString("N")
 $fixtureRoot = Join-Path $RepoRoot "out\dotnet\c51-fp-fixture-tests-$fixtureId"
 if ([string]::IsNullOrWhiteSpace($ResultPath)) {
-    $ResultPath = Join-Path $fixtureRoot "fixture-tests.json"
+    $ResultPath = Join-Path (Split-Path -Parent $fixtureRoot) "c51-fp-repair-tests-$fixtureId.json"
 }
 $ResultPath = [System.IO.Path]::GetFullPath($ResultPath)
 $results = [System.Collections.Generic.List[object]]::new()
@@ -132,8 +155,11 @@ try {
     if (-not $driftText.Contains($driftNeedle)) { throw "Drift fixture needle was not found in the locked StackFrameIterator source." }
     Set-Content -LiteralPath $driftStack -Value $driftText.Replace($driftNeedle, "void StackFrameIterator::NextC51Drift()") -Encoding ASCII
     $drift = Invoke-Repair $driftRoot (Join-Path $driftRoot "drift.result.json")
+    $driftAfterText = Get-Content -LiteralPath $driftStack -Raw
     $driftPass = $drift.ExitCode -ne 0 -and $drift.Output -match 'state=FAIL category=SOURCE_DRIFT' -and
-        (Get-Hash $driftStack) -ne $lock.nativeAotFpRepair.targetFiles.PSObject.Properties[0].Value.postimageSha256
+        $drift.Output -notmatch 'action=APPLIED' -and
+        $driftAfterText.Contains("void StackFrameIterator::NextC51Drift()") -and
+        -not $driftAfterText.Contains("m_FramePointer = (PTR_VOID)m_RegDisplay.GetFP();")
     Add-TestResult $results "source drift fails closed" $driftPass "Expected SOURCE_DRIFT and no postimage." $drift
     $testFailure = $testFailure -or -not $driftPass
 
@@ -142,7 +168,8 @@ try {
     $partialPatch = Join-Path $partialRoot "partial.patch"
     $patchChunks = [regex]::Split((Get-Content -LiteralPath $patchPath -Raw), '(?m)(?=^diff --git )') | Where-Object { $_.Trim().Length -gt 0 }
     Set-Content -LiteralPath $partialPatch -Value ($patchChunks[0].TrimEnd() + [Environment]::NewLine) -Encoding ASCII
-    $partialRelativeRoot = $partialRoot.Substring($RepoRoot.TrimEnd('\', '/') .Length).TrimStart('\', '/').Replace('\', '/')
+    $repoPrefix = $RepoRoot.TrimEnd('\', '/')
+    $partialRelativeRoot = $partialRoot.Substring($repoPrefix.Length).TrimStart('\', '/').Replace('\', '/')
     & git -C $RepoRoot apply --unidiff-zero --whitespace=nowarn --directory=$partialRelativeRoot $partialPatch
     if ($LASTEXITCODE -ne 0) { throw "Unable to create partial-application fixture." }
     $partial = Invoke-Repair $partialRoot (Join-Path $partialRoot "partial.result.json")

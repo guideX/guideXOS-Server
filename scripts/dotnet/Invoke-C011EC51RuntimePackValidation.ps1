@@ -2,7 +2,7 @@
 param(
     [ValidateSet("A", "B", "C", "D", "All")]
     [string]$Tier = "All",
-    [string]$RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\.." )).Path,
+    [string]$RepoRoot = "",
     [string]$EvidenceRoot = "",
     [string]$StockRuntimePackRoot = "",
     [string]$ExternalRuntimeRoot = "",
@@ -17,6 +17,7 @@ if ($FreshBootCount -ne 3) { throw "C51 reproducibility validation requires exac
 if ($BootTimeoutSeconds -lt 5) { throw "BootTimeoutSeconds must be at least 5." }
 if ($CommandTimeoutSeconds -lt 30) { throw "CommandTimeoutSeconds must be at least 30." }
 
+if ([string]::IsNullOrWhiteSpace($RepoRoot)) { $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\.." )).Path }
 $RepoRoot = [System.IO.Path]::GetFullPath($RepoRoot)
 if ([string]::IsNullOrWhiteSpace($EvidenceRoot)) {
     $EvidenceRoot = Join-Path $RepoRoot "out\dotnet\c51-runtime-pack-validation"
@@ -28,7 +29,9 @@ if (-not $EvidenceRoot.StartsWith($allowedEvidenceRoot, [System.StringComparison
 }
 
 function Get-Hash([string]$Path) {
-    return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToUpperInvariant()
+    $sha256 = [System.Security.Cryptography.SHA256]::Create()
+    try { return ([BitConverter]::ToString($sha256.ComputeHash([System.IO.File]::ReadAllBytes($Path))) -replace '-', '').ToUpperInvariant() }
+    finally { $sha256.Dispose() }
 }
 
 function Require-File([string]$Path, [string]$Label) {
@@ -59,14 +62,15 @@ function Invoke-BoundedPowerShell {
         Wait-Process -Id $process.Id -Timeout 10 -ErrorAction SilentlyContinue
     }
     $process.Refresh()
-    [pscustomobject]@{
+    $exitCode = if ($timedOut) { 124 } else { [int]$process.ExitCode }
+    return [pscustomobject]@{
         script = $ScriptPath
         command = $powershell + " " + ($quotedArguments -join " ")
-        exitCode = if ($timedOut) { 124 } else { $process.ExitCode }
+        exitCode = $exitCode
         timedOut = [bool]$timedOut
         log = $LogPath
         stderr = $errorPath
-        output = if (Test-Path -LiteralPath $LogPath) { Get-Content -LiteralPath $LogPath -Raw } else { "" }
+        outputTail = if (Test-Path -LiteralPath $LogPath) { (Get-Content -LiteralPath $LogPath -Tail 40 | Out-String).Trim() } else { "" }
     }
 }
 
@@ -75,7 +79,7 @@ function Test-PowerShellSyntax([string]$Path) {
     $errors = $null
     [System.Management.Automation.Language.Parser]::ParseFile($Path, [ref]$tokens, [ref]$errors) | Out-Null
     if ($errors.Count -gt 0) {
-        throw "PowerShell parse failed for $Path: " + (($errors | ForEach-Object { $_.Message }) -join "; ")
+        throw "PowerShell parse failed for ${Path}: " + (($errors | ForEach-Object { $_.Message }) -join "; ")
     }
 }
 
@@ -195,13 +199,25 @@ try {
         "-ResultPath", $fixtureResultPath,
         "-KeepFixtures"
     ) (Join-Path $runRoot "tier-a-fixtures.log") $CommandTimeoutSeconds
-    $tierA.checks.fixtureInvocation = $fixtureInvocation
+    $tierA.checks.fixtureInvocation = [ordered]@{
+        exitCode = $fixtureInvocation.exitCode
+        timedOut = $fixtureInvocation.timedOut
+        log = $fixtureInvocation.log
+        stderr = $fixtureInvocation.stderr
+    }
     if ($fixtureInvocation.exitCode -ne 0 -or -not (Test-Path -LiteralPath $fixtureResultPath -PathType Leaf)) {
-        throw "C51 fixture tests failed or did not produce a result manifest."
+        throw "C51 fixture tests failed or did not produce a result manifest. exit=$($fixtureInvocation.exitCode) timedOut=$($fixtureInvocation.timedOut) resultPath=$fixtureResultPath"
     }
     $fixtureResult = Get-Content -LiteralPath $fixtureResultPath -Raw | ConvertFrom-Json
-    if ($fixtureResult.result -ne "PASS" -or $fixtureResult.failed -ne 0) { throw "C51 fixture test result is not PASS." }
-    $tierA.checks.fixtureResult = $fixtureResult
+    if ($fixtureResult.result -ne "PASS" -or [int]$fixtureResult.failed -ne 0) { throw "C51 fixture test result is not PASS. result=$($fixtureResult.result) failed=$($fixtureResult.failed)" }
+    $tierA.checks.fixtureResult = [ordered]@{
+        path = $fixtureResultPath
+        sha256 = Get-Hash $fixtureResultPath
+        result = $fixtureResult.result
+        passed = [int]$fixtureResult.passed
+        failed = [int]$fixtureResult.failed
+        tests = @($fixtureResult.tests | ForEach-Object { [ordered]@{ name = $_.name; result = $_.result; exitCode = $_.exitCode } })
+    }
     $tierA.result = "PASS"
     $tierResults.A = $tierA
     Write-Host "[C51] tier=A PASS"
@@ -216,7 +232,15 @@ try {
         if ($tierB.invocation.exitCode -ne 0) { throw "C51 fresh runtime-pack build failed." }
         $runtimePackManifestPath = Join-Path $buildOutputRoot "runtime-pack.manifest.json"
         $runtimePackManifest = Assert-RuntimePackManifest $runtimePackManifestPath $lockPath $patchPath $lockedCommit
-        $tierB.runtimePackManifest = [ordered]@{ path = $runtimePackManifestPath; sha256 = Get-Hash $runtimePackManifestPath; object = $runtimePackManifest }
+        $tierB.runtimePackManifest = [ordered]@{
+            path = $runtimePackManifestPath
+            sha256 = Get-Hash $runtimePackManifestPath
+            sourceCommit = $runtimePackManifest.nativeAotFpRepairSourceCommit
+            patchState = $runtimePackManifest.nativeAotFpRepairStateAfter
+            archiveSha256 = $runtimePackManifest.adaptedRuntimeLibrarySha256
+            stackObjectSha256 = $runtimePackManifest.nativeAotFpRepairObjects.stackFrameIteratorSha256
+            coffObjectSha256 = $runtimePackManifest.nativeAotFpRepairObjects.coffNativeCodeManagerSha256
+        }
         $tierB.result = "PASS"
         $tierResults.B = $tierB
         Write-Host "[C51] tier=B PASS manifest=$runtimePackManifestPath"
@@ -248,7 +272,16 @@ try {
             throw "C51 C50 production manifest did not pass all retained semantic and three-run assertions."
         }
         if (@($gcManifest.qemu.runs).Count -ne 3) { throw "C51 C50 manifest does not contain exactly three fresh runs." }
-        $tierC.gcManifest = [ordered]@{ path = $gcManifestPath; sha256 = Get-Hash $gcManifestPath; object = $gcManifest }
+        $tierC.gcManifest = [ordered]@{
+            path = $gcManifestPath
+            sha256 = Get-Hash $gcManifestPath
+            marker = $gcManifest.marker
+            productionized = $gcManifest.productionized
+            outcome = $gcManifest.outcome
+            successLevel = $gcManifest.successLevel
+            freshRunCount = @($gcManifest.qemu.runs).Count
+            serialSha256 = @($gcManifest.qemu.serialSha256)
+        }
         $tierC.result = "PASS"
         $tierResults.C = $tierC
         Write-Host "[C51] tier=C PASS manifest=$gcManifestPath"
@@ -270,7 +303,14 @@ try {
         if ($ordinaryManifest.outcome -ne "PASS" -or $ordinaryManifest.freshBootCount -ne 3 -or $ordinaryManifest.noCanonicalKernelMutation -ne $true) {
             throw "C51 ordinary-boot manifest did not pass its exact marker and restoration assertions."
         }
-        $tierD.ordinaryManifest = [ordered]@{ path = $ordinaryManifestPath; sha256 = Get-Hash $ordinaryManifestPath; object = $ordinaryManifest }
+        $tierD.ordinaryManifest = [ordered]@{
+            path = $ordinaryManifestPath
+            sha256 = Get-Hash $ordinaryManifestPath
+            outcome = $ordinaryManifest.outcome
+            freshBootCount = $ordinaryManifest.freshBootCount
+            noCanonicalKernelMutation = $ordinaryManifest.noCanonicalKernelMutation
+            serialSha256 = @($ordinaryManifest.boots | ForEach-Object { $_.serialSha256 })
+        }
         $tierD.result = "PASS"
         $tierResults.D = $tierD
         Write-Host "[C51] tier=D PASS manifest=$ordinaryManifestPath"
@@ -320,9 +360,9 @@ $topManifest = [ordered]@{
         patchSha256 = Get-Hash $patchPath
     }
     tierResults = $tierResults
-    runtimePackManifest = if ($null -eq $runtimePackManifestPath) { $null } else { [ordered]@{ path = $runtimePackManifestPath; sha256 = Get-Hash $runtimePackManifestPath } }
-    gcProofManifest = if ($null -eq $gcManifestPath) { $null } else { [ordered]@{ path = $gcManifestPath; sha256 = Get-Hash $gcManifestPath } }
-    ordinaryBootManifest = if ($null -eq $ordinaryManifestPath) { $null } else { [ordered]@{ path = $ordinaryManifestPath; sha256 = Get-Hash $ordinaryManifestPath } }
+    runtimePackManifest = if ($null -eq $runtimePackManifestPath -or -not (Test-Path -LiteralPath $runtimePackManifestPath -PathType Leaf)) { $null } else { [ordered]@{ path = $runtimePackManifestPath; sha256 = Get-Hash $runtimePackManifestPath } }
+    gcProofManifest = if ($null -eq $gcManifestPath -or -not (Test-Path -LiteralPath $gcManifestPath -PathType Leaf)) { $null } else { [ordered]@{ path = $gcManifestPath; sha256 = Get-Hash $gcManifestPath } }
+    ordinaryBootManifest = if ($null -eq $ordinaryManifestPath -or -not (Test-Path -LiteralPath $ordinaryManifestPath -PathType Leaf)) { $null } else { [ordered]@{ path = $ordinaryManifestPath; sha256 = Get-Hash $ordinaryManifestPath } }
     semanticRewriteGuard = [ordered]@{
         result = if ($allRequestedPassed) { "PASS" } else { "FAIL" }
         c46SemanticCompileDefine = $false
