@@ -1874,7 +1874,7 @@ bool lookup_path(uint8_t volumeIndex, const char* path, DirEntry* out)
     if (!path || !out) return false;
     
     FATVolume& vol = s_volumes[volumeIndex];
-    
+
     // Handle empty path or root
     if (path[0] == '\0' || (path[0] == '/' && path[1] == '\0')) {
         // Return root directory info
@@ -1887,56 +1887,14 @@ bool lookup_path(uint8_t volumeIndex, const char* path, DirEntry* out)
         out->isDir = true;
         return true;
     }
-    
-    // Skip leading slash
-    const char* p = path;
-    if (*p == '/') ++p;
-    
-    // Start at root cluster
-    uint32_t currentCluster = vol.rootCluster;
-    DirEntry entry;
-    
-    while (*p) {
-        // Extract next path component
-        char component[128];
-        int i = 0;
-        while (*p && *p != '/' && i < 127) {
-            component[i++] = *p++;
-        }
-        component[i] = '\0';
-        
-        // Skip trailing slashes
-        while (*p == '/') ++p;
-        
-        // Skip empty components
-        if (component[0] == '\0') continue;
-        
-        // Search in current directory
-        if (!open_dir(volumeIndex, currentCluster)) {
-            return false;
-        }
-        
-        if (!find_in_dir(volumeIndex, component, &entry)) {
-            return false;  // Not found
-        }
-        
-        // Check if this is the final component
-        if (*p == '\0') {
-            // Found it!
-            memcopy(out, &entry, sizeof(DirEntry));
-            return true;
-        }
-        
-        // Not the final component - must be a directory
-        if (!entry.isDir) {
-            return false;  // Path component is not a directory
-        }
-        
-        // Continue with this directory
-        currentCluster = entry.firstCluster;
-    }
-    
-    return false;
+
+    // Path lookup is deliberately independent of the public directory
+    // iterator.  VFS callers may enumerate one directory while validating a
+    // child package; reusing s_dirIter here would destroy that caller's
+    // cursor before its next readdir().
+    uint32_t sector = 0;
+    uint32_t offset = 0;
+    return find_path_entry_at(volumeIndex, path, out, &sector, &offset);
 }
 
 FileWriteStatus overwrite_path_status(uint8_t volumeIndex, const char* path,
