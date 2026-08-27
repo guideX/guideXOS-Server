@@ -30,6 +30,11 @@ constexpr std::size_t kNavigatorScriptMaxElementHostObjects = 1024u;
 constexpr std::size_t kNavigatorScriptMaxDocumentMutations = 1024u;
 constexpr std::size_t kNavigatorScriptMaxDocumentNodes = 1024u;
 constexpr std::size_t kNavigatorScriptMaxClickHandlers = 64u;
+// JS13 snapshots at most 32 serials, including the clicked Element and the
+// document's html/body ancestors. The path is deliberately smaller than the
+// 1024-node document metadata bound so dispatch cannot consume an unbounded
+// native traversal stack.
+constexpr std::size_t kNavigatorScriptMaxPropagationDepth = 32u;
 
 struct NavigatorScriptHostLimits {
     std::size_t maxDocumentIdLength = kNavigatorScriptMaxDocumentIdLength;

@@ -3405,6 +3405,8 @@ const char* runtimeErrorCodeName(RuntimeErrorCode code)
         return "HostCallbackLimitExceeded";
     case RuntimeErrorCode::RealmSourceLimitExceeded:
         return "RealmSourceLimitExceeded";
+    case RuntimeErrorCode::PropagationPathLimitExceeded:
+        return "PropagationPathLimitExceeded";
     }
     return "Invalid";
 }

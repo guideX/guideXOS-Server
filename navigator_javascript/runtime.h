@@ -67,6 +67,7 @@ enum class RuntimeErrorCode : std::uint8_t {
     DocumentMutationLimitExceeded,
     RealmSourceLimitExceeded,
     HostCallbackLimitExceeded,
+    PropagationPathLimitExceeded,
 };
 
 struct RuntimeError {

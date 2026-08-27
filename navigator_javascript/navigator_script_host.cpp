@@ -178,22 +178,50 @@ bool NavigatorScriptHostAdapter::dispatchClick(RuntimeContext& runtime,
         error = RuntimeErrorCode::StaleHostObject;
         return false;
     }
-    const ClickHandlerRecord* record = clickHandlerFor(serial);
-    if (record == nullptr ||
-        (record->onclickFunction == kInvalidRuntimeFunctionId &&
-            record->listenerFunction == kInvalidRuntimeFunctionId)) return true;
     if (clickDispatchActive_) {
         error = RuntimeErrorCode::HostReentryUnsupported;
         return false;
     }
 
-    // Copy both function IDs before entering user code. If either callback
-    // replaces or clears a handler, the change is therefore used only by a
-    // subsequent click. onclick intentionally runs before addEventListener.
-    const RuntimeFunctionId onclickFunction = record->onclickFunction;
-    const RuntimeFunctionId listenerFunction = record->listenerFunction;
+    // Snapshot the DOM ownership chain before entering user code. The serial
+    // array is fixed-size and contains no native pointers; every subsequent
+    // entry is revalidated against the same document and generation before it
+    // can be used. Target is path[0]; ancestors follow toward the root.
+    std::array<HostInstanceId, kNavigatorScriptMaxPropagationDepth>
+        propagationPath{};
+    std::size_t propagationLength = 0;
+    HostInstanceId currentSerial = serial;
+    while (currentSerial != 0) {
+        if (propagationLength >= propagationPath.size()) {
+            error = RuntimeErrorCode::PropagationPathLimitExceeded;
+            return false;
+        }
+        const gxos::web::HtmlElementRef* element = findElement(currentSerial);
+        if (element == nullptr || element->serial == 0) {
+            error = RuntimeErrorCode::StaleHostObject;
+            return false;
+        }
+        propagationPath[propagationLength++] = element->serial;
+        const HostInstanceId parentSerial = element->parentSerial;
+        if (parentSerial == currentSerial) {
+            error = RuntimeErrorCode::StaleHostObject;
+            return false;
+        }
+        currentSerial = parentSerial;
+    }
+
+    bool hasDispatchableHandler = false;
+    for (std::size_t index = 0; index < propagationLength; ++index) {
+        if (hasClickHandler(propagationPath[index])) {
+            hasDispatchableHandler = true;
+            break;
+        }
+    }
+    if (!hasDispatchableHandler) return true;
+
+    const HostGenerationId dispatchGeneration = generation_;
     const HostObjectReference target{
-        serial, generation_, kNavigatorElementHostKind};
+        propagationPath[0], dispatchGeneration, kNavigatorElementHostKind};
     Value event;
     if (!runtime.createOrUpdateEventObject(
             SourceView("click", 5u), target, target, event, error)) {
@@ -221,8 +249,43 @@ bool NavigatorScriptHostAdapter::dispatchClick(RuntimeContext& runtime,
             if (firstError == RuntimeErrorCode::None) firstError = callbackError;
         }
     };
-    invoke(onclickFunction);
-    invoke(listenerFunction);
+    for (std::size_t index = 0; index < propagationLength; ++index) {
+        if (generation_ != dispatchGeneration || document_ == nullptr ||
+            findElement(propagationPath[index]) == nullptr) {
+            if (firstError == RuntimeErrorCode::None)
+                firstError = RuntimeErrorCode::StaleHostObject;
+            succeeded = false;
+            break;
+        }
+
+        // Lookup occurs when the propagation node is reached. This makes
+        // removal/replacement of a later ancestor visible to this dispatch.
+        // Copy both IDs before invoking the node's onclick so JS12's
+        // established onclick-before-listener behavior remains deterministic
+        // if onclick mutates its own registration.
+        const ClickHandlerRecord* record =
+            clickHandlerFor(propagationPath[index]);
+        if (record == nullptr ||
+            (record->onclickFunction == kInvalidRuntimeFunctionId &&
+                record->listenerFunction == kInvalidRuntimeFunctionId)) {
+            continue;
+        }
+        const RuntimeFunctionId onclickFunction = record->onclickFunction;
+        const RuntimeFunctionId listenerFunction = record->listenerFunction;
+        const HostObjectReference currentTarget{
+            propagationPath[index], dispatchGeneration,
+            kNavigatorElementHostKind};
+        RuntimeErrorCode eventError = RuntimeErrorCode::None;
+        if (!runtime.createOrUpdateEventObject(SourceView("click", 5u),
+                target, currentTarget, event, eventError)) {
+            if (firstError == RuntimeErrorCode::None) firstError = eventError;
+            succeeded = false;
+            break;
+        }
+        arguments[0] = event;
+        invoke(onclickFunction);
+        invoke(listenerFunction);
+    }
     clickDispatchActive_ = false;
     error = firstError;
     return succeeded;

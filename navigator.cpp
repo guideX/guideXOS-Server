@@ -218,7 +218,7 @@ bool Navigator::dispatchJavaScriptClick(int blockIndex)
 		return false;
 	const std::uint64_t serial = s_currentDoc.blocks[
 		static_cast<std::size_t>(blockIndex)].elementMetadata.serial;
-	if (serial == 0 || !s_scriptHostAdapter.hasClickHandler(serial)) return false;
+	if (serial == 0) return false;
 	RuntimeErrorCode error = RuntimeErrorCode::None;
 	if (!s_scriptHostAdapter.dispatchClick(s_scriptRuntime, serial, error))
 		recordJavaScriptError("click", error);

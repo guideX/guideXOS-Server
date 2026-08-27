@@ -1,0 +1,121 @@
+<!doctype html>
+<html>
+<head><title>Navigator JavaScript JS13</title></head>
+<body>
+<h1>Navigator JavaScript JS13</h1>
+<p>Basic bounded click bubbling through the real Navigator DOM.</p>
+<div id="js13-grandparent">
+  <div id="js13-parent">
+    <div id="js13-gap">
+      <button id="js13-child" type="button">Child</button>
+    </div>
+  </div>
+</div>
+<div id="js13-ancestor-only">
+  <div id="js13-ancestor-gap">
+    <button id="js13-unregistered-child" type="button">Unregistered</button>
+  </div>
+</div>
+<div id="js13-branch-a"><button id="js13-branch-a-child" type="button">Branch A</button></div>
+<div id="js13-branch-b"><button id="js13-branch-b-child" type="button">Branch B</button></div>
+<div id="js13-mutation-ancestor">
+  <div id="js13-mutation-gap">
+    <button id="js13-mutation-child" type="button">Mutation</button>
+  </div>
+</div>
+<div id="js13-error-ancestor">
+  <button id="js13-error-child" type="button">Error</button>
+</div>
+<p id="js13-state">state</p>
+<a id="js13-link" href="/navigator-smoke/javascript-js13-target.html">Navigate after JS13</a>
+<script>
+var js13Child = document.getElementById("js13-child");
+var js13Parent = document.getElementById("js13-parent");
+var js13Grandparent = document.getElementById("js13-grandparent");
+var js13State = document.getElementById("js13-state");
+var js13Order = "";
+var js13Target = "";
+var js13ChildCurrent = "";
+var js13ParentCurrent = "";
+var js13GrandCurrent = "";
+function js13ChildOnclick(event) {
+    js13Order = js13Order + "child-onclick>";
+    js13Target = event.target.id;
+    js13ChildCurrent = event.currentTarget.id;
+    event.target.textContent = "Clicked";
+}
+function js13ChildListener(event) {
+    js13Order = js13Order + "child-listener>";
+}
+function js13ParentOnclick(event) {
+    js13Order = js13Order + "parent-onclick>";
+    js13Target = event.target.id;
+    js13ParentCurrent = event.currentTarget.id;
+}
+function js13ParentListener(event) {
+    js13Order = js13Order + "parent-listener>";
+}
+function js13GrandOnclick(event) {
+    js13Order = js13Order + "grand-onclick>";
+    js13Target = event.target.id;
+    js13GrandCurrent = event.currentTarget.id;
+}
+function js13GrandListener(event) {
+    js13Order = js13Order + "grand-listener>";
+    js13State.textContent = "bubble:" + js13Order + ":" + js13Target + ":" +
+        js13ChildCurrent + ":" + js13ParentCurrent + ":" + js13GrandCurrent;
+}
+js13Child.onclick = js13ChildOnclick;
+js13Child.addEventListener("click", js13ChildListener);
+js13Parent.onclick = js13ParentOnclick;
+js13Parent.addEventListener("click", js13ParentListener);
+js13Grandparent.onclick = js13GrandOnclick;
+js13Grandparent.addEventListener("click", js13GrandListener);
+
+var js13AncestorOnly = document.getElementById("js13-ancestor-only");
+var js13UnregisteredChild = document.getElementById("js13-unregistered-child");
+js13AncestorOnly.addEventListener("click", function(event) {
+    js13State.textContent = "ancestor:" + event.target.id + ":" + event.currentTarget.id;
+});
+
+var js13BranchA = document.getElementById("js13-branch-a");
+var js13BranchB = document.getElementById("js13-branch-b");
+var js13BranchACount = 0;
+var js13BranchBCount = 0;
+js13BranchA.addEventListener("click", function(event) {
+    js13BranchACount = js13BranchACount + 1;
+    js13State.textContent = "branches:" + js13BranchACount + ":" + js13BranchBCount + ":" + event.target.id;
+});
+js13BranchB.addEventListener("click", function(event) {
+    js13BranchBCount = js13BranchBCount + 1;
+    js13State.textContent = "branches:" + js13BranchACount + ":" + js13BranchBCount + ":" + event.target.id;
+});
+
+var js13MutationAncestor = document.getElementById("js13-mutation-ancestor");
+var js13MutationChild = document.getElementById("js13-mutation-child");
+var js13MutationCount = 0;
+function js13MutationAncestorListener(event) {
+    js13MutationCount = js13MutationCount + 1;
+}
+function js13MutationChildHandler(event) {
+    js13MutationAncestor.removeEventListener("click", js13MutationAncestorListener);
+    js13State.textContent = "mutation:" + js13MutationCount;
+}
+js13MutationAncestor.addEventListener("click", js13MutationAncestorListener);
+js13MutationChild.addEventListener("click", js13MutationChildHandler);
+
+var js13ErrorChild = document.getElementById("js13-error-child");
+var js13ErrorAncestor = document.getElementById("js13-error-ancestor");
+var js13ErrorAncestorCount = 0;
+function js13BadHandler(event) {
+    js13ErrorChild.removeEventListener("click", js13BadHandler);
+    js13MissingIdentifier();
+}
+js13ErrorAncestor.addEventListener("click", function(event) {
+    js13ErrorAncestorCount = js13ErrorAncestorCount + 1;
+    js13State.textContent = "error:" + js13ErrorAncestorCount + ":" + event.target.id + ":" + event.currentTarget.id;
+});
+js13ErrorChild.addEventListener("click", js13BadHandler);
+</script>
+</body>
+</html>

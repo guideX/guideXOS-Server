@@ -1049,6 +1049,132 @@ static std::string navigatorHostedSmokeDiagnostic() {
         gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
         "replacement document has no stale JS12 callbacks or errors");
 
+    const bool js13Loaded = gxos::apps::Navigator::SmokeNavigateToQuiet(
+        "http://127.0.0.1:8080/navigator-smoke/javascript-js13.html");
+    const std::string js13InitialText =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    const uint64_t js13InitialRevision =
+        gxos::apps::Navigator::SmokeDocumentLayoutRevision();
+    int js13ChildX = 0;
+    int js13ChildY = 0;
+    int js13ChildW = 0;
+    int js13ChildH = 0;
+    const bool js13ChildHasGeometry = gxos::apps::Navigator::SmokeBlockGeometryById(
+        "js13-child", js13ChildX, js13ChildY, js13ChildW, js13ChildH);
+    const bool js13ChildHit =
+        gxos::apps::Navigator::SmokeFormHitTargetById("js13-child");
+    const size_t js13InitialHandlers =
+        gxos::apps::Navigator::SmokeJavaScriptHandlerCount();
+    const size_t js13InitialListeners =
+        gxos::apps::Navigator::SmokeJavaScriptListenerCount();
+    const std::string js13InitialError =
+        gxos::apps::Navigator::SmokeJavaScriptLastError();
+    add("JS13 hosted fixture loads nested bubbling handlers",
+        js13Loaded && contains(js13InitialText, "Navigator JavaScript JS13") &&
+        contains(js13InitialText, "Child") && js13InitialHandlers == 10u &&
+        js13InitialListeners == 10u && js13InitialError.empty(),
+        std::string("loaded=") + yesNo(js13Loaded) + ",records=" +
+        std::to_string(js13InitialHandlers) + ",listeners=" +
+        std::to_string(js13InitialListeners) + ",error=" +
+        (js13InitialError.empty() ? "none" : js13InitialError));
+
+    const bool js13ChildClickOne =
+        gxos::apps::Navigator::SmokeClickFormControlById("js13-child");
+    const std::string js13AfterChildOne =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    const uint64_t js13RevisionAfterChildOne =
+        gxos::apps::Navigator::SmokeDocumentLayoutRevision();
+    add("JS13 authentic hosted click bubbles target to ancestors",
+        js13ChildHasGeometry && js13ChildW > 0 && js13ChildH > 0 &&
+        js13ChildHit && js13ChildClickOne &&
+        contains(js13AfterChildOne, "bubble:child-onclick>child-listener>parent-onclick>parent-listener>grand-onclick>grand-listener>") &&
+        contains(js13AfterChildOne, ":js13-child:js13-child:js13-parent:js13-grandparent"),
+        std::string("geometry=") + yesNo(js13ChildHasGeometry) + ",hit=" +
+        yesNo(js13ChildHit) + ",click=" + yesNo(js13ChildClickOne));
+    add("JS13 hosted bubbling mutation relayouts and preserves order",
+        contains(js13AfterChildOne, "Clicked") &&
+        js13RevisionAfterChildOne > js13InitialRevision &&
+        !gxos::apps::Navigator::SmokeDocumentDirty(),
+        "target mutation settled after child-parent-grandparent dispatch");
+    const bool js13ChildClickTwo =
+        gxos::apps::Navigator::SmokeClickFormControlById("js13-child");
+    const std::string js13AfterChildTwo =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS13 repeated hosted bubbling keeps same-realm callback state",
+        js13ChildClickTwo &&
+        contains(js13AfterChildTwo, "child-onclick>child-listener>parent-onclick>parent-listener>grand-onclick>grand-listener>"),
+        "second authentic click retains nested handler registrations");
+
+    const bool js13AncestorOnlyClick =
+        gxos::apps::Navigator::SmokeClickFormControlById("js13-unregistered-child");
+    const std::string js13AfterAncestorOnly =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS13 hosted ancestor-only listener receives unregistered child",
+        js13AncestorOnlyClick &&
+        contains(js13AfterAncestorOnly, "ancestor:js13-unregistered-child:js13-ancestor-only"),
+        "handlerless child and gap still follow DOM parentSerial ancestry");
+
+    const bool js13BranchAClick =
+        gxos::apps::Navigator::SmokeClickFormControlById("js13-branch-a-child");
+    const std::string js13AfterBranchA =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    const bool js13BranchBClick =
+        gxos::apps::Navigator::SmokeClickFormControlById("js13-branch-b-child");
+    const std::string js13AfterBranchB =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS13 hosted independent DOM branches stay isolated",
+        js13BranchAClick && js13BranchBClick &&
+        contains(js13AfterBranchA, "branches:1:0:js13-branch-a-child") &&
+        contains(js13AfterBranchB, "branches:1:1:js13-branch-b-child"),
+        "branch A and branch B clicks only reach their own DOM ancestors");
+
+    const bool js13MutationClick =
+        gxos::apps::Navigator::SmokeClickFormControlById("js13-mutation-child");
+    const std::string js13AfterMutation =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS13 hosted listener mutation removes later ancestor safely",
+        js13MutationClick && contains(js13AfterMutation, "mutation:0"),
+        "child removes ancestor listener before that propagation node is reached");
+
+    const bool js13ErrorClickOne =
+        gxos::apps::Navigator::SmokeClickFormControlById("js13-error-child");
+    const std::string js13AfterErrorOne =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    const std::string js13Error =
+        gxos::apps::Navigator::SmokeJavaScriptLastError();
+    const bool js13ErrorClickTwo =
+        gxos::apps::Navigator::SmokeClickFormControlById("js13-error-child");
+    const std::string js13AfterErrorTwo =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS13 hosted callback errors still bubble and recover",
+        js13ErrorClickOne && js13ErrorClickTwo &&
+        contains(js13Error, "UnknownIdentifier") &&
+        contains(js13AfterErrorOne, "error:1:js13-error-child:js13-error-ancestor") &&
+        contains(js13AfterErrorTwo, "error:2:js13-error-child:js13-error-ancestor"),
+        std::string("first=") + yesNo(js13ErrorClickOne) + ",second=" +
+        yesNo(js13ErrorClickTwo) + ",error=" +
+        (js13Error.empty() ? "none" : js13Error));
+
+    const bool js13LinkHit =
+        gxos::apps::Navigator::SmokeHitLinkById("js13-link");
+    const bool js13LinkClick =
+        js13LinkHit && gxos::apps::Navigator::SmokeClickFirstLink();
+    const std::string js13TargetText =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS13 ordinary link navigation remains functional",
+        js13LinkHit && js13LinkClick &&
+        gxos::apps::Navigator::SmokeCurrentUrl() ==
+            "http://127.0.0.1:8080/navigator-smoke/javascript-js13-target.html" &&
+        contains(js13TargetText, "Navigator JavaScript JS13 Target"),
+        std::string("hit=") + yesNo(js13LinkHit) + ",link=" +
+        yesNo(js13LinkClick) + ",url=" +
+        gxos::apps::Navigator::SmokeCurrentUrl());
+    add("JS13 navigation clears old propagation listener state",
+        gxos::apps::Navigator::SmokeJavaScriptHandlerCount() == 0u &&
+        gxos::apps::Navigator::SmokeJavaScriptListenerCount() == 0u &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        "replacement document has no stale JS13 callbacks or errors");
+
     bool cssInlineLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-inline.html");
     std::string cssInlineText = gxos::apps::Navigator::SmokeCurrentDocumentText();
     std::string cssInlineReport = gxos::apps::Navigator::SmokeRuntimeReport();

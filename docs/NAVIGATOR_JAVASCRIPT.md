@@ -7,7 +7,7 @@ Navigator currently has a reusable HTML document/parser layer in
 navigation and rendering in `navigator.*`. The independent JavaScript
 subsystem now contains a bounded lexer, parser/AST, runtime core, and the JS8
 controlled document bridge described below. It has no general event system,
-but JS9–JS12 provide a deliberately bounded inline-script and synchronous
+but JS9–JS13 provide a deliberately bounded inline-script and synchronous
 click-callback path. The existing HTML parser preserves only the bounded
 inline script sources needed by that Navigator path; this is not browser
 script compatibility.
@@ -1580,6 +1580,104 @@ Element, `once`, passive listeners, bubbling, capture, propagation paths,
 `stopPropagation`, `stopImmediatePropagation`, `preventDefault`, cancellation,
 other event types, mouse or pointer data, keyboard/input events, timers,
 promises, task queues, microtasks, asynchronous callbacks, and broad DOM
-expansion remain outside this milestone. The recommended next step is JS13:
-basic click bubbling and propagation-path construction, with the child as
-`event.target` and each executing Element as `event.currentTarget`.
+expansion remain outside that milestone. JS13 is the narrow next step: basic
+click bubbling and bounded propagation-path construction.
+
+## Phase JS13: bounded click bubbling
+
+JS13 extends the existing synchronous click path from the directly hit
+Element to its DOM ancestors. The path is constructed from the authoritative
+`HtmlElementRef::parentSerial` links, not from layout overlap or a scan of all
+registered listeners. It is built before any callback runs, in target-to-root
+order, and is then dispatched in that same order. No capture traversal or
+event-phase machinery is introduced.
+
+The adapter uses one fixed
+`std::array<HostInstanceId, kNavigatorScriptMaxPropagationDepth>` for the
+snapshot. The bound is 32 Element serials, including the clicked Element and
+the `html`/`body` records when present. Each path record is one 8-byte
+`HostInstanceId`, for a fixed 256-byte path cost per dispatch. The array is
+stack-local and is not retained between clicks. A missing parent record,
+self-parent cycle, generation mismatch, or other invalid entry fails closed;
+exceeding 32 entries returns the dedicated
+`PropagationPathLimitExceeded` runtime error before JavaScript is invoked.
+The overflow policy is explicit abort of that click's JavaScript propagation;
+Navigator still follows its existing default action path afterward, including
+ordinary link navigation. No native pointer is read beyond the bounded
+document lookup.
+
+For the whole bubbling dispatch, `event.target` is initialized once to the
+authentically clicked Element and remains that canonical wrapper at every
+node. Before a node's callbacks execute, `event.currentTarget` is refreshed
+to that node's canonical wrapper. Thus a child callback sees child/child,
+while an ancestor callback sees child/ancestor. The Event is still one cached
+ordinary runtime object per realm; there is no per-node or per-click Event
+allocation. Its target/currentTarget values are safe generation-scoped host
+handles, and retained references observe the same deterministic JS12 reuse:
+later clicks refresh the cached object's fields, while generation invalidation
+makes old Element fields fail with `StaleHostObject`. Navigation resets the
+realm and clears the Event, function IDs, listener table, and path context.
+
+At each propagation node the adapter looks up the current bounded record when
+that node is reached. A child callback that removes a later ancestor listener
+therefore prevents that listener from firing; a replacement installed before
+the later node is reached is the one used. Within one node, the two IDs are
+copied on arrival so the established local order remains `onclick` followed
+by its one `addEventListener("click", ...)` listener. Handlerless ancestors
+are skipped without terminating the path, and an ancestor-only listener can
+receive a click from an otherwise unregistered descendant. Callback runtime
+errors retain JS12 containment: the failing callback reports its first error,
+the remaining local listener and later ancestors continue when possible, and
+the next independent click starts with a clean runtime diagnostic state.
+
+### JS13 proof fixtures and results
+
+The focused proof is
+`tests/navigator_javascript_js13_test.cpp`, run by
+`scripts/smoke-navigator-javascript-js13.ps1`. It uses the real parsed
+`WebDocument` structural records and the adapter's production-boundary click
+entrypoint. The suite covers direct, parent, and grandparent handlers;
+target/currentTarget divergence and canonical identity; onclick/listener
+ordering at every node; handlerless gaps; ancestor-only dispatch; independent
+branches; listener removal and replacement during dispatch; zero-argument
+callbacks; closure state; DOM mutation and relayout; callback-error
+continuation; deep hierarchies; the 32-entry boundary and overflow; 64-slot
+listener reuse; 100 repeated bubbling clicks; retained Event reuse; and
+navigation cleanup with stale-reference failure and a new nested document.
+The JS13 focused suite passes 332 checks with 0 failures.
+
+The authentic hosted proof is
+`navigator-smoke/javascript-js13.html` plus
+`navigator-smoke/javascript-js13-target.html`, exercised by the existing
+`navigator.smoke` aggregate. It uses Navigator HTML parsing, page-script
+execution, real layout, form-button hit testing, physical mouse down/up
+handling, production click dispatch, ancestor callbacks, callback mutation,
+callback-error recovery, and ordinary-link navigation. The hosted fixture
+proves the hit button is the original target, parent and grandparent handlers
+run in target-to-root order, an unregistered descendant reaches its ancestor,
+unrelated branches stay isolated, a removed ancestor listener is skipped, and
+navigation clears the old records. Nested-link behavior is not claimed: the
+current compact hit model reports the hit link block as the target and does
+not provide a separate generic descendant hit node for that case.
+
+The focused JS1–JS13 set contains 11 available suites: lexer, parser, runtime,
+JS6, JS7, JS8, JS9, JS10, JS11, JS12, and JS13. JS13's adapter/runtime path
+passes the `GXOS_BARE_METAL` compile lane and the strict warning-as-error
+syntax lane. Its bounded per-dispatch addition is 256 bytes of stack path
+storage; the existing 64 listener records remain 16 bytes each (1,024 bytes),
+and the existing one cached Event object and canonical host-wrapper registry
+remain bounded. The hosted Navigator aggregate is `309 passed, 7 failed`
+after the ten JS13 assertions are added; this is the JS12 baseline of
+`299 passed, 7 failed` plus ten new passing JS13 checks. The seven known
+pre-existing failures remain CSS 3C, CSS 3G, CSS 6A, CSS 6B (three checks),
+and CSS 6C. No JS13 aggregate failure is introduced.
+
+JS13 still does not implement full DOM Events: capture, `useCapture`, event
+phases or `eventPhase`, `bubbles`, `cancelable`, propagation controls,
+`preventDefault`, cancellation, listener options, `once`, `passive`, multiple
+listeners per Element, non-click events, keyboard/input/change events,
+MouseEvent/PointerEvent data, coordinates/buttons, timers, promises,
+microtasks, asynchronous dispatch, or broader DOM expansion remain excluded.
+The recommended JS14 milestone is `event.stopPropagation()` with target-local
+callbacks completing under a deterministic local policy and ancestor bubbling
+stopping without adding capture or default-action cancellation.
