@@ -41,6 +41,8 @@ static uint32_t s_fillFailures = 0;
 static uint32_t s_rdseedRetryFailures = 0;
 static uint32_t s_rdrandRetryFailures = 0;
 static uint32_t s_providerFallbacks = 0;
+static char s_cpuVendor[13] = "unavailable";
+static char s_cpuModel[49] = "unavailable";
 
 static void increment_bounded(uint32_t* value)
 {
@@ -112,6 +114,52 @@ static void read_cpuid(uint32_t leaf,
 #endif
 }
 
+static void cpuid_words_to_text(const uint32_t* words,
+                                uint32_t wordCount,
+                                char* output,
+                                size_t outputCapacity)
+{
+    if (!words || !output || outputCapacity == 0) return;
+
+    size_t length = 0;
+    for (uint32_t wordIndex = 0; wordIndex < wordCount; ++wordIndex) {
+        for (uint32_t byteIndex = 0; byteIndex < 4; ++byteIndex) {
+            if (length + 1 >= outputCapacity) break;
+            const char value = static_cast<char>((words[wordIndex] >> (byteIndex * 8)) & 0xFFU);
+            if (value == '\0') continue;
+            output[length++] = value;
+        }
+        if (length + 1 >= outputCapacity) break;
+    }
+    while (length > 0 && output[length - 1] == ' ') --length;
+    output[length] = '\0';
+}
+
+static void detect_cpu_identity()
+{
+    if (!cpuid_available()) return;
+
+    uint32_t maxBasicLeaf = 0;
+    uint32_t vendorEbx = 0;
+    uint32_t vendorEcx = 0;
+    uint32_t vendorEdx = 0;
+    read_cpuid(0, 0, &maxBasicLeaf, &vendorEbx, &vendorEcx, &vendorEdx);
+    const uint32_t vendorWords[3] = { vendorEbx, vendorEdx, vendorEcx };
+    cpuid_words_to_text(vendorWords, 3, s_cpuVendor, sizeof(s_cpuVendor));
+
+    uint32_t maxExtendedLeaf = 0;
+    read_cpuid(0x80000000U, 0, &maxExtendedLeaf, &vendorEbx, &vendorEcx, &vendorEdx);
+    if (maxExtendedLeaf < 0x80000004U) return;
+
+    uint32_t brandWords[12] = {};
+    for (uint32_t leaf = 0x80000002U; leaf <= 0x80000004U; ++leaf) {
+        const uint32_t offset = (leaf - 0x80000002U) * 4;
+        read_cpuid(leaf, 0, &brandWords[offset], &brandWords[offset + 1],
+            &brandWords[offset + 2], &brandWords[offset + 3]);
+    }
+    cpuid_words_to_text(brandWords, 12, s_cpuModel, sizeof(s_cpuModel));
+}
+
 static CpuRngFeatures detect_cpu_features()
 {
     CpuRngFeatures features = { false, false };
@@ -169,6 +217,10 @@ static bool read_rdrand32(uint32_t* word)
 }
 
 #else
+
+static void detect_cpu_identity()
+{
+}
 
 static CpuRngFeatures detect_cpu_features()
 {
@@ -231,6 +283,11 @@ static bool fill_from_virtio(void* buffer, size_t len)
 
 static void announce_initial_state()
 {
+    serial::puts("[SECURE-RNG] cpu_vendor=");
+    serial::puts(s_cpuVendor);
+    serial::puts("; cpu_model=");
+    serial::puts(s_cpuModel);
+    serial::puts("\n");
     serial::puts("[SECURE-RNG] provider initialized; rdseed=");
     serial::puts(s_state.cpu.rdseed ? "supported" : "unsupported");
     serial::puts("; rdrand=");
@@ -249,6 +306,7 @@ void init()
     if (s_state.initAttempted) return;
 
     s_state.initAttempted = true;
+    detect_cpu_identity();
     s_state.cpu = detect_cpu_features();
     const ProviderPriority priority = provider_priority(s_state.cpu, virtio::rng::ready());
     if (priority.count != 0) {

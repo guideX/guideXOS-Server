@@ -1,4 +1,4 @@
-# Navigator secure entropy (Phases 1–3)
+# Navigator secure entropy (Phases 1–4)
 
 Navigator’s bare-metal TLS randomness has one OS-level contract:
 
@@ -251,32 +251,88 @@ fail-closed security assertions passed. No runtime
 gated before the callback; its mapping is covered by the contract/source
 tests. No runtime `PSA_ERROR_HARDWARE_FAILURE` event was observed.
 
-### Phase 3 physical validation
+### Phase 4 physical qualification preparation (2026-08-27)
 
-No GuideXOS physical boot was performed, so the physical boot count is zero.
-The available chassis is an HP ProDesk 600 G6 Microtower with an Intel
-i5-10500 x86-64 CPU, but the current Windows environment reports an active
-hypervisor/VBS state. No GuideXOS bare-metal CPUID line, physical RDSEED or
-RDRAND result, selected physical provider, retry count, or physical HTTPS
-handshake was captured. QEMU virtio-rng and hosted Windows RNG results do not
-count toward this requirement.
+Phase 4 started from the clean `NAVIGATOR_GENERAL_IMPROVEMENTS` baseline at
+`6dde454777fc80644c739a70843a32c52069babb` (`Navigator entropy Phase 3
+prepare physical validation`). The tracked source change in this phase is
+limited to physical observability: secure-random initialization now emits the
+CPUID vendor and bounded CPU brand/model string before the existing provider
+line. It never emits random bytes or per-word retry noise. The existing
+diagnostics already report RDSEED/RDRAND support, virtio-rng detection,
+selected provider, initialization status, fill/failure/retry/fallback
+counters, PSA RNG results, DNS/TCP/TLS results, negotiated protocol/cipher
+when available, certificate and hostname validation, and HTTP status.
 
-Accordingly, Phase 3 remains Outcome B: the AMD64 image, secure-entropy
-contract, hosted validation, deterministic QEMU validation, authenticated
-public QEMU sequence, and fail-closed behavior were exercised, but the real
-physical AMD64 HTTPS proof remains unavailable. Outcome C is not indicated;
-no physical defect was established because physical execution was not
-attempted.
+The CA metadata discrepancy was documentation-only. The checked-in
+`assets/certs/mozilla-cacert-2026-08-13.pem` contains 121 roots and 191,850
+bytes with SHA-256
+`303daa9461b9617eb8e6209b272613fcf2923959ff32e9422eaaae195c55c780`;
+`assets/certs/README.md` was corrected from its older size/hash values. The
+PEM source and TLS policy were not changed.
 
-### Remaining limitation / next validation
+The canonical physical artifact is the AMD64 UEFI ESP directory produced by
+`.\build.ps1 -Clean -Arch amd64`. The canonical script does not create an ISO
+or write USB media; the prepared ESP tree must be copied to the chosen UEFI
+FAT32 boot medium. The exact artifact hashes and `ESP/build-identity.txt`
+contents are recorded in the Phase 4 execution report after this build.
 
-The next validation must boot the current image on real x86-64 bare metal for
-at least three fresh boots and capture the kernel's CPU vendor/model,
-RDSEED/RDRAND CPUID support, selected provider, retry/fallback counters,
-repeated secure fills, PSA callback status, DNS resolution, TCP connection,
-negotiated TLS version and cipher, certificate/hostname validation, and HTTP
-success. It must keep hostname verification and production trust policy
-enabled and must not use QEMU entropy or a plaintext fallback.
+No physical boot occurred during this run. Codex has no direct control of the
+HP ProDesk, so this phase is Outcome B (awaiting human physical execution),
+not a physical qualification. Hosted, QEMU, and Windows-hypervisor results
+are not counted as bare-metal proof.
+
+#### Human physical-test checklist
+
+Write the prepared ESP tree to a UEFI FAT32 USB, boot the HP ProDesk 600 G6
+Microtower in UEFI mode, and capture serial output. If serial is unavailable,
+capture the VGA diagnostics. Do not enable virtio-rng or any insecure fallback.
+
+For each of three fresh boots, record:
+
+```text
+Boot #N
+Machine:
+CPU:
+CPU vendor:
+RDSEED supported:
+RDRAND supported:
+Selected entropy provider:
+Secure entropy initialization:
+Secure fills:
+CPU retry/fallback counters:
+PSA RNG status:
+virtio-rng detected:
+```
+
+On every boot, launch Navigator against a stable HTTPS endpoint already
+supported by the existing image and record:
+
+```text
+Hostname:
+DNS:
+Resolved address:
+TCP/443:
+TLS handshake:
+TLS version:
+Cipher:
+Certificate validation:
+Hostname validation:
+HTTP status/result:
+Visible page/content:
+```
+
+On at least one boot, make several requests in one kernel session (for
+example `example.com`, `wikipedia.org`, and the existing NASA endpoint) and
+retain the serial/log output. The acceptance path is CPU RDSEED or RDRAND →
+PSA RNG → DNS → TCP/443 → authenticated TLS → certificate and hostname
+validation → HTTP response. A virtio-rng provider, an HTTP downgrade, a
+verification bypass, or a deterministic fallback is not a pass.
+
+The physical boot count remains zero, with no physical CPU/provider result,
+retry observation, PSA result, DNS/TCP/TLS handshake, HTTP status, or entropy
+failure evidence yet. Physical qualification remains pending until the human
+logs are supplied; Outcome A must not be claimed from this preparation run.
 
 ### Known limitations and classification
 

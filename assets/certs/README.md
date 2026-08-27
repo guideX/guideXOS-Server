@@ -9,8 +9,8 @@ published by curl's CA Extract service from Mozilla's public root store:
 - Mozilla source date in the bundle: 2026-08-13 03:12:01 UTC
 - Representation: ASCII PEM, one X.509 root certificate per block
 - Certificate count: 121
-- Source size: 188,900 bytes
-- SHA-256: `f66dff1bdf8f96060b8177976f8b7d9254bc89bc4db933d769f7384d28480bc9`
+- Source size: 191,850 bytes
+- SHA-256: `303daa9461b9617eb8e6209b272613fcf2923959ff32e9422eaaae195c55c780`
 - License: Mozilla source terms as documented by curl; the converted bundle
   is distributed under MPL 2.0.
 
