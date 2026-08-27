@@ -6,6 +6,7 @@ param(
     [string]$ExternalRuntimeRoot = "",
     [switch]$ManagedAllocation,
     [switch]$ManagedRepeatedAllocation,
+    [switch]$NativeAotFpRepair,
     [ValidateSet("Primary64KiB", "Small4KiB")]
     [string]$HeapConfiguration = "Primary64KiB",
     [switch]$Clean
@@ -37,6 +38,7 @@ if (-not [string]::IsNullOrWhiteSpace($ExternalRuntimeRoot)) {
 }
 if ($ManagedAllocation) { $arguments += '-ManagedAllocation' }
 if ($ManagedRepeatedAllocation) { $arguments += '-ManagedRepeatedAllocation' }
+if ($NativeAotFpRepair) { $arguments += '-NativeAotFpRepair' }
 if ($HeapConfiguration -ne "Primary64KiB") { $arguments += @('-HeapConfiguration', $HeapConfiguration) }
 if ($Clean) { $arguments += '-Clean' }
 & powershell @arguments

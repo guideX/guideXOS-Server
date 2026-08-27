@@ -6,6 +6,7 @@ param(
     [string]$ExternalRuntimeRoot = "",
     [switch]$ManagedAllocation,
     [switch]$ManagedRepeatedAllocation,
+    [switch]$NativeAotFpRepair,
     [ValidateSet("Primary64KiB", "Small4KiB")]
     [string]$HeapConfiguration = "Primary64KiB",
     [switch]$Clean
@@ -135,6 +136,10 @@ Assert-WithinRoot $OutputRoot (Join-Path $RepoRoot "out\dotnet") "Runtime-pack o
 $lock = Read-Lock
 $stockRoot = Find-StockRuntimePack $StockRuntimePackRoot
 Assert-StockPack $stockRoot $lock
+$lockedExternalRuntimeRoot = Join-Path $RepoRoot "out\dotnet\gc-feasibility-baseline\nativeaot-runtime"
+if ($NativeAotFpRepair -and [string]::IsNullOrWhiteSpace($ExternalRuntimeRoot)) {
+    $ExternalRuntimeRoot = $lockedExternalRuntimeRoot
+}
 $externalCommit = $null
 $managedHeapBytes = if ($HeapConfiguration -eq "Primary64KiB") { 65536 } else { 4096 }
 if ($ManagedRepeatedAllocation) { $ManagedAllocation = $true }
@@ -146,8 +151,15 @@ if (-not [string]::IsNullOrWhiteSpace($ExternalRuntimeRoot)) {
     }
     $externalCommit = (& git -C $ExternalRuntimeRoot rev-parse HEAD).Trim()
     if ($LASTEXITCODE -ne 0) { throw "Unable to read external runtime checkout revision: $ExternalRuntimeRoot" }
-    if ($externalCommit -ne $lock.ilCompiler.commit) {
+    if (-not $NativeAotFpRepair -and $externalCommit -ne $lock.ilCompiler.commit) {
         throw "External runtime checkout revision mismatch. Expected $($lock.ilCompiler.commit), got $externalCommit"
+    }
+    if ($NativeAotFpRepair) {
+        & git -C $ExternalRuntimeRoot cat-file -e "$($lock.ilCompiler.commit)`^{commit}"
+        if ($LASTEXITCODE -ne 0) {
+            throw "Locked NativeAOT source commit is not available in the external checkout: $($lock.ilCompiler.commit)"
+        }
+        $externalCommit = $lock.ilCompiler.commit
     }
 }
 
@@ -163,6 +175,33 @@ $sdkBatch = Join-Path $OutputRoot "build-runtime-pack-sdk.bat"
 $manifestPath = Join-Path $OutputRoot "runtime-pack.manifest.json"
 $vcvars = Find-VcVars64
 $objcopy = Find-Objcopy
+$fpPatch = Join-Path $RuntimePackRoot "patches\nativeaot-amd64-fp-handoff.patch"
+$fpApply = Join-Path $RuntimePackRoot "apply-nativeaot-fp-repair.ps1"
+$fpSourceRoot = Join-Path $OutputRoot "nativeaot-fp-repair-source"
+$fpStackSource = Join-Path $fpSourceRoot "src\coreclr\nativeaot\Runtime\StackFrameIterator.cpp"
+$fpCoffSource = Join-Path $fpSourceRoot "src\coreclr\nativeaot\Runtime\windows\CoffNativeCodeManager.cpp"
+$fpStackObject = Join-Path $OutputRoot "StackFrameIterator.cpp.fp-repair.obj"
+$fpCoffObject = Join-Path $OutputRoot "CoffNativeCodeManager.cpp.fp-repair.obj"
+$fpStackMember = "nativeaot\Runtime\Full\CMakeFiles\Runtime.WorkstationGC.dir\__\StackFrameIterator.cpp.obj"
+$fpCoffMember = "nativeaot\Runtime\Full\CMakeFiles\Runtime.WorkstationGC.dir\__\windows\CoffNativeCodeManager.cpp.obj"
+if ($NativeAotFpRepair) {
+    if ([string]::IsNullOrWhiteSpace($ExternalRuntimeRoot)) {
+        throw "NativeAOT FP repair requires the locked NativeAOT source checkout."
+    }
+    if (-not (Test-Path -LiteralPath $fpPatch -PathType Leaf) -or
+        -not (Test-Path -LiteralPath $fpApply -PathType Leaf)) {
+        throw "NativeAOT FP repair patch tooling is incomplete."
+    }
+    New-Item -ItemType Directory -Force -Path $fpSourceRoot | Out-Null
+    $fpSourceArchive = Join-Path $OutputRoot "nativeaot-fp-repair-source.tar"
+    & git -C $ExternalRuntimeRoot archive --format=tar --output="$fpSourceArchive" $lock.ilCompiler.commit `
+        "src/coreclr/nativeaot/Runtime" "src/coreclr/gc" "src/coreclr/inc" "src/coreclr/vm" `
+        "src/coreclr/pal/inc/rt" "src/coreclr/pal/src/include" "src/native/minipal"
+    if ($LASTEXITCODE -ne 0) { throw "Unable to archive locked NativeAOT FP repair sources." }
+    & tar.exe -xf $fpSourceArchive -C $fpSourceRoot
+    if ($LASTEXITCODE -ne 0) { throw "Unable to extract locked NativeAOT FP repair sources." }
+    & $fpApply -SourceRoot $fpSourceRoot
+}
 
 $stockSdk = Join-Path $stockRoot "sdk"
 New-Item -ItemType Directory -Force -Path $sdkOutput | Out-Null
@@ -187,6 +226,9 @@ $removedRuntimeMembers = @(
     "nativeaot\Runtime\Full\CMakeFiles\Runtime.WorkstationGC.dir\__\EHHelpers.cpp.obj",
     "nativeaot\Runtime\Full\CMakeFiles\Runtime.WorkstationGC.dir\__\thread.cpp.obj"
 )
+if ($NativeAotFpRepair) {
+    $removedRuntimeMembers += @($fpStackMember, $fpCoffMember)
+}
 $threadMember = Join-Path $OutputRoot "thread.cpp.obj"
 $ehMember = Join-Path $OutputRoot "EHHelpers.cpp.obj"
 $threadRenamedMember = Join-Path $OutputRoot "thread.cpp.obj.renamed.obj"
@@ -196,6 +238,14 @@ $allocFastRenamedMember = Join-Path $OutputRoot "AllocFast.asm.obj.renamed.obj"
 if ($ManagedAllocation) {
     $removedRuntimeMembers += "nativeaot\Runtime\Full\CMakeFiles\Runtime.WorkstationGC.dir\__\amd64\AllocFast.asm.obj"
 }
+$fpExtractionLines = if ($NativeAotFpRepair) {
+    @(
+        "lib.exe /nologo /extract:`"$fpStackMember`" `"$stockRuntimeLibrary`" /out:`"$fpStackObject`"",
+        "if errorlevel 1 exit /b %errorlevel%",
+        "lib.exe /nologo /extract:`"$fpCoffMember`" `"$stockRuntimeLibrary`" /out:`"$fpCoffObject`"",
+        "if errorlevel 1 exit /b %errorlevel%"
+    )
+} else { @() }
 $threadMemberArguments = "`"$threadMember`""
 $ehMemberArguments = "`"$ehMember`""
 $allocFastMemberArguments = if ($ManagedAllocation) { " `"$allocFastRenamedMember`"" } else { "" }
@@ -216,6 +266,7 @@ if ($ManagedAllocation) {
         "if errorlevel 1 exit /b %errorlevel%"
     )
 }
+$sdkLines += $fpExtractionLines
 $sdkLines += "exit /b %errorlevel%"
 $sdkLines | Set-Content -LiteralPath $sdkBatch -Encoding ASCII
 & $sdkBatch
@@ -233,12 +284,43 @@ if ($ManagedAllocation) {
     & $objcopy --redefine-sym RhpNewArray=guideXosStockRhpNewArray $allocFastRenamedMember
     if ($LASTEXITCODE -ne 0) { throw "COFF symbol adaptation failed for AllocFast.asm.obj" }
 }
+$fpCompileBatch = Join-Path $OutputRoot "build-nativeaot-fp-repair.bat"
+if ($NativeAotFpRepair) {
+    $fpCoreclrRoot = Join-Path $fpSourceRoot "src\coreclr"
+    $fpNativeRoot = Join-Path $fpSourceRoot "src\native"
+    $nativeAotRuntimeRoot = Join-Path $fpCoreclrRoot "nativeaot\Runtime"
+    $fpDefines = "/DWIN32 /D_WIN32 /D_WIN64 /DHOST_AMD64 /DTARGET_AMD64 /DTARGET_64BIT /DHOST_64BIT /DHOST_WINDOWS /DTARGET_WINDOWS /DNATIVEAOT /DFEATURE_NATIVEAOT /DFEATURE_HIJACK /DFEATURE_SUSPEND_REDIRECTION /DFEATURE_PERFTRACING /DFEATURE_BASICFREEZE /DFEATURE_CONSERVATIVE_GC /DFEATURE_CUSTOM_IMPORTS /DFEATURE_DYNAMIC_CODE /DFEATURE_CACHED_INTERFACE_DISPATCH /DVERIFY_HEAP /DUSE_GC_INFO_DECODER /D_LIB"
+    $fpStackDefines = "$fpDefines /DLPVOID=void*"
+    $fpIncludes = "/I`"$nativeAotRuntimeRoot`" /I`"$nativeAotRuntimeRoot\windows`" /I`"$fpCoreclrRoot`" /I`"$fpCoreclrRoot\native`" /I`"$fpCoreclrRoot\gc`" /I`"$fpCoreclrRoot\gc\env`" /I`"$nativeAotRuntimeRoot\inc`" /I`"$nativeAotRuntimeRoot\eventpipe`" /I`"$fpNativeRoot`" /I`"$(Join-Path $RuntimePackRoot 'src\platform')`" /FI`"$fpCoreclrRoot\gc\env\common.h`""
+    $fpCompileLines = @(
+        "@echo off",
+        "setlocal",
+        "call `"$vcvars`" >nul",
+        "if errorlevel 1 exit /b %errorlevel%",
+        "cl.exe /nologo /std:c++17 /TP /c /MT /GS- /GR- /EHs-c- /Zl /Oi /O2 /Zc:inline /Brepro $fpStackDefines $fpIncludes /Fo:`"$fpStackObject`" `"$fpStackSource`"",
+        "if errorlevel 1 exit /b %errorlevel%",
+        "cl.exe /nologo /std:c++14 /TP /c /MT /GS- /GR- /EHs-c- /Zl /Oi /O2 /Zc:inline /Brepro $fpDefines $fpIncludes /Fo:`"$fpCoffObject`" `"$fpCoffSource`"",
+        "if errorlevel 1 exit /b %errorlevel%",
+        "exit /b 0"
+    )
+    $fpCompileLines | Set-Content -LiteralPath $fpCompileBatch -Encoding ASCII
+    & $fpCompileBatch
+    if ($LASTEXITCODE -ne 0) { throw "NativeAOT FP repair source compilation failed with exit code $LASTEXITCODE" }
+    foreach ($objectPath in @($fpStackObject, $fpCoffObject)) {
+        if (-not (Test-Path -LiteralPath $objectPath -PathType Leaf)) { throw "NativeAOT FP repair object was not produced: $objectPath" }
+    }
+}
+$fpArchiveObjects = if ($NativeAotFpRepair) {
+    " `"$fpStackObject`" `"$fpCoffObject`""
+} else {
+    ""
+}
 $sdkLines = @(
     "@echo off",
     "setlocal",
     "call `"$vcvars`" >nul",
     "if errorlevel 1 exit /b %errorlevel%",
-    "lib.exe /nologo /OUT:`"$adaptedRuntimeLibrary`" `"$stockRuntimeLibrary`" $removeArguments `"$threadRenamedMember`" `"$ehRenamedMember`"$allocFastMemberArguments",
+    "lib.exe /nologo /OUT:`"$adaptedRuntimeLibrary`" `"$stockRuntimeLibrary`" $removeArguments `"$threadRenamedMember`" `"$ehRenamedMember`"$allocFastMemberArguments$fpArchiveObjects",
     "exit /b %errorlevel%"
 )
 $sdkLines | Set-Content -LiteralPath $sdkBatch -Encoding ASCII
@@ -265,7 +347,7 @@ $objectHash = Get-Hash $object
 $lockPath = Join-Path $RuntimePackRoot "runtime-pack.lock.json"
 $manifest = [ordered]@{
     schemaVersion = 1
-    identity = if ($ManagedRepeatedAllocation) { "guidexos-nativeaot-runtime-pack-amd64-hostlog-repeated-allocation-nocollection-v1" } elseif ($ManagedAllocation) { "guidexos-nativeaot-runtime-pack-amd64-hostlog-allocating-nocollection-v1" } else { "guidexos-nativeaot-runtime-pack-amd64-hostlog-nonallocating-v1" }
+    identity = if ($NativeAotFpRepair) { "guidexos-nativeaot-runtime-pack-amd64-workstationgc-fp-repair-v1" } elseif ($ManagedRepeatedAllocation) { "guidexos-nativeaot-runtime-pack-amd64-hostlog-repeated-allocation-nocollection-v1" } elseif ($ManagedAllocation) { "guidexos-nativeaot-runtime-pack-amd64-hostlog-allocating-nocollection-v1" } else { "guidexos-nativeaot-runtime-pack-amd64-hostlog-nonallocating-v1" }
     architecture = $lock.architecture
     targetFramework = $lock.targetFramework
     runtimeIdentifier = $lock.runtimeIdentifier
@@ -296,6 +378,13 @@ $manifest = [ordered]@{
     stockRuntimePackSourceCommit = $lock.runtimePack.commit
     externalRuntimeRoot = if ([string]::IsNullOrWhiteSpace($ExternalRuntimeRoot)) { $null } else { $ExternalRuntimeRoot }
     externalRuntimeCommit = if ([string]::IsNullOrWhiteSpace($ExternalRuntimeRoot)) { $null } else { $externalCommit }
+    nativeAotFpRepair = [bool]$NativeAotFpRepair
+    nativeAotFpRepairPatch = if ($NativeAotFpRepair) { $fpPatch } else { $null }
+    nativeAotFpRepairPatchSha256 = if ($NativeAotFpRepair) { Get-Hash $fpPatch } else { $null }
+    nativeAotFpRepairSourceRoot = if ($NativeAotFpRepair) { $fpSourceRoot } else { $null }
+    nativeAotFpRepairSourceCommit = if ($NativeAotFpRepair) { $externalCommit } else { $null }
+    nativeAotFpRepairObjects = if ($NativeAotFpRepair) { [ordered]@{ stackFrameIterator = $fpStackObject; stackFrameIteratorSha256 = Get-Hash $fpStackObject; coffNativeCodeManager = $fpCoffObject; coffNativeCodeManagerSha256 = Get-Hash $fpCoffObject } } else { $null }
+    nativeAotFpRepairMembers = if ($NativeAotFpRepair) { @($fpStackMember, $fpCoffMember) } else { @() }
     platformObject = $lock.platformObject
     liveWindowsImportsReplaced = @("FlsGetValue", "FlsSetValue", "RhpReversePInvoke", "RhpReversePInvokeReturn")
     managedAllocation = [bool]$ManagedAllocation

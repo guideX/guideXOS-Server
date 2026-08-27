@@ -1,0 +1,59 @@
+diff --git a/src/coreclr/nativeaot/Runtime/StackFrameIterator.cpp b/src/coreclr/nativeaot/Runtime/StackFrameIterator.cpp
+--- a/src/coreclr/nativeaot/Runtime/StackFrameIterator.cpp
++++ b/src/coreclr/nativeaot/Runtime/StackFrameIterator.cpp
+@@ -1525,0 +1525,11 @@
++#if defined(TARGET_AMD64)
++    // pRbp names the current logical frame-pointer storage until this
++    // iterator takes ownership of it.  Publish the current value before
++    // changing that ownership, so later metadata consumers never observe
++    // uninitialized iterator-owned storage.
++    if (m_RegDisplay.pRbp != NULL)
++    {
++        m_FramePointer = (PTR_VOID)m_RegDisplay.GetFP();
++        m_RegDisplay.pRbp = (PTR_uintptr_t)&m_FramePointer;
++    }
++#endif
+@@ -1939,0 +1950,8 @@
++#if defined(TARGET_AMD64)
++    // A reverse-P/Invoke method can have no method-local FP while pRbp still
++    // names the iterator-owned value published by the preceding unwind.
++    // Preserve that authoritative value across the method-state query.
++    uintptr_t publishedFramePointer =
++        (m_RegDisplay.pRbp == (PTR_uintptr_t)&m_FramePointer)
++            ? static_cast<uintptr_t>(m_RegDisplay.GetFP()) : 0u;
++#endif
+@@ -1940,0 +1959,7 @@
++#if defined(TARGET_AMD64)
++    if (m_FramePointer == NULL && publishedFramePointer != 0u)
++    {
++        m_FramePointer = (PTR_VOID)publishedFramePointer;
++        *m_RegDisplay.pRbp = publishedFramePointer;
++    }
++#endif
+diff --git a/src/coreclr/nativeaot/Runtime/windows/CoffNativeCodeManager.cpp b/src/coreclr/nativeaot/Runtime/windows/CoffNativeCodeManager.cpp
+--- a/src/coreclr/nativeaot/Runtime/windows/CoffNativeCodeManager.cpp
++++ b/src/coreclr/nativeaot/Runtime/windows/CoffNativeCodeManager.cpp
+@@ -830,0 +830,6 @@
++#if defined(TARGET_AMD64)
++    // CONTEXT.Rbp is the logical caller FP produced by RtlVirtualUnwind.
++    // contextPointers.Rbp only identifies restored-register storage; it is
++    // not the value that UWOP_SET_FPREG established for the caller.
++    PTR_uintptr_t callerRbpStorage = pRegisterSet->pRbp;
++#endif
+@@ -831,0 +837,16 @@
++
++#if defined(TARGET_AMD64)
++    // A reverse-P/Invoke frame keeps the incoming iterator-owned FP as the
++    // slot-base contract; its unwind CONTEXT.Rbp is not the caller FP used
++    // by the reverse transition metadata.  Restore the saved storage pointer
++    // after CONTEXT_TO_REGDISPLAY in both cases so promotion cannot leave a
++    // stale contextPointers.Rbp location in REGDISPLAY.
++    if (callerRbpStorage != NULL)
++    {
++        if ((unwindBlockFlags & UBF_FUNC_REVERSE_PINVOKE) == 0)
++        {
++            *callerRbpStorage = (uintptr_t)context.Rbp;
++        }
++        pRegisterSet->pRbp = callerRbpStorage;
++    }
++#endif
