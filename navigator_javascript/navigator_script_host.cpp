@@ -228,12 +228,14 @@ bool NavigatorScriptHostAdapter::dispatchClick(RuntimeContext& runtime,
         return false;
     }
     clickDispatchActive_ = true;
+    runtime.beginEventDispatch();
     std::vector<Value> arguments;
     try {
         arguments.reserve(1u);
         arguments.push_back(event);
     } catch (const std::bad_alloc&) {
         clickDispatchActive_ = false;
+        runtime.endEventDispatch();
         error = RuntimeErrorCode::AllocationFailure;
         return false;
     }
@@ -285,7 +287,9 @@ bool NavigatorScriptHostAdapter::dispatchClick(RuntimeContext& runtime,
         arguments[0] = event;
         invoke(onclickFunction);
         invoke(listenerFunction);
+        if (runtime.eventPropagationStopped()) break;
     }
+    runtime.endEventDispatch();
     clickDispatchActive_ = false;
     error = firstError;
     return succeeded;

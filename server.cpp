@@ -1175,6 +1175,147 @@ static std::string navigatorHostedSmokeDiagnostic() {
         gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
         "replacement document has no stale JS13 callbacks or errors");
 
+    const bool js14Loaded = gxos::apps::Navigator::SmokeNavigateToQuiet(
+        "http://127.0.0.1:8080/navigator-smoke/javascript-js14.html");
+    const std::string js14InitialText =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    int js14TargetX = 0;
+    int js14TargetY = 0;
+    int js14TargetW = 0;
+    int js14TargetH = 0;
+    const bool js14TargetHasGeometry =
+        gxos::apps::Navigator::SmokeBlockGeometryById(
+            "js14-target-stop", js14TargetX, js14TargetY, js14TargetW,
+            js14TargetH);
+    const bool js14TargetHit =
+        gxos::apps::Navigator::SmokeFormHitTargetById("js14-target-stop");
+    const size_t js14InitialHandlers =
+        gxos::apps::Navigator::SmokeJavaScriptHandlerCount();
+    const size_t js14InitialListeners =
+        gxos::apps::Navigator::SmokeJavaScriptListenerCount();
+    const std::string js14InitialError =
+        gxos::apps::Navigator::SmokeJavaScriptLastError();
+    add("JS14 hosted fixture loads callable stopPropagation callbacks",
+        js14Loaded && contains(js14InitialText, "Navigator JavaScript JS14") &&
+        js14InitialHandlers == 18u && js14InitialListeners == 18u &&
+        js14InitialError.empty(),
+        std::string("loaded=") + yesNo(js14Loaded) + ",records=" +
+        std::to_string(js14InitialHandlers) + ",listeners=" +
+        std::to_string(js14InitialListeners) + ",error=" +
+        (js14InitialError.empty() ? "none" : js14InitialError));
+
+    const bool js14TargetClick =
+        gxos::apps::Navigator::SmokeClickFormControlById("js14-target-stop");
+    const std::string js14AfterTarget =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS14 target listener stops parent and grandparent",
+        js14TargetHasGeometry && js14TargetW > 0 && js14TargetH > 0 &&
+        js14TargetHit && js14TargetClick &&
+        contains(js14AfterTarget,
+            "target:c:js14-target-stop:js14-target-stop") &&
+        !contains(js14AfterTarget, "target-parent-ran") &&
+        !contains(js14AfterTarget, "target-grandparent-ran"),
+        std::string("geometry=") + yesNo(js14TargetHasGeometry) +
+        ",hit=" + yesNo(js14TargetHit) + ",click=" + yesNo(js14TargetClick));
+
+    const bool js14OnclickClick =
+        gxos::apps::Navigator::SmokeClickFormControlById("js14-onclick-stop");
+    const std::string js14AfterOnclick =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS14 onclick stop still runs the child listener",
+        js14OnclickClick && contains(js14AfterOnclick, "onclick:ol"),
+        "expected onclick then listener after onclick stop");
+
+    const bool js14ListenerClick =
+        gxos::apps::Navigator::SmokeClickFormControlById("js14-listener-stop");
+    const std::string js14AfterListener =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS14 listener stop preserves onclick-before-listener order",
+        js14ListenerClick && contains(js14AfterListener, "listener:ol"),
+        "expected listener stop after onclick");
+
+    const bool js14AncestorClick =
+        gxos::apps::Navigator::SmokeClickFormControlById("js14-ancestor-child");
+    const std::string js14AfterAncestor =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS14 parent stop preserves target/currentTarget and suppresses higher nodes",
+        js14AncestorClick &&
+        contains(js14AfterAncestor, "ancestor:cp:js14-ancestor-child:js14-ancestor-parent") &&
+        !contains(js14AfterAncestor, "ancestor:grandparent-ran"),
+        "expected child then parent with no grandparent callback");
+    add("JS14 ancestor stop mutation relayouts",
+        contains(js14AfterAncestor, "Parent") &&
+        !gxos::apps::Navigator::SmokeDocumentDirty(),
+        "parent text mutation settled after stopped dispatch");
+
+    const bool js14ResetOne =
+        gxos::apps::Navigator::SmokeClickFormControlById("js14-reset-child");
+    const std::string js14AfterResetOne =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    const bool js14ResetTwo =
+        gxos::apps::Navigator::SmokeClickFormControlById("js14-reset-child");
+    const std::string js14AfterResetTwo =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS14 propagation state resets per click",
+        js14ResetOne && js14ResetTwo && !contains(js14AfterResetOne, "reset:1") &&
+        contains(js14AfterResetTwo, "reset:1"),
+        "first reset click stops; second click reaches parent");
+
+    const bool js14BranchAClick =
+        gxos::apps::Navigator::SmokeClickFormControlById("js14-branch-a-child");
+    const bool js14BranchBClick =
+        gxos::apps::Navigator::SmokeClickFormControlById("js14-branch-b-child");
+    const std::string js14AfterBranchB =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS14 stopped branch does not affect a later independent branch",
+        js14BranchAClick && js14BranchBClick &&
+        contains(js14AfterBranchB, "branches:1:1"),
+        "tree B still bubbles normally after tree A stops");
+
+    const bool js14MutationClick =
+        gxos::apps::Navigator::SmokeClickFormControlById("js14-mutation-child");
+    const std::string js14AfterMutation =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS14 stopped callback can mutate DOM and relayout",
+        js14MutationClick && contains(js14AfterMutation, "Stopped") &&
+        contains(js14AfterMutation, "mutation:stopped") &&
+        !contains(js14AfterMutation, "mutation:parent-ran") &&
+        !gxos::apps::Navigator::SmokeDocumentDirty(),
+        "target mutation succeeds while ancestor remains stopped");
+
+    const bool js14ErrorClick =
+        gxos::apps::Navigator::SmokeClickFormControlById("js14-error-child");
+    const std::string js14AfterError =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    const std::string js14Error =
+        gxos::apps::Navigator::SmokeJavaScriptLastError();
+    add("JS14 error after stop remains contained and stopped",
+        js14ErrorClick && contains(js14AfterError, "error:stopped") &&
+        !contains(js14AfterError, "error:parent-ran") &&
+        contains(js14Error, "UnknownIdentifier"),
+        std::string("click=") + yesNo(js14ErrorClick) + ",error=" +
+        (js14Error.empty() ? "none" : js14Error));
+
+    const bool js14LinkHit =
+        gxos::apps::Navigator::SmokeHitLinkById("js14-link");
+    const bool js14LinkClick =
+        js14LinkHit && gxos::apps::Navigator::SmokeClickFirstLink();
+    const std::string js14TargetText =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS14 stopPropagation does not cancel ordinary link navigation",
+        js14LinkHit && js14LinkClick &&
+        gxos::apps::Navigator::SmokeCurrentUrl() ==
+            "http://127.0.0.1:8080/navigator-smoke/javascript-js14-target.html" &&
+        contains(js14TargetText, "Navigator JavaScript JS14 Target"),
+        std::string("hit=") + yesNo(js14LinkHit) + ",link=" +
+        yesNo(js14LinkClick) + ",url=" +
+        gxos::apps::Navigator::SmokeCurrentUrl());
+    add("JS14 navigation invalidates stopped document handlers",
+        gxos::apps::Navigator::SmokeJavaScriptHandlerCount() == 0u &&
+        gxos::apps::Navigator::SmokeJavaScriptListenerCount() == 0u &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        "new navigation has no stale JS14 callbacks or errors");
+
     bool cssInlineLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-inline.html");
     std::string cssInlineText = gxos::apps::Navigator::SmokeCurrentDocumentText();
     std::string cssInlineReport = gxos::apps::Navigator::SmokeRuntimeReport();

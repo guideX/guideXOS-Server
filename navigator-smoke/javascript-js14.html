@@ -1,0 +1,162 @@
+<!doctype html>
+<html>
+<head><title>Navigator JavaScript JS14</title></head>
+<body>
+<h1>Navigator JavaScript JS14</h1>
+<p>Bounded click bubbling with stopPropagation.</p>
+<div id="js14-grandparent">
+  <div id="js14-parent">
+    <div id="js14-gap"><button id="js14-target-stop" type="button">Target stop</button></div>
+  </div>
+</div>
+<button id="js14-onclick-stop" type="button">Onclick stop</button>
+<button id="js14-listener-stop" type="button">Listener stop</button>
+<div id="js14-ancestor-grandparent">
+  <div id="js14-ancestor-parent"><button id="js14-ancestor-child" type="button">Ancestor stop</button></div>
+</div>
+<div id="js14-reset-parent"><button id="js14-reset-child" type="button">Reset</button></div>
+<div id="js14-branch-a"><button id="js14-branch-a-child" type="button">Branch A</button></div>
+<div id="js14-branch-b"><button id="js14-branch-b-child" type="button">Branch B</button></div>
+<div id="js14-mutation-parent"><button id="js14-mutation-child" type="button">Mutation</button></div>
+<div id="js14-error-parent"><button id="js14-error-child" type="button">Error</button></div>
+<p id="js14-state">state</p>
+<div id="js14-link-parent"><a id="js14-link" href="/navigator-smoke/javascript-js14-target.html">Stop bubbling but navigate</a></div>
+<script>
+var js14State = document.getElementById("js14-state");
+
+var js14TargetStop = document.getElementById("js14-target-stop");
+var js14TargetParent = document.getElementById("js14-parent");
+var js14TargetGrandparent = document.getElementById("js14-grandparent");
+var js14TargetOrder = "";
+var js14TargetParentCalls = 0;
+var js14TargetGrandparentCalls = 0;
+function js14TargetListener(event) {
+    js14TargetOrder = js14TargetOrder + "c";
+    js14TargetStopTarget = event.target.id;
+    js14TargetStopCurrent = event.currentTarget.id;
+    event.stopPropagation();
+    js14State.textContent = "target:" + js14TargetOrder + ":" + js14TargetStopTarget + ":" + js14TargetStopCurrent;
+}
+function js14TargetParentListener(event) {
+    js14TargetParentCalls = js14TargetParentCalls + 1;
+    js14State.textContent = "target-parent-ran";
+}
+function js14TargetGrandparentListener(event) {
+    js14TargetGrandparentCalls = js14TargetGrandparentCalls + 1;
+    js14State.textContent = "target-grandparent-ran";
+}
+var js14TargetStopTarget = "";
+var js14TargetStopCurrent = "";
+js14TargetStop.addEventListener("click", js14TargetListener);
+js14TargetParent.addEventListener("click", js14TargetParentListener);
+js14TargetGrandparent.addEventListener("click", js14TargetGrandparentListener);
+
+var js14OnclickStop = document.getElementById("js14-onclick-stop");
+var js14OnclickOrder = "";
+var js14OnclickParentCalls = 0;
+js14OnclickStop.onclick = function(event) {
+    js14OnclickOrder = js14OnclickOrder + "o";
+    event.stopPropagation();
+};
+js14OnclickStop.addEventListener("click", function(event) {
+    js14OnclickOrder = js14OnclickOrder + "l";
+    js14State.textContent = "onclick:" + js14OnclickOrder;
+});
+
+var js14ListenerStop = document.getElementById("js14-listener-stop");
+var js14ListenerOrder = "";
+var js14ListenerParentCalls = 0;
+js14ListenerStop.onclick = function(event) { js14ListenerOrder = js14ListenerOrder + "o"; };
+js14ListenerStop.addEventListener("click", function(event) {
+    js14ListenerOrder = js14ListenerOrder + "l";
+    event.stopPropagation();
+    js14State.textContent = "listener:" + js14ListenerOrder;
+});
+
+var js14AncestorChild = document.getElementById("js14-ancestor-child");
+var js14AncestorParent = document.getElementById("js14-ancestor-parent");
+var js14AncestorGrandparent = document.getElementById("js14-ancestor-grandparent");
+var js14AncestorOrder = "";
+var js14AncestorGrandparentCalls = 0;
+var js14AncestorTarget = "";
+var js14AncestorCurrent = "";
+js14AncestorChild.addEventListener("click", function(event) {
+    js14AncestorOrder = js14AncestorOrder + "c";
+});
+js14AncestorParent.addEventListener("click", function(event) {
+    js14AncestorOrder = js14AncestorOrder + "p";
+    js14AncestorTarget = event.target.id;
+    js14AncestorCurrent = event.currentTarget.id;
+    event.currentTarget.textContent = "Parent";
+    event.stopPropagation();
+    js14State.textContent = "ancestor:" + js14AncestorOrder + ":" +
+        js14AncestorTarget + ":" + js14AncestorCurrent;
+});
+js14AncestorGrandparent.addEventListener("click", function(event) {
+    js14AncestorGrandparentCalls = js14AncestorGrandparentCalls + 1;
+    js14AncestorOrder = js14AncestorOrder + "g";
+    js14State.textContent = "ancestor:grandparent-ran";
+});
+
+var js14ResetChild = document.getElementById("js14-reset-child");
+var js14ResetParent = document.getElementById("js14-reset-parent");
+var js14ResetFirst = true;
+var js14ResetParentCalls = 0;
+js14ResetChild.addEventListener("click", function(event) {
+    if (js14ResetFirst) {
+        js14ResetFirst = false;
+        event.stopPropagation();
+    }
+});
+js14ResetParent.addEventListener("click", function(event) {
+    js14ResetParentCalls = js14ResetParentCalls + 1;
+    js14State.textContent = "reset:" + js14ResetParentCalls;
+});
+
+var js14BranchAChild = document.getElementById("js14-branch-a-child");
+var js14BranchBChild = document.getElementById("js14-branch-b-child");
+var js14BranchB = document.getElementById("js14-branch-b");
+var js14BranchACalls = 0;
+var js14BranchBCalls = 0;
+js14BranchAChild.addEventListener("click", function(event) {
+    js14BranchACalls = js14BranchACalls + 1;
+    event.stopPropagation();
+});
+js14BranchB.addEventListener("click", function(event) {
+    js14BranchBCalls = js14BranchBCalls + 1;
+    js14State.textContent = "branches:" + js14BranchACalls + ":" + js14BranchBCalls;
+});
+
+var js14MutationChild = document.getElementById("js14-mutation-child");
+var js14MutationParent = document.getElementById("js14-mutation-parent");
+var js14MutationParentCalls = 0;
+js14MutationChild.addEventListener("click", function(event) {
+    event.stopPropagation();
+    event.target.textContent = "Stopped";
+    js14State.textContent = "mutation:stopped";
+});
+js14MutationParent.addEventListener("click", function(event) {
+    js14MutationParentCalls = js14MutationParentCalls + 1;
+    js14State.textContent = "mutation:parent-ran";
+});
+
+var js14ErrorChild = document.getElementById("js14-error-child");
+var js14ErrorParent = document.getElementById("js14-error-parent");
+var js14ErrorParentCalls = 0;
+js14ErrorChild.addEventListener("click", function(event) {
+    event.stopPropagation();
+    js14State.textContent = "error:stopped";
+    var x = js14UnknownIdentifier;
+});
+js14ErrorParent.addEventListener("click", function(event) {
+    js14ErrorParentCalls = js14ErrorParentCalls + 1;
+    js14State.textContent = "error:parent-ran";
+});
+
+var js14Link = document.getElementById("js14-link");
+var js14LinkAncestor = document.getElementById("js14-link-parent");
+js14Link.addEventListener("click", function(event) { event.stopPropagation(); });
+js14LinkAncestor.addEventListener("click", function(event) { js14State.textContent = "link-parent-ran"; });
+</script>
+</body>
+</html>

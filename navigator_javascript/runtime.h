@@ -246,6 +246,17 @@ public:
         const HostObjectReference& currentTarget, Value& result,
         RuntimeErrorCode& error);
 
+    // The Navigator click adapter brackets one synchronous dispatch with
+    // these calls. stopPropagation is a method on the cached Event object;
+    // outside this active window it is a harmless no-op and cannot affect a
+    // later event.
+    void beginEventDispatch();
+    void endEventDispatch();
+    bool eventPropagationStopped() const
+    {
+        return eventDispatchActive_ && eventPropagationStopped_;
+    }
+
     void setHostAdapter(HostAdapter* adapter) { hostAdapter_ = adapter; }
     HostAdapter* hostAdapter() const { return hostAdapter_; }
     bool registerHostObject(HostInstanceId instance, HostObjectKind kind,
@@ -289,6 +300,7 @@ private:
         MathFloor,
         MathCeil,
         MathRound,
+        EventStopPropagation,
     };
 
     struct RuntimeProperty {
@@ -402,7 +414,11 @@ private:
     RuntimeObjectId arrayPrototype_ = kInvalidRuntimeObjectId;
     RuntimeObjectId mathObject_ = kInvalidRuntimeObjectId;
     RuntimeObjectId eventObject_ = kInvalidRuntimeObjectId;
+    RuntimeFunctionId eventStopPropagationFunction_ =
+        kInvalidRuntimeFunctionId;
     bool builtInsInitialized_ = false;
+    bool eventDispatchActive_ = false;
+    bool eventPropagationStopped_ = false;
     HostAdapter* hostAdapter_ = nullptr;
     HostGenerationId hostGeneration_ = kInvalidHostGenerationId;
     std::vector<HostObjectRecord> hostObjects_;
