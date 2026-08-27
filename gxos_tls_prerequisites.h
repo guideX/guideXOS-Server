@@ -25,6 +25,10 @@ bool gxos_random_bytes(void* buffer, size_t len);
 GxosRandomQuality gxos_random_quality();
 const char* gxos_random_quality_name(GxosRandomQuality quality);
 const char* gxos_random_backend();
+const char* gxos_secure_random_source();
+const char* gxos_secure_random_status();
+bool gxos_rdseed_supported();
+bool gxos_rdrand_supported();
 bool gxos_virtio_rng_detected();
 const char* gxos_virtio_rng_status();
 

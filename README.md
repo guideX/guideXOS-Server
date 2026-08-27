@@ -144,6 +144,7 @@ Current milestone: bare-metal Navigator can render a reviewed real public HTTPS 
 * Structured evidence export: `scripts/export-navigator-public-https-evidence.ps1`
 * Public-root validator/manifest helper: `scripts/validate-navigator-ca-bundle.ps1`
 * Review/operator contract: `scripts/fixtures/README.md`
+* Navigator secure entropy architecture: `docs/NAVIGATOR_SECURE_ENTROPY.md`
 * Interactive screenshot launch: `.\scripts\run-navigator-public-https-screenshot.ps1`
 
 The screenshot launcher defaults to `https://sha256.badssl.com/`, rejects targets outside the reviewed allowlist, and stages the same explicit proof policy and trust material as the passing proof:

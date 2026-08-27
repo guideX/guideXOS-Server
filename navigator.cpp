@@ -11638,6 +11638,10 @@ namespace {
 
 			{"TLS Prerequisites", "RNG quality", gxos_random_quality_name(randomQuality)},
 			{"TLS Prerequisites", "RNG backend", gxos_random_backend()},
+			{"TLS Prerequisites", "Secure RNG source", gxos_secure_random_source()},
+			{"TLS Prerequisites", "Secure RNG status", gxos_secure_random_status()},
+			{"TLS Prerequisites", "CPU RDSEED", gxos_rdseed_supported() ? "supported" : "unsupported"},
+			{"TLS Prerequisites", "CPU RDRAND", gxos_rdrand_supported() ? "supported" : "unsupported"},
 			{"TLS Prerequisites", "VirtIO RNG detected", gxos_virtio_rng_detected() ? "yes" : "no"},
 			{"TLS Prerequisites", "VirtIO RNG status", gxos_virtio_rng_status()},
 			{"TLS Prerequisites", "Random read smoke", rngReadSmoke ? "PASS" : "FAIL"},

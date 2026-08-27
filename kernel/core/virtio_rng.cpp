@@ -436,7 +436,6 @@ bool fill(void* buffer, size_t len)
         return false;
     }
     if (!ensure_request_queue_ready()) return false;
-    if (!initialize_legacy_device(false)) return false;
     if (!submit_entropy_request(buffer, len)) {
         const Status firstFailure = s_state.lastStatus;
         if ((firstFailure == STATUS_REQUEST_TIMEOUT ||

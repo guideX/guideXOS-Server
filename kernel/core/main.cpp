@@ -61,6 +61,7 @@
 #include "include/kernel/qemu_display_configuration_control_proof.h"
 #include "include/kernel/qemu_display_configuration_persistence_proof.h"
 #include "include/kernel/qemu_display_events_proof.h"
+#include "include/kernel/secure_random.h"
 #include "include/kernel/virtio_rng.h"
 
 // Interrupt support
@@ -916,6 +917,7 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         // Initialize VirtIO subsystem
         kernel::virtio::block::init();
         kernel::virtio::rng::init();
+        kernel::secure_random::init();
         kernel::serial::puts("[KERNEL] VirtIO subsystem initialized\n");
         
         // Initialize ATA/SATA driver (scans for IDE and AHCI controllers)

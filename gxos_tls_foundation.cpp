@@ -250,6 +250,17 @@ static int gxos_mbedtls_days_in_month(int year, int month)
     return kDays[month - 1];
 }
 
+#if defined(GXOS_BARE_METAL)
+static bool gxos_psa_rng_failure_marker_emitted = false;
+
+static void gxos_report_psa_rng_failure()
+{
+    if (gxos_psa_rng_failure_marker_emitted) return;
+    gxos_psa_rng_failure_marker_emitted = true;
+    kernel::serial::puts("[TLS-PSA] external RNG request failed; secure entropy unavailable\n");
+}
+#endif
+
 static bool gxos_mbedtls_utc_tm_from_unix_seconds(long long seconds, struct tm* out_tm)
 {
     if (!out_tm || seconds < 0) return false;
@@ -334,10 +345,16 @@ extern "C" psa_status_t mbedtls_psa_external_get_random(
     if (!output_length) return PSA_ERROR_INVALID_ARGUMENT;
     *output_length = 0;
 
-    if ((output == nullptr && output_size != 0) || gxos::gxos_random_quality() != gxos::GxosRandomQuality::Secure) {
+    if (output_size == 0) {
+        return PSA_SUCCESS;
+    }
+    if (!output) return PSA_ERROR_INVALID_ARGUMENT;
+    if (gxos::gxos_random_quality() != gxos::GxosRandomQuality::Secure) {
+        gxos_report_psa_rng_failure();
         return PSA_ERROR_INSUFFICIENT_ENTROPY;
     }
     if (!gxos::gxos_random_bytes(output, output_size)) {
+        gxos_report_psa_rng_failure();
         return PSA_ERROR_HARDWARE_FAILURE;
     }
 
@@ -347,7 +364,8 @@ extern "C" psa_status_t mbedtls_psa_external_get_random(
 
 extern "C" int gxos_mbedtls_ssl_random(void*, unsigned char* output, size_t output_len)
 {
-    if ((output == nullptr && output_len != 0) || gxos::gxos_random_quality() != gxos::GxosRandomQuality::Secure) {
+    if (output_len == 0) return 0;
+    if (!output || gxos::gxos_random_quality() != gxos::GxosRandomQuality::Secure) {
         return -1;
     }
     return gxos::gxos_random_bytes(output, output_len) ? 0 : -1;
@@ -2412,11 +2430,11 @@ GxosTlsRuntimeHookInfo make_runtime_hook_info()
     if (gxos_random_quality() == GxosRandomQuality::Secure) {
         state.rngStatus = GxosTlsHookStatus::Ready;
         copy_text(state.rngDetail, sizeof(state.rngDetail),
-            "PSA external RNG callback is wired to gxos_random_bytes() and requires Secure entropy.");
+            "PSA external RNG callback is wired to the kernel secure-random provider; Secure entropy is required.");
     } else {
         state.rngStatus = GxosTlsHookStatus::Unavailable;
         copy_text(state.rngDetail, sizeof(state.rngDetail),
-            "PSA external RNG callback is wired, but guideXOS does not currently report Secure entropy.");
+            "PSA external RNG callback is wired, but the kernel secure-random provider is unavailable.");
     }
 
     if (is_clock_ready(gxos_wall_clock_status())) {

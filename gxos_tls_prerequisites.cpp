@@ -4,6 +4,7 @@
 
 #include "kernel/core/include/kernel/arch.h"
 #include "kernel/core/include/kernel/serial_debug.h"
+#include "kernel/core/include/kernel/secure_random.h"
 #include "kernel/core/include/kernel/time.h"
 #include "kernel/core/include/kernel/virtio_rng.h"
 
@@ -45,21 +46,7 @@ bool gxos_random_bytes(void* buffer, size_t len)
     if (!buffer && len != 0) return false;
     if (len == 0) return true;
 
-    // The current bare-metal virtio-rng transitional path is stable with
-    // small bounded reads during early boot and TLS smoke. Chunk larger TLS
-    // entropy requests so the handshake stays deterministic without changing
-    // the underlying secure entropy source or validation policy.
-    static const size_t kEntropyChunkBytes = 16;
-
-    uint8_t* out = static_cast<uint8_t*>(buffer);
-    while (len != 0) {
-        uint8_t chunk[kEntropyChunkBytes];
-        const size_t request = len > sizeof(chunk) ? sizeof(chunk) : len;
-        if (!kernel::virtio::rng::fill(chunk, request)) return false;
-        for (size_t i = 0; i < request; ++i) out[i] = chunk[i];
-        out += request;
-        len -= request;
-    }
+    if (!kernel::secure_random::fill(buffer, len)) return false;
     if (!s_entropyReadMarkerEmitted) {
         s_entropyReadMarkerEmitted = true;
         kernel::serial::puts("[RNG] entropy sample request success; secure source read confirmed\n");
@@ -69,35 +56,34 @@ bool gxos_random_bytes(void* buffer, size_t len)
 
 GxosRandomQuality gxos_random_quality()
 {
-    return kernel::virtio::rng::ready()
+    return kernel::secure_random::ready()
         ? GxosRandomQuality::Secure
         : GxosRandomQuality::Unavailable;
 }
 
 const char* gxos_random_backend()
 {
-    if (kernel::virtio::rng::ready()) {
-        return kernel::virtio::rng::backend_name();
-    }
+    return kernel::secure_random::source_name();
+}
 
-    switch (kernel::virtio::rng::last_status()) {
-    case kernel::virtio::rng::STATUS_DEVICE_NOT_FOUND:
-        return "none (virtio-rng PCI device not found)";
-    case kernel::virtio::rng::STATUS_UNSUPPORTED_ARCH:
-        return "none (virtio-rng requires x86/AMD64 PCI port I/O)";
-    case kernel::virtio::rng::STATUS_UNSUPPORTED_VIRTIO_MODE:
-        return "none (virtio-rng modern/non-transitional PCI unsupported)";
-    case kernel::virtio::rng::STATUS_QUEUE_SETUP_FAILED:
-        return "none (virtio-rng queue setup failed)";
-    case kernel::virtio::rng::STATUS_REQUEST_TIMEOUT:
-        return "none (virtio-rng request timeout)";
-    case kernel::virtio::rng::STATUS_SHORT_READ:
-        return "none (virtio-rng short read)";
-    case kernel::virtio::rng::STATUS_DEVICE_ERROR:
-        return "none (virtio-rng device error)";
-    default:
-        return "none (secure entropy unavailable)";
-    }
+const char* gxos_secure_random_source()
+{
+    return kernel::secure_random::source_name();
+}
+
+const char* gxos_secure_random_status()
+{
+    return kernel::secure_random::status_name();
+}
+
+bool gxos_rdseed_supported()
+{
+    return kernel::secure_random::rdseed_supported();
+}
+
+bool gxos_rdrand_supported()
+{
+    return kernel::secure_random::rdrand_supported();
 }
 
 bool gxos_virtio_rng_detected()
@@ -225,6 +211,30 @@ const char* gxos_random_backend()
 #else
     return "none (unsupported hosted platform)";
 #endif
+}
+
+const char* gxos_secure_random_source()
+{
+    return gxos_random_backend();
+}
+
+const char* gxos_secure_random_status()
+{
+#if defined(_WIN32)
+    return "hosted-system-rng";
+#else
+    return "hosted-not-applicable";
+#endif
+}
+
+bool gxos_rdseed_supported()
+{
+    return false;
+}
+
+bool gxos_rdrand_supported()
+{
+    return false;
 }
 
 bool gxos_virtio_rng_detected()
