@@ -7,7 +7,7 @@
   "description": "Bounded native guideXOS workspace and source editor.",
   "category": "Development",
   "kind": "NativeElf",
-  "icon": "",
+  "icon": "app.developerstudio",
   "minGuideXOSVersion": "0.5.0",
   "supportedArchitectures": [
     "amd64"

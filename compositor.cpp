@@ -2404,6 +2404,8 @@ namespace gxos {
 
         static std::string startMenuLogicalIconName(const std::string& label) {
             if (label == "Trash") return hostedTrashIconLogicalName();
+            const RegisteredDesktopApp* registeredApp = findDesktopAppByNameOrId(label);
+            if (registeredApp && !registeredApp->icon.empty()) return registeredApp->icon;
             const std::string builtInIcon = hostedBuiltInIconKeyForLabel(label);
             if (!builtInIcon.empty()) return builtInIcon;
             if (label == "Files" || label == "File Explorer" || label == "FileManager" || label == "File Manager") return "app.files";

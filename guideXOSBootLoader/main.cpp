@@ -1417,7 +1417,11 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE* SystemTable) {
     // early instructions, so it will execute correctly at the physical address.
     // When kernel_main is called, it uses internal relative calls that will work
     // because the entire kernel is position-independent within its loaded region.
-    BootHandoffTrampoline((void*)(UINTN)entryPhys, (void*)v1BootInfo, stackTop, (void*)(UINTN)pt.Pml4Phys);
+    // The new page tables map the kernel's linked virtual address range to the
+    // relocated physical image.  Jump through that virtual mapping after CR3
+    // is loaded; using the physical entry only worked while the allocation
+    // happened outside the kernel virtual range.
+    BootHandoffTrampoline((void*)(UINTN)entryVirt, (void*)v1BootInfo, stackTop, (void*)(UINTN)pt.Pml4Phys);
 
     // If we return, halt
     guideXOS::debug::SerialPrint("\n!!! KERNEL RETURNED - THIS SHOULD NOT HAPPEN !!!\n");

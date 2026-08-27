@@ -13,6 +13,7 @@
 #include "include/kernel/serial_debug.h"
 #include "include/kernel/vfs.h"
 
+#include "bitmap_font.h"
 #include "sdk/include/guidexos/abi.h"
 #include "sdk/include/guidexos/app.h"
 
@@ -26,7 +27,14 @@ static const uint32_t kMaxPackages = 8u;
 static const uint32_t kMaxManifestBytes = 8192u;
 static const uint32_t kReadChunkBytes = 65536u;
 static const uint32_t kRuntimeStackBytes = 128u * 1024u;
+// Developer Studio's signed amd64 ELF has a large, valid PT_LOAD .bss region.
+// Keep the loader bound below the amd64 heap capacity while retaining the
+// original conservative bound on other architectures.
+#if defined(__x86_64__)
+static const uint32_t kMaxLoadedImageBytes = 512u * 1024u * 1024u;
+#else
 static const uint32_t kMaxLoadedImageBytes = 32u * 1024u * 1024u;
+#endif
 static const uint32_t kMaxFrameBytes = 16u * 1024u * 1024u;
 
 using Package = PackageInfo;
@@ -48,7 +56,7 @@ class NativeWindowOwner final : public app::KernelApp {
 public:
     explicit NativeWindowOwner(Runtime* runtime)
         : m_runtime(runtime), m_allocation(nullptr), m_pixels(nullptr), m_pixelBytes(0), m_width(0), m_height(0),
-          m_strideBytes(0), m_closed(false) {
+          m_strideBytes(0), m_surface(nullptr), m_surfaceBytes(0), m_pendingEventValue(), m_pendingEvent(false), m_closed(false) {
         m_name[0] = '\0';
     }
 
@@ -63,9 +71,26 @@ public:
         release_pixels();
     }
 
+    void onMouseMove(int x, int y) override {
+        queue_mouse_event(x, y, GX_MOUSE_BUTTON_NONE, GX_MOUSE_ACTION_MOVE, 0);
+    }
+
+    void onMouseDown(int x, int y, uint8_t button) override {
+        queue_mouse_event(x, y, mouse_button_for_abi(button), GX_MOUSE_ACTION_DOWN, 0);
+    }
+
+    void onMouseUp(int x, int y, uint8_t button) override {
+        queue_mouse_event(x, y, mouse_button_for_abi(button), GX_MOUSE_ACTION_UP, 0);
+    }
+
+    void onMouseWheel(int x, int y, int wheelDelta) override {
+        queue_mouse_event(x, y, GX_MOUSE_BUTTON_NONE, GX_MOUSE_ACTION_WHEEL, wheelDelta);
+    }
+
     void draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) override {
         framebuffer::fill_rect(x, y, w, h, 0xFF000000u);
-        if (!m_pixels || m_width == 0 || m_height == 0) return;
+        const uint32_t* source = m_surface ? m_surface : m_pixels;
+        if (!source || m_width == 0 || m_height == 0) return;
 
         const uint32_t drawX = w > m_width ? x + (w - m_width) / 2u : x;
         const uint32_t drawY = h > m_height ? y + (h - m_height) / 2u : y;
@@ -75,9 +100,10 @@ public:
         const uint32_t pitchWords = framebuffer::get_pitch() / 4u;
         if (!output || pitchWords == 0) return;
 
+        const uint32_t sourceStrideWords = m_surface ? m_width : m_strideBytes / 4u;
         for (uint32_t row = 0; row < visibleH; ++row) {
             for (uint32_t col = 0; col < visibleW; ++col) {
-                const uint32_t src = m_pixels[row * (m_strideBytes / 4u) + col];
+                const uint32_t src = source[row * sourceStrideWords + col];
                 output[(drawY + row) * pitchWords + drawX + col] = 0xFF000000u | (src & 0x00FFFFFFu);
             }
         }
@@ -94,10 +120,18 @@ public:
         if (flags & GX_WINDOW_FLAG_RESIZABLE) m_window->flags |= app::WF_RESIZABLE;
         const uint32_t screenW = framebuffer::get_width();
         const uint32_t screenH = framebuffer::get_height();
+        if (static_cast<uint32_t>(width) > screenW ||
+            static_cast<uint32_t>(height) + compositor::TITLEBAR_HEIGHT > screenH) {
+            delete m_window;
+            m_window = nullptr;
+            return false;
+        }
         m_window->x = screenW > static_cast<uint32_t>(width) ?
             static_cast<int>((screenW - static_cast<uint32_t>(width)) / 2u) : 0;
         m_window->y = screenH > static_cast<uint32_t>(height) ?
             static_cast<int>((screenH - static_cast<uint32_t>(height)) / 2u) : 0;
+        m_width = static_cast<uint32_t>(width);
+        m_height = static_cast<uint32_t>(height);
         setTitle(title);
         if (!compositor::KernelCompositor::registerWindow(m_window)) {
             delete m_window;
@@ -108,6 +142,40 @@ public:
         m_closed = false;
         desktop_request_redraw();
         return true;
+    }
+
+    gx_result draw_text(int x, int y, const char* text) {
+        if (!text || !ensure_surface()) return GX_ERROR_INVALID_ARGUMENT;
+        if (text[0] == '\f' && text[1] == '\0') {
+            clear_surface(0xFF000000u);
+        } else {
+            gxos::gui::BitmapFont::DrawStringToBuffer(
+                m_surface, static_cast<int>(m_width * sizeof(uint32_t)),
+                static_cast<int>(m_width), static_cast<int>(m_height),
+                x, y, text, -1, 0xFFFFFFFFu);
+        }
+        invalidate();
+        return GX_OK;
+    }
+
+    gx_result draw_rect(int x, int y, int width, int height, uint32_t color) {
+        if (width <= 0 || height <= 0 || !ensure_surface()) return GX_ERROR_INVALID_ARGUMENT;
+        const int left = x < 0 ? 0 : x;
+        const int top = y < 0 ? 0 : y;
+        const int right = x > static_cast<int>(m_width) ? static_cast<int>(m_width) :
+            (x > 0x7FFFFFFF - width ? static_cast<int>(m_width) : x + width);
+        const int bottom = y > static_cast<int>(m_height) ? static_cast<int>(m_height) :
+            (y > 0x7FFFFFFF - height ? static_cast<int>(m_height) : y + height);
+        if (left < right && top < bottom) {
+            const uint32_t pixel = 0xFF000000u | (color & 0x00FFFFFFu);
+            for (int row = top; row < bottom; ++row) {
+                for (int col = left; col < right; ++col) {
+                    m_surface[static_cast<uint32_t>(row) * m_width + static_cast<uint32_t>(col)] = pixel;
+                }
+            }
+        }
+        invalidate();
+        return GX_OK;
     }
 
     bool present(const void* pixels, uint32_t width, uint32_t height, uint32_t strideBytes) {
@@ -148,12 +216,69 @@ public:
         m_width = 0;
         m_height = 0;
         m_strideBytes = 0;
+        if (m_surface) delete[] m_surface;
+        m_surface = nullptr;
+        m_surfaceBytes = 0;
+    }
+
+    void clear_surface(uint32_t color) {
+        if (!m_surface) return;
+        const uint32_t pixels = m_width * m_height;
+        for (uint32_t i = 0; i < pixels; ++i) m_surface[i] = color;
+    }
+
+    bool ensure_surface() {
+        if (m_surface) return true;
+        if (m_width == 0 || m_height == 0 || m_width > 0xFFFFFFFFu / m_height) return false;
+        const uint64_t bytes64 = static_cast<uint64_t>(m_width) * m_height * sizeof(uint32_t);
+        if (bytes64 == 0 || bytes64 > kMaxFrameBytes) return false;
+        m_surface = new uint32_t[static_cast<uint32_t>(bytes64 / sizeof(uint32_t))];
+        if (!m_surface) return false;
+        m_surfaceBytes = static_cast<uint32_t>(bytes64);
+        clear_surface(0xFF000000u);
+        return true;
     }
 
     bool closed() const { return m_closed || m_window == nullptr; }
     app::KernelWindow* window() const { return m_window; }
 
+    bool take_pending_event(gx_event* event) {
+        if (!event || !m_pendingEvent) return false;
+        *event = m_pendingEventValue;
+        m_pendingEvent = false;
+        return true;
+    }
+
 private:
+    static int mouse_button_for_abi(uint8_t button) {
+        if (button & 0x01u) return GX_MOUSE_BUTTON_LEFT;
+        if (button & 0x02u) return GX_MOUSE_BUTTON_RIGHT;
+        if (button & 0x04u) return GX_MOUSE_BUTTON_MIDDLE;
+        return GX_MOUSE_BUTTON_NONE;
+    }
+
+    void queue_mouse_event(int x, int y, int button, int action, int wheelDelta) {
+        if (m_closed || !m_window) return;
+        m_pendingEventValue.size = sizeof(gx_event);
+        m_pendingEventValue.type = GX_EVENT_MOUSE;
+        m_pendingEventValue.window = m_window->id;
+        m_pendingEventValue.param1 = x;
+        m_pendingEventValue.param2 = y;
+        m_pendingEventValue.param3 = GX_MOUSE_PACK(button, action);
+        m_pendingEventValue.param4 = wheelDelta;
+        m_pendingEvent = true;
+        if (action != GX_MOUSE_ACTION_MOVE) {
+            serial::puts("[NATIVE-ELF] mouse event app=");
+            serial::puts(m_window->title);
+            serial::puts(" action=");
+            serial::puts(action == GX_MOUSE_ACTION_DOWN ? "down" :
+                         action == GX_MOUSE_ACTION_UP ? "up" : "wheel");
+            serial::puts(" button=0x");
+            serial::put_hex32(static_cast<uint32_t>(button));
+            serial::putc('\n');
+        }
+    }
+
     void record_frame_guard_failure();
 
     bool guards_intact() const {
@@ -169,6 +294,10 @@ private:
     uint32_t m_width;
     uint32_t m_height;
     uint32_t m_strideBytes;
+    uint32_t* m_surface;
+    uint32_t m_surfaceBytes;
+    gx_event m_pendingEventValue;
+    bool m_pendingEvent;
     bool m_closed;
 };
 
@@ -247,6 +376,16 @@ static uint32_t text_length(const char* value) {
     uint32_t length = 0;
     if (value) while (value[length]) ++length;
     return length;
+}
+
+static void serial_put_u32_decimal(uint32_t value) {
+    char digits[11];
+    uint32_t count = 0;
+    do {
+        digits[count++] = static_cast<char>('0' + (value % 10u));
+        value /= 10u;
+    } while (value != 0u && count < sizeof(digits));
+    while (count > 0u) serial::putc(digits[--count]);
 }
 
 static bool text_copy(char* destination, uint32_t capacity, const char* source) {
@@ -447,6 +586,7 @@ static bool parse_package(const char* directory, Package* package) {
     char kind[32];
     char runtime[32];
     char architecture[32];
+    package->startMenuVisible = true;
     if (!json_string(s_manifest, "\"kind\"", kind, sizeof(kind)) ||
         !text_equal(kind, "NativeElf") ||
         !json_string(s_manifest, "\"runtime\"", runtime, sizeof(runtime)) ||
@@ -457,7 +597,12 @@ static bool parse_package(const char* directory, Package* package) {
         !text_equal(architecture, "amd64") ||
         !json_string(s_manifest, "\"path\"", package->executable, sizeof(package->executable)) ||
         !json_string(s_manifest, "\"entryPoint\"", package->entryPoint, sizeof(package->entryPoint)) ||
-        !json_string(s_manifest, "\"abi\"", package->abi, sizeof(package->abi))) return false;
+         !json_string(s_manifest, "\"abi\"", package->abi, sizeof(package->abi))) return false;
+    (void)json_string(s_manifest, "\"icon\"", package->icon, sizeof(package->icon));
+    char startMenuVisible[16];
+    if (json_string(s_manifest, "\"appearsInStartMenu\"", startMenuVisible, sizeof(startMenuVisible))) {
+        package->startMenuVisible = !text_equal(startMenuVisible, "false");
+    }
     if (!text_equal(package->entryPoint, "gx_main") || !text_equal(package->abi, GX_ABI_NAME)) return false;
     char executablePath[256];
     if (!package_path(package, package->executable, executablePath, sizeof(executablePath))) return false;
@@ -523,6 +668,16 @@ const PackageInfo* lookup_package(const char* appName) {
     return find_package(appName);
 }
 
+uint32_t package_count() {
+    if (!s_discovered) discover();
+    return s_packageCount;
+}
+
+const PackageInfo* package_at(uint32_t index) {
+    if (!s_discovered) discover();
+    return index < s_packageCount ? &s_packages[index] : nullptr;
+}
+
 struct Elf64Header {
     uint8_t ident[16];
     uint16_t type;
@@ -585,8 +740,107 @@ static void write_u64(uint8_t* bytes, uint64_t value) {
     }
 }
 
+static bool opcode_has_modrm(uint8_t opcode) {
+    switch (opcode) {
+        case 0x00u: case 0x01u: case 0x02u: case 0x03u:
+        case 0x08u: case 0x09u: case 0x0Au: case 0x0Bu:
+        case 0x10u: case 0x11u: case 0x12u: case 0x13u:
+        case 0x18u: case 0x19u: case 0x1Au: case 0x1Bu:
+        case 0x20u: case 0x21u: case 0x22u: case 0x23u:
+        case 0x28u: case 0x29u: case 0x2Au: case 0x2Bu:
+        case 0x30u: case 0x31u: case 0x32u: case 0x33u:
+        case 0x38u: case 0x39u: case 0x3Au: case 0x3Bu:
+        case 0x62u: case 0x63u: case 0x69u: case 0x6Bu:
+        case 0x80u: case 0x81u: case 0x82u: case 0x83u:
+        case 0x84u: case 0x85u: case 0x86u: case 0x87u:
+        case 0x88u: case 0x89u: case 0x8Au: case 0x8Bu:
+        case 0x8Cu: case 0x8Du: case 0x8Eu: case 0x8Fu:
+        case 0xC0u: case 0xC1u: case 0xC6u: case 0xC7u:
+        case 0xD0u: case 0xD1u: case 0xD2u: case 0xD3u:
+        case 0xD8u: case 0xD9u: case 0xDAu: case 0xDBu:
+        case 0xDCu: case 0xDDu: case 0xDEu: case 0xDFu:
+        case 0xF6u: case 0xF7u: case 0xFEu: case 0xFFu:
+            return true;
+        default:
+            return false;
+    }
+}
+
+static bool two_byte_opcode_has_modrm(uint8_t opcode) {
+    if ((opcode >= 0x10u && opcode <= 0x17u) ||
+        (opcode >= 0x28u && opcode <= 0x2Fu) ||
+        (opcode >= 0x40u && opcode <= 0x4Fu) ||
+        (opcode >= 0x50u && opcode <= 0x6Fu) ||
+        (opcode >= 0x70u && opcode <= 0x7Fu) ||
+        (opcode >= 0x90u && opcode <= 0x9Fu)) return true;
+    switch (opcode) {
+        case 0xA3u: case 0xA4u: case 0xA5u: case 0xABu: case 0xAFu:
+        case 0xB0u: case 0xB1u: case 0xB3u: case 0xB6u: case 0xB7u:
+        case 0xBAu: case 0xBBu: case 0xBCu: case 0xBDu: case 0xBEu: case 0xBFu:
+        case 0xC0u: case 0xC1u: case 0xC7u:
+        case 0xD0u: case 0xD1u: case 0xD2u: case 0xD3u:
+        case 0xE6u: case 0xE7u:
+            return true;
+        default:
+            return false;
+    }
+}
+
+static bool absolute_disp32_offset(const uint8_t* bytes, uint64_t offset, uint64_t end,
+                                   uint64_t* displacementOffset) {
+    uint64_t cursor = offset;
+    uint32_t prefixCount = 0;
+    while (cursor < end && prefixCount < 6u) {
+        const uint8_t prefix = bytes[cursor];
+        if (prefix == 0xF0u || prefix == 0xF2u || prefix == 0xF3u ||
+            prefix == 0x2Eu || prefix == 0x36u || prefix == 0x3Eu ||
+            prefix == 0x26u || prefix == 0x64u || prefix == 0x65u ||
+            prefix == 0x66u || prefix == 0x67u ||
+            (prefix >= 0x40u && prefix <= 0x4Fu)) {
+            ++cursor;
+            ++prefixCount;
+            continue;
+        }
+        break;
+    }
+    if (cursor >= end) return false;
+
+    const uint8_t opcode = bytes[cursor++];
+    if (opcode == 0x0Fu) {
+        if (cursor >= end) return false;
+        const uint8_t extended = bytes[cursor++];
+        if (extended == 0x38u || extended == 0x3Au) {
+            if (cursor >= end) return false;
+            ++cursor;
+        } else if (!two_byte_opcode_has_modrm(extended)) {
+            return false;
+        }
+    } else if (!opcode_has_modrm(opcode)) {
+        return false;
+    }
+
+    if (cursor + 6u > end) return false;
+    const uint8_t modrm = bytes[cursor];
+    // A mod=00, r/m=100 ModRM selects a SIB byte.  Base=101 means the
+    // following disp32 is absolute; the index may be none (0x25) or an
+    // indexed jump-table form such as 0xC5 ([rax*8 + disp32]).
+    if ((modrm & 0xC7u) != 0x04u || (bytes[cursor + 1u] & 0x07u) != 0x05u) return false;
+    *displacementOffset = cursor + 2u;
+    return true;
+}
+
+static bool rebase_absolute_disp32(Runtime* runtime, uint64_t minimum, uint64_t maximum,
+                                   uint64_t delta, uint64_t displacementOffset) {
+    const uint64_t value = read_u32(runtime->image + displacementOffset);
+    if (value < minimum || value >= maximum || value + delta > 0xFFFFFFFFull) return false;
+    write_u32(runtime->image + displacementOffset, static_cast<uint32_t>(value + delta));
+    return true;
+}
+
 static uint64_t rebase_static_absolute_words(Runtime* runtime, uint64_t minimum, uint64_t maximum,
-                                              uint64_t executableMinimum, uint64_t executableMaximum) {
+                                              uint64_t executableMinimum, uint64_t executableMaximum,
+                                              uint64_t writableMinimum, uint64_t writableMaximum,
+                                              uint64_t readOnlyMinimum, uint64_t readOnlyMaximum) {
     // The production package is intentionally static ET_EXEC and has no
     // dynamic relocation table.  Its small-model x86-64 code uses three
     // forms of absolute address: aligned data pointers, movabs imm64 values,
@@ -609,27 +863,42 @@ static uint64_t rebase_static_absolute_words(Runtime* runtime, uint64_t minimum,
         ++count;
     }
 
-    // REX.W + MOV r64, [index*8 + disp32] with no base register.  This is
-    // the form emitted for the static maze pointer table.
-    for (uint64_t offset = executableStart; offset + 8u <= executableEnd; ++offset) {
-        const uint8_t rex = runtime->image[offset];
-        const uint8_t opcode = runtime->image[offset + 1u];
-        const uint8_t modrm = runtime->image[offset + 2u];
-        if ((rex & 0xF8u) != 0x48u || opcode != 0x8Bu || (modrm & 0xC7u) != 0x04u ||
-            runtime->image[offset + 3u] != 0xC5u) continue;
-        const uint32_t value = read_u32(runtime->image + offset + 4u);
-        if (static_cast<uint64_t>(value) < minimum || static_cast<uint64_t>(value) >= maximum ||
-            static_cast<uint64_t>(value) + delta > 0xFFFFFFFFull) continue;
-        write_u32(runtime->image + offset + 4u, value + static_cast<uint32_t>(delta));
-        ++count;
+    // Absolute disp32 memory operands use a no-base SIB (04/0C/14/... 25)
+    // after an optional x86 prefix and opcode.  This covers the static ELF's
+    // direct global loads/stores without treating arbitrary instruction words
+    // as pointers.
+    uint64_t lastDisplacementOffset = ~0ull;
+    for (uint64_t offset = executableStart; offset < executableEnd; ++offset) {
+        uint64_t displacementOffset = 0;
+        if (!absolute_disp32_offset(runtime->image, offset, executableEnd, &displacementOffset)) continue;
+        if (displacementOffset == lastDisplacementOffset) continue;
+        lastDisplacementOffset = displacementOffset;
+        if (rebase_absolute_disp32(runtime, minimum, maximum, delta, displacementOffset)) ++count;
     }
 
-    // Static pointer tables are naturally eight-byte aligned in .data.
-    for (uint64_t offset = 0; offset + sizeof(uint64_t) <= runtime->imageBytes; offset += sizeof(uint64_t)) {
-        const uint64_t value = read_u64(runtime->image + offset);
-        if (value < minimum || value >= maximum) continue;
-        write_u64(runtime->image + offset, value + delta);
-        ++count;
+    // Static pointer tables are naturally eight-byte aligned in writable or
+    // read-only PT_LOAD data.  Do not scan executable bytes as arbitrary
+    // words: large code-model immediates and instruction operands can look
+    // like addresses and corrupt otherwise valid instructions.
+    if (writableMaximum > writableMinimum) {
+        const uint64_t writableStart = writableMinimum - minimum;
+        const uint64_t writableEnd = writableMaximum - minimum;
+        for (uint64_t offset = writableStart; offset + sizeof(uint64_t) <= writableEnd; offset += sizeof(uint64_t)) {
+            const uint64_t value = read_u64(runtime->image + offset);
+            if (value < minimum || value >= maximum) continue;
+            write_u64(runtime->image + offset, value + delta);
+            ++count;
+        }
+    }
+    if (readOnlyMaximum > readOnlyMinimum) {
+        const uint64_t readOnlyStart = readOnlyMinimum - minimum;
+        const uint64_t readOnlyEnd = readOnlyMaximum - minimum;
+        for (uint64_t offset = readOnlyStart; offset + sizeof(uint64_t) <= readOnlyEnd; offset += sizeof(uint64_t)) {
+            const uint64_t value = read_u64(runtime->image + offset);
+            if (value < minimum || value >= maximum) continue;
+            write_u64(runtime->image + offset, value + delta);
+            ++count;
+        }
     }
     return count;
 }
@@ -654,6 +923,10 @@ static bool load_image(Runtime* runtime) {
     uint64_t maximum = 0;
     uint64_t executableMinimum = ~0ull;
     uint64_t executableMaximum = 0;
+    uint64_t writableMinimum = ~0ull;
+    uint64_t writableMaximum = 0;
+    uint64_t readOnlyMinimum = ~0ull;
+    uint64_t readOnlyMaximum = 0;
     uint32_t loadCount = 0;
     for (uint16_t i = 0; i < header.phnum; ++i) {
         Elf64ProgramHeader program;
@@ -675,6 +948,14 @@ static bool load_image(Runtime* runtime) {
         if ((program.flags & 1u) != 0u) {
             if (start < executableMinimum) executableMinimum = start;
             if (end > executableMaximum) executableMaximum = end;
+        }
+        if ((program.flags & 2u) != 0u) {
+            if (start < writableMinimum) writableMinimum = start;
+            if (end > writableMaximum) writableMaximum = end;
+        }
+        if ((program.flags & 3u) == 0u) {
+            if (start < readOnlyMinimum) readOnlyMinimum = start;
+            if (end > readOnlyMaximum) readOnlyMaximum = end;
         }
         ++loadCount;
     }
@@ -718,7 +999,8 @@ static bool load_image(Runtime* runtime) {
     }
 
     const uint64_t rebasedWords = rebase_static_absolute_words(runtime, minimum, maximum,
-        executableMinimum, executableMaximum);
+        executableMinimum, executableMaximum, writableMinimum, writableMaximum,
+        readOnlyMinimum, readOnlyMaximum);
 
     serial::puts("[NATIVE-ELF] runtime="); serial::put_hex64(s_runtimeSequence);
     serial::puts(" load PASS format=ELF64 machine=amd64 segments=0x"); serial::put_hex32(loadCount);
@@ -760,7 +1042,7 @@ static gx_result GX_CALL host_request_window_ex(gx_app_context* context, const c
     Runtime* runtime = runtime_from(context);
     if (!runtime || !outWindow || !title || runtime->owner) return GX_ERROR_INVALID_ARGUMENT;
     abi_begin(runtime, NativeAbiOperation::CreateWindow);
-    if (width != 480 || height != 640) {
+    if (width <= 0 || height <= 0 || width > 1280 || height > 760) {
         abi_complete(runtime, NativeAbiOperation::CreateWindow);
         return GX_ERROR_UNSUPPORTED;
     }
@@ -772,7 +1054,10 @@ static gx_result GX_CALL host_request_window_ex(gx_app_context* context, const c
         return GX_ERROR_FAILED;
     }
     *outWindow = runtime->owner->window()->id;
-    log_runtime(runtime, "window PASS title=Nexgen PacMan size=480x640 fixed centered compositor");
+    serial::puts("[NATIVE-ELF] window PASS app="); serial::puts(runtime->package->displayName);
+    serial::puts(" title="); serial::puts(title);
+    serial::puts(" size="); serial_put_u32_decimal(static_cast<uint32_t>(width)); serial::putc('x');
+    serial_put_u32_decimal(static_cast<uint32_t>(height)); serial::puts(" compositor\n");
     abi_complete(runtime, NativeAbiOperation::CreateWindow);
     return GX_OK;
 }
@@ -782,12 +1067,19 @@ static gx_result GX_CALL host_request_window(gx_app_context* context, const char
     return host_request_window_ex(context, title, width, height, GX_WINDOW_FLAG_FIXED_SIZE, outWindow);
 }
 
-static gx_result GX_CALL host_draw_text(gx_app_context*, gx_handle, int, int, const char*) {
-    return GX_ERROR_UNSUPPORTED;
+static gx_result GX_CALL host_draw_text(gx_app_context* context, gx_handle window, int x, int y, const char* text) {
+    Runtime* runtime = runtime_from(context);
+    if (!runtime || !runtime->owner || !runtime->owner->window() ||
+        window != runtime->owner->window()->id || !text) return GX_ERROR_INVALID_ARGUMENT;
+    return runtime->owner->draw_text(x, y, text);
 }
 
-static gx_result GX_CALL host_draw_rect(gx_app_context*, gx_handle, int, int, int, int, uint32_t) {
-    return GX_ERROR_UNSUPPORTED;
+static gx_result GX_CALL host_draw_rect(gx_app_context* context, gx_handle window, int x, int y,
+                                        int width, int height, uint32_t color) {
+    Runtime* runtime = runtime_from(context);
+    if (!runtime || !runtime->owner || !runtime->owner->window() ||
+        window != runtime->owner->window()->id) return GX_ERROR_INVALID_ARGUMENT;
+    return runtime->owner->draw_rect(x, y, width, height, color);
 }
 
 static void pump_desktop(Runtime* runtime) {
@@ -819,16 +1111,19 @@ static gx_result GX_CALL host_poll_event(gx_app_context* context, gx_event* outE
             return abi_result(runtime, NativeAbiOperation::PollEvent, GX_OK);
         }
 
-        // Keep the native event path independent from the compositor's full
-        // desktop repaint. Frames are repainted from host_present_frame;
-        // polling must remain responsive to queued PS/2 transitions.
-        input::poll();
+        // Pump the compositor while polling so retained native-app surfaces
+        // and window/input ownership stay live between application events.
+        pump_desktop(runtime);
 
         const bool focused = compositor::KernelCompositor::getFocusedWindow() == runtime->owner->window();
         if (!runtime->focusKnown || focused != runtime->lastFocus) {
             runtime->focusKnown = true;
             runtime->lastFocus = focused;
             outEvent->type = focused ? GX_EVENT_WINDOW_FOCUS : GX_EVENT_WINDOW_BLUR;
+            return abi_result(runtime, NativeAbiOperation::PollEvent, GX_OK);
+        }
+
+        if (runtime->owner->take_pending_event(outEvent)) {
             return abi_result(runtime, NativeAbiOperation::PollEvent, GX_OK);
         }
 
@@ -1231,6 +1526,8 @@ void discover() {}
 bool launch(const char*) { return false; }
 bool is_available(const char*) { return false; }
 const PackageInfo* lookup_package(const char*) { return nullptr; }
+uint32_t package_count() { return 0; }
+const PackageInfo* package_at(uint32_t) { return nullptr; }
 
 #endif
 

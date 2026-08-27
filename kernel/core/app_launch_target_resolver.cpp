@@ -193,7 +193,7 @@ static bool fill_native_elf_target(gxos::apps::LaunchTarget& target, const char*
     target.diagnosticStatus = "resolved-native-elf";
     target.diagnosticReason =
         "Validated NativeElf App Model target: runtime=native-elf architecture=amd64 "
-        "abi=guidexos-c-abi-v1 executable=/Apps/PacMan/bin/amd64/pacman.elf "
+        "abi=guidexos-c-abi-v1 executable=package-manifest-relative "
         "package-relative VFS resources";
     return true;
 }

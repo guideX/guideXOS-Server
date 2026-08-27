@@ -67,9 +67,9 @@ function Build-WallpaperRuntimeImage {
         Write-Host "      Building wallpaper filesystem image..." -ForegroundColor Cyan
         $smokeCaFixture = $env:GXOS_NAVIGATOR_SMOKE_CA_FIXTURE -eq "1"
         if ($smokeCaFixture) {
-            & $WallpaperPackScript -InputDir (Join-Path $RootDir "assets\Backgrounds") -OutputDir (Join-Path $RootDir "out\wallpaper-pack") -OutputImage $Ramdisk -NativePackageDir (Join-Path $RootDir "Apps\PacMan") -SmokeCaFixture
+            & $WallpaperPackScript -InputDir (Join-Path $RootDir "assets\Backgrounds") -OutputDir (Join-Path $RootDir "out\wallpaper-pack") -OutputImage $Ramdisk -NativePackageDirs @((Join-Path $RootDir "Apps\PacMan"), (Join-Path $RootDir "Apps\DeveloperStudio")) -SmokeCaFixture
         } else {
-            & $WallpaperPackScript -InputDir (Join-Path $RootDir "assets\Backgrounds") -OutputDir (Join-Path $RootDir "out\wallpaper-pack") -OutputImage $Ramdisk -NativePackageDir (Join-Path $RootDir "Apps\PacMan")
+            & $WallpaperPackScript -InputDir (Join-Path $RootDir "assets\Backgrounds") -OutputDir (Join-Path $RootDir "out\wallpaper-pack") -OutputImage $Ramdisk -NativePackageDirs @((Join-Path $RootDir "Apps\PacMan"), (Join-Path $RootDir "Apps\DeveloperStudio"))
         }
         $script:WallpaperRuntimeImageBuilt = $true
     } elseif (!(Test-Path $Ramdisk)) {
@@ -459,92 +459,106 @@ Build-WallpaperRuntimeImage
 # Stage the validated App Model package in the ESP root as well. The normal
 # QEMU path exposes the ESP FAT volume at /, while the release ISO uses the
 # same package from ramdisk.img when no persistent root is available.
-function Stage-PacmanPackage {
-    $packageRoot = Join-Path $RootDir "Apps\PacMan"
-    $manifestPath = Join-Path $packageRoot "app.json"
-    $elfPath = Join-Path $packageRoot "bin\amd64\pacman.elf"
-    $levelPath = Join-Path $packageRoot "resources\level1.gximg"
-    $spritesPath = Join-Path $packageRoot "resources\pacpics.gximg"
-    foreach ($required in @(
-        @{ Path = $manifestPath; Name = "PacMan manifest" },
-        @{ Path = $elfPath; Name = "PacMan AMD64 Native ELF" },
-        @{ Path = $levelPath; Name = "PacMan level asset" },
-        @{ Path = $spritesPath; Name = "PacMan sprite asset" }
-    )) {
-        if (!(Test-Path -LiteralPath $required.Path -PathType Leaf)) {
-            Write-Host "      ERROR: Missing $($required.Name): $($required.Path)" -ForegroundColor Red
-            exit 1
-        }
-    }
-
-    try {
-        $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
-        $entry = @($manifest.entries | Where-Object { $_.architecture -eq $Arch })
-        if ($manifest.id -ne "com.guidexos.pacman" -or $manifest.kind -ne "NativeElf" -or
-            $entry.Count -ne 1 -or $entry[0].path -ne "bin/amd64/pacman.elf" -or
-            $entry[0].entryPoint -ne "gx_main" -or $entry[0].abi -ne "guidexos-c-abi-v1" -or
-            $entry[0].runtime -ne "native-elf") {
-            throw "manifest identity, kind, architecture, path, entry point, ABI, or runtime is invalid"
-        }
-    } catch {
-        Write-Host "      ERROR: PacMan App Model manifest validation failed: $($_.Exception.Message)" -ForegroundColor Red
-        exit 1
-    }
-
-    $elfBytes = [IO.File]::ReadAllBytes($elfPath)
-    if ($elfBytes.Length -lt 20 -or $elfBytes[0] -ne 0x7f -or $elfBytes[1] -ne 0x45 -or
-        $elfBytes[2] -ne 0x4c -or $elfBytes[3] -ne 0x46 -or $elfBytes[4] -ne 2 -or
-        $elfBytes[5] -ne 1 -or $elfBytes[18] -ne 0x3e -or $elfBytes[19] -ne 0) {
-        Write-Host "      ERROR: PacMan executable is not a little-endian AMD64 ELF64" -ForegroundColor Red
-        exit 1
-    }
-
+function Stage-AppModelPackages {
+    $packageSpecs = @(
+        @{ Name = "PacMan"; Id = "com.guidexos.pacman"; Elf = "bin\amd64\pacman.elf" },
+        @{ Name = "DeveloperStudio"; Id = "com.guidexos.developerstudio"; Elf = "bin\amd64\developerstudio.elf"; ExpectedElfBytes = 1015064; ExpectedElfHash = "5343F5DF0EDFE423542348C0AF8C9F8690CE339D197DEB4737DD05A27348CAC7" }
+    )
     $appsRoot = Join-Path $ESPDir "Apps"
-    $stageRoot = Join-Path $appsRoot "PacMan"
     New-Item -ItemType Directory -Path $appsRoot -Force | Out-Null
-    if (Test-Path -LiteralPath $stageRoot) {
-        $resolvedAppsRoot = (Resolve-Path -LiteralPath $appsRoot).Path.TrimEnd('\')
-        $resolvedStageRoot = (Resolve-Path -LiteralPath $stageRoot).Path
-        if (!$resolvedStageRoot.StartsWith($resolvedAppsRoot + '\', [StringComparison]::OrdinalIgnoreCase)) {
-            Write-Host "      ERROR: refusing to remove PacMan stage outside ESP\Apps: $resolvedStageRoot" -ForegroundColor Red
+    $identityPath = Join-Path $ESPDir "build-identity.txt"
+
+    foreach ($spec in $packageSpecs) {
+        $packageRoot = Join-Path $RootDir ("Apps\" + $spec.Name)
+        $manifestPath = Join-Path $packageRoot "app.json"
+        $elfPath = Join-Path $packageRoot $spec.Elf
+        foreach ($required in @(
+            @{ Path = $manifestPath; Name = "$($spec.Name) manifest" },
+            @{ Path = $elfPath; Name = "$($spec.Name) AMD64 Native ELF" }
+        )) {
+            if (!(Test-Path -LiteralPath $required.Path -PathType Leaf)) {
+                Write-Host "      ERROR: Missing $($required.Name): $($required.Path)" -ForegroundColor Red
+                exit 1
+            }
+        }
+
+        try {
+            $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+            $entry = @($manifest.entries | Where-Object { $_.architecture -eq $Arch })
+            if ($manifest.id -ne $spec.Id -or $manifest.kind -ne "NativeElf" -or
+                $entry.Count -ne 1 -or $entry[0].path -ne ($spec.Elf.Replace('\', '/')) -or
+                $entry[0].entryPoint -ne "gx_main" -or $entry[0].abi -ne "guidexos-c-abi-v1" -or
+                $entry[0].runtime -ne "native-elf") {
+                throw "manifest identity, kind, architecture, path, entry point, ABI, or runtime is invalid"
+            }
+        } catch {
+            Write-Host "      ERROR: $($spec.Name) App Model manifest validation failed: $($_.Exception.Message)" -ForegroundColor Red
             exit 1
         }
-        Remove-Item -LiteralPath $resolvedStageRoot -Recurse -Force
-    }
-    New-Item -ItemType Directory -Path (Join-Path $stageRoot "bin\amd64"), (Join-Path $stageRoot "resources") -Force | Out-Null
-    Copy-Item -LiteralPath $manifestPath -Destination (Join-Path $stageRoot "app.json") -Force
-    Copy-Item -LiteralPath $elfPath -Destination (Join-Path $stageRoot "bin\amd64\pacman.elf") -Force
-    Copy-Item -LiteralPath $levelPath -Destination (Join-Path $stageRoot "resources\level1.gximg") -Force
-    Copy-Item -LiteralPath $spritesPath -Destination (Join-Path $stageRoot "resources\pacpics.gximg") -Force
 
-    $actualFiles = @(Get-ChildItem -LiteralPath $stageRoot -Recurse -File | ForEach-Object {
-        $_.FullName.Substring($stageRoot.Length + 1).Replace('\', '/')
-    } | Sort-Object)
-    $expectedFiles = @("app.json", "bin/amd64/pacman.elf", "resources/level1.gximg", "resources/pacpics.gximg")
-    if ((Compare-Object $expectedFiles $actualFiles).Count -ne 0) {
-        Write-Host "      ERROR: staged PacMan package tree is not exact: $($actualFiles -join ', ')" -ForegroundColor Red
-        exit 1
-    }
+        $elfBytes = [IO.File]::ReadAllBytes($elfPath)
+        if ($elfBytes.Length -lt 20 -or $elfBytes[0] -ne 0x7f -or $elfBytes[1] -ne 0x45 -or
+            $elfBytes[2] -ne 0x4c -or $elfBytes[3] -ne 0x46 -or $elfBytes[4] -ne 2 -or
+            $elfBytes[5] -ne 1 -or $elfBytes[18] -ne 0x3e -or $elfBytes[19] -ne 0) {
+            Write-Host "      ERROR: $($spec.Name) executable is not a little-endian AMD64 ELF64" -ForegroundColor Red
+            exit 1
+        }
+        $sourceElfHash = (Get-FileHash -LiteralPath $elfPath -Algorithm SHA256).Hash.ToUpperInvariant()
+        if ($spec.ExpectedElfBytes -and ($elfBytes.Length -ne $spec.ExpectedElfBytes -or $sourceElfHash -ne $spec.ExpectedElfHash)) {
+            Write-Host "      ERROR: $($spec.Name) signed-off ELF size/hash changed; refusing to stage it" -ForegroundColor Red
+            exit 1
+        }
 
-    $stagedElf = Join-Path $stageRoot "bin\amd64\pacman.elf"
-    $stagedManifest = Join-Path $stageRoot "app.json"
-    $elfHash = (Get-FileHash -LiteralPath $stagedElf -Algorithm SHA256).Hash
-    $manifestHash = (Get-FileHash -LiteralPath $stagedManifest -Algorithm SHA256).Hash
-    Write-Host "      Staged /Apps/PacMan (manifest, AMD64 ELF, level, sprites)" -ForegroundColor Green
-    Write-Host "      PacMan ELF bytes=$((Get-Item -LiteralPath $stagedElf).Length) sha256=$elfHash" -ForegroundColor Cyan
-    Write-Host "      PacMan manifest bytes=$((Get-Item -LiteralPath $stagedManifest).Length) sha256=$manifestHash" -ForegroundColor Cyan
-    $identityPath = Join-Path $ESPDir "build-identity.txt"
-    if (Test-Path -LiteralPath $identityPath) {
-        Add-Content -LiteralPath $identityPath -Value @(
-            "pacmanPackageRoot=/Apps/PacMan"
-            "pacmanElfSha256=$elfHash"
-            "pacmanManifestSha256=$manifestHash"
-            "pacmanElfBytes=$((Get-Item -LiteralPath $stagedElf).Length)"
-            "pacmanManifestBytes=$((Get-Item -LiteralPath $stagedManifest).Length)"
-        )
+        $stageRoot = Join-Path $appsRoot $spec.Name
+        if (Test-Path -LiteralPath $stageRoot) {
+            $resolvedAppsRoot = (Resolve-Path -LiteralPath $appsRoot).Path.TrimEnd('\')
+            $resolvedStageRoot = (Resolve-Path -LiteralPath $stageRoot).Path
+            if (!$resolvedStageRoot.StartsWith($resolvedAppsRoot + '\', [StringComparison]::OrdinalIgnoreCase)) {
+                Write-Host "      ERROR: refusing to remove package stage outside ESP\Apps: $resolvedStageRoot" -ForegroundColor Red
+                exit 1
+            }
+            Remove-Item -LiteralPath $resolvedStageRoot -Recurse -Force
+        }
+        New-Item -ItemType Directory -Path $stageRoot -Force | Out-Null
+        $sourceFiles = @(Get-ChildItem -LiteralPath $packageRoot -Recurse -File)
+        foreach ($sourceFile in $sourceFiles) {
+            $relative = $sourceFile.FullName.Substring($packageRoot.Length + 1)
+            $target = Join-Path $stageRoot $relative
+            New-Item -ItemType Directory -Force -Path (Split-Path -Parent $target) | Out-Null
+            Copy-Item -LiteralPath $sourceFile.FullName -Destination $target -Force
+        }
+
+        $actualFiles = @(Get-ChildItem -LiteralPath $stageRoot -Recurse -File | ForEach-Object {
+            $_.FullName.Substring($stageRoot.Length + 1).Replace('\', '/')
+        } | Sort-Object)
+        $expectedFiles = @($sourceFiles | ForEach-Object {
+            $_.FullName.Substring($packageRoot.Length + 1).Replace('\', '/')
+        } | Sort-Object)
+        if ((Compare-Object $expectedFiles $actualFiles).Count -ne 0) {
+            Write-Host "      ERROR: staged $($spec.Name) package tree is not exact: $($actualFiles -join ', ')" -ForegroundColor Red
+            exit 1
+        }
+
+        $stagedElf = Join-Path $stageRoot $spec.Elf
+        $stagedManifest = Join-Path $stageRoot "app.json"
+        $elfHash = (Get-FileHash -LiteralPath $stagedElf -Algorithm SHA256).Hash
+        $manifestHash = (Get-FileHash -LiteralPath $stagedManifest -Algorithm SHA256).Hash
+        Write-Host "      Staged /Apps/$($spec.Name) App Model package ($($actualFiles -join ', '))" -ForegroundColor Green
+        Write-Host "      $($spec.Name) ELF bytes=$((Get-Item -LiteralPath $stagedElf).Length) sha256=$elfHash" -ForegroundColor Cyan
+        Write-Host "      $($spec.Name) manifest bytes=$((Get-Item -LiteralPath $stagedManifest).Length) sha256=$manifestHash" -ForegroundColor Cyan
+        if (Test-Path -LiteralPath $identityPath) {
+            $identityPrefix = $spec.Name.ToLowerInvariant()
+            Add-Content -LiteralPath $identityPath -Value @(
+                "${identityPrefix}PackageRoot=/Apps/$($spec.Name)"
+                "${identityPrefix}ElfSha256=$elfHash"
+                "${identityPrefix}ManifestSha256=$manifestHash"
+                "${identityPrefix}ElfBytes=$((Get-Item -LiteralPath $stagedElf).Length)"
+                "${identityPrefix}ManifestBytes=$((Get-Item -LiteralPath $stagedManifest).Length)"
+            )
+        }
     }
 }
-Stage-PacmanPackage
+Stage-AppModelPackages
 
 Write-Host "      ESP directory ready" -ForegroundColor Green
 Write-Host ""

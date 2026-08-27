@@ -428,6 +428,22 @@ static bool desktop_str_eq(const char* a, const char* b)
     return *a == '\0' && *b == '\0';
 }
 
+static bool desktop_str_less(const char* a, const char* b)
+{
+    if (!a || !a[0]) return b && b[0];
+    if (!b || !b[0]) return false;
+    while (*a && *b) {
+        char ac = *a;
+        char bc = *b;
+        if (ac >= 'A' && ac <= 'Z') ac = (char)(ac - 'A' + 'a');
+        if (bc >= 'A' && bc <= 'Z') bc = (char)(bc - 'A' + 'a');
+        if (ac != bc) return ac < bc;
+        ++a;
+        ++b;
+    }
+    return *a == '\0' && *b != '\0';
+}
+
 #if defined(GXOS_APPMODEL_TYPED_DISPATCH_SHADOW_ONLY) && defined(GXOS_BARE_METAL)
 static bool bare_metal_shadow_file_explorer_alias_pair(const char* a, const char* b)
 {
@@ -1850,7 +1866,7 @@ struct StartMenuApp {
 };
 
 // Start menu application list (pinned + recent, matching desktop icons)
-static StartMenuApp s_startMenuApps[] = {
+static StartMenuApp s_startMenuApps[24] = {
     {"Calculator",  true,  false, 0xFF4690C8},  // pinned
     {"Notepad",     true,  false, 0xFF78B450},  // pinned
     {"Console",     true,  false, 0xFF78B450},  // pinned
@@ -1868,11 +1884,13 @@ static StartMenuApp s_startMenuApps[] = {
     {"File Explorer", false, true, 0xFFC8B43C}, // recent
     {"ImgViewer",   false, false, 0xFFC87830},  // not shown by default
 };
-static const int kStartMenuAppCount = sizeof(s_startMenuApps) / sizeof(s_startMenuApps[0]);
+static const int kStaticStartMenuAppCount = 16;
+static const int kMaxDiscoveredStartMenuApps = 8;
+static int s_startMenuAppCount = kStaticStartMenuAppCount;
 static const int kMaxStartMenuRecent = 10;  // Max recent apps in start menu
 
 // All Programs alphabetically sorted list (for "All Programs" view)
-static const char* s_allProgramsList[] = {
+static const char* const kStaticAllProgramsList[] = {
     "Calculator",
     "Clock",
     "Console",
@@ -1889,7 +1907,9 @@ static const char* s_allProgramsList[] = {
     "TaskManager",
     "Trash",
 };
-static const int kAllProgramsCount = sizeof(s_allProgramsList) / sizeof(s_allProgramsList[0]);
+static const int kStaticAllProgramsCount = sizeof(kStaticAllProgramsList) / sizeof(kStaticAllProgramsList[0]);
+static const char* s_allProgramsList[16 + kMaxDiscoveredStartMenuApps] = {};
+static int s_allProgramsCount = kStaticAllProgramsCount;
 static const char* kStartMenuRecentProgramsPath = "/.startmenu_recent";
 
 struct AppModelDemoRow {
@@ -3066,11 +3086,11 @@ static const StartMenuApp* find_start_menu_app(const char* appName)
     } else if (desktop_str_eq(appName, "Control Panel")) {
         appName = "ControlPanel";
     }
-    for (int i = 0; i < kStartMenuAppCount; ++i) {
+    for (int i = 0; i < s_startMenuAppCount; ++i) {
         if (desktop_str_eq(s_startMenuApps[i].name, appName)) return &s_startMenuApps[i];
     }
     if (desktop_str_eq(appName, "App Model Demo")) {
-        for (int i = 0; i < kStartMenuAppCount; ++i) {
+        for (int i = 0; i < s_startMenuAppCount; ++i) {
             if (desktop_str_eq(s_startMenuApps[i].name, "AppModel")) return &s_startMenuApps[i];
         }
     }
@@ -4754,7 +4774,62 @@ static void refresh_start_menu_list()
 {
     // Start Menu app visibility is intentionally independent from the
     // desktop system-icon policy.
-    serial::puts("[desktop] Start Menu app list refresh preserves app pins independent of desktop icons\n");
+    s_startMenuAppCount = kStaticStartMenuAppCount;
+    s_allProgramsCount = kStaticAllProgramsCount;
+#if defined(GXOS_BARE_METAL)
+    // Native ELF packages are the source of truth for package-backed entries.
+    // Rebuild the small fixed menu arrays from the validated App Model table so
+    // an absent or invalid package never creates a clickable stale row.
+    native_elf::discover();
+    for (int i = 0; i < kStaticAllProgramsCount; ++i) {
+        s_allProgramsList[i] = kStaticAllProgramsList[i];
+    }
+    const uint32_t packageCount = native_elf::package_count();
+    for (uint32_t i = 0; i < packageCount &&
+         s_startMenuAppCount < kStaticStartMenuAppCount + kMaxDiscoveredStartMenuApps; ++i) {
+        const native_elf::PackageInfo* package = native_elf::package_at(i);
+        if (!package || !package->valid || !package->startMenuVisible || !package->displayName[0]) continue;
+
+        bool alreadyListed = false;
+        for (int j = 0; j < s_startMenuAppCount; ++j) {
+            if (desktop_str_eq(s_startMenuApps[j].name, package->displayName)) {
+                alreadyListed = true;
+                break;
+            }
+        }
+        if (!alreadyListed) {
+            s_startMenuApps[s_startMenuAppCount++] = {
+                package->displayName, true, false, 0xFF4678BEu
+            };
+        }
+
+        bool inAllPrograms = false;
+        for (int j = 0; j < s_allProgramsCount; ++j) {
+            if (desktop_str_eq(s_allProgramsList[j], package->displayName)) {
+                inAllPrograms = true;
+                break;
+            }
+        }
+        if (!inAllPrograms && s_allProgramsCount < kStaticAllProgramsCount + kMaxDiscoveredStartMenuApps) {
+            int insertAt = 0;
+            while (insertAt < s_allProgramsCount &&
+                   !desktop_str_less(package->displayName, s_allProgramsList[insertAt])) {
+                ++insertAt;
+            }
+            for (int j = s_allProgramsCount; j > insertAt; --j) {
+                s_allProgramsList[j] = s_allProgramsList[j - 1];
+            }
+            s_allProgramsList[insertAt] = package->displayName;
+            ++s_allProgramsCount;
+            serial::puts("[desktop] Start Menu package visible: ");
+            serial::puts(package->displayName);
+            serial::puts(" icon=");
+            serial::puts(package->icon[0] ? package->icon : "(fallback)");
+            serial::putc('\n');
+        }
+    }
+#endif
+    serial::puts("[desktop] Start Menu app list refreshed from built-ins and validated packages\n");
 }
 
 static const char* canonical_start_menu_recent_program(const char* appName)
@@ -4887,9 +4962,11 @@ static bool remove_from_start_menu_recent(const char* appName)
 static bool start_menu_item_is_available(const char* appName)
 {
 #if defined(GXOS_BARE_METAL)
-    if (desktop_str_eq(appName, "Nexgen PacMan")) {
-        return native_elf::is_available(appName);
-    }
+    const native_elf::PackageInfo* package = native_elf::lookup_package(appName);
+    if (package) return package->valid && package->startMenuVisible;
+    // Preserve the existing PacMan compatibility row when its package is not
+    // present in a particular boot image.
+    if (desktop_str_eq(appName, "Nexgen PacMan")) return native_elf::is_available(appName);
 #endif
     return true;
 }
@@ -4900,7 +4977,7 @@ static const char* start_menu_visible_item_for_index(int visibleIndex)
 
     int current = 0;
     if (s_startMenuAllProgs) {
-        for (int i = 0; i < kAllProgramsCount; ++i) {
+        for (int i = 0; i < s_allProgramsCount; ++i) {
             if (!start_menu_item_is_available(s_allProgramsList[i])) continue;
             if (current++ == visibleIndex) return s_allProgramsList[i];
         }
@@ -4918,7 +4995,7 @@ static int get_start_menu_item_count()
 {
     int count = 0;
     if (s_startMenuAllProgs) {
-        for (int i = 0; i < kAllProgramsCount; ++i) {
+        for (int i = 0; i < s_allProgramsCount; ++i) {
             if (start_menu_item_is_available(s_allProgramsList[i])) ++count;
         }
     } else {
@@ -6021,6 +6098,11 @@ static const char* GetDesktopIconLogicalNameForIcon(int iconIdx)
 
 static const char* GetStartMenuLogicalIconName(const char* label)
 {
+#if defined(GXOS_BARE_METAL)
+    if (const native_elf::PackageInfo* package = native_elf::lookup_package(label)) {
+        if (package->icon[0]) return package->icon;
+    }
+#endif
     return GetDesktopIconLogicalName(label);
 }
 
@@ -6102,6 +6184,7 @@ static const uint32_t* get_embedded_desktop_icon_pixels(const char* logicalName)
     if (text_equals(logicalName, "app.paint"))         return kDesktopThemeIcon_Paint;
     if (text_equals(logicalName, "app.clock"))         return kDesktopThemeIcon_Clock;
     if (text_equals(logicalName, "app.navigator"))     return kDesktopThemeIcon_Globe;
+    if (text_equals(logicalName, "app.developerstudio")) return kDesktopThemeIcon_DeveloperStudio;
     // Unmapped app icons: use closest available embedded icon as fallback
     if (text_equals(logicalName, "app.diskmanager"))   return kDesktopThemeIcon_Files;
     if (text_equals(logicalName, "app.installer"))     return kDesktopThemeIcon_Files;
@@ -9221,6 +9304,10 @@ void toggle_start_menu()
         s_startMenuScroll = 0;
         s_startMenuAllProgs = false;  // Start with Recent Programs view
         refresh_start_menu_list();     // Sync with desktop icon states
+        // A clean desktop has no recent history yet.  Show the normal
+        // discovered application list so packaged apps are immediately
+        // reachable from the freshly opened Start Menu.
+        if (s_startMenuRecentProgramCount == 0) s_startMenuAllProgs = true;
         s_hoverMenuLeft = -1;
         s_hoverMenuRight = -1;
         s_clickedMenuLeft = -1;

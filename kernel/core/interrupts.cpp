@@ -87,6 +87,24 @@ struct GDTEntry {
     uint8_t  base_high;
 } PACKED;
 
+struct TSS64 {
+    uint32_t reserved0;
+    uint64_t rsp0;
+    uint64_t rsp1;
+    uint64_t rsp2;
+    uint64_t reserved1;
+    uint64_t ist1;
+    uint64_t ist2;
+    uint64_t ist3;
+    uint64_t ist4;
+    uint64_t ist5;
+    uint64_t ist6;
+    uint64_t ist7;
+    uint64_t reserved2;
+    uint16_t reserved3;
+    uint16_t iomapBase;
+} PACKED;
+
 struct GDTPtr {
     uint16_t limit;
     uint64_t base;
@@ -123,8 +141,14 @@ static const uint8_t kIRQBase       = 32;
 // Static data
 // ----------------------------------------------------------------
 
+#if defined(__x86_64__) || defined(_M_X64)
+// GDT: null, code, data, and a 64-bit TSS descriptor (two slots).
+static GDTEntry s_gdt[5];
+static TSS64 s_tss;
+#else
 // GDT: 3 entries - null, code, data
 static GDTEntry s_gdt[3];
+#endif
 static GDTPtr   s_gdtPtr;
 
 static IDTEntry s_idt[kIDTSize];
@@ -151,6 +175,19 @@ static void set_gdt_entry(int index, uint32_t base, uint32_t limit, uint8_t acce
     s_gdt[index].base_high       = (uint8_t)((base >> 24) & 0xFF);
 }
 
+#if defined(__x86_64__) || defined(_M_X64)
+static void set_tss_descriptor(int index, uint64_t base, uint32_t limit)
+{
+    set_gdt_entry(index, static_cast<uint32_t>(base), limit, 0x89, 0x00);
+    s_gdt[index + 1].limit_low = static_cast<uint16_t>((base >> 32) & 0xFFFFu);
+    s_gdt[index + 1].base_low = static_cast<uint16_t>((base >> 48) & 0xFFFFu);
+    s_gdt[index + 1].base_mid = 0;
+    s_gdt[index + 1].access = 0;
+    s_gdt[index + 1].flags_limit_high = 0;
+    s_gdt[index + 1].base_high = 0;
+}
+#endif
+
 static void gdt_init()
 {
     // Entry 0: Null descriptor (required by x86)
@@ -166,6 +203,10 @@ static void gdt_init()
     // Access: Present (0x80) | DPL=0 (0x00) | Type=data,read,write (0x12) = 0x92
     // Flags: 0x00 (no long mode bit for data segments)
     set_gdt_entry(2, 0, 0xFFFFF, 0x92, 0x00);
+    s_tss = {};
+    s_tss.iomapBase = sizeof(TSS64);
+    s_tss.ist1 = (reinterpret_cast<uint64_t>(gxos_exception_stack) + sizeof(gxos_exception_stack)) & ~0x0Full;
+    set_tss_descriptor(3, reinterpret_cast<uint64_t>(&s_tss), sizeof(TSS64) - 1u);
 #else
     // Entry 1: 32-bit code segment (selector 0x08)
     // Access: Present (0x80) | DPL=0 (0x00) | Type=code,exec,read (0x1A) = 0x9A
@@ -229,7 +270,13 @@ static void gdt_init()
 #endif
 #endif
 
+#if defined(__x86_64__)
+    const uint16_t tssSelector = 0x18;
+    asm volatile ("ltr %0" : : "r"(tssSelector) : "memory");
+    serial::puts("[GDT] GDT loaded with code/data/TSS entries, segments reloaded\n");
+#else
     serial::puts("[GDT] GDT loaded with 3 entries, segments reloaded\n");
+#endif
 }
 
 // ----------------------------------------------------------------
@@ -287,11 +334,11 @@ void eoi(uint8_t irq)
 // ----------------------------------------------------------------
 
 #if defined(__x86_64__) || defined(_M_X64)
-static void set_idt_entry(int index, uint64_t addr, uint8_t type_attr)
+static void set_idt_entry(int index, uint64_t addr, uint8_t type_attr, uint8_t ist = 0)
 {
     s_idt[index].offset_low  = (uint16_t)(addr & 0xFFFF);
     s_idt[index].selector    = 0x08;
-    s_idt[index].ist         = 0;
+    s_idt[index].ist         = ist & 0x07u;
     s_idt[index].type_attr   = type_attr;
     s_idt[index].offset_mid  = (uint16_t)((addr >> 16) & 0xFFFF);
     s_idt[index].offset_high = (uint32_t)((addr >> 32) & 0xFFFFFFFF);
@@ -678,7 +725,7 @@ void init()
 #if defined(__x86_64__) || defined(_M_X64)
         set_idt_entry(kIRQBase + i,
                       reinterpret_cast<uint64_t>(s_stubs[i]),
-                      0x8E);
+                      0x8E, 1);
 #else
         set_idt_entry(kIRQBase + i,
                       reinterpret_cast<uint32_t>(s_stubs[i]),

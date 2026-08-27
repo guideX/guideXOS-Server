@@ -792,7 +792,7 @@ static void copy_c_string(char* dst, uint32_t dstSize, const char* src)
 static void clear_lfn_name(char* name, uint32_t nameSize)
 {
     if (!name || nameSize == 0) return;
-    name[0] = '\0';
+    for (uint32_t i = 0; i < nameSize; ++i) name[i] = '\0';
 }
 
 static void lfn_put_char(char* name, uint32_t nameSize, uint32_t pos, uint16_t ch)
@@ -800,7 +800,6 @@ static void lfn_put_char(char* name, uint32_t nameSize, uint32_t pos, uint16_t c
     if (!name || nameSize == 0 || pos + 1 >= nameSize) return;
     if (ch == 0x0000 || ch == 0xFFFF) return;
     name[pos] = (ch < 0x80) ? static_cast<char>(ch) : '?';
-    name[pos + 1] = '\0';
 }
 
 static void collect_lfn_entry(const FAT32_LFNEntry* lfn, char* name, uint32_t nameSize)

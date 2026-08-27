@@ -5,7 +5,8 @@ param(
     [int]$ImageSizeMB = 64,
     [switch]$SmokeCaFixture,
     [string]$ImageViewerRuntimeSmokePath,
-    [string]$NativePackageDir
+    [string]$NativePackageDir,
+    [string[]]$NativePackageDirs
 )
 
 $ErrorActionPreference = "Stop"
@@ -15,7 +16,12 @@ $RootDir = Split-Path -Parent $ScriptDir
 $InputDir = if ([System.IO.Path]::IsPathRooted($InputDir)) { $InputDir } else { Join-Path $RootDir $InputDir }
 $OutputDir = if ([System.IO.Path]::IsPathRooted($OutputDir)) { $OutputDir } else { Join-Path $RootDir $OutputDir }
 $OutputImage = if ([System.IO.Path]::IsPathRooted($OutputImage)) { $OutputImage } else { Join-Path $RootDir $OutputImage }
-$NativePackageDir = if ([string]::IsNullOrWhiteSpace($NativePackageDir)) { "" } elseif ([System.IO.Path]::IsPathRooted($NativePackageDir)) { $NativePackageDir } else { Join-Path $RootDir $NativePackageDir }
+$nativePackageInputs = @()
+if (-not [string]::IsNullOrWhiteSpace($NativePackageDir)) { $nativePackageInputs += $NativePackageDir }
+if ($NativePackageDirs) { $nativePackageInputs += $NativePackageDirs }
+$NativePackageDirs = @($nativePackageInputs | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | ForEach-Object {
+    if ([System.IO.Path]::IsPathRooted($_)) { $_ } else { Join-Path $RootDir $_ }
+})
 $TrackedOutputRootCaBundlePath = Join-Path $OutputDir "certs\ca-bundle.pem"
 $TrackedOutputRootCaManifestCompatPath = Join-Path $OutputDir "certs\CABUNDLE.MAN"
 $NavigatorCaBundleManifestScript = Join-Path $ScriptDir "validate-navigator-ca-bundle.ps1"
@@ -714,10 +720,7 @@ function Write-Fat32Image([string]$ImagePath, [string]$WallpaperDir, [array]$Fil
     $hasConfigCerts = $false
     $hasConfigNavigator = $false
     $hasApps = $false
-    $hasPacman = $false
-    $hasPacmanBin = $false
-    $hasPacmanAmd64 = $false
-    $hasPacmanResources = $false
+    $appDirectories = @()
     foreach ($file in $Files) {
         $fullPath = [System.IO.Path]::GetFullPath($file.FullName)
         $relativePath = Get-StagedRelativePath $OutputDir $fullPath
@@ -744,30 +747,17 @@ function Write-Fat32Image([string]$ImagePath, [string]$WallpaperDir, [array]$Fil
             }
             '^Apps$' {
                 $hasApps = $true
+                if ($appDirectories -notcontains 'Apps') { $appDirectories += 'Apps' }
                 break
             }
-            '^Apps/PacMan$' {
+            '^Apps/.+$' {
                 $hasApps = $true
-                $hasPacman = $true
-                break
-            }
-            '^Apps/PacMan/bin$' {
-                $hasApps = $true
-                $hasPacman = $true
-                $hasPacmanBin = $true
-                break
-            }
-            '^Apps/PacMan/bin/amd64$' {
-                $hasApps = $true
-                $hasPacman = $true
-                $hasPacmanBin = $true
-                $hasPacmanAmd64 = $true
-                break
-            }
-            '^Apps/PacMan/resources$' {
-                $hasApps = $true
-                $hasPacman = $true
-                $hasPacmanResources = $true
+                $parts = $directory.Split('/')
+                $path = ''
+                for ($partIndex = 0; $partIndex -lt $parts.Length; $partIndex++) {
+                    $path = if ($path) { "$path/$($parts[$partIndex])" } else { $parts[$partIndex] }
+                    if ($appDirectories -notcontains $path) { $appDirectories += $path }
+                }
                 break
             }
             default {
@@ -802,11 +792,6 @@ function Write-Fat32Image([string]$ImagePath, [string]$WallpaperDir, [array]$Fil
     $configCluster = $null
     $configCertsCluster = $null
     $configNavigatorCluster = $null
-    $appsCluster = $null
-    $pacmanCluster = $null
-    $pacmanBinCluster = $null
-    $pacmanAmd64Cluster = $null
-    $pacmanResourcesCluster = $null
     if ($hasCerts) {
         $certsCluster = $nextCluster++
         $fat[$certsCluster] = 0x0FFFFFFF
@@ -824,24 +809,12 @@ function Write-Fat32Image([string]$ImagePath, [string]$WallpaperDir, [array]$Fil
         $fat[$configNavigatorCluster] = 0x0FFFFFFF
     }
     if ($hasApps) {
-        $appsCluster = $nextCluster++
-        $fat[$appsCluster] = 0x0FFFFFFF
-    }
-    if ($hasPacman) {
-        $pacmanCluster = $nextCluster++
-        $fat[$pacmanCluster] = 0x0FFFFFFF
-    }
-    if ($hasPacmanBin) {
-        $pacmanBinCluster = $nextCluster++
-        $fat[$pacmanBinCluster] = 0x0FFFFFFF
-    }
-    if ($hasPacmanAmd64) {
-        $pacmanAmd64Cluster = $nextCluster++
-        $fat[$pacmanAmd64Cluster] = 0x0FFFFFFF
-    }
-    if ($hasPacmanResources) {
-        $pacmanResourcesCluster = $nextCluster++
-        $fat[$pacmanResourcesCluster] = 0x0FFFFFFF
+        $appDirectoryClusters = @{}
+        foreach ($appDirectory in ($appDirectories | Sort-Object { ($_ -split '/').Length })) {
+            $cluster = $nextCluster++
+            $fat[$cluster] = 0x0FFFFFFF
+            $appDirectoryClusters[$appDirectory] = [uint32]$cluster
+        }
     }
 
     $fileRecords = @()
@@ -923,8 +896,8 @@ function Write-Fat32Image([string]$ImagePath, [string]$WallpaperDir, [array]$Fil
         if ($null -ne $configCluster) {
             Add-DirectoryRecord $rootEntries "config" (Get-ShortName "config" $usedRoot) 0x10 $configCluster 0
         }
-        if ($null -ne $appsCluster) {
-            Add-DirectoryRecord $rootEntries "Apps" (Get-ShortName "Apps" $usedRoot) 0x10 $appsCluster 0
+        if ($hasApps) {
+            Add-DirectoryRecord $rootEntries "Apps" (Get-ShortName "Apps" $usedRoot) 0x10 $appDirectoryClusters['Apps'] 0
         }
 
         $wallEntries = New-Object 'System.Collections.Generic.List[byte[]]'
@@ -937,16 +910,12 @@ function Write-Fat32Image([string]$ImagePath, [string]$WallpaperDir, [array]$Fil
         $usedConfigCert = @{}
         $configNavigatorEntries = if ($null -ne $configNavigatorCluster) { New-Object 'System.Collections.Generic.List[byte[]]' } else { $null }
         $usedConfigNavigator = @{}
-        $appsEntries = if ($null -ne $appsCluster) { New-Object 'System.Collections.Generic.List[byte[]]' } else { $null }
-        $usedApps = @{}
-        $pacmanEntries = if ($null -ne $pacmanCluster) { New-Object 'System.Collections.Generic.List[byte[]]' } else { $null }
-        $usedPacman = @{}
-        $pacmanBinEntries = if ($null -ne $pacmanBinCluster) { New-Object 'System.Collections.Generic.List[byte[]]' } else { $null }
-        $usedPacmanBin = @{}
-        $pacmanAmd64Entries = if ($null -ne $pacmanAmd64Cluster) { New-Object 'System.Collections.Generic.List[byte[]]' } else { $null }
-        $usedPacmanAmd64 = @{}
-        $pacmanResourcesEntries = if ($null -ne $pacmanResourcesCluster) { New-Object 'System.Collections.Generic.List[byte[]]' } else { $null }
-        $usedPacmanResources = @{}
+        $appDirectoryEntries = @{}
+        $appDirectoryUsed = @{}
+        foreach ($appDirectory in $appDirectories) {
+            $appDirectoryEntries[$appDirectory] = New-Object 'System.Collections.Generic.List[byte[]]'
+            $appDirectoryUsed[$appDirectory] = @{}
+        }
 
         if ($null -ne $configEntries) {
             if ($null -ne $configCertsCluster) {
@@ -956,22 +925,21 @@ function Write-Fat32Image([string]$ImagePath, [string]$WallpaperDir, [array]$Fil
                 Add-DirectoryRecord $configEntries "navigator" (Get-ShortName "navigator" $usedConfig) 0x10 $configNavigatorCluster 0
             }
         }
-        if ($null -ne $appsEntries -and $null -ne $pacmanCluster) {
-            Add-DirectoryRecord $appsEntries "PacMan" (Get-ShortName "PacMan" $usedApps) 0x10 $pacmanCluster 0
-        }
-        if ($null -ne $pacmanEntries) {
-            if ($null -ne $pacmanBinCluster) {
-                Add-DirectoryRecord $pacmanEntries "bin" (Get-ShortName "bin" $usedPacman) 0x10 $pacmanBinCluster 0
-            }
-            if ($null -ne $pacmanResourcesCluster) {
-                Add-DirectoryRecord $pacmanEntries "resources" (Get-ShortName "resources" $usedPacman) 0x10 $pacmanResourcesCluster 0
-            }
-        }
-        if ($null -ne $pacmanBinEntries -and $null -ne $pacmanAmd64Cluster) {
-            Add-DirectoryRecord $pacmanBinEntries "amd64" (Get-ShortName "amd64" $usedPacmanBin) 0x10 $pacmanAmd64Cluster 0
+        foreach ($appDirectory in ($appDirectories | Sort-Object { ($_ -split '/').Length })) {
+            if ($appDirectory -eq 'Apps') { continue }
+            $separator = $appDirectory.LastIndexOf('/')
+            $parent = $appDirectory.Substring(0, $separator)
+            $name = $appDirectory.Substring($separator + 1)
+            Add-DirectoryRecord $appDirectoryEntries[$parent] $name `
+                (Get-ShortName $name $appDirectoryUsed[$parent]) 0x10 $appDirectoryClusters[$appDirectory] 0
         }
 
         foreach ($record in $fileRecords) {
+            if ($record.Directory -like 'Apps/*') {
+                Add-DirectoryRecord $appDirectoryEntries[$record.Directory] $record.Name `
+                    (Get-ShortName $record.Name $appDirectoryUsed[$record.Directory]) 0x20 $record.Cluster $record.Size
+                continue
+            }
             switch ($record.Directory) {
                 "wall" {
                     Add-DirectoryRecord $wallEntries $record.Name (Get-ShortName $record.Name $usedWall) 0x20 $record.Cluster $record.Size
@@ -989,18 +957,6 @@ function Write-Fat32Image([string]$ImagePath, [string]$WallpaperDir, [array]$Fil
                     Add-DirectoryRecord $configNavigatorEntries $record.Name (Get-ShortName $record.Name $usedConfigNavigator) 0x20 $record.Cluster $record.Size
                     break
                 }
-                "Apps/PacMan" {
-                    Add-DirectoryRecord $pacmanEntries $record.Name (Get-ShortName $record.Name $usedPacman) 0x20 $record.Cluster $record.Size
-                    break
-                }
-                "Apps/PacMan/bin/amd64" {
-                    Add-DirectoryRecord $pacmanAmd64Entries $record.Name (Get-ShortName $record.Name $usedPacmanAmd64) 0x20 $record.Cluster $record.Size
-                    break
-                }
-                "Apps/PacMan/resources" {
-                    Add-DirectoryRecord $pacmanResourcesEntries $record.Name (Get-ShortName $record.Name $usedPacmanResources) 0x20 $record.Cluster $record.Size
-                    break
-                }
             }
         }
 
@@ -1010,16 +966,24 @@ function Write-Fat32Image([string]$ImagePath, [string]$WallpaperDir, [array]$Fil
             @($certsCluster, $certEntries),
             @($configCluster, $configEntries),
             @($configCertsCluster, $configCertEntries),
-            @($configNavigatorCluster, $configNavigatorEntries),
-            @($appsCluster, $appsEntries),
-            @($pacmanCluster, $pacmanEntries),
-            @($pacmanBinCluster, $pacmanBinEntries),
-            @($pacmanAmd64Cluster, $pacmanAmd64Entries),
-            @($pacmanResourcesCluster, $pacmanResourcesEntries)
+            @($configNavigatorCluster, $configNavigatorEntries)
         )) {
             if ($null -eq $pair[0] -or $null -eq $pair[1]) { continue }
             $cluster = [uint32]$pair[0]
             $entries = $pair[1]
+            $dirBytes = New-Object byte[] $clusterBytes
+            $offset = 0
+            foreach ($entry in $entries) {
+                [Array]::Copy($entry, 0, $dirBytes, $offset, 32)
+                $offset += 32
+            }
+            $stream.Position = ($dataStartSector + (($cluster - 2) * $sectorsPerCluster)) * $bytesPerSector
+            $stream.Write($dirBytes, 0, $dirBytes.Length)
+        }
+
+        foreach ($appDirectory in $appDirectories) {
+            $cluster = [uint32]$appDirectoryClusters[$appDirectory]
+            $entries = $appDirectoryEntries[$appDirectory]
             $dirBytes = New-Object byte[] $clusterBytes
             $offset = 0
             foreach ($entry in $entries) {
@@ -1067,24 +1031,24 @@ foreach ($stagingDir in @($wallpaperDir, $certsDir, $configDir, $appsDir)) {
 New-Item -ItemType Directory -Force -Path $wallpaperDir | Out-Null
 New-Item -ItemType Directory -Force -Path (Split-Path -Parent $OutputImage) | Out-Null
 
-if (-not [string]::IsNullOrWhiteSpace($NativePackageDir)) {
-    $nativePackageFiles = @(
-        @{ Relative = "app.json"; Label = "manifest" },
-        @{ Relative = "bin\amd64\pacman.elf"; Label = "AMD64 Native ELF" },
-        @{ Relative = "resources\level1.gximg"; Label = "level asset" },
-        @{ Relative = "resources\pacpics.gximg"; Label = "sprite asset" }
-    )
-    $nativeStageRoot = Join-Path $appsDir "PacMan"
-    foreach ($nativeFile in $nativePackageFiles) {
-        $source = Join-Path $NativePackageDir $nativeFile.Relative
-        if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {
-            throw "Missing PacMan $($nativeFile.Label) for ramdisk package: $source"
-        }
-        $target = Join-Path $nativeStageRoot $nativeFile.Relative
+foreach ($packageSourceDir in $NativePackageDirs) {
+    if (-not (Test-Path -LiteralPath $packageSourceDir -PathType Container)) {
+        throw "Native ELF package directory not found for ramdisk: $packageSourceDir"
+    }
+    $packageRoot = (Resolve-Path -LiteralPath $packageSourceDir).Path.TrimEnd('\')
+    $packageName = Split-Path -Leaf $packageRoot
+    $nativeFiles = @(Get-ChildItem -LiteralPath $packageRoot -Recurse -File)
+    if ($nativeFiles.Count -eq 0) {
+        throw "Native ELF package is empty for ramdisk: $packageRoot"
+    }
+    $nativeStageRoot = Join-Path $appsDir $packageName
+    foreach ($nativeFile in $nativeFiles) {
+        $relative = $nativeFile.FullName.Substring($packageRoot.Length + 1).Replace('\', '/')
+        $target = Join-Path $nativeStageRoot ($relative.Replace('/', '\'))
         New-Item -ItemType Directory -Force -Path (Split-Path -Parent $target) | Out-Null
-        Copy-Item -LiteralPath $source -Destination $target -Force
+        Copy-Item -LiteralPath $nativeFile.FullName -Destination $target -Force
         $staged += Get-Item -LiteralPath $target
-        Write-Host "      staged /Apps/PacMan/$($nativeFile.Relative.Replace('\', '/')) in ramdisk" -ForegroundColor Yellow
+        Write-Host "      staged /Apps/$packageName/$relative in ramdisk" -ForegroundColor Yellow
     }
 }
 

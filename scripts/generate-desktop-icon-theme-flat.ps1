@@ -16,6 +16,7 @@ $icons = @(
     @{ Symbol = "Files"; File = "25-Folder_256x256_35390.png" },
     @{ Symbol = "FileGeneric"; File = "31-Document_256x256_35398.png" },
     @{ Symbol = "Globe"; File = "39-Globe_256x256_35386.png" },
+    @{ Symbol = "DeveloperStudio"; File = "DeveloperStudio_256x256.png" },
     @{ Symbol = "Paint"; File = "7-Image_capture_256x256_35382.png" },
     @{ Symbol = "TaskManager"; File = "15-Dashboard__256x256_35400.png" },
     @{ Symbol = "TrashEmpty"; File = "24-Empty_Trash_256x256_35394.png" },
@@ -58,14 +59,16 @@ foreach ($icon in $icons) {
                 $argb = ('0x{0:X8}' -f $c.ToArgb())
                 $row.Add($argb)
                 if ($row.Count -eq 8) {
-                    $lines.Add('    ' + ($row -join ', ') + ', ')
+                    $suffix = if ($icon.Symbol -eq "DeveloperStudio") { ',' } else { ', ' }
+                    $lines.Add('    ' + ($row -join ', ') + $suffix)
                     $row.Clear()
                 }
             }
         }
 
         if ($row.Count -gt 0) {
-            $lines.Add('    ' + ($row -join ', ') + ', ')
+            $suffix = if ($icon.Symbol -eq "DeveloperStudio") { ',' } else { ', ' }
+            $lines.Add('    ' + ($row -join ', ') + $suffix)
         }
 
         $lines.Add('};')

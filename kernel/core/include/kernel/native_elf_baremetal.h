@@ -22,10 +22,12 @@ struct PackageInfo {
     char root[128];
     char id[80];
     char displayName[80];
+    char icon[64];
     char executable[160];
     char entryPoint[48];
     char abi[64];
     uint64_t executableBytes;
+    bool startMenuVisible;
 };
 
 // Scan the mounted /Apps tree for supported NativeElf packages.
@@ -42,6 +44,10 @@ bool is_available(const char* appName);
 // non-null result means the package has a real bare-metal target, not merely a
 // manifest entry.
 const PackageInfo* lookup_package(const char* appName);
+
+// Enumerate the same validated package table used by lookup_package().
+uint32_t package_count();
+const PackageInfo* package_at(uint32_t index);
 
 } // namespace native_elf
 } // namespace kernel

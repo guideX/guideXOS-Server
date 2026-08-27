@@ -372,13 +372,15 @@ char* strstr(const char* haystack, const char* needle)
 // ============================================================================
 
 namespace {
-    // Keep production bare metal bounded to the original 32 MiB arena.  The
-    // opt-in Navigator HTTP smoke intentionally retains several 2048x2048
-    // decoded fixtures at once so it can exercise the shared 64 MiB document
-    // budget; give that diagnostic image enough physical heap to reach the
-    // policy boundary instead of faulting inside STBI first.
+    // The released amd64 Developer Studio image contains a large bounded
+    // zero-initialized data region.  Keep the allocator large enough for that
+    // existing package while preserving the smaller footprint on other
+    // production architectures.  The opt-in Navigator HTTP smoke remains a
+    // separate 128 MiB profile for its decoded fixture budget.
 #if defined(GXOS_NAVIGATOR_HTTP_SMOKE_ACTIVE)
     static constexpr size_t KERNEL_HEAP_SIZE = 128u * 1024u * 1024u;
+#elif defined(__x86_64__)
+    static constexpr size_t KERNEL_HEAP_SIZE = 512u * 1024u * 1024u;
 #else
     static constexpr size_t KERNEL_HEAP_SIZE = 32u * 1024u * 1024u;
 #endif
