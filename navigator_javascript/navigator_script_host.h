@@ -81,7 +81,7 @@ public:
     // already-installed realm; no source is reparsed and no new realm is
     // created for the click.
     bool dispatchClick(RuntimeContext& runtime, HostInstanceId serial,
-        RuntimeErrorCode& error);
+        RuntimeErrorCode& error, bool* defaultPrevented = nullptr);
     bool hasClickHandler(HostInstanceId serial) const;
     std::size_t clickListenerCount() const { return clickListenerCount_; }
     std::size_t clickHandlerCount() const { return clickHandlerCount_; }
@@ -149,7 +149,8 @@ public:
     ScriptResult execute(const std::string& source);
     // Production-boundary proof hook: feed the authoritative document
     // element serial returned by a Navigator hit test into the real adapter.
-    bool dispatchClick(std::uint64_t serial, RuntimeErrorCode& error);
+    bool dispatchClick(std::uint64_t serial, RuntimeErrorCode& error,
+        bool* defaultPrevented = nullptr);
     bool relayout();
 
     RuntimeContext& runtime() { return runtime_; }

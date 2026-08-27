@@ -171,9 +171,10 @@ void NavigatorScriptHostAdapter::removeEmptyClickHandler(HostInstanceId serial)
 }
 
 bool NavigatorScriptHostAdapter::dispatchClick(RuntimeContext& runtime,
-    HostInstanceId serial, RuntimeErrorCode& error)
+    HostInstanceId serial, RuntimeErrorCode& error, bool* defaultPrevented)
 {
     error = RuntimeErrorCode::None;
+    if (defaultPrevented != nullptr) *defaultPrevented = false;
     if (document_ == nullptr || findElement(serial) == nullptr) {
         error = RuntimeErrorCode::StaleHostObject;
         return false;
@@ -290,6 +291,9 @@ bool NavigatorScriptHostAdapter::dispatchClick(RuntimeContext& runtime,
             invoke(listenerFunction);
         if (runtime.eventPropagationStopped()) break;
     }
+    const bool dispatchDefaultPrevented = runtime.eventDefaultPrevented();
+    if (defaultPrevented != nullptr)
+        *defaultPrevented = dispatchDefaultPrevented;
     runtime.endEventDispatch();
     clickDispatchActive_ = false;
     error = firstError;
@@ -862,9 +866,9 @@ ScriptResult NavigatorScriptExecutionHarness::execute(const std::string& source)
 }
 
 bool NavigatorScriptExecutionHarness::dispatchClick(std::uint64_t serial,
-    RuntimeErrorCode& error)
+    RuntimeErrorCode& error, bool* defaultPrevented)
 {
-    return adapter_.dispatchClick(runtime_, serial, error);
+    return adapter_.dispatchClick(runtime_, serial, error, defaultPrevented);
 }
 
 bool NavigatorScriptExecutionHarness::relayout()

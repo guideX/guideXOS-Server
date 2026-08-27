@@ -729,8 +729,8 @@ root.addEventListener("click", rootHandler);
         "immediate: method is exposed as callable function");
     expectUndefined(harness, "missingEventMember",
         "immediate: unknown Event member remains missing");
-    expect(harness.runtime().nativeFunctionCount() == nativeFunctionsBefore + 2u,
-        "immediate: stop methods use two cached native functions");
+    expect(harness.runtime().nativeFunctionCount() == nativeFunctionsBefore + 3u,
+        "immediate: Event methods use three cached native functions");
 
     result = harness.execute(R"JS(
 var listenerTarget = "";

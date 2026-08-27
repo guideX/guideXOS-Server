@@ -212,7 +212,7 @@ void Navigator::executeJavaScriptDocumentScripts()
 	}
 }
 
-bool Navigator::dispatchJavaScriptClick(int blockIndex)
+bool Navigator::dispatchJavaScriptClick(int blockIndex, bool* defaultPrevented)
 {
 	if (blockIndex < 0 || blockIndex >= static_cast<int>(s_currentDoc.blocks.size()))
 		return false;
@@ -220,7 +220,8 @@ bool Navigator::dispatchJavaScriptClick(int blockIndex)
 		static_cast<std::size_t>(blockIndex)].elementMetadata.serial;
 	if (serial == 0) return false;
 	RuntimeErrorCode error = RuntimeErrorCode::None;
-	if (!s_scriptHostAdapter.dispatchClick(s_scriptRuntime, serial, error))
+	if (!s_scriptHostAdapter.dispatchClick(s_scriptRuntime, serial, error,
+		defaultPrevented))
 		recordJavaScriptError("click", error);
 	return true;
 }
@@ -18128,18 +18129,25 @@ bool Navigator::smokeClickBlock(int blockIndex, bool label)
 
 void Navigator::handleDocumentClick(HitTarget target, int linkBlockIndex)
 {
+	bool defaultPrevented = false;
 	const bool callbackRegistered =
 		(target == HitTarget::Link || target == HitTarget::FormLabel ||
 		 target == HitTarget::FormCheckbox || target == HitTarget::FormRadio ||
 		 target == HitTarget::FormSelect || target == HitTarget::FormSubmit) &&
 		linkBlockIndex >= 0 &&
 		linkBlockIndex < static_cast<int>(s_currentDoc.blocks.size()) &&
-		dispatchJavaScriptClick(linkBlockIndex);
-	if (callbackRegistered && s_currentDoc.layoutDirty) updateDisplay();
+		dispatchJavaScriptClick(linkBlockIndex, &defaultPrevented);
+	if (callbackRegistered && s_currentDoc.layoutDirty) {
+		// Hosted smoke may defer compositor paint submission, but a successful
+		// script DOM mutation still has to consume the layout-dirty boundary so
+		// hit geometry and the document revision remain authoritative.
+		ensureInlineLayout(s_currentDoc);
+		updateDisplay();
+	}
 
-	// JS9 policy: dispatch the direct onclick first, then preserve the
-	// pre-existing activation behavior for links and controls.
-	if (target == HitTarget::Link &&
+	// JS9/JS16 policy: dispatch the direct onclick first, then preserve the
+	// pre-existing activation behavior unless the Event was canceled.
+	if (target == HitTarget::Link && !defaultPrevented &&
 		linkBlockIndex >= 0 &&
 		linkBlockIndex < static_cast<int>(s_currentDoc.blocks.size()))
 	{

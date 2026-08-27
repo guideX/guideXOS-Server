@@ -1878,3 +1878,125 @@ asynchronous dispatch, or broad DOM expansion. The recommended JS16 milestone
 is `event.preventDefault()` with read-only `event.defaultPrevented` for
 cancellable click default actions, while leaving handler propagation controls
 otherwise independent.
+
+## Phase JS16: `event.preventDefault()` and `event.defaultPrevented`
+
+JS16 adds the first cancellable click default action to the cached JS12–JS15
+Event model:
+
+```javascript
+event.preventDefault();
+event.defaultPrevented;
+```
+
+`preventDefault` is exposed as a callable read-only Event method through the
+same runtime-native-function path as `stopPropagation` and
+`stopImmediatePropagation`. A detached call uses the existing deterministic
+`InvalidReceiver` convention. Extra arguments are ignored by the existing
+native-call convention. `defaultPrevented` is an immutable host-owned Boolean
+property: script assignment is a non-strict no-op, so assignment cannot cancel
+or clear the actual dispatch state.
+
+The dispatch state now has three independent bounded flags:
+
+```text
+propagationStopped
+immediatePropagationStopped
+defaultPrevented
+```
+
+`preventDefault()` only changes the third flag. It does not stop the current
+node, prevent same-node handlers, or suppress bubbling. `stopPropagation()` and
+`stopImmediatePropagation()` likewise do not cancel the default action unless a
+callback explicitly calls `preventDefault()` as well. The cached Event
+property is reset to `false` at dispatch start, becomes `true` monotonically
+after a successful call, and remains visible to all later handlers in that
+dispatch. Dispatch cleanup clears native state after the default-action
+decision; the retained cached property therefore reflects the most recent
+completed dispatch until the next dispatch resets it.
+
+The initial default action is ordinary Navigator link navigation. The
+production click boundary now captures the dispatch cancellation result before
+cleanup and checks it immediately before `navigateTo()`. A cancelled hosted
+link still receives authentic mouse down/up input, hit testing, JavaScript
+dispatch, callback mutation, and relayout, but the current document remains
+active. An uncancelled link follows the existing navigation path. Ancestor
+handlers observe and may cancel the same descendant link dispatch through the
+shared Event. Buttons and other supported non-link targets can set the Event
+property safely, but JS16 does not invent a default action for them.
+
+Cancellation does not use an exception, early callback return, or longjmp-like
+control transfer. JavaScript after the call continues normally. If a callback
+errors after calling `preventDefault()`, the error remains contained and the
+captured cancellation still suppresses link navigation. If it errors before
+the call, cancellation remains false and the existing callback-error/default-
+action policy applies. Repeated calls are harmless and monotonic.
+
+The focused proof is
+`tests/navigator_javascript_js16_test.cpp`, run by
+`scripts/smoke-navigator-javascript-js16.ps1`. It covers callable method and
+read-only property exposure, initial and updated state, extra arguments,
+wrong receivers, onclick/listener ordering, bubbling visibility through parent
+and grandparent, ancestor cancellation, target/currentTarget and canonical
+identity, callback continuation and DOM mutation/relayout, both propagation
+controls independently, all combined stop-plus-cancellation orders, repeated
+calls, conditional reset, non-link cancellation, callback errors before and
+after cancellation, retained/outside-dispatch calls, stale generation safety,
+independent branches, closure and zero-argument callbacks, listener removal,
+slot reuse, 64-listener capacity, path overflow/recovery, and 100 cancelled
+bounded clicks.
+
+The authentic hosted proof is
+`navigator-smoke/javascript-js16.html`, with
+`navigator-smoke/javascript-js16-target.html` and
+`navigator-smoke/javascript-js16-uncancelled.html`. It uses real Navigator
+HTML parsing, the production JavaScript realm, actual DOM element wrappers,
+real layout and hit testing, hosted mouse down/up, the shared Event object,
+the actual JavaScript `preventDefault()` call, the production default-action
+decision, and observable cancelled versus uncancelled navigation. The
+aggregate also proves that child cancellation bubbles to the parent, that a
+listener after `onclick` sees `defaultPrevented`, that the first click can be
+cancelled while a later click is not, and that navigation resets old handler
+and error state.
+
+### JS16 proof results
+
+The focused JS16 proof reports 338 checks with 0 failures. The complete
+available JS1–JS16 focused set contains 14 suites: lexer, parser, runtime,
+JS6, JS7, JS8, JS9, JS10, JS11, JS12, JS13, JS14, JS15, and JS16; all 14
+pass. The JS16 smoke script also passes its bare-metal compilation lane and
+strict warning-as-error syntax lane. The normal hosted native build links
+successfully.
+
+The latest required hosted aggregate proves all 9 JS16 checks, including the
+cancelled-link `revision=0->1` relayout result, with 0 JS16 failures. It
+reports 342 passed and 7 failed in this workspace; the 7 failures are the
+known pre-existing CSS baseline failures. The pre-JS16 baseline was 333
+passed and 7 failed, so the JS16-specific contribution is 9 passing checks
+and no new failure beyond baseline.
+
+JS16 adds no per-click allocation. The persistent cost is one additional
+cached native function ID and one Boolean in `RuntimeContext`, one bounded
+native function record, and one read-only Boolean Event property populated
+once per realm.
+The fixed 32-entry propagation snapshot and fixed 64-record listener table
+remain unchanged. Path overflow still fails before Event creation or callback
+execution, so it cannot set `defaultPrevented`; a subsequent valid dispatch
+starts cleanly. Navigation and generation invalidation continue to clear
+listeners, active dispatch state, host wrappers, and old Event access. A
+retained Event method outside active dispatch is harmless and cannot
+pre-cancel a later click.
+
+JS16 remains intentionally incomplete DOM Events compatibility. It does not
+provide capture, capture listeners, event phases, `eventPhase`, `bubbles`,
+`cancelable`, passive listeners, multiple listeners per Element, listener
+options, `once`, additional event types, mouse/pointer coordinates,
+keyboard/input/change events, timers, promises, task queues, microtasks,
+asynchronous dispatch, or broad DOM expansion. Only the existing ordinary
+Navigator link default action is cancellable; form and other activation
+semantics remain outside this milestone.
+
+The recommended next milestone is JS17: expose basic read-only Event metadata
+such as `bubbles` and `cancelable`, or, if the runtime is ready, begin bounded
+multiple `addEventListener` listeners per element with correct
+`stopImmediatePropagation()` semantics. JS17 is not implemented here.

@@ -238,7 +238,7 @@ public:
     // Create or update the one synchronous host-created Event object used by
     // the narrow Navigator click dispatch path. The returned value is an
     // ordinary runtime object, so normal property lookup, assignment, and
-    // equality semantics apply. The three host-defined properties are
+    // equality semantics apply. The host-defined properties are
     // immutable from script; target handles remain generation-scoped host
     // values and are canonicalized by the existing host-object registry.
     bool createOrUpdateEventObject(SourceView type,
@@ -259,6 +259,10 @@ public:
     bool eventImmediatePropagationStopped() const
     {
         return eventDispatchActive_ && eventImmediatePropagationStopped_;
+    }
+    bool eventDefaultPrevented() const
+    {
+        return eventDispatchActive_ && eventDefaultPrevented_;
     }
 
     void setHostAdapter(HostAdapter* adapter) { hostAdapter_ = adapter; }
@@ -306,6 +310,7 @@ private:
         MathRound,
         EventStopPropagation,
         EventStopImmediatePropagation,
+        EventPreventDefault,
     };
 
     struct RuntimeProperty {
@@ -423,10 +428,13 @@ private:
         kInvalidRuntimeFunctionId;
     RuntimeFunctionId eventStopImmediatePropagationFunction_ =
         kInvalidRuntimeFunctionId;
+    RuntimeFunctionId eventPreventDefaultFunction_ =
+        kInvalidRuntimeFunctionId;
     bool builtInsInitialized_ = false;
     bool eventDispatchActive_ = false;
     bool eventPropagationStopped_ = false;
     bool eventImmediatePropagationStopped_ = false;
+    bool eventDefaultPrevented_ = false;
     HostAdapter* hostAdapter_ = nullptr;
     HostGenerationId hostGeneration_ = kInvalidHostGenerationId;
     std::vector<HostObjectRecord> hostObjects_;

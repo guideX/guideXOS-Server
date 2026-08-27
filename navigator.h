@@ -1019,7 +1019,8 @@ private:
 	static void handleMouseInput(int x, int y, int button, const std::string& action);
 	static bool resetJavaScriptRealmForNavigation();
 	static void executeJavaScriptDocumentScripts();
-	static bool dispatchJavaScriptClick(int blockIndex);
+	static bool dispatchJavaScriptClick(int blockIndex,
+		bool* defaultPrevented = nullptr);
 	static void recordJavaScriptError(const std::string& phase,
 		gxos::javascript::RuntimeErrorCode error);
 	static void handleKeyPress(int keyCode, const std::string& action);

@@ -1,0 +1,72 @@
+<!doctype html>
+<html>
+<head><title>Navigator JavaScript JS16</title></head>
+<body>
+<h1>Navigator JavaScript JS16</h1>
+<p>Click default-action cancellation with independent bubbling controls.</p>
+<div id="js16-root">
+  <div id="js16-parent">
+    <a id="js16-cancel-link" href="/navigator-smoke/javascript-js16-target.html">Cancel navigation</a>
+    <button id="js16-bubble-child" type="button">Bubble cancellation</button>
+    <button id="js16-reset" type="button">Reset</button>
+    <button id="js16-error" type="button">Error after cancellation</button>
+    <button id="js16-stop" type="button">Stop only</button>
+  </div>
+</div>
+<p id="js16-state">initial</p>
+<script>
+var js16State = document.getElementById("js16-state");
+var js16Parent = document.getElementById("js16-parent");
+var js16CancelLink = document.getElementById("js16-cancel-link");
+var js16BubbleChild = document.getElementById("js16-bubble-child");
+var js16Reset = document.getElementById("js16-reset");
+var js16Error = document.getElementById("js16-error");
+var js16Stop = document.getElementById("js16-stop");
+var js16BubbleLog = "";
+var js16ParentSaw = false;
+var js16ResetFirst = true;
+function js16Bool(value) {
+    if (value) return "true";
+    return "false";
+}
+js16CancelLink.onclick = function(event) {
+    event.preventDefault();
+    js16State.textContent = "cancelled:" + js16Bool(event.defaultPrevented);
+    event.target.textContent = "Cancelled link";
+};
+js16CancelLink.addEventListener("click", function(event) {
+    js16State.textContent = js16State.textContent + ":listener-sees-" +
+        js16Bool(event.defaultPrevented);
+});
+js16BubbleChild.addEventListener("click", function(event) {
+    js16BubbleLog = js16BubbleLog + "c";
+    event.preventDefault();
+});
+js16Parent.addEventListener("click", function(event) {
+    if (event.target !== js16BubbleChild) return;
+    js16BubbleLog = js16BubbleLog + "p";
+    js16ParentSaw = event.defaultPrevented;
+    js16State.textContent = "bubble:" + js16BubbleLog + ":" +
+        js16Bool(js16ParentSaw);
+});
+js16Reset.addEventListener("click", function(event) {
+    if (js16ResetFirst) {
+        js16ResetFirst = false;
+        event.preventDefault();
+        js16State.textContent = "reset:cancelled";
+    } else {
+        js16State.textContent = "reset:uncancelled";
+    }
+});
+js16Error.addEventListener("click", function(event) {
+    event.preventDefault();
+    js16State.textContent = "error:cancelled";
+    var x = js16UnknownIdentifier;
+});
+js16Stop.addEventListener("click", function(event) {
+    event.stopPropagation();
+    js16State.textContent = "stop-only";
+});
+</script>
+</body>
+</html>

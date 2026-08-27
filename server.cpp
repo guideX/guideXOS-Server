@@ -1467,6 +1467,122 @@ static std::string navigatorHostedSmokeDiagnostic() {
         gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
         "replacement document has no stale JS15 callbacks or errors");
 
+    const bool js16Loaded = gxos::apps::Navigator::SmokeNavigateToQuiet(
+        "http://127.0.0.1:8080/navigator-smoke/javascript-js16.html");
+    const std::string js16InitialText =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    const uint64_t js16InitialRevision =
+        gxos::apps::Navigator::SmokeDocumentLayoutRevision();
+    int js16LinkX = 0;
+    int js16LinkY = 0;
+    int js16LinkW = 0;
+    int js16LinkH = 0;
+    const bool js16LinkHasGeometry =
+        gxos::apps::Navigator::SmokeBlockGeometryById(
+            "js16-cancel-link", js16LinkX, js16LinkY, js16LinkW, js16LinkH);
+    const bool js16LinkHit =
+        gxos::apps::Navigator::SmokeHitLinkById("js16-cancel-link");
+    const size_t js16InitialHandlers =
+        gxos::apps::Navigator::SmokeJavaScriptHandlerCount();
+    const size_t js16InitialListeners =
+        gxos::apps::Navigator::SmokeJavaScriptListenerCount();
+    const std::string js16InitialError =
+        gxos::apps::Navigator::SmokeJavaScriptLastError();
+    add("JS16 hosted fixture loads cancellation callbacks",
+        js16Loaded && contains(js16InitialText, "Navigator JavaScript JS16") &&
+        contains(js16InitialText, "Click default-action cancellation") &&
+        js16InitialHandlers == 6u && js16InitialListeners == 6u &&
+        js16InitialError.empty(),
+        std::string("loaded=") + yesNo(js16Loaded) + ",records=" +
+        std::to_string(js16InitialHandlers) + ",listeners=" +
+        std::to_string(js16InitialListeners) + ",error=" +
+        (js16InitialError.empty() ? "none" : js16InitialError));
+
+    const bool js16CancelledClick =
+        js16LinkHit && !gxos::apps::Navigator::SmokeClickFirstLink();
+    const std::string js16AfterCancelledLink =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    const uint64_t js16RevisionAfterCancelledLink =
+        gxos::apps::Navigator::SmokeDocumentLayoutRevision();
+    add("JS16 authentic preventDefault suppresses link navigation",
+        js16CancelledClick &&
+        gxos::apps::Navigator::SmokeCurrentUrl() ==
+            "http://127.0.0.1:8080/navigator-smoke/javascript-js16.html" &&
+        contains(js16AfterCancelledLink, "cancelled:true:listener-sees-true") &&
+        contains(js16AfterCancelledLink, "Cancelled link"),
+        std::string("click=") + yesNo(js16CancelledClick) + ",url=" +
+        gxos::apps::Navigator::SmokeCurrentUrl());
+    add("JS16 cancelled link mutation relayouts while page remains active",
+        js16LinkHasGeometry && js16LinkW > 0 && js16LinkH > 0 &&
+        js16RevisionAfterCancelledLink > js16InitialRevision &&
+        !gxos::apps::Navigator::SmokeDocumentDirty(),
+        std::string("geometry=") + yesNo(js16LinkHasGeometry) + ",revision=" +
+        std::to_string(js16InitialRevision) + "->" +
+        std::to_string(js16RevisionAfterCancelledLink));
+
+    const bool js16BubbleClick =
+        gxos::apps::Navigator::SmokeClickFormControlById("js16-bubble-child");
+    const std::string js16AfterBubble =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS16 cancellation preserves bubbling and visibility",
+        js16BubbleClick && contains(js16AfterBubble, "bubble:cp:true"),
+        "expected child then parent with parent seeing defaultPrevented=true");
+
+    const bool js16ResetOne =
+        gxos::apps::Navigator::SmokeClickFormControlById("js16-reset");
+    const std::string js16AfterResetOne =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    const bool js16ResetTwo =
+        gxos::apps::Navigator::SmokeClickFormControlById("js16-reset");
+    const std::string js16AfterResetTwo =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS16 defaultPrevented resets on each hosted click",
+        js16ResetOne && js16ResetTwo &&
+        contains(js16AfterResetOne, "reset:cancelled") &&
+        contains(js16AfterResetTwo, "reset:uncancelled"),
+        "first reset click cancels; second begins with a clear dispatch state");
+
+    const bool js16ErrorClick =
+        gxos::apps::Navigator::SmokeClickFormControlById("js16-error");
+    const std::string js16ErrorText =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    const std::string js16Error =
+        gxos::apps::Navigator::SmokeJavaScriptLastError();
+    add("JS16 error after cancellation remains contained",
+        js16ErrorClick && contains(js16ErrorText, "error:cancelled") &&
+        contains(js16Error, "UnknownIdentifier"),
+        std::string("click=") + yesNo(js16ErrorClick) + ",error=" +
+        (js16Error.empty() ? "none" : js16Error));
+
+    const bool js16StopClick =
+        gxos::apps::Navigator::SmokeClickFormControlById("js16-stop");
+    add("JS16 stopPropagation remains independent from cancellation",
+        js16StopClick &&
+        gxos::apps::Navigator::SmokeCurrentDocumentText().find("stop-only") !=
+            std::string::npos,
+        "stop-only callback does not use preventDefault");
+    add("JS16 navigation clears cancellation-era state",
+        gxos::apps::Navigator::SmokeNavigateToQuiet(
+            "http://127.0.0.1:8080/navigator-smoke/javascript-js16-uncancelled.html") &&
+        gxos::apps::Navigator::SmokeJavaScriptHandlerCount() == 0u &&
+        gxos::apps::Navigator::SmokeJavaScriptListenerCount() == 0u &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        "replacement page starts with no old handlers or callback error");
+
+    const bool js16UncancelledHit =
+        gxos::apps::Navigator::SmokeHitLinkById("js16-uncancelled-link");
+    const bool js16UncancelledClick =
+        js16UncancelledHit && gxos::apps::Navigator::SmokeClickFirstLink();
+    add("JS16 uncancelled ordinary link still navigates",
+        js16UncancelledClick &&
+        gxos::apps::Navigator::SmokeCurrentUrl() ==
+            "http://127.0.0.1:8080/navigator-smoke/javascript-js16-target.html" &&
+        contains(gxos::apps::Navigator::SmokeCurrentDocumentText(),
+            "Navigator JavaScript JS16 Target"),
+        std::string("hit=") + yesNo(js16UncancelledHit) + ",click=" +
+        yesNo(js16UncancelledClick) + ",url=" +
+        gxos::apps::Navigator::SmokeCurrentUrl());
+
     bool cssInlineLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-inline.html");
     std::string cssInlineText = gxos::apps::Navigator::SmokeCurrentDocumentText();
     std::string cssInlineReport = gxos::apps::Navigator::SmokeRuntimeReport();
