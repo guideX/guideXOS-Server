@@ -1,0 +1,52 @@
+<!doctype html>
+<html>
+<head><title>Navigator JavaScript JS12</title></head>
+<body>
+<h1>Navigator JavaScript JS12</h1>
+<p>This page exercises minimal click Event objects through Navigator.</p>
+<button id="js12-alpha" type="button">Alpha 0</button>
+<button id="js12-beta" type="button">Beta 0</button>
+<button id="js12-order" type="button">Order</button>
+<button id="js12-bad" type="button">Bad</button>
+<p id="js12-state">state</p>
+<p id="js12-order-state">order</p>
+<a id="js12-link" href="/navigator-smoke/javascript-js12-target.html">Navigate after JS12</a>
+<script>
+var js12Alpha = document.getElementById("js12-alpha");
+var js12Beta = document.getElementById("js12-beta");
+var js12Order = document.getElementById("js12-order");
+var js12Bad = document.getElementById("js12-bad");
+var js12State = document.getElementById("js12-state");
+var js12OrderState = document.getElementById("js12-order-state");
+var js12AlphaCount = 0;
+var js12BetaCount = 0;
+var js12OrderValue = "";
+function js12AlphaHandler(event) {
+    js12AlphaCount = js12AlphaCount + 1;
+    js12Alpha.textContent = "Alpha " + js12AlphaCount;
+    js12State.textContent = event.type + ":" + event.target.id + ":" + event.currentTarget.id;
+}
+function js12BetaHandler(event) {
+    js12BetaCount = js12BetaCount + 1;
+    js12Beta.textContent = "Beta " + js12BetaCount;
+    js12State.textContent = event.type + ":" + event.target.id + ":" + event.currentTarget.id;
+}
+function js12OrderOnclick(event) {
+    js12OrderValue = js12OrderValue + "o";
+    js12OrderState.textContent = js12OrderValue + ":" + event.target.id;
+}
+function js12OrderListener(event) {
+    js12OrderValue = js12OrderValue + "l";
+    js12OrderState.textContent = js12OrderValue + ":" + event.currentTarget.id;
+}
+function js12BadHandler(event) {
+    js12MissingIdentifier();
+}
+js12Alpha.addEventListener("click", js12AlphaHandler);
+js12Beta.addEventListener("click", js12BetaHandler);
+js12Order.onclick = js12OrderOnclick;
+js12Order.addEventListener("click", js12OrderListener);
+js12Bad.addEventListener("click", js12BadHandler);
+</script>
+</body>
+</html>

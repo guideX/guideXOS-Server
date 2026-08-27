@@ -234,6 +234,17 @@ public:
         const std::vector<Value>& arguments, Value& result,
         RuntimeErrorCode& error);
 
+    // Create or update the one synchronous host-created Event object used by
+    // the narrow Navigator click dispatch path. The returned value is an
+    // ordinary runtime object, so normal property lookup, assignment, and
+    // equality semantics apply. The three host-defined properties are
+    // immutable from script; target handles remain generation-scoped host
+    // values and are canonicalized by the existing host-object registry.
+    bool createOrUpdateEventObject(SourceView type,
+        const HostObjectReference& target,
+        const HostObjectReference& currentTarget, Value& result,
+        RuntimeErrorCode& error);
+
     void setHostAdapter(HostAdapter* adapter) { hostAdapter_ = adapter; }
     HostAdapter* hostAdapter() const { return hostAdapter_; }
     bool registerHostObject(HostInstanceId instance, HostObjectKind kind,
@@ -282,6 +293,7 @@ private:
     struct RuntimeProperty {
         std::string key;
         Value value;
+        bool readOnly = false;
     };
 
     struct RuntimeObject {
@@ -333,6 +345,8 @@ private:
         Value& value, RuntimeErrorCode& error,
         SourceLocation location = SourceLocation());
     bool writeProperty(RuntimeObjectId object, const std::string& key,
+        Value value, RuntimeErrorCode& error, bool readOnly = false);
+    bool updateExistingProperty(RuntimeObjectId object, const std::string& key,
         Value value, RuntimeErrorCode& error);
     bool initializeBuiltIns(RuntimeErrorCode& error);
     bool installHostGlobalInternal(const HostGlobalSpec& spec,
@@ -386,6 +400,7 @@ private:
     RuntimeObjectId objectPrototype_ = kInvalidRuntimeObjectId;
     RuntimeObjectId arrayPrototype_ = kInvalidRuntimeObjectId;
     RuntimeObjectId mathObject_ = kInvalidRuntimeObjectId;
+    RuntimeObjectId eventObject_ = kInvalidRuntimeObjectId;
     bool builtInsInitialized_ = false;
     HostAdapter* hostAdapter_ = nullptr;
     HostGenerationId hostGeneration_ = kInvalidHostGenerationId;

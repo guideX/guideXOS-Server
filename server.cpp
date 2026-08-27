@@ -946,6 +946,109 @@ static std::string navigatorHostedSmokeDiagnostic() {
         gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
         "replacement document has no old callbacks, IDs, or errors");
 
+    const bool js12Loaded = gxos::apps::Navigator::SmokeNavigateToQuiet(
+        "http://127.0.0.1:8080/navigator-smoke/javascript-js12.html");
+    const std::string js12InitialText =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    const uint64_t js12InitialRevision =
+        gxos::apps::Navigator::SmokeDocumentLayoutRevision();
+    int js12AlphaX = 0;
+    int js12AlphaY = 0;
+    int js12AlphaW = 0;
+    int js12AlphaH = 0;
+    const bool js12AlphaHasGeometry = gxos::apps::Navigator::SmokeBlockGeometryById(
+        "js12-alpha", js12AlphaX, js12AlphaY, js12AlphaW, js12AlphaH);
+    const bool js12AlphaHit =
+        gxos::apps::Navigator::SmokeFormHitTargetById("js12-alpha");
+    const size_t js12InitialHandlers =
+        gxos::apps::Navigator::SmokeJavaScriptHandlerCount();
+    const size_t js12InitialListeners =
+        gxos::apps::Navigator::SmokeJavaScriptListenerCount();
+    const std::string js12InitialError =
+        gxos::apps::Navigator::SmokeJavaScriptLastError();
+    add("JS12 hosted fixture loads and registers Event callbacks",
+        js12Loaded && contains(js12InitialText, "Navigator JavaScript JS12") &&
+        contains(js12InitialText, "Alpha 0") && js12InitialHandlers == 4u &&
+        js12InitialListeners == 4u && js12InitialError.empty(),
+        std::string("loaded=") + yesNo(js12Loaded) + ",records=" +
+        std::to_string(js12InitialHandlers) + ",listeners=" +
+        std::to_string(js12InitialListeners) + ",error=" +
+        (js12InitialError.empty() ? "none" : js12InitialError));
+
+    const bool js12AlphaClickOne =
+        gxos::apps::Navigator::SmokeClickFormControlById("js12-alpha");
+    const std::string js12AfterAlphaOne =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    const uint64_t js12RevisionAfterAlphaOne =
+        gxos::apps::Navigator::SmokeDocumentLayoutRevision();
+    add("JS12 authentic hosted click passes minimal Event values",
+        js12AlphaHasGeometry && js12AlphaW > 0 && js12AlphaH > 0 &&
+        js12AlphaHit && js12AlphaClickOne &&
+        contains(js12AfterAlphaOne, "Alpha 1") &&
+        contains(js12AfterAlphaOne, "click:js12-alpha:js12-alpha"),
+        std::string("geometry=") + yesNo(js12AlphaHasGeometry) + ",hit=" +
+        yesNo(js12AlphaHit) + ",click=" + yesNo(js12AlphaClickOne));
+    const bool js12AlphaClickTwo =
+        gxos::apps::Navigator::SmokeClickFormControlById("js12-alpha");
+    const std::string js12AfterAlphaTwo =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS12 hosted closure state persists across Event clicks",
+        js12AlphaClickTwo && contains(js12AfterAlphaTwo, "Alpha 2") &&
+        contains(js12AfterAlphaTwo, "click:js12-alpha:js12-alpha"),
+        "same callback realm remains active across physical clicks");
+    const bool js12BetaClick =
+        gxos::apps::Navigator::SmokeClickFormControlById("js12-beta");
+    const std::string js12AfterBeta =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS12 hosted target/currentTarget follow the hit element",
+        js12BetaClick && contains(js12AfterBeta, "Beta 1") &&
+        contains(js12AfterBeta, "click:js12-beta:js12-beta"),
+        "independent element dispatch reports beta for both direct properties");
+    const bool js12OrderClick =
+        gxos::apps::Navigator::SmokeClickFormControlById("js12-order");
+    const std::string js12AfterOrder =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS12 onclick and addEventListener both receive Event in order",
+        js12OrderClick && contains(js12AfterOrder, "ol:js12-order"),
+        "expected onclick before the registered listener");
+    const bool js12BadClick =
+        gxos::apps::Navigator::SmokeClickFormControlById("js12-bad");
+    const std::string js12BadError =
+        gxos::apps::Navigator::SmokeJavaScriptLastError();
+    const bool js12BetaClickAfterError =
+        gxos::apps::Navigator::SmokeClickFormControlById("js12-beta");
+    add("JS12 callback errors remain contained after Event dispatch",
+        js12BadClick && contains(js12BadError, "UnknownIdentifier") &&
+        js12BetaClickAfterError &&
+        contains(gxos::apps::Navigator::SmokeCurrentDocumentText(), "Beta 2"),
+        std::string("bad-click=") + yesNo(js12BadClick) + ",error=" +
+        (js12BadError.empty() ? "none" : js12BadError));
+    add("JS12 callback mutation still relayouts",
+        js12RevisionAfterAlphaOne > js12InitialRevision &&
+        !gxos::apps::Navigator::SmokeDocumentDirty(),
+        "revision=" + std::to_string(js12InitialRevision) + "->" +
+        std::to_string(js12RevisionAfterAlphaOne));
+
+    const bool js12LinkHit =
+        gxos::apps::Navigator::SmokeHitLinkById("js12-link");
+    const bool js12LinkClick =
+        js12LinkHit && gxos::apps::Navigator::SmokeClickFirstLink();
+    const std::string js12TargetText =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS12 ordinary link navigation remains functional",
+        js12LinkHit && js12LinkClick &&
+        gxos::apps::Navigator::SmokeCurrentUrl() ==
+            "http://127.0.0.1:8080/navigator-smoke/javascript-js12-target.html" &&
+        contains(js12TargetText, "Navigator JavaScript JS12 Target"),
+        std::string("hit=") + yesNo(js12LinkHit) + ",link=" +
+        yesNo(js12LinkClick) + ",url=" +
+        gxos::apps::Navigator::SmokeCurrentUrl());
+    add("JS12 navigation clears Event-era listener state",
+        gxos::apps::Navigator::SmokeJavaScriptHandlerCount() == 0u &&
+        gxos::apps::Navigator::SmokeJavaScriptListenerCount() == 0u &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        "replacement document has no stale JS12 callbacks or errors");
+
     bool cssInlineLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-inline.html");
     std::string cssInlineText = gxos::apps::Navigator::SmokeCurrentDocumentText();
     std::string cssInlineReport = gxos::apps::Navigator::SmokeRuntimeReport();

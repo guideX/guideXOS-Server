@@ -7,7 +7,7 @@ Navigator currently has a reusable HTML document/parser layer in
 navigation and rendering in `navigator.*`. The independent JavaScript
 subsystem now contains a bounded lexer, parser/AST, runtime core, and the JS8
 controlled document bridge described below. It has no general event system,
-but JS9/JS10 provide a deliberately bounded inline-script and synchronous
+but JS9–JS12 provide a deliberately bounded inline-script and synchronous
 click-callback path. The existing HTML parser preserves only the bounded
 inline script sources needed by that Navigator path; this is not browser
 script compatibility.
@@ -1463,3 +1463,123 @@ asynchronous JavaScript, or broader DOM APIs. A clean next phase is JS12:
 introduce a minimal click Event object and pass it as the first callback
 argument, initially exposing only `type`, `target`, and `currentTarget`
 without propagation.
+
+## Phase JS12: minimal click Event objects
+
+JS12 adds the first host-created object passed through Navigator's production
+click callback path. Both supported callback styles now receive one argument:
+
+```javascript
+element.onclick = function (event) { /* ... */ };
+element.addEventListener("click", function (event) { /* ... */ });
+```
+
+The argument is an ordinary runtime object created by `RuntimeContext` and
+passed through the existing function argument vector. Its complete JS12
+surface is deliberately only:
+
+| Property | JS12 value |
+| --- | --- |
+| `event.type` | the ordinary JavaScript string `"click"` |
+| `event.target` | the clicked Element wrapper |
+| `event.currentTarget` | the Element whose callback is executing |
+
+JS12 has no propagation path. For the current direct click model,
+`target` and `currentTarget` are separate Event properties that carry the same
+Element handle. They are not implemented as a single hard-coded semantic;
+the separate properties leave the correct shape for a future bubbling phase.
+No parent dispatch, bubbling, capture, phases, propagation controls, default
+prevention, mouse coordinates, or other event types are added.
+
+### Object and Element identity
+
+The runtime keeps one cached Event object per same-realm document lifetime.
+It uses normal runtime object property lookup, so local aliases and
+`event === event` follow ordinary object identity. The host updates the two
+Event handle properties before each synchronous click and passes the same
+Event value to `onclick` and the registered listener. A callback may ignore
+the argument; a callback with multiple formals receives Event in the first
+formal and the existing runtime's normal `undefined` value for an omitted
+extra argument.
+
+Each Event Element property is a value from the existing generation-scoped
+host-object registry. A handle returned by `event.target` therefore compares
+identically with the value returned by `document.getElementById` for the same
+element, and reads such as `event.target.id` and mutations such as
+`event.target.textContent = "Clicked"` address the live document element.
+Repeated reads return the same canonical Element wrapper. Event properties are
+host-defined read-only fields from script: assigning `event.type`,
+`event.target`, or `event.currentTarget` is a deterministic no-op and cannot
+change dispatch identity. Unknown fields use the normal missing-property
+result (`undefined`).
+
+### Lifetime, navigation, and bounds
+
+The Event object is synchronous but is retained as one runtime object so a
+callback may safely store it. `type` is immutable; `target` and
+`currentTarget` are read-only to script and are refreshed for the next click
+because the bounded Event object is reused. During and after a callback, while
+its document generation remains valid, those values are safe runtime values.
+The object itself contains runtime values, never a native document pointer. On
+a generation invalidation, the referenced Element handles become stale under
+the existing `StaleHostObject` convention; attempting `savedEvent.target.id`
+therefore fails closed instead of dereferencing old document storage. Normal
+navigation resets the realm and clears the Event object, listener table, and
+old callback values before the replacement document is installed.
+
+There is no per-click Event allocation and no per-click host record. The
+bounded cost is one normal three-property runtime object per realm, plus the
+already bounded canonical Element host-wrapper records for the two handles.
+The fixed JS11 listener table remains 64 records of 16 bytes (1,024 bytes)
+and one listener per Element. The Event object is reused on every click; realm
+reset releases it and the normal host-generation cleanup invalidates old
+Element values.
+
+### JS12 proof fixtures and results
+
+The focused proof is
+`tests/navigator_javascript_js12_test.cpp`, run by
+`scripts/smoke-navigator-javascript-js12.ps1`. It compiles the runtime,
+adapter, parser, and real `WebDocument` fixture path with `GXOS_BARE_METAL`,
+then performs a strict warning-as-error syntax check. The suite covers
+callback arguments, zero- and multi-parameter functions, `type`, target and
+currentTarget reads, canonical identity and repeated reads, local aliases,
+two-element dispatch, shared Event identity across `onclick` and the listener,
+read-only assignments, DOM mutation and relayout, JS11 removal and slot
+capacity, unsupported and invalid inputs, callback-error containment,
+generation invalidation, replacement-document cleanup, and a 100-click
+boundedness stress run. The final checked result is recorded with the
+JS1–JS12 validation report below. At JS12 closeout it passes all 259 checks;
+the dedicated script also passes the `GXOS_BARE_METAL` compile and strict
+hosted syntax-check lanes.
+
+The authentic hosted proof uses
+`navigator-smoke/javascript-js12.html` and
+`navigator-smoke/javascript-js12-target.html` through the existing
+`navigator.smoke` aggregate. It uses actual HTML parsing, page-script
+execution, Element lookup, Navigator hit testing, hosted click input, callback
+mutation, callback-error recovery, ordinary link navigation, and
+document-scoped cleanup. The aggregate reports JS12 assertions separately
+from its known unrelated CSS failures. At JS12 closeout the aggregate is
+`299 passed, 7 failed`; the nine additional JS12 checks all pass, and the
+seven failures are the pre-existing CSS 3C, CSS 3G, CSS 6A, CSS 6B (three
+checks), and CSS 6C failures. JS11's baseline was `290 passed, 7 failed`, so
+JS12 introduces no new aggregate failure.
+
+### JS12 validation closeout
+
+The complete available focused regression set passes: JS1 lexer, JS2 parser,
+JS3 runtime, JS6, JS7, JS8, JS9, JS10, JS11 (164 checks), and JS12 (259
+checks). The hosted/native JS12 implementation is compiled by the normal
+server source list, and the focused JS12 path compiles successfully with
+`GXOS_BARE_METAL`; no hosted-only Event storage or RTTI/exception dependency
+was added.
+
+JS12 does not claim full DOM Events. Listener options, multiple listeners per
+Element, `once`, passive listeners, bubbling, capture, propagation paths,
+`stopPropagation`, `stopImmediatePropagation`, `preventDefault`, cancellation,
+other event types, mouse or pointer data, keyboard/input events, timers,
+promises, task queues, microtasks, asynchronous callbacks, and broad DOM
+expansion remain outside this milestone. The recommended next step is JS13:
+basic click bubbling and propagation-path construction, with the child as
+`event.target` and each executing Element as `event.currentTarget`.

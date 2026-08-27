@@ -1961,6 +1961,49 @@ bool RuntimeContext::invokeFunctionInSameRealm(const Value& function,
     return succeeded;
 }
 
+bool RuntimeContext::createOrUpdateEventObject(SourceView type,
+    const HostObjectReference& target,
+    const HostObjectReference& currentTarget, Value& result,
+    RuntimeErrorCode& error)
+{
+    error = RuntimeErrorCode::None;
+    if (type.length == 0 ||
+        (type.data == nullptr && type.length != 0)) {
+        error = RuntimeErrorCode::InvalidHostReturn;
+        return false;
+    }
+
+    RuntimeHostObjectId targetObject = kInvalidRuntimeHostObjectId;
+    if (!createHostObject(target, targetObject, error, true)) return false;
+    RuntimeHostObjectId currentTargetObject = kInvalidRuntimeHostObjectId;
+    if (!createHostObject(currentTarget, currentTargetObject, error, true))
+        return false;
+
+    if (eventObject_ == kInvalidRuntimeObjectId ||
+        objectAt(eventObject_) == nullptr) {
+        Value typeValue;
+        if (!createString(type, typeValue, error)) return false;
+        const std::vector<Value> noElements;
+        if (!createObject(false, noElements, eventObject_, error)) return false;
+        if (!writeProperty(eventObject_, "type", typeValue, error, true) ||
+            !writeProperty(eventObject_, "target",
+                Value::hostObject(targetObject), error, true) ||
+            !writeProperty(eventObject_, "currentTarget",
+                Value::hostObject(currentTargetObject), error, true)) {
+            eventObject_ = kInvalidRuntimeObjectId;
+            return false;
+        }
+    } else if (!updateExistingProperty(eventObject_, "target",
+            Value::hostObject(targetObject), error) ||
+        !updateExistingProperty(eventObject_, "currentTarget",
+            Value::hostObject(currentTargetObject), error)) {
+        return false;
+    }
+
+    result = Value::object(eventObject_);
+    return true;
+}
+
 RuntimeContext::RuntimeContext(RuntimeLimits limits)
     : limits_(limits),
       ast_(),
@@ -1994,6 +2037,7 @@ void RuntimeContext::clearRuntimeState()
     objectPrototype_ = kInvalidRuntimeObjectId;
     arrayPrototype_ = kInvalidRuntimeObjectId;
     mathObject_ = kInvalidRuntimeObjectId;
+    eventObject_ = kInvalidRuntimeObjectId;
     builtInsInitialized_ = false;
     hostObjects_.clear();
     hostMethods_.clear();
@@ -2378,7 +2422,8 @@ bool RuntimeContext::readProperty(RuntimeObjectId objectId,
 }
 
 bool RuntimeContext::writeProperty(RuntimeObjectId objectId,
-    const std::string& key, Value value, RuntimeErrorCode& error)
+    const std::string& key, Value value, RuntimeErrorCode& error,
+    bool readOnly)
 {
     error = RuntimeErrorCode::None;
     RuntimeObject* object = objectAt(objectId);
@@ -2426,6 +2471,11 @@ bool RuntimeContext::writeProperty(RuntimeObjectId objectId,
 
     for (RuntimeProperty& property : object->properties) {
         if (property.key == key) {
+            // Host-created Event properties are immutable from script. A
+            // non-strict assignment is a deterministic no-op; the host can
+            // still refresh the cached handle values through the dedicated
+            // updateExistingProperty path below.
+            if (property.readOnly) return true;
             property.value = value;
             return true;
         }
@@ -2444,6 +2494,7 @@ bool RuntimeContext::writeProperty(RuntimeObjectId objectId,
         RuntimeProperty property;
         property.key = key;
         property.value = value;
+        property.readOnly = readOnly;
         object->properties.push_back(std::move(property));
     } catch (const std::bad_alloc&) {
         error = RuntimeErrorCode::AllocationFailure;
@@ -2452,6 +2503,25 @@ bool RuntimeContext::writeProperty(RuntimeObjectId objectId,
     ++totalPropertyCount_;
     totalPropertyKeyBytes_ += key.size();
     return true;
+}
+
+bool RuntimeContext::updateExistingProperty(RuntimeObjectId objectId,
+    const std::string& key, Value value, RuntimeErrorCode& error)
+{
+    error = RuntimeErrorCode::None;
+    RuntimeObject* object = objectAt(objectId);
+    if (object == nullptr) {
+        error = RuntimeErrorCode::CannotWriteProperty;
+        return false;
+    }
+    for (RuntimeProperty& property : object->properties) {
+        if (property.key == key) {
+            property.value = value;
+            return true;
+        }
+    }
+    error = RuntimeErrorCode::CannotWriteProperty;
+    return false;
 }
 
 RuntimeErrorCode RuntimeContext::mapHostResult(HostResultCode code) const

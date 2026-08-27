@@ -9,6 +9,7 @@
 #include <cctype>
 #include <limits>
 #include <utility>
+#include <vector>
 
 namespace gxos {
 namespace javascript {
@@ -191,8 +192,23 @@ bool NavigatorScriptHostAdapter::dispatchClick(RuntimeContext& runtime,
     // subsequent click. onclick intentionally runs before addEventListener.
     const RuntimeFunctionId onclickFunction = record->onclickFunction;
     const RuntimeFunctionId listenerFunction = record->listenerFunction;
+    const HostObjectReference target{
+        serial, generation_, kNavigatorElementHostKind};
+    Value event;
+    if (!runtime.createOrUpdateEventObject(
+            SourceView("click", 5u), target, target, event, error)) {
+        return false;
+    }
     clickDispatchActive_ = true;
-    std::vector<Value> noArguments;
+    std::vector<Value> arguments;
+    try {
+        arguments.reserve(1u);
+        arguments.push_back(event);
+    } catch (const std::bad_alloc&) {
+        clickDispatchActive_ = false;
+        error = RuntimeErrorCode::AllocationFailure;
+        return false;
+    }
     Value ignored;
     bool succeeded = true;
     RuntimeErrorCode firstError = RuntimeErrorCode::None;
@@ -200,7 +216,7 @@ bool NavigatorScriptHostAdapter::dispatchClick(RuntimeContext& runtime,
         if (function == kInvalidRuntimeFunctionId) return;
         RuntimeErrorCode callbackError = RuntimeErrorCode::None;
         if (!runtime.invokeFunctionInSameRealm(Value::function(function),
-            noArguments, ignored, callbackError)) {
+            arguments, ignored, callbackError)) {
             succeeded = false;
             if (firstError == RuntimeErrorCode::None) firstError = callbackError;
         }
