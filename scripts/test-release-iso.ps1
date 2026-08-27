@@ -140,7 +140,11 @@ if ($null -ne $combinedOvmf) {
 }
 
 $qemuArgs += @(
-    '-drive', "file=$resolvedIso,media=cdrom,readonly=on,format=raw,if=ide,index=0",
+    # Attach the ISO as an explicit IDE CD device.  With the current QEMU/OVMF
+    # combination, the shorthand if=ide drive can fall through to PXE even
+    # when the El Torito UEFI entry is valid.
+    '-drive', "if=none,id=releasecdrom,file=$resolvedIso,media=cdrom,readonly=on,format=raw",
+    '-device', 'ide-cd,drive=releasecdrom,bootindex=1',
     '-boot', 'order=d',
     '-m', '1024M',
     '-vga', 'std',
