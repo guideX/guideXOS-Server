@@ -1,4 +1,4 @@
-# Navigator secure entropy (Phase 1)
+# Navigator secure entropy (Phases 1–3)
 
 Navigator’s bare-metal TLS randomness has one OS-level contract:
 
@@ -154,7 +154,7 @@ contract smoke and source path; this runtime lane is gated before invoking the
 callback, so no PSA insufficient-entropy callback event was observed in that
 boot.
 
-### Physically bare-metal-tested
+### Phase 2 physically bare-metal-tested (historical)
 
 No physical bare-metal boot or HTTPS connection was performed in this
 environment. Therefore there is no physical CPU/provider/boot count, and no
@@ -163,15 +163,130 @@ on physical AMD64 hardware. Certificate verification and hostname
 verification remained enabled in all tested TLS paths; no `VERIFY_NONE`
 equivalent was used.
 
+## Phase 3 validation evidence (2026-08-27)
+
+### Image preparation and generated-state audit
+
+The validation started from the expected `NAVIGATOR_GENERAL_IMPROVEMENTS`
+branch at `d3de4af51114d551569eeb3eda073006f418537c` with a clean tracked
+worktree. The canonical `build.ps1 -Arch amd64` production path completed,
+including the UEFI bootloader, AMD64 kernel, ESP staging, production CA
+bundle, trust manifest, and production HTTPS policy. The validation build
+generated the following artifact set before generated tracked outputs were
+restored for a clean worktree:
+
+```text
+ESP/EFI/BOOT/BOOTX64.EFI  55,296 bytes
+  SHA256 3F911CECE1F98B3974838F05735225D7C4B454C0C6EFCB577824866EC09B3729
+ESP/kernel.elf            2,571,968 bytes
+  SHA256 CB81031ABD1DEBC2E2DE29A6955028EF78E763C0A04FA83957CAAF1AD0BEDF21
+ESP/ramdisk.img           67,108,864 bytes
+  SHA256 2AC2CB832471B43C853DB004342DDD9458FC11051AC3BDA7F4C3ACCB2A4C9228
+```
+
+The checked-in CA PEM was validated as a public-source bundle with 121 roots
+and actual file SHA256
+`303daa9461b9617eb8e6209b272613fcf2923959ff32e9422eaaae195c55c780`.
+The pre-existing CA README contains older size/hash metadata; Phase 3 did not
+alter the CA source, and the validator and build manifest used the actual PEM
+bytes shown here.
+The production build staged that bundle and set the Navigator HTTPS policy to
+`production-validated`. The explicit public QEMU run used a merged production
+manifest with 122 roots, 193,200 bytes, SHA256
+`18650ddb576c9e43c21ac899f437c244f33e03e36014d8c1402f4630f860e4f1`,
+`production_ready=yes`, and `test_only=no`.
+
+The Phase 3 run did not modify production source or tests. Hosted smoke
+execution temporarily changed tracked generated desktop/build identity state;
+those exact generated changes were restored before the focused documentation
+commit. The final tracked change is this evidence update only.
+
+### Hosted validation
+
+The secure-random contract smoke passed, including CPUID interpretation,
+provider priority, transient and exhausted bounded retries, output clearing,
+invalid arguments, zero-length requests, and no-provider failure. Mbed
+TLS/TF-PSA profile verification passed. Hosted Navigator smoke passed.
+
+The hosted public HTTPS corpus reached valid HTML on 3 of 4 targets. The
+observed TLS protocol was TLS 1.2, certificate and hostname validation were
+enabled, and the IANA HTTP downgrade was blocked. This lane uses the Windows
+system RNG and is not physical CPU-entropy evidence.
+
+### QEMU validation
+
+QEMU 11.0.0 with the repository-local OVMF image was used with the canonical
+transitional virtio-rng configuration shown above. The deterministic
+`production_validated` smoke passed. QEMU exposed neither RDSEED nor RDRAND,
+so the selected provider was `virtio-rng legacy PCI transitional`; secure
+initialization succeeded, with two secure fill requests, zero fill failures,
+and zero provider fallbacks. This is QEMU host-backed entropy, not physical
+CPU entropy.
+
+The explicit public QEMU pilot used the checked-in CA source and reached the
+external sequence `NASA → Wikipedia → example.com → NASA`. All four stages
+reported TLS success, certificate validation, hostname validation, HTTP 200,
+and visible decoded HTML; the sequence result was `PASS`. The TLS-PSA trace
+reported external RNG callback registration, `psa_crypto_init` success, and a
+successful secure-source request. The public-stage trace does not expose the
+exact negotiated cipher/version; its TLS record header was TLS 1.2-compatible.
+The local validated-policy fixture separately reported TLS 1.2 with
+`TLS-ECDHE-RSA-WITH-AES-128-GCM-SHA256` and passed the certificate, hostname,
+and downgrade-negative checks.
+
+The harness's separate optional `real_public_probe` marker reported `SKIP`
+because its probe-specific configuration did not align with the direct public
+pilot environment, so that wrapper returned exit code 1. This does not erase
+the successful persistent public sequence in the same QEMU boot, but it is
+recorded rather than presented as a clean wrapper pass.
+
+The fail-closed QEMU lane disabled both CPU RNG features and omitted
+virtio-rng. It reported `selected=none (secure entropy unavailable)`, two
+failed and cleared random reads, `tls_backend_status=RngCallbackUnavailable`,
+`tls_smoke.tls_status=RngUnavailable`, and `plaintext_fallback=no`. DNS, TCP,
+and TLS remained not attempted. The ordinary harness returned exit code 1 by
+design because its positive smoke assertion requires secure entropy; the
+fail-closed security assertions passed. No runtime
+`PSA_ERROR_INSUFFICIENT_ENTROPY` callback event was observed because TLS was
+gated before the callback; its mapping is covered by the contract/source
+tests. No runtime `PSA_ERROR_HARDWARE_FAILURE` event was observed.
+
+### Phase 3 physical validation
+
+No GuideXOS physical boot was performed, so the physical boot count is zero.
+The available chassis is an HP ProDesk 600 G6 Microtower with an Intel
+i5-10500 x86-64 CPU, but the current Windows environment reports an active
+hypervisor/VBS state. No GuideXOS bare-metal CPUID line, physical RDSEED or
+RDRAND result, selected physical provider, retry count, or physical HTTPS
+handshake was captured. QEMU virtio-rng and hosted Windows RNG results do not
+count toward this requirement.
+
+Accordingly, Phase 3 remains Outcome B: the AMD64 image, secure-entropy
+contract, hosted validation, deterministic QEMU validation, authenticated
+public QEMU sequence, and fail-closed behavior were exercised, but the real
+physical AMD64 HTTPS proof remains unavailable. Outcome C is not indicated;
+no physical defect was established because physical execution was not
+attempted.
+
+### Remaining limitation / next validation
+
+The next validation must boot the current image on real x86-64 bare metal for
+at least three fresh boots and capture the kernel's CPU vendor/model,
+RDSEED/RDRAND CPUID support, selected provider, retry/fallback counters,
+repeated secure fills, PSA callback status, DNS resolution, TCP connection,
+negotiated TLS version and cipher, certificate/hostname validation, and HTTP
+success. It must keep hostname verification and production trust policy
+enabled and must not use QEMU entropy or a plaintext fallback.
+
 ### Known limitations and classification
 
 The shipped virtio-rng implementation is limited to the existing
 legacy/transitional PCI transport; modern-only virtio-rng is unsupported.
 The i686-equivalent `ARCH=x86` build still fails on the pre-existing missing
 freestanding `string.h` headers (and `ARCH=i686` is not a valid Makefile
-target). It was not repaired in Phase 2. The practical Phase 2 result is
-Outcome B: implementation and host/QEMU validation are sound, but physical
-bare-metal HTTPS remains externally blocked.
+target). It was not repaired in Phase 2 or Phase 3. The practical Phase 2 and
+Phase 3 result is Outcome B: implementation and host/QEMU validation are
+sound, but physical bare-metal HTTPS remains externally blocked.
 
 ## Tests and troubleshooting
 
