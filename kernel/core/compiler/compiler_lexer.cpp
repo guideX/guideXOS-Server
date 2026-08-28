@@ -38,6 +38,8 @@ static TokenKind identifier_kind(const char* source, uint32_t offset, uint32_t l
     if (text_equals(source, offset, length, "void")) return TokenKind::KeywordVoid;
     if (text_equals(source, offset, length, "return")) return TokenKind::KeywordReturn;
     if (text_equals(source, offset, length, "log")) return TokenKind::KeywordLog;
+    if (text_equals(source, offset, length, "if")) return TokenKind::KeywordIf;
+    if (text_equals(source, offset, length, "else")) return TokenKind::KeywordElse;
     return TokenKind::Identifier;
 }
 
@@ -89,6 +91,8 @@ const char* token_kind_name(TokenKind kind)
         case TokenKind::KeywordVoid: return "'void'";
         case TokenKind::KeywordReturn: return "'return'";
         case TokenKind::KeywordLog: return "'log'";
+        case TokenKind::KeywordIf: return "'if'";
+        case TokenKind::KeywordElse: return "'else'";
         case TokenKind::Star: return "'*'";
         case TokenKind::LeftParen: return "'('";
         case TokenKind::RightParen: return "')'";
@@ -98,6 +102,12 @@ const char* token_kind_name(TokenKind kind)
         case TokenKind::Minus: return "'-'";
         case TokenKind::Plus: return "'+'";
         case TokenKind::Equal: return "'='";
+        case TokenKind::EqualEqual: return "'=='";
+        case TokenKind::NotEqual: return "'!='";
+        case TokenKind::Less: return "'<'";
+        case TokenKind::LessEqual: return "'<='";
+        case TokenKind::Greater: return "'>'";
+        case TokenKind::GreaterEqual: return "'>='";
         case TokenKind::Comma: return "','";
         default: return "unknown";
     }
@@ -223,6 +233,7 @@ bool lex_source(const char* source, uint32_t sourceLength, Token* tokens,
         }
 
         TokenKind kind;
+        uint32_t tokenLength = 1;
         switch (c) {
             case '*': kind = TokenKind::Star; break;
             case '(': kind = TokenKind::LeftParen; break;
@@ -232,15 +243,39 @@ bool lex_source(const char* source, uint32_t sourceLength, Token* tokens,
             case ';': kind = TokenKind::Semicolon; break;
             case '-': kind = TokenKind::Minus; break;
             case '+': kind = TokenKind::Plus; break;
-            case '=': kind = TokenKind::Equal; break;
+            case '=':
+                if (index + 1 < sourceLength && source[index + 1] == '=') {
+                    kind = TokenKind::EqualEqual; tokenLength = 2;
+                } else kind = TokenKind::Equal;
+                break;
+            case '!':
+                if (index + 1 < sourceLength && source[index + 1] == '=') {
+                    kind = TokenKind::NotEqual; tokenLength = 2;
+                } else {
+                    diagnostics.error(location, "unexpected character", "character");
+                    advance(source, sourceLength, &index, &line, &column);
+                    return false;
+                }
+                break;
+            case '<':
+                if (index + 1 < sourceLength && source[index + 1] == '=') {
+                    kind = TokenKind::LessEqual; tokenLength = 2;
+                } else kind = TokenKind::Less;
+                break;
+            case '>':
+                if (index + 1 < sourceLength && source[index + 1] == '=') {
+                    kind = TokenKind::GreaterEqual; tokenLength = 2;
+                } else kind = TokenKind::Greater;
+                break;
             case ',': kind = TokenKind::Comma; break;
             default:
                 diagnostics.error(location, "unexpected character", "character");
                 advance(source, sourceLength, &index, &line, &column);
                 return false;
         }
-        advance(source, sourceLength, &index, &line, &column);
-        if (!add_token(tokens, tokenCapacity, tokenCount, kind, location, 1, diagnostics)) return false;
+        for (uint32_t i = 0; i < tokenLength; ++i)
+            advance(source, sourceLength, &index, &line, &column);
+        if (!add_token(tokens, tokenCapacity, tokenCount, kind, location, tokenLength, diagnostics)) return false;
     }
 
     const SourceLocation endLocation = {sourceLength, line, column};

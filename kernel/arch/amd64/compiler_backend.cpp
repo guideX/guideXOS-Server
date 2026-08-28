@@ -33,7 +33,12 @@ static int32_t local_displacement(uint16_t slot)
 
 class Emitter {
 public:
-    Emitter(uint8_t* output, uint32_t capacity) : m_output(output), m_capacity(capacity), m_offset(0) {}
+    Emitter(uint8_t* output, uint32_t capacity)
+        : m_output(output), m_capacity(capacity), m_offset(0), m_labelCount(0), m_fixupCount(0)
+    {
+        for (uint32_t i = 0; i < COMPILER_MAX_BRANCH_LABELS; ++i) m_labels[i] = {};
+        for (uint32_t i = 0; i < COMPILER_MAX_BRANCH_FIXUPS; ++i) m_fixups[i] = {};
+    }
 
     bool bytes(const uint8_t* values, uint32_t count)
     {
@@ -82,6 +87,12 @@ public:
     bool sub_eax_ecx() { static const uint8_t v[] = {0x29, 0xC8}; return bytes(v, sizeof(v)); }
     bool imul_eax_ecx() { static const uint8_t v[] = {0x0F, 0xAF, 0xC1}; return bytes(v, sizeof(v)); }
     bool neg_eax() { static const uint8_t v[] = {0xF7, 0xD8}; return bytes(v, sizeof(v)); }
+    bool cmp_ecx_eax() { static const uint8_t v[] = {0x39, 0xC1}; return bytes(v, sizeof(v)); }
+    bool setcc(uint8_t condition) {
+        return byte(0x0F) && byte(condition) && byte(0xC0);
+    }
+    bool movzx_eax_al() { static const uint8_t v[] = {0x0F, 0xB6, 0xC0}; return bytes(v, sizeof(v)); }
+    bool test_eax_eax() { static const uint8_t v[] = {0x85, 0xC0}; return bytes(v, sizeof(v)); }
     bool push_rax() { return byte(0x50); }
     bool pop_rcx() { return byte(0x59); }
     bool sub_rsp(uint32_t value) {
@@ -98,10 +109,73 @@ public:
     bool epilogue() { return bytes(reinterpret_cast<const uint8_t*>("\x48\x89\xEC\x5D\xC3"), 5); }
     bool call_rax() { return bytes(reinterpret_cast<const uint8_t*>("\xFF\xD0"), 2); }
 
+    bool create_label(uint16_t* label)
+    {
+        if (!label || m_labelCount >= COMPILER_MAX_BRANCH_LABELS) return false;
+        *label = static_cast<uint16_t>(m_labelCount++);
+        m_labels[*label].defined = false;
+        m_labels[*label].offset = 0;
+        return true;
+    }
+
+    bool define_label(uint16_t label)
+    {
+        if (label >= m_labelCount || m_labels[label].defined) return false;
+        m_labels[label].defined = true;
+        m_labels[label].offset = m_offset;
+        return true;
+    }
+
+    bool emit_branch(uint8_t secondOpcode, uint16_t label)
+    {
+        if (label >= m_labelCount || m_fixupCount >= COMPILER_MAX_BRANCH_FIXUPS) return false;
+        if (!byte(0x0F) || !byte(secondOpcode)) return false;
+        const uint32_t patchOffset = m_offset;
+        if (!u32(0)) return false;
+        BranchFixup& fixup = m_fixups[m_fixupCount++];
+        fixup.patchOffset = patchOffset;
+        fixup.label = label;
+        return true;
+    }
+
+    bool emit_jz(uint16_t label) { return emit_branch(0x84, label); }
+    bool emit_jmp(uint16_t label)
+    {
+        if (label >= m_labelCount || m_fixupCount >= COMPILER_MAX_BRANCH_FIXUPS) return false;
+        if (!byte(0xE9)) return false;
+        const uint32_t patchOffset = m_offset;
+        if (!u32(0)) return false;
+        BranchFixup& fixup = m_fixups[m_fixupCount++];
+        fixup.patchOffset = patchOffset;
+        fixup.label = label;
+        return true;
+    }
+
+    bool patch_branches()
+    {
+        for (uint32_t i = 0; i < m_fixupCount; ++i) {
+            const BranchFixup& fixup = m_fixups[i];
+            if (fixup.label >= m_labelCount || !m_labels[fixup.label].defined ||
+                fixup.patchOffset > m_offset || m_offset - fixup.patchOffset < 4U) return false;
+            const int64_t displacement = static_cast<int64_t>(m_labels[fixup.label].offset) -
+                                         static_cast<int64_t>(fixup.patchOffset + 4U);
+            if (displacement < -2147483648LL || displacement > 2147483647LL) return false;
+            const uint32_t value = static_cast<uint32_t>(static_cast<int32_t>(displacement));
+            for (uint32_t j = 0; j < 4; ++j) m_output[fixup.patchOffset + j] = static_cast<uint8_t>(value >> (j * 8));
+        }
+        return true;
+    }
+
 private:
+    struct BranchLabel { bool defined; uint32_t offset; };
+    struct BranchFixup { uint32_t patchOffset; uint16_t label; };
     uint8_t* m_output;
     uint32_t m_capacity;
     uint32_t m_offset;
+    uint32_t m_labelCount;
+    uint32_t m_fixupCount;
+    BranchLabel m_labels[COMPILER_MAX_BRANCH_LABELS];
+    BranchFixup m_fixups[COMPILER_MAX_BRANCH_FIXUPS];
 };
 
 static uint32_t host_log_count(const FunctionIR& function)
@@ -114,8 +188,8 @@ static uint32_t host_log_count(const FunctionIR& function)
 
 static bool is_legacy_single_log(const FunctionIR& function)
 {
-    return function.localCount == 0 && host_log_count(function) == 1 &&
-           function.returnExpression < function.expressionCount &&
+    return function.blockCount == 1 && function.returnCount == 1 && function.localCount == 0 &&
+           host_log_count(function) == 1 && function.returnExpression < function.expressionCount &&
            function.expressions[function.returnExpression].kind == ExpressionKind::Constant;
 }
 
@@ -124,23 +198,14 @@ static bool emit_log(Emitter& emitter, const FunctionIR& function, const Stateme
 {
     if (statement.stringIndex >= function.stringCount || dataAddress == 0) return false;
     const uint64_t address = dataAddress + function.stringOffsets[statement.stringIndex];
-    (void)contextDisplacement;
-    if (framed) {
-        // The frame prologue saved the incoming context. Reload it before
-        // every independent host call because RCX is volatile across calls.
-        if (!emitter.mov_rcx_context_local(contextDisplacement)) return false;
-    }
-    // The legacy one-log fast path intentionally uses the incoming RCX and
-    // the historical 0x28 reservation.  Framed calls already have an aligned
-    // RSP and only need the Microsoft x64 32-byte home area.
+    if (framed && !emitter.mov_rcx_context_local(contextDisplacement)) return false;
     if (!emitter.mov_rdx_imm64(address) || !emitter.load_host_log()) return false;
     if (!emitter.sub_rsp(framed ? 0x20U : 0x28U) || !emitter.call_rax() ||
         !emitter.add_rsp(framed ? 0x20U : 0x28U)) return false;
     return true;
 }
 
-static bool emit_expression(Emitter& emitter, const FunctionIR& function,
-                            uint16_t index)
+static bool emit_expression(Emitter& emitter, const FunctionIR& function, uint16_t index)
 {
     if (index == COMPILER_INVALID_INDEX || index >= function.expressionCount) return false;
     const Expression& expression = function.expressions[index];
@@ -155,23 +220,97 @@ static bool emit_expression(Emitter& emitter, const FunctionIR& function,
         case ExpressionKind::Add:
         case ExpressionKind::Subtract:
         case ExpressionKind::Multiply:
+        case ExpressionKind::Equal:
+        case ExpressionKind::NotEqual:
+        case ExpressionKind::Less:
+        case ExpressionKind::LessEqual:
+        case ExpressionKind::Greater:
+        case ExpressionKind::GreaterEqual:
             if (!emit_expression(emitter, function, expression.left) || !emitter.push_rax() ||
                 !emit_expression(emitter, function, expression.right) || !emitter.pop_rcx()) return false;
             if (expression.kind == ExpressionKind::Add) return emitter.add_eax_ecx();
-            if (expression.kind == ExpressionKind::Subtract) {
-                // The left operand is on the stack. Exchange the two 32-bit
-                // values using a scratch register so the operation is left-right.
-                // EAX=right, ECX=left: xchg is unnecessary; use the fixed
-                // register sequence supported by this tiny backend.
+            if (expression.kind == ExpressionKind::Subtract)
                 return emitter.bytes(reinterpret_cast<const uint8_t*>("\x91"), 1) && emitter.sub_eax_ecx();
+            if (expression.kind == ExpressionKind::Multiply) return emitter.imul_eax_ecx();
+            if (!emitter.cmp_ecx_eax()) return false;
+            switch (expression.kind) {
+                case ExpressionKind::Equal: return emitter.setcc(0x94) && emitter.movzx_eax_al();
+                case ExpressionKind::NotEqual: return emitter.setcc(0x95) && emitter.movzx_eax_al();
+                case ExpressionKind::Less: return emitter.setcc(0x9C) && emitter.movzx_eax_al();
+                case ExpressionKind::LessEqual: return emitter.setcc(0x9E) && emitter.movzx_eax_al();
+                case ExpressionKind::Greater: return emitter.setcc(0x9F) && emitter.movzx_eax_al();
+                case ExpressionKind::GreaterEqual: return emitter.setcc(0x9D) && emitter.movzx_eax_al();
+                default: return false;
             }
-            return emitter.imul_eax_ecx();
         default: return false;
     }
 }
 
-static bool emit_legacy_log(const FunctionIR& function, uint64_t dataAddress,
-                            Emitter& emitter)
+static bool emit_block(Emitter& emitter, const FunctionIR& function, uint16_t blockIndex,
+                       uint64_t dataAddress, bool framed, const FrameLayout& frame, uint16_t epilogueLabel,
+                       uint32_t depth);
+
+static bool emit_statement(Emitter& emitter, const FunctionIR& function, const Statement& statement,
+                           uint64_t dataAddress, bool framed, const FrameLayout& frame, uint16_t epilogueLabel,
+                           uint32_t depth)
+{
+    switch (statement.kind) {
+        case StatementKind::DeclareLocal:
+        case StatementKind::StoreLocal:
+            return statement.localIndex < function.localCount &&
+                emit_expression(emitter, function, statement.expression) &&
+                emitter.mov_local_eax(local_displacement(statement.localIndex));
+        case StatementKind::HostLog:
+            return emit_log(emitter, function, statement, dataAddress,
+                            framed, frame.contextDisplacement);
+        case StatementKind::Return:
+            return emit_expression(emitter, function, statement.expression) &&
+                (epilogueLabel != COMPILER_INVALID_INDEX ? emitter.emit_jmp(epilogueLabel) : emitter.byte(0xC3));
+        case StatementKind::Block:
+            return emit_block(emitter, function, statement.thenBlock, dataAddress, framed, frame,
+                              epilogueLabel, depth + 1U);
+        case StatementKind::If: {
+            if (depth > COMPILER_MAX_CONDITIONAL_NESTING || statement.thenBlock >= function.blockCount ||
+                (statement.elseBlock != COMPILER_INVALID_INDEX && statement.elseBlock >= function.blockCount) ||
+                !emit_expression(emitter, function, statement.expression) || !emitter.test_eax_eax()) return false;
+            uint16_t endLabel = COMPILER_INVALID_INDEX;
+            if (!emitter.create_label(&endLabel)) return false;
+            if (statement.elseBlock == COMPILER_INVALID_INDEX) {
+                if (!emitter.emit_jz(endLabel) ||
+                    !emit_block(emitter, function, statement.thenBlock, dataAddress, framed, frame, epilogueLabel, depth + 1U) ||
+                    !emitter.define_label(endLabel)) return false;
+                return true;
+            }
+            uint16_t elseLabel = COMPILER_INVALID_INDEX;
+            if (!emitter.create_label(&elseLabel) || !emitter.emit_jz(elseLabel) ||
+                !emit_block(emitter, function, statement.thenBlock, dataAddress, framed, frame, epilogueLabel, depth + 1U) ||
+                !emitter.emit_jmp(endLabel) || !emitter.define_label(elseLabel) ||
+                !emit_block(emitter, function, statement.elseBlock, dataAddress, framed, frame, epilogueLabel, depth + 1U) ||
+                !emitter.define_label(endLabel)) return false;
+            return true;
+        }
+        default: return false;
+    }
+}
+
+static bool emit_block(Emitter& emitter, const FunctionIR& function, uint16_t blockIndex,
+                       uint64_t dataAddress, bool framed, const FrameLayout& frame, uint16_t epilogueLabel,
+                       uint32_t depth)
+{
+    if (blockIndex >= function.blockCount || depth > COMPILER_MAX_BLOCK_NESTING) return false;
+    const Block& block = function.blocks[blockIndex];
+    uint16_t statementIndex = block.firstStatement;
+    uint32_t visited = 0;
+    while (statementIndex != COMPILER_INVALID_INDEX && visited++ < COMPILER_MAX_STATEMENTS) {
+        if (statementIndex >= function.statementCount ||
+            !emit_statement(emitter, function, function.statements[statementIndex], dataAddress,
+                             framed, frame, epilogueLabel, depth)) return false;
+        statementIndex = function.statements[statementIndex].nextStatement;
+    }
+    return statementIndex == COMPILER_INVALID_INDEX;
+}
+
+static bool emit_legacy_log(const FunctionIR& function, uint64_t dataAddress, Emitter& emitter)
 {
     const Statement* log = nullptr;
     for (uint32_t i = 0; i < function.statementCount; ++i)
@@ -187,7 +326,7 @@ bool calculate_frame_layout(uint32_t localCount, FrameLayout* output)
 {
     if (!output || localCount > COMPILER_MAX_LOCALS) return false;
     const uint32_t localBytes = localCount * 4U;
-    const uint32_t requested = 40U + localBytes; // 32-byte home area + saved ctx slot + locals
+    const uint32_t requested = 40U + localBytes;
     uint32_t frameBytes = 0;
     if (!align16(requested, &frameBytes)) return false;
     output->frameBytes = frameBytes;
@@ -201,9 +340,11 @@ bool emit_function(const FunctionIR& function, uint64_t readOnlyDataAddress,
 {
     static_assert(offsetof(gx_app_context, host) == 8, "generated gx_app_context host offset changed");
     static_assert(offsetof(gx_host_calls, log) == 8, "generated gx_host_calls log offset changed");
+    if (outputSize) *outputSize = 0;
     if (!output || !outputSize || outputCapacity == 0 || !is_gx_main(function.name) ||
+        function.rootBlock == COMPILER_INVALID_INDEX || function.rootBlock >= function.blockCount ||
         function.returnExpression == COMPILER_INVALID_INDEX ||
-        function.returnExpression >= function.expressionCount) return false;
+        function.returnExpression >= function.expressionCount || function.returnCount == 0) return false;
     const uint32_t logCount = host_log_count(function);
     if (function.hasHostLog && (!function.usesAppContext || readOnlyDataAddress == 0 ||
                                 function.stringCount == 0 || logCount == 0)) return false;
@@ -216,33 +357,21 @@ bool emit_function(const FunctionIR& function, uint64_t readOnlyDataAddress,
     }
 
     const bool framed = function.localCount != 0 || logCount > 1;
+    const bool sharedEpilogue = framed || function.blockCount > 1;
     FrameLayout frame = {};
     if (framed && !calculate_frame_layout(function.localCount, &frame)) return false;
+    uint16_t epilogueLabel = COMPILER_INVALID_INDEX;
+    if (sharedEpilogue && !emitter.create_label(&epilogueLabel)) return false;
     if (framed) {
         if (!emitter.prologue(frame.frameBytes) || !emitter.mov_context_local(frame.contextDisplacement)) return false;
     }
-
-    for (uint32_t i = 0; i < function.statementCount; ++i) {
-        const Statement& statement = function.statements[i];
-        switch (statement.kind) {
-            case StatementKind::DeclareLocal:
-            case StatementKind::StoreLocal:
-                if (statement.localIndex >= function.localCount ||
-                    !emit_expression(emitter, function, statement.expression) ||
-                    !emitter.mov_local_eax(local_displacement(statement.localIndex))) return false;
-                break;
-            case StatementKind::HostLog:
-                if (!emit_log(emitter, function, statement, readOnlyDataAddress,
-                              framed, frame.contextDisplacement)) return false;
-                break;
-            case StatementKind::Return:
-                if (!emit_expression(emitter, function, statement.expression)) return false;
-                if (framed && !emitter.epilogue()) return false;
-                if (!framed && !emitter.byte(0xC3)) return false;
-                break;
-            default: return false;
-        }
+    if (!emit_block(emitter, function, function.rootBlock, readOnlyDataAddress, framed, frame,
+                    sharedEpilogue ? epilogueLabel : COMPILER_INVALID_INDEX, 0)) return false;
+    if (sharedEpilogue) {
+        if (!emitter.define_label(epilogueLabel)) return false;
+        if (framed ? !emitter.epilogue() : !emitter.byte(0xC3)) return false;
     }
+    if (!emitter.patch_branches()) return false;
     *outputSize = emitter.size();
     return *outputSize != 0;
 }

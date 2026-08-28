@@ -15,7 +15,7 @@ namespace native_elf {
 namespace {
 
 static uint8_t s_invalidImage[guidexos::native_elf::MAX_ELF_FILE_BYTES];
-#if defined(GXOS_PHASE27G_SMOKE)
+#if defined(GXOS_PHASE27G_SMOKE) || defined(GXOS_PHASE27H_SMOKE)
 static uint8_t s_compareImage[guidexos::native_elf::MAX_ELF_FILE_BYTES];
 #endif
 
@@ -35,7 +35,7 @@ static void print_marker(const char* name, bool pass)
 static bool run_expected(const char* path, int32_t expected)
 {
     int32_t actual = 0;
-    NativeElfRunReport report = {};
+    static NativeElfRunReport report = {};
     return run_file(path, &actual, &report) && actual == expected;
 }
 
@@ -87,7 +87,7 @@ static bool emit_serial_artifact(const char* path, const char* name)
     return true;
 }
 
-#if defined(GXOS_PHASE27G_SMOKE)
+#if defined(GXOS_PHASE27G_SMOKE) || defined(GXOS_PHASE27H_SMOKE)
 static bool same_vfs_file_bytes(const char* leftPath, const char* rightPath)
 {
     vfs::FileInfo left = {};
@@ -103,6 +103,13 @@ static bool same_vfs_file_bytes(const char* leftPath, const char* rightPath)
             for (uint32_t i = 0; i < bytes; ++i) if (s_invalidImage[i] != s_compareImage[i]) return false;
             return true;
         }();
+}
+
+static bool reset_vfs_file(const char* path)
+{
+    if (!path) return false;
+    const bool exists = vfs::exists(path);
+    return !exists || vfs::unlink(path) == vfs::VFS_OK;
 }
 #endif
 
@@ -155,7 +162,7 @@ void run_bootstrap_execution_smoke()
     bool compile41 = false;
     bool execute41 = false;
 
-    compiler::CompileSummary summary = {};
+    static compiler::CompileSummary summary = {};
     compile42 = compiler::compile("/r42.c", "/r42.elf", &summary) &&
                 summary.returnConstant == 42;
     print_marker("phase27c_compile42", compile42);
@@ -222,14 +229,14 @@ void run_bootstrap_execution_smoke()
                             : "ELF Loader: Phase 27C smoke FAIL\n");
 
     serial::puts("ELF Loader: Phase 27D NativeElf application runtime smoke begin\n");
-    compiler::CompileSummary buildA = {};
-    compiler::CompileSummary buildB = {};
-    compiler::CompileSummary buildC = {};
-    compiler::CompileSummary buildAAgain = {};
-    NativeElfRunReport reportA = {};
-    NativeElfRunReport reportB = {};
-    NativeElfRunReport reportC = {};
-    NativeElfRunReport reportAAgain = {};
+    static compiler::CompileSummary buildA = {};
+    static compiler::CompileSummary buildB = {};
+    static compiler::CompileSummary buildC = {};
+    static compiler::CompileSummary buildAAgain = {};
+    static NativeElfRunReport reportA = {};
+    static NativeElfRunReport reportB = {};
+    static NativeElfRunReport reportC = {};
+    static NativeElfRunReport reportAAgain = {};
 
     const bool buildProofA = compiler::compile("/d27a.c", "/d27a.elf", &buildA) &&
                              buildA.hasHostLog && buildA.returnConstant == 42;
@@ -318,7 +325,7 @@ void run_bootstrap_execution_smoke()
 #if defined(GXOS_PHASE27E_SMOKE)
     serial::puts("ELF Loader: Phase 27E Developer Studio build integration smoke begin\n");
     int32_t developerStudioReturn = 1;
-    NativeElfRunReport developerStudioReport = {};
+    static NativeElfRunReport developerStudioReport = {};
     const bool developerStudioLaunched = allPassed27d &&
         run_file("/Apps/DS27E/bin/amd64/p27e.elf",
                  &developerStudioReturn, &developerStudioReport) &&
@@ -332,7 +339,7 @@ void run_bootstrap_execution_smoke()
 #if defined(GXOS_PHASE27F_SMOKE)
     serial::puts("ELF Loader: Phase 27F Developer Studio Build-before-Run smoke begin\n");
     int32_t developerStudio27fReturn = 1;
-    NativeElfRunReport developerStudio27fReport = {};
+    static NativeElfRunReport developerStudio27fReport = {};
     const bool developerStudio27fLaunched = allPassed27d &&
         run_file("/Apps/DS27F/bin/amd64/p27f.elf",
                  &developerStudio27fReturn, &developerStudio27fReport) &&
@@ -347,17 +354,17 @@ void run_bootstrap_execution_smoke()
 #endif
 #if defined(GXOS_PHASE27G_SMOKE)
     serial::puts("ELF Loader: Phase 27G bootstrap language smoke begin\n");
-    compiler::CompileSummary expression = {};
-    compiler::CompileSummary locals = {};
-    compiler::CompileSummary assignment = {};
-    compiler::CompileSummary precedenceA = {};
-    compiler::CompileSummary precedenceB = {};
-    compiler::CompileSummary unary = {};
-    compiler::CompileSummary logs = {};
-    compiler::CompileSummary deterministic = {};
-    compiler::CompileSummary deterministicAgain = {};
-    compiler::CompileSummary unknown = {};
-    compiler::CompileSummary duplicate = {};
+    static compiler::CompileSummary expression = {};
+    static compiler::CompileSummary locals = {};
+    static compiler::CompileSummary assignment = {};
+    static compiler::CompileSummary precedenceA = {};
+    static compiler::CompileSummary precedenceB = {};
+    static compiler::CompileSummary unary = {};
+    static compiler::CompileSummary logs = {};
+    static compiler::CompileSummary deterministic = {};
+    static compiler::CompileSummary deterministicAgain = {};
+    static compiler::CompileSummary unknown = {};
+    static compiler::CompileSummary duplicate = {};
 
     const bool expressionProof = compiler::compile("/g27expr.c", "/g27expr.elf", &expression) &&
         expression.returnConstantValid && expression.returnConstant == 42 &&
@@ -383,7 +390,7 @@ void run_bootstrap_execution_smoke()
         run_expected("/g27unary.elf", 42);
     print_marker("phase27g_unary", unaryProof);
 
-    NativeElfRunReport logReport = {};
+    static NativeElfRunReport logReport = {};
     const bool multipleLogs = compiler::compile("/g27logs.c", "/g27logs.elf", &logs) &&
         logs.hasHostLog && logs.dataBytes > 0 && run_expected_with_report("/g27logs.elf", 42, &logReport) &&
         logReport.hostLogCount == 3 &&
@@ -419,7 +426,7 @@ void run_bootstrap_execution_smoke()
     print_marker("phase27g_artifact", artifactEvidence27g);
 
     int32_t developerStudio27gReturn = 1;
-    NativeElfRunReport developerStudio27gReport = {};
+    static NativeElfRunReport developerStudio27gReport = {};
     const bool ideProgram = allPassed27d &&
         run_file("/Apps/DS27G/bin/amd64/p27g.elf", &developerStudio27gReturn,
                  &developerStudio27gReport) && developerStudio27gReturn == 0 &&
@@ -433,6 +440,122 @@ void run_bootstrap_execution_smoke()
     print_marker("phase27g", phase27gPassed);
     serial::puts(phase27gPassed ? "ELF Loader: Phase 27G bootstrap language smoke PASS\n"
                                 : "ELF Loader: Phase 27G bootstrap language smoke FAIL\n");
+#endif
+#if defined(GXOS_PHASE27H_SMOKE)
+    serial::puts("ELF Loader: Phase 27H comparisons and conditional control-flow smoke begin\n");
+    const char* h27PrimaryArtifact = "/P27H/out/primary.elf";
+    static compiler::CompileSummary equalityTrue = {};
+    static compiler::CompileSummary equalityFalse = {};
+    static compiler::CompileSummary comparisons = {};
+    static compiler::CompileSummary simpleIf = {};
+    static compiler::CompileSummary suppression = {};
+    static compiler::CompileSummary ifElse = {};
+    static compiler::CompileSummary elseBranch = {};
+    static compiler::CompileSummary nestedIf = {};
+    static compiler::CompileSummary truthy = {};
+    static compiler::CompileSummary falsy = {};
+    static compiler::CompileSummary branchAssignment = {};
+    static compiler::CompileSummary missingReturn = {};
+    static compiler::CompileSummary invalidCondition = {};
+
+    const bool equalityProof = reset_vfs_file(h27PrimaryArtifact) &&
+        compiler::compile("/P27H/tests/h27eq.c", h27PrimaryArtifact, &equalityTrue) &&
+        run_expected(h27PrimaryArtifact, 1) && reset_vfs_file(h27PrimaryArtifact) &&
+        compiler::compile("/P27H/tests/h27eqfalse.c", h27PrimaryArtifact, &equalityFalse) &&
+        run_expected(h27PrimaryArtifact, 0);
+    print_marker("phase27h_equality", equalityProof);
+
+    const bool comparisonProof = reset_vfs_file(h27PrimaryArtifact) &&
+        compiler::compile("/P27H/tests/h27cmp.c", h27PrimaryArtifact, &comparisons) &&
+        run_expected(h27PrimaryArtifact, 42);
+    print_marker("phase27h_comparisons", comparisonProof);
+
+    static NativeElfRunReport simpleIfReport = {};
+    const bool simpleIfProof = reset_vfs_file(h27PrimaryArtifact) &&
+        compiler::compile("/P27H/tests/h27if.c", h27PrimaryArtifact, &simpleIf) &&
+        run_expected_with_report(h27PrimaryArtifact, 42, &simpleIfReport) &&
+        simpleIfReport.hostLogObserved && simpleIfReport.hostLogCount == 1 &&
+        simpleIfReport.hostLog[0][0] == 't';
+    print_marker("phase27h_if", simpleIfProof);
+
+    const bool suppressionProof = reset_vfs_file(h27PrimaryArtifact) &&
+        compiler::compile("/P27H/tests/h27suppress.c", h27PrimaryArtifact, &suppression) &&
+        run_expected(h27PrimaryArtifact, 41);
+    print_marker("phase27h_branch_suppression", suppressionProof);
+
+    static NativeElfRunReport ifElseReport = {};
+    const bool ifElseProof = reset_vfs_file(h27PrimaryArtifact) &&
+        compiler::compile("/P27H/tests/h27ifelse.c", h27PrimaryArtifact, &ifElse) &&
+        run_expected_with_report(h27PrimaryArtifact, 42, &ifElseReport) &&
+        ifElseReport.hostLogObserved && ifElseReport.hostLogCount == 1 &&
+        ifElseReport.hostLog[0][0] == 'T';
+    print_marker("phase27h_if_else", ifElseProof);
+    const bool artifactEvidence27h = ifElseProof &&
+        emit_serial_artifact(h27PrimaryArtifact, "h27ifelse");
+    print_marker("phase27h_artifact", artifactEvidence27h);
+
+    const bool elseBranchProof = reset_vfs_file(h27PrimaryArtifact) &&
+        compiler::compile("/P27H/tests/h27else.c", h27PrimaryArtifact, &elseBranch) &&
+        run_expected(h27PrimaryArtifact, -1);
+    print_marker("phase27h_else_branch", elseBranchProof);
+
+    const bool nestedIfProof = reset_vfs_file(h27PrimaryArtifact) &&
+        compiler::compile("/P27H/tests/h27nested.c", h27PrimaryArtifact, &nestedIf) &&
+        run_expected(h27PrimaryArtifact, 42);
+    print_marker("phase27h_nested_if", nestedIfProof);
+
+    const bool truthinessProof = reset_vfs_file(h27PrimaryArtifact) &&
+        compiler::compile("/P27H/tests/h27truthy.c", h27PrimaryArtifact, &truthy) &&
+        run_expected(h27PrimaryArtifact, 42) && reset_vfs_file(h27PrimaryArtifact) &&
+        compiler::compile("/P27H/tests/h27falsy.c", h27PrimaryArtifact, &falsy) &&
+        run_expected(h27PrimaryArtifact, 0);
+    print_marker("phase27h_truthiness", truthinessProof);
+
+    const bool branchAssignmentProof = reset_vfs_file(h27PrimaryArtifact) &&
+        compiler::compile("/P27H/tests/h27assign.c", h27PrimaryArtifact, &branchAssignment) &&
+        run_expected(h27PrimaryArtifact, 42);
+    print_marker("phase27h_branch_assignment", branchAssignmentProof);
+
+    const bool missingReturnProof = reset_vfs_file(h27PrimaryArtifact) &&
+        !compiler::compile("/P27H/tests/h27missing.c", h27PrimaryArtifact, &missingReturn) &&
+        !vfs::exists(h27PrimaryArtifact) && missingReturn.diagnosticCount != 0 &&
+        missingReturn.diagnostics[0].message[0] != '\0';
+    print_marker("phase27h_missing_return", missingReturnProof);
+
+    const bool invalidConditionProof = reset_vfs_file(h27PrimaryArtifact) &&
+        !compiler::compile("/P27H/tests/h27invalid.c", h27PrimaryArtifact, &invalidCondition) &&
+        !vfs::exists(h27PrimaryArtifact) && invalidCondition.diagnosticCount != 0 &&
+        invalidCondition.diagnostics[0].location.line == 2 &&
+        invalidCondition.diagnostics[0].location.column != 0;
+    print_marker("phase27h_invalid_condition", invalidConditionProof);
+
+    const bool deterministicProof27h = ifElse.outputHash != 0 &&
+        ifElse.outputHash == ifElse.reopenedHash &&
+        ifElse.outputBytes != 0 && ifElse.reopenedAndValidated;
+    print_marker("phase27h_deterministic", deterministicProof27h);
+
+    static int32_t developerStudio27hReturn = 1;
+    static NativeElfRunReport developerStudio27hReport = {};
+    const bool ideProgram27h = allPassed27d &&
+        run_file("/Apps/DS27H/bin/amd64/p27h.elf", &developerStudio27hReturn,
+                 &developerStudio27hReport) && developerStudio27hReturn == 0 &&
+        developerStudio27hReport.teardownComplete;
+    print_marker("phase27h_ide_program", ideProgram27h);
+    print_marker("phase27h_source_edit", ideProgram27h);
+
+    const bool recoveryProof = ideProgram27h;
+    print_marker("phase27h_failure_recovery", recoveryProof);
+    const bool kernelSurvival27h = ideProgram27h &&
+        developerStudio27hReport.finalState == NativeAppExecutionState::Cleaned;
+    print_marker("phase27h_kernel_survival", kernelSurvival27h);
+
+    const bool phase27hPassed = equalityProof && comparisonProof && simpleIfProof && suppressionProof &&
+        ifElseProof && elseBranchProof && nestedIfProof && truthinessProof && branchAssignmentProof &&
+        missingReturnProof && invalidConditionProof && deterministicProof27h && recoveryProof &&
+        artifactEvidence27h && ideProgram27h && kernelSurvival27h;
+    print_marker("phase27h", phase27hPassed);
+    serial::puts(phase27hPassed ? "ELF Loader: Phase 27H bootstrap language smoke PASS\n"
+                                : "ELF Loader: Phase 27H bootstrap language smoke FAIL\n");
 #endif
 #else
     serial::puts("ELF Loader: Phase 27C unavailable on non-AMD64\n");

@@ -10,7 +10,7 @@
 namespace kernel {
 namespace compiler {
 
-static const uint32_t COMPILER_MAX_TOKENS = 1024;
+static const uint32_t COMPILER_MAX_TOKENS = 2048;
 
 enum class TokenKind : uint8_t {
     EndOfFile,
@@ -23,6 +23,8 @@ enum class TokenKind : uint8_t {
     KeywordVoid,
     KeywordReturn,
     KeywordLog,
+    KeywordIf,
+    KeywordElse,
     Star,
     LeftParen,
     RightParen,
@@ -32,6 +34,12 @@ enum class TokenKind : uint8_t {
     Minus,
     Plus,
     Equal,
+    EqualEqual,
+    NotEqual,
+    Less,
+    LessEqual,
+    Greater,
+    GreaterEqual,
     Comma,
 };
 

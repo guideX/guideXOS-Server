@@ -77,6 +77,13 @@ static bool has_bytes(const uint8_t* bytes, uint32_t count,
     return false;
 }
 
+static bool has_expression_kind(const FunctionIR& function, ExpressionKind kind)
+{
+    for (uint32_t i = 0; i < function.expressionCount; ++i)
+        if (function.expressions[i].kind == kind) return true;
+    return false;
+}
+
 } // namespace
 
 int main()
@@ -163,6 +170,118 @@ int main()
     if (!require(parse_text(unarySource, &unary, &unaryDiagnostics) && unary.localCount == 1 &&
                  unary.statementCount == 2 && !unary.returnConstantValid,
                  "unary negation and local use parse")) return 1;
+
+    const char* comparisonTokens =
+        "int gx_main(void* ctx) { if (1 <= 2) { return 1; } else { return 0; } }";
+    Token comparisonTokenBuffer[COMPILER_MAX_TOKENS] = {};
+    uint32_t comparisonTokenCount = 0;
+    Diagnostics comparisonTokenDiagnostics;
+    if (!require(lex_source(comparisonTokens, static_cast<uint32_t>(std::strlen(comparisonTokens)),
+                            comparisonTokenBuffer, COMPILER_MAX_TOKENS, &comparisonTokenCount,
+                            comparisonTokenDiagnostics), "comparison source lexes")) return 1;
+    if (!require(comparisonTokenBuffer[8].kind == TokenKind::KeywordIf &&
+                 comparisonTokenBuffer[10].kind == TokenKind::Integer &&
+                 comparisonTokenBuffer[11].kind == TokenKind::LessEqual &&
+                 comparisonTokenBuffer[12].kind == TokenKind::Integer &&
+                 comparisonTokenBuffer[13].length == 1 &&
+                 comparisonTokenBuffer[19].kind == TokenKind::KeywordElse,
+                 "comparison tokens use longest matching and locations")) return 1;
+
+    const char* comparisonsSource =
+        "int gx_main(void* ctx) { return (1 == 1) + (1 != 2) + (1 < 2) + "
+        "(2 <= 2) + (3 > 2) + (3 >= 3); }";
+    FunctionIR comparisons = {};
+    Diagnostics comparisonsDiagnostics;
+    if (!require(parse_text(comparisonsSource, &comparisons, &comparisonsDiagnostics) &&
+                 comparisons.returnConstantValid && comparisons.returnConstant == 6 &&
+                 has_expression_kind(comparisons, ExpressionKind::Equal) &&
+                 has_expression_kind(comparisons, ExpressionKind::NotEqual) &&
+                 has_expression_kind(comparisons, ExpressionKind::Less) &&
+                 has_expression_kind(comparisons, ExpressionKind::LessEqual) &&
+                 has_expression_kind(comparisons, ExpressionKind::Greater) &&
+                 has_expression_kind(comparisons, ExpressionKind::GreaterEqual),
+                 "all comparison IR operations and precedence are represented")) return 1;
+
+    const char* signedComparisonSource = "int gx_main(void* ctx) { return -1 < 1; }";
+    FunctionIR signedComparison = {};
+    Diagnostics signedComparisonDiagnostics;
+    if (!require(parse_text(signedComparisonSource, &signedComparison, &signedComparisonDiagnostics) &&
+                 signedComparison.returnConstantValid && signedComparison.returnConstant == 1,
+                 "signed comparison constant folding is signed")) return 1;
+
+    const char* conditionalSource =
+        "int gx_main(gx_app_context* ctx) { int x = 20; int y = 22; int result = x + y; "
+        "if (result == 42) { log(ctx, \"answer\"); return result; } "
+        "else { log(ctx, \"unexpected\"); return -1; } }";
+    FunctionIR conditional = {};
+    uint8_t conditionalCode[COMPILER_MAX_CODE_BYTES] = {};
+    uint32_t conditionalCodeBytes = 0;
+    Diagnostics conditionalDiagnostics;
+    if (!require(parse_text(conditionalSource, &conditional, &conditionalDiagnostics) &&
+                 conditional.blockCount == 3 && conditional.returnCount == 2 &&
+                 !conditional.returnConstantValid &&
+                 amd64::emit_function(conditional, BOOTSTRAP_IMAGE_BASE + BOOTSTRAP_DATA_OFFSET,
+                                       conditionalCode, sizeof(conditionalCode), &conditionalCodeBytes),
+                 "if/else and nested block IR emit")) return 1;
+    const uint8_t cmp[] = {0x39, 0xC1};
+    const uint8_t test[] = {0x85, 0xC0};
+    const uint8_t conditionalJump[] = {0x0F, 0x84};
+    const uint8_t unconditionalJump[] = {0xE9};
+    const uint8_t setEqual[] = {0x0F, 0x94, 0xC0};
+    if (!require(has_bytes(conditionalCode, conditionalCodeBytes, cmp, sizeof(cmp)) &&
+                 has_bytes(conditionalCode, conditionalCodeBytes, test, sizeof(test)) &&
+                 has_bytes(conditionalCode, conditionalCodeBytes, conditionalJump, sizeof(conditionalJump)) &&
+                 has_bytes(conditionalCode, conditionalCodeBytes, unconditionalJump, sizeof(unconditionalJump)) &&
+                 has_bytes(conditionalCode, conditionalCodeBytes, setEqual, sizeof(setEqual)) &&
+                 has_bytes(conditionalCode, conditionalCodeBytes, reinterpret_cast<const uint8_t*>("\x0F\xB6\xC0"), 3),
+                 "AMD64 comparisons and real branches are emitted")) return 1;
+
+    const char* genericConditionSource =
+        "int gx_main(void* ctx) { int x = 1; if ((x + 1) >= 2) { if (x) { return 42; } } return 0; }";
+    FunctionIR genericCondition = {};
+    Diagnostics genericConditionDiagnostics;
+    if (!require(parse_text(genericConditionSource, &genericCondition, &genericConditionDiagnostics) &&
+                 genericCondition.blockCount >= 3 && genericCondition.returnCount == 2,
+                 "generic truth conditions and nested if parse")) return 1;
+
+    const char* missingReturnSource =
+        "int gx_main(void* ctx) { int x = 42; if (x == 42) { return 42; } }";
+    FunctionIR missingReturn = {};
+    Diagnostics missingReturnDiagnostics;
+    if (!require(!parse_text(missingReturnSource, &missingReturn, &missingReturnDiagnostics) &&
+                 missingReturnDiagnostics.count() != 0 &&
+                 std::strcmp(missingReturnDiagnostics.at(0).message,
+                             "gx_main may reach end without returning a value") == 0,
+                 "missing return paths are diagnosed")) return 1;
+
+    const char* invalidConditionSource =
+        "int gx_main(void* ctx) { if (x ==) { return 42; } return 0; }";
+    FunctionIR invalidCondition = {};
+    Diagnostics invalidConditionDiagnostics;
+    if (!require(!parse_text(invalidConditionSource, &invalidCondition, &invalidConditionDiagnostics) &&
+                 invalidConditionDiagnostics.count() != 0 &&
+                 invalidConditionDiagnostics.at(0).location.line == 1 &&
+                 invalidConditionDiagnostics.at(0).location.column > 0,
+                 "malformed conditions retain source locations")) return 1;
+
+    std::string tooManyBlocks = "int gx_main(void* ctx) {";
+    for (uint32_t i = 0; i < COMPILER_MAX_BLOCK_NESTING + 1; ++i) tooManyBlocks += " {";
+    tooManyBlocks += " return 0; ";
+    for (uint32_t i = 0; i < COMPILER_MAX_BLOCK_NESTING + 1; ++i) tooManyBlocks += "}";
+    tooManyBlocks += " }";
+    FunctionIR tooManyBlocksFunction = {};
+    Diagnostics tooManyBlocksDiagnostics;
+    if (!require(!parse_text(tooManyBlocks.c_str(), &tooManyBlocksFunction, &tooManyBlocksDiagnostics) &&
+                 tooManyBlocksDiagnostics.count() != 0 &&
+                 std::strcmp(tooManyBlocksDiagnostics.at(0).message, "block nesting limit exceeded") == 0,
+                 "block nesting capacity is bounded")) return 1;
+
+    uint8_t tinyCode[32] = {};
+    uint32_t tinyCodeBytes = 0;
+    if (!require(!amd64::emit_function(conditional,
+                                       BOOTSTRAP_IMAGE_BASE + BOOTSTRAP_DATA_OFFSET,
+                                       tinyCode, sizeof(tinyCode), &tinyCodeBytes),
+                 "branch code-buffer overflow is rejected")) return 1;
 
     const char* logsSource =
         "int gx_main(gx_app_context* ctx) { log(ctx, \"First\"); log(ctx, \"Second\"); log(ctx, \"Third\"); return 42; }";

@@ -13,6 +13,8 @@ namespace amd64 {
 
 static const uint32_t AMD64_BOOTSTRAP_CODE_BYTES = 6;
 static const uint32_t AMD64_BOOTSTRAP_MAX_CODE_BYTES = COMPILER_MAX_CODE_BYTES;
+static const uint32_t COMPILER_MAX_BRANCH_LABELS = 128;
+static const uint32_t COMPILER_MAX_BRANCH_FIXUPS = 128;
 
 struct FrameLayout {
     uint32_t frameBytes;

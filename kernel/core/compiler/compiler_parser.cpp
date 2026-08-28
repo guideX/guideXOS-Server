@@ -94,7 +94,7 @@ public:
     Parser(const char* source, const Token* tokens, uint32_t tokenCount,
            FunctionIR* output, Diagnostics& diagnostics)
         : m_source(source), m_tokens(tokens), m_tokenCount(tokenCount), m_index(0),
-          m_output(output), m_diagnostics(diagnostics), m_seenReturn(false), m_parameterToken{}
+          m_output(output), m_diagnostics(diagnostics), m_returnCount(0), m_parameterToken{}
     {
     }
 
@@ -103,7 +103,6 @@ public:
         if (!expect(TokenKind::KeywordInt, "expected return type 'int'")) return false;
         if (!expect(TokenKind::KeywordGxMain, "expected function name 'gx_main'")) return false;
         if (!expect(TokenKind::LeftParen, "expected '(' after function name")) return false;
-
         if (current().kind == TokenKind::KeywordVoid) {
             ++m_index;
         } else if (current().kind == TokenKind::KeywordGxAppContext) {
@@ -122,40 +121,25 @@ public:
         if (!copy_identifier(m_output->parameterName, sizeof(m_output->parameterName), m_parameterToken)) return false;
         ++m_index;
         if (!expect(TokenKind::RightParen, "expected ')' after parameter")) return false;
-        if (!expect(TokenKind::LeftBrace, "expected '{' before function body")) return false;
 
-        while (current().kind != TokenKind::RightBrace && current().kind != TokenKind::EndOfFile) {
-            if (current().kind == TokenKind::KeywordInt) {
-                if (!parse_declaration()) return false;
-            } else if (current().kind == TokenKind::Identifier) {
-                if (!parse_assignment()) return false;
-            } else if (current().kind == TokenKind::KeywordLog) {
-                if (!parse_log()) return false;
-            } else if (current().kind == TokenKind::KeywordReturn) {
-                if (!parse_return()) return false;
-                if (current().kind != TokenKind::RightBrace) {
-                    error_current("return statement must be the final statement");
-                    return false;
-                }
-            } else {
-                error_current("expected statement");
-                return false;
-            }
-        }
-
-        if (!m_seenReturn) {
-            error_current("return statement required");
-            return false;
-        }
-        if (!expect(TokenKind::RightBrace, "expected '}' after function body")) return false;
+        uint16_t rootBlock = COMPILER_INVALID_INDEX;
+        if (!parse_block(0, 0, &rootBlock)) return false;
+        m_output->rootBlock = rootBlock;
         if (current().kind != TokenKind::EndOfFile) {
             error_current("expected end of source after function");
             return false;
         }
+        if (!block_guarantees_return(rootBlock)) {
+            m_diagnostics.error(current().location,
+                                "gx_main may reach end without returning a value", "function");
+            return false;
+        }
+
         m_output->name[0] = 'g'; m_output->name[1] = 'x'; m_output->name[2] = '_';
         m_output->name[3] = 'm'; m_output->name[4] = 'a'; m_output->name[5] = 'i';
         m_output->name[6] = 'n'; m_output->name[7] = '\0';
-        m_output->returnConstantValid = evaluate_return_constant();
+        m_output->returnCount = m_returnCount;
+        m_output->returnConstantValid = m_returnCount == 1 && evaluate_return_constant();
         if (!m_output->returnConstantValid) m_output->returnConstant = 0;
         return !m_diagnostics.has_error();
     }
@@ -224,24 +208,98 @@ private:
         return true;
     }
 
-    bool append_statement(StatementKind kind, SourceLocation location,
-                          uint16_t expression, uint16_t localIndex, uint16_t stringIndex)
+    bool create_block(uint32_t depth, uint16_t* blockIndex)
     {
+        if (depth > COMPILER_MAX_BLOCK_NESTING) {
+            error_current("block nesting limit exceeded");
+            return false;
+        }
+        if (m_output->blockCount >= COMPILER_MAX_BLOCKS) {
+            m_diagnostics.error(current().location, "too many blocks", "block");
+            return false;
+        }
+        const uint16_t index = static_cast<uint16_t>(m_output->blockCount++);
+        Block& block = m_output->blocks[index];
+        block = {};
+        block.firstStatement = COMPILER_INVALID_INDEX;
+        block.lastStatement = COMPILER_INVALID_INDEX;
+        block.depth = static_cast<uint16_t>(depth);
+        if (blockIndex) *blockIndex = index;
+        return true;
+    }
+
+    bool append_statement(uint16_t blockIndex, StatementKind kind, SourceLocation location,
+                          uint16_t expression, uint16_t localIndex, uint16_t stringIndex,
+                          uint16_t thenBlock = COMPILER_INVALID_INDEX,
+                          uint16_t elseBlock = COMPILER_INVALID_INDEX)
+    {
+        if (blockIndex >= m_output->blockCount) return false;
         if (m_output->statementCount >= COMPILER_MAX_STATEMENTS) {
             m_diagnostics.error(location, "too many statements", "statement");
             return false;
         }
-        Statement& statement = m_output->statements[m_output->statementCount++];
+        const uint16_t statementIndex = static_cast<uint16_t>(m_output->statementCount++);
+        Statement& statement = m_output->statements[statementIndex];
         statement = {};
         statement.kind = kind;
         statement.expression = expression;
         statement.localIndex = localIndex;
         statement.stringIndex = stringIndex;
+        statement.thenBlock = thenBlock;
+        statement.elseBlock = elseBlock;
+        statement.nextStatement = COMPILER_INVALID_INDEX;
         statement.location = location;
+        Block& block = m_output->blocks[blockIndex];
+        if (block.firstStatement == COMPILER_INVALID_INDEX) block.firstStatement = statementIndex;
+        else m_output->statements[block.lastStatement].nextStatement = statementIndex;
+        block.lastStatement = statementIndex;
         return true;
     }
 
-    bool parse_declaration()
+    bool parse_block(uint32_t depth, uint32_t conditionalDepth, uint16_t* blockIndex)
+    {
+        if (!expect(TokenKind::LeftBrace, "expected '{' before block")) return false;
+        uint16_t block = COMPILER_INVALID_INDEX;
+        if (!create_block(depth, &block)) return false;
+        while (current().kind != TokenKind::RightBrace && current().kind != TokenKind::EndOfFile) {
+            if (!parse_statement(block, depth, conditionalDepth)) return false;
+        }
+        if (!expect(TokenKind::RightBrace, "expected '}' after block")) return false;
+        if (blockIndex) *blockIndex = block;
+        return true;
+    }
+
+    bool parse_statement_body(uint32_t depth, uint32_t conditionalDepth, uint16_t* blockIndex)
+    {
+        if (current().kind == TokenKind::LeftBrace)
+            return parse_block(depth + 1U, conditionalDepth, blockIndex);
+        uint16_t block = COMPILER_INVALID_INDEX;
+        if (!create_block(depth + 1U, &block)) return false;
+        if (!parse_statement(block, depth + 1U, conditionalDepth)) return false;
+        if (blockIndex) *blockIndex = block;
+        return true;
+    }
+
+    bool parse_statement(uint16_t blockIndex, uint32_t depth, uint32_t conditionalDepth)
+    {
+        if (current().kind == TokenKind::KeywordInt) return parse_declaration(blockIndex);
+        if (current().kind == TokenKind::Identifier) return parse_assignment(blockIndex);
+        if (current().kind == TokenKind::KeywordLog) return parse_log(blockIndex);
+        if (current().kind == TokenKind::KeywordReturn) return parse_return(blockIndex);
+        if (current().kind == TokenKind::KeywordIf) return parse_if(blockIndex, depth, conditionalDepth);
+        if (current().kind == TokenKind::LeftBrace) {
+            uint16_t child = COMPILER_INVALID_INDEX;
+            const SourceLocation location = current().location;
+            if (!parse_block(depth + 1U, conditionalDepth, &child)) return false;
+            return append_statement(blockIndex, StatementKind::Block, location,
+                                    COMPILER_INVALID_INDEX, COMPILER_INVALID_INDEX,
+                                    COMPILER_INVALID_INDEX, child);
+        }
+        error_current("expected statement");
+        return false;
+    }
+
+    bool parse_declaration(uint16_t blockIndex)
     {
         const SourceLocation location = current().location;
         ++m_index;
@@ -264,10 +322,11 @@ private:
         }
         if (!expect(TokenKind::Semicolon, "expected ';' after declaration")) return false;
         m_output->locals[slot].initialized = true;
-        return append_statement(StatementKind::DeclareLocal, location, expression, slot, COMPILER_INVALID_INDEX);
+        return append_statement(blockIndex, StatementKind::DeclareLocal, location, expression, slot,
+                                COMPILER_INVALID_INDEX);
     }
 
-    bool parse_assignment()
+    bool parse_assignment(uint16_t blockIndex)
     {
         const Token name = current();
         const int32_t slot = find_local_text(name);
@@ -282,7 +341,7 @@ private:
         if (expression == COMPILER_INVALID_INDEX) return false;
         if (!expect(TokenKind::Semicolon, "expected ';' after assignment")) return false;
         m_output->locals[slot].initialized = true;
-        return append_statement(StatementKind::StoreLocal, name.location, expression,
+        return append_statement(blockIndex, StatementKind::StoreLocal, name.location, expression,
                                 static_cast<uint16_t>(slot), COMPILER_INVALID_INDEX);
     }
 
@@ -311,7 +370,7 @@ private:
         return true;
     }
 
-    bool parse_log()
+    bool parse_log(uint16_t blockIndex)
     {
         const SourceLocation location = current().location;
         if (!m_output->usesAppContext) {
@@ -337,22 +396,46 @@ private:
         if (!expect(TokenKind::RightParen, "expected ')' after log arguments")) return false;
         if (!expect(TokenKind::Semicolon, "expected ';' after log call")) return false;
         m_output->hasHostLog = true;
-        return append_statement(StatementKind::HostLog, location,
+        return append_statement(blockIndex, StatementKind::HostLog, location,
                                 COMPILER_INVALID_INDEX, COMPILER_INVALID_INDEX, stringIndex);
     }
 
-    bool parse_return()
+    bool parse_return(uint16_t blockIndex)
     {
         const SourceLocation location = current().location;
         ++m_index;
         const uint16_t expression = parse_expression(0);
         if (expression == COMPILER_INVALID_INDEX) return false;
         if (!expect(TokenKind::Semicolon, "expected ';' after return expression")) return false;
-        if (!append_statement(StatementKind::Return, location, expression,
+        if (!append_statement(blockIndex, StatementKind::Return, location, expression,
                               COMPILER_INVALID_INDEX, COMPILER_INVALID_INDEX)) return false;
         m_output->returnExpression = expression;
-        m_seenReturn = true;
+        ++m_returnCount;
         return true;
+    }
+
+    bool parse_if(uint16_t blockIndex, uint32_t depth, uint32_t conditionalDepth)
+    {
+        if (conditionalDepth >= COMPILER_MAX_CONDITIONAL_NESTING) {
+            error_current("conditional nesting limit exceeded");
+            return false;
+        }
+        const SourceLocation location = current().location;
+        ++m_index;
+        if (!expect(TokenKind::LeftParen, "expected '(' after 'if'")) return false;
+        const uint16_t condition = parse_expression(0);
+        if (condition == COMPILER_INVALID_INDEX) return false;
+        if (!expect(TokenKind::RightParen, "expected ')' after if condition")) return false;
+        uint16_t thenBlock = COMPILER_INVALID_INDEX;
+        if (!parse_statement_body(depth, conditionalDepth + 1U, &thenBlock)) return false;
+        uint16_t elseBlock = COMPILER_INVALID_INDEX;
+        if (current().kind == TokenKind::KeywordElse) {
+            ++m_index;
+            if (!parse_statement_body(depth, conditionalDepth + 1U, &elseBlock)) return false;
+        }
+        return append_statement(blockIndex, StatementKind::If, location, condition,
+                                COMPILER_INVALID_INDEX, COMPILER_INVALID_INDEX,
+                                thenBlock, elseBlock);
     }
 
     uint16_t make_expression(ExpressionKind kind, SourceLocation location,
@@ -387,7 +470,44 @@ private:
             error_current("expression nesting limit exceeded");
             return COMPILER_INVALID_INDEX;
         }
-        return parse_additive(depth);
+        return parse_equality(depth);
+    }
+
+    uint16_t parse_equality(uint32_t depth)
+    {
+        uint16_t left = parse_relational(depth);
+        while (left != COMPILER_INVALID_INDEX &&
+               (current().kind == TokenKind::EqualEqual || current().kind == TokenKind::NotEqual)) {
+            const Token operatorToken = current();
+            const TokenKind operation = current().kind;
+            ++m_index;
+            const uint16_t right = parse_relational(depth);
+            if (right == COMPILER_INVALID_INDEX) return COMPILER_INVALID_INDEX;
+            left = make_expression(operation == TokenKind::EqualEqual ? ExpressionKind::Equal : ExpressionKind::NotEqual,
+                                   operatorToken.location, left, right, COMPILER_INVALID_INDEX, 0);
+        }
+        return left;
+    }
+
+    uint16_t parse_relational(uint32_t depth)
+    {
+        uint16_t left = parse_additive(depth);
+        while (left != COMPILER_INVALID_INDEX &&
+               (current().kind == TokenKind::Less || current().kind == TokenKind::LessEqual ||
+                current().kind == TokenKind::Greater || current().kind == TokenKind::GreaterEqual)) {
+            const Token operatorToken = current();
+            const TokenKind operation = current().kind;
+            ++m_index;
+            const uint16_t right = parse_additive(depth);
+            if (right == COMPILER_INVALID_INDEX) return COMPILER_INVALID_INDEX;
+            ExpressionKind kind = ExpressionKind::Less;
+            if (operation == TokenKind::LessEqual) kind = ExpressionKind::LessEqual;
+            else if (operation == TokenKind::Greater) kind = ExpressionKind::Greater;
+            else if (operation == TokenKind::GreaterEqual) kind = ExpressionKind::GreaterEqual;
+            left = make_expression(kind, operatorToken.location, left, right,
+                                   COMPILER_INVALID_INDEX, 0);
+        }
+        return left;
     }
 
     uint16_t parse_additive(uint32_t depth)
@@ -436,7 +556,7 @@ private:
                 make_expression(ExpressionKind::Negate, location, constant,
                                 COMPILER_INVALID_INDEX, COMPILER_INVALID_INDEX, 0);
         }
-        const uint16_t child = parse_unary(depth + 1);
+        const uint16_t child = parse_unary(depth + 1U);
         if (child == COMPILER_INVALID_INDEX) return child;
         return make_expression(ExpressionKind::Negate, location, child,
                                COMPILER_INVALID_INDEX, COMPILER_INVALID_INDEX, 0);
@@ -473,7 +593,7 @@ private:
                 return COMPILER_INVALID_INDEX;
             }
             ++m_index;
-            const uint16_t expression = parse_additive(depth + 1);
+            const uint16_t expression = parse_expression(depth + 1U);
             if (expression == COMPILER_INVALID_INDEX) return expression;
             if (!expect(TokenKind::RightParen, "expected ')' after expression")) return COMPILER_INVALID_INDEX;
             return expression;
@@ -488,20 +608,25 @@ private:
             depth > COMPILER_MAX_EXPRESSION_NESTING + 2U) return false;
         const Expression& expression = m_output->expressions[index];
         uint32_t left = 0, right = 0;
+        if (expression.kind == ExpressionKind::Constant) {
+            *bits = static_cast<uint32_t>(expression.value);
+            return true;
+        }
+        if (expression.kind == ExpressionKind::LoadLocal) return false;
+        if (expression.kind == ExpressionKind::Negate)
+            return evaluate_expression(expression.left, depth + 1U, bits) && (*bits = 0U - *bits, true);
+        if (!evaluate_expression(expression.left, depth + 1U, &left) ||
+            !evaluate_expression(expression.right, depth + 1U, &right)) return false;
         switch (expression.kind) {
-            case ExpressionKind::Constant: *bits = static_cast<uint32_t>(expression.value); return true;
-            case ExpressionKind::LoadLocal: return false;
-            case ExpressionKind::Negate:
-                return evaluate_expression(expression.left, depth + 1, bits) && (*bits = 0U - *bits, true);
-            case ExpressionKind::Add:
-            case ExpressionKind::Subtract:
-            case ExpressionKind::Multiply:
-                if (!evaluate_expression(expression.left, depth + 1, &left) ||
-                    !evaluate_expression(expression.right, depth + 1, &right)) return false;
-                if (expression.kind == ExpressionKind::Add) *bits = left + right;
-                else if (expression.kind == ExpressionKind::Subtract) *bits = left - right;
-                else *bits = left * right;
-                return true;
+            case ExpressionKind::Add: *bits = left + right; return true;
+            case ExpressionKind::Subtract: *bits = left - right; return true;
+            case ExpressionKind::Multiply: *bits = left * right; return true;
+            case ExpressionKind::Equal: *bits = bits_to_i32(left) == bits_to_i32(right) ? 1U : 0U; return true;
+            case ExpressionKind::NotEqual: *bits = bits_to_i32(left) != bits_to_i32(right) ? 1U : 0U; return true;
+            case ExpressionKind::Less: *bits = bits_to_i32(left) < bits_to_i32(right) ? 1U : 0U; return true;
+            case ExpressionKind::LessEqual: *bits = bits_to_i32(left) <= bits_to_i32(right) ? 1U : 0U; return true;
+            case ExpressionKind::Greater: *bits = bits_to_i32(left) > bits_to_i32(right) ? 1U : 0U; return true;
+            case ExpressionKind::GreaterEqual: *bits = bits_to_i32(left) >= bits_to_i32(right) ? 1U : 0U; return true;
             default: return false;
         }
     }
@@ -514,13 +639,30 @@ private:
         return true;
     }
 
+    bool block_guarantees_return(uint16_t blockIndex) const
+    {
+        if (blockIndex == COMPILER_INVALID_INDEX || blockIndex >= m_output->blockCount) return false;
+        const Block& block = m_output->blocks[blockIndex];
+        uint16_t statementIndex = block.firstStatement;
+        uint32_t visited = 0;
+        while (statementIndex != COMPILER_INVALID_INDEX && visited++ < COMPILER_MAX_STATEMENTS) {
+            const Statement& statement = m_output->statements[statementIndex];
+            if (statement.kind == StatementKind::Return) return true;
+            if (statement.kind == StatementKind::Block && block_guarantees_return(statement.thenBlock)) return true;
+            if (statement.kind == StatementKind::If && statement.elseBlock != COMPILER_INVALID_INDEX &&
+                block_guarantees_return(statement.thenBlock) && block_guarantees_return(statement.elseBlock)) return true;
+            statementIndex = statement.nextStatement;
+        }
+        return false;
+    }
+
     const char* m_source;
     const Token* m_tokens;
     uint32_t m_tokenCount;
     uint32_t m_index;
     FunctionIR* m_output;
     Diagnostics& m_diagnostics;
-    bool m_seenReturn;
+    uint32_t m_returnCount;
     Token m_parameterToken;
 };
 
@@ -536,6 +678,7 @@ bool parse_function(const char* source, const Token* tokens, uint32_t tokenCount
     }
     *output = {};
     output->returnExpression = COMPILER_INVALID_INDEX;
+    output->rootBlock = COMPILER_INVALID_INDEX;
     Parser parser(source, tokens, tokenCount, output, diagnostics);
     return parser.parse();
 }

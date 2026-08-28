@@ -837,7 +837,12 @@ static bool run_file_internal(const char* path,
         (void)teardown_application(report);
         return false;
     }
-    if (!prepare_application_stack(stackBase, report)) {
+    // The normal public route has one fixed application stack. Keep this
+    // internal boundary fail-safe if a damaged caller frame supplies an
+    // unexpected value; nested execution supplies its separate stack.
+    const uint64_t safeStackBase = stackBase == NESTED_APPLICATION_STACK_BASE
+        ? NESTED_APPLICATION_STACK_BASE : APPLICATION_STACK_BASE;
+    if (!prepare_application_stack(safeStackBase, report)) {
         s_appRuntime.state = NativeAppExecutionState::Failed;
         (void)teardown_application(report);
         return false;

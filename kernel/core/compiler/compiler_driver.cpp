@@ -245,7 +245,8 @@ bool compile(const char* sourcePath,
     put_decimal_u64(tokenCount);
     serial::putc('\n');
 
-    FunctionIR function = {};
+    static FunctionIR function = {};
+    function = {};
     if (!parse_function(reinterpret_cast<const char*>(s_source), s_tokens, tokenCount,
                         &function, diagnostics)) {
         return fail_build(diagnostics, summary);
@@ -376,7 +377,7 @@ bool compile(const char* sourcePath,
 void run_bootstrap_smoke()
 {
     serial::puts("Compiler: Phase 27B bare-metal smoke begin\n");
-    serial::puts("Compiler: limits source=65536 tokens=1024 diagnostics=16 identifiers=63 strings=255 locals=32 statements=128 expressions=512 code=4096 data=2048 output=12288\n");
+    serial::puts("Compiler: limits source=65536 tokens=2048 diagnostics=16 identifiers=63 strings=255 locals=32 statements=256 expressions=1024 blocks=32 block_depth=16 condition_depth=16 labels=128 fixups=128 code=8192 data=2048 output=12288\n");
 
     CompileSummary return42 = {};
     CompileSummary deterministic = {};

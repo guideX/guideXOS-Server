@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "id": "dev.guidexos.phase27h",
+  "displayName": "Phase 27H Comparisons and Conditional Control Flow",
+  "version": "0.1.0",
+  "publisher": "guideXOS",
+  "description": "Phase 27H comparisons and conditional control-flow proof fixture.",
+  "category": "Applications",
+  "kind": "NativeElf",
+  "icon": "",
+  "minGuideXOSVersion": "0.5.0",
+  "supportedArchitectures": ["amd64"],
+  "entries": [{
+    "architecture": "amd64",
+    "path": "bin/amd64/phase27h.elf",
+    "entryPoint": "gx_main",
+    "abi": "guidexos-c-abi-v1",
+    "runtime": "native-elf"
+  }]
+}

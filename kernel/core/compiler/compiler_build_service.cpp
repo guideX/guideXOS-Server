@@ -430,7 +430,8 @@ static void run_build(const gx_build_request* request)
     s_job.snapshot.state = GX_BUILD_RUNNING;
     char sourceLine[GX_BUILD_MAX_OUTPUT_LINE_BYTES] = {};
     copy_text(sourceLine, sizeof(sourceLine), "Source: "); append_text(sourceLine, sizeof(sourceLine), sourceRelative); output_line(sourceLine, 1);
-    CompileSummary summary = {};
+    static CompileSummary summary = {};
+    summary = {};
     if (!compile(sourcePath, artifactPath, &summary)) {
         for (uint32_t i = 0; i < summary.diagnosticCount; ++i) {
             char line[GX_BUILD_MAX_OUTPUT_LINE_BYTES] = {};
