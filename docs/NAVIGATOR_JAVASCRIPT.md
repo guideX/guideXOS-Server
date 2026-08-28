@@ -1996,7 +1996,111 @@ asynchronous dispatch, or broad DOM expansion. Only the existing ordinary
 Navigator link default action is cancellable; form and other activation
 semantics remain outside this milestone.
 
-The recommended next milestone is JS17: expose basic read-only Event metadata
-such as `bubbles` and `cancelable`, or, if the runtime is ready, begin bounded
-multiple `addEventListener` listeners per element with correct
-`stopImmediatePropagation()` semantics. JS17 is not implemented here.
+## Phase JS17: bounded multiple click listeners per Element
+
+JS17 replaces JS10's one-registered-listener-per-Element limitation with a
+bounded list of exact click registrations:
+
+```javascript
+element.addEventListener("click", first);
+element.addEventListener("click", second);
+element.addEventListener("click", third);
+```
+
+The listener table remains global to one document and is capped at 64 active
+registrations. `onclick` is independent: it has its own fixed 64-record table
+and does not consume listener registrations. `clickListenerCount()` reports
+registrations; the historical `clickHandlerCount()` diagnostic reports the
+number of Elements represented by either table. Navigation, generation
+invalidation, and document replacement clear both tables.
+
+Each listener record is 24 bytes, up from the JS16 mixed record size of 16
+bytes. The new record contains the Element serial, exact runtime Function ID,
+and a 64-bit registration sequence. The fixed listener table therefore costs
+1,536 bytes. The independent onclick table remains 64 records at 16 bytes
+(1,024 bytes), for a combined fixed callback-table cost of 2,560 bytes. The
+sequence is both logical order and registration identity; a removed slot may
+be reused physically, but a replacement receives a new sequence. Sequence
+wraparound is deterministic: outside dispatch, active records are compacted
+and resequenced in order; at the boundary during dispatch, a new registration
+is rejected rather than invalidating an active snapshot.
+
+Registration order is logical sequence order, never physical slot order. An
+exact duplicate `(Element, "click", Function ID)` is a no-op and consumes no
+slot. Function IDs preserve runtime identity, so different function objects
+with identical source can coexist. Removal only removes the exact matching
+registration; repeated removal, wrong callbacks, and wrong Elements are
+harmless. Removing and adding again appends the callback at the end of the
+current order. Released slots are immediately reusable.
+
+Dispatch uses a fixed per-node snapshot of at most 64 entries. Each snapshot
+entry is 16 bytes (sequence plus Function ID), so the stack-local snapshot
+cost is 1,024 bytes. At each propagation node Navigator collects active
+registrations in logical order before running `onclick`, then runs `onclick`
+first and validates each captured sequence, Element serial, and Function ID
+before invoking it. A listener removed before its turn is skipped; a listener
+added after the node snapshot, including from `onclick`, waits for the next
+dispatch. Remove-then-readd invalidates the old identity and cannot invoke a
+new callback through a reused physical slot. Self-removal is safe, and
+`stopImmediatePropagation()` terminates the snapshot iteration immediately.
+The snapshot is automatic storage only and is gone when the synchronous
+dispatch returns.
+
+The existing Event state is shared by all callbacks in a dispatch. Ordinary
+`stopPropagation()` still permits later listeners on the current Element but
+blocks ancestors. `stopImmediatePropagation()` blocks later listeners on the
+current Element and all ancestors. `preventDefault()` remains independent:
+later listeners observe `defaultPrevented`, and an uncancelled ordinary link
+still navigates while a cancelled link does not. Callback errors remain
+contained according to the established JS13–JS16 policy: later eligible
+listeners and ancestors continue unless propagation was explicitly stopped;
+an immediate stop remains effective after an error, and cancellation remains
+effective after an error.
+
+The focused proof is
+`tests/navigator_javascript_js17_test.cpp`, run by
+`scripts/smoke-navigator-javascript-js17.ps1`. It uses the real HTML parser,
+runtime, host adapter, canonical Element wrappers, cached Event, bubbling
+path, callback invocation, and document lifecycle. It covers two and three
+listeners, ordering, onclick precedence, duplicate and identity semantics,
+all removal positions, slot reuse, stale-slot reuse protection, 64/65 global
+capacity, multi-Element capacity, propagation controls, cancellation,
+target/currentTarget identity, mutation during dispatch, self-removal,
+onclick mutation, errors, closure and zero-argument callbacks, navigation
+cleanup, stale references, path overflow/recovery, unsupported events,
+invalid callbacks, and 100 repeated multi-listener clicks.
+
+The authentic hosted proof is
+`navigator-smoke/javascript-js17.html`, with
+`navigator-smoke/javascript-js17-target.html`. The aggregate loads these
+files through the production HTTP path, parses the real page, executes its
+`<script>` source in Navigator's document realm, performs layout and
+hit-tested hosted mouse down/up, and verifies production order, bubbling,
+immediate stopping, mutation snapshots, Event state, cancellation, and
+navigation cleanup.
+
+### JS17 proof results
+
+The JS17 focused proof reports 394 checks with 0 failures. The complete
+available JS1–JS17 focused set contains 15 suites: lexer, parser, runtime,
+JS6, JS7, JS8, JS9, JS10, JS11, JS12, JS13, JS14, JS15, JS16, and JS17.
+All 15 suites pass. The JS17 bare-metal compile lane and strict
+warning-as-error syntax lane pass, and the normal native hosted build links
+successfully.
+
+The JS17 aggregate reports 349 passed and 7 failed across 356 checks, with
+all 7 JS17 hosted checks passing. This is a delta of 7 passing checks over
+the recorded JS16 result of 342 passed and 7 failed. It retains the same
+seven unrelated CSS failures: CSS 3C, CSS 3G, CSS 6A, CSS 6B's three checks,
+and CSS 6C. No CSS repair is part of JS17.
+
+Navigator still does not provide complete DOM Events compatibility. JS17 does
+not add capture, capture listeners, event phases, `eventPhase`, `bubbles`,
+`cancelable`, listener options, `{ once: true }`, passive listeners, additional
+event types, coordinates, keyboard/input/change events, timers, promises,
+task queues, microtasks, asynchronous dispatch, or broad DOM expansion.
+
+The recommended next milestone is JS18: a bounded `{ once: true }` listener
+option while preserving the fixed capacity, registration ordering, snapshot
+identity, and propagation behavior. If listener-option parsing is not ready,
+read-only `event.bubbles` and `event.cancelable` are the smaller alternative.

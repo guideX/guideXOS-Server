@@ -1583,6 +1583,83 @@ static std::string navigatorHostedSmokeDiagnostic() {
         yesNo(js16UncancelledClick) + ",url=" +
         gxos::apps::Navigator::SmokeCurrentUrl());
 
+    const bool js17Loaded = gxos::apps::Navigator::SmokeNavigateToQuiet(
+        "http://127.0.0.1:8080/navigator-smoke/javascript-js17.html");
+    const std::string js17InitialText =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    const size_t js17InitialHandlers =
+        gxos::apps::Navigator::SmokeJavaScriptHandlerCount();
+    const size_t js17InitialListeners =
+        gxos::apps::Navigator::SmokeJavaScriptListenerCount();
+    const std::string js17InitialError =
+        gxos::apps::Navigator::SmokeJavaScriptLastError();
+    add("JS17 hosted fixture loads bounded multiple listeners",
+        js17Loaded && contains(js17InitialText, "Navigator JavaScript JS17") &&
+        contains(js17InitialText, "Bounded multiple click listeners") &&
+        js17InitialHandlers == 6u && js17InitialListeners == 12u &&
+        js17InitialError.empty(),
+        std::string("loaded=") + yesNo(js17Loaded) + ",handlers=" +
+        std::to_string(js17InitialHandlers) + ",listeners=" +
+        std::to_string(js17InitialListeners) + ",error=" +
+        (js17InitialError.empty() ? "none" : js17InitialError));
+
+    const bool js17OrderClick =
+        gxos::apps::Navigator::SmokeClickFormControlById("js17-order");
+    add("JS17 hosted order is onclick then three listeners then parent",
+        js17OrderClick && contains(
+            gxos::apps::Navigator::SmokeCurrentDocumentText(),
+            "order:oabcp"),
+        "expected authentic order oabcp");
+    const bool js17StopClick =
+        gxos::apps::Navigator::SmokeClickFormControlById("js17-stop");
+    add("JS17 hosted stopPropagation keeps same-node listeners",
+        js17StopClick && contains(
+            gxos::apps::Navigator::SmokeCurrentDocumentText(), "stop:ab") &&
+        !contains(gxos::apps::Navigator::SmokeCurrentDocumentText(),
+            "stop:ab:parent"),
+        "expected stop:ab without parent callback");
+    const bool js17ImmediateClick =
+        gxos::apps::Navigator::SmokeClickFormControlById("js17-immediate");
+    add("JS17 hosted immediate stop skips later listeners and parent",
+        js17ImmediateClick && contains(
+            gxos::apps::Navigator::SmokeCurrentDocumentText(), "immediate:a") &&
+        !contains(gxos::apps::Navigator::SmokeCurrentDocumentText(),
+            "immediate:a:parent"),
+        "expected immediate:a without later callbacks");
+    const bool js17MutationOne =
+        gxos::apps::Navigator::SmokeClickFormControlById("js17-mutation");
+    const std::string js17MutationTextOne =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    const bool js17MutationTwo =
+        gxos::apps::Navigator::SmokeClickFormControlById("js17-mutation");
+    const std::string js17MutationTextTwo =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS17 hosted mutation snapshot defers additions and skips removals",
+        js17MutationOne && js17MutationTwo &&
+        contains(js17MutationTextOne, "mutation:a") &&
+        contains(js17MutationTextTwo, "mutation:aac"),
+        "expected first mutation:a and cumulative second mutation:aac");
+    const bool js17CancelHit =
+        gxos::apps::Navigator::SmokeHitLinkById("js17-cancel");
+    const bool js17CancelledClick =
+        js17CancelHit && !gxos::apps::Navigator::SmokeClickFirstLink();
+    add("JS17 hosted preventDefault preserves later-listener visibility",
+        js17CancelledClick &&
+        gxos::apps::Navigator::SmokeCurrentUrl() ==
+            "http://127.0.0.1:8080/navigator-smoke/javascript-js17.html" &&
+        contains(gxos::apps::Navigator::SmokeCurrentDocumentText(),
+            "cancel:ad"),
+        std::string("hit=") + yesNo(js17CancelHit) + ",cancelled=" +
+        yesNo(js17CancelledClick) + ",url=" +
+        gxos::apps::Navigator::SmokeCurrentUrl());
+    add("JS17 hosted navigation cleanup clears listener tables",
+        gxos::apps::Navigator::SmokeNavigateToQuiet(
+            "http://127.0.0.1:8080/navigator-smoke/javascript-js17-target.html") &&
+        gxos::apps::Navigator::SmokeJavaScriptHandlerCount() == 0u &&
+        gxos::apps::Navigator::SmokeJavaScriptListenerCount() == 0u &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        "replacement page starts without JS17 registrations");
+
     bool cssInlineLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-inline.html");
     std::string cssInlineText = gxos::apps::Navigator::SmokeCurrentDocumentText();
     std::string cssInlineReport = gxos::apps::Navigator::SmokeRuntimeReport();

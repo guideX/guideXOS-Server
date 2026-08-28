@@ -30,7 +30,7 @@ constexpr std::size_t kNavigatorScriptMaxElementHostObjects = 1024u;
 constexpr std::size_t kNavigatorScriptMaxDocumentMutations = 1024u;
 constexpr std::size_t kNavigatorScriptMaxDocumentNodes = 1024u;
 constexpr std::size_t kNavigatorScriptMaxClickHandlers = 64u;
-// JS13 snapshots at most 32 serials, including the clicked Element and the
+// JS13/JS17 snapshots at most 32 serials, including the clicked Element and the
 // document's html/body ancestors. The path is deliberately smaller than the
 // 1024-node document metadata bound so dispatch cannot consume an unbounded
 // native traversal stack.
@@ -84,6 +84,9 @@ public:
         RuntimeErrorCode& error, bool* defaultPrevented = nullptr);
     bool hasClickHandler(HostInstanceId serial) const;
     std::size_t clickListenerCount() const { return clickListenerCount_; }
+    // Compatibility diagnostic: the number of Elements with at least one
+    // onclick or addEventListener registration. Listener capacity is exposed
+    // separately by clickListenerCount().
     std::size_t clickHandlerCount() const { return clickHandlerCount_; }
     void clearClickHandlers();
 
@@ -91,16 +94,48 @@ private:
     struct ClickHandlerRecord {
         HostInstanceId serial = 0;
         RuntimeFunctionId onclickFunction = kInvalidRuntimeFunctionId;
-        RuntimeFunctionId listenerFunction = kInvalidRuntimeFunctionId;
     };
     static_assert(sizeof(ClickHandlerRecord) == 16u,
         "Navigator click records must remain 16 bytes");
+
+    // A listener record is one global registration slot. The 64-bit sequence
+    // is both its registration identity and its logical dispatch order; it is
+    // never reused while an older registration could be present in a node
+    // snapshot. The physical slot may be reused immediately after removal.
+    struct ClickListenerRecord {
+        HostInstanceId serial = 0;
+        RuntimeFunctionId listenerFunction = kInvalidRuntimeFunctionId;
+        std::uint64_t registrationSequence = 0;
+    };
+    static_assert(sizeof(ClickListenerRecord) == 24u,
+        "Navigator listener records must remain 24 bytes");
+
+    struct ClickListenerSnapshotEntry {
+        std::uint64_t registrationSequence = 0;
+        RuntimeFunctionId listenerFunction = kInvalidRuntimeFunctionId;
+    };
+    static_assert(sizeof(ClickListenerSnapshotEntry) == 16u,
+        "Navigator listener snapshots must remain 16 bytes");
 
     std::size_t callbackLimit() const;
     std::size_t listenerLimit() const;
     ClickHandlerRecord* clickHandlerFor(HostInstanceId serial);
     const ClickHandlerRecord* clickHandlerFor(HostInstanceId serial) const;
     void removeEmptyClickHandler(HostInstanceId serial);
+    ClickListenerRecord* clickListenerFor(HostInstanceId serial,
+        RuntimeFunctionId function);
+    const ClickListenerRecord* clickListenerFor(
+        HostInstanceId serial, RuntimeFunctionId function) const;
+    const ClickListenerRecord* clickListenerForSequence(
+        HostInstanceId serial, std::uint64_t registrationSequence) const;
+    bool collectListenerSnapshot(HostInstanceId serial,
+        std::array<ClickListenerSnapshotEntry,
+            kNavigatorScriptMaxClickHandlers>& snapshot,
+        std::size_t& count) const;
+    bool hasClickListener(HostInstanceId serial) const;
+    bool hasAnyClickHandler(HostInstanceId serial) const;
+    void resequenceListeners();
+    bool allocateListenerSequence(std::uint64_t& sequence);
     gxos::web::HtmlElementRef* findElement(HostInstanceId serial);
     const gxos::web::HtmlElementRef* findElement(HostInstanceId serial) const;
     bool isKnownElementSerial(HostInstanceId serial) const;
@@ -121,8 +156,14 @@ private:
     NavigatorScriptHostLimits limits_;
     std::array<ClickHandlerRecord, kNavigatorScriptMaxClickHandlers>
         clickHandlers_{};
+    std::array<ClickListenerRecord, kNavigatorScriptMaxClickHandlers>
+        clickListeners_{};
+    // Number of Elements represented by either table, retained for the
+    // historical clickHandlerCount() diagnostic.
     std::size_t clickHandlerCount_ = 0;
+    std::size_t clickOnclickRecordCount_ = 0;
     std::size_t clickListenerCount_ = 0;
+    std::uint64_t nextListenerRegistrationSequence_ = 1u;
     bool clickDispatchActive_ = false;
     // Returned strings are copied synchronously by RuntimeContext. Keeping
     // one adapter-owned scratch value avoids exposing mutable document memory.

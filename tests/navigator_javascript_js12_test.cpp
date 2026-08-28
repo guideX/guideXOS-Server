@@ -377,7 +377,12 @@ e0.removeEventListener("click", wrong);
 
     std::string source =
         "function shared(event) { calls = calls + 1; lastEventTarget = event.target.id; }";
-    for (int index = 0; index < 64; ++index) {
+    // e0 already has one listener; add a second callback there, then add 62
+    // distinct callbacks on e1 through e62. This reaches 64 without relying
+    // on replacement semantics and retains one released slot for e64.
+    source += "var x0 = document.getElementById(\"e0\");";
+    source += "x0.addEventListener(\"click\", shared);";
+    for (int index = 1; index < 63; ++index) {
         source += "var x" + std::to_string(index) +
             " = document.getElementById(\"e" + std::to_string(index) + "\");";
         source += "x" + std::to_string(index) +
@@ -386,8 +391,8 @@ e0.removeEventListener("click", wrong);
     result = harness.execute(source);
     expect(result.succeeded(), "capacity: 64 registrations succeed");
     expect(harness.hostAdapter().clickListenerCount() == 64u &&
-        harness.hostAdapter().clickHandlerCount() == 64u,
-        "capacity: listener table remains bounded at 64");
+        harness.hostAdapter().clickHandlerCount() == 63u,
+        "capacity: listener table remains bounded at 64 registrations");
     result = harness.execute(
         "x0.removeEventListener(\"click\", shared);"
         "e64.addEventListener(\"click\", shared);");

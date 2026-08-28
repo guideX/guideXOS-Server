@@ -224,8 +224,10 @@ root.addEventListener("click", rootHandler);
         "core: onclick keeps grandparent suppressed");
 
     result = harness.execute(
+        "child.removeEventListener(\"click\", childListener);"
+        "function childListenerAfterOnclick(event) { order = order + \"l\"; event.stopPropagation(1, 2, 3); }"
         "child.onclick = function(event) { order = order + \"o\"; };"
-        "child.addEventListener(\"click\", function(event) { order = order + \"l\"; event.stopPropagation(1, 2, 3); });"
+        "child.addEventListener(\"click\", childListenerAfterOnclick);"
         "order = \"\";");
     expect(result.succeeded(), "core: listener-after-onclick setup succeeds");
     click(harness, child, error, "core: listener after onclick stops bubbling");
@@ -249,6 +251,7 @@ function grandparentUnexpected(event) { order = order + "g"; grandparentCount = 
 function rootUnexpected(event) { order = order + "r"; rootCount = rootCount + 1; }
 child.onclick = null;
 child.removeEventListener("click", childListener);
+child.removeEventListener("click", childListenerAfterOnclick);
 child.addEventListener("click", childNormal);
 parent.addEventListener("click", parentStop);
 grandparent.addEventListener("click", grandparentUnexpected);
@@ -282,6 +285,7 @@ order = "";
         "core: parent suppresses root");
 
     result = harness.execute(R"JS(
+root.removeEventListener("click", rootUnexpected);
 root.onclick = function(event) { order = order + "o"; event.stopPropagation(); event.stopPropagation(); };
 root.addEventListener("click", function(event) { order = order + "l"; event.stopPropagation(); });
 order = "";
@@ -595,7 +599,8 @@ e0.removeEventListener("click", wrong);
         "e0.addEventListener(\"click\", shared);");
     expect(result.succeeded(), "capacity: remove/re-add succeeds");
     std::string registrations;
-    for (int index = 0; index < 64; ++index) {
+    registrations += "var x0 = document.getElementById(\"e0\");";
+    for (int index = 1; index < 64; ++index) {
         registrations += "var x" + std::to_string(index) +
             " = document.getElementById(\"e" + std::to_string(index) + "\");";
         registrations += "x" + std::to_string(index) +

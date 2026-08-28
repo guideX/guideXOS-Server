@@ -565,7 +565,8 @@ e0.removeEventListener("click", wrong);
         "capacity: listener slot is reused");
 
     std::string registrations = "";
-    for (int index = 0; index < 64; ++index) {
+    registrations += "var x0 = document.getElementById(\"e0\");";
+    for (int index = 1; index < 64; ++index) {
         registrations += "var x" + std::to_string(index) +
             " = document.getElementById(\"e" + std::to_string(index) + "\");";
         registrations += "x" + std::to_string(index) +

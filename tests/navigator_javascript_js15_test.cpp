@@ -23,7 +23,7 @@ const char* kFixture = R"HTML(
 <div id="root">
   <div id="grandparent">
     <div id="parent">
-      <div id="gap"><button id="child" type="button">Child</button></div>
+      <div id="gap"><button id="child" type="button">Child</button><button id="conditional" type="button">Conditional</button></div>
     </div>
   </div>
 </div>
@@ -224,8 +224,10 @@ root.addEventListener("click", rootHandler);
         "core: onclick keeps grandparent suppressed");
 
     result = harness.execute(
+        "child.removeEventListener(\"click\", childListener);"
+        "function childListenerAfterOnclick(event) { order = order + \"l\"; event.stopPropagation(1, 2, 3); }"
         "child.onclick = function(event) { order = order + \"o\"; };"
-        "child.addEventListener(\"click\", function(event) { order = order + \"l\"; event.stopPropagation(1, 2, 3); });"
+        "child.addEventListener(\"click\", childListenerAfterOnclick);"
         "order = \"\";");
     expect(result.succeeded(), "core: listener-after-onclick setup succeeds");
     click(harness, child, error, "core: listener after onclick stops bubbling");
@@ -249,6 +251,7 @@ function grandparentUnexpected(event) { order = order + "g"; grandparentCount = 
 function rootUnexpected(event) { order = order + "r"; rootCount = rootCount + 1; }
 child.onclick = null;
 child.removeEventListener("click", childListener);
+child.removeEventListener("click", childListenerAfterOnclick);
 child.addEventListener("click", childNormal);
 parent.addEventListener("click", parentStop);
 grandparent.addEventListener("click", grandparentUnexpected);
@@ -283,6 +286,7 @@ order = "";
 
     result = harness.execute(R"JS(
 root.onclick = function(event) { order = order + "o"; event.stopPropagation(); event.stopPropagation(); };
+root.removeEventListener("click", rootUnexpected);
 root.addEventListener("click", function(event) { order = order + "l"; event.stopPropagation(); });
 order = "";
 )JS");
@@ -317,13 +321,12 @@ void testResetBranchesMutationAndCallbackErrors()
     ScriptResult result = harness.execute(R"JS(
 var child = document.getElementById("child");
 var grandparent = document.getElementById("grandparent");
-var stopOnce = true;
 var childCalls = 0;
 var grandparentCalls = 0;
 var parentCount = 0;
 function conditionalStop(event) {
     childCalls = childCalls + 1;
-    if (stopOnce) { stopOnce = false; event.stopPropagation(); }
+    if (childCalls == 1) event.stopPropagation();
 }
 function grandHandler(event) { grandparentCalls = grandparentCalls + 1; }
 child.addEventListener("click", conditionalStop);
@@ -599,7 +602,8 @@ e0.removeEventListener("click", wrong);
         "e0.addEventListener(\"click\", shared);");
     expect(result.succeeded(), "capacity: remove/re-add succeeds");
     std::string registrations;
-    for (int index = 0; index < 64; ++index) {
+    registrations += "var x0 = document.getElementById(\"e0\");";
+    for (int index = 1; index < 64; ++index) {
         registrations += "var x" + std::to_string(index) +
             " = document.getElementById(\"e" + std::to_string(index) + "\");";
         registrations += "x" + std::to_string(index) +
@@ -735,13 +739,15 @@ root.addEventListener("click", rootHandler);
     result = harness.execute(R"JS(
 var listenerTarget = "";
 var listenerCurrent = "";
-child.onclick = function(event) { order = order + "o"; };
-child.addEventListener("click", function(event) {
+child.removeEventListener("click", childListener);
+function listenerStop(event) {
     order = order + "l";
     listenerTarget = event.target.id;
     listenerCurrent = event.currentTarget.id;
     event.stopImmediatePropagation(3, 2, 1);
-});
+}
+child.onclick = function(event) { order = order + "o"; };
+child.addEventListener("click", listenerStop);
 order = "";
 )JS");
     expect(result.succeeded(), "immediate: listener setup succeeds");
@@ -756,8 +762,10 @@ order = "";
         "immediate: listener-origin stop skips parent");
 
     result = harness.execute(R"JS(
+child.removeEventListener("click", listenerStop);
+function childBeforeParent(event) { order = order + "l"; }
 child.onclick = function(event) { order = order + "c"; };
-child.addEventListener("click", function(event) { order = order + "l"; });
+child.addEventListener("click", childBeforeParent);
 parent.onclick = function(event) {
     order = order + "p";
     parentTarget = event.target.id;
@@ -788,8 +796,10 @@ order = "";
         "immediate: parent currentTarget identity is canonical");
 
     result = harness.execute(R"JS(
+child.removeEventListener("click", childBeforeParent);
+function childOrdinary(event) { order = order + "l"; }
 child.onclick = function(event) { order = order + "o"; event.stopPropagation(); };
-child.addEventListener("click", function(event) { order = order + "l"; });
+child.addEventListener("click", childOrdinary);
 parent.onclick = null;
 parent.addEventListener("click", function(event) { order = order + "p"; });
 order = "";
@@ -802,13 +812,15 @@ order = "";
         "immediate: stopPropagation still suppresses ancestors");
 
     result = harness.execute(R"JS(
-child.onclick = function(event) { order = order + "o"; event.stopPropagation(); };
-child.addEventListener("click", function(event) {
+child.removeEventListener("click", childOrdinary);
+function childMixed(event) {
     order = order + "l";
     event.stopImmediatePropagation();
     event.stopPropagation();
     order = order + "x";
-});
+}
+child.onclick = function(event) { order = order + "o"; event.stopPropagation(); };
+child.addEventListener("click", childMixed);
 parent.addEventListener("click", function(event) { order = order + "p"; });
 order = "";
 )JS");
@@ -1001,15 +1013,14 @@ var oldElement = retainedChild;
         "retained: stale Element still fails closed");
 
     result = harness.execute(R"JS(
-var first = true;
-var conditionalChild = document.getElementById("child");
+var conditionalChild = document.getElementById("conditional");
 var conditionalParent = document.getElementById("parent");
 var conditionalOnclickCalls = 0;
 var conditionalListenerCalls = 0;
 var conditionalParentCalls = 0;
 conditionalChild.onclick = function(event) {
     conditionalOnclickCalls = conditionalOnclickCalls + 1;
-    if (first) { first = false; event.stopImmediatePropagation(); }
+    if (conditionalOnclickCalls == 1) event.stopImmediatePropagation();
 };
 conditionalChild.addEventListener("click", function(event) {
     conditionalListenerCalls = conditionalListenerCalls + 1;
@@ -1019,7 +1030,7 @@ conditionalParent.addEventListener("click", function(event) {
 });
 )JS");
     expect(result.succeeded(), "reset: conditional setup succeeds");
-    const std::uint64_t conditionalSerial = serialById(harness, "child");
+    const std::uint64_t conditionalSerial = serialById(harness, "conditional");
     click(harness, conditionalSerial, error, "reset: first conditional click");
     expectNumber(harness, "conditionalListenerCalls", 0.0,
         "reset: first listener is suppressed");

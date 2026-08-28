@@ -120,9 +120,10 @@ void testRegistrationDispatchClosureMutationAndCoexistence()
         "var bad = document.getElementById(\"bad\");"
         "var count = 0; var otherCount = 10; var order = \"\";"
         "counter.onclick = function () { order = order + \"o\"; };"
-        "counter.addEventListener(\"click\", function () {"
+        "function firstListener() {"
         "count = count + 1; order = order + \"l\";"
-        "counter.textContent = \"Count \" + count; });"
+        "counter.textContent = \"Count \" + count; }"
+        "counter.addEventListener(\"click\", firstListener);"
         "other.addEventListener(\"click\", function () {"
         "otherCount = otherCount + 2; other.textContent = \"B \" + otherCount; });"
         "bad.addEventListener(\"click\", function () { missingFunction(); });");
@@ -152,15 +153,15 @@ void testRegistrationDispatchClosureMutationAndCoexistence()
         "other click does not alter counter closure");
 
     result = harness.execute(
-        "counter.addEventListener(\"click\", function () {"
-        "counter.textContent = \"replacement\"; });");
-    expect(result.succeeded(), "duplicate listener replaces safely");
+        "counter.addEventListener(\"click\", firstListener);");
+    expect(result.succeeded(), "duplicate listener is a safe no-op");
     expect(harness.hostAdapter().clickListenerCount() == 3u,
-        "duplicate replacement does not consume another listener slot");
-    click(harness, counter, error, "replacement listener click");
-    expect(elementText(harness, counter) == "replacement",
-        "replacement listener takes effect on next click");
-    expectString(harness, "order", "olololo", "replacement retains onclick order");
+        "duplicate registration does not consume another listener slot");
+    click(harness, counter, error, "duplicate listener click");
+    expect(elementText(harness, counter) == "Count 4",
+        "duplicate registration leaves the original listener active");
+    expectString(harness, "order", "olololol",
+        "duplicate registration preserves onclick order");
 
     result = harness.execute("counter.addEventListener(\"keydown\", function () {});");
     expectError(result, RuntimeErrorCode::HostInvalidValue,

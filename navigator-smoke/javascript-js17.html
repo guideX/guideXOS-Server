@@ -1,0 +1,73 @@
+<!doctype html>
+<html>
+<head><title>Navigator JavaScript JS17</title></head>
+<body>
+<h1>Navigator JavaScript JS17</h1>
+<p>Bounded multiple click listeners with authentic bubbling and cancellation.</p>
+<div id="js17-parent">
+  <button id="js17-order" type="button">Order</button>
+  <button id="js17-stop" type="button">Stop propagation</button>
+  <button id="js17-immediate" type="button">Immediate stop</button>
+  <a id="js17-cancel" href="/navigator-smoke/javascript-js17-target.html">Cancel navigation</a>
+  <button id="js17-mutation" type="button">Mutation</button>
+</div>
+<p id="js17-state">initial</p>
+<script>
+var js17State = document.getElementById("js17-state");
+var js17Parent = document.getElementById("js17-parent");
+var js17Order = document.getElementById("js17-order");
+var js17Stop = document.getElementById("js17-stop");
+var js17Immediate = document.getElementById("js17-immediate");
+var js17Cancel = document.getElementById("js17-cancel");
+var js17Mutation = document.getElementById("js17-mutation");
+var js17OrderLog = "";
+var js17StopLog = "";
+var js17ImmediateLog = "";
+var js17CancelLog = "";
+var js17MutationLog = "";
+js17Order.onclick = function(event) { js17OrderLog = js17OrderLog + "o"; };
+js17Order.addEventListener("click", function(event) { js17OrderLog = js17OrderLog + "a"; });
+js17Order.addEventListener("click", function(event) { js17OrderLog = js17OrderLog + "b"; });
+js17Order.addEventListener("click", function(event) { js17OrderLog = js17OrderLog + "c"; });
+js17Stop.addEventListener("click", function(event) {
+    js17StopLog = js17StopLog + "a";
+    event.stopPropagation();
+});
+js17Stop.addEventListener("click", function(event) {
+    js17StopLog = js17StopLog + "b";
+    js17State.textContent = "stop:" + js17StopLog;
+});
+js17Immediate.addEventListener("click", function(event) {
+    js17ImmediateLog = js17ImmediateLog + "a";
+    event.stopImmediatePropagation();
+    js17State.textContent = "immediate:" + js17ImmediateLog;
+});
+js17Immediate.addEventListener("click", function(event) { js17ImmediateLog = js17ImmediateLog + "b"; });
+js17Cancel.addEventListener("click", function(event) {
+    js17CancelLog = js17CancelLog + "a";
+    event.preventDefault();
+});
+js17Cancel.addEventListener("click", function(event) {
+    if (event.defaultPrevented) js17CancelLog = js17CancelLog + "d";
+});
+function js17MutationLater(event) { js17MutationLog = js17MutationLog + "c"; }
+function js17MutationRemoved(event) { js17MutationLog = js17MutationLog + "b"; }
+js17Mutation.addEventListener("click", function(event) {
+    js17MutationLog = js17MutationLog + "a";
+    js17Mutation.removeEventListener("click", js17MutationRemoved);
+    js17Mutation.addEventListener("click", js17MutationLater);
+});
+js17Mutation.addEventListener("click", js17MutationRemoved);
+js17Parent.addEventListener("click", function(event) {
+    if (event.target === js17Order) {
+        js17OrderLog = js17OrderLog + "p";
+        js17State.textContent = "order:" + js17OrderLog;
+    }
+    if (event.target === js17Stop) js17State.textContent = "stop:" + js17StopLog + ":parent";
+    if (event.target === js17Immediate) js17State.textContent = "immediate:" + js17ImmediateLog + ":parent";
+    if (event.target === js17Cancel) js17State.textContent = "cancel:" + js17CancelLog;
+    if (event.target === js17Mutation) js17State.textContent = "mutation:" + js17MutationLog;
+});
+</script>
+</body>
+</html>

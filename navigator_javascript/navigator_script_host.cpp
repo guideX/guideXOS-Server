@@ -118,13 +118,13 @@ std::size_t NavigatorScriptHostAdapter::callbackLimit() const
 
 std::size_t NavigatorScriptHostAdapter::listenerLimit() const
 {
-    return std::min(limits_.maxClickListeners, clickHandlers_.size());
+    return std::min(limits_.maxClickListeners, clickListeners_.size());
 }
 
 NavigatorScriptHostAdapter::ClickHandlerRecord*
 NavigatorScriptHostAdapter::clickHandlerFor(HostInstanceId serial)
 {
-    for (std::size_t index = 0; index < clickHandlerCount_; ++index) {
+    for (std::size_t index = 0; index < clickOnclickRecordCount_; ++index) {
         if (clickHandlers_[index].serial == serial) return &clickHandlers_[index];
     }
     return nullptr;
@@ -133,7 +133,7 @@ NavigatorScriptHostAdapter::clickHandlerFor(HostInstanceId serial)
 const NavigatorScriptHostAdapter::ClickHandlerRecord*
 NavigatorScriptHostAdapter::clickHandlerFor(HostInstanceId serial) const
 {
-    for (std::size_t index = 0; index < clickHandlerCount_; ++index) {
+    for (std::size_t index = 0; index < clickOnclickRecordCount_; ++index) {
         if (clickHandlers_[index].serial == serial) return &clickHandlers_[index];
     }
     return nullptr;
@@ -141,33 +141,157 @@ NavigatorScriptHostAdapter::clickHandlerFor(HostInstanceId serial) const
 
 bool NavigatorScriptHostAdapter::hasClickHandler(HostInstanceId serial) const
 {
-    const ClickHandlerRecord* record = clickHandlerFor(serial);
-    return record != nullptr &&
-        (record->onclickFunction != kInvalidRuntimeFunctionId ||
-            record->listenerFunction != kInvalidRuntimeFunctionId);
+    return hasAnyClickHandler(serial);
 }
 
 void NavigatorScriptHostAdapter::clearClickHandlers()
 {
     for (ClickHandlerRecord& record : clickHandlers_) record = ClickHandlerRecord();
+    for (ClickListenerRecord& record : clickListeners_)
+        record = ClickListenerRecord();
     clickHandlerCount_ = 0;
+    clickOnclickRecordCount_ = 0;
     clickListenerCount_ = 0;
+    nextListenerRegistrationSequence_ = 1u;
     clickDispatchActive_ = false;
 }
 
 void NavigatorScriptHostAdapter::removeEmptyClickHandler(HostInstanceId serial)
 {
-    for (std::size_t index = 0; index < clickHandlerCount_; ++index) {
+    for (std::size_t index = 0; index < clickOnclickRecordCount_; ++index) {
         ClickHandlerRecord& record = clickHandlers_[index];
         if (record.serial != serial ||
-            record.onclickFunction != kInvalidRuntimeFunctionId ||
-            record.listenerFunction != kInvalidRuntimeFunctionId) continue;
-        for (std::size_t move = index + 1; move < clickHandlerCount_; ++move)
+            record.onclickFunction != kInvalidRuntimeFunctionId) continue;
+        for (std::size_t move = index + 1; move < clickOnclickRecordCount_; ++move)
             clickHandlers_[move - 1] = clickHandlers_[move];
-        clickHandlers_[clickHandlerCount_ - 1] = ClickHandlerRecord();
-        --clickHandlerCount_;
+        clickHandlers_[clickOnclickRecordCount_ - 1] = ClickHandlerRecord();
+        --clickOnclickRecordCount_;
         return;
     }
+}
+
+NavigatorScriptHostAdapter::ClickListenerRecord*
+NavigatorScriptHostAdapter::clickListenerFor(HostInstanceId serial,
+    RuntimeFunctionId function)
+{
+    for (ClickListenerRecord& record : clickListeners_) {
+        if (record.serial == serial && record.listenerFunction == function)
+            return &record;
+    }
+    return nullptr;
+}
+
+const NavigatorScriptHostAdapter::ClickListenerRecord*
+NavigatorScriptHostAdapter::clickListenerFor(HostInstanceId serial,
+    RuntimeFunctionId function) const
+{
+    for (const ClickListenerRecord& record : clickListeners_) {
+        if (record.serial == serial && record.listenerFunction == function)
+            return &record;
+    }
+    return nullptr;
+}
+
+const NavigatorScriptHostAdapter::ClickListenerRecord*
+NavigatorScriptHostAdapter::clickListenerForSequence(
+    HostInstanceId serial, std::uint64_t registrationSequence) const
+{
+    for (const ClickListenerRecord& record : clickListeners_) {
+        if (record.serial == serial &&
+            record.registrationSequence == registrationSequence)
+            return &record;
+    }
+    return nullptr;
+}
+
+bool NavigatorScriptHostAdapter::hasClickListener(HostInstanceId serial) const
+{
+    for (const ClickListenerRecord& record : clickListeners_) {
+        if (record.serial == serial &&
+            record.listenerFunction != kInvalidRuntimeFunctionId)
+            return true;
+    }
+    return false;
+}
+
+bool NavigatorScriptHostAdapter::hasAnyClickHandler(HostInstanceId serial) const
+{
+    const ClickHandlerRecord* onclick = clickHandlerFor(serial);
+    return (onclick != nullptr &&
+        onclick->onclickFunction != kInvalidRuntimeFunctionId) ||
+        hasClickListener(serial);
+}
+
+void NavigatorScriptHostAdapter::resequenceListeners()
+{
+    std::array<std::size_t, kNavigatorScriptMaxClickHandlers> slots{};
+    std::size_t count = 0;
+    for (std::size_t index = 0; index < clickListeners_.size(); ++index) {
+        if (clickListeners_[index].serial == 0 ||
+            clickListeners_[index].listenerFunction == kInvalidRuntimeFunctionId)
+            continue;
+        slots[count++] = index;
+    }
+
+    // Insertion sort is intentional: the table is fixed at 64 entries and
+    // this keeps the resequencing path allocation-free and deterministic.
+    for (std::size_t index = 1; index < count; ++index) {
+        const std::size_t slot = slots[index];
+        std::size_t position = index;
+        while (position > 0 &&
+            clickListeners_[slots[position - 1]].registrationSequence >
+                clickListeners_[slot].registrationSequence) {
+            slots[position] = slots[position - 1];
+            --position;
+        }
+        slots[position] = slot;
+    }
+    for (std::size_t index = 0; index < count; ++index)
+        clickListeners_[slots[index]].registrationSequence =
+            static_cast<std::uint64_t>(index + 1u);
+    nextListenerRegistrationSequence_ =
+        static_cast<std::uint64_t>(count + 1u);
+}
+
+bool NavigatorScriptHostAdapter::allocateListenerSequence(
+    std::uint64_t& sequence)
+{
+    // Sequence zero is reserved for an unused record. A 64-bit sequence is
+    // practically non-wrapping, but the boundary remains deterministic: if
+    // it is reached outside dispatch, active records are compacted in logical
+    // order; during dispatch, refusing the new registration protects any
+    // already-captured snapshot from resequencing.
+    if (nextListenerRegistrationSequence_ == 0u ||
+        nextListenerRegistrationSequence_ ==
+            std::numeric_limits<std::uint64_t>::max()) {
+        if (clickDispatchActive_) return false;
+        resequenceListeners();
+    }
+    sequence = nextListenerRegistrationSequence_++;
+    return sequence != 0u;
+}
+
+bool NavigatorScriptHostAdapter::collectListenerSnapshot(HostInstanceId serial,
+    std::array<ClickListenerSnapshotEntry,
+        kNavigatorScriptMaxClickHandlers>& snapshot, std::size_t& count) const
+{
+    count = 0;
+    for (const ClickListenerRecord& record : clickListeners_) {
+        if (record.serial != serial ||
+            record.listenerFunction == kInvalidRuntimeFunctionId) continue;
+        if (count >= snapshot.size()) return false;
+        ClickListenerSnapshotEntry entry{
+            record.registrationSequence, record.listenerFunction};
+        std::size_t position = count++;
+        while (position > 0 &&
+            snapshot[position - 1].registrationSequence >
+                entry.registrationSequence) {
+            snapshot[position] = snapshot[position - 1];
+            --position;
+        }
+        snapshot[position] = entry;
+    }
+    return true;
 }
 
 bool NavigatorScriptHostAdapter::dispatchClick(RuntimeContext& runtime,
@@ -261,20 +385,28 @@ bool NavigatorScriptHostAdapter::dispatchClick(RuntimeContext& runtime,
             break;
         }
 
-        // Lookup occurs when the propagation node is reached. This makes
-        // removal/replacement of a later ancestor visible to this dispatch.
-        // Copy both IDs before invoking the node's onclick so JS12's
-        // established onclick-before-listener behavior remains deterministic
-        // if onclick mutates its own registration.
+        // Capture this node's registrations before onclick runs. The fixed
+        // snapshot gives JS17 deterministic browser-like mutation semantics:
+        // additions during onclick or a listener wait for the next dispatch,
+        // while each captured identity is revalidated before invocation so a
+        // removal (including remove-then-readd into the same physical slot)
+        // cannot invoke the replacement.
+        std::array<ClickListenerSnapshotEntry,
+            kNavigatorScriptMaxClickHandlers> listenerSnapshot{};
+        std::size_t listenerSnapshotCount = 0;
+        if (!collectListenerSnapshot(propagationPath[index], listenerSnapshot,
+                listenerSnapshotCount)) {
+            if (firstError == RuntimeErrorCode::None)
+                firstError = RuntimeErrorCode::HostCallbackLimitExceeded;
+            succeeded = false;
+            break;
+        }
         const ClickHandlerRecord* record =
             clickHandlerFor(propagationPath[index]);
-        if (record == nullptr ||
-            (record->onclickFunction == kInvalidRuntimeFunctionId &&
-                record->listenerFunction == kInvalidRuntimeFunctionId)) {
-            continue;
-        }
-        const RuntimeFunctionId onclickFunction = record->onclickFunction;
-        const RuntimeFunctionId listenerFunction = record->listenerFunction;
+        const RuntimeFunctionId onclickFunction = record == nullptr
+            ? kInvalidRuntimeFunctionId : record->onclickFunction;
+        if (onclickFunction == kInvalidRuntimeFunctionId &&
+            listenerSnapshotCount == 0u) continue;
         const HostObjectReference currentTarget{
             propagationPath[index], dispatchGeneration,
             kNavigatorElementHostKind};
@@ -287,8 +419,20 @@ bool NavigatorScriptHostAdapter::dispatchClick(RuntimeContext& runtime,
         }
         arguments[0] = event;
         invoke(onclickFunction);
-        if (!runtime.eventImmediatePropagationStopped())
-            invoke(listenerFunction);
+        if (!runtime.eventImmediatePropagationStopped()) {
+            for (std::size_t listenerIndex = 0;
+                 listenerIndex < listenerSnapshotCount; ++listenerIndex) {
+                if (runtime.eventImmediatePropagationStopped()) break;
+                const ClickListenerSnapshotEntry& captured =
+                    listenerSnapshot[listenerIndex];
+                const ClickListenerRecord* active = clickListenerForSequence(
+                    propagationPath[index], captured.registrationSequence);
+                if (active == nullptr ||
+                    active->listenerFunction != captured.listenerFunction)
+                    continue;
+                invoke(active->listenerFunction);
+            }
+        }
         if (runtime.eventPropagationStopped()) break;
     }
     const bool dispatchDefaultPrevented = runtime.eventDefaultPrevented();
@@ -625,10 +769,14 @@ HostResult NavigatorScriptHostAdapter::setProperty(
     if (textEquals(property, "id") || textEquals(property, "tagName"))
         return HostResult{HostResultCode::PropertyReadOnly};
     if (textEquals(property, "onclick")) {
+        const bool hadAnyHandler = hasAnyClickHandler(object.instanceId);
         if (value.type == HostValueType::Null) {
             if (ClickHandlerRecord* record = clickHandlerFor(object.instanceId))
                 record->onclickFunction = kInvalidRuntimeFunctionId;
             removeEmptyClickHandler(object.instanceId);
+            if (hadAnyHandler && !hasAnyClickHandler(object.instanceId) &&
+                clickHandlerCount_ > 0)
+                --clickHandlerCount_;
             return HostResult();
         }
         if (value.type != HostValueType::Function ||
@@ -639,10 +787,11 @@ HostResult NavigatorScriptHostAdapter::setProperty(
             record->onclickFunction = value.functionId;
             return HostResult();
         }
-        if (clickHandlerCount_ >= callbackLimit())
+        if (clickOnclickRecordCount_ >= callbackLimit())
             return HostResult{HostResultCode::CallbackLimitExceeded};
-        clickHandlers_[clickHandlerCount_++] = ClickHandlerRecord{
-            object.instanceId, value.functionId, kInvalidRuntimeFunctionId};
+        clickHandlers_[clickOnclickRecordCount_++] = ClickHandlerRecord{
+            object.instanceId, value.functionId};
+        if (!hadAnyHandler) ++clickHandlerCount_;
         return HostResult();
     }
     if (!textEquals(property, "textContent"))
@@ -684,21 +833,37 @@ HostResult NavigatorScriptHostAdapter::call(const HostObjectReference* receiver,
         }
         if (!textEquals(arguments[0].stringValue, "click"))
             return HostResult{HostResultCode::InvalidValue};
-        ClickHandlerRecord* record = clickHandlerFor(receiver->instanceId);
-        if (record != nullptr) {
-            if (record->listenerFunction == kInvalidRuntimeFunctionId)
-                ++clickListenerCount_;
-            record->listenerFunction = arguments[1].functionId;
+        // The exact (Element, event type, Function ID) tuple is a duplicate
+        // no-op. Check it before capacity so duplicate calls never consume a
+        // slot or perturb logical registration order.
+        if (clickListenerFor(receiver->instanceId, arguments[1].functionId) !=
+            nullptr) {
             result = HostValue::undefined();
             return HostResult();
         }
-        if (clickHandlerCount_ >= callbackLimit() ||
-            clickListenerCount_ >= listenerLimit())
+        if (clickListenerCount_ >= listenerLimit())
             return HostResult{HostResultCode::CallbackLimitExceeded};
-        clickHandlers_[clickHandlerCount_++] = ClickHandlerRecord{
-            receiver->instanceId, kInvalidRuntimeFunctionId,
-            arguments[1].functionId};
+
+        ClickListenerRecord* freeRecord = nullptr;
+        for (ClickListenerRecord& candidate : clickListeners_) {
+            if (candidate.serial == 0 ||
+                candidate.listenerFunction == kInvalidRuntimeFunctionId) {
+                freeRecord = &candidate;
+                break;
+            }
+        }
+        if (freeRecord == nullptr)
+            return HostResult{HostResultCode::CallbackLimitExceeded};
+
+        std::uint64_t sequence = 0;
+        if (!allocateListenerSequence(sequence))
+            return HostResult{HostResultCode::CallbackLimitExceeded};
+        const bool hadAnyHandler = hasAnyClickHandler(receiver->instanceId);
+        freeRecord->serial = receiver->instanceId;
+        freeRecord->listenerFunction = arguments[1].functionId;
+        freeRecord->registrationSequence = sequence;
         ++clickListenerCount_;
+        if (!hadAnyHandler) ++clickHandlerCount_;
         result = HostValue::undefined();
         return HostResult();
     }
@@ -720,12 +885,16 @@ HostResult NavigatorScriptHostAdapter::call(const HostObjectReference* receiver,
         // Removal is deliberately a lookup only. It never creates a record,
         // and function IDs provide JavaScript function identity within this
         // same realm; source text or function shape is never compared.
-        ClickHandlerRecord* record = clickHandlerFor(receiver->instanceId);
-        if (record != nullptr &&
-            record->listenerFunction == arguments[1].functionId) {
+        ClickListenerRecord* record = clickListenerFor(receiver->instanceId,
+            arguments[1].functionId);
+        if (record != nullptr) {
+            record->serial = 0;
             record->listenerFunction = kInvalidRuntimeFunctionId;
+            record->registrationSequence = 0;
             if (clickListenerCount_ > 0) --clickListenerCount_;
-            removeEmptyClickHandler(receiver->instanceId);
+            if (!hasAnyClickHandler(receiver->instanceId) &&
+                clickHandlerCount_ > 0)
+                --clickHandlerCount_;
         }
         result = HostValue::undefined();
         return HostResult();
