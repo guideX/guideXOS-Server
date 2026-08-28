@@ -251,6 +251,121 @@ public static unsafe class Program
     }
 #endif
 
+#if HOSTLOGPROOF_C011EC54
+    [DllImport("__Internal", EntryPoint = "guideXosNativeAotC011EC54Start")]
+    private static extern int GuideXosNativeAotC011EC54Start();
+
+    [DllImport("__Internal", EntryPoint = "guideXosNativeAotC011EC54BeforeAllocation")]
+    private static extern int GuideXosNativeAotC011EC54BeforeAllocation(
+        uint ordinal,
+        uint payloadSize);
+
+    [DllImport("__Internal", EntryPoint = "guideXosNativeAotC011EC54AfterAllocation")]
+    private static extern int GuideXosNativeAotC011EC54AfterAllocation(
+        nint objectAddress);
+
+    [DllImport("__Internal", EntryPoint = "guideXosNativeAotC011EC54ManagedReadback")]
+    private static extern int GuideXosNativeAotC011EC54ManagedReadback(
+        uint ordinal,
+        uint valid);
+
+    [DllImport("__Internal", EntryPoint = "guideXosNativeAotC011EC54RecordSurvivor")]
+    private static extern int GuideXosNativeAotC011EC54RecordSurvivor(
+        uint ordinal,
+        uint collectionCount,
+        nint objectAddress,
+        uint generation,
+        uint valid);
+
+    [DllImport("__Internal", EntryPoint = "guideXosNativeAotC011EC54Finish")]
+    private static extern int GuideXosNativeAotC011EC54Finish();
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static int RunC011EC54ReclaimedGen1EphemeralTransition()
+    {
+        const uint payloadSize = 65536u;
+        const uint hardLimit = 64u;
+        const uint survivorCount = 4u;
+        if (GuideXosNativeAotC011EC54Start() != 0)
+        {
+            return -1;
+        }
+
+        // Keep a small explicit survivor set across authentic collections.
+        // The remaining arrays die at the end of each iteration; no collection
+        // request or allocator address is supplied by this workload.
+        byte[] survivor0 = null;
+        byte[] survivor1 = null;
+        byte[] survivor2 = null;
+        byte[] survivor3 = null;
+        int lastManagedCollection = GC.CollectionCount(0);
+        for (uint ordinal = 0u; ordinal < hardLimit; ordinal++)
+        {
+            if (GuideXosNativeAotC011EC54BeforeAllocation(
+                    ordinal, payloadSize) != 0)
+            {
+                return -1;
+            }
+
+            byte[] value = new byte[payloadSize];
+            WriteIdentifyingPattern(value, ordinal);
+            nint objectAddress = Unsafe.As<byte[], nint>(ref value);
+            if (GuideXosNativeAotC011EC54AfterAllocation(objectAddress) != 0)
+            {
+                return -1;
+            }
+            bool readbackValid = HasIdentifyingPattern(value, ordinal);
+            if (!readbackValid ||
+                GuideXosNativeAotC011EC54ManagedReadback(
+                    ordinal, readbackValid ? 1u : 0u) != 0)
+            {
+                return -1;
+            }
+
+            if (ordinal == 0u) survivor0 = value;
+            else if (ordinal == 1u) survivor1 = value;
+            else if (ordinal == 2u) survivor2 = value;
+            else if (ordinal == 3u) survivor3 = value;
+
+            int managedCollection = GC.CollectionCount(0);
+            if (managedCollection != lastManagedCollection)
+            {
+                lastManagedCollection = managedCollection;
+                uint collectionCount = managedCollection < 0
+                    ? 0u : (uint)managedCollection;
+                byte[][] survivors =
+                {
+                    survivor0, survivor1, survivor2, survivor3,
+                };
+                for (uint survivorOrdinal = 0u;
+                     survivorOrdinal < survivorCount;
+                     survivorOrdinal++)
+                {
+                    byte[] survivor = survivors[survivorOrdinal];
+                    if (survivor != null &&
+                        GuideXosNativeAotC011EC54RecordSurvivor(
+                            survivorOrdinal,
+                            collectionCount,
+                            Unsafe.As<byte[], nint>(ref survivor),
+                            (uint)GC.GetGeneration(survivor),
+                            1u) != 0)
+                    {
+                        return -1;
+                    }
+                }
+            }
+
+            GC.KeepAlive(survivor0);
+            GC.KeepAlive(survivor1);
+            GC.KeepAlive(survivor2);
+            GC.KeepAlive(survivor3);
+            GC.KeepAlive(value);
+        }
+
+        return GuideXosNativeAotC011EC54Finish();
+    }
+#endif
+
 #if HOSTLOGPROOF_C011EC42
     [DllImport("__Internal", EntryPoint = "guideXosNativeAotC011EC42Start")]
     private static extern int GuideXosNativeAotC011EC42Start();
@@ -846,7 +961,10 @@ public static unsafe class Program
                 {
                     return GxAbi.ErrorInvalidArgument;
                 }
-#if HOSTLOGPROOF_C011EC53
+#if HOSTLOGPROOF_C011EC54
+                return RunC011EC54ReclaimedGen1EphemeralTransition() == 0
+                    ? 0 : GxAbi.ErrorInvalidArgument;
+#elif HOSTLOGPROOF_C011EC53
                 return RunC011EC53ReclaimedGen1NaturalReuse() == 0
                     ? 0 : GxAbi.ErrorInvalidArgument;
 #elif HOSTLOGPROOF_C011EC42

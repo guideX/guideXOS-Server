@@ -789,7 +789,7 @@ extern "C" int32_t guidexos_nativeaot_gc_describe_object(
     gx_uintptr* heapAllocated,
     gx_uintptr* heapReserved,
     gx_uint32* heapOwned);
-#if defined(GUIDEXOS_NATIVEAOT_SEGMENT_BOUNDARY_ALLOCATION) || defined(GUIDEXOS_NATIVEAOT_C011EC40_COMPACTION_RECLAMATION) || defined(GUIDEXOS_NATIVEAOT_C011EC42_RECLAIMED_GEN1_LIFECYCLE) || defined(GUIDEXOS_NATIVEAOT_C011EC53_RECLAIMED_GEN1_NATURAL_REUSE)
+#if defined(GUIDEXOS_NATIVEAOT_SEGMENT_BOUNDARY_ALLOCATION) || defined(GUIDEXOS_NATIVEAOT_C011EC40_COMPACTION_RECLAMATION) || defined(GUIDEXOS_NATIVEAOT_C011EC42_RECLAIMED_GEN1_LIFECYCLE) || defined(GUIDEXOS_NATIVEAOT_C011EC53_RECLAIMED_GEN1_NATURAL_REUSE) || defined(GUIDEXOS_NATIVEAOT_C011EC54_RECLAIMED_GEN1_EPHEMERAL_TRANSITION)
 extern "C" int32_t guidexos_nativeaot_gc_describe_segment(
     void* object,
     gx_uintptr* segmentIdentity,
@@ -13523,6 +13523,12 @@ extern "C" void __cdecl guideXosNativeAotC011EC53NativeHelperEntry(
 extern "C" void __cdecl guideXosNativeAotC011EC53NativeAfterAllocation(
     uintptr_t objectAddress);
 #endif
+#if defined(GUIDEXOS_NATIVEAOT_C011EC54_RECLAIMED_GEN1_EPHEMERAL_TRANSITION)
+extern "C" void __cdecl guideXosNativeAotC011EC54NativeHelperEntry(
+    uintptr_t requestedSize);
+extern "C" void __cdecl guideXosNativeAotC011EC54NativeAfterAllocation(
+    uintptr_t objectAddress);
+#endif
 static int guideXosNativeAotC011EC41Finish();
 #endif
 
@@ -13557,6 +13563,26 @@ extern "C" void __cdecl guideXosNativeAotC011EC53EphemeralBoundaryObserved(
     uintptr_t segmentAllocated, uintptr_t segmentCommitted,
     uintptr_t segmentReserved, uint32_t segmentGeneration);
 extern "C" void __cdecl guideXosNativeAotC011EC53AllocationPathObserved(
+    uint32_t path, uintptr_t selectedStart, uintptr_t selectedEnd,
+    uintptr_t allocationAddress, uintptr_t alignedSize,
+    uintptr_t residualStart, uintptr_t residualEnd,
+    uintptr_t freeBytesBefore, uintptr_t freeBytesAfter);
+#endif
+#if defined(GUIDEXOS_NATIVEAOT_C011EC54_RECLAIMED_GEN1_EPHEMERAL_TRANSITION)
+extern "C" void __cdecl guideXosNativeAotC011EC54CollectionEntered(
+    uint32_t generation, uint32_t collectionReason);
+extern "C" void __cdecl guideXosNativeAotC011EC54PlannerDecisionObserved(
+    uint32_t finalDecision, uint32_t condemnedGeneration,
+    uint32_t collectionReason);
+extern "C" void __cdecl guideXosNativeAotC011EC54PhaseEntered(uint32_t phase);
+extern "C" void __cdecl guideXosNativeAotC011EC54RestartEEReturned();
+extern "C" void __cdecl guideXosNativeAotC011EC54GenerationStateObserved(
+    const guidexos_nativeaot_c011ec54_state_snapshot* state);
+extern "C" void __cdecl guideXosNativeAotC011EC54SegmentTransitionObserved(
+    uint32_t reason, uintptr_t oldSegment, uintptr_t newSegment,
+    uintptr_t oldAllocated, uintptr_t newAllocated,
+    uintptr_t oldReserved, uintptr_t newReserved);
+extern "C" void __cdecl guideXosNativeAotC011EC54AllocationPathObserved(
     uint32_t path, uintptr_t selectedStart, uintptr_t selectedEnd,
     uintptr_t allocationAddress, uintptr_t alignedSize,
     uintptr_t residualStart, uintptr_t residualEnd,
@@ -15208,6 +15234,9 @@ extern "C" void __cdecl guideXosNativeAotC011EC41NativeHelperEntry(
 #if defined(GUIDEXOS_NATIVEAOT_C011EC53_RECLAIMED_GEN1_NATURAL_REUSE)
     guideXosNativeAotC011EC53NativeHelperEntry(requestedSize);
 #endif
+#if defined(GUIDEXOS_NATIVEAOT_C011EC54_RECLAIMED_GEN1_EPHEMERAL_TRANSITION)
+    guideXosNativeAotC011EC54NativeHelperEntry(requestedSize);
+#endif
 }
 
 static void guideXosNativeAotC011EC41RecordAllocation(
@@ -15377,6 +15406,9 @@ extern "C" void __cdecl guideXosNativeAotC011EC41NativeAfterAllocation(
     uintptr_t objectAddress) {
 #if defined(GUIDEXOS_NATIVEAOT_C011EC53_RECLAIMED_GEN1_NATURAL_REUSE)
     guideXosNativeAotC011EC53NativeAfterAllocation(objectAddress);
+#endif
+#if defined(GUIDEXOS_NATIVEAOT_C011EC54_RECLAIMED_GEN1_EPHEMERAL_TRANSITION)
+    guideXosNativeAotC011EC54NativeAfterAllocation(objectAddress);
 #endif
     guidexos_nativeaot_c011ec41_provenance_record& r =
         g_guideXosAllocationDiagnostics.c011ec41Provenance;
@@ -16781,6 +16813,781 @@ guideXosNativeAotC011EC53Finish() {
     r.completionMarkerEmitted = 1u;
     suspendEeSerialPutString(
         "[nativeaot-gc-short-weak-lifetime] COMPLETE marker=C011EC53 outcome=");
+    suspendEeSerialPutString(outcome);
+    suspendEeSerialPutString(" successLevel=");
+    suspendEeSerialPutHex32(level);
+    suspendEeSerialPutString(" noReuseClassification=");
+    suspendEeSerialPutHex32(r.noReuseClassification);
+    suspendEeSerialPutString(" collectionCount=");
+    suspendEeSerialPutHex32(r.collectionEntryCount);
+    suspendEeSerialPutString(" invariantFailures=");
+    suspendEeSerialPutHex32(r.invariantFailures);
+    suspendEeSerialPutString(" safeStopReason=");
+    suspendEeSerialPutHex32(r.safeStopReason);
+    suspendEeSerialPutString("\n");
+    return r.invariantFailures == 0u ? 0 : -1;
+}
+#endif
+
+#if defined(GUIDEXOS_NATIVEAOT_C011EC54_RECLAIMED_GEN1_EPHEMERAL_TRANSITION)
+static bool guideXosNativeAotC011EC54RangeOverlaps(
+    uintptr_t start, uintptr_t end, uintptr_t otherStart,
+    uintptr_t otherEnd) {
+    return start < end && otherStart < otherEnd &&
+        start < otherEnd && otherStart < end;
+}
+
+static void guideXosNativeAotC011EC54Emit(
+    const char* marker,
+    const guidexos_nativeaot_c011ec54_lifecycle_record& r) {
+    const guidexos_nativeaot_c011ec54_collection_record* c =
+        r.collectionEntryCount == 0u
+            ? nullptr : &r.collections[r.collectionEntryCount - 1u];
+    suspendEeSerialPutString(
+        "[nativeaot-gc-short-weak-lifetime] ");
+    suspendEeSerialPutString(marker);
+#define C54P32(name, value) \
+    suspendEeSerialPutString(" " name "="); suspendEeSerialPutHex32(value)
+#define C54P64(name, value) \
+    suspendEeSerialPutString(" " name "="); suspendEeSerialPutHex64(value)
+    C54P32("preflight", r.preflightEmitted);
+    C54P32("reclaimed", r.reclaimedEmitted);
+    C54P32("collections", r.collectionEntryCount);
+    C54P32("allocations", r.allocationCount);
+    C54P32("sourceOlderGeneration", r.sourceOlderGenerationObserved);
+    C54P32("sourceFixBounds", r.sourceFixBoundsObserved);
+    C54P32("sourceAdjust", r.sourceAdjustObserved);
+    C54P32("ephemeralTransition", r.ephemeralTransitionObserved);
+    C54P32("segmentRetired", r.segmentRetired);
+    C54P32("segmentRecycled", r.segmentRecycled);
+    C54P32("allocatorVisible", r.allocatorVisible);
+    C54P32("tailEligible", r.tailEligible);
+    C54P32("tailConsidered", r.tailConsidered);
+    C54P32("tailSelected", r.tailSelected);
+    C54P32("tailConsumed", r.tailConsumed);
+    C54P32("tailStillMapped", r.tailStillMapped);
+    C54P32("eligibilityTransition", r.eligibilityTransition);
+    C54P32("postCollectionAllocations", r.postCollectionAllocationCount);
+    C54P32("survivorObservations", r.survivorObservationCount);
+    C54P32("invariantFailures", r.invariantFailures);
+    C54P32("sensitiveDiagnosticAllocations", r.sensitiveDiagnosticAllocations);
+    C54P32("safeStopReason", r.safeStopReason);
+    C54P32("noReuseClassification", r.noReuseClassification);
+    C54P32("requestedGeneration", r.requestedGeneration);
+    C54P32("maximumGeneration", r.maximumGeneration);
+    C54P32("allocationPath", r.allocationPath);
+    C54P32("collectionOrdinal", c == nullptr ? 0u : c->ordinal);
+    C54P32("collectionCondemnedGeneration", c == nullptr ? 0u : c->condemnedGeneration);
+    C54P32("collectionPlannerObserved", c == nullptr ? 0u : c->plannerDecisionObserved);
+    C54P32("collectionPlannerDecision", c == nullptr ? 0u : c->plannerDecision);
+    C54P32("collectionPhaseObserved", c == nullptr ? 0u : c->phaseObserved);
+    C54P32("collectionActualPhase", c == nullptr ? 0u : c->actualPhase);
+    C54P32("collectionRestartObserved", c == nullptr ? 0u : c->restartObserved);
+    C54P32("collectionManagedResumeObserved", c == nullptr ? 0u : c->managedResumeObserved);
+    C54P32("collectionFixBoundsBefore", c == nullptr ? 0u : c->fixBoundsBeforeObserved);
+    C54P32("collectionFixBoundsAfter", c == nullptr ? 0u : c->fixBoundsAfterObserved);
+    C54P32("collectionEphemeralTransition", c == nullptr ? 0u : c->ephemeralTransitionObserved);
+    C54P32("managedContinuation", r.managedContinuationValid);
+    C54P32("planner", r.plannerValid);
+    C54P32("restart", r.restartValid);
+    C54P32("managedResume", r.managedResumeValid);
+    C54P64("tailStart", r.tailStart);
+    C54P64("tailEnd", r.tailEnd);
+    C54P64("tailSize", r.tailSize);
+    C54P64("tailHeap", r.tailHeap);
+    C54P64("tailSegment", r.tailSegment);
+    C54P64("tailGenerationBefore", r.tailGenerationBefore);
+    C54P64("tailGenerationAfter", r.tailGenerationAfter);
+    C54P64("tailSegmentAfter", r.tailSegmentAfter);
+    C54P64("tailSegmentBaseAfter", r.tailSegmentBaseAfter);
+    C54P64("tailSegmentAllocatedAfter", r.tailSegmentAllocatedAfter);
+    C54P64("tailSegmentCommittedAfter", r.tailSegmentCommittedAfter);
+    C54P64("tailSegmentReservedAfter", r.tailSegmentReservedAfter);
+    C54P64("ephemeralSegmentBefore", r.ephemeralSegmentBefore);
+    C54P64("ephemeralLowBefore", r.ephemeralLowBefore);
+    C54P64("ephemeralHighBefore", r.ephemeralHighBefore);
+    C54P64("ephemeralSegmentAfter", r.ephemeralSegmentAfter);
+    C54P64("ephemeralLowAfter", r.ephemeralLowAfter);
+    C54P64("ephemeralHighAfter", r.ephemeralHighAfter);
+#define C54GEN(prefix, state) \
+    C54P64(prefix "0Start", (state).generations[0].startSegmentMem); \
+    C54P64(prefix "0AllocationStart", (state).generations[0].allocationStart); \
+    C54P64(prefix "0AllocationPointer", (state).generations[0].allocationPointer); \
+    C54P64(prefix "0AllocationLimit", (state).generations[0].allocationLimit); \
+    C54P64(prefix "0Segment", (state).generations[0].allocationSegment); \
+    C54P64(prefix "1Start", (state).generations[1].startSegmentMem); \
+    C54P64(prefix "1AllocationStart", (state).generations[1].allocationStart); \
+    C54P64(prefix "1AllocationPointer", (state).generations[1].allocationPointer); \
+    C54P64(prefix "1AllocationLimit", (state).generations[1].allocationLimit); \
+    C54P64(prefix "1Segment", (state).generations[1].allocationSegment); \
+    C54P64(prefix "2Start", (state).generations[2].startSegmentMem); \
+    C54P64(prefix "2AllocationStart", (state).generations[2].allocationStart); \
+    C54P64(prefix "2AllocationPointer", (state).generations[2].allocationPointer); \
+    C54P64(prefix "2AllocationLimit", (state).generations[2].allocationLimit); \
+    C54P64(prefix "2Segment", (state).generations[2].allocationSegment);
+    if (c != nullptr) {
+        C54GEN("genBefore", c->fixBoundsBefore);
+        C54GEN("genAfter", c->fixBoundsAfter);
+    }
+#undef C54GEN
+    C54P64("firstObject", r.firstObject);
+    C54P64("firstObjectEnd", r.firstObjectEnd);
+    C54P64("firstObjectOffset", r.firstObjectOffset);
+    C54P64("firstSupplyingSegment", r.firstSupplyingSegment);
+    C54P64("firstSupplyingGeneration", r.firstSupplyingGeneration);
+    C54P64("firstSentinel", r.firstSentinel);
+    C54P64("firstReadback", r.firstReadback);
+#undef C54P32
+#undef C54P64
+    suspendEeSerialPutString("\n");
+}
+
+static void guideXosNativeAotC011EC54CaptureContext(bool after) {
+    guidexos_nativeaot_c011ec54_lifecycle_record& r =
+        g_guideXosAllocationDiagnostics.c011ec54Lifecycle;
+    uintptr_t allocationPointer = 0u;
+    uintptr_t allocationLimit = 0u;
+    uintptr_t currentThread = 0u;
+    uintptr_t gcHeap = 0u;
+    gx_uint32 gcCount = 0u;
+    uintptr_t allocatedBytes = 0u;
+    gx_uint32 finalizableObjects = 0u;
+    gx_uint32 gcInProgress = 0u;
+    gx_uint32 gcMode = 0u;
+    uintptr_t contextIdentity = 0u;
+    uintptr_t allocBytes = 0u;
+    uintptr_t allocBytesUoh = 0u;
+    if (guidexos_nativeaot_gc_read_state(
+            &allocationPointer, &allocationLimit, &currentThread, &gcHeap,
+            &gcCount, &allocatedBytes, &finalizableObjects, &gcInProgress,
+            &gcMode, &contextIdentity, &allocBytes, &allocBytesUoh) != 0 ||
+        currentThread == 0u || gcHeap == 0u || contextIdentity == 0u ||
+        allocationLimit < allocationPointer) {
+        ++r.invariantFailures;
+        r.safeStopReason = 0xC0540001u;
+        return;
+    }
+    r.threadIdentity = currentThread;
+    r.contextIdentity = contextIdentity;
+    r.homeHeap = gcHeap;
+    r.collectionCountAfter = gcCount;
+    if (after) {
+        r.finalAllocPtr = allocationPointer;
+        r.finalAllocLimit = allocationLimit;
+    } else {
+        r.initialAllocPtr = allocationPointer;
+        r.initialAllocLimit = allocationLimit;
+        r.collectionCountBefore = gcCount;
+    }
+    (void)allocatedBytes;
+    (void)finalizableObjects;
+    (void)gcInProgress;
+    (void)gcMode;
+    (void)allocBytes;
+    (void)allocBytesUoh;
+}
+
+static const guidexos_nativeaot_c011ec54_state_snapshot*
+guideXosNativeAotC011EC54ActiveAfterState(
+    const guidexos_nativeaot_c011ec54_collection_record& c) {
+    if (c.adjustAfterObserved != 0u) return &c.adjustAfter;
+    if (c.fixBoundsAfterObserved != 0u) return &c.fixBoundsAfter;
+    return &c.entry;
+}
+
+static void guideXosNativeAotC011EC54CaptureTailAfterCollection() {
+    guidexos_nativeaot_c011ec54_lifecycle_record& r =
+        g_guideXosAllocationDiagnostics.c011ec54Lifecycle;
+    if (r.tailStart == 0u || r.tailEnd <= r.tailStart ||
+        r.collectionEntryCount == 0u) return;
+    uintptr_t segment = 0u;
+    uintptr_t segmentBase = 0u;
+    uintptr_t segmentAllocated = 0u;
+    uintptr_t segmentCommitted = 0u;
+    uintptr_t segmentReserved = 0u;
+    gx_uint32 segmentGeneration = 0u;
+    if (guidexos_nativeaot_gc_describe_segment(
+            reinterpret_cast<void*>(r.tailStart), &segment, &segmentBase,
+            &segmentAllocated, &segmentCommitted, &segmentReserved, nullptr,
+            &segmentGeneration) != 0 || segment == 0u ||
+        segmentBase > r.tailStart || r.tailEnd > segmentReserved) {
+        r.tailStillMapped = 0u;
+        return;
+    }
+    r.tailStillMapped = 1u;
+    r.allocatorVisible = 1u;
+    r.tailSegmentAfter = segment;
+    r.tailSegmentBaseAfter = segmentBase;
+    r.tailSegmentAllocatedAfter = segmentAllocated;
+    r.tailSegmentCommittedAfter = segmentCommitted;
+    r.tailSegmentReservedAfter = segmentReserved;
+    r.tailGenerationAfter = segmentGeneration;
+    const guidexos_nativeaot_c011ec54_collection_record& c =
+        r.collections[r.collectionEntryCount - 1u];
+    const guidexos_nativeaot_c011ec54_state_snapshot* state =
+        guideXosNativeAotC011EC54ActiveAfterState(c);
+    r.ephemeralSegmentAfter = state->ephemeralSegment;
+    r.ephemeralLowAfter = state->ephemeralLow;
+    r.ephemeralHighAfter = state->ephemeralHigh;
+    const bool activeEphemeralRange = state->ephemeralSegment == segment &&
+        state->ephemeralLow != 0u &&
+        state->ephemeralHigh > state->ephemeralLow &&
+        r.tailStart >= state->ephemeralLow &&
+        r.tailEnd <= state->ephemeralHigh;
+    if (r.tailEligible == 0u && activeEphemeralRange) {
+        r.tailEligible = 1u;
+        r.eligibilityTransition = 1u;
+        guideXosNativeAotC011EC54Emit(
+            "ELIGIBLE marker=C011EC54-ELIGIBLE", r);
+    }
+}
+
+extern "C" __declspec(dllexport) int __cdecl
+guideXosNativeAotC011EC54Start() {
+    guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    guidexos_nativeaot_c011ec54_lifecycle_record& r =
+        d.c011ec54Lifecycle;
+    r = {};
+    const guidexos_nativeaot_c011ec40_compaction_record& c40 =
+        d.c011ec40Compaction;
+    const guidexos_nativeaot_c011ec41_provenance_record& c41 =
+        d.c011ec41Provenance;
+    if (c40.completionMarkerEmitted == 0u || c40.reclaimedEmitted == 0u ||
+        c41.completionMarkerEmitted == 0u || c40.freeTailStart == 0u ||
+        c40.freeTailEnd <= c40.freeTailStart) {
+        r.safeStopReason = 0xC0540003u;
+        guideXosNativeAotC011EC54Emit(
+            "BLOCKED marker=C011EC54-BLOCKED", r);
+        return -1;
+    }
+    r.started = 1u;
+    r.preflightEmitted = 1u;
+    r.reclaimedEmitted = 1u;
+    r.tailSegment = c40.segment;
+    r.tailStart = c40.freeTailStart;
+    r.tailEnd = c40.freeTailEnd;
+    r.tailSize = c40.freeTailSize;
+    r.tailHeap = c41.homeHeap;
+    r.tailGenerationBefore = static_cast<uint32_t>(c40.generation);
+    r.tailStillMapped = 1u;
+    r.allocatorVisible = c40.allocatorVisibleTail;
+    r.requestedGeneration = 0u;
+    r.requestedDomain = 0u;
+    r.maximumGeneration = d.c011ec39Plan.maximumGeneration != 0u
+        ? d.c011ec39Plan.maximumGeneration : 2u;
+    r.managedContinuationValid = 1u;
+    guideXosNativeAotC011EC54CaptureContext(false);
+    if (r.invariantFailures != 0u) {
+        guideXosNativeAotC011EC54Emit(
+            "BLOCKED marker=C011EC54-BLOCKED", r);
+        return -1;
+    }
+    r.tailSegmentBaseBefore = c40.segmentStart;
+    r.tailSegmentAllocatedBefore = c40.segmentAllocatedAfter;
+    r.tailSegmentCommittedBefore = c40.segmentCommitted;
+    r.tailSegmentReservedBefore = c40.segmentReserved;
+    guideXosNativeAotC011EC54Emit(
+        "PREFLIGHT marker=C011EC54-PREFLIGHT", r);
+    guideXosNativeAotC011EC54Emit(
+        "RECLAIMED marker=C011EC54-RECLAIMED", r);
+    r.lifecycleEmitted = 1u;
+    guideXosNativeAotC011EC54Emit(
+        "LIFECYCLE marker=C011EC54-LIFECYCLE", r);
+    return 0;
+}
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC54CollectionEntered(
+    uint32_t generation, uint32_t collectionReason) {
+    guidexos_nativeaot_c011ec54_lifecycle_record& r =
+        g_guideXosAllocationDiagnostics.c011ec54Lifecycle;
+    if (r.started == 0u) return;
+    if (r.collectionEntryCount >=
+        GUIDEXOS_NATIVEAOT_C011EC54_MAX_COLLECTIONS) {
+        ++r.invariantFailures;
+        r.safeStopReason = 0xC0540004u;
+        return;
+    }
+    const uint32_t index = r.collectionEntryCount++;
+    guidexos_nativeaot_c011ec54_collection_record& c = r.collections[index];
+    c = {};
+    c.observed = 1u;
+    c.ordinal = index + 1u;
+    c.condemnedGeneration = generation;
+    c.collectionReason = collectionReason;
+    if (generation >= 1u) r.sourceOlderGenerationObserved = 1u;
+    guideXosNativeAotC011EC54Emit(
+        "LIFECYCLE marker=C011EC54-LIFECYCLE", r);
+}
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC54PlannerDecisionObserved(
+    uint32_t finalDecision, uint32_t condemnedGeneration,
+    uint32_t collectionReason) {
+    guidexos_nativeaot_c011ec54_lifecycle_record& r =
+        g_guideXosAllocationDiagnostics.c011ec54Lifecycle;
+    if (r.started == 0u || r.collectionEntryCount == 0u) return;
+    guidexos_nativeaot_c011ec54_collection_record& c =
+        r.collections[r.collectionEntryCount - 1u];
+    c.plannerDecisionObserved = 1u;
+    c.plannerDecision = finalDecision;
+    c.condemnedGeneration = condemnedGeneration;
+    c.collectionReason = collectionReason;
+    r.plannerValid = 1u;
+}
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC54PhaseEntered(uint32_t phase) {
+    guidexos_nativeaot_c011ec54_lifecycle_record& r =
+        g_guideXosAllocationDiagnostics.c011ec54Lifecycle;
+    if (r.started == 0u || r.collectionEntryCount == 0u) return;
+    guidexos_nativeaot_c011ec54_collection_record& c =
+        r.collections[r.collectionEntryCount - 1u];
+    c.phaseObserved = 1u;
+    c.actualPhase = phase;
+}
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC54GenerationStateObserved(
+    const guidexos_nativeaot_c011ec54_state_snapshot* state) {
+    guidexos_nativeaot_c011ec54_lifecycle_record& r =
+        g_guideXosAllocationDiagnostics.c011ec54Lifecycle;
+    if (r.started == 0u || state == nullptr || r.collectionEntryCount == 0u)
+        return;
+    if (state->operation < GUIDEXOS_NATIVEAOT_C011EC54_COLLECTION_ENTRY ||
+        state->operation > GUIDEXOS_NATIVEAOT_C011EC54_ADJUST_EPHEMERAL_AFTER) {
+        ++r.invariantFailures;
+        r.safeStopReason = 0xC0540005u;
+        return;
+    }
+    guidexos_nativeaot_c011ec54_collection_record& c =
+        r.collections[r.collectionEntryCount - 1u];
+    if (state->operation == GUIDEXOS_NATIVEAOT_C011EC54_COLLECTION_ENTRY) {
+        c.entry = *state;
+        r.ephemeralSegmentBefore = state->ephemeralSegment;
+        r.ephemeralLowBefore = state->ephemeralLow;
+        r.ephemeralHighBefore = state->ephemeralHigh;
+        return;
+    }
+    if (state->operation == GUIDEXOS_NATIVEAOT_C011EC54_FIX_BOUNDS_BEFORE) {
+        c.fixBoundsBefore = *state;
+        c.fixBoundsBeforeObserved = 1u;
+        r.sourceFixBoundsObserved = 1u;
+        guideXosNativeAotC011EC54Emit(
+            "GEN-BEFORE marker=C011EC54-GEN-BEFORE", r);
+    } else if (state->operation == GUIDEXOS_NATIVEAOT_C011EC54_FIX_BOUNDS_AFTER) {
+        c.fixBoundsAfter = *state;
+        c.fixBoundsAfterObserved = 1u;
+        guideXosNativeAotC011EC54Emit(
+            "GEN-AFTER marker=C011EC54-GEN-AFTER", r);
+    } else if (state->operation == GUIDEXOS_NATIVEAOT_C011EC54_ADJUST_EPHEMERAL_BEFORE) {
+        c.adjustBefore = *state;
+        c.adjustBeforeObserved = 1u;
+        r.sourceAdjustObserved = 1u;
+    } else {
+        c.adjustAfter = *state;
+        c.adjustAfterObserved = 1u;
+        r.sourceAdjustObserved = 1u;
+        const bool transition = c.adjustBefore.ephemeralSegment !=
+                c.adjustAfter.ephemeralSegment ||
+            c.adjustBefore.ephemeralLow != c.adjustAfter.ephemeralLow ||
+            c.adjustBefore.ephemeralHigh != c.adjustAfter.ephemeralHigh;
+        if (transition) {
+            c.ephemeralTransitionObserved = 1u;
+            r.ephemeralTransitionObserved = 1u;
+            r.ephemeralTransitionEmitted = 1u;
+            guideXosNativeAotC011EC54Emit(
+                "EPHEMERAL marker=C011EC54-EPHEMERAL", r);
+        }
+    }
+}
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC54SegmentTransitionObserved(
+    uint32_t reason, uintptr_t oldSegment, uintptr_t newSegment,
+    uintptr_t oldAllocated, uintptr_t newAllocated,
+    uintptr_t oldReserved, uintptr_t newReserved) {
+    guidexos_nativeaot_c011ec54_lifecycle_record& r =
+        g_guideXosAllocationDiagnostics.c011ec54Lifecycle;
+    if (r.started == 0u || oldSegment == newSegment) return;
+    if (reason == 1u) {
+        r.ephemeralTransitionObserved = 1u;
+        r.ephemeralTransitionEmitted = 1u;
+        guideXosNativeAotC011EC54Emit(
+            "EPHEMERAL marker=C011EC54-EPHEMERAL", r);
+    } else if (reason == 2u) {
+        r.segmentRecycled = 1u;
+        r.recycleEmitted = 1u;
+        guideXosNativeAotC011EC54Emit(
+            "RECYCLE marker=C011EC54-RECYCLE", r);
+    } else if (reason == 3u) {
+        r.segmentRetired = 1u;
+        guideXosNativeAotC011EC54Emit(
+            "RETIRE marker=C011EC54-RETIRE", r);
+    }
+    (void)oldAllocated;
+    (void)newAllocated;
+    (void)oldReserved;
+    (void)newReserved;
+}
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC54RestartEEReturned() {
+    guidexos_nativeaot_c011ec54_lifecycle_record& r =
+        g_guideXosAllocationDiagnostics.c011ec54Lifecycle;
+    if (r.started == 0u || r.collectionEntryCount == 0u) return;
+    guidexos_nativeaot_c011ec54_collection_record& c =
+        r.collections[r.collectionEntryCount - 1u];
+    if (c.restartObserved != 0u) return;
+    c.restartObserved = 1u;
+    c.managedResumeObserved = 1u;
+    r.restartValid = 1u;
+    r.managedResumeValid = 1u;
+    guideXosNativeAotC011EC54CaptureContext(true);
+    guideXosNativeAotC011EC54CaptureTailAfterCollection();
+    guideXosNativeAotC011EC54Emit(
+        "RESUME marker=C011EC54-RESUME", r);
+}
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC54AllocationPathObserved(
+    uint32_t path, uintptr_t selectedStart, uintptr_t selectedEnd,
+    uintptr_t allocationAddress, uintptr_t alignedSize,
+    uintptr_t residualStart, uintptr_t residualEnd,
+    uintptr_t freeBytesBefore, uintptr_t freeBytesAfter) {
+    guidexos_nativeaot_c011ec54_lifecycle_record& r =
+        g_guideXosAllocationDiagnostics.c011ec54Lifecycle;
+    if (r.started == 0u || r.requestActive == 0u ||
+        r.allocationCount >= GUIDEXOS_NATIVEAOT_C011EC54_MAX_ALLOCATIONS)
+        return;
+    guidexos_nativeaot_c011ec54_allocation_record& a =
+        r.allocations[r.allocationCount];
+    a.candidateObserved = 1u;
+    a.candidatePath = path;
+    a.candidateStart = selectedStart;
+    a.candidateEnd = selectedEnd;
+    r.allocationPath = path;
+    if (guideXosNativeAotC011EC54RangeOverlaps(
+            selectedStart, selectedEnd, r.tailStart, r.tailEnd) &&
+        r.tailEligible != 0u) {
+        r.tailConsidered = 1u;
+        r.tailSelected = 1u;
+        a.eligible = 1u;
+        a.considered = 1u;
+        a.selected = 1u;
+        a.selectedStart = selectedStart;
+        a.selectedEnd = selectedEnd;
+        r.candidateStart = selectedStart;
+        r.candidateEnd = selectedEnd;
+        r.selectedStart = selectedStart;
+        r.selectedEnd = selectedEnd;
+        guideXosNativeAotC011EC54Emit(
+            "CONSIDERED marker=C011EC54-CONSIDERED", r);
+        guideXosNativeAotC011EC54Emit(
+            "SELECTED marker=C011EC54-SELECTED", r);
+    }
+    (void)allocationAddress;
+    (void)alignedSize;
+    (void)residualStart;
+    (void)residualEnd;
+    (void)freeBytesBefore;
+    (void)freeBytesAfter;
+}
+
+extern "C" __declspec(dllexport) int __cdecl
+guideXosNativeAotC011EC54BeforeAllocation(
+    uint32_t ordinal, uint32_t payloadSize) {
+    guidexos_nativeaot_c011ec54_lifecycle_record& r =
+        g_guideXosAllocationDiagnostics.c011ec54Lifecycle;
+    if (r.started == 0u || ordinal >=
+        GUIDEXOS_NATIVEAOT_C011EC54_MAX_ALLOCATIONS ||
+        ordinal != r.allocationCount || payloadSize != 65536u ||
+        r.requestActive != 0u) {
+        r.safeStopReason = 0xC0540007u;
+        return -1;
+    }
+    guidexos_nativeaot_c011ec54_allocation_record& a = r.allocations[ordinal];
+    a = {};
+    a.observed = 1u;
+    a.ordinal = ordinal;
+    a.requestedPayload = payloadSize;
+    a.requestedSize = (payloadSize + 0x18u + 7u) & ~7u;
+    a.sentinel = ordinal;
+    uintptr_t allocationPointer = 0u;
+    uintptr_t allocationLimit = 0u;
+    uintptr_t currentThread = 0u;
+    uintptr_t gcHeap = 0u;
+    gx_uint32 gcCount = 0u;
+    uintptr_t allocatedBytes = 0u;
+    gx_uint32 finalizableObjects = 0u;
+    gx_uint32 gcInProgress = 0u;
+    gx_uint32 gcMode = 0u;
+    uintptr_t contextIdentity = 0u;
+    uintptr_t allocBytes = 0u;
+    uintptr_t allocBytesUoh = 0u;
+    if (guidexos_nativeaot_gc_read_state(
+            &allocationPointer, &allocationLimit, &currentThread, &gcHeap,
+            &gcCount, &allocatedBytes, &finalizableObjects, &gcInProgress,
+            &gcMode, &contextIdentity, &allocBytes, &allocBytesUoh) != 0 ||
+        currentThread == 0u || gcHeap == 0u || contextIdentity == 0u ||
+        allocationLimit < allocationPointer) {
+        ++r.invariantFailures;
+        r.safeStopReason = 0xC0540008u;
+        return -1;
+    }
+    a.collectionBefore = gcCount;
+    a.pointerBefore = allocationPointer;
+    a.limitBefore = allocationLimit;
+    r.requestActive = 1u;
+    r.collectionCountBefore = gcCount;
+    return 0;
+}
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC54NativeHelperEntry(uintptr_t requestedSize) {
+    guidexos_nativeaot_c011ec54_lifecycle_record& r =
+        g_guideXosAllocationDiagnostics.c011ec54Lifecycle;
+    if (r.started == 0u || r.requestActive == 0u ||
+        r.allocationCount >= GUIDEXOS_NATIVEAOT_C011EC54_MAX_ALLOCATIONS)
+        return;
+    if (requestedSize != r.allocations[r.allocationCount].requestedSize) {
+        ++r.invariantFailures;
+        r.safeStopReason = 0xC054000Au;
+    }
+}
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC54NativeAfterAllocation(uintptr_t objectAddress) {
+    guidexos_nativeaot_c011ec54_lifecycle_record& r =
+        g_guideXosAllocationDiagnostics.c011ec54Lifecycle;
+    if (r.started == 0u || r.requestActive == 0u) return;
+    const uint32_t ordinal = r.allocationCount;
+    if (ordinal >= GUIDEXOS_NATIVEAOT_C011EC54_MAX_ALLOCATIONS ||
+        objectAddress == 0u) {
+        ++r.invariantFailures;
+        r.safeStopReason = 0xC054000Bu;
+        r.requestActive = 0u;
+        return;
+    }
+    guidexos_nativeaot_c011ec54_allocation_record& a = r.allocations[ordinal];
+    uintptr_t allocationPointerAfter = 0u;
+    uintptr_t allocationLimitAfter = 0u;
+    uintptr_t currentThreadAfter = 0u;
+    uintptr_t gcHeapAfter = 0u;
+    gx_uint32 gcCountAfter = 0u;
+    uintptr_t allocatedBytesAfter = 0u;
+    gx_uint32 finalizableObjectsAfter = 0u;
+    gx_uint32 gcInProgressAfter = 0u;
+    gx_uint32 gcModeAfter = 0u;
+    uintptr_t contextIdentityAfter = 0u;
+    uintptr_t allocBytesAfter = 0u;
+    uintptr_t allocBytesUohAfter = 0u;
+    if (guidexos_nativeaot_gc_read_state(
+            &allocationPointerAfter, &allocationLimitAfter,
+            &currentThreadAfter, &gcHeapAfter, &gcCountAfter,
+            &allocatedBytesAfter, &finalizableObjectsAfter, &gcInProgressAfter,
+            &gcModeAfter, &contextIdentityAfter, &allocBytesAfter,
+            &allocBytesUohAfter) != 0 || currentThreadAfter == 0u ||
+        gcHeapAfter == 0u || contextIdentityAfter == 0u ||
+        allocationLimitAfter < allocationPointerAfter) {
+        ++r.invariantFailures;
+        r.safeStopReason = 0xC054000Cu;
+    }
+    a.objectAddress = objectAddress;
+    a.objectEnd = objectAddress + a.requestedSize;
+    a.pointerAfter = allocationPointerAfter;
+    a.limitAfter = allocationLimitAfter;
+    a.collectionAfter = gcCountAfter;
+    a.postCollection = a.collectionAfter > a.collectionBefore ? 1u : 0u;
+    if (a.postCollection != 0u) ++r.postCollectionAllocationCount;
+    a.pointerValid = a.limitBefore >= a.pointerBefore &&
+        a.limitAfter >= a.pointerAfter &&
+        (a.pointerBefore == 0u || (a.pointerBefore & 7u) == 0u) &&
+        (a.pointerAfter == 0u || (a.pointerAfter & 7u) == 0u) ? 1u : 0u;
+    a.objectValid = objectAddress >= a.pointerBefore ||
+        a.postCollection != 0u ? 1u : 0u;
+    gx_uint32 heapOwned = 0u;
+    if (guidexos_nativeaot_gc_describe_object(
+            reinterpret_cast<void*>(objectAddress), nullptr, nullptr,
+            nullptr, &heapOwned) != 0) heapOwned = 0u;
+    a.heapOwned = heapOwned;
+    gx_uint32 segmentGeneration32 = 0u;
+    if (guidexos_nativeaot_gc_describe_segment(
+            reinterpret_cast<void*>(objectAddress), &a.segmentIdentity,
+            &a.segmentBase, &a.segmentAllocated, &a.segmentCommitted,
+            &a.segmentReserved, nullptr, &segmentGeneration32) != 0 ||
+        a.segmentIdentity == 0u || a.segmentBase == 0u ||
+        a.segmentCommitted < a.segmentBase ||
+        a.segmentReserved < a.segmentCommitted) {
+        ++a.invariantFailures;
+    } else {
+        a.segmentGeneration = segmentGeneration32;
+    }
+    if (r.tailEligible != 0u &&
+        guideXosNativeAotC011EC54RangeOverlaps(
+            a.objectAddress, a.objectEnd, r.tailStart, r.tailEnd)) {
+        a.consumed = 1u;
+        r.tailConsumed = 1u;
+        r.firstConsumingAllocationOrdinal = ordinal;
+        r.firstObject = a.objectAddress;
+        r.firstObjectEnd = a.objectEnd;
+        r.firstObjectOffset = a.objectAddress >= r.tailStart
+            ? a.objectAddress - r.tailStart : 0u;
+        r.firstSupplyingSegment = a.segmentIdentity;
+        r.firstSupplyingGeneration = segmentGeneration32;
+        r.firstSentinel = ordinal;
+    }
+    if (ordinal == 0u) {
+        r.firstObject = a.objectAddress;
+        r.firstObjectEnd = a.objectEnd;
+        r.firstSupplyingSegment = a.segmentIdentity;
+        r.firstSupplyingGeneration = segmentGeneration32;
+        r.firstSentinel = ordinal;
+    }
+    a.invariantFailures += a.pointerValid == 0u ? 1u : 0u;
+    a.invariantFailures += a.objectValid == 0u ? 1u : 0u;
+    a.invariantFailures += a.heapOwned == 0u ? 1u : 0u;
+    r.invariantFailures += a.invariantFailures;
+    r.finalAllocPtr = a.pointerAfter;
+    r.finalAllocLimit = a.limitAfter;
+    r.collectionCountAfter = a.collectionAfter;
+    r.managedContinuationValid = r.invariantFailures == 0u ? 1u : 0u;
+    r.requestActive = 0u;
+    r.allocationCount = ordinal + 1u;
+}
+
+extern "C" __declspec(dllexport) int __cdecl
+guideXosNativeAotC011EC54AfterAllocation(uintptr_t objectAddress) {
+    guideXosNativeAotC011EC54NativeAfterAllocation(objectAddress);
+    return g_guideXosAllocationDiagnostics.c011ec54Lifecycle.invariantFailures == 0u
+        ? 0 : -1;
+}
+
+extern "C" __declspec(dllexport) int __cdecl
+guideXosNativeAotC011EC54ManagedReadback(uint32_t ordinal, uint32_t valid) {
+    guidexos_nativeaot_c011ec54_lifecycle_record& r =
+        g_guideXosAllocationDiagnostics.c011ec54Lifecycle;
+    if (r.started == 0u || ordinal >= r.allocationCount || valid == 0u ||
+        r.allocations[ordinal].objectAddress == 0u ||
+        r.allocations[ordinal].sentinel != ordinal) {
+        ++r.invariantFailures;
+        r.safeStopReason = 0xC054000Du;
+        return -1;
+    }
+    r.liveObjectIntegrity = 1u;
+    r.firstReadback = ordinal == 0u ? 1u : r.firstReadback;
+    return 0;
+}
+
+extern "C" __declspec(dllexport) int __cdecl
+guideXosNativeAotC011EC54RecordSurvivor(
+    uint32_t ordinal, uint32_t collectionCount, uintptr_t objectAddress,
+    uint32_t generation,
+    uint32_t valid) {
+    guidexos_nativeaot_c011ec54_lifecycle_record& r =
+        g_guideXosAllocationDiagnostics.c011ec54Lifecycle;
+    if (r.started == 0u || ordinal >=
+        GUIDEXOS_NATIVEAOT_C011EC54_MAX_SURVIVORS || valid == 0u ||
+        objectAddress == 0u || generation > r.maximumGeneration) {
+        ++r.invariantFailures;
+        r.safeStopReason = 0xC054000Eu;
+        return -1;
+    }
+    guidexos_nativeaot_c011ec54_survivor_record& s = r.survivors[ordinal];
+    if (s.observed == 0u) {
+        s.initialAddress = ordinal < r.allocationCount
+            ? r.allocations[ordinal].objectAddress : objectAddress;
+        s.initialGeneration = ordinal < r.allocationCount
+            ? static_cast<uint32_t>(r.allocations[ordinal].segmentGeneration)
+            : generation;
+    }
+    s.observed = 1u;
+    s.ordinal = ordinal;
+    s.collectionCount = collectionCount;
+    s.generation = generation;
+    s.valid = valid;
+    s.currentAddress = objectAddress;
+    s.moved = s.initialAddress != s.currentAddress ? 1u : 0u;
+    if (guidexos_nativeaot_gc_describe_segment(
+            reinterpret_cast<void*>(objectAddress), &s.segment, nullptr,
+            nullptr, nullptr, nullptr, nullptr, nullptr) != 0) s.segment = 0u;
+    ++r.survivorObservationCount;
+    suspendEeSerialPutString(
+        "[nativeaot-gc-short-weak-lifetime] SURVIVOR marker=C011EC54-SURVIVOR ordinal=");
+    suspendEeSerialPutHex32(s.ordinal);
+    suspendEeSerialPutString(" collectionCount=");
+    suspendEeSerialPutHex32(s.collectionCount);
+    suspendEeSerialPutString(" initialAddress=");
+    suspendEeSerialPutHex64(s.initialAddress);
+    suspendEeSerialPutString(" currentAddress=");
+    suspendEeSerialPutHex64(s.currentAddress);
+    suspendEeSerialPutString(" initialGeneration=");
+    suspendEeSerialPutHex32(s.initialGeneration);
+    suspendEeSerialPutString(" generation=");
+    suspendEeSerialPutHex32(s.generation);
+    suspendEeSerialPutString(" moved=");
+    suspendEeSerialPutHex32(s.moved);
+    suspendEeSerialPutString(" segment=");
+    suspendEeSerialPutHex64(s.segment);
+    suspendEeSerialPutString(" valid=");
+    suspendEeSerialPutHex32(s.valid);
+    suspendEeSerialPutString(" sentinel=");
+    suspendEeSerialPutHex32(s.ordinal);
+    suspendEeSerialPutString("\n");
+    return 0;
+}
+
+extern "C" __declspec(dllexport) int __cdecl
+guideXosNativeAotC011EC54Finish() {
+    guidexos_nativeaot_allocation_diagnostics& d =
+        g_guideXosAllocationDiagnostics;
+    guidexos_nativeaot_c011ec54_lifecycle_record& r =
+        d.c011ec54Lifecycle;
+    r.sensitiveDiagnosticAllocations = d.c011ec29SensitiveAllocationCount;
+    if (r.collectionEntryCount == 0u) {
+        r.noReuseClassification = 8u;
+    } else if (r.sourceOlderGenerationObserved == 0u) {
+        r.noReuseClassification = 7u;
+    } else if (r.segmentRetired != 0u || r.segmentRecycled != 0u) {
+        r.noReuseClassification = r.segmentRecycled != 0u ? 5u : 4u;
+    } else if (r.tailEligible == 0u && r.sourceFixBoundsObserved != 0u) {
+        r.noReuseClassification = 2u;
+    } else if (r.tailEligible != 0u && r.tailConsidered == 0u) {
+        r.noReuseClassification = 6u;
+    } else if (r.tailSelected != 0u && r.tailConsumed == 0u) {
+        r.noReuseClassification = 7u;
+    }
+    const bool predecessors = d.c011ec40Compaction.reclaimedEmitted != 0u &&
+        d.c011ec41Provenance.completionMarkerEmitted != 0u;
+    const bool naturalReuse = r.tailConsumed != 0u && r.tailSelected != 0u &&
+        r.firstObject != 0u && r.managedContinuationValid != 0u &&
+        r.invariantFailures == 0u && r.sensitiveDiagnosticAllocations == 0u &&
+        predecessors;
+    const bool naturalSelection = r.tailSelected != 0u &&
+        r.invariantFailures == 0u && r.sensitiveDiagnosticAllocations == 0u;
+    const bool naturalEligibility = r.tailEligible != 0u &&
+        r.invariantFailures == 0u && r.sensitiveDiagnosticAllocations == 0u;
+    const bool observedLifecycle = r.sourceOlderGenerationObserved != 0u &&
+        r.sourceFixBoundsObserved != 0u;
+    const bool observedBoundarySetup = r.sourceFixBoundsObserved != 0u;
+    const char* outcome = r.invariantFailures != 0u ? "E" :
+        (naturalReuse ? "A" : (naturalSelection || naturalEligibility ? "B" :
+        (r.segmentRetired != 0u || r.segmentRecycled != 0u ? "D" :
+        (observedLifecycle || observedBoundarySetup ? "C" : "D"))));
+    const uint32_t level = naturalReuse ? 5u :
+        (naturalSelection ? 4u : (naturalEligibility ? 3u :
+        (observedLifecycle ? 2u : (observedBoundarySetup ? 1u : 0u))));
+    if (naturalReuse) {
+        r.completionMarkerEmitted = 1u;
+        guideXosNativeAotC011EC54Emit(
+            "REUSE marker=C011EC54-REUSE", r);
+    }
+    guideXosNativeAotC011EC54Emit(
+        "ELIGIBILITY marker=C011EC54-ELIGIBILITY", r);
+    r.completionMarkerEmitted = 1u;
+    suspendEeSerialPutString(
+        "[nativeaot-gc-short-weak-lifetime] COMPLETE marker=C011EC54 outcome=");
     suspendEeSerialPutString(outcome);
     suspendEeSerialPutString(" successLevel=");
     suspendEeSerialPutHex32(level);
@@ -19755,6 +20562,20 @@ extern "C" __declspec(dllexport) int __cdecl guideXosNativeAotC011EC53AfterAlloc
 extern "C" __declspec(dllexport) int __cdecl guideXosNativeAotC011EC53ManagedReadback(uint32_t ordinal, uint32_t valid);
 extern "C" __declspec(dllexport) int __cdecl guideXosNativeAotC011EC53Finish();
 #endif
+#if defined(GUIDEXOS_NATIVEAOT_C011EC54_RECLAIMED_GEN1_EPHEMERAL_TRANSITION)
+extern "C" void* __pinvoke_HostLogProof__Module____Internal__guideXosNativeAotC011EC54Start__Ansi;
+extern "C" void* __pinvoke_HostLogProof__Module____Internal__guideXosNativeAotC011EC54BeforeAllocation__Ansi;
+extern "C" void* __pinvoke_HostLogProof__Module____Internal__guideXosNativeAotC011EC54AfterAllocation__Ansi;
+extern "C" void* __pinvoke_HostLogProof__Module____Internal__guideXosNativeAotC011EC54ManagedReadback__Ansi;
+extern "C" void* __pinvoke_HostLogProof__Module____Internal__guideXosNativeAotC011EC54RecordSurvivor__Ansi;
+extern "C" void* __pinvoke_HostLogProof__Module____Internal__guideXosNativeAotC011EC54Finish__Ansi;
+extern "C" __declspec(dllexport) int __cdecl guideXosNativeAotC011EC54Start();
+extern "C" __declspec(dllexport) int __cdecl guideXosNativeAotC011EC54BeforeAllocation(uint32_t ordinal, uint32_t payloadSize);
+extern "C" __declspec(dllexport) int __cdecl guideXosNativeAotC011EC54AfterAllocation(uintptr_t objectAddress);
+extern "C" __declspec(dllexport) int __cdecl guideXosNativeAotC011EC54ManagedReadback(uint32_t ordinal, uint32_t valid);
+extern "C" __declspec(dllexport) int __cdecl guideXosNativeAotC011EC54RecordSurvivor(uint32_t ordinal, uint32_t collectionCount, uintptr_t objectAddress, uint32_t generation, uint32_t valid);
+extern "C" __declspec(dllexport) int __cdecl guideXosNativeAotC011EC54Finish();
+#endif
 #endif
 #endif
 
@@ -21375,6 +22196,32 @@ extern "C" __declspec(noinline) void __cdecl RhpReversePInvoke(void* frame) {
     __pinvoke_HostLogProof__Module____Internal__guideXosNativeAotC011EC53Finish__Ansi =
         reinterpret_cast<void*>(static_cast<GuideXosNativeAotC011EC53FinishFn>(
             ::guideXosNativeAotC011EC53Finish));
+#endif
+#if defined(GUIDEXOS_NATIVEAOT_C011EC54_RECLAIMED_GEN1_EPHEMERAL_TRANSITION)
+    using GuideXosNativeAotC011EC54StartFn = int (__cdecl*)(void);
+    using GuideXosNativeAotC011EC54BeforeAllocationFn = int (__cdecl*)(uint32_t, uint32_t);
+    using GuideXosNativeAotC011EC54AfterAllocationFn = int (__cdecl*)(uintptr_t);
+    using GuideXosNativeAotC011EC54ManagedReadbackFn = int (__cdecl*)(uint32_t, uint32_t);
+    using GuideXosNativeAotC011EC54RecordSurvivorFn = int (__cdecl*)(uint32_t, uint32_t, uintptr_t, uint32_t, uint32_t);
+    using GuideXosNativeAotC011EC54FinishFn = int (__cdecl*)(void);
+    __pinvoke_HostLogProof__Module____Internal__guideXosNativeAotC011EC54Start__Ansi =
+        reinterpret_cast<void*>(static_cast<GuideXosNativeAotC011EC54StartFn>(
+            ::guideXosNativeAotC011EC54Start));
+    __pinvoke_HostLogProof__Module____Internal__guideXosNativeAotC011EC54BeforeAllocation__Ansi =
+        reinterpret_cast<void*>(static_cast<GuideXosNativeAotC011EC54BeforeAllocationFn>(
+            ::guideXosNativeAotC011EC54BeforeAllocation));
+    __pinvoke_HostLogProof__Module____Internal__guideXosNativeAotC011EC54AfterAllocation__Ansi =
+        reinterpret_cast<void*>(static_cast<GuideXosNativeAotC011EC54AfterAllocationFn>(
+            ::guideXosNativeAotC011EC54AfterAllocation));
+    __pinvoke_HostLogProof__Module____Internal__guideXosNativeAotC011EC54ManagedReadback__Ansi =
+        reinterpret_cast<void*>(static_cast<GuideXosNativeAotC011EC54ManagedReadbackFn>(
+            ::guideXosNativeAotC011EC54ManagedReadback));
+    __pinvoke_HostLogProof__Module____Internal__guideXosNativeAotC011EC54RecordSurvivor__Ansi =
+        reinterpret_cast<void*>(static_cast<GuideXosNativeAotC011EC54RecordSurvivorFn>(
+            ::guideXosNativeAotC011EC54RecordSurvivor));
+    __pinvoke_HostLogProof__Module____Internal__guideXosNativeAotC011EC54Finish__Ansi =
+        reinterpret_cast<void*>(static_cast<GuideXosNativeAotC011EC54FinishFn>(
+            ::guideXosNativeAotC011EC54Finish));
 #endif
 #if defined(GUIDEXOS_NATIVEAOT_C011EC38_DEAD_OBJECT_RECLAMATION)
     using GuideXosNativeAotC011EC38BeforeAllocationFn = int (__cdecl*)(
