@@ -58,12 +58,20 @@ static_assert(offsetof(gx_host_calls, bare_metal_build_project_poll) == 248, "ba
 static_assert(offsetof(gx_host_calls, bare_metal_build_project_release) == 256, "bare-metal build release slot changed");
 static_assert(offsetof(gx_host_calls, bare_metal_file_stat) == 264, "bare-metal file stat slot changed");
 static_assert(offsetof(gx_host_calls, bare_metal_file_remove) == 304, "bare-metal file remove slot changed");
-static_assert(sizeof(gx_host_calls) == 312, "gx_host_calls size changed");
-static_assert(sizeof(gx_development_run_request) == 72, "development run request size changed");
+static_assert(offsetof(gx_host_calls, bare_metal_development_run_prepare) == 312, "bare-metal run prepare slot changed");
+static_assert(offsetof(gx_host_calls, bare_metal_development_run_start) == 320, "bare-metal run start slot changed");
+static_assert(offsetof(gx_host_calls, bare_metal_development_run_poll) == 328, "bare-metal run poll slot changed");
+static_assert(offsetof(gx_host_calls, bare_metal_development_run_request_close) == 336, "bare-metal run close slot changed");
+static_assert(offsetof(gx_host_calls, bare_metal_development_run_release) == 344, "bare-metal run release slot changed");
+static_assert(sizeof(gx_host_calls) == 352, "gx_host_calls size changed");
+static_assert(sizeof(gx_development_run_request) == 96, "development run request size changed");
 static_assert(offsetof(gx_development_run_request, projectRoot) == 8, "development run request project root offset changed");
 static_assert(offsetof(gx_development_run_request, artifactSha256) == 56, "development run request artifact hash offset changed");
 static_assert(offsetof(gx_development_run_request, flags) == 64, "development run request flags offset changed");
 static_assert(offsetof(gx_development_run_request, reserved) == 68, "development run request reserved offset changed");
+static_assert(offsetof(gx_development_run_request, artifactSize) == 72, "development run artifact size offset changed");
+static_assert(offsetof(gx_development_run_request, artifactArchitecture) == 80, "development run artifact architecture offset changed");
+static_assert(offsetof(gx_development_run_request, artifactAbi) == 88, "development run artifact ABI offset changed");
 static_assert(sizeof(gx_development_debug_request) == 104, "development debug request size changed");
 static_assert(GX_DEVELOPMENT_DEBUG_STEP_OUT_RETURN == 14, "Step Out command must be appended after command 13");
 static_assert(offsetof(gx_development_debug_request, threadId) == 72, "development debug thread id offset changed");
@@ -76,9 +84,10 @@ static_assert(offsetof(gx_development_debug_snapshot, stackHigh) == 464, "develo
 static_assert(offsetof(gx_development_debug_snapshot, internalBreakpointPurpose) == 432,
               "internal breakpoint purpose must occupy the appended snapshot slot");
 static_assert(sizeof(gx_development_debug_snapshot) == 472, "development debug snapshot size changed");
-static_assert(sizeof(gx_development_run_snapshot) == 448, "development run snapshot size changed");
+static_assert(sizeof(gx_development_run_snapshot) == 4552, "development run snapshot size changed");
 static_assert(offsetof(gx_development_run_snapshot, processId) == 24, "development run process id offset changed");
 static_assert(offsetof(gx_development_run_snapshot, applicationId) == 56, "development run application id offset changed");
+static_assert(offsetof(gx_development_run_snapshot, outputCount) == 448, "development run output count offset changed");
 static_assert(sizeof(gx_build_request) == 72, "build request size changed");
 static_assert(offsetof(gx_build_request, projectRoot) == 8, "build request project root offset changed");
 static_assert(offsetof(gx_build_request, configuration) == 64, "build request configuration offset changed");

@@ -1,0 +1,14 @@
+{
+  "formatVersion": 1,
+  "projectId": "dev.guidexos.phase27f",
+  "displayName": "Phase 27F Bare Metal Run",
+  "projectKind": "native-gui-application",
+  "sourceRoot": "src",
+  "applicationManifest": "app/app.json",
+  "defaultTargetProfile": "guidexos.amd64.baremetal.bootstrap.native",
+  "entryPoint": "gx_main",
+  "abi": "guidexos-c-abi-v1",
+  "architecture": "amd64",
+  "outputName": "phase27f",
+  "sourceEntry": "main.cpp"
+}

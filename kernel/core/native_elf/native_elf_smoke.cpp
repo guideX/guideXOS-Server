@@ -307,6 +307,22 @@ void run_bootstrap_execution_smoke()
     serial::puts(developerStudioLaunched ? "ELF Loader: Phase 27E smoke PASS\n"
                                           : "ELF Loader: Phase 27E smoke FAIL\n");
 #endif
+#if defined(GXOS_PHASE27F_SMOKE)
+    serial::puts("ELF Loader: Phase 27F Developer Studio Build-before-Run smoke begin\n");
+    int32_t developerStudio27fReturn = 1;
+    NativeElfRunReport developerStudio27fReport = {};
+    const bool developerStudio27fLaunched = allPassed27d &&
+        run_file("/Apps/DS27F/bin/amd64/p27f.elf",
+                 &developerStudio27fReturn, &developerStudio27fReport) &&
+        developerStudio27fReturn == 0 && developerStudio27fReport.teardownComplete;
+    print_marker("phase27f_app_launch", developerStudio27fLaunched);
+    print_marker("phase27f_kernel_survival", developerStudio27fLaunched &&
+        developerStudio27fReport.finalState == NativeAppExecutionState::Cleaned);
+    const bool phase27fPassed = developerStudio27fLaunched &&
+        developerStudio27fReport.finalState == NativeAppExecutionState::Cleaned;
+    serial::puts(phase27fPassed ? "ELF Loader: Phase 27F smoke PASS\n"
+                                : "ELF Loader: Phase 27F smoke FAIL\n");
+#endif
 #else
     serial::puts("ELF Loader: Phase 27C unavailable on non-AMD64\n");
 #endif

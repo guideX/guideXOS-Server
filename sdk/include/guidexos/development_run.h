@@ -14,6 +14,8 @@ extern "C" {
 #define GX_DEVELOPMENT_RUN_MAX_APP_ID_BYTES 96u
 #define GX_DEVELOPMENT_RUN_MAX_DISPLAY_NAME_BYTES 96u
 #define GX_DEVELOPMENT_RUN_MAX_ERROR_BYTES 128u
+#define GX_DEVELOPMENT_RUN_MAX_OUTPUT_LINES 16u
+#define GX_DEVELOPMENT_RUN_MAX_OUTPUT_LINE_BYTES 256u
 #define GX_DEVELOPMENT_RUN_FLAG_DEBUG_CONTROLLED 1u
 
 typedef uint64_t gx_development_run_handle;
@@ -59,7 +61,12 @@ typedef enum gx_development_run_error_code {
     GX_DEVELOPMENT_RUN_ERROR_LAUNCH_FAILED = 24,
     GX_DEVELOPMENT_RUN_ERROR_RELEASED = 25,
     GX_DEVELOPMENT_RUN_ERROR_SERVICE_UNAVAILABLE = 26,
-    GX_DEVELOPMENT_RUN_ERROR_INTERNAL = 27
+    GX_DEVELOPMENT_RUN_ERROR_INTERNAL = 27,
+    /* Append-only bare-metal Run diagnostics. */
+    GX_DEVELOPMENT_RUN_ERROR_ARTIFACT_SIZE_CHANGED = 28,
+    GX_DEVELOPMENT_RUN_ERROR_RUNTIME_BUSY = 29,
+    GX_DEVELOPMENT_RUN_ERROR_CANCEL_UNSUPPORTED = 30,
+    GX_DEVELOPMENT_RUN_ERROR_CANCELLED = 31
 } gx_development_run_error_code;
 
 typedef struct gx_development_run_request {
@@ -74,7 +81,16 @@ typedef struct gx_development_run_request {
     const char* artifactSha256;
     uint32_t flags;
     uint32_t reserved;
+    /* Appended identity fields. Older callers may omit these fields; services
+     * must gate their use by request->size. */
+    uint64_t artifactSize;
+    const char* artifactArchitecture;
+    const char* artifactAbi;
 } gx_development_run_request;
+
+typedef struct gx_development_run_output_line {
+    char text[GX_DEVELOPMENT_RUN_MAX_OUTPUT_LINE_BYTES];
+} gx_development_run_output_line;
 
 typedef struct gx_development_run_snapshot {
     uint32_t size;
@@ -92,6 +108,11 @@ typedef struct gx_development_run_snapshot {
     char displayName[GX_DEVELOPMENT_RUN_MAX_DISPLAY_NAME_BYTES];
     char artifactSha256[GX_DEVELOPMENT_RUN_MAX_SHA256_BYTES];
     char errorMessage[GX_DEVELOPMENT_RUN_MAX_ERROR_BYTES];
+    /* Appended output capture. Older callers receive the legacy prefix only. */
+    uint32_t reservedOutputAlignment;
+    uint32_t outputCount;
+    uint32_t outputTruncated;
+    gx_development_run_output_line output[GX_DEVELOPMENT_RUN_MAX_OUTPUT_LINES];
 } gx_development_run_snapshot;
 
 #ifdef __cplusplus

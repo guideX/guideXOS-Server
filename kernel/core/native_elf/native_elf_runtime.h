@@ -26,6 +26,8 @@ static const uint64_t APPLICATION_STACK_BASE =
 static const uint64_t APPLICATION_STACK_ALIGNMENT = 16ULL;
 static const uint32_t APPLICATION_STACK_GUARD_BYTES = 0U;
 static const uint32_t NATIVE_APP_MAX_LOG_BYTES = 255U;
+static const uint32_t NATIVE_APP_MAX_LOG_LINES = 16U;
+static const uint32_t NATIVE_APP_MAX_LOG_LINE_BYTES = NATIVE_APP_MAX_LOG_BYTES + 1U;
 // Bootstrap compiler output remains capped by MAX_ELF_FILE_BYTES. The
 // Developer Studio proof app is a prelinked NativeElf application and gets a
 // separate bounded loader buffer while still using the same validator and
@@ -76,6 +78,9 @@ struct NativeAppExecutionContext {
     NativeAppExecutionState state;
     bool hostLogObserved;
     uint32_t hostLogBytes;
+    uint32_t hostLogCount;
+    bool hostLogTruncated;
+    char hostLog[NATIVE_APP_MAX_LOG_LINES][NATIVE_APP_MAX_LOG_LINE_BYTES];
 
     uint64_t kernelRspBefore;
     uint64_t applicationRsp;
@@ -141,9 +146,17 @@ inline bool native_app_log_pointer_range(uint64_t pointer,
     return *maximumReadableBytes != 0;
 }
 
+struct NativeElfRunReport;
+
 bool native_elf_execution_active();
 const NativeAppExecutionContext* native_elf_runtime_context();
 bool native_elf_host_call_validation_smoke();
+
+// Runs one child NativeElf operation while the active NativeElf host
+// application remains suspended. The child uses a separate stack and the
+// parent image/page permissions are restored before this returns. Only one
+// nested operation is supported and it is intentionally synchronous.
+bool run_file_nested(const char* path, int32_t* returnValue, NativeElfRunReport* report = nullptr);
 
 } // namespace native_elf
 } // namespace kernel

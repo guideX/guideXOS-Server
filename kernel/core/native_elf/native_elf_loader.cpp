@@ -6,6 +6,7 @@
 
 #include "native_elf_executor.h"
 #include "../compiler/compiler_build_service.h"
+#include "native_elf_run_service.h"
 #include "arch/amd64.h"
 #include "kernel/desktop_font.h"
 #include "kernel/framebuffer.h"
@@ -31,6 +32,27 @@ static bool s_nxEnabled = false;
 static uint8_t s_file[NATIVE_APP_MAX_ELF_FILE_BYTES];
 static NativeAppExecutionContext s_appRuntime = {};
 static char s_bareBuildStrings[8][768] = {};
+static char s_bareRunStrings[9][768] = {};
+static const uint64_t NESTED_APPLICATION_STACK_BASE =
+    APPLICATION_STACK_BASE - APPLICATION_STACK_SIZE;
+static const uint64_t NESTED_SERVICE_STACK_BASE =
+    NESTED_APPLICATION_STACK_BASE - APPLICATION_STACK_SIZE;
+static bool s_nestedExecutionActive = false;
+static uint8_t s_parentImage[guidexos::native_elf::MAX_MAPPED_BYTES] = {};
+static uint64_t s_parentImageSize = 0;
+static uint64_t s_parentImagePtes[guidexos::native_elf::MAX_MAPPED_BYTES /
+                                  guidexos::native_elf::PAGE_SIZE] = {};
+static uint32_t s_parentImagePteCount = 0;
+static NativeAppExecutionContext s_parentRuntime = {};
+
+struct NestedInvocation {
+    const char* path;
+    int32_t* returnValue;
+    NativeElfRunReport* report;
+    bool success;
+};
+
+static NestedInvocation s_nestedInvocation = {};
 
 static uint64_t read_stack_pointer()
 {
@@ -69,6 +91,13 @@ static gx_result GX_CALL host_log(gx_app_context* context, const char* message)
     serial::putc('\n');
     s_appRuntime.hostLogObserved = true;
     s_appRuntime.hostLogBytes = length;
+    if (s_appRuntime.hostLogCount < NATIVE_APP_MAX_LOG_LINES) {
+        for (uint32_t i = 0; i <= length && i < NATIVE_APP_MAX_LOG_LINE_BYTES; ++i)
+            s_appRuntime.hostLog[s_appRuntime.hostLogCount][i] = message[i];
+        ++s_appRuntime.hostLogCount;
+    } else {
+        s_appRuntime.hostLogTruncated = true;
+    }
     return GX_OK;
 }
 
@@ -319,10 +348,100 @@ static gx_result GX_CALL host_bare_build_release(gx_app_context* context, gx_bui
     return compiler::BareMetalBuildService::release(handle);
 }
 
+static void copy_bytes(uint8_t* destination, const uint8_t* source, uint64_t count);
+
+static bool copy_run_snapshot_to_app(const gx_development_run_snapshot& source,
+                                     gx_development_run_snapshot* destination)
+{
+    if (!destination || !app_pointer_range(destination, sizeof(uint32_t))) return false;
+    const uint32_t requested = destination->size;
+    if (requested < static_cast<uint32_t>(offsetof(gx_development_run_snapshot, outputCount))) return false;
+    const uint32_t bytes = requested < sizeof(source) ? requested : static_cast<uint32_t>(sizeof(source));
+    if (!app_pointer_range(destination, bytes)) return false;
+    copy_bytes(reinterpret_cast<uint8_t*>(destination),
+               reinterpret_cast<const uint8_t*>(&source), bytes);
+    return true;
+}
+
+static gx_result GX_CALL host_bare_run_prepare(
+    gx_app_context* context,
+    const gx_development_run_request* request,
+    gx_development_run_handle* outputHandle,
+    gx_development_run_snapshot* outputSnapshot)
+{
+    if (!app_context_valid(context) || !request || !outputHandle || !outputSnapshot ||
+        !app_pointer_range(request, sizeof(*request)) ||
+        !app_pointer_range(outputHandle, sizeof(*outputHandle)) ||
+        !app_pointer_range(outputSnapshot, sizeof(uint32_t))) return GX_ERROR_PERMISSION_DENIED;
+    if (request->size < sizeof(*request) || request->version != GX_DEVELOPMENT_RUN_API_VERSION) return GX_ERROR_INVALID_ARGUMENT;
+    const char* values[9] = { request->projectRoot, request->projectId, request->projectKind,
+                              request->targetProfile, request->manifestPath, request->artifactPath,
+                              request->artifactSha256, request->artifactArchitecture, request->artifactAbi };
+    for (uint32_t i = 0; i < 9; ++i) {
+        if (!app_string(values[i], s_bareRunStrings[i], sizeof(s_bareRunStrings[i]))) return GX_ERROR_INVALID_ARGUMENT;
+    }
+    gx_development_run_request copied = request[0];
+    copied.projectRoot = s_bareRunStrings[0];
+    copied.projectId = s_bareRunStrings[1];
+    copied.projectKind = s_bareRunStrings[2];
+    copied.targetProfile = s_bareRunStrings[3];
+    copied.manifestPath = s_bareRunStrings[4];
+    copied.artifactPath = s_bareRunStrings[5];
+    copied.artifactSha256 = s_bareRunStrings[6];
+    copied.artifactArchitecture = s_bareRunStrings[7];
+    copied.artifactAbi = s_bareRunStrings[8];
+
+    gx_development_run_snapshot local = {};
+    local.size = sizeof(local);
+    local.version = GX_DEVELOPMENT_RUN_API_VERSION;
+    const gx_result result = NativeElfRunService::prepare(copied, outputHandle, &local);
+    if (!copy_run_snapshot_to_app(local, outputSnapshot)) return GX_ERROR_PERMISSION_DENIED;
+    return result;
+}
+
+static gx_result GX_CALL host_bare_run_start(gx_app_context* context,
+                                              gx_development_run_handle handle)
+{
+    if (!app_context_valid(context)) return GX_ERROR_PERMISSION_DENIED;
+    return NativeElfRunService::start(handle);
+}
+
+static gx_result GX_CALL host_bare_run_poll(gx_app_context* context,
+                                             gx_development_run_handle handle,
+                                             gx_development_run_snapshot* outputSnapshot)
+{
+    if (!app_context_valid(context) || !outputSnapshot ||
+        !app_pointer_range(outputSnapshot, sizeof(uint32_t))) return GX_ERROR_PERMISSION_DENIED;
+    gx_development_run_snapshot local = {};
+    local.size = sizeof(local);
+    local.version = GX_DEVELOPMENT_RUN_API_VERSION;
+    const gx_result result = NativeElfRunService::poll(handle, &local);
+    if (!copy_run_snapshot_to_app(local, outputSnapshot)) return GX_ERROR_PERMISSION_DENIED;
+    return result;
+}
+
+static gx_result GX_CALL host_bare_run_request_close(gx_app_context* context,
+                                                      gx_development_run_handle handle)
+{
+    if (!app_context_valid(context)) return GX_ERROR_PERMISSION_DENIED;
+    return NativeElfRunService::request_close(handle);
+}
+
+static gx_result GX_CALL host_bare_run_release(gx_app_context* context,
+                                                gx_development_run_handle handle)
+{
+    if (!app_context_valid(context)) return GX_ERROR_PERMISSION_DENIED;
+    return NativeElfRunService::release(handle);
+}
+
 static void clear_report(NativeElfRunReport* report)
 {
     if (!report) return;
     *report = {};
+    // A validation failure before image/stack mapping has no runtime cleanup
+    // left outstanding. Paths that acquire resources overwrite this field
+    // from teardown_application before returning.
+    report->teardownComplete = true;
     report->error = "NativeElf execution did not start";
 }
 
@@ -363,10 +482,10 @@ static bool find_read_only_data(const NativeElfValidationResult& validation,
     return true;
 }
 
-static bool prepare_application_stack(NativeElfRunReport* report)
+static bool prepare_application_stack(uint64_t stackBase, NativeElfRunReport* report)
 {
     NativeAppStackLayout stack = {};
-    if (!calculate_application_stack_layout(APPLICATION_STACK_BASE,
+    if (!calculate_application_stack_layout(stackBase,
                                             APPLICATION_STACK_SIZE,
                                             &stack)) {
         return fail_report(report, "application stack layout is invalid");
@@ -410,6 +529,11 @@ static void initialize_app_context()
     s_appRuntime.hostCalls.bare_metal_file_write_all = host_bare_file_write_all;
     s_appRuntime.hostCalls.bare_metal_file_create_directory = host_bare_file_create_directory;
     s_appRuntime.hostCalls.bare_metal_file_remove = host_bare_file_remove;
+    s_appRuntime.hostCalls.bare_metal_development_run_prepare = host_bare_run_prepare;
+    s_appRuntime.hostCalls.bare_metal_development_run_start = host_bare_run_start;
+    s_appRuntime.hostCalls.bare_metal_development_run_poll = host_bare_run_poll;
+    s_appRuntime.hostCalls.bare_metal_development_run_request_close = host_bare_run_request_close;
+    s_appRuntime.hostCalls.bare_metal_development_run_release = host_bare_run_release;
 
     s_appRuntime.appContext = {};
     s_appRuntime.appContext.size = sizeof(gx_app_context);
@@ -632,7 +756,10 @@ bool execution_context_configured()
     return s_contextConfigured;
 }
 
-bool run_file(const char* path, int32_t* returnValue, NativeElfRunReport* report)
+static bool run_file_internal(const char* path,
+                              int32_t* returnValue,
+                              NativeElfRunReport* report,
+                              uint64_t stackBase)
 {
     clear_report(report);
     if (returnValue) *returnValue = 0;
@@ -710,7 +837,7 @@ bool run_file(const char* path, int32_t* returnValue, NativeElfRunReport* report
         (void)teardown_application(report);
         return false;
     }
-    if (!prepare_application_stack(report)) {
+    if (!prepare_application_stack(stackBase, report)) {
         s_appRuntime.state = NativeAppExecutionState::Failed;
         (void)teardown_application(report);
         return false;
@@ -759,6 +886,12 @@ bool run_file(const char* path, int32_t* returnValue, NativeElfRunReport* report
         report->applicationRsp = s_appRuntime.applicationRsp;
         report->hostLogObserved = s_appRuntime.hostLogObserved;
         report->hostLogBytes = s_appRuntime.hostLogBytes;
+        report->hostLogCount = s_appRuntime.hostLogCount;
+        report->hostLogTruncated = s_appRuntime.hostLogTruncated;
+        for (uint32_t i = 0; i < s_appRuntime.hostLogCount && i < NATIVE_APP_MAX_LOG_LINES; ++i)
+            copy_bytes(reinterpret_cast<uint8_t*>(report->hostLog[i]),
+                       reinterpret_cast<const uint8_t*>(s_appRuntime.hostLog[i]),
+                       NATIVE_APP_MAX_LOG_LINE_BYTES);
         report->dedicatedStackUsed =
             native_app_pointer_in_range(s_appRuntime.applicationRsp,
                                         s_appRuntime.stackBase,
@@ -776,6 +909,127 @@ bool run_file(const char* path, int32_t* returnValue, NativeElfRunReport* report
     serial::puts(teardownComplete ? "ELF Loader: teardown PASS\n"
                                   : "ELF Loader: teardown FAIL\n");
     return teardownComplete;
+}
+
+bool run_file(const char* path, int32_t* returnValue, NativeElfRunReport* report)
+{
+    return run_file_internal(path, returnValue, report, APPLICATION_STACK_BASE);
+}
+
+static int32_t GX_CALL nested_service_entry(void*)
+{
+    // The parent NativeElf image and context have already been snapshotted by
+    // run_file_nested. The child therefore gets the same loader contract on a
+    // separate stack while this kernel callback remains outside the image.
+    s_appRuntime = {};
+    s_appRuntime.state = NativeAppExecutionState::Empty;
+    s_nestedInvocation.success = run_file_internal(
+        s_nestedInvocation.path,
+        s_nestedInvocation.returnValue,
+        s_nestedInvocation.report,
+        NESTED_APPLICATION_STACK_BASE);
+    return s_nestedInvocation.success ? 1 : 0;
+}
+
+bool run_file_nested(const char* path, int32_t* returnValue, NativeElfRunReport* report)
+{
+    clear_report(report);
+    if (returnValue) *returnValue = 0;
+    if (!s_contextConfigured || !path || path[0] == '\0' || !returnValue) {
+        return fail_report(report, "nested NativeElf request is invalid");
+    }
+    if (s_nestedExecutionActive || s_appRuntime.state != NativeAppExecutionState::Running) {
+        return fail_report(report, "nested NativeElf runtime is not available");
+    }
+    if (s_appRuntime.imageBase != guidexos::native_elf::IMAGE_BASE ||
+        s_appRuntime.imageSize == 0 ||
+        s_appRuntime.imageSize > guidexos::native_elf::MAX_MAPPED_BYTES ||
+        (s_appRuntime.imageSize & (guidexos::native_elf::PAGE_SIZE - 1ULL)) != 0) {
+        return fail_report(report, "active NativeElf image cannot be suspended safely");
+    }
+
+    NativeAppStackLayout serviceStack = {};
+    if (!calculate_application_stack_layout(NESTED_SERVICE_STACK_BASE,
+                                            APPLICATION_STACK_SIZE,
+                                            &serviceStack) ||
+        !set_page_permissions(serviceStack.base, serviceStack.top, true, false)) {
+        return fail_report(report, "nested NativeElf service stack is unavailable");
+    }
+    clear_bytes(reinterpret_cast<uint8_t*>(static_cast<uintptr_t>(serviceStack.base)),
+                serviceStack.size);
+
+    s_parentImageSize = s_appRuntime.imageSize;
+    copy_bytes(s_parentImage,
+               reinterpret_cast<const uint8_t*>(static_cast<uintptr_t>(s_appRuntime.imageBase)),
+               s_parentImageSize);
+    s_parentImagePteCount = static_cast<uint32_t>(
+        s_parentImageSize / guidexos::native_elf::PAGE_SIZE);
+    if (s_parentImagePteCount > sizeof(s_parentImagePtes) / sizeof(s_parentImagePtes[0])) {
+        (void)set_page_permissions(serviceStack.base, serviceStack.top, false, false);
+        return fail_report(report, "nested NativeElf image page count exceeds bounds");
+    }
+    for (uint32_t i = 0; i < s_parentImagePteCount; ++i) {
+        volatile uint64_t* pte = nullptr;
+        if (!find_pte(s_appRuntime.imageBase +
+                          static_cast<uint64_t>(i) * guidexos::native_elf::PAGE_SIZE,
+                      &pte)) {
+            (void)set_page_permissions(serviceStack.base, serviceStack.top, false, false);
+            return fail_report(report, "parent NativeElf page table cannot be suspended");
+        }
+        s_parentImagePtes[i] = *pte;
+    }
+    s_parentRuntime = s_appRuntime;
+    s_nestedInvocation.path = path;
+    s_nestedInvocation.returnValue = returnValue;
+    s_nestedInvocation.report = report;
+    s_nestedInvocation.success = false;
+    s_nestedExecutionActive = true;
+
+    NativeElfTrampolineResult trampoline = {};
+    const bool invoked = invoke_native_entry_on_stack(
+        reinterpret_cast<uint64_t>(&nested_service_entry),
+        &s_nestedInvocation,
+        serviceStack.top,
+        &trampoline);
+
+    bool restored = true;
+    const uint64_t parentEnd = guidexos::native_elf::IMAGE_BASE + s_parentImageSize;
+    if (!set_page_permissions(guidexos::native_elf::IMAGE_BASE, parentEnd, true, false)) {
+        restored = false;
+    } else {
+        copy_bytes(reinterpret_cast<uint8_t*>(static_cast<uintptr_t>(guidexos::native_elf::IMAGE_BASE)),
+                   s_parentImage, s_parentImageSize);
+        for (uint32_t i = 0; i < s_parentImagePteCount; ++i) {
+            volatile uint64_t* pte = nullptr;
+            const uint64_t page = guidexos::native_elf::IMAGE_BASE +
+                static_cast<uint64_t>(i) * guidexos::native_elf::PAGE_SIZE;
+            if (!find_pte(page, &pte)) {
+                restored = false;
+                continue;
+            }
+            *pte = s_parentImagePtes[i];
+            arch::amd64::invlpg(reinterpret_cast<void*>(static_cast<uintptr_t>(page)));
+        }
+    }
+    clear_bytes(reinterpret_cast<uint8_t*>(static_cast<uintptr_t>(serviceStack.base)),
+                serviceStack.size);
+    if (!set_page_permissions(serviceStack.base, serviceStack.top, false, false)) restored = false;
+
+    s_appRuntime = s_parentRuntime;
+    s_parentRuntime = {};
+    s_parentImageSize = 0;
+    s_parentImagePteCount = 0;
+    s_nestedExecutionActive = false;
+    s_nestedInvocation.path = nullptr;
+    s_nestedInvocation.returnValue = nullptr;
+    s_nestedInvocation.report = nullptr;
+
+    if (!invoked || !restored) {
+        return fail_report(report, !invoked
+            ? "nested NativeElf trampoline invocation failed"
+            : "nested NativeElf parent restoration failed");
+    }
+    return s_nestedInvocation.success;
 }
 
 bool native_elf_execution_active()

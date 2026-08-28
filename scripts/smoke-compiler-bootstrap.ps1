@@ -2,7 +2,8 @@
 param(
     [int]$BootCount = 3,
     [int]$TimeoutSeconds = 45,
-    [switch]$Phase27E
+    [switch]$Phase27E,
+    [switch]$Phase27F
 )
 
 $ErrorActionPreference = "Stop"
@@ -12,8 +13,10 @@ $espDirectory = Join-Path $root "ESP"
 $fixtureDirectory = Join-Path $root "scripts/fixtures/phase27b"
 $phase27dFixtureDirectory = Join-Path $root "scripts/fixtures/phase27d"
 $phase27eFixtureDirectory = Join-Path $root "scripts/fixtures/phase27e"
+$phase27fFixtureDirectory = Join-Path $root "scripts/fixtures/phase27f"
 $developerStudioRoot = Join-Path (Split-Path -Parent $root) "guideXOS_Developer_Studio"
 $phase27eAppDirectory = Join-Path $root "Apps/DS27E"
+$phase27fAppDirectory = Join-Path $root "Apps/DS27F"
 $qemuPath = "C:\Program Files\qemu\qemu-system-x86_64.exe"
 $ovmfCodePath = Join-Path $root "OVMF.fd"
 $tempDirectory = Join-Path ([System.IO.Path]::GetTempPath()) ("guidexos-phase27d-" + [guid]::NewGuid().ToString("N"))
@@ -128,7 +131,7 @@ function Invoke-QemuProofBoot([int]$runNumber, [string]$qemu) {
             "phase27d=PASS",
             "ELF Loader: Phase 27D smoke PASS"
         )
-        if ($Phase27E) {
+        if ($Phase27E -or $Phase27F) {
             $requiredMarkers += @(
                 "phase27e_build_backend=PASS",
                 "phase27e_ide_build=PASS",
@@ -141,11 +144,30 @@ function Invoke-QemuProofBoot([int]$runNumber, [string]$qemu) {
                 "ELF Loader: Phase 27E smoke PASS"
             )
         }
+        if ($Phase27F) {
+            $requiredMarkers += @(
+                "phase27f_run_backend=PASS",
+                "phase27f_ide_run=PASS",
+                "phase27f_source_edit_run=PASS",
+                "phase27f_build_failure_blocks_run=PASS",
+                "phase27f_recovery=PASS",
+                "phase27f_run_recovery=PASS",
+                "phase27f_repeat=PASS",
+                "phase27f_repeat_run=PASS",
+                "phase27f_output_isolation=PASS",
+                "phase27f_exit_code=PASS",
+                "phase27f_artifact_identity=PASS",
+                "phase27f_kernel_survival=PASS",
+                "phase27f=PASS",
+                "phase27f_app_launch=PASS",
+                "ELF Loader: Phase 27F smoke PASS"
+            )
+        }
         $missingMarkers = @($requiredMarkers | Where-Object { $serial -notmatch [regex]::Escape($_) })
         if ($missingMarkers.Count -ne 0) {
             Write-Host "QEMU boot $runNumber missed required Phase 27B/27C/27D markers: $($missingMarkers -join ', ')" -ForegroundColor Red
-            if ($Phase27E) {
-                $serial -split "`r?`n" | Where-Object { $_ -match "phase27e|Phase 27E" } | ForEach-Object { Write-Host $_ }
+            if ($Phase27E -or $Phase27F) {
+                $serial -split "`r?`n" | Where-Object { $_ -match "phase27e|phase27f|Phase 27E|Phase 27F" } | ForEach-Object { Write-Host $_ }
             }
             if ($serial) { Write-Host $serial }
             if ($stderr) { Write-Host $stderr }
@@ -155,7 +177,7 @@ function Invoke-QemuProofBoot([int]$runNumber, [string]$qemu) {
         Write-Host "--- QEMU bare-metal compiler proof boot $runNumber ---" -ForegroundColor Cyan
         $serial -split "`r?`n" |
             Where-Object { $_ -notmatch "NativeElf: artifact_hex=" -and
-                           $_ -match "Compiler:|ELF Loader:|NativeElf:|phase27c|phase27d|phase27e|^error:" } |
+                           $_ -match "Compiler:|ELF Loader:|NativeElf:|phase27c|phase27d|phase27e|phase27f|^error:" } |
             ForEach-Object { Write-Host $_ }
     }
     finally {
@@ -181,19 +203,27 @@ try {
 
     # The host toolchain only builds the kernel/bootloader test harness. It is
     # never called by the guest compiler while it reads and emits the ELF.
-    if ($Phase27E) {
+    if ($Phase27E -or $Phase27F) {
         if (!(Test-Path (Join-Path $developerStudioRoot "scripts/build-phase27e.ps1"))) {
             throw "Developer Studio Phase 27E build script is missing: $developerStudioRoot"
         }
         & powershell -ExecutionPolicy Bypass -File (Join-Path $developerStudioRoot "scripts/build-phase27e.ps1") -ServerRoot $root
         if ($LASTEXITCODE -ne 0) { throw "Developer Studio Phase 27E proof app build failed" }
     }
+    if ($Phase27F) {
+        if (!(Test-Path (Join-Path $developerStudioRoot "scripts/build-phase27f.ps1"))) {
+            throw "Developer Studio Phase 27F build script is missing: $developerStudioRoot"
+        }
+        & powershell -ExecutionPolicy Bypass -File (Join-Path $developerStudioRoot "scripts/build-phase27f.ps1") -ServerRoot $root
+        if ($LASTEXITCODE -ne 0) { throw "Developer Studio Phase 27F proof app build failed" }
+    }
     $env:EXTRA_CFLAGS = "-DGXOS_COMPILER_BOOTSTRAP_SMOKE_ACTIVE"
-    if ($Phase27E) { $env:EXTRA_CFLAGS += " -DGXOS_PHASE27E_SMOKE" }
+    if ($Phase27E -or $Phase27F) { $env:EXTRA_CFLAGS += " -DGXOS_PHASE27E_SMOKE" }
+    if ($Phase27F) { $env:EXTRA_CFLAGS += " -DGXOS_PHASE27F_SMOKE" }
     Push-Location $kernelDirectory
     try {
         Remove-Item -Force -ErrorAction SilentlyContinue (Join-Path $kernelDirectory "build/amd64/obj/core/main.o")
-        if ($Phase27E) {
+        if ($Phase27E -or $Phase27F) {
             Remove-Item -Force -ErrorAction SilentlyContinue (Join-Path $kernelDirectory "build/amd64/obj/core/native_elf/native_elf_smoke.o")
         }
         & $make ARCH=amd64 "EXTRA_CFLAGS=$env:EXTRA_CFLAGS" "MBEDTLS_GUIDEXOS_IMPORT_STATE_DEPS="
@@ -229,8 +259,19 @@ try {
             $backups[$relativePath] = $backup
         }
     }
-    if ($Phase27E) {
+    if ($Phase27E -or $Phase27F) {
         foreach ($relativeDirectory in @("P27E", "Apps/DS27E")) {
+            $target = Join-Path $espDirectory $relativeDirectory
+            if (Test-Path $target -PathType Leaf) { throw "ESP target is a file: $target" }
+            if (Test-Path $target -PathType Container) {
+                $backup = Join-Path $tempDirectory ("backup-directory-" + ($relativeDirectory -replace '[/\\]', '-'))
+                Copy-Item $target $backup -Recurse -Force
+                $directoryBackups[$relativeDirectory] = $backup
+            }
+        }
+    }
+    if ($Phase27F) {
+        foreach ($relativeDirectory in @("P27F", "Apps/DS27F")) {
             $target = Join-Path $espDirectory $relativeDirectory
             if (Test-Path $target -PathType Leaf) { throw "ESP target is a file: $target" }
             if (Test-Path $target -PathType Container) {
@@ -249,13 +290,21 @@ try {
     Copy-Item (Join-Path $phase27dFixtureDirectory "d27c.c") (Join-Path $espDirectory "d27c.c") -Force
     Copy-Item $kernelBinary (Join-Path $espDirectory "kernel.elf") -Force
     Copy-Item $bootloaderBinary (Join-Path $espDirectory "EFI/BOOT/BOOTX64.EFI") -Force
-    if ($Phase27E) {
+    if ($Phase27E -or $Phase27F) {
         Copy-Item $phase27eFixtureDirectory (Join-Path $espDirectory "P27E") -Recurse -Force
         New-Item -ItemType Directory -Force -Path (Join-Path $espDirectory "Apps") | Out-Null
         Copy-Item $phase27eAppDirectory (Join-Path $espDirectory "Apps/DS27E") -Recurse -Force
         if (!(Test-Path -LiteralPath (Join-Path $espDirectory "P27E/guidexos.project") -PathType Leaf) -or
             !(Test-Path -LiteralPath (Join-Path $espDirectory "P27E/src/main.cpp") -PathType Leaf)) {
             throw "Phase 27E project fixture was not staged into ESP"
+        }
+    }
+    if ($Phase27F) {
+        Copy-Item $phase27fFixtureDirectory (Join-Path $espDirectory "P27F") -Recurse -Force
+        Copy-Item $phase27fAppDirectory (Join-Path $espDirectory "Apps/DS27F") -Recurse -Force
+        if (!(Test-Path -LiteralPath (Join-Path $espDirectory "P27F/guidexos.project") -PathType Leaf) -or
+            !(Test-Path -LiteralPath (Join-Path $espDirectory "P27F/src/main.cpp") -PathType Leaf)) {
+            throw "Phase 27F project fixture was not staged into ESP"
         }
     }
 
@@ -279,10 +328,15 @@ try {
                 if (Test-Path $target) { Remove-Item -LiteralPath $target -Force }
             }
         }
-        if ($Phase27E -and $run -gt 1) {
+        if (($Phase27E -or $Phase27F) -and $run -gt 1) {
             $projectTarget = Join-Path $espDirectory "P27E"
             if (Test-Path $projectTarget) { Remove-Item -LiteralPath $projectTarget -Recurse -Force }
             Copy-Item $phase27eFixtureDirectory $projectTarget -Recurse -Force
+        }
+        if ($Phase27F -and $run -gt 1) {
+            $projectTarget = Join-Path $espDirectory "P27F"
+            if (Test-Path $projectTarget) { Remove-Item -LiteralPath $projectTarget -Recurse -Force }
+            Copy-Item $phase27fFixtureDirectory $projectTarget -Recurse -Force
         }
         Invoke-QemuProofBoot $run $qemu
     }
@@ -309,7 +363,9 @@ try {
     & $objdump -D -Mintel -b binary -m i386:x86-64 --adjust-vma=0x10000000 `
         --start-address=0x10001000 --stop-address=0x10001022 (Join-Path $evidenceDirectory "d27a.elf")
     if ($LASTEXITCODE -ne 0) { throw "external Phase 27D ELF inspection failed" }
-    if ($Phase27E) {
+    if ($Phase27F) {
+        Write-Host "Phase 27B/27C/27D/27E/27F QEMU proof completed across $BootCount fresh boot(s)." -ForegroundColor Green
+    } elseif ($Phase27E) {
         Write-Host "Phase 27B/27C/27D/27E QEMU proof completed across $BootCount fresh boot(s)." -ForegroundColor Green
     } else {
         Write-Host "Phase 27B/27C/27D QEMU proof completed across $BootCount fresh boot(s)." -ForegroundColor Green
@@ -337,8 +393,20 @@ finally {
             Copy-Item $backups[$relativePath] $target -Force
         }
     }
-    if ($Phase27E) {
+    if ($Phase27E -or $Phase27F) {
         foreach ($relativeDirectory in @("P27E", "Apps/DS27E")) {
+            $target = Join-Path $espDirectory $relativeDirectory
+            if (Test-Path -LiteralPath $target -PathType Container) {
+                Remove-Item -LiteralPath $target -Recurse -Force -ErrorAction SilentlyContinue
+            }
+            if ($directoryBackups.ContainsKey($relativeDirectory)) {
+                New-Item -ItemType Directory -Force -Path (Split-Path -Parent $target) | Out-Null
+                Copy-Item $directoryBackups[$relativeDirectory] $target -Recurse -Force
+            }
+        }
+    }
+    if ($Phase27F) {
+        foreach ($relativeDirectory in @("P27F", "Apps/DS27F")) {
             $target = Join-Path $espDirectory $relativeDirectory
             if (Test-Path -LiteralPath $target -PathType Container) {
                 Remove-Item -LiteralPath $target -Recurse -Force -ErrorAction SilentlyContinue

@@ -148,6 +148,11 @@ struct NativeHostCallTable {
     gx_result (*bare_metal_file_write_all)(NativeGxAppContext* ctx, const char* path, const void* buffer, uint32_t bufferSize, uint32_t* outBytesWritten) = nullptr;
     gx_result (*bare_metal_file_create_directory)(NativeGxAppContext* ctx, const char* path) = nullptr;
     gx_result (*bare_metal_file_remove)(NativeGxAppContext* ctx, const char* path) = nullptr;
+    gx_result (*bare_metal_development_run_prepare)(NativeGxAppContext* ctx, const gx_development_run_request* request, gx_development_run_handle* outHandle, gx_development_run_snapshot* outSnapshot) = nullptr;
+    gx_result (*bare_metal_development_run_start)(NativeGxAppContext* ctx, gx_development_run_handle handle) = nullptr;
+    gx_result (*bare_metal_development_run_poll)(NativeGxAppContext* ctx, gx_development_run_handle handle, gx_development_run_snapshot* outSnapshot) = nullptr;
+    gx_result (*bare_metal_development_run_request_close)(NativeGxAppContext* ctx, gx_development_run_handle handle) = nullptr;
+    gx_result (*bare_metal_development_run_release)(NativeGxAppContext* ctx, gx_development_run_handle handle) = nullptr;
 };
 
 static_assert(offsetof(NativeHostCallTable, log) == 8, "native ABI log slot changed");
@@ -183,7 +188,12 @@ static_assert(offsetof(NativeHostCallTable, bare_metal_file_list) == 280, "nativ
 static_assert(offsetof(NativeHostCallTable, bare_metal_file_write_all) == 288, "native ABI bare-metal file write slot changed");
 static_assert(offsetof(NativeHostCallTable, bare_metal_file_create_directory) == 296, "native ABI bare-metal mkdir slot changed");
 static_assert(offsetof(NativeHostCallTable, bare_metal_file_remove) == 304, "native ABI bare-metal remove slot changed");
-static_assert(sizeof(NativeHostCallTable) == 312, "native ABI host call table size changed");
+static_assert(offsetof(NativeHostCallTable, bare_metal_development_run_prepare) == 312, "native ABI bare-metal run prepare slot changed");
+static_assert(offsetof(NativeHostCallTable, bare_metal_development_run_start) == 320, "native ABI bare-metal run start slot changed");
+static_assert(offsetof(NativeHostCallTable, bare_metal_development_run_poll) == 328, "native ABI bare-metal run poll slot changed");
+static_assert(offsetof(NativeHostCallTable, bare_metal_development_run_request_close) == 336, "native ABI bare-metal run close slot changed");
+static_assert(offsetof(NativeHostCallTable, bare_metal_development_run_release) == 344, "native ABI bare-metal run release slot changed");
+static_assert(sizeof(NativeHostCallTable) == 352, "native ABI host call table size changed");
 
 enum class NativeAppLifecycleState {
     Created = 0,

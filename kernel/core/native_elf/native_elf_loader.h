@@ -37,6 +37,9 @@ struct NativeElfRunReport {
     uint64_t readOnlyDataBytes;
     uint32_t hostLogBytes;
     NativeAppExecutionState finalState;
+    uint32_t hostLogCount;
+    bool hostLogTruncated;
+    char hostLog[NATIVE_APP_MAX_LOG_LINES][NATIVE_APP_MAX_LOG_LINE_BYTES];
     const char* error;
 };
 

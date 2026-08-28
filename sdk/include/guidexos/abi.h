@@ -153,6 +153,13 @@ typedef struct gx_host_calls {
     gx_result (GX_CALL *bare_metal_file_write_all)(gx_app_context* ctx, const char* path, const void* buffer, uint32_t bufferSize, uint32_t* outBytesWritten);
     gx_result (GX_CALL *bare_metal_file_create_directory)(gx_app_context* ctx, const char* path);
     gx_result (GX_CALL *bare_metal_file_remove)(gx_app_context* ctx, const char* path);
+    /* Bare-metal Developer Studio Run service. These slots are append-only
+     * and are advertised only by a NativeElf runtime with the service. */
+    gx_result (GX_CALL *bare_metal_development_run_prepare)(gx_app_context* ctx, const gx_development_run_request* request, gx_development_run_handle* outHandle, gx_development_run_snapshot* outSnapshot);
+    gx_result (GX_CALL *bare_metal_development_run_start)(gx_app_context* ctx, gx_development_run_handle handle);
+    gx_result (GX_CALL *bare_metal_development_run_poll)(gx_app_context* ctx, gx_development_run_handle handle, gx_development_run_snapshot* outSnapshot);
+    gx_result (GX_CALL *bare_metal_development_run_request_close)(gx_app_context* ctx, gx_development_run_handle handle);
+    gx_result (GX_CALL *bare_metal_development_run_release)(gx_app_context* ctx, gx_development_run_handle handle);
 } gx_host_calls;
 
 #ifdef __cplusplus
