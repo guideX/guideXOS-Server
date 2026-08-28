@@ -172,6 +172,85 @@ public static unsafe class Program
     }
 #endif
 
+#if HOSTLOGPROOF_C011EC53
+    [DllImport("__Internal", EntryPoint = "guideXosNativeAotC011EC53Start")]
+    private static extern int GuideXosNativeAotC011EC53Start();
+
+    [DllImport("__Internal", EntryPoint = "guideXosNativeAotC011EC53BeforeAllocation")]
+    private static extern int GuideXosNativeAotC011EC53BeforeAllocation(
+        uint ordinal,
+        uint payloadSize);
+
+    [DllImport("__Internal", EntryPoint = "guideXosNativeAotC011EC53AfterAllocation")]
+    private static extern int GuideXosNativeAotC011EC53AfterAllocation(
+        nint objectAddress);
+
+    [DllImport("__Internal", EntryPoint = "guideXosNativeAotC011EC53ManagedReadback")]
+    private static extern int GuideXosNativeAotC011EC53ManagedReadback(
+        uint ordinal,
+        uint valid);
+
+    [DllImport("__Internal", EntryPoint = "guideXosNativeAotC011EC53Finish")]
+    private static extern int GuideXosNativeAotC011EC53Finish();
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static int RunC011EC53ReclaimedGen1NaturalReuse()
+    {
+        const uint payloadSize = 65536u;
+        const uint hardLimit = 64u;
+        if (GuideXosNativeAotC011EC53Start() != 0)
+        {
+            return -1;
+        }
+
+        // Keep four ordinary managed survivors across the bounded pressure
+        // window.  All other values are intentionally dead after each loop;
+        // neither case supplies an allocator address or collection request.
+        // The 64-allocation cap is deliberately small enough to complete
+        // under the fresh-boot QEMU bound while still providing authentic
+        // post-C40 allocation pressure.
+        byte[] survivor0 = null;
+        byte[] survivor1 = null;
+        byte[] survivor2 = null;
+        byte[] survivor3 = null;
+        for (uint ordinal = 0u; ordinal < hardLimit; ordinal++)
+        {
+            if (GuideXosNativeAotC011EC53BeforeAllocation(
+                    ordinal, payloadSize) != 0)
+            {
+                return -1;
+            }
+
+            byte[] value = new byte[payloadSize];
+            WriteIdentifyingPattern(value, ordinal);
+            nint objectAddress = Unsafe.As<byte[], nint>(ref value);
+            if (GuideXosNativeAotC011EC53AfterAllocation(objectAddress) != 0)
+            {
+                return -1;
+            }
+            bool readbackValid = HasIdentifyingPattern(value, ordinal);
+            if (!readbackValid ||
+                GuideXosNativeAotC011EC53ManagedReadback(
+                    ordinal, readbackValid ? 1u : 0u) != 0)
+            {
+                return -1;
+            }
+
+            if (ordinal == 0u) survivor0 = value;
+            else if (ordinal == 1u) survivor1 = value;
+            else if (ordinal == 2u) survivor2 = value;
+            else if (ordinal == 3u) survivor3 = value;
+            GC.KeepAlive(survivor0);
+            GC.KeepAlive(survivor1);
+            GC.KeepAlive(survivor2);
+            GC.KeepAlive(survivor3);
+            GC.KeepAlive(value);
+        }
+
+        return GuideXosNativeAotC011EC53Finish();
+    }
+#endif
+
 #if HOSTLOGPROOF_C011EC42
     [DllImport("__Internal", EntryPoint = "guideXosNativeAotC011EC42Start")]
     private static extern int GuideXosNativeAotC011EC42Start();
@@ -767,7 +846,10 @@ public static unsafe class Program
                 {
                     return GxAbi.ErrorInvalidArgument;
                 }
-#if HOSTLOGPROOF_C011EC42
+#if HOSTLOGPROOF_C011EC53
+                return RunC011EC53ReclaimedGen1NaturalReuse() == 0
+                    ? 0 : GxAbi.ErrorInvalidArgument;
+#elif HOSTLOGPROOF_C011EC42
                 return RunC011EC42ReclaimedGen1Lifecycle() == 0
                     ? 0 : GxAbi.ErrorInvalidArgument;
 #else

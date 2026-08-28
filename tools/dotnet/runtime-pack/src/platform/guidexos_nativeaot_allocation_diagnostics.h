@@ -949,6 +949,201 @@ typedef struct guidexos_nativeaot_c011ec42_lifecycle_record {
 } guidexos_nativeaot_c011ec42_lifecycle_record;
 
 enum {
+    GUIDEXOS_NATIVEAOT_C011EC53_MAX_ALLOCATIONS = 256u,
+    GUIDEXOS_NATIVEAOT_C011EC53_MAX_COLLECTIONS = 4u,
+};
+
+/*
+ * C011EC53 follows the C40 recovered compacted tail after C41 has finished
+ * its fixed eight-allocation provenance window.  The record deliberately
+ * separates representation/visibility, eligibility, consideration,
+ * selection, and consumption.  No field is an allocator input: every value
+ * is a scalar snapshot or a source-observed event from the locked Workstation
+ * GC path.
+ */
+typedef struct guidexos_nativeaot_c011ec53_collection_record {
+    uint32_t observed;
+    uint32_t ordinal;
+    uint32_t condemnedGeneration;
+    uint32_t collectionReason;
+    uint32_t plannerDecisionObserved;
+    uint32_t plannerDecision;
+    uint32_t phaseObserved;
+    uint32_t actualPhase;
+    uint32_t restartObserved;
+    uint32_t managedResumeObserved;
+    uint32_t ephemeralBoundaryObserved;
+    uint32_t reserved[5];
+    uintptr_t ephemeralLow;
+    uintptr_t ephemeralHigh;
+    uintptr_t ephemeralSegment;
+    uintptr_t ephemeralSegmentBase;
+    uintptr_t ephemeralSegmentAllocated;
+    uintptr_t ephemeralSegmentCommitted;
+    uintptr_t ephemeralSegmentReserved;
+    uintptr_t ephemeralGeneration;
+} guidexos_nativeaot_c011ec53_collection_record;
+
+typedef struct guidexos_nativeaot_c011ec53_allocation_record {
+    uint32_t observed;
+    uint32_t ordinal;
+    uint32_t requestedPayload;
+    uint32_t requestedSize;
+    uint32_t alignedSize;
+    uint32_t fastPath;
+    uint32_t rarePath;
+    uint32_t refillPath;
+    uint32_t collectionBefore;
+    uint32_t collectionAfter;
+    uint32_t postCollection;
+    uint32_t allocatorVisible;
+    uint32_t eligible;
+    uint32_t considered;
+    uint32_t selected;
+    uint32_t consumed;
+    uint32_t pointerValid;
+    uint32_t objectValid;
+    uint32_t heapOwned;
+    uint32_t invariantFailures;
+    uint32_t candidatePath;
+    uint32_t candidateObserved;
+    uint32_t reserved[2];
+
+    uintptr_t objectAddress;
+    uintptr_t objectEnd;
+    uintptr_t pointerBefore;
+    uintptr_t pointerAfter;
+    uintptr_t limitBefore;
+    uintptr_t limitAfter;
+    uintptr_t threadIdentity;
+    uintptr_t contextIdentity;
+    uintptr_t heapIdentity;
+    uintptr_t segmentIdentity;
+    uintptr_t segmentBase;
+    uintptr_t segmentAllocated;
+    uintptr_t segmentCommitted;
+    uintptr_t segmentReserved;
+    uintptr_t segmentGeneration;
+    uintptr_t candidateStart;
+    uintptr_t candidateEnd;
+    uintptr_t candidateResidualStart;
+    uintptr_t candidateResidualEnd;
+    uintptr_t selectedStart;
+    uintptr_t selectedEnd;
+    uintptr_t allocationPath;
+    uintptr_t sentinel;
+} guidexos_nativeaot_c011ec53_allocation_record;
+
+typedef struct guidexos_nativeaot_c011ec53_lifecycle_record {
+    uint32_t started;
+    uint32_t preflightEmitted;
+    uint32_t reclaimedEmitted;
+    uint32_t lifecycleEmitted;
+    uint32_t eligibilityEmitted;
+    uint32_t consideredEmitted;
+    uint32_t selectedEmitted;
+    uint32_t reuseEmitted;
+    uint32_t resumeEmitted;
+    uint32_t completionMarkerEmitted;
+    uint32_t collectionEntryCount;
+    uint32_t collectionCountBefore;
+    uint32_t collectionCountAfter;
+    uint32_t allocationCount;
+    uint32_t postCollectionAllocationCount;
+    uint32_t firstConsumingAllocationOrdinal;
+    uint32_t allocatorVisible;
+    uint32_t allocatorVisibleTransition;
+    uint32_t tailEligible;
+    uint32_t eligibilityTransition;
+    uint32_t tailConsidered;
+    uint32_t tailSelected;
+    uint32_t tailConsumed;
+    uint32_t directReuse;
+    uint32_t segmentLevelReuse;
+    uint32_t tailStillMapped;
+    uint32_t requestedGeneration;
+    uint32_t requestedDomain;
+    uint32_t maximumGeneration;
+    uint32_t allocationPath;
+    uint32_t noReuseClassification;
+    uint32_t invariantFailures;
+    uint32_t sensitiveDiagnosticAllocations;
+    uint32_t safeStopReason;
+    uint32_t managedContinuationValid;
+    uint32_t liveObjectIntegrity;
+    uint32_t c18Valid;
+    uint32_t coffCodeManagerValid;
+    uint32_t findMethodInfoValid;
+    uint32_t rootScanValid;
+    uint32_t markClosureValid;
+    uint32_t plannerValid;
+    uint32_t restartValid;
+    uint32_t managedResumeValid;
+    uint32_t pageFaultObserved;
+    uint32_t failFastObserved;
+    uint32_t requestActive;
+    uint32_t reserved[3];
+
+    uintptr_t threadIdentity;
+    uintptr_t contextIdentity;
+    uintptr_t homeHeap;
+    uintptr_t initialAllocPtr;
+    uintptr_t initialAllocLimit;
+    uintptr_t finalAllocPtr;
+    uintptr_t finalAllocLimit;
+    uintptr_t allocationSegmentBefore;
+    uintptr_t allocationSegmentAfter;
+    uintptr_t allocationGenerationBefore;
+    uintptr_t allocationGenerationAfter;
+
+    uintptr_t tailSegment;
+    uintptr_t tailStart;
+    uintptr_t tailEnd;
+    uintptr_t tailSize;
+    uintptr_t tailHeap;
+    uintptr_t tailGenerationBefore;
+    uintptr_t tailGenerationAfter;
+    uintptr_t tailSegmentBaseBefore;
+    uintptr_t tailSegmentAllocatedBefore;
+    uintptr_t tailSegmentCommittedBefore;
+    uintptr_t tailSegmentReservedBefore;
+    uintptr_t tailSegmentAfter;
+    uintptr_t tailSegmentBaseAfter;
+    uintptr_t tailSegmentAllocatedAfter;
+    uintptr_t tailSegmentCommittedAfter;
+    uintptr_t tailSegmentReservedAfter;
+    uintptr_t generation0StartBefore;
+    uintptr_t generation0EndBefore;
+    uintptr_t generation0SegmentBefore;
+    uintptr_t generation0StartAfter;
+    uintptr_t generation0EndAfter;
+    uintptr_t generation0SegmentAfter;
+
+    uintptr_t candidateStart;
+    uintptr_t candidateEnd;
+    uintptr_t selectedStart;
+    uintptr_t selectedEnd;
+    uintptr_t firstObject;
+    uintptr_t firstObjectEnd;
+    uintptr_t firstObjectOffset;
+    uintptr_t firstPointerBefore;
+    uintptr_t firstPointerAfter;
+    uintptr_t firstLimit;
+    uintptr_t firstPayload;
+    uintptr_t firstAlignedSize;
+    uintptr_t firstObjectType;
+    uintptr_t firstSupplyingSegment;
+    uintptr_t firstSupplyingGeneration;
+    uintptr_t firstSentinel;
+    uintptr_t firstReadback;
+
+    guidexos_nativeaot_c011ec53_collection_record collections[
+        GUIDEXOS_NATIVEAOT_C011EC53_MAX_COLLECTIONS];
+    guidexos_nativeaot_c011ec53_allocation_record allocations[
+        GUIDEXOS_NATIVEAOT_C011EC53_MAX_ALLOCATIONS];
+} guidexos_nativeaot_c011ec53_lifecycle_record;
+
+enum {
     GUIDEXOS_NATIVEAOT_C011EC44_MAX_CHECKPOINTS = 8u,
     GUIDEXOS_NATIVEAOT_C011EC44_FRAME_CREATE = 1u,
     GUIDEXOS_NATIVEAOT_C011EC44_PRE_GC = 2u,
@@ -3237,6 +3432,8 @@ typedef struct guidexos_nativeaot_allocation_diagnostics {
     guidexos_nativeaot_c011ec41_provenance_record c011ec41Provenance;
     /* C011EC42 bounded natural post-Collection-3 lifecycle evidence. */
     guidexos_nativeaot_c011ec42_lifecycle_record c011ec42Lifecycle;
+    /* C011EC53 productionized reclaimed-generation-1 natural reuse watch. */
+    guidexos_nativeaot_c011ec53_lifecycle_record c011ec53Lifecycle;
     /* C011EC44 malformed transition-frame provenance. */
     guidexos_nativeaot_c011ec44_provenance_record c011ec44Provenance;
     /* C011EC45 reverse-P/Invoke slot layout, register, and unwind provenance. */
