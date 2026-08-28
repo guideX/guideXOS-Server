@@ -221,6 +221,10 @@ public:
         RuntimeObjectId prototype);
     bool readPropertyForTesting(RuntimeObjectId object, const std::string& key,
         Value& value, RuntimeErrorCode& error);
+    // Synchronous host adapters may inspect a bounded ordinary runtime object
+    // while validating a host call. Missing properties return Undefined.
+    bool readObjectPropertyForHost(RuntimeObjectId object,
+        const std::string& key, Value& value, RuntimeErrorCode& error);
     bool readHostPropertyForTesting(RuntimeHostObjectId object,
         const std::string& key, Value& value, RuntimeErrorCode& error);
     bool writeHostPropertyForTesting(RuntimeHostObjectId object,

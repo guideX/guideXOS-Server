@@ -204,6 +204,18 @@ NavigatorScriptHostAdapter::clickListenerForSequence(
     return nullptr;
 }
 
+NavigatorScriptHostAdapter::ClickListenerRecord*
+NavigatorScriptHostAdapter::clickListenerForSequence(
+    HostInstanceId serial, std::uint64_t registrationSequence)
+{
+    for (ClickListenerRecord& record : clickListeners_) {
+        if (record.serial == serial &&
+            record.registrationSequence == registrationSequence)
+            return &record;
+    }
+    return nullptr;
+}
+
 bool NavigatorScriptHostAdapter::hasClickListener(HostInstanceId serial) const
 {
     for (const ClickListenerRecord& record : clickListeners_) {
@@ -220,6 +232,16 @@ bool NavigatorScriptHostAdapter::hasAnyClickHandler(HostInstanceId serial) const
     return (onclick != nullptr &&
         onclick->onclickFunction != kInvalidRuntimeFunctionId) ||
         hasClickListener(serial);
+}
+
+void NavigatorScriptHostAdapter::removeClickListener(
+    ClickListenerRecord& record)
+{
+    const HostInstanceId serial = record.serial;
+    record = ClickListenerRecord();
+    if (clickListenerCount_ > 0) --clickListenerCount_;
+    if (!hasAnyClickHandler(serial) && clickHandlerCount_ > 0)
+        --clickHandlerCount_;
 }
 
 void NavigatorScriptHostAdapter::resequenceListeners()
@@ -425,12 +447,16 @@ bool NavigatorScriptHostAdapter::dispatchClick(RuntimeContext& runtime,
                 if (runtime.eventImmediatePropagationStopped()) break;
                 const ClickListenerSnapshotEntry& captured =
                     listenerSnapshot[listenerIndex];
-                const ClickListenerRecord* active = clickListenerForSequence(
+                ClickListenerRecord* active = clickListenerForSequence(
                     propagationPath[index], captured.registrationSequence);
                 if (active == nullptr ||
                     active->listenerFunction != captured.listenerFunction)
                     continue;
-                invoke(active->listenerFunction);
+                const RuntimeFunctionId listenerFunction =
+                    active->listenerFunction;
+                if ((active->flags & kNavigatorClickListenerOnceFlag) != 0u)
+                    removeClickListener(*active);
+                invoke(listenerFunction);
             }
         }
         if (runtime.eventPropagationStopped()) break;
@@ -812,16 +838,58 @@ HostResult NavigatorScriptHostAdapter::validateDocumentReceiver(
     return validate(*receiver);
 }
 
-HostResult NavigatorScriptHostAdapter::call(const HostObjectReference* receiver,
+HostResult NavigatorScriptHostAdapter::call(
+    const HostObjectReference* receiver, std::uint32_t methodId,
+    const HostValue* arguments, std::size_t argumentCount, HostValue& result)
+{
+    return callInternal(receiver, methodId, arguments, argumentCount, result,
+        false, false);
+}
+
+HostResult NavigatorScriptHostAdapter::callWithRuntime(
+    RuntimeContext& runtime, const HostObjectReference* receiver,
     std::uint32_t methodId, const HostValue* arguments,
     std::size_t argumentCount, HostValue& result)
+{
+    bool optionsSupplied = false;
+    bool once = false;
+    if (methodId == kNavigatorAddEventListenerMethod &&
+        argumentCount == 3u) {
+        if (arguments == nullptr || arguments[2].type != HostValueType::Object)
+            return HostResult{HostResultCode::InvalidValue};
+        Value onceValue;
+        RuntimeErrorCode optionError = RuntimeErrorCode::None;
+        if (!runtime.readObjectPropertyForHost(arguments[2].objectId, "once",
+                onceValue, optionError)) {
+            return HostResult{HostResultCode::InvalidValue};
+        }
+        if (onceValue.isUndefined()) {
+            once = false;
+        } else if (onceValue.isBoolean()) {
+            once = onceValue.booleanValue();
+        } else {
+            return HostResult{HostResultCode::InvalidValue};
+        }
+        optionsSupplied = true;
+    }
+    return callInternal(receiver, methodId, arguments, argumentCount, result,
+        once, optionsSupplied);
+}
+
+HostResult NavigatorScriptHostAdapter::callInternal(
+    const HostObjectReference* receiver,
+    std::uint32_t methodId, const HostValue* arguments,
+    std::size_t argumentCount, HostValue& result, bool once,
+    bool optionsSupplied)
 {
     if (receiver == nullptr) return HostResult{HostResultCode::InvalidObject};
     const HostResult receiverResult = validate(*receiver);
     if (!receiverResult.succeeded()) return receiverResult;
     if (methodId == kNavigatorAddEventListenerMethod) {
         if (receiver->kind != kNavigatorElementHostKind ||
-            argumentCount != 2u || arguments == nullptr ||
+            (argumentCount != 2u &&
+                (!optionsSupplied || argumentCount != 3u)) ||
+            arguments == nullptr ||
             arguments[0].type != HostValueType::String ||
             arguments[1].type != HostValueType::Function ||
             arguments[1].functionId == kInvalidRuntimeFunctionId) {
@@ -861,6 +929,7 @@ HostResult NavigatorScriptHostAdapter::call(const HostObjectReference* receiver,
         const bool hadAnyHandler = hasAnyClickHandler(receiver->instanceId);
         freeRecord->serial = receiver->instanceId;
         freeRecord->listenerFunction = arguments[1].functionId;
+        freeRecord->flags = once ? kNavigatorClickListenerOnceFlag : 0u;
         freeRecord->registrationSequence = sequence;
         ++clickListenerCount_;
         if (!hadAnyHandler) ++clickHandlerCount_;
@@ -888,13 +957,7 @@ HostResult NavigatorScriptHostAdapter::call(const HostObjectReference* receiver,
         ClickListenerRecord* record = clickListenerFor(receiver->instanceId,
             arguments[1].functionId);
         if (record != nullptr) {
-            record->serial = 0;
-            record->listenerFunction = kInvalidRuntimeFunctionId;
-            record->registrationSequence = 0;
-            if (clickListenerCount_ > 0) --clickListenerCount_;
-            if (!hasAnyClickHandler(receiver->instanceId) &&
-                clickHandlerCount_ > 0)
-                --clickHandlerCount_;
+            removeClickListener(*record);
         }
         result = HostValue::undefined();
         return HostResult();

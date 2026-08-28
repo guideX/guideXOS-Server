@@ -2468,6 +2468,12 @@ bool RuntimeContext::readPropertyForTesting(RuntimeObjectId object,
     return readProperty(object, key, value, error, SourceLocation());
 }
 
+bool RuntimeContext::readObjectPropertyForHost(RuntimeObjectId object,
+    const std::string& key, Value& value, RuntimeErrorCode& error)
+{
+    return readProperty(object, key, value, error, SourceLocation());
+}
+
 bool RuntimeContext::readProperty(RuntimeObjectId objectId,
     const std::string& key, Value& value, RuntimeErrorCode& error,
     SourceLocation location)
@@ -3178,7 +3184,8 @@ bool RuntimeContext::invokeHostMethod(const FunctionRecord& function,
     try {
         validation = hostAdapter_->validate(target);
         if (validation.succeeded()) {
-            operation = hostAdapter_->call(receiverReference, function.hostMethod,
+            operation = hostAdapter_->callWithRuntime(*this, receiverReference,
+                function.hostMethod,
                 hostArguments.empty() ? nullptr : hostArguments.data(),
                 hostArguments.size(), hostResult);
         }

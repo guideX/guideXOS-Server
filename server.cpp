@@ -340,6 +340,12 @@ static std::string navigatorHostedSmokeDiagnostic() {
         if (text.size() > compact.size()) compact += "...";
         return compact;
     };
+    auto summarizeFromMarker = [&](const std::string& text,
+                                   const std::string& marker, size_t limit) {
+        const std::size_t pos = text.rfind(marker);
+        if (pos == std::string::npos) return std::string("(missing)");
+        return summarizeText(text.substr(pos), limit);
+    };
     auto evidenceSnippet = [&](const std::string& report, const std::string& needle) {
         const std::size_t pos = report.find(needle);
         if (pos == std::string::npos) return std::string("(missing)");
@@ -1659,6 +1665,88 @@ static std::string navigatorHostedSmokeDiagnostic() {
         gxos::apps::Navigator::SmokeJavaScriptListenerCount() == 0u &&
         gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
         "replacement page starts without JS17 registrations");
+
+    const bool js18Loaded = gxos::apps::Navigator::SmokeNavigateToQuiet(
+        "http://127.0.0.1:8080/navigator-smoke/javascript-js18.html");
+    const std::string js18InitialText =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    const size_t js18InitialHandlers =
+        gxos::apps::Navigator::SmokeJavaScriptHandlerCount();
+    const size_t js18InitialListeners =
+        gxos::apps::Navigator::SmokeJavaScriptListenerCount();
+    const std::string js18InitialError =
+        gxos::apps::Navigator::SmokeJavaScriptLastError();
+    add("JS18 hosted fixture loads object options",
+        js18Loaded && contains(js18InitialText, "Navigator JavaScript JS18") &&
+        contains(js18InitialText, "Bounded once click listeners") &&
+        js18InitialHandlers == 4u && js18InitialListeners == 7u &&
+        js18InitialError.empty(),
+        std::string("loaded=") + yesNo(js18Loaded) + ",handlers=" +
+        std::to_string(js18InitialHandlers) + ",listeners=" +
+        std::to_string(js18InitialListeners) + ",error=" +
+        (js18InitialError.empty() ? "none" : js18InitialError));
+
+    const bool js18OnceClickOne =
+        gxos::apps::Navigator::SmokeClickFormControlById("js18-once");
+    const std::string js18OnceTextOne =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    const bool js18OnceClickTwo =
+        gxos::apps::Navigator::SmokeClickFormControlById("js18-once");
+    const std::string js18OnceTextTwo =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS18 hosted onclick precedes once then persistent listener",
+        js18OnceClickOne && js18OnceClickTwo &&
+        contains(js18OnceTextOne, "once:oab") &&
+        contains(js18OnceTextTwo, "once:oabob"),
+        std::string("first=") + summarizeFromMarker(js18OnceTextOne, "once:", 80) +
+        ",second=" + summarizeFromMarker(js18OnceTextTwo, "once:", 80));
+
+    const bool js18ImmediateClickOne =
+        gxos::apps::Navigator::SmokeClickFormControlById("js18-immediate");
+    const std::string js18ImmediateTextOne =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    const bool js18ImmediateClickTwo =
+        gxos::apps::Navigator::SmokeClickFormControlById("js18-immediate");
+    const std::string js18ImmediateTextTwo =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS18 hosted once removal survives immediate stop",
+        js18ImmediateClickOne && js18ImmediateClickTwo &&
+        contains(js18ImmediateTextOne, "immediate:a") &&
+        contains(js18ImmediateTextTwo, "immediate:ab:parent"),
+        "expected first once callback only and second persistent callback");
+
+    const bool js18CancelHit =
+        gxos::apps::Navigator::SmokeHitLinkById("js18-cancel");
+    const bool js18CancelledClick =
+        js18CancelHit && !gxos::apps::Navigator::SmokeClickFirstLink();
+    const std::string js18CancelText =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS18 hosted first link click is cancelled once",
+        js18CancelledClick &&
+        gxos::apps::Navigator::SmokeCurrentUrl() ==
+            "http://127.0.0.1:8080/navigator-smoke/javascript-js18.html" &&
+        contains(js18CancelText, "cancel:ad"),
+        std::string("hit=") + yesNo(js18CancelHit) + ",cancelled=" +
+        yesNo(js18CancelledClick) + ",text=" + summarizeText(js18CancelText, 180));
+
+    const bool js18CancelHitAgain =
+        gxos::apps::Navigator::SmokeHitLinkById("js18-cancel");
+    const bool js18NavigatedClick =
+        js18CancelHitAgain && gxos::apps::Navigator::SmokeClickFirstLink();
+    add("JS18 hosted second link click navigates normally",
+        js18NavigatedClick &&
+        gxos::apps::Navigator::SmokeCurrentUrl() ==
+            "http://127.0.0.1:8080/navigator-smoke/javascript-js18-target.html" &&
+        contains(gxos::apps::Navigator::SmokeCurrentDocumentText(),
+            "Navigator JavaScript JS18 Target"),
+        std::string("hit=") + yesNo(js18CancelHitAgain) + ",click=" +
+        yesNo(js18NavigatedClick) + ",url=" +
+        gxos::apps::Navigator::SmokeCurrentUrl());
+    add("JS18 hosted navigation cleanup clears once registrations",
+        gxos::apps::Navigator::SmokeJavaScriptHandlerCount() == 0u &&
+        gxos::apps::Navigator::SmokeJavaScriptListenerCount() == 0u &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        "replacement page starts without JS18 registrations");
 
     bool cssInlineLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-inline.html");
     std::string cssInlineText = gxos::apps::Navigator::SmokeCurrentDocumentText();

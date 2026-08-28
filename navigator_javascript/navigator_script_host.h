@@ -30,6 +30,7 @@ constexpr std::size_t kNavigatorScriptMaxElementHostObjects = 1024u;
 constexpr std::size_t kNavigatorScriptMaxDocumentMutations = 1024u;
 constexpr std::size_t kNavigatorScriptMaxDocumentNodes = 1024u;
 constexpr std::size_t kNavigatorScriptMaxClickHandlers = 64u;
+constexpr std::uint32_t kNavigatorClickListenerOnceFlag = 1u;
 // JS13/JS17 snapshots at most 32 serials, including the clicked Element and the
 // document's html/body ancestors. The path is deliberately smaller than the
 // 1024-node document metadata bound so dispatch cannot consume an unbounded
@@ -75,6 +76,10 @@ public:
     HostResult call(const HostObjectReference* receiver,
         std::uint32_t methodId, const HostValue* arguments,
         std::size_t argumentCount, HostValue& result) override;
+    HostResult callWithRuntime(RuntimeContext& runtime,
+        const HostObjectReference* receiver, std::uint32_t methodId,
+        const HostValue* arguments, std::size_t argumentCount,
+        HostValue& result) override;
 
     // Navigator calls this only after its normal hit test has selected a
     // document element serial. The callback is invoked in the supplied,
@@ -105,6 +110,7 @@ private:
     struct ClickListenerRecord {
         HostInstanceId serial = 0;
         RuntimeFunctionId listenerFunction = kInvalidRuntimeFunctionId;
+        std::uint32_t flags = 0;
         std::uint64_t registrationSequence = 0;
     };
     static_assert(sizeof(ClickListenerRecord) == 24u,
@@ -128,14 +134,21 @@ private:
         HostInstanceId serial, RuntimeFunctionId function) const;
     const ClickListenerRecord* clickListenerForSequence(
         HostInstanceId serial, std::uint64_t registrationSequence) const;
+    ClickListenerRecord* clickListenerForSequence(
+        HostInstanceId serial, std::uint64_t registrationSequence);
     bool collectListenerSnapshot(HostInstanceId serial,
         std::array<ClickListenerSnapshotEntry,
             kNavigatorScriptMaxClickHandlers>& snapshot,
         std::size_t& count) const;
     bool hasClickListener(HostInstanceId serial) const;
     bool hasAnyClickHandler(HostInstanceId serial) const;
+    void removeClickListener(ClickListenerRecord& record);
     void resequenceListeners();
     bool allocateListenerSequence(std::uint64_t& sequence);
+    HostResult callInternal(const HostObjectReference* receiver,
+        std::uint32_t methodId, const HostValue* arguments,
+        std::size_t argumentCount, HostValue& result, bool once,
+        bool optionsSupplied);
     gxos::web::HtmlElementRef* findElement(HostInstanceId serial);
     const gxos::web::HtmlElementRef* findElement(HostInstanceId serial) const;
     bool isKnownElementSerial(HostInstanceId serial) const;

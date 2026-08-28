@@ -1,0 +1,56 @@
+<!doctype html>
+<html>
+<head><title>Navigator JavaScript JS18</title></head>
+<body>
+<h1>Navigator JavaScript JS18</h1>
+<p>Bounded once click listeners with fixed-capacity dispatch.</p>
+<div id="js18-parent">
+  <button id="js18-once" type="button">Once ordering</button>
+  <button id="js18-immediate" type="button">Once immediate</button>
+  <a id="js18-cancel" href="/navigator-smoke/javascript-js18-target.html">Cancel once</a>
+</div>
+<p id="js18-state">initial</p>
+<script>
+var js18State = document.getElementById("js18-state");
+var js18Parent = document.getElementById("js18-parent");
+var js18Once = document.getElementById("js18-once");
+var js18Immediate = document.getElementById("js18-immediate");
+var js18Cancel = document.getElementById("js18-cancel");
+var js18OnceLog = "";
+var js18ImmediateLog = "";
+var js18CancelLog = "";
+js18Once.onclick = function(event) {
+    js18OnceLog = js18OnceLog + "o";
+};
+js18Once.addEventListener("click", function(event) {
+    js18OnceLog = js18OnceLog + "a";
+}, { once: true });
+js18Once.addEventListener("click", function(event) {
+    js18OnceLog = js18OnceLog + "b";
+});
+js18Immediate.addEventListener("click", function(event) {
+    js18ImmediateLog = js18ImmediateLog + "a";
+    js18State.textContent = "immediate:" + js18ImmediateLog;
+    event.stopImmediatePropagation();
+}, { once: true });
+js18Immediate.addEventListener("click", function(event) {
+    js18ImmediateLog = js18ImmediateLog + "b";
+});
+js18Cancel.addEventListener("click", function(event) {
+    js18CancelLog = js18CancelLog + "a";
+    event.preventDefault();
+}, { once: true });
+js18Cancel.addEventListener("click", function(event) {
+    if (event.defaultPrevented) js18CancelLog = js18CancelLog + "d";
+});
+js18Parent.addEventListener("click", function(event) {
+    if (event.target === js18Once)
+        js18State.textContent = "once:" + js18OnceLog;
+    if (event.target === js18Immediate)
+        js18State.textContent = "immediate:" + js18ImmediateLog + ":parent";
+    if (event.target === js18Cancel)
+        js18State.textContent = "cancel:" + js18CancelLog;
+});
+</script>
+</body>
+</html>

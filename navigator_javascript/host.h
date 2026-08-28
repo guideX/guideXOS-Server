@@ -9,6 +9,8 @@
 namespace gxos {
 namespace javascript {
 
+class RuntimeContext;
+
 using HostGenerationId = std::uint32_t;
 constexpr HostGenerationId kInvalidHostGenerationId = 0u;
 using HostInstanceId = std::uint64_t;
@@ -186,6 +188,18 @@ public:
     virtual HostResult call(const HostObjectReference* receiver,
         std::uint32_t methodId, const HostValue* arguments,
         std::size_t argumentCount, HostValue& result) = 0;
+
+    // Runtime-aware host calls may inspect bounded ordinary runtime objects
+    // synchronously through RuntimeContext. Existing adapters retain the
+    // original call contract by default.
+    virtual HostResult callWithRuntime(RuntimeContext& runtime,
+        const HostObjectReference* receiver, std::uint32_t methodId,
+        const HostValue* arguments, std::size_t argumentCount,
+        HostValue& result)
+    {
+        (void)runtime;
+        return call(receiver, methodId, arguments, argumentCount, result);
+    }
 };
 
 const char* hostValueTypeName(HostValueType type);

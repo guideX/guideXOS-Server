@@ -2100,7 +2100,97 @@ not add capture, capture listeners, event phases, `eventPhase`, `bubbles`,
 event types, coordinates, keyboard/input/change events, timers, promises,
 task queues, microtasks, asynchronous dispatch, or broad DOM expansion.
 
-The recommended next milestone is JS18: a bounded `{ once: true }` listener
-option while preserving the fixed capacity, registration ordering, snapshot
-identity, and propagation behavior. If listener-option parsing is not ready,
-read-only `event.bubbles` and `event.cancelable` are the smaller alternative.
+## Phase JS18: bounded `{ once: true }` click listeners
+
+JS18 adds the one supported listener option:
+
+```javascript
+element.addEventListener("click", callback, { once: true });
+```
+
+The existing two-argument form remains persistent. An ordinary object with
+`once: false`, no `once` property, or `{}` is also persistent. The parser
+and runtime already support object literals; the host call boundary passes the
+bounded runtime object ID to the Navigator adapter, which reads only its
+`once` property through the existing runtime property lookup. Unknown members
+such as `banana` are ignored. Only literal Boolean `true` and `false` are
+accepted for `once` (an `undefined` value is treated like a missing
+property). Numbers, strings, `null`, non-object third arguments, and other
+malformed options are rejected with `HostInvalidValue` before a listener slot
+is allocated. Boolean capture arguments, `capture`, and `passive` are not
+implemented.
+
+Duplicate identity remains exactly the JS17 tuple (Element, `"click"`,
+Function ID). A duplicate call is a no-op even when its once value differs,
+so a persistent registration cannot be changed to once and a once registration
+cannot be changed to persistent by a duplicate call. Different function
+objects remain distinct. Removing a fired once listener is harmless; a later
+registration of the same function receives a new sequence and can fire again.
+
+The listener record stays 24 bytes: Element serial, runtime Function ID, a
+32-bit flags word using one once bit, and the 64-bit registration sequence.
+The fixed 64-record listener table remains 1,536 bytes, and the independent
+onclick table remains 1,024 bytes. The per-node dispatch snapshot remains at
+most 64 entries of 16 bytes, or 1,024 bytes of stack-local storage. No
+once-specific heap allocation or per-click registration table is added.
+
+Before invoking a snapshotted listener, dispatch validates its sequence and
+Function ID. If the record is once, Navigator clears it and releases its
+global slot immediately before invoking the callback. This ordering is
+intentional: an error, `stopPropagation()`, `stopImmediatePropagation()`, or
+self re-registration cannot restore or double-invoke the old registration.
+Self re-registration therefore creates a new sequence that is excluded from
+the current snapshot and can run on the next click. Earlier callbacks can
+remove a later once listener, and slot reuse cannot make a replacement match
+the stale snapshot identity.
+
+`onclick` remains first, followed by registered listeners in logical
+registration order. A once listener can call `preventDefault()` and later
+listeners observe `event.defaultPrevented`; after it is gone, the next click
+starts with a fresh default-prevention state. Propagation controls remain
+independent of once removal. Path overflow happens before callback dispatch,
+so it consumes neither a once listener nor default-prevention state.
+Navigation, detach, generation invalidation, and realm reset clear fired and
+unfired once records alike. Old Elements and retained functions remain
+fail-closed at the host boundary, while JavaScript references to a function
+remain valid after its listener registration is removed.
+
+The focused proof is
+`tests/navigator_javascript_js18_test.cpp`, run by
+`scripts/smoke-navigator-javascript-js18.ps1`. It covers persistent two-
+argument, `once:false`, missing options, once suppression and capacity
+release, duplicate options, exact function identity, mixed order, onclick
+precedence, removal and re-addition, self re-registration, callback errors,
+propagation controls, cancellation, target/currentTarget identity, mutation
+snapshots, stale-slot reuse, global and mixed capacity, overflow recovery,
+navigation cleanup, unsupported events, malformed options, and 100 bounded
+re-registering clicks. It reports 403 checks with 0 failures.
+
+The authentic hosted proof is
+`navigator-smoke/javascript-js18.html`, with
+`navigator-smoke/javascript-js18-target.html`. The aggregate loads the page
+through the production HTTP path, executes its object-literal options through
+the real document realm, performs hit-tested clicks, checks onclick/once/
+persistent order, once immediate-stop behavior, first-click link cancellation,
+second-click navigation, and navigation cleanup.
+
+The complete available JS1–JS18 focused set contains 16 suites: lexer, parser,
+runtime, JS6, JS7, JS8, JS9, JS10, JS11, JS12, JS13, JS14, JS15, JS16, JS17,
+and JS18. The JS18 bare-metal and strict warning-as-error lanes use the same
+bounded sources; both focused smoke lanes pass. The native hosted build also
+links successfully. The aggregate reports 355 passed and 7 failed across 362
+checks, with all 6 JS18 hosted checks passing. This is a delta of 6 passing
+checks and 6 total checks over the recorded JS17 aggregate. The same 7
+unrelated CSS failures remain: CSS 3C, CSS 3G, CSS 6A, CSS 6B's three checks,
+and CSS 6C. No CSS repair is part of JS18.
+
+JS18 is intentionally not generic `EventListenerOptions`. It does not add
+`capture`, Boolean capture semantics, passive listeners, event phases,
+`eventPhase`, `bubbles`, `cancelable`, additional event types,
+mouse/pointer metadata, keyboard/input events, timers, promises, task queues,
+microtasks, asynchronous dispatch, or broad DOM expansion.
+
+The recommended JS19 milestone is read-only Event metadata:
+`event.bubbles === true` and `event.cancelable === true` for the current
+click model. Capture should follow only when it can preserve the same fixed
+memory and deterministic propagation guarantees.
