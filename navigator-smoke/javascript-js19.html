@@ -1,0 +1,93 @@
+<!doctype html>
+<html>
+<head><title>Navigator JavaScript JS19</title></head>
+<body>
+<h1>Navigator JavaScript JS19</h1>
+<p>Read-only click Event bubbles and cancelable metadata.</p>
+<div id="js19-grandparent">
+  <div id="js19-parent">
+    <button id="js19-target" type="button">Metadata</button>
+    <button id="js19-stop" type="button">Stop</button>
+    <button id="js19-immediate" type="button">Immediate</button>
+    <a id="js19-cancel" href="/navigator-smoke/javascript-js19-target.html">Cancel once</a>
+  </div>
+</div>
+<p id="js19-state">initial</p>
+<script>
+var js19State = document.getElementById("js19-state");
+var js19Grandparent = document.getElementById("js19-grandparent");
+var js19Parent = document.getElementById("js19-parent");
+var js19Target = document.getElementById("js19-target");
+var js19Stop = document.getElementById("js19-stop");
+var js19Immediate = document.getElementById("js19-immediate");
+var js19Cancel = document.getElementById("js19-cancel");
+var js19Order = "";
+var js19StopLog = "";
+var js19ImmediateLog = "";
+var js19CancelLog = "";
+var js19InitialDefault = false;
+var js19Unknown = false;
+js19Target.onclick = function(event) {
+    if (event.bubbles === true && event.cancelable === true) js19Order = js19Order + "o";
+    else js19Order = js19Order + "x";
+    js19InitialDefault = event.defaultPrevented === false;
+};
+js19Target.addEventListener("click", function(event) {
+    if (event.bubbles === true && event.cancelable === true) js19Order = js19Order + "l";
+    else js19Order = js19Order + "x";
+    js19Unknown = event.whatever === undefined;
+    event.bubbles = false;
+    event.cancelable = false;
+});
+js19Parent.addEventListener("click", function(event) {
+    if (event.target === js19Target && event.currentTarget === js19Parent &&
+        event.bubbles === true && event.cancelable === true)
+        js19Order = js19Order + "p";
+    if (event.target === js19Stop) js19State.textContent = "stop-parent";
+    if (event.target === js19Immediate) js19State.textContent =
+        "immediate:" + js19ImmediateLog + ":parent";
+    if (event.target === js19Cancel && event.bubbles === true &&
+        event.cancelable === true && event.defaultPrevented === true) {
+        js19CancelLog = js19CancelLog + "p";
+        js19State.textContent = "cancel:" + js19CancelLog;
+    }
+});
+js19Grandparent.addEventListener("click", function(event) {
+    if (event.target === js19Target && event.currentTarget === js19Grandparent &&
+        event.bubbles === true && event.cancelable === true)
+        js19Order = js19Order + "g";
+    if (event.target === js19Target) js19State.textContent = "target:" + js19Order;
+});
+js19Stop.addEventListener("click", function(event) {
+    if (event.bubbles === true && event.cancelable === true) js19StopLog = "b";
+    else js19StopLog = "x";
+    event.bubbles = false;
+    event.cancelable = false;
+    event.stopPropagation();
+});
+js19Stop.addEventListener("click", function(event) {
+    if (event.bubbles === true && event.cancelable === true) js19StopLog = js19StopLog + "c";
+    js19State.textContent = "stop:" + js19StopLog;
+});
+js19Immediate.addEventListener("click", function(event) {
+    if (event.bubbles === true && event.cancelable === true) js19ImmediateLog = "b";
+    else js19ImmediateLog = "x";
+    js19State.textContent = "immediate:" + js19ImmediateLog;
+    event.stopImmediatePropagation();
+}, { once: true });
+js19Immediate.addEventListener("click", function(event) {
+    if (event.bubbles === true && event.cancelable === true) js19ImmediateLog = js19ImmediateLog + "p";
+    js19State.textContent = "immediate:" + js19ImmediateLog;
+});
+js19Cancel.addEventListener("click", function(event) {
+    if (event.cancelable === true && event.defaultPrevented === false) js19CancelLog = "c";
+    else js19CancelLog = "x";
+    event.preventDefault();
+    if (event.cancelable === true && event.defaultPrevented === true) js19CancelLog = js19CancelLog + "d";
+}, { once: true });
+js19Cancel.addEventListener("click", function(event) {
+    if (event.cancelable === true && event.defaultPrevented === true) js19CancelLog = js19CancelLog + "l";
+});
+</script>
+</body>
+</html>

@@ -2190,7 +2190,118 @@ JS18 is intentionally not generic `EventListenerOptions`. It does not add
 mouse/pointer metadata, keyboard/input events, timers, promises, task queues,
 microtasks, asynchronous dispatch, or broad DOM expansion.
 
-The recommended JS19 milestone is read-only Event metadata:
-`event.bubbles === true` and `event.cancelable === true` for the current
-click model. Capture should follow only when it can preserve the same fixed
-memory and deterministic propagation guarantees.
+JS18 itself is intentionally not generic `EventListenerOptions`; the later
+JS19 metadata addition is described below. Capture should follow only when it
+can preserve the same fixed memory and deterministic propagation guarantees.
+
+## Phase JS19: read-only Event metadata
+
+JS19 adds the two read-only metadata members supported by Navigator's current
+click Event model:
+
+```javascript
+event.bubbles === true
+event.cancelable === true
+```
+
+Both values are ordinary JavaScript Booleans, not strings. Every supported
+`"click"` dispatch reports `event.bubbles === true` because the bounded target
+to-ancestor path bubbles, and reports `event.cancelable === true` because
+`preventDefault()` can suppress the supported link default action.
+
+These properties describe capability, not mutable dispatch state. Assignments
+such as `event.bubbles = false` and `event.cancelable = false` are deterministic
+no-ops through the existing read-only host-property semantics. Reading or
+assigning either property does not stop propagation and does not cancel a
+default action. Only `stopPropagation()`,
+`stopImmediatePropagation()`, and `preventDefault()` retain their established
+effects.
+
+`cancelable` remains true before and after cancellation. The separate
+`defaultPrevented` member starts false for each dispatch and becomes true only
+after `preventDefault()`; later same-node listeners and bubbling ancestors see
+both `cancelable === true` and `defaultPrevented === true`. A cancelled link
+therefore remains on its page, while metadata inspection alone leaves an
+uncancelled link free to navigate. `bubbles` likewise remains true after
+`stopPropagation()` or `stopImmediatePropagation()`, even when that particular
+dispatch no longer reaches an ancestor.
+
+`onclick` and all registered listeners receive the same cached Event object.
+The target callback, target listeners, parent listener, and grandparent
+listener observe the same Boolean metadata while `target` remains the
+original canonical Element and `currentTarget` tracks the node being invoked.
+`{ once: true }`, listener snapshots, duplicate identity, removal, capacity,
+and mutation rules are unchanged. A once callback sees the metadata before its
+registration is released, and persistent listeners see it on later clicks.
+
+### JS19 storage and lifetime
+
+The runtime still owns one cached ordinary Event object per realm. JS19 adds
+two host-created read-only `RuntimeProperty` entries to that object, increasing
+the cached Event property count from seven to nine. The Event object record,
+click-handler records, 64-entry listener table, dispatch snapshot, and native
+function table are unchanged; native-function count does not increase. The
+only fixed metadata storage is two property entries plus 17 key bytes for
+`bubbles` and `cancelable`; no native metadata record or dynamic metadata table
+is introduced. Exact allocator padding/capacity remains an implementation
+detail of the existing property vector.
+
+There is no per-click heap allocation for metadata. The first dispatch creates
+the already-existing cached Event object and its fixed properties; subsequent
+clicks only refresh target/currentTarget and default-prevention state. If
+JavaScript retains the Event, later reads remain safe and deterministic within
+the realm; the cached object reports the current/latest reusable metadata and
+does not expose native pointers. Navigation resets the realm and clears
+document-scoped listener state. Generation checks continue to make stale
+Element handles fail closed, while a new document click receives fresh true
+metadata and no old propagation or cancellation state.
+
+Path construction still happens before callbacks. A path beyond the 32-node
+bound returns `PropagationPathLimitExceeded` without creating the Event,
+running a listener, consuming a once registration, or changing cancellation
+state. A later valid path recovers normally. Callback errors remain contained,
+and later eligible listeners/ancestors still see true metadata.
+
+Unknown Event members remain ordinary missing properties (`undefined`), and
+unsupported event types, invalid callbacks, and malformed listener options
+remain rejected at the same host boundary. JS19 does not add capture, Boolean
+capture arguments, `eventPhase`, passive listeners, additional event types,
+MouseEvent/PointerEvent, keyboard/input events, timers, promises, task queues,
+microtasks, asynchronous dispatch, or broad DOM expansion. These are metadata
+properties for the current click model, not full DOM Events compatibility.
+
+The focused proof is
+`tests/navigator_javascript_js19_test.cpp`, run by
+`scripts/smoke-navigator-javascript-js19.ps1`. It uses parsed HTML, the real
+WebDocument and host adapter, canonical Element wrappers, onclick, multiple
+listeners, ancestor bubbling, stopPropagation,
+stopImmediatePropagation, preventDefault/defaultPrevented distinction,
+read-only assignments, once removal, listener mutation, callback-error
+containment, stale generation handling, navigation cleanup, 64/65 capacity,
+path overflow/recovery, unknown and unsupported inputs, retained Event reads,
+and 100 repeated clicks. It reports 442 checks with 0 failures.
+
+The authentic hosted proof is
+`navigator-smoke/javascript-js19.html`, with
+`navigator-smoke/javascript-js19-target.html`. The aggregate loads these
+files through the production HTTP path, executes the page script in the
+production realm, performs hit-tested target/stop/immediate clicks, verifies
+target and ancestor metadata, checks authentic once cancellation and later
+uncancelled navigation, and confirms navigation cleanup.
+
+The complete available JS1–JS19 focused set contains 17 suites: lexer, parser,
+runtime, JS6, JS7, JS8, JS9, JS10, JS11, JS12, JS13, JS14, JS15, JS16, JS17,
+JS18, and JS19. The JS19 bare-metal compile lane and strict warning-as-error
+syntax lane use the same bounded sources; the native hosted build is validated
+separately. The aggregate result is 362 passed and 7 failed out of 369 checks;
+all seven added JS19 checks pass, so JS19 adds seven passing checks with no new
+failure. The seven known unrelated CSS failures remain CSS 3C, CSS 3G, CSS 6A,
+CSS 6B's three checks, and CSS 6C. No CSS repair is part of JS19.
+
+The recommended JS20 milestone is bounded capture-phase support, beginning
+with `element.addEventListener("click", callback, { capture: true })` while
+preserving `{ once: true }`. A bounded model can dispatch capture
+`root -> parent -> target`, target handlers, then bubble `target -> parent ->
+root`, with `event.target` fixed to the original target and
+`event.currentTarget` following each node. JS20 should consider `eventPhase`
+only if it is needed to make capture observable and testable.

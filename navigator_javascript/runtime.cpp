@@ -2048,6 +2048,10 @@ bool RuntimeContext::createOrUpdateEventObject(SourceView type,
                 Value::hostObject(targetObject), error, true) ||
             !writeProperty(eventObject_, "currentTarget",
                 Value::hostObject(currentTargetObject), error, true) ||
+            !writeProperty(eventObject_, "bubbles", Value::boolean(true),
+                error, true) ||
+            !writeProperty(eventObject_, "cancelable", Value::boolean(true),
+                error, true) ||
             !writeProperty(eventObject_, "stopPropagation",
                 Value::function(eventStopPropagationFunction_), error, true) ||
             !writeProperty(eventObject_, "stopImmediatePropagation",

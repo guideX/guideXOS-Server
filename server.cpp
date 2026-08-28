@@ -1748,6 +1748,90 @@ static std::string navigatorHostedSmokeDiagnostic() {
         gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
         "replacement page starts without JS18 registrations");
 
+    const bool js19Loaded = gxos::apps::Navigator::SmokeNavigateToQuiet(
+        "http://127.0.0.1:8080/navigator-smoke/javascript-js19.html");
+    const std::string js19InitialText =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    const size_t js19InitialHandlers =
+        gxos::apps::Navigator::SmokeJavaScriptHandlerCount();
+    const size_t js19InitialListeners =
+        gxos::apps::Navigator::SmokeJavaScriptListenerCount();
+    const std::string js19InitialError =
+        gxos::apps::Navigator::SmokeJavaScriptLastError();
+    add("JS19 hosted fixture loads read-only Event metadata",
+        js19Loaded && contains(js19InitialText, "Navigator JavaScript JS19") &&
+        contains(js19InitialText, "Read-only click Event bubbles") &&
+        js19InitialHandlers == 6u && js19InitialListeners == 9u &&
+        js19InitialError.empty(),
+        std::string("loaded=") + yesNo(js19Loaded) + ",handlers=" +
+        std::to_string(js19InitialHandlers) + ",listeners=" +
+        std::to_string(js19InitialListeners) + ",error=" +
+        (js19InitialError.empty() ? "none" : js19InitialError));
+
+    const bool js19TargetClick =
+        gxos::apps::Navigator::SmokeClickFormControlById("js19-target");
+    const std::string js19TargetText =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS19 hosted target onclick, listener, and ancestors share metadata",
+        js19TargetClick && contains(js19TargetText, "target:olpg"),
+        "expected target:olpg from onclick, target listener, parent, grandparent");
+
+    const bool js19StopClick =
+        gxos::apps::Navigator::SmokeClickFormControlById("js19-stop");
+    const std::string js19StopText =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS19 hosted metadata assignment does not alter propagation",
+        js19StopClick && contains(js19StopText, "stop:bc") &&
+        !contains(js19StopText, "stop-parent"),
+        "expected stop:bc without a parent callback");
+
+    const bool js19ImmediateClickOne =
+        gxos::apps::Navigator::SmokeClickFormControlById("js19-immediate");
+    const std::string js19ImmediateTextOne =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    const bool js19ImmediateClickTwo =
+        gxos::apps::Navigator::SmokeClickFormControlById("js19-immediate");
+    const std::string js19ImmediateTextTwo =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS19 hosted immediate stop and once removal preserve metadata",
+        js19ImmediateClickOne && js19ImmediateClickTwo &&
+        contains(js19ImmediateTextOne, "immediate:b") &&
+        contains(js19ImmediateTextTwo, "immediate:bp:parent"),
+        "expected first metadata-aware once callback and second persistent bubble");
+
+    const bool js19CancelHit =
+        gxos::apps::Navigator::SmokeHitLinkById("js19-cancel");
+    const bool js19CancelledClick =
+        js19CancelHit && !gxos::apps::Navigator::SmokeClickFirstLink();
+    const std::string js19CancelText =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS19 hosted cancelable metadata preserves authentic cancellation",
+        js19CancelledClick &&
+        gxos::apps::Navigator::SmokeCurrentUrl() ==
+            "http://127.0.0.1:8080/navigator-smoke/javascript-js19.html" &&
+        contains(js19CancelText, "cancel:cdlp"),
+        std::string("hit=") + yesNo(js19CancelHit) + ",cancelled=" +
+        yesNo(js19CancelledClick) + ",text=" + summarizeText(js19CancelText, 160));
+
+    const bool js19CancelHitAgain =
+        gxos::apps::Navigator::SmokeHitLinkById("js19-cancel");
+    const bool js19UncancelledClick =
+        js19CancelHitAgain && gxos::apps::Navigator::SmokeClickFirstLink();
+    add("JS19 hosted uncancelled metadata inspection still navigates",
+        js19UncancelledClick &&
+        gxos::apps::Navigator::SmokeCurrentUrl() ==
+            "http://127.0.0.1:8080/navigator-smoke/javascript-js19-target.html" &&
+        contains(gxos::apps::Navigator::SmokeCurrentDocumentText(),
+            "Navigator JavaScript JS19 Target"),
+        std::string("hit=") + yesNo(js19CancelHitAgain) + ",click=" +
+        yesNo(js19UncancelledClick) + ",url=" +
+        gxos::apps::Navigator::SmokeCurrentUrl());
+    add("JS19 hosted navigation cleanup clears metadata-era listeners",
+        gxos::apps::Navigator::SmokeJavaScriptHandlerCount() == 0u &&
+        gxos::apps::Navigator::SmokeJavaScriptListenerCount() == 0u &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        "replacement page starts without JS19 registrations");
+
     bool cssInlineLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-inline.html");
     std::string cssInlineText = gxos::apps::Navigator::SmokeCurrentDocumentText();
     std::string cssInlineReport = gxos::apps::Navigator::SmokeRuntimeReport();
