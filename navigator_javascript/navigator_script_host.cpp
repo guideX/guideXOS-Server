@@ -172,10 +172,12 @@ void NavigatorScriptHostAdapter::removeEmptyClickHandler(HostInstanceId serial)
 
 NavigatorScriptHostAdapter::ClickListenerRecord*
 NavigatorScriptHostAdapter::clickListenerFor(HostInstanceId serial,
-    RuntimeFunctionId function)
+    RuntimeFunctionId function, bool capture)
 {
     for (ClickListenerRecord& record : clickListeners_) {
-        if (record.serial == serial && record.listenerFunction == function)
+        if (record.serial == serial && record.listenerFunction == function &&
+            ((record.flags & kNavigatorClickListenerCaptureFlag) != 0u) ==
+                capture)
             return &record;
     }
     return nullptr;
@@ -183,10 +185,12 @@ NavigatorScriptHostAdapter::clickListenerFor(HostInstanceId serial,
 
 const NavigatorScriptHostAdapter::ClickListenerRecord*
 NavigatorScriptHostAdapter::clickListenerFor(HostInstanceId serial,
-    RuntimeFunctionId function) const
+    RuntimeFunctionId function, bool capture) const
 {
     for (const ClickListenerRecord& record : clickListeners_) {
-        if (record.serial == serial && record.listenerFunction == function)
+        if (record.serial == serial && record.listenerFunction == function &&
+            ((record.flags & kNavigatorClickListenerCaptureFlag) != 0u) ==
+                capture)
             return &record;
     }
     return nullptr;
@@ -295,12 +299,15 @@ bool NavigatorScriptHostAdapter::allocateListenerSequence(
 
 bool NavigatorScriptHostAdapter::collectListenerSnapshot(HostInstanceId serial,
     std::array<ClickListenerSnapshotEntry,
-        kNavigatorScriptMaxClickHandlers>& snapshot, std::size_t& count) const
+        kNavigatorScriptMaxClickHandlers>& snapshot, std::size_t& count,
+    bool capture) const
 {
     count = 0;
     for (const ClickListenerRecord& record : clickListeners_) {
         if (record.serial != serial ||
-            record.listenerFunction == kInvalidRuntimeFunctionId) continue;
+            record.listenerFunction == kInvalidRuntimeFunctionId ||
+            (((record.flags & kNavigatorClickListenerCaptureFlag) != 0u) !=
+                capture)) continue;
         if (count >= snapshot.size()) return false;
         ClickListenerSnapshotEntry entry{
             record.registrationSequence, record.listenerFunction};
@@ -388,6 +395,7 @@ bool NavigatorScriptHostAdapter::dispatchClick(RuntimeContext& runtime,
     }
     Value ignored;
     bool succeeded = true;
+    bool dispatchAborted = false;
     RuntimeErrorCode firstError = RuntimeErrorCode::None;
     const auto invoke = [&](RuntimeFunctionId function) {
         if (function == kInvalidRuntimeFunctionId) return;
@@ -398,68 +406,141 @@ bool NavigatorScriptHostAdapter::dispatchClick(RuntimeContext& runtime,
             if (firstError == RuntimeErrorCode::None) firstError = callbackError;
         }
     };
-    for (std::size_t index = 0; index < propagationLength; ++index) {
-        if (generation_ != dispatchGeneration || document_ == nullptr ||
-            findElement(propagationPath[index]) == nullptr) {
-            if (firstError == RuntimeErrorCode::None)
-                firstError = RuntimeErrorCode::StaleHostObject;
-            succeeded = false;
-            break;
-        }
-
-        // Capture this node's registrations before onclick runs. The fixed
-        // snapshot gives JS17 deterministic browser-like mutation semantics:
-        // additions during onclick or a listener wait for the next dispatch,
-        // while each captured identity is revalidated before invocation so a
-        // removal (including remove-then-readd into the same physical slot)
-        // cannot invoke the replacement.
-        std::array<ClickListenerSnapshotEntry,
-            kNavigatorScriptMaxClickHandlers> listenerSnapshot{};
-        std::size_t listenerSnapshotCount = 0;
-        if (!collectListenerSnapshot(propagationPath[index], listenerSnapshot,
-                listenerSnapshotCount)) {
+    // One fixed snapshot is reused for every node and phase. Capture and
+    // bubble are intentionally collected at different times: mutations made
+    // during capture can affect a later bubble snapshot, but never the active
+    // snapshot for the current node and phase.
+    std::array<ClickListenerSnapshotEntry,
+        kNavigatorScriptMaxClickHandlers> listenerSnapshot{};
+    std::size_t listenerSnapshotCount = 0;
+    const auto collectListeners = [&](HostInstanceId currentSerial,
+        bool capture) {
+        if (!collectListenerSnapshot(currentSerial, listenerSnapshot,
+                listenerSnapshotCount, capture)) {
             if (firstError == RuntimeErrorCode::None)
                 firstError = RuntimeErrorCode::HostCallbackLimitExceeded;
             succeeded = false;
-            break;
+            dispatchAborted = true;
+            return false;
         }
-        const ClickHandlerRecord* record =
-            clickHandlerFor(propagationPath[index]);
-        const RuntimeFunctionId onclickFunction = record == nullptr
-            ? kInvalidRuntimeFunctionId : record->onclickFunction;
-        if (onclickFunction == kInvalidRuntimeFunctionId &&
-            listenerSnapshotCount == 0u) continue;
+        return true;
+    };
+    const auto invokeCollectedListeners = [&](HostInstanceId currentSerial,
+        bool capture) {
+        if (listenerSnapshotCount == 0u) return true;
         const HostObjectReference currentTarget{
-            propagationPath[index], dispatchGeneration,
-            kNavigatorElementHostKind};
+            currentSerial, dispatchGeneration, kNavigatorElementHostKind};
         RuntimeErrorCode eventError = RuntimeErrorCode::None;
         if (!runtime.createOrUpdateEventObject(SourceView("click", 5u),
                 target, currentTarget, event, eventError)) {
             if (firstError == RuntimeErrorCode::None) firstError = eventError;
             succeeded = false;
-            break;
+            dispatchAborted = true;
+            return false;
         }
         arguments[0] = event;
-        invoke(onclickFunction);
-        if (!runtime.eventImmediatePropagationStopped()) {
-            for (std::size_t listenerIndex = 0;
-                 listenerIndex < listenerSnapshotCount; ++listenerIndex) {
-                if (runtime.eventImmediatePropagationStopped()) break;
-                const ClickListenerSnapshotEntry& captured =
-                    listenerSnapshot[listenerIndex];
-                ClickListenerRecord* active = clickListenerForSequence(
-                    propagationPath[index], captured.registrationSequence);
-                if (active == nullptr ||
-                    active->listenerFunction != captured.listenerFunction)
-                    continue;
-                const RuntimeFunctionId listenerFunction =
-                    active->listenerFunction;
-                if ((active->flags & kNavigatorClickListenerOnceFlag) != 0u)
-                    removeClickListener(*active);
-                invoke(listenerFunction);
+        for (std::size_t listenerIndex = 0;
+             listenerIndex < listenerSnapshotCount; ++listenerIndex) {
+            if (runtime.eventImmediatePropagationStopped()) break;
+            const ClickListenerSnapshotEntry& captured =
+                listenerSnapshot[listenerIndex];
+            ClickListenerRecord* active = clickListenerForSequence(
+                currentSerial, captured.registrationSequence);
+            if (active == nullptr ||
+                active->listenerFunction != captured.listenerFunction ||
+                (((active->flags & kNavigatorClickListenerCaptureFlag) != 0u) !=
+                    capture)) continue;
+            const RuntimeFunctionId listenerFunction =
+                active->listenerFunction;
+            if ((active->flags & kNavigatorClickListenerOnceFlag) != 0u)
+                removeClickListener(*active);
+            invoke(listenerFunction);
+        }
+        return true;
+    };
+    const auto invokeListeners = [&](HostInstanceId currentSerial,
+        bool capture) {
+        return collectListeners(currentSerial, capture) &&
+            invokeCollectedListeners(currentSerial, capture);
+    };
+    const auto updateCurrentTarget = [&](HostInstanceId currentSerial) {
+        const HostObjectReference currentTarget{
+            currentSerial, dispatchGeneration, kNavigatorElementHostKind};
+        RuntimeErrorCode eventError = RuntimeErrorCode::None;
+        if (!runtime.createOrUpdateEventObject(SourceView("click", 5u),
+                target, currentTarget, event, eventError)) {
+            if (firstError == RuntimeErrorCode::None) firstError = eventError;
+            succeeded = false;
+            dispatchAborted = true;
+            return false;
+        }
+        arguments[0] = event;
+        return true;
+    };
+    const auto validatePathEntry = [&](HostInstanceId currentSerial) {
+        if (generation_ == dispatchGeneration && document_ != nullptr &&
+            findElement(currentSerial) != nullptr) return true;
+        if (firstError == RuntimeErrorCode::None)
+            firstError = RuntimeErrorCode::StaleHostObject;
+        succeeded = false;
+        dispatchAborted = true;
+        return false;
+    };
+
+    // Capture walks the existing target-to-root path in reverse. Ancestor
+    // onclick handlers are not part of this phase.
+    for (std::size_t reverse = propagationLength; reverse > 1u; --reverse) {
+        const HostInstanceId currentSerial = propagationPath[reverse - 1u];
+        if (!validatePathEntry(currentSerial) ||
+            !invokeListeners(currentSerial, true)) break;
+        if (runtime.eventPropagationStopped()) break;
+    }
+
+    // The target has one dispatch stage. Its capture listeners, onclick, and
+    // non-capture listeners share the target currentTarget. stopPropagation
+    // still permits all later target handlers; immediate stop does not.
+    if (!dispatchAborted && !runtime.eventPropagationStopped() &&
+        validatePathEntry(propagationPath[0])) {
+        if (invokeListeners(propagationPath[0], true) &&
+            !runtime.eventImmediatePropagationStopped()) {
+            // Preserve JS17's target mutation rule: the target bubble
+            // snapshot is fixed before target onclick runs, while capture
+            // mutations can still affect this later target-phase snapshot.
+            if (collectListeners(propagationPath[0], false)) {
+                const ClickHandlerRecord* record =
+                    clickHandlerFor(propagationPath[0]);
+                const RuntimeFunctionId onclickFunction = record == nullptr
+                    ? kInvalidRuntimeFunctionId : record->onclickFunction;
+                if (onclickFunction != kInvalidRuntimeFunctionId) {
+                    if (updateCurrentTarget(propagationPath[0]))
+                        invoke(onclickFunction);
+                }
+                if (!dispatchAborted &&
+                    !runtime.eventImmediatePropagationStopped()) {
+                    invokeCollectedListeners(propagationPath[0], false);
+                }
             }
         }
-        if (runtime.eventPropagationStopped()) break;
+    }
+
+    // Bubble uses the original forward path, starting with the target's
+    // parent. Each ancestor gets a fresh non-capture snapshot at this point.
+    if (!dispatchAborted && !runtime.eventPropagationStopped() &&
+        !runtime.eventImmediatePropagationStopped()) {
+        for (std::size_t index = 1u; index < propagationLength; ++index) {
+            const HostInstanceId currentSerial = propagationPath[index];
+            if (!validatePathEntry(currentSerial)) break;
+            const ClickHandlerRecord* record = clickHandlerFor(currentSerial);
+            const RuntimeFunctionId onclickFunction = record == nullptr
+                ? kInvalidRuntimeFunctionId : record->onclickFunction;
+            if (onclickFunction != kInvalidRuntimeFunctionId) {
+                if (!updateCurrentTarget(currentSerial)) break;
+                invoke(onclickFunction);
+            }
+            if (runtime.eventImmediatePropagationStopped()) break;
+            if (!invokeListeners(currentSerial, false)) break;
+            if (runtime.eventPropagationStopped()) break;
+        }
     }
     const bool dispatchDefaultPrevented = runtime.eventDefaultPrevented();
     if (defaultPrevented != nullptr)
@@ -843,7 +924,7 @@ HostResult NavigatorScriptHostAdapter::call(
     const HostValue* arguments, std::size_t argumentCount, HostValue& result)
 {
     return callInternal(receiver, methodId, arguments, argumentCount, result,
-        false, false);
+        false, false, false);
 }
 
 HostResult NavigatorScriptHostAdapter::callWithRuntime(
@@ -853,7 +934,9 @@ HostResult NavigatorScriptHostAdapter::callWithRuntime(
 {
     bool optionsSupplied = false;
     bool once = false;
-    if (methodId == kNavigatorAddEventListenerMethod &&
+    bool capture = false;
+    if ((methodId == kNavigatorAddEventListenerMethod ||
+            methodId == kNavigatorRemoveEventListenerMethod) &&
         argumentCount == 3u) {
         if (arguments == nullptr || arguments[2].type != HostValueType::Object)
             return HostResult{HostResultCode::InvalidValue};
@@ -870,17 +953,30 @@ HostResult NavigatorScriptHostAdapter::callWithRuntime(
         } else {
             return HostResult{HostResultCode::InvalidValue};
         }
+        Value captureValue;
+        optionError = RuntimeErrorCode::None;
+        if (!runtime.readObjectPropertyForHost(arguments[2].objectId,
+                "capture", captureValue, optionError)) {
+            return HostResult{HostResultCode::InvalidValue};
+        }
+        if (captureValue.isUndefined()) {
+            capture = false;
+        } else if (captureValue.isBoolean()) {
+            capture = captureValue.booleanValue();
+        } else {
+            return HostResult{HostResultCode::InvalidValue};
+        }
         optionsSupplied = true;
     }
     return callInternal(receiver, methodId, arguments, argumentCount, result,
-        once, optionsSupplied);
+        once, capture, optionsSupplied);
 }
 
 HostResult NavigatorScriptHostAdapter::callInternal(
     const HostObjectReference* receiver,
     std::uint32_t methodId, const HostValue* arguments,
     std::size_t argumentCount, HostValue& result, bool once,
-    bool optionsSupplied)
+    bool capture, bool optionsSupplied)
 {
     if (receiver == nullptr) return HostResult{HostResultCode::InvalidObject};
     const HostResult receiverResult = validate(*receiver);
@@ -901,11 +997,11 @@ HostResult NavigatorScriptHostAdapter::callInternal(
         }
         if (!textEquals(arguments[0].stringValue, "click"))
             return HostResult{HostResultCode::InvalidValue};
-        // The exact (Element, event type, Function ID) tuple is a duplicate
-        // no-op. Check it before capacity so duplicate calls never consume a
-        // slot or perturb logical registration order.
-        if (clickListenerFor(receiver->instanceId, arguments[1].functionId) !=
-            nullptr) {
+        // The exact (Element, event type, Function ID, capture) tuple is a
+        // duplicate no-op. once is deliberately excluded from identity, so a
+        // second call cannot change the first registration's once behavior.
+        if (clickListenerFor(receiver->instanceId, arguments[1].functionId,
+                capture) != nullptr) {
             result = HostValue::undefined();
             return HostResult();
         }
@@ -929,7 +1025,8 @@ HostResult NavigatorScriptHostAdapter::callInternal(
         const bool hadAnyHandler = hasAnyClickHandler(receiver->instanceId);
         freeRecord->serial = receiver->instanceId;
         freeRecord->listenerFunction = arguments[1].functionId;
-        freeRecord->flags = once ? kNavigatorClickListenerOnceFlag : 0u;
+        freeRecord->flags = (once ? kNavigatorClickListenerOnceFlag : 0u) |
+            (capture ? kNavigatorClickListenerCaptureFlag : 0u);
         freeRecord->registrationSequence = sequence;
         ++clickListenerCount_;
         if (!hadAnyHandler) ++clickHandlerCount_;
@@ -938,7 +1035,9 @@ HostResult NavigatorScriptHostAdapter::callInternal(
     }
     if (methodId == kNavigatorRemoveEventListenerMethod) {
         if (receiver->kind != kNavigatorElementHostKind ||
-            argumentCount != 2u || arguments == nullptr ||
+            (argumentCount != 2u &&
+                (!optionsSupplied || argumentCount != 3u)) ||
+            arguments == nullptr ||
             arguments[0].type != HostValueType::String ||
             arguments[1].type != HostValueType::Function ||
             arguments[1].functionId == kInvalidRuntimeFunctionId) {
@@ -955,7 +1054,7 @@ HostResult NavigatorScriptHostAdapter::callInternal(
         // and function IDs provide JavaScript function identity within this
         // same realm; source text or function shape is never compared.
         ClickListenerRecord* record = clickListenerFor(receiver->instanceId,
-            arguments[1].functionId);
+            arguments[1].functionId, capture);
         if (record != nullptr) {
             removeClickListener(*record);
         }

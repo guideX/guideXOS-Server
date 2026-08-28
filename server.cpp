@@ -1832,6 +1832,118 @@ static std::string navigatorHostedSmokeDiagnostic() {
         gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
         "replacement page starts without JS19 registrations");
 
+    const bool js20Loaded = gxos::apps::Navigator::SmokeNavigateToQuiet(
+        "http://127.0.0.1:8080/navigator-smoke/javascript-js20.html");
+    const std::string js20InitialText =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    const size_t js20InitialHandlers =
+        gxos::apps::Navigator::SmokeJavaScriptHandlerCount();
+    const size_t js20InitialListeners =
+        gxos::apps::Navigator::SmokeJavaScriptListenerCount();
+    const std::string js20InitialError =
+        gxos::apps::Navigator::SmokeJavaScriptLastError();
+    add("JS20 hosted fixture loads bounded capture registrations",
+        js20Loaded && contains(js20InitialText, "Navigator JavaScript JS20") &&
+        contains(js20InitialText, "Bounded click capture") &&
+        js20InitialHandlers == 8u && js20InitialListeners == 26u &&
+        js20InitialError.empty(),
+        std::string("loaded=") + yesNo(js20Loaded) + ",handlers=" +
+        std::to_string(js20InitialHandlers) + ",listeners=" +
+        std::to_string(js20InitialListeners) + ",error=" +
+        (js20InitialError.empty() ? "none" : js20InitialError));
+
+    const bool js20TargetClick =
+        gxos::apps::Navigator::SmokeClickFormControlById("js20-target");
+    const std::string js20TargetText =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS20 authentic capture-target-bubble ordering",
+        js20TargetClick && contains(js20TargetText,
+            "order:ABCDEFGIHJKLMNOP") &&
+        contains(js20TargetText, "stable:true") &&
+        contains(js20TargetText, "current:truetruetruetrue"),
+        "expected root/grandparent/parent capture, target, then bubble");
+
+    const bool js20StopClick =
+        gxos::apps::Navigator::SmokeClickFormControlById("js20-stop");
+    add("JS20 authentic ancestor capture stopPropagation",
+        js20StopClick && contains(
+            gxos::apps::Navigator::SmokeCurrentDocumentText(), "stop:ab"),
+        "expected same-root capture listeners only");
+
+    const bool js20ImmediateClick =
+        gxos::apps::Navigator::SmokeClickFormControlById("js20-immediate");
+    add("JS20 authentic capture stopImmediatePropagation",
+        js20ImmediateClick && contains(
+            gxos::apps::Navigator::SmokeCurrentDocumentText(), "immediate:a"),
+        "expected later same-node capture listener and later phases skipped");
+
+    const bool js20TargetStopClick =
+        gxos::apps::Navigator::SmokeClickFormControlById("js20-target-stop");
+    add("JS20 authentic target capture stopPropagation",
+        js20TargetStopClick && contains(
+            gxos::apps::Navigator::SmokeCurrentDocumentText(),
+            "target-stop:cob"),
+        "expected target capture, onclick, target bubble, no ancestor bubble");
+
+    const bool js20TargetImmediateClick =
+        gxos::apps::Navigator::SmokeClickFormControlById(
+            "js20-target-immediate");
+    add("JS20 authentic target capture immediate stop",
+        js20TargetImmediateClick && contains(
+            gxos::apps::Navigator::SmokeCurrentDocumentText(),
+            "target-immediate:c"),
+        "expected target onclick and target bubble skipped");
+
+    const bool js20OnceClickOne =
+        gxos::apps::Navigator::SmokeClickFormControlById("js20-once");
+    const std::string js20OnceTextOne =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    const bool js20OnceClickTwo =
+        gxos::apps::Navigator::SmokeClickFormControlById("js20-once");
+    const std::string js20OnceTextTwo =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS20 authentic capture once executes once",
+        js20OnceClickOne && js20OnceClickTwo &&
+        contains(js20OnceTextOne, "once:1") &&
+        contains(js20OnceTextTwo, "once:1"),
+        std::string("first=") + yesNo(js20OnceClickOne) + ",second=" +
+        yesNo(js20OnceClickTwo) + ",first=" +
+        summarizeFromMarker(js20OnceTextOne, "once:", 80) + ",second=" +
+        summarizeFromMarker(js20OnceTextTwo, "once:", 80));
+
+    const bool js20CancelHit =
+        gxos::apps::Navigator::SmokeHitLinkById("js20-cancel");
+    const bool js20CancelledClick =
+        js20CancelHit && !gxos::apps::Navigator::SmokeClickFirstLink();
+    const std::string js20CancelText =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS20 authentic capture preventDefault cancels link",
+        js20CancelledClick &&
+        gxos::apps::Navigator::SmokeCurrentUrl() ==
+            "http://127.0.0.1:8080/navigator-smoke/javascript-js20.html" &&
+        contains(js20CancelText, "cancel:cdp"),
+        std::string("hit=") + yesNo(js20CancelHit) + ",cancelled=" +
+        yesNo(js20CancelledClick) + ",text=" + summarizeText(js20CancelText, 160));
+
+    const bool js20CancelHitAgain =
+        gxos::apps::Navigator::SmokeHitLinkById("js20-cancel");
+    const bool js20UncancelledClick =
+        js20CancelHitAgain && gxos::apps::Navigator::SmokeClickFirstLink();
+    add("JS20 uncancelled second link click navigates",
+        js20UncancelledClick &&
+        gxos::apps::Navigator::SmokeCurrentUrl() ==
+            "http://127.0.0.1:8080/navigator-smoke/javascript-js20-target.html" &&
+        contains(gxos::apps::Navigator::SmokeCurrentDocumentText(),
+            "Navigator JavaScript JS20 Target"),
+        std::string("hit=") + yesNo(js20CancelHitAgain) + ",click=" +
+        yesNo(js20UncancelledClick) + ",url=" +
+        gxos::apps::Navigator::SmokeCurrentUrl());
+    add("JS20 navigation cleanup clears capture state",
+        gxos::apps::Navigator::SmokeJavaScriptHandlerCount() == 0u &&
+        gxos::apps::Navigator::SmokeJavaScriptListenerCount() == 0u &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        "replacement page starts without JS20 listeners");
+
     bool cssInlineLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-inline.html");
     std::string cssInlineText = gxos::apps::Navigator::SmokeCurrentDocumentText();
     std::string cssInlineReport = gxos::apps::Navigator::SmokeRuntimeReport();

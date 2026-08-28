@@ -1,0 +1,155 @@
+<!doctype html>
+<html>
+<head><title>Navigator JavaScript JS20</title></head>
+<body>
+<h1>Navigator JavaScript JS20</h1>
+<p>Bounded click capture, target, bubbling, cancellation, and once.</p>
+<div id="js20-root">
+  <div id="js20-grandparent">
+    <div id="js20-parent">
+      <button id="js20-target" type="button">Order</button>
+      <button id="js20-stop" type="button">Stop capture</button>
+      <button id="js20-immediate" type="button">Immediate capture</button>
+      <button id="js20-target-stop" type="button">Stop target</button>
+      <button id="js20-target-immediate" type="button">Immediate target</button>
+      <button id="js20-once" type="button">Once capture</button>
+      <a id="js20-cancel" href="/navigator-smoke/javascript-js20-target.html">Cancel once</a>
+    </div>
+  </div>
+</div>
+<p id="js20-state">initial</p>
+<script>
+var js20State = document.getElementById("js20-state");
+var js20Root = document.getElementById("js20-root");
+var js20Grandparent = document.getElementById("js20-grandparent");
+var js20Parent = document.getElementById("js20-parent");
+var js20Target = document.getElementById("js20-target");
+var js20Stop = document.getElementById("js20-stop");
+var js20Immediate = document.getElementById("js20-immediate");
+var js20TargetStop = document.getElementById("js20-target-stop");
+var js20TargetImmediate = document.getElementById("js20-target-immediate");
+var js20Once = document.getElementById("js20-once");
+var js20Cancel = document.getElementById("js20-cancel");
+var js20Order = "";
+var js20TargetStable = true;
+var js20RootCurrent = false;
+var js20GrandCurrent = false;
+var js20ParentCurrent = false;
+var js20TargetCurrent = false;
+var js20StopLog = "";
+var js20ImmediateLog = "";
+var js20TargetStopLog = "";
+var js20TargetImmediateLog = "";
+var js20OnceCalls = 0;
+var js20CancelLog = "";
+var js20CancelCount = 0;
+function js20Metadata(event, node) {
+    js20TargetStable = js20TargetStable && event.target === js20Target &&
+        event.bubbles === true && event.cancelable === true;
+    if (event.currentTarget === js20Root) js20RootCurrent = true;
+    if (event.currentTarget === js20Grandparent) js20GrandCurrent = true;
+    if (event.currentTarget === js20Parent) js20ParentCurrent = true;
+    if (event.currentTarget === js20Target) js20TargetCurrent = true;
+}
+js20Root.addEventListener("click", function(event) {
+    if (event.target === js20Target) { js20Metadata(event, js20Root); js20Order = js20Order + "A"; }
+}, { capture: true });
+js20Root.addEventListener("click", function(event) {
+    if (event.target === js20Target) { js20Metadata(event, js20Root); js20Order = js20Order + "B"; }
+}, { capture: true });
+js20Grandparent.addEventListener("click", function(event) {
+    if (event.target === js20Target) { js20Metadata(event, js20Grandparent); js20Order = js20Order + "C"; }
+}, { capture: true });
+js20Grandparent.addEventListener("click", function(event) {
+    if (event.target === js20Target) { js20Metadata(event, js20Grandparent); js20Order = js20Order + "D"; }
+}, { capture: true });
+js20Parent.addEventListener("click", function(event) {
+    if (event.target === js20Target) { js20Metadata(event, js20Parent); js20Order = js20Order + "E"; }
+}, { capture: true });
+js20Parent.addEventListener("click", function(event) {
+    if (event.target === js20Target) { js20Metadata(event, js20Parent); js20Order = js20Order + "F"; }
+}, { capture: true });
+js20Target.addEventListener("click", function(event) {
+    js20Metadata(event, js20Target); js20Order = js20Order + "G";
+}, { capture: true });
+js20Target.onclick = function(event) {
+    js20Metadata(event, js20Target); js20Order = js20Order + "I";
+};
+js20Target.addEventListener("click", function(event) {
+    js20Metadata(event, js20Target); js20Order = js20Order + "H";
+});
+js20Target.addEventListener("click", function(event) {
+    js20Metadata(event, js20Target); js20Order = js20Order + "J";
+});
+js20Parent.onclick = function(event) {
+    if (event.target === js20Target) { js20Metadata(event, js20Parent); js20Order = js20Order + "K"; }
+};
+js20Parent.addEventListener("click", function(event) {
+    if (event.target === js20Target) { js20Metadata(event, js20Parent); js20Order = js20Order + "L"; }
+});
+js20Parent.addEventListener("click", function(event) {
+    if (event.target === js20Target) { js20Metadata(event, js20Parent); js20Order = js20Order + "M"; }
+});
+js20Root.onclick = function(event) {
+    if (event.target === js20Target) { js20Metadata(event, js20Root); js20Order = js20Order + "N"; }
+};
+js20Root.addEventListener("click", function(event) {
+    if (event.target === js20Target) { js20Metadata(event, js20Root); js20Order = js20Order + "O"; }
+});
+js20Root.addEventListener("click", function(event) {
+    if (event.target === js20Target) {
+        js20Metadata(event, js20Root); js20Order = js20Order + "P";
+        js20State.textContent = "order:" + js20Order + ";stable:" + js20TargetStable +
+            ";current:" + js20RootCurrent + js20GrandCurrent + js20ParentCurrent + js20TargetCurrent;
+    }
+});
+js20Root.addEventListener("click", function(event) {
+    if (event.target === js20Stop) { js20StopLog = js20StopLog + "a"; event.stopPropagation(); }
+}, { capture: true });
+js20Root.addEventListener("click", function(event) {
+    if (event.target === js20Stop) { js20StopLog = js20StopLog + "b"; js20State.textContent = "stop:" + js20StopLog; }
+}, { capture: true });
+js20Root.addEventListener("click", function(event) {
+    if (event.target === js20Immediate) { js20ImmediateLog = "a"; event.stopImmediatePropagation(); js20State.textContent = "immediate:" + js20ImmediateLog; }
+}, { capture: true });
+js20Root.addEventListener("click", function(event) {
+    if (event.target === js20Immediate) { js20ImmediateLog = js20ImmediateLog + "b"; }
+}, { capture: true });
+js20TargetStop.onclick = function(event) { js20TargetStopLog = js20TargetStopLog + "o"; };
+js20TargetStop.addEventListener("click", function(event) {
+    js20TargetStopLog = js20TargetStopLog + "c"; event.stopPropagation();
+}, { capture: true });
+js20TargetStop.addEventListener("click", function(event) {
+    js20TargetStopLog = js20TargetStopLog + "b"; js20State.textContent = "target-stop:" + js20TargetStopLog;
+});
+js20TargetImmediate.onclick = function(event) { js20TargetImmediateLog = js20TargetImmediateLog + "o"; };
+js20TargetImmediate.addEventListener("click", function(event) {
+    js20TargetImmediateLog = js20TargetImmediateLog + "c";
+    js20State.textContent = "target-immediate:" + js20TargetImmediateLog;
+    event.stopImmediatePropagation();
+}, { capture: true });
+js20TargetImmediate.addEventListener("click", function(event) {
+    js20TargetImmediateLog = js20TargetImmediateLog + "b";
+});
+js20Once.addEventListener("click", function(event) {
+    js20OnceCalls = js20OnceCalls + 1;
+}, { capture: true, once: true });
+js20Once.addEventListener("click", function(event) {
+    js20State.textContent = "once:" + js20OnceCalls;
+});
+js20Root.addEventListener("click", function(event) {
+    if (event.target === js20Cancel && js20CancelCount === 0) {
+        js20CancelCount = js20CancelCount + 1; js20CancelLog = "c"; event.preventDefault();
+    }
+}, { capture: true });
+js20Cancel.addEventListener("click", function(event) {
+    if (event.defaultPrevented === true) js20CancelLog = js20CancelLog + "d";
+});
+js20Parent.addEventListener("click", function(event) {
+    if (event.target === js20Cancel && event.defaultPrevented === true) {
+        js20CancelLog = js20CancelLog + "p"; js20State.textContent = "cancel:" + js20CancelLog;
+    }
+});
+</script>
+</body>
+</html>

@@ -2298,10 +2298,166 @@ all seven added JS19 checks pass, so JS19 adds seven passing checks with no new
 failure. The seven known unrelated CSS failures remain CSS 3C, CSS 3G, CSS 6A,
 CSS 6B's three checks, and CSS 6C. No CSS repair is part of JS19.
 
-The recommended JS20 milestone is bounded capture-phase support, beginning
-with `element.addEventListener("click", callback, { capture: true })` while
-preserving `{ once: true }`. A bounded model can dispatch capture
-`root -> parent -> target`, target handlers, then bubble `target -> parent ->
-root`, with `event.target` fixed to the original target and
-`event.currentTarget` following each node. JS20 should consider `eventPhase`
-only if it is needed to make capture observable and testable.
+## Phase JS20: bounded click capture-phase support
+
+JS20 adds bounded capture-phase support to the existing click listener model:
+
+```javascript
+element.addEventListener("click", callback, { capture: true });
+element.addEventListener("click", callback, { capture: false });
+element.addEventListener("click", callback, { capture: true, once: true });
+```
+
+The explicit object form is the supported surface. Boolean capture shorthand,
+such as `addEventListener("click", callback, true)` or
+`removeEventListener("click", callback, true)`, remains unsupported. Supported
+option members are `capture` and `once`; both use Boolean validation, absent
+members default to false, and unknown members remain ignored.
+
+### JS20 dispatch order
+
+Navigator continues to build one fixed target-to-root propagation path, with a
+maximum of 32 Elements. Capture traverses the ancestor portion of that path in
+reverse, root toward target. The target is then dispatched once as one target
+stage, followed by the existing forward bubble traversal:
+
+```text
+capture: root -> ... -> parent
+target:  child capture -> child onclick -> child non-capture listeners
+bubble:  parent onclick -> parent listeners -> ... -> root onclick -> root listeners
+```
+
+Ancestor `onclick` is bubble-only. On one Element, multiple capture listeners
+run in registration order, and multiple non-capture listeners run in
+registration order. Capture always precedes target `onclick` and target
+non-capture listeners; `onclick` still precedes non-capture listeners. Capture
+and bubble registration order is phase-separated rather than interleaved.
+
+`event.target` remains the original authentically clicked canonical Element for
+all phases. `event.currentTarget` is refreshed to the canonical Element whose
+callback is executing. `event.bubbles` and `event.cancelable` remain Boolean
+`true` during capture, target, and bubble. JS20 intentionally does not expose
+`event.eventPhase` or phase constants; those are recommended for JS21.
+
+`stopPropagation()` finishes all eligible listeners on the current Element,
+then prevents later Elements and later phases. At the target it still permits
+target capture's later same-node handlers, `onclick`, and target non-capture
+listeners, but prevents ancestor bubbling. `stopImmediatePropagation()` skips
+later listeners on the current Element and all later Elements/phases, whether
+called during capture, target, or bubble. Existing bubble propagation-control
+behavior is unchanged.
+
+`preventDefault()` during capture sets `defaultPrevented` while leaving capture,
+target, and bubble traversal active. Later callbacks in every phase observe the
+cancellation, and the supported link default action is suppressed only after
+dispatch. Cancellation is independent from propagation control.
+
+### JS20 listener identity, removal, and once
+
+The duplicate-registration key is `(Element, "click", Function identity,
+capture)`. `once` is not part of identity. Consequently, a capture and a
+non-capture registration of the same function coexist, while repeating a
+registration with the same capture bit is a no-op even if the second call uses
+a different `once` value; the first call's `once` behavior is retained.
+
+Removal uses the same key except that only the capture bit is read from the
+options. The two-argument form means `capture: false` and removes only the
+non-capture registration. `{ capture: true }` removes only capture. A `once`
+member in removal options is ignored for matching (and, when present, follows
+the same Boolean validation policy). Removal never removes both phases.
+
+Capture `once` registrations are consumed immediately before callback
+invocation, including target capture. They release their fixed listener slot
+even if the callback stops propagation or throws a contained JavaScript error.
+
+### JS20 mutation snapshots
+
+The adapter reuses one fixed 64-entry, 16-byte listener snapshot (1,024 bytes)
+sequentially for every node and phase. A capture snapshot is collected when a
+node is reached during capture; the target capture snapshot and target bubble
+snapshot are separate visits; each ancestor gets a fresh bubble snapshot when
+the bubble reaches it. Each snapshot preserves registration-sequence order and
+revalidates both sequence and function identity before invocation. Removal,
+including remove-then-reuse of a physical slot, therefore cannot invoke a stale
+callback.
+
+Additions do not join the active node/phase snapshot. A capture callback can
+add a capture listener for a later click, or add a non-capture listener to an
+ancestor whose later bubble snapshot has not yet been collected; that new
+listener may run in the same event's later bubble phase. Removal during capture
+can prevent a later bubble listener from entering its snapshot. Mutations during
+bubble cannot alter completed capture. A capture listener added by target
+`onclick` waits for the next event because capture has already completed.
+
+### JS20 bounded storage and cleanup
+
+The listener record remains 24 bytes: serial (8), Function ID (4), flags (4),
+and registration sequence (8). JS20 uses bit 1 of the existing flags word for
+capture and bit 0 for once; no listener-record expansion or separate capture
+table was added. The fixed 64-record listener table costs 1,536 bytes. The
+16-byte snapshot entry is unchanged and the reused snapshot costs 1,024 bytes;
+there are not simultaneous capture and bubble snapshot buffers.
+
+The dispatch memory model is therefore fixed: 1,536 bytes of listener table,
+up to 256 bytes for the 32-serial propagation path, 1,024 bytes for the reused
+phase snapshot, the existing cached Event object/property storage and its
+generation-scoped Element wrappers, plus the existing scalar phase-control
+state. No capture-specific persistent collection, recursion, or per-click
+Event growth is introduced. The listener capacity remains 64 total
+`addEventListener` registrations across both phases; registration 65 fails
+with `HostCallbackLimitExceeded`.
+
+Path construction still happens before JavaScript. A path beyond 32 nodes
+returns `PropagationPathLimitExceeded` before capture, target, bubble, Event
+creation, once consumption, or cancellation. A later valid path recovers. A
+callback error is contained according to the existing policy: the error is
+reported, same-node eligible listeners and later phases continue, and
+propagation/cancellation state already set by that callback remains effective.
+
+Navigation clears capture and non-capture registrations, once state, snapshots,
+and phase state. Stale Elements fail closed through generation checks. A
+retained Event exposes only the existing cached safe metadata; no capture stack
+or snapshot pointer is exposed.
+
+### JS20 proof and results
+
+The focused proof is `tests/navigator_javascript_js20_test.cpp`, run by
+`scripts/smoke-navigator-javascript-js20.ps1`. It exercises parsed HTML,
+real host option objects, canonical Element identity, phase-separated identity
+and removal, 64/65 capacity, root-to-target capture, target ordering,
+stopPropagation and stopImmediatePropagation in capture/target/bubble,
+preventDefault visibility and cancellation, once capture, mutation snapshots,
+stale-slot reuse, handlerless ancestors, independent branches, 32-node
+overflow/recovery, contained capture errors, navigation cleanup, unsupported
+inputs, and 100 repeated clicks. The JS20 focused suite reports 463 checks with
+0 failures. The JS1-JS20 set contains 18 focused suites: lexer, parser,
+runtime, JS6 through JS20. The final sweep passes all 18 focused scripts; the
+dedicated JS20 script passes its `GXOS_BARE_METAL` compile and strict hosted
+syntax lanes, and the normal `build.bat` native server build links
+successfully.
+
+The authentic hosted proof is `navigator-smoke/javascript-js20.html`, with
+`navigator-smoke/javascript-js20-target.html` as its navigation target. The
+aggregate loads the page through the production HTTP path, uses real layout,
+hit testing, mouse down/up, and the production propagation path, then checks
+capture order, target ordering, ancestor and target propagation controls,
+capture `once`, capture cancellation of a real link, uncancelled navigation,
+and navigation cleanup.
+
+The JS20 aggregate adds ten Navigator assertions to the JS19 baseline of 369
+total checks. The final hosted result is `372 passed, 7 failed` out of 379
+checks: all ten JS20 assertions pass, and the seven known unrelated CSS
+failures remain CSS 3C, CSS 3G, CSS 6A, CSS 6B's three checks, and CSS 6C. No
+CSS repair is part of JS20.
+
+Bare-metal compilation uses `GXOS_BARE_METAL` with the authoritative focused
+source lane and strict `-Wall -Wextra -Werror -pedantic` syntax validation.
+JS20 adds no dynamic
+containers, hosted-only APIs, RTTI, exceptions, timers, promises, microtasks,
+additional event types, MouseEvent/PointerEvent, or broad DOM behavior. Full
+DOM Events compatibility remains incomplete.
+
+The recommended JS21 milestone is `event.eventPhase` with standard phase
+constants equivalent to `CAPTURING_PHASE = 1`, `AT_TARGET = 2`, and
+`BUBBLING_PHASE = 3`. A later phase may consider Boolean capture shorthand or
+additional event types.

@@ -31,6 +31,7 @@ constexpr std::size_t kNavigatorScriptMaxDocumentMutations = 1024u;
 constexpr std::size_t kNavigatorScriptMaxDocumentNodes = 1024u;
 constexpr std::size_t kNavigatorScriptMaxClickHandlers = 64u;
 constexpr std::uint32_t kNavigatorClickListenerOnceFlag = 1u;
+constexpr std::uint32_t kNavigatorClickListenerCaptureFlag = 2u;
 // JS13/JS17 snapshots at most 32 serials, including the clicked Element and the
 // document's html/body ancestors. The path is deliberately smaller than the
 // 1024-node document metadata bound so dispatch cannot consume an unbounded
@@ -129,9 +130,9 @@ private:
     const ClickHandlerRecord* clickHandlerFor(HostInstanceId serial) const;
     void removeEmptyClickHandler(HostInstanceId serial);
     ClickListenerRecord* clickListenerFor(HostInstanceId serial,
-        RuntimeFunctionId function);
+        RuntimeFunctionId function, bool capture);
     const ClickListenerRecord* clickListenerFor(
-        HostInstanceId serial, RuntimeFunctionId function) const;
+        HostInstanceId serial, RuntimeFunctionId function, bool capture) const;
     const ClickListenerRecord* clickListenerForSequence(
         HostInstanceId serial, std::uint64_t registrationSequence) const;
     ClickListenerRecord* clickListenerForSequence(
@@ -139,7 +140,7 @@ private:
     bool collectListenerSnapshot(HostInstanceId serial,
         std::array<ClickListenerSnapshotEntry,
             kNavigatorScriptMaxClickHandlers>& snapshot,
-        std::size_t& count) const;
+        std::size_t& count, bool capture) const;
     bool hasClickListener(HostInstanceId serial) const;
     bool hasAnyClickHandler(HostInstanceId serial) const;
     void removeClickListener(ClickListenerRecord& record);
@@ -148,7 +149,7 @@ private:
     HostResult callInternal(const HostObjectReference* receiver,
         std::uint32_t methodId, const HostValue* arguments,
         std::size_t argumentCount, HostValue& result, bool once,
-        bool optionsSupplied);
+        bool capture, bool optionsSupplied);
     gxos::web::HtmlElementRef* findElement(HostInstanceId serial);
     const gxos::web::HtmlElementRef* findElement(HostInstanceId serial) const;
     bool isKnownElementSerial(HostInstanceId serial) const;
