@@ -33,6 +33,21 @@ Diagnostics::Diagnostics()
 {
 }
 
+namespace {
+
+static void copy_message(char* output, uint32_t capacity, const char* input)
+{
+    if (!output || capacity == 0) return;
+    uint32_t i = 0;
+    if (input) while (i + 1 < capacity && input[i]) {
+        output[i] = input[i];
+        ++i;
+    }
+    output[i] = '\0';
+}
+
+} // namespace
+
 void Diagnostics::error(SourceLocation location, const char* message, const char* tokenKind)
 {
     if (m_count >= COMPILER_MAX_DIAGNOSTICS) {
@@ -41,8 +56,32 @@ void Diagnostics::error(SourceLocation location, const char* message, const char
     }
 
     m_items[m_count].location = location;
-    m_items[m_count].message = message ? message : "compiler error";
+    copy_message(m_messageStorage[m_count], sizeof(m_messageStorage[m_count]),
+                 message ? message : "compiler error");
+    m_items[m_count].message = m_messageStorage[m_count];
     m_items[m_count].tokenKind = tokenKind ? tokenKind : "unknown";
+    ++m_count;
+}
+
+void Diagnostics::error_identifier(SourceLocation location, const char* prefix,
+                                   const char* identifier, uint32_t identifierBytes,
+                                   const char* tokenKind)
+{
+    if (m_count >= COMPILER_MAX_DIAGNOSTICS) {
+        m_overflowed = true;
+        return;
+    }
+    char* output = m_messageStorage[m_count];
+    uint32_t written = 0;
+    if (prefix) while (written + 1 < COMPILER_MAX_DIAGNOSTIC_MESSAGE_BYTES && prefix[written]) output[written] = prefix[written], ++written;
+    if (written + 1 < COMPILER_MAX_DIAGNOSTIC_MESSAGE_BYTES) output[written++] = '\'';
+    for (uint32_t i = 0; i < identifierBytes && written + 1 < COMPILER_MAX_DIAGNOSTIC_MESSAGE_BYTES; ++i)
+        output[written++] = identifier ? identifier[i] : '?';
+    if (written + 1 < COMPILER_MAX_DIAGNOSTIC_MESSAGE_BYTES) output[written++] = '\'';
+    output[written] = '\0';
+    m_items[m_count].location = location;
+    m_items[m_count].message = output;
+    m_items[m_count].tokenKind = tokenKind ? tokenKind : "identifier";
     ++m_count;
 }
 

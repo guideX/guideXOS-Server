@@ -22,7 +22,7 @@ static const uint32_t PROGRAM_HEADER_BYTES = 56;
 static const uint32_t PROGRAM_HEADER_COUNT_CODE_ONLY = 1;
 static const uint32_t PROGRAM_HEADER_COUNT_CODE_AND_DATA = 2;
 static const uint32_t SEGMENT_ALIGNMENT = 0x1000;
-static const uint32_t BOOTSTRAP_DATA_BYTES_LIMIT = 256;
+static const uint32_t BOOTSTRAP_DATA_BYTES_LIMIT = COMPILER_MAX_TOTAL_STRING_DATA;
 
 static void clear_bytes(uint8_t* bytes, uint32_t count)
 {

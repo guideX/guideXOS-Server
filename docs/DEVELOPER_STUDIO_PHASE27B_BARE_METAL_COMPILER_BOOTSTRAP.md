@@ -6,7 +6,12 @@ Phase 27B proves the smallest authentic source-to-native-ELF path inside a runni
 
 This is a bounded bootstrap compiler, not a general C or C++ implementation and not a linker.
 
-## Supported language
+## Supported language at the Phase 27B checkpoint
+
+This section records the historical Phase 27B literal-only proof shape. The
+current bootstrap compiler is a strict bounded superset; local variables,
+expressions, assignments, and multiple host calls are documented in
+`DEVELOPER_STUDIO_PHASE27G_BOOTSTRAP_LANGUAGE_EXPANSION.md`.
 
 The accepted grammar is:
 
@@ -31,7 +36,11 @@ source
   -> validate_bootstrap_elf
 ```
 
-The driver is `kernel/core/compiler/compiler_driver.cpp`. The parser never emits instructions; it only produces `FunctionIR { name, returnConstant }`. The AMD64 backend consumes that IR.
+The driver is `kernel/core/compiler/compiler_driver.cpp`. The Phase 27B
+parser never emitted instructions; it produced the historical
+`FunctionIR { name, returnConstant }` view. The current parser/backend
+contract is the expanded target-neutral IR described by the Phase 27G
+document.
 
 ## Resource limits
 

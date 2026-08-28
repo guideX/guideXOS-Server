@@ -9,6 +9,7 @@
 #pragma once
 
 #include "kernel/types.h"
+#include "compiler_ir.h"
 #include "../native_elf/native_elf_contract.h"
 
 namespace kernel {

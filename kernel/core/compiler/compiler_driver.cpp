@@ -87,6 +87,22 @@ static void print_data(const uint8_t* data, uint32_t dataBytes)
     serial::putc('\n');
 }
 
+static bool flatten_string_table(const FunctionIR& function, uint8_t* output,
+                                 uint32_t capacity, uint32_t* outputBytes)
+{
+    if (!output || !outputBytes || function.stringDataBytes > capacity) return false;
+    uint32_t offset = 0;
+    for (uint32_t i = 0; i < function.stringCount; ++i) {
+        if (function.stringOffsets[i] != offset || offset + function.strings[i].bytes + 1U > capacity) return false;
+        for (uint32_t j = 0; j < function.strings[i].bytes; ++j)
+            output[offset + j] = static_cast<uint8_t>(function.strings[i].data[j]);
+        output[offset + function.strings[i].bytes] = 0;
+        offset += function.strings[i].bytes + 1U;
+    }
+    *outputBytes = offset;
+    return offset == function.stringDataBytes;
+}
+
 static void copy_diagnostics(const Diagnostics& diagnostics, CompileSummary* summary)
 {
     if (!summary) return;
@@ -236,15 +252,15 @@ bool compile(const char* sourcePath,
     }
 
     serial::puts("Compiler: return_constant=");
-    put_decimal_i32(function.returnConstant);
+    if (function.returnConstantValid) put_decimal_i32(function.returnConstant);
+    else serial::puts("nonconstant");
     serial::putc('\n');
 
-    uint32_t dataBytes = function.hasHostLog ? function.logMessageBytes + 1U : 0U;
-    if (dataBytes > sizeof(s_data)) {
+    uint32_t dataBytes = 0;
+    if (!flatten_string_table(function, s_data, sizeof(s_data), &dataBytes)) {
         diagnostics.error(driverLocation, "source string data exceeds compiler limit", "data");
         return fail_build(diagnostics, summary);
     }
-    for (uint32_t i = 0; i < dataBytes; ++i) s_data[i] = static_cast<uint8_t>(function.logMessage[i]);
     if (dataBytes != 0) print_data(s_data, dataBytes);
 
     uint32_t codeBytes = 0;
@@ -338,6 +354,7 @@ bool compile(const char* sourcePath,
         summary->reopenedAndValidated = true;
         summary->sourceBytes = sourceBytes;
         summary->tokenCount = tokenCount;
+        summary->returnConstantValid = function.returnConstantValid;
         summary->returnConstant = function.returnConstant;
         summary->codeBytes = codeBytes;
         summary->hasHostLog = function.hasHostLog;
@@ -359,7 +376,7 @@ bool compile(const char* sourcePath,
 void run_bootstrap_smoke()
 {
     serial::puts("Compiler: Phase 27B bare-metal smoke begin\n");
-    serial::puts("Compiler: limits source=65536 tokens=256 diagnostics=8 output=12288\n");
+    serial::puts("Compiler: limits source=65536 tokens=1024 diagnostics=16 identifiers=63 strings=255 locals=32 statements=128 expressions=512 code=4096 data=2048 output=12288\n");
 
     CompileSummary return42 = {};
     CompileSummary deterministic = {};

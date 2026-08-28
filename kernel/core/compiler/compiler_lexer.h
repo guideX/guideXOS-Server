@@ -1,21 +1,28 @@
 //
-// Bounded lexer for the bare-metal compiler bootstrap.
+// Bounded lexer for the bare-metal compiler bootstrap language.
 //
 
 #pragma once
 
 #include "compiler_diagnostics.h"
+#include "compiler_ir.h"
 
 namespace kernel {
 namespace compiler {
 
-static const uint32_t COMPILER_MAX_TOKENS = 256;
+static const uint32_t COMPILER_MAX_TOKENS = 1024;
 
 enum class TokenKind : uint8_t {
     EndOfFile,
     Identifier,
     Integer,
     StringLiteral,
+    KeywordInt,
+    KeywordGxMain,
+    KeywordGxAppContext,
+    KeywordVoid,
+    KeywordReturn,
+    KeywordLog,
     Star,
     LeftParen,
     RightParen,
@@ -24,6 +31,7 @@ enum class TokenKind : uint8_t {
     Semicolon,
     Minus,
     Plus,
+    Equal,
     Comma,
 };
 

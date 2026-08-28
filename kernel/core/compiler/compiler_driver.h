@@ -6,15 +6,14 @@
 
 #include "kernel/types.h"
 #include "compiler_diagnostics.h"
+#include "compiler_ir.h"
 
 namespace kernel {
 namespace compiler {
 
 static const uint32_t COMPILER_MAX_SOURCE_BYTES = 64 * 1024;
 static const uint32_t COMPILER_MAX_OUTPUT_BYTES = 12288;
-static const uint32_t COMPILER_MAX_CODE_BYTES = 128;
-static const uint32_t COMPILER_MAX_DATA_BYTES = 256;
-static const uint32_t COMPILER_MAX_DIAGNOSTIC_MESSAGE_BYTES = 128;
+static const uint32_t COMPILER_MAX_DATA_BYTES = COMPILER_MAX_TOTAL_STRING_DATA;
 static const uint32_t COMPILER_MAX_DIAGNOSTIC_TOKEN_BYTES = 32;
 
 struct CompileDiagnostic {
@@ -29,6 +28,7 @@ struct CompileSummary {
     bool hasHostLog;
     uint32_t sourceBytes;
     uint32_t tokenCount;
+    bool returnConstantValid;
     int32_t returnConstant;
     uint32_t codeBytes;
     uint8_t code[COMPILER_MAX_CODE_BYTES];

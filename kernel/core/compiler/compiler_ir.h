@@ -1,25 +1,100 @@
 //
-// Target-neutral IR for the bare-metal compiler bootstrap.
+// Target-neutral IR for the bounded bare-metal compiler bootstrap language.
 //
 
 #pragma once
 
 #include "kernel/types.h"
+#include "compiler_diagnostics.h"
 
 namespace kernel {
 namespace compiler {
 
 static const uint32_t COMPILER_FUNCTION_NAME_CAPACITY = 16;
-static const uint32_t COMPILER_PARAMETER_NAME_CAPACITY = 32;
+static const uint32_t COMPILER_PARAMETER_NAME_CAPACITY = 64;
+static const uint32_t COMPILER_MAX_IDENTIFIER_BYTES = 63;
 static const uint32_t COMPILER_MAX_STRING_LITERAL_BYTES = 255;
+static const uint32_t COMPILER_MAX_STRING_LITERALS = 16;
+static const uint32_t COMPILER_MAX_TOTAL_STRING_DATA = 2048;
+static const uint32_t COMPILER_MAX_LOCALS = 32;
+static const uint32_t COMPILER_MAX_STATEMENTS = 128;
+static const uint32_t COMPILER_MAX_EXPRESSION_NODES = 512;
+static const uint32_t COMPILER_MAX_EXPRESSION_NESTING = 16;
+static const uint32_t COMPILER_MAX_CODE_BYTES = 4096;
+
+static const uint16_t COMPILER_INVALID_INDEX = 0xFFFFU;
+
+enum class ExpressionKind : uint8_t {
+    Constant,
+    LoadLocal,
+    Add,
+    Subtract,
+    Multiply,
+    Negate,
+};
+
+struct Expression {
+    ExpressionKind kind;
+    uint8_t reserved;
+    uint16_t left;
+    uint16_t right;
+    uint16_t localIndex;
+    uint16_t reserved2;
+    int32_t value;
+    SourceLocation location;
+};
+
+enum class StatementKind : uint8_t {
+    DeclareLocal,
+    StoreLocal,
+    HostLog,
+    Return,
+};
+
+struct Statement {
+    StatementKind kind;
+    uint8_t reserved;
+    uint16_t expression;
+    uint16_t localIndex;
+    uint16_t stringIndex;
+    SourceLocation location;
+};
+
+struct LocalSymbol {
+    char name[COMPILER_MAX_IDENTIFIER_BYTES + 1];
+    uint16_t slot;
+    bool initialized;
+};
+
+struct StringLiteral {
+    char data[COMPILER_MAX_STRING_LITERAL_BYTES + 1];
+    uint16_t bytes;
+};
 
 struct FunctionIR {
     char name[COMPILER_FUNCTION_NAME_CAPACITY];
+    char parameterName[COMPILER_PARAMETER_NAME_CAPACITY];
     bool usesAppContext;
     bool hasHostLog;
+    bool returnConstantValid;
+    uint32_t statementCount;
+    uint32_t expressionCount;
+    uint32_t localCount;
+    uint32_t stringCount;
+    uint32_t stringDataBytes;
+    uint16_t returnExpression;
+    int32_t returnConstant;
+
+    // Compatibility view retained for the Phase 27D host checks.  It is the
+    // first log literal when one exists; new code uses strings[] below.
     uint32_t logMessageBytes;
     char logMessage[COMPILER_MAX_STRING_LITERAL_BYTES + 1];
-    int32_t returnConstant;
+
+    LocalSymbol locals[COMPILER_MAX_LOCALS];
+    StringLiteral strings[COMPILER_MAX_STRING_LITERALS];
+    uint16_t stringOffsets[COMPILER_MAX_STRING_LITERALS];
+    Expression expressions[COMPILER_MAX_EXPRESSION_NODES];
+    Statement statements[COMPILER_MAX_STATEMENTS];
 };
 
 } // namespace compiler

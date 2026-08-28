@@ -1,9 +1,6 @@
 //
 // Bounded diagnostics for the bare-metal compiler bootstrap.
 //
-// This intentionally stores pointers to static messages rather than allocating
-// formatted strings.  Diagnostics are deterministic and safe in the kernel.
-//
 
 #pragma once
 
@@ -12,7 +9,8 @@
 namespace kernel {
 namespace compiler {
 
-static const uint32_t COMPILER_MAX_DIAGNOSTICS = 8;
+static const uint32_t COMPILER_MAX_DIAGNOSTICS = 16;
+static const uint32_t COMPILER_MAX_DIAGNOSTIC_MESSAGE_BYTES = 128;
 
 struct SourceLocation {
     uint32_t offset;
@@ -31,6 +29,9 @@ public:
     Diagnostics();
 
     void error(SourceLocation location, const char* message, const char* tokenKind);
+    void error_identifier(SourceLocation location, const char* prefix,
+                          const char* identifier, uint32_t identifierBytes,
+                          const char* tokenKind);
     bool has_error() const;
     uint32_t count() const;
     const CompilerDiagnostic& at(uint32_t index) const;
@@ -38,6 +39,7 @@ public:
 
 private:
     CompilerDiagnostic m_items[COMPILER_MAX_DIAGNOSTICS];
+    char m_messageStorage[COMPILER_MAX_DIAGNOSTICS][COMPILER_MAX_DIAGNOSTIC_MESSAGE_BYTES];
     uint32_t m_count;
     bool m_overflowed;
 };

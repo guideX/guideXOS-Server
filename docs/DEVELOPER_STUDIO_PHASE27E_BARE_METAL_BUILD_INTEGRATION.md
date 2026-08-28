@@ -23,10 +23,12 @@ are exposed through the ABI. A second start while a job is retained returns
 ## Supported compiler subset
 
 The Phase 27E kernel compiler accepts one deterministically selected `.c` or
-`.cpp` source, AMD64, `guidexos-c-abi-v1`, and the `gx_main(void* ctx)` entry
-point. The current bootstrap subset supports the integer return form and the
-bounded `log(ctx, "...")` host-call form used by the proof application. It
-emits a NativeElf image at:
+`.cpp` source, AMD64, `guidexos-c-abi-v1`, and the `gx_main` entry point. The
+current Phase 27G bootstrap subset adds bounded local integer declarations,
+assignments, arithmetic expressions, parenthesized expressions, multiple
+statements, and multiple `log(ctx, "...")` calls. See
+`DEVELOPER_STUDIO_PHASE27G_BOOTSTRAP_LANGUAGE_EXPANSION.md` for the exact
+grammar and limits. It emits a NativeElf image at:
 
 ```text
 build/bin/amd64/<outputName>.elf

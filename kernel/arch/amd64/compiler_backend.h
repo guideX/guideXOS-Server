@@ -1,5 +1,5 @@
 //
-// AMD64 backend for the bare-metal compiler bootstrap.
+// AMD64 lowering for the bounded bootstrap compiler IR.
 //
 
 #pragma once
@@ -12,7 +12,15 @@ namespace compiler {
 namespace amd64 {
 
 static const uint32_t AMD64_BOOTSTRAP_CODE_BYTES = 6;
-static const uint32_t AMD64_BOOTSTRAP_MAX_CODE_BYTES = 128;
+static const uint32_t AMD64_BOOTSTRAP_MAX_CODE_BYTES = COMPILER_MAX_CODE_BYTES;
+
+struct FrameLayout {
+    uint32_t frameBytes;
+    int32_t contextDisplacement;
+    uint32_t localBytes;
+};
+
+bool calculate_frame_layout(uint32_t localCount, FrameLayout* output);
 
 bool emit_function(const FunctionIR& function,
                    uint8_t* output,
