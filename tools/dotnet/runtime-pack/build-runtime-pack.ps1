@@ -164,10 +164,10 @@ if (-not [string]::IsNullOrWhiteSpace($ExternalRuntimeRoot)) {
     if (-not (Test-Path -LiteralPath (Join-Path $ExternalRuntimeRoot ".git"))) {
         throw "External runtime root is not a Git checkout: $ExternalRuntimeRoot"
     }
-    $externalCommit = (& git -C $ExternalRuntimeRoot rev-parse HEAD).Trim()
+    $externalCommit = (& git -c core.longpaths=true -C $ExternalRuntimeRoot rev-parse HEAD).Trim()
     if ($LASTEXITCODE -ne 0) { throw "Unable to read external runtime checkout revision: $ExternalRuntimeRoot" }
     $externalCheckoutHead = $externalCommit
-    $externalStatus = @(& git -C $ExternalRuntimeRoot status --porcelain 2>&1)
+    $externalStatus = @(& git -c core.longpaths=true -C $ExternalRuntimeRoot status --porcelain 2>&1)
     if ($LASTEXITCODE -ne 0) { throw "Unable to read external runtime checkout status: $ExternalRuntimeRoot" }
     if ($externalStatus.Count -ne 0) {
         throw "External runtime checkout is dirty; C51 requires a clean source acquisition checkout: $ExternalRuntimeRoot"
@@ -176,7 +176,7 @@ if (-not [string]::IsNullOrWhiteSpace($ExternalRuntimeRoot)) {
         throw "External runtime checkout revision mismatch. Expected $($lock.ilCompiler.commit), got $externalCommit"
     }
     if ($NativeAotFpRepair) {
-        & git -C $ExternalRuntimeRoot cat-file -e "$($lock.ilCompiler.commit)`^{commit}"
+        & git -c core.longpaths=true -C $ExternalRuntimeRoot cat-file -e "$($lock.ilCompiler.commit)`^{commit}"
         if ($LASTEXITCODE -ne 0) {
             throw "Locked NativeAOT source commit is not available in the external checkout: $($lock.ilCompiler.commit)"
         }

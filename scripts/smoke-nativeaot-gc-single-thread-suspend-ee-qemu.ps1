@@ -5,6 +5,7 @@ param(
     [int]$FreshBootCount = 3,
     [switch]$SkipManagedBuild,
     [string]$RuntimePackManifest = "",
+    [string]$LockedRuntimeRoot = "",
     [ValidateSet("single-thread-suspend-ee", "allocation-context-fixup-root-boundary", "first-per-thread-root-provider", "first-root-candidate-load", "first-non-null-root-callback-boundary", "first-root-callback-entry", "first-root-membership-classification", "first-root-heap-resolution", "first-root-condemned-generation-decision", "first-root-pre-mark-boundary", "first-root-first-mark-mutation", "first-root-post-queue-mark-decision", "first-root-first-non-null-old-o", "next-genuine-root-provider", "stack-provider-transition-failfast", "stack-provider-code-manager-registration", "stack-provider-transition-frame-control-pc", "stack-provider-unwind-gc-info", "stack-provider-unwind-caller-frame", "stack-provider-native-transition-continuation", "stack-provider-native-caller-provenance", "stack-provider-native-kernel-entry-boundary", "stack-provider-native-kernel-stack-completion", "post-root-queue-mark-processing", "mark-queue-closure", "post-mark-short-weak-handle", "short-weak-handle-operation", "short-weak-live-handle", "short-weak-dead-handle", "short-weak-lifetime-transition", "relocation-root-update", "relocated-handle-update", "lifetime-transition-complete", "second-collection-completion", "dead-object-reclamation", "collection-plan-mode-provenance-c37", "collection-plan-mode-provenance-c38", "compaction-reclamation", "post-gc-allocator-provenance", "post-gc-reclaimed-gen1-lifecycle", "malformed-transition-frame-provenance", "reverse-pinvoke-slot-provenance", "regdisplay-fp-handoff", "relocation-root-fault-provenance", "iterator-fp-ownership", "second-collection-continuation", "productionized-second-collection")]
     [string]$ProofMode = "single-thread-suspend-ee"
 )
@@ -415,10 +416,30 @@ if ((Hash-File $activeArchive) -ne $activeArchiveHash) { throw "Active PAL archi
 $qemuVersion = (& $qemu --version | Select-Object -First 1)
 Set-Content -LiteralPath (Join-Path $runRoot "qemu-version.txt") -Value $qemuVersion -Encoding ASCII
 
-$sourceRoot = Join-Path $root "out\dotnet\pal-runtime-active-replacement-build\locked-source\src\coreclr"
+$lockedRuntimeRootWasProvided = -not [string]::IsNullOrWhiteSpace($LockedRuntimeRoot)
+if ([string]::IsNullOrWhiteSpace($LockedRuntimeRoot)) {
+    $LockedRuntimeRoot = Join-Path $root "out\dotnet\pal-runtime-active-replacement-build\locked-source"
+}
+$LockedRuntimeRoot = [System.IO.Path]::GetFullPath($LockedRuntimeRoot)
+if ($lockedRuntimeRootWasProvided) {
+    $lockedRuntimeRootGit = Join-Path $LockedRuntimeRoot ".git"
+    if (-not (Test-Path -LiteralPath $lockedRuntimeRootGit)) {
+        throw "C52 locked NativeAOT source root is not a Git checkout: $LockedRuntimeRoot"
+    }
+    $lockedRuntimeExpectedCommit = "9d5a6a9aa463d6d10b0b0ba6d5982cc82f363dc3"
+    $lockedRuntimeActualCommit = (& git -c core.longpaths=true -C $LockedRuntimeRoot rev-parse HEAD).Trim().ToLowerInvariant()
+    if ($LASTEXITCODE -ne 0 -or $lockedRuntimeActualCommit -ne $lockedRuntimeExpectedCommit) {
+        throw "C52 locked NativeAOT source checkout is not pinned to ${lockedRuntimeExpectedCommit}: $LockedRuntimeRoot (actual $lockedRuntimeActualCommit)"
+    }
+    $lockedRuntimeStatus = @(& git -c core.longpaths=true -C $LockedRuntimeRoot status --porcelain 2>&1)
+    if ($LASTEXITCODE -ne 0 -or $lockedRuntimeStatus.Count -ne 0) {
+        throw "C52 locked NativeAOT source checkout is dirty: $LockedRuntimeRoot"
+    }
+}
+$sourceRoot = Join-Path $LockedRuntimeRoot "src\coreclr"
 $nativeAotRoot = Join-Path $sourceRoot "nativeaot"
-$palSourceRoot = Join-Path $root "out\dotnet\pal-runtime-active-replacement-build\locked-source\src\native"
-$lockedSourceRoot = Join-Path $root "out\dotnet\pal-runtime-active-replacement-build\locked-source"
+$palSourceRoot = Join-Path $LockedRuntimeRoot "src\native"
+$lockedSourceRoot = $LockedRuntimeRoot
 $isC14QueueInstrumentation = $isFirstRootFirstNonNullOldO -or $isNextGenuineRootProvider
 $platformSource = Join-Path $root "tools\dotnet\runtime-pack\src\platform\guidexos_nativeaot_platform.cpp"
 $probeSource = Join-Path $root "tools\dotnet\runtime-pack\src\probes\guidexos_nativeaot_gc_allocation_probe.cpp"
@@ -5251,6 +5272,9 @@ exit /b %errorlevel%
     Invoke-LoggedCommand $make @("-C","kernel","ARCH=amd64","GXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST=1","GXOS_NATIVEAOT_GC_SINGLE_THREAD_SUSPEND_EE_QEMU_TEST=1","NATIVEAOT_GC_STARTUP_QEMU_ARTIFACT_OBJ=$embeddedObj","EXTRA_CFLAGS=$extraCflags") (Join-Path $runRoot "kernel-build.log")
     Require-File $kernelPath "Specialized single-thread SuspendEE kernel"
     $specializedKernelHash = Hash-File $kernelPath
+    $proofKernelPath = Join-Path $runRoot "artifacts\proof-kernel.elf"
+    New-Item -ItemType Directory -Force -Path (Split-Path $proofKernelPath) | Out-Null
+    Copy-Item -LiteralPath $kernelPath -Destination $proofKernelPath -Force
     Set-Content -LiteralPath (Join-Path $runRoot "kernel-symbols.txt") -Value (& $objdump -t $kernelPath) -Encoding ASCII
     $nativeHelperAudit = $null
     $nativeEntryAudit = $null
@@ -8087,6 +8111,8 @@ exit /b %errorlevel%
             semanticRewriteGuard=[ordered]@{ result=if ($productionized) { 'PASS' } else { 'NOT_APPLICABLE' }; c46SemanticCompileDefine=if ($productionized) { $false } else { $useC011EC46SemanticInjection }; c47SemanticCompileDefine=if ($productionized) { $false } else { $isC011EC47 }; c48SemanticCompileDefine=if ($productionized) { $false } else { $isC011EC48 }; generatedStackFrameIteratorReplacement=$false; durableRuntimeSourceUsed=if ($productionized) { $true } else { $false } }
             runtimePackBuildManifest=if ($productionized) { $RuntimePackManifest } else { $null }
             runtimePackBuildManifestSha256=if ($productionized) { Hash-File $RuntimePackManifest } else { $null }
+            lockedRuntimeRoot=if ($productionized -and $lockedRuntimeRootWasProvided) { $LockedRuntimeRoot } else { $null }
+            lockedRuntimeCommit=if ($productionized -and $lockedRuntimeRootWasProvided) { $lockedRuntimeActualCommit } else { $null }
             repositoryHead=$repoHead; startingCommittedHead=$startingCommittedHead; startingBranch=$startingBranch
             upstream=$upstream; startingWorktreeStatus=$startingWorktreeStatus; startingDirtyState=$dirtyState
             lockedRuntimeIdentity=[ordered]@{ nativeAot='9.0.0'; architecture='AMD64'; gc='Workstation'; gcInterfaces='5.3 / 2'; sourceCommit=$lockedCommit }
@@ -8094,6 +8120,8 @@ exit /b %errorlevel%
             predecessor=[ordered]@{ C011EC18='PASS / preflight and FindMethodInfo retained'; C011EC26='PASS / promoted roots exactly 4'; C011EC28='PASS / queue closure retained'; C011EC34='PASS / relocation preflight retained'; C011EC47='PASS / no invalid base or former slot'; C011EC48='PASS / FP-IN, FP-PREPARE, FP-REHOME, FP-CONSUME retained' }
             progression=[ordered]@{ planner='authentic C39 planner decision observed'; collection='C49 collection-done, RestartEE, and managed-resume markers'; branch=if ($firstC49Run.fields.plannerDecision -eq '0x00000001') { 'COMPACT' } else { 'SWEEP' }; allocation='bounded C41 eight-allocation continuation'; regression='C18-C48 evidence parsed from each fresh boot' }
             qemu=[ordered]@{ version=$qemuVersion; runCount=$FreshBootCount; proofKernelSha256=$specializedKernelHash; serialSha256=@($c49Runs | ForEach-Object { $_.serialSha256 }); qemuDebugSha256=@($c49Runs | ForEach-Object { $_.qemuDebugSha256 }); evidenceRoot=$runRoot; exactCommandLog=(Join-Path $runRoot 'commands.txt'); runs=$c49Runs }
+            payloadHashes=[ordered]@{ proofKernel=$specializedKernelHash; managedPe=(Hash-File $pePath); elf=(Hash-File $elfPath); map=(Hash-File $mapPath); serial=@($c49Runs | ForEach-Object { $_.serialSha256 }) }
+            artifactPaths=[ordered]@{ proofKernel=$proofKernelPath; managedPe=$pePath; elf=$elfPath; map=$mapPath }
              regressions=[ordered]@{ C18='PASS; valid manager/FindMethodInfo path retained'; C26='PASS; promoted roots exactly 4'; C28='PASS; mark queue closure retained'; C34='PASS; relocation preflight and root callbacks retained'; C39='PASS; planner decision observed without forcing result'; C40='PASS; compact/sweep production branch observed'; C41='PASS; eight bounded post-GC allocations'; C42='retained historical third-collection lifecycle; not enabled by C49/C50'; C43='retained safety-gate history'; C44='PASS; malformed transition provenance retained'; C45='PASS; reverse-P/Invoke slot provenance retained'; C46=if ($productionized) { 'PASS; durable runtime source check and production execution' } else { 'PASS; REGDISPLAY handoff retained' }; C47=if ($productionized) { 'PASS; no former invalid root base/slot' } else { 'PASS; former invalid root base/slot absent' }; C48=if ($productionized) { 'PASS; durable iterator ownership source check and production execution' } else { 'PASS; iterator FP ownership markers retained' }; semanticHarness=if ($productionized) { 'PASS; C46/C48 semantic rewriting disabled' } else { 'not applicable' }; ordinaryBoot='PASS after finally restoration'; diffCheck='PASS git diff --check' }
              ordinaryRestoration=[ordered]@{ expectedKernelSha256=$normalKernelHash; expectedEspSha256=$normalKernelHash; restoredByFinally=$true; kernelSha256=(Hash-File $kernelPath); espSha256=(Hash-File $espKernelPath) }
              documentation=if ($productionized) { 'docs/dotnet/NATIVEAOT_WORKSTATION_GC_FP_REPAIR_PRODUCTIONIZATION.md' } else { 'docs/dotnet/NATIVEAOT_WORKSTATION_GC_SECOND_COLLECTION_CONTINUATION.md' }; evidenceRoot=$runRoot; manifestPath=$manifestPath

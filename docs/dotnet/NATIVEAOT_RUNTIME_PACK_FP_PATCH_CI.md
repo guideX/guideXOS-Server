@@ -1,5 +1,7 @@
 # C011EC51 NativeAOT Runtime-Pack FP Patch and CI Validation
 
+The C011EC52 aggregate release-gate closure supersedes this document’s historical C51 `-Tier All` result as the authoritative release gate. Use [NATIVEAOT_RUNTIME_PACK_AGGREGATE_RELEASE_GATE.md](NATIVEAOT_RUNTIME_PACK_AGGREGATE_RELEASE_GATE.md) for the complete A -> B -> C -> D release proof and current evidence.
+
 C011EC51 continues the C50 runtime-pack work from commit `733ffb793b91477d3b959441829cbfbd1511cbd2` on branch `v1.1_DOTNET_SUPPORT`. It makes the NativeAOT AMD64 Workstation-GC frame-pointer handoff a reproducible, locked, fail-closed build input.
 
 ## Locked runtime identity
@@ -57,7 +59,7 @@ Run the complete gate on a Windows host with Visual C++, the locked source check
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\dotnet\Invoke-C011EC51RuntimePackValidation.ps1 -Tier All
 ```
 
-For a separately acquired clean locked source checkout, pass `-ExternalRuntimeRoot <path>`. The entrypoint also accepts `-StockRuntimePackRoot`, `-CommandTimeoutSeconds`, and `-BootTimeoutSeconds` for controlled CI environments. Evidence and the top-level `c51-validation.manifest.json` are written below `out\dotnet\c51-runtime-pack-validation`.
+For a separately acquired clean locked source checkout, pass `-ExternalRuntimeRoot <path>`. The entrypoint also accepts `-StockRuntimePackRoot`, `-CommandTimeoutSeconds`, and `-BootTimeoutSeconds` for controlled CI environments. Historical C51 evidence is below `out\dotnet\c51-runtime-pack-validation`; the current C52 aggregate evidence is below `out\dotnet\c52-runtime-pack-validation` and uses `c52.validation.manifest.json`.
 
 The full `-Tier All` result is `outcome=A`, success level 5. Tier A alone is a static/fixture gate and reports success level 1; its top outcome remains `D` because no runtime-pack or boot proof was requested. Levels 2, 4, and 5 correspond to the fresh runtime pack, three-boot C50 proof, and complete ordinary-boot restoration proof respectively.
 
