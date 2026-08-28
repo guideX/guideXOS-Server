@@ -140,8 +140,8 @@ struct RxDescriptor {
     uint64_t bufferAddr;    // physical address of packet buffer
     uint16_t length;        // length of received data
     uint16_t checksum;      // packet checksum
-    uint8_t  status;        // descriptor status
-    uint8_t  errors;        // descriptor errors
+    volatile uint8_t status; // descriptor status written by the NIC
+    volatile uint8_t errors; // descriptor errors written by the NIC
     uint16_t special;       // VLAN tag (if applicable)
 } NIC_PACKED;
 
@@ -158,7 +158,7 @@ struct TxDescriptor {
     uint16_t length;        // data length
     uint8_t  cso;           // checksum offset
     uint8_t  cmd;           // command field
-    uint8_t  status;        // descriptor status (written by hardware)
+    volatile uint8_t status; // descriptor status written by the NIC
     uint8_t  css;           // checksum start
     uint16_t special;       // VLAN / special
 } NIC_PACKED;
@@ -250,6 +250,24 @@ struct NICDevice {
     bool        pollingEnabled; // receive path is drained by main-loop polling
 };
 
+// Read-only identity record for a PCI network controller. This deliberately
+// contains no BAR or command-register state: diagnostic enumeration must not
+// probe, resize, or bind unsupported devices.
+struct NetworkControllerInfo {
+    uint8_t  pciBus;
+    uint8_t  pciSlot;
+    uint8_t  pciFunc;
+    uint16_t vendorId;
+    uint16_t deviceId;
+    uint16_t subsystemVendorId;
+    uint16_t subsystemDeviceId;
+    uint8_t  revisionId;
+    uint8_t  classCode;
+    uint8_t  subclass;
+    uint8_t  progIf;
+    bool     supportedEthernet;
+};
+
 // ================================================================
 // NIC BootInfo (passed from bootloader)
 // Must match guideXOS::NicInfo in guidexOSBootInfo.h
@@ -303,6 +321,12 @@ bool is_active();
 
 // Return the NIC device info.
 const NICDevice* get_device();
+
+// Perform a bounded, read-only PCI scan and return network-controller
+// identities, including unsupported PCI wireless controllers. No BAR is
+// sized and no device is modified or claimed by this call.
+uint8_t enumerate_network_controllers(NetworkControllerInfo* out,
+                                      uint8_t capacity);
 
 // Get the MAC address (6 bytes).
 const uint8_t* get_mac_address();

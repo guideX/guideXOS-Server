@@ -14,6 +14,7 @@
 #include "include/kernel/udp.h"
 #include "include/kernel/dns.h"
 #include "include/kernel/dhcp.h"
+#include "include/kernel/usb.h"
 #include "include/kernel/pit.h"
 #include "include/kernel/vfs.h"
 #include "include/kernel/block_device.h"
@@ -35,6 +36,7 @@ namespace kernel {
 namespace shell {
 
 static void uint_hex_to_str(uint32_t value, uint8_t digits, char* buf);
+static void uint_to_str(uint32_t n, char* buf);
 
 
 
@@ -1210,41 +1212,108 @@ static void cmd_lsblk() {
     output_string("|-vda1 254:1    0    4G  0 part /mnt/disk\n");
 }
 
-static void cmd_lspci() {
-    output_string("PCI network inventory visible to the kernel:\n");
-    const nic::NICDevice* dev = nic::get_device();
-    if (!dev) {
-        output_string("  No kernel-bound Ethernet controller.\n");
-        output_string("  The UEFI boot log prints all PCI network controllers,\n");
-        output_string("  including unsupported wireless hardware.\n");
+static void print_pci_network_inventory() {
+    nic::NetworkControllerInfo controllers[32];
+    uint8_t count = nic::enumerate_network_controllers(controllers, 32);
+
+    output_string("PCI network inventory (read-only):\n");
+    if (count == 0) {
+        output_string("  No PCI class 0x02 network controller found.\n");
         return;
     }
 
     char hexStr[9];
-    uint_hex_to_str(dev->pciBus, 2, hexStr);
-    output_string("  ");
-    output_string(hexStr);
-    output_string(":");
-    uint_hex_to_str(dev->pciSlot, 2, hexStr);
-    output_string(hexStr);
-    output_string(".");
-    uint_hex_to_str(dev->pciFunc, 1, hexStr);
-    output_string(hexStr);
-    output_string(" network controller ");
-    uint_hex_to_str(dev->vendorId, 4, hexStr);
-    output_string(hexStr);
-    output_string(":");
-    uint_hex_to_str(dev->deviceId, 4, hexStr);
-    output_string(hexStr);
-    output_string(" driver=");
-    output_string(network_status::driver_name(dev->vendorId, dev->deviceId));
-    output_string(dev->active ? " ready\n" : " detected/not-ready\n");
+    for (uint8_t i = 0; i < count; ++i) {
+        const nic::NetworkControllerInfo& info = controllers[i];
+        output_string("  PCI ");
+        uint_hex_to_str(info.pciBus, 2, hexStr);
+        output_string(hexStr);
+        output_string(":");
+        uint_hex_to_str(info.pciSlot, 2, hexStr);
+        output_string(hexStr);
+        output_string(".");
+        uint_hex_to_str(info.pciFunc, 1, hexStr);
+        output_string(hexStr);
+        output_string(" vendor/device: ");
+        uint_hex_to_str(info.vendorId, 4, hexStr);
+        output_string(hexStr);
+        output_string(":");
+        uint_hex_to_str(info.deviceId, 4, hexStr);
+        output_string(hexStr);
+        output_string(" subsystem: ");
+        uint_hex_to_str(info.subsystemVendorId, 4, hexStr);
+        output_string(hexStr);
+        output_string(":");
+        uint_hex_to_str(info.subsystemDeviceId, 4, hexStr);
+        output_string(hexStr);
+        output_string(" class/subclass/progif/revision: ");
+        uint_hex_to_str(info.classCode, 2, hexStr);
+        output_string(hexStr);
+        output_string("/");
+        uint_hex_to_str(info.subclass, 2, hexStr);
+        output_string(hexStr);
+        output_string("/");
+        uint_hex_to_str(info.progIf, 2, hexStr);
+        output_string(hexStr);
+        output_string("/");
+        uint_hex_to_str(info.revisionId, 2, hexStr);
+        output_string(hexStr);
+        output_string(" driver: ");
+        output_string(info.supportedEthernet
+                      ? network_status::driver_name(info.vendorId, info.deviceId)
+                      : "unsupported (identity only)");
+        output_string("\n");
+    }
+}
+
+static void cmd_lspci() {
+    print_pci_network_inventory();
 }
 
 static void cmd_lsusb() {
-    output_string("Bus 001 Device 001: ID 0000:0000 guideXOS Virtual Hub\n");
-    output_string("Bus 001 Device 002: ID 0627:0001 USB Keyboard\n");
-    output_string("Bus 001 Device 003: ID 0627:0001 USB Mouse\n");
+    output_string("USB device inventory (enumerated descriptors):\n");
+    uint8_t count = 0;
+    char hexStr[9];
+    for (uint16_t address = 1; address < 128; ++address) {
+        const usb::Device* dev = usb::get_device(static_cast<uint8_t>(address));
+        if (!dev) continue;
+        ++count;
+        output_string("  Bus 001 Device ");
+        uint_hex_to_str(dev->address, 3, hexStr);
+        output_string(hexStr);
+        output_string(": ID ");
+        uint_hex_to_str(dev->devDesc.idVendor, 4, hexStr);
+        output_string(hexStr);
+        output_string(":");
+        uint_hex_to_str(dev->devDesc.idProduct, 4, hexStr);
+        output_string(hexStr);
+        output_string(" class/subclass/protocol: ");
+        uint_hex_to_str(dev->devDesc.bDeviceClass, 2, hexStr);
+        output_string(hexStr);
+        output_string("/");
+        uint_hex_to_str(dev->devDesc.bDeviceSubClass, 2, hexStr);
+        output_string(hexStr);
+        output_string("/");
+        uint_hex_to_str(dev->devDesc.bDeviceProtocol, 2, hexStr);
+        output_string(hexStr);
+        output_string(" interfaces=");
+        uint_to_str(dev->numInterfaces, hexStr);
+        output_string(hexStr);
+        output_string("\n");
+        for (uint8_t iface = 0; iface < dev->numInterfaces; ++iface) {
+            output_string("    interface class/subclass/protocol: ");
+            uint_hex_to_str(dev->interfaceClass[iface], 2, hexStr);
+            output_string(hexStr);
+            output_string("/");
+            uint_hex_to_str(dev->interfaceSubClass[iface], 2, hexStr);
+            output_string(hexStr);
+            output_string("/");
+            uint_hex_to_str(dev->interfaceProtocol[iface], 2, hexStr);
+            output_string(hexStr);
+            output_string("\n");
+        }
+    }
+    if (count == 0) output_string("  No USB devices enumerated.\n");
 }
 
 // ============================================================
@@ -2003,6 +2072,9 @@ static void uint_hex_to_str(uint32_t value, uint8_t digits, char* buf) {
 
 static void cmd_nicinfo() {
     output_string("=== NIC Diagnostic Information ===\n\n");
+
+    print_pci_network_inventory();
+    output_string("\n");
     
     const nic::NICDevice* dev = nic::get_device();
     if (!dev) {

@@ -298,13 +298,13 @@ void PrintPciDevice(EFI_SYSTEM_TABLE* ST, const PciDevice* dev)
 {
     if (!ST || !dev || !dev->found) return;
     
-    Print((CONST CHAR16*)L"  [%02x:%02x.%x] Vendor=%04x Device=%04x Subsystem=%04x:%04x Class=%02x/%02x ProgIF=%02x Rev=%02x IRQ=%d\n",
-          (UINTN)dev->bus, (UINTN)dev->device, (UINTN)dev->function,
-          (UINTN)dev->vendorId, (UINTN)dev->deviceId,
-          (UINTN)dev->subsystemVendorId, (UINTN)dev->subsystemDeviceId,
-          (UINTN)dev->classCode, (UINTN)dev->subclass,
-          (UINTN)dev->progIf, (UINTN)dev->revisionId,
-          (UINTN)dev->irqLine);
+    Print((CONST CHAR16*)L"  [%02x:%02x.%x] Vendor=%04x Device=%04x Subsystem=%04x:%04x Class=%02x/%02x ProgIF=%02x Rev=%02x IRQ=%u\n",
+          (UINT32)dev->bus, (UINT32)dev->device, (UINT32)dev->function,
+          (UINT32)dev->vendorId, (UINT32)dev->deviceId,
+          (UINT32)dev->subsystemVendorId, (UINT32)dev->subsystemDeviceId,
+          (UINT32)dev->classCode, (UINT32)dev->subclass,
+          (UINT32)dev->progIf, (UINT32)dev->revisionId,
+          (UINT32)dev->irqLine);
     
     if (dev->isMemoryBar) {
         Print((CONST CHAR16*)L"    BAR0: Phys=%016lx Size=%lx (%s)\n",

@@ -288,6 +288,61 @@ static bool is_supported_nic(uint16_t vendor, uint16_t device)
             device == PCI_DEVICE_I217);
 }
 
+uint8_t enumerate_network_controllers(NetworkControllerInfo* out,
+                                      uint8_t capacity)
+{
+    if (!out || capacity == 0) return 0;
+
+#if ARCH_HAS_PORT_IO
+    uint8_t found = 0;
+    for (uint16_t bus = 0; bus < 8; ++bus) {
+        for (uint8_t dev = 0; dev < 32; ++dev) {
+            uint8_t bus8 = static_cast<uint8_t>(bus);
+            uint32_t id = pci_read32(bus8, dev, 0, 0);
+            if (id == 0xFFFFFFFFu || id == 0) continue;
+
+            uint32_t headerReg = pci_read32(bus8, dev, 0, 0x0C);
+            uint8_t headerType = static_cast<uint8_t>(headerReg >> 16);
+            uint8_t maxFunc = (headerType & 0x80) ? 8 : 1;
+
+            for (uint8_t func = 0; func < maxFunc; ++func) {
+                if (func > 0) {
+                    id = pci_read32(bus8, dev, func, 0);
+                    if (id == 0xFFFFFFFFu || id == 0) continue;
+                }
+
+                uint32_t classReg = pci_read32(bus8, dev, func, 0x08);
+                uint8_t baseClass = static_cast<uint8_t>(classReg >> 24);
+                if (baseClass != PCI_CLASS_NETWORK) continue;
+
+                // The diagnostic surface has a fixed bound. Continue the
+                // read-only scan so no write-only probing is introduced.
+                if (found >= capacity) continue;
+
+                NetworkControllerInfo& info = out[found++];
+                info.pciBus = bus8;
+                info.pciSlot = dev;
+                info.pciFunc = func;
+                info.vendorId = static_cast<uint16_t>(id & 0xFFFFu);
+                info.deviceId = static_cast<uint16_t>(id >> 16);
+                info.subsystemVendorId = pci_read16(bus8, dev, func, 0x2C);
+                info.subsystemDeviceId = pci_read16(bus8, dev, func, 0x2E);
+                info.revisionId = static_cast<uint8_t>(classReg & 0xFFu);
+                info.classCode = baseClass;
+                info.subclass = static_cast<uint8_t>(classReg >> 16);
+                info.progIf = static_cast<uint8_t>((classReg >> 8) & 0xFFu);
+                info.supportedEthernet =
+                    info.subclass == PCI_SUBCLASS_ETH &&
+                    is_supported_nic(info.vendorId, info.deviceId);
+            }
+        }
+    }
+    return found;
+#else
+    return 0;
+#endif
+}
+
 // ================================================================
 // Reset and initialise the E1000 hardware
 // ================================================================
@@ -477,6 +532,16 @@ static bool scan_pci_nic()
 }
 
 #endif // ARCH_HAS_PORT_IO
+
+#if !ARCH_HAS_PORT_IO
+uint8_t enumerate_network_controllers(NetworkControllerInfo* out,
+                                      uint8_t capacity)
+{
+    (void)out;
+    (void)capacity;
+    return 0;
+}
+#endif
 
 // ================================================================
 // Initialize from BootInfo (bootloader provides mapped MMIO)

@@ -116,6 +116,7 @@ static inline const CHAR16* AsChar16(const CHAR16* s) {
 }
 
 // Very small formatter: supports %% %s %c %u %d %x/%X %lx/%Lx %Lu/%llu %p %r
+// and the zero-padded hexadecimal widths used by the hardware diagnostics.
 template <typename TChar>
 static inline UINTN UefiVPrintImpl(const TChar* Format, VA_LIST args) {
     const CHAR16* fmt = AsChar16((const wchar_t*)Format);
@@ -135,6 +136,17 @@ static inline UINTN UefiVPrintImpl(const TChar* Format, VA_LIST args) {
         CHAR16 nxt = fmt[++i];
         if (nxt == 0) break;
         if (nxt == L'%') { UefiAppendEolNormalized(out, (UINTN)(sizeof(out) / sizeof(out[0])), &len, L'%'); continue; }
+
+        // Parse an optional decimal field width.  The formatter only needs
+        // zero-padding today (for example, %04x and %016lx), but consuming the
+        // complete width keeps unsupported non-zero-padded forms readable.
+        BOOLEAN zeroPad = (nxt == L'0');
+        UINTN fieldWidth = 0;
+        while (nxt >= L'0' && nxt <= L'9') {
+            fieldWidth = fieldWidth * 10 + (UINTN)(nxt - L'0');
+            nxt = fmt[++i];
+        }
+        if (nxt == 0) break;
 
         // length modifiers
         BOOLEAN isLong = FALSE;
@@ -184,7 +196,8 @@ static inline UINTN UefiVPrintImpl(const TChar* Format, VA_LIST args) {
             if (isLongLong) v = va_arg(args, UINT64);
             else if (isLong) v = (UINT64)va_arg(args, UINTN);
             else v = (UINT64)va_arg(args, UINT32);
-            UefiAppendHex64(out, (UINTN)(sizeof(out) / sizeof(out[0])), &len, v, 0, upper);
+            UefiAppendHex64(out, (UINTN)(sizeof(out) / sizeof(out[0])), &len, v,
+                            zeroPad ? fieldWidth : 0, upper);
             break;
         }
         case L'p': {

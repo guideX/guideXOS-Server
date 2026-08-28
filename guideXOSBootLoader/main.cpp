@@ -971,8 +971,8 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE* SystemTable) {
         guideXOS::pci::PciDevice* nic = pciResult.nic;
         
         Print(L"\n*** Using NIC at [%02x:%02x.%x] ***\n",
-              (UINTN)nic->bus, (UINTN)nic->device, (UINTN)nic->function);
-        Print(L"    Vendor: %04x  Device: %04x\n", (UINTN)nic->vendorId, (UINTN)nic->deviceId);
+              (UINT32)nic->bus, (UINT32)nic->device, (UINT32)nic->function);
+        Print(L"    Vendor: %04x  Device: %04x\n", (UINT32)nic->vendorId, (UINT32)nic->deviceId);
         Print(L"    MMIO Phys: %016lx  Size: %lx\n", nic->bar0Phys, nic->bar0Size);
         
         // Store NIC info in BootInfo
