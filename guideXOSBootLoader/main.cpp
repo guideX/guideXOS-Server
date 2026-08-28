@@ -952,10 +952,13 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE* SystemTable) {
     guideXOS::pci::InitPci();
     uint8_t nicCount = guideXOS::pci::EnumeratePci(&pciResult);
     
-    Print(L"Found %u network controller(s)\n", (UINTN)pciResult.deviceCount);
+    Print(L"\n=== Network hardware capture ===\n");
+    Print(L"Found %u PCI network controller(s); supported Ethernet drivers: %u\n",
+          (UINTN)pciResult.deviceCount, (UINTN)nicCount);
     for (uint8_t i = 0; i < pciResult.deviceCount; i++) {
         guideXOS::pci::PrintPciDevice(SystemTable, &pciResult.devices[i]);
     }
+    Print(L"=== End network hardware capture ===\n\n");
     
     // Initialize NIC info in BootInfo (cleared by default)
     SetMem(&v1BootInfo->Nic, sizeof(guideXOS::NicInfo), 0);
@@ -975,6 +978,12 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE* SystemTable) {
         // Store NIC info in BootInfo
         v1BootInfo->Nic.VendorId = nic->vendorId;
         v1BootInfo->Nic.DeviceId = nic->deviceId;
+        v1BootInfo->Nic.SubsystemVendorId = nic->subsystemVendorId;
+        v1BootInfo->Nic.SubsystemDeviceId = nic->subsystemDeviceId;
+        v1BootInfo->Nic.RevisionId = nic->revisionId;
+        v1BootInfo->Nic.ClassCode = nic->classCode;
+        v1BootInfo->Nic.Subclass = nic->subclass;
+        v1BootInfo->Nic.ProgIf = nic->progIf;
         v1BootInfo->Nic.Bus = nic->bus;
         v1BootInfo->Nic.Device = nic->device;
         v1BootInfo->Nic.Function = nic->function;

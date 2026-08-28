@@ -446,6 +446,9 @@ struct Statistics {
     uint32_t noRouteErrors;
     uint32_t ttlExpired;
     uint32_t fragmentsDropped;
+    uint32_t arpRequestsSent;
+    uint32_t arpRepliesReceived;
+    uint32_t arpMalformedDropped;
 };
 
 // Get IPv4 statistics

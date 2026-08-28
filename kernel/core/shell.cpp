@@ -10,6 +10,7 @@
 #include "include/kernel/icmp.h"
 #include "include/kernel/ipv4.h"
 #include "include/kernel/nic.h"
+#include "include/kernel/network_status.h"
 #include "include/kernel/udp.h"
 #include "include/kernel/dns.h"
 #include "include/kernel/dhcp.h"
@@ -33,6 +34,7 @@ extern void desktop_run_test_mode();
 namespace kernel {
 namespace shell {
 
+static void uint_hex_to_str(uint32_t value, uint8_t digits, char* buf);
 
 
 
@@ -374,6 +376,7 @@ static void cmd_help() {
     output_string("Network:\n");
     output_string("  ping <ip>      - Send ICMP echo request\n");
     output_string("  ifconfig, ip   - Network interface info\n");
+    output_string("  netdiag        - Bare-metal NIC/DHCP/ARP diagnostics\n");
     output_string("  ipconfig       - Windows-style IP config\n");
     output_string("  ipconfig /all  - Full IP configuration\n");
     output_string("  ipconfig /flushdns - Flush DNS cache\n");
@@ -1208,10 +1211,34 @@ static void cmd_lsblk() {
 }
 
 static void cmd_lspci() {
-    output_string("00:00.0 Host bridge: guideXOS Virtual Host Bridge\n");
-    output_string("00:01.0 VGA compatible controller: guideXOS Framebuffer\n");
-    output_string("00:02.0 Ethernet controller: Intel 82540EM Gigabit\n");
-    output_string("00:03.0 USB controller: UHCI Host Controller\n");
+    output_string("PCI network inventory visible to the kernel:\n");
+    const nic::NICDevice* dev = nic::get_device();
+    if (!dev) {
+        output_string("  No kernel-bound Ethernet controller.\n");
+        output_string("  The UEFI boot log prints all PCI network controllers,\n");
+        output_string("  including unsupported wireless hardware.\n");
+        return;
+    }
+
+    char hexStr[9];
+    uint_hex_to_str(dev->pciBus, 2, hexStr);
+    output_string("  ");
+    output_string(hexStr);
+    output_string(":");
+    uint_hex_to_str(dev->pciSlot, 2, hexStr);
+    output_string(hexStr);
+    output_string(".");
+    uint_hex_to_str(dev->pciFunc, 1, hexStr);
+    output_string(hexStr);
+    output_string(" network controller ");
+    uint_hex_to_str(dev->vendorId, 4, hexStr);
+    output_string(hexStr);
+    output_string(":");
+    uint_hex_to_str(dev->deviceId, 4, hexStr);
+    output_string(hexStr);
+    output_string(" driver=");
+    output_string(network_status::driver_name(dev->vendorId, dev->deviceId));
+    output_string(dev->active ? " ready\n" : " detected/not-ready\n");
 }
 
 static void cmd_lsusb() {
@@ -1964,6 +1991,16 @@ static void uint_to_str(uint32_t n, char* buf) {
     buf[i] = '\0';
 }
 
+static void uint_hex_to_str(uint32_t value, uint8_t digits, char* buf) {
+    static const char hex[] = "0123456789ABCDEF";
+    if (digits > 8) digits = 8;
+    for (uint8_t i = 0; i < digits; ++i) {
+        uint8_t shift = static_cast<uint8_t>((digits - 1 - i) * 4);
+        buf[i] = hex[(value >> shift) & 0x0F];
+    }
+    buf[digits] = '\0';
+}
+
 static void cmd_nicinfo() {
     output_string("=== NIC Diagnostic Information ===\n\n");
     
@@ -1977,10 +2014,39 @@ static void cmd_nicinfo() {
     output_string("Device Name: ");
     output_string(dev->name);
     output_string("\n");
+
+    const ipv4::NetworkConfig* config = ipv4::get_config();
+    network_status::Inputs statusInput = {};
+    statusInput.adapterPresent = true;
+    statusInput.driverBound = network_status::is_supported_intel_e1000(
+        dev->vendorId, dev->deviceId);
+    statusInput.driverReady = dev->active;
+    statusInput.linkUp = dev->active && nic::get_link_state() == nic::NIC_LINK_UP;
+    statusInput.ipv4Configured = config && config->configured;
+    statusInput.gatewayConfigured = config && config->gateway != 0;
+    statusInput.dnsConfigured = config && config->dns != 0;
+    statusInput.connectivityVerified = false;
+
+    output_string("Connection State: ");
+    output_string(network_status::state_to_string(network_status::classify(statusInput)));
+    output_string("\n");
+    output_string("Driver: ");
+    output_string(network_status::driver_name(dev->vendorId, dev->deviceId));
+    output_string("\n");
+    output_string("Driver Ready: ");
+    output_string(dev->active ? "YES" : "NO");
+    output_string("   PHY Link: ");
+    output_string(statusInput.linkUp ? "UP" : "DOWN");
+    output_string("\n");
+    output_string("RX/TX Mode: ");
+    output_string(dev->pollingEnabled ? "main-loop polling" : "not active");
+    output_string("   IRQ: ");
+    output_string(dev->irqRegistered ? "registered" : "not registered");
+    output_string("\n");
     
     // Vendor/Device ID
     output_string("Vendor ID: 0x");
-    char hexStr[8];
+    char hexStr[9];
     for (int i = 0; i < 4; i++) {
         uint8_t nibble = (dev->vendorId >> (12 - i*4)) & 0xF;
         hexStr[i] = (nibble < 10) ? ('0' + nibble) : ('A' + nibble - 10);
@@ -1997,17 +2063,34 @@ static void cmd_nicinfo() {
     hexStr[4] = '\0';
     output_string(hexStr);
     output_string("\n");
+
+    output_string("Subsystem: 0x");
+    uint_hex_to_str(dev->subsystemVendorId, 4, hexStr);
+    output_string(hexStr);
+    output_string(":0x");
+    uint_hex_to_str(dev->subsystemDeviceId, 4, hexStr);
+    output_string(hexStr);
+    output_string("  Class: 0x");
+    uint_hex_to_str(dev->classCode, 2, hexStr);
+    output_string(hexStr);
+    output_string("/0x");
+    uint_hex_to_str(dev->subclass, 2, hexStr);
+    output_string(hexStr);
+    output_string("  ProgIF: 0x");
+    uint_hex_to_str(dev->progIf, 2, hexStr);
+    output_string(hexStr);
+    output_string("  Rev: 0x");
+    uint_hex_to_str(dev->revisionId, 2, hexStr);
+    output_string(hexStr);
+    output_string("\n");
     
     // PCI location
     output_string("PCI Location: ");
-    hexStr[0] = '0' + (dev->pciBus / 10) % 10;
-    hexStr[1] = '0' + dev->pciBus % 10;
+    uint_hex_to_str(dev->pciBus, 2, hexStr);
     hexStr[2] = ':';
-    hexStr[3] = '0' + (dev->pciSlot / 10) % 10;
-    hexStr[4] = '0' + dev->pciSlot % 10;
+    uint_hex_to_str(dev->pciSlot, 2, hexStr + 3);
     hexStr[5] = '.';
-    hexStr[6] = '0' + dev->pciFunc;
-    hexStr[7] = '\0';
+    uint_hex_to_str(dev->pciFunc, 1, hexStr + 6);
     output_string(hexStr);
     output_string("\n");
     
@@ -2039,6 +2122,11 @@ static void cmd_nicinfo() {
             hexStr[7-i] = (nibble < 10) ? ('0' + nibble) : ('A' + nibble - 10);
         }
         hexStr[8] = '\0';
+        output_string(hexStr);
+        output_string("\n");
+
+        output_string("MMIO Region Size: 0x");
+        uint_hex_to_str(static_cast<uint32_t>(dev->mmioSize), 8, hexStr);
         output_string(hexStr);
         output_string("\n");
         
@@ -2080,6 +2168,7 @@ static void cmd_nicinfo() {
     output_string("Link State: ");
     output_string(dev->link == nic::NIC_LINK_UP ? "UP" : "DOWN");
     output_string("\n");
+    output_string("Negotiated Speed/Duplex: not exposed by the current E1000 PHY status path\n");
     
     // Statistics
     output_string("\n--- Statistics ---\n");
@@ -2112,6 +2201,111 @@ static void cmd_nicinfo() {
     
     output_string("Interrupts: ");
     uint_to_str(stats->interrupts, numStr);
+    output_string(numStr);
+    output_string("\n");
+
+    output_string("TX Attempted: ");
+    uint_to_str(stats->txAttempted, numStr);
+    output_string(numStr);
+    output_string("   TX Completed: ");
+    uint_to_str(stats->txFrames, numStr);
+    output_string(numStr);
+    output_string("   TX Dropped: ");
+    uint_to_str(stats->txDropped, numStr);
+    output_string(numStr);
+    output_string("\n");
+
+    output_string("RX Observed: ");
+    uint_to_str(stats->rxObserved, numStr);
+    output_string(numStr);
+    output_string("   RX Accepted: ");
+    uint_to_str(stats->rxFrames, numStr);
+    output_string(numStr);
+    output_string("   RX Malformed: ");
+    uint_to_str(stats->rxMalformed, numStr);
+    output_string(numStr);
+    output_string("   RX Dropped: ");
+    uint_to_str(stats->rxDropped, numStr);
+    output_string(numStr);
+    output_string("\n");
+
+    const dhcp::Statistics* dhcpStats = dhcp::get_stats();
+    const dhcp::LeaseInfo* lease = dhcp::get_lease();
+    output_string("DHCP State: ");
+    output_string(dhcp::state_to_string(dhcp::get_state()));
+    output_string("\n");
+    output_string("DHCP Counters: discover=");
+    uint_to_str(dhcpStats->discoversSent, numStr);
+    output_string(numStr);
+    output_string(" offer=");
+    uint_to_str(dhcpStats->offersReceived, numStr);
+    output_string(numStr);
+    output_string(" request=");
+    uint_to_str(dhcpStats->requestsSent, numStr);
+    output_string(numStr);
+    output_string(" ack=");
+    uint_to_str(dhcpStats->acksReceived, numStr);
+    output_string(numStr);
+    output_string(" nak=");
+    uint_to_str(dhcpStats->naksReceived, numStr);
+    output_string(numStr);
+    output_string(" timeout=");
+    uint_to_str(dhcpStats->timeouts, numStr);
+    output_string(numStr);
+    output_string("\n");
+    output_string("DHCP Lease: ");
+    output_string(lease->valid ? "APPLIED" : "none");
+    if (lease->valid) {
+        output_string("   Lifetime: ");
+        uint_to_str(lease->leaseTime, numStr);
+        output_string(numStr);
+        output_string(" sec");
+    }
+    output_string("\n");
+
+    output_string("IPv4: ");
+    if (config && config->configured) {
+        char ipStr[16];
+        ipv4::ip_to_string(config->ipAddr, ipStr);
+        output_string(ipStr);
+    } else {
+        output_string("not configured");
+    }
+    output_string("   Mask: ");
+    if (config && config->configured) {
+        char ipStr[16];
+        ipv4::ip_to_string(config->subnetMask, ipStr);
+        output_string(ipStr);
+    } else {
+        output_string("none");
+    }
+    output_string("   Gateway: ");
+    if (config && config->gateway != 0) {
+        char ipStr[16];
+        ipv4::ip_to_string(config->gateway, ipStr);
+        output_string(ipStr);
+    } else {
+        output_string("none");
+    }
+    output_string("   DNS: ");
+    if (config && config->dns != 0) {
+        char ipStr[16];
+        ipv4::ip_to_string(config->dns, ipStr);
+        output_string(ipStr);
+    } else {
+        output_string("none");
+    }
+    output_string("\n");
+
+    const ipv4::Statistics* ipStats = ipv4::get_stats();
+    output_string("ARP: requests=");
+    uint_to_str(ipStats->arpRequestsSent, numStr);
+    output_string(numStr);
+    output_string(" replies=");
+    uint_to_str(ipStats->arpRepliesReceived, numStr);
+    output_string(numStr);
+    output_string(" malformed=");
+    uint_to_str(ipStats->arpMalformedDropped, numStr);
     output_string(numStr);
     output_string("\n");
 }
@@ -2371,8 +2565,13 @@ static void cmd_ipconfig(const char* args[], uint32_t argCount) {
     const nic::NICDevice* dev = nic::get_device();
     const ipv4::NetworkConfig* cfg = ipv4::get_config();
     
+    if (!dev) {
+        output_string("No network adapter was detected.\n");
+        return;
+    }
+
     if (!nic::is_active()) {
-        output_string("No network interfaces found.\n");
+        output_string("Adapter detected, but the driver is not ready.\n");
         return;
     }
     
@@ -2404,14 +2603,19 @@ static void cmd_ipconfig(const char* args[], uint32_t argCount) {
     output_string(":\n\n");
     
     if (!cfg || !cfg->configured) {
-        output_string("   Media State . . . . . . . . . . . : Media disconnected\n");
+        output_string("   Media State . . . . . . . . . . . : ");
+        output_string(nic::get_link_state() == nic::NIC_LINK_UP
+                      ? "Acquiring network address\n"
+                      : "Media disconnected\n");
         return;
     }
     
     output_string("   Connection-specific DNS Suffix  . : \n");
     
     if (showAll) {
-        output_string("   Description . . . . . . . . . . . : Intel 82540EM Gigabit Ethernet\n");
+        output_string("   Description . . . . . . . . . . . : ");
+        output_string(network_status::driver_name(dev->vendorId, dev->deviceId));
+        output_string("\n");
         output_string("   Physical Address. . . . . . . . . : ");
         char macStr[18];
         ethernet::mac_to_string(dev->macAddress, macStr);
@@ -2422,7 +2626,9 @@ static void cmd_ipconfig(const char* args[], uint32_t argCount) {
         }
         output_string(macStr);
         output_string("\n");
-        output_string("   DHCP Enabled. . . . . . . . . . . : No\n");
+        output_string("   DHCP State . . . . . . . . . . . . : ");
+        output_string(dhcp::state_to_string(dhcp::get_state()));
+        output_string("\n");
         output_string("   Autoconfiguration Enabled . . . . : Yes\n");
     }
     
@@ -3134,7 +3340,8 @@ static void execute_command(const char* cmd) {
         cmd_ping(arg1);
     } else if (str_eq(command, "ifconfig") || str_eq(command, "ip")) {
         cmd_ifconfig();
-    } else if (str_eq(command, "nicinfo") || str_eq(command, "nicstat")) {
+    } else if (str_eq(command, "nicinfo") || str_eq(command, "nicstat") ||
+               str_eq(command, "netdiag")) {
         cmd_nicinfo();
     } else if (str_eq(command, "netstat") || str_eq(command, "ss")) {
         cmd_netstat();

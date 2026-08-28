@@ -1,4 +1,4 @@
-// Ethernet Frame Parser and Builder — Implementation
+// Ethernet Frame Parser and Builder - Implementation
 //
 // Copyright (c) 2026 guideXOS Server
 //
@@ -37,7 +37,7 @@ static uint8_t hex_char_to_val(char c)
 // Convert a nibble (0-15) to hex character
 static char val_to_hex_char(uint8_t val)
 {
-    static const char hex[] = "0123456789AB";
+    static const char hex[] = "0123456789ABCDEF";
     return hex[val & 0x0F];
 }
 

@@ -221,8 +221,11 @@ uint8_t EnumeratePci(PciEnumResult* result)
                 uint8_t subclass = (uint8_t)(classReg >> 16);
                 uint8_t progIf = (uint8_t)(classReg >> 8);
                 
-                // Check for network controller
-                if (classCode != PCI_CLASS_NETWORK || subclass != PCI_SUBCLASS_ETH) {
+                // Keep every PCI network controller in the bounded inventory.
+                // Wireless controllers commonly use a non-Ethernet subclass
+                // (for example 0x80), so filtering on subclass here would
+                // hide the hardware we need to identify next.
+                if (classCode != PCI_CLASS_NETWORK) {
                     continue;
                 }
                 
@@ -242,15 +245,32 @@ uint8_t EnumeratePci(PciEnumResult* result)
                 pciDev->classCode = classCode;
                 pciDev->subclass = subclass;
                 pciDev->progIf = progIf;
+                pciDev->revisionId = PciRead8(bus, dev, func, 0x08);
+                pciDev->subsystemVendorId = PciRead16(bus, dev, func, 0x2C);
+                pciDev->subsystemDeviceId = PciRead16(bus, dev, func, 0x2E);
                 
                 // Read IRQ line
                 pciDev->irqLine = PciRead8(bus, dev, func, 0x3C);
                 
-                // Get BAR0 info
-                pciDev->isMemoryBar = GetBar0Info(bus, dev, func,
-                                                   &pciDev->bar0Phys,
-                                                   &pciDev->bar0Size,
-                                                   &pciDev->is64bit);
+                // Only size BAR0 for a driver-compatible Ethernet device.
+                // Sizing an unsupported network controller writes all ones
+                // to its BAR, which is an unnecessary side effect during an
+                // identification-only audit.
+                if (subclass == PCI_SUBCLASS_ETH && IsSupportedNic(vendorId, deviceId)) {
+                    pciDev->isMemoryBar = GetBar0Info(bus, dev, func,
+                                                       &pciDev->bar0Phys,
+                                                       &pciDev->bar0Size,
+                                                       &pciDev->is64bit);
+                } else {
+                    uint32_t bar0 = PciRead32(bus, dev, func, 0x10);
+                    pciDev->isMemoryBar = (bar0 & 0x01u) == 0;
+                    pciDev->is64bit = pciDev->isMemoryBar && (((bar0 >> 1) & 0x03u) == 2);
+                    pciDev->bar0Phys = bar0 & 0xFFFFFFF0u;
+                    if (pciDev->is64bit) {
+                        pciDev->bar0Phys |= static_cast<uint64_t>(PciRead32(bus, dev, func, 0x14)) << 32;
+                    }
+                    pciDev->bar0Size = 0;
+                }
                 
                 pciDev->bar0Virt = 0;  // Will be set after mapping
                 pciDev->found = true;
@@ -258,10 +278,14 @@ uint8_t EnumeratePci(PciEnumResult* result)
                 
                 result->deviceCount++;
                 
-                // Track first supported NIC
-                if (result->nic == nullptr && IsSupportedNic(vendorId, deviceId)) {
-                    result->nic = pciDev;
+                // Count every exact supported Ethernet match, while keeping
+                // the existing first-match binding policy for the kernel.
+                if (subclass == PCI_SUBCLASS_ETH &&
+                    IsSupportedNic(vendorId, deviceId)) {
                     nicCount++;
+                    if (result->nic == nullptr) {
+                        result->nic = pciDev;
+                    }
                 }
             }
         }
@@ -274,10 +298,12 @@ void PrintPciDevice(EFI_SYSTEM_TABLE* ST, const PciDevice* dev)
 {
     if (!ST || !dev || !dev->found) return;
     
-    Print((CONST CHAR16*)L"  [%02x:%02x.%x] Vendor=%04x Device=%04x Class=%02x/%02x IRQ=%d\n",
+    Print((CONST CHAR16*)L"  [%02x:%02x.%x] Vendor=%04x Device=%04x Subsystem=%04x:%04x Class=%02x/%02x ProgIF=%02x Rev=%02x IRQ=%d\n",
           (UINTN)dev->bus, (UINTN)dev->device, (UINTN)dev->function,
           (UINTN)dev->vendorId, (UINTN)dev->deviceId,
+          (UINTN)dev->subsystemVendorId, (UINTN)dev->subsystemDeviceId,
           (UINTN)dev->classCode, (UINTN)dev->subclass,
+          (UINTN)dev->progIf, (UINTN)dev->revisionId,
           (UINTN)dev->irqLine);
     
     if (dev->isMemoryBar) {
@@ -288,10 +314,17 @@ void PrintPciDevice(EFI_SYSTEM_TABLE* ST, const PciDevice* dev)
         if (dev->mapped) {
             Print((CONST CHAR16*)L"    Mapped to Virt=%016lx\n", dev->bar0Virt);
         }
+    } else {
+        Print((CONST CHAR16*)L"    BAR0: I/O space or unavailable (base=%016lx)\n",
+              dev->bar0Phys);
     }
     
-    if (IsSupportedNic(dev->vendorId, dev->deviceId)) {
-        Print((CONST CHAR16*)L"    ** Supported Intel E1000 NIC **\n");
+    if (dev->classCode == PCI_CLASS_NETWORK &&
+        dev->subclass == PCI_SUBCLASS_ETH &&
+        IsSupportedNic(dev->vendorId, dev->deviceId)) {
+        Print((CONST CHAR16*)L"    Driver: intel-e1000 family (supported)\n");
+    } else {
+        Print((CONST CHAR16*)L"    Driver: unsupported (identity only; no binding)\n");
     }
 }
 

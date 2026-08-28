@@ -62,6 +62,12 @@ namespace guideXOS
         uint64_t MmioSize;      // Size of MMIO region
         uint16_t VendorId;
         uint16_t DeviceId;
+        uint16_t SubsystemVendorId;
+        uint16_t SubsystemDeviceId;
+        uint8_t  RevisionId;
+        uint8_t  ClassCode;
+        uint8_t  Subclass;
+        uint8_t  ProgIf;
         uint8_t  Bus;
         uint8_t  Device;
         uint8_t  Function;

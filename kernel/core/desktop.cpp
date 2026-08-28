@@ -30,6 +30,7 @@
 #include "include/kernel/vfs.h"
 #include "include/kernel/desktop_capabilities.h"
 #include "include/kernel/nic.h"
+#include "include/kernel/network_status.h"
 #include "include/kernel/usb_net.h"
 #include "include/kernel/ipv4.h"
 #include "include/kernel/pci_audio.h"
@@ -8016,10 +8017,40 @@ struct NetworkAdapter {
 };
 
 static const NetworkAdapter s_networkAdapters[] = {
-    {"Intel Ethernet Adapter",      "Intel Corporation",     "Connected", true},
-    {"Realtek PCIe GbE Controller", "Realtek Semiconductor", "Not found", false},
+    {"PCI Ethernet controller", "Live PCI/bootloader inventory", "", false},
+    {"USB network controller", "ECM/RNDIS/USB Wi-Fi",           "", false},
 };
 static const int kNetAdapterCount = 2;
+
+static bool network_adapter_detected(int index)
+{
+    if (index == 0) return nic::get_device() != nullptr;
+    if (index == 1) return usb_net::device_count() > 0;
+    return false;
+}
+
+static const char* network_adapter_status(int index)
+{
+    if (index == 1) {
+        return network_adapter_detected(index) ? "Detected" : "Not detected";
+    }
+
+    const nic::NICDevice* dev = nic::get_device();
+    if (!dev) return "Not detected";
+
+    network_status::Inputs input = {};
+    input.adapterPresent = true;
+    input.driverBound = network_status::is_supported_intel_e1000(
+        dev->vendorId, dev->deviceId);
+    input.driverReady = dev->active;
+    input.linkUp = dev->active && nic::get_link_state() == nic::NIC_LINK_UP;
+    const ipv4::NetworkConfig* config = ipv4::get_config();
+    input.ipv4Configured = config && config->configured;
+    input.gatewayConfigured = config && config->gateway != 0;
+    input.dnsConfigured = config && config->dns != 0;
+    input.connectivityVerified = false;
+    return network_status::state_to_string(network_status::classify(input));
+}
 
 static void draw_network_adapters()
 {
@@ -8051,30 +8082,36 @@ static void draw_network_adapters()
                          (s_networkAdapterHover == i) ? rgb(38, 48, 58) : rgb(32, 32, 40);
         framebuffer::fill_rect(dlgX + 12, rowY, kNetAdaptersW - 24, kNetAdapterRowH, rowBg);
 
-        uint32_t statusColor = s_networkAdapters[i].detected ? rgb(95, 184, 120) : rgb(100, 100, 110);
+        bool detected = network_adapter_detected(i);
+        uint32_t statusColor = detected ? rgb(95, 184, 120) : rgb(100, 100, 110);
         framebuffer::fill_rect(dlgX + 12, rowY, 4, kNetAdapterRowH, statusColor);
 
-        uint32_t iconColor = s_networkAdapters[i].detected ? rgb(80, 180, 120) : rgb(80, 80, 90);
+        uint32_t iconColor = detected ? rgb(80, 180, 120) : rgb(80, 80, 90);
         framebuffer::fill_rect(dlgX + 24, rowY + 12, 32, 32, iconColor);
         draw_rect(dlgX + 24, rowY + 12, 32, 32, rgb(120, 140, 160));
 
         draw_text(dlgX + 64, rowY + 10, s_networkAdapters[i].name, rgb(220, 220, 235), 1);
         draw_text(dlgX + 64, rowY + 28, s_networkAdapters[i].vendor, rgb(160, 165, 180), 1);
-        draw_text(dlgX + kNetAdaptersW - 120, rowY + 20, s_networkAdapters[i].status, rgb(180, 185, 200), 1);
+        draw_text(dlgX + kNetAdaptersW - 180, rowY + 20, network_adapter_status(i), rgb(180, 185, 200), 1);
     }
 
     uint32_t btnY = dlgY + kNetAdaptersH - 46;
     uint32_t propBtnX = dlgX + kNetAdaptersW - 200;
-    bool propEnabled = (s_networkAdapterSelected >= 0 && s_networkAdapters[s_networkAdapterSelected].detected);
+    bool propEnabled = (s_networkAdapterSelected == 0 && nic::is_active());
     uint32_t propBg = propEnabled ? rgb(55, 85, 125) : rgb(45, 45, 55);
     framebuffer::fill_rect(propBtnX, btnY, 90, 30, propBg);
     draw_rect(propBtnX, btnY, 90, 30, propEnabled ? rgb(80, 120, 170) : rgb(60, 60, 70));
     draw_text_centered(propBtnX, btnY, 90, 30, "Properties", propEnabled ? rgb(210, 220, 240) : rgb(120, 120, 130), 1);
 
     uint32_t statusBtnX = dlgX + kNetAdaptersW - 100;
-    framebuffer::fill_rect(statusBtnX, btnY, 90, 30, rgb(45, 50, 60));
-    draw_rect(statusBtnX, btnY, 90, 30, rgb(65, 75, 90));
-    draw_text_centered(statusBtnX, btnY, 90, 30, "Status", rgb(160, 165, 180), 1);
+    bool statusEnabled = s_networkAdapterSelected >= 0 &&
+                         network_adapter_detected(s_networkAdapterSelected);
+    framebuffer::fill_rect(statusBtnX, btnY, 90, 30,
+                           statusEnabled ? rgb(55, 85, 125) : rgb(45, 50, 60));
+    draw_rect(statusBtnX, btnY, 90, 30,
+              statusEnabled ? rgb(80, 120, 170) : rgb(65, 75, 90));
+    draw_text_centered(statusBtnX, btnY, 90, 30, "Status",
+                       statusEnabled ? rgb(210, 220, 240) : rgb(160, 165, 180), 1);
 }
 
 static int hit_test_network_adapters(int32_t mx, int32_t my)
@@ -8095,6 +8132,14 @@ static int hit_test_network_adapters(int32_t mx, int32_t my)
     if ((uint32_t)mx >= propBtnX && (uint32_t)mx < propBtnX + 90 &&
         (uint32_t)my >= btnY && (uint32_t)my < btnY + 30) {
         return -10;
+    }
+
+    uint32_t statusBtnX = dlgX + kNetAdaptersW - 100;
+    if ((uint32_t)mx >= statusBtnX && (uint32_t)mx < statusBtnX + 90 &&
+        (uint32_t)my >= btnY && (uint32_t)my < btnY + 30 &&
+        s_networkAdapterSelected >= 0 &&
+        network_adapter_detected(s_networkAdapterSelected)) {
+        return -11;
     }
 
     uint32_t contentY = dlgY + 36;
@@ -12621,12 +12666,20 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
                 return;
             } else if (btn == -10) {
                 // Properties - open config dialog
-                if (s_networkAdapterSelected >= 0 && s_networkAdapters[s_networkAdapterSelected].detected) {
+                if (s_networkAdapterSelected == 0 && nic::is_active()) {
                     s_networkConfigOpen = true;
                     draw();
                     draw_cursor(mx, my);
                     return;
                 }
+            } else if (btn == -11) {
+                s_notification.title = "Network status";
+                s_notification.message = "Run 'netdiag' in Shell for bounded NIC, ARP, and DHCP counters.";
+                s_notification.visible = true;
+                s_notification.showTime = s_tickCounter;
+                draw();
+                draw_cursor(mx, my);
+                return;
             } else if (btn >= 0 && btn < kNetAdapterCount) {
                 s_networkAdapterSelected = btn;
                 draw();

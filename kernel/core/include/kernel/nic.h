@@ -1,7 +1,7 @@
 // Network Interface Card (NIC) Driver
 //
 // Supports:
-//   - Intel E1000 / E1000E (PCI MMIO)  — QEMU default, VirtualBox, Bochs
+//   - Intel E1000 / E1000E (PCI MMIO)  - QEMU default, VirtualBox, Bochs
 //   - PCI bus scan for class 0x02 (Network Controller)
 //   - Raw Ethernet frame send / receive via descriptor rings
 //   - IRQ-driven receive with ring buffer
@@ -206,14 +206,17 @@ enum Status : uint8_t {
 // ================================================================
 
 struct NetStats {
+    uint32_t txAttempted; // Valid frames submitted to the TX path
     uint32_t txFrames;
     uint32_t rxFrames;
+    uint32_t rxObserved;  // Completed RX descriptors observed by the driver
     uint32_t txBytes;
     uint32_t rxBytes;
     uint32_t txErrors;
     uint32_t rxErrors;
     uint32_t txDropped;
     uint32_t rxDropped;
+    uint32_t rxMalformed; // Bad/multi-descriptor/oversize RX frames
     uint32_t interrupts;
 };
 
@@ -228,14 +231,23 @@ struct NICDevice {
     uint8_t     pciFunc;
     uint16_t    vendorId;
     uint16_t    deviceId;
+    uint16_t    subsystemVendorId;
+    uint16_t    subsystemDeviceId;
+    uint8_t     revisionId;
+    uint8_t     classCode;
+    uint8_t     subclass;
+    uint8_t     progIf;
     uint64_t    mmioBase;       // BAR0 MMIO base address (virtual after mapping)
     uint64_t    mmioPhys;       // BAR0 physical address
+    uint64_t    mmioSize;       // BAR0 MMIO region size when reported
     uint8_t     irqLine;        // PCI interrupt line
     uint8_t     macAddress[ETH_ALEN];
     LinkState   link;
     NetStats    stats;
     char        name[32];       // e.g. "eth0"
     bool        mmioMapped;     // true if MMIO is mapped by bootloader
+    bool        irqRegistered;  // kernel IRQ handler registered
+    bool        pollingEnabled; // receive path is drained by main-loop polling
 };
 
 // ================================================================
@@ -249,6 +261,12 @@ struct NicBootInfo {
     uint64_t mmioSize;      // Size of MMIO region
     uint16_t vendorId;
     uint16_t deviceId;
+    uint16_t subsystemVendorId;
+    uint16_t subsystemDeviceId;
+    uint8_t  revisionId;
+    uint8_t  classCode;
+    uint8_t  subclass;
+    uint8_t  progIf;
     uint8_t  bus;
     uint8_t  device;
     uint8_t  function;
@@ -291,6 +309,10 @@ const uint8_t* get_mac_address();
 
 // Get the current link state.
 LinkState get_link_state();
+
+// Record whether the kernel registered the device IRQ.  RX still uses the
+// bounded main-loop polling path; the IRQ acknowledges hardware events.
+void set_irq_registered(bool registered);
 
 // ----------------------------------------------------------------
 // Frame-level I/O

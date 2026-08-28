@@ -35,7 +35,7 @@ static const uint16_t PCI_DEVICE_E1000E   = 0x10D3;  // 82574L
 static const uint16_t PCI_DEVICE_I217     = 0x153A;  // I217-LM
 
 // Maximum devices to track
-static const uint8_t MAX_PCI_DEVICES = 4;
+static const uint8_t MAX_PCI_DEVICES = 8;
 
 // ================================================================
 // PCI Device Information
@@ -47,6 +47,9 @@ struct PciDevice {
     uint8_t  function;
     uint16_t vendorId;
     uint16_t deviceId;
+    uint16_t subsystemVendorId;
+    uint16_t subsystemDeviceId;
+    uint8_t  revisionId;
     uint8_t  classCode;
     uint8_t  subclass;
     uint8_t  progIf;

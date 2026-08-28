@@ -1,4 +1,4 @@
-// NIC Driver — Implementation
+// NIC Driver - Implementation
 //
 // Scans PCI for network controllers (class 02/00), initialises the
 // first supported Intel E1000 found, sets up RX/TX descriptor rings,
@@ -98,7 +98,7 @@ static inline uint32_t mmio_read32(uint64_t base, uint32_t reg)
 }
 
 // ================================================================
-// PCI configuration space (port-I/O method — x86/amd64)
+// PCI configuration space (port-I/O method - x86/amd64)
 // ================================================================
 
 #if ARCH_HAS_PORT_IO
@@ -355,24 +355,45 @@ static bool scan_pci_nic()
                 uint8_t baseClass = static_cast<uint8_t>(classReg >> 24);
                 uint8_t subClass  = static_cast<uint8_t>(classReg >> 16);
 
-                if (baseClass != PCI_CLASS_NETWORK || subClass != PCI_SUBCLASS_ETH)
+                if (baseClass != PCI_CLASS_NETWORK)
                     continue;
 
                 uint16_t vendor = static_cast<uint16_t>(id & 0xFFFF);
                 uint16_t device = static_cast<uint16_t>(id >> 16);
+                uint8_t revision = static_cast<uint8_t>(classReg & 0xFF);
+                uint16_t subsystemVendor = pci_read16(static_cast<uint8_t>(bus), dev, func, 0x2C);
+                uint16_t subsystemDevice = pci_read16(static_cast<uint8_t>(bus), dev, func, 0x2E);
 
-                serial::puts("[NIC] Found NIC: vendor=");
+                serial::puts("[NIC] PCI network controller ");
+                serial::put_hex8(static_cast<uint8_t>(bus));
+                serial::putc(':');
+                serial::put_hex8(dev);
+                serial::putc('.');
+                serial::put_hex8(func);
+                serial::puts(" vendor=");
                 serial::put_hex32(vendor);
                 serial::puts(" device=");
                 serial::put_hex32(device);
+                serial::puts(" subsystem=");
+                serial::put_hex32(subsystemVendor);
+                serial::putc(':');
+                serial::put_hex32(subsystemDevice);
+                serial::puts(" class=");
+                serial::put_hex8(baseClass);
+                serial::putc('/');
+                serial::put_hex8(subClass);
+                serial::puts(" progif=");
+                serial::put_hex8(static_cast<uint8_t>((classReg >> 8) & 0xFF));
+                serial::puts(" rev=");
+                serial::put_hex8(revision);
                 serial::putc('\n');
 
-                if (!is_supported_nic(vendor, device)) {
-                    serial::puts("[NIC] NIC not supported (not Intel E1000)\n");
+                if (subClass != PCI_SUBCLASS_ETH || !is_supported_nic(vendor, device)) {
+                    serial::puts("[NIC] Driver: unsupported (identity only; no binding)\n");
                     continue;
                 }
 
-                // Found a supported NIC — read BAR0 (MMIO base)
+                // Found a supported NIC - read BAR0 (MMIO base)
                 uint32_t bar0 = pci_read32(static_cast<uint8_t>(bus), dev, func, 0x10);
                 if (bar0 & 0x01) {
                     serial::puts("[NIC] BAR0 is I/O space, skipping\n");
@@ -417,7 +438,15 @@ static bool scan_pci_nic()
                 s_device.pciFunc  = func;
                 s_device.vendorId = vendor;
                 s_device.deviceId = device;
+                s_device.subsystemVendorId = subsystemVendor;
+                s_device.subsystemDeviceId = subsystemDevice;
+                s_device.revisionId = revision;
+                s_device.classCode = baseClass;
+                s_device.subclass = subClass;
+                s_device.progIf = static_cast<uint8_t>((classReg >> 8) & 0xFF);
                 s_device.mmioBase = mmioBase;
+                s_device.mmioPhys = mmioBase;
+                s_device.mmioSize = 0x20000;
                 s_device.irqLine  = irqLine;
 
                 // Set device name
@@ -505,8 +534,15 @@ bool init_from_bootinfo(const NicBootInfo* nicInfo)
     s_device.pciFunc = nicInfo->function;
     s_device.vendorId = nicInfo->vendorId;
     s_device.deviceId = nicInfo->deviceId;
+    s_device.subsystemVendorId = nicInfo->subsystemVendorId;
+    s_device.subsystemDeviceId = nicInfo->subsystemDeviceId;
+    s_device.revisionId = nicInfo->revisionId;
+    s_device.classCode = nicInfo->classCode;
+    s_device.subclass = nicInfo->subclass;
+    s_device.progIf = nicInfo->progIf;
     s_device.mmioBase = nicInfo->mmioVirt;  // Use virtual address for MMIO access
     s_device.mmioPhys = nicInfo->mmioPhys;
+    s_device.mmioSize = nicInfo->mmioSize;
     s_device.irqLine = nicInfo->irqLine;
     s_device.mmioMapped = true;
     
@@ -550,6 +586,7 @@ bool init_from_bootinfo(const NicBootInfo* nicInfo)
     serial::putc('\n');
     
     s_device.active = true;
+    s_device.pollingEnabled = true;
     s_initialised = true;
     
     serial::puts("[NIC] E1000 initialization complete!\n");
@@ -602,7 +639,7 @@ void init()
         serial::puts("[NIC] No supported NIC found\n");
     }
 #else
-    // Architectures without PCI port-I/O: stub — MMIO PCI ECAM
+    // Architectures without PCI port-I/O: stub - MMIO PCI ECAM
     // enumeration would go here for ia64/sparc64/riscv64.
 #endif
 }
@@ -627,6 +664,8 @@ LinkState get_link_state()
     if (!s_initialised) return NIC_LINK_DOWN;
 
 #if ARCH_HAS_PORT_IO
+    // A detected-but-not-initialised device has no safe MMIO virtual address.
+    if (!s_device.active || !s_device.mmioMapped) return s_device.link;
     uint32_t status = mmio_read32(s_device.mmioBase, E1000_STATUS);
     s_device.link = (status & E1000_STATUS_LU) ? NIC_LINK_UP : NIC_LINK_DOWN;
 #endif
@@ -634,8 +673,13 @@ LinkState get_link_state()
     return s_device.link;
 }
 
+void set_irq_registered(bool registered)
+{
+    if (s_initialised) s_device.irqRegistered = registered;
+}
+
 // ================================================================
-// send_frame — transmit a raw Ethernet frame
+// send_frame - transmit a raw Ethernet frame
 // ================================================================
 
 Status send_frame(const uint8_t* data, uint16_t len)
@@ -644,7 +688,7 @@ Status send_frame(const uint8_t* data, uint16_t len)
         serial::puts("[NIC] send_frame: not initialized or not active\n");
         return NIC_ERR_NO_DEVICE;
     }
-    if (len < ETH_HLEN) {
+    if (!data || len < ETH_HLEN) {
         serial::puts("[NIC] send_frame: frame too small\n");
         return NIC_ERR_FRAME_TOO_LARGE; // too small
     }
@@ -654,18 +698,14 @@ Status send_frame(const uint8_t* data, uint16_t len)
     }
 
 #if ARCH_HAS_PORT_IO
+    s_device.stats.txAttempted++;
+
     // Check that the current TX descriptor is available
     if (!(s_txDescs[s_txCur].status & E1000_TXD_STAT_DD)) {
         serial::puts("[NIC] send_frame: TX descriptor not available (TX ring full)\n");
         s_device.stats.txDropped++;
         return NIC_ERR_TX_FULL;
     }
-
-    serial::puts("[NIC] send_frame: sending ");
-    serial::put_hex16(len);
-    serial::puts(" bytes, txCur=");
-    serial::put_hex16(s_txCur);
-    serial::putc('\n');
 
     // Copy frame data to TX buffer
     memcopy(s_txBuffer, data, static_cast<uint32_t>(len));
@@ -679,26 +719,14 @@ Status send_frame(const uint8_t* data, uint16_t len)
                                     E1000_TXD_CMD_RS;
     s_txDescs[s_txCur].status     = 0;
 
-    serial::puts("[NIC] TX desc bufferAddr=0x");
-    serial::put_hex32(static_cast<uint32_t>(bufAddr >> 32));
-    serial::put_hex32(static_cast<uint32_t>(bufAddr));
-    serial::putc('\n');
-
     // Advance tail pointer to submit the descriptor
     uint16_t oldTx = s_txCur;
     s_txCur = (s_txCur + 1) % NUM_TX_DESC;
     mmio_write32(s_device.mmioBase, E1000_TDT, s_txCur);
 
-    serial::puts("[NIC] TDT updated to ");
-    serial::put_hex16(s_txCur);
-    serial::puts(", waiting for completion...\n");
-
     // Wait for transmission to complete (busy-poll descriptor status)
     for (uint32_t i = 0; i < 1000000; ++i) {
         if (s_txDescs[oldTx].status & E1000_TXD_STAT_DD) {
-            serial::puts("[NIC] TX complete after ");
-            serial::put_hex32(i);
-            serial::puts(" iterations\n");
             s_device.stats.txFrames++;
             s_device.stats.txBytes += static_cast<uint32_t>(len);
             return NIC_OK;
@@ -718,7 +746,7 @@ Status send_frame(const uint8_t* data, uint16_t len)
 }
 
 // ================================================================
-// receive_frame — read the next pending Ethernet frame
+// receive_frame - read the next pending Ethernet frame
 // ================================================================
 
 Status receive_frame(uint8_t* buffer, uint16_t max_len, uint16_t* received)
@@ -732,6 +760,8 @@ Status receive_frame(uint8_t* buffer, uint16_t max_len, uint16_t* received)
         return NIC_ERR_RX_EMPTY;
     }
 
+    s_device.stats.rxObserved++;
+
     // Verify end-of-packet flag
     if (!(s_rxDescs[s_rxCur].status & E1000_RXD_STAT_EOP)) {
         // Multi-descriptor frames not supported; drop and advance
@@ -740,6 +770,7 @@ Status receive_frame(uint8_t* buffer, uint16_t max_len, uint16_t* received)
         s_rxCur = (s_rxCur + 1) % NUM_RX_DESC;
         mmio_write32(s_device.mmioBase, E1000_RDT, oldRx);
         s_device.stats.rxDropped++;
+        s_device.stats.rxMalformed++;
         return NIC_ERR_RX_EMPTY;
     }
 
@@ -752,6 +783,7 @@ Status receive_frame(uint8_t* buffer, uint16_t max_len, uint16_t* received)
         s_rxCur = (s_rxCur + 1) % NUM_RX_DESC;
         mmio_write32(s_device.mmioBase, E1000_RDT, oldRx);
         s_device.stats.rxDropped++;
+        s_device.stats.rxMalformed++;
         return NIC_ERR_BUFFER_TOO_SMALL;
     }
 
@@ -762,6 +794,7 @@ Status receive_frame(uint8_t* buffer, uint16_t max_len, uint16_t* received)
         s_rxCur = (s_rxCur + 1) % NUM_RX_DESC;
         mmio_write32(s_device.mmioBase, E1000_RDT, oldRx);
         s_device.stats.rxErrors++;
+        s_device.stats.rxMalformed++;
         return NIC_ERR_RX_EMPTY;
     }
 
@@ -787,7 +820,7 @@ Status receive_frame(uint8_t* buffer, uint16_t max_len, uint16_t* received)
 }
 
 // ================================================================
-// IRQ handler — called from interrupt dispatch
+// IRQ handler - called from interrupt dispatch
 // ================================================================
 
 void irq_handler()
@@ -801,7 +834,7 @@ void irq_handler()
     s_device.stats.interrupts++;
 
     if (icr & E1000_ICR_LSC) {
-        // Link status changed — update cached state
+        // Link status changed - update cached state
         uint32_t status = mmio_read32(s_device.mmioBase, E1000_STATUS);
         s_device.link = (status & E1000_STATUS_LU) ? NIC_LINK_UP : NIC_LINK_DOWN;
         serial::puts("[NIC] Link status changed: ");
@@ -809,7 +842,7 @@ void irq_handler()
         serial::putc('\n');
     }
 
-    // RX interrupt: frames are available — the main loop will call
+    // RX interrupt: frames are available - the main loop will call
     // receive_frame() to drain them.  No action needed here beyond
     // acknowledging the interrupt.
 

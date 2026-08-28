@@ -1038,6 +1038,7 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
             kernel::interrupts::register_irq(
                 kernel::nic::get_device()->irqLine,
                 kernel::nic::irq_handler);
+            kernel::nic::set_irq_registered(true);
             
             // Initialize IPv4 layer
             kernel::ipv4::init();
@@ -1066,6 +1067,10 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
             
             // Initialize DNS client
             kernel::dns::init();
+
+            // Reset DHCP state/counters for this boot and seed its XID source
+            // from the active NIC MAC before attempting discovery.
+            kernel::dhcp::init();
 
             kernel::serial::puts("[KERNEL] Attempting DHCP network configuration...\n");
             if (kernel::dhcp::discover() == kernel::dhcp::DHCP_OK) {

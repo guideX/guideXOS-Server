@@ -1,4 +1,4 @@
-// IPv4 Network Layer — Implementation
+// IPv4 Network Layer - Implementation
 //
 // Copyright (c) 2026 guideXOS Server
 //
@@ -404,23 +404,31 @@ static Status send_arp_packet(uint16_t oper, uint32_t targetIP, const uint8_t* t
     nic::Status nicStatus = nic::send_frame(frame, frameLen);
     if (nicStatus != nic::NIC_OK) return IP_ERR_TX_FAILED;
 
+    if (oper == ARP_OPER_REQUEST) s_stats.arpRequestsSent++;
+
     return IP_OK;
 }
 
 static void handle_arp_packet(const ethernet::ParsedFrame* frame)
 {
-    if (!frame || !frame->payload || frame->payloadLen < sizeof(ArpPacket)) return;
+    if (!frame || !frame->payload || frame->payloadLen < sizeof(ArpPacket)) {
+        s_stats.arpMalformedDropped++;
+        return;
+    }
 
     const ArpPacket* arp = reinterpret_cast<const ArpPacket*>(frame->payload);
     if (ethernet::ntohs(arp->htype) != ARP_HTYPE_ETHERNET ||
         ethernet::ntohs(arp->ptype) != ethernet::ETHERTYPE_IPV4 ||
         arp->hlen != 6 || arp->plen != 4) {
+        s_stats.arpMalformedDropped++;
         return;
     }
 
     uint16_t oper = ethernet::ntohs(arp->oper);
     uint32_t senderIP = ethernet::ntohl(arp->spa);
     uint32_t targetIP = ethernet::ntohl(arp->tpa);
+
+    if (oper == ARP_OPER_REPLY) s_stats.arpRepliesReceived++;
 
     arp_add(senderIP, arp->sha);
 
