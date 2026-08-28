@@ -18,6 +18,11 @@ The append-only `gx_host_calls` slots are:
 sizeof(gx_host_calls) = 232
 ```
 
+Phase 27E appends the separate bare-metal Developer Studio build/VFS block
+after this hosted-development block; the full table is 312 bytes when those
+slots are advertised. The hosted Run contract and its offsets remain
+unchanged.
+
 Requests and snapshots carry `size` and `version`. The request contains fixed
 caller-owned strings for project root/ID/kind/target, `app/app.json`, the build
 artifact path, and the build SHA-256. The snapshot returns a generation-bound

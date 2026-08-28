@@ -5,7 +5,13 @@
 #include "native_elf_loader.h"
 
 #include "native_elf_executor.h"
+#include "../compiler/compiler_build_service.h"
 #include "arch/amd64.h"
+#include "kernel/desktop_font.h"
+#include "kernel/framebuffer.h"
+#include "kernel/input_manager.h"
+#include "kernel/pit.h"
+#include "kernel/ps2keyboard.h"
 #include "kernel/serial_debug.h"
 #include "kernel/vfs.h"
 
@@ -22,8 +28,9 @@ static const uint64_t PTE_ADDRESS_MASK = 0x000FFFFFFFFFF000ULL;
 static NativeElfExecutionContext s_context = {};
 static bool s_contextConfigured = false;
 static bool s_nxEnabled = false;
-static uint8_t s_file[guidexos::native_elf::MAX_ELF_FILE_BYTES];
+static uint8_t s_file[NATIVE_APP_MAX_ELF_FILE_BYTES];
 static NativeAppExecutionContext s_appRuntime = {};
+static char s_bareBuildStrings[8][768] = {};
 
 static uint64_t read_stack_pointer()
 {
@@ -72,6 +79,244 @@ static uint32_t GX_CALL host_get_api_version(gx_app_context* context)
         context->host != &s_appRuntime.hostCalls ||
         context->userData != &s_appRuntime) return 0;
     return GX_API_VERSION;
+}
+
+static bool app_pointer_range(const void* pointer, uint64_t bytes)
+{
+    const uint64_t address = reinterpret_cast<uint64_t>(pointer);
+    if (address == 0 || bytes == 0 || address > ~static_cast<uint64_t>(0) - bytes) return false;
+    return native_app_pointer_in_range(address, s_appRuntime.imageBase, s_appRuntime.imageSize) ||
+           native_app_pointer_in_range(address, s_appRuntime.stackBase, s_appRuntime.stackSize);
+}
+
+static bool app_string(const char* pointer, char* output, uint32_t capacity)
+{
+    if (!pointer || !output || capacity < 2 || !app_pointer_range(pointer, 1)) return false;
+    for (uint32_t i = 0; i + 1 < capacity; ++i) {
+        if (!app_pointer_range(pointer + i, 1)) return false;
+        output[i] = pointer[i];
+        if (output[i] == '\0') return true;
+    }
+    output[0] = '\0';
+    return false;
+}
+
+static bool app_context_valid(gx_app_context* context)
+{
+    return s_appRuntime.state == NativeAppExecutionState::Running && context &&
+        context == &s_appRuntime.appContext && context->host == &s_appRuntime.hostCalls &&
+        context->userData == &s_appRuntime;
+}
+
+static gx_result GX_CALL host_bare_file_stat(gx_app_context* context, const char* path, gx_file_info* output)
+{
+    if (!app_context_valid(context) || !output || !app_pointer_range(output, sizeof(*output))) return GX_ERROR_PERMISSION_DENIED;
+    char localPath[vfs::VFS_MAX_PATH] = {};
+    if (!app_string(path, localPath, sizeof(localPath))) return GX_ERROR_INVALID_ARGUMENT;
+    vfs::FileInfo info = {};
+    if (vfs::stat(localPath, &info) != vfs::VFS_OK) return GX_ERROR_FAILED;
+    output->type = info.type == vfs::FILE_TYPE_DIRECTORY ? GX_FILE_TYPE_DIRECTORY :
+        (info.type == vfs::FILE_TYPE_REGULAR ? GX_FILE_TYPE_REGULAR : GX_FILE_TYPE_UNKNOWN);
+    output->reserved = 0;
+    output->size = info.size;
+    return GX_OK;
+}
+
+static gx_result GX_CALL host_bare_file_read_workspace(gx_app_context* context, const char* path,
+                                                         void* buffer, uint32_t bufferSize, uint32_t* outBytes)
+{
+    if (!app_context_valid(context) || !outBytes || !app_pointer_range(outBytes, sizeof(*outBytes)) ||
+        (bufferSize != 0 && (!buffer || !app_pointer_range(buffer, bufferSize)))) return GX_ERROR_PERMISSION_DENIED;
+    *outBytes = 0;
+    char localPath[vfs::VFS_MAX_PATH] = {};
+    if (!app_string(path, localPath, sizeof(localPath))) return GX_ERROR_INVALID_ARGUMENT;
+    const int32_t bytes = bufferSize == 0 ? 0 : vfs::read_file(localPath, buffer, bufferSize);
+    if (bytes < 0) return GX_ERROR_FAILED;
+    *outBytes = static_cast<uint32_t>(bytes);
+    return GX_OK;
+}
+
+static gx_result GX_CALL host_bare_file_list(gx_app_context* context, const char* path,
+                                               gx_file_entry* output, uint32_t capacity,
+                                               uint32_t* outCount, uint32_t* outTruncated)
+{
+    if (capacity > 128) capacity = 128;
+    const uint64_t outputBytes = static_cast<uint64_t>(capacity) * sizeof(*output);
+    if (!app_context_valid(context) || !outCount || !app_pointer_range(outCount, sizeof(*outCount)) ||
+        (outTruncated && !app_pointer_range(outTruncated, sizeof(*outTruncated))) ||
+        (capacity != 0 && (!output || !app_pointer_range(output, outputBytes)))) return GX_ERROR_PERMISSION_DENIED;
+    *outCount = 0;
+    if (outTruncated) *outTruncated = 0;
+    char localPath[vfs::VFS_MAX_PATH] = {};
+    if (!app_string(path, localPath, sizeof(localPath))) return GX_ERROR_INVALID_ARGUMENT;
+    const uint8_t iterator = vfs::opendir(localPath);
+    if (iterator == 0xFF) return GX_ERROR_FAILED;
+    vfs::DirEntry entry = {};
+    while (vfs::readdir(iterator, &entry)) {
+        if (*outCount < capacity) {
+            gx_file_entry& destination = output[*outCount];
+            destination = {};
+            destination.type = entry.type == vfs::FILE_TYPE_DIRECTORY ? GX_FILE_TYPE_DIRECTORY :
+                (entry.type == vfs::FILE_TYPE_REGULAR ? GX_FILE_TYPE_REGULAR : GX_FILE_TYPE_UNKNOWN);
+            destination.size = entry.size;
+            uint32_t i = 0;
+            for (; i + 1 < sizeof(destination.name) && entry.name[i] != '\0'; ++i) destination.name[i] = entry.name[i];
+            destination.name[i] = '\0';
+            ++(*outCount);
+        } else if (outTruncated) *outTruncated = 1;
+    }
+    vfs::closedir(iterator);
+    return GX_OK;
+}
+
+static gx_result GX_CALL host_bare_file_write_all(gx_app_context* context, const char* path,
+                                                   const void* buffer, uint32_t bufferSize, uint32_t* outBytes)
+{
+    if (!app_context_valid(context) || !outBytes || !app_pointer_range(outBytes, sizeof(*outBytes)) ||
+        (bufferSize != 0 && (!buffer || !app_pointer_range(buffer, bufferSize)))) return GX_ERROR_PERMISSION_DENIED;
+    *outBytes = 0;
+    char localPath[vfs::VFS_MAX_PATH] = {};
+    if (!app_string(path, localPath, sizeof(localPath))) return GX_ERROR_INVALID_ARGUMENT;
+    const int32_t bytes = vfs::write_file(localPath, buffer, bufferSize);
+    if (bytes < 0) return GX_ERROR_FAILED;
+    *outBytes = static_cast<uint32_t>(bytes);
+    return GX_OK;
+}
+
+static gx_result GX_CALL host_bare_file_create_directory(gx_app_context* context, const char* path)
+{
+    if (!app_context_valid(context)) return GX_ERROR_PERMISSION_DENIED;
+    char localPath[vfs::VFS_MAX_PATH] = {};
+    if (!app_string(path, localPath, sizeof(localPath))) return GX_ERROR_INVALID_ARGUMENT;
+    return vfs::mkdir(localPath) == vfs::VFS_OK ? GX_OK : GX_ERROR_FAILED;
+}
+
+static gx_result GX_CALL host_bare_file_remove(gx_app_context* context, const char* path)
+{
+    if (!app_context_valid(context)) return GX_ERROR_PERMISSION_DENIED;
+    char localPath[vfs::VFS_MAX_PATH] = {};
+    if (!app_string(path, localPath, sizeof(localPath))) return GX_ERROR_INVALID_ARGUMENT;
+    vfs::FileInfo info = {};
+    if (vfs::stat(localPath, &info) != vfs::VFS_OK) return GX_ERROR_FAILED;
+    const vfs::Status result = info.type == vfs::FILE_TYPE_DIRECTORY ? vfs::rmdir(localPath) : vfs::unlink(localPath);
+    return result == vfs::VFS_OK ? GX_OK : GX_ERROR_FAILED;
+}
+
+static bool native_window_valid(gx_app_context* context, gx_handle window)
+{
+    return app_context_valid(context) && window == 1;
+}
+
+static gx_result GX_CALL host_bare_request_window(gx_app_context* context, const char*, int width, int height, gx_handle* output)
+{
+    if (!app_context_valid(context) || !output || !app_pointer_range(output, sizeof(*output)) || width <= 0 || height <= 0) return GX_ERROR_INVALID_ARGUMENT;
+    *output = 1;
+    return framebuffer::is_available() ? GX_OK : GX_ERROR_UNSUPPORTED;
+}
+
+static gx_result GX_CALL host_bare_request_window_ex(gx_app_context* context, const char* title, int width, int height, uint32_t, gx_handle* output)
+{
+    return host_bare_request_window(context, title, width, height, output);
+}
+
+static gx_result GX_CALL host_bare_draw_text(gx_app_context* context, gx_handle window, int x, int y, const char* text)
+{
+    if (!native_window_valid(context, window) || !text) return GX_ERROR_INVALID_ARGUMENT;
+    char localText[256] = {};
+    if (!app_string(text, localText, sizeof(localText))) return GX_ERROR_INVALID_ARGUMENT;
+    if (x < 0) x = 0;
+    if (y < 0) y = 0;
+    desktop::draw_text(static_cast<uint32_t>(x), static_cast<uint32_t>(y), localText, 0x00F0F5FFu, 1);
+    return GX_OK;
+}
+
+static gx_result GX_CALL host_bare_draw_rect(gx_app_context* context, gx_handle window, int x, int y, int width, int height, uint32_t color)
+{
+    if (!native_window_valid(context, window) || width <= 0 || height <= 0) return GX_ERROR_INVALID_ARGUMENT;
+    if (x < 0) { width += x; x = 0; } if (y < 0) { height += y; y = 0; }
+    if (width <= 0 || height <= 0) return GX_OK;
+    framebuffer::fill_rect(static_cast<uint32_t>(x), static_cast<uint32_t>(y), static_cast<uint32_t>(width), static_cast<uint32_t>(height), color);
+    return GX_OK;
+}
+
+static gx_result GX_CALL host_bare_present_frame(gx_app_context* context, gx_handle window, int, int, int, int, uint32_t, uint32_t, const void*, uint32_t)
+{
+    if (!native_window_valid(context, window)) return GX_ERROR_INVALID_ARGUMENT;
+    framebuffer::present();
+    return GX_OK;
+}
+
+static gx_result GX_CALL host_bare_poll_event(gx_app_context* context, gx_event* output, int)
+{
+    if (!app_context_valid(context) || !output || !app_pointer_range(output, sizeof(*output))) return GX_ERROR_INVALID_ARGUMENT;
+    *output = {};
+    output->size = sizeof(*output);
+    output->window = 1;
+    input::poll();
+    if (ps2keyboard::has_key()) {
+        output->type = GX_EVENT_KEY;
+        output->param1 = static_cast<int>(ps2keyboard::get_key());
+        output->param2 = GX_KEY_ACTION_DOWN;
+        output->param3 = (ps2keyboard::is_shift_down() ? GX_KEY_MOD_SHIFT : 0) |
+                         (ps2keyboard::is_ctrl_down() ? GX_KEY_MOD_CTRL : 0) |
+                         (ps2keyboard::is_alt_down() ? GX_KEY_MOD_ALT : 0);
+        return GX_OK;
+    }
+    if (input::mouse_dirty()) {
+        output->type = GX_EVENT_MOUSE;
+        output->param1 = input::mouse_x();
+        output->param2 = input::mouse_y();
+        output->param3 = GX_MOUSE_PACK(input::mouse_buttons() ? GX_MOUSE_BUTTON_LEFT : GX_MOUSE_BUTTON_NONE, GX_MOUSE_ACTION_MOVE);
+        input::mouse_clear_dirty();
+        return GX_OK;
+    }
+    framebuffer::present();
+    return GX_ERROR_TIMEOUT;
+}
+
+static gx_result GX_CALL host_bare_wait_for_close(gx_app_context* context, gx_handle window, int)
+{
+    return native_window_valid(context, window) ? GX_ERROR_TIMEOUT : GX_ERROR_INVALID_ARGUMENT;
+}
+
+static gx_result GX_CALL host_bare_exit(gx_app_context* context, gx_result exitCode)
+{
+    return app_context_valid(context) ? exitCode : GX_ERROR_PERMISSION_DENIED;
+}
+
+static uint64_t GX_CALL host_bare_get_ticks_ms(gx_app_context* context)
+{
+    return app_context_valid(context) ? pit::ticks() * 10ULL : 0;
+}
+
+static gx_result GX_CALL host_bare_build_start(gx_app_context* context, const gx_build_request* request, gx_build_handle* output)
+{
+    if (!app_context_valid(context) || !request || !output || !app_pointer_range(request, sizeof(*request)) || !app_pointer_range(output, sizeof(*output))) return GX_ERROR_PERMISSION_DENIED;
+    const char* input[8] = { request->projectRoot, request->projectId, request->projectKind, request->targetProfile,
+                             request->buildSystem, request->buildScript, request->expectedArtifact, request->configuration };
+    for (uint32_t i = 0; i < 8; ++i) if (!app_string(input[i], s_bareBuildStrings[i], sizeof(s_bareBuildStrings[i]))) return GX_ERROR_INVALID_ARGUMENT;
+    gx_build_request copied = *request;
+    copied.projectRoot = s_bareBuildStrings[0];
+    copied.projectId = s_bareBuildStrings[1];
+    copied.projectKind = s_bareBuildStrings[2];
+    copied.targetProfile = s_bareBuildStrings[3];
+    copied.buildSystem = s_bareBuildStrings[4];
+    copied.buildScript = s_bareBuildStrings[5];
+    copied.expectedArtifact = s_bareBuildStrings[6];
+    copied.configuration = s_bareBuildStrings[7];
+    return compiler::BareMetalBuildService::start(&copied, output);
+}
+
+static gx_result GX_CALL host_bare_build_poll(gx_app_context* context, gx_build_handle handle, gx_build_snapshot* output)
+{
+    if (!app_context_valid(context) || !output || !app_pointer_range(output, sizeof(*output))) return GX_ERROR_PERMISSION_DENIED;
+    return compiler::BareMetalBuildService::poll(handle, output);
+}
+
+static gx_result GX_CALL host_bare_build_release(gx_app_context* context, gx_build_handle handle)
+{
+    if (!app_context_valid(context)) return GX_ERROR_PERMISSION_DENIED;
+    return compiler::BareMetalBuildService::release(handle);
 }
 
 static void clear_report(NativeElfRunReport* report)
@@ -147,6 +392,24 @@ static void initialize_app_context()
     s_appRuntime.hostCalls.version = GX_API_VERSION;
     s_appRuntime.hostCalls.log = host_log;
     s_appRuntime.hostCalls.get_api_version = host_get_api_version;
+    s_appRuntime.hostCalls.request_window = host_bare_request_window;
+    s_appRuntime.hostCalls.request_window_ex = host_bare_request_window_ex;
+    s_appRuntime.hostCalls.draw_text = host_bare_draw_text;
+    s_appRuntime.hostCalls.draw_rect = host_bare_draw_rect;
+    s_appRuntime.hostCalls.wait_for_close = host_bare_wait_for_close;
+    s_appRuntime.hostCalls.poll_event = host_bare_poll_event;
+    s_appRuntime.hostCalls.exit = host_bare_exit;
+    s_appRuntime.hostCalls.present_frame = host_bare_present_frame;
+    s_appRuntime.hostCalls.get_ticks_ms = host_bare_get_ticks_ms;
+    s_appRuntime.hostCalls.bare_metal_build_project_start = host_bare_build_start;
+    s_appRuntime.hostCalls.bare_metal_build_project_poll = host_bare_build_poll;
+    s_appRuntime.hostCalls.bare_metal_build_project_release = host_bare_build_release;
+    s_appRuntime.hostCalls.bare_metal_file_stat = host_bare_file_stat;
+    s_appRuntime.hostCalls.bare_metal_file_read_workspace = host_bare_file_read_workspace;
+    s_appRuntime.hostCalls.bare_metal_file_list = host_bare_file_list;
+    s_appRuntime.hostCalls.bare_metal_file_write_all = host_bare_file_write_all;
+    s_appRuntime.hostCalls.bare_metal_file_create_directory = host_bare_file_create_directory;
+    s_appRuntime.hostCalls.bare_metal_file_remove = host_bare_file_remove;
 
     s_appRuntime.appContext = {};
     s_appRuntime.appContext.size = sizeof(gx_app_context);
@@ -395,7 +658,7 @@ bool run_file(const char* path, int32_t* returnValue, NativeElfRunReport* report
     if (vfs::stat(path, &info) != vfs::VFS_OK || info.type != vfs::FILE_TYPE_REGULAR) {
         return fail_report(report, "ELF file is not a regular VFS file");
     }
-    if (info.size == 0 || info.size > guidexos::native_elf::MAX_ELF_FILE_BYTES) {
+    if (info.size == 0 || info.size > NATIVE_APP_MAX_ELF_FILE_BYTES) {
         return fail_report(report, "ELF file exceeds loader bounds");
     }
     const uint32_t fileBytes = static_cast<uint32_t>(info.size);
@@ -407,6 +670,7 @@ bool run_file(const char* path, int32_t* returnValue, NativeElfRunReport* report
     NativeElfValidationPolicy policy = default_validation_policy();
     policy.regionBase = s_context.regionBase;
     policy.regionSize = s_context.regionSize;
+    policy.maxFileBytes = NATIVE_APP_MAX_ELF_FILE_BYTES;
     NativeElfValidationResult validation = {};
     if (!validate_native_elf(s_file, fileBytes, policy, &validation)) {
         return fail_report(report, validation.error);

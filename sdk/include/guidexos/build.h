@@ -43,7 +43,12 @@ typedef enum gx_build_error_code {
     GX_BUILD_ERROR_ENTRY_POINT_MISSING = 14,
     GX_BUILD_ERROR_MANIFEST_ARTIFACT_MISMATCH = 15,
     GX_BUILD_ERROR_OUTPUT_TRUNCATED = 16,
-    GX_BUILD_ERROR_INTERNAL = 17
+    GX_BUILD_ERROR_INTERNAL = 17,
+    /* Append-only bare-metal compiler diagnostics. Existing hosted values
+     * retain their numeric meaning. */
+    GX_BUILD_ERROR_COMPILER_FAILED = 18,
+    GX_BUILD_ERROR_SOURCE_SELECTION = 19,
+    GX_BUILD_ERROR_UNSUPPORTED_PROJECT = 20
 } gx_build_error_code;
 
 typedef struct gx_build_request {

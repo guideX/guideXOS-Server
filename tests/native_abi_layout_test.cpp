@@ -53,7 +53,12 @@ static_assert(offsetof(gx_host_calls, development_run_poll) == 208, "development
 static_assert(offsetof(gx_host_calls, development_run_request_close) == 216, "development run close slot changed");
 static_assert(offsetof(gx_host_calls, development_run_release) == 224, "development run release slot changed");
 static_assert(offsetof(gx_host_calls, development_debug) == 232, "development debug slot changed");
-static_assert(sizeof(gx_host_calls) == 240, "gx_host_calls size changed");
+static_assert(offsetof(gx_host_calls, bare_metal_build_project_start) == 240, "bare-metal build start slot changed");
+static_assert(offsetof(gx_host_calls, bare_metal_build_project_poll) == 248, "bare-metal build poll slot changed");
+static_assert(offsetof(gx_host_calls, bare_metal_build_project_release) == 256, "bare-metal build release slot changed");
+static_assert(offsetof(gx_host_calls, bare_metal_file_stat) == 264, "bare-metal file stat slot changed");
+static_assert(offsetof(gx_host_calls, bare_metal_file_remove) == 304, "bare-metal file remove slot changed");
+static_assert(sizeof(gx_host_calls) == 312, "gx_host_calls size changed");
 static_assert(sizeof(gx_development_run_request) == 72, "development run request size changed");
 static_assert(offsetof(gx_development_run_request, projectRoot) == 8, "development run request project root offset changed");
 static_assert(offsetof(gx_development_run_request, artifactSha256) == 56, "development run request artifact hash offset changed");

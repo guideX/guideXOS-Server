@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "id": "dev.guidexos.phase27e",
+  "displayName": "Phase 27E Bare Metal Build",
+  "version": "0.1.0",
+  "publisher": "guideXOS",
+  "description": "Phase 27E build integration proof fixture.",
+  "category": "Applications",
+  "kind": "NativeElf",
+  "icon": "",
+  "minGuideXOSVersion": "0.5.0",
+  "supportedArchitectures": ["amd64"],
+  "entries": [{
+    "architecture": "amd64",
+    "path": "bin/amd64/phase27e.elf",
+    "entryPoint": "gx_main",
+    "abi": "guidexos-c-abi-v1",
+    "runtime": "native-elf"
+  }]
+}

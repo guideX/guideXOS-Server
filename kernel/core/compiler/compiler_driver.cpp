@@ -87,11 +87,43 @@ static void print_data(const uint8_t* data, uint32_t dataBytes)
     serial::putc('\n');
 }
 
+static void copy_diagnostics(const Diagnostics& diagnostics, CompileSummary* summary)
+{
+    if (!summary) return;
+    summary->diagnosticCount = diagnostics.count() < COMPILER_MAX_DIAGNOSTICS
+        ? diagnostics.count() : COMPILER_MAX_DIAGNOSTICS;
+    summary->diagnosticsTruncated = diagnostics.overflowed();
+    for (uint32_t i = 0; i < summary->diagnosticCount; ++i) {
+        const CompilerDiagnostic& source = diagnostics.at(i);
+        CompileDiagnostic& destination = summary->diagnostics[i];
+        destination.location = source.location;
+        uint32_t messageBytes = 0;
+        if (source.message) {
+            while (messageBytes + 1 < sizeof(destination.message) && source.message[messageBytes] != '\0') {
+                destination.message[messageBytes] = source.message[messageBytes];
+                ++messageBytes;
+            }
+        }
+        destination.message[messageBytes] = '\0';
+        uint32_t tokenBytes = 0;
+        if (source.tokenKind) {
+            while (tokenBytes + 1 < sizeof(destination.tokenKind) && source.tokenKind[tokenBytes] != '\0') {
+                destination.tokenKind[tokenBytes] = source.tokenKind[tokenBytes];
+                ++tokenBytes;
+            }
+        }
+        destination.tokenKind[tokenBytes] = '\0';
+    }
+}
+
 static bool fail_build(Diagnostics& diagnostics, CompileSummary* summary)
 {
     print_diagnostics(diagnostics);
     serial::puts("Compiler: build FAIL\n");
-    if (summary) summary->success = false;
+    if (summary) {
+        summary->success = false;
+        copy_diagnostics(diagnostics, summary);
+    }
     return false;
 }
 

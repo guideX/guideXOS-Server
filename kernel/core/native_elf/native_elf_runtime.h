@@ -26,6 +26,11 @@ static const uint64_t APPLICATION_STACK_BASE =
 static const uint64_t APPLICATION_STACK_ALIGNMENT = 16ULL;
 static const uint32_t APPLICATION_STACK_GUARD_BYTES = 0U;
 static const uint32_t NATIVE_APP_MAX_LOG_BYTES = 255U;
+// Bootstrap compiler output remains capped by MAX_ELF_FILE_BYTES. The
+// Developer Studio proof app is a prelinked NativeElf application and gets a
+// separate bounded loader buffer while still using the same validator and
+// fixed NativeElf region.
+static const uint32_t NATIVE_APP_MAX_ELF_FILE_BYTES = 256U * 1024U;
 
 static_assert(APPLICATION_STACK_SIZE < guidexos::native_elf::REGION_SIZE,
               "application stack must fit inside the reserved NativeElf window");

@@ -5,6 +5,7 @@
 #pragma once
 
 #include "kernel/types.h"
+#include "compiler_diagnostics.h"
 
 namespace kernel {
 namespace compiler {
@@ -13,6 +14,14 @@ static const uint32_t COMPILER_MAX_SOURCE_BYTES = 64 * 1024;
 static const uint32_t COMPILER_MAX_OUTPUT_BYTES = 12288;
 static const uint32_t COMPILER_MAX_CODE_BYTES = 128;
 static const uint32_t COMPILER_MAX_DATA_BYTES = 256;
+static const uint32_t COMPILER_MAX_DIAGNOSTIC_MESSAGE_BYTES = 128;
+static const uint32_t COMPILER_MAX_DIAGNOSTIC_TOKEN_BYTES = 32;
+
+struct CompileDiagnostic {
+    SourceLocation location;
+    char message[COMPILER_MAX_DIAGNOSTIC_MESSAGE_BYTES];
+    char tokenKind[COMPILER_MAX_DIAGNOSTIC_TOKEN_BYTES];
+};
 
 struct CompileSummary {
     bool success;
@@ -30,6 +39,9 @@ struct CompileSummary {
     uint64_t outputHash;
     uint64_t reopenedHash;
     uint64_t dataHash;
+    uint32_t diagnosticCount;
+    bool diagnosticsTruncated;
+    CompileDiagnostic diagnostics[COMPILER_MAX_DIAGNOSTICS];
 };
 
 bool compile(const char* sourcePath,
