@@ -41,6 +41,8 @@ enum class TokenKind : uint8_t {
     Greater,
     GreaterEqual,
     Comma,
+    LogicalAnd,
+    LogicalOr,
 };
 
 struct Token {

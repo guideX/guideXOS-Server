@@ -84,6 +84,46 @@ static bool has_expression_kind(const FunctionIR& function, ExpressionKind kind)
     return false;
 }
 
+static bool has_forward_conditional_bypass(const uint8_t* bytes, uint32_t count,
+                                           uint8_t secondOpcode)
+{
+    if (!bytes) return false;
+    for (uint32_t i = 0; i + 6 <= count; ++i) {
+        if (bytes[i] != 0x0F || bytes[i + 1] != secondOpcode) continue;
+        const int32_t displacement =
+            static_cast<int32_t>(static_cast<uint32_t>(bytes[i + 2]) |
+                                 (static_cast<uint32_t>(bytes[i + 3]) << 8) |
+                                 (static_cast<uint32_t>(bytes[i + 4]) << 16) |
+                                 (static_cast<uint32_t>(bytes[i + 5]) << 24));
+        const int64_t target = static_cast<int64_t>(i + 6) + displacement;
+        if (target > static_cast<int64_t>(i + 6) && target < static_cast<int64_t>(count)) return true;
+    }
+    return false;
+}
+
+static bool branch_skips_needle(const uint8_t* bytes, uint32_t count,
+                                uint8_t secondOpcode, const uint8_t* needle,
+                                uint32_t needleCount)
+{
+    if (!bytes || !needle || needleCount == 0) return false;
+    for (uint32_t i = 0; i + 6 <= count; ++i) {
+        if (bytes[i] != 0x0F || bytes[i + 1] != secondOpcode) continue;
+        const int32_t displacement =
+            static_cast<int32_t>(static_cast<uint32_t>(bytes[i + 2]) |
+                                 (static_cast<uint32_t>(bytes[i + 3]) << 8) |
+                                 (static_cast<uint32_t>(bytes[i + 4]) << 16) |
+                                 (static_cast<uint32_t>(bytes[i + 5]) << 24));
+        const int64_t target = static_cast<int64_t>(i + 6) + displacement;
+        if (target <= static_cast<int64_t>(i + 6) || target > static_cast<int64_t>(count)) continue;
+        for (uint32_t j = i + 6; j + needleCount <= count; ++j) {
+            bool same = true;
+            for (uint32_t k = 0; k < needleCount; ++k) if (bytes[j + k] != needle[k]) same = false;
+            if (same && target > static_cast<int64_t>(j + needleCount)) return true;
+        }
+    }
+    return false;
+}
+
 } // namespace
 
 int main()
@@ -392,7 +432,142 @@ int main()
                  deterministicCodeBytesA == deterministicCodeBytesB &&
                  deterministicElfBytesA == deterministicElfBytesB &&
                  std::memcmp(deterministicElfA, deterministicElfB, deterministicElfBytesA) == 0,
-                 "identical multi-string source produces identical ELF")) return 1;
+                  "identical multi-string source produces identical ELF")) return 1;
+
+    const char* logicalLex = "int gx_main(void* ctx) { return 1&&2||3; }";
+    Token logicalTokens[COMPILER_MAX_TOKENS] = {};
+    uint32_t logicalTokenCount = 0;
+    Diagnostics logicalLexDiagnostics;
+    if (!require(lex_source(logicalLex, static_cast<uint32_t>(std::strlen(logicalLex)), logicalTokens,
+                            COMPILER_MAX_TOKENS, &logicalTokenCount, logicalLexDiagnostics),
+                 "logical operators lex")) return 1;
+    if (!require(logicalTokens[10].kind == TokenKind::LogicalAnd && logicalTokens[10].length == 2 &&
+                 logicalTokens[11].kind == TokenKind::Integer && logicalTokens[12].kind == TokenKind::LogicalOr &&
+                  logicalTokens[12].length == 2 && logicalTokens[12].location.column == 37,
+                 "logical operators use longest matching and source locations")) return 1;
+
+    const char* singleAnd = "int gx_main(void* ctx) { return 1 & 1; }";
+    const char* singleOr = "int gx_main(void* ctx) { return 1 | 1; }";
+    Token invalidOperatorTokens[COMPILER_MAX_TOKENS] = {};
+    uint32_t invalidOperatorTokenCount = 0;
+    Diagnostics singleAndDiagnostics;
+    Diagnostics singleOrDiagnostics;
+    if (!require(!lex_source(singleAnd, static_cast<uint32_t>(std::strlen(singleAnd)),
+                             invalidOperatorTokens, COMPILER_MAX_TOKENS,
+                             &invalidOperatorTokenCount, singleAndDiagnostics) &&
+                 singleAndDiagnostics.count() != 0 &&
+                 std::strcmp(singleAndDiagnostics.at(0).message,
+                             "unexpected '&'; logical AND is '&&'") == 0,
+                 "single ampersand is rejected with a focused diagnostic")) return 1;
+    if (!require(!lex_source(singleOr, static_cast<uint32_t>(std::strlen(singleOr)),
+                             invalidOperatorTokens, COMPILER_MAX_TOKENS,
+                             &invalidOperatorTokenCount, singleOrDiagnostics) &&
+                 singleOrDiagnostics.count() != 0 &&
+                 std::strcmp(singleOrDiagnostics.at(0).message,
+                             "unexpected '|'; logical OR is '||'") == 0,
+                 "single pipe is rejected with a focused diagnostic")) return 1;
+
+    const char* logicalSource = "int gx_main(void* ctx) { return 0 || 1 && 1; }";
+    FunctionIR logical = {};
+    Diagnostics logicalDiagnostics;
+    if (!require(parse_text(logicalSource, &logical, &logicalDiagnostics) &&
+                 logical.returnConstantValid && logical.returnConstant == 1 &&
+                 has_expression_kind(logical, ExpressionKind::LogicalAnd) &&
+                 has_expression_kind(logical, ExpressionKind::LogicalOr),
+                 "logical precedence and target-neutral IR are represented")) return 1;
+
+    const char* logicalParentheses = "int gx_main(void* ctx) { return (0 || 1) && 0; }";
+    FunctionIR logicalParenthesesFunction = {};
+    Diagnostics logicalParenthesesDiagnostics;
+    if (!require(parse_text(logicalParentheses, &logicalParenthesesFunction,
+                             &logicalParenthesesDiagnostics) &&
+                 logicalParenthesesFunction.returnConstantValid &&
+                 logicalParenthesesFunction.returnConstant == 0,
+                 "logical parentheses override precedence")) return 1;
+
+    const char* logicalComparisonsSource = "int gx_main(void* ctx) { return 20 == 20 && 22 == 22; }";
+    FunctionIR logicalComparisons = {};
+    Diagnostics logicalComparisonsDiagnostics;
+    if (!require(parse_text(logicalComparisonsSource, &logicalComparisons, &logicalComparisonsDiagnostics) &&
+                 logicalComparisons.returnConstantValid && logicalComparisons.returnConstant == 1,
+                 "comparisons bind tighter than logical AND")) return 1;
+
+    const char* canonicalLogical = "int gx_main(void* ctx) { return 42 && 99; }";
+    FunctionIR canonicalLogicalFunction = {};
+    uint8_t canonicalLogicalCode[COMPILER_MAX_CODE_BYTES] = {};
+    uint32_t canonicalLogicalCodeBytes = 0;
+    if (!require(compile_text(canonicalLogical, &canonicalLogicalFunction, canonicalLogicalCode,
+                              &canonicalLogicalCodeBytes, expressionElf, &expressionElfBytes) &&
+                 canonicalLogicalFunction.returnConstantValid &&
+                 canonicalLogicalFunction.returnConstant == 1,
+                 "nonzero logical operands produce canonical one")) return 1;
+
+    const char* logicalAssignmentSource =
+        "int gx_main(gx_app_context* ctx) { int x = 20; int y = 22; "
+        "int matched = x == 20 && y == 22; return matched * 42; }";
+    FunctionIR logicalAssignment = {};
+    uint8_t logicalAssignmentCode[COMPILER_MAX_CODE_BYTES] = {};
+    uint32_t logicalAssignmentCodeBytes = 0;
+    if (!require(compile_text(logicalAssignmentSource, &logicalAssignment,
+                              logicalAssignmentCode, &logicalAssignmentCodeBytes,
+                              expressionElf, &expressionElfBytes) &&
+                 has_expression_kind(logicalAssignment, ExpressionKind::LogicalAnd) &&
+                 logicalAssignmentCodeBytes != 0,
+                 "logical expressions are value-producing assignments")) return 1;
+
+    const char* shortCircuitAndSource =
+        "int gx_main(void* ctx) { int left = 0; int right = 7; return left && right; }";
+    FunctionIR shortCircuitAnd = {};
+    uint8_t shortCircuitAndCode[COMPILER_MAX_CODE_BYTES] = {};
+    uint32_t shortCircuitAndCodeBytes = 0;
+    if (!require(compile_text(shortCircuitAndSource, &shortCircuitAnd, shortCircuitAndCode,
+                              &shortCircuitAndCodeBytes, expressionElf, &expressionElfBytes),
+                 "short-circuit AND pipeline")) return 1;
+    const uint8_t rightLoad[] = {0x8B, 0x85, 0xF8, 0xFF, 0xFF, 0xFF};
+    if (!require(has_forward_conditional_bypass(shortCircuitAndCode, shortCircuitAndCodeBytes, 0x84) &&
+                 branch_skips_needle(shortCircuitAndCode, shortCircuitAndCodeBytes, 0x84,
+                                     rightLoad, sizeof(rightLoad)),
+                 "AND branch graph bypasses RHS load")) return 1;
+
+    const char* shortCircuitOrSource =
+        "int gx_main(void* ctx) { int left = 1; int right = 7; return left || right; }";
+    FunctionIR shortCircuitOr = {};
+    uint8_t shortCircuitOrCode[COMPILER_MAX_CODE_BYTES] = {};
+    uint32_t shortCircuitOrCodeBytes = 0;
+    if (!require(compile_text(shortCircuitOrSource, &shortCircuitOr, shortCircuitOrCode,
+                              &shortCircuitOrCodeBytes, expressionElf, &expressionElfBytes),
+                 "short-circuit OR pipeline")) return 1;
+    if (!require(has_forward_conditional_bypass(shortCircuitOrCode, shortCircuitOrCodeBytes, 0x85) &&
+                 branch_skips_needle(shortCircuitOrCode, shortCircuitOrCodeBytes, 0x85,
+                                     rightLoad, sizeof(rightLoad)),
+                 "OR branch graph bypasses RHS load")) return 1;
+
+    const char* invalidLogicalAnd = "int gx_main(void* ctx) { if (1 &&) { return 42; } return 0; }";
+    const char* invalidLogicalOr = "int gx_main(void* ctx) { if (|| 1) { return 42; } return 0; }";
+    FunctionIR invalidLogicalFunction = {};
+    Diagnostics invalidLogicalDiagnostics;
+    if (!require(!parse_text(invalidLogicalAnd, &invalidLogicalFunction, &invalidLogicalDiagnostics) &&
+                 invalidLogicalDiagnostics.count() != 0 &&
+                 invalidLogicalDiagnostics.at(0).location.column > 0,
+                 "missing logical RHS is rejected with a source location")) return 1;
+    invalidLogicalDiagnostics = Diagnostics();
+    if (!require(!parse_text(invalidLogicalOr, &invalidLogicalFunction, &invalidLogicalDiagnostics) &&
+                 invalidLogicalDiagnostics.count() != 0 &&
+                 invalidLogicalDiagnostics.at(0).location.column > 0,
+                 "missing logical LHS is rejected with a source location")) return 1;
+
+    std::string tooManyLogicalBranches = "int gx_main(void* ctx) { return 1";
+    for (uint32_t i = 0; i < 44; ++i) tooManyLogicalBranches += " && 1";
+    tooManyLogicalBranches += "; }";
+    FunctionIR tooManyLogicalFunction = {};
+    uint8_t tooManyLogicalCode[COMPILER_MAX_CODE_BYTES] = {};
+    uint32_t tooManyLogicalCodeBytes = 0;
+    Diagnostics tooManyLogicalDiagnostics;
+    if (!require(parse_text(tooManyLogicalBranches.c_str(), &tooManyLogicalFunction,
+                             &tooManyLogicalDiagnostics) &&
+                 !amd64::emit_function(tooManyLogicalFunction, tooManyLogicalCode,
+                                        sizeof(tooManyLogicalCode), &tooManyLogicalCodeBytes),
+                 "logical branch/fixup capacity is bounded")) return 1;
 
     std::puts("compiler_bootstrap_host_test: PASS");
     return 0;

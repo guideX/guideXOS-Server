@@ -40,6 +40,8 @@ enum class ExpressionKind : uint8_t {
     LessEqual,
     Greater,
     GreaterEqual,
+    LogicalAnd,
+    LogicalOr,
 };
 
 struct Expression {

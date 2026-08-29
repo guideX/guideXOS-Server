@@ -470,7 +470,35 @@ private:
             error_current("expression nesting limit exceeded");
             return COMPILER_INVALID_INDEX;
         }
-        return parse_equality(depth);
+        return parse_logical_or(depth);
+    }
+
+    uint16_t parse_logical_or(uint32_t depth)
+    {
+        uint16_t left = parse_logical_and(depth);
+        while (left != COMPILER_INVALID_INDEX && current().kind == TokenKind::LogicalOr) {
+            const Token operatorToken = current();
+            ++m_index;
+            const uint16_t right = parse_logical_and(depth);
+            if (right == COMPILER_INVALID_INDEX) return COMPILER_INVALID_INDEX;
+            left = make_expression(ExpressionKind::LogicalOr, operatorToken.location,
+                                   left, right, COMPILER_INVALID_INDEX, 0);
+        }
+        return left;
+    }
+
+    uint16_t parse_logical_and(uint32_t depth)
+    {
+        uint16_t left = parse_equality(depth);
+        while (left != COMPILER_INVALID_INDEX && current().kind == TokenKind::LogicalAnd) {
+            const Token operatorToken = current();
+            ++m_index;
+            const uint16_t right = parse_equality(depth);
+            if (right == COMPILER_INVALID_INDEX) return COMPILER_INVALID_INDEX;
+            left = make_expression(ExpressionKind::LogicalAnd, operatorToken.location,
+                                   left, right, COMPILER_INVALID_INDEX, 0);
+        }
+        return left;
     }
 
     uint16_t parse_equality(uint32_t depth)
@@ -615,8 +643,26 @@ private:
         if (expression.kind == ExpressionKind::LoadLocal) return false;
         if (expression.kind == ExpressionKind::Negate)
             return evaluate_expression(expression.left, depth + 1U, bits) && (*bits = 0U - *bits, true);
-        if (!evaluate_expression(expression.left, depth + 1U, &left) ||
-            !evaluate_expression(expression.right, depth + 1U, &right)) return false;
+        if (!evaluate_expression(expression.left, depth + 1U, &left)) return false;
+        if (expression.kind == ExpressionKind::LogicalAnd) {
+            if (left == 0) {
+                *bits = 0;
+                return true;
+            }
+            if (!evaluate_expression(expression.right, depth + 1U, &right)) return false;
+            *bits = right != 0 ? 1U : 0U;
+            return true;
+        }
+        if (expression.kind == ExpressionKind::LogicalOr) {
+            if (left != 0) {
+                *bits = 1U;
+                return true;
+            }
+            if (!evaluate_expression(expression.right, depth + 1U, &right)) return false;
+            *bits = right != 0 ? 1U : 0U;
+            return true;
+        }
+        if (!evaluate_expression(expression.right, depth + 1U, &right)) return false;
         switch (expression.kind) {
             case ExpressionKind::Add: *bits = left + right; return true;
             case ExpressionKind::Subtract: *bits = left - right; return true;

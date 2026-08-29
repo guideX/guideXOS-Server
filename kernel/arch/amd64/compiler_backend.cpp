@@ -139,6 +139,7 @@ public:
     }
 
     bool emit_jz(uint16_t label) { return emit_branch(0x84, label); }
+    bool emit_jnz(uint16_t label) { return emit_branch(0x85, label); }
     bool emit_jmp(uint16_t label)
     {
         if (label >= m_labelCount || m_fixupCount >= COMPILER_MAX_BRANCH_FIXUPS) return false;
@@ -209,6 +210,26 @@ static bool emit_expression(Emitter& emitter, const FunctionIR& function, uint16
 {
     if (index == COMPILER_INVALID_INDEX || index >= function.expressionCount) return false;
     const Expression& expression = function.expressions[index];
+    if (expression.kind == ExpressionKind::LogicalAnd || expression.kind == ExpressionKind::LogicalOr) {
+        uint16_t shortCircuitLabel = COMPILER_INVALID_INDEX;
+        uint16_t endLabel = COMPILER_INVALID_INDEX;
+        if (!emitter.create_label(&shortCircuitLabel) || !emitter.create_label(&endLabel) ||
+            !emit_expression(emitter, function, expression.left) || !emitter.test_eax_eax()) return false;
+        if (expression.kind == ExpressionKind::LogicalAnd) {
+            if (!emitter.emit_jz(shortCircuitLabel) ||
+                !emit_expression(emitter, function, expression.right) || !emitter.test_eax_eax() ||
+                !emitter.emit_jz(shortCircuitLabel) || !emitter.mov_eax_imm32(1) ||
+                !emitter.emit_jmp(endLabel) || !emitter.define_label(shortCircuitLabel) ||
+                !emitter.mov_eax_imm32(0) || !emitter.define_label(endLabel)) return false;
+        } else {
+            if (!emitter.emit_jnz(shortCircuitLabel) ||
+                !emit_expression(emitter, function, expression.right) || !emitter.test_eax_eax() ||
+                !emitter.emit_jnz(shortCircuitLabel) || !emitter.mov_eax_imm32(0) ||
+                !emitter.emit_jmp(endLabel) || !emitter.define_label(shortCircuitLabel) ||
+                !emitter.mov_eax_imm32(1) || !emitter.define_label(endLabel)) return false;
+        }
+        return true;
+    }
     switch (expression.kind) {
         case ExpressionKind::Constant:
             return emitter.mov_eax_imm32(static_cast<uint32_t>(expression.value));

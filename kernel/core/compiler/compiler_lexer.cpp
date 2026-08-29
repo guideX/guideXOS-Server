@@ -109,6 +109,8 @@ const char* token_kind_name(TokenKind kind)
         case TokenKind::Greater: return "'>'";
         case TokenKind::GreaterEqual: return "'>='";
         case TokenKind::Comma: return "','";
+        case TokenKind::LogicalAnd: return "'&&'";
+        case TokenKind::LogicalOr: return "'||'";
         default: return "unknown";
     }
 }
@@ -268,6 +270,24 @@ bool lex_source(const char* source, uint32_t sourceLength, Token* tokens,
                 } else kind = TokenKind::Greater;
                 break;
             case ',': kind = TokenKind::Comma; break;
+            case '&':
+                if (index + 1 < sourceLength && source[index + 1] == '&') {
+                    kind = TokenKind::LogicalAnd; tokenLength = 2;
+                } else {
+                    diagnostics.error(location, "unexpected '&'; logical AND is '&&'", "'&'");
+                    advance(source, sourceLength, &index, &line, &column);
+                    return false;
+                }
+                break;
+            case '|':
+                if (index + 1 < sourceLength && source[index + 1] == '|') {
+                    kind = TokenKind::LogicalOr; tokenLength = 2;
+                } else {
+                    diagnostics.error(location, "unexpected '|'; logical OR is '||'", "'|'");
+                    advance(source, sourceLength, &index, &line, &column);
+                    return false;
+                }
+                break;
             default:
                 diagnostics.error(location, "unexpected character", "character");
                 advance(source, sourceLength, &index, &line, &column);

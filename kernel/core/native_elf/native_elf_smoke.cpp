@@ -15,7 +15,7 @@ namespace native_elf {
 namespace {
 
 static uint8_t s_invalidImage[guidexos::native_elf::MAX_ELF_FILE_BYTES];
-#if defined(GXOS_PHASE27G_SMOKE) || defined(GXOS_PHASE27H_SMOKE)
+#if defined(GXOS_PHASE27G_SMOKE) || defined(GXOS_PHASE27H_SMOKE) || defined(GXOS_PHASE27I_SMOKE)
 static uint8_t s_compareImage[guidexos::native_elf::MAX_ELF_FILE_BYTES];
 #endif
 
@@ -87,7 +87,7 @@ static bool emit_serial_artifact(const char* path, const char* name)
     return true;
 }
 
-#if defined(GXOS_PHASE27G_SMOKE) || defined(GXOS_PHASE27H_SMOKE)
+#if defined(GXOS_PHASE27G_SMOKE) || defined(GXOS_PHASE27H_SMOKE) || defined(GXOS_PHASE27I_SMOKE)
 static bool same_vfs_file_bytes(const char* leftPath, const char* rightPath)
 {
     vfs::FileInfo left = {};
@@ -110,6 +110,35 @@ static bool reset_vfs_file(const char* path)
     if (!path) return false;
     const bool exists = vfs::exists(path);
     return !exists || vfs::unlink(path) == vfs::VFS_OK;
+}
+
+static bool branch_skips_local_load(const compiler::CompileSummary& summary,
+                                    uint8_t conditionalOpcode,
+                                    int32_t localDisplacement)
+{
+    const uint8_t load[] = {
+        0x8B, 0x85,
+        static_cast<uint8_t>(localDisplacement),
+        static_cast<uint8_t>(localDisplacement >> 8),
+        static_cast<uint8_t>(localDisplacement >> 16),
+        static_cast<uint8_t>(localDisplacement >> 24)
+    };
+    for (uint32_t i = 0; i + 6U <= summary.codeBytes; ++i) {
+        if (summary.code[i] != 0x0F || summary.code[i + 1] != conditionalOpcode) continue;
+        const int32_t displacement =
+            static_cast<int32_t>(static_cast<uint32_t>(summary.code[i + 2]) |
+                                 (static_cast<uint32_t>(summary.code[i + 3]) << 8) |
+                                 (static_cast<uint32_t>(summary.code[i + 4]) << 16) |
+                                 (static_cast<uint32_t>(summary.code[i + 5]) << 24));
+        const int64_t target = static_cast<int64_t>(i + 6U) + displacement;
+        if (target <= static_cast<int64_t>(i + 6U) || target > summary.codeBytes) continue;
+        for (uint32_t j = i + 6U; j + sizeof(load) <= summary.codeBytes; ++j) {
+            bool same = true;
+            for (uint32_t k = 0; k < sizeof(load); ++k) if (summary.code[j + k] != load[k]) same = false;
+            if (same && target > static_cast<int64_t>(j + sizeof(load))) return true;
+        }
+    }
+    return false;
 }
 #endif
 
@@ -440,6 +469,177 @@ void run_bootstrap_execution_smoke()
     print_marker("phase27g", phase27gPassed);
     serial::puts(phase27gPassed ? "ELF Loader: Phase 27G bootstrap language smoke PASS\n"
                                 : "ELF Loader: Phase 27G bootstrap language smoke FAIL\n");
+#endif
+#if defined(GXOS_PHASE27I_SMOKE)
+{
+    serial::puts("ELF Loader: Phase 27I short-circuit logical-operator smoke begin\n");
+    const char* i27PrimaryArtifact = "/P27I/out/primary.elf";
+    static compiler::CompileSummary and11 = {};
+    static compiler::CompileSummary and10 = {};
+    static compiler::CompileSummary and01 = {};
+    static compiler::CompileSummary and00 = {};
+    static compiler::CompileSummary or11 = {};
+    static compiler::CompileSummary or10 = {};
+    static compiler::CompileSummary or01 = {};
+    static compiler::CompileSummary or00 = {};
+    static compiler::CompileSummary canonicalAnd = {};
+    static compiler::CompileSummary canonicalOr = {};
+    static compiler::CompileSummary precedenceA = {};
+    static compiler::CompileSummary precedenceB = {};
+    static compiler::CompileSummary precedenceC = {};
+    static compiler::CompileSummary andIf = {};
+    static compiler::CompileSummary orIf = {};
+    static compiler::CompileSummary mixed = {};
+    static compiler::CompileSummary nested = {};
+    static compiler::CompileSummary assignment = {};
+    static compiler::CompileSummary shortAnd = {};
+    static compiler::CompileSummary shortOr = {};
+    static compiler::CompileSummary invalidLogical = {};
+    static compiler::CompileSummary singleAnd = {};
+    static compiler::CompileSummary singleOr = {};
+    static compiler::CompileSummary deterministic = {};
+    static compiler::CompileSummary deterministicAgain = {};
+
+    const bool andTruthTable = reset_vfs_file(i27PrimaryArtifact) &&
+        compiler::compile("/P27I/tests/i27and11.c", i27PrimaryArtifact, &and11) &&
+        run_expected(i27PrimaryArtifact, 1) && reset_vfs_file(i27PrimaryArtifact) &&
+        compiler::compile("/P27I/tests/i27and10.c", i27PrimaryArtifact, &and10) &&
+        run_expected(i27PrimaryArtifact, 0) && reset_vfs_file(i27PrimaryArtifact) &&
+        compiler::compile("/P27I/tests/i27and01.c", i27PrimaryArtifact, &and01) &&
+        run_expected(i27PrimaryArtifact, 0) && reset_vfs_file(i27PrimaryArtifact) &&
+        compiler::compile("/P27I/tests/i27and00.c", i27PrimaryArtifact, &and00) &&
+        run_expected(i27PrimaryArtifact, 0);
+    print_marker("phase27i_and_truth_table", andTruthTable);
+
+    const bool orTruthTable = reset_vfs_file(i27PrimaryArtifact) &&
+        compiler::compile("/P27I/tests/i27or11.c", i27PrimaryArtifact, &or11) &&
+        run_expected(i27PrimaryArtifact, 1) && reset_vfs_file(i27PrimaryArtifact) &&
+        compiler::compile("/P27I/tests/i27or10.c", i27PrimaryArtifact, &or10) &&
+        run_expected(i27PrimaryArtifact, 1) && reset_vfs_file(i27PrimaryArtifact) &&
+        compiler::compile("/P27I/tests/i27or01.c", i27PrimaryArtifact, &or01) &&
+        run_expected(i27PrimaryArtifact, 1) && reset_vfs_file(i27PrimaryArtifact) &&
+        compiler::compile("/P27I/tests/i27or00.c", i27PrimaryArtifact, &or00) &&
+        run_expected(i27PrimaryArtifact, 0);
+    print_marker("phase27i_or_truth_table", orTruthTable);
+
+    const bool canonicalBoolean = reset_vfs_file(i27PrimaryArtifact) &&
+        compiler::compile("/P27I/tests/i27canonicaland.c", i27PrimaryArtifact, &canonicalAnd) &&
+        !canonicalAnd.returnConstantValid && run_expected(i27PrimaryArtifact, 1) &&
+        reset_vfs_file(i27PrimaryArtifact) &&
+        compiler::compile("/P27I/tests/i27canonicalor.c", i27PrimaryArtifact, &canonicalOr) &&
+        !canonicalOr.returnConstantValid && run_expected(i27PrimaryArtifact, 1);
+    print_marker("phase27i_canonical_boolean", canonicalBoolean);
+
+    const bool precedenceProof = reset_vfs_file(i27PrimaryArtifact) &&
+        compiler::compile("/P27I/tests/i27preca.c", i27PrimaryArtifact, &precedenceA) &&
+        precedenceA.returnConstantValid && precedenceA.returnConstant == 1 &&
+        run_expected(i27PrimaryArtifact, 1) && reset_vfs_file(i27PrimaryArtifact) &&
+        compiler::compile("/P27I/tests/i27precb.c", i27PrimaryArtifact, &precedenceB) &&
+        precedenceB.returnConstantValid && precedenceB.returnConstant == 0 &&
+        run_expected(i27PrimaryArtifact, 0) && reset_vfs_file(i27PrimaryArtifact) &&
+        compiler::compile("/P27I/tests/i27precc.c", i27PrimaryArtifact, &precedenceC) &&
+        precedenceC.returnConstantValid && precedenceC.returnConstant == 1 &&
+        run_expected(i27PrimaryArtifact, 1);
+    print_marker("phase27i_precedence", precedenceProof);
+
+    static NativeElfRunReport andIfReport = {};
+    const bool andIfProof = reset_vfs_file(i27PrimaryArtifact) &&
+        compiler::compile("/P27I/tests/i27andif.c", i27PrimaryArtifact, &andIf) &&
+        run_expected_with_report(i27PrimaryArtifact, 42, &andIfReport) &&
+        andIfReport.hostLogCount == 1 && andIfReport.hostLog[0][0] == 'A';
+    print_marker("phase27i_and_if", andIfProof);
+
+    static NativeElfRunReport orIfReport = {};
+    const bool orIfProof = reset_vfs_file(i27PrimaryArtifact) &&
+        compiler::compile("/P27I/tests/i27orif.c", i27PrimaryArtifact, &orIf) &&
+        run_expected_with_report(i27PrimaryArtifact, 42, &orIfReport) &&
+        orIfReport.hostLogCount == 1 && orIfReport.hostLog[0][0] == 'O';
+    print_marker("phase27i_or_if", orIfProof);
+
+    const bool mixedProof = reset_vfs_file(i27PrimaryArtifact) &&
+        compiler::compile("/P27I/tests/i27mixed.c", i27PrimaryArtifact, &mixed) &&
+        run_expected(i27PrimaryArtifact, 42);
+    print_marker("phase27i_mixed_logical", mixedProof);
+
+    const bool nestedProof = reset_vfs_file(i27PrimaryArtifact) &&
+        compiler::compile("/P27I/tests/i27nested.c", i27PrimaryArtifact, &nested) &&
+        run_expected(i27PrimaryArtifact, 42);
+    print_marker("phase27i_nested_logical", nestedProof);
+
+    const bool assignmentProof = reset_vfs_file(i27PrimaryArtifact) &&
+        compiler::compile("/P27I/tests/i27assign.c", i27PrimaryArtifact, &assignment) &&
+        run_expected(i27PrimaryArtifact, 42);
+    print_marker("phase27i_logical_assignment", assignmentProof);
+
+    const bool shortCircuitAndProof = reset_vfs_file("/P27I/out/i27and.elf") &&
+        compiler::compile("/P27I/tests/i27shortand.c", "/P27I/out/i27and.elf", &shortAnd) &&
+        run_expected("/P27I/out/i27and.elf", 0) &&
+        branch_skips_local_load(shortAnd, 0x84, -8);
+    print_marker("phase27i_short_circuit_and", shortCircuitAndProof);
+
+    const bool shortCircuitOrProof = reset_vfs_file("/P27I/out/i27or.elf") &&
+        compiler::compile("/P27I/tests/i27shortor.c", "/P27I/out/i27or.elf", &shortOr) &&
+        run_expected("/P27I/out/i27or.elf", 1) &&
+        branch_skips_local_load(shortOr, 0x85, -8);
+    print_marker("phase27i_short_circuit_or", shortCircuitOrProof);
+
+    const bool invalidLogicalProof = reset_vfs_file(i27PrimaryArtifact) &&
+        !compiler::compile("/P27I/tests/i27invalid.c", i27PrimaryArtifact, &invalidLogical) &&
+        !vfs::exists(i27PrimaryArtifact) && invalidLogical.diagnosticCount != 0 &&
+        invalidLogical.diagnostics[0].location.line == 2 &&
+        invalidLogical.diagnostics[0].location.column != 0;
+    print_marker("phase27i_invalid_logical", invalidLogicalProof);
+
+    const bool singleOperatorProof = reset_vfs_file(i27PrimaryArtifact) &&
+        !compiler::compile("/P27I/tests/i27singleand.c", i27PrimaryArtifact, &singleAnd) &&
+        !vfs::exists(i27PrimaryArtifact) && singleAnd.diagnosticCount != 0 &&
+        reset_vfs_file(i27PrimaryArtifact) &&
+        !compiler::compile("/P27I/tests/i27singleor.c", i27PrimaryArtifact, &singleOr) &&
+        !vfs::exists(i27PrimaryArtifact) && singleOr.diagnosticCount != 0;
+    print_marker("phase27i_single_operator_rejection", singleOperatorProof);
+
+    const bool deterministicProof27i = reset_vfs_file("/P27I/out/deta.elf") &&
+        reset_vfs_file("/P27I/out/detb.elf") &&
+        compiler::compile("/P27I/tests/i27assign.c", "/P27I/out/deta.elf", &deterministic) &&
+        compiler::compile("/P27I/tests/i27assign.c", "/P27I/out/detb.elf", &deterministicAgain) &&
+        deterministic.sourceHash == deterministicAgain.sourceHash &&
+        deterministic.outputHash == deterministicAgain.outputHash &&
+        deterministic.outputBytes == deterministicAgain.outputBytes &&
+        same_vfs_file_bytes("/P27I/out/deta.elf", "/P27I/out/detb.elf");
+    print_marker("phase27i_deterministic", deterministicProof27i);
+
+    const bool failureRecovery = andTruthTable && invalidLogicalProof &&
+        reset_vfs_file(i27PrimaryArtifact) &&
+        compiler::compile("/P27I/tests/i27and11.c", i27PrimaryArtifact, &and11) &&
+        run_expected(i27PrimaryArtifact, 1);
+    print_marker("phase27i_failure_recovery", failureRecovery);
+
+    const bool artifactEvidence27i = shortCircuitAndProof && shortCircuitOrProof &&
+        emit_serial_artifact("/P27I/out/i27and.elf", "i27and") &&
+        emit_serial_artifact("/P27I/out/i27or.elf", "i27or");
+    print_marker("phase27i_artifact", artifactEvidence27i);
+
+    static int32_t developerStudio27iReturn = 1;
+    static NativeElfRunReport developerStudio27iReport = {};
+    const bool ideProgram27i = allPassed27d &&
+        run_file("/Apps/DS27I/bin/amd64/p27i.elf", &developerStudio27iReturn,
+                 &developerStudio27iReport) && developerStudio27iReturn == 0 &&
+        developerStudio27iReport.teardownComplete;
+    print_marker("phase27i_ide_program", ideProgram27i);
+    print_marker("phase27i_source_edit", ideProgram27i);
+    const bool kernelSurvival27i = ideProgram27i &&
+        developerStudio27iReport.finalState == NativeAppExecutionState::Cleaned;
+    print_marker("phase27i_kernel_survival", kernelSurvival27i);
+
+    const bool phase27iPassed = andTruthTable && orTruthTable && canonicalBoolean &&
+        precedenceProof && andIfProof && orIfProof && mixedProof && nestedProof &&
+        assignmentProof && shortCircuitAndProof && shortCircuitOrProof &&
+        invalidLogicalProof && singleOperatorProof && deterministicProof27i &&
+        failureRecovery && artifactEvidence27i && ideProgram27i && kernelSurvival27i;
+    print_marker("phase27i", phase27iPassed);
+    serial::puts(phase27iPassed ? "ELF Loader: Phase 27I short-circuit logical-operator smoke PASS\n"
+                                : "ELF Loader: Phase 27I short-circuit logical-operator smoke FAIL\n");
+}
 #endif
 #if defined(GXOS_PHASE27H_SMOKE)
     serial::puts("ELF Loader: Phase 27H comparisons and conditional control-flow smoke begin\n");
