@@ -1,5 +1,6 @@
 #include "file_explorer.h"
 #include "desktop_theme.h"
+#include "desktop_control_theme.h"
 #include "file_icon_provider.h"
 #include "icon_theme_manager.h"
 #include "desktop_service.h"
@@ -156,8 +157,7 @@ namespace gxos { namespace apps {
 
         uint32_t FileExplorerPathBoxColor() {
             if (!isSciFiThemeActive()) return packRgb(252, 252, 252);
-            const DesktopTheme& theme = fileExplorerTheme();
-            return blendColor(theme.windowBackground, theme.taskbarBackground, 10);
+            return GetDesktopControlTheme(fileExplorerTheme()).inputBackground;
         }
 
         uint32_t FileExplorerPanelColor() {
@@ -208,32 +208,27 @@ namespace gxos { namespace apps {
 
         uint32_t FileExplorerSelectedRowColor() {
             if (!isSciFiThemeActive()) return packRgb(80, 100, 150);
-            const DesktopTheme& theme = fileExplorerTheme();
-            return blendColor(theme.windowBackground, theme.accent, 20);
+            return GetDesktopControlTheme(fileExplorerTheme()).selectionActive;
         }
 
         uint32_t FileExplorerSelectedNavigationColor() {
             if (!isSciFiThemeActive()) return packRgb(218, 228, 244);
-            const DesktopTheme& theme = fileExplorerTheme();
-            return blendColor(theme.windowBackground, theme.accent, 18);
+            return GetDesktopControlTheme(fileExplorerTheme()).selectionActive;
         }
 
         uint32_t FileExplorerHoveredRowColor() {
             if (!isSciFiThemeActive()) return packRgb(232, 232, 238);
-            const DesktopTheme& theme = fileExplorerTheme();
-            return blendColor(theme.windowBackground, theme.mutedAccent, 12);
+            return GetDesktopControlTheme(fileExplorerTheme()).controlHover;
         }
 
         uint32_t FileExplorerContextMenuColor() {
             if (!isSciFiThemeActive()) return packRgb(245, 245, 248);
-            const DesktopTheme& theme = fileExplorerTheme();
-            return blendColor(theme.windowBackground, theme.taskbarBackground, 12);
+            return GetDesktopControlTheme(fileExplorerTheme()).controlBackground;
         }
 
         uint32_t FileExplorerContextMenuHoverColor() {
             if (!isSciFiThemeActive()) return packRgb(65, 105, 170);
-            const DesktopTheme& theme = fileExplorerTheme();
-            return blendColor(theme.accent, theme.windowBackground, 22);
+            return GetDesktopControlTheme(fileExplorerTheme()).controlHover;
         }
 
         enum PromptMode {
@@ -1943,11 +1938,12 @@ namespace gxos { namespace apps {
             const int thumbTop = fileListScrollbarThumbTop();
             const int thumbH = fileListScrollbarThumbHeight();
 
+            const DesktopControlTheme controlTheme = GetDesktopControlTheme(fileExplorerTheme());
             const uint32_t trackColor = isSciFiThemeActive()
-                ? blendColor(fileExplorerTheme().windowBackground, fileExplorerTheme().taskbarBackground, 16)
+                ? controlTheme.scrollbarTrack
                 : packRgb(236, 238, 242);
             const uint32_t thumbColor = isSciFiThemeActive()
-                ? blendColor(fileExplorerTheme().accent, fileExplorerTheme().windowBorder, 34)
+                ? controlTheme.scrollbarThumb
                 : packRgb(150, 160, 176);
             drawRect(trackLeft, trackTop, kFileListScrollbarW, trackH,
                 static_cast<int>((trackColor >> 16) & 0xFF),

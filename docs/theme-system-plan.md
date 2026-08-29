@@ -1288,7 +1288,46 @@ The divergence is material rather than a small release-portable patch. The overl
 
 ## Deferred / Future Work Queue
 
-The following remain deliberately frozen unless a separate release reason authorizes them: Navigator interior polish; Task Manager; Clock; Disk Manager; Device Manager; Network utilities; universal controls; icons; fonts; wallpaper coupling; glass/blur; animations; rounded hit testing; and pixel-identical hosted/bare-metal rendering.
+The following remain deliberately frozen unless a separate release reason authorizes them: Navigator interior polish; Task Manager; Clock; Disk Manager; Device Manager; Network utilities; remaining application-specific control migration; icons; fonts; wallpaper coupling; glass/blur; animations; rounded hit testing; and pixel-identical hosted/bare-metal rendering.
+
+## Phase 10A - Universal Sci-Fi Application Controls
+
+Phase 10A establishes a reusable color/state foundation for common application controls. It extends the existing `DesktopTheme`-derived role path; it does not introduce a second theme-selection object, replace the compositor, or redesign application layouts. Classic remains the default and compatible with the pre-Phase-10A control appearance, while Sci-Fi remains opt-in through the existing selector and persistence path.
+
+### Audit findings and ownership
+
+Theme selection and persistence remain owned by `desktop_theme.cpp`, `desktop_config.cpp`, and the existing Display Options/configuration path. `DesktopTheme` remains the source of palette, chrome, and metric values. Hosted window/client painting and generic compositor widgets remain in `compositor.cpp`/`compositor.h`; bare-metal widget rendering and input state remain in `kernel/core/kernel_compositor.cpp` and `kernel/core/include/kernel/kernel_app.h`. Application-local paint helpers remain in the application sources.
+
+The audit found a shared button widget path in both compositor implementations, but not a complete cross-application control framework. Bare-metal `TextBox` and `CheckBox` widgets are shared primitives. File Explorer, Display Options, and other applications still own their list rows, tabs, and scrollbar geometry. The bare-metal `ListBox` enum exists, but it does not yet have a shared renderer or add/list-state API. Hosted widget protocol state currently exposes hover and pressed for generic buttons, but not a separate enabled or keyboard-focus field.
+
+### Shared roles and APIs
+
+`desktop_control_theme.h` now exposes `DesktopControlTheme`, a token view derived from the selected `DesktopTheme` by `GetDesktopControlTheme`. Existing `BareMetalControlTheme` spelling remains an alias for compatibility. The role set is intentionally limited to real consumers:
+
+* control background, hover, pressed, disabled, borders, focus border, and primary/disabled text;
+* input background, border, focus border, text, and disabled text;
+* active/inactive selection colors;
+* panel/secondary text, separator, and scrollbar track/thumb/hover/pressed/disabled colors.
+
+`DesktopControlState` plus `DesktopControlFillColor`, `DesktopControlBorderColor`, and `DesktopControlTextColor` provide the common state lookup. `DesktopSelectionColor` provides active/inactive selection lookup. The helpers centralize color relationships while leaving geometry, event ownership, focus semantics, and Classic fallbacks with the existing callers.
+
+### Controls and proof consumers
+
+Generic hosted compositor buttons and bare-metal buttons now consume shared Sci-Fi state roles for normal, hover, pressed, focused, and disabled rendering where the owning path exposes that state. Bare-metal text boxes and checkboxes consume shared input/control roles. The hosted File Explorer path and Display Options route existing selection, scrollbar, button, and panel surfaces through the shared roles. Notepad routes its existing editor, caret, selection, menu, and separator surfaces through the corresponding input/control roles. Hosted context menus reuse the shared control, separator, hover, border, and text roles. No control geometry or input behavior changed.
+
+The bounded proof surfaces are File Explorer, Notepad, Display Options, Calculator's generic widget path, hosted context menus, and the bare-metal shared widget compositor. These exercise buttons, text/edit fields, selection, list-area surfaces, separators, menus, and scrolling without deep application-specific redesign. Task Manager and future utilities can consume the same roles as their remaining local controls are migrated.
+
+### Classic and Sci-Fi behavior
+
+Classic branches retain their established literals and behavior; the shared role derivation preserves the prior bare-metal role relationships and does not alter theme IDs, persistence keys, metrics, hit regions, or input ownership. Missing, invalid, and explicit Classic configuration continue to resolve to Classic. Sci-Fi uses dark technical surfaces, cool accents, restrained borders, readable text, and distinct hover/pressed/focus/disabled states without glow-heavy effects or animation.
+
+### Validation results
+
+The focused `tests/desktop_control_theme_test.cpp` probe passed for Classic/Sci-Fi lookup, fallback parsing, role derivation, and normal/hover/pressed/focused/disabled state selection. `build.bat`, the AMD64 kernel build, `build.ps1 -Arch amd64`, the theme-system smoke, startup/app-model regression, live-directory status, hosted display-runtime, BootInfo framebuffer, VirtIO GPU/input source, and build-wrapper checks all passed. The canonical startup-sync passed with the release ESP's persisted Classic configuration and with `-DesktopThemeId scifi` and `-DesktopThemeId classic` overrides applied only to disposable staged ESP copies; the Sci-Fi run emitted `loaded desktop theme=scifi`. Fresh final serial artifacts include `logs/desktop-startup-sync-20260828-173653.serial.log` for the persisted Classic boot and `logs/desktop-startup-sync-20260828-173743.serial.log` for the Sci-Fi override. Bare-metal/QEMU proof is bounded to boot, shell, theme load, shared rendering source coverage, input ownership, selection, and scrolling paths; the startup-sync run intentionally does not launch application windows, so fresh per-state application screenshots remain a limitation.
+
+### Known limitations and deferred work
+
+This phase does not create a universal tab/list framework, add a hosted enabled/focus protocol, redesign application-local list or scrollbar geometry, migrate every existing hard-coded application color, or restyle Navigator, Task Manager, Device Manager, Disk Manager, Network utilities, or Developer Studio interiors. A future phase can add shared state plumbing only where an actual consumer needs it, then migrate those remaining application-specific controls incrementally.
 
 ## Manual Validation Runbook
 
@@ -1324,8 +1363,8 @@ The following remain deliberately frozen unless a separate release reason author
 
 ## Notes
 
-Classic remains the compatibility baseline. The v0.3 Sci-Fi milestone is a scoped, role-based visual release rather than universal restyling. The evidence and validation boundaries above are deliberate; they do not authorize another visual theme phase.
+Classic remains the compatibility baseline. The v0.3 Sci-Fi milestone remains a scoped, role-based visual release. Phase 10A adds reusable application-control roles while preserving the existing theme-selection architecture and the evidence/validation boundaries above.
 
 ## Recommended Next Pass
 
-None for v0.3 closeout. Preserve the deferred-work freeze, protect v0.2 from late integration, and address any future surface expansion only through a separately authorized phase.
+Phase 10A is the recommended reusable foundation for the next authorized Sci-Fi pass. Keep future work bounded to application-specific migration or a narrowly justified missing shared control state; preserve the deferred-work freeze for effects, layout redesigns, and unrelated application functionality.

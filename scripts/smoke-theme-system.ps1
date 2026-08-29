@@ -97,8 +97,25 @@ $compositor = Join-Path $Root "compositor.cpp"
 $kernelApps = Join-Path $Root "kernel\core\kernel_apps.cpp"
 $kernelCompositor = Join-Path $Root "kernel\core\kernel_compositor.cpp"
 $windowRenderer = Join-Path $Root "window_renderer.h"
+$startupSync = Join-Path $Root "scripts\smoke-desktop-startup-sync.ps1"
+$controlThemeHeader = Join-Path $Root "desktop_control_theme.h"
+$controlThemeTest = Join-Path $Root "tests\desktop_control_theme_test.cpp"
 $planDoc = Join-Path $Root "docs\theme-system-plan.md"
 $smokeScriptPath = $MyInvocation.MyCommand.Path
+$desktopControlRolesMatch = Find-FirstMatch $controlThemeHeader 'struct DesktopControlTheme'
+$desktopControlTokenMatch = Find-RawMatch $controlThemeHeader 'controlBackground.*?inputBackground.*?scrollbarTrack'
+$desktopControlStateMatch = Find-RawMatch $controlThemeHeader 'enum class DesktopControlState.*?DesktopControlFillColor.*?DesktopControlBorderColor.*?DesktopControlTextColor'
+$hostedSharedButtonMatch = Find-RawMatch $compositor 'hostedDefaultWidgetFillColor.*?DesktopControlFillColor.*?hostedDefaultWidgetBorderColor.*?DesktopControlBorderColor.*?hostedDefaultWidgetTextColor.*?DesktopControlTextColor'
+$kernelSharedWidgetMatch = Find-RawMatch $kernelCompositor 'DesktopControlFillColor.*?DesktopControlBorderColor.*?DesktopControlTextColor.*?inputBackground'
+$fileExplorerControlConsumerMatch = Find-FirstMatch $fileExplorer 'GetDesktopControlTheme|DesktopControl|scrollbarTrack'
+$notepadControlConsumerMatch = Find-FirstMatch $notepad 'GetDesktopControlTheme|DesktopControl|inputBackground'
+$displayOptionsControlConsumerMatch = Find-FirstMatch $displayOptions 'GetDesktopControlTheme|DesktopControl|controlFocusBorder'
+$controlThemeTestMatch = Find-FirstMatch $controlThemeTest 'DesktopControlState::Hover|TryParseDesktopThemeId'
+$startupThemeOverrideMatch = Find-FirstMatch $startupSync 'DesktopThemeId|staged desktop theme override'
+$phase10AHeadingMatch = Find-FirstMatch $planDoc '## Phase 10A'
+$phase10AArchitectureMatch = Find-FirstMatch $planDoc 'DesktopControlTheme'
+$phase10AClassicMatch = Find-FirstMatch $planDoc 'Classic remains the default and compatible'
+$phase10ALimitationsMatch = Find-FirstMatch $planDoc '### Known limitations and deferred work'
 $displayOptionsThemeHelperMatch = Find-FirstMatch $displayOptions 'IsSciFiThemeActive|DisplayOptionsBodyColor|DisplayOptionsPanelColor|DisplayOptionsCardColor|DisplayOptionsButtonFillColor|DisplayOptionsButtonBorderColor|DisplayOptionsTextColor|DisplayOptionsMutedTextColor|DisplayOptionsAccentColor'
 $displayOptionsThemeFieldMatch = Find-FirstMatch $displayOptions 'windowBackground|windowBorder|accent|mutedAccent|taskbarBackground|taskbarBorder|titleBarText'
 $displayOptionsTextColorMatch = Find-FirstMatch $displayOptions 'MT_DrawTextAtColor|DisplayOptionsMutedTextColor\(\)|DisplayOptionsTextColor\(\)'
@@ -518,7 +535,20 @@ $checks = @(
     [pscustomobject]@{ Name = "phase 8b bare-metal File Explorer theme path wired"; Pass = $null -ne $kernelFileExplorerThemeMatch; Match = $kernelFileExplorerThemeMatch },
     [pscustomobject]@{ Name = "phase 8b File Explorer widget guard scoped"; Pass = $null -ne $kernelFileExplorerWidgetGuardMatch; Match = $kernelFileExplorerWidgetGuardMatch },
     [pscustomobject]@{ Name = "phase 8b File Explorer Classic and geometry boundaries documented"; Pass = $null -ne $phase8bHeadingMatch -and $null -ne $phase8bBoundaryMatch; Match = $(if ($null -ne $phase8bBoundaryMatch) { $phase8bBoundaryMatch } else { $phase8bHeadingMatch }) },
-    [pscustomobject]@{ Name = "compositor start button rect helper wired"; Pass = $null -ne $compositorStartButtonRectMatch; Match = $compositorStartButtonRectMatch }
+    [pscustomobject]@{ Name = "compositor start button rect helper wired"; Pass = $null -ne $compositorStartButtonRectMatch; Match = $compositorStartButtonRectMatch },
+    [pscustomobject]@{ Name = "phase 10a shared control role structure"; Pass = $null -ne $desktopControlRolesMatch -and $null -ne $desktopControlTokenMatch; Match = $(if ($null -ne $desktopControlTokenMatch) { $desktopControlTokenMatch } else { $desktopControlRolesMatch }) },
+    [pscustomobject]@{ Name = "phase 10a control state APIs"; Pass = $null -ne $desktopControlStateMatch; Match = $desktopControlStateMatch },
+    [pscustomobject]@{ Name = "phase 10a hosted generic button route"; Pass = $null -ne $hostedSharedButtonMatch; Match = $hostedSharedButtonMatch },
+    [pscustomobject]@{ Name = "phase 10a bare-metal shared widget route"; Pass = $null -ne $kernelSharedWidgetMatch; Match = $kernelSharedWidgetMatch },
+    [pscustomobject]@{ Name = "phase 10a File Explorer control consumer"; Pass = $null -ne $fileExplorerControlConsumerMatch; Match = $fileExplorerControlConsumerMatch },
+    [pscustomobject]@{ Name = "phase 10a Notepad control consumer"; Pass = $null -ne $notepadControlConsumerMatch; Match = $notepadControlConsumerMatch },
+    [pscustomobject]@{ Name = "phase 10a Display Options control consumer"; Pass = $null -ne $displayOptionsControlConsumerMatch; Match = $displayOptionsControlConsumerMatch },
+    [pscustomobject]@{ Name = "phase 10a focused control test present"; Pass = $null -ne $controlThemeTestMatch; Match = $controlThemeTestMatch },
+    [pscustomobject]@{ Name = "phase 10a staged Classic/Sci-Fi boot override"; Pass = $null -ne $startupThemeOverrideMatch; Match = $startupThemeOverrideMatch },
+    [pscustomobject]@{ Name = "phase 10a docs heading"; Pass = $null -ne $phase10AHeadingMatch; Match = $phase10AHeadingMatch },
+    [pscustomobject]@{ Name = "phase 10a architecture documented"; Pass = $null -ne $phase10AArchitectureMatch; Match = $phase10AArchitectureMatch },
+    [pscustomobject]@{ Name = "phase 10a Classic compatibility documented"; Pass = $null -ne $phase10AClassicMatch; Match = $phase10AClassicMatch },
+    [pscustomobject]@{ Name = "phase 10a limitations documented"; Pass = $null -ne $phase10ALimitationsMatch; Match = $phase10ALimitationsMatch }
 )
 
 $failures = 0

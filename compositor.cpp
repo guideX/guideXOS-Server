@@ -7,6 +7,7 @@
 #include "file_icon_provider.h"
 #include "file_explorer.h"
 #include "desktop_theme.h"
+#include "desktop_control_theme.h"
 #include "shutdown_dialog.h"
 #include "clock_time_settings.h"
 #include "display_options_store.h"
@@ -356,6 +357,33 @@ namespace gxos {
             return theme.titleBarText;
         }
 
+        static DesktopControlState hostedWidgetState(const Widget& widget) {
+            if (widget.pressed) return DesktopControlState::Pressed;
+            if (widget.hover) return DesktopControlState::Hover;
+            return DesktopControlState::Normal;
+        }
+
+        static uint32_t hostedDefaultWidgetFillColor(const Widget& widget, const DesktopTheme& theme) {
+            if (theme.id != DesktopThemeId::SciFi) {
+                return calculatorClassicWidgetFillColor(widget);
+            }
+            return DesktopControlFillColor(GetDesktopControlTheme(theme), hostedWidgetState(widget));
+        }
+
+        static uint32_t hostedDefaultWidgetBorderColor(const Widget& widget, const DesktopTheme& theme) {
+            if (theme.id != DesktopThemeId::SciFi) {
+                return calculatorClassicWidgetBorderColor(widget);
+            }
+            return DesktopControlBorderColor(GetDesktopControlTheme(theme), hostedWidgetState(widget));
+        }
+
+        static uint32_t hostedDefaultWidgetTextColor(const Widget& widget, const DesktopTheme& theme) {
+            if (theme.id != DesktopThemeId::SciFi) {
+                return calculatorClassicWidgetTextColor(widget);
+            }
+            return DesktopControlTextColor(GetDesktopControlTheme(theme), hostedWidgetState(widget));
+        }
+
         static uint32_t widgetFillColor(const WinInfo& winfo, const Widget& widget, const DesktopTheme& theme) {
             if (isSciFiDialogSurface(winfo, theme)) {
                 return sciFiDialogWidgetFillColor(winfo, widget, theme);
@@ -370,7 +398,9 @@ namespace gxos {
                     ? navigatorSciFiWidgetFillColor(theme, widget)
                     : navigatorClassicWidgetFillColor(widget);
             }
-            return calculatorWidgetFillColor(winfo, widget, theme);
+            return isCalculatorWindow(winfo)
+                ? calculatorWidgetFillColor(winfo, widget, theme)
+                : hostedDefaultWidgetFillColor(widget, theme);
         }
 
         static uint32_t widgetBorderColor(const WinInfo& winfo, const Widget& widget, const DesktopTheme& theme) {
@@ -387,7 +417,9 @@ namespace gxos {
                     ? navigatorSciFiWidgetBorderColor(theme, widget)
                     : navigatorClassicWidgetBorderColor(widget);
             }
-            return calculatorWidgetBorderColor(winfo, widget, theme);
+            return isCalculatorWindow(winfo)
+                ? calculatorWidgetBorderColor(winfo, widget, theme)
+                : hostedDefaultWidgetBorderColor(widget, theme);
         }
 
         static uint32_t widgetTextColor(const WinInfo& winfo, const Widget& widget, const DesktopTheme& theme) {
@@ -404,7 +436,9 @@ namespace gxos {
                     ? navigatorSciFiWidgetTextColor(theme, widget)
                     : navigatorClassicWidgetTextColor(widget);
             }
-            return calculatorWidgetTextColor(winfo, widget, theme);
+            return isCalculatorWindow(winfo)
+                ? calculatorWidgetTextColor(winfo, widget, theme)
+                : hostedDefaultWidgetTextColor(widget, theme);
         }
 
         enum class TaskbarPosition {

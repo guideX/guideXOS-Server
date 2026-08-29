@@ -8,6 +8,7 @@
 #include "file_explorer.h"
 #include "notification_manager.h"
 #include "desktop_theme.h"
+#include "desktop_control_theme.h"
 #ifdef _WIN32
 #include "window_renderer.h"
 #endif
@@ -394,23 +395,24 @@ void RightClickMenu::Draw(HDC dc) {
     int menuH = (int)s_items.size() * kItemH;
     const DesktopTheme& theme = GetCurrentDesktopTheme();
     const bool sciFiTheme = theme.id == DesktopThemeId::SciFi;
+    const DesktopControlTheme controlTheme = GetDesktopControlTheme(theme);
     const uint32_t menuSurface = sciFiTheme
-        ? WindowRenderer::BlendThemeColor(theme.taskbarBackground, theme.windowBackground, 12)
+        ? controlTheme.controlBackground
         : 0xFF222222u;
     const COLORREF menuBackground = sciFiTheme
         ? WindowRenderer::ToColorRef(menuSurface)
         : RGB(34, 34, 34);
     const COLORREF menuBorder = sciFiTheme
-        ? WindowRenderer::ToColorRef(WindowRenderer::BlendThemeColor(theme.taskbarBorder, theme.accent, 40))
+        ? WindowRenderer::ToColorRef(controlTheme.controlFocusBorder)
         : RGB(63, 63, 63);
     const COLORREF menuSeparator = sciFiTheme
-        ? WindowRenderer::ToColorRef(WindowRenderer::BlendThemeColor(theme.windowBorder, theme.mutedAccent, 28))
+        ? WindowRenderer::ToColorRef(controlTheme.separator)
         : RGB(74, 74, 74);
     const COLORREF menuHover = sciFiTheme
-        ? WindowRenderer::ToColorRef(WindowRenderer::BlendThemeColor(menuSurface, theme.accent, 22))
+        ? WindowRenderer::ToColorRef(controlTheme.controlHover)
         : RGB(49, 49, 49);
     const COLORREF menuText = sciFiTheme
-        ? WindowRenderer::ToColorRef(theme.titleBarText)
+        ? WindowRenderer::ToColorRef(controlTheme.controlText)
         : RGB(220, 220, 220);
 
     // Menu background (semi-transparent dark)

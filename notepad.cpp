@@ -4,6 +4,7 @@
 #include "vfs.h"
 #include "desktop_service.h"
 #include "desktop_theme.h"
+#include "desktop_control_theme.h"
 #include "save_dialog.h"
 #include "save_changes_dialog.h"
 #include "open_dialog.h"
@@ -70,23 +71,21 @@ namespace gxos { namespace apps {
             if (!isSciFiThemeActive()) {
                 return packRgb(18, 20, 24);
             }
-            const DesktopTheme& theme = notepadTheme();
-            return blendColor(theme.windowBackground, theme.taskbarBackground, 8);
+            return GetDesktopControlTheme(notepadTheme()).inputBackground;
         }
 
         uint32_t NotepadBorderColor() {
             if (!isSciFiThemeActive()) {
                 return packRgb(36, 38, 44);
             }
-            const DesktopTheme& theme = notepadTheme();
-            return blendColor(theme.windowBorder, theme.taskbarBorder, 28);
+            return GetDesktopControlTheme(notepadTheme()).inputBorder;
         }
 
         uint32_t NotepadTextColor() {
             if (!isSciFiThemeActive()) {
                 return packRgb(220, 220, 220);
             }
-            return notepadTheme().titleBarText;
+            return GetDesktopControlTheme(notepadTheme()).inputText;
         }
 
         uint32_t NotepadMutedTextColor() {
@@ -108,8 +107,7 @@ namespace gxos { namespace apps {
             if (!isSciFiThemeActive()) {
                 return packRgb(42, 92, 160);
             }
-            const DesktopTheme& theme = notepadTheme();
-            return blendColor(theme.accent, theme.windowBackground, 34);
+            return GetDesktopControlTheme(notepadTheme()).selectionActive;
         }
 
         uint32_t NotepadStatusColor() {
@@ -124,16 +122,14 @@ namespace gxos { namespace apps {
             if (!isSciFiThemeActive()) {
                 return packRgb(80, 80, 90);
             }
-            const DesktopTheme& theme = notepadTheme();
-            return blendColor(theme.taskbarBackground, theme.windowBackground, 12);
+            return GetDesktopControlTheme(notepadTheme()).controlBackground;
         }
 
         uint32_t NotepadMenuHoverColor() {
             if (!isSciFiThemeActive()) {
                 return packRgb(100, 120, 140);
             }
-            const DesktopTheme& theme = notepadTheme();
-            return blendColor(theme.windowBorder, theme.accent, 16);
+            return GetDesktopControlTheme(notepadTheme()).controlHover;
         }
 
         void publishDrawTextAt(uint64_t windowId, int x, int y, const std::string& text) {

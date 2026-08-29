@@ -211,49 +211,44 @@ static uint32_t kernelThemeBlend(uint32_t base, uint32_t overlay, int overlayPer
 static uint32_t kernelNotepadMenuSurfaceColor()
 {
     if (!kernelSciFiThemeActive()) return rgb(240, 240, 245);
-    const DesktopTheme& theme = GetCurrentDesktopTheme();
-    return kernelThemeBlend(theme.taskbarBackground, theme.windowBackground, 28);
+    return GetDesktopControlTheme(GetCurrentDesktopTheme()).controlBackground;
 }
 
 static uint32_t kernelNotepadMenuBorderColor()
 {
     if (!kernelSciFiThemeActive()) return rgb(160, 160, 170);
-    const DesktopTheme& theme = GetCurrentDesktopTheme();
-    return kernelThemeBlend(theme.windowBorder, theme.accent, 28);
+    return GetDesktopControlTheme(GetCurrentDesktopTheme()).controlBorder;
 }
 
 static uint32_t kernelNotepadMenuHoverColor()
 {
     if (!kernelSciFiThemeActive()) return rgb(45, 95, 180);
-    const DesktopTheme& theme = GetCurrentDesktopTheme();
-    return kernelThemeBlend(theme.windowBorder, theme.accent, 34);
+    return GetDesktopControlTheme(GetCurrentDesktopTheme()).controlHover;
 }
 
 static uint32_t kernelNotepadMenuTextColor(bool hovered)
 {
     if (!kernelSciFiThemeActive()) return hovered ? rgb(255, 255, 255) : rgb(0, 0, 0);
-    const DesktopTheme& theme = GetCurrentDesktopTheme();
-    return hovered ? theme.titleBarText : kernelThemeBlend(theme.titleBarText, theme.windowBackground, 18);
+    const DesktopControlTheme roles = GetDesktopControlTheme(GetCurrentDesktopTheme());
+    return hovered ? roles.controlText : roles.secondaryText;
 }
 
 static uint32_t kernelNotepadMenuBarColor()
 {
     if (!kernelSciFiThemeActive()) return rgb(50, 50, 60);
-    const DesktopTheme& theme = GetCurrentDesktopTheme();
-    return kernelThemeBlend(theme.taskbarBackground, theme.windowBackground, 18);
+    return GetDesktopControlTheme(GetCurrentDesktopTheme()).panelBackground;
 }
 
 static uint32_t kernelNotepadMenuBarSeparatorColor()
 {
     if (!kernelSciFiThemeActive()) return rgb(70, 70, 80);
-    const DesktopTheme& theme = GetCurrentDesktopTheme();
-    return kernelThemeBlend(theme.windowBorder, theme.accent, 24);
+    return GetDesktopControlTheme(GetCurrentDesktopTheme()).separator;
 }
 
 static uint32_t kernelNotepadMenuItemTextColor()
 {
     if (!kernelSciFiThemeActive()) return rgb(220, 220, 230);
-    return GetCurrentDesktopTheme().titleBarText;
+    return GetDesktopControlTheme(GetCurrentDesktopTheme()).controlText;
 }
 
 static uint32_t kernelNotepadEditorColor()
@@ -266,28 +261,25 @@ static uint32_t kernelNotepadEditorColor()
 static uint32_t kernelNotepadEditorBorderColor()
 {
     if (!kernelSciFiThemeActive()) return rgb(45, 45, 55);
-    const DesktopTheme& theme = GetCurrentDesktopTheme();
-    return kernelThemeBlend(theme.windowBorder, theme.taskbarBorder, 28);
+    return GetDesktopControlTheme(GetCurrentDesktopTheme()).inputBorder;
 }
 
 static uint32_t kernelNotepadTextColor()
 {
     if (!kernelSciFiThemeActive()) return rgb(220, 220, 235);
-    return GetBareMetalControlTheme(GetCurrentDesktopTheme()).primaryText;
+    return GetDesktopControlTheme(GetCurrentDesktopTheme()).inputText;
 }
 
 static uint32_t kernelNotepadCaretColor()
 {
     if (!kernelSciFiThemeActive()) return rgb(200, 200, 220);
-    return GetCurrentDesktopTheme().accent;
+    return GetDesktopControlTheme(GetCurrentDesktopTheme()).controlFocusBorder;
 }
 
 static uint32_t kernelNotepadSelectionColor()
 {
     if (!kernelSciFiThemeActive()) return rgb(42, 91, 154);
-    const DesktopTheme& theme = GetCurrentDesktopTheme();
-    const BareMetalControlTheme roles = GetBareMetalControlTheme(theme);
-    return BareMetalSelectionFillColor(theme, roles.recessedField, true);
+    return GetDesktopControlTheme(GetCurrentDesktopTheme()).selectionActive;
 }
 
 static uint32_t kernelNotepadContextShadowColor()
@@ -339,18 +331,15 @@ static uint32_t kernelDisplayOptionsPanelColor()
 static uint32_t kernelDisplayOptionsTabColor(bool active)
 {
     if (!kernelSciFiThemeActive()) return active ? rgb(58, 58, 58) : rgb(34, 34, 38);
-    const DesktopTheme& theme = GetCurrentDesktopTheme();
-    const BareMetalControlTheme roles = GetBareMetalControlTheme(theme);
-    const uint32_t base = BlendDesktopThemeColor(roles.raisedPanel, roles.panelBackground, 18);
-    return active ? BareMetalSelectionFillColor(theme, base, true) : base;
+    const DesktopControlTheme roles = GetDesktopControlTheme(GetCurrentDesktopTheme());
+    return active ? roles.selectionActive : roles.controlBackground;
 }
 
 static uint32_t kernelDisplayOptionsTabBorderColor(bool active)
 {
     if (!kernelSciFiThemeActive()) return rgb(90, 90, 96);
-    const DesktopTheme& theme = GetCurrentDesktopTheme();
-    const BareMetalControlTheme roles = GetBareMetalControlTheme(theme);
-    return BlendDesktopThemeColor(roles.border, active ? theme.accent : theme.mutedAccent, active ? 38 : 22);
+    const DesktopControlTheme roles = GetDesktopControlTheme(GetCurrentDesktopTheme());
+    return DesktopControlBorderColor(roles, active ? DesktopControlState::Focused : DesktopControlState::Normal);
 }
 
 static uint32_t kernelDisplayOptionsHeadingTextColor()
@@ -399,42 +388,33 @@ static uint32_t kernelDisplayOptionsCardBorderColor()
 static uint32_t kernelDisplayOptionsScrollbarTrackColor()
 {
     if (!kernelSciFiThemeActive()) return rgb(36, 36, 40);
-    return GetBareMetalControlTheme(GetCurrentDesktopTheme()).panelBackground;
+    return GetDesktopControlTheme(GetCurrentDesktopTheme()).scrollbarTrack;
 }
 
 static uint32_t kernelDisplayOptionsScrollbarThumbColor()
 {
     if (!kernelSciFiThemeActive()) return rgb(150, 160, 176);
-    return GetCurrentDesktopTheme().accent;
-}
-
-static BareMetalButtonSurfaceRoles kernelDisplayOptionsButtonRoles()
-{
-    const DesktopTheme& theme = GetCurrentDesktopTheme();
-    const BareMetalControlTheme roles = GetBareMetalControlTheme(theme);
-    const uint32_t base = BlendDesktopThemeColor(roles.raisedPanel, roles.panelBackground, 18);
-    return GetBareMetalButtonSurfaceRoles(theme, base, 18, 24);
+    return GetDesktopControlTheme(GetCurrentDesktopTheme()).scrollbarThumb;
 }
 
 static uint32_t kernelDisplayOptionsButtonFillColor(bool selected)
 {
     if (!kernelSciFiThemeActive()) return selected ? rgb(62, 96, 150) : rgb(38, 39, 46);
-    const BareMetalButtonSurfaceRoles roles = kernelDisplayOptionsButtonRoles();
-    return selected ? roles.pressed : roles.normal;
+    const DesktopControlTheme roles = GetDesktopControlTheme(GetCurrentDesktopTheme());
+    return DesktopControlFillColor(roles, selected ? DesktopControlState::Pressed : DesktopControlState::Normal);
 }
 
 static uint32_t kernelDisplayOptionsButtonBorderColor(bool selected)
 {
     if (!kernelSciFiThemeActive()) return rgb(112, 120, 140);
-    const DesktopTheme& theme = GetCurrentDesktopTheme();
-    const BareMetalControlTheme roles = GetBareMetalControlTheme(theme);
-    return BlendDesktopThemeColor(roles.border, selected ? theme.accent : theme.mutedAccent, selected ? 36 : 26);
+    const DesktopControlTheme roles = GetDesktopControlTheme(GetCurrentDesktopTheme());
+    return DesktopControlBorderColor(roles, selected ? DesktopControlState::Focused : DesktopControlState::Normal);
 }
 
 static uint32_t kernelDisplayOptionsButtonTextColor()
 {
     if (!kernelSciFiThemeActive()) return rgb(235, 238, 246);
-    return kernelDisplayOptionsButtonRoles().text;
+    return GetDesktopControlTheme(GetCurrentDesktopTheme()).controlText;
 }
 
 static uint32_t kernelDisplayOptionsPositiveTextColor()

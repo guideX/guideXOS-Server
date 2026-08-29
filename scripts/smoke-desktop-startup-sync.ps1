@@ -1,5 +1,7 @@
 param(
-    [int]$TimeoutSeconds = 120
+    [int]$TimeoutSeconds = 120,
+    [ValidateSet("", "classic", "scifi")]
+    [string]$DesktopThemeId = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -102,6 +104,25 @@ New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
 Copy-Item -LiteralPath $esp -Destination $stagedEsp -Recurse -Force
 $stagedStartup = Join-Path $stagedEsp "startup.nsh"
 "FS0:\EFI\BOOT\BOOTX64.EFI" | Set-Content -LiteralPath $stagedStartup -Encoding ASCII
+
+if (-not [string]::IsNullOrWhiteSpace($DesktopThemeId)) {
+    $stagedDesktopConfig = Join-Path $stagedEsp "desktop.cfg"
+    if (-not (Test-Path -LiteralPath $stagedDesktopConfig)) {
+        throw "Staged ESP is missing desktop.cfg for the requested theme override."
+    }
+
+    $desktopConfigText = Get-Content -LiteralPath $stagedDesktopConfig -Raw
+    if ($desktopConfigText -notmatch '(?m)^desktopThemeId=') {
+        throw "Staged desktop.cfg has no desktopThemeId entry for the requested theme override."
+    }
+
+    $desktopConfigText = [regex]::Replace(
+        $desktopConfigText,
+        '(?m)^desktopThemeId=.*$',
+        "desktopThemeId=$DesktopThemeId")
+    Set-Content -LiteralPath $stagedDesktopConfig -Value $desktopConfigText -Encoding ASCII
+    Write-Host "[startup-sync] staged desktop theme override: $DesktopThemeId"
+}
 
 $cleanupMarker = "desktopCleanupRuntimePass=2"
 $builtKernel = Join-Path $Root "kernel\build\amd64\bin\kernel.elf"

@@ -14,6 +14,7 @@
 #include "wallpaper_registry.h"
 #include "background_store.h"
 #include "background_service.h"
+#include "desktop_control_theme.h"
 #include <algorithm>
 #include <chrono>
 #include <cstring>
@@ -594,22 +595,19 @@ namespace {
     uint32_t DisplayOptionsSelectedBorderColor()
     {
         if (!IsSciFiThemeActive()) return packRgb(72, 110, 180);
-        const auto& theme = DisplayOptionsTheme();
-        return blendColor(theme.accent, theme.windowBorder, 28);
+        return GetDesktopControlTheme(DisplayOptionsTheme()).controlFocusBorder;
     }
 
     uint32_t DisplayOptionsHoverBorderColor()
     {
         if (!IsSciFiThemeActive()) return packRgb(55, 65, 85);
-        const auto& theme = DisplayOptionsTheme();
-        return blendColor(theme.mutedAccent, theme.windowBorder, 34);
+        return GetDesktopControlTheme(DisplayOptionsTheme()).controlHoverBorder;
     }
 
     uint32_t DisplayOptionsNeutralBorderColor()
     {
         if (!IsSciFiThemeActive()) return packRgb(84, 90, 105);
-        const auto& theme = DisplayOptionsTheme();
-        return blendColor(theme.taskbarBorder, theme.windowBorder, 22);
+        return GetDesktopControlTheme(DisplayOptionsTheme()).controlBorder;
     }
 
     uint32_t DisplayOptionsButtonFillColor(bool active, bool enabled)
@@ -620,10 +618,10 @@ namespace {
             return packRgb(34, 34, 38);
         }
 
-        const auto& theme = DisplayOptionsTheme();
-        if (active) return blendColor(theme.windowBorder, theme.accent, 18);
-        if (enabled) return blendColor(theme.taskbarBackground, theme.windowBackground, 18);
-        return blendColor(theme.taskbarBackground, theme.windowBackground, 8);
+        const DesktopControlTheme roles = GetDesktopControlTheme(DisplayOptionsTheme());
+        if (active) return DesktopControlFillColor(roles, DesktopControlState::Pressed);
+        if (enabled) return DesktopControlFillColor(roles, DesktopControlState::Normal);
+        return DesktopControlFillColor(roles, DesktopControlState::Disabled);
     }
 
     uint32_t DisplayOptionsButtonBorderColor(bool active, bool enabled)
@@ -634,23 +632,22 @@ namespace {
             return packRgb(58, 58, 62);
         }
 
-        const auto& theme = DisplayOptionsTheme();
-        if (active) return blendColor(theme.accent, theme.windowBorder, 34);
-        if (enabled) return blendColor(theme.taskbarBorder, theme.windowBorder, 28);
-        return blendColor(theme.windowBorder, theme.taskbarBackground, 28);
+        const DesktopControlTheme roles = GetDesktopControlTheme(DisplayOptionsTheme());
+        if (active) return DesktopControlBorderColor(roles, DesktopControlState::Focused);
+        if (enabled) return DesktopControlBorderColor(roles, DesktopControlState::Normal);
+        return DesktopControlBorderColor(roles, DesktopControlState::Disabled);
     }
 
     uint32_t DisplayOptionsTextColor()
     {
         if (!IsSciFiThemeActive()) return packRgb(220, 220, 220);
-        return DisplayOptionsTheme().titleBarText;
+        return GetDesktopControlTheme(DisplayOptionsTheme()).controlText;
     }
 
     uint32_t DisplayOptionsMutedTextColor()
     {
         if (!IsSciFiThemeActive()) return packRgb(186, 190, 196);
-        const auto& theme = DisplayOptionsTheme();
-        return blendColor(theme.titleBarText, theme.taskbarBackground, 54);
+        return GetDesktopControlTheme(DisplayOptionsTheme()).controlDisabledText;
     }
 
     uint32_t DisplayOptionsAccentColor()
@@ -1239,15 +1236,16 @@ void DisplayOptions::drawButton(int x, int y, int w, int h, const std::string& t
 void DisplayOptions::drawCheckbox(int x, int y, const std::string& text, bool checked, bool hover)
 {
     int box = kDesktopIconCheckboxSize;
+    const DesktopControlTheme controlTheme = GetDesktopControlTheme(DisplayOptionsTheme());
     if (hover) {
         const uint32_t hoverFill = IsSciFiThemeActive()
-            ? blendColor(DisplayOptionsCardColor(), DisplayOptionsAccentColor(), 10)
+            ? controlTheme.controlHover
             : packRgb(38, 46, 62);
         drawColorRect(s_windowId, x - 8, y - 8, 320, 34, hoverFill);
     }
-    const uint32_t boxFill = checked ? DisplayOptionsAccentColor() : (IsSciFiThemeActive() ? blendColor(DisplayOptionsCardColor(), DisplayOptionsNeutralBorderColor(), 24) : packRgb(30, 30, 34));
-    const uint32_t boxTop = IsSciFiThemeActive() ? blendColor(DisplayOptionsAccentColor(), DisplayOptionsTextColor(), 16) : packRgb(130, 135, 150);
-    const uint32_t boxBottom = IsSciFiThemeActive() ? blendColor(DisplayOptionsPanelColor(), DisplayOptionsNeutralBorderColor(), 30) : packRgb(85, 90, 110);
+    const uint32_t boxFill = checked ? DisplayOptionsAccentColor() : (IsSciFiThemeActive() ? controlTheme.inputBackground : packRgb(30, 30, 34));
+    const uint32_t boxTop = IsSciFiThemeActive() ? controlTheme.inputFocusBorder : packRgb(130, 135, 150);
+    const uint32_t boxBottom = IsSciFiThemeActive() ? controlTheme.inputBorder : packRgb(85, 90, 110);
     drawColorRect(s_windowId, x, y, box, box, boxFill);
     drawColorRect(s_windowId, x, y, box, 1, boxTop);
     drawColorRect(s_windowId, x, y + box - 1, box, 1, boxBottom);

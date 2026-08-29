@@ -1124,6 +1124,16 @@ void KernelCompositor::drawWidget(app::KernelWindow* window, app::Widget* widget
                         ? BlendDesktopThemeColor(controlRoles.border, theme.mutedAccent, 30)
                         : BlendDesktopThemeColor(controlRoles.border, theme.taskbarBorder, 20));
                 textColor = buttonRoles.text;
+            } else if (sciFiTheme) {
+                const DesktopControlTheme controlRoles = GetDesktopControlTheme(theme);
+                const DesktopControlState state = !widget->enabled
+                    ? DesktopControlState::Disabled
+                    : (widget->pressed
+                        ? DesktopControlState::Pressed
+                        : (widget->hover ? DesktopControlState::Hover : DesktopControlState::Normal));
+                bgColor = DesktopControlFillColor(controlRoles, state);
+                borderColor = DesktopControlBorderColor(controlRoles, state);
+                textColor = DesktopControlTextColor(controlRoles, state);
             }
             fillRect(x, y, w, h, bgColor);
             drawRect(x, y, w, h, borderColor);
@@ -1137,29 +1147,53 @@ void KernelCompositor::drawWidget(app::KernelWindow* window, app::Widget* widget
             break;
         }
         
-        case app::WidgetType::TextBox:
-            fillRect(x, y, w, h, rgb(45, 45, 55));
-            drawRect(x, y, w, h, rgb(70, 80, 100));
-            drawText(x + 4, y + (h - kGlyphH) / 2, widget->text, widget->fgColor);
+        case app::WidgetType::TextBox: {
+            if (sciFiTheme) {
+                const DesktopControlTheme controlRoles = GetDesktopControlTheme(theme);
+                fillRect(x, y, w, h, controlRoles.inputBackground);
+                drawRect(x, y, w, h, widget->enabled
+                    ? controlRoles.inputBorder
+                    : controlRoles.controlDisabledBorder);
+                drawText(x + 4, y + (h - kGlyphH) / 2, widget->text,
+                    widget->enabled ? controlRoles.inputText : controlRoles.inputDisabledText);
+            } else {
+                fillRect(x, y, w, h, rgb(45, 45, 55));
+                drawRect(x, y, w, h, rgb(70, 80, 100));
+                drawText(x + 4, y + (h - kGlyphH) / 2, widget->text, widget->fgColor);
+            }
             break;
+        }
             
         case app::WidgetType::CheckBox: {
+            const DesktopControlTheme controlRoles = GetDesktopControlTheme(theme);
+            const uint32_t boxY = y + (h - 12) / 2;
+            const uint32_t boxFill = sciFiTheme
+                ? (widget->value ? controlRoles.selectionActive : controlRoles.inputBackground)
+                : (widget->value ? rgb(74, 158, 255) : rgb(45, 45, 55));
+            const uint32_t boxBorder = sciFiTheme
+                ? (widget->enabled
+                    ? (widget->hover ? controlRoles.controlHoverBorder : controlRoles.inputBorder)
+                    : controlRoles.controlDisabledBorder)
+                : rgb(80, 100, 140);
             // Box
-            fillRect(x, y + (h - 12) / 2, 12, 12, widget->value ? rgb(74, 158, 255) : rgb(45, 45, 55));
-            drawRect(x, y + (h - 12) / 2, 12, 12, rgb(80, 100, 140));
+            fillRect(x, boxY, 12, 12, boxFill);
+            drawRect(x, boxY, 12, 12, boxBorder);
             // Check mark
             if (widget->value) {
-                uint32_t checkColor = rgb(255, 255, 255);
-                framebuffer::put_pixel(x + 3, y + (h - 12) / 2 + 6, checkColor);
-                framebuffer::put_pixel(x + 4, y + (h - 12) / 2 + 7, checkColor);
-                framebuffer::put_pixel(x + 5, y + (h - 12) / 2 + 8, checkColor);
-                framebuffer::put_pixel(x + 6, y + (h - 12) / 2 + 7, checkColor);
-                framebuffer::put_pixel(x + 7, y + (h - 12) / 2 + 6, checkColor);
-                framebuffer::put_pixel(x + 8, y + (h - 12) / 2 + 5, checkColor);
-                framebuffer::put_pixel(x + 9, y + (h - 12) / 2 + 4, checkColor);
+                uint32_t checkColor = sciFiTheme ? controlRoles.selectionText : rgb(255, 255, 255);
+                framebuffer::put_pixel(x + 3, boxY + 6, checkColor);
+                framebuffer::put_pixel(x + 4, boxY + 7, checkColor);
+                framebuffer::put_pixel(x + 5, boxY + 8, checkColor);
+                framebuffer::put_pixel(x + 6, boxY + 7, checkColor);
+                framebuffer::put_pixel(x + 7, boxY + 6, checkColor);
+                framebuffer::put_pixel(x + 8, boxY + 5, checkColor);
+                framebuffer::put_pixel(x + 9, boxY + 4, checkColor);
             }
             // Label
-            drawText(x + 18, y + (h - kGlyphH) / 2, widget->text, widget->fgColor);
+            drawText(x + 18, y + (h - kGlyphH) / 2, widget->text,
+                sciFiTheme
+                    ? (widget->enabled ? controlRoles.controlText : controlRoles.controlDisabledText)
+                    : widget->fgColor);
             break;
         }
         
