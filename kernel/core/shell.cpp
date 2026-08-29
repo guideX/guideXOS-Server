@@ -2090,10 +2090,11 @@ static void cmd_nicinfo() {
     const ipv4::NetworkConfig* config = ipv4::get_config();
     network_status::Inputs statusInput = {};
     statusInput.adapterPresent = true;
-    statusInput.driverBound = network_status::is_supported_intel_e1000(
-        dev->vendorId, dev->deviceId);
+    statusInput.driverBound = dev->driverBound &&
+        network_status::is_supported_intel_e1000(dev->vendorId, dev->deviceId);
     statusInput.driverReady = dev->active;
-    statusInput.linkUp = dev->active && nic::get_link_state() == nic::NIC_LINK_UP;
+    const nic::LinkState liveLink = nic::get_link_state();
+    statusInput.linkUp = dev->active && liveLink == nic::NIC_LINK_UP;
     statusInput.ipv4Configured = config && config->configured;
     statusInput.gatewayConfigured = config && config->gateway != 0;
     statusInput.dnsConfigured = config && config->dns != 0;
@@ -2105,15 +2106,29 @@ static void cmd_nicinfo() {
     output_string("Driver: ");
     output_string(network_status::driver_name(dev->vendorId, dev->deviceId));
     output_string("\n");
+    output_string("Driver Bound: ");
+    output_string(dev->driverBound ? "YES" : "NO");
+    output_string("   Init Stage: ");
+    output_string(nic::init_stage_name(dev->initStage));
+    output_string("\n");
     output_string("Driver Ready: ");
     output_string(dev->active ? "YES" : "NO");
     output_string("   PHY Link: ");
-    output_string(statusInput.linkUp ? "UP" : "DOWN");
+    output_string(liveLink == nic::NIC_LINK_UP ? "UP" :
+                  (liveLink == nic::NIC_LINK_DOWN ? "DOWN" : "UNKNOWN"));
     output_string("\n");
     output_string("RX/TX Mode: ");
     output_string(dev->pollingEnabled ? "main-loop polling" : "not active");
     output_string("   IRQ: ");
     output_string(dev->irqRegistered ? "registered" : "not registered");
+    output_string("\n");
+    output_string("RX ring: ");
+    output_string(dev->rxRingInitialized ? "initialized" : "not initialized");
+    output_string("   TX ring: ");
+    output_string(dev->txRingInitialized ? "initialized" : "not initialized");
+    output_string("\n");
+    output_string("NIC registration: ");
+    output_string(dev->nicRegistered ? "YES" : "NO");
     output_string("\n");
     
     // Vendor/Device ID
@@ -2183,6 +2198,27 @@ static void cmd_nicinfo() {
     
     // MMIO Status
     output_string("\n--- MMIO Status ---\n");
+    output_string("BAR/MMIO Physical Address: 0x");
+    for (int i = 7; i >= 0; i--) {
+        uint8_t nibble = (dev->mmioPhys >> (i * 4)) & 0xF;
+        hexStr[7-i] = (nibble < 10) ? ('0' + nibble) : ('A' + nibble - 10);
+    }
+    hexStr[8] = '\0';
+    output_string(hexStr);
+    output_string("  Size: 0x");
+    uint_hex_to_str(static_cast<uint32_t>(dev->mmioSize), 8, hexStr);
+    output_string(hexStr);
+    output_string("\n");
+    output_string("PCI Command: 0x");
+    uint_hex_to_str(dev->pciCommand, 4, hexStr);
+    output_string(hexStr);
+    output_string("  CTRL: 0x");
+    uint_hex_to_str(dev->ctrlValue, 8, hexStr);
+    output_string(hexStr);
+    output_string("  STATUS: 0x");
+    uint_hex_to_str(dev->statusValue, 8, hexStr);
+    output_string(hexStr);
+    output_string("\n");
     output_string("MMIO Mapped: ");
     output_string(dev->mmioMapped ? "YES" : "NO");
     output_string("\n");
@@ -2197,19 +2233,6 @@ static void cmd_nicinfo() {
         output_string(hexStr);
         output_string("\n");
 
-        output_string("MMIO Region Size: 0x");
-        uint_hex_to_str(static_cast<uint32_t>(dev->mmioSize), 8, hexStr);
-        output_string(hexStr);
-        output_string("\n");
-        
-        output_string("MMIO Physical Address: 0x");
-        for (int i = 7; i >= 0; i--) {
-            uint8_t nibble = (dev->mmioPhys >> (i * 4)) & 0xF;
-            hexStr[7-i] = (nibble < 10) ? ('0' + nibble) : ('A' + nibble - 10);
-        }
-        hexStr[8] = '\0';
-        output_string(hexStr);
-        output_string("\n");
     } else {
         output_string("\n** PROBLEM: MMIO NOT MAPPED **\n");
         output_string("This means the bootloader did not map the NIC's\n");
@@ -2238,9 +2261,32 @@ static void cmd_nicinfo() {
     }
     
     output_string("Link State: ");
-    output_string(dev->link == nic::NIC_LINK_UP ? "UP" : "DOWN");
+    output_string(liveLink == nic::NIC_LINK_UP ? "UP" :
+                  (liveLink == nic::NIC_LINK_DOWN ? "DOWN" : "UNKNOWN"));
     output_string("\n");
-    output_string("Negotiated Speed/Duplex: not exposed by the current E1000 PHY status path\n");
+    output_string("PHY access: ");
+    output_string(nic::phy_access_state_name(dev->phyAccess));
+    output_string("  MDIC: 0x");
+    uint_hex_to_str(dev->mdicValue, 8, hexStr);
+    output_string(hexStr);
+    output_string("  PHY status: 0x");
+    uint_hex_to_str(dev->phyStatusValue, 4, hexStr);
+    output_string(hexStr);
+    output_string("\n");
+    output_string("Negotiated Speed/Duplex: ");
+    if (dev->negotiatedSpeed == 0) {
+        output_string("unknown");
+    } else {
+        char speedStr[16];
+        uint_to_str(dev->negotiatedSpeed, speedStr);
+        output_string(speedStr);
+        output_string(" Mb/s ");
+        output_string(dev->negotiatedFullDuplex ? "full" : "half");
+    }
+    output_string("\n");
+    output_string("Last initialization failure: ");
+    output_string(dev->lastInitFailure[0] != '\0' ? dev->lastInitFailure : "none");
+    output_string("\n");
     
     // Statistics
     output_string("\n--- Statistics ---\n");

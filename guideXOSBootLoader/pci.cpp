@@ -87,79 +87,100 @@ bool IsSupportedNic(uint16_t vendorId, uint16_t deviceId)
     
     return (deviceId == PCI_DEVICE_E1000 ||
             deviceId == PCI_DEVICE_E1000E ||
-            deviceId == PCI_DEVICE_I217);
+            deviceId == PCI_DEVICE_I217 ||
+            deviceId == PCI_DEVICE_I219_LM);
 }
 
-bool GetBar0Info(uint8_t bus, uint8_t dev, uint8_t func,
-                 uint64_t* outPhys, uint64_t* outSize, bool* outIs64bit)
+bool GetRegisterBarInfo(uint8_t bus, uint8_t dev, uint8_t func,
+                        uint64_t* outPhys, uint64_t* outSize, bool* outIs64bit,
+                        uint8_t* outBarIndex)
 {
-    if (!outPhys || !outSize || !outIs64bit) return false;
-    
+    if (!outPhys || !outSize || !outIs64bit || !outBarIndex) return false;
+
     *outPhys = 0;
     *outSize = 0;
     *outIs64bit = false;
-    
-    // Read BAR0
-    uint32_t bar0 = PciRead32(bus, dev, func, 0x10);
-    
-    // Check if memory BAR (bit 0 = 0)
-    if (bar0 & 0x01) {
-        // I/O BAR, not MMIO
-        return false;
+    *outBarIndex = 0xFF;
+
+    // Some Intel-compatible devices expose a legacy I/O BAR before the
+    // register MMIO BAR (QEMU's e1000 is one example). For the exact
+    // supported Ethernet match, inspect all conventional PCI BAR slots and
+    // select the first valid memory BAR instead of assuming BAR0.
+    for (uint8_t barIndex = 0; barIndex < 6; ++barIndex) {
+        const uint8_t offset = static_cast<uint8_t>(0x10 + barIndex * 4);
+        const uint32_t bar = PciRead32(bus, dev, func, offset);
+        if (bar & 0x01u) continue; // I/O BAR; not the register MMIO window.
+
+        const uint8_t barType = static_cast<uint8_t>((bar >> 1) & 0x03u);
+        if (barType == 1 || barType == 3) continue; // reserved encoding
+
+        const bool is64bit = barType == 2;
+        if (is64bit && barIndex == 5) continue; // no upper BAR slot
+
+        const uint32_t upperBar = is64bit
+            ? PciRead32(bus, dev, func, static_cast<uint8_t>(offset + 4)) : 0;
+        if (is64bit && upperBar == 0xFFFFFFFFu) {
+            ++barIndex;
+            continue;
+        }
+        const uint64_t phys = (static_cast<uint64_t>(bar & 0xFFFFFFF0u) |
+                               (static_cast<uint64_t>(upperBar) << 32));
+        if (phys == 0 || phys == 0xFFFFFFFFFFFFFFFFULL) {
+            if (is64bit) ++barIndex;
+            continue;
+        }
+
+        // Sizing is performed only for an exact supported Ethernet match by
+        // the caller. Disable decoding while probing, then restore the
+        // command register and both halves of a 64-bit BAR.
+        const uint16_t originalCommand = PciRead16(bus, dev, func, 0x04);
+        PciWrite16(bus, dev, func, 0x04,
+                   static_cast<uint16_t>(originalCommand & ~0x0003u));
+        PciWrite32(bus, dev, func, offset, 0xFFFFFFFFu);
+        if (is64bit) {
+            PciWrite32(bus, dev, func, static_cast<uint8_t>(offset + 4), 0xFFFFFFFFu);
+        }
+
+        const uint32_t sizeBar = PciRead32(bus, dev, func, offset);
+        uint64_t sizeMask = static_cast<uint64_t>(sizeBar & 0xFFFFFFF0u);
+        if (is64bit) {
+            const uint32_t sizeUpperBar =
+                PciRead32(bus, dev, func, static_cast<uint8_t>(offset + 4));
+            sizeMask |= static_cast<uint64_t>(sizeUpperBar) << 32;
+        }
+
+        PciWrite32(bus, dev, func, offset, bar);
+        if (is64bit) {
+            PciWrite32(bus, dev, func, static_cast<uint8_t>(offset + 4), upperBar);
+        }
+        PciWrite16(bus, dev, func, 0x04, originalCommand);
+
+        if (sizeMask == 0 || sizeMask == 0xFFFFFFFFFFFFFFFFULL) {
+            if (is64bit) ++barIndex;
+            continue;
+        }
+
+        // Invert a 32-bit mask at 32-bit width. Widening it first would
+        // produce a false high-half size such as 0xffffffff00020000.
+        const uint32_t sizeMask32 = sizeBar & 0xFFFFFFF0u;
+        const uint64_t size = is64bit
+            ? ((~sizeMask) + 1)
+            : static_cast<uint64_t>((~sizeMask32) + 1u);
+        // The selected register BAR must cover the RAL/RAH window and an
+        // unexpectedly huge BAR is not safe to map in the bootloader.
+        if (size < 0x1000 || size > 0x1000000 || (size & (size - 1)) != 0) {
+            if (is64bit) ++barIndex;
+            continue;
+        }
+
+        *outPhys = phys;
+        *outSize = size;
+        *outIs64bit = is64bit;
+        *outBarIndex = barIndex;
+        return true;
     }
-    
-    // Check BAR type (bits 1-2)
-    uint8_t barType = (bar0 >> 1) & 0x03;
-    *outIs64bit = (barType == 2);  // Type 2 = 64-bit BAR
-    
-    // Get physical address
-    uint64_t phys = bar0 & 0xFFFFFFF0u;
-    
-    if (*outIs64bit) {
-        uint32_t bar1 = PciRead32(bus, dev, func, 0x14);
-        phys |= ((uint64_t)bar1 << 32);
-    }
-    
-    // Determine BAR size by writing all 1s and reading back
-    // Save original value first
-    uint32_t origBar0 = bar0;
-    uint32_t origBar1 = 0;
-    if (*outIs64bit) {
-        origBar1 = PciRead32(bus, dev, func, 0x14);
-    }
-    
-    // Write all 1s
-    PciWrite32(bus, dev, func, 0x10, 0xFFFFFFFF);
-    if (*outIs64bit) {
-        PciWrite32(bus, dev, func, 0x14, 0xFFFFFFFF);
-    }
-    
-    // Read back
-    uint32_t sizeBar0 = PciRead32(bus, dev, func, 0x10);
-    uint64_t size = (~(sizeBar0 & 0xFFFFFFF0u)) + 1;
-    
-    if (*outIs64bit) {
-        uint32_t sizeBar1 = PciRead32(bus, dev, func, 0x14);
-        uint64_t size64 = ((uint64_t)sizeBar1 << 32) | (sizeBar0 & 0xFFFFFFF0u);
-        size = (~size64) + 1;
-    }
-    
-    // Restore original BAR values
-    PciWrite32(bus, dev, func, 0x10, origBar0);
-    if (*outIs64bit) {
-        PciWrite32(bus, dev, func, 0x14, origBar1);
-    }
-    
-    // Sanity check size (E1000 is typically 128KB or 256KB)
-    if (size == 0 || size > 0x1000000) {  // Max 16MB
-        // Use default size for E1000
-        size = 0x20000;  // 128KB
-    }
-    
-    *outPhys = phys;
-    *outSize = size;
-    
-    return true;
+
+    return false;
 }
 
 void EnablePciDevice(uint8_t bus, uint8_t dev, uint8_t func)
@@ -252,15 +273,16 @@ uint8_t EnumeratePci(PciEnumResult* result)
                 // Read IRQ line
                 pciDev->irqLine = PciRead8(bus, dev, func, 0x3C);
                 
-                // Only size BAR0 for a driver-compatible Ethernet device.
+                // Only size a register BAR for a driver-compatible Ethernet device.
                 // Sizing an unsupported network controller writes all ones
                 // to its BAR, which is an unnecessary side effect during an
                 // identification-only audit.
                 if (subclass == PCI_SUBCLASS_ETH && IsSupportedNic(vendorId, deviceId)) {
-                    pciDev->isMemoryBar = GetBar0Info(bus, dev, func,
-                                                       &pciDev->bar0Phys,
-                                                       &pciDev->bar0Size,
-                                                       &pciDev->is64bit);
+                    pciDev->isMemoryBar = GetRegisterBarInfo(bus, dev, func,
+                                                              &pciDev->bar0Phys,
+                                                              &pciDev->bar0Size,
+                                                              &pciDev->is64bit,
+                                                              &pciDev->barIndex);
                 } else {
                     uint32_t bar0 = PciRead32(bus, dev, func, 0x10);
                     pciDev->isMemoryBar = (bar0 & 0x01u) == 0;
@@ -270,6 +292,7 @@ uint8_t EnumeratePci(PciEnumResult* result)
                         pciDev->bar0Phys |= static_cast<uint64_t>(PciRead32(bus, dev, func, 0x14)) << 32;
                     }
                     pciDev->bar0Size = 0;
+                    pciDev->barIndex = 0xFF;
                 }
                 
                 pciDev->bar0Virt = 0;  // Will be set after mapping
@@ -307,7 +330,8 @@ void PrintPciDevice(EFI_SYSTEM_TABLE* ST, const PciDevice* dev)
           (UINT32)dev->irqLine);
     
     if (dev->isMemoryBar) {
-        Print((CONST CHAR16*)L"    BAR0: Phys=%016lx Size=%lx (%s)\n",
+        Print((CONST CHAR16*)L"    BAR%u: Phys=%016lx Size=%lx (%s)\n",
+              (UINT32)dev->barIndex,
               dev->bar0Phys, dev->bar0Size,
               dev->is64bit ? L"64-bit" : L"32-bit");
         
@@ -322,7 +346,11 @@ void PrintPciDevice(EFI_SYSTEM_TABLE* ST, const PciDevice* dev)
     if (dev->classCode == PCI_CLASS_NETWORK &&
         dev->subclass == PCI_SUBCLASS_ETH &&
         IsSupportedNic(dev->vendorId, dev->deviceId)) {
-        Print((CONST CHAR16*)L"    Driver: intel-e1000 family (supported)\n");
+        if (dev->deviceId == PCI_DEVICE_I219_LM) {
+            Print((CONST CHAR16*)L"    Driver: intel-i219-lm (PCH) (supported)\n");
+        } else {
+            Print((CONST CHAR16*)L"    Driver: intel-e1000 family (supported)\n");
+        }
     } else {
         Print((CONST CHAR16*)L"    Driver: unsupported (identity only; no binding)\n");
     }

@@ -1,7 +1,7 @@
 // PCI Enumeration for guideXOS Bootloader
 //
 // Enumerates PCI devices to find network controllers and
-// read their BAR0 (MMIO base address) for kernel use.
+// read the selected register BAR (MMIO base address) for kernel use.
 //
 // Uses x86 I/O port access (0xCF8/0xCFC) method.
 //
@@ -33,6 +33,7 @@ static const uint16_t PCI_VENDOR_INTEL    = 0x8086;
 static const uint16_t PCI_DEVICE_E1000    = 0x100E;  // 82540EM (QEMU default)
 static const uint16_t PCI_DEVICE_E1000E   = 0x10D3;  // 82574L
 static const uint16_t PCI_DEVICE_I217     = 0x153A;  // I217-LM
+static const uint16_t PCI_DEVICE_I219_LM  = 0x156F;  // I219-LM/PCH
 
 // Maximum devices to track
 static const uint8_t MAX_PCI_DEVICES = 8;
@@ -54,9 +55,10 @@ struct PciDevice {
     uint8_t  subclass;
     uint8_t  progIf;
     uint8_t  irqLine;
-    uint64_t bar0Phys;      // BAR0 physical address
-    uint64_t bar0Size;      // BAR0 size
-    uint64_t bar0Virt;      // BAR0 virtual address (after mapping)
+    uint64_t bar0Phys;      // Selected register BAR physical address
+    uint64_t bar0Size;      // Selected register BAR size
+    uint64_t bar0Virt;      // Selected register BAR virtual address (after mapping)
+    uint8_t  barIndex;      // Selected BAR number (0..5), 0xFF if unavailable
     bool     isMemoryBar;   // true = MMIO, false = I/O port
     bool     is64bit;       // true = 64-bit BAR
     bool     found;
@@ -74,10 +76,10 @@ struct NicBootInfo {
     uint8_t  device;
     uint8_t  function;
     uint8_t  irqLine;
-    uint64_t mmioPhys;      // Physical BAR0 address
+    uint64_t mmioPhys;      // Physical selected register BAR address
     uint64_t mmioVirt;      // Virtual address (mapped by bootloader)
     uint64_t mmioSize;      // Size of MMIO region
-    uint8_t  macAddress[6]; // Placeholder MAC (kernel reads actual)
+    uint8_t  macAddress[6]; // Zero until the kernel reads the hardware RAR
     uint8_t  reserved[2];
     uint32_t flags;         // Bit 0: found, Bit 1: mapped, Bit 2: active
 };
@@ -117,10 +119,11 @@ uint8_t  PciRead8(uint8_t bus, uint8_t dev, uint8_t func, uint8_t offset);
 void PciWrite32(uint8_t bus, uint8_t dev, uint8_t func, uint8_t offset, uint32_t value);
 void PciWrite16(uint8_t bus, uint8_t dev, uint8_t func, uint8_t offset, uint16_t value);
 
-// Get BAR0 physical address and size
-// Returns true if BAR0 is a valid memory BAR
-bool GetBar0Info(uint8_t bus, uint8_t dev, uint8_t func,
-                 uint64_t* outPhys, uint64_t* outSize, bool* outIs64bit);
+// Get the first valid register memory BAR physical address and size.
+// Returns true when a conventional 32/64-bit memory BAR is available.
+bool GetRegisterBarInfo(uint8_t bus, uint8_t dev, uint8_t func,
+                        uint64_t* outPhys, uint64_t* outSize, bool* outIs64bit,
+                        uint8_t* outBarIndex);
 
 // Enable PCI bus mastering and memory space access
 void EnablePciDevice(uint8_t bus, uint8_t dev, uint8_t func);

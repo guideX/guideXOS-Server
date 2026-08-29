@@ -84,7 +84,12 @@ namespace paging
         return EFI_SUCCESS;
     }
 
-    EFI_STATUS MapIdentityRange(EFI_SYSTEM_TABLE* SystemTable, EFI_PHYSICAL_ADDRESS pml4Phys, EFI_PHYSICAL_ADDRESS physBase, UINTN sizeBytes)
+    static EFI_STATUS MapIdentityRangeWithFlags(
+        EFI_SYSTEM_TABLE* SystemTable,
+        EFI_PHYSICAL_ADDRESS pml4Phys,
+        EFI_PHYSICAL_ADDRESS physBase,
+        UINTN sizeBytes,
+        UINT64 leafFlags)
     {
         if (sizeBytes == 0) return EFI_SUCCESS;
 
@@ -107,12 +112,30 @@ namespace paging
                 }
             }
             
-            // Map as RW executable (Present, Writable)
+            // Map as RW with the caller-selected cache policy.  MMIO uses
+            // PCD/PWT; ordinary RAM uses neither flag.
             // NOTE: Removed PTE_G (Global) flag as it requires CR4.PGE to be set
-            pt[pti] = (UINT64)p | PTE_P | PTE_W;
+            pt[pti] = (UINT64)p | PTE_P | PTE_W | leafFlags;
         }
 
         return EFI_SUCCESS;
+    }
+
+    EFI_STATUS MapIdentityRange(EFI_SYSTEM_TABLE* SystemTable,
+                                EFI_PHYSICAL_ADDRESS pml4Phys,
+                                EFI_PHYSICAL_ADDRESS physBase,
+                                UINTN sizeBytes)
+    {
+        return MapIdentityRangeWithFlags(SystemTable, pml4Phys, physBase, sizeBytes, 0);
+    }
+
+    EFI_STATUS MapUncachedIdentityRange(EFI_SYSTEM_TABLE* SystemTable,
+                                        EFI_PHYSICAL_ADDRESS pml4Phys,
+                                        EFI_PHYSICAL_ADDRESS physBase,
+                                        UINTN sizeBytes)
+    {
+        return MapIdentityRangeWithFlags(SystemTable, pml4Phys, physBase, sizeBytes,
+                                         PTE_PCD | PTE_PWT);
     }
 
     EFI_STATUS MapRange(

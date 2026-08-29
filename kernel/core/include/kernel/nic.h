@@ -43,18 +43,21 @@ static const uint16_t PCI_VENDOR_INTEL   = 0x8086;
 static const uint16_t PCI_DEVICE_E1000   = 0x100E;  // 82540EM (QEMU default)
 static const uint16_t PCI_DEVICE_E1000E  = 0x10D3;  // 82574L
 static const uint16_t PCI_DEVICE_I217    = 0x153A;   // I217-LM
+static const uint16_t PCI_DEVICE_I219_LM = 0x156F;   // I219-LM/PCH
 
 static const uint8_t  PCI_CLASS_NETWORK  = 0x02;
 static const uint8_t  PCI_SUBCLASS_ETH   = 0x00;
 
 // ================================================================
-// E1000 register offsets (from BAR0 MMIO base)
+// E1000 register offsets (from the selected register MMIO base)
 // ================================================================
 
 static const uint32_t E1000_CTRL     = 0x0000;  // Device Control
 static const uint32_t E1000_STATUS   = 0x0008;  // Device Status
 static const uint32_t E1000_EECD     = 0x0010;  // EEPROM/Flash Control
 static const uint32_t E1000_EERD     = 0x0014;  // EEPROM Read
+static const uint32_t E1000_CTRL_EXT  = 0x0018;  // Extended Device Control
+static const uint32_t E1000_MDIC     = 0x0020;  // MDI/PHY management
 static const uint32_t E1000_ICR      = 0x00C0;  // Interrupt Cause Read
 static const uint32_t E1000_ICS      = 0x00C8;  // Interrupt Cause Set
 static const uint32_t E1000_IMS      = 0x00D0;  // Interrupt Mask Set
@@ -75,6 +78,8 @@ static const uint32_t E1000_TDT      = 0x3818;  // TX Descriptor Tail
 static const uint32_t E1000_MTA      = 0x5200;  // Multicast Table Array (128 dwords)
 static const uint32_t E1000_RAL0     = 0x5400;  // Receive Address Low  (MAC [0])
 static const uint32_t E1000_RAH0     = 0x5404;  // Receive Address High (MAC [0])
+static const uint32_t E1000_MMIO_MIN_SIZE = E1000_RAH0 + sizeof(uint32_t);
+static const uint32_t E1000_RAH_AV   = (1u << 31); // Receive address valid
 
 // CTRL register bits
 static const uint32_t E1000_CTRL_SLU   = (1u << 6);   // Set Link Up
@@ -84,6 +89,10 @@ static const uint32_t E1000_CTRL_FD    = (1u << 0);   // Full Duplex
 
 // STATUS register bits
 static const uint32_t E1000_STATUS_LU  = (1u << 1);   // Link Up
+static const uint32_t E1000_STATUS_SPEED_MASK = (3u << 6);
+static const uint32_t E1000_STATUS_SPEED_10   = (0u << 6);
+static const uint32_t E1000_STATUS_SPEED_100  = (1u << 6);
+static const uint32_t E1000_STATUS_SPEED_1000 = (2u << 6);
 
 // RCTL (Receive Control) bits
 static const uint32_t E1000_RCTL_EN    = (1u << 1);   // Receiver Enable
@@ -116,6 +125,21 @@ static const uint32_t E1000_EERD_START = (1u << 0);
 static const uint32_t E1000_EERD_DONE  = (1u << 4);
 static const uint32_t E1000_EERD_ADDR_SHIFT = 8;
 static const uint32_t E1000_EERD_DATA_SHIFT = 16;
+
+// MDIC fields.  The I219 integrated PHY is MDI address 1.
+static const uint32_t E1000_MDIC_DATA_MASK  = 0x0000FFFFu;
+static const uint32_t E1000_MDIC_REG_SHIFT  = 16;
+static const uint32_t E1000_MDIC_PHY_SHIFT  = 21;
+static const uint32_t E1000_MDIC_OP_SHIFT   = 26;
+static const uint32_t E1000_MDIC_OP_WRITE   = (1u << E1000_MDIC_OP_SHIFT);
+static const uint32_t E1000_MDIC_OP_READ    = (2u << E1000_MDIC_OP_SHIFT);
+static const uint32_t E1000_MDIC_READY      = (1u << 28);
+static const uint32_t E1000_MDIC_ERROR      = (1u << 30);
+static const uint8_t  I219_PHY_ADDRESS      = 1;
+static const uint8_t  I219_PHY_STATUS_REG   = 26;
+static const uint16_t I219_PHY_STATUS_LINK  = (1u << 6);
+static const uint16_t I219_PHY_STATUS_DUPLEX = (1u << 7);
+static const uint16_t I219_PHY_STATUS_SPEED_MASK = (3u << 8);
 
 // ================================================================
 // Descriptor ring sizes
@@ -184,7 +208,52 @@ static const uint8_t E1000_TXD_STAT_DD  = (1u << 0); // Descriptor Done
 enum LinkState : uint8_t {
     NIC_LINK_DOWN = 0,
     NIC_LINK_UP   = 1,
+    NIC_LINK_UNKNOWN = 2,
 };
+
+enum PhyAccessState : uint8_t {
+    NIC_PHY_NOT_ATTEMPTED = 0,
+    NIC_PHY_OK             = 1,
+    NIC_PHY_FAILED         = 2,
+};
+
+enum InitStage : uint8_t {
+    NIC_INIT_NONE = 0,
+    NIC_INIT_BOUND,
+    NIC_INIT_MMIO,
+    NIC_INIT_PCI,
+    NIC_INIT_RESET,
+    NIC_INIT_MAC,
+    NIC_INIT_PHY,
+    NIC_INIT_RX_RING,
+    NIC_INIT_TX_RING,
+    NIC_INIT_READY,
+};
+
+inline const char* phy_access_state_name(PhyAccessState state)
+{
+    switch (state) {
+        case NIC_PHY_OK:             return "ok";
+        case NIC_PHY_FAILED:         return "failed";
+        default:                     return "not attempted";
+    }
+}
+
+inline const char* init_stage_name(InitStage stage)
+{
+    switch (stage) {
+        case NIC_INIT_BOUND:         return "PCI binding";
+        case NIC_INIT_MMIO:          return "MMIO";
+        case NIC_INIT_PCI:           return "PCI activation";
+        case NIC_INIT_RESET:         return "reset";
+        case NIC_INIT_MAC:           return "MAC";
+        case NIC_INIT_PHY:           return "PHY";
+        case NIC_INIT_RX_RING:       return "RX ring";
+        case NIC_INIT_TX_RING:       return "TX ring";
+        case NIC_INIT_READY:         return "ready";
+        default:                     return "none";
+    }
+}
 
 // ================================================================
 // NIC status codes
@@ -237,9 +306,9 @@ struct NICDevice {
     uint8_t     classCode;
     uint8_t     subclass;
     uint8_t     progIf;
-    uint64_t    mmioBase;       // BAR0 MMIO base address (virtual after mapping)
-    uint64_t    mmioPhys;       // BAR0 physical address
-    uint64_t    mmioSize;       // BAR0 MMIO region size when reported
+    uint64_t    mmioBase;       // Selected register BAR (virtual after mapping)
+    uint64_t    mmioPhys;       // Selected register BAR physical address
+    uint64_t    mmioSize;       // Selected register BAR size when reported
     uint8_t     irqLine;        // PCI interrupt line
     uint8_t     macAddress[ETH_ALEN];
     LinkState   link;
@@ -248,6 +317,23 @@ struct NICDevice {
     bool        mmioMapped;     // true if MMIO is mapped by bootloader
     bool        irqRegistered;  // kernel IRQ handler registered
     bool        pollingEnabled; // receive path is drained by main-loop polling
+    bool        driverBound;    // exact PCI match claimed by this driver
+    bool        nicRegistered;  // ready NIC exposed to the network stack
+    bool        rxRingInitialized;
+    bool        txRingInitialized;
+    uint16_t    pciCommand;
+    uint32_t    ctrlValue;
+    uint32_t    statusValue;
+    uint32_t    mdicValue;
+    uint16_t    phyStatusValue;
+    uint16_t    phyId1;
+    uint16_t    phyId2;
+    uint8_t     phyAddress;
+    uint16_t    negotiatedSpeed; // 10, 100, 1000, or 0 when unknown
+    bool        negotiatedFullDuplex;
+    PhyAccessState phyAccess;
+    InitStage   initStage;
+    char        lastInitFailure[96];
 };
 
 // Read-only identity record for a PCI network controller. This deliberately
@@ -274,7 +360,7 @@ struct NetworkControllerInfo {
 // ================================================================
 
 struct NicBootInfo {
-    uint64_t mmioPhys;      // Physical BAR0 address
+    uint64_t mmioPhys;      // Physical selected register BAR address
     uint64_t mmioVirt;      // Virtual address (mapped by bootloader)
     uint64_t mmioSize;      // Size of MMIO region
     uint16_t vendorId;
@@ -307,6 +393,22 @@ static const uint32_t NIC_BOOT_FLAG_ACTIVE = (1u << 2);
 // Initialize NIC using BootInfo from bootloader (preferred method)
 // Returns true if NIC was initialized successfully
 bool init_from_bootinfo(const NicBootInfo* nicInfo);
+
+// Validate an IEEE station address without consulting hardware.
+// This is also used by hosted proof tests.
+inline bool is_valid_station_mac(const uint8_t* mac)
+{
+    if (!mac) return false;
+
+    bool allZero = true;
+    bool allFF = true;
+    for (uint8_t i = 0; i < ETH_ALEN; ++i) {
+        if (mac[i] != 0x00) allZero = false;
+        if (mac[i] != 0xFF) allFF = false;
+    }
+
+    return !allZero && !allFF && ((mac[0] & 0x01u) == 0u);
+}
 
 // Set the physical address where the kernel image was loaded.
 void set_kernel_physical_base(uint64_t physicalBase);

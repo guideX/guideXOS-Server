@@ -57,7 +57,7 @@ namespace guideXOS
     // NIC device information (passed from bootloader to kernel)
     struct NicInfo
     {
-        uint64_t MmioPhys;      // Physical BAR0 address
+        uint64_t MmioPhys;      // Physical selected register BAR address
         uint64_t MmioVirt;      // Virtual address (mapped by bootloader)
         uint64_t MmioSize;      // Size of MMIO region
         uint16_t VendorId;
@@ -72,7 +72,7 @@ namespace guideXOS
         uint8_t  Device;
         uint8_t  Function;
         uint8_t  IrqLine;
-        uint8_t  MacAddress[6]; // Placeholder MAC (00:00:00:00:00:00 if not read)
+        uint8_t  MacAddress[6]; // Zero until the kernel reads the hardware RAR
         uint8_t  Reserved0[2];
         uint32_t Flags;         // Bit 0: found, Bit 1: mapped, Bit 2: active
         uint32_t Reserved1;

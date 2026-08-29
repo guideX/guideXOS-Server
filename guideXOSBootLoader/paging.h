@@ -43,6 +43,15 @@ namespace paging
         EFI_PHYSICAL_ADDRESS physBase,
         UINTN sizeBytes);
 
+    // Identity-map a device range with page-table cache-disable flags.  The
+    // ordinary identity map remains available for RAM and firmware ranges;
+    // this front door is reserved for PCI MMIO.
+    EFI_STATUS MapUncachedIdentityRange(
+        EFI_SYSTEM_TABLE* SystemTable,
+        EFI_PHYSICAL_ADDRESS pml4Phys,
+        EFI_PHYSICAL_ADDRESS physBase,
+        UINTN sizeBytes);
+
     // Helper to add a mapping for [virtBase, virtBase+size) -> physBase
     EFI_STATUS MapRange(
         EFI_SYSTEM_TABLE* SystemTable,

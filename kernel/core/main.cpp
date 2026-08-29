@@ -1014,7 +1014,7 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
                 if (nicInitialized) {
                     kernel::serial::puts("[KERNEL] NIC initialized from BootInfo successfully\n");
                 } else {
-                    kernel::serial::puts("[KERNEL] WARNING: BootInfo NIC init failed, falling back to PCI scan\n");
+                    kernel::serial::puts("[KERNEL] WARNING: BootInfo NIC init failed; bound device retained for diagnostics\n");
                 }
             } else {
                 kernel::serial::puts("[KERNEL] NIC not found in BootInfo (flags=");
@@ -1025,10 +1025,15 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
             kernel::serial::puts("[KERNEL] No BootInfo available, using PCI scan\n");
         }
         
-        // Fall back to PCI scan if bootinfo init failed
-        if (!nicInitialized) {
+        // Fall back to PCI scan only when BootInfo did not produce a bound
+        // device structure.  A failed I219 hardware stage is intentionally
+        // retained for netdiag so the exact frontier is not erased by a
+        // second identity-only scan.
+        if (!nicInitialized && kernel::nic::get_device() == nullptr) {
             kernel::serial::puts("[KERNEL] Falling back to PCI scan...\n");
             kernel::nic::init();
+        } else if (!nicInitialized) {
+            kernel::serial::puts("[KERNEL] NIC binding retained for diagnostics after init failure\n");
         }
         
         if (kernel::nic::is_active()) {

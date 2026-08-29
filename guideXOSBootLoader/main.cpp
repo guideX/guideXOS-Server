@@ -966,8 +966,11 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE* SystemTable) {
     // Track NIC MMIO for page table mapping
     EFI_PHYSICAL_ADDRESS nicMmioPhys = 0;
     UINTN nicMmioSize = 0;
+    EFI_PHYSICAL_ADDRESS nicMmioMapBase = 0;
+    UINTN nicMmioMapSize = 0;
     
-    if (pciResult.nic != nullptr && pciResult.nic->isMemoryBar) {
+    if (pciResult.nic != nullptr && pciResult.nic->isMemoryBar &&
+        pciResult.nic->bar0Phys != 0 && pciResult.nic->bar0Size != 0) {
         guideXOS::pci::PciDevice* nic = pciResult.nic;
         
         Print(L"\n*** Using NIC at [%02x:%02x.%x] ***\n",
@@ -992,18 +995,12 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE* SystemTable) {
         v1BootInfo->Nic.MmioSize = nic->bar0Size;
         v1BootInfo->Nic.Flags = guideXOS::NIC_FLAG_FOUND;
         
-        // Placeholder MAC (kernel will read actual MAC after MMIO is mapped)
-        v1BootInfo->Nic.MacAddress[0] = 0x52;
-        v1BootInfo->Nic.MacAddress[1] = 0x54;
-        v1BootInfo->Nic.MacAddress[2] = 0x00;
-        v1BootInfo->Nic.MacAddress[3] = 0x12;
-        v1BootInfo->Nic.MacAddress[4] = 0x34;
-        v1BootInfo->Nic.MacAddress[5] = 0x56;
+        // Leave MacAddress zeroed.  The kernel must obtain and validate the
+        // station address from the device's receive-address registers.
         
         // Track for page table mapping
         nicMmioPhys = (EFI_PHYSICAL_ADDRESS)nic->bar0Phys;
         nicMmioSize = (UINTN)nic->bar0Size;
-        if (nicMmioSize == 0) nicMmioSize = 0x20000;  // Default 128KB for E1000
         
         // Enable bus mastering and memory space for the NIC
         guideXOS::pci::EnablePciDevice(nic->bus, nic->device, nic->function);
@@ -1158,11 +1155,13 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE* SystemTable) {
     Print(L"Mapping low memory stack region: 0x100000 size 2MB\n");
 
     // 13. NIC MMIO region - CRITICAL for network driver
-    // Map the NIC's BAR0 MMIO region so the kernel can access hardware registers
+    // Map the selected NIC register BAR so the kernel can access hardware registers
     if (nicMmioPhys != 0 && nicMmioSize != 0) {
         // Align to page boundary
         EFI_PHYSICAL_ADDRESS nicMmioAligned = nicMmioPhys & ~0xFFFull;
         UINTN nicMmioAlignedSize = ((nicMmioPhys - nicMmioAligned) + nicMmioSize + 0xFFF) & ~0xFFFull;
+        nicMmioMapBase = nicMmioAligned;
+        nicMmioMapSize = nicMmioAlignedSize;
         
         ranges[rangeCount] = nicMmioAligned;
         sizes[rangeCount] = nicMmioAlignedSize;
@@ -1189,6 +1188,17 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE* SystemTable) {
             &pt);
         if (EFI_ERROR(st)) {
             Print(L"Failed to build identity page tables\n");
+            return st;
+        }
+    }
+
+    // Keep PCI MMIO uncached in the identity map.  The general identity map
+    // remains write-back for RAM; only the exact BAR range receives PCD/PWT.
+    if (nicMmioMapBase != 0 && nicMmioMapSize != 0) {
+        EFI_STATUS st = guideXOS::paging::MapUncachedIdentityRange(
+            SystemTable, pt.Pml4Phys, nicMmioMapBase, nicMmioMapSize);
+        if (EFI_ERROR(st)) {
+            Print(L"Failed to apply uncached NIC MMIO mapping\n");
             return st;
         }
     }
