@@ -14,6 +14,11 @@
 namespace gxos {
 namespace javascript {
 
+constexpr std::uint8_t kEventPhaseNone = 0u;
+constexpr std::uint8_t kEventPhaseCapturing = 1u;
+constexpr std::uint8_t kEventPhaseAtTarget = 2u;
+constexpr std::uint8_t kEventPhaseBubbling = 3u;
+
 enum class RuntimeErrorCode : std::uint8_t {
     None = 0,
     UnknownIdentifier,
@@ -256,6 +261,10 @@ public:
     // affect a later event.
     void beginEventDispatch();
     void endEventDispatch();
+    // The host updates one dispatch-scoped byte at stage boundaries. The
+    // cached Event property mirrors this value and remains host-owned.
+    void setEventPhase(std::uint8_t phase);
+    std::uint8_t eventPhase() const { return eventPhase_; }
     bool eventPropagationStopped() const
     {
         return eventDispatchActive_ && eventPropagationStopped_;
@@ -427,6 +436,7 @@ private:
     RuntimeObjectId objectPrototype_ = kInvalidRuntimeObjectId;
     RuntimeObjectId arrayPrototype_ = kInvalidRuntimeObjectId;
     RuntimeObjectId mathObject_ = kInvalidRuntimeObjectId;
+    RuntimeObjectId eventConstantsObject_ = kInvalidRuntimeObjectId;
     RuntimeObjectId eventObject_ = kInvalidRuntimeObjectId;
     RuntimeFunctionId eventStopPropagationFunction_ =
         kInvalidRuntimeFunctionId;
@@ -436,6 +446,7 @@ private:
         kInvalidRuntimeFunctionId;
     bool builtInsInitialized_ = false;
     bool eventDispatchActive_ = false;
+    std::uint8_t eventPhase_ = kEventPhaseNone;
     bool eventPropagationStopped_ = false;
     bool eventImmediatePropagationStopped_ = false;
     bool eventDefaultPrevented_ = false;

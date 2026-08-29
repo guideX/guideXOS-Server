@@ -2461,3 +2461,135 @@ The recommended JS21 milestone is `event.eventPhase` with standard phase
 constants equivalent to `CAPTURING_PHASE = 1`, `AT_TARGET = 2`, and
 `BUBBLING_PHASE = 3`. A later phase may consider Boolean capture shorthand or
 additional event types.
+
+## Phase JS21: `event.eventPhase` and Event phase constants
+
+JS21 exposes the current phase of the existing bounded synchronous click
+dispatch:
+
+```javascript
+event.eventPhase
+```
+
+The value is a host-owned, read-only number with the standard conceptual
+values:
+
+| Value | Meaning |
+| ---: | --- |
+| `0` | `Event.NONE`; no active dispatch, including a retained Event after dispatch |
+| `1` | `Event.CAPTURING_PHASE`; an ancestor capture callback |
+| `2` | `Event.AT_TARGET`; every callback on the clicked Element |
+| `3` | `Event.BUBBLING_PHASE`; an ancestor bubble callback |
+
+The target rule is important: a target capture listener reports `2`, not `1`.
+Target capture, target `onclick`, and target non-capture listeners all share
+the target phase. Ancestor `onclick` remains bubble-only and reports `3`.
+`event.currentTarget` continues to identify the Element whose callback is
+running, while `event.target` remains the original clicked Element. The
+existing `bubbles === true` and `cancelable === true` metadata is unchanged in
+all three active phases.
+
+The default realm also exposes a bounded ordinary global object:
+
+```javascript
+Event.NONE === 0
+Event.CAPTURING_PHASE === 1
+Event.AT_TARGET === 2
+Event.BUBBLING_PHASE === 3
+```
+
+`Event` is a constants namespace, not a new Event constructor. It has four
+read-only numeric properties and no additional native functions. Assignments
+to the constants and to `event.eventPhase` are deterministic no-ops under the
+existing host-property read-only semantics. Unknown members retain normal
+missing-property behavior (`undefined`). If explicitly tiny runtime limits
+cannot fit the optional constants namespace, the mandatory cached Event phase
+property remains bounded and the namespace is omitted rather than changing
+the prior limit contract.
+
+### JS21 dispatch state and safety
+
+The runtime adds one `uint8_t` dispatch-scoped phase field. The adapter sets it
+once before ancestor capture, once before the target stage, and once before
+ancestor bubbling. It is never stored in a listener record, snapshot entry, or
+propagation-path entry. `endEventDispatch()` resets it and the cached Event
+property to `Event.NONE`, including after propagation control, contained
+callback errors, or a recovered dispatch. A path overflow is rejected before
+Event creation and callback dispatch, and therefore leaves the phase at `0`.
+
+`stopPropagation()` and `stopImmediatePropagation()` preserve the phase seen
+by the stopping callback and the existing same-node/later-node rules. A target
+capture stop still allows target `onclick` and target bubble listeners, all at
+phase `2`, while suppressing ancestor bubbling. `preventDefault()` remains
+independent: a capture callback can set `defaultPrevented`, and target and
+bubble callbacks observe it while their phase changes to `2` and `3`. Once
+listeners are removed immediately before invocation and report the phase of
+the dispatch stage that invoked them. The established callback-error
+containment policy continues without prematurely changing phase.
+
+Navigation resets the realm, listener tables, cached Event state, and active
+phase state. Retained Event values are ordinary bounded objects with no stack,
+snapshot, or path pointers; after dispatch their `eventPhase` safely reports
+`0`. Stale Element handles continue to fail closed through generation checks,
+and independent trees do not share sticky phase state.
+
+### JS21 bounded memory
+
+The cached Event gains one read-only `eventPhase` property. Compared with the
+JS20 runtime baseline, the default realm also gains one cached ordinary
+`Event` constants object with four read-only numeric properties. The exact
+fixed accounting is:
+
+| Resource | JS21 delta |
+| --- | ---: |
+| Runtime Event property entries | `+1` per cached Event; `+4` constants at realm initialization |
+| Runtime objects | `+1` constants namespace at realm initialization |
+| Native functions | `+0` |
+| Host objects | `+0` |
+| Listener records | `+0` (still 64 × 24 bytes) |
+| Propagation path/snapshot | `+0` (still bounded at 32 serials and one 64-entry snapshot) |
+| Per-click allocation | `0` after the existing cached Event/wrappers are established |
+
+The dispatch phase itself costs one byte in `RuntimeContext` plus normal
+compiler padding already accounted for by the containing runtime object. No
+dynamic phase container, per-click Event, listener-record field, or hosted-only
+dependency was added. Full DOM Events compatibility remains incomplete.
+
+### JS21 proof and validation
+
+The focused proof is
+`tests/navigator_javascript_js21_test.cpp`, run by
+`scripts/smoke-navigator-javascript-js21.ps1`. It uses the real parsed
+WebDocument and host adapter to prove complete phase order, target
+`AT_TARGET` semantics, read-only metadata and constants, currentTarget/target
+identity, bubbles/cancelable/defaultPrevented behavior, propagation controls,
+once, cross-phase mutation and removal, callback errors, overflow/reset and
+recovery, retained Events, stale references, navigation cleanup, independent
+trees, unsupported inputs, fixed listener capacity, and 100 repeated clicks.
+The focused JS21 suite reports 514 checks with 0 failures.
+
+The authentic hosted proof is
+`navigator-smoke/javascript-js21.html`, with
+`navigator-smoke/javascript-js21-target.html` as its navigation target. The
+production aggregate loads the fixture over HTTP, executes its parsed inline
+script in the production realm, uses real hit-tested controls and links, and
+checks phase ordering, same-callback `1,3`, target `2`, once, capture
+cancellation, uncancelled navigation, and cleanup.
+
+The complete JS1–JS21 focused set contains 19 suites: lexer, parser, runtime,
+JS6 through JS21, and all 19 focused scripts pass. JS21 adds no new event
+family, Boolean capture shorthand, passive listeners, constructors,
+asynchronous work, timers, promises, microtasks, or broad DOM expansion. The
+aggregate Navigator result is `381 passed, 7 failed` out of `388` checks: the
+nine JS21 assertions pass, and the seven known unrelated aggregate CSS
+failures remain CSS 3C, CSS 3G, CSS 6A, CSS 6B's three checks, and CSS 6C.
+
+The recommended JS22 milestone is Boolean capture shorthand:
+
+```javascript
+element.addEventListener("click", handler, true);
+element.removeEventListener("click", handler, true);
+```
+
+mapping `true` to capture and `false` to non-capture while preserving the
+object form `{ capture: true, once: true }`.

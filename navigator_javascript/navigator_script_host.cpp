@@ -406,6 +406,9 @@ bool NavigatorScriptHostAdapter::dispatchClick(RuntimeContext& runtime,
             if (firstError == RuntimeErrorCode::None) firstError = callbackError;
         }
     };
+    // The phase comes from the propagation stage, never from the listener's
+    // capture flag. Target capture listeners are therefore AT_TARGET.
+    runtime.setEventPhase(kEventPhaseCapturing);
     // One fixed snapshot is reused for every node and phase. Capture and
     // bubble are intentionally collected at different times: mutations made
     // during capture can affect a later bubble snapshot, but never the active
@@ -501,6 +504,7 @@ bool NavigatorScriptHostAdapter::dispatchClick(RuntimeContext& runtime,
     // still permits all later target handlers; immediate stop does not.
     if (!dispatchAborted && !runtime.eventPropagationStopped() &&
         validatePathEntry(propagationPath[0])) {
+        runtime.setEventPhase(kEventPhaseAtTarget);
         if (invokeListeners(propagationPath[0], true) &&
             !runtime.eventImmediatePropagationStopped()) {
             // Preserve JS17's target mutation rule: the target bubble
@@ -527,6 +531,7 @@ bool NavigatorScriptHostAdapter::dispatchClick(RuntimeContext& runtime,
     // parent. Each ancestor gets a fresh non-capture snapshot at this point.
     if (!dispatchAborted && !runtime.eventPropagationStopped() &&
         !runtime.eventImmediatePropagationStopped()) {
+        runtime.setEventPhase(kEventPhaseBubbling);
         for (std::size_t index = 1u; index < propagationLength; ++index) {
             const HostInstanceId currentSerial = propagationPath[index];
             if (!validatePathEntry(currentSerial)) break;

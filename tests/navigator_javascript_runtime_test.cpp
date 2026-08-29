@@ -262,7 +262,7 @@ void testObjectsAndProperties()
     expectNumber(context, "numeric", 8.0, "objects: numeric key coercion");
     expectType(context, "missing", ValueType::Undefined,
         "objects: missing property is Undefined");
-    expect(context.objectCount() == 4 && context.propertyCount() == 12,
+    expect(context.objectCount() == 5 && context.propertyCount() == 16,
         "objects: bounded pool and duplicate-free properties");
 
     const ScriptResult duplicate = execute(context,
@@ -378,7 +378,7 @@ void testObjectArrayLimitsAndReset()
         RuntimeErrorCode::PropertyLimitExceeded, "objects: property limit", properties);
 
     RuntimeLimits totalProperties;
-    totalProperties.maxTotalProperties = 10;
+    totalProperties.maxTotalProperties = 14;
     expectError("var a = {}; a.x = 1; var b = {}; b.y = 2;",
         RuntimeErrorCode::PropertyLimitExceeded,
         "objects: total property limit", totalProperties);
@@ -412,9 +412,9 @@ void testObjectArrayLimitsAndReset()
     RuntimeContext context;
     expect(execute(context, "var a = { x: 1 }; a.x = 2; var b = [3];").succeeded(),
         "reset: objects and arrays setup succeeds");
-    expect(context.objectCount() == 5, "reset: objects are retained before reset");
+    expect(context.objectCount() == 6, "reset: objects are retained before reset");
     context.reset();
-    expect(context.objectCount() == 3 && context.propertyCount() == 9 &&
+    expect(context.objectCount() == 4 && context.propertyCount() == 13 &&
         context.arrayElementCount() == 0, "reset: object pools are cleared");
     expect(execute(context, "var result = 7;").succeeded(),
         "reset: new script after object reset succeeds");

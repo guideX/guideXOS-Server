@@ -194,7 +194,7 @@ void testIntegrationAndPrototypeStructure()
         expect(context.prototypeOf(context.objectPrototypeId()) ==
             kInvalidRuntimeObjectId, "Object.prototype -> null");
     }
-    expect(context.objectCount() == 4, "built-in and script object accounting");
+    expect(context.objectCount() == 5, "built-in and script object accounting");
     expect(context.nativeFunctionCount() == 9,
         "native function accounting");
 }

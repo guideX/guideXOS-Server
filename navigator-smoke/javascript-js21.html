@@ -1,0 +1,130 @@
+<!doctype html>
+<html>
+<head><title>Navigator JavaScript JS21</title></head>
+<body>
+<h1>Navigator JavaScript JS21</h1>
+<p>Event phases, constants, and bounded dispatch observability.</p>
+<div id="js21-root">
+  <div id="js21-parent">
+    <button id="js21-child" type="button">Phase order</button>
+    <button id="js21-target-stop" type="button">Target stop</button>
+    <button id="js21-target-immediate" type="button">Target immediate</button>
+    <button id="js21-once" type="button">Once</button>
+    <a id="js21-cancel" href="/navigator-smoke/javascript-js21-target.html">Cancel</a>
+    <a id="js21-navigate" href="/navigator-smoke/javascript-js21-target.html">Navigate</a>
+  </div>
+</div>
+<p id="js21-state">initial</p>
+<script>
+var js21State = document.getElementById("js21-state");
+var js21Root = document.getElementById("js21-root");
+var js21Parent = document.getElementById("js21-parent");
+var js21Child = document.getElementById("js21-child");
+var js21TargetStop = document.getElementById("js21-target-stop");
+var js21TargetImmediate = document.getElementById("js21-target-immediate");
+var js21Once = document.getElementById("js21-once");
+var js21Cancel = document.getElementById("js21-cancel");
+var js21Order = "";
+var js21TargetStable = true;
+var js21MetadataStable = true;
+var js21RootCaptureCurrent = false;
+var js21ParentCaptureCurrent = false;
+var js21TargetCurrent = false;
+var js21ParentBubbleCurrent = false;
+var js21SameCallback = "";
+var js21CancelLog = "";
+var js21CancelCount = 0;
+var js21TargetStopLog = "";
+var js21TargetImmediateLog = "";
+var js21OnceCapture = "";
+var js21OnceTargetCapture = "";
+var js21OnceTargetBubble = "";
+var js21OnceBubble = "";
+function js21Inspect(event, node, expected) {
+    js21TargetStable = js21TargetStable && event.target === js21Child;
+    js21MetadataStable = js21MetadataStable && event.bubbles === true &&
+        event.cancelable === true;
+    if (event.currentTarget === js21Root && expected === 1) js21RootCaptureCurrent = true;
+    if (event.currentTarget === js21Parent && expected === 1) js21ParentCaptureCurrent = true;
+    if (event.currentTarget === js21Child && expected === 2) js21TargetCurrent = true;
+    if (event.currentTarget === js21Parent && expected === 3) js21ParentBubbleCurrent = true;
+}
+js21Root.addEventListener("click", function(event) {
+    if (event.target === js21Child) { js21Inspect(event, js21Root, 1); js21Order = js21Order + "r1"; }
+}, { capture: true });
+js21Parent.addEventListener("click", function(event) {
+    if (event.target === js21Child) { js21Inspect(event, js21Parent, 1); js21Order = js21Order + "p1"; }
+}, { capture: true });
+js21Child.addEventListener("click", function(event) {
+    if (event.target === js21Child) { js21Inspect(event, js21Child, 2); js21Order = js21Order + "c2"; }
+}, { capture: true });
+js21Child.onclick = function(event) {
+    if (event.target === js21Child) { js21Inspect(event, js21Child, 2); js21Order = js21Order + "o2"; }
+};
+js21Child.addEventListener("click", function(event) {
+    if (event.target === js21Child) { js21Inspect(event, js21Child, 2); js21Order = js21Order + "t2"; }
+});
+js21Parent.onclick = function(event) {
+    if (event.target === js21Child) { js21Inspect(event, js21Parent, 3); js21Order = js21Order + "po3"; }
+};
+js21Parent.addEventListener("click", function(event) {
+    if (event.target === js21Child) { js21Inspect(event, js21Parent, 3); js21Order = js21Order + "p3"; }
+});
+js21Root.onclick = function(event) {
+    if (event.target === js21Child) { js21Inspect(event, js21Root, 3); js21Order = js21Order + "ro3"; }
+};
+js21Root.addEventListener("click", function(event) {
+    if (event.target === js21Child) {
+        js21Inspect(event, js21Root, 3); js21Order = js21Order + "r3";
+        js21State.textContent = "order:" + js21Order + ";target:" + js21TargetStable +
+            ";meta:" + js21MetadataStable + ";current:" +
+            js21RootCaptureCurrent + js21ParentCaptureCurrent + js21TargetCurrent +
+            js21ParentBubbleCurrent + ";constants:" +
+            (Event.CAPTURING_PHASE === 1 && Event.AT_TARGET === 2 &&
+             Event.BUBBLING_PHASE === 3) + ";same:" + js21SameCallback;
+    }
+});
+function js21Same(event) { if (event.target === js21Child) js21SameCallback = js21SameCallback + event.eventPhase; }
+js21Parent.addEventListener("click", js21Same, { capture: true });
+js21Parent.addEventListener("click", js21Same);
+js21Root.addEventListener("click", function(event) {
+    if (event.target === js21Cancel && js21CancelCount === 0) {
+        js21CancelCount = js21CancelCount + 1; js21CancelLog = "r" + event.eventPhase; event.preventDefault();
+    }
+}, { capture: true });
+js21Cancel.onclick = function(event) { js21CancelLog = js21CancelLog + "t" + event.eventPhase; };
+js21Parent.addEventListener("click", function(event) {
+    if (event.target === js21Cancel) {
+        js21CancelLog = js21CancelLog + "p" + event.eventPhase + ":" + event.defaultPrevented;
+        js21State.textContent = "cancel:" + js21CancelLog;
+    }
+});
+js21TargetStop.onclick = function(event) { js21TargetStopLog = js21TargetStopLog + "o" + event.eventPhase; };
+js21TargetStop.addEventListener("click", function(event) {
+    js21TargetStopLog = js21TargetStopLog + "b" + event.eventPhase;
+    js21State.textContent = "target-stop:" + js21TargetStopLog;
+});
+js21TargetStop.addEventListener("click", function(event) {
+    if (event.target === js21TargetStop) js21TargetStopLog = js21TargetStopLog + "t" + event.eventPhase;
+}, { capture: true });
+js21TargetImmediate.addEventListener("click", function(event) {
+    js21TargetImmediateLog = "c" + event.eventPhase; event.stopImmediatePropagation();
+    js21State.textContent = "target-immediate:" + js21TargetImmediateLog;
+}, { capture: true });
+js21TargetImmediate.onclick = function(event) { js21TargetImmediateLog = js21TargetImmediateLog + "o" + event.eventPhase; };
+js21TargetImmediate.addEventListener("click", function(event) { js21TargetImmediateLog = js21TargetImmediateLog + "b" + event.eventPhase; });
+js21Root.addEventListener("click", function(event) {
+    if (event.target === js21Once) js21OnceCapture = js21OnceCapture + event.eventPhase;
+}, { capture: true, once: true });
+js21Once.addEventListener("click", function(event) { js21OnceTargetCapture = js21OnceTargetCapture + event.eventPhase; }, { capture: true, once: true });
+js21Once.addEventListener("click", function(event) { js21OnceTargetBubble = js21OnceTargetBubble + event.eventPhase; }, { once: true });
+js21Parent.addEventListener("click", function(event) {
+    if (event.target === js21Once) {
+        js21OnceBubble = js21OnceBubble + event.eventPhase;
+        js21State.textContent = "once:" + js21OnceCapture + ":" + js21OnceTargetCapture +
+            ":" + js21OnceTargetBubble + ":" + js21OnceBubble;
+    }
+}, { once: true });
+</script>
+</body>
+</html>

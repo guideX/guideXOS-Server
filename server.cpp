@@ -1944,6 +1944,97 @@ static std::string navigatorHostedSmokeDiagnostic() {
         gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
         "replacement page starts without JS20 listeners");
 
+    const bool js21Loaded = gxos::apps::Navigator::SmokeNavigateToQuiet(
+        "http://127.0.0.1:8080/navigator-smoke/javascript-js21.html");
+    const std::string js21InitialText =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    const size_t js21InitialHandlers =
+        gxos::apps::Navigator::SmokeJavaScriptHandlerCount();
+    const size_t js21InitialListeners =
+        gxos::apps::Navigator::SmokeJavaScriptListenerCount();
+    const std::string js21InitialError =
+        gxos::apps::Navigator::SmokeJavaScriptLastError();
+    add("JS21 hosted fixture loads phase registrations",
+        js21Loaded && contains(js21InitialText, "Navigator JavaScript JS21") &&
+        contains(js21InitialText, "Event phases") && js21InitialHandlers == 7u &&
+        js21InitialListeners == 18u && js21InitialError.empty(),
+        std::string("loaded=") + yesNo(js21Loaded) + ",handlers=" +
+        std::to_string(js21InitialHandlers) + ",listeners=" +
+        std::to_string(js21InitialListeners) + ",error=" +
+        (js21InitialError.empty() ? "none" : js21InitialError));
+
+    const bool js21OnceClickOne =
+        gxos::apps::Navigator::SmokeClickFormControlById("js21-once");
+    const bool js21OnceClickTwo =
+        gxos::apps::Navigator::SmokeClickFormControlById("js21-once");
+    add("JS21 once listeners retain their dispatch phases",
+        js21OnceClickOne && js21OnceClickTwo && contains(
+            gxos::apps::Navigator::SmokeCurrentDocumentText(),
+            "once:1:2:2:3"),
+        "ancestor capture=1, target capture/bubble=2, ancestor bubble=3 once");
+
+    const bool js21ChildClick =
+        gxos::apps::Navigator::SmokeClickFormControlById("js21-child");
+    const std::string js21ChildText =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS21 authentic capture-target-bubble phases",
+        js21ChildClick && contains(js21ChildText,
+            "order:r1p1c2o2t2po3p3ro3r3") &&
+        contains(js21ChildText, "target:true") &&
+        contains(js21ChildText, "meta:true") &&
+        contains(js21ChildText, "current:truetruetruetrue") &&
+        contains(js21ChildText, "constants:true"),
+        "expected root/parent capture=1, target handlers=2, ancestors bubble=3");
+    add("JS21 same callback derives phase from dispatch stage",
+        contains(js21ChildText, "same:13") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        "same callback phase evidence is retained in the hosted realm");
+
+    const bool js21TargetStopClick =
+        gxos::apps::Navigator::SmokeClickFormControlById("js21-target-stop");
+    add("JS21 target stopPropagation remains AT_TARGET",
+        js21TargetStopClick && contains(
+            gxos::apps::Navigator::SmokeCurrentDocumentText(),
+            "target-stop:t2o2b2"),
+        "target capture, onclick, and target bubble remain phase 2");
+    const bool js21TargetImmediateClick =
+        gxos::apps::Navigator::SmokeClickFormControlById(
+            "js21-target-immediate");
+    add("JS21 target immediate stop reports AT_TARGET",
+        js21TargetImmediateClick && contains(
+            gxos::apps::Navigator::SmokeCurrentDocumentText(),
+            "target-immediate:c2"),
+        "target immediate stop skips later target handlers and ancestors");
+
+    const bool js21CancelHit =
+        gxos::apps::Navigator::SmokeHitLinkById("js21-cancel");
+    const bool js21CancelledClick =
+        js21CancelHit && !gxos::apps::Navigator::SmokeClickFirstLink();
+    const std::string js21CancelText =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS21 capture preventDefault preserves phase metadata",
+        js21CancelledClick &&
+        gxos::apps::Navigator::SmokeCurrentUrl() ==
+            "http://127.0.0.1:8080/navigator-smoke/javascript-js21.html" &&
+        contains(js21CancelText, "cancel:r1t2p3:true"),
+        "capture cancellation reaches target/bubble without navigation");
+
+    const bool js21CancelHitAgain =
+        gxos::apps::Navigator::SmokeHitLinkById("js21-cancel");
+    const bool js21UncancelledClick =
+        js21CancelHitAgain && gxos::apps::Navigator::SmokeClickFirstLink();
+    add("JS21 ordinary uncancelled link remains functional",
+        js21UncancelledClick && gxos::apps::Navigator::SmokeCurrentUrl() ==
+            "http://127.0.0.1:8080/navigator-smoke/javascript-js21-target.html" &&
+        contains(gxos::apps::Navigator::SmokeCurrentDocumentText(),
+            "Navigator JavaScript JS21 Target"),
+        "second click is not cancelled and navigates authentically");
+    add("JS21 navigation cleanup clears phase-era listeners",
+        gxos::apps::Navigator::SmokeJavaScriptHandlerCount() == 0u &&
+        gxos::apps::Navigator::SmokeJavaScriptListenerCount() == 0u &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        "replacement page starts without JS21 registrations or errors");
+
     bool cssInlineLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-inline.html");
     std::string cssInlineText = gxos::apps::Navigator::SmokeCurrentDocumentText();
     std::string cssInlineReport = gxos::apps::Navigator::SmokeRuntimeReport();

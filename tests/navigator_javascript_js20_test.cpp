@@ -702,7 +702,7 @@ root.addEventListener("click", function(event) { onceBubbleCalls = onceBubbleCal
         "stress: once registrations release bounded slots");
     expect(stress.runtime().objectCount() == objects + 1u,
         "stress: 100 clicks create no additional Event objects");
-    expect(stress.runtime().propertyCount() == properties + 9u,
+    expect(stress.runtime().propertyCount() == properties + 10u,
         "stress: 100 clicks create no additional Event properties");
     expect(stress.runtime().hostObjectCount() == hosts,
         "stress: target/currentTarget wrappers remain bounded");

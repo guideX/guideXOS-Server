@@ -2060,7 +2060,9 @@ bool RuntimeContext::createOrUpdateEventObject(SourceView type,
             !writeProperty(eventObject_, "preventDefault",
                 Value::function(eventPreventDefaultFunction_), error, true) ||
             !writeProperty(eventObject_, "defaultPrevented",
-                Value::boolean(false), error, true)) {
+                Value::boolean(false), error, true) ||
+            !writeProperty(eventObject_, "eventPhase",
+                Value::number(static_cast<double>(eventPhase_)), error, true)) {
             eventObject_ = kInvalidRuntimeObjectId;
             eventStopPropagationFunction_ = kInvalidRuntimeFunctionId;
             eventStopImmediatePropagationFunction_ = kInvalidRuntimeFunctionId;
@@ -2081,6 +2083,7 @@ bool RuntimeContext::createOrUpdateEventObject(SourceView type,
 void RuntimeContext::beginEventDispatch()
 {
     eventDispatchActive_ = true;
+    eventPhase_ = kEventPhaseNone;
     eventPropagationStopped_ = false;
     eventImmediatePropagationStopped_ = false;
     eventDefaultPrevented_ = false;
@@ -2089,14 +2092,35 @@ void RuntimeContext::beginEventDispatch()
         objectAt(eventObject_) != nullptr)
         (void)updateExistingProperty(eventObject_, "defaultPrevented",
             Value::boolean(false), ignored);
+    if (eventObject_ != kInvalidRuntimeObjectId &&
+        objectAt(eventObject_) != nullptr)
+        (void)updateExistingProperty(eventObject_, "eventPhase",
+            Value::number(static_cast<double>(eventPhase_)), ignored);
 }
 
 void RuntimeContext::endEventDispatch()
 {
     eventDispatchActive_ = false;
+    eventPhase_ = kEventPhaseNone;
     eventPropagationStopped_ = false;
     eventImmediatePropagationStopped_ = false;
     eventDefaultPrevented_ = false;
+    RuntimeErrorCode ignored = RuntimeErrorCode::None;
+    if (eventObject_ != kInvalidRuntimeObjectId &&
+        objectAt(eventObject_) != nullptr)
+        (void)updateExistingProperty(eventObject_, "eventPhase",
+            Value::number(static_cast<double>(eventPhase_)), ignored);
+}
+
+void RuntimeContext::setEventPhase(std::uint8_t phase)
+{
+    if (phase > kEventPhaseBubbling) phase = kEventPhaseNone;
+    eventPhase_ = phase;
+    RuntimeErrorCode ignored = RuntimeErrorCode::None;
+    if (eventObject_ != kInvalidRuntimeObjectId &&
+        objectAt(eventObject_) != nullptr)
+        (void)updateExistingProperty(eventObject_, "eventPhase",
+            Value::number(static_cast<double>(eventPhase_)), ignored);
 }
 
 RuntimeContext::RuntimeContext(RuntimeLimits limits)
@@ -2132,12 +2156,14 @@ void RuntimeContext::clearRuntimeState()
     objectPrototype_ = kInvalidRuntimeObjectId;
     arrayPrototype_ = kInvalidRuntimeObjectId;
     mathObject_ = kInvalidRuntimeObjectId;
+    eventConstantsObject_ = kInvalidRuntimeObjectId;
     eventObject_ = kInvalidRuntimeObjectId;
     eventStopPropagationFunction_ = kInvalidRuntimeFunctionId;
     eventStopImmediatePropagationFunction_ = kInvalidRuntimeFunctionId;
     eventPreventDefaultFunction_ = kInvalidRuntimeFunctionId;
     builtInsInitialized_ = false;
     eventDispatchActive_ = false;
+    eventPhase_ = kEventPhaseNone;
     eventPropagationStopped_ = false;
     eventImmediatePropagationStopped_ = false;
     eventDefaultPrevented_ = false;
@@ -2430,6 +2456,44 @@ bool RuntimeContext::initializeBuiltIns(RuntimeErrorCode& error)
         environmentError)) {
         error = RuntimeErrorCode::BuiltInInitializationFailed;
         return false;
+    }
+    const char eventName[] = "Event";
+    // Event constants are optional only when an explicitly tiny caller limit
+    // cannot fit the bounded namespace. This keeps the older runtime limit
+    // contracts meaningful while the default realm exposes Event normally.
+    const std::size_t eventConstantKeyBytes =
+        sizeof("NONE") - 1u + sizeof("CAPTURING_PHASE") - 1u +
+        sizeof("AT_TARGET") - 1u + sizeof("BUBBLING_PHASE") - 1u;
+    const bool canInstallEventConstants =
+        limits_.maxObjects > objects_.size() &&
+        limits_.maxPropertiesPerObject >= 4u &&
+        limits_.maxTotalProperties >= totalPropertyCount_ + 4u &&
+        limits_.maxPropertyNameLength >= sizeof("CAPTURING_PHASE") - 1u &&
+        limits_.maxTotalPropertyKeyBytes >=
+            totalPropertyKeyBytes_ + eventConstantKeyBytes &&
+        limits_.maxBindings >= 2u &&
+        limits_.maxBindingNameLength >= sizeof(eventName) - 1u;
+    if (canInstallEventConstants) {
+        if (!createObject(false, noElements, eventConstantsObject_, error,
+                objectPrototype_)) return false;
+        if (!writeProperty(eventConstantsObject_, "NONE",
+                Value::number(static_cast<double>(kEventPhaseNone)), error,
+                true) ||
+            !writeProperty(eventConstantsObject_, "CAPTURING_PHASE",
+                Value::number(static_cast<double>(kEventPhaseCapturing)), error,
+                true) ||
+            !writeProperty(eventConstantsObject_, "AT_TARGET",
+                Value::number(static_cast<double>(kEventPhaseAtTarget)), error,
+                true) ||
+            !writeProperty(eventConstantsObject_, "BUBBLING_PHASE",
+                Value::number(static_cast<double>(kEventPhaseBubbling)), error,
+                true)) return false;
+        if (!environment_.declare(
+                SourceView(eventName, sizeof(eventName) - 1u),
+                Value::object(eventConstantsObject_), environmentError)) {
+            error = RuntimeErrorCode::BuiltInInitializationFailed;
+            return false;
+        }
     }
     builtInsInitialized_ = true;
     return true;

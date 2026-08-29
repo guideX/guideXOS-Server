@@ -242,8 +242,8 @@ grandparent.addEventListener("click", function(event) {
         "metadata: onclick, listeners, parent, grandparent order");
     expect(harness.runtime().objectCount() == objectsBefore + 1u,
         "metadata: first dispatch creates one cached Event object");
-    expect(harness.runtime().propertyCount() == propertiesBefore + 9u,
-        "metadata: cached Event adds exactly nine fixed properties");
+    expect(harness.runtime().propertyCount() == propertiesBefore + 10u,
+        "metadata: cached Event adds exactly ten fixed properties");
     expect(harness.runtime().nativeFunctionCount() == nativeFunctionsBefore + 3u,
         "metadata: Event metadata adds no native functions");
     expect(harness.runtime().hostObjectCount() >= hostObjectsBefore,
@@ -563,7 +563,7 @@ parent.addEventListener("click", function(event) {
         "stress: once removal leaves one target and one ancestor listener");
     expect(stress.runtime().objectCount() == stressObjects + 1u,
         "stress: 100 clicks create no additional Event objects");
-    expect(stress.runtime().propertyCount() == stressProperties + 9u,
+    expect(stress.runtime().propertyCount() == stressProperties + 10u,
         "stress: 100 clicks create no additional Event properties");
 }
 
