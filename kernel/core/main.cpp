@@ -1026,9 +1026,8 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         }
         
         // Fall back to PCI scan only when BootInfo did not produce a bound
-        // device structure.  A failed I219 hardware stage is intentionally
-        // retained for netdiag so the exact frontier is not erased by a
-        // second identity-only scan.
+        // device structure.  A failed hardware stage is retained for netdiag
+        // so the exact frontier is not erased by a second identity-only scan.
         if (!nicInitialized && kernel::nic::get_device() == nullptr) {
             kernel::serial::puts("[KERNEL] Falling back to PCI scan...\n");
             kernel::nic::init();
@@ -1074,17 +1073,15 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
             kernel::dns::init();
 
             // Reset DHCP state/counters for this boot and seed its XID source
-            // from the active NIC MAC before attempting discovery.
+            // from the active NIC MAC.  Discovery is deliberately user-
+            // initiated after input/main-loop startup; a synchronous DHCP
+            // wait here can starve a physical machine's input path when no
+            // carrier or DHCP server is present.
             kernel::dhcp::init();
-
-            kernel::serial::puts("[KERNEL] Attempting DHCP network configuration...\n");
-            if (kernel::dhcp::discover() == kernel::dhcp::DHCP_OK) {
-                kernel::serial::puts("[KERNEL] DHCP network configuration complete\n");
-                kernel::dns::init();
-            } else {
-                kernel::serial::puts("[KERNEL] DHCP failed, keeping static network configuration\n");
-            }
+            kernel::serial::puts("[KERNEL] DHCP boot discovery deferred; use 'dhcp /discover' after startup\n");
         }
+
+        kernel::serial::puts("[AIDA-PHASE3] checkpoint=network-ready\n");
         
         // ============================================================
         
@@ -1108,6 +1105,7 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         kernel::input::init(kernel::framebuffer::get_width(),
                             kernel::framebuffer::get_height());
         kernel::serial::puts("[KERNEL] Input manager initialized\n");
+        kernel::serial::puts("[AIDA-PHASE3] checkpoint=input-ready\n");
         
         // Update feature report for input devices
         kernel::feature_report::complete_init(kernel::feature_report::INPUT_PS2_KB);
@@ -1159,6 +1157,7 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         kernel::desktop::run_imageviewer_runtime_smoke();
         kernel::serial::puts("[IMAGEVIEWER-RUNTIME-SMOKE] done\n");
 #endif
+        kernel::serial::puts("[AIDA-PHASE3] checkpoint=main-loop-ready\n");
         kernel::serial::puts("[KERNEL] Entering main loop (waiting for input)...\n");
         
         

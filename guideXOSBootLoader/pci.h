@@ -35,6 +35,11 @@ static const uint16_t PCI_DEVICE_E1000E   = 0x10D3;  // 82574L
 static const uint16_t PCI_DEVICE_I217     = 0x153A;  // I217-LM
 static const uint16_t PCI_DEVICE_I219_LM  = 0x156F;  // I219-LM/PCH
 
+// Read-only discovery cannot determine a BAR's resource size without the
+// destructive all-ones sizing transaction.  The approved E1000-family
+// register set used by the kernel fits in this bounded mapping window.
+static const uint64_t PCI_NIC_MMIO_WINDOW_SIZE = 0x6000;
+
 // Maximum devices to track
 static const uint8_t MAX_PCI_DEVICES = 8;
 
@@ -56,7 +61,7 @@ struct PciDevice {
     uint8_t  progIf;
     uint8_t  irqLine;
     uint64_t bar0Phys;      // Selected register BAR physical address
-    uint64_t bar0Size;      // Selected register BAR size
+    uint64_t bar0Size;      // Bounded kernel register-window mapping size
     uint64_t bar0Virt;      // Selected register BAR virtual address (after mapping)
     uint8_t  barIndex;      // Selected BAR number (0..5), 0xFF if unavailable
     bool     isMemoryBar;   // true = MMIO, false = I/O port
@@ -119,8 +124,9 @@ uint8_t  PciRead8(uint8_t bus, uint8_t dev, uint8_t func, uint8_t offset);
 void PciWrite32(uint8_t bus, uint8_t dev, uint8_t func, uint8_t offset, uint32_t value);
 void PciWrite16(uint8_t bus, uint8_t dev, uint8_t func, uint8_t offset, uint16_t value);
 
-// Get the first valid register memory BAR physical address and size.
-// Returns true when a conventional 32/64-bit memory BAR is available.
+// Get the first valid register memory BAR physical address and a bounded
+// kernel register-window mapping size.  This function is read-only: it never
+// writes a BAR or PCI command register to discover resource sizing.
 bool GetRegisterBarInfo(uint8_t bus, uint8_t dev, uint8_t func,
                         uint64_t* outPhys, uint64_t* outSize, bool* outIs64bit,
                         uint8_t* outBarIndex);

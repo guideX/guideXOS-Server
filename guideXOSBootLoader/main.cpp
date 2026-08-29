@@ -976,7 +976,8 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE* SystemTable) {
         Print(L"\n*** Using NIC at [%02x:%02x.%x] ***\n",
               (UINT32)nic->bus, (UINT32)nic->device, (UINT32)nic->function);
         Print(L"    Vendor: %04x  Device: %04x\n", (UINT32)nic->vendorId, (UINT32)nic->deviceId);
-        Print(L"    MMIO Phys: %016lx  Size: %lx\n", nic->bar0Phys, nic->bar0Size);
+        Print(L"    MMIO Phys: %016lx  MapSize: %lx (bounded register window)\n",
+              nic->bar0Phys, nic->bar0Size);
         
         // Store NIC info in BootInfo
         v1BootInfo->Nic.VendorId = nic->vendorId;

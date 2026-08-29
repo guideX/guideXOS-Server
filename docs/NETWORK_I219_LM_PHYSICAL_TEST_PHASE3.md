@@ -1,5 +1,9 @@
 # HP Laptop Test — Intel I219-LM Phase 3
 
+> Historical, unverified test plan. Phase 3 freeze isolation does not assume
+> or enable I219-LM support until an actual AIDA_LPT diagnostic capture proves
+> the PCI identity.
+
 Target: wired Intel I219-LM `8086:156F`, subsystem `103C:8079`, revision `21`.
 
 Boot the Phase-3 UEFI artifact with an Ethernet cable attached. At the guideXOS shell, run:

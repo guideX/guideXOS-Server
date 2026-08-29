@@ -433,11 +433,13 @@ uint8_t enumerate_network_controllers(NetworkControllerInfo* out,
 // Get the MAC address (6 bytes).
 const uint8_t* get_mac_address();
 
-// Get the current link state.
+// Get the cached link state.  This function is side-effect-free and must not
+// perform MMIO/MDIC transactions because it is used by desktop redraw paths.
 LinkState get_link_state();
 
-// Record whether the kernel registered the device IRQ.  RX still uses the
-// bounded main-loop polling path; the IRQ acknowledges hardware events.
+// Record whether the kernel registered the device IRQ.  NIC causes remain
+// masked until this is set true; RX still uses the bounded main-loop polling
+// path and the IRQ acknowledges hardware events.
 void set_irq_registered(bool registered);
 
 // ----------------------------------------------------------------

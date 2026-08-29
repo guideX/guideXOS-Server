@@ -87,8 +87,7 @@ bool IsSupportedNic(uint16_t vendorId, uint16_t deviceId)
     
     return (deviceId == PCI_DEVICE_E1000 ||
             deviceId == PCI_DEVICE_E1000E ||
-            deviceId == PCI_DEVICE_I217 ||
-            deviceId == PCI_DEVICE_I219_LM);
+            deviceId == PCI_DEVICE_I217);
 }
 
 bool GetRegisterBarInfo(uint8_t bus, uint8_t dev, uint8_t func,
@@ -130,51 +129,10 @@ bool GetRegisterBarInfo(uint8_t bus, uint8_t dev, uint8_t func,
             continue;
         }
 
-        // Sizing is performed only for an exact supported Ethernet match by
-        // the caller. Disable decoding while probing, then restore the
-        // command register and both halves of a 64-bit BAR.
-        const uint16_t originalCommand = PciRead16(bus, dev, func, 0x04);
-        PciWrite16(bus, dev, func, 0x04,
-                   static_cast<uint16_t>(originalCommand & ~0x0003u));
-        PciWrite32(bus, dev, func, offset, 0xFFFFFFFFu);
-        if (is64bit) {
-            PciWrite32(bus, dev, func, static_cast<uint8_t>(offset + 4), 0xFFFFFFFFu);
-        }
-
-        const uint32_t sizeBar = PciRead32(bus, dev, func, offset);
-        uint64_t sizeMask = static_cast<uint64_t>(sizeBar & 0xFFFFFFF0u);
-        if (is64bit) {
-            const uint32_t sizeUpperBar =
-                PciRead32(bus, dev, func, static_cast<uint8_t>(offset + 4));
-            sizeMask |= static_cast<uint64_t>(sizeUpperBar) << 32;
-        }
-
-        PciWrite32(bus, dev, func, offset, bar);
-        if (is64bit) {
-            PciWrite32(bus, dev, func, static_cast<uint8_t>(offset + 4), upperBar);
-        }
-        PciWrite16(bus, dev, func, 0x04, originalCommand);
-
-        if (sizeMask == 0 || sizeMask == 0xFFFFFFFFFFFFFFFFULL) {
-            if (is64bit) ++barIndex;
-            continue;
-        }
-
-        // Invert a 32-bit mask at 32-bit width. Widening it first would
-        // produce a false high-half size such as 0xffffffff00020000.
-        const uint32_t sizeMask32 = sizeBar & 0xFFFFFFF0u;
-        const uint64_t size = is64bit
-            ? ((~sizeMask) + 1)
-            : static_cast<uint64_t>((~sizeMask32) + 1u);
-        // The selected register BAR must cover the RAL/RAH window and an
-        // unexpectedly huge BAR is not safe to map in the bootloader.
-        if (size < 0x1000 || size > 0x1000000 || (size & (size - 1)) != 0) {
-            if (is64bit) ++barIndex;
-            continue;
-        }
-
         *outPhys = phys;
-        *outSize = size;
+        // Use only the register range consumed by the kernel.  The actual BAR
+        // resource size is intentionally not guessed by writing all ones.
+        *outSize = PCI_NIC_MMIO_WINDOW_SIZE;
         *outIs64bit = is64bit;
         *outBarIndex = barIndex;
         return true;
@@ -273,10 +231,9 @@ uint8_t EnumeratePci(PciEnumResult* result)
                 // Read IRQ line
                 pciDev->irqLine = PciRead8(bus, dev, func, 0x3C);
                 
-                // Only size a register BAR for a driver-compatible Ethernet device.
-                // Sizing an unsupported network controller writes all ones
-                // to its BAR, which is an unnecessary side effect during an
-                // identification-only audit.
+                // Only select a register BAR for a driver-compatible Ethernet
+                // device.  GetRegisterBarInfo is read-only; unsupported
+                // controllers remain identity-only and are never touched.
                 if (subclass == PCI_SUBCLASS_ETH && IsSupportedNic(vendorId, deviceId)) {
                     pciDev->isMemoryBar = GetRegisterBarInfo(bus, dev, func,
                                                               &pciDev->bar0Phys,
@@ -346,11 +303,7 @@ void PrintPciDevice(EFI_SYSTEM_TABLE* ST, const PciDevice* dev)
     if (dev->classCode == PCI_CLASS_NETWORK &&
         dev->subclass == PCI_SUBCLASS_ETH &&
         IsSupportedNic(dev->vendorId, dev->deviceId)) {
-        if (dev->deviceId == PCI_DEVICE_I219_LM) {
-            Print((CONST CHAR16*)L"    Driver: intel-i219-lm (PCH) (supported)\n");
-        } else {
-            Print((CONST CHAR16*)L"    Driver: intel-e1000 family (supported)\n");
-        }
+        Print((CONST CHAR16*)L"    Driver: intel-e1000 family (supported)\n");
     } else {
         Print((CONST CHAR16*)L"    Driver: unsupported (identity only; no binding)\n");
     }

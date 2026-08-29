@@ -306,13 +306,47 @@ function Start-NavigatorKernelSmokeServers {
         "--public-pilot-tls-cert", "`"$PublicPilotTlsCert`"", "--public-pilot-tls-key", "`"$PublicPilotTlsKey`""
     )
     $httpsProc = Start-Process -FilePath $python -ArgumentList $httpsArgs -PassThru -WindowStyle Hidden -RedirectStandardOutput $httpsLog -RedirectStandardError $httpsErrLog
-    Start-Sleep -Milliseconds 800
-    if ($httpProc.HasExited) {
-        throw "local HTTP smoke server exited early; see $httpLog"
+
+    # DHCP discovery is deliberately deferred until after input/main-loop
+    # startup. Do not let the kernel reach its first TLS probe before the
+    # localhost fixtures are actually listening; a fixed sleep made this
+    # scenario timing-dependent.
+    $serverDeadline = (Get-Date).AddSeconds(10)
+    $httpReady = $false
+    $httpsReady = $false
+    while ((Get-Date) -lt $serverDeadline -and (-not $httpReady -or -not $httpsReady)) {
+        if ($httpProc.HasExited) {
+            throw "local HTTP smoke server exited early; see $httpLog"
+        }
+        if ($httpsProc.HasExited) {
+            throw "local HTTPS smoke server exited early; see $httpsLog"
+        }
+
+        foreach ($probe in @(
+                [pscustomobject]@{ Port = 8080; Ready = 'Http' },
+                [pscustomobject]@{ Port = 8443; Ready = 'Https' })) {
+            $client = New-Object System.Net.Sockets.TcpClient
+            try {
+                $connect = $client.BeginConnect('127.0.0.1', $probe.Port, $null, $null)
+                if ($connect.AsyncWaitHandle.WaitOne(200)) {
+                    $client.EndConnect($connect)
+                    if ($probe.Ready -eq 'Http') { $httpReady = $true }
+                    else { $httpsReady = $true }
+                }
+            } catch {
+                # The bounded retry below handles the normal process-start
+                # interval and leaves real fixture failures visible.
+            } finally {
+                $client.Close()
+            }
+        }
+        if (-not $httpReady -or -not $httpsReady) {
+            Start-Sleep -Milliseconds 100
+        }
     }
-    if ($httpsProc.HasExited) {
-        throw "local HTTPS smoke server exited early; see $httpsLog"
-    }
+
+    if (-not $httpReady) { throw "local HTTP smoke server did not listen on port 8080; see $httpLog" }
+    if (-not $httpsReady) { throw "local HTTPS smoke server did not listen on port 8443; see $httpsLog" }
 
     return [pscustomobject]@{
         HttpProcess = $httpProc
@@ -535,7 +569,11 @@ function Invoke-NavigatorKernelSmokeQemuPass {
             "-machine", "pc",
             "-drive", "if=pflash,format=raw,readonly=on,file=`"$ovmf`"",
             "-drive", "file=fat:rw:`"$esp`",format=raw,if=ide,index=0",
-            "-m", "512M",
+            # The canonical AMD64 kernel image reserves more than 512 MiB of
+            # virtual address space for static runtime storage. Keep this
+            # smoke aligned with build.ps1/release QEMU's 1024 MiB setting so
+            # OVMF can load the guest instead of failing with EFI_OUT_OF_RESOURCES.
+            "-m", "1024M",
             "-vga", "std",
             "-display", "none",
             "-serial", "file:`"$serialLog`"",

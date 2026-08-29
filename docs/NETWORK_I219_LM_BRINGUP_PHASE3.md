@@ -1,5 +1,10 @@
 # Intel I219-LM Bring-Up — Phase 3
 
+> Historical draft retained for audit context. The I219-LM (`8086:156F`)
+> implementation described here is not enabled by the AIDA_LPT freeze
+> isolation work because no AIDA_LPT PCI capture has established that device.
+> Do not treat this document as physical hardware evidence.
+
 Date: 2026-08-28/29
 Target: Intel I219-LM, PCI `8086:156F`, subsystem `103C:8079`, revision `21`
 Outcome: **B — major bring-up implemented; physical verification remains**

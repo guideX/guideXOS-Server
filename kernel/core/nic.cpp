@@ -148,8 +148,7 @@ static bool is_supported_nic(uint16_t vendor, uint16_t device)
     if (vendor != PCI_VENDOR_INTEL) return false;
     return (device == PCI_DEVICE_E1000 ||
             device == PCI_DEVICE_E1000E ||
-            device == PCI_DEVICE_I217 ||
-            device == PCI_DEVICE_I219_LM);
+            device == PCI_DEVICE_I217);
 }
 
 // ================================================================
@@ -575,8 +574,9 @@ static bool init_e1000(uint64_t mmioBase)
         return false;
     }
 
-    // Enable NIC interrupts
-    enable_nic_interrupts(mmioBase);
+    // Keep NIC interrupt causes masked until the kernel has installed the
+    // device IRQ handler.  Enabling them here leaves a real device a window
+    // in which it can assert an IRQ before the handler is registered.
 
     return true;
 }
@@ -947,26 +947,30 @@ LinkState get_link_state()
 {
     if (!s_initialised) return NIC_LINK_DOWN;
 
-#if ARCH_HAS_PORT_IO
-    // A detected-but-not-initialised device has no safe MMIO virtual address.
-    if (!s_device.active || !s_device.mmioMapped) return s_device.link;
-    if (is_i219_device(s_device.deviceId)) {
-        if (!read_i219_phy_status(s_device.mmioBase)) {
-            s_device.link = NIC_LINK_UNKNOWN;
-        }
-    } else {
-        uint32_t status = mmio_read32(s_device.mmioBase, E1000_STATUS);
-        s_device.statusValue = status;
-        s_device.link = (status & E1000_STATUS_LU) ? NIC_LINK_UP : NIC_LINK_DOWN;
-    }
-#endif
-
+    // This is a status query, not a hardware transaction.  The desktop
+    // network widget and shell diagnostics may call it from redraw paths;
+    // those paths must never perform MMIO or a potentially long MDIC poll.
+    // The cached value is populated during bounded initialisation and updated
+    // by the NIC IRQ handler when link-change events are acknowledged.
     return s_device.link;
 }
 
 void set_irq_registered(bool registered)
 {
-    if (s_initialised) s_device.irqRegistered = registered;
+    if (!s_initialised) return;
+
+    s_device.irqRegistered = registered;
+
+#if ARCH_HAS_PORT_IO
+    if (s_device.active && s_device.mmioMapped) {
+        if (registered) {
+            enable_nic_interrupts(s_device.mmioBase);
+        } else {
+            mmio_write32(s_device.mmioBase, E1000_IMC, 0xFFFFFFFFu);
+            mmio_read32(s_device.mmioBase, E1000_ICR);
+        }
+    }
+#endif
 }
 
 // ================================================================
