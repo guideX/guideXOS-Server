@@ -1297,6 +1297,134 @@ typedef struct guidexos_nativeaot_c011ec55_selection_record {
     uintptr_t gen2Fragmentation;
 } guidexos_nativeaot_c011ec55_selection_record;
 
+enum {
+    GUIDEXOS_NATIVEAOT_C011EC56_MAX_SELECTIONS = 512u,
+    GUIDEXOS_NATIVEAOT_C011EC56_MAX_SURVIVOR_OBSERVATIONS = 1024u,
+    GUIDEXOS_NATIVEAOT_C011EC56_MAX_SURVIVORS = 48u,
+    GUIDEXOS_NATIVEAOT_C011EC56_BRANCH_KEEP_GEN0 = 1u,
+    GUIDEXOS_NATIVEAOT_C011EC56_BRANCH_GEN1_ALLOC_BUDGET = 2u,
+    GUIDEXOS_NATIVEAOT_C011EC56_BRANCH_LOW_CARD = 3u,
+    GUIDEXOS_NATIVEAOT_C011EC56_BRANCH_LOW_EPHEMERAL = 4u,
+    GUIDEXOS_NATIVEAOT_C011EC56_BRANCH_TIME_TUNING = 5u,
+    GUIDEXOS_NATIVEAOT_C011EC56_BRANCH_EPHEMERAL_FRAGMENTATION = 6u,
+    GUIDEXOS_NATIVEAOT_C011EC56_BRANCH_LOW_LATENCY_CLAMP = 7u,
+    GUIDEXOS_NATIVEAOT_C011EC56_BRANCH_MEMORY_HIGH = 8u,
+    GUIDEXOS_NATIVEAOT_C011EC56_BRANCH_MEMORY_VERY_HIGH = 9u,
+    GUIDEXOS_NATIVEAOT_C011EC56_BRANCH_MEMORY_FRAGMENTATION = 10u,
+    GUIDEXOS_NATIVEAOT_C011EC56_BRANCH_EXPAND_FULL = 11u,
+    GUIDEXOS_NATIVEAOT_C011EC56_BRANCH_BEFORE_OOM = 12u,
+    GUIDEXOS_NATIVEAOT_C011EC56_BRANCH_INDUCED_BLOCKING = 13u,
+    GUIDEXOS_NATIVEAOT_C011EC56_BRANCH_INDUCED_NOFORCE = 14u,
+    GUIDEXOS_NATIVEAOT_C011EC56_BRANCH_GEN2_ALMOST_BUDGET = 15u,
+    GUIDEXOS_NATIVEAOT_C011EC56_BRANCH_HIGH_FRAGMENTATION_FULL = 16u,
+    GUIDEXOS_NATIVEAOT_C011EC56_BRANCH_ELEVATE_GEN1 = 17u,
+    GUIDEXOS_NATIVEAOT_C011EC56_BRANCH_GEN2_BUDGET_AFTER_GEN1 = 18u,
+    GUIDEXOS_NATIVEAOT_C011EC56_BRANCH_MAX_GENERATION_FRAGMENTATION = 19u,
+};
+
+typedef struct guidexos_nativeaot_c011ec56_policy_record {
+    uint32_t observed;
+    uint32_t ordinal;
+    uint32_t initialGeneration;
+    uint32_t selectedGeneration;
+    uint32_t collectionReason;
+    uint32_t checkOnly;
+    uint32_t blockingCollection;
+    uint32_t elevationRequested;
+    uint32_t promotion;
+    uint32_t lowEphemeral;
+    uint32_t highMemory;
+    uint32_t veryHighMemory;
+    uint32_t highFragmentation;
+    uint32_t evaluateElevation;
+    uint32_t provisionalMode;
+    uint32_t lowMemoryDetected;
+    uint32_t checkMemory;
+    uint32_t branchId;
+    uint32_t firstElevationBranch;
+    uint32_t nAlloc;
+    uint32_t memoryLoad;
+    uint32_t highMemoryThreshold;
+    uint32_t veryHighMemoryThreshold;
+    uint32_t mediumMemoryThreshold;
+    uint32_t reserved[4];
+    uintptr_t availablePhysical;
+    uintptr_t availablePageFile;
+    uintptr_t gen0DesiredAllocation;
+    int64_t gen0NewAllocation;
+    int64_t gen0GcNewAllocation;
+    uintptr_t gen0CurrentSize;
+    uintptr_t gen0Fragmentation;
+    uintptr_t gen0PromotedBytes;
+    uintptr_t gen0SurvivedBytes;
+    uintptr_t gen0BeginDataSize;
+    uintptr_t gen1DesiredAllocation;
+    int64_t gen1NewAllocation;
+    int64_t gen1GcNewAllocation;
+    uintptr_t gen1CurrentSize;
+    uintptr_t gen1Fragmentation;
+    uintptr_t gen1PromotedBytes;
+    uintptr_t gen1SurvivedBytes;
+    uintptr_t gen1BeginDataSize;
+    uintptr_t gen2DesiredAllocation;
+    int64_t gen2NewAllocation;
+    int64_t gen2GcNewAllocation;
+    uintptr_t gen2CurrentSize;
+    uintptr_t gen2Fragmentation;
+    uintptr_t gen2PromotedBytes;
+    uintptr_t gen2SurvivedBytes;
+    uintptr_t gen2BeginDataSize;
+    int64_t gen1BudgetDepletion;
+} guidexos_nativeaot_c011ec56_policy_record;
+
+typedef struct guidexos_nativeaot_c011ec56_survivor_record {
+    uint32_t observed;
+    uint32_t ordinal;
+    uint32_t collectionCount;
+    uint32_t initialGeneration;
+    uint32_t generation;
+    uint32_t valid;
+    uint32_t moved;
+    uint32_t reserved;
+    uintptr_t initialAddress;
+    uintptr_t currentAddress;
+} guidexos_nativeaot_c011ec56_survivor_record;
+
+typedef struct guidexos_nativeaot_c011ec56_lifecycle_record {
+    uint32_t started;
+    uint32_t cohort;
+    uint32_t activeSurvivorCount;
+    uint32_t cohortCount;
+    uint32_t policyObservationCount;
+    uint32_t survivorObservationCount;
+    uint32_t thresholdCrossed;
+    uint32_t firstOlderGenerationObserved;
+    uint32_t firstThresholdOrdinal;
+    uint32_t firstThresholdBranch;
+    uint32_t firstOlderCollectionOrdinal;
+    uint32_t firstOlderGeneration;
+    uint32_t firstOlderReason;
+    uint32_t invariantFailures;
+    uint32_t safeStopReason;
+    uint32_t firstThresholdKind;
+    uint32_t reserved[2];
+    int64_t firstThresholdPreValue;
+    int64_t firstThresholdPostValue;
+    int64_t firstThresholdValue;
+    uintptr_t activeRetainedAlignedBytes;
+    uintptr_t lastGen1PromotedBytes;
+    uintptr_t lastGen1DesiredAllocation;
+    int64_t lastGen1NewAllocation;
+    uint32_t lastPolicyOrdinal;
+    uint32_t lastPolicySelectedGeneration;
+    uint32_t lastPolicyBranch;
+    uint32_t lastPolicyFirstElevationBranch;
+    guidexos_nativeaot_c011ec56_policy_record policies[
+        GUIDEXOS_NATIVEAOT_C011EC56_MAX_SELECTIONS];
+    guidexos_nativeaot_c011ec56_survivor_record survivors[
+        GUIDEXOS_NATIVEAOT_C011EC56_MAX_SURVIVOR_OBSERVATIONS];
+} guidexos_nativeaot_c011ec56_lifecycle_record;
+
 typedef struct guidexos_nativeaot_c011ec54_lifecycle_record {
     uint32_t started;
     uint32_t preflightEmitted;
@@ -3695,6 +3823,8 @@ typedef struct guidexos_nativeaot_allocation_diagnostics {
     guidexos_nativeaot_c011ec53_lifecycle_record c011ec53Lifecycle;
     /* C011EC54 source-correlated generation-boundary lifecycle evidence. */
     guidexos_nativeaot_c011ec54_lifecycle_record c011ec54Lifecycle;
+    /* C011EC56 bounded generation-selection policy and survivor-cohort evidence. */
+    guidexos_nativeaot_c011ec56_lifecycle_record c011ec56Lifecycle;
     /* C011EC44 malformed transition-frame provenance. */
     guidexos_nativeaot_c011ec44_provenance_record c011ec44Provenance;
     /* C011EC45 reverse-P/Invoke slot layout, register, and unwind provenance. */

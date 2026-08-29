@@ -6,7 +6,7 @@ param(
     [switch]$SkipManagedBuild,
     [string]$RuntimePackManifest = "",
     [string]$LockedRuntimeRoot = "",
-    [ValidateSet("single-thread-suspend-ee", "allocation-context-fixup-root-boundary", "first-per-thread-root-provider", "first-root-candidate-load", "first-non-null-root-callback-boundary", "first-root-callback-entry", "first-root-membership-classification", "first-root-heap-resolution", "first-root-condemned-generation-decision", "first-root-pre-mark-boundary", "first-root-first-mark-mutation", "first-root-post-queue-mark-decision", "first-root-first-non-null-old-o", "next-genuine-root-provider", "stack-provider-transition-failfast", "stack-provider-code-manager-registration", "stack-provider-transition-frame-control-pc", "stack-provider-unwind-gc-info", "stack-provider-unwind-caller-frame", "stack-provider-native-transition-continuation", "stack-provider-native-caller-provenance", "stack-provider-native-kernel-entry-boundary", "stack-provider-native-kernel-stack-completion", "post-root-queue-mark-processing", "mark-queue-closure", "post-mark-short-weak-handle", "short-weak-handle-operation", "short-weak-live-handle", "short-weak-dead-handle", "short-weak-lifetime-transition", "relocation-root-update", "relocated-handle-update", "lifetime-transition-complete", "second-collection-completion", "dead-object-reclamation", "collection-plan-mode-provenance-c37", "collection-plan-mode-provenance-c38", "compaction-reclamation", "post-gc-allocator-provenance", "post-gc-reclaimed-gen1-lifecycle", "reclaimed-gen1-natural-reuse", "reclaimed-gen1-ephemeral-transition", "reclaimed-gen1-natural-older-generation-transition", "malformed-transition-frame-provenance", "reverse-pinvoke-slot-provenance", "regdisplay-fp-handoff", "relocation-root-fault-provenance", "iterator-fp-ownership", "second-collection-continuation", "productionized-second-collection")]
+    [ValidateSet("single-thread-suspend-ee", "allocation-context-fixup-root-boundary", "first-per-thread-root-provider", "first-root-candidate-load", "first-non-null-root-callback-boundary", "first-root-callback-entry", "first-root-membership-classification", "first-root-heap-resolution", "first-root-condemned-generation-decision", "first-root-pre-mark-boundary", "first-root-first-mark-mutation", "first-root-post-queue-mark-decision", "first-root-first-non-null-old-o", "next-genuine-root-provider", "stack-provider-transition-failfast", "stack-provider-code-manager-registration", "stack-provider-transition-frame-control-pc", "stack-provider-unwind-gc-info", "stack-provider-unwind-caller-frame", "stack-provider-native-transition-continuation", "stack-provider-native-caller-provenance", "stack-provider-native-kernel-entry-boundary", "stack-provider-native-kernel-stack-completion", "post-root-queue-mark-processing", "mark-queue-closure", "post-mark-short-weak-handle", "short-weak-handle-operation", "short-weak-live-handle", "short-weak-dead-handle", "short-weak-lifetime-transition", "relocation-root-update", "relocated-handle-update", "lifetime-transition-complete", "second-collection-completion", "dead-object-reclamation", "collection-plan-mode-provenance-c37", "collection-plan-mode-provenance-c38", "compaction-reclamation", "post-gc-allocator-provenance", "post-gc-reclaimed-gen1-lifecycle", "reclaimed-gen1-natural-reuse", "reclaimed-gen1-ephemeral-transition", "reclaimed-gen1-natural-older-generation-transition", "natural-gen1-condemnation-policy-threshold", "malformed-transition-frame-provenance", "reverse-pinvoke-slot-provenance", "regdisplay-fp-handoff", "relocation-root-fault-provenance", "iterator-fp-ownership", "second-collection-continuation", "productionized-second-collection")]
     [string]$ProofMode = "single-thread-suspend-ee"
 )
 
@@ -99,6 +99,8 @@ if ([string]::IsNullOrWhiteSpace($EvidenceRoot)) {
         Join-Path $root "out\dotnet\c011ec54-reclaimed-gen1-ephemeral-transition"
     } elseif ($ProofMode -eq "reclaimed-gen1-natural-older-generation-transition") {
         Join-Path $root "out\dotnet\c011ec55-natural-older-generation-transition"
+    } elseif ($ProofMode -eq "natural-gen1-condemnation-policy-threshold") {
+        Join-Path $root "out\dotnet\c011ec56-natural-gen1-condemnation-policy-threshold"
     } elseif ($ProofMode -eq "post-mark-short-weak-handle") {
         Join-Path $root "out\dotnet\c011ec29-post-mark-short-weak-handle"
     } elseif ($ProofMode -eq "first-root-post-queue-mark-decision") {
@@ -140,9 +142,10 @@ $isC011EC36 = $ProofMode -eq "lifetime-transition-complete"
 $isC011EC38 = $ProofMode -eq "dead-object-reclamation"
 $isC011EC53 = $ProofMode -eq "reclaimed-gen1-natural-reuse"
 $isC011EC54 = $ProofMode -eq "reclaimed-gen1-ephemeral-transition"
-$isC011EC55 = $ProofMode -eq "reclaimed-gen1-natural-older-generation-transition"
+$isC011EC56 = $ProofMode -eq "natural-gen1-condemnation-policy-threshold"
+$isC011EC55 = $ProofMode -in @("reclaimed-gen1-natural-older-generation-transition", "natural-gen1-condemnation-policy-threshold")
 $isC011EC54Lifecycle = $isC011EC54 -or $isC011EC55
-$isC011EC50Production = $ProofMode -in @("productionized-second-collection", "reclaimed-gen1-natural-reuse", "reclaimed-gen1-ephemeral-transition", "reclaimed-gen1-natural-older-generation-transition")
+$isC011EC50Production = $ProofMode -in @("productionized-second-collection", "reclaimed-gen1-natural-reuse", "reclaimed-gen1-ephemeral-transition", "reclaimed-gen1-natural-older-generation-transition", "natural-gen1-condemnation-policy-threshold")
 $isC011EC49 = $ProofMode -in @("second-collection-continuation", "productionized-second-collection")
 $isC011EC48 = $ProofMode -in @("iterator-fp-ownership", "second-collection-continuation")
 $isC011EC47 = $ProofMode -in @("relocation-root-fault-provenance", "iterator-fp-ownership", "second-collection-continuation")
@@ -150,41 +153,41 @@ $isC011EC46 = $ProofMode -in @("regdisplay-fp-handoff", "relocation-root-fault-p
 $isC011EC45 = $ProofMode -in @("reverse-pinvoke-slot-provenance", "regdisplay-fp-handoff", "relocation-root-fault-provenance", "iterator-fp-ownership", "second-collection-continuation", "productionized-second-collection")
 $isC011EC44 = $ProofMode -in @("malformed-transition-frame-provenance", "reverse-pinvoke-slot-provenance", "regdisplay-fp-handoff", "relocation-root-fault-provenance", "iterator-fp-ownership", "second-collection-continuation", "productionized-second-collection")
 $isC011EC42 = $ProofMode -in @("post-gc-reclaimed-gen1-lifecycle", "malformed-transition-frame-provenance", "reverse-pinvoke-slot-provenance", "regdisplay-fp-handoff", "relocation-root-fault-provenance", "iterator-fp-ownership")
-$isC011EC41 = $ProofMode -in @("post-gc-allocator-provenance", "post-gc-reclaimed-gen1-lifecycle", "reclaimed-gen1-natural-reuse", "reclaimed-gen1-ephemeral-transition", "reclaimed-gen1-natural-older-generation-transition", "malformed-transition-frame-provenance", "reverse-pinvoke-slot-provenance", "regdisplay-fp-handoff", "relocation-root-fault-provenance", "iterator-fp-ownership", "second-collection-continuation", "productionized-second-collection")
-$isC011EC40 = $ProofMode -in @("compaction-reclamation", "post-gc-allocator-provenance", "post-gc-reclaimed-gen1-lifecycle", "reclaimed-gen1-natural-reuse", "reclaimed-gen1-ephemeral-transition", "reclaimed-gen1-natural-older-generation-transition", "malformed-transition-frame-provenance", "reverse-pinvoke-slot-provenance", "regdisplay-fp-handoff", "relocation-root-fault-provenance", "iterator-fp-ownership", "second-collection-continuation", "productionized-second-collection")
-$isC011EC39 = $ProofMode -in @("collection-plan-mode-provenance-c37", "collection-plan-mode-provenance-c38", "compaction-reclamation", "post-gc-allocator-provenance", "post-gc-reclaimed-gen1-lifecycle", "reclaimed-gen1-natural-reuse", "reclaimed-gen1-ephemeral-transition", "reclaimed-gen1-natural-older-generation-transition", "malformed-transition-frame-provenance", "reverse-pinvoke-slot-provenance", "regdisplay-fp-handoff", "relocation-root-fault-provenance", "iterator-fp-ownership", "second-collection-continuation", "productionized-second-collection")
+$isC011EC41 = $isC011EC56 -or $ProofMode -in @("post-gc-allocator-provenance", "post-gc-reclaimed-gen1-lifecycle", "reclaimed-gen1-natural-reuse", "reclaimed-gen1-ephemeral-transition", "reclaimed-gen1-natural-older-generation-transition", "malformed-transition-frame-provenance", "reverse-pinvoke-slot-provenance", "regdisplay-fp-handoff", "relocation-root-fault-provenance", "iterator-fp-ownership", "second-collection-continuation", "productionized-second-collection")
+$isC011EC40 = $isC011EC56 -or $ProofMode -in @("compaction-reclamation", "post-gc-allocator-provenance", "post-gc-reclaimed-gen1-lifecycle", "reclaimed-gen1-natural-reuse", "reclaimed-gen1-ephemeral-transition", "reclaimed-gen1-natural-older-generation-transition", "malformed-transition-frame-provenance", "reverse-pinvoke-slot-provenance", "regdisplay-fp-handoff", "relocation-root-fault-provenance", "iterator-fp-ownership", "second-collection-continuation", "productionized-second-collection")
+$isC011EC39 = $isC011EC56 -or $ProofMode -in @("collection-plan-mode-provenance-c37", "collection-plan-mode-provenance-c38", "compaction-reclamation", "post-gc-allocator-provenance", "post-gc-reclaimed-gen1-lifecycle", "reclaimed-gen1-natural-reuse", "reclaimed-gen1-ephemeral-transition", "reclaimed-gen1-natural-older-generation-transition", "malformed-transition-frame-provenance", "reverse-pinvoke-slot-provenance", "regdisplay-fp-handoff", "relocation-root-fault-provenance", "iterator-fp-ownership", "second-collection-continuation", "productionized-second-collection")
 $isC011EC39C38Variant = $ProofMode -eq "collection-plan-mode-provenance-c38"
 $useC011EC46SemanticInjection = $isC011EC46 -and -not $isC011EC50Production
 if ($isC011EC50Production -and $useC011EC46SemanticInjection) {
     throw "C51 semantic-rewrite guard failed: C46/C47/C48 semantic injection is enabled in productionized mode."
 }
 $isC011EC37 = $ProofMode -in @("second-collection-completion", "dead-object-reclamation") -or $isC011EC39 -or $isC011EC55
-$isC011EC35 = $ProofMode -in @("relocated-handle-update", "lifetime-transition-complete", "second-collection-completion", "dead-object-reclamation")
+$isC011EC35 = $isC011EC56 -or $ProofMode -in @("relocated-handle-update", "lifetime-transition-complete", "second-collection-completion", "dead-object-reclamation")
 $isC011EC35Proof = $ProofMode -eq "relocated-handle-update"
-$isC011EC34 = $ProofMode -in @("relocation-root-update", "relocated-handle-update", "lifetime-transition-complete", "second-collection-completion", "dead-object-reclamation")
-$isC011EC33 = $ProofMode -in @("short-weak-lifetime-transition", "relocation-root-update", "relocated-handle-update", "lifetime-transition-complete", "second-collection-completion", "dead-object-reclamation")
+$isC011EC34 = $isC011EC56 -or $ProofMode -in @("relocation-root-update", "relocated-handle-update", "lifetime-transition-complete", "second-collection-completion", "dead-object-reclamation")
+$isC011EC33 = $isC011EC56 -or $ProofMode -in @("short-weak-lifetime-transition", "relocation-root-update", "relocated-handle-update", "lifetime-transition-complete", "second-collection-completion", "dead-object-reclamation")
 $isC011EC31 = $ProofMode -eq "short-weak-live-handle"
-$isC011EC32 = $ProofMode -in @("short-weak-dead-handle", "short-weak-lifetime-transition", "relocation-root-update", "relocated-handle-update", "lifetime-transition-complete", "second-collection-completion", "dead-object-reclamation")
+$isC011EC32 = $isC011EC56 -or $ProofMode -in @("short-weak-dead-handle", "short-weak-lifetime-transition", "relocation-root-update", "relocated-handle-update", "lifetime-transition-complete", "second-collection-completion", "dead-object-reclamation")
 $isC011EC30 = $isC011EC31 -or $isC011EC32 -or ($ProofMode -eq "short-weak-handle-operation")
-$isC011EC29 = $ProofMode -in @("post-mark-short-weak-handle", "short-weak-handle-operation", "short-weak-live-handle", "short-weak-dead-handle", "short-weak-lifetime-transition", "relocation-root-update", "relocated-handle-update", "lifetime-transition-complete", "second-collection-completion", "dead-object-reclamation")
+$isC011EC29 = $isC011EC56 -or $ProofMode -in @("post-mark-short-weak-handle", "short-weak-handle-operation", "short-weak-live-handle", "short-weak-dead-handle", "short-weak-lifetime-transition", "relocation-root-update", "relocated-handle-update", "lifetime-transition-complete", "second-collection-completion", "dead-object-reclamation")
 $isC011EC28 = $isC011EC29 -or ($ProofMode -eq "mark-queue-closure")
 $isC011EC27Stop = $ProofMode -eq "post-root-queue-mark-processing"
 $isC011EC27 = $isC011EC28 -or $isC011EC27Stop
-$isC011EC26 = $isC011EC27 -or $ProofMode -eq "stack-provider-native-kernel-stack-completion"
+$isC011EC26 = $isC011EC56 -or $isC011EC27 -or $ProofMode -eq "stack-provider-native-kernel-stack-completion"
 $isC011EC25 = $isC011EC26 -or $ProofMode -eq "stack-provider-native-kernel-entry-boundary"
 $isC011EC24 = $isC011EC25 -or $ProofMode -eq "stack-provider-native-caller-provenance"
 $isC011EC21 = $isC011EC24 -or $ProofMode -eq "stack-provider-native-transition-continuation"
 $isC011EC23 = $isC011EC21
 $isC011EC20 = $isC011EC24 -or $ProofMode -in @("stack-provider-unwind-caller-frame", "stack-provider-native-transition-continuation")
 $isC011EC19 = $isC011EC24 -or $ProofMode -in @("stack-provider-unwind-gc-info", "stack-provider-unwind-caller-frame", "stack-provider-native-transition-continuation")
-$isNextGenuineRootProvider = $isC011EC24 -or $ProofMode -in @("next-genuine-root-provider", "stack-provider-transition-failfast", "stack-provider-code-manager-registration", "stack-provider-transition-frame-control-pc", "stack-provider-unwind-gc-info", "stack-provider-unwind-caller-frame", "stack-provider-native-transition-continuation", "mark-queue-closure", "post-mark-short-weak-handle", "short-weak-handle-operation", "short-weak-live-handle", "short-weak-dead-handle", "short-weak-lifetime-transition", "relocation-root-update", "relocated-handle-update", "lifetime-transition-complete", "second-collection-completion", "dead-object-reclamation")
+$isNextGenuineRootProvider = $isC011EC24 -or $isC011EC56 -or $ProofMode -in @("next-genuine-root-provider", "stack-provider-transition-failfast", "stack-provider-code-manager-registration", "stack-provider-transition-frame-control-pc", "stack-provider-unwind-gc-info", "stack-provider-unwind-caller-frame", "stack-provider-native-transition-continuation", "mark-queue-closure", "post-mark-short-weak-handle", "short-weak-handle-operation", "short-weak-live-handle", "short-weak-dead-handle", "short-weak-lifetime-transition", "relocation-root-update", "relocated-handle-update", "lifetime-transition-complete", "second-collection-completion", "dead-object-reclamation")
 $isFirstRootPreMarkBoundary = $ProofMode -in @("first-root-pre-mark-boundary", "first-root-first-mark-mutation", "first-root-post-queue-mark-decision")
 $isFirstRootHeapResolutionOrCondemned = $isFirstRootHeapResolution -or $isFirstRootCondemnedGenerationDecision -or $isFirstRootPreMarkBoundary
 $isFirstRootCondemnedGenerationDecisionOrPreMark = $isFirstRootCondemnedGenerationDecision -or $isFirstRootPreMarkBoundary
 $isFirstRootMembershipClassification = $ProofMode -eq "first-root-membership-classification"
 $isFirstRootCallbackEntry = $isC011EC24 -or $isC011EC37 -or $isC011EC38 -or $ProofMode -in @("first-root-callback-entry", "first-root-membership-classification", "first-root-heap-resolution", "first-root-condemned-generation-decision", "first-root-pre-mark-boundary", "first-root-first-mark-mutation", "first-root-post-queue-mark-decision", "first-root-first-non-null-old-o", "next-genuine-root-provider", "stack-provider-transition-failfast", "stack-provider-code-manager-registration", "stack-provider-transition-frame-control-pc", "stack-provider-unwind-gc-info", "stack-provider-unwind-caller-frame", "stack-provider-native-transition-continuation", "mark-queue-closure", "post-mark-short-weak-handle", "short-weak-handle-operation", "short-weak-live-handle", "short-weak-dead-handle", "short-weak-lifetime-transition", "relocation-root-update", "relocated-handle-update", "lifetime-transition-complete", "second-collection-completion", "dead-object-reclamation")
 $isFirstNonNullRoot = $ProofMode -eq "first-non-null-root-callback-boundary"
-$isCandidateLoadEnumeration = $isFirstRootCandidateLoad -or $isFirstNonNullRoot -or $isFirstRootCallbackEntry
+$isCandidateLoadEnumeration = $isFirstRootCandidateLoad -or $isFirstNonNullRoot -or $isFirstRootCallbackEntry -or $isNextGenuineRootProvider
 $isFirstPerThreadRootProvider = $isC011EC24 -or $isC011EC37 -or $isC011EC38 -or $ProofMode -in @("first-per-thread-root-provider", "first-root-candidate-load", "first-non-null-root-callback-boundary", "first-root-callback-entry", "first-root-membership-classification", "first-root-heap-resolution", "first-root-condemned-generation-decision", "first-root-pre-mark-boundary", "first-root-first-mark-mutation", "first-root-post-queue-mark-decision", "first-root-first-non-null-old-o", "next-genuine-root-provider", "stack-provider-transition-failfast", "stack-provider-code-manager-registration", "stack-provider-transition-frame-control-pc", "stack-provider-unwind-gc-info", "stack-provider-unwind-caller-frame", "stack-provider-native-transition-continuation", "short-weak-handle-operation", "short-weak-live-handle", "short-weak-dead-handle", "relocation-root-update", "relocated-handle-update", "lifetime-transition-complete", "second-collection-completion", "dead-object-reclamation")
 $isAllocationContextFixupRootBoundary = $isC011EC24 -or $isC011EC37 -or $isC011EC38 -or $ProofMode -in @("allocation-context-fixup-root-boundary", "first-per-thread-root-provider", "first-root-candidate-load", "first-non-null-root-callback-boundary", "first-root-callback-entry", "first-root-membership-classification", "first-root-heap-resolution", "first-root-condemned-generation-decision", "first-root-pre-mark-boundary", "first-root-first-mark-mutation", "first-root-post-queue-mark-decision", "first-root-first-non-null-old-o", "next-genuine-root-provider", "stack-provider-transition-failfast", "stack-provider-code-manager-registration", "stack-provider-transition-frame-control-pc", "stack-provider-unwind-gc-info", "stack-provider-unwind-caller-frame", "stack-provider-native-transition-continuation", "short-weak-handle-operation", "short-weak-live-handle", "short-weak-dead-handle", "relocation-root-update", "relocated-handle-update", "lifetime-transition-complete", "second-collection-completion", "dead-object-reclamation")
 $isC011EC39C37Instrumentation = $isC011EC39
@@ -224,7 +227,7 @@ if ($isC011EC47) {
 if ($isC011EC48) {
     $c011ec46Define += $c011ec48Define
 }
-$proofDefine = if ($isNextGenuineRootProvider -or $isC011EC39) {
+$proofDefine = if ($isNextGenuineRootProvider -or $isC011EC39 -or $isC011EC55) {
     $minimalDefine = if ($isStackProviderTransitionFailFast) { " /DGUIDEXOS_NATIVEAOT_STACK_PROVIDER_TRANSITION_FAILFAST_MINIMAL" } else { "" }
     $codeManagerDefine = if ($isCodeManagerRegistration) { " /DGUIDEXOS_NATIVEAOT_C011EC17_CODE_MANAGER" } elseif ($useStockRhpNewArrayEntry) { " /DGUIDEXOS_NATIVEAOT_USE_STOCK_RHP_NEW_ARRAY_ENTRY /DGUIDEXOS_NATIVEAOT_C011EC18_NATIVE_RHP_NEW_ARRAY" } else { "" }
     $c19Define = if ($isC011EC19) { " /DGUIDEXOS_NATIVEAOT_C011EC19_UNWIND_GC_INFO" } else { "" }
@@ -252,8 +255,9 @@ $proofDefine = if ($isNextGenuineRootProvider -or $isC011EC39) {
     $c53Define = if ($isC011EC53) { " /DGUIDEXOS_NATIVEAOT_C011EC53_RECLAIMED_GEN1_NATURAL_REUSE" } else { "" }
     $c54Define = if ($isC011EC54Lifecycle) { " /DGUIDEXOS_NATIVEAOT_C011EC54_RECLAIMED_GEN1_EPHEMERAL_TRANSITION" } else { "" }
     $c55Define = if ($isC011EC55) { " /DGUIDEXOS_NATIVEAOT_C011EC55_NATURAL_OLDER_GENERATION_TRANSITION" } else { "" }
-    $firstNonNullDefine = if ($isC011EC31 -or $isC011EC32) { "" } else { " /DGUIDEXOS_NATIVEAOT_FIRST_NON_NULL_ROOT_ALLOCATION" }
-    "/DGUIDEXOS_NATIVEAOT_ALLOCATION_CONTEXT_FIXUP_ROOT_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_PER_THREAD_ROOT_PROVIDER_ALLOCATION$firstNonNullDefine /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CALLBACK_ENTRY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_MEMBERSHIP_CLASSIFICATION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_HEAP_RESOLUTION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CONDEMNED_GENERATION_DECISION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_PRE_MARK_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_NON_NULL_OLD_O_ALLOCATION /DGUIDEXOS_NATIVEAOT_NEXT_GENUINE_ROOT_PROVIDER_ALLOCATION$minimalDefine$codeManagerDefine$c19Define$c20Define$c21Define$c23Define$c24Define$c25Define$c26Define$c27Define$c28Define$c29Define$c31Define$c32Define$c33Define$c34Define$c35Define$c36Define$c37Define$c38Define$c39Define$c40Define$c41Define$c42Define$c53Define$c54Define$c55Define$c011ec49Define"
+    $c56Define = if ($isC011EC56) { " /DGUIDEXOS_NATIVEAOT_C011EC56_POLICY_THRESHOLD" } else { "" }
+    $firstNonNullDefine = if ($isC011EC31 -or $isC011EC32 -or $isC011EC56) { "" } else { " /DGUIDEXOS_NATIVEAOT_FIRST_NON_NULL_ROOT_ALLOCATION" }
+    "/DGUIDEXOS_NATIVEAOT_ALLOCATION_CONTEXT_FIXUP_ROOT_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_PER_THREAD_ROOT_PROVIDER_ALLOCATION$firstNonNullDefine /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CALLBACK_ENTRY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_MEMBERSHIP_CLASSIFICATION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_HEAP_RESOLUTION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CONDEMNED_GENERATION_DECISION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_PRE_MARK_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_NON_NULL_OLD_O_ALLOCATION /DGUIDEXOS_NATIVEAOT_NEXT_GENUINE_ROOT_PROVIDER_ALLOCATION$minimalDefine$codeManagerDefine$c19Define$c20Define$c21Define$c23Define$c24Define$c25Define$c26Define$c27Define$c28Define$c29Define$c31Define$c32Define$c33Define$c34Define$c35Define$c36Define$c37Define$c38Define$c39Define$c40Define$c41Define$c42Define$c53Define$c54Define$c55Define$c56Define$c011ec49Define"
 } elseif ($isFirstRootFirstNonNullOldO) {
     "/DGUIDEXOS_NATIVEAOT_ALLOCATION_CONTEXT_FIXUP_ROOT_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_PER_THREAD_ROOT_PROVIDER_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_NON_NULL_ROOT_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CALLBACK_ENTRY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_MEMBERSHIP_CLASSIFICATION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_HEAP_RESOLUTION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CONDEMNED_GENERATION_DECISION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_PRE_MARK_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_NON_NULL_OLD_O_ALLOCATION"
 } elseif ($isFirstRootPostQueueMarkDecision) {
@@ -280,6 +284,9 @@ $proofDefine = if ($isNextGenuineRootProvider -or $isC011EC39) {
     "/DGUIDEXOS_NATIVEAOT_ALLOCATION_CONTEXT_FIXUP_ROOT_BOUNDARY_ALLOCATION"
 } else {
     ""
+}
+if ($isC011EC55) {
+    $proofDefine += " /DGUIDEXOS_NATIVEAOT_C011EC18_NATIVE_RHP_NEW_ARRAY /DGUIDEXOS_NATIVEAOT_C011EC20_UNWIND /DGUIDEXOS_NATIVEAOT_C011EC27_POST_ROOT_QUEUE /DGUIDEXOS_NATIVEAOT_C011EC33_LIFETIME_TRANSITION"
 }
 $evidence = [System.IO.Path]::GetFullPath($EvidenceRoot)
 $runRoot = Join-Path $evidence (Get-Date -Format "run-yyyyMMdd-HHmmssfff")
@@ -392,6 +399,14 @@ function Get-MarkerField([string]$Text, [string]$Name) {
     if (-not $match.Success) { return $null }
     $value = if ($match.Groups['value16'].Success) { $match.Groups['value16'].Value } else { $match.Groups['value8'].Value }
     return "0x" + $value.ToUpperInvariant()
+}
+
+function Get-C011EC56MarkerRecords([string]$Text, [string]$Marker) {
+    # The target serial path can concatenate multiple diagnostic writes before
+    # the UART reader sees a line break.  Split on the next nativeaot marker so
+    # policy/cohort records remain individually parseable and bounded.
+    $pattern = 'marker=' + [regex]::Escape($Marker) + '(?=(?:\s|$))(?:(?!\s+\[nativeaot-).)*'
+    return @([regex]::Matches($Text, $pattern) | ForEach-Object { $_.Value.Trim() })
 }
 
 $startingCommittedHead = (& git -C $root rev-parse HEAD).Trim()
@@ -2216,6 +2231,34 @@ extern "C" void __cdecl guideXosNativeAotC011EC55GenerationSelectionObserved(
     uintptr_t gen2CurrentSize, uintptr_t gen2Fragmentation);
 '@
             }
+            if ($isC011EC56) {
+                $c54GcDeclaration += [Environment]::NewLine + @'
+extern "C" void __cdecl guideXosNativeAotC011EC56GenerationSelectionObserved(
+    uint32_t initialGeneration, uint32_t selectedGeneration,
+    uint32_t collectionReason, uint32_t checkOnly,
+    uint32_t blockingCollection, uint32_t elevationRequested,
+    uint32_t promotion, uint32_t lowEphemeral, uint32_t highMemory,
+    uint32_t veryHighMemory, uint32_t highFragmentation,
+    uint32_t evaluateElevation, uint32_t provisionalMode,
+    uint32_t lowMemoryDetected, uint32_t checkMemory,
+    uint32_t branchId, uint32_t firstElevationBranch, uint32_t nAlloc,
+    uint32_t memoryLoad, uint32_t highMemoryThreshold,
+    uint32_t veryHighMemoryThreshold, uint32_t mediumMemoryThreshold,
+    uintptr_t availablePhysical, uintptr_t availablePageFile,
+    uintptr_t gen0DesiredAllocation, intptr_t gen0NewAllocation,
+    intptr_t gen0GcNewAllocation, uintptr_t gen0CurrentSize,
+    uintptr_t gen0Fragmentation, uintptr_t gen0PromotedBytes,
+    uintptr_t gen0SurvivedBytes, uintptr_t gen0BeginDataSize,
+    uintptr_t gen1DesiredAllocation, intptr_t gen1NewAllocation,
+    intptr_t gen1GcNewAllocation, uintptr_t gen1CurrentSize,
+    uintptr_t gen1Fragmentation, uintptr_t gen1PromotedBytes,
+    uintptr_t gen1SurvivedBytes, uintptr_t gen1BeginDataSize,
+    uintptr_t gen2DesiredAllocation, intptr_t gen2NewAllocation,
+    intptr_t gen2GcNewAllocation, uintptr_t gen2CurrentSize,
+    uintptr_t gen2Fragmentation, uintptr_t gen2PromotedBytes,
+    uintptr_t gen2SurvivedBytes, uintptr_t gen2BeginDataSize);
+'@
+            }
             $gcCppText = $gcCppText.Replace('#include "gcpriv.h"', '#include "gcpriv.h"' + [Environment]::NewLine + [Environment]::NewLine + $c54GcDeclaration.TrimEnd())
 
             if ($isC011EC55) {
@@ -2239,6 +2282,187 @@ extern "C" void __cdecl guideXosNativeAotC011EC55GenerationSelectionObserved(
                     '        static_cast<uintptr_t>(dd_current_size(dynamic_data_of (1))), static_cast<uintptr_t>(dd_fragmentation(dynamic_data_of (1))),' + $lockedSourceNewLine +
                     '        static_cast<uintptr_t>(dd_desired_allocation(dynamic_data_of (2))), static_cast<uintptr_t>(dd_new_allocation(dynamic_data_of (2))),' + $lockedSourceNewLine +
                     '        static_cast<uintptr_t>(dd_current_size(dynamic_data_of (2))), static_cast<uintptr_t>(dd_fragmentation(dynamic_data_of (2))));' + $lockedSourceNewLine
+                $selectionFunction = $selectionFunction.Substring(0, $selectionReturn) + $selectionCallback + $selectionFunction.Substring($selectionReturn)
+                $gcCppText = $gcCppText.Substring(0, $selectionStart) + $selectionFunction + $gcCppText.Substring($selectionEnd)
+            }
+
+            if ($isC011EC56) {
+                $selectionStart = $gcCppText.IndexOf('int gc_heap::generation_to_condemn (int n_initial,')
+                $selectionEnd = $gcCppText.IndexOf('#ifdef _PREFAST_', $selectionStart)
+                if ($selectionStart -lt 0 -or $selectionEnd -le $selectionStart) { throw "C011EC56 could not isolate generation_to_condemn." }
+                $selectionFunction = $gcCppText.Substring($selectionStart, $selectionEnd - $selectionStart)
+                $selectionEntryNeedle = '    int n = n_initial;' + $lockedSourceNewLine +
+                    '    int n_alloc = n;' + $lockedSourceNewLine
+                $selectionEntryReplacement = $selectionEntryNeedle +
+                    '    uint32_t guideXosNativeAotC011EC56LastBranch = 0u;' + $lockedSourceNewLine +
+                    '    uint32_t guideXosNativeAotC011EC56FirstElevationBranch = 0u;' + $lockedSourceNewLine
+                if (-not $selectionFunction.Contains($selectionEntryNeedle)) { throw "C011EC56 generation_to_condemn entry was not found." }
+                $selectionFunction = $selectionFunction.Replace($selectionEntryNeedle, $selectionEntryReplacement)
+
+                $branchReplacements = @(
+                    @{
+                        Needle = '                if (get_new_allocation (i) <= 0)' + $lockedSourceNewLine +
+                            '                {' + $lockedSourceNewLine +
+                            '                    n = max_generation;'
+                        Replacement = '                if (get_new_allocation (i) <= 0)' + $lockedSourceNewLine +
+                            '                {' + $lockedSourceNewLine +
+                            '                    guideXosNativeAotC011EC56LastBranch = 1u;' + $lockedSourceNewLine +
+                            '                    if (guideXosNativeAotC011EC56FirstElevationBranch == 0u && n < max_generation) guideXosNativeAotC011EC56FirstElevationBranch = 1u;' + $lockedSourceNewLine +
+                            '                    n = max_generation;'
+                    },
+                    @{
+                        Needle = '            if (get_new_allocation (i) <= 0)' + $lockedSourceNewLine +
+                            '            {' + $lockedSourceNewLine +
+                            '                n = i;'
+                        Replacement = '            if (get_new_allocation (i) <= 0)' + $lockedSourceNewLine +
+                            '            {' + $lockedSourceNewLine +
+                            '                guideXosNativeAotC011EC56LastBranch = 2u;' + $lockedSourceNewLine +
+                            '                if (guideXosNativeAotC011EC56FirstElevationBranch == 0u && n < i) guideXosNativeAotC011EC56FirstElevationBranch = 2u;' + $lockedSourceNewLine +
+                            '                n = i;'
+                    },
+                    @{
+                        Needle = '                n = min (i, n_time_max);'
+                        Replacement = '                guideXosNativeAotC011EC56LastBranch = 5u;' + $lockedSourceNewLine +
+                            '                if (guideXosNativeAotC011EC56FirstElevationBranch == 0u && n < i) guideXosNativeAotC011EC56FirstElevationBranch = 5u;' + $lockedSourceNewLine +
+                            '                n = min (i, n_time_max);'
+                    },
+                    @{
+                        Needle = '            n = max (n, max_generation - 1);'
+                        Replacement = '            guideXosNativeAotC011EC56LastBranch = 3u;' + $lockedSourceNewLine +
+                            '            if (guideXosNativeAotC011EC56FirstElevationBranch == 0u && n < (max_generation - 1)) guideXosNativeAotC011EC56FirstElevationBranch = 3u;' + $lockedSourceNewLine +
+                            '            n = max (n, max_generation - 1);'
+                    },
+                    @{
+                        Needle = '        n = max (n, max_generation - 1);'
+                        Replacement = '        guideXosNativeAotC011EC56LastBranch = 4u;' + $lockedSourceNewLine +
+                            '        if (guideXosNativeAotC011EC56FirstElevationBranch == 0u && n < (max_generation - 1)) guideXosNativeAotC011EC56FirstElevationBranch = 4u;' + $lockedSourceNewLine +
+                            '        n = max (n, max_generation - 1);'
+                    },
+                    @{
+                        Needle = '            n = i;' + $lockedSourceNewLine
+                        Replacement = '            guideXosNativeAotC011EC56LastBranch = 6u;' + $lockedSourceNewLine +
+                            '            if (guideXosNativeAotC011EC56FirstElevationBranch == 0u && n < i) guideXosNativeAotC011EC56FirstElevationBranch = 6u;' + $lockedSourceNewLine +
+                            '            n = i;' + $lockedSourceNewLine
+                    },
+                    @{
+                        Needle = '                n = min (n, max_generation - 1);'
+                        Replacement = '                guideXosNativeAotC011EC56LastBranch = 7u;' + $lockedSourceNewLine +
+                            '                n = min (n, max_generation - 1);'
+                    },
+                    @{
+                        Needle = '            high_memory_load = TRUE;'
+                        Replacement = '            high_memory_load = TRUE;' + $lockedSourceNewLine +
+                            '            guideXosNativeAotC011EC56LastBranch = 8u;'
+                    },
+                    @{
+                        Needle = '                v_high_memory_load = TRUE;'
+                        Replacement = '                guideXosNativeAotC011EC56LastBranch = 9u;' + $lockedSourceNewLine +
+                            '                v_high_memory_load = TRUE;'
+                    },
+                    @{
+                        Needle = '            if (high_fragmentation)' + $lockedSourceNewLine +
+                            '            {' + $lockedSourceNewLine +
+                            '                dprintf (6666, ("h%d high frag true!! mem load %d", heap_number, memory_load));'
+                        Replacement = '            if (high_fragmentation)' + $lockedSourceNewLine +
+                            '            {' + $lockedSourceNewLine +
+                            '                guideXosNativeAotC011EC56LastBranch = 10u;' + $lockedSourceNewLine +
+                            '                dprintf (6666, ("h%d high frag true!! mem load %d", heap_number, memory_load));'
+                    },
+                    @{
+                        Needle = '    if (should_expand_in_full_gc)' + $lockedSourceNewLine +
+                            '    {' + $lockedSourceNewLine +
+                            '        dprintf (GTC_LOG, ("h%d: expand_in_full - BLOCK", heap_number));'
+                        Replacement = '    if (should_expand_in_full_gc)' + $lockedSourceNewLine +
+                            '    {' + $lockedSourceNewLine +
+                            '        guideXosNativeAotC011EC56LastBranch = 11u;' + $lockedSourceNewLine +
+                            '        dprintf (GTC_LOG, ("h%d: expand_in_full - BLOCK", heap_number));'
+                    },
+                    @{
+                        Needle = '    if (last_gc_before_oom)' + $lockedSourceNewLine +
+                            '    {' + $lockedSourceNewLine +
+                            '        dprintf (GTC_LOG, ("h%d: alloc full - BLOCK", heap_number));'
+                        Replacement = '    if (last_gc_before_oom)' + $lockedSourceNewLine +
+                            '    {' + $lockedSourceNewLine +
+                            '        guideXosNativeAotC011EC56LastBranch = 12u;' + $lockedSourceNewLine +
+                            '        dprintf (GTC_LOG, ("h%d: alloc full - BLOCK", heap_number));'
+                    },
+                    @{
+                        Needle = '            dprintf (GTC_LOG, ("induced - BLOCK"));'
+                        Replacement = '            guideXosNativeAotC011EC56LastBranch = 13u;' + $lockedSourceNewLine +
+                            '            dprintf (GTC_LOG, ("induced - BLOCK"));'
+                    },
+                    @{
+                        Needle = '            local_condemn_reasons->set_condition (gen_induced_noforce_p);'
+                        Replacement = '            guideXosNativeAotC011EC56LastBranch = 14u;' + $lockedSourceNewLine +
+                            '            local_condemn_reasons->set_condition (gen_induced_noforce_p);'
+                    },
+                    @{
+                        Needle = '                dprintf (GTC_LOG, ("%zd left in gen2 alloc (%zd)",' + $lockedSourceNewLine +
+                            '                    dd_new_allocation (dd_max), dd_desired_allocation (dd_max)));'
+                        Replacement = '                guideXosNativeAotC011EC56LastBranch = 15u;' + $lockedSourceNewLine +
+                            '                if (guideXosNativeAotC011EC56FirstElevationBranch == 0u && n < max_generation) guideXosNativeAotC011EC56FirstElevationBranch = 15u;' + $lockedSourceNewLine +
+                            '                dprintf (GTC_LOG, ("%zd left in gen2 alloc (%zd)",' + $lockedSourceNewLine +
+                            '                    dd_new_allocation (dd_max), dd_desired_allocation (dd_max)));'
+                    },
+                    @{
+                        Needle = '            if (high_fragmentation)' + $lockedSourceNewLine +
+                            '            {' + $lockedSourceNewLine +
+                            '                //elevate to max_generation'
+                        Replacement = '            if (high_fragmentation)' + $lockedSourceNewLine +
+                            '            {' + $lockedSourceNewLine +
+                            '                guideXosNativeAotC011EC56LastBranch = 16u;' + $lockedSourceNewLine +
+                            '                if (guideXosNativeAotC011EC56FirstElevationBranch == 0u && n < max_generation) guideXosNativeAotC011EC56FirstElevationBranch = 16u;' + $lockedSourceNewLine +
+                            '                //elevate to max_generation'
+                    },
+                    @{
+                        Needle = '            else' + $lockedSourceNewLine +
+                            '            {' + $lockedSourceNewLine +
+                            '                n = max (n, max_generation - 1);'
+                        Replacement = '            else' + $lockedSourceNewLine +
+                            '            {' + $lockedSourceNewLine +
+                            '                guideXosNativeAotC011EC56LastBranch = 17u;' + $lockedSourceNewLine +
+                            '                if (guideXosNativeAotC011EC56FirstElevationBranch == 0u && n < (max_generation - 1)) guideXosNativeAotC011EC56FirstElevationBranch = 17u;' + $lockedSourceNewLine +
+                            '                n = max (n, max_generation - 1);'
+                    },
+                    @{
+                        Needle = '            if (get_new_allocation (max_generation) <= 0)' + $lockedSourceNewLine +
+                            '            {' + $lockedSourceNewLine +
+                            '                dprintf (GTC_LOG, ("h%d: budget alloc", heap_number));' + $lockedSourceNewLine +
+                            '                n = max_generation;'
+                        Replacement = '            if (get_new_allocation (max_generation) <= 0)' + $lockedSourceNewLine +
+                            '            {' + $lockedSourceNewLine +
+                            '                guideXosNativeAotC011EC56LastBranch = 18u;' + $lockedSourceNewLine +
+                            '                if (guideXosNativeAotC011EC56FirstElevationBranch == 0u && n < max_generation) guideXosNativeAotC011EC56FirstElevationBranch = 18u;' + $lockedSourceNewLine +
+                            '                dprintf (GTC_LOG, ("h%d: budget alloc", heap_number));' + $lockedSourceNewLine +
+                            '                n = max_generation;'
+                    }
+                )
+                foreach ($branchReplacement in $branchReplacements) {
+                    if (-not $selectionFunction.Contains($branchReplacement.Needle)) {
+                        throw "C011EC56 source branch injection point was not found."
+                    }
+                    $selectionFunction = Replace-First $selectionFunction $branchReplacement.Needle $branchReplacement.Replacement
+                }
+                $selectionReturnNeedle = '    return n;' + $lockedSourceNewLine
+                $selectionReturn = $selectionFunction.LastIndexOf($selectionReturnNeedle)
+                if ($selectionReturn -lt 0) { throw "C011EC56 generation_to_condemn return was not found." }
+                $selectionCallback = '    if (guideXosNativeAotC011EC56LastBranch == 0u) guideXosNativeAotC011EC56LastBranch = 1u;' + $lockedSourceNewLine +
+                    '    guideXosNativeAotC011EC56GenerationSelectionObserved(' + $lockedSourceNewLine +
+                    '        static_cast<uint32_t>(n_initial), static_cast<uint32_t>(n), static_cast<uint32_t>(local_settings->reason),' + $lockedSourceNewLine +
+                    '        check_only_p ? 1u : 0u,' + $lockedSourceNewLine +
+                    '        (blocking_collection_p != nullptr && *blocking_collection_p) ? 1u : 0u,' + $lockedSourceNewLine +
+                    '        (elevation_requested_p != nullptr && *elevation_requested_p) ? 1u : 0u,' + $lockedSourceNewLine +
+                    '        local_settings->promotion ? 1u : 0u, low_ephemeral_space ? 1u : 0u,' + $lockedSourceNewLine +
+                    '        high_memory_load ? 1u : 0u, v_high_memory_load ? 1u : 0u, high_fragmentation ? 1u : 0u,' + $lockedSourceNewLine +
+                    '        evaluate_elevation ? 1u : 0u, provisional_mode_triggered ? 1u : 0u,' + $lockedSourceNewLine +
+                    '        low_memory_detected ? 1u : 0u, check_memory ? 1u : 0u,' + $lockedSourceNewLine +
+                    '        guideXosNativeAotC011EC56LastBranch, guideXosNativeAotC011EC56FirstElevationBranch,' + $lockedSourceNewLine +
+                    '        static_cast<uint32_t>(n_alloc), memory_load, high_memory_load_th,' + $lockedSourceNewLine +
+                    '        v_high_memory_load_th, m_high_memory_load_th,' + $lockedSourceNewLine +
+                    '        static_cast<uintptr_t>(available_physical), static_cast<uintptr_t>(available_page_file),' + $lockedSourceNewLine +
+                    '        static_cast<uintptr_t>(dd_desired_allocation(dynamic_data_of (0))), static_cast<intptr_t>(dd_new_allocation(dynamic_data_of (0))), static_cast<intptr_t>(dd_gc_new_allocation(dynamic_data_of (0))), static_cast<uintptr_t>(dd_current_size(dynamic_data_of (0))), static_cast<uintptr_t>(dd_fragmentation(dynamic_data_of (0))), static_cast<uintptr_t>(dd_promoted_size(dynamic_data_of (0))), static_cast<uintptr_t>(dd_survived_size(dynamic_data_of (0))), static_cast<uintptr_t>(dd_begin_data_size(dynamic_data_of (0))),' + $lockedSourceNewLine +
+                    '        static_cast<uintptr_t>(dd_desired_allocation(dynamic_data_of (1))), static_cast<intptr_t>(dd_new_allocation(dynamic_data_of (1))), static_cast<intptr_t>(dd_gc_new_allocation(dynamic_data_of (1))), static_cast<uintptr_t>(dd_current_size(dynamic_data_of (1))), static_cast<uintptr_t>(dd_fragmentation(dynamic_data_of (1))), static_cast<uintptr_t>(dd_promoted_size(dynamic_data_of (1))), static_cast<uintptr_t>(dd_survived_size(dynamic_data_of (1))), static_cast<uintptr_t>(dd_begin_data_size(dynamic_data_of (1))),' + $lockedSourceNewLine +
+                    '        static_cast<uintptr_t>(dd_desired_allocation(dynamic_data_of (2))), static_cast<intptr_t>(dd_new_allocation(dynamic_data_of (2))), static_cast<intptr_t>(dd_gc_new_allocation(dynamic_data_of (2))), static_cast<uintptr_t>(dd_current_size(dynamic_data_of (2))), static_cast<uintptr_t>(dd_fragmentation(dynamic_data_of (2))), static_cast<uintptr_t>(dd_promoted_size(dynamic_data_of (2))), static_cast<uintptr_t>(dd_survived_size(dynamic_data_of (2))), static_cast<uintptr_t>(dd_begin_data_size(dynamic_data_of (2))));' + $lockedSourceNewLine
                 $selectionFunction = $selectionFunction.Substring(0, $selectionReturn) + $selectionCallback + $selectionFunction.Substring($selectionReturn)
                 $gcCppText = $gcCppText.Substring(0, $selectionStart) + $selectionFunction + $gcCppText.Substring($selectionEnd)
             }
@@ -5165,7 +5389,7 @@ exit /b 0
     } else {
         ""
     }
-$managedProofMode = if ($isC011EC55) { "NaturalOlderGenerationTransition" } elseif ($isC011EC54) { "ReclaimedGen1EphemeralTransition" } elseif ($isC011EC53) { "ReclaimedGen1NaturalReuse" } elseif ($isC011EC44 -or $isC011EC42) { "PostGcReclaimedGen1Lifecycle" } elseif ($isC011EC41) { "PostGcAllocatorProvenance" } elseif ($isC011EC40) { "CompactionReclamation" } elseif ($isC011EC39C38Variant) { "CollectionPlanC38" } elseif ($isC011EC39) { "CollectionPlanC37" } elseif ($isC011EC38) { "DeadObjectReclamation" } elseif ($isC011EC37) { "LifetimeTransitionSecondCollection" } elseif ($isC011EC33) { "LifetimeTransition" } elseif ($isC011EC31) { "ShortWeakLive" } elseif ($isC011EC32) { "ShortWeakDead" } elseif ($isFirstRootFirstNonNullOldO) { "FirstNonNullOldO" } elseif ($isFirstNonNullRoot -or $isFirstRootCallbackEntry) { "FirstNonNullRoot" } else { "FirstCollectionBoundary" }
+    $managedProofMode = if ($isC011EC56) { "NaturalGen1CondemnationPolicyThreshold" } elseif ($isC011EC55) { "NaturalOlderGenerationTransition" } elseif ($isC011EC54) { "ReclaimedGen1EphemeralTransition" } elseif ($isC011EC53) { "ReclaimedGen1NaturalReuse" } elseif ($isC011EC44 -or $isC011EC42) { "PostGcReclaimedGen1Lifecycle" } elseif ($isC011EC41) { "PostGcAllocatorProvenance" } elseif ($isC011EC40) { "CompactionReclamation" } elseif ($isC011EC39C38Variant) { "CollectionPlanC38" } elseif ($isC011EC39) { "CollectionPlanC37" } elseif ($isC011EC38) { "DeadObjectReclamation" } elseif ($isC011EC37) { "LifetimeTransitionSecondCollection" } elseif ($isC011EC33) { "LifetimeTransition" } elseif ($isC011EC31) { "ShortWeakLive" } elseif ($isC011EC32) { "ShortWeakDead" } elseif ($isFirstRootFirstNonNullOldO) { "FirstNonNullOldO" } elseif ($isFirstNonNullRoot -or $isFirstRootCallbackEntry) { "FirstNonNullRoot" } else { "FirstCollectionBoundary" }
     $managedRuntimePackProperty = if ($isTransitionFrameControlPc -or $isC011EC19) {
         "-p:HostLogProofRuntimePackObj=$managedRuntimePackObj"
     } else {
@@ -5505,7 +5729,7 @@ exit /b %errorlevel%
         $requiredSymbols += @("guideXosNativeAotC011EC15GcScanRootsEntered","guideXosNativeAotC011EC15ProviderEntered","guideXosNativeAotC011EC15EnumGcRefReturned")
     } elseif ($isNextGenuineRootProvider) {
         $requiredSymbols += @("guideXosNativeAotAllocationContextFixupRequest","guideXosNativeAotAllocationContextFixupGcStartWorkObserver","guideXosNativeAotAllocationRootPhaseRequested","guideXosNativeAotAllocationContextFixupEnumerationEntry","guideXosNativeAotAllocationContextFixupContextVisited","guideXosNativeAotAllocationContextFixupEnumerationComplete","guideXosNativeAotFirstPerThreadRootGcScanRootsEntered","guideXosNativeAotFirstPerThreadRootForeachThreadEntered","guideXosNativeAotFirstPerThreadRootIteratorInitialized","guideXosNativeAotFirstPerThreadRootIteratorCompletion","guideXosNativeAotFirstPerThreadRootThreadEnumerated","guideXosNativeAotFirstPerThreadRootThreadExcluded","guideXosNativeAotFirstPerThreadRootThreadIncluded","guideXosNativeAotFirstPerThreadRootThreadStaticListObserved","guideXosNativeAotFirstPerThreadRootThreadStaticStorageEntered","guideXosNativeAotC011EC15GcScanRootsEntered","guideXosNativeAotC011EC15ProviderEntered","guideXosNativeAotC011EC15CandidateObserved","guideXosNativeAotC011EC15EnumGcRefReturned","guideXosNativeAotC011EC15QueueMarkReturned","guideXosNativeAotC011EC15MarkHelperReturned","guideXosNativeAotC011EC15PromoteReturned","guideXosNativeAotC011EC15PromoteEntered","guideXosNativeAotC011EC15PromoteCandidateLoaded")
-        if (-not $isC011EC31 -and -not $isC011EC32) {
+        if (-not $isC011EC31 -and -not $isC011EC32 -and -not $isC011EC56) {
             $requiredSymbols += @("guideXosManagedThreadStaticProofAssigned","guideXosManagedThreadStaticProofReadback")
         }
     if ($isC011EC19) {
@@ -5523,7 +5747,7 @@ exit /b %errorlevel%
                 $requiredSymbols += @("guideXosNativeAotC011EC21DescribeNativeCaller","guideXosNativeAotC011EC21SafeStop")
             }
         }
-    } elseif ($isFirstRootCallbackEntry -and -not $isFirstRootFirstNonNullOldO) {
+    } elseif ($isFirstRootCallbackEntry -and -not $isFirstRootFirstNonNullOldO -and -not $isC011EC56) {
         $requiredSymbols += @("guideXosNativeAotAllocationContextFixupRequest","guideXosNativeAotAllocationContextFixupGcStartWorkObserver","guideXosNativeAotAllocationRootPhaseRequested","guideXosNativeAotAllocationContextFixupEnumerationEntry","guideXosNativeAotAllocationContextFixupContextVisited","guideXosNativeAotAllocationContextFixupEnumerationComplete","guideXosNativeAotFirstPerThreadRootGcScanRootsEntered","guideXosNativeAotFirstPerThreadRootForeachThreadEntered","guideXosNativeAotFirstPerThreadRootIteratorInitialized","guideXosNativeAotFirstPerThreadRootIteratorCompletion","guideXosNativeAotFirstPerThreadRootThreadEnumerated","guideXosNativeAotFirstPerThreadRootThreadExcluded","guideXosNativeAotFirstPerThreadRootThreadIncluded","guideXosNativeAotFirstPerThreadRootThreadStaticListObserved","guideXosNativeAotFirstPerThreadRootThreadStaticStorageEntered","guideXosNativeAotFirstNonNullRootCandidateLoadRequested","guideXosNativeAotFirstNonNullRootCandidateMachineWordLoaded","guideXosNativeAotFirstRootCallbackCallSiteEntered","guideXosNativeAotFirstRootCallbackEntered","guideXosNativeAotFirstRootCallbackCandidateLoaded","guideXosManagedThreadStaticProofAssigned","guideXosManagedThreadStaticProofReadback")
         if ($isFirstRootFirstNonNullOldO) {
             $requiredSymbols += @("guideXosNativeAotFirstRootCallbackCallSiteEntered","guideXosNativeAotFirstRootNonNullOldOCandidateLoadRequested","guideXosNativeAotFirstRootNonNullOldOCandidateMachineWordLoaded","guideXosNativeAotFirstRootNonNullOldOCandidateLoaded","guideXosNativeAotFirstRootNonNullOldOCallbackEntered","guideXosNativeAotFirstRootNonNullOldOMarkHelperEntered","guideXosNativeAotFirstRootNonNullOldOWorklistWriteBefore","guideXosNativeAotFirstRootNonNullOldOWorklistWriteCompleted","guideXosNativeAotFirstRootNonNullOldODecisionRequested","guideXosNativeAotFirstRootNonNullOldODecisionEntered","guideXosNativeAotFirstRootNonNullOldONullDecisionCompleted","guideXosNativeAotFirstRootNonNullOldONonNullDecisionStarted","guideXosNativeAotFirstRootNonNullOldOMarkedRequested","guideXosNativeAotFirstRootNonNullOldOMarkedCompleted","guideXosNativeAotFirstRootNonNullOldORawMarkWordRead","guideXosNativeAotFirstRootNonNullOldOMarkedTrueBoundary","guideXosNativeAotFirstRootNonNullOldOMarkedFalseBoundary")
@@ -5708,6 +5932,9 @@ exit /b %errorlevel%
     if ($isC011EC55) {
         $requiredSymbols += @("guideXosNativeAotC011EC55Start","guideXosNativeAotC011EC55BeforeAllocation","guideXosNativeAotC011EC55AfterAllocation","guideXosNativeAotC011EC55ManagedReadback","guideXosNativeAotC011EC55RecordSurvivor","guideXosNativeAotC011EC55Finish","guideXosNativeAotC011EC55CollectionEntered","guideXosNativeAotC011EC55GenerationSelectionObserved","guideXosNativeAotC011EC55PlannerDecisionObserved","guideXosNativeAotC011EC55PhaseEntered","guideXosNativeAotC011EC55RestartEEReturned","guideXosNativeAotC011EC55GenerationStateObserved","guideXosNativeAotC011EC55SegmentTransitionObserved","guideXosNativeAotC011EC55AllocationPathObserved","guideXosNativeAotC011EC55NativeHelperEntry","guideXosNativeAotC011EC55NativeAfterAllocation")
     }
+    if ($isC011EC56) {
+        $requiredSymbols += @("guideXosNativeAotC011EC56Start","guideXosNativeAotC011EC56CohortStarted","guideXosNativeAotC011EC56CohortFinished","guideXosNativeAotC011EC56BeforeAllocation","guideXosNativeAotC011EC56AfterAllocation","guideXosNativeAotC011EC56ManagedReadback","guideXosNativeAotC011EC56RecordSurvivor","guideXosNativeAotC011EC56GetOlderGenerationObserved","guideXosNativeAotC011EC56Finish","guideXosNativeAotC011EC56GenerationSelectionObserved","guideXosNativeAotC011EC56CollectionEntered","guideXosNativeAotC011EC56RestartEEReturned")
+    }
     if ($isC011EC44) {
         $requiredSymbols += @("guideXosNativeAotC011EC44AllocationCheckpoint","guideXosNativeAotC011EC44SuspendCheckpoint","guideXosNativeAotC011EC44RootSource","guideXosNativeAotC011EC44ReverseSlotLoaded")
         if ($isC011EC45) {
@@ -5806,7 +6033,9 @@ exit /b %errorlevel%
                     $normalizedLiveText = ($normalizedLiveText -creplace '(?<=[0-9])(?=[a-z])', ' ') -replace '\s+', ' '
                     $normalizedLiveText = $normalizedLiveText -replace '\b(c\d+)\s+(ec\d+)', '$1$2'
                     $normalizedLiveText = $normalizedLiveText -replace '\s*=\s*', '='
-                    $stopPattern = if ($isC011EC55) {
+                    $stopPattern = if ($isC011EC56) {
+                        'marker=C011EC56 outcome=[ABCDE]|marker=C011EC56-BLOCKED'
+                    } elseif ($isC011EC55) {
                         'marker=C011EC55 outcome=[ABCDE]|marker=C011EC55-BLOCKED'
                     } elseif ($isC011EC54) {
                         'marker=C011EC54 outcome=[ABCDE]|marker=C011EC54-BLOCKED'
@@ -5894,7 +6123,13 @@ exit /b %errorlevel%
             if (-not $completed -and [string]::IsNullOrWhiteSpace($earlyFailure)) {
                 Read-Monitor $port $monitorPath
                 $failureSerial = if (Test-Path -LiteralPath $serialPath) { Get-Content -LiteralPath $serialPath -Raw } else { "" }
-                if ($isC011EC53) {
+                if ($isC011EC56) {
+                    $earlyFailure = if ($qemuProcess.HasExited) {
+                        "c011ec56-exited-before-completion-marker"
+                    } else {
+                        "c011ec56-timeout-before-completion-marker"
+                    }
+                } elseif ($isC011EC53) {
                     $earlyFailure = if ($qemuProcess.HasExited) {
                         "c011ec53-exited-before-completion-marker"
                     } else {
@@ -5966,6 +6201,38 @@ exit /b %errorlevel%
                 outcome=$c49SemanticOutcome; semanticOutcome=$c49SemanticOutcome
                 successLevel=$c49SuccessLevel; harnessTerminated=$true
                 markerLine=$c49MarkerLine; earlyFailure=$earlyFailure
+                serialTail=if ($validationText.Length -gt 16000) { $validationText.Substring($validationText.Length - 16000) } else { $validationText }
+            }
+            continue
+        } elseif ($isC011EC56) {
+            $c56CompleteLines = @(Get-C011EC56MarkerRecords $validationText 'C011EC56' | Where-Object { $_ -match 'marker=C011EC56\s+outcome=' })
+            $c56BlockedLines = @(Get-C011EC56MarkerRecords $validationText 'C011EC56-BLOCKED')
+            $c56MarkerLine = if ($c56CompleteLines.Count -ne 0) {
+                $c56CompleteLines[-1].Trim()
+            } elseif ($c56BlockedLines.Count -ne 0) {
+                $c56BlockedLines[-1].Trim()
+            } else { $null }
+            $c56OutcomeMatch = if ($null -ne $c56MarkerLine) {
+                [regex]::Match($c56MarkerLine, 'outcome=(?<outcome>[ABCDE])')
+            } else { $null }
+            $c56Outcome = if ($null -ne $c56OutcomeMatch -and $c56OutcomeMatch.Success) {
+                $c56OutcomeMatch.Groups['outcome'].Value
+            } else { 'D' }
+            $c56LevelText = if ($null -ne $c56MarkerLine) { Get-MarkerField $c56MarkerLine 'successLevel' } else { $null }
+            $c56Level = if ($null -ne $c56LevelText) { [Convert]::ToUInt32($c56LevelText.Substring(2), 16) } else { 0u }
+            $c56PolicyLines = @(Get-C011EC56MarkerRecords $validationText 'C011EC56-POLICY')
+            $c56CohortLines = @(Get-C011EC56MarkerRecords $validationText 'C011EC56-COHORT' | Where-Object { $_ -match 'marker=C011EC56-COHORT\s+cohort=' })
+            $c56CohortEndLines = @(Get-C011EC56MarkerRecords $validationText 'C011EC56-COHORT-END')
+            $c56ThresholdLines = @(Get-C011EC56MarkerRecords $validationText 'C011EC56-THRESHOLD')
+            $c56Gen1Lines = @(Get-C011EC56MarkerRecords $validationText 'C011EC56-GEN1')
+            $c56ResumeLines = @(Get-C011EC56MarkerRecords $validationText 'C011EC56-RESUME')
+            $runResults += [ordered]@{
+                name=$name; serial=$serialPath; serialSha256=(Hash-File $serialPath)
+                safeStopMarker=if ($null -ne $c56CompleteLines -and $c56CompleteLines.Count -ne 0) { 'C011EC56' } elseif ($c56BlockedLines.Count -ne 0) { 'C011EC56-BLOCKED' } else { 'C011EC56-TIMEOUT' }
+                outcome=$c56Outcome; semanticOutcome=$c56Outcome; successLevel=$c56Level
+                harnessTerminated=$true; markerLine=$c56MarkerLine; earlyFailure=$earlyFailure
+                policyLines=$c56PolicyLines; cohortLines=$c56CohortLines; cohortEndLines=$c56CohortEndLines
+                thresholdLines=$c56ThresholdLines; gen1Lines=$c56Gen1Lines; resumeLines=$c56ResumeLines
                 serialTail=if ($validationText.Length -gt 16000) { $validationText.Substring($validationText.Length - 16000) } else { $validationText }
             }
             continue
@@ -9141,6 +9408,102 @@ exit /b %errorlevel%
         }
         $manifest | ConvertTo-Json -Depth 100 | Set-Content -LiteralPath $manifestPath -Encoding ASCII
         Write-Host "C011EC44 malformed transition-frame provenance: Outcome C / Level 1" -ForegroundColor Yellow
+    } elseif ($isC011EC56) {
+        if (@($runResults).Count -ne $FreshBootCount) { throw "C011EC56 produced $(@($runResults).Count) runs instead of $FreshBootCount." }
+        $blockedC56Runs = @($runResults | Where-Object { $_.safeStopMarker -ne 'C011EC56' })
+        $branchNames = [ordered]@{
+            '1'='keep gen0: no earlier elevation branch changed n'
+            '2'='gen1 new_allocation <= 0: generation allocation budget'
+            '3'='low-card-table efficiency: skip to gen1'
+            '4'='low ephemeral space: elevate to at least gen1'
+            '5'='background time tuning: older-generation interval'
+            '6'='ephemeral-generation fragmentation'
+            '7'='low-latency clamp'
+            '8'='memory load >= high_memory_load_th'
+            '9'='memory load >= v_high_memory_load_th or low-memory status'
+            '10'='high fragmentation under memory-load evaluation'
+            '11'='expand-in-full-GC blocking path'
+            '12'='last-GC-before-OOM path'
+            '13'='induced blocking collection'
+            '14'='induced no-force collection'
+            '15'='gen2 allocation ratio below 90 percent'
+            '16'='high fragmentation: elevate to full/gen2'
+            '17'='low-ephemeral or high-memory elevation without high fragmentation'
+            '18'='gen2 budget check after gen1 elevation'
+            '19'='maximum-generation fragmentation blocking path'
+        }
+        if ($blockedC56Runs.Count -ne 0) {
+            $manifest = [ordered]@{
+                outcome='Outcome D / C011EC56 bounded policy run stopped before completion'
+                successLevel=(@($runResults | ForEach-Object { [int]$_.successLevel } | Measure-Object -Minimum).Minimum)
+                proofMode=$ProofMode; marker='C011EC56'; preflightMarker='C011EC56-PREFLIGHT'
+                repositoryHead=$repoHead; startingCommittedHead=$startingCommittedHead; startingBranch=$startingBranch
+                upstream=$upstream; startingWorktreeStatus=$startingWorktreeStatus; startingDirtyState=$dirtyState
+                blocker=[ordered]@{ safeStopMarkers=@($blockedC56Runs | ForEach-Object { $_.safeStopMarker }); earlyFailures=@($blockedC56Runs | ForEach-Object { $_.earlyFailure }); classification='bounded stop; no collection or generation policy was forced' }
+                qemu=[ordered]@{ version=$qemuVersion; runCount=$FreshBootCount; proofKernelSha256=$specializedKernelHash; serialSha256=@($runResults | ForEach-Object { $_.serialSha256 }); evidenceRoot=$runRoot; exactCommandLog=(Join-Path $runRoot 'commands.txt'); runs=$runResults }
+                payloadHashes=[ordered]@{ proofKernel=$specializedKernelHash; pe=(Hash-File $pePath); elf=(Hash-File $elfPath); map=(Hash-File $mapPath) }
+                ordinaryRestoration=[ordered]@{ expectedKernelSha256=$normalKernelHash; expectedEspSha256=$normalKernelHash; restoredByFinally=$true; kernelSha256=(Hash-File $kernelPath); espSha256=(Hash-File $espKernelPath) }
+                documentation='docs/dotnet/NATIVEAOT_WORKSTATION_GC_GEN1_CONDEMNATION_POLICY_THRESHOLD.md'; evidenceRoot=$runRoot; manifestPath=$manifestPath
+            }
+            $manifest | ConvertTo-Json -Depth 100 | Set-Content -LiteralPath $manifestPath -Encoding ASCII
+            Write-Host 'C011EC56 generation policy: bounded stop' -ForegroundColor Yellow
+        } else {
+            $firstC56Run = $runResults[0]
+            $complete = $firstC56Run.markerLine
+            $c56Read = { param([string]$field) $v=Get-MarkerField $complete $field; if($null -eq $v){throw "C011EC56 missing field $field."}; $v }
+            $stableC56Fields = @('outcome','successLevel','thresholdCrossed','firstThresholdOrdinal','firstThresholdKind','firstThresholdBranch','firstGen1CollectionOrdinal','firstGen1Generation','firstGen1Reason','policyRecords','cohorts','c54Collections','c54PlannerObserved','c54RestartValid','c54ManagedResumeValid','c54FixBoundsObserved','c54AdjustEphemeralObserved','c54EphemeralTransition','c54AllocatorVisible','c54TailEligible','c54TailStillMapped','c54SegmentRetired','c54SegmentRecycled','invariantFailures','sensitiveDiagnosticAllocations','failFast','pageFault')
+            foreach ($field in $stableC56Fields) {
+                $values = @($runResults | ForEach-Object {
+                    $line = $_.markerLine
+                    if ($field -eq 'outcome') { $_.outcome } else { Get-MarkerField $line $field }
+                } | Select-Object -Unique)
+                if ($values.Count -ne 1) { throw "C011EC56 semantic field $field varied across fresh boots." }
+            }
+            $c56Outcome = $firstC56Run.outcome
+            $c56Level = [int]$firstC56Run.successLevel
+            $policyFields = @('selectionOrdinal','selectionInitialGeneration','selectionGeneration','selectionReason','selectionCheckOnly','selectionBlocking','selectionElevation','selectionPromotion','selectionLowEphemeral','selectionHighMemory','selectionVeryHighMemory','selectionHighFragmentation','selectionEvaluateElevation','selectionProvisionalMode','selectionLowMemoryDetected','selectionCheckMemory','branchId','firstElevationBranch','nAlloc','memoryLoad','highMemoryThreshold','veryHighMemoryThreshold','mediumMemoryThreshold','availablePhysical','availablePageFile','gen0DesiredAllocation','gen0NewAllocationRaw','gen0GcNewAllocationRaw','gen0CurrentSize','gen0Fragmentation','gen0PromotedBytes','gen0SurvivedBytes','gen0BeginDataSize','gen1DesiredAllocation','gen1NewAllocationRaw','gen1GcNewAllocationRaw','gen1CurrentSize','gen1Fragmentation','gen1PromotedBytes','gen1SurvivedBytes','gen1BeginDataSize','gen2DesiredAllocation','gen2NewAllocationRaw','gen2GcNewAllocationRaw','gen2CurrentSize','gen2Fragmentation','gen2PromotedBytes','gen2SurvivedBytes','gen2BeginDataSize','gen1BudgetDepletion')
+            $policyRecords = @($firstC56Run.policyLines | ForEach-Object {
+                $line = $_
+                $record = [ordered]@{ marker=$line }
+                foreach ($field in $policyFields) { $record[$field] = Get-MarkerField $line $field }
+                $record
+            })
+            $cohortRecords = @($firstC56Run.cohortEndLines | ForEach-Object {
+                $line = $_
+                [ordered]@{ marker=$line; cohort=Get-MarkerField $line 'cohort'; survivorCount=Get-MarkerField $line 'survivorCount'; retainedAlignedBytes=Get-MarkerField $line 'retainedAlignedBytes'; promotedBytes=Get-MarkerField $line 'promotedBytes'; gen1DesiredAllocation=Get-MarkerField $line 'gen1DesiredAllocation'; gen1NewAllocation=Get-MarkerField $line 'gen1NewAllocation'; policyOrdinal=Get-MarkerField $line 'policyOrdinal'; selectedGeneration=Get-MarkerField $line 'selectedGeneration' }
+            })
+            $thresholdRecords = @($firstC56Run.thresholdLines | ForEach-Object { [ordered]@{ marker=$_; ordinal=Get-MarkerField $_ 'thresholdOrdinal'; kind=Get-MarkerField $_ 'thresholdKind'; branch=Get-MarkerField $_ 'thresholdBranch'; preValue=Get-MarkerField $_ 'thresholdPreValue'; postValue=Get-MarkerField $_ 'thresholdPostValue'; threshold=Get-MarkerField $_ 'thresholdValue' } })
+            $firstGen1 = if ($firstC56Run.gen1Lines.Count -ne 0) { $firstC56Run.gen1Lines[0] } else { $null }
+            $firstGen1Record = if ($null -ne $firstGen1) { [ordered]@{ marker=$firstGen1; collectionOrdinal=Get-MarkerField $firstGen1 'collectionOrdinal'; condemnedGeneration=Get-MarkerField $firstGen1 'condemnedGeneration'; collectionReason=Get-MarkerField $firstGen1 'collectionReason'; thresholdOrdinal=Get-MarkerField $firstGen1 'thresholdOrdinal'; thresholdBranch=Get-MarkerField $firstGen1 'thresholdBranch'; selectionOrdinal=Get-MarkerField $firstGen1 'selectionOrdinal' } } else { $null }
+            $tailStart = & $c56Read 'tailStart'
+            $tailEnd = & $c56Read 'tailEnd'
+            $firstThresholdBranch = & $c56Read 'firstThresholdBranch'
+            $firstThresholdBranchKey = ([Convert]::ToUInt32($firstThresholdBranch.Substring(2), 16)).ToString()
+            $manifest = [ordered]@{
+                outcome="Outcome $c56Outcome / exact generation-selection policy telemetry and bounded survivor-cohort result"
+                successLevel=$c56Level; proofMode=$ProofMode; marker='C011EC56'; preflightMarker='C011EC56-PREFLIGHT'
+                repositoryHead=$repoHead; startingCommittedHead=$startingCommittedHead; startingBranch=$startingBranch; upstream=$upstream
+                startingWorktreeStatus=$startingWorktreeStatus; startingDirtyState=$dirtyState
+                lockedRuntimeIdentity=[ordered]@{ nativeAot='9.0.0'; architecture='AMD64'; gc='Workstation'; gcInterfaces='5.3 / 2'; sourceCommit=$lockedCommit; fpPatch='nativeaot-amd64-fp-handoff.patch'; fpPatchSha256='4185495724D48E2962BA9042AF352718BF9188032DEE4C9DE6FFE9F145A1DC31' }
+                sourceAudit=[ordered]@{ generationToCondemn='out/dotnet/gc-feasibility-baseline/nativeaot-runtime/src/coreclr/gc/gc.cpp:21486'; dynamicData='out/dotnet/gc-feasibility-baseline/nativeaot-runtime/src/coreclr/gc/gcpriv.h:1115'; computeIn='gc.cpp:44026'; computeNewDynamicData='gc.cpp:44147'; getMemoryInfo='gc.cpp:29148'; thresholdInitialization='gc.cpp:53223'; lowEphemeralHelper='gc.cpp:45215'; sourceReturnHook='immediately before locked return n;'; policyMutation='none' }
+                policy=[ordered]@{ branchIds=$branchNames; gen1BudgetCondition='get_new_allocation(1) <= 0 in the initial n+1 allocation-budget loop'; elevationCondition='!provisional_mode_triggered && evaluate_elevation && (low_ephemeral_space || high_memory_load || v_high_memory_load)'; gen2RatioCondition='(float)dd_new_allocation(max_generation)/(float)dd_desired_allocation(max_generation) < 0.9'; lowEphemeralCondition='!ephemeral_gen_fit_p(...)'; memoryLoadCondition='memory_load >= high_memory_load_th or g_low_memory_status'; signedFields=@('gen0NewAllocationRaw','gen0GcNewAllocationRaw','gen1NewAllocationRaw','gen1GcNewAllocationRaw','gen2NewAllocationRaw','gen2GcNewAllocationRaw','gen1BudgetDepletion'); unsignedFields=@('desiredAllocation','currentSize','fragmentation','promotedBytes','survivedBytes','beginDataSize'); records=$policyRecords }
+                threshold=[ordered]@{ observed=((& $c56Read 'thresholdCrossed') -ne '00000000'); crossingRecords=$thresholdRecords; preValue=(& $c56Read 'firstThresholdPreValue'); postValue=(& $c56Read 'firstThresholdPostValue'); target=(& $c56Read 'firstThresholdValue'); branch=$firstThresholdBranch; branchMeaning=if($branchNames.Contains($firstThresholdBranchKey)){ $branchNames[$firstThresholdBranchKey] } else { 'unknown' } }
+                boundedWorkload=[ordered]@{ maximumCohorts=6; survivorCohortCounts=@(8,16,24,32,40,48); survivorsPerCohort=8; maximumSurvivors=48; payloadSize='0x00010000'; alignedSurvivorAllocationSize='0x0000000000010018'; maximumRetainedAlignedBytes='0x0000000000300480'; maximumTransientAllocationsPerCohort=64; maximumExplicitAllocations=384; maximumManagedBytes='0x0000000001800000 / 25165824'; maximumCollectionObservations=1024; maximumPolicyRecords=512; maximumSurvivorObservations=1024; maximumDiagnosticRecords=2048; stopCondition='first authentic C011EC56-GEN1 or fixed six-cohort bound'; noForcedCollection=$true; noGenerationOverride=$true; cohorts=$cohortRecords }
+                firstOlderGeneration=[ordered]@{ observed=(& $c56Read 'firstGen1CollectionOrdinal') -ne '00000000'; marker=$firstGen1Record; collectionOrdinal=(& $c56Read 'firstGen1CollectionOrdinal'); condemnedGeneration=(& $c56Read 'firstGen1Generation'); collectionReason=(& $c56Read 'firstGen1Reason'); exactBranch=(& $c56Read 'firstThresholdBranch') }
+                lifecycle=[ordered]@{ c54Collections=(& $c56Read 'c54Collections'); plannerObserved=(& $c56Read 'c54PlannerObserved'); restartValid=(& $c56Read 'c54RestartValid'); managedResumeValid=(& $c56Read 'c54ManagedResumeValid'); fixGenerationBounds=(& $c56Read 'c54FixBoundsObserved'); adjustEphemeralLimits=(& $c56Read 'c54AdjustEphemeralObserved'); ephemeralTransition=(& $c56Read 'c54EphemeralTransition'); compacting='recorded by retained C39/C40 planner chronology'; relocating='recorded by retained C39/C40 planner chronology'; resumeLines=$firstC56Run.resumeLines }
+                reclaimedTail=[ordered]@{ start=$tailStart; end=$tailEnd; segment=(& $c56Read 'tailSegment'); generationBefore=(& $c56Read 'tailGenerationBefore'); generationAfter=(& $c56Read 'tailGenerationAfter'); allocatorVisibleBefore=(& $c56Read 'c54AllocatorVisible'); allocatorVisibleAfter=(& $c56Read 'c54AllocatorVisible'); eligibleBefore='00000000'; eligibleAfter=(& $c56Read 'c54TailEligible'); stillMapped=(& $c56Read 'c54TailStillMapped'); segmentAfter=(& $c56Read 'tailSegmentAfter'); ephemeralSegmentBefore=(& $c56Read 'ephemeralSegmentBefore'); ephemeralSegmentAfter=(& $c56Read 'ephemeralSegmentAfter'); segmentRetired=(& $c56Read 'c54SegmentRetired'); segmentRecycled=(& $c56Read 'c54SegmentRecycled'); immediateDomainEffect='see generation/ephemeral/eligibility fields; no consideration or selection was forced' }
+                correlation=[ordered]@{ equality='0x1CDB68 - 0x14DAA8 = 0x800C0 = 8 * 0x10018'; classification='B — derived but indirect'; evidence='compute_in(gen1) obtains generation_allocation_size(gen1), then USE_REGIONS compute_new_dynamic_data stores gc_new_allocation - in; desired_allocation is a separately modeled target; the equality is therefore budget depletion caused by incoming survivor allocation accounting, not the desired field itself' }
+                survivors=[ordered]@{ cohortTable=$cohortRecords; observations=$firstC56Run.policyLines.Count; sequence='initialGeneration=0, sentinel/readback valid, then GC.GetGeneration and address recorded after CollectionCount(0) changed'; markerLines=$firstC56Run.gen1Lines }
+                diagnostics=[ordered]@{ markers=@('C011EC56-PREFLIGHT','C011EC56-POLICY','C011EC56-COHORT','C011EC56-COHORT-END','C011EC56-THRESHOLD','C011EC56-GEN1','C011EC56-RESUME','C011EC56'); invariantFailures=(& $c56Read 'invariantFailures'); sensitiveDiagnosticAllocations=(& $c56Read 'sensitiveDiagnosticAllocations'); failFast=(& $c56Read 'failFast'); pageFault=(& $c56Read 'pageFault'); boundedFixedSizeRecords=$true }
+                regressions=[ordered]@{ C18='retained through C55/C54 productionized FP and code-manager path'; roots='retained C26 root scan'; mark='retained C28 mark closure'; C34='retained preflight'; C37='retained repeated collection'; C39='retained planner provenance'; C40='retained reclamation'; C41='retained allocation-domain result'; C46C48='durable FP repairs unchanged'; C49='retained full-collection predecessor'; C50='productionized runtime-pack path'; C53='allocator-visible/ineligible classification retained'; C54='generation-bound publication retained'; C55='repeated gen0 control and source fields retained'; semanticRewriteGuard='production mode did not enable C46/C47/C48 semantic injection' }
+                qemu=[ordered]@{ version=$qemuVersion; runCount=$FreshBootCount; semanticAgreement=$true; proofKernelSha256=$specializedKernelHash; serialSha256=@($runResults | ForEach-Object { $_.serialSha256 }); evidenceRoot=$runRoot; exactCommandLog=(Join-Path $runRoot 'commands.txt'); runs=$runResults }
+                payloadHashes=[ordered]@{ proofKernel=$specializedKernelHash; pe=(Hash-File $pePath); elf=(Hash-File $elfPath); map=(Hash-File $mapPath) }
+                ordinaryRestoration=[ordered]@{ expectedKernelSha256=$normalKernelHash; expectedEspSha256=$normalKernelHash; restoredByFinally=$true; kernelSha256=(Hash-File $kernelPath); espSha256=(Hash-File $espKernelPath); proofOnlyArtifactActive=$false }
+                documentation='docs/dotnet/NATIVEAOT_WORKSTATION_GC_GEN1_CONDEMNATION_POLICY_THRESHOLD.md'; evidenceRoot=$runRoot; manifestPath=$manifestPath
+            }
+            $manifest | ConvertTo-Json -Depth 100 | Set-Content -LiteralPath $manifestPath -Encoding ASCII
+            Write-Host "C011EC56 generation policy: Outcome $c56Outcome / Level $c56Level" -ForegroundColor Green
+        }
     } elseif ($isC011EC55 -or $isC011EC54) {
         $c54ResultPrefix = if ($isC011EC55) { 'C011EC55' } else { 'C011EC54' }
         $c54ResultDoc = if ($isC011EC55) { 'docs/dotnet/NATIVEAOT_WORKSTATION_GC_NATURAL_OLDER_GENERATION_TRANSITION.md' } else { 'docs/dotnet/NATIVEAOT_WORKSTATION_GC_RECLAIMED_GEN1_EPHEMERAL_TRANSITION.md' }
