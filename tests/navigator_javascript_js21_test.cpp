@@ -582,12 +582,12 @@ void testUnsupportedRegressions()
         "unsupported: invalid callback remains rejected");
     result = harness.execute(
         "child.addEventListener(\"click\", handler, true);");
-    expectError(result, RuntimeErrorCode::HostInvalidValue,
-        "unsupported: Boolean shorthand remains rejected");
+    expect(result.succeeded(),
+        "unsupported: Boolean shorthand is accepted by JS22");
     result = harness.execute(
         "child.removeEventListener(\"click\", handler, true);");
-    expectError(result, RuntimeErrorCode::HostInvalidValue,
-        "unsupported: Boolean removal shorthand remains rejected");
+    expect(result.succeeded(),
+        "unsupported: Boolean removal shorthand is accepted by JS22");
 }
 
 } // namespace

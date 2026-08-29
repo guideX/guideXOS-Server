@@ -1,0 +1,123 @@
+<!doctype html>
+<html>
+<head><title>Navigator JavaScript JS22</title></head>
+<body>
+<h1>Navigator JavaScript JS22</h1>
+<p>Boolean capture shorthand with authentic hit-tested dispatch.</p>
+<div id="js22-root">
+  <div id="js22-parent">
+    <button id="js22-child" type="button">Order</button>
+    <button id="js22-stop" type="button">Stop</button>
+    <button id="js22-immediate" type="button">Immediate</button>
+    <button id="js22-target-stop" type="button">Target stop</button>
+    <button id="js22-target-immediate" type="button">Target immediate</button>
+    <button id="js22-cross" type="button">Cross removal</button>
+    <a id="js22-cancel" href="/navigator-smoke/javascript-js22-target.html">Cancel</a>
+  </div>
+</div>
+<p id="js22-state">initial</p>
+<script>
+var js22State = document.getElementById("js22-state");
+var js22Root = document.getElementById("js22-root");
+var js22Parent = document.getElementById("js22-parent");
+var js22Child = document.getElementById("js22-child");
+var js22Stop = document.getElementById("js22-stop");
+var js22Immediate = document.getElementById("js22-immediate");
+var js22TargetStop = document.getElementById("js22-target-stop");
+var js22TargetImmediate = document.getElementById("js22-target-immediate");
+var js22Cross = document.getElementById("js22-cross");
+var js22Cancel = document.getElementById("js22-cancel");
+var js22Order = "";
+var js22Same = "";
+var js22TargetStable = true;
+var js22CurrentStable = true;
+var js22StopLog = "";
+var js22ImmediateLog = "";
+var js22TargetStopLog = "";
+var js22TargetImmediateLog = "";
+var js22CancelLog = "";
+var js22CancelCount = 0;
+var js22CrossLog = "";
+function js22Check(event, current, phase) {
+    js22TargetStable = js22TargetStable && event.target === js22Child &&
+        event.eventPhase === phase;
+    js22CurrentStable = js22CurrentStable && event.currentTarget === current &&
+        event.bubbles === true && event.cancelable === true;
+}
+js22Root.addEventListener("click", function(event) {
+    if (event.target === js22Child) { js22Check(event, js22Root, 1); js22Order = js22Order + "r1"; }
+}, true);
+js22Parent.addEventListener("click", function(event) {
+    if (event.target === js22Child) { js22Check(event, js22Parent, 1); js22Order = js22Order + "p1"; }
+}, { capture: true });
+js22Child.addEventListener("click", function(event) {
+    if (event.target === js22Child) { js22Check(event, js22Child, 2); js22Order = js22Order + "c2"; }
+}, true);
+js22Child.onclick = function(event) {
+    if (event.target === js22Child) { js22Check(event, js22Child, 2); js22Order = js22Order + "o2"; }
+};
+js22Child.addEventListener("click", function(event) {
+    if (event.target === js22Child) { js22Check(event, js22Child, 2); js22Order = js22Order + "t2"; }
+}, false);
+js22Parent.onclick = function(event) {
+    if (event.target === js22Child) { js22Check(event, js22Parent, 3); js22Order = js22Order + "po3"; }
+};
+js22Parent.addEventListener("click", function(event) {
+    if (event.target === js22Child) { js22Check(event, js22Parent, 3); js22Order = js22Order + "p3"; }
+    if (event.target === js22Cancel) {
+        js22CancelLog = js22CancelLog + "p" + event.eventPhase + event.defaultPrevented;
+        js22State.textContent = "cancel:" + js22CancelLog;
+    }
+}, false);
+js22Root.addEventListener("click", function(event) {
+    if (event.target === js22Child) {
+        js22Check(event, js22Root, 3); js22Order = js22Order + "r3";
+        js22State.textContent = "order:" + js22Order + ";same:" + js22Same +
+            ";target:" + js22TargetStable + ";current:" + js22CurrentStable;
+    }
+}, false);
+function js22SameHandler(event) { if (event.target === js22Child) js22Same = js22Same + event.eventPhase; }
+js22Parent.addEventListener("click", js22SameHandler, true);
+js22Parent.addEventListener("click", js22SameHandler, false);
+js22Root.addEventListener("click", function(event) {
+    if (event.target === js22Stop) { js22StopLog = js22StopLog + "a" + event.eventPhase; event.stopPropagation(); }
+}, true);
+js22Root.addEventListener("click", function(event) {
+    if (event.target === js22Stop) { js22StopLog = js22StopLog + "b" + event.eventPhase; js22State.textContent = "stop:" + js22StopLog; }
+}, true);
+js22Parent.addEventListener("click", function(event) {
+    if (event.target === js22Stop) js22StopLog = js22StopLog + "p" + event.eventPhase;
+}, true);
+js22Root.addEventListener("click", function(event) {
+    if (event.target === js22Immediate) { js22ImmediateLog = "a" + event.eventPhase; event.stopImmediatePropagation(); js22State.textContent = "immediate:" + js22ImmediateLog; }
+}, true);
+js22Root.addEventListener("click", function(event) {
+    if (event.target === js22Immediate) js22ImmediateLog = js22ImmediateLog + "b" + event.eventPhase;
+}, true);
+js22TargetStop.addEventListener("click", function(event) {
+    js22TargetStopLog = js22TargetStopLog + "c" + event.eventPhase; event.stopPropagation();
+}, true);
+js22TargetStop.onclick = function(event) { js22TargetStopLog = js22TargetStopLog + "o" + event.eventPhase; };
+js22TargetStop.addEventListener("click", function(event) {
+    js22TargetStopLog = js22TargetStopLog + "b" + event.eventPhase; js22State.textContent = "target-stop:" + js22TargetStopLog;
+}, false);
+js22TargetImmediate.addEventListener("click", function(event) {
+    js22TargetImmediateLog = "c" + event.eventPhase; event.stopImmediatePropagation(); js22State.textContent = "target-immediate:" + js22TargetImmediateLog;
+}, true);
+js22TargetImmediate.onclick = function(event) { js22TargetImmediateLog = js22TargetImmediateLog + "o"; };
+js22TargetImmediate.addEventListener("click", function(event) { js22TargetImmediateLog = js22TargetImmediateLog + "b"; }, false);
+function js22CrossHandler(event) { js22CrossLog = js22CrossLog + "x"; }
+js22Parent.addEventListener("click", js22CrossHandler, true);
+js22Parent.removeEventListener("click", js22CrossHandler, { capture: true });
+js22Parent.addEventListener("click", js22CrossHandler, false);
+js22Parent.removeEventListener("click", js22CrossHandler, false);
+js22Cross.onclick = function(event) { js22State.textContent = "cross:" + js22CrossLog; };
+js22Root.addEventListener("click", function(event) {
+    if (event.target === js22Cancel && js22CancelCount === 0) {
+        js22CancelCount = js22CancelCount + 1; js22CancelLog = "c" + event.eventPhase; event.preventDefault();
+    }
+}, true);
+js22Cancel.onclick = function(event) { js22CancelLog = js22CancelLog + "t" + event.eventPhase + event.defaultPrevented; };
+</script>
+</body>
+</html>

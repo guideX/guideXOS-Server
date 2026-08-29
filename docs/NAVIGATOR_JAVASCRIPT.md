@@ -2308,11 +2308,11 @@ element.addEventListener("click", callback, { capture: false });
 element.addEventListener("click", callback, { capture: true, once: true });
 ```
 
-The explicit object form is the supported surface. Boolean capture shorthand,
-such as `addEventListener("click", callback, true)` or
-`removeEventListener("click", callback, true)`, remains unsupported. Supported
+At the JS20 milestone the explicit object form was the supported surface;
+Boolean capture shorthand was intentionally deferred to JS22. Supported
 option members are `capture` and `once`; both use Boolean validation, absent
-members default to false, and unknown members remain ignored.
+members default to false, and unknown members remain ignored. The current
+JS22 extension adds the Boolean form without changing those object rules.
 
 ### JS20 dispatch order
 
@@ -2459,8 +2459,9 @@ DOM Events compatibility remains incomplete.
 
 The recommended JS21 milestone is `event.eventPhase` with standard phase
 constants equivalent to `CAPTURING_PHASE = 1`, `AT_TARGET = 2`, and
-`BUBBLING_PHASE = 3`. A later phase may consider Boolean capture shorthand or
-additional event types.
+`BUBBLING_PHASE = 3`. JS22 adds only the compatibility Boolean capture
+shorthand; richer listener options and additional event types remain later
+work.
 
 ## Phase JS21: `event.eventPhase` and Event phase constants
 
@@ -2566,7 +2567,9 @@ identity, bubbles/cancelable/defaultPrevented behavior, propagation controls,
 once, cross-phase mutation and removal, callback errors, overflow/reset and
 recovery, retained Events, stale references, navigation cleanup, independent
 trees, unsupported inputs, fixed listener capacity, and 100 repeated clicks.
-The focused JS21 suite reports 514 checks with 0 failures.
+The focused JS21 suite reports 512 checks with 0 failures in the current JS22
+tree; the JS21 baseline's two now-obsolete Boolean-rejection assertions were
+replaced by acceptance checks.
 
 The authentic hosted proof is
 `navigator-smoke/javascript-js21.html`, with
@@ -2593,3 +2596,137 @@ element.removeEventListener("click", handler, true);
 
 mapping `true` to capture and `false` to non-capture while preserving the
 object form `{ capture: true, once: true }`.
+
+## Phase JS22: Boolean capture shorthand for click listeners
+
+JS22 implements the standard Boolean third argument for the existing bounded
+`click` listener host methods:
+
+```javascript
+element.addEventListener("click", handler, true);  // capture
+element.addEventListener("click", handler, false); // bubble
+element.removeEventListener("click", handler, true);
+element.removeEventListener("click", handler, false);
+```
+
+The Boolean form is an argument-normalization extension, not a new listener
+kind. `true` means `capture: true`, and `false` means `capture: false`. The
+existing two-argument add/remove form has the same normalized state as
+`false`. The richer object form remains fully supported and is still required
+for `once` or any future listener metadata:
+
+```javascript
+element.addEventListener("click", handler, {
+    capture: true,
+    once: true
+});
+```
+
+### JS22 options normalization and identity
+
+The runtime-aware host-call boundary inspects the existing runtime value type
+and passes the same two Boolean fields to the established listener operation:
+
+| Third argument | `capture` | `once` |
+| --- | ---: | ---: |
+| omitted | `false` | `false` |
+| explicit `undefined` | `false` | `false` |
+| Boolean `true` | `true` | `false` |
+| Boolean `false` | `false` | `false` |
+| options object | parsed `capture` member | parsed `once` member |
+
+Options objects retain the JS18–JS21 validation rules. Boolean syntax does not
+perform JavaScript truthiness conversion: `1`, `0`, strings, and other
+primitive values remain deterministic `HostInvalidValue` failures. The
+repository's existing null policy is also preserved: `null` is rejected as
+`HostInvalidValue`. Unknown members on an otherwise valid options object keep
+their prior ignored-member behavior.
+
+Listener identity remains exactly `(Element, event type, Function identity,
+capture bit)`. Consequently, Boolean and object syntax duplicates are no-ops,
+and a duplicate does not consume a slot:
+
+```javascript
+element.addEventListener("click", handler, true);
+element.addEventListener("click", handler, { capture: true }); // duplicate
+```
+
+The same callback may still have one capture and one bubble registration. A
+Boolean removal supplies only the capture identity bit; it ignores `once`, so
+an object registration `{ capture: true, once: true }` can be removed with
+`removeEventListener("click", handler, true)`. Capture and bubble registrations
+therefore remain independently removable across syntax forms.
+
+### JS22 dispatch and regressions
+
+No dispatch redesign is required. Boolean registrations enter the same fixed
+64-entry global listener table, 24-byte listener records, registration
+sequence ordering, bounded propagation path, phase-aware snapshots, stale-slot
+checks, callback-error containment, once handling, navigation cleanup, and
+cached Event metadata used by JS21. A target Boolean capture listener reports
+`AT_TARGET` (`2`), while an ancestor Boolean capture listener reports
+`CAPTURING_PHASE` (`1`) and an ancestor Boolean bubble listener reports
+`BUBBLING_PHASE` (`3`). Target ordering remains capture listener, `onclick`,
+then non-capture listener.
+
+The focused proof is
+`tests/navigator_javascript_js22_test.cpp`, run by
+`scripts/smoke-navigator-javascript-js22.ps1`. It uses the real parser,
+runtime, WebDocument, host adapter, and authentic dispatch path to cover
+Boolean/object equivalence, two-argument equivalence, duplicate capacity,
+capture-aware and bubble-aware removal, cross-form removal, same-callback
+phases, target phases, `onclick` ordering, multiple-listener ordering,
+object-only once, malformed inputs, propagation controls, cancellation and
+`defaultPrevented`, mutation, callback errors, path overflow/recovery,
+navigation/stale references, the 64/65 capacity boundary, and 100 mixed
+shorthand clicks. The focused JS22 suite reports 308 checks with 0 failures.
+
+The authentic hosted proof is
+`navigator-smoke/javascript-js22.html`, with
+`navigator-smoke/javascript-js22-target.html` as its navigation target. It
+uses real parsed Boolean literals, nested layout, hit testing, capture,
+target, bubbling, cross-form removal, propagation controls, cancellation, and
+ordinary link navigation. The production aggregate adds 10 JS22 checks; all
+10 pass, including navigation cleanup.
+
+### JS22 bounded memory
+
+JS22 adds no listener record, propagation-path entry, snapshot entry, Event
+object, dispatch-state field, host object, or native function. The normalized
+Boolean is held only in the existing call-local `capture` field. Before and
+after JS22, the bounded accounting is:
+
+| Resource | Before JS22 | After JS22 | Delta |
+| --- | ---: | ---: | ---: |
+| Listener records | `64 × 24 = 1536` bytes | `64 × 24 = 1536` bytes | `0` |
+| Event properties | `10` cached properties | `10` cached properties | `0` |
+| Host objects | existing bounded set | existing bounded set | `0` |
+| Native functions | existing bounded set | existing bounded set | `0` |
+| Per-click allocation | `0` after cache/wrappers | `0` after cache/wrappers | `0` |
+
+The focused 100-click mixed stress proof confirms fixed Event, host-object,
+listener-table, and once-slot behavior. No dynamic options object, temporary
+STL container, RTTI, exception, or shorthand-specific callback table was
+added. Full DOM Events compatibility remains incomplete.
+
+### JS22 validation result
+
+The JS22 focused script passes with `GXOS_BARE_METAL`, and its strict
+`-Wall -Wextra -Werror -pedantic` adapter/runtime syntax validation passes.
+The native hosted production build also passes through `build.bat`; the
+existing hosted build emits unrelated pre-existing warnings but exits
+successfully.
+
+The complete JS1–JS22 focused set contains 20 suites: lexer, parser, runtime,
+and JS6 through JS22. All 20 focused scripts pass. The aggregate Navigator
+run reports `391 passed, 7 failed` out of `398` checks: all 10 JS22 aggregate
+checks pass, so JS22 adds no failures. The seven known unrelated CSS failures
+remain CSS 3C, CSS 3G, CSS 6A, CSS 6B's three checks, and CSS 6C.
+
+Limitations remain intentional: only `click` is supported; richer listener
+options require object syntax; `passive`, additional EventListenerOptions
+fields, MouseEvent, PointerEvent, keyboard/input events, timers, promises,
+microtasks, asynchronous queues, and broad DOM expansion are out of scope.
+The recommended JS23 direction is a bounded keyboard event foundation,
+starting with `keydown`/`keyup` and the smallest useful `key`/`code` metadata
+representation.

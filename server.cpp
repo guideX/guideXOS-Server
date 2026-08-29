@@ -2035,6 +2035,108 @@ static std::string navigatorHostedSmokeDiagnostic() {
         gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
         "replacement page starts without JS21 registrations or errors");
 
+    const bool js22Loaded = gxos::apps::Navigator::SmokeNavigateToQuiet(
+        "http://127.0.0.1:8080/navigator-smoke/javascript-js22.html");
+    const std::string js22InitialText =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    const size_t js22InitialHandlers =
+        gxos::apps::Navigator::SmokeJavaScriptHandlerCount();
+    const size_t js22InitialListeners =
+        gxos::apps::Navigator::SmokeJavaScriptListenerCount();
+    const std::string js22InitialError =
+        gxos::apps::Navigator::SmokeJavaScriptLastError();
+    add("JS22 hosted fixture loads Boolean registrations",
+        js22Loaded && contains(js22InitialText, "Navigator JavaScript JS22") &&
+        contains(js22InitialText, "Boolean capture shorthand") &&
+        js22InitialHandlers == 7u && js22InitialListeners == 18u &&
+        js22InitialError.empty(),
+        std::string("loaded=") + yesNo(js22Loaded) + ",handlers=" +
+        std::to_string(js22InitialHandlers) + ",listeners=" +
+        std::to_string(js22InitialListeners) + ",error=" +
+        (js22InitialError.empty() ? "none" : js22InitialError));
+
+    const bool js22ChildClick =
+        gxos::apps::Navigator::SmokeClickFormControlById("js22-child");
+    const std::string js22ChildText =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS22 authentic Boolean capture-target-bubble ordering",
+        js22ChildClick && contains(js22ChildText,
+            "order:r1p1c2o2t2po3p3r3") &&
+        contains(js22ChildText, "same:13") &&
+        contains(js22ChildText, "target:true") &&
+        contains(js22ChildText, "current:true"),
+        "Boolean capture, object capture, target ordering, and same callback phases");
+
+    const bool js22CrossClick =
+        gxos::apps::Navigator::SmokeClickFormControlById("js22-cross");
+    add("JS22 hosted cross-form removal leaves callback inactive",
+        js22CrossClick && contains(
+            gxos::apps::Navigator::SmokeCurrentDocumentText(), "cross:"),
+        "Boolean registration/object removal and object registration/Boolean removal both hold");
+
+    const bool js22StopClick =
+        gxos::apps::Navigator::SmokeClickFormControlById("js22-stop");
+    add("JS22 hosted Boolean stopPropagation preserves same-node capture",
+        js22StopClick && contains(
+            gxos::apps::Navigator::SmokeCurrentDocumentText(), "stop:a1b1"),
+        "later same-node capture listener runs while later nodes do not");
+
+    const bool js22ImmediateClick =
+        gxos::apps::Navigator::SmokeClickFormControlById("js22-immediate");
+    add("JS22 hosted Boolean stopImmediatePropagation stops immediately",
+        js22ImmediateClick && contains(
+            gxos::apps::Navigator::SmokeCurrentDocumentText(),
+            "immediate:a1"),
+        "later same-node listeners and later phases are skipped");
+
+    const bool js22TargetStopClick =
+        gxos::apps::Navigator::SmokeClickFormControlById("js22-target-stop");
+    add("JS22 hosted target Boolean stopPropagation remains AT_TARGET",
+        js22TargetStopClick && contains(
+            gxos::apps::Navigator::SmokeCurrentDocumentText(),
+            "target-stop:c2o2b2"),
+        "target capture, onclick, and target bubble all report phase 2");
+
+    const bool js22TargetImmediateClick =
+        gxos::apps::Navigator::SmokeClickFormControlById(
+            "js22-target-immediate");
+    add("JS22 hosted target Boolean immediate stop remains AT_TARGET",
+        js22TargetImmediateClick && contains(
+            gxos::apps::Navigator::SmokeCurrentDocumentText(),
+            "target-immediate:c2"),
+        "target immediate stop skips onclick, target bubble, and ancestors");
+
+    const bool js22CancelHit =
+        gxos::apps::Navigator::SmokeHitLinkById("js22-cancel");
+    const bool js22CancelledClick =
+        js22CancelHit && !gxos::apps::Navigator::SmokeClickFirstLink();
+    const std::string js22CancelText =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS22 hosted Boolean capture preventDefault cancels link",
+        js22CancelledClick &&
+        gxos::apps::Navigator::SmokeCurrentUrl() ==
+            "http://127.0.0.1:8080/navigator-smoke/javascript-js22.html" &&
+        contains(js22CancelText, "cancel:c1t2truep3true"),
+        std::string("hit=") + yesNo(js22CancelHit) + ",cancelled=" +
+        yesNo(js22CancelledClick) + ",text=" +
+        summarizeText(js22CancelText, 180));
+
+    const bool js22CancelHitAgain =
+        gxos::apps::Navigator::SmokeHitLinkById("js22-cancel");
+    const bool js22UncancelledClick =
+        js22CancelHitAgain && gxos::apps::Navigator::SmokeClickFirstLink();
+    add("JS22 hosted uncancelled link remains functional",
+        js22UncancelledClick && gxos::apps::Navigator::SmokeCurrentUrl() ==
+            "http://127.0.0.1:8080/navigator-smoke/javascript-js22-target.html" &&
+        contains(gxos::apps::Navigator::SmokeCurrentDocumentText(),
+            "Navigator JavaScript JS22 Target"),
+        "second link click is not cancelled and navigates authentically");
+    add("JS22 navigation cleanup clears Boolean listeners",
+        gxos::apps::Navigator::SmokeJavaScriptHandlerCount() == 0u &&
+        gxos::apps::Navigator::SmokeJavaScriptListenerCount() == 0u &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        "replacement page starts without JS22 registrations or errors");
+
     bool cssInlineLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-inline.html");
     std::string cssInlineText = gxos::apps::Navigator::SmokeCurrentDocumentText();
     std::string cssInlineReport = gxos::apps::Navigator::SmokeRuntimeReport();

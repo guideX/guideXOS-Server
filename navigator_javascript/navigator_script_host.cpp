@@ -928,6 +928,23 @@ HostResult NavigatorScriptHostAdapter::call(
     const HostObjectReference* receiver, std::uint32_t methodId,
     const HostValue* arguments, std::size_t argumentCount, HostValue& result)
 {
+    if ((methodId == kNavigatorAddEventListenerMethod ||
+            methodId == kNavigatorRemoveEventListenerMethod) &&
+        argumentCount == 3u) {
+        if (arguments == nullptr) return HostResult{HostResultCode::InvalidValue};
+        // Boolean options are a host-call compatibility shorthand. The
+        // runtime-aware path below handles ordinary options objects; keeping
+        // this small direct-call path in sync makes the adapter contract
+        // deterministic for embedders that do not have a RuntimeContext.
+        if (arguments[2].type == HostValueType::Boolean) {
+            return callInternal(receiver, methodId, arguments, argumentCount,
+                result, false, arguments[2].booleanValue, true);
+        }
+        if (arguments[2].type == HostValueType::Undefined) {
+            return callInternal(receiver, methodId, arguments, argumentCount,
+                result, false, false, true);
+        }
+    }
     return callInternal(receiver, methodId, arguments, argumentCount, result,
         false, false, false);
 }
@@ -943,35 +960,49 @@ HostResult NavigatorScriptHostAdapter::callWithRuntime(
     if ((methodId == kNavigatorAddEventListenerMethod ||
             methodId == kNavigatorRemoveEventListenerMethod) &&
         argumentCount == 3u) {
-        if (arguments == nullptr || arguments[2].type != HostValueType::Object)
+        if (arguments == nullptr)
             return HostResult{HostResultCode::InvalidValue};
-        Value onceValue;
-        RuntimeErrorCode optionError = RuntimeErrorCode::None;
-        if (!runtime.readObjectPropertyForHost(arguments[2].objectId, "once",
-                onceValue, optionError)) {
-            return HostResult{HostResultCode::InvalidValue};
-        }
-        if (onceValue.isUndefined()) {
-            once = false;
-        } else if (onceValue.isBoolean()) {
-            once = onceValue.booleanValue();
+        if (arguments[2].type == HostValueType::Boolean) {
+            // The Boolean third argument represents capture only. In
+            // particular, it never enables once.
+            capture = arguments[2].booleanValue;
+            optionsSupplied = true;
+        } else if (arguments[2].type == HostValueType::Undefined) {
+            // Explicit undefined is the same normalized options state as an
+            // omitted third argument. Null and all other primitives remain
+            // invalid, preserving the JS18-21 host contract.
+            optionsSupplied = true;
+        } else if (arguments[2].type == HostValueType::Object) {
+            Value onceValue;
+            RuntimeErrorCode optionError = RuntimeErrorCode::None;
+            if (!runtime.readObjectPropertyForHost(arguments[2].objectId,
+                    "once", onceValue, optionError)) {
+                return HostResult{HostResultCode::InvalidValue};
+            }
+            if (onceValue.isUndefined()) {
+                once = false;
+            } else if (onceValue.isBoolean()) {
+                once = onceValue.booleanValue();
+            } else {
+                return HostResult{HostResultCode::InvalidValue};
+            }
+            Value captureValue;
+            optionError = RuntimeErrorCode::None;
+            if (!runtime.readObjectPropertyForHost(arguments[2].objectId,
+                    "capture", captureValue, optionError)) {
+                return HostResult{HostResultCode::InvalidValue};
+            }
+            if (captureValue.isUndefined()) {
+                capture = false;
+            } else if (captureValue.isBoolean()) {
+                capture = captureValue.booleanValue();
+            } else {
+                return HostResult{HostResultCode::InvalidValue};
+            }
+            optionsSupplied = true;
         } else {
             return HostResult{HostResultCode::InvalidValue};
         }
-        Value captureValue;
-        optionError = RuntimeErrorCode::None;
-        if (!runtime.readObjectPropertyForHost(arguments[2].objectId,
-                "capture", captureValue, optionError)) {
-            return HostResult{HostResultCode::InvalidValue};
-        }
-        if (captureValue.isUndefined()) {
-            capture = false;
-        } else if (captureValue.isBoolean()) {
-            capture = captureValue.booleanValue();
-        } else {
-            return HostResult{HostResultCode::InvalidValue};
-        }
-        optionsSupplied = true;
     }
     return callInternal(receiver, methodId, arguments, argumentCount, result,
         once, capture, optionsSupplied);

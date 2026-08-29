@@ -725,12 +725,12 @@ void testUnsupportedAndBooleanShorthand()
         "unsupported: capture does not relax callback validation");
     result = harness.execute(
         "target.addEventListener(\"click\", handler, true);");
-    expectError(result, RuntimeErrorCode::HostInvalidValue,
-        "unsupported: Boolean capture shorthand remains unsupported");
+    expect(result.succeeded(),
+        "unsupported: Boolean capture shorthand is accepted by JS22");
     result = harness.execute(
         "target.removeEventListener(\"click\", handler, true);");
-    expectError(result, RuntimeErrorCode::HostInvalidValue,
-        "unsupported: Boolean removal shorthand remains unsupported");
+    expect(result.succeeded(),
+        "unsupported: Boolean removal shorthand is accepted by JS22");
 }
 
 } // namespace
