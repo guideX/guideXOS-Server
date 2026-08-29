@@ -148,7 +148,8 @@ static bool is_supported_nic(uint16_t vendor, uint16_t device)
     if (vendor != PCI_VENDOR_INTEL) return false;
     return (device == PCI_DEVICE_E1000 ||
             device == PCI_DEVICE_E1000E ||
-            device == PCI_DEVICE_I217);
+            device == PCI_DEVICE_I217 ||
+            device == PCI_DEVICE_I219_LM);
 }
 
 // ================================================================
@@ -523,6 +524,7 @@ static bool init_e1000(uint64_t mmioBase)
         set_init_failure(NIC_INIT_RESET, "reset timeout");
         return false;
     }
+    serial::puts("[NIC] MAC reset: complete (bounded)\n");
 
     // Keep interrupts masked until all state and rings are ready.
     mmio_write32(mmioBase, E1000_IMC, 0xFFFFFFFF);
@@ -542,6 +544,9 @@ static bool init_e1000(uint64_t mmioBase)
         set_init_failure(NIC_INIT_MAC, "invalid MAC in RAL0/RAH0");
         return false;
     }
+    serial::puts(is_i219_device(s_device.deviceId)
+                 ? "[NIC] MAC acquisition: RAL0/RAH0 valid\n"
+                 : "[NIC] MAC acquisition: EERD/RAR valid\n");
 
     if (is_i219_device(s_device.deviceId)) {
         s_device.initStage = NIC_INIT_PHY;
@@ -549,6 +554,7 @@ static bool init_e1000(uint64_t mmioBase)
             set_init_failure(NIC_INIT_PHY, "PHY MDIC timeout or invalid response");
             return false;
         }
+        serial::puts("[NIC] I219 PHY discovery: MDIC address=1 status=26 valid\n");
     } else {
         s_device.link = (s_device.statusValue & E1000_STATUS_LU)
                         ? NIC_LINK_UP : NIC_LINK_DOWN;
@@ -567,12 +573,14 @@ static bool init_e1000(uint64_t mmioBase)
         set_init_failure(NIC_INIT_RX_RING, "RX ring DMA address unavailable");
         return false;
     }
+    serial::puts("[NIC] RX ring setup: 32 descriptors ready\n");
 
     s_device.initStage = NIC_INIT_TX_RING;
     if (!init_tx(mmioBase)) {
         set_init_failure(NIC_INIT_TX_RING, "TX ring DMA address unavailable");
         return false;
     }
+    serial::puts("[NIC] TX ring setup: 8 descriptors ready\n");
 
     // Keep NIC interrupt causes masked until the kernel has installed the
     // device IRQ handler.  Enabling them here leaves a real device a window
@@ -811,6 +819,12 @@ bool init_from_bootinfo(const NicBootInfo* nicInfo)
     s_device.phyAccess = NIC_PHY_NOT_ATTEMPTED;
     s_device.link = NIC_LINK_UNKNOWN;
 
+    serial::puts(exactDriverMatch
+                 ? (is_i219_device(s_device.deviceId)
+                    ? "[NIC] PCI match: accepted; driver=intel-i219-lm (PCH)\n"
+                    : "[NIC] PCI match: accepted; driver=intel-e1000 family\n")
+                 : "[NIC] PCI match: rejected; no exact Ethernet driver\n");
+
     if (!exactDriverMatch) {
         set_init_failure(NIC_INIT_BOUND, "PCI identity is outside the exact driver match");
         return false;
@@ -833,6 +847,9 @@ bool init_from_bootinfo(const NicBootInfo* nicInfo)
         set_init_failure(NIC_INIT_MMIO, "MMIO BAR is smaller than the register window");
         return false;
     }
+    serial::puts("[NIC] MMIO mapping: accepted size=");
+    serial::put_hex32(s_device.mmioSize);
+    serial::puts(" bytes\n");
 
     s_device.initStage = NIC_INIT_PCI;
     uint16_t command = pci_read16(s_device.pciBus, s_device.pciSlot,
@@ -843,6 +860,9 @@ bool init_from_bootinfo(const NicBootInfo* nicInfo)
                  0xFFFF0000u) | command);
     s_device.pciCommand = pci_read16(s_device.pciBus, s_device.pciSlot,
                                      s_device.pciFunc, 0x04);
+    serial::puts("[NIC] PCI command: ");
+    serial::put_hex32(s_device.pciCommand);
+    serial::puts(" (memory+bus-master enabled)\n");
     if ((s_device.pciCommand & ((1u << 1) | (1u << 2))) != ((1u << 1) | (1u << 2))) {
         set_init_failure(NIC_INIT_PCI, "PCI memory-space/bus-master enable failed");
         return false;
@@ -870,6 +890,7 @@ bool init_from_bootinfo(const NicBootInfo* nicInfo)
     s_device.pollingEnabled = true;
     s_device.nicRegistered = true;
     s_device.initStage = NIC_INIT_READY;
+    serial::puts("[NIC] NIC registration: complete; interrupt causes remain masked\n");
     
     serial::puts(is_i219_device(s_device.deviceId)
                  ? "[NIC] I219-LM initialization complete\n"

@@ -45,7 +45,10 @@ int main()
     assert(network_status::is_supported_intel_e1000(0x8086, 0x100E));
     assert(network_status::is_supported_intel_e1000(0x8086, 0x10D3));
     assert(network_status::is_supported_intel_e1000(0x8086, 0x153A));
-    assert(!network_status::is_supported_intel_e1000(0x8086, 0x156F));
+    assert(network_status::is_supported_intel_e1000(0x8086, 0x156F));
+    assert(strcmp(network_status::driver_name(0x8086, 0x156F),
+                  "intel-i219-lm (PCH)") == 0);
+    assert(!network_status::is_supported_intel_e1000(0x8086, 0x24F3));
     assert(!network_status::is_supported_intel_e1000(0x10EC, 0x8168));
     assert(!network_status::is_supported_intel_e1000(0x8086, 0x1234));
 

@@ -2,6 +2,7 @@
 //
 // Supports:
 //   - Intel E1000 / E1000E (PCI MMIO)  - QEMU default, VirtualBox, Bochs
+//   - Intel I219-LM/PCH (8086:156F) via the bounded E1000e-compatible path
 //   - PCI bus scan for class 0x02 (Network Controller)
 //   - Raw Ethernet frame send / receive via descriptor rings
 //   - IRQ-driven receive with ring buffer

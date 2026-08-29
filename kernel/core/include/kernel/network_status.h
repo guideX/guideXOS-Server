@@ -66,7 +66,8 @@ inline const char* state_to_string(ConnectionState state)
 inline bool is_supported_intel_e1000(uint16_t vendorId, uint16_t deviceId)
 {
     return vendorId == 0x8086 &&
-           (deviceId == 0x100E || deviceId == 0x10D3 || deviceId == 0x153A);
+           (deviceId == 0x100E || deviceId == 0x10D3 || deviceId == 0x153A ||
+            deviceId == 0x156F);
 }
 
 inline const char* driver_name(uint16_t vendorId, uint16_t deviceId)
@@ -74,6 +75,7 @@ inline const char* driver_name(uint16_t vendorId, uint16_t deviceId)
     if (vendorId == 0x8086 && deviceId == 0x100E) return "intel-e1000 (82540EM)";
     if (vendorId == 0x8086 && deviceId == 0x10D3) return "intel-e1000e (82574L)";
     if (vendorId == 0x8086 && deviceId == 0x153A) return "intel-e1000 (I217-LM)";
+    if (vendorId == 0x8086 && deviceId == 0x156F) return "intel-i219-lm (PCH)";
     return "unsupported";
 }
 

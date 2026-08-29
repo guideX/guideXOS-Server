@@ -1004,8 +1004,13 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE* SystemTable) {
         nicMmioSize = (UINTN)nic->bar0Size;
         
         // Enable bus mastering and memory space for the NIC
+        UINT16 pciCommandBefore = guideXOS::pci::PciRead16(
+            nic->bus, nic->device, nic->function, 0x04);
         guideXOS::pci::EnablePciDevice(nic->bus, nic->device, nic->function);
-        Print(L"    PCI bus mastering enabled\n");
+        UINT16 pciCommandAfter = guideXOS::pci::PciRead16(
+            nic->bus, nic->device, nic->function, 0x04);
+        Print(L"    PCI command: before=%04x after=%04x (memory+bus-master requested)\n",
+              (UINT32)pciCommandBefore, (UINT32)pciCommandAfter);
     } else {
         Print(L"\nNo supported NIC found for MMIO mapping\n");
     }

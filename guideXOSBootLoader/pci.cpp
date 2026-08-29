@@ -87,7 +87,8 @@ bool IsSupportedNic(uint16_t vendorId, uint16_t deviceId)
     
     return (deviceId == PCI_DEVICE_E1000 ||
             deviceId == PCI_DEVICE_E1000E ||
-            deviceId == PCI_DEVICE_I217);
+            deviceId == PCI_DEVICE_I217 ||
+            deviceId == PCI_DEVICE_I219_LM);
 }
 
 bool GetRegisterBarInfo(uint8_t bus, uint8_t dev, uint8_t func,
@@ -303,9 +304,13 @@ void PrintPciDevice(EFI_SYSTEM_TABLE* ST, const PciDevice* dev)
     if (dev->classCode == PCI_CLASS_NETWORK &&
         dev->subclass == PCI_SUBCLASS_ETH &&
         IsSupportedNic(dev->vendorId, dev->deviceId)) {
-        Print((CONST CHAR16*)L"    Driver: intel-e1000 family (supported)\n");
+        if (dev->deviceId == PCI_DEVICE_I219_LM) {
+            Print((CONST CHAR16*)L"    Match: accepted; Driver: intel-i219-lm (PCH) (supported)\n");
+        } else {
+            Print((CONST CHAR16*)L"    Match: accepted; Driver: intel-e1000 family (supported)\n");
+        }
     } else {
-        Print((CONST CHAR16*)L"    Driver: unsupported (identity only; no binding)\n");
+        Print((CONST CHAR16*)L"    Match: rejected; Driver: unsupported (identity only; no binding)\n");
     }
 }
 
