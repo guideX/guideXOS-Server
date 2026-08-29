@@ -1144,9 +1144,10 @@ typedef struct guidexos_nativeaot_c011ec53_lifecycle_record {
 } guidexos_nativeaot_c011ec53_lifecycle_record;
 
 enum {
-    GUIDEXOS_NATIVEAOT_C011EC54_MAX_ALLOCATIONS = 256u,
-    GUIDEXOS_NATIVEAOT_C011EC54_MAX_COLLECTIONS = 8u,
+    GUIDEXOS_NATIVEAOT_C011EC54_MAX_ALLOCATIONS = 2048u,
+    GUIDEXOS_NATIVEAOT_C011EC54_MAX_COLLECTIONS = 1024u,
     GUIDEXOS_NATIVEAOT_C011EC54_MAX_SURVIVORS = 8u,
+    GUIDEXOS_NATIVEAOT_C011EC55_MAX_SELECTIONS = 1024u,
     GUIDEXOS_NATIVEAOT_C011EC54_COLLECTION_ENTRY = 1u,
     GUIDEXOS_NATIVEAOT_C011EC54_FIX_BOUNDS_BEFORE = 2u,
     GUIDEXOS_NATIVEAOT_C011EC54_FIX_BOUNDS_AFTER = 3u,
@@ -1261,6 +1262,41 @@ typedef struct guidexos_nativeaot_c011ec54_survivor_record {
     uintptr_t segment;
 } guidexos_nativeaot_c011ec54_survivor_record;
 
+/*
+ * C011EC55 captures the scalar policy state at the return of the locked
+ * generation_to_condemn function.  It is intentionally stored alongside the
+ * C54 lifecycle record because C55 is a continuation of that proof and the
+ * source callback uses the same bounded, non-owning diagnostic state.
+ */
+typedef struct guidexos_nativeaot_c011ec55_selection_record {
+    uint32_t observed;
+    uint32_t ordinal;
+    uint32_t initialGeneration;
+    uint32_t selectedGeneration;
+    uint32_t collectionReason;
+    uint32_t checkOnly;
+    uint32_t blockingCollection;
+    uint32_t elevationRequested;
+    uint32_t promotion;
+    uint32_t lowEphemeral;
+    uint32_t highMemory;
+    uint32_t veryHighMemory;
+    uint32_t highFragmentation;
+    uint32_t reserved[3];
+    uintptr_t gen0DesiredAllocation;
+    uintptr_t gen0NewAllocation;
+    uintptr_t gen0CurrentSize;
+    uintptr_t gen0Fragmentation;
+    uintptr_t gen1DesiredAllocation;
+    uintptr_t gen1NewAllocation;
+    uintptr_t gen1CurrentSize;
+    uintptr_t gen1Fragmentation;
+    uintptr_t gen2DesiredAllocation;
+    uintptr_t gen2NewAllocation;
+    uintptr_t gen2CurrentSize;
+    uintptr_t gen2Fragmentation;
+} guidexos_nativeaot_c011ec55_selection_record;
+
 typedef struct guidexos_nativeaot_c011ec54_lifecycle_record {
     uint32_t started;
     uint32_t preflightEmitted;
@@ -1295,6 +1331,10 @@ typedef struct guidexos_nativeaot_c011ec54_lifecycle_record {
     uint32_t segmentRetired;
     uint32_t segmentRecycled;
     uint32_t survivorObservationCount;
+    uint32_t selectionObservationCount;
+    uint32_t selectionSourceObserved;
+    uint32_t outcomeCode;
+    uint32_t successLevel;
     uint32_t noReuseClassification;
     uint32_t invariantFailures;
     uint32_t sensitiveDiagnosticAllocations;
@@ -1358,6 +1398,8 @@ typedef struct guidexos_nativeaot_c011ec54_lifecycle_record {
         GUIDEXOS_NATIVEAOT_C011EC54_MAX_ALLOCATIONS];
     guidexos_nativeaot_c011ec54_survivor_record survivors[
         GUIDEXOS_NATIVEAOT_C011EC54_MAX_SURVIVORS];
+    guidexos_nativeaot_c011ec55_selection_record selections[
+        GUIDEXOS_NATIVEAOT_C011EC55_MAX_SELECTIONS];
 } guidexos_nativeaot_c011ec54_lifecycle_record;
 
 enum {

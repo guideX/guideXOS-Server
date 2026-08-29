@@ -88,6 +88,9 @@
   <PropertyGroup Condition="'$(HostLogProofMode)' == 'ReclaimedGen1EphemeralTransition'">
     <DefineConstants>$(DefineConstants);HOSTLOGPROOF_FIRST_COLLECTION_BOUNDARY_ALLOCATION;HOSTLOGPROOF_SHORT_WEAK_LIFETIME;HOSTLOGPROOF_C011EC37;HOSTLOGPROOF_C011EC40;HOSTLOGPROOF_C011EC41;HOSTLOGPROOF_C011EC54</DefineConstants>
   </PropertyGroup>
+  <PropertyGroup Condition="'$(HostLogProofMode)' == 'NaturalOlderGenerationTransition'">
+    <DefineConstants>$(DefineConstants);HOSTLOGPROOF_FIRST_COLLECTION_BOUNDARY_ALLOCATION;HOSTLOGPROOF_SHORT_WEAK_LIFETIME;HOSTLOGPROOF_C011EC37;HOSTLOGPROOF_C011EC40;HOSTLOGPROOF_C011EC41;HOSTLOGPROOF_C011EC55</DefineConstants>
+  </PropertyGroup>
 
   <PropertyGroup Condition="'$(HostLogProofMode)' == 'FirstNonNullRoot'">
     <DefineConstants>$(DefineConstants);HOSTLOGPROOF_FIRST_COLLECTION_BOUNDARY_ALLOCATION;HOSTLOGPROOF_FIRST_NON_NULL_ROOT</DefineConstants>
