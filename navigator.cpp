@@ -1,6 +1,7 @@
 #include "navigator.h"
 
 #include "desktop_theme.h"
+#include "desktop_control_theme.h"
 
 #include "gui_protocol.h"
 #include "gxos_tls_foundation.h"
@@ -474,111 +475,102 @@ namespace {
 	uint32_t NavigatorBodyColor()
 	{
 		if (!isSciFiThemeActive()) return packRgb(25, 29, 38);
-		const DesktopTheme& theme = navigatorTheme();
-		return blendColor(theme.taskbarBackground, theme.windowBackground, 14);
+		const DesktopControlTheme roles = GetDesktopControlTheme(navigatorTheme());
+		return blendColor(roles.raisedPanel, roles.panelBackground, 14);
 	}
 
 	uint32_t NavigatorToolbarColor()
 	{
 		if (!isSciFiThemeActive()) return packRgb(42, 46, 58);
-		const DesktopTheme& theme = navigatorTheme();
-		return blendColor(theme.titleBarBackground, theme.windowBackground, 12);
+		const DesktopControlTheme roles = GetDesktopControlTheme(navigatorTheme());
+		return blendColor(roles.raisedPanel, roles.panelBackground, 12);
 	}
 
 	uint32_t NavigatorToolbarBorderColor()
 	{
 		if (!isSciFiThemeActive()) return packRgb(78, 86, 108);
-		const DesktopTheme& theme = navigatorTheme();
-		return blendColor(theme.windowBorder, theme.mutedAccent, 24);
+		return GetDesktopControlTheme(navigatorTheme()).separator;
 	}
 
 	uint32_t NavigatorAddressFillColor()
 	{
 		if (!isSciFiThemeActive()) return packRgb(18, 22, 30);
-		const DesktopTheme& theme = navigatorTheme();
-		return blendColor(theme.windowBackground, theme.taskbarBackground, 12);
+		return GetDesktopControlTheme(navigatorTheme()).inputBackground;
 	}
 
 	uint32_t NavigatorAddressFocusedBorderColor()
 	{
 		if (!isSciFiThemeActive()) return packRgb(80, 140, 220);
-		const DesktopTheme& theme = navigatorTheme();
-		return blendColor(theme.accent, theme.windowBackground, 28);
+		return GetDesktopControlTheme(navigatorTheme()).inputFocusBorder;
 	}
 
 	uint32_t NavigatorAddressIdleTopBorderColor()
 	{
 		if (!isSciFiThemeActive()) return packRgb(110, 120, 142);
-		const DesktopTheme& theme = navigatorTheme();
-		return blendColor(theme.windowBorder, theme.mutedAccent, 18);
+		return GetDesktopControlTheme(navigatorTheme()).inputBorder;
 	}
 
 	uint32_t NavigatorAddressIdleBottomBorderColor()
 	{
 		if (!isSciFiThemeActive()) return packRgb(70, 78, 96);
-		const DesktopTheme& theme = navigatorTheme();
-		return blendColor(theme.taskbarBorder, theme.windowBackground, 18);
+		return GetDesktopControlTheme(navigatorTheme()).inputBorder;
 	}
 
-	uint32_t NavigatorContentColor()
+	// This is the default document surface, not browser chrome. Keep the
+	// existing light user-agent default in both themes so Sci-Fi does not tint
+	// pages that do not publish an explicit CSS/body background.
+	uint32_t NavigatorDocumentDefaultColor()
 	{
-		if (!isSciFiThemeActive()) return packRgb(245, 247, 250);
-		const DesktopTheme& theme = navigatorTheme();
-		return blendColor(theme.windowBackground, theme.taskbarBackground, 18);
+		return packRgb(245, 247, 250);
 	}
 
 	uint32_t NavigatorContentTextColor(uint32_t contentColor)
 	{
 		if (!isSciFiThemeActive()) return 0xFF303846u;
-		return isDarkColor(contentColor) ? navigatorTheme().titleBarText : 0xFF303846u;
+		const DesktopControlTheme roles = GetDesktopControlTheme(navigatorTheme());
+		return isDarkColor(contentColor) ? roles.primaryText : 0xFF303846u;
 	}
 
 	uint32_t NavigatorContentBorderColor()
 	{
 		if (!isSciFiThemeActive()) return packRgb(186, 192, 204);
-		const DesktopTheme& theme = navigatorTheme();
-		return blendColor(theme.windowBorder, theme.mutedAccent, 18);
+		return GetDesktopControlTheme(navigatorTheme()).separator;
 	}
 
 	uint32_t NavigatorScrollTrackColor()
 	{
 		if (!isSciFiThemeActive()) return packRgb(229, 232, 238);
-		const DesktopTheme& theme = navigatorTheme();
-		return blendColor(theme.taskbarBackground, theme.windowBackground, 16);
+		return GetDesktopControlTheme(navigatorTheme()).scrollbarTrack;
 	}
 
 	uint32_t NavigatorScrollThumbColor()
 	{
 		if (!isSciFiThemeActive()) return packRgb(130, 138, 156);
-		const DesktopTheme& theme = navigatorTheme();
-		return blendColor(theme.accent, theme.windowBorder, 34);
+		return GetDesktopControlTheme(navigatorTheme()).scrollbarThumb;
 	}
 
 	uint32_t NavigatorStatusBarColor()
 	{
 		if (!isSciFiThemeActive()) return packRgb(36, 40, 50);
-		const DesktopTheme& theme = navigatorTheme();
-		return blendColor(theme.taskbarBackground, theme.windowBackground, 8);
+		return GetDesktopControlTheme(navigatorTheme()).raisedPanel;
 	}
 
 	uint32_t NavigatorStatusBarBorderColor()
 	{
 		if (!isSciFiThemeActive()) return packRgb(78, 86, 108);
-		const DesktopTheme& theme = navigatorTheme();
-		return blendColor(theme.windowBorder, theme.mutedAccent, 24);
+		return GetDesktopControlTheme(navigatorTheme()).separator;
 	}
 
 	uint32_t NavigatorTextColor()
 	{
 		if (!isSciFiThemeActive()) return packRgb(220, 220, 220);
-		return navigatorTheme().titleBarText;
+		return GetDesktopControlTheme(navigatorTheme()).primaryText;
 	}
 
 	uint32_t NavigatorMutedTextColor()
 	{
 		if (!isSciFiThemeActive()) return packRgb(186, 190, 196);
-		const DesktopTheme& theme = navigatorTheme();
-		return blendColor(theme.titleBarText, theme.taskbarBackground, 54);
+		return GetDesktopControlTheme(navigatorTheme()).secondaryText;
 	}
 
 	uint32_t NavigatorAccentColor()
@@ -590,72 +582,70 @@ namespace {
 	uint32_t NavigatorSelectionColor()
 	{
 		if (!isSciFiThemeActive()) return packRgb(96, 146, 224);
-		const DesktopTheme& theme = navigatorTheme();
-		return blendColor(theme.accent, theme.windowBackground, 34);
+		return GetDesktopControlTheme(navigatorTheme()).selectionActive;
 	}
 
 	uint32_t NavigatorFindHighlightColor()
 	{
 		if (!isSciFiThemeActive()) return packRgb(255, 244, 168);
-		const DesktopTheme& theme = navigatorTheme();
-		return blendColor(theme.accent, theme.mutedAccent, 20);
+		const DesktopControlTheme roles = GetDesktopControlTheme(navigatorTheme());
+		return blendColor(roles.selectionActive, roles.selectionInactive, 20);
 	}
 
 	uint32_t NavigatorFieldFillColor(bool focused)
 	{
 		if (!isSciFiThemeActive()) return packRgb(250, 252, 255);
-		const DesktopTheme& theme = navigatorTheme();
-		return blendColor(theme.windowBackground, theme.taskbarBackground, focused ? 10 : 16);
+		const DesktopControlTheme roles = GetDesktopControlTheme(navigatorTheme());
+		return focused ? blendColor(roles.inputBackground, roles.inputFocusBorder, 10) : roles.inputBackground;
 	}
 
 	uint32_t NavigatorFieldBorderColor(bool focused)
 	{
 		if (!isSciFiThemeActive()) return focused ? packRgb(54, 118, 210) : packRgb(148, 156, 170);
-		const DesktopTheme& theme = navigatorTheme();
-		return focused ? blendColor(theme.accent, theme.windowBackground, 30) : blendColor(theme.windowBorder, theme.mutedAccent, 24);
+		const DesktopControlTheme roles = GetDesktopControlTheme(navigatorTheme());
+		return focused ? roles.inputFocusBorder : roles.inputBorder;
 	}
 
 	uint32_t NavigatorFieldTextColor()
 	{
 		if (!isSciFiThemeActive()) return packRgb(35, 45, 60);
-		return navigatorTheme().titleBarText;
+		return GetDesktopControlTheme(navigatorTheme()).inputText;
 	}
 
 	uint32_t NavigatorFieldMutedTextColor()
 	{
 		if (!isSciFiThemeActive()) return packRgb(128, 136, 150);
-		const DesktopTheme& theme = navigatorTheme();
-		return blendColor(theme.titleBarText, theme.taskbarBackground, 50);
+		return GetDesktopControlTheme(navigatorTheme()).inputDisabledText;
 	}
 
 	uint32_t NavigatorButtonFillColor(bool focused, bool disabled)
 	{
 		if (!isSciFiThemeActive()) return disabled ? packRgb(184, 188, 196) : packRgb(65, 112, 190);
-		const DesktopTheme& theme = navigatorTheme();
-		const uint32_t base = blendColor(theme.windowBackground, theme.taskbarBackground, 16);
-		if (disabled) return blendColor(base, theme.windowBorder, 12);
-		return focused ? blendColor(base, theme.accent, 22) : base;
+		const DesktopControlTheme roles = GetDesktopControlTheme(navigatorTheme());
+		return DesktopControlFillColor(roles, disabled ? DesktopControlState::Disabled :
+			(focused ? DesktopControlState::Focused : DesktopControlState::Normal));
 	}
 
 	uint32_t NavigatorButtonBorderColor(bool focused, bool disabled)
 	{
 		if (!isSciFiThemeActive()) return disabled ? packRgb(128, 132, 140) : (focused ? packRgb(54, 118, 210) : packRgb(38, 78, 150));
-		const DesktopTheme& theme = navigatorTheme();
-		const uint32_t base = blendColor(theme.windowBorder, theme.taskbarBorder, 18);
-		if (disabled) return blendColor(base, theme.taskbarBackground, 22);
-		return focused ? blendColor(theme.accent, theme.titleBarText, 12) : blendColor(base, theme.mutedAccent, 10);
+		const DesktopControlTheme roles = GetDesktopControlTheme(navigatorTheme());
+		return DesktopControlBorderColor(roles, disabled ? DesktopControlState::Disabled :
+			(focused ? DesktopControlState::Focused : DesktopControlState::Normal));
 	}
 
 	uint32_t NavigatorButtonTextColor(bool disabled)
 	{
 		if (!isSciFiThemeActive()) return disabled ? packRgb(76, 80, 88) : packRgb(255, 255, 255);
-		const DesktopTheme& theme = navigatorTheme();
-		return disabled ? blendColor(theme.titleBarText, theme.taskbarBackground, 58) : theme.titleBarText;
+		const DesktopControlTheme roles = GetDesktopControlTheme(navigatorTheme());
+		return DesktopControlTextColor(roles, disabled ? DesktopControlState::Disabled : DesktopControlState::Normal);
 	}
 
-	void addButton(uint64_t windowId, int id, int x, int y, int w, int h, const std::string& text, const std::string& iconPath = {})
+	void addButton(uint64_t windowId, int id, int x, int y, int w, int h, const std::string& text,
+		const std::string& iconPath = {}, bool enabled = true)
 	{
 		publish(MsgType::MT_WidgetAdd, packWidgetAdd(windowId, 1, id, x, y, w, h, text));
+		publish(MsgType::MT_WidgetSetEnabled, packWidgetSetEnabled(windowId, id, enabled));
 		if (!iconPath.empty()) publish(MsgType::MT_WidgetSetIcon, packWidgetSetIcon(windowId, id, iconPath));
 		// Track registered widget IDs for smoke/diagnostic access.
 		auto& ids = Navigator::s_registeredWidgetIds;
@@ -4266,8 +4256,8 @@ void Navigator::updateDisplay()
 		drawThemeRect(s_windowId, 0, 0, kWindowW, kToolbarH, NavigatorToolbarColor());
 		drawThemeRect(s_windowId, 0, kToolbarH - 1, kWindowW, 1, NavigatorToolbarBorderColor());
 
-		addButton(s_windowId, kWidgetIdBack, 20, kButtonY, kButtonW, kButtonH, "Back", std::string(kIconRoot) + "above_thearrow_10194.png");
-		addButton(s_windowId, kWidgetIdForward, 20 + (kButtonW + kButtonGap), kButtonY, kButtonW, kButtonH, "Next", std::string(kIconRoot) + "Next_arrow_10211.png");
+		addButton(s_windowId, kWidgetIdBack, 20, kButtonY, kButtonW, kButtonH, "Back", std::string(kIconRoot) + "above_thearrow_10194.png", !s_backStack.empty());
+		addButton(s_windowId, kWidgetIdForward, 20 + (kButtonW + kButtonGap), kButtonY, kButtonW, kButtonH, "Next", std::string(kIconRoot) + "Next_arrow_10211.png", !s_forwardStack.empty());
 		addButton(s_windowId, kWidgetIdReload, 20 + 2 * (kButtonW + kButtonGap), kButtonY, kButtonW, kButtonH, "Reload", std::string(kIconRoot) + "refresh_arrow_10190.png");
 	addButton(s_windowId, kWidgetIdHome, 20 + 3 * (kButtonW + kButtonGap), kButtonY, kButtonW, kButtonH, "Home", std::string(kIconRoot) + "gohome_action_ir_10235.png");
 	addButton(s_windowId, kWidgetIdBookmarks, 20 + 4 * (kButtonW + kButtonGap), kButtonY, kButtonW, kButtonH, "Marks", std::string(kIconRoot) + "markers_list_add_favorites_10275.png");
@@ -4319,7 +4309,7 @@ void Navigator::renderDocument()
 	s_renderCounters = {};
 
 	// Content area background
-	uint32_t contentColor = NavigatorContentColor();
+	uint32_t contentColor = NavigatorDocumentDefaultColor();
 	if (s_currentDoc.bodyStyle.hasBackgroundColor) {
 		contentColor = s_currentDoc.bodyStyle.backgroundColor;
 	}
@@ -4731,7 +4721,7 @@ void Navigator::renderDocument()
 				if (info.ok) {
 					drawImage(s_windowId, imageX, boxY + borderTop + paddingTop, imageW, imageH, info.drawPath);
 				} else {
-					drawThemeRect(s_windowId, imageX, boxY + borderTop + paddingTop, imageW, imageH, NavigatorContentColor());
+				drawThemeRect(s_windowId, imageX, boxY + borderTop + paddingTop, imageW, imageH, NavigatorDocumentDefaultColor());
 					drawThemeRect(s_windowId, imageX, boxY + borderTop + paddingTop, imageW, 1, NavigatorContentBorderColor());
 					drawThemeRect(s_windowId, imageX, boxY + borderTop + paddingTop + imageH - 1, imageW, 1, NavigatorContentBorderColor());
 					drawThemeRect(s_windowId, imageX, boxY + borderTop + paddingTop, 1, imageH, NavigatorContentBorderColor());

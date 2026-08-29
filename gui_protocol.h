@@ -45,7 +45,8 @@ namespace gxos {
             MT_DesktopBackgroundInventoryChanged = 32, // payload: active background id
             MT_ClearFocus = 33,                // payload: window id losing focus
             MT_SyncFrame = 34,                 // payload: <window id>|<expected generation>|<expected app sequence>|<freeze>
-            MT_UnfreezeFrame = 35              // payload: window id; validation capture helper only
+            MT_UnfreezeFrame = 35,              // payload: window id; validation capture helper only
+            MT_WidgetSetEnabled = 36            // payload: <winId>|<widgetId>|<enabled>
         };
         struct WindowDesc { uint64_t id; std::string title; int w; int h; };
         struct Rect { int x; int y; int w; int h; };
@@ -107,6 +108,7 @@ namespace gxos {
         // Helper for building widget add payloads: <winId>|<type>|<id>|<x>|<y>|<w>|<h>|<text>
         inline std::string packWidgetAdd(uint64_t winId, int type, int id, int x, int y, int w, int h, const std::string& text) { std::ostringstream oss; oss << winId << "|" << type << "|" << id << "|" << x << "|" << y << "|" << w << "|" << h << "|" << text; return oss.str( ); }
         inline std::string packWidgetSetIcon(uint64_t winId, int id, const std::string& path) { std::ostringstream oss; oss << winId << "|" << id << "|" << path; return oss.str( ); }
+        inline std::string packWidgetSetEnabled(uint64_t winId, int id, bool enabled) { std::ostringstream oss; oss << winId << "|" << id << "|" << (enabled ? 1 : 0); return oss.str( ); }
         inline std::string packDrawImage(uint64_t winId, int x, int y, const std::string& path) { std::ostringstream oss; oss << winId << "|" << x << "|" << y << "|-1|-1|" << path; return oss.str( ); }
         inline std::string packDrawImage(uint64_t winId, int x, int y, int w, int h, const std::string& path) { std::ostringstream oss; oss << winId << "|" << x << "|" << y << "|" << w << "|" << h << "|" << path; return oss.str( ); }
         inline bool unpackDrawImage(const std::string& payload, DrawImageSpec& spec) {

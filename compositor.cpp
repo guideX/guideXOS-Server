@@ -277,45 +277,6 @@ namespace gxos {
             return calculatorSciFiWidgetTextColor(theme, widget);
         }
 
-        static bool isNavigatorWindow(const WinInfo& winfo) {
-            static const std::string kNavigatorTitle = "guideXOS Navigator";
-            static const std::string kNavigatorTitleSuffix = " - guideXOS Navigator";
-            return winfo.title == kNavigatorTitle ||
-                (winfo.title.size() >= kNavigatorTitleSuffix.size() &&
-                 winfo.title.compare(winfo.title.size() - kNavigatorTitleSuffix.size(),
-                     kNavigatorTitleSuffix.size(), kNavigatorTitleSuffix) == 0);
-        }
-
-        static uint32_t navigatorClassicWidgetFillColor(const Widget& widget) {
-            return calculatorClassicWidgetFillColor(widget);
-        }
-
-        static uint32_t navigatorClassicWidgetBorderColor(const Widget& widget) {
-            return calculatorClassicWidgetBorderColor(widget);
-        }
-
-        static uint32_t navigatorClassicWidgetTextColor(const Widget& widget) {
-            return calculatorClassicWidgetTextColor(widget);
-        }
-
-        static uint32_t navigatorSciFiWidgetFillColor(const DesktopTheme& theme, const Widget& widget) {
-            const uint32_t base = WindowRenderer::BlendThemeColor(theme.windowBackground, theme.taskbarBackground, 16);
-            const uint32_t hoverFill = WindowRenderer::BlendThemeColor(base, theme.mutedAccent, 14);
-            const uint32_t pressedFill = WindowRenderer::BlendThemeColor(base, theme.accent, 22);
-            return widget.pressed ? pressedFill : (widget.hover ? hoverFill : base);
-        }
-
-        static uint32_t navigatorSciFiWidgetBorderColor(const DesktopTheme& theme, const Widget& widget) {
-            const uint32_t base = WindowRenderer::BlendThemeColor(theme.windowBorder, theme.taskbarBorder, 18);
-            const uint32_t hoverBorder = WindowRenderer::BlendThemeColor(base, theme.mutedAccent, 24);
-            const uint32_t pressedBorder = WindowRenderer::BlendThemeColor(base, theme.accent, 30);
-            return widget.pressed ? pressedBorder : (widget.hover ? hoverBorder : base);
-        }
-
-        static uint32_t navigatorSciFiWidgetTextColor(const DesktopTheme& theme, const Widget&) {
-            return theme.titleBarText;
-        }
-
         static bool isSciFiCoreDialogSurface(const WinInfo& winfo, const DesktopTheme& theme) {
             return winfo.coreDialogSurface && theme.id == DesktopThemeId::SciFi;
         }
@@ -358,6 +319,7 @@ namespace gxos {
         }
 
         static DesktopControlState hostedWidgetState(const Widget& widget) {
+            if (!widget.enabled) return DesktopControlState::Disabled;
             if (widget.pressed) return DesktopControlState::Pressed;
             if (widget.hover) return DesktopControlState::Hover;
             return DesktopControlState::Normal;
@@ -393,11 +355,6 @@ namespace gxos {
                     ? imageViewerSciFiWidgetFillColor(theme, widget)
                     : imageViewerClassicWidgetFillColor(widget);
             }
-            if (isNavigatorWindow(winfo)) {
-                return theme.id == DesktopThemeId::SciFi
-                    ? navigatorSciFiWidgetFillColor(theme, widget)
-                    : navigatorClassicWidgetFillColor(widget);
-            }
             return isCalculatorWindow(winfo)
                 ? calculatorWidgetFillColor(winfo, widget, theme)
                 : hostedDefaultWidgetFillColor(widget, theme);
@@ -412,11 +369,6 @@ namespace gxos {
                     ? imageViewerSciFiWidgetBorderColor(theme, widget)
                     : imageViewerClassicWidgetBorderColor(widget);
             }
-            if (isNavigatorWindow(winfo)) {
-                return theme.id == DesktopThemeId::SciFi
-                    ? navigatorSciFiWidgetBorderColor(theme, widget)
-                    : navigatorClassicWidgetBorderColor(widget);
-            }
             return isCalculatorWindow(winfo)
                 ? calculatorWidgetBorderColor(winfo, widget, theme)
                 : hostedDefaultWidgetBorderColor(widget, theme);
@@ -430,11 +382,6 @@ namespace gxos {
                 return theme.id == DesktopThemeId::SciFi
                     ? imageViewerSciFiWidgetTextColor(theme, widget)
                     : imageViewerClassicWidgetTextColor(widget);
-            }
-            if (isNavigatorWindow(winfo)) {
-                return theme.id == DesktopThemeId::SciFi
-                    ? navigatorSciFiWidgetTextColor(theme, widget)
-                    : navigatorClassicWidgetTextColor(widget);
             }
             return isCalculatorWindow(winfo)
                 ? calculatorWidgetTextColor(winfo, widget, theme)
@@ -6196,7 +6143,7 @@ namespace gxos {
                 }
             }
 
-            if (topW) { int wx = mx - topW->x - theme.windowPadding; int wy = my - topW->y - titleBarH - theme.windowPadding; for (auto& wd : topW->widgets) { bool over = (wx >= wd.x && wx < wd.x + wd.w && wy >= wd.y && wy < wd.y + wd.h); if (!down && !up) { if (wd.hover != over) { wd.hover = over; invalidate(topW->id); } } else if (down) { if (over) { wd.pressed = true; wd.hover = true; invalidate(topW->id); } } else if (up) { if (wd.pressed) { if (over) { emitWidgetEvt(topW->id, wd.id, "click", ""); Logger::write(LogLevel::Info, std::string("Widget clicked: ") + std::to_string(topW->id) + "/" + std::to_string(wd.id)); } wd.pressed = false; wd.hover = false; invalidate(topW->id); } } } }
+            if (topW) { int wx = mx - topW->x - theme.windowPadding; int wy = my - topW->y - titleBarH - theme.windowPadding; for (auto& wd : topW->widgets) { if (!wd.enabled) { wd.hover = false; wd.pressed = false; continue; } bool over = (wx >= wd.x && wx < wd.x + wd.w && wy >= wd.y && wy < wd.y + wd.h); if (!down && !up) { if (wd.hover != over) { wd.hover = over; invalidate(topW->id); } } else if (down) { if (over) { wd.pressed = true; wd.hover = true; invalidate(topW->id); } } else if (up) { if (wd.pressed) { if (over) { emitWidgetEvt(topW->id, wd.id, "click", ""); Logger::write(LogLevel::Info, std::string("Widget clicked: ") + std::to_string(topW->id) + "/" + std::to_string(wd.id)); } wd.pressed = false; wd.hover = false; invalidate(topW->id); } } } }
             // move while dragging
             if (g_dragActive && !up) { auto it = g_windows.find(g_dragWin); if (it != g_windows.end( )) { WinInfo& w = it->second; if (!w.maximized && !w.minimized && !w.tombstoned) { int nx = mx - g_dragOffX; int ny = my - g_dragOffY; if (nx < work.left) nx = work.left; if (ny < work.top) ny = work.top; if (nx + w.w > work.right) nx = work.right - w.w; if (ny + w.h > work.bottom) ny = work.bottom - w.h; if (nx != w.x || ny != w.y) { w.x = nx; w.y = ny; w.normalX = nx; w.normalY = ny; w.hasNormalBounds = true; w.animState.normX = nx; w.animState.normY = ny; w.dirty = true; invalidate(w.id); } } } }
             if (down) {
@@ -6615,6 +6562,30 @@ namespace gxos {
                 ImageBitmap icon = loadCachedUiImage(path); uint64_t ownerPid = 0;
                 if (icon.status == ImageLoadStatus::Ok) { std::lock_guard<std::mutex> lk(g_lock); auto it = g_windows.find(winId); if (it != g_windows.end()) { auto widget = std::find_if(it->second.widgets.begin(), it->second.widgets.end(), [wid](const Widget& item) { return item.id == wid; }); if (widget != it->second.widgets.end()) { widget->iconPath = path; widget->icon = icon; it->second.dirty = true; ownerPid = it->second.ownerPid; } } }
                 publishOut(MsgType::MT_WidgetSetIcon, std::to_string(winId) + "|" + std::to_string(wid), ownerPid); invalidate(winId);
+            } break;
+            case MsgType::MT_WidgetSetEnabled: {
+                std::istringstream iss(s); std::string winS, idS, enabledS; std::getline(iss, winS, '|'); std::getline(iss, idS, '|'); std::getline(iss, enabledS);
+                uint64_t winId = 0; int wid = -1; bool enabled = false;
+                try { winId = std::stoull(winS); wid = std::stoi(idS); enabled = std::stoi(enabledS) != 0; } catch (...) {}
+                uint64_t ownerPid = 0;
+                {
+                    std::lock_guard<std::mutex> lk(g_lock);
+                    auto it = g_windows.find(winId);
+                    if (it != g_windows.end( )) {
+                        auto widget = std::find_if(it->second.widgets.begin(), it->second.widgets.end(), [wid](const Widget& item) { return item.id == wid; });
+                        if (widget != it->second.widgets.end( )) {
+                            widget->enabled = enabled;
+                            if (!enabled) {
+                                widget->hover = false;
+                                widget->pressed = false;
+                            }
+                            it->second.dirty = true;
+                            ownerPid = it->second.ownerPid;
+                        }
+                    }
+                }
+                publishOut(MsgType::MT_WidgetSetEnabled, std::to_string(winId) + "|" + std::to_string(wid) + "|" + (enabled ? "1" : "0"), ownerPid);
+                invalidate(winId);
             } break;
             case MsgType::MT_WindowList: { std::ostringstream oss; bool first = true; { std::lock_guard<std::mutex> lk(g_lock); for (uint64_t id : g_z) { auto it = g_windows.find(id); if (it == g_windows.end( )) continue; if (!first) oss << ";"; first = false; oss << it->first << "|" << it->second.title << "|" << (it->second.minimized ? 1 : 0); } } const std::string diag = hostedFreezeDiagnosticsCompactSummary( ); if (!diag.empty()) { if (!first) oss << ";"; oss << diag; } publishOut(MsgType::MT_WindowList, oss.str( ), m.srcPid); } break;
             case MsgType::MT_Activate: { uint64_t id = 0; try { id = std::stoull(s); } catch (...) {} uint64_t previousFocus = 0; { std::lock_guard<std::mutex> lk(g_lock); if (g_modalWindow != 0 && id != g_modalWindow) id = g_modalWindow; previousFocus = g_focus; for (auto it = g_z.begin( ); it != g_z.end( ); ++it) { if (*it == id) { g_z.erase(it); break; } } auto wit = g_windows.find(id); if (wit != g_windows.end( )) { wit->second.minimized = false; wit->second.tombstoned = false; } g_z.push_back(id); g_focus = id; } sendFocusChange(previousFocus, id); invalidate(id); } break;

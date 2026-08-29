@@ -7438,6 +7438,90 @@ void ImageViewerApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
 // possible, and report unavailable platform capabilities honestly.
 // ============================================================
 
+static bool kernelNavigatorSciFiThemeActive()
+{
+    return GetCurrentDesktopThemeId() == DesktopThemeId::SciFi;
+}
+
+static uint32_t kernelNavigatorClientColor()
+{
+    if (!kernelNavigatorSciFiThemeActive()) return 0xFFF6F8FB;
+    const DesktopControlTheme roles = GetDesktopControlTheme(GetCurrentDesktopTheme());
+    return BlendDesktopThemeColor(roles.raisedPanel, roles.panelBackground, 14);
+}
+
+static uint32_t kernelNavigatorToolbarColor()
+{
+    if (!kernelNavigatorSciFiThemeActive()) return 0xFF2B2F3A;
+    return GetDesktopControlTheme(GetCurrentDesktopTheme()).raisedPanel;
+}
+
+static uint32_t kernelNavigatorSeparatorColor()
+{
+    if (!kernelNavigatorSciFiThemeActive()) return 0xFF586076;
+    return GetDesktopControlTheme(GetCurrentDesktopTheme()).separator;
+}
+
+static uint32_t kernelNavigatorAddressFillColor()
+{
+    if (!kernelNavigatorSciFiThemeActive()) return 0xFF161A22;
+    return GetDesktopControlTheme(GetCurrentDesktopTheme()).inputBackground;
+}
+
+static uint32_t kernelNavigatorAddressBorderColor(bool focused)
+{
+    if (!kernelNavigatorSciFiThemeActive()) return focused ? 0xFF6FA8FF : 0xFF6E7688;
+    const DesktopControlTheme roles = GetDesktopControlTheme(GetCurrentDesktopTheme());
+    return focused ? roles.inputFocusBorder : roles.inputBorder;
+}
+
+static uint32_t kernelNavigatorAddressTrailingBorderColor()
+{
+    if (!kernelNavigatorSciFiThemeActive()) return 0xFF11151D;
+    return GetDesktopControlTheme(GetCurrentDesktopTheme()).inputBorder;
+}
+
+static uint32_t kernelNavigatorAddressTextColor()
+{
+    if (!kernelNavigatorSciFiThemeActive()) return 0xFFE8ECF6;
+    return GetDesktopControlTheme(GetCurrentDesktopTheme()).inputText;
+}
+
+static uint32_t kernelNavigatorCaretColor()
+{
+    if (!kernelNavigatorSciFiThemeActive()) return 0xFFE8ECF6;
+    return GetDesktopControlTheme(GetCurrentDesktopTheme()).inputFocusBorder;
+}
+
+static uint32_t kernelNavigatorViewportBorderColor()
+{
+    return GetDesktopControlTheme(GetCurrentDesktopTheme()).separator;
+}
+
+static uint32_t kernelNavigatorScrollbarTrackColor()
+{
+    if (!kernelNavigatorSciFiThemeActive()) return 0xFFE0E4EB;
+    return GetDesktopControlTheme(GetCurrentDesktopTheme()).scrollbarTrack;
+}
+
+static uint32_t kernelNavigatorScrollbarThumbColor()
+{
+    if (!kernelNavigatorSciFiThemeActive()) return 0xFF848C9C;
+    return GetDesktopControlTheme(GetCurrentDesktopTheme()).scrollbarThumb;
+}
+
+static uint32_t kernelNavigatorStatusColor()
+{
+    if (!kernelNavigatorSciFiThemeActive()) return 0xFF262A34;
+    return GetDesktopControlTheme(GetCurrentDesktopTheme()).raisedPanel;
+}
+
+static uint32_t kernelNavigatorStatusTextColor()
+{
+    if (!kernelNavigatorSciFiThemeActive()) return 0xFFDEE2EC;
+    return GetDesktopControlTheme(GetCurrentDesktopTheme()).primaryText;
+}
+
 NavigatorApp::NavigatorApp()
     : m_blockCount(0), m_bookmarkCount(0), m_recentDownloadCount(0), m_backCount(0),
       m_forwardCount(0),
@@ -7578,24 +7662,24 @@ void NavigatorApp::update()
 
 void NavigatorApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h)
 {
-    framebuffer::fill_rect(x, y, w, h, 0xFFF6F8FB);
-    framebuffer::fill_rect(x, y, w, TOOLBAR_H, 0xFF2B2F3A);
-    framebuffer::fill_rect(x, y + TOOLBAR_H - 1, w, 1, 0xFF586076);
+    framebuffer::fill_rect(x, y, w, h, kernelNavigatorClientColor());
+    framebuffer::fill_rect(x, y, w, TOOLBAR_H, kernelNavigatorToolbarColor());
+    framebuffer::fill_rect(x, y + TOOLBAR_H - 1, w, 1, kernelNavigatorSeparatorColor());
 
     int addressW = (int)w - ADDRESS_X - 20;
     if (addressW > 0) {
-        framebuffer::fill_rect(x + ADDRESS_X, y + ADDRESS_Y, (uint32_t)addressW, ADDRESS_H, 0xFF161A22);
-        framebuffer::fill_rect(x + ADDRESS_X, y + ADDRESS_Y, (uint32_t)addressW, 1, m_addressFocused ? 0xFF6FA8FF : 0xFF6E7688);
-        framebuffer::fill_rect(x + ADDRESS_X, y + ADDRESS_Y + ADDRESS_H - 1, (uint32_t)addressW, 1, 0xFF11151D);
-        framebuffer::fill_rect(x + ADDRESS_X, y + ADDRESS_Y, 1, ADDRESS_H, m_addressFocused ? 0xFF6FA8FF : 0xFF6E7688);
-        framebuffer::fill_rect(x + ADDRESS_X + addressW - 1, y + ADDRESS_Y, 1, ADDRESS_H, 0xFF11151D);
+        framebuffer::fill_rect(x + ADDRESS_X, y + ADDRESS_Y, (uint32_t)addressW, ADDRESS_H, kernelNavigatorAddressFillColor());
+        framebuffer::fill_rect(x + ADDRESS_X, y + ADDRESS_Y, (uint32_t)addressW, 1, kernelNavigatorAddressBorderColor(m_addressFocused));
+        framebuffer::fill_rect(x + ADDRESS_X, y + ADDRESS_Y + ADDRESS_H - 1, (uint32_t)addressW, 1, kernelNavigatorAddressTrailingBorderColor());
+        framebuffer::fill_rect(x + ADDRESS_X, y + ADDRESS_Y, 1, ADDRESS_H, kernelNavigatorAddressBorderColor(m_addressFocused));
+        framebuffer::fill_rect(x + ADDRESS_X + addressW - 1, y + ADDRESS_Y, 1, ADDRESS_H, kernelNavigatorAddressTrailingBorderColor());
         appDrawText(x + ADDRESS_X + 8, y + ADDRESS_Y + 7,
                     m_addressFocused ? m_addressBuffer : m_currentUrl,
-                    rgb(232, 236, 246));
+                    kernelNavigatorAddressTextColor());
         if (m_addressFocused) {
             int caretX = ADDRESS_X + 8 + m_addressCaret * 6;
             if (caretX < ADDRESS_X + addressW - 4) {
-                framebuffer::fill_rect(x + (uint32_t)caretX, y + ADDRESS_Y + 4, 1, ADDRESS_H - 8, 0xFFE8ECF6);
+                framebuffer::fill_rect(x + (uint32_t)caretX, y + ADDRESS_Y + 4, 1, ADDRESS_H - 8, kernelNavigatorCaretColor());
             }
         }
     }
@@ -7613,13 +7697,16 @@ void NavigatorApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h)
     if (contentH > 0) {
         framebuffer::fill_rect(x + CONTENT_X, contentTop, w - CONTENT_X * 2, contentH, css_background_or(0xFFFAFBFD, m_bodyStyle));
         drawDocument(x, y, w, h);
+        if (kernelNavigatorSciFiThemeActive()) {
+            framebuffer::fill_rect(x + CONTENT_X, contentTop, w - CONTENT_X * 2, 1, kernelNavigatorViewportBorderColor());
+        }
     }
 
     if (maxScroll() > 0) {
         uint32_t trackX = x + w - 22;
         uint32_t trackY = contentTop + 4;
         uint32_t trackH = contentH > 8 ? contentH - 8 : contentH;
-        framebuffer::fill_rect(trackX, trackY, 6, trackH, 0xFFE0E4EB);
+        framebuffer::fill_rect(trackX, trackY, 6, trackH, kernelNavigatorScrollbarTrackColor());
         int thumbH = (int)((trackH * (contentH ? contentH : 1)) / (uint32_t)(maxScroll() + (int)contentH));
         if (thumbH < 20) thumbH = 20;
         int maxScrollValue = maxScroll();
@@ -7627,11 +7714,11 @@ void NavigatorApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h)
         if (maxScrollValue > 0 && (int)trackH > thumbH) {
             thumbY += ((int)trackH - thumbH) * m_scrollY / maxScrollValue;
         }
-        framebuffer::fill_rect(trackX, (uint32_t)thumbY, 6, (uint32_t)thumbH, 0xFF848C9C);
+        framebuffer::fill_rect(trackX, (uint32_t)thumbY, 6, (uint32_t)thumbH, kernelNavigatorScrollbarThumbColor());
     }
 
-    framebuffer::fill_rect(x, y + h - STATUS_H, w, STATUS_H, 0xFF262A34);
-    framebuffer::fill_rect(x, y + h - STATUS_H, w, 1, 0xFF586076);
+    framebuffer::fill_rect(x, y + h - STATUS_H, w, STATUS_H, kernelNavigatorStatusColor());
+    framebuffer::fill_rect(x, y + h - STATUS_H, w, 1, kernelNavigatorSeparatorColor());
     char statusLine[160];
     strcopy(statusLine, m_status, sizeof(statusLine));
     if (hasSelection()) {
@@ -7645,7 +7732,7 @@ void NavigatorApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h)
             strappend(statusLine, " chars", sizeof(statusLine));
         }
     }
-    appDrawText(x + 10, y + h - STATUS_H + 8, statusLine, rgb(222, 226, 236));
+    appDrawText(x + 10, y + h - STATUS_H + 8, statusLine, kernelNavigatorStatusTextColor());
 }
 
 void NavigatorApp::onMouseMove(int x, int y)
@@ -7996,6 +8083,12 @@ void NavigatorApp::updateButtons()
     m_homeBtnId = addButton(x, 12, BUTTON_W, BUTTON_H, "Home"); setButtonIcon(m_homeBtnId, m_toolbarIcons[3]); x += BUTTON_W + BUTTON_GAP;
     m_bookmarksBtnId = addButton(x, 12, BUTTON_W, BUTTON_H, "Marks"); setButtonIcon(m_bookmarksBtnId, m_toolbarIcons[4]); x += BUTTON_W + BUTTON_GAP;
     m_addBookmarkBtnId = addButton(x, 12, BUTTON_W, BUTTON_H, "Add"); setButtonIcon(m_addBookmarkBtnId, m_toolbarIcons[5]);
+    setWidgetEnabled(m_backBtnId, m_backCount > 0);
+    setWidgetEnabled(m_forwardBtnId, m_forwardCount > 0);
+    setWidgetEnabled(m_reloadBtnId, true);
+    setWidgetEnabled(m_homeBtnId, true);
+    setWidgetEnabled(m_bookmarksBtnId, true);
+    setWidgetEnabled(m_addBookmarkBtnId, true);
 }
 
 void NavigatorApp::loadChromeImages()
@@ -12251,6 +12344,7 @@ void NavigatorApp::loadUrl(const char* url)
     blurFormBlock();
     setStatus("Ready");
     m_loading = false;
+    updateButtons();
 
 }
 

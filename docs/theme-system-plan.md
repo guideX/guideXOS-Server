@@ -1288,7 +1288,7 @@ The divergence is material rather than a small release-portable patch. The overl
 
 ## Deferred / Future Work Queue
 
-The following remain deliberately frozen unless a separate release reason authorizes them: Navigator interior polish; Task Manager; Clock; Disk Manager; Device Manager; Network utilities; remaining application-specific control migration; icons; fonts; wallpaper coupling; glass/blur; animations; rounded hit testing; and pixel-identical hosted/bare-metal rendering.
+The following remain deliberately frozen unless a separate release reason authorizes them: Navigator visual work beyond the bounded Phase 10B interior pass; Task Manager; Clock; Disk Manager; Device Manager; Network utilities; remaining application-specific control migration; icons; fonts; wallpaper coupling; glass/blur; animations; rounded hit testing; and pixel-identical hosted/bare-metal rendering.
 
 ## Phase 10A - Universal Sci-Fi Application Controls
 
@@ -1328,6 +1328,52 @@ The focused `tests/desktop_control_theme_test.cpp` probe passed for Classic/Sci-
 ### Known limitations and deferred work
 
 This phase does not create a universal tab/list framework, add a hosted enabled/focus protocol, redesign application-local list or scrollbar geometry, migrate every existing hard-coded application color, or restyle Navigator, Task Manager, Device Manager, Disk Manager, Network utilities, or Developer Studio interiors. A future phase can add shared state plumbing only where an actual consumer needs it, then migrate those remaining application-specific controls incrementally.
+
+## Phase 10B - Navigator Interior Sci-Fi Theming
+
+Phase 10B applies the Phase 10A control-role foundation to the Navigator version present on this branch. It is a bounded visual integration pass: browser behavior, networking, HTML/CSS/JavaScript behavior, navigation, input routing, and lifecycle remain owned by their existing implementations. No Navigator feature branch functionality was merged.
+
+### Starting architecture and ownership audit
+
+The hosted Navigator application in `navigator.cpp` builds and publishes its toolbar, address field, document draw commands, scroll affordance, status/find surface, and existing internal/error document content through the GUI protocol. The hosted compositor in `compositor.cpp` owns the retained window/client/widget pixels and generic button state. The bare-metal `NavigatorApp` in `kernel/core/kernel_apps.cpp` owns its framebuffer client chrome, document renderer, address caret, scroll affordance, and status strip, while the shared kernel compositor owns its toolbar widgets.
+
+The audit found these real Navigator-visible application surfaces: the client background; toolbar and separator; Back, Forward, Reload, Home, Marks, Add, and Find buttons; address/location field, text, focus border, and caret; the document viewport boundary; Navigator-owned document scroll track/thumb; status/loading text and the existing throbber area; find controls; and browser-owned about/error/blank documents rendered through the existing document path. The current Navigator has no tabs, Navigator-owned context-menu subsystem, download panel, security panel, sidebar, or separate browser popup surface to migrate. Toolbar icons remain application-owned and unchanged.
+
+### Browser chrome versus web content
+
+Phase 10B themes browser chrome owned by Navigator and the compositor only. Document backgrounds, authored CSS colors, form colors, links, layout, images, and HTML/CSS scroll behavior remain document-engine output. In particular, the default document surface remains the existing light user-agent color in both themes when a page does not publish an explicit background; an authored `bodyStyle.backgroundColor` or other page style still wins. Navigator-owned scroll tracks/thumbs are themed where drawn by the application; HTML/CSS scrollbar behavior is not globally overridden.
+
+### Shared roles consumed
+
+Hosted Navigator surface helpers derive Sci-Fi values from `GetDesktopControlTheme`: raised/panel surfaces for client, toolbar, and status areas; separator; input background/border/focus border/text/disabled text; shared button fill/border/text state lookup; scrollbar track/thumb; primary/muted text; active/inactive selection; and restrained accent/highlight roles. The hosted compositor now treats the generic widget enabled state as a shared `DesktopControlState::Disabled` input, so Navigator's Back and Forward buttons publish their real history availability without introducing a Navigator-specific palette.
+
+Bare-metal Navigator uses the same derived roles for client, toolbar, separator, address field/caret, viewport boundary, Navigator-owned scrollbars, and status surface. Back and Forward enabled state is refreshed from the existing history counters. No new `DesktopControlTheme` fields were needed; the only new reusable plumbing is the additive `MT_WidgetSetEnabled`/`packWidgetSetEnabled` protocol message and the generic widget `enabled` state, which are useful to any hosted application that publishes a real disabled control.
+
+### Classic and Sci-Fi behavior
+
+Classic remains the default and keeps the previous Navigator literals, geometry, hit targets, icons, document defaults, navigation logic, and input semantics. Missing, invalid, explicit Classic, and persisted Classic configuration continue to resolve to Classic through the existing theme path. Sci-Fi changes only the application-owned chrome to dark technical surfaces, cool readable accents, crisp separators, clear input focus/selection, and visibly disabled navigation controls. It does not recolor arbitrary web pages, change document layout, or add glow, animation, transparency, or geometry changes.
+
+### Validation and evidence
+
+The focused `tests/desktop_control_theme_test.cpp` probe passed, including Classic/Sci-Fi lookup, fallback parsing, shared role derivation, and normal/hover/pressed/focused/disabled state selection. The extended `scripts/smoke-theme-system.ps1 -SkipBuild` probe passed its Navigator shared-role, document-boundary, enabled-state, generic compositor-routing, and documentation assertions. The standalone `navigator_url_tests.cpp` probe passed all 13 URL normalization cases. `build.bat` completed successfully for the hosted executable.
+
+The bounded hosted launch/navigation proof sent `gui.start`, launched Navigator, navigated to `file:///docs/index.html`, and exited cleanly with `NAVIGATOR_GOTO_RESULT: PASS` and `current_block_count=37`; the trace also showed the shared widget-enabled messages. The existing full `scripts/smoke-navigator-hosted.ps1` run reached the local fixture sequence and then stalled after loading `text-polish.html` without emitting its terminal result marker. It was interrupted after the retained `logs/navigator-hosted-smoke-20260828-205526.log` stopped advancing; the HTTP/HTTPS companion logs are retained alongside it. This is recorded as a hosted smoke harness/runtime limitation, not a confirmed theme regression, because the bounded Navigator launch/navigation path and the focused functional probe passed.
+
+AMD64 validation uses the established `build.ps1 -Arch amd64` and disposable/staged ESP startup path, together with the existing Navigator kernel smoke scenarios where the environment permits. The startup harness proves boot, theme selection, shared compositor/input paths, and Navigator source/runtime integration, but does not provide a fresh per-state Navigator application screenshot. Lack of external Internet connectivity is not treated as a theme failure when local/internal navigation or bounded source evidence proves the chrome path.
+
+The normal AMD64 kernel build and `build.ps1 -Arch amd64` release build passed. Disposable-ESP startup-sync runs passed for persisted Classic, staged Sci-Fi, and staged Classic overrides; the Sci-Fi serial trace recorded `loaded desktop theme=scifi`. Retained serial evidence is `logs/desktop-startup-sync-20260828-210430.serial.log`, `logs/desktop-startup-sync-20260828-210504.serial.log`, and `logs/desktop-startup-sync-20260828-210537.serial.log`. The targeted `scripts/smoke-navigator-kernel.ps1 -ScenarioFilter no_policy` did not reach QEMU: its diagnostic Navigator HTTP/PNG build stopped at the pre-existing TLS foundation symbol mismatch (`kGxosTlsRenegotiationInfoScsv`, `GxosTlsCapabilityContractValidation`, and `tls_set_capability_contract_failure`). No TLS or Navigator functionality was changed to work around that unrelated harness/build defect.
+
+The remaining Phase 10A regression checks passed: startup/app-model, live-directory desktop status, hosted display runtime, BootInfo framebuffer, VirtIO GPU/input routing, and build-wrapper. The workspace was rebuilt with the normal release path after the diagnostic Navigator kernel-smoke attempt, so staged smoke flags are not retained in the final build state.
+
+### Limitations and deferred Navigator visual work
+
+The hosted protocol still has no separate keyboard-focus publication for generic toolbar widgets, so toolbar focus rendering remains limited to the state the compositor already owns; the address field publishes its own focused state. The bare-metal toolbar does not expose a new keyboard-focus protocol in this pass. Loading/progress behavior and the existing throbber are preserved rather than redesigned. Visual proof is bounded by the available hosted/QEMU harness and may not capture every hover/pressed/focus transition automatically.
+
+Deferred work includes icon-system replacement, tabs or new browser panels, context-menu/security/download surfaces that do not yet exist, broader page/document styling, new effects, rounded clipping/hit-testing, animation, and any Navigator functionality or rendering-engine changes. These remain separate from this theme integration.
+
+### Phase 10B closeout
+
+Navigator's primary application-owned chrome now consumes the shared Phase 10A foundation on hosted and bare-metal paths while web content remains a separate document-owned surface. Final outcome, exact commit, regression results, QEMU limitations, and retained evidence are recorded with the Phase 10B closeout report and should be kept aligned with this section.
 
 ## Manual Validation Runbook
 

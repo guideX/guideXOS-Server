@@ -116,6 +116,11 @@ $phase10AHeadingMatch = Find-FirstMatch $planDoc '## Phase 10A'
 $phase10AArchitectureMatch = Find-FirstMatch $planDoc 'DesktopControlTheme'
 $phase10AClassicMatch = Find-FirstMatch $planDoc 'Classic remains the default and compatible'
 $phase10ALimitationsMatch = Find-FirstMatch $planDoc '### Known limitations and deferred work'
+$phase10BHeadingMatch = Find-FirstMatch $planDoc '## Phase 10B - Navigator Interior Sci-Fi Theming'
+$phase10BOwnershipMatch = Find-RawMatch $planDoc '### Starting architecture and ownership audit.*?hosted Navigator application in `navigator\.cpp`.*?bare-metal `NavigatorApp`'
+$phase10BDocumentBoundaryMatch = Find-RawMatch $planDoc '### Browser chrome versus web content.*?Document backgrounds, authored CSS colors.*?HTML/CSS scrollbar behavior is not globally overridden'
+$phase10BValidationMatch = Find-RawMatch $planDoc '### Validation and evidence.*?build\.bat.*?smoke-navigator-hosted\.ps1.*?build\.ps1 -Arch amd64'
+$phase10BLimitationsMatch = Find-RawMatch $planDoc '### Limitations and deferred Navigator visual work.*?no separate keyboard-focus publication.*?Deferred work includes icon-system replacement'
 $displayOptionsThemeHelperMatch = Find-FirstMatch $displayOptions 'IsSciFiThemeActive|DisplayOptionsBodyColor|DisplayOptionsPanelColor|DisplayOptionsCardColor|DisplayOptionsButtonFillColor|DisplayOptionsButtonBorderColor|DisplayOptionsTextColor|DisplayOptionsMutedTextColor|DisplayOptionsAccentColor'
 $displayOptionsThemeFieldMatch = Find-FirstMatch $displayOptions 'windowBackground|windowBorder|accent|mutedAccent|taskbarBackground|taskbarBorder|titleBarText'
 $displayOptionsTextColorMatch = Find-FirstMatch $displayOptions 'MT_DrawTextAtColor|DisplayOptionsMutedTextColor\(\)|DisplayOptionsTextColor\(\)'
@@ -292,7 +297,7 @@ $phase4hNoPerEffectMatch = Find-RawMatch $planDoc '## Phase 4H.*?No per-effect c
 $phase4hNoAppModelMatch = Find-RawMatch $planDoc '## Phase 4H.*?No App Model gate/status dependency was introduced\.'
 $phase4hImageViewerThemeMatch = Find-FirstMatch $imageViewer 'ImageViewerBodyColor|ImageViewerPanelColor|ImageViewerStatusColor|ImageViewerPreviewBorderColor|ImageViewerSeparatorColor|ImageViewerTextColor|ImageViewerMutedTextColor|ImageViewerAccentColor'
 $phase4hImageViewerCompositorMatch = Find-FirstMatch $compositor 'isImageViewerWindow|imageViewerClassicWidgetFillColor|imageViewerSciFiWidgetFillColor|imageViewerSciFiWidgetBorderColor|imageViewerSciFiWidgetTextColor'
-$navigatorThemeHelperMatch = Find-FirstMatch $navigator 'NavigatorBodyColor|NavigatorToolbarColor|NavigatorAddressFillColor|NavigatorAddressFocusedBorderColor|NavigatorContentColor|NavigatorContentTextColor|NavigatorContentBorderColor|NavigatorScrollTrackColor|NavigatorScrollThumbColor|NavigatorStatusBarColor|NavigatorStatusBarBorderColor|NavigatorTextColor|NavigatorMutedTextColor|NavigatorAccentColor|NavigatorSelectionColor|NavigatorFindHighlightColor|NavigatorFieldFillColor|NavigatorFieldBorderColor|NavigatorFieldTextColor|NavigatorFieldMutedTextColor|NavigatorButtonFillColor|NavigatorButtonBorderColor|NavigatorButtonTextColor'
+$navigatorThemeHelperMatch = Find-FirstMatch $navigator 'NavigatorBodyColor|NavigatorToolbarColor|NavigatorAddressFillColor|NavigatorAddressFocusedBorderColor|NavigatorDocumentDefaultColor|NavigatorContentTextColor|NavigatorContentBorderColor|NavigatorScrollTrackColor|NavigatorScrollThumbColor|NavigatorStatusBarColor|NavigatorStatusBarBorderColor|NavigatorTextColor|NavigatorMutedTextColor|NavigatorAccentColor|NavigatorSelectionColor|NavigatorFindHighlightColor|NavigatorFieldFillColor|NavigatorFieldBorderColor|NavigatorFieldTextColor|NavigatorFieldMutedTextColor|NavigatorButtonFillColor|NavigatorButtonBorderColor|NavigatorButtonTextColor'
 $navigatorThemeFieldMatch = Find-FirstMatch $navigator 'windowBackground|windowBorder|accent|mutedAccent|taskbarBackground|taskbarBorder|titleBarText'
 $navigatorNoPerEffectMatch = Find-FirstMatch $navigator 'Visual Effects|per-effect'
 $taskManagerThemeHelperMatch = Find-FirstMatch $taskManager 'TaskManagerBodyColor|TaskManagerPanelColor|TaskManagerHeaderColor|TaskManagerListColor|TaskManagerRowColor|TaskManagerRowSelectedColor|TaskManagerBorderColor|TaskManagerTextColor|TaskManagerHeaderTextColor|TaskManagerValueTextColor|TaskManagerMutedTextColor|TaskManagerAccentColor|TaskManagerIndicatorColor|GetCurrentDesktopThemeId|GetCurrentDesktopTheme|DesktopThemeId::SciFi'
@@ -300,8 +305,15 @@ $taskManagerThemeFieldMatch = Find-FirstMatch $taskManager 'windowBackground|win
 $taskManagerGraphThemeMatch = Find-RawMatch $taskManager 'drawGraphBox\(.*?TaskManagerIndicatorColor\('
 $taskManagerStatusThemeMatch = Find-RawMatch $taskManager 'updateStatusBar\(\).*?TaskManagerMutedTextColor\('
 $taskManagerNoPerEffectMatch = Find-FirstMatch $taskManager 'Visual Effects|per-effect'
-$navigatorCompositorWidgetMatch = Find-FirstMatch $compositor 'isNavigatorWindow|navigatorSciFiWidgetFillColor|navigatorSciFiWidgetBorderColor|navigatorSciFiWidgetTextColor'
-$navigatorCompositorGuardMatch = Find-FirstMatch $compositor 'kNavigatorTitle|kNavigatorTitleSuffix'
+$navigatorSharedRolesMatch = Find-RawMatch $navigator 'GetDesktopControlTheme.*?inputBackground.*?scrollbarTrack.*?selectionActive'
+$navigatorDocumentBoundaryMatch = Find-RawMatch $navigator 'NavigatorDocumentDefaultColor\(\).*?245,\s*247,\s*250.*?bodyStyle\.backgroundColor'
+$navigatorEnabledProtocolMatch = Find-RawMatch $navigator 'MT_WidgetSetEnabled.*?packWidgetSetEnabled'
+$navigatorCompositorSharedWidgetMatch = Find-RawMatch $compositor 'hostedDefaultWidgetFillColor.*?DesktopControlFillColor'
+$navigatorCompositorDisabledMatch = Find-RawMatch $compositor 'hostedWidgetState.*?DesktopControlState::Disabled'
+$navigatorCompositorSpecificMatch = Find-FirstMatch $compositor 'isNavigatorWindow|navigatorSciFiWidgetFillColor|navigatorSciFiWidgetBorderColor|navigatorSciFiWidgetTextColor'
+$kernelNavigatorThemeMatch = Find-RawMatch $kernelApps 'kernelNavigatorClientColor.*?GetDesktopControlTheme.*?kernelNavigatorAddressFillColor.*?inputBackground.*?kernelNavigatorScrollbarTrackColor.*?scrollbarTrack.*?kernelNavigatorStatusColor'
+$kernelNavigatorEnabledMatch = Find-RawMatch $kernelApps 'updateButtons\(\).*?setWidgetEnabled\(m_backBtnId.*?setWidgetEnabled\(m_forwardBtnId'
+$kernelNavigatorViewportMatch = Find-FirstMatch $kernelApps 'kernelNavigatorViewportBorderColor|CONTENT_X, contentTop'
 $themeRecommendationGateMatch = Find-FirstMatch $displayOptions 's_selectedThemeId == DesktopThemeId::SciFi'
 $themeRecommendationTextMatch = Find-RawMatch $displayOptions 'Optional recommendation for Sci Fi: guideXOS Space, guideXOS Space 2, Tron Porsche, CPU\..*?Choose any wallpaper on the Background tab\.'
 $clockThemeHelperMatch = Find-FirstMatch $clock 'ClockBodyColor|ClockFaceColor|ClockBorderColor|ClockReadoutColor|ClockMutedTextColor|ClockAccentColor|paintClockSurface|drawClockText|GetCurrentDesktopThemeId|GetCurrentDesktopTheme|DesktopThemeId::SciFi'
@@ -477,8 +489,8 @@ $checks = @(
     [pscustomobject]@{ Name = "display options sci fi wallpaper recommendation text"; Pass = $null -ne $themeRecommendationTextMatch; Match = $themeRecommendationTextMatch },
     [pscustomobject]@{ Name = "display options effect placeholders remain"; Pass = $null -ne $effectPlaceholderMatch -and $null -ne $phase3aNoEffectsMatch; Match = $(if ($null -ne $phase3aNoEffectsMatch) { $phase3aNoEffectsMatch } else { $effectPlaceholderMatch }) },
     [pscustomobject]@{ Name = "navigator theme helpers wired"; Pass = $null -ne $navigatorThemeHelperMatch -or $null -ne $navigatorThemeFieldMatch; Match = $(if ($null -ne $navigatorThemeHelperMatch) { $navigatorThemeHelperMatch } else { $navigatorThemeFieldMatch }) },
-    [pscustomobject]@{ Name = "navigator compositor widget theming wired"; Pass = $null -ne $navigatorCompositorWidgetMatch; Match = $navigatorCompositorWidgetMatch },
-    [pscustomobject]@{ Name = "navigator compositor guard tightened"; Pass = $null -ne $navigatorCompositorGuardMatch; Match = $navigatorCompositorGuardMatch },
+    [pscustomobject]@{ Name = "navigator uses shared compositor widget theming"; Pass = $null -ne $navigatorCompositorSharedWidgetMatch; Match = $navigatorCompositorSharedWidgetMatch },
+    [pscustomobject]@{ Name = "navigator has no compositor-specific widget palette"; Pass = $null -eq $navigatorCompositorSpecificMatch; Match = $navigatorCompositorSpecificMatch },
     [pscustomobject]@{ Name = "navigator no per-effect controls"; Pass = $null -eq $navigatorNoPerEffectMatch; Match = $navigatorNoPerEffectMatch },
     [pscustomobject]@{ Name = "manual validation checklist heading"; Pass = $null -ne $manualChecklistHeadingMatch; Match = $manualChecklistHeadingMatch },
     [pscustomobject]@{ Name = "classic hosted checklist heading"; Pass = $null -ne $classicHostedChecklistMatch; Match = $classicHostedChecklistMatch },
@@ -548,13 +560,29 @@ $checks = @(
     [pscustomobject]@{ Name = "phase 10a docs heading"; Pass = $null -ne $phase10AHeadingMatch; Match = $phase10AHeadingMatch },
     [pscustomobject]@{ Name = "phase 10a architecture documented"; Pass = $null -ne $phase10AArchitectureMatch; Match = $phase10AArchitectureMatch },
     [pscustomobject]@{ Name = "phase 10a Classic compatibility documented"; Pass = $null -ne $phase10AClassicMatch; Match = $phase10AClassicMatch },
-    [pscustomobject]@{ Name = "phase 10a limitations documented"; Pass = $null -ne $phase10ALimitationsMatch; Match = $phase10ALimitationsMatch }
+    [pscustomobject]@{ Name = "phase 10a limitations documented"; Pass = $null -ne $phase10ALimitationsMatch; Match = $phase10ALimitationsMatch },
+    [pscustomobject]@{ Name = "phase 10b docs heading"; Pass = $null -ne $phase10BHeadingMatch; Match = $phase10BHeadingMatch },
+    [pscustomobject]@{ Name = "phase 10b Navigator ownership documented"; Pass = $null -ne $phase10BOwnershipMatch; Match = $phase10BOwnershipMatch },
+    [pscustomobject]@{ Name = "phase 10b page/chrome boundary documented"; Pass = $null -ne $phase10BDocumentBoundaryMatch; Match = $phase10BDocumentBoundaryMatch },
+    [pscustomobject]@{ Name = "phase 10b validation paths documented"; Pass = $null -ne $phase10BValidationMatch; Match = $phase10BValidationMatch },
+    [pscustomobject]@{ Name = "phase 10b limitations documented"; Pass = $null -ne $phase10BLimitationsMatch; Match = $phase10BLimitationsMatch },
+    [pscustomobject]@{ Name = "phase 10b Navigator theme helpers wired"; Pass = $null -ne $navigatorThemeHelperMatch; Match = $navigatorThemeHelperMatch },
+    [pscustomobject]@{ Name = "phase 10b Navigator shared roles consumed"; Pass = $null -ne $navigatorSharedRolesMatch; Match = $navigatorSharedRolesMatch },
+    [pscustomobject]@{ Name = "phase 10b document/chrome boundary preserved"; Pass = $null -ne $navigatorDocumentBoundaryMatch; Match = $navigatorDocumentBoundaryMatch },
+    [pscustomobject]@{ Name = "phase 10b hosted enabled state protocol wired"; Pass = $null -ne $navigatorEnabledProtocolMatch; Match = $navigatorEnabledProtocolMatch },
+    [pscustomobject]@{ Name = "phase 10b hosted Navigator uses shared widget path"; Pass = $null -ne $navigatorCompositorSharedWidgetMatch; Match = $navigatorCompositorSharedWidgetMatch },
+    [pscustomobject]@{ Name = "phase 10b hosted disabled state uses shared lookup"; Pass = $null -ne $navigatorCompositorDisabledMatch; Match = $navigatorCompositorDisabledMatch },
+    [pscustomobject]@{ Name = "phase 10b no Navigator-specific compositor palette"; Pass = $null -eq $navigatorCompositorSpecificMatch; Match = $navigatorCompositorSpecificMatch },
+    [pscustomobject]@{ Name = "phase 10b bare-metal Navigator shared roles consumed"; Pass = $null -ne $kernelNavigatorThemeMatch; Match = $kernelNavigatorThemeMatch },
+    [pscustomobject]@{ Name = "phase 10b bare-metal navigation state wired"; Pass = $null -ne $kernelNavigatorEnabledMatch; Match = $kernelNavigatorEnabledMatch },
+    [pscustomobject]@{ Name = "phase 10b bare-metal viewport boundary wired"; Pass = $null -ne $kernelNavigatorViewportMatch; Match = $kernelNavigatorViewportMatch }
 )
 
 $failures = 0
 foreach ($check in $checks) {
     if (-not $check.Pass) {
         $failures++
+        Write-Error ("FAILED CHECK: {0}" -f $check.Name)
     }
     Emit-Check -Name $check.Name -Pass $check.Pass -Match $check.Match
 }
