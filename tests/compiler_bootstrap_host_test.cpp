@@ -173,7 +173,7 @@ static bool branch_skips_needle(const uint8_t* bytes, uint32_t count,
 int main()
 {
     const char* literal = "int gx_main(void* ctx) { return 42; }";
-    FunctionIR literalFunction = {};
+    static FunctionIR literalFunction = {};
     Diagnostics literalDiagnostics;
     Token literalTokens[COMPILER_MAX_TOKENS] = {};
     uint32_t literalTokenCount = 0;
@@ -219,7 +219,7 @@ int main()
                  "literal fast path emits legacy bytes")) return 1;
 
     const char* expressionSource = "int gx_main(gx_app_context* ctx) { return 20 + 22; }";
-    FunctionIR expressionFunction = {};
+    static FunctionIR expressionFunction = {};
     uint8_t expressionCode[COMPILER_MAX_CODE_BYTES] = {};
     uint8_t expressionElf[BOOTSTRAP_MAX_ELF_BYTES] = {};
     uint32_t expressionCodeBytes = 0;
@@ -233,7 +233,7 @@ int main()
 
     const char* localsSource =
         "int gx_main(gx_app_context* ctx) { int x = 20; int y = 22; int result = x + y; return result; }";
-    FunctionIR locals = {};
+    static FunctionIR locals = {};
     uint8_t localsCode[COMPILER_MAX_CODE_BYTES] = {};
     uint8_t localsElf[BOOTSTRAP_MAX_ELF_BYTES] = {};
     uint32_t localsCodeBytes = 0;
@@ -255,21 +255,21 @@ int main()
 
     const char* assignmentSource =
         "int gx_main(gx_app_context* ctx) { int value = 10; value = value * 4; value = value + 2; return value; }";
-    FunctionIR assignment = {};
+    static FunctionIR assignment = {};
     Diagnostics assignmentDiagnostics;
     if (!require(parse_text(assignmentSource, &assignment, &assignmentDiagnostics) &&
                  assignment.localCount == 1 && assignment.statementCount == 4,
                  "assignment statements resolve")) return 1;
 
     const char* precedenceSource = "int gx_main(void* ctx) { return (2 + 5) * 6; }";
-    FunctionIR precedence = {};
+    static FunctionIR precedence = {};
     Diagnostics precedenceDiagnostics;
     if (!require(parse_text(precedenceSource, &precedence, &precedenceDiagnostics) &&
                  precedence.returnConstantValid && precedence.returnConstant == 42,
                  "precedence and parentheses evaluate deterministically")) return 1;
 
     const char* unarySource = "int gx_main(void* ctx) { int x = -20; return -x + 22; }";
-    FunctionIR unary = {};
+    static FunctionIR unary = {};
     Diagnostics unaryDiagnostics;
     if (!require(parse_text(unarySource, &unary, &unaryDiagnostics) && unary.localCount == 1 &&
                  unary.statementCount == 2 && !unary.returnConstantValid,
@@ -294,7 +294,7 @@ int main()
     const char* comparisonsSource =
         "int gx_main(void* ctx) { return (1 == 1) + (1 != 2) + (1 < 2) + "
         "(2 <= 2) + (3 > 2) + (3 >= 3); }";
-    FunctionIR comparisons = {};
+    static FunctionIR comparisons = {};
     Diagnostics comparisonsDiagnostics;
     if (!require(parse_text(comparisonsSource, &comparisons, &comparisonsDiagnostics) &&
                  comparisons.returnConstantValid && comparisons.returnConstant == 6 &&
@@ -307,7 +307,7 @@ int main()
                  "all comparison IR operations and precedence are represented")) return 1;
 
     const char* signedComparisonSource = "int gx_main(void* ctx) { return -1 < 1; }";
-    FunctionIR signedComparison = {};
+    static FunctionIR signedComparison = {};
     Diagnostics signedComparisonDiagnostics;
     if (!require(parse_text(signedComparisonSource, &signedComparison, &signedComparisonDiagnostics) &&
                  signedComparison.returnConstantValid && signedComparison.returnConstant == 1,
@@ -317,7 +317,7 @@ int main()
         "int gx_main(gx_app_context* ctx) { int x = 20; int y = 22; int result = x + y; "
         "if (result == 42) { log(ctx, \"answer\"); return result; } "
         "else { log(ctx, \"unexpected\"); return -1; } }";
-    FunctionIR conditional = {};
+    static FunctionIR conditional = {};
     uint8_t conditionalCode[COMPILER_MAX_CODE_BYTES] = {};
     uint32_t conditionalCodeBytes = 0;
     Diagnostics conditionalDiagnostics;
@@ -561,7 +561,7 @@ int main()
 
     const char* genericConditionSource =
         "int gx_main(void* ctx) { int x = 1; if ((x + 1) >= 2) { if (x) { return 42; } } return 0; }";
-    FunctionIR genericCondition = {};
+    static FunctionIR genericCondition = {};
     Diagnostics genericConditionDiagnostics;
     if (!require(parse_text(genericConditionSource, &genericCondition, &genericConditionDiagnostics) &&
                  genericCondition.blockCount >= 3 && genericCondition.returnCount == 2,
@@ -569,7 +569,7 @@ int main()
 
     const char* missingReturnSource =
         "int gx_main(void* ctx) { int x = 42; if (x == 42) { return 42; } }";
-    FunctionIR missingReturn = {};
+    static FunctionIR missingReturn = {};
     Diagnostics missingReturnDiagnostics;
     if (!require(!parse_text(missingReturnSource, &missingReturn, &missingReturnDiagnostics) &&
                  missingReturnDiagnostics.count() != 0 &&
@@ -579,7 +579,7 @@ int main()
 
     const char* invalidConditionSource =
         "int gx_main(void* ctx) { if (x ==) { return 42; } return 0; }";
-    FunctionIR invalidCondition = {};
+    static FunctionIR invalidCondition = {};
     Diagnostics invalidConditionDiagnostics;
     if (!require(!parse_text(invalidConditionSource, &invalidCondition, &invalidConditionDiagnostics) &&
                  invalidConditionDiagnostics.count() != 0 &&
@@ -592,7 +592,7 @@ int main()
     tooManyBlocks += " return 0; ";
     for (uint32_t i = 0; i < COMPILER_MAX_BLOCK_NESTING + 1; ++i) tooManyBlocks += "}";
     tooManyBlocks += " }";
-    FunctionIR tooManyBlocksFunction = {};
+    static FunctionIR tooManyBlocksFunction = {};
     Diagnostics tooManyBlocksDiagnostics;
     if (!require(!parse_text(tooManyBlocks.c_str(), &tooManyBlocksFunction, &tooManyBlocksDiagnostics) &&
                  tooManyBlocksDiagnostics.count() != 0 &&
@@ -608,7 +608,7 @@ int main()
 
     const char* logsSource =
         "int gx_main(gx_app_context* ctx) { log(ctx, \"First\"); log(ctx, \"Second\"); log(ctx, \"Third\"); return 42; }";
-    FunctionIR logs = {};
+    static FunctionIR logs = {};
     uint8_t logsCode[COMPILER_MAX_CODE_BYTES] = {};
     uint8_t logsElf[BOOTSTRAP_MAX_ELF_BYTES] = {};
     uint32_t logsCodeBytes = 0;
@@ -621,7 +621,7 @@ int main()
                  "multiple logs use separate deterministic string slots")) return 1;
 
     const char* unknown = "int gx_main(gx_app_context* ctx) { return missing + 1; }";
-    FunctionIR unknownFunction = {};
+    static FunctionIR unknownFunction = {};
     Diagnostics unknownDiagnostics;
     if (!require(!parse_text(unknown, &unknownFunction, &unknownDiagnostics) &&
                  unknownDiagnostics.count() != 0 &&
@@ -629,7 +629,7 @@ int main()
                  "unknown identifiers are rejected with names")) return 1;
 
     const char* duplicate = "int gx_main(gx_app_context* ctx) { int x = 1; int x = 2; return x; }";
-    FunctionIR duplicateFunction = {};
+    static FunctionIR duplicateFunction = {};
     Diagnostics duplicateDiagnostics;
     if (!require(!parse_text(duplicate, &duplicateFunction, &duplicateDiagnostics) &&
                  std::strcmp(duplicateDiagnostics.at(0).message, "duplicate local 'x'") == 0,
@@ -638,7 +638,7 @@ int main()
     std::string oversized = "int gx_main(void* ctx) { int ";
     oversized.append(64, 'x');
     oversized += " = 1; return 1; }";
-    FunctionIR oversizedFunction = {};
+    static FunctionIR oversizedFunction = {};
     Diagnostics oversizedDiagnostics;
     if (!require(!parse_text(oversized.c_str(), &oversizedFunction, &oversizedDiagnostics),
                  "oversized identifiers are rejected")) return 1;
@@ -648,7 +648,7 @@ int main()
     nested += "1";
     nested.append(17, ')');
     nested += "; }";
-    FunctionIR nestedFunction = {};
+    static FunctionIR nestedFunction = {};
     Diagnostics nestedDiagnostics;
     if (!require(!parse_text(nested.c_str(), &nestedFunction, &nestedDiagnostics) &&
                  std::strcmp(nestedDiagnostics.at(0).message, "expression nesting limit exceeded") == 0,
@@ -659,7 +659,7 @@ int main()
         tooManyLocals += " int local" + std::to_string(i) + " = 0;";
     }
     tooManyLocals += " return 0; }";
-    FunctionIR tooManyLocalsFunction = {};
+    static FunctionIR tooManyLocalsFunction = {};
     Diagnostics tooManyLocalsDiagnostics;
     if (!require(!parse_text(tooManyLocals.c_str(), &tooManyLocalsFunction, &tooManyLocalsDiagnostics) &&
                  std::strcmp(tooManyLocalsDiagnostics.at(0).message, "too many local variables") == 0,
@@ -668,7 +668,7 @@ int main()
     std::string tooManyStatements = "int gx_main(void* ctx) { int value = 0;";
     for (uint32_t i = 0; i < COMPILER_MAX_STATEMENTS; ++i) tooManyStatements += " value = 0;";
     tooManyStatements += " return value; }";
-    FunctionIR tooManyStatementsFunction = {};
+    static FunctionIR tooManyStatementsFunction = {};
     Diagnostics tooManyStatementsDiagnostics;
     if (!require(!parse_text(tooManyStatements.c_str(), &tooManyStatementsFunction,
                               &tooManyStatementsDiagnostics) &&
@@ -681,7 +681,7 @@ int main()
         tooManyExpressions += "1";
     }
     tooManyExpressions += "; }";
-    FunctionIR tooManyExpressionsFunction = {};
+    static FunctionIR tooManyExpressionsFunction = {};
     Diagnostics tooManyExpressionsDiagnostics;
     if (!require(!parse_text(tooManyExpressions.c_str(), &tooManyExpressionsFunction,
                               &tooManyExpressionsDiagnostics) &&
@@ -693,7 +693,7 @@ int main()
         tooManyStrings += " log(ctx, \"s" + std::to_string(i) + "\");";
     }
     tooManyStrings += " return 0; }";
-    FunctionIR tooManyStringsFunction = {};
+    static FunctionIR tooManyStringsFunction = {};
     Diagnostics tooManyStringsDiagnostics;
     if (!require(!parse_text(tooManyStrings.c_str(), &tooManyStringsFunction,
                               &tooManyStringsDiagnostics) &&
@@ -704,8 +704,8 @@ int main()
     uint8_t deterministicCodeB[COMPILER_MAX_CODE_BYTES] = {};
     uint8_t deterministicElfA[BOOTSTRAP_MAX_ELF_BYTES] = {};
     uint8_t deterministicElfB[BOOTSTRAP_MAX_ELF_BYTES] = {};
-    FunctionIR deterministicA = {};
-    FunctionIR deterministicB = {};
+    static FunctionIR deterministicA = {};
+    static FunctionIR deterministicB = {};
     uint32_t deterministicCodeBytesA = 0, deterministicCodeBytesB = 0;
     uint32_t deterministicElfBytesA = 0, deterministicElfBytesB = 0;
     if (!require(compile_text(logsSource, &deterministicA, deterministicCodeA,
@@ -751,7 +751,7 @@ int main()
                  "single pipe is rejected with a focused diagnostic")) return 1;
 
     const char* logicalSource = "int gx_main(void* ctx) { return 0 || 1 && 1; }";
-    FunctionIR logical = {};
+    static FunctionIR logical = {};
     Diagnostics logicalDiagnostics;
     if (!require(parse_text(logicalSource, &logical, &logicalDiagnostics) &&
                  logical.returnConstantValid && logical.returnConstant == 1 &&
@@ -760,7 +760,7 @@ int main()
                  "logical precedence and target-neutral IR are represented")) return 1;
 
     const char* logicalParentheses = "int gx_main(void* ctx) { return (0 || 1) && 0; }";
-    FunctionIR logicalParenthesesFunction = {};
+    static FunctionIR logicalParenthesesFunction = {};
     Diagnostics logicalParenthesesDiagnostics;
     if (!require(parse_text(logicalParentheses, &logicalParenthesesFunction,
                              &logicalParenthesesDiagnostics) &&
@@ -769,14 +769,14 @@ int main()
                  "logical parentheses override precedence")) return 1;
 
     const char* logicalComparisonsSource = "int gx_main(void* ctx) { return 20 == 20 && 22 == 22; }";
-    FunctionIR logicalComparisons = {};
+    static FunctionIR logicalComparisons = {};
     Diagnostics logicalComparisonsDiagnostics;
     if (!require(parse_text(logicalComparisonsSource, &logicalComparisons, &logicalComparisonsDiagnostics) &&
                  logicalComparisons.returnConstantValid && logicalComparisons.returnConstant == 1,
                  "comparisons bind tighter than logical AND")) return 1;
 
     const char* canonicalLogical = "int gx_main(void* ctx) { return 42 && 99; }";
-    FunctionIR canonicalLogicalFunction = {};
+    static FunctionIR canonicalLogicalFunction = {};
     uint8_t canonicalLogicalCode[COMPILER_MAX_CODE_BYTES] = {};
     uint32_t canonicalLogicalCodeBytes = 0;
     if (!require(compile_text(canonicalLogical, &canonicalLogicalFunction, canonicalLogicalCode,
@@ -788,7 +788,7 @@ int main()
     const char* logicalAssignmentSource =
         "int gx_main(gx_app_context* ctx) { int x = 20; int y = 22; "
         "int matched = x == 20 && y == 22; return matched * 42; }";
-    FunctionIR logicalAssignment = {};
+    static FunctionIR logicalAssignment = {};
     uint8_t logicalAssignmentCode[COMPILER_MAX_CODE_BYTES] = {};
     uint32_t logicalAssignmentCodeBytes = 0;
     if (!require(compile_text(logicalAssignmentSource, &logicalAssignment,
@@ -800,7 +800,7 @@ int main()
 
     const char* shortCircuitAndSource =
         "int gx_main(void* ctx) { int left = 0; int right = 7; return left && right; }";
-    FunctionIR shortCircuitAnd = {};
+    static FunctionIR shortCircuitAnd = {};
     uint8_t shortCircuitAndCode[COMPILER_MAX_CODE_BYTES] = {};
     uint32_t shortCircuitAndCodeBytes = 0;
     if (!require(compile_text(shortCircuitAndSource, &shortCircuitAnd, shortCircuitAndCode,
@@ -814,7 +814,7 @@ int main()
 
     const char* shortCircuitOrSource =
         "int gx_main(void* ctx) { int left = 1; int right = 7; return left || right; }";
-    FunctionIR shortCircuitOr = {};
+    static FunctionIR shortCircuitOr = {};
     uint8_t shortCircuitOrCode[COMPILER_MAX_CODE_BYTES] = {};
     uint32_t shortCircuitOrCodeBytes = 0;
     if (!require(compile_text(shortCircuitOrSource, &shortCircuitOr, shortCircuitOrCode,
@@ -827,7 +827,7 @@ int main()
 
     const char* invalidLogicalAnd = "int gx_main(void* ctx) { if (1 &&) { return 42; } return 0; }";
     const char* invalidLogicalOr = "int gx_main(void* ctx) { if (|| 1) { return 42; } return 0; }";
-    FunctionIR invalidLogicalFunction = {};
+    static FunctionIR invalidLogicalFunction = {};
     Diagnostics invalidLogicalDiagnostics;
     if (!require(!parse_text(invalidLogicalAnd, &invalidLogicalFunction, &invalidLogicalDiagnostics) &&
                  invalidLogicalDiagnostics.count() != 0 &&
@@ -842,7 +842,7 @@ int main()
     std::string tooManyLogicalBranches = "int gx_main(void* ctx) { return 1";
     for (uint32_t i = 0; i < 44; ++i) tooManyLogicalBranches += " && 1";
     tooManyLogicalBranches += "; }";
-    FunctionIR tooManyLogicalFunction = {};
+    static FunctionIR tooManyLogicalFunction = {};
     uint8_t tooManyLogicalCode[COMPILER_MAX_CODE_BYTES] = {};
     uint32_t tooManyLogicalCodeBytes = 0;
     Diagnostics tooManyLogicalDiagnostics;

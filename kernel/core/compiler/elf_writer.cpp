@@ -100,11 +100,12 @@ bool write_bootstrap_elf(const uint8_t* code,
                          uint32_t codeBytes,
                          const uint8_t* readOnlyData,
                          uint32_t readOnlyDataBytes,
+                         uint32_t entryCodeOffset,
                          uint8_t* output,
                          uint32_t outputCapacity,
                          ElfLayout* layout)
 {
-    if (!code || !output || !layout || codeBytes == 0 ||
+    if (!code || !output || !layout || codeBytes == 0 || entryCodeOffset >= codeBytes ||
         readOnlyDataBytes > BOOTSTRAP_DATA_BYTES_LIMIT ||
         (readOnlyDataBytes != 0 && !readOnlyData)) return false;
 
@@ -117,7 +118,7 @@ bool write_bootstrap_elf(const uint8_t* code,
         outputBytes > outputCapacity || outputBytes > BOOTSTRAP_MAX_ELF_BYTES) return false;
 
     uint64_t entryPoint = 0;
-    if (!add_u64(BOOTSTRAP_IMAGE_BASE, BOOTSTRAP_CODE_OFFSET, &entryPoint)) return false;
+    if (!add_u64(BOOTSTRAP_IMAGE_BASE, BOOTSTRAP_CODE_OFFSET + entryCodeOffset, &entryPoint)) return false;
 
     clear_bytes(output, outputBytes);
 
@@ -180,6 +181,7 @@ bool write_bootstrap_elf(const uint8_t* code,
     layout->imageBase = BOOTSTRAP_IMAGE_BASE;
     layout->entryPoint = entryPoint;
     layout->codeOffset = BOOTSTRAP_CODE_OFFSET;
+    layout->entryCodeOffset = entryCodeOffset;
     layout->dataOffset = dataOffset;
     layout->dataAddress = readOnlyDataBytes == 0 ? 0 : BOOTSTRAP_IMAGE_BASE + BOOTSTRAP_DATA_OFFSET;
     layout->dataBytes = readOnlyDataBytes;
@@ -193,7 +195,19 @@ bool write_bootstrap_elf(const uint8_t* code,
                          uint32_t outputCapacity,
                          ElfLayout* layout)
 {
-    return write_bootstrap_elf(code, codeBytes, nullptr, 0, output, outputCapacity, layout);
+    return write_bootstrap_elf(code, codeBytes, nullptr, 0, 0, output, outputCapacity, layout);
+}
+
+bool write_bootstrap_elf(const uint8_t* code,
+                         uint32_t codeBytes,
+                         const uint8_t* readOnlyData,
+                         uint32_t readOnlyDataBytes,
+                         uint8_t* output,
+                         uint32_t outputCapacity,
+                         ElfLayout* layout)
+{
+    return write_bootstrap_elf(code, codeBytes, readOnlyData, readOnlyDataBytes, 0,
+                               output, outputCapacity, layout);
 }
 
 bool validate_bootstrap_elf(const uint8_t* image,
@@ -201,10 +215,11 @@ bool validate_bootstrap_elf(const uint8_t* image,
                             uint64_t expectedImageBase,
                             uint32_t expectedCodeOffset,
                             const uint8_t* expectedCode,
-                            uint32_t expectedCodeBytes,
-                            ElfValidationResult* result,
-                            const uint8_t* expectedData,
-                            uint32_t expectedDataBytes)
+                             uint32_t expectedCodeBytes,
+                             ElfValidationResult* result,
+                             const uint8_t* expectedData,
+                             uint32_t expectedDataBytes,
+                             uint32_t expectedEntryCodeOffset)
 {
     if (!result) return false;
     result->valid = false;
@@ -308,7 +323,7 @@ bool validate_bootstrap_elf(const uint8_t* image,
     if (!expectedBaseSeen) return fail(result, "ELF PT_LOAD image base does not match expected base");
 
     uint64_t expectedEntry = 0;
-    if (!add_u64(expectedImageBase, expectedCodeOffset, &expectedEntry)) return fail(result, "expected ELF entry address overflows");
+    if (!add_u64(expectedImageBase, expectedCodeOffset + expectedEntryCodeOffset, &expectedEntry)) return fail(result, "expected ELF entry address overflows");
     if (entryPoint != expectedEntry) return fail(result, "ELF entry point does not match expected code address");
     if (!entryInExecutableLoad) return fail(result, "ELF entry point is outside executable PT_LOAD");
     if (expectedDataBytes != 0 && (!expectedData || !expectedDataFound)) {
@@ -320,7 +335,7 @@ bool validate_bootstrap_elf(const uint8_t* image,
         return fail(result, "expected generated code range exceeds ELF file");
     }
     if (expectedCodeBytes != 0) {
-        if (result->codeFileOffset != expectedCodeOffset) return fail(result, "ELF entry does not map to expected code offset");
+        if (result->codeFileOffset != expectedCodeOffset + expectedEntryCodeOffset) return fail(result, "ELF entry does not map to expected code offset");
         for (uint32_t i = 0; i < expectedCodeBytes; ++i) {
             if (image[expectedCodeOffset + i] != expectedCode[i]) return fail(result, "ELF code bytes do not match generated AMD64 code");
         }

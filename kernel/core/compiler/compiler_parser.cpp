@@ -1,5 +1,6 @@
 //
-// Recursive-descent parser and resolver for the bounded bootstrap language.
+// Recursive-descent parser, resolver, and bounded call-graph analysis for the
+// bootstrap language.
 //
 
 #include "compiler_parser.h"
@@ -8,22 +9,51 @@ namespace kernel {
 namespace compiler {
 namespace {
 
-static bool same_token_text(const char* source, const Token& left, const Token& right)
+static CallSite s_callSites[COMPILER_MAX_FUNCTIONS][COMPILER_MAX_CALL_EXPRESSIONS] = {};
+static uint16_t s_callArguments[COMPILER_MAX_FUNCTIONS][COMPILER_MAX_CALL_ARGUMENT_NODES] = {};
+
+static bool token_is_name(const Token& token)
 {
-    if (!source || left.length != right.length) return false;
-    for (uint32_t i = 0; i < left.length; ++i)
-        if (source[left.location.offset + i] != source[right.location.offset + i]) return false;
-    return true;
+    return token.kind == TokenKind::Identifier || token.kind == TokenKind::KeywordGxMain;
 }
 
-static bool is_identifier_token(const Token& token)
+static bool token_is_gx_main(const Token& token)
 {
-    return token.kind == TokenKind::Identifier;
+    return token.kind == TokenKind::KeywordGxMain;
 }
 
 static uint32_t token_index_or_eof(uint32_t index, uint32_t count)
 {
     return index < count ? index : (count == 0 ? 0 : count - 1);
+}
+
+static bool token_text_equals(const char* source, const Token& token, const char* text)
+{
+    if (!source || !text) return false;
+    uint32_t length = 0;
+    while (text[length]) ++length;
+    if (token.length != length) return false;
+    for (uint32_t i = 0; i < length; ++i)
+        if (source[token.location.offset + i] != text[i]) return false;
+    return true;
+}
+
+static bool name_equals(const char* left, const char* right)
+{
+    if (!left || !right) return false;
+    uint32_t i = 0;
+    while (left[i] || right[i]) {
+        if (left[i] != right[i]) return false;
+        ++i;
+    }
+    return true;
+}
+
+static uint32_t name_length(const char* name)
+{
+    uint32_t length = 0;
+    if (name) while (name[length]) ++length;
+    return length;
 }
 
 static int32_t bits_to_i32(uint32_t bits)
@@ -89,63 +119,47 @@ static bool parse_string_literal(const char* source, const Token& token,
     return true;
 }
 
-class Parser {
+class FunctionParser {
 public:
-    Parser(const char* source, const Token* tokens, uint32_t tokenCount,
-           FunctionIR* output, Diagnostics& diagnostics)
-        : m_source(source), m_tokens(tokens), m_tokenCount(tokenCount), m_index(0),
-          m_output(output), m_diagnostics(diagnostics), m_returnCount(0), m_parameterToken{}
+    FunctionParser(const char* source, const Token* tokens, uint32_t tokenCount,
+                   uint32_t* index, FunctionIR* output, Diagnostics& diagnostics)
+        : m_source(source), m_tokens(tokens), m_tokenCount(tokenCount), m_index(index),
+          m_output(output), m_diagnostics(diagnostics), m_returnCount(0), m_callDepth(0),
+          m_contextToken{}
     {
     }
 
-    bool parse()
+    bool parse_body()
     {
-        if (!expect(TokenKind::KeywordInt, "expected return type 'int'")) return false;
-        if (!expect(TokenKind::KeywordGxMain, "expected function name 'gx_main'")) return false;
-        if (!expect(TokenKind::LeftParen, "expected '(' after function name")) return false;
-        if (current().kind == TokenKind::KeywordVoid) {
-            ++m_index;
-        } else if (current().kind == TokenKind::KeywordGxAppContext) {
-            m_output->usesAppContext = true;
-            ++m_index;
-        } else {
-            error_current("expected 'void' or 'gx_app_context' parameter type");
-            return false;
-        }
-        if (!expect(TokenKind::Star, "expected '*' in pointer parameter")) return false;
-        if (!is_identifier_token(current())) {
-            error_current("expected parameter identifier");
-            return false;
-        }
-        m_parameterToken = current();
-        if (!copy_identifier(m_output->parameterName, sizeof(m_output->parameterName), m_parameterToken)) return false;
-        ++m_index;
-        if (!expect(TokenKind::RightParen, "expected ')' after parameter")) return false;
-
         uint16_t rootBlock = COMPILER_INVALID_INDEX;
         if (!parse_block(0, 0, 0, &rootBlock)) return false;
         m_output->rootBlock = rootBlock;
-        if (current().kind != TokenKind::EndOfFile) {
-            error_current("expected end of source after function");
-            return false;
-        }
         if (!block_guarantees_return(rootBlock)) {
-            m_diagnostics.error(current().location,
-                                "gx_main may reach end without returning a value", "function");
+            if (token_text_equals(m_source, m_nameToken, "gx_main")) {
+                m_diagnostics.error(m_nameToken.location,
+                                    "gx_main may reach end without returning a value", "function");
+            } else {
+                m_diagnostics.error_identifier_suffix(m_nameToken.location, "function ",
+                                                      m_source + m_nameToken.location.offset,
+                                                      m_nameToken.length,
+                                                      " may reach end without returning a value", "function");
+            }
             return false;
         }
-
-        m_output->name[0] = 'g'; m_output->name[1] = 'x'; m_output->name[2] = '_';
-        m_output->name[3] = 'm'; m_output->name[4] = 'a'; m_output->name[5] = 'i';
-        m_output->name[6] = 'n'; m_output->name[7] = '\0';
         m_output->returnCount = m_returnCount;
         m_output->returnConstantValid = m_returnCount == 1 && evaluate_return_constant();
         if (!m_output->returnConstantValid) m_output->returnConstant = 0;
         return !m_diagnostics.has_error();
     }
 
+    void set_name_token(const Token& token) { m_nameToken = token; }
+    void set_context_token(const Token& token) { m_contextToken = token; }
+
 private:
-    const Token& current() const { return m_tokens[token_index_or_eof(m_index, m_tokenCount)]; }
+    const Token& current() const
+    {
+        return m_tokens[token_index_or_eof(*m_index, m_tokenCount)];
+    }
 
     void error_current(const char* message)
     {
@@ -158,13 +172,14 @@ private:
             error_current(message);
             return false;
         }
-        ++m_index;
+        ++(*m_index);
         return true;
     }
 
     bool copy_identifier(char* output, uint32_t capacity, const Token& token)
     {
-        if (!output || capacity == 0 || token.length > COMPILER_MAX_IDENTIFIER_BYTES || token.length + 1 > capacity) {
+        if (!output || capacity == 0 || !token_is_name(token) ||
+            token.length > COMPILER_MAX_IDENTIFIER_BYTES || token.length + 1 > capacity) {
             m_diagnostics.error(token.location, "identifier exceeds 63-byte limit", "identifier");
             return false;
         }
@@ -173,23 +188,57 @@ private:
         return true;
     }
 
-    int32_t find_local_text(const Token& token) const
+    bool name_matches(const char* name, const Token& token) const
     {
-        for (uint32_t i = 0; i < m_output->localCount; ++i) {
-            uint32_t length = 0;
-            while (m_output->locals[i].name[length]) ++length;
-            if (length != token.length) continue;
-            bool same = true;
-            for (uint32_t j = 0; j < length; ++j)
-                if (m_output->locals[i].name[j] != m_source[token.location.offset + j]) same = false;
-            if (same) return static_cast<int32_t>(i);
+        if (!name || !token_is_name(token)) return false;
+        uint32_t length = 0;
+        while (name[length]) ++length;
+        if (length != token.length) return false;
+        for (uint32_t i = 0; i < length; ++i)
+            if (name[i] != m_source[token.location.offset + i]) return false;
+        return true;
+    }
+
+    int32_t find_integer_parameter(const Token& token) const
+    {
+        for (uint32_t i = 0; i < m_output->integerParameterCount; ++i) {
+            if (name_matches(m_output->parameters[i].name, token))
+                return static_cast<int32_t>(m_output->parameters[i].slot);
         }
         return -1;
     }
 
+    bool is_context_parameter(const Token& token) const
+    {
+        return m_output->usesAppContext && m_contextToken.length != 0 &&
+            name_matches(m_output->parameterName, token);
+    }
+
+    int32_t find_local(const Token& token) const
+    {
+        for (uint32_t i = 0; i < m_output->localCount; ++i) {
+            if (name_matches(m_output->locals[i].name, token))
+                return static_cast<int32_t>(m_output->locals[i].slot);
+        }
+        return -1;
+    }
+
+    int32_t find_variable(const Token& token) const
+    {
+        const int32_t parameter = find_integer_parameter(token);
+        return parameter >= 0 ? parameter : find_local(token);
+    }
+
+    bool name_already_declared(const Token& token) const
+    {
+        if (is_context_parameter(token) || find_integer_parameter(token) >= 0 || find_local(token) >= 0)
+            return true;
+        return false;
+    }
+
     bool add_local(const Token& token, uint16_t* slot)
     {
-        if (find_local_text(token) >= 0) {
+        if (name_already_declared(token)) {
             m_diagnostics.error_identifier(token.location, "duplicate local ",
                                            m_source + token.location.offset, token.length, "identifier");
             return false;
@@ -198,7 +247,7 @@ private:
             m_diagnostics.error(token.location, "too many local variables", "identifier");
             return false;
         }
-        const uint16_t newSlot = static_cast<uint16_t>(m_output->localCount);
+        const uint16_t newSlot = static_cast<uint16_t>(m_output->integerParameterCount + m_output->localCount);
         LocalSymbol& local = m_output->locals[m_output->localCount++];
         local = {};
         local.slot = newSlot;
@@ -314,18 +363,18 @@ private:
     bool parse_declaration(uint16_t blockIndex)
     {
         const SourceLocation location = current().location;
-        ++m_index;
-        if (!is_identifier_token(current())) {
+        ++(*m_index);
+        if (!token_is_name(current()) || current().kind == TokenKind::KeywordGxMain) {
             error_current("expected identifier after 'int'");
             return false;
         }
         const Token name = current();
         uint16_t slot = COMPILER_INVALID_INDEX;
         if (!add_local(name, &slot)) return false;
-        ++m_index;
+        ++(*m_index);
         uint16_t expression = COMPILER_INVALID_INDEX;
         if (current().kind == TokenKind::Equal) {
-            ++m_index;
+            ++(*m_index);
             expression = parse_expression(0);
             if (expression == COMPILER_INVALID_INDEX) return false;
         } else {
@@ -333,7 +382,7 @@ private:
             if (expression == COMPILER_INVALID_INDEX) return false;
         }
         if (!expect(TokenKind::Semicolon, "expected ';' after declaration")) return false;
-        m_output->locals[slot].initialized = true;
+        m_output->locals[m_output->localCount - 1U].initialized = true;
         return append_statement(blockIndex, StatementKind::DeclareLocal, location, expression, slot,
                                 COMPILER_INVALID_INDEX);
     }
@@ -341,18 +390,26 @@ private:
     bool parse_assignment(uint16_t blockIndex)
     {
         const Token name = current();
-        const int32_t slot = find_local_text(name);
+        const int32_t parameterSlot = find_integer_parameter(name);
+        const int32_t slot = parameterSlot >= 0 ? parameterSlot : find_local(name);
         if (slot < 0) {
-            m_diagnostics.error_identifier(name.location, "unknown identifier ",
-                                           m_source + name.location.offset, name.length, "identifier");
+            if (current().kind == TokenKind::Identifier && m_index && *m_index + 1 < m_tokenCount &&
+                m_tokens[*m_index + 1].kind == TokenKind::LeftParen) {
+                m_diagnostics.error_identifier(name.location, "function calls must be used as expressions: ",
+                                               m_source + name.location.offset, name.length, "call");
+            } else {
+                m_diagnostics.error_identifier(name.location, "unknown identifier ",
+                                               m_source + name.location.offset, name.length, "identifier");
+            }
             return false;
         }
-        ++m_index;
+        ++(*m_index);
         if (!expect(TokenKind::Equal, "expected '=' in assignment")) return false;
         const uint16_t expression = parse_expression(0);
         if (expression == COMPILER_INVALID_INDEX) return false;
         if (!expect(TokenKind::Semicolon, "expected ';' after assignment")) return false;
-        m_output->locals[slot].initialized = true;
+        for (uint32_t i = 0; i < m_output->localCount; ++i)
+            if (m_output->locals[i].slot == static_cast<uint16_t>(slot)) m_output->locals[i].initialized = true;
         return append_statement(blockIndex, StatementKind::StoreLocal, name.location, expression,
                                 static_cast<uint16_t>(slot), COMPILER_INVALID_INDEX);
     }
@@ -389,20 +446,20 @@ private:
             error_current("host log requires a gx_app_context parameter");
             return false;
         }
-        ++m_index;
+        ++(*m_index);
         if (!expect(TokenKind::LeftParen, "expected '(' after log")) return false;
-        if (!is_identifier_token(current()) || !same_token_text(m_source, current(), m_parameterToken)) {
+        if (!token_is_name(current()) || !name_matches(m_output->parameterName, current())) {
             error_current("log must receive the context parameter");
             return false;
         }
-        ++m_index;
+        ++(*m_index);
         if (!expect(TokenKind::Comma, "expected ',' between log arguments")) return false;
         if (current().kind != TokenKind::StringLiteral) {
             error_current("expected string literal in log call");
             return false;
         }
         const Token stringToken = current();
-        ++m_index;
+        ++(*m_index);
         uint16_t stringIndex = COMPILER_INVALID_INDEX;
         if (!add_string(stringToken, &stringIndex)) return false;
         if (!expect(TokenKind::RightParen, "expected ')' after log arguments")) return false;
@@ -415,7 +472,7 @@ private:
     bool parse_return(uint16_t blockIndex)
     {
         const SourceLocation location = current().location;
-        ++m_index;
+        ++(*m_index);
         const uint16_t expression = parse_expression(0);
         if (expression == COMPILER_INVALID_INDEX) return false;
         if (!expect(TokenKind::Semicolon, "expected ';' after return expression")) return false;
@@ -434,7 +491,7 @@ private:
             return false;
         }
         const SourceLocation location = current().location;
-        ++m_index;
+        ++(*m_index);
         if (!expect(TokenKind::LeftParen, "expected '(' after 'if'")) return false;
         const uint16_t condition = parse_expression(0);
         if (condition == COMPILER_INVALID_INDEX) return false;
@@ -443,7 +500,7 @@ private:
         if (!parse_statement_body(depth, conditionalDepth + 1U, loopDepth, &thenBlock)) return false;
         uint16_t elseBlock = COMPILER_INVALID_INDEX;
         if (current().kind == TokenKind::KeywordElse) {
-            ++m_index;
+            ++(*m_index);
             if (!parse_statement_body(depth, conditionalDepth + 1U, loopDepth, &elseBlock)) return false;
         }
         return append_statement(blockIndex, StatementKind::If, location, condition,
@@ -459,7 +516,7 @@ private:
             return false;
         }
         const SourceLocation location = current().location;
-        ++m_index;
+        ++(*m_index);
         if (!expect(TokenKind::LeftParen, "expected '(' after 'while'")) return false;
         const uint16_t condition = parse_expression(0);
         if (condition == COMPILER_INVALID_INDEX) return false;
@@ -480,7 +537,7 @@ private:
             m_diagnostics.error(location, outsideLoopMessage, keyword);
             return false;
         }
-        ++m_index;
+        ++(*m_index);
         if (!expect(TokenKind::Semicolon, kind == StatementKind::Break
                     ? "expected ';' after 'break'"
                     : "expected ';' after 'continue'")) return false;
@@ -490,7 +547,8 @@ private:
     }
 
     uint16_t make_expression(ExpressionKind kind, SourceLocation location,
-                             uint16_t left, uint16_t right, uint16_t localIndex, int32_t value)
+                             uint16_t left, uint16_t right, uint16_t localIndex, int32_t value,
+                             uint16_t callIndex = COMPILER_INVALID_INDEX)
     {
         if (m_output->expressionCount >= COMPILER_MAX_EXPRESSION_NODES) {
             m_diagnostics.error(location, "too many expression nodes", "expression");
@@ -503,6 +561,7 @@ private:
         expression.left = left;
         expression.right = right;
         expression.localIndex = localIndex;
+        expression.callIndex = callIndex;
         expression.value = value;
         expression.location = location;
         return index;
@@ -529,7 +588,7 @@ private:
         uint16_t left = parse_logical_and(depth);
         while (left != COMPILER_INVALID_INDEX && current().kind == TokenKind::LogicalOr) {
             const Token operatorToken = current();
-            ++m_index;
+            ++(*m_index);
             const uint16_t right = parse_logical_and(depth);
             if (right == COMPILER_INVALID_INDEX) return COMPILER_INVALID_INDEX;
             left = make_expression(ExpressionKind::LogicalOr, operatorToken.location,
@@ -543,7 +602,7 @@ private:
         uint16_t left = parse_equality(depth);
         while (left != COMPILER_INVALID_INDEX && current().kind == TokenKind::LogicalAnd) {
             const Token operatorToken = current();
-            ++m_index;
+            ++(*m_index);
             const uint16_t right = parse_equality(depth);
             if (right == COMPILER_INVALID_INDEX) return COMPILER_INVALID_INDEX;
             left = make_expression(ExpressionKind::LogicalAnd, operatorToken.location,
@@ -559,7 +618,7 @@ private:
                (current().kind == TokenKind::EqualEqual || current().kind == TokenKind::NotEqual)) {
             const Token operatorToken = current();
             const TokenKind operation = current().kind;
-            ++m_index;
+            ++(*m_index);
             const uint16_t right = parse_relational(depth);
             if (right == COMPILER_INVALID_INDEX) return COMPILER_INVALID_INDEX;
             left = make_expression(operation == TokenKind::EqualEqual ? ExpressionKind::Equal : ExpressionKind::NotEqual,
@@ -576,7 +635,7 @@ private:
                 current().kind == TokenKind::Greater || current().kind == TokenKind::GreaterEqual)) {
             const Token operatorToken = current();
             const TokenKind operation = current().kind;
-            ++m_index;
+            ++(*m_index);
             const uint16_t right = parse_additive(depth);
             if (right == COMPILER_INVALID_INDEX) return COMPILER_INVALID_INDEX;
             ExpressionKind kind = ExpressionKind::Less;
@@ -596,7 +655,7 @@ private:
                (current().kind == TokenKind::Plus || current().kind == TokenKind::Minus)) {
             const Token operatorToken = current();
             const TokenKind operation = current().kind;
-            ++m_index;
+            ++(*m_index);
             const uint16_t right = parse_multiplicative(depth);
             if (right == COMPILER_INVALID_INDEX) return COMPILER_INVALID_INDEX;
             left = make_expression(operation == TokenKind::Plus ? ExpressionKind::Add : ExpressionKind::Subtract,
@@ -610,7 +669,7 @@ private:
         uint16_t left = parse_unary(depth);
         while (left != COMPILER_INVALID_INDEX && current().kind == TokenKind::Star) {
             const Token operatorToken = current();
-            ++m_index;
+            ++(*m_index);
             const uint16_t right = parse_unary(depth);
             if (right == COMPILER_INVALID_INDEX) return COMPILER_INVALID_INDEX;
             left = make_expression(ExpressionKind::Multiply, operatorToken.location,
@@ -623,10 +682,10 @@ private:
     {
         if (current().kind != TokenKind::Minus) return parse_primary(depth);
         const SourceLocation location = current().location;
-        ++m_index;
+        ++(*m_index);
         if (current().kind == TokenKind::Integer) {
             const Token literal = current();
-            ++m_index;
+            ++(*m_index);
             int32_t magnitude = 0;
             if (!parse_integer(m_source, literal, true, &magnitude, m_diagnostics)) return COMPILER_INVALID_INDEX;
             if (magnitude == static_cast<int32_t>(0x80000000U)) return make_constant(magnitude, location);
@@ -641,24 +700,87 @@ private:
                                COMPILER_INVALID_INDEX, COMPILER_INVALID_INDEX, 0);
     }
 
+    uint16_t parse_call(const Token& nameToken, uint32_t depth)
+    {
+        if (m_callDepth >= COMPILER_MAX_CALL_NESTING) {
+            m_diagnostics.error(nameToken.location, "call nesting limit exceeded", "call");
+            return COMPILER_INVALID_INDEX;
+        }
+        if (m_output->callCount >= COMPILER_MAX_CALL_EXPRESSIONS) {
+            m_diagnostics.error(nameToken.location, "too many call expressions", "call");
+            return COMPILER_INVALID_INDEX;
+        }
+        const uint16_t callIndex = static_cast<uint16_t>(m_output->callCount++);
+        CallSite& call = m_output->calls[callIndex];
+        call = {};
+        if (!copy_identifier(call.calleeName, sizeof(call.calleeName), nameToken)) return COMPILER_INVALID_INDEX;
+        call.location = nameToken.location;
+        call.argumentStart = 0;
+        call.argumentCount = 0;
+        call.calleeFunction = COMPILER_INVALID_INDEX;
+        ++(*m_index);
+        if (!expect(TokenKind::LeftParen, "expected '(' after function name")) return COMPILER_INVALID_INDEX;
+
+        ++m_callDepth;
+        uint16_t argumentExpressions[COMPILER_MAX_PARAMETERS] = {};
+        uint16_t argumentCount = 0;
+        if (current().kind != TokenKind::RightParen) {
+            while (true) {
+                if (argumentCount >= COMPILER_MAX_PARAMETERS) {
+                    m_diagnostics.error(nameToken.location,
+                                        "function call exceeds four-argument limit", "call");
+                    return COMPILER_INVALID_INDEX;
+                }
+                const uint16_t argument = parse_expression(depth + 1U);
+                if (argument == COMPILER_INVALID_INDEX) return COMPILER_INVALID_INDEX;
+                argumentExpressions[argumentCount++] = argument;
+                if (current().kind != TokenKind::Comma) break;
+                ++(*m_index);
+            }
+        }
+        --m_callDepth;
+        if (!expect(TokenKind::RightParen, "expected ')' after function arguments")) return COMPILER_INVALID_INDEX;
+        if (m_output->callArgumentCount > COMPILER_MAX_CALL_ARGUMENT_NODES - argumentCount) {
+            m_diagnostics.error(nameToken.location, "call argument storage capacity exceeded", "call");
+            return COMPILER_INVALID_INDEX;
+        }
+        call.argumentStart = static_cast<uint16_t>(m_output->callArgumentCount);
+        call.argumentCount = argumentCount;
+        for (uint32_t i = 0; i < argumentCount; ++i)
+            m_output->callArguments[m_output->callArgumentCount++] = argumentExpressions[i];
+        return make_expression(ExpressionKind::Call, nameToken.location,
+                               COMPILER_INVALID_INDEX, COMPILER_INVALID_INDEX,
+                               COMPILER_INVALID_INDEX, 0, callIndex);
+    }
+
     uint16_t parse_primary(uint32_t depth)
     {
         const Token token = current();
         if (token.kind == TokenKind::Integer) {
-            ++m_index;
+            ++(*m_index);
             int32_t value = 0;
             if (!parse_integer(m_source, token, false, &value, m_diagnostics)) return COMPILER_INVALID_INDEX;
             return make_constant(value, token.location);
         }
-        if (token.kind == TokenKind::Identifier) {
-            ++m_index;
-            const int32_t slot = find_local_text(token);
+        if (token_is_name(token)) {
+            const bool call = *m_index + 1U < m_tokenCount && m_tokens[*m_index + 1U].kind == TokenKind::LeftParen;
+            if (call) return parse_call(token, depth);
+            ++(*m_index);
+            const int32_t slot = find_variable(token);
             if (slot < 0) {
-                m_diagnostics.error_identifier(token.location, "unknown identifier ",
-                                               m_source + token.location.offset, token.length, "identifier");
+                if (is_context_parameter(token))
+                    m_diagnostics.error(token.location, "gx_app_context parameter is only valid as log context", "identifier");
+                else
+                    m_diagnostics.error_identifier(token.location, "unknown identifier ",
+                                                   m_source + token.location.offset, token.length, "identifier");
                 return COMPILER_INVALID_INDEX;
             }
-            if (!m_output->locals[slot].initialized) {
+            bool initialized = false;
+            for (uint32_t i = 0; i < m_output->integerParameterCount; ++i)
+                if (m_output->parameters[i].slot == static_cast<uint16_t>(slot)) initialized = m_output->parameters[i].initialized;
+            for (uint32_t i = 0; i < m_output->localCount; ++i)
+                if (m_output->locals[i].slot == static_cast<uint16_t>(slot)) initialized = m_output->locals[i].initialized;
+            if (!initialized) {
                 m_diagnostics.error(token.location, "local used before initialization", "identifier");
                 return COMPILER_INVALID_INDEX;
             }
@@ -671,7 +793,7 @@ private:
                 m_diagnostics.error(token.location, "expression nesting limit exceeded", "'('");
                 return COMPILER_INVALID_INDEX;
             }
-            ++m_index;
+            ++(*m_index);
             const uint16_t expression = parse_expression(depth + 1U);
             if (expression == COMPILER_INVALID_INDEX) return expression;
             if (!expect(TokenKind::RightParen, "expected ')' after expression")) return COMPILER_INVALID_INDEX;
@@ -684,31 +806,25 @@ private:
     bool evaluate_expression(uint16_t index, uint32_t depth, uint32_t* bits) const
     {
         if (!bits || index == COMPILER_INVALID_INDEX || index >= m_output->expressionCount ||
-            depth > COMPILER_MAX_EXPRESSION_NESTING + 2U) return false;
+            depth > COMPILER_MAX_EXPRESSION_NESTING + COMPILER_MAX_CALL_NESTING + 2U) return false;
         const Expression& expression = m_output->expressions[index];
         uint32_t left = 0, right = 0;
         if (expression.kind == ExpressionKind::Constant) {
             *bits = static_cast<uint32_t>(expression.value);
             return true;
         }
-        if (expression.kind == ExpressionKind::LoadLocal) return false;
+        if (expression.kind == ExpressionKind::LoadLocal || expression.kind == ExpressionKind::Call) return false;
         if (expression.kind == ExpressionKind::Negate)
             return evaluate_expression(expression.left, depth + 1U, bits) && (*bits = 0U - *bits, true);
         if (!evaluate_expression(expression.left, depth + 1U, &left)) return false;
         if (expression.kind == ExpressionKind::LogicalAnd) {
-            if (left == 0) {
-                *bits = 0;
-                return true;
-            }
+            if (left == 0) { *bits = 0; return true; }
             if (!evaluate_expression(expression.right, depth + 1U, &right)) return false;
             *bits = right != 0 ? 1U : 0U;
             return true;
         }
         if (expression.kind == ExpressionKind::LogicalOr) {
-            if (left != 0) {
-                *bits = 1U;
-                return true;
-            }
+            if (left != 0) { *bits = 1U; return true; }
             if (!evaluate_expression(expression.right, depth + 1U, &right)) return false;
             *bits = right != 0 ? 1U : 0U;
             return true;
@@ -756,17 +872,45 @@ private:
     const char* m_source;
     const Token* m_tokens;
     uint32_t m_tokenCount;
-    uint32_t m_index;
+    uint32_t* m_index;
     FunctionIR* m_output;
     Diagnostics& m_diagnostics;
     uint32_t m_returnCount;
-    Token m_parameterToken;
+    uint32_t m_callDepth;
+    Token m_nameToken;
+    Token m_contextToken;
 };
+
+static int32_t find_function(const TranslationUnitIR& unit, const char* name)
+{
+    for (uint32_t i = 0; i < unit.functionCount; ++i)
+        if (name_equals(unit.functionSymbols[i].name, name)) return static_cast<int32_t>(i);
+    return -1;
+}
+
+static bool visit_call_graph(const TranslationUnitIR& unit, uint16_t functionIndex,
+                             uint8_t* state, Diagnostics& diagnostics)
+{
+    if (!state || functionIndex >= unit.functionCount) return false;
+    if (state[functionIndex] == 1) {
+        diagnostics.error(unit.functions[functionIndex].location,
+                          "recursive function calls are not supported", "call-graph");
+        return false;
+    }
+    if (state[functionIndex] == 2) return true;
+    state[functionIndex] = 1;
+    for (uint32_t i = 0; i < unit.functionCount; ++i) {
+        if (unit.callGraph[functionIndex][i] &&
+            !visit_call_graph(unit, static_cast<uint16_t>(i), state, diagnostics)) return false;
+    }
+    state[functionIndex] = 2;
+    return true;
+}
 
 } // namespace
 
-bool parse_function(const char* source, const Token* tokens, uint32_t tokenCount,
-                    FunctionIR* output, Diagnostics& diagnostics)
+bool parse_translation_unit(const char* source, const Token* tokens, uint32_t tokenCount,
+                            TranslationUnitIR* output, Diagnostics& diagnostics)
 {
     if (!source || !tokens || !output || tokenCount == 0) {
         const SourceLocation location = {0, 1, 1};
@@ -774,10 +918,228 @@ bool parse_function(const char* source, const Token* tokens, uint32_t tokenCount
         return false;
     }
     *output = {};
-    output->returnExpression = COMPILER_INVALID_INDEX;
-    output->rootBlock = COMPILER_INVALID_INDEX;
-    Parser parser(source, tokens, tokenCount, output, diagnostics);
-    return parser.parse();
+    output->entryFunction = COMPILER_INVALID_INDEX;
+    for (uint32_t f = 0; f < COMPILER_MAX_FUNCTIONS; ++f) {
+        for (uint32_t c = 0; c < COMPILER_MAX_CALL_EXPRESSIONS; ++c) s_callSites[f][c] = {};
+        for (uint32_t a = 0; a < COMPILER_MAX_CALL_ARGUMENT_NODES; ++a) s_callArguments[f][a] = COMPILER_INVALID_INDEX;
+    }
+    uint32_t index = 0;
+    while (tokens[token_index_or_eof(index, tokenCount)].kind != TokenKind::EndOfFile) {
+        if (tokens[token_index_or_eof(index, tokenCount)].kind != TokenKind::KeywordInt) {
+            diagnostics.error(tokens[token_index_or_eof(index, tokenCount)].location,
+                              "expected function definition beginning with 'int'", "parser");
+            return false;
+        }
+        if (output->functionCount >= COMPILER_MAX_FUNCTIONS) {
+            diagnostics.error(tokens[index].location, "function capacity exceeded (maximum is 16)", "function");
+            return false;
+        }
+        FunctionIR& function = output->functions[output->functionCount];
+        function = {};
+        function.functionIndex = static_cast<uint16_t>(output->functionCount);
+        function.calls = s_callSites[output->functionCount];
+        function.callArguments = s_callArguments[output->functionCount];
+        function.returnExpression = COMPILER_INVALID_INDEX;
+        function.rootBlock = COMPILER_INVALID_INDEX;
+        function.codeLabel = COMPILER_INVALID_INDEX;
+
+        ++index;
+        const Token nameToken = tokens[token_index_or_eof(index, tokenCount)];
+        if (!token_is_name(nameToken) || (nameToken.kind == TokenKind::KeywordGxMain && output->entryFunction != COMPILER_INVALID_INDEX)) {
+            if (token_is_gx_main(nameToken) && output->entryFunction != COMPILER_INVALID_INDEX) {
+                diagnostics.error_identifier(nameToken.location, "duplicate function ",
+                                              source + nameToken.location.offset, nameToken.length, "function");
+            } else {
+                diagnostics.error(nameToken.location, "expected function identifier", "function");
+            }
+            return false;
+        }
+        function.location = nameToken.location;
+        for (uint32_t i = 0; i < output->functionCount; ++i) {
+            if (tokens[token_index_or_eof(index, tokenCount)].length == 0) break;
+            const FunctionSymbol& existing = output->functionSymbols[i];
+            uint32_t length = 0;
+            while (existing.name[length]) ++length;
+            bool same = length == nameToken.length;
+            for (uint32_t j = 0; same && j < length; ++j)
+                if (existing.name[j] != source[nameToken.location.offset + j]) same = false;
+            if (same) {
+                diagnostics.error_identifier(nameToken.location, "duplicate function ",
+                                              source + nameToken.location.offset, nameToken.length, "function");
+                return false;
+            }
+        }
+        for (uint32_t i = 0; i < nameToken.length; ++i) function.name[i] = source[nameToken.location.offset + i];
+        function.name[nameToken.length] = '\0';
+        FunctionSymbol& symbol = output->functionSymbols[output->functionCount];
+        symbol = {};
+        for (uint32_t i = 0; i < nameToken.length; ++i) symbol.name[i] = function.name[i];
+        symbol.name[nameToken.length] = '\0';
+        symbol.functionIndex = static_cast<uint16_t>(output->functionCount);
+        symbol.location = nameToken.location;
+        ++index;
+
+        if (tokens[token_index_or_eof(index, tokenCount)].kind != TokenKind::LeftParen) {
+            diagnostics.error(tokens[token_index_or_eof(index, tokenCount)].location,
+                              "expected '(' after function name", "function");
+            return false;
+        }
+        ++index;
+        FunctionParser parser(source, tokens, tokenCount, &index, &function, diagnostics);
+        parser.set_name_token(nameToken);
+        if (token_is_gx_main(nameToken)) {
+            const Token typeToken = tokens[token_index_or_eof(index, tokenCount)];
+            const bool legacyVoidPointer = typeToken.kind == TokenKind::KeywordVoid;
+            if (!legacyVoidPointer && typeToken.kind != TokenKind::KeywordGxAppContext) {
+                diagnostics.error(typeToken.location, "gx_main requires gx_app_context* parameter", "parameter");
+                return false;
+            }
+            ++index;
+            if (tokens[token_index_or_eof(index, tokenCount)].kind != TokenKind::Star) {
+                diagnostics.error(tokens[token_index_or_eof(index, tokenCount)].location,
+                                  "expected '*' in pointer parameter", "parameter");
+                return false;
+            }
+            ++index;
+            const Token parameter = tokens[token_index_or_eof(index, tokenCount)];
+            if (!token_is_name(parameter) || parameter.kind == TokenKind::KeywordGxMain) {
+                diagnostics.error(parameter.location, "expected parameter identifier", "parameter");
+                return false;
+            }
+            for (uint32_t i = 0; i < parameter.length; ++i) function.parameterName[i] = source[parameter.location.offset + i];
+            function.parameterName[parameter.length] = '\0';
+            function.parameters[0] = {};
+            for (uint32_t i = 0; i < parameter.length; ++i) function.parameters[0].name[i] = source[parameter.location.offset + i];
+            function.parameters[0].kind = ParameterKind::AppContextPointer;
+            function.parameters[0].slot = COMPILER_INVALID_INDEX;
+            function.parameters[0].initialized = true;
+            function.parameterCount = 1;
+            function.usesAppContext = true;
+            parser.set_context_token(parameter);
+            ++index;
+            if (tokens[token_index_or_eof(index, tokenCount)].kind != TokenKind::RightParen) {
+                diagnostics.error(tokens[token_index_or_eof(index, tokenCount)].location,
+                                  "gx_main accepts exactly one gx_app_context* parameter", "parameter");
+                return false;
+            }
+        } else {
+            uint32_t parameterIndex = 0;
+            if (tokens[token_index_or_eof(index, tokenCount)].kind != TokenKind::RightParen) {
+                while (true) {
+                    if (parameterIndex >= COMPILER_MAX_PARAMETERS) {
+                        diagnostics.error(tokens[token_index_or_eof(index, tokenCount)].location,
+                                          "function parameter limit exceeded (maximum is 4)", "parameter");
+                        return false;
+                    }
+                    if (tokens[token_index_or_eof(index, tokenCount)].kind != TokenKind::KeywordInt) {
+                        diagnostics.error(tokens[token_index_or_eof(index, tokenCount)].location,
+                                          "ordinary functions accept only int parameters", "parameter");
+                        return false;
+                    }
+                    ++index;
+                    const Token parameter = tokens[token_index_or_eof(index, tokenCount)];
+                    if (!token_is_name(parameter) || parameter.kind == TokenKind::KeywordGxMain) {
+                        diagnostics.error(parameter.location, "expected parameter identifier", "parameter");
+                        return false;
+                    }
+                    for (uint32_t i = 0; i < parameterIndex; ++i) {
+                        uint32_t length = 0;
+                        while (function.parameters[i].name[length]) ++length;
+                        bool same = length == parameter.length;
+                        for (uint32_t j = 0; same && j < length; ++j)
+                            if (function.parameters[i].name[j] != source[parameter.location.offset + j]) same = false;
+                        if (same) {
+                            diagnostics.error_identifier(parameter.location, "duplicate parameter ",
+                                                          source + parameter.location.offset, parameter.length, "parameter");
+                            return false;
+                        }
+                    }
+                    ParameterSymbol& parameterSymbol = function.parameters[parameterIndex];
+                    parameterSymbol = {};
+                    for (uint32_t i = 0; i < parameter.length; ++i) parameterSymbol.name[i] = source[parameter.location.offset + i];
+                    parameterSymbol.kind = ParameterKind::Integer;
+                    parameterSymbol.slot = static_cast<uint16_t>(parameterIndex);
+                    parameterSymbol.initialized = true;
+                    ++parameterIndex;
+                    ++index;
+                    if (tokens[token_index_or_eof(index, tokenCount)].kind != TokenKind::Comma) break;
+                    ++index;
+                }
+            }
+            function.parameterCount = static_cast<uint16_t>(parameterIndex);
+            function.integerParameterCount = static_cast<uint16_t>(parameterIndex);
+        }
+        symbol.parameterCount = function.parameterCount;
+        if (tokens[token_index_or_eof(index, tokenCount)].kind != TokenKind::RightParen) {
+            diagnostics.error(tokens[token_index_or_eof(index, tokenCount)].location,
+                              "expected ')' after parameter list", "parameter");
+            return false;
+        }
+        ++index;
+        if (!parser.parse_body()) return false;
+        if (token_is_gx_main(nameToken)) output->entryFunction = static_cast<uint16_t>(output->functionCount);
+        ++output->functionCount;
+    }
+
+    if (output->entryFunction == COMPILER_INVALID_INDEX) {
+        diagnostics.error(tokens[token_index_or_eof(index, tokenCount)].location,
+                          "missing gx_main entry function", "function");
+        return false;
+    }
+
+    for (uint32_t i = 0; i < output->functionCount; ++i) {
+        FunctionIR& function = output->functions[i];
+        for (uint32_t j = 0; j < function.callCount; ++j) {
+            CallSite& call = function.calls[j];
+            const int32_t callee = find_function(*output, call.calleeName);
+            if (callee < 0) {
+                diagnostics.error_identifier(call.location, "unknown function ", call.calleeName,
+                                              name_length(call.calleeName), "call");
+                return false;
+            }
+            if (static_cast<uint16_t>(callee) == output->entryFunction) {
+                diagnostics.error(call.location, "gx_main is not callable from source", "call");
+                return false;
+            }
+            const uint32_t expected = output->functions[callee].parameterCount;
+            if (expected != call.argumentCount) {
+                diagnostics.error_function_argument_count(call.location, call.calleeName,
+                                                          name_length(call.calleeName),
+                                                          expected, call.argumentCount);
+                return false;
+            }
+            call.calleeFunction = static_cast<uint16_t>(callee);
+            if (!output->callGraph[i][callee]) {
+                if (output->callGraphEdgeCount >= COMPILER_MAX_CALL_GRAPH_EDGES) {
+                    diagnostics.error(call.location, "call graph edge capacity exceeded", "call-graph");
+                    return false;
+                }
+                output->callGraph[i][callee] = true;
+                ++output->callGraphEdgeCount;
+            }
+        }
+    }
+    uint8_t state[COMPILER_MAX_FUNCTIONS] = {};
+    for (uint32_t i = 0; i < output->functionCount; ++i)
+        if (!visit_call_graph(*output, static_cast<uint16_t>(i), state, diagnostics)) return false;
+    return !diagnostics.has_error();
+}
+
+bool parse_function(const char* source, const Token* tokens, uint32_t tokenCount,
+                    FunctionIR* output, Diagnostics& diagnostics)
+{
+    if (!output) return false;
+    static TranslationUnitIR unit = {};
+    unit = {};
+    if (!parse_translation_unit(source, tokens, tokenCount, &unit, diagnostics)) return false;
+    if (unit.functionCount != 1) {
+        diagnostics.error(unit.functions[unit.entryFunction].location,
+                          "parse_function accepts only one function; use parse_translation_unit for multiple functions",
+                          "parser");
+        return false;
+    }
+    *output = unit.functions[0];
+    return true;
 }
 
 } // namespace compiler

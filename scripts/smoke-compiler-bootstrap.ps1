@@ -8,7 +8,8 @@ param(
     [switch]$Phase27H,
     [switch]$Phase27I,
     [switch]$Phase27J,
-    [switch]$Phase27K
+    [switch]$Phase27K,
+    [switch]$Phase27L
 )
 
 $ErrorActionPreference = "Stop"
@@ -18,6 +19,7 @@ if ($Phase27H) { $Phase27G = $true; $Phase27F = $true; $Phase27E = $true }
 if ($Phase27I) { $Phase27H = $true; $Phase27G = $true; $Phase27F = $true; $Phase27E = $true }
 if ($Phase27J) { $Phase27I = $true; $Phase27H = $true; $Phase27G = $true; $Phase27F = $true; $Phase27E = $true }
 if ($Phase27K) { $Phase27J = $true; $Phase27I = $true; $Phase27H = $true; $Phase27G = $true; $Phase27F = $true; $Phase27E = $true }
+if ($Phase27L) { $Phase27K = $true; $Phase27J = $true; $Phase27I = $true; $Phase27H = $true; $Phase27G = $true; $Phase27F = $true; $Phase27E = $true }
 $root = Split-Path -Parent $PSScriptRoot
 $kernelDirectory = Join-Path $root "kernel"
 $espDirectory = Join-Path $root "ESP"
@@ -30,6 +32,7 @@ $phase27hFixtureDirectory = Join-Path $root "scripts/fixtures/phase27h"
 $phase27iFixtureDirectory = Join-Path $root "scripts/fixtures/phase27i"
 $phase27jFixtureDirectory = Join-Path $root "scripts/fixtures/phase27j"
 $phase27kFixtureDirectory = Join-Path $root "scripts/fixtures/phase27k"
+$phase27lFixtureDirectory = Join-Path $root "scripts/fixtures/phase27l"
 $developerStudioRoot = Join-Path (Split-Path -Parent $root) "guideXOS_Developer_Studio"
 $phase27eAppDirectory = Join-Path $root "Apps/DS27E"
 $phase27fAppDirectory = Join-Path $root "Apps/DS27F"
@@ -38,6 +41,7 @@ $phase27hAppDirectory = Join-Path $root "Apps/DS27H"
 $phase27iAppDirectory = Join-Path $root "Apps/DS27I"
 $phase27jAppDirectory = Join-Path $root "Apps/DS27J"
 $phase27kAppDirectory = Join-Path $root "Apps/DS27K"
+$phase27lAppDirectory = Join-Path $root "Apps/DS27L"
 $qemuPath = "C:\Program Files\qemu\qemu-system-x86_64.exe"
 $ovmfCodePath = Join-Path $root "OVMF.fd"
 $tempDirectory = Join-Path ([System.IO.Path]::GetTempPath()) ("guidexos-phase27d-" + [guid]::NewGuid().ToString("N"))
@@ -145,6 +149,23 @@ function Stage-Phase27KProject([string]$target) {
         "k27host_continue.c", "k27host_break.c", "k27break_outside.c", "k27continue_outside.c",
         "k27invalid_break.c", "k27invalid_continue.c", "k27missing_break_return.c",
         "k27missing_continue_return.c", "k27capacity.c")) {
+        Move-Item (Join-Path $target $sourceName) (Join-Path $testDirectory $sourceName) -Force
+    }
+    New-Item -ItemType Directory -Force -Path (Join-Path $target "out") | Out-Null
+}
+
+function Stage-Phase27LProject([string]$target) {
+    if (Test-Path -LiteralPath $target) {
+        Remove-Item -LiteralPath $target -Recurse -Force
+    }
+    Copy-Item $phase27lFixtureDirectory $target -Recurse -Force
+    $testDirectory = Join-Path $target "tests"
+    New-Item -ItemType Directory -Force -Path $testDirectory | Out-Null
+    foreach ($sourceName in @(
+        "l27zero.c", "l27one.c", "l27multi.c", "l27four.c", "l27nested.c", "l27expr.c",
+        "l27condition.c", "l27loop.c", "l27if.c", "l27control.c", "l27forward.c", "l27backward.c",
+        "l27isolation.c", "l27param.c", "l27entry.c", "l27missing.c", "l27duplicate_param.c",
+        "l27duplicate_function.c", "l27param_limit.c", "l27arg_count.c", "l27unknown.c", "l27recursion.c")) {
         Move-Item (Join-Path $target $sourceName) (Join-Path $testDirectory $sourceName) -Force
     }
     New-Item -ItemType Directory -Force -Path (Join-Path $target "out") | Out-Null
@@ -373,11 +394,46 @@ function Invoke-QemuProofBoot([int]$runNumber, [string]$qemu) {
                 "ELF Loader: Phase 27K break/continue smoke PASS"
             )
         }
+        if ($Phase27L) {
+            $requiredMarkers += @(
+                "phase27l_zero_arg_function=PASS",
+                "phase27l_one_arg_function=PASS",
+                "phase27l_multi_arg_function=PASS",
+                "phase27l_four_arg_function=PASS",
+                "phase27l_nested_calls=PASS",
+                "phase27l_call_expression=PASS",
+                "phase27l_call_condition=PASS",
+                "phase27l_function_with_loop=PASS",
+                "phase27l_function_with_if=PASS",
+                "phase27l_function_loop_control=PASS",
+                "phase27l_forward_call=PASS",
+                "phase27l_backward_call=PASS",
+                "phase27l_call_opcode=PASS",
+                "phase27l_local_isolation=PASS",
+                "phase27l_parameter_isolation=PASS",
+                "phase27l_function_missing_return=PASS",
+                "phase27l_duplicate_parameter=PASS",
+                "phase27l_duplicate_function=PASS",
+                "phase27l_parameter_limit=PASS",
+                "phase27l_argument_count=PASS",
+                "phase27l_unknown_function=PASS",
+                "phase27l_recursion_rejected=PASS",
+                "phase27l_gx_main_entry=PASS",
+                "phase27l_host_integration=PASS",
+                "phase27l_ide_program=PASS",
+                "phase27l_source_edit=PASS",
+                "phase27l_failure_recovery=PASS",
+                "phase27l_deterministic=PASS",
+                "phase27l_kernel_survival=PASS",
+                "phase27l=PASS",
+                "ELF Loader: Phase 27L user functions smoke PASS"
+            )
+        }
         $missingMarkers = @($requiredMarkers | Where-Object { $serial -notmatch [regex]::Escape($_) })
         if ($missingMarkers.Count -ne 0) {
-            Write-Host "QEMU boot $runNumber missed required Phase 27B-27K markers: $($missingMarkers -join ', ')" -ForegroundColor Red
+            Write-Host "QEMU boot $runNumber missed required Phase 27B-27L markers: $($missingMarkers -join ', ')" -ForegroundColor Red
             if ($Phase27E -or $Phase27F) {
-                $serial -split "`r?`n" | Where-Object { $_ -match "phase27e|phase27f|phase27g|phase27h|phase27i|phase27j|phase27k|Phase 27E|Phase 27F|Phase 27G|Phase 27H|Phase 27I|Phase 27J|Phase 27K" } | ForEach-Object { Write-Host $_ }
+                $serial -split "`r?`n" | Where-Object { $_ -match "phase27e|phase27f|phase27g|phase27h|phase27i|phase27j|phase27k|phase27l|Phase 27E|Phase 27F|Phase 27G|Phase 27H|Phase 27I|Phase 27J|Phase 27K|Phase 27L" } | ForEach-Object { Write-Host $_ }
             }
             if ($serial) { Write-Host $serial }
             if ($stderr) { Write-Host $stderr }
@@ -387,7 +443,7 @@ function Invoke-QemuProofBoot([int]$runNumber, [string]$qemu) {
         Write-Host "--- QEMU bare-metal compiler proof boot $runNumber ---" -ForegroundColor Cyan
         $serial -split "`r?`n" |
             Where-Object { $_ -notmatch "NativeElf: artifact_hex=" -and
-                           $_ -match "Compiler:|ELF Loader:|NativeElf:|phase27c|phase27d|phase27e|phase27f|phase27g|phase27h|phase27i|phase27j|^error:" } |
+                           $_ -match "Compiler:|ELF Loader:|NativeElf:|phase27c|phase27d|phase27e|phase27f|phase27g|phase27h|phase27i|phase27j|phase27k|phase27l|^error:" } |
             ForEach-Object { Write-Host $_ }
     }
     finally {
@@ -466,6 +522,13 @@ try {
         & powershell -ExecutionPolicy Bypass -File (Join-Path $developerStudioRoot "scripts/build-phase27k.ps1") -ServerRoot $root
         if ($LASTEXITCODE -ne 0) { throw "Developer Studio Phase 27K proof app build failed" }
     }
+    if ($Phase27L) {
+        if (!(Test-Path (Join-Path $developerStudioRoot "scripts/build-phase27l.ps1"))) {
+            throw "Developer Studio Phase 27L build script is missing: $developerStudioRoot"
+        }
+        & powershell -ExecutionPolicy Bypass -File (Join-Path $developerStudioRoot "scripts/build-phase27l.ps1") -ServerRoot $root
+        if ($LASTEXITCODE -ne 0) { throw "Developer Studio Phase 27L proof app build failed" }
+    }
     $env:EXTRA_CFLAGS = "-DGXOS_COMPILER_BOOTSTRAP_SMOKE_ACTIVE"
     if ($Phase27E -or $Phase27F) { $env:EXTRA_CFLAGS += " -DGXOS_PHASE27E_SMOKE" }
     if ($Phase27F) { $env:EXTRA_CFLAGS += " -DGXOS_PHASE27F_SMOKE" }
@@ -474,6 +537,7 @@ try {
     if ($Phase27I) { $env:EXTRA_CFLAGS += " -DGXOS_PHASE27I_SMOKE" }
     if ($Phase27J) { $env:EXTRA_CFLAGS += " -DGXOS_PHASE27J_SMOKE" }
     if ($Phase27K) { $env:EXTRA_CFLAGS += " -DGXOS_PHASE27K_SMOKE" }
+    if ($Phase27L) { $env:EXTRA_CFLAGS += " -DGXOS_PHASE27L_SMOKE" }
     Push-Location $kernelDirectory
     try {
         Remove-Item -Force -ErrorAction SilentlyContinue (Join-Path $kernelDirectory "build/amd64/obj/core/main.o")
@@ -507,11 +571,13 @@ try {
         "i27and11.c", "i27and10.c", "i27and01.c", "i27and00.c", "i27or11.c", "i27or10.c", "i27or01.c", "i27or00.c", "i27canonicaland.c", "i27canonicalor.c", "i27preca.c", "i27precb.c", "i27precc.c", "i27andif.c", "i27orif.c", "i27mixed.c", "i27nested.c", "i27assign.c", "i27shortand.c", "i27shortor.c", "i27invalid.c", "i27singleand.c", "i27singleor.c",
         "j27basic.c", "j27sum.c", "j27zero.c", "j27reeval.c", "j27logical.c", "j27logical_or.c", "j27ifwhile.c", "j27whileif.c", "j27nested.c", "j27bodydecl.c", "j27calls.c", "j27runtime1.c", "j27runtime2.c", "j27return.c", "j27invalid_empty.c", "j27invalid_relational.c", "j27missing.c",
         "k27basic.c", "k27continue.c", "k27break_if.c", "k27continue_if.c", "k27combined.c", "k27skip_tail.c", "k27break_tail.c", "k27nested_break.c", "k27nested_continue.c", "k27host_continue.c", "k27host_break.c", "k27break_outside.c", "k27continue_outside.c", "k27invalid_break.c", "k27invalid_continue.c", "k27missing_break_return.c", "k27missing_continue_return.c", "k27capacity.c",
+        "l27zero.c", "l27one.c", "l27multi.c", "l27four.c", "l27nested.c", "l27expr.c", "l27condition.c", "l27loop.c", "l27if.c", "l27control.c", "l27forward.c", "l27backward.c", "l27isolation.c", "l27param.c", "l27entry.c", "l27missing.c", "l27duplicate_param.c", "l27duplicate_function.c", "l27param_limit.c", "l27arg_count.c", "l27unknown.c", "l27recursion.c",
         "g27expr.elf", "g27local.elf", "g27assn.elf", "g27preca.elf", "g27precb.elf", "g27unary.elf", "g27logs.elf", "g27unknown.elf", "g27duplicate.elf", "g27deta.elf", "g27detb.elf", "g27reco.elf",
         "h27eq.elf", "h27eqfalse.elf", "h27cmp.elf", "h27if.elf", "h27suppress.elf", "h27ifelse.elf", "h27else.elf", "h27nested.elf", "h27truthy.elf", "h27falsy.elf", "h27assign.elf", "h27missing.elf", "h27invalid.elf", "h27deta.elf", "h27detb.elf", "h27reco.elf",
         "i27and11.elf", "i27and10.elf", "i27and01.elf", "i27and00.elf", "i27or11.elf", "i27or10.elf", "i27or01.elf", "i27or00.elf", "i27canonicaland.elf", "i27canonicalor.elf", "i27preca.elf", "i27precb.elf", "i27precc.elf", "i27andif.elf", "i27orif.elf", "i27mixed.elf", "i27nested.elf", "i27assign.elf", "i27shortand.elf", "i27shortor.elf", "i27invalid.elf", "i27singleand.elf", "i27singleor.elf", "i27and.elf", "i27or.elf", "deta.elf", "detb.elf",
         "j27basic.elf", "j27sum.elf", "j27zero.elf", "j27reeval.elf", "j27logical.elf", "j27logical_or.elf", "j27ifwhile.elf", "j27whileif.elf", "j27nested.elf", "j27bodydecl.elf", "j27calls.elf", "j27runtime1.elf", "j27runtime2.elf", "j27return.elf", "j27invalid_empty.elf", "j27invalid_relational.elf", "j27missing.elf", "j27deta.elf", "j27detb.elf", "j27reco.elf",
         "k27basic.elf", "k27cont.elf", "k27continue.elf", "k27break.elf", "k27combined.elf", "k27deta.elf", "k27detb.elf",
+        "l27primary.elf", "l27deta.elf", "l27detb.elf",
         "kernel.elf", "EFI/BOOT/BOOTX64.EFI", "NvVars"
     )
     foreach ($relativePath in $managedFiles) {
@@ -600,6 +666,17 @@ try {
             }
         }
     }
+    if ($Phase27L) {
+        foreach ($relativeDirectory in @("P27L", "Apps/DS27L")) {
+            $target = Join-Path $espDirectory $relativeDirectory
+            if (Test-Path $target -PathType Leaf) { throw "ESP target is a file: $target" }
+            if (Test-Path $target -PathType Container) {
+                $backup = Join-Path $tempDirectory ("backup-directory-" + ($relativeDirectory -replace '[/\\]', '-'))
+                Copy-Item $target $backup -Recurse -Force
+                $directoryBackups[$relativeDirectory] = $backup
+            }
+        }
+    }
     New-Item -ItemType Directory -Force -Path (Join-Path $espDirectory "EFI/BOOT") | Out-Null
     Copy-Item (Join-Path $fixtureDirectory "r42.c") (Join-Path $espDirectory "r42.c") -Force
     Copy-Item (Join-Path $fixtureDirectory "r41.c") (Join-Path $espDirectory "r41.c") -Force
@@ -675,6 +752,14 @@ try {
             throw "Phase 27K project fixture was not staged into ESP"
         }
     }
+    if ($Phase27L) {
+        Stage-Phase27LProject (Join-Path $espDirectory "P27L")
+        Copy-Item $phase27lAppDirectory (Join-Path $espDirectory "Apps/DS27L") -Recurse -Force
+        if (!(Test-Path -LiteralPath (Join-Path $espDirectory "P27L/guidexos.project") -PathType Leaf) -or
+            !(Test-Path -LiteralPath (Join-Path $espDirectory "P27L/src/main.cpp") -PathType Leaf)) {
+            throw "Phase 27L project fixture was not staged into ESP"
+        }
+    }
 
     # Each boot receives a clean guest output namespace. The compiler itself
     # creates/replaces these files through guideXOS VFS path-level operations.
@@ -686,7 +771,8 @@ try {
         "h27eq.elf", "h27eqfalse.elf", "h27cmp.elf", "h27if.elf", "h27suppress.elf", "h27ifelse.elf", "h27else.elf", "h27nested.elf", "h27truthy.elf", "h27falsy.elf", "h27assign.elf", "h27missing.elf", "h27invalid.elf", "h27deta.elf", "h27detb.elf", "h27reco.elf",
         "i27and11.elf", "i27and10.elf", "i27and01.elf", "i27and00.elf", "i27or11.elf", "i27or10.elf", "i27or01.elf", "i27or00.elf", "i27canonicaland.elf", "i27canonicalor.elf", "i27preca.elf", "i27precb.elf", "i27precc.elf", "i27andif.elf", "i27orif.elf", "i27mixed.elf", "i27nested.elf", "i27assign.elf", "i27shortand.elf", "i27shortor.elf", "i27invalid.elf", "i27singleand.elf", "i27singleor.elf", "i27and.elf", "i27or.elf", "deta.elf", "detb.elf",
         "j27basic.elf", "j27sum.elf", "j27zero.elf", "j27reeval.elf", "j27logical.elf", "j27logical_or.elf", "j27ifwhile.elf", "j27whileif.elf", "j27nested.elf", "j27bodydecl.elf", "j27calls.elf", "j27runtime1.elf", "j27runtime2.elf", "j27return.elf", "j27invalid_empty.elf", "j27invalid_relational.elf", "j27missing.elf", "j27deta.elf", "j27detb.elf", "j27reco.elf",
-        "k27basic.elf", "k27cont.elf", "k27continue.elf", "k27break.elf", "k27combined.elf", "k27deta.elf", "k27detb.elf")) {
+        "k27basic.elf", "k27cont.elf", "k27continue.elf", "k27break.elf", "k27combined.elf", "k27deta.elf", "k27detb.elf",
+        "l27primary.elf", "l27deta.elf", "l27detb.elf")) {
         $target = Join-Path $espDirectory $relativePath
         if (Test-Path $target) { Remove-Item -LiteralPath $target -Force }
     }
@@ -722,6 +808,15 @@ try {
                     Copy-Item (Join-Path $phase27kFixtureDirectory $sourceName) (Join-Path $espDirectory $sourceName) -Force
                 }
             }
+            if ($Phase27L) {
+                foreach ($sourceName in @(
+                    "l27zero.c", "l27one.c", "l27multi.c", "l27four.c", "l27nested.c", "l27expr.c",
+                    "l27condition.c", "l27loop.c", "l27if.c", "l27control.c", "l27forward.c", "l27backward.c",
+                    "l27isolation.c", "l27param.c", "l27entry.c", "l27missing.c", "l27duplicate_param.c",
+                    "l27duplicate_function.c", "l27param_limit.c", "l27arg_count.c", "l27unknown.c", "l27recursion.c")) {
+                    Copy-Item (Join-Path $phase27lFixtureDirectory $sourceName) (Join-Path $espDirectory $sourceName) -Force
+                }
+            }
             foreach ($relativePath in @(
                 "r42.elf", "r42b.elf", "r41.elf", "bad.elf",
                 "p27magic.elf", "p27arch.elf", "p27entry.elf", "p27out.elf", "p27trunc.elf",
@@ -730,7 +825,8 @@ try {
                 "h27eq.elf", "h27eqfalse.elf", "h27cmp.elf", "h27if.elf", "h27suppress.elf", "h27ifelse.elf", "h27else.elf", "h27nested.elf", "h27truthy.elf", "h27falsy.elf", "h27assign.elf", "h27missing.elf", "h27invalid.elf", "h27deta.elf", "h27detb.elf", "h27reco.elf",
                 "i27and11.elf", "i27and10.elf", "i27and01.elf", "i27and00.elf", "i27or11.elf", "i27or10.elf", "i27or01.elf", "i27or00.elf", "i27canonicaland.elf", "i27canonicalor.elf", "i27preca.elf", "i27precb.elf", "i27precc.elf", "i27andif.elf", "i27orif.elf", "i27mixed.elf", "i27nested.elf", "i27assign.elf", "i27shortand.elf", "i27shortor.elf", "i27invalid.elf", "i27singleand.elf", "i27singleor.elf", "i27and.elf", "i27or.elf", "deta.elf", "detb.elf",
                 "j27basic.elf", "j27sum.elf", "j27zero.elf", "j27reeval.elf", "j27logical.elf", "j27logical_or.elf", "j27ifwhile.elf", "j27whileif.elf", "j27nested.elf", "j27bodydecl.elf", "j27calls.elf", "j27runtime1.elf", "j27runtime2.elf", "j27return.elf", "j27invalid_empty.elf", "j27invalid_relational.elf", "j27missing.elf", "j27deta.elf", "j27detb.elf", "j27reco.elf",
-                "k27basic.elf", "k27cont.elf", "k27continue.elf", "k27break.elf", "k27combined.elf", "k27deta.elf", "k27detb.elf")) {
+                "k27basic.elf", "k27cont.elf", "k27continue.elf", "k27break.elf", "k27combined.elf", "k27deta.elf", "k27detb.elf",
+                "l27primary.elf", "l27deta.elf", "l27detb.elf")) {
                 $target = Join-Path $espDirectory $relativePath
                 if (Test-Path $target) { Remove-Item -LiteralPath $target -Force }
             }
@@ -770,6 +866,11 @@ try {
             if (Test-Path $projectTarget) { Remove-Item $projectTarget -Recurse -Force }
             Stage-Phase27KProject $projectTarget
         }
+        if ($Phase27L -and $run -gt 1) {
+            $projectTarget = Join-Path $espDirectory "P27L"
+            if (Test-Path $projectTarget) { Remove-Item $projectTarget -Recurse -Force }
+            Stage-Phase27LProject $projectTarget
+        }
         # Every QEMU invocation gets its own disposable directory-backed FAT
         # image. Guest writes must not become the input state of the next
         # requested fresh boot.
@@ -802,6 +903,9 @@ try {
         Export-SerialArtifact $finalSerial "k27break" (Join-Path $evidenceDirectory "k27break.elf")
         Export-SerialArtifact $finalSerial "k27continue" (Join-Path $evidenceDirectory "k27continue.elf")
         Export-SerialArtifact $finalSerial "k27combined" (Join-Path $evidenceDirectory "k27combined.elf")
+    }
+    if ($Phase27L) {
+        Export-SerialArtifact $finalSerial "l27primary" (Join-Path $evidenceDirectory "l27primary.elf")
     }
 
     $readelf = Get-RequiredTool "readelf" ""
@@ -855,7 +959,16 @@ try {
                                 --start-address=0x10001000 --stop-address=0x10001600 (Join-Path $evidenceDirectory $artifact)
                             if ($LASTEXITCODE -ne 0) { throw "external Phase 27K ELF inspection failed: $artifact" }
                         }
-                        Write-Host "Phase 27B/27C/27D/27E/27F/27G/27H/27I/27J/27K QEMU proof completed across $BootCount fresh boot(s)." -ForegroundColor Green
+                        if ($Phase27L) {
+                            Write-Host "--- external audit of guest-generated l27primary.elf ---" -ForegroundColor Cyan
+                            & $readelf -h -l (Join-Path $evidenceDirectory "l27primary.elf")
+                            & $objdump -D -Mintel -b binary -m i386:x86-64 --adjust-vma=0x10000000 `
+                                --start-address=0x10001000 --stop-address=0x10001600 (Join-Path $evidenceDirectory "l27primary.elf")
+                            if ($LASTEXITCODE -ne 0) { throw "external Phase 27L ELF inspection failed" }
+                            Write-Host "Phase 27B/27C/27D/27E/27F/27G/27H/27I/27J/27K/27L QEMU proof completed across $BootCount fresh boot(s)." -ForegroundColor Green
+                        } else {
+                            Write-Host "Phase 27B/27C/27D/27E/27F/27G/27H/27I/27J/27K QEMU proof completed across $BootCount fresh boot(s)." -ForegroundColor Green
+                        }
                     } else {
                         Write-Host "Phase 27B/27C/27D/27E/27F/27G/27H/27I/27J QEMU proof completed across $BootCount fresh boot(s)." -ForegroundColor Green
                     }
@@ -892,6 +1005,8 @@ finally {
         "i27and11.c", "i27and10.c", "i27and01.c", "i27and00.c", "i27or11.c", "i27or10.c", "i27or01.c", "i27or00.c", "i27canonicaland.c", "i27canonicalor.c", "i27preca.c", "i27precb.c", "i27precc.c", "i27andif.c", "i27orif.c", "i27mixed.c", "i27nested.c", "i27assign.c", "i27shortand.c", "i27shortor.c", "i27invalid.c", "i27singleand.c", "i27singleor.c",
         "j27basic.c", "j27sum.c", "j27zero.c", "j27reeval.c", "j27logical.c", "j27logical_or.c", "j27ifwhile.c", "j27whileif.c", "j27nested.c", "j27bodydecl.c", "j27calls.c", "j27runtime1.c", "j27runtime2.c", "j27return.c", "j27invalid_empty.c", "j27invalid_relational.c", "j27missing.c",
         "k27basic.c", "k27continue.c", "k27break_if.c", "k27continue_if.c", "k27combined.c", "k27skip_tail.c", "k27break_tail.c", "k27nested_break.c", "k27nested_continue.c", "k27host_continue.c", "k27host_break.c", "k27break_outside.c", "k27continue_outside.c", "k27invalid_break.c", "k27invalid_continue.c", "k27missing_break_return.c", "k27missing_continue_return.c", "k27capacity.c",
+        "l27zero.c", "l27one.c", "l27multi.c", "l27four.c", "l27nested.c", "l27expr.c", "l27condition.c", "l27loop.c", "l27if.c", "l27control.c", "l27forward.c", "l27backward.c", "l27isolation.c", "l27param.c", "l27entry.c", "l27missing.c", "l27duplicate_param.c", "l27duplicate_function.c", "l27param_limit.c", "l27arg_count.c", "l27unknown.c", "l27recursion.c",
+        "l27primary.elf", "l27deta.elf", "l27detb.elf",
         "g27expr.elf", "g27local.elf", "g27assn.elf", "g27preca.elf", "g27precb.elf", "g27unary.elf", "g27logs.elf", "g27unknown.elf", "g27duplicate.elf", "g27deta.elf", "g27detb.elf", "g27reco.elf",
         "h27eq.elf", "h27eqfalse.elf", "h27cmp.elf", "h27if.elf", "h27suppress.elf", "h27ifelse.elf", "h27else.elf", "h27nested.elf", "h27truthy.elf", "h27falsy.elf", "h27assign.elf", "h27missing.elf", "h27invalid.elf", "h27deta.elf", "h27detb.elf", "h27reco.elf",
         "i27and11.elf", "i27and10.elf", "i27and01.elf", "i27and00.elf", "i27or11.elf", "i27or10.elf", "i27or01.elf", "i27or00.elf", "i27canonicaland.elf", "i27canonicalor.elf", "i27preca.elf", "i27precb.elf", "i27precc.elf", "i27andif.elf", "i27orif.elf", "i27mixed.elf", "i27nested.elf", "i27assign.elf", "i27shortand.elf", "i27shortor.elf", "i27invalid.elf", "i27singleand.elf", "i27singleor.elf", "i27and.elf", "i27or.elf", "deta.elf", "detb.elf",
@@ -980,6 +1095,18 @@ finally {
     }
     if ($Phase27K) {
         foreach ($relativeDirectory in @("P27K", "Apps/DS27K")) {
+            $target = Join-Path $espDirectory $relativeDirectory
+            if (Test-Path -LiteralPath $target -PathType Container) {
+                Remove-Item -LiteralPath $target -Recurse -Force -ErrorAction SilentlyContinue
+            }
+            if ($directoryBackups.ContainsKey($relativeDirectory)) {
+                New-Item -ItemType Directory -Force -Path (Split-Path -Parent $target) | Out-Null
+                Copy-Item $directoryBackups[$relativeDirectory] $target -Recurse -Force
+            }
+        }
+    }
+    if ($Phase27L) {
+        foreach ($relativeDirectory in @("P27L", "Apps/DS27L")) {
             $target = Join-Path $espDirectory $relativeDirectory
             if (Test-Path -LiteralPath $target -PathType Container) {
                 Remove-Item -LiteralPath $target -Recurse -Force -ErrorAction SilentlyContinue

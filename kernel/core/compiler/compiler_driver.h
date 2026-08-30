@@ -12,7 +12,7 @@ namespace kernel {
 namespace compiler {
 
 static const uint32_t COMPILER_MAX_SOURCE_BYTES = 64 * 1024;
-static const uint32_t COMPILER_MAX_OUTPUT_BYTES = 12288;
+static const uint32_t COMPILER_MAX_OUTPUT_BYTES = 32768;
 static const uint32_t COMPILER_MAX_DATA_BYTES = COMPILER_MAX_TOTAL_STRING_DATA;
 static const uint32_t COMPILER_MAX_DIAGNOSTIC_TOKEN_BYTES = 32;
 
@@ -28,6 +28,8 @@ struct CompileSummary {
     bool hasHostLog;
     uint32_t sourceBytes;
     uint32_t tokenCount;
+    uint32_t functionCount;
+    uint32_t entryCodeOffset;
     bool returnConstantValid;
     int32_t returnConstant;
     uint32_t codeBytes;

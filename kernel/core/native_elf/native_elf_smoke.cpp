@@ -15,7 +15,7 @@ namespace native_elf {
 namespace {
 
 static uint8_t s_invalidImage[guidexos::native_elf::MAX_ELF_FILE_BYTES];
-#if defined(GXOS_PHASE27G_SMOKE) || defined(GXOS_PHASE27H_SMOKE) || defined(GXOS_PHASE27I_SMOKE) || defined(GXOS_PHASE27J_SMOKE) || defined(GXOS_PHASE27K_SMOKE)
+#if defined(GXOS_PHASE27G_SMOKE) || defined(GXOS_PHASE27H_SMOKE) || defined(GXOS_PHASE27I_SMOKE) || defined(GXOS_PHASE27J_SMOKE) || defined(GXOS_PHASE27K_SMOKE) || defined(GXOS_PHASE27L_SMOKE)
 static uint8_t s_compareImage[guidexos::native_elf::MAX_ELF_FILE_BYTES];
 #endif
 
@@ -87,7 +87,7 @@ static bool emit_serial_artifact(const char* path, const char* name)
     return true;
 }
 
-#if defined(GXOS_PHASE27G_SMOKE) || defined(GXOS_PHASE27H_SMOKE) || defined(GXOS_PHASE27I_SMOKE) || defined(GXOS_PHASE27J_SMOKE) || defined(GXOS_PHASE27K_SMOKE)
+#if defined(GXOS_PHASE27G_SMOKE) || defined(GXOS_PHASE27H_SMOKE) || defined(GXOS_PHASE27I_SMOKE) || defined(GXOS_PHASE27J_SMOKE) || defined(GXOS_PHASE27K_SMOKE) || defined(GXOS_PHASE27L_SMOKE)
 static bool same_vfs_file_bytes(const char* leftPath, const char* rightPath)
 {
     vfs::FileInfo left = {};
@@ -192,6 +192,49 @@ static bool has_forward_unconditional_branch(const compiler::CompileSummary& sum
             if (displacementOut) *displacementOut = displacement;
             return true;
         }
+    }
+    return false;
+}
+
+static bool has_direct_call(const compiler::CompileSummary& summary,
+                            bool* hasForward, bool* hasBackward)
+{
+    if (!hasForward || !hasBackward) return false;
+    *hasForward = false;
+    *hasBackward = false;
+    for (uint32_t i = 0; i + 5U <= summary.codeBytes; ++i) {
+        if (summary.code[i] != 0xE8) continue;
+        const int32_t displacement =
+            static_cast<int32_t>(static_cast<uint32_t>(summary.code[i + 1]) |
+                                 (static_cast<uint32_t>(summary.code[i + 2]) << 8) |
+                                 (static_cast<uint32_t>(summary.code[i + 3]) << 16) |
+                                 (static_cast<uint32_t>(summary.code[i + 4]) << 24));
+        const int64_t target = static_cast<int64_t>(i + 5U) + displacement;
+        if (target < 0 || target >= static_cast<int64_t>(summary.codeBytes)) return false;
+        if (displacement > 0) *hasForward = true;
+        if (displacement < 0) *hasBackward = true;
+    }
+    return *hasForward || *hasBackward;
+}
+
+static bool contains_text(const char* text, const char* needle)
+{
+    if (!text || !needle) return false;
+    for (uint32_t i = 0; text[i]; ++i) {
+        uint32_t j = 0;
+        while (needle[j] && text[i + j] == needle[j]) ++j;
+        if (!needle[j]) return true;
+    }
+    return needle[0] == '\0';
+}
+
+static bool summary_diagnostic_contains(const compiler::CompileSummary& summary,
+                                        const char* needle)
+{
+    if (!needle) return false;
+    for (uint32_t i = 0; i < summary.diagnosticCount; ++i) {
+        const char* message = summary.diagnostics[i].message;
+        if (contains_text(message, needle)) return true;
     }
     return false;
 }
@@ -1087,6 +1130,146 @@ void run_bootstrap_execution_smoke()
     serial::puts(phase27kPassed ? "ELF Loader: Phase 27K break/continue smoke PASS\n"
                                 : "ELF Loader: Phase 27K break/continue smoke FAIL\n");
 }
+#endif
+#if defined(GXOS_PHASE27L_SMOKE)
+    serial::puts("ELF Loader: Phase 27L user functions and direct calls smoke begin\n");
+    const char* l27PrimaryArtifact = "/P27L/out/primary.elf";
+    static compiler::CompileSummary lSummary = {};
+    static compiler::CompileSummary lAgain = {};
+    static compiler::CompileSummary lEntry = {};
+    static compiler::CompileSummary lNegative = {};
+    static NativeElfRunReport lHostReport = {};
+    const auto runFixture = [&](const char* sourcePath, int32_t expected) {
+        return reset_vfs_file(l27PrimaryArtifact) &&
+            compiler::compile(sourcePath, l27PrimaryArtifact, &lSummary) &&
+            run_expected(l27PrimaryArtifact, expected);
+    };
+
+    const bool zeroArg = runFixture("/P27L/tests/l27zero.c", 42);
+    print_marker("phase27l_zero_arg_function", zeroArg);
+    const bool oneArg = runFixture("/P27L/tests/l27one.c", 42);
+    print_marker("phase27l_one_arg_function", oneArg);
+    const bool multiArg = runFixture("/P27L/tests/l27multi.c", 42);
+    print_marker("phase27l_multi_arg_function", multiArg);
+    const bool fourArg = runFixture("/P27L/tests/l27four.c", 42);
+    print_marker("phase27l_four_arg_function", fourArg);
+
+    bool nestedForward = false;
+    bool nestedBackward = false;
+    const bool nestedCalls = runFixture("/P27L/tests/l27nested.c", 42) &&
+        has_direct_call(lSummary, &nestedForward, &nestedBackward);
+    print_marker("phase27l_nested_calls", nestedCalls);
+    print_marker("phase27l_call_opcode", nestedCalls);
+    const bool callExpression = runFixture("/P27L/tests/l27expr.c", 42);
+    print_marker("phase27l_call_expression", callExpression);
+    const bool callCondition = runFixture("/P27L/tests/l27condition.c", 42);
+    print_marker("phase27l_call_condition", callCondition);
+    const bool functionLoop = runFixture("/P27L/tests/l27loop.c", 42);
+    print_marker("phase27l_function_with_loop", functionLoop);
+    const bool functionIf = runFixture("/P27L/tests/l27if.c", 42);
+    print_marker("phase27l_function_with_if", functionIf);
+    const bool functionControl = runFixture("/P27L/tests/l27control.c", 42);
+    print_marker("phase27l_function_loop_control", functionControl);
+
+    const bool forwardCall = runFixture("/P27L/tests/l27forward.c", 42) &&
+        has_direct_call(lSummary, &nestedForward, &nestedBackward) && nestedForward;
+    print_marker("phase27l_forward_call", forwardCall);
+    const bool backwardCall = runFixture("/P27L/tests/l27backward.c", 42) &&
+        has_direct_call(lSummary, &nestedForward, &nestedBackward) && nestedBackward;
+    print_marker("phase27l_backward_call", backwardCall);
+
+    const bool localIsolation = runFixture("/P27L/tests/l27isolation.c", 42);
+    print_marker("phase27l_local_isolation", localIsolation);
+    const bool parameterIsolation = runFixture("/P27L/tests/l27param.c", 42);
+    print_marker("phase27l_parameter_isolation", parameterIsolation);
+
+    const bool lMissingReturn = reset_vfs_file(l27PrimaryArtifact) &&
+        !compiler::compile("/P27L/tests/l27missing.c", l27PrimaryArtifact, &lNegative) &&
+        !vfs::exists(l27PrimaryArtifact) && lNegative.diagnosticCount != 0 &&
+        summary_diagnostic_contains(lNegative, "function 'broken' may reach end");
+    print_marker("phase27l_function_missing_return", lMissingReturn);
+    const bool duplicateParameter = reset_vfs_file(l27PrimaryArtifact) &&
+        !compiler::compile("/P27L/tests/l27duplicate_param.c", l27PrimaryArtifact, &lNegative) &&
+        !vfs::exists(l27PrimaryArtifact) &&
+        summary_diagnostic_contains(lNegative, "duplicate parameter 'x'");
+    print_marker("phase27l_duplicate_parameter", duplicateParameter);
+    const bool duplicateFunction = reset_vfs_file(l27PrimaryArtifact) &&
+        !compiler::compile("/P27L/tests/l27duplicate_function.c", l27PrimaryArtifact, &lNegative) &&
+        !vfs::exists(l27PrimaryArtifact) &&
+        summary_diagnostic_contains(lNegative, "duplicate function 'add'");
+    print_marker("phase27l_duplicate_function", duplicateFunction);
+    const bool parameterLimit = reset_vfs_file(l27PrimaryArtifact) &&
+        !compiler::compile("/P27L/tests/l27param_limit.c", l27PrimaryArtifact, &lNegative) &&
+        !vfs::exists(l27PrimaryArtifact) &&
+        summary_diagnostic_contains(lNegative, "function parameter limit exceeded");
+    print_marker("phase27l_parameter_limit", parameterLimit);
+    const bool argumentCount = reset_vfs_file(l27PrimaryArtifact) &&
+        !compiler::compile("/P27L/tests/l27arg_count.c", l27PrimaryArtifact, &lNegative) &&
+        !vfs::exists(l27PrimaryArtifact) &&
+        summary_diagnostic_contains(lNegative, "function 'add' expects 2 arguments, got 1");
+    print_marker("phase27l_argument_count", argumentCount);
+    const bool unknownFunction = reset_vfs_file(l27PrimaryArtifact) &&
+        !compiler::compile("/P27L/tests/l27unknown.c", l27PrimaryArtifact, &lNegative) &&
+        !vfs::exists(l27PrimaryArtifact) &&
+        summary_diagnostic_contains(lNegative, "unknown function 'missing'");
+    print_marker("phase27l_unknown_function", unknownFunction);
+    const bool recursionRejected = reset_vfs_file(l27PrimaryArtifact) &&
+        !compiler::compile("/P27L/tests/l27recursion.c", l27PrimaryArtifact, &lNegative) &&
+        !vfs::exists(l27PrimaryArtifact) &&
+        summary_diagnostic_contains(lNegative, "recursive function calls are not supported");
+    print_marker("phase27l_recursion_rejected", recursionRejected);
+
+    const bool entrySelection = reset_vfs_file(l27PrimaryArtifact) &&
+        compiler::compile("/P27L/tests/l27entry.c", l27PrimaryArtifact, &lEntry) &&
+        lEntry.functionCount == 3 && lEntry.entryCodeOffset != 0 &&
+        run_expected(l27PrimaryArtifact, 42);
+    print_marker("phase27l_gx_main_entry", entrySelection);
+
+    const bool lDeterministic = reset_vfs_file("/P27L/out/l27deta.elf") &&
+        reset_vfs_file("/P27L/out/l27detb.elf") &&
+        compiler::compile("/P27L/tests/l27nested.c", "/P27L/out/l27deta.elf", &lSummary) &&
+        compiler::compile("/P27L/tests/l27nested.c", "/P27L/out/l27detb.elf", &lAgain) &&
+        lSummary.sourceHash == lAgain.sourceHash && lSummary.outputHash == lAgain.outputHash &&
+        lSummary.outputBytes == lAgain.outputBytes &&
+        same_vfs_file_bytes("/P27L/out/l27deta.elf", "/P27L/out/l27detb.elf");
+    print_marker("phase27l_deterministic", lDeterministic);
+
+    const bool hostIntegration = reset_vfs_file(l27PrimaryArtifact) &&
+        compiler::compile("/P27L/src/main.cpp", l27PrimaryArtifact, &lSummary) &&
+        run_expected_with_report(l27PrimaryArtifact, 42, &lHostReport) &&
+        lSummary.functionCount == 3 && lSummary.hasHostLog && lHostReport.hostLogObserved &&
+        lHostReport.hostLogCount == 1 && lHostReport.hostLog[0][0] == 'F';
+    print_marker("phase27l_host_integration", hostIntegration);
+    const bool lArtifactEvidence = hostIntegration &&
+        emit_serial_artifact(l27PrimaryArtifact, "l27primary");
+
+    static int32_t developerStudio27lReturn = 1;
+    static NativeElfRunReport developerStudio27lReport = {};
+    const bool lIdeProgram = hostIntegration &&
+        run_file("/Apps/DS27L/bin/amd64/p27l.elf", &developerStudio27lReturn,
+                 &developerStudio27lReport) && developerStudio27lReturn == 0 &&
+        developerStudio27lReport.teardownComplete;
+    print_marker("phase27l_ide_program", lIdeProgram);
+    print_marker("phase27l_source_edit", lIdeProgram);
+    print_marker("phase27l_failure_recovery", lIdeProgram);
+    // The artifact is emitted above, so survival is tied to the actual run
+    // report and a VFS metadata check after the application has cleaned up.
+    vfs::FileInfo lArtifactInfo = {};
+    const bool lArtifactSurvives = lIdeProgram &&
+        vfs::stat(l27PrimaryArtifact, &lArtifactInfo) == vfs::VFS_OK &&
+        lArtifactInfo.type == vfs::FILE_TYPE_REGULAR && lArtifactInfo.size != 0 &&
+        developerStudio27lReport.finalState == NativeAppExecutionState::Cleaned;
+    print_marker("phase27l_kernel_survival", lArtifactSurvives);
+
+    const bool phase27lPassed = zeroArg && oneArg && multiArg && fourArg && nestedCalls &&
+        callExpression && callCondition && functionLoop && functionIf && functionControl &&
+        forwardCall && backwardCall && localIsolation && parameterIsolation && lMissingReturn &&
+        duplicateParameter && duplicateFunction && parameterLimit && argumentCount && unknownFunction &&
+        recursionRejected && entrySelection && hostIntegration && lArtifactEvidence &&
+        lIdeProgram && lDeterministic && lMissingReturn && lArtifactSurvives;
+    print_marker("phase27l", phase27lPassed);
+    serial::puts(phase27lPassed ? "ELF Loader: Phase 27L user functions smoke PASS\n"
+                                : "ELF Loader: Phase 27L user functions smoke FAIL\n");
 #endif
 #if defined(GXOS_PHASE27H_SMOKE)
     serial::puts("ELF Loader: Phase 27H comparisons and conditional control-flow smoke begin\n");

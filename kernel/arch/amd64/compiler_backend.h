@@ -20,6 +20,10 @@ struct FrameLayout {
     uint32_t frameBytes;
     int32_t contextDisplacement;
     uint32_t localBytes;
+    uint32_t parameterBytes;
+    uint32_t temporaryBytes;
+    uint32_t variableBytes;
+    uint16_t temporarySlots;
 };
 
 // Calculate an AMD64 signed rel32 displacement without allowing unsigned
@@ -30,6 +34,17 @@ bool calculate_signed_rel32(uint64_t targetAddress,
                             int32_t* displacement);
 
 bool calculate_frame_layout(uint32_t localCount, FrameLayout* output);
+
+bool calculate_frame_layout(uint32_t parameterCount, uint32_t localCount,
+                            uint32_t temporarySlots, bool hasContext,
+                            FrameLayout* output);
+
+bool emit_translation_unit(const TranslationUnitIR& unit,
+                           uint64_t readOnlyDataAddress,
+                           uint8_t* output,
+                           uint32_t outputCapacity,
+                           uint32_t* outputSize,
+                           uint32_t* entryCodeOffset);
 
 bool emit_function(const FunctionIR& function,
                    uint8_t* output,

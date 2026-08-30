@@ -32,6 +32,12 @@ public:
     void error_identifier(SourceLocation location, const char* prefix,
                           const char* identifier, uint32_t identifierBytes,
                           const char* tokenKind);
+    void error_identifier_suffix(SourceLocation location, const char* prefix,
+                                 const char* identifier, uint32_t identifierBytes,
+                                 const char* suffix, const char* tokenKind);
+    void error_function_argument_count(SourceLocation location, const char* name,
+                                       uint32_t nameBytes, uint32_t expected,
+                                       uint32_t actual);
     bool has_error() const;
     uint32_t count() const;
     const CompilerDiagnostic& at(uint32_t index) const;

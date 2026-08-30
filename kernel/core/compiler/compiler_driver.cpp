@@ -87,20 +87,26 @@ static void print_data(const uint8_t* data, uint32_t dataBytes)
     serial::putc('\n');
 }
 
-static bool flatten_string_table(const FunctionIR& function, uint8_t* output,
+static bool flatten_string_table(TranslationUnitIR& unit, uint8_t* output,
                                  uint32_t capacity, uint32_t* outputBytes)
 {
-    if (!output || !outputBytes || function.stringDataBytes > capacity) return false;
+    if (!output || !outputBytes || unit.functionCount > COMPILER_MAX_FUNCTIONS) return false;
     uint32_t offset = 0;
-    for (uint32_t i = 0; i < function.stringCount; ++i) {
-        if (function.stringOffsets[i] != offset || offset + function.strings[i].bytes + 1U > capacity) return false;
-        for (uint32_t j = 0; j < function.strings[i].bytes; ++j)
-            output[offset + j] = static_cast<uint8_t>(function.strings[i].data[j]);
-        output[offset + function.strings[i].bytes] = 0;
-        offset += function.strings[i].bytes + 1U;
+    for (uint32_t f = 0; f < unit.functionCount; ++f) {
+        FunctionIR& function = unit.functions[f];
+        const uint32_t functionStart = offset;
+        function.dataOffset = functionStart;
+        for (uint32_t i = 0; i < function.stringCount; ++i) {
+            if (function.stringOffsets[i] != offset - functionStart ||
+                offset + function.strings[i].bytes + 1U > capacity) return false;
+            for (uint32_t j = 0; j < function.strings[i].bytes; ++j)
+                output[offset + j] = static_cast<uint8_t>(function.strings[i].data[j]);
+            output[offset + function.strings[i].bytes] = 0;
+            offset += function.strings[i].bytes + 1U;
+        }
     }
     *outputBytes = offset;
-    return offset == function.stringDataBytes;
+    return true;
 }
 
 static void copy_diagnostics(const Diagnostics& diagnostics, CompileSummary* summary)
@@ -245,29 +251,35 @@ bool compile(const char* sourcePath,
     put_decimal_u64(tokenCount);
     serial::putc('\n');
 
-    static FunctionIR function = {};
-    function = {};
-    if (!parse_function(reinterpret_cast<const char*>(s_source), s_tokens, tokenCount,
-                        &function, diagnostics)) {
+    static TranslationUnitIR unit = {};
+    unit = {};
+    if (!parse_translation_unit(reinterpret_cast<const char*>(s_source), s_tokens, tokenCount,
+                                &unit, diagnostics)) {
         return fail_build(diagnostics, summary);
     }
+    FunctionIR& function = unit.functions[unit.entryFunction];
 
+    serial::puts("Compiler: functions=");
+    put_decimal_u64(unit.functionCount);
+    serial::putc('\n');
     serial::puts("Compiler: return_constant=");
     if (function.returnConstantValid) put_decimal_i32(function.returnConstant);
     else serial::puts("nonconstant");
     serial::putc('\n');
 
     uint32_t dataBytes = 0;
-    if (!flatten_string_table(function, s_data, sizeof(s_data), &dataBytes)) {
+    if (!flatten_string_table(unit, s_data, sizeof(s_data), &dataBytes)) {
         diagnostics.error(driverLocation, "source string data exceeds compiler limit", "data");
         return fail_build(diagnostics, summary);
     }
     if (dataBytes != 0) print_data(s_data, dataBytes);
 
     uint32_t codeBytes = 0;
+    uint32_t entryCodeOffset = 0;
 #if defined(__x86_64__)
     const uint64_t dataAddress = dataBytes == 0 ? 0 : BOOTSTRAP_IMAGE_BASE + BOOTSTRAP_DATA_OFFSET;
-    if (!amd64::emit_function(function, dataAddress, s_code, sizeof(s_code), &codeBytes)) {
+    if (!amd64::emit_translation_unit(unit, dataAddress, s_code, sizeof(s_code), &codeBytes,
+                                      &entryCodeOffset)) {
         diagnostics.error(driverLocation, "AMD64 backend rejected target-neutral IR", "backend");
         return fail_build(diagnostics, summary);
     }
@@ -278,7 +290,7 @@ bool compile(const char* sourcePath,
     print_code(s_code, codeBytes);
 
     ElfLayout layout = {};
-    if (!write_bootstrap_elf(s_code, codeBytes, s_data, dataBytes,
+    if (!write_bootstrap_elf(s_code, codeBytes, s_data, dataBytes, entryCodeOffset,
                              s_elf, sizeof(s_elf), &layout)) {
         diagnostics.error(driverLocation, "ELF writer could not construct bounded image", "elf");
         return fail_build(diagnostics, summary);
@@ -287,7 +299,7 @@ bool compile(const char* sourcePath,
     ElfValidationResult producedValidation = {};
     if (!validate_bootstrap_elf(s_elf, layout.outputBytes, layout.imageBase,
                                 layout.codeOffset, s_code, codeBytes,
-                                &producedValidation, s_data, dataBytes)) {
+                                 &producedValidation, s_data, dataBytes, entryCodeOffset)) {
         diagnostics.error(driverLocation, producedValidation.error, "elf");
         return fail_build(diagnostics, summary);
     }
@@ -335,7 +347,7 @@ bool compile(const char* sourcePath,
     ElfValidationResult reopenedValidation = {};
     if (!validate_bootstrap_elf(s_reopened, static_cast<uint32_t>(reopenedBytes),
                                 layout.imageBase, layout.codeOffset, s_code, codeBytes,
-                                &reopenedValidation, s_data, dataBytes)) {
+                                 &reopenedValidation, s_data, dataBytes, entryCodeOffset)) {
         diagnostics.error(driverLocation, reopenedValidation.error, "elf");
         return fail_build(diagnostics, summary);
     }
@@ -355,6 +367,8 @@ bool compile(const char* sourcePath,
         summary->reopenedAndValidated = true;
         summary->sourceBytes = sourceBytes;
         summary->tokenCount = tokenCount;
+        summary->functionCount = unit.functionCount;
+        summary->entryCodeOffset = entryCodeOffset;
         summary->returnConstantValid = function.returnConstantValid;
         summary->returnConstant = function.returnConstant;
         summary->codeBytes = codeBytes;
@@ -377,7 +391,7 @@ bool compile(const char* sourcePath,
 void run_bootstrap_smoke()
 {
     serial::puts("Compiler: Phase 27B bare-metal smoke begin\n");
-    serial::puts("Compiler: limits source=65536 tokens=2048 diagnostics=16 identifiers=63 strings=255 locals=32 statements=256 expressions=1024 blocks=32 block_depth=16 condition_depth=16 loop_depth=8 labels=128 fixups=128 code=8192 data=2048 output=12288\n");
+    serial::puts("Compiler: limits source=65536 tokens=2048 diagnostics=16 identifiers=63 functions=16 parameters=4 calls=32 call_args=128 call_edges=128 call_nesting=8 temporaries=64 strings=255 locals=32 statements=256 expressions=1024 blocks=32 block_depth=16 condition_depth=16 loop_depth=8 labels=128 fixups=128 code=24576 data=2048 output=32768\n");
 
     CompileSummary return42 = {};
     CompileSummary deterministic = {};
