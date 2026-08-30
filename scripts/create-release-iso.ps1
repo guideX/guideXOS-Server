@@ -13,7 +13,9 @@ param(
     [ValidateSet('PyCdlib', 'Oscdimg')]
     [string]$IsoBackend = 'PyCdlib',
     [string]$OscdimgPath,
-    [string]$PythonPath
+    [string]$PythonPath,
+    [ValidateRange(0, 8)]
+    [int]$I219Phase5Stage = 8
 )
 
 Set-StrictMode -Version Latest
@@ -415,8 +417,8 @@ function Invoke-CanonicalBuild {
     if (-not (Test-Path -LiteralPath $BuildScript -PathType Leaf)) { Fail "canonical build script is missing: $BuildScript" }
     $powershell = Get-Command powershell.exe -ErrorAction SilentlyContinue
     if ($null -eq $powershell) { Fail 'Windows PowerShell (powershell.exe) is required to invoke the canonical build.' }
-    $buildArgs = @('-Arch', $Arch)
-    if ($Clean) { $buildArgs = @('-Clean', '-Arch', $Arch) }
+    $buildArgs = @('-Arch', $Arch, '-I219Phase5Stage', [string]$I219Phase5Stage)
+    if ($Clean) { $buildArgs = @('-Clean', '-Arch', $Arch, '-I219Phase5Stage', [string]$I219Phase5Stage) }
     Write-Host "[release-iso] invoking canonical build.ps1 with supported arguments" -ForegroundColor Cyan
     Invoke-ExternalChecked -FilePath $powershell.Source -Arguments (@('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $BuildScript) + $buildArgs) | Out-Null
 }
@@ -475,6 +477,15 @@ try {
     if (-not $SkipBuild) { Invoke-CanonicalBuild }
     $esp = Get-EspContents
 
+    $identityPath = Join-Path $EspRoot 'build-identity.txt'
+    if (Test-Path -LiteralPath $identityPath -PathType Leaf) {
+        $identityText = [IO.File]::ReadAllText($identityPath)
+        $identityMatch = [regex]::Match($identityText, '(?m)^phase5I219Stage=(\d+)\s*$')
+        if ($identityMatch.Success -and [int]$identityMatch.Groups[1].Value -ne $I219Phase5Stage) {
+            Fail "ESP build identity stage $($identityMatch.Groups[1].Value) does not match requested I219 Phase 5 stage $I219Phase5Stage. Rebuild without -SkipBuild."
+        }
+    }
+
     $bootloader = Get-Item -LiteralPath (Join-Path $EspRoot 'EFI\BOOT\BOOTX64.EFI')
     $kernel = Get-Item -LiteralPath (Join-Path $EspRoot 'kernel.elf')
     $ramdisk = Get-Item -LiteralPath (Join-Path $EspRoot 'ramdisk.img')
@@ -510,6 +521,7 @@ try {
         ("Version: $Version"),
         ("Architecture: $Arch"),
         ("Source commit: $sourceCommit"),
+        ("I219 Phase 5 stage selector: $I219Phase5Stage"),
         '',
         ("The bootable UEFI FAT image is $bootImageIsoPath."),
         'It contains the complete guideXOS Server EFI payload.',
@@ -564,7 +576,7 @@ try {
         fs = '2.4.16'
         pycdlib = '1.16.0'
         isoBackend = $IsoBackend
-        canonicalBuild = 'build.ps1 -Arch amd64' + $(if ($Clean) { ' -Clean' } else { '' })
+        canonicalBuild = 'build.ps1 -Arch amd64 -I219Phase5Stage ' + $I219Phase5Stage + $(if ($Clean) { ' -Clean' } else { '' })
     }
     if ($IsoBackend -eq 'Oscdimg') {
         $toolRecords.oscdimg = Get-ToolRecord $oscdimg $oscdimgVersion
@@ -575,6 +587,7 @@ try {
         version = $Version
         architecture = $Arch
         artifactType = 'bootable-uefi-iso'
+        i219Phase5Stage = $I219Phase5Stage
         isoBackend = $IsoBackend
         isoFilename = $isoName
         isoByteSize = [int64]$isoInfo.Length

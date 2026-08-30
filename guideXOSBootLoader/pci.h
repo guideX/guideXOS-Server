@@ -13,6 +13,17 @@
 #include "Uefi.h"
 #include <stdint.h>
 
+// Phase 5 is a deliberately small compile-time isolation selector.  The
+// same macro is passed to the kernel build so the loader and kernel stop at
+// the same I219 stage.  Existing NICs ignore this selector.
+#ifndef GXOS_AIDA_I219_PHASE5_STAGE
+#define GXOS_AIDA_I219_PHASE5_STAGE 8
+#endif
+
+#if GXOS_AIDA_I219_PHASE5_STAGE < 0 || GXOS_AIDA_I219_PHASE5_STAGE > 8
+#error GXOS_AIDA_I219_PHASE5_STAGE must be in the range 0..8
+#endif
+
 namespace guideXOS {
 namespace pci {
 

@@ -2106,6 +2106,17 @@ static void cmd_nicinfo() {
     output_string("Driver: ");
     output_string(network_status::driver_name(dev->vendorId, dev->deviceId));
     output_string("\n");
+    output_string("I219 Phase 5 stage: ");
+    if (dev->deviceId == nic::PCI_DEVICE_I219_LM) {
+        char stageText[2];
+        stageText[0] = static_cast<char>('0' + dev->phase5Stage);
+        stageText[1] = '\0';
+        output_string(stageText);
+        output_string(dev->phase5Stopped ? " (stopped/failed)" : " (active)");
+    } else {
+        output_string("N/A");
+    }
+    output_string("\n");
     output_string("Driver Bound: ");
     output_string(dev->driverBound ? "YES" : "NO");
     output_string("   Init Stage: ");
@@ -2121,6 +2132,8 @@ static void cmd_nicinfo() {
     output_string(dev->pollingEnabled ? "main-loop polling" : "not active");
     output_string("   IRQ: ");
     output_string(dev->irqRegistered ? "registered" : "not registered");
+    output_string("   NIC mask: ");
+    output_string(dev->interruptsEnabled ? "enabled" : "masked");
     output_string("\n");
     output_string("RX ring: ");
     output_string(dev->rxRingInitialized ? "initialized" : "not initialized");
@@ -2130,6 +2143,11 @@ static void cmd_nicinfo() {
     output_string("NIC registration: ");
     output_string(dev->nicRegistered ? "YES" : "NO");
     output_string("\n");
+    if (dev->lastInitFailure[0] != '\0') {
+        output_string("Last init failure: ");
+        output_string(dev->lastInitFailure);
+        output_string("\n");
+    }
     
     // Vendor/Device ID
     output_string("Vendor ID: 0x");

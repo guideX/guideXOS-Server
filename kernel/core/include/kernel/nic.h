@@ -23,6 +23,17 @@
 #include "kernel/types.h"
 #include "kernel/arch.h"
 
+// Phase 5 physical isolation selector.  The UEFI loader is built with the
+// same value.  Only the exact I219-LM device uses it; existing NIC paths keep
+// their normal behavior.
+#ifndef GXOS_AIDA_I219_PHASE5_STAGE
+#define GXOS_AIDA_I219_PHASE5_STAGE 8
+#endif
+
+#if GXOS_AIDA_I219_PHASE5_STAGE < 0 || GXOS_AIDA_I219_PHASE5_STAGE > 8
+#error GXOS_AIDA_I219_PHASE5_STAGE must be in the range 0..8
+#endif
+
 namespace kernel {
 namespace nic {
 
@@ -334,6 +345,9 @@ struct NICDevice {
     bool        negotiatedFullDuplex;
     PhyAccessState phyAccess;
     InitStage   initStage;
+    uint8_t     phase5Stage;       // 0..8 for I219; 0xFF for other NICs
+    bool        phase5Stopped;     // intentionally stopped or failed safely
+    bool        interruptsEnabled; // hardware NIC interrupt mask is enabled
     char        lastInitFailure[96];
 };
 
@@ -439,9 +453,14 @@ const uint8_t* get_mac_address();
 LinkState get_link_state();
 
 // Record whether the kernel registered the device IRQ.  NIC causes remain
-// masked until this is set true; RX still uses the bounded main-loop polling
-// path and the IRQ acknowledges hardware events.
+// masked until this is set true; exact I219 Stage 8 still defers hardware
+// enablement until the main-loop readiness checkpoint.
 void set_irq_registered(bool registered);
+
+// Stage 8 only: enable the I219 hardware interrupt mask after the main-loop
+// readiness checkpoint.  This is a no-op for earlier diagnostic stages and
+// for existing non-I219 devices whose legacy ordering is preserved.
+void enable_deferred_interrupts();
 
 // ----------------------------------------------------------------
 // Frame-level I/O

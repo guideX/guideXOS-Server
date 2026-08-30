@@ -32,7 +32,9 @@
     <CharacterSet>Unicode</CharacterSet>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
-  <PropertyGroup Label="UserMacros" />
+  <PropertyGroup Label="UserMacros">
+    <GXOS_AIDA_I219_PHASE5_STAGE Condition="'$(GXOS_AIDA_I219_PHASE5_STAGE)'==''">8</GXOS_AIDA_I219_PHASE5_STAGE>
+  </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <EmbedManifest>false</EmbedManifest>
     <GenerateManifest>false</GenerateManifest>
@@ -41,7 +43,7 @@
     <ClCompile>
       <WarningLevel>Level3</WarningLevel>
       <SDLCheck>true</SDLCheck>
-      <PreprocessorDefinitions>_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>_DEBUG;GXOS_AIDA_I219_PHASE5_STAGE=$(GXOS_AIDA_I219_PHASE5_STAGE);%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <AdditionalIncludeDirectories>$(ProjectDir);D:\devgitlab\guideXOS\guideXOS.SERVER\edk2-master\MdePkg\Include;D:\devgitlab\guideXOS\guideXOS.SERVER\edk2-master\MdePkg\Include\X64;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <BasicRuntimeChecks>Default</BasicRuntimeChecks>
@@ -64,7 +66,7 @@
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <SDLCheck>true</SDLCheck>
-      <PreprocessorDefinitions>NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>NDEBUG;GXOS_AIDA_I219_PHASE5_STAGE=$(GXOS_AIDA_I219_PHASE5_STAGE);%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <AdditionalIncludeDirectories>$(ProjectDir);D:\devgitlab\guideXOS\guideXOS.SERVER\edk2-master\MdePkg\Include;D:\devgitlab\guideXOS\guideXOS.SERVER\edk2-master\MdePkg\Include\X64;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <BasicRuntimeChecks>Default</BasicRuntimeChecks>

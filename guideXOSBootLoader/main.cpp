@@ -948,6 +948,7 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE* SystemTable) {
 
     // --- PCI Enumeration: Find NIC and get MMIO address ---
     Print(L"\n=== PCI Enumeration ===\n");
+    Print(L"[AIDA-I219-P5] loader-stage=%u\n", (UINT32)GXOS_AIDA_I219_PHASE5_STAGE);
     guideXOS::pci::PciEnumResult pciResult;
     guideXOS::pci::InitPci();
     uint8_t nicCount = guideXOS::pci::EnumeratePci(&pciResult);
@@ -969,17 +970,16 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE* SystemTable) {
     EFI_PHYSICAL_ADDRESS nicMmioMapBase = 0;
     UINTN nicMmioMapSize = 0;
     
-    if (pciResult.nic != nullptr && pciResult.nic->isMemoryBar &&
-        pciResult.nic->bar0Phys != 0 && pciResult.nic->bar0Size != 0) {
+    if (pciResult.nic != nullptr) {
         guideXOS::pci::PciDevice* nic = pciResult.nic;
-        
-        Print(L"\n*** Using NIC at [%02x:%02x.%x] ***\n",
+
+        Print(L"\n*** Binding NIC at [%02x:%02x.%x] ***\n",
               (UINT32)nic->bus, (UINT32)nic->device, (UINT32)nic->function);
         Print(L"    Vendor: %04x  Device: %04x\n", (UINT32)nic->vendorId, (UINT32)nic->deviceId);
-        Print(L"    MMIO Phys: %016lx  MapSize: %lx (bounded register window)\n",
-              nic->bar0Phys, nic->bar0Size);
         
-        // Store NIC info in BootInfo
+        // Store the exact identity even when the selected diagnostic stage
+        // intentionally has no BAR mapping yet.  This lets the kernel report
+        // Stage 0/1 without falling back to a second PCI scan.
         v1BootInfo->Nic.VendorId = nic->vendorId;
         v1BootInfo->Nic.DeviceId = nic->deviceId;
         v1BootInfo->Nic.SubsystemVendorId = nic->subsystemVendorId;
@@ -992,27 +992,45 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE* SystemTable) {
         v1BootInfo->Nic.Device = nic->device;
         v1BootInfo->Nic.Function = nic->function;
         v1BootInfo->Nic.IrqLine = nic->irqLine;
+        v1BootInfo->Nic.Flags = guideXOS::NIC_FLAG_FOUND;
         v1BootInfo->Nic.MmioPhys = nic->bar0Phys;
         v1BootInfo->Nic.MmioSize = nic->bar0Size;
-        v1BootInfo->Nic.Flags = guideXOS::NIC_FLAG_FOUND;
-        
+
         // Leave MacAddress zeroed.  The kernel must obtain and validate the
         // station address from the device's receive-address registers.
-        
-        // Track for page table mapping
-        nicMmioPhys = (EFI_PHYSICAL_ADDRESS)nic->bar0Phys;
-        nicMmioSize = (UINTN)nic->bar0Size;
-        
-        // Enable bus mastering and memory space for the NIC
-        UINT16 pciCommandBefore = guideXOS::pci::PciRead16(
-            nic->bus, nic->device, nic->function, 0x04);
-        guideXOS::pci::EnablePciDevice(nic->bus, nic->device, nic->function);
-        UINT16 pciCommandAfter = guideXOS::pci::PciRead16(
-            nic->bus, nic->device, nic->function, 0x04);
-        Print(L"    PCI command: before=%04x after=%04x (memory+bus-master requested)\n",
-              (UINT32)pciCommandBefore, (UINT32)pciCommandAfter);
+
+        const bool hasRegisterBar = nic->isMemoryBar &&
+                                    nic->bar0Phys != 0 &&
+                                    nic->bar0Size != 0;
+        const bool i219BindOnly = nic->vendorId == guideXOS::pci::PCI_VENDOR_INTEL &&
+                                  nic->deviceId == guideXOS::pci::PCI_DEVICE_I219_LM &&
+                                  GXOS_AIDA_I219_PHASE5_STAGE == 0;
+        if (hasRegisterBar) {
+            Print(L"    MMIO Phys: %016lx  MapSize: %lx (bounded register window)\n",
+                  nic->bar0Phys, nic->bar0Size);
+
+            // Track for page table mapping.
+            nicMmioPhys = (EFI_PHYSICAL_ADDRESS)nic->bar0Phys;
+            nicMmioSize = (UINTN)nic->bar0Size;
+
+            // Stage 0 is identity-only.  All later stages allow the bounded
+            // PCI command setup required before the kernel can use MMIO/DMA.
+            if (!i219BindOnly) {
+                UINT16 pciCommandBefore = guideXOS::pci::PciRead16(
+                    nic->bus, nic->device, nic->function, 0x04);
+                guideXOS::pci::EnablePciDevice(nic->bus, nic->device, nic->function);
+                UINT16 pciCommandAfter = guideXOS::pci::PciRead16(
+                    nic->bus, nic->device, nic->function, 0x04);
+                Print(L"    PCI command: before=%04x after=%04x (memory+bus-master requested)\n",
+                      (UINT32)pciCommandBefore, (UINT32)pciCommandAfter);
+            }
+        } else if (i219BindOnly) {
+            Print(L"    [AIDA-I219-P5] stage=0 complete; BAR/PCI setup skipped\n");
+        } else {
+            Print(L"    No usable register BAR; kernel will abandon bring-up safely\n");
+        }
     } else {
-        Print(L"\nNo supported NIC found for MMIO mapping\n");
+        Print(L"\nNo supported NIC found for binding\n");
     }
     Print(L"=========================\n\n");
 

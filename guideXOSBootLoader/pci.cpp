@@ -227,7 +227,16 @@ uint8_t EnumeratePci(PciEnumResult* result)
                 pciDev->progIf = progIf;
                 pciDev->revisionId = PciRead8(bus, dev, func, 0x08);
                 pciDev->subsystemVendorId = PciRead16(bus, dev, func, 0x2C);
-                pciDev->subsystemDeviceId = PciRead16(bus, dev, func, 0x2E);
+                 pciDev->subsystemDeviceId = PciRead16(bus, dev, func, 0x2E);
+
+                // Keep the BAR fields deterministic when Stage 0 deliberately
+                // stops at identity binding before BAR discovery.
+                pciDev->bar0Phys = 0;
+                pciDev->bar0Size = 0;
+                pciDev->bar0Virt = 0;
+                pciDev->barIndex = 0xFF;
+                pciDev->isMemoryBar = false;
+                pciDev->is64bit = false;
                 
                 // Read IRQ line
                 pciDev->irqLine = PciRead8(bus, dev, func, 0x3C);
@@ -235,12 +244,19 @@ uint8_t EnumeratePci(PciEnumResult* result)
                 // Only select a register BAR for a driver-compatible Ethernet
                 // device.  GetRegisterBarInfo is read-only; unsupported
                 // controllers remain identity-only and are never touched.
-                if (subclass == PCI_SUBCLASS_ETH && IsSupportedNic(vendorId, deviceId)) {
+                const bool i219BindOnly =
+                    vendorId == PCI_VENDOR_INTEL &&
+                    deviceId == PCI_DEVICE_I219_LM &&
+                    GXOS_AIDA_I219_PHASE5_STAGE == 0;
+                if (subclass == PCI_SUBCLASS_ETH && IsSupportedNic(vendorId, deviceId) &&
+                    !i219BindOnly) {
                     pciDev->isMemoryBar = GetRegisterBarInfo(bus, dev, func,
                                                               &pciDev->bar0Phys,
                                                               &pciDev->bar0Size,
                                                               &pciDev->is64bit,
                                                               &pciDev->barIndex);
+                } else if (i219BindOnly) {
+                    Print((CONST CHAR16*)L"    [AIDA-I219-P5] stage=0 BAR discovery skipped (bind only)\n");
                 } else {
                     uint32_t bar0 = PciRead32(bus, dev, func, 0x10);
                     pciDev->isMemoryBar = (bar0 & 0x01u) == 0;

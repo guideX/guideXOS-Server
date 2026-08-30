@@ -66,6 +66,13 @@ static uint8_t s_txBuffer[ETH_FRAME_MAX];
 static uint16_t s_rxCur = 0;
 static uint16_t s_txCur = 0;
 
+// Hardware waits in the I219 path are deliberately iteration-bounded.  The
+// bound does not depend on PIT/IRQ progress because this code runs before the
+// input/main-loop readiness checkpoints.
+static const uint32_t I219_PHASE5_HW_WAIT_LIMIT = 100000u;
+
+static void mask_nic_interrupts(uint64_t mmioBase);
+
 static bool is_i219_device(uint16_t deviceId)
 {
     return deviceId == PCI_DEVICE_I219_LM;
@@ -78,6 +85,19 @@ static void set_init_failure(InitStage stage, const char* reason)
     s_device.nicRegistered = false;
     s_device.pollingEnabled = false;
     s_device.irqRegistered = false;
+    s_device.interruptsEnabled = false;
+    if (is_i219_device(s_device.deviceId)) s_device.phase5Stopped = true;
+
+    // Best-effort hardware masking is part of the fail-closed contract.  The
+    // state flags above remain authoritative if the device no longer answers
+    // MMIO reads/writes.
+    // Stages 0-2 are intentionally non-invasive: stopping at those stages
+    // must not add a write merely to report the stop.  From Stage 3 onward,
+    // fail-closed masking is required after every attempted hardware access.
+    if (s_device.mmioMapped && s_device.mmioBase != 0 &&
+        (!is_i219_device(s_device.deviceId) || s_device.phase5Stage >= 3u)) {
+        mask_nic_interrupts(s_device.mmioBase);
+    }
 
     uint32_t i = 0;
     if (reason != nullptr) {
@@ -92,6 +112,41 @@ static void set_init_failure(InitStage stage, const char* reason)
                                                      : "[NIC] E1000 init failed: ");
     serial::puts(s_device.lastInitFailure);
     serial::putc('\n');
+}
+
+static void phase5_stage_number(uint8_t stage)
+{
+    serial::putc(static_cast<char>('0' + (stage <= 9u ? stage : 9u)));
+}
+
+static void phase5_stage_enter(uint8_t stage)
+{
+    serial::puts("[AIDA-I219-P5] stage=");
+    phase5_stage_number(stage);
+    serial::puts(" enter\n");
+}
+
+static void phase5_stage_complete(uint8_t stage)
+{
+    serial::puts("[AIDA-I219-P5] stage=");
+    phase5_stage_number(stage);
+    serial::puts(" complete\n");
+}
+
+static void phase5_stage_failed(uint8_t stage)
+{
+    serial::puts("[AIDA-I219-P5] stage=");
+    phase5_stage_number(stage);
+    serial::puts(" failed; NIC abandoned\n");
+}
+
+static bool phase5_stop(uint8_t stage, InitStage initStage, const char* reason)
+{
+    set_init_failure(initStage, reason);
+    serial::puts("[AIDA-I219-P5] stage=");
+    phase5_stage_number(stage);
+    serial::puts(" complete; bring-up intentionally stopped\n");
+    return false;
 }
 
 static bool dma_address(const void* ptr, uint64_t* physicalOut)
@@ -141,6 +196,13 @@ static inline uint32_t mmio_read32(uint64_t base, uint32_t reg)
     volatile uint32_t* addr = reinterpret_cast<volatile uint32_t*>(
         static_cast<uintptr_t>(base + reg));
     return *addr;
+}
+
+static void mask_nic_interrupts(uint64_t mmioBase)
+{
+    if (mmioBase == 0) return;
+    mmio_write32(mmioBase, E1000_IMC, 0xFFFFFFFFu);
+    mmio_read32(mmioBase, E1000_ICR);
 }
 
 static bool is_supported_nic(uint16_t vendor, uint16_t device)
@@ -201,7 +263,7 @@ static uint16_t eeprom_read(uint64_t mmioBase, uint8_t addr)
     mmio_write32(mmioBase, E1000_EERD, val);
 
     // Poll for DONE
-    for (uint32_t i = 0; i < 100000; ++i) {
+    for (uint32_t i = 0; i < I219_PHASE5_HW_WAIT_LIMIT; ++i) {
         uint32_t rd = mmio_read32(mmioBase, E1000_EERD);
         if (rd & E1000_EERD_DONE) {
             return static_cast<uint16_t>(rd >> E1000_EERD_DATA_SHIFT);
@@ -260,22 +322,56 @@ static bool mdic_read(uint64_t mmioBase, uint8_t phyAddress,
 {
     if (!valueOut) return false;
 
+    if (is_i219_device(s_device.deviceId)) {
+        serial::puts("[AIDA-I219-P5] mdic begin phy=");
+        serial::put_hex8(phyAddress);
+        serial::puts(" reg=");
+        serial::put_hex8(registerAddress);
+        serial::putc('\n');
+    }
+
     const uint32_t command = E1000_MDIC_OP_READ |
                              (static_cast<uint32_t>(phyAddress) << E1000_MDIC_PHY_SHIFT) |
                              (static_cast<uint32_t>(registerAddress) << E1000_MDIC_REG_SHIFT);
     mmio_write32(mmioBase, E1000_MDIC, command);
 
-    for (uint32_t i = 0; i < 100000u; ++i) {
+    for (uint32_t i = 0; i < I219_PHASE5_HW_WAIT_LIMIT; ++i) {
         const uint32_t mdic = mmio_read32(mmioBase, E1000_MDIC);
         s_device.mdicValue = mdic;
         if ((mdic & E1000_MDIC_READY) == 0u) continue;
-        if ((mdic & E1000_MDIC_ERROR) != 0u) return false;
+        if ((mdic & E1000_MDIC_ERROR) != 0u) {
+            serial::puts("[AIDA-I219-P5] mdic error phy=");
+            serial::put_hex8(phyAddress);
+            serial::puts(" reg=");
+            serial::put_hex8(registerAddress);
+            serial::putc('\n');
+            return false;
+        }
         const uint16_t value = static_cast<uint16_t>(mdic & E1000_MDIC_DATA_MASK);
-        if (value == 0xFFFFu) return false;
+        if (value == 0xFFFFu) {
+            serial::puts("[AIDA-I219-P5] mdic invalid phy=");
+            serial::put_hex8(phyAddress);
+            serial::puts(" reg=");
+            serial::put_hex8(registerAddress);
+            serial::putc('\n');
+            return false;
+        }
         *valueOut = value;
+        if (is_i219_device(s_device.deviceId)) {
+            serial::puts("[AIDA-I219-P5] mdic complete phy=");
+            serial::put_hex8(phyAddress);
+            serial::puts(" reg=");
+            serial::put_hex8(registerAddress);
+            serial::putc('\n');
+        }
         return true;
     }
 
+    serial::puts("[AIDA-I219-P5] mdic timeout phy=");
+    serial::put_hex8(phyAddress);
+    serial::puts(" reg=");
+    serial::put_hex8(registerAddress);
+    serial::putc('\n');
     return false;
 }
 
@@ -491,6 +587,12 @@ static bool init_e1000(uint64_t mmioBase)
         return false;
     }
 
+    const bool i219 = is_i219_device(s_device.deviceId);
+    if (i219) {
+        phase5_stage_enter(3);
+        serial::puts("[AIDA-I219-P5] reset begin\n");
+    }
+
     // Disable all interrupts and engines before reset.  The reset wait is
     // finite and observes the device's self-clearing CTRL.RST bit.
     s_device.initStage = NIC_INIT_RESET;
@@ -502,16 +604,21 @@ static bool init_e1000(uint64_t mmioBase)
     uint32_t ctrl = mmio_read32(mmioBase, E1000_CTRL);
     s_device.ctrlValue = ctrl;
     if (ctrl == 0xFFFFFFFFu) {
+        if (i219) {
+            serial::puts("[AIDA-I219-P5] reset CTRL read returned all-ones\n");
+            phase5_stage_failed(3);
+        }
         set_init_failure(NIC_INIT_MMIO, "MMIO CTRL read returned all-ones");
         return false;
     }
 
     mmio_write32(mmioBase, E1000_CTRL, ctrl | E1000_CTRL_RST);
     bool resetComplete = false;
-    for (uint32_t i = 0; i < 100000u; ++i) {
+    for (uint32_t i = 0; i < I219_PHASE5_HW_WAIT_LIMIT; ++i) {
         ctrl = mmio_read32(mmioBase, E1000_CTRL);
         s_device.ctrlValue = ctrl;
         if (ctrl == 0xFFFFFFFFu) {
+            if (i219) phase5_stage_failed(3);
             set_init_failure(NIC_INIT_RESET, "reset read returned all-ones");
             return false;
         }
@@ -521,46 +628,94 @@ static bool init_e1000(uint64_t mmioBase)
         }
     }
     if (!resetComplete) {
+        if (i219) {
+            serial::puts("[AIDA-I219-P5] reset timeout\n");
+            phase5_stage_failed(3);
+        }
         set_init_failure(NIC_INIT_RESET, "reset timeout");
         return false;
     }
-    serial::puts("[NIC] MAC reset: complete (bounded)\n");
+    if (!i219) serial::puts("[NIC] MAC reset: complete (bounded)\n");
 
     // Keep interrupts masked until all state and rings are ready.
-    mmio_write32(mmioBase, E1000_IMC, 0xFFFFFFFF);
-    mmio_read32(mmioBase, E1000_ICR);
+    mask_nic_interrupts(mmioBase);
 
-    // Let the PHY negotiate.  I219 does not use the older forced-full-
-    // duplex assumption; preserve the legacy setup for the older devices.
-    ctrl = mmio_read32(mmioBase, E1000_CTRL);
-    ctrl |= E1000_CTRL_SLU | E1000_CTRL_ASDE;
-    if (!is_i219_device(s_device.deviceId)) ctrl |= E1000_CTRL_FD;
-    mmio_write32(mmioBase, E1000_CTRL, ctrl);
-    s_device.ctrlValue = mmio_read32(mmioBase, E1000_CTRL);
-    s_device.statusValue = mmio_read32(mmioBase, E1000_STATUS);
+    if (i219) {
+        serial::puts("[AIDA-I219-P5] reset complete\n");
+        phase5_stage_complete(3);
+        if (GXOS_AIDA_I219_PHASE5_STAGE == 3) {
+            return phase5_stop(3, NIC_INIT_RESET,
+                               "Phase 5 stage 3 intentionally stopped after reset");
+        }
 
-    s_device.initStage = NIC_INIT_MAC;
-    if (!read_mac_address(mmioBase, s_device.macAddress)) {
-        set_init_failure(NIC_INIT_MAC, "invalid MAC in RAL0/RAH0");
-        return false;
-    }
-    serial::puts(is_i219_device(s_device.deviceId)
-                 ? "[NIC] MAC acquisition: RAL0/RAH0 valid\n"
-                 : "[NIC] MAC acquisition: EERD/RAR valid\n");
+        phase5_stage_enter(4);
+        s_device.initStage = NIC_INIT_MAC;
+        if (!read_mac_address(mmioBase, s_device.macAddress)) {
+            phase5_stage_failed(4);
+            set_init_failure(NIC_INIT_MAC, "invalid MAC in RAL0/RAH0");
+            return false;
+        }
+        serial::puts("[NIC] MAC acquisition: RAL0/RAH0 valid\n");
+        phase5_stage_complete(4);
+        if (GXOS_AIDA_I219_PHASE5_STAGE == 4) {
+            return phase5_stop(4, NIC_INIT_MAC,
+                               "Phase 5 stage 4 intentionally stopped after MAC acquisition");
+        }
 
-    if (is_i219_device(s_device.deviceId)) {
+        phase5_stage_enter(5);
+        // Let the PHY negotiate.  This is the existing I219 setup; no
+        // speculative PHY writes are introduced by the isolation path.
+        ctrl = mmio_read32(mmioBase, E1000_CTRL);
+        if (ctrl == 0xFFFFFFFFu) {
+            phase5_stage_failed(5);
+            set_init_failure(NIC_INIT_PHY, "PHY CTRL read returned all-ones");
+            return false;
+        }
+        ctrl |= E1000_CTRL_SLU | E1000_CTRL_ASDE;
+        mmio_write32(mmioBase, E1000_CTRL, ctrl);
+        s_device.ctrlValue = mmio_read32(mmioBase, E1000_CTRL);
+        s_device.statusValue = mmio_read32(mmioBase, E1000_STATUS);
         s_device.initStage = NIC_INIT_PHY;
+        if (s_device.ctrlValue == 0xFFFFFFFFu || s_device.statusValue == 0xFFFFFFFFu) {
+            phase5_stage_failed(5);
+            set_init_failure(NIC_INIT_PHY, "PHY CTRL/STATUS read returned all-ones");
+            return false;
+        }
         if (!read_i219_phy_status(mmioBase)) {
+            phase5_stage_failed(5);
             set_init_failure(NIC_INIT_PHY, "PHY MDIC timeout or invalid response");
             return false;
         }
         serial::puts("[NIC] I219 PHY discovery: MDIC address=1 status=26 valid\n");
+        phase5_stage_complete(5);
+        if (GXOS_AIDA_I219_PHASE5_STAGE == 5) {
+            return phase5_stop(5, NIC_INIT_PHY,
+                               "Phase 5 stage 5 intentionally stopped after PHY/MDIC");
+        }
+
+        phase5_stage_enter(6);
     } else {
+        // Preserve the existing E1000/E1000E sequence exactly for QEMU and
+        // previously supported discrete Intel devices.
+        ctrl = mmio_read32(mmioBase, E1000_CTRL);
+        ctrl |= E1000_CTRL_SLU | E1000_CTRL_ASDE | E1000_CTRL_FD;
+        mmio_write32(mmioBase, E1000_CTRL, ctrl);
+        s_device.ctrlValue = mmio_read32(mmioBase, E1000_CTRL);
+        s_device.statusValue = mmio_read32(mmioBase, E1000_STATUS);
+
+        s_device.initStage = NIC_INIT_MAC;
+        if (!read_mac_address(mmioBase, s_device.macAddress)) {
+            set_init_failure(NIC_INIT_MAC, "invalid MAC in RAL0/RAH0");
+            return false;
+        }
+        serial::puts("[NIC] MAC acquisition: EERD/RAR valid\n");
+
         s_device.link = (s_device.statusValue & E1000_STATUS_LU)
                         ? NIC_LINK_UP : NIC_LINK_DOWN;
     }
 
-    // Clear the Multicast Table Array (128 dwords)
+    // Clear the Multicast Table Array (128 dwords).  For I219 this is the
+    // first operation in Stage 6, after the reset/MAC/PHY boundary.
     for (uint32_t i = 0; i < 128; ++i) {
         mmio_write32(mmioBase, E1000_MTA + (i * 4), 0);
     }
@@ -570,17 +725,30 @@ static bool init_e1000(uint64_t mmioBase)
     // no stack memory is ever handed to the device.
     s_device.initStage = NIC_INIT_RX_RING;
     if (!init_rx(mmioBase)) {
+        if (i219) phase5_stage_failed(6);
         set_init_failure(NIC_INIT_RX_RING, "RX ring DMA address unavailable");
         return false;
     }
-    serial::puts("[NIC] RX ring setup: 32 descriptors ready\n");
+    if (!i219) serial::puts("[NIC] RX ring setup: 32 descriptors ready\n");
 
     s_device.initStage = NIC_INIT_TX_RING;
     if (!init_tx(mmioBase)) {
+        if (i219) phase5_stage_failed(6);
         set_init_failure(NIC_INIT_TX_RING, "TX ring DMA address unavailable");
         return false;
     }
-    serial::puts("[NIC] TX ring setup: 8 descriptors ready\n");
+    if (!i219) serial::puts("[NIC] TX ring setup: 8 descriptors ready\n");
+
+    if (i219) {
+        serial::puts("[NIC] RX ring setup: 32 descriptors ready\n");
+        serial::puts("[NIC] TX ring setup: 8 descriptors ready\n");
+        mask_nic_interrupts(mmioBase);
+        phase5_stage_complete(6);
+        if (GXOS_AIDA_I219_PHASE5_STAGE == 6) {
+            return phase5_stop(6, NIC_INIT_TX_RING,
+                               "Phase 5 stage 6 intentionally stopped after DMA rings");
+        }
+    }
 
     // Keep NIC interrupt causes masked until the kernel has installed the
     // device IRQ handler.  Enabling them here leaves a real device a window
@@ -788,13 +956,6 @@ bool init_from_bootinfo(const NicBootInfo* nicInfo)
     serial::put_hex32(static_cast<uint32_t>(nicInfo->mmioVirt));
     serial::putc('\n');
     
-    // Initialize device structure
-    memzero(&s_device, sizeof(s_device));
-    memzero(s_rxDescs, sizeof(s_rxDescs));
-    memzero(s_txDescs, sizeof(s_txDescs));
-    s_rxCur = 0;
-    s_txCur = 0;
-    
     // Populate device info from BootInfo
     s_device.pciBus = nicInfo->bus;
     s_device.pciSlot = nicInfo->device;
@@ -814,6 +975,10 @@ bool init_from_bootinfo(const NicBootInfo* nicInfo)
     s_device.mmioMapped = (nicInfo->flags & NIC_BOOT_FLAG_MAPPED) != 0u;
     const bool exactDriverMatch = is_supported_nic(s_device.vendorId, s_device.deviceId) &&
                                   s_device.subclass == PCI_SUBCLASS_ETH;
+    const bool i219 = is_i219_device(s_device.deviceId);
+    s_device.phase5Stage = i219 ? static_cast<uint8_t>(GXOS_AIDA_I219_PHASE5_STAGE) : 0xFFu;
+    s_device.phase5Stopped = false;
+    s_device.interruptsEnabled = false;
     s_device.driverBound = exactDriverMatch;
     s_device.initStage = NIC_INIT_BOUND;
     s_device.phyAccess = NIC_PHY_NOT_ATTEMPTED;
@@ -836,36 +1001,148 @@ bool init_from_bootinfo(const NicBootInfo* nicInfo)
     s_device.name[4] = '\0';
     
 #if ARCH_HAS_PORT_IO
+    // Stage 0 is deliberately handled before any BAR, PCI command, or MMIO
+    // work.  The loader has copied only identity fields into BootInfo for this
+    // configuration, so stopping here also proves that binding alone is safe.
+    if (i219) {
+        phase5_stage_enter(0);
+        serial::puts("[AIDA-I219-P5] bind=8086:156F driver=intel-i219-lm\n");
+        phase5_stage_complete(0);
+        if (GXOS_AIDA_I219_PHASE5_STAGE == 0) {
+            return phase5_stop(0, NIC_INIT_BOUND,
+                               "Phase 5 stage 0 intentionally stopped after bind");
+        }
+    }
+
     // The UEFI handoff is the normal bare-metal path.  It must provide a
     // nonzero BAR, a mapped virtual address, and enough bytes for the
     // registers used by this driver before any MMIO access is attempted.
     if (!s_device.mmioMapped || s_device.mmioBase == 0) {
+        if (i219) phase5_stage_failed(1);
         set_init_failure(NIC_INIT_MMIO, "MMIO BAR unavailable or not mapped");
         return false;
     }
     if (s_device.mmioSize < E1000_MMIO_MIN_SIZE) {
+        if (i219) phase5_stage_failed(1);
         set_init_failure(NIC_INIT_MMIO, "MMIO BAR is smaller than the register window");
         return false;
     }
-    serial::puts("[NIC] MMIO mapping: accepted size=");
-    serial::put_hex32(s_device.mmioSize);
-    serial::puts(" bytes\n");
 
-    s_device.initStage = NIC_INIT_PCI;
-    uint16_t command = pci_read16(s_device.pciBus, s_device.pciSlot,
-                                  s_device.pciFunc, 0x04);
-    command = static_cast<uint16_t>(command | (1u << 1) | (1u << 2));
-    pci_write32(s_device.pciBus, s_device.pciSlot, s_device.pciFunc, 0x04,
-                (pci_read32(s_device.pciBus, s_device.pciSlot, s_device.pciFunc, 0x04) &
-                 0xFFFF0000u) | command);
-    s_device.pciCommand = pci_read16(s_device.pciBus, s_device.pciSlot,
-                                     s_device.pciFunc, 0x04);
-    serial::puts("[NIC] PCI command: ");
-    serial::put_hex32(s_device.pciCommand);
-    serial::puts(" (memory+bus-master enabled)\n");
-    if ((s_device.pciCommand & ((1u << 1) | (1u << 2))) != ((1u << 1) | (1u << 2))) {
-        set_init_failure(NIC_INIT_PCI, "PCI memory-space/bus-master enable failed");
-        return false;
+    if (i219) {
+        phase5_stage_enter(1);
+        // Read the selected conventional BAR without sizing writes.  A 64-bit
+        // BAR consumes the following slot, exactly as the loader does.
+        uint64_t discoveredBar = 0;
+        uint8_t discoveredBarIndex = 0xFFu;
+        for (uint8_t barIndex = 0; barIndex < 6; ++barIndex) {
+            const uint8_t barOffset = static_cast<uint8_t>(0x10u + barIndex * 4u);
+            const uint32_t barLow = pci_read32(s_device.pciBus, s_device.pciSlot,
+                                               s_device.pciFunc, barOffset);
+            if ((barLow & 0x1u) != 0u) continue;
+            const uint8_t barType = static_cast<uint8_t>((barLow >> 1) & 0x3u);
+            if (barType == 1u || barType == 3u) continue;
+            const bool is64bit = barType == 2u;
+            if (is64bit && barIndex == 5u) continue;
+            const uint32_t barHigh = is64bit
+                ? pci_read32(s_device.pciBus, s_device.pciSlot,
+                             s_device.pciFunc, static_cast<uint8_t>(barOffset + 4u))
+                : 0u;
+            if (is64bit) ++barIndex;
+            discoveredBar = static_cast<uint64_t>(barLow & 0xFFFFFFF0u) |
+                            (static_cast<uint64_t>(barHigh) << 32);
+            if (discoveredBar == 0 || discoveredBar == 0xFFFFFFFFFFFFFFFFULL) {
+                discoveredBar = 0;
+                continue;
+            }
+            discoveredBarIndex = static_cast<uint8_t>(barIndex - (is64bit ? 1u : 0u));
+            break;
+        }
+        if (discoveredBar == 0) {
+            phase5_stage_failed(1);
+            set_init_failure(NIC_INIT_MMIO, "I219 has no usable memory BAR");
+            return false;
+        }
+        serial::puts("[AIDA-I219-P5] bar=");
+        serial::put_hex32(static_cast<uint32_t>(discoveredBar >> 32));
+        serial::put_hex32(static_cast<uint32_t>(discoveredBar));
+        serial::puts(" mapped=");
+        serial::put_hex32(static_cast<uint32_t>(s_device.mmioBase));
+        serial::puts(" size=");
+        serial::put_hex32(static_cast<uint32_t>(s_device.mmioSize));
+        serial::puts(" index=");
+        serial::put_hex8(discoveredBarIndex);
+        serial::putc('\n');
+        if (discoveredBar == 0 || discoveredBar != s_device.mmioPhys) {
+            phase5_stage_failed(1);
+            set_init_failure(NIC_INIT_MMIO, "I219 BAR handoff does not match PCI BAR");
+            return false;
+        }
+
+        s_device.initStage = NIC_INIT_PCI;
+        uint16_t command = pci_read16(s_device.pciBus, s_device.pciSlot,
+                                      s_device.pciFunc, 0x04);
+        const uint16_t requiredCommand = static_cast<uint16_t>((1u << 1) | (1u << 2));
+        if ((command & requiredCommand) != requiredCommand) {
+            uint32_t commandReg = pci_read32(s_device.pciBus, s_device.pciSlot,
+                                              s_device.pciFunc, 0x04);
+            pci_write32(s_device.pciBus, s_device.pciSlot, s_device.pciFunc, 0x04,
+                        (commandReg & 0xFFFF0000u) |
+                        static_cast<uint32_t>(command | requiredCommand));
+        }
+        s_device.pciCommand = pci_read16(s_device.pciBus, s_device.pciSlot,
+                                         s_device.pciFunc, 0x04);
+        serial::puts("[AIDA-I219-P5] pci-command=");
+        serial::put_hex32(s_device.pciCommand);
+        serial::putc('\n');
+        if ((s_device.pciCommand & requiredCommand) != requiredCommand) {
+            phase5_stage_failed(1);
+            set_init_failure(NIC_INIT_PCI, "PCI memory-space/bus-master enable failed");
+            return false;
+        }
+        phase5_stage_complete(1);
+        if (GXOS_AIDA_I219_PHASE5_STAGE == 1) {
+            return phase5_stop(1, NIC_INIT_PCI,
+                               "Phase 5 stage 1 intentionally stopped after BAR/PCI");
+        }
+
+        phase5_stage_enter(2);
+        // STATUS is the least invasive identity/readiness register used by
+        // this driver.  Stage 2 performs no reset, PHY access, or write.
+        s_device.statusValue = mmio_read32(s_device.mmioBase, E1000_STATUS);
+        serial::puts("[AIDA-I219-P5] mmio-status=");
+        serial::put_hex32(s_device.statusValue);
+        serial::putc('\n');
+        if (s_device.statusValue == 0xFFFFFFFFu) {
+            phase5_stage_failed(2);
+            set_init_failure(NIC_INIT_MMIO, "I219 STATUS read returned all-ones");
+            return false;
+        }
+        phase5_stage_complete(2);
+        if (GXOS_AIDA_I219_PHASE5_STAGE == 2) {
+            return phase5_stop(2, NIC_INIT_MMIO,
+                               "Phase 5 stage 2 intentionally stopped after MMIO probe");
+        }
+    } else {
+        serial::puts("[NIC] MMIO mapping: accepted size=");
+        serial::put_hex32(s_device.mmioSize);
+        serial::puts(" bytes\n");
+
+        s_device.initStage = NIC_INIT_PCI;
+        uint16_t command = pci_read16(s_device.pciBus, s_device.pciSlot,
+                                      s_device.pciFunc, 0x04);
+        command = static_cast<uint16_t>(command | (1u << 1) | (1u << 2));
+        pci_write32(s_device.pciBus, s_device.pciSlot, s_device.pciFunc, 0x04,
+                    (pci_read32(s_device.pciBus, s_device.pciSlot, s_device.pciFunc, 0x04) &
+                     0xFFFF0000u) | command);
+        s_device.pciCommand = pci_read16(s_device.pciBus, s_device.pciSlot,
+                                         s_device.pciFunc, 0x04);
+        serial::puts("[NIC] PCI command: ");
+        serial::put_hex32(s_device.pciCommand);
+        serial::puts(" (memory+bus-master enabled)\n");
+        if ((s_device.pciCommand & ((1u << 1) | (1u << 2))) != ((1u << 1) | (1u << 2))) {
+            set_init_failure(NIC_INIT_PCI, "PCI memory-space/bus-master enable failed");
+            return false;
+        }
     }
 
     serial::puts("[NIC] Initializing E1000-family hardware...\n");
@@ -886,11 +1163,20 @@ bool init_from_bootinfo(const NicBootInfo* nicInfo)
                  (s_device.link == NIC_LINK_DOWN ? "DOWN" : "UNKNOWN"));
     serial::putc('\n');
     
+    if (i219) {
+        phase5_stage_enter(7);
+        // Stage 6 and this registration boundary are always interrupt-masked.
+        mask_nic_interrupts(s_device.mmioBase);
+    }
     s_device.active = true;
     s_device.pollingEnabled = true;
     s_device.nicRegistered = true;
     s_device.initStage = NIC_INIT_READY;
     serial::puts("[NIC] NIC registration: complete; interrupt causes remain masked\n");
+
+    if (i219) {
+        phase5_stage_complete(7);
+    }
     
     serial::puts(is_i219_device(s_device.deviceId)
                  ? "[NIC] I219-LM initialization complete\n"
@@ -985,12 +1271,41 @@ void set_irq_registered(bool registered)
 #if ARCH_HAS_PORT_IO
     if (s_device.active && s_device.mmioMapped) {
         if (registered) {
-            enable_nic_interrupts(s_device.mmioBase);
+            if (is_i219_device(s_device.deviceId)) {
+                // Stages 0-7 must be physically quiet.  Stage 8 records the
+                // handler boundary here but defers IMS until main-loop-ready.
+                mask_nic_interrupts(s_device.mmioBase);
+                if (s_device.phase5Stage < 8u) {
+                    serial::puts("[AIDA-I219-P5] interrupts remain masked\n");
+                } else {
+                    phase5_stage_enter(8);
+                    serial::puts("[AIDA-I219-P5] stage=8 handler registered; enable deferred\n");
+                }
+            } else {
+                enable_nic_interrupts(s_device.mmioBase);
+                s_device.interruptsEnabled = true;
+            }
         } else {
-            mmio_write32(s_device.mmioBase, E1000_IMC, 0xFFFFFFFFu);
-            mmio_read32(s_device.mmioBase, E1000_ICR);
+            mask_nic_interrupts(s_device.mmioBase);
+            s_device.interruptsEnabled = false;
         }
     }
+#endif
+}
+
+void enable_deferred_interrupts()
+{
+#if ARCH_HAS_PORT_IO
+    if (!s_initialised || !s_device.active || !s_device.mmioMapped ||
+        !s_device.irqRegistered || !is_i219_device(s_device.deviceId) ||
+        s_device.phase5Stage != 8u || s_device.interruptsEnabled) {
+        return;
+    }
+
+    enable_nic_interrupts(s_device.mmioBase);
+    s_device.interruptsEnabled = true;
+    phase5_stage_complete(8);
+    serial::puts("[AIDA-I219-P5] NIC interrupt mask enabled after main-loop-ready\n");
 #endif
 }
 
@@ -1160,9 +1475,17 @@ void irq_handler()
     if (icr & E1000_ICR_LSC) {
         // Link status changed - update cached state
         if (is_i219_device(s_device.deviceId)) {
-            if (!read_i219_phy_status(s_device.mmioBase)) {
-                s_device.link = NIC_LINK_UNKNOWN;
-            }
+            // Never issue a multi-transaction MDIC poll from interrupt
+            // context.  A link-change storm before the input loop is ready
+            // would otherwise repeatedly consume the entire bounded wait
+            // budget and starve timer/input dispatch.  STATUS is the cached
+            // interrupt-time observation; the explicit MDIC path remains in
+            // the staged boot-time probe.
+            uint32_t status = mmio_read32(s_device.mmioBase, E1000_STATUS);
+            s_device.statusValue = status;
+            s_device.link = (status == 0xFFFFFFFFu)
+                            ? NIC_LINK_UNKNOWN
+                            : ((status & E1000_STATUS_LU) ? NIC_LINK_UP : NIC_LINK_DOWN);
         } else {
             uint32_t status = mmio_read32(s_device.mmioBase, E1000_STATUS);
             s_device.statusValue = status;

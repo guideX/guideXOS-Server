@@ -1158,6 +1158,10 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         kernel::serial::puts("[IMAGEVIEWER-RUNTIME-SMOKE] done\n");
 #endif
         kernel::serial::puts("[AIDA-PHASE3] checkpoint=main-loop-ready\n");
+        // I219 Stage 8 is the only diagnostic configuration that enables the
+        // NIC hardware interrupt mask, and only after the input/main-loop
+        // readiness boundary has been published.
+        kernel::nic::enable_deferred_interrupts();
         kernel::serial::puts("[KERNEL] Entering main loop (waiting for input)...\n");
         
         
