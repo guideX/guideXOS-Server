@@ -24,6 +24,17 @@
 #error GXOS_AIDA_I219_PHASE5_STAGE must be in the range 0..8
 #endif
 
+// Phase 6 is a kernel-side I219 reset-boundary selector.  The loader carries
+// the same identity in its build output but does not execute the micro-stage
+// MMIO operations.  Existing NICs ignore this selector.
+#ifndef GXOS_AIDA_I219_PHASE6_STAGE
+#define GXOS_AIDA_I219_PHASE6_STAGE 0
+#endif
+
+#if GXOS_AIDA_I219_PHASE6_STAGE < 0 || GXOS_AIDA_I219_PHASE6_STAGE > 6
+#error GXOS_AIDA_I219_PHASE6_STAGE must be in the range 0..6
+#endif
+
 namespace guideXOS {
 namespace pci {
 

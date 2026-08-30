@@ -72,13 +72,16 @@ static uint16_t s_txCur = 0;
 static const uint32_t I219_PHASE5_HW_WAIT_LIMIT = 100000u;
 
 static void mask_nic_interrupts(uint64_t mmioBase);
+static inline void mmio_write32(uint64_t base, uint32_t reg, uint32_t val);
+static inline uint32_t mmio_read32(uint64_t base, uint32_t reg);
 
 static bool is_i219_device(uint16_t deviceId)
 {
     return deviceId == PCI_DEVICE_I219_LM;
 }
 
-static void set_init_failure(InitStage stage, const char* reason)
+static void set_init_failure(InitStage stage, const char* reason,
+                             bool allowHardwareMask = true)
 {
     s_device.initStage = stage;
     s_device.active = false;
@@ -94,7 +97,7 @@ static void set_init_failure(InitStage stage, const char* reason)
     // Stages 0-2 are intentionally non-invasive: stopping at those stages
     // must not add a write merely to report the stop.  From Stage 3 onward,
     // fail-closed masking is required after every attempted hardware access.
-    if (s_device.mmioMapped && s_device.mmioBase != 0 &&
+    if (allowHardwareMask && s_device.mmioMapped && s_device.mmioBase != 0 &&
         (!is_i219_device(s_device.deviceId) || s_device.phase5Stage >= 3u)) {
         mask_nic_interrupts(s_device.mmioBase);
     }
@@ -147,6 +150,254 @@ static bool phase5_stop(uint8_t stage, InitStage initStage, const char* reason)
     phase5_stage_number(stage);
     serial::puts(" complete; bring-up intentionally stopped\n");
     return false;
+}
+
+static void phase6_stage_enter(uint8_t stage, const char* name)
+{
+    serial::puts("[AIDA-I219-P6] stage=");
+    phase5_stage_number(stage);
+    serial::puts(" enter name=");
+    serial::puts(name);
+    serial::puts("\n");
+}
+
+static void phase6_stage_complete(uint8_t stage)
+{
+    serial::puts("[AIDA-I219-P6] stage=");
+    phase5_stage_number(stage);
+    serial::puts(" complete\n");
+}
+
+static void phase6_stage_failed(uint8_t stage, const char* reason)
+{
+    serial::puts("[AIDA-I219-P6] stage=");
+    phase5_stage_number(stage);
+    serial::puts(" failed reason=");
+    serial::puts(reason);
+    serial::puts("\n");
+}
+
+// A diagnostic stage may intentionally stop immediately after a write or
+// reset.  Do not perform the normal fail-closed MMIO mask in that path: an
+// extra access would move the observed physical boundary past the operation
+// under test.  The software state is still fail-closed and the device never
+// reaches the NIC registration or interrupt-enable path.
+static bool phase6_stop(uint8_t stage, InitStage initStage, const char* reason)
+{
+    set_init_failure(initStage, reason, false);
+    serial::puts("[AIDA-I219-P6] stage=");
+    phase5_stage_number(stage);
+    serial::puts(" bring-up intentionally stopped\n");
+    return false;
+}
+
+static void phase6_trace_begin(const char* operation)
+{
+    serial::puts("[AIDA-I219-P6] op=");
+    serial::puts(operation);
+    serial::puts(" begin\n");
+}
+
+static void phase6_trace_complete(const char* operation)
+{
+    serial::puts("[AIDA-I219-P6] op=");
+    serial::puts(operation);
+    serial::puts(" complete\n");
+}
+
+static void phase6_trace_write(uint64_t mmioBase, uint32_t reg, uint32_t value,
+                               const char* operation)
+{
+    phase6_trace_begin(operation);
+    mmio_write32(mmioBase, reg, value);
+    phase6_trace_complete(operation);
+    serial::puts("[AIDA-I219-P6] op=");
+    serial::puts(operation);
+    serial::puts(" reg=0x");
+    serial::put_hex32(reg);
+    serial::puts(" value=0x");
+    serial::put_hex32(value);
+    serial::putc('\n');
+}
+
+static uint32_t phase6_trace_read(uint64_t mmioBase, uint32_t reg,
+                                  const char* operation)
+{
+    phase6_trace_begin(operation);
+    const uint32_t value = mmio_read32(mmioBase, reg);
+    phase6_trace_complete(operation);
+    serial::puts("[AIDA-I219-P6] op=");
+    serial::puts(operation);
+    serial::puts(" reg=0x");
+    serial::put_hex32(reg);
+    serial::puts(" value=0x");
+    serial::put_hex32(value);
+    serial::putc('\n');
+    return value;
+}
+
+// Linux e1000e supplies real sleeps around the PCH reset.  guideXOS currently
+// has no calibrated microsecond delay API, so use the existing x86 port-80
+// delay primitive as a bounded approximation.  This is a sequencing guard,
+// not reset-completion detection; completion remains a separate finite MMIO
+// poll below.
+static void phase6_pch_delay_ms(uint32_t milliseconds)
+{
+#if ARCH_HAS_PORT_IO
+    for (uint32_t ms = 0; ms < milliseconds; ++ms) {
+        for (uint32_t i = 0; i < 10000u; ++i) {
+            arch::outb(0x80u, 0u);
+        }
+    }
+#else
+    (void)milliseconds;
+#endif
+}
+
+static bool run_i219_phase6_micro_stage(uint64_t mmioBase)
+{
+#if GXOS_AIDA_I219_PHASE6_STAGE == 0
+    (void)mmioBase;
+    return true;
+#else
+    const uint8_t stage = static_cast<uint8_t>(GXOS_AIDA_I219_PHASE6_STAGE);
+    uint32_t ctrl = 0;
+
+    phase6_stage_enter(stage,
+#if GXOS_AIDA_I219_PHASE6_STAGE == 1
+                       "mask-only"
+#elif GXOS_AIDA_I219_PHASE6_STAGE == 2
+                       "mask-plus-rctl-disable"
+#elif GXOS_AIDA_I219_PHASE6_STAGE == 3
+                       "mask-plus-rctl-tctl-disable"
+#elif GXOS_AIDA_I219_PHASE6_STAGE == 4
+                       "ctrl-read"
+#elif GXOS_AIDA_I219_PHASE6_STAGE == 5
+                       "ctrl-rst-write"
+#else
+                       "pch-reset-candidate"
+#endif
+    );
+
+    // Stages 1-5 deliberately preserve the operation values of the failed
+    // Phase 5 boundary so each added write/read can be tested independently.
+    if (stage <= 5u) {
+        phase6_trace_write(mmioBase, E1000_IMC, 0xFFFFFFFFu, "imc-write");
+        const uint32_t icr = phase6_trace_read(mmioBase, E1000_ICR, "icr-read-clear");
+        serial::puts("[AIDA-I219-P6] op=icr-read-clear observed=0x");
+        serial::put_hex32(icr);
+        serial::putc('\n');
+    }
+    if (stage >= 2u && stage <= 5u) {
+        phase6_trace_write(mmioBase, E1000_RCTL, 0u, "rctl-disable");
+    }
+    if (stage >= 3u && stage <= 5u) {
+        phase6_trace_write(mmioBase, E1000_TCTL, 0u, "tctl-disable");
+    }
+    if (stage >= 4u && stage <= 5u) {
+        ctrl = phase6_trace_read(mmioBase, E1000_CTRL, "ctrl-read");
+        s_device.ctrlValue = ctrl;
+        if (ctrl == 0xFFFFFFFFu) {
+            phase6_stage_failed(stage, "CTRL returned all-ones");
+            return phase6_stop(stage, NIC_INIT_MMIO,
+                               "Phase 6 CTRL read returned all-ones");
+        }
+    }
+    if (stage == 1u) {
+        phase6_stage_complete(stage);
+        return phase6_stop(stage, NIC_INIT_RESET,
+                           "Phase 6 mask-only diagnostic stop");
+    }
+    if (stage == 2u) {
+        phase6_stage_complete(stage);
+        return phase6_stop(stage, NIC_INIT_RESET,
+                           "Phase 6 RCTL-disable diagnostic stop");
+    }
+    if (stage == 3u) {
+        phase6_stage_complete(stage);
+        return phase6_stop(stage, NIC_INIT_RESET,
+                           "Phase 6 TCTL-disable diagnostic stop");
+    }
+    if (stage == 4u) {
+        phase6_stage_complete(stage);
+        return phase6_stop(stage, NIC_INIT_RESET,
+                           "Phase 6 CTRL-read diagnostic stop");
+    }
+    if (stage == 5u) {
+        const uint32_t resetValue = ctrl | E1000_CTRL_RST;
+        phase6_trace_write(mmioBase, E1000_CTRL, resetValue, "ctrl-rst-write");
+        s_device.ctrlValue = resetValue;
+        phase6_stage_complete(stage);
+        return phase6_stop(stage, NIC_INIT_RESET,
+                           "Phase 6 stopped immediately after CTRL.RST write");
+    }
+
+    // Candidate reset flow, limited to the MAC/reset boundary.  This follows
+    // the PCH ordering that Linux e1000e uses, but intentionally does not
+    // touch PHY/MDIC, NVM, DMA, or interrupts beyond keeping IMC masked.
+    phase6_trace_write(mmioBase, E1000_IMC, 0xFFFFFFFFu, "reset-imc-write");
+    phase6_trace_write(mmioBase, E1000_RCTL, 0u, "reset-rctl-disable");
+    phase6_trace_write(mmioBase, E1000_TCTL, E1000_TCTL_PSP, "reset-tctl-psp");
+    const uint32_t flushValue = phase6_trace_read(mmioBase, E1000_STATUS, "reset-status-flush");
+    (void)flushValue;
+    phase6_trace_begin("reset-pre-delay-10ms");
+    phase6_pch_delay_ms(10u);
+    phase6_trace_complete("reset-pre-delay-10ms");
+
+    ctrl = phase6_trace_read(mmioBase, E1000_CTRL, "reset-ctrl-read");
+    s_device.ctrlValue = ctrl;
+    if (ctrl == 0xFFFFFFFFu) {
+        phase6_stage_failed(stage, "reset CTRL returned all-ones");
+        return phase6_stop(stage, NIC_INIT_MMIO,
+                           "Phase 6 reset CTRL read returned all-ones");
+    }
+
+    const uint32_t resetValue = ctrl | E1000_CTRL_RST;
+    phase6_trace_write(mmioBase, E1000_CTRL, resetValue, "reset-ctrl-rst-write");
+    phase6_trace_begin("reset-post-delay-20ms");
+    phase6_pch_delay_ms(20u);
+    phase6_trace_complete("reset-post-delay-20ms");
+
+    bool resetComplete = false;
+    uint32_t iterations = 0;
+    phase6_trace_begin("reset-poll");
+    for (; iterations < I219_PHASE5_HW_WAIT_LIMIT; ++iterations) {
+        ctrl = mmio_read32(mmioBase, E1000_CTRL);
+        s_device.ctrlValue = ctrl;
+        if (ctrl == 0xFFFFFFFFu) {
+            phase6_trace_complete("reset-poll");
+            phase6_stage_failed(stage, "reset poll returned all-ones");
+            return phase6_stop(stage, NIC_INIT_RESET,
+                               "Phase 6 reset poll returned all-ones");
+        }
+        if ((ctrl & E1000_CTRL_RST) == 0u) {
+            resetComplete = true;
+            ++iterations;
+            break;
+        }
+    }
+    phase6_trace_complete("reset-poll");
+    serial::puts("[AIDA-I219-P6] op=reset-poll iterations=");
+    serial::put_hex32(iterations);
+    serial::putc('\n');
+    if (!resetComplete) {
+        phase6_stage_failed(stage, "reset poll timeout");
+        return phase6_stop(stage, NIC_INIT_RESET,
+                           "Phase 6 PCH reset completion timeout");
+    }
+
+    // Linux re-masks and drains causes after reset.  Keep this final mask in
+    // the candidate image, but do not enable IMS or proceed to PHY/DMA.
+    phase6_trace_write(mmioBase, E1000_IMC, 0xFFFFFFFFu, "reset-post-imc-write");
+    const uint32_t postResetIcr = phase6_trace_read(mmioBase, E1000_ICR,
+                                                     "reset-post-icr-read-clear");
+    serial::puts("[AIDA-I219-P6] op=reset-post-icr-read-clear observed=0x");
+    serial::put_hex32(postResetIcr);
+    serial::putc('\n');
+    phase6_stage_complete(stage);
+    return phase6_stop(stage, NIC_INIT_RESET,
+                       "Phase 6 candidate reset diagnostic stop");
+#endif
 }
 
 static bool dma_address(const void* ptr, uint64_t* physicalOut)
@@ -977,6 +1228,7 @@ bool init_from_bootinfo(const NicBootInfo* nicInfo)
                                   s_device.subclass == PCI_SUBCLASS_ETH;
     const bool i219 = is_i219_device(s_device.deviceId);
     s_device.phase5Stage = i219 ? static_cast<uint8_t>(GXOS_AIDA_I219_PHASE5_STAGE) : 0xFFu;
+    s_device.phase6Stage = i219 ? static_cast<uint8_t>(GXOS_AIDA_I219_PHASE6_STAGE) : 0xFFu;
     s_device.phase5Stopped = false;
     s_device.interruptsEnabled = false;
     s_device.driverBound = exactDriverMatch;
@@ -1121,6 +1373,9 @@ bool init_from_bootinfo(const NicBootInfo* nicInfo)
         if (GXOS_AIDA_I219_PHASE5_STAGE == 2) {
             return phase5_stop(2, NIC_INIT_MMIO,
                                "Phase 5 stage 2 intentionally stopped after MMIO probe");
+        }
+        if (GXOS_AIDA_I219_PHASE6_STAGE != 0) {
+            return run_i219_phase6_micro_stage(s_device.mmioBase);
         }
     } else {
         serial::puts("[NIC] MMIO mapping: accepted size=");

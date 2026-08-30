@@ -15,7 +15,9 @@ param(
     [string]$OscdimgPath,
     [string]$PythonPath,
     [ValidateRange(0, 8)]
-    [int]$I219Phase5Stage = 8
+    [int]$I219Phase5Stage = 8,
+    [ValidateRange(0, 6)]
+    [int]$I219Phase6Stage = 0
 )
 
 Set-StrictMode -Version Latest
@@ -417,8 +419,11 @@ function Invoke-CanonicalBuild {
     if (-not (Test-Path -LiteralPath $BuildScript -PathType Leaf)) { Fail "canonical build script is missing: $BuildScript" }
     $powershell = Get-Command powershell.exe -ErrorAction SilentlyContinue
     if ($null -eq $powershell) { Fail 'Windows PowerShell (powershell.exe) is required to invoke the canonical build.' }
-    $buildArgs = @('-Arch', $Arch, '-I219Phase5Stage', [string]$I219Phase5Stage)
-    if ($Clean) { $buildArgs = @('-Clean', '-Arch', $Arch, '-I219Phase5Stage', [string]$I219Phase5Stage) }
+    $buildArgs = @('-Arch', $Arch, '-I219Phase5Stage', [string]$I219Phase5Stage,
+                   '-I219Phase6Stage', [string]$I219Phase6Stage)
+    if ($Clean) { $buildArgs = @('-Clean', '-Arch', $Arch,
+                                  '-I219Phase5Stage', [string]$I219Phase5Stage,
+                                  '-I219Phase6Stage', [string]$I219Phase6Stage) }
     Write-Host "[release-iso] invoking canonical build.ps1 with supported arguments" -ForegroundColor Cyan
     Invoke-ExternalChecked -FilePath $powershell.Source -Arguments (@('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $BuildScript) + $buildArgs) | Out-Null
 }
@@ -484,6 +489,10 @@ try {
         if ($identityMatch.Success -and [int]$identityMatch.Groups[1].Value -ne $I219Phase5Stage) {
             Fail "ESP build identity stage $($identityMatch.Groups[1].Value) does not match requested I219 Phase 5 stage $I219Phase5Stage. Rebuild without -SkipBuild."
         }
+        $microStageMatch = [regex]::Match($identityText, '(?m)^phase6I219Stage=(\d+)\s*$')
+        if ($microStageMatch.Success -and [int]$microStageMatch.Groups[1].Value -ne $I219Phase6Stage) {
+            Fail "ESP build identity micro-stage $($microStageMatch.Groups[1].Value) does not match requested I219 Phase 6 micro-stage $I219Phase6Stage. Rebuild without -SkipBuild."
+        }
     }
 
     $bootloader = Get-Item -LiteralPath (Join-Path $EspRoot 'EFI\BOOT\BOOTX64.EFI')
@@ -522,6 +531,7 @@ try {
         ("Architecture: $Arch"),
         ("Source commit: $sourceCommit"),
         ("I219 Phase 5 stage selector: $I219Phase5Stage"),
+        ("I219 Phase 6 micro-stage selector: $I219Phase6Stage"),
         '',
         ("The bootable UEFI FAT image is $bootImageIsoPath."),
         'It contains the complete guideXOS Server EFI payload.',
@@ -576,7 +586,7 @@ try {
         fs = '2.4.16'
         pycdlib = '1.16.0'
         isoBackend = $IsoBackend
-        canonicalBuild = 'build.ps1 -Arch amd64 -I219Phase5Stage ' + $I219Phase5Stage + $(if ($Clean) { ' -Clean' } else { '' })
+        canonicalBuild = 'build.ps1 -Arch amd64 -I219Phase5Stage ' + $I219Phase5Stage + ' -I219Phase6Stage ' + $I219Phase6Stage + $(if ($Clean) { ' -Clean' } else { '' })
     }
     if ($IsoBackend -eq 'Oscdimg') {
         $toolRecords.oscdimg = Get-ToolRecord $oscdimg $oscdimgVersion
@@ -588,6 +598,7 @@ try {
         architecture = $Arch
         artifactType = 'bootable-uefi-iso'
         i219Phase5Stage = $I219Phase5Stage
+        i219Phase6Stage = $I219Phase6Stage
         isoBackend = $IsoBackend
         isoFilename = $isoName
         isoByteSize = [int64]$isoInfo.Length

@@ -2117,6 +2117,17 @@ static void cmd_nicinfo() {
         output_string("N/A");
     }
     output_string("\n");
+    output_string("I219 Phase 6 micro-stage: ");
+    if (dev->deviceId == nic::PCI_DEVICE_I219_LM) {
+        char microStageText[2];
+        microStageText[0] = static_cast<char>('0' + dev->phase6Stage);
+        microStageText[1] = '\0';
+        output_string(microStageText);
+        if (dev->phase6Stage != 0u) output_string(" (diagnostic)");
+    } else {
+        output_string("N/A");
+    }
+    output_string("\n");
     output_string("Driver Bound: ");
     output_string(dev->driverBound ? "YES" : "NO");
     output_string("   Init Stage: ");

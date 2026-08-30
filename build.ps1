@@ -19,7 +19,9 @@ param(
     [string]$Memory = "1024M",
     [string]$Arch = "amd64",
     [ValidateRange(0, 8)]
-    [int]$I219Phase5Stage = 8
+    [int]$I219Phase5Stage = 8,
+    [ValidateRange(0, 6)]
+    [int]$I219Phase6Stage = 0
 )
 
 $ErrorActionPreference = "Stop"
@@ -30,6 +32,7 @@ Write-Host "====================================" -ForegroundColor Cyan
 Write-Host "  Build identity: GXOS-LARGE-FILE-PASTE-TRACE-V1" -ForegroundColor Cyan
 Write-Host "  Build probe ID: GXOS-LFPASTE-20260726-02" -ForegroundColor Cyan
 Write-Host "  I219 Phase 5 stage: $I219Phase5Stage" -ForegroundColor Cyan
+Write-Host "  I219 Phase 6 micro-stage: $I219Phase6Stage" -ForegroundColor Cyan
 Write-Host ""
 
 $RootDir = $PSScriptRoot
@@ -188,7 +191,7 @@ if (Test-Path $BootloaderProject) {
     }
     
     # Build bootloader
-    & $MSBuild $BootloaderProject /p:Configuration=Release /p:Platform=x64 /p:GXOS_AIDA_I219_PHASE5_STAGE=$I219Phase5Stage /t:Rebuild /m /nologo /verbosity:minimal
+    & $MSBuild $BootloaderProject /p:Configuration=Release /p:Platform=x64 /p:GXOS_AIDA_I219_PHASE5_STAGE=$I219Phase5Stage /p:GXOS_AIDA_I219_PHASE6_STAGE=$I219Phase6Stage /p:TrackFileAccess=false /t:Rebuild /m /nologo /verbosity:minimal
     
     if ($LASTEXITCODE -ne 0) {
         Write-Host "      ERROR: Bootloader build failed" -ForegroundColor Red
@@ -332,6 +335,7 @@ if (!$SkipKernel) {
         Push-Location $KernelDir
         $KernelExtraCFlags = @()
         $KernelExtraCFlags += "-DGXOS_AIDA_I219_PHASE5_STAGE=$I219Phase5Stage"
+        $KernelExtraCFlags += "-DGXOS_AIDA_I219_PHASE6_STAGE=$I219Phase6Stage"
         if (-not [string]::IsNullOrWhiteSpace($env:EXTRA_CFLAGS)) {
             $KernelExtraCFlags += $env:EXTRA_CFLAGS.Trim()
         }
@@ -446,6 +450,7 @@ elseif (Test-Path $KernelBin) {
         "probe=GXOS-LFPASTE-20260726-02"
         "imageKind=ESP-directory-used-as-QEMU-FAT-media"
         "phase5I219Stage=$I219Phase5Stage"
+        "phase6I219Stage=$I219Phase6Stage"
         "imageRoot=$ESPDir"
         "bootloaderSource=$BootloaderBin"
         "bootloaderSha256=$((Get-FileHash -LiteralPath $TargetBootloader -Algorithm SHA256).Hash)"

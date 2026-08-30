@@ -34,6 +34,17 @@
 #error GXOS_AIDA_I219_PHASE5_STAGE must be in the range 0..8
 #endif
 
+// Phase 6 is a separate, compile-time micro-stage selector.  Zero leaves the
+// normal Phase 5 path selected; values 1..6 stop after one additional
+// I219-only reset-boundary operation.  Existing NICs ignore this selector.
+#ifndef GXOS_AIDA_I219_PHASE6_STAGE
+#define GXOS_AIDA_I219_PHASE6_STAGE 0
+#endif
+
+#if GXOS_AIDA_I219_PHASE6_STAGE < 0 || GXOS_AIDA_I219_PHASE6_STAGE > 6
+#error GXOS_AIDA_I219_PHASE6_STAGE must be in the range 0..6
+#endif
+
 namespace kernel {
 namespace nic {
 
@@ -346,6 +357,7 @@ struct NICDevice {
     PhyAccessState phyAccess;
     InitStage   initStage;
     uint8_t     phase5Stage;       // 0..8 for I219; 0xFF for other NICs
+    uint8_t     phase6Stage;       // 0..6 for I219; 0xFF for other NICs
     bool        phase5Stopped;     // intentionally stopped or failed safely
     bool        interruptsEnabled; // hardware NIC interrupt mask is enabled
     char        lastInitFailure[96];
