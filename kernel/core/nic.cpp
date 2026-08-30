@@ -51,16 +51,14 @@ static uint64_t    s_kernelPhysicalBase = 0x100000;
 #if defined(__GNUC__) || defined(__clang__)
 static RxDescriptor s_rxDescs[NUM_RX_DESC] __attribute__((aligned(16)));
 static TxDescriptor s_txDescs[NUM_TX_DESC] __attribute__((aligned(16)));
+static uint8_t s_rxBuffers[NUM_RX_DESC][RX_BUFFER_SIZE] __attribute__((aligned(16)));
+static uint8_t s_txBuffer[ETH_FRAME_MAX] __attribute__((aligned(16)));
 #else
 __declspec(align(16)) static RxDescriptor s_rxDescs[NUM_RX_DESC];
 __declspec(align(16)) static TxDescriptor s_txDescs[NUM_TX_DESC];
+__declspec(align(16)) static uint8_t s_rxBuffers[NUM_RX_DESC][RX_BUFFER_SIZE];
+__declspec(align(16)) static uint8_t s_txBuffer[ETH_FRAME_MAX];
 #endif
-
-// Packet buffers for RX ring (each 2048 bytes)
-static uint8_t s_rxBuffers[NUM_RX_DESC][RX_BUFFER_SIZE];
-
-// TX packet buffer (single frame staging area)
-static uint8_t s_txBuffer[ETH_FRAME_MAX];
 
 // Current descriptor indices
 static uint16_t s_rxCur = 0;
@@ -78,6 +76,15 @@ static inline uint32_t mmio_read32(uint64_t base, uint32_t reg);
 static bool is_i219_device(uint16_t deviceId)
 {
     return deviceId == PCI_DEVICE_I219_LM;
+}
+
+static bool i219_phase7_path_selected()
+{
+    // Phase 5/6 selectors retain their historical isolation behavior. The
+    // permanent PCH path is selected only by the default Phase 5 boundary
+    // with no Phase 6 micro-stage active.
+    return GXOS_AIDA_I219_PHASE5_STAGE == 8 &&
+           GXOS_AIDA_I219_PHASE6_STAGE == 0;
 }
 
 static void set_init_failure(InitStage stage, const char* reason,
@@ -241,7 +248,7 @@ static uint32_t phase6_trace_read(uint64_t mmioBase, uint32_t reg,
 // delay primitive as a bounded approximation.  This is a sequencing guard,
 // not reset-completion detection; completion remains a separate finite MMIO
 // poll below.
-static void phase6_pch_delay_ms(uint32_t milliseconds)
+static void pch_reset_delay_ms(uint32_t milliseconds)
 {
 #if ARCH_HAS_PORT_IO
     for (uint32_t ms = 0; ms < milliseconds; ++ms) {
@@ -252,6 +259,110 @@ static void phase6_pch_delay_ms(uint32_t milliseconds)
 #else
     (void)milliseconds;
 #endif
+}
+
+static void phase7_print_mac_marker(const uint8_t* mac)
+{
+    serial::puts("[AIDA-I219-P7] mac=");
+    for (uint8_t i = 0; i < ETH_ALEN; ++i) {
+        if (i > 0) serial::putc(':');
+        serial::put_hex8(mac[i]);
+    }
+    serial::puts(" valid=yes source=RAL0/RAH0\n");
+}
+
+static void phase7_stage_enter(const char* name)
+{
+    serial::puts("[AIDA-I219-P7] stage=");
+    serial::put_hex8(GXOS_AIDA_I219_PHASE7_STAGE);
+    serial::puts(" enter name=");
+    serial::puts(name);
+    serial::puts("\n");
+}
+
+static void phase7_stage_complete(const char* name)
+{
+    serial::puts("[AIDA-I219-P7] ");
+    serial::puts(name);
+    serial::puts("=ready\n");
+}
+
+static bool phase7_stop(InitStage initStage, const char* reason)
+{
+    set_init_failure(initStage, reason);
+    serial::puts("[AIDA-I219-P7] stage=");
+    serial::puts(phase7_stage_name(GXOS_AIDA_I219_PHASE7_STAGE));
+    serial::puts(" complete; bring-up intentionally stopped\n");
+    return false;
+}
+
+// Permanent exact-I219 reset path. This is the smallest physically proven
+// PCH repair: it deliberately omits Linux's ownership/SWFLAG/FWSM/PHY-reset
+// machinery until guideXOS has an evidence-backed need for those operations.
+static bool i219_pch_reset(uint64_t mmioBase)
+{
+    s_device.initStage = NIC_INIT_RESET;
+
+    // Phase 6 physical evidence requires causes to be masked and drained
+    // before quiescing the engines.
+    mask_nic_interrupts(mmioBase);
+    mmio_write32(mmioBase, E1000_RCTL, 0u);
+    mmio_write32(mmioBase, E1000_TCTL, E1000_TCTL_PSP);
+
+    // Flush posted writes through STATUS before the reset request. Do not
+    // perform a post-reset STATUS/CTRL flush until the finite delay elapses.
+    const uint32_t status = mmio_read32(mmioBase, E1000_STATUS);
+    s_device.statusValue = status;
+    if (status == 0xFFFFFFFFu) {
+        serial::puts("[AIDA-I219-P7] reset=FAIL reason=status-all-ones\n");
+        set_init_failure(NIC_INIT_MMIO, "I219 STATUS flush returned all-ones");
+        return false;
+    }
+
+    pch_reset_delay_ms(10u);
+
+    const uint32_t ctrl = mmio_read32(mmioBase, E1000_CTRL);
+    s_device.ctrlValue = ctrl;
+    if (ctrl == 0xFFFFFFFFu) {
+        serial::puts("[AIDA-I219-P7] reset=FAIL reason=ctrl-all-ones\n");
+        set_init_failure(NIC_INIT_MMIO, "I219 CTRL read returned all-ones");
+        return false;
+    }
+
+    // Preserve the hardware's CTRL state exactly as in the proven candidate;
+    // only the reset bit is added.
+    mmio_write32(mmioBase, E1000_CTRL, ctrl | E1000_CTRL_RST);
+
+    // Immediate post-reset reads were part of the unsafe generic boundary.
+    // The first post-write MMIO read is intentionally delayed and is only the
+    // bounded completion poll below.
+    pch_reset_delay_ms(20u);
+
+    bool resetComplete = false;
+    for (uint32_t i = 0; i < I219_PHASE5_HW_WAIT_LIMIT; ++i) {
+        const uint32_t observedCtrl = mmio_read32(mmioBase, E1000_CTRL);
+        s_device.ctrlValue = observedCtrl;
+        if (observedCtrl == 0xFFFFFFFFu) {
+            serial::puts("[AIDA-I219-P7] reset=FAIL reason=poll-all-ones\n");
+            set_init_failure(NIC_INIT_RESET, "I219 reset poll returned all-ones");
+            return false;
+        }
+        if ((observedCtrl & E1000_CTRL_RST) == 0u) {
+            resetComplete = true;
+            break;
+        }
+    }
+    if (!resetComplete) {
+        serial::puts("[AIDA-I219-P7] reset=FAIL reason=poll-timeout\n");
+        set_init_failure(NIC_INIT_RESET, "I219 PCH reset completion timeout");
+        return false;
+    }
+
+    // Linux re-masks and drains causes after the PCH reset. This is the last
+    // operation in the permanent reset helper and still never enables IMS.
+    mask_nic_interrupts(mmioBase);
+    serial::puts("[AIDA-I219-P7] reset=PASS\n");
+    return true;
 }
 
 static bool run_i219_phase6_micro_stage(uint64_t mmioBase)
@@ -341,7 +452,7 @@ static bool run_i219_phase6_micro_stage(uint64_t mmioBase)
     const uint32_t flushValue = phase6_trace_read(mmioBase, E1000_STATUS, "reset-status-flush");
     (void)flushValue;
     phase6_trace_begin("reset-pre-delay-10ms");
-    phase6_pch_delay_ms(10u);
+    pch_reset_delay_ms(10u);
     phase6_trace_complete("reset-pre-delay-10ms");
 
     ctrl = phase6_trace_read(mmioBase, E1000_CTRL, "reset-ctrl-read");
@@ -355,7 +466,7 @@ static bool run_i219_phase6_micro_stage(uint64_t mmioBase)
     const uint32_t resetValue = ctrl | E1000_CTRL_RST;
     phase6_trace_write(mmioBase, E1000_CTRL, resetValue, "reset-ctrl-rst-write");
     phase6_trace_begin("reset-post-delay-20ms");
-    phase6_pch_delay_ms(20u);
+    pch_reset_delay_ms(20u);
     phase6_trace_complete("reset-post-delay-20ms");
 
     bool resetComplete = false;
@@ -417,6 +528,86 @@ static bool dma_address(const void* ptr, uint64_t* physicalOut)
     if (physical == 0) return false;
 
     *physicalOut = physical;
+    return true;
+}
+
+static bool dma_address_range(const void* ptr, uint64_t length,
+                              uint64_t alignment, uint64_t* physicalOut)
+{
+    if (length == 0u || !dma_address(ptr, physicalOut)) return false;
+    if (alignment != 0u && ((*physicalOut & (alignment - 1u)) != 0u)) {
+        return false;
+    }
+    if (*physicalOut > (~0ULL - (length - 1u))) return false;
+    return true;
+}
+
+static bool dma_ranges_overlap(uint64_t first, uint64_t firstLength,
+                               uint64_t second, uint64_t secondLength)
+{
+    if (firstLength == 0u || secondLength == 0u) return false;
+    const uint64_t firstEnd = first + firstLength;
+    const uint64_t secondEnd = second + secondLength;
+    return first < secondEnd && second < firstEnd;
+}
+
+// All DMA objects are static storage in the loaded kernel image. The UEFI
+// loader maps that complete image and the physical translation below uses the
+// same image base supplied in BootInfo. Validate the complete small layout
+// before handing any ring to hardware so a bad translation fails closed.
+static bool validate_dma_layout()
+{
+    static_assert(sizeof(RxDescriptor) == 16u, "RX descriptor size changed");
+    static_assert(sizeof(TxDescriptor) == 16u, "TX descriptor size changed");
+    static_assert((NUM_RX_DESC * sizeof(RxDescriptor)) % 128u == 0u,
+                  "RX ring length must be 128-byte aligned");
+    static_assert((NUM_TX_DESC * sizeof(TxDescriptor)) % 128u == 0u,
+                  "TX ring length must be 128-byte aligned");
+
+    uint64_t rxDescPhys = 0;
+    uint64_t txDescPhys = 0;
+    uint64_t txBufferPhys = 0;
+    if (!dma_address_range(&s_rxDescs[0],
+                           NUM_RX_DESC * sizeof(RxDescriptor), 16u,
+                           &rxDescPhys) ||
+        !dma_address_range(&s_txDescs[0],
+                           NUM_TX_DESC * sizeof(TxDescriptor), 16u,
+                           &txDescPhys) ||
+        !dma_address_range(&s_txBuffer[0], sizeof(s_txBuffer), 16u,
+                           &txBufferPhys)) {
+        return false;
+    }
+
+    if (dma_ranges_overlap(rxDescPhys, NUM_RX_DESC * sizeof(RxDescriptor),
+                           txDescPhys, NUM_TX_DESC * sizeof(TxDescriptor)) ||
+        dma_ranges_overlap(rxDescPhys, NUM_RX_DESC * sizeof(RxDescriptor),
+                           txBufferPhys, sizeof(s_txBuffer)) ||
+        dma_ranges_overlap(txDescPhys, NUM_TX_DESC * sizeof(TxDescriptor),
+                           txBufferPhys, sizeof(s_txBuffer))) {
+        return false;
+    }
+
+    uint64_t rxBufferPhys[NUM_RX_DESC];
+    for (uint16_t i = 0; i < NUM_RX_DESC; ++i) {
+        if (!dma_address_range(&s_rxBuffers[i][0], RX_BUFFER_SIZE, 16u,
+                               &rxBufferPhys[i])) {
+            return false;
+        }
+        if (dma_ranges_overlap(rxDescPhys, NUM_RX_DESC * sizeof(RxDescriptor),
+                               rxBufferPhys[i], RX_BUFFER_SIZE) ||
+            dma_ranges_overlap(txDescPhys, NUM_TX_DESC * sizeof(TxDescriptor),
+                               rxBufferPhys[i], RX_BUFFER_SIZE) ||
+            dma_ranges_overlap(txBufferPhys, sizeof(s_txBuffer),
+                               rxBufferPhys[i], RX_BUFFER_SIZE)) {
+            return false;
+        }
+        for (uint16_t previous = 0; previous < i; ++previous) {
+            if (dma_ranges_overlap(rxBufferPhys[previous], RX_BUFFER_SIZE,
+                                   rxBufferPhys[i], RX_BUFFER_SIZE)) {
+                return false;
+            }
+        }
+    }
     return true;
 }
 
@@ -574,7 +765,9 @@ static bool mdic_read(uint64_t mmioBase, uint8_t phyAddress,
     if (!valueOut) return false;
 
     if (is_i219_device(s_device.deviceId)) {
-        serial::puts("[AIDA-I219-P5] mdic begin phy=");
+        serial::puts(i219_phase7_path_selected()
+                     ? "[AIDA-I219-P7] mdic begin phy="
+                     : "[AIDA-I219-P5] mdic begin phy=");
         serial::put_hex8(phyAddress);
         serial::puts(" reg=");
         serial::put_hex8(registerAddress);
@@ -591,7 +784,9 @@ static bool mdic_read(uint64_t mmioBase, uint8_t phyAddress,
         s_device.mdicValue = mdic;
         if ((mdic & E1000_MDIC_READY) == 0u) continue;
         if ((mdic & E1000_MDIC_ERROR) != 0u) {
-            serial::puts("[AIDA-I219-P5] mdic error phy=");
+            serial::puts(i219_phase7_path_selected()
+                         ? "[AIDA-I219-P7] mdic error phy="
+                         : "[AIDA-I219-P5] mdic error phy=");
             serial::put_hex8(phyAddress);
             serial::puts(" reg=");
             serial::put_hex8(registerAddress);
@@ -600,7 +795,9 @@ static bool mdic_read(uint64_t mmioBase, uint8_t phyAddress,
         }
         const uint16_t value = static_cast<uint16_t>(mdic & E1000_MDIC_DATA_MASK);
         if (value == 0xFFFFu) {
-            serial::puts("[AIDA-I219-P5] mdic invalid phy=");
+            serial::puts(i219_phase7_path_selected()
+                         ? "[AIDA-I219-P7] mdic invalid phy="
+                         : "[AIDA-I219-P5] mdic invalid phy=");
             serial::put_hex8(phyAddress);
             serial::puts(" reg=");
             serial::put_hex8(registerAddress);
@@ -609,7 +806,9 @@ static bool mdic_read(uint64_t mmioBase, uint8_t phyAddress,
         }
         *valueOut = value;
         if (is_i219_device(s_device.deviceId)) {
-            serial::puts("[AIDA-I219-P5] mdic complete phy=");
+            serial::puts(i219_phase7_path_selected()
+                         ? "[AIDA-I219-P7] mdic complete phy="
+                         : "[AIDA-I219-P5] mdic complete phy=");
             serial::put_hex8(phyAddress);
             serial::puts(" reg=");
             serial::put_hex8(registerAddress);
@@ -618,7 +817,9 @@ static bool mdic_read(uint64_t mmioBase, uint8_t phyAddress,
         return true;
     }
 
-    serial::puts("[AIDA-I219-P5] mdic timeout phy=");
+    serial::puts(i219_phase7_path_selected()
+                 ? "[AIDA-I219-P7] mdic timeout phy="
+                 : "[AIDA-I219-P5] mdic timeout phy=");
     serial::put_hex8(phyAddress);
     serial::puts(" reg=");
     serial::put_hex8(registerAddress);
@@ -631,14 +832,18 @@ static bool read_i219_phy_status(uint64_t mmioBase)
     uint16_t phyId1 = 0;
     uint16_t phyId2 = 0;
     uint16_t phyStatus = 0;
-    if (!mdic_read(mmioBase, I219_PHY_ADDRESS, 2, &phyId1) ||
-        !mdic_read(mmioBase, I219_PHY_ADDRESS, 3, &phyId2) ||
+    if (!mdic_read(mmioBase, I219_PHY_ADDRESS, I219_PHY_ID1_REG, &phyId1) ||
+        !mdic_read(mmioBase, I219_PHY_ADDRESS, I219_PHY_ID2_REG, &phyId2) ||
         !mdic_read(mmioBase, I219_PHY_ADDRESS, I219_PHY_STATUS_REG, &phyStatus)) {
         s_device.phyAccess = NIC_PHY_FAILED;
         return false;
     }
 
-    if ((phyId1 == 0u && phyId2 == 0u) ||
+    // The integrated PCH PHY is conventionally reached at MDI address 1;
+    // registers 2/3 are the IEEE PHY identifier and register 26 is the
+    // family-specific link/status value. These are read-only assumptions in
+    // this stage: no PHY programming or semaphore acquisition is attempted.
+    if (phyId1 == 0u || phyId2 == 0u ||
         (phyId1 == 0xFFFFu && phyId2 == 0xFFFFu)) {
         s_device.phyAccess = NIC_PHY_FAILED;
         return false;
@@ -671,18 +876,23 @@ static bool read_i219_phy_status(uint64_t mmioBase)
 
 static bool init_rx(uint64_t mmioBase)
 {
+    if (!validate_dma_layout()) return false;
+
     // Initialise each RX descriptor to point at its buffer
     for (uint16_t i = 0; i < NUM_RX_DESC; ++i) {
         memzero(&s_rxDescs[i], sizeof(RxDescriptor));
         uint64_t bufferPhys = 0;
-        if (!dma_address(&s_rxBuffers[i][0], &bufferPhys)) return false;
+        if (!dma_address_range(&s_rxBuffers[i][0], RX_BUFFER_SIZE, 16u,
+                               &bufferPhys)) return false;
         s_rxDescs[i].bufferAddr = bufferPhys;
         s_rxDescs[i].status     = 0;
     }
 
     // Program the RX descriptor ring base address
     uint64_t rxDescPhys = 0;
-    if (!dma_address(&s_rxDescs[0], &rxDescPhys) || (rxDescPhys & 0x0Fu) != 0u) {
+    if (!dma_address_range(&s_rxDescs[0],
+                           NUM_RX_DESC * sizeof(RxDescriptor), 16u,
+                           &rxDescPhys)) {
         return false;
     }
     mmio_write32(mmioBase, E1000_RDBAL, static_cast<uint32_t>(rxDescPhys & 0xFFFFFFFF));
@@ -713,6 +923,8 @@ static bool init_rx(uint64_t mmioBase)
 
 static bool init_tx(uint64_t mmioBase)
 {
+    if (!validate_dma_layout()) return false;
+
     for (uint16_t i = 0; i < NUM_TX_DESC; ++i) {
         memzero(&s_txDescs[i], sizeof(TxDescriptor));
         s_txDescs[i].status = E1000_TXD_STAT_DD; // mark as done (available)
@@ -720,7 +932,9 @@ static bool init_tx(uint64_t mmioBase)
 
     // Program the TX descriptor ring base address
     uint64_t txDescPhys = 0;
-    if (!dma_address(&s_txDescs[0], &txDescPhys) || (txDescPhys & 0x0Fu) != 0u) {
+    if (!dma_address_range(&s_txDescs[0],
+                           NUM_TX_DESC * sizeof(TxDescriptor), 16u,
+                           &txDescPhys)) {
         return false;
     }
     mmio_write32(mmioBase, E1000_TDBAL, static_cast<uint32_t>(txDescPhys & 0xFFFFFFFF));
@@ -839,59 +1053,75 @@ static bool init_e1000(uint64_t mmioBase)
     }
 
     const bool i219 = is_i219_device(s_device.deviceId);
-    if (i219) {
-        phase5_stage_enter(3);
-        serial::puts("[AIDA-I219-P5] reset begin\n");
-    }
+    const bool i219P7 = i219 && i219_phase7_path_selected();
+    uint32_t ctrl = 0;
 
-    // Disable all interrupts and engines before reset.  The reset wait is
-    // finite and observes the device's self-clearing CTRL.RST bit.
-    s_device.initStage = NIC_INIT_RESET;
-    mmio_write32(mmioBase, E1000_RCTL, 0);
-    mmio_write32(mmioBase, E1000_TCTL, 0);
-    mmio_write32(mmioBase, E1000_IMC, 0xFFFFFFFF);
-    mmio_read32(mmioBase, E1000_ICR);
-
-    uint32_t ctrl = mmio_read32(mmioBase, E1000_CTRL);
-    s_device.ctrlValue = ctrl;
-    if (ctrl == 0xFFFFFFFFu) {
-        if (i219) {
-            serial::puts("[AIDA-I219-P5] reset CTRL read returned all-ones\n");
-            phase5_stage_failed(3);
+    if (i219P7) {
+        if (!i219_pch_reset(mmioBase)) return false;
+        if (GXOS_AIDA_I219_PHASE7_STAGE == 0) {
+            // The default I219 production path stops at the physically proven
+            // reset boundary until the later hardware stages are qualified.
+            return phase7_stop(NIC_INIT_RESET,
+                               "I219 PCH reset-only default; later bring-up is opt-in");
         }
-        set_init_failure(NIC_INIT_MMIO, "MMIO CTRL read returned all-ones");
-        return false;
-    }
+    } else {
+        // Preserve the old generic sequence only for the historical Phase 5
+        // isolation selectors. It is never used by the Phase 7/default I219
+        // path, and all non-I219 devices retain this exact legacy behavior.
+        if (i219) {
+            phase5_stage_enter(3);
+            serial::puts("[AIDA-I219-P5] reset begin\n");
+        }
 
-    mmio_write32(mmioBase, E1000_CTRL, ctrl | E1000_CTRL_RST);
-    bool resetComplete = false;
-    for (uint32_t i = 0; i < I219_PHASE5_HW_WAIT_LIMIT; ++i) {
+        // Disable all interrupts and engines before reset. The reset wait is
+        // finite and observes the device's self-clearing CTRL.RST bit.
+        s_device.initStage = NIC_INIT_RESET;
+        mmio_write32(mmioBase, E1000_RCTL, 0);
+        mmio_write32(mmioBase, E1000_TCTL, 0);
+        mmio_write32(mmioBase, E1000_IMC, 0xFFFFFFFF);
+        mmio_read32(mmioBase, E1000_ICR);
+
         ctrl = mmio_read32(mmioBase, E1000_CTRL);
         s_device.ctrlValue = ctrl;
         if (ctrl == 0xFFFFFFFFu) {
-            if (i219) phase5_stage_failed(3);
-            set_init_failure(NIC_INIT_RESET, "reset read returned all-ones");
+            if (i219) {
+                serial::puts("[AIDA-I219-P5] reset CTRL read returned all-ones\n");
+                phase5_stage_failed(3);
+            }
+            set_init_failure(NIC_INIT_MMIO, "MMIO CTRL read returned all-ones");
             return false;
         }
-        if ((ctrl & E1000_CTRL_RST) == 0u) {
-            resetComplete = true;
-            break;
-        }
-    }
-    if (!resetComplete) {
-        if (i219) {
-            serial::puts("[AIDA-I219-P5] reset timeout\n");
-            phase5_stage_failed(3);
-        }
-        set_init_failure(NIC_INIT_RESET, "reset timeout");
-        return false;
-    }
-    if (!i219) serial::puts("[NIC] MAC reset: complete (bounded)\n");
 
-    // Keep interrupts masked until all state and rings are ready.
-    mask_nic_interrupts(mmioBase);
+        mmio_write32(mmioBase, E1000_CTRL, ctrl | E1000_CTRL_RST);
+        bool resetComplete = false;
+        for (uint32_t i = 0; i < I219_PHASE5_HW_WAIT_LIMIT; ++i) {
+            ctrl = mmio_read32(mmioBase, E1000_CTRL);
+            s_device.ctrlValue = ctrl;
+            if (ctrl == 0xFFFFFFFFu) {
+                if (i219) phase5_stage_failed(3);
+                set_init_failure(NIC_INIT_RESET, "reset read returned all-ones");
+                return false;
+            }
+            if ((ctrl & E1000_CTRL_RST) == 0u) {
+                resetComplete = true;
+                break;
+            }
+        }
+        if (!resetComplete) {
+            if (i219) {
+                serial::puts("[AIDA-I219-P5] reset timeout\n");
+                phase5_stage_failed(3);
+            }
+            set_init_failure(NIC_INIT_RESET, "reset timeout");
+            return false;
+        }
+        if (!i219) serial::puts("[NIC] MAC reset: complete (bounded)\n");
 
-    if (i219) {
+        // Keep interrupts masked until all state and rings are ready.
+        mask_nic_interrupts(mmioBase);
+    }
+
+    if (i219 && !i219P7) {
         serial::puts("[AIDA-I219-P5] reset complete\n");
         phase5_stage_complete(3);
         if (GXOS_AIDA_I219_PHASE5_STAGE == 3) {
@@ -945,6 +1175,45 @@ static bool init_e1000(uint64_t mmioBase)
         }
 
         phase5_stage_enter(6);
+    } else if (i219P7) {
+        phase7_stage_enter("mac");
+        s_device.initStage = NIC_INIT_MAC;
+        if (!read_mac_address(mmioBase, s_device.macAddress)) {
+            serial::puts("[AIDA-I219-P7] mac-invalid source=RAL0/RAH0\n");
+            set_init_failure(NIC_INIT_MAC, "I219 RAL0/RAH0 contains an invalid station address");
+            return false;
+        }
+        phase7_print_mac_marker(s_device.macAddress);
+        phase7_stage_complete("mac");
+        if (GXOS_AIDA_I219_PHASE7_STAGE == 1) {
+            return phase7_stop(NIC_INIT_MAC,
+                               "Phase 7 MAC diagnostic stop");
+        }
+
+        phase7_stage_enter("phy");
+        s_device.initStage = NIC_INIT_PHY;
+        if (!read_i219_phy_status(mmioBase)) {
+            serial::puts("[AIDA-I219-P7] phy-timeout\n");
+            set_init_failure(NIC_INIT_PHY, "I219 PHY MDIC read timed out or returned an invalid response");
+            return false;
+        }
+        serial::puts("[AIDA-I219-P7] phy-id=0x");
+        serial::put_hex32(s_device.phyId1);
+        serial::puts(":0x");
+        serial::put_hex32(s_device.phyId2);
+        serial::puts(" address=0x");
+        serial::put_hex8(s_device.phyAddress);
+        serial::puts(" valid=yes\n");
+        serial::puts("[AIDA-I219-P7] phy-status=0x");
+        serial::put_hex32(s_device.phyStatusValue);
+        serial::puts(" link=");
+        serial::puts(s_device.link == NIC_LINK_UP ? "up" : "down");
+        serial::puts("\n");
+        phase7_stage_complete("phy");
+        if (GXOS_AIDA_I219_PHASE7_STAGE == 2) {
+            return phase7_stop(NIC_INIT_PHY,
+                               "Phase 7 PHY diagnostic stop");
+        }
     } else {
         // Preserve the existing E1000/E1000E sequence exactly for QEMU and
         // previously supported discrete Intel devices.
@@ -976,21 +1245,45 @@ static bool init_e1000(uint64_t mmioBase)
     // no stack memory is ever handed to the device.
     s_device.initStage = NIC_INIT_RX_RING;
     if (!init_rx(mmioBase)) {
-        if (i219) phase5_stage_failed(6);
+        if (i219P7) {
+            serial::puts("[AIDA-I219-P7] dma-address-invalid\n");
+        } else if (i219) {
+            phase5_stage_failed(6);
+        }
         set_init_failure(NIC_INIT_RX_RING, "RX ring DMA address unavailable");
         return false;
     }
-    if (!i219) serial::puts("[NIC] RX ring setup: 32 descriptors ready\n");
+    if (i219P7) {
+        serial::puts("[AIDA-I219-P7] rx-ring=ready\n");
+    } else if (!i219) {
+        serial::puts("[NIC] RX ring setup: 32 descriptors ready\n");
+    }
 
     s_device.initStage = NIC_INIT_TX_RING;
     if (!init_tx(mmioBase)) {
-        if (i219) phase5_stage_failed(6);
+        if (i219P7) {
+            serial::puts("[AIDA-I219-P7] dma-address-invalid\n");
+        } else if (i219) {
+            phase5_stage_failed(6);
+        }
         set_init_failure(NIC_INIT_TX_RING, "TX ring DMA address unavailable");
         return false;
     }
-    if (!i219) serial::puts("[NIC] TX ring setup: 8 descriptors ready\n");
+    if (i219P7) {
+        serial::puts("[AIDA-I219-P7] tx-ring=ready\n");
+    } else if (!i219) {
+        serial::puts("[NIC] TX ring setup: 8 descriptors ready\n");
+    }
 
-    if (i219) {
+    if (i219P7) {
+        // DMA engines are intentionally left configured for the physical
+        // stage, but causes remain masked and no IRQ is enabled.
+        mask_nic_interrupts(mmioBase);
+        if (GXOS_AIDA_I219_PHASE7_STAGE == 3) {
+            return phase7_stop(NIC_INIT_TX_RING,
+                               "Phase 7 DMA diagnostic stop");
+        }
+    } else if (i219) {
         serial::puts("[NIC] RX ring setup: 32 descriptors ready\n");
         serial::puts("[NIC] TX ring setup: 8 descriptors ready\n");
         mask_nic_interrupts(mmioBase);
@@ -1229,6 +1522,7 @@ bool init_from_bootinfo(const NicBootInfo* nicInfo)
     const bool i219 = is_i219_device(s_device.deviceId);
     s_device.phase5Stage = i219 ? static_cast<uint8_t>(GXOS_AIDA_I219_PHASE5_STAGE) : 0xFFu;
     s_device.phase6Stage = i219 ? static_cast<uint8_t>(GXOS_AIDA_I219_PHASE6_STAGE) : 0xFFu;
+    s_device.phase7Stage = i219 ? static_cast<uint8_t>(GXOS_AIDA_I219_PHASE7_STAGE) : 0xFFu;
     s_device.phase5Stopped = false;
     s_device.interruptsEnabled = false;
     s_device.driverBound = exactDriverMatch;
@@ -1532,6 +1826,11 @@ void set_irq_registered(bool registered)
                 mask_nic_interrupts(s_device.mmioBase);
                 if (s_device.phase5Stage < 8u) {
                     serial::puts("[AIDA-I219-P5] interrupts remain masked\n");
+                } else if (s_device.phase7Stage == 4u) {
+                    // Registration diagnostics deliberately stop before any
+                    // I219 IMS write, even after the shared IRQ handler is
+                    // installed.
+                    serial::puts("[AIDA-I219-P7] registered=yes interrupts=masked\n");
                 } else {
                     phase5_stage_enter(8);
                     serial::puts("[AIDA-I219-P5] stage=8 handler registered; enable deferred\n");
@@ -1553,7 +1852,8 @@ void enable_deferred_interrupts()
 #if ARCH_HAS_PORT_IO
     if (!s_initialised || !s_device.active || !s_device.mmioMapped ||
         !s_device.irqRegistered || !is_i219_device(s_device.deviceId) ||
-        s_device.phase5Stage != 8u || s_device.interruptsEnabled) {
+        s_device.phase5Stage != 8u || s_device.phase7Stage == 4u ||
+        s_device.interruptsEnabled) {
         return;
     }
 

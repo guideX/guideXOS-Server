@@ -2128,6 +2128,24 @@ static void cmd_nicinfo() {
         output_string("N/A");
     }
     output_string("\n");
+    output_string("I219 Phase 7 stage: ");
+    if (dev->deviceId == nic::PCI_DEVICE_I219_LM) {
+        char phase7Text[24];
+        const char* stageName = nic::phase7_stage_name(dev->phase7Stage);
+        uint32_t index = 0;
+        while (stageName[index] != '\0' && index + 1u < sizeof(phase7Text)) {
+            phase7Text[index] = stageName[index];
+            ++index;
+        }
+        phase7Text[index] = '\0';
+        output_string(phase7Text);
+        output_string(dev->phase7Stage == 4u
+                      ? " (registration; IRQ masked)"
+                      : " (diagnostic gate)");
+    } else {
+        output_string("N/A");
+    }
+    output_string("\n");
     output_string("Driver Bound: ");
     output_string(dev->driverBound ? "YES" : "NO");
     output_string("   Init Stage: ");
@@ -2300,6 +2318,16 @@ static void cmd_nicinfo() {
     output_string(hexStr);
     output_string("  PHY status: 0x");
     uint_hex_to_str(dev->phyStatusValue, 4, hexStr);
+    output_string(hexStr);
+    output_string("\n");
+    output_string("PHY ID: 0x");
+    uint_hex_to_str(dev->phyId1, 4, hexStr);
+    output_string(hexStr);
+    output_string(":0x");
+    uint_hex_to_str(dev->phyId2, 4, hexStr);
+    output_string(hexStr);
+    output_string("  Address: 0x");
+    uint_hex_to_str(dev->phyAddress, 2, hexStr);
     output_string(hexStr);
     output_string("\n");
     output_string("Negotiated Speed/Duplex: ");

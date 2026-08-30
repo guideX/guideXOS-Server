@@ -21,7 +21,9 @@ param(
     [ValidateRange(0, 8)]
     [int]$I219Phase5Stage = 8,
     [ValidateRange(0, 6)]
-    [int]$I219Phase6Stage = 0
+    [int]$I219Phase6Stage = 0,
+    [ValidateRange(0, 4)]
+    [int]$I219Phase7Stage = 0
 )
 
 $ErrorActionPreference = "Stop"
@@ -33,6 +35,7 @@ Write-Host "  Build identity: GXOS-LARGE-FILE-PASTE-TRACE-V1" -ForegroundColor C
 Write-Host "  Build probe ID: GXOS-LFPASTE-20260726-02" -ForegroundColor Cyan
 Write-Host "  I219 Phase 5 stage: $I219Phase5Stage" -ForegroundColor Cyan
 Write-Host "  I219 Phase 6 micro-stage: $I219Phase6Stage" -ForegroundColor Cyan
+Write-Host "  I219 Phase 7 stage: $I219Phase7Stage ($(@('reset-only','mac','phy','dma','register')[$I219Phase7Stage]))" -ForegroundColor Cyan
 Write-Host ""
 
 $RootDir = $PSScriptRoot
@@ -191,7 +194,7 @@ if (Test-Path $BootloaderProject) {
     }
     
     # Build bootloader
-    & $MSBuild $BootloaderProject /p:Configuration=Release /p:Platform=x64 /p:GXOS_AIDA_I219_PHASE5_STAGE=$I219Phase5Stage /p:GXOS_AIDA_I219_PHASE6_STAGE=$I219Phase6Stage /p:TrackFileAccess=false /t:Rebuild /m /nologo /verbosity:minimal
+    & $MSBuild $BootloaderProject /p:Configuration=Release /p:Platform=x64 /p:GXOS_AIDA_I219_PHASE5_STAGE=$I219Phase5Stage /p:GXOS_AIDA_I219_PHASE6_STAGE=$I219Phase6Stage /p:GXOS_AIDA_I219_PHASE7_STAGE=$I219Phase7Stage /p:TrackFileAccess=false /t:Rebuild /m /nologo /verbosity:minimal
     
     if ($LASTEXITCODE -ne 0) {
         Write-Host "      ERROR: Bootloader build failed" -ForegroundColor Red
@@ -336,6 +339,7 @@ if (!$SkipKernel) {
         $KernelExtraCFlags = @()
         $KernelExtraCFlags += "-DGXOS_AIDA_I219_PHASE5_STAGE=$I219Phase5Stage"
         $KernelExtraCFlags += "-DGXOS_AIDA_I219_PHASE6_STAGE=$I219Phase6Stage"
+        $KernelExtraCFlags += "-DGXOS_AIDA_I219_PHASE7_STAGE=$I219Phase7Stage"
         if (-not [string]::IsNullOrWhiteSpace($env:EXTRA_CFLAGS)) {
             $KernelExtraCFlags += $env:EXTRA_CFLAGS.Trim()
         }
@@ -451,6 +455,9 @@ elseif (Test-Path $KernelBin) {
         "imageKind=ESP-directory-used-as-QEMU-FAT-media"
         "phase5I219Stage=$I219Phase5Stage"
         "phase6I219Stage=$I219Phase6Stage"
+        "phase7I219Stage=$I219Phase7Stage"
+        "phase7I219StageName=$(@('reset-only','mac','phy','dma','register')[$I219Phase7Stage])"
+        "uniqueBuildId=GXOS-P7-$I219Phase7Stage-$([Guid]::NewGuid().ToString('N'))"
         "imageRoot=$ESPDir"
         "bootloaderSource=$BootloaderBin"
         "bootloaderSha256=$((Get-FileHash -LiteralPath $TargetBootloader -Algorithm SHA256).Hash)"

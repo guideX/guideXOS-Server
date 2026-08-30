@@ -35,6 +35,14 @@
 #error GXOS_AIDA_I219_PHASE6_STAGE must be in the range 0..6
 #endif
 
+#ifndef GXOS_AIDA_I219_PHASE7_STAGE
+#define GXOS_AIDA_I219_PHASE7_STAGE 0
+#endif
+
+#if GXOS_AIDA_I219_PHASE7_STAGE < 0 || GXOS_AIDA_I219_PHASE7_STAGE > 4
+#error GXOS_AIDA_I219_PHASE7_STAGE must be in the range 0..4
+#endif
+
 namespace guideXOS {
 namespace pci {
 

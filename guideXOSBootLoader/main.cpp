@@ -950,6 +950,7 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE* SystemTable) {
     Print(L"\n=== PCI Enumeration ===\n");
     Print(L"[AIDA-I219-P5] loader-stage=%u\n", (UINT32)GXOS_AIDA_I219_PHASE5_STAGE);
     Print(L"[AIDA-I219-P6] loader-micro-stage=%u\n", (UINT32)GXOS_AIDA_I219_PHASE6_STAGE);
+    Print(L"[AIDA-I219-P7] loader-stage=%u\n", (UINT32)GXOS_AIDA_I219_PHASE7_STAGE);
     guideXOS::pci::PciEnumResult pciResult;
     guideXOS::pci::InitPci();
     uint8_t nicCount = guideXOS::pci::EnumeratePci(&pciResult);

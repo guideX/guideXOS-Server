@@ -2,7 +2,7 @@
 //
 // Supports:
 //   - Intel E1000 / E1000E (PCI MMIO)  - QEMU default, VirtualBox, Bochs
-//   - Intel I219-LM/PCH (8086:156F) via the bounded E1000e-compatible path
+//   - Intel I219-LM/PCH (8086:156F) via the staged, fail-safe PCH path
 //   - PCI bus scan for class 0x02 (Network Controller)
 //   - Raw Ethernet frame send / receive via descriptor rings
 //   - IRQ-driven receive with ring buffer
@@ -43,6 +43,18 @@
 
 #if GXOS_AIDA_I219_PHASE6_STAGE < 0 || GXOS_AIDA_I219_PHASE6_STAGE > 6
 #error GXOS_AIDA_I219_PHASE6_STAGE must be in the range 0..6
+#endif
+
+// Phase 7 is the opt-in continuation after the physically proven PCH reset.
+// The production/default value is reset-only (0); values 1..4 stop at the
+// MAC, PHY, DMA, and registration boundaries respectively. Existing NICs
+// ignore this selector.
+#ifndef GXOS_AIDA_I219_PHASE7_STAGE
+#define GXOS_AIDA_I219_PHASE7_STAGE 0
+#endif
+
+#if GXOS_AIDA_I219_PHASE7_STAGE < 0 || GXOS_AIDA_I219_PHASE7_STAGE > 4
+#error GXOS_AIDA_I219_PHASE7_STAGE must be in the range 0..4
 #endif
 
 namespace kernel {
@@ -163,6 +175,8 @@ static const uint8_t  I219_PHY_STATUS_REG   = 26;
 static const uint16_t I219_PHY_STATUS_LINK  = (1u << 6);
 static const uint16_t I219_PHY_STATUS_DUPLEX = (1u << 7);
 static const uint16_t I219_PHY_STATUS_SPEED_MASK = (3u << 8);
+static const uint8_t  I219_PHY_ID1_REG       = 2;
+static const uint8_t  I219_PHY_ID2_REG       = 3;
 
 // ================================================================
 // Descriptor ring sizes
@@ -278,6 +292,18 @@ inline const char* init_stage_name(InitStage stage)
     }
 }
 
+inline const char* phase7_stage_name(uint8_t stage)
+{
+    switch (stage) {
+        case 0: return "reset-only";
+        case 1: return "mac";
+        case 2: return "phy";
+        case 3: return "dma";
+        case 4: return "register";
+        default: return "unknown";
+    }
+}
+
 // ================================================================
 // NIC status codes
 // ================================================================
@@ -358,6 +384,7 @@ struct NICDevice {
     InitStage   initStage;
     uint8_t     phase5Stage;       // 0..8 for I219; 0xFF for other NICs
     uint8_t     phase6Stage;       // 0..6 for I219; 0xFF for other NICs
+    uint8_t     phase7Stage;       // 0..4 for I219; 0xFF for other NICs
     bool        phase5Stopped;     // intentionally stopped or failed safely
     bool        interruptsEnabled; // hardware NIC interrupt mask is enabled
     char        lastInitFailure[96];
@@ -466,12 +493,14 @@ LinkState get_link_state();
 
 // Record whether the kernel registered the device IRQ.  NIC causes remain
 // masked until this is set true; exact I219 Stage 8 still defers hardware
-// enablement until the main-loop readiness checkpoint.
+// enablement until the main-loop readiness checkpoint. Phase 7 registration
+// diagnostics intentionally keep the hardware mask closed.
 void set_irq_registered(bool registered);
 
 // Stage 8 only: enable the I219 hardware interrupt mask after the main-loop
-// readiness checkpoint.  This is a no-op for earlier diagnostic stages and
-// for existing non-I219 devices whose legacy ordering is preserved.
+// readiness checkpoint. This is a no-op for reset/MAC/PHY/DMA diagnostics,
+// the Phase 7 registration diagnostic, and existing non-I219 devices whose
+// legacy ordering is preserved.
 void enable_deferred_interrupts();
 
 // ----------------------------------------------------------------

@@ -17,7 +17,9 @@ param(
     [ValidateRange(0, 8)]
     [int]$I219Phase5Stage = 8,
     [ValidateRange(0, 6)]
-    [int]$I219Phase6Stage = 0
+    [int]$I219Phase6Stage = 0,
+    [ValidateRange(0, 4)]
+    [int]$I219Phase7Stage = 0
 )
 
 Set-StrictMode -Version Latest
@@ -36,6 +38,8 @@ $RequirementsFile = Join-Path $RepositoryRoot 'requirements-release.txt'
 $PackageStartUtc = [DateTime]::UtcNow
 $WorkDirectory = $null
 $CommandLogRoot = Join-Path $ReleaseWorkRoot 'command-logs'
+$I219Phase7StageNames = @('reset-only', 'mac', 'phy', 'dma', 'register')
+$I219Phase7StageName = $I219Phase7StageNames[$I219Phase7Stage]
 
 function Fail([string]$Message) {
     throw "[release-iso] $Message"
@@ -420,10 +424,12 @@ function Invoke-CanonicalBuild {
     $powershell = Get-Command powershell.exe -ErrorAction SilentlyContinue
     if ($null -eq $powershell) { Fail 'Windows PowerShell (powershell.exe) is required to invoke the canonical build.' }
     $buildArgs = @('-Arch', $Arch, '-I219Phase5Stage', [string]$I219Phase5Stage,
-                   '-I219Phase6Stage', [string]$I219Phase6Stage)
+                   '-I219Phase6Stage', [string]$I219Phase6Stage,
+                   '-I219Phase7Stage', [string]$I219Phase7Stage)
     if ($Clean) { $buildArgs = @('-Clean', '-Arch', $Arch,
                                   '-I219Phase5Stage', [string]$I219Phase5Stage,
-                                  '-I219Phase6Stage', [string]$I219Phase6Stage) }
+                                  '-I219Phase6Stage', [string]$I219Phase6Stage,
+                                  '-I219Phase7Stage', [string]$I219Phase7Stage) }
     Write-Host "[release-iso] invoking canonical build.ps1 with supported arguments" -ForegroundColor Cyan
     Invoke-ExternalChecked -FilePath $powershell.Source -Arguments (@('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $BuildScript) + $buildArgs) | Out-Null
 }
@@ -439,6 +445,7 @@ if ($IsoBackend -eq 'PyCdlib' -and -not [string]::IsNullOrWhiteSpace($OscdimgPat
 $sourceStatusLines = @(Invoke-GitChecked @('status', '--porcelain=v1', '--untracked-files=all') -split "`r?`n" | Where-Object { $_ -ne '' })
 $sourceCommit = Invoke-GitChecked @('rev-parse', 'HEAD')
 $sourceBranch = Invoke-GitChecked @('branch', '--show-current')
+$uniqueBuildId = "GXOS-P7-$I219Phase7Stage-$($sourceCommit.Substring(0, 12))-$(New-Guid)"
 $worktreeClean = ($sourceStatusLines.Count -eq 0)
 if (-not $worktreeClean) {
     Write-Host 'WARNING: worktree is dirty; the release manifest will record this and the artifact is not reproducible from HEAD alone.' -ForegroundColor Yellow
@@ -493,6 +500,10 @@ try {
         if ($microStageMatch.Success -and [int]$microStageMatch.Groups[1].Value -ne $I219Phase6Stage) {
             Fail "ESP build identity micro-stage $($microStageMatch.Groups[1].Value) does not match requested I219 Phase 6 micro-stage $I219Phase6Stage. Rebuild without -SkipBuild."
         }
+        $phase7StageMatch = [regex]::Match($identityText, '(?m)^phase7I219Stage=(\d+)\s*$')
+        if ($phase7StageMatch.Success -and [int]$phase7StageMatch.Groups[1].Value -ne $I219Phase7Stage) {
+            Fail "ESP build identity stage $($phase7StageMatch.Groups[1].Value) does not match requested I219 Phase 7 stage $I219Phase7Stage. Rebuild without -SkipBuild."
+        }
     }
 
     $bootloader = Get-Item -LiteralPath (Join-Path $EspRoot 'EFI\BOOT\BOOTX64.EFI')
@@ -532,6 +543,8 @@ try {
         ("Source commit: $sourceCommit"),
         ("I219 Phase 5 stage selector: $I219Phase5Stage"),
         ("I219 Phase 6 micro-stage selector: $I219Phase6Stage"),
+        ("I219 Phase 7 stage selector: $I219Phase7Stage ($I219Phase7StageName)"),
+        ("Unique build identity: $uniqueBuildId"),
         '',
         ("The bootable UEFI FAT image is $bootImageIsoPath."),
         'It contains the complete guideXOS Server EFI payload.',
@@ -586,7 +599,7 @@ try {
         fs = '2.4.16'
         pycdlib = '1.16.0'
         isoBackend = $IsoBackend
-        canonicalBuild = 'build.ps1 -Arch amd64 -I219Phase5Stage ' + $I219Phase5Stage + ' -I219Phase6Stage ' + $I219Phase6Stage + $(if ($Clean) { ' -Clean' } else { '' })
+        canonicalBuild = 'build.ps1 -Arch amd64 -I219Phase5Stage ' + $I219Phase5Stage + ' -I219Phase6Stage ' + $I219Phase6Stage + ' -I219Phase7Stage ' + $I219Phase7Stage + $(if ($Clean) { ' -Clean' } else { '' })
     }
     if ($IsoBackend -eq 'Oscdimg') {
         $toolRecords.oscdimg = Get-ToolRecord $oscdimg $oscdimgVersion
@@ -599,6 +612,9 @@ try {
         artifactType = 'bootable-uefi-iso'
         i219Phase5Stage = $I219Phase5Stage
         i219Phase6Stage = $I219Phase6Stage
+        i219Phase7Stage = $I219Phase7Stage
+        i219Phase7StageName = $I219Phase7StageName
+        uniqueBuildId = $uniqueBuildId
         isoBackend = $IsoBackend
         isoFilename = $isoName
         isoByteSize = [int64]$isoInfo.Length
