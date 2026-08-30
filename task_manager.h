@@ -146,6 +146,7 @@ namespace gxos { namespace apps {
         static void updateDisplay();
         static void updateHeader();
         static void updateStatusBar();
+        static void updateActionButtonStates();
         static void updatePerformanceTab();
         static void updateTombstonedTab();
         static void updateMemoryDetailsTab();

@@ -11,12 +11,16 @@ struct DesktopControlTheme
     uint32_t panelBackground;
     uint32_t raisedPanel;
     uint32_t recessedField;
+    // Shared table/list header roles for utility-style applications.
+    uint32_t tableHeaderBackground;
+    uint32_t tableHeaderText;
     uint32_t border;
     uint32_t primaryText;
     uint32_t secondaryText;
     uint32_t selectionActive;
     uint32_t selectionInactive;
     uint32_t selectionText;
+    uint32_t statusWarning;
 
     // Shared button/control states.
     uint32_t controlBackground;
@@ -60,12 +64,15 @@ inline DesktopControlTheme GetDesktopControlTheme(const DesktopTheme& theme)
     roles.panelBackground = theme.windowBackground;
     roles.raisedPanel = theme.taskbarBackground;
     roles.recessedField = BlendDesktopThemeColor(theme.windowBackground, theme.taskbarBackground, 8);
+    roles.tableHeaderBackground = BlendDesktopThemeColor(theme.windowBackground, theme.taskbarBackground, 22);
+    roles.tableHeaderText = theme.titleBarText;
     roles.border = theme.windowBorder;
     roles.primaryText = theme.titleBarText;
     roles.secondaryText = BlendDesktopThemeColor(theme.titleBarText, theme.windowBackground, 34);
     roles.selectionActive = BlendDesktopThemeColor(theme.windowBackground, theme.accent, 48);
     roles.selectionInactive = BlendDesktopThemeColor(theme.windowBackground, theme.mutedAccent, 42);
     roles.selectionText = theme.titleBarText;
+    roles.statusWarning = BlendDesktopThemeColor(theme.mutedAccent, theme.titleBarText, 30);
 
     roles.controlBackground = BlendDesktopThemeColor(theme.windowBackground, theme.taskbarBackground, 18);
     roles.controlHover = BlendDesktopThemeColor(roles.controlBackground, theme.mutedAccent, 16);

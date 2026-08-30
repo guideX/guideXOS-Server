@@ -121,6 +121,13 @@ $phase10BOwnershipMatch = Find-RawMatch $planDoc '### Starting architecture and 
 $phase10BDocumentBoundaryMatch = Find-RawMatch $planDoc '### Browser chrome versus web content.*?Document backgrounds, authored CSS colors.*?HTML/CSS scrollbar behavior is not globally overridden'
 $phase10BValidationMatch = Find-RawMatch $planDoc '### Validation and evidence.*?build\.bat.*?smoke-navigator-hosted\.ps1.*?build\.ps1 -Arch amd64'
 $phase10BLimitationsMatch = Find-RawMatch $planDoc '### Limitations and deferred Navigator visual work.*?no separate keyboard-focus publication.*?Deferred work includes icon-system replacement'
+$phase10CHeadingMatch = Find-FirstMatch $planDoc '## Phase 10C - Task Manager Interior Sci-Fi Theming'
+$phase10COwnershipMatch = Find-RawMatch $planDoc '### Starting architecture and ownership audit.*?Hosted Task Manager is .*?`task_manager\.cpp`/`task_manager\.h`.*?Bare-metal Task Manager is `kernel::apps::TaskManagerApp`'
+$phase10CSurfacesMatch = Find-RawMatch $planDoc '### Application-owned surfaces themed.*?process/task table headers.*?existing footer/status/summary text hierarchy'
+$phase10CSharedRolesMatch = Find-RawMatch $planDoc '### Shared roles and reusable additions.*?GetDesktopControlTheme.*?tableHeaderBackground.*?tableHeaderText.*?No Task Manager-specific Sci-Fi palette'
+$phase10CClassicMatch = Find-RawMatch $planDoc '### Classic and Sci-Fi behavior.*?Classic remains the default.*?Sci-Fi is opt-in.*?action semantics are unchanged'
+$phase10CValidationMatch = Find-RawMatch $planDoc '### Validation and evidence.*?focused control-theme test.*?AMD64 validation uses `build\.ps1 -Arch amd64`'
+$phase10CBoundaryMatch = Find-RawMatch $planDoc 'Visual theming completed now:.*?Task Manager functionality that does not yet exist:.*?deliberately deferred product work, not theme defects'
 $displayOptionsThemeHelperMatch = Find-FirstMatch $displayOptions 'IsSciFiThemeActive|DisplayOptionsBodyColor|DisplayOptionsPanelColor|DisplayOptionsCardColor|DisplayOptionsButtonFillColor|DisplayOptionsButtonBorderColor|DisplayOptionsTextColor|DisplayOptionsMutedTextColor|DisplayOptionsAccentColor'
 $displayOptionsThemeFieldMatch = Find-FirstMatch $displayOptions 'windowBackground|windowBorder|accent|mutedAccent|taskbarBackground|taskbarBorder|titleBarText'
 $displayOptionsTextColorMatch = Find-FirstMatch $displayOptions 'MT_DrawTextAtColor|DisplayOptionsMutedTextColor\(\)|DisplayOptionsTextColor\(\)'
@@ -305,6 +312,14 @@ $taskManagerThemeFieldMatch = Find-FirstMatch $taskManager 'windowBackground|win
 $taskManagerGraphThemeMatch = Find-RawMatch $taskManager 'drawGraphBox\(.*?TaskManagerIndicatorColor\('
 $taskManagerStatusThemeMatch = Find-RawMatch $taskManager 'updateStatusBar\(\).*?TaskManagerMutedTextColor\('
 $taskManagerNoPerEffectMatch = Find-FirstMatch $taskManager 'Visual Effects|per-effect'
+$taskManagerSharedRolesMatch = Find-RawMatch $taskManager 'GetDesktopControlTheme.*?tableHeaderBackground.*?DesktopSelectionColor'
+$taskManagerMetricRolesMatch = Find-RawMatch $taskManager 'TaskManagerIndicatorColor\(int metricIndex\).*?controlHoverBorder.*?controlBorder.*?secondaryText'
+$taskManagerWarningRoleMatch = Find-RawMatch $taskManager 'TaskManagerStatusWarningColor\(\).*?statusWarning'
+$taskManagerEnabledStateMatch = Find-RawMatch $taskManager 'MT_WidgetSetEnabled.*?packWidgetSetEnabled.*?updateActionButtonStates'
+$taskManagerActiveTabMatch = Find-RawMatch $taskManager 'isSciFiThemeActive\(\).*?controlFocusBorder'
+$kernelTaskManagerSharedRolesMatch = Find-RawMatch $kernelApps 'kernelTaskManagerControlTheme.*?tableHeaderBackground.*?DesktopSelectionColor'
+$kernelTaskManagerEnabledStateMatch = Find-RawMatch $kernelApps 'TaskManagerApp::refreshList\(\).*?setWidgetEnabled\(m_endTaskBtnId'
+$taskManagerControlRoleMatch = Find-RawMatch $controlThemeHeader 'tableHeaderBackground.*?tableHeaderText'
 $navigatorSharedRolesMatch = Find-RawMatch $navigator 'GetDesktopControlTheme.*?inputBackground.*?scrollbarTrack.*?selectionActive'
 $navigatorDocumentBoundaryMatch = Find-RawMatch $navigator 'NavigatorDocumentDefaultColor\(\).*?245,\s*247,\s*250.*?bodyStyle\.backgroundColor'
 $navigatorEnabledProtocolMatch = Find-RawMatch $navigator 'MT_WidgetSetEnabled.*?packWidgetSetEnabled'
@@ -449,6 +464,12 @@ $checks = @(
     [pscustomobject]@{ Name = "phase 4e task manager theme helpers wired"; Pass = $null -ne $taskManagerThemeHelperMatch -or $null -ne $taskManagerThemeFieldMatch; Match = $(if ($null -ne $taskManagerThemeHelperMatch) { $taskManagerThemeHelperMatch } else { $taskManagerThemeFieldMatch }) },
     [pscustomobject]@{ Name = "phase 4e.1 graph/status theme paths wired"; Pass = $null -ne $taskManagerGraphThemeMatch -and $null -ne $taskManagerStatusThemeMatch; Match = $(if ($null -ne $taskManagerGraphThemeMatch) { $taskManagerGraphThemeMatch } else { $taskManagerStatusThemeMatch }) },
     [pscustomobject]@{ Name = "phase 4e no per-effect controls"; Pass = $null -eq $taskManagerNoPerEffectMatch; Match = $taskManagerNoPerEffectMatch },
+    [pscustomobject]@{ Name = "phase 10c Task Manager shared roles consumed"; Pass = $null -ne $taskManagerSharedRolesMatch -and $null -ne $kernelTaskManagerSharedRolesMatch; Match = $(if ($null -ne $taskManagerSharedRolesMatch) { $taskManagerSharedRolesMatch } else { $kernelTaskManagerSharedRolesMatch }) },
+    [pscustomobject]@{ Name = "phase 10c Task Manager metric roles consumed"; Pass = $null -ne $taskManagerMetricRolesMatch; Match = $taskManagerMetricRolesMatch },
+    [pscustomobject]@{ Name = "phase 10c Task Manager warning role consumed"; Pass = $null -ne $taskManagerWarningRoleMatch; Match = $taskManagerWarningRoleMatch },
+    [pscustomobject]@{ Name = "phase 10c Task Manager enabled state published"; Pass = $null -ne $taskManagerEnabledStateMatch -and $null -ne $kernelTaskManagerEnabledStateMatch; Match = $(if ($null -ne $taskManagerEnabledStateMatch) { $taskManagerEnabledStateMatch } else { $kernelTaskManagerEnabledStateMatch }) },
+    [pscustomobject]@{ Name = "phase 10c Task Manager Sci-Fi active tab state"; Pass = $null -ne $taskManagerActiveTabMatch; Match = $taskManagerActiveTabMatch },
+    [pscustomobject]@{ Name = "phase 10c shared table header roles exist"; Pass = $null -ne $taskManagerControlRoleMatch; Match = $taskManagerControlRoleMatch },
     [pscustomobject]@{ Name = "phase 4e no app model status gate dependency"; Pass = $null -eq $smokeNoAppModelStatusMatch; Match = $smokeNoAppModelStatusMatch },
     [pscustomobject]@{ Name = "phase 4f docs heading"; Pass = $null -ne $phase4fHeadingMatch; Match = $phase4fHeadingMatch },
     [pscustomobject]@{ Name = "phase 4f docs body"; Pass = $null -ne $phase4fBodyMatch; Match = $phase4fBodyMatch },
@@ -575,7 +596,14 @@ $checks = @(
     [pscustomobject]@{ Name = "phase 10b no Navigator-specific compositor palette"; Pass = $null -eq $navigatorCompositorSpecificMatch; Match = $navigatorCompositorSpecificMatch },
     [pscustomobject]@{ Name = "phase 10b bare-metal Navigator shared roles consumed"; Pass = $null -ne $kernelNavigatorThemeMatch; Match = $kernelNavigatorThemeMatch },
     [pscustomobject]@{ Name = "phase 10b bare-metal navigation state wired"; Pass = $null -ne $kernelNavigatorEnabledMatch; Match = $kernelNavigatorEnabledMatch },
-    [pscustomobject]@{ Name = "phase 10b bare-metal viewport boundary wired"; Pass = $null -ne $kernelNavigatorViewportMatch; Match = $kernelNavigatorViewportMatch }
+    [pscustomobject]@{ Name = "phase 10b bare-metal viewport boundary wired"; Pass = $null -ne $kernelNavigatorViewportMatch; Match = $kernelNavigatorViewportMatch },
+    [pscustomobject]@{ Name = "phase 10c docs heading"; Pass = $null -ne $phase10CHeadingMatch; Match = $phase10CHeadingMatch },
+    [pscustomobject]@{ Name = "phase 10c Task Manager ownership documented"; Pass = $null -ne $phase10COwnershipMatch; Match = $phase10COwnershipMatch },
+    [pscustomobject]@{ Name = "phase 10c Task Manager surfaces documented"; Pass = $null -ne $phase10CSurfacesMatch; Match = $phase10CSurfacesMatch },
+    [pscustomobject]@{ Name = "phase 10c shared roles documented"; Pass = $null -ne $phase10CSharedRolesMatch; Match = $phase10CSharedRolesMatch },
+    [pscustomobject]@{ Name = "phase 10c Classic and Sci-Fi boundaries documented"; Pass = $null -ne $phase10CClassicMatch; Match = $phase10CClassicMatch },
+    [pscustomobject]@{ Name = "phase 10c validation paths documented"; Pass = $null -ne $phase10CValidationMatch; Match = $phase10CValidationMatch },
+    [pscustomobject]@{ Name = "phase 10c feature boundaries documented"; Pass = $null -ne $phase10CBoundaryMatch; Match = $phase10CBoundaryMatch }
 )
 
 $failures = 0

@@ -4147,7 +4147,112 @@ namespace {
         framebuffer::fill_rect(x + w - 1, y, 1, h, borderColor);
     }
 
+    static DesktopControlTheme kernelTaskManagerControlTheme()
+    {
+        return GetDesktopControlTheme(GetCurrentDesktopTheme());
+    }
+
+    static uint32_t kernelTaskManagerBodyColor()
+    {
+        if (!kernelSciFiThemeActive()) return rgb(24, 26, 31);
+        return kernelTaskManagerControlTheme().panelBackground;
+    }
+
+    static uint32_t kernelTaskManagerPanelColor()
+    {
+        if (!kernelSciFiThemeActive()) return rgb(27, 29, 35);
+        return kernelTaskManagerControlTheme().recessedField;
+    }
+
+    static uint32_t kernelTaskManagerInsetColor()
+    {
+        if (!kernelSciFiThemeActive()) return rgb(24, 26, 31);
+        return kernelTaskManagerControlTheme().raisedPanel;
+    }
+
+    static uint32_t kernelTaskManagerHeaderColor()
+    {
+        if (!kernelSciFiThemeActive()) return rgb(40, 44, 54);
+        return kernelTaskManagerControlTheme().tableHeaderBackground;
+    }
+
+    static uint32_t kernelTaskManagerBorderColor()
+    {
+        if (!kernelSciFiThemeActive()) return rgb(60, 68, 82);
+        return kernelTaskManagerControlTheme().separator;
+    }
+
+    static uint32_t kernelTaskManagerInsetBorderColor()
+    {
+        if (!kernelSciFiThemeActive()) return rgb(58, 64, 78);
+        return kernelTaskManagerControlTheme().border;
+    }
+
+    static uint32_t kernelTaskManagerHeadingTextColor()
+    {
+        if (!kernelSciFiThemeActive()) return rgb(240, 244, 250);
+        return kernelTaskManagerControlTheme().primaryText;
+    }
+
+    static uint32_t kernelTaskManagerTextColor()
+    {
+        if (!kernelSciFiThemeActive()) return rgb(236, 240, 248);
+        return kernelTaskManagerControlTheme().primaryText;
+    }
+
+    static uint32_t kernelTaskManagerValueTextColor()
+    {
+        if (!kernelSciFiThemeActive()) return rgb(212, 218, 228);
+        return kernelTaskManagerControlTheme().controlText;
+    }
+
+    static uint32_t kernelTaskManagerMutedTextColor()
+    {
+        if (!kernelSciFiThemeActive()) return rgb(160, 166, 176);
+        return kernelTaskManagerControlTheme().secondaryText;
+    }
+
+    static uint32_t kernelTaskManagerSelectionColor()
+    {
+        if (!kernelSciFiThemeActive()) return rgb(48, 64, 90);
+        return DesktopSelectionColor(kernelTaskManagerControlTheme(), true);
+    }
+
+    static uint32_t kernelTaskManagerMetricColor(int metricIndex)
+    {
+        if (!kernelSciFiThemeActive()) {
+            switch (metricIndex) {
+            case 0: return rgb(96, 163, 228);
+            case 1: return rgb(96, 196, 126);
+            case 2: return rgb(230, 173, 74);
+            default: return rgb(160, 166, 176);
+            }
+        }
+
+        const DesktopControlTheme roles = kernelTaskManagerControlTheme();
+        switch (metricIndex) {
+        case 0: return GetCurrentDesktopTheme().accent;
+        case 1: return roles.controlHoverBorder;
+        case 2: return roles.controlBorder;
+        default: return roles.secondaryText;
+        }
+    }
+
+    static uint32_t kernelTaskManagerStatusColor(bool running)
+    {
+        if (!kernelSciFiThemeActive()) return running ? rgb(84, 185, 110) : rgb(180, 88, 88);
+        const DesktopControlTheme roles = kernelTaskManagerControlTheme();
+        return running ? roles.controlHoverBorder : roles.statusWarning;
+    }
+
     static void drawTabButton(uint32_t x, uint32_t y, uint32_t w, uint32_t h, const char* label, bool active) {
+        if (kernelSciFiThemeActive()) {
+            const DesktopControlTheme roles = kernelTaskManagerControlTheme();
+            const DesktopControlState state = active ? DesktopControlState::Pressed : DesktopControlState::Normal;
+            drawRoundedPanel(x, y, w, h, DesktopControlFillColor(roles, state), DesktopControlBorderColor(roles, state));
+            appDrawText(x + 12, y + (h - kGlyphH) / 2, label, DesktopControlTextColor(roles, state));
+            return;
+        }
         drawRoundedPanel(x, y, w, h, active ? rgb(52, 62, 80) : rgb(34, 36, 44), active ? rgb(92, 130, 196) : rgb(64, 68, 80));
         uint32_t textX = x + 12;
         uint32_t textY = y + (h - kGlyphH) / 2;
@@ -4155,9 +4260,12 @@ namespace {
     }
 
     static void drawHistoryGraph(uint32_t x, uint32_t y, uint32_t w, uint32_t h, const uint8_t* history, int count, int head, uint32_t accentColor) {
-        drawRoundedPanel(x, y, w, h, rgb(28, 30, 36), rgb(72, 78, 92));
+        const uint32_t graphColor = kernelSciFiThemeActive() ? kernelTaskManagerInsetColor() : rgb(28, 30, 36);
+        const uint32_t graphBorder = kernelSciFiThemeActive() ? kernelTaskManagerInsetBorderColor() : rgb(72, 78, 92);
+        const uint32_t unavailableText = kernelSciFiThemeActive() ? kernelTaskManagerMutedTextColor() : rgb(160, 166, 176);
+        drawRoundedPanel(x, y, w, h, graphColor, graphBorder);
         if (!history || count <= 0) {
-            appDrawText(x + 12, y + (h - kGlyphH) / 2, "N/A", rgb(160, 166, 176));
+            appDrawText(x + 12, y + (h - kGlyphH) / 2, "N/A", unavailableText);
             return;
         }
 
@@ -4252,8 +4360,9 @@ void TaskManagerApp::update() {
 }
 
 void TaskManagerApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
-    drawRoundedPanel(x + 10, y + 10, w - 20, h - 20, rgb(24, 26, 31), rgb(54, 60, 74));
-    appDrawText(x + 18, y + 14, "Task Manager", rgb(240, 244, 250));
+    drawRoundedPanel(x + 10, y + 10, w - 20, h - 20, kernelTaskManagerBodyColor(),
+        kernelSciFiThemeActive() ? kernelTaskManagerControlTheme().border : rgb(54, 60, 74));
+    appDrawText(x + 18, y + 14, "Task Manager", kernelTaskManagerHeadingTextColor());
 
     const uint32_t tabY = y + 34;
     const uint32_t tabH = 28;
@@ -4269,35 +4378,36 @@ void TaskManagerApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
     const uint32_t contentH = h - 118;
 
     if (m_activeTab == 0) {
-        drawRoundedPanel(contentX, contentY, contentW, contentH, rgb(27, 29, 35), rgb(60, 68, 82));
+        drawRoundedPanel(contentX, contentY, contentW, contentH, kernelTaskManagerPanelColor(), kernelTaskManagerBorderColor());
         const uint32_t headerH = 24;
-        framebuffer::fill_rect(contentX + 1, contentY + 1, contentW - 2, headerH, rgb(40, 44, 54));
-        appDrawText(contentX + 12, contentY + 7, "Application", rgb(226, 232, 242));
-        appDrawText(contentX + contentW - 112, contentY + 7, "Windows", rgb(226, 232, 242));
-        appDrawText(contentX + contentW - 56, contentY + 7, "Status", rgb(226, 232, 242));
+        framebuffer::fill_rect(contentX + 1, contentY + 1, contentW - 2, headerH, kernelTaskManagerHeaderColor());
+        appDrawText(contentX + 12, contentY + 7, "Application", kernelTaskManagerTextColor());
+        appDrawText(contentX + contentW - 112, contentY + 7, "Windows", kernelTaskManagerTextColor());
+        appDrawText(contentX + contentW - 56, contentY + 7, "Status", kernelTaskManagerTextColor());
 
         const uint32_t rowH = 24;
         const uint32_t listTop = contentY + headerH + 2;
         for (int i = 0; i < m_entryCount && (uint32_t)i * rowH < contentH - 80; ++i) {
             const uint32_t rowY = listTop + i * rowH;
             if (i == m_selectedApp) {
-                framebuffer::fill_rect(contentX + 1, rowY, contentW - 2, rowH - 1, rgb(48, 64, 90));
+                framebuffer::fill_rect(contentX + 1, rowY, contentW - 2, rowH - 1, kernelTaskManagerSelectionColor());
             } else if (i % 2 == 0) {
-                framebuffer::fill_rect(contentX + 1, rowY, contentW - 2, rowH - 1, rgb(31, 34, 41));
+                framebuffer::fill_rect(contentX + 1, rowY, contentW - 2, rowH - 1,
+                    kernelSciFiThemeActive() ? kernelTaskManagerInsetColor() : rgb(31, 34, 41));
             }
 
-            appDrawText(contentX + 12, rowY + 5, m_entries[i].name, rgb(236, 240, 248));
+            appDrawText(contentX + 12, rowY + 5, m_entries[i].name, kernelTaskManagerTextColor());
             char windowsText[8];
             int_to_text(m_entries[i].windowCount, windowsText, sizeof(windowsText));
-            appDrawText(contentX + contentW - 108, rowY + 5, windowsText, rgb(212, 218, 228));
+            appDrawText(contentX + contentW - 108, rowY + 5, windowsText, kernelTaskManagerValueTextColor());
             const char* status = m_entries[i].running ? "Running" : "Stopped";
-            uint32_t statusColor = m_entries[i].running ? rgb(84, 185, 110) : rgb(180, 88, 88);
+            uint32_t statusColor = kernelTaskManagerStatusColor(m_entries[i].running);
             framebuffer::fill_rect(contentX + contentW - 58, rowY + 7, 8, 8, statusColor);
-            appDrawText(contentX + contentW - 44, rowY + 5, status, rgb(212, 218, 228));
+            appDrawText(contentX + contentW - 44, rowY + 5, status, kernelTaskManagerValueTextColor());
         }
 
         const uint32_t detailY = contentY + contentH - 92;
-        framebuffer::fill_rect(contentX + 1, detailY, contentW - 2, 1, rgb(68, 74, 88));
+        framebuffer::fill_rect(contentX + 1, detailY, contentW - 2, 1, kernelTaskManagerBorderColor());
         char detailLine[160];
         if (m_selectedApp >= 0 && m_selectedApp < m_entryCount) {
             strcopy(detailLine, "Selected: ", sizeof(detailLine));
@@ -4311,12 +4421,12 @@ void TaskManagerApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
         } else {
             strcopy(detailLine, "Selected: N/A", sizeof(detailLine));
         }
-        appDrawText(contentX + 12, detailY + 12, detailLine, rgb(200, 206, 218));
-        appDrawText(contentX + 12, detailY + 30, "Bare-metal view: processes are kernel apps and shell windows.", rgb(156, 164, 178));
-        appDrawText(contentX + 12, detailY + 48, "Refresh updates the list; End Task closes the selected app.", rgb(156, 164, 178));
+        appDrawText(contentX + 12, detailY + 12, detailLine, kernelTaskManagerValueTextColor());
+        appDrawText(contentX + 12, detailY + 30, "Bare-metal view: processes are kernel apps and shell windows.", kernelTaskManagerMutedTextColor());
+        appDrawText(contentX + 12, detailY + 48, "Refresh updates the list; End Task closes the selected app.", kernelTaskManagerMutedTextColor());
     } else if (m_activeTab == 1) {
-        drawRoundedPanel(contentX, contentY, contentW, contentH, rgb(27, 29, 35), rgb(60, 68, 82));
-        appDrawText(contentX + 12, contentY + 10, "Performance", rgb(240, 244, 250));
+        drawRoundedPanel(contentX, contentY, contentW, contentH, kernelTaskManagerPanelColor(), kernelTaskManagerBorderColor());
+        appDrawText(contentX + 12, contentY + 10, "Performance", kernelTaskManagerHeadingTextColor());
 
         const kernel::desktop::CpuTelemetrySnapshot cpu = kernel::desktop::cpu_telemetry_snapshot();
         const int runningApps = app::AppManager::getRunningAppCount();
@@ -4326,14 +4436,14 @@ void TaskManagerApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
         const uint64_t heapFree = gxos_kernel_heap_free_bytes();
         const int heapPct = heapTotal > 0 ? static_cast<int>((heapUsed * 100ULL) / heapTotal) : 0;
 
-        drawHistoryGraph(contentX + 10, contentY + 34, 160, 84, m_cpuHistory, m_cpuHistoryCount, m_cpuHistoryHead, rgb(96, 163, 228));
-        drawHistoryGraph(contentX + 10, contentY + 126, 160, 84, m_heapHistory, m_heapHistoryCount, m_heapHistoryHead, rgb(96, 196, 126));
-        drawRoundedPanel(contentX + 184, contentY + 34, contentW - 196, contentH - 46, rgb(24, 26, 31), rgb(58, 64, 78));
+        drawHistoryGraph(contentX + 10, contentY + 34, 160, 84, m_cpuHistory, m_cpuHistoryCount, m_cpuHistoryHead, kernelTaskManagerMetricColor(0));
+        drawHistoryGraph(contentX + 10, contentY + 126, 160, 84, m_heapHistory, m_heapHistoryCount, m_heapHistoryHead, kernelTaskManagerMetricColor(1));
+        drawRoundedPanel(contentX + 184, contentY + 34, contentW - 196, contentH - 46, kernelTaskManagerInsetColor(), kernelTaskManagerInsetBorderColor());
 
-        appDrawText(contentX + 198, contentY + 44, "CPU", rgb(236, 240, 248));
-        appDrawText(contentX + 198, contentY + 104, "Apps", rgb(236, 240, 248));
-        appDrawText(contentX + 198, contentY + 164, "Windows", rgb(236, 240, 248));
-        appDrawText(contentX + 198, contentY + 224, "Heap", rgb(236, 240, 248));
+        appDrawText(contentX + 198, contentY + 44, "CPU", kernelTaskManagerTextColor());
+        appDrawText(contentX + 198, contentY + 104, "Apps", kernelTaskManagerTextColor());
+        appDrawText(contentX + 198, contentY + 164, "Windows", kernelTaskManagerTextColor());
+        appDrawText(contentX + 198, contentY + 224, "Heap", kernelTaskManagerTextColor());
 
         char cpuPctText[16];
         char cpuWinText[24];
@@ -4352,42 +4462,42 @@ void TaskManagerApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
         uint64_to_text(heapFree, heapFreeText, sizeof(heapFreeText));
         int_to_text(heapPct, heapPctText, sizeof(heapPctText));
 
-        appDrawText(contentX + 280, contentY + 44, cpu.available ? cpuPctText : "N/A", rgb(96, 163, 228));
-        appDrawText(contentX + 340, contentY + 44, cpu.available ? "percent" : "warmup", rgb(160, 166, 176));
-        appDrawText(contentX + 280, contentY + 62, "Window: ", rgb(160, 166, 176));
-        appDrawText(contentX + 340, contentY + 62, cpuWinText, rgb(212, 218, 228));
-        appDrawText(contentX + 198, contentY + 122, appCountText, rgb(96, 196, 126));
-        appDrawText(contentX + 198, contentY + 182, windowCountText, rgb(230, 173, 74));
-        appDrawText(contentX + 198, contentY + 242, heapUsedText, rgb(232, 236, 244));
-        appDrawText(contentX + 280, contentY + 242, "used of ", rgb(160, 166, 176));
-        appDrawText(contentX + 340, contentY + 242, heapTotalText, rgb(212, 218, 228));
-        appDrawText(contentX + 280, contentY + 260, heapFreeText, rgb(160, 166, 176));
-        appDrawText(contentX + 340, contentY + 260, "free", rgb(160, 166, 176));
-        appDrawText(contentX + 280, contentY + 278, heapPctText, rgb(96, 196, 126));
-        appDrawText(contentX + 340, contentY + 278, "% heap used", rgb(160, 166, 176));
+        appDrawText(contentX + 280, contentY + 44, cpu.available ? cpuPctText : "N/A", kernelTaskManagerMetricColor(0));
+        appDrawText(contentX + 340, contentY + 44, cpu.available ? "percent" : "warmup", kernelTaskManagerMutedTextColor());
+        appDrawText(contentX + 280, contentY + 62, "Window: ", kernelTaskManagerMutedTextColor());
+        appDrawText(contentX + 340, contentY + 62, cpuWinText, kernelTaskManagerValueTextColor());
+        appDrawText(contentX + 198, contentY + 122, appCountText, kernelTaskManagerMetricColor(1));
+        appDrawText(contentX + 198, contentY + 182, windowCountText, kernelTaskManagerMetricColor(2));
+        appDrawText(contentX + 198, contentY + 242, heapUsedText, kernelTaskManagerValueTextColor());
+        appDrawText(contentX + 280, contentY + 242, "used of ", kernelTaskManagerMutedTextColor());
+        appDrawText(contentX + 340, contentY + 242, heapTotalText, kernelTaskManagerValueTextColor());
+        appDrawText(contentX + 280, contentY + 260, heapFreeText, kernelTaskManagerMutedTextColor());
+        appDrawText(contentX + 340, contentY + 260, "free", kernelTaskManagerMutedTextColor());
+        appDrawText(contentX + 280, contentY + 278, heapPctText, kernelTaskManagerMetricColor(1));
+        appDrawText(contentX + 340, contentY + 278, "% heap used", kernelTaskManagerMutedTextColor());
 
-        appDrawText(contentX + 198, contentY + contentH - 44, cpu.source ? cpu.source : "N/A", rgb(160, 166, 176));
-        appDrawText(contentX + 198, contentY + contentH - 26, "Kernel heap is a 1 MB bump allocator.", rgb(160, 166, 176));
+        appDrawText(contentX + 198, contentY + contentH - 44, cpu.source ? cpu.source : "N/A", kernelTaskManagerMutedTextColor());
+        appDrawText(contentX + 198, contentY + contentH - 26, "Kernel heap is a 1 MB bump allocator.", kernelTaskManagerMutedTextColor());
     } else if (m_activeTab == 2) {
-        drawRoundedPanel(contentX, contentY, contentW, contentH, rgb(27, 29, 35), rgb(60, 68, 82));
-        appDrawText(contentX + 12, contentY + 10, "Tombstoned", rgb(240, 244, 250));
-        appDrawText(contentX + 12, contentY + 46, "Bare-metal build does not collect app tombstones yet.", rgb(218, 222, 232));
-        appDrawText(contentX + 12, contentY + 66, "Use the hosted/server Task Manager for tombstone policy details.", rgb(160, 166, 176));
-        drawRoundedPanel(contentX + 12, contentY + 100, contentW - 24, 110, rgb(22, 24, 29), rgb(58, 64, 78));
-        appDrawText(contentX + 24, contentY + 118, "Available fields:", rgb(236, 240, 248));
-        appDrawText(contentX + 24, contentY + 138, "Name, PID, reason, exit code, runtime", rgb(160, 166, 176));
-        appDrawText(contentX + 24, contentY + 156, "App ID-backed tombstones are implemented in the hosted build.", rgb(160, 166, 176));
+        drawRoundedPanel(contentX, contentY, contentW, contentH, kernelTaskManagerPanelColor(), kernelTaskManagerBorderColor());
+        appDrawText(contentX + 12, contentY + 10, "Tombstoned", kernelTaskManagerHeadingTextColor());
+        appDrawText(contentX + 12, contentY + 46, "Bare-metal build does not collect app tombstones yet.", kernelTaskManagerTextColor());
+        appDrawText(contentX + 12, contentY + 66, "Use the hosted/server Task Manager for tombstone policy details.", kernelTaskManagerMutedTextColor());
+        drawRoundedPanel(contentX + 12, contentY + 100, contentW - 24, 110, kernelTaskManagerInsetColor(), kernelTaskManagerInsetBorderColor());
+        appDrawText(contentX + 24, contentY + 118, "Available fields:", kernelTaskManagerTextColor());
+        appDrawText(contentX + 24, contentY + 138, "Name, PID, reason, exit code, runtime", kernelTaskManagerMutedTextColor());
+        appDrawText(contentX + 24, contentY + 156, "App ID-backed tombstones are implemented in the hosted build.", kernelTaskManagerMutedTextColor());
     } else {
-        drawRoundedPanel(contentX, contentY, contentW, contentH, rgb(27, 29, 35), rgb(60, 68, 82));
-        appDrawText(contentX + 12, contentY + 10, "Memory Details", rgb(240, 244, 250));
+        drawRoundedPanel(contentX, contentY, contentW, contentH, kernelTaskManagerPanelColor(), kernelTaskManagerBorderColor());
+        appDrawText(contentX + 12, contentY + 10, "Memory Details", kernelTaskManagerHeadingTextColor());
 
         const uint64_t heapTotal = gxos_kernel_heap_total_bytes();
         const uint64_t heapUsed = gxos_kernel_heap_used_bytes();
         const uint64_t heapFree = gxos_kernel_heap_free_bytes();
         const int heapPct = heapTotal > 0 ? static_cast<int>((heapUsed * 100ULL) / heapTotal) : 0;
 
-        drawHistoryGraph(contentX + 12, contentY + 34, 220, 88, m_heapHistory, m_heapHistoryCount, m_heapHistoryHead, rgb(96, 196, 126));
-        drawRoundedPanel(contentX + 248, contentY + 34, contentW - 260, contentH - 46, rgb(24, 26, 31), rgb(58, 64, 78));
+        drawHistoryGraph(contentX + 12, contentY + 34, 220, 88, m_heapHistory, m_heapHistoryCount, m_heapHistoryHead, kernelTaskManagerMetricColor(1));
+        drawRoundedPanel(contentX + 248, contentY + 34, contentW - 260, contentH - 46, kernelTaskManagerInsetColor(), kernelTaskManagerInsetBorderColor());
 
         char heapUsedText[32];
         char heapFreeText[32];
@@ -4398,21 +4508,22 @@ void TaskManagerApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
         uint64_to_text(heapTotal, heapTotalText, sizeof(heapTotalText));
         int_to_text(heapPct, heapPctText, sizeof(heapPctText));
 
-        appDrawText(contentX + 262, contentY + 46, "Total heap:", rgb(236, 240, 248));
-        appDrawText(contentX + 262, contentY + 66, heapTotalText, rgb(212, 218, 228));
-        appDrawText(contentX + 262, contentY + 96, "Used:", rgb(236, 240, 248));
-        appDrawText(contentX + 262, contentY + 116, heapUsedText, rgb(212, 218, 228));
-        appDrawText(contentX + 262, contentY + 146, "Free:", rgb(236, 240, 248));
-        appDrawText(contentX + 262, contentY + 166, heapFreeText, rgb(212, 218, 228));
-        appDrawText(contentX + 262, contentY + 196, "Utilization:", rgb(236, 240, 248));
-        appDrawText(contentX + 262, contentY + 216, heapPctText, rgb(96, 196, 126));
-        appDrawText(contentX + 282, contentY + 216, "%", rgb(96, 196, 126));
-        appDrawText(contentX + 262, contentY + 250, "Heap is a kernel bump allocator; allocations are not freed.", rgb(160, 166, 176));
-        appDrawText(contentX + 262, contentY + 270, "That makes the total fixed and the used value monotonic.", rgb(160, 166, 176));
+        appDrawText(contentX + 262, contentY + 46, "Total heap:", kernelTaskManagerTextColor());
+        appDrawText(contentX + 262, contentY + 66, heapTotalText, kernelTaskManagerValueTextColor());
+        appDrawText(contentX + 262, contentY + 96, "Used:", kernelTaskManagerTextColor());
+        appDrawText(contentX + 262, contentY + 116, heapUsedText, kernelTaskManagerValueTextColor());
+        appDrawText(contentX + 262, contentY + 146, "Free:", kernelTaskManagerTextColor());
+        appDrawText(contentX + 262, contentY + 166, heapFreeText, kernelTaskManagerValueTextColor());
+        appDrawText(contentX + 262, contentY + 196, "Utilization:", kernelTaskManagerTextColor());
+        appDrawText(contentX + 262, contentY + 216, heapPctText, kernelTaskManagerMetricColor(1));
+        appDrawText(contentX + 282, contentY + 216, "%", kernelTaskManagerMetricColor(1));
+        appDrawText(contentX + 262, contentY + 250, "Heap is a kernel bump allocator; allocations are not freed.", kernelTaskManagerMutedTextColor());
+        appDrawText(contentX + 262, contentY + 270, "That makes the total fixed and the used value monotonic.", kernelTaskManagerMutedTextColor());
     }
 
     // Bottom status strip. The real controls are the widget buttons created in init().
-    framebuffer::fill_rect(x + 14, y + h - 54, w - 28, 1, rgb(70, 76, 90));
+    framebuffer::fill_rect(x + 14, y + h - 54, w - 28, 1,
+        kernelSciFiThemeActive() ? kernelTaskManagerControlTheme().separator : rgb(70, 76, 90));
     uint32_t bottomY = y + h - 42;
     char cpuLine[128];
     const kernel::desktop::CpuTelemetrySnapshot cpu = kernel::desktop::cpu_telemetry_snapshot();
@@ -4434,9 +4545,9 @@ void TaskManagerApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
         strappend(cpuLine, windowBuf, sizeof(cpuLine));
         strappend(cpuLine, " ms", sizeof(cpuLine));
     }
-    appDrawText(x + 230, bottomY + 8, cpuLine, rgb(180, 200, 220));
-    appDrawText(x + 230, bottomY + 18, cpu.source ? cpu.source : "N/A", rgb(160, 170, 185));
-    appDrawText(x + w - 196, bottomY + 8, "Use the task buttons below the strip.", rgb(160, 170, 185));
+    appDrawText(x + 230, bottomY + 8, cpuLine, kernelTaskManagerValueTextColor());
+    appDrawText(x + 230, bottomY + 18, cpu.source ? cpu.source : "N/A", kernelTaskManagerMutedTextColor());
+    appDrawText(x + w - 196, bottomY + 8, "Use the task buttons below the strip.", kernelTaskManagerMutedTextColor());
 }
 
 void TaskManagerApp::onMouseDown(int localX, int localY, uint8_t button) {
@@ -4520,6 +4631,19 @@ void TaskManagerApp::refreshList() {
     // Validate selection
     if (m_selectedApp >= m_entryCount) {
         m_selectedApp = m_entryCount - 1;
+    }
+
+    bool canEndTask = false;
+    if (m_selectedApp >= 0 && m_selectedApp < m_entryCount) {
+        if (m_entries[m_selectedApp].isShell) {
+            canEndTask = shell::is_open();
+        } else {
+            app::KernelApp* selectedApp = app::AppManager::getRunningApp(m_selectedApp);
+            canEndTask = selectedApp != nullptr && selectedApp != this;
+        }
+    }
+    if (m_endTaskBtnId >= 0) {
+        setWidgetEnabled(m_endTaskBtnId, canEndTask);
     }
 }
 

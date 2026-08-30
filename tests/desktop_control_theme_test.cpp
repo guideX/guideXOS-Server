@@ -26,6 +26,12 @@ int main()
         "control panel role follows the selected theme");
     ok &= expect(classicRoles.inputBackground == classicRoles.recessedField,
         "input background is derived from the shared recessed-field role");
+    ok &= expect(sciFiRoles.tableHeaderBackground != sciFiRoles.panelBackground,
+        "table header background is a distinct shared utility role");
+    ok &= expect(sciFiRoles.tableHeaderText == sciFi.titleBarText,
+        "table header text follows the selected theme title text");
+    ok &= expect(sciFiRoles.statusWarning != sciFiRoles.panelBackground,
+        "status warning is a distinct shared utility role");
     ok &= expect(DesktopControlFillColor(sciFiRoles, DesktopControlState::Normal) == sciFiRoles.controlBackground,
         "normal control state selects the normal fill");
     ok &= expect(DesktopControlFillColor(sciFiRoles, DesktopControlState::Hover) == sciFiRoles.controlHover,

@@ -1375,6 +1375,72 @@ Deferred work includes icon-system replacement, tabs or new browser panels, cont
 
 Navigator's primary application-owned chrome now consumes the shared Phase 10A foundation on hosted and bare-metal paths while web content remains a separate document-owned surface. Final outcome, exact commit, regression results, QEMU limitations, and retained evidence are recorded with the Phase 10B closeout report and should be kept aligned with this section.
 
+## Phase 10C - Task Manager Interior Sci-Fi Theming
+
+Phase 10C themes the existing guideXOS Server Task Manager as a bounded application-surface consumer of the Phase 10A/10B shared control foundation. It changes paint roles and real control-state publication only; it does not add Task Manager features or change process-management behavior.
+
+### Closeout metadata
+
+* Starting HEAD: `44301f187a114d214c8522fed85782c2ae8a4641` (`Theme Navigator interior for Sci-Fi mode`).
+* Phase 10B was already pushed when this audit began: upstream was `origin/v0.3_SCI_FI_THEME`, with `0 ahead / 0 behind` at the starting checkpoint.
+* Phase 10C closeout result: Outcome B — complete with minor limitations. The final commit subject is `Theme Task Manager interior for Sci-Fi mode`; the exact SHA and repository counts are included in the implementation report.
+
+### Starting architecture and ownership audit
+
+The repository contains two real Task Manager implementations. Hosted Task Manager is `gxos::apps::TaskManager` in `task_manager.cpp`/`task_manager.h`; it publishes its client rectangles, text, table rows, selection, status/details, and performance/memory/tombstone content through the GUI IPC path. The hosted compositor owns the outer frame/title bar and generic buttons. Bare-metal Task Manager is `kernel::apps::TaskManagerApp` in `kernel/core/kernel_apps.cpp`; it directly paints its framebuffer client surface, list/table, tabs, status/details, and resource views, while the shared kernel compositor owns its Refresh and End Task buttons.
+
+The audit found no application-owned Task Manager context menu, confirmation dialog, local scrollbar, or separate keyboard-focus model. Hosted tabs are existing generic widgets; bare-metal tabs are direct-drawn controls. Existing process/app enumeration, refresh, selection, scrolling, keyboard/mouse routing, action guards, and lifecycle paths were kept intact. The bare-metal build intentionally has different data coverage and already reports that it does not collect hosted app tombstones; that is a functional product boundary, not a theming defect.
+
+### Application-owned surfaces themed
+
+The real Task Manager surfaces migrated to shared roles are:
+
+* hosted and bare-metal client/body backgrounds and nested panels;
+* process/task table headers, list backgrounds, row text, selected row, empty list space, and separators;
+* CPU, memory, disk, network/resource values and existing graph/status text;
+* hosted tombstone and memory-details panels, including their existing empty/data states;
+* existing tab boundaries and bare-metal tab active/inactive surfaces;
+* existing footer/status/summary text hierarchy; and
+* the existing Refresh, End Task/End Process, Restore, and End Tombstoned buttons through the shared compositor/widget state path.
+
+No new columns, tabs, graphs, scrollbar geometry, context-menu commands, confirmation behavior, or process commands were introduced. Hover and pressed button rendering remain provided by the existing generic compositor state path. There is no Task Manager-owned scrollbar or context menu to migrate in this revision.
+
+### Shared roles and reusable additions
+
+Both implementations derive Sci-Fi colors from `DesktopTheme` through `GetDesktopControlTheme`. Task Manager consumes `panelBackground`, `raisedPanel`, `recessedField`, `border`, `primaryText`, `secondaryText`, `controlText`, `separator`, `selectionActive`, `statusWarning`, `controlHoverBorder`, and `controlBorder`, plus `DesktopSelectionColor` and the existing `DesktopControlState` fill/border/text lookups. The hosted action controls publish the existing `MT_WidgetSetEnabled` state, and bare-metal End Task now reflects its existing selection/action guard through `setWidgetEnabled` without changing the guard itself.
+
+Three reusable roles were added to `DesktopControlTheme`: `tableHeaderBackground`, `tableHeaderText`, and `statusWarning`. They each have a clear current consumer in the Task Manager utility surface and are plausibly useful for later utility tables/status reporting. No Task Manager-specific Sci-Fi palette or second theme-selection path was added. Sci-Fi resource indicators reuse the selected theme accent/control/separator/secondary roles; Classic metric and warning literals remain in their existing branches.
+
+### Classic and Sci-Fi behavior
+
+Classic remains the default, including missing, invalid, explicit, and persisted Classic configuration. Hosted and bare-metal Classic branches retain the prior Task Manager colors and geometry. Sci-Fi is opt-in and gives Task Manager dark workstation/server surfaces, crisp table hierarchy, cool restrained accents, readable primary/secondary values, clear selection, and subtle separators. Client geometry, hit regions, input routing, data text, refresh cadence, and action semantics are unchanged.
+
+### Validation and evidence
+
+The focused control-theme test covers the new table-header roles in addition to Classic/Sci-Fi lookup, fallback parsing, and normal/hover/pressed/focused/disabled state selection. The extended theme-system smoke checks verify hosted and bare-metal Task Manager role consumption, shared indicator roles, action enabled-state plumbing, Sci-Fi tab state, and the shared header tokens.
+
+Hosted validation used the existing Task Manager snapshot smoke and the hosted server/display-runtime path. The snapshot checkpoints cover Task Manager list data, selection, refresh, performance, memory details, and tombstone surfaces, and all of those checkpoints passed. Its standalone launch marker remains affected by the existing PowerShell process/pipe timing issue; a direct `gui.start`, `taskmgr`, `gui.wlist`, `gui.pop`, `quit` sequence returned `Task Manager launched, pid=11`, `Compositor received MT_Create: Task Manager|760|520`, and `TaskManager window created: 1000`. The marker mismatch is therefore classified as a harness limitation rather than a Task Manager behavior change. The hosted compositor owns generic normal/hover/pressed/disabled button pixels, while Task Manager source/runtime evidence covers the app-owned interior.
+
+AMD64 validation uses `build.ps1 -Arch amd64` and the canonical disposable/staged ESP startup-sync path. Classic and Sci-Fi startup-sync runs passed and recorded theme selection in `logs/desktop-startup-sync-20260829-171623.serial.log` and `logs/desktop-startup-sync-20260829-171652.serial.log`. The startup-sync harness does not directly launch Task Manager or retain a fresh per-state Task Manager screenshot. Source, build, hosted snapshot, and bounded runtime evidence therefore provide the strongest available Task Manager proof; lack of a direct QEMU Task Manager launch is a harness limitation, not a product failure.
+
+The complete Phase 10C closeout recorded passing `build.bat`, `mingw32-make -C kernel ARCH=amd64 -j2`, `build.ps1 -Arch amd64`, focused control-theme tests, `smoke-theme-system.ps1 -SkipBuild`, startup/app-model, live-directory, hosted-display, bootinfo, virtio-input, and build-wrapper regressions, plus `git diff --check`. The Task Manager snapshot smoke returned only the launch-marker harness failure described above; its Task Manager data and tombstone assertions passed. No test was weakened.
+
+### Functional boundaries, limitations, and deferred work
+
+Visual theming completed now: shared-role routing for the existing Task Manager interiors, table/list hierarchy, selected rows, status/resource text, tabs where already present, and existing action-button enabled/hover/pressed behavior on hosted and bare-metal paths.
+
+Task Manager functionality that does not yet exist: richer process APIs, process trees, CPU/memory profiler architecture, history graphs beyond the existing views, services/startup/network/disk tools, detailed threads, priority/affinity controls, new kill semantics, and expanded diagnostics. These are deliberately deferred product work, not theme defects. Also deferred are a universal list/tab/scrollbar framework, a separate hosted keyboard-focus protocol, and automatic per-state QEMU application screenshots.
+
+### Phase 10C closeout
+
+* Outcome: Outcome B — Phase 10C complete with minor limitations. The implementation is complete; the remaining limits are the snapshot launch-marker timing defect and the lack of direct Task Manager QEMU launch/screenshot automation.
+* Final repository state: one local Phase 10C commit ahead of `origin/v0.3_SCI_FI_THEME`, with a clean worktree after closeout. The exact ending SHA and final ahead/behind counts are included in the implementation report.
+* Nothing is pushed by Phase 10C unless explicitly requested.
+
+### Future utility-theming implications
+
+The shared table-header roles and existing control/selection/state lookups now provide a small reusable path for later Device Manager, Disk Manager, or Network utility surfaces. Future work should continue to audit each real application first, add only semantic roles with an immediate consumer, and keep utility feature development separate from theme integration.
+
 ## Manual Validation Runbook
 
 * Start the hosted server executable and use `gui.start` to open the compositor.

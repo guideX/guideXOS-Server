@@ -1,5 +1,6 @@
 #include "task_manager.h"
 #include "desktop_theme.h"
+#include "desktop_control_theme.h"
 #include "gui_protocol.h"
 #include "logger.h"
 #include "allocator.h"
@@ -91,21 +92,6 @@ namespace gxos { namespace apps {
             return (0xFFu << 24) | (static_cast<uint32_t>(r) << 16) | (static_cast<uint32_t>(g) << 8) | static_cast<uint32_t>(b);
         }
 
-        static uint32_t blendColor(uint32_t baseColor, uint32_t overlayColor, int overlayPercent) {
-            overlayPercent = std::clamp(overlayPercent, 0, 100);
-            const int basePercent = 100 - overlayPercent;
-            const uint8_t baseR = static_cast<uint8_t>((baseColor >> 16) & 0xFF);
-            const uint8_t baseG = static_cast<uint8_t>((baseColor >> 8) & 0xFF);
-            const uint8_t baseB = static_cast<uint8_t>(baseColor & 0xFF);
-            const uint8_t overlayR = static_cast<uint8_t>((overlayColor >> 16) & 0xFF);
-            const uint8_t overlayG = static_cast<uint8_t>((overlayColor >> 8) & 0xFF);
-            const uint8_t overlayB = static_cast<uint8_t>(overlayColor & 0xFF);
-            return packRgb(
-                static_cast<uint8_t>((baseR * basePercent + overlayR * overlayPercent) / 100),
-                static_cast<uint8_t>((baseG * basePercent + overlayG * overlayPercent) / 100),
-                static_cast<uint8_t>((baseB * basePercent + overlayB * overlayPercent) / 100));
-        }
-
         static bool isSciFiThemeActive() {
             return GetCurrentDesktopThemeId() == DesktopThemeId::SciFi;
         }
@@ -114,40 +100,36 @@ namespace gxos { namespace apps {
             return GetCurrentDesktopTheme();
         }
 
+        static DesktopControlTheme taskManagerControlTheme() {
+            return GetDesktopControlTheme(taskManagerTheme());
+        }
+
         static uint32_t TaskManagerBodyColor() {
             if (!isSciFiThemeActive()) {
                 return packRgb(26, 26, 26);
             }
-
-            const DesktopTheme& theme = taskManagerTheme();
-            return blendColor(theme.windowBackground, theme.taskbarBackground, 10);
+            return taskManagerControlTheme().panelBackground;
         }
 
         static uint32_t TaskManagerPanelColor() {
             if (!isSciFiThemeActive()) {
                 return packRgb(26, 26, 26);
             }
-
-            const DesktopTheme& theme = taskManagerTheme();
-            return blendColor(theme.windowBackground, theme.taskbarBackground, 14);
+            return taskManagerControlTheme().recessedField;
         }
 
         static uint32_t TaskManagerHeaderColor() {
             if (!isSciFiThemeActive()) {
                 return packRgb(36, 36, 36);
             }
-
-            const DesktopTheme& theme = taskManagerTheme();
-            return blendColor(theme.windowBackground, theme.taskbarBackground, 22);
+            return taskManagerControlTheme().tableHeaderBackground;
         }
 
         static uint32_t TaskManagerListColor() {
             if (!isSciFiThemeActive()) {
                 return packRgb(24, 24, 24);
             }
-
-            const DesktopTheme& theme = taskManagerTheme();
-            return blendColor(theme.windowBackground, theme.taskbarBackground, 18);
+            return taskManagerControlTheme().raisedPanel;
         }
 
         static uint32_t TaskManagerRowColor() {
@@ -158,70 +140,77 @@ namespace gxos { namespace apps {
             if (!isSciFiThemeActive()) {
                 return packRgb(42, 59, 82);
             }
-
-            const DesktopTheme& theme = taskManagerTheme();
-            return blendColor(theme.windowBackground, theme.accent, 18);
+            return DesktopSelectionColor(taskManagerControlTheme(), true);
         }
 
         static uint32_t TaskManagerBorderColor() {
             if (!isSciFiThemeActive()) {
                 return packRgb(68, 68, 68);
             }
-
-            const DesktopTheme& theme = taskManagerTheme();
-            return blendColor(theme.windowBorder, theme.taskbarBorder, 24);
+            return taskManagerControlTheme().separator;
         }
 
         static uint32_t TaskManagerTextColor() {
             if (!isSciFiThemeActive()) {
                 return packRgb(220, 220, 220);
             }
-
-            const DesktopTheme& theme = taskManagerTheme();
-            return blendColor(theme.titleBarText, theme.windowBackground, 8);
+            return taskManagerControlTheme().primaryText;
         }
 
         static uint32_t TaskManagerHeaderTextColor() {
             if (!isSciFiThemeActive()) {
                 return packRgb(236, 240, 248);
             }
-
-            return taskManagerTheme().titleBarText;
+            return taskManagerControlTheme().tableHeaderText;
         }
 
         static uint32_t TaskManagerValueTextColor() {
             if (!isSciFiThemeActive()) {
                 return packRgb(224, 228, 238);
             }
-
-            const DesktopTheme& theme = taskManagerTheme();
-            return blendColor(theme.titleBarText, theme.windowBackground, 12);
+            return taskManagerControlTheme().controlText;
         }
 
         static uint32_t TaskManagerMutedTextColor() {
             if (!isSciFiThemeActive()) {
                 return packRgb(160, 166, 176);
             }
+            return taskManagerControlTheme().secondaryText;
+        }
 
-            const DesktopTheme& theme = taskManagerTheme();
-            return blendColor(theme.titleBarText, theme.taskbarBackground, 58);
+        static uint32_t TaskManagerStatusWarningColor() {
+            if (!isSciFiThemeActive()) {
+                return packRgb(208, 92, 92);
+            }
+            return taskManagerControlTheme().statusWarning;
         }
 
         static uint32_t TaskManagerAccentColor() {
             if (!isSciFiThemeActive()) {
                 return packRgb(228, 232, 240);
             }
-
             return taskManagerTheme().accent;
         }
 
-        static uint32_t TaskManagerIndicatorColor(uint32_t baseColor) {
+        static uint32_t TaskManagerIndicatorColor(int metricIndex) {
             if (!isSciFiThemeActive()) {
-                return baseColor;
+                switch (metricIndex) {
+                case 0: return packRgb(93, 173, 226);
+                case 1: return packRgb(88, 214, 141);
+                case 2: return packRgb(230, 126, 34);
+                case 3: return packRgb(155, 89, 182);
+                default: return packRgb(93, 173, 226);
+                }
             }
 
-            const DesktopTheme& theme = taskManagerTheme();
-            return blendColor(baseColor, theme.accent, 14);
+            const DesktopControlTheme roles = taskManagerControlTheme();
+            switch (metricIndex) {
+            case 0: return taskManagerTheme().accent;
+            case 1: return roles.controlHoverBorder;
+            case 2: return roles.controlBorder;
+            case 3: return roles.secondaryText;
+            default: return taskManagerTheme().accent;
+            }
         }
 
         static uint64_t microsToMillisCeil(uint64_t micros) {
@@ -387,6 +376,15 @@ namespace gxos { namespace apps {
             ipc::Message msg;
             msg.type = (uint32_t)MsgType::MT_DrawText;
             const std::string payload = std::to_string(windowId) + "|\f";
+            msg.data.assign(payload.begin(), payload.end());
+            ipc::Bus::publish("gui.input", std::move(msg), false);
+        }
+
+        static void publishWidgetEnabled(uint64_t windowId, int widgetId, bool enabled) {
+            if (windowId == 0) return;
+            ipc::Message msg;
+            msg.type = (uint32_t)MsgType::MT_WidgetSetEnabled;
+            const std::string payload = packWidgetSetEnabled(windowId, widgetId, enabled);
             msg.data.assign(payload.begin(), payload.end());
             ipc::Bus::publish("gui.input", std::move(msg), false);
         }
@@ -1049,6 +1047,7 @@ namespace gxos { namespace apps {
                                     updateHeader();
                                     updateDisplay();
                                     updateStatusBar();
+                                    updateActionButtonStates();
                                     s_lastRefreshTicks = nowTicks;
                                     s_lastPerformanceRefreshTicks = nowTicks;
                                 } catch (const std::exception& e) {
@@ -1229,6 +1228,8 @@ namespace gxos { namespace apps {
         if (s_selectedIndex < 0) {
             s_selectedIndex = 0;
         }
+
+        updateActionButtonStates();
         
         Logger::write(LogLevel::Info, std::string("TaskManager: Refreshed ") + std::to_string(s_processes.size()) + " processes");
     }
@@ -1323,12 +1324,14 @@ namespace gxos { namespace apps {
             // Tombstoned tab: Up/Down to select, R=Restore, E/Del=End
             if (keyCode == 38) { // Up
                 if (s_selectedTombIndex > 0) s_selectedTombIndex--;
+                updateActionButtonStates();
                 updateDisplay();
                 return;
             }
             if (keyCode == 40) { // Down
                 int count = countTombstoned();
                 if (s_selectedTombIndex < count - 1) s_selectedTombIndex++;
+                updateActionButtonStates();
                 updateDisplay();
                 return;
             }
@@ -1367,6 +1370,7 @@ namespace gxos { namespace apps {
                 if (s_selectedIndex < s_scrollOffset) {
                     s_scrollOffset = s_selectedIndex;
                 }
+                updateActionButtonStates();
                 updateDisplay();
             }
         }
@@ -1376,6 +1380,7 @@ namespace gxos { namespace apps {
                 if (s_selectedIndex >= s_scrollOffset + 11) {
                     s_scrollOffset = s_selectedIndex - 10;
                 }
+                updateActionButtonStates();
                 updateDisplay();
             }
         }
@@ -1445,6 +1450,13 @@ namespace gxos { namespace apps {
     
     void TaskManager::updateDisplay() {
         clearWindow(s_windowId);
+
+        if (isSciFiThemeActive()) {
+            const int tabX[] = { 4, 118, 232, 346 };
+            const int tabW[] = { 110, 110, 110, 130 };
+            const DesktopControlTheme roles = taskManagerControlTheme();
+            publishRectColor(s_windowId, tabX[s_currentTab], 50, tabW[s_currentTab], 2, roles.controlFocusBorder);
+        }
 
         if (s_currentTab == 0) {
             updateHeader();
@@ -1557,13 +1569,6 @@ namespace gxos { namespace apps {
         const uint64_t* navHistories[] = { s_cpuHistory, s_memoryHistory, s_diskHistory, nullptr };
         const int navHistoryCounts[] = { s_cpuHistoryCount, s_memoryHistoryCount, s_diskHistoryCount, 0 };
         const int navHistoryHeads[] = { s_cpuHistoryHead, s_memoryHistoryHead, s_diskHistoryHead, 0 };
-        const uint32_t navColors[4] = {
-            packRgb(93, 173, 226),
-            packRgb(88, 214, 141),
-            packRgb(230, 126, 34),
-            packRgb(155, 89, 182)
-        };
-
         for (int i = 0; i < 4; ++i) {
             const int itemY = navStartY + i * 96;
             if (i == s_perfCategoryIndex) {
@@ -1582,7 +1587,7 @@ namespace gxos { namespace apps {
                 navHistories[i],
                 navHistoryCounts[i],
                 navHistoryHeads[i],
-                TaskManagerIndicatorColor(navColors[i])
+                TaskManagerIndicatorColor(i)
             );
         }
 
@@ -1590,12 +1595,6 @@ namespace gxos { namespace apps {
                                       (s_perfCategoryIndex == 1 && mem.heapUtilPctAvailable && s_memoryHistoryCount > 0) ||
                                       (s_perfCategoryIndex == 2 && perf.diskAvailable && perf.diskActivePctAvailable && s_diskHistoryCount > 0);
         const char* detailLabels[] = { "CPU", "Memory", "Disk", "Network" };
-        const uint32_t detailColors[4] = {
-            packRgb(93, 173, 226),
-            packRgb(88, 214, 141),
-            packRgb(230, 126, 34),
-            packRgb(155, 89, 182)
-        };
         const uint64_t* detailHistory = s_perfCategoryIndex == 0 ? s_cpuHistory
                                       : s_perfCategoryIndex == 1 ? s_memoryHistory
                                       : s_perfCategoryIndex == 2 ? s_diskHistory
@@ -1625,7 +1624,7 @@ namespace gxos { namespace apps {
             detailHistory,
             detailHistoryCount,
             detailHistoryHead,
-            TaskManagerIndicatorColor(detailColors[s_perfCategoryIndex])
+            TaskManagerIndicatorColor(s_perfCategoryIndex)
         );
 
         const int detailTop = y + 256;
@@ -1817,6 +1816,22 @@ namespace gxos { namespace apps {
         std::string payload = oss.str();
         publishTextAtColor(s_windowId, 12, 496, TaskManagerMutedTextColor(), payload);
     }
+
+    void TaskManager::updateActionButtonStates() {
+        const bool hasSelectedProcess = s_selectedIndex >= 0 &&
+            s_selectedIndex < static_cast<int>(s_processes.size());
+        const bool canEndProcess = hasSelectedProcess && s_processes[s_selectedIndex].pid != 0;
+        const bool hasSelectedTombstone = s_selectedTombIndex >= 0 &&
+            s_selectedTombIndex < static_cast<int>(s_snapshot.tombstoned.size());
+        const bool canRestoreTombstone = hasSelectedTombstone &&
+            s_snapshot.tombstoned[s_selectedTombIndex].restoreSupported;
+        const bool canEndTombstone = hasSelectedTombstone &&
+            s_snapshot.tombstoned[s_selectedTombIndex].endSupported;
+
+        publishWidgetEnabled(s_windowId, 2, canEndProcess);
+        publishWidgetEnabled(s_windowId, 20, canRestoreTombstone);
+        publishWidgetEnabled(s_windowId, 21, canEndTombstone);
+    }
     
     // --- Tombstoned management (matching Legacy TaskManager.cs) ---
     
@@ -1934,7 +1949,7 @@ namespace gxos { namespace apps {
         auto row = [&](const std::string& label, const std::string& value, bool highlight = false) {
             publishTextAtColor(s_windowId, labelX, rowY, TaskManagerTextColor(), label);
             if (highlight) {
-                publishTextAtColor(s_windowId, valueX, rowY, 208, 92, 92, value);
+                publishTextAtColor(s_windowId, valueX, rowY, TaskManagerStatusWarningColor(), value);
             } else {
                 publishTextAtColor(s_windowId, valueX, rowY, TaskManagerValueTextColor(), value);
             }
