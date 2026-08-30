@@ -1459,6 +1459,111 @@ typedef struct guidexos_nativeaot_c011ec56_lifecycle_record {
         GUIDEXOS_NATIVEAOT_C011EC56_MAX_SURVIVOR_OBSERVATIONS];
 } guidexos_nativeaot_c011ec56_lifecycle_record;
 
+/*
+ * C011EC58 records the provenance of the value supplied to every production
+ * generation_to_condemn call in the locked Workstation GC build.  The record
+ * is deliberately scalar and fixed-size: the source observer never allocates,
+ * never changes a GC decision, and stops recording rather than growing state.
+ */
+enum {
+    GUIDEXOS_NATIVEAOT_C011EC58_MAX_ENTRIES = 256u,
+    GUIDEXOS_NATIVEAOT_C011EC58_CALLSITE_CHECK_ONLY = 1u,
+    GUIDEXOS_NATIVEAOT_C011EC58_CALLSITE_MULTI_HEAP = 2u,
+    GUIDEXOS_NATIVEAOT_C011EC58_CALLSITE_SINGLE_HEAP = 3u,
+    GUIDEXOS_NATIVEAOT_C011EC58_ORIGIN_CHECK_FOR_FULL_GC = 1u,
+    GUIDEXOS_NATIVEAOT_C011EC58_ORIGIN_BUDGET_TRIGGER = 2u,
+    GUIDEXOS_NATIVEAOT_C011EC58_ORIGIN_EPHEMERAL_OOS = 3u,
+    GUIDEXOS_NATIVEAOT_C011EC58_ORIGIN_FULL_OOS = 4u,
+    GUIDEXOS_NATIVEAOT_C011EC58_ORIGIN_OTHER = 5u,
+    GUIDEXOS_NATIVEAOT_C011EC58_FREE_REGION_UNKNOWN = 0u,
+    GUIDEXOS_NATIVEAOT_C011EC58_FREE_REGION_AVAILABLE = 1u,
+    GUIDEXOS_NATIVEAOT_C011EC58_FREE_REGION_UNAVAILABLE = 2u,
+};
+
+typedef struct guidexos_nativeaot_c011ec58_entry_record {
+    uint32_t observed;
+    uint32_t ordinal;
+    uint32_t callSite;
+    uint32_t nInitial;
+    uint32_t checkOnly;
+    uint32_t collectionReason;
+    uint32_t maximumGeneration;
+    uint32_t requestedGeneration;
+    uint32_t selectedGeneration;
+    uint32_t originBranch;
+    uint32_t allocationPath;
+    uint32_t sourceFixBoundsObserved;
+    uint32_t sourceAdjustObserved;
+    uint32_t ephemeralTransitionObserved;
+    uint32_t freeRegionObserved;
+    uint32_t freeRegionResult;
+    uint32_t freeRegionPath;
+    uint32_t lastGcBeforeOom;
+    uint32_t collectionOrdinal;
+    uint32_t tailEligible;
+    uint32_t tailConsidered;
+    uint32_t tailSelected;
+    uint32_t tailConsumed;
+    uint32_t tailStillMapped;
+    uint32_t b02Observed;
+    uint32_t b02Crossed;
+    uint32_t b12Eligible;
+    uint32_t reserved[3];
+    uintptr_t requestSize;
+    uintptr_t alignedSize;
+    uintptr_t allocationContext;
+    uintptr_t allocationPointer;
+    uintptr_t allocationLimit;
+    uintptr_t allocationSegment;
+    uintptr_t tailSegment;
+    uintptr_t tailStart;
+    uintptr_t tailEnd;
+    int64_t gen1Budget;
+} guidexos_nativeaot_c011ec58_entry_record;
+
+typedef struct guidexos_nativeaot_c011ec58_lifecycle_record {
+    uint32_t started;
+    uint32_t entryCount;
+    uint32_t lastN0Entry;
+    uint32_t firstN2Entry;
+    uint32_t n0Count;
+    uint32_t n1Count;
+    uint32_t n2Count;
+    uint32_t originObservationCount;
+    uint32_t allocationAttemptCount;
+    uint32_t freeRegionObservationCount;
+    uint32_t lastFreeRegionObserved;
+    uint32_t lastFreeRegionResult;
+    uint32_t lastFreeRegionPath;
+    uint32_t b02Observed;
+    uint32_t b02Crossed;
+    uint32_t b12Eligible;
+    uint32_t n0ToN2Proven;
+    uint32_t tailMarkerEmitted;
+    uint32_t restartObserved;
+    uint32_t resumeObserved;
+    uint32_t invariantFailures;
+    uint32_t safeStopReason;
+    uint32_t lastOriginBranch;
+    uint32_t lastOriginNInitial;
+    uint32_t lastOriginReason;
+    uint32_t lastCollectionOrdinal;
+    uint32_t lastPolicyOrdinal;
+    uint32_t reserved[2];
+    uintptr_t lastRequestSize;
+    uintptr_t lastAlignedSize;
+    uintptr_t lastAllocationContext;
+    uintptr_t lastAllocationPointer;
+    uintptr_t lastAllocationLimit;
+    uintptr_t lastAllocationSegment;
+    uintptr_t lastTailSegment;
+    uintptr_t lastTailStart;
+    uintptr_t lastTailEnd;
+    int64_t lastGen1Budget;
+    guidexos_nativeaot_c011ec58_entry_record entries[
+        GUIDEXOS_NATIVEAOT_C011EC58_MAX_ENTRIES];
+} guidexos_nativeaot_c011ec58_lifecycle_record;
+
 typedef struct guidexos_nativeaot_c011ec54_lifecycle_record {
     uint32_t started;
     uint32_t preflightEmitted;
@@ -3859,6 +3964,8 @@ typedef struct guidexos_nativeaot_allocation_diagnostics {
     guidexos_nativeaot_c011ec54_lifecycle_record c011ec54Lifecycle;
     /* C011EC56 bounded generation-selection policy and survivor-cohort evidence. */
     guidexos_nativeaot_c011ec56_lifecycle_record c011ec56Lifecycle;
+    /* C011EC58 bounded n_initial call-site and allocation provenance. */
+    guidexos_nativeaot_c011ec58_lifecycle_record c011ec58Lifecycle;
     /* C011EC44 malformed transition-frame provenance. */
     guidexos_nativeaot_c011ec44_provenance_record c011ec44Provenance;
     /* C011EC45 reverse-P/Invoke slot layout, register, and unwind provenance. */

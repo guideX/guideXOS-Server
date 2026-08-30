@@ -97,6 +97,9 @@
   <PropertyGroup Condition="'$(HostLogProofMode)' == 'DirectGen1BudgetCondemnation'">
     <DefineConstants>$(DefineConstants);HOSTLOGPROOF_FIRST_COLLECTION_BOUNDARY_ALLOCATION;HOSTLOGPROOF_SHORT_WEAK_LIFETIME;HOSTLOGPROOF_C011EC37;HOSTLOGPROOF_C011EC40;HOSTLOGPROOF_C011EC41;HOSTLOGPROOF_C011EC55;HOSTLOGPROOF_C011EC57</DefineConstants>
   </PropertyGroup>
+  <PropertyGroup Condition="'$(HostLogProofMode)' == 'NInitialProvenance'">
+    <DefineConstants>$(DefineConstants);HOSTLOGPROOF_FIRST_COLLECTION_BOUNDARY_ALLOCATION;HOSTLOGPROOF_SHORT_WEAK_LIFETIME;HOSTLOGPROOF_C011EC37;HOSTLOGPROOF_C011EC40;HOSTLOGPROOF_C011EC41;HOSTLOGPROOF_C011EC55;HOSTLOGPROOF_C011EC57;HOSTLOGPROOF_C011EC58</DefineConstants>
+  </PropertyGroup>
   <PropertyGroup Condition="'$(HostLogProofMode)' == 'DirectGen1BudgetCondemnation' and '$(HostLogProofC57Strategy)' == 'S1'">
     <DefineConstants>$(DefineConstants);HOSTLOGPROOF_C011EC57_S1</DefineConstants>
   </PropertyGroup>
@@ -104,6 +107,15 @@
     <DefineConstants>$(DefineConstants);HOSTLOGPROOF_C011EC57_S2</DefineConstants>
   </PropertyGroup>
   <PropertyGroup Condition="'$(HostLogProofMode)' == 'DirectGen1BudgetCondemnation' and '$(HostLogProofC57Strategy)' == 'S3'">
+    <DefineConstants>$(DefineConstants);HOSTLOGPROOF_C011EC57_S3</DefineConstants>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(HostLogProofMode)' == 'NInitialProvenance' and '$(HostLogProofC57Strategy)' == 'S1'">
+    <DefineConstants>$(DefineConstants);HOSTLOGPROOF_C011EC57_S1</DefineConstants>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(HostLogProofMode)' == 'NInitialProvenance' and '$(HostLogProofC57Strategy)' == 'S2'">
+    <DefineConstants>$(DefineConstants);HOSTLOGPROOF_C011EC57_S2</DefineConstants>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(HostLogProofMode)' == 'NInitialProvenance' and '$(HostLogProofC57Strategy)' == 'S3'">
     <DefineConstants>$(DefineConstants);HOSTLOGPROOF_C011EC57_S3</DefineConstants>
   </PropertyGroup>
 
