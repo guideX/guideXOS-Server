@@ -109,6 +109,40 @@ public:
     bool epilogue() { return bytes(reinterpret_cast<const uint8_t*>("\x48\x89\xEC\x5D\xC3"), 5); }
     bool call_rax() { return bytes(reinterpret_cast<const uint8_t*>("\xFF\xD0"), 2); }
 
+    bool push_loop_target(uint16_t continueLabel, uint16_t breakLabel)
+    {
+        if (continueLabel >= m_labelCount || breakLabel >= m_labelCount ||
+            m_loopDepth >= COMPILER_MAX_LOOP_TARGET_DEPTH) return false;
+        m_loopStack[m_loopDepth].continueLabel = continueLabel;
+        m_loopStack[m_loopDepth].breakLabel = breakLabel;
+        ++m_loopDepth;
+        return true;
+    }
+
+    bool pop_loop_target()
+    {
+        if (m_loopDepth == 0) return false;
+        --m_loopDepth;
+        m_loopStack[m_loopDepth] = {};
+        return true;
+    }
+
+    bool current_break_target(uint16_t* label) const
+    {
+        if (!label || m_loopDepth == 0) return false;
+        *label = m_loopStack[m_loopDepth - 1U].breakLabel;
+        return true;
+    }
+
+    bool current_continue_target(uint16_t* label) const
+    {
+        if (!label || m_loopDepth == 0) return false;
+        *label = m_loopStack[m_loopDepth - 1U].continueLabel;
+        return true;
+    }
+
+    uint32_t loop_depth() const { return m_loopDepth; }
+
     bool create_label(uint16_t* label)
     {
         if (!label || m_labelCount >= COMPILER_MAX_BRANCH_LABELS) return false;
@@ -171,13 +205,16 @@ public:
 private:
     struct BranchLabel { bool defined; uint32_t offset; };
     struct BranchFixup { uint32_t patchOffset; uint16_t label; };
+    struct LoopTarget { uint16_t continueLabel; uint16_t breakLabel; };
     uint8_t* m_output;
     uint32_t m_capacity;
     uint32_t m_offset;
     uint32_t m_labelCount;
     uint32_t m_fixupCount;
+    uint32_t m_loopDepth = 0;
     BranchLabel m_labels[COMPILER_MAX_BRANCH_LABELS];
     BranchFixup m_fixups[COMPILER_MAX_BRANCH_FIXUPS];
+    LoopTarget m_loopStack[COMPILER_MAX_LOOP_TARGET_DEPTH] = {};
 };
 
 static uint32_t host_log_count(const FunctionIR& function)
@@ -288,6 +325,14 @@ static bool emit_statement(Emitter& emitter, const FunctionIR& function, const S
         case StatementKind::Return:
             return emit_expression(emitter, function, statement.expression) &&
                 (epilogueLabel != COMPILER_INVALID_INDEX ? emitter.emit_jmp(epilogueLabel) : emitter.byte(0xC3));
+        case StatementKind::Break: {
+            uint16_t target = COMPILER_INVALID_INDEX;
+            return emitter.current_break_target(&target) && emitter.emit_jmp(target);
+        }
+        case StatementKind::Continue: {
+            uint16_t target = COMPILER_INVALID_INDEX;
+            return emitter.current_continue_target(&target) && emitter.emit_jmp(target);
+        }
         case StatementKind::Block:
             return emit_block(emitter, function, statement.thenBlock, dataAddress, framed, frame,
                               epilogueLabel, depth + 1U, loopDepth);
@@ -320,9 +365,11 @@ static bool emit_statement(Emitter& emitter, const FunctionIR& function, const S
                 !emitter.define_label(conditionLabel) ||
                 !emit_expression(emitter, function, statement.expression) ||
                 !emitter.test_eax_eax() || !emitter.emit_jz(endLabel) ||
-                !emit_block(emitter, function, statement.thenBlock, dataAddress, framed, frame,
-                            epilogueLabel, depth + 1U, loopDepth + 1U) ||
-                !emitter.emit_jmp(conditionLabel) || !emitter.define_label(endLabel)) return false;
+                !emitter.push_loop_target(conditionLabel, endLabel)) return false;
+            const bool body = emit_block(emitter, function, statement.thenBlock, dataAddress, framed, frame,
+                                         epilogueLabel, depth + 1U, loopDepth + 1U);
+            const bool popped = emitter.pop_loop_target();
+            if (!body || !popped || !emitter.emit_jmp(conditionLabel) || !emitter.define_label(endLabel)) return false;
             return true;
         }
         default: return false;
@@ -423,7 +470,8 @@ bool emit_function(const FunctionIR& function, uint64_t readOnlyDataAddress,
         if (!emitter.prologue(frame.frameBytes) || !emitter.mov_context_local(frame.contextDisplacement)) return false;
     }
     if (!emit_block(emitter, function, function.rootBlock, readOnlyDataAddress, framed, frame,
-                    sharedEpilogue ? epilogueLabel : COMPILER_INVALID_INDEX, 0, 0)) return false;
+                    sharedEpilogue ? epilogueLabel : COMPILER_INVALID_INDEX, 0, 0) ||
+        emitter.loop_depth() != 0) return false;
     if (sharedEpilogue) {
         if (!emitter.define_label(epilogueLabel)) return false;
         if (framed ? !emitter.epilogue() : !emitter.byte(0xC3)) return false;

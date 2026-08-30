@@ -15,7 +15,7 @@ namespace native_elf {
 namespace {
 
 static uint8_t s_invalidImage[guidexos::native_elf::MAX_ELF_FILE_BYTES];
-#if defined(GXOS_PHASE27G_SMOKE) || defined(GXOS_PHASE27H_SMOKE) || defined(GXOS_PHASE27I_SMOKE) || defined(GXOS_PHASE27J_SMOKE)
+#if defined(GXOS_PHASE27G_SMOKE) || defined(GXOS_PHASE27H_SMOKE) || defined(GXOS_PHASE27I_SMOKE) || defined(GXOS_PHASE27J_SMOKE) || defined(GXOS_PHASE27K_SMOKE)
 static uint8_t s_compareImage[guidexos::native_elf::MAX_ELF_FILE_BYTES];
 #endif
 
@@ -87,7 +87,7 @@ static bool emit_serial_artifact(const char* path, const char* name)
     return true;
 }
 
-#if defined(GXOS_PHASE27G_SMOKE) || defined(GXOS_PHASE27H_SMOKE) || defined(GXOS_PHASE27I_SMOKE) || defined(GXOS_PHASE27J_SMOKE)
+#if defined(GXOS_PHASE27G_SMOKE) || defined(GXOS_PHASE27H_SMOKE) || defined(GXOS_PHASE27I_SMOKE) || defined(GXOS_PHASE27J_SMOKE) || defined(GXOS_PHASE27K_SMOKE)
 static bool same_vfs_file_bytes(const char* leftPath, const char* rightPath)
 {
     vfs::FileInfo left = {};
@@ -153,6 +153,42 @@ static bool has_backward_unconditional_branch(const compiler::CompileSummary& su
                                  (static_cast<uint32_t>(summary.code[i + 4]) << 24));
         const int64_t target = static_cast<int64_t>(i + 5U) + displacement;
         if (displacement < 0 && target >= 0 && target < static_cast<int64_t>(i)) {
+            if (displacementOut) *displacementOut = displacement;
+            return true;
+        }
+    }
+    return false;
+}
+
+static uint32_t count_backward_unconditional_branches(const compiler::CompileSummary& summary)
+{
+    uint32_t count = 0;
+    for (uint32_t i = 0; i + 5U <= summary.codeBytes; ++i) {
+        if (summary.code[i] != 0xE9) continue;
+        const int32_t displacement =
+            static_cast<int32_t>(static_cast<uint32_t>(summary.code[i + 1]) |
+                                 (static_cast<uint32_t>(summary.code[i + 2]) << 8) |
+                                 (static_cast<uint32_t>(summary.code[i + 3]) << 16) |
+                                 (static_cast<uint32_t>(summary.code[i + 4]) << 24));
+        const int64_t target = static_cast<int64_t>(i + 5U) + displacement;
+        if (displacement < 0 && target >= 0 && target < static_cast<int64_t>(i)) ++count;
+    }
+    return count;
+}
+
+static bool has_forward_unconditional_branch(const compiler::CompileSummary& summary,
+                                             int32_t* displacementOut)
+{
+    for (uint32_t i = 0; i + 5U <= summary.codeBytes; ++i) {
+        if (summary.code[i] != 0xE9) continue;
+        const int32_t displacement =
+            static_cast<int32_t>(static_cast<uint32_t>(summary.code[i + 1]) |
+                                 (static_cast<uint32_t>(summary.code[i + 2]) << 8) |
+                                 (static_cast<uint32_t>(summary.code[i + 3]) << 16) |
+                                 (static_cast<uint32_t>(summary.code[i + 4]) << 24));
+        const int64_t target = static_cast<int64_t>(i + 5U) + displacement;
+        if (displacement > 0 && target > static_cast<int64_t>(i + 5U) &&
+            target < static_cast<int64_t>(summary.codeBytes)) {
             if (displacementOut) *displacementOut = displacement;
             return true;
         }
@@ -842,6 +878,214 @@ void run_bootstrap_execution_smoke()
     print_marker("phase27j", phase27jPassed);
     serial::puts(phase27jPassed ? "ELF Loader: Phase 27J while-loop smoke PASS\n"
                                 : "ELF Loader: Phase 27J while-loop smoke FAIL\n");
+}
+#endif
+#if defined(GXOS_PHASE27K_SMOKE)
+{
+    serial::puts("ELF Loader: Phase 27K break/continue loop-target smoke begin\n");
+    const char* k27PrimaryArtifact = "/P27K/out/primary.elf";
+    static compiler::CompileSummary basic = {};
+    static compiler::CompileSummary continueBasic = {};
+    static compiler::CompileSummary breakInside = {};
+    static compiler::CompileSummary continueInside = {};
+    static compiler::CompileSummary combined = {};
+    static compiler::CompileSummary skipTail = {};
+    static compiler::CompileSummary breakTail = {};
+    static compiler::CompileSummary nestedBreak = {};
+    static compiler::CompileSummary nestedContinue = {};
+    static compiler::CompileSummary hostContinue = {};
+    static compiler::CompileSummary hostBreak = {};
+    static compiler::CompileSummary breakOutside = {};
+    static compiler::CompileSummary continueOutside = {};
+    static compiler::CompileSummary invalidBreak = {};
+    static compiler::CompileSummary invalidContinue = {};
+    static compiler::CompileSummary missingBreakReturn = {};
+    static compiler::CompileSummary missingContinueReturn = {};
+    static compiler::CompileSummary capacity = {};
+    static compiler::CompileSummary deterministic = {};
+    static compiler::CompileSummary deterministicAgain = {};
+    static compiler::CompileSummary breakAudit = {};
+    static compiler::CompileSummary continueAudit = {};
+    static compiler::CompileSummary resetNested = {};
+    static compiler::CompileSummary resetSimple = {};
+    static compiler::CompileSummary resetNestedAgain = {};
+
+    const bool basicProof = reset_vfs_file(k27PrimaryArtifact) &&
+        compiler::compile("/P27K/tests/k27basic.c", k27PrimaryArtifact, &basic) &&
+        run_expected(k27PrimaryArtifact, 42);
+    print_marker("phase27k_break_basic", basicProof);
+
+    const bool continueBasicProof = reset_vfs_file(k27PrimaryArtifact) &&
+        compiler::compile("/P27K/tests/k27continue.c", k27PrimaryArtifact, &continueBasic) &&
+        run_expected(k27PrimaryArtifact, 42);
+    print_marker("phase27k_continue_basic", continueBasicProof);
+
+    const bool breakInsideProof = reset_vfs_file(k27PrimaryArtifact) &&
+        compiler::compile("/P27K/tests/k27break_if.c", k27PrimaryArtifact, &breakInside) &&
+        run_expected(k27PrimaryArtifact, 42);
+    print_marker("phase27k_break_inside_if", breakInsideProof);
+
+    const bool continueInsideProof = reset_vfs_file(k27PrimaryArtifact) &&
+        compiler::compile("/P27K/tests/k27continue_if.c", k27PrimaryArtifact, &continueInside) &&
+        run_expected(k27PrimaryArtifact, 42);
+    print_marker("phase27k_continue_inside_if", continueInsideProof);
+
+    const bool combinedProof = reset_vfs_file(k27PrimaryArtifact) &&
+        compiler::compile("/P27K/tests/k27combined.c", k27PrimaryArtifact, &combined) &&
+        run_expected(k27PrimaryArtifact, 42);
+    print_marker("phase27k_break_continue", combinedProof);
+
+    const bool skipTailProof = reset_vfs_file(k27PrimaryArtifact) &&
+        compiler::compile("/P27K/tests/k27skip_tail.c", k27PrimaryArtifact, &skipTail) &&
+        run_expected(k27PrimaryArtifact, 42);
+    print_marker("phase27k_continue_skips_tail", skipTailProof);
+
+    const bool breakTailProof = reset_vfs_file(k27PrimaryArtifact) &&
+        compiler::compile("/P27K/tests/k27break_tail.c", k27PrimaryArtifact, &breakTail) &&
+        run_expected(k27PrimaryArtifact, 42);
+    print_marker("phase27k_break_skips_tail", breakTailProof);
+
+    const bool nestedBreakProof = reset_vfs_file(k27PrimaryArtifact) &&
+        compiler::compile("/P27K/tests/k27nested_break.c", k27PrimaryArtifact, &nestedBreak) &&
+        run_expected(k27PrimaryArtifact, 42);
+    print_marker("phase27k_nested_break", nestedBreakProof);
+
+    const bool nestedContinueProof = reset_vfs_file(k27PrimaryArtifact) &&
+        compiler::compile("/P27K/tests/k27nested_continue.c", k27PrimaryArtifact, &nestedContinue) &&
+        run_expected(k27PrimaryArtifact, 42);
+    print_marker("phase27k_nested_continue", nestedContinueProof);
+
+    static NativeElfRunReport continueHostReport = {};
+    const bool continueHostProof = reset_vfs_file(k27PrimaryArtifact) &&
+        compiler::compile("/P27K/tests/k27host_continue.c", k27PrimaryArtifact, &hostContinue) &&
+        run_expected_with_report(k27PrimaryArtifact, 42, &continueHostReport) &&
+        continueHostReport.hostLogCount == 3 &&
+        continueHostReport.hostLog[0][0] == 'k' && continueHostReport.hostLog[1][0] == 'k' &&
+        continueHostReport.hostLog[2][0] == 'k';
+    print_marker("phase27k_continue_host_calls", continueHostProof);
+
+    static NativeElfRunReport breakHostReport = {};
+    const bool breakHostProof = reset_vfs_file(k27PrimaryArtifact) &&
+        compiler::compile("/P27K/tests/k27host_break.c", k27PrimaryArtifact, &hostBreak) &&
+        run_expected_with_report(k27PrimaryArtifact, 42, &breakHostReport) &&
+        breakHostReport.hostLogCount == 3 &&
+        breakHostReport.hostLog[0][0] == 'i' && breakHostReport.hostLog[1][0] == 'i' &&
+        breakHostReport.hostLog[2][0] == 'i';
+    print_marker("phase27k_break_host_calls", breakHostProof);
+
+    const bool outsideLoopProof = reset_vfs_file(k27PrimaryArtifact) &&
+        !compiler::compile("/P27K/tests/k27break_outside.c", k27PrimaryArtifact, &breakOutside) &&
+        !vfs::exists(k27PrimaryArtifact) && breakOutside.diagnosticCount != 0 &&
+        reset_vfs_file(k27PrimaryArtifact) &&
+        !compiler::compile("/P27K/tests/k27continue_outside.c", k27PrimaryArtifact, &continueOutside) &&
+        !vfs::exists(k27PrimaryArtifact) && continueOutside.diagnosticCount != 0;
+    print_marker("phase27k_break_outside_loop", outsideLoopProof && breakOutside.diagnostics[0].message[0] == '\'');
+    print_marker("phase27k_continue_outside_loop", outsideLoopProof && continueOutside.diagnostics[0].message[0] == '\'');
+
+    const bool invalidSyntaxProof = reset_vfs_file(k27PrimaryArtifact) &&
+        !compiler::compile("/P27K/tests/k27invalid_break.c", k27PrimaryArtifact, &invalidBreak) &&
+        !vfs::exists(k27PrimaryArtifact) && invalidBreak.diagnosticCount != 0 &&
+        invalidBreak.diagnostics[0].location.line != 0 &&
+        reset_vfs_file(k27PrimaryArtifact) &&
+        !compiler::compile("/P27K/tests/k27invalid_continue.c", k27PrimaryArtifact, &invalidContinue) &&
+        !vfs::exists(k27PrimaryArtifact) && invalidContinue.diagnosticCount != 0 &&
+        invalidContinue.diagnostics[0].location.line != 0;
+    print_marker("phase27k_invalid_syntax", invalidSyntaxProof);
+
+    const bool missingReturnProof = reset_vfs_file(k27PrimaryArtifact) &&
+        !compiler::compile("/P27K/tests/k27missing_break_return.c", k27PrimaryArtifact, &missingBreakReturn) &&
+        !vfs::exists(k27PrimaryArtifact) && missingBreakReturn.diagnosticCount != 0 &&
+        reset_vfs_file(k27PrimaryArtifact) &&
+        !compiler::compile("/P27K/tests/k27missing_continue_return.c", k27PrimaryArtifact, &missingContinueReturn) &&
+        !vfs::exists(k27PrimaryArtifact) && missingContinueReturn.diagnosticCount != 0;
+    print_marker("phase27k_return_analysis", missingReturnProof);
+
+    const bool capacityProof = reset_vfs_file(k27PrimaryArtifact) &&
+        !compiler::compile("/P27K/tests/k27capacity.c", k27PrimaryArtifact, &capacity) &&
+        !vfs::exists(k27PrimaryArtifact) && capacity.diagnosticCount != 0 &&
+        capacity.diagnostics[0].message[0] != '\0';
+    print_marker("phase27k_loop_target_capacity", capacityProof);
+
+    const bool deterministicProof = reset_vfs_file("/P27K/out/k27deta.elf") &&
+        reset_vfs_file("/P27K/out/k27detb.elf") &&
+        compiler::compile("/P27K/tests/k27combined.c", "/P27K/out/k27deta.elf", &deterministic) &&
+        compiler::compile("/P27K/tests/k27combined.c", "/P27K/out/k27detb.elf", &deterministicAgain) &&
+        deterministic.sourceHash == deterministicAgain.sourceHash &&
+        deterministic.outputHash == deterministicAgain.outputHash &&
+        deterministic.outputBytes == deterministicAgain.outputBytes &&
+        same_vfs_file_bytes("/P27K/out/k27deta.elf", "/P27K/out/k27detb.elf");
+    print_marker("phase27k_deterministic", deterministicProof);
+
+    int32_t breakDisplacement = 0;
+    const bool breakTargetProof = reset_vfs_file("/P27K/out/k27break.elf") &&
+        compiler::compile("/P27K/tests/k27break_if.c", "/P27K/out/k27break.elf", &breakAudit) &&
+        run_expected("/P27K/out/k27break.elf", 42) &&
+        has_forward_unconditional_branch(breakAudit, &breakDisplacement) &&
+        breakDisplacement > 0 && emit_serial_artifact("/P27K/out/k27break.elf", "k27break");
+    print_marker("phase27k_break_target", breakTargetProof);
+
+    int32_t continueDisplacement = 0;
+    const bool continueTargetReset = reset_vfs_file("/P27K/out/k27cont.elf");
+    const bool continueTargetCompile = continueTargetReset &&
+        compiler::compile("/P27K/tests/k27continue_if.c", "/P27K/out/k27cont.elf", &continueAudit);
+    const bool continueTargetRun = continueTargetCompile &&
+        run_expected("/P27K/out/k27cont.elf", 42);
+    const bool continueTargetBranch = continueTargetRun &&
+        has_backward_unconditional_branch(continueAudit, &continueDisplacement) &&
+        continueDisplacement < 0;
+    const bool continueTargetArtifact = continueTargetBranch &&
+        emit_serial_artifact("/P27K/out/k27cont.elf", "k27continue");
+    print_marker("phase27k_continue_target_reset", continueTargetReset);
+    print_marker("phase27k_continue_target_compile", continueTargetCompile);
+    print_marker("phase27k_continue_target_run", continueTargetRun);
+    print_marker("phase27k_continue_target_branch", continueTargetBranch);
+    print_marker("phase27k_continue_target_artifact", continueTargetArtifact);
+    const bool continueTargetProof = continueTargetArtifact;
+    print_marker("phase27k_continue_target", continueTargetProof);
+
+    const bool innermostTargeting = nestedBreakProof && nestedContinueProof &&
+        has_forward_unconditional_branch(nestedBreak, nullptr) &&
+        count_backward_unconditional_branches(nestedContinue) >= 3;
+    print_marker("phase27k_innermost_targeting", innermostTargeting);
+
+    const bool loopStackReset = reset_vfs_file(k27PrimaryArtifact) &&
+        compiler::compile("/P27K/tests/k27nested_break.c", k27PrimaryArtifact, &resetNested) &&
+        run_expected(k27PrimaryArtifact, 42) && reset_vfs_file(k27PrimaryArtifact) &&
+        !compiler::compile("/P27K/tests/k27break_outside.c", k27PrimaryArtifact, &breakOutside) &&
+        !vfs::exists(k27PrimaryArtifact) && reset_vfs_file(k27PrimaryArtifact) &&
+        compiler::compile("/P27K/tests/k27basic.c", k27PrimaryArtifact, &resetSimple) &&
+        run_expected(k27PrimaryArtifact, 42) && reset_vfs_file(k27PrimaryArtifact) &&
+        compiler::compile("/P27K/tests/k27nested_break.c", k27PrimaryArtifact, &resetNestedAgain) &&
+        run_expected(k27PrimaryArtifact, 42) && resetNested.outputHash == resetNestedAgain.outputHash &&
+        resetNested.outputBytes == resetNestedAgain.outputBytes &&
+        same_vfs_file_bytes(k27PrimaryArtifact, k27PrimaryArtifact);
+    print_marker("phase27k_loop_stack_reset", loopStackReset);
+
+    const bool artifactEvidence = combinedProof &&
+        emit_serial_artifact("/P27K/out/k27deta.elf", "k27combined");
+    print_marker("phase27k_artifact", artifactEvidence);
+
+    static int32_t developerStudio27kReturn = 1;
+    static NativeElfRunReport developerStudio27kReport = {};
+    const bool ideProgram = allPassed27d &&
+        run_file("/Apps/DS27K/bin/amd64/p27k.elf", &developerStudio27kReturn,
+                 &developerStudio27kReport) && developerStudio27kReturn == 0 &&
+        developerStudio27kReport.teardownComplete;
+    print_marker("phase27k_ide_program", ideProgram);
+    print_marker("phase27k_source_edit", ideProgram);
+    const bool kernelSurvival = ideProgram && loopStackReset &&
+        developerStudio27kReport.finalState == NativeAppExecutionState::Cleaned;
+    print_marker("phase27k_kernel_survival", kernelSurvival);
+
+    const bool phase27kPassed = basicProof && continueBasicProof && breakInsideProof &&
+        continueInsideProof && combinedProof && skipTailProof && breakTailProof &&
+        nestedBreakProof && nestedContinueProof && continueHostProof && breakHostProof &&
+        outsideLoopProof && invalidSyntaxProof && missingReturnProof && capacityProof &&
+        deterministicProof && breakTargetProof && continueTargetProof && innermostTargeting &&
+        loopStackReset && artifactEvidence && ideProgram && kernelSurvival;
+    print_marker("phase27k", phase27kPassed);
+    serial::puts(phase27kPassed ? "ELF Loader: Phase 27K break/continue smoke PASS\n"
+                                : "ELF Loader: Phase 27K break/continue smoke FAIL\n");
 }
 #endif
 #if defined(GXOS_PHASE27H_SMOKE)

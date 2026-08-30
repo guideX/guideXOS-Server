@@ -24,6 +24,8 @@ static const uint32_t COMPILER_MAX_BLOCKS = 32;
 static const uint32_t COMPILER_MAX_BLOCK_NESTING = 16;
 static const uint32_t COMPILER_MAX_CONDITIONAL_NESTING = 16;
 static const uint32_t COMPILER_MAX_LOOP_NESTING = 8;
+// Backend loop-control targets use the same bound as parser loop nesting.
+static const uint32_t COMPILER_MAX_LOOP_TARGET_DEPTH = COMPILER_MAX_LOOP_NESTING;
 static const uint32_t COMPILER_MAX_CODE_BYTES = 8192;
 
 static const uint16_t COMPILER_INVALID_INDEX = 0xFFFFU;
@@ -63,6 +65,8 @@ enum class StatementKind : uint8_t {
     Return,
     If,
     While,
+    Break,
+    Continue,
     Block,
 };
 

@@ -41,6 +41,8 @@ static TokenKind identifier_kind(const char* source, uint32_t offset, uint32_t l
     if (text_equals(source, offset, length, "if")) return TokenKind::KeywordIf;
     if (text_equals(source, offset, length, "else")) return TokenKind::KeywordElse;
     if (text_equals(source, offset, length, "while")) return TokenKind::KeywordWhile;
+    if (text_equals(source, offset, length, "break")) return TokenKind::KeywordBreak;
+    if (text_equals(source, offset, length, "continue")) return TokenKind::KeywordContinue;
     return TokenKind::Identifier;
 }
 
@@ -95,6 +97,8 @@ const char* token_kind_name(TokenKind kind)
         case TokenKind::KeywordIf: return "'if'";
         case TokenKind::KeywordElse: return "'else'";
         case TokenKind::KeywordWhile: return "'while'";
+        case TokenKind::KeywordBreak: return "'break'";
+        case TokenKind::KeywordContinue: return "'continue'";
         case TokenKind::Star: return "'*'";
         case TokenKind::LeftParen: return "'('";
         case TokenKind::RightParen: return "')'";

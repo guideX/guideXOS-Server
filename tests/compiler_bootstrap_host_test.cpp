@@ -107,6 +107,27 @@ static bool has_backward_unconditional_branch(const uint8_t* bytes, uint32_t cou
     return false;
 }
 
+static uint32_t count_unconditional_branches(const uint8_t* bytes, uint32_t count,
+                                             bool backward)
+{
+    uint32_t matches = 0;
+    if (!bytes) return 0;
+    for (uint32_t i = 0; i + 5U <= count; ++i) {
+        if (bytes[i] != 0xE9) continue;
+        const int32_t displacement =
+            static_cast<int32_t>(static_cast<uint32_t>(bytes[i + 1]) |
+                                 (static_cast<uint32_t>(bytes[i + 2]) << 8) |
+                                 (static_cast<uint32_t>(bytes[i + 3]) << 16) |
+                                 (static_cast<uint32_t>(bytes[i + 4]) << 24));
+        const int64_t target = static_cast<int64_t>(i + 5U) + displacement;
+        const bool isBackward = displacement < 0 && target >= 0 && target < static_cast<int64_t>(i);
+        const bool isForward = displacement >= 0 && target > static_cast<int64_t>(i + 5U) &&
+                               target < static_cast<int64_t>(count);
+        if ((backward && isBackward) || (!backward && isForward)) ++matches;
+    }
+    return matches;
+}
+
 static bool has_forward_conditional_bypass(const uint8_t* bytes, uint32_t count,
                                            uint8_t secondOpcode)
 {
@@ -397,6 +418,138 @@ int main()
                  std::strcmp(tooManyLoopsDiagnostics.at(0).message,
                              "loop nesting limit exceeded") == 0,
                  "loop nesting capacity is bounded")) return 1;
+    if (!require(COMPILER_MAX_LOOP_TARGET_DEPTH == COMPILER_MAX_LOOP_NESTING,
+                 "loop target capacity matches loop nesting capacity")) return 1;
+
+    const char* breakContinueSource =
+        "int gx_main(void* ctx) { int i = 0; int total = 0; while (i < 10) { "
+        "i = i + 1; if (i < 3) { continue; } if (i > 8) { break; } "
+        "total = total + i; } return total + 9; }";
+    static FunctionIR breakContinue = {};
+    Diagnostics breakContinueDiagnostics;
+    static uint8_t breakContinueCode[COMPILER_MAX_CODE_BYTES] = {};
+    uint32_t breakContinueCodeBytes = 0;
+    if (!require(parse_text(breakContinueSource, &breakContinue, &breakContinueDiagnostics) &&
+                 has_statement_kind(breakContinue, StatementKind::Break) &&
+                 has_statement_kind(breakContinue, StatementKind::Continue) &&
+                 amd64::emit_function(breakContinue, breakContinueCode,
+                                      sizeof(breakContinueCode), &breakContinueCodeBytes) &&
+                 count_unconditional_branches(breakContinueCode, breakContinueCodeBytes, true) >= 2 &&
+                 count_unconditional_branches(breakContinueCode, breakContinueCodeBytes, false) >= 1,
+                 "break and continue lower to bounded control-flow branches")) return 1;
+
+    const char* nestedLoopControlSource =
+        "int gx_main(void* ctx) { int outer = 0; int total = 0; while (outer < 3) { "
+        "int inner = 0; while (inner < 4) { inner = inner + 1; "
+        "if (inner < 3) { continue; } if (inner > 3) { break; } "
+        "total = total + 7; } outer = outer + 1; } return total; }";
+    static FunctionIR nestedLoopControl = {};
+    Diagnostics nestedLoopControlDiagnostics;
+    static uint8_t nestedLoopControlCode[COMPILER_MAX_CODE_BYTES] = {};
+    uint32_t nestedLoopControlCodeBytes = 0;
+    if (!require(parse_text(nestedLoopControlSource, &nestedLoopControl,
+                            &nestedLoopControlDiagnostics) &&
+                 has_statement_kind(nestedLoopControl, StatementKind::While) &&
+                 has_statement_kind(nestedLoopControl, StatementKind::Break) &&
+                 has_statement_kind(nestedLoopControl, StatementKind::Continue) &&
+                 amd64::emit_function(nestedLoopControl, nestedLoopControlCode,
+                                      sizeof(nestedLoopControlCode), &nestedLoopControlCodeBytes) &&
+                 count_unconditional_branches(nestedLoopControlCode, nestedLoopControlCodeBytes, true) >= 3 &&
+                 count_unconditional_branches(nestedLoopControlCode, nestedLoopControlCodeBytes, false) >= 1,
+                 "nested break and continue use innermost loop targets")) return 1;
+
+    const char* breakOutside = "int gx_main(void* ctx) { break; return 42; }";
+    const char* continueOutside = "int gx_main(void* ctx) { continue; return 42; }";
+    static FunctionIR outsideFunction = {};
+    Diagnostics breakOutsideDiagnostics;
+    Diagnostics continueOutsideDiagnostics;
+    if (!require(!parse_text(breakOutside, &outsideFunction, &breakOutsideDiagnostics) &&
+                 breakOutsideDiagnostics.count() != 0 &&
+                 std::strcmp(breakOutsideDiagnostics.at(0).message,
+                             "'break' is only valid inside a loop") == 0 &&
+                 breakOutsideDiagnostics.at(0).location.column > 0,
+                 "break outside a loop is source-located and rejected")) return 1;
+    if (!require(!parse_text(continueOutside, &outsideFunction, &continueOutsideDiagnostics) &&
+                 continueOutsideDiagnostics.count() != 0 &&
+                 std::strcmp(continueOutsideDiagnostics.at(0).message,
+                             "'continue' is only valid inside a loop") == 0 &&
+                 continueOutsideDiagnostics.at(0).location.column > 0,
+                 "continue outside a loop is source-located and rejected")) return 1;
+
+    const char* breakWithoutSemicolon =
+        "int gx_main(void* ctx) { while (1) { break } return 0; }";
+    const char* continueWithoutSemicolon =
+        "int gx_main(void* ctx) { while (1) { continue } return 0; }";
+    Diagnostics invalidBreakSyntaxDiagnostics;
+    Diagnostics invalidContinueSyntaxDiagnostics;
+    if (!require(!parse_text(breakWithoutSemicolon, &outsideFunction,
+                             &invalidBreakSyntaxDiagnostics) &&
+                 invalidBreakSyntaxDiagnostics.count() != 0 &&
+                 std::strcmp(invalidBreakSyntaxDiagnostics.at(0).message,
+                             "expected ';' after 'break'") == 0,
+                 "break requires a semicolon")) return 1;
+    if (!require(!parse_text(continueWithoutSemicolon, &outsideFunction,
+                             &invalidContinueSyntaxDiagnostics) &&
+                 invalidContinueSyntaxDiagnostics.count() != 0 &&
+                 std::strcmp(invalidContinueSyntaxDiagnostics.at(0).message,
+                             "expected ';' after 'continue'") == 0,
+                 "continue requires a semicolon")) return 1;
+
+    const char* loopKeywordBoundaries =
+        "break breaker breakfast continue continued continueValue";
+    Token loopKeywordTokens[COMPILER_MAX_TOKENS] = {};
+    uint32_t loopKeywordTokenCount = 0;
+    Diagnostics loopKeywordDiagnostics;
+    if (!require(lex_source(loopKeywordBoundaries,
+                            static_cast<uint32_t>(std::strlen(loopKeywordBoundaries)),
+                            loopKeywordTokens, COMPILER_MAX_TOKENS,
+                            &loopKeywordTokenCount, loopKeywordDiagnostics) &&
+                 loopKeywordTokens[0].kind == TokenKind::KeywordBreak &&
+                 loopKeywordTokens[1].kind == TokenKind::Identifier &&
+                 loopKeywordTokens[2].kind == TokenKind::Identifier &&
+                 loopKeywordTokens[3].kind == TokenKind::KeywordContinue &&
+                 loopKeywordTokens[4].kind == TokenKind::Identifier &&
+                 loopKeywordTokens[5].kind == TokenKind::Identifier,
+                 "break and continue preserve identifier boundaries")) return 1;
+
+    const char* breakMissingReturn =
+        "int gx_main(void* ctx) { int x = 1; while (x) { break; } }";
+    const char* continueMissingReturn =
+        "int gx_main(void* ctx) { int x = 1; while (x) { continue; } }";
+    Diagnostics breakMissingReturnDiagnostics;
+    Diagnostics continueMissingReturnDiagnostics;
+    if (!require(!parse_text(breakMissingReturn, &outsideFunction,
+                             &breakMissingReturnDiagnostics) &&
+                 breakMissingReturnDiagnostics.count() != 0 &&
+                 std::strcmp(breakMissingReturnDiagnostics.at(0).message,
+                             "gx_main may reach end without returning a value") == 0,
+                 "break does not satisfy missing-return analysis")) return 1;
+    if (!require(!parse_text(continueMissingReturn, &outsideFunction,
+                             &continueMissingReturnDiagnostics) &&
+                 continueMissingReturnDiagnostics.count() != 0 &&
+                 std::strcmp(continueMissingReturnDiagnostics.at(0).message,
+                             "gx_main may reach end without returning a value") == 0,
+                 "continue does not satisfy missing-return analysis")) return 1;
+
+    static uint8_t resetCodeA[COMPILER_MAX_CODE_BYTES] = {};
+    static uint8_t resetCodeB[COMPILER_MAX_CODE_BYTES] = {};
+    static uint8_t resetElfA[BOOTSTRAP_MAX_ELF_BYTES] = {};
+    static uint8_t resetElfB[BOOTSTRAP_MAX_ELF_BYTES] = {};
+    static FunctionIR resetA = {};
+    static FunctionIR resetB = {};
+    uint32_t resetCodeBytesA = 0, resetCodeBytesB = 0;
+    uint32_t resetElfBytesA = 0, resetElfBytesB = 0;
+    if (!require(compile_text(nestedLoopControlSource, &resetA, resetCodeA,
+                              &resetCodeBytesA, resetElfA, &resetElfBytesA) &&
+                 !parse_text(breakOutside, &outsideFunction, &breakOutsideDiagnostics) &&
+                 compile_text(whileSource, &outsideFunction, resetCodeB,
+                              &resetCodeBytesB, resetElfB, &resetElfBytesB) &&
+                 compile_text(nestedLoopControlSource, &resetB, resetCodeB,
+                              &resetCodeBytesB, resetElfB, &resetElfBytesB) &&
+                 resetCodeBytesA == resetCodeBytesB && resetElfBytesA == resetElfBytesB &&
+                 std::memcmp(resetCodeA, resetCodeB, resetCodeBytesA) == 0 &&
+                 std::memcmp(resetElfA, resetElfB, resetElfBytesA) == 0,
+                 "loop-target state resets after nested and failed compilations")) return 1;
 
     int32_t displacement = 0;
     if (!require(amd64::calculate_signed_rel32(100, 110, &displacement) && displacement == -10 &&

@@ -26,6 +26,8 @@ enum class TokenKind : uint8_t {
     KeywordIf,
     KeywordElse,
     KeywordWhile,
+    KeywordBreak,
+    KeywordContinue,
     Star,
     LeftParen,
     RightParen,

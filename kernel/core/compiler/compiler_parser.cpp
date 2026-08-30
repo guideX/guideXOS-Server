@@ -293,6 +293,12 @@ private:
             return parse_if(blockIndex, depth, conditionalDepth, loopDepth);
         if (current().kind == TokenKind::KeywordWhile)
             return parse_while(blockIndex, depth, conditionalDepth, loopDepth);
+        if (current().kind == TokenKind::KeywordBreak)
+            return parse_loop_control(blockIndex, loopDepth, StatementKind::Break,
+                                      "break", "'break' is only valid inside a loop");
+        if (current().kind == TokenKind::KeywordContinue)
+            return parse_loop_control(blockIndex, loopDepth, StatementKind::Continue,
+                                      "continue", "'continue' is only valid inside a loop");
         if (current().kind == TokenKind::LeftBrace) {
             uint16_t child = COMPILER_INVALID_INDEX;
             const SourceLocation location = current().location;
@@ -463,6 +469,24 @@ private:
         return append_statement(blockIndex, StatementKind::While, location, condition,
                                 COMPILER_INVALID_INDEX, COMPILER_INVALID_INDEX,
                                 bodyBlock, COMPILER_INVALID_INDEX);
+    }
+
+    bool parse_loop_control(uint16_t blockIndex, uint32_t loopDepth,
+                            StatementKind kind, const char* keyword,
+                            const char* outsideLoopMessage)
+    {
+        const SourceLocation location = current().location;
+        if (loopDepth == 0) {
+            m_diagnostics.error(location, outsideLoopMessage, keyword);
+            return false;
+        }
+        ++m_index;
+        if (!expect(TokenKind::Semicolon, kind == StatementKind::Break
+                    ? "expected ';' after 'break'"
+                    : "expected ';' after 'continue'")) return false;
+        return append_statement(blockIndex, kind, location,
+                                COMPILER_INVALID_INDEX, COMPILER_INVALID_INDEX,
+                                COMPILER_INVALID_INDEX);
     }
 
     uint16_t make_expression(ExpressionKind kind, SourceLocation location,
