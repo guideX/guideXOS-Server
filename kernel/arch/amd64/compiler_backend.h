@@ -22,6 +22,13 @@ struct FrameLayout {
     uint32_t localBytes;
 };
 
+// Calculate an AMD64 signed rel32 displacement without allowing unsigned
+// wraparound or silent truncation.  Both inputs are offsets/addresses of the
+// branch target and the first byte after the rel32 field.
+bool calculate_signed_rel32(uint64_t targetAddress,
+                            uint64_t addressAfterBranch,
+                            int32_t* displacement);
+
 bool calculate_frame_layout(uint32_t localCount, FrameLayout* output);
 
 bool emit_function(const FunctionIR& function,

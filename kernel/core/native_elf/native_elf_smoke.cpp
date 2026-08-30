@@ -15,7 +15,7 @@ namespace native_elf {
 namespace {
 
 static uint8_t s_invalidImage[guidexos::native_elf::MAX_ELF_FILE_BYTES];
-#if defined(GXOS_PHASE27G_SMOKE) || defined(GXOS_PHASE27H_SMOKE) || defined(GXOS_PHASE27I_SMOKE)
+#if defined(GXOS_PHASE27G_SMOKE) || defined(GXOS_PHASE27H_SMOKE) || defined(GXOS_PHASE27I_SMOKE) || defined(GXOS_PHASE27J_SMOKE)
 static uint8_t s_compareImage[guidexos::native_elf::MAX_ELF_FILE_BYTES];
 #endif
 
@@ -87,7 +87,7 @@ static bool emit_serial_artifact(const char* path, const char* name)
     return true;
 }
 
-#if defined(GXOS_PHASE27G_SMOKE) || defined(GXOS_PHASE27H_SMOKE) || defined(GXOS_PHASE27I_SMOKE)
+#if defined(GXOS_PHASE27G_SMOKE) || defined(GXOS_PHASE27H_SMOKE) || defined(GXOS_PHASE27I_SMOKE) || defined(GXOS_PHASE27J_SMOKE)
 static bool same_vfs_file_bytes(const char* leftPath, const char* rightPath)
 {
     vfs::FileInfo left = {};
@@ -136,6 +136,25 @@ static bool branch_skips_local_load(const compiler::CompileSummary& summary,
             bool same = true;
             for (uint32_t k = 0; k < sizeof(load); ++k) if (summary.code[j + k] != load[k]) same = false;
             if (same && target > static_cast<int64_t>(j + sizeof(load))) return true;
+        }
+    }
+    return false;
+}
+
+static bool has_backward_unconditional_branch(const compiler::CompileSummary& summary,
+                                              int32_t* displacementOut)
+{
+    for (uint32_t i = 0; i + 5U <= summary.codeBytes; ++i) {
+        if (summary.code[i] != 0xE9) continue;
+        const int32_t displacement =
+            static_cast<int32_t>(static_cast<uint32_t>(summary.code[i + 1]) |
+                                 (static_cast<uint32_t>(summary.code[i + 2]) << 8) |
+                                 (static_cast<uint32_t>(summary.code[i + 3]) << 16) |
+                                 (static_cast<uint32_t>(summary.code[i + 4]) << 24));
+        const int64_t target = static_cast<int64_t>(i + 5U) + displacement;
+        if (displacement < 0 && target >= 0 && target < static_cast<int64_t>(i)) {
+            if (displacementOut) *displacementOut = displacement;
+            return true;
         }
     }
     return false;
@@ -639,6 +658,190 @@ void run_bootstrap_execution_smoke()
     print_marker("phase27i", phase27iPassed);
     serial::puts(phase27iPassed ? "ELF Loader: Phase 27I short-circuit logical-operator smoke PASS\n"
                                 : "ELF Loader: Phase 27I short-circuit logical-operator smoke FAIL\n");
+}
+#endif
+#if defined(GXOS_PHASE27J_SMOKE)
+{
+    serial::puts("ELF Loader: Phase 27J while-loop smoke begin\n");
+    const char* j27PrimaryArtifact = "/P27J/out/primary.elf";
+    static compiler::CompileSummary basic = {};
+    static compiler::CompileSummary sum = {};
+    static compiler::CompileSummary zero = {};
+    static compiler::CompileSummary reevaluation = {};
+    static compiler::CompileSummary logical = {};
+    static compiler::CompileSummary logicalOr = {};
+    static compiler::CompileSummary ifInside = {};
+    static compiler::CompileSummary whileInside = {};
+    static compiler::CompileSummary nested = {};
+    static compiler::CompileSummary bodyDeclaration = {};
+    static compiler::CompileSummary calls = {};
+    static compiler::CompileSummary runtimeOne = {};
+    static compiler::CompileSummary runtimeTwo = {};
+    static compiler::CompileSummary returnInside = {};
+    static compiler::CompileSummary invalidEmpty = {};
+    static compiler::CompileSummary invalidRelational = {};
+    static compiler::CompileSummary missingReturn = {};
+    static compiler::CompileSummary deterministic = {};
+    static compiler::CompileSummary deterministicAgain = {};
+    static compiler::CompileSummary recovery = {};
+    static compiler::CompileSummary audit = {};
+
+    const bool basicProof = reset_vfs_file(j27PrimaryArtifact) &&
+        compiler::compile("/P27J/tests/j27basic.c", j27PrimaryArtifact, &basic) &&
+        run_expected(j27PrimaryArtifact, 42);
+    print_marker("phase27j_basic_while", basicProof);
+
+    const bool sumProof = reset_vfs_file(j27PrimaryArtifact) &&
+        compiler::compile("/P27J/tests/j27sum.c", j27PrimaryArtifact, &sum) &&
+        run_expected(j27PrimaryArtifact, 42);
+    print_marker("phase27j_sum_loop", sumProof);
+
+    const bool zeroProof = reset_vfs_file(j27PrimaryArtifact) &&
+        compiler::compile("/P27J/tests/j27zero.c", j27PrimaryArtifact, &zero) &&
+        run_expected(j27PrimaryArtifact, 42);
+    print_marker("phase27j_zero_iteration", zeroProof);
+
+    const bool reevaluationProof = reset_vfs_file(j27PrimaryArtifact) &&
+        compiler::compile("/P27J/tests/j27reeval.c", j27PrimaryArtifact, &reevaluation) &&
+        run_expected(j27PrimaryArtifact, 42);
+    print_marker("phase27j_condition_reevaluation", reevaluationProof);
+
+    const bool logicalProof = reset_vfs_file(j27PrimaryArtifact) &&
+        compiler::compile("/P27J/tests/j27logical.c", j27PrimaryArtifact, &logical) &&
+        run_expected(j27PrimaryArtifact, 42);
+    print_marker("phase27j_logical_condition", logicalProof);
+
+    const bool logicalOrProof = reset_vfs_file(j27PrimaryArtifact) &&
+        compiler::compile("/P27J/tests/j27logical_or.c", j27PrimaryArtifact, &logicalOr) &&
+        run_expected(j27PrimaryArtifact, 5);
+    print_marker("phase27j_logical_or_regression", logicalOrProof);
+
+    const bool ifInsideProof = reset_vfs_file(j27PrimaryArtifact) &&
+        compiler::compile("/P27J/tests/j27ifwhile.c", j27PrimaryArtifact, &ifInside) &&
+        run_expected(j27PrimaryArtifact, 42);
+    print_marker("phase27j_if_inside_while", ifInsideProof);
+
+    const bool whileInsideProof = reset_vfs_file(j27PrimaryArtifact) &&
+        compiler::compile("/P27J/tests/j27whileif.c", j27PrimaryArtifact, &whileInside) &&
+        run_expected(j27PrimaryArtifact, 42);
+    print_marker("phase27j_while_inside_if", whileInsideProof);
+
+    const bool nestedProof = reset_vfs_file(j27PrimaryArtifact) &&
+        compiler::compile("/P27J/tests/j27nested.c", j27PrimaryArtifact, &nested) &&
+        run_expected(j27PrimaryArtifact, 42);
+    print_marker("phase27j_nested_while", nestedProof);
+
+    const bool bodyDeclarationProof = reset_vfs_file(j27PrimaryArtifact) &&
+        compiler::compile("/P27J/tests/j27bodydecl.c", j27PrimaryArtifact, &bodyDeclaration) &&
+        run_expected(j27PrimaryArtifact, 21);
+    print_marker("phase27j_loop_body_declaration", bodyDeclarationProof);
+
+    static NativeElfRunReport callsReport = {};
+    const bool hostCallsProof = reset_vfs_file(j27PrimaryArtifact) &&
+        compiler::compile("/P27J/tests/j27calls.c", j27PrimaryArtifact, &calls) &&
+        run_expected_with_report(j27PrimaryArtifact, 42, &callsReport) &&
+        callsReport.hostLogCount == 3 && callsReport.hostLog[0][0] == 'l' &&
+        callsReport.hostLog[1][0] == 'l' && callsReport.hostLog[2][0] == 'l';
+    print_marker("phase27j_loop_host_calls", hostCallsProof);
+
+    const bool runtimeOneProof = reset_vfs_file("/P27J/out/runtime1.elf") &&
+        compiler::compile("/P27J/tests/j27runtime1.c", "/P27J/out/runtime1.elf", &runtimeOne) &&
+        run_expected("/P27J/out/runtime1.elf", 42);
+    const bool runtimeTwoProof = reset_vfs_file("/P27J/out/runtime2.elf") &&
+        compiler::compile("/P27J/tests/j27runtime2.c", "/P27J/out/runtime2.elf", &runtimeTwo) &&
+        run_expected("/P27J/out/runtime2.elf", 21);
+    print_hash_pair("phase27j_runtime_one", runtimeOne.sourceHash, runtimeOne.outputHash, runtimeOne.dataHash);
+    print_hash_pair("phase27j_runtime_two", runtimeTwo.sourceHash, runtimeTwo.outputHash, runtimeTwo.dataHash);
+    bool runtimeCodeDiffers = runtimeOne.codeBytes != runtimeTwo.codeBytes;
+    if (!runtimeCodeDiffers && runtimeOne.codeBytes == runtimeTwo.codeBytes) {
+        for (uint32_t i = 0; i < runtimeOne.codeBytes; ++i) {
+            if (runtimeOne.code[i] != runtimeTwo.code[i]) {
+                runtimeCodeDiffers = true;
+                break;
+            }
+        }
+    }
+    const bool runtimeStateProof = runtimeOneProof && runtimeTwoProof &&
+        runtimeOne.sourceHash != runtimeTwo.sourceHash &&
+        runtimeOne.outputHash != runtimeTwo.outputHash && runtimeCodeDiffers;
+    print_marker("phase27j_runtime_state", runtimeStateProof);
+
+    const bool returnInsideProof = reset_vfs_file(j27PrimaryArtifact) &&
+        compiler::compile("/P27J/tests/j27return.c", j27PrimaryArtifact, &returnInside) &&
+        run_expected(j27PrimaryArtifact, 3);
+    print_marker("phase27j_return_inside_loop", returnInsideProof);
+
+    const bool invalidProof = reset_vfs_file(j27PrimaryArtifact) &&
+        !compiler::compile("/P27J/tests/j27invalid_empty.c", j27PrimaryArtifact, &invalidEmpty) &&
+        !vfs::exists(j27PrimaryArtifact) && invalidEmpty.diagnosticCount != 0 &&
+        invalidEmpty.diagnostics[0].location.line == 3 &&
+        invalidEmpty.diagnostics[0].location.column != 0 &&
+        reset_vfs_file(j27PrimaryArtifact) &&
+        !compiler::compile("/P27J/tests/j27invalid_relational.c", j27PrimaryArtifact, &invalidRelational) &&
+        !vfs::exists(j27PrimaryArtifact) && invalidRelational.diagnosticCount != 0 &&
+        invalidRelational.diagnostics[0].location.line == 4 &&
+        invalidRelational.diagnostics[0].location.column != 0;
+    print_marker("phase27j_invalid_while", invalidProof);
+
+    const bool missingReturnProof = reset_vfs_file(j27PrimaryArtifact) &&
+        !compiler::compile("/P27J/tests/j27missing.c", j27PrimaryArtifact, &missingReturn) &&
+        !vfs::exists(j27PrimaryArtifact) && missingReturn.diagnosticCount != 0 &&
+        missingReturn.diagnostics[0].location.column != 0 &&
+        missingReturn.diagnostics[0].message[0] != '\0';
+    print_marker("phase27j_missing_return", missingReturnProof);
+
+    const bool deterministicProof = reset_vfs_file("/P27J/out/j27deta.elf") &&
+        reset_vfs_file("/P27J/out/j27detb.elf") &&
+        compiler::compile("/P27J/tests/j27sum.c", "/P27J/out/j27deta.elf", &deterministic) &&
+        compiler::compile("/P27J/tests/j27sum.c", "/P27J/out/j27detb.elf", &deterministicAgain) &&
+        deterministic.sourceHash == deterministicAgain.sourceHash &&
+        deterministic.outputHash == deterministicAgain.outputHash &&
+        deterministic.outputBytes == deterministicAgain.outputBytes &&
+        same_vfs_file_bytes("/P27J/out/j27deta.elf", "/P27J/out/j27detb.elf");
+    print_marker("phase27j_deterministic", deterministicProof);
+
+    const bool failureRecovery = invalidProof &&
+        reset_vfs_file(j27PrimaryArtifact) &&
+        compiler::compile("/P27J/tests/j27basic.c", j27PrimaryArtifact, &recovery) &&
+        run_expected(j27PrimaryArtifact, 42);
+    print_marker("phase27j_failure_recovery", failureRecovery);
+
+    int32_t backwardDisplacement = 0;
+    const bool backwardBranchProof = reset_vfs_file("/P27J/out/j27sum.elf") &&
+        compiler::compile("/P27J/tests/j27sum.c", "/P27J/out/j27sum.elf", &audit) &&
+        run_expected("/P27J/out/j27sum.elf", 42) &&
+        has_backward_unconditional_branch(audit, &backwardDisplacement) &&
+        backwardDisplacement < 0 && emit_serial_artifact("/P27J/out/j27sum.elf", "j27sum");
+    print_marker("phase27j_backward_branch", backwardBranchProof);
+
+    static int32_t developerStudio27jReturn = 1;
+    static NativeElfRunReport developerStudio27jReport = {};
+    const bool ideProgram = allPassed27d &&
+        run_file("/Apps/DS27J/bin/amd64/p27j.elf", &developerStudio27jReturn,
+                 &developerStudio27jReport) && developerStudio27jReturn == 0 &&
+        developerStudio27jReport.teardownComplete;
+    print_marker("phase27j_ide_program", ideProgram);
+    const bool sourceEdit = runtimeStateProof;
+    print_marker("phase27j_source_edit", sourceEdit);
+    vfs::FileInfo survivalInfo = {};
+    uint8_t survivalMagic[4] = {};
+    const bool kernelSurvival = ideProgram && failureRecovery && backwardBranchProof &&
+        developerStudio27jReport.finalState == NativeAppExecutionState::Cleaned &&
+        vfs::stat("/P27J/out/j27sum.elf", &survivalInfo) == vfs::VFS_OK &&
+        survivalInfo.type == vfs::FILE_TYPE_REGULAR && survivalInfo.size != 0 &&
+        vfs::read_file("/P27J/out/j27sum.elf", survivalMagic, sizeof(survivalMagic)) == sizeof(survivalMagic) &&
+        survivalMagic[0] == 0x7F && survivalMagic[1] == 'E' &&
+        survivalMagic[2] == 'L' && survivalMagic[3] == 'F';
+    print_marker("phase27j_kernel_survival", kernelSurvival);
+
+    const bool phase27jPassed = basicProof && sumProof && zeroProof && reevaluationProof &&
+        logicalProof && logicalOrProof && ifInsideProof && whileInsideProof && nestedProof &&
+        bodyDeclarationProof && hostCallsProof && runtimeStateProof && returnInsideProof &&
+        invalidProof && missingReturnProof && deterministicProof && failureRecovery &&
+        backwardBranchProof && ideProgram && sourceEdit && kernelSurvival;
+    print_marker("phase27j", phase27jPassed);
+    serial::puts(phase27jPassed ? "ELF Loader: Phase 27J while-loop smoke PASS\n"
+                                : "ELF Loader: Phase 27J while-loop smoke FAIL\n");
 }
 #endif
 #if defined(GXOS_PHASE27H_SMOKE)

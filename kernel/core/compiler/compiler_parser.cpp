@@ -123,7 +123,7 @@ public:
         if (!expect(TokenKind::RightParen, "expected ')' after parameter")) return false;
 
         uint16_t rootBlock = COMPILER_INVALID_INDEX;
-        if (!parse_block(0, 0, &rootBlock)) return false;
+        if (!parse_block(0, 0, 0, &rootBlock)) return false;
         m_output->rootBlock = rootBlock;
         if (current().kind != TokenKind::EndOfFile) {
             error_current("expected end of source after function");
@@ -256,41 +256,47 @@ private:
         return true;
     }
 
-    bool parse_block(uint32_t depth, uint32_t conditionalDepth, uint16_t* blockIndex)
+    bool parse_block(uint32_t depth, uint32_t conditionalDepth, uint32_t loopDepth,
+                     uint16_t* blockIndex)
     {
         if (!expect(TokenKind::LeftBrace, "expected '{' before block")) return false;
         uint16_t block = COMPILER_INVALID_INDEX;
         if (!create_block(depth, &block)) return false;
         while (current().kind != TokenKind::RightBrace && current().kind != TokenKind::EndOfFile) {
-            if (!parse_statement(block, depth, conditionalDepth)) return false;
+            if (!parse_statement(block, depth, conditionalDepth, loopDepth)) return false;
         }
         if (!expect(TokenKind::RightBrace, "expected '}' after block")) return false;
         if (blockIndex) *blockIndex = block;
         return true;
     }
 
-    bool parse_statement_body(uint32_t depth, uint32_t conditionalDepth, uint16_t* blockIndex)
+    bool parse_statement_body(uint32_t depth, uint32_t conditionalDepth, uint32_t loopDepth,
+                              uint16_t* blockIndex)
     {
         if (current().kind == TokenKind::LeftBrace)
-            return parse_block(depth + 1U, conditionalDepth, blockIndex);
+            return parse_block(depth + 1U, conditionalDepth, loopDepth, blockIndex);
         uint16_t block = COMPILER_INVALID_INDEX;
         if (!create_block(depth + 1U, &block)) return false;
-        if (!parse_statement(block, depth + 1U, conditionalDepth)) return false;
+        if (!parse_statement(block, depth + 1U, conditionalDepth, loopDepth)) return false;
         if (blockIndex) *blockIndex = block;
         return true;
     }
 
-    bool parse_statement(uint16_t blockIndex, uint32_t depth, uint32_t conditionalDepth)
+    bool parse_statement(uint16_t blockIndex, uint32_t depth, uint32_t conditionalDepth,
+                         uint32_t loopDepth)
     {
         if (current().kind == TokenKind::KeywordInt) return parse_declaration(blockIndex);
         if (current().kind == TokenKind::Identifier) return parse_assignment(blockIndex);
         if (current().kind == TokenKind::KeywordLog) return parse_log(blockIndex);
         if (current().kind == TokenKind::KeywordReturn) return parse_return(blockIndex);
-        if (current().kind == TokenKind::KeywordIf) return parse_if(blockIndex, depth, conditionalDepth);
+        if (current().kind == TokenKind::KeywordIf)
+            return parse_if(blockIndex, depth, conditionalDepth, loopDepth);
+        if (current().kind == TokenKind::KeywordWhile)
+            return parse_while(blockIndex, depth, conditionalDepth, loopDepth);
         if (current().kind == TokenKind::LeftBrace) {
             uint16_t child = COMPILER_INVALID_INDEX;
             const SourceLocation location = current().location;
-            if (!parse_block(depth + 1U, conditionalDepth, &child)) return false;
+            if (!parse_block(depth + 1U, conditionalDepth, loopDepth, &child)) return false;
             return append_statement(blockIndex, StatementKind::Block, location,
                                     COMPILER_INVALID_INDEX, COMPILER_INVALID_INDEX,
                                     COMPILER_INVALID_INDEX, child);
@@ -414,7 +420,8 @@ private:
         return true;
     }
 
-    bool parse_if(uint16_t blockIndex, uint32_t depth, uint32_t conditionalDepth)
+    bool parse_if(uint16_t blockIndex, uint32_t depth, uint32_t conditionalDepth,
+                  uint32_t loopDepth)
     {
         if (conditionalDepth >= COMPILER_MAX_CONDITIONAL_NESTING) {
             error_current("conditional nesting limit exceeded");
@@ -427,15 +434,35 @@ private:
         if (condition == COMPILER_INVALID_INDEX) return false;
         if (!expect(TokenKind::RightParen, "expected ')' after if condition")) return false;
         uint16_t thenBlock = COMPILER_INVALID_INDEX;
-        if (!parse_statement_body(depth, conditionalDepth + 1U, &thenBlock)) return false;
+        if (!parse_statement_body(depth, conditionalDepth + 1U, loopDepth, &thenBlock)) return false;
         uint16_t elseBlock = COMPILER_INVALID_INDEX;
         if (current().kind == TokenKind::KeywordElse) {
             ++m_index;
-            if (!parse_statement_body(depth, conditionalDepth + 1U, &elseBlock)) return false;
+            if (!parse_statement_body(depth, conditionalDepth + 1U, loopDepth, &elseBlock)) return false;
         }
         return append_statement(blockIndex, StatementKind::If, location, condition,
                                 COMPILER_INVALID_INDEX, COMPILER_INVALID_INDEX,
                                 thenBlock, elseBlock);
+    }
+
+    bool parse_while(uint16_t blockIndex, uint32_t depth, uint32_t conditionalDepth,
+                     uint32_t loopDepth)
+    {
+        if (loopDepth >= COMPILER_MAX_LOOP_NESTING) {
+            error_current("loop nesting limit exceeded");
+            return false;
+        }
+        const SourceLocation location = current().location;
+        ++m_index;
+        if (!expect(TokenKind::LeftParen, "expected '(' after 'while'")) return false;
+        const uint16_t condition = parse_expression(0);
+        if (condition == COMPILER_INVALID_INDEX) return false;
+        if (!expect(TokenKind::RightParen, "expected ')' after while condition")) return false;
+        uint16_t bodyBlock = COMPILER_INVALID_INDEX;
+        if (!parse_statement_body(depth, conditionalDepth, loopDepth + 1U, &bodyBlock)) return false;
+        return append_statement(blockIndex, StatementKind::While, location, condition,
+                                COMPILER_INVALID_INDEX, COMPILER_INVALID_INDEX,
+                                bodyBlock, COMPILER_INVALID_INDEX);
     }
 
     uint16_t make_expression(ExpressionKind kind, SourceLocation location,

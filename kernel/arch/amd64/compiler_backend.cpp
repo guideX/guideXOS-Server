@@ -158,10 +158,11 @@ public:
             const BranchFixup& fixup = m_fixups[i];
             if (fixup.label >= m_labelCount || !m_labels[fixup.label].defined ||
                 fixup.patchOffset > m_offset || m_offset - fixup.patchOffset < 4U) return false;
-            const int64_t displacement = static_cast<int64_t>(m_labels[fixup.label].offset) -
-                                         static_cast<int64_t>(fixup.patchOffset + 4U);
-            if (displacement < -2147483648LL || displacement > 2147483647LL) return false;
-            const uint32_t value = static_cast<uint32_t>(static_cast<int32_t>(displacement));
+            int32_t displacement = 0;
+            if (!calculate_signed_rel32(m_labels[fixup.label].offset,
+                                        static_cast<uint64_t>(fixup.patchOffset) + 4U,
+                                        &displacement)) return false;
+            const uint32_t value = static_cast<uint32_t>(displacement);
             for (uint32_t j = 0; j < 4; ++j) m_output[fixup.patchOffset + j] = static_cast<uint8_t>(value >> (j * 8));
         }
         return true;
@@ -269,11 +270,11 @@ static bool emit_expression(Emitter& emitter, const FunctionIR& function, uint16
 
 static bool emit_block(Emitter& emitter, const FunctionIR& function, uint16_t blockIndex,
                        uint64_t dataAddress, bool framed, const FrameLayout& frame, uint16_t epilogueLabel,
-                       uint32_t depth);
+                       uint32_t depth, uint32_t loopDepth);
 
 static bool emit_statement(Emitter& emitter, const FunctionIR& function, const Statement& statement,
                            uint64_t dataAddress, bool framed, const FrameLayout& frame, uint16_t epilogueLabel,
-                           uint32_t depth)
+                           uint32_t depth, uint32_t loopDepth)
 {
     switch (statement.kind) {
         case StatementKind::DeclareLocal:
@@ -289,7 +290,7 @@ static bool emit_statement(Emitter& emitter, const FunctionIR& function, const S
                 (epilogueLabel != COMPILER_INVALID_INDEX ? emitter.emit_jmp(epilogueLabel) : emitter.byte(0xC3));
         case StatementKind::Block:
             return emit_block(emitter, function, statement.thenBlock, dataAddress, framed, frame,
-                              epilogueLabel, depth + 1U);
+                              epilogueLabel, depth + 1U, loopDepth);
         case StatementKind::If: {
             if (depth > COMPILER_MAX_CONDITIONAL_NESTING || statement.thenBlock >= function.blockCount ||
                 (statement.elseBlock != COMPILER_INVALID_INDEX && statement.elseBlock >= function.blockCount) ||
@@ -298,16 +299,30 @@ static bool emit_statement(Emitter& emitter, const FunctionIR& function, const S
             if (!emitter.create_label(&endLabel)) return false;
             if (statement.elseBlock == COMPILER_INVALID_INDEX) {
                 if (!emitter.emit_jz(endLabel) ||
-                    !emit_block(emitter, function, statement.thenBlock, dataAddress, framed, frame, epilogueLabel, depth + 1U) ||
+                    !emit_block(emitter, function, statement.thenBlock, dataAddress, framed, frame,
+                                epilogueLabel, depth + 1U, loopDepth) ||
                     !emitter.define_label(endLabel)) return false;
                 return true;
             }
             uint16_t elseLabel = COMPILER_INVALID_INDEX;
             if (!emitter.create_label(&elseLabel) || !emitter.emit_jz(elseLabel) ||
-                !emit_block(emitter, function, statement.thenBlock, dataAddress, framed, frame, epilogueLabel, depth + 1U) ||
+                !emit_block(emitter, function, statement.thenBlock, dataAddress, framed, frame, epilogueLabel, depth + 1U, loopDepth) ||
                 !emitter.emit_jmp(endLabel) || !emitter.define_label(elseLabel) ||
-                !emit_block(emitter, function, statement.elseBlock, dataAddress, framed, frame, epilogueLabel, depth + 1U) ||
+                !emit_block(emitter, function, statement.elseBlock, dataAddress, framed, frame, epilogueLabel, depth + 1U, loopDepth) ||
                 !emitter.define_label(endLabel)) return false;
+            return true;
+        }
+        case StatementKind::While: {
+            uint16_t conditionLabel = COMPILER_INVALID_INDEX;
+            uint16_t endLabel = COMPILER_INVALID_INDEX;
+            if (loopDepth >= COMPILER_MAX_LOOP_NESTING || statement.thenBlock >= function.blockCount ||
+                !emitter.create_label(&conditionLabel) || !emitter.create_label(&endLabel) ||
+                !emitter.define_label(conditionLabel) ||
+                !emit_expression(emitter, function, statement.expression) ||
+                !emitter.test_eax_eax() || !emitter.emit_jz(endLabel) ||
+                !emit_block(emitter, function, statement.thenBlock, dataAddress, framed, frame,
+                            epilogueLabel, depth + 1U, loopDepth + 1U) ||
+                !emitter.emit_jmp(conditionLabel) || !emitter.define_label(endLabel)) return false;
             return true;
         }
         default: return false;
@@ -316,7 +331,7 @@ static bool emit_statement(Emitter& emitter, const FunctionIR& function, const S
 
 static bool emit_block(Emitter& emitter, const FunctionIR& function, uint16_t blockIndex,
                        uint64_t dataAddress, bool framed, const FrameLayout& frame, uint16_t epilogueLabel,
-                       uint32_t depth)
+                       uint32_t depth, uint32_t loopDepth)
 {
     if (blockIndex >= function.blockCount || depth > COMPILER_MAX_BLOCK_NESTING) return false;
     const Block& block = function.blocks[blockIndex];
@@ -325,7 +340,7 @@ static bool emit_block(Emitter& emitter, const FunctionIR& function, uint16_t bl
     while (statementIndex != COMPILER_INVALID_INDEX && visited++ < COMPILER_MAX_STATEMENTS) {
         if (statementIndex >= function.statementCount ||
             !emit_statement(emitter, function, function.statements[statementIndex], dataAddress,
-                             framed, frame, epilogueLabel, depth)) return false;
+                             framed, frame, epilogueLabel, depth, loopDepth)) return false;
         statementIndex = function.statements[statementIndex].nextStatement;
     }
     return statementIndex == COMPILER_INVALID_INDEX;
@@ -342,6 +357,27 @@ static bool emit_legacy_log(const FunctionIR& function, uint64_t dataAddress, Em
 }
 
 } // namespace
+
+bool calculate_signed_rel32(uint64_t targetAddress, uint64_t addressAfterBranch,
+                            int32_t* displacement)
+{
+    if (!displacement) return false;
+    if (targetAddress >= addressAfterBranch) {
+        const uint64_t distance = targetAddress - addressAfterBranch;
+        if (distance > 2147483647ULL) return false;
+        *displacement = static_cast<int32_t>(distance);
+        return true;
+    }
+
+    const uint64_t distance = addressAfterBranch - targetAddress;
+    if (distance > 2147483648ULL) return false;
+    if (distance == 2147483648ULL) {
+        *displacement = static_cast<int32_t>(0x80000000U);
+    } else {
+        *displacement = -static_cast<int32_t>(distance);
+    }
+    return true;
+}
 
 bool calculate_frame_layout(uint32_t localCount, FrameLayout* output)
 {
@@ -387,7 +423,7 @@ bool emit_function(const FunctionIR& function, uint64_t readOnlyDataAddress,
         if (!emitter.prologue(frame.frameBytes) || !emitter.mov_context_local(frame.contextDisplacement)) return false;
     }
     if (!emit_block(emitter, function, function.rootBlock, readOnlyDataAddress, framed, frame,
-                    sharedEpilogue ? epilogueLabel : COMPILER_INVALID_INDEX, 0)) return false;
+                    sharedEpilogue ? epilogueLabel : COMPILER_INVALID_INDEX, 0, 0)) return false;
     if (sharedEpilogue) {
         if (!emitter.define_label(epilogueLabel)) return false;
         if (framed ? !emitter.epilogue() : !emitter.byte(0xC3)) return false;

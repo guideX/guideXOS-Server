@@ -84,6 +84,29 @@ static bool has_expression_kind(const FunctionIR& function, ExpressionKind kind)
     return false;
 }
 
+static bool has_statement_kind(const FunctionIR& function, StatementKind kind)
+{
+    for (uint32_t i = 0; i < function.statementCount; ++i)
+        if (function.statements[i].kind == kind) return true;
+    return false;
+}
+
+static bool has_backward_unconditional_branch(const uint8_t* bytes, uint32_t count)
+{
+    if (!bytes) return false;
+    for (uint32_t i = 0; i + 5U <= count; ++i) {
+        if (bytes[i] != 0xE9) continue;
+        const int32_t displacement =
+            static_cast<int32_t>(static_cast<uint32_t>(bytes[i + 1]) |
+                                 (static_cast<uint32_t>(bytes[i + 2]) << 8) |
+                                 (static_cast<uint32_t>(bytes[i + 3]) << 16) |
+                                 (static_cast<uint32_t>(bytes[i + 4]) << 24));
+        const int64_t target = static_cast<int64_t>(i + 5U) + displacement;
+        if (displacement < 0 && target >= 0 && target < static_cast<int64_t>(i)) return true;
+    }
+    return false;
+}
+
 static bool has_forward_conditional_bypass(const uint8_t* bytes, uint32_t count,
                                            uint8_t secondOpcode)
 {
@@ -141,6 +164,26 @@ int main()
                  literalTokens[3].kind == TokenKind::KeywordVoid &&
                  literalTokens[8].kind == TokenKind::KeywordReturn,
                  "keyword tokens are explicit")) return 1;
+
+    const char* whileLex = "while whilex while (";
+    static Token whileTokens[COMPILER_MAX_TOKENS] = {};
+    uint32_t whileTokenCount = 0;
+    Diagnostics whileLexDiagnostics;
+    if (!require(lex_source(whileLex, static_cast<uint32_t>(std::strlen(whileLex)), whileTokens,
+                            COMPILER_MAX_TOKENS, &whileTokenCount, whileLexDiagnostics) &&
+                 whileTokens[0].kind == TokenKind::KeywordWhile &&
+                 whileTokens[1].kind == TokenKind::Identifier && whileTokens[1].length == 6 &&
+                 whileTokens[2].kind == TokenKind::KeywordWhile &&
+                 whileTokens[3].kind == TokenKind::LeftParen && whileTokens[3].location.column == 20,
+                 "while lexing preserves keyword boundaries and locations")) return 1;
+    const char* malformedWhileLex = "while @";
+    Diagnostics malformedWhileLexDiagnostics;
+    uint32_t malformedWhileTokenCount = 0;
+    if (!require(!lex_source(malformedWhileLex, static_cast<uint32_t>(std::strlen(malformedWhileLex)),
+                             whileTokens, COMPILER_MAX_TOKENS, &malformedWhileTokenCount,
+                             malformedWhileLexDiagnostics) && malformedWhileLexDiagnostics.count() != 0 &&
+                 malformedWhileLexDiagnostics.at(0).location.column == 7,
+                 "malformed while-adjacent syntax is source located")) return 1;
     if (!require(parse_function(literal, literalTokens, literalTokenCount,
                                 &literalFunction, literalDiagnostics),
                  "literal source parses")) return 1;
@@ -275,6 +318,93 @@ int main()
                  has_bytes(conditionalCode, conditionalCodeBytes, setEqual, sizeof(setEqual)) &&
                  has_bytes(conditionalCode, conditionalCodeBytes, reinterpret_cast<const uint8_t*>("\x0F\xB6\xC0"), 3),
                  "AMD64 comparisons and real branches are emitted")) return 1;
+
+    const char* whileSource =
+        "int gx_main(void* ctx) { int i = 0; while (i < 3) i = i + 1; return i; }";
+    static FunctionIR whileFunction = {};
+    static Diagnostics whileDiagnostics;
+    static uint8_t whileCode[COMPILER_MAX_CODE_BYTES] = {};
+    uint32_t whileCodeBytes = 0;
+    if (!require(parse_text(whileSource, &whileFunction, &whileDiagnostics) &&
+                 whileFunction.blockCount == 2 && whileFunction.localCount == 1 &&
+                 has_statement_kind(whileFunction, StatementKind::While) &&
+                 amd64::emit_function(whileFunction, whileCode, sizeof(whileCode), &whileCodeBytes) &&
+                 has_backward_unconditional_branch(whileCode, whileCodeBytes),
+                 "single-statement while emits a real backward branch")) return 1;
+
+    const char* nestedWhileSource =
+        "int gx_main(void* ctx) { int outer = 0; int total = 0; "
+        "while (outer < 3) { int inner = 0; while (inner < 2) { "
+        "total = total + 7; inner = inner + 1; } outer = outer + 1; } return total; }";
+    static FunctionIR nestedWhile = {};
+    static Diagnostics nestedWhileDiagnostics;
+    static uint8_t nestedWhileCode[COMPILER_MAX_CODE_BYTES] = {};
+    uint32_t nestedWhileCodeBytes = 0;
+    if (!require(parse_text(nestedWhileSource, &nestedWhile, &nestedWhileDiagnostics) &&
+                 nestedWhile.blockCount >= 3 && nestedWhile.localCount == 3 &&
+                 has_statement_kind(nestedWhile, StatementKind::While) &&
+                 amd64::emit_function(nestedWhile, nestedWhileCode, sizeof(nestedWhileCode),
+                                      &nestedWhileCodeBytes) &&
+                 has_backward_unconditional_branch(nestedWhileCode, nestedWhileCodeBytes),
+                 "nested while loops remain target-neutral and emit")) return 1;
+
+    const char* composedWhileSource =
+        "int gx_main(void* ctx) { int i = 0; int enabled = 1; if (enabled) { "
+        "while (i < 10 && enabled) { if (i < 5) { i = i + 1; } else { "
+        "enabled = 0; } } } return i; }";
+    static FunctionIR composedWhile = {};
+    static Diagnostics composedWhileDiagnostics;
+    if (!require(parse_text(composedWhileSource, &composedWhile, &composedWhileDiagnostics) &&
+                 has_statement_kind(composedWhile, StatementKind::While) &&
+                 has_statement_kind(composedWhile, StatementKind::If) &&
+                 has_expression_kind(composedWhile, ExpressionKind::LogicalAnd),
+                 "while composes with if and short-circuit conditions")) return 1;
+
+    const char* returnInsideWhileSource =
+        "int gx_main(void* ctx) { int x = 1; while (x) { if (x == 42) { return x; } "
+        "x = x + 1; } return 0; }";
+    static FunctionIR returnInsideWhile = {};
+    static Diagnostics returnInsideWhileDiagnostics;
+    static uint8_t returnInsideWhileCode[COMPILER_MAX_CODE_BYTES] = {};
+    uint32_t returnInsideWhileCodeBytes = 0;
+    if (!require(parse_text(returnInsideWhileSource, &returnInsideWhile,
+                            &returnInsideWhileDiagnostics) && returnInsideWhile.returnCount == 2 &&
+                 amd64::emit_function(returnInsideWhile, returnInsideWhileCode,
+                                      sizeof(returnInsideWhileCode), &returnInsideWhileCodeBytes),
+                 "return inside while uses the shared epilogue path")) return 1;
+
+    const char* missingWhileReturnSource =
+        "int gx_main(void* ctx) { int x = 1; while (x) { return 42; } }";
+    static FunctionIR missingWhileReturn = {};
+    static Diagnostics missingWhileReturnDiagnostics;
+    if (!require(!parse_text(missingWhileReturnSource, &missingWhileReturn,
+                             &missingWhileReturnDiagnostics) &&
+                 missingWhileReturnDiagnostics.count() != 0 &&
+                 std::strcmp(missingWhileReturnDiagnostics.at(0).message,
+                             "gx_main may reach end without returning a value") == 0,
+                 "while remains conservative for return-path analysis")) return 1;
+
+    std::string tooManyLoops = "int gx_main(void* ctx) { int value = 0; ";
+    for (uint32_t i = 0; i < COMPILER_MAX_LOOP_NESTING + 1U; ++i)
+        tooManyLoops += "while (value < 1) {";
+    tooManyLoops += " value = 1; return value; ";
+    for (uint32_t i = 0; i < COMPILER_MAX_LOOP_NESTING + 1U; ++i) tooManyLoops += "}";
+    tooManyLoops += " return value; }";
+    static FunctionIR tooManyLoopsFunction = {};
+    static Diagnostics tooManyLoopsDiagnostics;
+    if (!require(!parse_text(tooManyLoops.c_str(), &tooManyLoopsFunction,
+                             &tooManyLoopsDiagnostics) && tooManyLoopsDiagnostics.count() != 0 &&
+                 std::strcmp(tooManyLoopsDiagnostics.at(0).message,
+                             "loop nesting limit exceeded") == 0,
+                 "loop nesting capacity is bounded")) return 1;
+
+    int32_t displacement = 0;
+    if (!require(amd64::calculate_signed_rel32(100, 110, &displacement) && displacement == -10 &&
+                 amd64::calculate_signed_rel32(110, 110, &displacement) && displacement == 0 &&
+                 amd64::calculate_signed_rel32(110, 100, &displacement) && displacement == 10 &&
+                 !amd64::calculate_signed_rel32(0, 0x100000000ULL, &displacement) &&
+                 !amd64::calculate_signed_rel32(0x100000000ULL, 0, &displacement),
+                 "signed rel32 handles backward, zero, forward, and overflow cases")) return 1;
 
     const char* genericConditionSource =
         "int gx_main(void* ctx) { int x = 1; if ((x + 1) >= 2) { if (x) { return 42; } } return 0; }";
