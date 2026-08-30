@@ -1375,6 +1375,15 @@ typedef struct guidexos_nativeaot_c011ec56_policy_record {
     uintptr_t gen2SurvivedBytes;
     uintptr_t gen2BeginDataSize;
     int64_t gen1BudgetDepletion;
+    /* C011EC57 threshold-race correlation; zero in the C56 proof. */
+    uint32_t allocationOrdinal;
+    uint32_t allocationWave;
+    uint32_t allocationCohort;
+    uint32_t freeRegionObserved;
+    uint32_t freeRegionResult;
+    uint32_t b12Eligible;
+    uint32_t b02Observed;
+    int64_t gen1BudgetDistance;
 } guidexos_nativeaot_c011ec56_policy_record;
 
 typedef struct guidexos_nativeaot_c011ec56_survivor_record {
@@ -1419,6 +1428,31 @@ typedef struct guidexos_nativeaot_c011ec56_lifecycle_record {
     uint32_t lastPolicySelectedGeneration;
     uint32_t lastPolicyBranch;
     uint32_t lastPolicyFirstElevationBranch;
+    /* C011EC57 bounded allocation-boundary and threshold-race state. */
+    uint32_t lastAllocationOrdinal;
+    uint32_t lastAllocationWave;
+    uint32_t lastAllocationCohort;
+    uint32_t allocationObservationCount;
+    uint32_t freeRegionObservationCount;
+    uint32_t lastFreeRegionObserved;
+    uint32_t lastFreeRegionResult;
+    uint32_t b12Eligible;
+    uint32_t b02Observed;
+    uint32_t b02Crossed;
+    uint32_t directGen1Selected;
+    uint32_t laterOverride;
+    uint32_t b02NInitial;
+    uint32_t b02NBefore;
+    uint32_t b02NAfter;
+    int64_t b02PreValue;
+    int64_t b02Value;
+    uint32_t b02AllocationOrdinal;
+    uint32_t b02AllocationWave;
+    uint32_t b02Cohort;
+    uint32_t b02PolicyOrdinal;
+    uint32_t b02CollectionOrdinal;
+    uint32_t directGen1MarkerEmitted;
+    uint32_t b12MarkerEmitted;
     guidexos_nativeaot_c011ec56_policy_record policies[
         GUIDEXOS_NATIVEAOT_C011EC56_MAX_SELECTIONS];
     guidexos_nativeaot_c011ec56_survivor_record survivors[

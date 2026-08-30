@@ -769,6 +769,255 @@ public static unsafe class Program
     }
 #endif
 
+#if HOSTLOGPROOF_C011EC57
+    [DllImport("__Internal", EntryPoint = "guideXosNativeAotC011EC56Start")]
+    private static extern int GuideXosNativeAotC011EC57Start();
+
+    [DllImport("__Internal", EntryPoint = "guideXosNativeAotC011EC56CohortStarted")]
+    private static extern int GuideXosNativeAotC011EC57CohortStarted(
+        uint cohort,
+        uint survivorCount,
+        nint retainedAlignedBytes);
+
+    [DllImport("__Internal", EntryPoint = "guideXosNativeAotC011EC56CohortFinished")]
+    private static extern int GuideXosNativeAotC011EC57CohortFinished();
+
+    [DllImport("__Internal", EntryPoint = "guideXosNativeAotC011EC57BeforeAllocation")]
+    private static extern int GuideXosNativeAotC011EC57BeforeAllocation(
+        uint ordinal,
+        uint payloadSize,
+        uint allocationWave);
+
+    [DllImport("__Internal", EntryPoint = "guideXosNativeAotC011EC56AfterAllocation")]
+    private static extern int GuideXosNativeAotC011EC57AfterAllocation(
+        nint objectAddress);
+
+    [DllImport("__Internal", EntryPoint = "guideXosNativeAotC011EC56ManagedReadback")]
+    private static extern int GuideXosNativeAotC011EC57ManagedReadback(
+        uint ordinal,
+        uint valid);
+
+    [DllImport("__Internal", EntryPoint = "guideXosNativeAotC011EC56RecordSurvivor")]
+    private static extern int GuideXosNativeAotC011EC57RecordSurvivor(
+        uint ordinal,
+        uint collectionCount,
+        nint initialAddress,
+        nint currentAddress,
+        uint initialGeneration,
+        uint generation,
+        uint valid);
+
+    [DllImport("__Internal", EntryPoint = "guideXosNativeAotC011EC56GetOlderGenerationObserved")]
+    private static extern int GuideXosNativeAotC011EC57GetOlderGenerationObserved();
+
+    [DllImport("__Internal", EntryPoint = "guideXosNativeAotC011EC56Finish")]
+    private static extern int GuideXosNativeAotC011EC57Finish();
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static int RecordC011EC57Survivors(
+        uint collectionCount,
+        byte[][] survivors,
+        uint[] survivorOrdinals,
+        uint[] initialGenerations,
+        nint[] initialAddresses,
+        uint survivorCount)
+    {
+        for (uint ordinal = 0u; ordinal < survivorCount; ordinal++)
+        {
+            byte[] survivor = survivors[ordinal];
+            if (survivor == null)
+            {
+                continue;
+            }
+            uint generation = (uint)GC.GetGeneration(survivor);
+            bool valid = initialGenerations[ordinal] == 0u &&
+                initialAddresses[ordinal] != 0 &&
+                HasIdentifyingPattern(survivor, survivorOrdinals[ordinal]);
+            if (!valid ||
+                GuideXosNativeAotC011EC57RecordSurvivor(
+                    ordinal,
+                    collectionCount,
+                    initialAddresses[ordinal],
+                    Unsafe.As<byte[], nint>(ref survivor),
+                    initialGenerations[ordinal],
+                    generation,
+                    1u) != 0)
+            {
+                return -1;
+            }
+        }
+        return 0;
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static int RunC011EC57DirectGen1BudgetCondemnation()
+    {
+        const uint payloadSize = 65536u;
+#if HOSTLOGPROOF_C011EC57_S2
+        const uint maximumCohorts = 6u;
+        const uint survivorsPerCohort = 16u;
+#elif HOSTLOGPROOF_C011EC57_S3
+        const uint maximumCohorts = 6u;
+        const uint survivorsPerCohort = 24u;
+#else
+        const uint maximumCohorts = 6u;
+        const uint survivorsPerCohort = 8u;
+#endif
+        const uint maximumSurvivors = 48u;
+#if HOSTLOGPROOF_C011EC57_S1
+        const uint maximumTransientAllocationsPerCohort = 24u;
+#else
+        const uint maximumTransientAllocationsPerCohort = 48u;
+#endif
+        const uint maximumCollectionObservations = 256u;
+        const uint maximumPolicyRecords = 512u;
+        const uint maximumSurvivorObservations = 1024u;
+        const uint maximumExplicitAllocations =
+            maximumCohorts * maximumTransientAllocationsPerCohort;
+        const ulong maximumManagedBytes =
+            (ulong)maximumExplicitAllocations * payloadSize;
+        const ulong alignedSurvivorAllocationSize = 0x10018UL;
+        const ulong maximumRetainedAlignedBytes =
+            (ulong)maximumSurvivors * alignedSurvivorAllocationSize;
+        const uint maximumDiagnosticRecords = 2048u;
+        if (maximumCohorts < 2u || maximumCohorts > 6u ||
+            maximumSurvivors != 48u ||
+            maximumTransientAllocationsPerCohort < 24u ||
+            maximumTransientAllocationsPerCohort > 48u ||
+            maximumExplicitAllocations > 288u ||
+            maximumManagedBytes > 18874368UL ||
+            maximumRetainedAlignedBytes != 0x300480UL ||
+            maximumCollectionObservations != 256u ||
+            maximumPolicyRecords != 512u ||
+            maximumSurvivorObservations != 1024u ||
+            maximumDiagnosticRecords != 2048u)
+        {
+            return -1;
+        }
+        if (GuideXosNativeAotC011EC57Start() != 0)
+        {
+            return -1;
+        }
+
+        byte[][] survivors = new byte[maximumSurvivors][];
+        uint[] survivorOrdinals = new uint[maximumSurvivors];
+        uint[] initialGenerations = new uint[maximumSurvivors];
+        nint[] initialAddresses = new nint[maximumSurvivors];
+        int lastManagedCollection = GC.CollectionCount(0);
+        bool stop = false;
+        for (uint cohort = 1u; cohort <= maximumCohorts && !stop; cohort++)
+        {
+            uint previousSurvivorCount = (cohort - 1u) * survivorsPerCohort;
+            uint requestedSurvivorCount = cohort * survivorsPerCohort;
+            uint survivorCount = requestedSurvivorCount < maximumSurvivors
+                ? requestedSurvivorCount
+                : maximumSurvivors;
+            uint newSurvivorsThisCohort = survivorCount - previousSurvivorCount;
+            if (GuideXosNativeAotC011EC57CohortStarted(
+                    cohort,
+                    survivorCount,
+                    (nint)(survivorCount * alignedSurvivorAllocationSize)) != 0)
+            {
+                return -1;
+            }
+
+            for (uint offset = 0u;
+                 offset < maximumTransientAllocationsPerCohort && !stop;
+                 offset++)
+            {
+                uint ordinal = (cohort - 1u) *
+                    maximumTransientAllocationsPerCohort + offset;
+                if (GuideXosNativeAotC011EC57BeforeAllocation(
+                        ordinal, payloadSize, offset) != 0)
+                {
+                    return -1;
+                }
+
+                byte[] value = new byte[payloadSize];
+                WriteIdentifyingPattern(value, ordinal);
+                nint objectAddress = Unsafe.As<byte[], nint>(ref value);
+                if (GuideXosNativeAotC011EC57AfterAllocation(objectAddress) != 0)
+                {
+                    return -1;
+                }
+                bool readbackValid = HasIdentifyingPattern(value, ordinal);
+                if (!readbackValid ||
+                    GuideXosNativeAotC011EC57ManagedReadback(
+                        ordinal, readbackValid ? 1u : 0u) != 0)
+                {
+                    return -1;
+                }
+
+                if (offset < newSurvivorsThisCohort)
+                {
+                    uint survivorOrdinal = previousSurvivorCount + offset;
+                    survivors[survivorOrdinal] = value;
+                    survivorOrdinals[survivorOrdinal] = ordinal;
+                    initialGenerations[survivorOrdinal] = (uint)GC.GetGeneration(value);
+                    initialAddresses[survivorOrdinal] = objectAddress;
+                    if (initialGenerations[survivorOrdinal] != 0u)
+                    {
+                        return -1;
+                    }
+                }
+
+                int managedCollection = GC.CollectionCount(0);
+                if (managedCollection != lastManagedCollection)
+                {
+                    lastManagedCollection = managedCollection;
+                    uint collectionCount = managedCollection < 0
+                        ? 0u : (uint)managedCollection;
+                    if (RecordC011EC57Survivors(
+                            collectionCount,
+                            survivors,
+                            survivorOrdinals,
+                            initialGenerations,
+                            initialAddresses,
+                            survivorCount) != 0)
+                    {
+                        return -1;
+                    }
+                    if (GuideXosNativeAotC011EC57GetOlderGenerationObserved() != 0)
+                    {
+                        stop = true;
+                    }
+                }
+
+                GC.KeepAlive(survivors);
+                GC.KeepAlive(value);
+            }
+
+            if (GuideXosNativeAotC011EC57CohortFinished() != 0)
+            {
+                return -1;
+            }
+        }
+
+        int finalManagedCollection = GC.CollectionCount(0);
+        if (!stop && finalManagedCollection != lastManagedCollection)
+        {
+            uint collectionCount = finalManagedCollection < 0
+                ? 0u : (uint)finalManagedCollection;
+            if (RecordC011EC57Survivors(
+                    collectionCount,
+                    survivors,
+                    survivorOrdinals,
+                    initialGenerations,
+                    initialAddresses,
+                    maximumSurvivors) != 0)
+            {
+                return -1;
+            }
+        }
+
+        // The validating calls above are the bounded post-GC managed
+        // continuation. Keep all retained cohorts live until the native
+        // lifecycle has emitted the result.
+        GC.KeepAlive(survivors);
+        return GuideXosNativeAotC011EC57Finish();
+    }
+#endif
+
 #if HOSTLOGPROOF_C011EC42
     [DllImport("__Internal", EntryPoint = "guideXosNativeAotC011EC42Start")]
     private static extern int GuideXosNativeAotC011EC42Start();
@@ -1364,7 +1613,10 @@ public static unsafe class Program
                 {
                     return GxAbi.ErrorInvalidArgument;
                 }
-#if HOSTLOGPROOF_C011EC56
+#if HOSTLOGPROOF_C011EC57
+                return RunC011EC57DirectGen1BudgetCondemnation() == 0
+                    ? 0 : GxAbi.ErrorInvalidArgument;
+#elif HOSTLOGPROOF_C011EC56
                 return RunC011EC56NaturalGen1CondemnationPolicyThreshold() == 0
                     ? 0 : GxAbi.ErrorInvalidArgument;
 #elif HOSTLOGPROOF_C011EC55

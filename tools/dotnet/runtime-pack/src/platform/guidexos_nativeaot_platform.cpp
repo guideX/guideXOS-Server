@@ -17692,7 +17692,7 @@ guideXosNativeAotC011EC54Finish() {
 }
 
 #if defined(GUIDEXOS_NATIVEAOT_C011EC55_NATURAL_OLDER_GENERATION_TRANSITION)
-#if defined(GUIDEXOS_NATIVEAOT_C011EC56_POLICY_THRESHOLD)
+#if defined(GUIDEXOS_NATIVEAOT_C011EC56_POLICY_THRESHOLD) || defined(GUIDEXOS_NATIVEAOT_C011EC57_DIRECT_GEN1_BUDGET)
 extern "C" void __cdecl
 guideXosNativeAotC011EC56CollectionEntered(
     uint32_t generation, uint32_t collectionReason);
@@ -17763,7 +17763,7 @@ guideXosNativeAotC011EC55CollectionEntered(
         guideXosNativeAotC011EC55Emit(
             "OLDER-GC marker=C011EC55-OLDER-GC", r);
     }
-#if defined(GUIDEXOS_NATIVEAOT_C011EC56_POLICY_THRESHOLD)
+#if defined(GUIDEXOS_NATIVEAOT_C011EC56_POLICY_THRESHOLD) || defined(GUIDEXOS_NATIVEAOT_C011EC57_DIRECT_GEN1_BUDGET)
     guideXosNativeAotC011EC56CollectionEntered(generation, collectionReason);
 #endif
 }
@@ -17864,7 +17864,7 @@ guideXosNativeAotC011EC55RestartEEReturned() {
         r.collections[r.collectionEntryCount - 1u].restartObserved != 0u) {
         guideXosNativeAotC011EC55Emit("RESUME marker=C011EC55-RESUME", r);
     }
-#if defined(GUIDEXOS_NATIVEAOT_C011EC56_POLICY_THRESHOLD)
+#if defined(GUIDEXOS_NATIVEAOT_C011EC56_POLICY_THRESHOLD) || defined(GUIDEXOS_NATIVEAOT_C011EC57_DIRECT_GEN1_BUDGET)
     guideXosNativeAotC011EC56RestartEEReturned();
 #endif
 }
@@ -17980,7 +17980,12 @@ guideXosNativeAotC011EC55Finish() {
     suspendEeSerialPutString("\n");
     return status;
 }
-#if defined(GUIDEXOS_NATIVEAOT_C011EC56_POLICY_THRESHOLD)
+#if defined(GUIDEXOS_NATIVEAOT_C011EC56_POLICY_THRESHOLD) || defined(GUIDEXOS_NATIVEAOT_C011EC57_DIRECT_GEN1_BUDGET)
+#if defined(GUIDEXOS_NATIVEAOT_C011EC57_DIRECT_GEN1_BUDGET)
+#define GUIDEXOS_NATIVEAOT_C011EC56_MARKER_PREFIX "C011EC57"
+#else
+#define GUIDEXOS_NATIVEAOT_C011EC56_MARKER_PREFIX "C011EC56"
+#endif
 static void guideXosNativeAotC011EC56Put32(const char* name, uint32_t value) {
     suspendEeSerialPutString(" ");
     suspendEeSerialPutString(name);
@@ -18006,7 +18011,7 @@ static void guideXosNativeAotC011EC56PutSigned64(
 static void guideXosNativeAotC011EC56EmitPolicy(
     const guidexos_nativeaot_c011ec56_policy_record& s) {
     suspendEeSerialPutString(
-        "[nativeaot-gc-short-weak-lifetime] POLICY marker=C011EC56-POLICY");
+        "[nativeaot-gc-short-weak-lifetime] POLICY marker=" GUIDEXOS_NATIVEAOT_C011EC56_MARKER_PREFIX "-POLICY");
     guideXosNativeAotC011EC56Put32("selectionOrdinal", s.ordinal);
     guideXosNativeAotC011EC56Put32("selectionInitialGeneration", s.initialGeneration);
     guideXosNativeAotC011EC56Put32("selectionGeneration", s.selectedGeneration);
@@ -18057,13 +18062,128 @@ static void guideXosNativeAotC011EC56EmitPolicy(
     guideXosNativeAotC011EC56Put64("gen2SurvivedBytes", s.gen2SurvivedBytes);
     guideXosNativeAotC011EC56Put64("gen2BeginDataSize", s.gen2BeginDataSize);
     guideXosNativeAotC011EC56PutSigned64("gen1BudgetDepletion", s.gen1BudgetDepletion);
+#if defined(GUIDEXOS_NATIVEAOT_C011EC57_DIRECT_GEN1_BUDGET)
+    guideXosNativeAotC011EC56Put32("allocationOrdinal", s.allocationOrdinal);
+    guideXosNativeAotC011EC56Put32("allocationWave", s.allocationWave);
+    guideXosNativeAotC011EC56Put32("allocationCohort", s.allocationCohort);
+    guideXosNativeAotC011EC56Put32("freeRegionObserved", s.freeRegionObserved);
+    guideXosNativeAotC011EC56Put32("freeRegionResult", s.freeRegionResult);
+    guideXosNativeAotC011EC56Put32("b12Eligible", s.b12Eligible);
+    guideXosNativeAotC011EC56Put32("b02Observed", s.b02Observed);
+    guideXosNativeAotC011EC56PutSigned64("gen1BudgetDistance", s.gen1BudgetDistance);
+#endif
     suspendEeSerialPutString("\n");
 }
+
+#if defined(GUIDEXOS_NATIVEAOT_C011EC57_DIRECT_GEN1_BUDGET)
+static void guideXosNativeAotC011EC57EmitRace(
+    const guidexos_nativeaot_c011ec56_policy_record& s) {
+    suspendEeSerialPutString(
+        "[nativeaot-gc-short-weak-lifetime] RACE marker=C011EC57-RACE");
+    guideXosNativeAotC011EC56Put32("policyOrdinal", s.ordinal);
+    guideXosNativeAotC011EC56Put32("allocationOrdinal", s.allocationOrdinal);
+    guideXosNativeAotC011EC56Put32("allocationWave", s.allocationWave);
+    guideXosNativeAotC011EC56Put32("allocationCohort", s.allocationCohort);
+    guideXosNativeAotC011EC56Put64("gen1DesiredAllocation", s.gen1DesiredAllocation);
+    guideXosNativeAotC011EC56PutSigned64("gen1NewAllocationRaw", s.gen1NewAllocation);
+    guideXosNativeAotC011EC56PutSigned64("gen1BudgetDistance", s.gen1BudgetDistance);
+    guideXosNativeAotC011EC56Put32("freeRegionObserved", s.freeRegionObserved);
+    guideXosNativeAotC011EC56Put32("freeRegionResult", s.freeRegionResult);
+    guideXosNativeAotC011EC56Put32("b12Eligible", s.b12Eligible);
+    guideXosNativeAotC011EC56Put32("b02Observed", s.b02Observed);
+    guideXosNativeAotC011EC56Put32("selectedGeneration", s.selectedGeneration);
+    guideXosNativeAotC011EC56Put32("branchId", s.branchId);
+    suspendEeSerialPutString("\n");
+}
+
+static void guideXosNativeAotC011EC57EmitB02Threshold(
+    const guidexos_nativeaot_c011ec56_lifecycle_record& r) {
+    suspendEeSerialPutString(
+        "[nativeaot-gc-short-weak-lifetime] THRESHOLD marker=C011EC57-B02-THRESHOLD");
+    guideXosNativeAotC011EC56Put32("policyOrdinal", r.b02PolicyOrdinal);
+    guideXosNativeAotC011EC56Put32("allocationOrdinal", r.b02AllocationOrdinal);
+    guideXosNativeAotC011EC56Put32("allocationWave", r.b02AllocationWave);
+    guideXosNativeAotC011EC56Put32("cohort", r.b02Cohort);
+    guideXosNativeAotC011EC56Put32("collectionOrdinal", r.b02CollectionOrdinal);
+    guideXosNativeAotC011EC56PutSigned64("preValue", r.b02PreValue);
+    guideXosNativeAotC011EC56PutSigned64("crossingValue", r.b02Value);
+    guideXosNativeAotC011EC56Put32("nInitial", r.b02NInitial);
+    guideXosNativeAotC011EC56Put32("nBefore", r.b02NBefore);
+    guideXosNativeAotC011EC56Put32("nAfter", r.b02NAfter);
+    guideXosNativeAotC011EC56Put32("sourceComparison", r.b02Value <= 0 ? 1u : 0u);
+    suspendEeSerialPutString("\n");
+}
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC56B02Observed(
+    uint32_t nInitial, uint32_t nBefore, uint32_t nAfter,
+    uint32_t generation, intptr_t budgetValue) {
+    guidexos_nativeaot_c011ec56_lifecycle_record& r =
+        g_guideXosAllocationDiagnostics.c011ec56Lifecycle;
+    if (r.started == 0u || generation != 1u) return;
+    r.b02Observed = 1u;
+    r.b02NInitial = nInitial;
+    r.b02NBefore = nBefore;
+    r.b02NAfter = nAfter;
+    r.b02Value = static_cast<int64_t>(budgetValue);
+    r.b02AllocationOrdinal = r.lastAllocationOrdinal;
+    r.b02AllocationWave = r.lastAllocationWave;
+    r.b02Cohort = r.lastAllocationCohort;
+    r.b02PolicyOrdinal = r.policyObservationCount + 1u;
+    r.b02CollectionOrdinal =
+        g_guideXosAllocationDiagnostics.c011ec54Lifecycle.collectionEntryCount + 1u;
+    const bool priorPositive = r.policyObservationCount != 0u &&
+        r.policies[r.policyObservationCount - 1u].checkOnly == 0u &&
+        r.policies[r.policyObservationCount - 1u].gen1NewAllocation > 0;
+    if (r.b02Crossed == 0u && priorPositive && budgetValue <= 0 &&
+        nInitial == 0u && nBefore == 0u && nAfter == 1u) {
+        r.b02Crossed = 1u;
+        r.thresholdCrossed = 1u;
+        r.firstThresholdOrdinal = r.b02PolicyOrdinal;
+        r.firstThresholdBranch = GUIDEXOS_NATIVEAOT_C011EC56_BRANCH_GEN1_ALLOC_BUDGET;
+        r.firstThresholdKind = 3u;
+        r.b02PreValue = r.policies[r.policyObservationCount - 1u].gen1NewAllocation;
+        r.firstThresholdPreValue = r.b02PreValue;
+        r.firstThresholdPostValue = static_cast<int64_t>(budgetValue);
+        r.firstThresholdValue = 0;
+        guideXosNativeAotC011EC57EmitB02Threshold(r);
+    }
+}
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC56FreeRegionObserved(uint32_t result) {
+    guidexos_nativeaot_c011ec56_lifecycle_record& r =
+        g_guideXosAllocationDiagnostics.c011ec56Lifecycle;
+    if (r.started == 0u) return;
+    ++r.freeRegionObservationCount;
+    r.lastFreeRegionObserved = 1u;
+    r.lastFreeRegionResult = result != 0u ? 1u : 0u;
+    r.b12Eligible = result == 0u ? 1u : 0u;
+    if (result == 0u && r.b12MarkerEmitted == 0u) {
+        r.b12MarkerEmitted = 1u;
+        suspendEeSerialPutString(
+            "[nativeaot-gc-short-weak-lifetime] B12 marker=C011EC57-B12");
+        guideXosNativeAotC011EC56Put32("policyOrdinal", r.policyObservationCount + 1u);
+        guideXosNativeAotC011EC56Put32("allocationOrdinal", r.lastAllocationOrdinal);
+        guideXosNativeAotC011EC56Put32("allocationWave", r.lastAllocationWave);
+        guideXosNativeAotC011EC56Put32("cohort", r.lastAllocationCohort);
+        if (r.policyObservationCount != 0u) {
+            const guidexos_nativeaot_c011ec56_policy_record& previous =
+                r.policies[r.policyObservationCount - 1u];
+            guideXosNativeAotC011EC56PutSigned64("gen1NewAllocation", previous.gen1NewAllocation);
+            guideXosNativeAotC011EC56PutSigned64("gen1BudgetDistance", previous.gen1NewAllocation);
+        }
+        guideXosNativeAotC011EC56Put32("freeRegionResult", result);
+        guideXosNativeAotC011EC56Put32("b12Eligible", 1u);
+        suspendEeSerialPutString("\n");
+    }
+}
+#endif
 
 static void guideXosNativeAotC011EC56EmitThreshold(
     const guidexos_nativeaot_c011ec56_lifecycle_record& r) {
     suspendEeSerialPutString(
-        "[nativeaot-gc-short-weak-lifetime] THRESHOLD marker=C011EC56-THRESHOLD");
+        "[nativeaot-gc-short-weak-lifetime] THRESHOLD marker=" GUIDEXOS_NATIVEAOT_C011EC56_MARKER_PREFIX "-THRESHOLD");
     guideXosNativeAotC011EC56Put32("thresholdOrdinal", r.firstThresholdOrdinal);
     guideXosNativeAotC011EC56Put32("thresholdKind", r.firstThresholdKind);
     guideXosNativeAotC011EC56Put32("thresholdBranch", r.firstThresholdBranch);
@@ -18165,6 +18285,16 @@ guideXosNativeAotC011EC56GenerationSelectionObserved(
     s.gen2BeginDataSize = gen2BeginDataSize;
     s.gen1BudgetDepletion =
         static_cast<int64_t>(gen1DesiredAllocation) - s.gen1NewAllocation;
+#if defined(GUIDEXOS_NATIVEAOT_C011EC57_DIRECT_GEN1_BUDGET)
+    s.allocationOrdinal = r.lastAllocationOrdinal;
+    s.allocationWave = r.lastAllocationWave;
+    s.allocationCohort = r.lastAllocationCohort;
+    s.freeRegionObserved = r.lastFreeRegionObserved;
+    s.freeRegionResult = r.lastFreeRegionResult;
+    s.b12Eligible = r.b12Eligible;
+    s.b02Observed = r.b02Observed;
+    s.gen1BudgetDistance = s.gen1NewAllocation;
+#endif
 
     const bool budgetCrossed = previous != nullptr &&
         previous->checkOnly == 0u && checkOnly == 0u &&
@@ -18180,6 +18310,24 @@ guideXosNativeAotC011EC56GenerationSelectionObserved(
     r.lastGen1PromotedBytes = gen1PromotedBytes;
     r.lastGen1DesiredAllocation = gen1DesiredAllocation;
     r.lastGen1NewAllocation = s.gen1NewAllocation;
+#if defined(GUIDEXOS_NATIVEAOT_C011EC57_DIRECT_GEN1_BUDGET)
+    if (r.b02Crossed != 0u && r.b02PolicyOrdinal == s.ordinal) {
+        if (selectedGeneration == 1u) {
+            r.directGen1Selected = 1u;
+        } else if (selectedGeneration >= 2u) {
+            r.laterOverride = 1u;
+            suspendEeSerialPutString(
+                "[nativeaot-gc-short-weak-lifetime] OVERRIDE marker=C011EC57-OVERRIDE");
+            guideXosNativeAotC011EC56Put32("policyOrdinal", s.ordinal);
+            guideXosNativeAotC011EC56Put32("b02NInitial", r.b02NInitial);
+            guideXosNativeAotC011EC56Put32("b02NBefore", r.b02NBefore);
+            guideXosNativeAotC011EC56Put32("b02NAfter", r.b02NAfter);
+            guideXosNativeAotC011EC56Put32("finalGeneration", selectedGeneration);
+            guideXosNativeAotC011EC56Put32("branchId", branchId);
+            suspendEeSerialPutString("\n");
+        }
+    }
+#endif
     if (r.thresholdCrossed == 0u && (budgetCrossed || selectionCrossed)) {
         r.thresholdCrossed = 1u;
         r.firstThresholdOrdinal = s.ordinal;
@@ -18198,6 +18346,9 @@ guideXosNativeAotC011EC56GenerationSelectionObserved(
         }
     }
     guideXosNativeAotC011EC56EmitPolicy(s);
+#if defined(GUIDEXOS_NATIVEAOT_C011EC57_DIRECT_GEN1_BUDGET)
+    guideXosNativeAotC011EC57EmitRace(s);
+#endif
     if (r.thresholdCrossed != 0u &&
         r.firstThresholdOrdinal == s.ordinal) {
         guideXosNativeAotC011EC56EmitThreshold(r);
@@ -18213,7 +18364,13 @@ guideXosNativeAotC011EC56Start() {
     r = {};
     r.started = 1u;
     suspendEeSerialPutString(
-        "[nativeaot-gc-short-weak-lifetime] PREFLIGHT marker=C011EC56-PREFLIGHT maxSurvivors=00000030 maxCohorts=00000006 payloadSize=00010000 maxTransientAllocationsPerCohort=00000040 maxPolicyRecords=00000200 maxSurvivorObservations=00000400\n");
+        "[nativeaot-gc-short-weak-lifetime] PREFLIGHT marker=" GUIDEXOS_NATIVEAOT_C011EC56_MARKER_PREFIX "-PREFLIGHT maxSurvivors=00000030 maxCohorts=00000006 payloadSize=00010000 maxTransientAllocationsPerCohort="
+#if defined(GUIDEXOS_NATIVEAOT_C011EC57_DIRECT_GEN1_BUDGET)
+        "00000030"
+#else
+        "00000040"
+#endif
+        " maxPolicyRecords=00000200 maxSurvivorObservations=00000400\n");
     return 0;
 }
 
@@ -18234,7 +18391,7 @@ guideXosNativeAotC011EC56CohortStarted(
     r.activeRetainedAlignedBytes = retainedAlignedBytes;
     if (cohort > r.cohortCount) r.cohortCount = cohort;
     suspendEeSerialPutString(
-        "[nativeaot-gc-short-weak-lifetime] COHORT marker=C011EC56-COHORT cohort=");
+        "[nativeaot-gc-short-weak-lifetime] COHORT marker=" GUIDEXOS_NATIVEAOT_C011EC56_MARKER_PREFIX "-COHORT cohort=");
     suspendEeSerialPutHex32(cohort);
     guideXosNativeAotC011EC56Put32("survivorCount", survivorCount);
     guideXosNativeAotC011EC56Put64("retainedAlignedBytes", retainedAlignedBytes);
@@ -18248,7 +18405,7 @@ guideXosNativeAotC011EC56CohortFinished() {
         g_guideXosAllocationDiagnostics.c011ec56Lifecycle;
     if (r.started == 0u || r.cohort == 0u) return -1;
     suspendEeSerialPutString(
-        "[nativeaot-gc-short-weak-lifetime] COHORT-END marker=C011EC56-COHORT-END cohort=");
+        "[nativeaot-gc-short-weak-lifetime] COHORT-END marker=" GUIDEXOS_NATIVEAOT_C011EC56_MARKER_PREFIX "-COHORT-END cohort=");
     suspendEeSerialPutHex32(r.cohort);
     guideXosNativeAotC011EC56Put32("survivorCount", r.activeSurvivorCount);
     guideXosNativeAotC011EC56Put64("retainedAlignedBytes", r.activeRetainedAlignedBytes);
@@ -18266,6 +18423,23 @@ guideXosNativeAotC011EC56BeforeAllocation(
     uint32_t ordinal, uint32_t payloadSize) {
     return guideXosNativeAotC011EC55BeforeAllocation(ordinal, payloadSize);
 }
+
+#if defined(GUIDEXOS_NATIVEAOT_C011EC57_DIRECT_GEN1_BUDGET)
+extern "C" __declspec(dllexport) int __cdecl
+guideXosNativeAotC011EC57BeforeAllocation(
+    uint32_t ordinal, uint32_t payloadSize, uint32_t allocationWave) {
+    const int status = guideXosNativeAotC011EC56BeforeAllocation(ordinal, payloadSize);
+    guidexos_nativeaot_c011ec56_lifecycle_record& r =
+        g_guideXosAllocationDiagnostics.c011ec56Lifecycle;
+    if (status == 0 && r.started != 0u) {
+        ++r.allocationObservationCount;
+        r.lastAllocationOrdinal = ordinal;
+        r.lastAllocationWave = allocationWave;
+        r.lastAllocationCohort = r.cohort;
+    }
+    return status;
+}
+#endif
 
 extern "C" __declspec(dllexport) int __cdecl
 guideXosNativeAotC011EC56AfterAllocation(uintptr_t objectAddress) {
@@ -18310,7 +18484,7 @@ guideXosNativeAotC011EC56RecordSurvivor(
     s.initialAddress = initialAddress;
     s.currentAddress = currentAddress;
     suspendEeSerialPutString(
-        "[nativeaot-gc-short-weak-lifetime] SURVIVOR marker=C011EC56-SURVIVOR ordinal=");
+        "[nativeaot-gc-short-weak-lifetime] SURVIVOR marker=" GUIDEXOS_NATIVEAOT_C011EC56_MARKER_PREFIX "-SURVIVOR ordinal=");
     suspendEeSerialPutHex32(ordinal);
     guideXosNativeAotC011EC56Put32("collectionCount", collectionCount);
     guideXosNativeAotC011EC56Put32("initialGeneration", initialGeneration);
@@ -18336,8 +18510,26 @@ guideXosNativeAotC011EC56CollectionEntered(
     r.firstOlderCollectionOrdinal = c54.collectionEntryCount;
     r.firstOlderGeneration = generation;
     r.firstOlderReason = collectionReason;
+#if defined(GUIDEXOS_NATIVEAOT_C011EC57_DIRECT_GEN1_BUDGET)
     suspendEeSerialPutString(
-        "[nativeaot-gc-short-weak-lifetime] GEN1 marker=C011EC56-GEN1 collectionOrdinal=");
+        "[nativeaot-gc-short-weak-lifetime] COLLECTION marker=C011EC57-COLLECTION collectionOrdinal=");
+    suspendEeSerialPutHex32(r.firstOlderCollectionOrdinal);
+    guideXosNativeAotC011EC56Put32("condemnedGeneration", generation);
+    guideXosNativeAotC011EC56Put32("collectionReason", collectionReason);
+    guideXosNativeAotC011EC56Put32("b02Crossed", r.b02Crossed);
+    guideXosNativeAotC011EC56Put32("b12Eligible", r.b12Eligible);
+    suspendEeSerialPutString("\n");
+    const bool directSelection = r.b02Crossed != 0u &&
+        r.b02PolicyOrdinal == r.lastPolicyOrdinal && generation == 1u;
+    if (!directSelection) return;
+#endif
+    suspendEeSerialPutString(
+#if defined(GUIDEXOS_NATIVEAOT_C011EC57_DIRECT_GEN1_BUDGET)
+        "[nativeaot-gc-short-weak-lifetime] GEN1 marker=C011EC57-GEN1 collectionOrdinal="
+#else
+        "[nativeaot-gc-short-weak-lifetime] GEN1 marker=C011EC56-GEN1 collectionOrdinal="
+#endif
+    );
     suspendEeSerialPutHex32(r.firstOlderCollectionOrdinal);
     guideXosNativeAotC011EC56Put32("condemnedGeneration", generation);
     guideXosNativeAotC011EC56Put32("collectionReason", collectionReason);
@@ -18359,7 +18551,7 @@ guideXosNativeAotC011EC56RestartEEReturned() {
         c54.collections[c54.collectionEntryCount - 1u];
     if (c.restartObserved == 0u) return;
     suspendEeSerialPutString(
-        "[nativeaot-gc-short-weak-lifetime] RESUME marker=C011EC56-RESUME collectionOrdinal=");
+        "[nativeaot-gc-short-weak-lifetime] RESUME marker=" GUIDEXOS_NATIVEAOT_C011EC56_MARKER_PREFIX "-RESUME collectionOrdinal=");
     suspendEeSerialPutHex32(c.ordinal);
     guideXosNativeAotC011EC56Put32("restartObserved", c.restartObserved);
     guideXosNativeAotC011EC56Put32("managedResumeObserved", c.managedResumeObserved);
@@ -18384,14 +18576,25 @@ guideXosNativeAotC011EC56Finish() {
     const bool olderCompleted = r.firstOlderGenerationObserved != 0u &&
         c54.sourceFixBoundsObserved != 0u && c54.restartValid != 0u &&
         c54.managedResumeValid != 0u && !invariantFailure;
+#if defined(GUIDEXOS_NATIVEAOT_C011EC57_DIRECT_GEN1_BUDGET)
+    const bool directSelection = r.b02Crossed != 0u &&
+        r.directGen1Selected != 0u && r.firstOlderGeneration == 1u;
+    const bool directCompleted = directSelection && olderCompleted;
+    const char* outcome = invariantFailure ? "F" :
+        (directCompleted ? "A" : (r.b02Crossed != 0u ? "B" : "C"));
+    const uint32_t level = invariantFailure ? 0u :
+        (directCompleted ? 4u : (directSelection ? 3u :
+        (r.b02Crossed != 0u ? 2u : 1u)));
+#else
     const char* outcome = invariantFailure ? "E" :
         (olderCompleted ? "A" :
         (r.firstOlderGenerationObserved != 0u ? "B" : "C"));
     const uint32_t level = invariantFailure ? 0u :
         (olderCompleted ? 4u :
         (r.thresholdCrossed != 0u ? 2u : 1u));
+#endif
     suspendEeSerialPutString(
-        "[nativeaot-gc-short-weak-lifetime] COMPLETE marker=C011EC56 outcome=");
+        "[nativeaot-gc-short-weak-lifetime] COMPLETE marker=" GUIDEXOS_NATIVEAOT_C011EC56_MARKER_PREFIX " outcome=");
     suspendEeSerialPutString(outcome);
     guideXosNativeAotC011EC56Put32("successLevel", level);
     guideXosNativeAotC011EC56Put32("thresholdCrossed", r.thresholdCrossed);
@@ -18404,6 +18607,29 @@ guideXosNativeAotC011EC56Finish() {
     guideXosNativeAotC011EC56Put32("firstGen1CollectionOrdinal", r.firstOlderCollectionOrdinal);
     guideXosNativeAotC011EC56Put32("firstGen1Generation", r.firstOlderGeneration);
     guideXosNativeAotC011EC56Put32("firstGen1Reason", r.firstOlderReason);
+#if defined(GUIDEXOS_NATIVEAOT_C011EC57_DIRECT_GEN1_BUDGET)
+    guideXosNativeAotC011EC56Put32("b02Observed", r.b02Observed);
+    guideXosNativeAotC011EC56Put32("b02Crossed", r.b02Crossed);
+    guideXosNativeAotC011EC56Put32("directGen1Selected", r.directGen1Selected);
+    guideXosNativeAotC011EC56Put32("laterOverride", r.laterOverride);
+    guideXosNativeAotC011EC56Put32("freeRegionObservationCount", r.freeRegionObservationCount);
+    guideXosNativeAotC011EC56Put32("lastFreeRegionObserved", r.lastFreeRegionObserved);
+    guideXosNativeAotC011EC56Put32("lastFreeRegionResult", r.lastFreeRegionResult);
+    guideXosNativeAotC011EC56Put32("b12Eligible", r.b12Eligible);
+    guideXosNativeAotC011EC56Put32("lastAllocationOrdinal", r.lastAllocationOrdinal);
+    guideXosNativeAotC011EC56Put32("lastAllocationWave", r.lastAllocationWave);
+    guideXosNativeAotC011EC56Put32("lastAllocationCohort", r.lastAllocationCohort);
+    guideXosNativeAotC011EC56Put32("b02PolicyOrdinal", r.b02PolicyOrdinal);
+    guideXosNativeAotC011EC56Put32("b02CollectionOrdinal", r.b02CollectionOrdinal);
+    guideXosNativeAotC011EC56Put32("b02AllocationOrdinal", r.b02AllocationOrdinal);
+    guideXosNativeAotC011EC56Put32("b02AllocationWave", r.b02AllocationWave);
+    guideXosNativeAotC011EC56Put32("b02Cohort", r.b02Cohort);
+    guideXosNativeAotC011EC56Put32("b02NInitial", r.b02NInitial);
+    guideXosNativeAotC011EC56Put32("b02NBefore", r.b02NBefore);
+    guideXosNativeAotC011EC56Put32("b02NAfter", r.b02NAfter);
+    guideXosNativeAotC011EC56PutSigned64("b02PreValue", r.b02PreValue);
+    guideXosNativeAotC011EC56PutSigned64("b02Value", r.b02Value);
+#endif
     guideXosNativeAotC011EC56Put32("policyRecords", r.policyObservationCount);
     guideXosNativeAotC011EC56Put32("cohorts", r.cohortCount);
     guideXosNativeAotC011EC56Put32("survivorObservations", r.survivorObservationCount);
@@ -18435,6 +18661,7 @@ guideXosNativeAotC011EC56Finish() {
     r.started = 0u;
     return invariantFailure ? -1 : 0;
 }
+#undef GUIDEXOS_NATIVEAOT_C011EC56_MARKER_PREFIX
 #endif
 #endif
 #endif
@@ -21411,7 +21638,7 @@ extern "C" __declspec(dllexport) int __cdecl guideXosNativeAotC011EC54ManagedRea
 extern "C" __declspec(dllexport) int __cdecl guideXosNativeAotC011EC54RecordSurvivor(uint32_t ordinal, uint32_t collectionCount, uintptr_t objectAddress, uint32_t generation, uint32_t valid);
 extern "C" __declspec(dllexport) int __cdecl guideXosNativeAotC011EC54Finish();
 #endif
-#if defined(GUIDEXOS_NATIVEAOT_C011EC55_NATURAL_OLDER_GENERATION_TRANSITION) && !defined(GUIDEXOS_NATIVEAOT_C011EC56_POLICY_THRESHOLD)
+#if defined(GUIDEXOS_NATIVEAOT_C011EC55_NATURAL_OLDER_GENERATION_TRANSITION) && !defined(GUIDEXOS_NATIVEAOT_C011EC56_POLICY_THRESHOLD) && !defined(GUIDEXOS_NATIVEAOT_C011EC57_DIRECT_GEN1_BUDGET)
 extern "C" void* __pinvoke_HostLogProof__Module____Internal__guideXosNativeAotC011EC55Start__Ansi;
 extern "C" void* __pinvoke_HostLogProof__Module____Internal__guideXosNativeAotC011EC55BeforeAllocation__Ansi;
 extern "C" void* __pinvoke_HostLogProof__Module____Internal__guideXosNativeAotC011EC55AfterAllocation__Ansi;
@@ -21425,11 +21652,16 @@ extern "C" __declspec(dllexport) int __cdecl guideXosNativeAotC011EC55ManagedRea
 extern "C" __declspec(dllexport) int __cdecl guideXosNativeAotC011EC55RecordSurvivor(uint32_t ordinal, uint32_t collectionCount, uintptr_t objectAddress, uint32_t generation, uint32_t valid);
 extern "C" __declspec(dllexport) int __cdecl guideXosNativeAotC011EC55Finish();
 #endif
-#if defined(GUIDEXOS_NATIVEAOT_C011EC56_POLICY_THRESHOLD)
+#if defined(GUIDEXOS_NATIVEAOT_C011EC56_POLICY_THRESHOLD) || defined(GUIDEXOS_NATIVEAOT_C011EC57_DIRECT_GEN1_BUDGET)
+#if defined(GUIDEXOS_NATIVEAOT_C011EC57_DIRECT_GEN1_BUDGET)
+extern "C" void* __pinvoke_HostLogProof__Module____Internal__guideXosNativeAotC011EC57BeforeAllocation__Ansi;
+#endif
 extern "C" void* __pinvoke_HostLogProof__Module____Internal__guideXosNativeAotC011EC56Start__Ansi;
 extern "C" void* __pinvoke_HostLogProof__Module____Internal__guideXosNativeAotC011EC56CohortStarted__Ansi;
 extern "C" void* __pinvoke_HostLogProof__Module____Internal__guideXosNativeAotC011EC56CohortFinished__Ansi;
+#if !defined(GUIDEXOS_NATIVEAOT_C011EC57_DIRECT_GEN1_BUDGET)
 extern "C" void* __pinvoke_HostLogProof__Module____Internal__guideXosNativeAotC011EC56BeforeAllocation__Ansi;
+#endif
 extern "C" void* __pinvoke_HostLogProof__Module____Internal__guideXosNativeAotC011EC56AfterAllocation__Ansi;
 extern "C" void* __pinvoke_HostLogProof__Module____Internal__guideXosNativeAotC011EC56ManagedReadback__Ansi;
 extern "C" void* __pinvoke_HostLogProof__Module____Internal__guideXosNativeAotC011EC56RecordSurvivor__Ansi;
@@ -23092,7 +23324,7 @@ extern "C" __declspec(noinline) void __cdecl RhpReversePInvoke(void* frame) {
         reinterpret_cast<void*>(static_cast<GuideXosNativeAotC011EC54FinishFn>(
             ::guideXosNativeAotC011EC54Finish));
 #endif
-#if defined(GUIDEXOS_NATIVEAOT_C011EC55_NATURAL_OLDER_GENERATION_TRANSITION) && !defined(GUIDEXOS_NATIVEAOT_C011EC56_POLICY_THRESHOLD)
+#if defined(GUIDEXOS_NATIVEAOT_C011EC55_NATURAL_OLDER_GENERATION_TRANSITION) && !defined(GUIDEXOS_NATIVEAOT_C011EC56_POLICY_THRESHOLD) && !defined(GUIDEXOS_NATIVEAOT_C011EC57_DIRECT_GEN1_BUDGET)
     using GuideXosNativeAotC011EC55StartFn = int (__cdecl*)(void);
     using GuideXosNativeAotC011EC55BeforeAllocationFn = int (__cdecl*)(uint32_t, uint32_t);
     using GuideXosNativeAotC011EC55AfterAllocationFn = int (__cdecl*)(uintptr_t);
@@ -23118,16 +23350,24 @@ extern "C" __declspec(noinline) void __cdecl RhpReversePInvoke(void* frame) {
         reinterpret_cast<void*>(static_cast<GuideXosNativeAotC011EC55FinishFn>(
             ::guideXosNativeAotC011EC55Finish));
 #endif
-#if defined(GUIDEXOS_NATIVEAOT_C011EC56_POLICY_THRESHOLD)
+#if defined(GUIDEXOS_NATIVEAOT_C011EC56_POLICY_THRESHOLD) || defined(GUIDEXOS_NATIVEAOT_C011EC57_DIRECT_GEN1_BUDGET)
     using GuideXosNativeAotC011EC56StartFn = int (__cdecl*)(void);
     using GuideXosNativeAotC011EC56CohortStartedFn = int (__cdecl*)(uint32_t, uint32_t, uintptr_t);
     using GuideXosNativeAotC011EC56CohortFinishedFn = int (__cdecl*)(void);
+#if !defined(GUIDEXOS_NATIVEAOT_C011EC57_DIRECT_GEN1_BUDGET)
     using GuideXosNativeAotC011EC56BeforeAllocationFn = int (__cdecl*)(uint32_t, uint32_t);
+#endif
     using GuideXosNativeAotC011EC56AfterAllocationFn = int (__cdecl*)(uintptr_t);
     using GuideXosNativeAotC011EC56ManagedReadbackFn = int (__cdecl*)(uint32_t, uint32_t);
     using GuideXosNativeAotC011EC56RecordSurvivorFn = int (__cdecl*)(uint32_t, uint32_t, uintptr_t, uintptr_t, uint32_t, uint32_t, uint32_t);
     using GuideXosNativeAotC011EC56GetOlderGenerationObservedFn = int (__cdecl*)(void);
     using GuideXosNativeAotC011EC56FinishFn = int (__cdecl*)(void);
+#if defined(GUIDEXOS_NATIVEAOT_C011EC57_DIRECT_GEN1_BUDGET)
+    using GuideXosNativeAotC011EC57BeforeAllocationFn = int (__cdecl*)(uint32_t, uint32_t, uint32_t);
+    __pinvoke_HostLogProof__Module____Internal__guideXosNativeAotC011EC57BeforeAllocation__Ansi =
+        reinterpret_cast<void*>(static_cast<GuideXosNativeAotC011EC57BeforeAllocationFn>(
+            ::guideXosNativeAotC011EC57BeforeAllocation));
+#endif
     __pinvoke_HostLogProof__Module____Internal__guideXosNativeAotC011EC56Start__Ansi =
         reinterpret_cast<void*>(static_cast<GuideXosNativeAotC011EC56StartFn>(
             ::guideXosNativeAotC011EC56Start));
@@ -23137,9 +23377,11 @@ extern "C" __declspec(noinline) void __cdecl RhpReversePInvoke(void* frame) {
     __pinvoke_HostLogProof__Module____Internal__guideXosNativeAotC011EC56CohortFinished__Ansi =
         reinterpret_cast<void*>(static_cast<GuideXosNativeAotC011EC56CohortFinishedFn>(
             ::guideXosNativeAotC011EC56CohortFinished));
+#if !defined(GUIDEXOS_NATIVEAOT_C011EC57_DIRECT_GEN1_BUDGET)
     __pinvoke_HostLogProof__Module____Internal__guideXosNativeAotC011EC56BeforeAllocation__Ansi =
         reinterpret_cast<void*>(static_cast<GuideXosNativeAotC011EC56BeforeAllocationFn>(
             ::guideXosNativeAotC011EC56BeforeAllocation));
+#endif
     __pinvoke_HostLogProof__Module____Internal__guideXosNativeAotC011EC56AfterAllocation__Ansi =
         reinterpret_cast<void*>(static_cast<GuideXosNativeAotC011EC56AfterAllocationFn>(
             ::guideXosNativeAotC011EC56AfterAllocation));
