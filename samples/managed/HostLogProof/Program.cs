@@ -1113,6 +1113,250 @@ public static unsafe class Program
         return GuideXosNativeAotC011EC57Finish();
     }
 
+#if HOSTLOGPROOF_C011EC61
+    [DllImport("__Internal", EntryPoint = "guideXosNativeAotC011EC61PromotionReady")]
+    private static extern int GuideXosNativeAotC011EC61PromotionReady();
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static int RunC011EC61PreFinalN0PromotionCycle()
+    {
+#if HOSTLOGPROOF_C011EC61_P2
+        const uint mainCohorts = 2u;
+        const uint survivorsPerMainCohort = 16u;
+#else
+        const uint mainCohorts = 5u;
+        const uint survivorsPerMainCohort = 8u;
+#endif
+        const uint payloadSize = 65536u;
+        // Match the smallest C57 shape that naturally produces the first
+        // gen1 promotion in the following N0 while retaining a bounded
+        // ordinary tail for the next policy opportunity.
+        const uint earlySurvivorCount = 16u;
+        const uint earlyTransientAllocations = 48u;
+        const uint transientAllocationsPerCohort = 48u;
+        // Three bounded pressure waves mirror the C57 S2 tail. They are
+        // reached only after the promotion-derived debit is observed.
+        const uint tailAllocations = 144u;
+        const ulong alignedSurvivorAllocationSize = 0x10018UL;
+        const uint maximumSurvivors = 48u;
+        byte[][] survivors = new byte[maximumSurvivors][];
+        uint[] survivorOrdinals = new uint[maximumSurvivors];
+        uint[] initialGenerations = new uint[maximumSurvivors];
+        nint[] initialAddresses = new nint[maximumSurvivors];
+        int lastManagedCollection = GC.CollectionCount(0);
+        uint allocationOrdinal = 0u;
+        bool promotionReady = false;
+
+#if HOSTLOGPROOF_C011EC61_P0
+        return RunC011EC57DirectGen1BudgetCondemnation();
+#else
+        if (GuideXosNativeAotC011EC57Start() != 0)
+        {
+            return -1;
+        }
+        // Keep the inherited C57 scalar getter reachable so the production
+        // runtime-pack P/Invoke table remains complete in the custom P1/P2
+        // workload. This is observational only and never changes policy.
+        _ = GuideXosNativeAotC011EC57GetOlderGenerationObserved();
+
+        if (GuideXosNativeAotC011EC57CohortStarted(
+                1u, earlySurvivorCount,
+                (nint)(earlySurvivorCount * alignedSurvivorAllocationSize)) != 0)
+        {
+            return -1;
+        }
+        for (uint offset = 0u; offset < earlySurvivorCount; offset++)
+        {
+            uint ordinal = allocationOrdinal++;
+            if (GuideXosNativeAotC011EC57BeforeAllocation(
+                    ordinal, payloadSize, offset) != 0)
+            {
+                return -1;
+            }
+            byte[] value = new byte[payloadSize];
+            WriteIdentifyingPattern(value, ordinal);
+            nint objectAddress = Unsafe.As<byte[], nint>(ref value);
+            if (GuideXosNativeAotC011EC57AfterAllocation(objectAddress) != 0 ||
+                !HasIdentifyingPattern(value, ordinal) ||
+                GuideXosNativeAotC011EC57ManagedReadback(ordinal, 1u) != 0)
+            {
+                return -1;
+            }
+            survivors[offset] = value;
+            survivorOrdinals[offset] = ordinal;
+            initialGenerations[offset] = (uint)GC.GetGeneration(value);
+            initialAddresses[offset] = objectAddress;
+            if (initialGenerations[offset] != 0u)
+            {
+                return -1;
+            }
+            GC.KeepAlive(survivors);
+            GC.KeepAlive(value);
+        }
+        for (uint offset = 0u; offset < earlyTransientAllocations; offset++)
+        {
+            uint ordinal = allocationOrdinal++;
+            if (GuideXosNativeAotC011EC57BeforeAllocation(
+                    ordinal, payloadSize, offset) != 0)
+            {
+                return -1;
+            }
+            byte[] value = new byte[payloadSize];
+            WriteIdentifyingPattern(value, ordinal);
+            nint objectAddress = Unsafe.As<byte[], nint>(ref value);
+            if (GuideXosNativeAotC011EC57AfterAllocation(objectAddress) != 0 ||
+                !HasIdentifyingPattern(value, ordinal) ||
+                GuideXosNativeAotC011EC57ManagedReadback(ordinal, 1u) != 0)
+            {
+                return -1;
+            }
+            int managedCollection = GC.CollectionCount(0);
+            if (managedCollection != lastManagedCollection)
+            {
+                lastManagedCollection = managedCollection;
+                if (RecordC011EC57Survivors(
+                        managedCollection < 0 ? 0u : (uint)managedCollection,
+                        survivors, survivorOrdinals, initialGenerations,
+                        initialAddresses, earlySurvivorCount) != 0)
+                {
+                    return -1;
+                }
+            }
+            GC.KeepAlive(survivors);
+            GC.KeepAlive(value);
+        }
+        if (GuideXosNativeAotC011EC57CohortFinished() != 0)
+        {
+            return -1;
+        }
+
+        uint currentSurvivorCount = earlySurvivorCount;
+        for (uint mainIndex = 0u; mainIndex < mainCohorts; mainIndex++)
+        {
+            uint cohort = mainIndex + 2u;
+            uint requestedSurvivors = cohort * survivorsPerMainCohort;
+            uint survivorCount = requestedSurvivors < maximumSurvivors
+                ? requestedSurvivors : maximumSurvivors;
+            if (survivorCount <= currentSurvivorCount)
+            {
+                survivorCount = maximumSurvivors;
+            }
+            uint newSurvivors = survivorCount - currentSurvivorCount;
+            if (GuideXosNativeAotC011EC57CohortStarted(
+                    cohort, survivorCount,
+                    (nint)(survivorCount * alignedSurvivorAllocationSize)) != 0)
+            {
+                return -1;
+            }
+            for (uint offset = 0u; offset < transientAllocationsPerCohort; offset++)
+            {
+                uint ordinal = allocationOrdinal++;
+                if (GuideXosNativeAotC011EC57BeforeAllocation(
+                        ordinal, payloadSize, offset) != 0)
+                {
+                    return -1;
+                }
+                byte[] value = new byte[payloadSize];
+                WriteIdentifyingPattern(value, ordinal);
+                nint objectAddress = Unsafe.As<byte[], nint>(ref value);
+                if (GuideXosNativeAotC011EC57AfterAllocation(objectAddress) != 0 ||
+                    !HasIdentifyingPattern(value, ordinal) ||
+                    GuideXosNativeAotC011EC57ManagedReadback(ordinal, 1u) != 0)
+                {
+                    return -1;
+                }
+                if (offset < newSurvivors)
+                {
+                    uint survivorOrdinal = currentSurvivorCount + offset;
+                    survivors[survivorOrdinal] = value;
+                    survivorOrdinals[survivorOrdinal] = ordinal;
+                    initialGenerations[survivorOrdinal] = (uint)GC.GetGeneration(value);
+                    initialAddresses[survivorOrdinal] = objectAddress;
+                    if (initialGenerations[survivorOrdinal] != 0u)
+                    {
+                        return -1;
+                    }
+                }
+                int managedCollection = GC.CollectionCount(0);
+                if (managedCollection != lastManagedCollection)
+                {
+                    lastManagedCollection = managedCollection;
+                    if (RecordC011EC57Survivors(
+                            managedCollection < 0 ? 0u : (uint)managedCollection,
+                            survivors, survivorOrdinals, initialGenerations,
+                            initialAddresses, survivorCount) != 0)
+                    {
+                        return -1;
+                    }
+                }
+                GC.KeepAlive(survivors);
+                GC.KeepAlive(value);
+            }
+            currentSurvivorCount = survivorCount;
+            if (GuideXosNativeAotC011EC57CohortFinished() != 0)
+            {
+                return -1;
+            }
+            promotionReady = GuideXosNativeAotC011EC61PromotionReady() != 0;
+            if (promotionReady)
+            {
+                break;
+            }
+        }
+
+        // Once a promotion-derived debit is observed, ordinary transient
+        // pressure is allowed to discover the next normal N0. This is a
+        // bounded tail; it never requests a collection or changes policy.
+        if (promotionReady)
+        {
+            for (uint offset = 0u; offset < tailAllocations; offset++)
+            {
+                uint ordinal = allocationOrdinal++;
+                // The continuation is intentionally plain managed pressure.
+                // The C57 allocation wrapper has completed its promotion
+                // cohort; keeping it out of this tail avoids treating the
+                // post-promotion probe as another tracked cohort while the
+                // native C58/C61 observers continue to capture every natural
+                // policy entry and event.
+                byte[] value = new byte[payloadSize];
+                WriteIdentifyingPattern(value, ordinal);
+                if (!HasIdentifyingPattern(value, ordinal))
+                {
+                    return -1;
+                }
+                int managedCollection = GC.CollectionCount(0);
+                if (managedCollection != lastManagedCollection)
+                {
+                    lastManagedCollection = managedCollection;
+                    if (RecordC011EC57Survivors(
+                            managedCollection < 0 ? 0u : (uint)managedCollection,
+                            survivors, survivorOrdinals, initialGenerations,
+                            initialAddresses, currentSurvivorCount) != 0)
+                    {
+                        return -1;
+                    }
+                }
+                GC.KeepAlive(survivors);
+                GC.KeepAlive(value);
+            }
+        }
+        int finalManagedCollection = GC.CollectionCount(0);
+        if (finalManagedCollection != lastManagedCollection)
+        {
+            if (RecordC011EC57Survivors(
+                    finalManagedCollection < 0 ? 0u : (uint)finalManagedCollection,
+                    survivors, survivorOrdinals, initialGenerations,
+                    initialAddresses, currentSurvivorCount) != 0)
+            {
+                return -1;
+            }
+        }
+        GC.KeepAlive(survivors);
+        return GuideXosNativeAotC011EC57Finish();
+#endif
+    }
+#endif
+
 #if HOSTLOGPROOF_C011EC60
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static int RunC011EC60PreLastN0PromotionTiming()
@@ -1725,7 +1969,10 @@ public static unsafe class Program
                 {
                     return GxAbi.ErrorInvalidArgument;
                 }
-#if HOSTLOGPROOF_C011EC60
+#if HOSTLOGPROOF_C011EC61
+                return RunC011EC61PreFinalN0PromotionCycle() == 0
+                    ? 0 : GxAbi.ErrorInvalidArgument;
+#elif HOSTLOGPROOF_C011EC60
                 return RunC011EC60PreLastN0PromotionTiming() == 0
                     ? 0 : GxAbi.ErrorInvalidArgument;
 #elif HOSTLOGPROOF_C011EC57

@@ -106,6 +106,9 @@
   <PropertyGroup Condition="'$(HostLogProofMode)' == 'PreLastN0PromotionTiming'">
     <DefineConstants>$(DefineConstants);HOSTLOGPROOF_FIRST_COLLECTION_BOUNDARY_ALLOCATION;HOSTLOGPROOF_SHORT_WEAK_LIFETIME;HOSTLOGPROOF_C011EC37;HOSTLOGPROOF_C011EC40;HOSTLOGPROOF_C011EC41;HOSTLOGPROOF_C011EC55;HOSTLOGPROOF_C011EC57;HOSTLOGPROOF_C011EC58;HOSTLOGPROOF_C011EC60</DefineConstants>
   </PropertyGroup>
+  <PropertyGroup Condition="'$(HostLogProofMode)' == 'PreFinalN0PromotionCycle'">
+    <DefineConstants>$(DefineConstants);HOSTLOGPROOF_FIRST_COLLECTION_BOUNDARY_ALLOCATION;HOSTLOGPROOF_SHORT_WEAK_LIFETIME;HOSTLOGPROOF_C011EC37;HOSTLOGPROOF_C011EC40;HOSTLOGPROOF_C011EC41;HOSTLOGPROOF_C011EC55;HOSTLOGPROOF_C011EC57;HOSTLOGPROOF_C011EC58;HOSTLOGPROOF_C011EC61</DefineConstants>
+  </PropertyGroup>
   <PropertyGroup Condition="'$(HostLogProofMode)' == 'DirectGen1BudgetCondemnation' and '$(HostLogProofC57Strategy)' == 'S1'">
     <DefineConstants>$(DefineConstants);HOSTLOGPROOF_C011EC57_S1</DefineConstants>
   </PropertyGroup>
@@ -141,6 +144,15 @@
   </PropertyGroup>
   <PropertyGroup Condition="'$(HostLogProofMode)' == 'PreLastN0PromotionTiming' and '$(HostLogProofC60Strategy)' == 'T2'">
     <DefineConstants>$(DefineConstants);HOSTLOGPROOF_C011EC60_T2</DefineConstants>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(HostLogProofMode)' == 'PreFinalN0PromotionCycle' and '$(HostLogProofC61Strategy)' == 'P0'">
+    <DefineConstants>$(DefineConstants);HOSTLOGPROOF_C011EC57_S2;HOSTLOGPROOF_C011EC61_P0</DefineConstants>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(HostLogProofMode)' == 'PreFinalN0PromotionCycle' and '$(HostLogProofC61Strategy)' == 'P1'">
+    <DefineConstants>$(DefineConstants);HOSTLOGPROOF_C011EC57_S2;HOSTLOGPROOF_C011EC61_P1</DefineConstants>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(HostLogProofMode)' == 'PreFinalN0PromotionCycle' and '$(HostLogProofC61Strategy)' == 'P2'">
+    <DefineConstants>$(DefineConstants);HOSTLOGPROOF_C011EC57_S2;HOSTLOGPROOF_C011EC61_P2</DefineConstants>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(HostLogProofMode)' == 'FirstNonNullRoot'">

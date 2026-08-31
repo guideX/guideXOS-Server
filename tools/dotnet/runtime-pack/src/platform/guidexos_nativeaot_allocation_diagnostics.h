@@ -1681,6 +1681,107 @@ typedef struct guidexos_nativeaot_c011ec60_lifecycle_record {
         GUIDEXOS_NATIVEAOT_C011EC60_MAX_EVENTS];
 } guidexos_nativeaot_c011ec60_lifecycle_record;
 
+/* C011EC61 keeps the C60 scalar event shape but gives the chronology a
+ * semantic boundary: the last normal N0 is discovered only when the first
+ * caller-escalated full/OOS N2 is observed.  The record remains fixed-size
+ * and observational so no GC-sensitive path can allocate or alter policy. */
+enum {
+    GUIDEXOS_NATIVEAOT_C011EC61_MAX_EVENTS = 512u,
+    GUIDEXOS_NATIVEAOT_C011EC61_EVENT_SURVIVE = 1u,
+    GUIDEXOS_NATIVEAOT_C011EC61_EVENT_PROMOTE = 2u,
+    GUIDEXOS_NATIVEAOT_C011EC61_EVENT_COMPUTE_IN = 3u,
+    GUIDEXOS_NATIVEAOT_C011EC61_EVENT_DYNAMIC = 4u,
+    GUIDEXOS_NATIVEAOT_C011EC61_EVENT_GCNEW = 5u,
+    GUIDEXOS_NATIVEAOT_C011EC61_EVENT_GEN1_DEBIT = 6u,
+    GUIDEXOS_NATIVEAOT_C011EC61_EVENT_ENTRY = 7u,
+    GUIDEXOS_NATIVEAOT_C011EC61_EVENT_B02 = 8u,
+    GUIDEXOS_NATIVEAOT_C011EC61_EVENT_POLICY = 9u,
+};
+
+typedef struct guidexos_nativeaot_c011ec61_lifecycle_record {
+    uint32_t started;
+    uint32_t strategy;
+    uint32_t eventCount;
+    uint32_t eventOverflow;
+    uint32_t sourceCallbackCount;
+    uint32_t surviveCount;
+    uint32_t promoteCount;
+    uint32_t debitCount;
+    uint32_t entryCount;
+    uint32_t n0Count;
+    uint32_t n2Count;
+    uint32_t firstN2Entry;
+    uint32_t finalN0Entry;
+    uint32_t postPromotionN0Count;
+    uint32_t promotionCycleCount;
+    uint32_t pendingPromotion;
+    uint32_t firstPromotionEventOrdinal;
+    uint32_t firstPromotionTransferOrdinal;
+    uint32_t firstDebitEventOrdinal;
+    uint32_t firstPromotionDebitEventOrdinal;
+    uint32_t lastPromotionEventOrdinal;
+    uint32_t lastDebitEventOrdinal;
+    uint32_t finalN0EventOrdinal;
+    uint32_t finalN0PolicyEventOrdinal;
+    uint32_t firstN2EventOrdinal;
+    uint32_t temporalInvariant;
+    uint32_t failedRelation;
+    uint32_t b02Observed;
+    uint32_t b02Crossed;
+    uint32_t b02EventOrdinal;
+    uint32_t b02PolicyEntryOrdinal;
+    uint32_t b02NInitial;
+    uint32_t b02NBefore;
+    uint32_t b02NAfter;
+    uint32_t finalN0NInitial;
+    uint32_t finalN0CallSite;
+    uint32_t finalN0CheckOnly;
+    uint32_t finalN0CollectionReason;
+    uint32_t finalN0SelectedGeneration;
+    uint32_t finalN0PolicyOrdinal;
+    uint32_t finalN0FreeRegionObserved;
+    uint32_t finalN0FreeRegionResult;
+    uint32_t finalN0TryGetNewFreeRegion;
+    uint32_t finalN0B12Eligible;
+    uint32_t finalN0LastGcBeforeOom;
+    uint32_t finalN0B02Observed;
+    uint32_t finalN0B02Crossed;
+    uint32_t finalCondemnedGeneration;
+    uint32_t laterOverride;
+    uint32_t invariantFailures;
+    uint32_t safeStopReason;
+    uint32_t reserved[5];
+    uintptr_t finalN0DesiredAllocation;
+    uintptr_t finalN0GcNewAllocation;
+    uintptr_t finalN0NewRaw;
+    int64_t finalN0NewSigned;
+    int64_t finalN0B02Margin;
+    uintptr_t totalPromotedBytes;
+    uintptr_t totalPromotionDebitBytes;
+    uintptr_t promotionSurvivorCount;
+    uintptr_t promotionRetainedBytes;
+    uintptr_t promotionGenerationAllocationSize;
+    uintptr_t promotionGen1GcNewBefore;
+    uintptr_t promotionDebitBytes;
+    uintptr_t promotionGen1GcNewAfter;
+    uintptr_t promotionPublishedNewAllocation;
+    uintptr_t promotionDesiredAllocation;
+    uintptr_t lastPromotedBytes;
+    uintptr_t lastSurvivedBytes;
+    uintptr_t lastGenerationAllocationSize;
+    int64_t lastGen1NewSigned;
+    uintptr_t finalN0PromotedBytesIncorporated;
+    uintptr_t finalN0PromotionCycles;
+    uint32_t lastN0EventOrdinal;
+    uint32_t lastN0PolicyEventOrdinal;
+    uint32_t lastN0EntryOrdinal;
+    uint32_t lastN0CandidateValid;
+    uint32_t finalN0Frozen;
+    uint32_t reservedCandidate[3];
+    guidexos_nativeaot_c011ec60_event_record events[
+        GUIDEXOS_NATIVEAOT_C011EC61_MAX_EVENTS];
+} guidexos_nativeaot_c011ec61_lifecycle_record;
+
 typedef struct guidexos_nativeaot_c011ec54_lifecycle_record {
     uint32_t started;
     uint32_t preflightEmitted;
@@ -4085,6 +4186,8 @@ typedef struct guidexos_nativeaot_allocation_diagnostics {
     guidexos_nativeaot_c011ec58_lifecycle_record c011ec58Lifecycle;
     /* C011EC60 source promotion-to-gen1-budget chronology. */
     guidexos_nativeaot_c011ec60_lifecycle_record c011ec60Lifecycle;
+    /* C011EC61 semantic pre-final-N0 promotion-cycle chronology. */
+    guidexos_nativeaot_c011ec61_lifecycle_record c011ec61Lifecycle;
     /* C011EC44 malformed transition-frame provenance. */
     guidexos_nativeaot_c011ec44_provenance_record c011ec44Provenance;
     /* C011EC45 reverse-P/Invoke slot layout, register, and unwind provenance. */
