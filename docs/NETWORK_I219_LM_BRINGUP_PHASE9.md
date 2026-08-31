@@ -115,21 +115,39 @@ Result: PASS.
 The canonical AMD64 freestanding build uses the unchanged Phase 8 selectors:
 `I219Phase5Stage=8`, `I219Phase6Stage=0`, and `I219Phase7Stage=4`.
 
-Build and release-ISO results, including exact tool output, are recorded in
-the final Phase 9 handoff. QEMU validation must confirm firmware, bootloader,
-kernel, ramdisk, desktop, main-loop readiness, and emulated E1000 startup.
+The canonical build passed with:
+
+```text
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\build.ps1 -Arch amd64 -I219Phase5Stage 8 -I219Phase6Stage 0 -I219Phase7Stage 4
+```
+
+The release wrapper, focused hosted diagnostics test, `git diff --check`, and
+build-wrapper self-test also passed. The final release ISO passed a fresh
+bounded QEMU run: firmware, bootloader, kernel, 64 MiB ramdisk, desktop,
+main-loop readiness, and emulated E1000 startup markers were all observed.
+Serial evidence is in:
+
+```text
+out/release-iso/qemu-test-94f5e21884054756b1c56b294a44c022/serial.log
+```
+
 QEMU evidence is virtual-machine evidence only and is not an I219 physical
-success claim.
+success claim. The interactive QEMU desktop was also inspected, but its
+launcher did not provide a usable Console, so no `nicinfo brief` command
+output is claimed from QEMU.
 
 ## 6. Phase 9 artifact
 
 The image is uniquely named and does not overwrite the Phase 8 image.
 
-- Path: pending packaging
 - Filename: `guideXOS-Server-v0.1.0-phase9-aida-i219-briefdiag-amd64.iso`
-- Size: pending packaging
-- SHA-256: pending packaging
-- Manifest: pending packaging
+- Path: `dist/guideXOS-Server-v0.1.0-phase9-aida-i219-briefdiag-amd64.iso`
+- Size: 90,245,120 bytes
+- SHA-256: `2fd97f49f02580e0521c5e021ffbac9f9dde6f1a6d0ac484907bf13262c50e43`
+- Checksum sidecar: `dist/guideXOS-Server-v0.1.0-phase9-aida-i219-briefdiag-amd64.iso.sha256`
+- Manifest: `dist/guideXOS-Server-v0.1.0-phase9-aida-i219-briefdiag-amd64.manifest.json`
+- Structural result: bootable UEFI, platform `0xEF`, no-emulation media.
+- Manifest source commit: `268fd103d51aef90af2f7bf0b0a15a870c484e87`.
 
 ## 7. Physical AIDA_LPT procedure
 
