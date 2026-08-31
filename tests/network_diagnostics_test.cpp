@@ -61,6 +61,42 @@ int main()
     assert(!nic::is_valid_station_mac(broadcastMac));
     assert(!nic::is_valid_station_mac(multicastMac));
 
+    nic::NICDevice readyDevice = {};
+    readyDevice.driverBound = true;
+    readyDevice.mmioMapped = true;
+    readyDevice.mmioProbeAttempted = true;
+    readyDevice.mmioProbePassed = true;
+    readyDevice.macReadAttempted = true;
+    readyDevice.macValid = true;
+    readyDevice.rxRingInitialized = true;
+    readyDevice.txRingInitialized = true;
+    readyDevice.deviceId = nic::PCI_DEVICE_I219_LM;
+    readyDevice.resetAttempted = true;
+    readyDevice.resetCompleted = true;
+    readyDevice.phyProbeAttempted = true;
+    readyDevice.phyAccess = nic::NIC_PHY_OK;
+    readyDevice.nicRegistered = true;
+    readyDevice.active = true;
+    readyDevice.driverReady = true;
+    readyDevice.initStage = nic::NIC_INIT_READY;
+    assert(nic::hardware_init_complete(readyDevice));
+    assert(nic::is_driver_ready(readyDevice));
+
+    // A discovered/bound I219 with a failed PHY stage must not project as
+    // driver-ready, even if a stale registration/active bit is present.
+    readyDevice.phyAccess = nic::NIC_PHY_FAILED;
+    readyDevice.initStage = nic::NIC_INIT_PHY;
+    readyDevice.driverReady = false;
+    assert(!nic::hardware_init_complete(readyDevice));
+    assert(!nic::is_driver_ready(readyDevice));
+
+    // Registration and readiness are distinct state gates.
+    readyDevice.phyAccess = nic::NIC_PHY_OK;
+    readyDevice.initStage = nic::NIC_INIT_TX_RING;
+    readyDevice.driverReady = false;
+    assert(nic::hardware_init_complete(readyDevice));
+    assert(!nic::is_driver_ready(readyDevice));
+
     const uint8_t mac[] = {0xCA, 0xFE, 0xB0, 0x0C, 0xD0, 0x5E};
     char macString[18];
     ethernet::mac_to_string(mac, macString);

@@ -2072,6 +2072,7 @@ static void uint_hex_to_str(uint32_t value, uint8_t digits, char* buf) {
 
 static void cmd_nicinfo() {
     output_string("=== NIC Diagnostic Information ===\n\n");
+    char hexStr[9];
 
     print_pci_network_inventory();
     output_string("\n");
@@ -2092,9 +2093,9 @@ static void cmd_nicinfo() {
     statusInput.adapterPresent = true;
     statusInput.driverBound = dev->driverBound &&
         network_status::is_supported_intel_e1000(dev->vendorId, dev->deviceId);
-    statusInput.driverReady = dev->active;
+    statusInput.driverReady = nic::is_driver_ready(*dev);
     const nic::LinkState liveLink = nic::get_link_state();
-    statusInput.linkUp = dev->active && liveLink == nic::NIC_LINK_UP;
+    statusInput.linkUp = statusInput.driverReady && liveLink == nic::NIC_LINK_UP;
     statusInput.ipv4Configured = config && config->configured;
     statusInput.gatewayConfigured = config && config->gateway != 0;
     statusInput.dnsConfigured = config && config->dns != 0;
@@ -2139,9 +2140,13 @@ static void cmd_nicinfo() {
         }
         phase7Text[index] = '\0';
         output_string(phase7Text);
-        output_string(dev->phase7Stage == 4u
-                      ? " (registration; IRQ masked)"
-                      : " (diagnostic gate)");
+        if (dev->phase7Stage == 4u) {
+            output_string(dev->nicRegistered
+                          ? " (registered; IRQ masked)"
+                          : " (registration target; not registered)");
+        } else {
+            output_string(" (diagnostic gate)");
+        }
     } else {
         output_string("N/A");
     }
@@ -2152,7 +2157,7 @@ static void cmd_nicinfo() {
     output_string(nic::init_stage_name(dev->initStage));
     output_string("\n");
     output_string("Driver Ready: ");
-    output_string(dev->active ? "YES" : "NO");
+    output_string(nic::is_driver_ready(*dev) ? "YES" : "NO");
     output_string("   PHY Link: ");
     output_string(liveLink == nic::NIC_LINK_UP ? "UP" :
                   (liveLink == nic::NIC_LINK_DOWN ? "DOWN" : "UNKNOWN"));
@@ -2172,6 +2177,57 @@ static void cmd_nicinfo() {
     output_string("NIC registration: ");
     output_string(dev->nicRegistered ? "YES" : "NO");
     output_string("\n");
+    output_string("Hardware init gate: ");
+    output_string(nic::hardware_init_complete(*dev) ? "PASS" : "INCOMPLETE");
+    output_string("\n");
+    output_string("MMIO probe: ");
+    output_string(dev->mmioProbeAttempted
+                  ? (dev->mmioProbePassed ? "PASS" : "FAIL")
+                  : "not attempted");
+    output_string("\n");
+    output_string("Reset: attempted=");
+    output_string(dev->resetAttempted ? "yes" : "no");
+    output_string(" completed=");
+    output_string(dev->resetCompleted ? "yes" : "no");
+    output_string(" timeout=");
+    output_string(dev->resetTimedOut ? "yes" : "no");
+    output_string(" polls=");
+    char diagnosticNum[16];
+    uint_to_str(dev->resetPollIterations, diagnosticNum);
+    output_string(diagnosticNum);
+    output_string("\n");
+    output_string("Reset CTRL: before=0x");
+    uint_hex_to_str(dev->resetCtrlBefore, 8, hexStr);
+    output_string(hexStr);
+    output_string(" request=0x");
+    uint_hex_to_str(dev->resetCtrlRequest, 8, hexStr);
+    output_string(hexStr);
+    output_string(" after=0x");
+    uint_hex_to_str(dev->resetCtrlAfter, 8, hexStr);
+    output_string(hexStr);
+    output_string("\n");
+    output_string("MAC acquisition: attempted=");
+    output_string(dev->macReadAttempted ? "yes" : "no");
+    output_string(" valid=");
+    output_string(dev->macValid ? "yes" : "no");
+    output_string(" source=");
+    output_string(dev->deviceId == nic::PCI_DEVICE_I219_LM ? "RAL0/RAH0" : "EERD/RAR0");
+    output_string(" RAL=0x");
+    uint_hex_to_str(dev->macRalValue, 8, hexStr);
+    output_string(hexStr);
+    output_string(" RAH=0x");
+    uint_hex_to_str(dev->macRahValue, 8, hexStr);
+    output_string(hexStr);
+    output_string("\n");
+    output_string("PHY probe: attempted=");
+    output_string(dev->phyProbeAttempted ? "yes" : "no");
+    output_string(" access=");
+    output_string(nic::phy_access_state_name(dev->phyAccess));
+    output_string("\n");
+    output_string("Last failure stage: ");
+    output_string(dev->lastFailureStage == nic::NIC_INIT_NONE
+                  ? "none" : nic::init_stage_name(dev->lastFailureStage));
+    output_string("\n");
     if (dev->lastInitFailure[0] != '\0') {
         output_string("Last init failure: ");
         output_string(dev->lastInitFailure);
@@ -2180,7 +2236,6 @@ static void cmd_nicinfo() {
     
     // Vendor/Device ID
     output_string("Vendor ID: 0x");
-    char hexStr[9];
     for (int i = 0; i < 4; i++) {
         uint8_t nibble = (dev->vendorId >> (12 - i*4)) & 0xF;
         hexStr[i] = (nibble < 10) ? ('0' + nibble) : ('A' + nibble - 10);

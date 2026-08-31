@@ -91,7 +91,9 @@ static void set_init_failure(InitStage stage, const char* reason,
                              bool allowHardwareMask = true)
 {
     s_device.initStage = stage;
+    s_device.lastFailureStage = stage;
     s_device.active = false;
+    s_device.driverReady = false;
     s_device.nicRegistered = false;
     s_device.pollingEnabled = false;
     s_device.irqRegistered = false;
@@ -312,18 +314,22 @@ static bool i219_pch_reset(uint64_t mmioBase)
     // Flush posted writes through STATUS before the reset request. Do not
     // perform a post-reset STATUS/CTRL flush until the finite delay elapses.
     const uint32_t status = mmio_read32(mmioBase, E1000_STATUS);
+    s_device.mmioProbeAttempted = true;
     s_device.statusValue = status;
     if (status == 0xFFFFFFFFu) {
+        s_device.mmioProbePassed = false;
         serial::puts("[AIDA-I219-P7] reset=FAIL reason=status-all-ones\n");
         set_init_failure(NIC_INIT_MMIO, "I219 STATUS flush returned all-ones");
         return false;
     }
+    s_device.mmioProbePassed = true;
 
     pch_reset_delay_ms(10u);
 
     const uint32_t ctrl = mmio_read32(mmioBase, E1000_CTRL);
     s_device.ctrlValue = ctrl;
     if (ctrl == 0xFFFFFFFFu) {
+        s_device.mmioProbePassed = false;
         serial::puts("[AIDA-I219-P7] reset=FAIL reason=ctrl-all-ones\n");
         set_init_failure(NIC_INIT_MMIO, "I219 CTRL read returned all-ones");
         return false;
@@ -331,7 +337,10 @@ static bool i219_pch_reset(uint64_t mmioBase)
 
     // Preserve the hardware's CTRL state exactly as in the proven candidate;
     // only the reset bit is added.
-    mmio_write32(mmioBase, E1000_CTRL, ctrl | E1000_CTRL_RST);
+    s_device.resetCtrlBefore = ctrl;
+    s_device.resetCtrlRequest = ctrl | E1000_CTRL_RST;
+    s_device.resetAttempted = true;
+    mmio_write32(mmioBase, E1000_CTRL, s_device.resetCtrlRequest);
 
     // Immediate post-reset reads were part of the unsafe generic boundary.
     // The first post-write MMIO read is intentionally delayed and is only the
@@ -339,10 +348,14 @@ static bool i219_pch_reset(uint64_t mmioBase)
     pch_reset_delay_ms(20u);
 
     bool resetComplete = false;
+    s_device.resetPollIterations = 0;
     for (uint32_t i = 0; i < I219_PHASE5_HW_WAIT_LIMIT; ++i) {
         const uint32_t observedCtrl = mmio_read32(mmioBase, E1000_CTRL);
         s_device.ctrlValue = observedCtrl;
+        s_device.resetCtrlAfter = observedCtrl;
+        s_device.resetPollIterations = i + 1u;
         if (observedCtrl == 0xFFFFFFFFu) {
+            s_device.mmioProbePassed = false;
             serial::puts("[AIDA-I219-P7] reset=FAIL reason=poll-all-ones\n");
             set_init_failure(NIC_INIT_RESET, "I219 reset poll returned all-ones");
             return false;
@@ -353,10 +366,12 @@ static bool i219_pch_reset(uint64_t mmioBase)
         }
     }
     if (!resetComplete) {
+        s_device.resetTimedOut = true;
         serial::puts("[AIDA-I219-P7] reset=FAIL reason=poll-timeout\n");
         set_init_failure(NIC_INIT_RESET, "I219 PCH reset completion timeout");
         return false;
     }
+    s_device.resetCompleted = true;
 
     // Linux re-masks and drains causes after the PCH reset. This is the last
     // operation in the permanent reset helper and still never enables IMS.
@@ -720,6 +735,8 @@ static bool read_rar0_address(uint64_t mmioBase, uint8_t* mac, bool requireValid
 
     const uint32_t ral = mmio_read32(mmioBase, E1000_RAL0);
     const uint32_t rah = mmio_read32(mmioBase, E1000_RAH0);
+    s_device.macRalValue = ral;
+    s_device.macRahValue = rah;
     if (ral == 0xFFFFFFFFu || rah == 0xFFFFFFFFu) return false;
     if (requireValidBit && (rah & E1000_RAH_AV) == 0u) return false;
 
@@ -829,6 +846,7 @@ static bool mdic_read(uint64_t mmioBase, uint8_t phyAddress,
 
 static bool read_i219_phy_status(uint64_t mmioBase)
 {
+    s_device.phyProbeAttempted = true;
     uint16_t phyId1 = 0;
     uint16_t phyId2 = 0;
     uint16_t phyStatus = 0;
@@ -868,6 +886,28 @@ static bool read_i219_phy_status(uint64_t mmioBase)
     }
     s_device.negotiatedFullDuplex = (phyStatus & I219_PHY_STATUS_DUPLEX) != 0u;
     return true;
+}
+
+// The I219 PHY access path needs the documented MAC link-control preparation
+// before MDIC transactions. This is the same bounded CTRL.SLU/ASDE step used
+// by the earlier I219 path; it is deliberately not a PHY register write.
+static bool prepare_i219_phy_access(uint64_t mmioBase)
+{
+    s_device.mmioProbeAttempted = true;
+    const uint32_t ctrl = mmio_read32(mmioBase, E1000_CTRL);
+    s_device.ctrlValue = ctrl;
+    if (ctrl == 0xFFFFFFFFu) {
+        s_device.mmioProbePassed = false;
+        return false;
+    }
+
+    mmio_write32(mmioBase, E1000_CTRL, ctrl | E1000_CTRL_SLU | E1000_CTRL_ASDE);
+    s_device.ctrlValue = mmio_read32(mmioBase, E1000_CTRL);
+    s_device.statusValue = mmio_read32(mmioBase, E1000_STATUS);
+    s_device.mmioProbeAttempted = true;
+    s_device.mmioProbePassed = s_device.ctrlValue != 0xFFFFFFFFu &&
+                               s_device.statusValue != 0xFFFFFFFFu;
+    return s_device.mmioProbePassed;
 }
 
 // ================================================================
@@ -1081,9 +1121,11 @@ static bool init_e1000(uint64_t mmioBase)
         mmio_write32(mmioBase, E1000_IMC, 0xFFFFFFFF);
         mmio_read32(mmioBase, E1000_ICR);
 
+        s_device.mmioProbeAttempted = true;
         ctrl = mmio_read32(mmioBase, E1000_CTRL);
         s_device.ctrlValue = ctrl;
         if (ctrl == 0xFFFFFFFFu) {
+            s_device.mmioProbePassed = false;
             if (i219) {
                 serial::puts("[AIDA-I219-P5] reset CTRL read returned all-ones\n");
                 phase5_stage_failed(3);
@@ -1092,12 +1134,19 @@ static bool init_e1000(uint64_t mmioBase)
             return false;
         }
 
-        mmio_write32(mmioBase, E1000_CTRL, ctrl | E1000_CTRL_RST);
+        s_device.resetCtrlBefore = ctrl;
+        s_device.resetCtrlRequest = ctrl | E1000_CTRL_RST;
+        s_device.resetAttempted = true;
+        mmio_write32(mmioBase, E1000_CTRL, s_device.resetCtrlRequest);
         bool resetComplete = false;
+        s_device.resetPollIterations = 0;
         for (uint32_t i = 0; i < I219_PHASE5_HW_WAIT_LIMIT; ++i) {
             ctrl = mmio_read32(mmioBase, E1000_CTRL);
             s_device.ctrlValue = ctrl;
+            s_device.resetCtrlAfter = ctrl;
+            s_device.resetPollIterations = i + 1u;
             if (ctrl == 0xFFFFFFFFu) {
+                s_device.mmioProbePassed = false;
                 if (i219) phase5_stage_failed(3);
                 set_init_failure(NIC_INIT_RESET, "reset read returned all-ones");
                 return false;
@@ -1108,6 +1157,7 @@ static bool init_e1000(uint64_t mmioBase)
             }
         }
         if (!resetComplete) {
+            s_device.resetTimedOut = true;
             if (i219) {
                 serial::puts("[AIDA-I219-P5] reset timeout\n");
                 phase5_stage_failed(3);
@@ -1115,6 +1165,7 @@ static bool init_e1000(uint64_t mmioBase)
             set_init_failure(NIC_INIT_RESET, "reset timeout");
             return false;
         }
+        s_device.resetCompleted = true;
         if (!i219) serial::puts("[NIC] MAC reset: complete (bounded)\n");
 
         // Keep interrupts masked until all state and rings are ready.
@@ -1131,11 +1182,14 @@ static bool init_e1000(uint64_t mmioBase)
 
         phase5_stage_enter(4);
         s_device.initStage = NIC_INIT_MAC;
+        s_device.macReadAttempted = true;
         if (!read_mac_address(mmioBase, s_device.macAddress)) {
+            s_device.macValid = false;
             phase5_stage_failed(4);
             set_init_failure(NIC_INIT_MAC, "invalid MAC in RAL0/RAH0");
             return false;
         }
+        s_device.macValid = true;
         serial::puts("[NIC] MAC acquisition: RAL0/RAH0 valid\n");
         phase5_stage_complete(4);
         if (GXOS_AIDA_I219_PHASE5_STAGE == 4) {
@@ -1144,20 +1198,10 @@ static bool init_e1000(uint64_t mmioBase)
         }
 
         phase5_stage_enter(5);
-        // Let the PHY negotiate.  This is the existing I219 setup; no
+        // Let the PHY negotiate. This is the existing bounded I219 setup; no
         // speculative PHY writes are introduced by the isolation path.
-        ctrl = mmio_read32(mmioBase, E1000_CTRL);
-        if (ctrl == 0xFFFFFFFFu) {
-            phase5_stage_failed(5);
-            set_init_failure(NIC_INIT_PHY, "PHY CTRL read returned all-ones");
-            return false;
-        }
-        ctrl |= E1000_CTRL_SLU | E1000_CTRL_ASDE;
-        mmio_write32(mmioBase, E1000_CTRL, ctrl);
-        s_device.ctrlValue = mmio_read32(mmioBase, E1000_CTRL);
-        s_device.statusValue = mmio_read32(mmioBase, E1000_STATUS);
         s_device.initStage = NIC_INIT_PHY;
-        if (s_device.ctrlValue == 0xFFFFFFFFu || s_device.statusValue == 0xFFFFFFFFu) {
+        if (!prepare_i219_phy_access(mmioBase)) {
             phase5_stage_failed(5);
             set_init_failure(NIC_INIT_PHY, "PHY CTRL/STATUS read returned all-ones");
             return false;
@@ -1178,11 +1222,14 @@ static bool init_e1000(uint64_t mmioBase)
     } else if (i219P7) {
         phase7_stage_enter("mac");
         s_device.initStage = NIC_INIT_MAC;
+        s_device.macReadAttempted = true;
         if (!read_mac_address(mmioBase, s_device.macAddress)) {
+            s_device.macValid = false;
             serial::puts("[AIDA-I219-P7] mac-invalid source=RAL0/RAH0\n");
             set_init_failure(NIC_INIT_MAC, "I219 RAL0/RAH0 contains an invalid station address");
             return false;
         }
+        s_device.macValid = true;
         phase7_print_mac_marker(s_device.macAddress);
         phase7_stage_complete("mac");
         if (GXOS_AIDA_I219_PHASE7_STAGE == 1) {
@@ -1192,6 +1239,16 @@ static bool init_e1000(uint64_t mmioBase)
 
         phase7_stage_enter("phy");
         s_device.initStage = NIC_INIT_PHY;
+        if (!prepare_i219_phy_access(mmioBase)) {
+            serial::puts("[AIDA-I219-P8] phy-control=FAIL ctrl/status-all-ones\n");
+            set_init_failure(NIC_INIT_PHY, "I219 PHY CTRL/STATUS preparation returned all-ones");
+            return false;
+        }
+        serial::puts("[AIDA-I219-P8] phy-control=ready ctrl=0x");
+        serial::put_hex32(s_device.ctrlValue);
+        serial::puts(" status=0x");
+        serial::put_hex32(s_device.statusValue);
+        serial::putc('\n');
         if (!read_i219_phy_status(mmioBase)) {
             serial::puts("[AIDA-I219-P7] phy-timeout\n");
             set_init_failure(NIC_INIT_PHY, "I219 PHY MDIC read timed out or returned an invalid response");
@@ -1222,12 +1279,22 @@ static bool init_e1000(uint64_t mmioBase)
         mmio_write32(mmioBase, E1000_CTRL, ctrl);
         s_device.ctrlValue = mmio_read32(mmioBase, E1000_CTRL);
         s_device.statusValue = mmio_read32(mmioBase, E1000_STATUS);
+        s_device.mmioProbeAttempted = true;
+        s_device.mmioProbePassed = s_device.ctrlValue != 0xFFFFFFFFu &&
+                                   s_device.statusValue != 0xFFFFFFFFu;
+        if (!s_device.mmioProbePassed) {
+            set_init_failure(NIC_INIT_MMIO, "MMIO CTRL/STATUS read returned all-ones");
+            return false;
+        }
 
         s_device.initStage = NIC_INIT_MAC;
-        if (!read_mac_address(mmioBase, s_device.macAddress)) {
+        s_device.macReadAttempted = true;
+        if (!s_device.mmioProbePassed || !read_mac_address(mmioBase, s_device.macAddress)) {
+            s_device.macValid = false;
             set_init_failure(NIC_INIT_MAC, "invalid MAC in RAL0/RAH0");
             return false;
         }
+        s_device.macValid = true;
         serial::puts("[NIC] MAC acquisition: EERD/RAR valid\n");
 
         s_device.link = (s_device.statusValue & E1000_STATUS_LU)
@@ -1655,6 +1722,8 @@ bool init_from_bootinfo(const NicBootInfo* nicInfo)
         // STATUS is the least invasive identity/readiness register used by
         // this driver.  Stage 2 performs no reset, PHY access, or write.
         s_device.statusValue = mmio_read32(s_device.mmioBase, E1000_STATUS);
+        s_device.mmioProbeAttempted = true;
+        s_device.mmioProbePassed = s_device.statusValue != 0xFFFFFFFFu;
         serial::puts("[AIDA-I219-P5] mmio-status=");
         serial::put_hex32(s_device.statusValue);
         serial::putc('\n');
@@ -1700,6 +1769,14 @@ bool init_from_bootinfo(const NicBootInfo* nicInfo)
         return false;
     }
 
+    // Keep the publication boundary explicit. A successful helper return is
+    // not sufficient if any required state marker was not recorded.
+    if (!hardware_init_complete(s_device)) {
+        set_init_failure(s_device.initStage,
+                         "initialization completion gate not satisfied");
+        return false;
+    }
+
     serial::puts("[NIC] MAC: ");
     for (uint8_t i = 0; i < 6; ++i) {
         if (i > 0) serial::putc(':');
@@ -1717,10 +1794,11 @@ bool init_from_bootinfo(const NicBootInfo* nicInfo)
         // Stage 6 and this registration boundary are always interrupt-masked.
         mask_nic_interrupts(s_device.mmioBase);
     }
-    s_device.active = true;
-    s_device.pollingEnabled = true;
     s_device.nicRegistered = true;
     s_device.initStage = NIC_INIT_READY;
+    s_device.active = true;
+    s_device.driverReady = true;
+    s_device.pollingEnabled = true;
     serial::puts("[NIC] NIC registration: complete; interrupt causes remain masked\n");
 
     if (i219) {
@@ -1786,7 +1864,7 @@ void init()
 
 bool is_active()
 {
-    return s_initialised && s_device.active;
+    return s_initialised && is_driver_ready(s_device);
 }
 
 const NICDevice* get_device()

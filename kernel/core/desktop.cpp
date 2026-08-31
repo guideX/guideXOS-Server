@@ -8042,8 +8042,8 @@ static const char* network_adapter_status(int index)
     input.adapterPresent = true;
     input.driverBound = network_status::is_supported_intel_e1000(
         dev->vendorId, dev->deviceId);
-    input.driverReady = dev->active;
-    input.linkUp = dev->active && nic::get_link_state() == nic::NIC_LINK_UP;
+    input.driverReady = nic::is_driver_ready(*dev);
+    input.linkUp = input.driverReady && nic::get_link_state() == nic::NIC_LINK_UP;
     const ipv4::NetworkConfig* config = ipv4::get_config();
     input.ipv4Configured = config && config->configured;
     input.gatewayConfigured = config && config->gateway != 0;

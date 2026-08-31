@@ -344,6 +344,7 @@ struct NetStats {
 
 struct NICDevice {
     bool        active;
+    bool        driverReady;    // published only after hardware init and registration
     uint8_t     pciBus;
     uint8_t     pciSlot;
     uint8_t     pciFunc;
@@ -370,10 +371,24 @@ struct NICDevice {
     bool        nicRegistered;  // ready NIC exposed to the network stack
     bool        rxRingInitialized;
     bool        txRingInitialized;
+    bool        mmioProbeAttempted;
+    bool        mmioProbePassed;
+    bool        resetAttempted;
+    bool        resetCompleted;
+    bool        resetTimedOut;
+    bool        macReadAttempted;
+    bool        macValid;
+    bool        phyProbeAttempted;
     uint16_t    pciCommand;
     uint32_t    ctrlValue;
     uint32_t    statusValue;
     uint32_t    mdicValue;
+    uint32_t    resetCtrlBefore;
+    uint32_t    resetCtrlRequest;
+    uint32_t    resetCtrlAfter;
+    uint32_t    resetPollIterations;
+    uint32_t    macRalValue;
+    uint32_t    macRahValue;
     uint16_t    phyStatusValue;
     uint16_t    phyId1;
     uint16_t    phyId2;
@@ -387,6 +402,7 @@ struct NICDevice {
     uint8_t     phase7Stage;       // 0..4 for I219; 0xFF for other NICs
     bool        phase5Stopped;     // intentionally stopped or failed safely
     bool        interruptsEnabled; // hardware NIC interrupt mask is enabled
+    InitStage   lastFailureStage;
     char        lastInitFailure[96];
 };
 
@@ -462,6 +478,31 @@ inline bool is_valid_station_mac(const uint8_t* mac)
     }
 
     return !allZero && !allFF && ((mac[0] & 0x01u) == 0u);
+}
+
+// Hardware initialization is complete only after every required state gate
+// for the selected device family has passed. This is separate from NIC
+// registration and the legacy `active` field.
+inline bool hardware_init_complete(const NICDevice& device)
+{
+    if (!device.driverBound || !device.mmioMapped ||
+        !device.mmioProbeAttempted || !device.mmioProbePassed ||
+        !device.macReadAttempted || !device.macValid ||
+        !device.rxRingInitialized || !device.txRingInitialized) {
+        return false;
+    }
+    if (device.deviceId == PCI_DEVICE_I219_LM &&
+        (!device.resetAttempted || !device.resetCompleted ||
+         !device.phyProbeAttempted || device.phyAccess != NIC_PHY_OK)) {
+        return false;
+    }
+    return true;
+}
+
+inline bool is_driver_ready(const NICDevice& device)
+{
+    return device.driverReady && device.active && device.nicRegistered &&
+           device.initStage == NIC_INIT_READY && hardware_init_complete(device);
 }
 
 // Set the physical address where the kernel image was loaded.
