@@ -43,12 +43,15 @@ static const uint32_t COMPILER_MAX_PROJECT_IMPORTS = 128;
 static const uint32_t COMPILER_MAX_PROJECT_RELOCATIONS = 256;
 static const uint32_t COMPILER_MAX_MODULE_RELOCATIONS = 64;
 static const uint32_t COMPILER_MAX_SOURCE_PATH_BYTES = 256;
+static const uint32_t COMPILER_MAX_GLOBALS = 32;
+static const uint32_t COMPILER_MAX_MODULE_SYMBOLS = COMPILER_MAX_FUNCTIONS + COMPILER_MAX_GLOBALS;
 
 static const uint16_t COMPILER_INVALID_INDEX = 0xFFFFU;
 
 enum class ExpressionKind : uint8_t {
     Constant,
     LoadLocal,
+    LoadGlobal,
     Add,
     Subtract,
     Multiply,
@@ -70,6 +73,7 @@ struct Expression {
     uint16_t left;
     uint16_t right;
     uint16_t localIndex;
+    uint16_t globalIndex;
     uint16_t callIndex;
     int32_t value;
     SourceLocation location;
@@ -78,6 +82,8 @@ struct Expression {
 enum class StatementKind : uint8_t {
     DeclareLocal,
     StoreLocal,
+    StoreGlobal,
+    EvaluateExpression,
     HostLog,
     Return,
     If,
@@ -92,6 +98,7 @@ struct Statement {
     uint8_t reserved;
     uint16_t expression;
     uint16_t localIndex;
+    uint16_t globalIndex;
     uint16_t stringIndex;
     uint16_t thenBlock;
     uint16_t elseBlock;
@@ -203,8 +210,21 @@ struct FunctionDeclaration {
     SourceLocation location;
 };
 
+struct GlobalSymbolIR {
+    char name[COMPILER_FUNCTION_NAME_CAPACITY];
+    bool isDefinition;
+    bool hasInitializer;
+    uint16_t reserved;
+    int32_t initialValue;
+    uint32_t moduleDataOffset;
+    uint32_t size;
+    uint32_t alignment;
+    SourceLocation location;
+};
+
 struct TranslationUnitIR {
     uint32_t functionCount;
+    uint32_t globalCount;
     uint16_t entryFunction;
     uint16_t callGraphEdgeCount;
     uint16_t recursiveSccCount;
@@ -212,6 +232,7 @@ struct TranslationUnitIR {
     FunctionIR functions[COMPILER_MAX_FUNCTIONS];
     FunctionSymbol functionSymbols[COMPILER_MAX_FUNCTIONS];
     FunctionDeclaration declarations[COMPILER_MAX_DECLARATIONS];
+    GlobalSymbolIR globals[COMPILER_MAX_GLOBALS];
     bool callGraph[COMPILER_MAX_FUNCTIONS][COMPILER_MAX_FUNCTIONS];
     bool recursiveFunction[COMPILER_MAX_FUNCTIONS];
 };
@@ -219,6 +240,12 @@ struct TranslationUnitIR {
 enum class RelocationKind : uint8_t {
     CallRel32,
     DataAddress64,
+    GlobalDataAddress64,
+};
+
+enum class SymbolKind : uint8_t {
+    Function,
+    Data,
 };
 
 struct RelocationRecord {
@@ -232,8 +259,12 @@ struct RelocationRecord {
 };
 
 struct ExportSymbol {
+    SymbolKind kind;
     char name[COMPILER_FUNCTION_NAME_CAPACITY];
     uint32_t moduleCodeOffset;
+    uint32_t moduleDataOffset;
+    uint32_t size;
+    uint32_t alignment;
     uint16_t parameterCount;
     bool isEntry;
     uint8_t reserved;
@@ -241,9 +272,12 @@ struct ExportSymbol {
 };
 
 struct ImportSymbol {
+    SymbolKind kind;
     char name[COMPILER_FUNCTION_NAME_CAPACITY];
     uint16_t expectedParameterCount;
     uint16_t reserved;
+    uint32_t size;
+    uint32_t alignment;
     SourceLocation location;
 };
 
@@ -258,14 +292,17 @@ struct CompiledModule {
     uint8_t code[COMPILER_MAX_CODE_BYTES];
     uint32_t dataBytes;
     uint8_t data[COMPILER_MAX_LINKED_DATA_BYTES];
+    uint32_t mutableDataBytes;
+    uint8_t mutableData[COMPILER_MAX_LINKED_DATA_BYTES];
     uint32_t exportCount;
-    ExportSymbol exports[COMPILER_MAX_FUNCTIONS];
+    ExportSymbol exports[COMPILER_MAX_MODULE_SYMBOLS];
     uint32_t importCount;
-    ImportSymbol imports[COMPILER_MAX_FUNCTIONS];
+    ImportSymbol imports[COMPILER_MAX_MODULE_SYMBOLS];
     uint32_t relocationCount;
     RelocationRecord relocations[COMPILER_MAX_MODULE_RELOCATIONS];
     uint32_t entryCodeOffset;
     uint32_t functionCount;
+    uint32_t globalCount;
     bool hasEntry;
     bool hasHostLog;
     bool returnConstantValid;
@@ -278,11 +315,16 @@ struct CompiledModule {
 };
 
 struct GlobalFunctionSymbol {
+    SymbolKind kind;
     char name[COMPILER_FUNCTION_NAME_CAPACITY];
     uint16_t moduleIndex;
     uint16_t parameterCount;
     uint32_t moduleCodeOffset;
     uint32_t finalCodeOffset;
+    uint32_t moduleDataOffset;
+    uint32_t finalDataOffset;
+    uint32_t size;
+    uint32_t alignment;
     bool isEntry;
     uint8_t reserved[3];
 };
@@ -293,8 +335,11 @@ struct LinkedProgram {
     uint8_t code[COMPILER_MAX_LINKED_CODE_BYTES];
     uint32_t dataBytes;
     uint8_t data[COMPILER_MAX_LINKED_DATA_BYTES];
+    uint32_t mutableDataBytes;
+    uint8_t mutableData[COMPILER_MAX_LINKED_DATA_BYTES];
     uint32_t entryCodeOffset;
     uint32_t dataFileOffset;
+    uint32_t mutableDataFileOffset;
     uint32_t exportCount;
     GlobalFunctionSymbol exports[COMPILER_MAX_PROJECT_EXPORTS];
     uint32_t importCount;

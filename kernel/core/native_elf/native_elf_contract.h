@@ -21,7 +21,9 @@ static const uint64_t IMAGE_BASE = 0x10000000ULL;
 static const uint64_t REGION_SIZE = 0x00200000ULL;
 
 static const uint32_t PAGE_SIZE = 0x1000U;
-static const uint32_t MAX_ELF_FILE_BYTES = 12288U;
+// The compiler bootstrap image is bounded by its 64 KiB code, 8 KiB rodata,
+// 8 KiB mutable-data, and page-alignment/header budget.
+static const uint32_t MAX_ELF_FILE_BYTES = 98304U;
 static const uint64_t MAX_MAPPED_BYTES = 0x00100000ULL;
 static const uint16_t MAX_LOAD_SEGMENTS = 4U;
 

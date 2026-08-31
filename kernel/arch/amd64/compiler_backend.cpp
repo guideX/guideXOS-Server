@@ -99,6 +99,8 @@ public:
                u32(static_cast<uint32_t>(displacement));
     }
     bool mov_eax_local(int32_t displacement) { return mov_reg_mem32(0, displacement); }
+    bool mov_eax_rax() { static const uint8_t v[] = {0x8B, 0x02}; return bytes(v, sizeof(v)); }
+    bool mov_rax_eax() { static const uint8_t v[] = {0x89, 0x02}; return bytes(v, sizeof(v)); }
     bool mov_local_eax(int32_t displacement)
     {
         return bytes(reinterpret_cast<const uint8_t*>("\x89\x85"), 2) && u32(static_cast<uint32_t>(displacement));
@@ -335,6 +337,27 @@ public:
         relocation.location = location;
         return true;
     }
+    bool emit_global_data_address(const char* name, SourceLocation location)
+    {
+        if (!name || !m_relocations || !m_relocationCount ||
+            *m_relocationCount >= m_relocationCapacity ||
+            !bytes(reinterpret_cast<const uint8_t*>("\x48\xBA"), 2)) return false;
+        const uint32_t patchOffset = m_offset;
+        if (!u64(0)) return false;
+        RelocationRecord& relocation = m_relocations[(*m_relocationCount)++];
+        relocation = {};
+        relocation.kind = RelocationKind::GlobalDataAddress64;
+        relocation.width = 8;
+        relocation.patchOffset = patchOffset;
+        relocation.location = location;
+        uint32_t i = 0;
+        while (i + 1 < sizeof(relocation.targetSymbolName) && name[i] != '\0') {
+            relocation.targetSymbolName[i] = name[i];
+            ++i;
+        }
+        relocation.targetSymbolName[i] = '\0';
+        return name[i] == '\0';
+    }
     bool patch_branches()
     {
         for (uint32_t i = 0; i < m_fixupCount; ++i) {
@@ -431,7 +454,9 @@ static bool required_temporary_slots(const FunctionIR& function, uint16_t index,
         *output = static_cast<uint16_t>(needed);
         return true;
     }
-    if (expression.kind == ExpressionKind::Constant || expression.kind == ExpressionKind::LoadLocal) {
+    if (expression.kind == ExpressionKind::Constant ||
+        expression.kind == ExpressionKind::LoadLocal ||
+        expression.kind == ExpressionKind::LoadGlobal) {
         *output = 0;
         return true;
     }
@@ -449,7 +474,9 @@ static bool required_transient_stack_bytes(const FunctionIR& function, uint16_t 
     if (!output || index == COMPILER_INVALID_INDEX || index >= function.expressionCount ||
         depth > COMPILER_MAX_EXPRESSION_NODES) return false;
     const Expression& expression = function.expressions[index];
-    if (expression.kind == ExpressionKind::Constant || expression.kind == ExpressionKind::LoadLocal) {
+    if (expression.kind == ExpressionKind::Constant ||
+        expression.kind == ExpressionKind::LoadLocal ||
+        expression.kind == ExpressionKind::LoadGlobal) {
         *output = 0;
         return true;
     }
@@ -550,6 +577,10 @@ static bool emit_expression(Emitter& emitter, const TranslationUnitIR& unit,
         case ExpressionKind::LoadLocal:
             if (expression.localIndex >= function.integerParameterCount + function.localCount) return false;
             return emitter.mov_eax_local(local_displacement(expression.localIndex));
+        case ExpressionKind::LoadGlobal:
+            if (expression.globalIndex >= unit.globalCount) return false;
+            return emitter.emit_global_data_address(unit.globals[expression.globalIndex].name,
+                                                    expression.location) && emitter.mov_eax_rax();
         case ExpressionKind::Negate:
             return emit_expression(emitter, unit, function, frame, functionLabels, expression.left,
                                    epilogueLabel, callFailureLabel) && emitter.neg_eax();
@@ -603,6 +634,15 @@ static bool emit_statement(Emitter& emitter, const TranslationUnitIR& unit, cons
                 emit_expression(emitter, unit, function, frame, functionLabels, statement.expression,
                                 epilogueLabel, callFailureLabel) &&
                 emitter.mov_local_eax(local_displacement(statement.localIndex));
+        case StatementKind::StoreGlobal:
+            if (statement.globalIndex >= unit.globalCount) return false;
+            return emit_expression(emitter, unit, function, frame, functionLabels, statement.expression,
+                                   epilogueLabel, callFailureLabel) &&
+                emitter.emit_global_data_address(unit.globals[statement.globalIndex].name,
+                                                 statement.location) && emitter.mov_rax_eax();
+        case StatementKind::EvaluateExpression:
+            return emit_expression(emitter, unit, function, frame, functionLabels, statement.expression,
+                                   epilogueLabel, callFailureLabel);
         case StatementKind::HostLog:
             return function.usesAppContext && emit_log(emitter, function, statement, dataAddress, true,
                                                        frame.contextDisplacement);
@@ -783,8 +823,14 @@ static bool emit_translation_unit_impl(const TranslationUnitIR& unit, uint64_t r
     if (entryCodeOffset) *entryCodeOffset = 0;
     if (relocationCount) *relocationCount = 0;
     if (!output || !outputSize || !entryCodeOffset || outputCapacity == 0 ||
-        unit.functionCount == 0 || unit.functionCount > COMPILER_MAX_FUNCTIONS ||
+         unit.functionCount > COMPILER_MAX_FUNCTIONS ||
+         unit.globalCount > COMPILER_MAX_GLOBALS ||
         (unit.entryFunction != COMPILER_INVALID_INDEX && unit.entryFunction >= unit.functionCount)) return false;
+    if (unit.functionCount == 0) {
+        *outputSize = 0;
+        *entryCodeOffset = 0;
+        return true;
+    }
     for (uint32_t i = 0; i < unit.functionCount; ++i) {
         const FunctionIR& function = unit.functions[i];
         if (function.rootBlock == COMPILER_INVALID_INDEX || function.rootBlock >= function.blockCount ||
@@ -840,7 +886,8 @@ static bool emit_translation_unit_impl(const TranslationUnitIR& unit, uint64_t r
             return true;
         }
         if (function.localCount == 0 && function.integerParameterCount == 0 && function.callCount == 0 &&
-            !function.hasHostLog && function.blockCount == 1 && function.returnCount == 1) {
+            !function.hasHostLog && function.blockCount == 1 && function.statementCount == 1 &&
+            function.returnCount == 1) {
             emitter = Emitter(output, outputCapacity, relocations, relocationCapacity, relocationCount);
             if (!emit_expression(emitter, unit, function, frames[0], functionLabels, function.returnExpression,
                                  COMPILER_INVALID_INDEX, COMPILER_INVALID_INDEX) ||

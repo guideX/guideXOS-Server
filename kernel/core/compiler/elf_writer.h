@@ -2,8 +2,8 @@
 // Bootstrap ELF64 executable writer and validator.
 //
 // This is deliberately a final-image writer, not a linker.  It emits a small
-// deterministic ET_EXEC image with an RX code load and, when requested, an R
-// read-only data load.  There are no section or dynamic tables.
+// deterministic ET_EXEC image with separate RX code, R read-only data, and RW
+// mutable-data loads.  There are no section or dynamic tables.
 //
 
 #pragma once
@@ -28,6 +28,9 @@ struct ElfLayout {
     uint32_t dataOffset;
     uint64_t dataAddress;
     uint32_t dataBytes;
+    uint32_t mutableDataOffset;
+    uint64_t mutableDataAddress;
+    uint32_t mutableDataBytes;
     uint32_t outputBytes;
 };
 
@@ -42,10 +45,24 @@ struct ElfValidationResult {
     uint32_t dataFileOffset;
     uint64_t dataVirtualAddress;
     uint32_t dataBytes;
+    uint32_t mutableDataFileOffset;
+    uint64_t mutableDataVirtualAddress;
+    uint32_t mutableDataBytes;
 };
 
 bool write_bootstrap_elf(const uint8_t* code,
                          uint32_t codeBytes,
+                         uint8_t* output,
+                         uint32_t outputCapacity,
+                         ElfLayout* layout);
+
+bool write_bootstrap_elf(const uint8_t* code,
+                         uint32_t codeBytes,
+                         const uint8_t* readOnlyData,
+                         uint32_t readOnlyDataBytes,
+                         const uint8_t* mutableData,
+                         uint32_t mutableDataBytes,
+                         uint32_t entryCodeOffset,
                          uint8_t* output,
                          uint32_t outputCapacity,
                          ElfLayout* layout);
@@ -76,6 +93,19 @@ bool validate_bootstrap_elf(const uint8_t* image,
                             ElfValidationResult* result,
                             const uint8_t* expectedData = nullptr,
                             uint32_t expectedDataBytes = 0,
+                            uint32_t expectedEntryCodeOffset = 0);
+
+bool validate_bootstrap_elf(const uint8_t* image,
+                            uint32_t imageBytes,
+                            uint64_t expectedImageBase,
+                            uint32_t expectedCodeOffset,
+                            const uint8_t* expectedCode,
+                            uint32_t expectedCodeBytes,
+                            ElfValidationResult* result,
+                            const uint8_t* expectedData,
+                            uint32_t expectedDataBytes,
+                            const uint8_t* expectedMutableData,
+                            uint32_t expectedMutableDataBytes,
                             uint32_t expectedEntryCodeOffset = 0);
 
 } // namespace compiler

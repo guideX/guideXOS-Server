@@ -122,9 +122,10 @@ static bool parse_string_literal(const char* source, const Token& token,
 class FunctionParser {
 public:
     FunctionParser(const char* source, const Token* tokens, uint32_t tokenCount,
-                   uint32_t* index, FunctionIR* output, Diagnostics& diagnostics)
+                   uint32_t* index, FunctionIR* output, const TranslationUnitIR* unit,
+                   Diagnostics& diagnostics)
         : m_source(source), m_tokens(tokens), m_tokenCount(tokenCount), m_index(index),
-          m_output(output), m_diagnostics(diagnostics), m_returnCount(0), m_callDepth(0),
+          m_output(output), m_unit(unit), m_diagnostics(diagnostics), m_returnCount(0), m_callDepth(0),
           m_contextToken{}
     {
     }
@@ -229,6 +230,14 @@ private:
         return parameter >= 0 ? parameter : find_local(token);
     }
 
+    int32_t find_global(const Token& token) const
+    {
+        if (!m_unit || !token_is_name(token)) return -1;
+        for (uint32_t i = 0; i < m_unit->globalCount; ++i)
+            if (name_matches(m_unit->globals[i].name, token)) return static_cast<int32_t>(i);
+        return -1;
+    }
+
     bool name_already_declared(const Token& token) const
     {
         if (is_context_parameter(token) || find_integer_parameter(token) >= 0 || find_local(token) >= 0)
@@ -280,7 +289,8 @@ private:
     bool append_statement(uint16_t blockIndex, StatementKind kind, SourceLocation location,
                           uint16_t expression, uint16_t localIndex, uint16_t stringIndex,
                           uint16_t thenBlock = COMPILER_INVALID_INDEX,
-                          uint16_t elseBlock = COMPILER_INVALID_INDEX)
+                          uint16_t elseBlock = COMPILER_INVALID_INDEX,
+                          uint16_t globalIndex = COMPILER_INVALID_INDEX)
     {
         if (blockIndex >= m_output->blockCount) return false;
         if (m_output->statementCount >= COMPILER_MAX_STATEMENTS) {
@@ -293,6 +303,7 @@ private:
         statement.kind = kind;
         statement.expression = expression;
         statement.localIndex = localIndex;
+        statement.globalIndex = globalIndex;
         statement.stringIndex = stringIndex;
         statement.thenBlock = thenBlock;
         statement.elseBlock = elseBlock;
@@ -335,7 +346,12 @@ private:
                          uint32_t loopDepth)
     {
         if (current().kind == TokenKind::KeywordInt) return parse_declaration(blockIndex);
-        if (current().kind == TokenKind::Identifier) return parse_assignment(blockIndex);
+        if (current().kind == TokenKind::Identifier) {
+            if (m_index && *m_index + 1 < m_tokenCount &&
+                m_tokens[*m_index + 1].kind == TokenKind::LeftParen)
+                return parse_expression_statement(blockIndex);
+            return parse_assignment(blockIndex);
+        }
         if (current().kind == TokenKind::KeywordLog) return parse_log(blockIndex);
         if (current().kind == TokenKind::KeywordReturn) return parse_return(blockIndex);
         if (current().kind == TokenKind::KeywordIf)
@@ -358,6 +374,16 @@ private:
         }
         error_current("expected statement");
         return false;
+    }
+
+    bool parse_expression_statement(uint16_t blockIndex)
+    {
+        const SourceLocation location = current().location;
+        const uint16_t expression = parse_expression(0);
+        if (expression == COMPILER_INVALID_INDEX) return false;
+        if (!expect(TokenKind::Semicolon, "expected ';' after expression")) return false;
+        return append_statement(blockIndex, StatementKind::EvaluateExpression, location, expression,
+                                COMPILER_INVALID_INDEX, COMPILER_INVALID_INDEX);
     }
 
     bool parse_declaration(uint16_t blockIndex)
@@ -392,7 +418,8 @@ private:
         const Token name = current();
         const int32_t parameterSlot = find_integer_parameter(name);
         const int32_t slot = parameterSlot >= 0 ? parameterSlot : find_local(name);
-        if (slot < 0) {
+        const int32_t global = slot < 0 ? find_global(name) : -1;
+        if (slot < 0 && global < 0) {
             if (current().kind == TokenKind::Identifier && m_index && *m_index + 1 < m_tokenCount &&
                 m_tokens[*m_index + 1].kind == TokenKind::LeftParen) {
                 m_diagnostics.error_identifier(name.location, "function calls must be used as expressions: ",
@@ -408,10 +435,16 @@ private:
         const uint16_t expression = parse_expression(0);
         if (expression == COMPILER_INVALID_INDEX) return false;
         if (!expect(TokenKind::Semicolon, "expected ';' after assignment")) return false;
-        for (uint32_t i = 0; i < m_output->localCount; ++i)
-            if (m_output->locals[i].slot == static_cast<uint16_t>(slot)) m_output->locals[i].initialized = true;
-        return append_statement(blockIndex, StatementKind::StoreLocal, name.location, expression,
-                                static_cast<uint16_t>(slot), COMPILER_INVALID_INDEX);
+        if (slot >= 0) {
+            for (uint32_t i = 0; i < m_output->localCount; ++i)
+                if (m_output->locals[i].slot == static_cast<uint16_t>(slot)) m_output->locals[i].initialized = true;
+            return append_statement(blockIndex, StatementKind::StoreLocal, name.location, expression,
+                                    static_cast<uint16_t>(slot), COMPILER_INVALID_INDEX);
+        }
+        return append_statement(blockIndex, StatementKind::StoreGlobal, name.location, expression,
+                                COMPILER_INVALID_INDEX, COMPILER_INVALID_INDEX,
+                                COMPILER_INVALID_INDEX, COMPILER_INVALID_INDEX,
+                                static_cast<uint16_t>(global));
     }
 
     bool add_string(const Token& token, uint16_t* index)
@@ -768,6 +801,15 @@ private:
             ++(*m_index);
             const int32_t slot = find_variable(token);
             if (slot < 0) {
+                const int32_t global = find_global(token);
+                if (global >= 0) {
+                    const uint16_t expression = make_expression(ExpressionKind::LoadGlobal, token.location,
+                        COMPILER_INVALID_INDEX, COMPILER_INVALID_INDEX,
+                        COMPILER_INVALID_INDEX, 0);
+                    if (expression == COMPILER_INVALID_INDEX) return expression;
+                    m_output->expressions[expression].globalIndex = static_cast<uint16_t>(global);
+                    return expression;
+                }
                 if (is_context_parameter(token))
                     m_diagnostics.error(token.location, "gx_app_context parameter is only valid as log context", "identifier");
                 else
@@ -813,7 +855,8 @@ private:
             *bits = static_cast<uint32_t>(expression.value);
             return true;
         }
-        if (expression.kind == ExpressionKind::LoadLocal || expression.kind == ExpressionKind::Call) return false;
+        if (expression.kind == ExpressionKind::LoadLocal ||
+            expression.kind == ExpressionKind::LoadGlobal || expression.kind == ExpressionKind::Call) return false;
         if (expression.kind == ExpressionKind::Negate)
             return evaluate_expression(expression.left, depth + 1U, bits) && (*bits = 0U - *bits, true);
         if (!evaluate_expression(expression.left, depth + 1U, &left)) return false;
@@ -874,6 +917,7 @@ private:
     uint32_t m_tokenCount;
     uint32_t* m_index;
     FunctionIR* m_output;
+    const TranslationUnitIR* m_unit;
     Diagnostics& m_diagnostics;
     uint32_t m_returnCount;
     uint32_t m_callDepth;
@@ -893,6 +937,21 @@ static int32_t find_declaration(const TranslationUnitIR& unit, const char* name)
     for (uint32_t i = 0; i < unit.declarationCount; ++i)
         if (name_equals(unit.declarations[i].name, name)) return static_cast<int32_t>(i);
     return -1;
+}
+
+static int32_t find_global(const TranslationUnitIR& unit, const char* name)
+{
+    for (uint32_t i = 0; i < unit.globalCount; ++i)
+        if (name_equals(unit.globals[i].name, name)) return static_cast<int32_t>(i);
+    return -1;
+}
+
+static bool report_symbol_kind_conflict(const SourceLocation& location,
+                                        const char* name, Diagnostics& diagnostics)
+{
+    diagnostics.error_identifier_suffix(location, "symbol ", name, name_length(name),
+                                        " defined as both function and global", "identifier");
+    return false;
 }
 
 static bool function_signature_matches(const FunctionIR& function,
@@ -960,14 +1019,145 @@ bool parse_translation_unit(const char* source, const Token* tokens, uint32_t to
     }
     uint32_t index = 0;
     while (tokens[token_index_or_eof(index, tokenCount)].kind != TokenKind::EndOfFile) {
-        if (tokens[token_index_or_eof(index, tokenCount)].kind != TokenKind::KeywordInt) {
+        const Token externalToken = tokens[token_index_or_eof(index, tokenCount)];
+        if (externalToken.kind == TokenKind::Identifier && token_text_equals(source, externalToken, "extern")) {
+            ++index;
+            const Token intToken = tokens[token_index_or_eof(index, tokenCount)];
+            if (intToken.kind != TokenKind::KeywordInt) {
+                diagnostics.error(intToken.location, "expected 'int' after 'extern'", "parser");
+                return false;
+            }
+            ++index;
+            const Token nameToken = tokens[token_index_or_eof(index, tokenCount)];
+            if (!token_is_name(nameToken) || nameToken.kind == TokenKind::KeywordGxMain) {
+                diagnostics.error(nameToken.location, "expected identifier after 'extern int'", "global");
+                return false;
+            }
+            char name[COMPILER_FUNCTION_NAME_CAPACITY] = {};
+            for (uint32_t i = 0; i < nameToken.length; ++i) name[i] = source[nameToken.location.offset + i];
+            name[nameToken.length] = '\0';
+            for (uint32_t i = 0; i < output->functionCount; ++i)
+                if (token_text_equals(source, nameToken, output->functionSymbols[i].name))
+                    return report_symbol_kind_conflict(nameToken.location, name, diagnostics);
+            for (uint32_t i = 0; i < output->declarationCount; ++i)
+                if (token_text_equals(source, nameToken, output->declarations[i].name))
+                    return report_symbol_kind_conflict(nameToken.location, name, diagnostics);
+            ++index;
+            if (tokens[token_index_or_eof(index, tokenCount)].kind != TokenKind::Semicolon) {
+                diagnostics.error(tokens[token_index_or_eof(index, tokenCount)].location,
+                                  "expected ';' after extern global declaration", "global");
+                return false;
+            }
+            ++index;
+            int32_t globalIndex = find_global(*output, name);
+            if (globalIndex < 0) {
+                if (output->globalCount >= COMPILER_MAX_GLOBALS) {
+                    diagnostics.error(nameToken.location, "global capacity exceeded (maximum is 32)", "global");
+                    return false;
+                }
+                globalIndex = static_cast<int32_t>(output->globalCount++);
+                GlobalSymbolIR& global = output->globals[globalIndex];
+                global = {};
+                for (uint32_t i = 0; i <= nameToken.length; ++i) global.name[i] = name[i];
+                global.location = nameToken.location;
+                global.size = 4;
+                global.alignment = 4;
+            }
+            continue;
+        }
+        if (externalToken.kind != TokenKind::KeywordInt) {
             diagnostics.error(tokens[token_index_or_eof(index, tokenCount)].location,
-                              "expected function definition beginning with 'int'", "parser");
+                              "expected external declaration beginning with 'int' or 'extern int'", "parser");
             return false;
         }
-        if (output->functionCount >= COMPILER_MAX_FUNCTIONS) {
-            diagnostics.error(tokens[index].location, "function capacity exceeded (maximum is 16)", "function");
+        ++index;
+        const Token nameToken = tokens[token_index_or_eof(index, tokenCount)];
+        if (!token_is_name(nameToken)) {
+            diagnostics.error(nameToken.location, "expected identifier after 'int'", "external-declaration");
             return false;
+        }
+        const Token afterName = tokens[token_index_or_eof(index + 1U, tokenCount)];
+        if (afterName.kind != TokenKind::LeftParen) {
+            char name[COMPILER_FUNCTION_NAME_CAPACITY] = {};
+            if (nameToken.kind == TokenKind::KeywordGxMain ||
+                nameToken.length > COMPILER_MAX_IDENTIFIER_BYTES) {
+                diagnostics.error(nameToken.location, "global name is not a valid ordinary identifier", "global");
+                return false;
+            }
+            for (uint32_t i = 0; i < nameToken.length; ++i) name[i] = source[nameToken.location.offset + i];
+            name[nameToken.length] = '\0';
+            for (uint32_t i = 0; i < output->functionCount; ++i)
+                if (token_text_equals(source, nameToken, output->functionSymbols[i].name))
+                    return report_symbol_kind_conflict(nameToken.location, name, diagnostics);
+            for (uint32_t i = 0; i < output->declarationCount; ++i)
+                if (token_text_equals(source, nameToken, output->declarations[i].name))
+                    return report_symbol_kind_conflict(nameToken.location, name, diagnostics);
+
+            ++index;
+            int32_t initialValue = 0;
+            bool hasInitializer = false;
+            if (tokens[token_index_or_eof(index, tokenCount)].kind == TokenKind::Equal) {
+                hasInitializer = true;
+                ++index;
+                bool negative = false;
+                if (tokens[token_index_or_eof(index, tokenCount)].kind == TokenKind::Minus) {
+                    negative = true;
+                    ++index;
+                }
+                const Token literal = tokens[token_index_or_eof(index, tokenCount)];
+                if (literal.kind != TokenKind::Integer) {
+                    diagnostics.error(literal.location, "global initializer must be a constant integer", "global");
+                    return false;
+                }
+                int32_t magnitude = 0;
+                if (!parse_integer(source, literal, negative, &magnitude, diagnostics)) return false;
+                if (negative && magnitude != static_cast<int32_t>(0x80000000U))
+                    initialValue = -magnitude;
+                else initialValue = magnitude;
+                ++index;
+            }
+            if (tokens[token_index_or_eof(index, tokenCount)].kind != TokenKind::Semicolon) {
+                diagnostics.error(tokens[token_index_or_eof(index, tokenCount)].location,
+                                  "global initializer must be a constant integer", "global");
+                return false;
+            }
+            ++index;
+            const int32_t existingIndex = find_global(*output, name);
+            if (existingIndex >= 0) {
+                GlobalSymbolIR& global = output->globals[existingIndex];
+                if (global.isDefinition) {
+                    diagnostics.error_identifier(nameToken.location, "duplicate definition for global ",
+                                                  name, name_length(name), "global");
+                    return false;
+                }
+                global.isDefinition = true;
+                global.hasInitializer = hasInitializer;
+                global.initialValue = initialValue;
+                global.location = nameToken.location;
+            } else {
+                if (output->globalCount >= COMPILER_MAX_GLOBALS) {
+                    diagnostics.error(nameToken.location, "global capacity exceeded (maximum is 32)", "global");
+                    return false;
+                }
+                GlobalSymbolIR& global = output->globals[output->globalCount++];
+                global = {};
+                for (uint32_t i = 0; i <= nameToken.length; ++i) global.name[i] = name[i];
+                global.isDefinition = true;
+                global.hasInitializer = hasInitializer;
+                global.initialValue = initialValue;
+                global.location = nameToken.location;
+                global.size = 4;
+                global.alignment = 4;
+            }
+            continue;
+        }
+        if (output->functionCount >= COMPILER_MAX_FUNCTIONS) {
+            diagnostics.error(nameToken.location, "function capacity exceeded (maximum is 16)", "function");
+            return false;
+        }
+        for (uint32_t i = 0; i < output->globalCount; ++i) {
+            if (token_text_equals(source, nameToken, output->globals[i].name))
+                return report_symbol_kind_conflict(nameToken.location, output->globals[i].name, diagnostics);
         }
         FunctionIR& function = output->functions[output->functionCount];
         function = {};
@@ -977,13 +1167,6 @@ bool parse_translation_unit(const char* source, const Token* tokens, uint32_t to
         function.returnExpression = COMPILER_INVALID_INDEX;
         function.rootBlock = COMPILER_INVALID_INDEX;
         function.codeLabel = COMPILER_INVALID_INDEX;
-
-        ++index;
-        const Token nameToken = tokens[token_index_or_eof(index, tokenCount)];
-        if (!token_is_name(nameToken)) {
-            diagnostics.error(nameToken.location, "expected function identifier", "function");
-            return false;
-        }
         function.location = nameToken.location;
         for (uint32_t i = 0; i < output->functionCount; ++i) {
             const FunctionSymbol& existing = output->functionSymbols[i];
@@ -1003,7 +1186,7 @@ bool parse_translation_unit(const char* source, const Token* tokens, uint32_t to
             return false;
         }
         ++index;
-        FunctionParser parser(source, tokens, tokenCount, &index, &function, diagnostics);
+        FunctionParser parser(source, tokens, tokenCount, &index, &function, output, diagnostics);
         parser.set_name_token(nameToken);
         if (token_is_gx_main(nameToken)) {
             const Token typeToken = tokens[token_index_or_eof(index, tokenCount)];

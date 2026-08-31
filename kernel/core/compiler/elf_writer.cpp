@@ -15,14 +15,20 @@ static const uint32_t PROGRAM_TYPE_LOAD = 1;
 static const uint32_t PROGRAM_TYPE_DYNAMIC = 2;
 static const uint32_t PROGRAM_TYPE_INTERP = 3;
 static const uint32_t PROGRAM_FLAGS_EXECUTABLE = 1;
+static const uint32_t PROGRAM_FLAGS_WRITABLE = 2;
 static const uint32_t PROGRAM_FLAGS_READABLE = 4;
 static const uint32_t PROGRAM_HEADER_OFFSET = 64;
 static const uint32_t ELF_HEADER_BYTES = 64;
 static const uint32_t PROGRAM_HEADER_BYTES = 56;
-static const uint32_t PROGRAM_HEADER_COUNT_CODE_ONLY = 1;
-static const uint32_t PROGRAM_HEADER_COUNT_CODE_AND_DATA = 2;
 static const uint32_t SEGMENT_ALIGNMENT = 0x1000;
 static const uint32_t BOOTSTRAP_DATA_BYTES_LIMIT = COMPILER_MAX_LINKED_DATA_BYTES;
+
+struct LoadRange {
+    uint64_t fileStart;
+    uint64_t fileEnd;
+    uint64_t virtualStart;
+    uint64_t virtualEnd;
+};
 
 static void clear_bytes(uint8_t* bytes, uint32_t count)
 {
@@ -37,12 +43,12 @@ static void put_u16(uint8_t* bytes, uint32_t offset, uint16_t value)
 
 static void put_u32(uint8_t* bytes, uint32_t offset, uint32_t value)
 {
-    for (uint32_t i = 0; i < 4; ++i) bytes[offset + i] = static_cast<uint8_t>((value >> (i * 8)) & 0xFFu);
+    for (uint32_t i = 0; i < 4; ++i) bytes[offset + i] = static_cast<uint8_t>(value >> (i * 8));
 }
 
 static void put_u64(uint8_t* bytes, uint32_t offset, uint64_t value)
 {
-    for (uint32_t i = 0; i < 8; ++i) bytes[offset + i] = static_cast<uint8_t>((value >> (i * 8)) & 0xFFu);
+    for (uint32_t i = 0; i < 8; ++i) bytes[offset + i] = static_cast<uint8_t>(value >> (i * 8));
 }
 
 static uint16_t get_u16(const uint8_t* bytes, uint32_t offset)
@@ -107,94 +113,125 @@ bool write_bootstrap_elf(const uint8_t* code,
                          uint32_t codeBytes,
                          const uint8_t* readOnlyData,
                          uint32_t readOnlyDataBytes,
+                         const uint8_t* mutableData,
+                         uint32_t mutableDataBytes,
                          uint32_t entryCodeOffset,
                          uint8_t* output,
                          uint32_t outputCapacity,
                          ElfLayout* layout)
 {
     if (!code || !output || !layout || codeBytes == 0 || entryCodeOffset >= codeBytes ||
-        readOnlyDataBytes > BOOTSTRAP_DATA_BYTES_LIMIT ||
-        (readOnlyDataBytes != 0 && !readOnlyData)) return false;
+        readOnlyDataBytes > BOOTSTRAP_DATA_BYTES_LIMIT || mutableDataBytes > BOOTSTRAP_DATA_BYTES_LIMIT ||
+        (readOnlyDataBytes != 0 && !readOnlyData) || (mutableDataBytes != 0 && !mutableData)) return false;
 
     uint32_t codeFileEnd = 0;
     if (!add_u32(BOOTSTRAP_CODE_OFFSET, codeBytes, &codeFileEnd)) return false;
-    uint32_t dataOffset = 0;
-    if (readOnlyDataBytes != 0 && !align_page(codeFileEnd, &dataOffset)) return false;
-    uint32_t outputBytes = 0;
-    if ((readOnlyDataBytes == 0 && !add_u32(codeFileEnd, 0, &outputBytes)) ||
-        (readOnlyDataBytes != 0 && !add_u32(dataOffset, readOnlyDataBytes, &outputBytes)) ||
-        outputBytes > outputCapacity || outputBytes > BOOTSTRAP_MAX_ELF_BYTES) return false;
+    uint32_t rodataOffset = 0;
+    uint32_t rodataEnd = codeFileEnd;
+    if (readOnlyDataBytes != 0) {
+        if (!align_page(codeFileEnd, &rodataOffset) ||
+            !add_u32(rodataOffset, readOnlyDataBytes, &rodataEnd)) return false;
+    }
+    uint32_t mutableDataOffset = 0;
+    uint32_t outputBytes = rodataEnd;
+    if (mutableDataBytes != 0) {
+        if (!align_page(rodataEnd, &mutableDataOffset)) return false;
+        if (mutableDataOffset < BOOTSTRAP_DATA_OFFSET) mutableDataOffset = BOOTSTRAP_DATA_OFFSET;
+        if (!add_u32(mutableDataOffset, mutableDataBytes, &outputBytes)) return false;
+    }
+    const uint32_t headerBytes = PROGRAM_HEADER_OFFSET + 3U * PROGRAM_HEADER_BYTES;
+    if (outputBytes > outputCapacity || outputBytes > BOOTSTRAP_MAX_ELF_BYTES || headerBytes > outputBytes)
+        return false;
 
     uint64_t entryPoint = 0;
     if (!add_u64(BOOTSTRAP_IMAGE_BASE, BOOTSTRAP_CODE_OFFSET + entryCodeOffset, &entryPoint)) return false;
 
     clear_bytes(output, outputBytes);
-
-    // ELF64 identification.
     output[0] = 0x7F;
     output[1] = 'E';
     output[2] = 'L';
     output[3] = 'F';
-    output[4] = 2; // ELFCLASS64
-    output[5] = 1; // ELFDATA2LSB
-    output[6] = 1; // EV_CURRENT
+    output[4] = 2;
+    output[5] = 1;
+    output[6] = 1;
 
-    // ELF header fields, serialized explicitly as little-endian values.
     put_u16(output, 16, ELF_TYPE_EXECUTABLE);
     put_u16(output, 18, ELF_MACHINE_AMD64);
     put_u32(output, 20, ELF_VERSION_CURRENT);
     put_u64(output, 24, entryPoint);
     put_u64(output, 32, PROGRAM_HEADER_OFFSET);
-    put_u64(output, 40, 0); // no section header table
-    put_u32(output, 48, 0); // no processor flags
+    put_u64(output, 40, 0);
+    put_u32(output, 48, 0);
     put_u16(output, 52, ELF_HEADER_BYTES);
     put_u16(output, 54, PROGRAM_HEADER_BYTES);
-    const uint16_t programHeaderCount = readOnlyDataBytes == 0
-        ? static_cast<uint16_t>(PROGRAM_HEADER_COUNT_CODE_ONLY)
-        : static_cast<uint16_t>(PROGRAM_HEADER_COUNT_CODE_AND_DATA);
+    const uint16_t programHeaderCount = static_cast<uint16_t>(1U +
+        (readOnlyDataBytes != 0 ? 1U : 0U) + (mutableDataBytes != 0 ? 1U : 0U));
     put_u16(output, 56, programHeaderCount);
-    put_u16(output, 58, 0); // no section headers
+    put_u16(output, 58, 0);
     put_u16(output, 60, 0);
     put_u16(output, 62, 0);
 
-    // The first load contains the ELF metadata and generated code.  Its
-    // file-backed range ends before the page-aligned data load when present.
-    const uint32_t ph = PROGRAM_HEADER_OFFSET;
-    put_u32(output, ph + 0, PROGRAM_TYPE_LOAD);
-    put_u32(output, ph + 4, PROGRAM_FLAGS_READABLE | PROGRAM_FLAGS_EXECUTABLE);
-    put_u64(output, ph + 8, 0);
-    put_u64(output, ph + 16, BOOTSTRAP_IMAGE_BASE);
-    put_u64(output, ph + 24, BOOTSTRAP_IMAGE_BASE);
-    put_u64(output, ph + 32, BOOTSTRAP_CODE_OFFSET + codeBytes);
-    put_u64(output, ph + 40, BOOTSTRAP_CODE_OFFSET + codeBytes);
-    put_u64(output, ph + 48, SEGMENT_ALIGNMENT);
-
+    const uint32_t codePh = PROGRAM_HEADER_OFFSET;
+    put_u32(output, codePh + 0, PROGRAM_TYPE_LOAD);
+    put_u32(output, codePh + 4, PROGRAM_FLAGS_READABLE | PROGRAM_FLAGS_EXECUTABLE);
+    put_u64(output, codePh + 8, 0);
+    put_u64(output, codePh + 16, BOOTSTRAP_IMAGE_BASE);
+    put_u64(output, codePh + 24, BOOTSTRAP_IMAGE_BASE);
+    put_u64(output, codePh + 32, codeFileEnd);
+    put_u64(output, codePh + 40, codeFileEnd);
+    put_u64(output, codePh + 48, SEGMENT_ALIGNMENT);
     for (uint32_t i = 0; i < codeBytes; ++i) output[BOOTSTRAP_CODE_OFFSET + i] = code[i];
 
+    uint32_t nextPh = codePh + PROGRAM_HEADER_BYTES;
     if (readOnlyDataBytes != 0) {
-        const uint32_t dataPh = PROGRAM_HEADER_OFFSET + PROGRAM_HEADER_BYTES;
-        put_u32(output, dataPh + 0, PROGRAM_TYPE_LOAD);
-        put_u32(output, dataPh + 4, PROGRAM_FLAGS_READABLE);
-        put_u64(output, dataPh + 8, dataOffset);
-        put_u64(output, dataPh + 16, BOOTSTRAP_IMAGE_BASE + dataOffset);
-        put_u64(output, dataPh + 24, BOOTSTRAP_IMAGE_BASE + dataOffset);
-        put_u64(output, dataPh + 32, readOnlyDataBytes);
-        put_u64(output, dataPh + 40, readOnlyDataBytes);
-        put_u64(output, dataPh + 48, SEGMENT_ALIGNMENT);
-        for (uint32_t i = 0; i < readOnlyDataBytes; ++i) {
-            output[dataOffset + i] = readOnlyData[i];
-        }
+        put_u32(output, nextPh + 0, PROGRAM_TYPE_LOAD);
+        put_u32(output, nextPh + 4, PROGRAM_FLAGS_READABLE);
+        put_u64(output, nextPh + 8, rodataOffset);
+        put_u64(output, nextPh + 16, BOOTSTRAP_IMAGE_BASE + rodataOffset);
+        put_u64(output, nextPh + 24, BOOTSTRAP_IMAGE_BASE + rodataOffset);
+        put_u64(output, nextPh + 32, readOnlyDataBytes);
+        put_u64(output, nextPh + 40, readOnlyDataBytes);
+        put_u64(output, nextPh + 48, SEGMENT_ALIGNMENT);
+        for (uint32_t i = 0; i < readOnlyDataBytes; ++i) output[rodataOffset + i] = readOnlyData[i];
+        nextPh += PROGRAM_HEADER_BYTES;
+    }
+    if (mutableDataBytes != 0) {
+        put_u32(output, nextPh + 0, PROGRAM_TYPE_LOAD);
+        put_u32(output, nextPh + 4, PROGRAM_FLAGS_READABLE | PROGRAM_FLAGS_WRITABLE);
+        put_u64(output, nextPh + 8, mutableDataOffset);
+        put_u64(output, nextPh + 16, BOOTSTRAP_IMAGE_BASE + mutableDataOffset);
+        put_u64(output, nextPh + 24, BOOTSTRAP_IMAGE_BASE + mutableDataOffset);
+        put_u64(output, nextPh + 32, mutableDataBytes);
+        put_u64(output, nextPh + 40, mutableDataBytes);
+        put_u64(output, nextPh + 48, SEGMENT_ALIGNMENT);
+        for (uint32_t i = 0; i < mutableDataBytes; ++i) output[mutableDataOffset + i] = mutableData[i];
     }
 
     layout->imageBase = BOOTSTRAP_IMAGE_BASE;
     layout->entryPoint = entryPoint;
     layout->codeOffset = BOOTSTRAP_CODE_OFFSET;
     layout->entryCodeOffset = entryCodeOffset;
-    layout->dataOffset = dataOffset;
-    layout->dataAddress = readOnlyDataBytes == 0 ? 0 : BOOTSTRAP_IMAGE_BASE + dataOffset;
+    layout->dataOffset = rodataOffset;
+    layout->dataAddress = readOnlyDataBytes == 0 ? 0 : BOOTSTRAP_IMAGE_BASE + rodataOffset;
     layout->dataBytes = readOnlyDataBytes;
+    layout->mutableDataOffset = mutableDataOffset;
+    layout->mutableDataAddress = mutableDataBytes == 0 ? 0 : BOOTSTRAP_IMAGE_BASE + mutableDataOffset;
+    layout->mutableDataBytes = mutableDataBytes;
     layout->outputBytes = outputBytes;
     return true;
+}
+
+bool write_bootstrap_elf(const uint8_t* code,
+                         uint32_t codeBytes,
+                         const uint8_t* outputData,
+                         uint32_t outputDataBytes,
+                         uint32_t entryCodeOffset,
+                         uint8_t* output,
+                         uint32_t outputCapacity,
+                         ElfLayout* layout)
+{
+    return write_bootstrap_elf(code, codeBytes, outputData, outputDataBytes,
+                               nullptr, 0, entryCodeOffset, output, outputCapacity, layout);
 }
 
 bool write_bootstrap_elf(const uint8_t* code,
@@ -203,7 +240,8 @@ bool write_bootstrap_elf(const uint8_t* code,
                          uint32_t outputCapacity,
                          ElfLayout* layout)
 {
-    return write_bootstrap_elf(code, codeBytes, nullptr, 0, 0, output, outputCapacity, layout);
+    return write_bootstrap_elf(code, codeBytes, nullptr, 0, nullptr, 0, 0,
+                               output, outputCapacity, layout);
 }
 
 bool write_bootstrap_elf(const uint8_t* code,
@@ -218,28 +256,22 @@ bool write_bootstrap_elf(const uint8_t* code,
                                output, outputCapacity, layout);
 }
 
-bool validate_bootstrap_elf(const uint8_t* image,
-                            uint32_t imageBytes,
-                            uint64_t expectedImageBase,
-                            uint32_t expectedCodeOffset,
-                            const uint8_t* expectedCode,
-                             uint32_t expectedCodeBytes,
-                             ElfValidationResult* result,
-                             const uint8_t* expectedData,
-                             uint32_t expectedDataBytes,
-                             uint32_t expectedEntryCodeOffset)
+static bool validate_bootstrap_elf_impl(const uint8_t* image,
+                                        uint32_t imageBytes,
+                                        uint64_t expectedImageBase,
+                                        uint32_t expectedCodeOffset,
+                                        const uint8_t* expectedCode,
+                                        uint32_t expectedCodeBytes,
+                                        ElfValidationResult* result,
+                                        const uint8_t* expectedData,
+                                        uint32_t expectedDataBytes,
+                                        const uint8_t* expectedMutableData,
+                                        uint32_t expectedMutableDataBytes,
+                                        uint32_t expectedEntryCodeOffset)
 {
     if (!result) return false;
-    result->valid = false;
+    *result = {};
     result->error = "unknown ELF validation failure";
-    result->entryPoint = 0;
-    result->imageBase = 0;
-    result->loadCount = 0;
-    result->executableLoadCount = 0;
-    result->codeFileOffset = 0;
-    result->dataFileOffset = 0;
-    result->dataVirtualAddress = 0;
-    result->dataBytes = 0;
 
     if (!image || imageBytes < ELF_HEADER_BYTES) return fail(result, "ELF image is smaller than ELF64 header");
     if (image[0] != 0x7F || image[1] != 'E' || image[2] != 'L' || image[3] != 'F') return fail(result, "ELF magic mismatch");
@@ -263,8 +295,10 @@ bool validate_bootstrap_elf(const uint8_t* image,
     result->entryPoint = entryPoint;
     bool entryInExecutableLoad = false;
     bool expectedDataFound = expectedDataBytes == 0;
+    bool expectedMutableDataFound = expectedMutableDataBytes == 0;
     bool expectedBaseSeen = false;
-
+    LoadRange loadRanges[4] = {};
+    uint16_t loadRangeCount = 0;
     for (uint16_t i = 0; i < programHeaderCount; ++i) {
         const uint64_t headerOffset64 = programHeaderOffset + static_cast<uint64_t>(i) * programHeaderBytes;
         if (headerOffset64 > imageBytes || headerOffset64 > 0xFFFFFFFFULL) return fail(result, "ELF program-header offset overflows validator bounds");
@@ -276,19 +310,30 @@ bool validate_bootstrap_elf(const uint8_t* image,
         const uint64_t fileSize = get_u64(image, headerOffset + 32);
         const uint64_t memorySize = get_u64(image, headerOffset + 40);
         const uint64_t alignment = get_u64(image, headerOffset + 48);
-
         if (type == PROGRAM_TYPE_INTERP) return fail(result, "PT_INTERP is forbidden for bootstrap ELF");
         if (type == PROGRAM_TYPE_DYNAMIC) return fail(result, "PT_DYNAMIC is forbidden for bootstrap ELF");
         if (type != PROGRAM_TYPE_LOAD) continue;
-
+        if (loadRangeCount >= 4) return fail(result, "ELF contains too many PT_LOAD segments");
         ++result->loadCount;
+        if ((flags & ~(PROGRAM_FLAGS_READABLE | PROGRAM_FLAGS_WRITABLE | PROGRAM_FLAGS_EXECUTABLE)) != 0 ||
+            (flags & PROGRAM_FLAGS_READABLE) == 0) return fail(result, "PT_LOAD permissions are invalid");
+        if ((flags & PROGRAM_FLAGS_WRITABLE) != 0 && (flags & PROGRAM_FLAGS_EXECUTABLE) != 0)
+            return fail(result, "writable executable PT_LOAD is forbidden");
         if (fileOffset > imageBytes || fileSize > static_cast<uint64_t>(imageBytes) - fileOffset) return fail(result, "PT_LOAD file range exceeds ELF bounds");
-        if (fileSize > memorySize) return fail(result, "PT_LOAD file size exceeds memory size");
+        if (fileSize > memorySize || memorySize == 0) return fail(result, "PT_LOAD file size exceeds memory size");
+        uint64_t fileEnd = 0;
+        if (!add_u64(fileOffset, fileSize, &fileEnd)) return fail(result, "PT_LOAD file range overflows");
         uint64_t virtualEnd = 0;
         if (!add_u64(virtualAddress, memorySize, &virtualEnd)) return fail(result, "PT_LOAD virtual range overflows");
+        for (uint16_t prior = 0; prior < loadRangeCount; ++prior) {
+            const LoadRange& range = loadRanges[prior];
+            if ((virtualAddress < range.virtualEnd && range.virtualStart < virtualEnd) ||
+                (fileOffset < range.fileEnd && range.fileStart < fileEnd))
+                return fail(result, "PT_LOAD segments overlap");
+        }
+        loadRanges[loadRangeCount++] = {fileOffset, fileEnd, virtualAddress, virtualEnd};
         if (alignment > 1) {
-            if (!is_power_of_two(alignment)) return fail(result, "PT_LOAD alignment is not a power of two");
-            if ((fileOffset % alignment) != (virtualAddress % alignment)) return fail(result, "PT_LOAD file/virtual alignment mismatch");
+            if (!is_power_of_two(alignment) || (fileOffset % alignment) != (virtualAddress % alignment)) return fail(result, "PT_LOAD alignment is invalid");
         }
         if (virtualAddress == expectedImageBase) {
             expectedBaseSeen = true;
@@ -304,23 +349,22 @@ bool validate_bootstrap_elf(const uint8_t* image,
                 result->codeFileOffset = static_cast<uint32_t>(codeOffset64);
                 if (entryDelta >= fileSize) return fail(result, "ELF entry point is not file-backed");
             }
-        } else if ((flags & PROGRAM_FLAGS_READABLE) != 0 &&
-                   (flags & PROGRAM_FLAGS_EXECUTABLE) == 0 &&
-                   (flags & 2U) == 0 && expectedDataBytes != 0) {
-            uint64_t dataEnd = 0;
-            if (add_u64(virtualAddress, fileSize, &dataEnd) && fileSize >= expectedDataBytes &&
-                virtualAddress >= expectedImageBase) {
-                if (fileOffset > 0xFFFFFFFFULL) {
-                    return fail(result, "ELF data file offset overflows");
-                }
-                result->dataFileOffset = static_cast<uint32_t>(fileOffset);
-                result->dataVirtualAddress = virtualAddress;
-                result->dataBytes = expectedDataBytes;
-                expectedDataFound = true;
+        } else if ((flags & PROGRAM_FLAGS_WRITABLE) != 0) {
+            if (expectedMutableDataBytes != 0 && fileSize >= expectedMutableDataBytes && virtualAddress >= expectedImageBase) {
+                if (fileOffset > 0xFFFFFFFFULL) return fail(result, "ELF mutable-data file offset overflows");
+                result->mutableDataFileOffset = static_cast<uint32_t>(fileOffset);
+                result->mutableDataVirtualAddress = virtualAddress;
+                result->mutableDataBytes = expectedMutableDataBytes;
+                expectedMutableDataFound = true;
             }
+        } else if (expectedDataBytes != 0 && fileSize >= expectedDataBytes && virtualAddress >= expectedImageBase) {
+            if (fileOffset > 0xFFFFFFFFULL) return fail(result, "ELF data file offset overflows");
+            result->dataFileOffset = static_cast<uint32_t>(fileOffset);
+            result->dataVirtualAddress = virtualAddress;
+            result->dataBytes = expectedDataBytes;
+            expectedDataFound = true;
         }
     }
-
     if (result->loadCount == 0) return fail(result, "ELF contains no PT_LOAD segment");
     if (result->executableLoadCount == 0) return fail(result, "ELF contains no executable PT_LOAD segment");
     if (!expectedBaseSeen) return fail(result, "ELF PT_LOAD image base does not match expected base");
@@ -329,36 +373,66 @@ bool validate_bootstrap_elf(const uint8_t* image,
     if (!add_u64(expectedImageBase, expectedCodeOffset + expectedEntryCodeOffset, &expectedEntry)) return fail(result, "expected ELF entry address overflows");
     if (entryPoint != expectedEntry) return fail(result, "ELF entry point does not match expected code address");
     if (!entryInExecutableLoad) return fail(result, "ELF entry point is outside executable PT_LOAD");
-    if (expectedDataBytes != 0 && (!expectedData || !expectedDataFound)) {
-        return fail(result, "ELF source data is not in a read-only PT_LOAD");
-    }
+    if (expectedDataBytes != 0 && (!expectedData || !expectedDataFound)) return fail(result, "ELF source data is not in a read-only PT_LOAD");
+    if (expectedMutableDataBytes != 0 && (!expectedMutableData || !expectedMutableDataFound)) return fail(result, "ELF mutable data is not in a writable PT_LOAD");
 
     uint32_t expectedCodeEnd = 0;
-    if (expectedCodeBytes != 0 && (!expectedCode || !add_u32(expectedCodeOffset, expectedCodeBytes, &expectedCodeEnd) || expectedCodeEnd > imageBytes)) {
-        return fail(result, "expected generated code range exceeds ELF file");
-    }
+    if (expectedCodeBytes != 0 && (!expectedCode || !add_u32(expectedCodeOffset, expectedCodeBytes, &expectedCodeEnd) || expectedCodeEnd > imageBytes)) return fail(result, "expected generated code range exceeds ELF file");
     if (expectedCodeBytes != 0) {
         if (result->codeFileOffset != expectedCodeOffset + expectedEntryCodeOffset) return fail(result, "ELF entry does not map to expected code offset");
-        for (uint32_t i = 0; i < expectedCodeBytes; ++i) {
+        for (uint32_t i = 0; i < expectedCodeBytes; ++i)
             if (image[expectedCodeOffset + i] != expectedCode[i]) return fail(result, "ELF code bytes do not match generated AMD64 code");
-        }
     }
     if (expectedDataBytes != 0) {
-        uint32_t expectedDataEnd = 0;
-        if (!add_u32(result->dataFileOffset, expectedDataBytes, &expectedDataEnd) ||
-            expectedDataEnd > imageBytes) {
-            return fail(result, "expected source data range exceeds ELF file");
-        }
-        for (uint32_t i = 0; i < expectedDataBytes; ++i) {
-            if (image[result->dataFileOffset + i] != expectedData[i]) {
-                return fail(result, "ELF source data does not match compiler output");
-            }
-        }
+        uint32_t end = 0;
+        if (!add_u32(result->dataFileOffset, expectedDataBytes, &end) || end > imageBytes) return fail(result, "expected source data range exceeds ELF file");
+        for (uint32_t i = 0; i < expectedDataBytes; ++i)
+            if (image[result->dataFileOffset + i] != expectedData[i]) return fail(result, "ELF source data does not match compiler output");
     }
-
+    if (expectedMutableDataBytes != 0) {
+        uint32_t end = 0;
+        if (!add_u32(result->mutableDataFileOffset, expectedMutableDataBytes, &end) || end > imageBytes) return fail(result, "expected mutable data range exceeds ELF file");
+        for (uint32_t i = 0; i < expectedMutableDataBytes; ++i)
+            if (image[result->mutableDataFileOffset + i] != expectedMutableData[i]) return fail(result, "ELF mutable data does not match compiler output");
+    }
     result->valid = true;
     result->error = "";
     return true;
+}
+
+bool validate_bootstrap_elf(const uint8_t* image,
+                            uint32_t imageBytes,
+                            uint64_t expectedImageBase,
+                            uint32_t expectedCodeOffset,
+                            const uint8_t* expectedCode,
+                            uint32_t expectedCodeBytes,
+                            ElfValidationResult* result,
+                            const uint8_t* expectedData,
+                            uint32_t expectedDataBytes,
+                            uint32_t expectedEntryCodeOffset)
+{
+    return validate_bootstrap_elf_impl(image, imageBytes, expectedImageBase, expectedCodeOffset,
+                                       expectedCode, expectedCodeBytes, result, expectedData,
+                                       expectedDataBytes, nullptr, 0, expectedEntryCodeOffset);
+}
+
+bool validate_bootstrap_elf(const uint8_t* image,
+                            uint32_t imageBytes,
+                            uint64_t expectedImageBase,
+                            uint32_t expectedCodeOffset,
+                            const uint8_t* expectedCode,
+                            uint32_t expectedCodeBytes,
+                            ElfValidationResult* result,
+                            const uint8_t* expectedData,
+                            uint32_t expectedDataBytes,
+                            const uint8_t* expectedMutableData,
+                            uint32_t expectedMutableDataBytes,
+                            uint32_t expectedEntryCodeOffset)
+{
+    return validate_bootstrap_elf_impl(image, imageBytes, expectedImageBase, expectedCodeOffset,
+                                       expectedCode, expectedCodeBytes, result, expectedData,
+                                       expectedDataBytes, expectedMutableData, expectedMutableDataBytes,
+                                       expectedEntryCodeOffset);
 }
 
 } // namespace compiler

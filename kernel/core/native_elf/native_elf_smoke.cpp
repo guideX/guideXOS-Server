@@ -543,6 +543,24 @@ void run_bootstrap_execution_smoke()
     serial::puts(developerStudio27nLaunched ? "ELF Loader: Phase 27N smoke PASS\n"
                                              : "ELF Loader: Phase 27N smoke FAIL\n");
 #endif
+#if defined(GXOS_PHASE27O_SMOKE)
+    serial::puts("ELF Loader: Phase 27O Developer Studio global data smoke begin\n");
+    int32_t developerStudio27oReturn = 1;
+    static NativeElfRunReport developerStudio27oReport = {};
+    const bool developerStudio27oLaunched = allPassed27d &&
+        run_file("/Apps/DS27O/bin/amd64/p27o.elf",
+                 &developerStudio27oReturn, &developerStudio27oReport) &&
+        developerStudio27oReturn == 0 && developerStudio27oReport.teardownComplete;
+    print_marker("phase27o_app_launch", developerStudio27oLaunched);
+    print_marker("phase27o_kernel_survival", developerStudio27oLaunched &&
+        developerStudio27oReport.finalState == NativeAppExecutionState::Cleaned);
+    const bool phase27oArtifactEvidence = developerStudio27oLaunched &&
+        emit_serial_artifact("/P27O/build/bin/amd64/phase27o.elf", "o27primary");
+    print_marker("phase27o_artifact_evidence", phase27oArtifactEvidence);
+    serial::puts(developerStudio27oLaunched && phase27oArtifactEvidence ?
+                 "ELF Loader: Phase 27O cross-file global data smoke PASS\n" :
+                 "ELF Loader: Phase 27O cross-file global data smoke FAIL\n");
+#endif
 #if defined(GXOS_PHASE27G_SMOKE)
     serial::puts("ELF Loader: Phase 27G bootstrap language smoke begin\n");
     static compiler::CompileSummary expression = {};

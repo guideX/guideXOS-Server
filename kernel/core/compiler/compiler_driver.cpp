@@ -255,12 +255,15 @@ bool compile_project(const char* const* sourcePaths,
     }
 
     if (s_linked.dataBytes != 0) print_data(s_linked.data, s_linked.dataBytes);
+    if (s_linked.mutableDataBytes != 0) print_data(s_linked.mutableData, s_linked.mutableDataBytes);
     print_code(s_linked.code, s_linked.codeBytes);
 
     ElfLayout layout = {};
     if (!write_bootstrap_elf(s_linked.code, s_linked.codeBytes, s_linked.data, s_linked.dataBytes,
+                             s_linked.mutableData, s_linked.mutableDataBytes,
                              s_linked.entryCodeOffset, s_elf, sizeof(s_elf), &layout) ||
-        layout.dataOffset != s_linked.dataFileOffset) {
+        layout.dataOffset != s_linked.dataFileOffset ||
+        layout.mutableDataOffset != s_linked.mutableDataFileOffset) {
         Diagnostics diagnostics;
         diagnostics.error(driverLocation, "ELF writer could not construct bounded linked image", "elf");
         if (summary) append_diagnostics(diagnostics, summary, "<link>");
@@ -271,6 +274,7 @@ bool compile_project(const char* const* sourcePaths,
     if (!validate_bootstrap_elf(s_elf, layout.outputBytes, layout.imageBase,
                                 layout.codeOffset, s_linked.code, s_linked.codeBytes,
                                 &producedValidation, s_linked.data, s_linked.dataBytes,
+                                s_linked.mutableData, s_linked.mutableDataBytes,
                                 s_linked.entryCodeOffset)) {
         Diagnostics diagnostics;
         diagnostics.error(driverLocation, producedValidation.error, "elf");
@@ -325,6 +329,7 @@ bool compile_project(const char* const* sourcePaths,
     if (!validate_bootstrap_elf(s_reopened, static_cast<uint32_t>(reopenedBytes),
                                 layout.imageBase, layout.codeOffset, s_linked.code, s_linked.codeBytes,
                                 &reopenedValidation, s_linked.data, s_linked.dataBytes,
+                                s_linked.mutableData, s_linked.mutableDataBytes,
                                 s_linked.entryCodeOffset)) {
         Diagnostics diagnostics;
         diagnostics.error(driverLocation, reopenedValidation.error, "elf");

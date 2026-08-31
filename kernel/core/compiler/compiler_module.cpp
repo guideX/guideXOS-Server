@@ -89,6 +89,68 @@ static int32_t find_import(const CompiledModule& module, const char* name)
     return -1;
 }
 
+static int32_t find_global(const TranslationUnitIR& unit, const char* name)
+{
+    for (uint32_t i = 0; i < unit.globalCount; ++i)
+        if (same_name(unit.globals[i].name, name)) return static_cast<int32_t>(i);
+    return -1;
+}
+
+static bool append_global_import(CompiledModule* module, const TranslationUnitIR& unit,
+                                 const char* name, SourceLocation location,
+                                 Diagnostics& diagnostics)
+{
+    if (!module || !name) return false;
+    const int32_t globalIndex = find_global(unit, name);
+    if (globalIndex >= 0 && unit.globals[globalIndex].isDefinition) return true;
+    const int32_t existing = find_import(*module, name);
+    if (existing >= 0) {
+        if (module->imports[existing].kind != SymbolKind::Data) {
+            diagnostics.error_identifier_suffix(location, "symbol ", name, name_length(name),
+                                                " used as both function and global", "global");
+            return false;
+        }
+        return true;
+    }
+    if (module->importCount >= COMPILER_MAX_MODULE_SYMBOLS) {
+        diagnostics.error(location, "module import capacity exceeded", "linker");
+        return false;
+    }
+    ImportSymbol& importSymbol = module->imports[module->importCount++];
+    importSymbol = {};
+    importSymbol.kind = SymbolKind::Data;
+    if (!copy_string(importSymbol.name, sizeof(importSymbol.name), name)) return false;
+    importSymbol.size = 4;
+    importSymbol.alignment = 4;
+    importSymbol.location = location;
+    return true;
+}
+
+static bool flatten_global_data(TranslationUnitIR& unit, CompiledModule* module,
+                               Diagnostics& diagnostics)
+{
+    if (!module) return false;
+    uint32_t offset = 0;
+    for (uint32_t i = 0; i < unit.globalCount; ++i) {
+        GlobalSymbolIR& global = unit.globals[i];
+        if (!global.isDefinition) continue;
+        if ((offset & 3U) != 0) offset = (offset + 3U) & ~3U;
+        if (offset > sizeof(module->mutableData) - 4U) {
+            diagnostics.error(global.location, "mutable global data capacity exceeded", "global");
+            return false;
+        }
+        const uint32_t value = static_cast<uint32_t>(global.initialValue);
+        module->mutableData[offset] = static_cast<uint8_t>(value);
+        module->mutableData[offset + 1U] = static_cast<uint8_t>(value >> 8);
+        module->mutableData[offset + 2U] = static_cast<uint8_t>(value >> 16);
+        module->mutableData[offset + 3U] = static_cast<uint8_t>(value >> 24);
+        global.moduleDataOffset = offset;
+        offset += 4U;
+    }
+    module->mutableDataBytes = offset;
+    return true;
+}
+
 } // namespace
 
 bool compile_module_from_source(const char* sourcePath,
@@ -124,6 +186,7 @@ bool compile_module_from_source(const char* sourcePath,
 
     module->tokenCount = tokenCount;
     module->functionCount = s_unit.functionCount;
+    module->globalCount = s_unit.globalCount;
     module->recursiveSccCount = s_unit.recursiveSccCount;
     for (uint32_t i = 0; i < COMPILER_MAX_FUNCTIONS; ++i)
         module->recursiveFunction[i] = s_unit.recursiveFunction[i];
@@ -136,6 +199,7 @@ bool compile_module_from_source(const char* sourcePath,
         diagnostics.error({0, 1, 1}, "source string data exceeds compiler limit", "data");
         return false;
     }
+    if (!flatten_global_data(s_unit, module, diagnostics)) return false;
 
 #if defined(__x86_64__)
     if (!amd64::emit_translation_unit_module(s_unit, module->code, sizeof(module->code),
@@ -164,11 +228,31 @@ bool compile_module_from_source(const char* sourcePath,
         }
         ExportSymbol& exportSymbol = module->exports[module->exportCount++];
         exportSymbol = {};
+        exportSymbol.kind = SymbolKind::Function;
         if (!copy_string(exportSymbol.name, sizeof(exportSymbol.name), function.name)) return false;
         exportSymbol.moduleCodeOffset = function.codeOffset;
         exportSymbol.parameterCount = function.parameterCount;
         exportSymbol.isEntry = module->hasEntry && i == s_unit.entryFunction;
         exportSymbol.location = function.location;
+    }
+    for (uint32_t i = 0; i < s_unit.globalCount; ++i) {
+        const GlobalSymbolIR& global = s_unit.globals[i];
+        if (!global.isDefinition) continue;
+        if (module->exportCount >= COMPILER_MAX_MODULE_SYMBOLS) {
+            diagnostics.error(global.location, "module export capacity exceeded", "linker");
+            return false;
+        }
+        ExportSymbol& exportSymbol = module->exports[module->exportCount++];
+        exportSymbol = {};
+        exportSymbol.kind = SymbolKind::Data;
+        if (!copy_string(exportSymbol.name, sizeof(exportSymbol.name), global.name)) return false;
+        exportSymbol.moduleDataOffset = global.moduleDataOffset;
+        exportSymbol.size = 4;
+        exportSymbol.alignment = 4;
+        exportSymbol.location = global.location;
+    }
+    for (uint32_t i = 0; i < s_unit.functionCount; ++i) {
+        const FunctionIR& function = s_unit.functions[i];
         for (uint32_t c = 0; c < function.callCount; ++c) {
             const CallSite& call = function.calls[c];
             if (!call.external) continue;
@@ -181,15 +265,33 @@ bool compile_module_from_source(const char* sourcePath,
                 }
                 continue;
             }
-            if (module->importCount >= COMPILER_MAX_FUNCTIONS) {
+            if (module->importCount >= COMPILER_MAX_MODULE_SYMBOLS) {
                 diagnostics.error(call.location, "module import capacity exceeded", "linker");
                 return false;
             }
             ImportSymbol& importSymbol = module->imports[module->importCount++];
             importSymbol = {};
+            importSymbol.kind = SymbolKind::Function;
             if (!copy_string(importSymbol.name, sizeof(importSymbol.name), call.calleeName)) return false;
             importSymbol.expectedParameterCount = call.expectedParameterCount;
             importSymbol.location = call.location;
+        }
+    }
+    for (uint32_t i = 0; i < s_unit.functionCount; ++i) {
+        const FunctionIR& function = s_unit.functions[i];
+        for (uint32_t e = 0; e < function.expressionCount; ++e) {
+            const Expression& expression = function.expressions[e];
+            if (expression.kind != ExpressionKind::LoadGlobal ||
+                expression.globalIndex >= s_unit.globalCount) continue;
+            if (!append_global_import(module, s_unit, s_unit.globals[expression.globalIndex].name,
+                                      expression.location, diagnostics)) return false;
+        }
+        for (uint32_t s = 0; s < function.statementCount; ++s) {
+            const Statement& statement = function.statements[s];
+            if (statement.kind != StatementKind::StoreGlobal ||
+                statement.globalIndex >= s_unit.globalCount) continue;
+            if (!append_global_import(module, s_unit, s_unit.globals[statement.globalIndex].name,
+                                      statement.location, diagnostics)) return false;
         }
     }
     return !diagnostics.has_error();

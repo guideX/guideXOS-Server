@@ -49,6 +49,13 @@ static bool align16(uint32_t value, uint32_t* output)
     return true;
 }
 
+static bool align4(uint32_t value, uint32_t* output)
+{
+    if (!output || value > 0xFFFFFFFCU) return false;
+    *output = (value + 3U) & ~3U;
+    return true;
+}
+
 static bool align_page(uint32_t value, uint32_t* output)
 {
     if (!output || value > 0xFFFFF000U) return false;
@@ -71,6 +78,16 @@ static int32_t find_symbol(const LinkedProgram& program, const char* name)
 {
     for (uint32_t i = 0; i < program.exportCount; ++i)
         if (names_equal(program.exports[i].name, name)) return static_cast<int32_t>(i);
+    return -1;
+}
+
+static int32_t find_module_function_export(const CompiledModule& module, uint32_t functionIndex)
+{
+    uint32_t seen = 0;
+    for (uint32_t i = 0; i < module.exportCount; ++i) {
+        if (module.exports[i].kind != SymbolKind::Function) continue;
+        if (seen++ == functionIndex) return static_cast<int32_t>(i);
+    }
     return -1;
 }
 
@@ -105,14 +122,22 @@ static bool calculate_rel32(uint64_t target, uint64_t after, int32_t* output)
     return true;
 }
 
+static bool report_kind_conflict(const SourceLocation& location, const char* name,
+                                 Diagnostics& diagnostics)
+{
+    diagnostics.error_identifier_suffix(location, "symbol ", name, name_length(name),
+                                        " defined as both function and global", "linker");
+    return false;
+}
+
 } // namespace
 
 bool link_modules(const CompiledModule* modules, uint32_t moduleCount,
                   LinkedProgram* output, Diagnostics& diagnostics)
 {
     if (!modules || !output || moduleCount == 0 || moduleCount > COMPILER_MAX_TRANSLATION_UNITS) {
-        const SourceLocation location = {0, 1, 1};
-        diagnostics.error(location, "linker module count exceeds bounded project limit", "linker");
+        diagnostics.error((SourceLocation){0, 1, 1},
+                          "linker module count exceeds bounded project limit", "linker");
         return false;
     }
     *output = {};
@@ -120,16 +145,20 @@ bool link_modules(const CompiledModule* modules, uint32_t moduleCount,
 
     const CompiledModule* ordered[COMPILER_MAX_TRANSLATION_UNITS] = {};
     for (uint32_t i = 0; i < moduleCount; ++i) {
-        if (modules[i].sourcePath[0] == '\0' || modules[i].codeBytes == 0 ||
-            modules[i].codeBytes > COMPILER_MAX_CODE_BYTES ||
-            modules[i].dataBytes > COMPILER_MAX_LINKED_DATA_BYTES ||
-            modules[i].exportCount > COMPILER_MAX_FUNCTIONS ||
-            modules[i].importCount > COMPILER_MAX_FUNCTIONS ||
-            modules[i].relocationCount > COMPILER_MAX_MODULE_RELOCATIONS) {
-            diagnostics.error((SourceLocation){0, 1, 1}, "compiled module exceeds bounded representation", "linker");
+        const CompiledModule& module = modules[i];
+        if (module.sourcePath[0] == '\0' || module.codeBytes > COMPILER_MAX_CODE_BYTES ||
+            module.functionCount > COMPILER_MAX_FUNCTIONS || module.globalCount > COMPILER_MAX_GLOBALS ||
+            (module.functionCount != 0 && module.codeBytes == 0) ||
+            module.dataBytes > COMPILER_MAX_LINKED_DATA_BYTES ||
+            module.mutableDataBytes > COMPILER_MAX_LINKED_DATA_BYTES ||
+            module.exportCount > COMPILER_MAX_MODULE_SYMBOLS ||
+            module.importCount > COMPILER_MAX_MODULE_SYMBOLS ||
+            module.relocationCount > COMPILER_MAX_MODULE_RELOCATIONS) {
+            diagnostics.error((SourceLocation){0, 1, 1},
+                              "compiled module exceeds bounded representation", "linker");
             return false;
         }
-        ordered[i] = &modules[i];
+        ordered[i] = &module;
     }
     for (uint32_t i = 0; i < moduleCount; ++i) {
         for (uint32_t j = i + 1; j < moduleCount; ++j) {
@@ -147,8 +176,10 @@ bool link_modules(const CompiledModule* modules, uint32_t moduleCount,
 
     uint32_t moduleCodeOffsets[COMPILER_MAX_TRANSLATION_UNITS] = {};
     uint32_t moduleDataOffsets[COMPILER_MAX_TRANSLATION_UNITS] = {};
+    uint32_t moduleMutableDataOffsets[COMPILER_MAX_TRANSLATION_UNITS] = {};
     uint32_t codeOffset = 0;
     uint32_t dataOffset = 0;
+    uint32_t mutableDataOffset = 0;
     for (uint32_t i = 0; i < moduleCount; ++i) {
         if (!align16(codeOffset, &codeOffset) ||
             !add_u32(codeOffset, ordered[i]->codeBytes, &codeOffset) ||
@@ -163,36 +194,65 @@ bool link_modules(const CompiledModule* modules, uint32_t moduleCount,
             diagnostics.error((SourceLocation){0, 1, 1}, "linked read-only data capacity exceeded", "linker");
             return false;
         }
+        if (!align4(mutableDataOffset, &mutableDataOffset) ||
+            (ordered[i]->mutableDataBytes != 0 &&
+             !add_u32(mutableDataOffset, ordered[i]->mutableDataBytes, &mutableDataOffset)) ||
+            mutableDataOffset > COMPILER_MAX_LINKED_DATA_BYTES) {
+            diagnostics.error((SourceLocation){0, 1, 1}, "linked mutable data capacity exceeded", "linker");
+            return false;
+        }
+        moduleMutableDataOffsets[i] = mutableDataOffset - ordered[i]->mutableDataBytes;
     }
     output->codeBytes = codeOffset;
     output->dataBytes = dataOffset;
+    output->mutableDataBytes = mutableDataOffset;
     for (uint32_t i = 0; i < moduleCount; ++i) {
         for (uint32_t j = 0; j < ordered[i]->codeBytes; ++j)
             output->code[moduleCodeOffsets[i] + j] = ordered[i]->code[j];
         for (uint32_t j = 0; j < ordered[i]->dataBytes; ++j)
             output->data[moduleDataOffsets[i] + j] = ordered[i]->data[j];
+        for (uint32_t j = 0; j < ordered[i]->mutableDataBytes; ++j)
+            output->mutableData[moduleMutableDataOffsets[i] + j] = ordered[i]->mutableData[j];
     }
-    if (output->dataBytes == 0) {
-        output->dataFileOffset = 0;
-    } else {
-        uint32_t codeFileEnd = 0;
-        if (!add_u32(BOOTSTRAP_CODE_OFFSET, output->codeBytes, &codeFileEnd) ||
-            !align_page(codeFileEnd, &output->dataFileOffset) ||
-            output->dataFileOffset < BOOTSTRAP_DATA_OFFSET) {
-            diagnostics.error((SourceLocation){0, 1, 1}, "linked image layout overflowed", "linker");
+
+    output->dataFileOffset = 0;
+    output->mutableDataFileOffset = 0;
+    uint32_t codeFileEnd = 0;
+    if (!add_u32(BOOTSTRAP_CODE_OFFSET, output->codeBytes, &codeFileEnd)) {
+        diagnostics.error((SourceLocation){0, 1, 1}, "linked image layout overflowed", "linker");
+        return false;
+    }
+    uint32_t rodataFileEnd = codeFileEnd;
+    if (output->dataBytes != 0) {
+        if (!align_page(codeFileEnd, &output->dataFileOffset) ||
+            output->dataFileOffset < BOOTSTRAP_DATA_OFFSET ||
+            !add_u32(output->dataFileOffset, output->dataBytes, &rodataFileEnd)) {
+            diagnostics.error((SourceLocation){0, 1, 1}, "linked read-only image layout overflowed", "linker");
             return false;
         }
     }
+    if (output->mutableDataBytes != 0) {
+        if (!align_page(rodataFileEnd, &output->mutableDataFileOffset)) {
+            diagnostics.error((SourceLocation){0, 1, 1}, "linked mutable image layout overflowed", "linker");
+            return false;
+        }
+        if (output->mutableDataFileOffset < BOOTSTRAP_DATA_OFFSET)
+            output->mutableDataFileOffset = BOOTSTRAP_DATA_OFFSET;
+    }
 
-    // The global external table is populated from sorted modules, making both
-    // symbol order and final bytes independent of VFS enumeration order.
+    // One ordinary namespace contains both function and data definitions.
     for (uint32_t m = 0; m < moduleCount; ++m) {
         const CompiledModule& module = *ordered[m];
         for (uint32_t e = 0; e < module.exportCount; ++e) {
             const ExportSymbol& exportSymbol = module.exports[e];
-            if (find_symbol(*output, exportSymbol.name) >= 0) {
-                diagnostics.error_identifier(exportSymbol.location, "duplicate definition for function ",
-                                              exportSymbol.name, name_length(exportSymbol.name), "linker");
+            const int32_t existing = find_symbol(*output, exportSymbol.name);
+            if (existing >= 0) {
+                if (output->exports[existing].kind != exportSymbol.kind)
+                    return report_kind_conflict(exportSymbol.location, exportSymbol.name, diagnostics);
+                diagnostics.error_identifier(exportSymbol.location,
+                    exportSymbol.kind == SymbolKind::Data ? "duplicate definition for global " :
+                    "duplicate definition for function ", exportSymbol.name,
+                    name_length(exportSymbol.name), "linker");
                 return false;
             }
             if (output->exportCount >= COMPILER_MAX_PROJECT_EXPORTS) {
@@ -201,26 +261,45 @@ bool link_modules(const CompiledModule* modules, uint32_t moduleCount,
             }
             GlobalFunctionSymbol& global = output->exports[output->exportCount++];
             global = {};
+            global.kind = exportSymbol.kind;
             copy_name(global.name, sizeof(global.name), exportSymbol.name);
             global.moduleIndex = static_cast<uint16_t>(m);
             global.parameterCount = exportSymbol.parameterCount;
             global.moduleCodeOffset = exportSymbol.moduleCodeOffset;
-            if (global.moduleCodeOffset >= module.codeBytes ||
-                !add_u32(moduleCodeOffsets[m], global.moduleCodeOffset, &global.finalCodeOffset) ||
-                global.finalCodeOffset >= output->codeBytes) {
-                diagnostics.error(exportSymbol.location, "export code offset is out of bounds", "linker");
-                return false;
-            }
+            global.moduleDataOffset = exportSymbol.moduleDataOffset;
+            global.size = exportSymbol.size;
+            global.alignment = exportSymbol.alignment;
             global.isEntry = exportSymbol.isEntry;
+            if (exportSymbol.kind == SymbolKind::Function) {
+                if (global.moduleCodeOffset >= module.codeBytes ||
+                    !add_u32(moduleCodeOffsets[m], global.moduleCodeOffset, &global.finalCodeOffset) ||
+                    (module.codeBytes != 0 && global.finalCodeOffset >= output->codeBytes)) {
+                    diagnostics.error(exportSymbol.location, "export code offset is out of bounds", "linker");
+                    return false;
+                }
+            } else {
+                if (global.size != 4 || global.alignment != 4 ||
+                    global.moduleDataOffset > module.mutableDataBytes ||
+                    module.mutableDataBytes - global.moduleDataOffset < global.size ||
+                    !add_u32(moduleMutableDataOffsets[m], global.moduleDataOffset, &global.finalDataOffset) ||
+                    global.finalDataOffset > output->mutableDataBytes ||
+                    output->mutableDataBytes - global.finalDataOffset < global.size) {
+                    diagnostics.error(exportSymbol.location, "global data export is out of bounds", "linker");
+                    return false;
+                }
+            }
         }
     }
 
     uint32_t entryCount = 0;
     for (uint32_t i = 0; i < output->exportCount; ++i) {
-        if (output->exports[i].isEntry) {
-            ++entryCount;
-            output->entryCodeOffset = output->exports[i].finalCodeOffset;
+        if (!output->exports[i].isEntry) continue;
+        if (output->exports[i].kind != SymbolKind::Function) {
+            diagnostics.error((SourceLocation){0, 1, 1}, "global cannot be the gx_main entry", "linker");
+            return false;
         }
+        ++entryCount;
+        output->entryCodeOffset = output->exports[i].finalCodeOffset;
     }
     if (entryCount == 0) {
         diagnostics.error((SourceLocation){0, 1, 1}, "missing gx_main entry function", "linker");
@@ -231,8 +310,7 @@ bool link_modules(const CompiledModule* modules, uint32_t moduleCount,
         return false;
     }
 
-    // Imports are declarations that are actually used by a generated call.
-    // Unused prototypes therefore do not need a definition.
+    // Imports are declarations that are actually used by generated code.
     for (uint32_t m = 0; m < moduleCount; ++m) {
         const CompiledModule& module = *ordered[m];
         for (uint32_t i = 0; i < module.importCount; ++i) {
@@ -241,14 +319,26 @@ bool link_modules(const CompiledModule* modules, uint32_t moduleCount,
                 diagnostics.error(importSymbol.location, "project import capacity exceeded", "linker");
                 return false;
             }
-            const int32_t globalIndex = find_symbol(*output, importSymbol.name);
-            if (globalIndex < 0) {
-                diagnostics.error_identifier(importSymbol.location, "undefined external function ",
-                                              importSymbol.name, name_length(importSymbol.name), "linker");
+            const int32_t symbolIndex = find_symbol(*output, importSymbol.name);
+            if (symbolIndex < 0) {
+                diagnostics.error_identifier(importSymbol.location,
+                    importSymbol.kind == SymbolKind::Data ? "undefined external global " :
+                    "undefined external function ", importSymbol.name,
+                    name_length(importSymbol.name), "linker");
                 return false;
             }
-            if (output->exports[globalIndex].parameterCount != importSymbol.expectedParameterCount) {
-                diagnostics.error_identifier(importSymbol.location, "conflicting declaration for function ",
+            const GlobalFunctionSymbol& definition = output->exports[symbolIndex];
+            if (definition.kind != importSymbol.kind)
+                return report_kind_conflict(importSymbol.location, importSymbol.name, diagnostics);
+            if (importSymbol.kind == SymbolKind::Function) {
+                if (definition.parameterCount != importSymbol.expectedParameterCount) {
+                    diagnostics.error_identifier(importSymbol.location, "conflicting declaration for function ",
+                                                  importSymbol.name, name_length(importSymbol.name), "function");
+                    return false;
+                }
+            } else if (importSymbol.size != 4 || importSymbol.alignment != 4 ||
+                       definition.size != importSymbol.size || definition.alignment != importSymbol.alignment) {
+                    diagnostics.error_identifier(importSymbol.location, "conflicting declaration for global ",
                                               importSymbol.name, name_length(importSymbol.name), "linker");
                 return false;
             }
@@ -256,19 +346,24 @@ bool link_modules(const CompiledModule* modules, uint32_t moduleCount,
         }
     }
 
-    // Reconstruct the bounded project call graph from module-local recursion
-    // metadata and the external call relocations.  The module representation
-    // intentionally does not carry a general relocatable-object symbol graph.
+    // Reconstruct the bounded project function graph. Data symbols do not
+    // participate in the call graph even though they share the namespace.
     bool projectGraph[COMPILER_MAX_PROJECT_EXPORTS][COMPILER_MAX_PROJECT_EXPORTS] = {};
     for (uint32_t m = 0; m < moduleCount; ++m) {
         const CompiledModule& module = *ordered[m];
-        for (uint32_t f = 0; f < module.functionCount && f < module.exportCount; ++f) {
-            const int32_t global = find_symbol(*output, module.exports[f].name);
-            if (global >= 0 && module.recursiveFunction[f]) projectGraph[global][global] = true;
-            for (uint32_t g = 0; g < module.functionCount && g < module.exportCount; ++g) {
+        for (uint32_t f = 0; f < module.functionCount; ++f) {
+            const int32_t moduleFunction = find_module_function_export(module, f);
+            if (moduleFunction < 0) continue;
+            const int32_t caller = find_symbol(*output, module.exports[moduleFunction].name);
+            if (caller < 0) continue;
+            if (module.recursiveFunction[f]) projectGraph[caller][caller] = true;
+            for (uint32_t g = 0; g < module.functionCount; ++g) {
                 if (!module.callGraph[f][g]) continue;
-                const int32_t callee = find_symbol(*output, module.exports[g].name);
-                if (global >= 0 && callee >= 0) projectGraph[global][callee] = true;
+                const int32_t moduleCallee = find_module_function_export(module, g);
+                if (moduleCallee < 0) continue;
+                const int32_t callee = find_symbol(*output, module.exports[moduleCallee].name);
+                if (callee >= 0 && output->exports[callee].kind == SymbolKind::Function)
+                    projectGraph[caller][callee] = true;
             }
         }
         for (uint32_t r = 0; r < module.relocationCount; ++r) {
@@ -277,17 +372,18 @@ bool link_modules(const CompiledModule* modules, uint32_t moduleCount,
             int32_t caller = -1;
             uint32_t callerOffset = 0;
             for (uint32_t e = 0; e < module.exportCount; ++e) {
-                if (module.exports[e].moduleCodeOffset <= relocation.patchOffset &&
-                    (caller < 0 || module.exports[e].moduleCodeOffset >= callerOffset)) {
-                    const int32_t candidate = find_symbol(*output, module.exports[e].name);
-                    if (candidate >= 0) {
-                        caller = candidate;
-                        callerOffset = module.exports[e].moduleCodeOffset;
-                    }
+                if (module.exports[e].kind != SymbolKind::Function ||
+                    module.exports[e].moduleCodeOffset > relocation.patchOffset ||
+                    (caller >= 0 && module.exports[e].moduleCodeOffset < callerOffset)) continue;
+                const int32_t candidate = find_symbol(*output, module.exports[e].name);
+                if (candidate >= 0) {
+                    caller = candidate;
+                    callerOffset = module.exports[e].moduleCodeOffset;
                 }
             }
             const int32_t callee = find_symbol(*output, relocation.targetSymbolName);
-            if (caller >= 0 && callee >= 0) projectGraph[caller][callee] = true;
+            if (caller >= 0 && callee >= 0 && output->exports[callee].kind == SymbolKind::Function)
+                projectGraph[caller][callee] = true;
         }
     }
     for (uint32_t k = 0; k < output->exportCount; ++k)
@@ -297,11 +393,13 @@ bool link_modules(const CompiledModule* modules, uint32_t moduleCount,
                     (projectGraph[i][k] && projectGraph[k][j]);
     output->recursiveSccCount = 0;
     for (uint32_t i = 0; i < output->exportCount; ++i) {
+        if (output->exports[i].kind != SymbolKind::Function) continue;
         output->recursiveFunction[i] = projectGraph[i][i];
         if (!output->recursiveFunction[i]) continue;
         bool representative = true;
         for (uint32_t j = 0; j < i; ++j) {
-            if (output->recursiveFunction[j] && projectGraph[i][j] && projectGraph[j][i]) {
+            if (output->exports[j].kind == SymbolKind::Function && output->recursiveFunction[j] &&
+                projectGraph[i][j] && projectGraph[j][i]) {
                 representative = false;
                 break;
             }
@@ -309,7 +407,6 @@ bool link_modules(const CompiledModule* modules, uint32_t moduleCount,
         if (representative) ++output->recursiveSccCount;
     }
 
-    // Apply only the two internal relocation kinds supported by Phase 27N.
     for (uint32_t m = 0; m < moduleCount; ++m) {
         const CompiledModule& module = *ordered[m];
         for (uint32_t r = 0; r < module.relocationCount; ++r) {
@@ -329,18 +426,17 @@ bool link_modules(const CompiledModule* modules, uint32_t moduleCount,
                 diagnostics.error(relocation.location, "linked relocation patch range is out of bounds", "relocation");
                 return false;
             }
+            const int32_t targetIndex = find_symbol(*output, relocation.targetSymbolName);
             if (relocation.kind == RelocationKind::CallRel32) {
-                if (relocation.width != 4) {
-                    diagnostics.error(relocation.location, "CallRel32 relocation width is invalid", "relocation");
+                if (relocation.width != 4 || targetIndex < 0) {
+                    if (targetIndex < 0) diagnostics.error_identifier(relocation.location,
+                        "undefined external function ", relocation.targetSymbolName,
+                        name_length(relocation.targetSymbolName), "linker");
+                    else diagnostics.error(relocation.location, "CallRel32 target is not a function", "relocation");
                     return false;
                 }
-                const int32_t targetIndex = find_symbol(*output, relocation.targetSymbolName);
-                if (targetIndex < 0) {
-                    diagnostics.error_identifier(relocation.location, "undefined external function ",
-                                                  relocation.targetSymbolName,
-                                                  name_length(relocation.targetSymbolName), "linker");
-                    return false;
-                }
+                if (output->exports[targetIndex].kind != SymbolKind::Function)
+                    return report_kind_conflict(relocation.location, relocation.targetSymbolName, diagnostics);
                 const uint64_t targetAddress = BOOTSTRAP_IMAGE_BASE + BOOTSTRAP_CODE_OFFSET +
                     output->exports[targetIndex].finalCodeOffset;
                 const uint64_t afterCall = BOOTSTRAP_IMAGE_BASE + BOOTSTRAP_CODE_OFFSET + finalPatch + 4U;
@@ -351,12 +447,30 @@ bool link_modules(const CompiledModule* modules, uint32_t moduleCount,
                     return false;
                 }
             } else if (relocation.kind == RelocationKind::DataAddress64) {
-                if (relocation.width != 8 || relocation.dataOffset > module.dataBytes ||
+                if (relocation.width != 8 || output->dataBytes == 0 ||
+                    relocation.dataOffset > module.dataBytes ||
+                    moduleDataOffsets[m] > output->dataBytes ||
                     relocation.dataOffset > output->dataBytes - moduleDataOffsets[m] ||
+                    output->dataBytes - moduleDataOffsets[m] - relocation.dataOffset < 1U ||
                     !patch_u64(output->code, output->codeBytes, finalPatch,
                                BOOTSTRAP_IMAGE_BASE + output->dataFileOffset +
                                moduleDataOffsets[m] + relocation.dataOffset)) {
                     diagnostics.error(relocation.location, "DataAddress64 relocation is invalid", "relocation");
+                    return false;
+                }
+            } else if (relocation.kind == RelocationKind::GlobalDataAddress64) {
+                if (relocation.width != 8 || targetIndex < 0) {
+                    diagnostics.error_identifier(relocation.location, "undefined external global ",
+                                                  relocation.targetSymbolName,
+                                                  name_length(relocation.targetSymbolName), "linker");
+                    return false;
+                }
+                if (output->exports[targetIndex].kind != SymbolKind::Data ||
+                    output->mutableDataFileOffset == 0 ||
+                    !patch_u64(output->code, output->codeBytes, finalPatch,
+                               BOOTSTRAP_IMAGE_BASE + output->mutableDataFileOffset +
+                               output->exports[targetIndex].finalDataOffset)) {
+                    diagnostics.error(relocation.location, "GlobalDataAddress64 relocation is invalid", "relocation");
                     return false;
                 }
             } else {
