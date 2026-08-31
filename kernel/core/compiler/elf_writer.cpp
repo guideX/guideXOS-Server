@@ -22,7 +22,7 @@ static const uint32_t PROGRAM_HEADER_BYTES = 56;
 static const uint32_t PROGRAM_HEADER_COUNT_CODE_ONLY = 1;
 static const uint32_t PROGRAM_HEADER_COUNT_CODE_AND_DATA = 2;
 static const uint32_t SEGMENT_ALIGNMENT = 0x1000;
-static const uint32_t BOOTSTRAP_DATA_BYTES_LIMIT = COMPILER_MAX_TOTAL_STRING_DATA;
+static const uint32_t BOOTSTRAP_DATA_BYTES_LIMIT = COMPILER_MAX_LINKED_DATA_BYTES;
 
 static void clear_bytes(uint8_t* bytes, uint32_t count)
 {
@@ -80,6 +80,13 @@ static bool add_u64(uint64_t left, uint64_t right, uint64_t* result)
     return true;
 }
 
+static bool align_page(uint32_t value, uint32_t* result)
+{
+    if (!result || value > 0xFFFFF000U) return false;
+    *result = (value + 0xFFFU) & ~0xFFFU;
+    return true;
+}
+
 static bool is_power_of_two(uint64_t value)
 {
     return value != 0 && (value & (value - 1)) == 0;
@@ -109,12 +116,13 @@ bool write_bootstrap_elf(const uint8_t* code,
         readOnlyDataBytes > BOOTSTRAP_DATA_BYTES_LIMIT ||
         (readOnlyDataBytes != 0 && !readOnlyData)) return false;
 
+    uint32_t codeFileEnd = 0;
+    if (!add_u32(BOOTSTRAP_CODE_OFFSET, codeBytes, &codeFileEnd)) return false;
+    uint32_t dataOffset = 0;
+    if (readOnlyDataBytes != 0 && !align_page(codeFileEnd, &dataOffset)) return false;
     uint32_t outputBytes = 0;
-    if (readOnlyDataBytes != 0 &&
-        codeBytes >= BOOTSTRAP_DATA_OFFSET - BOOTSTRAP_CODE_OFFSET) return false;
-    const uint32_t dataOffset = readOnlyDataBytes == 0 ? 0 : BOOTSTRAP_DATA_OFFSET;
-    if ((readOnlyDataBytes == 0 && !add_u32(BOOTSTRAP_CODE_OFFSET, codeBytes, &outputBytes)) ||
-        (readOnlyDataBytes != 0 && !add_u32(BOOTSTRAP_DATA_OFFSET, readOnlyDataBytes, &outputBytes)) ||
+    if ((readOnlyDataBytes == 0 && !add_u32(codeFileEnd, 0, &outputBytes)) ||
+        (readOnlyDataBytes != 0 && !add_u32(dataOffset, readOnlyDataBytes, &outputBytes)) ||
         outputBytes > outputCapacity || outputBytes > BOOTSTRAP_MAX_ELF_BYTES) return false;
 
     uint64_t entryPoint = 0;
@@ -167,14 +175,14 @@ bool write_bootstrap_elf(const uint8_t* code,
         const uint32_t dataPh = PROGRAM_HEADER_OFFSET + PROGRAM_HEADER_BYTES;
         put_u32(output, dataPh + 0, PROGRAM_TYPE_LOAD);
         put_u32(output, dataPh + 4, PROGRAM_FLAGS_READABLE);
-        put_u64(output, dataPh + 8, BOOTSTRAP_DATA_OFFSET);
-        put_u64(output, dataPh + 16, BOOTSTRAP_IMAGE_BASE + BOOTSTRAP_DATA_OFFSET);
-        put_u64(output, dataPh + 24, BOOTSTRAP_IMAGE_BASE + BOOTSTRAP_DATA_OFFSET);
+        put_u64(output, dataPh + 8, dataOffset);
+        put_u64(output, dataPh + 16, BOOTSTRAP_IMAGE_BASE + dataOffset);
+        put_u64(output, dataPh + 24, BOOTSTRAP_IMAGE_BASE + dataOffset);
         put_u64(output, dataPh + 32, readOnlyDataBytes);
         put_u64(output, dataPh + 40, readOnlyDataBytes);
         put_u64(output, dataPh + 48, SEGMENT_ALIGNMENT);
         for (uint32_t i = 0; i < readOnlyDataBytes; ++i) {
-            output[BOOTSTRAP_DATA_OFFSET + i] = readOnlyData[i];
+            output[dataOffset + i] = readOnlyData[i];
         }
     }
 
@@ -183,7 +191,7 @@ bool write_bootstrap_elf(const uint8_t* code,
     layout->codeOffset = BOOTSTRAP_CODE_OFFSET;
     layout->entryCodeOffset = entryCodeOffset;
     layout->dataOffset = dataOffset;
-    layout->dataAddress = readOnlyDataBytes == 0 ? 0 : BOOTSTRAP_IMAGE_BASE + BOOTSTRAP_DATA_OFFSET;
+    layout->dataAddress = readOnlyDataBytes == 0 ? 0 : BOOTSTRAP_IMAGE_BASE + dataOffset;
     layout->dataBytes = readOnlyDataBytes;
     layout->outputBytes = outputBytes;
     return true;
@@ -300,18 +308,13 @@ bool validate_bootstrap_elf(const uint8_t* image,
                    (flags & PROGRAM_FLAGS_EXECUTABLE) == 0 &&
                    (flags & 2U) == 0 && expectedDataBytes != 0) {
             uint64_t dataEnd = 0;
-            uint64_t expectedDataAddress = 0;
-            if (!add_u64(expectedImageBase, BOOTSTRAP_DATA_OFFSET, &expectedDataAddress)) {
-                return fail(result, "expected ELF data address overflows");
-            }
-            if (add_u64(virtualAddress, fileSize, &dataEnd) &&
-                expectedDataAddress >= virtualAddress && expectedDataAddress < dataEnd &&
-                fileSize >= expectedDataBytes) {
-                uint64_t dataOffset64 = 0;
-                if (!add_u64(fileOffset, expectedDataAddress - virtualAddress, &dataOffset64) ||
-                    dataOffset64 > 0xFFFFFFFFULL) return fail(result, "ELF data file offset overflows");
-                result->dataFileOffset = static_cast<uint32_t>(dataOffset64);
-                result->dataVirtualAddress = expectedDataAddress;
+            if (add_u64(virtualAddress, fileSize, &dataEnd) && fileSize >= expectedDataBytes &&
+                virtualAddress >= expectedImageBase) {
+                if (fileOffset > 0xFFFFFFFFULL) {
+                    return fail(result, "ELF data file offset overflows");
+                }
+                result->dataFileOffset = static_cast<uint32_t>(fileOffset);
+                result->dataVirtualAddress = virtualAddress;
                 result->dataBytes = expectedDataBytes;
                 expectedDataFound = true;
             }

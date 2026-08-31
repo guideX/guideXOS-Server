@@ -33,6 +33,23 @@ static void print_marker(const char* name, bool pass)
     serial::puts(pass ? "=PASS\n" : "=FAIL\n");
 }
 
+#if defined(GXOS_PHASE27M_SMOKE)
+static void print_decimal(uint32_t value)
+{
+    char digits[10] = {};
+    uint32_t count = 0;
+    if (value == 0) {
+        serial::putc('0');
+        return;
+    }
+    while (value != 0 && count < sizeof(digits)) {
+        digits[count++] = static_cast<char>('0' + (value % 10U));
+        value /= 10U;
+    }
+    while (count != 0) serial::putc(digits[--count]);
+}
+#endif
+
 static bool run_expected(const char* path, int32_t expected)
 {
     int32_t actual = 0;
@@ -508,6 +525,23 @@ void run_bootstrap_execution_smoke()
         developerStudio27fReport.finalState == NativeAppExecutionState::Cleaned;
     serial::puts(phase27fPassed ? "ELF Loader: Phase 27F smoke PASS\n"
                                 : "ELF Loader: Phase 27F smoke FAIL\n");
+#endif
+#if defined(GXOS_PHASE27N_SMOKE)
+    serial::puts("ELF Loader: Phase 27N Developer Studio multi-file linker smoke begin\n");
+    int32_t developerStudio27nReturn = 1;
+    static NativeElfRunReport developerStudio27nReport = {};
+    const bool developerStudio27nLaunched = allPassed27d &&
+        run_file("/Apps/DS27N/bin/amd64/p27n.elf",
+                 &developerStudio27nReturn, &developerStudio27nReport) &&
+        developerStudio27nReturn == 0 && developerStudio27nReport.teardownComplete;
+    print_marker("phase27n_app_launch", developerStudio27nLaunched);
+    print_marker("phase27n_kernel_survival", developerStudio27nLaunched &&
+        developerStudio27nReport.finalState == NativeAppExecutionState::Cleaned);
+    const bool developerStudio27nArtifactEvidence = developerStudio27nLaunched &&
+        emit_serial_artifact("/P27N/build/bin/amd64/phase27n.elf", "n27primary");
+    print_marker("phase27n_artifact_evidence", developerStudio27nArtifactEvidence);
+    serial::puts(developerStudio27nLaunched ? "ELF Loader: Phase 27N smoke PASS\n"
+                                             : "ELF Loader: Phase 27N smoke FAIL\n");
 #endif
 #if defined(GXOS_PHASE27G_SMOKE)
     serial::puts("ELF Loader: Phase 27G bootstrap language smoke begin\n");
@@ -1302,6 +1336,17 @@ void run_bootstrap_execution_smoke()
 #endif
 #if defined(GXOS_PHASE27M_SMOKE)
     serial::puts("ELF Loader: Phase 27M recursion-safe call-stack hardening smoke begin\n");
+    serial::puts("Compiler: stack_policy frame_bytes=");
+    print_decimal(compiler::COMPILER_MAX_GENERATED_FRAME_BYTES);
+    serial::puts(" transient_bytes=");
+    print_decimal(compiler::COMPILER_MAX_TRANSIENT_STACK_BYTES);
+    serial::puts(" activation_bytes=");
+    print_decimal(compiler::COMPILER_MAX_GENERATED_ACTIVATION_STACK_COST);
+    serial::puts(" max_depth=");
+    print_decimal(compiler::COMPILER_MAX_RUNTIME_CALL_DEPTH);
+    serial::puts(" reserve_bytes=");
+    print_decimal(NATIVE_ELF_RUNTIME_SAFETY_RESERVE_BYTES);
+    serial::putc('\n');
     const char* m27PrimaryArtifact = "/P27M/out/primary.elf";
     static compiler::CompileSummary mSummary = {};
     static compiler::CompileSummary mMutual = {};

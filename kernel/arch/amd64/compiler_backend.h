@@ -53,6 +53,18 @@ bool emit_translation_unit(const TranslationUnitIR& unit,
                            uint32_t* outputSize,
                            uint32_t* entryCodeOffset);
 
+// Module emission leaves cross-translation-unit calls and data addresses as
+// bounded internal relocations. Calls to definitions in the same translation
+// unit continue to use local branch fixups.
+bool emit_translation_unit_module(const TranslationUnitIR& unit,
+                                  uint8_t* output,
+                                  uint32_t outputCapacity,
+                                  uint32_t* outputSize,
+                                  uint32_t* entryCodeOffset,
+                                  RelocationRecord* relocations,
+                                  uint32_t relocationCapacity,
+                                  uint32_t* relocationCount);
+
 bool emit_function(const FunctionIR& function,
                    uint8_t* output,
                    uint32_t outputCapacity,

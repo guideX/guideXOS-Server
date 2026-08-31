@@ -12,14 +12,16 @@ namespace kernel {
 namespace compiler {
 
 static const uint32_t COMPILER_MAX_SOURCE_BYTES = 64 * 1024;
-static const uint32_t COMPILER_MAX_OUTPUT_BYTES = 32768;
-static const uint32_t COMPILER_MAX_DATA_BYTES = COMPILER_MAX_TOTAL_STRING_DATA;
+static const uint32_t COMPILER_MAX_OUTPUT_BYTES = 98304;
+static const uint32_t COMPILER_MAX_DATA_BYTES = COMPILER_MAX_LINKED_DATA_BYTES;
 static const uint32_t COMPILER_MAX_DIAGNOSTIC_TOKEN_BYTES = 32;
+static const uint32_t COMPILER_MAX_DIAGNOSTIC_PATH_BYTES = COMPILER_MAX_SOURCE_PATH_BYTES;
 
 struct CompileDiagnostic {
     SourceLocation location;
     char message[COMPILER_MAX_DIAGNOSTIC_MESSAGE_BYTES];
     char tokenKind[COMPILER_MAX_DIAGNOSTIC_TOKEN_BYTES];
+    char sourcePath[COMPILER_MAX_DIAGNOSTIC_PATH_BYTES];
 };
 
 struct CompileSummary {
@@ -35,7 +37,7 @@ struct CompileSummary {
     bool returnConstantValid;
     int32_t returnConstant;
     uint32_t codeBytes;
-    uint8_t code[COMPILER_MAX_CODE_BYTES];
+    uint8_t code[COMPILER_MAX_LINKED_CODE_BYTES];
     uint32_t dataBytes;
     uint8_t data[COMPILER_MAX_DATA_BYTES];
     uint32_t outputBytes;
@@ -51,6 +53,13 @@ struct CompileSummary {
 bool compile(const char* sourcePath,
              const char* outputPath,
              CompileSummary* summary);
+
+// Compile each source path as an independent translation unit, then link the
+// resulting bounded in-memory modules into one NativeElf application.
+bool compile_project(const char* const* sourcePaths,
+                     uint32_t sourceCount,
+                     const char* outputPath,
+                     CompileSummary* summary);
 
 // Opt-in startup proof used by the Phase 27B QEMU smoke.  Normal boots do not
 // call this routine; NativeElf execution is exercised by the separate

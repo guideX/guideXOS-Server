@@ -43,10 +43,14 @@ static int32_t temporary_displacement(const FrameLayout& frame, uint16_t slot)
 
 class Emitter {
 public:
-    Emitter(uint8_t* output, uint32_t capacity)
+    Emitter(uint8_t* output, uint32_t capacity,
+            RelocationRecord* relocations = nullptr,
+            uint32_t relocationCapacity = 0,
+            uint32_t* relocationCount = nullptr)
         : m_output(output), m_capacity(capacity), m_offset(0), m_labelCount(0), m_fixupCount(0),
           m_loopDepth(0), m_rspMod16(8), m_temporaryDepth(0), m_maxTemporaryDepth(0),
-          m_transientBytes(0), m_maxTransientBytes(0)
+          m_transientBytes(0), m_maxTransientBytes(0), m_relocations(relocations),
+          m_relocationCapacity(relocationCapacity), m_relocationCount(relocationCount)
     {
         for (uint32_t i = 0; i < COMPILER_MAX_BRANCH_LABELS; ++i) m_labels[i] = {};
         for (uint32_t i = 0; i < COMPILER_MAX_BRANCH_FIXUPS; ++i) m_fixups[i] = {};
@@ -295,6 +299,42 @@ public:
         fixup.label = label;
         return true;
     }
+    bool emit_call_external(const char* name, SourceLocation location)
+    {
+        if (!name || !m_relocations || !m_relocationCount ||
+            *m_relocationCount >= m_relocationCapacity || !byte(0xE8)) return false;
+        const uint32_t patchOffset = m_offset;
+        if (!u32(0)) return false;
+        RelocationRecord& relocation = m_relocations[(*m_relocationCount)++];
+        relocation = {};
+        relocation.kind = RelocationKind::CallRel32;
+        relocation.width = 4;
+        relocation.patchOffset = patchOffset;
+        relocation.location = location;
+        uint32_t i = 0;
+        while (i + 1 < sizeof(relocation.targetSymbolName) && name[i] != '\0') {
+            relocation.targetSymbolName[i] = name[i];
+            ++i;
+        }
+        relocation.targetSymbolName[i] = '\0';
+        return name[i] == '\0';
+    }
+    bool emit_data_address(uint32_t dataOffset, SourceLocation location)
+    {
+        if (!m_relocations || !m_relocationCount ||
+            *m_relocationCount >= m_relocationCapacity ||
+            !bytes(reinterpret_cast<const uint8_t*>("\x48\xBA"), 2)) return false;
+        const uint32_t patchOffset = m_offset;
+        if (!u64(0)) return false;
+        RelocationRecord& relocation = m_relocations[(*m_relocationCount)++];
+        relocation = {};
+        relocation.kind = RelocationKind::DataAddress64;
+        relocation.width = 8;
+        relocation.patchOffset = patchOffset;
+        relocation.dataOffset = dataOffset;
+        relocation.location = location;
+        return true;
+    }
     bool patch_branches()
     {
         for (uint32_t i = 0; i < m_fixupCount; ++i) {
@@ -326,6 +366,9 @@ private:
     uint16_t m_maxTemporaryDepth;
     uint32_t m_transientBytes;
     uint32_t m_maxTransientBytes;
+    RelocationRecord* m_relocations;
+    uint32_t m_relocationCapacity;
+    uint32_t* m_relocationCount;
     BranchLabel m_labels[COMPILER_MAX_BRANCH_LABELS];
     BranchFixup m_fixups[COMPILER_MAX_BRANCH_FIXUPS];
     LoopTarget m_loopStack[COMPILER_MAX_LOOP_TARGET_DEPTH] = {};
@@ -350,10 +393,15 @@ static bool is_legacy_single_log(const FunctionIR& function)
 static bool emit_log(Emitter& emitter, const FunctionIR& function, const Statement& statement,
                      uint64_t dataAddress, bool framed, int32_t contextDisplacement)
 {
-    if (statement.stringIndex >= function.stringCount || dataAddress == 0) return false;
-    const uint64_t address = dataAddress + function.dataOffset + function.stringOffsets[statement.stringIndex];
+    if (statement.stringIndex >= function.stringCount) return false;
     if (framed && !emitter.mov_rcx_context_local(contextDisplacement)) return false;
-    if (!emitter.mov_rdx_imm64(address) || !emitter.load_host_log()) return false;
+    const uint32_t stringOffset = function.dataOffset + function.stringOffsets[statement.stringIndex];
+    if (dataAddress != 0) {
+        if (!emitter.mov_rdx_imm64(dataAddress + stringOffset)) return false;
+    } else if (!emitter.emit_data_address(stringOffset, statement.location)) {
+        return false;
+    }
+    if (!emitter.load_host_log()) return false;
     const uint32_t reserve = emitter.call_stack_reserve();
     if (!emitter.sub_rsp(reserve) || !emitter.call_rax() || !emitter.add_rsp(reserve)) return false;
     return true;
@@ -466,9 +514,10 @@ static bool emit_expression(Emitter& emitter, const TranslationUnitIR& unit,
     if (expression.kind == ExpressionKind::Call) {
         if (!function.calls || !function.callArguments || expression.callIndex >= function.callCount) return false;
         const CallSite& call = function.calls[expression.callIndex];
-        if (call.calleeFunction >= unit.functionCount || call.argumentCount > COMPILER_MAX_PARAMETERS ||
+        if ((!call.external && call.calleeFunction >= unit.functionCount) ||
+            call.argumentCount > COMPILER_MAX_PARAMETERS ||
             call.argumentStart + call.argumentCount > function.callArgumentCount ||
-            functionLabels[call.calleeFunction] == COMPILER_INVALID_INDEX) return false;
+            (!call.external && functionLabels[call.calleeFunction] == COMPILER_INVALID_INDEX)) return false;
         uint16_t base = 0;
         if (!emitter.acquire_temporary_slots(call.argumentCount, &base)) return false;
         for (uint32_t i = 0; i < call.argumentCount; ++i) {
@@ -483,9 +532,15 @@ static bool emit_expression(Emitter& emitter, const TranslationUnitIR& unit,
                                        temporary_displacement(frame, static_cast<uint16_t>(base + i)))) return false;
         if (callFailureLabel == COMPILER_INVALID_INDEX || epilogueLabel == COMPILER_INVALID_INDEX) return false;
         const uint32_t reserve = emitter.call_stack_reserve();
-        return emitter.cmp_r14d_imm32(COMPILER_MAX_RUNTIME_CALL_DEPTH) &&
-            emitter.emit_jae(callFailureLabel) && emitter.inc_r14d() &&
-            emitter.sub_rsp(reserve) && emitter.emit_call(functionLabels[call.calleeFunction]) &&
+        if (!emitter.cmp_r14d_imm32(COMPILER_MAX_RUNTIME_CALL_DEPTH) ||
+            !emitter.emit_jae(callFailureLabel) || !emitter.inc_r14d() ||
+            !emitter.sub_rsp(reserve)) return false;
+        if (call.external) {
+            if (!emitter.emit_call_external(call.calleeName, call.location)) return false;
+        } else if (!emitter.emit_call(functionLabels[call.calleeFunction])) {
+            return false;
+        }
+        return
             emitter.add_rsp(reserve) && emitter.test_r15d() && emitter.emit_jnz(epilogueLabel) &&
             emitter.release_temporary_slots(call.argumentCount);
     }
@@ -715,17 +770,21 @@ bool calculate_frame_layout(uint32_t parameterCount, uint32_t localCount,
     return output->activationBytes <= COMPILER_MAX_GENERATED_ACTIVATION_STACK_COST;
 }
 
-bool emit_translation_unit(const TranslationUnitIR& unit, uint64_t readOnlyDataAddress,
-                           uint8_t* output, uint32_t outputCapacity, uint32_t* outputSize,
-                           uint32_t* entryCodeOffset)
+static bool emit_translation_unit_impl(const TranslationUnitIR& unit, uint64_t readOnlyDataAddress,
+                                       uint8_t* output, uint32_t outputCapacity, uint32_t* outputSize,
+                                       uint32_t* entryCodeOffset,
+                                       RelocationRecord* relocations,
+                                       uint32_t relocationCapacity,
+                                       uint32_t* relocationCount)
 {
     static_assert(offsetof(gx_app_context, host) == 8, "generated gx_app_context host offset changed");
     static_assert(offsetof(gx_host_calls, log) == 8, "generated gx_host_calls log offset changed");
     if (outputSize) *outputSize = 0;
     if (entryCodeOffset) *entryCodeOffset = 0;
+    if (relocationCount) *relocationCount = 0;
     if (!output || !outputSize || !entryCodeOffset || outputCapacity == 0 ||
         unit.functionCount == 0 || unit.functionCount > COMPILER_MAX_FUNCTIONS ||
-        unit.entryFunction >= unit.functionCount) return false;
+        (unit.entryFunction != COMPILER_INVALID_INDEX && unit.entryFunction >= unit.functionCount)) return false;
     for (uint32_t i = 0; i < unit.functionCount; ++i) {
         const FunctionIR& function = unit.functions[i];
         if (function.rootBlock == COMPILER_INVALID_INDEX || function.rootBlock >= function.blockCount ||
@@ -741,10 +800,13 @@ bool emit_translation_unit(const TranslationUnitIR& unit, uint64_t readOnlyDataA
             (function.callCount != 0 && !function.calls) ||
             (function.callArgumentCount != 0 && !function.callArguments)) return false;
         const uint32_t logs = host_log_count(function);
-        if (function.hasHostLog && (!function.usesAppContext || readOnlyDataAddress == 0 || function.stringCount == 0 || logs == 0)) return false;
+        const bool relocatableData = relocations != nullptr && relocationCount != nullptr;
+        if (function.hasHostLog && (!function.usesAppContext ||
+                                    (!relocatableData && readOnlyDataAddress == 0) ||
+                                    function.stringCount == 0 || logs == 0)) return false;
     }
 
-    Emitter emitter(output, outputCapacity);
+    Emitter emitter(output, outputCapacity, relocations, relocationCapacity, relocationCount);
     uint16_t functionLabels[COMPILER_MAX_FUNCTIONS] = {};
     FrameLayout frames[COMPILER_MAX_FUNCTIONS] = {};
     for (uint32_t i = 0; i < unit.functionCount; ++i) {
@@ -770,7 +832,7 @@ bool emit_translation_unit(const TranslationUnitIR& unit, uint64_t readOnlyDataA
     if (unit.functionCount == 1 && is_gx_main(unit.functions[0].name)) {
         const FunctionIR& function = unit.functions[0];
         if (is_legacy_single_log(function)) {
-            emitter = Emitter(output, outputCapacity);
+            emitter = Emitter(output, outputCapacity, relocations, relocationCapacity, relocationCount);
             if (!emit_legacy_log(function, readOnlyDataAddress, emitter) || !emitter.byte(0xC3) ||
                 !emitter.patch_branches()) return false;
             *outputSize = emitter.size();
@@ -779,7 +841,7 @@ bool emit_translation_unit(const TranslationUnitIR& unit, uint64_t readOnlyDataA
         }
         if (function.localCount == 0 && function.integerParameterCount == 0 && function.callCount == 0 &&
             !function.hasHostLog && function.blockCount == 1 && function.returnCount == 1) {
-            emitter = Emitter(output, outputCapacity);
+            emitter = Emitter(output, outputCapacity, relocations, relocationCapacity, relocationCount);
             if (!emit_expression(emitter, unit, function, frames[0], functionLabels, function.returnExpression,
                                  COMPILER_INVALID_INDEX, COMPILER_INVALID_INDEX) ||
                 !emitter.byte(0xC3) || !emitter.patch_branches()) return false;
@@ -792,7 +854,9 @@ bool emit_translation_unit(const TranslationUnitIR& unit, uint64_t readOnlyDataA
     for (uint32_t i = 0; i < unit.functionCount; ++i) {
         const FunctionIR& function = unit.functions[i];
         const uint32_t start = emitter.size();
+        const uint32_t functionStart = emitter.size();
         if (!emitter.define_label(functionLabels[i])) return false;
+        const_cast<FunctionIR&>(unit.functions[i]).codeOffset = functionStart;
         if (i == unit.entryFunction) *entryCodeOffset = start;
         emitter.begin_function();
         const FrameLayout& frame = frames[i];
@@ -816,9 +880,31 @@ bool emit_translation_unit(const TranslationUnitIR& unit, uint64_t readOnlyDataA
         if (!emitter.define_label(epilogueLabel) || !emitter.dec_r14d() || !emitter.epilogue()) return false;
         if (emitter.max_transient_bytes() > frame.transientBytes) return false;
     }
-    if (!emitter.patch_branches() || *entryCodeOffset >= emitter.size()) return false;
+    if (!emitter.patch_branches() ||
+        (unit.entryFunction != COMPILER_INVALID_INDEX && *entryCodeOffset >= emitter.size())) return false;
     *outputSize = emitter.size();
     return *outputSize != 0;
+}
+
+bool emit_translation_unit(const TranslationUnitIR& unit, uint64_t readOnlyDataAddress,
+                           uint8_t* output, uint32_t outputCapacity, uint32_t* outputSize,
+                           uint32_t* entryCodeOffset)
+{
+    return emit_translation_unit_impl(unit, readOnlyDataAddress, output, outputCapacity,
+                                      outputSize, entryCodeOffset, nullptr, 0, nullptr);
+}
+
+bool emit_translation_unit_module(const TranslationUnitIR& unit,
+                                  uint8_t* output, uint32_t outputCapacity,
+                                  uint32_t* outputSize, uint32_t* entryCodeOffset,
+                                  RelocationRecord* relocations,
+                                  uint32_t relocationCapacity,
+                                  uint32_t* relocationCount)
+{
+    if (!relocations || !relocationCount) return false;
+    return emit_translation_unit_impl(unit, 0, output, outputCapacity, outputSize,
+                                      entryCodeOffset, relocations, relocationCapacity,
+                                      relocationCount);
 }
 
 bool emit_function(const FunctionIR& function, uint64_t readOnlyDataAddress,

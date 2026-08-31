@@ -17,6 +17,16 @@ bool parse_translation_unit(const char* source,
                             TranslationUnitIR* output,
                             Diagnostics& diagnostics);
 
+// The caller-owned arenas make translation-unit isolation explicit. The
+// legacy overload above retains its original compatibility arena.
+bool parse_translation_unit(const char* source,
+                            const Token* tokens,
+                            uint32_t tokenCount,
+                            TranslationUnitIR* output,
+                            Diagnostics& diagnostics,
+                            CallSite* callStorage,
+                            uint16_t* callArgumentStorage);
+
 // Compatibility entry point for the pre-27L host tests and callers that
 // intentionally compile a one-function source.  Multi-function sources use
 // parse_translation_unit directly.

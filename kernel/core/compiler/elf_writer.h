@@ -18,7 +18,7 @@ namespace compiler {
 static const uint64_t BOOTSTRAP_IMAGE_BASE = guidexos::native_elf::IMAGE_BASE;
 static const uint32_t BOOTSTRAP_CODE_OFFSET = 0x1000;
 static const uint32_t BOOTSTRAP_DATA_OFFSET = 0x2000;
-static const uint32_t BOOTSTRAP_MAX_ELF_BYTES = 32768;
+static const uint32_t BOOTSTRAP_MAX_ELF_BYTES = 98304;
 
 struct ElfLayout {
     uint64_t imageBase;

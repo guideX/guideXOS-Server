@@ -1,0 +1,13 @@
+{
+  "formatVersion": 1,
+  "projectId": "dev.guidexos.phase27n",
+  "displayName": "Phase 27N Multi-File Compilation and Internal Linker",
+  "projectKind": "native-gui-application",
+  "sourceRoot": "src",
+  "applicationManifest": "app/app.json",
+  "defaultTargetProfile": "guidexos.amd64.baremetal.bootstrap.native",
+  "entryPoint": "gx_main",
+  "abi": "guidexos-c-abi-v1",
+  "architecture": "amd64",
+  "outputName": "phase27n"
+}

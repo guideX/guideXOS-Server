@@ -22,7 +22,23 @@ static const char kAbi[] = "guidexos-c-abi-v1";
 static const char kArchitecture[] = "amd64";
 static const uint32_t kMaxProjectText = 16u * 1024u;
 static const uint32_t kMaxResolvedPath = 256u;
-static const uint32_t kMaxSourceCandidates = 32u;
+static const uint32_t kMaxProjectSources = COMPILER_MAX_TRANSLATION_UNITS;
+
+struct SourceSelection {
+    uint32_t count;
+    char paths[kMaxProjectSources][kMaxResolvedPath];
+    char relatives[kMaxProjectSources][kMaxResolvedPath];
+};
+
+static bool equal_text(const char* left, const char* right);
+
+static const char* diagnostic_display_path(const SourceSelection& selection, const char* path)
+{
+    if (!path || path[0] == '\0') return "<link>";
+    for (uint32_t i = 0; i < selection.count; ++i)
+        if (equal_text(selection.paths[i], path)) return selection.relatives[i];
+    return path;
+}
 
 struct BuildJob {
     bool used;
@@ -305,41 +321,60 @@ static void artifact_sha256(const uint8_t* bytes, uint32_t count, char output[GX
     Sha256 hash; hash.update(bytes, count); hash.finish(output);
 }
 
-static bool choose_source(const char* root, const char* sourceRoot, const char* sourceEntry,
-                          char* sourcePath, uint32_t sourcePathCapacity, char* relativePath, uint32_t relativeCapacity)
+static bool choose_sources(const char* root, const char* sourceRoot, const char* sourceEntry,
+                           SourceSelection* selection)
 {
-    if (!root || !sourceRoot || !safe_relative(sourceRoot)) return false;
+    if (!root || !sourceRoot || !selection || !safe_relative(sourceRoot)) return false;
+    *selection = {};
     if (sourceEntry && sourceEntry[0] != '\0') {
-        if (!safe_relative(sourceEntry) || !join_path(root, sourceRoot, sourcePath, sourcePathCapacity)) return false;
-        const uint32_t sourceRootLength = text_length(sourcePath, sourcePathCapacity);
-        if (sourceRootLength + 1 >= sourcePathCapacity || !append_text(sourcePath, sourcePathCapacity, "/") || !append_text(sourcePath, sourcePathCapacity, sourceEntry)) return false;
-        if (!copy_text(relativePath, relativeCapacity, sourceRoot) || !append_text(relativePath, relativeCapacity, "/") || !append_text(relativePath, relativeCapacity, sourceEntry)) return false;
+        if (!safe_relative(sourceEntry) ||
+            !join_path(root, sourceRoot, selection->paths[0], sizeof(selection->paths[0])) ||
+            !append_text(selection->paths[0], sizeof(selection->paths[0]), "/") ||
+            !append_text(selection->paths[0], sizeof(selection->paths[0]), sourceEntry) ||
+            !copy_text(selection->relatives[0], sizeof(selection->relatives[0]), sourceRoot) ||
+            !append_text(selection->relatives[0], sizeof(selection->relatives[0]), "/") ||
+            !append_text(selection->relatives[0], sizeof(selection->relatives[0]), sourceEntry)) return false;
         vfs::FileInfo info = {};
-        return vfs::stat(sourcePath, &info) == vfs::VFS_OK && info.type == vfs::FILE_TYPE_REGULAR;
+        if (vfs::stat(selection->paths[0], &info) != vfs::VFS_OK ||
+            info.type != vfs::FILE_TYPE_REGULAR) return false;
+        selection->count = 1;
+        return true;
     }
 
     char sourceDirectory[kMaxResolvedPath] = {};
     if (!join_path(root, sourceRoot, sourceDirectory, sizeof(sourceDirectory))) return false;
     const uint8_t iterator = vfs::opendir(sourceDirectory);
     if (iterator == 0xFF) return false;
-    char candidates[kMaxSourceCandidates][vfs::VFS_MAX_FILENAME] = {};
+    char candidates[kMaxProjectSources][vfs::VFS_MAX_FILENAME] = {};
     uint32_t count = 0;
+    bool overflow = false;
     vfs::DirEntry entry = {};
-    while (count < kMaxSourceCandidates && vfs::readdir(iterator, &entry)) {
+    while (vfs::readdir(iterator, &entry)) {
         const uint32_t length = text_length(entry.name, sizeof(entry.name));
         const bool c = length >= 2 && entry.name[length - 2] == '.' && entry.name[length - 1] == 'c';
         const bool cpp = length >= 4 && entry.name[length - 4] == '.' && entry.name[length - 3] == 'c' && entry.name[length - 2] == 'p' && entry.name[length - 1] == 'p';
-        if (entry.type == vfs::FILE_TYPE_REGULAR && (c || cpp)) copy_text(candidates[count++], sizeof(candidates[0]), entry.name);
+        if (entry.type == vfs::FILE_TYPE_REGULAR && (c || cpp)) {
+            if (count >= kMaxProjectSources) overflow = true;
+            else if (!copy_text(candidates[count++], sizeof(candidates[0]), entry.name)) overflow = true;
+        }
     }
     vfs::closedir(iterator);
+    if (overflow || count == 0) return false;
     for (uint32_t i = 0; i < count; ++i) for (uint32_t j = i + 1; j < count; ++j) {
         bool before = false; uint32_t k = 0; while (candidates[i][k] && candidates[j][k] && candidates[i][k] == candidates[j][k]) ++k;
         before = static_cast<unsigned char>(candidates[i][k]) < static_cast<unsigned char>(candidates[j][k]);
         if (!before) { char swap[vfs::VFS_MAX_FILENAME] = {}; copy_text(swap, sizeof(swap), candidates[i]); copy_text(candidates[i], sizeof(candidates[i]), candidates[j]); copy_text(candidates[j], sizeof(candidates[j]), swap); }
     }
-    if (count != 1) return false;
-    if (!join_path(root, sourceRoot, sourcePath, sourcePathCapacity) || !append_text(sourcePath, sourcePathCapacity, "/") || !append_text(sourcePath, sourcePathCapacity, candidates[0])) return false;
-    return copy_text(relativePath, relativeCapacity, sourceRoot) && append_text(relativePath, relativeCapacity, "/") && append_text(relativePath, relativeCapacity, candidates[0]);
+    selection->count = count;
+    for (uint32_t i = 0; i < count; ++i) {
+        if (!join_path(root, sourceRoot, selection->paths[i], sizeof(selection->paths[i])) ||
+            !append_text(selection->paths[i], sizeof(selection->paths[i]), "/") ||
+            !append_text(selection->paths[i], sizeof(selection->paths[i]), candidates[i]) ||
+            !copy_text(selection->relatives[i], sizeof(selection->relatives[i]), sourceRoot) ||
+            !append_text(selection->relatives[i], sizeof(selection->relatives[i]), "/") ||
+            !append_text(selection->relatives[i], sizeof(selection->relatives[i]), candidates[i])) return false;
+    }
+    return true;
 }
 
 static bool ensure_directory(const char* path)
@@ -358,7 +393,7 @@ static bool ensure_output_directory(const char* root)
 }
 
 static bool metadata_matches(const char* root, const gx_build_request* request,
-                             char* sourcePath, char* sourceRelative, char* artifactPath,
+                             SourceSelection* selection, char* artifactPath,
                              uint32_t* outErrorCode)
 {
     if (outErrorCode) *outErrorCode = GX_BUILD_ERROR_UNSUPPORTED_PROJECT;
@@ -374,7 +409,7 @@ static bool metadata_matches(const char* root, const gx_build_request* request,
     char sourceRoot[128] = {}; char sourceEntry[256] = {};
     if (!json_string_value(s_projectText, text_length(s_projectText, sizeof(s_projectText)), "sourceRoot", sourceRoot, sizeof(sourceRoot), false) ||
         !json_string_value(s_projectText, text_length(s_projectText, sizeof(s_projectText)), "sourceEntry", sourceEntry, sizeof(sourceEntry), true) ||
-        !choose_source(root, sourceRoot, sourceEntry, sourcePath, kMaxResolvedPath, sourceRelative, kMaxResolvedPath)) {
+        !choose_sources(root, sourceRoot, sourceEntry, selection)) {
         if (outErrorCode) *outErrorCode = GX_BUILD_ERROR_SOURCE_SELECTION;
         return false;
     }
@@ -410,12 +445,13 @@ static void run_build(const gx_build_request* request)
     s_job.snapshot.state = GX_BUILD_PREPARING;
     output_line("Bare-metal build backend: kernel VFS compiler", 1);
     output_line("No host process or external toolchain is used", 1);
-    char sourcePath[kMaxResolvedPath] = {}; char sourceRelative[kMaxResolvedPath] = {}; char artifactPath[kMaxResolvedPath] = {};
+    SourceSelection selection = {};
+    char artifactPath[kMaxResolvedPath] = {};
     uint32_t metadataError = GX_BUILD_ERROR_UNSUPPORTED_PROJECT;
     if (!request || !equal_text(request->targetProfile, kBareMetalTarget) || !equal_text(request->buildSystem, kBareMetalBuildSystem) ||
-        !metadata_matches(request->projectRoot, request, sourcePath, sourceRelative, artifactPath, &metadataError)) {
+        !metadata_matches(request->projectRoot, request, &selection, artifactPath, &metadataError)) {
         failure(metadataError, metadataError == GX_BUILD_ERROR_SOURCE_SELECTION
-            ? "project source selection is not exactly one supported source file"
+            ? "project source selection is empty or exceeds the bounded source-file limit"
             : "project metadata is not a supported bare-metal bootstrap target");
         return;
     }
@@ -428,14 +464,26 @@ static void run_build(const gx_build_request* request)
         return;
     }
     s_job.snapshot.state = GX_BUILD_RUNNING;
-    char sourceLine[GX_BUILD_MAX_OUTPUT_LINE_BYTES] = {};
-    copy_text(sourceLine, sizeof(sourceLine), "Source: "); append_text(sourceLine, sizeof(sourceLine), sourceRelative); output_line(sourceLine, 1);
+    for (uint32_t i = 0; i < selection.count; ++i) {
+        char sourceLine[GX_BUILD_MAX_OUTPUT_LINE_BYTES] = {};
+        copy_text(sourceLine, sizeof(sourceLine), "Compiling ");
+        append_text(sourceLine, sizeof(sourceLine), selection.relatives[i]);
+        output_line(sourceLine, 1);
+    }
+    char linkLine[GX_BUILD_MAX_OUTPUT_LINE_BYTES] = {};
+    copy_text(linkLine, sizeof(linkLine), "Linking ");
+    append_dec(linkLine, sizeof(linkLine), selection.count);
+    append_text(linkLine, sizeof(linkLine), " modules");
+    output_line(linkLine, 1);
+    const char* sourcePaths[kMaxProjectSources] = {};
+    for (uint32_t i = 0; i < selection.count; ++i) sourcePaths[i] = selection.paths[i];
     static CompileSummary summary = {};
     summary = {};
-    if (!compile(sourcePath, artifactPath, &summary)) {
+    if (!compile_project(sourcePaths, selection.count, artifactPath, &summary)) {
         for (uint32_t i = 0; i < summary.diagnosticCount; ++i) {
             char line[GX_BUILD_MAX_OUTPUT_LINE_BYTES] = {};
-            append_text(line, sizeof(line), sourceRelative); append_text(line, sizeof(line), "("); append_dec(line, sizeof(line), summary.diagnostics[i].location.line); append_text(line, sizeof(line), ","); append_dec(line, sizeof(line), summary.diagnostics[i].location.column); append_text(line, sizeof(line), "): error: "); append_text(line, sizeof(line), summary.diagnostics[i].message);
+            const char* diagnosticPath = diagnostic_display_path(selection, summary.diagnostics[i].sourcePath);
+            append_text(line, sizeof(line), diagnosticPath); append_text(line, sizeof(line), "("); append_dec(line, sizeof(line), summary.diagnostics[i].location.line); append_text(line, sizeof(line), ","); append_dec(line, sizeof(line), summary.diagnostics[i].location.column); append_text(line, sizeof(line), "): error: "); append_text(line, sizeof(line), summary.diagnostics[i].message);
             output_line(line, 2);
         }
         s_job.snapshot.errorCount = summary.diagnosticCount == 0 ? 1 : summary.diagnosticCount;
@@ -463,7 +511,14 @@ static void run_build(const gx_build_request* request)
     copy_text(s_job.snapshot.artifactArchitecture, sizeof(s_job.snapshot.artifactArchitecture), kArchitecture);
     artifact_sha256(s_artifact, bytes, s_job.snapshot.artifactSha256);
     char successLine[GX_BUILD_MAX_OUTPUT_LINE_BYTES] = {};
-    append_text(successLine, sizeof(successLine), "NativeElf validation PASS | bytes="); append_dec(successLine, sizeof(successLine), bytes); append_text(successLine, sizeof(successLine), " | entry=0x10001000"); output_line(successLine, 1);
+    append_text(successLine, sizeof(successLine), "NativeElf validation PASS | bytes="); append_dec(successLine, sizeof(successLine), bytes); append_text(successLine, sizeof(successLine), " | entry=0x");
+    const uint32_t entry = static_cast<uint32_t>(validation.entryPoint);
+    const char hex[] = "0123456789ABCDEF";
+    for (int32_t shift = 28; shift >= 0; shift -= 4) {
+        char digit[2] = {hex[(entry >> shift) & 0xFU], '\0'};
+        append_text(successLine, sizeof(successLine), digit);
+    }
+    output_line(successLine, 1);
     s_job.snapshot.processExitCode = 0;
 }
 

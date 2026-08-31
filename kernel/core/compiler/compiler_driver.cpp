@@ -5,12 +5,9 @@
 #include "compiler_driver.h"
 
 #include "compiler_diagnostics.h"
-#include "compiler_lexer.h"
-#include "compiler_parser.h"
+#include "compiler_linker.h"
+#include "compiler_module.h"
 #include "elf_writer.h"
-#if defined(__x86_64__)
-#include "arch/amd64/compiler_backend.h"
-#endif
 #include "kernel/serial_debug.h"
 #include "kernel/vfs.h"
 
@@ -19,12 +16,11 @@ namespace compiler {
 namespace {
 
 static uint8_t s_source[COMPILER_MAX_SOURCE_BYTES + 1];
-static Token s_tokens[COMPILER_MAX_TOKENS];
-static uint8_t s_code[COMPILER_MAX_CODE_BYTES];
-static uint8_t s_data[COMPILER_MAX_DATA_BYTES];
 static uint8_t s_elf[COMPILER_MAX_OUTPUT_BYTES];
 static uint8_t s_reopened[COMPILER_MAX_OUTPUT_BYTES];
 static uint8_t s_compare[COMPILER_MAX_OUTPUT_BYTES];
+static CompiledModule s_modules[COMPILER_MAX_TRANSLATION_UNITS] = {};
+static LinkedProgram s_linked = {};
 
 static uint64_t hash_bytes(const uint8_t* bytes, uint32_t count)
 {
@@ -36,6 +32,13 @@ static uint64_t hash_bytes(const uint8_t* bytes, uint32_t count)
         hash *= 1099511628211ULL;
     }
     return hash;
+}
+
+static uint32_t string_length(const char* value)
+{
+    uint32_t length = 0;
+    if (value) while (value[length]) ++length;
+    return length;
 }
 
 static void put_decimal_u64(uint64_t value)
@@ -51,17 +54,6 @@ static void put_decimal_u64(uint64_t value)
         value /= 10;
     }
     while (count != 0) serial::putc(digits[--count]);
-}
-
-static void put_decimal_i32(int32_t value)
-{
-    if (value < 0) {
-        serial::putc('-');
-        const uint32_t magnitude = static_cast<uint32_t>(-(value + 1)) + 1u;
-        put_decimal_u64(magnitude);
-    } else {
-        put_decimal_u64(static_cast<uint32_t>(value));
-    }
 }
 
 static void put_hash(uint64_t hash)
@@ -87,66 +79,37 @@ static void print_data(const uint8_t* data, uint32_t dataBytes)
     serial::putc('\n');
 }
 
-static bool flatten_string_table(TranslationUnitIR& unit, uint8_t* output,
-                                 uint32_t capacity, uint32_t* outputBytes)
-{
-    if (!output || !outputBytes || unit.functionCount > COMPILER_MAX_FUNCTIONS) return false;
-    uint32_t offset = 0;
-    for (uint32_t f = 0; f < unit.functionCount; ++f) {
-        FunctionIR& function = unit.functions[f];
-        const uint32_t functionStart = offset;
-        function.dataOffset = functionStart;
-        for (uint32_t i = 0; i < function.stringCount; ++i) {
-            if (function.stringOffsets[i] != offset - functionStart ||
-                offset + function.strings[i].bytes + 1U > capacity) return false;
-            for (uint32_t j = 0; j < function.strings[i].bytes; ++j)
-                output[offset + j] = static_cast<uint8_t>(function.strings[i].data[j]);
-            output[offset + function.strings[i].bytes] = 0;
-            offset += function.strings[i].bytes + 1U;
-        }
-    }
-    *outputBytes = offset;
-    return true;
-}
-
-static void copy_diagnostics(const Diagnostics& diagnostics, CompileSummary* summary)
+static void append_diagnostics(const Diagnostics& diagnostics, CompileSummary* summary,
+                               const char* sourcePath)
 {
     if (!summary) return;
-    summary->diagnosticCount = diagnostics.count() < COMPILER_MAX_DIAGNOSTICS
-        ? diagnostics.count() : COMPILER_MAX_DIAGNOSTICS;
-    summary->diagnosticsTruncated = diagnostics.overflowed();
-    for (uint32_t i = 0; i < summary->diagnosticCount; ++i) {
+    const uint32_t available = COMPILER_MAX_DIAGNOSTICS - summary->diagnosticCount;
+    const uint32_t take = diagnostics.count() < available ? diagnostics.count() : available;
+    for (uint32_t i = 0; i < take; ++i) {
         const CompilerDiagnostic& source = diagnostics.at(i);
-        CompileDiagnostic& destination = summary->diagnostics[i];
+        CompileDiagnostic& destination = summary->diagnostics[summary->diagnosticCount++];
+        destination = {};
         destination.location = source.location;
-        uint32_t messageBytes = 0;
-        if (source.message) {
-            while (messageBytes + 1 < sizeof(destination.message) && source.message[messageBytes] != '\0') {
-                destination.message[messageBytes] = source.message[messageBytes];
-                ++messageBytes;
-            }
+        uint32_t bytes = 0;
+        while (bytes + 1 < sizeof(destination.message) && source.message && source.message[bytes]) {
+            destination.message[bytes] = source.message[bytes];
+            ++bytes;
         }
-        destination.message[messageBytes] = '\0';
-        uint32_t tokenBytes = 0;
-        if (source.tokenKind) {
-            while (tokenBytes + 1 < sizeof(destination.tokenKind) && source.tokenKind[tokenBytes] != '\0') {
-                destination.tokenKind[tokenBytes] = source.tokenKind[tokenBytes];
-                ++tokenBytes;
-            }
+        destination.message[bytes] = '\0';
+        bytes = 0;
+        while (bytes + 1 < sizeof(destination.tokenKind) && source.tokenKind && source.tokenKind[bytes]) {
+            destination.tokenKind[bytes] = source.tokenKind[bytes];
+            ++bytes;
         }
-        destination.tokenKind[tokenBytes] = '\0';
+        destination.tokenKind[bytes] = '\0';
+        bytes = 0;
+        while (bytes + 1 < sizeof(destination.sourcePath) && sourcePath && sourcePath[bytes]) {
+            destination.sourcePath[bytes] = sourcePath[bytes];
+            ++bytes;
+        }
+        destination.sourcePath[bytes] = '\0';
     }
-}
-
-static bool fail_build(Diagnostics& diagnostics, CompileSummary* summary)
-{
-    print_diagnostics(diagnostics);
-    serial::puts("Compiler: build FAIL\n");
-    if (summary) {
-        summary->success = false;
-        copy_diagnostics(diagnostics, summary);
-    }
-    return false;
+    if (diagnostics.overflowed() || diagnostics.count() > take) summary->diagnosticsTruncated = true;
 }
 
 static bool same_code(const CompileSummary& left, const CompileSummary& right)
@@ -196,131 +159,123 @@ static void print_smoke_result(const char* name, bool pass)
 
 } // namespace
 
-bool compile(const char* sourcePath,
-             const char* outputPath,
-             CompileSummary* summary)
+static bool fail_project(CompileSummary* summary)
+{
+    if (summary) summary->success = false;
+    serial::puts("Compiler: build FAIL\n");
+    return false;
+}
+
+bool compile_project(const char* const* sourcePaths,
+                     uint32_t sourceCount,
+                     const char* outputPath,
+                     CompileSummary* summary)
 {
     CompileSummary local = {};
     if (summary) *summary = local;
-
-    Diagnostics diagnostics;
+    for (uint32_t i = 0; i < COMPILER_MAX_TRANSLATION_UNITS; ++i) s_modules[i] = {};
+    s_linked = {};
     const SourceLocation driverLocation = {0, 1, 1};
-    if (!sourcePath || !outputPath || sourcePath[0] == '\0' || outputPath[0] == '\0') {
-        diagnostics.error(driverLocation, "source and output paths are required", "path");
-        return fail_build(diagnostics, summary);
+    if (!sourcePaths || sourceCount == 0 || sourceCount > COMPILER_MAX_TRANSLATION_UNITS ||
+        !outputPath || outputPath[0] == '\0') {
+        Diagnostics diagnostics;
+        diagnostics.error(driverLocation, "project source list and output path are required", "project");
+        if (summary) append_diagnostics(diagnostics, summary, "<project>");
+        return fail_project(summary);
     }
 
-    serial::puts("Compiler: source=");
-    serial::puts(sourcePath);
+    serial::puts("Compiler: project_sources=");
+    put_decimal_u64(sourceCount);
     serial::puts(" output=");
     serial::puts(outputPath);
     serial::putc('\n');
 
-    vfs::FileInfo sourceInfo = {};
-    if (vfs::stat(sourcePath, &sourceInfo) != vfs::VFS_OK ||
-        sourceInfo.type != vfs::FILE_TYPE_REGULAR) {
-        diagnostics.error(driverLocation, "unable to read regular source file", "path");
-        return fail_build(diagnostics, summary);
+    bool compileFailed = false;
+    uint32_t totalSourceBytes = 0;
+    uint32_t totalTokenCount = 0;
+    uint64_t projectSourceHash = 0;
+    for (uint32_t i = 0; i < sourceCount; ++i) {
+        const char* sourcePath = sourcePaths[i];
+        serial::puts("Compiler: compiling ");
+        serial::puts(sourcePath ? sourcePath : "<null>");
+        serial::putc('\n');
+        Diagnostics diagnostics;
+        vfs::FileInfo sourceInfo = {};
+        if (!sourcePath || sourcePath[0] == '\0' ||
+            vfs::stat(sourcePath, &sourceInfo) != vfs::VFS_OK ||
+            sourceInfo.type != vfs::FILE_TYPE_REGULAR) {
+            diagnostics.error(driverLocation, "unable to read regular source file", "path");
+            if (summary) append_diagnostics(diagnostics, summary, sourcePath ? sourcePath : "<null>");
+            compileFailed = true;
+            continue;
+        }
+        if (sourceInfo.size > COMPILER_MAX_SOURCE_BYTES) {
+            diagnostics.error(driverLocation, "source exceeds 64 KiB compiler limit", "source");
+            if (summary) append_diagnostics(diagnostics, summary, sourcePath);
+            compileFailed = true;
+            continue;
+        }
+        const uint32_t sourceBytes = static_cast<uint32_t>(sourceInfo.size);
+        const int32_t readBytes = sourceBytes == 0 ? 0 : vfs::read_file(sourcePath, s_source, sourceBytes);
+        if (readBytes < 0 || static_cast<uint32_t>(readBytes) != sourceBytes) {
+            diagnostics.error(driverLocation, "source read was shorter than filesystem metadata", "filesystem");
+            if (summary) append_diagnostics(diagnostics, summary, sourcePath);
+            compileFailed = true;
+            continue;
+        }
+        s_source[sourceBytes] = '\0';
+        if (!compile_module_from_source(sourcePath, reinterpret_cast<const char*>(s_source), sourceBytes,
+                                        &s_modules[i], diagnostics)) {
+            if (summary) append_diagnostics(diagnostics, summary, sourcePath);
+            compileFailed = true;
+            continue;
+        }
+        totalSourceBytes += sourceBytes;
+        totalTokenCount += s_modules[i].tokenCount;
+        projectSourceHash ^= hash_bytes(reinterpret_cast<const uint8_t*>(sourcePath),
+                                        string_length(sourcePath)) ^
+                             s_modules[i].sourceHash;
+        serial::puts("Compiler: module functions=");
+        put_decimal_u64(s_modules[i].functionCount);
+        serial::puts(" code_bytes=");
+        put_decimal_u64(s_modules[i].codeBytes);
+        serial::puts(" relocations=");
+        put_decimal_u64(s_modules[i].relocationCount);
+        serial::putc('\n');
     }
-    if (sourceInfo.size > COMPILER_MAX_SOURCE_BYTES) {
-        diagnostics.error(driverLocation, "source exceeds 64 KiB compiler limit", "source");
-        return fail_build(diagnostics, summary);
-    }
+    if (compileFailed) return fail_project(summary);
 
-    const uint32_t sourceBytes = static_cast<uint32_t>(sourceInfo.size);
-    const int32_t readBytes = sourceBytes == 0 ? 0 : vfs::read_file(sourcePath, s_source, sourceBytes);
-    if (readBytes < 0 || static_cast<uint32_t>(readBytes) != sourceBytes) {
-        diagnostics.error(driverLocation, "source read was shorter than filesystem metadata", "filesystem");
-        return fail_build(diagnostics, summary);
-    }
-    s_source[sourceBytes] = '\0';
-    const uint64_t sourceHash = hash_bytes(s_source, sourceBytes);
-
-    serial::puts("Compiler: source_bytes=");
-    put_decimal_u64(sourceBytes);
-    serial::puts(" source_hash=fnv1a64:");
-    put_hash(sourceHash);
+    Diagnostics linkerDiagnostics;
+    serial::puts("Compiler: linking modules=");
+    put_decimal_u64(sourceCount);
     serial::putc('\n');
-
-    uint32_t tokenCount = 0;
-    if (!lex_source(reinterpret_cast<const char*>(s_source), sourceBytes,
-                    s_tokens, COMPILER_MAX_TOKENS, &tokenCount, diagnostics)) {
-        return fail_build(diagnostics, summary);
-    }
-    serial::puts("Compiler: tokens=");
-    put_decimal_u64(tokenCount);
-    serial::putc('\n');
-
-    static TranslationUnitIR unit = {};
-    unit = {};
-    if (!parse_translation_unit(reinterpret_cast<const char*>(s_source), s_tokens, tokenCount,
-                                &unit, diagnostics)) {
-        return fail_build(diagnostics, summary);
-    }
-    FunctionIR& function = unit.functions[unit.entryFunction];
-
-    if (summary) {
-        summary->recursiveSccCount = unit.recursiveSccCount;
-        for (uint32_t i = 0; i < COMPILER_MAX_FUNCTIONS; ++i)
-            summary->recursiveFunction[i] = unit.recursiveFunction[i];
+    if (!link_modules(s_modules, sourceCount, &s_linked, linkerDiagnostics)) {
+        if (summary) append_diagnostics(linkerDiagnostics, summary, "<link>");
+        return fail_project(summary);
     }
 
-    serial::puts("Compiler: functions=");
-    put_decimal_u64(unit.functionCount);
-    serial::putc('\n');
-#if defined(__x86_64__)
-    serial::puts("Compiler: stack_policy frame_bytes=");
-    put_decimal_u64(COMPILER_MAX_GENERATED_FRAME_BYTES);
-    serial::puts(" transient_bytes=");
-    put_decimal_u64(COMPILER_MAX_TRANSIENT_STACK_BYTES);
-    serial::puts(" activation_bytes=");
-    put_decimal_u64(COMPILER_MAX_GENERATED_ACTIVATION_STACK_COST);
-    serial::puts(" max_depth=");
-    put_decimal_u64(COMPILER_MAX_RUNTIME_CALL_DEPTH);
-    serial::puts(" reserve_bytes=");
-    put_decimal_u64(::kernel::native_elf::NATIVE_ELF_RUNTIME_SAFETY_RESERVE_BYTES);
-    serial::putc('\n');
-#endif
-    serial::puts("Compiler: return_constant=");
-    if (function.returnConstantValid) put_decimal_i32(function.returnConstant);
-    else serial::puts("nonconstant");
-    serial::putc('\n');
-
-    uint32_t dataBytes = 0;
-    if (!flatten_string_table(unit, s_data, sizeof(s_data), &dataBytes)) {
-        diagnostics.error(driverLocation, "source string data exceeds compiler limit", "data");
-        return fail_build(diagnostics, summary);
-    }
-    if (dataBytes != 0) print_data(s_data, dataBytes);
-
-    uint32_t codeBytes = 0;
-    uint32_t entryCodeOffset = 0;
-#if defined(__x86_64__)
-    const uint64_t dataAddress = dataBytes == 0 ? 0 : BOOTSTRAP_IMAGE_BASE + BOOTSTRAP_DATA_OFFSET;
-    if (!amd64::emit_translation_unit(unit, dataAddress, s_code, sizeof(s_code), &codeBytes,
-                                      &entryCodeOffset)) {
-        diagnostics.error(driverLocation, "AMD64 backend rejected target-neutral IR", "backend");
-        return fail_build(diagnostics, summary);
-    }
-#else
-    diagnostics.error(driverLocation, "bootstrap compiler backend is only available on AMD64", "backend");
-    return fail_build(diagnostics, summary);
-#endif
-    print_code(s_code, codeBytes);
+    if (s_linked.dataBytes != 0) print_data(s_linked.data, s_linked.dataBytes);
+    print_code(s_linked.code, s_linked.codeBytes);
 
     ElfLayout layout = {};
-    if (!write_bootstrap_elf(s_code, codeBytes, s_data, dataBytes, entryCodeOffset,
-                             s_elf, sizeof(s_elf), &layout)) {
-        diagnostics.error(driverLocation, "ELF writer could not construct bounded image", "elf");
-        return fail_build(diagnostics, summary);
+    if (!write_bootstrap_elf(s_linked.code, s_linked.codeBytes, s_linked.data, s_linked.dataBytes,
+                             s_linked.entryCodeOffset, s_elf, sizeof(s_elf), &layout) ||
+        layout.dataOffset != s_linked.dataFileOffset) {
+        Diagnostics diagnostics;
+        diagnostics.error(driverLocation, "ELF writer could not construct bounded linked image", "elf");
+        if (summary) append_diagnostics(diagnostics, summary, "<link>");
+        return fail_project(summary);
     }
 
     ElfValidationResult producedValidation = {};
     if (!validate_bootstrap_elf(s_elf, layout.outputBytes, layout.imageBase,
-                                layout.codeOffset, s_code, codeBytes,
-                                 &producedValidation, s_data, dataBytes, entryCodeOffset)) {
+                                layout.codeOffset, s_linked.code, s_linked.codeBytes,
+                                &producedValidation, s_linked.data, s_linked.dataBytes,
+                                s_linked.entryCodeOffset)) {
+        Diagnostics diagnostics;
         diagnostics.error(driverLocation, producedValidation.error, "elf");
-        return fail_build(diagnostics, summary);
+        if (summary) append_diagnostics(diagnostics, summary, "<link>");
+        return fail_project(summary);
     }
     serial::puts("Compiler: produced ELF validation PASS entry=0x");
     serial::put_hex64(layout.entryPoint);
@@ -328,29 +283,31 @@ bool compile(const char* sourcePath,
 
     const int32_t written = vfs::write_file(outputPath, s_elf, layout.outputBytes);
     if (written < 0 || static_cast<uint32_t>(written) != layout.outputBytes) {
+        Diagnostics diagnostics;
         diagnostics.error(driverLocation, "filesystem did not write complete ELF image", "filesystem");
-        return fail_build(diagnostics, summary);
+        if (summary) append_diagnostics(diagnostics, summary, "<filesystem>");
+        return fail_project(summary);
     }
+    const uint64_t outputHash = hash_bytes(s_elf, layout.outputBytes);
     serial::puts("Compiler: output_bytes=");
     put_decimal_u64(layout.outputBytes);
     serial::puts(" output_hash=fnv1a64:");
-    const uint64_t outputHash = hash_bytes(s_elf, layout.outputBytes);
     put_hash(outputHash);
     serial::putc('\n');
 
-    // write_file is the existing FAT path-level create/overwrite helper.  The
-    // explicit handle close below establishes that a VFS file can be closed,
-    // reopened, read back, and validated after that write operation.
     uint8_t closeHandle = vfs::open(outputPath, vfs::OPEN_READ);
     if (closeHandle == 0xFF || vfs::close(closeHandle) != vfs::VFS_OK) {
+        Diagnostics diagnostics;
         diagnostics.error(driverLocation, "generated ELF could not be closed through VFS", "filesystem");
-        return fail_build(diagnostics, summary);
+        if (summary) append_diagnostics(diagnostics, summary, "<filesystem>");
+        return fail_project(summary);
     }
-
     uint8_t reopenHandle = vfs::open(outputPath, vfs::OPEN_READ);
     if (reopenHandle == 0xFF) {
+        Diagnostics diagnostics;
         diagnostics.error(driverLocation, "generated ELF could not be reopened through VFS", "filesystem");
-        return fail_build(diagnostics, summary);
+        if (summary) append_diagnostics(diagnostics, summary, "<filesystem>");
+        return fail_project(summary);
     }
     const int64_t reopenedSize = vfs::file_size(reopenHandle);
     const int32_t reopenedBytes = reopenedSize <= 0 || reopenedSize > COMPILER_MAX_OUTPUT_BYTES
@@ -359,16 +316,20 @@ bool compile(const char* sourcePath,
     const vfs::Status reopenCloseStatus = vfs::close(reopenHandle);
     if (reopenCloseStatus != vfs::VFS_OK || reopenedBytes < 0 ||
         static_cast<uint32_t>(reopenedBytes) != layout.outputBytes) {
+        Diagnostics diagnostics;
         diagnostics.error(driverLocation, "reopened ELF readback was incomplete", "filesystem");
-        return fail_build(diagnostics, summary);
+        if (summary) append_diagnostics(diagnostics, summary, "<filesystem>");
+        return fail_project(summary);
     }
-
     ElfValidationResult reopenedValidation = {};
     if (!validate_bootstrap_elf(s_reopened, static_cast<uint32_t>(reopenedBytes),
-                                layout.imageBase, layout.codeOffset, s_code, codeBytes,
-                                 &reopenedValidation, s_data, dataBytes, entryCodeOffset)) {
+                                layout.imageBase, layout.codeOffset, s_linked.code, s_linked.codeBytes,
+                                &reopenedValidation, s_linked.data, s_linked.dataBytes,
+                                s_linked.entryCodeOffset)) {
+        Diagnostics diagnostics;
         diagnostics.error(driverLocation, reopenedValidation.error, "elf");
-        return fail_build(diagnostics, summary);
+        if (summary) append_diagnostics(diagnostics, summary, "<filesystem>");
+        return fail_project(summary);
     }
     const uint64_t reopenedHash = hash_bytes(s_reopened, static_cast<uint32_t>(reopenedBytes));
     serial::puts("Compiler: reopened_bytes=");
@@ -377,34 +338,55 @@ bool compile(const char* sourcePath,
     put_hash(reopenedHash);
     serial::puts(" readback ELF validation PASS\n");
     if (reopenedHash != outputHash) {
+        Diagnostics diagnostics;
         diagnostics.error(driverLocation, "reopened ELF hash differs from produced ELF hash", "filesystem");
-        return fail_build(diagnostics, summary);
+        if (summary) append_diagnostics(diagnostics, summary, "<filesystem>");
+        return fail_project(summary);
     }
 
     if (summary) {
         summary->success = true;
         summary->reopenedAndValidated = true;
-        summary->sourceBytes = sourceBytes;
-        summary->tokenCount = tokenCount;
-        summary->functionCount = unit.functionCount;
-        summary->entryCodeOffset = entryCodeOffset;
-        summary->returnConstantValid = function.returnConstantValid;
-        summary->returnConstant = function.returnConstant;
-        summary->codeBytes = codeBytes;
-        summary->hasHostLog = function.hasHostLog;
-        for (uint32_t i = 0; i < codeBytes && i < sizeof(summary->code); ++i) summary->code[i] = s_code[i];
+        summary->sourceBytes = totalSourceBytes;
+        summary->tokenCount = totalTokenCount;
+        summary->functionCount = 0;
+        summary->recursiveSccCount = s_linked.recursiveSccCount;
+        summary->entryCodeOffset = s_linked.entryCodeOffset;
+        summary->codeBytes = s_linked.codeBytes;
+        summary->dataBytes = s_linked.dataBytes;
         summary->outputBytes = layout.outputBytes;
-        summary->dataBytes = dataBytes;
-        for (uint32_t i = 0; i < dataBytes && i < sizeof(summary->data); ++i) summary->data[i] = s_data[i];
-        summary->sourceHash = sourceHash;
+        summary->sourceHash = sourceCount == 1 ? s_modules[0].sourceHash : projectSourceHash;
         summary->outputHash = outputHash;
         summary->reopenedHash = reopenedHash;
-        summary->dataHash = hash_bytes(s_data, dataBytes);
+        summary->dataHash = hash_bytes(s_linked.data, s_linked.dataBytes);
+        for (uint32_t i = 0; i < sourceCount; ++i) {
+            summary->functionCount += s_modules[i].functionCount;
+        }
+        for (uint32_t i = 0; i < COMPILER_MAX_PROJECT_EXPORTS &&
+                           i < COMPILER_MAX_FUNCTIONS; ++i)
+            summary->recursiveFunction[i] = s_linked.recursiveFunction[i];
+        for (uint32_t i = 0; i < s_linked.codeBytes && i < sizeof(summary->code); ++i)
+            summary->code[i] = s_linked.code[i];
+        for (uint32_t i = 0; i < s_linked.dataBytes && i < sizeof(summary->data); ++i)
+            summary->data[i] = s_linked.data[i];
+        for (uint32_t i = 0; i < sourceCount; ++i) {
+            for (uint32_t e = 0; e < s_modules[i].exportCount; ++e) {
+                if (!s_modules[i].exports[e].isEntry) continue;
+                summary->hasHostLog = s_modules[i].hasHostLog;
+                summary->returnConstantValid = s_modules[i].returnConstantValid;
+                summary->returnConstant = s_modules[i].returnConstant;
+            }
+        }
     }
-
     serial::puts("Compiler: ELF validation PASS\n");
     serial::puts("Compiler: build PASS\n");
     return true;
+}
+
+bool compile(const char* sourcePath, const char* outputPath, CompileSummary* summary)
+{
+    const char* sources[1] = {sourcePath};
+    return compile_project(sources, 1, outputPath, summary);
 }
 
 void run_bootstrap_smoke()

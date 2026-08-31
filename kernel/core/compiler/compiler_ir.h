@@ -34,6 +34,15 @@ static const uint32_t COMPILER_MAX_LOOP_NESTING = 8;
 // Backend loop-control targets use the same bound as parser loop nesting.
 static const uint32_t COMPILER_MAX_LOOP_TARGET_DEPTH = COMPILER_MAX_LOOP_NESTING;
 static const uint32_t COMPILER_MAX_CODE_BYTES = 24576;
+static const uint32_t COMPILER_MAX_LINKED_CODE_BYTES = 65536;
+static const uint32_t COMPILER_MAX_LINKED_DATA_BYTES = 8192;
+static const uint32_t COMPILER_MAX_TRANSLATION_UNITS = 16;
+static const uint32_t COMPILER_MAX_DECLARATIONS = 16;
+static const uint32_t COMPILER_MAX_PROJECT_EXPORTS = 128;
+static const uint32_t COMPILER_MAX_PROJECT_IMPORTS = 128;
+static const uint32_t COMPILER_MAX_PROJECT_RELOCATIONS = 256;
+static const uint32_t COMPILER_MAX_MODULE_RELOCATIONS = 64;
+static const uint32_t COMPILER_MAX_SOURCE_PATH_BYTES = 256;
 
 static const uint16_t COMPILER_INVALID_INDEX = 0xFFFFU;
 
@@ -126,7 +135,9 @@ struct CallSite {
     uint16_t argumentStart;
     uint16_t argumentCount;
     uint16_t calleeFunction;
-    uint16_t reserved;
+    uint16_t expectedParameterCount;
+    bool external;
+    uint8_t reserved;
     SourceLocation location;
 };
 
@@ -146,6 +157,7 @@ struct FunctionIR {
     uint16_t callArgumentCount;
     uint16_t maxTemporarySlots;
     uint16_t codeLabel;
+    uint32_t codeOffset;
     uint32_t dataOffset;
     uint32_t statementCount;
     uint32_t blockCount;
@@ -183,15 +195,113 @@ struct FunctionSymbol {
     SourceLocation location;
 };
 
+struct FunctionDeclaration {
+    char name[COMPILER_FUNCTION_NAME_CAPACITY];
+    uint16_t parameterCount;
+    bool usesAppContext;
+    uint8_t reserved;
+    SourceLocation location;
+};
+
 struct TranslationUnitIR {
     uint32_t functionCount;
     uint16_t entryFunction;
     uint16_t callGraphEdgeCount;
     uint16_t recursiveSccCount;
+    uint16_t declarationCount;
     FunctionIR functions[COMPILER_MAX_FUNCTIONS];
     FunctionSymbol functionSymbols[COMPILER_MAX_FUNCTIONS];
+    FunctionDeclaration declarations[COMPILER_MAX_DECLARATIONS];
     bool callGraph[COMPILER_MAX_FUNCTIONS][COMPILER_MAX_FUNCTIONS];
     bool recursiveFunction[COMPILER_MAX_FUNCTIONS];
+};
+
+enum class RelocationKind : uint8_t {
+    CallRel32,
+    DataAddress64,
+};
+
+struct RelocationRecord {
+    RelocationKind kind;
+    uint8_t width;
+    uint16_t reserved;
+    uint32_t patchOffset;
+    uint32_t dataOffset;
+    char targetSymbolName[COMPILER_FUNCTION_NAME_CAPACITY];
+    SourceLocation location;
+};
+
+struct ExportSymbol {
+    char name[COMPILER_FUNCTION_NAME_CAPACITY];
+    uint32_t moduleCodeOffset;
+    uint16_t parameterCount;
+    bool isEntry;
+    uint8_t reserved;
+    SourceLocation location;
+};
+
+struct ImportSymbol {
+    char name[COMPILER_FUNCTION_NAME_CAPACITY];
+    uint16_t expectedParameterCount;
+    uint16_t reserved;
+    SourceLocation location;
+};
+
+// This is the deliberately small guideXOS-internal object representation.
+// It is held in memory for one build and is never serialized as a general ELF
+// relocatable object file.
+struct CompiledModule {
+    char sourcePath[COMPILER_MAX_SOURCE_PATH_BYTES];
+    uint32_t sourceBytes;
+    uint32_t tokenCount;
+    uint32_t codeBytes;
+    uint8_t code[COMPILER_MAX_CODE_BYTES];
+    uint32_t dataBytes;
+    uint8_t data[COMPILER_MAX_LINKED_DATA_BYTES];
+    uint32_t exportCount;
+    ExportSymbol exports[COMPILER_MAX_FUNCTIONS];
+    uint32_t importCount;
+    ImportSymbol imports[COMPILER_MAX_FUNCTIONS];
+    uint32_t relocationCount;
+    RelocationRecord relocations[COMPILER_MAX_MODULE_RELOCATIONS];
+    uint32_t entryCodeOffset;
+    uint32_t functionCount;
+    bool hasEntry;
+    bool hasHostLog;
+    bool returnConstantValid;
+    int32_t returnConstant;
+    bool recursiveFunction[COMPILER_MAX_FUNCTIONS];
+    bool callGraph[COMPILER_MAX_FUNCTIONS][COMPILER_MAX_FUNCTIONS];
+    uint64_t sourceHash;
+    uint16_t recursiveSccCount;
+    uint16_t reserved;
+};
+
+struct GlobalFunctionSymbol {
+    char name[COMPILER_FUNCTION_NAME_CAPACITY];
+    uint16_t moduleIndex;
+    uint16_t parameterCount;
+    uint32_t moduleCodeOffset;
+    uint32_t finalCodeOffset;
+    bool isEntry;
+    uint8_t reserved[3];
+};
+
+struct LinkedProgram {
+    uint32_t moduleCount;
+    uint32_t codeBytes;
+    uint8_t code[COMPILER_MAX_LINKED_CODE_BYTES];
+    uint32_t dataBytes;
+    uint8_t data[COMPILER_MAX_LINKED_DATA_BYTES];
+    uint32_t entryCodeOffset;
+    uint32_t dataFileOffset;
+    uint32_t exportCount;
+    GlobalFunctionSymbol exports[COMPILER_MAX_PROJECT_EXPORTS];
+    uint32_t importCount;
+    uint32_t relocationCount;
+    uint16_t recursiveSccCount;
+    bool recursiveFunction[COMPILER_MAX_PROJECT_EXPORTS];
+    bool linked;
 };
 
 } // namespace compiler

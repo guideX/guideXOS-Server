@@ -888,6 +888,29 @@ static int32_t find_function(const TranslationUnitIR& unit, const char* name)
     return -1;
 }
 
+static int32_t find_declaration(const TranslationUnitIR& unit, const char* name)
+{
+    for (uint32_t i = 0; i < unit.declarationCount; ++i)
+        if (name_equals(unit.declarations[i].name, name)) return static_cast<int32_t>(i);
+    return -1;
+}
+
+static bool function_signature_matches(const FunctionIR& function,
+                                       uint16_t parameterCount,
+                                       bool usesAppContext)
+{
+    return function.parameterCount == parameterCount &&
+        function.usesAppContext == usesAppContext;
+}
+
+static bool declaration_signature_matches(const FunctionDeclaration& declaration,
+                                          uint16_t parameterCount,
+                                          bool usesAppContext)
+{
+    return declaration.parameterCount == parameterCount &&
+        declaration.usesAppContext == usesAppContext;
+}
+
 static void classify_recursive_sccs(TranslationUnitIR* unit)
 {
     if (!unit) return;
@@ -919,9 +942,10 @@ static void classify_recursive_sccs(TranslationUnitIR* unit)
 } // namespace
 
 bool parse_translation_unit(const char* source, const Token* tokens, uint32_t tokenCount,
-                            TranslationUnitIR* output, Diagnostics& diagnostics)
+                            TranslationUnitIR* output, Diagnostics& diagnostics,
+                            CallSite* callStorage, uint16_t* callArgumentStorage)
 {
-    if (!source || !tokens || !output || tokenCount == 0) {
+    if (!source || !tokens || !output || tokenCount == 0 || !callStorage || !callArgumentStorage) {
         const SourceLocation location = {0, 1, 1};
         diagnostics.error(location, "invalid parser input", "parser");
         return false;
@@ -929,8 +953,10 @@ bool parse_translation_unit(const char* source, const Token* tokens, uint32_t to
     *output = {};
     output->entryFunction = COMPILER_INVALID_INDEX;
     for (uint32_t f = 0; f < COMPILER_MAX_FUNCTIONS; ++f) {
-        for (uint32_t c = 0; c < COMPILER_MAX_CALL_EXPRESSIONS; ++c) s_callSites[f][c] = {};
-        for (uint32_t a = 0; a < COMPILER_MAX_CALL_ARGUMENT_NODES; ++a) s_callArguments[f][a] = COMPILER_INVALID_INDEX;
+        for (uint32_t c = 0; c < COMPILER_MAX_CALL_EXPRESSIONS; ++c)
+            callStorage[f * COMPILER_MAX_CALL_EXPRESSIONS + c] = {};
+        for (uint32_t a = 0; a < COMPILER_MAX_CALL_ARGUMENT_NODES; ++a)
+            callArgumentStorage[f * COMPILER_MAX_CALL_ARGUMENT_NODES + a] = COMPILER_INVALID_INDEX;
     }
     uint32_t index = 0;
     while (tokens[token_index_or_eof(index, tokenCount)].kind != TokenKind::EndOfFile) {
@@ -946,33 +972,22 @@ bool parse_translation_unit(const char* source, const Token* tokens, uint32_t to
         FunctionIR& function = output->functions[output->functionCount];
         function = {};
         function.functionIndex = static_cast<uint16_t>(output->functionCount);
-        function.calls = s_callSites[output->functionCount];
-        function.callArguments = s_callArguments[output->functionCount];
+        function.calls = callStorage + output->functionCount * COMPILER_MAX_CALL_EXPRESSIONS;
+        function.callArguments = callArgumentStorage + output->functionCount * COMPILER_MAX_CALL_ARGUMENT_NODES;
         function.returnExpression = COMPILER_INVALID_INDEX;
         function.rootBlock = COMPILER_INVALID_INDEX;
         function.codeLabel = COMPILER_INVALID_INDEX;
 
         ++index;
         const Token nameToken = tokens[token_index_or_eof(index, tokenCount)];
-        if (!token_is_name(nameToken) || (nameToken.kind == TokenKind::KeywordGxMain && output->entryFunction != COMPILER_INVALID_INDEX)) {
-            if (token_is_gx_main(nameToken) && output->entryFunction != COMPILER_INVALID_INDEX) {
-                diagnostics.error_identifier(nameToken.location, "duplicate function ",
-                                              source + nameToken.location.offset, nameToken.length, "function");
-            } else {
-                diagnostics.error(nameToken.location, "expected function identifier", "function");
-            }
+        if (!token_is_name(nameToken)) {
+            diagnostics.error(nameToken.location, "expected function identifier", "function");
             return false;
         }
         function.location = nameToken.location;
         for (uint32_t i = 0; i < output->functionCount; ++i) {
-            if (tokens[token_index_or_eof(index, tokenCount)].length == 0) break;
             const FunctionSymbol& existing = output->functionSymbols[i];
-            uint32_t length = 0;
-            while (existing.name[length]) ++length;
-            bool same = length == nameToken.length;
-            for (uint32_t j = 0; same && j < length; ++j)
-                if (existing.name[j] != source[nameToken.location.offset + j]) same = false;
-            if (same) {
+            if (token_text_equals(source, nameToken, existing.name)) {
                 diagnostics.error_identifier(nameToken.location, "duplicate function ",
                                               source + nameToken.location.offset, nameToken.length, "function");
                 return false;
@@ -980,12 +995,6 @@ bool parse_translation_unit(const char* source, const Token* tokens, uint32_t to
         }
         for (uint32_t i = 0; i < nameToken.length; ++i) function.name[i] = source[nameToken.location.offset + i];
         function.name[nameToken.length] = '\0';
-        FunctionSymbol& symbol = output->functionSymbols[output->functionCount];
-        symbol = {};
-        for (uint32_t i = 0; i < nameToken.length; ++i) symbol.name[i] = function.name[i];
-        symbol.name[nameToken.length] = '\0';
-        symbol.functionIndex = static_cast<uint16_t>(output->functionCount);
-        symbol.location = nameToken.location;
         ++index;
 
         if (tokens[token_index_or_eof(index, tokenCount)].kind != TokenKind::LeftParen) {
@@ -1047,30 +1056,34 @@ bool parse_translation_unit(const char* source, const Token* tokens, uint32_t to
                     }
                     ++index;
                     const Token parameter = tokens[token_index_or_eof(index, tokenCount)];
-                    if (!token_is_name(parameter) || parameter.kind == TokenKind::KeywordGxMain) {
+                    const bool hasParameterName = token_is_name(parameter) && parameter.kind != TokenKind::KeywordGxMain;
+                    if (!hasParameterName && parameter.kind != TokenKind::Comma &&
+                        parameter.kind != TokenKind::RightParen) {
                         diagnostics.error(parameter.location, "expected parameter identifier", "parameter");
                         return false;
                     }
-                    for (uint32_t i = 0; i < parameterIndex; ++i) {
-                        uint32_t length = 0;
-                        while (function.parameters[i].name[length]) ++length;
-                        bool same = length == parameter.length;
-                        for (uint32_t j = 0; same && j < length; ++j)
-                            if (function.parameters[i].name[j] != source[parameter.location.offset + j]) same = false;
-                        if (same) {
-                            diagnostics.error_identifier(parameter.location, "duplicate parameter ",
-                                                          source + parameter.location.offset, parameter.length, "parameter");
-                            return false;
+                    if (hasParameterName) {
+                        for (uint32_t i = 0; i < parameterIndex; ++i) {
+                            uint32_t length = 0;
+                            while (function.parameters[i].name[length]) ++length;
+                            bool same = length == parameter.length;
+                            for (uint32_t j = 0; same && j < length; ++j)
+                                if (function.parameters[i].name[j] != source[parameter.location.offset + j]) same = false;
+                            if (same) {
+                                diagnostics.error_identifier(parameter.location, "duplicate parameter ",
+                                                              source + parameter.location.offset, parameter.length, "parameter");
+                                return false;
+                            }
                         }
+                        ParameterSymbol& parameterSymbol = function.parameters[parameterIndex];
+                        parameterSymbol = {};
+                        for (uint32_t i = 0; i < parameter.length; ++i) parameterSymbol.name[i] = source[parameter.location.offset + i];
+                        parameterSymbol.kind = ParameterKind::Integer;
+                        parameterSymbol.slot = static_cast<uint16_t>(parameterIndex);
+                        parameterSymbol.initialized = true;
+                        ++index;
                     }
-                    ParameterSymbol& parameterSymbol = function.parameters[parameterIndex];
-                    parameterSymbol = {};
-                    for (uint32_t i = 0; i < parameter.length; ++i) parameterSymbol.name[i] = source[parameter.location.offset + i];
-                    parameterSymbol.kind = ParameterKind::Integer;
-                    parameterSymbol.slot = static_cast<uint16_t>(parameterIndex);
-                    parameterSymbol.initialized = true;
                     ++parameterIndex;
-                    ++index;
                     if (tokens[token_index_or_eof(index, tokenCount)].kind != TokenKind::Comma) break;
                     ++index;
                 }
@@ -1078,22 +1091,76 @@ bool parse_translation_unit(const char* source, const Token* tokens, uint32_t to
             function.parameterCount = static_cast<uint16_t>(parameterIndex);
             function.integerParameterCount = static_cast<uint16_t>(parameterIndex);
         }
-        symbol.parameterCount = function.parameterCount;
         if (tokens[token_index_or_eof(index, tokenCount)].kind != TokenKind::RightParen) {
             diagnostics.error(tokens[token_index_or_eof(index, tokenCount)].location,
                               "expected ')' after parameter list", "parameter");
             return false;
         }
         ++index;
+        const bool declaration = tokens[token_index_or_eof(index, tokenCount)].kind == TokenKind::Semicolon;
+        if (declaration) {
+            const int32_t definition = find_function(*output, function.name);
+            if (definition >= 0 && !function_signature_matches(output->functions[definition],
+                                                                 function.parameterCount,
+                                                                 function.usesAppContext)) {
+                diagnostics.error_identifier(nameToken.location, "conflicting declaration for function ",
+                                              function.name, nameToken.length, "function");
+                return false;
+            }
+            const int32_t existing = find_declaration(*output, function.name);
+            if (existing >= 0) {
+                if (!declaration_signature_matches(output->declarations[existing], function.parameterCount,
+                                                   function.usesAppContext)) {
+                    diagnostics.error_identifier(nameToken.location, "conflicting declaration for function ",
+                                                  function.name, nameToken.length, "function");
+                    return false;
+                }
+            } else {
+                if (output->declarationCount >= COMPILER_MAX_DECLARATIONS) {
+                    diagnostics.error(nameToken.location, "declaration capacity exceeded (maximum is 16)", "function");
+                    return false;
+                }
+                FunctionDeclaration& declarationRecord = output->declarations[output->declarationCount++];
+                declarationRecord = {};
+                for (uint32_t i = 0; i < nameToken.length; ++i) declarationRecord.name[i] = function.name[i];
+                declarationRecord.name[nameToken.length] = '\0';
+                declarationRecord.parameterCount = function.parameterCount;
+                declarationRecord.usesAppContext = function.usesAppContext;
+                declarationRecord.location = nameToken.location;
+            }
+            ++index;
+            continue;
+        }
+        if (find_function(*output, function.name) >= 0) {
+            diagnostics.error_identifier(nameToken.location, "duplicate function ",
+                                          function.name, nameToken.length, "function");
+            return false;
+        }
+        for (uint32_t p = 0; p < function.parameterCount; ++p) {
+            if (function.parameters[p].name[0] == '\0') {
+                diagnostics.error(tokens[token_index_or_eof(index, tokenCount)].location,
+                                  "function definitions require parameter identifiers", "parameter");
+                return false;
+            }
+        }
+        const int32_t declarationIndex = find_declaration(*output, function.name);
+        if (declarationIndex >= 0 &&
+            !declaration_signature_matches(output->declarations[declarationIndex], function.parameterCount,
+                                           function.usesAppContext)) {
+            diagnostics.error_identifier(nameToken.location, "conflicting declaration for function ",
+                                          function.name, nameToken.length, "function");
+            return false;
+        }
+        FunctionSymbol& symbol = output->functionSymbols[output->functionCount];
+        symbol = {};
+        for (uint32_t i = 0; i < nameToken.length; ++i) symbol.name[i] = function.name[i];
+        symbol.name[nameToken.length] = '\0';
+        symbol.functionIndex = static_cast<uint16_t>(output->functionCount);
+        symbol.parameterCount = function.parameterCount;
+        symbol.location = nameToken.location;
         if (!parser.parse_body()) return false;
         if (token_is_gx_main(nameToken)) output->entryFunction = static_cast<uint16_t>(output->functionCount);
         ++output->functionCount;
-    }
-
-    if (output->entryFunction == COMPILER_INVALID_INDEX) {
-        diagnostics.error(tokens[token_index_or_eof(index, tokenCount)].location,
-                          "missing gx_main entry function", "function");
-        return false;
     }
 
     for (uint32_t i = 0; i < output->functionCount; ++i) {
@@ -1101,24 +1168,33 @@ bool parse_translation_unit(const char* source, const Token* tokens, uint32_t to
         for (uint32_t j = 0; j < function.callCount; ++j) {
             CallSite& call = function.calls[j];
             const int32_t callee = find_function(*output, call.calleeName);
-            if (callee < 0) {
+            const int32_t declaration = find_declaration(*output, call.calleeName);
+            uint32_t expected = 0;
+            if (callee >= 0) expected = output->functions[callee].parameterCount;
+            else if (declaration >= 0) expected = output->declarations[declaration].parameterCount;
+            else {
                 diagnostics.error_identifier(call.location, "unknown function ", call.calleeName,
                                               name_length(call.calleeName), "call");
                 return false;
             }
-            if (static_cast<uint16_t>(callee) == output->entryFunction) {
+            if (callee >= 0 && static_cast<uint16_t>(callee) == output->entryFunction) {
                 diagnostics.error(call.location, "gx_main is not callable from source", "call");
                 return false;
             }
-            const uint32_t expected = output->functions[callee].parameterCount;
+            if (callee < 0 && name_equals(call.calleeName, "gx_main")) {
+                diagnostics.error(call.location, "gx_main is not callable from source", "call");
+                return false;
+            }
             if (expected != call.argumentCount) {
                 diagnostics.error_function_argument_count(call.location, call.calleeName,
                                                           name_length(call.calleeName),
                                                           expected, call.argumentCount);
                 return false;
             }
-            call.calleeFunction = static_cast<uint16_t>(callee);
-            if (!output->callGraph[i][callee]) {
+            call.expectedParameterCount = static_cast<uint16_t>(expected);
+            call.external = callee < 0;
+            call.calleeFunction = callee < 0 ? COMPILER_INVALID_INDEX : static_cast<uint16_t>(callee);
+            if (callee >= 0 && !output->callGraph[i][callee]) {
                 if (output->callGraphEdgeCount >= COMPILER_MAX_CALL_GRAPH_EDGES) {
                     diagnostics.error(call.location, "call graph edge capacity exceeded", "call-graph");
                     return false;
@@ -1134,6 +1210,17 @@ bool parse_translation_unit(const char* source, const Token* tokens, uint32_t to
     return !diagnostics.has_error();
 }
 
+bool parse_translation_unit(const char* source, const Token* tokens, uint32_t tokenCount,
+                            TranslationUnitIR* output, Diagnostics& diagnostics)
+{
+    for (uint32_t f = 0; f < COMPILER_MAX_FUNCTIONS; ++f) {
+        for (uint32_t c = 0; c < COMPILER_MAX_CALL_EXPRESSIONS; ++c) s_callSites[f][c] = {};
+        for (uint32_t a = 0; a < COMPILER_MAX_CALL_ARGUMENT_NODES; ++a) s_callArguments[f][a] = COMPILER_INVALID_INDEX;
+    }
+    return parse_translation_unit(source, tokens, tokenCount, output, diagnostics,
+                                  &s_callSites[0][0], &s_callArguments[0][0]);
+}
+
 bool parse_function(const char* source, const Token* tokens, uint32_t tokenCount,
                     FunctionIR* output, Diagnostics& diagnostics)
 {
@@ -1142,7 +1229,9 @@ bool parse_function(const char* source, const Token* tokens, uint32_t tokenCount
     unit = {};
     if (!parse_translation_unit(source, tokens, tokenCount, &unit, diagnostics)) return false;
     if (unit.functionCount != 1) {
-        diagnostics.error(unit.functions[unit.entryFunction].location,
+        diagnostics.error(unit.entryFunction < unit.functionCount
+                              ? unit.functions[unit.entryFunction].location
+                              : (SourceLocation){0, 1, 1},
                           "parse_function accepts only one function; use parse_translation_unit for multiple functions",
                           "parser");
         return false;
