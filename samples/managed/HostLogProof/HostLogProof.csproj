@@ -103,6 +103,9 @@
   <PropertyGroup Condition="'$(HostLogProofMode)' == 'LastN0DirectGen1Window'">
     <DefineConstants>$(DefineConstants);HOSTLOGPROOF_FIRST_COLLECTION_BOUNDARY_ALLOCATION;HOSTLOGPROOF_SHORT_WEAK_LIFETIME;HOSTLOGPROOF_C011EC37;HOSTLOGPROOF_C011EC40;HOSTLOGPROOF_C011EC41;HOSTLOGPROOF_C011EC55;HOSTLOGPROOF_C011EC57;HOSTLOGPROOF_C011EC58;HOSTLOGPROOF_C011EC59</DefineConstants>
   </PropertyGroup>
+  <PropertyGroup Condition="'$(HostLogProofMode)' == 'PreLastN0PromotionTiming'">
+    <DefineConstants>$(DefineConstants);HOSTLOGPROOF_FIRST_COLLECTION_BOUNDARY_ALLOCATION;HOSTLOGPROOF_SHORT_WEAK_LIFETIME;HOSTLOGPROOF_C011EC37;HOSTLOGPROOF_C011EC40;HOSTLOGPROOF_C011EC41;HOSTLOGPROOF_C011EC55;HOSTLOGPROOF_C011EC57;HOSTLOGPROOF_C011EC58;HOSTLOGPROOF_C011EC60</DefineConstants>
+  </PropertyGroup>
   <PropertyGroup Condition="'$(HostLogProofMode)' == 'DirectGen1BudgetCondemnation' and '$(HostLogProofC57Strategy)' == 'S1'">
     <DefineConstants>$(DefineConstants);HOSTLOGPROOF_C011EC57_S1</DefineConstants>
   </PropertyGroup>
@@ -129,6 +132,15 @@
   </PropertyGroup>
   <PropertyGroup Condition="'$(HostLogProofMode)' == 'LastN0DirectGen1Window' and '$(HostLogProofC57Strategy)' == 'S3'">
     <DefineConstants>$(DefineConstants);HOSTLOGPROOF_C011EC57_S3</DefineConstants>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(HostLogProofMode)' == 'PreLastN0PromotionTiming' and '$(HostLogProofC60Strategy)' == 'T0'">
+    <DefineConstants>$(DefineConstants);HOSTLOGPROOF_C011EC57_S2;HOSTLOGPROOF_C011EC60_T0</DefineConstants>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(HostLogProofMode)' == 'PreLastN0PromotionTiming' and '$(HostLogProofC60Strategy)' == 'T1'">
+    <DefineConstants>$(DefineConstants);HOSTLOGPROOF_C011EC60_T1</DefineConstants>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(HostLogProofMode)' == 'PreLastN0PromotionTiming' and '$(HostLogProofC60Strategy)' == 'T2'">
+    <DefineConstants>$(DefineConstants);HOSTLOGPROOF_C011EC60_T2</DefineConstants>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(HostLogProofMode)' == 'FirstNonNullRoot'">

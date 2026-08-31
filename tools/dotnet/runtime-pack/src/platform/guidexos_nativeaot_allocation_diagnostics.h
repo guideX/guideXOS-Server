@@ -1564,6 +1564,123 @@ typedef struct guidexos_nativeaot_c011ec58_lifecycle_record {
         GUIDEXOS_NATIVEAOT_C011EC58_MAX_ENTRIES];
 } guidexos_nativeaot_c011ec58_lifecycle_record;
 
+/* C011EC60 source-accounting chronology.  These records are intentionally
+ * scalar and fixed-size: the GC source probe never allocates, waits, changes
+ * a counter, or changes a collection decision. */
+enum {
+    GUIDEXOS_NATIVEAOT_C011EC60_MAX_EVENTS = 512u,
+    GUIDEXOS_NATIVEAOT_C011EC60_EVENT_SURVIVE = 1u,
+    GUIDEXOS_NATIVEAOT_C011EC60_EVENT_PROMOTE = 2u,
+    GUIDEXOS_NATIVEAOT_C011EC60_EVENT_COMPUTE_IN = 3u,
+    GUIDEXOS_NATIVEAOT_C011EC60_EVENT_DYNAMIC = 4u,
+    GUIDEXOS_NATIVEAOT_C011EC60_EVENT_GCNEW = 5u,
+    GUIDEXOS_NATIVEAOT_C011EC60_EVENT_GEN1_DEBIT = 6u,
+    GUIDEXOS_NATIVEAOT_C011EC60_EVENT_ENTRY = 7u,
+    GUIDEXOS_NATIVEAOT_C011EC60_EVENT_B02 = 8u,
+    GUIDEXOS_NATIVEAOT_C011EC60_EVENT_POLICY = 9u,
+};
+
+typedef struct guidexos_nativeaot_c011ec60_event_record {
+    uint32_t observed;
+    uint32_t eventOrdinal;
+    uint32_t kind;
+    uint32_t collectionOrdinal;
+    uint32_t allocationWave;
+    uint32_t survivorCohort;
+    uint32_t policyEntryOrdinal;
+    uint32_t entryOrdinal;
+    uint32_t generation;
+    uint32_t reserved[3];
+    uintptr_t promotedBytes;
+    uintptr_t survivedBytes;
+    uintptr_t generationAllocationSize;
+    uintptr_t debitBytes;
+    uintptr_t gen1DesiredAllocation;
+    uintptr_t gen1GcNewBefore;
+    uintptr_t gen1GcNewAfter;
+    uintptr_t gen1NewBefore;
+    uintptr_t gen1NewAfter;
+    uintptr_t retainedBytes;
+    uintptr_t survivorCount;
+    int64_t gen1NewSignedBefore;
+    int64_t gen1NewSignedAfter;
+} guidexos_nativeaot_c011ec60_event_record;
+
+typedef struct guidexos_nativeaot_c011ec60_lifecycle_record {
+    uint32_t started;
+    uint32_t strategy;
+    uint32_t eventCount;
+    uint32_t eventOverflow;
+    uint32_t sourceCallbackCount;
+    uint32_t surviveCount;
+    uint32_t promoteCount;
+    uint32_t computeInCount;
+    uint32_t dynamicCount;
+    uint32_t gcNewCount;
+    uint32_t debitCount;
+    uint32_t entryCount;
+    uint32_t entry1EventOrdinal;
+    uint32_t entry2EventOrdinal;
+    uint32_t entry3EventOrdinal;
+    uint32_t firstPromotionEventOrdinal;
+    uint32_t firstDebitEventOrdinal;
+    uint32_t lastPromotionEventOrdinal;
+    uint32_t lastDebitEventOrdinal;
+    uint32_t promotionBeforeEntry2;
+    uint32_t debitBeforeEntry2;
+    uint32_t promotionAfterEntry2;
+    uint32_t debitAfterEntry2;
+    uint32_t entry2Observed;
+    uint32_t postEntry2AccountingObserved;
+    uint32_t b02Observed;
+    uint32_t b02Crossed;
+    uint32_t timingClass;
+    uint32_t invariantFailures;
+    uint32_t safeStopReason;
+    uint32_t b02EventOrdinal;
+    uint32_t b02PolicyEntryOrdinal;
+    uint32_t b02NInitial;
+    uint32_t b02NBefore;
+    uint32_t b02NAfter;
+    uint32_t reserved[1];
+    uintptr_t promotedBytesObservedBeforeEntry2;
+    uintptr_t promotedBytesTransferredBeforeEntry2;
+    uintptr_t debitBytesBeforeEntry2;
+    uintptr_t entry2SurvivorCount;
+    uintptr_t entry2RetainedBytes;
+    uintptr_t entry2PromotedBytesIncorporated;
+    uintptr_t entry2Gen1DesiredAllocation;
+    uintptr_t entry2Gen1GcNewAllocation;
+    uintptr_t entry2Gen1NewRaw;
+    int64_t entry2Gen1NewSigned;
+    uint32_t entry2PolicyEventOrdinal;
+    uint32_t reservedEntry2;
+    uintptr_t entry2FinalPolicyGen1DesiredAllocation;
+    uintptr_t entry2FinalPolicyGen1GcNewAllocation;
+    uintptr_t entry2FinalPolicyGen1NewRaw;
+    int64_t entry2FinalPolicyGen1NewSigned;
+    uintptr_t postEntry2PromotedBytesIncorporated;
+    uintptr_t postEntry2Gen1DesiredAllocation;
+    uintptr_t postEntry2Gen1GcNewAllocation;
+    uintptr_t postEntry2Gen1NewRaw;
+    int64_t postEntry2Gen1NewSigned;
+    uintptr_t lastPromotedBytes;
+    uintptr_t lastSurvivedBytes;
+    uintptr_t lastGenerationAllocationSize;
+    uintptr_t promotedBytesTransferred;
+    uintptr_t debitBytesObserved;
+    uintptr_t lastGen1DesiredAllocation;
+    uintptr_t lastGen1GcNewAllocation;
+    uintptr_t lastGen1NewRaw;
+    int64_t lastGen1NewSigned;
+    uintptr_t b02Gen1NewRaw;
+    int64_t b02Gen1NewSigned;
+    uintptr_t b02SurvivorCount;
+    uintptr_t b02PromotedBytes;
+    guidexos_nativeaot_c011ec60_event_record events[
+        GUIDEXOS_NATIVEAOT_C011EC60_MAX_EVENTS];
+} guidexos_nativeaot_c011ec60_lifecycle_record;
+
 typedef struct guidexos_nativeaot_c011ec54_lifecycle_record {
     uint32_t started;
     uint32_t preflightEmitted;
@@ -3966,6 +4083,8 @@ typedef struct guidexos_nativeaot_allocation_diagnostics {
     guidexos_nativeaot_c011ec56_lifecycle_record c011ec56Lifecycle;
     /* C011EC58 bounded n_initial call-site and allocation provenance. */
     guidexos_nativeaot_c011ec58_lifecycle_record c011ec58Lifecycle;
+    /* C011EC60 source promotion-to-gen1-budget chronology. */
+    guidexos_nativeaot_c011ec60_lifecycle_record c011ec60Lifecycle;
     /* C011EC44 malformed transition-frame provenance. */
     guidexos_nativeaot_c011ec44_provenance_record c011ec44Provenance;
     /* C011EC45 reverse-P/Invoke slot layout, register, and unwind provenance. */

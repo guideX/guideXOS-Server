@@ -665,7 +665,95 @@ public static unsafe class Program
         nint[] initialAddresses = new nint[maximumSurvivors];
         int lastManagedCollection = GC.CollectionCount(0);
         bool stop = false;
-        for (uint cohort = 1u; cohort <= maximumCohorts && !stop; cohort++)
+#if HOSTLOGPROOF_C011EC60_T1
+        // T1 is a bounded ordinary timing prelude.  It gives one small live
+        // cohort a chance to cross a natural gen0 collection before the main
+        // C57 allocation schedule starts; no collection or generation policy
+        // is requested by the workload.
+        const uint earlySurvivorCount = 8u;
+        const uint earlyTransientAllocations = 48u;
+        if (GuideXosNativeAotC011EC57CohortStarted(
+                1u, earlySurvivorCount,
+                (nint)(earlySurvivorCount * alignedSurvivorAllocationSize)) != 0)
+        {
+            return -1;
+        }
+        for (uint offset = 0u; offset < earlySurvivorCount; offset++)
+        {
+            uint ordinal = offset;
+            if (GuideXosNativeAotC011EC57BeforeAllocation(
+                    ordinal, payloadSize, offset) != 0)
+            {
+                return -1;
+            }
+            byte[] value = new byte[payloadSize];
+            WriteIdentifyingPattern(value, ordinal);
+            nint objectAddress = Unsafe.As<byte[], nint>(ref value);
+            if (GuideXosNativeAotC011EC57AfterAllocation(objectAddress) != 0 ||
+                !HasIdentifyingPattern(value, ordinal) ||
+                GuideXosNativeAotC011EC57ManagedReadback(ordinal, 1u) != 0)
+            {
+                return -1;
+            }
+            survivors[offset] = value;
+            survivorOrdinals[offset] = ordinal;
+            initialGenerations[offset] = (uint)GC.GetGeneration(value);
+            initialAddresses[offset] = objectAddress;
+            if (initialGenerations[offset] != 0u)
+            {
+                return -1;
+            }
+            GC.KeepAlive(survivors);
+            GC.KeepAlive(value);
+        }
+        for (uint offset = 0u; offset < earlyTransientAllocations; offset++)
+        {
+            uint ordinal = earlySurvivorCount + offset;
+            if (GuideXosNativeAotC011EC57BeforeAllocation(
+                    ordinal, payloadSize, offset) != 0)
+            {
+                return -1;
+            }
+            byte[] value = new byte[payloadSize];
+            WriteIdentifyingPattern(value, ordinal);
+            nint objectAddress = Unsafe.As<byte[], nint>(ref value);
+            if (GuideXosNativeAotC011EC57AfterAllocation(objectAddress) != 0 ||
+                !HasIdentifyingPattern(value, ordinal) ||
+                GuideXosNativeAotC011EC57ManagedReadback(ordinal, 1u) != 0)
+            {
+                return -1;
+            }
+            int managedCollection = GC.CollectionCount(0);
+            if (managedCollection != lastManagedCollection)
+            {
+                lastManagedCollection = managedCollection;
+                uint collectionCount = managedCollection < 0
+                    ? 0u : (uint)managedCollection;
+                if (RecordC011EC57Survivors(
+                        collectionCount, survivors, survivorOrdinals,
+                        initialGenerations, initialAddresses,
+                        earlySurvivorCount) != 0)
+                {
+                    return -1;
+                }
+                if (GuideXosNativeAotC011EC57GetOlderGenerationObserved() != 0)
+                {
+                    stop = true;
+                }
+            }
+            GC.KeepAlive(survivors);
+            GC.KeepAlive(value);
+        }
+        if (stop || GC.GetGeneration(survivors[0]) == 0u ||
+            GuideXosNativeAotC011EC57CohortFinished() != 0)
+        {
+            return -1;
+        }
+        const uint firstCohort = 2u;
+#else
+        const uint firstCohort = 1u;
+#endif
+        for (uint cohort = firstCohort; cohort <= maximumCohorts && !stop; cohort++)
         {
             uint survivorCount = cohort * survivorsPerCohort;
             if (GuideXosNativeAotC011EC56CohortStarted(
@@ -863,6 +951,13 @@ public static unsafe class Program
         const uint maximumCohorts = 6u;
         const uint survivorsPerCohort = 8u;
 #endif
+#if HOSTLOGPROOF_C011EC60_T1
+        const uint maximumMainCohorts = maximumCohorts - 1u;
+        const uint timingPreludeAllocations = 56u;
+#else
+        const uint maximumMainCohorts = maximumCohorts;
+        const uint timingPreludeAllocations = 0u;
+#endif
         const uint maximumSurvivors = 48u;
 #if HOSTLOGPROOF_C011EC57_S1
         const uint maximumTransientAllocationsPerCohort = 24u;
@@ -873,7 +968,8 @@ public static unsafe class Program
         const uint maximumPolicyRecords = 512u;
         const uint maximumSurvivorObservations = 1024u;
         const uint maximumExplicitAllocations =
-            maximumCohorts * maximumTransientAllocationsPerCohort;
+            maximumMainCohorts * maximumTransientAllocationsPerCohort +
+            timingPreludeAllocations;
         const ulong maximumManagedBytes =
             (ulong)maximumExplicitAllocations * payloadSize;
         const ulong alignedSurvivorAllocationSize = 0x10018UL;
@@ -884,8 +980,8 @@ public static unsafe class Program
             maximumSurvivors != 48u ||
             maximumTransientAllocationsPerCohort < 24u ||
             maximumTransientAllocationsPerCohort > 48u ||
-            maximumExplicitAllocations > 288u ||
-            maximumManagedBytes > 18874368UL ||
+            maximumExplicitAllocations > 296u ||
+            maximumManagedBytes > 19398656UL ||
             maximumRetainedAlignedBytes != 0x300480UL ||
             maximumCollectionObservations != 256u ||
             maximumPolicyRecords != 512u ||
@@ -1016,6 +1112,22 @@ public static unsafe class Program
         GC.KeepAlive(survivors);
         return GuideXosNativeAotC011EC57Finish();
     }
+
+#if HOSTLOGPROOF_C011EC60
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static int RunC011EC60PreLastN0PromotionTiming()
+    {
+#if HOSTLOGPROOF_C011EC60_T0
+        // T0 deliberately reuses the C59-selected S2 allocation shape so the
+        // source chronology is compared against the exact last-N0 baseline.
+        return RunC011EC57DirectGen1BudgetCondemnation();
+#else
+        // T1 uses the bounded ordinary prelude above. T2 is intentionally not
+        // selected in C60 because T1 already failed the required 0,0,2 gate.
+        return RunC011EC57DirectGen1BudgetCondemnation();
+#endif
+    }
+#endif
 #endif
 
 #if HOSTLOGPROOF_C011EC42
@@ -1613,7 +1725,10 @@ public static unsafe class Program
                 {
                     return GxAbi.ErrorInvalidArgument;
                 }
-#if HOSTLOGPROOF_C011EC57
+#if HOSTLOGPROOF_C011EC60
+                return RunC011EC60PreLastN0PromotionTiming() == 0
+                    ? 0 : GxAbi.ErrorInvalidArgument;
+#elif HOSTLOGPROOF_C011EC57
                 return RunC011EC57DirectGen1BudgetCondemnation() == 0
                     ? 0 : GxAbi.ErrorInvalidArgument;
 #elif HOSTLOGPROOF_C011EC56
