@@ -6,6 +6,7 @@
 #include "kernel/network_status.h"
 #include "kernel/ethernet.h"
 #include "kernel/nic.h"
+#include "kernel/shell.h"
 
 using namespace kernel;
 
@@ -15,6 +16,10 @@ static_assert((nic::NUM_RX_DESC & (nic::NUM_RX_DESC - 1)) == 0,
               "RX ring arithmetic expects a power-of-two descriptor count");
 static_assert((nic::NUM_TX_DESC & (nic::NUM_TX_DESC - 1)) == 0,
               "TX ring arithmetic expects a power-of-two descriptor count");
+static_assert(shell::NICINFO_BRIEF_EXPECTED_LINES == 18,
+              "nicinfo brief device-present output line count changed");
+static_assert(shell::NICINFO_BRIEF_EXPECTED_LINES <= shell::NICINFO_BRIEF_MAX_LINES,
+              "nicinfo brief must fit its declared bounded output");
 
 int main()
 {
@@ -51,6 +56,12 @@ int main()
     assert(!network_status::is_supported_intel_e1000(0x8086, 0x24F3));
     assert(!network_status::is_supported_intel_e1000(0x10EC, 0x8168));
     assert(!network_status::is_supported_intel_e1000(0x8086, 0x1234));
+
+    assert(shell::nicinfo_mode_from_arg(nullptr) == shell::NICINFO_MODE_FULL);
+    assert(shell::nicinfo_mode_from_arg("") == shell::NICINFO_MODE_FULL);
+    assert(shell::nicinfo_mode_from_arg("brief") == shell::NICINFO_MODE_BRIEF);
+    assert(shell::nicinfo_mode_from_arg("Brief") == shell::NICINFO_MODE_INVALID);
+    assert(shell::nicinfo_mode_from_arg("unknown") == shell::NICINFO_MODE_INVALID);
 
     const uint8_t validMac[] = {0x00, 0x11, 0x22, 0x33, 0x44, 0x55};
     const uint8_t zeroMac[] = {0, 0, 0, 0, 0, 0};
@@ -89,6 +100,21 @@ int main()
     readyDevice.driverReady = false;
     assert(!nic::hardware_init_complete(readyDevice));
     assert(!nic::is_driver_ready(readyDevice));
+    assert(strcmp(nic::init_stage_name(readyDevice.initStage), "PHY") == 0);
+    assert(strcmp(nic::init_stage_name(nic::NIC_INIT_PHY), "PHY") == 0);
+    assert(strcmp(nic::phy_access_state_name(nic::NIC_PHY_FAILED), "failed") == 0);
+
+    readyDevice.lastFailureStage = nic::NIC_INIT_PHY;
+    readyDevice.lastInitFailure[0] = 'P';
+    readyDevice.lastInitFailure[1] = 'H';
+    readyDevice.lastInitFailure[2] = 'Y';
+    readyDevice.lastInitFailure[3] = '\0';
+    assert(readyDevice.lastFailureStage == nic::NIC_INIT_PHY);
+    assert(strcmp(readyDevice.lastInitFailure, "PHY") == 0);
+
+    assert(strcmp(nic::link_state_name(nic::NIC_LINK_UP), "UP") == 0);
+    assert(strcmp(nic::link_state_name(nic::NIC_LINK_DOWN), "DOWN") == 0);
+    assert(strcmp(nic::link_state_name(nic::NIC_LINK_UNKNOWN), "UNKNOWN") == 0);
 
     // Registration and readiness are distinct state gates.
     readyDevice.phyAccess = nic::NIC_PHY_OK;

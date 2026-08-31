@@ -28,6 +28,33 @@ static const uint32_t MAX_CMD_LENGTH = 256;
 static const uint32_t MAX_HISTORY = 32;
 static const uint32_t MAX_ARGS = 16;
 
+// `nicinfo brief` is intended to fit in one ordinary physical Console
+// viewport.  Keep the contract explicit so the hosted diagnostics test and
+// future changes have a stable bound to check.
+static const uint32_t NICINFO_BRIEF_MAX_LINES = 20;
+static const uint32_t NICINFO_BRIEF_EXPECTED_LINES = 18;
+static_assert(NICINFO_BRIEF_EXPECTED_LINES <= NICINFO_BRIEF_MAX_LINES,
+              "nicinfo brief expected output must stay within its line bound");
+
+enum NicInfoMode : uint8_t {
+    NICINFO_MODE_FULL = 0,
+    NICINFO_MODE_BRIEF,
+    NICINFO_MODE_INVALID,
+};
+
+inline NicInfoMode nicinfo_mode_from_arg(const char* arg)
+{
+    if (!arg || *arg == '\0') return NICINFO_MODE_FULL;
+
+    const char* expected = "brief";
+    while (*arg && *expected && *arg == *expected) {
+        ++arg;
+        ++expected;
+    }
+    return (*arg == '\0' && *expected == '\0')
+        ? NICINFO_MODE_BRIEF : NICINFO_MODE_INVALID;
+}
+
 // ================================================================
 // Shell State
 // ================================================================

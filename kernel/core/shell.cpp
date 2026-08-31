@@ -378,7 +378,8 @@ static void cmd_help() {
     output_string("Network:\n");
     output_string("  ping <ip>      - Send ICMP echo request\n");
     output_string("  ifconfig, ip   - Network interface info\n");
-    output_string("  netdiag        - Bare-metal NIC/DHCP/ARP diagnostics\n");
+    output_string("  nicinfo [brief] - NIC diagnostics; brief is one-screen hardware state\n");
+    output_string("  netdiag         - Bare-metal NIC/DHCP/ARP diagnostics\n");
     output_string("  ipconfig       - Windows-style IP config\n");
     output_string("  ipconfig /all  - Full IP configuration\n");
     output_string("  ipconfig /flushdns - Flush DNS cache\n");
@@ -2070,6 +2071,197 @@ static void uint_hex_to_str(uint32_t value, uint8_t digits, char* buf) {
     buf[digits] = '\0';
 }
 
+// Print only state retained by NIC initialization.  In particular, this
+// function must remain observational: it must not scan PCI, touch MMIO, poll
+// MDIC, or re-run any descriptor/reset operation.
+static void cmd_nicinfo_brief() {
+    // Device-present output is deliberately fixed at 18 logical lines.  Keep
+    // each line below MAX_LINE_LENGTH so the Console's line splitter cannot
+    // turn the one-screen diagnostic into additional physical lines.
+    output_string("NIC Hardware Summary\n");
+
+    const nic::NICDevice* dev = nic::get_device();
+    if (!dev) {
+        output_string("Device: no recorded NIC state\n");
+        output_string("Init: no NIC device structure\n");
+        output_string("Driver Ready: NO\n");
+        output_string("Link: UNKNOWN (no cached device state)\n");
+        output_string("DHCP: state=");
+        output_string(dhcp::state_to_string(dhcp::get_state()));
+        output_string(" lease=none\n");
+        return;
+    }
+
+    char hexStr[9];
+    char numStr[16];
+    char macStr[18];
+
+    output_string("Device: ");
+    output_string(dev->name);
+    output_string("  Driver: ");
+    output_string(network_status::driver_name(dev->vendorId, dev->deviceId));
+    output_string("  bound=");
+    output_string(dev->driverBound ? "YES\n" : "NO\n");
+
+    output_string("PCI: ");
+    uint_hex_to_str(dev->pciBus, 2, hexStr);
+    output_string(hexStr);
+    output_string(":");
+    uint_hex_to_str(dev->pciSlot, 2, hexStr);
+    output_string(hexStr);
+    output_string(".");
+    uint_hex_to_str(dev->pciFunc, 1, hexStr);
+    output_string(hexStr);
+    output_string("  ID: ");
+    uint_hex_to_str(dev->vendorId, 4, hexStr);
+    output_string(hexStr);
+    output_string(":");
+    uint_hex_to_str(dev->deviceId, 4, hexStr);
+    output_string(hexStr);
+    output_string("\n");
+
+    output_string("Subsystem: ");
+    uint_hex_to_str(dev->subsystemVendorId, 4, hexStr);
+    output_string(hexStr);
+    output_string(":");
+    uint_hex_to_str(dev->subsystemDeviceId, 4, hexStr);
+    output_string(hexStr);
+    output_string("  Rev: ");
+    uint_hex_to_str(dev->revisionId, 2, hexStr);
+    output_string(hexStr);
+    output_string("\n");
+
+    output_string("Path: ");
+    if (dev->deviceId == nic::PCI_DEVICE_I219_LM) {
+        output_string("P5=");
+        uint_to_str(dev->phase5Stage, numStr);
+        output_string(numStr);
+        output_string(" P6=");
+        uint_to_str(dev->phase6Stage, numStr);
+        output_string(numStr);
+        output_string(" P7=");
+        uint_to_str(dev->phase7Stage, numStr);
+        output_string(numStr);
+    } else {
+        output_string("standard");
+    }
+    output_string("\n");
+
+    output_string("MMIO: mapped=");
+    output_string(dev->mmioMapped ? "YES" : "NO");
+    output_string(" probe=");
+    output_string(dev->mmioProbeAttempted
+                  ? (dev->mmioProbePassed ? "PASS" : "FAIL")
+                  : "not attempted");
+    output_string("\n");
+
+    output_string("Reset: attempted=");
+    output_string(dev->resetAttempted ? "yes" : "no");
+    output_string(" complete=");
+    output_string(dev->resetCompleted ? "yes" : "no");
+    output_string(" timeout=");
+    output_string(dev->resetTimedOut ? "yes\n" : "no\n");
+
+    output_string("CTRL: ");
+    if (dev->resetAttempted) {
+        output_string("before=0x");
+        uint_hex_to_str(dev->resetCtrlBefore, 8, hexStr);
+        output_string(hexStr);
+        output_string(" request=0x");
+        uint_hex_to_str(dev->resetCtrlRequest, 8, hexStr);
+        output_string(hexStr);
+        output_string(" after=0x");
+        uint_hex_to_str(dev->resetCtrlAfter, 8, hexStr);
+        output_string(hexStr);
+    } else {
+        output_string("not captured");
+    }
+    output_string("\n");
+
+    ethernet::mac_to_string(dev->macAddress, macStr);
+    output_string("MAC: ");
+    output_string(macStr);
+    output_string(" valid=");
+    output_string(dev->macValid ? "yes" : "no");
+    output_string(" source=");
+    output_string(dev->deviceId == nic::PCI_DEVICE_I219_LM ? "RAL0/RAH0" : "EERD/RAR0");
+    output_string("\n");
+
+    output_string("PHY: attempted=");
+    output_string(dev->phyProbeAttempted ? "yes" : "no");
+    output_string(" access=");
+    output_string(nic::phy_access_state_name(dev->phyAccess));
+    output_string(" id=0x");
+    uint_hex_to_str(dev->phyId1, 4, hexStr);
+    output_string(hexStr);
+    output_string(":0x");
+    uint_hex_to_str(dev->phyId2, 4, hexStr);
+    output_string(hexStr);
+    output_string(" addr=0x");
+    uint_hex_to_str(dev->phyAddress, 2, hexStr);
+    output_string(hexStr);
+    output_string("\n");
+
+    output_string("PHY status: 0x");
+    uint_hex_to_str(dev->phyStatusValue, 4, hexStr);
+    output_string(hexStr);
+    output_string(" mode=");
+    if (dev->negotiatedSpeed == 0) {
+        output_string("unknown");
+    } else {
+        uint_to_str(dev->negotiatedSpeed, numStr);
+        output_string(numStr);
+        output_string(dev->negotiatedFullDuplex ? "/full" : "/half");
+    }
+    output_string("\n");
+
+    output_string("RX ring: ");
+    output_string(dev->rxRingInitialized ? "READY" : "NOT READY");
+    output_string("  TX ring: ");
+    output_string(dev->txRingInitialized ? "READY\n" : "NOT READY\n");
+
+    output_string("Registered: ");
+    output_string(dev->nicRegistered ? "YES" : "NO");
+    output_string("  active=");
+    output_string(dev->active ? "YES" : "NO");
+    output_string("  IRQ=");
+    output_string(dev->irqRegistered ? "registered" : "not registered");
+    output_string("  mask=");
+    output_string(dev->interruptsEnabled ? "enabled\n" : "masked\n");
+
+    output_string("Init: stage=");
+    output_string(nic::init_stage_name(dev->initStage));
+    output_string("  hardware=");
+    output_string(nic::hardware_init_complete(*dev) ? "PASS\n" : "INCOMPLETE\n");
+
+    output_string("Failure: ");
+    if (dev->lastFailureStage != nic::NIC_INIT_NONE) {
+        output_string(nic::init_stage_name(dev->lastFailureStage));
+        if (dev->lastInitFailure[0] != '\0') {
+            output_string(" - ");
+            output_string(dev->lastInitFailure);
+        }
+    } else if (dev->lastInitFailure[0] != '\0') {
+        output_string(dev->lastInitFailure);
+    } else {
+        output_string("none");
+    }
+    output_string("\n");
+
+    output_string("Driver Ready: ");
+    output_string(nic::is_driver_ready(*dev) ? "YES\n" : "NO\n");
+
+    output_string("Link: ");
+    output_string(nic::link_state_name(nic::get_link_state()));
+    output_string(" (cached)\n");
+
+    const dhcp::LeaseInfo* lease = dhcp::get_lease();
+    output_string("DHCP: state=");
+    output_string(dhcp::state_to_string(dhcp::get_state()));
+    output_string(" lease=");
+    output_string(lease && lease->valid ? "APPLIED\n" : "none\n");
+}
+
 static void cmd_nicinfo() {
     output_string("=== NIC Diagnostic Information ===\n\n");
     char hexStr[9];
@@ -3572,7 +3764,17 @@ static void execute_command(const char* cmd) {
         cmd_ifconfig();
     } else if (str_eq(command, "nicinfo") || str_eq(command, "nicstat") ||
                str_eq(command, "netdiag")) {
-        cmd_nicinfo();
+        const NicInfoMode nicInfoMode =
+            (argCount <= 1) ? NICINFO_MODE_FULL :
+            (argCount == 2 ? nicinfo_mode_from_arg(arg1) : NICINFO_MODE_INVALID);
+        if (nicInfoMode == NICINFO_MODE_FULL) {
+            cmd_nicinfo();
+        } else if (nicInfoMode == NICINFO_MODE_BRIEF) {
+            cmd_nicinfo_brief();
+        } else {
+            output_string("Usage: nicinfo [brief]\n");
+            output_string("  brief: recorded NIC initialization/link state only\n");
+        }
     } else if (str_eq(command, "netstat") || str_eq(command, "ss")) {
         cmd_netstat();
     } else if (str_eq(command, "route")) {

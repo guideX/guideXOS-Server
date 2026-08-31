@@ -248,6 +248,15 @@ enum LinkState : uint8_t {
     NIC_LINK_UNKNOWN = 2,
 };
 
+inline const char* link_state_name(LinkState state)
+{
+    switch (state) {
+        case NIC_LINK_UP:      return "UP";
+        case NIC_LINK_DOWN:    return "DOWN";
+        default:               return "UNKNOWN";
+    }
+}
+
 enum PhyAccessState : uint8_t {
     NIC_PHY_NOT_ATTEMPTED = 0,
     NIC_PHY_OK             = 1,
