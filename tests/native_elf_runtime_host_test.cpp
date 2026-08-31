@@ -11,6 +11,7 @@
 #include "arch/amd64/compiler_backend.h"
 
 #include <cstdio>
+#include <cstddef>
 #include <cstring>
 #include <string>
 
@@ -59,6 +60,22 @@ static bool compile_text(const char* source,
 
 int main()
 {
+    if (!require(NATIVE_ELF_APPLICATION_STACK_SIZE == 64U * 1024U &&
+                 NATIVE_ELF_RUNTIME_SAFETY_RESERVE_BYTES == 8192U &&
+                 NATIVE_ELF_TRAMPOLINE_ENTRY_OVERHEAD_BYTES == 0x28U &&
+                 COMPILER_MAX_GENERATED_FRAME_BYTES == 448U &&
+                 COMPILER_MAX_TRANSIENT_STACK_BYTES == 128U &&
+                 COMPILER_MAX_GENERATED_ACTIVATION_STACK_COST == 632U &&
+                 COMPILER_MAX_RUNTIME_CALL_DEPTH == 90U,
+                 "Phase 27M stack policy constants are stable")) return 1;
+    if (!require(sizeof(NativeElfTrampolineResult) == 24U &&
+                 offsetof(NativeElfTrampolineResult, returnValue) == 0U &&
+                 offsetof(NativeElfTrampolineResult, applicationRsp) == 8U &&
+                 offsetof(NativeElfTrampolineResult, runtimeStatus) == 16U &&
+                 offsetof(NativeElfTrampolineResult, runtimeCallDepth) == 20U &&
+                 native_runtime_status_name(NativeRuntimeStatus::CallDepthExceeded) != nullptr,
+                 "trampoline runtime-status ABI is append-only and explicit")) return 1;
+
     NativeAppStackLayout stack = {};
     if (!require(calculate_application_stack_layout(APPLICATION_STACK_BASE,
                                                     APPLICATION_STACK_SIZE, &stack),
@@ -151,8 +168,13 @@ int main()
     context.state = NativeAppExecutionState::Running;
     context.state = NativeAppExecutionState::Returned;
     context.state = NativeAppExecutionState::Cleaned;
+    context.runtimeStatus = NativeRuntimeStatus::CallDepthExceeded;
+    context.runtimeCallDepth = COMPILER_MAX_RUNTIME_CALL_DEPTH;
     if (!require(context.state == NativeAppExecutionState::Cleaned,
                  "runtime state enum supports deterministic lifecycle")) return 1;
+    if (!require(context.runtimeStatus == NativeRuntimeStatus::CallDepthExceeded &&
+                 context.runtimeCallDepth == 90U,
+                 "runtime state carries bounded-call failure details")) return 1;
 
     std::puts("native_elf_runtime_host_test: PASS");
     return 0;

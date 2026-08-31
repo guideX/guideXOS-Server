@@ -187,9 +187,11 @@ struct TranslationUnitIR {
     uint32_t functionCount;
     uint16_t entryFunction;
     uint16_t callGraphEdgeCount;
+    uint16_t recursiveSccCount;
     FunctionIR functions[COMPILER_MAX_FUNCTIONS];
     FunctionSymbol functionSymbols[COMPILER_MAX_FUNCTIONS];
     bool callGraph[COMPILER_MAX_FUNCTIONS][COMPILER_MAX_FUNCTIONS];
+    bool recursiveFunction[COMPILER_MAX_FUNCTIONS];
 };
 
 } // namespace compiler

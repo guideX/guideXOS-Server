@@ -29,6 +29,8 @@ struct CompileSummary {
     uint32_t sourceBytes;
     uint32_t tokenCount;
     uint32_t functionCount;
+    uint16_t recursiveSccCount;
+    bool recursiveFunction[COMPILER_MAX_FUNCTIONS];
     uint32_t entryCodeOffset;
     bool returnConstantValid;
     int32_t returnConstant;

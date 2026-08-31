@@ -41,6 +41,10 @@ struct NativeElfRunReport {
     bool hostLogTruncated;
     char hostLog[NATIVE_APP_MAX_LOG_LINES][NATIVE_APP_MAX_LOG_LINE_BYTES];
     const char* error;
+
+    // Append-only runtime diagnostics.  Existing report offsets remain stable.
+    NativeRuntimeStatus runtimeStatus;
+    uint32_t runtimeCallDepth;
 };
 
 bool configure_execution_context(const NativeElfExecutionContext& context);

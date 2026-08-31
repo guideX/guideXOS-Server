@@ -108,6 +108,44 @@ static int32_t read_rel32(const uint8_t* code, uint32_t offset)
         (static_cast<uint32_t>(code[offset + 4]) << 24));
 }
 
+struct GeneratedCallResult {
+    int result;
+    uint32_t runtimeFailure;
+    uint32_t runtimeDepth;
+};
+
+static GeneratedCallResult call_generated_entry(void* entry)
+{
+#if defined(__GNUC__) || defined(__clang__)
+    GeneratedCallResult result = {};
+    // R14/R15 are compiler-private nonvolatile registers for generated
+    // applications.  The real NativeElf trampoline preserves them; this
+    // host shim supplies the same ABI boundary for direct in-memory tests.
+    asm volatile(
+        "pushq %%r14\n\t"
+        "pushq %%r15\n\t"
+        "subq $64, %%rsp\n\t"
+        "movq %[output], 32(%%rsp)\n\t"
+        "xorq %%rcx, %%rcx\n\t"
+        "call *%[entry]\n\t"
+        "movq 32(%%rsp), %%r11\n\t"
+        "movl %%r15d, 4(%%r11)\n\t"
+        "movl %%r15d, 8(%%r11)\n\t"
+        "addq $64, %%rsp\n\t"
+        "popq %%r15\n\t"
+        "popq %%r14\n\t"
+        : "=a"(result.result)
+        : [entry] "r"(entry), [output] "r"(&result)
+        : "rcx", "rdx", "r8", "r9", "r10", "r11", "memory");
+    return result;
+#else
+    typedef int (*EntryFunction)(void*);
+    GeneratedCallResult result = {};
+    result.result = reinterpret_cast<EntryFunction>(entry)(nullptr);
+    return result;
+#endif
+}
+
 static bool inspect_calls(const Artifact& artifact, uint32_t* callCount,
                           bool* hasForward, bool* hasBackward)
 {
@@ -126,7 +164,30 @@ static bool inspect_calls(const Artifact& artifact, uint32_t* callCount,
     return true;
 }
 
-static bool execute_entry(const Artifact& artifact, int32_t expected)
+static bool contains_bytes(const Artifact& artifact, const uint8_t* bytes, uint32_t count)
+{
+    if (!bytes || count == 0 || count > artifact.codeBytes) return false;
+    for (uint32_t i = 0; i + count <= artifact.codeBytes; ++i) {
+        bool same = true;
+        for (uint32_t j = 0; j < count; ++j)
+            if (artifact.code[i + j] != bytes[j]) { same = false; break; }
+        if (same) return true;
+    }
+    return false;
+}
+
+static bool has_call_target(const Artifact& artifact, uint32_t target)
+{
+    for (uint32_t i = 0; i + 5U <= artifact.codeBytes; ++i) {
+        if (artifact.code[i] != 0xE8) continue;
+        const int64_t actual = static_cast<int64_t>(i + 5U) + read_rel32(artifact.code, i);
+        if (actual == static_cast<int64_t>(target)) return true;
+    }
+    return false;
+}
+
+static bool execute_entry(const Artifact& artifact, int32_t expected,
+                          GeneratedCallResult* observed = nullptr)
 {
 #if defined(_WIN32)
     void* memory = VirtualAlloc(nullptr, artifact.codeBytes, MEM_COMMIT | MEM_RESERVE,
@@ -137,12 +198,12 @@ static bool execute_entry(const Artifact& artifact, int32_t expected)
     const bool executable = VirtualProtect(memory, artifact.codeBytes, PAGE_EXECUTE_READ,
                                            &oldProtection) != 0;
     FlushInstructionCache(GetCurrentProcess(), memory, artifact.codeBytes);
-    typedef int (*EntryFunction)(void*);
-    const int result = executable
-        ? reinterpret_cast<EntryFunction>(static_cast<uint8_t*>(memory) + artifact.entryCodeOffset)(nullptr)
-        : 0;
+    const GeneratedCallResult call = executable
+        ? call_generated_entry(static_cast<uint8_t*>(memory) + artifact.entryCodeOffset)
+        : GeneratedCallResult();
+    if (observed) *observed = call;
     VirtualFree(memory, 0, MEM_RELEASE);
-    return executable && result == expected;
+    return executable && call.result == expected;
 #else
     (void)artifact;
     (void)expected;
@@ -269,12 +330,6 @@ static bool test_diagnostics_and_limits()
             "int broken(int x) { if (x) { return 42; } } int gx_main(gx_app_context* ctx) { return 0; }",
             "function 'broken' may reach end without returning a value"), "per-function missing-return diagnostic")) return false;
     if (!require(expect_rejected(
-            "int recurse(int x) { return recurse(x); } int gx_main(gx_app_context* ctx) { return recurse(1); }",
-            "recursive function calls are not supported"), "direct recursion rejection")) return false;
-    if (!require(expect_rejected(
-            "int a() { return b(); } int b() { return a(); } int gx_main(gx_app_context* ctx) { return a(); }",
-            "recursive function calls are not supported"), "mutual recursion rejection")) return false;
-    if (!require(expect_rejected(
             "int gx_main(gx_app_context* ctx) { return gx_main(1); }",
             "gx_main is not callable from source"), "gx_main call rejection")) return false;
     if (!require(expect_rejected(
@@ -303,6 +358,132 @@ static bool test_diagnostics_and_limits()
     return true;
 }
 
+static bool test_recursion_and_safety()
+{
+    const uint8_t guardCompare[] = {0x41, 0x81, 0xFE};
+    const uint8_t guardBranch[] = {0x0F, 0x83};
+    const uint8_t guardIncrement[] = {0x41, 0xFF, 0xC6};
+
+    const char* direct =
+        "int sum_down(int n) { if (n <= 0) { return 0; } return n + sum_down(n - 1); }\n"
+        "int gx_main(gx_app_context* ctx) { return sum_down(6) * 2; }\n";
+    Diagnostics diagnostics;
+    if (!require(compile_unit(direct, &g_first, &diagnostics), "direct recursion compiles")) return false;
+    GeneratedCallResult directResult = {};
+    if (!require(execute_entry(g_first, 42, &directResult) && directResult.runtimeFailure == 0,
+                 "direct recursion returns 42")) return false;
+    if (!require(g_first.unit.recursiveFunction[0] && g_first.unit.recursiveSccCount == 1,
+                 "direct recursion is classified as one recursive SCC")) return false;
+    uint32_t directCalls = 0;
+    bool directForward = false, directBackward = false;
+    if (!require(inspect_calls(g_first, &directCalls, &directForward, &directBackward) &&
+                 directCalls == 2 && directBackward && has_call_target(g_first, 0),
+                 "direct recursion contains a real backward self-call")) return false;
+    if (!require(contains_bytes(g_first, guardCompare, sizeof(guardCompare)) &&
+                 contains_bytes(g_first, guardBranch, sizeof(guardBranch)) &&
+                 contains_bytes(g_first, guardIncrement, sizeof(guardIncrement)),
+                 "direct user calls contain the runtime depth guard")) return false;
+
+    const char* localIsolation =
+        "int sum_copy(int n) { int current = n; if (n <= 0) { return 0; } "
+        "return current + sum_copy(n - 1); }\n"
+        "int gx_main(gx_app_context* ctx) { return sum_copy(6) * 2; }\n";
+    if (!require(compile_unit(localIsolation, &g_first, &diagnostics) &&
+                 execute_entry(g_first, 42), "recursive local storage is isolated")) return false;
+
+    const char* parameterIsolation =
+        "int descend(int n) { if (n == 0) { return 42; } n = n - 1; return descend(n); }\n"
+        "int gx_main(gx_app_context* ctx) { return descend(6); }\n";
+    if (!require(compile_unit(parameterIsolation, &g_first, &diagnostics) &&
+                 execute_entry(g_first, 42), "recursive parameter storage is isolated")) return false;
+
+    const char* mutual =
+        "int is_even(int n) { if (n == 0) { return 1; } return is_odd(n - 1); }\n"
+        "int is_odd(int n) { if (n == 0) { return 0; } return is_even(n - 1); }\n"
+        "int gx_main(gx_app_context* ctx) { return is_even(42) * 42; }\n";
+    if (!require(compile_unit(mutual, &g_first, &diagnostics), "mutual recursion compiles")) return false;
+    if (!require(execute_entry(g_first, 42), "mutual recursion returns 42")) return false;
+    if (!require(g_first.unit.recursiveFunction[0] && g_first.unit.recursiveFunction[1] &&
+                 g_first.unit.recursiveSccCount == 1,
+                 "mutual recursion is classified as one recursive SCC")) return false;
+    uint32_t mutualCalls = 0;
+    bool mutualForward = false, mutualBackward = false;
+    if (!require(inspect_calls(g_first, &mutualCalls, &mutualForward, &mutualBackward) &&
+                 mutualCalls == 3 && mutualForward && mutualBackward,
+                 "mutual recursion contains forward and backward rel32 calls")) return false;
+
+    const char* controlFlow =
+        "int recursive_answer(int n) { if (n <= 0) { return 0; } "
+        "if (n == 6) { return n + recursive_answer(n - 1); } "
+        "return n + recursive_answer(n - 1); }\n"
+        "int gx_main(gx_app_context* ctx) { return recursive_answer(6) * 2; }\n";
+    if (!require(compile_unit(controlFlow, &g_first, &diagnostics) &&
+                 execute_entry(g_first, 42), "recursion composes with if control flow")) return false;
+
+    const char* loop =
+        "int loop_recursive(int n) { int i = 0; while (i < 1) { i = i + 1; } "
+        "if (n == 0) { return 36; } return loop_recursive(n - 1) + 1; }\n"
+        "int gx_main(gx_app_context* ctx) { return loop_recursive(6); }\n";
+    if (!require(compile_unit(loop, &g_first, &diagnostics) && execute_entry(g_first, 42),
+                 "recursion composes with while loops")) return false;
+
+    const char* nested =
+        "int add_one(int x) { return x + 1; }\n"
+        "int count_down(int n) { if (n == 0) { return 36; } "
+        "return count_down(n - 1) + add_one(0); }\n"
+        "int gx_main(gx_app_context* ctx) { return count_down(6); }\n";
+    if (!require(compile_unit(nested, &g_first, &diagnostics) && execute_entry(g_first, 42),
+                 "recursive nested helper calls return 42")) return false;
+
+    const char* callExpression =
+        "int sum_down(int n) { if (n <= 0) { return 0; } int value = sum_down(n - 1); "
+        "return value + n; }\n"
+        "int gx_main(gx_app_context* ctx) { return sum_down(6) * 2; }\n";
+    if (!require(compile_unit(callExpression, &g_first, &diagnostics) &&
+                 execute_entry(g_first, 42), "recursive call expression returns 42")) return false;
+
+    amd64::FrameLayout maximum = {};
+    if (!require(amd64::calculate_frame_layout(COMPILER_MAX_PARAMETERS, COMPILER_MAX_LOCALS,
+                                               COMPILER_MAX_TEMPORARY_SLOTS, false,
+                                               COMPILER_MAX_TRANSIENT_STACK_BYTES, &maximum) &&
+                 maximum.frameBytes == COMPILER_MAX_GENERATED_FRAME_BYTES &&
+                 maximum.transientBytes == COMPILER_MAX_TRANSIENT_STACK_BYTES &&
+                 maximum.activationBytes == COMPILER_MAX_GENERATED_ACTIVATION_STACK_COST &&
+                 COMPILER_MAX_RUNTIME_CALL_DEPTH == 90,
+                 "recursive stack accounting matches the shared safety policy")) return false;
+
+    const char* boundary =
+        "int recurse(int n) { if (n == 0) { return 42; } return recurse(n - 1); }\n"
+        "int gx_main(gx_app_context* ctx) { return recurse(88); }\n";
+    if (!require(compile_unit(boundary, &g_first, &diagnostics), "safe depth boundary compiles")) return false;
+    GeneratedCallResult boundaryResult = {};
+    if (!require(execute_entry(g_first, 42, &boundaryResult) && boundaryResult.runtimeFailure == 0,
+                 "depth below the derived limit succeeds")) return false;
+
+    const char* overBoundary =
+        "int recurse(int n) { if (n == 0) { return 42; } return recurse(n - 1); }\n"
+        "int gx_main(gx_app_context* ctx) { return recurse(89); }\n";
+    if (!require(compile_unit(overBoundary, &g_first, &diagnostics), "excess boundary source compiles")) return false;
+    GeneratedCallResult overBoundaryResult = {};
+    if (!require(execute_entry(g_first, 0, &overBoundaryResult) && overBoundaryResult.runtimeFailure != 0 &&
+                 overBoundaryResult.runtimeDepth == COMPILER_MAX_RUNTIME_CALL_DEPTH,
+                 "one activation beyond the limit fails through the software guard")) return false;
+
+    const char* excessive =
+        "int recurse(int n) { if (n == 0) { return 42; } return recurse(n - 1); }\n"
+        "int gx_main(gx_app_context* ctx) { return recurse(1000000); }\n";
+    if (!require(compile_unit(excessive, &g_first, &diagnostics), "extremely deep recursion compiles")) return false;
+    GeneratedCallResult excessiveResult = {};
+    if (!require(execute_entry(g_first, 0, &excessiveResult) && excessiveResult.runtimeFailure != 0 &&
+                 excessiveResult.runtimeDepth == COMPILER_MAX_RUNTIME_CALL_DEPTH,
+                 "extremely deep recursion fails deterministically before stack exhaustion")) return false;
+    if (!require(compile_unit(direct, &g_first, &diagnostics) && execute_entry(g_first, 42),
+                 "runtime state resets after call-depth failure")) return false;
+    for (uint32_t run = 0; run < 3; ++run)
+        if (!require(execute_entry(g_first, 42), "repeated recursive run succeeds")) return false;
+    return true;
+}
+
 static bool test_determinism()
 {
     const char* source =
@@ -324,7 +505,9 @@ static bool test_determinism()
 
 int main()
 {
-    if (!test_valid_programs() || !test_diagnostics_and_limits() || !test_determinism()) return 1;
+    if (!test_valid_programs() || !test_diagnostics_and_limits() ||
+        !test_recursion_and_safety() || !test_determinism()) return 1;
+    std::puts("recursive stack accounting = PASS");
     std::puts("compiler_functions_host_test: PASS");
     return 0;
 }

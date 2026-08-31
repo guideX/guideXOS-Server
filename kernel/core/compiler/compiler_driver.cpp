@@ -259,9 +259,28 @@ bool compile(const char* sourcePath,
     }
     FunctionIR& function = unit.functions[unit.entryFunction];
 
+    if (summary) {
+        summary->recursiveSccCount = unit.recursiveSccCount;
+        for (uint32_t i = 0; i < COMPILER_MAX_FUNCTIONS; ++i)
+            summary->recursiveFunction[i] = unit.recursiveFunction[i];
+    }
+
     serial::puts("Compiler: functions=");
     put_decimal_u64(unit.functionCount);
     serial::putc('\n');
+#if defined(__x86_64__)
+    serial::puts("Compiler: stack_policy frame_bytes=");
+    put_decimal_u64(COMPILER_MAX_GENERATED_FRAME_BYTES);
+    serial::puts(" transient_bytes=");
+    put_decimal_u64(COMPILER_MAX_TRANSIENT_STACK_BYTES);
+    serial::puts(" activation_bytes=");
+    put_decimal_u64(COMPILER_MAX_GENERATED_ACTIVATION_STACK_COST);
+    serial::puts(" max_depth=");
+    put_decimal_u64(COMPILER_MAX_RUNTIME_CALL_DEPTH);
+    serial::puts(" reserve_bytes=");
+    put_decimal_u64(::kernel::native_elf::NATIVE_ELF_RUNTIME_SAFETY_RESERVE_BYTES);
+    serial::putc('\n');
+#endif
     serial::puts("Compiler: return_constant=");
     if (function.returnConstantValid) put_decimal_i32(function.returnConstant);
     else serial::puts("nonconstant");

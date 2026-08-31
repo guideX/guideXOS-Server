@@ -6,6 +6,7 @@
 
 #include "kernel/types.h"
 #include "core/compiler/compiler_ir.h"
+#include "core/native_elf/native_elf_stack_policy.h"
 
 namespace kernel {
 namespace compiler {
@@ -23,6 +24,8 @@ struct FrameLayout {
     uint32_t parameterBytes;
     uint32_t temporaryBytes;
     uint32_t variableBytes;
+    uint32_t transientBytes;
+    uint32_t activationBytes;
     uint16_t temporarySlots;
 };
 
@@ -38,6 +41,10 @@ bool calculate_frame_layout(uint32_t localCount, FrameLayout* output);
 bool calculate_frame_layout(uint32_t parameterCount, uint32_t localCount,
                             uint32_t temporarySlots, bool hasContext,
                             FrameLayout* output);
+
+bool calculate_frame_layout(uint32_t parameterCount, uint32_t localCount,
+                            uint32_t temporarySlots, bool hasContext,
+                            uint32_t transientBytes, FrameLayout* output);
 
 bool emit_translation_unit(const TranslationUnitIR& unit,
                            uint64_t readOnlyDataAddress,

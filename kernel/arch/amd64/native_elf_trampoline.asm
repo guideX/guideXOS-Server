@@ -10,7 +10,9 @@
 ; At the target entry, RSP is stackTop - 0x28.  This gives the target
 ; the required 32-byte home area and the required 16-byte call alignment.
 ; The target's return address is therefore entirely contained by the bounded
-; application stack.  The kernel stack is restored from R15's saved frame.
+; application stack.  The kernel stack is restored from R13's saved frame;
+; R14 carries the generated current call depth. R15 is zero on success and
+; carries the sticky failure depth when the generated guard trips.
 ;
 
 bits 64
@@ -57,23 +59,32 @@ invoke_native_entry_on_stack:
 
     ; Keep the kernel frame address in a nonvolatile register while the
     ; application and its host call execute.
-    mov     r15, rsp
-    mov     rax, [r15 + 0x40]
-    mov     rcx, [r15 + 0x48]
-    mov     r12, [r15 + 0x58]
-    mov     rsp, [r15 + 0x50]
+    mov     r13, rsp
+    mov     rax, [r13 + 0x40]
+    mov     rcx, [r13 + 0x48]
+    mov     r12, [r13 + 0x58]
+    mov     rsp, [r13 + 0x50]
     and     rsp, -16
     sub     rsp, 0x20
     ; The target observes rsp-8, after this call pushes its return address.
     lea     r10, [rsp - 8]
     mov     [r12 + 0x08], r10
+    xor     r14d, r14d
+    xor     r15d, r15d
     call    rax
 
     ; EAX is the gx_main result.  R12 is nonvolatile under the target ABI.
     mov     [r12 + 0x00], eax
+    xor     eax, eax
+    test    r15d, r15d
+    jz      .runtime_status_stored
+    mov     eax, 1
+.runtime_status_stored:
+    mov     [r12 + 0x10], eax
+    mov     [r12 + 0x14], r15d
 
     ; Restore the kernel caller's exact stack and all nonvolatile state.
-    mov     rsp, r15
+    mov     rsp, r13
     movdqu  xmm6, [rsp + 0x80]
     movdqu  xmm7, [rsp + 0x90]
     movdqu  xmm8, [rsp + 0xA0]

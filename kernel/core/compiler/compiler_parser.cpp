@@ -888,23 +888,32 @@ static int32_t find_function(const TranslationUnitIR& unit, const char* name)
     return -1;
 }
 
-static bool visit_call_graph(const TranslationUnitIR& unit, uint16_t functionIndex,
-                             uint8_t* state, Diagnostics& diagnostics)
+static void classify_recursive_sccs(TranslationUnitIR* unit)
 {
-    if (!state || functionIndex >= unit.functionCount) return false;
-    if (state[functionIndex] == 1) {
-        diagnostics.error(unit.functions[functionIndex].location,
-                          "recursive function calls are not supported", "call-graph");
-        return false;
+    if (!unit) return;
+    bool reachable[COMPILER_MAX_FUNCTIONS][COMPILER_MAX_FUNCTIONS] = {};
+    for (uint32_t i = 0; i < unit->functionCount; ++i)
+        for (uint32_t j = 0; j < unit->functionCount; ++j)
+            reachable[i][j] = unit->callGraph[i][j];
+    for (uint32_t k = 0; k < unit->functionCount; ++k)
+        for (uint32_t i = 0; i < unit->functionCount; ++i)
+            for (uint32_t j = 0; j < unit->functionCount; ++j)
+                reachable[i][j] = reachable[i][j] || (reachable[i][k] && reachable[k][j]);
+
+    unit->recursiveSccCount = 0;
+    for (uint32_t i = 0; i < unit->functionCount; ++i)
+        unit->recursiveFunction[i] = reachable[i][i];
+    for (uint32_t i = 0; i < unit->functionCount; ++i) {
+        if (!unit->recursiveFunction[i]) continue;
+        bool firstRepresentative = true;
+        for (uint32_t j = 0; j < i; ++j) {
+            if (unit->recursiveFunction[j] && reachable[i][j] && reachable[j][i]) {
+                firstRepresentative = false;
+                break;
+            }
+        }
+        if (firstRepresentative) ++unit->recursiveSccCount;
     }
-    if (state[functionIndex] == 2) return true;
-    state[functionIndex] = 1;
-    for (uint32_t i = 0; i < unit.functionCount; ++i) {
-        if (unit.callGraph[functionIndex][i] &&
-            !visit_call_graph(unit, static_cast<uint16_t>(i), state, diagnostics)) return false;
-    }
-    state[functionIndex] = 2;
-    return true;
 }
 
 } // namespace
@@ -1119,9 +1128,9 @@ bool parse_translation_unit(const char* source, const Token* tokens, uint32_t to
             }
         }
     }
-    uint8_t state[COMPILER_MAX_FUNCTIONS] = {};
-    for (uint32_t i = 0; i < output->functionCount; ++i)
-        if (!visit_call_graph(*output, static_cast<uint16_t>(i), state, diagnostics)) return false;
+    // Cycles are legal recursive SCCs in Phase 27M.  The backend instruments
+    // every generated source-defined call with the bounded runtime guard.
+    classify_recursive_sccs(output);
     return !diagnostics.has_error();
 }
 

@@ -11,11 +11,12 @@
 
 #include "../../../sdk/include/guidexos/app.h"
 #include "native_elf_contract.h"
+#include "native_elf_stack_policy.h"
 
 namespace kernel {
 namespace native_elf {
 
-static const uint64_t APPLICATION_STACK_SIZE = 64ULL * 1024ULL;
+static const uint64_t APPLICATION_STACK_SIZE = NATIVE_ELF_APPLICATION_STACK_SIZE;
 // The bootloader identity-maps the complete NativeElf window.  Keep the
 // dedicated application stack in its tail, beyond the loader's 1 MiB image
 // limit, so it cannot overlap either the generated image or the kernel's
@@ -47,6 +48,23 @@ enum class NativeAppExecutionState : uint8_t {
     Cleaned
 };
 
+// This is a runtime failure channel, not an application exit value.  The
+// compiler currently emits the bounded call-depth failure below; keeping the
+// enum extensible allows later NativeElf safety checks to use the same channel.
+enum class NativeRuntimeStatus : uint32_t {
+    None = 0,
+    CallDepthExceeded = 1,
+};
+
+inline const char* native_runtime_status_name(NativeRuntimeStatus status)
+{
+    switch (status) {
+    case NativeRuntimeStatus::None: return "None";
+    case NativeRuntimeStatus::CallDepthExceeded: return "CallDepthExceeded";
+    }
+    return "Unknown";
+}
+
 struct NativeAppStackLayout {
     uint64_t base;
     uint64_t size;
@@ -57,6 +75,8 @@ struct NativeElfTrampolineResult {
     int32_t returnValue;
     uint32_t reserved;
     uint64_t applicationRsp;
+    NativeRuntimeStatus runtimeStatus;
+    uint32_t runtimeCallDepth;
 };
 
 struct NativeAppExecutionContext {
@@ -86,6 +106,11 @@ struct NativeAppExecutionContext {
     uint64_t applicationRsp;
     uint64_t kernelRspAfter;
     const char* error;
+
+    // Append-only runtime diagnostics.  Keep all legacy context offsets above
+    // this point stable for existing host-call and lifecycle code.
+    NativeRuntimeStatus runtimeStatus;
+    uint32_t runtimeCallDepth;
 };
 
 // These assertions pin the generated-code ABI to the SDK definition.  The

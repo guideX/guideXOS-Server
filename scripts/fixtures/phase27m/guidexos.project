@@ -1,0 +1,14 @@
+{
+  "formatVersion": 1,
+  "projectId": "dev.guidexos.phase27m",
+  "displayName": "Phase 27M Recursion-Safe Call-Stack Hardening",
+  "projectKind": "native-gui-application",
+  "sourceRoot": "src",
+  "applicationManifest": "app/app.json",
+  "defaultTargetProfile": "guidexos.amd64.baremetal.bootstrap.native",
+  "entryPoint": "gx_main",
+  "abi": "guidexos-c-abi-v1",
+  "architecture": "amd64",
+  "outputName": "phase27m",
+  "sourceEntry": "main.cpp"
+}

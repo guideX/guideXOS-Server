@@ -576,6 +576,8 @@ static bool teardown_application(NativeElfRunReport* report)
     s_appRuntime.stackBase = 0;
     s_appRuntime.stackSize = 0;
     s_appRuntime.stackTop = 0;
+    s_appRuntime.runtimeStatus = NativeRuntimeStatus::None;
+    s_appRuntime.runtimeCallDepth = 0;
     s_appRuntime.result = preservedResult;
     s_appRuntime.state = clean ? NativeAppExecutionState::Cleaned : NativeAppExecutionState::Failed;
     s_appRuntime.error = clean ? "" : "NativeElf teardown could not restore page permissions";
@@ -882,6 +884,8 @@ static bool run_file_internal(const char* path,
         return fail_report(report, "NativeElf stack trampoline invocation failed");
     }
     s_appRuntime.result = trampoline.returnValue;
+    s_appRuntime.runtimeStatus = trampoline.runtimeStatus;
+    s_appRuntime.runtimeCallDepth = trampoline.runtimeCallDepth;
     *returnValue = s_appRuntime.result;
     s_appRuntime.state = NativeAppExecutionState::Returned;
     if (report) {
@@ -893,6 +897,8 @@ static bool run_file_internal(const char* path,
         report->hostLogBytes = s_appRuntime.hostLogBytes;
         report->hostLogCount = s_appRuntime.hostLogCount;
         report->hostLogTruncated = s_appRuntime.hostLogTruncated;
+        report->runtimeStatus = s_appRuntime.runtimeStatus;
+        report->runtimeCallDepth = s_appRuntime.runtimeCallDepth;
         for (uint32_t i = 0; i < s_appRuntime.hostLogCount && i < NATIVE_APP_MAX_LOG_LINES; ++i)
             copy_bytes(reinterpret_cast<uint8_t*>(report->hostLog[i]),
                        reinterpret_cast<const uint8_t*>(s_appRuntime.hostLog[i]),
@@ -906,14 +912,19 @@ static bool run_file_internal(const char* path,
     serial::puts("ELF Loader: gx_main returned ");
     put_decimal_i32(s_appRuntime.result);
     serial::putc('\n');
+    const bool runtimeSucceeded = s_appRuntime.runtimeStatus == NativeRuntimeStatus::None;
+    if (!runtimeSucceeded) {
+        serial::puts("ELF Loader: Application terminated: recursive call depth limit exceeded.\n");
+    }
     const bool teardownComplete = teardown_application(report);
     if (report) {
-        report->success = teardownComplete;
-        report->error = teardownComplete ? "" : s_appRuntime.error;
+        report->success = teardownComplete && runtimeSucceeded;
+        report->error = !teardownComplete ? s_appRuntime.error :
+            (runtimeSucceeded ? "" : "ELF Loader: Application terminated: recursive call depth limit exceeded.");
     }
     serial::puts(teardownComplete ? "ELF Loader: teardown PASS\n"
                                   : "ELF Loader: teardown FAIL\n");
-    return teardownComplete;
+    return teardownComplete && runtimeSucceeded;
 }
 
 bool run_file(const char* path, int32_t* returnValue, NativeElfRunReport* report)
