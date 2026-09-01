@@ -161,8 +161,13 @@ static const uint32_t E1000_EERD_DONE  = (1u << 4);
 static const uint32_t E1000_EERD_ADDR_SHIFT = 8;
 static const uint32_t E1000_EERD_DATA_SHIFT = 16;
 
-// MDIC fields.  The I219 integrated PHY is MDI address 1.
+// MDIC fields.  The register and PHY address fields are five bits wide.
+// The I219 standard IEEE PHY register page is reached at MDI address 2;
+// address 1 is used by the PCH controller's general/high-page registers.
 static const uint32_t E1000_MDIC_DATA_MASK  = 0x0000FFFFu;
+static const uint32_t E1000_MDIC_REG_MASK   = 0x001F0000u;
+static const uint32_t E1000_MDIC_PHY_MASK   = 0x03E00000u;
+static const uint32_t E1000_MDIC_OP_MASK    = 0x0C000000u;
 static const uint32_t E1000_MDIC_REG_SHIFT  = 16;
 static const uint32_t E1000_MDIC_PHY_SHIFT  = 21;
 static const uint32_t E1000_MDIC_OP_SHIFT   = 26;
@@ -170,13 +175,111 @@ static const uint32_t E1000_MDIC_OP_WRITE   = (1u << E1000_MDIC_OP_SHIFT);
 static const uint32_t E1000_MDIC_OP_READ    = (2u << E1000_MDIC_OP_SHIFT);
 static const uint32_t E1000_MDIC_READY      = (1u << 28);
 static const uint32_t E1000_MDIC_ERROR      = (1u << 30);
-static const uint8_t  I219_PHY_ADDRESS      = 1;
+static const uint8_t  I219_PHY_ADDRESS      = 2;
+static const uint8_t  I219_GENERAL_PHY_ADDRESS = 1;
 static const uint8_t  I219_PHY_STATUS_REG   = 26;
 static const uint16_t I219_PHY_STATUS_LINK  = (1u << 6);
 static const uint16_t I219_PHY_STATUS_DUPLEX = (1u << 7);
 static const uint16_t I219_PHY_STATUS_SPEED_MASK = (3u << 8);
 static const uint8_t  I219_PHY_ID1_REG       = 2;
 static const uint8_t  I219_PHY_ID2_REG       = 3;
+static const uint32_t I219_MDIC_POLL_LIMIT   = 1920u;
+static const uint32_t I219_MDIC_POLL_DELAY_US = 50u;
+
+enum class DeviceFamily : uint8_t {
+    Unsupported = 0,
+    E1000,
+    I219Pch,
+};
+
+inline DeviceFamily device_family_for(uint16_t vendor, uint16_t device)
+{
+    if (vendor != PCI_VENDOR_INTEL) return DeviceFamily::Unsupported;
+    switch (device) {
+        case PCI_DEVICE_E1000:
+        case PCI_DEVICE_E1000E:
+        case PCI_DEVICE_I217:
+            return DeviceFamily::E1000;
+        case PCI_DEVICE_I219_LM:
+            return DeviceFamily::I219Pch;
+        default:
+            return DeviceFamily::Unsupported;
+    }
+}
+
+inline const char* device_family_name(DeviceFamily family)
+{
+    switch (family) {
+        case DeviceFamily::E1000:   return "E1000";
+        case DeviceFamily::I219Pch: return "I219/PCH";
+        default:                    return "unsupported";
+    }
+}
+
+enum class PhyAddressSource : uint8_t {
+    None = 0,
+    FixedFamily,
+    Discovered,
+    Default,
+};
+
+inline const char* phy_address_source_name(PhyAddressSource source)
+{
+    switch (source) {
+        case PhyAddressSource::FixedFamily: return "fixed-family";
+        case PhyAddressSource::Discovered:  return "discovered";
+        case PhyAddressSource::Default:     return "default";
+        default:                            return "none";
+    }
+}
+
+inline uint32_t encode_mdic_read_command(uint8_t phyAddress,
+                                          uint8_t registerAddress)
+{
+    return E1000_MDIC_OP_READ |
+           ((static_cast<uint32_t>(phyAddress) & 0x1Fu) << E1000_MDIC_PHY_SHIFT) |
+           ((static_cast<uint32_t>(registerAddress) & 0x1Fu) << E1000_MDIC_REG_SHIFT);
+}
+
+inline uint8_t mdic_phy_address(uint32_t mdic)
+{
+    return static_cast<uint8_t>((mdic & E1000_MDIC_PHY_MASK) >> E1000_MDIC_PHY_SHIFT);
+}
+
+inline uint8_t mdic_register_address(uint32_t mdic)
+{
+    return static_cast<uint8_t>((mdic & E1000_MDIC_REG_MASK) >> E1000_MDIC_REG_SHIFT);
+}
+
+inline bool mdic_ready(uint32_t mdic)
+{
+    return (mdic & E1000_MDIC_READY) != 0u;
+}
+
+inline bool mdic_error(uint32_t mdic)
+{
+    return (mdic & E1000_MDIC_ERROR) != 0u;
+}
+
+inline bool mdic_response_fields_match(uint32_t mdic, uint8_t phyAddress,
+                                       uint8_t registerAddress)
+{
+    return mdic_phy_address(mdic) == (phyAddress & 0x1Fu) &&
+           mdic_register_address(mdic) == (registerAddress & 0x1Fu);
+}
+
+// Zero is a legitimate value for an individual PHY register.  All-ones is
+// reserved here as the invalid/no-response sentinel; PHY ID validation below
+// applies the stricter identifier-specific checks.
+inline bool mdic_data_is_valid(uint16_t data)
+{
+    return data != 0xFFFFu;
+}
+
+inline bool phy_identifier_is_valid(uint16_t id1, uint16_t id2)
+{
+    return id1 != 0u && id2 != 0u && id1 != 0xFFFFu && id2 != 0xFFFFu;
+}
 
 // ================================================================
 // Descriptor ring sizes
@@ -392,6 +495,16 @@ struct NICDevice {
     uint32_t    ctrlValue;
     uint32_t    statusValue;
     uint32_t    mdicValue;
+    uint32_t    mdicInitialValue;
+    uint32_t    mdicCommandValue;
+    uint32_t    mdicPollIterations;
+    uint16_t    mdicDataValue;
+    uint8_t     mdicRegisterAddress;
+    bool        mdicReady;
+    bool        mdicError;
+    bool        mdicTimedOut;
+    bool        mdicResponseValid;
+    bool        mdicDataValid;
     uint32_t    resetCtrlBefore;
     uint32_t    resetCtrlRequest;
     uint32_t    resetCtrlAfter;
@@ -402,6 +515,7 @@ struct NICDevice {
     uint16_t    phyId1;
     uint16_t    phyId2;
     uint8_t     phyAddress;
+    PhyAddressSource phyAddressSource;
     uint16_t    negotiatedSpeed; // 10, 100, 1000, or 0 when unknown
     bool        negotiatedFullDuplex;
     PhyAccessState phyAccess;
@@ -500,7 +614,7 @@ inline bool hardware_init_complete(const NICDevice& device)
         !device.rxRingInitialized || !device.txRingInitialized) {
         return false;
     }
-    if (device.deviceId == PCI_DEVICE_I219_LM &&
+    if (device_family_for(device.vendorId, device.deviceId) == DeviceFamily::I219Pch &&
         (!device.resetAttempted || !device.resetCompleted ||
          !device.phyProbeAttempted || device.phyAccess != NIC_PHY_OK)) {
         return false;

@@ -32,7 +32,7 @@ static const uint32_t MAX_ARGS = 16;
 // viewport.  Keep the contract explicit so the hosted diagnostics test and
 // future changes have a stable bound to check.
 static const uint32_t NICINFO_BRIEF_MAX_LINES = 20;
-static const uint32_t NICINFO_BRIEF_EXPECTED_LINES = 18;
+static const uint32_t NICINFO_BRIEF_EXPECTED_LINES = 19;
 static_assert(NICINFO_BRIEF_EXPECTED_LINES <= NICINFO_BRIEF_MAX_LINES,
               "nicinfo brief expected output must stay within its line bound");
 

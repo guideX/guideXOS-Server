@@ -2075,7 +2075,7 @@ static void uint_hex_to_str(uint32_t value, uint8_t digits, char* buf) {
 // function must remain observational: it must not scan PCI, touch MMIO, poll
 // MDIC, or re-run any descriptor/reset operation.
 static void cmd_nicinfo_brief() {
-    // Device-present output is deliberately fixed at 18 logical lines.  Keep
+    // Device-present output is deliberately fixed at 19 logical lines.  Keep
     // each line below MAX_LINE_LENGTH so the Console's line splitter cannot
     // turn the one-screen diagnostic into additional physical lines.
     output_string("NIC Hardware Summary\n");
@@ -2200,6 +2200,8 @@ static void cmd_nicinfo_brief() {
     output_string(" addr=0x");
     uint_hex_to_str(dev->phyAddress, 2, hexStr);
     output_string(hexStr);
+    output_string(" source=");
+    output_string(nic::phy_address_source_name(dev->phyAddressSource));
     output_string("\n");
 
     output_string("PHY status: 0x");
@@ -2214,6 +2216,33 @@ static void cmd_nicinfo_brief() {
         output_string(dev->negotiatedFullDuplex ? "/full" : "/half");
     }
     output_string("\n");
+
+    output_string("MDIC: reg=");
+    uint_hex_to_str(dev->mdicRegisterAddress, 2, hexStr);
+    output_string(hexStr);
+    output_string(" init=0x");
+    uint_hex_to_str(dev->mdicInitialValue, 8, hexStr);
+    output_string(hexStr);
+    output_string(" cmd=0x");
+    uint_hex_to_str(dev->mdicCommandValue, 8, hexStr);
+    output_string(hexStr);
+    output_string(" final=0x");
+    uint_hex_to_str(dev->mdicValue, 8, hexStr);
+    output_string(hexStr);
+    output_string(" R=");
+    output_string(dev->mdicReady ? "Y" : "N");
+    output_string(" E=");
+    output_string(dev->mdicError ? "Y" : "N");
+    output_string(" T=");
+    output_string(dev->mdicTimedOut ? "Y" : "N");
+    output_string(" polls=");
+    uint_to_str(dev->mdicPollIterations, numStr);
+    output_string(numStr);
+    output_string(" data=0x");
+    uint_hex_to_str(dev->mdicDataValue, 4, hexStr);
+    output_string(hexStr);
+    output_string(" ok=");
+    output_string(dev->mdicDataValid ? "Y\n" : "N\n");
 
     output_string("RX ring: ");
     output_string(dev->rxRingInitialized ? "READY" : "NOT READY");
@@ -2265,6 +2294,7 @@ static void cmd_nicinfo_brief() {
 static void cmd_nicinfo() {
     output_string("=== NIC Diagnostic Information ===\n\n");
     char hexStr[9];
+    char numStr[16];
 
     print_pci_network_inventory();
     output_string("\n");
@@ -2567,6 +2597,34 @@ static void cmd_nicinfo() {
     uint_hex_to_str(dev->phyStatusValue, 4, hexStr);
     output_string(hexStr);
     output_string("\n");
+    output_string("MDIC transaction: reg=0x");
+    uint_hex_to_str(dev->mdicRegisterAddress, 2, hexStr);
+    output_string(hexStr);
+    output_string(" initial=0x");
+    uint_hex_to_str(dev->mdicInitialValue, 8, hexStr);
+    output_string(hexStr);
+    output_string(" command=0x");
+    uint_hex_to_str(dev->mdicCommandValue, 8, hexStr);
+    output_string(hexStr);
+    output_string(" final=0x");
+    uint_hex_to_str(dev->mdicValue, 8, hexStr);
+    output_string(hexStr);
+    output_string(" ready=");
+    output_string(dev->mdicReady ? "yes" : "no");
+    output_string(" error=");
+    output_string(dev->mdicError ? "yes" : "no");
+    output_string(" timeout=");
+    output_string(dev->mdicTimedOut ? "yes" : "no");
+    output_string(" polls=");
+    uint_to_str(dev->mdicPollIterations, numStr);
+    output_string(numStr);
+    output_string(" data=0x");
+    uint_hex_to_str(dev->mdicDataValue, 4, hexStr);
+    output_string(hexStr);
+    output_string(" response=");
+    output_string(dev->mdicResponseValid ? "valid" : "invalid");
+    output_string(" data-valid=");
+    output_string(dev->mdicDataValid ? "yes\n" : "no\n");
     output_string("PHY ID: 0x");
     uint_hex_to_str(dev->phyId1, 4, hexStr);
     output_string(hexStr);
@@ -2576,6 +2634,8 @@ static void cmd_nicinfo() {
     output_string("  Address: 0x");
     uint_hex_to_str(dev->phyAddress, 2, hexStr);
     output_string(hexStr);
+    output_string("  Source: ");
+    output_string(nic::phy_address_source_name(dev->phyAddressSource));
     output_string("\n");
     output_string("Negotiated Speed/Duplex: ");
     if (dev->negotiatedSpeed == 0) {
@@ -2596,7 +2656,6 @@ static void cmd_nicinfo() {
     output_string("\n--- Statistics ---\n");
     const nic::NetStats* stats = &dev->stats;
     
-    char numStr[16];
     output_string("TX Frames: ");
     uint_to_str(stats->txFrames, numStr);
     output_string(numStr);

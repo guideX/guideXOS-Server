@@ -16,7 +16,7 @@ static_assert((nic::NUM_RX_DESC & (nic::NUM_RX_DESC - 1)) == 0,
               "RX ring arithmetic expects a power-of-two descriptor count");
 static_assert((nic::NUM_TX_DESC & (nic::NUM_TX_DESC - 1)) == 0,
               "TX ring arithmetic expects a power-of-two descriptor count");
-static_assert(shell::NICINFO_BRIEF_EXPECTED_LINES == 18,
+static_assert(shell::NICINFO_BRIEF_EXPECTED_LINES == 19,
               "nicinfo brief device-present output line count changed");
 static_assert(shell::NICINFO_BRIEF_EXPECTED_LINES <= shell::NICINFO_BRIEF_MAX_LINES,
               "nicinfo brief must fit its declared bounded output");
@@ -57,6 +57,44 @@ int main()
     assert(!network_status::is_supported_intel_e1000(0x10EC, 0x8168));
     assert(!network_status::is_supported_intel_e1000(0x8086, 0x1234));
 
+    // Keep the emulated discrete E1000 and the integrated I219/PCH path
+    // explicit. The vendor is part of family identification.
+    assert(nic::device_family_for(0x8086, 0x100E) == nic::DeviceFamily::E1000);
+    assert(nic::device_family_for(0x8086, 0x10D3) == nic::DeviceFamily::E1000);
+    assert(nic::device_family_for(0x8086, 0x153A) == nic::DeviceFamily::E1000);
+    assert(nic::device_family_for(0x8086, 0x156F) == nic::DeviceFamily::I219Pch);
+    assert(nic::device_family_for(0x10EC, 0x156F) == nic::DeviceFamily::Unsupported);
+    assert(nic::device_family_for(0x8086, 0x1234) == nic::DeviceFamily::Unsupported);
+    assert(strcmp(nic::device_family_name(nic::DeviceFamily::I219Pch),
+                  "I219/PCH") == 0);
+
+    // I219 standard page-0 IEEE PHY registers use MDI address 2. Address 1
+    // is reserved for the PCH general/high-page register view.
+    assert(nic::I219_PHY_ADDRESS == 2);
+    assert(nic::I219_GENERAL_PHY_ADDRESS == 1);
+    assert(strcmp(nic::phy_address_source_name(nic::PhyAddressSource::FixedFamily),
+                  "fixed-family") == 0);
+
+    const uint32_t mdicCommand = nic::encode_mdic_read_command(2, 2);
+    assert(mdicCommand == 0x08420000u);
+    assert(nic::mdic_phy_address(mdicCommand) == 2);
+    assert(nic::mdic_register_address(mdicCommand) == 2);
+    const uint32_t maskedCommand = nic::encode_mdic_read_command(0xFFu, 0xFFu);
+    assert(nic::mdic_phy_address(maskedCommand) == 31);
+    assert(nic::mdic_register_address(maskedCommand) == 31);
+    const uint32_t mdicResponse = mdicCommand | nic::E1000_MDIC_READY | 0x0154u;
+    assert(nic::mdic_ready(mdicResponse));
+    assert(!nic::mdic_error(mdicResponse));
+    assert(nic::mdic_response_fields_match(mdicResponse, 2, 2));
+    assert(nic::mdic_data_is_valid(0x0000u));
+    assert(!nic::mdic_data_is_valid(0xFFFFu));
+    assert(nic::phy_identifier_is_valid(0x0154u, 0x0C00u));
+    assert(!nic::phy_identifier_is_valid(0x0000u, 0x0C00u));
+    assert(!nic::phy_identifier_is_valid(0x0154u, 0x0000u));
+    assert(!nic::phy_identifier_is_valid(0xFFFFu, 0x0C00u));
+    assert(!nic::phy_identifier_is_valid(0x0154u, 0xFFFFu));
+    assert(nic::mdic_error(mdicResponse | nic::E1000_MDIC_ERROR));
+
     assert(shell::nicinfo_mode_from_arg(nullptr) == shell::NICINFO_MODE_FULL);
     assert(shell::nicinfo_mode_from_arg("") == shell::NICINFO_MODE_FULL);
     assert(shell::nicinfo_mode_from_arg("brief") == shell::NICINFO_MODE_BRIEF);
@@ -81,11 +119,14 @@ int main()
     readyDevice.macValid = true;
     readyDevice.rxRingInitialized = true;
     readyDevice.txRingInitialized = true;
+    readyDevice.vendorId = nic::PCI_VENDOR_INTEL;
     readyDevice.deviceId = nic::PCI_DEVICE_I219_LM;
     readyDevice.resetAttempted = true;
     readyDevice.resetCompleted = true;
     readyDevice.phyProbeAttempted = true;
     readyDevice.phyAccess = nic::NIC_PHY_OK;
+    readyDevice.phyAddress = nic::I219_PHY_ADDRESS;
+    readyDevice.phyAddressSource = nic::PhyAddressSource::FixedFamily;
     readyDevice.nicRegistered = true;
     readyDevice.active = true;
     readyDevice.driverReady = true;

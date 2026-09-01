@@ -75,7 +75,7 @@ static inline uint32_t mmio_read32(uint64_t base, uint32_t reg);
 
 static bool is_i219_device(uint16_t deviceId)
 {
-    return deviceId == PCI_DEVICE_I219_LM;
+    return device_family_for(PCI_VENDOR_INTEL, deviceId) == DeviceFamily::I219Pch;
 }
 
 static bool i219_phase7_path_selected()
@@ -245,22 +245,25 @@ static uint32_t phase6_trace_read(uint64_t mmioBase, uint32_t reg,
     return value;
 }
 
-// Linux e1000e supplies real sleeps around the PCH reset.  guideXOS currently
-// has no calibrated microsecond delay API, so use the existing x86 port-80
-// delay primitive as a bounded approximation.  This is a sequencing guard,
-// not reset-completion detection; completion remains a separate finite MMIO
-// poll below.
-static void pch_reset_delay_ms(uint32_t milliseconds)
+// guideXOS currently has no calibrated microsecond delay API.  The existing
+// x86 port-80 delay primitive is used as a bounded approximation for both the
+// PCH reset sequencing guard and the MDIC transaction settling interval.
+static void mdic_delay_us(uint32_t microseconds)
 {
 #if ARCH_HAS_PORT_IO
-    for (uint32_t ms = 0; ms < milliseconds; ++ms) {
-        for (uint32_t i = 0; i < 10000u; ++i) {
+    for (uint32_t us = 0; us < microseconds; ++us) {
+        for (uint32_t i = 0; i < 10u; ++i) {
             arch::outb(0x80u, 0u);
         }
     }
 #else
-    (void)milliseconds;
+    (void)microseconds;
 #endif
+}
+
+static void pch_reset_delay_ms(uint32_t milliseconds)
+{
+    mdic_delay_us(milliseconds * 1000u);
 }
 
 static void phase7_print_mac_marker(const uint8_t* mac)
@@ -643,16 +646,20 @@ static inline void dma_memory_barrier()
 
 static inline void mmio_write32(uint64_t base, uint32_t reg, uint32_t val)
 {
+    dma_memory_barrier();
     volatile uint32_t* addr = reinterpret_cast<volatile uint32_t*>(
         static_cast<uintptr_t>(base + reg));
     *addr = val;
+    dma_memory_barrier();
 }
 
 static inline uint32_t mmio_read32(uint64_t base, uint32_t reg)
 {
     volatile uint32_t* addr = reinterpret_cast<volatile uint32_t*>(
         static_cast<uintptr_t>(base + reg));
-    return *addr;
+    const uint32_t value = *addr;
+    dma_memory_barrier();
+    return value;
 }
 
 static void mask_nic_interrupts(uint64_t mmioBase)
@@ -664,11 +671,7 @@ static void mask_nic_interrupts(uint64_t mmioBase)
 
 static bool is_supported_nic(uint16_t vendor, uint16_t device)
 {
-    if (vendor != PCI_VENDOR_INTEL) return false;
-    return (device == PCI_DEVICE_E1000 ||
-            device == PCI_DEVICE_E1000E ||
-            device == PCI_DEVICE_I217 ||
-            device == PCI_DEVICE_I219_LM);
+    return device_family_for(vendor, device) != DeviceFamily::Unsupported;
 }
 
 // ================================================================
@@ -781,6 +784,24 @@ static bool mdic_read(uint64_t mmioBase, uint8_t phyAddress,
 {
     if (!valueOut) return false;
 
+    // Capture the complete transaction envelope before issuing the command.
+    // The initial value is diagnostic only; MDIC commands replace the prior
+    // completion state, so a stale READY bit does not need a separate clear
+    // write and no PHY write is introduced here.
+    s_device.phyAddress = phyAddress;
+    s_device.mdicRegisterAddress = registerAddress;
+    s_device.mdicInitialValue = mmio_read32(mmioBase, E1000_MDIC);
+    s_device.mdicValue = s_device.mdicInitialValue;
+    s_device.mdicCommandValue = encode_mdic_read_command(phyAddress,
+                                                           registerAddress);
+    s_device.mdicPollIterations = 0;
+    s_device.mdicDataValue = 0;
+    s_device.mdicReady = false;
+    s_device.mdicError = false;
+    s_device.mdicTimedOut = false;
+    s_device.mdicResponseValid = false;
+    s_device.mdicDataValid = false;
+
     if (is_i219_device(s_device.deviceId)) {
         serial::puts(i219_phase7_path_selected()
                      ? "[AIDA-I219-P7] mdic begin phy="
@@ -791,16 +812,21 @@ static bool mdic_read(uint64_t mmioBase, uint8_t phyAddress,
         serial::putc('\n');
     }
 
-    const uint32_t command = E1000_MDIC_OP_READ |
-                             (static_cast<uint32_t>(phyAddress) << E1000_MDIC_PHY_SHIFT) |
-                             (static_cast<uint32_t>(registerAddress) << E1000_MDIC_REG_SHIFT);
-    mmio_write32(mmioBase, E1000_MDIC, command);
+    mmio_write32(mmioBase, E1000_MDIC, s_device.mdicCommandValue);
 
-    for (uint32_t i = 0; i < I219_PHASE5_HW_WAIT_LIMIT; ++i) {
-        const uint32_t mdic = mmio_read32(mmioBase, E1000_MDIC);
+    uint32_t mdic = s_device.mdicInitialValue;
+    for (uint32_t i = 0; i < I219_MDIC_POLL_LIMIT; ++i) {
+        // Intel's e1000e path gives MDIC 50 us between command and each
+        // completion observation. Keep the wait bounded and independent of
+        // interrupts/main-loop progress.
+        mdic_delay_us(I219_MDIC_POLL_DELAY_US);
+        mdic = mmio_read32(mmioBase, E1000_MDIC);
+        s_device.mdicPollIterations = i + 1u;
         s_device.mdicValue = mdic;
-        if ((mdic & E1000_MDIC_READY) == 0u) continue;
-        if ((mdic & E1000_MDIC_ERROR) != 0u) {
+        s_device.mdicReady = mdic_ready(mdic);
+        s_device.mdicError = mdic_error(mdic);
+        if (!s_device.mdicReady) continue;
+        if (s_device.mdicError) {
             serial::puts(i219_phase7_path_selected()
                          ? "[AIDA-I219-P7] mdic error phy="
                          : "[AIDA-I219-P5] mdic error phy=");
@@ -810,8 +836,20 @@ static bool mdic_read(uint64_t mmioBase, uint8_t phyAddress,
             serial::putc('\n');
             return false;
         }
+        if (!mdic_response_fields_match(mdic, phyAddress, registerAddress)) {
+            serial::puts(i219_phase7_path_selected()
+                         ? "[AIDA-I219-P7] mdic invalid-fields phy="
+                         : "[AIDA-I219-P5] mdic invalid-fields phy=");
+            serial::put_hex8(phyAddress);
+            serial::puts(" reg=");
+            serial::put_hex8(registerAddress);
+            serial::putc('\n');
+            return false;
+        }
+        s_device.mdicResponseValid = true;
         const uint16_t value = static_cast<uint16_t>(mdic & E1000_MDIC_DATA_MASK);
-        if (value == 0xFFFFu) {
+        s_device.mdicDataValue = value;
+        if (!mdic_data_is_valid(value)) {
             serial::puts(i219_phase7_path_selected()
                          ? "[AIDA-I219-P7] mdic invalid phy="
                          : "[AIDA-I219-P5] mdic invalid phy=");
@@ -821,6 +859,7 @@ static bool mdic_read(uint64_t mmioBase, uint8_t phyAddress,
             serial::putc('\n');
             return false;
         }
+        s_device.mdicDataValid = true;
         *valueOut = value;
         if (is_i219_device(s_device.deviceId)) {
             serial::puts(i219_phase7_path_selected()
@@ -834,6 +873,10 @@ static bool mdic_read(uint64_t mmioBase, uint8_t phyAddress,
         return true;
     }
 
+    s_device.mdicValue = mdic;
+    s_device.mdicReady = mdic_ready(mdic);
+    s_device.mdicError = mdic_error(mdic);
+    s_device.mdicTimedOut = !s_device.mdicReady;
     serial::puts(i219_phase7_path_selected()
                  ? "[AIDA-I219-P7] mdic timeout phy="
                  : "[AIDA-I219-P5] mdic timeout phy=");
@@ -847,6 +890,8 @@ static bool mdic_read(uint64_t mmioBase, uint8_t phyAddress,
 static bool read_i219_phy_status(uint64_t mmioBase)
 {
     s_device.phyProbeAttempted = true;
+    s_device.phyAddress = I219_PHY_ADDRESS;
+    s_device.phyAddressSource = PhyAddressSource::FixedFamily;
     uint16_t phyId1 = 0;
     uint16_t phyId2 = 0;
     uint16_t phyStatus = 0;
@@ -857,12 +902,10 @@ static bool read_i219_phy_status(uint64_t mmioBase)
         return false;
     }
 
-    // The integrated PCH PHY is conventionally reached at MDI address 1;
-    // registers 2/3 are the IEEE PHY identifier and register 26 is the
-    // family-specific link/status value. These are read-only assumptions in
-    // this stage: no PHY programming or semaphore acquisition is attempted.
-    if (phyId1 == 0u || phyId2 == 0u ||
-        (phyId1 == 0xFFFFu && phyId2 == 0xFFFFu)) {
+    // These are standard page-0 IEEE PHY identifiers. A zero or all-ones
+    // identifier is not accepted as a successful physical response, while a
+    // zero value in an individual non-ID register remains legal.
+    if (!phy_identifier_is_valid(phyId1, phyId2)) {
         s_device.phyAccess = NIC_PHY_FAILED;
         return false;
     }
@@ -870,7 +913,6 @@ static bool read_i219_phy_status(uint64_t mmioBase)
     s_device.phyId1 = phyId1;
     s_device.phyId2 = phyId2;
     s_device.phyStatusValue = phyStatus;
-    s_device.phyAddress = I219_PHY_ADDRESS;
     s_device.phyAccess = NIC_PHY_OK;
     s_device.link = (phyStatus & I219_PHY_STATUS_LINK) ? NIC_LINK_UP : NIC_LINK_DOWN;
     if (s_device.link == NIC_LINK_DOWN) {
@@ -1211,7 +1253,7 @@ static bool init_e1000(uint64_t mmioBase)
             set_init_failure(NIC_INIT_PHY, "PHY MDIC timeout or invalid response");
             return false;
         }
-        serial::puts("[NIC] I219 PHY discovery: MDIC address=1 status=26 valid\n");
+        serial::puts("[NIC] I219 PHY discovery: MDIC address=2 source=fixed-family status=26 valid\n");
         phase5_stage_complete(5);
         if (GXOS_AIDA_I219_PHASE5_STAGE == 5) {
             return phase5_stop(5, NIC_INIT_PHY,
