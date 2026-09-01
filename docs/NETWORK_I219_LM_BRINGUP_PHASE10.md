@@ -9,6 +9,9 @@ The Phase 9 image was booted on physical AIDA_LPT with Ethernet connected
 before startup. guideXOS reached the desktop and remained usable. The
 decisive `nicinfo brief` capture was:
 
+Phase 9 artifact: `guideXOS-Server-v0.1.0-phase9-aida-i219-briefdiag-amd64.iso`;
+SHA-256 `2fd97f49f02580e0521c5e021ffbac9f9dde6f1a6d0ac484907bf13262c50e43`.
+
 ```text
 PHY id=0x0000:0x0000 addr=0x00
 PHY status: 0x0000 mode=unknown
@@ -160,8 +163,8 @@ Two fresh QEMU boots used the established emulated E1000 setup:
 Both observed firmware entry, bootloader, kernel load, 64 MiB ramdisk load,
 desktop readiness, and kernel main-loop readiness. Serial evidence:
 
-- `out/release-iso/qemu-test-e2bf5db076bf45ee925ce21128296d3e/serial.log`
-- `out/release-iso/qemu-test-34c90f41e50048e3a08db69eca980982/serial.log`
+- `out/release-iso/qemu-test-fcc0619f58bc48ceae863522a30d6c51/serial.log`
+- `out/release-iso/qemu-test-295fb45e58f640768bb01360e84fb1f9/serial.log`
 
 These are QEMU regression results only. They do not claim physical I219
 success; the QEMU model accepts the discrete E1000 PHY access path.
@@ -171,9 +174,11 @@ success; the QEMU model accepts the discrete E1000 PHY access path.
 - Filename: `guideXOS-Server-v0.1.0-phase10-aida-i219-mdic-amd64.iso`
 - Path: `dist/guideXOS-Server-v0.1.0-phase10-aida-i219-mdic-amd64.iso`
 - Size: 90,245,120 bytes
-- SHA-256: `0256c48cb64756a31989cc47566afd29408dcefcd171634e5e52af97560a7f45`
+- SHA-256: `bbf4f0df41b6950c99cbc490c23a0c5c288f20ad018beecf77c4f77ac82dbadf`
 - Checksum sidecar: `dist/guideXOS-Server-v0.1.0-phase10-aida-i219-mdic-amd64.iso.sha256`
 - Manifest: `dist/guideXOS-Server-v0.1.0-phase10-aida-i219-mdic-amd64.manifest.json`
+- Manifest source commit: `8282311b2d0656c9e85b76f60c66ff146e9bd455`;
+  packaging started with a clean worktree.
 - Structural result: bootable UEFI, platform `0xEF`, no-emulation media.
 
 ## 8. Physical AIDA_LPT acceptance procedure
