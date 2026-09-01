@@ -19,6 +19,7 @@ enum ConnectionState : uint8_t {
     STATE_ADAPTER_DETECTED,
     STATE_DRIVER_UNAVAILABLE,
     STATE_DISCONNECTED,
+    STATE_IPV4_UNCONFIGURED,
     STATE_ACQUIRING_ADDRESS,
     STATE_IPV4_CONFIGURED,
     STATE_LOCAL_NETWORK_CONFIGURED,
@@ -31,6 +32,7 @@ struct Inputs {
     bool driverReady;
     bool linkUp;
     bool ipv4Configured;
+    bool ipv4ConfigurationPending;
     bool gatewayConfigured;
     bool dnsConfigured;
     bool connectivityVerified;
@@ -42,7 +44,11 @@ inline ConnectionState classify(const Inputs& input)
     if (!input.driverBound) return STATE_DRIVER_UNAVAILABLE;
     if (!input.driverReady) return STATE_ADAPTER_DETECTED;
     if (!input.linkUp) return STATE_DISCONNECTED;
-    if (!input.ipv4Configured) return STATE_ACQUIRING_ADDRESS;
+    if (!input.ipv4Configured) {
+        return input.ipv4ConfigurationPending
+            ? STATE_ACQUIRING_ADDRESS
+            : STATE_IPV4_UNCONFIGURED;
+    }
     if (input.connectivityVerified) return STATE_ONLINE;
     if (input.gatewayConfigured) return STATE_LOCAL_NETWORK_CONFIGURED;
     return STATE_IPV4_CONFIGURED;
@@ -55,6 +61,7 @@ inline const char* state_to_string(ConnectionState state)
         case STATE_ADAPTER_DETECTED:        return "Adapter detected";
         case STATE_DRIVER_UNAVAILABLE:      return "Driver unavailable";
         case STATE_DISCONNECTED:            return "Disconnected";
+        case STATE_IPV4_UNCONFIGURED:       return "IPv4 unconfigured";
         case STATE_ACQUIRING_ADDRESS:       return "Acquiring address";
         case STATE_IPV4_CONFIGURED:         return "IPv4 configured";
         case STATE_LOCAL_NETWORK_CONFIGURED:return "Local network configured";

@@ -118,22 +118,25 @@ void ip_to_string(uint32_t ip, char* str)
 bool ip_from_string(const char* str, uint32_t* ip)
 {
     if (!str || !ip) return false;
-    
+
     uint32_t result = 0;
-    uint8_t octet = 0;
+    uint16_t octet = 0;
     uint8_t octetCount = 0;
+    bool hasDigit = false;
     
     for (const char* p = str; ; ++p) {
         if (*p >= '0' && *p <= '9') {
-            octet = octet * 10 + (*p - '0');
+            hasDigit = true;
+            octet = static_cast<uint16_t>(octet * 10u + (*p - '0'));
             if (octet > 255) return false;
         } else if (*p == '.' || *p == '\0') {
+            if (!hasDigit || octetCount >= 4) return false;
             result = (result << 8) | octet;
             octet = 0;
+            hasDigit = false;
             octetCount++;
-            
+
             if (*p == '\0') break;
-            if (octetCount >= 4) return false;
         } else {
             return false;
         }
@@ -142,6 +145,47 @@ bool ip_from_string(const char* str, uint32_t* ip)
     if (octetCount != 4) return false;
     
     *ip = result;
+    return true;
+}
+
+bool mask_from_prefix(uint8_t prefix, uint32_t* mask)
+{
+    if (!mask || prefix > 32u) return false;
+    if (prefix == 0u) {
+        *mask = 0;
+    } else if (prefix == 32u) {
+        *mask = 0xFFFFFFFFu;
+    } else {
+        *mask = 0xFFFFFFFFu << (32u - prefix);
+    }
+    return true;
+}
+
+bool is_valid_subnet_mask(uint32_t mask)
+{
+    if (mask == 0u) return false;
+
+    bool zeroSeen = false;
+    for (uint32_t bit = 0x80000000u; bit != 0u; bit >>= 1) {
+        if ((mask & bit) != 0u) {
+            if (zeroSeen) return false;
+        } else {
+            zeroSeen = true;
+        }
+    }
+    return true;
+}
+
+bool prefix_from_mask(uint32_t mask, uint8_t* prefix)
+{
+    if (!prefix || !is_valid_subnet_mask(mask)) return false;
+
+    uint8_t result = 0;
+    for (uint32_t bit = 0x80000000u; bit != 0u; bit >>= 1) {
+        if ((mask & bit) == 0u) break;
+        ++result;
+    }
+    *prefix = result;
     return true;
 }
 
@@ -218,23 +262,101 @@ void init()
     serial::puts("[IPv4] Layer initialized\n");
 }
 
-void configure(uint32_t ip, uint32_t mask, uint32_t gateway, uint32_t dns)
+const char* config_status_name(ConfigStatus status)
 {
+    switch (status) {
+        case CONFIG_OK:                  return "ok";
+        case CONFIG_ERR_INVALID_IP:      return "invalid-ip";
+        case CONFIG_ERR_INVALID_MASK:    return "invalid-mask";
+        case CONFIG_ERR_INVALID_GATEWAY: return "invalid-gateway";
+        case CONFIG_ERR_INVALID_DNS:     return "invalid-dns";
+        case CONFIG_ERR_ROUTE_TABLE:     return "route-table-full";
+        default:                         return "unknown";
+    }
+}
+
+static bool is_valid_unicast_host(uint32_t ip)
+{
+    return ip != ADDR_ANY && ip != ADDR_BROADCAST &&
+           !is_multicast(ip) && !is_loopback(ip);
+}
+
+ConfigStatus validate_configuration(uint32_t ip, uint32_t mask,
+                                     uint32_t gateway, uint32_t dns)
+{
+    if (!is_valid_unicast_host(ip)) return CONFIG_ERR_INVALID_IP;
+    if (!is_valid_subnet_mask(mask)) return CONFIG_ERR_INVALID_MASK;
+
+    const uint32_t network = ip & mask;
+    const uint32_t broadcast = network | ~mask;
+    if (mask != 0xFFFFFFFFu && (ip == network || ip == broadcast)) {
+        return CONFIG_ERR_INVALID_IP;
+    }
+
+    if (gateway != 0u &&
+        (!is_valid_unicast_host(gateway) || !is_same_subnet(ip, gateway, mask))) {
+        return CONFIG_ERR_INVALID_GATEWAY;
+    }
+    if (dns != 0u && !is_valid_unicast_host(dns)) {
+        return CONFIG_ERR_INVALID_DNS;
+    }
+    return CONFIG_OK;
+}
+
+static void clear_routes()
+{
+    memzero(s_routes, sizeof(s_routes));
+}
+
+static void clear_arp_cache()
+{
+    memzero(s_arpCache, sizeof(s_arpCache));
+}
+
+void clear_configuration()
+{
+    uint8_t mac[6];
+    ethernet::mac_copy(mac, s_config.macAddr);
+    memzero(&s_config, sizeof(s_config));
+    ethernet::mac_copy(s_config.macAddr, mac);
+    clear_routes();
+    clear_arp_cache();
+}
+
+void select_dhcp_mode()
+{
+    clear_configuration();
+    s_config.mode = CONFIG_DHCP;
+}
+
+static ConfigStatus apply_configuration(uint32_t ip, uint32_t mask,
+                                         uint32_t gateway, uint32_t dns,
+                                         ConfigurationMode mode)
+{
+    const ConfigStatus validation = validate_configuration(ip, mask, gateway, dns);
+    if (validation != CONFIG_OK) return validation;
+
+    clear_routes();
+    clear_arp_cache();
     s_config.ipAddr = ip;
     s_config.subnetMask = mask;
     s_config.gateway = gateway;
     s_config.dns = dns;
+    s_config.mode = mode;
     s_config.configured = true;
-    
-    // Add default route via gateway
-    if (gateway != 0) {
-        add_route(0, 0, gateway, 100);
+
+    if (gateway != 0u && add_route(0, 0, gateway, 100) != IP_OK) {
+        clear_configuration();
+        return CONFIG_ERR_ROUTE_TABLE;
     }
-    
-    // Add local network route (direct)
-    add_route(ip & mask, mask, 0, 1);
-    
-    serial::puts("[IPv4] Configured: IP=");
+    if (add_route(ip & mask, mask, 0, 1) != IP_OK) {
+        clear_configuration();
+        return CONFIG_ERR_ROUTE_TABLE;
+    }
+
+    serial::puts("[IPv4] Configured mode=");
+    serial::puts(configuration_mode_name(mode));
+    serial::puts(" IP=");
     char ipStr[16];
     ip_to_string(ip, ipStr);
     serial::puts(ipStr);
@@ -245,6 +367,31 @@ void configure(uint32_t ip, uint32_t mask, uint32_t gateway, uint32_t dns)
     ip_to_string(gateway, ipStr);
     serial::puts(ipStr);
     serial::putc('\n');
+    return CONFIG_OK;
+}
+
+void configure(uint32_t ip, uint32_t mask, uint32_t gateway, uint32_t dns)
+{
+    // Compatibility wrapper for existing callers; new code selects its mode.
+    (void)configure_static(ip, mask, gateway, dns);
+}
+
+ConfigStatus configure_static(uint32_t ip, uint32_t mask,
+                               uint32_t gateway, uint32_t dns)
+{
+    return apply_configuration(ip, mask, gateway, dns, CONFIG_STATIC);
+}
+
+ConfigStatus configure_dhcp(uint32_t ip, uint32_t mask,
+                            uint32_t gateway, uint32_t dns)
+{
+    return apply_configuration(ip, mask, gateway, dns, CONFIG_DHCP);
+}
+
+ConfigStatus configure_qemu_defaults(uint32_t ip, uint32_t mask,
+                                     uint32_t gateway, uint32_t dns)
+{
+    return apply_configuration(ip, mask, gateway, dns, CONFIG_QEMU_DEFAULT);
 }
 
 void set_mac_address(const uint8_t* mac)
@@ -400,6 +547,8 @@ static Status send_arp_packet(uint16_t oper, uint32_t targetIP, const uint8_t* t
         &frameLen);
 
     if (ethStatus != ethernet::ETH_OK) return IP_ERR_TX_FAILED;
+
+    if (oper == ARP_OPER_REQUEST) s_stats.arpRequestsGenerated++;
 
     nic::Status nicStatus = nic::send_frame(frame, frameLen);
     if (nicStatus != nic::NIC_OK) return IP_ERR_TX_FAILED;
@@ -691,6 +840,8 @@ Status send_packet(const uint8_t* payload,
                    uint32_t dstAddr,
                    uint8_t protocol)
 {
+    s_stats.txAttempts++;
+
     if (!s_config.configured) {
         s_stats.txErrors++;
         return IP_ERR_NOT_CONFIGURED;

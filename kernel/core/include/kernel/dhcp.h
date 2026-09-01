@@ -206,7 +206,9 @@ enum Status : uint8_t {
 // ================================================================
 
 struct Statistics {
+    uint32_t discoverAttempts;    // DISCOVER packets generated before send
     uint32_t discoversSent;
+    uint32_t discoverSendFailures;
     uint32_t offersReceived;
     uint32_t requestsSent;
     uint32_t acksReceived;
@@ -223,6 +225,14 @@ struct Statistics {
 
 // Initialize DHCP client
 void init();
+
+// Select automatic/DHCP mode without starting a blocking discovery. This
+// clears any lease and the active IPv4 configuration through the shared
+// networking backend.
+void set_automatic_mode();
+
+// Forget a lease before applying manual configuration.
+void clear_lease_for_manual_configuration();
 
 // ================================================================
 // DHCP Discovery and Configuration

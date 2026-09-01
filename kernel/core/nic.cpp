@@ -73,6 +73,16 @@ static void mask_nic_interrupts(uint64_t mmioBase);
 static inline void mmio_write32(uint64_t base, uint32_t reg, uint32_t val);
 static inline uint32_t mmio_read32(uint64_t base, uint32_t reg);
 
+static void snapshot_tx_registers()
+{
+#if ARCH_HAS_PORT_IO
+    if (!s_device.mmioMapped) return;
+    s_device.tx.observedHead = mmio_read32(s_device.mmioBase, E1000_TDH);
+    s_device.tx.observedTail = mmio_read32(s_device.mmioBase, E1000_TDT);
+    s_device.tx.control = mmio_read32(s_device.mmioBase, E1000_TCTL);
+#endif
+}
+
 static bool is_i219_device(uint16_t deviceId)
 {
     return device_family_for(PCI_VENDOR_INTEL, deviceId) == DeviceFamily::I219Pch;
@@ -1041,6 +1051,7 @@ static bool init_tx(uint64_t mmioBase)
 
     // Set inter-packet gap (TIPG)
     mmio_write32(mmioBase, E1000_TIPG, E1000_TIPG_DEFAULT);
+    snapshot_tx_registers();
     s_device.txRingInitialized = true;
     return true;
 }
@@ -2005,6 +2016,9 @@ Status send_frame(const uint8_t* data, uint16_t len)
 
 #if ARCH_HAS_PORT_IO
     s_device.stats.txAttempted++;
+    s_device.tx.tailBefore = s_txCur;
+    s_device.tx.lastDescriptor = s_txCur;
+    snapshot_tx_registers();
 
     // Check that the current TX descriptor is available
     if (!(s_txDescs[s_txCur].status & E1000_TXD_STAT_DD)) {
@@ -2036,12 +2050,19 @@ Status send_frame(const uint8_t* data, uint16_t len)
     uint16_t oldTx = s_txCur;
     s_txCur = (s_txCur + 1) % NUM_TX_DESC;
     mmio_write32(s_device.mmioBase, E1000_TDT, s_txCur);
+    s_device.stats.txFramesSubmitted++;
+    s_device.tx.descriptorSubmissions++;
+    s_device.tx.tailAfter = s_txCur;
+    snapshot_tx_registers();
 
     // Wait for transmission to complete (busy-poll descriptor status)
     for (uint32_t i = 0; i < 1000000; ++i) {
         if (s_txDescs[oldTx].status & E1000_TXD_STAT_DD) {
             s_device.stats.txFrames++;
             s_device.stats.txBytes += static_cast<uint32_t>(len);
+            s_device.tx.descriptorCompletions++;
+            s_device.tx.lastDescriptorStatus = s_txDescs[oldTx].status;
+            snapshot_tx_registers();
             return NIC_OK;
         }
     }
@@ -2050,6 +2071,9 @@ Status send_frame(const uint8_t* data, uint16_t len)
     serial::put_hex8(s_txDescs[oldTx].status);
     serial::putc('\n');
     s_device.stats.txErrors++;
+    s_device.tx.hardwareTimeouts++;
+    s_device.tx.lastDescriptorStatus = s_txDescs[oldTx].status;
+    snapshot_tx_registers();
     return NIC_ERR_INIT_FAIL;
 #else
     (void)data;

@@ -10,6 +10,7 @@
 #include "include/kernel/dhcp.h"
 #include "include/kernel/udp.h"
 #include "include/kernel/ipv4.h"
+#include "include/kernel/dns.h"
 #include "include/kernel/ethernet.h"
 #include "include/kernel/nic.h"
 #include "include/kernel/socket.h"
@@ -109,6 +110,19 @@ void init()
     }
 
     serial::puts("[DHCP] Client initialized\n");
+}
+
+void clear_lease_for_manual_configuration()
+{
+    memzero(&s_lease, sizeof(s_lease));
+    s_state = STATE_INIT;
+}
+
+void set_automatic_mode()
+{
+    clear_lease_for_manual_configuration();
+    ipv4::select_dhcp_mode();
+    dns::set_server(0);
 }
 
 // ================================================================
@@ -486,9 +500,10 @@ static Status do_discover(const uint8_t* mac, uint32_t xid,
     s_state = STATE_SELECTING;
 
     for (uint8_t attempt = 0; attempt < MAX_DISCOVER_RETRIES; ++attempt) {
+        s_stats.discoverAttempts++;
         st = dhcp_send(s_txBuffer, pktLen, ipv4::ADDR_BROADCAST);
         if (st != DHCP_OK) {
-            s_stats.errors++;
+            s_stats.discoverSendFailures++;
             continue;
         }
         s_stats.discoversSent++;
@@ -522,8 +537,12 @@ static Status do_discover(const uint8_t* mac, uint32_t xid,
             return DHCP_OK;
         }
 
-        s_stats.timeouts++;
-        serial::puts("[DHCP] DISCOVER timeout, retrying...\n");
+        if (st == DHCP_ERR_TIMEOUT) {
+            s_stats.timeouts++;
+            serial::puts("[DHCP] DISCOVER timeout, retrying...\n");
+        } else {
+            s_stats.errors++;
+        }
     }
 
     return DHCP_ERR_NO_OFFER;
@@ -551,7 +570,6 @@ static Status do_request(const uint8_t* mac, uint32_t xid,
     for (uint8_t attempt = 0; attempt < MAX_REQUEST_RETRIES; ++attempt) {
         st = dhcp_send(s_txBuffer, pktLen, ipv4::ADDR_BROADCAST);
         if (st != DHCP_OK) {
-            s_stats.errors++;
             continue;
         }
         s_stats.requestsSent++;
@@ -585,16 +603,20 @@ static Status do_request(const uint8_t* mac, uint32_t xid,
             }
         }
 
-        s_stats.timeouts++;
-        serial::puts("[DHCP] REQUEST timeout, retrying...\n");
+        if (st == DHCP_ERR_TIMEOUT) {
+            s_stats.timeouts++;
+            serial::puts("[DHCP] REQUEST timeout, retrying...\n");
+        } else {
+            s_stats.errors++;
+        }
     }
 
     return DHCP_ERR_NO_ACK;
 }
 
 // Internal: Apply lease and configure the kernel networking state
-static void apply_lease(const Packet* ackPkt, const ParsedOptions* opts,
-                        uint32_t xid)
+static Status apply_lease(const Packet* ackPkt, const ParsedOptions* opts,
+                          uint32_t xid)
 {
     uint32_t assignedIP = dhcp_ntohl(ackPkt->yiaddr);
 
@@ -612,15 +634,23 @@ static void apply_lease(const Packet* ackPkt, const ParsedOptions* opts,
                              : (s_lease.leaseTime * 7) / 8;
     s_lease.leaseStartTick = s_tickCounter;
     s_lease.xid            = xid;
-    s_lease.valid          = true;
-
     // Configure IPv4 layer with the obtained parameters
-    ipv4::configure(s_lease.assignedIP,
-                    s_lease.subnetMask,
-                    s_lease.gateway,
-                    s_lease.dnsServer);
+    const ipv4::ConfigStatus configStatus = ipv4::configure_dhcp(
+        s_lease.assignedIP, s_lease.subnetMask,
+        s_lease.gateway, s_lease.dnsServer);
+    if (configStatus != ipv4::CONFIG_OK) {
+        s_lease.valid = false;
+        serial::puts("[DHCP] Lease rejected by IPv4 configuration: ");
+        serial::puts(ipv4::config_status_name(configStatus));
+        serial::putc('\n');
+        return DHCP_ERR_INVALID;
+    }
+
+    s_lease.valid = true;
+    dns::set_server(s_lease.dnsServer);
 
     s_state = STATE_BOUND;
+    return DHCP_OK;
 }
 
 // ================================================================
@@ -632,6 +662,15 @@ Status discover()
     if (!nic::is_active()) {
         serial::puts("[DHCP] No NIC available\n");
         return DHCP_ERR_NO_NIC;
+    }
+
+    // A manual configuration is no longer authoritative once discovery is
+    // requested. Preserve the emulated QEMU source state because its
+    // established user-networking path uses the configured 10.0.2.x source
+    // address while probing for a lease.
+    const ipv4::NetworkConfig* currentConfig = ipv4::get_config();
+    if (!currentConfig || currentConfig->mode != ipv4::CONFIG_QEMU_DEFAULT) {
+        ipv4::select_dhcp_mode();
     }
 
     const uint8_t* mac = nic::get_mac_address();
@@ -666,14 +705,19 @@ Status discover()
 
         if (st == DHCP_OK) {
             // Apply configuration
-            apply_lease(&ackPkt, &ackOpts, xid);
+            st = apply_lease(&ackPkt, &ackOpts, xid);
+            if (st != DHCP_OK) {
+                s_state = STATE_ERROR;
+                udp::unbind(DHCP_CLIENT_PORT);
+                return st;
+            }
             dhcp_print_info();
             udp::unbind(DHCP_CLIENT_PORT);
             return DHCP_OK;
         }
 
         if (st == DHCP_ERR_NAK) {
-            // NAK received — restart from DISCOVER
+            // NAK received - restart from DISCOVER
             xid = generate_xid();
             st = do_discover(mac, xid, &offerPkt, &offerOpts);
             if (st != DHCP_OK) break;
@@ -769,7 +813,10 @@ void check_renewal()
                 ParsedOptions opts;
                 if (parse_options(resp, &opts) == DHCP_OK) {
                     if (opts.messageType == DHCPACK) {
-                        apply_lease(resp, &opts, xid);
+                        if (apply_lease(resp, &opts, xid) != DHCP_OK) {
+                            s_state = STATE_ERROR;
+                            return;
+                        }
                         s_stats.renewals++;
                         serial::puts("[DHCP] Lease renewed\n");
                         return;
@@ -786,7 +833,7 @@ void check_renewal()
             }
         }
 
-        // Renewal failed — will retry on next check
+        // Renewal failed - will retry on next check
         serial::puts("[DHCP] Renewal failed, will retry\n");
     }
 }
@@ -828,6 +875,8 @@ Status dhcp_release()
     // Invalidate lease regardless of send result
     s_lease.valid = false;
     s_state = STATE_RELEASED;
+    ipv4::clear_configuration();
+    dns::set_server(0);
 
     serial::puts("[DHCP] Lease released\n");
     return DHCP_OK;

@@ -33,6 +33,9 @@
 #include "include/kernel/network_status.h"
 #include "include/kernel/usb_net.h"
 #include "include/kernel/ipv4.h"
+#include "include/kernel/dhcp.h"
+#include "include/kernel/dns.h"
+#include "include/kernel/text_field.h"
 #include "include/kernel/pci_audio.h"
 #include "include/kernel/usb_audio.h"
 #include "include/kernel/time.h"
@@ -757,14 +760,10 @@ static int s_networkAdapterHover = -1;
 
 // Network Configuration dialog state
 static bool s_networkConfigOpen = false;
-static int s_networkConfigFocusField = -1;  // Which IP octet field is focused
+static int s_networkConfigFocusField = -1;
 static bool s_networkConfigUseDHCP = true;
 static bool s_networkConfigUseDHCPforDNS = true;
-// IP configuration values (4 octets each)
-static uint8_t s_netConfigIP[4] = {0, 0, 0, 0};
-static uint8_t s_netConfigMask[4] = {255, 255, 255, 0};
-static uint8_t s_netConfigGateway[4] = {0, 0, 0, 0};
-static uint8_t s_netConfigDNS[4] = {0, 0, 0, 0};
+static text_field::TextField s_networkConfigFields[4] = {};
 static int s_networkConfigBtnHover = -1;  // 0 = OK, 1 = Cancel
 
 // Layout constants
@@ -8046,6 +8045,12 @@ static const char* network_adapter_status(int index)
     input.linkUp = input.driverReady && nic::get_link_state() == nic::NIC_LINK_UP;
     const ipv4::NetworkConfig* config = ipv4::get_config();
     input.ipv4Configured = config && config->configured;
+    const dhcp::ClientState dhcpState = dhcp::get_state();
+    input.ipv4ConfigurationPending =
+        dhcpState == dhcp::STATE_SELECTING ||
+        dhcpState == dhcp::STATE_REQUESTING ||
+        dhcpState == dhcp::STATE_RENEWING ||
+        dhcpState == dhcp::STATE_REBINDING;
     input.gatewayConfigured = config && config->gateway != 0;
     input.dnsConfigured = config && config->dns != 0;
     input.connectivityVerified = false;
@@ -8161,6 +8166,95 @@ static int hit_test_network_adapters(int32_t mx, int32_t my)
 
 static const uint32_t kNetConfigW = 480;
 static const uint32_t kNetConfigH = 420;
+static const uint32_t kNetConfigFieldX = 180;
+static const uint32_t kNetConfigFieldW = 200;
+static const uint32_t kNetConfigFieldOffsets[4] = {140, 168, 196, 232};
+
+static void set_network_config_field_ip(uint8_t field, uint32_t address)
+{
+    if (field >= 4) return;
+    char value[16];
+    ipv4::ip_to_string(address, value);
+    text_field::set_text(s_networkConfigFields[field], value);
+}
+
+static void load_network_config_dialog()
+{
+    const ipv4::NetworkConfig* config = ipv4::get_config();
+    s_networkConfigFocusField = -1;
+    s_networkConfigUseDHCP = !config || !config->configured ||
+                             config->mode != ipv4::CONFIG_STATIC;
+    s_networkConfigUseDHCPforDNS = true;
+
+    set_network_config_field_ip(0, config && config->configured ? config->ipAddr : 0);
+    set_network_config_field_ip(1, config && config->configured
+                                   ? config->subnetMask : ipv4::MASK_24);
+    set_network_config_field_ip(2, config && config->configured ? config->gateway : 0);
+    set_network_config_field_ip(3, config && config->configured ? config->dns : 0);
+
+    for (uint8_t i = 0; i < 4; ++i) {
+        s_networkConfigFields[i].enabled = !s_networkConfigUseDHCP;
+        text_field::set_focus(s_networkConfigFields[i], false);
+    }
+}
+
+static void open_network_config_dialog()
+{
+    load_network_config_dialog();
+    s_networkConfigOpen = true;
+}
+
+static void set_network_config_mode(bool useDHCP)
+{
+    s_networkConfigUseDHCP = useDHCP;
+    if (useDHCP) s_networkConfigFocusField = -1;
+    for (uint8_t i = 0; i < 4; ++i) {
+        s_networkConfigFields[i].enabled = !useDHCP;
+        text_field::set_focus(s_networkConfigFields[i], false);
+    }
+}
+
+static int network_config_field_at(int32_t mx, int32_t my)
+{
+    if (s_networkConfigUseDHCP) return -1;
+    uint32_t dlgX = (s_screenW - kNetConfigW) / 2;
+    uint32_t dlgY = (s_screenH - kNetConfigH) / 2;
+    for (int i = 0; i < 4; ++i) {
+        if ((uint32_t)mx >= dlgX + kNetConfigFieldX &&
+            (uint32_t)mx < dlgX + kNetConfigFieldX + kNetConfigFieldW &&
+            (uint32_t)my >= dlgY + kNetConfigFieldOffsets[i] &&
+            (uint32_t)my < dlgY + kNetConfigFieldOffsets[i] + 24) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+static void focus_network_config_field(int field, int32_t mx)
+{
+    if (field < 0 || field >= 4) return;
+    for (int i = 0; i < 4; ++i) {
+        text_field::set_focus(s_networkConfigFields[i], i == field);
+    }
+    s_networkConfigFocusField = field;
+    if (mx >= 0) {
+        uint32_t dlgX = (s_screenW - kNetConfigW) / 2;
+        int32_t textX = mx - static_cast<int32_t>(dlgX + kNetConfigFieldX + 8);
+        uint8_t caret = textX <= 0 ? 0 : static_cast<uint8_t>((textX + 3) / 6);
+        text_field::set_caret(s_networkConfigFields[field], caret);
+    }
+}
+
+static const char* network_config_error(ipv4::ConfigStatus status)
+{
+    switch (status) {
+        case ipv4::CONFIG_ERR_INVALID_IP:      return "Invalid IPv4 address";
+        case ipv4::CONFIG_ERR_INVALID_MASK:    return "Invalid subnet mask";
+        case ipv4::CONFIG_ERR_INVALID_GATEWAY: return "Invalid gateway";
+        case ipv4::CONFIG_ERR_INVALID_DNS:     return "Invalid DNS server";
+        default:                               return "Network configuration failed";
+    }
+}
 
 static void draw_network_config()
 {
@@ -8204,68 +8298,66 @@ static void draw_network_config()
 
     // IP Address
     draw_text(dlgX + 48, textY, "IP address:", labelColor, 1);
-    framebuffer::fill_rect(dlgX + 180, textY - 4, 200, 20, fieldBg);
-    draw_rect(dlgX + 180, textY - 4, 200, 20, rgb(70, 80, 95));
-    char ipStr[20]; 
-    // Format IP as string
-    int idx = 0;
-    for (int o = 0; o < 4; o++) {
-        uint8_t v = s_netConfigIP[o];
-        if (v >= 100) ipStr[idx++] = '0' + v / 100;
-        if (v >= 10) ipStr[idx++] = '0' + (v / 10) % 10;
-        ipStr[idx++] = '0' + v % 10;
-        if (o < 3) ipStr[idx++] = '.';
+    framebuffer::fill_rect(dlgX + kNetConfigFieldX, textY - 4,
+                           kNetConfigFieldW, 20, fieldBg);
+    draw_rect(dlgX + kNetConfigFieldX, textY - 4,
+              kNetConfigFieldW, 20,
+              s_networkConfigFocusField == 0 ? rgb(100, 150, 220) : rgb(70, 80, 95));
+    draw_text(dlgX + kNetConfigFieldX + 8, textY,
+              s_networkConfigFields[0].text, labelColor, 1);
+    if (s_networkConfigFocusField == 0 && !s_networkConfigUseDHCP) {
+        framebuffer::fill_rect(dlgX + kNetConfigFieldX + 8 +
+                               s_networkConfigFields[0].caret * 6,
+                               textY - 2, 1, 12, rgb(230, 235, 250));
     }
-    ipStr[idx] = '\0';
-    draw_text(dlgX + 188, textY, ipStr, labelColor, 1);
     textY += 28;
 
     // Subnet mask
     draw_text(dlgX + 48, textY, "Subnet mask:", labelColor, 1);
-    framebuffer::fill_rect(dlgX + 180, textY - 4, 200, 20, fieldBg);
-    draw_rect(dlgX + 180, textY - 4, 200, 20, rgb(70, 80, 95));
-    idx = 0;
-    for (int o = 0; o < 4; o++) {
-        uint8_t v = s_netConfigMask[o];
-        if (v >= 100) ipStr[idx++] = '0' + v / 100;
-        if (v >= 10) ipStr[idx++] = '0' + (v / 10) % 10;
-        ipStr[idx++] = '0' + v % 10;
-        if (o < 3) ipStr[idx++] = '.';
+    framebuffer::fill_rect(dlgX + kNetConfigFieldX, textY - 4,
+                           kNetConfigFieldW, 20, fieldBg);
+    draw_rect(dlgX + kNetConfigFieldX, textY - 4,
+              kNetConfigFieldW, 20,
+              s_networkConfigFocusField == 1 ? rgb(100, 150, 220) : rgb(70, 80, 95));
+    draw_text(dlgX + kNetConfigFieldX + 8, textY,
+              s_networkConfigFields[1].text, labelColor, 1);
+    if (s_networkConfigFocusField == 1 && !s_networkConfigUseDHCP) {
+        framebuffer::fill_rect(dlgX + kNetConfigFieldX + 8 +
+                               s_networkConfigFields[1].caret * 6,
+                               textY - 2, 1, 12, rgb(230, 235, 250));
     }
-    ipStr[idx] = '\0';
-    draw_text(dlgX + 188, textY, ipStr, labelColor, 1);
     textY += 28;
 
     // Gateway
     draw_text(dlgX + 48, textY, "Default gateway:", labelColor, 1);
-    framebuffer::fill_rect(dlgX + 180, textY - 4, 200, 20, fieldBg);
-    draw_rect(dlgX + 180, textY - 4, 200, 20, rgb(70, 80, 95));
-    idx = 0;
-    for (int o = 0; o < 4; o++) {
-        uint8_t v = s_netConfigGateway[o];
-        if (v >= 100) ipStr[idx++] = '0' + v / 100;
-        if (v >= 10) ipStr[idx++] = '0' + (v / 10) % 10;
-        ipStr[idx++] = '0' + v % 10;
-        if (o < 3) ipStr[idx++] = '.';
+    framebuffer::fill_rect(dlgX + kNetConfigFieldX, textY - 4,
+                           kNetConfigFieldW, 20, fieldBg);
+    draw_rect(dlgX + kNetConfigFieldX, textY - 4,
+              kNetConfigFieldW, 20,
+              s_networkConfigFocusField == 2 ? rgb(100, 150, 220) : rgb(70, 80, 95));
+    draw_text(dlgX + kNetConfigFieldX + 8, textY,
+              s_networkConfigFields[2].text, labelColor, 1);
+    if (s_networkConfigFocusField == 2 && !s_networkConfigUseDHCP) {
+        framebuffer::fill_rect(dlgX + kNetConfigFieldX + 8 +
+                               s_networkConfigFields[2].caret * 6,
+                               textY - 2, 1, 12, rgb(230, 235, 250));
     }
-    ipStr[idx] = '\0';
-    draw_text(dlgX + 188, textY, ipStr, labelColor, 1);
     textY += 36;
 
     // DNS
     draw_text(dlgX + 48, textY, "Preferred DNS:", labelColor, 1);
-    framebuffer::fill_rect(dlgX + 180, textY - 4, 200, 20, fieldBg);
-    draw_rect(dlgX + 180, textY - 4, 200, 20, rgb(70, 80, 95));
-    idx = 0;
-    for (int o = 0; o < 4; o++) {
-        uint8_t v = s_netConfigDNS[o];
-        if (v >= 100) ipStr[idx++] = '0' + v / 100;
-        if (v >= 10) ipStr[idx++] = '0' + (v / 10) % 10;
-        ipStr[idx++] = '0' + v % 10;
-        if (o < 3) ipStr[idx++] = '.';
+    framebuffer::fill_rect(dlgX + kNetConfigFieldX, textY - 4,
+                           kNetConfigFieldW, 20, fieldBg);
+    draw_rect(dlgX + kNetConfigFieldX, textY - 4,
+              kNetConfigFieldW, 20,
+              s_networkConfigFocusField == 3 ? rgb(100, 150, 220) : rgb(70, 80, 95));
+    draw_text(dlgX + kNetConfigFieldX + 8, textY,
+              s_networkConfigFields[3].text, labelColor, 1);
+    if (s_networkConfigFocusField == 3 && !s_networkConfigUseDHCP) {
+        framebuffer::fill_rect(dlgX + kNetConfigFieldX + 8 +
+                               s_networkConfigFields[3].caret * 6,
+                               textY - 2, 1, 12, rgb(230, 235, 250));
     }
-    ipStr[idx] = '\0';
-    draw_text(dlgX + 188, textY, ipStr, labelColor, 1);
 
     // Buttons
     uint32_t btnY = dlgY + kNetConfigH - 50;
@@ -8312,17 +8404,72 @@ static int hit_test_network_config(int32_t mx, int32_t my)
     // DHCP radio
     uint32_t contentY = dlgY + 36;
     uint32_t textY = contentY + 12 + 32;
-    if ((uint32_t)mx >= dlgX + 20 && (uint32_t)mx < dlgX + 32 &&
+    if ((uint32_t)mx >= dlgX + 20 && (uint32_t)mx < dlgX + 390 &&
         (uint32_t)my >= textY && (uint32_t)my < textY + 16) {
         return -20;
     }
     textY += 28;
-    if ((uint32_t)mx >= dlgX + 20 && (uint32_t)mx < dlgX + 32 &&
+    if ((uint32_t)mx >= dlgX + 20 && (uint32_t)mx < dlgX + 390 &&
         (uint32_t)my >= textY && (uint32_t)my < textY + 16) {
         return -21;
     }
 
+    const int field = network_config_field_at(mx, my);
+    if (field >= 0) return field;
+
     return -1;
+}
+
+static bool parse_network_config_field(uint8_t field, uint32_t* value)
+{
+    if (!value || field >= 4) return false;
+    const char* text = s_networkConfigFields[field].text;
+    if (field == 1) {
+        bool hasDot = false;
+        uint32_t prefix = 0;
+        bool hasDigit = false;
+        for (uint8_t i = 0; text[i] != '\0'; ++i) {
+            if (text[i] == '.') {
+                hasDot = true;
+                break;
+            }
+            if (text[i] < '0' || text[i] > '9') return false;
+            hasDigit = true;
+            prefix = prefix * 10u + static_cast<uint32_t>(text[i] - '0');
+            if (prefix > 32u) return false;
+        }
+        if (!hasDot && hasDigit) {
+            return ipv4::mask_from_prefix(static_cast<uint8_t>(prefix), value);
+        }
+    }
+    return ipv4::ip_from_string(text, value);
+}
+
+static bool apply_network_config_dialog()
+{
+    if (s_networkConfigUseDHCP) {
+        dhcp::set_automatic_mode();
+        return true;
+    }
+
+    uint32_t values[4];
+    for (uint8_t i = 0; i < 4; ++i) {
+        if (!parse_network_config_field(i, &values[i])) {
+            s_notification.message = "Enter valid IPv4 values";
+            return false;
+        }
+    }
+
+    const ipv4::ConfigStatus status = ipv4::configure_static(
+        values[0], values[1], values[2], values[3]);
+    if (status != ipv4::CONFIG_OK) {
+        s_notification.message = network_config_error(status);
+        return false;
+    }
+
+    dhcp::clear_lease_for_manual_configuration();
+    dns::set_server(values[3]);
+    return true;
 }
 
 // ============================================================
@@ -11104,6 +11251,54 @@ void handle_key(uint32_t key)
         return;
     }
 
+    // Network configuration is a modal surface. Its fields are normal
+    // fixed-storage text controls, so consume their keys before compositor,
+    // shell, or desktop shortcut routing can see them.
+    if (s_networkConfigOpen) {
+        if (key == 27) {
+            s_networkConfigOpen = false;
+            draw();
+            return;
+        }
+
+        if (key == '\t' || key == shell::KEY_TAB) {
+            int next = s_networkConfigFocusField;
+            if (is_shift_modifier_down()) {
+                next = next <= 0 ? 3 : next - 1;
+            } else {
+                next = next < 0 || next >= 3 ? 0 : next + 1;
+            }
+            focus_network_config_field(next, -1);
+            draw();
+            return;
+        }
+
+        if (s_networkConfigFocusField >= 0 && s_networkConfigFocusField < 4 &&
+            text_field::handle_key(
+                s_networkConfigFields[s_networkConfigFocusField], key)) {
+            draw();
+            return;
+        }
+
+        // Enter is the keyboard equivalent of the dialog's OK button.
+        if (key == '\n' || key == '\r') {
+            if (apply_network_config_dialog()) {
+                s_networkConfigOpen = false;
+                s_notification.title = "Network";
+                s_notification.message = s_networkConfigUseDHCP
+                    ? "Automatic configuration selected"
+                    : "Static configuration applied";
+            } else {
+                s_notification.title = "Network configuration";
+            }
+            s_notification.visible = true;
+            s_notification.showTime = s_tickCounter;
+            draw();
+            return;
+        }
+        return;
+    }
+
     // Route keyboard input to focused kernel compositor window first
     if (compositor::KernelCompositor::hasWindows()) {
         app::KernelWindow* focused = compositor::KernelCompositor::getFocusedWindow();
@@ -12630,10 +12825,20 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
                 draw_cursor(mx, my);
                 return;
             } else if (btn == -10) {
-                // OK - apply config
+                // OK - commit through the shared IPv4/DHCP configuration.
+                if (!apply_network_config_dialog()) {
+                    s_notification.title = "Network configuration";
+                    s_notification.visible = true;
+                    s_notification.showTime = s_tickCounter;
+                    draw();
+                    draw_cursor(mx, my);
+                    return;
+                }
                 s_networkConfigOpen = false;
                 s_notification.title = "Network";
-                s_notification.message = "Configuration applied";
+                s_notification.message = s_networkConfigUseDHCP
+                    ? "Automatic configuration selected"
+                    : "Static configuration applied";
                 s_notification.visible = true;
                 s_notification.showTime = s_tickCounter;
                 draw();
@@ -12641,13 +12846,19 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
                 return;
             } else if (btn == -20) {
                 // DHCP selected
-                s_networkConfigUseDHCP = true;
+                set_network_config_mode(true);
                 draw();
                 draw_cursor(mx, my);
                 return;
             } else if (btn == -21) {
                 // Manual selected
-                s_networkConfigUseDHCP = false;
+                set_network_config_mode(false);
+                draw();
+                draw_cursor(mx, my);
+                return;
+            }
+            if (btn >= 0 && btn < 4) {
+                focus_network_config_field(btn, mx);
                 draw();
                 draw_cursor(mx, my);
                 return;
@@ -12667,7 +12878,7 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
             } else if (btn == -10) {
                 // Properties - open config dialog
                 if (s_networkAdapterSelected == 0 && nic::is_active()) {
-                    s_networkConfigOpen = true;
+                    open_network_config_dialog();
                     draw();
                     draw_cursor(mx, my);
                     return;
@@ -12700,7 +12911,7 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
                 return;
             } else if (btn >= 100) {
                 // Config button clicked
-                s_networkConfigOpen = true;
+                open_network_config_dialog();
                 draw();
                 draw_cursor(mx, my);
                 return;

@@ -436,7 +436,8 @@ enum Status : uint8_t {
 // ================================================================
 
 struct NetStats {
-    uint32_t txAttempted; // Valid frames submitted to the TX path
+    uint32_t txAttempted; // Valid frames entering generic NIC transmit path
+    uint32_t txFramesSubmitted; // Descriptor accepted and TDT advanced
     uint32_t txFrames;
     uint32_t rxFrames;
     uint32_t rxObserved;  // Completed RX descriptors observed by the driver
@@ -448,6 +449,19 @@ struct NetStats {
     uint32_t rxDropped;
     uint32_t rxMalformed; // Bad/multi-descriptor/oversize RX frames
     uint32_t interrupts;
+};
+
+struct TxDiagnostics {
+    uint32_t descriptorSubmissions;
+    uint32_t descriptorCompletions;
+    uint32_t hardwareTimeouts;
+    uint16_t lastDescriptor;
+    uint16_t tailBefore;
+    uint16_t tailAfter;
+    uint8_t  lastDescriptorStatus;
+    uint32_t observedHead;
+    uint32_t observedTail;
+    uint32_t control;
 };
 
 // ================================================================
@@ -475,6 +489,7 @@ struct NICDevice {
     uint8_t     macAddress[ETH_ALEN];
     LinkState   link;
     NetStats    stats;
+    TxDiagnostics tx;
     char        name[32];       // e.g. "eth0"
     bool        mmioMapped;     // true if MMIO is mapped by bootloader
     bool        irqRegistered;  // kernel IRQ handler registered

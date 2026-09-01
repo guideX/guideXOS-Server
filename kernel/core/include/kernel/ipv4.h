@@ -188,12 +188,30 @@ struct ParsedPacket {
 // Network configuration
 // ================================================================
 
+enum ConfigurationMode : uint8_t {
+    CONFIG_UNCONFIGURED = 0,
+    CONFIG_STATIC        = 1,
+    CONFIG_DHCP          = 2,
+    CONFIG_QEMU_DEFAULT  = 3,
+};
+
+inline const char* configuration_mode_name(ConfigurationMode mode)
+{
+    switch (mode) {
+        case CONFIG_STATIC:       return "static";
+        case CONFIG_DHCP:         return "dhcp";
+        case CONFIG_QEMU_DEFAULT: return "qemu-default";
+        default:                  return "unconfigured";
+    }
+}
+
 struct NetworkConfig {
     uint32_t ipAddr;             // Our IP address (host byte order)
     uint32_t subnetMask;         // Subnet mask (host byte order)
     uint32_t gateway;            // Default gateway (host byte order)
     uint32_t dns;                // DNS server (host byte order)
     uint8_t  macAddr[6];         // Our MAC address
+    ConfigurationMode mode;      // How the active IPv4 state was selected
     bool     configured;         // Network is configured
 };
 
@@ -230,6 +248,17 @@ enum Status : uint8_t {
     IP_ERR_FRAGMENTED    = 11,   // Fragmentation not supported
 };
 
+enum ConfigStatus : uint8_t {
+    CONFIG_OK                  = 0,
+    CONFIG_ERR_INVALID_IP      = 1,
+    CONFIG_ERR_INVALID_MASK    = 2,
+    CONFIG_ERR_INVALID_GATEWAY = 3,
+    CONFIG_ERR_INVALID_DNS     = 4,
+    CONFIG_ERR_ROUTE_TABLE     = 5,
+};
+
+const char* config_status_name(ConfigStatus status);
+
 // ================================================================
 // IP Address Utilities
 // ================================================================
@@ -254,6 +283,15 @@ void ip_to_string(uint32_t ip, char* str);
 
 // Parse IP address from string "A.B.C.D"
 bool ip_from_string(const char* str, uint32_t* ip);
+
+// Convert a CIDR prefix to a host-order subnet mask.
+bool mask_from_prefix(uint8_t prefix, uint32_t* mask);
+
+// Convert a contiguous host-order subnet mask to a CIDR prefix.
+bool prefix_from_mask(uint32_t mask, uint8_t* prefix);
+
+// Check whether a host-order mask is contiguous and non-zero.
+bool is_valid_subnet_mask(uint32_t mask);
 
 // Check if address is in the same subnet
 inline bool is_same_subnet(uint32_t ip1, uint32_t ip2, uint32_t mask)
@@ -309,6 +347,30 @@ void init();
 
 // Configure network settings
 void configure(uint32_t ip, uint32_t mask, uint32_t gateway, uint32_t dns);
+
+// Apply a validated manual/static configuration. State is unchanged on error.
+ConfigStatus configure_static(uint32_t ip, uint32_t mask,
+                               uint32_t gateway, uint32_t dns);
+
+// Apply a DHCP lease configuration. Gateway and DNS may be zero when the
+// server omitted those options; the assigned address and mask are validated.
+ConfigStatus configure_dhcp(uint32_t ip, uint32_t mask,
+                            uint32_t gateway, uint32_t dns);
+
+// Preserve the established QEMU user-networking defaults for the emulated
+// discrete E1000 path, while labelling them as a source rather than a lease.
+ConfigStatus configure_qemu_defaults(uint32_t ip, uint32_t mask,
+                                     uint32_t gateway, uint32_t dns);
+
+// Clear active IPv4 state, routes, and ARP cache while preserving the MAC.
+void clear_configuration();
+
+// Select automatic/DHCP mode without claiming an address or lease.
+void select_dhcp_mode();
+
+// Validate values before applying them to the shared configuration state.
+ConfigStatus validate_configuration(uint32_t ip, uint32_t mask,
+                                    uint32_t gateway, uint32_t dns);
 
 // Set our MAC address (for Ethernet frame building)
 void set_mac_address(const uint8_t* mac);
@@ -436,6 +498,7 @@ void handle_packet(const uint8_t* data, uint16_t len);
 // ================================================================
 
 struct Statistics {
+    uint32_t txAttempts;          // Upper-stack send_packet calls
     uint32_t rxPackets;
     uint32_t txPackets;
     uint32_t rxBytes;
@@ -446,7 +509,8 @@ struct Statistics {
     uint32_t noRouteErrors;
     uint32_t ttlExpired;
     uint32_t fragmentsDropped;
-    uint32_t arpRequestsSent;
+    uint32_t arpRequestsGenerated; // Valid ARP request frames constructed
+    uint32_t arpRequestsSent;      // NIC send_frame completed successfully
     uint32_t arpRepliesReceived;
     uint32_t arpMalformedDropped;
 };

@@ -14,6 +14,7 @@
 #include "include/kernel/udp.h"
 #include "include/kernel/dns.h"
 #include "include/kernel/dhcp.h"
+#include "include/kernel/network_config_cli.h"
 #include "include/kernel/usb.h"
 #include "include/kernel/pit.h"
 #include "include/kernel/vfs.h"
@@ -383,6 +384,9 @@ static void cmd_help() {
     output_string("  ipconfig       - Windows-style IP config\n");
     output_string("  ipconfig /all  - Full IP configuration\n");
     output_string("  ipconfig /flushdns - Flush DNS cache\n");
+    output_string("  netconfig show  - Show active IPv4 configuration\n");
+    output_string("  netconfig static <ip> <mask|prefix> <gateway> <dns>\n");
+    output_string("  netconfig dhcp   - Select automatic IPv4 configuration\n");
     output_string("  dhcp           - DHCP client status\n");
     output_string("  dhcp /discover - Discover DHCP server\n");
     output_string("  dhcp /release  - Release DHCP lease\n");
@@ -2319,6 +2323,12 @@ static void cmd_nicinfo() {
     const nic::LinkState liveLink = nic::get_link_state();
     statusInput.linkUp = statusInput.driverReady && liveLink == nic::NIC_LINK_UP;
     statusInput.ipv4Configured = config && config->configured;
+    const dhcp::ClientState dhcpState = dhcp::get_state();
+    statusInput.ipv4ConfigurationPending =
+        dhcpState == dhcp::STATE_SELECTING ||
+        dhcpState == dhcp::STATE_REQUESTING ||
+        dhcpState == dhcp::STATE_RENEWING ||
+        dhcpState == dhcp::STATE_REBINDING;
     statusInput.gatewayConfigured = config && config->gateway != 0;
     statusInput.dnsConfigured = config && config->dns != 0;
     statusInput.connectivityVerified = false;
@@ -2326,6 +2336,9 @@ static void cmd_nicinfo() {
     output_string("Connection State: ");
     output_string(network_status::state_to_string(network_status::classify(statusInput)));
     output_string("\n");
+    output_string("IPv4 Configuration: ");
+    output_string(config ? ipv4::configuration_mode_name(config->mode) : "unconfigured");
+    output_string(config && config->configured ? " (active)\n" : " (not active)\n");
     output_string("Driver: ");
     output_string(network_status::driver_name(dev->vendorId, dev->deviceId));
     output_string("\n");
@@ -2688,11 +2701,49 @@ static void cmd_nicinfo() {
     output_string("TX Attempted: ");
     uint_to_str(stats->txAttempted, numStr);
     output_string(numStr);
+    output_string("   Frame Submitted: ");
+    uint_to_str(stats->txFramesSubmitted, numStr);
+    output_string(numStr);
     output_string("   TX Completed: ");
     uint_to_str(stats->txFrames, numStr);
     output_string(numStr);
     output_string("   TX Dropped: ");
     uint_to_str(stats->txDropped, numStr);
+    output_string(numStr);
+    output_string("\n");
+
+    output_string("TX Descriptor: submitted=");
+    uint_to_str(dev->tx.descriptorSubmissions, numStr);
+    output_string(numStr);
+    output_string(" completed=");
+    uint_to_str(dev->tx.descriptorCompletions, numStr);
+    output_string(numStr);
+    output_string(" timeouts=");
+    uint_to_str(dev->tx.hardwareTimeouts, numStr);
+    output_string(numStr);
+    output_string(" TDH=0x");
+    uint_hex_to_str(dev->tx.observedHead, 8, hexStr);
+    output_string(hexStr);
+    output_string(" TDT=0x");
+    uint_hex_to_str(dev->tx.observedTail, 8, hexStr);
+    output_string(hexStr);
+    output_string(" TCTL=0x");
+    uint_hex_to_str(dev->tx.control, 8, hexStr);
+    output_string(hexStr);
+    output_string("\n");
+
+    const ipv4::Statistics* ipStats = ipv4::get_stats();
+    output_string("IPv4 TX: upper-attempts=");
+    uint_to_str(ipStats->txAttempts, numStr);
+    output_string(numStr);
+    output_string(" packets=");
+    uint_to_str(ipStats->txPackets, numStr);
+    output_string(numStr);
+    output_string(" errors=");
+    uint_to_str(ipStats->txErrors, numStr);
+    output_string(numStr);
+    output_string(" no-route=");
+    uint_to_str(ipStats->noRouteErrors, numStr);
     output_string(numStr);
     output_string("\n");
 
@@ -2715,7 +2766,10 @@ static void cmd_nicinfo() {
     output_string("DHCP State: ");
     output_string(dhcp::state_to_string(dhcp::get_state()));
     output_string("\n");
-    output_string("DHCP Counters: discover=");
+    output_string("DHCP Counters: discover-generated=");
+    uint_to_str(dhcpStats->discoverAttempts, numStr);
+    output_string(numStr);
+    output_string(" discover-submitted=");
     uint_to_str(dhcpStats->discoversSent, numStr);
     output_string(numStr);
     output_string(" offer=");
@@ -2732,6 +2786,9 @@ static void cmd_nicinfo() {
     output_string(numStr);
     output_string(" timeout=");
     uint_to_str(dhcpStats->timeouts, numStr);
+    output_string(numStr);
+    output_string(" send-fail=");
+    uint_to_str(dhcpStats->discoverSendFailures, numStr);
     output_string(numStr);
     output_string("\n");
     output_string("DHCP Lease: ");
@@ -2778,8 +2835,10 @@ static void cmd_nicinfo() {
     }
     output_string("\n");
 
-    const ipv4::Statistics* ipStats = ipv4::get_stats();
-    output_string("ARP: requests=");
+    output_string("ARP: requests-generated=");
+    uint_to_str(ipStats->arpRequestsGenerated, numStr);
+    output_string(numStr);
+    output_string(" requests-completed=");
     uint_to_str(ipStats->arpRequestsSent, numStr);
     output_string(numStr);
     output_string(" replies=");
@@ -3085,9 +3144,13 @@ static void cmd_ipconfig(const char* args[], uint32_t argCount) {
     
     if (!cfg || !cfg->configured) {
         output_string("   Media State . . . . . . . . . . . : ");
-        output_string(nic::get_link_state() == nic::NIC_LINK_UP
-                      ? "Acquiring network address\n"
-                      : "Media disconnected\n");
+        if (nic::get_link_state() != nic::NIC_LINK_UP) {
+            output_string("Media disconnected\n");
+        } else if (cfg && cfg->mode == ipv4::CONFIG_DHCP) {
+            output_string("IPv4 unconfigured (automatic mode)\n");
+        } else {
+            output_string("IPv4 unconfigured\n");
+        }
         return;
     }
     
@@ -3110,7 +3173,8 @@ static void cmd_ipconfig(const char* args[], uint32_t argCount) {
         output_string("   DHCP State . . . . . . . . . . . . : ");
         output_string(dhcp::state_to_string(dhcp::get_state()));
         output_string("\n");
-        output_string("   Autoconfiguration Enabled . . . . : Yes\n");
+        output_string("   Autoconfiguration Enabled . . . . : ");
+        output_string(cfg->mode == ipv4::CONFIG_DHCP ? "Yes\n" : "No\n");
     }
     
     // IPv4 Address
@@ -3149,6 +3213,92 @@ static void cmd_ipconfig(const char* args[], uint32_t argCount) {
         
         output_string("   NetBIOS over Tcpip. . . . . . . . : Disabled\n");
     }
+}
+
+// ============================================================
+// nslookup Command (DNS lookup)
+// ============================================================
+
+static void cmd_netconfig(const char* args[], uint32_t argCount)
+{
+    const network_config_cli::Operation operation = argCount <= 1
+        ? network_config_cli::OP_SHOW
+        : network_config_cli::operation_from_string(args[1]);
+
+    if (operation == network_config_cli::OP_SHOW) {
+        if (argCount > 2) {
+            output_string("Usage: netconfig show\n");
+            return;
+        }
+        const ipv4::NetworkConfig* config = ipv4::get_config();
+        char ipStr[16];
+        output_string("IPv4 configuration:\n");
+        output_string("  Mode:   ");
+        output_string(config ? ipv4::configuration_mode_name(config->mode) : "unconfigured");
+        output_string("\n  Status: ");
+        output_string(config && config->configured ? "active\n" : "unconfigured (no active address)\n");
+
+        if (config && config->configured) {
+            output_string("  Address: ");
+            ipv4::ip_to_string(config->ipAddr, ipStr);
+            output_string(ipStr);
+            output_string("\n  Mask:    ");
+            ipv4::ip_to_string(config->subnetMask, ipStr);
+            output_string(ipStr);
+            output_string("\n  Gateway: ");
+            ipv4::ip_to_string(config->gateway, ipStr);
+            output_string(ipStr);
+            output_string("\n  DNS:     ");
+            ipv4::ip_to_string(config->dns, ipStr);
+            output_string(ipStr);
+            output_string("\n");
+        }
+        const dhcp::LeaseInfo* lease = dhcp::get_lease();
+        output_string("  DHCP lease: ");
+        output_string(lease && lease->valid ? "active\n" : "none\n");
+        return;
+    }
+
+    if (operation == network_config_cli::OP_DHCP) {
+        if (argCount != 2) {
+            output_string("Usage: netconfig dhcp\n");
+            return;
+        }
+        dhcp::set_automatic_mode();
+        output_string("DHCP/automatic IPv4 selected; no address has been acquired.\n");
+        return;
+    }
+
+    if (operation == network_config_cli::OP_STATIC) {
+        if (argCount != 6) {
+            output_string("Usage: netconfig static <ip> <mask|prefix> <gateway> <dns>\n");
+            return;
+        }
+
+        uint32_t values[4];
+        if (!ipv4::ip_from_string(args[2], &values[0]) ||
+            !network_config_cli::parse_mask(args[3], &values[1]) ||
+            !ipv4::ip_from_string(args[4], &values[2]) ||
+            !ipv4::ip_from_string(args[5], &values[3])) {
+            output_string("netconfig: invalid IPv4 value; configuration unchanged.\n");
+            return;
+        }
+
+        const ipv4::ConfigStatus status = ipv4::configure_static(
+            values[0], values[1], values[2], values[3]);
+        if (status != ipv4::CONFIG_OK) {
+            output_string("netconfig: rejected (");
+            output_string(ipv4::config_status_name(status));
+            output_string("); configuration unchanged.\n");
+            return;
+        }
+        dhcp::clear_lease_for_manual_configuration();
+        dns::set_server(values[3]);
+        output_string("Static IPv4 configuration applied.\n");
+        return;
+    }
+
+    output_string("Usage: netconfig show | netconfig static <ip> <mask|prefix> <gateway> <dns> | netconfig dhcp\n");
 }
 
 // ============================================================
@@ -3449,9 +3599,19 @@ static void cmd_dhcp(const char* args[], uint32_t argCount) {
         output_string("DHCP Client Statistics:\n\n");
         const dhcp::Statistics* stats = dhcp::get_stats();
         char numStr[12];
+
+        output_string("  Discover attempts: ");
+        uint_to_str(stats->discoverAttempts, numStr);
+        output_string(numStr);
+        output_string("\n");
         
         output_string("  Discovers sent:   ");
         uint_to_str(stats->discoversSent, numStr);
+        output_string(numStr);
+        output_string("\n");
+
+        output_string("  Discover send failures: ");
+        uint_to_str(stats->discoverSendFailures, numStr);
         output_string(numStr);
         output_string("\n");
         
@@ -3847,6 +4007,12 @@ static void execute_command(const char* cmd) {
         cmd_nc(ncArgs, argCount);
     } else if (str_eq(command, "udpstat")) {
         cmd_udpstat();
+    } else if (str_eq(command, "netconfig")) {
+        const char* netconfigArgs[MAX_ARGS];
+        for (uint32_t i = 0; i < argCount; ++i) {
+            netconfigArgs[i] = args[i];
+        }
+        cmd_netconfig(netconfigArgs, argCount);
     } else if (str_eq(command, "ipconfig")) {
         // Pass all args to ipconfig command
         const char* ipconfigArgs[MAX_ARGS];

@@ -7,6 +7,8 @@
 #include "kernel/ethernet.h"
 #include "kernel/nic.h"
 #include "kernel/shell.h"
+#include "kernel/ipv4.h"
+#include "kernel/text_field.h"
 
 using namespace kernel;
 
@@ -36,6 +38,11 @@ int main()
     assert(network_status::classify(input) == network_status::STATE_DISCONNECTED);
 
     input.linkUp = true;
+    assert(network_status::classify(input) == network_status::STATE_IPV4_UNCONFIGURED);
+    assert(strcmp(network_status::state_to_string(network_status::STATE_IPV4_UNCONFIGURED),
+                  "IPv4 unconfigured") == 0);
+
+    input.ipv4ConfigurationPending = true;
     assert(network_status::classify(input) == network_status::STATE_ACQUIRING_ADDRESS);
 
     input.ipv4Configured = true;
@@ -168,6 +175,23 @@ int main()
     char macString[18];
     ethernet::mac_to_string(mac, macString);
     assert(strcmp(macString, "CA:FE:B0:0C:D0:5E") == 0);
+
+    // The IPv4 dialog uses the same fixed-storage control semantics as the
+    // hosted control check: focus gates edits, caret placement is explicit,
+    // numeric input is bounded, and both deletion directions work.
+    text_field::TextField field = {};
+    field.enabled = true;
+    text_field::set_text(field, "192.168.0.50");
+    text_field::set_focus(field, true);
+    text_field::set_caret(field, 3);
+    assert(text_field::handle_key(field, '9'));
+    assert(strcmp(field.text, "1929.168.0.50") == 0);
+    assert(text_field::handle_key(field, '\b'));
+    assert(strcmp(field.text, "192.168.0.50") == 0);
+    text_field::set_caret(field, 4);
+    assert(text_field::handle_key(field, 0x106u));
+    assert(strcmp(field.text, "192.68.0.50") == 0);
+    assert(!text_field::handle_key(field, 'x'));
 
     return 0;
 }

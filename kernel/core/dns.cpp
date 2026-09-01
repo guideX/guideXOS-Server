@@ -69,7 +69,9 @@ static bool str_eq_case_insensitive(const char* a, const char* b)
 // Internal state
 // ================================================================
 
-static uint32_t s_dnsServer = DNS_GOOGLE_PRIMARY;  // Default to Google DNS
+// No resolver is active until IPv4 configuration supplies one. QEMU's
+// legitimate 10.0.2.3 default is provided through ipv4::configure_qemu_defaults.
+static uint32_t s_dnsServer = 0;
 static CacheEntry s_cache[MAX_CACHE_ENTRIES];
 static Statistics s_stats;
 static QueryDiagnostics s_lastQueryDiagnostics;
@@ -111,6 +113,7 @@ void init()
     memzero(&s_lastQueryDiagnostics, sizeof(s_lastQueryDiagnostics));
     s_nextQueryId = 1;
     s_systemTicks = 0;
+    s_dnsServer = 0;
     
     // Use configured DNS server if available
     const ipv4::NetworkConfig* cfg = ipv4::get_config();

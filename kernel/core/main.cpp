@@ -1048,14 +1048,19 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
             kernel::ipv4::init();
             kernel::ipv4::set_mac_address(kernel::nic::get_mac_address());
             
-            // Configure with default IP (can be changed via DHCP later)
-            // Default: 10.0.2.15/24, gateway 10.0.2.2 (QEMU user networking)
-            kernel::ipv4::configure(
-                kernel::ipv4::make_ip(10, 0, 2, 15),   // IP
-                kernel::ipv4::MASK_24,                  // Subnet mask
-                kernel::ipv4::make_ip(10, 0, 2, 2),    // Gateway
-                kernel::ipv4::make_ip(10, 0, 2, 3)     // DNS
-            );
+            // Keep the established 10.0.2.x defaults only for QEMU's
+            // discrete E1000. An attached physical controller starts with no
+            // fabricated IPv4 lease and must be configured by DHCP or static
+            // control before the stack reports usable addresses.
+            if (kernel::nic::get_device()->deviceId == kernel::nic::PCI_DEVICE_E1000) {
+                kernel::ipv4::configure_qemu_defaults(
+                    kernel::ipv4::make_ip(10, 0, 2, 15),
+                    kernel::ipv4::MASK_24,
+                    kernel::ipv4::make_ip(10, 0, 2, 2),
+                    kernel::ipv4::make_ip(10, 0, 2, 3));
+            } else {
+                kernel::ipv4::clear_configuration();
+            }
             
             // Initialize ICMP (ping support)
             kernel::icmp::init();
