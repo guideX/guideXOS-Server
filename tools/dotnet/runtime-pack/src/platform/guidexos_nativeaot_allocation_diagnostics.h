@@ -1963,6 +1963,102 @@ typedef struct guidexos_nativeaot_c011ec62_lifecycle_record {
         GUIDEXOS_NATIVEAOT_C011EC62_MAX_EVENTS];
 } guidexos_nativeaot_c011ec62_lifecycle_record;
 
+/* C011EC64 traces the first ordinary post-resume policy opportunity after
+ * the promotion-derived gen1 debit.  Unlike C62's first-allocation window,
+ * this record remains open for the bounded managed tail and preserves the
+ * complete C56 policy snapshot for each source-backed condemnation entry. */
+enum {
+    GUIDEXOS_NATIVEAOT_C011EC64_MAX_CANDIDATES = 128u,
+    GUIDEXOS_NATIVEAOT_C011EC64_MAX_ALLOCATIONS = 512u,
+};
+
+typedef struct guidexos_nativeaot_c011ec64_candidate_record {
+    uint32_t observed;
+    uint32_t entryOrdinal;
+    uint32_t sourceEventOrdinal;
+    uint32_t collectionOrdinal;
+    uint32_t policyOrdinal;
+    uint32_t callSite;
+    uint32_t callerRequestedGeneration;
+    uint32_t nInitial;
+    uint32_t checkOnly;
+    uint32_t collectionReason;
+    uint32_t maximumGeneration;
+    uint32_t selectedGeneration;
+    uint32_t originBranch;
+    uint32_t lastGcBeforeOom;
+    uint32_t allocationOrdinal;
+    uint32_t policyObserved;
+    uint32_t ordinaryNormalCaller;
+    uint32_t qualifying;
+    uint32_t reserved[4];
+    guidexos_nativeaot_c011ec56_policy_record policy;
+} guidexos_nativeaot_c011ec64_candidate_record;
+
+typedef struct guidexos_nativeaot_c011ec64_allocation_record {
+    uint32_t observed;
+    uint32_t ordinal;
+    uint32_t collectionOrdinal;
+    uint32_t completed;
+    uint32_t reserved[4];
+    uintptr_t payloadSize;
+    uintptr_t requestedSize;
+    uintptr_t allocationContext;
+    uintptr_t allocationPointer;
+    uintptr_t allocationLimit;
+    uintptr_t objectAddress;
+    uintptr_t allocationPointerAfter;
+    uintptr_t allocationLimitAfter;
+} guidexos_nativeaot_c011ec64_allocation_record;
+
+typedef struct guidexos_nativeaot_c011ec64_lifecycle_record {
+    uint32_t started;
+    uint32_t variant;
+    uint32_t candidateCount;
+    uint32_t candidateOverflow;
+    uint32_t allocationCount;
+    uint32_t allocationOverflow;
+    uint32_t promotionObserved;
+    uint32_t debitObserved;
+    uint32_t restartObserved;
+    uint32_t managedResumeObserved;
+    uint32_t ordinaryPressureObserved;
+    uint32_t fullPolicyStateObserved;
+    uint32_t postDebitNormalN0Observed;
+    uint32_t callerProvenanceObserved;
+    uint32_t completionObserved;
+    uint32_t invariantFailures;
+    uint32_t noPolicyMutation;
+    uint32_t noAllocatorMutation;
+    uint32_t noOosSuppression;
+    uint32_t postResumeAllocationCount;
+    uint32_t firstPostResumeAllocationOrdinal;
+    uint32_t lastPostResumeAllocationOrdinal;
+    uint32_t activeAllocationOrdinal;
+    uint32_t qualifyingEntryOrdinal;
+    uint32_t qualifyingPolicyOrdinal;
+    uint32_t qualifyingSourceEventOrdinal;
+    uint32_t qualifyingCallSite;
+    uint32_t qualifyingRequestedGeneration;
+    uint32_t qualifyingNInitial;
+    uint32_t qualifyingSelectedGeneration;
+    uint32_t qualifyingCollectionReason;
+    uint32_t qualifyingOriginBranch;
+    uint32_t qualifyingLastGcBeforeOom;
+    uint32_t qualifyingAllocationOrdinal;
+    uint32_t qualifyingCollectionOrdinal;
+    uint32_t debitCollectionOrdinal;
+    uint32_t safeStopReason;
+    uintptr_t firstPostResumePayloadSize;
+    uintptr_t firstPostResumeRequestedSize;
+    uintptr_t lastPostResumePayloadSize;
+    uintptr_t lastPostResumeRequestedSize;
+    guidexos_nativeaot_c011ec64_candidate_record candidates[
+        GUIDEXOS_NATIVEAOT_C011EC64_MAX_CANDIDATES];
+    guidexos_nativeaot_c011ec64_allocation_record allocations[
+        GUIDEXOS_NATIVEAOT_C011EC64_MAX_ALLOCATIONS];
+} guidexos_nativeaot_c011ec64_lifecycle_record;
+
 typedef struct guidexos_nativeaot_c011ec54_lifecycle_record {
     uint32_t started;
     uint32_t preflightEmitted;
@@ -4371,6 +4467,8 @@ typedef struct guidexos_nativeaot_allocation_diagnostics {
     guidexos_nativeaot_c011ec61_lifecycle_record c011ec61Lifecycle;
     /* C011EC62 post-promotion allocation/refill topology provenance. */
     guidexos_nativeaot_c011ec62_lifecycle_record c011ec62Lifecycle;
+    /* C011EC64 post-debit normal condemnation entry timing. */
+    guidexos_nativeaot_c011ec64_lifecycle_record c011ec64Lifecycle;
     /* C011EC44 malformed transition-frame provenance. */
     guidexos_nativeaot_c011ec44_provenance_record c011ec44Provenance;
     /* C011EC45 reverse-P/Invoke slot layout, register, and unwind provenance. */

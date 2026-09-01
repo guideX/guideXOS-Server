@@ -1140,6 +1140,16 @@ public static unsafe class Program
     private static extern int GuideXosNativeAotC011EC63Finish();
 #endif
 
+#if HOSTLOGPROOF_C011EC64
+    [DllImport("__Internal", EntryPoint = "guideXosNativeAotC011EC64Start")]
+    private static extern int GuideXosNativeAotC011EC64Start(
+        uint variant, uint maximumSurvivors, ulong maximumRetainedBytes,
+        uint maximumTransientAllocations, ulong maximumTransientBytes);
+
+    [DllImport("__Internal", EntryPoint = "guideXosNativeAotC011EC64Finish")]
+    private static extern int GuideXosNativeAotC011EC64Finish();
+#endif
+
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static int RunC011EC61PreFinalN0PromotionCycle()
     {
@@ -1151,7 +1161,18 @@ public static unsafe class Program
         const uint survivorsPerMainCohort = 8u;
 #endif
         const uint payloadSize = 65536u;
-#if HOSTLOGPROOF_C011EC62_R1
+#if HOSTLOGPROOF_C011EC64
+        const uint postDebitPayloadSize = 16384u;
+#if HOSTLOGPROOF_C011EC64_W1
+        const uint postDebitTailAllocations = 224u;
+#elif HOSTLOGPROOF_C011EC64_W2
+        const uint postDebitTailAllocations = 256u;
+#elif HOSTLOGPROOF_C011EC64_W3
+        const uint postDebitTailAllocations = 320u;
+#else
+        const uint postDebitTailAllocations = 192u;
+#endif
+#elif HOSTLOGPROOF_C011EC62_R1
         const uint postDebitPayloadSize = 8192u;
         const uint postDebitTailAllocations = 256u;
 #elif HOSTLOGPROOF_C011EC62_R2
@@ -1180,7 +1201,24 @@ public static unsafe class Program
 #else
             1u;
 #endif
-#if HOSTLOGPROOF_C011EC63
+#if HOSTLOGPROOF_C011EC64
+        uint c64Variant =
+#if HOSTLOGPROOF_C011EC64_W1
+            1u;
+#elif HOSTLOGPROOF_C011EC64_W2
+            2u;
+#elif HOSTLOGPROOF_C011EC64_W3
+            3u;
+#else
+            0u;
+#endif
+        if (GuideXosNativeAotC011EC64Start(
+                c64Variant, maximumSurvivors, 0x300480UL,
+                48u, 0x1200000UL) != 0)
+        {
+            return -1;
+        }
+#elif HOSTLOGPROOF_C011EC63
         if (GuideXosNativeAotC011EC63Start(
                 3u, maximumSurvivors, 0x300480UL,
                 48u, 0x1200000UL) != 0)
@@ -1419,7 +1457,10 @@ public static unsafe class Program
         }
         GC.KeepAlive(survivors);
         int c57Status = GuideXosNativeAotC011EC57Finish();
-#if HOSTLOGPROOF_C011EC63
+#if HOSTLOGPROOF_C011EC64
+        int c64Status = GuideXosNativeAotC011EC64Finish();
+        return c57Status == 0 && c64Status == 0 ? 0 : -1;
+#elif HOSTLOGPROOF_C011EC63
         int c63Status = GuideXosNativeAotC011EC63Finish();
         return c57Status == 0 && c63Status == 0 ? 0 : -1;
 #elif HOSTLOGPROOF_C011EC62
@@ -2044,7 +2085,10 @@ public static unsafe class Program
                 {
                     return GxAbi.ErrorInvalidArgument;
                 }
-#if HOSTLOGPROOF_C011EC63
+#if HOSTLOGPROOF_C011EC64
+                return RunC011EC61PreFinalN0PromotionCycle() == 0
+                    ? 0 : GxAbi.ErrorInvalidArgument;
+#elif HOSTLOGPROOF_C011EC63
                 return RunC011EC61PreFinalN0PromotionCycle() == 0
                     ? 0 : GxAbi.ErrorInvalidArgument;
 #elif HOSTLOGPROOF_C011EC62
