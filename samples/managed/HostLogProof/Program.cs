@@ -1130,6 +1130,16 @@ public static unsafe class Program
     private static extern int GuideXosNativeAotC011EC62Finish();
 #endif
 
+#if HOSTLOGPROOF_C011EC63
+    [DllImport("__Internal", EntryPoint = "guideXosNativeAotC011EC63Start")]
+    private static extern int GuideXosNativeAotC011EC63Start(
+        uint strategy, uint maximumSurvivors, ulong maximumRetainedBytes,
+        uint maximumTransientAllocations, ulong maximumTransientBytes);
+
+    [DllImport("__Internal", EntryPoint = "guideXosNativeAotC011EC63Finish")]
+    private static extern int GuideXosNativeAotC011EC63Finish();
+#endif
+
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static int RunC011EC61PreFinalN0PromotionCycle()
     {
@@ -1170,12 +1180,21 @@ public static unsafe class Program
 #else
             1u;
 #endif
+#if HOSTLOGPROOF_C011EC63
+        if (GuideXosNativeAotC011EC63Start(
+                3u, maximumSurvivors, 0x300480UL,
+                48u, 0x1200000UL) != 0)
+        {
+            return -1;
+        }
+#else
         if (GuideXosNativeAotC011EC62Start(
                 c62Strategy, maximumSurvivors, 0x300480UL,
                 48u, 0x1200000UL) != 0)
         {
             return -1;
         }
+#endif
 #endif
         byte[][] survivors = new byte[maximumSurvivors][];
         uint[] survivorOrdinals = new uint[maximumSurvivors];
@@ -1400,7 +1419,10 @@ public static unsafe class Program
         }
         GC.KeepAlive(survivors);
         int c57Status = GuideXosNativeAotC011EC57Finish();
-#if HOSTLOGPROOF_C011EC62
+#if HOSTLOGPROOF_C011EC63
+        int c63Status = GuideXosNativeAotC011EC63Finish();
+        return c57Status == 0 && c63Status == 0 ? 0 : -1;
+#elif HOSTLOGPROOF_C011EC62
         int c62Status = GuideXosNativeAotC011EC62Finish();
         return c57Status == 0 && c62Status == 0 ? 0 : -1;
 #else
@@ -2022,7 +2044,10 @@ public static unsafe class Program
                 {
                     return GxAbi.ErrorInvalidArgument;
                 }
-#if HOSTLOGPROOF_C011EC62
+#if HOSTLOGPROOF_C011EC63
+                return RunC011EC61PreFinalN0PromotionCycle() == 0
+                    ? 0 : GxAbi.ErrorInvalidArgument;
+#elif HOSTLOGPROOF_C011EC62
                 return RunC011EC61PreFinalN0PromotionCycle() == 0
                     ? 0 : GxAbi.ErrorInvalidArgument;
 #elif HOSTLOGPROOF_C011EC61
