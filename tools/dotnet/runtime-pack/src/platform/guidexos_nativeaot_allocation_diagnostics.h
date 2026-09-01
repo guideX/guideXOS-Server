@@ -2059,6 +2059,194 @@ typedef struct guidexos_nativeaot_c011ec64_lifecycle_record {
         GUIDEXOS_NATIVEAOT_C011EC64_MAX_ALLOCATIONS];
 } guidexos_nativeaot_c011ec64_lifecycle_record;
 
+/* C011EC65 keeps the C64 workload open across the complete post-debit tail
+ * and records the allocator-to-OOS provenance without making a production
+ * decision.  The callbacks only copy scalar values into these fixed-size
+ * records; serial formatting is deferred to the explicit Finish call. */
+enum {
+    GUIDEXOS_NATIVEAOT_C011EC65_MAX_EVENTS = 1024u,
+    GUIDEXOS_NATIVEAOT_C011EC65_EVENT_ATTEMPT = 1u,
+    GUIDEXOS_NATIVEAOT_C011EC65_EVENT_NORMAL_REFILL = 2u,
+    GUIDEXOS_NATIVEAOT_C011EC65_EVENT_POST_DEBIT = 3u,
+    GUIDEXOS_NATIVEAOT_C011EC65_EVENT_ALLOC_FAIL = 4u,
+    GUIDEXOS_NATIVEAOT_C011EC65_EVENT_REGION_SEARCH = 5u,
+    GUIDEXOS_NATIVEAOT_C011EC65_EVENT_REGION_CANDIDATE = 6u,
+    GUIDEXOS_NATIVEAOT_C011EC65_EVENT_REGION_RESULT = 7u,
+    GUIDEXOS_NATIVEAOT_C011EC65_EVENT_EXPANSION = 8u,
+    GUIDEXOS_NATIVEAOT_C011EC65_EVENT_OOS = 9u,
+    GUIDEXOS_NATIVEAOT_C011EC65_EVENT_LAST_GC_BEFORE_OOM = 10u,
+    GUIDEXOS_NATIVEAOT_C011EC65_EVENT_GEN_REQUEST = 11u,
+    GUIDEXOS_NATIVEAOT_C011EC65_EVENT_GC_CALL = 12u,
+    GUIDEXOS_NATIVEAOT_C011EC65_EVENT_N_INITIAL = 13u,
+    GUIDEXOS_NATIVEAOT_C011EC65_EVENT_FIRST_DIVERGENCE = 14u,
+    GUIDEXOS_NATIVEAOT_C011EC65_EVENT_RESTART = 15u,
+    GUIDEXOS_NATIVEAOT_C011EC65_EVENT_RESUME = 16u,
+    GUIDEXOS_NATIVEAOT_C011EC65_EVENT_ENTRY = 17u,
+};
+
+typedef struct guidexos_nativeaot_c011ec65_refill_record {
+    uint32_t observed;
+    uint32_t phase;
+    uint32_t generation;
+    uint32_t fitResult;
+    uint32_t branch;
+    uint32_t commitFailed;
+    uint32_t shortSegmentEnd;
+    uint32_t allocationState;
+    uintptr_t requestSize;
+    uintptr_t allocationContext;
+    uintptr_t allocationPointer;
+    uintptr_t allocationLimit;
+    uintptr_t activeSegment;
+    uintptr_t regionRemaining;
+    uintptr_t freeRegionsBefore;
+    uintptr_t freeRegionsAfter;
+    uintptr_t candidateRegion;
+    uint32_t regionResult;
+    uint32_t regionBranch;
+    uint32_t expansionAttempted;
+    uint32_t expansionSucceeded;
+    uint32_t reserved[2];
+} guidexos_nativeaot_c011ec65_refill_record;
+
+typedef struct guidexos_nativeaot_c011ec65_event_record {
+    uint32_t observed;
+    uint32_t eventOrdinal;
+    uint32_t kind;
+    uint32_t phase;
+    uint32_t collectionOrdinal;
+    uint32_t allocationOrdinal;
+    uint32_t generation;
+    uint32_t branch;
+    uint32_t result;
+    uint32_t commitFailed;
+    uint32_t shortSegmentEnd;
+    uint32_t allocationState;
+    uint32_t requestedGeneration;
+    uint32_t nInitial;
+    uint32_t collectionReason;
+    uint32_t originBranch;
+    uint32_t lastGcBeforeOom;
+    uint32_t reserved[3];
+    uintptr_t requestSize;
+    uintptr_t allocationContext;
+    uintptr_t allocationPointer;
+    uintptr_t allocationLimit;
+    uintptr_t activeSegment;
+    uintptr_t regionRemaining;
+    uintptr_t freeRegionsBefore;
+    uintptr_t freeRegionsAfter;
+    uintptr_t candidateRegion;
+    uintptr_t committedBytes;
+    uintptr_t reservedBytes;
+} guidexos_nativeaot_c011ec65_event_record;
+
+typedef struct guidexos_nativeaot_c011ec65_lifecycle_record {
+    uint32_t started;
+    uint32_t variant;
+    uint32_t eventCount;
+    uint32_t eventOverflow;
+    uint32_t invariantFailures;
+    uint32_t safeStopReason;
+    uint32_t sensitiveDiagnosticAllocations;
+    uint32_t promotionObserved;
+    uint32_t debitObserved;
+    uint32_t restartObserved;
+    uint32_t managedResumeObserved;
+    uint32_t normalRefillObserved;
+    uint32_t postDebitObserved;
+    uint32_t allocationFailureObserved;
+    uint32_t regionSearchObserved;
+    uint32_t regionCandidateObserved;
+    uint32_t regionResultObserved;
+    uint32_t expansionAttempted;
+    uint32_t expansionSucceeded;
+    uint32_t oosObserved;
+    uint32_t lastGcBeforeOom;
+    uint32_t genRequestObserved;
+    uint32_t gcCallObserved;
+    uint32_t nInitialObserved;
+    uint32_t firstDivergenceObserved;
+    uint32_t entryObserved;
+    uint32_t completionObserved;
+    uint32_t noPolicyMutation;
+    uint32_t noAllocatorMutation;
+    uint32_t freeRegionMutation;
+    uint32_t requestedGenerationMutation;
+    uint32_t noOosSuppression;
+    uint32_t allocationAttemptCount;
+    uint32_t regionEventCount;
+    uint32_t oosEventCount;
+    uint32_t retryCount;
+    uint32_t normalAttemptEventOrdinal;
+    uint32_t normalFitEventOrdinal;
+    uint32_t postAttemptEventOrdinal;
+    uint32_t postFitEventOrdinal;
+    uint32_t firstDivergenceEventOrdinal;
+    uint32_t oosEventOrdinal;
+    uint32_t genRequestEventOrdinal;
+    uint32_t nInitialEventOrdinal;
+    uint32_t entryEventOrdinal;
+    uint32_t firstCallSite;
+    uint32_t firstRequestedGeneration;
+    uint32_t firstNInitial;
+    uint32_t firstCollectionReason;
+    uint32_t firstOriginBranch;
+    uint32_t firstLastGcBeforeOom;
+    uint32_t firstDivergenceBranch;
+    uint32_t postAllocationState;
+    uint32_t postGeneration;
+    uint32_t postFitBranch;
+    uint32_t postCommitFailed;
+    uint32_t postShortSegmentEnd;
+    uint32_t postRegionResult;
+    uint32_t postRegionBranch;
+    uint32_t postExpansionAttempted;
+    uint32_t postExpansionSucceeded;
+    uint32_t allocationRegionObserved;
+    uint32_t allocationRegionResult;
+    uint32_t allocationRegionBranch;
+    uint32_t allocationRegionGeneration;
+    uint32_t postOosGeneration;
+    uint32_t postOosReason;
+    uint32_t postOosBranch;
+    uint32_t postGcCallGeneration;
+    uint32_t postGcCallReason;
+    uint32_t postGcCallOrigin;
+    uint32_t postEntryNInitial;
+    uint32_t postEntrySelectedGeneration;
+    uint32_t reserved[3];
+    uintptr_t normalRequestSize;
+    uintptr_t normalAllocationContext;
+    uintptr_t normalAllocationPointer;
+    uintptr_t normalAllocationLimit;
+    uintptr_t normalActiveSegment;
+    uintptr_t normalRegionRemaining;
+    uintptr_t normalFreeRegionsBefore;
+    uintptr_t normalFreeRegionsAfter;
+    uintptr_t normalCandidateRegion;
+    uintptr_t postRequestSize;
+    uintptr_t postAllocationContext;
+    uintptr_t postAllocationPointer;
+    uintptr_t postAllocationLimit;
+    uintptr_t postActiveSegment;
+    uintptr_t postRegionRemaining;
+    uintptr_t postFreeRegionsBefore;
+    uintptr_t postFreeRegionsAfter;
+    uintptr_t postCandidateRegion;
+    uintptr_t postCommittedBytes;
+    uintptr_t postReservedBytes;
+    uintptr_t allocationRegionSize;
+    uintptr_t allocationRegion;
+    uintptr_t allocationRegionFreeBefore;
+    uintptr_t allocationRegionFreeAfter;
+    uintptr_t allocationRegionActiveSegment;
+    guidexos_nativeaot_c011ec65_refill_record normalRefill;
+    guidexos_nativeaot_c011ec65_refill_record postRefill;
+    guidexos_nativeaot_c011ec65_event_record events[
+        GUIDEXOS_NATIVEAOT_C011EC65_MAX_EVENTS];
+} guidexos_nativeaot_c011ec65_lifecycle_record;
+
 typedef struct guidexos_nativeaot_c011ec54_lifecycle_record {
     uint32_t started;
     uint32_t preflightEmitted;
@@ -4469,6 +4657,8 @@ typedef struct guidexos_nativeaot_allocation_diagnostics {
     guidexos_nativeaot_c011ec62_lifecycle_record c011ec62Lifecycle;
     /* C011EC64 post-debit normal condemnation entry timing. */
     guidexos_nativeaot_c011ec64_lifecycle_record c011ec64Lifecycle;
+    /* C011EC65 post-debit gen2/OOS preemption provenance. */
+    guidexos_nativeaot_c011ec65_lifecycle_record c011ec65Lifecycle;
     /* C011EC44 malformed transition-frame provenance. */
     guidexos_nativeaot_c011ec44_provenance_record c011ec44Provenance;
     /* C011EC45 reverse-P/Invoke slot layout, register, and unwind provenance. */

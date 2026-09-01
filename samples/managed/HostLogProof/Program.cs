@@ -1141,6 +1141,15 @@ public static unsafe class Program
 #endif
 
 #if HOSTLOGPROOF_C011EC64
+#if HOSTLOGPROOF_C011EC65
+    [DllImport("__Internal", EntryPoint = "guideXosNativeAotC011EC65Start")]
+    private static extern int GuideXosNativeAotC011EC65Start(
+        uint variant, uint maximumSurvivors, ulong maximumRetainedBytes,
+        uint maximumTransientAllocations, ulong maximumTransientBytes);
+
+    [DllImport("__Internal", EntryPoint = "guideXosNativeAotC011EC65Finish")]
+    private static extern int GuideXosNativeAotC011EC65Finish();
+#endif
     [DllImport("__Internal", EntryPoint = "guideXosNativeAotC011EC64Start")]
     private static extern int GuideXosNativeAotC011EC64Start(
         uint variant, uint maximumSurvivors, ulong maximumRetainedBytes,
@@ -1211,6 +1220,14 @@ public static unsafe class Program
             3u;
 #else
             0u;
+#endif
+#if HOSTLOGPROOF_C011EC65
+        if (GuideXosNativeAotC011EC65Start(
+                c64Variant, maximumSurvivors, 0x300480UL,
+                48u, 0x1200000UL) != 0)
+        {
+            return -1;
+        }
 #endif
         if (GuideXosNativeAotC011EC64Start(
                 c64Variant, maximumSurvivors, 0x300480UL,
@@ -1459,7 +1476,12 @@ public static unsafe class Program
         int c57Status = GuideXosNativeAotC011EC57Finish();
 #if HOSTLOGPROOF_C011EC64
         int c64Status = GuideXosNativeAotC011EC64Finish();
+#if HOSTLOGPROOF_C011EC65
+        int c65Status = GuideXosNativeAotC011EC65Finish();
+        return c57Status == 0 && c64Status == 0 && c65Status == 0 ? 0 : -1;
+#else
         return c57Status == 0 && c64Status == 0 ? 0 : -1;
+#endif
 #elif HOSTLOGPROOF_C011EC63
         int c63Status = GuideXosNativeAotC011EC63Finish();
         return c57Status == 0 && c63Status == 0 ? 0 : -1;
