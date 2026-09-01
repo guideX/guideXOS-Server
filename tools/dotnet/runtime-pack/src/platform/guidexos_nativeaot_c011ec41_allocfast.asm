@@ -10,6 +10,10 @@ EXTERN  RhpNewArrayRare:PROC
 EXTERN  RhExceptionHandling_FailedAllocation:PROC
 EXTERN  guideXosNativeAotC011EC41NativeHelperEntry:PROC
 EXTERN  guideXosNativeAotC011EC41NativeAfterAllocation:PROC
+IFDEF GUIDEXOS_NATIVEAOT_C011EC62_POST_PROMOTION_REFILL_TOPOLOGY
+EXTERN  guideXosNativeAotC011EC62ManagedAllocationEntered:PROC
+EXTERN  guideXosNativeAotC011EC62ManagedAllocationReturned:PROC
+ENDIF
 
 PUBLIC  RhpNewArray
 
@@ -50,6 +54,30 @@ RhpNewArray PROC
         xor         r10d, r10d
         add         r10, r8
 
+IFDEF GUIDEXOS_NATIVEAOT_C011EC62_POST_PROMOTION_REFILL_TOPOLOGY
+        ; Observe the request before the locked bump/rare branch.  The
+        ; callback only reads the current context and records diagnostics;
+        ; it does not modify any allocator state.
+        sub         rsp, 68h
+        mov         qword ptr [rsp + 40h], rax
+        mov         qword ptr [rsp + 48h], rcx
+        mov         qword ptr [rsp + 50h], rdx
+        mov         qword ptr [rsp + 58h], r10
+        mov         rcx, rax
+        mov         rdx, rax
+        mov         r8, r10
+        mov         r9, qword ptr [r10]
+        mov         rax, qword ptr [r10 + 8]
+        mov         qword ptr [rsp + 28h], rax
+        mov         dword ptr [rsp + 30h], 0
+        call        guideXosNativeAotC011EC62ManagedAllocationEntered
+        mov         rax, qword ptr [rsp + 40h]
+        mov         rcx, qword ptr [rsp + 48h]
+        mov         rdx, qword ptr [rsp + 50h]
+        mov         r10, qword ptr [rsp + 58h]
+        add         rsp, 68h
+ENDIF
+
         mov         r8, rax
         add         rax, qword ptr [r10]
         jc          RhpNewArrayRare
@@ -60,6 +88,17 @@ RhpNewArray PROC
         sub         rax, r8
         mov         qword ptr [rax], rcx
         mov         dword ptr [rax + 8], edx
+
+IFDEF GUIDEXOS_NATIVEAOT_C011EC62_POST_PROMOTION_REFILL_TOPOLOGY
+        sub         rsp, 28h
+        mov         qword ptr [rsp + 20h], rax
+        mov         rcx, rax
+        mov         rdx, qword ptr [r10]
+        mov         r8, qword ptr [r10 + 8]
+        call        guideXosNativeAotC011EC62ManagedAllocationReturned
+        mov         rax, qword ptr [rsp + 20h]
+        add         rsp, 28h
+ENDIF
 
         sub         rsp, 28h
         mov         qword ptr [rsp + 20h], rax

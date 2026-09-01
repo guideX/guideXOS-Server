@@ -1117,6 +1117,19 @@ public static unsafe class Program
     [DllImport("__Internal", EntryPoint = "guideXosNativeAotC011EC61PromotionReady")]
     private static extern int GuideXosNativeAotC011EC61PromotionReady();
 
+#if HOSTLOGPROOF_C011EC62
+    [DllImport("__Internal", EntryPoint = "guideXosNativeAotC011EC62Start")]
+    private static extern int GuideXosNativeAotC011EC62Start(
+        uint strategy, uint maximumSurvivors, ulong maximumRetainedBytes,
+        uint maximumTransientAllocations, ulong maximumTransientBytes);
+
+    [DllImport("__Internal", EntryPoint = "guideXosNativeAotC011EC62DebitReady")]
+    private static extern int GuideXosNativeAotC011EC62DebitReady();
+
+    [DllImport("__Internal", EntryPoint = "guideXosNativeAotC011EC62Finish")]
+    private static extern int GuideXosNativeAotC011EC62Finish();
+#endif
+
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static int RunC011EC61PreFinalN0PromotionCycle()
     {
@@ -1128,6 +1141,16 @@ public static unsafe class Program
         const uint survivorsPerMainCohort = 8u;
 #endif
         const uint payloadSize = 65536u;
+#if HOSTLOGPROOF_C011EC62_R1
+        const uint postDebitPayloadSize = 8192u;
+        const uint postDebitTailAllocations = 256u;
+#elif HOSTLOGPROOF_C011EC62_R2
+        const uint postDebitPayloadSize = 16384u;
+        const uint postDebitTailAllocations = 192u;
+#else
+        const uint postDebitPayloadSize = payloadSize;
+        const uint postDebitTailAllocations = 144u;
+#endif
         // Match the smallest C57 shape that naturally produces the first
         // gen1 promotion in the following N0 while retaining a bounded
         // ordinary tail for the next policy opportunity.
@@ -1136,9 +1159,24 @@ public static unsafe class Program
         const uint transientAllocationsPerCohort = 48u;
         // Three bounded pressure waves mirror the C57 S2 tail. They are
         // reached only after the promotion-derived debit is observed.
-        const uint tailAllocations = 144u;
         const ulong alignedSurvivorAllocationSize = 0x10018UL;
         const uint maximumSurvivors = 48u;
+#if HOSTLOGPROOF_C011EC62
+        uint c62Strategy =
+#if HOSTLOGPROOF_C011EC62_R1
+            2u;
+#elif HOSTLOGPROOF_C011EC62_R2
+            3u;
+#else
+            1u;
+#endif
+        if (GuideXosNativeAotC011EC62Start(
+                c62Strategy, maximumSurvivors, 0x300480UL,
+                48u, 0x1200000UL) != 0)
+        {
+            return -1;
+        }
+#endif
         byte[][] survivors = new byte[maximumSurvivors][];
         uint[] survivorOrdinals = new uint[maximumSurvivors];
         uint[] initialGenerations = new uint[maximumSurvivors];
@@ -1298,6 +1336,15 @@ public static unsafe class Program
                 return -1;
             }
             promotionReady = GuideXosNativeAotC011EC61PromotionReady() != 0;
+#if HOSTLOGPROOF_C011EC62
+            // C62 owns the post-debit tail. C61's promotion-ready bit is
+            // intentionally later: it waits for the next N0/N2 chronology,
+            // which is precisely what R1/R2 are probing here.
+            if (!promotionReady)
+            {
+                promotionReady = GuideXosNativeAotC011EC62DebitReady() != 0;
+            }
+#endif
             if (promotionReady)
             {
                 break;
@@ -1309,7 +1356,7 @@ public static unsafe class Program
         // bounded tail; it never requests a collection or changes policy.
         if (promotionReady)
         {
-            for (uint offset = 0u; offset < tailAllocations; offset++)
+            for (uint offset = 0u; offset < postDebitTailAllocations; offset++)
             {
                 uint ordinal = allocationOrdinal++;
                 // The continuation is intentionally plain managed pressure.
@@ -1318,7 +1365,7 @@ public static unsafe class Program
                 // post-promotion probe as another tracked cohort while the
                 // native C58/C61 observers continue to capture every natural
                 // policy entry and event.
-                byte[] value = new byte[payloadSize];
+                byte[] value = new byte[postDebitPayloadSize];
                 WriteIdentifyingPattern(value, ordinal);
                 if (!HasIdentifyingPattern(value, ordinal))
                 {
@@ -1352,7 +1399,13 @@ public static unsafe class Program
             }
         }
         GC.KeepAlive(survivors);
-        return GuideXosNativeAotC011EC57Finish();
+        int c57Status = GuideXosNativeAotC011EC57Finish();
+#if HOSTLOGPROOF_C011EC62
+        int c62Status = GuideXosNativeAotC011EC62Finish();
+        return c57Status == 0 && c62Status == 0 ? 0 : -1;
+#else
+        return c57Status;
+#endif
 #endif
     }
 #endif
@@ -1969,7 +2022,10 @@ public static unsafe class Program
                 {
                     return GxAbi.ErrorInvalidArgument;
                 }
-#if HOSTLOGPROOF_C011EC61
+#if HOSTLOGPROOF_C011EC62
+                return RunC011EC61PreFinalN0PromotionCycle() == 0
+                    ? 0 : GxAbi.ErrorInvalidArgument;
+#elif HOSTLOGPROOF_C011EC61
                 return RunC011EC61PreFinalN0PromotionCycle() == 0
                     ? 0 : GxAbi.ErrorInvalidArgument;
 #elif HOSTLOGPROOF_C011EC60
