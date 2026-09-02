@@ -6,7 +6,7 @@ param(
     [switch]$SkipManagedBuild,
     [string]$RuntimePackManifest = "",
     [string]$LockedRuntimeRoot = "",
-    [ValidateSet("single-thread-suspend-ee", "allocation-context-fixup-root-boundary", "first-per-thread-root-provider", "first-root-candidate-load", "first-non-null-root-callback-boundary", "first-root-callback-entry", "first-root-membership-classification", "first-root-heap-resolution", "first-root-condemned-generation-decision", "first-root-pre-mark-boundary", "first-root-first-mark-mutation", "first-root-post-queue-mark-decision", "first-root-first-non-null-old-o", "next-genuine-root-provider", "stack-provider-transition-failfast", "stack-provider-code-manager-registration", "stack-provider-transition-frame-control-pc", "stack-provider-unwind-gc-info", "stack-provider-unwind-caller-frame", "stack-provider-native-transition-continuation", "stack-provider-native-caller-provenance", "stack-provider-native-kernel-entry-boundary", "stack-provider-native-kernel-stack-completion", "post-root-queue-mark-processing", "mark-queue-closure", "post-mark-short-weak-handle", "short-weak-handle-operation", "short-weak-live-handle", "short-weak-dead-handle", "short-weak-lifetime-transition", "relocation-root-update", "relocated-handle-update", "lifetime-transition-complete", "second-collection-completion", "dead-object-reclamation", "collection-plan-mode-provenance-c37", "collection-plan-mode-provenance-c38", "compaction-reclamation", "post-gc-allocator-provenance", "post-gc-reclaimed-gen1-lifecycle", "reclaimed-gen1-natural-reuse", "reclaimed-gen1-ephemeral-transition", "reclaimed-gen1-natural-older-generation-transition", "natural-gen1-condemnation-policy-threshold", "direct-gen1-budget-condemnation", "n-initial-provenance", "last-n0-direct-gen1-window", "pre-last-n0-promotion-timing", "pre-final-n0-promotion-cycle", "post-promotion-n0-refill-topology", "post-promotion-earlier-headroom", "post-debit-normal-condemnation-entry", "post-debit-gen2-oos-preemption", "post-debit-normal-gen0-refill", "gen0-region-availability-provenance", "retained-survivor-region-availability", "malformed-transition-frame-provenance", "reverse-pinvoke-slot-provenance", "regdisplay-fp-handoff", "relocation-root-fault-provenance", "iterator-fp-ownership", "second-collection-continuation", "productionized-second-collection")]
+    [ValidateSet("single-thread-suspend-ee", "allocation-context-fixup-root-boundary", "first-per-thread-root-provider", "first-root-candidate-load", "first-non-null-root-callback-boundary", "first-root-callback-entry", "first-root-membership-classification", "first-root-heap-resolution", "first-root-condemned-generation-decision", "first-root-pre-mark-boundary", "first-root-first-mark-mutation", "first-root-post-queue-mark-decision", "first-root-first-non-null-old-o", "next-genuine-root-provider", "stack-provider-transition-failfast", "stack-provider-code-manager-registration", "stack-provider-transition-frame-control-pc", "stack-provider-unwind-gc-info", "stack-provider-unwind-caller-frame", "stack-provider-native-transition-continuation", "stack-provider-native-caller-provenance", "stack-provider-native-kernel-entry-boundary", "stack-provider-native-kernel-stack-completion", "post-root-queue-mark-processing", "mark-queue-closure", "post-mark-short-weak-handle", "short-weak-handle-operation", "short-weak-live-handle", "short-weak-dead-handle", "short-weak-lifetime-transition", "relocation-root-update", "relocated-handle-update", "lifetime-transition-complete", "second-collection-completion", "dead-object-reclamation", "collection-plan-mode-provenance-c37", "collection-plan-mode-provenance-c38", "compaction-reclamation", "post-gc-allocator-provenance", "post-gc-reclaimed-gen1-lifecycle", "reclaimed-gen1-natural-reuse", "reclaimed-gen1-ephemeral-transition", "reclaimed-gen1-natural-older-generation-transition", "natural-gen1-condemnation-policy-threshold", "direct-gen1-budget-condemnation", "n-initial-provenance", "last-n0-direct-gen1-window", "pre-last-n0-promotion-timing", "pre-final-n0-promotion-cycle", "post-promotion-n0-refill-topology", "post-promotion-earlier-headroom", "post-debit-normal-condemnation-entry", "post-debit-gen2-oos-preemption", "post-debit-normal-gen0-refill", "gen0-region-availability-provenance", "retained-survivor-region-availability", "survivor-cohort-provenance-reconciliation", "malformed-transition-frame-provenance", "reverse-pinvoke-slot-provenance", "regdisplay-fp-handoff", "relocation-root-fault-provenance", "iterator-fp-ownership", "second-collection-continuation", "productionized-second-collection")]
     [string]$ProofMode = "single-thread-suspend-ee",
     [ValidateSet("S1", "S2", "S3")]
     [string]$C57Strategy = "S1",
@@ -23,7 +23,9 @@ param(
     [ValidateSet(192, 200, 208, 216, 224, 320)]
     [int]$C66TailAllocations = 320,
     [ValidateSet(1, 2, 3, 4)]
-    [int]$C68RetainedSurvivors = 4
+    [int]$C68RetainedSurvivors = 4,
+    [ValidateSet(16)]
+    [int]$C69RetainedSurvivors = 16
 )
 
 $ErrorActionPreference = "Stop"
@@ -141,6 +143,8 @@ if ([string]::IsNullOrWhiteSpace($EvidenceRoot)) {
         Join-Path $root "out\dotnet\c011ec67-gen0-region-availability-provenance"
     } elseif ($ProofMode -eq "retained-survivor-region-availability") {
         Join-Path $root "out\dotnet\c011ec68-retained-survivor-region-availability"
+    } elseif ($ProofMode -eq "survivor-cohort-provenance-reconciliation") {
+        Join-Path $root "out\dotnet\c011ec69-survivor-cohort-provenance-reconciliation"
     } elseif ($ProofMode -eq "post-mark-short-weak-handle") {
         Join-Path $root "out\dotnet\c011ec29-post-mark-short-weak-handle"
     } elseif ($ProofMode -eq "first-root-post-queue-mark-decision") {
@@ -185,8 +189,9 @@ $isC011EC54 = $ProofMode -eq "reclaimed-gen1-ephemeral-transition"
 $isC011EC56 = $ProofMode -eq "natural-gen1-condemnation-policy-threshold"
 $isC011EC57 = $ProofMode -eq "direct-gen1-budget-condemnation"
 $isC011EC60 = $ProofMode -eq "pre-last-n0-promotion-timing"
+$isC011EC69 = $ProofMode -eq "survivor-cohort-provenance-reconciliation"
 $isC011EC68 = $ProofMode -eq "retained-survivor-region-availability"
-$isC011EC67 = $ProofMode -eq "gen0-region-availability-provenance" -or $isC011EC68
+$isC011EC67 = $ProofMode -eq "gen0-region-availability-provenance" -or $isC011EC68 -or $isC011EC69
 $isC011EC66 = $ProofMode -eq "post-debit-normal-gen0-refill" -or $isC011EC67
 $isC011EC65 = $ProofMode -eq "post-debit-gen2-oos-preemption" -or $isC011EC66
 $isC011EC64 = $ProofMode -in @("post-debit-normal-condemnation-entry", "post-debit-gen2-oos-preemption", "post-debit-normal-gen0-refill") -or $isC011EC67
@@ -324,10 +329,11 @@ $proofDefine = if ($isNextGenuineRootProvider -or $isC011EC39 -or $isC011EC55) {
     $c66Define = if ($isC011EC66) { " /DGUIDEXOS_NATIVEAOT_C011EC66_POST_DEBIT_NORMAL_GEN0_REFILL" } else { "" }
     $c67Define = if ($isC011EC67) { " /DGUIDEXOS_NATIVEAOT_C011EC67_GEN0_REGION_AVAILABILITY" } else { "" }
     $c68Define = if ($isC011EC68) { " /DGUIDEXOS_NATIVEAOT_C011EC68_RETAINED_SURVIVOR_REGION_AVAILABILITY /DGUIDEXOS_NATIVEAOT_C011EC68_SURVIVOR_COUNT=$C68RetainedSurvivors" } else { "" }
+    $c69Define = if ($isC011EC69) { " /DGUIDEXOS_NATIVEAOT_C011EC68_RETAINED_SURVIVOR_REGION_AVAILABILITY /DGUIDEXOS_NATIVEAOT_C011EC69_SURVIVOR_COHORT_PROVENANCE /DGUIDEXOS_NATIVEAOT_C011EC68_SURVIVOR_COUNT=$C69RetainedSurvivors" } else { "" }
     $c66TailDefine = if ($isC011EC66 -and $C66TailAllocations -ne 320) { " /DGUIDEXOS_NATIVEAOT_C011EC66_TAIL_$C66TailAllocations" } else { "" }
     $c62StrategyDefine = if ($isC011EC62 -and -not $isC011EC64 -and $C62Strategy -eq "R1") { " /DGUIDEXOS_NATIVEAOT_C011EC62_STRATEGY_R1" } elseif ($isC011EC62 -and -not $isC011EC64 -and $C62Strategy -eq "R2") { " /DGUIDEXOS_NATIVEAOT_C011EC62_STRATEGY_R2" } else { "" }
     $firstNonNullDefine = if ($isC011EC31 -or $isC011EC32 -or $isC011EC56Instrumentation) { "" } else { " /DGUIDEXOS_NATIVEAOT_FIRST_NON_NULL_ROOT_ALLOCATION" }
-    "/DGUIDEXOS_NATIVEAOT_ALLOCATION_CONTEXT_FIXUP_ROOT_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_PER_THREAD_ROOT_PROVIDER_ALLOCATION$firstNonNullDefine /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CALLBACK_ENTRY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_MEMBERSHIP_CLASSIFICATION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_HEAP_RESOLUTION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CONDEMNED_GENERATION_DECISION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_PRE_MARK_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_NON_NULL_OLD_O_ALLOCATION /DGUIDEXOS_NATIVEAOT_NEXT_GENUINE_ROOT_PROVIDER_ALLOCATION$minimalDefine$codeManagerDefine$c19Define$c20Define$c21Define$c23Define$c24Define$c25Define$c26Define$c27Define$c28Define$c29Define$c31Define$c32Define$c33Define$c34Define$c35Define$c36Define$c37Define$c38Define$c39Define$c40Define$c41Define$c42Define$c53Define$c54Define$c55Define$c56Define$c59Define$c59StrategyDefine$c60Define$c60StrategyDefine$c61Define$c61StrategyDefine$c62Define$c63Define$c64Define$c65Define$c66Define$c67Define$c68Define$c66TailDefine$c62StrategyDefine$c011ec49Define"
+    "/DGUIDEXOS_NATIVEAOT_ALLOCATION_CONTEXT_FIXUP_ROOT_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_PER_THREAD_ROOT_PROVIDER_ALLOCATION$firstNonNullDefine /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CALLBACK_ENTRY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_MEMBERSHIP_CLASSIFICATION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_HEAP_RESOLUTION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CONDEMNED_GENERATION_DECISION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_PRE_MARK_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_NON_NULL_OLD_O_ALLOCATION /DGUIDEXOS_NATIVEAOT_NEXT_GENUINE_ROOT_PROVIDER_ALLOCATION$minimalDefine$codeManagerDefine$c19Define$c20Define$c21Define$c23Define$c24Define$c25Define$c26Define$c27Define$c28Define$c29Define$c31Define$c32Define$c33Define$c34Define$c35Define$c36Define$c37Define$c38Define$c39Define$c40Define$c41Define$c42Define$c53Define$c54Define$c55Define$c56Define$c59Define$c59StrategyDefine$c60Define$c60StrategyDefine$c61Define$c61StrategyDefine$c62Define$c63Define$c64Define$c65Define$c66Define$c67Define$c68Define$c69Define$c66TailDefine$c62StrategyDefine$c011ec49Define"
 } elseif ($isFirstRootFirstNonNullOldO) {
     "/DGUIDEXOS_NATIVEAOT_ALLOCATION_CONTEXT_FIXUP_ROOT_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_PER_THREAD_ROOT_PROVIDER_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_NON_NULL_ROOT_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CALLBACK_ENTRY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_MEMBERSHIP_CLASSIFICATION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_HEAP_RESOLUTION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CONDEMNED_GENERATION_DECISION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_PRE_MARK_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_NON_NULL_OLD_O_ALLOCATION"
 } elseif ($isFirstRootPostQueueMarkDecision) {
@@ -6262,13 +6268,14 @@ exit /b 0
     } else {
         ""
     }
-    $managedProofMode = if ($isC011EC68) { "RetainedSurvivorRegionAvailability" } elseif ($isC011EC67) { "PostDebitNormalGen0Refill" } elseif ($isC011EC66) { "PostDebitNormalGen0Refill" } elseif ($isC011EC65) { "PostDebitGen2OosPreemption" } elseif ($isC011EC64) { "PostDebitNormalCondemnationEntry" } elseif ($isC011EC63) { "PostPromotionEarlierHeadroom" } elseif ($isC011EC62) { "PostPromotionN0RefillTopology" } elseif ($isC011EC61) { "PreFinalN0PromotionCycle" } elseif ($isC011EC60) { "PreLastN0PromotionTiming" } elseif ($isC011EC59) { "LastN0DirectGen1Window" } elseif ($isC011EC58) { "NInitialProvenance" } elseif ($isC011EC57) { "DirectGen1BudgetCondemnation" } elseif ($isC011EC56) { "NaturalGen1CondemnationPolicyThreshold" } elseif ($isC011EC55) { "NaturalOlderGenerationTransition" } elseif ($isC011EC54) { "ReclaimedGen1EphemeralTransition" } elseif ($isC011EC53) { "ReclaimedGen1NaturalReuse" } elseif ($isC011EC44 -or $isC011EC42) { "PostGcReclaimedGen1Lifecycle" } elseif ($isC011EC41) { "PostGcAllocatorProvenance" } elseif ($isC011EC40) { "CompactionReclamation" } elseif ($isC011EC39C38Variant) { "CollectionPlanC38" } elseif ($isC011EC39) { "CollectionPlanC37" } elseif ($isC011EC38) { "DeadObjectReclamation" } elseif ($isC011EC37) { "LifetimeTransitionSecondCollection" } elseif ($isC011EC33) { "LifetimeTransition" } elseif ($isC011EC31) { "ShortWeakLive" } elseif ($isC011EC32) { "ShortWeakDead" } elseif ($isFirstRootFirstNonNullOldO) { "FirstNonNullOldO" } elseif ($isFirstNonNullRoot -or $isFirstRootCallbackEntry) { "FirstNonNullRoot" } else { "FirstCollectionBoundary" }
+    $managedProofMode = if ($isC011EC69) { "SurvivorCohortProvenanceReconciliation" } elseif ($isC011EC68) { "RetainedSurvivorRegionAvailability" } elseif ($isC011EC67) { "PostDebitNormalGen0Refill" } elseif ($isC011EC66) { "PostDebitNormalGen0Refill" } elseif ($isC011EC65) { "PostDebitGen2OosPreemption" } elseif ($isC011EC64) { "PostDebitNormalCondemnationEntry" } elseif ($isC011EC63) { "PostPromotionEarlierHeadroom" } elseif ($isC011EC62) { "PostPromotionN0RefillTopology" } elseif ($isC011EC61) { "PreFinalN0PromotionCycle" } elseif ($isC011EC60) { "PreLastN0PromotionTiming" } elseif ($isC011EC59) { "LastN0DirectGen1Window" } elseif ($isC011EC58) { "NInitialProvenance" } elseif ($isC011EC57) { "DirectGen1BudgetCondemnation" } elseif ($isC011EC56) { "NaturalGen1CondemnationPolicyThreshold" } elseif ($isC011EC55) { "NaturalOlderGenerationTransition" } elseif ($isC011EC54) { "ReclaimedGen1EphemeralTransition" } elseif ($isC011EC53) { "ReclaimedGen1NaturalReuse" } elseif ($isC011EC44 -or $isC011EC42) { "PostGcReclaimedGen1Lifecycle" } elseif ($isC011EC41) { "PostGcAllocatorProvenance" } elseif ($isC011EC40) { "CompactionReclamation" } elseif ($isC011EC39C38Variant) { "CollectionPlanC38" } elseif ($isC011EC39) { "CollectionPlanC37" } elseif ($isC011EC38) { "DeadObjectReclamation" } elseif ($isC011EC37) { "LifetimeTransitionSecondCollection" } elseif ($isC011EC33) { "LifetimeTransition" } elseif ($isC011EC31) { "ShortWeakLive" } elseif ($isC011EC32) { "ShortWeakDead" } elseif ($isFirstRootFirstNonNullOldO) { "FirstNonNullOldO" } elseif ($isFirstNonNullRoot -or $isFirstRootCallbackEntry) { "FirstNonNullRoot" } else { "FirstCollectionBoundary" }
     $managedC57StrategyProperty = if ($isC011EC57Instrumentation) { "-p:HostLogProofC57Strategy=$C57Strategy" } else { "" }
     $managedC60StrategyProperty = if ($isC011EC60) { "-p:HostLogProofC60Strategy=$C60Strategy" } else { "" }
     $managedC61StrategyProperty = if ($isC011EC61) { "-p:HostLogProofC61Strategy=$c61StrategyForRun" } else { "" }
     $managedC62StrategyProperty = if ($isC011EC62 -and -not $isC011EC63 -and -not $isC011EC64) { "-p:HostLogProofC62Strategy=$C62Strategy" } else { "" }
     $managedC66StrategyProperty = if ($isC011EC66) { "-p:HostLogProofC66Strategy=$C66Strategy" } else { "" }
     $managedC68SurvivorProperty = if ($isC011EC68) { "-p:HostLogProofC68RetainedSurvivors=$C68RetainedSurvivors" } else { "" }
+    $managedC69SurvivorProperty = if ($isC011EC69) { "-p:HostLogProofC69RetainedSurvivors=$C69RetainedSurvivors" } else { "" }
     $c64VariantForRun = if ($isC011EC66) { "W3" } else { $C64Variant }
     $managedC64VariantProperty = if ($isC011EC64) { "-p:HostLogProofC64Variant=$c64VariantForRun" } else { "" }
     $managedRuntimePackProperty = if ($isTransitionFrameControlPc -or $isC011EC19) {
@@ -6298,7 +6305,7 @@ if errorlevel 1 exit /b %errorlevel%
 cl.exe /nologo /TC /c /GS- /Zl /Fo:"$runtimeSupportObj" "$runtimeSupportSource"
 if errorlevel 1 exit /b %errorlevel%
 $managedRuntimePackAssembly
-    "$dotnet" publish "$(Join-Path $root 'samples\managed\HostLogProof\HostLogProof.csproj')" -c Release -r win-x64 --self-contained true -p:PublishAot=true -p:InvariantGlobalization=true -p:IlcGenerateStackTraceData=false -p:IlcUseEnvironmentalTools=true -p:HostLogProofRuntimeSupportObj=$runtimeSupportObj -p:HostLogProofMapPath=$mapPath -p:HostLogProofMode=$managedProofMode $managedC57StrategyProperty $managedC60StrategyProperty $managedC61StrategyProperty $managedC62StrategyProperty $managedC64VariantProperty $managedC66StrategyProperty $managedC68SurvivorProperty -p:HostLogProofC66TailAllocations=$C66TailAllocations -p:BaseOutputPath=$managedPublishRoot\bin\ -p:BaseIntermediateOutputPath=$managedPublishRoot\obj\ $managedRuntimePackProperty $probeObjectPropertyArgument -p:IlcSdkPath=$oldArtifact\sdk\
+    "$dotnet" publish "$(Join-Path $root 'samples\managed\HostLogProof\HostLogProof.csproj')" -c Release -r win-x64 --self-contained true -p:PublishAot=true -p:InvariantGlobalization=true -p:IlcGenerateStackTraceData=false -p:IlcUseEnvironmentalTools=true -p:HostLogProofRuntimeSupportObj=$runtimeSupportObj -p:HostLogProofMapPath=$mapPath -p:HostLogProofMode=$managedProofMode $managedC57StrategyProperty $managedC60StrategyProperty $managedC61StrategyProperty $managedC62StrategyProperty $managedC64VariantProperty $managedC66StrategyProperty $managedC68SurvivorProperty $managedC69SurvivorProperty -p:HostLogProofC66TailAllocations=$C66TailAllocations -p:BaseOutputPath=$managedPublishRoot\bin\ -p:BaseIntermediateOutputPath=$managedPublishRoot\obj\ $managedRuntimePackProperty $probeObjectPropertyArgument -p:IlcSdkPath=$oldArtifact\sdk\
 if errorlevel 1 exit /b %errorlevel%
 cl.exe /nologo /std:c++17 /TP /c /MT /GS- /GR- /EHs-c- /Zl /Oi /O2 /Zc:inline /Brepro /DGUIDEXOS_NATIVEAOT_MANAGED_IMAGE /I"$(Join-Path $root 'tools\dotnet\runtime-pack\src\platform')" /I"$nativeAotRoot\Runtime" /Fo:"$startupProbeObj" "$startupProbeSource"
 if errorlevel 1 exit /b %errorlevel%
@@ -6942,7 +6949,9 @@ exit /b %errorlevel%
                     $normalizedLiveText = ($normalizedLiveText -creplace '(?<=[0-9])(?=[a-z])', ' ') -replace '\s+', ' '
                     $normalizedLiveText = $normalizedLiveText -replace '\b(c\d+)\s+(ec\d+)', '$1$2'
                     $normalizedLiveText = $normalizedLiveText -replace '\s*=\s*', '='
-                    $stopPattern = if ($isC011EC68) {
+                    $stopPattern = if ($isC011EC69) {
+                        'marker=C011EC69 outcome=[ABCDEF]|marker=C011EC69-BLOCKED'
+                    } elseif ($isC011EC68) {
                         'marker=C011EC68 outcome=[ABCDEF]|marker=C011EC68-BLOCKED'
                     } elseif ($isC011EC67) {
                         'marker=C011EC67 outcome=[ABCDEF]|marker=C011EC67-BLOCKED'
@@ -7054,7 +7063,13 @@ exit /b %errorlevel%
             if (-not $completed -and [string]::IsNullOrWhiteSpace($earlyFailure)) {
                 Read-Monitor $port $monitorPath
                 $failureSerial = if (Test-Path -LiteralPath $serialPath) { Get-Content -LiteralPath $serialPath -Raw } else { "" }
-                if ($isC011EC68) {
+                if ($isC011EC69) {
+                    $earlyFailure = if ($qemuProcess.HasExited) {
+                        "c011ec69-exited-before-completion-marker"
+                    } else {
+                        "c011ec69-timeout-before-completion-marker"
+                    }
+                } elseif ($isC011EC68) {
                     $earlyFailure = if ($qemuProcess.HasExited) {
                         "c011ec68-exited-before-completion-marker"
                     } else {
@@ -7199,6 +7214,48 @@ exit /b %errorlevel%
                 successLevel=$c49SuccessLevel; harnessTerminated=$true
                 markerLine=$c49MarkerLine; earlyFailure=$earlyFailure
                 serialTail=if ($validationText.Length -gt 16000) { $validationText.Substring($validationText.Length - 16000) } else { $validationText }
+            }
+            continue
+        } elseif ($isC011EC69) {
+            $c69CompleteLines = @(Get-C011EC56MarkerRecords $validationText 'C011EC69' | Where-Object { $_ -match 'marker=C011EC69\s+outcome=' })
+            $c69BlockedLines = @(Get-C011EC56MarkerRecords $validationText 'C011EC69-BLOCKED')
+            $c69MarkerLine = if ($c69CompleteLines.Count -ne 0) {
+                $c69CompleteLines[-1].Trim()
+            } elseif ($c69BlockedLines.Count -ne 0) {
+                $c69BlockedLines[-1].Trim()
+            } else { $null }
+            $c69OutcomeMatch = if ($null -ne $c69MarkerLine) { [regex]::Match($c69MarkerLine, 'outcome=(?<outcome>[ABCDEF])') } else { $null }
+            $c69Outcome = if ($null -ne $c69OutcomeMatch -and $c69OutcomeMatch.Success) { $c69OutcomeMatch.Groups['outcome'].Value } else { 'D' }
+            $c69LevelText = if ($null -ne $c69MarkerLine) { Get-MarkerField $c69MarkerLine 'successLevel' } else { $null }
+            $c69Level = if ($null -ne $c69LevelText) { [Convert]::ToUInt32($c69LevelText.Substring(2), 16) } else { 0 }
+            $runResults += [ordered]@{
+                name=$name; serial=$serialPath; serialSha256=(Hash-File $serialPath)
+                safeStopMarker=if ($c69CompleteLines.Count -ne 0) { 'C011EC69' } elseif ($c69BlockedLines.Count -ne 0) { 'C011EC69-BLOCKED' } else { 'C011EC69-TIMEOUT' }
+                outcome=$c69Outcome; semanticOutcome=$c69Outcome; successLevel=$c69Level
+                harnessTerminated=$true; markerLine=$c69MarkerLine; earlyFailure=$earlyFailure
+                preflightLines=@(Get-C011EC56MarkerRecords $validationText 'C011EC69-PREFLIGHT')
+                controlLines=@(Get-C011EC56MarkerRecords $validationText 'C69_CONTROL_16')
+                promotionAnchorLines=@(Get-C011EC56MarkerRecords $validationText 'C69_PROMOTION_ANCHOR')
+                boundaryLines=@(
+                    (Get-C011EC56MarkerRecords $validationText 'C69_PRE_PROMOTION_BASIC_COUNT')
+                    (Get-C011EC56MarkerRecords $validationText 'C69_POST_PROMOTION_BASIC_COUNT')
+                    (Get-C011EC56MarkerRecords $validationText 'C69_POST_RESTART_BASIC_COUNT')
+                    (Get-C011EC56MarkerRecords $validationText 'C69_MANAGED_RESUME_BASIC_COUNT')
+                    (Get-C011EC56MarkerRecords $validationText 'C69_BEFORE_DECISIVE_BASIC_COUNT'))
+                lastNonzeroLines=@(Get-C011EC56MarkerRecords $validationText 'C69_LAST_NONZERO_CANDIDATE')
+                finalUnlinkLines=@(Get-C011EC56MarkerRecords $validationText 'C69_FINAL_CANDIDATE_UNLINK')
+                contextExhaustedLines=@(Get-C011EC56MarkerRecords $validationText 'C69_GEN0_CONTEXT_EXHAUSTED')
+                getNewRegionLines=@(Get-C011EC56MarkerRecords $validationText 'C69_GET_NEW_REGION_0')
+                candidateLines=@(Get-C011EC56MarkerRecords $validationText 'C69_POST_DEBIT_GEN0_CANDIDATE')
+                regionSelectedLines=@(Get-C011EC56MarkerRecords $validationText 'C69_POST_DEBIT_REGION_SELECTED')
+                normalRefillLines=@(Get-C011EC56MarkerRecords $validationText 'C69_POST_DEBIT_NORMAL_REFILL')
+                summaryLines=@(Get-C011EC56MarkerRecords $validationText 'C69_SUMMARY')
+                c67CompleteLines=@(Get-C011EC56MarkerRecords $validationText 'C011EC67' | Where-Object { $_ -match 'marker=C011EC67\s+outcome=' })
+                c67NormalLines=@(Get-C011EC56MarkerRecords $validationText 'C011EC67-NORMAL-REFILL-CONTROL')
+                c65CompletionLines=@(Get-C011EC56MarkerRecords $validationText 'C011EC65' | Where-Object { $_ -match 'marker=C011EC65\s+outcome=' })
+                c57SurvivorLines=@(Get-C011EC56MarkerRecords $validationText 'C011EC57-SURVIVOR')
+                c26CompletionLines=@(Get-C011EC56MarkerRecords $validationText 'C011EC26' | Where-Object { $_ -match 'marker=C011EC26\s+outcome=' })
+                serialTail=if ($validationText.Length -gt 48000) { $validationText.Substring($validationText.Length - 48000) } else { $validationText }
             }
             continue
         } elseif ($isC011EC68) {
@@ -10904,6 +10961,63 @@ exit /b %errorlevel%
         }
         $manifest | ConvertTo-Json -Depth 100 | Set-Content -LiteralPath $manifestPath -Encoding ASCII
         Write-Host "C011EC44 malformed transition-frame provenance: Outcome C / Level 1" -ForegroundColor Yellow
+    } elseif ($isC011EC69) {
+        if (@($runResults).Count -ne $FreshBootCount) { throw "C011EC69 produced $(@($runResults).Count) runs instead of $FreshBootCount." }
+        $firstC69Run = $runResults[0]
+        if ($firstC69Run.safeStopMarker -ne 'C011EC69') {
+            throw 'C011EC69 did not reach its bounded completion marker.'
+        }
+        $c69Read = { param([string]$line,[string]$field) $v=Get-MarkerField $line $field; if($null -eq $v){throw "C011EC69 missing completion field $field."}; $v }
+        $c69SemanticFields = @('retainedReferences','promotionObserved','debitObserved','restartObserved','managedResumeObserved','candidateAvailable','regionSelected','normalRefill','commitFailed','contextExhausted','fullOos','requestedGeneration','condemnedGeneration','invariantFailures','sensitiveDiagnosticAllocations','successLevel')
+        foreach ($field in $c69SemanticFields) {
+            $values = @($runResults | ForEach-Object { & $c69Read $_.markerLine $field } | Select-Object -Unique)
+            if ($values.Count -ne 1 -or $null -eq $values[0]) { throw "C011EC69 semantic field $field varied or was absent across fresh boots." }
+        }
+        $c69RequiredMarkers = @(
+            'preflightLines','controlLines','promotionAnchorLines','boundaryLines','lastNonzeroLines',
+            'finalUnlinkLines','contextExhaustedLines','getNewRegionLines','candidateLines',
+            'regionSelectedLines','normalRefillLines','summaryLines','c67CompleteLines',
+            'c65CompletionLines','c57SurvivorLines') | Where-Object { @($firstC69Run[$_]).Count -eq 0 }
+        if (@($c69RequiredMarkers).Count -ne 0) { throw 'C011EC69 required provenance or lifecycle markers were absent.' }
+        $c69AnchorLine = $firstC69Run.promotionAnchorLines[0]
+        $c69SummaryLine = $firstC69Run.summaryLines[0]
+        $c69CandidateLine = $firstC69Run.candidateLines[0]
+        $c69SelectedLine = $firstC69Run.regionSelectedLines[0]
+        $c69RefillLine = $firstC69Run.normalRefillLines[0]
+        $c69Level = [Convert]::ToUInt32((& $c69Read $firstC69Run.markerLine 'successLevel').Substring(2), 16)
+        $c69OutcomeMatch = [regex]::Match($firstC69Run.markerLine, 'outcome=(?<outcome>[ABCDEF])')
+        $c69Outcome = if ($c69OutcomeMatch.Success) { $c69OutcomeMatch.Groups['outcome'].Value } else { 'D' }
+        $c69Anchor = (& $c69Read $c69AnchorLine 'observed') -eq '0x00000001'
+        $c69Chronology = (& $c69Read $c69SummaryLine 'candidateChronology') -eq '0x00000001'
+        $c69FullChronology = (& $c69Read $c69SummaryLine 'fullChronology') -eq '0x00000001'
+        $c69Agreement = $true
+        foreach ($run in $runResults) {
+            if ($run.outcome -ne $c69Outcome -or $run.successLevel -ne $c69Level) { $c69Agreement = $false }
+        }
+        $c69Manifest = [ordered]@{
+            outcome="Outcome $c69Outcome / C011EC69 survivor-cohort provenance reconciliation"
+            successLevel=$c69Level
+            proofMode=$ProofMode; marker='C011EC69'; retainedReferences=$C69RetainedSurvivors; controlRetainedReferences=16
+            strategy=$C66Strategy; tailAllocations=$C66TailAllocations
+            repositoryHead=$repoHead; startingCommittedHead=$startingCommittedHead; startingBranch=$startingBranch; upstream=$upstream; startingWorktreeStatus=$startingWorktreeStatus; startingDirtyState=$dirtyState
+            lockedRuntimeIdentity=[ordered]@{ nativeAot='9.0.0'; architecture='AMD64'; gc='Workstation'; gcInterfaces='5.3 / 2'; sourceCommit=$lockedCommit; fpPatchSha256='4185495724D48E2962BA9042AF352718BF9188032DEE4C9DE6FFE9F145A1DC31'; ordinaryKernelSha256=$normalKernelHash; semanticRewrites='C46/C47/C48 disabled; durable FP repair inherited from runtime-pack' }
+            independentVariable=[ordered]@{ name='managed references retained by the early C67 cohort'; baseline=16; value=$C69RetainedSurvivors; changedOnly='none; exact C67 control reconstruction'; heldConstant='C67/C68 allocation schedule, payload, object type, P2/W3/216 schedule, pressure waves, thresholds' }
+            provenance=[ordered]@{ control=$firstC69Run.controlLines[0]; promotionAnchor=$c69AnchorLine; c26HistoricalPromotingRoots='separate stack-derived C26 metric; not equated with retained slots'; aliases='zero: sixteen distinct byte[] allocations occupy sixteen managed array slots'; identityEvidence='C011EC57-SURVIVOR records; first/last addresses emitted in C69 anchor' }
+            promotion=[ordered]@{ anchor=$c69Anchor; retainedReferences=(Get-MarkerField $c69AnchorLine 'managedRetainedReferences'); enumeratedPromotingRoots=(Get-MarkerField $c69AnchorLine 'enumeratedPromotingRoots'); uniquePromotedObjects=(Get-MarkerField $c69AnchorLine 'uniquePromotedObjects'); promotedBytes=(Get-MarkerField $c69AnchorLine 'promotedBytes'); gen1BudgetBefore=(Get-MarkerField $c69AnchorLine 'gen1BudgetBefore'); debit=(Get-MarkerField $c69AnchorLine 'gen1Debit'); gen1BudgetAfter=(Get-MarkerField $c69AnchorLine 'gen1BudgetAfter'); generationBefore=(Get-MarkerField $c69AnchorLine 'generationBefore'); generationAfter=(Get-MarkerField $c69AnchorLine 'generationAfter'); restartEE=(Get-MarkerField $c69AnchorLine 'restartEE'); managedResume=(Get-MarkerField $c69AnchorLine 'managedResume'); survivorIntegrity=(Get-MarkerField $c69AnchorLine 'survivorIntegrity') }
+            boundaries=[ordered]@{ beforePromotion=@($firstC69Run.boundaryLines | Where-Object { $_ -match 'C69_PRE_PROMOTION_BASIC_COUNT' }); afterPromotion=@($firstC69Run.boundaryLines | Where-Object { $_ -match 'C69_POST_PROMOTION_BASIC_COUNT' }); afterRestart=@($firstC69Run.boundaryLines | Where-Object { $_ -match 'C69_POST_RESTART_BASIC_COUNT' }); managedResume=@($firstC69Run.boundaryLines | Where-Object { $_ -match 'C69_MANAGED_RESUME_BASIC_COUNT' }); beforeDecisive=@($firstC69Run.boundaryLines | Where-Object { $_ -match 'C69_BEFORE_DECISIVE_BASIC_COUNT' }) }
+            regionChronology=[ordered]@{ lastNonzero=$firstC69Run.lastNonzeroLines[0]; finalCandidateUnlink=$firstC69Run.finalUnlinkLines[0]; contextExhausted=$firstC69Run.contextExhaustedLines[0]; getNewRegion0=$firstC69Run.getNewRegionLines[0]; postDebitCandidate=$c69CandidateLine; postDebitRegionSelected=$c69SelectedLine; postDebitNormalRefill=$c69RefillLine; c67Summary=$firstC69Run.c67CompleteLines[0] }
+            predicates=[ordered]@{ promotionAnchorReproduced=$c69Anchor; candidateChronologyReproduced=$c69Chronology; fullC67AnchorReproduced=$c69FullChronology; postDebitGen0Candidate=((& $c69Read $c69CandidateLine 'available') -eq '0x00000001'); postDebitRegionSelected=((& $c69Read $c69SelectedLine 'selected') -eq '0x00000001'); postDebitNormalRefill=((& $c69Read $c69RefillLine 'result') -eq '0x00000001'); B02Evaluated=$false; B02Justified=$false }
+            diagnostics=[ordered]@{ invariantFailures=(Get-MarkerField $c69SummaryLine 'invariantFailures'); sensitiveDiagnosticAllocations=(Get-MarkerField $c69SummaryLine 'sensitiveDiagnosticAllocations'); allocatorMutation=(Get-MarkerField $c69SummaryLine 'allocatorMutation'); regionMutation=(Get-MarkerField $c69SummaryLine 'regionMutation'); regionListMutation=(Get-MarkerField $c69SummaryLine 'regionListMutation'); candidateMutation=(Get-MarkerField $c69SummaryLine 'candidateMutation'); policyMutation=(Get-MarkerField $c69SummaryLine 'policyMutation'); survivorFabrication='0x00000000'; oosSuppression='0x00000000'; requestedGenerationMutation='0x00000000' }
+            markers=[ordered]@{ required=@('C011EC69-PREFLIGHT','C69_CONTROL_16','C69_PROMOTION_ANCHOR','C69_POST_PROMOTION_BASIC_COUNT','C69_POST_RESTART_BASIC_COUNT','C69_MANAGED_RESUME_BASIC_COUNT','C69_LAST_NONZERO_CANDIDATE','C69_FINAL_CANDIDATE_UNLINK','C69_GEN0_CONTEXT_EXHAUSTED','C69_GET_NEW_REGION_0','C69_POST_DEBIT_GEN0_CANDIDATE','C69_POST_DEBIT_REGION_SELECTED','C69_POST_DEBIT_NORMAL_REFILL','C69_SUMMARY','C011EC69'); semanticAgreement=$c69Agreement; runs=$runResults }
+            qemu=[ordered]@{ version=$qemuVersion; runCount=$FreshBootCount; semanticAgreement=$c69Agreement; strategy=$C66Strategy; tailAllocations=$C66TailAllocations; retainedReferences=$C69RetainedSurvivors; proofKernelSha256=$specializedKernelHash; serialSha256=@($runResults | ForEach-Object { $_.serialSha256 }); evidenceRoot=$runRoot; exactCommandLog=(Join-Path $runRoot 'commands.txt'); runs=$runResults; failFast='0x00000000'; pageFault='0x00000000' }
+            payloadHashes=[ordered]@{ proofKernel=$specializedKernelHash; pe=(Hash-File $pePath); elf=(Hash-File $elfPath); map=(Hash-File $mapPath) }
+            ordinaryRestoration=[ordered]@{ expectedKernelSha256=$normalKernelHash; expectedEspSha256=$normalKernelHash; restoredByFinally=$true; kernelSha256=(Hash-File $kernelPath); espSha256=(Hash-File $espKernelPath); proofOnlyArtifactActive=$false; qemuCleanup='only C69-owned processes stopped'; unrelatedQemu='preserved' }
+            documentation='docs/dotnet/NATIVEAOT_WORKSTATION_GC_C69_SURVIVOR_COHORT_PROVENANCE_RECONCILIATION.md'; evidenceRoot=$runRoot; manifestPath=$manifestPath
+            nextMilestone=if($c69Level -ge 2){'C70: begin a bounded coarse-to-fine survivor-count sweep from the known-good 16-reference anchor'}else{'Identify and reconcile the first C67/C69 divergence before any survivor-count sweep'}
+        }
+        $c69Manifest | ConvertTo-Json -Depth 100 | Set-Content -LiteralPath $manifestPath -Encoding ASCII
+        if (-not $c69Agreement) { throw 'C011EC69 semantics varied across fresh boots.' }
+        Write-Host "C011EC69 survivor-cohort provenance reconciliation: Outcome $c69Outcome / Level $c69Level" -ForegroundColor $(if($c69Outcome -eq 'A'){'Green'}else{'Yellow'})
     } elseif ($isC011EC68) {
         if (@($runResults).Count -ne $FreshBootCount) { throw "C011EC68 produced $(@($runResults).Count) runs instead of $FreshBootCount." }
         $firstC68Run = $runResults[0]

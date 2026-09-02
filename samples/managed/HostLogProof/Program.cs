@@ -1209,6 +1209,9 @@ public static unsafe class Program
         // ordinary tail for the next policy opportunity.
         const uint earlySurvivorCount = 16u;
 #if HOSTLOGPROOF_C011EC68
+#if HOSTLOGPROOF_C011EC69
+        const uint retainedSurvivorCount = 16u;
+#else
 #if HOSTLOGPROOF_C011EC68_SURVIVORS_1
         const uint retainedSurvivorCount = 1u;
 #elif HOSTLOGPROOF_C011EC68_SURVIVORS_2
@@ -1217,6 +1220,7 @@ public static unsafe class Program
         const uint retainedSurvivorCount = 3u;
 #else
         const uint retainedSurvivorCount = 4u;
+#endif
 #endif
         const uint earlySurvivorAllocationCount = earlySurvivorCount;
 #else
