@@ -22367,6 +22367,271 @@ static void guideXosNativeAotC011EC67Emit() {
     r.completionObserved = 1u;
 }
 
+#if defined(GUIDEXOS_NATIVEAOT_C011EC68_RETAINED_SURVIVOR_REGION_AVAILABILITY)
+static void guideXosNativeAotC011EC68Emit() {
+    guidexos_nativeaot_c011ec67_lifecycle_record& c67 =
+        guideXosNativeAotC011EC67State();
+    const guidexos_nativeaot_c011ec65_lifecycle_record& c65 =
+        g_guideXosAllocationDiagnostics.c011ec65Lifecycle;
+    const guidexos_nativeaot_c011ec62_lifecycle_record& c62 =
+        g_guideXosAllocationDiagnostics.c011ec62Lifecycle;
+    const guidexos_nativeaot_c011ec61_lifecycle_record& c61 =
+        g_guideXosAllocationDiagnostics.c011ec61Lifecycle;
+    const guidexos_nativeaot_c011ec56_lifecycle_record& c56 =
+        g_guideXosAllocationDiagnostics.c011ec56Lifecycle;
+    const guidexos_nativeaot_c011ec64_lifecycle_record& c64 =
+        g_guideXosAllocationDiagnostics.c011ec64Lifecycle;
+
+    const bool c67Baseline = c67.c66BaselineObserved != 0u &&
+        c67.getNewRegionObserved != 0u && c67.getNewRegionResult == 0u &&
+        c67.decisiveFreeBytes == 0u;
+    const bool anchor = c65.promotionObserved != 0u &&
+        c65.debitObserved != 0u && c65.restartObserved != 0u &&
+        c65.managedResumeObserved != 0u;
+    const bool candidate = anchor && c67.getNewRegionObserved != 0u &&
+        c67.decisiveFreeBytes != 0u && c67.decisiveCandidateHead != 0u;
+    const bool selected = candidate && c65.allocationRegionObserved != 0u &&
+        c65.allocationRegionResult != 0u && c65.allocationRegion != 0u;
+    const bool normal = selected && c65.postContextExhaustedObserved != 0u &&
+        c65.postNormalRefillObserved != 0u &&
+        c65.postNormalRefill.fitResult != 0u &&
+        c65.postNormalCommitFailed == 0u &&
+        c65.postNormalRefill.activeSegment != 0u &&
+        c65.postPreemptionBeforeNormal == 0u &&
+        c65.postRefillCompleted != 0u && c65.postRefillSucceeded != 0u &&
+        c65.postManagedAllocationCompleted != 0u;
+    const uint32_t commitFailed = normal ? 0u :
+        (candidate ? c65.postNormalCommitFailed : c65.postCommitFailed);
+    const bool invalid = c67.invariantFailures != 0u ||
+        c67.eventOverflow != 0u || c67.snapshotOverflow != 0u ||
+        c67.sensitiveDiagnosticAllocations != 0u ||
+        c65.invariantFailures != 0u || c62.invariantFailures != 0u ||
+        c56.invariantFailures != 0u || c67.noAllocatorMutation == 0u ||
+        c67.noRegionMutation == 0u || c67.noRegionListMutation == 0u ||
+        c67.noCandidateMutation == 0u || c67.noPolicyMutation == 0u ||
+        c67.noOosSuppression == 0u || c67.noRequestedGenerationMutation == 0u;
+    const bool postDebitN0 = c64.postDebitNormalN0Observed != 0u &&
+        c64.qualifyingNInitial == 0u;
+    const char* outcome = invalid ? "F" : (normal ? "A" :
+        (candidate ? "B" : (anchor ? "C" : "D")));
+    const uint32_t level = invalid ? 0u : (normal ? 4u :
+        (selected ? 3u : (candidate ? 2u : (anchor ? 1u : 0u))));
+    const uint32_t observedSurvivors =
+        static_cast<uint32_t>(c61.promotionSurvivorCount);
+
+    const guidexos_nativeaot_c011ec67_region_event_record* lastCandidate = nullptr;
+    if (c67.capacityLossEventOrdinal != 0u &&
+        c67.capacityLossEventOrdinal <= c67.eventCount) {
+        lastCandidate = &c67.events[c67.capacityLossEventOrdinal - 1u];
+    }
+
+    suspendEeSerialPutString(
+        "[nativeaot-gc-short-weak-lifetime] C67-BASELINE marker=C011EC68-C67-BASELINE result=");
+    guideXosNativeAotC011EC67Put32("value", c67Baseline ? 1u : 0u);
+    guideXosNativeAotC011EC67Put32("expectedSurvivors", 4u);
+    suspendEeSerialPutString(" source=C011EC67-unchanged-control-shape\n");
+
+    suspendEeSerialPutString(
+        "[nativeaot-gc-short-weak-lifetime] VARIANT marker=C011EC68-VARIANT variable=retained-survivor-references-entering-promotion");
+    guideXosNativeAotC011EC67Put32(
+        "baseline", 4u);
+    guideXosNativeAotC011EC67Put32(
+        "value", GUIDEXOS_NATIVEAOT_C011EC68_SURVIVOR_COUNT);
+    suspendEeSerialPutString(" direction=decrease pressureHeld=1 payloadHeld=1 tailHeld=1 cohortSchedule=P2\n");
+
+    suspendEeSerialPutString(
+        "[nativeaot-gc-short-weak-lifetime] SURVIVORS marker=C011EC68-SURVIVORS");
+    guideXosNativeAotC011EC67Put32("requested", GUIDEXOS_NATIVEAOT_C011EC68_SURVIVOR_COUNT);
+    guideXosNativeAotC011EC67Put64("observed", observedSurvivors);
+    guideXosNativeAotC011EC67Put64("retainedBytes", c61.promotionRetainedBytes);
+    guideXosNativeAotC011EC67Put64("observations", c56.survivorObservationCount);
+    guideXosNativeAotC011EC67Put32("sentinelReadbacksValid", c56.invariantFailures == 0u ? 1u : 0u);
+    if (c56.survivorObservationCount != 0u) {
+        const guidexos_nativeaot_c011ec56_survivor_record& survivor =
+            c56.survivors[c56.survivorObservationCount - 1u];
+        guideXosNativeAotC011EC67Put64("lastInitialAddress", survivor.initialAddress);
+        guideXosNativeAotC011EC67Put64("lastCurrentAddress", survivor.currentAddress);
+        guideXosNativeAotC011EC67Put32("lastInitialGeneration", survivor.initialGeneration);
+        guideXosNativeAotC011EC67Put32("lastGeneration", survivor.generation);
+    }
+    suspendEeSerialPutString("\n");
+
+    suspendEeSerialPutString(
+        "[nativeaot-gc-short-weak-lifetime] PROMOTE marker=C011EC68-PROMOTE");
+    guideXosNativeAotC011EC67Put32("observed", c65.promotionObserved);
+    guideXosNativeAotC011EC67Put64("survivorCount", observedSurvivors);
+    guideXosNativeAotC011EC67Put64("promotedBytes", c61.promotionRetainedBytes);
+    guideXosNativeAotC011EC67Put64("promotionGenerationAllocationSize", c61.promotionGenerationAllocationSize);
+    suspendEeSerialPutString("\n");
+
+    suspendEeSerialPutString(
+        "[nativeaot-gc-short-weak-lifetime] GEN1-DEBIT marker=C011EC68-GEN1-DEBIT");
+    guideXosNativeAotC011EC67Put32("observed", c65.debitObserved);
+    guideXosNativeAotC011EC67Put64("debitBytes", c61.promotionDebitBytes);
+    guideXosNativeAotC011EC67Put64("gen1BudgetBefore", c61.promotionGen1GcNewBefore);
+    guideXosNativeAotC011EC67Put64("gen1BudgetAfter", c61.promotionGen1GcNewAfter);
+    suspendEeSerialPutString("\n");
+
+    suspendEeSerialPutString(
+        "[nativeaot-gc-short-weak-lifetime] RESTART marker=C011EC68-RESTART");
+    guideXosNativeAotC011EC67Put32("observed", c65.restartObserved);
+    suspendEeSerialPutString("\n");
+    suspendEeSerialPutString(
+        "[nativeaot-gc-short-weak-lifetime] RESUME marker=C011EC68-RESUME");
+    guideXosNativeAotC011EC67Put32("observed", c65.managedResumeObserved);
+    suspendEeSerialPutString("\n");
+
+    suspendEeSerialPutString(
+        "[nativeaot-gc-short-weak-lifetime] CANDIDATE-COUNT marker=C011EC68-CANDIDATE-COUNT");
+    guideXosNativeAotC011EC67Put64("lastNonzero", c67.lastNonzeroCandidateCount);
+    guideXosNativeAotC011EC67Put64("finalBeforeDecisive", c67.firstZeroCandidateCount);
+    guideXosNativeAotC011EC67Put64("decisive", c67.decisiveFreeBytes);
+    guideXosNativeAotC011EC67Put32("candidateTransitionObserved", c67.candidateTransitionObserved);
+    suspendEeSerialPutString(" structure=gc_heap::free_regions[basic_free_region]\n");
+
+    suspendEeSerialPutString(
+        "[nativeaot-gc-short-weak-lifetime] LAST-CANDIDATE marker=C011EC68-LAST-CANDIDATE");
+    guideXosNativeAotC011EC67Put32("observed", lastCandidate != nullptr ? 1u : 0u);
+    guideXosNativeAotC011EC67Put32("eventOrdinal", lastCandidate != nullptr ? lastCandidate->eventOrdinal : 0u);
+    guideXosNativeAotC011EC67Put64("region", lastCandidate != nullptr ? lastCandidate->region : 0u);
+    guideXosNativeAotC011EC67Put64("freeCountBefore", lastCandidate != nullptr ? lastCandidate->freeCountBefore : 0u);
+    guideXosNativeAotC011EC67Put64("freeCountAfter", lastCandidate != nullptr ? lastCandidate->freeCountAfter : 0u);
+    guideXosNativeAotC011EC67Put32("stateBefore", lastCandidate != nullptr ? lastCandidate->stateBefore : 0u);
+    guideXosNativeAotC011EC67Put32("stateAfter", lastCandidate != nullptr ? lastCandidate->stateAfter : 0u);
+    suspendEeSerialPutString(" source=region_free_list::unlink_region\n");
+
+    suspendEeSerialPutString(
+        "[nativeaot-gc-short-weak-lifetime] REGION-LIFECYCLE marker=C011EC68-REGION-LIFECYCLE");
+    guideXosNativeAotC011EC67Put64("candidateAdds", c67.candidateAddCount);
+    guideXosNativeAotC011EC67Put64("candidateRemoves", c67.candidateRemoveCount);
+    guideXosNativeAotC011EC67Put64("candidateTransfers", c67.candidateTransferCount);
+    guideXosNativeAotC011EC67Put64("regionCreates", c67.regionCreateCount);
+    guideXosNativeAotC011EC67Put64("generationTransitions", c67.regionGenerationTransitionCount);
+    guideXosNativeAotC011EC67Put64("getFreeRegion", c67.getFreeRegionCount);
+    guideXosNativeAotC011EC67Put64("getNewRegion", c67.getNewRegionCount);
+    guideXosNativeAotC011EC67Put32("gcCausedCandidateLoss", c67.gcCausedCandidateLoss);
+    guideXosNativeAotC011EC67Put32("ordinaryAllocationCausedCandidateLoss", c67.ordinaryAllocationCausedCandidateLoss);
+    guideXosNativeAotC011EC67Put32("promotionCausedCandidateLoss", c67.promotionCausedCandidateLoss);
+    suspendEeSerialPutString("\n");
+
+    suspendEeSerialPutString(
+        "[nativeaot-gc-short-weak-lifetime] CONTEXT-EXHAUST marker=C011EC68-CONTEXT-EXHAUST");
+    guideXosNativeAotC011EC67Put32("observed", c65.postContextExhaustedObserved);
+    guideXosNativeAotC011EC67Put64("requestSize", c65.postRequestSize);
+    guideXosNativeAotC011EC67Put64("activeRegion", c65.postActiveSegment);
+    suspendEeSerialPutString("\n");
+
+    suspendEeSerialPutString(
+        "[nativeaot-gc-short-weak-lifetime] GET-NEW-REGION marker=C011EC68-GET-NEW-REGION");
+    guideXosNativeAotC011EC67Put32("observed", c67.getNewRegionObserved);
+    guideXosNativeAotC011EC67Put64("candidateCount", c67.decisiveFreeBytes);
+    guideXosNativeAotC011EC67Put64("candidateHead", c67.decisiveCandidateHead);
+    guideXosNativeAotC011EC67Put32("result", c67.getNewRegionResult);
+    guideXosNativeAotC011EC67Put32("generation", c67.decisiveGeneration);
+    guideXosNativeAotC011EC67Put32("sourceBranch", c67.decisiveSourceBranch);
+    suspendEeSerialPutString(" source=gc_heap::get_new_region(0)\n");
+
+    suspendEeSerialPutString(
+        "[nativeaot-gc-short-weak-lifetime] CANDIDATE marker=C011EC68-CANDIDATE");
+    guideXosNativeAotC011EC67Put32("available", candidate ? 1u : 0u);
+    guideXosNativeAotC011EC67Put64("countAtGetNewRegion", c67.decisiveFreeBytes);
+    guideXosNativeAotC011EC67Put64("head", c67.decisiveCandidateHead);
+    guideXosNativeAotC011EC67Put32("productionDiscoverable", candidate ? 1u : 0u);
+    suspendEeSerialPutString(" structure=gc_heap::free_regions[basic_free_region]\n");
+
+    suspendEeSerialPutString(
+        "[nativeaot-gc-short-weak-lifetime] REGION-SELECTED marker=C011EC68-REGION-SELECTED");
+    guideXosNativeAotC011EC67Put32("selected", selected ? 1u : 0u);
+    guideXosNativeAotC011EC67Put64("region", c65.allocationRegion);
+    guideXosNativeAotC011EC67Put32("result", c65.allocationRegionResult);
+    guideXosNativeAotC011EC67Put32("generation", c65.allocationRegionGeneration);
+    suspendEeSerialPutString(" source=gc_heap::get_free_region->region_free_list::unlink_region_front\n");
+
+    suspendEeSerialPutString(
+        "[nativeaot-gc-short-weak-lifetime] COMMIT-FAILED marker=C011EC68-COMMIT-FAILED");
+    guideXosNativeAotC011EC67Put32("value", commitFailed);
+    guideXosNativeAotC011EC67Put32("normalRefill", normal ? 1u : 0u);
+    suspendEeSerialPutString("\n");
+
+    suspendEeSerialPutString(
+        "[nativeaot-gc-short-weak-lifetime] NORMAL-REFILL ");
+    suspendEeSerialPutString(normal ? "PASS" : "FAIL");
+    suspendEeSerialPutString(" marker=C011EC68-NORMAL-REFILL");
+    guideXosNativeAotC011EC67Put32("result", normal ? 1u : 0u);
+    guideXosNativeAotC011EC67Put32("contextExhausted", c65.postContextExhaustedObserved);
+    guideXosNativeAotC011EC67Put32("regionSelected", selected ? 1u : 0u);
+    guideXosNativeAotC011EC67Put32("commitFailed", commitFailed);
+    guideXosNativeAotC011EC67Put32("allocationCompleted", c65.postManagedAllocationCompleted);
+    suspendEeSerialPutString("\n");
+
+    suspendEeSerialPutString(
+        "[nativeaot-gc-short-weak-lifetime] OOS marker=C011EC68-OOS");
+    guideXosNativeAotC011EC67Put32("observed", c65.oosObserved);
+    guideXosNativeAotC011EC67Put32("generation", c65.postOosGeneration);
+    guideXosNativeAotC011EC67Put32("collectionReason", c65.postOosReason);
+    guideXosNativeAotC011EC67Put32("lastGcBeforeOom", c65.lastGcBeforeOom);
+    suspendEeSerialPutString("\n");
+
+    suspendEeSerialPutString(
+        "[nativeaot-gc-short-weak-lifetime] N-INITIAL marker=C011EC68-N-INITIAL");
+    guideXosNativeAotC011EC67Put32("observed", c65.nInitialObserved);
+    guideXosNativeAotC011EC67Put32("nInitial", c65.postEntryNInitial);
+    guideXosNativeAotC011EC67Put32("selectedGeneration", c65.postEntrySelectedGeneration);
+    suspendEeSerialPutString("\n");
+
+    suspendEeSerialPutString(
+        "[nativeaot-gc-short-weak-lifetime] SURVIVOR-REGION-LINK marker=C011EC68-SURVIVOR-REGION-LINK");
+    guideXosNativeAotC011EC67Put32("survivorCount", GUIDEXOS_NATIVEAOT_C011EC68_SURVIVOR_COUNT);
+    guideXosNativeAotC011EC67Put64("promotedBytes", c61.promotionRetainedBytes);
+    guideXosNativeAotC011EC67Put64("debitBytes", c61.promotionDebitBytes);
+    guideXosNativeAotC011EC67Put32("candidateLossObserved", c67.candidateTransitionObserved);
+    guideXosNativeAotC011EC67Put32("candidateAtDecisive", candidate ? 1u : 0u);
+    guideXosNativeAotC011EC67Put32("selectedAtDecisive", selected ? 1u : 0u);
+    guideXosNativeAotC011EC67Put32("normalRefillAtDecisive", normal ? 1u : 0u);
+    suspendEeSerialPutString(" source=promotion-accounting-to-region-free-list-chronology\n");
+
+    suspendEeSerialPutString(
+        "[nativeaot-gc-short-weak-lifetime] SUMMARY marker=C011EC68-SUMMARY");
+    guideXosNativeAotC011EC67Put32("anchorValid", anchor ? 1u : 0u);
+    guideXosNativeAotC011EC67Put32("regionAvailabilityAtDecisive", candidate ? 1u : 0u);
+    guideXosNativeAotC011EC67Put32("regionSelected", selected ? 1u : 0u);
+    guideXosNativeAotC011EC67Put32("normalRefill", normal ? 1u : 0u);
+    guideXosNativeAotC011EC67Put32("postDebitN0", postDebitN0 ? 1u : 0u);
+    guideXosNativeAotC011EC67Put32("c67Baseline", c67Baseline ? 1u : 0u);
+    guideXosNativeAotC011EC67Put32("invariantFailures", c67.invariantFailures + c65.invariantFailures + c62.invariantFailures + c56.invariantFailures);
+    guideXosNativeAotC011EC67Put32("sensitiveDiagnosticAllocations", c67.sensitiveDiagnosticAllocations + c65.sensitiveDiagnosticAllocations + c62.sensitiveDiagnosticAllocations);
+    guideXosNativeAotC011EC67Put32("allocatorMutation", 0u);
+    guideXosNativeAotC011EC67Put32("regionMutation", 0u);
+    guideXosNativeAotC011EC67Put32("regionListMutation", 0u);
+    guideXosNativeAotC011EC67Put32("candidateMutation", 0u);
+    guideXosNativeAotC011EC67Put32("policyMutation", 0u);
+    guideXosNativeAotC011EC67Put32("oosSuppression", 0u);
+    suspendEeSerialPutString("\n");
+
+    suspendEeSerialPutString(
+        "[nativeaot-gc-short-weak-lifetime] COMPLETE marker=C011EC68 outcome=");
+    suspendEeSerialPutString(outcome);
+    guideXosNativeAotC011EC67Put32("successLevel", level);
+    guideXosNativeAotC011EC67Put32("retainedSurvivors", GUIDEXOS_NATIVEAOT_C011EC68_SURVIVOR_COUNT);
+    guideXosNativeAotC011EC67Put32("observedSurvivors", observedSurvivors);
+    guideXosNativeAotC011EC67Put32("promotionObserved", c65.promotionObserved);
+    guideXosNativeAotC011EC67Put32("debitObserved", c65.debitObserved);
+    guideXosNativeAotC011EC67Put32("restartObserved", c65.restartObserved);
+    guideXosNativeAotC011EC67Put32("managedResumeObserved", c65.managedResumeObserved);
+    guideXosNativeAotC011EC67Put32("candidateAvailable", candidate ? 1u : 0u);
+    guideXosNativeAotC011EC67Put32("regionSelected", selected ? 1u : 0u);
+    guideXosNativeAotC011EC67Put32("normalRefill", normal ? 1u : 0u);
+    guideXosNativeAotC011EC67Put32("commitFailed", commitFailed);
+    guideXosNativeAotC011EC67Put32("fullOosPreemption", c65.oosObserved != 0u ? 1u : 0u);
+    guideXosNativeAotC011EC67Put32("requestedGeneration", c65.postGcCallGeneration);
+    guideXosNativeAotC011EC67Put32("nInitial", c65.postEntryNInitial);
+    guideXosNativeAotC011EC67Put32("invariantFailures", c67.invariantFailures + c65.invariantFailures + c62.invariantFailures + c56.invariantFailures);
+    guideXosNativeAotC011EC67Put32("sensitiveDiagnosticAllocations", c67.sensitiveDiagnosticAllocations + c65.sensitiveDiagnosticAllocations + c62.sensitiveDiagnosticAllocations);
+    guideXosNativeAotC011EC67Put32("completionObserved", 1u);
+    suspendEeSerialPutString("\n");
+}
+#endif
+
 static void guideXosNativeAotC011EC67Start() {
     guidexos_nativeaot_c011ec67_lifecycle_record& r =
         guideXosNativeAotC011EC67State();
@@ -22381,6 +22646,10 @@ static void guideXosNativeAotC011EC67Start() {
     r.noRequestedGenerationMutation = 1u;
     suspendEeSerialPutString(
         "[nativeaot-gc-short-weak-lifetime] PREFLIGHT marker=C011EC67-PREFLIGHT bounded=00000001 maxEvents=00000800 maxSnapshots=00000400 sourceAccountingOnly=00000001 allocatorMutation=00000000 regionMutation=00000000 regionListMutation=00000000 candidateMutation=00000000 policyMutation=00000000 oosSuppression=00000000 requestedGenerationMutation=00000000\n");
+#if defined(GUIDEXOS_NATIVEAOT_C011EC68_RETAINED_SURVIVOR_REGION_AVAILABILITY)
+    suspendEeSerialPutString(
+        "[nativeaot-gc-short-weak-lifetime] PREFLIGHT marker=C011EC68-PREFLIGHT bounded=00000001 baselineSurvivors=00000004 direction=decrease maxVariantSurvivors=00000004 maxEvents=00000800 maxSnapshots=00000400 sourceAccountingOnly=00000001 allocatorMutation=00000000 regionMutation=00000000 regionListMutation=00000000 candidateMutation=00000000 policyMutation=00000000 survivorFabrication=00000000 commitFailedMutation=00000000 oosSuppression=00000000 requestedGenerationMutation=00000000\n");
+#endif
 }
 
 static int guideXosNativeAotC011EC67Finish() {
@@ -22388,6 +22657,9 @@ static int guideXosNativeAotC011EC67Finish() {
         guideXosNativeAotC011EC67State();
     if (r.started == 0u) return -1;
     guideXosNativeAotC011EC67Emit();
+#if defined(GUIDEXOS_NATIVEAOT_C011EC68_RETAINED_SURVIVOR_REGION_AVAILABILITY)
+    guideXosNativeAotC011EC68Emit();
+#endif
     r.started = 0u;
     return r.invariantFailures != 0u || r.eventOverflow != 0u ||
         r.snapshotOverflow != 0u ? -1 : 0;

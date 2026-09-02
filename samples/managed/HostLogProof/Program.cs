@@ -1208,6 +1208,21 @@ public static unsafe class Program
         // gen1 promotion in the following N0 while retaining a bounded
         // ordinary tail for the next policy opportunity.
         const uint earlySurvivorCount = 16u;
+#if HOSTLOGPROOF_C011EC68
+#if HOSTLOGPROOF_C011EC68_SURVIVORS_1
+        const uint retainedSurvivorCount = 1u;
+#elif HOSTLOGPROOF_C011EC68_SURVIVORS_2
+        const uint retainedSurvivorCount = 2u;
+#elif HOSTLOGPROOF_C011EC68_SURVIVORS_3
+        const uint retainedSurvivorCount = 3u;
+#else
+        const uint retainedSurvivorCount = 4u;
+#endif
+        const uint earlySurvivorAllocationCount = earlySurvivorCount;
+#else
+        const uint retainedSurvivorCount = earlySurvivorCount;
+        const uint earlySurvivorAllocationCount = earlySurvivorCount;
+#endif
         const uint earlyTransientAllocations = 48u;
         const uint transientAllocationsPerCohort = 48u;
         // Three bounded pressure waves mirror the C57 S2 tail. They are
@@ -1285,12 +1300,12 @@ public static unsafe class Program
         _ = GuideXosNativeAotC011EC57GetOlderGenerationObserved();
 
         if (GuideXosNativeAotC011EC57CohortStarted(
-                1u, earlySurvivorCount,
-                (nint)(earlySurvivorCount * alignedSurvivorAllocationSize)) != 0)
+                1u, retainedSurvivorCount,
+                (nint)(retainedSurvivorCount * alignedSurvivorAllocationSize)) != 0)
         {
             return -1;
         }
-        for (uint offset = 0u; offset < earlySurvivorCount; offset++)
+        for (uint offset = 0u; offset < earlySurvivorAllocationCount; offset++)
         {
             uint ordinal = allocationOrdinal++;
             if (GuideXosNativeAotC011EC57BeforeAllocation(
@@ -1307,13 +1322,16 @@ public static unsafe class Program
             {
                 return -1;
             }
-            survivors[offset] = value;
-            survivorOrdinals[offset] = ordinal;
-            initialGenerations[offset] = (uint)GC.GetGeneration(value);
-            initialAddresses[offset] = objectAddress;
-            if (initialGenerations[offset] != 0u)
+            if (offset < retainedSurvivorCount)
             {
-                return -1;
+                survivors[offset] = value;
+                survivorOrdinals[offset] = ordinal;
+                initialGenerations[offset] = (uint)GC.GetGeneration(value);
+                initialAddresses[offset] = objectAddress;
+                if (initialGenerations[offset] != 0u)
+                {
+                    return -1;
+                }
             }
             GC.KeepAlive(survivors);
             GC.KeepAlive(value);
@@ -1342,7 +1360,7 @@ public static unsafe class Program
                 if (RecordC011EC57Survivors(
                         managedCollection < 0 ? 0u : (uint)managedCollection,
                         survivors, survivorOrdinals, initialGenerations,
-                        initialAddresses, earlySurvivorCount) != 0)
+                        initialAddresses, retainedSurvivorCount) != 0)
                 {
                     return -1;
                 }
@@ -1355,6 +1373,9 @@ public static unsafe class Program
             return -1;
         }
 
+        // Preserve C67's later cohort allocation schedule. C68 changes only
+        // which early references remain live when the promotion collection is
+        // reached; the later cohort still contributes its inherited objects.
         uint currentSurvivorCount = earlySurvivorCount;
         for (uint mainIndex = 0u; mainIndex < mainCohorts; mainIndex++)
         {
