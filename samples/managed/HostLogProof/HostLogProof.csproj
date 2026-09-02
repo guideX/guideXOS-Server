@@ -121,13 +121,16 @@
   <PropertyGroup Condition="'$(HostLogProofMode)' == 'PostDebitGen2OosPreemption'">
     <DefineConstants>$(DefineConstants);HOSTLOGPROOF_FIRST_COLLECTION_BOUNDARY_ALLOCATION;HOSTLOGPROOF_SHORT_WEAK_LIFETIME;HOSTLOGPROOF_C011EC37;HOSTLOGPROOF_C011EC40;HOSTLOGPROOF_C011EC41;HOSTLOGPROOF_C011EC55;HOSTLOGPROOF_C011EC57;HOSTLOGPROOF_C011EC58;HOSTLOGPROOF_C011EC61;HOSTLOGPROOF_C011EC62;HOSTLOGPROOF_C011EC64;HOSTLOGPROOF_C011EC65;HOSTLOGPROOF_C011EC57_S2;HOSTLOGPROOF_C011EC61_P2</DefineConstants>
   </PropertyGroup>
-  <PropertyGroup Condition="('$(HostLogProofMode)' == 'PostDebitNormalCondemnationEntry' or '$(HostLogProofMode)' == 'PostDebitGen2OosPreemption') and '$(HostLogProofC64Variant)' == 'W1'">
+  <PropertyGroup Condition="'$(HostLogProofMode)' == 'PostDebitNormalGen0Refill'">
+    <DefineConstants>$(DefineConstants);HOSTLOGPROOF_FIRST_COLLECTION_BOUNDARY_ALLOCATION;HOSTLOGPROOF_SHORT_WEAK_LIFETIME;HOSTLOGPROOF_C011EC37;HOSTLOGPROOF_C011EC40;HOSTLOGPROOF_C011EC41;HOSTLOGPROOF_C011EC55;HOSTLOGPROOF_C011EC57;HOSTLOGPROOF_C011EC58;HOSTLOGPROOF_C011EC61;HOSTLOGPROOF_C011EC62;HOSTLOGPROOF_C011EC64;HOSTLOGPROOF_C011EC65;HOSTLOGPROOF_C011EC66;HOSTLOGPROOF_C011EC57_S2</DefineConstants>
+  </PropertyGroup>
+  <PropertyGroup Condition="('$(HostLogProofMode)' == 'PostDebitNormalCondemnationEntry' or '$(HostLogProofMode)' == 'PostDebitGen2OosPreemption' or '$(HostLogProofMode)' == 'PostDebitNormalGen0Refill') and '$(HostLogProofC64Variant)' == 'W1'">
     <DefineConstants>$(DefineConstants);HOSTLOGPROOF_C011EC64_W1</DefineConstants>
   </PropertyGroup>
-  <PropertyGroup Condition="('$(HostLogProofMode)' == 'PostDebitNormalCondemnationEntry' or '$(HostLogProofMode)' == 'PostDebitGen2OosPreemption') and '$(HostLogProofC64Variant)' == 'W2'">
+  <PropertyGroup Condition="('$(HostLogProofMode)' == 'PostDebitNormalCondemnationEntry' or '$(HostLogProofMode)' == 'PostDebitGen2OosPreemption' or '$(HostLogProofMode)' == 'PostDebitNormalGen0Refill') and '$(HostLogProofC64Variant)' == 'W2'">
     <DefineConstants>$(DefineConstants);HOSTLOGPROOF_C011EC64_W2</DefineConstants>
   </PropertyGroup>
-  <PropertyGroup Condition="('$(HostLogProofMode)' == 'PostDebitNormalCondemnationEntry' or '$(HostLogProofMode)' == 'PostDebitGen2OosPreemption') and '$(HostLogProofC64Variant)' == 'W3'">
+  <PropertyGroup Condition="('$(HostLogProofMode)' == 'PostDebitNormalCondemnationEntry' or '$(HostLogProofMode)' == 'PostDebitGen2OosPreemption' or '$(HostLogProofMode)' == 'PostDebitNormalGen0Refill') and '$(HostLogProofC64Variant)' == 'W3'">
     <DefineConstants>$(DefineConstants);HOSTLOGPROOF_C011EC64_W3</DefineConstants>
   </PropertyGroup>
   <PropertyGroup Condition="'$(HostLogProofMode)' == 'DirectGen1BudgetCondemnation' and '$(HostLogProofC57Strategy)' == 'S1'">
@@ -174,6 +177,27 @@
   </PropertyGroup>
   <PropertyGroup Condition="'$(HostLogProofMode)' == 'PreFinalN0PromotionCycle' and '$(HostLogProofC61Strategy)' == 'P2'">
     <DefineConstants>$(DefineConstants);HOSTLOGPROOF_C011EC57_S2;HOSTLOGPROOF_C011EC61_P2</DefineConstants>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(HostLogProofMode)' == 'PostDebitNormalGen0Refill' and '$(HostLogProofC66Strategy)' == 'P1'">
+    <DefineConstants>$(DefineConstants);HOSTLOGPROOF_C011EC61_P1;HOSTLOGPROOF_C011EC66_P1</DefineConstants>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(HostLogProofMode)' == 'PostDebitNormalGen0Refill' and '$(HostLogProofC66Strategy)' == 'P2'">
+    <DefineConstants>$(DefineConstants);HOSTLOGPROOF_C011EC61_P2;HOSTLOGPROOF_C011EC66_P2</DefineConstants>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(HostLogProofMode)' == 'PostDebitNormalGen0Refill' and '$(HostLogProofC66TailAllocations)' == '192'">
+    <DefineConstants>$(DefineConstants);HOSTLOGPROOF_C011EC66_T192</DefineConstants>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(HostLogProofMode)' == 'PostDebitNormalGen0Refill' and '$(HostLogProofC66TailAllocations)' == '200'">
+    <DefineConstants>$(DefineConstants);HOSTLOGPROOF_C011EC66_T200</DefineConstants>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(HostLogProofMode)' == 'PostDebitNormalGen0Refill' and '$(HostLogProofC66TailAllocations)' == '208'">
+    <DefineConstants>$(DefineConstants);HOSTLOGPROOF_C011EC66_T208</DefineConstants>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(HostLogProofMode)' == 'PostDebitNormalGen0Refill' and '$(HostLogProofC66TailAllocations)' == '216'">
+    <DefineConstants>$(DefineConstants);HOSTLOGPROOF_C011EC66_T216</DefineConstants>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(HostLogProofMode)' == 'PostDebitNormalGen0Refill' and '$(HostLogProofC66TailAllocations)' == '224'">
+    <DefineConstants>$(DefineConstants);HOSTLOGPROOF_C011EC66_T224</DefineConstants>
   </PropertyGroup>
   <PropertyGroup Condition="'$(HostLogProofMode)' == 'PostPromotionN0RefillTopology' and '$(HostLogProofC62Strategy)' == 'R0'">
     <DefineConstants>$(DefineConstants);HOSTLOGPROOF_C011EC62_R0</DefineConstants>

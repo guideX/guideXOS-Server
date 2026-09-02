@@ -2215,6 +2215,18 @@ typedef struct guidexos_nativeaot_c011ec65_lifecycle_record {
     uint32_t postGcCallOrigin;
     uint32_t postEntryNInitial;
     uint32_t postEntrySelectedGeneration;
+    uint32_t postContextExhaustedObserved;
+    uint32_t postNormalRefillObserved;
+    uint32_t postRefillCompleted;
+    uint32_t postRefillSucceeded;
+    uint32_t postManagedAllocationCompleted;
+    uint32_t postPreemptionBeforeNormal;
+    uint32_t postNormalGeneration;
+    uint32_t postNormalCommitFailed;
+    uint32_t postNormalShortSegmentEnd;
+    uint32_t postNormalAllocationState;
+    uint32_t postNormalRegionResult;
+    uint32_t postNormalRegionBranch;
     uint32_t reserved[3];
     uintptr_t normalRequestSize;
     uintptr_t normalAllocationContext;
@@ -2243,6 +2255,10 @@ typedef struct guidexos_nativeaot_c011ec65_lifecycle_record {
     uintptr_t allocationRegionActiveSegment;
     guidexos_nativeaot_c011ec65_refill_record normalRefill;
     guidexos_nativeaot_c011ec65_refill_record postRefill;
+    guidexos_nativeaot_c011ec65_refill_record postNormalRefill;
+    uintptr_t postNormalObjectAddress;
+    uintptr_t postNormalAllocationPointerAfter;
+    uintptr_t postNormalAllocationLimitAfter;
     guidexos_nativeaot_c011ec65_event_record events[
         GUIDEXOS_NATIVEAOT_C011EC65_MAX_EVENTS];
 } guidexos_nativeaot_c011ec65_lifecycle_record;

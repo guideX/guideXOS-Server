@@ -1162,7 +1162,10 @@ public static unsafe class Program
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static int RunC011EC61PreFinalN0PromotionCycle()
     {
-#if HOSTLOGPROOF_C011EC61_P2
+#if HOSTLOGPROOF_C011EC66_P1 || HOSTLOGPROOF_C011EC61_P1
+        const uint mainCohorts = 5u;
+        const uint survivorsPerMainCohort = 8u;
+#elif HOSTLOGPROOF_C011EC66_P2 || HOSTLOGPROOF_C011EC61_P2
         const uint mainCohorts = 2u;
         const uint survivorsPerMainCohort = 16u;
 #else
@@ -1176,6 +1179,16 @@ public static unsafe class Program
         const uint postDebitTailAllocations = 224u;
 #elif HOSTLOGPROOF_C011EC64_W2
         const uint postDebitTailAllocations = 256u;
+#elif HOSTLOGPROOF_C011EC66_T192
+        const uint postDebitTailAllocations = 192u;
+#elif HOSTLOGPROOF_C011EC66_T200
+        const uint postDebitTailAllocations = 200u;
+#elif HOSTLOGPROOF_C011EC66_T208
+        const uint postDebitTailAllocations = 208u;
+#elif HOSTLOGPROOF_C011EC66_T216
+        const uint postDebitTailAllocations = 216u;
+#elif HOSTLOGPROOF_C011EC66_T224
+        const uint postDebitTailAllocations = 224u;
 #elif HOSTLOGPROOF_C011EC64_W3
         const uint postDebitTailAllocations = 320u;
 #else
