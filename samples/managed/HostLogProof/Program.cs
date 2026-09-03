@@ -1208,9 +1208,43 @@ public static unsafe class Program
         // gen1 promotion in the following N0 while retaining a bounded
         // ordinary tail for the next policy opportunity.
         const uint earlySurvivorCount = 16u;
-#if HOSTLOGPROOF_C011EC68
+#if HOSTLOGPROOF_C011EC68 || HOSTLOGPROOF_C011EC70
 #if HOSTLOGPROOF_C011EC69
         const uint retainedSurvivorCount = 16u;
+#elif HOSTLOGPROOF_C011EC70
+#if HOSTLOGPROOF_C011EC70_SURVIVORS_1
+        const uint retainedSurvivorCount = 1u;
+#elif HOSTLOGPROOF_C011EC70_SURVIVORS_2
+        const uint retainedSurvivorCount = 2u;
+#elif HOSTLOGPROOF_C011EC70_SURVIVORS_3
+        const uint retainedSurvivorCount = 3u;
+#elif HOSTLOGPROOF_C011EC70_SURVIVORS_4
+        const uint retainedSurvivorCount = 4u;
+#elif HOSTLOGPROOF_C011EC70_SURVIVORS_5
+        const uint retainedSurvivorCount = 5u;
+#elif HOSTLOGPROOF_C011EC70_SURVIVORS_6
+        const uint retainedSurvivorCount = 6u;
+#elif HOSTLOGPROOF_C011EC70_SURVIVORS_7
+        const uint retainedSurvivorCount = 7u;
+#elif HOSTLOGPROOF_C011EC70_SURVIVORS_8
+        const uint retainedSurvivorCount = 8u;
+#elif HOSTLOGPROOF_C011EC70_SURVIVORS_9
+        const uint retainedSurvivorCount = 9u;
+#elif HOSTLOGPROOF_C011EC70_SURVIVORS_10
+        const uint retainedSurvivorCount = 10u;
+#elif HOSTLOGPROOF_C011EC70_SURVIVORS_11
+        const uint retainedSurvivorCount = 11u;
+#elif HOSTLOGPROOF_C011EC70_SURVIVORS_12
+        const uint retainedSurvivorCount = 12u;
+#elif HOSTLOGPROOF_C011EC70_SURVIVORS_13
+        const uint retainedSurvivorCount = 13u;
+#elif HOSTLOGPROOF_C011EC70_SURVIVORS_14
+        const uint retainedSurvivorCount = 14u;
+#elif HOSTLOGPROOF_C011EC70_SURVIVORS_15
+        const uint retainedSurvivorCount = 15u;
+#else
+        const uint retainedSurvivorCount = 16u;
+#endif
 #else
 #if HOSTLOGPROOF_C011EC68_SURVIVORS_1
         const uint retainedSurvivorCount = 1u;
