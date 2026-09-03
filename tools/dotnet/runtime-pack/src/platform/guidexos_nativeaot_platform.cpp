@@ -17386,9 +17386,15 @@ guideXosNativeAotC011EC54BeforeAllocation(
     uint32_t ordinal, uint32_t payloadSize) {
     guidexos_nativeaot_c011ec54_lifecycle_record& r =
         g_guideXosAllocationDiagnostics.c011ec54Lifecycle;
+#if defined(GUIDEXOS_NATIVEAOT_C011EC71_PROMOTION_DECISION_LIVE_BYTE_THRESHOLD)
+    const bool payloadAllowed = payloadSize == 65536u ||
+        payloadSize == GUIDEXOS_NATIVEAOT_C011EC71_PAYLOAD_SIZE;
+#else
+    const bool payloadAllowed = payloadSize == 65536u;
+#endif
     if (r.started == 0u || ordinal >=
         GUIDEXOS_NATIVEAOT_C011EC54_MAX_ALLOCATIONS ||
-        ordinal != r.allocationCount || payloadSize != 65536u ||
+        ordinal != r.allocationCount || !payloadAllowed ||
         r.requestActive != 0u) {
         r.safeStopReason = 0xC0540007u;
         return -1;
@@ -21759,6 +21765,171 @@ static void guideXosNativeAotC011EC66Emit() {
 #endif
 
 #if defined(GUIDEXOS_NATIVEAOT_C011EC67_GEN0_REGION_AVAILABILITY)
+/* C71 keeps a deliberately small, fixed-address observer beside C67.  The
+ * callbacks are fed by the locked GC's production accounting points; they do
+ * not participate in promotion, region selection, or planner mutation. */
+#if defined(GUIDEXOS_NATIVEAOT_C011EC71_PROMOTION_DECISION_LIVE_BYTE_THRESHOLD)
+struct guidexos_nativeaot_c011ec71_state {
+    uint32_t started;
+    uint32_t markedObjectCount;
+    uint32_t markedObjectsAtDecision;
+    uint32_t syncCount;
+    uint32_t decisionCount;
+    uint32_t plannerCount;
+    uint32_t invariantFailures;
+    uint32_t condemnedGeneration;
+    uint32_t promotionDecision;
+    uint32_t thresholdGreaterOlderGeneration;
+    uint32_t promotedGreaterThreshold;
+    uint32_t settingsPromotion;
+    uint32_t plannerDecision;
+    uint32_t plannerGenerationBefore;
+    uint32_t plannerGenerationAfter;
+    uint32_t plannerSurvivorRatio;
+    uint32_t plannerOldCardSurvivorRatio;
+    uint32_t firstDecisionRecorded;
+    uintptr_t markedBytes;
+    uintptr_t markedBytesAtDecision;
+    uint32_t markedObjectsAtFirstDecision;
+    uintptr_t markedBytesAtFirstDecision;
+    uintptr_t firstMarkedObject;
+    uintptr_t lastMarkedObject;
+    uintptr_t firstMarkedSize;
+    uintptr_t lastMarkedSize;
+    uintptr_t threshold;
+    uintptr_t promotedBytes;
+    uintptr_t olderGenerationSize;
+    uintptr_t firstThreshold;
+    uintptr_t firstPromotedBytes;
+    uintptr_t firstOlderGenerationSize;
+    uint32_t firstPromotionDecision;
+    uint32_t firstCondemnedGeneration;
+    uint32_t firstThresholdGreaterOlderGeneration;
+    uint32_t firstPromotedGreaterThreshold;
+    uint32_t firstSettingsPromotion;
+    uintptr_t syncRegion;
+    uintptr_t syncAllocatedBytes;
+    uintptr_t syncUsedBytes;
+    uintptr_t syncReservedBytes;
+    uintptr_t syncLiveBytes;
+    uint32_t syncGenerationBefore;
+    uint32_t syncPlanGeneration;
+    uintptr_t plannerRegion;
+    uintptr_t plannerAllocatedBytes;
+    uintptr_t plannerUsedBytes;
+    uintptr_t plannerReservedBytes;
+    uintptr_t plannerLiveBytes;
+    uintptr_t plannerRegionSize;
+};
+
+static guidexos_nativeaot_c011ec71_state g_guideXosNativeAotC011EC71 = {};
+
+static void guideXosNativeAotC011EC71Reset() {
+    unsigned char* bytes = reinterpret_cast<unsigned char*>(
+        &g_guideXosNativeAotC011EC71);
+    for (uintptr_t index = 0u;
+         index < sizeof(g_guideXosNativeAotC011EC71); ++index) {
+        bytes[index] = 0u;
+    }
+}
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC71MarkedObjectObserved(
+    uintptr_t object, uintptr_t size, uint32_t condemnedGeneration) {
+    guidexos_nativeaot_c011ec71_state& s = g_guideXosNativeAotC011EC71;
+    if (s.started == 0u) return;
+    if (s.markedObjectCount == 0xFFFFFFFFu) {
+        ++s.invariantFailures;
+        return;
+    }
+    ++s.markedObjectCount;
+    s.markedBytes += size;
+    if (s.firstMarkedObject == 0u) {
+        s.firstMarkedObject = object;
+        s.firstMarkedSize = size;
+    }
+    s.lastMarkedObject = object;
+    s.lastMarkedSize = size;
+    s.condemnedGeneration = condemnedGeneration;
+}
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC71SyncRegionObserved(
+    uintptr_t region, uintptr_t allocatedBytes, uintptr_t usedBytes,
+    uintptr_t reservedBytes, uintptr_t liveBytes,
+    uint32_t generationBefore, uint32_t planGeneration) {
+    guidexos_nativeaot_c011ec71_state& s = g_guideXosNativeAotC011EC71;
+    if (s.started == 0u) return;
+    ++s.syncCount;
+    if (s.syncCount == 1u || liveBytes >= s.syncLiveBytes) {
+        s.syncRegion = region;
+        s.syncAllocatedBytes = allocatedBytes;
+        s.syncUsedBytes = usedBytes;
+        s.syncReservedBytes = reservedBytes;
+        s.syncLiveBytes = liveBytes;
+        s.syncGenerationBefore = generationBefore;
+        s.syncPlanGeneration = planGeneration;
+    }
+}
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC71PromotionDecisionObserved(
+    uintptr_t threshold, uintptr_t promotedBytes, uintptr_t olderGenerationSize,
+    uint32_t condemnedGeneration, uint32_t decision,
+    uint32_t thresholdGreaterOlderGeneration,
+    uint32_t promotedGreaterThreshold, uint32_t settingsPromotion) {
+    guidexos_nativeaot_c011ec71_state& s = g_guideXosNativeAotC011EC71;
+    if (s.started == 0u) return;
+    ++s.decisionCount;
+    s.markedObjectsAtDecision = s.markedObjectCount;
+    s.markedBytesAtDecision = s.markedBytes;
+    s.threshold = threshold;
+    s.promotedBytes = promotedBytes;
+    s.olderGenerationSize = olderGenerationSize;
+    s.condemnedGeneration = condemnedGeneration;
+    s.promotionDecision = decision;
+    s.thresholdGreaterOlderGeneration = thresholdGreaterOlderGeneration;
+    s.promotedGreaterThreshold = promotedGreaterThreshold;
+    s.settingsPromotion = settingsPromotion;
+    if (s.firstDecisionRecorded == 0u) {
+        s.firstDecisionRecorded = 1u;
+        s.markedObjectsAtFirstDecision = s.markedObjectCount;
+        s.markedBytesAtFirstDecision = s.markedBytes;
+        s.firstThreshold = threshold;
+        s.firstPromotedBytes = promotedBytes;
+        s.firstOlderGenerationSize = olderGenerationSize;
+        s.firstPromotionDecision = decision;
+        s.firstCondemnedGeneration = condemnedGeneration;
+        s.firstThresholdGreaterOlderGeneration = thresholdGreaterOlderGeneration;
+        s.firstPromotedGreaterThreshold = promotedGreaterThreshold;
+        s.firstSettingsPromotion = settingsPromotion;
+    }
+}
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC71PlannerDecisionObserved(
+    uintptr_t region, uintptr_t allocatedBytes, uintptr_t usedBytes,
+    uintptr_t reservedBytes, uintptr_t liveBytes, uintptr_t regionSize,
+    uint32_t generationBefore, uint32_t generationAfter,
+    uint32_t survivorRatio, uint32_t oldCardSurvivorRatio,
+    uint32_t plannerDecision, uint32_t settingsPromotion) {
+    guidexos_nativeaot_c011ec71_state& s = g_guideXosNativeAotC011EC71;
+    if (s.started == 0u) return;
+    ++s.plannerCount;
+    s.plannerRegion = region;
+    s.plannerAllocatedBytes = allocatedBytes;
+    s.plannerUsedBytes = usedBytes;
+    s.plannerReservedBytes = reservedBytes;
+    s.plannerLiveBytes = liveBytes;
+    s.plannerRegionSize = regionSize;
+    s.plannerGenerationBefore = generationBefore;
+    s.plannerGenerationAfter = generationAfter;
+    s.plannerSurvivorRatio = survivorRatio;
+    s.plannerOldCardSurvivorRatio = oldCardSurvivorRatio;
+    s.plannerDecision = plannerDecision;
+    s.settingsPromotion = settingsPromotion;
+}
+#endif
 static guidexos_nativeaot_c011ec67_lifecycle_record&
 guideXosNativeAotC011EC67State() {
     return g_guideXosAllocationDiagnostics.c011ec67Lifecycle;
@@ -23236,9 +23407,162 @@ static void guideXosNativeAotC011EC70Emit()
 }
 #endif
 
+#if defined(GUIDEXOS_NATIVEAOT_C011EC71_PROMOTION_DECISION_LIVE_BYTE_THRESHOLD)
+static void guideXosNativeAotC011EC71Emit() {
+    const guidexos_nativeaot_c011ec71_state& s =
+        g_guideXosNativeAotC011EC71;
+    const guidexos_nativeaot_c011ec54_lifecycle_record& c54 =
+        g_guideXosAllocationDiagnostics.c011ec54Lifecycle;
+    const guidexos_nativeaot_c011ec62_lifecycle_record& c62 =
+        g_guideXosAllocationDiagnostics.c011ec62Lifecycle;
+    const uint32_t configured = GUIDEXOS_NATIVEAOT_C011EC71_RETAINED_COUNT;
+    const uintptr_t payloadSize = GUIDEXOS_NATIVEAOT_C011EC71_PAYLOAD_SIZE;
+    uintptr_t measuredObjectSize = 0u;
+    uintptr_t retainedLiveBytes = 0u;
+    uint32_t actualRetainedReferences = 0u;
+    uint32_t retainedObjectSizeUniform = 1u;
+    for (uint32_t index = 0u; index < configured; ++index) {
+        if (index >= c54.allocationCount ||
+            c54.allocations[index].observed == 0u) {
+            retainedObjectSizeUniform = 0u;
+            break;
+        }
+        const uintptr_t objectSize = c54.allocations[index].requestedSize;
+        if (measuredObjectSize == 0u) measuredObjectSize = objectSize;
+        if (objectSize != measuredObjectSize) retainedObjectSizeUniform = 0u;
+        retainedLiveBytes += objectSize;
+        ++actualRetainedReferences;
+    }
+    if (actualRetainedReferences == 0u) {
+        measuredObjectSize = c62.firstAllocationAlignedSize;
+    }
+    const uintptr_t requestedRetainedBytes =
+        static_cast<uintptr_t>(configured) * payloadSize;
+    uintptr_t totalRequestedPayloadBytes = 0u;
+    uintptr_t totalRequestedObjectBytes = 0u;
+    for (uint32_t index = 0u; index < c54.allocationCount; ++index) {
+        totalRequestedPayloadBytes += c54.allocations[index].requestedPayload;
+        totalRequestedObjectBytes += c54.allocations[index].requestedSize;
+    }
+
+    suspendEeSerialPutString(
+        "[nativeaot-gc-short-weak-lifetime] CONTROL marker=C71_CONTROL_LIVE_BYTE_THRESHOLD");
+    guideXosNativeAotC011EC67Put32("case", GUIDEXOS_NATIVEAOT_C011EC71_CASE);
+    guideXosNativeAotC011EC67Put32("configuredRetainedReferences", configured);
+    guideXosNativeAotC011EC67Put32("actualRetainedReferences", actualRetainedReferences);
+    guideXosNativeAotC011EC67Put64("payloadSize", payloadSize);
+    guideXosNativeAotC011EC67Put64("measuredObjectSize", measuredObjectSize);
+    guideXosNativeAotC011EC67Put64("requestedRetainedBytes", requestedRetainedBytes);
+    guideXosNativeAotC011EC67Put64("retainedLiveBytes", retainedLiveBytes);
+    guideXosNativeAotC011EC67Put32("retainedObjectSizeUniform", retainedObjectSizeUniform);
+    guideXosNativeAotC011EC67Put32("allocationCount", c54.allocationCount);
+    guideXosNativeAotC011EC67Put64("totalRequestedPayloadBytes", totalRequestedPayloadBytes);
+    guideXosNativeAotC011EC67Put64("totalRequestedObjectBytes", totalRequestedObjectBytes);
+    suspendEeSerialPutString(
+        " source=HostLogProof.C71-case-and-C011EC54-retained-ordinal-allocation-records\n");
+
+    suspendEeSerialPutString(
+        "[nativeaot-gc-short-weak-lifetime] LIVE marker=C71_RETAINED_LIVE_BYTES");
+    guideXosNativeAotC011EC67Put32("observed", actualRetainedReferences == configured ? 1u : 0u);
+    guideXosNativeAotC011EC67Put64("retainedCount", actualRetainedReferences);
+    guideXosNativeAotC011EC67Put64("objectSize", measuredObjectSize);
+    guideXosNativeAotC011EC67Put64("value", retainedLiveBytes);
+    guideXosNativeAotC011EC67Put64("requestedValue", requestedRetainedBytes);
+    suspendEeSerialPutString(
+        " source=measured-object-size*retained-reference-count; production-policy-input=survived_per_region\n");
+
+    suspendEeSerialPutString(
+        "[nativeaot-gc-short-weak-lifetime] MARKED marker=C71_MARKED_LIVE_BYTES");
+    guideXosNativeAotC011EC67Put32("observed", s.markedObjectCount != 0u ? 1u : 0u);
+    guideXosNativeAotC011EC67Put64("objectCount", s.markedObjectsAtFirstDecision);
+    guideXosNativeAotC011EC67Put64("value", s.markedBytesAtFirstDecision);
+    guideXosNativeAotC011EC67Put64("allObservedBytes", s.markedBytes);
+    guideXosNativeAotC011EC67Put64("firstObject", s.firstMarkedObject);
+    guideXosNativeAotC011EC67Put64("lastObject", s.lastMarkedObject);
+    suspendEeSerialPutString(
+        " source=gc_heap::add_to_promoted_bytes->survived_per_region\n");
+
+    suspendEeSerialPutString(
+        "[nativeaot-gc-short-weak-lifetime] DECISION marker=C71_PROMOTION_DECISION");
+    guideXosNativeAotC011EC67Put32("observed", s.decisionCount != 0u ? 1u : 0u);
+    guideXosNativeAotC011EC67Put32("count", s.decisionCount);
+    guideXosNativeAotC011EC67Put64("threshold", s.firstThreshold);
+    guideXosNativeAotC011EC67Put64("promotedBytes", s.firstPromotedBytes);
+    guideXosNativeAotC011EC67Put64("olderGenerationSize", s.firstOlderGenerationSize);
+    guideXosNativeAotC011EC67Put32("thresholdGreaterOlderGeneration", s.firstThresholdGreaterOlderGeneration);
+    guideXosNativeAotC011EC67Put32("promotedGreaterThreshold", s.firstPromotedGreaterThreshold);
+    guideXosNativeAotC011EC67Put32("decision", s.firstPromotionDecision);
+    guideXosNativeAotC011EC67Put32("condemnedGeneration", s.firstCondemnedGeneration);
+    guideXosNativeAotC011EC67Put32("settingsPromotion", s.firstSettingsPromotion);
+    guideXosNativeAotC011EC67Put64("markedBytesAtDecision", s.markedBytesAtFirstDecision);
+    guideXosNativeAotC011EC67Put64("lastThreshold", s.threshold);
+    guideXosNativeAotC011EC67Put64("lastPromotedBytes", s.promotedBytes);
+    guideXosNativeAotC011EC67Put64("lastOlderGenerationSize", s.olderGenerationSize);
+    guideXosNativeAotC011EC67Put32("lastDecision", s.promotionDecision);
+    guideXosNativeAotC011EC67Put32("lastCondemnedGeneration", s.condemnedGeneration);
+    guideXosNativeAotC011EC67Put64("lastMarkedBytesAtDecision", s.markedBytesAtDecision);
+    suspendEeSerialPutString(
+        " source=gc_heap::decide_on_promotion_surv(total_promoted_bytes,older_gen_size,threshold)\n");
+
+    suspendEeSerialPutString(
+        "[nativeaot-gc-short-weak-lifetime] SYNC marker=C71_SYNC_REGION");
+    guideXosNativeAotC011EC67Put32("observed", s.syncCount != 0u ? 1u : 0u);
+    guideXosNativeAotC011EC67Put32("count", s.syncCount);
+    guideXosNativeAotC011EC67Put64("region", s.syncRegion);
+    guideXosNativeAotC011EC67Put64("allocatedBytes", s.syncAllocatedBytes);
+    guideXosNativeAotC011EC67Put64("usedBytes", s.syncUsedBytes);
+    guideXosNativeAotC011EC67Put64("reservedBytes", s.syncReservedBytes);
+    guideXosNativeAotC011EC67Put64("liveBytes", s.syncLiveBytes);
+    guideXosNativeAotC011EC67Put32("generationBefore", s.syncGenerationBefore);
+    guideXosNativeAotC011EC67Put32("planGeneration", s.syncPlanGeneration);
+    suspendEeSerialPutString(
+        " source=gc_heap::sync_promoted_bytes->heap_segment_survived\n");
+
+    suspendEeSerialPutString(
+        "[nativeaot-gc-short-weak-lifetime] PLANNER marker=C71_PLANNER_DECISION");
+    guideXosNativeAotC011EC67Put32("observed", s.plannerCount != 0u ? 1u : 0u);
+    guideXosNativeAotC011EC67Put32("count", s.plannerCount);
+    guideXosNativeAotC011EC67Put64("region", s.plannerRegion);
+    guideXosNativeAotC011EC67Put64("allocatedBytes", s.plannerAllocatedBytes);
+    guideXosNativeAotC011EC67Put64("usedBytes", s.plannerUsedBytes);
+    guideXosNativeAotC011EC67Put64("reservedBytes", s.plannerReservedBytes);
+    guideXosNativeAotC011EC67Put64("liveBytes", s.plannerLiveBytes);
+    guideXosNativeAotC011EC67Put64("regionSize", s.plannerRegionSize);
+    guideXosNativeAotC011EC67Put32("generationBefore", s.plannerGenerationBefore);
+    guideXosNativeAotC011EC67Put32("generationAfter", s.plannerGenerationAfter);
+    guideXosNativeAotC011EC67Put32("survivorRatio", s.plannerSurvivorRatio);
+    guideXosNativeAotC011EC67Put32("oldCardSurvivorRatio", s.plannerOldCardSurvivorRatio);
+    guideXosNativeAotC011EC67Put32("decision", s.plannerDecision);
+    guideXosNativeAotC011EC67Put32("settingsPromotion", s.settingsPromotion);
+    suspendEeSerialPutString(
+        " source=gc_heap::should_sweep_in_plan;threshold=90-percent-of-basic-region\n");
+
+    suspendEeSerialPutString(
+        "[nativeaot-gc-short-weak-lifetime] FIRST-DIVERGENCE marker=C71_FIRST_DIVERGENCE");
+    guideXosNativeAotC011EC67Put32("observed", s.decisionCount != 0u ? 1u : 0u);
+    guideXosNativeAotC011EC67Put32("productionQuantityChanged", s.markedObjectCount != 0u ? 1u : 0u);
+    suspendEeSerialPutString(
+        " stage=gc_heap::add_to_promoted_bytes quantity=survived_per_region source=marked-object-size accumulation next=gc_heap::decide_on_promotion_surv\n");
+
+    suspendEeSerialPutString(
+        "[nativeaot-gc-short-weak-lifetime] COMPLETE marker=C011EC71 outcome=");
+    suspendEeSerialPutString(
+        s.decisionCount != 0u && s.markedObjectCount != 0u ? "A" : "B");
+    guideXosNativeAotC011EC67Put32("successLevel", s.invariantFailures == 0u ? 2u : 0u);
+    guideXosNativeAotC011EC67Put32("decisionObserved", s.decisionCount != 0u ? 1u : 0u);
+    guideXosNativeAotC011EC67Put32("plannerObserved", s.plannerCount != 0u ? 1u : 0u);
+    guideXosNativeAotC011EC67Put32("invariantFailures", s.invariantFailures);
+    suspendEeSerialPutString("\n");
+}
+#endif
+
 static void guideXosNativeAotC011EC67Start() {
     guidexos_nativeaot_c011ec67_lifecycle_record& r =
         guideXosNativeAotC011EC67State();
+#if defined(GUIDEXOS_NATIVEAOT_C011EC71_PROMOTION_DECISION_LIVE_BYTE_THRESHOLD)
+    guideXosNativeAotC011EC71Reset();
+    g_guideXosNativeAotC011EC71.started = 1u;
+#endif
     guideXosNativeAotC011EC67Reset(r);
     r.started = 1u;
     r.noAllocatorMutation = 1u;
@@ -23264,6 +23588,14 @@ static void guideXosNativeAotC011EC67Start() {
     guideXosNativeAotC011EC67Put32("value", GUIDEXOS_NATIVEAOT_C011EC70_SURVIVOR_COUNT);
     suspendEeSerialPutString(" sweep=16,12,8,4 adaptiveMidpoints=1 freshBootConfirmation=3 sourceAccountingOnly=00000001 allocatorMutation=00000000 regionMutation=00000000 regionListMutation=00000000 candidateMutation=00000000 policyMutation=00000000 survivorFabrication=00000000 commitFailedMutation=00000000 oosSuppression=00000000 requestedGenerationMutation=00000000\n");
 #endif
+#if defined(GUIDEXOS_NATIVEAOT_C011EC71_PROMOTION_DECISION_LIVE_BYTE_THRESHOLD)
+    suspendEeSerialPutString(
+        "[nativeaot-gc-short-weak-lifetime] PREFLIGHT marker=C011EC71-PREFLIGHT bounded=00000001 sourceLockedCommit=9d5a6a9aa463d6d10b0b0ba6d5982cc82f363dc3 configuredRetainedReferences=");
+    guideXosNativeAotC011EC67Put32("value", GUIDEXOS_NATIVEAOT_C011EC71_RETAINED_COUNT);
+    guideXosNativeAotC011EC67Put64("payloadSize", GUIDEXOS_NATIVEAOT_C011EC71_PAYLOAD_SIZE);
+    guideXosNativeAotC011EC67Put32("case", GUIDEXOS_NATIVEAOT_C011EC71_CASE);
+    suspendEeSerialPutString(" sourceAccountingOnly=00000001 allocatorMutation=00000000 policyMutation=00000000\n");
+#endif
 }
 
 static int guideXosNativeAotC011EC67Finish() {
@@ -23279,6 +23611,9 @@ static int guideXosNativeAotC011EC67Finish() {
 #endif
 #if defined(GUIDEXOS_NATIVEAOT_C011EC70_SURVIVOR_THRESHOLD_CAUSALITY)
     guideXosNativeAotC011EC70Emit();
+#endif
+#if defined(GUIDEXOS_NATIVEAOT_C011EC71_PROMOTION_DECISION_LIVE_BYTE_THRESHOLD)
+    guideXosNativeAotC011EC71Emit();
 #endif
     r.started = 0u;
     return r.invariantFailures != 0u || r.eventOverflow != 0u ||

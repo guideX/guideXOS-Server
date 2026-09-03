@@ -1263,9 +1263,65 @@ public static unsafe class Program
 #endif
         const uint earlyTransientAllocations = 48u;
         const uint transientAllocationsPerCohort = 48u;
+        const uint retainedPayloadSize =
+#if HOSTLOGPROOF_C011EC71_16BELOW
+            65504u;
+#elif HOSTLOGPROOF_C011EC71_15ABOVE
+            69888u;
+#elif HOSTLOGPROOF_C011EC71_15ADJACENTBELOW
+            69880u;
+#elif HOSTLOGPROOF_C011EC71_15MID
+            67712u;
+#elif HOSTLOGPROOF_C011EC71_15MID2
+            68800u;
+#elif HOSTLOGPROOF_C011EC71_15MID3
+            69344u;
+#elif HOSTLOGPROOF_C011EC71_15MID4
+            69072u;
+#elif HOSTLOGPROOF_C011EC71_15MID5
+            69208u;
+#elif HOSTLOGPROOF_C011EC71_15MID6
+            69272u;
+#elif HOSTLOGPROOF_C011EC71_15MID7
+            69240u;
+#elif HOSTLOGPROOF_C011EC71_15MID8
+            69224u;
+#elif HOSTLOGPROOF_C011EC71_15MID9
+            69216u;
+#else
+            payloadSize;
+#endif
         // Three bounded pressure waves mirror the C57 S2 tail. They are
         // reached only after the promotion-derived debit is observed.
         const ulong alignedSurvivorAllocationSize = 0x10018UL;
+        const ulong retainedAlignedSurvivorAllocationSize =
+#if HOSTLOGPROOF_C011EC71_16BELOW
+            0xFFF8UL;
+#elif HOSTLOGPROOF_C011EC71_15ABOVE
+            0x11118UL;
+#elif HOSTLOGPROOF_C011EC71_15ADJACENTBELOW
+            0x11110UL;
+#elif HOSTLOGPROOF_C011EC71_15MID
+            0x10898UL;
+#elif HOSTLOGPROOF_C011EC71_15MID2
+            0x10CD8UL;
+#elif HOSTLOGPROOF_C011EC71_15MID3
+            0x10EF8UL;
+#elif HOSTLOGPROOF_C011EC71_15MID4
+            0x10DE8UL;
+#elif HOSTLOGPROOF_C011EC71_15MID5
+            0x10E70UL;
+#elif HOSTLOGPROOF_C011EC71_15MID6
+            0x10EB0UL;
+#elif HOSTLOGPROOF_C011EC71_15MID7
+            0x10E90UL;
+#elif HOSTLOGPROOF_C011EC71_15MID8
+            0x10E80UL;
+#elif HOSTLOGPROOF_C011EC71_15MID9
+            0x10E78UL;
+#else
+            alignedSurvivorAllocationSize;
+#endif
         const uint maximumSurvivors = 48u;
 #if HOSTLOGPROOF_C011EC62
         uint c62Strategy =
@@ -1339,19 +1395,21 @@ public static unsafe class Program
 
         if (GuideXosNativeAotC011EC57CohortStarted(
                 1u, retainedSurvivorCount,
-                (nint)(retainedSurvivorCount * alignedSurvivorAllocationSize)) != 0)
+                (nint)(retainedSurvivorCount * retainedAlignedSurvivorAllocationSize)) != 0)
         {
             return -1;
         }
         for (uint offset = 0u; offset < earlySurvivorAllocationCount; offset++)
         {
             uint ordinal = allocationOrdinal++;
+            uint allocationPayloadSize = offset < retainedSurvivorCount
+                ? retainedPayloadSize : payloadSize;
             if (GuideXosNativeAotC011EC57BeforeAllocation(
-                    ordinal, payloadSize, offset) != 0)
+                    ordinal, allocationPayloadSize, offset) != 0)
             {
                 return -1;
             }
-            byte[] value = new byte[payloadSize];
+            byte[] value = new byte[allocationPayloadSize];
             WriteIdentifyingPattern(value, ordinal);
             nint objectAddress = Unsafe.As<byte[], nint>(ref value);
             if (GuideXosNativeAotC011EC57AfterAllocation(objectAddress) != 0 ||
