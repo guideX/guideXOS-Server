@@ -18185,7 +18185,11 @@ extern "C" void __cdecl guideXosNativeAotC011EC67RegionListMutationObserved(
     uintptr_t previousBefore, uintptr_t previousAfter,
     uintptr_t mem, uintptr_t committed, uintptr_t reserved,
     uintptr_t used, uintptr_t allocated,
-    uintptr_t freeCountBefore, uintptr_t freeCountAfter);
+    uintptr_t freeCountBefore, uintptr_t freeCountAfter,
+    uintptr_t headBefore, uintptr_t headAfter,
+    uintptr_t tailBefore, uintptr_t tailAfter,
+    uintptr_t liveBytes, uint32_t planGenerationBefore,
+    uint32_t planGenerationAfter, uint32_t sourceBranch);
 extern "C" void __cdecl guideXosNativeAotC011EC67RegionSourceObserved(
     uint32_t kind, uint32_t checkpoint, uint32_t generation, uintptr_t size,
     uintptr_t region, uintptr_t activeRegion, uintptr_t nextRegion,
@@ -21765,6 +21769,66 @@ static void guideXosNativeAotC011EC66Emit() {
 #endif
 
 #if defined(GUIDEXOS_NATIVEAOT_C011EC67_GEN0_REGION_AVAILABILITY)
+ #if defined(GUIDEXOS_NATIVEAOT_C011EC72_PROMOTION_THRESHOLD_REGION_FORMATION)
+static void guideXosNativeAotC011EC72MarkedObjectObserved(
+    uintptr_t object, uintptr_t size, uint32_t condemnedGeneration);
+static void guideXosNativeAotC011EC72PromotionDecisionObserved(
+    uintptr_t threshold, uintptr_t promotedBytes, uintptr_t olderGenerationSize,
+    uint32_t condemnedGeneration, uint32_t decision,
+    uint32_t thresholdGreaterOlderGeneration,
+    uint32_t promotedGreaterThreshold, uint32_t settingsPromotion);
+static void guideXosNativeAotC011EC72PlannerDecisionObserved(
+    uintptr_t region, uintptr_t allocatedBytes, uintptr_t usedBytes,
+    uintptr_t reservedBytes, uintptr_t liveBytes, uintptr_t regionSize,
+    uint32_t generationBefore, uint32_t generationAfter,
+    uint32_t survivorRatio, uint32_t oldCardSurvivorRatio,
+    uint32_t plannerDecision, uint32_t settingsPromotion);
+static void guideXosNativeAotC011EC72BoundaryObserved(
+    uint32_t collectionOrdinal, uint32_t restartObserved,
+    uint32_t managedResumeObserved);
+static void guideXosNativeAotC011EC72RegionListObserved(
+    uint32_t kind, uint32_t listKind, uintptr_t list, uintptr_t region,
+    uint32_t generationBefore, uint32_t generationAfter,
+    uint32_t stateBefore, uint32_t stateAfter,
+    uintptr_t nextBefore, uintptr_t nextAfter,
+    uintptr_t previousBefore, uintptr_t previousAfter,
+    uintptr_t mem, uintptr_t committed, uintptr_t reserved,
+    uintptr_t used, uintptr_t allocated,
+    uintptr_t freeCountBefore, uintptr_t freeCountAfter,
+    uintptr_t headBefore, uintptr_t headAfter,
+    uintptr_t tailBefore, uintptr_t tailAfter,
+    uintptr_t liveBytes, uint32_t planGenerationBefore,
+    uint32_t planGenerationAfter, uint32_t sourceBranch);
+static void guideXosNativeAotC011EC72RegionSourceObserved(
+    uint32_t kind, uint32_t checkpoint, uint32_t generation,
+    uintptr_t size, uintptr_t region, uintptr_t activeRegion,
+    uintptr_t nextRegion, uintptr_t freeCountBefore,
+    uintptr_t freeCountAfter, uintptr_t allocatorFreeBefore,
+    uintptr_t allocatorFreeAfter, uint32_t result, uint32_t sourceBranch);
+static void guideXosNativeAotC011EC72RegionCreateObserved(
+    uint32_t generation, uintptr_t region, uintptr_t start,
+    uintptr_t end, uintptr_t allocatorFreeBefore,
+    uintptr_t allocatorFreeAfter, uint32_t result);
+static void guideXosNativeAotC011EC72RegionCommitObserved(
+    uint32_t generation, uintptr_t region, uintptr_t committed,
+    uintptr_t reserved, uint32_t result);
+static void guideXosNativeAotC011EC72RegionGenerationObserved(
+    uintptr_t region, uint32_t generationBefore, uint32_t generationAfter);
+static void guideXosNativeAotC011EC72SnapshotObserved(
+    uint32_t checkpoint, uintptr_t activeRegion,
+    uintptr_t allocationRegion, uintptr_t nextRegion,
+    uintptr_t totalRegions, uintptr_t gen0Regions,
+    uintptr_t candidateRegions, uintptr_t candidateHead,
+    uintptr_t candidateTail, uintptr_t allocatorUsedRegions,
+    uintptr_t allocatorFreeBytes);
+static void guideXosNativeAotC011EC72ExpansionObserved(
+    uintptr_t segment, uintptr_t requestSize, uintptr_t committed,
+    uintptr_t reserved, uint32_t succeeded, uint32_t hardLimitShort);
+extern "C" void __cdecl guideXosNativeAotC011EC72SourceContextObserved(
+    uint32_t sourceBranch);
+static void guideXosNativeAotC011EC72Start();
+static int guideXosNativeAotC011EC72Finish();
+ #endif
 /* C71 keeps a deliberately small, fixed-address observer beside C67.  The
  * callbacks are fed by the locked GC's production accounting points; they do
  * not participate in promotion, region selection, or planner mutation. */
@@ -21851,6 +21915,10 @@ guideXosNativeAotC011EC71MarkedObjectObserved(
     s.lastMarkedObject = object;
     s.lastMarkedSize = size;
     s.condemnedGeneration = condemnedGeneration;
+#if defined(GUIDEXOS_NATIVEAOT_C011EC72_PROMOTION_THRESHOLD_REGION_FORMATION)
+    guideXosNativeAotC011EC72MarkedObjectObserved(
+        object, size, condemnedGeneration);
+#endif
 }
 
 extern "C" void __cdecl
@@ -21904,6 +21972,12 @@ guideXosNativeAotC011EC71PromotionDecisionObserved(
         s.firstPromotedGreaterThreshold = promotedGreaterThreshold;
         s.firstSettingsPromotion = settingsPromotion;
     }
+#if defined(GUIDEXOS_NATIVEAOT_C011EC72_PROMOTION_THRESHOLD_REGION_FORMATION)
+    guideXosNativeAotC011EC72PromotionDecisionObserved(
+        threshold, promotedBytes, olderGenerationSize, condemnedGeneration,
+        decision, thresholdGreaterOlderGeneration,
+        promotedGreaterThreshold, settingsPromotion);
+#endif
 }
 
 extern "C" void __cdecl
@@ -21928,12 +22002,891 @@ guideXosNativeAotC011EC71PlannerDecisionObserved(
     s.plannerOldCardSurvivorRatio = oldCardSurvivorRatio;
     s.plannerDecision = plannerDecision;
     s.settingsPromotion = settingsPromotion;
+#if defined(GUIDEXOS_NATIVEAOT_C011EC72_PROMOTION_THRESHOLD_REGION_FORMATION)
+    guideXosNativeAotC011EC72PlannerDecisionObserved(
+        region, allocatedBytes, usedBytes, reservedBytes, liveBytes,
+        regionSize, generationBefore, generationAfter, survivorRatio,
+        oldCardSurvivorRatio, plannerDecision, settingsPromotion);
+#endif
 }
 #endif
 static guidexos_nativeaot_c011ec67_lifecycle_record&
 guideXosNativeAotC011EC67State() {
     return g_guideXosAllocationDiagnostics.c011ec67Lifecycle;
 }
+static void guideXosNativeAotC011EC67Put32(const char* name, uint32_t value);
+static void guideXosNativeAotC011EC67Put64(const char* name, uintptr_t value);
+
+#if defined(GUIDEXOS_NATIVEAOT_C011EC72_PROMOTION_THRESHOLD_REGION_FORMATION)
+/* C72 is a bounded, allocation-free chronology layered on the existing C67
+ * production observers.  It owns no GC object and never participates in a
+ * list, planner, generation, allocator, or OOS decision. */
+enum {
+    GUIDEXOS_NATIVEAOT_C011EC72_MAX_EVENTS = 4096u,
+    GUIDEXOS_NATIVEAOT_C011EC72_MAX_REGIONS = 256u,
+    GUIDEXOS_NATIVEAOT_C011EC72_EVENT_REGION_LIST = 1u,
+    GUIDEXOS_NATIVEAOT_C011EC72_EVENT_REGION_SOURCE = 2u,
+    GUIDEXOS_NATIVEAOT_C011EC72_EVENT_REGION_CREATE = 3u,
+    GUIDEXOS_NATIVEAOT_C011EC72_EVENT_REGION_COMMIT = 4u,
+    GUIDEXOS_NATIVEAOT_C011EC72_EVENT_REGION_GENERATION = 5u,
+    GUIDEXOS_NATIVEAOT_C011EC72_EVENT_SNAPSHOT = 6u,
+    GUIDEXOS_NATIVEAOT_C011EC72_EVENT_EXPANSION = 7u,
+    GUIDEXOS_NATIVEAOT_C011EC72_EVENT_MARK = 8u,
+    GUIDEXOS_NATIVEAOT_C011EC72_EVENT_DECISION = 9u,
+    GUIDEXOS_NATIVEAOT_C011EC72_EVENT_PLANNER = 10u,
+    GUIDEXOS_NATIVEAOT_C011EC72_EVENT_BOUNDARY = 11u
+};
+
+struct guidexos_nativeaot_c011ec72_event {
+    uint32_t observed;
+    uint32_t eventOrdinal;
+    uint32_t kind;
+    uint32_t checkpoint;
+    uint32_t phase;
+    uint32_t listKind;
+    uint32_t sourceBranch;
+    uint32_t generationBefore;
+    uint32_t generationAfter;
+    uint32_t planGenerationBefore;
+    uint32_t planGenerationAfter;
+    uint32_t stateBefore;
+    uint32_t stateAfter;
+    uint32_t result;
+    uint32_t condemnedGeneration;
+    uint32_t decision;
+    uint32_t settingsPromotion;
+    uintptr_t region;
+    uintptr_t list;
+    uintptr_t mem;
+    uintptr_t committed;
+    uintptr_t reserved;
+    uintptr_t used;
+    uintptr_t allocated;
+    uintptr_t liveBytes;
+    uintptr_t freeBytes;
+    uintptr_t freeCountBefore;
+    uintptr_t freeCountAfter;
+    uintptr_t headBefore;
+    uintptr_t headAfter;
+    uintptr_t tailBefore;
+    uintptr_t tailAfter;
+    uintptr_t nextBefore;
+    uintptr_t nextAfter;
+    uintptr_t previousBefore;
+    uintptr_t previousAfter;
+    uintptr_t object;
+    uintptr_t objectSize;
+    uintptr_t threshold;
+    uintptr_t promotedBytes;
+    uintptr_t olderGenerationSize;
+    uintptr_t regionSize;
+    uintptr_t totalRegions;
+    uintptr_t gen0Regions;
+    uintptr_t candidateRegions;
+    uintptr_t candidateHead;
+    uintptr_t candidateTail;
+    uintptr_t allocatorFreeBefore;
+    uintptr_t allocatorFreeAfter;
+    uint32_t survivorRatio;
+    uint32_t oldCardSurvivorRatio;
+};
+
+struct guidexos_nativeaot_c011ec72_region {
+    uint32_t observed;
+    uint32_t basicMembership;
+    uint32_t basicMembershipAtRestart;
+    uint32_t insertionCount;
+    uint32_t removalCount;
+    uint32_t firstInsertionOrdinal;
+    uint32_t lastInsertionOrdinal;
+    uint32_t firstRemovalOrdinal;
+    uint32_t lastRemovalOrdinal;
+    uint32_t firstSourceBranch;
+    uint32_t lastSourceBranch;
+    uint32_t firstGenerationBefore;
+    uint32_t firstGenerationAfter;
+    uint32_t lastGenerationBefore;
+    uint32_t lastGenerationAfter;
+    uint32_t firstStateBefore;
+    uint32_t firstStateAfter;
+    uint32_t lastStateBefore;
+    uint32_t lastStateAfter;
+    uint32_t firstPlanGenerationBefore;
+    uint32_t firstPlanGenerationAfter;
+    uint32_t lastPlanGenerationBefore;
+    uint32_t lastPlanGenerationAfter;
+    uint32_t createOrdinal;
+    uint32_t commitOrdinal;
+    uintptr_t identity;
+    uintptr_t rangeStart;
+    uintptr_t rangeEnd;
+    uintptr_t committed;
+    uintptr_t allocated;
+    uintptr_t used;
+    uintptr_t liveBytes;
+    uintptr_t freeBytes;
+    uint32_t generationBefore;
+    uint32_t generationAfter;
+    uint32_t stateBefore;
+    uint32_t stateAfter;
+    uint32_t planGenerationBefore;
+    uint32_t planGenerationAfter;
+};
+
+struct guidexos_nativeaot_c011ec72_state {
+    uint32_t started;
+    uint32_t eventCount;
+    uint32_t eventOverflow;
+    uint32_t regionCount;
+    uint32_t regionOverflow;
+    uint32_t invariantFailures;
+    uint32_t sourceContext;
+    uint32_t firstDecisionOrdinal;
+    uint32_t firstRegionDivergenceOrdinal;
+    uint32_t restartOrdinal;
+    uint32_t managedResumeOrdinal;
+    uint32_t beforeBasicObserved;
+    uint32_t postRestartBasicObserved;
+    uint32_t postResumeBasicObserved;
+    uint32_t basicInsertions;
+    uint32_t basicRemovals;
+    uint32_t relevantGenerationTransitions;
+    uint32_t markedObjectCount;
+    uint32_t plannerCount;
+    uint32_t decisionCount;
+    uint32_t condemnedGeneration;
+    uint32_t decision;
+    uint32_t thresholdGreaterOlderGeneration;
+    uint32_t promotedGreaterThreshold;
+    uint32_t settingsPromotion;
+    uint32_t plannerDecision;
+    uint32_t plannerGenerationBefore;
+    uint32_t plannerGenerationAfter;
+    uint32_t survivorRatio;
+    uint32_t oldCardSurvivorRatio;
+    uint32_t postRestartBasicCount;
+    uint32_t postRestartLedgerCount;
+    uint32_t postResumeBasicCount;
+    uintptr_t markedBytes;
+    uintptr_t threshold;
+    uintptr_t promotedBytes;
+    uintptr_t olderGenerationSize;
+    uintptr_t plannerLiveBytes;
+    uintptr_t firstProductionQuantity;
+    uintptr_t beforeBasicCount;
+    uintptr_t lastCandidateCount;
+    uintptr_t lastCandidateRegion;
+    guidexos_nativeaot_c011ec72_event events[
+        GUIDEXOS_NATIVEAOT_C011EC72_MAX_EVENTS];
+    guidexos_nativeaot_c011ec72_region regions[
+        GUIDEXOS_NATIVEAOT_C011EC72_MAX_REGIONS];
+};
+
+static guidexos_nativeaot_c011ec72_state
+    g_guideXosNativeAotC011EC72 = {};
+
+static void guideXosNativeAotC011EC72Reset() {
+    unsigned char* bytes = reinterpret_cast<unsigned char*>(
+        &g_guideXosNativeAotC011EC72);
+    for (uintptr_t index = 0u;
+         index < sizeof(g_guideXosNativeAotC011EC72); ++index) {
+        bytes[index] = 0u;
+    }
+}
+
+static void guideXosNativeAotC011EC72Overflow(uint32_t reason) {
+    guidexos_nativeaot_c011ec72_state& s = g_guideXosNativeAotC011EC72;
+    ++s.invariantFailures;
+    if (reason == 1u) s.eventOverflow = 1u;
+    if (reason == 2u) s.regionOverflow = 1u;
+}
+
+static guidexos_nativeaot_c011ec72_event*
+guideXosNativeAotC011EC72BeginEvent(uint32_t kind, uint32_t phase) {
+    guidexos_nativeaot_c011ec72_state& s = g_guideXosNativeAotC011EC72;
+    if (s.started == 0u) return nullptr;
+    if (s.eventCount >= GUIDEXOS_NATIVEAOT_C011EC72_MAX_EVENTS) {
+        guideXosNativeAotC011EC72Overflow(1u);
+        return nullptr;
+    }
+    guidexos_nativeaot_c011ec72_event& e = s.events[s.eventCount++];
+    e = {};
+    e.observed = 1u;
+    e.eventOrdinal = s.eventCount;
+    e.kind = kind;
+    e.phase = phase;
+    return &e;
+}
+
+static guidexos_nativeaot_c011ec72_region*
+guideXosNativeAotC011EC72Region(uintptr_t identity, bool create) {
+    if (identity == 0u) return nullptr;
+    guidexos_nativeaot_c011ec72_state& s = g_guideXosNativeAotC011EC72;
+    for (uint32_t index = 0u; index < s.regionCount; ++index) {
+        if (s.regions[index].identity == identity) return &s.regions[index];
+    }
+    if (!create) return nullptr;
+    if (s.regionCount >= GUIDEXOS_NATIVEAOT_C011EC72_MAX_REGIONS) {
+        guideXosNativeAotC011EC72Overflow(2u);
+        return nullptr;
+    }
+    guidexos_nativeaot_c011ec72_region& r = s.regions[s.regionCount++];
+    r = {};
+    r.observed = 1u;
+    r.identity = identity;
+    return &r;
+}
+
+static void guideXosNativeAotC011EC72RegionListObserved(
+    uint32_t kind, uint32_t listKind, uintptr_t list, uintptr_t region,
+    uint32_t generationBefore, uint32_t generationAfter,
+    uint32_t stateBefore, uint32_t stateAfter,
+    uintptr_t nextBefore, uintptr_t nextAfter,
+    uintptr_t previousBefore, uintptr_t previousAfter,
+    uintptr_t mem, uintptr_t committed, uintptr_t reserved,
+    uintptr_t used, uintptr_t allocated,
+    uintptr_t freeCountBefore, uintptr_t freeCountAfter,
+    uintptr_t headBefore, uintptr_t headAfter,
+    uintptr_t tailBefore, uintptr_t tailAfter,
+    uintptr_t liveBytes, uint32_t planGenerationBefore,
+    uint32_t planGenerationAfter, uint32_t sourceBranch) {
+    guidexos_nativeaot_c011ec72_state& s = g_guideXosNativeAotC011EC72;
+    if (s.started == 0u) return;
+    guidexos_nativeaot_c011ec72_event* e =
+        guideXosNativeAotC011EC72BeginEvent(
+            GUIDEXOS_NATIVEAOT_C011EC72_EVENT_REGION_LIST, 0u);
+    if (e == nullptr) return;
+    e->listKind = listKind;
+    e->sourceBranch = s.sourceContext != 0u ? s.sourceContext : sourceBranch;
+    e->region = region;
+    e->list = list;
+    e->generationBefore = generationBefore;
+    e->generationAfter = generationAfter;
+    e->planGenerationBefore = planGenerationBefore;
+    e->planGenerationAfter = planGenerationAfter;
+    e->stateBefore = stateBefore;
+    e->stateAfter = stateAfter;
+    e->nextBefore = nextBefore;
+    e->nextAfter = nextAfter;
+    e->previousBefore = previousBefore;
+    e->previousAfter = previousAfter;
+    e->mem = mem;
+    e->committed = committed;
+    e->reserved = reserved;
+    e->used = used;
+    e->allocated = allocated;
+    e->liveBytes = liveBytes;
+    e->freeBytes = reserved >= (allocated > mem ? allocated : mem)
+        ? reserved - (allocated > mem ? allocated : mem) : 0u;
+    e->freeCountBefore = freeCountBefore;
+    e->freeCountAfter = freeCountAfter;
+    e->headBefore = headBefore;
+    e->headAfter = headAfter;
+    e->tailBefore = tailBefore;
+    e->tailAfter = tailAfter;
+    guidexos_nativeaot_c011ec72_region* r =
+        guideXosNativeAotC011EC72Region(region, true);
+    if (r == nullptr) return;
+    r->rangeStart = mem;
+    r->rangeEnd = reserved;
+    r->committed = committed;
+    r->allocated = allocated;
+    r->used = used;
+    r->liveBytes = liveBytes;
+    r->freeBytes = e->freeBytes;
+    r->generationBefore = generationBefore;
+    r->generationAfter = generationAfter;
+    r->stateBefore = stateBefore;
+    r->stateAfter = stateAfter;
+    r->planGenerationBefore = planGenerationBefore;
+    r->planGenerationAfter = planGenerationAfter;
+    r->lastSourceBranch = e->sourceBranch;
+    if (listKind == 0u && kind == GUIDEXOS_NATIVEAOT_C011EC67_EVENT_LIST_ADD) {
+        ++s.basicInsertions;
+        r->basicMembership = 1u;
+        ++r->insertionCount;
+        if (r->firstInsertionOrdinal == 0u) {
+            r->firstInsertionOrdinal = e->eventOrdinal;
+            r->firstSourceBranch = e->sourceBranch;
+            r->firstGenerationBefore = generationBefore;
+            r->firstGenerationAfter = generationAfter;
+            r->firstStateBefore = stateBefore;
+            r->firstStateAfter = stateAfter;
+            r->firstPlanGenerationBefore = planGenerationBefore;
+            r->firstPlanGenerationAfter = planGenerationAfter;
+        }
+        r->lastInsertionOrdinal = e->eventOrdinal;
+    } else if (listKind == 0u && kind == GUIDEXOS_NATIVEAOT_C011EC67_EVENT_LIST_REMOVE) {
+        ++s.basicRemovals;
+        r->basicMembership = 0u;
+        ++r->removalCount;
+        if (r->firstRemovalOrdinal == 0u) r->firstRemovalOrdinal = e->eventOrdinal;
+        r->lastRemovalOrdinal = e->eventOrdinal;
+    }
+    if (s.firstDecisionOrdinal != 0u && s.firstRegionDivergenceOrdinal == 0u) {
+        s.firstRegionDivergenceOrdinal = e->eventOrdinal;
+    }
+}
+
+static void guideXosNativeAotC011EC72RegionSourceObserved(
+    uint32_t kind, uint32_t checkpoint, uint32_t generation,
+    uintptr_t size, uintptr_t region, uintptr_t activeRegion,
+    uintptr_t nextRegion, uintptr_t freeCountBefore,
+    uintptr_t freeCountAfter, uintptr_t allocatorFreeBefore,
+    uintptr_t allocatorFreeAfter, uint32_t result, uint32_t sourceBranch) {
+    guidexos_nativeaot_c011ec72_state& s = g_guideXosNativeAotC011EC72;
+    if (s.started == 0u) return;
+    guidexos_nativeaot_c011ec72_event* e =
+        guideXosNativeAotC011EC72BeginEvent(
+            GUIDEXOS_NATIVEAOT_C011EC72_EVENT_REGION_SOURCE, checkpoint);
+    if (e == nullptr) return;
+    e->checkpoint = checkpoint;
+    e->sourceBranch = sourceBranch;
+    e->generationBefore = generation;
+    e->generationAfter = generation;
+    e->region = region;
+    e->mem = activeRegion;
+    e->nextAfter = nextRegion;
+    e->freeBytes = size;
+    e->freeCountBefore = freeCountBefore;
+    e->freeCountAfter = freeCountAfter;
+    e->allocatorFreeBefore = allocatorFreeBefore;
+    e->allocatorFreeAfter = allocatorFreeAfter;
+    e->result = result;
+    s.lastCandidateCount = freeCountAfter;
+    s.lastCandidateRegion = region;
+    (void)kind;
+}
+
+static void guideXosNativeAotC011EC72RegionCreateObserved(
+    uint32_t generation, uintptr_t region, uintptr_t start,
+    uintptr_t end, uintptr_t allocatorFreeBefore,
+    uintptr_t allocatorFreeAfter, uint32_t result) {
+    guidexos_nativeaot_c011ec72_state& s = g_guideXosNativeAotC011EC72;
+    if (s.started == 0u) return;
+    guidexos_nativeaot_c011ec72_event* e =
+        guideXosNativeAotC011EC72BeginEvent(
+            GUIDEXOS_NATIVEAOT_C011EC72_EVENT_REGION_CREATE, 0u);
+    if (e == nullptr) return;
+    e->sourceBranch = 5u;
+    e->generationBefore = generation;
+    e->generationAfter = generation;
+    e->region = region;
+    e->mem = start;
+    e->reserved = end;
+    e->allocatorFreeBefore = allocatorFreeBefore;
+    e->allocatorFreeAfter = allocatorFreeAfter;
+    e->result = result;
+    guidexos_nativeaot_c011ec72_region* r =
+        guideXosNativeAotC011EC72Region(region, true);
+    if (r != nullptr) {
+        r->createOrdinal = e->eventOrdinal;
+        r->rangeStart = start;
+        r->rangeEnd = end;
+        r->generationBefore = generation;
+        r->generationAfter = generation;
+    }
+}
+
+static void guideXosNativeAotC011EC72RegionCommitObserved(
+    uint32_t generation, uintptr_t region, uintptr_t committed,
+    uintptr_t reserved, uint32_t result) {
+    guidexos_nativeaot_c011ec72_state& s = g_guideXosNativeAotC011EC72;
+    if (s.started == 0u) return;
+    guidexos_nativeaot_c011ec72_event* e =
+        guideXosNativeAotC011EC72BeginEvent(
+            GUIDEXOS_NATIVEAOT_C011EC72_EVENT_REGION_COMMIT, 0u);
+    if (e == nullptr) return;
+    e->sourceBranch = 5u;
+    e->generationBefore = generation;
+    e->generationAfter = generation;
+    e->region = region;
+    e->committed = committed;
+    e->reserved = reserved;
+    e->result = result;
+    guidexos_nativeaot_c011ec72_region* r =
+        guideXosNativeAotC011EC72Region(region, true);
+    if (r != nullptr) {
+        r->commitOrdinal = e->eventOrdinal;
+        r->committed = committed;
+        r->rangeEnd = reserved;
+    }
+}
+
+static void guideXosNativeAotC011EC72RegionGenerationObserved(
+    uintptr_t region, uint32_t generationBefore, uint32_t generationAfter) {
+    guidexos_nativeaot_c011ec72_state& s = g_guideXosNativeAotC011EC72;
+    if (s.started == 0u) return;
+    guidexos_nativeaot_c011ec72_event* e =
+        guideXosNativeAotC011EC72BeginEvent(
+            GUIDEXOS_NATIVEAOT_C011EC72_EVENT_REGION_GENERATION, 0u);
+    if (e == nullptr) return;
+    e->region = region;
+    e->generationBefore = generationBefore;
+    e->generationAfter = generationAfter;
+    ++s.relevantGenerationTransitions;
+    guidexos_nativeaot_c011ec72_region* r =
+        guideXosNativeAotC011EC72Region(region, true);
+    if (r != nullptr) {
+        r->lastGenerationBefore = generationBefore;
+        r->lastGenerationAfter = generationAfter;
+        r->generationBefore = generationBefore;
+        r->generationAfter = generationAfter;
+    }
+}
+
+static void guideXosNativeAotC011EC72SnapshotObserved(
+    uint32_t checkpoint, uintptr_t activeRegion,
+    uintptr_t allocationRegion, uintptr_t nextRegion,
+    uintptr_t totalRegions, uintptr_t gen0Regions,
+    uintptr_t candidateRegions, uintptr_t candidateHead,
+    uintptr_t candidateTail, uintptr_t allocatorUsedRegions,
+    uintptr_t allocatorFreeBytes) {
+    guidexos_nativeaot_c011ec72_state& s = g_guideXosNativeAotC011EC72;
+    if (s.started == 0u) return;
+    guidexos_nativeaot_c011ec72_event* e =
+        guideXosNativeAotC011EC72BeginEvent(
+            GUIDEXOS_NATIVEAOT_C011EC72_EVENT_SNAPSHOT, checkpoint);
+    if (e == nullptr) return;
+    e->checkpoint = checkpoint;
+    e->mem = activeRegion;
+    e->committed = allocationRegion;
+    e->reserved = nextRegion;
+    e->totalRegions = totalRegions;
+    e->gen0Regions = gen0Regions;
+    e->candidateRegions = candidateRegions;
+    e->candidateHead = candidateHead;
+    e->candidateTail = candidateTail;
+    e->allocatorFreeBefore = allocatorUsedRegions;
+    e->allocatorFreeAfter = allocatorFreeBytes;
+    if (checkpoint == 3u) {
+        s.beforeBasicObserved = 1u;
+        s.beforeBasicCount = candidateRegions;
+    }
+    if (checkpoint == 7u) {
+        s.postRestartBasicObserved = 1u;
+        s.postRestartBasicCount = static_cast<uint32_t>(candidateRegions);
+        s.postRestartLedgerCount = 0u;
+        for (uint32_t index = 0u; index < s.regionCount; ++index) {
+            s.regions[index].basicMembershipAtRestart =
+                s.regions[index].basicMembership;
+            s.postRestartLedgerCount +=
+                s.regions[index].basicMembershipAtRestart;
+        }
+    }
+    s.lastCandidateCount = candidateRegions;
+    s.lastCandidateRegion = candidateHead;
+}
+
+static void guideXosNativeAotC011EC72ExpansionObserved(
+    uintptr_t segment, uintptr_t requestSize, uintptr_t committed,
+    uintptr_t reserved, uint32_t succeeded, uint32_t hardLimitShort) {
+    guidexos_nativeaot_c011ec72_state& s = g_guideXosNativeAotC011EC72;
+    if (s.started == 0u) return;
+    guidexos_nativeaot_c011ec72_event* e =
+        guideXosNativeAotC011EC72BeginEvent(
+            GUIDEXOS_NATIVEAOT_C011EC72_EVENT_EXPANSION, 0u);
+    if (e == nullptr) return;
+    e->sourceBranch = hardLimitShort != 0u ? 2u : 1u;
+    e->region = segment;
+    e->freeBytes = requestSize;
+    e->committed = committed;
+    e->reserved = reserved;
+    e->result = succeeded;
+}
+
+static void guideXosNativeAotC011EC72MarkedObjectObserved(
+    uintptr_t object, uintptr_t size, uint32_t condemnedGeneration) {
+    guidexos_nativeaot_c011ec72_state& s = g_guideXosNativeAotC011EC72;
+    if (s.started == 0u) return;
+    guidexos_nativeaot_c011ec72_event* e =
+        guideXosNativeAotC011EC72BeginEvent(
+            GUIDEXOS_NATIVEAOT_C011EC72_EVENT_MARK, 0u);
+    if (e == nullptr) return;
+    e->object = object;
+    e->objectSize = size;
+    e->condemnedGeneration = condemnedGeneration;
+    ++s.markedObjectCount;
+    s.markedBytes += size;
+}
+
+static void guideXosNativeAotC011EC72PromotionDecisionObserved(
+    uintptr_t threshold, uintptr_t promotedBytes, uintptr_t olderGenerationSize,
+    uint32_t condemnedGeneration, uint32_t decision,
+    uint32_t thresholdGreaterOlderGeneration,
+    uint32_t promotedGreaterThreshold, uint32_t settingsPromotion) {
+    guidexos_nativeaot_c011ec72_state& s = g_guideXosNativeAotC011EC72;
+    if (s.started == 0u) return;
+    guidexos_nativeaot_c011ec72_event* e =
+        guideXosNativeAotC011EC72BeginEvent(
+            GUIDEXOS_NATIVEAOT_C011EC72_EVENT_DECISION, 0u);
+    if (e == nullptr) return;
+    e->threshold = threshold;
+    e->promotedBytes = promotedBytes;
+    e->olderGenerationSize = olderGenerationSize;
+    e->condemnedGeneration = condemnedGeneration;
+    e->decision = decision;
+    e->settingsPromotion = settingsPromotion;
+    s.firstDecisionOrdinal = s.firstDecisionOrdinal == 0u
+        ? e->eventOrdinal : s.firstDecisionOrdinal;
+    ++s.decisionCount;
+    s.threshold = threshold;
+    s.promotedBytes = promotedBytes;
+    s.olderGenerationSize = olderGenerationSize;
+    s.condemnedGeneration = condemnedGeneration;
+    s.decision = decision;
+    s.thresholdGreaterOlderGeneration = thresholdGreaterOlderGeneration;
+    s.promotedGreaterThreshold = promotedGreaterThreshold;
+    s.settingsPromotion = settingsPromotion;
+    s.firstProductionQuantity = promotedBytes;
+}
+
+static void guideXosNativeAotC011EC72PlannerDecisionObserved(
+    uintptr_t region, uintptr_t allocatedBytes, uintptr_t usedBytes,
+    uintptr_t reservedBytes, uintptr_t liveBytes, uintptr_t regionSize,
+    uint32_t generationBefore, uint32_t generationAfter,
+    uint32_t survivorRatio, uint32_t oldCardSurvivorRatio,
+    uint32_t plannerDecision, uint32_t settingsPromotion) {
+    guidexos_nativeaot_c011ec72_state& s = g_guideXosNativeAotC011EC72;
+    if (s.started == 0u) return;
+    guidexos_nativeaot_c011ec72_event* e =
+        guideXosNativeAotC011EC72BeginEvent(
+            GUIDEXOS_NATIVEAOT_C011EC72_EVENT_PLANNER, 0u);
+    if (e == nullptr) return;
+    e->region = region;
+    e->allocated = allocatedBytes;
+    e->used = usedBytes;
+    e->reserved = reservedBytes;
+    e->liveBytes = liveBytes;
+    e->regionSize = regionSize;
+    e->generationBefore = generationBefore;
+    e->generationAfter = generationAfter;
+    e->survivorRatio = survivorRatio;
+    e->oldCardSurvivorRatio = oldCardSurvivorRatio;
+    e->decision = plannerDecision;
+    e->settingsPromotion = settingsPromotion;
+    ++s.plannerCount;
+    s.plannerDecision = plannerDecision;
+    s.plannerGenerationBefore = generationBefore;
+    s.plannerGenerationAfter = generationAfter;
+    s.survivorRatio = survivorRatio;
+    s.oldCardSurvivorRatio = oldCardSurvivorRatio;
+    s.plannerLiveBytes = liveBytes;
+}
+
+static void guideXosNativeAotC011EC72BoundaryObserved(
+    uint32_t collectionOrdinal, uint32_t restartObserved,
+    uint32_t managedResumeObserved) {
+    guidexos_nativeaot_c011ec72_state& s = g_guideXosNativeAotC011EC72;
+    if (s.started == 0u) return;
+    const uint32_t phase = managedResumeObserved != 0u ? 2u : 1u;
+    guidexos_nativeaot_c011ec72_event* e =
+        guideXosNativeAotC011EC72BeginEvent(
+            GUIDEXOS_NATIVEAOT_C011EC72_EVENT_BOUNDARY, phase);
+    if (e == nullptr) return;
+    e->result = restartObserved;
+    e->condemnedGeneration = collectionOrdinal;
+    if (managedResumeObserved != 0u) {
+        s.managedResumeOrdinal = e->eventOrdinal;
+        s.postResumeBasicObserved = s.postRestartBasicObserved;
+        s.postResumeBasicCount = s.postRestartBasicCount;
+    } else if (restartObserved != 0u) {
+        s.restartOrdinal = e->eventOrdinal;
+    }
+}
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC72SourceContextObserved(uint32_t sourceBranch) {
+    if (g_guideXosNativeAotC011EC72.started != 0u) {
+        g_guideXosNativeAotC011EC72.sourceContext = sourceBranch;
+    }
+}
+
+static void guideXosNativeAotC011EC72EmitEvent(
+    const guidexos_nativeaot_c011ec72_event& e) {
+    const char* marker = "EVENT marker=C72_EVENT";
+    if (e.kind == GUIDEXOS_NATIVEAOT_C011EC72_EVENT_REGION_LIST &&
+        e.listKind == 0u && e.result == 0u) {
+        marker = e.freeCountAfter < e.freeCountBefore
+            ? "BASIC-REMOVE marker=C72_BASIC_REMOVE"
+            : "BASIC-INSERT marker=C72_BASIC_INSERT";
+    } else if (e.kind == GUIDEXOS_NATIVEAOT_C011EC72_EVENT_REGION_GENERATION) {
+        marker = "REGION-GEN marker=C72_REGION_GEN";
+    } else if (e.kind == GUIDEXOS_NATIVEAOT_C011EC72_EVENT_DECISION) {
+        marker = "DECISION marker=C72_FIRST_PRODUCTION_DIVERGENCE";
+    } else if (e.kind == GUIDEXOS_NATIVEAOT_C011EC72_EVENT_PLANNER) {
+        marker = "PLANNER marker=C72_REGION_PLAN";
+    }
+    suspendEeSerialPutString(
+        "[nativeaot-gc-short-weak-lifetime] ");
+    suspendEeSerialPutString(marker);
+    guideXosNativeAotC011EC67Put32("eventOrdinal", e.eventOrdinal);
+    guideXosNativeAotC011EC67Put32("kind", e.kind);
+    guideXosNativeAotC011EC67Put32("checkpoint", e.checkpoint);
+    guideXosNativeAotC011EC67Put32("phase", e.phase);
+    guideXosNativeAotC011EC67Put32("listKind", e.listKind);
+    guideXosNativeAotC011EC67Put32("sourceBranch", e.sourceBranch);
+    guideXosNativeAotC011EC67Put64("region", e.region);
+    guideXosNativeAotC011EC67Put64("list", e.list);
+    guideXosNativeAotC011EC67Put64("mem", e.mem);
+    guideXosNativeAotC011EC67Put64("committed", e.committed);
+    guideXosNativeAotC011EC67Put64("reserved", e.reserved);
+    guideXosNativeAotC011EC67Put64("used", e.used);
+    guideXosNativeAotC011EC67Put64("allocated", e.allocated);
+    guideXosNativeAotC011EC67Put64("liveBytes", e.liveBytes);
+    guideXosNativeAotC011EC67Put64("freeBytes", e.freeBytes);
+    guideXosNativeAotC011EC67Put32("generationBefore", e.generationBefore);
+    guideXosNativeAotC011EC67Put32("generationAfter", e.generationAfter);
+    guideXosNativeAotC011EC67Put32("planGenerationBefore", e.planGenerationBefore);
+    guideXosNativeAotC011EC67Put32("planGenerationAfter", e.planGenerationAfter);
+    guideXosNativeAotC011EC67Put32("stateBefore", e.stateBefore);
+    guideXosNativeAotC011EC67Put32("stateAfter", e.stateAfter);
+    guideXosNativeAotC011EC67Put64("freeCountBefore", e.freeCountBefore);
+    guideXosNativeAotC011EC67Put64("freeCountAfter", e.freeCountAfter);
+    guideXosNativeAotC011EC67Put64("headBefore", e.headBefore);
+    guideXosNativeAotC011EC67Put64("headAfter", e.headAfter);
+    guideXosNativeAotC011EC67Put64("tailBefore", e.tailBefore);
+    guideXosNativeAotC011EC67Put64("tailAfter", e.tailAfter);
+    guideXosNativeAotC011EC67Put64("nextBefore", e.nextBefore);
+    guideXosNativeAotC011EC67Put64("nextAfter", e.nextAfter);
+    guideXosNativeAotC011EC67Put64("previousBefore", e.previousBefore);
+    guideXosNativeAotC011EC67Put64("previousAfter", e.previousAfter);
+    guideXosNativeAotC011EC67Put64("object", e.object);
+    guideXosNativeAotC011EC67Put64("objectSize", e.objectSize);
+    guideXosNativeAotC011EC67Put64("threshold", e.threshold);
+    guideXosNativeAotC011EC67Put64("promotedBytes", e.promotedBytes);
+    guideXosNativeAotC011EC67Put64("olderGenerationSize", e.olderGenerationSize);
+    guideXosNativeAotC011EC67Put32("condemnedGeneration", e.condemnedGeneration);
+    guideXosNativeAotC011EC67Put32("decision", e.decision);
+    guideXosNativeAotC011EC67Put32("settingsPromotion", e.settingsPromotion);
+    guideXosNativeAotC011EC67Put32("survivorRatio", e.survivorRatio);
+    guideXosNativeAotC011EC67Put32("oldCardSurvivorRatio", e.oldCardSurvivorRatio);
+    guideXosNativeAotC011EC67Put64("regionSize", e.regionSize);
+    suspendEeSerialPutString("\n");
+}
+
+static void guideXosNativeAotC011EC72EmitRegion(
+    const guidexos_nativeaot_c011ec72_region& r) {
+    suspendEeSerialPutString(
+        "[nativeaot-gc-short-weak-lifetime] REGION-ID marker=C72_REGION_ID");
+    guideXosNativeAotC011EC67Put64("region", r.identity);
+    guideXosNativeAotC011EC67Put64("rangeStart", r.rangeStart);
+    guideXosNativeAotC011EC67Put64("rangeEnd", r.rangeEnd);
+    guideXosNativeAotC011EC67Put64("committed", r.committed);
+    guideXosNativeAotC011EC67Put64("allocated", r.allocated);
+    guideXosNativeAotC011EC67Put64("used", r.used);
+    guideXosNativeAotC011EC67Put64("liveBytes", r.liveBytes);
+    guideXosNativeAotC011EC67Put64("freeBytes", r.freeBytes);
+    guideXosNativeAotC011EC67Put32("generationBefore", r.generationBefore);
+    guideXosNativeAotC011EC67Put32("generationAfter", r.generationAfter);
+    guideXosNativeAotC011EC67Put32("stateBefore", r.stateBefore);
+    guideXosNativeAotC011EC67Put32("stateAfter", r.stateAfter);
+    guideXosNativeAotC011EC67Put32("planGenerationBefore", r.planGenerationBefore);
+    guideXosNativeAotC011EC67Put32("planGenerationAfter", r.planGenerationAfter);
+    guideXosNativeAotC011EC67Put32("basicMembership", r.basicMembership);
+    guideXosNativeAotC011EC67Put32("basicMembershipAtRestart", r.basicMembershipAtRestart);
+    guideXosNativeAotC011EC67Put32("insertionCount", r.insertionCount);
+    guideXosNativeAotC011EC67Put32("removalCount", r.removalCount);
+    guideXosNativeAotC011EC67Put32("firstInsertionOrdinal", r.firstInsertionOrdinal);
+    guideXosNativeAotC011EC67Put32("lastInsertionOrdinal", r.lastInsertionOrdinal);
+    guideXosNativeAotC011EC67Put32("firstRemovalOrdinal", r.firstRemovalOrdinal);
+    guideXosNativeAotC011EC67Put32("lastRemovalOrdinal", r.lastRemovalOrdinal);
+    guideXosNativeAotC011EC67Put32("firstSourceBranch", r.firstSourceBranch);
+    guideXosNativeAotC011EC67Put32("lastSourceBranch", r.lastSourceBranch);
+    guideXosNativeAotC011EC67Put32("createOrdinal", r.createOrdinal);
+    guideXosNativeAotC011EC67Put32("commitOrdinal", r.commitOrdinal);
+    suspendEeSerialPutString("\n");
+    suspendEeSerialPutString(
+        "[nativeaot-gc-short-weak-lifetime] REGION-PROVENANCE marker=C72_REGION_PROVENANCE");
+    guideXosNativeAotC011EC67Put64("region", r.identity);
+    guideXosNativeAotC011EC67Put32("atPostRestart", r.basicMembershipAtRestart);
+    guideXosNativeAotC011EC67Put32("sourceBranch", r.firstSourceBranch);
+    guideXosNativeAotC011EC67Put32("createObserved", r.createOrdinal != 0u ? 1u : 0u);
+    guideXosNativeAotC011EC67Put32("basicInsertions", r.insertionCount);
+    guideXosNativeAotC011EC67Put32("basicRemovals", r.removalCount);
+    suspendEeSerialPutString("\n");
+}
+
+static int guideXosNativeAotC011EC72Finish() {
+    guidexos_nativeaot_c011ec72_state& s = g_guideXosNativeAotC011EC72;
+    if (s.started == 0u) return -1;
+    const guidexos_nativeaot_c011ec67_lifecycle_record& c67 =
+        guideXosNativeAotC011EC67State();
+    const guidexos_nativeaot_c011ec65_lifecycle_record& c65 =
+        g_guideXosAllocationDiagnostics.c011ec65Lifecycle;
+    const guidexos_nativeaot_c011ec71_state& c71 =
+        g_guideXosNativeAotC011EC71;
+    const uint32_t c72InvariantFailures =
+        s.invariantFailures + c67.invariantFailures + c71.invariantFailures;
+    const bool invalid = s.eventOverflow != 0u || s.regionOverflow != 0u ||
+        s.invariantFailures != 0u || c67.invariantFailures != 0u ||
+        c67.sensitiveDiagnosticAllocations != 0u ||
+        c71.invariantFailures != 0u ||
+        c67.noAllocatorMutation == 0u || c67.noRegionMutation == 0u ||
+        c67.noRegionListMutation == 0u || c67.noCandidateMutation == 0u ||
+        c67.noPolicyMutation == 0u || c67.noOosSuppression == 0u ||
+        c67.noRequestedGenerationMutation == 0u;
+    const bool genealogy = s.firstDecisionOrdinal != 0u &&
+        s.regionCount != 0u && s.postRestartBasicObserved != 0u &&
+        s.basicInsertions != 0u;
+    const bool basicAccounting = genealogy &&
+        s.postRestartLedgerCount == s.postRestartBasicCount;
+    // C72 currently traces the first region consequence and exact ledger
+    // membership, but does not yet link a later candidate identity back to
+    // that region.  Keep the reported level at 1 until that link is proven.
+    const uint32_t level = invalid ? 0u :
+        (genealogy ? 1u : 0u);
+    const char* outcome = invalid ? "E" : (level == 3u ? "A" :
+        (level == 2u ? "B" : (level == 1u ? "C" : "D")));
+
+    suspendEeSerialPutString(
+        "[nativeaot-gc-short-weak-lifetime] CASE marker=C72_CASE");
+    guideXosNativeAotC011EC67Put32("case", GUIDEXOS_NATIVEAOT_C011EC71_CASE);
+    guideXosNativeAotC011EC67Put32("retainedCount", GUIDEXOS_NATIVEAOT_C011EC71_RETAINED_COUNT);
+    guideXosNativeAotC011EC67Put64("payloadSize", GUIDEXOS_NATIVEAOT_C011EC71_PAYLOAD_SIZE);
+    guideXosNativeAotC011EC67Put64("retainedLiveBytes",
+        static_cast<uintptr_t>(GUIDEXOS_NATIVEAOT_C011EC71_RETAINED_COUNT) *
+        static_cast<uintptr_t>(GUIDEXOS_NATIVEAOT_C011EC71_PAYLOAD_SIZE + 0x18u + 7u & ~7u));
+    suspendEeSerialPutString("\n");
+
+    suspendEeSerialPutString(
+        "[nativeaot-gc-short-weak-lifetime] FIRST-DIVERGENCE marker=C72_FIRST_PRODUCTION_DIVERGENCE");
+    guideXosNativeAotC011EC67Put32("eventOrdinal", s.firstDecisionOrdinal);
+    guideXosNativeAotC011EC67Put32("regionEventOrdinal", s.firstRegionDivergenceOrdinal);
+    guideXosNativeAotC011EC67Put64("threshold", s.threshold);
+    guideXosNativeAotC011EC67Put64("promotedBytes", s.promotedBytes);
+    guideXosNativeAotC011EC67Put64("olderGenerationSize", s.olderGenerationSize);
+    guideXosNativeAotC011EC67Put32("decision", s.decision);
+    guideXosNativeAotC011EC67Put32("condemnedGeneration", s.condemnedGeneration);
+    suspendEeSerialPutString(" source=gc_heap::decide_on_promotion_surv condition=(threshold>older_gen_size)||(promoted>threshold)\n");
+
+    suspendEeSerialPutString(
+        "[nativeaot-gc-short-weak-lifetime] PRE-BASIC marker=C72_BASIC_COUNT_BEFORE");
+    guideXosNativeAotC011EC67Put32("observed", s.beforeBasicObserved);
+    guideXosNativeAotC011EC67Put64("count", s.beforeBasicCount);
+    suspendEeSerialPutString(" structure=gc_heap::free_regions[basic_free_region]\n");
+    suspendEeSerialPutString(
+        "[nativeaot-gc-short-weak-lifetime] POST-RESTART marker=C72_POST_RESTART_BASIC_COUNT");
+    guideXosNativeAotC011EC67Put32("observed", s.postRestartBasicObserved);
+    guideXosNativeAotC011EC67Put32("count", s.postRestartBasicCount);
+    guideXosNativeAotC011EC67Put32("restartOrdinal", s.restartOrdinal);
+    suspendEeSerialPutString(" structure=gc_heap::free_regions[basic_free_region]\n");
+    suspendEeSerialPutString(
+        "[nativeaot-gc-short-weak-lifetime] POST-RESUME marker=C72_MANAGED_RESUME_BASIC_COUNT");
+    guideXosNativeAotC011EC67Put32("observed", s.postResumeBasicObserved);
+    guideXosNativeAotC011EC67Put32("count", s.postResumeBasicCount);
+    guideXosNativeAotC011EC67Put32("resumeOrdinal", s.managedResumeOrdinal);
+    suspendEeSerialPutString(" structure=gc_heap::free_regions[basic_free_region]\n");
+
+    for (uint32_t index = 0u; index < s.eventCount; ++index) {
+        guideXosNativeAotC011EC72EmitEvent(s.events[index]);
+    }
+    for (uint32_t index = 0u; index < s.regionCount; ++index) {
+        guideXosNativeAotC011EC72EmitRegion(s.regions[index]);
+    }
+
+    suspendEeSerialPutString(
+        "[nativeaot-gc-short-weak-lifetime] SUMMARY marker=C72_SUMMARY");
+    guideXosNativeAotC011EC67Put32("level", level);
+    guideXosNativeAotC011EC67Put32("outcomeCode", static_cast<uint32_t>(outcome[0]));
+    guideXosNativeAotC011EC67Put32("eventCount", s.eventCount);
+    guideXosNativeAotC011EC67Put32("regionCount", s.regionCount);
+    guideXosNativeAotC011EC67Put32("basicInsertions", s.basicInsertions);
+    guideXosNativeAotC011EC67Put32("basicRemovals", s.basicRemovals);
+    guideXosNativeAotC011EC67Put32("generationTransitions", s.relevantGenerationTransitions);
+    guideXosNativeAotC011EC67Put32("firstDecisionOrdinal", s.firstDecisionOrdinal);
+    guideXosNativeAotC011EC67Put32("firstRegionDivergenceOrdinal", s.firstRegionDivergenceOrdinal);
+    guideXosNativeAotC011EC67Put32("restartOrdinal", s.restartOrdinal);
+    guideXosNativeAotC011EC67Put32("managedResumeOrdinal", s.managedResumeOrdinal);
+    guideXosNativeAotC011EC67Put32("beforeBasicObserved", s.beforeBasicObserved);
+    guideXosNativeAotC011EC67Put32("beforeBasicCount", s.beforeBasicCount);
+    guideXosNativeAotC011EC67Put32("postRestartBasicObserved", s.postRestartBasicObserved);
+    guideXosNativeAotC011EC67Put32("postRestartBasicCount", s.postRestartBasicCount);
+    guideXosNativeAotC011EC67Put32("postRestartLedgerCount", s.postRestartLedgerCount);
+    guideXosNativeAotC011EC67Put32("postResumeBasicObserved", s.postResumeBasicObserved);
+    guideXosNativeAotC011EC67Put32("postResumeBasicCount", s.postResumeBasicCount);
+    guideXosNativeAotC011EC67Put32("promotionDecision", s.decision);
+    guideXosNativeAotC011EC67Put32("basicAccounting", basicAccounting ? 1u : 0u);
+    guideXosNativeAotC011EC67Put64("threshold", s.threshold);
+    guideXosNativeAotC011EC67Put64("promotedBytes", s.promotedBytes);
+    guideXosNativeAotC011EC67Put64("olderGenerationSize", s.olderGenerationSize);
+    guideXosNativeAotC011EC67Put64("markedBytes", s.markedBytes);
+    guideXosNativeAotC011EC67Put32("plannerCount", s.plannerCount);
+    guideXosNativeAotC011EC67Put32("plannerDecision", s.plannerDecision);
+    guideXosNativeAotC011EC67Put32("expansionAttempted", c67.expansionAttempted);
+    guideXosNativeAotC011EC67Put32("expansionSucceeded", c67.expansionSucceeded);
+    guideXosNativeAotC011EC67Put32("tailReclaimed", g_guideXosAllocationDiagnostics.c011ec54Lifecycle.segmentRecycled);
+    guideXosNativeAotC011EC67Put32("lastNonzeroCandidateCount", static_cast<uint32_t>(c67.lastNonzeroCandidateCount));
+    guideXosNativeAotC011EC67Put32("candidateAvailable", c67.decisiveCandidateHead != 0u ? 1u : 0u);
+    guideXosNativeAotC011EC67Put32("candidateSelected", c65.allocationRegionResult != 0u ? 1u : 0u);
+    guideXosNativeAotC011EC67Put32("normalRefill", c65.postNormalRefillObserved);
+    guideXosNativeAotC011EC67Put32("commitFailed", c65.postNormalCommitFailed);
+    guideXosNativeAotC011EC67Put32("contextExhausted", c65.postContextExhaustedObserved);
+    guideXosNativeAotC011EC67Put32("oosReason", c65.postOosReason);
+    guideXosNativeAotC011EC67Put32("lastGcBeforeOom", c65.lastGcBeforeOom);
+    guideXosNativeAotC011EC67Put32("requestedGeneration", c65.postGcCallGeneration);
+    guideXosNativeAotC011EC67Put32("condemnedGeneration", c71.condemnedGeneration);
+    guideXosNativeAotC011EC67Put32("eventOverflow", s.eventOverflow);
+    guideXosNativeAotC011EC67Put32("regionOverflow", s.regionOverflow);
+    guideXosNativeAotC011EC67Put32("invariantFailures", c72InvariantFailures);
+    guideXosNativeAotC011EC67Put32("c65DiagnosticInvariantFailures", c65.invariantFailures);
+    guideXosNativeAotC011EC67Put32("sensitiveDiagnosticAllocations", c67.sensitiveDiagnosticAllocations);
+    guideXosNativeAotC011EC67Put32("allocatorMutation", 0u);
+    guideXosNativeAotC011EC67Put32("rootMutation", 0u);
+    guideXosNativeAotC011EC67Put32("plannerMutation", 0u);
+    guideXosNativeAotC011EC67Put32("regionMutation", 0u);
+    guideXosNativeAotC011EC67Put32("regionListMutation", 0u);
+    guideXosNativeAotC011EC67Put32("candidateMutation", 0u);
+    guideXosNativeAotC011EC67Put32("policyMutation", 0u);
+    guideXosNativeAotC011EC67Put32("survivorFabrication", 0u);
+    guideXosNativeAotC011EC67Put32("rootFabrication", 0u);
+    guideXosNativeAotC011EC67Put32("failFast", 0u);
+    guideXosNativeAotC011EC67Put32("pageFault", 0u);
+    suspendEeSerialPutString("\n");
+
+    suspendEeSerialPutString(
+        "[nativeaot-gc-short-weak-lifetime] COMPLETE marker=C011EC72");
+    guideXosNativeAotC011EC67Put32("successLevel", level);
+    guideXosNativeAotC011EC67Put32("outcome", static_cast<uint32_t>(outcome[0]));
+    guideXosNativeAotC011EC67Put32("eventCount", s.eventCount);
+    guideXosNativeAotC011EC67Put32("maxEvents", GUIDEXOS_NATIVEAOT_C011EC72_MAX_EVENTS);
+    guideXosNativeAotC011EC67Put32("regionCount", s.regionCount);
+    guideXosNativeAotC011EC67Put32("maxRegions", GUIDEXOS_NATIVEAOT_C011EC72_MAX_REGIONS);
+    guideXosNativeAotC011EC67Put32("eventOverflow", s.eventOverflow);
+    guideXosNativeAotC011EC67Put32("regionOverflow", s.regionOverflow);
+    guideXosNativeAotC011EC67Put32("firstDecisionOrdinal", s.firstDecisionOrdinal);
+    guideXosNativeAotC011EC67Put32("firstRegionDivergenceOrdinal", s.firstRegionDivergenceOrdinal);
+    guideXosNativeAotC011EC67Put32("restartOrdinal", s.restartOrdinal);
+    guideXosNativeAotC011EC67Put32("managedResumeOrdinal", s.managedResumeOrdinal);
+    guideXosNativeAotC011EC67Put32("basicInsertions", s.basicInsertions);
+    guideXosNativeAotC011EC67Put32("basicRemovals", s.basicRemovals);
+    guideXosNativeAotC011EC67Put32("postRestartBasicCount", s.postRestartBasicCount);
+    guideXosNativeAotC011EC67Put32("postRestartLedgerCount", s.postRestartLedgerCount);
+    guideXosNativeAotC011EC67Put32("postResumeBasicCount", s.postResumeBasicCount);
+    guideXosNativeAotC011EC67Put32("promotionObserved", c65.promotionObserved);
+    guideXosNativeAotC011EC67Put32("debitObserved", c65.debitObserved);
+    guideXosNativeAotC011EC67Put32("promotionDecision", s.decision);
+    guideXosNativeAotC011EC67Put32("basicAccounting", basicAccounting ? 1u : 0u);
+    guideXosNativeAotC011EC67Put64("promotedBytes", s.promotedBytes);
+    guideXosNativeAotC011EC67Put32("candidateAvailable", c67.decisiveCandidateHead != 0u ? 1u : 0u);
+    guideXosNativeAotC011EC67Put32("candidateSelected", c65.allocationRegionResult != 0u ? 1u : 0u);
+    guideXosNativeAotC011EC67Put32("normalRefill", c65.postNormalRefillObserved);
+    guideXosNativeAotC011EC67Put32("commitFailed", c65.postNormalCommitFailed);
+    guideXosNativeAotC011EC67Put32("contextExhausted", c65.postContextExhaustedObserved);
+    guideXosNativeAotC011EC67Put32("oosReason", c65.postOosReason);
+    guideXosNativeAotC011EC67Put32("requestedGeneration", c65.postGcCallGeneration);
+    guideXosNativeAotC011EC67Put32("condemnedGeneration", c71.condemnedGeneration);
+    guideXosNativeAotC011EC67Put32("invariantFailures", c72InvariantFailures);
+    guideXosNativeAotC011EC67Put32("c65DiagnosticInvariantFailures", c65.invariantFailures);
+    guideXosNativeAotC011EC67Put32("sensitiveDiagnosticAllocations", c67.sensitiveDiagnosticAllocations);
+    guideXosNativeAotC011EC67Put32("failFast", 0u);
+    guideXosNativeAotC011EC67Put32("pageFault", 0u);
+    guideXosNativeAotC011EC67Put32("completionObserved", 1u);
+    suspendEeSerialPutString("\n");
+    s.started = 0u;
+    return invalid ? -1 : 0;
+}
+#endif
 
 static void guideXosNativeAotC011EC67Reset(
     guidexos_nativeaot_c011ec67_lifecycle_record& r) {
@@ -22054,7 +23007,11 @@ guideXosNativeAotC011EC67RegionListMutationObserved(
     uintptr_t previousBefore, uintptr_t previousAfter,
     uintptr_t mem, uintptr_t committed, uintptr_t reserved,
     uintptr_t used, uintptr_t allocated,
-    uintptr_t freeCountBefore, uintptr_t freeCountAfter) {
+    uintptr_t freeCountBefore, uintptr_t freeCountAfter,
+    uintptr_t headBefore, uintptr_t headAfter,
+    uintptr_t tailBefore, uintptr_t tailAfter,
+    uintptr_t liveBytes, uint32_t planGenerationBefore,
+    uint32_t planGenerationAfter, uint32_t sourceBranch) {
     guidexos_nativeaot_c011ec67_lifecycle_record& r =
         guideXosNativeAotC011EC67State();
     if (r.started == 0u) return;
@@ -22074,6 +23031,15 @@ guideXosNativeAotC011EC67RegionListMutationObserved(
         stateBefore, stateAfter, nextBefore, nextAfter, previousBefore,
         previousAfter, mem, committed, reserved, used, allocated,
         freeCountBefore, freeCountAfter);
+#if defined(GUIDEXOS_NATIVEAOT_C011EC72_PROMOTION_THRESHOLD_REGION_FORMATION)
+    guideXosNativeAotC011EC72RegionListObserved(
+        kind, listKind, list, region, generationBefore, generationAfter,
+        stateBefore, stateAfter, nextBefore, nextAfter, previousBefore,
+        previousAfter, mem, committed, reserved, used, allocated,
+        freeCountBefore, freeCountAfter, headBefore, headAfter,
+        tailBefore, tailAfter, liveBytes, planGenerationBefore,
+        planGenerationAfter, sourceBranch);
+#endif
 }
 
 extern "C" void __cdecl
@@ -22128,6 +23094,12 @@ guideXosNativeAotC011EC67RegionSourceObserved(
             freeCountBefore, freeCountAfter, e->eventOrdinal, checkpoint,
             kind);
     }
+#if defined(GUIDEXOS_NATIVEAOT_C011EC72_PROMOTION_THRESHOLD_REGION_FORMATION)
+    guideXosNativeAotC011EC72RegionSourceObserved(
+        kind, checkpoint, generation, size, region, activeRegion,
+        nextRegion, freeCountBefore, freeCountAfter,
+        allocatorFreeBefore, allocatorFreeAfter, result, sourceBranch);
+#endif
 }
 
 extern "C" void __cdecl
@@ -22151,6 +23123,11 @@ guideXosNativeAotC011EC67RegionCreateObserved(
     e->allocatorFreeBefore = allocatorFreeBefore;
     e->allocatorFreeAfter = allocatorFreeAfter;
     e->result = result;
+#if defined(GUIDEXOS_NATIVEAOT_C011EC72_PROMOTION_THRESHOLD_REGION_FORMATION)
+    guideXosNativeAotC011EC72RegionCreateObserved(
+        generation, region, start, end, allocatorFreeBefore,
+        allocatorFreeAfter, result);
+#endif
 }
 
 extern "C" void __cdecl
@@ -22170,6 +23147,10 @@ guideXosNativeAotC011EC67RegionCommitObserved(
     e->committed = committed;
     e->reserved = reserved;
     e->result = result;
+#if defined(GUIDEXOS_NATIVEAOT_C011EC72_PROMOTION_THRESHOLD_REGION_FORMATION)
+    guideXosNativeAotC011EC72RegionCommitObserved(
+        generation, region, committed, reserved, result);
+#endif
 }
 
 extern "C" void __cdecl
@@ -22188,6 +23169,10 @@ guideXosNativeAotC011EC67RegionGenerationObserved(
     e->region = region;
     e->generationBefore = generationBefore;
     e->generationAfter = generationAfter;
+#if defined(GUIDEXOS_NATIVEAOT_C011EC72_PROMOTION_THRESHOLD_REGION_FORMATION)
+    guideXosNativeAotC011EC72RegionGenerationObserved(
+        region, generationBefore, generationAfter);
+#endif
 }
 
 extern "C" void __cdecl
@@ -22241,6 +23226,12 @@ guideXosNativeAotC011EC67SnapshotObserved(
     if (checkpoint >= 7u && g_guideXosAllocationDiagnostics.c011ec65Lifecycle.managedResumeObserved != 0u) {
         r.postDebitRefillObserved |= checkpoint >= 8u ? 1u : 0u;
     }
+#if defined(GUIDEXOS_NATIVEAOT_C011EC72_PROMOTION_THRESHOLD_REGION_FORMATION)
+    guideXosNativeAotC011EC72SnapshotObserved(
+        checkpoint, activeRegion, allocationRegion, nextRegion,
+        totalRegions, gen0Regions, candidateRegions, candidateHead,
+        candidateTail, allocatorUsedRegions, allocatorFreeBytes);
+#endif
 }
 
 extern "C" void __cdecl
@@ -22262,6 +23253,11 @@ guideXosNativeAotC011EC67ExpansionObserved(
     e->freeBytes = requestSize;
     e->result = succeeded;
     e->sourceBranch = hardLimitShort;
+#if defined(GUIDEXOS_NATIVEAOT_C011EC72_PROMOTION_THRESHOLD_REGION_FORMATION)
+    guideXosNativeAotC011EC72ExpansionObserved(
+        segment, requestSize, committed, reserved, succeeded,
+        hardLimitShort);
+#endif
 }
 
 static void guideXosNativeAotC011EC67Put32(const char* name, uint32_t value) {
@@ -23559,6 +24555,12 @@ static void guideXosNativeAotC011EC71Emit() {
 static void guideXosNativeAotC011EC67Start() {
     guidexos_nativeaot_c011ec67_lifecycle_record& r =
         guideXosNativeAotC011EC67State();
+#if defined(GUIDEXOS_NATIVEAOT_C011EC72_PROMOTION_THRESHOLD_REGION_FORMATION)
+    guideXosNativeAotC011EC72Reset();
+    g_guideXosNativeAotC011EC72.started = 1u;
+    suspendEeSerialPutString(
+        "[nativeaot-gc-short-weak-lifetime] PREFLIGHT marker=C011EC72-PREFLIGHT bounded=00000001 maxEvents=00001000 maxRegions=00000100 sourceAccountingOnly=00000001 allocatorMutation=00000000 rootMutation=00000000 plannerMutation=00000000 regionMutation=00000000 regionListMutation=00000000 candidateMutation=00000000 policyMutation=00000000 survivorFabrication=00000000 rootFabrication=00000000 oosSuppression=00000000 requestedGenerationMutation=00000000 b02=00000000\n");
+#endif
 #if defined(GUIDEXOS_NATIVEAOT_C011EC71_PROMOTION_DECISION_LIVE_BYTE_THRESHOLD)
     guideXosNativeAotC011EC71Reset();
     g_guideXosNativeAotC011EC71.started = 1u;
@@ -23602,6 +24604,14 @@ static int guideXosNativeAotC011EC67Finish() {
     guidexos_nativeaot_c011ec67_lifecycle_record& r =
         guideXosNativeAotC011EC67State();
     if (r.started == 0u) return -1;
+#if defined(GUIDEXOS_NATIVEAOT_C011EC72_PROMOTION_THRESHOLD_REGION_FORMATION)
+    // Emit the bounded C72 report before the larger inherited C67 event dump;
+    // the QEMU serial capture has a finite tail and must retain the causal
+    // summary/completion markers even when the inherited dump is long.
+    const int c011ec72Result = guideXosNativeAotC011EC72Finish();
+#else
+    const int c011ec72Result = 0;
+#endif
     guideXosNativeAotC011EC67Emit();
 #if defined(GUIDEXOS_NATIVEAOT_C011EC68_RETAINED_SURVIVOR_REGION_AVAILABILITY) && !defined(GUIDEXOS_NATIVEAOT_C011EC69_SURVIVOR_COHORT_PROVENANCE)
     guideXosNativeAotC011EC68Emit();
@@ -23617,7 +24627,7 @@ static int guideXosNativeAotC011EC67Finish() {
 #endif
     r.started = 0u;
     return r.invariantFailures != 0u || r.eventOverflow != 0u ||
-        r.snapshotOverflow != 0u ? -1 : 0;
+        r.snapshotOverflow != 0u || c011ec72Result != 0 ? -1 : 0;
 }
 #endif
 
@@ -25076,6 +26086,10 @@ extern "C" void __cdecl
 guideXosNativeAotC011EC62RestartObserved(
     uint32_t collectionOrdinal, uint32_t restartObserved,
     uint32_t managedResumeObserved) {
+#if defined(GUIDEXOS_NATIVEAOT_C011EC72_PROMOTION_THRESHOLD_REGION_FORMATION)
+    guideXosNativeAotC011EC72BoundaryObserved(
+        collectionOrdinal, restartObserved, managedResumeObserved);
+#endif
 #if defined(GUIDEXOS_NATIVEAOT_C011EC65_POST_DEBIT_GEN2_OOS_PREEMPTION)
     guideXosNativeAotC011EC65RestartObserved(
         collectionOrdinal, restartObserved, managedResumeObserved);
