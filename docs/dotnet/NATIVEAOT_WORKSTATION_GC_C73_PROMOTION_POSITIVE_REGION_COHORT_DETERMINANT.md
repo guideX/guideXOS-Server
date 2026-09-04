@@ -121,7 +121,7 @@
 119. Final worktree cleanliness is required. [C73 report checkpoint 119]
 120. Final commit is local only. [C73 report checkpoint 120]
 121. Final commit SHA is determined at closeout. [C73 report checkpoint 121]
-122. C73 implementation SHA is recorded by the closeout commit. [C73 report checkpoint 122]
+122. C73 implementation/closeout commit SHA is d7daa8ec. [C73 report checkpoint 122]
 123. C73 report SHA is tied to the closeout tree. [C73 report checkpoint 123]
 124. Overall classification is baseline divergence. [C73 report checkpoint 124]
 125. No six-versus-one causal claim is supported. [C73 report checkpoint 125]
@@ -164,4 +164,3 @@
 162. Observer output must not mutate allocator state. [C73 report checkpoint 162]
 163. Observer output must not change production control flow. [C73 report checkpoint 163]
 164. QEMU is single-vCPU TCG. [C73 report checkpoint 164]
-
