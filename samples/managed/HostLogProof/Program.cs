@@ -1264,8 +1264,14 @@ public static unsafe class Program
         const uint earlyTransientAllocations = 48u;
         const uint transientAllocationsPerCohort = 48u;
         const uint retainedPayloadSize =
-#if HOSTLOGPROOF_C011EC71_16BELOW
+#if HOSTLOGPROOF_C011EC73_16BELOW || HOSTLOGPROOF_C011EC71_16BELOW
             65504u;
+#elif HOSTLOGPROOF_C011EC73_15MATCHLOW
+            69904u;
+#elif HOSTLOGPROOF_C011EC73_15MATCHHIGH
+            69912u;
+#elif HOSTLOGPROOF_C011EC73_15BASELINE
+            69224u;
 #elif HOSTLOGPROOF_C011EC71_15ABOVE
             69888u;
 #elif HOSTLOGPROOF_C011EC71_15ADJACENTBELOW
@@ -1295,8 +1301,14 @@ public static unsafe class Program
         // reached only after the promotion-derived debit is observed.
         const ulong alignedSurvivorAllocationSize = 0x10018UL;
         const ulong retainedAlignedSurvivorAllocationSize =
-#if HOSTLOGPROOF_C011EC71_16BELOW
+#if HOSTLOGPROOF_C011EC73_16BELOW || HOSTLOGPROOF_C011EC71_16BELOW
             0xFFF8UL;
+#elif HOSTLOGPROOF_C011EC73_15MATCHLOW
+            0x11128UL;
+#elif HOSTLOGPROOF_C011EC73_15MATCHHIGH
+            0x11130UL;
+#elif HOSTLOGPROOF_C011EC73_15BASELINE
+            0x10E80UL;
 #elif HOSTLOGPROOF_C011EC71_15ABOVE
             0x11118UL;
 #elif HOSTLOGPROOF_C011EC71_15ADJACENTBELOW

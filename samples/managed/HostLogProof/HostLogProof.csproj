@@ -223,6 +223,9 @@
   <PropertyGroup Condition="'$(HostLogProofMode)' == 'PromotionDecisionLiveByteThreshold'">
     <DefineConstants>$(DefineConstants);HOSTLOGPROOF_FIRST_COLLECTION_BOUNDARY_ALLOCATION;HOSTLOGPROOF_SHORT_WEAK_LIFETIME;HOSTLOGPROOF_C011EC37;HOSTLOGPROOF_C011EC40;HOSTLOGPROOF_C011EC41;HOSTLOGPROOF_C011EC55;HOSTLOGPROOF_C011EC57;HOSTLOGPROOF_C011EC58;HOSTLOGPROOF_C011EC61;HOSTLOGPROOF_C011EC62;HOSTLOGPROOF_C011EC64;HOSTLOGPROOF_C011EC65;HOSTLOGPROOF_C011EC66;HOSTLOGPROOF_C011EC67;HOSTLOGPROOF_C011EC68;HOSTLOGPROOF_C011EC70;HOSTLOGPROOF_C011EC71;HOSTLOGPROOF_C011EC57_S2;HOSTLOGPROOF_C011EC61_P2;HOSTLOGPROOF_C011EC64_W3;HOSTLOGPROOF_C011EC66_P2</DefineConstants>
   </PropertyGroup>
+  <PropertyGroup Condition="'$(HostLogProofMode)' == 'PromotionPositiveRegionCohort'">
+    <DefineConstants>$(DefineConstants);HOSTLOGPROOF_FIRST_COLLECTION_BOUNDARY_ALLOCATION;HOSTLOGPROOF_SHORT_WEAK_LIFETIME;HOSTLOGPROOF_C011EC37;HOSTLOGPROOF_C011EC40;HOSTLOGPROOF_C011EC41;HOSTLOGPROOF_C011EC55;HOSTLOGPROOF_C011EC57;HOSTLOGPROOF_C011EC58;HOSTLOGPROOF_C011EC61;HOSTLOGPROOF_C011EC62;HOSTLOGPROOF_C011EC64;HOSTLOGPROOF_C011EC65;HOSTLOGPROOF_C011EC66;HOSTLOGPROOF_C011EC67;HOSTLOGPROOF_C011EC68;HOSTLOGPROOF_C011EC70;HOSTLOGPROOF_C011EC57_S2;HOSTLOGPROOF_C011EC61_P2;HOSTLOGPROOF_C011EC64_W3;HOSTLOGPROOF_C011EC66_P2;HOSTLOGPROOF_C011EC66_T216</DefineConstants>
+  </PropertyGroup>
   <PropertyGroup Condition="'$(HostLogProofMode)' == 'PromotionDecisionLiveByteThreshold' and '$(HostLogProofC71Case)' == 'baseline16'">
     <DefineConstants>$(DefineConstants);HOSTLOGPROOF_C011EC71_BASELINE16;HOSTLOGPROOF_C011EC70_SURVIVORS_16</DefineConstants>
   </PropertyGroup>
@@ -264,6 +267,21 @@
   </PropertyGroup>
   <PropertyGroup Condition="'$(HostLogProofMode)' == 'PromotionDecisionLiveByteThreshold' and '$(HostLogProofC71Case)' == '15mid9'">
     <DefineConstants>$(DefineConstants);HOSTLOGPROOF_C011EC71_15MID9;HOSTLOGPROOF_C011EC70_SURVIVORS_15</DefineConstants>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(HostLogProofMode)' == 'PromotionPositiveRegionCohort' and '$(HostLogProofC73Case)' == 'baseline16'">
+    <DefineConstants>$(DefineConstants);HOSTLOGPROOF_C011EC70_SURVIVORS_16</DefineConstants>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(HostLogProofMode)' == 'PromotionPositiveRegionCohort' and '$(HostLogProofC73Case)' == '16below'">
+    <DefineConstants>$(DefineConstants);HOSTLOGPROOF_C011EC73_16BELOW;HOSTLOGPROOF_C011EC70_SURVIVORS_16</DefineConstants>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(HostLogProofMode)' == 'PromotionPositiveRegionCohort' and '$(HostLogProofC73Case)' == '15mid8'">
+    <DefineConstants>$(DefineConstants);HOSTLOGPROOF_C011EC73_15BASELINE;HOSTLOGPROOF_C011EC70_SURVIVORS_15</DefineConstants>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(HostLogProofMode)' == 'PromotionPositiveRegionCohort' and '$(HostLogProofC73Case)' == '15matchlow'">
+    <DefineConstants>$(DefineConstants);HOSTLOGPROOF_C011EC73_15MATCHLOW;HOSTLOGPROOF_C011EC70_SURVIVORS_15</DefineConstants>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(HostLogProofMode)' == 'PromotionPositiveRegionCohort' and '$(HostLogProofC73Case)' == '15matchhigh'">
+    <DefineConstants>$(DefineConstants);HOSTLOGPROOF_C011EC73_15MATCHHIGH;HOSTLOGPROOF_C011EC70_SURVIVORS_15</DefineConstants>
   </PropertyGroup>
   <PropertyGroup Condition="'$(HostLogProofMode)' == 'SurvivorCountThresholdCausality' and '$(HostLogProofC70RetainedSurvivors)' == '1'">
     <DefineConstants>$(DefineConstants);HOSTLOGPROOF_C011EC70_SURVIVORS_1</DefineConstants>
