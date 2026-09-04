@@ -8,6 +8,11 @@ param(
     [string]$LockedRuntimeRoot = "",
     [ValidateSet("single-thread-suspend-ee", "allocation-context-fixup-root-boundary", "first-per-thread-root-provider", "first-root-candidate-load", "first-non-null-root-callback-boundary", "first-root-callback-entry", "first-root-membership-classification", "first-root-heap-resolution", "first-root-condemned-generation-decision", "first-root-pre-mark-boundary", "first-root-first-mark-mutation", "first-root-post-queue-mark-decision", "first-root-first-non-null-old-o", "next-genuine-root-provider", "stack-provider-transition-failfast", "stack-provider-code-manager-registration", "stack-provider-transition-frame-control-pc", "stack-provider-unwind-gc-info", "stack-provider-unwind-caller-frame", "stack-provider-native-transition-continuation", "stack-provider-native-caller-provenance", "stack-provider-native-kernel-entry-boundary", "stack-provider-native-kernel-stack-completion", "post-root-queue-mark-processing", "mark-queue-closure", "post-mark-short-weak-handle", "short-weak-handle-operation", "short-weak-live-handle", "short-weak-dead-handle", "short-weak-lifetime-transition", "relocation-root-update", "relocated-handle-update", "lifetime-transition-complete", "second-collection-completion", "dead-object-reclamation", "collection-plan-mode-provenance-c37", "collection-plan-mode-provenance-c38", "compaction-reclamation", "post-gc-allocator-provenance", "post-gc-reclaimed-gen1-lifecycle", "reclaimed-gen1-natural-reuse", "reclaimed-gen1-ephemeral-transition", "reclaimed-gen1-natural-older-generation-transition", "natural-gen1-condemnation-policy-threshold", "direct-gen1-budget-condemnation", "n-initial-provenance", "last-n0-direct-gen1-window", "pre-last-n0-promotion-timing", "pre-final-n0-promotion-cycle", "post-promotion-n0-refill-topology", "post-promotion-earlier-headroom", "post-debit-normal-condemnation-entry", "post-debit-gen2-oos-preemption", "post-debit-normal-gen0-refill", "gen0-region-availability-provenance", "retained-survivor-region-availability", "survivor-cohort-provenance-reconciliation", "survivor-count-threshold-causality", "promotion-decision-live-byte-threshold", "promotion-threshold-region-formation", "promotion-positive-region-cohort", "malformed-transition-frame-provenance", "reverse-pinvoke-slot-provenance", "regdisplay-fp-handoff", "relocation-root-fault-provenance", "iterator-fp-ownership", "second-collection-continuation", "productionized-second-collection")]
     [string]$ProofMode = "single-thread-suspend-ee",
+    [ValidateSet("", "PromotionDecisionLiveByteThreshold", "PromotionPositiveRegionCohort")]
+    [string]$ManagedProofModeOverride = "",
+    [switch]$DisableC73NativeObserver,
+    [switch]$EnableC73NativeObserverForC72,
+    [switch]$EnableC71NativeObserver,
     [ValidateSet("S1", "S2", "S3")]
     [string]$C57Strategy = "S1",
     [ValidateSet("T0", "T1", "T2")]
@@ -29,12 +34,15 @@ param(
     [ValidateRange(1, 16)]
     [int]$C70RetainedSurvivors = 16,
     [ValidateSet("baseline16", "baseline15", "16below", "15above", "15adjacentbelow", "15mid", "15mid2", "15mid3", "15mid4", "15mid5", "15mid6", "15mid7", "15mid8", "15mid9", "15matchlow", "15matchhigh")]
-    [string]$C71Case = "baseline16"
+    [string]$C71Case = "baseline16",
+    [ValidateRange(1024, 65530)]
+    [int]$QemuMonitorPortBase = 44800
 )
 
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 if ($FreshBootCount -lt 1) { throw "FreshBootCount must be at least 1." }
+if ($QemuMonitorPortBase + $FreshBootCount - 1 -gt 65535) { throw "QemuMonitorPortBase plus FreshBootCount exceeds the TCP port range." }
 
 function Replace-First([string]$text, [string]$old, [string]$new) {
     $offset = $text.IndexOf($old, [System.StringComparison]::Ordinal)
@@ -204,6 +212,7 @@ $isC011EC60 = $ProofMode -eq "pre-last-n0-promotion-timing"
 $isC011EC73 = $ProofMode -eq "promotion-positive-region-cohort"
 $isC011EC72 = $ProofMode -eq "promotion-threshold-region-formation"
 $isC011EC71 = $ProofMode -eq "promotion-decision-live-byte-threshold" -or $isC011EC72
+$enableC71NativeObserver = $isC011EC71 -or $EnableC71NativeObserver
 $isC011EC70 = $ProofMode -eq "survivor-count-threshold-causality" -or $isC011EC71 -or $isC011EC73
 if ($isC011EC71) {
     $C70RetainedSurvivors = if ($C71Case -in @("baseline15", "15above", "15adjacentbelow", "15mid", "15mid2", "15mid3", "15mid4", "15mid5", "15mid6", "15mid7", "15mid8", "15mid9", "15matchlow", "15matchhigh")) { 15 } else { 16 }
@@ -354,9 +363,9 @@ $proofDefine = if ($isNextGenuineRootProvider -or $isC011EC39 -or $isC011EC55) {
     $c70Define = if ($isC011EC70) { " /DGUIDEXOS_NATIVEAOT_C011EC70_SURVIVOR_THRESHOLD_CAUSALITY /DGUIDEXOS_NATIVEAOT_C011EC70_SURVIVOR_COUNT=$C70RetainedSurvivors" } else { "" }
     $c71CaseCode = switch ($C71Case) { "baseline16" { 1 } "baseline15" { 2 } "16below" { 3 } "15above" { 4 } "15adjacentbelow" { 5 } "15mid" { 6 } "15mid2" { 7 } "15mid3" { 8 } "15mid4" { 9 } "15mid5" { 10 } "15mid6" { 11 } "15mid7" { 12 } "15mid8" { 13 } "15mid9" { 14 } "15matchlow" { 15 } "15matchhigh" { 16 } default { 0 } }
     $c71PayloadSize = switch ($C71Case) { "16below" { 65504 } "15above" { 69888 } "15adjacentbelow" { 69880 } "15mid" { 67712 } "15mid2" { 68800 } "15mid3" { 69344 } "15mid4" { 69072 } "15mid5" { 69208 } "15mid6" { 69272 } "15mid7" { 69240 } "15mid8" { 69224 } "15mid9" { 69216 } "15matchlow" { 69904 } "15matchhigh" { 69912 } default { 65536 } }
-    $c71Define = if ($isC011EC71) { " /DGUIDEXOS_NATIVEAOT_C011EC71_PROMOTION_DECISION_LIVE_BYTE_THRESHOLD /DGUIDEXOS_NATIVEAOT_C011EC71_RETAINED_COUNT=$C70RetainedSurvivors /DGUIDEXOS_NATIVEAOT_C011EC71_PAYLOAD_SIZE=$c71PayloadSize /DGUIDEXOS_NATIVEAOT_C011EC71_CASE=$c71CaseCode" } else { "" }
+    $c71Define = if ($enableC71NativeObserver) { " /DGUIDEXOS_NATIVEAOT_C011EC71_PROMOTION_DECISION_LIVE_BYTE_THRESHOLD /DGUIDEXOS_NATIVEAOT_C011EC71_RETAINED_COUNT=$C70RetainedSurvivors /DGUIDEXOS_NATIVEAOT_C011EC71_PAYLOAD_SIZE=$c71PayloadSize /DGUIDEXOS_NATIVEAOT_C011EC71_CASE=$c71CaseCode" } else { "" }
     $c72Define = if ($isC011EC72) { " /DGUIDEXOS_NATIVEAOT_C011EC72_PROMOTION_THRESHOLD_REGION_FORMATION" } else { "" }
-    $c73Define = if ($isC011EC73) { " /DGUIDEXOS_NATIVEAOT_C011EC73_PROMOTION_POSITIVE_REGION_COHORT" } else { "" }
+    $c73Define = if (($isC011EC73 -or $EnableC73NativeObserverForC72) -and -not $DisableC73NativeObserver) { " /DGUIDEXOS_NATIVEAOT_C011EC73_PROMOTION_POSITIVE_REGION_COHORT" } else { "" }
     $c66TailDefine = if ($isC011EC66 -and $C66TailAllocations -ne 320) { " /DGUIDEXOS_NATIVEAOT_C011EC66_TAIL_$C66TailAllocations" } else { "" }
     $c62StrategyDefine = if ($isC011EC62 -and -not $isC011EC64 -and $C62Strategy -eq "R1") { " /DGUIDEXOS_NATIVEAOT_C011EC62_STRATEGY_R1" } elseif ($isC011EC62 -and -not $isC011EC64 -and $C62Strategy -eq "R2") { " /DGUIDEXOS_NATIVEAOT_C011EC62_STRATEGY_R2" } else { "" }
     $firstNonNullDefine = if ($isC011EC31 -or $isC011EC32 -or $isC011EC56Instrumentation) { "" } else { " /DGUIDEXOS_NATIVEAOT_FIRST_NON_NULL_ROOT_ALLOCATION" }
@@ -436,6 +445,25 @@ function Hash-File([string]$Path) {
 
 function Log-Command([string]$Text) {
     Add-Content -LiteralPath (Join-Path $runRoot "commands.txt") -Value $Text
+}
+
+function Add-QemuChronologyEvent([System.Collections.Generic.List[object]]$Events, [Diagnostics.Stopwatch]$Clock, [string]$Name, [hashtable]$Fields = @{}) {
+    $record = [ordered]@{
+        ordinal = $Events.Count + 1
+        event = $Name
+        timestampUtc = (Get-Date).ToUniversalTime().ToString('o')
+        stopwatchTicks = $Clock.ElapsedTicks
+    }
+    foreach ($key in $Fields.Keys) { $record[$key] = $Fields[$key] }
+    $Events.Add([pscustomobject]$record) | Out-Null
+}
+
+function Get-QemuExitCode([System.Diagnostics.Process]$Process) {
+    if ($null -eq $Process) { return $null }
+    try {
+        if ($Process.HasExited) { return $Process.ExitCode }
+    } catch { }
+    return $null
 }
 
 function Invoke-LoggedCommand {
@@ -2193,7 +2221,7 @@ extern "C" void __cdecl guideXosNativeAotC011EC48ReverseConsume(uintptr_t method
         $gcWksText = (Get-Content -LiteralPath $lockedGcwksPath -Raw).Replace([string]([char]13) + [string]([char]10), [string][char]10)
         $gcCppText = (Get-Content -LiteralPath $lockedGcCppPath -Raw).Replace([string]([char]13) + [string]([char]10), [string][char]10)
         $lockedSourceNewLine = "`n"
-        if ($isC011EC71) {
+        if ($enableC71NativeObserver) {
             $c71GcDeclaration = @'
 extern "C" void __cdecl guideXosNativeAotC011EC71MarkedObjectObserved(uintptr_t object, uintptr_t size, uint32_t condemnedGeneration);
 extern "C" void __cdecl guideXosNativeAotC011EC71SyncRegionObserved(uintptr_t region, uintptr_t allocatedBytes, uintptr_t usedBytes, uintptr_t reservedBytes, uintptr_t liveBytes, uint32_t generationBefore, uint32_t planGeneration);
@@ -3426,7 +3454,7 @@ static uint32_t guideXosC011EC67RegionState(heap_segment* region)
                 $gcCppText = $gcCppText.Substring(0, $dynamicStart) + $dynamicFunction + $gcCppText.Substring($dynamicEnd)
             }
 
-            if ($isC011EC71) {
+            if ($enableC71NativeObserver) {
                 $addPromotedStart = $gcCppText.IndexOf('inline' + $lockedSourceNewLine + 'void gc_heap::add_to_promoted_bytes (uint8_t* object, size_t obj_size, int thread)')
                 $addPromotedEnd = $gcCppText.IndexOf('heap_segment* gc_heap::find_segment', $addPromotedStart)
                 if ($addPromotedStart -lt 0 -or $addPromotedEnd -le $addPromotedStart) { throw "C011EC71 could not isolate add_to_promoted_bytes." }
@@ -6452,7 +6480,7 @@ exit /b 0
     } else {
         ""
     }
-    $managedProofMode = if ($isC011EC73) { "PromotionPositiveRegionCohort" } elseif ($isC011EC71) { "PromotionDecisionLiveByteThreshold" } elseif ($isC011EC70) { "SurvivorCountThresholdCausality" } elseif ($isC011EC69) { "SurvivorCohortProvenanceReconciliation" } elseif ($isC011EC68) { "RetainedSurvivorRegionAvailability" } elseif ($isC011EC67) { "PostDebitNormalGen0Refill" } elseif ($isC011EC66) { "PostDebitNormalGen0Refill" } elseif ($isC011EC65) { "PostDebitGen2OosPreemption" } elseif ($isC011EC64) { "PostDebitNormalCondemnationEntry" } elseif ($isC011EC63) { "PostPromotionEarlierHeadroom" } elseif ($isC011EC62) { "PostPromotionN0RefillTopology" } elseif ($isC011EC61) { "PreFinalN0PromotionCycle" } elseif ($isC011EC60) { "PreLastN0PromotionTiming" } elseif ($isC011EC59) { "LastN0DirectGen1Window" } elseif ($isC011EC58) { "NInitialProvenance" } elseif ($isC011EC57) { "DirectGen1BudgetCondemnation" } elseif ($isC011EC56) { "NaturalGen1CondemnationPolicyThreshold" } elseif ($isC011EC55) { "NaturalOlderGenerationTransition" } elseif ($isC011EC54) { "ReclaimedGen1EphemeralTransition" } elseif ($isC011EC53) { "ReclaimedGen1NaturalReuse" } elseif ($isC011EC44 -or $isC011EC42) { "PostGcReclaimedGen1Lifecycle" } elseif ($isC011EC41) { "PostGcAllocatorProvenance" } elseif ($isC011EC40) { "CompactionReclamation" } elseif ($isC011EC39C38Variant) { "CollectionPlanC38" } elseif ($isC011EC39) { "CollectionPlanC37" } elseif ($isC011EC38) { "DeadObjectReclamation" } elseif ($isC011EC37) { "LifetimeTransitionSecondCollection" } elseif ($isC011EC31) { "ShortWeakLive" } elseif ($isC011EC32) { "ShortWeakDead" } elseif ($isFirstRootFirstNonNullOldO) { "FirstNonNullOldO" } elseif ($isFirstNonNullRoot -or $isFirstRootCallbackEntry) { "FirstNonNullRoot" } else { "FirstCollectionBoundary" }
+    $managedProofMode = if (-not [string]::IsNullOrWhiteSpace($ManagedProofModeOverride)) { $ManagedProofModeOverride } elseif ($isC011EC73) { "PromotionPositiveRegionCohort" } elseif ($isC011EC71) { "PromotionDecisionLiveByteThreshold" } elseif ($isC011EC70) { "SurvivorCountThresholdCausality" } elseif ($isC011EC69) { "SurvivorCohortProvenanceReconciliation" } elseif ($isC011EC68) { "RetainedSurvivorRegionAvailability" } elseif ($isC011EC67) { "PostDebitNormalGen0Refill" } elseif ($isC011EC66) { "PostDebitNormalGen0Refill" } elseif ($isC011EC65) { "PostDebitGen2OosPreemption" } elseif ($isC011EC64) { "PostDebitNormalCondemnationEntry" } elseif ($isC011EC63) { "PostPromotionEarlierHeadroom" } elseif ($isC011EC62) { "PostPromotionN0RefillTopology" } elseif ($isC011EC61) { "PreFinalN0PromotionCycle" } elseif ($isC011EC60) { "PreLastN0PromotionTiming" } elseif ($isC011EC59) { "LastN0DirectGen1Window" } elseif ($isC011EC58) { "NInitialProvenance" } elseif ($isC011EC57) { "DirectGen1BudgetCondemnation" } elseif ($isC011EC56) { "NaturalGen1CondemnationPolicyThreshold" } elseif ($isC011EC55) { "NaturalOlderGenerationTransition" } elseif ($isC011EC54) { "ReclaimedGen1EphemeralTransition" } elseif ($isC011EC53) { "ReclaimedGen1NaturalReuse" } elseif ($isC011EC44 -or $isC011EC42) { "PostGcReclaimedGen1Lifecycle" } elseif ($isC011EC41) { "PostGcAllocatorProvenance" } elseif ($isC011EC40) { "CompactionReclamation" } elseif ($isC011EC39C38Variant) { "CollectionPlanC38" } elseif ($isC011EC39) { "CollectionPlanC37" } elseif ($isC011EC38) { "DeadObjectReclamation" } elseif ($isC011EC37) { "SecondCollectionCompletion" } elseif ($isC011EC31) { "ShortWeakLive" } elseif ($isC011EC32) { "ShortWeakDead" } elseif ($isFirstRootFirstNonNullOldO) { "FirstNonNullOldO" } elseif ($isFirstNonNullRoot -or $isFirstRootCallbackEntry) { "FirstNonNullRoot" } else { "FirstCollectionBoundary" }
     $managedC57StrategyProperty = if ($isC011EC57Instrumentation) { "-p:HostLogProofC57Strategy=$C57Strategy" } else { "" }
     $managedC60StrategyProperty = if ($isC011EC60) { "-p:HostLogProofC60Strategy=$C60Strategy" } else { "" }
     $managedC61StrategyProperty = if ($isC011EC61) { "-p:HostLogProofC61Strategy=$c61StrategyForRun" } else { "" }
@@ -6461,10 +6489,10 @@ exit /b 0
     $managedC68SurvivorProperty = if ($isC011EC68) { "-p:HostLogProofC68RetainedSurvivors=$C68RetainedSurvivors" } else { "" }
     $managedC69SurvivorProperty = if ($isC011EC69) { "-p:HostLogProofC69RetainedSurvivors=$C69RetainedSurvivors" } else { "" }
     $managedC70SurvivorProperty = if ($isC011EC70) { "-p:HostLogProofC70RetainedSurvivors=$C70RetainedSurvivors" } else { "" }
-    $managedC71CaseProperty = if ($isC011EC71) { "-p:HostLogProofC71Case=$C71Case" } else { "" }
-    $managedC73CaseProperty = if ($isC011EC73) { "-p:HostLogProofC73Case=$C71Case" } else { "" }
+    $managedC71CaseProperty = if ($isC011EC71 -or $managedProofMode -eq "PromotionDecisionLiveByteThreshold") { "-p:HostLogProofC71Case=$C71Case" } else { "" }
+    $managedC73CaseProperty = if ($isC011EC73 -and $managedProofMode -eq "PromotionPositiveRegionCohort") { "-p:HostLogProofC73Case=$C71Case" } else { "" }
     $c64VariantForRun = if ($isC011EC66) { "W3" } else { $C64Variant }
-    $managedC64VariantProperty = if ($isC011EC64) { "-p:HostLogProofC64Variant=$c64VariantForRun" } else { "" }
+    $managedC64VariantProperty = if ($isC011EC64 -or $managedProofMode -eq "PromotionDecisionLiveByteThreshold") { "-p:HostLogProofC64Variant=$c64VariantForRun" } else { "" }
     $managedRuntimePackProperty = if ($isTransitionFrameControlPc -or $isC011EC19) {
         "-p:HostLogProofRuntimePackObj=$managedRuntimePackObj"
     } else {
@@ -7117,21 +7145,47 @@ exit /b %errorlevel%
         New-Item -ItemType Directory -Force -Path (Split-Path $bootPath) | Out-Null
         Copy-Item -LiteralPath $bootloader -Destination $bootPath -Force
         Copy-Item -LiteralPath $kernelPath -Destination (Join-Path $espRoot "kernel.elf") -Force
-        $port = 44800 + $runIndex
+        $port = $QemuMonitorPortBase + $runIndex
         $monitorPath = Join-Path $oneRoot "watchdog-monitor.txt"
         $qemuDebugPath = Join-Path $oneRoot "qemu-debug.log"
         $qemuArgs = @("-accel","tcg,thread=single","-machine","pc","-smp","1","-drive",('if=pflash,format=raw,readonly=on,file="' + $ovmf + '"'),"-drive",('file=fat:rw:"' + $espRoot + '",format=raw,if=ide,index=0'),"-m","1024M","-vga","std","-display","none","-serial",('file:"' + $serialPath + '"'),"-monitor",("tcp:127.0.0.1:$port,server,nowait"),"-no-reboot","-no-shutdown","-rtc","base=utc,clock=host")
         if ($isStackProviderTransitionFailFast -or $isCodeManagerRegistration -or $isTransitionFrameControlPc -or $isC011EC19 -or $isC011EC33 -or $isFirstNonNullRoot -or $isFirstRootCallbackEntry -or $isC011EC49) { $qemuArgs += @("-d","int,guest_errors","-D",$qemuDebugPath) }
-        Log-Command ('"' + $qemu + '" ' + ($qemuArgs -join ' '))
-        $qemuProcess = Start-Process -FilePath $qemu -ArgumentList $qemuArgs -WindowStyle Hidden -PassThru
+        $qemuCommand = '"' + $qemu + '" ' + ($qemuArgs -join ' ')
+        $chronologyEvents = [System.Collections.Generic.List[object]]::new()
+        $chronologyClock = [Diagnostics.Stopwatch]::StartNew()
+        $chronologyPath = Join-Path $oneRoot "qemu-chronology.json"
+        $qemuProcess = $null
+        $serialFileCreated = $false
+        $serialFileOpened = $false
+        $firstSerialByteObserved = $false
+        $qemuExitRecorded = $false
+        $watchdogTriggered = $false
+        $watchdogReason = $null
+        $timeoutReached = $false
+        Add-QemuChronologyEvent $chronologyEvents $chronologyClock 'qemu-process-launch-requested' @{ executable=$qemu; monitorPort=$port; command=$qemuCommand }
+        Log-Command $qemuCommand
         $completed = $false
         $earlyFailure = $null
         try {
+            $qemuProcess = Start-Process -FilePath $qemu -ArgumentList $qemuArgs -WindowStyle Hidden -PassThru
+            Add-QemuChronologyEvent $chronologyEvents $chronologyClock 'qemu-pid-acquired' @{ pid=$qemuProcess.Id }
             $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
             while ((Get-Date) -lt $deadline -and -not $qemuProcess.HasExited) {
                 Start-Sleep -Milliseconds 250
                 if (Test-Path -LiteralPath $serialPath) {
+                    if (-not $serialFileCreated) {
+                        $serialFileCreated = $true
+                        Add-QemuChronologyEvent $chronologyEvents $chronologyClock 'serial-file-created' @{ path=$serialPath }
+                    }
+                    if (-not $serialFileOpened) {
+                        $serialFileOpened = $true
+                        Add-QemuChronologyEvent $chronologyEvents $chronologyClock 'serial-file-first-opened' @{ path=$serialPath }
+                    }
                     $liveText = Get-Content -LiteralPath $serialPath -Raw
+                    if ($null -ne $liveText -and $liveText.Length -gt 0 -and -not $firstSerialByteObserved) {
+                        $firstSerialByteObserved = $true
+                        Add-QemuChronologyEvent $chronologyEvents $chronologyClock 'first-serial-byte' @{ byteCount=$liveText.Length }
+                    }
                     $normalizedLiveText = $liveText -replace '\[IRQ\] dispatch irq=00\s*', ''
                     $normalizedLiveText = ($normalizedLiveText -creplace '(?<=[0-9])(?=[a-z])', ' ') -replace '\s+', ' '
                     $normalizedLiveText = $normalizedLiveText -replace '\b(c\d+)\s+(ec\d+)', '$1$2'
@@ -7249,6 +7303,21 @@ exit /b %errorlevel%
                     if (($isFirstNonNullRoot -or $isFirstRootCallbackEntry) -and $normalizedLiveText -match '\[PageFault\] Not-present violation on read \(kernel\)') { $earlyFailure = "nativeaot-thread-static-startup-page-fault"; break }
                 }
             }
+            if ($null -ne $qemuProcess -and $qemuProcess.HasExited -and -not $qemuExitRecorded) {
+                $qemuExitRecorded = $true
+                Add-QemuChronologyEvent $chronologyEvents $chronologyClock 'qemu-process-exit' @{ exitCode=(Get-QemuExitCode $qemuProcess) }
+            }
+            if ($completed) {
+                $watchdogTriggered = $true
+                $watchdogReason = 'safe-stop-marker'
+                Add-QemuChronologyEvent $chronologyEvents $chronologyClock 'watchdog-condition-triggered' @{ reason=$watchdogReason }
+            } elseif ((Get-Date) -ge $deadline -and $null -eq $earlyFailure) {
+                $timeoutReached = $true
+                $watchdogTriggered = $true
+                $watchdogReason = 'timeout'
+                Add-QemuChronologyEvent $chronologyEvents $chronologyClock 'timeout-reached' @{ timeoutSeconds=$TimeoutSeconds }
+                Add-QemuChronologyEvent $chronologyEvents $chronologyClock 'watchdog-condition-triggered' @{ reason=$watchdogReason }
+            }
             if (-not $completed -and [string]::IsNullOrWhiteSpace($earlyFailure)) {
                 Read-Monitor $port $monitorPath
                 $failureSerial = if (Test-Path -LiteralPath $serialPath) { Get-Content -LiteralPath $serialPath -Raw } else { "" }
@@ -7359,15 +7428,47 @@ exit /b %errorlevel%
                 } elseif ($isC011EC33 -and $failureSerial -match 'marker=C011EC33-LIVE') {
                     $earlyFailure = "collection1-post-weak-completion-timeout"
                 } elseif ($qemuProcess.HasExited) {
+                    $watchdogTriggered = $true
+                    $watchdogReason = 'qemu-exited-before-completion-marker'
+                    Add-QemuChronologyEvent $chronologyEvents $chronologyClock 'watchdog-condition-triggered' @{ reason=$watchdogReason }
                     throw "QEMU $name exited before the NativeAOT GC safe-stop marker."
                 } else {
+                    $watchdogTriggered = $true
+                    $watchdogReason = 'timeout'
+                    if (-not $timeoutReached) {
+                        $timeoutReached = $true
+                        Add-QemuChronologyEvent $chronologyEvents $chronologyClock 'timeout-reached' @{ timeoutSeconds=$TimeoutSeconds }
+                    }
+                    Add-QemuChronologyEvent $chronologyEvents $chronologyClock 'watchdog-condition-triggered' @{ reason=$watchdogReason }
                     throw "QEMU $name timed out after $TimeoutSeconds seconds."
                 }
             }
         } finally {
-            if (-not $qemuProcess.HasExited) { Stop-Process -Id $qemuProcess.Id -Force }
-            try { $qemuProcess.WaitForExit() } catch { }
-            [ordered]@{ run=$name; timeoutSeconds=$TimeoutSeconds; safeStopObserved=$completed; earlyFailure=$earlyFailure; harnessTerminated=$true; processId=$qemuProcess.Id; serialPath=$serialPath; monitorPath=$monitorPath; qemuDebugPath=$qemuDebugPath } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $oneRoot "watchdog.json") -Encoding ASCII
+            Add-QemuChronologyEvent $chronologyEvents $chronologyClock 'cleanup-initiated' @{ reason=if($completed){'safe-stop'}elseif($null -ne $earlyFailure){$earlyFailure}else{'watchdog-or-error'} }
+            if ($null -ne $qemuProcess) {
+                if (-not $qemuProcess.HasExited) { Stop-Process -Id $qemuProcess.Id -Force }
+                try { $qemuProcess.WaitForExit() } catch { }
+                if (-not $qemuExitRecorded) {
+                    $qemuExitRecorded = $true
+                    Add-QemuChronologyEvent $chronologyEvents $chronologyClock 'qemu-process-exit' @{ exitCode=(Get-QemuExitCode $qemuProcess); afterCleanup=$true }
+                }
+            }
+            $qemuExitOrdinal = @($chronologyEvents | Where-Object { $_.event -eq 'qemu-process-exit' } | Select-Object -First 1 | ForEach-Object { $_.ordinal })
+            $watchdogOrdinal = @($chronologyEvents | Where-Object { $_.event -eq 'watchdog-condition-triggered' } | Select-Object -First 1 | ForEach-Object { $_.ordinal })
+            $qemuExitedBeforeWatchdog = $qemuExitOrdinal.Count -ne 0 -and ($watchdogOrdinal.Count -eq 0 -or $qemuExitOrdinal[0] -lt $watchdogOrdinal[0])
+            [ordered]@{
+                run=$name; timeoutSeconds=$TimeoutSeconds; safeStopObserved=$completed; earlyFailure=$earlyFailure
+                watchdogTriggered=$watchdogTriggered; watchdogReason=$watchdogReason; timeoutReached=$timeoutReached
+                qemuExitedBeforeWatchdog=$qemuExitedBeforeWatchdog; processId=if($null -ne $qemuProcess){$qemuProcess.Id}else{$null}
+                exitCode=if($null -ne $qemuProcess){Get-QemuExitCode $qemuProcess}else{$null}; monitorPort=$port
+                serialPath=$serialPath; monitorPath=$monitorPath; qemuDebugPath=$qemuDebugPath; chronologyPath=$chronologyPath
+            } | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $oneRoot "watchdog.json") -Encoding ASCII
+            [ordered]@{
+                run=$name; timeoutSeconds=$TimeoutSeconds; monitorPort=$port; command=$qemuCommand
+                events=@($chronologyEvents); qemuExitedBeforeWatchdog=$qemuExitedBeforeWatchdog
+                exitCode=if($null -ne $qemuProcess){Get-QemuExitCode $qemuProcess}else{$null}
+                firstSerialByteObserved=$firstSerialByteObserved; serialPath=$serialPath
+            } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $chronologyPath -Encoding ASCII
         }
         Require-File $serialPath "Fresh QEMU serial log"
         $serial = Get-Content -LiteralPath $serialPath -Raw
