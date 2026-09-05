@@ -176,10 +176,22 @@ build.ps1 -Arch amd64 -I219Phase5Stage 8 -I219Phase6Stage 0 -I219Phase7Stage 4
 Result: PASS. The build produced the UEFI bootloader, kernel, ramdisk, and
 ESP image. Existing compiler warnings remain outside this phase's scope.
 
-QEMU validation is performed with the packaged ISO using the existing
-release ISO smoke/boot verifier and multiple fresh E1000 boots. QEMU is
+QEMU validation was performed with the packaged ISO using the existing
+release ISO smoke/boot verifier in two fresh E1000 boots. Both reached the
+firmware boot entry, bootloader, kernel, ramdisk, desktop, and kernel-main-
+loop markers. Both reported the emulated Intel E1000 initialized with
+`Link: UP`; no boot hang or boot-delay regression was observed. QEMU is
 virtual discrete-E1000 evidence only and is not accepted as proof of I219
-physical carrier. Final results and logs are recorded below after packaging.
+physical carrier. Serial logs:
+
+- `out/release-iso/qemu-test-c1379be3a8654d41afe71ddd49c80521/serial.log`
+- `out/release-iso/qemu-test-7e738b3c48454f178bd8c3d59048c33a/serial.log`
+
+The release ISO structural verifier also passed: UEFI no-emulation boot
+record, boot catalog, FAT32 boot image, and expected input-file manifest all
+verified. Existing unrelated QEMU smoke output still reports the known
+filesystem-mount and secure-RNG smoke limitations; those did not prevent the
+NIC/desktop readiness markers.
 
 ## Phase 12 artifact
 
@@ -192,12 +204,14 @@ guideXOS-Server-v0.1.0-phase12-aida-i219-link-refresh-amd64.iso
 Exact path, size, SHA-256, sidecar SHA-256, and manifest are recorded here
 after the final packaging run:
 
-- ISO path: pending packaging
+- ISO path: `D:\dev\guideXOSServer_NAVIGATOR_IMPROVEMENTS\dist\guideXOS-Server-v0.1.0-phase12-aida-i219-link-refresh-amd64.iso`
 - ISO filename: `guideXOS-Server-v0.1.0-phase12-aida-i219-link-refresh-amd64.iso`
-- ISO size: pending packaging
-- ISO SHA-256: pending packaging
-- SHA-256 sidecar: pending packaging
-- Manifest: pending packaging
+- ISO size: `91,293,696` bytes
+- ISO SHA-256: `325b4ca06784165af72d884809120cdc75d398c63fb87ad6903f8825a512b59d`
+- SHA-256 sidecar: `dist/guideXOS-Server-v0.1.0-phase12-aida-i219-link-refresh-amd64.iso.sha256`
+- Manifest: `dist/guideXOS-Server-v0.1.0-phase12-aida-i219-link-refresh-amd64.manifest.json`
+- Manifest source commit: `1e6a9e8d8cf675a30034bb1fae1607ebf82e69fb`
+- Manifest packaging worktree: clean
 
 ## Physical AIDA_LPT acceptance procedure
 
@@ -228,4 +242,3 @@ Interpretation:
 - UP only after settling: record the poll count/timeout evidence and decide
   whether the timing is expected I219 post-reset negotiation or an ordering
   defect.
-
