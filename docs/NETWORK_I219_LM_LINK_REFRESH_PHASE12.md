@@ -184,8 +184,8 @@ loop markers. Both reported the emulated Intel E1000 initialized with
 virtual discrete-E1000 evidence only and is not accepted as proof of I219
 physical carrier. Serial logs:
 
-- `out/release-iso/qemu-test-c1379be3a8654d41afe71ddd49c80521/serial.log`
-- `out/release-iso/qemu-test-7e738b3c48454f178bd8c3d59048c33a/serial.log`
+- `out/release-iso/qemu-test-09424a3463f04de9ba993287a294a81d/serial.log`
+- `out/release-iso/qemu-test-387b894fc4c0490fb97211c5cf25115c/serial.log`
 
 The release ISO structural verifier also passed: UEFI no-emulation boot
 record, boot catalog, FAT32 boot image, and expected input-file manifest all
