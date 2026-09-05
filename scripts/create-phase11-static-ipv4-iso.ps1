@@ -10,9 +10,9 @@ $RepositoryRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Pat
 $BuildScript = Join-Path $RepositoryRoot 'build.ps1'
 $ReleaseScript = Join-Path $RepositoryRoot 'scripts\create-release-iso.ps1'
 $powershell = Get-Command powershell.exe -ErrorAction Stop
-$version = '0.1.0-phase11-aida-i219-static-ipv4'
+$version = '0.1.0-phase11-aida-dhcp-tx'
 
-Write-Host "[phase11-iso] Building static IPv4/TX diagnostic image ($version)" -ForegroundColor Cyan
+Write-Host "[phase11-iso] Building DHCP TX provenance image ($version)" -ForegroundColor Cyan
 
 $buildArgs = @(
     '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $BuildScript,
@@ -21,7 +21,7 @@ $buildArgs = @(
 )
 if ($CleanFirst) { $buildArgs += '-Clean' }
 & $powershell.Source @buildArgs
-if ($LASTEXITCODE -ne 0) { throw 'canonical build failed for Phase 11 static IPv4 image' }
+if ($LASTEXITCODE -ne 0) { throw 'canonical build failed for Phase 11 DHCP TX image' }
 
 $releaseArgs = @(
     '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $ReleaseScript,
@@ -33,6 +33,6 @@ if (-not [string]::IsNullOrWhiteSpace($PythonPath)) {
     $releaseArgs += @('-PythonPath', $PythonPath)
 }
 & $powershell.Source @releaseArgs
-if ($LASTEXITCODE -ne 0) { throw 'release ISO packaging failed for Phase 11 static IPv4 image' }
+if ($LASTEXITCODE -ne 0) { throw 'release ISO packaging failed for Phase 11 DHCP TX image' }
 
 Write-Host "[phase11-iso] Created guideXOS-Server-v$version-amd64.iso with SHA-256 and manifest" -ForegroundColor Green

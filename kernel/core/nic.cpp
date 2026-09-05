@@ -2017,13 +2017,20 @@ Status send_frame(const uint8_t* data, uint16_t len)
 #if ARCH_HAS_PORT_IO
     s_device.stats.txAttempted++;
     s_device.tx.tailBefore = s_txCur;
+    s_device.tx.tailAfter = s_txCur;
     s_device.tx.lastDescriptor = s_txCur;
+    s_device.tx.lastLength = len;
+    s_device.tx.lastBufferAddress = 0;
+    s_device.tx.lastCommand = 0;
+    s_device.tx.lastStatus = NIC_OK;
     snapshot_tx_registers();
 
     // Check that the current TX descriptor is available
     if (!(s_txDescs[s_txCur].status & E1000_TXD_STAT_DD)) {
         serial::puts("[NIC] send_frame: TX descriptor not available (TX ring full)\n");
         s_device.stats.txDropped++;
+        s_device.tx.driverErrors++;
+        s_device.tx.lastStatus = NIC_ERR_TX_FULL;
         return NIC_ERR_TX_FULL;
     }
 
@@ -2035,6 +2042,8 @@ Status send_frame(const uint8_t* data, uint16_t len)
     if (!dma_address(s_txBuffer, &bufAddr)) {
         serial::puts("[NIC] send_frame: TX buffer DMA address unavailable\n");
         s_device.stats.txErrors++;
+        s_device.tx.driverErrors++;
+        s_device.tx.lastStatus = NIC_ERR_INIT_FAIL;
         return NIC_ERR_INIT_FAIL;
     }
     dma_memory_barrier();
@@ -2044,6 +2053,8 @@ Status send_frame(const uint8_t* data, uint16_t len)
                                     E1000_TXD_CMD_IFCS |
                                     E1000_TXD_CMD_RS;
     s_txDescs[s_txCur].status     = 0;
+    s_device.tx.lastBufferAddress = bufAddr;
+    s_device.tx.lastCommand = s_txDescs[s_txCur].cmd;
     dma_memory_barrier();
 
     // Advance tail pointer to submit the descriptor
@@ -2062,6 +2073,7 @@ Status send_frame(const uint8_t* data, uint16_t len)
             s_device.stats.txBytes += static_cast<uint32_t>(len);
             s_device.tx.descriptorCompletions++;
             s_device.tx.lastDescriptorStatus = s_txDescs[oldTx].status;
+            s_device.tx.lastStatus = NIC_OK;
             snapshot_tx_registers();
             return NIC_OK;
         }
@@ -2073,6 +2085,7 @@ Status send_frame(const uint8_t* data, uint16_t len)
     s_device.stats.txErrors++;
     s_device.tx.hardwareTimeouts++;
     s_device.tx.lastDescriptorStatus = s_txDescs[oldTx].status;
+    s_device.tx.lastStatus = NIC_ERR_INIT_FAIL;
     snapshot_tx_registers();
     return NIC_ERR_INIT_FAIL;
 #else

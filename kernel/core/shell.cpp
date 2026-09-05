@@ -2763,14 +2763,21 @@ static void cmd_nicinfo() {
 
     const dhcp::Statistics* dhcpStats = dhcp::get_stats();
     const dhcp::LeaseInfo* lease = dhcp::get_lease();
+    const dhcp::Diagnostics* dhcpDiag = dhcp::get_diagnostics();
     output_string("DHCP State: ");
     output_string(dhcp::state_to_string(dhcp::get_state()));
     output_string("\n");
-    output_string("DHCP Counters: discover-generated=");
+    output_string("DHCP Counters: built=");
+    uint_to_str(dhcpStats->discoverBuilt, numStr);
+    output_string(numStr);
+    output_string(" attempts=");
     uint_to_str(dhcpStats->discoverAttempts, numStr);
     output_string(numStr);
-    output_string(" discover-submitted=");
-    uint_to_str(dhcpStats->discoversSent, numStr);
+    output_string(" submitted=");
+    uint_to_str(dhcpStats->discoverSubmissions, numStr);
+    output_string(numStr);
+    output_string(" complete=");
+    uint_to_str(dhcpStats->discoverCompletions, numStr);
     output_string(numStr);
     output_string(" offer=");
     uint_to_str(dhcpStats->offersReceived, numStr);
@@ -2790,6 +2797,62 @@ static void cmd_nicinfo() {
     output_string(" send-fail=");
     uint_to_str(dhcpStats->discoverSendFailures, numStr);
     output_string(numStr);
+    output_string("\n");
+    output_string("DHCP TX: msg=");
+    output_string(dhcp::msgtype_to_string(dhcpDiag->lastMessageType));
+    output_string(" xid=0x");
+    char dhcpHexStr[9];
+    uint_hex_to_str(dhcpDiag->transactionId, 8, dhcpHexStr);
+    output_string(dhcpHexStr);
+    output_string(" DHCP-len=");
+    uint_to_str(dhcpDiag->dhcpPacketLength, numStr);
+    output_string(numStr);
+    output_string(" frame-len=");
+    uint_to_str(dhcpDiag->frameLength, numStr);
+    output_string(numStr);
+    output_string(" attempted=");
+    output_string(dhcpDiag->txSubmissionAttempted ? "yes" : "no");
+    output_string(" desc=");
+    output_string(dhcpDiag->txDescriptorAccepted ? "accepted" : "no");
+    output_string(" tail=");
+    output_string(dhcpDiag->txTailAdvanced ? "advanced" : "no");
+    output_string(" complete=");
+    output_string(dhcpDiag->txCompletionObserved ? "yes" : "no");
+    output_string(" timeout=");
+    output_string(dhcpDiag->txCompletionTimeout ? "yes" : "no");
+    output_string(" error=");
+    output_string(dhcpDiag->txDriverError ? "yes\n" : "no\n");
+    output_string("DHCP RX: broadcast=");
+    uint_to_str(dhcpDiag->rxEthernetBroadcast, numStr);
+    output_string(numStr);
+    output_string(" ipv4=");
+    uint_to_str(dhcpDiag->rxIPv4, numStr);
+    output_string(numStr);
+    output_string(" udp=");
+    uint_to_str(dhcpDiag->rxUDP, numStr);
+    output_string(numStr);
+    output_string(" dhcp=");
+    uint_to_str(dhcpDiag->rxDHCP, numStr);
+    output_string(numStr);
+    output_string(" malformed=");
+    uint_to_str(dhcpDiag->rxDHCPMalformed, numStr);
+    output_string(numStr);
+    output_string("\n");
+    output_string("DHCP Wait: offer=");
+    output_string(dhcpDiag->waitForOfferBegun ? "begun" : "not-started");
+    output_string(" timeout=");
+    output_string(dhcpDiag->waitForOfferTimeout ? "yes" : "no");
+    output_string(" ACK=");
+    output_string(dhcpDiag->waitForAckBegun ? "begun" : "not-started");
+    output_string(" timeout=");
+    output_string(dhcpDiag->waitForAckTimeout ? "yes\n" : "no\n");
+    output_string("DHCP Failure: ");
+    output_string(dhcpDiag->failureStage == dhcp::FAILURE_NONE
+                      ? "none" : dhcp::failure_stage_name(dhcpDiag->failureStage));
+    if (dhcpDiag->failureReason[0] != '\0') {
+        output_string(" - ");
+        output_string(dhcpDiag->failureReason);
+    }
     output_string("\n");
     output_string("DHCP Lease: ");
     output_string(lease->valid ? "APPLIED" : "none");
@@ -3059,6 +3122,7 @@ static void cmd_ipconfig(const char* args[], uint32_t argCount) {
     
     if (renew) {
         output_string("\nguideXOS IP Configuration\n\n");
+        dhcp::note_command_invocation();
         
         if (!nic::is_active()) {
             output_string("No adapter is in a state permissible for this operation.\n");
@@ -3069,7 +3133,6 @@ static void cmd_ipconfig(const char* args[], uint32_t argCount) {
         const nic::NICDevice* dev = nic::get_device();
         output_string(dev ? dev->name : "eth0");
         output_string("...\n");
-        
         dhcp::Status st = dhcp::discover();
         if (st == dhcp::DHCP_OK) {
             const dhcp::LeaseInfo* lease = dhcp::get_lease();
@@ -3088,7 +3151,19 @@ static void cmd_ipconfig(const char* args[], uint32_t argCount) {
                     output_string("Error: DHCP request timed out.\n");
                     break;
                 case dhcp::DHCP_ERR_NO_OFFER:
-                    output_string("Error: No DHCP server responded.\n");
+                    output_string("Error: DISCOVER transmitted; no DHCP OFFER received.\n");
+                    break;
+                case dhcp::DHCP_ERR_SEND_FAIL:
+                    output_string("Error: DHCP transmission did not complete; inspect 'dhcp status'.\n");
+                    break;
+                case dhcp::DHCP_ERR_NOT_READY:
+                    output_string("Error: Network interface driver is not ready.\n");
+                    break;
+                case dhcp::DHCP_ERR_LINK_DOWN:
+                    output_string("Error: Network link is down.\n");
+                    break;
+                case dhcp::DHCP_ERR_BUILD:
+                    output_string("Error: DHCP packet construction failed.\n");
                     break;
                 default:
                     output_string("Error: DHCP operation failed.\n");
@@ -3151,6 +3226,16 @@ static void cmd_ipconfig(const char* args[], uint32_t argCount) {
         } else {
             output_string("IPv4 unconfigured\n");
         }
+        output_string("   Configuration Provenance . . . . : ");
+        output_string(cfg ? ipv4::configuration_mode_name(cfg->mode) : "none");
+        output_string("\n");
+        output_string("   DHCP State . . . . . . . . . . . : ");
+        output_string(dhcp::state_to_string(dhcp::get_state()));
+        output_string("\n");
+        output_string("   IPv4 Address . . . . . . . . . . : none\n");
+        output_string("   Subnet Mask . . . . . . . . . . . : none\n");
+        output_string("   Default Gateway . . . . . . . . . : none\n");
+        output_string("   DNS Servers . . . . . . . . . . . : none\n");
         return;
     }
     
@@ -3175,6 +3260,9 @@ static void cmd_ipconfig(const char* args[], uint32_t argCount) {
         output_string("\n");
         output_string("   Autoconfiguration Enabled . . . . : ");
         output_string(cfg->mode == ipv4::CONFIG_DHCP ? "Yes\n" : "No\n");
+        output_string("   Configuration Provenance . . . . : ");
+        output_string(ipv4::configuration_mode_name(cfg->mode));
+        output_string("\n");
     }
     
     // IPv4 Address
@@ -3477,9 +3565,160 @@ static void cmd_host(const char* domain) {
 // dhcp Command (DHCP client operations)
 // ============================================================
 
+static void cmd_dhcp_status()
+{
+    const dhcp::Diagnostics* diagnostics = dhcp::get_diagnostics();
+    const dhcp::Statistics* stats = dhcp::get_stats();
+    const dhcp::LeaseInfo* lease = dhcp::get_lease();
+    const ipv4::NetworkConfig* config = ipv4::get_config();
+    char numStr[16];
+    char hexStr[9];
+    char macStr[18];
+
+    output_string("DHCP provenance status\n");
+    output_string("Command invoked: ");
+    uint_to_str(diagnostics->commandInvocations, numStr);
+    output_string(numStr);
+    output_string("  Interface: ");
+    output_string(diagnostics->suitableInterfaceFound ? "found" : "none");
+    output_string(" ready=");
+    output_string(diagnostics->interfaceReady ? "yes" : "no");
+    output_string(" link=");
+    output_string(diagnostics->linkUp ? "UP\n" : "DOWN/unknown\n");
+
+    output_string("State: ");
+    output_string(dhcp::state_to_string(dhcp::get_state()));
+    output_string("  Lease: ");
+    output_string(lease->valid ? "active\n" : "none\n");
+    output_string("DISCOVER: built=");
+    output_string(diagnostics->discoverPacketBuilt ? "yes" : "no");
+    output_string(" xid=0x");
+    uint_hex_to_str(diagnostics->transactionId, 8, hexStr);
+    output_string(hexStr);
+    output_string(" DHCP-len=");
+    uint_to_str(diagnostics->dhcpPacketLength, numStr);
+    output_string(numStr);
+    output_string(" frame=");
+    uint_to_str(diagnostics->frameLength, numStr);
+    output_string(numStr);
+    output_string("\n");
+
+    output_string("Ethernet: src=");
+    ethernet::mac_to_string(diagnostics->sourceMAC, macStr);
+    output_string(macStr);
+    output_string(" dst=");
+    ethernet::mac_to_string(diagnostics->destinationMAC, macStr);
+    output_string(macStr);
+    output_string("\n");
+    output_string("UDP: ");
+    uint_to_str(diagnostics->sourcePort, numStr);
+    output_string(numStr);
+    output_string(" -> ");
+    uint_to_str(diagnostics->destinationPort, numStr);
+    output_string(numStr);
+    output_string(" message=");
+    output_string(dhcp::msgtype_to_string(diagnostics->lastMessageType));
+    output_string("\n");
+
+    output_string("TX: attempted=");
+    output_string(diagnostics->txSubmissionAttempted ? "yes" : "no");
+    output_string(" desc=");
+    output_string(diagnostics->txDescriptorAccepted ? "accepted" : "no");
+    output_string(" tail=");
+    output_string(diagnostics->txTailAdvanced ? "advanced" : "no");
+    output_string(" complete=");
+    output_string(diagnostics->txCompletionObserved ? "yes" : "no");
+    output_string(" timeout=");
+    output_string(diagnostics->txCompletionTimeout ? "yes" : "no");
+    output_string(" error=");
+    output_string(diagnostics->txDriverError ? "yes\n" : "no\n");
+    output_string("TX ring: desc=");
+    uint_to_str(diagnostics->txDescriptor, numStr);
+    output_string(numStr);
+    output_string(" tail ");
+    uint_to_str(diagnostics->txTailBefore, numStr);
+    output_string(numStr);
+    output_string("->");
+    uint_to_str(diagnostics->txTailAfter, numStr);
+    output_string(numStr);
+    output_string(" status=0x");
+    uint_hex_to_str(diagnostics->txDriverStatus, 2, hexStr);
+    output_string(hexStr);
+    output_string("\n");
+
+    output_string("Wait offer: begun=");
+    output_string(diagnostics->waitForOfferBegun ? "yes" : "no");
+    output_string(" timeout=");
+    output_string(diagnostics->waitForOfferTimeout ? "yes\n" : "no\n");
+    output_string("Wait ACK: begun=");
+    output_string(diagnostics->waitForAckBegun ? "yes" : "no");
+    output_string(" timeout=");
+    output_string(diagnostics->waitForAckTimeout ? "yes\n" : "no\n");
+    output_string("RX wait: broadcast=");
+    uint_to_str(diagnostics->rxEthernetBroadcast, numStr);
+    output_string(numStr);
+    output_string(" ipv4=");
+    uint_to_str(diagnostics->rxIPv4, numStr);
+    output_string(numStr);
+    output_string(" udp=");
+    uint_to_str(diagnostics->rxUDP, numStr);
+    output_string(numStr);
+    output_string(" dhcp=");
+    uint_to_str(diagnostics->rxDHCP, numStr);
+    output_string(numStr);
+    output_string(" malformed=");
+    uint_to_str(diagnostics->rxDHCPMalformed, numStr);
+    output_string(numStr);
+    output_string("\n");
+
+    output_string("Counters: built=");
+    uint_to_str(stats->discoverBuilt, numStr);
+    output_string(numStr);
+    output_string(" attempts=");
+    uint_to_str(stats->discoverAttempts, numStr);
+    output_string(numStr);
+    output_string(" submitted=");
+    uint_to_str(stats->discoverSubmissions, numStr);
+    output_string(numStr);
+    output_string(" complete=");
+    uint_to_str(stats->discoverCompletions, numStr);
+    output_string(numStr);
+    output_string(" offer=");
+    uint_to_str(stats->offersReceived, numStr);
+    output_string(numStr);
+    output_string(" request=");
+    uint_to_str(stats->requestsSent, numStr);
+    output_string(numStr);
+    output_string(" ack=");
+    uint_to_str(stats->acksReceived, numStr);
+    output_string(numStr);
+    output_string(" nak=");
+    uint_to_str(stats->naksReceived, numStr);
+    output_string(numStr);
+    output_string(" timeout=");
+    uint_to_str(stats->timeouts, numStr);
+    output_string(numStr);
+    output_string(" fail=");
+    uint_to_str(stats->discoverSendFailures, numStr);
+    output_string(numStr);
+    output_string("\n");
+
+    output_string("Failure: ");
+    output_string(diagnostics->failureStage == dhcp::FAILURE_NONE
+                      ? "none" : dhcp::failure_stage_name(diagnostics->failureStage));
+    if (diagnostics->failureReason[0] != '\0') {
+        output_string(" - ");
+        output_string(diagnostics->failureReason);
+    }
+    output_string("\nIPv4: mode=");
+    output_string(config ? ipv4::configuration_mode_name(config->mode) : "unconfigured");
+    output_string(" status=");
+    output_string(config && config->configured ? "active\n" : "not configured\n");
+}
+
 static void cmd_dhcp(const char* args[], uint32_t argCount) {
     // Check for flags
-    bool showStatus = (argCount <= 1);
+    bool compactStatus = false;
     bool doDiscover = false;
     bool doRelease = false;
     bool doRenew = false;
@@ -3498,8 +3737,11 @@ static void cmd_dhcp(const char* args[], uint32_t argCount) {
         } else if (str_eq(args[i], "/stats") || str_eq(args[i], "-stats") ||
                    str_eq(args[i], "/s") || str_eq(args[i], "-s")) {
             showStats = true;
+        } else if (str_eq(args[i], "status") || str_eq(args[i], "/status") ||
+                   str_eq(args[i], "-status")) {
+            compactStatus = true;
         } else if (str_eq(args[i], "/?") || str_eq(args[i], "-h") || str_eq(args[i], "--help")) {
-            output_string("Usage: dhcp [/discover] [/release] [/renew] [/stats]\n");
+            output_string("Usage: dhcp [status] [/discover] [/release] [/renew] [/stats]\n");
             output_string("\n");
             output_string("Options:\n");
             output_string("  (none)     Display current DHCP lease status\n");
@@ -3507,10 +3749,20 @@ static void cmd_dhcp(const char* args[], uint32_t argCount) {
             output_string("  /release   Release the current DHCP lease\n");
             output_string("  /renew     Renew the current DHCP lease\n");
             output_string("  /stats     Display DHCP client statistics\n");
+            output_string("  status     Display compact TX/RX provenance\n");
             return;
         }
     }
-    
+
+    if (compactStatus) {
+        cmd_dhcp_status();
+        return;
+    }
+
+    if (doRenew || doDiscover) {
+        dhcp::note_command_invocation();
+    }
+
     if (!nic::is_active()) {
         output_string("dhcp: no network interface active\n");
         return;
@@ -3579,7 +3831,19 @@ static void cmd_dhcp(const char* args[], uint32_t argCount) {
                     output_string("Error: DHCP request timed out.\n");
                     break;
                 case dhcp::DHCP_ERR_NO_OFFER:
-                    output_string("Error: No DHCP server responded.\n");
+                    output_string("Error: DISCOVER transmitted; no DHCP OFFER received.\n");
+                    break;
+                case dhcp::DHCP_ERR_SEND_FAIL:
+                    output_string("Error: DHCP transmission did not complete; inspect 'dhcp status'.\n");
+                    break;
+                case dhcp::DHCP_ERR_NOT_READY:
+                    output_string("Error: Network interface driver is not ready.\n");
+                    break;
+                case dhcp::DHCP_ERR_LINK_DOWN:
+                    output_string("Error: Network link is down.\n");
+                    break;
+                case dhcp::DHCP_ERR_BUILD:
+                    output_string("Error: DHCP packet construction failed.\n");
                     break;
                 case dhcp::DHCP_ERR_NO_ACK:
                     output_string("Error: DHCP server did not acknowledge.\n");
@@ -3600,8 +3864,23 @@ static void cmd_dhcp(const char* args[], uint32_t argCount) {
         const dhcp::Statistics* stats = dhcp::get_stats();
         char numStr[12];
 
+        output_string("  Discover payloads built: ");
+        uint_to_str(stats->discoverBuilt, numStr);
+        output_string(numStr);
+        output_string("\n");
+
         output_string("  Discover attempts: ");
         uint_to_str(stats->discoverAttempts, numStr);
+        output_string(numStr);
+        output_string("\n");
+
+        output_string("  Discover descriptors submitted: ");
+        uint_to_str(stats->discoverSubmissions, numStr);
+        output_string(numStr);
+        output_string("\n");
+
+        output_string("  Discover TX completed: ");
+        uint_to_str(stats->discoverCompletions, numStr);
         output_string(numStr);
         output_string("\n");
         
@@ -3612,6 +3891,11 @@ static void cmd_dhcp(const char* args[], uint32_t argCount) {
 
         output_string("  Discover send failures: ");
         uint_to_str(stats->discoverSendFailures, numStr);
+        output_string(numStr);
+        output_string("\n");
+
+        output_string("  Discover TX timeouts: ");
+        uint_to_str(stats->discoverTxTimeouts, numStr);
         output_string(numStr);
         output_string("\n");
         

@@ -440,6 +440,18 @@ Status build_packet(uint8_t* buffer,
                     uint16_t payloadLen,
                     uint16_t* packetLen);
 
+// Build an IPv4 packet with an explicit source address. Unlike build_packet(),
+// this bootstrap helper does not require an active IPv4 configuration; it is
+// used for protocols such as DHCP that must transmit from 0.0.0.0.
+Status build_packet_from_source(uint8_t* buffer,
+                                uint16_t bufferSize,
+                                uint32_t srcAddr,
+                                uint32_t dstAddr,
+                                uint8_t protocol,
+                                const uint8_t* payload,
+                                uint16_t payloadLen,
+                                uint16_t* packetLen);
+
 // Build IP header only (caller fills payload)
 Status build_header(Header* hdr,
                     uint32_t srcAddr,

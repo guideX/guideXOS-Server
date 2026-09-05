@@ -82,11 +82,56 @@ static uint32_t generate_xid()
 static LeaseInfo   s_lease;
 static ClientState s_state = STATE_INIT;
 static Statistics  s_stats;
+static Diagnostics s_diagnostics;
 static uint32_t    s_tickCounter = 0;  // Simple tick counter for lease timing
 
 // Static buffers to avoid large stack allocations (prevents ___chkstk_ms)
 static uint8_t s_txBuffer[sizeof(Packet)];
 static uint8_t s_rxBuffer[sizeof(Packet)];
+static uint8_t s_udpWireBuffer[1500];
+static uint8_t s_ipWireBuffer[1500];
+static uint8_t s_frameWireBuffer[ethernet::MAX_FRAME_LEN];
+static uint8_t s_receiveFrame[ethernet::MAX_FRAME_LEN];
+
+static void copy_text(char* destination, uint32_t capacity, const char* source)
+{
+    if (!destination || capacity == 0) return;
+    uint32_t i = 0;
+    if (source) {
+        while (source[i] != '\0' && i + 1u < capacity) {
+            destination[i] = source[i];
+            ++i;
+        }
+    }
+    destination[i] = '\0';
+}
+
+static void set_failure(FailureStage stage, const char* reason)
+{
+    s_diagnostics.failureStage = stage;
+    copy_text(s_diagnostics.failureReason,
+              sizeof(s_diagnostics.failureReason), reason);
+}
+
+static void reset_invocation_diagnostics()
+{
+    const uint32_t commandInvocations = s_diagnostics.commandInvocations;
+    memzero(&s_diagnostics, sizeof(s_diagnostics));
+    s_diagnostics.commandInvocations = commandInvocations;
+}
+
+static uint8_t packet_message_type(const uint8_t* packet, size_t length)
+{
+    const uint16_t optionsOffset = sizeof(Packet) - DHCP_OPTIONS_MAX;
+    if (!packet || length < static_cast<size_t>(optionsOffset + 7u)) return 0;
+    const uint8_t* options = packet + optionsOffset;
+    if (options[0] != 0x63 || options[1] != 0x82 ||
+        options[2] != 0x53 || options[3] != 0x63 ||
+        options[4] != OPT_MSG_TYPE || options[5] != 1u) {
+        return 0;
+    }
+    return options[6];
+}
 
 // ================================================================
 // Initialization
@@ -96,6 +141,7 @@ void init()
 {
     memzero(&s_lease, sizeof(s_lease));
     memzero(&s_stats, sizeof(s_stats));
+    memzero(&s_diagnostics, sizeof(s_diagnostics));
     s_state = STATE_INIT;
     s_tickCounter = 0;
 
@@ -110,6 +156,11 @@ void init()
     }
 
     serial::puts("[DHCP] Client initialized\n");
+}
+
+void note_command_invocation()
+{
+    s_diagnostics.commandInvocations++;
 }
 
 void clear_lease_for_manual_configuration()
@@ -420,15 +471,141 @@ Status parse_options(const Packet* pkt, ParsedOptions* opts)
 
 Status dhcp_send(uint8_t* packet, size_t length, uint32_t server_ip)
 {
-    if (!packet || length == 0) return DHCP_ERR_INVALID;
+    if (!packet || length == 0 || length > 0xFFFFu) return DHCP_ERR_INVALID;
 
-    // Use the UDP layer to send from DHCP client port (68) to server port (67)
-    udp::Status udpSt = udp::send(DHCP_CLIENT_PORT, server_ip,
-                                   DHCP_SERVER_PORT,
-                                   packet,
-                                   static_cast<uint16_t>(length));
-    if (udpSt != udp::UDP_OK) {
-        serial::puts("[DHCP] UDP send failed\n");
+    const uint8_t messageType = packet_message_type(packet, length);
+    s_diagnostics.lastMessageType = messageType;
+    s_diagnostics.sourcePort = DHCP_CLIENT_PORT;
+    s_diagnostics.destinationPort = DHCP_SERVER_PORT;
+
+    const nic::NICDevice* device = nic::get_device();
+    if (!device || !nic::is_active()) {
+        set_failure(FAILURE_INTERFACE, "no suitable active interface");
+        return DHCP_ERR_NO_NIC;
+    }
+
+    const uint8_t* sourceMAC = nic::get_mac_address();
+    if (!sourceMAC) {
+        set_failure(FAILURE_INTERFACE, "interface has no station MAC");
+        return DHCP_ERR_NO_NIC;
+    }
+
+    const ipv4::NetworkConfig* config = ipv4::get_config();
+    const uint32_t sourceIP = config && config->configured
+        ? config->ipAddr : ipv4::ADDR_ANY;
+
+    // Initial DHCP DISCOVER/REQUEST traffic is a bootstrap packet. It must
+    // not go through the configured-only UDP/IPv4 route, ARP, or gateway
+    // lookup path. The same raw path is used for the broadcast RELEASE-style
+    // calls that this client issues today; unicast renewal keeps the existing
+    // configured UDP path below.
+    if (server_ip != ipv4::ADDR_BROADCAST) {
+        s_diagnostics.txSubmissionAttempted = true;
+        const nic::TxDiagnostics before = device->tx;
+        const udp::Status udpStatus = udp::send(
+            DHCP_CLIENT_PORT, server_ip, DHCP_SERVER_PORT, packet,
+            static_cast<uint16_t>(length));
+        const nic::NICDevice* afterDevice = nic::get_device();
+        const nic::TxEvidence evidence = afterDevice
+            ? nic::observe_tx(before, afterDevice->tx,
+                              udpStatus == udp::UDP_OK ? nic::NIC_OK
+                                                       : nic::NIC_ERR_INIT_FAIL)
+            : nic::TxEvidence{};
+        s_diagnostics.txDescriptorAccepted = evidence.descriptorAccepted;
+        s_diagnostics.txTailAdvanced = evidence.tailAdvanced;
+        s_diagnostics.txCompletionObserved = evidence.completionObserved;
+        s_diagnostics.txCompletionTimeout = evidence.completionTimedOut;
+        s_diagnostics.txDriverError = evidence.driverError ||
+                                      udpStatus != udp::UDP_OK;
+        if (afterDevice) {
+            s_diagnostics.txDescriptor = afterDevice->tx.lastDescriptor;
+            s_diagnostics.txTailBefore = afterDevice->tx.tailBefore;
+            s_diagnostics.txTailAfter = afterDevice->tx.tailAfter;
+            s_diagnostics.txDescriptorSubmissions =
+                afterDevice->tx.descriptorSubmissions;
+            s_diagnostics.txDescriptorCompletions =
+                afterDevice->tx.descriptorCompletions;
+            s_diagnostics.txHardwareTimeouts = afterDevice->tx.hardwareTimeouts;
+            s_diagnostics.txDriverStatus = afterDevice->tx.lastStatus;
+        }
+        if (udpStatus != udp::UDP_OK) {
+            set_failure(evidence.completionTimedOut
+                            ? FAILURE_TX_COMPLETION : FAILURE_TX_SUBMIT,
+                        "configured UDP send failed");
+            s_stats.errors++;
+            return DHCP_ERR_SEND_FAIL;
+        }
+        return DHCP_OK;
+    }
+
+    uint16_t udpLength = 0;
+    uint16_t ipLength = 0;
+    uint16_t frameLength = 0;
+
+    udp::Status udpStatus = udp::build_datagram(
+        s_udpWireBuffer, sizeof(s_udpWireBuffer), DHCP_CLIENT_PORT, DHCP_SERVER_PORT,
+        sourceIP, ipv4::ADDR_BROADCAST, packet,
+        static_cast<uint16_t>(length), &udpLength);
+    if (udpStatus != udp::UDP_OK) {
+        set_failure(FAILURE_UDP_BUILD, "UDP 68->67 datagram build failed");
+        s_stats.errors++;
+        return DHCP_ERR_BUILD;
+    }
+
+    const ipv4::Status ipStatus = ipv4::build_packet_from_source(
+        s_ipWireBuffer, sizeof(s_ipWireBuffer), sourceIP, ipv4::ADDR_BROADCAST,
+        ipv4::PROTO_UDP, s_udpWireBuffer, udpLength, &ipLength);
+    if (ipStatus != ipv4::IP_OK) {
+        set_failure(FAILURE_IPV4_BUILD, "IPv4 bootstrap broadcast build failed");
+        s_stats.errors++;
+        return DHCP_ERR_BUILD;
+    }
+
+    const ethernet::Status ethernetStatus = ethernet::build_broadcast_frame(
+        s_frameWireBuffer, sizeof(s_frameWireBuffer), sourceMAC,
+        ethernet::ETHERTYPE_IPV4, s_ipWireBuffer, ipLength, &frameLength);
+    if (ethernetStatus != ethernet::ETH_OK) {
+        set_failure(FAILURE_ETHERNET_BUILD,
+                    "Ethernet broadcast frame build failed");
+        s_stats.errors++;
+        return DHCP_ERR_BUILD;
+    }
+
+    s_diagnostics.dhcpPacketLength = static_cast<uint16_t>(length);
+    s_diagnostics.frameLength = frameLength;
+    ethernet::mac_copy(s_diagnostics.sourceMAC, sourceMAC);
+    ethernet::mac_copy(s_diagnostics.destinationMAC, ethernet::BROADCAST_MAC);
+    s_diagnostics.txSubmissionAttempted = true;
+
+    const nic::TxDiagnostics before = device->tx;
+    const nic::Status nicStatus = nic::send_frame(s_frameWireBuffer, frameLength);
+    const nic::NICDevice* afterDevice = nic::get_device();
+    const nic::TxEvidence evidence = afterDevice
+        ? nic::observe_tx(before, afterDevice->tx, nicStatus)
+        : nic::TxEvidence{};
+    s_diagnostics.txDescriptorAccepted = evidence.descriptorAccepted;
+    s_diagnostics.txTailAdvanced = evidence.tailAdvanced;
+    s_diagnostics.txCompletionObserved = evidence.completionObserved;
+    s_diagnostics.txCompletionTimeout = evidence.completionTimedOut;
+    s_diagnostics.txDriverError = evidence.driverError;
+    if (afterDevice) {
+        s_diagnostics.txDescriptor = afterDevice->tx.lastDescriptor;
+        s_diagnostics.txTailBefore = afterDevice->tx.tailBefore;
+        s_diagnostics.txTailAfter = afterDevice->tx.tailAfter;
+        s_diagnostics.txDescriptorSubmissions =
+            afterDevice->tx.descriptorSubmissions;
+        s_diagnostics.txDescriptorCompletions =
+            afterDevice->tx.descriptorCompletions;
+        s_diagnostics.txHardwareTimeouts = afterDevice->tx.hardwareTimeouts;
+        s_diagnostics.txDriverStatus = afterDevice->tx.lastStatus;
+    }
+
+    if (nicStatus != nic::NIC_OK) {
+        set_failure(evidence.completionTimedOut
+                        ? FAILURE_TX_COMPLETION : FAILURE_TX_SUBMIT,
+                    evidence.completionTimedOut
+                        ? "NIC TX descriptor completion timed out"
+                        : "NIC TX submission failed");
         s_stats.errors++;
         return DHCP_ERR_SEND_FAIL;
     }
@@ -440,44 +617,62 @@ Status dhcp_receive(uint8_t* buffer, size_t max_len, uint32_t* server_ip)
 {
     if (!buffer || max_len == 0) return DHCP_ERR_INVALID;
 
-    // Create a temporary socket bound to the DHCP client port
-    int sock = socket::udp_socket();
-    if (sock == socket::INVALID_SOCKET) {
-        serial::puts("[DHCP] Failed to create socket\n");
-        return DHCP_ERR_NETWORK;
-    }
-
-    int bindResult = socket::udp_bind(sock, DHCP_CLIENT_PORT);
-    if (bindResult != socket::SOCK_OK && bindResult != socket::SOCK_ERR_INUSE) {
-        socket::udp_close(sock);
-        serial::puts("[DHCP] Failed to bind to port 68\n");
-        return DHCP_ERR_NETWORK;
-    }
-
-    socket::udp_setnonblocking(sock, true);
-
-    // Poll for a response with timeout
-    // Simple busy-wait with iteration count as timeout approximation
+    // Poll completed RX descriptors directly. DHCP is deliberately allowed
+    // to receive before IPv4 configuration exists, so this path does not use
+    // the configured-only socket factory or main-loop IPv4 polling.
     static const uint32_t POLL_ITERATIONS = 500000;
-    Status result = DHCP_ERR_TIMEOUT;
-
-    socket::SockAddr srcAddr;
+    static const uint16_t RX_FRAME_MAX = ethernet::MAX_FRAME_LEN;
     for (uint32_t i = 0; i < POLL_ITERATIONS; ++i) {
-        int received = socket::udp_recvfrom(sock, buffer,
-                                            static_cast<uint16_t>(max_len),
-                                            &srcAddr);
-        if (received > 0) {
-            if (server_ip) *server_ip = srcAddr.addr;
-            result = DHCP_OK;
-            break;
+        uint16_t frameLen = 0;
+        const nic::Status nicStatus = nic::receive_frame(
+            s_receiveFrame, RX_FRAME_MAX, &frameLen);
+        if (nicStatus == nic::NIC_OK) {
+            ethernet::ParsedFrame ethernetFrame;
+            if (ethernet::parse_frame(s_receiveFrame, frameLen, &ethernetFrame) !=
+                ethernet::ETH_OK) {
+                continue;
+            }
+            if (ethernetFrame.isBroadcast) {
+                s_diagnostics.rxEthernetBroadcast++;
+            }
+            if (ethernetFrame.etherType != ethernet::ETHERTYPE_IPV4) continue;
+            s_diagnostics.rxIPv4++;
+
+            ipv4::ParsedPacket ipPacket;
+            if (ipv4::parse_packet(ethernetFrame.payload,
+                                   ethernetFrame.payloadLen, &ipPacket) !=
+                ipv4::IP_OK) {
+                continue;
+            }
+            if (ipPacket.protocol != ipv4::PROTO_UDP) continue;
+            s_diagnostics.rxUDP++;
+
+            udp::ParsedDatagram datagram;
+            if (udp::parse_datagram(ipPacket.payload, ipPacket.payloadLen,
+                                    ipPacket.srcAddr, ipPacket.dstAddr,
+                                    &datagram) != udp::UDP_OK ||
+                !datagram.checksumValid) {
+                continue;
+            }
+            if (datagram.dstPort != DHCP_CLIENT_PORT) continue;
+            s_diagnostics.rxDHCP++;
+            if (datagram.dataLen < 240u || datagram.dataLen > max_len) {
+                s_diagnostics.rxDHCPMalformed++;
+                continue;
+            }
+            memzero(buffer, static_cast<uint32_t>(max_len));
+            memcopy(buffer, datagram.data, datagram.dataLen);
+            if (server_ip) *server_ip = ipPacket.srcAddr;
+            return DHCP_OK;
         }
 
-        // Brief delay (architecture-dependent, simple spin)
+        if (nicStatus != nic::NIC_ERR_RX_EMPTY) return DHCP_ERR_NETWORK;
+
+        // Brief bounded delay (architecture-dependent, simple spin).
         for (volatile uint32_t d = 0; d < 100; ++d) { }
     }
 
-    socket::udp_close(sock);
-    return result;
+    return DHCP_ERR_TIMEOUT;
 }
 
 // ================================================================
@@ -491,7 +686,16 @@ static Status do_discover(const uint8_t* mac, uint32_t xid,
     uint16_t pktLen = 0;
 
     Status st = build_discover(s_txBuffer, sizeof(s_txBuffer), mac, xid, &pktLen);
-    if (st != DHCP_OK) return st;
+    if (st != DHCP_OK) {
+        set_failure(FAILURE_DHCP_BUILD, "DHCP DISCOVER packet build failed");
+        return DHCP_ERR_BUILD;
+    }
+
+    s_stats.discoverBuilt++;
+    s_diagnostics.discoverPacketBuilt = true;
+    s_diagnostics.transactionId = xid;
+    s_diagnostics.dhcpPacketLength = pktLen;
+    s_diagnostics.lastMessageType = DHCPDISCOVER;
 
     serial::puts("[DHCP] Sending DISCOVER (xid=0x");
     serial::put_hex32(xid);
@@ -499,29 +703,55 @@ static Status do_discover(const uint8_t* mac, uint32_t xid,
 
     s_state = STATE_SELECTING;
 
+    bool submitted = false;
     for (uint8_t attempt = 0; attempt < MAX_DISCOVER_RETRIES; ++attempt) {
         s_stats.discoverAttempts++;
+        s_diagnostics.lastMessageType = DHCPDISCOVER;
         st = dhcp_send(s_txBuffer, pktLen, ipv4::ADDR_BROADCAST);
         if (st != DHCP_OK) {
             s_stats.discoverSendFailures++;
+            if (s_diagnostics.txCompletionTimeout) {
+                s_stats.discoverTxTimeouts++;
+            }
+            if (st == DHCP_ERR_BUILD || st == DHCP_ERR_NO_NIC ||
+                st == DHCP_ERR_NOT_READY || st == DHCP_ERR_LINK_DOWN) {
+                return st;
+            }
             continue;
+        }
+        submitted = true;
+        if (s_diagnostics.txDescriptorAccepted) {
+            s_stats.discoverSubmissions++;
+        }
+        if (s_diagnostics.txCompletionObserved) {
+            s_stats.discoverCompletions++;
         }
         s_stats.discoversSent++;
 
         // Wait for OFFER
+        s_diagnostics.waitForOfferBegun = true;
         uint32_t fromIP = 0;
         st = dhcp_receive(s_rxBuffer, sizeof(s_rxBuffer), &fromIP);
         if (st == DHCP_OK) {
             Packet* resp = reinterpret_cast<Packet*>(s_rxBuffer);
 
             // Validate: must be BOOTREPLY with our xid
-            if (resp->op != BOOTREPLY) continue;
+            if (resp->op != BOOTREPLY) {
+                s_diagnostics.rxDHCPMalformed++;
+                continue;
+            }
             if (dhcp_ntohl(resp->xid) != xid) continue;
 
             // Parse options
             ParsedOptions opts;
-            if (parse_options(resp, &opts) != DHCP_OK) continue;
-            if (opts.messageType != DHCPOFFER) continue;
+            if (parse_options(resp, &opts) != DHCP_OK) {
+                s_diagnostics.rxDHCPMalformed++;
+                continue;
+            }
+            if (opts.messageType != DHCPOFFER) {
+                s_diagnostics.rxDHCPMalformed++;
+                continue;
+            }
 
             // Valid OFFER received
             memcopy(offerPkt, resp, sizeof(Packet));
@@ -539,12 +769,23 @@ static Status do_discover(const uint8_t* mac, uint32_t xid,
 
         if (st == DHCP_ERR_TIMEOUT) {
             s_stats.timeouts++;
+            s_diagnostics.waitForOfferTimeout = true;
             serial::puts("[DHCP] DISCOVER timeout, retrying...\n");
         } else {
             s_stats.errors++;
         }
     }
 
+    if (!submitted) {
+        if (s_diagnostics.failureStage == FAILURE_NONE) {
+            set_failure(FAILURE_TX_SUBMIT,
+                        "no DHCP DISCOVER reached NIC submission");
+        }
+        return DHCP_ERR_SEND_FAIL;
+    }
+
+    set_failure(FAILURE_OFFER_WAIT,
+                "DISCOVER transmitted but no valid OFFER received");
     return DHCP_ERR_NO_OFFER;
 }
 
@@ -557,7 +798,10 @@ static Status do_request(const uint8_t* mac, uint32_t xid,
 
     Status st = build_request(s_txBuffer, sizeof(s_txBuffer), mac, xid,
                               offeredIP, serverIP, &pktLen);
-    if (st != DHCP_OK) return st;
+    if (st != DHCP_OK) {
+        set_failure(FAILURE_DHCP_BUILD, "DHCP REQUEST packet build failed");
+        return DHCP_ERR_BUILD;
+    }
 
     serial::puts("[DHCP] Sending REQUEST for IP: ");
     char ipStr[16];
@@ -567,14 +811,22 @@ static Status do_request(const uint8_t* mac, uint32_t xid,
 
     s_state = STATE_REQUESTING;
 
+    bool submitted = false;
     for (uint8_t attempt = 0; attempt < MAX_REQUEST_RETRIES; ++attempt) {
+        s_diagnostics.lastMessageType = DHCPREQUEST;
         st = dhcp_send(s_txBuffer, pktLen, ipv4::ADDR_BROADCAST);
         if (st != DHCP_OK) {
+            if (st == DHCP_ERR_BUILD || st == DHCP_ERR_NO_NIC ||
+                st == DHCP_ERR_NOT_READY || st == DHCP_ERR_LINK_DOWN) {
+                return st;
+            }
             continue;
         }
+        submitted = true;
         s_stats.requestsSent++;
 
         // Wait for ACK or NAK
+        s_diagnostics.waitForAckBegun = true;
         uint32_t fromIP = 0;
         st = dhcp_receive(s_rxBuffer, sizeof(s_rxBuffer), &fromIP);
         if (st == DHCP_OK) {
@@ -605,12 +857,21 @@ static Status do_request(const uint8_t* mac, uint32_t xid,
 
         if (st == DHCP_ERR_TIMEOUT) {
             s_stats.timeouts++;
+            s_diagnostics.waitForAckTimeout = true;
             serial::puts("[DHCP] REQUEST timeout, retrying...\n");
         } else {
             s_stats.errors++;
         }
     }
 
+    if (!submitted) {
+        set_failure(FAILURE_TX_SUBMIT,
+                    "no DHCP REQUEST reached NIC submission");
+        return DHCP_ERR_SEND_FAIL;
+    }
+
+    set_failure(FAILURE_ACK_WAIT,
+                "DHCP REQUEST transmitted but no ACK was received");
     return DHCP_ERR_NO_ACK;
 }
 
@@ -659,25 +920,46 @@ static Status apply_lease(const Packet* ackPkt, const ParsedOptions* opts,
 
 Status discover()
 {
-    if (!nic::is_active()) {
-        serial::puts("[DHCP] No NIC available\n");
+    reset_invocation_diagnostics();
+    s_state = STATE_INIT;
+
+    const nic::NICDevice* device = nic::get_device();
+    s_diagnostics.suitableInterfaceFound =
+        device && device->driverBound;
+    if (!device || !s_diagnostics.suitableInterfaceFound) {
+        set_failure(FAILURE_INTERFACE, "no suitable network interface found");
+        s_state = STATE_ERROR;
+        serial::puts("[DHCP] No suitable NIC available\n");
         return DHCP_ERR_NO_NIC;
     }
 
-    // A manual configuration is no longer authoritative once discovery is
-    // requested. Preserve the emulated QEMU source state because its
-    // established user-networking path uses the configured 10.0.2.x source
-    // address while probing for a lease.
-    const ipv4::NetworkConfig* currentConfig = ipv4::get_config();
-    if (!currentConfig || currentConfig->mode != ipv4::CONFIG_QEMU_DEFAULT) {
-        ipv4::select_dhcp_mode();
+    s_diagnostics.interfaceReady = nic::is_driver_ready(*device);
+    if (!s_diagnostics.interfaceReady) {
+        set_failure(FAILURE_READY, "interface driver is not ready");
+        s_state = STATE_ERROR;
+        serial::puts("[DHCP] NIC driver is not ready\n");
+        return DHCP_ERR_NOT_READY;
     }
 
-    const uint8_t* mac = nic::get_mac_address();
-    if (!mac) return DHCP_ERR_NO_NIC;
+    s_diagnostics.linkUp = nic::get_link_state() == nic::NIC_LINK_UP;
+    if (!s_diagnostics.linkUp) {
+        set_failure(FAILURE_LINK, "interface link is down");
+        s_state = STATE_ERROR;
+        serial::puts("[DHCP] NIC link is down\n");
+        return DHCP_ERR_LINK_DOWN;
+    }
 
-    // Bind DHCP client port in UDP layer before starting
-    udp::bind(DHCP_CLIENT_PORT, ipv4::ADDR_ANY, nullptr);
+    // A DHCP attempt owns the active IPv4 mode until it succeeds. This clears
+    // any stale static/QEMU projection but intentionally does not write a
+    // placeholder address; the bootstrap frame below supplies 0.0.0.0.
+    set_automatic_mode();
+
+    const uint8_t* mac = nic::get_mac_address();
+    if (!mac) {
+        set_failure(FAILURE_INTERFACE, "interface has no station MAC");
+        s_state = STATE_ERROR;
+        return DHCP_ERR_NO_NIC;
+    }
 
     uint32_t xid = generate_xid();
 
@@ -688,7 +970,6 @@ Status discover()
     if (st != DHCP_OK) {
         s_state = STATE_ERROR;
         serial::puts("[DHCP] Discovery failed\n");
-        udp::unbind(DHCP_CLIENT_PORT);
         return st;
     }
 
@@ -708,11 +989,9 @@ Status discover()
             st = apply_lease(&ackPkt, &ackOpts, xid);
             if (st != DHCP_OK) {
                 s_state = STATE_ERROR;
-                udp::unbind(DHCP_CLIENT_PORT);
                 return st;
             }
             dhcp_print_info();
-            udp::unbind(DHCP_CLIENT_PORT);
             return DHCP_OK;
         }
 
@@ -734,7 +1013,6 @@ Status discover()
 
     s_state = STATE_ERROR;
     serial::puts("[DHCP] Configuration failed\n");
-    udp::unbind(DHCP_CLIENT_PORT);
     return st;
 }
 
@@ -745,6 +1023,11 @@ Status discover()
 const LeaseInfo* get_lease()
 {
     return &s_lease;
+}
+
+const Diagnostics* get_diagnostics()
+{
+    return &s_diagnostics;
 }
 
 ClientState get_state()
@@ -1036,6 +1319,25 @@ const char* state_to_string(ClientState state)
     case STATE_RELEASED:   return "RELEASED";
     case STATE_ERROR:      return "ERROR";
     default:               return "UNKNOWN";
+    }
+}
+
+const char* failure_stage_name(FailureStage stage)
+{
+    switch (stage) {
+    case FAILURE_INTERFACE:       return "interface";
+    case FAILURE_READY:           return "ready";
+    case FAILURE_LINK:            return "link";
+    case FAILURE_DHCP_BUILD:      return "DHCP build";
+    case FAILURE_UDP_BUILD:       return "UDP build";
+    case FAILURE_IPV4_BUILD:      return "IPv4 build";
+    case FAILURE_ETHERNET_BUILD:  return "Ethernet build";
+    case FAILURE_TX_SUBMIT:       return "TX submit";
+    case FAILURE_TX_COMPLETION:   return "TX completion";
+    case FAILURE_OFFER_WAIT:      return "offer wait";
+    case FAILURE_ACK_WAIT:        return "ACK wait";
+    case FAILURE_OFFER_PARSE:     return "offer parse";
+    default:                      return "none";
     }
 }
 

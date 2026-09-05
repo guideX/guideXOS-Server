@@ -286,32 +286,24 @@ Status parse_datagram(const uint8_t* data, uint16_t len,
 // Datagram Transmission
 // ================================================================
 
-Status send(uint16_t srcPort, uint32_t dstIP, uint16_t dstPort,
-            const uint8_t* data, uint16_t len)
+Status build_datagram(uint8_t* buffer, uint16_t bufferSize,
+                      uint16_t srcPort, uint16_t dstPort,
+                      uint32_t srcIP, uint32_t dstIP,
+                      const uint8_t* data, uint16_t len,
+                      uint16_t* packetLen)
 {
-    if (!ipv4::is_configured()) {
-        s_stats.txErrors++;
-        return UDP_ERR_NOT_CONFIGURED;
-    }
-    
     if (len > MTU_PAYLOAD) {
-        s_stats.txErrors++;
         return UDP_ERR_TOO_LONG;
     }
-    
-    // Build UDP packet
+
     uint16_t udpLen = HEADER_LEN + len;
-    uint8_t packet[1500];  // Max Ethernet payload
-    
-    if (udpLen > sizeof(packet)) {
-        s_stats.txErrors++;
-        return UDP_ERR_TOO_LONG;
-    }
-    
-    memzero(packet, sizeof(packet));
+    if (!buffer || bufferSize < udpLen) return UDP_ERR_BUFFER_SMALL;
+    if (!data && len > 0) return UDP_ERR_NULL_PTR;
+
+    memzero(buffer, bufferSize);
     
     // Fill UDP header
-    Header* hdr = reinterpret_cast<Header*>(packet);
+    Header* hdr = reinterpret_cast<Header*>(buffer);
     hdr->srcPort = ethernet::htons(srcPort);
     hdr->dstPort = ethernet::htons(dstPort);
     hdr->length = ethernet::htons(udpLen);
@@ -319,10 +311,31 @@ Status send(uint16_t srcPort, uint32_t dstIP, uint16_t dstPort,
     
     // Copy payload
     if (data && len > 0) {
-        memcopy(packet + HEADER_LEN, data, len);
+        memcopy(buffer + HEADER_LEN, data, len);
     }
     
-    hdr->checksum = calculate_checksum(ipv4::get_config()->ipAddr, dstIP, packet, udpLen);
+    hdr->checksum = calculate_checksum(srcIP, dstIP, buffer, udpLen);
+    if (packetLen) *packetLen = udpLen;
+    return UDP_OK;
+}
+
+Status send(uint16_t srcPort, uint32_t dstIP, uint16_t dstPort,
+            const uint8_t* data, uint16_t len)
+{
+    if (!ipv4::is_configured()) {
+        s_stats.txErrors++;
+        return UDP_ERR_NOT_CONFIGURED;
+    }
+
+    uint8_t packet[1500];  // Max Ethernet payload
+    uint16_t udpLen = 0;
+    Status buildStatus = build_datagram(packet, sizeof(packet), srcPort,
+                                        dstPort, ipv4::get_config()->ipAddr,
+                                        dstIP, data, len, &udpLen);
+    if (buildStatus != UDP_OK) {
+        s_stats.txErrors++;
+        return buildStatus;
+    }
     
     // Send via IPv4
     ipv4::Status ipStatus = ipv4::send_packet(

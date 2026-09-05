@@ -455,14 +455,49 @@ struct TxDiagnostics {
     uint32_t descriptorSubmissions;
     uint32_t descriptorCompletions;
     uint32_t hardwareTimeouts;
+    uint32_t driverErrors;
     uint16_t lastDescriptor;
     uint16_t tailBefore;
     uint16_t tailAfter;
+    uint16_t lastLength;
+    uint64_t lastBufferAddress;
+    uint8_t  lastCommand;
     uint8_t  lastDescriptorStatus;
+    uint8_t  lastStatus;
     uint32_t observedHead;
     uint32_t observedTail;
     uint32_t control;
 };
+
+// A bounded observation of one send_frame() call. This keeps upper-layer
+// diagnostics tied to descriptor deltas rather than guessing from a generic
+// packet counter.
+struct TxEvidence {
+    bool descriptorAccepted;
+    bool tailAdvanced;
+    bool completionObserved;
+    bool completionTimedOut;
+    bool driverError;
+};
+
+inline TxEvidence observe_tx(const TxDiagnostics& before,
+                             const TxDiagnostics& after,
+                             Status result)
+{
+    TxEvidence evidence = {};
+    evidence.descriptorAccepted =
+        after.descriptorSubmissions > before.descriptorSubmissions;
+    evidence.tailAdvanced = evidence.descriptorAccepted &&
+        (after.tailAfter != after.tailBefore);
+    evidence.completionObserved =
+        after.descriptorCompletions > before.descriptorCompletions;
+    evidence.completionTimedOut =
+        after.hardwareTimeouts > before.hardwareTimeouts;
+    evidence.driverError = after.driverErrors > before.driverErrors ||
+        (result != NIC_OK && !evidence.completionTimedOut &&
+         !evidence.descriptorAccepted);
+    return evidence;
+}
 
 // ================================================================
 // NIC device descriptor

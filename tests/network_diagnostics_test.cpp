@@ -164,6 +164,47 @@ int main()
     assert(strcmp(nic::link_state_name(nic::NIC_LINK_DOWN), "DOWN") == 0);
     assert(strcmp(nic::link_state_name(nic::NIC_LINK_UNKNOWN), "UNKNOWN") == 0);
 
+    // TX provenance is based on observable descriptor deltas. A completed
+    // descriptor, a submission that never completes, and a pre-submit error
+    // must remain distinguishable without touching hardware in this test.
+    nic::TxDiagnostics before = {};
+    nic::TxDiagnostics completed = before;
+    completed.descriptorSubmissions = 1;
+    completed.descriptorCompletions = 1;
+    completed.tailBefore = 3;
+    completed.tailAfter = 4;
+    nic::TxEvidence completedEvidence =
+        nic::observe_tx(before, completed, nic::NIC_OK);
+    assert(completedEvidence.descriptorAccepted);
+    assert(completedEvidence.tailAdvanced);
+    assert(completedEvidence.completionObserved);
+    assert(!completedEvidence.completionTimedOut);
+    assert(!completedEvidence.driverError);
+
+    nic::TxDiagnostics timedOut = before;
+    timedOut.descriptorSubmissions = 1;
+    timedOut.tailBefore = 4;
+    timedOut.tailAfter = 5;
+    timedOut.hardwareTimeouts = 1;
+    timedOut.driverErrors = 0;
+    nic::TxEvidence timeoutEvidence =
+        nic::observe_tx(before, timedOut, nic::NIC_ERR_INIT_FAIL);
+    assert(timeoutEvidence.descriptorAccepted);
+    assert(timeoutEvidence.tailAdvanced);
+    assert(!timeoutEvidence.completionObserved);
+    assert(timeoutEvidence.completionTimedOut);
+    assert(!timeoutEvidence.driverError);
+
+    nic::TxDiagnostics rejected = before;
+    rejected.driverErrors = 1;
+    nic::TxEvidence rejectedEvidence =
+        nic::observe_tx(before, rejected, nic::NIC_ERR_TX_FULL);
+    assert(!rejectedEvidence.descriptorAccepted);
+    assert(!rejectedEvidence.tailAdvanced);
+    assert(!rejectedEvidence.completionObserved);
+    assert(!rejectedEvidence.completionTimedOut);
+    assert(rejectedEvidence.driverError);
+
     // Registration and readiness are distinct state gates.
     readyDevice.phyAccess = nic::NIC_PHY_OK;
     readyDevice.initStage = nic::NIC_INIT_TX_RING;

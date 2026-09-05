@@ -199,6 +199,9 @@ enum Status : uint8_t {
     DHCP_ERR_NOT_BOUND   = 8,   // Not in BOUND state
     DHCP_ERR_SEND_FAIL   = 9,   // UDP send failed
     DHCP_ERR_PARSE       = 10,  // Failed to parse response
+    DHCP_ERR_NOT_READY   = 11,  // NIC exists but driver is not ready
+    DHCP_ERR_LINK_DOWN   = 12,  // NIC is ready but carrier is down
+    DHCP_ERR_BUILD       = 13,  // DHCP wire packet could not be built
 };
 
 // ================================================================
@@ -206,9 +209,13 @@ enum Status : uint8_t {
 // ================================================================
 
 struct Statistics {
-    uint32_t discoverAttempts;    // DISCOVER packets generated before send
-    uint32_t discoversSent;
+    uint32_t discoverBuilt;       // Valid DHCP DISCOVER payload constructed
+    uint32_t discoverAttempts;    // Attempts to submit a built DISCOVER
+    uint32_t discoverSubmissions; // NIC descriptor accepted and TDT advanced
+    uint32_t discoverCompletions; // NIC TX completion observed
+    uint32_t discoversSent;       // DISCOVER TX completed successfully
     uint32_t discoverSendFailures;
+    uint32_t discoverTxTimeouts;
     uint32_t offersReceived;
     uint32_t requestsSent;
     uint32_t acksReceived;
@@ -219,12 +226,72 @@ struct Statistics {
     uint32_t renewals;
 };
 
+enum FailureStage : uint8_t {
+    FAILURE_NONE = 0,
+    FAILURE_INTERFACE,
+    FAILURE_READY,
+    FAILURE_LINK,
+    FAILURE_DHCP_BUILD,
+    FAILURE_UDP_BUILD,
+    FAILURE_IPV4_BUILD,
+    FAILURE_ETHERNET_BUILD,
+    FAILURE_TX_SUBMIT,
+    FAILURE_TX_COMPLETION,
+    FAILURE_OFFER_WAIT,
+    FAILURE_ACK_WAIT,
+    FAILURE_OFFER_PARSE,
+};
+
+struct Diagnostics {
+    uint32_t commandInvocations;
+    bool suitableInterfaceFound;
+    bool interfaceReady;
+    bool linkUp;
+    bool discoverPacketBuilt;
+    uint32_t transactionId;
+    uint16_t dhcpPacketLength;
+    uint16_t frameLength;
+    uint8_t sourceMAC[6];
+    uint8_t destinationMAC[6];
+    uint16_t sourcePort;
+    uint16_t destinationPort;
+    uint8_t lastMessageType;
+    bool txSubmissionAttempted;
+    bool txDescriptorAccepted;
+    bool txTailAdvanced;
+    bool txCompletionObserved;
+    bool txCompletionTimeout;
+    bool txDriverError;
+    uint8_t txDriverStatus;
+    uint16_t txDescriptor;
+    uint16_t txTailBefore;
+    uint16_t txTailAfter;
+    uint32_t txDescriptorSubmissions;
+    uint32_t txDescriptorCompletions;
+    uint32_t txHardwareTimeouts;
+    uint32_t rxEthernetBroadcast;
+    uint32_t rxIPv4;
+    uint32_t rxUDP;
+    uint32_t rxDHCP;
+    uint32_t rxDHCPMalformed;
+    bool waitForOfferBegun;
+    bool waitForOfferTimeout;
+    bool waitForAckBegun;
+    bool waitForAckTimeout;
+    FailureStage failureStage;
+    char failureReason[96];
+};
+
 // ================================================================
 // Initialization
 // ================================================================
 
 // Initialize DHCP client
 void init();
+
+// Record that a shell/manual DHCP operation was requested. The discovery
+// routine itself is also used by lease renewal and does not infer this bit.
+void note_command_invocation();
 
 // Select automatic/DHCP mode without starting a blocking discovery. This
 // clears any lease and the active IPv4 configuration through the shared
@@ -300,10 +367,12 @@ Status build_release(uint8_t* buffer, uint16_t bufferSize,
                      uint16_t* packetLen);
 
 // ================================================================
-// Packet Send / Receive (using existing UDP stack)
+// Packet Send / Receive (bootstrap raw path plus configured UDP path)
 // ================================================================
 
-// Send a DHCP packet via UDP broadcast
+// Send a DHCP packet. Broadcast bootstrap traffic is built through UDP/IPv4
+// wire helpers and submitted directly to the NIC; configured unicast traffic
+// uses the normal UDP/IPv4 route.
 //
 // Parameters:
 //   packet    - DHCP packet buffer
@@ -313,7 +382,8 @@ Status build_release(uint8_t* buffer, uint16_t bufferSize,
 // Returns DHCP_OK on success
 Status dhcp_send(uint8_t* packet, size_t length, uint32_t server_ip);
 
-// Receive a DHCP packet via UDP
+// Receive a DHCP packet by bounded direct RX polling so an unconfigured host
+// can accept an OFFER.
 //
 // Parameters:
 //   buffer    - Output buffer
@@ -370,6 +440,8 @@ const char* state_to_string(ClientState state);
 
 const Statistics* get_stats();
 void reset_stats();
+const Diagnostics* get_diagnostics();
+const char* failure_stage_name(FailureStage stage);
 
 } // namespace dhcp
 } // namespace kernel

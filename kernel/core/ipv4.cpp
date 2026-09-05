@@ -811,14 +811,30 @@ Status build_packet(uint8_t* buffer,
 {
     if (!buffer) return IP_ERR_NULL_PTR;
     if (!s_config.configured) return IP_ERR_NOT_CONFIGURED;
-    
+
+    return build_packet_from_source(buffer, bufferSize, s_config.ipAddr,
+                                    dstAddr, protocol, payload, payloadLen,
+                                    packetLen);
+}
+
+Status build_packet_from_source(uint8_t* buffer,
+                                uint16_t bufferSize,
+                                uint32_t srcAddr,
+                                uint32_t dstAddr,
+                                uint8_t protocol,
+                                const uint8_t* payload,
+                                uint16_t payloadLen,
+                                uint16_t* packetLen)
+{
+    if (!buffer) return IP_ERR_NULL_PTR;
+
+    if (payloadLen > MAX_PAYLOAD) return IP_ERR_TOO_LONG;
     uint16_t totalLen = MIN_HEADER_LEN + payloadLen;
     if (totalLen > bufferSize) return IP_ERR_BUFFER_SMALL;
-    if (payloadLen > MAX_PAYLOAD) return IP_ERR_TOO_LONG;
     
     // Build header
     Header* hdr = reinterpret_cast<Header*>(buffer);
-    Status status = build_header(hdr, s_config.ipAddr, dstAddr, protocol, payloadLen);
+    Status status = build_header(hdr, srcAddr, dstAddr, protocol, payloadLen);
     if (status != IP_OK) return status;
     
     // Copy payload

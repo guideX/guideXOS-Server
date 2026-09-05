@@ -230,6 +230,15 @@ Status parse_datagram(const uint8_t* data, uint16_t len,
 Status send(uint16_t srcPort, uint32_t dstIP, uint16_t dstPort,
             const uint8_t* data, uint16_t len);
 
+// Build a UDP datagram without requiring an active IPv4 configuration. The
+// caller supplies the addresses used for the checksum; this is needed by
+// bootstrap protocols that use 0.0.0.0 as their source address.
+Status build_datagram(uint8_t* buffer, uint16_t bufferSize,
+                      uint16_t srcPort, uint16_t dstPort,
+                      uint32_t srcIP, uint32_t dstIP,
+                      const uint8_t* data, uint16_t len,
+                      uint16_t* packetLen);
+
 // Convenience function: send UDP datagram (as specified in requirements)
 inline Status udp_send(uint16_t port, uint32_t dst_ip, uint16_t dst_port,
                        const uint8_t* data, uint16_t length)

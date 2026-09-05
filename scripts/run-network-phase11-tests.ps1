@@ -18,6 +18,38 @@ if ($LASTEXITCODE -ne 0) { throw 'network_diagnostics_test compile failed' }
 & $diagnosticsExe
 if ($LASTEXITCODE -ne 0) { throw 'network_diagnostics_test failed' }
 
+$wireExe = Join-Path $testDir 'dhcp_wire_test.exe'
+& $compiler.Source -std=c++14 -O2 -Wall -Wextra `
+    '-U__x86_64__' '-U__x86_64' '-U__amd64' '-U__amd64__' '-D__aarch64__' `
+    '-ffunction-sections' '-fdata-sections' `
+    -I (Join-Path $root 'kernel/core/include') `
+    -I (Join-Path $root 'kernel/arch/arm64/include') `
+    (Join-Path $root 'tests/dhcp_wire_test.cpp') `
+    (Join-Path $root 'kernel/core/dhcp.cpp') `
+    (Join-Path $root 'kernel/core/udp.cpp') `
+    (Join-Path $root 'kernel/core/ipv4.cpp') `
+    (Join-Path $root 'kernel/core/ethernet.cpp') `
+    '-Wl,--gc-sections' -o $wireExe
+if ($LASTEXITCODE -ne 0) { throw 'dhcp_wire_test compile failed' }
+& $wireExe
+if ($LASTEXITCODE -ne 0) { throw 'dhcp_wire_test failed' }
+
+$stateExe = Join-Path $testDir 'dhcp_state_test.exe'
+& $compiler.Source -std=c++14 -O2 -Wall -Wextra `
+    '-U__x86_64__' '-U__x86_64' '-U__amd64' '-U__amd64__' '-D__aarch64__' `
+    '-ffunction-sections' '-fdata-sections' `
+    -I (Join-Path $root 'kernel/core/include') `
+    -I (Join-Path $root 'kernel/arch/arm64/include') `
+    (Join-Path $root 'tests/dhcp_state_test.cpp') `
+    (Join-Path $root 'kernel/core/dhcp.cpp') `
+    (Join-Path $root 'kernel/core/udp.cpp') `
+    (Join-Path $root 'kernel/core/ipv4.cpp') `
+    (Join-Path $root 'kernel/core/ethernet.cpp') `
+    '-Wl,--gc-sections' -o $stateExe
+if ($LASTEXITCODE -ne 0) { throw 'dhcp_state_test compile failed' }
+& $stateExe
+if ($LASTEXITCODE -ne 0) { throw 'dhcp_state_test failed' }
+
 $configurationExe = Join-Path $testDir 'network_configuration_test.exe'
 & $compiler.Source -std=c++14 -O2 -Wall -Wextra `
     '-U__x86_64__' '-U__x86_64' '-U__amd64' '-U__amd64__' '-D__aarch64__' `
