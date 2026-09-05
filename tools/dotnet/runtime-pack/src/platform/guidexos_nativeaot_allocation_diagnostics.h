@@ -2310,6 +2310,13 @@ typedef struct guidexos_nativeaot_c011ec67_region_event_record {
     uintptr_t freeBytes;
     uintptr_t freeCountBefore;
     uintptr_t freeCountAfter;
+    uintptr_t headBefore;
+    uintptr_t headAfter;
+    uintptr_t tailBefore;
+    uintptr_t tailAfter;
+    uintptr_t liveBytes;
+    uint32_t planGenerationBefore;
+    uint32_t planGenerationAfter;
     uintptr_t allocatorFreeBefore;
     uintptr_t allocatorFreeAfter;
 } guidexos_nativeaot_c011ec67_region_event_record;
