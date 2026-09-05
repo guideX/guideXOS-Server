@@ -40,6 +40,11 @@ LinkState get_link_state()
     return NIC_LINK_UP;
 }
 
+LinkRefreshResult refresh_link_state()
+{
+    return LinkRefreshResult::Up;
+}
+
 const NICDevice* get_device()
 {
     return &g_device;

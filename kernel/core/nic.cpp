@@ -136,6 +136,18 @@ static void set_init_failure(InitStage stage, const char* reason,
     serial::putc('\n');
 }
 
+static void set_link_failure(const char* reason)
+{
+    uint32_t i = 0;
+    if (reason != nullptr) {
+        while (reason[i] != '\0' && i + 1u < sizeof(s_device.linkFailureReason)) {
+            s_device.linkFailureReason[i] = reason[i];
+            ++i;
+        }
+    }
+    s_device.linkFailureReason[i] = '\0';
+}
+
 static void phase5_stage_number(uint8_t stage)
 {
     serial::putc(static_cast<char>('0' + (stage <= 9u ? stage : 9u)));
@@ -923,8 +935,11 @@ static bool read_i219_phy_status(uint64_t mmioBase)
     s_device.phyId1 = phyId1;
     s_device.phyId2 = phyId2;
     s_device.phyStatusValue = phyStatus;
+    s_device.phyStatusValid = true;
+    s_device.linkSource = LinkSource::Phy;
     s_device.phyAccess = NIC_PHY_OK;
-    s_device.link = (phyStatus & I219_PHY_STATUS_LINK) ? NIC_LINK_UP : NIC_LINK_DOWN;
+    s_device.link = link_state_from_i219_phy_status(phyStatus);
+    s_device.lastLinkRefreshState = NIC_LINK_UNKNOWN;
     if (s_device.link == NIC_LINK_DOWN) {
         s_device.negotiatedSpeed = 0;
         s_device.negotiatedFullDuplex = false;
@@ -938,6 +953,139 @@ static bool read_i219_phy_status(uint64_t mmioBase)
     }
     s_device.negotiatedFullDuplex = (phyStatus & I219_PHY_STATUS_DUPLEX) != 0u;
     return true;
+}
+
+static void reset_link_refresh_diagnostics(uint32_t pollLimit)
+{
+    s_device.linkRefreshAttempted = true;
+    s_device.linkRefreshResult = LinkRefreshResult::NotAttempted;
+    s_device.lastLinkRefreshState = NIC_LINK_UNKNOWN;
+    s_device.linkSource = LinkSource::None;
+    s_device.linkRefreshTimedOut = false;
+    s_device.linkRefreshPollCount = 0;
+    s_device.linkRefreshPollLimit = pollLimit;
+    s_device.linkFailureReason[0] = '\0';
+    s_device.phyBmsrFirstValue = 0;
+    s_device.phyBmsrSecondValue = 0;
+    s_device.phyBmsrFirstValid = false;
+    s_device.phyBmsrSecondValid = false;
+    s_device.phyStatusValid = false;
+    s_device.phyBmsrReadCount = 0;
+    s_device.linkMacStatusValue = 0xFFFFFFFFu;
+    s_device.linkMacStatusValid = false;
+}
+
+static void record_i219_link_evidence(const I219LinkEvidence& evidence,
+                                      uint32_t macStatus)
+{
+    s_device.phyBmsrFirstValid = evidence.bmsrFirstValid;
+    s_device.phyBmsrFirstValue = evidence.bmsrFirst;
+    s_device.phyBmsrSecondValid = evidence.bmsrSecondValid;
+    s_device.phyBmsrSecondValue = evidence.bmsrSecond;
+    s_device.phyStatusValid = evidence.phyStatusValid;
+    if (evidence.phyStatusValid) s_device.phyStatusValue = evidence.phyStatus;
+    s_device.linkMacStatusValue = macStatus;
+    s_device.linkMacStatusValid = macStatus != 0xFFFFFFFFu;
+}
+
+static void update_i219_negotiated_state(uint16_t phyStatus)
+{
+    if ((phyStatus & I219_PHY_STATUS_LINK) == 0u) {
+        s_device.negotiatedSpeed = 0;
+        s_device.negotiatedFullDuplex = false;
+        return;
+    }
+    switch (phyStatus & I219_PHY_STATUS_SPEED_MASK) {
+        case (0u << 8): s_device.negotiatedSpeed = 10; break;
+        case (1u << 8): s_device.negotiatedSpeed = 100; break;
+        case (2u << 8): s_device.negotiatedSpeed = 1000; break;
+        default: s_device.negotiatedSpeed = 0; break;
+    }
+    s_device.negotiatedFullDuplex = (phyStatus & I219_PHY_STATUS_DUPLEX) != 0u;
+}
+
+static LinkRefreshResult refresh_i219_link_state(uint64_t mmioBase,
+                                                 uint32_t pollLimit)
+{
+    reset_link_refresh_diagnostics(pollLimit);
+    if (mmioBase == 0 || !s_device.mmioMapped || pollLimit == 0u) {
+        s_device.link = NIC_LINK_READ_ERROR;
+        s_device.linkRefreshResult = LinkRefreshResult::ReadError;
+        set_link_failure("I219 link refresh has no usable MMIO mapping");
+        return s_device.linkRefreshResult;
+    }
+
+    for (uint32_t poll = 0; poll < pollLimit; ++poll) {
+        I219LinkEvidence evidence = {};
+        uint16_t value = 0;
+
+        ++s_device.phyBmsrReadCount;
+        evidence.bmsrFirstValid =
+            mdic_read(mmioBase, I219_PHY_ADDRESS, I219_PHY_BMSR_REG, &value);
+        if (evidence.bmsrFirstValid) evidence.bmsrFirst = value;
+
+        ++s_device.phyBmsrReadCount;
+        value = 0;
+        evidence.bmsrSecondValid =
+            mdic_read(mmioBase, I219_PHY_ADDRESS, I219_PHY_BMSR_REG, &value);
+        if (evidence.bmsrSecondValid) evidence.bmsrSecond = value;
+
+        value = 0;
+        evidence.phyStatusValid =
+            mdic_read(mmioBase, I219_PHY_ADDRESS, I219_PHY_STATUS_REG, &value);
+        if (evidence.phyStatusValid) evidence.phyStatus = value;
+
+        const uint32_t macStatus = mmio_read32(mmioBase, E1000_STATUS);
+        s_device.statusValue = macStatus;
+        record_i219_link_evidence(evidence, macStatus);
+        s_device.linkRefreshPollCount = poll + 1u;
+
+        const LinkEvaluation evaluation = evaluate_i219_link(evidence);
+        s_device.linkSource = evaluation.source;
+        if (evaluation.result == LinkRefreshResult::ReadError) {
+            s_device.link = NIC_LINK_READ_ERROR;
+            s_device.lastLinkRefreshState = NIC_LINK_READ_ERROR;
+            s_device.linkRefreshResult = LinkRefreshResult::ReadError;
+            set_link_failure("I219 PHY BMSR and PHY Status reads were not valid");
+            return s_device.linkRefreshResult;
+        }
+
+        if (evaluation.result == LinkRefreshResult::Conflict) {
+            s_device.link = NIC_LINK_UNKNOWN;
+            s_device.lastLinkRefreshState = NIC_LINK_UNKNOWN;
+            if (link_refresh_poll_exhausted(poll + 1u, pollLimit)) {
+                s_device.linkRefreshTimedOut = true;
+                s_device.linkRefreshResult = LinkRefreshResult::Conflict;
+                set_link_failure("I219 BMSR and PHY Status link bits disagree");
+                return s_device.linkRefreshResult;
+            }
+            mdic_delay_us(I219_LINK_POLL_INTERVAL_US);
+            continue;
+        }
+
+        s_device.link = evaluation.state;
+        s_device.lastLinkRefreshState = evaluation.state;
+        s_device.linkRefreshResult = evaluation.result;
+        if (evidence.phyStatusValid) {
+            update_i219_negotiated_state(evidence.phyStatus);
+        }
+        if (evaluation.state == NIC_LINK_UP) return s_device.linkRefreshResult;
+
+        // A valid DOWN is still a real result, but the bounded settle window
+        // gives an I219 that is negotiating after reset a chance to report UP.
+        if (link_refresh_poll_exhausted(poll + 1u, pollLimit)) {
+            s_device.linkRefreshTimedOut = pollLimit > 1u;
+            return s_device.linkRefreshResult;
+        }
+        mdic_delay_us(I219_LINK_POLL_INTERVAL_US);
+    }
+
+    s_device.link = NIC_LINK_UNKNOWN;
+    s_device.lastLinkRefreshState = NIC_LINK_UNKNOWN;
+    s_device.linkRefreshTimedOut = true;
+    s_device.linkRefreshResult = LinkRefreshResult::Conflict;
+    set_link_failure("I219 link refresh exhausted its bounded poll window");
+    return s_device.linkRefreshResult;
 }
 
 // The I219 PHY access path needs the documented MAC link-control preparation
@@ -1414,6 +1562,22 @@ static bool init_e1000(uint64_t mmioBase)
         }
     }
 
+    if (i219P7 && GXOS_AIDA_I219_PHASE7_STAGE >= 4u) {
+        // The initial PHY Status sample is retained for the bring-up record,
+        // but it is not sufficient as a current-link sample: I219 BMSR link
+        // status is RO/LL and must be read twice. Perform one bounded
+        // post-DMA settle/refresh before publishing the ready NIC.
+        serial::puts("[NIC] I219 link refresh: bounded post-init settle\n");
+        refresh_i219_link_state(mmioBase, I219_LINK_SETTLE_POLL_LIMIT);
+        serial::puts("[NIC] I219 link refresh result: ");
+        serial::puts(link_refresh_result_name(s_device.linkRefreshResult));
+        serial::puts(" polls=");
+        serial::put_hex32(s_device.linkRefreshPollCount);
+        serial::puts("/");
+        serial::put_hex32(s_device.linkRefreshPollLimit);
+        serial::putc('\n');
+    }
+
     // Keep NIC interrupt causes masked until the kernel has installed the
     // device IRQ handler.  Enabling them here leaves a real device a window
     // in which it can assert an IRQ before the handler is registered.
@@ -1649,6 +1813,11 @@ bool init_from_bootinfo(const NicBootInfo* nicInfo)
     s_device.initStage = NIC_INIT_BOUND;
     s_device.phyAccess = NIC_PHY_NOT_ATTEMPTED;
     s_device.link = NIC_LINK_UNKNOWN;
+    s_device.lastLinkRefreshState = NIC_LINK_UNKNOWN;
+    s_device.linkRefreshResult = LinkRefreshResult::NotAttempted;
+    s_device.linkSource = LinkSource::None;
+    s_device.linkMacStatusValue = 0xFFFFFFFFu;
+    s_device.linkFailureReason[0] = '\0';
 
     serial::puts(exactDriverMatch
                  ? (is_i219_device(s_device.deviceId)
@@ -1880,6 +2049,11 @@ void init()
     s_initialised = false;
     s_rxCur = 0;
     s_txCur = 0;
+    s_device.link = NIC_LINK_UNKNOWN;
+    s_device.lastLinkRefreshState = NIC_LINK_UNKNOWN;
+    s_device.linkRefreshResult = LinkRefreshResult::NotAttempted;
+    s_device.linkSource = LinkSource::None;
+    s_device.linkMacStatusValue = 0xFFFFFFFFu;
 
 #if ARCH_HAS_PORT_IO
     serial::puts("[NIC] Scanning PCI bus for network controllers...\n");
@@ -1901,7 +2075,7 @@ void init()
                 serial::put_hex8(s_device.macAddress[i]);
             }
             serial::puts("  Link=");
-            serial::puts(s_device.link == NIC_LINK_UP ? "UP" : "DOWN");
+            serial::puts(link_state_name(s_device.link));
             serial::putc('\n');
         } else {
             serial::puts("[NIC] Device found but not active (MMIO not mapped)\n");
@@ -1932,14 +2106,60 @@ const uint8_t* get_mac_address()
 
 LinkState get_link_state()
 {
-    if (!s_initialised) return NIC_LINK_DOWN;
+    if (!s_initialised) return NIC_LINK_UNKNOWN;
 
     // This is a status query, not a hardware transaction.  The desktop
     // network widget and shell diagnostics may call it from redraw paths;
     // those paths must never perform MMIO or a potentially long MDIC poll.
     // The cached value is populated during bounded initialisation and updated
-    // by the NIC IRQ handler when link-change events are acknowledged.
+    // by the NIC IRQ handler or an explicit bounded refresh when appropriate.
     return s_device.link;
+}
+
+LinkRefreshResult refresh_link_state()
+{
+    if (!s_initialised) return LinkRefreshResult::ReadError;
+
+#if ARCH_HAS_PORT_IO
+    if (!s_device.driverBound || !s_device.mmioMapped || s_device.mmioBase == 0) {
+        s_device.link = NIC_LINK_READ_ERROR;
+        s_device.lastLinkRefreshState = NIC_LINK_READ_ERROR;
+        s_device.linkRefreshAttempted = true;
+        s_device.linkRefreshResult = LinkRefreshResult::ReadError;
+        s_device.linkRefreshTimedOut = false;
+        s_device.linkRefreshPollCount = 0;
+        s_device.linkRefreshPollLimit = I219_LINK_REFRESH_POLL_LIMIT;
+        s_device.linkSource = LinkSource::None;
+        set_link_failure("link refresh has no usable bound MMIO device");
+        return s_device.linkRefreshResult;
+    }
+
+    if (is_i219_device(s_device.deviceId)) {
+        return refresh_i219_link_state(s_device.mmioBase,
+                                       I219_LINK_REFRESH_POLL_LIMIT);
+    }
+
+    reset_link_refresh_diagnostics(1u);
+    const uint32_t status = mmio_read32(s_device.mmioBase, E1000_STATUS);
+    s_device.statusValue = status;
+    s_device.linkMacStatusValue = status;
+    s_device.linkMacStatusValid = status != 0xFFFFFFFFu;
+    s_device.linkRefreshPollCount = 1u;
+    s_device.linkSource = LinkSource::Mac;
+    const LinkState state = link_state_from_mac_status(status);
+    s_device.lastLinkRefreshState = state;
+    s_device.link = state;
+    if (state == NIC_LINK_READ_ERROR) {
+        s_device.linkRefreshResult = LinkRefreshResult::ReadError;
+        set_link_failure("MAC STATUS read returned all-ones");
+    } else {
+        s_device.linkRefreshResult = state == NIC_LINK_UP
+            ? LinkRefreshResult::Up : LinkRefreshResult::Down;
+    }
+    return s_device.linkRefreshResult;
+#else
+    return LinkRefreshResult::ReadError;
+#endif
 }
 
 void set_irq_registered(bool registered)
@@ -2195,17 +2415,20 @@ void irq_handler()
             // the staged boot-time probe.
             uint32_t status = mmio_read32(s_device.mmioBase, E1000_STATUS);
             s_device.statusValue = status;
-            s_device.link = (status == 0xFFFFFFFFu)
-                            ? NIC_LINK_UNKNOWN
-                            : ((status & E1000_STATUS_LU) ? NIC_LINK_UP : NIC_LINK_DOWN);
+            s_device.linkMacStatusValue = status;
+            s_device.linkMacStatusValid = status != 0xFFFFFFFFu;
+            s_device.linkSource = LinkSource::Mac;
+            s_device.link = link_state_from_mac_status(status);
         } else {
             uint32_t status = mmio_read32(s_device.mmioBase, E1000_STATUS);
             s_device.statusValue = status;
-            s_device.link = (status & E1000_STATUS_LU) ? NIC_LINK_UP : NIC_LINK_DOWN;
+            s_device.linkMacStatusValue = status;
+            s_device.linkMacStatusValid = status != 0xFFFFFFFFu;
+            s_device.linkSource = LinkSource::Mac;
+            s_device.link = link_state_from_mac_status(status);
         }
         serial::puts("[NIC] Link status changed: ");
-        serial::puts(s_device.link == NIC_LINK_UP ? "UP" :
-                     (s_device.link == NIC_LINK_DOWN ? "DOWN" : "UNKNOWN"));
+        serial::puts(link_state_name(s_device.link));
         serial::putc('\n');
     }
 

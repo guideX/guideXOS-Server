@@ -105,6 +105,7 @@ int main()
     assert(shell::nicinfo_mode_from_arg(nullptr) == shell::NICINFO_MODE_FULL);
     assert(shell::nicinfo_mode_from_arg("") == shell::NICINFO_MODE_FULL);
     assert(shell::nicinfo_mode_from_arg("brief") == shell::NICINFO_MODE_BRIEF);
+    assert(shell::nicinfo_mode_from_arg("link") == shell::NICINFO_MODE_LINK);
     assert(shell::nicinfo_mode_from_arg("Brief") == shell::NICINFO_MODE_INVALID);
     assert(shell::nicinfo_mode_from_arg("unknown") == shell::NICINFO_MODE_INVALID);
 
@@ -163,6 +164,7 @@ int main()
     assert(strcmp(nic::link_state_name(nic::NIC_LINK_UP), "UP") == 0);
     assert(strcmp(nic::link_state_name(nic::NIC_LINK_DOWN), "DOWN") == 0);
     assert(strcmp(nic::link_state_name(nic::NIC_LINK_UNKNOWN), "UNKNOWN") == 0);
+    assert(strcmp(nic::link_state_name(nic::NIC_LINK_READ_ERROR), "ERROR") == 0);
 
     // TX provenance is based on observable descriptor deltas. A completed
     // descriptor, a submission that never completes, and a pre-submit error

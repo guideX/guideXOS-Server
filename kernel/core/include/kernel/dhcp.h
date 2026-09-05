@@ -17,6 +17,7 @@
 #define KERNEL_DHCP_H
 
 #include "kernel/types.h"
+#include "kernel/nic.h"
 
 namespace kernel {
 namespace dhcp {
@@ -202,6 +203,7 @@ enum Status : uint8_t {
     DHCP_ERR_NOT_READY   = 11,  // NIC exists but driver is not ready
     DHCP_ERR_LINK_DOWN   = 12,  // NIC is ready but carrier is down
     DHCP_ERR_BUILD       = 13,  // DHCP wire packet could not be built
+    DHCP_ERR_LINK_UNKNOWN = 14, // Link status could not be trusted
 };
 
 // ================================================================
@@ -247,6 +249,9 @@ struct Diagnostics {
     bool suitableInterfaceFound;
     bool interfaceReady;
     bool linkUp;
+    bool linkRefreshAttempted;
+    nic::LinkRefreshResult linkRefreshResult;
+    nic::LinkState linkRefreshState;
     bool discoverPacketBuilt;
     uint32_t transactionId;
     uint16_t dhcpPacketLength;

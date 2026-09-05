@@ -39,6 +39,7 @@ static_assert(NICINFO_BRIEF_EXPECTED_LINES <= NICINFO_BRIEF_MAX_LINES,
 enum NicInfoMode : uint8_t {
     NICINFO_MODE_FULL = 0,
     NICINFO_MODE_BRIEF,
+    NICINFO_MODE_LINK,
     NICINFO_MODE_INVALID,
 };
 
@@ -46,13 +47,22 @@ inline NicInfoMode nicinfo_mode_from_arg(const char* arg)
 {
     if (!arg || *arg == '\0') return NICINFO_MODE_FULL;
 
-    const char* expected = "brief";
-    while (*arg && *expected && *arg == *expected) {
+    const char* brief = "brief";
+    const char* link = "link";
+    const char* original = arg;
+    while (*arg && *brief && *arg == *brief) {
         ++arg;
-        ++expected;
+        ++brief;
     }
-    return (*arg == '\0' && *expected == '\0')
-        ? NICINFO_MODE_BRIEF : NICINFO_MODE_INVALID;
+    if (*arg == '\0' && *brief == '\0') return NICINFO_MODE_BRIEF;
+
+    arg = original;
+    while (*arg && *link && *arg == *link) {
+        ++arg;
+        ++link;
+    }
+    return (*arg == '\0' && *link == '\0')
+        ? NICINFO_MODE_LINK : NICINFO_MODE_INVALID;
 }
 
 // ================================================================

@@ -118,6 +118,8 @@ static void reset_invocation_diagnostics()
     const uint32_t commandInvocations = s_diagnostics.commandInvocations;
     memzero(&s_diagnostics, sizeof(s_diagnostics));
     s_diagnostics.commandInvocations = commandInvocations;
+    s_diagnostics.linkRefreshResult = nic::LinkRefreshResult::NotAttempted;
+    s_diagnostics.linkRefreshState = nic::NIC_LINK_UNKNOWN;
 }
 
 static uint8_t packet_message_type(const uint8_t* packet, size_t length)
@@ -142,6 +144,8 @@ void init()
     memzero(&s_lease, sizeof(s_lease));
     memzero(&s_stats, sizeof(s_stats));
     memzero(&s_diagnostics, sizeof(s_diagnostics));
+    s_diagnostics.linkRefreshResult = nic::LinkRefreshResult::NotAttempted;
+    s_diagnostics.linkRefreshState = nic::NIC_LINK_UNKNOWN;
     s_state = STATE_INIT;
     s_tickCounter = 0;
 
@@ -941,12 +945,34 @@ Status discover()
         return DHCP_ERR_NOT_READY;
     }
 
-    s_diagnostics.linkUp = nic::get_link_state() == nic::NIC_LINK_UP;
+    const nic::LinkState cachedLink = nic::get_link_state();
+    s_diagnostics.linkRefreshState = cachedLink;
+    s_diagnostics.linkUp = cachedLink == nic::NIC_LINK_UP;
     if (!s_diagnostics.linkUp) {
-        set_failure(FAILURE_LINK, "interface link is down");
-        s_state = STATE_ERROR;
-        serial::puts("[DHCP] NIC link is down\n");
-        return DHCP_ERR_LINK_DOWN;
+        s_diagnostics.linkRefreshAttempted = true;
+        s_diagnostics.linkRefreshResult = nic::refresh_link_state();
+        s_diagnostics.linkRefreshState = nic::get_link_state();
+        s_diagnostics.linkUp =
+            s_diagnostics.linkRefreshResult == nic::LinkRefreshResult::Up &&
+            s_diagnostics.linkRefreshState == nic::NIC_LINK_UP;
+        serial::puts("[DHCP] Link preflight refresh: ");
+        serial::puts(nic::link_refresh_result_name(s_diagnostics.linkRefreshResult));
+        serial::putc('\n');
+        if (!s_diagnostics.linkUp) {
+            if (s_diagnostics.linkRefreshResult == nic::LinkRefreshResult::Down &&
+                s_diagnostics.linkRefreshState == nic::NIC_LINK_DOWN) {
+                set_failure(FAILURE_LINK,
+                            "interface link is down (confirmed by bounded refresh)");
+                s_state = STATE_ERROR;
+                serial::puts("[DHCP] NIC link is down\n");
+                return DHCP_ERR_LINK_DOWN;
+            }
+            set_failure(FAILURE_LINK,
+                        "interface link state unavailable; inspect link diagnostic");
+            s_state = STATE_ERROR;
+            serial::puts("[DHCP] NIC link state could not be trusted\n");
+            return DHCP_ERR_LINK_UNKNOWN;
+        }
     }
 
     // A DHCP attempt owns the active IPv4 mode until it succeeds. This clears

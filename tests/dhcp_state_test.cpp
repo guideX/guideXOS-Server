@@ -18,6 +18,8 @@ static nic::NICDevice g_device = {};
 static bool g_hasDevice = true;
 static bool g_active = true;
 static nic::LinkState g_link = nic::NIC_LINK_UP;
+static uint32_t g_linkRefreshCalls = 0;
+static nic::LinkRefreshResult g_linkRefreshResult = nic::LinkRefreshResult::Down;
 static nic::Status g_sendStatus = nic::NIC_ERR_TX_FULL;
 static const uint8_t g_mac[] = {0xEC, 0x8E, 0xB5, 0x9F, 0x36, 0x38};
 
@@ -53,6 +55,19 @@ const uint8_t* get_mac_address()
 LinkState get_link_state()
 {
     return g_link;
+}
+
+LinkRefreshResult refresh_link_state()
+{
+    ++g_linkRefreshCalls;
+    if (g_linkRefreshResult == LinkRefreshResult::Up) {
+        g_link = NIC_LINK_UP;
+    } else if (g_linkRefreshResult == LinkRefreshResult::Down) {
+        g_link = NIC_LINK_DOWN;
+    } else {
+        g_link = NIC_LINK_READ_ERROR;
+    }
+    return g_linkRefreshResult;
 }
 
 Status send_frame(const uint8_t*, uint16_t)
@@ -128,20 +143,43 @@ int main()
 
     set_ready_i219();
     g_link = nic::NIC_LINK_DOWN;
+    g_linkRefreshCalls = 0;
+    g_linkRefreshResult = nic::LinkRefreshResult::Down;
     dhcp::note_command_invocation();
     assert(dhcp::discover() == dhcp::DHCP_ERR_LINK_DOWN);
     assert(dhcp::get_diagnostics()->interfaceReady);
     assert(!dhcp::get_diagnostics()->linkUp);
+    assert(g_linkRefreshCalls == 1);
+    assert(dhcp::get_diagnostics()->linkRefreshAttempted);
+    assert(dhcp::get_diagnostics()->linkRefreshResult ==
+           nic::LinkRefreshResult::Down);
     assert(dhcp::get_diagnostics()->failureStage == dhcp::FAILURE_LINK);
 
     set_ready_i219();
-    g_link = nic::NIC_LINK_UP;
+    g_link = nic::NIC_LINK_DOWN;
+    g_linkRefreshCalls = 0;
+    g_linkRefreshResult = nic::LinkRefreshResult::ReadError;
+    dhcp::note_command_invocation();
+    assert(dhcp::discover() == dhcp::DHCP_ERR_LINK_UNKNOWN);
+    assert(g_linkRefreshCalls == 1);
+    assert(!dhcp::get_diagnostics()->linkUp);
+    assert(dhcp::get_diagnostics()->failureStage == dhcp::FAILURE_LINK);
+    assert(strstr(dhcp::get_diagnostics()->failureReason, "unavailable") != nullptr);
+
+    set_ready_i219();
+    g_link = nic::NIC_LINK_DOWN;
+    g_linkRefreshCalls = 0;
+    g_linkRefreshResult = nic::LinkRefreshResult::Up;
     g_sendStatus = nic::NIC_ERR_TX_FULL;
     dhcp::note_command_invocation();
     assert(dhcp::discover() == dhcp::DHCP_ERR_SEND_FAIL);
     const dhcp::Diagnostics* diagnostics = dhcp::get_diagnostics();
     const dhcp::Statistics* stats = dhcp::get_stats();
-    assert(diagnostics->commandInvocations == 4);
+    assert(diagnostics->commandInvocations == 5);
+    assert(g_linkRefreshCalls == 1);
+    assert(diagnostics->linkRefreshAttempted);
+    assert(diagnostics->linkRefreshResult == nic::LinkRefreshResult::Up);
+    assert(diagnostics->linkUp);
     assert(diagnostics->discoverPacketBuilt);
     assert(diagnostics->transactionId != 0);
     assert(diagnostics->frameLength > diagnostics->dhcpPacketLength);

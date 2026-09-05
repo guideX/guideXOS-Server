@@ -181,10 +181,19 @@ static const uint8_t  I219_PHY_STATUS_REG   = 26;
 static const uint16_t I219_PHY_STATUS_LINK  = (1u << 6);
 static const uint16_t I219_PHY_STATUS_DUPLEX = (1u << 7);
 static const uint16_t I219_PHY_STATUS_SPEED_MASK = (3u << 8);
+// I219 standard page-0 Status (BMSR) is register 1.  Bit 2 is RO/LL on
+// this PHY: a link-loss latch is cleared by a management-interface read, so
+// current-link checks must perform the established two-read sequence.
+static const uint8_t  I219_PHY_BMSR_REG      = 1;
+static const uint16_t I219_PHY_BMSR_LINK     = (1u << 2);
+static const uint16_t I219_PHY_BMSR_ANEG_COMPLETE = (1u << 5);
 static const uint8_t  I219_PHY_ID1_REG       = 2;
 static const uint8_t  I219_PHY_ID2_REG       = 3;
 static const uint32_t I219_MDIC_POLL_LIMIT   = 1920u;
 static const uint32_t I219_MDIC_POLL_DELAY_US = 50u;
+static const uint32_t I219_LINK_REFRESH_POLL_LIMIT = 20u;
+static const uint32_t I219_LINK_SETTLE_POLL_LIMIT = 50u;
+static const uint32_t I219_LINK_POLL_INTERVAL_US = 10000u;
 
 enum class DeviceFamily : uint8_t {
     Unsupported = 0,
@@ -349,6 +358,7 @@ enum LinkState : uint8_t {
     NIC_LINK_DOWN = 0,
     NIC_LINK_UP   = 1,
     NIC_LINK_UNKNOWN = 2,
+    NIC_LINK_READ_ERROR = 3,
 };
 
 inline const char* link_state_name(LinkState state)
@@ -356,8 +366,124 @@ inline const char* link_state_name(LinkState state)
     switch (state) {
         case NIC_LINK_UP:      return "UP";
         case NIC_LINK_DOWN:    return "DOWN";
+        case NIC_LINK_READ_ERROR: return "ERROR";
         default:               return "UNKNOWN";
     }
+}
+
+enum class LinkSource : uint8_t {
+    None = 0,
+    Phy,
+    Mac,
+    Combined,
+};
+
+inline const char* link_source_name(LinkSource source)
+{
+    switch (source) {
+        case LinkSource::Phy:      return "PHY";
+        case LinkSource::Mac:      return "MAC";
+        case LinkSource::Combined: return "combined";
+        default:                   return "none";
+    }
+}
+
+enum class LinkRefreshResult : uint8_t {
+    NotAttempted = 0,
+    Up,
+    Down,
+    ReadError,
+    Conflict,
+};
+
+inline const char* link_refresh_result_name(LinkRefreshResult result)
+{
+    switch (result) {
+        case LinkRefreshResult::Up:        return "UP";
+        case LinkRefreshResult::Down:      return "DOWN";
+        case LinkRefreshResult::ReadError: return "MDIC_ERROR";
+        case LinkRefreshResult::Conflict:  return "CONFLICT";
+        default:                            return "not attempted";
+    }
+}
+
+inline LinkState link_state_from_i219_bmsr(uint16_t bmsr)
+{
+    return (bmsr & I219_PHY_BMSR_LINK) ? NIC_LINK_UP : NIC_LINK_DOWN;
+}
+
+inline LinkState link_state_from_i219_phy_status(uint16_t phyStatus)
+{
+    return (phyStatus & I219_PHY_STATUS_LINK) ? NIC_LINK_UP : NIC_LINK_DOWN;
+}
+
+inline LinkState link_state_from_mac_status(uint32_t status)
+{
+    if (status == 0xFFFFFFFFu) return NIC_LINK_READ_ERROR;
+    return (status & E1000_STATUS_LU) ? NIC_LINK_UP : NIC_LINK_DOWN;
+}
+
+inline bool link_refresh_poll_exhausted(uint32_t pollCount,
+                                        uint32_t pollLimit)
+{
+    return pollLimit != 0u && pollCount >= pollLimit;
+}
+
+// A register-only input to the I219 link decision.  It is deliberately
+// exposed as a pure helper so hosted tests exercise the same source selection
+// and double-read semantics used by the hardware path.
+struct I219LinkEvidence {
+    bool     bmsrFirstValid;
+    uint16_t bmsrFirst;
+    bool     bmsrSecondValid;
+    uint16_t bmsrSecond;
+    bool     phyStatusValid;
+    uint16_t phyStatus;
+};
+
+struct LinkEvaluation {
+    LinkState         state;
+    LinkSource        source;
+    LinkRefreshResult result;
+};
+
+inline LinkEvaluation evaluate_i219_link(const I219LinkEvidence& evidence)
+{
+    LinkEvaluation evaluation = {
+        NIC_LINK_READ_ERROR, LinkSource::None, LinkRefreshResult::ReadError
+    };
+    // The second BMSR read is the current-link value after clearing any
+    // RO/LL indication from the first read.  The first read is retained for
+    // diagnostics and is not used as the final state.
+    if (evidence.bmsrSecondValid && evidence.phyStatusValid) {
+        const LinkState bmsrState = link_state_from_i219_bmsr(evidence.bmsrSecond);
+        const LinkState phyState = link_state_from_i219_phy_status(evidence.phyStatus);
+        evaluation.source = LinkSource::Combined;
+        if (bmsrState != phyState) {
+            evaluation.state = NIC_LINK_UNKNOWN;
+            evaluation.result = LinkRefreshResult::Conflict;
+            return evaluation;
+        }
+        evaluation.state = bmsrState;
+        evaluation.result = bmsrState == NIC_LINK_UP
+            ? LinkRefreshResult::Up : LinkRefreshResult::Down;
+        return evaluation;
+    }
+    if (evidence.bmsrSecondValid) {
+        evaluation.state = link_state_from_i219_bmsr(evidence.bmsrSecond);
+        evaluation.source = LinkSource::Phy;
+        evaluation.result = evaluation.state == NIC_LINK_UP
+            ? LinkRefreshResult::Up : LinkRefreshResult::Down;
+        return evaluation;
+    }
+    if (evidence.phyStatusValid) {
+        evaluation.state = link_state_from_i219_phy_status(evidence.phyStatus);
+        evaluation.source = LinkSource::Phy;
+        evaluation.result = evaluation.state == NIC_LINK_UP
+            ? LinkRefreshResult::Up : LinkRefreshResult::Down;
+        return evaluation;
+    }
+    return evaluation;
 }
 
 enum PhyAccessState : uint8_t {
@@ -562,6 +688,22 @@ struct NICDevice {
     uint32_t    macRalValue;
     uint32_t    macRahValue;
     uint16_t    phyStatusValue;
+    uint16_t    phyBmsrFirstValue;
+    uint16_t    phyBmsrSecondValue;
+    bool        phyBmsrFirstValid;
+    bool        phyBmsrSecondValid;
+    bool        phyStatusValid;
+    uint8_t     phyBmsrReadCount;
+    uint32_t    linkMacStatusValue;
+    bool        linkMacStatusValid;
+    LinkState   lastLinkRefreshState;
+    LinkSource  linkSource;
+    LinkRefreshResult linkRefreshResult;
+    bool        linkRefreshAttempted;
+    bool        linkRefreshTimedOut;
+    uint32_t    linkRefreshPollCount;
+    uint32_t    linkRefreshPollLimit;
+    char        linkFailureReason[80];
     uint16_t    phyId1;
     uint16_t    phyId2;
     uint8_t     phyAddress;
@@ -704,6 +846,12 @@ const uint8_t* get_mac_address();
 // Get the cached link state.  This function is side-effect-free and must not
 // perform MMIO/MDIC transactions because it is used by desktop redraw paths.
 LinkState get_link_state();
+
+// Perform one bounded, non-destructive link-state refresh.  The I219 path
+// uses the PHY BMSR double-read semantics and records corroborating PHY
+// Status/MAC STATUS values.  The cached state is updated only when the result
+// is trusted; read failure/conflict becomes ERROR/UNKNOWN, never DOWN.
+LinkRefreshResult refresh_link_state();
 
 // Record whether the kernel registered the device IRQ.  NIC causes remain
 // masked until this is set true; exact I219 Stage 8 still defers hardware

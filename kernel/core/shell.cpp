@@ -379,7 +379,7 @@ static void cmd_help() {
     output_string("Network:\n");
     output_string("  ping <ip>      - Send ICMP echo request\n");
     output_string("  ifconfig, ip   - Network interface info\n");
-    output_string("  nicinfo [brief] - NIC diagnostics; brief is one-screen hardware state\n");
+    output_string("  nicinfo [brief|link] - NIC diagnostics; link performs one bounded refresh\n");
     output_string("  netdiag         - Bare-metal NIC/DHCP/ARP diagnostics\n");
     output_string("  ipconfig       - Windows-style IP config\n");
     output_string("  ipconfig /all  - Full IP configuration\n");
@@ -2219,6 +2219,15 @@ static void cmd_nicinfo_brief() {
         output_string(numStr);
         output_string(dev->negotiatedFullDuplex ? "/full" : "/half");
     }
+    output_string(" BMSR=0x");
+    uint_hex_to_str(dev->phyBmsrFirstValue, 4, hexStr);
+    output_string(hexStr);
+    output_string("/0x");
+    uint_hex_to_str(dev->phyBmsrSecondValue, 4, hexStr);
+    output_string(hexStr);
+    output_string(" r=");
+    uint_to_str(dev->phyBmsrReadCount, numStr);
+    output_string(numStr);
     output_string("\n");
 
     output_string("MDIC: reg=");
@@ -2286,13 +2295,114 @@ static void cmd_nicinfo_brief() {
 
     output_string("Link: ");
     output_string(nic::link_state_name(nic::get_link_state()));
-    output_string(" (cached)\n");
+    output_string(" cache=");
+    output_string(nic::link_state_name(dev->link));
+    output_string(" last=");
+    output_string(nic::link_state_name(dev->lastLinkRefreshState));
+    output_string(" src=");
+    output_string(nic::link_source_name(dev->linkSource));
+    output_string(" refresh=");
+    output_string(nic::link_refresh_result_name(dev->linkRefreshResult));
+    output_string(" polls=");
+    uint_to_str(dev->linkRefreshPollCount, numStr);
+    output_string(numStr);
+    output_string("/");
+    uint_to_str(dev->linkRefreshPollLimit, numStr);
+    output_string(numStr);
+    output_string(" timeout=");
+    output_string(dev->linkRefreshTimedOut ? "yes\n" : "no\n");
 
     const dhcp::LeaseInfo* lease = dhcp::get_lease();
     output_string("DHCP: state=");
     output_string(dhcp::state_to_string(dhcp::get_state()));
     output_string(" lease=");
     output_string(lease && lease->valid ? "APPLIED\n" : "none\n");
+}
+
+// Explicit link diagnostics are allowed to perform one bounded, read-only
+// refresh. This is intentionally separate from `nicinfo brief`, which is
+// used by redraw paths and remains cache-only.
+static void cmd_nicinfo_link()
+{
+    const nic::NICDevice* before = nic::get_device();
+    if (!before) {
+        output_string("NIC link diagnostic\n");
+        output_string("Link: UNKNOWN\n");
+        output_string("Refresh: MDIC_ERROR no NIC device state\n");
+        return;
+    }
+
+    const nic::LinkRefreshResult result = nic::refresh_link_state();
+    const nic::NICDevice* dev = nic::get_device();
+    char hexStr[9];
+    char numStr[16];
+
+    output_string("NIC link diagnostic\n");
+    output_string("Cached: ");
+    output_string(nic::link_state_name(nic::get_link_state()));
+    output_string("  Last: ");
+    output_string(nic::link_state_name(dev->lastLinkRefreshState));
+    output_string("\n");
+    output_string("Refresh: ");
+    output_string(nic::link_refresh_result_name(result));
+    output_string(" source=");
+    output_string(nic::link_source_name(dev->linkSource));
+    output_string(" polls=");
+    uint_to_str(dev->linkRefreshPollCount, numStr);
+    output_string(numStr);
+    output_string("/");
+    uint_to_str(dev->linkRefreshPollLimit, numStr);
+    output_string(numStr);
+    output_string(" timeout=");
+    output_string(dev->linkRefreshTimedOut ? "yes\n" : "no\n");
+
+    output_string("PHY BMSR: first=0x");
+    uint_hex_to_str(dev->phyBmsrFirstValue, 4, hexStr);
+    output_string(hexStr);
+    output_string(dev->phyBmsrFirstValid ? " valid" : " invalid");
+    output_string(" second=0x");
+    uint_hex_to_str(dev->phyBmsrSecondValue, 4, hexStr);
+    output_string(hexStr);
+    output_string(dev->phyBmsrSecondValid ? " valid" : " invalid");
+    output_string(" reads=");
+    uint_to_str(dev->phyBmsrReadCount, numStr);
+    output_string(numStr);
+    output_string("\n");
+
+    output_string("PHY status: 0x");
+    uint_hex_to_str(dev->phyStatusValue, 4, hexStr);
+    output_string(hexStr);
+    output_string(dev->phyStatusValid ? " valid link=" : " invalid link=");
+    output_string(dev->phyStatusValid
+                  ? nic::link_state_name(nic::link_state_from_i219_phy_status(
+                        dev->phyStatusValue))
+                  : "UNKNOWN");
+    output_string("\n");
+
+    output_string("MAC STATUS: 0x");
+    uint_hex_to_str(dev->linkMacStatusValue, 8, hexStr);
+    output_string(hexStr);
+    output_string(dev->linkMacStatusValid ? " valid link=" : " invalid link=");
+    output_string(dev->linkMacStatusValid
+                  ? nic::link_state_name(nic::link_state_from_mac_status(
+                        dev->linkMacStatusValue))
+                  : "UNKNOWN");
+    output_string("\n");
+
+    output_string("MDIC: reg=0x");
+    uint_hex_to_str(dev->mdicRegisterAddress, 2, hexStr);
+    output_string(hexStr);
+    output_string(" ready=");
+    output_string(dev->mdicReady ? "yes" : "no");
+    output_string(" error=");
+    output_string(dev->mdicError ? "yes" : "no");
+    output_string(" timeout=");
+    output_string(dev->mdicTimedOut ? "yes\n" : "no\n");
+
+    output_string("Failure: ");
+    output_string(dev->linkFailureReason[0] != '\0'
+                  ? dev->linkFailureReason : "none");
+    output_string("\n");
 }
 
 static void cmd_nicinfo() {
@@ -3584,7 +3694,15 @@ static void cmd_dhcp_status()
     output_string(" ready=");
     output_string(diagnostics->interfaceReady ? "yes" : "no");
     output_string(" link=");
-    output_string(diagnostics->linkUp ? "UP\n" : "DOWN/unknown\n");
+    output_string(nic::link_state_name(diagnostics->linkRefreshState));
+    output_string("\n");
+    output_string("Link preflight: attempted=");
+    output_string(diagnostics->linkRefreshAttempted ? "yes" : "no");
+    output_string(" result=");
+    output_string(nic::link_refresh_result_name(diagnostics->linkRefreshResult));
+    output_string(" state=");
+    output_string(nic::link_state_name(diagnostics->linkRefreshState));
+    output_string("\n");
 
     output_string("State: ");
     output_string(dhcp::state_to_string(dhcp::get_state()));
@@ -4274,9 +4392,12 @@ static void execute_command(const char* cmd) {
             cmd_nicinfo();
         } else if (nicInfoMode == NICINFO_MODE_BRIEF) {
             cmd_nicinfo_brief();
+        } else if (nicInfoMode == NICINFO_MODE_LINK) {
+            cmd_nicinfo_link();
         } else {
-            output_string("Usage: nicinfo [brief]\n");
+            output_string("Usage: nicinfo [brief|link]\n");
             output_string("  brief: recorded NIC initialization/link state only\n");
+            output_string("  link: one bounded, read-only current link refresh\n");
         }
     } else if (str_eq(command, "netstat") || str_eq(command, "ss")) {
         cmd_netstat();
