@@ -312,15 +312,12 @@ still boots and remains separate from physical DHCP state.
 - Path: `dist/guideXOS-Server-v0.1.0-phase11-aida-dhcp-tx-amd64.iso`
 - Filename: `guideXOS-Server-v0.1.0-phase11-aida-dhcp-tx-amd64.iso`
 - Size: 90,245,120 bytes
-- SHA-256: `decf2d39d92d45e7798b14fd2b5b2e07376ac2e88fc438e57df0d28a1f1175bd`
+- SHA-256: `eb2881de096a0685d332e08ffede6d0264cc7a98457399ed5a39dfc587fca516`
 - Checksum: `dist/guideXOS-Server-v0.1.0-phase11-aida-dhcp-tx-amd64.iso.sha256`
 - Manifest: `dist/guideXOS-Server-v0.1.0-phase11-aida-dhcp-tx-amd64.manifest.json`
 - Structural result: bootable UEFI, `0xEF`, no-emulation media.
-
-The final artifact should be regenerated with `-SkipBuild` after the local
-Phase 11 commit if a clean manifest source-commit record is required; the
-artifact path, content, and checksum above are the validated Phase 11 build
-from this implementation pass.
+- Manifest source commit: `da159511046ba78b28bb2a31040b1afa2ba03fc1`;
+  packaging started with a clean worktree.
 
 ## 12. Physical AIDA_LPT procedure
 
