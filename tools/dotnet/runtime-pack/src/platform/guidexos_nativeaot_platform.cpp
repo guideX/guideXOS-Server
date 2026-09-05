@@ -22017,6 +22017,151 @@ guideXosNativeAotC011EC67State() {
 static void guideXosNativeAotC011EC67Put32(const char* name, uint32_t value);
 static void guideXosNativeAotC011EC67Put64(const char* name, uintptr_t value);
 
+#if defined(GUIDEXOS_NATIVEAOT_C011EC79_OFFLINE_REGION_RANGE_CENSUS)
+static uintptr_t guideXosNativeAotC011EC79Extent(
+    uintptr_t start, uintptr_t end) {
+    return end >= start ? end - start : 0u;
+}
+
+static uintptr_t guideXosNativeAotC011EC79Checksum(
+    uintptr_t hash,
+    const guidexos_nativeaot_c011ec67_region_event_record& eventRecord) {
+    const unsigned char* bytes =
+        reinterpret_cast<const unsigned char*>(&eventRecord);
+    for (uintptr_t index = 0u; index < sizeof(eventRecord); ++index) {
+        hash ^= static_cast<uintptr_t>(bytes[index]);
+        hash *= static_cast<uintptr_t>(0x100000001B3ULL);
+    }
+    return hash;
+}
+
+static void guideXosNativeAotC011EC79Emit() {
+    guidexos_nativeaot_c011ec67_lifecycle_record& lifecycle =
+        guideXosNativeAotC011EC67State();
+    static const uint32_t checkpoints[] = { 3u, 5u, 6u, 8u };
+    static const char* checkpointNames[] = {
+        "C79_POST_RETAINED_ALLOC",
+        "C79_PRE_TARGET_GC",
+        "C79_POST_PLAN",
+        "C79_POST_RESTART"
+    };
+    suspendEeSerialPutString(
+        "[nativeaot-gc-short-weak-lifetime] PREFLIGHT marker=C011EC79-PREFLIGHT bounded=00000001 storage=C67-fixed-event-array identity=address-range descriptorSecondary=00000001 runtimeSort=00000000 runtimeMaps=00000000 runtimeHistory=00000000 allocatorMutation=00000000 regionMutation=00000000 regionListMutation=00000000 candidateMutation=00000000 policyMutation=00000000 survivorFabrication=00000000 rootFabrication=00000000 b02=00000000\n");
+
+    for (uint32_t checkpointIndex = 0u;
+         checkpointIndex < sizeof(checkpoints) / sizeof(checkpoints[0]);
+         ++checkpointIndex) {
+        const uint32_t checkpoint = checkpoints[checkpointIndex];
+        uint32_t recordsWritten = 0u;
+        uintptr_t checksum = static_cast<uintptr_t>(0xCBF29CE484222325ULL);
+        uintptr_t regionCoveredBytes = 0u;
+        uintptr_t committedBytes = 0u;
+        uintptr_t allocatedBytes = 0u;
+        uintptr_t usedBytes = 0u;
+        uintptr_t freeBytes = 0u;
+        uintptr_t heapBase = 0u;
+        uintptr_t heapEnd = 0u;
+        for (uint32_t eventIndex = 0u;
+             eventIndex < lifecycle.eventCount &&
+                 eventIndex < GUIDEXOS_NATIVEAOT_C011EC67_MAX_EVENTS;
+             ++eventIndex) {
+            const guidexos_nativeaot_c011ec67_region_event_record& eventRecord =
+                lifecycle.events[eventIndex];
+            if (eventRecord.observed == 0u || eventRecord.checkpoint != checkpoint ||
+                eventRecord.mem == 0u || eventRecord.reserved <= eventRecord.mem) {
+                continue;
+            }
+            ++recordsWritten;
+            checksum = guideXosNativeAotC011EC79Checksum(checksum, eventRecord);
+            const uintptr_t rangeSize = guideXosNativeAotC011EC79Extent(
+                eventRecord.mem, eventRecord.reserved);
+            const uintptr_t committedExtent = guideXosNativeAotC011EC79Extent(
+                eventRecord.mem, eventRecord.committed);
+            const uintptr_t allocatedExtent = guideXosNativeAotC011EC79Extent(
+                eventRecord.mem, eventRecord.allocated);
+            const uintptr_t usedExtent = guideXosNativeAotC011EC79Extent(
+                eventRecord.mem, eventRecord.used);
+            const uintptr_t eventFreeBytes =
+                rangeSize >= allocatedExtent ? rangeSize - allocatedExtent : 0u;
+            if (heapBase == 0u || eventRecord.mem < heapBase)
+                heapBase = eventRecord.mem;
+            if (eventRecord.reserved > heapEnd)
+                heapEnd = eventRecord.reserved;
+            regionCoveredBytes += rangeSize;
+            committedBytes += committedExtent;
+            allocatedBytes += allocatedExtent;
+            usedBytes += usedExtent;
+            freeBytes += eventFreeBytes;
+
+            suspendEeSerialPutString(
+                "[nativeaot-gc-short-weak-lifetime] C79_CENSUS_RECORD marker=C79_CENSUS_RECORD");
+            guideXosNativeAotC011EC67Put32("checkpoint", checkpoint);
+            guideXosNativeAotC011EC67Put32("ordinal", recordsWritten);
+            guideXosNativeAotC011EC67Put64("descriptor", eventRecord.region);
+            guideXosNativeAotC011EC67Put64("rangeStart", eventRecord.mem);
+            guideXosNativeAotC011EC67Put64("rangeEnd", eventRecord.reserved);
+            guideXosNativeAotC011EC67Put64("rangeSize", rangeSize);
+            guideXosNativeAotC011EC67Put64("committedExtent", committedExtent);
+            guideXosNativeAotC011EC67Put64("allocatedExtent", allocatedExtent);
+            guideXosNativeAotC011EC67Put64("usedExtent", usedExtent);
+            guideXosNativeAotC011EC67Put64("liveBytes", eventRecord.liveBytes);
+            guideXosNativeAotC011EC67Put32("generation", eventRecord.generationAfter);
+            guideXosNativeAotC011EC67Put32("state", eventRecord.stateAfter);
+            guideXosNativeAotC011EC67Put32("ownerKind", eventRecord.listKind);
+            guideXosNativeAotC011EC67Put32("active", eventRecord.result);
+            guideXosNativeAotC011EC67Put32("contextOwned", (eventRecord.sourceBranch >> 1u) & 1u);
+            guideXosNativeAotC011EC67Put32("tailRole", eventRecord.sourceBranch & 1u);
+            guideXosNativeAotC011EC67Put64("list", eventRecord.list);
+            guideXosNativeAotC011EC67Put64("freeBytes", eventFreeBytes);
+            guideXosNativeAotC011EC67Put64("heapBase", heapBase);
+            guideXosNativeAotC011EC67Put64("heapEnd", heapEnd);
+            guideXosNativeAotC011EC67Put32("observationKind", eventRecord.kind);
+            suspendEeSerialPutString(" source=accepted-C67-event-range-projection\n");
+        }
+        const uintptr_t reservedHeapBytes = guideXosNativeAotC011EC79Extent(
+            heapBase, heapEnd);
+        suspendEeSerialPutString(
+            "[nativeaot-gc-short-weak-lifetime] C79_CENSUS_SUMMARY marker=C79_CENSUS_SUMMARY");
+        guideXosNativeAotC011EC67Put32("checkpoint", checkpoint);
+        suspendEeSerialPutString(" name=");
+        suspendEeSerialPutString(checkpointNames[checkpointIndex]);
+        guideXosNativeAotC011EC67Put32("regionCount", recordsWritten);
+        guideXosNativeAotC011EC67Put32("distinctRangeCount", recordsWritten);
+        guideXosNativeAotC011EC67Put32("recordCapacity", GUIDEXOS_NATIVEAOT_C011EC67_MAX_EVENTS);
+        guideXosNativeAotC011EC67Put32("recordsWritten", recordsWritten);
+        guideXosNativeAotC011EC67Put32("overflow", lifecycle.eventOverflow);
+        guideXosNativeAotC011EC67Put64("checksum", checksum);
+        guideXosNativeAotC011EC67Put64("heapBase", heapBase);
+        guideXosNativeAotC011EC67Put64("heapEnd", heapEnd);
+        guideXosNativeAotC011EC67Put64("reservedHeapBytes", reservedHeapBytes);
+        guideXosNativeAotC011EC67Put64("regionCoveredBytes", regionCoveredBytes);
+        guideXosNativeAotC011EC67Put64("committedHeapBytes", committedBytes);
+        guideXosNativeAotC011EC67Put64("allocatedBytes", allocatedBytes);
+        guideXosNativeAotC011EC67Put64("usedBytes", usedBytes);
+        guideXosNativeAotC011EC67Put64("freeBytes", freeBytes);
+        guideXosNativeAotC011EC67Put32("snapshotCompleteness", 0u);
+        suspendEeSerialPutString(" source=accepted-C67-event-range-projection\n");
+    }
+
+    const uint32_t clean = lifecycle.eventOverflow == 0u &&
+        lifecycle.snapshotOverflow == 0u && lifecycle.invariantFailures == 0u &&
+        lifecycle.sensitiveDiagnosticAllocations == 0u;
+    suspendEeSerialPutString(
+        "[nativeaot-gc-short-weak-lifetime] COMPLETE marker=C011EC79 outcome=");
+    suspendEeSerialPutString(clean != 0u ? "C" : "F");
+    guideXosNativeAotC011EC67Put32("successLevel", clean != 0u ? 1u : 0u);
+    guideXosNativeAotC011EC67Put32("censusRecordSize", sizeof(guidexos_nativeaot_c011ec67_region_event_record));
+    guideXosNativeAotC011EC67Put32("censusCapacity", GUIDEXOS_NATIVEAOT_C011EC67_MAX_EVENTS);
+    guideXosNativeAotC011EC67Put32("eventOverflow", lifecycle.eventOverflow);
+    guideXosNativeAotC011EC67Put32("snapshotOverflow", lifecycle.snapshotOverflow);
+    guideXosNativeAotC011EC67Put32("invariantFailures", lifecycle.invariantFailures);
+    guideXosNativeAotC011EC67Put32("sensitiveDiagnosticAllocations", lifecycle.sensitiveDiagnosticAllocations);
+    guideXosNativeAotC011EC67Put32("failFast", 0u);
+    guideXosNativeAotC011EC67Put32("pageFault", 0u);
+    suspendEeSerialPutString(" source=accepted-C67-event-range-projection\n");
+}
+#endif
+
 #if defined(GUIDEXOS_NATIVEAOT_C011EC73_PROMOTION_POSITIVE_REGION_COHORT)
 /* C73 deliberately reuses the already-accepted C67/C70 scalar observer and
  * performs its reconciliation only after managed execution has stopped.  It
@@ -25220,6 +25365,9 @@ static int guideXosNativeAotC011EC67Finish() {
     const int c011ec72Result = guideXosNativeAotC011EC72Finish();
 #else
     const int c011ec72Result = 0;
+#endif
+#if defined(GUIDEXOS_NATIVEAOT_C011EC79_OFFLINE_REGION_RANGE_CENSUS)
+    guideXosNativeAotC011EC79Emit();
 #endif
 #if defined(GUIDEXOS_NATIVEAOT_C011EC77_BASIC_REGION_SUPPLY_PROVENANCE)
     uintptr_t c77MaxTotalRegions = 0u;
