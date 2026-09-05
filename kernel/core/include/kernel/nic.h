@@ -110,6 +110,9 @@ static const uint32_t E1000_TDBAH    = 0x3804;  // TX Descriptor Base High
 static const uint32_t E1000_TDLEN    = 0x3808;  // TX Descriptor Length
 static const uint32_t E1000_TDH      = 0x3810;  // TX Descriptor Head
 static const uint32_t E1000_TDT      = 0x3818;  // TX Descriptor Tail
+static const uint32_t E1000_TXDCTL   = 0x3828;  // TX Descriptor Control
+static const uint32_t E1000_TARC0    = 0x3840;  // TX Arbitration Counter Q0
+static const uint32_t E1000_IOSFPC   = 0x0F28;  // I219 TX DMA erratum control
 static const uint32_t E1000_MTA      = 0x5200;  // Multicast Table Array (128 dwords)
 static const uint32_t E1000_RAL0     = 0x5400;  // Receive Address Low  (MAC [0])
 static const uint32_t E1000_RAH0     = 0x5404;  // Receive Address High (MAC [0])
@@ -144,6 +147,13 @@ static const uint32_t E1000_TCTL_EN    = (1u << 1);   // Transmitter Enable
 static const uint32_t E1000_TCTL_PSP   = (1u << 3);   // Pad Short Packets
 static const uint32_t E1000_TCTL_CT_SHIFT  = 4;       // Collision Threshold
 static const uint32_t E1000_TCTL_COLD_SHIFT = 12;     // Collision Distance
+
+// I219/PCH SPT silicon workaround used by upstream e1000e. It reduces the
+// number of outstanding TX DMA requests to avoid the documented TX hang.
+static const uint32_t E1000_RCTL_RDMTS_HEX = (1u << 16);
+static const uint32_t E1000_TARC0_CB_MULTIQ_3_REQ =
+    (1u << 28) | (1u << 29);
+static const uint32_t E1000_TARC0_CB_MULTIQ_2_REQ = (1u << 29);
 
 // ICR / IMS interrupt bits
 static const uint32_t E1000_ICR_TXDW   = (1u << 0);   // TX Descriptor Written Back
@@ -298,6 +308,27 @@ static const uint16_t NUM_RX_DESC = 32;
 static const uint16_t NUM_TX_DESC = 8;
 static const uint16_t RX_BUFFER_SIZE = 2048;
 
+static const uint64_t KERNEL_LINK_VIRTUAL_BASE = 0x100000ULL;
+
+// The loader maps the loaded kernel image at its linked virtual base and
+// publishes the physical backing base in BootInfo. This is the only supported
+// DMA translation for the static rings/buffers used by this driver.
+inline bool translate_kernel_dma_address(uint64_t virtualAddress,
+                                         uint64_t kernelPhysicalBase,
+                                         uint64_t* physicalOut)
+{
+    if (!physicalOut || virtualAddress < KERNEL_LINK_VIRTUAL_BASE ||
+        kernelPhysicalBase == 0) {
+        return false;
+    }
+    const uint64_t offset = virtualAddress - KERNEL_LINK_VIRTUAL_BASE;
+    if (kernelPhysicalBase > (~0ULL - offset)) return false;
+    const uint64_t physical = kernelPhysicalBase + offset;
+    if (physical == 0) return false;
+    *physicalOut = physical;
+    return true;
+}
+
 // ================================================================
 // Receive Descriptor (E1000 legacy format, 16 bytes)
 // ================================================================
@@ -335,6 +366,17 @@ struct TxDescriptor {
     uint8_t  css;           // checksum start
     uint16_t special;       // VLAN / special
 } NIC_PACKED;
+
+static_assert(sizeof(TxDescriptor) == 16u,
+              "legacy TX descriptor ABI must remain 16 bytes");
+static_assert(offsetof(TxDescriptor, bufferAddr) == 0u,
+              "legacy TX buffer address offset changed");
+static_assert(offsetof(TxDescriptor, length) == 8u,
+              "legacy TX length offset changed");
+static_assert(offsetof(TxDescriptor, cmd) == 11u,
+              "legacy TX command offset changed");
+static_assert(offsetof(TxDescriptor, status) == 12u,
+              "legacy TX status offset changed");
 
 #if !defined(__GNUC__) && !defined(__clang__)
 #pragma pack(pop)
@@ -577,8 +619,53 @@ struct NetStats {
     uint32_t interrupts;
 };
 
+enum class TxFailureReason : uint8_t {
+    None = 0,
+    NotReady,
+    RingInvalid,
+    DescriptorInvalid,
+    DoorbellNotObserved,
+    DescriptorNotConsumed,
+    CompletionTimeout,
+    DmaAddressInvalid,
+    EngineDisabled,
+    StatusReadError,
+};
+
+inline const char* tx_failure_reason_name(TxFailureReason reason)
+{
+    switch (reason) {
+        case TxFailureReason::NotReady:              return "TX_NOT_READY";
+        case TxFailureReason::RingInvalid:           return "TX_RING_INVALID";
+        case TxFailureReason::DescriptorInvalid:     return "TX_DESCRIPTOR_INVALID";
+        case TxFailureReason::DoorbellNotObserved:   return "TX_DOORBELL_NOT_OBSERVED";
+        case TxFailureReason::DescriptorNotConsumed: return "TX_DESCRIPTOR_NOT_CONSUMED";
+        case TxFailureReason::CompletionTimeout:     return "TX_COMPLETION_TIMEOUT";
+        case TxFailureReason::DmaAddressInvalid:     return "TX_DMA_ADDRESS_INVALID";
+        case TxFailureReason::EngineDisabled:        return "TX_ENGINE_DISABLED";
+        case TxFailureReason::StatusReadError:       return "TX_STATUS_READ_ERROR";
+        default:                                     return "none";
+    }
+}
+
+struct TxRegisterSnapshot {
+    uint32_t tdbal;
+    uint32_t tdbah;
+    uint32_t tdlen;
+    uint32_t tdh;
+    uint32_t tdt;
+    uint32_t tctl;
+    uint32_t tipg;
+    uint32_t txdctl;
+    uint32_t tarc0;
+    uint32_t iosfpc;
+    uint16_t pciCommand;
+    bool     valid;
+};
+
 struct TxDiagnostics {
     uint32_t descriptorSubmissions;
+    uint32_t descriptorPublications;
     uint32_t descriptorCompletions;
     uint32_t hardwareTimeouts;
     uint32_t driverErrors;
@@ -586,20 +673,37 @@ struct TxDiagnostics {
     uint16_t tailBefore;
     uint16_t tailAfter;
     uint16_t lastLength;
+    uint16_t tdtWritten;
     uint64_t lastBufferAddress;
+    uint64_t descriptorRingAddress;
+    uint64_t lastDescriptorAddress;
     uint8_t  lastCommand;
+    uint8_t  lastDescriptorStatusBefore;
     uint8_t  lastDescriptorStatus;
     uint8_t  lastStatus;
+    uint32_t completionPolls;
+    uint32_t completionPollLimit;
     uint32_t observedHead;
     uint32_t observedTail;
     uint32_t control;
+    bool     descriptorPublished;
+    bool     doorbellReadbackMatches;
+    bool     ringPoisoned;
+    TxFailureReason failureReason;
+    TxRegisterSnapshot initialRegisters;
+    TxRegisterSnapshot beforeRegisters;
+    TxRegisterSnapshot preDoorbellRegisters;
+    TxRegisterSnapshot afterDoorbellRegisters;
+    TxRegisterSnapshot finalRegisters;
 };
 
 // A bounded observation of one send_frame() call. This keeps upper-layer
 // diagnostics tied to descriptor deltas rather than guessing from a generic
 // packet counter.
 struct TxEvidence {
+    bool descriptorPublished;
     bool descriptorAccepted;
+    bool doorbellObserved;
     bool tailAdvanced;
     bool completionObserved;
     bool completionTimedOut;
@@ -611,10 +715,14 @@ inline TxEvidence observe_tx(const TxDiagnostics& before,
                              Status result)
 {
     TxEvidence evidence = {};
+    evidence.descriptorPublished =
+        after.descriptorPublications > before.descriptorPublications;
     evidence.descriptorAccepted =
         after.descriptorSubmissions > before.descriptorSubmissions;
+    evidence.doorbellObserved = evidence.descriptorAccepted &&
+        after.doorbellReadbackMatches;
     evidence.tailAdvanced = evidence.descriptorAccepted &&
-        (after.tailAfter != after.tailBefore);
+        (after.tailAfter != after.tailBefore || after.doorbellReadbackMatches);
     evidence.completionObserved =
         after.descriptorCompletions > before.descriptorCompletions;
     evidence.completionTimedOut =

@@ -262,11 +262,14 @@ struct Diagnostics {
     uint16_t destinationPort;
     uint8_t lastMessageType;
     bool txSubmissionAttempted;
+    bool txDescriptorPublished;
     bool txDescriptorAccepted;
+    bool txDoorbellObserved;
     bool txTailAdvanced;
     bool txCompletionObserved;
     bool txCompletionTimeout;
     bool txDriverError;
+    nic::TxFailureReason txFailureReason;
     uint8_t txDriverStatus;
     uint16_t txDescriptor;
     uint16_t txTailBefore;

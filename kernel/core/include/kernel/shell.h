@@ -40,6 +40,7 @@ enum NicInfoMode : uint8_t {
     NICINFO_MODE_FULL = 0,
     NICINFO_MODE_BRIEF,
     NICINFO_MODE_LINK,
+    NICINFO_MODE_TX,
     NICINFO_MODE_INVALID,
 };
 
@@ -49,6 +50,7 @@ inline NicInfoMode nicinfo_mode_from_arg(const char* arg)
 
     const char* brief = "brief";
     const char* link = "link";
+    const char* tx = "tx";
     const char* original = arg;
     while (*arg && *brief && *arg == *brief) {
         ++arg;
@@ -61,8 +63,15 @@ inline NicInfoMode nicinfo_mode_from_arg(const char* arg)
         ++arg;
         ++link;
     }
-    return (*arg == '\0' && *link == '\0')
-        ? NICINFO_MODE_LINK : NICINFO_MODE_INVALID;
+    if (*arg == '\0' && *link == '\0') return NICINFO_MODE_LINK;
+
+    arg = original;
+    while (*arg && *tx && *arg == *tx) {
+        ++arg;
+        ++tx;
+    }
+    return (*arg == '\0' && *tx == '\0')
+        ? NICINFO_MODE_TX : NICINFO_MODE_INVALID;
 }
 
 // ================================================================

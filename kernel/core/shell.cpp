@@ -379,7 +379,7 @@ static void cmd_help() {
     output_string("Network:\n");
     output_string("  ping <ip>      - Send ICMP echo request\n");
     output_string("  ifconfig, ip   - Network interface info\n");
-    output_string("  nicinfo [brief|link] - NIC diagnostics; link performs one bounded refresh\n");
+    output_string("  nicinfo [brief|link|tx] - NIC diagnostics; link refreshes, tx shows one TX descriptor\n");
     output_string("  netdiag         - Bare-metal NIC/DHCP/ARP diagnostics\n");
     output_string("  ipconfig       - Windows-style IP config\n");
     output_string("  ipconfig /all  - Full IP configuration\n");
@@ -2075,6 +2075,141 @@ static void uint_hex_to_str(uint32_t value, uint8_t digits, char* buf) {
     buf[digits] = '\0';
 }
 
+static void uint_hex64_to_str(uint64_t value, char* buf) {
+    static const char hex[] = "0123456789ABCDEF";
+    for (uint8_t i = 0; i < 16; ++i) {
+        const uint8_t shift = static_cast<uint8_t>((15u - i) * 4u);
+        buf[i] = hex[(value >> shift) & 0x0Fu];
+    }
+    buf[16] = '\0';
+}
+
+// Compact TX evidence for the physical bring-up loop. It intentionally
+// reports one descriptor plus the register snapshots around its doorbell;
+// it does not dump the ring or perform any new hardware operation.
+static void cmd_nicinfo_tx()
+{
+    const nic::NICDevice* dev = nic::get_device();
+    char numStr[16];
+    char hexStr[9];
+    char hex64Str[17];
+
+    output_string("NIC TX descriptor diagnostic\n");
+    if (!dev) {
+        output_string("TX: no recorded NIC state\n");
+        return;
+    }
+
+    const nic::TxDiagnostics& tx = dev->tx;
+    const nic::TxRegisterSnapshot& init = tx.initialRegisters;
+    const nic::TxRegisterSnapshot& doorbell = tx.afterDoorbellRegisters;
+    const nic::TxRegisterSnapshot& final = tx.finalRegisters.valid
+        ? tx.finalRegisters : init;
+
+    output_string("idx=");
+    uint_to_str(tx.lastDescriptor, numStr);
+    output_string(numStr);
+    output_string(" len=");
+    uint_to_str(tx.lastLength, numStr);
+    output_string(numStr);
+    output_string(" cmd=0x");
+    uint_hex_to_str(tx.lastCommand, 2, hexStr);
+    output_string(hexStr);
+    output_string(" status=");
+    uint_hex_to_str(tx.lastDescriptorStatusBefore, 2, hexStr);
+    output_string(hexStr);
+    output_string("->");
+    uint_hex_to_str(tx.lastDescriptorStatus, 2, hexStr);
+    output_string(hexStr);
+    output_string("\n");
+
+    output_string("ringPA=0x");
+    uint_hex64_to_str(tx.descriptorRingAddress, hex64Str);
+    output_string(hex64Str);
+    output_string(" descPA=0x");
+    uint_hex64_to_str(tx.lastDescriptorAddress, hex64Str);
+    output_string(hex64Str);
+    output_string("\n");
+    output_string("bufPA=0x");
+    uint_hex64_to_str(tx.lastBufferAddress, hex64Str);
+    output_string(hex64Str);
+    output_string(" published=");
+    output_string(tx.descriptorPublished ? "yes" : "no");
+    output_string(" doorbell=");
+    output_string(tx.doorbellReadbackMatches ? "yes" : "no");
+    output_string("\n");
+
+    output_string("init: TDBAL=0x");
+    uint_hex_to_str(init.tdbal, 8, hexStr);
+    output_string(hexStr);
+    output_string(" TDBAH=0x");
+    uint_hex_to_str(init.tdbah, 8, hexStr);
+    output_string(hexStr);
+    output_string(" LEN=0x");
+    uint_hex_to_str(init.tdlen, 8, hexStr);
+    output_string(hexStr);
+    output_string(" TDH/TDT=0x");
+    uint_hex_to_str(init.tdh, 4, hexStr);
+    output_string(hexStr);
+    output_string("/0x");
+    uint_hex_to_str(init.tdt, 4, hexStr);
+    output_string(hexStr);
+    output_string("\n");
+
+    output_string("doorbell: TDH/TDT=0x");
+    uint_hex_to_str(doorbell.tdh, 4, hexStr);
+    output_string(hexStr);
+    output_string("/0x");
+    uint_hex_to_str(doorbell.tdt, 4, hexStr);
+    output_string(hexStr);
+    output_string(" written=0x");
+    uint_hex_to_str(tx.tdtWritten, 4, hexStr);
+    output_string(hexStr);
+    output_string("\n");
+
+    output_string("final: TDH/TDT=0x");
+    uint_hex_to_str(final.tdh, 4, hexStr);
+    output_string(hexStr);
+    output_string("/0x");
+    uint_hex_to_str(final.tdt, 4, hexStr);
+    output_string(hexStr);
+    output_string(" TCTL=0x");
+    uint_hex_to_str(final.tctl, 8, hexStr);
+    output_string(hexStr);
+    output_string(" TIPG=0x");
+    uint_hex_to_str(final.tipg, 8, hexStr);
+    output_string(hexStr);
+    output_string("\n");
+
+    output_string("TXDCTL=0x");
+    uint_hex_to_str(final.txdctl, 8, hexStr);
+    output_string(hexStr);
+    output_string(" TARC0=0x");
+    uint_hex_to_str(final.tarc0, 8, hexStr);
+    output_string(hexStr);
+    output_string(" IOSFPC=0x");
+    uint_hex_to_str(final.iosfpc, 8, hexStr);
+    output_string(hexStr);
+    output_string(" PCI-CMD=0x");
+    uint_hex_to_str(final.pciCommand, 4, hexStr);
+    output_string(hexStr);
+    output_string("\n");
+
+    output_string("polls=");
+    uint_to_str(tx.completionPolls, numStr);
+    output_string(numStr);
+    output_string("/");
+    uint_to_str(tx.completionPollLimit, numStr);
+    output_string(numStr);
+    output_string(" timeout=");
+    output_string(tx.hardwareTimeouts != 0u ? "yes" : "no");
+    output_string(" poisoned=");
+    output_string(tx.ringPoisoned ? "yes" : "no");
+    output_string(" failure=");
+    output_string(nic::tx_failure_reason_name(tx.failureReason));
+    output_string("\n");
+}
+
 // Print only state retained by NIC initialization.  In particular, this
 // function must remain observational: it must not scan PCI, touch MMIO, poll
 // MDIC, or re-run any descriptor/reset operation.
@@ -3740,8 +3875,12 @@ static void cmd_dhcp_status()
 
     output_string("TX: attempted=");
     output_string(diagnostics->txSubmissionAttempted ? "yes" : "no");
+    output_string(" published=");
+    output_string(diagnostics->txDescriptorPublished ? "yes" : "no");
     output_string(" desc=");
     output_string(diagnostics->txDescriptorAccepted ? "accepted" : "no");
+    output_string(" doorbell=");
+    output_string(diagnostics->txDoorbellObserved ? "yes" : "no");
     output_string(" tail=");
     output_string(diagnostics->txTailAdvanced ? "advanced" : "no");
     output_string(" complete=");
@@ -3762,6 +3901,19 @@ static void cmd_dhcp_status()
     output_string(" status=0x");
     uint_hex_to_str(diagnostics->txDriverStatus, 2, hexStr);
     output_string(hexStr);
+    output_string(" polls=");
+    const nic::NICDevice* txDevice = nic::get_device();
+    if (txDevice) {
+        uint_to_str(txDevice->tx.completionPolls, numStr);
+        output_string(numStr);
+        output_string("/");
+        uint_to_str(txDevice->tx.completionPollLimit, numStr);
+        output_string(numStr);
+        output_string(" failure=");
+        output_string(nic::tx_failure_reason_name(txDevice->tx.failureReason));
+    } else {
+        output_string("0/0 failure=none");
+    }
     output_string("\n");
 
     output_string("Wait offer: begun=");
@@ -4394,10 +4546,13 @@ static void execute_command(const char* cmd) {
             cmd_nicinfo_brief();
         } else if (nicInfoMode == NICINFO_MODE_LINK) {
             cmd_nicinfo_link();
+        } else if (nicInfoMode == NICINFO_MODE_TX) {
+            cmd_nicinfo_tx();
         } else {
-            output_string("Usage: nicinfo [brief|link]\n");
+            output_string("Usage: nicinfo [brief|link|tx]\n");
             output_string("  brief: recorded NIC initialization/link state only\n");
             output_string("  link: one bounded, read-only current link refresh\n");
+            output_string("  tx: one TX descriptor and bounded register snapshot\n");
         }
     } else if (str_eq(command, "netstat") || str_eq(command, "ss")) {
         cmd_netstat();

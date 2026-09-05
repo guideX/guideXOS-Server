@@ -47,7 +47,10 @@ static NICDevice   s_device;
 static bool        s_initialised = false;
 static uint64_t    s_kernelPhysicalBase = 0x100000;
 
-// Descriptor rings (statically allocated, 16-byte aligned)
+// Descriptor rings (statically allocated in the loaded kernel image). The
+// descriptor ABI only requires 16-byte alignment; keeping the existing
+// storage model makes the loader-provided physical translation auditable and
+// avoids introducing a new allocator/bounce-buffer dependency in Phase 13.
 #if defined(__GNUC__) || defined(__clang__)
 static RxDescriptor s_rxDescs[NUM_RX_DESC] __attribute__((aligned(16)));
 static TxDescriptor s_txDescs[NUM_TX_DESC] __attribute__((aligned(16)));
@@ -63,6 +66,8 @@ __declspec(align(16)) static uint8_t s_txBuffer[ETH_FRAME_MAX];
 // Current descriptor indices
 static uint16_t s_rxCur = 0;
 static uint16_t s_txCur = 0;
+static bool s_txPoisoned = false;
+static const uint32_t TX_COMPLETION_POLL_LIMIT = 1000000u;
 
 // Hardware waits in the I219 path are deliberately iteration-bounded.  The
 // bound does not depend on PIT/IRQ progress because this code runs before the
@@ -73,14 +78,41 @@ static void mask_nic_interrupts(uint64_t mmioBase);
 static inline void mmio_write32(uint64_t base, uint32_t reg, uint32_t val);
 static inline uint32_t mmio_read32(uint64_t base, uint32_t reg);
 
-static void snapshot_tx_registers()
-{
 #if ARCH_HAS_PORT_IO
-    if (!s_device.mmioMapped) return;
-    s_device.tx.observedHead = mmio_read32(s_device.mmioBase, E1000_TDH);
-    s_device.tx.observedTail = mmio_read32(s_device.mmioBase, E1000_TDT);
-    s_device.tx.control = mmio_read32(s_device.mmioBase, E1000_TCTL);
+static uint16_t pci_read16(uint8_t bus, uint8_t dev, uint8_t func,
+                           uint8_t offset);
 #endif
+
+static TxRegisterSnapshot read_tx_registers()
+{
+    TxRegisterSnapshot snapshot = {};
+#if ARCH_HAS_PORT_IO
+    if (!s_device.mmioMapped) return snapshot;
+    snapshot.tdbal = mmio_read32(s_device.mmioBase, E1000_TDBAL);
+    snapshot.tdbah = mmio_read32(s_device.mmioBase, E1000_TDBAH);
+    snapshot.tdlen = mmio_read32(s_device.mmioBase, E1000_TDLEN);
+    snapshot.tdh = mmio_read32(s_device.mmioBase, E1000_TDH);
+    snapshot.tdt = mmio_read32(s_device.mmioBase, E1000_TDT);
+    snapshot.tctl = mmio_read32(s_device.mmioBase, E1000_TCTL);
+    snapshot.tipg = mmio_read32(s_device.mmioBase, E1000_TIPG);
+    snapshot.txdctl = mmio_read32(s_device.mmioBase, E1000_TXDCTL);
+    snapshot.tarc0 = mmio_read32(s_device.mmioBase, E1000_TARC0);
+    snapshot.iosfpc = mmio_read32(s_device.mmioBase, E1000_IOSFPC);
+    snapshot.pciCommand = pci_read16(s_device.pciBus, s_device.pciSlot,
+                                     s_device.pciFunc, 0x04);
+    snapshot.valid = true;
+#endif
+    return snapshot;
+}
+
+static void snapshot_tx_registers(TxRegisterSnapshot* destination)
+{
+    if (!destination) return;
+    *destination = read_tx_registers();
+    if (!destination->valid) return;
+    s_device.tx.observedHead = destination->tdh;
+    s_device.tx.observedTail = destination->tdt;
+    s_device.tx.control = destination->tctl;
 }
 
 static bool is_i219_device(uint16_t deviceId)
@@ -556,19 +588,8 @@ static bool dma_address(const void* ptr, uint64_t* physicalOut)
     if (ptr == nullptr || physicalOut == nullptr) return false;
 
     const uint64_t virt = reinterpret_cast<uint64_t>(ptr);
-    // The linker places kernel static storage at virtual 0x100000.  The
-    // bootloader supplies the physical base for that image; do not silently
-    // treat an unrelated virtual address as DMA-capable physical memory.
-    if (virt < 0x100000) return false;
-
-    const uint64_t offset = virt - 0x100000;
-    if (s_kernelPhysicalBase > (~0ULL - offset)) return false;
-
-    const uint64_t physical = s_kernelPhysicalBase + offset;
-    if (physical == 0) return false;
-
-    *physicalOut = physical;
-    return true;
+    return translate_kernel_dma_address(virt, s_kernelPhysicalBase,
+                                        physicalOut);
 }
 
 static bool dma_address_range(const void* ptr, uint64_t length,
@@ -655,6 +676,31 @@ static inline void dma_memory_barrier()
 {
 #if defined(__GNUC__) || defined(__clang__)
     asm volatile("" ::: "memory");
+#endif
+}
+
+// Descriptor and payload stores must be globally visible before the MMIO
+// tail doorbell. On AMD64 the store fence is the smallest explicit CPU-order
+// guarantee for that publication boundary; other targets retain the kernel's
+// compiler-ordering fallback until a target-specific DMA primitive exists.
+static inline void dma_publish_barrier()
+{
+#if defined(__x86_64__) || defined(__amd64__) || defined(_M_X64)
+    asm volatile("sfence" ::: "memory");
+#else
+    dma_memory_barrier();
+#endif
+}
+
+// A coherent DMA writeback is observed through a volatile load. The load
+// fence prevents later loads from passing the descriptor-status read on
+// AMD64, while keeping completion polling interrupt-independent.
+static inline void dma_completion_barrier()
+{
+#if defined(__x86_64__) || defined(__amd64__) || defined(_M_X64)
+    asm volatile("lfence" ::: "memory");
+#else
+    dma_memory_barrier();
 #endif
 }
 
@@ -1161,6 +1207,23 @@ static bool init_rx(uint64_t mmioBase)
 // Initialise TX descriptor ring
 // ================================================================
 
+static void apply_i219_spt_tx_workaround(uint64_t mmioBase)
+{
+    if (!is_i219_device(s_device.deviceId)) return;
+
+    // This is the narrowly scoped SPT/I219 MAC TX erratum workaround used by
+    // upstream e1000e. It changes no PHY state and is applied only to the
+    // exact I219/PCH family already selected by PCI identity.
+    const uint32_t iosfpc = mmio_read32(mmioBase, E1000_IOSFPC);
+    mmio_write32(mmioBase, E1000_IOSFPC, iosfpc | E1000_RCTL_RDMTS_HEX);
+
+    const uint32_t tarc0 = mmio_read32(mmioBase, E1000_TARC0);
+    const uint32_t correctedTarc0 =
+        (tarc0 & ~E1000_TARC0_CB_MULTIQ_3_REQ) |
+        E1000_TARC0_CB_MULTIQ_2_REQ;
+    mmio_write32(mmioBase, E1000_TARC0, correctedTarc0);
+}
+
 static bool init_tx(uint64_t mmioBase)
 {
     if (!validate_dma_layout()) return false;
@@ -1188,18 +1251,35 @@ static bool init_tx(uint64_t mmioBase)
     mmio_write32(mmioBase, E1000_TDT, 0);
     s_txCur = 0;
 
-    // Enable transmitter
-    // CT  = 0x0F (collision threshold)
-    // COLD = 0x040 (collision distance for full duplex)
+    // Program TIPG before enabling TX. CT=0x0F and COLD=0x03F are the
+    // documented full-duplex legacy values; this is shared by QEMU E1000 and
+    // physical I219.
+    mmio_write32(mmioBase, E1000_TIPG, E1000_TIPG_DEFAULT);
     uint32_t tctl = E1000_TCTL_EN |
                     E1000_TCTL_PSP |
                     (0x0F << E1000_TCTL_CT_SHIFT) |
-                    (0x040 << E1000_TCTL_COLD_SHIFT);
+                    (0x03F << E1000_TCTL_COLD_SHIFT);
     mmio_write32(mmioBase, E1000_TCTL, tctl);
 
-    // Set inter-packet gap (TIPG)
-    mmio_write32(mmioBase, E1000_TIPG, E1000_TIPG_DEFAULT);
-    snapshot_tx_registers();
+    apply_i219_spt_tx_workaround(mmioBase);
+    s_txPoisoned = false;
+    s_device.tx.descriptorRingAddress = txDescPhys;
+    s_device.tx.failureReason = TxFailureReason::None;
+    s_device.tx.ringPoisoned = false;
+    snapshot_tx_registers(&s_device.tx.initialRegisters);
+    if (!s_device.tx.initialRegisters.valid ||
+        s_device.tx.initialRegisters.tdbal !=
+            static_cast<uint32_t>(txDescPhys & 0xFFFFFFF0ULL) ||
+        s_device.tx.initialRegisters.tdbah !=
+            static_cast<uint32_t>(txDescPhys >> 32) ||
+        s_device.tx.initialRegisters.tdlen !=
+            NUM_TX_DESC * sizeof(TxDescriptor) ||
+        (s_device.tx.initialRegisters.tdh & 0xFFFFu) != 0u ||
+        (s_device.tx.initialRegisters.tdt & 0xFFFFu) != 0u ||
+        (s_device.tx.initialRegisters.tctl & E1000_TCTL_EN) == 0u) {
+        s_device.tx.failureReason = TxFailureReason::RingInvalid;
+        return false;
+    }
     s_device.txRingInitialized = true;
     return true;
 }
@@ -2240,17 +2320,43 @@ Status send_frame(const uint8_t* data, uint16_t len)
     s_device.tx.tailAfter = s_txCur;
     s_device.tx.lastDescriptor = s_txCur;
     s_device.tx.lastLength = len;
+    s_device.tx.tdtWritten = s_txCur;
     s_device.tx.lastBufferAddress = 0;
+    s_device.tx.lastDescriptorAddress = 0;
     s_device.tx.lastCommand = 0;
+    s_device.tx.lastDescriptorStatusBefore = 0;
+    s_device.tx.lastDescriptorStatus = 0;
     s_device.tx.lastStatus = NIC_OK;
-    snapshot_tx_registers();
+    s_device.tx.completionPolls = 0;
+    s_device.tx.completionPollLimit = TX_COMPLETION_POLL_LIMIT;
+    s_device.tx.descriptorPublished = false;
+    s_device.tx.doorbellReadbackMatches = false;
+    s_device.tx.failureReason = TxFailureReason::None;
+    snapshot_tx_registers(&s_device.tx.beforeRegisters);
+
+    if (s_txPoisoned) {
+        // A timeout leaves ownership ambiguous: hardware may still hold the
+        // descriptor and the shared payload buffer. Never overwrite either
+        // object on a retry. Reinitialisation is the only recovery boundary.
+        serial::puts("[NIC] send_frame: TX ring is poisoned after timeout\n");
+        s_device.stats.txDropped++;
+        s_device.tx.driverErrors++;
+        s_device.tx.ringPoisoned = true;
+        s_device.tx.failureReason = TxFailureReason::RingInvalid;
+        s_device.tx.lastStatus = NIC_ERR_TX_FULL;
+        snapshot_tx_registers(&s_device.tx.finalRegisters);
+        return NIC_ERR_TX_FULL;
+    }
 
     // Check that the current TX descriptor is available
-    if (!(s_txDescs[s_txCur].status & E1000_TXD_STAT_DD)) {
+    s_device.tx.lastDescriptorStatusBefore = s_txDescs[s_txCur].status;
+    if (!(s_device.tx.lastDescriptorStatusBefore & E1000_TXD_STAT_DD)) {
         serial::puts("[NIC] send_frame: TX descriptor not available (TX ring full)\n");
         s_device.stats.txDropped++;
         s_device.tx.driverErrors++;
+        s_device.tx.failureReason = TxFailureReason::DescriptorInvalid;
         s_device.tx.lastStatus = NIC_ERR_TX_FULL;
+        snapshot_tx_registers(&s_device.tx.finalRegisters);
         return NIC_ERR_TX_FULL;
     }
 
@@ -2263,7 +2369,9 @@ Status send_frame(const uint8_t* data, uint16_t len)
         serial::puts("[NIC] send_frame: TX buffer DMA address unavailable\n");
         s_device.stats.txErrors++;
         s_device.tx.driverErrors++;
+        s_device.tx.failureReason = TxFailureReason::DmaAddressInvalid;
         s_device.tx.lastStatus = NIC_ERR_INIT_FAIL;
+        snapshot_tx_registers(&s_device.tx.finalRegisters);
         return NIC_ERR_INIT_FAIL;
     }
     dma_memory_barrier();
@@ -2274,27 +2382,56 @@ Status send_frame(const uint8_t* data, uint16_t len)
                                     E1000_TXD_CMD_RS;
     s_txDescs[s_txCur].status     = 0;
     s_device.tx.lastBufferAddress = bufAddr;
+    s_device.tx.lastDescriptorAddress =
+        s_device.tx.descriptorRingAddress +
+        static_cast<uint64_t>(s_txCur) * sizeof(TxDescriptor);
     s_device.tx.lastCommand = s_txDescs[s_txCur].cmd;
-    dma_memory_barrier();
+    s_device.tx.descriptorPublished = true;
+    s_device.tx.descriptorPublications++;
+    dma_publish_barrier();
+    snapshot_tx_registers(&s_device.tx.preDoorbellRegisters);
 
     // Advance tail pointer to submit the descriptor
     uint16_t oldTx = s_txCur;
     s_txCur = (s_txCur + 1) % NUM_TX_DESC;
+    s_device.tx.tdtWritten = s_txCur;
     mmio_write32(s_device.mmioBase, E1000_TDT, s_txCur);
+    snapshot_tx_registers(&s_device.tx.afterDoorbellRegisters);
+    s_device.tx.tailAfter = static_cast<uint16_t>(
+        s_device.tx.afterDoorbellRegisters.tdt & 0xFFFFu);
+    s_device.tx.doorbellReadbackMatches =
+        s_device.tx.afterDoorbellRegisters.valid &&
+        s_device.tx.tailAfter == s_txCur;
+    if (!s_device.tx.doorbellReadbackMatches) {
+        serial::puts("[NIC] TX doorbell readback did not match\n");
+        s_device.stats.txErrors++;
+        s_device.tx.driverErrors++;
+        s_device.tx.failureReason = TxFailureReason::DoorbellNotObserved;
+        s_device.tx.lastStatus = NIC_ERR_INIT_FAIL;
+        s_txPoisoned = true;
+        s_device.tx.ringPoisoned = true;
+        snapshot_tx_registers(&s_device.tx.finalRegisters);
+        return NIC_ERR_INIT_FAIL;
+    }
+
+    // This is a software/MMIO submission proof, not a completion proof.
+    // Hardware consumption remains proven only by DD in the descriptor.
     s_device.stats.txFramesSubmitted++;
     s_device.tx.descriptorSubmissions++;
-    s_device.tx.tailAfter = s_txCur;
-    snapshot_tx_registers();
 
     // Wait for transmission to complete (busy-poll descriptor status)
-    for (uint32_t i = 0; i < 1000000; ++i) {
-        if (s_txDescs[oldTx].status & E1000_TXD_STAT_DD) {
+    for (uint32_t i = 0; i < TX_COMPLETION_POLL_LIMIT; ++i) {
+        const uint8_t status = s_txDescs[oldTx].status;
+        dma_completion_barrier();
+        s_device.tx.completionPolls = i + 1u;
+        if (status & E1000_TXD_STAT_DD) {
             s_device.stats.txFrames++;
             s_device.stats.txBytes += static_cast<uint32_t>(len);
             s_device.tx.descriptorCompletions++;
-            s_device.tx.lastDescriptorStatus = s_txDescs[oldTx].status;
+            s_device.tx.lastDescriptorStatus = status;
             s_device.tx.lastStatus = NIC_OK;
-            snapshot_tx_registers();
+            s_device.tx.failureReason = TxFailureReason::None;
+            snapshot_tx_registers(&s_device.tx.finalRegisters);
             return NIC_OK;
         }
     }
@@ -2306,7 +2443,22 @@ Status send_frame(const uint8_t* data, uint16_t len)
     s_device.tx.hardwareTimeouts++;
     s_device.tx.lastDescriptorStatus = s_txDescs[oldTx].status;
     s_device.tx.lastStatus = NIC_ERR_INIT_FAIL;
-    snapshot_tx_registers();
+    s_txPoisoned = true;
+    s_device.tx.ringPoisoned = true;
+    if ((s_device.tx.afterDoorbellRegisters.tctl & E1000_TCTL_EN) == 0u) {
+        s_device.tx.failureReason = TxFailureReason::EngineDisabled;
+    } else if (s_device.tx.lastDescriptorStatus == 0xFFu) {
+        s_device.tx.failureReason = TxFailureReason::StatusReadError;
+    } else if ((s_device.tx.afterDoorbellRegisters.tdh & 0xFFFFu) ==
+               (s_device.tx.preDoorbellRegisters.tdh & 0xFFFFu)) {
+        // TDH is retained as a corroborating observation only; DD remains the
+        // authoritative completion signal. This class says both signals show
+        // no consumption at the timeout boundary.
+        s_device.tx.failureReason = TxFailureReason::DescriptorNotConsumed;
+    } else {
+        s_device.tx.failureReason = TxFailureReason::CompletionTimeout;
+    }
+    snapshot_tx_registers(&s_device.tx.finalRegisters);
     return NIC_ERR_INIT_FAIL;
 #else
     (void)data;

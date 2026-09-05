@@ -515,7 +515,9 @@ Status dhcp_send(uint8_t* packet, size_t length, uint32_t server_ip)
                               udpStatus == udp::UDP_OK ? nic::NIC_OK
                                                        : nic::NIC_ERR_INIT_FAIL)
             : nic::TxEvidence{};
+        s_diagnostics.txDescriptorPublished = evidence.descriptorPublished;
         s_diagnostics.txDescriptorAccepted = evidence.descriptorAccepted;
+        s_diagnostics.txDoorbellObserved = evidence.doorbellObserved;
         s_diagnostics.txTailAdvanced = evidence.tailAdvanced;
         s_diagnostics.txCompletionObserved = evidence.completionObserved;
         s_diagnostics.txCompletionTimeout = evidence.completionTimedOut;
@@ -530,6 +532,7 @@ Status dhcp_send(uint8_t* packet, size_t length, uint32_t server_ip)
             s_diagnostics.txDescriptorCompletions =
                 afterDevice->tx.descriptorCompletions;
             s_diagnostics.txHardwareTimeouts = afterDevice->tx.hardwareTimeouts;
+            s_diagnostics.txFailureReason = afterDevice->tx.failureReason;
             s_diagnostics.txDriverStatus = afterDevice->tx.lastStatus;
         }
         if (udpStatus != udp::UDP_OK) {
@@ -587,7 +590,9 @@ Status dhcp_send(uint8_t* packet, size_t length, uint32_t server_ip)
     const nic::TxEvidence evidence = afterDevice
         ? nic::observe_tx(before, afterDevice->tx, nicStatus)
         : nic::TxEvidence{};
+    s_diagnostics.txDescriptorPublished = evidence.descriptorPublished;
     s_diagnostics.txDescriptorAccepted = evidence.descriptorAccepted;
+    s_diagnostics.txDoorbellObserved = evidence.doorbellObserved;
     s_diagnostics.txTailAdvanced = evidence.tailAdvanced;
     s_diagnostics.txCompletionObserved = evidence.completionObserved;
     s_diagnostics.txCompletionTimeout = evidence.completionTimedOut;
@@ -601,6 +606,7 @@ Status dhcp_send(uint8_t* packet, size_t length, uint32_t server_ip)
         s_diagnostics.txDescriptorCompletions =
             afterDevice->tx.descriptorCompletions;
         s_diagnostics.txHardwareTimeouts = afterDevice->tx.hardwareTimeouts;
+        s_diagnostics.txFailureReason = afterDevice->tx.failureReason;
         s_diagnostics.txDriverStatus = afterDevice->tx.lastStatus;
     }
 
@@ -712,6 +718,15 @@ static Status do_discover(const uint8_t* mac, uint32_t xid,
         s_stats.discoverAttempts++;
         s_diagnostics.lastMessageType = DHCPDISCOVER;
         st = dhcp_send(s_txBuffer, pktLen, ipv4::ADDR_BROADCAST);
+        // Descriptor publication and TDT readback are submission evidence;
+        // DD completion is tracked separately. This preserves a real
+        // submission even when the hardware never writes DD.
+        if (s_diagnostics.txDescriptorAccepted) {
+            s_stats.discoverSubmissions++;
+        }
+        if (s_diagnostics.txCompletionObserved) {
+            s_stats.discoverCompletions++;
+        }
         if (st != DHCP_OK) {
             s_stats.discoverSendFailures++;
             if (s_diagnostics.txCompletionTimeout) {
@@ -721,15 +736,17 @@ static Status do_discover(const uint8_t* mac, uint32_t xid,
                 st == DHCP_ERR_NOT_READY || st == DHCP_ERR_LINK_DOWN) {
                 return st;
             }
+            // A completion timeout poisons the synchronous TX ring because
+            // the shared buffer may still be owned by hardware. Do not issue
+            // another descriptor or overwrite that buffer without a full
+            // device/ring reinitialisation boundary.
+            if (s_diagnostics.txCompletionTimeout ||
+                s_diagnostics.txDescriptorAccepted) {
+                return DHCP_ERR_SEND_FAIL;
+            }
             continue;
         }
         submitted = true;
-        if (s_diagnostics.txDescriptorAccepted) {
-            s_stats.discoverSubmissions++;
-        }
-        if (s_diagnostics.txCompletionObserved) {
-            s_stats.discoverCompletions++;
-        }
         s_stats.discoversSent++;
 
         // Wait for OFFER

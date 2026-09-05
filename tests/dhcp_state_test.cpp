@@ -73,11 +73,26 @@ LinkRefreshResult refresh_link_state()
 Status send_frame(const uint8_t*, uint16_t)
 {
     if (g_sendStatus == NIC_OK) {
+        g_device.tx.descriptorPublications++;
         g_device.tx.descriptorSubmissions++;
         g_device.tx.descriptorCompletions++;
         g_device.tx.tailBefore = 0;
         g_device.tx.tailAfter = 1;
+        g_device.tx.doorbellReadbackMatches = true;
+        g_device.tx.descriptorPublished = true;
         g_device.tx.lastStatus = NIC_OK;
+    } else if (g_sendStatus == nic::NIC_ERR_INIT_FAIL) {
+        // The descriptor was published and the doorbell was accepted, but
+        // hardware never wrote DD. This is the physical Phase 12 boundary.
+        g_device.tx.descriptorPublications++;
+        g_device.tx.descriptorSubmissions++;
+        g_device.tx.tailBefore = 0;
+        g_device.tx.tailAfter = 1;
+        g_device.tx.doorbellReadbackMatches = true;
+        g_device.tx.descriptorPublished = true;
+        g_device.tx.hardwareTimeouts++;
+        g_device.tx.failureReason = nic::TxFailureReason::DescriptorNotConsumed;
+        g_device.tx.lastStatus = g_sendStatus;
     } else {
         g_device.tx.driverErrors++;
         g_device.tx.lastStatus = g_sendStatus;
@@ -203,6 +218,38 @@ int main()
     assert(ipv4::get_config()->mode == ipv4::CONFIG_DHCP);
     assert(strcmp(dhcp::failure_stage_name(diagnostics->failureStage),
                   "TX submit") == 0);
+
+    // A descriptor timeout is not a pre-submit failure. The upper DHCP
+    // counters must retain publication/TDT evidence while keeping completion
+    // and lease state false. The poisoned physical ring stops unsafe retries,
+    // so one attempt is recorded rather than reusing an owned buffer.
+    dhcp::init();
+    set_ready_i219();
+    g_link = nic::NIC_LINK_DOWN;
+    g_linkRefreshCalls = 0;
+    g_linkRefreshResult = nic::LinkRefreshResult::Up;
+    g_sendStatus = nic::NIC_ERR_INIT_FAIL;
+    dhcp::note_command_invocation();
+    assert(dhcp::discover() == dhcp::DHCP_ERR_SEND_FAIL);
+    diagnostics = dhcp::get_diagnostics();
+    stats = dhcp::get_stats();
+    assert(diagnostics->txDescriptorPublished);
+    assert(diagnostics->txDescriptorAccepted);
+    assert(diagnostics->txDoorbellObserved);
+    assert(!diagnostics->txCompletionObserved);
+    assert(diagnostics->txCompletionTimeout);
+    assert(diagnostics->txFailureReason ==
+           nic::TxFailureReason::DescriptorNotConsumed);
+    assert(diagnostics->failureStage == dhcp::FAILURE_TX_COMPLETION);
+    assert(stats->discoverBuilt == 1);
+    assert(stats->discoverAttempts == 1);
+    assert(stats->discoverSubmissions == 1);
+    assert(stats->discoverCompletions == 0);
+    assert(stats->discoversSent == 0);
+    assert(stats->discoverSendFailures == 1);
+    assert(stats->discoverTxTimeouts == 1);
+    assert(!dhcp::get_lease()->valid);
+    assert(!ipv4::get_config()->configured);
 
     return 0;
 }

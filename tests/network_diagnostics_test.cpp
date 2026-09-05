@@ -14,6 +14,10 @@ using namespace kernel;
 
 static_assert(sizeof(nic::RxDescriptor) == 16, "RX descriptor ABI must remain 16 bytes");
 static_assert(sizeof(nic::TxDescriptor) == 16, "TX descriptor ABI must remain 16 bytes");
+static_assert(offsetof(nic::TxDescriptor, bufferAddr) == 0, "TX buffer offset changed");
+static_assert(offsetof(nic::TxDescriptor, length) == 8, "TX length offset changed");
+static_assert(offsetof(nic::TxDescriptor, cmd) == 11, "TX command offset changed");
+static_assert(offsetof(nic::TxDescriptor, status) == 12, "TX status offset changed");
 static_assert((nic::NUM_RX_DESC & (nic::NUM_RX_DESC - 1)) == 0,
               "RX ring arithmetic expects a power-of-two descriptor count");
 static_assert((nic::NUM_TX_DESC & (nic::NUM_TX_DESC - 1)) == 0,
@@ -75,6 +79,20 @@ int main()
     assert(strcmp(nic::device_family_name(nic::DeviceFamily::I219Pch),
                   "I219/PCH") == 0);
 
+    uint64_t physical = 0;
+    assert(nic::translate_kernel_dma_address(0x100000ULL, 0x400000ULL,
+                                             &physical));
+    assert(physical == 0x400000ULL);
+    assert(nic::translate_kernel_dma_address(0x125678ULL, 0x800000ULL,
+                                             &physical));
+    assert(physical == 0x825678ULL);
+    assert(!nic::translate_kernel_dma_address(0x0FFFFFULL, 0x400000ULL,
+                                              &physical));
+    assert(!nic::translate_kernel_dma_address(0x100000ULL, 0, &physical));
+    assert(strcmp(nic::tx_failure_reason_name(
+                      nic::TxFailureReason::DescriptorNotConsumed),
+                  "TX_DESCRIPTOR_NOT_CONSUMED") == 0);
+
     // I219 standard page-0 IEEE PHY registers use MDI address 2. Address 1
     // is reserved for the PCH general/high-page register view.
     assert(nic::I219_PHY_ADDRESS == 2);
@@ -106,6 +124,7 @@ int main()
     assert(shell::nicinfo_mode_from_arg("") == shell::NICINFO_MODE_FULL);
     assert(shell::nicinfo_mode_from_arg("brief") == shell::NICINFO_MODE_BRIEF);
     assert(shell::nicinfo_mode_from_arg("link") == shell::NICINFO_MODE_LINK);
+    assert(shell::nicinfo_mode_from_arg("tx") == shell::NICINFO_MODE_TX);
     assert(shell::nicinfo_mode_from_arg("Brief") == shell::NICINFO_MODE_INVALID);
     assert(shell::nicinfo_mode_from_arg("unknown") == shell::NICINFO_MODE_INVALID);
 
@@ -171,27 +190,35 @@ int main()
     // must remain distinguishable without touching hardware in this test.
     nic::TxDiagnostics before = {};
     nic::TxDiagnostics completed = before;
+    completed.descriptorPublications = 1;
     completed.descriptorSubmissions = 1;
     completed.descriptorCompletions = 1;
     completed.tailBefore = 3;
     completed.tailAfter = 4;
+    completed.doorbellReadbackMatches = true;
     nic::TxEvidence completedEvidence =
         nic::observe_tx(before, completed, nic::NIC_OK);
     assert(completedEvidence.descriptorAccepted);
+    assert(completedEvidence.descriptorPublished);
+    assert(completedEvidence.doorbellObserved);
     assert(completedEvidence.tailAdvanced);
     assert(completedEvidence.completionObserved);
     assert(!completedEvidence.completionTimedOut);
     assert(!completedEvidence.driverError);
 
     nic::TxDiagnostics timedOut = before;
+    timedOut.descriptorPublications = 1;
     timedOut.descriptorSubmissions = 1;
     timedOut.tailBefore = 4;
     timedOut.tailAfter = 5;
+    timedOut.doorbellReadbackMatches = true;
     timedOut.hardwareTimeouts = 1;
     timedOut.driverErrors = 0;
     nic::TxEvidence timeoutEvidence =
         nic::observe_tx(before, timedOut, nic::NIC_ERR_INIT_FAIL);
     assert(timeoutEvidence.descriptorAccepted);
+    assert(timeoutEvidence.descriptorPublished);
+    assert(timeoutEvidence.doorbellObserved);
     assert(timeoutEvidence.tailAdvanced);
     assert(!timeoutEvidence.completionObserved);
     assert(timeoutEvidence.completionTimedOut);
