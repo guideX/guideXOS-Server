@@ -6633,9 +6633,13 @@ static void draw_network_widget(TaskbarWidget& widget)
 {
     uint32_t x = widget.bounds.x;
     uint32_t y = widget.bounds.y;
-    bool linkUp = network_link_up();
-    bool configured = ipv4::is_configured();
-    uint32_t barColor = linkUp ? (configured ? rgb(100, 200, 100) : rgb(200, 170, 80)) : rgb(110, 110, 120);
+    const bool linkUp = network_link_up();
+    const bool configured = ipv4::is_configured();
+    const DesktopTheme& theme = GetCurrentDesktopTheme();
+    const BareMetalControlTheme roles = GetBareMetalControlTheme(theme);
+    const uint32_t barColor = theme.id == DesktopThemeId::SciFi
+        ? (linkUp ? (configured ? theme.accent : roles.statusWarning) : roles.secondaryText)
+        : (linkUp ? (configured ? rgb(100, 200, 100) : rgb(200, 170, 80)) : rgb(110, 110, 120));
 
     for (int i = 0; i < 4; i++) {
         uint32_t barH = 4 + (uint32_t)i * 3;
@@ -8446,60 +8450,119 @@ static const NetworkAdapter s_networkAdapters[] = {
 };
 static const int kNetAdapterCount = 2;
 
+static uint32_t network_adapter_status_color(const NetworkAdapter& adapter,
+                                             const DesktopTheme& theme,
+                                             const BareMetalControlTheme& roles)
+{
+    if (theme.id != DesktopThemeId::SciFi) {
+        return adapter.detected ? rgb(95, 184, 120) : rgb(100, 100, 110);
+    }
+    return adapter.detected ? theme.accent : roles.statusWarning;
+}
+
+static uint32_t network_adapter_status_text_color(const NetworkAdapter& adapter,
+                                                  const DesktopTheme& theme,
+                                                  const BareMetalControlTheme& roles)
+{
+    if (theme.id != DesktopThemeId::SciFi) return rgb(180, 185, 200);
+    return adapter.detected ? roles.primaryText : roles.statusWarning;
+}
+
 static void draw_network_adapters()
 {
     if (!s_networkAdaptersOpen) return;
 
     uint32_t dlgX = (s_screenW - kNetAdaptersW) / 2;
     uint32_t dlgY = (s_screenH - kNetAdaptersH) / 2;
+    const DesktopTheme& theme = GetCurrentDesktopTheme();
+    const bool sciFiTheme = theme.id == DesktopThemeId::SciFi;
+    const BareMetalControlTheme roles = GetBareMetalControlTheme(theme);
 
-    framebuffer::fill_rect(dlgX + 4, dlgY + 4, kNetAdaptersW, kNetAdaptersH, rgb(10, 10, 15));
-    framebuffer::fill_rect(dlgX, dlgY, kNetAdaptersW, kNetAdaptersH, rgb(35, 35, 45));
-    draw_rect(dlgX, dlgY, kNetAdaptersW, kNetAdaptersH, rgb(70, 90, 130));
+    framebuffer::fill_rect(dlgX + 4, dlgY + 4, kNetAdaptersW, kNetAdaptersH,
+        sciFiTheme ? BlendDesktopThemeColor(theme.desktopBackground, roles.panelBackground, 40) : rgb(10, 10, 15));
+    framebuffer::fill_rect(dlgX, dlgY, kNetAdaptersW, kNetAdaptersH,
+        sciFiTheme ? roles.panelBackground : rgb(35, 35, 45));
+    draw_rect(dlgX, dlgY, kNetAdaptersW, kNetAdaptersH,
+        sciFiTheme ? BlendDesktopThemeColor(roles.border, theme.accent, 38) : rgb(70, 90, 130));
 
-    framebuffer::fill_rect(dlgX + 1, dlgY + 1, kNetAdaptersW - 2, 28, rgb(50, 70, 110));
-    draw_text(dlgX + 12, dlgY + 8, "Network Adapters", rgb(220, 225, 240), 1);
+    framebuffer::fill_rect(dlgX + 1, dlgY + 1, kNetAdaptersW - 2, 28,
+        sciFiTheme ? theme.titleBarBackground : rgb(50, 70, 110));
+    draw_text(dlgX + 12, dlgY + 8, "Network Adapters",
+        sciFiTheme ? roles.primaryText : rgb(220, 225, 240), 1);
 
     uint32_t closeBtnX = dlgX + kNetAdaptersW - 26;
-    framebuffer::fill_rect(closeBtnX, dlgY + 4, 20, 20, rgb(180, 60, 60));
-    draw_rect(closeBtnX, dlgY + 4, 20, 20, rgb(200, 80, 80));
-    draw_text(closeBtnX + 6, dlgY + 9, "x", rgb(240, 220, 220), 1);
+    const DesktopControlState closeState = DesktopControlState::Normal;
+    framebuffer::fill_rect(closeBtnX, dlgY + 4, 20, 20,
+        sciFiTheme ? DesktopControlFillColor(roles, closeState) : rgb(180, 60, 60));
+    if (sciFiTheme) {
+        draw_rect(closeBtnX, dlgY + 4, 20, 20,
+            DesktopControlBorderColor(roles, closeState));
+    } else {
+        draw_rect(closeBtnX, dlgY + 4, 20, 20, rgb(200, 80, 80));
+    }
+    draw_text(closeBtnX + 6, dlgY + 9, "x",
+        sciFiTheme ? DesktopControlTextColor(roles, closeState) : rgb(240, 220, 220), 1);
 
     uint32_t contentY = dlgY + 36;
-    framebuffer::fill_rect(dlgX + 8, contentY, kNetAdaptersW - 16, kNetAdaptersH - 90, rgb(28, 28, 35));
-    draw_text(dlgX + 20, contentY + 8, "Network Connections", rgb(200, 200, 220), 1);
+    framebuffer::fill_rect(dlgX + 8, contentY, kNetAdaptersW - 16, kNetAdaptersH - 90,
+        sciFiTheme ? roles.recessedField : rgb(28, 28, 35));
+    draw_text(dlgX + 20, contentY + 8, "Network Connections",
+        sciFiTheme ? roles.primaryText : rgb(200, 200, 220), 1);
 
     uint32_t listY = contentY + 30;
     for (int i = 0; i < kNetAdapterCount; i++) {
         uint32_t rowY = listY + (uint32_t)i * (kNetAdapterRowH + 4);
-        uint32_t rowBg = (s_networkAdapterSelected == i) ? rgb(45, 65, 95) : 
-                         (s_networkAdapterHover == i) ? rgb(38, 48, 58) : rgb(32, 32, 40);
+        uint32_t rowBg = sciFiTheme
+            ? ((s_networkAdapterSelected == i) ? DesktopSelectionColor(roles, true) :
+               (s_networkAdapterHover == i) ? DesktopControlFillColor(roles, DesktopControlState::Hover) :
+               ((i % 2 == 0) ? roles.raisedPanel :
+                BlendDesktopThemeColor(roles.raisedPanel, roles.panelBackground, 24)))
+            : ((s_networkAdapterSelected == i) ? rgb(45, 65, 95) :
+               (s_networkAdapterHover == i) ? rgb(38, 48, 58) : rgb(32, 32, 40));
         framebuffer::fill_rect(dlgX + 12, rowY, kNetAdaptersW - 24, kNetAdapterRowH, rowBg);
+        if (sciFiTheme) {
+            framebuffer::fill_rect(dlgX + 12, rowY + kNetAdapterRowH - 1,
+                kNetAdaptersW - 24, 1, roles.separator);
+        }
 
-        uint32_t statusColor = s_networkAdapters[i].detected ? rgb(95, 184, 120) : rgb(100, 100, 110);
+        const uint32_t statusColor = network_adapter_status_color(s_networkAdapters[i], theme, roles);
         framebuffer::fill_rect(dlgX + 12, rowY, 4, kNetAdapterRowH, statusColor);
 
-        uint32_t iconColor = s_networkAdapters[i].detected ? rgb(80, 180, 120) : rgb(80, 80, 90);
+        const uint32_t iconColor = sciFiTheme
+            ? BlendDesktopThemeColor(roles.raisedPanel, statusColor, 42)
+            : (s_networkAdapters[i].detected ? rgb(80, 180, 120) : rgb(80, 80, 90));
         framebuffer::fill_rect(dlgX + 24, rowY + 12, 32, 32, iconColor);
-        draw_rect(dlgX + 24, rowY + 12, 32, 32, rgb(120, 140, 160));
+        draw_rect(dlgX + 24, rowY + 12, 32, 32, sciFiTheme ? roles.border : rgb(120, 140, 160));
 
-        draw_text(dlgX + 64, rowY + 10, s_networkAdapters[i].name, rgb(220, 220, 235), 1);
-        draw_text(dlgX + 64, rowY + 28, s_networkAdapters[i].vendor, rgb(160, 165, 180), 1);
-        draw_text(dlgX + kNetAdaptersW - 120, rowY + 20, s_networkAdapters[i].status, rgb(180, 185, 200), 1);
+        draw_text(dlgX + 64, rowY + 10, s_networkAdapters[i].name,
+            sciFiTheme ? roles.primaryText : rgb(220, 220, 235), 1);
+        draw_text(dlgX + 64, rowY + 28, s_networkAdapters[i].vendor,
+            sciFiTheme ? roles.secondaryText : rgb(160, 165, 180), 1);
+        draw_text(dlgX + kNetAdaptersW - 120, rowY + 20, s_networkAdapters[i].status,
+            network_adapter_status_text_color(s_networkAdapters[i], theme, roles), 1);
     }
 
     uint32_t btnY = dlgY + kNetAdaptersH - 46;
     uint32_t propBtnX = dlgX + kNetAdaptersW - 200;
-    bool propEnabled = (s_networkAdapterSelected >= 0 && s_networkAdapters[s_networkAdapterSelected].detected);
-    uint32_t propBg = propEnabled ? rgb(55, 85, 125) : rgb(45, 45, 55);
+    const bool propEnabled = (s_networkAdapterSelected >= 0 && s_networkAdapters[s_networkAdapterSelected].detected);
+    const DesktopControlState propState = propEnabled ? DesktopControlState::Normal : DesktopControlState::Disabled;
+    uint32_t propBg = sciFiTheme ? DesktopControlFillColor(roles, propState) :
+        (propEnabled ? rgb(55, 85, 125) : rgb(45, 45, 55));
     framebuffer::fill_rect(propBtnX, btnY, 90, 30, propBg);
-    draw_rect(propBtnX, btnY, 90, 30, propEnabled ? rgb(80, 120, 170) : rgb(60, 60, 70));
-    draw_text_centered(propBtnX, btnY, 90, 30, "Properties", propEnabled ? rgb(210, 220, 240) : rgb(120, 120, 130), 1);
+    draw_rect(propBtnX, btnY, 90, 30, sciFiTheme ? DesktopControlBorderColor(roles, propState) :
+        (propEnabled ? rgb(80, 120, 170) : rgb(60, 60, 70)));
+    draw_text_centered(propBtnX, btnY, 90, 30, "Properties", sciFiTheme ?
+        DesktopControlTextColor(roles, propState) :
+        (propEnabled ? rgb(210, 220, 240) : rgb(120, 120, 130)), 1);
 
     uint32_t statusBtnX = dlgX + kNetAdaptersW - 100;
-    framebuffer::fill_rect(statusBtnX, btnY, 90, 30, rgb(45, 50, 60));
-    draw_rect(statusBtnX, btnY, 90, 30, rgb(65, 75, 90));
-    draw_text_centered(statusBtnX, btnY, 90, 30, "Status", rgb(160, 165, 180), 1);
+    const DesktopControlState statusState = DesktopControlState::Normal;
+    framebuffer::fill_rect(statusBtnX, btnY, 90, 30,
+        sciFiTheme ? DesktopControlFillColor(roles, statusState) : rgb(45, 50, 60));
+    draw_rect(statusBtnX, btnY, 90, 30,
+        sciFiTheme ? DesktopControlBorderColor(roles, statusState) : rgb(65, 75, 90));
+    draw_text_centered(statusBtnX, btnY, 90, 30, "Status",
+        sciFiTheme ? DesktopControlTextColor(roles, statusState) : rgb(160, 165, 180), 1);
 }
 
 static int hit_test_network_adapters(int32_t mx, int32_t my)
@@ -8548,44 +8611,82 @@ static void draw_network_config()
 
     uint32_t dlgX = (s_screenW - kNetConfigW) / 2;
     uint32_t dlgY = (s_screenH - kNetConfigH) / 2;
+    const DesktopTheme& theme = GetCurrentDesktopTheme();
+    const bool sciFiTheme = theme.id == DesktopThemeId::SciFi;
+    const BareMetalControlTheme roles = GetBareMetalControlTheme(theme);
 
-    framebuffer::fill_rect(dlgX + 4, dlgY + 4, kNetConfigW, kNetConfigH, rgb(10, 10, 15));
-    framebuffer::fill_rect(dlgX, dlgY, kNetConfigW, kNetConfigH, rgb(35, 35, 45));
-    draw_rect(dlgX, dlgY, kNetConfigW, kNetConfigH, rgb(70, 90, 130));
+    framebuffer::fill_rect(dlgX + 4, dlgY + 4, kNetConfigW, kNetConfigH,
+        sciFiTheme ? BlendDesktopThemeColor(theme.desktopBackground, roles.panelBackground, 40) : rgb(10, 10, 15));
+    framebuffer::fill_rect(dlgX, dlgY, kNetConfigW, kNetConfigH,
+        sciFiTheme ? roles.panelBackground : rgb(35, 35, 45));
+    draw_rect(dlgX, dlgY, kNetConfigW, kNetConfigH,
+        sciFiTheme ? BlendDesktopThemeColor(roles.border, theme.accent, 38) : rgb(70, 90, 130));
 
-    framebuffer::fill_rect(dlgX + 1, dlgY + 1, kNetConfigW - 2, 28, rgb(50, 70, 110));
-    draw_text(dlgX + 12, dlgY + 8, "TCP/IPv4 Properties", rgb(220, 225, 240), 1);
+    framebuffer::fill_rect(dlgX + 1, dlgY + 1, kNetConfigW - 2, 28,
+        sciFiTheme ? theme.titleBarBackground : rgb(50, 70, 110));
+    draw_text(dlgX + 12, dlgY + 8, "TCP/IPv4 Properties",
+        sciFiTheme ? roles.primaryText : rgb(220, 225, 240), 1);
 
     uint32_t closeBtnX = dlgX + kNetConfigW - 26;
-    framebuffer::fill_rect(closeBtnX, dlgY + 4, 20, 20, rgb(180, 60, 60));
-    draw_text(closeBtnX + 6, dlgY + 9, "x", rgb(240, 220, 220), 1);
+    const DesktopControlState closeState = DesktopControlState::Normal;
+    framebuffer::fill_rect(closeBtnX, dlgY + 4, 20, 20,
+        sciFiTheme ? DesktopControlFillColor(roles, closeState) : rgb(180, 60, 60));
+    if (sciFiTheme) {
+        draw_rect(closeBtnX, dlgY + 4, 20, 20,
+            DesktopControlBorderColor(roles, closeState));
+    }
+    draw_text(closeBtnX + 6, dlgY + 9, "x",
+        sciFiTheme ? DesktopControlTextColor(roles, closeState) : rgb(240, 220, 220), 1);
 
     uint32_t contentY = dlgY + 36;
-    framebuffer::fill_rect(dlgX + 8, contentY, kNetConfigW - 16, kNetConfigH - 90, rgb(30, 30, 38));
+    framebuffer::fill_rect(dlgX + 8, contentY, kNetConfigW - 16, kNetConfigH - 90,
+        sciFiTheme ? roles.recessedField : rgb(30, 30, 38));
 
     uint32_t textY = contentY + 12;
-    draw_text(dlgX + 20, textY, "Network settings can be configured here.", rgb(180, 185, 200), 1);
+    draw_text(dlgX + 20, textY, "Network settings can be configured here.",
+        sciFiTheme ? roles.secondaryText : rgb(180, 185, 200), 1);
     textY += 32;
 
     // DHCP option
-    framebuffer::fill_rect(dlgX + 20, textY + 2, 12, 12, s_networkConfigUseDHCP ? rgb(74, 158, 255) : rgb(60, 60, 70));
-    draw_rect(dlgX + 20, textY + 2, 12, 12, rgb(100, 120, 150));
-    draw_text(dlgX + 40, textY, "Obtain IP address automatically (DHCP)", rgb(200, 200, 220), 1);
+    framebuffer::fill_rect(dlgX + 20, textY + 2, 12, 12, sciFiTheme
+        ? (s_networkConfigUseDHCP ? DesktopSelectionColor(roles, true) :
+           DesktopControlFillColor(roles, DesktopControlState::Normal))
+        : (s_networkConfigUseDHCP ? rgb(74, 158, 255) : rgb(60, 60, 70)));
+    draw_rect(dlgX + 20, textY + 2, 12, 12,
+        sciFiTheme ? DesktopControlBorderColor(roles, DesktopControlState::Normal) : rgb(100, 120, 150));
+    draw_text(dlgX + 40, textY, "Obtain IP address automatically (DHCP)",
+        sciFiTheme ? roles.primaryText : rgb(200, 200, 220), 1);
     textY += 28;
 
     // Manual option
-    framebuffer::fill_rect(dlgX + 20, textY + 2, 12, 12, !s_networkConfigUseDHCP ? rgb(74, 158, 255) : rgb(60, 60, 70));
-    draw_rect(dlgX + 20, textY + 2, 12, 12, rgb(100, 120, 150));
-    draw_text(dlgX + 40, textY, "Use the following IP address:", rgb(200, 200, 220), 1);
+    framebuffer::fill_rect(dlgX + 20, textY + 2, 12, 12, sciFiTheme
+        ? (!s_networkConfigUseDHCP ? DesktopSelectionColor(roles, true) :
+           DesktopControlFillColor(roles, DesktopControlState::Normal))
+        : (!s_networkConfigUseDHCP ? rgb(74, 158, 255) : rgb(60, 60, 70)));
+    draw_rect(dlgX + 20, textY + 2, 12, 12,
+        sciFiTheme ? DesktopControlBorderColor(roles, DesktopControlState::Normal) : rgb(100, 120, 150));
+    draw_text(dlgX + 40, textY, "Use the following IP address:",
+        sciFiTheme ? roles.primaryText : rgb(200, 200, 220), 1);
     textY += 36;
 
-    uint32_t labelColor = !s_networkConfigUseDHCP ? rgb(200, 200, 220) : rgb(120, 120, 135);
-    uint32_t fieldBg = !s_networkConfigUseDHCP ? rgb(42, 42, 52) : rgb(32, 32, 40);
+    const bool manualFieldsEnabled = !s_networkConfigUseDHCP;
+    const uint32_t labelColor = sciFiTheme
+        ? (manualFieldsEnabled ? roles.primaryText : roles.inputDisabledText)
+        : (manualFieldsEnabled ? rgb(200, 200, 220) : rgb(120, 120, 135));
+    const uint32_t fieldBg = sciFiTheme
+        ? (manualFieldsEnabled ? roles.inputBackground : roles.controlDisabled)
+        : (manualFieldsEnabled ? rgb(42, 42, 52) : rgb(32, 32, 40));
+    const uint32_t fieldBorder = sciFiTheme
+        ? (manualFieldsEnabled ? roles.inputBorder : roles.controlDisabledBorder)
+        : rgb(70, 80, 95);
+    const uint32_t fieldText = sciFiTheme
+        ? (manualFieldsEnabled ? roles.inputText : roles.inputDisabledText)
+        : labelColor;
 
     // IP Address
     draw_text(dlgX + 48, textY, "IP address:", labelColor, 1);
     framebuffer::fill_rect(dlgX + 180, textY - 4, 200, 20, fieldBg);
-    draw_rect(dlgX + 180, textY - 4, 200, 20, rgb(70, 80, 95));
+    draw_rect(dlgX + 180, textY - 4, 200, 20, fieldBorder);
     char ipStr[20]; 
     // Format IP as string
     int idx = 0;
@@ -8597,13 +8698,13 @@ static void draw_network_config()
         if (o < 3) ipStr[idx++] = '.';
     }
     ipStr[idx] = '\0';
-    draw_text(dlgX + 188, textY, ipStr, labelColor, 1);
+    draw_text(dlgX + 188, textY, ipStr, fieldText, 1);
     textY += 28;
 
     // Subnet mask
     draw_text(dlgX + 48, textY, "Subnet mask:", labelColor, 1);
     framebuffer::fill_rect(dlgX + 180, textY - 4, 200, 20, fieldBg);
-    draw_rect(dlgX + 180, textY - 4, 200, 20, rgb(70, 80, 95));
+    draw_rect(dlgX + 180, textY - 4, 200, 20, fieldBorder);
     idx = 0;
     for (int o = 0; o < 4; o++) {
         uint8_t v = s_netConfigMask[o];
@@ -8613,13 +8714,13 @@ static void draw_network_config()
         if (o < 3) ipStr[idx++] = '.';
     }
     ipStr[idx] = '\0';
-    draw_text(dlgX + 188, textY, ipStr, labelColor, 1);
+    draw_text(dlgX + 188, textY, ipStr, fieldText, 1);
     textY += 28;
 
     // Gateway
     draw_text(dlgX + 48, textY, "Default gateway:", labelColor, 1);
     framebuffer::fill_rect(dlgX + 180, textY - 4, 200, 20, fieldBg);
-    draw_rect(dlgX + 180, textY - 4, 200, 20, rgb(70, 80, 95));
+    draw_rect(dlgX + 180, textY - 4, 200, 20, fieldBorder);
     idx = 0;
     for (int o = 0; o < 4; o++) {
         uint8_t v = s_netConfigGateway[o];
@@ -8629,13 +8730,13 @@ static void draw_network_config()
         if (o < 3) ipStr[idx++] = '.';
     }
     ipStr[idx] = '\0';
-    draw_text(dlgX + 188, textY, ipStr, labelColor, 1);
+    draw_text(dlgX + 188, textY, ipStr, fieldText, 1);
     textY += 36;
 
     // DNS
     draw_text(dlgX + 48, textY, "Preferred DNS:", labelColor, 1);
     framebuffer::fill_rect(dlgX + 180, textY - 4, 200, 20, fieldBg);
-    draw_rect(dlgX + 180, textY - 4, 200, 20, rgb(70, 80, 95));
+    draw_rect(dlgX + 180, textY - 4, 200, 20, fieldBorder);
     idx = 0;
     for (int o = 0; o < 4; o++) {
         uint8_t v = s_netConfigDNS[o];
@@ -8645,22 +8746,30 @@ static void draw_network_config()
         if (o < 3) ipStr[idx++] = '.';
     }
     ipStr[idx] = '\0';
-    draw_text(dlgX + 188, textY, ipStr, labelColor, 1);
+    draw_text(dlgX + 188, textY, ipStr, fieldText, 1);
 
     // Buttons
     uint32_t btnY = dlgY + kNetConfigH - 50;
     uint32_t okBtnX = dlgX + kNetConfigW - 200;
     uint32_t cancelBtnX = dlgX + kNetConfigW - 100;
 
-    uint32_t okBg = (s_networkConfigBtnHover == 0) ? rgb(70, 100, 145) : rgb(55, 85, 130);
+    const DesktopControlState okState = s_networkConfigBtnHover == 0
+        ? DesktopControlState::Hover : DesktopControlState::Normal;
+    uint32_t okBg = sciFiTheme ? DesktopControlFillColor(roles, okState) :
+        ((s_networkConfigBtnHover == 0) ? rgb(70, 100, 145) : rgb(55, 85, 130));
     framebuffer::fill_rect(okBtnX, btnY, 90, 32, okBg);
-    draw_rect(okBtnX, btnY, 90, 32, rgb(85, 120, 175));
-    draw_text_centered(okBtnX, btnY, 90, 32, "OK", rgb(220, 230, 250), 1);
+    draw_rect(okBtnX, btnY, 90, 32, sciFiTheme ? DesktopControlBorderColor(roles, okState) : rgb(85, 120, 175));
+    draw_text_centered(okBtnX, btnY, 90, 32, "OK",
+        sciFiTheme ? DesktopControlTextColor(roles, okState) : rgb(220, 230, 250), 1);
 
-    uint32_t cancelBg = (s_networkConfigBtnHover == 1) ? rgb(60, 55, 55) : rgb(50, 45, 45);
+    const DesktopControlState cancelState = s_networkConfigBtnHover == 1
+        ? DesktopControlState::Hover : DesktopControlState::Normal;
+    uint32_t cancelBg = sciFiTheme ? DesktopControlFillColor(roles, cancelState) :
+        ((s_networkConfigBtnHover == 1) ? rgb(60, 55, 55) : rgb(50, 45, 45));
     framebuffer::fill_rect(cancelBtnX, btnY, 90, 32, cancelBg);
-    draw_rect(cancelBtnX, btnY, 90, 32, rgb(90, 70, 70));
-    draw_text_centered(cancelBtnX, btnY, 90, 32, "Cancel", rgb(220, 200, 200), 1);
+    draw_rect(cancelBtnX, btnY, 90, 32, sciFiTheme ? DesktopControlBorderColor(roles, cancelState) : rgb(90, 70, 70));
+    draw_text_centered(cancelBtnX, btnY, 90, 32, "Cancel",
+        sciFiTheme ? DesktopControlTextColor(roles, cancelState) : rgb(220, 200, 200), 1);
 }
 
 static int hit_test_network_config(int32_t mx, int32_t my)

@@ -391,6 +391,17 @@ $kernelFileExplorerThemeMatch = Find-FirstMatch $kernelApps 'kernelFileExplorerC
 $kernelFileExplorerWidgetGuardMatch = Find-RawMatch $kernelCompositor 'fileExplorerWindow.*sciFiTheme|owner->getName\(\).*Files|owner->getName\(\).*FileExplorer'
 $phase8bHeadingMatch = Find-FirstMatch $planDoc '## Phase 8B .*Bare-Metal File Explorer Surface Consistency'
 $phase8bBoundaryMatch = Find-RawMatch $planDoc 'Classic branches retain the prior File Explorer literals.*?No client, toolbar, address, navigation, list, row, icon, scrollbar, footer, overlay, or widget geometry changed'
+$phase10FHeadingMatch = Find-FirstMatch $planDoc '## Phase 10F - Network Utilities Sci-Fi Interior Theming'
+$phase10FOwnershipMatch = Find-RawMatch $planDoc 'The repository has no hosted Network Settings application.*?bare-metal embedded desktop state.*?Network Adapters.*?TCP/IPv4 Properties'
+$phase10FBoundaryMatch = Find-RawMatch $planDoc 'network visual theming.*?network feature/driver\s+development.*?separate networking and Navigator branches'
+$phase10FValidationMatch = Find-RawMatch $planDoc 'Hosted validation consists.*?Bare-metal validation uses.*?harness/proof limitation'
+$phase10FLimitationsMatch = Find-RawMatch $planDoc 'does not currently publish.*?RX/TX.*?Deferred network UI work'
+$networkWidgetThemeMatch = Find-RawMatch $kernelDesktop 'static void draw_network_widget\(TaskbarWidget& widget\).*?roles\.statusWarning'
+$networkAdaptersThemeMatch = Find-RawMatch $kernelDesktop 'static void draw_network_adapters\(\).*?GetBareMetalControlTheme\(theme\).*?DesktopSelectionColor\(roles, true\).*?roles\.separator'
+$networkConfigThemeMatch = Find-RawMatch $kernelDesktop 'static void draw_network_config\(\).*?roles\.inputBackground.*?roles\.inputBorder.*?roles\.controlDisabled.*?DesktopControlFillColor\(roles, okState\).*?DesktopControlBorderColor\(roles, okState\)'
+$networkStatusRolesMatch = Find-RawMatch $kernelDesktop 'network_adapter_status_color\(.*?theme\.accent.*?roles\.statusWarning.*?network_adapter_status_text_color'
+$networkClassicFallbackMatch = Find-RawMatch $kernelDesktop 'sciFiTheme \? roles\.panelBackground : rgb\(35, 35, 45\).*?sciFiTheme \? theme\.titleBarBackground : rgb\(50, 70, 110\)'
+$networkDataBoundaryMatch = Find-RawMatch $kernelDesktop 'Intel Ethernet Adapter.*?Realtek PCIe GbE Controller.*?TCP/IPv4 Properties.*?Configuration applied'
 
 $checks = @(
     [pscustomobject]@{ Name = "theme header exists"; Pass = (Test-Path -LiteralPath $themeHeader); Match = $null },
@@ -661,7 +672,18 @@ $checks = @(
     [pscustomobject]@{ Name = "phase 10e hosted Disk Manager remains read-only"; Pass = $null -ne $diskHostedReadOnlyMatch; Match = $diskHostedReadOnlyMatch },
     [pscustomobject]@{ Name = "phase 10e bare-metal Disk Manager shared roles consumed"; Pass = $null -ne $diskBareMetalRolesMatch; Match = $diskBareMetalRolesMatch },
     [pscustomobject]@{ Name = "phase 10e hosted Classic branch preserved"; Pass = $null -ne $diskClassicFallbackMatch; Match = $diskClassicFallbackMatch },
-    [pscustomobject]@{ Name = "phase 10e Disk Manager header exists"; Pass = Test-Path -LiteralPath $diskManagerHeader; Match = $null }
+    [pscustomobject]@{ Name = "phase 10e Disk Manager header exists"; Pass = Test-Path -LiteralPath $diskManagerHeader; Match = $null },
+    [pscustomobject]@{ Name = "phase 10f Network Utilities heading"; Pass = $null -ne $phase10FHeadingMatch; Match = $phase10FHeadingMatch },
+    [pscustomobject]@{ Name = "phase 10f network ownership documented"; Pass = $null -ne $phase10FOwnershipMatch; Match = $phase10FOwnershipMatch },
+    [pscustomobject]@{ Name = "phase 10f visual/feature boundary documented"; Pass = $null -ne $phase10FBoundaryMatch; Match = $phase10FBoundaryMatch },
+    [pscustomobject]@{ Name = "phase 10f validation and harness limits documented"; Pass = $null -ne $phase10FValidationMatch; Match = $phase10FValidationMatch },
+    [pscustomobject]@{ Name = "phase 10f deferred network UI documented"; Pass = $null -ne $phase10FLimitationsMatch; Match = $phase10FLimitationsMatch },
+    [pscustomobject]@{ Name = "phase 10f taskbar network widget consumes shared status roles"; Pass = $null -ne $networkWidgetThemeMatch; Match = $networkWidgetThemeMatch },
+    [pscustomobject]@{ Name = "phase 10f adapter list consumes shared selection and separator roles"; Pass = $null -ne $networkAdaptersThemeMatch; Match = $networkAdaptersThemeMatch },
+    [pscustomobject]@{ Name = "phase 10f IPv4 form consumes shared input and control roles"; Pass = $null -ne $networkConfigThemeMatch; Match = $networkConfigThemeMatch },
+    [pscustomobject]@{ Name = "phase 10f status semantics consume shared roles"; Pass = $null -ne $networkStatusRolesMatch; Match = $networkStatusRolesMatch },
+    [pscustomobject]@{ Name = "phase 10f Classic network fallback remains present"; Pass = $null -ne $networkClassicFallbackMatch; Match = $networkClassicFallbackMatch },
+    [pscustomobject]@{ Name = "phase 10f network data and action strings remain unchanged"; Pass = $null -ne $networkDataBoundaryMatch; Match = $networkDataBoundaryMatch }
 )
 
 $failures = 0

@@ -1667,6 +1667,174 @@ features, not missing theme work. Later Network/System utility phases should
 continue to audit their real ownership and reuse the same shared table,
 selection, status, panel, separator, scrollbar, and control-state roles.
 
+## Phase 10F - Network Utilities Sci-Fi Interior Theming
+
+Phase 10F themes the meaningful graphical network surfaces that actually exist
+in this branch. It is network visual theming, not network feature/driver
+development. The separate networking and Navigator branches remain separate;
+no driver, DHCP, static-IP, PHY/MDIC, ARP, DNS, TLS, Navigator, or networking
+stack work was imported or recreated.
+
+### Starting state and ownership audit
+
+The phase started from `cc1e41dedd92898177de7df56e9488f0d084c3d3` on
+`v0.3_SCI_FI_THEME`, with a clean worktree and index. The upstream ref was
+`origin/v0.3_SCI_FI_THEME` at the same commit when the audit began, so the
+Phase 10E commit was already present upstream by this phase.
+
+The repository has no hosted Network Settings application. Hosted
+`control_panel.cpp` contains a `Network Settings` card and launch label, but
+there is no corresponding hosted network interior/handler. The real graphical
+network surfaces are bare-metal embedded desktop state and framebuffer paint
+owned by `kernel/core/desktop.cpp`; the compositor owns only the surrounding
+desktop/window lifecycle and generic input routing.
+
+### Network GUI inventory
+
+The audited GUI inventory is bounded to:
+
+* the taskbar `NetworkWidget`, which reports the existing NIC/USB-network link
+  state and existing IPv4 configured state;
+* the embedded `Network Adapters` modal, with the existing two-row adapter
+  fixture, selected/hovered rows, status labels, `Properties`, `Status`, and
+  close controls;
+* the embedded `TCP/IPv4 Properties` modal, with its existing DHCP/manual
+  radio controls, IPv4/subnet/gateway/DNS display fields, OK/Cancel, and close
+  paths; and
+* the existing Device Manager network inventory rows, which were already
+  themed through shared roles in Phase 10D and were not functionally changed
+  by this pass.
+
+The adapter list is a fixed existing presentation fixture (`Intel Ethernet
+Adapter` / `Connected` and `Realtek PCIe GbE Controller` / `Not found`), not a
+new enumeration model. The configuration modal does not currently publish
+editable text-field, caret, validation, persistence, DNS-mode, lease, MAC,
+RX/TX, or detail-pane state. There are no network tabs, application-owned
+scrollbars, context menus, confirmation/error dialogs, or taskbar network
+popup/connection center to theme. Kernel networking, shell/CLI diagnostics,
+and Navigator HTTP/network code are console or subsystem concerns and remain
+out of scope.
+
+### Surfaces themed and shared roles reused
+
+Sci-Fi now routes the taskbar network indicator through the selected
+`DesktopTheme` and shared status roles: configured link-up remains a positive
+accent, link-up without an IPv4 configuration uses the existing warning
+semantic, and link-down remains secondary/inactive. The underlying provider
+queries and indicator geometry are unchanged.
+
+The Network Adapters modal now uses `GetBareMetalControlTheme` for its shadow,
+panel, title stripe, border, content field, adapter rows, selected row,
+hovered row, row separators, adapter/vendor text, status indicator, and
+Properties/Status/close controls. Selected rows use `DesktopSelectionColor`;
+hover uses the generic control state; connected and not-found fixture states
+reuse the existing positive accent and `statusWarning` roles.
+
+The TCP/IPv4 Properties modal now uses shared panel/title/border/text roles,
+shared selection/control roles for DHCP/manual choice, shared `inputBackground`,
+`inputBorder`, `inputText`, and disabled input roles for the existing address
+fields, and generic control-state fill/border/text lookup for OK, Cancel, and
+close. No field hit-testing, parsing, validation, persistence, or networking
+side effect was added.
+
+No new reusable role or API was necessary. No Network-specific Sci-Fi palette,
+second theme system, network status enum, or fake status state was added.
+`DesktopTheme`, `DesktopControlTheme`, `GetBareMetalControlTheme`,
+`DesktopControlState`, `DesktopControlFillColor`,
+`DesktopControlBorderColor`, `DesktopControlTextColor`,
+`DesktopSelectionColor`, `roles.separator`, and existing status/input roles
+remain the complete theming plumbing.
+
+### Classic and Sci-Fi behavior
+
+Classic remains the default and retains the prior network widget colors,
+network-modal colors, geometry, hit regions, fixture strings, DHCP/manual
+toggle semantics, Properties guard, OK/Cancel/close behavior, and existing
+configuration notification. Missing, invalid, explicit Classic, and
+persisted Classic configuration continue to resolve through the existing
+Classic fallback path. Sci-Fi is opt-in and adds dark technical surfaces,
+clear adapter hierarchy, readable technical identifiers, visible selection and
+disabled state, restrained status accents, and crisp form controls.
+
+### Validation and functional boundary
+
+The focused theme smoke checks now cover the Phase 10F documentation,
+bare-metal network ownership, taskbar status-role consumption, adapter
+selection/separator roles, IPv4 input/control roles, status mappings, Classic
+fallback branches, and unchanged adapter/action strings. The existing theme
+control test continues to cover Classic/Sci-Fi role mapping and invalid/missing
+theme fallback.
+
+Hosted validation consists of the full hosted build and shared theme-system
+source/runtime checks. There is no hosted network utility to launch directly;
+that absence is an architecture finding, not a missing theme implementation.
+Bare-metal validation uses the AMD64 build and disposable-ESP startup-sync
+path, with Classic and Sci-Fi theme-load evidence. The current startup harness
+does not directly open every embedded modal or retain per-application
+screenshots, so source coverage, successful build/runtime startup, and the
+existing Control Panel-to-network modal input paths are the strongest bounded
+proof. This is a harness/proof limitation, not a network-theme product defect.
+
+The Phase 10F validation run completed with these results:
+
+* `build.bat`: PASS.
+* `mingw32-make -C kernel ARCH=amd64 -j2`: PASS; existing warnings only.
+* `build.ps1 -Arch amd64`: PASS; disposable/staged ESP completed.
+* `smoke-theme-system.ps1 -SkipBuild`: PASS, including the Phase 10F
+  source/documentation checks.
+* `smoke-startup-appmodel-regression.ps1 -SkipBuild`: PASS.
+* `smoke-desktop-startup-sync.ps1 -DesktopThemeId classic`: PASS; the serial
+  log recorded `desktop theme=classic source=primary`.
+* `smoke-desktop-startup-sync.ps1 -DesktopThemeId scifi`: PASS; the serial log
+  recorded `desktop theme=scifi source=primary`, QEMU NIC/link/IP startup, and
+  the expected lack of direct modal-launch markers.
+* `smoke-live-directory-desktop-status.ps1`,
+  `smoke-hosted-display-runtime.ps1`,
+  `smoke-bootinfo-framebuffer-array.ps1`,
+  `smoke-virtio-gpu-input-routing.ps1`, and `test-build-wrapper.ps1`: PASS.
+* The focused `desktop_control_theme_test.cpp` passed with the repository
+  include path supplied as an `-iquote` path; the initial `-I.` attempt hit
+  the known MinGW/repository `process.h` include collision and was not a
+  product failure.
+* `git diff --check`: PASS.
+
+No physical-adapter reset, PHY/MDIC operation, PCI rewrite, detach, or manual
+DHCP/configuration operation was performed. The disposable QEMU boot exercised
+the existing startup path, which emitted its normal DHCP `DISCOVER`; no
+physical hardware or live-network state was changed. Network connectivity was
+not required for visual proof. The patch does not change NIC enumeration,
+driver/link queries, DHCP/static behavior, IP validation, persistence, DNS,
+gateway settings, ARP, RX/TX, network-stack state, adapter selection, input
+routing, or application lifecycle.
+
+### Network regression results and deferred work
+
+The repository has no separate graphical network-configuration/UI test suite;
+the bounded source checks and existing theme/system, build, startup, and
+input regressions are the relevant coverage. Any unrelated physical-network or
+driver limitation remains a networking defect/validation limitation rather
+than a Sci-Fi theme failure.
+
+Deferred network UI work includes a real hosted Network Settings application,
+live adapter enumeration, adapter detail/status panes, MAC/link/lease/DHCP/DNS
+presentation, editable IPv4 controls, validation/error dialogs, persistence,
+refresh/status actions, scrollable lists, and richer diagnostics. These require
+application or networking feature development and belong to their appropriate
+branches, not Phase 10F.
+
+### Phase 10F closeout
+
+* Outcome: Outcome B — Phase 10F complete with minor harness limitations.
+  The existing bare-metal network GUI surfaces are themed through shared
+  roles, Classic remains compatible/default, Sci-Fi remains opt-in, and
+  networking behavior is unchanged.
+* Implementation commit: `Theme network utilities for Sci-Fi mode`; the
+  exact SHA and final repository counts are recorded in the final handoff.
+* The only proof limitation is the lack of direct modal-launch/per-application
+  screenshot retention in the current startup harness; no network feature was
+  added to improve that harness.
+* Nothing is pushed by Phase 10F unless explicitly requested.
+
 ## Manual Validation Runbook
 
 * Start the hosted server executable and use `gui.start` to open the compositor.
