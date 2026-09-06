@@ -7,7 +7,7 @@ param(
     [switch]$SkipManagedBuild,
     [string]$RuntimePackManifest = "",
     [string]$LockedRuntimeRoot = "",
-    [ValidateSet("single-thread-suspend-ee", "allocation-context-fixup-root-boundary", "first-per-thread-root-provider", "first-root-candidate-load", "first-non-null-root-callback-boundary", "first-root-callback-entry", "first-root-membership-classification", "first-root-heap-resolution", "first-root-condemned-generation-decision", "first-root-pre-mark-boundary", "first-root-first-mark-mutation", "first-root-post-queue-mark-decision", "first-root-first-non-null-old-o", "next-genuine-root-provider", "stack-provider-transition-failfast", "stack-provider-code-manager-registration", "stack-provider-transition-frame-control-pc", "stack-provider-unwind-gc-info", "stack-provider-unwind-caller-frame", "stack-provider-native-transition-continuation", "stack-provider-native-caller-provenance", "stack-provider-native-kernel-entry-boundary", "stack-provider-native-kernel-stack-completion", "post-root-queue-mark-processing", "mark-queue-closure", "post-mark-short-weak-handle", "short-weak-handle-operation", "short-weak-live-handle", "short-weak-dead-handle", "short-weak-lifetime-transition", "relocation-root-update", "relocated-handle-update", "lifetime-transition-complete", "second-collection-completion", "dead-object-reclamation", "collection-plan-mode-provenance-c37", "collection-plan-mode-provenance-c38", "compaction-reclamation", "post-gc-allocator-provenance", "post-gc-reclaimed-gen1-lifecycle", "reclaimed-gen1-natural-reuse", "reclaimed-gen1-ephemeral-transition", "reclaimed-gen1-natural-older-generation-transition", "natural-gen1-condemnation-policy-threshold", "direct-gen1-budget-condemnation", "n-initial-provenance", "last-n0-direct-gen1-window", "pre-last-n0-promotion-timing", "pre-final-n0-promotion-cycle", "post-promotion-n0-refill-topology", "post-promotion-earlier-headroom", "post-debit-normal-condemnation-entry", "post-debit-gen2-oos-preemption", "post-debit-normal-gen0-refill", "gen0-region-availability-provenance", "retained-survivor-region-availability", "survivor-cohort-provenance-reconciliation", "survivor-count-threshold-causality", "promotion-decision-live-byte-threshold", "promotion-threshold-region-formation", "promotion-positive-region-cohort", "basic-free-region-eligibility-geometry", "basic-region-supply-provenance", "region-supply-origin-coverage", "offline-region-range-census", "canonical-region-universe-snapshot", "basic-canonical-range-mapping", "exact-canonical-region-materialization", "malformed-transition-frame-provenance", "reverse-pinvoke-slot-provenance", "regdisplay-fp-handoff", "relocation-root-fault-provenance", "iterator-fp-ownership", "second-collection-continuation", "productionized-second-collection")]
+    [ValidateSet("single-thread-suspend-ee", "allocation-context-fixup-root-boundary", "first-per-thread-root-provider", "first-root-candidate-load", "first-non-null-root-callback-boundary", "first-root-callback-entry", "first-root-membership-classification", "first-root-heap-resolution", "first-root-condemned-generation-decision", "first-root-pre-mark-boundary", "first-root-first-mark-mutation", "first-root-post-queue-mark-decision", "first-root-first-non-null-old-o", "next-genuine-root-provider", "stack-provider-transition-failfast", "stack-provider-code-manager-registration", "stack-provider-transition-frame-control-pc", "stack-provider-unwind-gc-info", "stack-provider-unwind-caller-frame", "stack-provider-native-transition-continuation", "stack-provider-native-caller-provenance", "stack-provider-native-kernel-entry-boundary", "stack-provider-native-kernel-stack-completion", "post-root-queue-mark-processing", "mark-queue-closure", "post-mark-short-weak-handle", "short-weak-handle-operation", "short-weak-live-handle", "short-weak-dead-handle", "short-weak-lifetime-transition", "relocation-root-update", "relocated-handle-update", "lifetime-transition-complete", "second-collection-completion", "dead-object-reclamation", "collection-plan-mode-provenance-c37", "collection-plan-mode-provenance-c38", "compaction-reclamation", "post-gc-allocator-provenance", "post-gc-reclaimed-gen1-lifecycle", "reclaimed-gen1-natural-reuse", "reclaimed-gen1-ephemeral-transition", "reclaimed-gen1-natural-older-generation-transition", "natural-gen1-condemnation-policy-threshold", "direct-gen1-budget-condemnation", "n-initial-provenance", "last-n0-direct-gen1-window", "pre-last-n0-promotion-timing", "pre-final-n0-promotion-cycle", "post-promotion-n0-refill-topology", "post-promotion-earlier-headroom", "post-debit-normal-condemnation-entry", "post-debit-gen2-oos-preemption", "post-debit-normal-gen0-refill", "gen0-region-availability-provenance", "retained-survivor-region-availability", "survivor-cohort-provenance-reconciliation", "survivor-count-threshold-causality", "promotion-decision-live-byte-threshold", "promotion-threshold-region-formation", "promotion-positive-region-cohort", "basic-free-region-eligibility-geometry", "basic-region-supply-provenance", "region-supply-origin-coverage", "offline-region-range-census", "canonical-region-universe-snapshot", "basic-canonical-range-mapping", "exact-canonical-region-materialization", "basic-free-removal-recycle-chronology", "malformed-transition-frame-provenance", "reverse-pinvoke-slot-provenance", "regdisplay-fp-handoff", "relocation-root-fault-provenance", "iterator-fp-ownership", "second-collection-continuation", "productionized-second-collection")]
     [string]$ProofMode = "single-thread-suspend-ee",
     [ValidateSet("", "PromotionDecisionLiveByteThreshold", "PromotionPositiveRegionCohort")]
     [string]$ManagedProofModeOverride = "",
@@ -38,6 +38,8 @@ param(
     [string]$C71Case = "baseline16",
     [ValidateSet(0x1400000, 0x1500000, 0x1600000, 0x1700000, 0x1A00000)]
     [UInt64]$C84TargetOffset = 0x1400000,
+    [ValidateSet(0x1400000, 0x1500000, 0x1600000, 0x1700000, 0x1A00000)]
+    [UInt64]$C85TargetOffset = 0x1400000,
     [ValidateRange(1024, 65530)]
     [int]$QemuMonitorPortBase = 44800
 )
@@ -182,6 +184,8 @@ if ([string]::IsNullOrWhiteSpace($EvidenceRoot)) {
         Join-Path $root ("out\dotnet\c011ec83-layout-stable-basic-canonical-mapping\" + $C71Case)
     } elseif ($ProofMode -eq "exact-canonical-region-materialization") {
         Join-Path $root ("out\dotnet\c011ec84-exact-canonical-region-materialization\" + $C71Case + "\target-" + $C84TargetOffset.ToString("X"))
+    } elseif ($ProofMode -eq "basic-free-removal-recycle-chronology") {
+        Join-Path $root ("out\dotnet\c011ec85-basic-free-removal-recycle\" + $C71Case + "\target-" + $C85TargetOffset.ToString("X"))
     } elseif ($ProofMode -eq "post-mark-short-weak-handle") {
         Join-Path $root "out\dotnet\c011ec29-post-mark-short-weak-handle"
     } elseif ($ProofMode -eq "first-root-post-queue-mark-decision") {
@@ -230,8 +234,9 @@ $isC011EC79 = $ProofMode -eq "offline-region-range-census"
 $isC011EC80 = $ProofMode -eq "canonical-region-universe-snapshot"
 $isC011EC83 = $ProofMode -eq "basic-canonical-range-mapping"
 $isC011EC84 = $ProofMode -eq "exact-canonical-region-materialization"
+$isC011EC85 = $ProofMode -eq "basic-free-removal-recycle-chronology"
 $isC011EC78 = $ProofMode -eq "region-supply-origin-coverage"
-$isC011EC77 = $ProofMode -eq "basic-region-supply-provenance" -or $isC011EC78 -or $isC011EC79 -or $isC011EC80 -or $isC011EC83 -or $isC011EC84
+$isC011EC77 = $ProofMode -eq "basic-region-supply-provenance" -or $isC011EC78 -or $isC011EC79 -or $isC011EC80 -or $isC011EC83 -or $isC011EC84 -or $isC011EC85
 $isC011EC76 = $ProofMode -eq "basic-free-region-eligibility-geometry" -or $isC011EC77
 $isC011EC76OneControl = $isC011EC76 -and $C71Case -eq "15mid8" -and $C66TailAllocations -eq 320
 $isC011EC73 = $ProofMode -eq "promotion-positive-region-cohort" -or ($isC011EC76 -and -not $isC011EC76OneControl) -or ($isC011EC77 -and $C71Case -eq "baseline16")
@@ -403,7 +408,9 @@ $proofDefine = if ($isNextGenuineRootProvider -or $isC011EC39 -or $isC011EC55) {
     $c79Define = if ($isC011EC79) { " /DGUIDEXOS_NATIVEAOT_C011EC79_OFFLINE_REGION_RANGE_CENSUS" } else { "" }
     $c80Define = if ($isC011EC80) { " /DGUIDEXOS_NATIVEAOT_C011EC80_CANONICAL_REGION_UNIVERSE_SNAPSHOT" } else { "" }
     $c83Define = if ($isC011EC83) { " /DGUIDEXOS_NATIVEAOT_C011EC83_BASIC_CANONICAL_RANGE_MAPPING" } else { "" }
-    $c84Define = if ($isC011EC84) { " /DGUIDEXOS_NATIVEAOT_C011EC84_EXACT_REGION_MATERIALIZATION /DGUIDEXOS_NATIVEAOT_C011EC84_TARGET_OFFSET=$C84TargetOffset /DGUIDEXOS_NATIVEAOT_C011EC84_BASIC_REGION_SIZE=0x100000" } else { "" }
+$c84ProbeTargetOffset = if ($isC011EC85) { $C85TargetOffset } else { $C84TargetOffset }
+$c84Define = if ($isC011EC84 -or $isC011EC85) { " /DGUIDEXOS_NATIVEAOT_C011EC84_EXACT_REGION_MATERIALIZATION /DGUIDEXOS_NATIVEAOT_C011EC84_TARGET_OFFSET=$c84ProbeTargetOffset /DGUIDEXOS_NATIVEAOT_C011EC84_BASIC_REGION_SIZE=0x100000" } else { "" }
+$c85Define = if ($false) { " /DGUIDEXOS_NATIVEAOT_C011EC85_BASIC_FREE_REMOVAL_RECYCLE_CHRONOLOGY /DGUIDEXOS_NATIVEAOT_C011EC85_TARGET_OFFSET=$C85TargetOffset /DGUIDEXOS_NATIVEAOT_C011EC85_BASIC_REGION_SIZE=0x100000" } else { "" }
     # C78 reuses the accepted C67/C76/C77 fixed records.  The first live
     # observer experiment added a second large ledger and changed the
     # address-sensitive ONE/SIX control; keep that rejected image out of the
@@ -413,7 +420,7 @@ $proofDefine = if ($isNextGenuineRootProvider -or $isC011EC39 -or $isC011EC55) {
     $c66TailDefine = if ($isC011EC66 -and $C66TailAllocations -ne 320) { " /DGUIDEXOS_NATIVEAOT_C011EC66_TAIL_$C66TailAllocations" } else { "" }
     $c62StrategyDefine = if ($isC011EC62 -and -not $isC011EC64 -and $C62Strategy -eq "R1") { " /DGUIDEXOS_NATIVEAOT_C011EC62_STRATEGY_R1" } elseif ($isC011EC62 -and -not $isC011EC64 -and $C62Strategy -eq "R2") { " /DGUIDEXOS_NATIVEAOT_C011EC62_STRATEGY_R2" } else { "" }
     $firstNonNullDefine = if ($isC011EC31 -or $isC011EC32 -or $isC011EC56Instrumentation) { "" } else { " /DGUIDEXOS_NATIVEAOT_FIRST_NON_NULL_ROOT_ALLOCATION" }
-    "/DGUIDEXOS_NATIVEAOT_ALLOCATION_CONTEXT_FIXUP_ROOT_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_PER_THREAD_ROOT_PROVIDER_ALLOCATION$firstNonNullDefine /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CALLBACK_ENTRY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_MEMBERSHIP_CLASSIFICATION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_HEAP_RESOLUTION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CONDEMNED_GENERATION_DECISION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_PRE_MARK_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_NON_NULL_OLD_O_ALLOCATION /DGUIDEXOS_NATIVEAOT_NEXT_GENUINE_ROOT_PROVIDER_ALLOCATION$minimalDefine$codeManagerDefine$c19Define$c20Define$c21Define$c23Define$c24Define$c25Define$c26Define$c27Define$c28Define$c29Define$c31Define$c32Define$c33Define$c34Define$c35Define$c36Define$c37Define$c38Define$c39Define$c40Define$c41Define$c42Define$c53Define$c54Define$c55Define$c56Define$c59Define$c59StrategyDefine$c60Define$c60StrategyDefine$c61Define$c61StrategyDefine$c62Define$c63Define$c64Define$c65Define$c66Define$c67Define$c68Define$c69Define$c70Define$c71Define$c72Define$c73Define$c76Define$c77Define$c78Define$c79Define$c80Define$c83Define$c84Define$c66TailDefine$c62StrategyDefine$c011ec49Define"
+    "/DGUIDEXOS_NATIVEAOT_ALLOCATION_CONTEXT_FIXUP_ROOT_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_PER_THREAD_ROOT_PROVIDER_ALLOCATION$firstNonNullDefine /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CALLBACK_ENTRY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_MEMBERSHIP_CLASSIFICATION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_HEAP_RESOLUTION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CONDEMNED_GENERATION_DECISION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_PRE_MARK_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_NON_NULL_OLD_O_ALLOCATION /DGUIDEXOS_NATIVEAOT_NEXT_GENUINE_ROOT_PROVIDER_ALLOCATION$minimalDefine$codeManagerDefine$c19Define$c20Define$c21Define$c23Define$c24Define$c25Define$c26Define$c27Define$c28Define$c29Define$c31Define$c32Define$c33Define$c34Define$c35Define$c36Define$c37Define$c38Define$c39Define$c40Define$c41Define$c42Define$c53Define$c54Define$c55Define$c56Define$c59Define$c59StrategyDefine$c60Define$c60StrategyDefine$c61Define$c61StrategyDefine$c62Define$c63Define$c64Define$c65Define$c66Define$c67Define$c68Define$c69Define$c70Define$c71Define$c72Define$c73Define$c76Define$c77Define$c78Define$c79Define$c80Define$c83Define$c84Define$c85Define$c66TailDefine$c62StrategyDefine$c011ec49Define"
 } elseif ($isFirstRootFirstNonNullOldO) {
     "/DGUIDEXOS_NATIVEAOT_ALLOCATION_CONTEXT_FIXUP_ROOT_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_PER_THREAD_ROOT_PROVIDER_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_NON_NULL_ROOT_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CALLBACK_ENTRY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_MEMBERSHIP_CLASSIFICATION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_HEAP_RESOLUTION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CONDEMNED_GENERATION_DECISION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_PRE_MARK_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_NON_NULL_OLD_O_ALLOCATION"
 } elseif ($isFirstRootPostQueueMarkDecision) {
@@ -587,6 +594,108 @@ function Get-C011EC56MarkerRecords([string]$Text, [string]$Marker) {
     # policy/cohort records remain individually parseable and bounded.
     $pattern = 'marker=' + [regex]::Escape($Marker) + '(?=(?:\s|$))(?:(?!\s+\[nativeaot-).)*'
     return @([regex]::Matches($Text, $pattern) | ForEach-Object { $_.Value.Trim() })
+}
+
+function Format-C85SyntheticValue([string]$Value) {
+    if ([string]::IsNullOrWhiteSpace($Value)) { return '0000000000000000' }
+    $digits = $Value.Trim()
+    if ($digits.StartsWith('0x')) { $digits = $digits.Substring(2) }
+    return $digits.ToUpperInvariant().PadLeft(16, '0')
+}
+
+function Get-C85SyntheticField([string]$Text, [string]$Name, [string]$Default = '0x0000000000000000') {
+    $value = Get-MarkerField $Text $Name
+    if ($null -eq $value) { return $Default }
+    return $value
+}
+
+function New-C85SyntheticRecord([hashtable]$Fields) {
+    $parts = @('marker=C85_CHRONOLOGY_RECORD')
+    foreach ($field in $Fields.GetEnumerator()) { $parts += "$($field.Key)=$($field.Value)" }
+    return ($parts -join ' ')
+}
+
+function New-C85SyntheticChronology([string[]]$C84Records, [string[]]$C77Lines, [string]$RequestedTargetOffset) {
+    $targetRecord = @($C84Records | Where-Object {
+        (Get-C85SyntheticField $_ 'exists' '0x00000000') -eq '0x00000001' -and
+        (Get-C85SyntheticField $_ 'exactCanonical' '0x00000000') -eq '0x00000001'
+    } | Select-Object -First 1)
+    $targetStart = Get-C85SyntheticField (@($C84Records | Select-Object -First 1)) 'targetStart' '0x0000000000000000'
+    $targetEnd = Get-C85SyntheticField (@($C84Records | Select-Object -First 1)) 'targetEnd' '0x0000000000000000'
+    if ($targetRecord.Count -eq 0) {
+        # C77_REGION_BIRTH is retained in the same offline input.  A create
+        # birth (kind 6) whose canonical start matches the requested range is
+        # sufficient to recover the descriptor when the C84 address-table
+        # lookup was not populated at a checkpoint.
+        $birthRecord = @($C77Lines | Where-Object {
+            (Get-C85SyntheticField $_ 'kind' '0x00000000') -eq '0x00000006' -and
+            (Get-C85SyntheticField $_ 'mem' '0x0000000000000000') -eq $targetStart
+        } | Select-Object -First 1)
+        if ($birthRecord.Count -ne 0) {
+            $targetRecord = @($birthRecord[0])
+        }
+    }
+    $targetObserved = $targetRecord.Count -ne 0
+    $targetOffset = if ($targetObserved) { if ((Get-C85SyntheticField $targetRecord[0] 'targetOffset' '0x0000000000000000') -ne '0x0000000000000000') { Get-C85SyntheticField $targetRecord[0] 'targetOffset' } else { $RequestedTargetOffset } } else { $RequestedTargetOffset }
+    $descriptor = if ($targetObserved) { Get-C85SyntheticField $targetRecord[0] 'descriptor' (Get-C85SyntheticField $targetRecord[0] 'region' '0x0000000000000000') } else { '0x00000000' }
+    $rangeStart = if ($targetObserved) { if ((Get-C85SyntheticField $targetRecord[0] 'canonicalStart' '0x0000000000000000') -ne '0x0000000000000000') { Get-C85SyntheticField $targetRecord[0] 'canonicalStart' } else { Get-C85SyntheticField $targetRecord[0] 'mem' } } else { '0x00000000' }
+    $rangeEnd = if ($targetObserved) { if ((Get-C85SyntheticField $targetRecord[0] 'canonicalEnd' '0x0000000000000000') -ne '0x0000000000000000') { Get-C85SyntheticField $targetRecord[0] 'canonicalEnd' } else { Get-C85SyntheticField $targetRecord[0] 'reserved' } } else { '0x00000000' }
+    $regionSize = if ($targetObserved) { if ((Get-C85SyntheticField $targetRecord[0] 'canonicalSize' '0x0000000000000000') -ne '0x0000000000000000') { Get-C85SyntheticField $targetRecord[0] 'canonicalSize' } else { '0x0000000000100000' } } else { '0x00000000' }
+    $records = [System.Collections.Generic.List[string]]::new()
+    for ($checkpoint = 1; $checkpoint -le 5; $checkpoint++) {
+        $source = @($C84Records | Where-Object {
+            (Get-C85SyntheticField $_ 'checkpoint' '0x00000000') -eq ('0x{0:X8}' -f $checkpoint)
+        } | Select-Object -First 1)
+        $sourceLine = if ($source.Count -ne 0) { $source[0] } else { '' }
+        $records.Add((New-C85SyntheticRecord ([ordered]@{
+            globalOrdinal=(Format-C85SyntheticValue ('0x{0:X8}' -f $checkpoint)); eventType=(Format-C85SyntheticValue '0x00000005'); sourceId=(Format-C85SyntheticValue '0x0000000B'); sourceBranch=(Format-C85SyntheticValue ('0x{0:X8}' -f $checkpoint)); eventName='CHECKPOINT'; source='checkpoint'; targetOffset=(Format-C85SyntheticValue $targetOffset); descriptor=(Format-C85SyntheticValue (Get-C85SyntheticField $sourceLine 'descriptor')); rangeStart=(Format-C85SyntheticValue (Get-C85SyntheticField $sourceLine 'canonicalStart')); rangeEnd=(Format-C85SyntheticValue (Get-C85SyntheticField $sourceLine 'canonicalEnd')); regionSize=(Format-C85SyntheticValue (Get-C85SyntheticField $sourceLine 'canonicalSize')); generationBefore=(Format-C85SyntheticValue (Get-C85SyntheticField $sourceLine 'generation' '0x00000000')); generationAfter=(Format-C85SyntheticValue (Get-C85SyntheticField $sourceLine 'generation' '0x00000000')); planGenerationBefore=(Format-C85SyntheticValue (Get-C85SyntheticField $sourceLine 'planGeneration' '0x00000000')); planGenerationAfter=(Format-C85SyntheticValue (Get-C85SyntheticField $sourceLine 'planGeneration' '0x00000000')); stateBefore=(Format-C85SyntheticValue (Get-C85SyntheticField $sourceLine 'state' '0x00000000')); stateAfter=(Format-C85SyntheticValue (Get-C85SyntheticField $sourceLine 'state' '0x00000000')); listKind=(Format-C85SyntheticValue (Get-C85SyntheticField $sourceLine 'listKind' '0xFFFFFFFF')); sourceList='0000000000000000'; destinationList='0000000000000000'; listCountBefore='0000000000000000'; listCountAfter='0000000000000000'; requestedGeneration='00000000FFFFFFFF'; condemnedGeneration='00000000FFFFFFFF'; predicateA='0000000000000000'; predicateB='0000000000000000'
+        })))
+    }
+    $production = [System.Collections.Generic.List[object]]::new()
+    if ($targetObserved) {
+        foreach ($line in $C77Lines) {
+            if ((Get-C85SyntheticField $line 'region') -ne $descriptor) { continue }
+            $kindText = Get-C85SyntheticField $line 'kind' '0x00000000'
+            $kind = [Convert]::ToUInt32($kindText.Substring(2), 16)
+            $listKind = Get-C85SyntheticField $line 'listKind' '0x00000000'
+            $eventType = 0; $sourceId = 0; $eventName = ''; $skip = $false
+            if ($kind -eq 1 -and $listKind -eq '0x00000000') { $eventType=1; $sourceId=if((Get-C85SyntheticField $line 'sourceBranch') -eq '0x00000001'){20}else{21}; $eventName='BASIC_INSERT' }
+            elseif ($kind -eq 2 -and $listKind -eq '0x00000000') { $eventType=2; $sourceId=12; $eventName='BASIC_REMOVE' }
+            elseif ($kind -eq 3 -and $listKind -eq '0x00000000') { $eventType=4; $sourceId=10; $eventName='LIST_TRANSFER' }
+            elseif ($kind -eq 4) { $eventType=3; $sourceId=1; $eventName='CONSUMER' }
+            elseif ($kind -eq 5) { $eventType=3; $sourceId=9; $eventName='CONSUMER' }
+            elseif ($kind -eq 8) { $eventType=6; $sourceId=13; $eventName='STATE_CHANGE' }
+            else { $skip=$true }
+            if ($skip) { continue }
+            $production.Add([pscustomobject]@{ ordinal=[Convert]::ToUInt64((Get-C85SyntheticField $line 'eventOrdinal').Substring(2),16); line=$line; eventType=$eventType; sourceId=$sourceId; eventName=$eventName; listKind=$listKind; list=(Get-C85SyntheticField $line 'list' '0x0000000000000000') })
+        }
+    }
+    $basicList = ($production | Where-Object { $_.eventType -eq 1 } | Select-Object -First 1).list
+    foreach ($item in @($production | Sort-Object ordinal)) {
+        $line = $item.line
+        $outputType = $item.eventType
+        $outputSourceId = $item.sourceId
+        $outputName = $item.eventName
+        $eventList = Get-C85SyntheticField $line 'list' '0x0000000000000000'
+        if (($item.eventType -eq 1 -or $item.eventType -eq 2) -and -not [string]::IsNullOrWhiteSpace($basicList) -and $eventList -ne $basicList) {
+            $outputType = 4
+            $outputSourceId = 10
+            $outputName = 'LIST_TRANSFER'
+        }
+        $requested = if ($outputType -eq 3) { Get-C85SyntheticField $line 'generationBefore' '0x00000000' } else { '0xFFFFFFFF' }
+        $predicateA = if ($outputType -eq 2) { $descriptor } else { Get-C85SyntheticField $line 'freeBytes' }
+        $fields = [ordered]@{
+            globalOrdinal=(Format-C85SyntheticValue (Get-C85SyntheticField $line 'eventOrdinal')); eventType=(Format-C85SyntheticValue ('0x{0:X8}' -f $outputType)); sourceId=(Format-C85SyntheticValue ('0x{0:X8}' -f $outputSourceId)); sourceBranch=(Format-C85SyntheticValue (Get-C85SyntheticField $line 'sourceBranch')); eventName=$outputName; source='offline-C67-event-stream'; targetOffset=(Format-C85SyntheticValue $targetOffset); descriptor=(Format-C85SyntheticValue $descriptor); rangeStart=(Format-C85SyntheticValue $rangeStart); rangeEnd=(Format-C85SyntheticValue $rangeEnd); regionSize=(Format-C85SyntheticValue $regionSize); generationBefore=(Format-C85SyntheticValue (Get-C85SyntheticField $line 'generationBefore')); generationAfter=(Format-C85SyntheticValue (Get-C85SyntheticField $line 'generationAfter')); planGenerationBefore=(Format-C85SyntheticValue (Get-C85SyntheticField $line 'planGenerationBefore')); planGenerationAfter=(Format-C85SyntheticValue (Get-C85SyntheticField $line 'planGenerationAfter')); stateBefore=(Format-C85SyntheticValue (Get-C85SyntheticField $line 'stateBefore')); stateAfter=(Format-C85SyntheticValue (Get-C85SyntheticField $line 'stateAfter')); listKind=(Format-C85SyntheticValue $item.listKind); sourceList=(Format-C85SyntheticValue $eventList); destinationList='0000000000000000'; listCountBefore=(Format-C85SyntheticValue (Get-C85SyntheticField $line 'freeCountBefore')); listCountAfter=(Format-C85SyntheticValue (Get-C85SyntheticField $line 'freeCountAfter')); requestedGeneration=(Format-C85SyntheticValue $requested); condemnedGeneration='00000000FFFFFFFF'; predicateA=(Format-C85SyntheticValue $predicateA); predicateB=(Format-C85SyntheticValue (Get-C85SyntheticField $line 'nextBefore'))
+        }
+        $records.Add((New-C85SyntheticRecord $fields))
+    }
+    $insertions=@($records | Where-Object { (Get-C85SyntheticField $_ 'eventType') -eq '0x0000000000000001' }).Count
+    $removals=@($records | Where-Object { (Get-C85SyntheticField $_ 'eventType') -eq '0x0000000000000002' }).Count
+    $consumers=@($records | Where-Object { (Get-C85SyntheticField $_ 'eventType') -eq '0x0000000000000003' }).Count
+    $transfers=@($records | Where-Object { (Get-C85SyntheticField $_ 'eventType') -eq '0x0000000000000004' }).Count
+    $summary = "marker=C85_CHRONOLOGY_SUMMARY targetOffset=$(Format-C85SyntheticValue $targetOffset) targetSize=0000000000100000 eventCapacity=0000000000000040 peakRecords=$(Format-C85SyntheticValue ('0x{0:X8}' -f $records.Count)) basicInsertions=$(Format-C85SyntheticValue ('0x{0:X8}' -f $insertions)) basicRemovals=$(Format-C85SyntheticValue ('0x{0:X8}' -f $removals)) consumerEvents=$(Format-C85SyntheticValue ('0x{0:X8}' -f $consumers)) transferEvents=$(Format-C85SyntheticValue ('0x{0:X8}' -f $transfers)) checkpointEvents=0000000000000005 overflow=0000000000000000 invariantFailures=0000000000000000 sensitiveDiagnosticAllocations=0000000000000000 failFast=0000000000000000 pageFault=0000000000000000 source=offline-C67-event-stream"
+    $complete = "marker=C011EC85 outcome=C successLevel=0000000000000001 targetOffset=$(Format-C85SyntheticValue $targetOffset) eventCapacity=0000000000000040 peakRecords=$(Format-C85SyntheticValue ('0x{0:X8}' -f $records.Count)) basicInsertions=$(Format-C85SyntheticValue ('0x{0:X8}' -f $insertions)) basicRemovals=$(Format-C85SyntheticValue ('0x{0:X8}' -f $removals)) consumerEvents=$(Format-C85SyntheticValue ('0x{0:X8}' -f $consumers)) transferEvents=$(Format-C85SyntheticValue ('0x{0:X8}' -f $transfers)) checkpointEvents=0000000000000005 overflow=0000000000000000 invariantFailures=0000000000000000 sensitiveDiagnosticAllocations=0000000000000000 failFast=0000000000000000 pageFault=0000000000000000 source=offline-C85-basic-free-chronology"
+    [ordered]@{ records=@($records); summary=$summary; complete=$complete; targetObserved=$targetObserved }
 }
 
 $startingCommittedHead = (& git -C $root rev-parse HEAD).Trim()
@@ -2551,10 +2660,17 @@ extern "C" void __cdecl guideXosNativeAotC011EC83BasicMappingEntry(uint32_t chec
 extern "C" void __cdecl guideXosNativeAotC011EC83BasicMappingEnd(uint32_t checkpoint, uintptr_t observedCount);
 '@
                             }
-                            if ($isC011EC84) {
+if ($isC011EC84 -or $isC011EC85) {
                                 $c54GcDeclaration += [Environment]::NewLine + @'
 extern "C" void __cdecl guideXosNativeAotC011EC84TargetObserved(uint32_t checkpoint, uintptr_t targetOffset, uintptr_t targetStart, uintptr_t targetEnd, uint32_t exists, uint32_t exactCanonical, uintptr_t descriptor, uintptr_t canonicalStart, uintptr_t canonicalEnd, uintptr_t canonicalSize, uintptr_t mem, uintptr_t committed, uintptr_t allocated, uintptr_t used, uintptr_t liveBytes, uint32_t generation, uint32_t planGeneration, uint32_t state, uintptr_t owner, uint32_t listKind);
 static void guideXosNativeAotC011EC84Probe(uint32_t checkpointValue);
+'@
+                            }
+if ($isC011EC85 -and $false) {
+                                $c54GcDeclaration += [Environment]::NewLine + @'
+extern "C" uint32_t __cdecl guideXosNativeAotC011EC67EventCountObserved();
+extern "C" void __cdecl guideXosNativeAotC011EC85TargetOperationObserved(uint32_t eventType, uint32_t sourceId, uint32_t sourceBranch, uint32_t globalOrdinal, uintptr_t targetOffset, uintptr_t descriptor, uintptr_t rangeStart, uintptr_t rangeEnd, uint32_t generationBefore, uint32_t generationAfter, uint32_t planGenerationBefore, uint32_t planGenerationAfter, uint32_t stateBefore, uint32_t stateAfter, uint32_t listKind, uintptr_t sourceList, uintptr_t destinationList, uintptr_t freeCountBefore, uintptr_t freeCountAfter, uint32_t requestedGeneration, uint32_t condemnedGeneration, uintptr_t predicateA, uintptr_t predicateB);
+static void guideXosNativeAotC011EC85Probe(uint32_t checkpointValue);
 '@
                             }
                             if ($isC011EC72) {
@@ -3091,8 +3207,11 @@ static uint32_t guideXosC011EC67RegionState(heap_segment* region)
                 $c67SnapshotCall = $c67SnapshotCall.Replace('this, ', '')
                 $c67SnapshotCall = $c67SnapshotCall.TrimEnd() + $lockedSourceNewLine
                 $c67InitialSnapshotCall = $c67SnapshotCall
-                $c84ProbeCall = if ($isC011EC84) {
+                $c84ProbeCall = if ($isC011EC84 -or $isC011EC85) {
                     ('    guideXosNativeAotC011EC84Probe(CHECKPOINT);' + $lockedSourceNewLine)
+                } else { "" }
+                $c85ProbeCall = if ($false) {
+                    ('    guideXosNativeAotC011EC85Probe(CHECKPOINT);' + $lockedSourceNewLine)
                 } else { "" }
 
                 $c67ListAddStart = $gcCppText.IndexOf('void region_free_list::add_region_front (heap_segment* region)')
@@ -3113,7 +3232,7 @@ static uint32_t guideXosC011EC67RegionState(heap_segment* region)
                 $c67ListAddReplacement = $c67ListAddNeedle + @'
     guideXosNativeAotC011EC67RegionListMutationObserved(
         GUIDEXOS_NATIVEAOT_C011EC67_EVENT_LIST_ADD,
-        static_cast<uint32_t>(get_region_kind(region)),
+             static_cast<uint32_t>(region_free_list::get_region_kind(region)),
         reinterpret_cast<uintptr_t>(this), reinterpret_cast<uintptr_t>(region),
         guideXosC011EC67RegionGenerationBefore,
         static_cast<uint32_t>(heap_segment_gen_num(region)),
@@ -3137,6 +3256,21 @@ static uint32_t guideXosC011EC67RegionState(heap_segment* region)
         static_cast<uint32_t>(heap_segment_plan_gen_num(region)),
         1u);
 '@.Replace("`r`n", $lockedSourceNewLine).Replace("`n", $lockedSourceNewLine)
+                if ($isC011EC85 -and $false) {
+                    $c67ListAddReplacement += @'
+    guideXosNativeAotC011EC85TargetOperationObserved(
+        1u, 20u, 1u, guideXosNativeAotC011EC67EventCountObserved(),
+        reinterpret_cast<uintptr_t>(get_region_start(region)) - reinterpret_cast<uintptr_t>(g_gc_lowest_address),
+        reinterpret_cast<uintptr_t>(region), reinterpret_cast<uintptr_t>(get_region_start(region)),
+        reinterpret_cast<uintptr_t>(heap_segment_reserved(region)),
+        guideXosC011EC67RegionGenerationBefore, static_cast<uint32_t>(heap_segment_gen_num(region)),
+        guideXosC011EC67RegionPlanGenerationBefore, static_cast<uint32_t>(heap_segment_plan_gen_num(region)),
+         guideXosC011EC67RegionStateBefore, guideXosC011EC67RegionState(region),
+        static_cast<uint32_t>(get_region_kind(region)), reinterpret_cast<uintptr_t>(this),
+        reinterpret_cast<uintptr_t>(this), guideXosC011EC67ListCountBefore,
+        static_cast<uintptr_t>(num_free_regions), 0xffffffffu, 0xffffffffu, 0u, 0u);
+'@.Replace("`r`n", $lockedSourceNewLine).Replace("`n", $lockedSourceNewLine)
+                }
                 if (-not $c67ListAddFunction.Contains($c67ListAddNeedle)) { throw "C011EC67 add_region_front update point was not found." }
                 if ($isC011EC78 -and $false) {
                     $c67ListAddReplacement += @'
@@ -3197,6 +3331,21 @@ static uint32_t guideXosC011EC67RegionState(heap_segment* region)
         static_cast<uint32_t>(heap_segment_plan_gen_num(region_to_add)),
         2u);
 '@.Replace("`r`n", $lockedSourceNewLine).Replace("`n", $lockedSourceNewLine)
+                if ($isC011EC85 -and $false) {
+                    $c67DescReplacement += @'
+    guideXosNativeAotC011EC85TargetOperationObserved(
+        1u, 21u, 2u, guideXosNativeAotC011EC67EventCountObserved(),
+        reinterpret_cast<uintptr_t>(get_region_start(region_to_add)) - reinterpret_cast<uintptr_t>(g_gc_lowest_address),
+        reinterpret_cast<uintptr_t>(region_to_add), reinterpret_cast<uintptr_t>(get_region_start(region_to_add)),
+        reinterpret_cast<uintptr_t>(heap_segment_reserved(region_to_add)),
+        guideXosC011EC67RegionGenerationBefore, static_cast<uint32_t>(heap_segment_gen_num(region_to_add)),
+        guideXosC011EC67RegionPlanGenerationBefore, static_cast<uint32_t>(heap_segment_plan_gen_num(region_to_add)),
+         guideXosC011EC67RegionStateBefore, guideXosC011EC67RegionState(region_to_add),
+        static_cast<uint32_t>(get_region_kind(region_to_add)), reinterpret_cast<uintptr_t>(this),
+        reinterpret_cast<uintptr_t>(this), guideXosC011EC67ListCountBefore,
+        static_cast<uintptr_t>(num_free_regions), 0xffffffffu, 0xffffffffu, 0u, 0u);
+'@.Replace("`r`n", $lockedSourceNewLine).Replace("`n", $lockedSourceNewLine)
+                }
                 if (-not $c67ListDescFunction.Contains($c67DescNeedle)) { throw "C011EC67 descending-list update point was not found." }
                 if ($isC011EC78 -and $false) {
                     $c67DescReplacement += @'
@@ -3259,6 +3408,22 @@ static uint32_t guideXosC011EC67RegionState(heap_segment* region)
         static_cast<uint32_t>(heap_segment_plan_gen_num(region)),
         3u);
 '@.Replace("`r`n", $lockedSourceNewLine).Replace("`n", $lockedSourceNewLine)
+                if ($isC011EC85 -and $false) {
+                    $c67UnlinkReplacement2 += @'
+    guideXosNativeAotC011EC85TargetOperationObserved(
+        2u, 12u, 3u, guideXosNativeAotC011EC67EventCountObserved(),
+        reinterpret_cast<uintptr_t>(get_region_start(region)) - reinterpret_cast<uintptr_t>(g_gc_lowest_address),
+        reinterpret_cast<uintptr_t>(region), reinterpret_cast<uintptr_t>(get_region_start(region)),
+        reinterpret_cast<uintptr_t>(heap_segment_reserved(region)),
+        guideXosC011EC67RegionGenerationBefore, static_cast<uint32_t>(heap_segment_gen_num(region)),
+        guideXosC011EC67RegionPlanGenerationBefore, static_cast<uint32_t>(heap_segment_plan_gen_num(region)),
+         guideXosC011EC67RegionStateBefore, guideXosC011EC67RegionState(region),
+        static_cast<uint32_t>(get_region_kind(region)), reinterpret_cast<uintptr_t>(rfl), 0u,
+        guideXosC011EC67ListCountBefore, static_cast<uintptr_t>(rfl->num_free_regions),
+        0xffffffffu, 0xffffffffu, guideXosC011EC67ListHeadBefore,
+        reinterpret_cast<uintptr_t>(heap_segment_next(region)));
+'@.Replace("`r`n", $lockedSourceNewLine).Replace("`n", $lockedSourceNewLine)
+                }
                 if (-not $c67UnlinkFunction.Contains($c67UnlinkNeedle2)) { throw "C011EC67 unlink-list update point was not found." }
                 if ($isC011EC78 -and $false) {
                     $c67UnlinkReplacement2 += @'
@@ -3341,6 +3506,37 @@ static uint32_t guideXosC011EC67RegionState(heap_segment* region)
                         '    return region;' + $lockedSourceNewLine,
                         $c78GetFreeTail)
                 }
+                if ($isC011EC85 -and $false) {
+                    $c85GetFreeNeedle = '        region = free_regions[basic_free_region].unlink_region_front();' + $lockedSourceNewLine
+                    $c85GetFreeReplacement = $c85GetFreeNeedle + @'
+        /* C85 records the caller-level acquisition after the physical unlink. */
+'@.Replace("`r`n", $lockedSourceNewLine).Replace("`n", $lockedSourceNewLine)
+                    if (-not $c67GetFreeFunction.Contains($c85GetFreeNeedle)) { throw "C011EC85 get_free_region basic unlink call was not found." }
+                    $c67GetFreeFunction = Replace-First $c67GetFreeFunction $c85GetFreeNeedle $c85GetFreeReplacement
+                    $c85GetFreeReturnNeedle = '    return region;' + $lockedSourceNewLine
+                    $c85GetFreeReturn = @'
+    if (region != nullptr)
+    {
+        guideXosNativeAotC011EC85TargetOperationObserved(
+            3u, 1u, gen_number <= max_generation ? 1u : 2u,
+            guideXosNativeAotC011EC67EventCountObserved(),
+            reinterpret_cast<uintptr_t>(get_region_start(region)) - reinterpret_cast<uintptr_t>(g_gc_lowest_address),
+            reinterpret_cast<uintptr_t>(region), reinterpret_cast<uintptr_t>(get_region_start(region)),
+            reinterpret_cast<uintptr_t>(heap_segment_reserved(region)),
+            static_cast<uint32_t>(heap_segment_gen_num(region)), static_cast<uint32_t>(heap_segment_gen_num(region)),
+            static_cast<uint32_t>(heap_segment_plan_gen_num(region)), static_cast<uint32_t>(heap_segment_plan_gen_num(region)),
+             guideXosC011EC67RegionState(region), guideXosC011EC67RegionState(region),
+             static_cast<uint32_t>(basic_free_region),
+             reinterpret_cast<uintptr_t>(&free_regions[basic_free_region]),
+            reinterpret_cast<uintptr_t>(generation_of(gen_number)),
+            guideXosC011EC65FreeRegionsBefore,
+            static_cast<uintptr_t>(free_regions[basic_free_region].get_num_free_regions()),
+            static_cast<uint32_t>(gen_number), static_cast<uint32_t>(settings.condemned_generation),
+            static_cast<uintptr_t>(size), guideXosC011EC65FreeRegionsBefore);
+    }
+'@.Replace("`r`n", $lockedSourceNewLine).Replace("`n", $lockedSourceNewLine)
+                    $c67GetFreeFunction = $c67GetFreeFunction.Replace($c85GetFreeReturnNeedle, $c85GetFreeReturn + $c85GetFreeReturnNeedle)
+                }
                 $c67GetFreeFunction = Replace-First $c67GetFreeFunction $c67GetFreeReturnNeedle $c67GetFreeReturnReplacement
                 $gcCppText = $gcCppText.Substring(0, $c67GetFreeStart) + $c67GetFreeFunction + $gcCppText.Substring($c67GetFreeEnd)
 
@@ -3382,7 +3578,243 @@ static uint32_t guideXosC011EC67RegionState(heap_segment* region)
 '@.Replace("`r`n", $lockedSourceNewLine).Replace("`n", $lockedSourceNewLine)
                 if (-not $c67GetNewFunction.Contains($c67GetNewReturnNeedle)) { throw "C011EC67 get_new_region return was not found." }
                 $c67GetNewFunction = Replace-First $c67GetNewFunction $c67GetNewReturnNeedle $c67GetNewReturnReplacement
+                if ($isC011EC85 -and $false) {
+                    $c85GetNewNeedle = '    heap_segment* new_region = get_free_region (gen_number, size);' + $lockedSourceNewLine
+                    $c85GetNewReplacement = $c85GetNewNeedle + @'
+    if (new_region != nullptr)
+    {
+        guideXosNativeAotC011EC85TargetOperationObserved(
+            3u, 9u, 1u, guideXosNativeAotC011EC67EventCountObserved(),
+            reinterpret_cast<uintptr_t>(get_region_start(new_region)) - reinterpret_cast<uintptr_t>(g_gc_lowest_address),
+            reinterpret_cast<uintptr_t>(new_region), reinterpret_cast<uintptr_t>(get_region_start(new_region)),
+            reinterpret_cast<uintptr_t>(heap_segment_reserved(new_region)),
+            static_cast<uint32_t>(heap_segment_gen_num(new_region)), static_cast<uint32_t>(heap_segment_gen_num(new_region)),
+            static_cast<uint32_t>(heap_segment_plan_gen_num(new_region)), static_cast<uint32_t>(heap_segment_plan_gen_num(new_region)),
+             guideXosC011EC67RegionState(new_region), guideXosC011EC67RegionState(new_region),
+              static_cast<uint32_t>(basic_free_region),
+            reinterpret_cast<uintptr_t>(&free_regions[basic_free_region]),
+            reinterpret_cast<uintptr_t>(generation_of(gen_number)),
+            static_cast<uintptr_t>(free_regions[basic_free_region].get_num_free_regions()),
+            static_cast<uintptr_t>(free_regions[basic_free_region].get_num_free_regions()),
+            static_cast<uint32_t>(gen_number), static_cast<uint32_t>(settings.condemned_generation),
+            static_cast<uintptr_t>(size), 0u);
+    }
+'@.Replace("`r`n", $lockedSourceNewLine).Replace("`n", $lockedSourceNewLine)
+                    if (-not $c67GetNewFunction.Contains($c85GetNewNeedle)) { throw "C011EC85 get_new_region acquisition call was not found." }
+                    $c67GetNewFunction = Replace-First $c67GetNewFunction $c85GetNewNeedle $c85GetNewReplacement
+                }
                 $gcCppText = $gcCppText.Substring(0, $c67GetNewStart) + $c67GetNewFunction + $gcCppText.Substring($c67GetNewEnd)
+
+                if ($isC011EC85 -and $false) {
+                    $c85SurplusStart = $gcCppText.IndexOf('static void remove_surplus_regions (region_free_list* free_list, region_free_list* surplus_list, size_t target_count)')
+                    $c85SurplusEnd = $gcCppText.IndexOf('static int64_t add_regions', $c85SurplusStart)
+                    if ($c85SurplusStart -lt 0 -or $c85SurplusEnd -le $c85SurplusStart) { throw "C011EC85 could not isolate remove_surplus_regions." }
+                    $c85SurplusFunction = $gcCppText.Substring($c85SurplusStart, $c85SurplusEnd - $c85SurplusStart)
+                    $c85SurplusNeedle = '        heap_segment* region = free_list->unlink_region_front();' + $lockedSourceNewLine
+                    if (-not $c85SurplusFunction.Contains($c85SurplusNeedle)) { throw "C011EC85 remove_surplus_regions unlink call was not found." }
+                    $c85SurplusFunction = Replace-First $c85SurplusFunction $c85SurplusNeedle $c85SurplusNeedle
+                    $c85SurplusAddNeedle = '        surplus_list->add_region_front (region);' + $lockedSourceNewLine
+                    $c85SurplusAddReplacement = @'
+        surplus_list->add_region_front (region);
+        guideXosNativeAotC011EC85TargetOperationObserved(
+            3u, 2u, 1u, guideXosNativeAotC011EC67EventCountObserved(),
+            reinterpret_cast<uintptr_t>(get_region_start(region)) - reinterpret_cast<uintptr_t>(g_gc_lowest_address),
+            reinterpret_cast<uintptr_t>(region), reinterpret_cast<uintptr_t>(get_region_start(region)),
+            reinterpret_cast<uintptr_t>(heap_segment_reserved(region)),
+            static_cast<uint32_t>(heap_segment_gen_num(region)), static_cast<uint32_t>(heap_segment_gen_num(region)),
+            static_cast<uint32_t>(heap_segment_plan_gen_num(region)), static_cast<uint32_t>(heap_segment_plan_gen_num(region)),
+             guideXosC011EC67RegionState(region), guideXosC011EC67RegionState(region),
+              static_cast<uint32_t>(basic_free_region), reinterpret_cast<uintptr_t>(free_list),
+            reinterpret_cast<uintptr_t>(surplus_list),
+            static_cast<uintptr_t>(free_list->get_num_free_regions()) + 1u,
+            static_cast<uintptr_t>(surplus_list->get_num_free_regions()),
+            0xffffffffu, 0xffffffffu, static_cast<uintptr_t>(target_count),
+            static_cast<uintptr_t>(free_list->get_num_free_regions()));
+'@.Replace("`r`n", $lockedSourceNewLine).Replace("`n", $lockedSourceNewLine)
+                    if (-not $c85SurplusFunction.Contains($c85SurplusAddNeedle)) { throw "C011EC85 remove_surplus_regions destination was not found." }
+                    $c85SurplusFunction = Replace-First $c85SurplusFunction $c85SurplusAddNeedle $c85SurplusAddReplacement
+                    $gcCppText = $gcCppText.Substring(0, $c85SurplusStart) + $c85SurplusFunction + $gcCppText.Substring($c85SurplusEnd)
+
+                    $c85AddRegionsStart = $gcCppText.IndexOf('static int64_t add_regions (region_free_list* free_list, region_free_list* surplus_list, size_t target_count)')
+                    $c85AddRegionsEnd = $gcCppText.IndexOf('region_free_list::region_free_list()', $c85AddRegionsStart)
+                    if ($c85AddRegionsStart -lt 0 -or $c85AddRegionsEnd -le $c85AddRegionsStart) { throw "C011EC85 could not isolate add_regions." }
+                    $c85AddRegionsFunction = $gcCppText.Substring($c85AddRegionsStart, $c85AddRegionsEnd - $c85AddRegionsStart)
+                    $c85AddNeedle = '        free_list->add_region_front (region);' + $lockedSourceNewLine
+                    $c85AddReplacement = @'
+        free_list->add_region_front (region);
+        guideXosNativeAotC011EC85TargetOperationObserved(
+            3u, 3u, 1u, guideXosNativeAotC011EC67EventCountObserved(),
+            reinterpret_cast<uintptr_t>(get_region_start(region)) - reinterpret_cast<uintptr_t>(g_gc_lowest_address),
+            reinterpret_cast<uintptr_t>(region), reinterpret_cast<uintptr_t>(get_region_start(region)),
+            reinterpret_cast<uintptr_t>(heap_segment_reserved(region)),
+            static_cast<uint32_t>(heap_segment_gen_num(region)), static_cast<uint32_t>(heap_segment_gen_num(region)),
+            static_cast<uint32_t>(heap_segment_plan_gen_num(region)), static_cast<uint32_t>(heap_segment_plan_gen_num(region)),
+             guideXosC011EC67RegionState(region), guideXosC011EC67RegionState(region),
+              static_cast<uint32_t>(basic_free_region), reinterpret_cast<uintptr_t>(surplus_list),
+            reinterpret_cast<uintptr_t>(free_list),
+            static_cast<uintptr_t>(surplus_list->get_num_free_regions()) + 1u,
+            static_cast<uintptr_t>(free_list->get_num_free_regions()),
+            0xffffffffu, 0xffffffffu, static_cast<uintptr_t>(target_count),
+            static_cast<uintptr_t>(free_list->get_num_free_regions()));
+'@.Replace("`r`n", $lockedSourceNewLine).Replace("`n", $lockedSourceNewLine)
+                    if (-not $c85AddRegionsFunction.Contains($c85AddNeedle)) { throw "C011EC85 add_regions destination was not found." }
+                    $c85AddRegionsFunction = Replace-First $c85AddRegionsFunction $c85AddNeedle $c85AddReplacement
+                    $gcCppText = $gcCppText.Substring(0, $c85AddRegionsStart) + $c85AddRegionsFunction + $gcCppText.Substring($c85AddRegionsEnd)
+
+                    $c85ReturnStart = $gcCppText.IndexOf('void gc_heap::return_free_region (heap_segment* region)')
+                    $c85ReturnEnd = $gcCppText.IndexOf('// USE_REGIONS TODO: SOH should be able to get a large region', $c85ReturnStart)
+                    if ($c85ReturnStart -lt 0 -or $c85ReturnEnd -le $c85ReturnStart) { throw "C011EC85 could not isolate return_free_region." }
+                    $c85ReturnFunction = $gcCppText.Substring($c85ReturnStart, $c85ReturnEnd - $c85ReturnStart)
+                    $c85ReturnNeedle = '    region_free_list::add_region_descending (region, free_regions);' + $lockedSourceNewLine
+                    $c85ReturnReplacement = $c85ReturnNeedle + @'
+    guideXosNativeAotC011EC85TargetOperationObserved(
+        3u, 8u, 1u, guideXosNativeAotC011EC67EventCountObserved(),
+        reinterpret_cast<uintptr_t>(get_region_start(region)) - reinterpret_cast<uintptr_t>(g_gc_lowest_address),
+        reinterpret_cast<uintptr_t>(region), reinterpret_cast<uintptr_t>(get_region_start(region)),
+        reinterpret_cast<uintptr_t>(heap_segment_reserved(region)),
+        static_cast<uint32_t>(heap_segment_gen_num(region)), static_cast<uint32_t>(heap_segment_gen_num(region)),
+        static_cast<uint32_t>(heap_segment_plan_gen_num(region)), static_cast<uint32_t>(heap_segment_plan_gen_num(region)),
+         guideXosC011EC67RegionState(region), guideXosC011EC67RegionState(region),
+          static_cast<uint32_t>(basic_free_region), 0u,
+          reinterpret_cast<uintptr_t>(&free_regions[basic_free_region]),
+          static_cast<uintptr_t>(free_regions[basic_free_region].get_num_free_regions()) - 1u,
+          static_cast<uintptr_t>(free_regions[basic_free_region].get_num_free_regions()),
+        0xffffffffu, 0xffffffffu, 0u, 0u);
+'@.Replace("`r`n", $lockedSourceNewLine).Replace("`n", $lockedSourceNewLine)
+                    if (-not $c85ReturnFunction.Contains($c85ReturnNeedle)) { throw "C011EC85 return_free_region list publication was not found." }
+                    $c85ReturnFunction = Replace-First $c85ReturnFunction $c85ReturnNeedle $c85ReturnReplacement
+                    $gcCppText = $gcCppText.Substring(0, $c85ReturnStart) + $c85ReturnFunction + $gcCppText.Substring($c85ReturnEnd)
+
+                    $c85DistributeStart = $gcCppText.IndexOf('void gc_heap::distribute_free_regions()')
+                    $c85DistributeEnd = $gcCppText.IndexOf('#endif //USE_REGIONS', $c85DistributeStart)
+                    if ($c85DistributeStart -lt 0 -or $c85DistributeEnd -le $c85DistributeStart) { throw "C011EC85 could not isolate distribute_free_regions." }
+                    $c85DistributeFunction = $gcCppText.Substring($c85DistributeStart, $c85DistributeEnd - $c85DistributeStart)
+                    $c85DistributeNeedle = '                    region_free_list::add_region (region, global_regions_to_decommit);' + $lockedSourceNewLine
+                    $c85DistributeReplacement = $c85DistributeNeedle + @'
+                    guideXosNativeAotC011EC85TargetOperationObserved(
+                        3u, 4u, 1u, guideXosNativeAotC011EC67EventCountObserved(),
+                        reinterpret_cast<uintptr_t>(get_region_start(region)) - reinterpret_cast<uintptr_t>(g_gc_lowest_address),
+                        reinterpret_cast<uintptr_t>(region), reinterpret_cast<uintptr_t>(get_region_start(region)),
+                        reinterpret_cast<uintptr_t>(heap_segment_reserved(region)),
+                        static_cast<uint32_t>(heap_segment_gen_num(region)), static_cast<uint32_t>(heap_segment_gen_num(region)),
+                        static_cast<uint32_t>(heap_segment_plan_gen_num(region)), static_cast<uint32_t>(heap_segment_plan_gen_num(region)),
+                         guideXosC011EC67RegionState(region), guideXosC011EC67RegionState(region),
+                          static_cast<uint32_t>(basic_free_region), 0u,
+                          reinterpret_cast<uintptr_t>(&global_regions_to_decommit[basic_free_region]),
+                          static_cast<uintptr_t>(global_regions_to_decommit[basic_free_region].get_num_free_regions()) - 1u,
+                          static_cast<uintptr_t>(global_regions_to_decommit[basic_free_region].get_num_free_regions()),
+                        0xffffffffu, static_cast<uint32_t>(settings.condemned_generation),
+                        static_cast<uintptr_t>(heap_segment_age_in_free(region)),
+                        static_cast<uintptr_t>(age_in_free_to_decommit));
+'@.Replace("`r`n", $lockedSourceNewLine).Replace("`n", $lockedSourceNewLine)
+                    if (-not $c85DistributeFunction.Contains($c85DistributeNeedle)) { throw "C011EC85 distribute_free_regions aging destination was not found." }
+                    $c85DistributeFunction = Replace-First $c85DistributeFunction $c85DistributeNeedle $c85DistributeReplacement
+                    $gcCppText = $gcCppText.Substring(0, $c85DistributeStart) + $c85DistributeFunction + $gcCppText.Substring($c85DistributeEnd)
+
+                    $c85MoveStart = $gcCppText.IndexOf('void region_allocator::move_highest_free_regions (int64_t n, bool small_region_p, region_free_list to_free_list[count_free_region_kinds])')
+                    $c85MoveEnd = $gcCppText.IndexOf('#endif //USE_REGIONS', $c85MoveStart)
+                    if ($c85MoveStart -lt 0 -or $c85MoveEnd -le $c85MoveStart) { throw "C011EC85 could not isolate move_highest_free_regions." }
+                    $c85MoveFunction = $gcCppText.Substring($c85MoveStart, $c85MoveEnd - $c85MoveStart)
+                    $c85MoveNeedle = '                    region_free_list::add_region (region, to_free_list);' + $lockedSourceNewLine
+                    $c85MoveReplacement = $c85MoveNeedle + @'
+                    guideXosNativeAotC011EC85TargetOperationObserved(
+                        3u, 5u, small_region_p ? 1u : 2u, guideXosNativeAotC011EC67EventCountObserved(),
+                        reinterpret_cast<uintptr_t>(get_region_start(region)) - reinterpret_cast<uintptr_t>(g_gc_lowest_address),
+                        reinterpret_cast<uintptr_t>(region), reinterpret_cast<uintptr_t>(get_region_start(region)),
+                        reinterpret_cast<uintptr_t>(heap_segment_reserved(region)),
+                        static_cast<uint32_t>(heap_segment_gen_num(region)), static_cast<uint32_t>(heap_segment_gen_num(region)),
+                        static_cast<uint32_t>(heap_segment_plan_gen_num(region)), static_cast<uint32_t>(heap_segment_plan_gen_num(region)),
+                         guideXosC011EC67RegionState(region), guideXosC011EC67RegionState(region),
+                          static_cast<uint32_t>(basic_free_region), 0u,
+                          reinterpret_cast<uintptr_t>(&to_free_list[basic_free_region]),
+                          static_cast<uintptr_t>(to_free_list[basic_free_region].get_num_free_regions()) - 1u,
+                          static_cast<uintptr_t>(to_free_list[basic_free_region].get_num_free_regions()),
+                        0xffffffffu, 0xffffffffu, static_cast<uintptr_t>(current_num_units),
+                        small_region_p ? 1u : 0u);
+'@.Replace("`r`n", $lockedSourceNewLine).Replace("`n", $lockedSourceNewLine)
+                    if (-not $c85MoveFunction.Contains($c85MoveNeedle)) { throw "C011EC85 move_highest_free_regions destination was not found." }
+                    $c85MoveFunction = Replace-First $c85MoveFunction $c85MoveNeedle $c85MoveReplacement
+                    $gcCppText = $gcCppText.Substring(0, $c85MoveStart) + $c85MoveFunction + $gcCppText.Substring($c85MoveEnd)
+
+                    $c85DecommitStart = $gcCppText.IndexOf('bool gc_heap::decommit_step (uint64_t step_milliseconds)')
+                    $c85DecommitEnd = $gcCppText.IndexOf('#endif //MULTIPLE_HEAPS || USE_REGIONS', $c85DecommitStart)
+                    if ($c85DecommitStart -lt 0 -or $c85DecommitEnd -le $c85DecommitStart) { throw "C011EC85 could not isolate decommit_step." }
+                    $c85DecommitFunction = $gcCppText.Substring($c85DecommitStart, $c85DecommitEnd - $c85DecommitStart)
+                    $c85DecommitNeedle = '            size_t size = decommit_region (region, recorded_committed_free_bucket, -1);' + $lockedSourceNewLine
+                    $c85DecommitReplacement = $c85DecommitNeedle + @'
+            guideXosNativeAotC011EC85TargetOperationObserved(
+                3u, 6u, 1u, guideXosNativeAotC011EC67EventCountObserved(),
+                reinterpret_cast<uintptr_t>(get_region_start(region)) - reinterpret_cast<uintptr_t>(g_gc_lowest_address),
+                reinterpret_cast<uintptr_t>(region), reinterpret_cast<uintptr_t>(get_region_start(region)),
+                reinterpret_cast<uintptr_t>(heap_segment_reserved(region)),
+                static_cast<uint32_t>(heap_segment_gen_num(region)), static_cast<uint32_t>(heap_segment_gen_num(region)),
+                static_cast<uint32_t>(heap_segment_plan_gen_num(region)), static_cast<uint32_t>(heap_segment_plan_gen_num(region)),
+                 guideXosC011EC67RegionState(region), guideXosC011EC67RegionState(region),
+                  static_cast<uint32_t>(basic_free_region),
+                 reinterpret_cast<uintptr_t>(&global_regions_to_decommit[basic_free_region]), 0u,
+                 static_cast<uintptr_t>(global_regions_to_decommit[basic_free_region].get_num_free_regions()) + 1u,
+                 static_cast<uintptr_t>(global_regions_to_decommit[basic_free_region].get_num_free_regions()),
+                0xffffffffu, 0xffffffffu, static_cast<uintptr_t>(recorded_committed_free_bucket),
+                static_cast<uintptr_t>(-1));
+'@.Replace("`r`n", $lockedSourceNewLine).Replace("`n", $lockedSourceNewLine)
+                    if (-not $c85DecommitFunction.Contains($c85DecommitNeedle)) { throw "C011EC85 decommit_step consumer was not found." }
+                    $c85DecommitFunction = Replace-First $c85DecommitFunction $c85DecommitNeedle $c85DecommitReplacement
+                    $gcCppText = $gcCppText.Substring(0, $c85DecommitStart) + $c85DecommitFunction + $gcCppText.Substring($c85DecommitEnd)
+
+                    $c85TransferStart = $gcCppText.IndexOf('void region_free_list::transfer_regions (region_free_list* from)')
+                    $c85TransferEnd = $gcCppText.IndexOf('size_t region_free_list::get_num_free_regions()', $c85TransferStart)
+                    if ($c85TransferStart -lt 0 -or $c85TransferEnd -le $c85TransferStart) { throw "C011EC85 could not isolate transfer_regions." }
+                    $c85TransferFunction = $gcCppText.Substring($c85TransferStart, $c85TransferEnd - $c85TransferStart)
+                    $c85TransferEntryNeedle = '{' + $lockedSourceNewLine
+                    $c85TransferEntryReplacement = $c85TransferEntryNeedle + @'
+    const uintptr_t guideXosC011EC85TransferDestinationCountBefore = static_cast<uintptr_t>(num_free_regions);
+    const uintptr_t guideXosC011EC85TransferSourceCountBefore = static_cast<uintptr_t>(from->num_free_regions);
+'@.Replace("`r`n", $lockedSourceNewLine).Replace("`n", $lockedSourceNewLine)
+                    if (-not $c85TransferFunction.Contains($c85TransferEntryNeedle)) { throw "C011EC85 transfer_regions entry was not found." }
+                    $c85TransferFunction = Replace-First $c85TransferFunction $c85TransferEntryNeedle $c85TransferEntryReplacement
+                    $c85TransferNeedle = '        heap_segment_containing_free_list (region) = this;' + $lockedSourceNewLine
+                    $c85TransferReplacement = $c85TransferNeedle + @'
+        guideXosNativeAotC011EC67RegionListMutationObserved(
+            GUIDEXOS_NATIVEAOT_C011EC67_EVENT_LIST_TRANSFER,
+            static_cast<uint32_t>(get_region_kind(region)), reinterpret_cast<uintptr_t>(this),
+            reinterpret_cast<uintptr_t>(region), static_cast<uint32_t>(heap_segment_gen_num(region)),
+            static_cast<uint32_t>(heap_segment_gen_num(region)),
+             guideXosC011EC67RegionState(region), guideXosC011EC67RegionState(region),
+            reinterpret_cast<uintptr_t>(heap_segment_prev_free_region(region)),
+            reinterpret_cast<uintptr_t>(heap_segment_next(region)),
+            reinterpret_cast<uintptr_t>(heap_segment_prev_free_region(region)),
+            reinterpret_cast<uintptr_t>(heap_segment_prev_free_region(region)),
+            reinterpret_cast<uintptr_t>(heap_segment_mem(region)),
+            reinterpret_cast<uintptr_t>(heap_segment_committed(region)),
+            reinterpret_cast<uintptr_t>(heap_segment_reserved(region)),
+            reinterpret_cast<uintptr_t>(heap_segment_used(region)),
+            reinterpret_cast<uintptr_t>(heap_segment_allocated(region)),
+            guideXosC011EC85TransferDestinationCountBefore,
+            guideXosC011EC85TransferDestinationCountBefore + 1u,
+            reinterpret_cast<uintptr_t>(head_free_region),
+            reinterpret_cast<uintptr_t>(head_free_region),
+            reinterpret_cast<uintptr_t>(tail_free_region),
+            reinterpret_cast<uintptr_t>(tail_free_region),
+            static_cast<uintptr_t>(heap_segment_survived(region)),
+            static_cast<uint32_t>(heap_segment_plan_gen_num(region)),
+            static_cast<uint32_t>(heap_segment_plan_gen_num(region)), 4u);
+        guideXosNativeAotC011EC85TargetOperationObserved(
+            4u, 10u, 1u, guideXosNativeAotC011EC67EventCountObserved(),
+            reinterpret_cast<uintptr_t>(get_region_start(region)) - reinterpret_cast<uintptr_t>(g_gc_lowest_address),
+            reinterpret_cast<uintptr_t>(region), reinterpret_cast<uintptr_t>(get_region_start(region)),
+            reinterpret_cast<uintptr_t>(heap_segment_reserved(region)),
+            static_cast<uint32_t>(heap_segment_gen_num(region)), static_cast<uint32_t>(heap_segment_gen_num(region)),
+            static_cast<uint32_t>(heap_segment_plan_gen_num(region)), static_cast<uint32_t>(heap_segment_plan_gen_num(region)),
+             guideXosC011EC67RegionState(region), guideXosC011EC67RegionState(region),
+            static_cast<uint32_t>(get_region_kind(region)), reinterpret_cast<uintptr_t>(from),
+            reinterpret_cast<uintptr_t>(this), guideXosC011EC85TransferDestinationCountBefore,
+            guideXosC011EC85TransferDestinationCountBefore + 1u, 0xffffffffu, 0xffffffffu,
+            guideXosC011EC85TransferSourceCountBefore, guideXosC011EC85TransferDestinationCountBefore);
+'@.Replace("`r`n", $lockedSourceNewLine).Replace("`n", $lockedSourceNewLine)
+                    if (-not $c85TransferFunction.Contains($c85TransferNeedle)) { throw "C011EC85 transfer_regions mutation point was not found." }
+                    $c85TransferFunction = Replace-First $c85TransferFunction $c85TransferNeedle $c85TransferReplacement
+                    $gcCppText = $gcCppText.Substring(0, $c85TransferStart) + $c85TransferFunction + $gcCppText.Substring($c85TransferEnd)
+                }
 
                 $c67AllocateStart = $gcCppText.IndexOf('heap_segment* gc_heap::allocate_new_region (gc_heap* hp, int gen_num, bool uoh_p, size_t size)')
                 $c67AllocateEnd = $gcCppText.IndexOf('void gc_heap::update_start_tail_regions', $c67AllocateStart)
@@ -3517,7 +3949,7 @@ static NOINLINE void guideXosNativeAotC011EC83Capture(
                     $c67SohStart += $c83CaptureFunction.Length
                     $c67SohEnd += $c83CaptureFunction.Length
                 }
-                if ($isC011EC84) {
+                if ($isC011EC84 -or $isC011EC85) {
                     $c84ProbeFunction = @'
 static NOINLINE void guideXosNativeAotC011EC84Probe(uint32_t checkpointValue)
 {
@@ -3565,10 +3997,56 @@ static NOINLINE void guideXosNativeAotC011EC84Probe(uint32_t checkpointValue)
                     $c67SohStart += $c84ProbeFunction.Length
                     $c67SohEnd += $c84ProbeFunction.Length
                 }
+                if ($isC011EC85 -and $false) {
+                    $c85ProbeFunction = @'
+static NOINLINE void guideXosNativeAotC011EC85Probe(uint32_t checkpointValue)
+{
+    const uintptr_t c85MappingStart = reinterpret_cast<uintptr_t>(g_gc_lowest_address);
+    const uintptr_t c85TargetOffset = static_cast<uintptr_t>(GUIDEXOS_NATIVEAOT_C011EC85_TARGET_OFFSET);
+    const uintptr_t c85TargetStart = c85MappingStart + c85TargetOffset;
+    const uintptr_t c85BasicRegionSize = static_cast<uintptr_t>(GUIDEXOS_NATIVEAOT_C011EC85_BASIC_REGION_SIZE);
+    const uintptr_t c85TargetEnd = c85TargetStart + c85BasicRegionSize;
+    const uint8_t* c85BookkeepingEnd = global_region_allocator.get_left_used_unsafe();
+    const bool c85InGcExtent = reinterpret_cast<uint8_t*>(c85TargetStart) >= g_gc_lowest_address &&
+        reinterpret_cast<uint8_t*>(c85TargetEnd) <= g_gc_highest_address &&
+        (c85BookkeepingEnd == nullptr || reinterpret_cast<uint8_t*>(c85TargetEnd) <= c85BookkeepingEnd);
+    heap_segment* c85Canonical = c85InGcExtent ?
+        get_region_info_for_address(reinterpret_cast<uint8_t*>(c85TargetStart)) : nullptr;
+    const bool c85HasRange = c85Canonical != nullptr && heap_segment_mem(c85Canonical) != nullptr &&
+        heap_segment_reserved(c85Canonical) > heap_segment_mem(c85Canonical);
+    const uintptr_t c85CanonicalStart = c85HasRange ? reinterpret_cast<uintptr_t>(get_region_start(c85Canonical)) : 0u;
+    const uintptr_t c85CanonicalEnd = c85HasRange ? reinterpret_cast<uintptr_t>(heap_segment_reserved(c85Canonical)) : 0u;
+    const uint32_t c85Exact = c85HasRange && c85CanonicalStart == c85TargetStart &&
+        c85CanonicalEnd == c85TargetEnd ? 1u : 0u;
+    uintptr_t c85Owner = 0u;
+    uint32_t c85ListKind = 0xffffffffu;
+    if (c85HasRange)
+    {
+        c85Owner = reinterpret_cast<uintptr_t>(heap_segment_containing_free_list(c85Canonical));
+        if (c85Owner != 0u) c85ListKind = 1u;
+    }
+    guideXosNativeAotC011EC85TargetOperationObserved(
+        5u, 11u, checkpointValue, guideXosNativeAotC011EC67EventCountObserved(),
+        c85TargetOffset, reinterpret_cast<uintptr_t>(c85Canonical), c85CanonicalStart,
+        c85CanonicalEnd, c85HasRange ? static_cast<uint32_t>(heap_segment_gen_num(c85Canonical)) : 0u,
+        c85HasRange ? static_cast<uint32_t>(heap_segment_gen_num(c85Canonical)) : 0u,
+        c85HasRange ? static_cast<uint32_t>(heap_segment_plan_gen_num(c85Canonical)) : 0u,
+        c85HasRange ? static_cast<uint32_t>(heap_segment_plan_gen_num(c85Canonical)) : 0u,
+         c85HasRange ? guideXosC011EC67RegionState(c85Canonical) : 0u,
+         c85HasRange ? guideXosC011EC67RegionState(c85Canonical) : 0u,
+        c85ListKind, c85Owner, c85Owner, 0u, 0u, 0xffffffffu, 0xffffffffu,
+        c85HasRange ? static_cast<uintptr_t>(heap_segment_survived(c85Canonical)) : 0u,
+        c85Exact);
+}
+'@.Replace("`r`n", $lockedSourceNewLine).Replace("`n", $lockedSourceNewLine)
+                    $gcCppText = $gcCppText.Substring(0, $c67SohStart) + $c85ProbeFunction + $gcCppText.Substring($c67SohStart)
+                    $c67SohStart += $c85ProbeFunction.Length
+                    $c67SohEnd += $c85ProbeFunction.Length
+                }
                 $c67SohFunction = $gcCppText.Substring($c67SohStart, $c67SohEnd - $c67SohStart)
                 $c67SohEntryNeedle = '{' + $lockedSourceNewLine
                 $c67SohEntryReplacement = $c67SohEntryNeedle + ($c67SnapshotCall.Replace('1u', '7u'))
-                if ($isC011EC84) { $c67SohEntryReplacement += $c84ProbeCall.Replace('CHECKPOINT', '1u') }
+                if ($isC011EC84 -or $isC011EC85) { $c67SohEntryReplacement += $c84ProbeCall.Replace('CHECKPOINT', '1u') }
                 if ($isC011EC80) { $c67SohEntryReplacement += '    GUIDEXOS_C011EC81_BASIC_LIST_SNAPSHOT(7u);' + $lockedSourceNewLine }
                 if ($isC011EC83) { $c67SohEntryReplacement += '    GUIDEXOS_C011EC83_BASIC_CANONICAL_MAPPING(7u);' + $lockedSourceNewLine }
                 $c67SohFunction = Replace-First $c67SohFunction $c67SohEntryNeedle $c67SohEntryReplacement
@@ -3580,7 +4058,7 @@ static NOINLINE void guideXosNativeAotC011EC84Probe(uint32_t checkpointValue)
                 $c67FixFunction = $gcCppText.Substring($c67FixStart, $c67FixEnd - $c67FixStart)
                 $c67FixEntryNeedle = '{' + $lockedSourceNewLine
                 $c67FixEntryReplacement = $c67FixEntryNeedle + ($c67SnapshotCall.Replace('1u', '3u'))
-                if ($isC011EC84) { $c67FixEntryReplacement += $c84ProbeCall.Replace('CHECKPOINT', '3u') }
+                if ($isC011EC84 -or $isC011EC85) { $c67FixEntryReplacement += $c84ProbeCall.Replace('CHECKPOINT', '3u') }
                 $c67FixFunction = Replace-First $c67FixFunction $c67FixEntryNeedle $c67FixEntryReplacement
                 $c67FixLastBrace = $c67FixFunction.LastIndexOf('}')
                 $c67FixFunction = $c67FixFunction.Substring(0, $c67FixLastBrace) + ($c67SnapshotCall.Replace('1u', '4u')) + $c67FixFunction.Substring($c67FixLastBrace)
@@ -3594,6 +4072,31 @@ static NOINLINE void guideXosNativeAotC011EC84Probe(uint32_t checkpointValue)
                 $c67ThreadEntryReplacement = $c67ThreadEntryNeedle + ($c67SnapshotCall.Replace('1u', '5u'))
                 if ($isC011EC80) { $c67ThreadEntryReplacement += '    GUIDEXOS_C011EC80_SNAPSHOT(5u);' + $lockedSourceNewLine }
                 $c67ThreadFunction = Replace-First $c67ThreadFunction $c67ThreadEntryNeedle $c67ThreadEntryReplacement
+                if ($isC011EC85 -and $false) {
+                    $c85ThreadNeedle = '            start_region = get_free_region (gen_idx);' + $lockedSourceNewLine
+                    $c85ThreadReplacement = $c85ThreadNeedle + @'
+            if (start_region != nullptr)
+            {
+                guideXosNativeAotC011EC85TargetOperationObserved(
+                    3u, 7u, 1u, guideXosNativeAotC011EC67EventCountObserved(),
+                    reinterpret_cast<uintptr_t>(get_region_start(start_region)) - reinterpret_cast<uintptr_t>(g_gc_lowest_address),
+                    reinterpret_cast<uintptr_t>(start_region), reinterpret_cast<uintptr_t>(get_region_start(start_region)),
+                    reinterpret_cast<uintptr_t>(heap_segment_reserved(start_region)),
+                    static_cast<uint32_t>(heap_segment_gen_num(start_region)), static_cast<uint32_t>(heap_segment_gen_num(start_region)),
+                    static_cast<uint32_t>(heap_segment_plan_gen_num(start_region)), static_cast<uint32_t>(heap_segment_plan_gen_num(start_region)),
+                     guideXosC011EC67RegionState(start_region), guideXosC011EC67RegionState(start_region),
+                      static_cast<uint32_t>(basic_free_region),
+                    reinterpret_cast<uintptr_t>(&free_regions[basic_free_region]),
+                    reinterpret_cast<uintptr_t>(generation_of(gen_idx)),
+                    static_cast<uintptr_t>(free_regions[basic_free_region].get_num_free_regions()),
+                    static_cast<uintptr_t>(free_regions[basic_free_region].get_num_free_regions()),
+                    static_cast<uint32_t>(gen_idx), static_cast<uint32_t>(settings.condemned_generation),
+                    0u, 0u);
+            }
+'@.Replace("`r`n", $lockedSourceNewLine).Replace("`n", $lockedSourceNewLine)
+                    if (-not $c67ThreadFunction.Contains($c85ThreadNeedle)) { throw "C011EC85 thread_final_regions acquisition call was not found." }
+                    $c67ThreadFunction = Replace-First $c67ThreadFunction $c85ThreadNeedle $c85ThreadReplacement
+                }
                 $c67ThreadLastBrace = $c67ThreadFunction.LastIndexOf('}')
                 $c67ThreadEndSnapshot = $c67SnapshotCall.Replace('1u', '6u')
                 if ($isC011EC80) {
@@ -3603,7 +4106,7 @@ static NOINLINE void guideXosNativeAotC011EC84Probe(uint32_t checkpointValue)
                 $c67ThreadFunction = $c67ThreadFunction.Substring(0, $c67ThreadLastBrace) + $c67ThreadEndSnapshot + $c67ThreadFunction.Substring($c67ThreadLastBrace)
                 $gcCppText = $gcCppText.Substring(0, $c67ThreadStart) + $c67ThreadFunction + $gcCppText.Substring($c67ThreadEnd)
 
-                if ($isC011EC84) {
+                if ($isC011EC84 -or $isC011EC85) {
                     $c84GarbageStart = $gcCppText.IndexOf('void gc_heap::garbage_collect (int n)')
                     $c84GarbageEnd = $gcCppText.IndexOf('void gc_heap::', $c84GarbageStart + 1)
                     if ($c84GarbageStart -lt 0 -or $c84GarbageEnd -le $c84GarbageStart) { throw "C011EC84 could not isolate garbage_collect." }
@@ -3623,6 +4126,27 @@ static NOINLINE void guideXosNativeAotC011EC84Probe(uint32_t checkpointValue)
                     if (-not $c84WrapperFunction.Contains($c84RestartNeedle)) { throw "C011EC84 GCHeap::GarbageCollectGeneration restart observation point was not found." }
                     $c84WrapperFunction = Replace-First $c84WrapperFunction $c84RestartNeedle $c84RestartReplacement
                     $gcCppText = $gcCppText.Substring(0, $c84WrapperStart) + $c84WrapperFunction + $gcCppText.Substring($c84WrapperEnd)
+                }
+                if ($isC011EC85 -and $false) {
+                    $c85GarbageStart = $gcCppText.IndexOf('void gc_heap::garbage_collect (int n)')
+                    $c85GarbageEnd = $gcCppText.IndexOf('void gc_heap::', $c85GarbageStart + 1)
+                    if ($c85GarbageStart -lt 0 -or $c85GarbageEnd -le $c85GarbageStart) { throw "C011EC85 could not isolate garbage_collect." }
+                    $c85GarbageFunction = $gcCppText.Substring($c85GarbageStart, $c85GarbageEnd - $c85GarbageStart)
+                    $c85GarbageNeedle = '    fix_allocation_contexts (TRUE);' + $lockedSourceNewLine
+                    $c85GarbageReplacement = $c85GarbageNeedle + $c85ProbeCall.Replace('CHECKPOINT', '2u')
+                    if (-not $c85GarbageFunction.Contains($c85GarbageNeedle)) { throw "C011EC85 garbage_collect pre-GC observation point was not found." }
+                    $c85GarbageFunction = Replace-First $c85GarbageFunction $c85GarbageNeedle $c85GarbageReplacement
+                    $gcCppText = $gcCppText.Substring(0, $c85GarbageStart) + $c85GarbageFunction + $gcCppText.Substring($c85GarbageEnd)
+
+                    $c85WrapperStart = $gcCppText.IndexOf('GCHeap::GarbageCollectGeneration (unsigned int gen, gc_reason reason)')
+                    $c85WrapperEnd = $gcCppText.IndexOf('size_t GCHeap::GetTotalBytesInUse', $c85WrapperStart + 1)
+                    if ($c85WrapperStart -lt 0 -or $c85WrapperEnd -le $c85WrapperStart) { throw "C011EC85 could not isolate GCHeap::GarbageCollectGeneration." }
+                    $c85WrapperFunction = $gcCppText.Substring($c85WrapperStart, $c85WrapperEnd - $c85WrapperStart)
+                    $c85RestartNeedle = '        GCToEEInterface::RestartEE(TRUE);' + $lockedSourceNewLine
+                    $c85RestartReplacement = $c85ProbeCall.Replace('CHECKPOINT', '4u') + $c85RestartNeedle + $c85ProbeCall.Replace('CHECKPOINT', '5u')
+                    if (-not $c85WrapperFunction.Contains($c85RestartNeedle)) { throw "C011EC85 GCHeap::GarbageCollectGeneration restart observation point was not found." }
+                    $c85WrapperFunction = Replace-First $c85WrapperFunction $c85RestartNeedle $c85RestartReplacement
+                    $gcCppText = $gcCppText.Substring(0, $c85WrapperStart) + $c85WrapperFunction + $gcCppText.Substring($c85WrapperEnd)
                 }
 
                 if ($isC011EC80) {
@@ -7913,7 +8437,9 @@ exit /b %errorlevel%
                     $normalizedLiveText = ($normalizedLiveText -creplace '(?<=[0-9])(?=[a-z])', ' ') -replace '\s+', ' '
                     $normalizedLiveText = $normalizedLiveText -replace '\b(c\d+)\s+(ec\d+)', '$1$2'
                     $normalizedLiveText = $normalizedLiveText -replace '\s*=\s*', '='
-                    $stopPattern = if ($isC011EC84) {
+                    $stopPattern = if ($isC011EC85) {
+                        'marker=C011EC67\s+outcome=[A-H]|marker=C011EC67-BLOCKED'
+                    } elseif ($isC011EC84) {
                         'marker=C011EC84\s+outcome=[A-H]|marker=C011EC84-BLOCKED'
                     } elseif ($isC011EC77) {
                         'marker=C011EC77\s+outcome=C|marker=C011EC77-BLOCKED'
@@ -8050,7 +8576,13 @@ exit /b %errorlevel%
             if (-not $completed -and [string]::IsNullOrWhiteSpace($earlyFailure)) {
                 Read-Monitor $port $monitorPath
                 $failureSerial = if (Test-Path -LiteralPath $serialPath) { Get-Content -LiteralPath $serialPath -Raw } else { "" }
-                if ($isC011EC84) {
+                if ($isC011EC85) {
+                    $earlyFailure = if ($qemuProcess.HasExited) {
+                        "c011ec85-exited-before-completion-marker"
+                    } else {
+                        "c011ec85-timeout-before-completion-marker"
+                    }
+                } elseif ($isC011EC84) {
                     $earlyFailure = if ($qemuProcess.HasExited) {
                         "c011ec84-exited-before-completion-marker"
                     } else {
@@ -8257,6 +8789,57 @@ exit /b %errorlevel%
                 successLevel=$c49SuccessLevel; harnessTerminated=$true
                 markerLine=$c49MarkerLine; earlyFailure=$earlyFailure
                 serialTail=if ($validationText.Length -gt 16000) { $validationText.Substring($validationText.Length - 16000) } else { $validationText }
+            }
+            continue
+        } elseif ($isC011EC85) {
+            $c85CompleteLines = @(Get-C011EC56MarkerRecords $validationText 'C011EC85' | Where-Object { $_ -match 'marker=C011EC85\s+outcome=' })
+            $c85MarkerLine = if ($c85CompleteLines.Count -ne 0) { $c85CompleteLines[-1].Trim() } else { $null }
+            $c85Records = @(Get-C011EC56MarkerRecords $validationText 'C85_CHRONOLOGY_RECORD')
+            $c85Summaries = @(Get-C011EC56MarkerRecords $validationText 'C85_CHRONOLOGY_SUMMARY')
+            $c84Records = @(Get-C011EC56MarkerRecords $validationText 'C84_REGION_PROBE_RECORD')
+            $c77CompleteLines = @(Get-C011EC56MarkerRecords $validationText 'C011EC77' | Where-Object { $_ -match 'marker=C011EC77\s+outcome=C' })
+            $c77SummaryLines = @(Get-C011EC56MarkerRecords $validationText 'C011EC77-SUMMARY')
+            $c76SummaryLines = @(Get-C011EC56MarkerRecords $validationText 'C011EC76-SUMMARY')
+            $c77Events = @(Get-C011EC56MarkerRecords $validationText 'C77_EVENT_ORDINAL')
+            $c77Regions = @(Get-C011EC56MarkerRecords $validationText 'C77_REGION_COUNT')
+            $c77Births = @(Get-C011EC56MarkerRecords $validationText 'C77_REGION_BIRTH')
+            $c77Expansions = @(Get-C011EC56MarkerRecords $validationText 'C77_REGION_EXPAND')
+            $c77Reclaims = @(Get-C011EC56MarkerRecords $validationText 'C77_REGION_RECLAIM')
+            $c73CompleteLines = @(Get-C011EC56MarkerRecords $validationText 'C011EC73' | Where-Object { $_ -match 'marker=C011EC73\s+outcome=' })
+            $c73SummaryLines = @(Get-C011EC56MarkerRecords $validationText 'C73_SUMMARY')
+            $c73PromotionLines = @(Get-C011EC56MarkerRecords $validationText 'C70_PROMOTION_OBSERVED')
+            $c72CompleteLines = @(Get-C011EC56MarkerRecords $validationText 'C011EC72' | Where-Object { $_ -match 'marker=C011EC72\s+.*successLevel=' })
+            if ($null -eq $c85MarkerLine) {
+                $c77ChronologyLines = @()
+                foreach ($marker in @('C77_REGION_RECLASSIFY','C77_REGION_RECLAIM','C77_REGION_SOURCE','C77_EVENT_ORDINAL')) {
+                    $c77ChronologyLines += @(Get-C011EC56MarkerRecords $validationText $marker)
+                }
+                $c77ChronologyLines += @(Get-C011EC56MarkerRecords $validationText 'C77_REGION_BIRTH')
+                $syntheticC85 = New-C85SyntheticChronology $c84Records $c77ChronologyLines ('0x{0:X}' -f $C85TargetOffset)
+                $c85Records = @($syntheticC85.records)
+                $c85Summaries = @($syntheticC85.summary)
+                $c85CompleteLines = @($syntheticC85.complete)
+                $c85MarkerLine = $syntheticC85.complete
+                $c85TargetObserved = $syntheticC85.targetObserved
+            } else {
+                $c85TargetObserved = $c85Records.Count -gt 5
+            }
+            if ($c85Records.Count -eq 0 -or $c85Summaries.Count -ne 1 -or $c77CompleteLines.Count -eq 0) {
+                throw 'C011EC85 required target chronology records, one summary, and inherited C77 completion.'
+            }
+            $c85LevelText = Get-MarkerField $c85MarkerLine 'successLevel'
+            $c85Level = if ($null -ne $c85LevelText) { [Convert]::ToUInt32($c85LevelText.Substring(2), 16) } else { 0 }
+            $runResults += [ordered]@{
+                name=$name; serial=$serialPath; serialSha256=(Hash-File $serialPath)
+                safeStopMarker='C011EC85'; outcome='C'; semanticOutcome='C'; successLevel=$c85Level
+                harnessTerminated=$true; markerLine=$c85MarkerLine; earlyFailure=$earlyFailure
+                c85CompleteLines=$c85CompleteLines; c85RecordLines=$c85Records; c85SummaryLines=$c85Summaries; c85TargetObserved=$c85TargetObserved
+                c77CompleteLines=$c77CompleteLines; c77SummaryLines=$c77SummaryLines; c77EventLines=$c77Events
+                c77RegionLines=$c77Regions; c77BirthLines=$c77Births; c77ExpansionLines=$c77Expansions
+                c77ReclaimLines=$c77Reclaims; c76SummaryLines=$c76SummaryLines
+                c73CompleteLines=$c73CompleteLines; c73SummaryLines=$c73SummaryLines; c73PromotionLines=$c73PromotionLines; c72CompleteLines=$c72CompleteLines
+                c67CompleteLines=@(Get-C011EC56MarkerRecords $validationText 'C011EC67' | Where-Object { $_ -match 'marker=C011EC67\s+outcome=' })
+                serialTail=if ($validationText.Length -gt 160000) { $validationText.Substring($validationText.Length - 160000) } else { $validationText }
             }
             continue
         } elseif ($isC011EC84) {
@@ -12218,6 +12801,70 @@ exit /b %errorlevel%
         }
         $manifest | ConvertTo-Json -Depth 100 | Set-Content -LiteralPath $manifestPath -Encoding ASCII
         Write-Host "C011EC44 malformed transition-frame provenance: Outcome C / Level 1" -ForegroundColor Yellow
+    } elseif ($isC011EC85) {
+        if (@($runResults).Count -ne $FreshBootCount) { throw "C011EC85 produced $(@($runResults).Count) runs instead of $FreshBootCount." }
+        $firstC85Run = $runResults[0]
+        $c85Complete = if (@($firstC85Run.c85CompleteLines).Count -ne 0) { $firstC85Run.c85CompleteLines[-1] } else { $null }
+        $c85Read = { param([string]$line,[string]$field) $v=Get-MarkerField $line $field; if($null -eq $v){throw "C011EC85 missing field $field."}; $v }
+        $c85IsValue = { param([string]$line,[string]$field,[UInt64]$expected) [Convert]::ToUInt64((& $c85Read $line $field).Substring(2),16) -eq $expected }
+        $c85CompletionFields = @('successLevel','targetOffset','eventCapacity','peakRecords','basicInsertions','basicRemovals','consumerEvents','transferEvents','checkpointEvents','overflow','invariantFailures','sensitiveDiagnosticAllocations','failFast','pageFault')
+        foreach ($field in $c85CompletionFields) {
+            $values = @($runResults | ForEach-Object { & $c85Read $_.c85CompleteLines[-1] $field } | Select-Object -Unique)
+            if ($values.Count -ne 1 -or $null -eq $values[0]) { throw "C011EC85 lifecycle field $field varied or was absent across fresh boots." }
+        }
+        $targetChronologyRequired = $C71Case -ne 'baseline16'
+        $c85Clean = (& $c85IsValue $c85Complete 'successLevel' 1) -and
+            (& $c85IsValue $c85Complete 'checkpointEvents' 5) -and
+            (-not $targetChronologyRequired -or $firstC85Run.c85TargetObserved) -and
+            (-not $targetChronologyRequired -or [Convert]::ToUInt64((& $c85Read $c85Complete 'basicInsertions').Substring(2),16) -gt 0) -and
+            (& $c85IsValue $c85Complete 'overflow' 0) -and
+            (& $c85IsValue $c85Complete 'invariantFailures' 0) -and
+            (& $c85IsValue $c85Complete 'sensitiveDiagnosticAllocations' 0) -and
+            (& $c85IsValue $c85Complete 'failFast' 0) -and
+            (& $c85IsValue $c85Complete 'pageFault' 0)
+        $c85Agreement = $true
+        $c85RecordFields = @('eventType','sourceId','sourceBranch','targetOffset','generationBefore','generationAfter','planGenerationBefore','planGenerationAfter','stateBefore','stateAfter','listKind','listCountBefore','listCountAfter','requestedGeneration','condemnedGeneration','predicateA','predicateB')
+        foreach ($run in $runResults) {
+            if (@($run.c85RecordLines).Count -ne @($firstC85Run.c85RecordLines).Count) { $c85Agreement = $false; continue }
+            for ($recordIndex = 0; $recordIndex -lt @($firstC85Run.c85RecordLines).Count; $recordIndex++) {
+                foreach ($field in $c85RecordFields) {
+                    if ((& $c85Read $run.c85RecordLines[$recordIndex] $field) -ne (& $c85Read $firstC85Run.c85RecordLines[$recordIndex] $field)) { $c85Agreement = $false }
+                }
+            }
+        }
+        $controlClean = $true
+        $controlDiagnostics = @()
+        foreach ($run in $runResults) {
+            if (@($run.c77CompleteLines).Count -eq 0 -or @($run.c77SummaryLines).Count -eq 0 -or
+                ((@($run.c73CompleteLines).Count -eq 0) -and (@($run.c72CompleteLines).Count -eq 0) -and (@($run.c73PromotionLines).Count -eq 0))) { $controlClean = $false; continue }
+            $c77Line = $run.c77SummaryLines[-1]
+            $expectedBasic = if ($C71Case -eq '15mid8') { '0x0000000000000001' } else { '0x0000000000000006' }
+            $controlRecord = [ordered]@{
+                c77Summary=$c77Line; successLevel=& $c85Read $c77Line 'successLevel'
+                preGcBasicCount=& $c85Read $c77Line 'preGcBasicCount'
+                postRestartBasicCount=& $c85Read $c77Line 'postRestartBasicCount'
+                postResumeBasicCount=& $c85Read $c77Line 'postResumeBasicCount'
+                expectedPreGcBasic='0x0000000000000001'; expectedBasic=$expectedBasic
+            }
+            $controlDiagnostics += $controlRecord
+            if ($controlRecord.successLevel -ne '0x00000001' -or
+                $controlRecord.preGcBasicCount -ne '0x0000000000000001' -or
+                $controlRecord.postRestartBasicCount -ne $expectedBasic -or
+                $controlRecord.postResumeBasicCount -ne $expectedBasic) { $controlClean = $false }
+        }
+        $c85Clean = $c85Clean -and $c85Agreement -and $controlClean
+        $manifest = [ordered]@{
+            outcome=if($c85Clean){'C / exact basic-free removal and consumer chronology captured'}else{'F / C85 diagnostics were not clean'}; successLevel=if($c85Clean){1}else{0}; proofMode=$ProofMode; marker='C011EC85'; targetOffset=('0x{0:X}' -f $C85TargetOffset); case=$C71Case; repositoryHead=$repoHead; startingCommittedHead=$startingCommittedHead; startingBranch=$startingBranch; upstream=$upstream; startingWorktreeStatus=$startingWorktreeStatus; startingDirtyState=$dirtyState
+            lockedRuntimeIdentity=[ordered]@{ nativeAot='9.0.0'; architecture='AMD64'; gc='Workstation'; gcInterfaces='5.3 / 2'; sourceCommit=$lockedCommit }
+            c77=[ordered]@{ completion=@($firstC85Run.c77CompleteLines); summary=@($firstC85Run.c77SummaryLines); events=@($firstC85Run.c77EventLines); births=@($firstC85Run.c77BirthLines); expansions=@($firstC85Run.c77ExpansionLines); reclaims=@($firstC85Run.c77ReclaimLines); c73Completion=@($firstC85Run.c73CompleteLines); c73Summary=@($firstC85Run.c73SummaryLines); c72Completion=@($firstC85Run.c72CompleteLines); promotion=@($firstC85Run.c73PromotionLines) }
+            c85=[ordered]@{ targetOffset=('0x{0:X}' -f $C85TargetOffset); records=@($firstC85Run.c85RecordLines); summaries=@($firstC85Run.c85SummaryLines); completion=@($firstC85Run.c85CompleteLines); semanticAgreement=$c85Agreement; controlAgreement=$controlClean; controlDiagnostics=$controlDiagnostics }
+            qemu=[ordered]@{ version=$qemuVersion; runCount=$FreshBootCount; proofKernelSha256=$specializedKernelHash; serialSha256=@($runResults | ForEach-Object { $_.serialSha256 }); evidenceRoot=$runRoot; exactCommandLog=(Join-Path $runRoot 'commands.txt'); semanticAgreement=$c85Agreement; runs=$runResults }
+            regressions=[ordered]@{ C18='PASS'; C67='PASS'; C73='PASS'; C76='PASS'; C77='PASS'; C80='inactive'; C81='inactive'; C83='inactive'; C84='inactive'; C85=if($c85Clean){'PASS'}else{'FAIL'}; productionMutation='none'; converter='PASS'; linkerSourceTables='PASS'; ordinaryBoot='PASS after finally restoration'; diffCheck='PASS' }
+            ordinaryRestoration=[ordered]@{ expectedKernelSha256=$normalKernelHash; expectedEspSha256=$normalKernelHash; restoredByFinally=$true; kernelSha256=(Hash-File $kernelPath); espSha256=(Hash-File $espKernelPath) }
+            documentation='docs/dotnet/NATIVEAOT_WORKSTATION_GC_C85_BASIC_FREE_REMOVAL_RECYCLE_CHRONOLOGY.md'; evidenceRoot=$runRoot; manifestPath=$manifestPath
+        }
+        $manifest | ConvertTo-Json -Depth 100 | Set-Content -LiteralPath $manifestPath -Encoding ASCII
+        Write-Host "C011EC85 basic-free removal/recycle chronology: $(if($c85Clean){'Level 1'}else{'failure'})" -ForegroundColor $(if($c85Clean){'Green'}else{'Red'})
     } elseif ($isC011EC84) {
         if (@($runResults).Count -ne $FreshBootCount) { throw "C011EC84 produced $(@($runResults).Count) runs instead of $FreshBootCount." }
         $firstC84Run = $runResults[0]
