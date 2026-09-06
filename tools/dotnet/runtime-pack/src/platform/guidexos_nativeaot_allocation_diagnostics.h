@@ -2425,6 +2425,81 @@ typedef struct guidexos_nativeaot_c011ec67_lifecycle_record {
         GUIDEXOS_NATIVEAOT_C011EC67_MAX_EVENTS];
 } guidexos_nativeaot_c011ec67_lifecycle_record;
 
+/* C011EC80 snapshots the runtime's canonical USE_REGIONS address universe.
+ * The bound is intentionally small and explicit: the GC supplies the
+ * authentic mapping-entry span at each checkpoint, and overflow is a hard
+ * diagnostic outcome rather than a silently truncated snapshot. */
+enum {
+    GUIDEXOS_NATIVEAOT_C011EC80_MAX_REGIONS = 32u,
+    GUIDEXOS_NATIVEAOT_C011EC80_MAX_SNAPSHOTS = 4u,
+};
+
+typedef struct guidexos_nativeaot_c011ec80_region_record {
+    uint32_t observed;
+    uint32_t snapshotOrdinal;
+    uint32_t checkpoint;
+    uint32_t generation;
+    uint32_t planGeneration;
+    uint32_t state;
+    uint32_t listKind;
+    uint32_t active;
+    uint32_t specialFlags;
+    uint32_t tailRole;
+    uint32_t reserved0;
+    uint32_t reserved1;
+    uintptr_t descriptor;
+    uintptr_t owner;
+    uintptr_t list;
+    uintptr_t mappingIndex;
+    uintptr_t basicRegionCount;
+    uintptr_t rangeStart;
+    uintptr_t rangeEnd;
+    uintptr_t committed;
+    uintptr_t allocated;
+    uintptr_t used;
+    uintptr_t liveBytes;
+} guidexos_nativeaot_c011ec80_region_record;
+
+typedef struct guidexos_nativeaot_c011ec80_snapshot_record {
+    uint32_t observed;
+    uint32_t snapshotOrdinal;
+    uint32_t checkpoint;
+    uint32_t overflow;
+    uint32_t complete;
+    uint32_t reserved0;
+    uint32_t reserved1;
+    uint32_t reserved2;
+    uintptr_t mappingStart;
+    uintptr_t mappingEnd;
+    uintptr_t regionAlignment;
+    uintptr_t mappingEntries;
+    uintptr_t visitedEntries;
+    uintptr_t representedEntries;
+    uintptr_t excludedEntries;
+    uintptr_t materializedRegions;
+    uintptr_t recordsWritten;
+    uintptr_t recordCapacity;
+    guidexos_nativeaot_c011ec80_region_record regions[
+        GUIDEXOS_NATIVEAOT_C011EC80_MAX_REGIONS];
+} guidexos_nativeaot_c011ec80_snapshot_record;
+
+typedef struct guidexos_nativeaot_c011ec80_lifecycle_record {
+    uint32_t started;
+    uint32_t snapshotCount;
+    uint32_t snapshotOverflow;
+    uint32_t regionOverflow;
+    uint32_t invariantFailures;
+    uint32_t sensitiveDiagnosticAllocations;
+    uint32_t completionObserved;
+    uint32_t activeSnapshot;
+    uintptr_t canonicalMappingStart;
+    uintptr_t canonicalMappingEnd;
+    uintptr_t canonicalRegionAlignment;
+    uintptr_t canonicalMappingEntries;
+    guidexos_nativeaot_c011ec80_snapshot_record snapshots[
+        GUIDEXOS_NATIVEAOT_C011EC80_MAX_SNAPSHOTS];
+} guidexos_nativeaot_c011ec80_lifecycle_record;
+
 typedef struct guidexos_nativeaot_c011ec54_lifecycle_record {
     uint32_t started;
     uint32_t preflightEmitted;
@@ -4839,6 +4914,8 @@ typedef struct guidexos_nativeaot_allocation_diagnostics {
     guidexos_nativeaot_c011ec65_lifecycle_record c011ec65Lifecycle;
     /* C011EC67 gen0 region-availability provenance. */
     guidexos_nativeaot_c011ec67_lifecycle_record c011ec67Lifecycle;
+    /* C011EC80 canonical USE_REGIONS mapping-table universe snapshots. */
+    guidexos_nativeaot_c011ec80_lifecycle_record c011ec80Lifecycle;
     /* C011EC44 malformed transition-frame provenance. */
     guidexos_nativeaot_c011ec44_provenance_record c011ec44Provenance;
     /* C011EC45 reverse-P/Invoke slot layout, register, and unwind provenance. */

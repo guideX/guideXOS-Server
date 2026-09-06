@@ -22017,6 +22017,265 @@ guideXosNativeAotC011EC67State() {
 static void guideXosNativeAotC011EC67Put32(const char* name, uint32_t value);
 static void guideXosNativeAotC011EC67Put64(const char* name, uintptr_t value);
 
+#if defined(GUIDEXOS_NATIVEAOT_C011EC80_CANONICAL_REGION_UNIVERSE_SNAPSHOT)
+extern "C" void __cdecl guideXosNativeAotC011EC80SnapshotBegin(
+    uint32_t checkpoint, uintptr_t mappingStart, uintptr_t mappingEnd,
+    uintptr_t regionAlignment, uintptr_t mappingEntries);
+extern "C" void __cdecl guideXosNativeAotC011EC80RegionObserved(
+    uint32_t checkpoint, uintptr_t mappingIndex, uintptr_t descriptor,
+    uintptr_t owner, uintptr_t list, uintptr_t basicRegionCount,
+    uintptr_t rangeStart, uintptr_t rangeEnd, uintptr_t committed,
+    uintptr_t allocated, uintptr_t used, uintptr_t liveBytes,
+    uint32_t generation, uint32_t planGeneration, uint32_t state,
+    uint32_t listKind, uint32_t active, uint32_t specialFlags,
+    uint32_t tailRole);
+extern "C" void __cdecl guideXosNativeAotC011EC80SnapshotEnd(
+    uint32_t checkpoint, uintptr_t visitedEntries, uintptr_t excludedEntries,
+    uintptr_t materializedRegions);
+static void guideXosNativeAotC011EC80Emit();
+#endif
+
+#if defined(GUIDEXOS_NATIVEAOT_C011EC80_CANONICAL_REGION_UNIVERSE_SNAPSHOT)
+static guidexos_nativeaot_c011ec80_lifecycle_record&
+guideXosNativeAotC011EC80State() {
+    return g_guideXosAllocationDiagnostics.c011ec80Lifecycle;
+}
+
+static const char* guideXosNativeAotC011EC80CheckpointName(
+    uint32_t checkpoint) {
+    switch (checkpoint) {
+    case 5u: return "C80_PRE_GC";
+    case 6u: return "C80_POST_PLAN";
+    case 7u: return "C80_PRE_RESTART";
+    case 8u: return "C80_POST_RESTART";
+    default: return "C80_UNKNOWN";
+    }
+}
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC80SnapshotBegin(
+    uint32_t checkpoint, uintptr_t mappingStart, uintptr_t mappingEnd,
+    uintptr_t regionAlignment, uintptr_t mappingEntries) {
+    guidexos_nativeaot_c011ec80_lifecycle_record& lifecycle =
+        guideXosNativeAotC011EC80State();
+    lifecycle.started = 1u;
+    lifecycle.activeSnapshot = UINT32_MAX;
+    for (uint32_t snapshotOrdinal = 0u;
+         snapshotOrdinal < lifecycle.snapshotCount;
+         ++snapshotOrdinal) {
+        if (lifecycle.snapshots[snapshotOrdinal].checkpoint == checkpoint) {
+            return;
+        }
+    }
+    if (lifecycle.snapshotCount >=
+        GUIDEXOS_NATIVEAOT_C011EC80_MAX_SNAPSHOTS) {
+        ++lifecycle.snapshotOverflow;
+        return;
+    }
+
+    const uint32_t snapshotOrdinal = lifecycle.snapshotCount++;
+    guidexos_nativeaot_c011ec80_snapshot_record& snapshot =
+        lifecycle.snapshots[snapshotOrdinal];
+    snapshot.observed = 1u;
+    snapshot.snapshotOrdinal = snapshotOrdinal;
+    snapshot.checkpoint = checkpoint;
+    snapshot.mappingStart = mappingStart;
+    snapshot.mappingEnd = mappingEnd;
+    snapshot.regionAlignment = regionAlignment;
+    snapshot.mappingEntries = mappingEntries;
+    snapshot.recordCapacity =
+        GUIDEXOS_NATIVEAOT_C011EC80_MAX_REGIONS;
+    lifecycle.activeSnapshot = snapshotOrdinal;
+    if (snapshotOrdinal == 0u) {
+        lifecycle.canonicalMappingStart = mappingStart;
+        lifecycle.canonicalMappingEnd = mappingEnd;
+        lifecycle.canonicalRegionAlignment = regionAlignment;
+        lifecycle.canonicalMappingEntries = mappingEntries;
+    } else if (lifecycle.canonicalMappingStart != mappingStart ||
+               lifecycle.canonicalMappingEnd != mappingEnd ||
+               lifecycle.canonicalRegionAlignment != regionAlignment ||
+               lifecycle.canonicalMappingEntries != mappingEntries) {
+        ++lifecycle.invariantFailures;
+    }
+}
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC80RegionObserved(
+    uint32_t checkpoint, uintptr_t mappingIndex, uintptr_t descriptor,
+    uintptr_t owner, uintptr_t list, uintptr_t basicRegionCount,
+    uintptr_t rangeStart, uintptr_t rangeEnd, uintptr_t committed,
+    uintptr_t allocated, uintptr_t used, uintptr_t liveBytes,
+    uint32_t generation, uint32_t planGeneration, uint32_t state,
+    uint32_t listKind, uint32_t active, uint32_t specialFlags,
+    uint32_t tailRole) {
+    guidexos_nativeaot_c011ec80_lifecycle_record& lifecycle =
+        guideXosNativeAotC011EC80State();
+    if (lifecycle.activeSnapshot == UINT32_MAX ||
+        lifecycle.activeSnapshot >=
+            GUIDEXOS_NATIVEAOT_C011EC80_MAX_SNAPSHOTS) {
+        return;
+    }
+    guidexos_nativeaot_c011ec80_snapshot_record& snapshot =
+        lifecycle.snapshots[lifecycle.activeSnapshot];
+    if (snapshot.recordsWritten >=
+        GUIDEXOS_NATIVEAOT_C011EC80_MAX_REGIONS) {
+        ++snapshot.overflow;
+        ++lifecycle.regionOverflow;
+        return;
+    }
+
+    guidexos_nativeaot_c011ec80_region_record& region =
+        snapshot.regions[snapshot.recordsWritten];
+    region.observed = 1u;
+    region.snapshotOrdinal = snapshot.snapshotOrdinal;
+    region.checkpoint = checkpoint;
+    region.generation = generation;
+    region.planGeneration = planGeneration;
+    region.state = state;
+    region.listKind = listKind;
+    region.active = active;
+    region.specialFlags = specialFlags;
+    region.tailRole = tailRole;
+    region.descriptor = descriptor;
+    region.owner = owner;
+    region.list = list;
+    region.mappingIndex = mappingIndex;
+    region.basicRegionCount = basicRegionCount;
+    region.rangeStart = rangeStart;
+    region.rangeEnd = rangeEnd;
+    region.committed = committed;
+    region.allocated = allocated;
+    region.used = used;
+    region.liveBytes = liveBytes;
+    ++snapshot.recordsWritten;
+    ++snapshot.materializedRegions;
+    snapshot.representedEntries += basicRegionCount;
+}
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC80SnapshotEnd(
+    uint32_t checkpoint, uintptr_t visitedEntries, uintptr_t excludedEntries,
+    uintptr_t materializedRegions) {
+    guidexos_nativeaot_c011ec80_lifecycle_record& lifecycle =
+        guideXosNativeAotC011EC80State();
+    if (lifecycle.activeSnapshot == UINT32_MAX ||
+        lifecycle.activeSnapshot >=
+            GUIDEXOS_NATIVEAOT_C011EC80_MAX_SNAPSHOTS) {
+        return;
+    }
+    guidexos_nativeaot_c011ec80_snapshot_record& snapshot =
+        lifecycle.snapshots[lifecycle.activeSnapshot];
+    snapshot.visitedEntries = visitedEntries;
+    snapshot.excludedEntries = excludedEntries;
+    if (snapshot.materializedRegions != materializedRegions ||
+        snapshot.checkpoint != checkpoint ||
+        snapshot.visitedEntries != snapshot.mappingEntries ||
+        snapshot.representedEntries + snapshot.excludedEntries !=
+            snapshot.visitedEntries || snapshot.overflow != 0u) {
+        ++lifecycle.invariantFailures;
+    }
+    snapshot.complete =
+        snapshot.visitedEntries == snapshot.mappingEntries &&
+        snapshot.representedEntries + snapshot.excludedEntries ==
+            snapshot.visitedEntries && snapshot.overflow == 0u &&
+        snapshot.materializedRegions == materializedRegions ? 1u : 0u;
+    lifecycle.activeSnapshot = UINT32_MAX;
+}
+
+static void guideXosNativeAotC011EC80Emit() {
+    guidexos_nativeaot_c011ec80_lifecycle_record& lifecycle =
+        guideXosNativeAotC011EC80State();
+    suspendEeSerialPutString(
+        "[nativeaot-gc-short-weak-lifetime] PREFLIGHT marker=C011EC80-PREFLIGHT bounded=00000001 storage=C80-fixed-snapshot-array canonicalAuthority=seg_mapping_table lookup=get_region_info_for_address runtimeSort=00000000 runtimeMaps=00000000 runtimeHistory=00000000 allocatorMutation=00000000 regionMutation=00000000 regionListMutation=00000000 candidateMutation=00000000 policyMutation=00000000 survivorFabrication=00000000 rootFabrication=00000000 b02=00000000\n");
+
+    uint32_t completeSnapshots = 0u;
+    for (uint32_t snapshotIndex = 0u;
+         snapshotIndex < lifecycle.snapshotCount &&
+             snapshotIndex < GUIDEXOS_NATIVEAOT_C011EC80_MAX_SNAPSHOTS;
+         ++snapshotIndex) {
+        const guidexos_nativeaot_c011ec80_snapshot_record& snapshot =
+            lifecycle.snapshots[snapshotIndex];
+        for (uintptr_t regionIndex = 0u;
+             regionIndex < snapshot.recordsWritten &&
+                 regionIndex < GUIDEXOS_NATIVEAOT_C011EC80_MAX_REGIONS;
+             ++regionIndex) {
+            const guidexos_nativeaot_c011ec80_region_record& region =
+                snapshot.regions[regionIndex];
+            suspendEeSerialPutString(
+                "[nativeaot-gc-short-weak-lifetime] C80_REGION_RECORD marker=C80_REGION_RECORD");
+            guideXosNativeAotC011EC67Put32("checkpoint", region.checkpoint);
+            guideXosNativeAotC011EC67Put32("ordinal", static_cast<uint32_t>(regionIndex + 1u));
+            guideXosNativeAotC011EC67Put64("descriptor", region.descriptor);
+            guideXosNativeAotC011EC67Put64("owner", region.owner);
+            guideXosNativeAotC011EC67Put64("list", region.list);
+            guideXosNativeAotC011EC67Put64("mappingIndex", region.mappingIndex);
+            guideXosNativeAotC011EC67Put64("basicRegionCount", region.basicRegionCount);
+            guideXosNativeAotC011EC67Put64("rangeStart", region.rangeStart);
+            guideXosNativeAotC011EC67Put64("rangeEnd", region.rangeEnd);
+            guideXosNativeAotC011EC67Put64("committed", region.committed);
+            guideXosNativeAotC011EC67Put64("allocated", region.allocated);
+            guideXosNativeAotC011EC67Put64("used", region.used);
+            guideXosNativeAotC011EC67Put64("liveBytes", region.liveBytes);
+            guideXosNativeAotC011EC67Put32("generation", region.generation);
+            guideXosNativeAotC011EC67Put32("planGeneration", region.planGeneration);
+            guideXosNativeAotC011EC67Put32("state", region.state);
+            guideXosNativeAotC011EC67Put32("listKind", region.listKind);
+            guideXosNativeAotC011EC67Put32("active", region.active);
+            guideXosNativeAotC011EC67Put32("specialFlags", region.specialFlags);
+            guideXosNativeAotC011EC67Put32("tailRole", region.tailRole);
+            suspendEeSerialPutString(" source=canonical-seg-mapping-table\n");
+        }
+        suspendEeSerialPutString(
+            "[nativeaot-gc-short-weak-lifetime] C80_SNAPSHOT_SUMMARY marker=C80_SNAPSHOT_SUMMARY");
+        guideXosNativeAotC011EC67Put32("checkpoint", snapshot.checkpoint);
+        suspendEeSerialPutString(" name=");
+        suspendEeSerialPutString(
+            guideXosNativeAotC011EC80CheckpointName(snapshot.checkpoint));
+        guideXosNativeAotC011EC67Put64("mappingStart", snapshot.mappingStart);
+        guideXosNativeAotC011EC67Put64("mappingEnd", snapshot.mappingEnd);
+        guideXosNativeAotC011EC67Put64("regionAlignment", snapshot.regionAlignment);
+        guideXosNativeAotC011EC67Put64("mappingEntries", snapshot.mappingEntries);
+        guideXosNativeAotC011EC67Put64("visitedEntries", snapshot.visitedEntries);
+        guideXosNativeAotC011EC67Put64("representedEntries", snapshot.representedEntries);
+        guideXosNativeAotC011EC67Put64("excludedEntries", snapshot.excludedEntries);
+        guideXosNativeAotC011EC67Put64("materializedRegions", snapshot.materializedRegions);
+        guideXosNativeAotC011EC67Put64("recordsWritten", snapshot.recordsWritten);
+        guideXosNativeAotC011EC67Put64("recordCapacity", snapshot.recordCapacity);
+        guideXosNativeAotC011EC67Put32("overflow", snapshot.overflow);
+        guideXosNativeAotC011EC67Put32("snapshotCompleteness", snapshot.complete);
+        suspendEeSerialPutString(" source=canonical-seg-mapping-table\n");
+        if (snapshot.complete != 0u) ++completeSnapshots;
+    }
+
+    const uint32_t clean = lifecycle.snapshotCount ==
+        GUIDEXOS_NATIVEAOT_C011EC80_MAX_SNAPSHOTS &&
+        completeSnapshots == GUIDEXOS_NATIVEAOT_C011EC80_MAX_SNAPSHOTS &&
+        lifecycle.snapshotOverflow == 0u && lifecycle.regionOverflow == 0u &&
+        lifecycle.invariantFailures == 0u &&
+        lifecycle.sensitiveDiagnosticAllocations == 0u;
+    suspendEeSerialPutString(
+        "[nativeaot-gc-short-weak-lifetime] COMPLETE marker=C011EC80 outcome=");
+    suspendEeSerialPutString(clean != 0u ? "C" : "F");
+    guideXosNativeAotC011EC67Put32("successLevel", clean != 0u ? 2u : 0u);
+    guideXosNativeAotC011EC67Put32("snapshotCount", lifecycle.snapshotCount);
+    guideXosNativeAotC011EC67Put32("snapshotCapacity", GUIDEXOS_NATIVEAOT_C011EC80_MAX_SNAPSHOTS);
+    guideXosNativeAotC011EC67Put32("regionCapacity", GUIDEXOS_NATIVEAOT_C011EC80_MAX_REGIONS);
+    guideXosNativeAotC011EC67Put32("snapshotOverflow", lifecycle.snapshotOverflow);
+    guideXosNativeAotC011EC67Put32("regionOverflow", lifecycle.regionOverflow);
+    guideXosNativeAotC011EC67Put32("invariantFailures", lifecycle.invariantFailures);
+    guideXosNativeAotC011EC67Put32("sensitiveDiagnosticAllocations", lifecycle.sensitiveDiagnosticAllocations);
+    guideXosNativeAotC011EC67Put64("mappingStart", lifecycle.canonicalMappingStart);
+    guideXosNativeAotC011EC67Put64("mappingEnd", lifecycle.canonicalMappingEnd);
+    guideXosNativeAotC011EC67Put64("regionAlignment", lifecycle.canonicalRegionAlignment);
+    guideXosNativeAotC011EC67Put64("mappingEntries", lifecycle.canonicalMappingEntries);
+    guideXosNativeAotC011EC67Put32("completeSnapshots", completeSnapshots);
+    guideXosNativeAotC011EC67Put32("failFast", 0u);
+    guideXosNativeAotC011EC67Put32("pageFault", 0u);
+    suspendEeSerialPutString(" source=canonical-seg-mapping-table\n");
+    lifecycle.completionObserved = 1u;
+}
+#endif
+
 #if defined(GUIDEXOS_NATIVEAOT_C011EC79_OFFLINE_REGION_RANGE_CENSUS)
 static uintptr_t guideXosNativeAotC011EC79Extent(
     uintptr_t start, uintptr_t end) {
@@ -25368,6 +25627,9 @@ static int guideXosNativeAotC011EC67Finish() {
 #endif
 #if defined(GUIDEXOS_NATIVEAOT_C011EC79_OFFLINE_REGION_RANGE_CENSUS)
     guideXosNativeAotC011EC79Emit();
+#endif
+#if defined(GUIDEXOS_NATIVEAOT_C011EC80_CANONICAL_REGION_UNIVERSE_SNAPSHOT)
+    guideXosNativeAotC011EC80Emit();
 #endif
 #if defined(GUIDEXOS_NATIVEAOT_C011EC77_BASIC_REGION_SUPPLY_PROVENANCE)
     uintptr_t c77MaxTotalRegions = 0u;
