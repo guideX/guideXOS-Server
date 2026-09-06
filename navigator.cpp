@@ -246,6 +246,20 @@ bool Navigator::dispatchJavaScriptKeyboardEvent(int keyCode,
 	return true;
 }
 
+bool Navigator::dispatchJavaScriptFocusEvent(std::uint64_t targetSerial,
+	bool gained, bool bubblingVariant)
+{
+	if (targetSerial == 0 || s_scriptHostAdapter.document() != &s_currentDoc ||
+		!s_scriptRuntime.builtInsInitialized()) return false;
+	RuntimeErrorCode error = RuntimeErrorCode::None;
+	if (!s_scriptHostAdapter.dispatchFocusEvent(s_scriptRuntime, targetSerial,
+		gained, bubblingVariant, error)) {
+		recordJavaScriptError(gained ? (bubblingVariant ? "focusin" : "focus") :
+			(bubblingVariant ? "focusout" : "blur"), error);
+	}
+	return true;
+}
+
 static bool navigatorSmokeProgressEnabled()
 {
 	const char* value = std::getenv("GXOS_NAVIGATOR_SMOKE_PROGRESS");
@@ -18056,6 +18070,13 @@ void Navigator::clearDocumentFocus(bool recomputeStyles, FormFocusCancellationRe
 	FormRuntimeStateTable& runtime = s_currentDoc.formRuntimeState;
 	const bool hadFocus = runtime.focusValid || runtime.focusedLogicalSerial != 0;
 	if (hadFocus) ++s_currentDoc.formsDiagnostics.formFocusClears;
+	const std::uint64_t previousSerial = runtime.focusedLogicalSerial;
+	if (previousSerial != 0) {
+		// JS24 deliberately exposes the established Navigator ordering: the
+		// non-bubbling loss event is delivered before its bubbling counterpart.
+		dispatchJavaScriptFocusEvent(previousSerial, false, false);
+		dispatchJavaScriptFocusEvent(previousSerial, false, true);
+	}
 	runtime.focusedLogicalSerial = 0;
 	runtime.focusedDocumentGeneration = 0;
 	runtime.focusOrigin = FormFocusOrigin::None;
@@ -18543,11 +18564,18 @@ void Navigator::focusDocumentInput(int blockIndex, FormFocusOrigin origin)
 	FormRuntimeStateTable& runtime = s_currentDoc.formRuntimeState;
 	if (!runtime.initialized || runtime.documentGeneration != s_documentGeneration ||
 		block.formControl.logicalSerial == 0) return;
+	const std::uint64_t previousSerial = runtime.focusedLogicalSerial;
 	const bool changed = !runtime.focusValid ||
 		runtime.focusedLogicalSerial != block.formControl.logicalSerial ||
 		runtime.focusedDocumentGeneration != s_documentGeneration;
 	const bool originChanged = runtime.focusOrigin != origin;
 	if (runtime.keyboardActivationArmed) cancelKeyboardActivation(FormFocusCancellationReason::StateChange);
+	if (changed && previousSerial != 0) {
+		// Keep the focus owner Navigator-owned. The old element receives its
+		// complete loss notification before the new owner is installed.
+		dispatchJavaScriptFocusEvent(previousSerial, false, false);
+		dispatchJavaScriptFocusEvent(previousSerial, false, true);
+	}
 	if (changed) ++s_currentDoc.formsDiagnostics.formFocusChanges;
 	if (origin == FormFocusOrigin::Mouse && (changed || originChanged))
 		++s_currentDoc.formsDiagnostics.formFocusOriginMouse;
@@ -18566,6 +18594,12 @@ void Navigator::focusDocumentInput(int blockIndex, FormFocusOrigin origin)
 		recomputeFormControlStyles();
 		if (FormAccessibilityRecord* record = accessibilityRecordForSerial(block.formControl.logicalSerial))
 			record->revealResult = FormFocusRevealResult::None;
+	}
+	if (changed && isFocusedFormControl(block)) {
+		// The gain notification is emitted only after the authoritative owner and
+		// its style-validity checkpoint both agree that this element is focused.
+		dispatchJavaScriptFocusEvent(block.formControl.logicalSerial, true, false);
+		dispatchJavaScriptFocusEvent(block.formControl.logicalSerial, true, true);
 	}
 	revealFocusedFormControl(blockIndex);
 }
@@ -20123,6 +20157,18 @@ void Navigator::loadUrl(const std::string& url, bool updateDisplayAfterLoad,
 	NavigatorTransitionCategory transition)
 {
 	Logger::write(LogLevel::Info, std::string("Navigator loadUrl: ") + url);
+	const bool hadFocus = s_currentDoc.formRuntimeState.initialized &&
+		s_currentDoc.formRuntimeState.focusValid &&
+		s_currentDoc.formRuntimeState.focusedLogicalSerial != 0;
+	const bool hadRuntimeState = s_currentDoc.formRuntimeState.initialized;
+	const bool hadMousePress = s_mouseLeftDown;
+	const bool hadKeyboardPress = s_currentDoc.formRuntimeState.initialized &&
+		s_currentDoc.formRuntimeState.keyboardActivationArmed;
+	const bool staleMouseReleasePending = s_staleMouseReleaseGeneration != 0;
+	const bool staleKeyReleasePending = s_staleKeyReleaseGeneration != 0;
+	// The old document is still the installed host realm at this point, so its
+	// authentic focus loss is observable before navigation replaces that realm.
+	clearDocumentFocus(false, FormFocusCancellationReason::Navigation);
 	// Navigation is the active JavaScript realm boundary. Clear the bounded
 	// onclick table before replacing the document so old function IDs cannot
 	// observe or retarget the new page.
@@ -20139,15 +20185,6 @@ void Navigator::loadUrl(const std::string& url, bool updateDisplayAfterLoad,
 	}
 	s_pendingDocumentUrl = requestedDocumentUrl;
 	s_pendingTransitionCategory = transition;
-	const bool hadFocus = s_currentDoc.formRuntimeState.initialized &&
-		s_currentDoc.formRuntimeState.focusValid &&
-		s_currentDoc.formRuntimeState.focusedLogicalSerial != 0;
-	const bool hadRuntimeState = s_currentDoc.formRuntimeState.initialized;
-	const bool hadMousePress = s_mouseLeftDown;
-	const bool hadKeyboardPress = s_currentDoc.formRuntimeState.initialized &&
-		s_currentDoc.formRuntimeState.keyboardActivationArmed;
-	const bool staleMouseReleasePending = s_staleMouseReleaseGeneration != 0;
-	const bool staleKeyReleasePending = s_staleKeyReleaseGeneration != 0;
 	if (hadRuntimeState) incrementLifecycleCounter(s_lifecycleDiagnostics.runtimeStateClears);
 	// Element-local scroll state is navigation-scoped in Phase 6A. A rebuilt
 	// document must not inherit serials from the replaced DOM.
@@ -20157,7 +20194,6 @@ void Navigator::loadUrl(const std::string& url, bool updateDisplayAfterLoad,
 	if (s_documentGeneration == std::numeric_limits<uint64_t>::max()) s_documentGeneration = 1;
 	else ++s_documentGeneration;
 	incrementLifecycleCounter(s_lifecycleDiagnostics.documentGenerationChanges);
-	clearDocumentFocus(false, FormFocusCancellationReason::Navigation);
 	if (hadKeyboardPress || staleKeyReleasePending) s_staleKeyReleaseGeneration = s_documentGeneration;
 	else s_staleKeyReleaseGeneration = 0;
 	if (hadMousePress || staleMouseReleasePending) s_staleMouseReleaseGeneration = s_documentGeneration;

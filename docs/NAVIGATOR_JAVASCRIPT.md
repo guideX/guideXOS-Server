@@ -2804,3 +2804,96 @@ and CSS 6C. The broader `build-kernel.bat` validation currently stops before
 the kernel build on the repository's existing Mbed TLS configuration error
 for partial ECC acceleration/ECDHE-RSA prerequisites. No QEMU JS23 proof is
 claimed from that blocked kernel build.
+
+## Phase JS24: focus, blur, focusin, and focusout events
+
+JS24 exposes authentic focus transitions from the Navigator's existing bounded
+form-focus model. It does not create a second JavaScript focus state. The
+authoritative owner remains `WebDocument::formRuntimeState`, with
+`Navigator::focusDocumentInput` changing the owner and
+`Navigator::clearDocumentFocus` clearing it. Mouse activation of supported form
+controls and labels, keyboard Tab/Shift+Tab traversal, and the existing
+deactivation/navigation cleanup therefore share one event boundary. The
+existing CSS `:focus` invalidation and caret/keyboard activation state remain
+attached to that same transition.
+
+For a focus change from control A to control B, the bounded event order is:
+
+```text
+A: blur, focusout
+B: focus, focusin
+```
+
+The loss pair is delivered before the new owner is installed, and the gain pair
+is delivered after B becomes the authoritative owner. Clearing document focus
+emits `blur` then `focusout` for the old owner before the owner is cleared.
+Navigation performs that loss dispatch before the old JavaScript realm is
+detached, so old-document cleanup is observable while its listeners still
+exist. Requesting focus for the already focused element is a strict no-op: it
+does not dispatch duplicate events, change the focus origin, or consume a
+listener/dispatch slot.
+
+### JS24 event semantics
+
+All four names use the existing generic cached `Event` object. The runtime
+refreshes `type`, `target`, `currentTarget`, `eventPhase`, `bubbles`,
+`cancelable`, and `defaultPrevented` for each dispatch, while the object
+identity remains bounded and reusable. `focus` and `blur` use the normal
+capture/target phases but have `bubbles === false`; ancestor non-capture
+listeners are skipped. `focusin` and `focusout` use the same path with
+`bubbles === true`, so ancestor capture and bubble listeners observe them.
+Focus events are non-cancelable in this slice, and `preventDefault()` does not
+alter the authoritative focus owner or the existing form default behavior.
+
+The path is the focused form control, its structural DOM ancestors, and the
+document host. Capture, target, and bubbling dispatch reuse the JS23 listener
+snapshot and propagation controls, including registration order,
+`stopPropagation()`, `stopImmediatePropagation()`, Boolean capture shorthand,
+`once`, removal, stale-listener checks, and callback-error containment. The
+single global listener table remains capped at 64 records; JS24 adds no
+listener record shape or per-event allocation.
+
+The implementation intentionally exposes only the generic Event surface. It
+does not add `FocusEvent`, `relatedTarget`, programmatic `focus()` or `blur()`
+methods, focus-visible styling, shadow-DOM retargeting, or asynchronous event
+queues. The bubbling `focusin`/`focusout` pair is present, but broader DOM focus
+management remains outside this milestone.
+
+### JS24 validation result
+
+The focused proof is
+`tests/navigator_javascript_js24_test.cpp`, run by
+`scripts/smoke-navigator-javascript-js24.ps1`. It uses the real parser,
+runtime, WebDocument, host adapter, and bounded harness transition boundary to
+cover non-bubbling focus/blur with ancestor capture, bubbling focusin/focusout,
+target/currentTarget/phase metadata, same-element no-op behavior, A-to-B
+ordering, focus clearing, cancellation semantics, registration order,
+`once`, removal, Boolean capture, propagation controls, the 64/65 listener
+capacity boundary, and JS23 keyboard retargeting/text editing. The focused
+JS24 suite reports 214 checks with 0 failures, and its GXOS_BARE_METAL plus
+strict `-Wall -Wextra -Werror -pedantic` adapter/runtime lanes pass.
+
+The hosted fixture is
+`navigator-smoke/javascript-js24.html`. The production aggregate injects
+real mouse focus, key-down/key-up, A-to-B mouse transition, deactivation, and
+navigation cleanup through the same Navigator input bridge used by the
+application. All 7 JS24 aggregate checks pass. The complete available focused
+set now contains 22 suites: lexer, parser, runtime, and JS6 through JS24; all
+22 scripts pass. The hosted aggregate reports `401 passed, 7 failed` out of
+`408` checks. The seven failures are unchanged unrelated CSS baseline checks:
+CSS 3C, CSS 3G, CSS 6A, CSS 6B's three checks, and CSS 6C.
+
+The native hosted build completes successfully through `build.bat`, with the
+repository's existing unrelated warning volume. The bare-metal probe still
+stops before kernel compilation at the existing Mbed TLS configuration errors
+in `third_party/mbedtls/library/mbedtls_check_config.h`:
+`Unsupported partial support for ECC curves acceleration` and
+`MBEDTLS_KEY_EXCHANGE_ECDHE_RSA_ENABLED defined, but not all prerequisites`.
+Because the kernel build is blocked at that dependency check, no full-kernel
+or QEMU JS24 proof is claimed.
+
+The recommended JS25 direction is a bounded programmatic focus API, starting
+with `element.focus()` and `element.blur()` routed through the same authoritative
+transition boundary and preserving the no-op, ordering, cancellation, and
+navigation cleanup rules. A later milestone can then add `input`/`change`
+events only after their default-action and mutation semantics are specified.

@@ -1023,6 +1023,8 @@ private:
 		bool* defaultPrevented = nullptr);
 	static bool dispatchJavaScriptKeyboardEvent(int keyCode,
 		const std::string& action, bool* defaultPrevented = nullptr);
+	static bool dispatchJavaScriptFocusEvent(std::uint64_t targetSerial,
+		bool gained, bool bubblingVariant = false);
 	static void recordJavaScriptError(const std::string& phase,
 		gxos::javascript::RuntimeErrorCode error);
 	static void handleKeyPress(int keyCode, const std::string& action);

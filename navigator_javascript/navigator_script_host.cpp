@@ -371,6 +371,43 @@ bool NavigatorScriptHostAdapter::dispatchKeyboardEvent(
         false, error, defaultPrevented);
 }
 
+bool NavigatorScriptHostAdapter::dispatchFocusEvent(
+    RuntimeContext& runtime, HostInstanceId targetSerial, bool gained,
+    bool bubblingVariant, RuntimeErrorCode& error, bool* defaultPrevented)
+{
+    if (targetSerial == 0) {
+        error = RuntimeErrorCode::StaleHostObject;
+        if (defaultPrevented != nullptr) *defaultPrevented = false;
+        return false;
+    }
+    const char* typeText = nullptr;
+    std::size_t typeLength = 0;
+    NavigatorScriptEventType eventType = NavigatorScriptEventType::Focus;
+    if (gained) {
+        if (bubblingVariant) {
+            typeText = "focusin";
+            typeLength = 7u;
+            eventType = NavigatorScriptEventType::Focusin;
+        } else {
+            typeText = "focus";
+            typeLength = 5u;
+            eventType = NavigatorScriptEventType::Focus;
+        }
+    } else if (bubblingVariant) {
+        typeText = "focusout";
+        typeLength = 8u;
+        eventType = NavigatorScriptEventType::Focusout;
+    } else {
+        typeText = "blur";
+        typeLength = 4u;
+        eventType = NavigatorScriptEventType::Blur;
+    }
+    const HostObjectReference target{
+        targetSerial, generation_, kNavigatorElementHostKind};
+    return dispatchEvent(runtime, SourceView(typeText, typeLength), eventType,
+        target, SourceView(), SourceView(), false, error, defaultPrevented);
+}
+
 bool NavigatorScriptHostAdapter::dispatchEvent(RuntimeContext& runtime,
     SourceView type, NavigatorScriptEventType eventType,
     const HostObjectReference& target, SourceView key, SourceView code,
@@ -448,10 +485,15 @@ bool NavigatorScriptHostAdapter::dispatchEvent(RuntimeContext& runtime,
 
     const HostGenerationId dispatchGeneration = generation_;
     Value event;
+    const bool bubbles = eventType != NavigatorScriptEventType::Focus &&
+        eventType != NavigatorScriptEventType::Blur;
+    const bool cancelable = eventType == NavigatorScriptEventType::Click ||
+        eventType == NavigatorScriptEventType::Keydown ||
+        eventType == NavigatorScriptEventType::Keyup;
     if (!runtime.createOrUpdateEventObject(type, target,
             HostObjectReference{propagationPath[0].serial,
                 dispatchGeneration, propagationPath[0].kind}, key, code,
-            event, error)) {
+            bubbles, cancelable, event, error)) {
         return false;
     }
     clickDispatchActive_ = true;
@@ -508,7 +550,7 @@ bool NavigatorScriptHostAdapter::dispatchEvent(RuntimeContext& runtime,
             current.serial, dispatchGeneration, current.kind};
         RuntimeErrorCode eventError = RuntimeErrorCode::None;
         if (!runtime.createOrUpdateEventObject(type, target, currentTarget,
-                key, code, event, eventError)) {
+                key, code, bubbles, cancelable, event, eventError)) {
             if (firstError == RuntimeErrorCode::None) firstError = eventError;
             succeeded = false;
             dispatchAborted = true;
@@ -545,7 +587,7 @@ bool NavigatorScriptHostAdapter::dispatchEvent(RuntimeContext& runtime,
             current.serial, dispatchGeneration, current.kind};
         RuntimeErrorCode eventError = RuntimeErrorCode::None;
         if (!runtime.createOrUpdateEventObject(type, target, currentTarget,
-                key, code, event, eventError)) {
+                key, code, bubbles, cancelable, event, eventError)) {
             if (firstError == RuntimeErrorCode::None) firstError = eventError;
             succeeded = false;
             dispatchAborted = true;
@@ -606,7 +648,9 @@ bool NavigatorScriptHostAdapter::dispatchEvent(RuntimeContext& runtime,
 
     // Bubble uses the original forward path, starting with the target's
     // parent. Each ancestor gets a fresh non-capture snapshot at this point.
-    if (!dispatchAborted && !runtime.eventPropagationStopped() &&
+    // Focus and blur intentionally stop after target delivery; their capture
+    // phase remains observable through the same ancestor path.
+    if (bubbles && !dispatchAborted && !runtime.eventPropagationStopped() &&
         !runtime.eventImmediatePropagationStopped()) {
         runtime.setEventPhase(kEventPhaseBubbling);
         for (std::size_t index = 1u; index < propagationLength; ++index) {
@@ -649,6 +693,22 @@ bool NavigatorScriptHostAdapter::eventTypeFor(SourceView type,
     }
     if (textEquals(type, "keyup")) {
         eventType = NavigatorScriptEventType::Keyup;
+        return true;
+    }
+    if (textEquals(type, "focus")) {
+        eventType = NavigatorScriptEventType::Focus;
+        return true;
+    }
+    if (textEquals(type, "blur")) {
+        eventType = NavigatorScriptEventType::Blur;
+        return true;
+    }
+    if (textEquals(type, "focusin")) {
+        eventType = NavigatorScriptEventType::Focusin;
+        return true;
+    }
+    if (textEquals(type, "focusout")) {
+        eventType = NavigatorScriptEventType::Focusout;
         return true;
     }
     return false;
@@ -1354,6 +1414,7 @@ bool NavigatorScriptExecutionHarness::loadParsedDocument(
     }
     document_ = std::move(document);
     adapter_.attachDocument(document_, runtime_.hostGeneration());
+    focusedElementSerial_ = 0;
     if (!installDocumentGlobal(error)) return false;
     loaded_ = true;
     return true;
@@ -1395,6 +1456,61 @@ bool NavigatorScriptExecutionHarness::dispatchClick(std::uint64_t serial,
     RuntimeErrorCode& error, bool* defaultPrevented)
 {
     return adapter_.dispatchClick(runtime_, serial, error, defaultPrevented);
+}
+
+bool NavigatorScriptExecutionHarness::focusElement(std::uint64_t serial,
+    RuntimeErrorCode& error)
+{
+    error = RuntimeErrorCode::None;
+    const gxos::web::HtmlElementRef* element = findElementInDocument(document_,
+        serial, adapter_.limits().maxDocumentNodes);
+    if (!loaded_ || element == nullptr || serial == 0 ||
+        !element->formControl.metadataComplete ||
+        !element->formControl.supported || element->formControl.hidden ||
+        element->formControl.disabled) {
+        error = RuntimeErrorCode::StaleHostObject;
+        return false;
+    }
+    if (focusedElementSerial_ == serial) return true;
+    const std::uint64_t previousSerial = focusedElementSerial_;
+    if (previousSerial != 0) {
+        if (!adapter_.dispatchFocusEvent(runtime_, previousSerial, false, false,
+                error) || !adapter_.dispatchFocusEvent(runtime_, previousSerial,
+                false, true, error)) return false;
+    }
+    document_.formRuntimeState.initialized = true;
+    document_.formRuntimeState.documentGeneration = 1u;
+    document_.formRuntimeState.focusedLogicalSerial = serial;
+    document_.formRuntimeState.focusedDocumentGeneration = 1u;
+    document_.formRuntimeState.focusValid = true;
+    focusedElementSerial_ = serial;
+    if (!adapter_.dispatchFocusEvent(runtime_, serial, true, false, error) ||
+        !adapter_.dispatchFocusEvent(runtime_, serial, true, true, error))
+        return false;
+    return true;
+}
+
+bool NavigatorScriptExecutionHarness::clearFocus(RuntimeErrorCode& error)
+{
+    error = RuntimeErrorCode::None;
+    if (focusedElementSerial_ == 0) return true;
+    const std::uint64_t previousSerial = focusedElementSerial_;
+    if (!adapter_.dispatchFocusEvent(runtime_, previousSerial, false, false,
+            error) || !adapter_.dispatchFocusEvent(runtime_, previousSerial,
+            false, true, error)) return false;
+    document_.formRuntimeState.focusedLogicalSerial = 0;
+    document_.formRuntimeState.focusedDocumentGeneration = 0;
+    document_.formRuntimeState.focusValid = false;
+    focusedElementSerial_ = 0;
+    return true;
+}
+
+bool NavigatorScriptExecutionHarness::dispatchFocusedKeyboardEvent(
+    int keyCode, bool down, bool shiftPressed, RuntimeErrorCode& error,
+    bool* defaultPrevented)
+{
+    return adapter_.dispatchKeyboardEvent(runtime_, focusedElementSerial_,
+        keyCode, down, shiftPressed, error, defaultPrevented);
 }
 
 bool NavigatorScriptExecutionHarness::relayout()

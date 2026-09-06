@@ -253,7 +253,8 @@ public:
     bool createOrUpdateEventObject(SourceView type,
         const HostObjectReference& target,
         const HostObjectReference& currentTarget, SourceView key,
-        SourceView code, Value& result, RuntimeErrorCode& error);
+        SourceView code, bool bubbles, bool cancelable, Value& result,
+        RuntimeErrorCode& error);
 
     // The Navigator click adapter brackets one synchronous dispatch with
     // these calls. Event propagation methods are methods on the cached Event
@@ -452,6 +453,7 @@ private:
     bool eventPropagationStopped_ = false;
     bool eventImmediatePropagationStopped_ = false;
     bool eventDefaultPrevented_ = false;
+    bool eventCancelable_ = true;
     HostAdapter* hostAdapter_ = nullptr;
     HostGenerationId hostGeneration_ = kInvalidHostGenerationId;
     std::vector<HostObjectRecord> hostObjects_;

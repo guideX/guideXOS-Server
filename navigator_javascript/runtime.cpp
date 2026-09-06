@@ -1311,7 +1311,8 @@ private:
                 if (native == RuntimeContext::NativeFunctionId::EventStopImmediatePropagation) {
                     context_.eventImmediatePropagationStopped_ = true;
                 }
-                if (native == RuntimeContext::NativeFunctionId::EventPreventDefault) {
+                if (native == RuntimeContext::NativeFunctionId::EventPreventDefault &&
+                    context_.eventCancelable_) {
                     context_.eventDefaultPrevented_ = true;
                     RuntimeErrorCode propertyError = RuntimeErrorCode::None;
                     if (!context_.updateExistingProperty(context_.eventObject_,
@@ -1999,7 +2000,8 @@ bool RuntimeContext::invokeFunctionInSameRealm(const Value& function,
 bool RuntimeContext::createOrUpdateEventObject(SourceView type,
     const HostObjectReference& target,
     const HostObjectReference& currentTarget, SourceView key,
-    SourceView code, Value& result, RuntimeErrorCode& error)
+    SourceView code, bool bubbles, bool cancelable, Value& result,
+    RuntimeErrorCode& error)
 {
     error = RuntimeErrorCode::None;
     if (type.length == 0 ||
@@ -2018,6 +2020,7 @@ bool RuntimeContext::createOrUpdateEventObject(SourceView type,
         !createOrGetCachedString(key, keyValue, error) ||
         !createOrGetCachedString(code, codeValue, error)) return false;
     const bool hasKeyboardProperties = key.length != 0 || code.length != 0;
+    eventCancelable_ = cancelable;
 
     RuntimeHostObjectId targetObject = kInvalidRuntimeHostObjectId;
     if (!createHostObject(target, targetObject, error, true)) return false;
@@ -2057,9 +2060,9 @@ bool RuntimeContext::createOrUpdateEventObject(SourceView type,
                 Value::hostObject(targetObject), error, true) ||
             !writeProperty(eventObject_, "currentTarget",
                 Value::hostObject(currentTargetObject), error, true) ||
-            !writeProperty(eventObject_, "bubbles", Value::boolean(true),
+            !writeProperty(eventObject_, "bubbles", Value::boolean(bubbles),
                 error, true) ||
-            !writeProperty(eventObject_, "cancelable", Value::boolean(true),
+            !writeProperty(eventObject_, "cancelable", Value::boolean(cancelable),
                 error, true) ||
             !writeProperty(eventObject_, "stopPropagation",
                 Value::function(eventStopPropagationFunction_), error, true) ||
@@ -2086,7 +2089,11 @@ bool RuntimeContext::createOrUpdateEventObject(SourceView type,
         !updateExistingProperty(eventObject_, "target",
             Value::hostObject(targetObject), error) ||
         !updateExistingProperty(eventObject_, "currentTarget",
-            Value::hostObject(currentTargetObject), error)) {
+            Value::hostObject(currentTargetObject), error) ||
+        !updateExistingProperty(eventObject_, "bubbles", Value::boolean(bubbles),
+            error) ||
+        !updateExistingProperty(eventObject_, "cancelable",
+            Value::boolean(cancelable), error)) {
         return false;
     }
 
@@ -2201,6 +2208,7 @@ void RuntimeContext::clearRuntimeState()
     eventPropagationStopped_ = false;
     eventImmediatePropagationStopped_ = false;
     eventDefaultPrevented_ = false;
+    eventCancelable_ = true;
     hostObjects_.clear();
     hostMethods_.clear();
     hostGlobalSpecs_.clear();

@@ -2181,6 +2181,109 @@ static std::string navigatorHostedSmokeDiagnostic() {
         gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
         "replacement page starts without JS23 registrations or errors");
 
+    const bool js24Loaded = gxos::apps::Navigator::SmokeNavigateToQuiet(
+        "http://127.0.0.1:8080/navigator-smoke/javascript-js24.html");
+    const std::string js24InitialText =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    const size_t js24InitialHandlers =
+        gxos::apps::Navigator::SmokeJavaScriptHandlerCount();
+    const size_t js24InitialListeners =
+        gxos::apps::Navigator::SmokeJavaScriptListenerCount();
+    const std::string js24InitialError =
+        gxos::apps::Navigator::SmokeJavaScriptLastError();
+    add("JS24 hosted fixture loads focus listeners",
+        js24Loaded && contains(js24InitialText, "Navigator JavaScript JS24") &&
+        contains(js24InitialText, "authentic Navigator form-control") &&
+        js24InitialHandlers == 4u && js24InitialListeners == 22u &&
+        js24InitialError.empty(),
+        std::string("loaded=") + yesNo(js24Loaded) + ",handlers=" +
+        std::to_string(js24InitialHandlers) + ",listeners=" +
+        std::to_string(js24InitialListeners) + ",error=" +
+        (js24InitialError.empty() ? "none" : js24InitialError));
+
+    const bool js24MouseDownA =
+        gxos::apps::Navigator::SmokeMouseDownFormControlById("js24-a");
+    const bool js24MouseUpA = gxos::apps::Navigator::SmokeMouseUp();
+    const std::string js24AfterA =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS24 authentic mouse focus emits non-bubbling focus",
+        js24MouseDownA && js24MouseUpA &&
+        gxos::apps::Navigator::SmokeFocusedFormControlId() == "js24-a" &&
+        contains(js24AfterA, "focus-cap-document-js24-a:true;") &&
+        contains(js24AfterA, "focus-cap-parent-js24-a;") &&
+        contains(js24AfterA, "focus-target-a-focus:true;") &&
+        !contains(js24AfterA, "focus-bubble-js24-a") &&
+        !contains(js24AfterA, "focus-bubble-parent-js24-a"),
+        std::string("down=") + yesNo(js24MouseDownA) + ",up=" +
+        yesNo(js24MouseUpA) + ",focused=" +
+        gxos::apps::Navigator::SmokeFocusedFormControlId() + ",text=" +
+        summarizeText(js24AfterA, 260));
+
+    const bool js24KeyADown = gxos::apps::Navigator::SmokeKeyPress(65, "down");
+    const bool js24KeyAUp = gxos::apps::Navigator::SmokeKeyPress(65, "up");
+    const std::string js24AfterKeyA =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS24 preserves JS23 keyboard targeting and textbox editing",
+        js24KeyADown && js24KeyAUp &&
+        gxos::apps::Navigator::SmokeFormControlInputLengthById("js24-a") == 1 &&
+        contains(js24AfterKeyA, "key-keydown-js24-a:a;") &&
+        contains(js24AfterKeyA, "key-keyup-js24-a:a;"),
+        std::string("down=") + yesNo(js24KeyADown) + ",up=" +
+        yesNo(js24KeyAUp) + ",a-length=" + std::to_string(
+            gxos::apps::Navigator::SmokeFormControlInputLengthById("js24-a")) +
+        ",text=" + summarizeText(js24AfterKeyA, 260));
+
+    const bool js24MouseDownB =
+        gxos::apps::Navigator::SmokeMouseDownFormControlById("js24-b");
+    const bool js24MouseUpB = gxos::apps::Navigator::SmokeMouseUp();
+    const std::string js24AfterTransition =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS24 authentic A-to-B transition emits A blur and B focus",
+        js24MouseDownB && js24MouseUpB &&
+        gxos::apps::Navigator::SmokeFocusedFormControlId() == "js24-b" &&
+        contains(js24AfterTransition, "blur-target-a-blur:true;") &&
+        contains(js24AfterTransition, "focusout-target-a-js24-a;") &&
+        contains(js24AfterTransition, "focus-target-b-focus:true;") &&
+        contains(js24AfterTransition, "focusin-target-b-js24-b;") &&
+        !contains(js24AfterTransition, "focus-bubble-js24-b") &&
+        !contains(js24AfterTransition, "blur-bubble-js24-a"),
+        std::string("down=") + yesNo(js24MouseDownB) + ",up=" +
+        yesNo(js24MouseUpB) + ",focused=" +
+        gxos::apps::Navigator::SmokeFocusedFormControlId() + ",text=" +
+        summarizeText(js24AfterTransition, 320));
+
+    const bool js24KeyBDown = gxos::apps::Navigator::SmokeKeyPress(66, "down");
+    const bool js24KeyBUp = gxos::apps::Navigator::SmokeKeyPress(66, "up");
+    add("JS24 keyboard retargets to the newly focused control",
+        js24KeyBDown && js24KeyBUp &&
+        gxos::apps::Navigator::SmokeFormControlInputLengthById("js24-b") == 1 &&
+        contains(gxos::apps::Navigator::SmokeCurrentDocumentText(),
+            "key-keydown-js24-b:b;") &&
+        contains(gxos::apps::Navigator::SmokeCurrentDocumentText(),
+            "key-keyup-js24-b:b;"),
+        std::string("down=") + yesNo(js24KeyBDown) + ",up=" +
+        yesNo(js24KeyBUp) + ",b-length=" + std::to_string(
+            gxos::apps::Navigator::SmokeFormControlInputLengthById("js24-b")));
+
+    gxos::apps::Navigator::SmokeDeactivateWindow();
+    const std::string js24AfterClear =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS24 authentic focus clear emits blur and focusout",
+        gxos::apps::Navigator::SmokeFocusedFormControlId().empty() &&
+        contains(js24AfterClear, "blur-target-b-blur:true;") &&
+        contains(js24AfterClear, "focusout-target-b-js24-b;") &&
+        !contains(js24AfterClear, "blur-bubble-js24-b"),
+        std::string("focused=") +
+        gxos::apps::Navigator::SmokeFocusedFormControlId() + ",text=" +
+        summarizeText(js24AfterClear, 340));
+
+    add("JS24 navigation cleanup clears focus listeners",
+        gxos::apps::Navigator::SmokeNavigateToQuiet("about:navigator") &&
+        gxos::apps::Navigator::SmokeJavaScriptHandlerCount() == 0u &&
+        gxos::apps::Navigator::SmokeJavaScriptListenerCount() == 0u &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        "replacement page starts without JS24 registrations or errors");
+
     bool cssInlineLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-inline.html");
     std::string cssInlineText = gxos::apps::Navigator::SmokeCurrentDocumentText();
     std::string cssInlineReport = gxos::apps::Navigator::SmokeRuntimeReport();

@@ -1,0 +1,118 @@
+<!doctype html>
+<html>
+<head><title>Navigator JavaScript JS24</title></head>
+<body>
+<h1>Navigator JavaScript JS24</h1>
+<p>Focus and blur observe authentic Navigator form-control transitions.</p>
+<div id="js24-root">
+  <div id="js24-parent">
+    <input id="js24-a" type="text" value="">
+    <input id="js24-b" type="text" value="">
+  </div>
+</div>
+<p id="js24-state">initial</p>
+<script>
+var js24State = document.getElementById("js24-state");
+var js24Parent = document.getElementById("js24-parent");
+var js24A = document.getElementById("js24-a");
+var js24B = document.getElementById("js24-b");
+var js24Log = "";
+function js24Record(value) {
+    js24Log = js24Log + value;
+}
+function js24Show() {
+    js24State.textContent = js24Log;
+}
+
+document.addEventListener("focus", function(event) {
+    if (event.target === js24A || event.target === js24B)
+        js24Record("focus-cap-document-" + event.target.id + ":" +
+            (event.currentTarget === document) + ";");
+}, true);
+document.addEventListener("focus", function(event) {
+    if (event.target === js24A || event.target === js24B)
+        js24Record("focus-bubble-" + event.target.id + ";");
+});
+js24Parent.addEventListener("focus", function(event) {
+    if (event.target === js24A || event.target === js24B)
+        js24Record("focus-cap-parent-" + event.target.id + ";");
+}, true);
+js24Parent.addEventListener("focus", function(event) {
+    if (event.target === js24A || event.target === js24B)
+        js24Record("focus-bubble-parent-" + event.target.id + ";");
+});
+js24A.addEventListener("focus", function(event) {
+    js24Record("focus-target-a-" + event.type + ":" +
+        (event.currentTarget === js24A) + ";");
+});
+js24A.addEventListener("blur", function(event) {
+    js24Record("blur-target-a-" + event.type + ":" +
+        (event.currentTarget === js24A) + ";");
+});
+js24B.addEventListener("focus", function(event) {
+    js24Record("focus-target-b-" + event.type + ":" +
+        (event.currentTarget === js24B) + ";");
+});
+js24B.addEventListener("blur", function(event) {
+    js24Record("blur-target-b-" + event.type + ":" +
+        (event.currentTarget === js24B) + ";");
+    js24Show();
+});
+document.addEventListener("blur", function(event) {
+    if (event.target === js24A || event.target === js24B)
+        js24Record("blur-bubble-" + event.target.id + ";");
+});
+js24Parent.addEventListener("blur", function(event) {
+    if (event.target === js24A || event.target === js24B)
+        js24Record("blur-bubble-parent-" + event.target.id + ";");
+});
+
+document.addEventListener("focusin", function(event) {
+    if (event.target === js24A || event.target === js24B)
+        js24Record("focusin-document-" + event.target.id + ";");
+});
+js24Parent.addEventListener("focusin", function(event) {
+    if (event.target === js24A || event.target === js24B)
+        js24Record("focusin-parent-" + event.target.id + ";");
+});
+js24A.addEventListener("focusin", function(event) {
+    js24Record("focusin-target-a-" + event.target.id + ";");
+    js24Show();
+});
+js24B.addEventListener("focusin", function(event) {
+    js24Record("focusin-target-b-" + event.target.id + ";");
+    js24Show();
+});
+document.addEventListener("focusout", function(event) {
+    if (event.target === js24A || event.target === js24B)
+        js24Record("focusout-document-" + event.target.id + ";");
+});
+js24Parent.addEventListener("focusout", function(event) {
+    if (event.target === js24A || event.target === js24B)
+        js24Record("focusout-parent-" + event.target.id + ";");
+});
+js24A.addEventListener("focusout", function(event) {
+    js24Record("focusout-target-a-" + event.target.id + ";");
+});
+js24B.addEventListener("focusout", function(event) {
+    js24Record("focusout-target-b-" + event.target.id + ";");
+    js24Show();
+});
+
+js24A.addEventListener("keydown", function(event) {
+    js24Record("key-" + event.type + "-" + event.target.id + ":" + event.key + ";");
+});
+js24A.addEventListener("keyup", function(event) {
+    js24Record("key-" + event.type + "-" + event.target.id + ":" + event.key + ";");
+    js24Show();
+});
+js24B.addEventListener("keydown", function(event) {
+    js24Record("key-" + event.type + "-" + event.target.id + ":" + event.key + ";");
+});
+js24B.addEventListener("keyup", function(event) {
+    js24Record("key-" + event.type + "-" + event.target.id + ":" + event.key + ";");
+    js24Show();
+});
+</script>
+</body>
+</html>

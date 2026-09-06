@@ -36,6 +36,10 @@ enum class NavigatorScriptEventType : std::uint8_t {
     Click = 0u,
     Keydown,
     Keyup,
+    Focus,
+    Blur,
+    Focusin,
+    Focusout,
 };
 // JS13/JS17 snapshots at most 32 serials, including the clicked Element and the
 // document's html/body ancestors. The path is deliberately smaller than the
@@ -99,6 +103,11 @@ public:
         HostInstanceId targetSerial, int keyCode, bool down,
         bool shiftPressed,
         RuntimeErrorCode& error, bool* defaultPrevented = nullptr);
+    // Navigator calls this from its authoritative form-focus transition seam.
+    // The event is observational: dispatch never changes the focus owner.
+    bool dispatchFocusEvent(RuntimeContext& runtime, HostInstanceId targetSerial,
+        bool gained, bool bubblingVariant, RuntimeErrorCode& error,
+        bool* defaultPrevented = nullptr);
     bool hasClickHandler(HostInstanceId serial) const;
     std::size_t clickListenerCount() const { return clickListenerCount_; }
     // Compatibility diagnostic: the number of Elements with at least one
@@ -233,6 +242,13 @@ public:
     // element serial returned by a Navigator hit test into the real adapter.
     bool dispatchClick(std::uint64_t serial, RuntimeErrorCode& error,
         bool* defaultPrevented = nullptr);
+    // Focus proof boundary. This updates the same bounded document focus
+    // fields that Navigator owns before/after using the shared event adapter;
+    // it is intentionally a focus transition, not a raw callback trigger.
+    bool focusElement(std::uint64_t serial, RuntimeErrorCode& error);
+    bool clearFocus(RuntimeErrorCode& error);
+    bool dispatchFocusedKeyboardEvent(int keyCode, bool down, bool shiftPressed,
+        RuntimeErrorCode& error, bool* defaultPrevented = nullptr);
     bool relayout();
 
     RuntimeContext& runtime() { return runtime_; }
@@ -254,6 +270,7 @@ private:
     RuntimeContext runtime_;
     NavigatorScriptHostAdapter adapter_;
     gxos::web::WebDocument document_;
+    std::uint64_t focusedElementSerial_ = 0;
     bool loaded_ = false;
 };
 
