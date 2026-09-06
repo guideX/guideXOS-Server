@@ -2348,6 +2348,75 @@ static std::string navigatorHostedSmokeDiagnostic() {
         gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
         "replacement page starts without JS25 registrations or errors");
 
+    const bool js26Loaded = gxos::apps::Navigator::SmokeNavigateToQuiet(
+        "http://127.0.0.1:8080/navigator-smoke/javascript-js26.html");
+    const std::string js26InitialText =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    const size_t js26InitialHandlers =
+        gxos::apps::Navigator::SmokeJavaScriptHandlerCount();
+    const size_t js26InitialListeners =
+        gxos::apps::Navigator::SmokeJavaScriptListenerCount();
+    const std::string js26InitialError =
+        gxos::apps::Navigator::SmokeJavaScriptLastError();
+    add("JS26 hosted fixture loads input and change handlers",
+        js26Loaded && contains(js26InitialText, "Navigator JavaScript JS26") &&
+        contains(js26InitialText, "Real user edits") &&
+        js26InitialHandlers == 2u && js26InitialListeners == 5u &&
+        gxos::apps::Navigator::SmokeFocusedFormControlId() == "js26-name" &&
+        js26InitialError.empty(),
+        std::string("loaded=") + yesNo(js26Loaded) + ",handlers=" +
+        std::to_string(js26InitialHandlers) + ",listeners=" +
+        std::to_string(js26InitialListeners) + ",focused=" +
+        gxos::apps::Navigator::SmokeFocusedFormControlId() + ",error=" +
+        (js26InitialError.empty() ? "none" : js26InitialError));
+
+    const bool js26KeyDown = gxos::apps::Navigator::SmokeKeyPress(65, "down");
+    const bool js26KeyUp = gxos::apps::Navigator::SmokeKeyPress(65, "up");
+    const std::string js26AfterKeyboard =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    const size_t js26KeydownOffset = js26AfterKeyboard.find("keydown-name-a;");
+    const size_t js26DocumentInputOffset =
+        js26AfterKeyboard.find("input-document-a;");
+    const size_t js26TargetInputOffset =
+        js26AfterKeyboard.find("input-name-a;");
+    const size_t js26KeyupOffset = js26AfterKeyboard.find("keyup-name-a;");
+    add("JS26 hosted real keypress orders keydown input and keyup",
+        js26KeyDown && js26KeyUp &&
+        gxos::apps::Navigator::SmokeFormControlInputLengthById("js26-name") == 1 &&
+        js26KeydownOffset != std::string::npos &&
+        js26DocumentInputOffset > js26KeydownOffset &&
+        js26TargetInputOffset > js26DocumentInputOffset &&
+        js26KeyupOffset > js26TargetInputOffset &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("down=") + yesNo(js26KeyDown) + ",up=" +
+        yesNo(js26KeyUp) + ",name-length=" +
+        std::to_string(gxos::apps::Navigator::SmokeFormControlInputLengthById("js26-name")) +
+        ",text=" + summarizeText(js26AfterKeyboard, 360));
+
+    const bool js26TransferFocus =
+        gxos::apps::Navigator::SmokeFocusFormControlById("js26-notes", true);
+    const std::string js26AfterTransfer =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    const size_t js26InputNameOffset = js26AfterTransfer.find("input-name-a;");
+    const size_t js26ChangeNameOffset = js26AfterTransfer.find("change-name-a;");
+    add("JS26 hosted focus transfer commits one change event",
+        js26TransferFocus &&
+        gxos::apps::Navigator::SmokeFocusedFormControlId() == "js26-notes" &&
+        js26ChangeNameOffset != std::string::npos &&
+        js26InputNameOffset != std::string::npos &&
+        js26ChangeNameOffset > js26InputNameOffset &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("transfer=") + yesNo(js26TransferFocus) + ",focused=" +
+        gxos::apps::Navigator::SmokeFocusedFormControlId() + ",text=" +
+        summarizeText(js26AfterTransfer, 420));
+
+    add("JS26 navigation cleanup clears form-edit listeners",
+        gxos::apps::Navigator::SmokeNavigateToQuiet("about:navigator") &&
+        gxos::apps::Navigator::SmokeJavaScriptHandlerCount() == 0u &&
+        gxos::apps::Navigator::SmokeJavaScriptListenerCount() == 0u &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        "replacement page starts without JS26 registrations or errors");
+
     bool cssInlineLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-inline.html");
     std::string cssInlineText = gxos::apps::Navigator::SmokeCurrentDocumentText();
     std::string cssInlineReport = gxos::apps::Navigator::SmokeRuntimeReport();

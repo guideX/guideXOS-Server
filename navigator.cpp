@@ -272,6 +272,38 @@ bool Navigator::dispatchJavaScriptFocusEvent(std::uint64_t targetSerial,
 	return true;
 }
 
+bool Navigator::dispatchJavaScriptInputEvent(std::uint64_t targetSerial)
+{
+	if (targetSerial == 0 || s_scriptHostAdapter.document() != &s_currentDoc ||
+		!s_scriptRuntime.builtInsInitialized()) return false;
+	RuntimeErrorCode error = RuntimeErrorCode::None;
+	if (!s_scriptHostAdapter.dispatchInputEvent(s_scriptRuntime, targetSerial,
+		error)) {
+		recordJavaScriptError("input", error);
+	}
+	return true;
+}
+
+bool Navigator::dispatchJavaScriptChangeEvent(std::uint64_t targetSerial)
+{
+	if (targetSerial == 0 || s_scriptHostAdapter.document() != &s_currentDoc ||
+		!s_scriptRuntime.builtInsInitialized()) return false;
+	RuntimeErrorCode error = RuntimeErrorCode::None;
+	if (!s_scriptHostAdapter.dispatchChangeEvent(s_scriptRuntime, targetSerial,
+		error)) {
+		recordJavaScriptError("change", error);
+	}
+	return true;
+}
+
+void Navigator::commitJavaScriptFormEdit(std::uint64_t targetSerial)
+{
+	bool changed = false;
+	if (!s_scriptHostAdapter.commitFormEditSession(targetSerial, changed) ||
+		!changed) return;
+	dispatchJavaScriptChangeEvent(targetSerial);
+}
+
 bool Navigator::requestJavaScriptFocus(void*, std::uint64_t serial, bool focus)
 {
 	const int blockIndex = blockIndexForControlSerial(serial);
@@ -18137,6 +18169,9 @@ void Navigator::clearDocumentFocusInternal(bool recomputeStyles,
 		// non-bubbling loss event is delivered before its bubbling counterpart.
 		dispatchJavaScriptFocusEvent(previousSerial, false, false);
 		dispatchJavaScriptFocusEvent(previousSerial, false, true);
+		// Preserve JS24's loss ordering, then commit the edit session before the
+		// next control receives focus.
+		commitJavaScriptFormEdit(previousSerial);
 	}
 	runtime.focusedLogicalSerial = 0;
 	runtime.focusedDocumentGeneration = 0;
@@ -18651,6 +18686,9 @@ void Navigator::focusDocumentInputInternal(int blockIndex, FormFocusOrigin origi
 		// complete loss notification before the new owner is installed.
 		dispatchJavaScriptFocusEvent(previousSerial, false, false);
 		dispatchJavaScriptFocusEvent(previousSerial, false, true);
+		// Preserve JS24's loss ordering, then commit the edit session before the
+		// next control receives focus.
+		commitJavaScriptFormEdit(previousSerial);
 	}
 	if (changed) ++s_currentDoc.formsDiagnostics.formFocusChanges;
 	if (origin == FormFocusOrigin::Mouse && (changed || originChanged))
@@ -18661,6 +18699,7 @@ void Navigator::focusDocumentInputInternal(int blockIndex, FormFocusOrigin origi
 	runtime.focusedDocumentGeneration = s_documentGeneration;
 	runtime.focusOrigin = origin;
 	runtime.focusValid = true;
+	s_scriptHostAdapter.beginFormEditSession(block.formControl.logicalSerial);
 	clearKeyboardActivationState();
 	s_focusedInputBlockIndex = blockIndex;
 	s_inputCaret = static_cast<int>(block.inputValue.size());
@@ -19814,21 +19853,35 @@ void Navigator::handleKeyPress(int keyCode, const std::string& action)
 		}
 		DocBlock& block = s_currentDoc.blocks[static_cast<size_t>(focusedIndex)];
 		const int bufLen = static_cast<int>(block.inputValue.size());
+		s_inputCaret = std::max(0, std::min(s_inputCaret, bufLen));
+		const std::uint64_t inputSerial = block.formControl.logicalSerial;
+		auto applyUserEdit = [&](const std::string& editedValue,
+			int caretAfter) {
+			if (editedValue == block.inputValue || inputSerial == 0) return false;
+			if (!s_scriptHostAdapter.setFormValueFromUser(inputSerial,
+				editedValue)) return false;
+			// Set the native caret before dispatch. A re-entrant focus redirect is
+			// then free to replace it through the authoritative focus seam.
+			s_inputCaret = caretAfter;
+			dispatchJavaScriptInputEvent(inputSerial);
+			return true;
+		};
 		if (keyCode == 27) {
 			blurDocumentInput();
 			updateDisplay();
 		} else if (keyCode == 8) {
 			if (s_inputCaret > 0) {
-				block.inputValue.erase(static_cast<size_t>(s_inputCaret - 1), 1);
-				block.text = block.inputValue;
-				--s_inputCaret;
-				updateDisplay();
+				std::string editedValue = block.inputValue;
+				editedValue.erase(static_cast<size_t>(s_inputCaret - 1), 1);
+				if (applyUserEdit(editedValue, s_inputCaret - 1))
+					updateDisplay();
 			}
 		} else if (keyCode == 46) {
 			if (s_inputCaret < bufLen) {
-				block.inputValue.erase(static_cast<size_t>(s_inputCaret), 1);
-				block.text = block.inputValue;
-				updateDisplay();
+				std::string editedValue = block.inputValue;
+				editedValue.erase(static_cast<size_t>(s_inputCaret), 1);
+				if (applyUserEdit(editedValue, s_inputCaret))
+					updateDisplay();
 			}
 		} else if (keyCode == 37) {
 			if (s_inputCaret > 0) --s_inputCaret;
@@ -19843,11 +19896,11 @@ void Navigator::handleKeyPress(int keyCode, const std::string& action)
 			s_inputCaret = bufLen;
 			updateDisplay();
 		} else if (keyCode >= 32 && keyCode <= 126) {
-			block.inputValue.insert(static_cast<size_t>(s_inputCaret), 1,
+			std::string editedValue = block.inputValue;
+			editedValue.insert(static_cast<size_t>(s_inputCaret), 1,
 				navigatorTextInputCharacter(keyCode, s_shiftPressed));
-			block.text = block.inputValue;
-			++s_inputCaret;
-			updateDisplay();
+			if (applyUserEdit(editedValue, s_inputCaret + 1))
+				updateDisplay();
 		}
 		return;
 	}

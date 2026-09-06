@@ -173,6 +173,10 @@ struct FormRuntimeControlState {
 	bool disabled = false;
 	uint32_t activationCount = 0;
 	bool metadataValid = false;
+	// Snapshot used only to decide whether focus loss warrants a change event.
+	// The control's inputValue remains the sole authoritative current value.
+	std::string editBaselineValue;
+	bool editBaselineValid = false;
 };
 
 // Presence-only accessibility evidence for one supported control.  It never

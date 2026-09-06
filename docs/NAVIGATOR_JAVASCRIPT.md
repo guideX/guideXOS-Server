@@ -2989,3 +2989,85 @@ the existing focus ownership, keyboard/text-editing path, and DOM value
 mutation seam are specified. This phase does not implement those events or
 any broader focus API such as `FocusEvent`, `relatedTarget`, `activeElement`,
 focus options, `tabindex`, autofocus, or sequential Tab expansion.
+
+## Phase JS26: form editing events
+
+JS26 adds the bounded form-editing event pair:
+
+```javascript
+element.addEventListener("input", handler);
+element.addEventListener("change", handler);
+```
+
+The supported controls are text-like `<input>` elements already represented by
+Navigator (`text`, `password`, `search`, `email`, `url`, and `number`) plus
+`<textarea>`. Checkbox, radio, select, button, submit, reset, and other
+non-text controls do not gain JS26 editing events. The parser now completes the
+textarea's form metadata after its logical serial is assigned, so an eligible
+textarea participates in the same native focus and edit path as a text input.
+
+Native printable-key, backspace, and delete editing still mutates the
+authoritative `DocBlock::inputValue`. The event order for a changed key edit is
+`keydown`, `input`, `keyup`; arrows and other caret-only keys do not emit
+`input`. The `input` event is dispatched only after the value mutation succeeds,
+and a listener observes the new value through `event.target.value` and the
+element's `.value` getter. A failed or no-op edit emits neither event.
+
+The host exposes `.value` for the supported text controls. Reading it returns
+the current authoritative value. Assigning a primitive string, number, or
+boolean updates that value and the rendered/form metadata within the existing
+bounded script-mutation budget, but script assignment emits no implicit
+`input` or `change`; the assignment is not treated as user editing. Values are
+capped at the existing JS26 host bound of 256 UTF-8 bytes, and unsupported
+receivers cannot mutate unrelated document blocks.
+
+Each eligible control gets a small runtime edit-session baseline when it gains
+focus. On focus loss, Navigator preserves the JS25 loss sequence (`blur`, then
+`focusout`), compares the final authoritative value with that baseline, and
+dispatches exactly one `change` when the values differ. The `change` dispatch
+occurs after `focusout` and before the next control's `focus`/`focusin` pair.
+Programmatic focus transfer, `blur()`, window deactivation, and navigation use
+the same commit boundary. Reverting to the baseline, focusing an unchanged
+control, repeating a focus request, or clearing an already-cleared focus emits
+no change. A committed session becomes the next baseline, and document
+replacement discards all old baselines.
+
+Both names use the existing generic cached `Event` object. `input` and
+`change` bubble through the structural ancestor path, are non-cancelable, and
+there is no `InputEvent`, `data`, `inputType`, `isComposing`, `beforeinput`,
+selection API, or asynchronous event queue. Existing capture/target/bubble
+ordering, target/currentTarget/phase metadata, `once`, removal, Boolean
+capture, stop-propagation controls, stale-listener checks, and the global
+64-listener limit remain unchanged. Listener-side `.value` rewrites update the
+current value without recursively synthesizing another `input`; focus redirects
+requested from input/change callbacks remain bounded by the JS25 deferred
+transition drain.
+
+### JS26 validation result
+
+The focused proof is
+`tests/navigator_javascript_js26_test.cpp`, run by
+`scripts/smoke-navigator-javascript-js26.ps1`. It covers input/change metadata,
+native edit ordering, backspace/delete and revert behavior, `.value` getter and
+setter rules, re-entrant listeners, focus redirects, propagation controls,
+listener capacity, textareas, and document replacement. The hosted fixture is
+`navigator-smoke/javascript-js26.html`; the production aggregate drives a real
+key-down/key-up edit and a real focus transfer to verify the end-to-end
+`keydown` → `input` → `keyup` and committed `change` boundaries.
+
+The focused JS26 suite reports 497 checks with 0 failures, and its
+`GXOS_BARE_METAL` plus strict `-Wall -Wextra -Werror -pedantic` adapter/runtime
+lanes pass. The complete available focused set contains 24 suites: lexer,
+parser, runtime, and JS6 through JS26; all 24 pass. The normal native
+`build.bat` also completes successfully. The hosted aggregate reports 408
+passed and 7 failed out of 415 checks: the three JS26 checks pass, and the
+seven failures remain the unrelated CSS baselines CSS 3C, CSS 3G, CSS 6A,
+three CSS 6B checks, and CSS 6C. The kernel retry reaches the kernel build but
+remains blocked by the existing Mbed TLS configuration errors in
+`third_party/mbedtls/library/mbedtls_check_config.h`; no full-kernel or QEMU
+JS26 proof is claimed.
+
+The recommended JS27 direction is to choose one bounded extension explicitly:
+either checkbox/radio/select user-value transitions, or a separately specified
+`InputEvent`/`beforeinput` and selection model. Those should not be inferred
+from JS26's generic Event contract.

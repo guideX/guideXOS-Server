@@ -1,0 +1,46 @@
+<!doctype html>
+<html>
+<head><title>Navigator JavaScript JS26</title></head>
+<body>
+<h1>Navigator JavaScript JS26</h1>
+<p>Real user edits expose input events and committed focus-loss changes.</p>
+<div id="js26-root">
+  <div id="js26-parent">
+    <input id="js26-name" type="text" value="">
+    <textarea id="js26-notes">ready</textarea>
+  </div>
+</div>
+<p id="js26-state">initial</p>
+<script>
+var js26State = document.getElementById("js26-state");
+var js26Name = document.getElementById("js26-name");
+var js26Notes = document.getElementById("js26-notes");
+var js26Log = "";
+function js26Record(value) {
+    js26Log = js26Log + value;
+    js26State.textContent = js26Log;
+}
+
+document.addEventListener("input", function(event) {
+    if (event.target === js26Name)
+        js26Record("input-document-" + event.target.value + ";");
+}, true);
+js26Name.addEventListener("input", function(event) {
+    js26Record("input-name-" + js26Name.value + ";");
+});
+js26Name.addEventListener("change", function(event) {
+    js26Record("change-name-" + js26Name.value + ";");
+});
+js26Name.addEventListener("keydown", function(event) {
+    js26Record("keydown-name-" + event.key + ";");
+});
+js26Name.addEventListener("keyup", function(event) {
+    js26Record("keyup-name-" + event.key + ";");
+});
+
+// The fixture installs the handlers; hosted smoke drives focus and real
+// Navigator keyboard input through the server's existing input loop.
+js26Name.focus();
+</script>
+</body>
+</html>

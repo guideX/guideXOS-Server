@@ -64,6 +64,13 @@ bool appendBounded(std::string& target, const std::string& text,
     return true;
 }
 
+char harnessTextInputCharacter(int keyCode, bool shiftPressed)
+{
+    if (keyCode >= 65 && keyCode <= 90 && !shiftPressed)
+        return static_cast<char>(keyCode + 32);
+    return static_cast<char>(keyCode);
+}
+
 std::string canonicalTagName(const std::string& tagName)
 {
     std::string result = tagName;
@@ -430,6 +437,70 @@ bool NavigatorScriptHostAdapter::dispatchFocusEvent(
         target, SourceView(), SourceView(), false, error, defaultPrevented);
 }
 
+bool NavigatorScriptHostAdapter::dispatchInputEvent(
+    RuntimeContext& runtime, HostInstanceId targetSerial,
+    RuntimeErrorCode& error, bool* defaultPrevented)
+{
+    if (!isTextEditableFormElement(targetSerial)) {
+        error = RuntimeErrorCode::StaleHostObject;
+        if (defaultPrevented != nullptr) *defaultPrevented = false;
+        return false;
+    }
+    const HostObjectReference target{
+        targetSerial, generation_, kNavigatorElementHostKind};
+    return dispatchEvent(runtime, SourceView("input", 5u),
+        NavigatorScriptEventType::Input, target, SourceView(), SourceView(),
+        false, error, defaultPrevented);
+}
+
+bool NavigatorScriptHostAdapter::dispatchChangeEvent(
+    RuntimeContext& runtime, HostInstanceId targetSerial,
+    RuntimeErrorCode& error, bool* defaultPrevented)
+{
+    if (!isTextEditableFormElement(targetSerial)) {
+        error = RuntimeErrorCode::StaleHostObject;
+        if (defaultPrevented != nullptr) *defaultPrevented = false;
+        return false;
+    }
+    const HostObjectReference target{
+        targetSerial, generation_, kNavigatorElementHostKind};
+    return dispatchEvent(runtime, SourceView("change", 6u),
+        NavigatorScriptEventType::Change, target, SourceView(), SourceView(),
+        false, error, defaultPrevented);
+}
+
+bool NavigatorScriptHostAdapter::beginFormEditSession(HostInstanceId serial)
+{
+    gxos::web::DocBlock* block = formControlBlock(serial);
+    gxos::web::FormRuntimeControlState* state = formRuntimeState(serial);
+    if (block == nullptr || state == nullptr) return false;
+    state->editBaselineValue = block->inputValue;
+    state->editBaselineValid = true;
+    return true;
+}
+
+bool NavigatorScriptHostAdapter::commitFormEditSession(
+    HostInstanceId serial, bool& changed)
+{
+    changed = false;
+    const gxos::web::DocBlock* block = formControlBlock(serial);
+    gxos::web::FormRuntimeControlState* state = formRuntimeState(serial);
+    if (block == nullptr || state == nullptr || !state->editBaselineValid)
+        return false;
+    changed = block->inputValue != state->editBaselineValue;
+    // Keep the state tied to this document's latest committed value while
+    // disabling comparison until the next authentic focus gain.
+    state->editBaselineValue = block->inputValue;
+    state->editBaselineValid = false;
+    return true;
+}
+
+bool NavigatorScriptHostAdapter::setFormValueFromUser(
+    HostInstanceId serial, const std::string& value)
+{
+    return setElementValue(serial, value, false).succeeded();
+}
+
 bool NavigatorScriptHostAdapter::dispatchEvent(RuntimeContext& runtime,
     SourceView type, NavigatorScriptEventType eventType,
     const HostObjectReference& target, SourceView key, SourceView code,
@@ -735,7 +806,107 @@ bool NavigatorScriptHostAdapter::eventTypeFor(SourceView type,
         eventType = NavigatorScriptEventType::Focusout;
         return true;
     }
+    if (textEquals(type, "input")) {
+        eventType = NavigatorScriptEventType::Input;
+        return true;
+    }
+    if (textEquals(type, "change")) {
+        eventType = NavigatorScriptEventType::Change;
+        return true;
+    }
     return false;
+}
+
+bool NavigatorScriptHostAdapter::isTextEditableFormElement(
+    HostInstanceId serial) const
+{
+    const gxos::web::DocBlock* block = formControlBlock(serial);
+    if (block == nullptr || !block->formControl.metadataComplete ||
+        !block->formControl.supported) return false;
+    return block->type == gxos::web::BlockType::FormTextInput ||
+        block->type == gxos::web::BlockType::FormTextarea;
+}
+
+gxos::web::DocBlock* NavigatorScriptHostAdapter::formControlBlock(
+    HostInstanceId serial)
+{
+    if (document_ == nullptr || serial == 0) return nullptr;
+    for (gxos::web::DocBlock& block : document_->blocks) {
+        if ((block.type == gxos::web::BlockType::FormTextInput ||
+                block.type == gxos::web::BlockType::FormTextarea) &&
+            block.formControl.logicalSerial == serial)
+            return &block;
+    }
+    return nullptr;
+}
+
+const gxos::web::DocBlock* NavigatorScriptHostAdapter::formControlBlock(
+    HostInstanceId serial) const
+{
+    if (document_ == nullptr || serial == 0) return nullptr;
+    for (const gxos::web::DocBlock& block : document_->blocks) {
+        if ((block.type == gxos::web::BlockType::FormTextInput ||
+                block.type == gxos::web::BlockType::FormTextarea) &&
+            block.formControl.logicalSerial == serial)
+            return &block;
+    }
+    return nullptr;
+}
+
+gxos::web::FormRuntimeControlState*
+NavigatorScriptHostAdapter::formRuntimeState(HostInstanceId serial)
+{
+    if (document_ == nullptr || serial == 0) return nullptr;
+    const std::size_t count = std::min(
+        document_->formRuntimeState.count,
+        gxos::web::kFormRuntimeControlCap);
+    for (std::size_t index = 0; index < count; ++index) {
+        gxos::web::FormRuntimeControlState& state =
+            document_->formRuntimeState.controls[index];
+        if (state.logicalSerial == serial && state.metadataValid)
+            return &state;
+    }
+    return nullptr;
+}
+
+const gxos::web::FormRuntimeControlState*
+NavigatorScriptHostAdapter::formRuntimeState(HostInstanceId serial) const
+{
+    if (document_ == nullptr || serial == 0) return nullptr;
+    const std::size_t count = std::min(
+        document_->formRuntimeState.count,
+        gxos::web::kFormRuntimeControlCap);
+    for (std::size_t index = 0; index < count; ++index) {
+        const gxos::web::FormRuntimeControlState& state =
+            document_->formRuntimeState.controls[index];
+        if (state.logicalSerial == serial && state.metadataValid)
+            return &state;
+    }
+    return nullptr;
+}
+
+HostResult NavigatorScriptHostAdapter::setElementValue(
+    HostInstanceId serial, const std::string& value, bool scriptMutation)
+{
+    if (document_ == nullptr || !isTextEditableFormElement(serial))
+        return HostResult{HostResultCode::PropertyWriteFailed};
+    if (value.size() > kNavigatorScriptMaxFormValueBytes)
+        return HostResult{HostResultCode::DocumentTextLimitExceeded};
+    if (scriptMutation && document_->scriptMutationCount >=
+        limits_.maxDocumentMutations)
+        return HostResult{HostResultCode::DocumentMutationLimitExceeded};
+
+    gxos::web::DocBlock* block = formControlBlock(serial);
+    if (block == nullptr) return HostResult{HostResultCode::PropertyWriteFailed};
+    block->inputValue = value;
+    block->text = value;
+    block->formControl.value = value;
+    for (gxos::web::HtmlElementRef& element : document_->structuralElements) {
+        if (element.serial == serial) element.formControl.value = value;
+    }
+    document_->layoutDirty = true;
+    if (scriptMutation) ++document_->scriptMutationCount;
+    return HostResult();
 }
 
 bool NavigatorScriptHostAdapter::eventNameForKey(int keyCode,
@@ -880,6 +1051,14 @@ HostResult NavigatorScriptHostAdapter::getProperty(
         returnBuffer_ = std::move(text);
         result = HostValue::string(SourceView(returnBuffer_.data(),
             returnBuffer_.size()));
+        return HostResult();
+    }
+    if (textEquals(property, "value")) {
+        const gxos::web::DocBlock* block = formControlBlock(element->serial);
+        if (block == nullptr || !isTextEditableFormElement(element->serial))
+            return HostResult{HostResultCode::PropertyNotFound};
+        result = HostValue::string(SourceView(block->inputValue.data(),
+            block->inputValue.size()));
         return HostResult();
     }
     if (textEquals(property, "onclick")) {
@@ -1121,6 +1300,12 @@ HostResult NavigatorScriptHostAdapter::setProperty(
         return HostResult{HostResultCode::PropertyWriteFailed};
     if (textEquals(property, "id") || textEquals(property, "tagName"))
         return HostResult{HostResultCode::PropertyReadOnly};
+    if (textEquals(property, "value")) {
+        std::string text;
+        const HostResult conversion = convertTextValue(value, text);
+        if (!conversion.succeeded()) return conversion;
+        return setElementValue(object.instanceId, text, true);
+    }
     if (textEquals(property, "onclick")) {
         const bool hadAnyHandler = hasAnyEventHandler(
             kNavigatorElementHostKind, object.instanceId);
@@ -1461,7 +1646,28 @@ bool NavigatorScriptExecutionHarness::loadParsedDocument(
     }
     document_ = std::move(document);
     adapter_.attachDocument(document_, runtime_.hostGeneration());
+    document_.formRuntimeState = gxos::web::FormRuntimeStateTable{};
+    document_.formRuntimeState.initialized = true;
+    document_.formRuntimeState.documentGeneration = 1u;
+    for (const gxos::web::HtmlElementRef& element :
+        document_.structuralElements) {
+        const gxos::web::FormControlMetadata& metadata = element.formControl;
+        if (element.serial == 0 || !metadata.metadataComplete ||
+            !metadata.supported) continue;
+        if (document_.formRuntimeState.count >=
+            gxos::web::kFormRuntimeControlCap) break;
+        gxos::web::FormRuntimeControlState& state =
+            document_.formRuntimeState.controls[
+                document_.formRuntimeState.count++];
+        state.logicalSerial = element.serial;
+        state.type = metadata.type;
+        state.parentFormSerial = metadata.parentFormSerial;
+        state.parentFieldsetSerial = metadata.parentFieldsetSerial;
+        state.disabled = metadata.disabled;
+        state.metadataValid = true;
+    }
     focusedElementSerial_ = 0;
+    focusedInputCaret_ = 0;
     focusTransitionActive_ = false;
     pendingFocusRequest_ = false;
     pendingFocusSerial_ = 0;
@@ -1577,6 +1783,11 @@ bool NavigatorScriptExecutionHarness::focusElementInternal(
         if (!adapter_.dispatchFocusEvent(runtime_, previousSerial, false, false,
                 error) || !adapter_.dispatchFocusEvent(runtime_, previousSerial,
                 false, true, error)) return false;
+        bool changed = false;
+        if (!adapter_.commitFormEditSession(previousSerial, changed))
+            changed = false;
+        if (changed && !adapter_.dispatchChangeEvent(runtime_, previousSerial,
+                error)) return false;
     }
     document_.formRuntimeState.initialized = true;
     document_.formRuntimeState.documentGeneration = 1u;
@@ -1584,6 +1795,16 @@ bool NavigatorScriptExecutionHarness::focusElementInternal(
     document_.formRuntimeState.focusedDocumentGeneration = 1u;
     document_.formRuntimeState.focusValid = true;
     focusedElementSerial_ = serial;
+    adapter_.beginFormEditSession(serial);
+    focusedInputCaret_ = 0;
+    for (const gxos::web::DocBlock& block : document_.blocks) {
+        if (block.formControl.logicalSerial == serial &&
+            (block.type == gxos::web::BlockType::FormTextInput ||
+                block.type == gxos::web::BlockType::FormTextarea)) {
+            focusedInputCaret_ = static_cast<int>(block.inputValue.size());
+            break;
+        }
+    }
     if (!adapter_.dispatchFocusEvent(runtime_, serial, true, false, error) ||
         !adapter_.dispatchFocusEvent(runtime_, serial, true, true, error))
         return false;
@@ -1599,10 +1820,16 @@ bool NavigatorScriptExecutionHarness::clearFocusInternal(
     if (!adapter_.dispatchFocusEvent(runtime_, previousSerial, false, false,
             error) || !adapter_.dispatchFocusEvent(runtime_, previousSerial,
             false, true, error)) return false;
+    bool changed = false;
+    if (!adapter_.commitFormEditSession(previousSerial, changed))
+        changed = false;
+    if (changed && !adapter_.dispatchChangeEvent(runtime_, previousSerial,
+            error)) return false;
     document_.formRuntimeState.focusedLogicalSerial = 0;
     document_.formRuntimeState.focusedDocumentGeneration = 0;
     document_.formRuntimeState.focusValid = false;
     focusedElementSerial_ = 0;
+    focusedInputCaret_ = 0;
     return true;
 }
 
@@ -1667,6 +1894,85 @@ bool NavigatorScriptExecutionHarness::dispatchFocusedKeyboardEvent(
 {
     return adapter_.dispatchKeyboardEvent(runtime_, focusedElementSerial_,
         keyCode, down, shiftPressed, error, defaultPrevented);
+}
+
+bool NavigatorScriptExecutionHarness::dispatchFocusedUserEdit(
+    int keyCode, bool shiftPressed, RuntimeErrorCode& error,
+    bool* defaultPrevented)
+{
+    error = RuntimeErrorCode::None;
+    if (!loaded_ || focusedElementSerial_ == 0) {
+        error = RuntimeErrorCode::StaleHostObject;
+        if (defaultPrevented != nullptr) *defaultPrevented = false;
+        return false;
+    }
+
+    bool keydownDefaultPrevented = false;
+    if (!adapter_.dispatchKeyboardEvent(runtime_, focusedElementSerial_,
+            keyCode, true, shiftPressed, error, &keydownDefaultPrevented)) {
+        return false;
+    }
+    if (defaultPrevented != nullptr) *defaultPrevented = keydownDefaultPrevented;
+
+    // Keydown listeners can request a bounded focus redirect. The production
+    // path targets the resulting authoritative owner for its default action.
+    const std::uint64_t serial = focusedElementSerial_;
+    gxos::web::DocBlock* block = nullptr;
+    for (gxos::web::DocBlock& candidate : document_.blocks) {
+        if (candidate.formControl.logicalSerial == serial &&
+            candidate.formControl.metadataComplete &&
+            candidate.formControl.supported &&
+            (candidate.type == gxos::web::BlockType::FormTextInput ||
+                candidate.type == gxos::web::BlockType::FormTextarea)) {
+            block = &candidate;
+            break;
+        }
+    }
+
+    if (!keydownDefaultPrevented && block != nullptr &&
+        keyCode != 13 && keyCode != 32) {
+        const int caret = std::max(0, std::min(focusedInputCaret_,
+            static_cast<int>(block->inputValue.size())));
+        std::string editedValue = block->inputValue;
+        int nextCaret = caret;
+        if (keyCode == 8) {
+            if (caret > 0) {
+                editedValue.erase(static_cast<std::size_t>(caret - 1), 1);
+                nextCaret = caret - 1;
+            }
+        } else if (keyCode == 46) {
+            if (caret < static_cast<int>(editedValue.size()))
+                editedValue.erase(static_cast<std::size_t>(caret), 1);
+        } else if (keyCode == 37) {
+            nextCaret = std::max(0, caret - 1);
+        } else if (keyCode == 39) {
+            nextCaret = std::min(static_cast<int>(editedValue.size()),
+                caret + 1);
+        } else if (keyCode == 36) {
+            nextCaret = 0;
+        } else if (keyCode == 35) {
+            nextCaret = static_cast<int>(editedValue.size());
+        } else if (keyCode >= 32 && keyCode <= 126) {
+            editedValue.insert(static_cast<std::size_t>(caret), 1,
+                harnessTextInputCharacter(keyCode, shiftPressed));
+            nextCaret = caret + 1;
+        }
+        if (editedValue != block->inputValue &&
+            adapter_.setFormValueFromUser(serial, editedValue)) {
+            focusedInputCaret_ = nextCaret;
+            if (!adapter_.dispatchInputEvent(runtime_, serial, error)) {
+                return false;
+            }
+        }
+        if (editedValue == block->inputValue &&
+            (keyCode == 37 || keyCode == 39 || keyCode == 36 || keyCode == 35)) {
+            focusedInputCaret_ = nextCaret;
+        }
+    }
+
+    const std::uint64_t keyupTarget = focusedElementSerial_;
+    return adapter_.dispatchKeyboardEvent(runtime_, keyupTarget, keyCode,
+        false, shiftPressed, error, nullptr);
 }
 
 bool NavigatorScriptExecutionHarness::relayout()

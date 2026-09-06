@@ -1025,6 +1025,9 @@ private:
 		const std::string& action, bool* defaultPrevented = nullptr);
 	static bool dispatchJavaScriptFocusEvent(std::uint64_t targetSerial,
 		bool gained, bool bubblingVariant = false);
+	static bool dispatchJavaScriptInputEvent(std::uint64_t targetSerial);
+	static bool dispatchJavaScriptChangeEvent(std::uint64_t targetSerial);
+	static void commitJavaScriptFormEdit(std::uint64_t targetSerial);
 	static bool requestJavaScriptFocus(void* context, std::uint64_t serial,
 		bool focus);
 	static void completeJavaScriptFocusDispatch(void* context);

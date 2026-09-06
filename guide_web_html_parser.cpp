@@ -6720,7 +6720,16 @@ static void handleOpenTag(ParserState& st, const std::string& tagBody)
 		elementRef.formControl.readOnly = st.currentTextareaReadOnly;
 		elementRef.formControl.rows = st.currentTextareaRows;
 		elementRef.formControl.cols = st.currentTextareaCols;
-		pushElement(st, elementRef);
+		if (pushElement(st, elementRef) && !st.openElements.empty()) {
+			// The serial is assigned by pushElement/registerStructuralElement, so
+			// finalize the metadata completeness bit after registration.
+			st.openElements.back().formControl.metadataComplete =
+				st.uncapturedOpenElementDepth == 0;
+			if (HtmlElementRef* stored = findStructuralElement(st,
+				st.openElements.back().serial))
+				stored->formControl.metadataComplete =
+					st.openElements.back().formControl.metadataComplete;
+		}
 		++st.doc.formsDiagnostics.htmlTextareasParsed;
 		activateCurrentBlock(st);
 		st.textBuf.clear();

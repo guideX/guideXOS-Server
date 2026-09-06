@@ -32,6 +32,7 @@ constexpr std::size_t kNavigatorScriptMaxElementHostObjects = 1024u;
 constexpr std::size_t kNavigatorScriptMaxDocumentMutations = 1024u;
 constexpr std::size_t kNavigatorScriptMaxDocumentNodes = 1024u;
 constexpr std::size_t kNavigatorScriptMaxClickHandlers = 64u;
+constexpr std::size_t kNavigatorScriptMaxFormValueBytes = 256u;
 constexpr std::uint32_t kNavigatorClickListenerOnceFlag = 1u;
 constexpr std::uint32_t kNavigatorClickListenerCaptureFlag = 2u;
 enum class NavigatorScriptEventType : std::uint8_t {
@@ -42,6 +43,8 @@ enum class NavigatorScriptEventType : std::uint8_t {
     Blur,
     Focusin,
     Focusout,
+    Input,
+    Change,
 };
 // JS13/JS17 snapshots at most 32 serials, including the clicked Element and the
 // document's html/body ancestors. The path is deliberately smaller than the
@@ -120,6 +123,15 @@ public:
     bool dispatchFocusEvent(RuntimeContext& runtime, HostInstanceId targetSerial,
         bool gained, bool bubblingVariant, RuntimeErrorCode& error,
         bool* defaultPrevented = nullptr);
+    bool dispatchInputEvent(RuntimeContext& runtime, HostInstanceId targetSerial,
+        RuntimeErrorCode& error, bool* defaultPrevented = nullptr);
+    bool dispatchChangeEvent(RuntimeContext& runtime, HostInstanceId targetSerial,
+        RuntimeErrorCode& error, bool* defaultPrevented = nullptr);
+    // These helpers keep edit-session bookkeeping on the authoritative
+    // WebDocument form runtime. They never store a JavaScript-only value.
+    bool beginFormEditSession(HostInstanceId serial);
+    bool commitFormEditSession(HostInstanceId serial, bool& changed);
+    bool setFormValueFromUser(HostInstanceId serial, const std::string& value);
     bool hasClickHandler(HostInstanceId serial) const;
     std::size_t clickListenerCount() const { return clickListenerCount_; }
     // Compatibility diagnostic: the number of Elements with at least one
@@ -192,6 +204,14 @@ private:
         bool* defaultPrevented);
     bool eventTypeFor(SourceView type,
         NavigatorScriptEventType& eventType) const;
+    bool isTextEditableFormElement(HostInstanceId serial) const;
+    gxos::web::DocBlock* formControlBlock(HostInstanceId serial);
+    const gxos::web::DocBlock* formControlBlock(HostInstanceId serial) const;
+    gxos::web::FormRuntimeControlState* formRuntimeState(HostInstanceId serial);
+    const gxos::web::FormRuntimeControlState* formRuntimeState(
+        HostInstanceId serial) const;
+    HostResult setElementValue(HostInstanceId serial, const std::string& value,
+        bool scriptMutation);
     bool eventNameForKey(int keyCode, bool shiftPressed,
         std::string& key, std::string& code) const;
     HostResult callInternal(const HostObjectReference* receiver,
@@ -265,6 +285,11 @@ public:
     bool clearFocus(RuntimeErrorCode& error);
     bool dispatchFocusedKeyboardEvent(int keyCode, bool down, bool shiftPressed,
         RuntimeErrorCode& error, bool* defaultPrevented = nullptr);
+    // Focused production-boundary proof hook. It dispatches keydown, applies
+    // the same bounded text mutation seam, dispatches input only on change,
+    // then dispatches keyup.
+    bool dispatchFocusedUserEdit(int keyCode, bool shiftPressed,
+        RuntimeErrorCode& error, bool* defaultPrevented = nullptr);
     bool relayout();
     std::uint64_t focusedElementSerial() const { return focusedElementSerial_; }
 
@@ -296,6 +321,7 @@ private:
     NavigatorScriptHostAdapter adapter_;
     gxos::web::WebDocument document_;
     std::uint64_t focusedElementSerial_ = 0;
+    int focusedInputCaret_ = 0;
     bool focusTransitionActive_ = false;
     bool pendingFocusRequest_ = false;
     std::uint64_t pendingFocusSerial_ = 0;
