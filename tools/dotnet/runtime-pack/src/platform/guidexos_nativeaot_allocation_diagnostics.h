@@ -2425,6 +2425,7 @@ typedef struct guidexos_nativeaot_c011ec67_lifecycle_record {
         GUIDEXOS_NATIVEAOT_C011EC67_MAX_EVENTS];
 } guidexos_nativeaot_c011ec67_lifecycle_record;
 
+#if defined(GUIDEXOS_NATIVEAOT_C011EC80_CANONICAL_REGION_UNIVERSE_SNAPSHOT)
 /* C011EC80 snapshots the runtime's canonical USE_REGIONS address universe.
  * The bound is intentionally small and explicit: the GC supplies the
  * authentic mapping-entry span at each checkpoint, and overflow is a hard
@@ -2561,6 +2562,7 @@ typedef struct guidexos_nativeaot_c011ec81_lifecycle_record {
     guidexos_nativeaot_c011ec81_snapshot snapshots[
         GUIDEXOS_NATIVEAOT_C011EC81_MAX_SNAPSHOTS];
 } guidexos_nativeaot_c011ec81_lifecycle_record;
+#endif
 
 typedef struct guidexos_nativeaot_c011ec54_lifecycle_record {
     uint32_t started;
@@ -4977,9 +4979,11 @@ typedef struct guidexos_nativeaot_allocation_diagnostics {
     /* C011EC67 gen0 region-availability provenance. */
     guidexos_nativeaot_c011ec67_lifecycle_record c011ec67Lifecycle;
     /* C011EC80 canonical USE_REGIONS mapping-table universe snapshots. */
+#if defined(GUIDEXOS_NATIVEAOT_C011EC80_CANONICAL_REGION_UNIVERSE_SNAPSHOT)
     guidexos_nativeaot_c011ec80_lifecycle_record c011ec80Lifecycle;
     /* C011EC81 bounded basic free-list entry census. */
     guidexos_nativeaot_c011ec81_lifecycle_record c011ec81Lifecycle;
+#endif
     /* C011EC44 malformed transition-frame provenance. */
     guidexos_nativeaot_c011ec44_provenance_record c011ec44Provenance;
     /* C011EC45 reverse-P/Invoke slot layout, register, and unwind provenance. */

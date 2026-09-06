@@ -1,6 +1,7 @@
 param(
     [string]$RepoRoot = "",
     [string]$EvidenceRoot = "",
+    [string]$BuildOutputRoot = "",
     [int]$TimeoutSeconds = 90,
     [int]$FreshBootCount = 3,
     [switch]$SkipManagedBuild,
@@ -434,8 +435,13 @@ if ($isC011EC55) {
     $proofDefine += " /DGUIDEXOS_NATIVEAOT_C011EC18_NATIVE_RHP_NEW_ARRAY /DGUIDEXOS_NATIVEAOT_C011EC20_UNWIND /DGUIDEXOS_NATIVEAOT_C011EC27_POST_ROOT_QUEUE /DGUIDEXOS_NATIVEAOT_C011EC33_LIFETIME_TRANSITION"
 }
 $evidence = [System.IO.Path]::GetFullPath($EvidenceRoot)
+$buildEvidence = if ([string]::IsNullOrWhiteSpace($BuildOutputRoot)) {
+    $evidence
+} else {
+    [System.IO.Path]::GetFullPath($BuildOutputRoot)
+}
 $runRoot = Join-Path $evidence (Get-Date -Format "run-yyyyMMdd-HHmmssfff")
-$buildRoot = Join-Path $evidence ("build-" + (Split-Path -Leaf $runRoot))
+$buildRoot = Join-Path $buildEvidence ("build-" + (Split-Path -Leaf $runRoot))
 $artifactRoot = Join-Path $buildRoot "artifact"
 $runtimeRoot = Join-Path $buildRoot "runtime-pack"
 $oldRoot = Join-Path $root "out\dotnet\gc-first-real-allocation"
