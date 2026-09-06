@@ -22033,13 +22033,31 @@ extern "C" void __cdecl guideXosNativeAotC011EC80SnapshotEnd(
     uint32_t checkpoint, uintptr_t visitedEntries, uintptr_t excludedEntries,
     uintptr_t materializedRegions, uintptr_t duplicateDescriptorCount,
     uintptr_t duplicateRangeCount, uintptr_t invalidRangeCount);
+extern "C" void __cdecl guideXosNativeAotC011EC81BasicListSnapshotBegin(
+    uint32_t checkpoint, uintptr_t list, uintptr_t expectedCount,
+    uintptr_t basicRegionSize, uintptr_t sizeFreeRegions);
+extern "C" void __cdecl guideXosNativeAotC011EC81BasicListEntry(
+    uint32_t checkpoint, uint32_t ordinal, uintptr_t descriptor,
+    uintptr_t list, uintptr_t rangeStart, uintptr_t rangeEnd,
+    uintptr_t regionSize, uintptr_t committed, uintptr_t allocated,
+    uintptr_t used, uintptr_t liveBytes, uint32_t generation,
+    uint32_t planGeneration, uint32_t state, uint32_t ageInFree,
+    uintptr_t freeCount);
+extern "C" void __cdecl guideXosNativeAotC011EC81BasicListSnapshotEnd(
+    uint32_t checkpoint, uintptr_t observedCount);
 static void guideXosNativeAotC011EC80Emit();
+static void guideXosNativeAotC011EC81Emit();
 #endif
 
 #if defined(GUIDEXOS_NATIVEAOT_C011EC80_CANONICAL_REGION_UNIVERSE_SNAPSHOT)
 static guidexos_nativeaot_c011ec80_lifecycle_record&
 guideXosNativeAotC011EC80State() {
     return g_guideXosAllocationDiagnostics.c011ec80Lifecycle;
+}
+
+static guidexos_nativeaot_c011ec81_lifecycle_record&
+guideXosNativeAotC011EC81State() {
+    return g_guideXosAllocationDiagnostics.c011ec81Lifecycle;
 }
 
 static const char* guideXosNativeAotC011EC80CheckpointName(
@@ -22187,6 +22205,194 @@ guideXosNativeAotC011EC80SnapshotEnd(
     lifecycle.activeSnapshot = UINT32_MAX;
 }
 
+extern "C" void __cdecl
+guideXosNativeAotC011EC81BasicListSnapshotBegin(
+    uint32_t checkpoint, uintptr_t list, uintptr_t expectedCount,
+    uintptr_t basicRegionSize, uintptr_t sizeFreeRegions) {
+    guidexos_nativeaot_c011ec81_lifecycle_record& lifecycle =
+        guideXosNativeAotC011EC81State();
+    lifecycle.started = 1u;
+    lifecycle.activeSnapshot = UINT32_MAX;
+    for (uint32_t snapshotOrdinal = 0u;
+         snapshotOrdinal < lifecycle.snapshotCount;
+         ++snapshotOrdinal) {
+        if (lifecycle.snapshots[snapshotOrdinal].checkpoint == checkpoint) {
+            guidexos_nativeaot_c011ec81_snapshot& snapshot =
+                lifecycle.snapshots[snapshotOrdinal];
+            snapshot = {};
+            snapshot.observed = 1u;
+            snapshot.checkpoint = checkpoint;
+            snapshot.expectedCount = expectedCount;
+            snapshot.recordCapacity = GUIDEXOS_NATIVEAOT_C011EC81_MAX_ENTRIES;
+            snapshot.basicRegionSize = basicRegionSize;
+            snapshot.sizeFreeRegions = sizeFreeRegions;
+            snapshot.list = list;
+            lifecycle.activeSnapshot = snapshotOrdinal;
+            return;
+        }
+    }
+    if (lifecycle.snapshotCount >=
+        GUIDEXOS_NATIVEAOT_C011EC81_MAX_SNAPSHOTS) {
+        ++lifecycle.snapshotOverflow;
+        return;
+    }
+
+    const uint32_t snapshotOrdinal = lifecycle.snapshotCount++;
+    guidexos_nativeaot_c011ec81_snapshot& snapshot =
+        lifecycle.snapshots[snapshotOrdinal];
+    snapshot.observed = 1u;
+    snapshot.checkpoint = checkpoint;
+    snapshot.expectedCount = expectedCount;
+    snapshot.recordCapacity = GUIDEXOS_NATIVEAOT_C011EC81_MAX_ENTRIES;
+    snapshot.basicRegionSize = basicRegionSize;
+    snapshot.sizeFreeRegions = sizeFreeRegions;
+    snapshot.list = list;
+    lifecycle.activeSnapshot = snapshotOrdinal;
+}
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC81BasicListEntry(
+    uint32_t checkpoint, uint32_t ordinal, uintptr_t descriptor,
+    uintptr_t list, uintptr_t rangeStart, uintptr_t rangeEnd,
+    uintptr_t regionSize, uintptr_t committed, uintptr_t allocated,
+    uintptr_t used, uintptr_t liveBytes, uint32_t generation,
+    uint32_t planGeneration, uint32_t state, uint32_t ageInFree,
+    uintptr_t freeCount) {
+    guidexos_nativeaot_c011ec81_lifecycle_record& lifecycle =
+        guideXosNativeAotC011EC81State();
+    if (lifecycle.activeSnapshot == UINT32_MAX ||
+        lifecycle.activeSnapshot >=
+            GUIDEXOS_NATIVEAOT_C011EC81_MAX_SNAPSHOTS) {
+        return;
+    }
+    guidexos_nativeaot_c011ec81_snapshot& snapshot =
+        lifecycle.snapshots[lifecycle.activeSnapshot];
+    if (snapshot.observedCount >=
+        GUIDEXOS_NATIVEAOT_C011EC81_MAX_ENTRIES) {
+        ++snapshot.overflow;
+        ++lifecycle.entryOverflow;
+        return;
+    }
+
+    guidexos_nativeaot_c011ec81_entry& entry =
+        snapshot.entries[snapshot.observedCount];
+    entry.observed = 1u;
+    entry.checkpoint = checkpoint;
+    entry.ordinal = ordinal;
+    entry.generation = generation;
+    entry.planGeneration = planGeneration;
+    entry.state = state;
+    entry.ageInFree = ageInFree;
+    entry.descriptor = descriptor;
+    entry.list = list;
+    entry.rangeStart = rangeStart;
+    entry.rangeEnd = rangeEnd;
+    entry.regionSize = regionSize;
+    entry.committed = committed;
+    entry.allocated = allocated;
+    entry.used = used;
+    entry.liveBytes = liveBytes;
+    entry.freeCount = freeCount;
+    ++snapshot.observedCount;
+}
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC81BasicListSnapshotEnd(
+    uint32_t checkpoint, uintptr_t observedCount) {
+    guidexos_nativeaot_c011ec81_lifecycle_record& lifecycle =
+        guideXosNativeAotC011EC81State();
+    if (lifecycle.activeSnapshot == UINT32_MAX ||
+        lifecycle.activeSnapshot >=
+            GUIDEXOS_NATIVEAOT_C011EC81_MAX_SNAPSHOTS) {
+        return;
+    }
+    guidexos_nativeaot_c011ec81_snapshot& snapshot =
+        lifecycle.snapshots[lifecycle.activeSnapshot];
+    snapshot.observedCount = observedCount;
+    if (snapshot.checkpoint != checkpoint ||
+        snapshot.observedCount != snapshot.expectedCount ||
+        snapshot.overflow != 0u) {
+        ++lifecycle.invariantFailures;
+    }
+    snapshot.complete = snapshot.checkpoint == checkpoint &&
+        snapshot.observedCount == snapshot.expectedCount &&
+        snapshot.overflow == 0u ? 1u : 0u;
+    lifecycle.activeSnapshot = UINT32_MAX;
+}
+
+static void guideXosNativeAotC011EC81Emit() {
+    guidexos_nativeaot_c011ec81_lifecycle_record& lifecycle =
+        guideXosNativeAotC011EC81State();
+    uint32_t completeSnapshots = 0u;
+    for (uint32_t snapshotIndex = 0u;
+         snapshotIndex < lifecycle.snapshotCount &&
+             snapshotIndex < GUIDEXOS_NATIVEAOT_C011EC81_MAX_SNAPSHOTS;
+         ++snapshotIndex) {
+        const guidexos_nativeaot_c011ec81_snapshot& snapshot =
+            lifecycle.snapshots[snapshotIndex];
+        for (uintptr_t entryIndex = 0u;
+             entryIndex < snapshot.observedCount &&
+                 entryIndex < GUIDEXOS_NATIVEAOT_C011EC81_MAX_ENTRIES;
+             ++entryIndex) {
+            const guidexos_nativeaot_c011ec81_entry& entry =
+                snapshot.entries[entryIndex];
+            suspendEeSerialPutString(
+                "[nativeaot-gc-short-weak-lifetime] C81_BASIC_LIST_ENTRY marker=C81_BASIC_LIST_ENTRY");
+            guideXosNativeAotC011EC67Put32("checkpoint", entry.checkpoint);
+            guideXosNativeAotC011EC67Put32("ordinal", entry.ordinal);
+            guideXosNativeAotC011EC67Put64("descriptor", entry.descriptor);
+            guideXosNativeAotC011EC67Put64("list", entry.list);
+            guideXosNativeAotC011EC67Put64("rangeStart", entry.rangeStart);
+            guideXosNativeAotC011EC67Put64("rangeEnd", entry.rangeEnd);
+            guideXosNativeAotC011EC67Put64("regionSize", entry.regionSize);
+            guideXosNativeAotC011EC67Put64("committed", entry.committed);
+            guideXosNativeAotC011EC67Put64("allocated", entry.allocated);
+            guideXosNativeAotC011EC67Put64("used", entry.used);
+            guideXosNativeAotC011EC67Put64("liveBytes", entry.liveBytes);
+            guideXosNativeAotC011EC67Put32("generation", entry.generation);
+            guideXosNativeAotC011EC67Put32("planGeneration", entry.planGeneration);
+            guideXosNativeAotC011EC67Put32("state", entry.state);
+            guideXosNativeAotC011EC67Put32("ageInFree", entry.ageInFree);
+            guideXosNativeAotC011EC67Put64("freeCount", entry.freeCount);
+            suspendEeSerialPutString(" source=gc_heap::free_regions[basic_free_region]\n");
+        }
+        suspendEeSerialPutString(
+            "[nativeaot-gc-short-weak-lifetime] C81_BASIC_LIST_SUMMARY marker=C81_BASIC_LIST_SUMMARY");
+        guideXosNativeAotC011EC67Put32("checkpoint", snapshot.checkpoint);
+        guideXosNativeAotC011EC67Put64("expectedCount", snapshot.expectedCount);
+        guideXosNativeAotC011EC67Put64("observedCount", snapshot.observedCount);
+        guideXosNativeAotC011EC67Put64("recordCapacity", snapshot.recordCapacity);
+        guideXosNativeAotC011EC67Put64("basicRegionSize", snapshot.basicRegionSize);
+        guideXosNativeAotC011EC67Put64("sizeFreeRegions", snapshot.sizeFreeRegions);
+        guideXosNativeAotC011EC67Put64("list", snapshot.list);
+        guideXosNativeAotC011EC67Put32("overflow", snapshot.overflow);
+        guideXosNativeAotC011EC67Put32("snapshotCompleteness", snapshot.complete);
+        suspendEeSerialPutString(" source=gc_heap::free_regions[basic_free_region]\n");
+        if (snapshot.complete != 0u) ++completeSnapshots;
+    }
+
+    const uint32_t clean = lifecycle.snapshotCount ==
+        GUIDEXOS_NATIVEAOT_C011EC81_MAX_SNAPSHOTS &&
+        completeSnapshots == GUIDEXOS_NATIVEAOT_C011EC81_MAX_SNAPSHOTS &&
+        lifecycle.snapshotOverflow == 0u && lifecycle.entryOverflow == 0u &&
+        lifecycle.invariantFailures == 0u;
+    suspendEeSerialPutString(
+        "[nativeaot-gc-short-weak-lifetime] COMPLETE marker=C011EC81 outcome=");
+    suspendEeSerialPutString(clean != 0u ? "C" : "F");
+    guideXosNativeAotC011EC67Put32("successLevel", clean != 0u ? 1u : 0u);
+    guideXosNativeAotC011EC67Put32("snapshotCount", lifecycle.snapshotCount);
+    guideXosNativeAotC011EC67Put32("snapshotCapacity", GUIDEXOS_NATIVEAOT_C011EC81_MAX_SNAPSHOTS);
+    guideXosNativeAotC011EC67Put32("entryCapacity", GUIDEXOS_NATIVEAOT_C011EC81_MAX_ENTRIES);
+    guideXosNativeAotC011EC67Put32("snapshotOverflow", lifecycle.snapshotOverflow);
+    guideXosNativeAotC011EC67Put32("entryOverflow", lifecycle.entryOverflow);
+    guideXosNativeAotC011EC67Put32("invariantFailures", lifecycle.invariantFailures);
+    guideXosNativeAotC011EC67Put32("completeSnapshots", completeSnapshots);
+    guideXosNativeAotC011EC67Put32("failFast", 0u);
+    guideXosNativeAotC011EC67Put32("pageFault", 0u);
+    suspendEeSerialPutString(" source=gc_heap::free_regions[basic_free_region]\n");
+    lifecycle.completionObserved = 1u;
+}
+
 static void guideXosNativeAotC011EC80Emit() {
     guidexos_nativeaot_c011ec80_lifecycle_record& lifecycle =
         guideXosNativeAotC011EC80State();
@@ -22254,6 +22460,8 @@ static void guideXosNativeAotC011EC80Emit() {
         suspendEeSerialPutString(" source=canonical-seg-mapping-table\n");
         if (snapshot.complete != 0u) ++completeSnapshots;
     }
+
+    guideXosNativeAotC011EC81Emit();
 
     const uint32_t clean = lifecycle.snapshotCount ==
         GUIDEXOS_NATIVEAOT_C011EC80_MAX_SNAPSHOTS &&

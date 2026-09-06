@@ -2523,6 +2523,9 @@ extern "C" void __cdecl guideXosNativeAotC011EC67ExpansionObserved(uintptr_t seg
 extern "C" void __cdecl guideXosNativeAotC011EC80SnapshotBegin(uint32_t checkpoint, uintptr_t mappingStart, uintptr_t mappingEnd, uintptr_t regionAlignment, uintptr_t mappingEntries);
 extern "C" void __cdecl guideXosNativeAotC011EC80RegionObserved(uint32_t checkpoint, uintptr_t mappingIndex, uintptr_t descriptor, uintptr_t owner, uintptr_t list, uintptr_t basicRegionCount, uintptr_t rangeStart, uintptr_t rangeEnd, uintptr_t committed, uintptr_t allocated, uintptr_t used, uintptr_t liveBytes, uint32_t generation, uint32_t planGeneration, uint32_t state, uint32_t listKind, uint32_t active, uint32_t specialFlags, uint32_t tailRole);
 extern "C" void __cdecl guideXosNativeAotC011EC80SnapshotEnd(uint32_t checkpoint, uintptr_t visitedEntries, uintptr_t excludedEntries, uintptr_t materializedRegions, uintptr_t duplicateDescriptorCount, uintptr_t duplicateRangeCount, uintptr_t invalidRangeCount);
+extern "C" void __cdecl guideXosNativeAotC011EC81BasicListSnapshotBegin(uint32_t checkpoint, uintptr_t list, uintptr_t expectedCount, uintptr_t basicRegionSize, uintptr_t sizeFreeRegions);
+extern "C" void __cdecl guideXosNativeAotC011EC81BasicListEntry(uint32_t checkpoint, uint32_t ordinal, uintptr_t descriptor, uintptr_t list, uintptr_t rangeStart, uintptr_t rangeEnd, uintptr_t regionSize, uintptr_t committed, uintptr_t allocated, uintptr_t used, uintptr_t liveBytes, uint32_t generation, uint32_t planGeneration, uint32_t state, uint32_t ageInFree, uintptr_t freeCount);
+extern "C" void __cdecl guideXosNativeAotC011EC81BasicListSnapshotEnd(uint32_t checkpoint, uintptr_t observedCount);
 '@
                             }
                             if ($isC011EC72) {
@@ -2683,7 +2686,73 @@ static uint32_t guideXosC011EC67RegionState(heap_segment* region)
         guideXosNativeAotC011EC80SnapshotEnd( \
             (checkpointValue), visitedEntries, excludedEntries, materializedRegions, \
             duplicateDescriptorCount, duplicateRangeCount, invalidRangeCount); \
+        if ((checkpointValue) != 7u) \
+        { \
+        const uintptr_t c81BasicList = reinterpret_cast<uintptr_t>(&free_regions[basic_free_region]); \
+        uintptr_t c81ObservedCount = 0u; \
+        guideXosNativeAotC011EC81BasicListSnapshotBegin( \
+            (checkpointValue), c81BasicList, \
+            static_cast<uintptr_t>(free_regions[basic_free_region].get_num_free_regions()), \
+            regionAlignment, \
+            static_cast<uintptr_t>(free_regions[basic_free_region].get_size_free_regions())); \
+        for (heap_segment* c81Region = free_regions[basic_free_region].get_first_free_region(); \
+             c81Region != nullptr && c81ObservedCount < 16u; \
+             c81Region = heap_segment_next(c81Region)) \
+        { \
+            const uintptr_t c81Start = reinterpret_cast<uintptr_t>(get_region_start(c81Region)); \
+            const uintptr_t c81End = reinterpret_cast<uintptr_t>(heap_segment_reserved(c81Region)); \
+            guideXosNativeAotC011EC81BasicListEntry( \
+                (checkpointValue), static_cast<uint32_t>(c81ObservedCount + 1u), \
+                reinterpret_cast<uintptr_t>(c81Region), c81BasicList, \
+                c81Start, c81End, c81End >= c81Start ? c81End - c81Start : 0u, \
+                reinterpret_cast<uintptr_t>(heap_segment_committed(c81Region)), \
+                reinterpret_cast<uintptr_t>(heap_segment_allocated(c81Region)), \
+                reinterpret_cast<uintptr_t>(heap_segment_used(c81Region)), \
+                static_cast<uintptr_t>(heap_segment_survived(c81Region)), \
+                static_cast<uint32_t>(heap_segment_gen_num(c81Region)), \
+                static_cast<uint32_t>(heap_segment_plan_gen_num(c81Region)), \
+                guideXosC011EC67RegionState(c81Region), \
+                static_cast<uint32_t>(heap_segment_age_in_free(c81Region)), \
+                static_cast<uintptr_t>(free_regions[basic_free_region].get_num_free_regions())); \
+            ++c81ObservedCount; \
+        } \
+        guideXosNativeAotC011EC81BasicListSnapshotEnd((checkpointValue), c81ObservedCount); \
+        } \
     } \
+} while (0)
+'@.Replace("`r`n", $lockedSourceNewLine).Replace("`n", $lockedSourceNewLine)
+                $c67GcHelper += @'
+
+#define GUIDEXOS_C011EC81_BASIC_LIST_SNAPSHOT(checkpointValue) do { \
+    const uintptr_t c81BasicList = reinterpret_cast<uintptr_t>(&free_regions[basic_free_region]); \
+    uintptr_t c81ObservedCount = 0u; \
+    guideXosNativeAotC011EC81BasicListSnapshotBegin( \
+        (checkpointValue), c81BasicList, \
+        static_cast<uintptr_t>(free_regions[basic_free_region].get_num_free_regions()), \
+        static_cast<uintptr_t>((size_t)1 << min_segment_size_shr), \
+        static_cast<uintptr_t>(free_regions[basic_free_region].get_size_free_regions())); \
+    for (heap_segment* c81Region = free_regions[basic_free_region].get_first_free_region(); \
+         c81Region != nullptr && c81ObservedCount < 16u; \
+         c81Region = heap_segment_next(c81Region)) \
+    { \
+        const uintptr_t c81Start = reinterpret_cast<uintptr_t>(get_region_start(c81Region)); \
+        const uintptr_t c81End = reinterpret_cast<uintptr_t>(heap_segment_reserved(c81Region)); \
+        guideXosNativeAotC011EC81BasicListEntry( \
+            (checkpointValue), static_cast<uint32_t>(c81ObservedCount + 1u), \
+            reinterpret_cast<uintptr_t>(c81Region), c81BasicList, \
+            c81Start, c81End, c81End >= c81Start ? c81End - c81Start : 0u, \
+            reinterpret_cast<uintptr_t>(heap_segment_committed(c81Region)), \
+            reinterpret_cast<uintptr_t>(heap_segment_allocated(c81Region)), \
+            reinterpret_cast<uintptr_t>(heap_segment_used(c81Region)), \
+            static_cast<uintptr_t>(heap_segment_survived(c81Region)), \
+            static_cast<uint32_t>(heap_segment_gen_num(c81Region)), \
+            static_cast<uint32_t>(heap_segment_plan_gen_num(c81Region)), \
+            guideXosC011EC67RegionState(c81Region), \
+            static_cast<uint32_t>(heap_segment_age_in_free(c81Region)), \
+            static_cast<uintptr_t>(free_regions[basic_free_region].get_num_free_regions())); \
+        ++c81ObservedCount; \
+    } \
+    guideXosNativeAotC011EC81BasicListSnapshotEnd((checkpointValue), c81ObservedCount); \
 } while (0)
 '@.Replace("`r`n", $lockedSourceNewLine).Replace("`n", $lockedSourceNewLine)
                 }
@@ -3357,6 +3426,7 @@ static uint32_t guideXosC011EC67RegionState(heap_segment* region)
                 $c67SohFunction = $gcCppText.Substring($c67SohStart, $c67SohEnd - $c67SohStart)
                 $c67SohEntryNeedle = '{' + $lockedSourceNewLine
                 $c67SohEntryReplacement = $c67SohEntryNeedle + ($c67SnapshotCall.Replace('1u', '7u'))
+                if ($isC011EC80) { $c67SohEntryReplacement += '    GUIDEXOS_C011EC81_BASIC_LIST_SNAPSHOT(7u);' + $lockedSourceNewLine }
                 $c67SohFunction = Replace-First $c67SohFunction $c67SohEntryNeedle $c67SohEntryReplacement
                 $gcCppText = $gcCppText.Substring(0, $c67SohStart) + $c67SohFunction + $gcCppText.Substring($c67SohEnd)
 
@@ -8033,6 +8103,9 @@ exit /b %errorlevel%
             $c80Records = @(Get-C011EC56MarkerRecords $validationText 'C80_REGION_RECORD')
             $c80Summaries = @(Get-C011EC56MarkerRecords $validationText 'C80_SNAPSHOT_SUMMARY')
             $c80CompleteLines = @(Get-C011EC56MarkerRecords $validationText 'C011EC80' | Where-Object { $_ -match 'marker=C011EC80 outcome=' })
+            $c81Entries = @(Get-C011EC56MarkerRecords $validationText 'C81_BASIC_LIST_ENTRY')
+            $c81Summaries = @(Get-C011EC56MarkerRecords $validationText 'C81_BASIC_LIST_SUMMARY')
+            $c81CompleteLines = @(Get-C011EC56MarkerRecords $validationText 'C011EC81' | Where-Object { $_ -match 'marker=C011EC81 outcome=' })
             $c79InheritedRangeRecords = @(Get-C011EC56MarkerRecords $validationText 'C76_REGION_ELIGIBILITY')
             if ($isC011EC79 -and $c79Records.Count -eq 0 -and $c79InheritedRangeRecords.Count -ne 0) {
                 # C79 intentionally has no new live range walk.  Reuse the
@@ -8058,6 +8131,7 @@ exit /b %errorlevel%
                 c79RecordLines=$c79Records; c79SummaryLines=$c79Summaries; c79CompleteLines=$c79CompleteLines
                 c79InheritedRangeLines=$c79InheritedRangeRecords
                 c80RecordLines=$c80Records; c80SummaryLines=$c80Summaries; c80CompleteLines=$c80CompleteLines
+                c81EntryLines=$c81Entries; c81SummaryLines=$c81Summaries; c81CompleteLines=$c81CompleteLines
                 c77PreflightLines=@(Get-C011EC56MarkerRecords $validationText 'C011EC77-PREFLIGHT')
                 c76CompleteLines=$c76CompleteLines; c76SummaryLines=$c76SummaryLines
                 c76EligibilityLines=@(Get-C011EC56MarkerRecords $validationText 'C76_REGION_ELIGIBILITY')
@@ -11947,6 +12021,26 @@ exit /b %errorlevel%
             (& $c80Read $c80Complete 'failFast') -eq '0x00000000' -and
             (& $c80Read $c80Complete 'pageFault') -eq '0x00000000'
         if (-not $c80Clean) { throw 'C011EC80 canonical snapshot diagnostics were not clean.' }
+        if (@($firstC80Run.c81SummaryLines).Count -ne 4 -or
+            @($firstC80Run.c81CompleteLines).Count -eq 0) {
+            throw 'C011EC81 required four basic-list summaries and a completion marker were absent.'
+        }
+        $c81Complete = $firstC80Run.c81CompleteLines[-1]
+        $c81Read = { param([string]$line,[string]$field) $v=Get-MarkerField $line $field; if($null -eq $v){throw "C011EC81 missing field $field."}; $v }
+        $c81CompletionFields = @('successLevel','snapshotCount','snapshotCapacity','entryCapacity','snapshotOverflow','entryOverflow','invariantFailures','completeSnapshots','failFast','pageFault')
+        foreach ($field in $c81CompletionFields) {
+            $values = @($runResults | ForEach-Object { & $c81Read $_.c81CompleteLines[-1] $field } | Select-Object -Unique)
+            if ($values.Count -ne 1 -or $null -eq $values[0]) { throw "C011EC81 lifecycle field $field varied or was absent across fresh boots." }
+        }
+        $c81Clean = (& $c81Read $c81Complete 'successLevel') -eq '0x00000001' -and
+            (& $c81Read $c81Complete 'snapshotCount') -eq '0x00000004' -and
+            (& $c81Read $c81Complete 'completeSnapshots') -eq '0x00000004' -and
+            (& $c81Read $c81Complete 'snapshotOverflow') -eq '0x00000000' -and
+            (& $c81Read $c81Complete 'entryOverflow') -eq '0x00000000' -and
+            (& $c81Read $c81Complete 'invariantFailures') -eq '0x00000000' -and
+            (& $c81Read $c81Complete 'failFast') -eq '0x00000000' -and
+            (& $c81Read $c81Complete 'pageFault') -eq '0x00000000'
+        if (-not $c81Clean) { throw 'C011EC81 basic free-list diagnostics were not clean.' }
         $c80Agreement = $true
         $c80SummaryFields = @('checkpoint','mappingEntries','visitedEntries','representedEntries','excludedEntries','materializedRegions','recordsWritten','recordCapacity','duplicateDescriptorCount','duplicateRangeCount','invalidRangeCount','overflow','snapshotCompleteness')
         foreach ($run in $runResults) {
@@ -11962,15 +12056,32 @@ exit /b %errorlevel%
             }
         }
         if (-not $c80Agreement) { throw 'C011EC80 canonical snapshot shape varied across fresh boots.' }
+        $c81Agreement = $true
+        $c81SummaryFields = @('checkpoint','expectedCount','observedCount','recordCapacity','basicRegionSize','sizeFreeRegions','overflow','snapshotCompleteness')
+        foreach ($run in $runResults) {
+            if (@($run.c81SummaryLines).Count -ne @($firstC80Run.c81SummaryLines).Count -or
+                @($run.c81EntryLines).Count -ne @($firstC80Run.c81EntryLines).Count) {
+                $c81Agreement = $false
+                continue
+            }
+            for ($summaryIndex = 0; $summaryIndex -lt @($firstC80Run.c81SummaryLines).Count; $summaryIndex++) {
+                foreach ($field in $c81SummaryFields) {
+                    if ((& $c81Read $run.c81SummaryLines[$summaryIndex] $field) -ne (& $c81Read $firstC80Run.c81SummaryLines[$summaryIndex] $field)) { $c81Agreement = $false }
+                }
+            }
+        }
+        if (-not $c81Agreement) { throw 'C011EC81 basic free-list shape varied across fresh boots.' }
         $c80Manifest = [ordered]@{
             outcome='C / C011EC80 canonical USE_REGIONS region-universe snapshot'
             successLevel=2; proofMode=$ProofMode; marker='C011EC80'; case=$C71Case; retainedReferences=$C70RetainedSurvivors
             canonicalAuthority='seg_mapping_table resolved through get_region_info_for_address over [g_gc_lowest_address,g_gc_highest_address)'
             identity='raw descriptor is diagnostic only; raw range [rangeStart,rangeEnd) is the primary offline identity'
             snapshots=@($firstC80Run.c80SummaryLines); records=@($firstC80Run.c80RecordLines)
+            c81=[ordered]@{ entries=@($firstC80Run.c81EntryLines); summaries=@($firstC80Run.c81SummaryLines); completion=@($firstC80Run.c81CompleteLines) }
             diagnostics=[ordered]@{ snapshotOverflow=(& $c80Read $c80Complete 'snapshotOverflow'); regionOverflow=(& $c80Read $c80Complete 'regionOverflow'); invariantFailures=(& $c80Read $c80Complete 'invariantFailures'); sensitiveDiagnosticAllocations=(& $c80Read $c80Complete 'sensitiveDiagnosticAllocations'); failFast=(& $c80Read $c80Complete 'failFast'); pageFault=(& $c80Read $c80Complete 'pageFault') }
-            semanticAgreement=$c80Agreement; inheritedC77=@($firstC80Run.c77CompleteLines); c76=@($firstC80Run.c76SummaryLines)
-            qemu=[ordered]@{ version=$qemuVersion; runCount=$FreshBootCount; semanticAgreement=$c80Agreement; proofKernelSha256=$specializedKernelHash; serialSha256=@($runResults | ForEach-Object { $_.serialSha256 }); evidenceRoot=$runRoot; exactCommandLog=(Join-Path $runRoot 'commands.txt'); runs=$runResults }
+            c81Diagnostics=[ordered]@{ snapshotOverflow=(& $c81Read $c81Complete 'snapshotOverflow'); entryOverflow=(& $c81Read $c81Complete 'entryOverflow'); invariantFailures=(& $c81Read $c81Complete 'invariantFailures'); failFast=(& $c81Read $c81Complete 'failFast'); pageFault=(& $c81Read $c81Complete 'pageFault') }
+            semanticAgreement=$c80Agreement; c81SemanticAgreement=$c81Agreement; inheritedC77=@($firstC80Run.c77CompleteLines); c76=@($firstC80Run.c76SummaryLines)
+            qemu=[ordered]@{ version=$qemuVersion; runCount=$FreshBootCount; semanticAgreement=$c80Agreement; c81SemanticAgreement=$c81Agreement; proofKernelSha256=$specializedKernelHash; serialSha256=@($runResults | ForEach-Object { $_.serialSha256 }); evidenceRoot=$runRoot; exactCommandLog=(Join-Path $runRoot 'commands.txt'); runs=$runResults }
             payloadHashes=[ordered]@{ proofKernel=$specializedKernelHash; pe=(Hash-File $pePath); elf=(Hash-File $elfPath); map=(Hash-File $mapPath) }
             ordinaryRestoration=[ordered]@{ expectedKernelSha256=$normalKernelHash; expectedEspSha256=$normalKernelHash; restoredByFinally=$true; kernelSha256=(Hash-File $kernelPath); espSha256=(Hash-File $espKernelPath); proofOnlyArtifactActive=$false; qemuCleanup='only C80-owned processes stopped'; unrelatedQemu='preserved' }
             documentation='docs/dotnet/NATIVEAOT_WORKSTATION_GC_C80_CANONICAL_REGION_UNIVERSE_SNAPSHOT.md'; evidenceRoot=$runRoot; manifestPath=$manifestPath

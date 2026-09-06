@@ -2503,6 +2503,65 @@ typedef struct guidexos_nativeaot_c011ec80_lifecycle_record {
         GUIDEXOS_NATIVEAOT_C011EC80_MAX_SNAPSHOTS];
 } guidexos_nativeaot_c011ec80_lifecycle_record;
 
+/* C011EC81 captures the bounded contents of free_regions[basic_free_region]
+ * at the already-authenticated C80 checkpoints.  It is observational only:
+ * the list is walked without changing links, counters, descriptors, or
+ * region state.  The explicit bound makes a corrupt/cyclic list a rejected
+ * diagnostic rather than an unbounded walk. */
+enum {
+    GUIDEXOS_NATIVEAOT_C011EC81_MAX_ENTRIES = 16u,
+    GUIDEXOS_NATIVEAOT_C011EC81_MAX_SNAPSHOTS = 4u,
+};
+
+typedef struct guidexos_nativeaot_c011ec81_entry {
+    uint32_t observed;
+    uint32_t checkpoint;
+    uint32_t ordinal;
+    uint32_t generation;
+    uint32_t planGeneration;
+    uint32_t state;
+    uint32_t ageInFree;
+    uint32_t reserved0;
+    uintptr_t descriptor;
+    uintptr_t list;
+    uintptr_t rangeStart;
+    uintptr_t rangeEnd;
+    uintptr_t regionSize;
+    uintptr_t committed;
+    uintptr_t allocated;
+    uintptr_t used;
+    uintptr_t liveBytes;
+    uintptr_t freeCount;
+} guidexos_nativeaot_c011ec81_entry;
+
+typedef struct guidexos_nativeaot_c011ec81_snapshot {
+    uint32_t observed;
+    uint32_t checkpoint;
+    uint32_t overflow;
+    uint32_t complete;
+    uintptr_t expectedCount;
+    uintptr_t observedCount;
+    uintptr_t recordCapacity;
+    uintptr_t basicRegionSize;
+    uintptr_t sizeFreeRegions;
+    uintptr_t list;
+    guidexos_nativeaot_c011ec81_entry entries[
+        GUIDEXOS_NATIVEAOT_C011EC81_MAX_ENTRIES];
+} guidexos_nativeaot_c011ec81_snapshot;
+
+typedef struct guidexos_nativeaot_c011ec81_lifecycle_record {
+    uint32_t started;
+    uint32_t snapshotCount;
+    uint32_t snapshotOverflow;
+    uint32_t entryOverflow;
+    uint32_t invariantFailures;
+    uint32_t completionObserved;
+    uint32_t activeSnapshot;
+    uint32_t reserved1;
+    guidexos_nativeaot_c011ec81_snapshot snapshots[
+        GUIDEXOS_NATIVEAOT_C011EC81_MAX_SNAPSHOTS];
+} guidexos_nativeaot_c011ec81_lifecycle_record;
+
 typedef struct guidexos_nativeaot_c011ec54_lifecycle_record {
     uint32_t started;
     uint32_t preflightEmitted;
@@ -4919,6 +4978,8 @@ typedef struct guidexos_nativeaot_allocation_diagnostics {
     guidexos_nativeaot_c011ec67_lifecycle_record c011ec67Lifecycle;
     /* C011EC80 canonical USE_REGIONS mapping-table universe snapshots. */
     guidexos_nativeaot_c011ec80_lifecycle_record c011ec80Lifecycle;
+    /* C011EC81 bounded basic free-list entry census. */
+    guidexos_nativeaot_c011ec81_lifecycle_record c011ec81Lifecycle;
     /* C011EC44 malformed transition-frame provenance. */
     guidexos_nativeaot_c011ec44_provenance_record c011ec44Provenance;
     /* C011EC45 reverse-P/Invoke slot layout, register, and unwind provenance. */
