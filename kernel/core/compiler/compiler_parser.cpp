@@ -202,11 +202,29 @@ private:
 
     int32_t find_integer_parameter(const Token& token) const
     {
-        for (uint32_t i = 0; i < m_output->integerParameterCount; ++i) {
-            if (name_matches(m_output->parameters[i].name, token))
+        for (uint32_t i = 0; i < m_output->parameterCount; ++i) {
+            if (m_output->parameters[i].kind == ParameterKind::Integer &&
+                name_matches(m_output->parameters[i].name, token))
                 return static_cast<int32_t>(m_output->parameters[i].slot);
         }
         return -1;
+    }
+
+    int32_t find_pointer_parameter(const Token& token) const
+    {
+        for (uint32_t i = 0; i < m_output->parameterCount; ++i) {
+            if (m_output->parameters[i].kind == ParameterKind::Int32Pointer &&
+                name_matches(m_output->parameters[i].name, token))
+                return static_cast<int32_t>(m_output->parameters[i].slot);
+        }
+        return -1;
+    }
+
+    const ParameterSymbol* find_parameter_symbol(const Token& token) const
+    {
+        for (uint32_t i = 0; i < m_output->parameterCount; ++i)
+            if (name_matches(m_output->parameters[i].name, token)) return &m_output->parameters[i];
+        return nullptr;
     }
 
     bool is_context_parameter(const Token& token) const
@@ -222,6 +240,13 @@ private:
                 return static_cast<int32_t>(m_output->locals[i].slot);
         }
         return -1;
+    }
+
+    const LocalSymbol* find_local_name_symbol(const Token& token) const
+    {
+        for (uint32_t i = 0; i < m_output->localCount; ++i)
+            if (name_matches(m_output->locals[i].name, token)) return &m_output->locals[i];
+        return nullptr;
     }
 
     const LocalSymbol* find_local_symbol(uint16_t slot) const
@@ -247,7 +272,7 @@ private:
 
     bool name_already_declared(const Token& token) const
     {
-        if (is_context_parameter(token) || find_integer_parameter(token) >= 0 || find_local(token) >= 0)
+        if (is_context_parameter(token) || find_parameter_symbol(token) || find_local(token) >= 0)
             return true;
         return false;
     }
@@ -264,19 +289,31 @@ private:
             m_diagnostics.error(token.location, "too many local variables", "identifier");
             return false;
         }
-        const uint32_t elementBytes = static_cast<uint32_t>(elementCount) * 4U;
-        if (elementCount == 0 || elementCount > COMPILER_MAX_LOCAL_ARRAY_ELEMENTS ||
-            elementBytes > COMPILER_MAX_LOCAL_STORAGE_BYTES - m_output->localStorageBytes) {
+        const bool pointer = kind == StorageKind::PointerInt;
+        const uint32_t elementBytes = pointer
+            ? COMPILER_POINTER_DESCRIPTOR_BYTES
+            : static_cast<uint32_t>(elementCount) * 4U;
+        if ((!pointer && (elementCount == 0 || elementCount > COMPILER_MAX_LOCAL_ARRAY_ELEMENTS)) ||
+            (pointer && elementCount != 1)) {
             m_diagnostics.error(token.location, "local array storage exceeds the bounded function-frame limit", "array");
             return false;
         }
-        const uint32_t storageStart = m_output->integerParameterCount +
-            m_output->localStorageBytes / 4U;
+        const uint32_t localBase = m_output->parameterStorageBytes + m_output->localStorageBytes;
+        const uint32_t storageStart = pointer && (localBase & (COMPILER_POINTER_DESCRIPTOR_ALIGNMENT - 1U)) != 0
+            ? localBase + (COMPILER_POINTER_DESCRIPTOR_ALIGNMENT - (localBase & (COMPILER_POINTER_DESCRIPTOR_ALIGNMENT - 1U)))
+            : localBase;
+        const uint32_t storageEnd = storageStart + elementBytes;
+        if (storageEnd < storageStart || storageEnd < m_output->parameterStorageBytes ||
+            storageEnd - m_output->parameterStorageBytes > COMPILER_MAX_LOCAL_STORAGE_BYTES) {
+            m_diagnostics.error(token.location, "local storage exceeds the bounded function-frame limit", "local");
+            return false;
+        }
         // Stack slots grow toward lower addresses.  Store the array symbol's
         // slot at its highest logical element so base + index*4 walks upward
         // through element zero, one, ... in source order.
         const uint16_t newSlot = static_cast<uint16_t>(
-            storageStart + (kind == StorageKind::ArrayInt ? elementCount - 1U : 0U));
+            storageStart / 4U + (kind == StorageKind::ArrayInt ? elementCount - 1U :
+                                  (pointer ? COMPILER_POINTER_DESCRIPTOR_BYTES / 4U - 1U : 0U)));
         LocalSymbol& local = m_output->locals[m_output->localCount++];
         local = {};
         local.kind = kind;
@@ -285,7 +322,7 @@ private:
         local.elementSize = 4;
         local.initialized = kind == StorageKind::ArrayInt ? true : false;
         if (!copy_identifier(local.name, sizeof(local.name), token)) return false;
-        m_output->localStorageBytes += elementBytes;
+        m_output->localStorageBytes = storageEnd - m_output->parameterStorageBytes;
         if (slot) *slot = newSlot;
         return true;
     }
@@ -396,6 +433,7 @@ private:
                          uint32_t loopDepth)
     {
         if (current().kind == TokenKind::KeywordInt) return parse_declaration(blockIndex);
+        if (current().kind == TokenKind::Star) return parse_indirect_assignment(blockIndex);
         if (current().kind == TokenKind::Identifier) {
             if (m_index && *m_index + 1 < m_tokenCount &&
                 m_tokens[*m_index + 1].kind == TokenKind::LeftParen)
@@ -440,40 +478,85 @@ private:
     {
         const SourceLocation location = current().location;
         ++(*m_index);
+        const bool pointer = current().kind == TokenKind::Star;
+        if (pointer) ++(*m_index);
         if (!token_is_name(current()) || current().kind == TokenKind::KeywordGxMain) {
             error_current("expected identifier after 'int'");
             return false;
         }
         const Token name = current();
         ++(*m_index);
-        const bool wasArray = current().kind == TokenKind::LeftBracket;
+        const bool wasArray = !pointer && current().kind == TokenKind::LeftBracket;
         uint16_t elementCount = 1;
-        if (!parse_array_length(COMPILER_MAX_LOCAL_ARRAY_ELEMENTS, &elementCount)) return false;
+        if (pointer) {
+            if (current().kind == TokenKind::LeftBracket) {
+                m_diagnostics.error(current().location, "pointer declarators cannot have an array suffix", "pointer");
+                return false;
+            }
+        } else if (!parse_array_length(COMPILER_MAX_LOCAL_ARRAY_ELEMENTS, &elementCount)) {
+            return false;
+        }
         uint16_t slot = COMPILER_INVALID_INDEX;
-        const StorageKind declaredKind = wasArray ? StorageKind::ArrayInt : StorageKind::ScalarInt;
+        const StorageKind declaredKind = pointer ? StorageKind::PointerInt :
+            (wasArray ? StorageKind::ArrayInt : StorageKind::ScalarInt);
         if (!add_local(name, declaredKind, elementCount, &slot)) return false;
         uint16_t expression = COMPILER_INVALID_INDEX;
         if (current().kind == TokenKind::Equal) {
             ++(*m_index);
             expression = parse_expression(0);
             if (expression == COMPILER_INVALID_INDEX) return false;
+            const ValueType expected = pointer ? ValueType::Int32Pointer : ValueType::Int32;
+            if (m_output->expressions[expression].type != expected) {
+                m_diagnostics.error(name.location, pointer
+                    ? "cannot initialize int* with an int expression"
+                    : "cannot initialize int with a pointer expression", "type");
+                return false;
+            }
         } else {
-            expression = make_constant(0, name.location);
-            if (expression == COMPILER_INVALID_INDEX) return false;
+            if (!pointer) {
+                expression = make_constant(0, name.location);
+                if (expression == COMPILER_INVALID_INDEX) return false;
+            }
         }
         if (!expect(TokenKind::Semicolon, "expected ';' after declaration")) return false;
-        m_output->locals[m_output->localCount - 1U].initialized = true;
+        m_output->locals[m_output->localCount - 1U].initialized = expression != COMPILER_INVALID_INDEX;
         return append_statement(blockIndex, StatementKind::DeclareLocal, location, expression, slot,
                                 COMPILER_INVALID_INDEX);
+    }
+
+    bool parse_indirect_assignment(uint16_t blockIndex)
+    {
+        const SourceLocation location = current().location;
+        ++(*m_index);
+        const uint16_t target = parse_unary(0);
+        if (target == COMPILER_INVALID_INDEX) return false;
+        if (m_output->expressions[target].type != ValueType::Int32Pointer) {
+            m_diagnostics.error(location, "indirect assignment requires an int* target", "pointer");
+            return false;
+        }
+        if (!expect(TokenKind::Equal, "expected '=' in indirect assignment")) return false;
+        const uint16_t expression = parse_expression(0);
+        if (expression == COMPILER_INVALID_INDEX) return false;
+        if (m_output->expressions[expression].type != ValueType::Int32) {
+            m_diagnostics.error(location, "cannot store a pointer through int*", "type");
+            return false;
+        }
+        if (!expect(TokenKind::Semicolon, "expected ';' after indirect assignment")) return false;
+        if (!append_statement(blockIndex, StatementKind::StoreIndirectInt32, location, expression,
+                              COMPILER_INVALID_INDEX, COMPILER_INVALID_INDEX)) return false;
+        m_output->statements[m_output->statementCount - 1U].targetExpression = target;
+        return true;
     }
 
     bool parse_assignment(uint16_t blockIndex)
     {
         const Token name = current();
-        const int32_t parameterSlot = find_integer_parameter(name);
-        const int32_t slot = parameterSlot >= 0 ? parameterSlot : find_local(name);
+        const ParameterSymbol* parameter = find_parameter_symbol(name);
+        const LocalSymbol* localByName = find_local_name_symbol(name);
+        const int32_t slot = parameter ? static_cast<int32_t>(parameter->slot) :
+            (localByName ? static_cast<int32_t>(localByName->slot) : -1);
         const int32_t global = slot < 0 ? find_global(name) : -1;
-        if (slot < 0 && global < 0) {
+        if (!parameter && !localByName && global < 0) {
             if (current().kind == TokenKind::Identifier && m_index && *m_index + 1 < m_tokenCount &&
                 m_tokens[*m_index + 1].kind == TokenKind::LeftParen) {
                 m_diagnostics.error_identifier(name.location, "function calls must be used as expressions: ",
@@ -486,8 +569,8 @@ private:
         }
         ++(*m_index);
         if (current().kind == TokenKind::LeftBracket) {
-            const bool isLocal = slot >= 0;
-            const LocalSymbol* local = isLocal ? find_local_symbol(static_cast<uint16_t>(slot)) : nullptr;
+            const bool isLocal = localByName != nullptr;
+            const LocalSymbol* local = isLocal ? localByName : nullptr;
             const GlobalSymbolIR* globalSymbol = global >= 0 ? &m_unit->globals[global] : nullptr;
             const bool isArray = (local && local->kind == StorageKind::ArrayInt) ||
                 (globalSymbol && globalSymbol->kind == StorageKind::ArrayInt);
@@ -525,18 +608,36 @@ private:
         if (expression == COMPILER_INVALID_INDEX) return false;
         if (!expect(TokenKind::Semicolon, "expected ';' after assignment")) return false;
         if (slot >= 0) {
-            const LocalSymbol* local = find_local_symbol(static_cast<uint16_t>(slot));
+            const bool pointer = (parameter && parameter->kind == ParameterKind::Int32Pointer) ||
+                (localByName && localByName->kind == StorageKind::PointerInt);
+            const ValueType expected = pointer ? ValueType::Int32Pointer : ValueType::Int32;
+            if (m_output->expressions[expression].type != expected) {
+                m_diagnostics.error(name.location, pointer
+                    ? "cannot assign an int expression to int*"
+                    : "cannot assign an int* expression to int", "type");
+                return false;
+            }
+            const LocalSymbol* local = localByName;
             if (local && local->kind == StorageKind::ArrayInt) {
                 m_diagnostics.error(name.location, "array value cannot be assigned directly", "array");
                 return false;
             }
             for (uint32_t i = 0; i < m_output->localCount; ++i)
                 if (m_output->locals[i].slot == static_cast<uint16_t>(slot)) m_output->locals[i].initialized = true;
-            return append_statement(blockIndex, StatementKind::StoreLocal, name.location, expression,
+            return append_statement(blockIndex, pointer ? StatementKind::StorePointer : StatementKind::StoreLocal,
+                                    name.location, expression,
                                     static_cast<uint16_t>(slot), COMPILER_INVALID_INDEX);
         }
         if (global >= 0 && m_unit->globals[global].kind == StorageKind::ArrayInt) {
             m_diagnostics.error(name.location, "array value cannot be assigned directly", "array");
+            return false;
+        }
+        if (global >= 0 && m_unit->globals[global].kind == StorageKind::PointerInt) {
+            m_diagnostics.error(name.location, "global pointer variables are not supported in Phase 27R", "pointer");
+            return false;
+        }
+        if (global >= 0 && m_output->expressions[expression].type != ValueType::Int32) {
+            m_diagnostics.error(name.location, "cannot assign an int* expression to int", "type");
             return false;
         }
         return append_statement(blockIndex, StatementKind::StoreGlobal, name.location, expression,
@@ -606,6 +707,10 @@ private:
         ++(*m_index);
         const uint16_t expression = parse_expression(0);
         if (expression == COMPILER_INVALID_INDEX) return false;
+        if (m_output->expressions[expression].type != ValueType::Int32) {
+            m_diagnostics.error(location, "functions return int; pointer return values are not supported in Phase 27R", "type");
+            return false;
+        }
         if (!expect(TokenKind::Semicolon, "expected ';' after return expression")) return false;
         if (!append_statement(blockIndex, StatementKind::Return, location, expression,
                               COMPILER_INVALID_INDEX, COMPILER_INVALID_INDEX)) return false;
@@ -689,6 +794,11 @@ private:
         Expression& expression = m_output->expressions[index];
         expression = {};
         expression.kind = kind;
+        expression.type = (kind == ExpressionKind::AddressOfLocal ||
+                           kind == ExpressionKind::AddressOfGlobal ||
+                           kind == ExpressionKind::AddressOfIndexed ||
+                           kind == ExpressionKind::LoadPointer)
+            ? ValueType::Int32Pointer : ValueType::Int32;
         expression.left = left;
         expression.right = right;
         expression.localIndex = localIndex;
@@ -735,6 +845,11 @@ private:
             ++(*m_index);
             const uint16_t right = parse_logical_and(depth);
             if (right == COMPILER_INVALID_INDEX) return COMPILER_INVALID_INDEX;
+            if (m_output->expressions[left].type != ValueType::Int32 ||
+                m_output->expressions[right].type != ValueType::Int32) {
+                m_diagnostics.error(operatorToken.location, "logical operators require int expressions", "type");
+                return COMPILER_INVALID_INDEX;
+            }
             left = make_expression(ExpressionKind::LogicalOr, operatorToken.location,
                                    left, right, COMPILER_INVALID_INDEX, 0);
         }
@@ -749,6 +864,11 @@ private:
             ++(*m_index);
             const uint16_t right = parse_equality(depth);
             if (right == COMPILER_INVALID_INDEX) return COMPILER_INVALID_INDEX;
+            if (m_output->expressions[left].type != ValueType::Int32 ||
+                m_output->expressions[right].type != ValueType::Int32) {
+                m_diagnostics.error(operatorToken.location, "logical operators require int expressions", "type");
+                return COMPILER_INVALID_INDEX;
+            }
             left = make_expression(ExpressionKind::LogicalAnd, operatorToken.location,
                                    left, right, COMPILER_INVALID_INDEX, 0);
         }
@@ -765,6 +885,11 @@ private:
             ++(*m_index);
             const uint16_t right = parse_relational(depth);
             if (right == COMPILER_INVALID_INDEX) return COMPILER_INVALID_INDEX;
+            if (m_output->expressions[left].type != ValueType::Int32 ||
+                m_output->expressions[right].type != ValueType::Int32) {
+                m_diagnostics.error(operatorToken.location, "comparisons require int expressions", "type");
+                return COMPILER_INVALID_INDEX;
+            }
             left = make_expression(operation == TokenKind::EqualEqual ? ExpressionKind::Equal : ExpressionKind::NotEqual,
                                    operatorToken.location, left, right, COMPILER_INVALID_INDEX, 0);
         }
@@ -782,6 +907,11 @@ private:
             ++(*m_index);
             const uint16_t right = parse_additive(depth);
             if (right == COMPILER_INVALID_INDEX) return COMPILER_INVALID_INDEX;
+            if (m_output->expressions[left].type != ValueType::Int32 ||
+                m_output->expressions[right].type != ValueType::Int32) {
+                m_diagnostics.error(operatorToken.location, "arithmetic requires int expressions", "type");
+                return COMPILER_INVALID_INDEX;
+            }
             ExpressionKind kind = ExpressionKind::Less;
             if (operation == TokenKind::LessEqual) kind = ExpressionKind::LessEqual;
             else if (operation == TokenKind::Greater) kind = ExpressionKind::Greater;
@@ -802,6 +932,11 @@ private:
             ++(*m_index);
             const uint16_t right = parse_multiplicative(depth);
             if (right == COMPILER_INVALID_INDEX) return COMPILER_INVALID_INDEX;
+            if (m_output->expressions[left].type != ValueType::Int32 ||
+                m_output->expressions[right].type != ValueType::Int32) {
+                m_diagnostics.error(operatorToken.location, "arithmetic requires int expressions", "type");
+                return COMPILER_INVALID_INDEX;
+            }
             left = make_expression(operation == TokenKind::Plus ? ExpressionKind::Add : ExpressionKind::Subtract,
                                    operatorToken.location, left, right, COMPILER_INVALID_INDEX, 0);
         }
@@ -816,6 +951,11 @@ private:
             ++(*m_index);
             const uint16_t right = parse_unary(depth);
             if (right == COMPILER_INVALID_INDEX) return COMPILER_INVALID_INDEX;
+            if (m_output->expressions[left].type != ValueType::Int32 ||
+                m_output->expressions[right].type != ValueType::Int32) {
+                m_diagnostics.error(operatorToken.location, "arithmetic requires int expressions", "type");
+                return COMPILER_INVALID_INDEX;
+            }
             left = make_expression(ExpressionKind::Multiply, operatorToken.location,
                                    left, right, COMPILER_INVALID_INDEX, 0);
         }
@@ -824,6 +964,19 @@ private:
 
     uint16_t parse_unary(uint32_t depth)
     {
+        if (current().kind == TokenKind::Ampersand) return parse_address_of(depth);
+        if (current().kind == TokenKind::Star) {
+            const SourceLocation location = current().location;
+            ++(*m_index);
+            const uint16_t child = parse_unary(depth + 1U);
+            if (child == COMPILER_INVALID_INDEX) return child;
+            if (m_output->expressions[child].type != ValueType::Int32Pointer) {
+                m_diagnostics.error(location, "cannot dereference non-pointer expression", "pointer");
+                return COMPILER_INVALID_INDEX;
+            }
+            return make_expression(ExpressionKind::LoadIndirectInt32, location, child,
+                                   COMPILER_INVALID_INDEX, COMPILER_INVALID_INDEX, 0);
+        }
         if (current().kind != TokenKind::Minus) return parse_primary(depth);
         const SourceLocation location = current().location;
         ++(*m_index);
@@ -840,8 +993,75 @@ private:
         }
         const uint16_t child = parse_unary(depth + 1U);
         if (child == COMPILER_INVALID_INDEX) return child;
+        if (m_output->expressions[child].type != ValueType::Int32) {
+            m_diagnostics.error(location, "unary '-' requires an int expression", "type");
+            return COMPILER_INVALID_INDEX;
+        }
         return make_expression(ExpressionKind::Negate, location, child,
                                COMPILER_INVALID_INDEX, COMPILER_INVALID_INDEX, 0);
+    }
+
+    uint16_t parse_address_of(uint32_t depth)
+    {
+        (void)depth;
+        const SourceLocation location = current().location;
+        ++(*m_index);
+        const Token name = current();
+        if (!token_is_name(name) || name.kind == TokenKind::KeywordGxMain) {
+            m_diagnostics.error(location, "expression is not addressable", "pointer");
+            return COMPILER_INVALID_INDEX;
+        }
+        const ParameterSymbol* parameter = find_parameter_symbol(name);
+        const LocalSymbol* local = find_local_name_symbol(name);
+        const int32_t global = (!parameter && !local) ? find_global(name) : -1;
+        ++(*m_index);
+        const bool indexed = current().kind == TokenKind::LeftBracket;
+        if (!indexed) {
+            if (local && local->kind == StorageKind::ScalarInt)
+                return make_expression(ExpressionKind::AddressOfLocal, location,
+                                       COMPILER_INVALID_INDEX, COMPILER_INVALID_INDEX,
+                                       local->slot, 0);
+            if (global >= 0 && m_unit->globals[global].kind == StorageKind::ScalarInt) {
+                const uint16_t expression = make_expression(ExpressionKind::AddressOfGlobal, location,
+                    COMPILER_INVALID_INDEX, COMPILER_INVALID_INDEX, COMPILER_INVALID_INDEX, 0);
+                if (expression != COMPILER_INVALID_INDEX)
+                    m_output->expressions[expression].globalIndex = static_cast<uint16_t>(global);
+                return expression;
+            }
+            if (local && local->kind == StorageKind::ArrayInt)
+                m_diagnostics.error(location, "array value is not addressable; use an element", "pointer");
+            else if (global >= 0 && m_unit->globals[global].kind == StorageKind::ArrayInt)
+                m_diagnostics.error(location, "array value is not addressable; use an element", "pointer");
+            else if (parameter)
+                m_diagnostics.error(location, "expression is not addressable", "pointer");
+            else
+                m_diagnostics.error(location, "expression is not addressable", "pointer");
+            return COMPILER_INVALID_INDEX;
+        }
+        const bool isLocal = local != nullptr;
+        const bool isArray = (local && local->kind == StorageKind::ArrayInt) ||
+            (global >= 0 && m_unit->globals[global].kind == StorageKind::ArrayInt);
+        if (!isArray) {
+            m_diagnostics.error(location, "indexed access requires an array", "array");
+            return COMPILER_INVALID_INDEX;
+        }
+        ++(*m_index);
+        const uint16_t indexExpression = parse_expression(depth + 1U);
+        if (indexExpression == COMPILER_INVALID_INDEX ||
+            m_output->expressions[indexExpression].type != ValueType::Int32 ||
+            !expect(TokenKind::RightBracket, "expected ']' after array index"))
+            return COMPILER_INVALID_INDEX;
+        const uint16_t elementCount = isLocal ? local->elementCount : m_unit->globals[global].elementCount;
+        if (!validate_index_constant(indexExpression, elementCount, name.location)) return COMPILER_INVALID_INDEX;
+        const uint16_t expression = make_expression(ExpressionKind::AddressOfIndexed, location,
+            indexExpression, COMPILER_INVALID_INDEX,
+            isLocal ? local->slot : COMPILER_INVALID_INDEX, 0);
+        if (expression == COMPILER_INVALID_INDEX) return expression;
+        m_output->expressions[expression].globalIndex = isLocal ? COMPILER_INVALID_INDEX : static_cast<uint16_t>(global);
+        m_output->expressions[expression].elementCount = elementCount;
+        m_output->expressions[expression].elementSize = isLocal ? local->elementSize : m_unit->globals[global].elementSize;
+        m_output->expressions[expression].indexedBaseKind = isLocal ? IndexedBaseKind::Local : IndexedBaseKind::Global;
+        return expression;
     }
 
     uint16_t parse_call(const Token& nameToken, uint32_t depth)
@@ -910,11 +1130,11 @@ private:
             const bool call = *m_index + 1U < m_tokenCount && m_tokens[*m_index + 1U].kind == TokenKind::LeftParen;
             if (call) return parse_call(token, depth);
             ++(*m_index);
-            const int32_t slot = find_variable(token);
+            const ParameterSymbol* parameter = find_parameter_symbol(token);
+            const LocalSymbol* local = find_local_name_symbol(token);
             const bool indexed = current().kind == TokenKind::LeftBracket;
             if (indexed) {
-                const LocalSymbol* local = slot >= 0 ? find_local_symbol(static_cast<uint16_t>(slot)) : nullptr;
-                const int32_t global = slot < 0 ? find_global(token) : -1;
+                const int32_t global = (!parameter && !local) ? find_global(token) : -1;
                 const GlobalSymbolIR* globalSymbol = global >= 0 ? &m_unit->globals[global] : nullptr;
                 const bool isArray = (local && local->kind == StorageKind::ArrayInt) ||
                     (globalSymbol && globalSymbol->kind == StorageKind::ArrayInt);
@@ -932,7 +1152,7 @@ private:
                     return COMPILER_INVALID_INDEX;
                 const uint16_t expression = make_expression(ExpressionKind::LoadIndexed, token.location,
                     indexExpression, COMPILER_INVALID_INDEX,
-                    local ? static_cast<uint16_t>(slot) : COMPILER_INVALID_INDEX, 0);
+                    local ? local->slot : COMPILER_INVALID_INDEX, 0);
                 if (expression == COMPILER_INVALID_INDEX) return expression;
                 m_output->expressions[expression].globalIndex =
                     local ? COMPILER_INVALID_INDEX : static_cast<uint16_t>(global);
@@ -942,48 +1162,63 @@ private:
                     local ? IndexedBaseKind::Local : IndexedBaseKind::Global;
                 return expression;
             }
-            if (slot < 0) {
-                const int32_t global = find_global(token);
-                if (global >= 0) {
-                    if (m_unit->globals[global].kind == StorageKind::ArrayInt) {
-                        m_diagnostics.error_identifier_suffix(token.location, "array '",
-                                                              m_source + token.location.offset, token.length,
-                                                              "' requires an index", "array");
-                        return COMPILER_INVALID_INDEX;
-                    }
-                    const uint16_t expression = make_expression(ExpressionKind::LoadGlobal, token.location,
-                        COMPILER_INVALID_INDEX, COMPILER_INVALID_INDEX,
-                        COMPILER_INVALID_INDEX, 0);
-                    if (expression == COMPILER_INVALID_INDEX) return expression;
-                    m_output->expressions[expression].globalIndex = static_cast<uint16_t>(global);
-                    return expression;
-                }
-                if (is_context_parameter(token))
+            if (parameter) {
+                if (parameter->kind == ParameterKind::AppContextPointer) {
                     m_diagnostics.error(token.location, "gx_app_context parameter is only valid as log context", "identifier");
-                else
-                    m_diagnostics.error_identifier(token.location, "unknown identifier ",
-                                                   m_source + token.location.offset, token.length, "identifier");
-                return COMPILER_INVALID_INDEX;
+                    return COMPILER_INVALID_INDEX;
+                }
+                if (!parameter->initialized) {
+                    m_diagnostics.error(token.location, "pointer parameter used before initialization", "pointer");
+                    return COMPILER_INVALID_INDEX;
+                }
+                return make_expression(parameter->kind == ParameterKind::Int32Pointer
+                                           ? ExpressionKind::LoadPointer : ExpressionKind::LoadLocal,
+                                       token.location, COMPILER_INVALID_INDEX, COMPILER_INVALID_INDEX,
+                                       parameter->slot, 0);
             }
-            bool initialized = false;
-            for (uint32_t i = 0; i < m_output->integerParameterCount; ++i)
-                if (m_output->parameters[i].slot == static_cast<uint16_t>(slot)) initialized = m_output->parameters[i].initialized;
-            for (uint32_t i = 0; i < m_output->localCount; ++i)
-                if (m_output->locals[i].slot == static_cast<uint16_t>(slot)) initialized = m_output->locals[i].initialized;
-            const LocalSymbol* local = find_local_symbol(static_cast<uint16_t>(slot));
-            if (local && local->kind == StorageKind::ArrayInt) {
-                m_diagnostics.error_identifier_suffix(token.location, "array '",
-                                                      m_source + token.location.offset, token.length,
-                                                      "' requires an index", "array");
-                return COMPILER_INVALID_INDEX;
+            if (local) {
+                if (local->kind == StorageKind::ArrayInt) {
+                    m_diagnostics.error_identifier_suffix(token.location, "array '",
+                                                          m_source + token.location.offset, token.length,
+                                                          "' requires an index", "array");
+                    return COMPILER_INVALID_INDEX;
+                }
+                if (!local->initialized && local->kind != StorageKind::PointerInt) {
+                    m_diagnostics.error(token.location, local->kind == StorageKind::PointerInt
+                        ? "pointer used before initialization" : "local used before initialization", "identifier");
+                    return COMPILER_INVALID_INDEX;
+                }
+                return make_expression(local->kind == StorageKind::PointerInt
+                                           ? ExpressionKind::LoadPointer : ExpressionKind::LoadLocal,
+                                       token.location, COMPILER_INVALID_INDEX, COMPILER_INVALID_INDEX,
+                                       local->slot, 0);
             }
-            if (!initialized) {
-                m_diagnostics.error(token.location, "local used before initialization", "identifier");
-                return COMPILER_INVALID_INDEX;
+            const int32_t global = find_global(token);
+            if (global >= 0) {
+                if (m_unit->globals[global].kind == StorageKind::ArrayInt) {
+                    m_diagnostics.error_identifier_suffix(token.location, "array '",
+                                                          m_source + token.location.offset, token.length,
+                                                          "' requires an index", "array");
+                    return COMPILER_INVALID_INDEX;
+                }
+                if (m_unit->globals[global].kind == StorageKind::PointerInt) {
+                    m_diagnostics.error(token.location, "global pointer variables are not supported in Phase 27R", "pointer");
+                    return COMPILER_INVALID_INDEX;
+                }
+                const uint16_t expression = make_expression(ExpressionKind::LoadGlobal, token.location,
+                    COMPILER_INVALID_INDEX, COMPILER_INVALID_INDEX,
+                    COMPILER_INVALID_INDEX, 0);
+                if (expression == COMPILER_INVALID_INDEX) return expression;
+                m_output->expressions[expression].globalIndex = static_cast<uint16_t>(global);
+                return expression;
             }
-            return make_expression(ExpressionKind::LoadLocal, token.location,
-                                   COMPILER_INVALID_INDEX, COMPILER_INVALID_INDEX,
-                                   static_cast<uint16_t>(slot), 0);
+            if (is_context_parameter(token)) {
+                m_diagnostics.error(token.location, "gx_app_context parameter is only valid as log context", "identifier");
+            } else {
+                m_diagnostics.error_identifier(token.location, "unknown identifier ",
+                                               m_source + token.location.offset, token.length, "identifier");
+            }
+            return COMPILER_INVALID_INDEX;
         }
         if (token.kind == TokenKind::LeftParen) {
             if (depth >= COMPILER_MAX_EXPRESSION_NESTING) {
@@ -1011,7 +1246,12 @@ private:
             return true;
         }
         if (expression.kind == ExpressionKind::LoadLocal ||
-            expression.kind == ExpressionKind::LoadGlobal || expression.kind == ExpressionKind::Call) return false;
+            expression.kind == ExpressionKind::LoadGlobal || expression.kind == ExpressionKind::Call ||
+            expression.kind == ExpressionKind::LoadPointer ||
+            expression.kind == ExpressionKind::AddressOfLocal ||
+            expression.kind == ExpressionKind::AddressOfGlobal ||
+            expression.kind == ExpressionKind::AddressOfIndexed ||
+            expression.kind == ExpressionKind::LoadIndirectInt32) return false;
         if (expression.kind == ExpressionKind::Negate)
             return evaluate_expression(expression.left, depth + 1U, bits) && (*bits = 0U - *bits, true);
         if (!evaluate_expression(expression.left, depth + 1U, &left)) return false;
@@ -1111,18 +1351,24 @@ static bool report_symbol_kind_conflict(const SourceLocation& location,
 
 static bool function_signature_matches(const FunctionIR& function,
                                        uint16_t parameterCount,
-                                       bool usesAppContext)
+                                       bool usesAppContext,
+                                       const FunctionIR& signature)
 {
-    return function.parameterCount == parameterCount &&
-        function.usesAppContext == usesAppContext;
+    if (function.parameterCount != parameterCount || function.usesAppContext != usesAppContext) return false;
+    for (uint32_t i = 0; i < parameterCount; ++i)
+        if (function.parameters[i].kind != signature.parameters[i].kind) return false;
+    return true;
 }
 
 static bool declaration_signature_matches(const FunctionDeclaration& declaration,
                                           uint16_t parameterCount,
-                                          bool usesAppContext)
+                                          bool usesAppContext,
+                                          const FunctionIR& signature)
 {
-    return declaration.parameterCount == parameterCount &&
-        declaration.usesAppContext == usesAppContext;
+    if (declaration.parameterCount != parameterCount || declaration.usesAppContext != usesAppContext) return false;
+    for (uint32_t i = 0; i < parameterCount; ++i)
+        if (declaration.parameterKinds[i] != signature.parameters[i].kind) return false;
+    return true;
 }
 
 static void classify_recursive_sccs(TranslationUnitIR* unit)
@@ -1245,6 +1491,11 @@ bool parse_translation_unit(const char* source, const Token* tokens, uint32_t to
                 return false;
             }
             ++index;
+            if (tokens[token_index_or_eof(index, tokenCount)].kind == TokenKind::Star) {
+                diagnostics.error(tokens[token_index_or_eof(index, tokenCount)].location,
+                                  "global pointer variables are not supported in Phase 27R", "pointer");
+                return false;
+            }
             const Token nameToken = tokens[token_index_or_eof(index, tokenCount)];
             if (!token_is_name(nameToken) || nameToken.kind == TokenKind::KeywordGxMain) {
                 diagnostics.error(nameToken.location, "expected identifier after 'extern int'", "global");
@@ -1302,6 +1553,11 @@ bool parse_translation_unit(const char* source, const Token* tokens, uint32_t to
             return false;
         }
         ++index;
+        if (tokens[token_index_or_eof(index, tokenCount)].kind == TokenKind::Star) {
+            diagnostics.error(tokens[token_index_or_eof(index, tokenCount)].location,
+                              "global pointer variables are not supported in Phase 27R", "pointer");
+            return false;
+        }
         const Token nameToken = tokens[token_index_or_eof(index, tokenCount)];
         if (!token_is_name(nameToken)) {
             diagnostics.error(nameToken.location, "expected identifier after 'int'", "external-declaration");
@@ -1483,6 +1739,7 @@ bool parse_translation_unit(const char* source, const Token* tokens, uint32_t to
             function.parameters[0].slot = COMPILER_INVALID_INDEX;
             function.parameters[0].initialized = true;
             function.parameterCount = 1;
+            function.parameters[0].kind = ParameterKind::AppContextPointer;
             function.usesAppContext = true;
             parser.set_context_token(parameter);
             ++index;
@@ -1506,6 +1763,8 @@ bool parse_translation_unit(const char* source, const Token* tokens, uint32_t to
                         return false;
                     }
                     ++index;
+                    const bool pointerParameter = tokens[token_index_or_eof(index, tokenCount)].kind == TokenKind::Star;
+                    if (pointerParameter) ++index;
                     const Token parameter = tokens[token_index_or_eof(index, tokenCount)];
                     const bool hasParameterName = token_is_name(parameter) && parameter.kind != TokenKind::KeywordGxMain;
                     if (!hasParameterName && parameter.kind != TokenKind::Comma &&
@@ -1529,13 +1788,22 @@ bool parse_translation_unit(const char* source, const Token* tokens, uint32_t to
                         ParameterSymbol& parameterSymbol = function.parameters[parameterIndex];
                         parameterSymbol = {};
                         for (uint32_t i = 0; i < parameter.length; ++i) parameterSymbol.name[i] = source[parameter.location.offset + i];
-                        parameterSymbol.kind = ParameterKind::Integer;
-                        parameterSymbol.slot = static_cast<uint16_t>(parameterIndex);
+                        parameterSymbol.kind = pointerParameter ? ParameterKind::Int32Pointer : ParameterKind::Integer;
+                        uint32_t parameterStart = function.parameterStorageBytes;
+                        if (pointerParameter && (parameterStart & (COMPILER_POINTER_DESCRIPTOR_ALIGNMENT - 1U)) != 0)
+                            parameterStart += COMPILER_POINTER_DESCRIPTOR_ALIGNMENT -
+                                (parameterStart & (COMPILER_POINTER_DESCRIPTOR_ALIGNMENT - 1U));
+                        parameterSymbol.slot = static_cast<uint16_t>(parameterStart / 4U +
+                            (pointerParameter ? COMPILER_POINTER_DESCRIPTOR_BYTES / 4U - 1U : 0U));
                         parameterSymbol.initialized = true;
+                        function.parameterStorageBytes = parameterStart +
+                            (pointerParameter ? COMPILER_POINTER_DESCRIPTOR_BYTES : 4U);
+                        if (pointerParameter) ++function.pointerParameterCount;
+                        else ++function.integerParameterCount;
                         ++index;
                         if (tokens[token_index_or_eof(index, tokenCount)].kind == TokenKind::LeftBracket) {
                             diagnostics.error(tokens[token_index_or_eof(index, tokenCount)].location,
-                                              "array parameters are not supported in Phase 27Q", "parameter");
+                                              "array parameters are not supported in Phase 27R", "parameter");
                             return false;
                         }
                     }
@@ -1545,7 +1813,6 @@ bool parse_translation_unit(const char* source, const Token* tokens, uint32_t to
                 }
             }
             function.parameterCount = static_cast<uint16_t>(parameterIndex);
-            function.integerParameterCount = static_cast<uint16_t>(parameterIndex);
         }
         if (tokens[token_index_or_eof(index, tokenCount)].kind != TokenKind::RightParen) {
             diagnostics.error(tokens[token_index_or_eof(index, tokenCount)].location,
@@ -1558,7 +1825,8 @@ bool parse_translation_unit(const char* source, const Token* tokens, uint32_t to
             const int32_t definition = find_function(*output, function.name);
             if (definition >= 0 && !function_signature_matches(output->functions[definition],
                                                                  function.parameterCount,
-                                                                 function.usesAppContext)) {
+                                                                 function.usesAppContext,
+                                                                 function)) {
                 diagnostics.error_identifier(nameToken.location, "conflicting declaration for function ",
                                               function.name, nameToken.length, "function");
                 return false;
@@ -1566,7 +1834,7 @@ bool parse_translation_unit(const char* source, const Token* tokens, uint32_t to
             const int32_t existing = find_declaration(*output, function.name);
             if (existing >= 0) {
                 if (!declaration_signature_matches(output->declarations[existing], function.parameterCount,
-                                                   function.usesAppContext)) {
+                                                   function.usesAppContext, function)) {
                     diagnostics.error_identifier(nameToken.location, "conflicting declaration for function ",
                                                   function.name, nameToken.length, "function");
                     return false;
@@ -1582,6 +1850,8 @@ bool parse_translation_unit(const char* source, const Token* tokens, uint32_t to
                 declarationRecord.name[nameToken.length] = '\0';
                 declarationRecord.parameterCount = function.parameterCount;
                 declarationRecord.usesAppContext = function.usesAppContext;
+                for (uint32_t p = 0; p < function.parameterCount; ++p)
+                    declarationRecord.parameterKinds[p] = function.parameters[p].kind;
                 declarationRecord.location = nameToken.location;
             }
             ++index;
@@ -1602,7 +1872,7 @@ bool parse_translation_unit(const char* source, const Token* tokens, uint32_t to
         const int32_t declarationIndex = find_declaration(*output, function.name);
         if (declarationIndex >= 0 &&
             !declaration_signature_matches(output->declarations[declarationIndex], function.parameterCount,
-                                           function.usesAppContext)) {
+                                           function.usesAppContext, function)) {
             diagnostics.error_identifier(nameToken.location, "conflicting declaration for function ",
                                           function.name, nameToken.length, "function");
             return false;
@@ -1613,6 +1883,8 @@ bool parse_translation_unit(const char* source, const Token* tokens, uint32_t to
         symbol.name[nameToken.length] = '\0';
         symbol.functionIndex = static_cast<uint16_t>(output->functionCount);
         symbol.parameterCount = function.parameterCount;
+        for (uint32_t p = 0; p < function.parameterCount; ++p)
+            symbol.parameterKinds[p] = function.parameters[p].kind;
         symbol.location = nameToken.location;
         if (!parser.parse_body()) return false;
         if (token_is_gx_main(nameToken)) output->entryFunction = static_cast<uint16_t>(output->functionCount);
@@ -1648,6 +1920,25 @@ bool parse_translation_unit(const char* source, const Token* tokens, uint32_t to
                 return false;
             }
             call.expectedParameterCount = static_cast<uint16_t>(expected);
+            for (uint32_t a = 0; a < expected; ++a) {
+                const ParameterKind expectedKind = callee >= 0
+                    ? output->functions[callee].parameters[a].kind
+                    : output->declarations[declaration].parameterKinds[a];
+                call.expectedParameterKinds[a] = expectedKind;
+                const uint16_t argument = function.callArguments[call.argumentStart + a];
+                if (argument >= function.expressionCount ||
+                    (expectedKind == ParameterKind::Integer &&
+                     function.expressions[argument].type != ValueType::Int32) ||
+                    (expectedKind == ParameterKind::Int32Pointer &&
+                     function.expressions[argument].type != ValueType::Int32Pointer)) {
+                    diagnostics.error(call.location,
+                                      expectedKind == ParameterKind::Int32Pointer
+                                          ? "function argument requires int*"
+                                          : "function argument requires int",
+                                      "type");
+                    return false;
+                }
+            }
             call.external = callee < 0;
             call.calleeFunction = callee < 0 ? COMPILER_INVALID_INDEX : static_cast<uint16_t>(callee);
             if (callee >= 0 && !output->callGraph[i][callee]) {

@@ -253,6 +253,8 @@ bool compile_module_from_source(const char* sourcePath,
         if (!copy_string(exportSymbol.name, sizeof(exportSymbol.name), function.name)) return false;
         exportSymbol.moduleCodeOffset = function.codeOffset;
         exportSymbol.parameterCount = function.parameterCount;
+        for (uint32_t p = 0; p < function.parameterCount; ++p)
+            exportSymbol.parameterKinds[p] = function.parameters[p].kind;
         exportSymbol.isEntry = module->hasEntry && i == s_unit.entryFunction;
         exportSymbol.location = function.location;
     }
@@ -281,7 +283,10 @@ bool compile_module_from_source(const char* sourcePath,
             if (!call.external) continue;
             const int32_t existing = find_import(*module, call.calleeName);
             if (existing >= 0) {
-                if (module->imports[existing].expectedParameterCount != call.expectedParameterCount) {
+                bool sameSignature = module->imports[existing].expectedParameterCount == call.expectedParameterCount;
+                for (uint32_t p = 0; sameSignature && p < call.expectedParameterCount; ++p)
+                    sameSignature = module->imports[existing].parameterKinds[p] == call.expectedParameterKinds[p];
+                if (!sameSignature) {
                     diagnostics.error_identifier(call.location, "conflicting declaration for function ",
                                                   call.calleeName, name_length(call.calleeName), "function");
                     return false;
@@ -297,6 +302,8 @@ bool compile_module_from_source(const char* sourcePath,
             importSymbol.kind = SymbolKind::Function;
             if (!copy_string(importSymbol.name, sizeof(importSymbol.name), call.calleeName)) return false;
             importSymbol.expectedParameterCount = call.expectedParameterCount;
+            for (uint32_t p = 0; p < call.expectedParameterCount; ++p)
+                importSymbol.parameterKinds[p] = call.expectedParameterKinds[p];
             importSymbol.location = call.location;
         }
     }
@@ -304,8 +311,10 @@ bool compile_module_from_source(const char* sourcePath,
         const FunctionIR& function = s_unit.functions[i];
         for (uint32_t e = 0; e < function.expressionCount; ++e) {
             const Expression& expression = function.expressions[e];
-            const bool globalLoad = expression.kind == ExpressionKind::LoadGlobal;
-            const bool indexedLoad = expression.kind == ExpressionKind::LoadIndexed &&
+            const bool globalLoad = expression.kind == ExpressionKind::LoadGlobal ||
+                expression.kind == ExpressionKind::AddressOfGlobal;
+            const bool indexedLoad = (expression.kind == ExpressionKind::LoadIndexed ||
+                                      expression.kind == ExpressionKind::AddressOfIndexed) &&
                 expression.indexedBaseKind == IndexedBaseKind::Global;
             const uint16_t globalIndex = globalLoad ? expression.globalIndex : expression.globalIndex;
             if ((!globalLoad && !indexedLoad) || globalIndex >= s_unit.globalCount) continue;

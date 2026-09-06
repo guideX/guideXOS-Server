@@ -164,6 +164,8 @@ static void write_export(Writer& writer, const ExportSymbol& symbol)
     writer.u32(symbol.size); writer.u32(symbol.alignment);
     writer.u16(symbol.elementCount); writer.u16(symbol.elementSize);
     writer.u16(symbol.parameterCount); writer.u16(0);
+    for (uint32_t i = 0; i < COMPILER_MAX_PARAMETERS; ++i)
+        writer.u8(static_cast<uint8_t>(symbol.parameterKinds[i]));
     write_location(writer, symbol.location);
 }
 
@@ -180,6 +182,11 @@ static bool read_export(Reader& reader, ExportSymbol& symbol)
     symbol.size = reader.u32(); symbol.alignment = reader.u32();
     symbol.elementCount = reader.u16(); symbol.elementSize = reader.u16();
     symbol.parameterCount = reader.u16(); (void)reader.u16();
+    for (uint32_t i = 0; i < COMPILER_MAX_PARAMETERS; ++i) {
+        const uint8_t parameterKind = reader.u8();
+        if (parameterKind > static_cast<uint8_t>(ParameterKind::AppContextPointer)) return false;
+        symbol.parameterKinds[i] = static_cast<ParameterKind>(parameterKind);
+    }
     symbol.location = read_location(reader);
     return reader.ok();
 }
@@ -191,6 +198,8 @@ static void write_import(Writer& writer, const ImportSymbol& symbol)
     writer.u16(symbol.expectedParameterCount); writer.u16(0);
     writer.u32(symbol.size); writer.u32(symbol.alignment);
     writer.u16(symbol.elementCount); writer.u16(symbol.elementSize);
+    for (uint32_t i = 0; i < COMPILER_MAX_PARAMETERS; ++i)
+        writer.u8(static_cast<uint8_t>(symbol.parameterKinds[i]));
     write_location(writer, symbol.location);
 }
 
@@ -204,6 +213,11 @@ static bool read_import(Reader& reader, ImportSymbol& symbol)
     symbol.expectedParameterCount = reader.u16(); (void)reader.u16();
     symbol.size = reader.u32(); symbol.alignment = reader.u32();
     symbol.elementCount = reader.u16(); symbol.elementSize = reader.u16();
+    for (uint32_t i = 0; i < COMPILER_MAX_PARAMETERS; ++i) {
+        const uint8_t parameterKind = reader.u8();
+        if (parameterKind > static_cast<uint8_t>(ParameterKind::AppContextPointer)) return false;
+        symbol.parameterKinds[i] = static_cast<ParameterKind>(parameterKind);
+    }
     symbol.location = read_location(reader);
     return reader.ok();
 }

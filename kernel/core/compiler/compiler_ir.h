@@ -52,17 +52,24 @@ static const uint32_t COMPILER_MAX_MODULE_RELOCATIONS = 64;
 static const uint32_t COMPILER_MAX_SOURCE_PATH_BYTES = 256;
 static const uint32_t COMPILER_MAX_GLOBALS = 32;
 static const uint32_t COMPILER_MAX_MODULE_SYMBOLS = COMPILER_MAX_FUNCTIONS + COMPILER_MAX_GLOBALS;
+// Source-level int* values use frame-resident bounded descriptors.  The
+// descriptor address is only an internal ABI value; it is never an integer
+// expression available to source code.
+static const uint32_t COMPILER_POINTER_DESCRIPTOR_BYTES = 32;
+static const uint32_t COMPILER_POINTER_DESCRIPTOR_ALIGNMENT = 8;
+static const uint32_t COMPILER_MAX_POINTER_TEMPORARY_SLOTS = COMPILER_MAX_PARAMETERS;
 
 // Persistent guideXOS object identity.  These values are intentionally
 // independent from the compiler phase number: changing object-producing
 // semantics requires incrementing COMPILER_OBJECT_ABI_VERSION.
 static const uint16_t COMPILER_OBJECT_FORMAT_VERSION = 1;
-static const uint16_t COMPILER_OBJECT_ABI_VERSION = 2;
+static const uint16_t COMPILER_OBJECT_ABI_VERSION = 3;
 static const uint32_t COMPILER_OBJECT_ARCH_AMD64 = 1;
 static const uint32_t COMPILER_OBJECT_TARGET_ABI_GUIDEXOS_C_V1 = 1;
 static const uint32_t COMPILER_MAX_OBJECT_BYTES = 131072;
 static const uint32_t COMPILER_RUNTIME_STATUS_CALL_DEPTH = 1;
 static const uint32_t COMPILER_RUNTIME_STATUS_ARRAY_BOUNDS = 2;
+static const uint32_t COMPILER_RUNTIME_STATUS_INVALID_POINTER = 3;
 
 static const uint16_t COMPILER_INVALID_INDEX = 0xFFFFU;
 
@@ -84,11 +91,31 @@ enum class ExpressionKind : uint8_t {
     LogicalOr,
     Call,
     LoadIndexed,
+    AddressOfLocal,
+    AddressOfGlobal,
+    AddressOfIndexed,
+    LoadPointer,
+    LoadIndirectInt32,
+};
+
+enum class ValueType : uint8_t {
+    Int32,
+    Int32Pointer,
+};
+
+enum class PointerProvenanceKind : uint32_t {
+    Invalid = 0,
+    LocalScalar = 1,
+    GlobalScalar = 2,
+    LocalArrayElement = 3,
+    GlobalArrayElement = 4,
+    PointerParameter = 5,
 };
 
 enum class StorageKind : uint8_t {
     ScalarInt,
     ArrayInt,
+    PointerInt,
 };
 
 enum class IndexedBaseKind : uint8_t {
@@ -98,6 +125,7 @@ enum class IndexedBaseKind : uint8_t {
 
 struct Expression {
     ExpressionKind kind;
+    ValueType type;
     uint8_t reserved;
     uint16_t left;
     uint16_t right;
@@ -125,12 +153,15 @@ enum class StatementKind : uint8_t {
     Continue,
     Block,
     StoreIndexed,
+    StorePointer,
+    StoreIndirectInt32,
 };
 
 struct Statement {
     StatementKind kind;
     uint8_t reserved;
     uint16_t expression;
+    uint16_t targetExpression;
     uint16_t localIndex;
     uint16_t globalIndex;
     uint16_t stringIndex;
@@ -154,6 +185,7 @@ struct Block {
 
 enum class ParameterKind : uint8_t {
     Integer,
+    Int32Pointer,
     AppContextPointer,
 };
 
@@ -186,6 +218,7 @@ struct CallSite {
     uint16_t argumentCount;
     uint16_t calleeFunction;
     uint16_t expectedParameterCount;
+    ParameterKind expectedParameterKinds[COMPILER_MAX_PARAMETERS];
     bool external;
     uint8_t reserved;
     SourceLocation location;
@@ -203,6 +236,7 @@ struct FunctionIR {
     uint16_t functionIndex;
     uint16_t parameterCount;
     uint16_t integerParameterCount;
+    uint16_t pointerParameterCount;
     uint16_t callCount;
     uint16_t callArgumentCount;
     uint16_t maxTemporarySlots;
@@ -214,6 +248,7 @@ struct FunctionIR {
     uint32_t expressionCount;
     uint32_t localCount;
     uint32_t localStorageBytes;
+    uint32_t parameterStorageBytes;
     uint32_t stringCount;
     uint32_t stringDataBytes;
     uint16_t returnExpression;
@@ -243,6 +278,7 @@ struct FunctionSymbol {
     uint16_t parameterCount;
     uint16_t codeLabel;
     uint16_t reserved;
+    ParameterKind parameterKinds[COMPILER_MAX_PARAMETERS];
     SourceLocation location;
 };
 
@@ -251,6 +287,7 @@ struct FunctionDeclaration {
     uint16_t parameterCount;
     bool usesAppContext;
     uint8_t reserved;
+    ParameterKind parameterKinds[COMPILER_MAX_PARAMETERS];
     SourceLocation location;
 };
 
@@ -325,6 +362,7 @@ struct ExportSymbol {
     uint16_t parameterCount;
     bool isEntry;
     uint8_t reserved;
+    ParameterKind parameterKinds[COMPILER_MAX_PARAMETERS];
     SourceLocation location;
 };
 
@@ -337,6 +375,7 @@ struct ImportSymbol {
     uint32_t alignment;
     uint16_t elementCount;
     uint16_t elementSize;
+    ParameterKind parameterKinds[COMPILER_MAX_PARAMETERS];
     SourceLocation location;
 };
 
@@ -379,6 +418,7 @@ struct GlobalFunctionSymbol {
     char name[COMPILER_FUNCTION_NAME_CAPACITY];
     uint16_t moduleIndex;
     uint16_t parameterCount;
+    ParameterKind parameterKinds[COMPILER_MAX_PARAMETERS];
     uint32_t moduleCodeOffset;
     uint32_t finalCodeOffset;
     uint32_t moduleDataOffset;

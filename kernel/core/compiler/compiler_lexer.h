@@ -48,6 +48,7 @@ enum class TokenKind : uint8_t {
     LogicalOr,
     LeftBracket,
     RightBracket,
+    Ampersand,
 };
 
 struct Token {

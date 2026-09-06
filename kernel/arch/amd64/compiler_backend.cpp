@@ -38,7 +38,16 @@ static int32_t local_displacement(uint16_t slot)
 
 static int32_t temporary_displacement(const FrameLayout& frame, uint16_t slot)
 {
-    return slot_displacement(frame.variableBytes / 4U + 2U + slot);
+    const uint32_t base = frame.variableBytes + (frame.contextDisplacement != 0 ? 8U : 0U) + 8U;
+    return -static_cast<int32_t>(base + static_cast<uint32_t>(slot) * 4U);
+}
+
+static int32_t pointer_temporary_displacement(const FrameLayout& frame, uint16_t slot)
+{
+    const uint32_t base = frame.variableBytes + (frame.contextDisplacement != 0 ? 8U : 0U) + 8U +
+        frame.temporaryBytes;
+    return -static_cast<int32_t>(base +
+        (static_cast<uint32_t>(slot) + 1U) * COMPILER_POINTER_DESCRIPTOR_BYTES);
 }
 
 class Emitter {
@@ -49,6 +58,7 @@ public:
             uint32_t* relocationCount = nullptr)
         : m_output(output), m_capacity(capacity), m_offset(0), m_labelCount(0), m_fixupCount(0),
           m_loopDepth(0), m_rspMod16(8), m_temporaryDepth(0), m_maxTemporaryDepth(0),
+          m_pointerTemporaryDepth(0), m_maxPointerTemporaryDepth(0),
           m_transientBytes(0), m_maxTransientBytes(0), m_relocations(relocations),
           m_relocationCapacity(relocationCapacity), m_relocationCount(relocationCount)
     {
@@ -84,6 +94,8 @@ public:
         m_rspMod16 = 8;
         m_temporaryDepth = 0;
         m_maxTemporaryDepth = 0;
+        m_pointerTemporaryDepth = 0;
+        m_maxPointerTemporaryDepth = 0;
         m_transientBytes = 0;
         m_maxTransientBytes = 0;
     }
@@ -114,6 +126,65 @@ public:
     {
         return bytes(reinterpret_cast<const uint8_t*>("\x48\x8B\x85"), 3) &&
                u32(static_cast<uint32_t>(displacement));
+    }
+    bool mov_reg_mem64(uint8_t reg, int32_t displacement)
+    {
+        if (reg < 8) {
+            return bytes(reinterpret_cast<const uint8_t*>("\x48\x8B"), 2) &&
+                   byte(static_cast<uint8_t>(0x85U | (reg << 3))) &&
+                   u32(static_cast<uint32_t>(displacement));
+        }
+        return bytes(reinterpret_cast<const uint8_t*>("\x4C\x8B"), 2) &&
+               byte(static_cast<uint8_t>(0x85U | ((reg - 8U) << 3))) &&
+               u32(static_cast<uint32_t>(displacement));
+    }
+    bool mov_local_reg64(uint8_t reg, int32_t displacement)
+    {
+        if (reg < 8) {
+            return bytes(reinterpret_cast<const uint8_t*>("\x48\x89"), 2) &&
+                   byte(static_cast<uint8_t>(0x85U | (reg << 3))) &&
+                   u32(static_cast<uint32_t>(displacement));
+        }
+        return bytes(reinterpret_cast<const uint8_t*>("\x4C\x89"), 2) &&
+               byte(static_cast<uint8_t>(0x85U | ((reg - 8U) << 3))) &&
+               u32(static_cast<uint32_t>(displacement));
+    }
+    bool mov_rax_reg64(uint8_t reg)
+    {
+        if (reg < 8) return byte(0x48) && byte(0x89) && byte(static_cast<uint8_t>(0xC0U | (reg << 3)));
+        return byte(0x4C) && byte(0x89) && byte(static_cast<uint8_t>(0xC0U | ((reg - 8U) << 3)));
+    }
+    bool lea_rax_local(int32_t displacement)
+    {
+        return bytes(reinterpret_cast<const uint8_t*>("\x48\x8D\x85"), 3) &&
+               u32(static_cast<uint32_t>(displacement));
+    }
+    bool lea_reg_local64(uint8_t reg, int32_t displacement)
+    {
+        if (reg < 8) {
+            return bytes(reinterpret_cast<const uint8_t*>("\x48\x8D"), 2) &&
+                   byte(static_cast<uint8_t>(0x85U | (reg << 3))) &&
+                   u32(static_cast<uint32_t>(displacement));
+        }
+        return bytes(reinterpret_cast<const uint8_t*>("\x4C\x8D"), 2) &&
+               byte(static_cast<uint8_t>(0x85U | ((reg - 8U) << 3))) &&
+               u32(static_cast<uint32_t>(displacement));
+    }
+    bool mov_reg_ptr64(uint8_t reg, uint8_t base, uint8_t displacement)
+    {
+        if (base >= 8) return false;
+        const uint8_t rex = static_cast<uint8_t>(reg >= 8 ? 0x4CU : 0x48U);
+        return byte(rex) && byte(0x8B) &&
+               byte(static_cast<uint8_t>(0x40U | ((reg & 7U) << 3) | (base & 7U))) &&
+               byte(displacement);
+    }
+    bool mov_reg_ptr32(uint8_t reg, uint8_t base, uint8_t displacement)
+    {
+        if (base >= 8) return false;
+        const uint8_t rex = static_cast<uint8_t>(reg >= 8 ? 0x44U : 0x40U);
+        return byte(rex) && byte(0x8B) &&
+               byte(static_cast<uint8_t>(0x40U | ((reg & 7U) << 3) | (base & 7U))) &&
+               byte(displacement);
     }
     bool mov_reg_local32(uint8_t reg, int32_t displacement)
     {
@@ -161,6 +232,29 @@ public:
     bool setcc(uint8_t condition) { return byte(0x0F) && byte(condition) && byte(0xC0); }
     bool movzx_eax_al() { static const uint8_t v[] = {0x0F, 0xB6, 0xC0}; return bytes(v, sizeof(v)); }
     bool test_eax_eax() { static const uint8_t v[] = {0x85, 0xC0}; return bytes(v, sizeof(v)); }
+    bool test_rax_rax() { static const uint8_t v[] = {0x48, 0x85, 0xC0}; return bytes(v, sizeof(v)); }
+    bool test_edx_imm32(uint32_t value)
+    {
+        return bytes(reinterpret_cast<const uint8_t*>("\xF7\xC2"), 2) && u32(value);
+    }
+    bool cmp_rdx_rcx() { static const uint8_t v[] = {0x48, 0x39, 0xCA}; return bytes(v, sizeof(v)); }
+    bool cmp_rdx_r8() { static const uint8_t v[] = {0x4C, 0x39, 0xC2}; return bytes(v, sizeof(v)); }
+    bool sub_rdx_rcx() { static const uint8_t v[] = {0x48, 0x29, 0xCA}; return bytes(v, sizeof(v)); }
+    bool cmp_r8d_imm32(uint32_t value)
+    {
+        return bytes(reinterpret_cast<const uint8_t*>("\x41\x81\xF8"), 3) && u32(value);
+    }
+    bool sub_r8d_imm32(uint32_t value)
+    {
+        return bytes(reinterpret_cast<const uint8_t*>("\x41\x81\xE8"), 3) && u32(value);
+    }
+    bool mov_local_rax64(int32_t displacement) { return mov_local_reg64(0, displacement); }
+    bool mov_local_rdx64(int32_t displacement) { return mov_local_reg64(2, displacement); }
+    bool mov_rax_local64(int32_t displacement) { return mov_reg_mem64(0, displacement); }
+    bool mov_rdx_ptr64(uint8_t displacement) { return mov_reg_ptr64(2, 0, displacement); }
+    bool mov_rcx_ptr64(uint8_t displacement) { return mov_reg_ptr64(1, 0, displacement); }
+    bool mov_r8d_ptr32(uint8_t displacement) { return mov_reg_ptr32(8, 0, displacement); }
+    bool mov_ecx_ptr32(uint8_t displacement) { return mov_reg_ptr32(1, 0, displacement); }
     bool push_rax()
     {
         if (!byte(0x50) || m_transientBytes > COMPILER_MAX_TRANSIENT_STACK_BYTES - 8U) return false;
@@ -220,6 +314,10 @@ public:
     {
         return bytes(reinterpret_cast<const uint8_t*>("\x3D"), 1) && u32(value);
     }
+    bool cmp_ecx_imm32(uint32_t value)
+    {
+        return bytes(reinterpret_cast<const uint8_t*>("\x81\xF9"), 2) && u32(value);
+    }
     bool inc_r14d() { return bytes(reinterpret_cast<const uint8_t*>("\x41\xFF\xC6"), 3); }
     bool dec_r14d() { return bytes(reinterpret_cast<const uint8_t*>("\x41\xFF\xCE"), 3); }
     bool set_runtime_failure(uint32_t status)
@@ -234,6 +332,12 @@ public:
         return bytes(reinterpret_cast<const uint8_t*>("\x45\x89\xF7"), 3) &&
                bytes(reinterpret_cast<const uint8_t*>("\x41\xC1\xE7\x08"), 4) &&
                bytes(reinterpret_cast<const uint8_t*>("\x41\x83\xCF\x02"), 4);
+    }
+    bool set_invalid_pointer_failure()
+    {
+        return bytes(reinterpret_cast<const uint8_t*>("\x45\x89\xF7"), 3) &&
+               bytes(reinterpret_cast<const uint8_t*>("\x41\xC1\xE7\x08"), 4) &&
+               bytes(reinterpret_cast<const uint8_t*>("\x41\x83\xCF\x03"), 4);
     }
     bool test_r15d() { return bytes(reinterpret_cast<const uint8_t*>("\x45\x85\xFF"), 3); }
 
@@ -250,6 +354,22 @@ public:
     {
         if (count > m_temporaryDepth) return false;
         m_temporaryDepth -= count;
+        return true;
+    }
+    bool acquire_pointer_temporary_slots(uint16_t count, uint16_t* base)
+    {
+        if (!base || count > COMPILER_MAX_POINTER_TEMPORARY_SLOTS ||
+            m_pointerTemporaryDepth > COMPILER_MAX_POINTER_TEMPORARY_SLOTS - count) return false;
+        *base = static_cast<uint16_t>(m_pointerTemporaryDepth);
+        m_pointerTemporaryDepth += count;
+        if (m_pointerTemporaryDepth > m_maxPointerTemporaryDepth)
+            m_maxPointerTemporaryDepth = m_pointerTemporaryDepth;
+        return true;
+    }
+    bool release_pointer_temporary_slots(uint16_t count)
+    {
+        if (count > m_pointerTemporaryDepth) return false;
+        m_pointerTemporaryDepth -= count;
         return true;
     }
 
@@ -314,6 +434,8 @@ public:
     bool emit_jl(uint16_t label) { return emit_branch(0x8C, label); }
     bool emit_jge(uint16_t label) { return emit_branch(0x8D, label); }
     bool emit_jae(uint16_t label) { return emit_branch(0x83, label); }
+    bool emit_jb(uint16_t label) { return emit_branch(0x82, label); }
+    bool emit_ja(uint16_t label) { return emit_branch(0x87, label); }
     bool emit_jmp(uint16_t label)
     {
         if (label >= m_labelCount || m_fixupCount >= COMPILER_MAX_BRANCH_FIXUPS) return false;
@@ -422,6 +544,8 @@ private:
     uint8_t m_rspMod16;
     uint16_t m_temporaryDepth;
     uint16_t m_maxTemporaryDepth;
+    uint16_t m_pointerTemporaryDepth;
+    uint16_t m_maxPointerTemporaryDepth;
     uint32_t m_transientBytes;
     uint32_t m_maxTransientBytes;
     RelocationRecord* m_relocations;
@@ -451,7 +575,8 @@ static bool is_legacy_single_log(const FunctionIR& function)
 static bool has_indexed_access(const FunctionIR& function)
 {
     for (uint32_t i = 0; i < function.expressionCount; ++i)
-        if (function.expressions[i].kind == ExpressionKind::LoadIndexed) return true;
+        if (function.expressions[i].kind == ExpressionKind::LoadIndexed ||
+            function.expressions[i].kind == ExpressionKind::AddressOfIndexed) return true;
     for (uint32_t i = 0; i < function.statementCount; ++i)
         if (function.statements[i].kind == StatementKind::StoreIndexed) return true;
     return false;
@@ -500,13 +625,16 @@ static bool required_temporary_slots(const FunctionIR& function, uint16_t index,
     }
     if (expression.kind == ExpressionKind::Constant ||
         expression.kind == ExpressionKind::LoadLocal ||
-        expression.kind == ExpressionKind::LoadGlobal) {
+        expression.kind == ExpressionKind::LoadGlobal ||
+        expression.kind == ExpressionKind::LoadPointer ||
+        expression.kind == ExpressionKind::AddressOfLocal ||
+        expression.kind == ExpressionKind::AddressOfGlobal) {
         *output = 0;
         return true;
     }
-    if (expression.kind == ExpressionKind::LoadIndexed)
+    if (expression.kind == ExpressionKind::LoadIndexed || expression.kind == ExpressionKind::AddressOfIndexed)
         return required_temporary_slots(function, expression.left, depth + 1U, output);
-    if (expression.kind == ExpressionKind::Negate)
+    if (expression.kind == ExpressionKind::Negate || expression.kind == ExpressionKind::LoadIndirectInt32)
         return required_temporary_slots(function, expression.left, depth + 1U, output);
     if (!required_temporary_slots(function, expression.left, depth + 1U, &left)) return false;
     if (!required_temporary_slots(function, expression.right, depth + 1U, &right)) return false;
@@ -522,11 +650,14 @@ static bool required_transient_stack_bytes(const FunctionIR& function, uint16_t 
     const Expression& expression = function.expressions[index];
     if (expression.kind == ExpressionKind::Constant ||
         expression.kind == ExpressionKind::LoadLocal ||
-        expression.kind == ExpressionKind::LoadGlobal) {
+        expression.kind == ExpressionKind::LoadGlobal ||
+        expression.kind == ExpressionKind::LoadPointer ||
+        expression.kind == ExpressionKind::AddressOfLocal ||
+        expression.kind == ExpressionKind::AddressOfGlobal) {
         *output = 0;
         return true;
     }
-    if (expression.kind == ExpressionKind::LoadIndexed)
+    if (expression.kind == ExpressionKind::LoadIndexed || expression.kind == ExpressionKind::AddressOfIndexed)
         return required_transient_stack_bytes(function, expression.left, depth + 1U, output);
     if (expression.kind == ExpressionKind::Call) {
         if (!function.calls || !function.callArguments || expression.callIndex >= function.callCount) return false;
@@ -543,7 +674,7 @@ static bool required_transient_stack_bytes(const FunctionIR& function, uint16_t 
         *output = maximum;
         return *output <= COMPILER_MAX_TRANSIENT_STACK_BYTES;
     }
-    if (expression.kind == ExpressionKind::Negate)
+    if (expression.kind == ExpressionKind::Negate || expression.kind == ExpressionKind::LoadIndirectInt32)
         return required_transient_stack_bytes(function, expression.left, depth + 1U, output);
 
     uint32_t left = 0, right = 0;
@@ -556,21 +687,197 @@ static bool required_transient_stack_bytes(const FunctionIR& function, uint16_t 
     return needed <= COMPILER_MAX_TRANSIENT_STACK_BYTES;
 }
 
-static bool required_statement_temporary_slots(const FunctionIR& function, uint16_t* output)
+static bool required_pointer_temporary_slots(const FunctionIR& function, uint16_t index,
+                                             uint32_t depth, uint16_t* output)
 {
-    if (!output) return false;
+    if (!output || index == COMPILER_INVALID_INDEX || index >= function.expressionCount ||
+        depth > COMPILER_MAX_EXPRESSION_NODES) return false;
+    const Expression& expression = function.expressions[index];
     *output = 0;
+    if (expression.kind == ExpressionKind::Constant ||
+        expression.kind == ExpressionKind::LoadLocal ||
+        expression.kind == ExpressionKind::LoadGlobal ||
+        expression.kind == ExpressionKind::LoadPointer ||
+        expression.kind == ExpressionKind::AddressOfLocal ||
+        expression.kind == ExpressionKind::AddressOfGlobal) return true;
+    if (expression.kind == ExpressionKind::AddressOfIndexed ||
+        expression.kind == ExpressionKind::LoadIndexed ||
+        expression.kind == ExpressionKind::Negate ||
+        expression.kind == ExpressionKind::LoadIndirectInt32)
+        return required_pointer_temporary_slots(function, expression.left, depth + 1U, output);
+    if (expression.kind == ExpressionKind::Call) {
+        if (!function.calls || !function.callArguments || expression.callIndex >= function.callCount) return false;
+        const CallSite& call = function.calls[expression.callIndex];
+        if (call.argumentCount > COMPILER_MAX_PARAMETERS ||
+            call.argumentStart + call.argumentCount > function.callArgumentCount) return false;
+        uint16_t maximum = 0;
+        uint16_t child = 0;
+        for (uint32_t i = 0; i < call.argumentCount; ++i) {
+            if (!required_pointer_temporary_slots(function,
+                    function.callArguments[call.argumentStart + i], depth + 1U, &child)) return false;
+            if (child > maximum) maximum = child;
+        }
+        uint16_t pointerArguments = 0;
+        for (uint32_t i = 0; i < call.argumentCount; ++i)
+            if (call.expectedParameterKinds[i] == ParameterKind::Int32Pointer) ++pointerArguments;
+        const uint32_t needed = static_cast<uint32_t>(maximum) + pointerArguments;
+        if (needed > COMPILER_MAX_POINTER_TEMPORARY_SLOTS) return false;
+        *output = static_cast<uint16_t>(needed);
+        return true;
+    }
+    uint16_t left = 0, right = 0;
+    if (!required_pointer_temporary_slots(function, expression.left, depth + 1U, &left) ||
+        !required_pointer_temporary_slots(function, expression.right, depth + 1U, &right)) return false;
+    *output = left > right ? left : right;
+    return true;
+}
+
+static bool required_statement_temporary_slots(const FunctionIR& function, uint16_t* output,
+                                               uint16_t* pointerOutput)
+{
+    if (!output || !pointerOutput) return false;
+    *output = 0;
+    *pointerOutput = 0;
     for (uint32_t i = 0; i < function.statementCount; ++i) {
         const Statement& statement = function.statements[i];
-        if (statement.kind != StatementKind::StoreIndexed) continue;
+        if (statement.kind != StatementKind::StoreIndexed &&
+            statement.kind != StatementKind::StoreIndirectInt32) continue;
         uint16_t right = 0;
         uint16_t index = 0;
-        if (!required_temporary_slots(function, statement.expression, 0, &right) ||
-            !required_temporary_slots(function, statement.indexExpression, 0, &index)) return false;
+        if (!required_temporary_slots(function, statement.expression, 0, &right)) return false;
+        if (statement.kind == StatementKind::StoreIndexed) {
+            if (!required_temporary_slots(function, statement.indexExpression, 0, &index)) return false;
+        } else if (!required_temporary_slots(function, statement.targetExpression, 0, &index)) return false;
         const uint32_t needed = 1U + (right > index ? right : index);
         if (needed > COMPILER_MAX_TEMPORARY_SLOTS) return false;
         if (needed > *output) *output = static_cast<uint16_t>(needed);
+        uint16_t rightPointers = 0;
+        uint16_t indexPointers = 0;
+        if (!required_pointer_temporary_slots(function, statement.expression, 0, &rightPointers) ||
+            !required_pointer_temporary_slots(function,
+                statement.kind == StatementKind::StoreIndexed ? statement.indexExpression : statement.targetExpression,
+                0, &indexPointers)) return false;
+        const uint16_t pointerNeeded = rightPointers > indexPointers ? rightPointers : indexPointers;
+        if (pointerNeeded > *pointerOutput) *pointerOutput = pointerNeeded;
     }
+    return true;
+}
+
+static bool emit_indexed_address(Emitter& emitter, const TranslationUnitIR& unit,
+                                 const FunctionIR& function, const FrameLayout& frame,
+                                 const uint16_t* functionLabels, uint16_t indexExpression,
+                                 IndexedBaseKind baseKind, uint16_t baseIndex,
+                                 uint16_t elementCount, SourceLocation location,
+                                 uint16_t boundsFailureLabel, uint16_t epilogueLabel,
+                                 uint16_t callFailureLabel);
+
+static bool emit_array_bounds_failure(Emitter& emitter, uint16_t epilogueLabel);
+
+static bool emit_zero_pointer_descriptor(Emitter& emitter, int32_t destination)
+{
+    return emitter.mov_eax_imm32(0) &&
+           emitter.mov_local_rax64(destination) &&
+           emitter.mov_local_rax64(destination + 8) &&
+           emitter.mov_local_eax(destination + 16) &&
+           emitter.mov_local_eax(destination + 20) &&
+           emitter.mov_local_eax(destination + 24) &&
+           emitter.mov_local_eax(destination + 28);
+}
+
+static bool emit_copy_pointer_descriptor(Emitter& emitter, int32_t destination)
+{
+    return emitter.mov_rdx_ptr64(0) && emitter.mov_local_rdx64(destination) &&
+           emitter.mov_rdx_ptr64(8) && emitter.mov_local_rdx64(destination + 8) &&
+           emitter.mov_rdx_ptr64(16) && emitter.mov_local_rdx64(destination + 16) &&
+           emitter.mov_rdx_ptr64(24) && emitter.mov_local_rdx64(destination + 24);
+}
+
+static bool emit_pointer_descriptor_metadata(Emitter& emitter, int32_t destination,
+                                              PointerProvenanceKind provenance)
+{
+    return emitter.mov_eax_imm32(4) && emitter.mov_local_eax(destination + 16) &&
+           emitter.mov_local_eax(destination + 20) &&
+           emitter.mov_eax_imm32(static_cast<uint32_t>(provenance)) &&
+           emitter.mov_local_eax(destination + 24) &&
+           emitter.mov_eax_imm32(1) && emitter.mov_local_eax(destination + 28);
+}
+
+static bool emit_pointer_failure(Emitter& emitter, uint16_t epilogueLabel)
+{
+    return emitter.mov_eax_imm32(0) && emitter.set_invalid_pointer_failure() &&
+           emitter.emit_jmp(epilogueLabel);
+}
+
+static bool emit_pointer_validation(Emitter& emitter, uint16_t failureLabel)
+{
+    // RAX points at the descriptor.  Validate the descriptor fields before
+    // loading the user storage address in RDX.
+    return emitter.test_rax_rax() && emitter.emit_jz(failureLabel) &&
+           emitter.mov_ecx_ptr32(28) && emitter.cmp_ecx_imm32(1) && emitter.emit_jnz(failureLabel) &&
+           emitter.mov_ecx_ptr32(20) && emitter.cmp_ecx_imm32(4) && emitter.emit_jnz(failureLabel) &&
+           emitter.mov_r8d_ptr32(16) && emitter.cmp_r8d_imm32(4) && emitter.emit_jb(failureLabel) &&
+           emitter.mov_rdx_ptr64(0) && emitter.mov_rcx_ptr64(8) &&
+           emitter.cmp_rdx_rcx() && emitter.emit_jb(failureLabel) &&
+           emitter.test_edx_imm32(3) && emitter.emit_jnz(failureLabel) &&
+           emitter.sub_rdx_rcx() && emitter.sub_r8d_imm32(4) &&
+           emitter.cmp_rdx_r8() && emitter.emit_ja(failureLabel);
+}
+
+static bool emit_address_of(Emitter& emitter, const TranslationUnitIR& unit,
+                            const FunctionIR& function, const FrameLayout& frame,
+                            const uint16_t* functionLabels, const Expression& expression,
+                            uint16_t epilogueLabel, uint16_t callFailureLabel)
+{
+    if (frame.pointerScratchDisplacement == 0) return false;
+    const int32_t scratch = frame.pointerScratchDisplacement;
+    if (expression.kind == ExpressionKind::AddressOfLocal) {
+        bool scalar = false;
+        for (uint32_t i = 0; i < function.localCount; ++i)
+            if (function.locals[i].slot == expression.localIndex)
+                scalar = function.locals[i].kind == StorageKind::ScalarInt;
+        if (!scalar || !emitter.lea_rax_local(local_displacement(expression.localIndex)) ||
+            !emitter.mov_local_rax64(scratch) || !emitter.mov_local_rax64(scratch + 8) ||
+            !emit_pointer_descriptor_metadata(emitter, scratch, PointerProvenanceKind::LocalScalar) ||
+            !emitter.lea_rax_local(scratch)) return false;
+        return true;
+    }
+    if (expression.kind == ExpressionKind::AddressOfGlobal) {
+        if (expression.globalIndex >= unit.globalCount ||
+            unit.globals[expression.globalIndex].kind != StorageKind::ScalarInt ||
+            !emitter.emit_global_data_address(unit.globals[expression.globalIndex].name, expression.location) ||
+            !emitter.mov_local_rdx64(scratch) || !emitter.mov_local_rdx64(scratch + 8) ||
+            !emit_pointer_descriptor_metadata(emitter, scratch, PointerProvenanceKind::GlobalScalar) ||
+            !emitter.lea_rax_local(scratch)) return false;
+        return true;
+    }
+    if (expression.kind != ExpressionKind::AddressOfIndexed || expression.elementCount == 0 ||
+        expression.elementSize != 4 || !functionLabels) return false;
+    if (expression.indexedBaseKind == IndexedBaseKind::Local) {
+        if (expression.localIndex >= function.parameterStorageBytes / 4U + function.localStorageBytes / 4U) return false;
+    } else if (expression.globalIndex >= unit.globalCount ||
+               unit.globals[expression.globalIndex].kind != StorageKind::ArrayInt) {
+        return false;
+    }
+    uint16_t boundsFailureLabel = COMPILER_INVALID_INDEX;
+    uint16_t endLabel = COMPILER_INVALID_INDEX;
+    if (!emitter.create_label(&boundsFailureLabel) || !emitter.create_label(&endLabel) ||
+        !emit_indexed_address(emitter, unit, function, frame, functionLabels,
+                              expression.left, expression.indexedBaseKind,
+                              expression.indexedBaseKind == IndexedBaseKind::Local
+                                  ? expression.localIndex : expression.globalIndex,
+                              expression.elementCount, expression.location,
+                              boundsFailureLabel, epilogueLabel, callFailureLabel) ||
+        // With pointer arithmetic deferred, an array-element pointer is
+        // represented as the current element with a one-element extent.
+        !emitter.mov_local_rdx64(scratch) || !emitter.mov_local_rdx64(scratch + 8) ||
+        !emitter.mov_eax_imm32(4) ||
+        !emitter.mov_local_eax(scratch + 16) || !emitter.mov_local_eax(scratch + 20) ||
+        !emitter.mov_eax_imm32(static_cast<uint32_t>(expression.indexedBaseKind == IndexedBaseKind::Local
+            ? PointerProvenanceKind::LocalArrayElement : PointerProvenanceKind::GlobalArrayElement)) ||
+        !emitter.mov_local_eax(scratch + 24) || !emitter.mov_eax_imm32(1) ||
+        !emitter.mov_local_eax(scratch + 28) || !emitter.emit_jmp(endLabel) ||
+        !emitter.define_label(boundsFailureLabel) || !emit_array_bounds_failure(emitter, epilogueLabel) ||
+        !emitter.define_label(endLabel) || !emitter.lea_rax_local(scratch)) return false;
     return true;
 }
 
@@ -594,7 +901,7 @@ static bool emit_indexed_address(Emitter& emitter, const TranslationUnitIR& unit
         !emitter.cmp_eax_imm32(elementCount) || !emitter.emit_jge(boundsFailureLabel) ||
         !emitter.movsxd_rax_eax()) return false;
     if (baseKind == IndexedBaseKind::Local) {
-        if (baseIndex >= function.integerParameterCount + function.localStorageBytes / 4U)
+        if (baseIndex >= function.parameterStorageBytes / 4U + function.localStorageBytes / 4U)
             return false;
         return emitter.lea_rdx_local_rax(local_displacement(baseIndex));
     }
@@ -648,17 +955,33 @@ static bool emit_expression(Emitter& emitter, const TranslationUnitIR& unit,
             call.argumentStart + call.argumentCount > function.callArgumentCount ||
             (!call.external && functionLabels[call.calleeFunction] == COMPILER_INVALID_INDEX)) return false;
         uint16_t base = 0;
-        if (!emitter.acquire_temporary_slots(call.argumentCount, &base)) return false;
+        uint16_t pointerBase = 0;
+        uint16_t pointerArgumentCount = 0;
+        for (uint32_t i = 0; i < call.argumentCount; ++i)
+            if (call.expectedParameterKinds[i] == ParameterKind::Int32Pointer) ++pointerArgumentCount;
+        if (!emitter.acquire_temporary_slots(call.argumentCount, &base) ||
+            !emitter.acquire_pointer_temporary_slots(pointerArgumentCount, &pointerBase)) return false;
+        uint16_t pointerArgumentIndex = 0;
         for (uint32_t i = 0; i < call.argumentCount; ++i) {
             if (!emit_expression(emitter, unit, function, frame, functionLabels,
                                  function.callArguments[call.argumentStart + i],
-                                 epilogueLabel, callFailureLabel) ||
-                !emitter.mov_local_eax(temporary_displacement(frame, static_cast<uint16_t>(base + i)))) return false;
+                                 epilogueLabel, callFailureLabel)) return false;
+            if (call.expectedParameterKinds[i] == ParameterKind::Int32Pointer) {
+                if (!emit_copy_pointer_descriptor(emitter,
+                        pointer_temporary_displacement(frame, pointerArgumentIndex++))) return false;
+            } else if (!emitter.mov_local_eax(temporary_displacement(frame, static_cast<uint16_t>(base + i)))) {
+                return false;
+            }
         }
         static const uint8_t argumentRegisters[] = {1, 2, 8, 9}; // ECX, EDX, R8D, R9D
-        for (uint32_t i = 0; i < call.argumentCount; ++i)
-            if (!emitter.mov_reg_mem32(argumentRegisters[i],
-                                       temporary_displacement(frame, static_cast<uint16_t>(base + i)))) return false;
+        pointerArgumentIndex = 0;
+        for (uint32_t i = 0; i < call.argumentCount; ++i) {
+            if (call.expectedParameterKinds[i] == ParameterKind::Int32Pointer) {
+                if (!emitter.lea_reg_local64(argumentRegisters[i],
+                        pointer_temporary_displacement(frame, pointerArgumentIndex++))) return false;
+            } else if (!emitter.mov_reg_mem32(argumentRegisters[i],
+                       temporary_displacement(frame, static_cast<uint16_t>(base + i)))) return false;
+        }
         if (callFailureLabel == COMPILER_INVALID_INDEX || epilogueLabel == COMPILER_INVALID_INDEX) return false;
         const uint32_t reserve = emitter.call_stack_reserve();
         if (!emitter.cmp_r14d_imm32(COMPILER_MAX_RUNTIME_CALL_DEPTH) ||
@@ -671,14 +994,25 @@ static bool emit_expression(Emitter& emitter, const TranslationUnitIR& unit,
         }
         return
             emitter.add_rsp(reserve) && emitter.test_r15d() && emitter.emit_jnz(epilogueLabel) &&
+            emitter.release_pointer_temporary_slots(pointerArgumentCount) &&
             emitter.release_temporary_slots(call.argumentCount);
     }
     switch (expression.kind) {
         case ExpressionKind::Constant:
             return emitter.mov_eax_imm32(static_cast<uint32_t>(expression.value));
         case ExpressionKind::LoadLocal:
-            if (expression.localIndex >= function.integerParameterCount + function.localStorageBytes / 4U) return false;
+            if (expression.localIndex >= function.parameterStorageBytes / 4U + function.localStorageBytes / 4U) return false;
             return emitter.mov_eax_local(local_displacement(expression.localIndex));
+        case ExpressionKind::LoadPointer: {
+            bool pointerSlot = false;
+            for (uint32_t p = 0; p < function.parameterCount; ++p)
+                if (function.parameters[p].slot == expression.localIndex &&
+                    function.parameters[p].kind == ParameterKind::Int32Pointer) pointerSlot = true;
+            for (uint32_t l = 0; l < function.localCount; ++l)
+                if (function.locals[l].slot == expression.localIndex &&
+                    function.locals[l].kind == StorageKind::PointerInt) pointerSlot = true;
+            return pointerSlot && emitter.lea_rax_local(local_displacement(expression.localIndex));
+        }
         case ExpressionKind::LoadGlobal:
             if (expression.globalIndex >= unit.globalCount) return false;
             return emitter.emit_global_data_address(unit.globals[expression.globalIndex].name,
@@ -696,6 +1030,23 @@ static bool emit_expression(Emitter& emitter, const TranslationUnitIR& unit,
                 !emitter.mov_eax_rax() || !emitter.emit_jmp(endLabel) ||
                 !emitter.define_label(boundsFailureLabel) ||
                 !emit_array_bounds_failure(emitter, epilogueLabel) ||
+                !emitter.define_label(endLabel)) return false;
+            return true;
+        }
+        case ExpressionKind::AddressOfLocal:
+        case ExpressionKind::AddressOfGlobal:
+        case ExpressionKind::AddressOfIndexed:
+            return emit_address_of(emitter, unit, function, frame, functionLabels, expression,
+                                   epilogueLabel, callFailureLabel);
+        case ExpressionKind::LoadIndirectInt32: {
+            uint16_t failureLabel = COMPILER_INVALID_INDEX;
+            uint16_t endLabel = COMPILER_INVALID_INDEX;
+            if (!emitter.create_label(&failureLabel) || !emitter.create_label(&endLabel) ||
+                !emit_expression(emitter, unit, function, frame, functionLabels, expression.left,
+                                 epilogueLabel, callFailureLabel) ||
+                !emit_pointer_validation(emitter, failureLabel) ||
+                !emitter.mov_rdx_ptr64(0) || !emitter.mov_eax_rax() || !emitter.emit_jmp(endLabel) ||
+                !emitter.define_label(failureLabel) || !emit_pointer_failure(emitter, epilogueLabel) ||
                 !emitter.define_label(endLabel)) return false;
             return true;
         }
@@ -746,12 +1097,34 @@ static bool emit_statement(Emitter& emitter, const TranslationUnitIR& unit, cons
                            uint32_t depth, uint32_t loopDepth)
 {
     switch (statement.kind) {
-        case StatementKind::DeclareLocal:
-        case StatementKind::StoreLocal:
-            return statement.localIndex < function.integerParameterCount + function.localStorageBytes / 4U &&
+        case StatementKind::DeclareLocal: {
+            const LocalSymbol* local = nullptr;
+            for (uint32_t i = 0; i < function.localCount; ++i)
+                if (function.locals[i].slot == statement.localIndex) local = &function.locals[i];
+            if (!local) return false;
+            if (local->kind == StorageKind::PointerInt) {
+                if (statement.expression == COMPILER_INVALID_INDEX)
+                    return emit_zero_pointer_descriptor(emitter,
+                                                        local_displacement(statement.localIndex));
+                return emit_expression(emitter, unit, function, frame, functionLabels, statement.expression,
+                                       epilogueLabel, callFailureLabel) &&
+                    emit_copy_pointer_descriptor(emitter, local_displacement(statement.localIndex));
+            }
+            return statement.expression != COMPILER_INVALID_INDEX &&
                 emit_expression(emitter, unit, function, frame, functionLabels, statement.expression,
                                 epilogueLabel, callFailureLabel) &&
                 emitter.mov_local_eax(local_displacement(statement.localIndex));
+        }
+        case StatementKind::StoreLocal:
+            return statement.localIndex < function.parameterStorageBytes / 4U + function.localStorageBytes / 4U &&
+                emit_expression(emitter, unit, function, frame, functionLabels, statement.expression,
+                                epilogueLabel, callFailureLabel) &&
+                emitter.mov_local_eax(local_displacement(statement.localIndex));
+        case StatementKind::StorePointer:
+            return statement.localIndex < function.parameterStorageBytes / 4U + function.localStorageBytes / 4U &&
+                emit_expression(emitter, unit, function, frame, functionLabels, statement.expression,
+                                epilogueLabel, callFailureLabel) &&
+                emit_copy_pointer_descriptor(emitter, local_displacement(statement.localIndex));
         case StatementKind::StoreGlobal:
             if (statement.globalIndex >= unit.globalCount) return false;
             return emit_expression(emitter, unit, function, frame, functionLabels, statement.expression,
@@ -779,6 +1152,25 @@ static bool emit_statement(Emitter& emitter, const TranslationUnitIR& unit, cons
                 !emit_array_bounds_failure(emitter, epilogueLabel) ||
                 !emitter.define_label(endLabel) ||
                 !emitter.release_temporary_slots(1)) return false;
+            return true;
+        }
+        case StatementKind::StoreIndirectInt32: {
+            uint16_t temporaryBase = 0;
+            if (!emitter.acquire_temporary_slots(1, &temporaryBase) ||
+                !emit_expression(emitter, unit, function, frame, functionLabels, statement.expression,
+                                 epilogueLabel, callFailureLabel) ||
+                !emitter.mov_local_eax(temporary_displacement(frame, temporaryBase))) return false;
+            uint16_t failureLabel = COMPILER_INVALID_INDEX;
+            uint16_t endLabel = COMPILER_INVALID_INDEX;
+            if (!emitter.create_label(&failureLabel) || !emitter.create_label(&endLabel) ||
+                !emit_expression(emitter, unit, function, frame, functionLabels, statement.targetExpression,
+                                 epilogueLabel, callFailureLabel) ||
+                !emit_pointer_validation(emitter, failureLabel) ||
+                !emitter.mov_rdx_ptr64(0) ||
+                !emitter.mov_eax_local(temporary_displacement(frame, temporaryBase)) ||
+                !emitter.mov_rax_eax() || !emitter.emit_jmp(endLabel) ||
+                !emitter.define_label(failureLabel) || !emit_pointer_failure(emitter, epilogueLabel) ||
+                !emitter.define_label(endLabel) || !emitter.release_temporary_slots(1)) return false;
             return true;
         }
         case StatementKind::EvaluateExpression:
@@ -906,12 +1298,15 @@ bool calculate_frame_layout(uint32_t localCount, FrameLayout* output)
     output->localBytes = localBytes;
     output->parameterBytes = 0;
     output->temporaryBytes = 0;
+    output->pointerTemporaryBytes = 0;
     output->variableBytes = localBytes;
     output->transientBytes = 0;
     output->activationBytes = native_elf::NATIVE_ELF_RETURN_ADDRESS_BYTES +
         native_elf::NATIVE_ELF_SAVED_RBP_BYTES + frameBytes +
         native_elf::NATIVE_ELF_MAX_OUTGOING_CALL_RESERVE_BYTES;
     output->temporarySlots = 0;
+    output->pointerTemporarySlots = 0;
+    output->pointerScratchDisplacement = 0;
     return true;
 }
 
@@ -927,14 +1322,27 @@ bool calculate_frame_layout(uint32_t parameterCount, uint32_t localCount,
                             uint32_t temporarySlots, bool hasContext,
                             uint32_t transientBytes, FrameLayout* output)
 {
-    if (!output || parameterCount > COMPILER_MAX_PARAMETERS ||
-        localCount > COMPILER_MAX_LOCAL_STORAGE_BYTES / 4U ||
+    if (parameterCount > COMPILER_MAX_PARAMETERS) return false;
+    return calculate_pointer_frame_layout(parameterCount * 4U, localCount * 4U,
+                                          temporarySlots, 0, hasContext,
+                                          transientBytes, false, output);
+}
+
+bool calculate_pointer_frame_layout(uint32_t parameterBytes, uint32_t localBytes,
+                                    uint32_t temporarySlots, uint32_t pointerTemporarySlots,
+                                    bool hasContext, uint32_t transientBytes,
+                                    bool pointerScratch, FrameLayout* output)
+{
+    if (!output || parameterBytes > COMPILER_MAX_PARAMETERS * COMPILER_POINTER_DESCRIPTOR_BYTES ||
+        localBytes > COMPILER_MAX_LOCAL_STORAGE_BYTES ||
         temporarySlots > COMPILER_MAX_TEMPORARY_SLOTS ||
+        pointerTemporarySlots > COMPILER_MAX_POINTER_TEMPORARY_SLOTS ||
         transientBytes > COMPILER_MAX_TRANSIENT_STACK_BYTES) return false;
-    const uint32_t parameterBytes = parameterCount * 4U;
-    const uint32_t localBytes = localCount * 4U;
     const uint32_t temporaryBytes = temporarySlots * 4U;
-    const uint32_t requested = 40U + parameterBytes + localBytes + temporaryBytes;
+    const uint32_t pointerTemporaryBytes = pointerTemporarySlots * COMPILER_POINTER_DESCRIPTOR_BYTES;
+    const uint32_t scratchBytes = pointerScratch ? COMPILER_POINTER_DESCRIPTOR_BYTES : 0U;
+    const uint32_t requested = 40U + parameterBytes + localBytes + temporaryBytes +
+        pointerTemporaryBytes + scratchBytes;
     uint32_t frameBytes = 0;
     if (!align16(requested, &frameBytes)) return false;
     output->frameBytes = frameBytes;
@@ -943,12 +1351,18 @@ bool calculate_frame_layout(uint32_t parameterCount, uint32_t localCount,
     output->localBytes = localBytes;
     output->parameterBytes = parameterBytes;
     output->temporaryBytes = temporaryBytes;
+    output->pointerTemporaryBytes = pointerTemporaryBytes;
     output->variableBytes = parameterBytes + localBytes;
     output->transientBytes = transientBytes;
     output->activationBytes = native_elf::NATIVE_ELF_RETURN_ADDRESS_BYTES +
         native_elf::NATIVE_ELF_SAVED_RBP_BYTES + frameBytes + transientBytes +
         native_elf::NATIVE_ELF_MAX_OUTGOING_CALL_RESERVE_BYTES;
     output->temporarySlots = static_cast<uint16_t>(temporarySlots);
+    output->pointerTemporarySlots = static_cast<uint16_t>(pointerTemporarySlots);
+    output->pointerScratchDisplacement = pointerScratch
+        ? -static_cast<int32_t>(parameterBytes + localBytes + (hasContext ? 8U : 0U) +
+                                8U + temporaryBytes + pointerTemporaryBytes + scratchBytes)
+        : 0;
     return output->activationBytes <= COMPILER_MAX_GENERATED_ACTIVATION_STACK_COST;
 }
 
@@ -984,8 +1398,10 @@ static bool emit_translation_unit_impl(const TranslationUnitIR& unit, uint64_t r
             function.statementCount > COMPILER_MAX_STATEMENTS || function.blockCount > COMPILER_MAX_BLOCKS ||
             function.expressionCount > COMPILER_MAX_EXPRESSION_NODES ||
             function.localStorageBytes > COMPILER_MAX_LOCAL_STORAGE_BYTES ||
+            function.parameterStorageBytes > COMPILER_MAX_PARAMETERS * COMPILER_POINTER_DESCRIPTOR_BYTES ||
             function.stringCount > COMPILER_MAX_STRING_LITERALS ||
-            function.usesAppContext != (function.parameterCount == 1 && function.integerParameterCount == 0) ||
+            function.usesAppContext != (function.parameterCount == 1 &&
+                                        function.parameters[0].kind == ParameterKind::AppContextPointer) ||
             (function.callCount != 0 && !function.calls) ||
             (function.callArgumentCount != 0 && !function.callArguments)) return false;
         const uint32_t logs = host_log_count(function);
@@ -1012,13 +1428,29 @@ static bool emit_translation_unit_impl(const TranslationUnitIR& unit, uint64_t r
             if (expressionTransient > transientBytes) transientBytes = expressionTransient;
         }
         uint16_t statementNeeded = 0;
-        if (!required_statement_temporary_slots(unit.functions[i], &statementNeeded)) return false;
+        uint16_t statementPointerNeeded = 0;
+        if (!required_statement_temporary_slots(unit.functions[i], &statementNeeded,
+                                                 &statementPointerNeeded)) return false;
         if (statementNeeded > needed) needed = statementNeeded;
+        uint16_t pointerNeeded = 0;
+        for (uint32_t e = 0; e < unit.functions[i].expressionCount; ++e) {
+            uint16_t expressionPointerNeeded = 0;
+            if (!required_pointer_temporary_slots(unit.functions[i], static_cast<uint16_t>(e), 0,
+                                                   &expressionPointerNeeded)) return false;
+            if (expressionPointerNeeded > pointerNeeded) pointerNeeded = expressionPointerNeeded;
+        }
+        if (statementPointerNeeded > pointerNeeded) pointerNeeded = statementPointerNeeded;
+        bool pointerScratch = false;
+        for (uint32_t e = 0; e < unit.functions[i].expressionCount; ++e) {
+            const ExpressionKind kind = unit.functions[i].expressions[e].kind;
+            if (kind == ExpressionKind::AddressOfLocal || kind == ExpressionKind::AddressOfGlobal ||
+                kind == ExpressionKind::AddressOfIndexed) pointerScratch = true;
+        }
         if (needed > COMPILER_MAX_TEMPORARY_SLOTS ||
-            !calculate_frame_layout(unit.functions[i].integerParameterCount,
-                                     unit.functions[i].localStorageBytes / 4U,
-                                     needed, unit.functions[i].usesAppContext, transientBytes,
-                                     &frames[i])) return false;
+            !calculate_pointer_frame_layout(unit.functions[i].parameterStorageBytes,
+                                            unit.functions[i].localStorageBytes,
+                                            needed, pointerNeeded, unit.functions[i].usesAppContext,
+                                            transientBytes, pointerScratch, &frames[i])) return false;
     }
     // The old one-function fast paths are retained exactly for regression
     // coverage.  All multi-function units use the framed path below.
@@ -1059,8 +1491,16 @@ static bool emit_translation_unit_impl(const TranslationUnitIR& unit, uint64_t r
         if (i == unit.entryFunction && !emitter.initialize_runtime_state()) return false;
         if (function.usesAppContext && !emitter.mov_context_local(frame.contextDisplacement)) return false;
         static const uint8_t argumentRegisters[] = {1, 2, 8, 9};
-        for (uint32_t p = 0; p < function.integerParameterCount; ++p)
-            if (!emitter.mov_reg_local32(argumentRegisters[p], local_displacement(static_cast<uint16_t>(p)))) return false;
+        for (uint32_t p = 0; p < function.parameterCount; ++p) {
+            if (function.parameters[p].kind == ParameterKind::Integer) {
+                if (!emitter.mov_reg_local32(argumentRegisters[p],
+                                             local_displacement(function.parameters[p].slot))) return false;
+            } else if (function.parameters[p].kind == ParameterKind::Int32Pointer) {
+                if (!emitter.mov_rax_reg64(argumentRegisters[p]) ||
+                    !emit_copy_pointer_descriptor(emitter,
+                                                  local_displacement(function.parameters[p].slot))) return false;
+            }
+        }
         uint16_t epilogueLabel = COMPILER_INVALID_INDEX;
         uint16_t callFailureLabel = COMPILER_INVALID_INDEX;
         if (!emitter.create_label(&epilogueLabel) ||

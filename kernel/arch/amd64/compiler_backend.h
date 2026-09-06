@@ -23,10 +23,13 @@ struct FrameLayout {
     uint32_t localBytes;
     uint32_t parameterBytes;
     uint32_t temporaryBytes;
+    uint32_t pointerTemporaryBytes;
     uint32_t variableBytes;
     uint32_t transientBytes;
     uint32_t activationBytes;
     uint16_t temporarySlots;
+    uint16_t pointerTemporarySlots;
+    int32_t pointerScratchDisplacement;
 };
 
 // Calculate an AMD64 signed rel32 displacement without allowing unsigned
@@ -45,6 +48,11 @@ bool calculate_frame_layout(uint32_t parameterCount, uint32_t localCount,
 bool calculate_frame_layout(uint32_t parameterCount, uint32_t localCount,
                             uint32_t temporarySlots, bool hasContext,
                             uint32_t transientBytes, FrameLayout* output);
+
+bool calculate_pointer_frame_layout(uint32_t parameterBytes, uint32_t localBytes,
+                                    uint32_t temporarySlots, uint32_t pointerTemporarySlots,
+                                    bool hasContext, uint32_t transientBytes,
+                                    bool pointerScratch, FrameLayout* output);
 
 bool emit_translation_unit(const TranslationUnitIR& unit,
                            uint64_t readOnlyDataAddress,

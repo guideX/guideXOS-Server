@@ -119,6 +119,7 @@ const char* token_kind_name(TokenKind kind)
         case TokenKind::LogicalOr: return "'||'";
         case TokenKind::LeftBracket: return "'['";
         case TokenKind::RightBracket: return "']'";
+        case TokenKind::Ampersand: return "'&'";
         default: return "unknown";
     }
 }
@@ -284,9 +285,7 @@ bool lex_source(const char* source, uint32_t sourceLength, Token* tokens,
                 if (index + 1 < sourceLength && source[index + 1] == '&') {
                     kind = TokenKind::LogicalAnd; tokenLength = 2;
                 } else {
-                    diagnostics.error(location, "unexpected '&'; logical AND is '&&'", "'&'");
-                    advance(source, sourceLength, &index, &line, &column);
-                    return false;
+                    kind = TokenKind::Ampersand;
                 }
                 break;
             case '|':

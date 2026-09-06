@@ -735,13 +735,12 @@ int main()
     uint32_t invalidOperatorTokenCount = 0;
     Diagnostics singleAndDiagnostics;
     Diagnostics singleOrDiagnostics;
-    if (!require(!lex_source(singleAnd, static_cast<uint32_t>(std::strlen(singleAnd)),
-                             invalidOperatorTokens, COMPILER_MAX_TOKENS,
-                             &invalidOperatorTokenCount, singleAndDiagnostics) &&
-                 singleAndDiagnostics.count() != 0 &&
-                 std::strcmp(singleAndDiagnostics.at(0).message,
-                             "unexpected '&'; logical AND is '&&'") == 0,
-                 "single ampersand is rejected with a focused diagnostic")) return 1;
+    if (!require(lex_source(singleAnd, static_cast<uint32_t>(std::strlen(singleAnd)),
+                            invalidOperatorTokens, COMPILER_MAX_TOKENS,
+                            &invalidOperatorTokenCount, singleAndDiagnostics) &&
+                 invalidOperatorTokenCount != 0 &&
+                 invalidOperatorTokens[10].kind == TokenKind::Ampersand,
+                 "single ampersand is tokenized for address-of")) return 1;
     if (!require(!lex_source(singleOr, static_cast<uint32_t>(std::strlen(singleOr)),
                              invalidOperatorTokens, COMPILER_MAX_TOKENS,
                              &invalidOperatorTokenCount, singleOrDiagnostics) &&

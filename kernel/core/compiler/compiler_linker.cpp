@@ -265,6 +265,8 @@ bool link_modules(const CompiledModule* modules, uint32_t moduleCount,
             copy_name(global.name, sizeof(global.name), exportSymbol.name);
             global.moduleIndex = static_cast<uint16_t>(m);
             global.parameterCount = exportSymbol.parameterCount;
+            for (uint32_t p = 0; p < exportSymbol.parameterCount; ++p)
+                global.parameterKinds[p] = exportSymbol.parameterKinds[p];
             global.moduleCodeOffset = exportSymbol.moduleCodeOffset;
             global.moduleDataOffset = exportSymbol.moduleDataOffset;
             global.size = exportSymbol.size;
@@ -342,7 +344,10 @@ bool link_modules(const CompiledModule* modules, uint32_t moduleCount,
                 return report_kind_conflict(importSymbol.location, importSymbol.name, diagnostics);
             }
             if (importSymbol.kind == SymbolKind::Function) {
-                if (definition.parameterCount != importSymbol.expectedParameterCount) {
+                bool sameSignature = definition.parameterCount == importSymbol.expectedParameterCount;
+                for (uint32_t p = 0; sameSignature && p < importSymbol.expectedParameterCount; ++p)
+                    sameSignature = definition.parameterKinds[p] == importSymbol.parameterKinds[p];
+                if (!sameSignature) {
                     diagnostics.error_identifier(importSymbol.location, "conflicting declaration for function ",
                                                   importSymbol.name, name_length(importSymbol.name), "function");
                     return false;
