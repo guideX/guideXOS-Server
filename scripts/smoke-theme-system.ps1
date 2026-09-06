@@ -97,6 +97,8 @@ $compositor = Join-Path $Root "compositor.cpp"
 $kernelDesktop = Join-Path $Root "kernel\core\desktop.cpp"
 $kernelApps = Join-Path $Root "kernel\core\kernel_apps.cpp"
 $kernelCompositor = Join-Path $Root "kernel\core\kernel_compositor.cpp"
+$diskManager = Join-Path $Root "disk_manager.cpp"
+$diskManagerHeader = Join-Path $Root "disk_manager.h"
 $windowRenderer = Join-Path $Root "window_renderer.h"
 $startupSync = Join-Path $Root "scripts\smoke-desktop-startup-sync.ps1"
 $controlThemeHeader = Join-Path $Root "desktop_control_theme.h"
@@ -140,6 +142,21 @@ $phase10DSafetyMatch = Find-FirstMatch $planDoc 'No device was disabled'
 $phase10DSafetyOwnershipMatch = Find-FirstMatch $planDoc 'Driver, PCI'
 $phase10DNoNewRoleMatch = Find-FirstMatch $planDoc 'No new reusable role or API was necessary'
 $phase10DNoLocalPaletteMatch = Find-FirstMatch $planDoc 'No Device Manager-specific Sci-Fi'
+$phase10EHeadingMatch = Find-FirstMatch $planDoc '## Phase 10E - Disk Manager Interior Sci-Fi Theming'
+$phase10EOwnershipMatch = Find-RawMatch $planDoc 'Hosted Disk Manager is\s+.*?`disk_manager\.cpp`.*?Bare-metal\s+Disk\s+Manager is\s+`kernel::apps::DiskManagerApp`'
+$phase10EModelMatch = Find-RawMatch $planDoc 'left disk\s+list.*?Volumes table.*?partition map'
+$phase10ESafetyMatch = Find-RawMatch $planDoc 'does not format disks.*?Create Partition.*?no destructive action is needed'
+$phase10ELimitationsMatch = Find-RawMatch $planDoc 'Neither implementation has a hosted or bare-metal scrollbar.*?context\s+menu.*?per-partition selection model'
+$diskHostedAccessorMatch = Find-FirstMatch $diskManager 'GetDesktopControlTheme\(GetCurrentDesktopTheme\(\)\)'
+$diskHostedHeaderMatch = Find-FirstMatch $diskManager 'tableHeaderBackground|tableHeaderText'
+$diskHostedSelectionMatch = Find-FirstMatch $diskManager 'DesktopSelectionColor'
+$diskHostedButtonMatch = Find-FirstMatch $diskManager 'DesktopControlFillColor|DesktopControlBorderColor|DesktopControlTextColor'
+$diskHostedWarningMatch = Find-FirstMatch $diskManager 'roles\.statusWarning'
+$diskHostedSurfaceMatch = Find-RawMatch $diskManager 'drawVolumesGrid\(.*?drawMountsSection\(.*?drawPartitionMap\(.*?drawActions\('
+$diskHostedStatusMatch = Find-RawMatch $diskManager 'diskManagerStatusTextColor.*?roles\.statusWarning.*?roles\.controlHoverBorder'
+$diskHostedReadOnlyMatch = Find-RawMatch $diskManager 'tryFormatFAT\(\).*?Format is disabled.*?tryCreatePartitionLargestFree\(\).*?MBR writes are read-only'
+$diskBareMetalRolesMatch = Find-RawMatch $kernelApps 'DiskManagerApp::draw\(.*?GetBareMetalControlTheme.*?DesktopSelectionColor.*?tableHeaderBackground.*?roles\.separator'
+$diskClassicFallbackMatch = Find-RawMatch $diskManager 'const uint32_t classicColor = hover \? 0xFF3A3A3Au : 0xFF323232u.*?0xFF262626u'
 $displayOptionsThemeHelperMatch = Find-FirstMatch $displayOptions 'IsSciFiThemeActive|DisplayOptionsBodyColor|DisplayOptionsPanelColor|DisplayOptionsCardColor|DisplayOptionsButtonFillColor|DisplayOptionsButtonBorderColor|DisplayOptionsTextColor|DisplayOptionsMutedTextColor|DisplayOptionsAccentColor'
 $displayOptionsThemeFieldMatch = Find-FirstMatch $displayOptions 'windowBackground|windowBorder|accent|mutedAccent|taskbarBackground|taskbarBorder|titleBarText'
 $displayOptionsTextColorMatch = Find-FirstMatch $displayOptions 'MT_DrawTextAtColor|DisplayOptionsMutedTextColor\(\)|DisplayOptionsTextColor\(\)'
@@ -622,7 +639,29 @@ $checks = @(
     [pscustomobject]@{ Name = "phase 10c shared roles documented"; Pass = $null -ne $phase10CSharedRolesMatch; Match = $phase10CSharedRolesMatch },
     [pscustomobject]@{ Name = "phase 10c Classic and Sci-Fi boundaries documented"; Pass = $null -ne $phase10CClassicMatch; Match = $phase10CClassicMatch },
     [pscustomobject]@{ Name = "phase 10c validation paths documented"; Pass = $null -ne $phase10CValidationMatch; Match = $phase10CValidationMatch },
-    [pscustomobject]@{ Name = "phase 10c feature boundaries documented"; Pass = $null -ne $phase10CBoundaryMatch; Match = $phase10CBoundaryMatch }
+    [pscustomobject]@{ Name = "phase 10c feature boundaries documented"; Pass = $null -ne $phase10CBoundaryMatch; Match = $phase10CBoundaryMatch },
+    [pscustomobject]@{ Name = "phase 10d Device Manager heading"; Pass = $null -ne $phase10DHeadingMatch; Match = $phase10DHeadingMatch },
+    [pscustomobject]@{ Name = "phase 10d Device Manager ownership documented"; Pass = $null -ne $phase10DOwnershipMatch; Match = $phase10DOwnershipMatch },
+    [pscustomobject]@{ Name = "phase 10d Device Manager table model documented"; Pass = $null -ne $phase10DModelMatch; Match = $phase10DModelMatch },
+    [pscustomobject]@{ Name = "phase 10d Device Manager category boundary documented"; Pass = $null -ne $phase10DModelLimitMatch; Match = $phase10DModelLimitMatch },
+    [pscustomobject]@{ Name = "phase 10d Device Manager shared surface route"; Pass = $null -ne $phase10DSurfaceMatch; Match = $phase10DSurfaceMatch },
+    [pscustomobject]@{ Name = "phase 10d Device Manager status route"; Pass = $null -ne $phase10DStatusMatch; Match = $phase10DStatusMatch },
+    [pscustomobject]@{ Name = "phase 10d Device Manager action guard documented"; Pass = $null -ne $phase10DGuardMatch; Match = $phase10DGuardMatch },
+    [pscustomobject]@{ Name = "phase 10d Device Manager safety documented"; Pass = $null -ne $phase10DSafetyMatch -and $null -ne $phase10DSafetyOwnershipMatch; Match = $(if ($null -ne $phase10DSafetyMatch) { $phase10DSafetyMatch } else { $phase10DSafetyOwnershipMatch }) },
+    [pscustomobject]@{ Name = "phase 10d no new role documented"; Pass = $null -ne $phase10DNoNewRoleMatch; Match = $phase10DNoNewRoleMatch },
+    [pscustomobject]@{ Name = "phase 10d no local palette documented"; Pass = $null -ne $phase10DNoLocalPaletteMatch; Match = $phase10DNoLocalPaletteMatch },
+    [pscustomobject]@{ Name = "phase 10e Disk Manager heading"; Pass = $null -ne $phase10EHeadingMatch; Match = $phase10EHeadingMatch },
+    [pscustomobject]@{ Name = "phase 10e Disk Manager ownership documented"; Pass = $null -ne $phase10EOwnershipMatch; Match = $phase10EOwnershipMatch },
+    [pscustomobject]@{ Name = "phase 10e Disk Manager presentation model documented"; Pass = $null -ne $phase10EModelMatch; Match = $phase10EModelMatch },
+    [pscustomobject]@{ Name = "phase 10e storage safety boundary documented"; Pass = $null -ne $phase10ESafetyMatch; Match = $phase10ESafetyMatch },
+    [pscustomobject]@{ Name = "phase 10e absent surfaces documented"; Pass = $null -ne $phase10ELimitationsMatch; Match = $phase10ELimitationsMatch },
+    [pscustomobject]@{ Name = "phase 10e hosted Disk Manager shared roles consumed"; Pass = $null -ne $diskHostedAccessorMatch -and $null -ne $diskHostedHeaderMatch -and $null -ne $diskHostedSelectionMatch -and $null -ne $diskHostedButtonMatch -and $null -ne $diskHostedWarningMatch; Match = $(if ($null -ne $diskHostedHeaderMatch) { $diskHostedHeaderMatch } elseif ($null -ne $diskHostedButtonMatch) { $diskHostedButtonMatch } else { $diskHostedAccessorMatch }) },
+    [pscustomobject]@{ Name = "phase 10e hosted Disk Manager surfaces retained"; Pass = $null -ne $diskHostedSurfaceMatch; Match = $diskHostedSurfaceMatch },
+    [pscustomobject]@{ Name = "phase 10e hosted Disk Manager status roles consumed"; Pass = $null -ne $diskHostedStatusMatch; Match = $diskHostedStatusMatch },
+    [pscustomobject]@{ Name = "phase 10e hosted Disk Manager remains read-only"; Pass = $null -ne $diskHostedReadOnlyMatch; Match = $diskHostedReadOnlyMatch },
+    [pscustomobject]@{ Name = "phase 10e bare-metal Disk Manager shared roles consumed"; Pass = $null -ne $diskBareMetalRolesMatch; Match = $diskBareMetalRolesMatch },
+    [pscustomobject]@{ Name = "phase 10e hosted Classic branch preserved"; Pass = $null -ne $diskClassicFallbackMatch; Match = $diskClassicFallbackMatch },
+    [pscustomobject]@{ Name = "phase 10e Disk Manager header exists"; Pass = Test-Path -LiteralPath $diskManagerHeader; Match = $null }
 )
 
 $failures = 0

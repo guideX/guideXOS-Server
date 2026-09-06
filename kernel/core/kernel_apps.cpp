@@ -6637,17 +6637,23 @@ void DiskManagerApp::formatSize(uint64_t bytes, char* out, int outSize) const {
 }
 
 void DiskManagerApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
-    static const uint32_t kHeader   = 0xFF2C3E50;
-    static const uint32_t kBg       = 0xFF1E2430;
-    static const uint32_t kPanel    = 0xFF252D3B;
-    static const uint32_t kRowSel   = 0xFF2E4A6E;
-    static const uint32_t kRowAlt   = 0xFF222A36;
-    static const uint32_t kText     = 0xFFDCE3F0;
-    static const uint32_t kSubText  = 0xFF8A9AB0;
-    static const uint32_t kAccent   = 0xFF4A9ECA;
-    static const uint32_t kPartBar  = 0xFF3A7EAA;
-    static const uint32_t kPartBarB = 0xFF2A5E80;
-    (void)kAccent; (void)kPartBarB;
+    const bool sciFi = kernelSciFiThemeActive();
+    const DesktopTheme& theme = GetCurrentDesktopTheme();
+    const DesktopControlTheme roles = GetBareMetalControlTheme(theme);
+
+    // Classic values deliberately retain the pre-Phase-10E framebuffer
+    // palette. Sci-Fi derives every application-owned surface from the
+    // shared DesktopTheme/ DesktopControlTheme roles.
+    const uint32_t kHeader   = sciFi ? theme.titleBarBackground : 0xFF2C3E50u;
+    const uint32_t kBg       = sciFi ? roles.panelBackground : 0xFF1E2430u;
+    const uint32_t kPanel    = sciFi ? roles.raisedPanel : 0xFF252D3Bu;
+    const uint32_t kRowSel   = sciFi ? DesktopSelectionColor(roles, true) : 0xFF2E4A6Eu;
+    const uint32_t kRowAlt   = sciFi ? roles.recessedField : 0xFF222A36u;
+    const uint32_t kText     = sciFi ? roles.primaryText : 0xFFDCE3F0u;
+    const uint32_t kSubText  = sciFi ? roles.secondaryText : 0xFF8A9AB0u;
+    const uint32_t kAccent   = sciFi ? theme.accent : 0xFF4A9ECAu;
+    const uint32_t kPartBar  = sciFi ? roles.controlHoverBorder : 0xFF3A7EAAu;
+    const uint32_t kPartBarB = sciFi ? roles.selectionInactive : 0xFF2A5E80u;
 
     // Background
     framebuffer::fill_rect(x, y, w, h, kBg);
@@ -6689,10 +6695,16 @@ void DiskManagerApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
             dy += kGlyphH + 10;
 
             // Partition table header
-            appDrawText(rx + 4, dy, "# ", kSubText);
-            appDrawText(rx + 20, dy, "Type  LBA Start    Sectors     FS       Boot", kSubText);
+            if (sciFi) {
+                framebuffer::fill_rect(rx + 4, dy - 2, rw - 8, kGlyphH + 4,
+                                       roles.tableHeaderBackground);
+            }
+            const uint32_t tableHeaderText = sciFi ? roles.tableHeaderText : kSubText;
+            appDrawText(rx + 4, dy, "# ", tableHeaderText);
+            appDrawText(rx + 20, dy, "Type  LBA Start    Sectors     FS       Boot", tableHeaderText);
             dy += kGlyphH + 4;
-            framebuffer::fill_rect(rx + 4, dy, rw - 8, 1, kPanel);
+            framebuffer::fill_rect(rx + 4, dy, rw - 8, 1,
+                                   sciFi ? roles.separator : kPanel);
             dy += 3;
 
             if (d.partCount == 0) {

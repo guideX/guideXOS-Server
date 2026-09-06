@@ -1550,6 +1550,123 @@ selection, status, panel, separator, scrollbar, and control-state roles.
 * Final validation is the matrix above. The only non-zero regression result is the pre-existing Task Manager standalone launch-marker limitation; all of its substantive assertions passed.
 * Nothing was pushed by Phase 10D. The final worktree was cleaned of generated build and harness artifacts before commit.
 
+## Phase 10E - Disk Manager Interior Sci-Fi Theming
+
+Phase 10E themes the real Disk Manager implementations through the existing
+`DesktopTheme`/`DesktopControlTheme` path. It is a visual integration pass only:
+disk discovery, MBR/partition inspection, filesystem detection, capacity
+reporting, read-only host-image attachment, selection, refresh, and lifecycle
+behavior remain outside the theme change.
+
+### Closeout metadata
+
+* Starting HEAD: `cf5978e065dddca4c98dfc5dd6b320dc33a2b812` (`Theme Device Manager interior for Sci-Fi mode`).
+* Starting branch: `v0.3_SCI_FI_THEME`; upstream: `origin/v0.3_SCI_FI_THEME`; Phase 10D was already pushed at the starting checkpoint, so starting divergence was `0 ahead / 0 behind`.
+* The Phase 10E implementation commit and final repository counts are recorded in the closeout report below and in the final handoff.
+
+### Starting architecture and ownership audit
+
+The repository contains two real Disk Manager surfaces. Hosted Disk Manager is
+the IPC-rendered application in `disk_manager.cpp`; it owns the client paint
+commands and safe read-only inspection actions, while the hosted compositor
+owns the outer window chrome and generic window lifecycle. Bare-metal Disk
+Manager is `kernel::apps::DiskManagerApp` in
+`kernel/core/kernel_apps.cpp`; it owns its framebuffer client surface and
+disk-selection input, while the kernel compositor owns the surrounding window
+chrome and the existing Refresh widget.
+
+The hosted presentation model is a bounded operations utility: a left disk
+list, a Volumes table, a Mounts table, a graphical partition map, and an
+Actions/read-only host-image area. The bare-metal presentation is smaller: a
+disk list, selected-disk capacity and MBR partition rows, a partition map, and
+Refresh. Neither implementation has a hosted or bare-metal scrollbar, context
+menu, tab strip, detail pane, used/free meter, per-partition selection model,
+or confirmation dialog owned by Disk Manager. No absent surface was invented.
+
+### Surfaces themed and roles reused
+
+Hosted Sci-Fi routes its client background, left disk list, selected disk row,
+secondary disk metadata, Volumes and Mounts table surfaces, table headers,
+body cells, separators, status columns, partition-map background/free space,
+partition segments, capacity text, Actions panel, status/safety note, host
+image text, and application-owned buttons through the shared roles. Buttons
+use `DesktopControlState` plus `DesktopControlFillColor`,
+`DesktopControlBorderColor`, and `DesktopControlTextColor` for normal, hover,
+pressed, and disabled rendering. The existing compositor still owns the outer
+window controls.
+
+Bare-metal Sci-Fi routes the Disk Manager body, title stripe, left panel,
+selected disk row, alternate row, primary/secondary text, partition-table
+header, separator, boot marker, capacity text, and partition-map segments
+through `GetBareMetalControlTheme`, `DesktopSelectionColor`, and the current
+`DesktopTheme` accent. The existing Refresh widget continues to use the shared
+kernel compositor control path.
+
+No new reusable semantic role or API was necessary. Disk Manager reuses
+`panelBackground`, `raisedPanel`, `recessedField`, `tableHeaderBackground`,
+`tableHeaderText`, `border`, `separator`, `primaryText`, `secondaryText`,
+`selectionActive`/`selectionText`, `statusWarning`, and the generic control
+state lookups. No Disk Manager-specific Sci-Fi palette or second theme system
+was added.
+
+### Classic and Sci-Fi behavior
+
+Classic remains the default and preserves the existing Disk Manager geometry,
+data text, row and button values, read-only guards, hit regions, refresh path,
+and bare-metal framebuffer palette. Missing, invalid, explicit Classic, and
+persisted Classic configuration continue to resolve through the existing
+fallback path. Sci-Fi is opt-in and adds dark technical surfaces, crisp list
+and table hierarchy, visible selected-disk emphasis, restrained partition
+differentiation, readable capacity/status text, and clearly disabled dangerous
+actions.
+
+Existing status semantics are unchanged. Valid/healthy and mounted/active text
+can use a restrained positive accent in Sci-Fi; invalid or unreadable MBR
+states and the existing read-only safety notice use `statusWarning`; neutral
+or unmounted text remains secondary. No health, utilization, mount, or boot
+information was fabricated.
+
+### Storage safety boundary
+
+Phase 10E does not format disks, create or delete partitions, rewrite MBR/GPT
+metadata, change boot flags, mount writable filesystems, detach storage,
+overwrite sectors, or mutate ESP contents. Existing Format, Create Partition,
+and filesystem-switch controls remain disabled/read-only as before. Validation
+uses source checks, builds, startup/runtime evidence, and read-only enumeration
+only; no destructive action is needed to prove the theme integration.
+
+### Validation and evidence
+
+The focused theme smoke checks cover hosted shared-role consumption, table
+headers, selection, status-warning/positive state routing, disabled read-only
+actions, bare-metal role consumption, Classic branches, the documented
+architecture boundary, and the absence of invented surfaces. Hosted validation
+retains the existing launch/refresh/selection/read-only action paths and
+capacity/partition presentation without invoking storage mutation.
+
+AMD64 validation uses the established `build.ps1 -Arch amd64` and disposable
+ESP startup-sync path. The canonical startup harness does not directly launch
+Disk Manager or retain a fresh per-window screenshot in every state, so source
+coverage, hosted build/runtime evidence, kernel build evidence, and startup
+theme-selection evidence remain the strongest available proof where a screenshot
+is unavailable. A missing screenshot is a harness limitation, not a product
+failure.
+
+### Functional boundaries, limitations, and deferred work
+
+Visual theming completed now: the actual hosted list/table/map/action surface
+and the actual bare-metal list/partition/map surface consume shared theme roles
+while Classic stays compatible and storage behavior remains read-only.
+
+Disk Manager functionality that does not yet exist and remains deferred:
+scrollable disk/partition views, per-partition selection, a details pane,
+used/free resource meters, richer volume enumeration, mount/unmount workflows,
+format/delete/create flows, confirmation dialogs, context menus, tabs, SMART,
+GPT/MBR editing, and storage-driver work. These are storage/application
+features, not missing theme work. Later Network/System utility phases should
+continue to audit their real ownership and reuse the same shared table,
+selection, status, panel, separator, scrollbar, and control-state roles.
+
 ## Manual Validation Runbook
 
 * Start the hosted server executable and use `gui.start` to open the compositor.

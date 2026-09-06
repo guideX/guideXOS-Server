@@ -12,6 +12,8 @@
 #include "process.h"
 #include "ipc_bus.h"
 #include "bitmap_font.h"
+#include "desktop_theme.h"
+#include "desktop_control_theme.h"
 #include <sstream>
 #include <algorithm>
 #include <cstring>
@@ -33,6 +35,78 @@ namespace gxos {
 namespace apps {
 
 using namespace gxos::gui;
+
+namespace {
+
+static bool diskManagerSciFiThemeActive()
+{
+    return GetCurrentDesktopThemeId() == DesktopThemeId::SciFi;
+}
+
+static DesktopControlTheme diskManagerControlTheme()
+{
+    return GetDesktopControlTheme(GetCurrentDesktopTheme());
+}
+
+static void diskManagerColorComponents(uint32_t color, int& red, int& green, int& blue)
+{
+    red = static_cast<int>((color >> 16) & 0xFF);
+    green = static_cast<int>((color >> 8) & 0xFF);
+    blue = static_cast<int>(color & 0xFF);
+}
+
+static void diskManagerDrawRect(uint64_t windowId, int x, int y, int w, int h, uint32_t color)
+{
+    ipc::Message msg;
+    msg.type = (uint32_t)MsgType::MT_DrawRect;
+    int red = 0;
+    int green = 0;
+    int blue = 0;
+    diskManagerColorComponents(color, red, green, blue);
+    std::ostringstream oss;
+    oss << windowId << "|" << x << "|" << y << "|" << w << "|" << h
+        << "|" << red << "|" << green << "|" << blue;
+    const std::string payload = oss.str();
+    msg.data.assign(payload.begin(), payload.end());
+    ipc::Bus::publish("gui.input", std::move(msg), false);
+}
+
+static void diskManagerDrawText(uint64_t windowId, int x, int y, const std::string& text, uint32_t color)
+{
+    ipc::Message msg;
+    msg.type = (uint32_t)MsgType::MT_DrawText;
+    int red = 0;
+    int green = 0;
+    int blue = 0;
+    diskManagerColorComponents(color, red, green, blue);
+    std::ostringstream oss;
+    oss << windowId << "|" << x << "|" << y << "|" << text
+        << "|" << red << "|" << green << "|" << blue;
+    const std::string payload = oss.str();
+    msg.data.assign(payload.begin(), payload.end());
+    ipc::Bus::publish("gui.input", std::move(msg), false);
+}
+
+static uint32_t diskManagerStatusTextColor(const std::string& text)
+{
+    if (!diskManagerSciFiThemeActive()) return 0xFFFFFFFFu;
+
+    const DesktopControlTheme roles = diskManagerControlTheme();
+    if (text.find("invalid") != std::string::npos ||
+        text.find("unreadable") != std::string::npos ||
+        text.find("warning") != std::string::npos) {
+        return roles.statusWarning;
+    }
+    if (text.find("Healthy") != std::string::npos ||
+        text.find("valid MBR") != std::string::npos ||
+        text == "yes" || text.find("Active") != std::string::npos ||
+        text.find("Boot/System") != std::string::npos) {
+        return roles.controlHoverBorder;
+    }
+    return roles.secondaryText;
+}
+
+}
 
 // Static member initialization
 uint64_t DiskManager::s_windowId = 0;
@@ -1004,11 +1078,27 @@ void DiskManager::render() {
     // Send draw commands via IPC
     ipc::Message msg;
     msg.type = (uint32_t)MsgType::MT_Invalidate;
+    const bool sciFi = diskManagerSciFiThemeActive();
+    const DesktopControlTheme roles = diskManagerControlTheme();
     std::ostringstream oss;
-    oss << s_windowId << "|43|43|43";  // Dark gray background (RGB: 43,43,43)
+    int red = 43;
+    int green = 43;
+    int blue = 43;
+    if (sciFi) {
+        red = static_cast<int>((roles.panelBackground >> 16) & 0xFF);
+        green = static_cast<int>((roles.panelBackground >> 8) & 0xFF);
+        blue = static_cast<int>(roles.panelBackground & 0xFF);
+    }
+    oss << s_windowId << "|" << red << "|" << green << "|" << blue;
     std::string payload = oss.str();
     msg.data.assign(payload.begin(), payload.end());
     ipc::Bus::publish("gui.input", std::move(msg), false);
+
+    if (sciFi) {
+        // Keep the existing geometry while making the two application-owned
+        // work areas and their boundary read as a single technical surface.
+        diskManagerDrawRect(s_windowId, LEFT_PANE_W, 0, 1, 560, roles.separator);
+    }
     
     // Draw all components
     drawLeftPane(0, 0, 920, 560);
@@ -1037,14 +1127,27 @@ void DiskManager::render() {
 }
 
 void DiskManager::drawLeftPane(int winX, int winY, int winW, int winH) {
+    (void)winX;
+    (void)winY;
+    (void)winW;
     int lx = PAD;
     int ly = PAD;
+    const bool sciFi = diskManagerSciFiThemeActive();
+    const DesktopControlTheme roles = diskManagerControlTheme();
+
+    diskManagerDrawRect(s_windowId, PAD, PAD, LEFT_PANE_W - PAD, winH - PAD * 2,
+                        sciFi ? roles.raisedPanel : 0xFF2B2B2Bu);
     
     // Title "Disks"
     ipc::Message msg;
     msg.type = (uint32_t)MsgType::MT_DrawText;
     std::ostringstream oss;
-    oss << s_windowId << "|" << lx << "|" << (ly - 2) << "|Disks|255|255|255";
+    const uint32_t titleColor = sciFi ? roles.primaryText : 0xFFFFFFFFu;
+    int titleR = static_cast<int>((titleColor >> 16) & 0xFF);
+    int titleG = static_cast<int>((titleColor >> 8) & 0xFF);
+    int titleB = static_cast<int>(titleColor & 0xFF);
+    oss << s_windowId << "|" << lx << "|" << (ly - 2) << "|Disks|"
+        << titleR << "|" << titleG << "|" << titleB;
     std::string payload = oss.str();
     msg.data.assign(payload.begin(), payload.end());
     ipc::Bus::publish("gui.input", std::move(msg), false);
@@ -1053,37 +1156,22 @@ void DiskManager::drawLeftPane(int winX, int winY, int winW, int winH) {
     int rowW = LEFT_PANE_W - PAD * 2;
     int rowX = PAD + PAD;
     
-    uint32_t bgR = 48, bgG = 48, bgB = 48;
-    uint32_t bgSelR = 58, bgSelG = 58, bgSelB = 58;
-    
     // Draw disk list
     for (int i = 0; i < static_cast<int>(s_disks.size()); i++) {
         int ry = listY + i * (ROW_H + 4);
         bool selected = (s_selectedDiskIndex == i);
+        const uint32_t rowColor = sciFi
+            ? (selected ? DesktopSelectionColor(roles, true)
+                        : (i % 2 == 0 ? roles.panelBackground : roles.recessedField))
+            : (selected ? 0xFF3A3A3Au : 0xFF303030u);
         
         // Background rect
-        ipc::Message rectMsg;
-        rectMsg.type = (uint32_t)MsgType::MT_DrawRect;
-        std::ostringstream rectOss;
-        rectOss << s_windowId << "|" << rowX << "|" << ry << "|" << rowW << "|" << ROW_H << "|";
-        if (selected) {
-            rectOss << bgSelR << "|" << bgSelG << "|" << bgSelB;
-        } else {
-            rectOss << bgR << "|" << bgG << "|" << bgB;
-        }
-        std::string rectPayload = rectOss.str();
-        rectMsg.data.assign(rectPayload.begin(), rectPayload.end());
-        ipc::Bus::publish("gui.input", std::move(rectMsg), false);
+        diskManagerDrawRect(s_windowId, rowX, ry, rowW, ROW_H, rowColor);
         
         // Disk name text
-        ipc::Message textMsg;
-        textMsg.type = (uint32_t)MsgType::MT_DrawText;
-        std::ostringstream textOss;
-        textOss << s_windowId << "|" << (rowX + 6) << "|" << (ry + 3) << "|" 
-                << s_disks[i].name << "|255|255|255";
-        std::string textPayload = textOss.str();
-        textMsg.data.assign(textPayload.begin(), textPayload.end());
-        ipc::Bus::publish("gui.input", std::move(textMsg), false);
+        diskManagerDrawText(s_windowId, rowX + 6, ry + 3, s_disks[i].name,
+                            sciFi ? (selected ? roles.selectionText : roles.primaryText)
+                                  : 0xFFFFFFFFu);
 
         if (s_disks[i].haveInfo) {
             uint64_t totalBytes = s_disks[i].totalSectors * s_disks[i].bytesPerSector;
@@ -1091,34 +1179,31 @@ void DiskManager::drawLeftPane(int winX, int winY, int winW, int winH) {
             if (s_disks[i].isHostImage) {
                 detail += "  attached .img";
             }
-            ipc::Message detailMsg;
-            detailMsg.type = (uint32_t)MsgType::MT_DrawText;
-            std::ostringstream detailOss;
-            detailOss << s_windowId << "|" << (rowX + 6) << "|" << (ry + 15) << "|" 
-                      << detail << "|180|180|180";
-            std::string detailPayload = detailOss.str();
-            detailMsg.data.assign(detailPayload.begin(), detailPayload.end());
-            ipc::Bus::publish("gui.input", std::move(detailMsg), false);
+            diskManagerDrawText(s_windowId, rowX + 6, ry + 15, detail,
+                                sciFi ? roles.secondaryText : 0xFFB4B4B4u);
         }
     }
     
     // Status text at bottom
     int statusY = winH - (PAD + 40);
-    ipc::Message statusMsg;
-    statusMsg.type = (uint32_t)MsgType::MT_DrawText;
-    std::ostringstream statusOss;
-    statusOss << s_windowId << "|" << lx << "|" << statusY << "|" << s_status << "|255|255|255";
-    std::string statusPayload = statusOss.str();
-    statusMsg.data.assign(statusPayload.begin(), statusPayload.end());
-    ipc::Bus::publish("gui.input", std::move(statusMsg), false);
+    diskManagerDrawText(s_windowId, lx, statusY, s_status,
+                        sciFi ? roles.secondaryText : 0xFFFFFFFFu);
 }
 
 void DiskManager::drawVolumesGrid(int x, int y, int w, int h) {
+    const bool sciFi = diskManagerSciFiThemeActive();
+    const DesktopControlTheme roles = diskManagerControlTheme();
+    diskManagerDrawRect(s_windowId, x, y, w, h,
+                        sciFi ? roles.recessedField : 0xFF2A2A2Au);
+
     // Title
     ipc::Message msg;
     msg.type = (uint32_t)MsgType::MT_DrawText;
     std::ostringstream oss;
-    oss << s_windowId << "|" << x << "|" << y << "|Volumes|255|255|255";
+    const uint32_t titleColor = sciFi ? roles.primaryText : 0xFFFFFFFFu;
+    oss << s_windowId << "|" << x << "|" << y << "|Volumes|"
+        << ((titleColor >> 16) & 0xFF) << "|" << ((titleColor >> 8) & 0xFF)
+        << "|" << (titleColor & 0xFF);
     std::string payload = oss.str();
     msg.data.assign(payload.begin(), payload.end());
     ipc::Bus::publish("gui.input", std::move(msg), false);
@@ -1132,13 +1217,8 @@ void DiskManager::drawVolumesGrid(int x, int y, int w, int h) {
             "  Sectors " + std::to_string(sel->totalSectors) +
             "  Size " + fmtSize(totalBytes) +
             "  " + mbrStatusText(sel->mbrStatus);
-        ipc::Message infoMsg;
-        infoMsg.type = (uint32_t)MsgType::MT_DrawText;
-        std::ostringstream infoOss;
-        infoOss << s_windowId << "|" << x << "|" << (y + 16) << "|" << info << "|210|210|210";
-        std::string infoPayload = infoOss.str();
-        infoMsg.data.assign(infoPayload.begin(), infoPayload.end());
-        ipc::Bus::publish("gui.input", std::move(infoMsg), false);
+        diskManagerDrawText(s_windowId, x, y + 16, info,
+                            sciFi ? roles.secondaryText : 0xFFD2D2D2u);
         gridY += 18;
     }
     
@@ -1195,7 +1275,8 @@ void DiskManager::drawVolumesGrid(int x, int y, int w, int h) {
             cx += cw[3];
 
             std::string status = partitionStatusText(p, i);
-            drawCell(cx, rowY, cw[4], ROW_H, status.c_str());
+            drawCellWithColor(cx, rowY, cw[4], ROW_H, status.c_str(),
+                              diskManagerStatusTextColor(status));
             cx += cw[4];
 
             std::string type = fmtHexByte(p.type);
@@ -1209,7 +1290,8 @@ void DiskManager::drawVolumesGrid(int x, int y, int w, int h) {
             cx += cw[6];
             
             std::string mbr = mbrStatusText(sel->mbrStatus);
-            drawCell(cx, rowY, cw[7], ROW_H, mbr.c_str());
+            drawCellWithColor(cx, rowY, cw[7], ROW_H, mbr.c_str(),
+                              diskManagerStatusTextColor(mbr));
             cx += cw[7];
             
             std::string start = std::to_string(p.lbaStart);
@@ -1230,10 +1312,18 @@ void DiskManager::drawVolumesGrid(int x, int y, int w, int h) {
 }
 
 void DiskManager::drawMountsSection(int x, int y, int w, int h) {
+    const bool sciFi = diskManagerSciFiThemeActive();
+    const DesktopControlTheme roles = diskManagerControlTheme();
+    diskManagerDrawRect(s_windowId, x, y, w, h,
+                        sciFi ? roles.panelBackground : 0xFF2A2A2Au);
+
     ipc::Message msg;
     msg.type = (uint32_t)MsgType::MT_DrawText;
     std::ostringstream oss;
-    oss << s_windowId << "|" << x << "|" << y << "|Mounts|255|255|255";
+    const uint32_t titleColor = sciFi ? roles.primaryText : 0xFFFFFFFFu;
+    oss << s_windowId << "|" << x << "|" << y << "|Mounts|"
+        << ((titleColor >> 16) & 0xFF) << "|" << ((titleColor >> 8) & 0xFF)
+        << "|" << (titleColor & 0xFF);
     std::string payload = oss.str();
     msg.data.assign(payload.begin(), payload.end());
     ipc::Bus::publish("gui.input", std::move(msg), false);
@@ -1282,7 +1372,8 @@ void DiskManager::drawMountsSection(int x, int y, int w, int h) {
         cx += cw[2];
         drawCell(cx, rowY, cw[3], ROW_H, mp.c_str());
         cx += cw[3];
-        drawCell(cx, rowY, cw[4], ROW_H, mounted.c_str());
+        drawCellWithColor(cx, rowY, cw[4], ROW_H, mounted.c_str(),
+                          diskManagerStatusTextColor(mounted));
 
         rowY += ROW_H;
         if (rowY > y + h - ROW_H) break;
@@ -1292,12 +1383,19 @@ void DiskManager::drawMountsSection(int x, int y, int w, int h) {
 void DiskManager::drawPartitionMap(int x, int y, int w, int h) {
     DiskEntry* sel = getSelected();
     if (!sel) return;
+    const bool sciFi = diskManagerSciFiThemeActive();
+    const DesktopControlTheme roles = diskManagerControlTheme();
+    diskManagerDrawRect(s_windowId, x, y, w, h,
+                        sciFi ? roles.panelBackground : 0xFF2A2A2Au);
     
     // Title
     ipc::Message msg;
     msg.type = (uint32_t)MsgType::MT_DrawText;
     std::ostringstream oss;
-    oss << s_windowId << "|" << x << "|" << y << "|" << sel->name << "|255|255|255";
+    const uint32_t titleColor = sciFi ? roles.primaryText : 0xFFFFFFFFu;
+    oss << s_windowId << "|" << x << "|" << y << "|" << sel->name << "|"
+        << ((titleColor >> 16) & 0xFF) << "|" << ((titleColor >> 8) & 0xFF)
+        << "|" << (titleColor & 0xFF);
     std::string payload = oss.str();
     msg.data.assign(payload.begin(), payload.end());
     ipc::Bus::publish("gui.input", std::move(msg), false);
@@ -1306,13 +1404,12 @@ void DiskManager::drawPartitionMap(int x, int y, int w, int h) {
     int barH = 34;
     
     // Background bar
-    ipc::Message barMsg;
-    barMsg.type = (uint32_t)MsgType::MT_DrawRect;
-    std::ostringstream barOss;
-    barOss << s_windowId << "|" << x << "|" << barY << "|" << w << "|" << barH << "|30|30|30";
-    std::string barPayload = barOss.str();
-    barMsg.data.assign(barPayload.begin(), barPayload.end());
-    ipc::Bus::publish("gui.input", std::move(barMsg), false);
+    diskManagerDrawRect(s_windowId, x, barY, w, barH,
+                        sciFi ? roles.recessedField : 0xFF1E1E1Eu);
+    if (sciFi) {
+        diskManagerDrawRect(s_windowId, x, barY, w, 1, roles.separator);
+        diskManagerDrawRect(s_windowId, x, barY + barH - 1, w, 1, roles.separator);
+    }
     
     if (!sel->haveInfo) return;
     
@@ -1344,22 +1441,12 @@ void DiskManager::drawPartitionMap(int x, int y, int w, int h) {
             int freeX = x + static_cast<int>((cursor * w) / total);
             int freeW = static_cast<int>((freeCount * w) / total);
             if (freeW <= 0) freeW = 1;
-            ipc::Message freeMsg;
-            freeMsg.type = (uint32_t)MsgType::MT_DrawRect;
-            std::ostringstream freeOss;
-            freeOss << s_windowId << "|" << freeX << "|" << barY << "|" << freeW << "|" << barH << "|58|58|58";
-            std::string freePayload = freeOss.str();
-            freeMsg.data.assign(freePayload.begin(), freePayload.end());
-            ipc::Bus::publish("gui.input", std::move(freeMsg), false);
+            diskManagerDrawRect(s_windowId, freeX, barY, freeW, barH,
+                                sciFi ? roles.raisedPanel : 0xFF3A3A3Au);
             if (freeW > 70) {
                 std::string freeLbl = "Unallocated " + fmtSize(freeCount * (sel->bytesPerSector == 0 ? 512UL : sel->bytesPerSector));
-                ipc::Message lblMsg;
-                lblMsg.type = (uint32_t)MsgType::MT_DrawText;
-                std::ostringstream lblOss;
-                lblOss << s_windowId << "|" << (freeX + 4) << "|" << (barY + 10) << "|" << freeLbl << "|210|210|210";
-                std::string lblPayload = lblOss.str();
-                lblMsg.data.assign(lblPayload.begin(), lblPayload.end());
-                ipc::Bus::publish("gui.input", std::move(lblMsg), false);
+                diskManagerDrawText(s_windowId, freeX + 4, barY + 10, freeLbl,
+                                    sciFi ? roles.secondaryText : 0xFFD2D2D2u);
             }
         }
 
@@ -1367,26 +1454,20 @@ void DiskManager::drawPartitionMap(int x, int y, int w, int h) {
         int segW = static_cast<int>((count * w) / total);
         if (segW <= 0) segW = 1;
 
-        ipc::Message segMsg;
-        segMsg.type = (uint32_t)MsgType::MT_DrawRect;
-        std::ostringstream segOss;
-        segOss << s_windowId << "|" << segX << "|" << barY << "|" << segW << "|" << barH << "|76|139|245";
-        std::string segPayload = segOss.str();
-        segMsg.data.assign(segPayload.begin(), segPayload.end());
-        ipc::Bus::publish("gui.input", std::move(segMsg), false);
+        const bool systemPartition = p.status == 0x80 || (next == 0 && sel->isSystem);
+        const uint32_t segmentColor = sciFi
+            ? (systemPartition ? GetCurrentDesktopTheme().accent
+                               : (next % 2 == 0 ? roles.controlHoverBorder : roles.selectionInactive))
+            : 0xFF4C8BF5u;
+        diskManagerDrawRect(s_windowId, segX, barY, segW, barH, segmentColor);
 
         std::string lbl = "P" + std::to_string(next + 1) + " " + p.fs + " " + fmtHexByte(p.type);
         if (p.status == 0x80) lbl += " Active";
         if (p.status == 0x80 || (next == 0 && sel->isSystem)) lbl += " Boot/System";
         lbl += " " + fmtSize(p.lbaCount * (sel->bytesPerSector == 0 ? 512UL : sel->bytesPerSector));
         if (segW > 40) {
-            ipc::Message lblMsg;
-            lblMsg.type = (uint32_t)MsgType::MT_DrawText;
-            std::ostringstream lblOss;
-            lblOss << s_windowId << "|" << (segX + 4) << "|" << (barY + 10) << "|" << lbl << "|255|255|255";
-            std::string lblPayload = lblOss.str();
-            lblMsg.data.assign(lblPayload.begin(), lblPayload.end());
-            ipc::Bus::publish("gui.input", std::move(lblMsg), false);
+            diskManagerDrawText(s_windowId, segX + 4, barY + 10, lbl,
+                                sciFi ? roles.selectionText : 0xFFFFFFFFu);
         }
 
         uint64_t end = start + count;
@@ -1399,22 +1480,12 @@ void DiskManager::drawPartitionMap(int x, int y, int w, int h) {
         int freeX = x + static_cast<int>((cursor * w) / total);
         int freeW = w - (freeX - x);
         if (freeW <= 0) freeW = 1;
-        ipc::Message freeMsg;
-        freeMsg.type = (uint32_t)MsgType::MT_DrawRect;
-        std::ostringstream freeOss;
-        freeOss << s_windowId << "|" << freeX << "|" << barY << "|" << freeW << "|" << barH << "|58|58|58";
-        std::string freePayload = freeOss.str();
-        freeMsg.data.assign(freePayload.begin(), freePayload.end());
-        ipc::Bus::publish("gui.input", std::move(freeMsg), false);
+        diskManagerDrawRect(s_windowId, freeX, barY, freeW, barH,
+                            sciFi ? roles.raisedPanel : 0xFF3A3A3Au);
         if (freeW > 70) {
             std::string freeLbl = "Unallocated " + fmtSize(freeCount * (sel->bytesPerSector == 0 ? 512UL : sel->bytesPerSector));
-            ipc::Message lblMsg;
-            lblMsg.type = (uint32_t)MsgType::MT_DrawText;
-            std::ostringstream lblOss;
-            lblOss << s_windowId << "|" << (freeX + 4) << "|" << (barY + 10) << "|" << freeLbl << "|210|210|210";
-            std::string lblPayload = lblOss.str();
-            lblMsg.data.assign(lblPayload.begin(), lblPayload.end());
-            ipc::Bus::publish("gui.input", std::move(lblMsg), false);
+            diskManagerDrawText(s_windowId, freeX + 4, barY + 10, freeLbl,
+                                sciFi ? roles.secondaryText : 0xFFD2D2D2u);
         }
     }
     
@@ -1422,9 +1493,12 @@ void DiskManager::drawPartitionMap(int x, int y, int w, int h) {
     if (!s_cachedTotalCaption.empty()) {
         ipc::Message capMsg;
         capMsg.type = (uint32_t)MsgType::MT_DrawText;
-            std::ostringstream capOss;
-            std::string info = "Device " + std::to_string(sel->devIndex) + ", " + s_cachedTotalCaption + ", sector " + std::to_string(sel->bytesPerSector) + " B, sectors " + std::to_string(sel->totalSectors) + ", " + mbrStatusText(sel->mbrStatus);
-            capOss << s_windowId << "|" << x << "|" << (barY + barH + 6) << "|" << info << "|255|255|255";
+        std::ostringstream capOss;
+        std::string info = "Device " + std::to_string(sel->devIndex) + ", " + s_cachedTotalCaption + ", sector " + std::to_string(sel->bytesPerSector) + " B, sectors " + std::to_string(sel->totalSectors) + ", " + mbrStatusText(sel->mbrStatus);
+        const uint32_t infoColor = sciFi ? roles.primaryText : 0xFFFFFFFFu;
+        capOss << s_windowId << "|" << x << "|" << (barY + barH + 6) << "|" << info
+               << "|" << ((infoColor >> 16) & 0xFF) << "|" << ((infoColor >> 8) & 0xFF)
+               << "|" << (infoColor & 0xFF);
         std::string capPayload = capOss.str();
         capMsg.data.assign(capPayload.begin(), capPayload.end());
         ipc::Bus::publish("gui.input", std::move(capMsg), false);
@@ -1432,11 +1506,19 @@ void DiskManager::drawPartitionMap(int x, int y, int w, int h) {
 }
 
 void DiskManager::drawActions(int x, int y, int w, int h) {
+    const bool sciFi = diskManagerSciFiThemeActive();
+    const DesktopControlTheme roles = diskManagerControlTheme();
+    diskManagerDrawRect(s_windowId, x, y, w, h,
+                        sciFi ? roles.raisedPanel : 0xFF2B2B2Bu);
+
     // Title
     ipc::Message msg;
     msg.type = (uint32_t)MsgType::MT_DrawText;
     std::ostringstream oss;
-    oss << s_windowId << "|" << x << "|" << y << "|Actions|255|255|255";
+    const uint32_t titleColor = sciFi ? roles.primaryText : 0xFFFFFFFFu;
+    oss << s_windowId << "|" << x << "|" << y << "|Actions|"
+        << ((titleColor >> 16) & 0xFF) << "|" << ((titleColor >> 8) & 0xFF)
+        << "|" << (titleColor & 0xFF);
     std::string payload = oss.str();
     msg.data.assign(payload.begin(), payload.end());
     ipc::Bus::publish("gui.input", std::move(msg), false);
@@ -1491,26 +1573,19 @@ void DiskManager::drawActions(int x, int y, int w, int h) {
                hit(s_mouseX, s_mouseY, s_bxRefreshX, s_bxRefreshY, btnWRight, BTN_H));
 
     int noteY = byR + BTN_H + GAP;
-    ipc::Message noteMsg;
-    noteMsg.type = (uint32_t)MsgType::MT_DrawText;
-    std::ostringstream noteOss;
-    noteOss << s_windowId << "|" << rightX << "|" << noteY << "|Dangerous actions disabled: read-only disk inspection mode.|180|180|180";
-    std::string notePayload = noteOss.str();
-    noteMsg.data.assign(notePayload.begin(), notePayload.end());
-    ipc::Bus::publish("gui.input", std::move(noteMsg), false);
+    diskManagerDrawText(s_windowId, rightX, noteY,
+                        "Dangerous actions disabled: read-only disk inspection mode.",
+                        sciFi ? roles.statusWarning : 0xFFB4B4B4u);
 
     int hostY = noteY + 24;
-    ipc::Message hostMsg;
-    hostMsg.type = (uint32_t)MsgType::MT_DrawText;
-    std::ostringstream hostOss;
+    std::string hostText;
 #ifdef _WIN32
-    hostOss << s_windowId << "|" << rightX << "|" << hostY << "|Attach image from disks/ (.img, read-only)|210|210|210";
+    hostText = "Attach image from disks/ (.img, read-only)";
 #else
-    hostOss << s_windowId << "|" << rightX << "|" << hostY << "|Attach .img from VFS /disks or / as read-only RAM disk|210|210|210";
+    hostText = "Attach .img from VFS /disks or / as read-only RAM disk";
 #endif
-    std::string hostPayload = hostOss.str();
-    hostMsg.data.assign(hostPayload.begin(), hostPayload.end());
-    ipc::Bus::publish("gui.input", std::move(hostMsg), false);
+    diskManagerDrawText(s_windowId, rightX, hostY, hostText,
+                        sciFi ? roles.secondaryText : 0xFFD2D2D2u);
 
     int navY = hostY + 18;
     s_bxPrevImageX = rightX;
@@ -1525,13 +1600,8 @@ void DiskManager::drawActions(int x, int y, int w, int h) {
             currentImage += " [attached]";
         }
     }
-    ipc::Message curMsg;
-    curMsg.type = (uint32_t)MsgType::MT_DrawText;
-    std::ostringstream curOss;
-    curOss << s_windowId << "|" << (rightX + 40) << "|" << (navY + 8) << "|" << currentImage << "|255|255|255";
-    std::string curPayload = curOss.str();
-    curMsg.data.assign(curPayload.begin(), curPayload.end());
-    ipc::Bus::publish("gui.input", std::move(curMsg), false);
+    diskManagerDrawText(s_windowId, rightX + 40, navY + 8, currentImage,
+                        sciFi ? roles.primaryText : 0xFFFFFFFFu);
 
     s_bxNextImageX = rightX + 220;
     s_bxNextImageY = navY;
@@ -1550,86 +1620,75 @@ void DiskManager::drawActions(int x, int y, int w, int h) {
 }
 
 void DiskManager::drawHeaderCell(int x, int y, int w, int h, const char* text) {
-    // Background
-    ipc::Message bgMsg;
-    bgMsg.type = (uint32_t)MsgType::MT_DrawRect;
-    std::ostringstream bgOss;
-    bgOss << s_windowId << "|" << x << "|" << y << "|" << w << "|" << h << "|37|37|37";
-    std::string bgPayload = bgOss.str();
-    bgMsg.data.assign(bgPayload.begin(), bgPayload.end());
-    ipc::Bus::publish("gui.input", std::move(bgMsg), false);
-    
-    // Text
-    ipc::Message textMsg;
-    textMsg.type = (uint32_t)MsgType::MT_DrawText;
-    std::ostringstream textOss;
-    textOss << s_windowId << "|" << (x + 6) << "|" << (y + 6) << "|" << text << "|255|255|255";
-    std::string textPayload = textOss.str();
-    textMsg.data.assign(textPayload.begin(), textPayload.end());
-    ipc::Bus::publish("gui.input", std::move(textMsg), false);
+    const bool sciFi = diskManagerSciFiThemeActive();
+    const DesktopControlTheme roles = diskManagerControlTheme();
+    diskManagerDrawRect(s_windowId, x, y, w, h,
+                        sciFi ? roles.tableHeaderBackground : 0xFF252525u);
+    if (sciFi) {
+        diskManagerDrawRect(s_windowId, x, y + h - 1, w, 1, roles.separator);
+    }
+    diskManagerDrawText(s_windowId, x + 6, y + 6, text,
+                        sciFi ? roles.tableHeaderText : 0xFFFFFFFFu);
 }
 
 void DiskManager::drawCell(int x, int y, int w, int h, const char* text) {
-    // Background
-    ipc::Message bgMsg;
-    bgMsg.type = (uint32_t)MsgType::MT_DrawRect;
-    std::ostringstream bgOss;
-    bgOss << s_windowId << "|" << x << "|" << y << "|" << w << "|" << h << "|42|42|42";
-    std::string bgPayload = bgOss.str();
-    bgMsg.data.assign(bgPayload.begin(), bgPayload.end());
-    ipc::Bus::publish("gui.input", std::move(bgMsg), false);
-    
-    // Text
-    ipc::Message textMsg;
-    textMsg.type = (uint32_t)MsgType::MT_DrawText;
-    std::ostringstream textOss;
-    textOss << s_windowId << "|" << (x + 6) << "|" << (y + 6) << "|" << text << "|255|255|255";
-    std::string textPayload = textOss.str();
-    textMsg.data.assign(textPayload.begin(), textPayload.end());
-    ipc::Bus::publish("gui.input", std::move(textMsg), false);
+    const bool sciFi = diskManagerSciFiThemeActive();
+    const DesktopControlTheme roles = diskManagerControlTheme();
+    drawCellWithColor(x, y, w, h, text,
+                      sciFi ? roles.primaryText : 0xFFFFFFFFu);
+}
+
+void DiskManager::drawCellWithColor(int x, int y, int w, int h, const char* text, uint32_t textColor) {
+    const bool sciFi = diskManagerSciFiThemeActive();
+    const DesktopControlTheme roles = diskManagerControlTheme();
+    diskManagerDrawRect(s_windowId, x, y, w, h,
+                        sciFi ? roles.recessedField : 0xFF2A2A2Au);
+    if (sciFi) {
+        diskManagerDrawRect(s_windowId, x, y + h - 1, w, 1, roles.separator);
+    }
+    diskManagerDrawText(s_windowId, x + 6, y + 6, text, textColor);
 }
 
 void DiskManager::drawButton(int x, int y, int w, int h, const char* text, bool hover) {
-    // Background (lighter if hovered)
-    uint8_t r = hover ? 58 : 50;
-    uint8_t g = hover ? 58 : 50;
-    uint8_t b = hover ? 58 : 50;
-    
-    ipc::Message bgMsg;
-    bgMsg.type = (uint32_t)MsgType::MT_DrawRect;
-    std::ostringstream bgOss;
-    bgOss << s_windowId << "|" << x << "|" << y << "|" << w << "|" << h << "|" 
-          << static_cast<int>(r) << "|" << static_cast<int>(g) << "|" << static_cast<int>(b);
-    std::string bgPayload = bgOss.str();
-    bgMsg.data.assign(bgPayload.begin(), bgPayload.end());
-    ipc::Bus::publish("gui.input", std::move(bgMsg), false);
-    
-    // Text
-    ipc::Message textMsg;
-    textMsg.type = (uint32_t)MsgType::MT_DrawText;
-    std::ostringstream textOss;
-    textOss << s_windowId << "|" << (x + 10) << "|" << (y + 8) << "|" << text << "|255|255|255";
-    std::string textPayload = textOss.str();
-    textMsg.data.assign(textPayload.begin(), textPayload.end());
-    ipc::Bus::publish("gui.input", std::move(textMsg), false);
+    const bool sciFi = diskManagerSciFiThemeActive();
+    const DesktopControlTheme roles = diskManagerControlTheme();
+    if (!sciFi) {
+        const uint32_t classicColor = hover ? 0xFF3A3A3Au : 0xFF323232u;
+        diskManagerDrawRect(s_windowId, x, y, w, h, classicColor);
+        diskManagerDrawText(s_windowId, x + 10, y + 8, text, 0xFFFFFFFFu);
+        return;
+    }
+
+    const DesktopControlState state = s_mouseDown && hover
+        ? DesktopControlState::Pressed
+        : (hover ? DesktopControlState::Hover : DesktopControlState::Normal);
+    diskManagerDrawRect(s_windowId, x, y, w, h,
+                        DesktopControlBorderColor(roles, state));
+    if (w > 2 && h > 2) {
+        diskManagerDrawRect(s_windowId, x + 1, y + 1, w - 2, h - 2,
+                            DesktopControlFillColor(roles, state));
+    }
+    diskManagerDrawText(s_windowId, x + 10, y + 8, text,
+                        DesktopControlTextColor(roles, state));
 }
 
 void DiskManager::drawDisabledButton(int x, int y, int w, int h, const char* text) {
-    ipc::Message bgMsg;
-    bgMsg.type = (uint32_t)MsgType::MT_DrawRect;
-    std::ostringstream bgOss;
-    bgOss << s_windowId << "|" << x << "|" << y << "|" << w << "|" << h << "|38|38|38";
-    std::string bgPayload = bgOss.str();
-    bgMsg.data.assign(bgPayload.begin(), bgPayload.end());
-    ipc::Bus::publish("gui.input", std::move(bgMsg), false);
+    const bool sciFi = diskManagerSciFiThemeActive();
+    const DesktopControlTheme roles = diskManagerControlTheme();
+    if (!sciFi) {
+        diskManagerDrawRect(s_windowId, x, y, w, h, 0xFF262626u);
+        diskManagerDrawText(s_windowId, x + 10, y + 8, text, 0xFF787878u);
+        return;
+    }
 
-    ipc::Message textMsg;
-    textMsg.type = (uint32_t)MsgType::MT_DrawText;
-    std::ostringstream textOss;
-    textOss << s_windowId << "|" << (x + 10) << "|" << (y + 8) << "|" << text << "|120|120|120";
-    std::string textPayload = textOss.str();
-    textMsg.data.assign(textPayload.begin(), textPayload.end());
-    ipc::Bus::publish("gui.input", std::move(textMsg), false);
+    diskManagerDrawRect(s_windowId, x, y, w, h,
+                        DesktopControlBorderColor(roles, DesktopControlState::Disabled));
+    if (w > 2 && h > 2) {
+        diskManagerDrawRect(s_windowId, x + 1, y + 1, w - 2, h - 2,
+                            DesktopControlFillColor(roles, DesktopControlState::Disabled));
+    }
+    diskManagerDrawText(s_windowId, x + 10, y + 8, text,
+                        DesktopControlTextColor(roles, DesktopControlState::Disabled));
 }
 
 } // namespace apps

@@ -145,6 +145,7 @@ private:
     static void drawActions(int x, int y, int w, int h);
     static void drawHeaderCell(int x, int y, int w, int h, const char* text);
     static void drawCell(int x, int y, int w, int h, const char* text);
+    static void drawCellWithColor(int x, int y, int w, int h, const char* text, uint32_t textColor);
     static void drawButton(int x, int y, int w, int h, const char* text, bool hover);
     static void drawDisabledButton(int x, int y, int w, int h, const char* text);
     
