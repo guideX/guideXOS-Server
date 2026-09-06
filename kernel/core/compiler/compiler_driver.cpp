@@ -7,6 +7,7 @@
 #include "compiler_diagnostics.h"
 #include "compiler_linker.h"
 #include "compiler_module.h"
+#include "compiler_object.h"
 #include "elf_writer.h"
 #include "kernel/serial_debug.h"
 #include "kernel/vfs.h"
@@ -19,6 +20,7 @@ static uint8_t s_source[COMPILER_MAX_SOURCE_BYTES + 1];
 static uint8_t s_elf[COMPILER_MAX_OUTPUT_BYTES];
 static uint8_t s_reopened[COMPILER_MAX_OUTPUT_BYTES];
 static uint8_t s_compare[COMPILER_MAX_OUTPUT_BYTES];
+static uint8_t s_object[COMPILER_MAX_OBJECT_BYTES];
 static CompiledModule s_modules[COMPILER_MAX_TRANSLATION_UNITS] = {};
 static LinkedProgram s_linked = {};
 
@@ -157,6 +159,83 @@ static void print_smoke_result(const char* name, bool pass)
     serial::puts(pass ? "=PASS\n" : "=FAIL\n");
 }
 
+static bool copy_text(char* output, uint32_t capacity, const char* input)
+{
+    if (!output || capacity == 0 || !input) return false;
+    uint32_t i = 0;
+    while (i + 1 < capacity && input[i]) { output[i] = input[i]; ++i; }
+    if (input[i] != '\0') { output[0] = '\0'; return false; }
+    output[i] = '\0';
+    return true;
+}
+
+static bool temporary_object_path(const char* objectPath, char* output, uint32_t capacity)
+{
+    if (!copy_text(output, capacity, objectPath)) return false;
+    uint32_t lastSlash = 0;
+    uint32_t lastDot = 0xFFFFFFFFU;
+    for (uint32_t i = 0; output[i] != '\0'; ++i) {
+        if (output[i] == '/' || output[i] == '\\') lastSlash = i + 1U;
+        else if (output[i] == '.') lastDot = i;
+    }
+    if (lastDot == 0xFFFFFFFFU || lastDot < lastSlash ||
+        string_length(output) - lastDot != 4U) return false;
+    output[lastDot + 1U] = 'g';
+    output[lastDot + 2U] = 'x';
+    output[lastDot + 3U] = 't';
+    return true;
+}
+
+static bool load_cached_object(const char* objectPath, const char* sourceIdentityPath,
+                               uint32_t sourceBytes, uint64_t sourceHash,
+                               CompiledModule* module)
+{
+    if (!objectPath || !sourceIdentityPath || !module || objectPath[0] == '\0') return false;
+    vfs::FileInfo info = {};
+    if (vfs::stat(objectPath, &info) != vfs::VFS_OK || info.type != vfs::FILE_TYPE_REGULAR ||
+        info.size < COMPILER_GXO_HEADER_BYTES || info.size > COMPILER_MAX_OBJECT_BYTES) return false;
+    const uint32_t bytes = static_cast<uint32_t>(info.size);
+    if (vfs::read_file(objectPath, s_object, bytes) != static_cast<int32_t>(bytes)) return false;
+    Diagnostics diagnostics;
+    CompiledModule loaded = {};
+    if (!deserialize_gxo_object(s_object, bytes, &loaded, diagnostics) ||
+        !gxo_object_identity_matches(loaded, sourceIdentityPath, sourceBytes, sourceHash)) return false;
+    *module = loaded;
+    return true;
+}
+
+static bool publish_object(const char* objectPath, const CompiledModule& module)
+{
+    if (!objectPath || objectPath[0] == '\0') return false;
+    uint32_t bytes = 0;
+    if (!serialize_gxo_object(module, s_object, sizeof(s_object), &bytes)) return false;
+    CompiledModule checked = {};
+    Diagnostics diagnostics;
+    if (!deserialize_gxo_object(s_object, bytes, &checked, diagnostics)) return false;
+    char temporary[COMPILER_MAX_SOURCE_PATH_BYTES + 1] = {};
+    // The bare-metal FAT volume currently supports 8.3 names.  A suffix such
+    // as ".gxo.tmp" would therefore fail before the publication transaction
+    // begins; use a sibling three-character extension instead.
+    if (!temporary_object_path(objectPath, temporary, sizeof(temporary))) return false;
+    if (vfs::exists(temporary)) (void)vfs::unlink(temporary);
+    const int32_t temporaryWrite = vfs::write_file(temporary, s_object, bytes);
+    if (temporaryWrite != static_cast<int32_t>(bytes)) {
+        if (vfs::exists(temporary)) (void)vfs::unlink(temporary);
+        return false;
+    }
+    // FAT rename is non-replacing.  Keep a valid existing object until the
+    // new bytes have been fully serialized and verified, then replace it via
+    // VFS overwrite.  A failed write cannot be reported as a cache hit.
+    if (!vfs::exists(objectPath)) {
+        if (vfs::rename(temporary, objectPath) == vfs::VFS_OK) return true;
+    } else if (vfs::write_file(objectPath, s_object, bytes) == static_cast<int32_t>(bytes)) {
+        (void)vfs::unlink(temporary);
+        return true;
+    }
+    (void)vfs::unlink(temporary);
+    return false;
+}
+
 } // namespace
 
 static bool fail_project(CompileSummary* summary)
@@ -166,13 +245,14 @@ static bool fail_project(CompileSummary* summary)
     return false;
 }
 
-bool compile_project(const char* const* sourcePaths,
-                     uint32_t sourceCount,
-                     const char* outputPath,
-                     CompileSummary* summary)
+static bool compile_project_impl(const char* const* sourcePaths,
+                                 const char* const* sourceIdentityPaths,
+                                 const char* const* objectPaths,
+                                 uint32_t sourceCount,
+                                 const char* outputPath,
+                                 CompileSummary* summary)
 {
-    CompileSummary local = {};
-    if (summary) *summary = local;
+    if (summary) *summary = {};
     for (uint32_t i = 0; i < COMPILER_MAX_TRANSLATION_UNITS; ++i) s_modules[i] = {};
     s_linked = {};
     const SourceLocation driverLocation = {0, 1, 1};
@@ -190,15 +270,15 @@ bool compile_project(const char* const* sourcePaths,
     serial::puts(outputPath);
     serial::putc('\n');
 
+    if (summary) summary->sourceFileCount = sourceCount;
     bool compileFailed = false;
     uint32_t totalSourceBytes = 0;
     uint32_t totalTokenCount = 0;
     uint64_t projectSourceHash = 0;
     for (uint32_t i = 0; i < sourceCount; ++i) {
         const char* sourcePath = sourcePaths[i];
-        serial::puts("Compiler: compiling ");
-        serial::puts(sourcePath ? sourcePath : "<null>");
-        serial::putc('\n');
+        const char* sourceIdentityPath = sourceIdentityPaths && sourceIdentityPaths[i]
+            ? sourceIdentityPaths[i] : sourcePath;
         Diagnostics diagnostics;
         vfs::FileInfo sourceInfo = {};
         if (!sourcePath || sourcePath[0] == '\0' ||
@@ -224,16 +304,36 @@ bool compile_project(const char* const* sourcePaths,
             continue;
         }
         s_source[sourceBytes] = '\0';
-        if (!compile_module_from_source(sourcePath, reinterpret_cast<const char*>(s_source), sourceBytes,
-                                        &s_modules[i], diagnostics)) {
+        const uint64_t sourceHash = hash_bytes(s_source, sourceBytes);
+        if (objectPaths && objectPaths[i] &&
+            load_cached_object(objectPaths[i], sourceIdentityPath, sourceBytes, sourceHash, &s_modules[i])) {
+            if (summary) {
+                summary->moduleStatus[i] = COMPILE_MODULE_CACHE_HIT;
+                ++summary->cachedModuleCount;
+            }
+            serial::puts("Compiler: cache_hit "); serial::puts(sourceIdentityPath); serial::putc('\n');
+        } else if (!compile_module_from_source(sourceIdentityPath, reinterpret_cast<const char*>(s_source), sourceBytes,
+                                               &s_modules[i], diagnostics)) {
             if (summary) append_diagnostics(diagnostics, summary, sourcePath);
             compileFailed = true;
             continue;
+        } else {
+            if (summary) {
+                summary->moduleStatus[i] = COMPILE_MODULE_COMPILED;
+                ++summary->compiledModuleCount;
+            }
+            if (objectPaths && objectPaths[i] && !publish_object(objectPaths[i], s_modules[i])) {
+                diagnostics.error(driverLocation, "compiled object could not be published safely", "object");
+                if (summary) append_diagnostics(diagnostics, summary, sourcePath);
+                compileFailed = true;
+                continue;
+            }
+            serial::puts("Compiler: compiled "); serial::puts(sourceIdentityPath); serial::putc('\n');
         }
         totalSourceBytes += sourceBytes;
         totalTokenCount += s_modules[i].tokenCount;
-        projectSourceHash ^= hash_bytes(reinterpret_cast<const uint8_t*>(sourcePath),
-                                        string_length(sourcePath)) ^
+        projectSourceHash ^= hash_bytes(reinterpret_cast<const uint8_t*>(sourceIdentityPath),
+                                        string_length(sourceIdentityPath)) ^
                              s_modules[i].sourceHash;
         serial::puts("Compiler: module functions=");
         put_decimal_u64(s_modules[i].functionCount);
@@ -252,6 +352,10 @@ bool compile_project(const char* const* sourcePaths,
     if (!link_modules(s_modules, sourceCount, &s_linked, linkerDiagnostics)) {
         if (summary) append_diagnostics(linkerDiagnostics, summary, "<link>");
         return fail_project(summary);
+    }
+    if (summary) {
+        summary->linkedModuleCount = sourceCount;
+        summary->linkedFromPersistedObjects = summary->cachedModuleCount != 0;
     }
 
     if (s_linked.dataBytes != 0) print_data(s_linked.data, s_linked.dataBytes);
@@ -386,6 +490,24 @@ bool compile_project(const char* const* sourcePaths,
     serial::puts("Compiler: ELF validation PASS\n");
     serial::puts("Compiler: build PASS\n");
     return true;
+}
+
+bool compile_project(const char* const* sourcePaths,
+                     uint32_t sourceCount,
+                     const char* outputPath,
+                     CompileSummary* summary)
+{
+    return compile_project_impl(sourcePaths, nullptr, nullptr, sourceCount, outputPath, summary);
+}
+
+bool compile_project_incremental(const char* const* sourcePaths,
+                                 const char* const* sourceIdentityPaths,
+                                 const char* const* objectPaths,
+                                 uint32_t sourceCount,
+                                 const char* outputPath,
+                                 CompileSummary* summary)
+{
+    return compile_project_impl(sourcePaths, sourceIdentityPaths, objectPaths, sourceCount, outputPath, summary);
 }
 
 bool compile(const char* sourcePath, const char* outputPath, CompileSummary* summary)

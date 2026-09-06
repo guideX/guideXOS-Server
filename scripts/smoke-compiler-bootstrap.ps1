@@ -15,14 +15,21 @@ param(
     [switch]$Phase27N,
     [switch]$Phase27NOnly,
     [switch]$Phase27O,
-    [switch]$Phase27OOnly
+    [switch]$Phase27OOnly,
+    [switch]$Phase27P,
+    [switch]$Phase27POnly
 )
 
 $ErrorActionPreference = "Stop"
 # Phase 27G includes the complete earlier integration chain.  The focused M
 # mode deliberately keeps only the baseline C/D route plus the M smoke so a
 # flaky optional earlier IDE repeat cannot mask the recursion proof.
-if ($Phase27OOnly) {
+if ($Phase27POnly) {
+    $Phase27E = $false; $Phase27F = $false; $Phase27G = $false; $Phase27H = $false
+    $Phase27I = $false; $Phase27J = $false; $Phase27K = $false; $Phase27L = $false
+    $Phase27M = $false; $Phase27N = $false; $Phase27O = $false
+    $Phase27P = $true
+} elseif ($Phase27OOnly) {
     $Phase27E = $false; $Phase27F = $false; $Phase27G = $false; $Phase27H = $false
     $Phase27I = $false; $Phase27J = $false; $Phase27K = $false; $Phase27L = $false
     $Phase27M = $false; $Phase27N = $false
@@ -46,6 +53,7 @@ if ($Phase27OOnly) {
     if ($Phase27M) { $Phase27L = $true; $Phase27K = $true; $Phase27J = $true; $Phase27I = $true; $Phase27H = $true; $Phase27G = $true; $Phase27F = $true; $Phase27E = $true }
     if ($Phase27N) { $Phase27M = $true; $Phase27L = $true; $Phase27K = $true; $Phase27J = $true; $Phase27I = $true; $Phase27H = $true; $Phase27G = $true; $Phase27F = $true; $Phase27E = $true }
     if ($Phase27O) { $Phase27N = $true; $Phase27M = $true; $Phase27L = $true; $Phase27K = $true; $Phase27J = $true; $Phase27I = $true; $Phase27H = $true; $Phase27G = $true; $Phase27F = $true; $Phase27E = $true }
+    if ($Phase27P) { $Phase27O = $true; $Phase27N = $true; $Phase27M = $true; $Phase27L = $true; $Phase27K = $true; $Phase27J = $true; $Phase27I = $true; $Phase27H = $true; $Phase27G = $true; $Phase27F = $true; $Phase27E = $true }
 }
 $root = Split-Path -Parent $PSScriptRoot
 $kernelDirectory = Join-Path $root "kernel"
@@ -63,6 +71,7 @@ $phase27lFixtureDirectory = Join-Path $root "scripts/fixtures/phase27l"
 $phase27mFixtureDirectory = Join-Path $root "scripts/fixtures/phase27m"
 $phase27nFixtureDirectory = Join-Path $root "scripts/fixtures/phase27n"
 $phase27oFixtureDirectory = Join-Path $root "scripts/fixtures/phase27o"
+$phase27pFixtureDirectory = Join-Path $root "scripts/fixtures/phase27p"
 $developerStudioRoot = Join-Path (Split-Path -Parent $root) "guideXOS_Developer_Studio"
 $phase27eAppDirectory = Join-Path $root "Apps/DS27E"
 $phase27fAppDirectory = Join-Path $root "Apps/DS27F"
@@ -75,6 +84,7 @@ $phase27lAppDirectory = Join-Path $root "Apps/DS27L"
 $phase27mAppDirectory = Join-Path $root "Apps/DS27M"
 $phase27nAppDirectory = Join-Path $root "Apps/DS27N"
 $phase27oAppDirectory = Join-Path $root "Apps/DS27O"
+$phase27pAppDirectory = Join-Path $root "Apps/DS27P"
 $qemuPath = "C:\Program Files\qemu\qemu-system-x86_64.exe"
 $ovmfCodePath = Join-Path $root "OVMF.fd"
 $tempDirectory = Join-Path ([System.IO.Path]::GetTempPath()) ("guidexos-phase27d-" + [guid]::NewGuid().ToString("N"))
@@ -232,6 +242,13 @@ function Stage-Phase27OProject([string]$target) {
         Remove-Item -LiteralPath $target -Recurse -Force
     }
     Copy-Item $phase27oFixtureDirectory $target -Recurse -Force
+}
+
+function Stage-Phase27PProject([string]$target) {
+    if (Test-Path -LiteralPath $target) {
+        Remove-Item -LiteralPath $target -Recurse -Force
+    }
+    Copy-Item $phase27pFixtureDirectory $target -Recurse -Force
 }
 
 function Invoke-QemuProofBoot([int]$runNumber, [string]$qemu) {
@@ -656,21 +673,83 @@ function Invoke-QemuProofBoot([int]$runNumber, [string]$qemu) {
                 "ELF Loader: Phase 27O cross-file global data smoke PASS"
             )
         }
+        if ($Phase27P) {
+            $requiredMarkers += @(
+                "phase27p_run_backend=PASS",
+                "phase27p_project_open=PASS",
+                "phase27p_source_enumeration=PASS",
+                "phase27p_multi_file_documents=PASS",
+                "phase27p_cold_build=PASS",
+                "phase27p_no_change_build=PASS",
+                "phase27p_single_file_invalidation=PASS",
+                "phase27p_incremental_source_edit=PASS",
+                "phase27p_source_restore=PASS",
+                "phase27p_multi_file_invalidation=PASS",
+                "phase27p_added_source=PASS",
+                "phase27p_removed_source=PASS",
+                "phase27p_orphan_object_ignored=PASS",
+                "phase27p_source_rename=PASS",
+                "phase27p_same_size_edit_invalidates=PASS",
+                "phase27p_missing_object_rebuild=PASS",
+                "phase27p_corrupt_object_rebuild=PASS",
+                "phase27p_corrupt_code_rebuild=PASS",
+                "phase27p_corrupt_relocation_rebuild=PASS",
+                "phase27p_cold_counts=PASS",
+                "phase27p_warm_counts=PASS",
+                "phase27p_partial_counts=PASS",
+                "phase27p_compile_skipped_on_hit=PASS",
+                "phase27p_cached_undefined_symbol=PASS",
+                "phase27p_cached_signature_validation=PASS",
+                "phase27p_cached_link_failure_blocks_run=PASS",
+                "phase27p_compile_failure_recovery=PASS",
+                "phase27p_link_failure_recovery=PASS",
+                "phase27p_link_from_persisted_objects=PASS",
+                "phase27p_full_cache_execution=PASS",
+                "phase27p_ide_cold_build=PASS",
+                "phase27p_ide_warm_build=PASS",
+                "phase27p_ide_partial_rebuild=PASS",
+                "phase27p_ide_restore=PASS",
+                "phase27p_ide_corrupt_cache_recovery=PASS",
+                "phase27p_changed_source_never_uses_stale_object=PASS",
+                "phase27p_cached_shared_global=PASS",
+                "phase27p_cached_recursion=PASS",
+                "phase27p_cached_mutual_recursion=PASS",
+                "phase27p_cached_depth_guard=PASS",
+                "phase27p_cached_segment_permissions=PASS",
+                "phase27p_object_deterministic=PASS",
+                "phase27p_cold_warm_elf_identical=PASS",
+                "phase27p_restore_deterministic=PASS",
+                "phase27p_object_order_deterministic=PASS",
+                "phase27p_object_header=PASS",
+                "phase27p_target_identity=PASS",
+                "phase27p_source_hash_validation=PASS",
+                "phase27p_compiler_version_invalidation=PASS",
+                "phase27p_object_path_identity=PASS",
+                "phase27p_object_roundtrip=PASS",
+                "phase27p_object_version_invalidation=PASS",
+                "phase27p_wrong_arch_rebuild=PASS",
+                "phase27p_wrong_abi_rebuild=PASS",
+                "phase27p_single_file_cache=PASS",
+                "phase27p_kernel_survival=PASS",
+                "phase27p=PASS",
+                "ELF Loader: Phase 27P persistent object smoke PASS"
+            )
+        }
         $missingMarkers = @($requiredMarkers | Where-Object { $serial -notmatch [regex]::Escape($_) })
         if ($missingMarkers.Count -ne 0) {
-            Write-Host "QEMU boot $runNumber missed required Phase 27B-27O markers: $($missingMarkers -join ', ')" -ForegroundColor Red
+            Write-Host "QEMU boot $runNumber missed required compiler/IDE markers: $($missingMarkers -join ', ')" -ForegroundColor Red
             if ($Phase27E -or $Phase27F) {
-                $serial -split "`r?`n" | Where-Object { $_ -match "phase27e|phase27f|phase27g|phase27h|phase27i|phase27j|phase27k|phase27l|phase27m|phase27n|phase27o|Phase 27E|Phase 27F|Phase 27G|Phase 27H|Phase 27I|Phase 27J|Phase 27K|Phase 27L|Phase 27M|Phase 27N|Phase 27O" } | ForEach-Object { Write-Host $_ }
+                $serial -split "`r?`n" | Where-Object { $_ -match "phase27e|phase27f|phase27g|phase27h|phase27i|phase27j|phase27k|phase27l|phase27m|phase27n|phase27o|phase27p|Phase 27E|Phase 27F|Phase 27G|Phase 27H|Phase 27I|Phase 27J|Phase 27K|Phase 27L|Phase 27M|Phase 27N|Phase 27O|Phase 27P" } | ForEach-Object { Write-Host $_ }
             }
             if ($serial) { Write-Host $serial }
             if ($stderr) { Write-Host $stderr }
-            throw "Phase 27B-27O QEMU proof failed on boot $runNumber (exit $($process.ExitCode))"
+            throw "QEMU compiler/IDE proof failed on boot $runNumber (exit $($process.ExitCode))"
         }
 
         Write-Host "--- QEMU bare-metal compiler proof boot $runNumber ---" -ForegroundColor Cyan
         $serial -split "`r?`n" |
             Where-Object { $_ -notmatch "NativeElf: artifact_hex=" -and
-                           $_ -match "Compiler:|ELF Loader:|NativeElf:|phase27c|phase27d|phase27e|phase27f|phase27g|phase27h|phase27i|phase27j|phase27k|phase27l|phase27m|phase27n|phase27o|^error:" } |
+                           $_ -match "Compiler:|ELF Loader:|NativeElf:|phase27c|phase27d|phase27e|phase27f|phase27g|phase27h|phase27i|phase27j|phase27k|phase27l|phase27m|phase27n|phase27o|phase27p|^error:" } |
             ForEach-Object { Write-Host $_ }
     }
     finally {
@@ -777,6 +856,13 @@ try {
         & powershell -ExecutionPolicy Bypass -File (Join-Path $developerStudioRoot "scripts/build-phase27o.ps1") -ServerRoot $root
         if ($LASTEXITCODE -ne 0) { throw "Developer Studio Phase 27O proof app build failed" }
     }
+    if ($Phase27P) {
+        if (!(Test-Path (Join-Path $developerStudioRoot "scripts/build-phase27p.ps1"))) {
+            throw "Developer Studio Phase 27P build script is missing: $developerStudioRoot"
+        }
+        & powershell -ExecutionPolicy Bypass -File (Join-Path $developerStudioRoot "scripts/build-phase27p.ps1") -ServerRoot $root
+        if ($LASTEXITCODE -ne 0) { throw "Developer Studio Phase 27P proof app build failed" }
+    }
     $env:EXTRA_CFLAGS = "-DGXOS_COMPILER_BOOTSTRAP_SMOKE_ACTIVE"
     if ($Phase27E -or $Phase27F) { $env:EXTRA_CFLAGS += " -DGXOS_PHASE27E_SMOKE" }
     if ($Phase27F) { $env:EXTRA_CFLAGS += " -DGXOS_PHASE27F_SMOKE" }
@@ -789,10 +875,11 @@ try {
     if ($Phase27M) { $env:EXTRA_CFLAGS += " -DGXOS_PHASE27M_SMOKE" }
     if ($Phase27N) { $env:EXTRA_CFLAGS += " -DGXOS_PHASE27N_SMOKE" }
     if ($Phase27O) { $env:EXTRA_CFLAGS += " -DGXOS_PHASE27O_SMOKE" }
+    if ($Phase27P) { $env:EXTRA_CFLAGS += " -DGXOS_PHASE27P_SMOKE" }
     Push-Location $kernelDirectory
     try {
         Remove-Item -Force -ErrorAction SilentlyContinue (Join-Path $kernelDirectory "build/amd64/obj/core/main.o")
-        if ($Phase27E -or $Phase27F -or $Phase27M -or $Phase27O) {
+        if ($Phase27E -or $Phase27F -or $Phase27M -or $Phase27O -or $Phase27P) {
             Remove-Item -Force -ErrorAction SilentlyContinue (Join-Path $kernelDirectory "build/amd64/obj/core/native_elf/native_elf_smoke.o")
         }
         & $make all ARCH=amd64 "EXTRA_CFLAGS=$env:EXTRA_CFLAGS" "MBEDTLS_GUIDEXOS_IMPORT_STATE_DEPS="
@@ -961,6 +1048,17 @@ try {
             }
         }
     }
+    if ($Phase27P) {
+        foreach ($relativeDirectory in @("P27P", "Apps/DS27P")) {
+            $target = Join-Path $espDirectory $relativeDirectory
+            if (Test-Path $target -PathType Leaf) { throw "ESP target is a file: $target" }
+            if (Test-Path $target -PathType Container) {
+                $backup = Join-Path $tempDirectory ("backup-directory-" + ($relativeDirectory -replace '[/\\]', '-'))
+                Copy-Item $target $backup -Recurse -Force
+                $directoryBackups[$relativeDirectory] = $backup
+            }
+        }
+    }
     New-Item -ItemType Directory -Force -Path (Join-Path $espDirectory "EFI/BOOT") | Out-Null
     Copy-Item (Join-Path $fixtureDirectory "r42.c") (Join-Path $espDirectory "r42.c") -Force
     Copy-Item (Join-Path $fixtureDirectory "r41.c") (Join-Path $espDirectory "r41.c") -Force
@@ -1070,6 +1168,17 @@ try {
             !(Test-Path -LiteralPath (Join-Path $espDirectory "P27O/src/math.cpp") -PathType Leaf) -or
             !(Test-Path -LiteralPath (Join-Path $espDirectory "P27O/src/state.cpp") -PathType Leaf)) {
             throw "Phase 27O project fixture was not staged into ESP"
+        }
+    }
+    if ($Phase27P) {
+        Stage-Phase27PProject (Join-Path $espDirectory "P27P")
+        New-Item -ItemType Directory -Force -Path (Join-Path $espDirectory "Apps") | Out-Null
+        Copy-Item $phase27pAppDirectory (Join-Path $espDirectory "Apps/DS27P") -Recurse -Force
+        if (!(Test-Path -LiteralPath (Join-Path $espDirectory "P27P/guidexos.project") -PathType Leaf) -or
+            !(Test-Path -LiteralPath (Join-Path $espDirectory "P27P/src/main.cpp") -PathType Leaf) -or
+            !(Test-Path -LiteralPath (Join-Path $espDirectory "P27P/src/math.cpp") -PathType Leaf) -or
+            !(Test-Path -LiteralPath (Join-Path $espDirectory "P27P/src/state.cpp") -PathType Leaf)) {
+            throw "Phase 27P project fixture was not staged into ESP"
         }
     }
 
@@ -1206,6 +1315,11 @@ try {
                 if (Test-Path $projectTarget) { Remove-Item -LiteralPath $projectTarget -Recurse -Force }
                 Stage-Phase27OProject $projectTarget
             }
+            if ($Phase27P -and $run -gt 1) {
+                $projectTarget = Join-Path $espDirectory "P27P"
+                if (Test-Path $projectTarget) { Remove-Item -LiteralPath $projectTarget -Recurse -Force }
+                Stage-Phase27PProject $projectTarget
+            }
         # Every QEMU invocation gets its own disposable directory-backed FAT
         # image. Guest writes must not become the input state of the next
         # requested fresh boot.
@@ -1282,6 +1396,8 @@ try {
     }
     if ($Phase27OOnly) {
         Write-Host "Phase 27O focused QEMU proof completed across $BootCount fresh boot(s)." -ForegroundColor Green
+    } elseif ($Phase27POnly) {
+        Write-Host "Phase 27P focused QEMU proof completed across $BootCount fresh boot(s)." -ForegroundColor Green
     } elseif ($Phase27NOnly) {
         Write-Host "Phase 27B/27C/27D/27N focused QEMU proof completed across $BootCount fresh boot(s)." -ForegroundColor Green
     } elseif ($Phase27MOnly) {
@@ -1528,6 +1644,18 @@ finally {
     }
     if ($Phase27O) {
         foreach ($relativeDirectory in @("P27O", "Apps/DS27O")) {
+            $target = Join-Path $espDirectory $relativeDirectory
+            if (Test-Path -LiteralPath $target -PathType Container) {
+                Remove-Item -LiteralPath $target -Recurse -Force -ErrorAction SilentlyContinue
+            }
+            if ($directoryBackups.ContainsKey($relativeDirectory)) {
+                New-Item -ItemType Directory -Force -Path (Split-Path -Parent $target) | Out-Null
+                Copy-Item $directoryBackups[$relativeDirectory] $target -Recurse -Force
+            }
+        }
+    }
+    if ($Phase27P) {
+        foreach ($relativeDirectory in @("P27P", "Apps/DS27P")) {
             $target = Join-Path $espDirectory $relativeDirectory
             if (Test-Path -LiteralPath $target -PathType Container) {
                 Remove-Item -LiteralPath $target -Recurse -Force -ErrorAction SilentlyContinue

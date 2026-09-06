@@ -90,6 +90,11 @@ typedef struct gx_build_snapshot {
     char artifactArchitecture[32];
     char errorMessage[128];
     gx_build_output_line output[GX_BUILD_MAX_OUTPUT_LINES];
+    /* Phase 27P append-only incremental compilation counters. */
+    uint32_t sourceFileCount;
+    uint32_t compiledModuleCount;
+    uint32_t cachedModuleCount;
+    uint32_t linkedModuleCount;
 } gx_build_snapshot;
 
 #ifdef __cplusplus

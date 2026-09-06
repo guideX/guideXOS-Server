@@ -11,6 +11,7 @@ namespace kernel {
 namespace compiler {
 
 static const uint32_t COMPILER_MAX_IDENTIFIER_BYTES = 63;
+static const uint32_t COMPILER_MAX_SOURCE_BYTES = 64 * 1024;
 static const uint32_t COMPILER_FUNCTION_NAME_CAPACITY = COMPILER_MAX_IDENTIFIER_BYTES + 1;
 static const uint32_t COMPILER_PARAMETER_NAME_CAPACITY = COMPILER_FUNCTION_NAME_CAPACITY;
 static const uint32_t COMPILER_MAX_FUNCTIONS = 16;
@@ -45,6 +46,15 @@ static const uint32_t COMPILER_MAX_MODULE_RELOCATIONS = 64;
 static const uint32_t COMPILER_MAX_SOURCE_PATH_BYTES = 256;
 static const uint32_t COMPILER_MAX_GLOBALS = 32;
 static const uint32_t COMPILER_MAX_MODULE_SYMBOLS = COMPILER_MAX_FUNCTIONS + COMPILER_MAX_GLOBALS;
+
+// Persistent guideXOS object identity.  These values are intentionally
+// independent from the compiler phase number: changing object-producing
+// semantics requires incrementing COMPILER_OBJECT_ABI_VERSION.
+static const uint16_t COMPILER_OBJECT_FORMAT_VERSION = 1;
+static const uint16_t COMPILER_OBJECT_ABI_VERSION = 1;
+static const uint32_t COMPILER_OBJECT_ARCH_AMD64 = 1;
+static const uint32_t COMPILER_OBJECT_TARGET_ABI_GUIDEXOS_C_V1 = 1;
+static const uint32_t COMPILER_MAX_OBJECT_BYTES = 131072;
 
 static const uint16_t COMPILER_INVALID_INDEX = 0xFFFFU;
 

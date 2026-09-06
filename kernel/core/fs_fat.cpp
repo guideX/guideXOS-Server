@@ -756,7 +756,9 @@ uint32_t read_file(uint8_t fileHandle, void* buffer, uint32_t len)
     uint32_t clusterBytes = vol.sectorsPerCluster * vol.bytesPerSector;
 
     while (bytesRead < len && f.currentOffset < f.fileSize) {
-        if (is_end_of_chain(vol, f.currentCluster)) break;
+        // The first and last cluster are both valid read destinations even
+        // when the FAT marks the current cluster as end-of-chain.
+        if (f.currentCluster < 2 || f.currentCluster >= vol.totalDataClusters + 2) break;
 
         // Offset within current cluster
         uint32_t offsetInCluster = f.currentOffset % clusterBytes;
@@ -931,7 +933,6 @@ static bool split_parent_and_name(uint8_t volumeIndex, const char* path, uint32_
 {
     if (!path || !outParentCluster || !outName || outNameSize == 0) return false;
     FATVolume& vol = s_volumes[volumeIndex];
-
     const char* p = path;
     if (*p == '/') ++p;
     if (*p == '\0') return false;
@@ -1026,7 +1027,10 @@ static bool write_file_clusters(FATVolume& vol, uint32_t firstCluster, const voi
     uint32_t cluster = firstCluster;
     uint32_t written = 0;
 
-    while (written < len && !is_end_of_chain(vol, cluster)) {
+    // A newly allocated first cluster is already marked end-of-chain.  It is
+    // still a valid destination for the first sector; allocate another
+    // cluster only after that destination has been filled.
+    while (written < len) {
         for (uint32_t sectorInCluster = 0; sectorInCluster < vol.sectorsPerCluster && written < len; ++sectorInCluster) {
             memzero(s_secBuf, vol.bytesPerSector);
             uint32_t toCopy = len - written;
@@ -1354,7 +1358,6 @@ bool create_file_path(uint8_t volumeIndex, const char* path, const void* buffer,
 
     FATVolume& vol = s_volumes[volumeIndex];
     if (vol.type != FAT_TYPE_FAT16 && vol.type != FAT_TYPE_FAT32) return false;
-
     DirEntry existing;
     if (lookup_path(volumeIndex, path, &existing)) return false;
 
@@ -1365,12 +1368,18 @@ bool create_file_path(uint8_t volumeIndex, const char* path, const void* buffer,
     }
 
     char shortName[11];
-    if (!make_short_name(fileName, shortName)) return false;
+    if (!make_short_name(fileName, shortName)) {
+        return false;
+    }
 
     uint32_t firstCluster = allocate_cluster(vol);
-    if (firstCluster == 0) return false;
+    if (firstCluster == 0) {
+        return false;
+    }
 
-    if (!write_file_clusters(vol, firstCluster, buffer, len)) return false;
+    if (!write_file_clusters(vol, firstCluster, buffer, len)) {
+        return false;
+    }
 
     uint32_t sector = 0;
     uint32_t offset = 0;
@@ -1390,7 +1399,8 @@ bool create_file_path(uint8_t volumeIndex, const char* path, const void* buffer,
     de->firstClusterLo = static_cast<uint16_t>(firstCluster & 0xFFFF);
     de->fileSize = len;
 
-    return write_volume_sector(vol, sector, s_secBuf) == block::BLOCK_OK;
+    const bool created = write_volume_sector(vol, sector, s_secBuf) == block::BLOCK_OK;
+    return created;
 }
 
 bool create_directory_path(uint8_t volumeIndex, const char* path)

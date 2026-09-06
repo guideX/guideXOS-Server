@@ -6,6 +6,7 @@
 
 #include "compiler_driver.h"
 #include "elf_writer.h"
+#include "../native_elf/native_elf_executor.h"
 #include "../native_elf/native_elf_validator.h"
 #include "kernel/serial_debug.h"
 #include "kernel/vfs.h"
@@ -28,6 +29,7 @@ struct SourceSelection {
     uint32_t count;
     char paths[kMaxProjectSources][kMaxResolvedPath];
     char relatives[kMaxProjectSources][kMaxResolvedPath];
+    char objectPaths[kMaxProjectSources][kMaxResolvedPath];
 };
 
 static bool equal_text(const char* left, const char* right);
@@ -51,6 +53,8 @@ static gx_build_handle s_nextHandle = 1;
 static char s_projectText[kMaxProjectText + 1];
 static char s_manifestText[kMaxProjectText + 1];
 static uint8_t s_artifact[COMPILER_MAX_OUTPUT_BYTES];
+static const uint32_t kBuildServiceStackSize = 128u * 1024u;
+alignas(16) static uint8_t s_buildServiceStack[kBuildServiceStackSize];
 
 static uint32_t text_length(const char* value, uint32_t capacity)
 {
@@ -351,8 +355,13 @@ static bool choose_sources(const char* root, const char* sourceRoot, const char*
     vfs::DirEntry entry = {};
     while (vfs::readdir(iterator, &entry)) {
         const uint32_t length = text_length(entry.name, sizeof(entry.name));
-        const bool c = length >= 2 && entry.name[length - 2] == '.' && entry.name[length - 1] == 'c';
-        const bool cpp = length >= 4 && entry.name[length - 4] == '.' && entry.name[length - 3] == 'c' && entry.name[length - 2] == 'p' && entry.name[length - 1] == 'p';
+        const char extC = length == 0 ? '\0' : entry.name[length - 1];
+        const bool c = length >= 2 && entry.name[length - 2] == '.' &&
+            (extC == 'c' || extC == 'C');
+        const bool cpp = length >= 4 && entry.name[length - 4] == '.' &&
+            (entry.name[length - 3] == 'c' || entry.name[length - 3] == 'C') &&
+            (entry.name[length - 2] == 'p' || entry.name[length - 2] == 'P') &&
+            (entry.name[length - 1] == 'p' || entry.name[length - 1] == 'P');
         if (entry.type == vfs::FILE_TYPE_REGULAR && (c || cpp)) {
             if (count >= kMaxProjectSources) overflow = true;
             else if (!copy_text(candidates[count++], sizeof(candidates[0]), entry.name)) overflow = true;
@@ -389,7 +398,59 @@ static bool ensure_output_directory(const char* root)
     char path[kMaxResolvedPath] = {};
     return join_path(root, "build", path, sizeof(path)) && ensure_directory(path) &&
         join_path(root, "build/bin", path, sizeof(path)) && ensure_directory(path) &&
-        join_path(root, "build/bin/amd64", path, sizeof(path)) && ensure_directory(path);
+        join_path(root, "build/bin/amd64", path, sizeof(path)) && ensure_directory(path) &&
+        join_path(root, "build/obj", path, sizeof(path)) && ensure_directory(path) &&
+        join_path(root, "build/obj/amd64", path, sizeof(path)) && ensure_directory(path);
+}
+
+static bool object_path_for_source(const char* root, const char* relative,
+                                   char* output, uint32_t capacity)
+{
+    if (!root || !relative || !output || !safe_relative(relative)) return false;
+    if (!join_path(root, "build/obj/amd64", output, capacity) ||
+        !append_text(output, capacity, "/")) return false;
+    const uint32_t relativeBytes = text_length(relative, kMaxResolvedPath);
+    if (relativeBytes == 0 || relativeBytes >= kMaxResolvedPath) return false;
+    if (text_length(output, capacity) + relativeBytes + 5U >= capacity) return false;
+    // Rebuild the path in one pass, replacing only the source extension.
+    if (!join_path(root, "build/obj/amd64", output, capacity) || !append_text(output, capacity, "/")) return false;
+    uint32_t lastDot = 0xFFFFFFFFU;
+    for (uint32_t i = 0; i < relativeBytes; ++i)
+        if (relative[i] == '.') lastDot = i;
+    for (uint32_t i = 0; i < relativeBytes; ++i) {
+        if (lastDot != 0xFFFFFFFFU && i == lastDot) {
+            if (!append_text(output, capacity, ".gxo")) return false;
+            break;
+        }
+        char one[2] = { relative[i], '\0' };
+        if (!append_text(output, capacity, one)) return false;
+    }
+    return true;
+}
+
+static bool ensure_object_source_directory(const char* root, const char* relative)
+{
+    if (!root || !relative || !safe_relative(relative)) return false;
+    char directory[kMaxResolvedPath] = {};
+    if (!join_path(root, "build/obj/amd64", directory, sizeof(directory)) ||
+        !append_text(directory, sizeof(directory), "/")) return false;
+    const uint32_t relativeBytes = text_length(relative, kMaxResolvedPath);
+    uint32_t lastSlash = 0xFFFFFFFFU;
+    for (uint32_t i = 0; i < relativeBytes; ++i)
+        if (relative[i] == '/' || relative[i] == '\\') lastSlash = i;
+    if (lastSlash == 0xFFFFFFFFU) return true;
+    for (uint32_t i = 0; i < lastSlash; ++i) {
+        if (relative[i] == '/' || relative[i] == '\\') {
+            if (!ensure_directory(directory)) return false;
+            if (!append_text(directory, sizeof(directory), "/")) return false;
+        } else {
+            char one[2] = { relative[i], '\0' };
+            if (!append_text(directory, sizeof(directory), one)) return false;
+        }
+    }
+    // Keep directory paths slash-free so FAT 8.3 path parsing sees the same
+    // component sequence during creation and later object publication.
+    return ensure_directory(directory);
 }
 
 static bool metadata_matches(const char* root, const gx_build_request* request,
@@ -440,7 +501,7 @@ static bool metadata_matches(const char* root, const gx_build_request* request,
     return true;
 }
 
-static void run_build(const gx_build_request* request)
+static void run_build_core(const gx_build_request* request)
 {
     s_job.snapshot.state = GX_BUILD_PREPARING;
     output_line("Bare-metal build backend: kernel VFS compiler", 1);
@@ -459,27 +520,57 @@ static void run_build(const gx_build_request* request)
         failure(GX_BUILD_ERROR_INVALID_PROJECT_ROOT, "project build output directories could not be created");
         return;
     }
+    for (uint32_t i = 0; i < selection.count; ++i) {
+        if (!ensure_object_source_directory(request->projectRoot, selection.relatives[i]) ||
+            !object_path_for_source(request->projectRoot, selection.relatives[i],
+                                    selection.objectPaths[i], sizeof(selection.objectPaths[i]))) {
+            failure(GX_BUILD_ERROR_INVALID_PROJECT_ROOT, "project object-cache directories could not be created");
+            return;
+        }
+    }
     if (vfs::exists(artifactPath) && vfs::unlink(artifactPath) != vfs::VFS_OK) {
         failure(GX_BUILD_ERROR_ARTIFACT_INVALID, "stale artifact could not be removed");
         return;
     }
     s_job.snapshot.state = GX_BUILD_RUNNING;
-    for (uint32_t i = 0; i < selection.count; ++i) {
-        char sourceLine[GX_BUILD_MAX_OUTPUT_LINE_BYTES] = {};
-        copy_text(sourceLine, sizeof(sourceLine), "Compiling ");
-        append_text(sourceLine, sizeof(sourceLine), selection.relatives[i]);
-        output_line(sourceLine, 1);
-    }
-    char linkLine[GX_BUILD_MAX_OUTPUT_LINE_BYTES] = {};
-    copy_text(linkLine, sizeof(linkLine), "Linking ");
-    append_dec(linkLine, sizeof(linkLine), selection.count);
-    append_text(linkLine, sizeof(linkLine), " modules");
-    output_line(linkLine, 1);
     const char* sourcePaths[kMaxProjectSources] = {};
-    for (uint32_t i = 0; i < selection.count; ++i) sourcePaths[i] = selection.paths[i];
+    const char* sourceIdentityPaths[kMaxProjectSources] = {};
+    const char* objectPaths[kMaxProjectSources] = {};
+    for (uint32_t i = 0; i < selection.count; ++i) {
+        sourcePaths[i] = selection.paths[i];
+        sourceIdentityPaths[i] = selection.relatives[i];
+        objectPaths[i] = selection.objectPaths[i];
+    }
     static CompileSummary summary = {};
     summary = {};
-    if (!compile_project(sourcePaths, selection.count, artifactPath, &summary)) {
+    const bool compiled = compile_project_incremental(sourcePaths, sourceIdentityPaths, objectPaths,
+                                                      selection.count, artifactPath, &summary);
+    for (uint32_t i = 0; i < selection.count; ++i) {
+        if (summary.moduleStatus[i] == COMPILE_MODULE_CACHE_HIT) {
+            char line[GX_BUILD_MAX_OUTPUT_LINE_BYTES] = {};
+            copy_text(line, sizeof(line), "Using cached object ");
+            append_text(line, sizeof(line), selection.relatives[i]);
+            output_line(line, 1);
+        } else if (summary.moduleStatus[i] == COMPILE_MODULE_COMPILED) {
+            char line[GX_BUILD_MAX_OUTPUT_LINE_BYTES] = {};
+            copy_text(line, sizeof(line), "Compiling ");
+            append_text(line, sizeof(line), selection.relatives[i]);
+            output_line(line, 1);
+        }
+    }
+    if (summary.linkedModuleCount != 0) {
+        char linkLine[GX_BUILD_MAX_OUTPUT_LINE_BYTES] = {};
+        copy_text(linkLine, sizeof(linkLine), "Linking ");
+        append_dec(linkLine, sizeof(linkLine), summary.linkedModuleCount);
+        append_text(linkLine, sizeof(linkLine), summary.linkedFromPersistedObjects
+            ? " modules from validated objects" : " modules");
+        output_line(linkLine, 1);
+    }
+    s_job.snapshot.sourceFileCount = summary.sourceFileCount;
+    s_job.snapshot.compiledModuleCount = summary.compiledModuleCount;
+    s_job.snapshot.cachedModuleCount = summary.cachedModuleCount;
+    s_job.snapshot.linkedModuleCount = summary.linkedModuleCount;
+    if (!compiled) {
         for (uint32_t i = 0; i < summary.diagnosticCount; ++i) {
             char line[GX_BUILD_MAX_OUTPUT_LINE_BYTES] = {};
             const char* diagnosticPath = diagnostic_display_path(selection, summary.diagnostics[i].sourcePath);
@@ -520,6 +611,25 @@ static void run_build(const gx_build_request* request)
     }
     output_line(successLine, 1);
     s_job.snapshot.processExitCode = 0;
+}
+
+static int32_t GX_CALL build_service_entry(void* context)
+{
+    run_build_core(static_cast<const gx_build_request*>(context));
+    return 1;
+}
+
+static void run_build(const gx_build_request* request)
+{
+    native_elf::NativeElfTrampolineResult trampoline = {};
+    const bool invoked = native_elf::invoke_native_entry_on_stack(
+        reinterpret_cast<uint64_t>(&build_service_entry),
+        const_cast<gx_build_request*>(request),
+        reinterpret_cast<uint64_t>(s_buildServiceStack + sizeof(s_buildServiceStack)),
+        &trampoline);
+    if (!invoked) {
+        failure(GX_BUILD_ERROR_COMPILER_FAILED, "bare-metal compiler service stack invocation failed");
+    }
 }
 
 } // namespace
