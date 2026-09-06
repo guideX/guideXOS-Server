@@ -492,6 +492,12 @@ Prove 4 KiB page tables, MAIR/TCR/TTBR/SCTLR policy, barriers, VBAR_EL1,
 ESR/ELR/FAR/SPSR diagnostics, ARM architectural timer, pinned GIC, and a
 page-map/allocator smoke test.
 
+The Phase 2 QEMU virt proof pins the first interrupt path to DTB-discovered
+GICv2 and the non-secure physical generic timer.  AARCH64-3 should preserve
+the generic-kernel boundary while adding DTB-selected GICv3 support and
+architecture service interfaces; it should not broaden into scheduler or
+userspace work until those interfaces are independently validated.
+
 ### AARCH64-3 — Architecture services and scheduler
 
 Move core code to generic CPU/MMU/interrupt/timer/context/console interfaces.

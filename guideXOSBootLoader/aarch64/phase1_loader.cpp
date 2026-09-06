@@ -8,7 +8,33 @@
 #include "../Uefi.h"
 #include "../Protocol/LoadedImage.h"
 #include "../Protocol/SimpleFileSystem.h"
+#ifdef GXOS_AARCH64_PHASE2
+#include "../../aarch64/phase2/phase2_contract.h"
+using Aarch64Handoff = gxos_aarch64_phase2_handoff;
+#define GXOS_AARCH64_HANDOFF_MAGIC GXOS_AARCH64_PHASE2_HANDOFF_MAGIC
+#define GXOS_AARCH64_HANDOFF_VERSION GXOS_AARCH64_PHASE2_HANDOFF_VERSION
+#define GXOS_AARCH64_KERNEL_LOAD_ADDRESS GXOS_AARCH64_PHASE2_KERNEL_LOAD_ADDRESS
+#define GXOS_AARCH64_UART_BASE GXOS_AARCH64_PHASE2_UART_FALLBACK
+#define GXOS_AARCH64_FLAG_EBS_COMPLETE GXOS_AARCH64_PHASE2_FLAG_EBS_COMPLETE
+#define GXOS_AARCH64_FLAG_IDENTITY_LOAD GXOS_AARCH64_PHASE2_FLAG_IDENTITY_LOAD
+#define GXOS_AARCH64_FLAG_MMU_OFF_ON_ENTRY GXOS_AARCH64_PHASE2_FLAG_MMU_OFF_ON_ENTRY
+#define GXOS_AARCH64_FLAG_STACK_ALLOCATED GXOS_AARCH64_PHASE2_FLAG_STACK_ALLOCATED
+#define GXOS_AARCH64_FLAG_MEMORY_MAP_VALID GXOS_AARCH64_PHASE2_FLAG_MEMORY_MAP_VALID
+#define GXOS_AARCH64_FLAG_DTB_VALID GXOS_AARCH64_PHASE2_FLAG_DTB_VALID
+#define GXOS_AARCH64_FLAG_DTB_COPIED GXOS_AARCH64_PHASE2_FLAG_DTB_COPIED
+#else
 #include "../../aarch64/phase1/phase1_contract.h"
+using Aarch64Handoff = gxos_aarch64_phase1_handoff;
+#define GXOS_AARCH64_HANDOFF_MAGIC GXOS_AARCH64_PHASE1_HANDOFF_MAGIC
+#define GXOS_AARCH64_HANDOFF_VERSION GXOS_AARCH64_PHASE1_HANDOFF_VERSION
+#define GXOS_AARCH64_KERNEL_LOAD_ADDRESS GXOS_AARCH64_PHASE1_KERNEL_LOAD_ADDRESS
+#define GXOS_AARCH64_UART_BASE GXOS_AARCH64_PHASE1_UART_BASE
+#define GXOS_AARCH64_FLAG_EBS_COMPLETE GXOS_AARCH64_PHASE1_FLAG_EBS_COMPLETE
+#define GXOS_AARCH64_FLAG_IDENTITY_LOAD GXOS_AARCH64_PHASE1_FLAG_IDENTITY_LOAD
+#define GXOS_AARCH64_FLAG_MMU_OFF_ON_ENTRY GXOS_AARCH64_PHASE1_FLAG_MMU_OFF_ON_ENTRY
+#define GXOS_AARCH64_FLAG_STACK_ALLOCATED GXOS_AARCH64_PHASE1_FLAG_STACK_ALLOCATED
+#define GXOS_AARCH64_FLAG_MEMORY_MAP_VALID GXOS_AARCH64_PHASE1_FLAG_MEMORY_MAP_VALID
+#endif
 
 #include <stdint.h>
 
@@ -78,6 +104,12 @@ static const EFI_GUID kSimpleFileSystemProtocolGuid =
 static const EFI_GUID kFileInfoGuid =
     { 0x09576e92, 0x6d3f, 0x11d2, { 0x8e, 0x39, 0x00, 0xa0, 0xc9, 0x69, 0x72, 0x3b } };
 
+#ifdef GXOS_AARCH64_PHASE2
+// EFI_DTB_TABLE_GUID from the UEFI Device Tree Configuration Table protocol.
+static const EFI_GUID kDtbTableGuid =
+    { 0xb1b621d5, 0xf19c, 0x41a5, { 0x83, 0x0b, 0xd9, 0x15, 0x2c, 0x69, 0xaa, 0xe0 } };
+#endif
+
 static EFI_SYSTEM_TABLE* gSystemTable = nullptr;
 
 static bool add_u64(uint64_t a, uint64_t b, uint64_t* result)
@@ -98,6 +130,19 @@ static bool range_in_file(uint64_t offset, uint64_t size, UINTN fileSize)
 {
     uint64_t end = 0;
     return add_u64(offset, size, &end) && end <= (uint64_t)fileSize;
+}
+
+static uint32_t read_be32(const uint8_t* bytes)
+{
+    return ((uint32_t)bytes[0] << 24) | ((uint32_t)bytes[1] << 16) |
+           ((uint32_t)bytes[2] << 8) | (uint32_t)bytes[3];
+}
+
+static bool guid_equal(const EFI_GUID& left, const EFI_GUID& right)
+{
+    if (left.Data1 != right.Data1 || left.Data2 != right.Data2 || left.Data3 != right.Data3) return false;
+    for (UINTN i = 0; i < 8; ++i) if (left.Data4[i] != right.Data4[i]) return false;
+    return true;
 }
 
 static void print_ascii(const char* text)
@@ -333,7 +378,7 @@ static EFI_STATUS load_kernel(const uint8_t* file, UINTN fileSize,
     uint64_t imageEndUnrounded = 0;
     if (!add_u64(maxVaddr, kPageMask, &imageEndUnrounded)) return fail("ELF image size overflow");
     uint64_t imageEnd = imageEndUnrounded & ~kPageMask;
-    if (imageEnd <= imageStart || imageStart != GXOS_AARCH64_PHASE1_KERNEL_LOAD_ADDRESS) {
+    if (imageEnd <= imageStart || imageStart != GXOS_AARCH64_KERNEL_LOAD_ADDRESS) {
         return fail("ELF load address is not the Phase 1 fixed address");
     }
     uint64_t imageSize64 = imageEnd - imageStart;
@@ -341,10 +386,10 @@ static EFI_STATUS load_kernel(const uint8_t* file, UINTN fileSize,
     UINTN imageSize = (UINTN)imageSize64;
     UINTN pages = (imageSize + EFI_PAGE_SIZE - 1) / EFI_PAGE_SIZE;
 
-    EFI_PHYSICAL_ADDRESS physical = GXOS_AARCH64_PHASE1_KERNEL_LOAD_ADDRESS;
+    EFI_PHYSICAL_ADDRESS physical = GXOS_AARCH64_KERNEL_LOAD_ADDRESS;
     EFI_STATUS status = gSystemTable->BootServices->AllocatePages(
         AllocateAddress, EfiLoaderCode, pages, &physical);
-    if (EFI_ERROR(status) || physical != GXOS_AARCH64_PHASE1_KERNEL_LOAD_ADDRESS) {
+    if (EFI_ERROR(status) || physical != GXOS_AARCH64_KERNEL_LOAD_ADDRESS) {
         return fail("fixed kernel allocation at 0x40000000 failed");
     }
     uint8_t* destination = (uint8_t*)(UINTN)physical;
@@ -420,7 +465,7 @@ static EFI_STATUS acquire_memory_map(EFI_MEMORY_DESCRIPTOR** buffer, UINTN* capa
     }
 }
 
-static EFI_STATUS exit_boot_services(EFI_HANDLE imageHandle, gxos_aarch64_phase1_handoff* handoff,
+static EFI_STATUS exit_boot_services(EFI_HANDLE imageHandle, Aarch64Handoff* handoff,
                                      EFI_MEMORY_DESCRIPTOR** mapBuffer)
 {
     UINTN capacity = 0;
@@ -443,14 +488,14 @@ static EFI_STATUS exit_boot_services(EFI_HANDLE imageHandle, gxos_aarch64_phase1
         handoff->memory_map_size = mapSize;
         handoff->memory_map_descriptor_size = descriptorSize;
         handoff->memory_map_entry_count = mapSize / descriptorSize;
-        handoff->flags |= GXOS_AARCH64_PHASE1_FLAG_MEMORY_MAP_VALID;
+        handoff->flags |= GXOS_AARCH64_FLAG_MEMORY_MAP_VALID;
         *mapBuffer = memoryMap;
 
         print_ascii("[A64 UEFI] memory map acquired\r\n");
         print_ascii("[A64 UEFI] ExitBootServices requested\r\n");
         status = gSystemTable->BootServices->ExitBootServices(imageHandle, mapKey);
         if (!EFI_ERROR(status)) {
-            handoff->flags |= GXOS_AARCH64_PHASE1_FLAG_EBS_COMPLETE;
+            handoff->flags |= GXOS_AARCH64_FLAG_EBS_COMPLETE;
             return EFI_SUCCESS;
         }
         if (status != EFI_INVALID_PARAMETER) return fail("ExitBootServices failed");
@@ -459,6 +504,57 @@ static EFI_STATUS exit_boot_services(EFI_HANDLE imageHandle, gxos_aarch64_phase1
     }
     return fail("ExitBootServices retry limit exceeded");
 }
+
+#ifdef GXOS_AARCH64_PHASE2
+static bool validate_dtb_blob(const uint8_t* blob, uint64_t available, uint32_t* totalSize)
+{
+    if (!blob || available < 40 || available > UINT64_C(16) * 1024 * 1024 ||
+        read_be32(blob) != UINT32_C(0xd00dfeed)) return false;
+    const uint32_t total = read_be32(blob + 4);
+    const uint32_t structOffset = read_be32(blob + 8);
+    const uint32_t stringsOffset = read_be32(blob + 12);
+    const uint32_t reserveOffset = read_be32(blob + 16);
+    const uint32_t version = read_be32(blob + 20);
+    const uint32_t lastCompatible = read_be32(blob + 24);
+    const uint32_t stringsSize = read_be32(blob + 32);
+    const uint32_t structSize = read_be32(blob + 36);
+    if (total < 40 || total > available || total > UINT32_MAX || version < 16 || version > 19 ||
+        lastCompatible < 16 || lastCompatible > version || (reserveOffset & 7) != 0 || reserveOffset > total ||
+        !range_in_file(reserveOffset, 16, (UINTN)total) || (structOffset & 3) != 0 ||
+        (stringsOffset & 3) != 0 || !range_in_file(structOffset, structSize, (UINTN)total) ||
+        !range_in_file(stringsOffset, stringsSize, (UINTN)total)) return false;
+    if (totalSize) *totalSize = total;
+    return true;
+}
+
+static EFI_STATUS copy_dtb_from_configuration_table(Aarch64Handoff* handoff)
+{
+    if (!gSystemTable || !gSystemTable->ConfigurationTable || gSystemTable->NumberOfTableEntries == 0 ||
+        gSystemTable->NumberOfTableEntries > 1024) return fail("DTB configuration table unavailable");
+    for (UINTN i = 0; i < gSystemTable->NumberOfTableEntries; ++i) {
+        const EFI_CONFIGURATION_TABLE& entry = gSystemTable->ConfigurationTable[i];
+        if (!guid_equal(entry.VendorGuid, kDtbTableGuid) || !entry.VendorTable) continue;
+        const uint8_t* source = (const uint8_t*)entry.VendorTable;
+        uint32_t total = 0;
+        if (!validate_dtb_blob(source, UINT64_C(16) * 1024 * 1024, &total)) {
+            return fail("DTB header or block bounds are invalid");
+        }
+        const UINTN pages = ((UINTN)total + EFI_PAGE_SIZE - 1) / EFI_PAGE_SIZE;
+        EFI_PHYSICAL_ADDRESS copyPhysical = 0;
+        EFI_STATUS status = gSystemTable->BootServices->AllocatePages(
+            AllocateAnyPages, EfiLoaderData, pages, &copyPhysical);
+        if (EFI_ERROR(status) || copyPhysical == 0) return fail("DTB copy allocation failed");
+        set_bytes((void*)(UINTN)copyPhysical, pages * EFI_PAGE_SIZE, 0);
+        copy_bytes((void*)(UINTN)copyPhysical, source, total);
+        handoff->dtb_base = copyPhysical;
+        handoff->dtb_size = total;
+        handoff->flags |= GXOS_AARCH64_FLAG_DTB_VALID | GXOS_AARCH64_FLAG_DTB_COPIED;
+        print_ascii("[A64 UEFI] DTB: copied from EFI configuration table\r\n");
+        return EFI_SUCCESS;
+    }
+    return fail("EFI DTB configuration table not found");
+}
+#endif
 
 extern "C" EFI_STATUS efi_main(EFI_HANDLE imageHandle, EFI_SYSTEM_TABLE* systemTable)
 {
@@ -500,19 +596,19 @@ extern "C" EFI_STATUS efi_main(EFI_HANDLE imageHandle, EFI_SYSTEM_TABLE* systemT
     status = allocate_stack(&stackBase, &stackSize, &stackTop);
     if (EFI_ERROR(status)) return status;
 
-    gxos_aarch64_phase1_handoff* handoff = nullptr;
+    Aarch64Handoff* handoff = nullptr;
     EFI_PHYSICAL_ADDRESS handoffPhysical = 0;
     status = gSystemTable->BootServices->AllocatePages(
         AllocateAnyPages, EfiLoaderData, 1, &handoffPhysical);
-    handoff = (gxos_aarch64_phase1_handoff*)(UINTN)handoffPhysical;
+    handoff = (Aarch64Handoff*)(UINTN)handoffPhysical;
     if (EFI_ERROR(status) || !handoff) return fail("handoff allocation failed");
     set_bytes(handoff, EFI_PAGE_SIZE, 0);
-    handoff->magic = GXOS_AARCH64_PHASE1_HANDOFF_MAGIC;
-    handoff->version = GXOS_AARCH64_PHASE1_HANDOFF_VERSION;
+    handoff->magic = GXOS_AARCH64_HANDOFF_MAGIC;
+    handoff->version = GXOS_AARCH64_HANDOFF_VERSION;
     handoff->size = sizeof(*handoff);
-    handoff->flags = GXOS_AARCH64_PHASE1_FLAG_IDENTITY_LOAD |
-                     GXOS_AARCH64_PHASE1_FLAG_MMU_OFF_ON_ENTRY |
-                     GXOS_AARCH64_PHASE1_FLAG_STACK_ALLOCATED;
+    handoff->flags = GXOS_AARCH64_FLAG_IDENTITY_LOAD |
+                     GXOS_AARCH64_FLAG_MMU_OFF_ON_ENTRY |
+                     GXOS_AARCH64_FLAG_STACK_ALLOCATED;
     handoff->kernel_base = kernelBase;
     handoff->kernel_size = kernelSize;
     handoff->kernel_entry = kernelEntry;
@@ -521,13 +617,18 @@ extern "C" EFI_STATUS efi_main(EFI_HANDLE imageHandle, EFI_SYSTEM_TABLE* systemT
     handoff->stack_top = stackTop;
     handoff->initial_current_el = initialEl;
     handoff->loader_sctlr_el1 = loaderSctlr;
-    handoff->uart_base = GXOS_AARCH64_PHASE1_UART_BASE;
+    handoff->uart_base = GXOS_AARCH64_UART_BASE;
+
+#ifdef GXOS_AARCH64_PHASE2
+    status = copy_dtb_from_configuration_table(handoff);
+    if (EFI_ERROR(status)) return status;
+#endif
 
     EFI_MEMORY_DESCRIPTOR* mapBuffer = nullptr;
     status = exit_boot_services(imageHandle, handoff, &mapBuffer);
     if (EFI_ERROR(status)) return status;
 
-    typedef void (*KernelEntryFn)(gxos_aarch64_phase1_handoff*, uint64_t, uint64_t);
+    typedef void (*KernelEntryFn)(Aarch64Handoff*, uint64_t, uint64_t);
     KernelEntryFn entry = (KernelEntryFn)(UINTN)kernelEntry;
     entry(handoff, stackTop, 0);
     return EFI_ABORTED;
