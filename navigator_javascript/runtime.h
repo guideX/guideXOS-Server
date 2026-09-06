@@ -245,15 +245,15 @@ public:
         RuntimeErrorCode& error);
 
     // Create or update the one synchronous host-created Event object used by
-    // the narrow Navigator click dispatch path. The returned value is an
-    // ordinary runtime object, so normal property lookup, assignment, and
-    // equality semantics apply. The host-defined properties are
-    // immutable from script; target handles remain generation-scoped host
+    // Navigator's bounded synchronous event dispatch paths. The returned
+    // value is an ordinary runtime object, so normal property lookup,
+    // assignment, and equality semantics apply. The host-defined properties
+    // are immutable from script; target handles remain generation-scoped host
     // values and are canonicalized by the existing host-object registry.
     bool createOrUpdateEventObject(SourceView type,
         const HostObjectReference& target,
-        const HostObjectReference& currentTarget, Value& result,
-        RuntimeErrorCode& error);
+        const HostObjectReference& currentTarget, SourceView key,
+        SourceView code, Value& result, RuntimeErrorCode& error);
 
     // The Navigator click adapter brackets one synchronous dispatch with
     // these calls. Event propagation methods are methods on the cached Event
@@ -358,6 +358,8 @@ private:
     };
 
     bool createString(SourceView text, Value& value, RuntimeErrorCode& error);
+    bool createOrGetCachedString(SourceView text, Value& value,
+        RuntimeErrorCode& error);
     const std::string* stringData(const Value& value) const;
     bool createEnvironment(EnvironmentId parent, EnvironmentId& result,
         RuntimeErrorCode& error);

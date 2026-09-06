@@ -163,7 +163,7 @@ void testRegistrationDispatchClosureMutationAndCoexistence()
     expectString(harness, "order", "olololol",
         "duplicate registration preserves onclick order");
 
-    result = harness.execute("counter.addEventListener(\"keydown\", function () {});");
+    result = harness.execute("counter.addEventListener(\"mouseover\", function () {});");
     expectError(result, RuntimeErrorCode::HostInvalidValue,
         "unsupported event name fails safely");
     result = harness.execute("counter.addEventListener(\"click\", 7);");

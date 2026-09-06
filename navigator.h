@@ -1021,6 +1021,8 @@ private:
 	static void executeJavaScriptDocumentScripts();
 	static bool dispatchJavaScriptClick(int blockIndex,
 		bool* defaultPrevented = nullptr);
+	static bool dispatchJavaScriptKeyboardEvent(int keyCode,
+		const std::string& action, bool* defaultPrevented = nullptr);
 	static void recordJavaScriptError(const std::string& phase,
 		gxos::javascript::RuntimeErrorCode error);
 	static void handleKeyPress(int keyCode, const std::string& action);

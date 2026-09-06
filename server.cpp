@@ -2137,6 +2137,50 @@ static std::string navigatorHostedSmokeDiagnostic() {
         gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
         "replacement page starts without JS22 registrations or errors");
 
+    const bool js23Loaded = gxos::apps::Navigator::SmokeNavigateToQuiet(
+        "http://127.0.0.1:8080/navigator-smoke/javascript-js23.html");
+    const std::string js23InitialText =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    const size_t js23InitialHandlers =
+        gxos::apps::Navigator::SmokeJavaScriptHandlerCount();
+    const size_t js23InitialListeners =
+        gxos::apps::Navigator::SmokeJavaScriptListenerCount();
+    const std::string js23InitialError =
+        gxos::apps::Navigator::SmokeJavaScriptLastError();
+    add("JS23 hosted fixture loads keyboard listeners",
+        js23Loaded && contains(js23InitialText, "Navigator JavaScript JS23") &&
+        contains(js23InitialText, "keydown and keyup") &&
+        js23InitialHandlers == 3u && js23InitialListeners == 9u &&
+        js23InitialError.empty(),
+        std::string("loaded=") + yesNo(js23Loaded) + ",handlers=" +
+        std::to_string(js23InitialHandlers) + ",listeners=" +
+        std::to_string(js23InitialListeners) + ",error=" +
+        (js23InitialError.empty() ? "none" : js23InitialError));
+
+    const bool js23Focused =
+        gxos::apps::Navigator::SmokeFocusFormControlById("js23-input", true);
+    const bool js23KeyDown =
+        gxos::apps::Navigator::SmokeKeyPress(65, "down");
+    const bool js23KeyUp =
+        gxos::apps::Navigator::SmokeKeyPress(65, "up");
+    const std::string js23Text =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS23 authentic focused keydown/keyup propagation and key/code",
+        js23Focused && js23KeyDown && js23KeyUp &&
+        contains(js23Text, "d1;p1;t2:a:KeyA;t2b;p3;d3;u1;u2:a:KeyA;u3;") &&
+        gxos::apps::Navigator::SmokeFormControlInputLengthById("js23-input") == 1 &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("focused=") + yesNo(js23Focused) + ",down=" +
+        yesNo(js23KeyDown) + ",up=" + yesNo(js23KeyUp) + ",text=" +
+        summarizeText(js23Text, 240));
+
+    add("JS23 navigation cleanup clears keyboard listeners",
+        gxos::apps::Navigator::SmokeNavigateToQuiet("about:navigator") &&
+        gxos::apps::Navigator::SmokeJavaScriptHandlerCount() == 0u &&
+        gxos::apps::Navigator::SmokeJavaScriptListenerCount() == 0u &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        "replacement page starts without JS23 registrations or errors");
+
     bool cssInlineLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-inline.html");
     std::string cssInlineText = gxos::apps::Navigator::SmokeCurrentDocumentText();
     std::string cssInlineReport = gxos::apps::Navigator::SmokeRuntimeReport();

@@ -1,0 +1,51 @@
+<!doctype html>
+<html>
+<head><title>Navigator JavaScript JS23</title></head>
+<body>
+<h1>Navigator JavaScript JS23</h1>
+<p>Bounded keydown and keyup with cached key/code properties.</p>
+<div id="js23-root">
+  <div id="js23-parent">
+    <input id="js23-input" type="text" value="">
+  </div>
+</div>
+<p id="js23-state">initial</p>
+<script>
+var js23State = document.getElementById("js23-state");
+var js23Parent = document.getElementById("js23-parent");
+var js23Input = document.getElementById("js23-input");
+var js23Log = "";
+document.addEventListener("keydown", function(event) {
+    if (event.target === js23Input) js23Log = js23Log + "d1;";
+}, true);
+js23Parent.addEventListener("keydown", function(event) {
+    if (event.target === js23Input) js23Log = js23Log + "p1;";
+}, true);
+js23Input.addEventListener("keydown", function(event) {
+    if (event.target === js23Input)
+        js23Log = js23Log + "t2:" + event.key + ":" + event.code + ";";
+}, true);
+js23Input.addEventListener("keydown", function(event) {
+    if (event.target === js23Input) js23Log = js23Log + "t2b;";
+});
+js23Parent.addEventListener("keydown", function(event) {
+    if (event.target === js23Input) js23Log = js23Log + "p3;";
+});
+document.addEventListener("keydown", function(event) {
+    if (event.target === js23Input) js23Log = js23Log + "d3;";
+});
+document.addEventListener("keyup", function(event) {
+    if (event.target === js23Input) js23Log = js23Log + "u1;";
+}, true);
+js23Input.addEventListener("keyup", function(event) {
+    if (event.target === js23Input) js23Log = js23Log + "u2:" + event.key + ":" + event.code + ";";
+});
+document.addEventListener("keyup", function(event) {
+    if (event.target === js23Input) {
+        js23Log = js23Log + "u3;";
+        js23State.textContent = js23Log;
+    }
+});
+</script>
+</body>
+</html>

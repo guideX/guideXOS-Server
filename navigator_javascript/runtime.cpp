@@ -1998,8 +1998,8 @@ bool RuntimeContext::invokeFunctionInSameRealm(const Value& function,
 
 bool RuntimeContext::createOrUpdateEventObject(SourceView type,
     const HostObjectReference& target,
-    const HostObjectReference& currentTarget, Value& result,
-    RuntimeErrorCode& error)
+    const HostObjectReference& currentTarget, SourceView key,
+    SourceView code, Value& result, RuntimeErrorCode& error)
 {
     error = RuntimeErrorCode::None;
     if (type.length == 0 ||
@@ -2007,6 +2007,17 @@ bool RuntimeContext::createOrUpdateEventObject(SourceView type,
         error = RuntimeErrorCode::InvalidHostReturn;
         return false;
     }
+
+    Value typeValue;
+    Value keyValue;
+    Value codeValue;
+    // Event properties use cached runtime strings. Keyboard transitions can
+    // arrive indefinitely, but their bounded semantic values are retained
+    // once per distinct spelling rather than once per hardware transition.
+    if (!createOrGetCachedString(type, typeValue, error) ||
+        !createOrGetCachedString(key, keyValue, error) ||
+        !createOrGetCachedString(code, codeValue, error)) return false;
+    const bool hasKeyboardProperties = key.length != 0 || code.length != 0;
 
     RuntimeHostObjectId targetObject = kInvalidRuntimeHostObjectId;
     if (!createHostObject(target, targetObject, error, true)) return false;
@@ -2016,8 +2027,6 @@ bool RuntimeContext::createOrUpdateEventObject(SourceView type,
 
     if (eventObject_ == kInvalidRuntimeObjectId ||
         objectAt(eventObject_) == nullptr) {
-        Value typeValue;
-        if (!createString(type, typeValue, error)) return false;
         const std::vector<Value> noElements;
         if (!createObject(false, noElements, eventObject_, error)) return false;
         if (!createNativeFunction(NativeFunctionId::EventStopPropagation,
@@ -2069,11 +2078,36 @@ bool RuntimeContext::createOrUpdateEventObject(SourceView type,
             eventPreventDefaultFunction_ = kInvalidRuntimeFunctionId;
             return false;
         }
-    } else if (!updateExistingProperty(eventObject_, "target",
+        if (hasKeyboardProperties &&
+            (!writeProperty(eventObject_, "key", keyValue, error, true) ||
+                !writeProperty(eventObject_, "code", codeValue, error, true)))
+            return false;
+    } else if (!updateExistingProperty(eventObject_, "type", typeValue, error) ||
+        !updateExistingProperty(eventObject_, "target",
             Value::hostObject(targetObject), error) ||
         !updateExistingProperty(eventObject_, "currentTarget",
             Value::hostObject(currentTargetObject), error)) {
         return false;
+    }
+
+    if (hasKeyboardProperties) {
+        RuntimeErrorCode propertyError = RuntimeErrorCode::None;
+        if (!updateExistingProperty(eventObject_, "key", keyValue,
+                propertyError) &&
+            !writeProperty(eventObject_, "key", keyValue, error, true))
+            return false;
+        propertyError = RuntimeErrorCode::None;
+        if (!updateExistingProperty(eventObject_, "code", codeValue,
+                propertyError) &&
+            !writeProperty(eventObject_, "code", codeValue, error, true))
+            return false;
+    } else {
+        RuntimeErrorCode propertyError = RuntimeErrorCode::None;
+        (void)updateExistingProperty(eventObject_, "key", keyValue,
+            propertyError);
+        propertyError = RuntimeErrorCode::None;
+        (void)updateExistingProperty(eventObject_, "code", codeValue,
+            propertyError);
     }
 
     result = Value::object(eventObject_);
@@ -2223,6 +2257,32 @@ bool RuntimeContext::createString(SourceView text, Value& value,
     totalStringBytes_ += text.length;
     value = Value::string(static_cast<RuntimeStringId>(strings_.size() - 1));
     return true;
+}
+
+bool RuntimeContext::createOrGetCachedString(SourceView text, Value& value,
+    RuntimeErrorCode& error)
+{
+    error = RuntimeErrorCode::None;
+    if (text.data == nullptr && text.length != 0) {
+        error = RuntimeErrorCode::AllocationFailure;
+        return false;
+    }
+    if (text.length > limits_.maxRuntimeStringLength) {
+        error = RuntimeErrorCode::StringLimitExceeded;
+        return false;
+    }
+    const char* bytes = text.data == nullptr ? "" : text.data;
+    for (std::size_t index = 0; index < strings_.size(); ++index) {
+        const std::string& existing = strings_[index];
+        if (existing.size() == text.length &&
+            (text.length == 0 ||
+                std::char_traits<char>::compare(existing.data(), bytes,
+                    text.length) == 0)) {
+            value = Value::string(static_cast<RuntimeStringId>(index));
+            return true;
+        }
+    }
+    return createString(text, value, error);
 }
 
 bool RuntimeContext::createEnvironment(EnvironmentId parent,

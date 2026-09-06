@@ -226,6 +226,26 @@ bool Navigator::dispatchJavaScriptClick(int blockIndex, bool* defaultPrevented)
 	return true;
 }
 
+bool Navigator::dispatchJavaScriptKeyboardEvent(int keyCode,
+	const std::string& action, bool* defaultPrevented)
+{
+	if (action != "down" && action != "up") return false;
+	std::uint64_t targetSerial = 0;
+	const int focusedIndex = focusedFormControlBlockIndex();
+	if (focusedIndex >= 0 &&
+		focusedIndex < static_cast<int>(s_currentDoc.blocks.size())) {
+		targetSerial = s_currentDoc.blocks[static_cast<std::size_t>(focusedIndex)]
+			.elementMetadata.serial;
+	}
+	RuntimeErrorCode error = RuntimeErrorCode::None;
+	const bool down = action == "down";
+	if (!s_scriptHostAdapter.dispatchKeyboardEvent(s_scriptRuntime,
+		targetSerial, keyCode, down, s_shiftPressed, error, defaultPrevented)) {
+		recordJavaScriptError(down ? "keydown" : "keyup", error);
+	}
+	return true;
+}
+
 static bool navigatorSmokeProgressEnabled()
 {
 	const char* value = std::getenv("GXOS_NAVIGATOR_SMOKE_PROGRESS");
@@ -19438,6 +19458,13 @@ void Navigator::submitFormForBlock(int blockIndex)
 	updateDisplay();
 }
 
+static char navigatorTextInputCharacter(int keyCode, bool shiftPressed)
+{
+	if (keyCode >= 65 && keyCode <= 90 && !shiftPressed)
+		return static_cast<char>(keyCode + 32);
+	return static_cast<char>(keyCode);
+}
+
 void Navigator::handleKeyPress(int keyCode, const std::string& action)
 {
 	if (action == "up" && (keyCode == 32 || keyCode == 13) &&
@@ -19447,6 +19474,10 @@ void Navigator::handleKeyPress(int keyCode, const std::string& action)
 		s_staleKeyReleaseGeneration = 0;
 		return;
 	}
+	bool javascriptDefaultPrevented = false;
+	if (action == "down" || action == "up")
+		dispatchJavaScriptKeyboardEvent(keyCode, action,
+			&javascriptDefaultPrevented);
 	if (keyCode == 17) {
 		s_ctrlPressed = (action == "down");
 		return;
@@ -19455,6 +19486,7 @@ void Navigator::handleKeyPress(int keyCode, const std::string& action)
 		s_shiftPressed = (action == "down");
 		return;
 	}
+	if (javascriptDefaultPrevented) return;
 	if (keyCode == 9) {
 		if (action == "up") {
 			s_tabKeyPressed = false;
@@ -19531,7 +19563,7 @@ void Navigator::handleKeyPress(int keyCode, const std::string& action)
 			renderToolbar();
 		} else if (keyCode >= 32 && keyCode <= 126) { // Printable ASCII â€“ insert at caret
 			s_addressBuffer.insert(static_cast<size_t>(s_addressCaret), 1,
-				static_cast<char>(keyCode));
+				navigatorTextInputCharacter(keyCode, s_shiftPressed));
 			++s_addressCaret;
 			renderToolbar();
 		}
@@ -19575,7 +19607,8 @@ void Navigator::handleKeyPress(int keyCode, const std::string& action)
 			s_findCaret = bufLen;
 			updateDisplay();
 		} else if (keyCode >= 32 && keyCode <= 126) {
-			s_findBuffer.insert(static_cast<size_t>(s_findCaret), 1, static_cast<char>(keyCode));
+			s_findBuffer.insert(static_cast<size_t>(s_findCaret), 1,
+				navigatorTextInputCharacter(keyCode, s_shiftPressed));
 			++s_findCaret;
 			updateFindMatches(true);
 			goToFindMatch(0);
@@ -19650,7 +19683,8 @@ void Navigator::handleKeyPress(int keyCode, const std::string& action)
 			s_inputCaret = bufLen;
 			updateDisplay();
 		} else if (keyCode >= 32 && keyCode <= 126) {
-			block.inputValue.insert(static_cast<size_t>(s_inputCaret), 1, static_cast<char>(keyCode));
+			block.inputValue.insert(static_cast<size_t>(s_inputCaret), 1,
+				navigatorTextInputCharacter(keyCode, s_shiftPressed));
 			block.text = block.inputValue;
 			++s_inputCaret;
 			updateDisplay();

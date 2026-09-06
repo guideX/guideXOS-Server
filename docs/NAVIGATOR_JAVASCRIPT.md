@@ -2730,3 +2730,77 @@ microtasks, asynchronous queues, and broad DOM expansion are out of scope.
 The recommended JS23 direction is a bounded keyboard event foundation,
 starting with `keydown`/`keyup` and the smallest useful `key`/`code` metadata
 representation.
+
+## Phase JS23: bounded keyboard events
+
+JS23 adds the first keyboard-event slice to the existing Event implementation:
+
+```javascript
+document.addEventListener("keydown", function (event) {
+    // event.type, event.key, and event.code are available here.
+});
+
+input.addEventListener("keyup", function (event) {
+    // The released key uses the same bounded key/code mapping.
+});
+```
+
+The native path is the existing Navigator keyboard path: guideXOS key
+messages are normalized by `Navigator::handleKeyPress`, the focused form
+control is selected when one owns focus, and otherwise the document host is
+used as the fallback target. The adapter then sends the event through the
+same bounded listener table, propagation path, phase handling, cached Event,
+and callback invocation used by the earlier event milestones. For keyboard
+events the path is focused element, its DOM ancestors, then the document host,
+so capture, target, and bubble listeners all observe the normal dispatch
+order. JavaScript observation does not replace the existing textbox default
+editing path; `preventDefault()` suppresses that default key action through
+the existing synchronous dispatch result.
+
+`event.key` is a read-only cached property for the bounded Navigator mapping:
+letters (`a`/`A` through `z`/`Z`), digits, space, Enter, Escape, Backspace,
+Tab, the four arrow keys, Delete, Home, End, PageUp, PageDown, Shift,
+Control, and Alt. `event.code` is read-only and covers `KeyA`–`KeyZ`,
+`Digit0`–`Digit9`, `Enter`, `Escape`, `Backspace`, `Tab`, `Space`, the four
+arrow codes, and the bounded navigation/modifier codes. Key-up uses the same
+mapping as key-down. Key and code strings are cached in the runtime string
+store, so repeated hardware transitions do not create permanent per-event
+strings or JavaScript objects.
+
+This phase intentionally does not claim the full `KeyboardEvent` standard.
+It does not add `keypress`, `beforeinput`, `input`, composition/IME events,
+modifier properties such as `ctrlKey` or `shiftKey`, repeat/location/keyCode
+metadata, a browser keyboard-layout database, or browser-perfect physical
+scancode reporting. The current guideXOS message carries a virtual key code
+but no left/right scancode distinction, so `Shift`, `Control`, and `Alt` use
+the accurate generic bounded representation. Unknown virtual keys are not
+given manufactured key/code names.
+
+The focused proof is
+`tests/navigator_javascript_js23_test.cpp`, run by
+`scripts/smoke-navigator-javascript-js23.ps1`. The hosted fixture is
+`navigator-smoke/javascript-js23.html`; the production smoke path injects
+key-down and key-up transitions through `Navigator::SmokeKeyPress`, which
+enters the same input bridge and dispatch path as native input. The fixture
+also verifies focused-element targeting, document/ancestor capture and
+bubble, `once`, Boolean capture shorthand, removal, propagation controls,
+key identity, and ordinary text insertion. The fixed 64-registration listener
+capacity and existing bounded propagation/runtime lifetime safeguards remain
+unchanged.
+
+### JS23 validation result
+
+The dedicated JS23 suite reports 355 checks with 0 failures. Its focused
+smoke script passes the `GXOS_BARE_METAL` compile and strict
+`-Wall -Wextra -Werror -pedantic` runtime/adapter syntax lanes. The complete
+available focused set contains 21 suites: lexer, parser, runtime, and JS6
+through JS23; all 21 scripts pass. The production `build.bat` also completes
+successfully.
+
+The hosted aggregate reports `394 passed, 7 failed` out of `401` checks. Both
+JS23 aggregate assertions pass; the seven failures are the established
+unrelated CSS baseline checks: CSS 3C, CSS 3G, CSS 6A, CSS 6B's three checks,
+and CSS 6C. The broader `build-kernel.bat` validation currently stops before
+the kernel build on the repository's existing Mbed TLS configuration error
+for partial ECC acceleration/ECDHE-RSA prerequisites. No QEMU JS23 proof is
+claimed from that blocked kernel build.

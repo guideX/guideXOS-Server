@@ -32,6 +32,11 @@ constexpr std::size_t kNavigatorScriptMaxDocumentNodes = 1024u;
 constexpr std::size_t kNavigatorScriptMaxClickHandlers = 64u;
 constexpr std::uint32_t kNavigatorClickListenerOnceFlag = 1u;
 constexpr std::uint32_t kNavigatorClickListenerCaptureFlag = 2u;
+enum class NavigatorScriptEventType : std::uint8_t {
+    Click = 0u,
+    Keydown,
+    Keyup,
+};
 // JS13/JS17 snapshots at most 32 serials, including the clicked Element and the
 // document's html/body ancestors. The path is deliberately smaller than the
 // 1024-node document metadata bound so dispatch cannot consume an unbounded
@@ -88,6 +93,12 @@ public:
     // created for the click.
     bool dispatchClick(RuntimeContext& runtime, HostInstanceId serial,
         RuntimeErrorCode& error, bool* defaultPrevented = nullptr);
+    // Production and hosted-proof input boundary. targetSerial is the
+    // focused element serial, or zero to target the document fallback.
+    bool dispatchKeyboardEvent(RuntimeContext& runtime,
+        HostInstanceId targetSerial, int keyCode, bool down,
+        bool shiftPressed,
+        RuntimeErrorCode& error, bool* defaultPrevented = nullptr);
     bool hasClickHandler(HostInstanceId serial) const;
     std::size_t clickListenerCount() const { return clickListenerCount_; }
     // Compatibility diagnostic: the number of Elements with at least one
@@ -113,9 +124,9 @@ private:
         RuntimeFunctionId listenerFunction = kInvalidRuntimeFunctionId;
         std::uint32_t flags = 0;
         std::uint64_t registrationSequence = 0;
+        HostObjectKind ownerKind = 0;
+        NavigatorScriptEventType eventType = NavigatorScriptEventType::Click;
     };
-    static_assert(sizeof(ClickListenerRecord) == 24u,
-        "Navigator listener records must remain 24 bytes");
 
     struct ClickListenerSnapshotEntry {
         std::uint64_t registrationSequence = 0;
@@ -129,23 +140,39 @@ private:
     ClickHandlerRecord* clickHandlerFor(HostInstanceId serial);
     const ClickHandlerRecord* clickHandlerFor(HostInstanceId serial) const;
     void removeEmptyClickHandler(HostInstanceId serial);
-    ClickListenerRecord* clickListenerFor(HostInstanceId serial,
+    ClickListenerRecord* clickListenerFor(HostObjectKind ownerKind,
+        HostInstanceId serial, NavigatorScriptEventType eventType,
         RuntimeFunctionId function, bool capture);
-    const ClickListenerRecord* clickListenerFor(
-        HostInstanceId serial, RuntimeFunctionId function, bool capture) const;
+    const ClickListenerRecord* clickListenerFor(HostObjectKind ownerKind,
+        HostInstanceId serial, NavigatorScriptEventType eventType,
+        RuntimeFunctionId function, bool capture) const;
     const ClickListenerRecord* clickListenerForSequence(
-        HostInstanceId serial, std::uint64_t registrationSequence) const;
+        HostObjectKind ownerKind, HostInstanceId serial,
+        std::uint64_t registrationSequence) const;
     ClickListenerRecord* clickListenerForSequence(
-        HostInstanceId serial, std::uint64_t registrationSequence);
-    bool collectListenerSnapshot(HostInstanceId serial,
+        HostObjectKind ownerKind, HostInstanceId serial,
+        std::uint64_t registrationSequence);
+    bool collectListenerSnapshot(HostObjectKind ownerKind,
+        HostInstanceId serial, NavigatorScriptEventType eventType,
         std::array<ClickListenerSnapshotEntry,
             kNavigatorScriptMaxClickHandlers>& snapshot,
         std::size_t& count, bool capture) const;
-    bool hasClickListener(HostInstanceId serial) const;
-    bool hasAnyClickHandler(HostInstanceId serial) const;
+    bool hasClickListener(HostObjectKind ownerKind,
+        HostInstanceId serial) const;
+    bool hasAnyEventHandler(HostObjectKind ownerKind,
+        HostInstanceId serial) const;
     void removeClickListener(ClickListenerRecord& record);
     void resequenceListeners();
     bool allocateListenerSequence(std::uint64_t& sequence);
+    bool dispatchEvent(RuntimeContext& runtime, SourceView type,
+        NavigatorScriptEventType eventType,
+        const HostObjectReference& target, SourceView key, SourceView code,
+        bool includeOnclick, RuntimeErrorCode& error,
+        bool* defaultPrevented);
+    bool eventTypeFor(SourceView type,
+        NavigatorScriptEventType& eventType) const;
+    bool eventNameForKey(int keyCode, bool shiftPressed,
+        std::string& key, std::string& code) const;
     HostResult callInternal(const HostObjectReference* receiver,
         std::uint32_t methodId, const HostValue* arguments,
         std::size_t argumentCount, HostValue& result, bool once,
