@@ -1405,7 +1405,8 @@ static bool emit_expression_value(Emitter& emitter, const TranslationUnitIR& uni
             return expression.globalIndex < unit.globalCount &&
                 unit.globals[expression.globalIndex].kind == StorageKind::Struct &&
                 unit.globals[expression.globalIndex].structTypeIndex == expression.elementCount &&
-                emitter.emit_global_data_address(unit.globals[expression.globalIndex].name, expression.location);
+                emitter.emit_global_data_address(unit.globals[expression.globalIndex].name, expression.location) &&
+                emitter.mov_rax_reg64(2);
         case ExpressionKind::LoadGlobal:
             if (expression.globalIndex >= unit.globalCount) return false;
             return emitter.emit_global_data_address(unit.globals[expression.globalIndex].name,

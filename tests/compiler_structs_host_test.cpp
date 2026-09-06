@@ -43,6 +43,13 @@ static bool parse_text(const char* source, TranslationUnitIR* unit, Diagnostics*
 
 struct CallResult { int32_t value; uint32_t status; };
 
+static bool has_bytes_at(const uint8_t* bytes, uint32_t count, uint32_t offset,
+                         const uint8_t* expected, uint32_t expectedCount)
+{
+    if (!bytes || !expected || offset > count || expectedCount > count - offset) return false;
+    return std::memcmp(bytes + offset, expected, expectedCount) == 0;
+}
+
 static CallResult invoke(void* entry)
 {
     CallResult result = {};
@@ -206,6 +213,19 @@ static bool modules()
                  global.exports[1].kind == SymbolKind::DataStruct &&
                  global.exports[1].size == 8,
                  "global struct is zero-initialized in RW data")) return false;
+    bool globalStructAddressCopiedToRax = false;
+    const uint8_t movRaxRdx[] = {0x48, 0x89, 0xD0};
+    for (uint32_t r = 0; r < global.relocationCount; ++r) {
+        const RelocationRecord& relocation = global.relocations[r];
+        if (relocation.kind == RelocationKind::GlobalDataAddress64 &&
+            has_bytes_at(global.code, global.codeBytes, relocation.patchOffset + 8U,
+                         movRaxRdx, sizeof(movRaxRdx))) {
+            globalStructAddressCopiedToRax = true;
+            break;
+        }
+    }
+    if (!require(globalStructAddressCopiedToRax,
+                 "global struct address is copied to RAX before field addressing")) return false;
     const char* mismatch = "struct Point { int x; }; int sum_point(struct Point* p) { return p->x; }";
     CompiledModule bad = {};
     diagnostics = Diagnostics();

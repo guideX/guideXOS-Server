@@ -1869,6 +1869,9 @@ try {
         Export-SerialArtifact $finalSerial "s27main" (Join-Path $evidenceDirectory "s27main.elf")
     }
     if ($Phase27T) {
+        Export-SerialArtifact $finalSerial "t27glob" (Join-Path $evidenceDirectory "t27glob.elf")
+    }
+    if ($Phase27T) {
         Export-SerialArtifact $finalSerial "t27main" (Join-Path $evidenceDirectory "t27main.elf")
     }
 

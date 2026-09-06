@@ -1289,6 +1289,7 @@ void run_bootstrap_execution_smoke()
     static compiler::CompileSummary t27CachedSecond = {};
     static compiler::CompileSummary t27Edited = {};
     static compiler::CompileSummary t27SignatureBad = {};
+    static compiler::CompileSummary t27FieldOrderBad = {};
     static compiler::CompileSummary t27SignatureRecovered = {};
     static NativeElfRunReport t27Report = {};
     int32_t t27IgnoredReturn = 0;
@@ -1331,9 +1332,12 @@ void run_bootstrap_execution_smoke()
     const bool localWritten = write_t27_source("/P27T/out/t27local.c", t27LocalSource);
     const bool local = localWritten && compiler::compile("/P27T/out/t27local.c", "/P27T/out/t27local.elf", &t27Local) &&
         run_expected("/P27T/out/t27local.elf", 42);
-    const bool pointer = write_t27_source("/P27T/out/t27pointer.c", t27PointerSource) &&
-        compiler::compile("/P27T/out/t27pointer.c", "/P27T/out/t27pointer.elf", &t27Pointer) &&
-        run_expected("/P27T/out/t27pointer.elf", 42);
+    // The boot-time proof image uses the FAT short-name path. Keep generated
+    // smoke-only files within its 8.3 filename limit; this does not affect
+    // compiler or linker identifiers.
+    const bool pointer = write_t27_source("/P27T/out/t27ptr.c", t27PointerSource) &&
+        compiler::compile("/P27T/out/t27ptr.c", "/P27T/out/t27ptr.elf", &t27Pointer) &&
+        run_expected("/P27T/out/t27ptr.elf", 42);
     const bool arrowStore = write_t27_source("/P27T/out/t27store.c", t27ArrowStoreSource) &&
         compiler::compile("/P27T/out/t27store.c", "/P27T/out/t27store.elf", &t27ArrowStore) &&
         run_expected("/P27T/out/t27store.elf", 42);
@@ -1344,9 +1348,14 @@ void run_bootstrap_execution_smoke()
         compiler::compile("/P27T/out/t27adj.c", "/P27T/out/t27adj.elf", &t27Adjacent);
     const bool adjacent = adjacentCompiled && !run_file("/P27T/out/t27adj.elf", &t27IgnoredReturn, &t27Report) &&
         t27Report.runtimeStatus == NativeRuntimeStatus::InvalidPointerDereference && t27Report.teardownComplete;
-    const bool global = write_t27_source("/P27T/out/t27global.c", t27GlobalSource) &&
-        compiler::compile("/P27T/out/t27global.c", "/P27T/out/t27global.elf", &t27Global) &&
-        run_expected("/P27T/out/t27global.elf", 0);
+    const bool global = write_t27_source("/P27T/out/t27glob.c", t27GlobalSource) &&
+        compiler::compile("/P27T/out/t27glob.c", "/P27T/out/t27glob.elf", &t27Global) &&
+        run_expected("/P27T/out/t27glob.elf", 0);
+    // Keep a guest-generated global-struct image available for the external
+    // segment audit; unlike t27main, it contains mutable RW struct storage.
+    const bool globalArtifactEvidence = global &&
+        emit_serial_artifact("/P27T/out/t27glob.elf", "t27glob");
+    print_marker("phase27tv_global_artifact_evidence", globalArtifactEvidence);
     const bool recursion = write_t27_source("/P27T/out/t27rec.c", t27RecursionSource) &&
         compiler::compile("/P27T/out/t27rec.c", "/P27T/out/t27rec.elf", &t27Recursion) &&
         run_expected("/P27T/out/t27rec.elf", 42);
@@ -1369,11 +1378,11 @@ void run_bootstrap_execution_smoke()
     const bool arrowType = write_t27_source("/P27T/out/t27arrow.c", t27ArrowTypeSource) &&
         !compiler::compile("/P27T/out/t27arrow.c", "/P27T/out/t27arrow.elf", &t27ArrowType) &&
         compile_diagnostic_contains(t27ArrowType, "arrow access requires");
-    const bool assignment = write_t27_source("/P27T/out/t27assign.c", t27AssignmentSource) &&
-        !compiler::compile("/P27T/out/t27assign.c", "/P27T/out/t27assign.elf", &t27Assignment) &&
+    const bool assignment = write_t27_source("/P27T/out/t27asgn.c", t27AssignmentSource) &&
+        !compiler::compile("/P27T/out/t27asgn.c", "/P27T/out/t27asgn.elf", &t27Assignment) &&
         compile_diagnostic_contains(t27Assignment, "whole-struct assignment");
-    const bool byValue = write_t27_source("/P27T/out/t27byvalue.c", t27ByValueSource) &&
-        !compiler::compile("/P27T/out/t27byvalue.c", "/P27T/out/t27byvalue.elf", &t27ByValue) &&
+    const bool byValue = write_t27_source("/P27T/out/t27byval.c", t27ByValueSource) &&
+        !compiler::compile("/P27T/out/t27byval.c", "/P27T/out/t27byval.elf", &t27ByValue) &&
         compile_diagnostic_contains(t27ByValue, "passed by pointer");
     const bool pointerType = write_t27_source("/P27T/out/t27ptype.c", t27PointerTypeSource) &&
         !compiler::compile("/P27T/out/t27ptype.c", "/P27T/out/t27ptype.elf", &t27PointerType) &&
@@ -1406,15 +1415,24 @@ void run_bootstrap_execution_smoke()
         compiler::compile_project_incremental(t27Sources, t27Sources, t27Objects, 3, "/P27T/out/t27edit.elf", &t27Edited) &&
         t27Edited.compiledModuleCount == 1 && t27Edited.cachedModuleCount == 2 && run_expected("/P27T/out/t27edit.elf", 41);
     const bool restored = edited && vfs::write_file(t27Sources[1], t27MathOriginal, sizeof(t27MathOriginal) - 1U) == sizeof(t27MathOriginal) - 1U &&
-        compiler::compile_project_incremental(t27Sources, t27Sources, t27Objects, 3, "/P27T/out/t27restore.elf", &t27SignatureRecovered) &&
-        run_expected("/P27T/out/t27restore.elf", 42);
-    const char t27MathMismatch[] =
-        "struct Point { int x; }; int sum_point(struct Point* p) { return p->x; }\n";
-    const bool mismatchSeeded = restored && vfs::write_file(t27Sources[1], t27MathMismatch, sizeof(t27MathMismatch) - 1U) == sizeof(t27MathMismatch) - 1U;
+        compiler::compile_project_incremental(t27Sources, t27Sources, t27Objects, 3, "/P27T/out/t27rest.elf", &t27SignatureRecovered) &&
+        run_expected("/P27T/out/t27rest.elf", 42);
+    const char t27MathSignatureMismatch[] =
+        "struct Point { int x; int y; }; int sum_point(int p) { return p; }\n";
+    const bool mismatchSeeded = restored && vfs::write_file(t27Sources[1], t27MathSignatureMismatch,
+        sizeof(t27MathSignatureMismatch) - 1U) == sizeof(t27MathSignatureMismatch) - 1U;
     const bool mismatch = mismatchSeeded && !compiler::compile_project_incremental(t27Sources, t27Sources, t27Objects, 3,
         "/P27T/out/t27bad.elf", &t27SignatureBad) && t27SignatureBad.cachedModuleCount == 2 &&
         compile_diagnostic_contains(t27SignatureBad, "conflicting declaration for function");
-    const bool signatureFinal = mismatch && vfs::write_file(t27Sources[1], t27MathOriginal, sizeof(t27MathOriginal) - 1U) == sizeof(t27MathOriginal) - 1U &&
+    const char t27MathFieldOrderMismatch[] =
+        "struct Point { int y; int x; }; int sum_point(struct Point* p) { return p->x + p->y; }\n";
+    const bool fieldOrderSeeded = mismatch && vfs::write_file(t27Sources[1], t27MathFieldOrderMismatch,
+        sizeof(t27MathFieldOrderMismatch) - 1U) == sizeof(t27MathFieldOrderMismatch) - 1U;
+    const bool fieldOrderMismatch = fieldOrderSeeded && !compiler::compile_project_incremental(t27Sources, t27Sources,
+        t27Objects, 3, "/P27T/out/t27ordr.elf", &t27FieldOrderBad) && t27FieldOrderBad.cachedModuleCount == 2 &&
+        compile_diagnostic_contains(t27FieldOrderBad, "incompatible struct type definition across modules");
+    const bool signatureFinal = fieldOrderMismatch && vfs::write_file(t27Sources[1], t27MathOriginal,
+        sizeof(t27MathOriginal) - 1U) == sizeof(t27MathOriginal) - 1U &&
         compiler::compile_project_incremental(t27Sources, t27Sources, t27Objects, 3, "/P27T/out/t27final.elf", &t27SignatureRecovered) &&
         run_expected("/P27T/out/t27final.elf", 42);
     print_marker("phase27t_duplicate_field", duplicateField);
@@ -1432,7 +1450,7 @@ void run_bootstrap_execution_smoke()
     print_marker("phase27t_struct_pointer_type_safety", pointerType);
     print_marker("phase27t_cross_file_struct_pointer", project);
     print_marker("phase27t_struct_signature_mismatch", mismatch);
-    print_marker("phase27t_field_order_mismatch", mismatch);
+    print_marker("phase27t_field_order_mismatch", fieldOrderMismatch);
     print_marker("phase27t_unknown_field", unknownField);
     print_marker("phase27t_dot_type_error", dotType);
     print_marker("phase27t_arrow_type_error", arrowType);
@@ -1457,7 +1475,7 @@ void run_bootstrap_execution_smoke()
     print_marker("phase27t_ide_cold_struct", project);
     print_marker("phase27t_ide_warm_struct", cached);
     print_marker("phase27t_ide_partial_struct", edited && restored);
-    print_marker("phase27t_ide_struct_type_failure", mismatch);
+    print_marker("phase27t_ide_struct_type_failure", fieldOrderMismatch);
     print_marker("phase27t_struct_failure_blocks_run", mismatch);
     print_marker("phase27t_field_pointer_failure_recovery", adjacent && restored);
     print_marker("phase27t_struct_pointer_recursion", recursion);
@@ -1474,7 +1492,7 @@ void run_bootstrap_execution_smoke()
     print_marker("phase27t_kernel_survival", appLaunched && restored && signatureFinal);
     const bool phase27tPassed = local && pointer && arrowStore && fieldPointer && adjacent && global && recursion && deep &&
         duplicateField && duplicateStruct && unknownField && dotType && arrowType && assignment && byValue && pointerType &&
-        project && cached && deterministic && edited && restored && mismatch && signatureFinal && artifact && appLaunched;
+        project && cached && deterministic && edited && restored && mismatch && fieldOrderMismatch && signatureFinal && artifact && appLaunched;
     print_marker("phase27t", phase27tPassed);
     serial::puts(phase27tPassed ? "ELF Loader: Phase 27T structs and field addressing smoke PASS\n" :
                                   "ELF Loader: Phase 27T structs and field addressing smoke FAIL\n");
