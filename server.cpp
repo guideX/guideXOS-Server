@@ -2284,6 +2284,70 @@ static std::string navigatorHostedSmokeDiagnostic() {
         gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
         "replacement page starts without JS24 registrations or errors");
 
+    const bool js25Loaded = gxos::apps::Navigator::SmokeNavigateToQuiet(
+        "http://127.0.0.1:8080/navigator-smoke/javascript-js25.html");
+    const std::string js25InitialText =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    const size_t js25InitialHandlers =
+        gxos::apps::Navigator::SmokeJavaScriptHandlerCount();
+    const size_t js25InitialListeners =
+        gxos::apps::Navigator::SmokeJavaScriptListenerCount();
+    const std::string js25InitialError =
+        gxos::apps::Navigator::SmokeJavaScriptLastError();
+    add("JS25 hosted fixture loads programmatic focus methods",
+        js25Loaded && contains(js25InitialText, "Navigator JavaScript JS25") &&
+        contains(js25InitialText, "Programmatic focus and blur") &&
+        js25InitialHandlers == 4u && js25InitialListeners == 18u &&
+        js25InitialError.empty(),
+        std::string("loaded=") + yesNo(js25Loaded) + ",handlers=" +
+        std::to_string(js25InitialHandlers) + ",listeners=" +
+        std::to_string(js25InitialListeners) + ",error=" +
+        (js25InitialError.empty() ? "none" : js25InitialError));
+
+    const std::string js25AfterProgrammaticFocus =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS25 direct focus/blur uses JS24 ordering and propagation",
+        gxos::apps::Navigator::SmokeFocusedFormControlId() == "js25-a" &&
+        contains(js25AfterProgrammaticFocus,
+            "blur-a;focusout-a;focusout-parent-js25-a;focusout-document-js25-a;") &&
+        contains(js25AfterProgrammaticFocus,
+            "focus-cap-document-js25-b;focus-cap-parent-js25-b;focus-b;") &&
+        contains(js25AfterProgrammaticFocus,
+            "focusin-b;focusin-parent-js25-b;focusin-document-js25-b;") &&
+        contains(js25AfterProgrammaticFocus, "blur-b;") &&
+        contains(js25AfterProgrammaticFocus, "focusout-a;") &&
+        contains(js25AfterProgrammaticFocus,
+            "focus-cap-document-js25-a;focus-cap-parent-js25-a;focus-a;"),
+        std::string("focused=") +
+        gxos::apps::Navigator::SmokeFocusedFormControlId() + ",text=" +
+        summarizeText(js25AfterProgrammaticFocus, 520));
+
+    const bool js25KeyDown = gxos::apps::Navigator::SmokeKeyPress(65, "down");
+    const bool js25KeyUp = gxos::apps::Navigator::SmokeKeyPress(65, "up");
+    const std::string js25AfterKeyboard =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS25 programmatic focus feeds JS23 keyboard targeting",
+        js25KeyDown && js25KeyUp &&
+        gxos::apps::Navigator::SmokeFormControlInputLengthById("js25-a") == 1 &&
+        gxos::apps::Navigator::SmokeFocusedFormControlId().empty() &&
+        contains(js25AfterKeyboard, "keydown-js25-a:a;") &&
+        contains(js25AfterKeyboard, "keyup-js25-a:a;") &&
+        contains(js25AfterKeyboard, "blur-a;") &&
+        contains(js25AfterKeyboard, "focusout-a;") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("down=") + yesNo(js25KeyDown) + ",up=" +
+        yesNo(js25KeyUp) + ",focused=" +
+        gxos::apps::Navigator::SmokeFocusedFormControlId() + ",a-length=" +
+        std::to_string(gxos::apps::Navigator::SmokeFormControlInputLengthById("js25-a")) +
+        ",text=" + summarizeText(js25AfterKeyboard, 520));
+
+    add("JS25 navigation cleanup clears programmatic-focus listeners",
+        gxos::apps::Navigator::SmokeNavigateToQuiet("about:navigator") &&
+        gxos::apps::Navigator::SmokeJavaScriptHandlerCount() == 0u &&
+        gxos::apps::Navigator::SmokeJavaScriptListenerCount() == 0u &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        "replacement page starts without JS25 registrations or errors");
+
     bool cssInlineLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-inline.html");
     std::string cssInlineText = gxos::apps::Navigator::SmokeCurrentDocumentText();
     std::string cssInlineReport = gxos::apps::Navigator::SmokeRuntimeReport();

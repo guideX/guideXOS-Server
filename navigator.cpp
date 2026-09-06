@@ -116,6 +116,10 @@ std::string Navigator::s_lastPostHttpStatus;
 std::string Navigator::s_lastPostContentType;
 bool        Navigator::s_findActive = false;
 bool        Navigator::s_loading = false;
+bool        Navigator::s_focusTransitionActive = false;
+bool        Navigator::s_pendingFocusRequest = false;
+uint64_t    Navigator::s_pendingFocusSerial = 0;
+bool        Navigator::s_pendingFocusGain = false;
 static uint64_t s_throbberLoadingEntries = 0;
 static uint64_t s_throbberLoadingExits = 0;
 static uint64_t s_throbberPaintSubmissions = 0;
@@ -176,7 +180,15 @@ void Navigator::recordJavaScriptError(const std::string& phase,
 bool Navigator::resetJavaScriptRealmForNavigation()
 {
 	s_lastJavaScriptError.clear();
+	s_focusTransitionActive = false;
+	s_pendingFocusRequest = false;
+	s_pendingFocusSerial = 0;
+	s_pendingFocusGain = false;
 	s_scriptHostAdapter.detachDocument();
+	s_scriptHostAdapter.setFocusRequestCallback(&Navigator::requestJavaScriptFocus,
+		nullptr);
+	s_scriptHostAdapter.setDispatchCompleteCallback(
+		&Navigator::completeJavaScriptFocusDispatch, nullptr);
 	s_scriptRuntime.setHostAdapter(&s_scriptHostAdapter);
 	s_scriptRuntime.reset();
 	if (s_scriptRuntime.lastResult().succeeded()) return true;
@@ -258,6 +270,50 @@ bool Navigator::dispatchJavaScriptFocusEvent(std::uint64_t targetSerial,
 			(bubblingVariant ? "focusout" : "blur"), error);
 	}
 	return true;
+}
+
+bool Navigator::requestJavaScriptFocus(void*, std::uint64_t serial, bool focus)
+{
+	const int blockIndex = blockIndexForControlSerial(serial);
+	const bool focusable = blockIndex >= 0 &&
+		blockIndex < static_cast<int>(s_currentDoc.blocks.size()) &&
+		isFocusableFormControl(s_currentDoc.blocks[static_cast<std::size_t>(blockIndex)]);
+	const FormRuntimeStateTable& runtime = s_currentDoc.formRuntimeState;
+	const bool ownsFocus = runtime.initialized && runtime.focusValid &&
+		runtime.documentGeneration == s_documentGeneration &&
+		runtime.focusedDocumentGeneration == s_documentGeneration &&
+		runtime.focusedLogicalSerial == serial;
+	if (focus) {
+		// The existing form-control eligibility rules are the complete bounded
+		// focusability model for this phase. Non-focusable receivers are no-ops.
+		if (!focusable || ownsFocus) return true;
+	} else if (!ownsFocus) {
+		// blur() may only clear its actual receiver, never another owner.
+		return true;
+	}
+	if (s_focusTransitionActive || s_scriptHostAdapter.eventDispatchActive()) {
+		s_pendingFocusRequest = true;
+		s_pendingFocusSerial = serial;
+		s_pendingFocusGain = focus;
+		return true;
+	}
+	if (focus) {
+		focusDocumentInput(blockIndex,
+			FormFocusOrigin::ProgrammaticInternalSmoke);
+	} else {
+		clearDocumentFocus(true, FormFocusCancellationReason::StateChange);
+	}
+	if (s_windowId != 0) updateDisplay();
+	return true;
+}
+
+void Navigator::completeJavaScriptFocusDispatch(void*)
+{
+	// Focus requests made by a keyboard or other event listener are deferred
+	// until the current Event object has completed its propagation. Requests
+	// made during an existing focus transition are drained by that transition's
+	// authoritative wrapper, preserving the JS24 blur/focusout ordering.
+	if (!s_focusTransitionActive) drainPendingJavaScriptFocusRequests();
 }
 
 static bool navigatorSmokeProgressEnabled()
@@ -17851,7 +17907,7 @@ int Navigator::blockIndexForControlSerial(uint64_t serial)
 	if (serial == 0) return -1;
 	for (int i = 0; i < static_cast<int>(s_currentDoc.blocks.size()); ++i) {
 		const DocBlock& block = s_currentDoc.blocks[static_cast<size_t>(i)];
-		if (block.formControl.logicalSerial == serial && isRuntimeCheckable(block)) return i;
+		if (block.formControl.logicalSerial == serial && isFocusableFormControl(block)) return i;
 	}
 	return -1;
 }
@@ -17929,6 +17985,10 @@ bool Navigator::radioGroupMatches(const DocBlock& left, const DocBlock& right)
 
 void Navigator::initializeFormRuntimeState()
 {
+	s_focusTransitionActive = false;
+	s_pendingFocusRequest = false;
+	s_pendingFocusSerial = 0;
+	s_pendingFocusGain = false;
 	if (s_currentDoc.formRuntimeState.initialized &&
 		s_currentDoc.formRuntimeState.keyboardActivationArmed) {
 		cancelKeyboardActivation(FormFocusCancellationReason::StateChange);
@@ -18021,7 +18081,7 @@ void Navigator::recomputeFormControlStyles()
 			 runtime.focusedDocumentGeneration != s_documentGeneration)
 			? FormFocusCancellationReason::GenerationMismatch
 			: FormFocusCancellationReason::StateChange;
-		clearDocumentFocus(false, reason);
+		clearDocumentFocusInternal(false, reason);
 		++s_currentDoc.cssDiagnostics.runtimeFocusRecomputations;
 		gxos::web::recomputeDocumentStyles(s_currentDoc);
 		s_inlineLayoutDirty = true;
@@ -18065,7 +18125,8 @@ void Navigator::cancelKeyboardActivation(FormFocusCancellationReason reason)
 	clearKeyboardActivationState();
 }
 
-void Navigator::clearDocumentFocus(bool recomputeStyles, FormFocusCancellationReason reason)
+void Navigator::clearDocumentFocusInternal(bool recomputeStyles,
+	FormFocusCancellationReason reason)
 {
 	FormRuntimeStateTable& runtime = s_currentDoc.formRuntimeState;
 	const bool hadFocus = runtime.focusValid || runtime.focusedLogicalSerial != 0;
@@ -18092,6 +18153,21 @@ void Navigator::clearDocumentFocus(bool recomputeStyles, FormFocusCancellationRe
 		if (visibleDocumentOwnsInspectedSource())
 			storePageMetadata(s_pageMetadata, s_currentDoc);
 	}
+}
+
+void Navigator::clearDocumentFocus(bool recomputeStyles,
+	FormFocusCancellationReason reason)
+{
+	if (s_focusTransitionActive) {
+		s_pendingFocusRequest = true;
+		s_pendingFocusSerial = s_currentDoc.formRuntimeState.focusedLogicalSerial;
+		s_pendingFocusGain = false;
+		return;
+	}
+	s_focusTransitionActive = true;
+	clearDocumentFocusInternal(recomputeStyles, reason);
+	drainPendingJavaScriptFocusRequests();
+	s_focusTransitionActive = false;
 }
 
 void Navigator::clearMousePressState()
@@ -18556,7 +18632,7 @@ void Navigator::handleMouseInput(int x, int y, int button, const std::string& ac
 	}
 }
 
-void Navigator::focusDocumentInput(int blockIndex, FormFocusOrigin origin)
+void Navigator::focusDocumentInputInternal(int blockIndex, FormFocusOrigin origin)
 {
 	if (blockIndex < 0 || blockIndex >= static_cast<int>(s_currentDoc.blocks.size()) ||
 		!isFocusableFormControl(s_currentDoc.blocks[blockIndex])) return;
@@ -18602,6 +18678,56 @@ void Navigator::focusDocumentInput(int blockIndex, FormFocusOrigin origin)
 		dispatchJavaScriptFocusEvent(block.formControl.logicalSerial, true, true);
 	}
 	revealFocusedFormControl(blockIndex);
+}
+
+void Navigator::focusDocumentInput(int blockIndex, FormFocusOrigin origin)
+{
+	if (s_focusTransitionActive) {
+		if (blockIndex >= 0 &&
+			blockIndex < static_cast<int>(s_currentDoc.blocks.size())) {
+			s_pendingFocusRequest = true;
+			s_pendingFocusSerial = s_currentDoc.blocks[
+				static_cast<std::size_t>(blockIndex)].formControl.logicalSerial;
+			s_pendingFocusGain = true;
+		}
+		return;
+	}
+	s_focusTransitionActive = true;
+	focusDocumentInputInternal(blockIndex, origin);
+	drainPendingJavaScriptFocusRequests();
+	s_focusTransitionActive = false;
+}
+
+void Navigator::drainPendingJavaScriptFocusRequests()
+{
+	// Keep callback redirects synchronous and bounded. The last request made
+	// during one transition wins; mutually recursive listeners cannot grow a
+	// queue or recurse indefinitely.
+	constexpr std::size_t kMaxRedirects = 16u;
+	const bool ownsTransition = !s_focusTransitionActive;
+	if (ownsTransition) s_focusTransitionActive = true;
+	for (std::size_t redirect = 0; redirect < kMaxRedirects &&
+			s_pendingFocusRequest; ++redirect) {
+		const std::uint64_t serial = s_pendingFocusSerial;
+		const bool focus = s_pendingFocusGain;
+		s_pendingFocusRequest = false;
+		if (focus) {
+			const int blockIndex = blockIndexForControlSerial(serial);
+			if (blockIndex >= 0 &&
+				blockIndex < static_cast<int>(s_currentDoc.blocks.size()) &&
+				isFocusableFormControl(s_currentDoc.blocks[
+					static_cast<std::size_t>(blockIndex)]))
+				focusDocumentInputInternal(blockIndex,
+					FormFocusOrigin::ProgrammaticInternalSmoke);
+		} else {
+			const FormRuntimeStateTable& runtime = s_currentDoc.formRuntimeState;
+			if (runtime.focusValid && runtime.focusedLogicalSerial == serial)
+				clearDocumentFocusInternal(true,
+					FormFocusCancellationReason::StateChange);
+		}
+	}
+	s_pendingFocusRequest = false;
+	if (ownsTransition) s_focusTransitionActive = false;
 }
 
 void Navigator::revealFocusedFormControl(int blockIndex)

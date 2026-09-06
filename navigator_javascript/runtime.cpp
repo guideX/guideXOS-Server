@@ -1990,9 +1990,11 @@ bool RuntimeContext::invokeFunctionInSameRealm(const Value& function,
 {
     result_ = ScriptResult();
     finalValue_ = Value::undefined();
+    const std::size_t previousActiveCallFrames = activeCallFrames_;
     activeCallFrames_ = 0;
     const bool succeeded = invokeFunctionForTesting(function, arguments, result,
         error);
+    activeCallFrames_ = previousActiveCallFrames;
     if (!succeeded) result_.status = ScriptStatus::RuntimeFailure;
     return succeeded;
 }
@@ -2215,6 +2217,7 @@ void RuntimeContext::clearRuntimeState()
     liveHostObjectCount_ = 0;
     hostOperations_ = 0;
     hostCallActive_ = false;
+    hostReentryAllowed_ = false;
 }
 
 void RuntimeContext::reset()
@@ -2842,25 +2845,26 @@ bool RuntimeContext::validateAdapterReference(
         error = RuntimeErrorCode::InvalidHostObject;
         return false;
     }
-    if (hostCallActive_) {
+    if (hostCallActive_ && !hostReentryAllowed_) {
         error = RuntimeErrorCode::HostReentryUnsupported;
         return false;
     }
 
     HostResult result;
+    const bool previousHostCallActive = hostCallActive_;
     hostCallActive_ = true;
     try {
         result = hostAdapter_->validate(reference);
     } catch (const std::bad_alloc&) {
-        hostCallActive_ = false;
+        hostCallActive_ = previousHostCallActive;
         error = RuntimeErrorCode::HostCallFailed;
         return false;
     } catch (...) {
-        hostCallActive_ = false;
+        hostCallActive_ = previousHostCallActive;
         error = RuntimeErrorCode::HostCallFailed;
         return false;
     }
-    hostCallActive_ = false;
+    hostCallActive_ = previousHostCallActive;
     if (!result.succeeded()) {
         error = mapHostResult(result.code);
         return false;
@@ -3031,7 +3035,7 @@ bool RuntimeContext::readHostProperty(RuntimeHostObjectId object,
         error = RuntimeErrorCode::InvalidHostObject;
         return false;
     }
-    if (hostCallActive_) {
+    if (hostCallActive_ && !hostReentryAllowed_) {
         error = RuntimeErrorCode::HostReentryUnsupported;
         return false;
     }
@@ -3039,6 +3043,7 @@ bool RuntimeContext::readHostProperty(RuntimeHostObjectId object,
     HostResult validation;
     HostResult operation;
     HostValue hostValue;
+    const bool previousHostCallActive = hostCallActive_;
     hostCallActive_ = true;
     try {
         validation = hostAdapter_->validate(reference);
@@ -3047,15 +3052,15 @@ bool RuntimeContext::readHostProperty(RuntimeHostObjectId object,
                 SourceView(key.data(), key.size()), hostValue);
         }
     } catch (const std::bad_alloc&) {
-        hostCallActive_ = false;
+        hostCallActive_ = previousHostCallActive;
         error = RuntimeErrorCode::HostCallFailed;
         return false;
     } catch (...) {
-        hostCallActive_ = false;
+        hostCallActive_ = previousHostCallActive;
         error = RuntimeErrorCode::HostCallFailed;
         return false;
     }
-    hostCallActive_ = false;
+    hostCallActive_ = previousHostCallActive;
     if (!validation.succeeded()) {
         error = mapHostResult(validation.code);
         return false;
@@ -3092,12 +3097,13 @@ bool RuntimeContext::writeHostProperty(RuntimeHostObjectId object,
         error = RuntimeErrorCode::InvalidHostObject;
         return false;
     }
-    if (hostCallActive_) {
+    if (hostCallActive_ && !hostReentryAllowed_) {
         error = RuntimeErrorCode::HostReentryUnsupported;
         return false;
     }
     HostResult validation;
     HostResult operation;
+    const bool previousHostCallActive = hostCallActive_;
     hostCallActive_ = true;
     try {
         validation = hostAdapter_->validate(reference);
@@ -3106,15 +3112,15 @@ bool RuntimeContext::writeHostProperty(RuntimeHostObjectId object,
                 SourceView(key.data(), key.size()), hostValue);
         }
     } catch (const std::bad_alloc&) {
-        hostCallActive_ = false;
+        hostCallActive_ = previousHostCallActive;
         error = RuntimeErrorCode::HostCallFailed;
         return false;
     } catch (...) {
-        hostCallActive_ = false;
+        hostCallActive_ = previousHostCallActive;
         error = RuntimeErrorCode::HostCallFailed;
         return false;
     }
-    hostCallActive_ = false;
+    hostCallActive_ = previousHostCallActive;
     if (!validation.succeeded()) {
         error = mapHostResult(validation.code);
         return false;
@@ -3307,7 +3313,9 @@ bool RuntimeContext::invokeHostMethod(const FunctionRecord& function,
         setRuntimeError(RuntimeErrorCode::InvalidHostObject, location);
         return false;
     }
-    if (hostCallActive_) {
+    const bool methodAllowsReentry =
+        hostAdapter_->allowsReentrantCall(function.hostMethod);
+    if (hostCallActive_ && !methodAllowsReentry) {
         setRuntimeError(RuntimeErrorCode::HostReentryUnsupported, location);
         return false;
     }
@@ -3316,7 +3324,10 @@ bool RuntimeContext::invokeHostMethod(const FunctionRecord& function,
     HostResult validation;
     HostResult operation;
     HostValue hostResult;
+    const bool previousHostCallActive = hostCallActive_;
+    const bool previousHostReentryAllowed = hostReentryAllowed_;
     hostCallActive_ = true;
+    if (methodAllowsReentry) hostReentryAllowed_ = true;
     try {
         validation = hostAdapter_->validate(target);
         if (validation.succeeded()) {
@@ -3326,17 +3337,20 @@ bool RuntimeContext::invokeHostMethod(const FunctionRecord& function,
                 hostArguments.size(), hostResult);
         }
     } catch (const std::bad_alloc&) {
-        hostCallActive_ = false;
+        hostCallActive_ = previousHostCallActive;
+        hostReentryAllowed_ = previousHostReentryAllowed;
         --activeCallFrames_;
         setRuntimeError(RuntimeErrorCode::HostCallFailed, location);
         return false;
     } catch (...) {
-        hostCallActive_ = false;
+        hostCallActive_ = previousHostCallActive;
+        hostReentryAllowed_ = previousHostReentryAllowed;
         --activeCallFrames_;
         setRuntimeError(RuntimeErrorCode::HostCallFailed, location);
         return false;
     }
-    hostCallActive_ = false;
+    hostCallActive_ = previousHostCallActive;
+    hostReentryAllowed_ = previousHostReentryAllowed;
     if (!validation.succeeded()) {
         --activeCallFrames_;
         setRuntimeError(mapHostResult(validation.code), location);

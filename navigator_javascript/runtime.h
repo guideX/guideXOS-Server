@@ -462,6 +462,7 @@ private:
     std::size_t liveHostObjectCount_ = 0;
     std::size_t hostOperations_ = 0;
     bool hostCallActive_ = false;
+    bool hostReentryAllowed_ = false;
 };
 
 ScriptResult executeScript(SourceView source, RuntimeContext& context);

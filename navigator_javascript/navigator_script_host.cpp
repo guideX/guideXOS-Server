@@ -111,6 +111,27 @@ void NavigatorScriptHostAdapter::setGeneration(HostGenerationId generation)
     generation_ = generation;
 }
 
+void NavigatorScriptHostAdapter::setFocusRequestCallback(
+    FocusRequestCallback callback, void* context)
+{
+    focusRequestCallback_ = callback;
+    focusRequestContext_ = context;
+}
+
+void NavigatorScriptHostAdapter::setDispatchCompleteCallback(
+    DispatchCompleteCallback callback, void* context)
+{
+    dispatchCompleteCallback_ = callback;
+    dispatchCompleteContext_ = context;
+}
+
+bool NavigatorScriptHostAdapter::allowsReentrantCall(
+    std::uint32_t methodId) const
+{
+    return methodId == kNavigatorFocusMethod ||
+        methodId == kNavigatorBlurMethod;
+}
+
 std::size_t NavigatorScriptHostAdapter::callbackLimit() const
 {
     return std::min(limits_.maxClickHandlers, clickHandlers_.size());
@@ -361,7 +382,8 @@ bool NavigatorScriptHostAdapter::dispatchKeyboardEvent(
         return false;
     }
     const HostObjectReference target{
-        targetSerial, generation_, targetSerial == 0
+        targetSerial == 0 ? kNavigatorDocumentHostInstance : targetSerial,
+        generation_, targetSerial == 0
             ? kNavigatorDocumentHostKind : kNavigatorElementHostKind};
     const char* typeText = down ? "keydown" : "keyup";
     return dispatchEvent(runtime, SourceView(typeText, down ? 7u : 5u),
@@ -677,6 +699,8 @@ bool NavigatorScriptHostAdapter::dispatchEvent(RuntimeContext& runtime,
     runtime.endEventDispatch();
     clickDispatchActive_ = false;
     error = firstError;
+    if (dispatchCompleteCallback_ != nullptr)
+        dispatchCompleteCallback_(dispatchCompleteContext_);
     return succeeded;
 }
 
@@ -871,6 +895,14 @@ HostResult NavigatorScriptHostAdapter::getProperty(
     }
     if (textEquals(property, "removeEventListener")) {
         result = HostValue::method(kNavigatorRemoveEventListenerMethod, true, true);
+        return HostResult();
+    }
+    if (textEquals(property, "focus")) {
+        result = HostValue::method(kNavigatorFocusMethod, true, true);
+        return HostResult();
+    }
+    if (textEquals(property, "blur")) {
+        result = HostValue::method(kNavigatorBlurMethod, true, true);
         return HostResult();
     }
     return HostResult{HostResultCode::PropertyNotFound};
@@ -1228,6 +1260,17 @@ HostResult NavigatorScriptHostAdapter::callInternal(
     if (receiver == nullptr) return HostResult{HostResultCode::InvalidObject};
     const HostResult receiverResult = validate(*receiver);
     if (!receiverResult.succeeded()) return receiverResult;
+    if (methodId == kNavigatorFocusMethod ||
+        methodId == kNavigatorBlurMethod) {
+        if (receiver->kind != kNavigatorElementHostKind ||
+            argumentCount != 0u || focusRequestCallback_ == nullptr)
+            return HostResult{HostResultCode::InvalidValue};
+        if (!focusRequestCallback_(focusRequestContext_, receiver->instanceId,
+                methodId == kNavigatorFocusMethod))
+            return HostResult{HostResultCode::CallFailed};
+        result = HostValue::undefined();
+        return HostResult();
+    }
     if (methodId == kNavigatorAddEventListenerMethod) {
         if ((receiver->kind != kNavigatorElementHostKind &&
                 receiver->kind != kNavigatorDocumentHostKind) ||
@@ -1391,6 +1434,10 @@ NavigatorScriptExecutionHarness::NavigatorScriptExecutionHarness(
     RuntimeLimits runtimeLimits, NavigatorScriptHostLimits hostLimits)
     : runtime_(runtimeLimits), adapter_(1u, hostLimits)
 {
+    adapter_.setFocusRequestCallback(
+        &NavigatorScriptExecutionHarness::focusRequestCallback, this);
+    adapter_.setDispatchCompleteCallback(
+        &NavigatorScriptExecutionHarness::dispatchCompleteCallback, this);
     runtime_.setHostAdapter(&adapter_);
 }
 
@@ -1415,6 +1462,10 @@ bool NavigatorScriptExecutionHarness::loadParsedDocument(
     document_ = std::move(document);
     adapter_.attachDocument(document_, runtime_.hostGeneration());
     focusedElementSerial_ = 0;
+    focusTransitionActive_ = false;
+    pendingFocusRequest_ = false;
+    pendingFocusSerial_ = 0;
+    pendingFocusGain_ = false;
     if (!installDocumentGlobal(error)) return false;
     loaded_ = true;
     return true;
@@ -1458,8 +1509,57 @@ bool NavigatorScriptExecutionHarness::dispatchClick(std::uint64_t serial,
     return adapter_.dispatchClick(runtime_, serial, error, defaultPrevented);
 }
 
-bool NavigatorScriptExecutionHarness::focusElement(std::uint64_t serial,
-    RuntimeErrorCode& error)
+bool NavigatorScriptExecutionHarness::focusRequestCallback(
+    void* context, HostInstanceId serial, bool focus)
+{
+    if (context == nullptr) return false;
+    return static_cast<NavigatorScriptExecutionHarness*>(context)->requestFocus(
+        serial, focus);
+}
+
+void NavigatorScriptExecutionHarness::dispatchCompleteCallback(void* context)
+{
+    if (context == nullptr) return;
+    NavigatorScriptExecutionHarness* harness =
+        static_cast<NavigatorScriptExecutionHarness*>(context);
+    if (harness->focusTransitionActive_) return;
+    RuntimeErrorCode error = RuntimeErrorCode::None;
+    (void)harness->drainPendingFocusRequests(error);
+}
+
+bool NavigatorScriptExecutionHarness::requestFocus(HostInstanceId serial,
+    bool focus)
+{
+    const gxos::web::HtmlElementRef* element = findElementInDocument(document_,
+        serial, adapter_.limits().maxDocumentNodes);
+    const bool focusable = loaded_ && element != nullptr && serial != 0 &&
+        element->formControl.metadataComplete &&
+        element->formControl.supported && !element->formControl.hidden &&
+        !element->formControl.disabled;
+    const bool ownsFocus = focusedElementSerial_ == serial &&
+        document_.formRuntimeState.focusValid;
+    if (focus) {
+        // Calling focus() on a non-focusable element is a bounded no-op. The
+        // receiver was still validated by the ordinary host method path.
+        if (!focusable || ownsFocus) return true;
+    } else if (!ownsFocus) {
+        // blur() never clears a different element's authoritative owner.
+        return true;
+    }
+    if (focusTransitionActive_ || adapter_.eventDispatchActive()) {
+        pendingFocusRequest_ = true;
+        pendingFocusSerial_ = serial;
+        pendingFocusGain_ = focus;
+        return true;
+    }
+    RuntimeErrorCode error = RuntimeErrorCode::None;
+    const bool succeeded = focus ? focusElement(serial, error) :
+        clearFocus(error);
+    return succeeded && error == RuntimeErrorCode::None;
+}
+
+bool NavigatorScriptExecutionHarness::focusElementInternal(
+    std::uint64_t serial, RuntimeErrorCode& error)
 {
     error = RuntimeErrorCode::None;
     const gxos::web::HtmlElementRef* element = findElementInDocument(document_,
@@ -1490,7 +1590,8 @@ bool NavigatorScriptExecutionHarness::focusElement(std::uint64_t serial,
     return true;
 }
 
-bool NavigatorScriptExecutionHarness::clearFocus(RuntimeErrorCode& error)
+bool NavigatorScriptExecutionHarness::clearFocusInternal(
+    RuntimeErrorCode& error)
 {
     error = RuntimeErrorCode::None;
     if (focusedElementSerial_ == 0) return true;
@@ -1503,6 +1604,61 @@ bool NavigatorScriptExecutionHarness::clearFocus(RuntimeErrorCode& error)
     document_.formRuntimeState.focusValid = false;
     focusedElementSerial_ = 0;
     return true;
+}
+
+bool NavigatorScriptExecutionHarness::drainPendingFocusRequests(
+    RuntimeErrorCode& error)
+{
+    // A single bounded pending request is enough to make callback redirects
+    // deterministic without introducing an asynchronous focus queue. The
+    // cap also makes mutually recursive focus listeners fail closed.
+    constexpr std::size_t kMaxRedirects = 16u;
+    for (std::size_t redirect = 0; redirect < kMaxRedirects &&
+            pendingFocusRequest_; ++redirect) {
+        const std::uint64_t serial = pendingFocusSerial_;
+        const bool focus = pendingFocusGain_;
+        pendingFocusRequest_ = false;
+        if (focus) {
+            if (!focusElementInternal(serial, error)) return false;
+        } else if (focusedElementSerial_ == serial) {
+            if (!clearFocusInternal(error)) return false;
+        }
+    }
+    pendingFocusRequest_ = false;
+    return true;
+}
+
+bool NavigatorScriptExecutionHarness::focusElement(std::uint64_t serial,
+    RuntimeErrorCode& error)
+{
+    error = RuntimeErrorCode::None;
+    if (focusTransitionActive_) {
+        pendingFocusRequest_ = true;
+        pendingFocusSerial_ = serial;
+        pendingFocusGain_ = true;
+        return true;
+    }
+    focusTransitionActive_ = true;
+    bool succeeded = focusElementInternal(serial, error);
+    if (succeeded) succeeded = drainPendingFocusRequests(error);
+    focusTransitionActive_ = false;
+    return succeeded;
+}
+
+bool NavigatorScriptExecutionHarness::clearFocus(RuntimeErrorCode& error)
+{
+    error = RuntimeErrorCode::None;
+    if (focusTransitionActive_) {
+        pendingFocusRequest_ = true;
+        pendingFocusSerial_ = focusedElementSerial_;
+        pendingFocusGain_ = false;
+        return true;
+    }
+    focusTransitionActive_ = true;
+    bool succeeded = clearFocusInternal(error);
+    if (succeeded) succeeded = drainPendingFocusRequests(error);
+    focusTransitionActive_ = false;
+    return succeeded;
 }
 
 bool NavigatorScriptExecutionHarness::dispatchFocusedKeyboardEvent(

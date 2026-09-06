@@ -1,0 +1,89 @@
+<!doctype html>
+<html>
+<head><title>Navigator JavaScript JS25</title></head>
+<body>
+<h1>Navigator JavaScript JS25</h1>
+<p>Programmatic focus and blur reuse Navigator's authoritative form focus.</p>
+<div id="js25-root">
+  <div id="js25-parent">
+    <input id="js25-a" type="text" value="">
+    <input id="js25-b" type="text" value="">
+  </div>
+</div>
+<p id="js25-state">initial</p>
+<script>
+var js25State = document.getElementById("js25-state");
+var js25Parent = document.getElementById("js25-parent");
+var js25A = document.getElementById("js25-a");
+var js25B = document.getElementById("js25-b");
+var js25Log = "";
+function js25Record(value) {
+    js25Log = js25Log + value;
+}
+function js25Show() {
+    js25State.textContent = js25Log;
+}
+
+document.addEventListener("focus", function(event) {
+    if (event.target === js25A || event.target === js25B)
+        js25Record("focus-cap-document-" + event.target.id + ";");
+}, true);
+js25Parent.addEventListener("focus", function(event) {
+    if (event.target === js25A || event.target === js25B)
+        js25Record("focus-cap-parent-" + event.target.id + ";");
+}, true);
+js25A.addEventListener("focus", function(event) { js25Record("focus-a;"); });
+js25B.addEventListener("focus", function(event) { js25Record("focus-b;"); });
+
+document.addEventListener("focusin", function(event) {
+    if (event.target === js25A || event.target === js25B)
+        js25Record("focusin-document-" + event.target.id + ";");
+});
+js25Parent.addEventListener("focusin", function(event) {
+    if (event.target === js25A || event.target === js25B)
+        js25Record("focusin-parent-" + event.target.id + ";");
+});
+js25A.addEventListener("focusin", function(event) { js25Record("focusin-a;"); });
+js25B.addEventListener("focusin", function(event) { js25Record("focusin-b;"); });
+
+document.addEventListener("blur", function(event) {
+    if (event.target === js25A || event.target === js25B)
+        js25Record("blur-cap-document-" + event.target.id + ";");
+}, true);
+js25Parent.addEventListener("blur", function(event) {
+    if (event.target === js25A || event.target === js25B)
+        js25Record("blur-cap-parent-" + event.target.id + ";");
+}, true);
+js25A.addEventListener("blur", function(event) { js25Record("blur-a;"); });
+js25B.addEventListener("blur", function(event) { js25Record("blur-b;"); });
+
+document.addEventListener("focusout", function(event) {
+    if (event.target === js25A || event.target === js25B)
+        js25Record("focusout-document-" + event.target.id + ";");
+});
+js25Parent.addEventListener("focusout", function(event) {
+    if (event.target === js25A || event.target === js25B)
+        js25Record("focusout-parent-" + event.target.id + ";");
+});
+js25A.addEventListener("focusout", function(event) { js25Record("focusout-a;"); });
+js25B.addEventListener("focusout", function(event) { js25Record("focusout-b;"); });
+
+js25A.addEventListener("keydown", function(event) {
+    js25Record("keydown-" + event.target.id + ":" + event.key + ";");
+});
+js25A.addEventListener("keyup", function(event) {
+    js25Record("keyup-" + event.target.id + ":" + event.key + ";");
+    js25A.blur();
+    js25Show();
+});
+
+// JS25 proof: direct host methods, A-to-B ordering, clear, and a final
+// programmatic focus that becomes the JS23 keyboard target.
+js25A.focus();
+js25B.focus();
+js25B.blur();
+js25A.focus();
+js25Show();
+</script>
+</body>
+</html>

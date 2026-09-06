@@ -2897,3 +2897,95 @@ with `element.focus()` and `element.blur()` routed through the same authoritativ
 transition boundary and preserving the no-op, ordering, cancellation, and
 navigation cleanup rules. A later milestone can then add `input`/`change`
 events only after their default-action and mutation semantics are specified.
+
+## Phase JS25: programmatic element focus control
+
+JS25 adds ordinary host-backed DOM methods:
+
+```javascript
+element.focus();
+element.blur();
+```
+
+These are receiver-aware methods resolved through the existing Navigator DOM
+host dispatch path. The host handle's authentic element serial is mapped back
+to the current Navigator document and requests the existing
+`Navigator::focusDocumentInput` / `Navigator::clearDocumentFocus` transition.
+There is no JavaScript-only focused flag: `WebDocument::formRuntimeState`
+remains the single authoritative owner, and JS24 focus-event synthesis runs
+from that state transition.
+
+The JS24 ordering is therefore preserved. For A to B the observable order is
+`A blur`, `A focusout`, `B focus`, `B focusin`; clearing B emits `B blur`, then
+`B focusout`. `focus()` on the current owner is a strict no-op, and `blur()` on
+an element that does not own focus is a strict no-op. The methods use the
+existing void host-call convention and return no meaningful value.
+
+Focusability is deliberately bounded by Navigator's existing form-control
+eligibility rules: complete, supported, visible, enabled controls with valid
+layout geometry. This includes the existing supported form-control classes
+where they are represented by that model; it does not add `tabindex`, arbitrary
+focusable elements, CSS focusability, or a browser-complete disabled-element
+model. Non-focusable receivers are safe no-ops and cannot corrupt another
+element's owner. Stale or invalid receivers continue to use the normal host
+validation path.
+
+Programmatic events reuse the JS24 generic cached `Event` object and the JS23
+listener registry. `focus` and `blur` remain capture-enabled and non-bubbling;
+`focusin` and `focusout` remain bubbling. Target, currentTarget, eventPhase,
+bubbles, cancelable, listener ordering, Boolean capture shorthand, once,
+removal, stopPropagation, stopImmediatePropagation, and non-cancelability are
+unchanged. `preventDefault()` cannot block the ownership transition. The
+global listener registry remains capped at 64 records and focus calls allocate
+no permanent per-call listener structure.
+
+Focus requests made from a focus/blur/focusout callback are kept synchronous
+but deferred until the current event dispatch has completed. A single bounded
+pending request slot is used (the last request wins), with a 16-redirect cap for
+mutually recursive callbacks. This preserves the complete old transition
+before a redirect starts, avoids reusing Event metadata while an outer callback
+is still active, and gives deterministic, memory-safe behavior without an
+asynchronous focus queue. The same post-dispatch drain handles a keyboard
+callback that requests `blur()`.
+
+JS23 keyboard targeting follows the same owner. After `input.focus()`, the
+normal Navigator key transition dispatches `keydown`/`keyup` to that element
+and existing text editing remains on the same input path. After
+`input.blur()`, the no-focus fallback is the existing document target; JS25
+does not introduce a second keyboard-target state. `document.activeElement` was
+audited but intentionally deferred: Navigator has no existing tiny direct
+projection, and adding it would expand the bounded DOM object-model scope.
+
+### JS25 validation result
+
+The focused proof is
+`tests/navigator_javascript_js25_test.cpp`, run by
+`scripts/smoke-navigator-javascript-js25.ps1`. It reports 219 checks with 0
+failures, including direct focus/blur, all JS24 propagation and metadata
+semantics, receiver identity, focusability no-ops, repeated A/B/A transfers,
+re-entrant focus redirects, JS23 keyboard targeting, text editing, stale
+handles, and the unchanged 64-listener bound. The GXOS_BARE_METAL and strict
+`-Wall -Wextra -Werror -pedantic` adapter/runtime lanes pass.
+
+The hosted fixture is `navigator-smoke/javascript-js25.html`; its four
+aggregate checks all pass, including direct methods, A-to-B/clear event order,
+capture/bubble evidence, and JS23 keyboard targeting followed by programmatic
+blur. The complete available focused set now contains 23 suites: lexer, parser,
+runtime, and JS6 through JS25; all 23 scripts pass. The hosted aggregate
+reports `405 passed, 7 failed` out of `412` checks. The seven failures remain
+the unrelated CSS baseline checks: CSS 3C, CSS 3G, CSS 6A, CSS 6B's three
+checks, and CSS 6C; no JavaScript or focus-related aggregate check fails.
+
+The normal native `build.bat` completes successfully. The current
+`build-kernel.bat` lane does not reach the previously reported Mbed TLS check:
+it stops earlier in the bootloader Visual Studio build with MSBuild `MSB6001`
+(`Item has already been added`, keys `Path` and `PATH`) while launching
+`CL.exe`. This is an existing external bootloader/environment blocker, so no
+full-kernel or QEMU JS25 execution proof is claimed and no TLS configuration
+was changed.
+
+JS26 should remain narrow: add bounded `input` and `change` events only after
+the existing focus ownership, keyboard/text-editing path, and DOM value
+mutation seam are specified. This phase does not implement those events or
+any broader focus API such as `FocusEvent`, `relatedTarget`, `activeElement`,
+focus options, `tabindex`, autofocus, or sequential Tab expansion.

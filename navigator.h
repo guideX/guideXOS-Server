@@ -1025,11 +1025,16 @@ private:
 		const std::string& action, bool* defaultPrevented = nullptr);
 	static bool dispatchJavaScriptFocusEvent(std::uint64_t targetSerial,
 		bool gained, bool bubblingVariant = false);
+	static bool requestJavaScriptFocus(void* context, std::uint64_t serial,
+		bool focus);
+	static void completeJavaScriptFocusDispatch(void* context);
 	static void recordJavaScriptError(const std::string& phase,
 		gxos::javascript::RuntimeErrorCode error);
 	static void handleKeyPress(int keyCode, const std::string& action);
 	static void focusDocumentInput(int blockIndex,
 		gxos::web::FormFocusOrigin origin = gxos::web::FormFocusOrigin::ProgrammaticInternalSmoke);
+	static void focusDocumentInputInternal(int blockIndex,
+		gxos::web::FormFocusOrigin origin);
 	static void blurDocumentInput();
 	static void submitFormForBlock(int blockIndex);
 	static void focusNextFormControl(bool reverse);
@@ -1043,6 +1048,9 @@ private:
 	static void finishKeyboardActivation(int keyCode);
 	static void clearDocumentFocus(bool recomputeStyles = true,
 		gxos::web::FormFocusCancellationReason reason = gxos::web::FormFocusCancellationReason::StateChange);
+	static void clearDocumentFocusInternal(bool recomputeStyles,
+		gxos::web::FormFocusCancellationReason reason);
+	static void drainPendingJavaScriptFocusRequests();
 	static bool ensureFocusedControlStillValid();
 	static void revealFocusedFormControl(int blockIndex);
 	static int formControlHeight(const DocBlock& block);
@@ -1162,6 +1170,10 @@ private:
 	static std::string s_lastPostContentType;
 	static bool        s_findActive;
 	static bool        s_loading;
+	static bool        s_focusTransitionActive;
+	static bool        s_pendingFocusRequest;
+	static uint64_t    s_pendingFocusSerial;
+	static bool        s_pendingFocusGain;
 	static std::string s_findBuffer;
 	static int         s_findCaret;
 	static std::vector<FindMatch> s_findMatches;

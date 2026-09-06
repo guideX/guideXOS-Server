@@ -22,6 +22,8 @@ constexpr HostInstanceId kNavigatorDocumentHostInstance = 1u;
 constexpr std::uint32_t kNavigatorGetElementByIdMethod = 1u;
 constexpr std::uint32_t kNavigatorAddEventListenerMethod = 2u;
 constexpr std::uint32_t kNavigatorRemoveEventListenerMethod = 3u;
+constexpr std::uint32_t kNavigatorFocusMethod = 4u;
+constexpr std::uint32_t kNavigatorBlurMethod = 5u;
 
 constexpr std::size_t kNavigatorScriptMaxDocumentIdLength = 256u;
 constexpr std::size_t kNavigatorScriptMaxTextContentAssignment = 64u * 1024u;
@@ -64,6 +66,10 @@ struct NavigatorScriptHostLimits {
 // elements by serial and are checked against the current host generation.
 class NavigatorScriptHostAdapter final : public HostAdapter {
 public:
+    using FocusRequestCallback = bool (*)(void* context,
+        HostInstanceId serial, bool focus);
+    using DispatchCompleteCallback = void (*)(void* context);
+
     explicit NavigatorScriptHostAdapter(HostGenerationId generation = 1u,
         NavigatorScriptHostLimits limits = NavigatorScriptHostLimits());
     NavigatorScriptHostAdapter(gxos::web::WebDocument& document,
@@ -74,6 +80,11 @@ public:
         HostGenerationId generation);
     void detachDocument();
     void setGeneration(HostGenerationId generation);
+    void setFocusRequestCallback(FocusRequestCallback callback,
+        void* context);
+    void setDispatchCompleteCallback(DispatchCompleteCallback callback,
+        void* context);
+    bool eventDispatchActive() const { return clickDispatchActive_; }
     HostGenerationId generation() const { return generation_; }
     gxos::web::WebDocument* document() const { return document_; }
     const NavigatorScriptHostLimits& limits() const { return limits_; }
@@ -90,6 +101,7 @@ public:
         const HostObjectReference* receiver, std::uint32_t methodId,
         const HostValue* arguments, std::size_t argumentCount,
         HostValue& result) override;
+    bool allowsReentrantCall(std::uint32_t methodId) const override;
 
     // Navigator calls this only after its normal hit test has selected a
     // document element serial. The callback is invoked in the supplied,
@@ -215,6 +227,10 @@ private:
     std::size_t clickListenerCount_ = 0;
     std::uint64_t nextListenerRegistrationSequence_ = 1u;
     bool clickDispatchActive_ = false;
+    FocusRequestCallback focusRequestCallback_ = nullptr;
+    void* focusRequestContext_ = nullptr;
+    DispatchCompleteCallback dispatchCompleteCallback_ = nullptr;
+    void* dispatchCompleteContext_ = nullptr;
     // Returned strings are copied synchronously by RuntimeContext. Keeping
     // one adapter-owned scratch value avoids exposing mutable document memory.
     mutable std::string returnBuffer_;
@@ -250,6 +266,7 @@ public:
     bool dispatchFocusedKeyboardEvent(int keyCode, bool down, bool shiftPressed,
         RuntimeErrorCode& error, bool* defaultPrevented = nullptr);
     bool relayout();
+    std::uint64_t focusedElementSerial() const { return focusedElementSerial_; }
 
     RuntimeContext& runtime() { return runtime_; }
     const RuntimeContext& runtime() const { return runtime_; }
@@ -263,6 +280,14 @@ public:
     std::size_t layoutTextExtent() const { return document_.layoutTextExtent; }
 
 private:
+    static bool focusRequestCallback(void* context, HostInstanceId serial,
+        bool focus);
+    static void dispatchCompleteCallback(void* context);
+    bool requestFocus(HostInstanceId serial, bool focus);
+    bool focusElementInternal(std::uint64_t serial, RuntimeErrorCode& error);
+    bool clearFocusInternal(RuntimeErrorCode& error);
+    bool drainPendingFocusRequests(RuntimeErrorCode& error);
+
     bool installDocumentGlobal(RuntimeErrorCode& error);
     bool loadParsedDocument(gxos::web::WebDocument document,
         bool resetRealm, RuntimeErrorCode& error);
@@ -271,6 +296,10 @@ private:
     NavigatorScriptHostAdapter adapter_;
     gxos::web::WebDocument document_;
     std::uint64_t focusedElementSerial_ = 0;
+    bool focusTransitionActive_ = false;
+    bool pendingFocusRequest_ = false;
+    std::uint64_t pendingFocusSerial_ = 0;
+    bool pendingFocusGain_ = false;
     bool loaded_ = false;
 };
 

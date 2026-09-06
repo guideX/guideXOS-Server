@@ -200,6 +200,16 @@ public:
         (void)runtime;
         return call(receiver, methodId, arguments, argumentCount, result);
     }
+
+    // Most hosts intentionally reject a host call made while another host
+    // call is active. A bounded host method may opt into re-entry when its
+    // own synchronous callback contract is safe. The default remains the
+    // historical fail-closed behavior.
+    virtual bool allowsReentrantCall(std::uint32_t methodId) const
+    {
+        (void)methodId;
+        return false;
+    }
 };
 
 const char* hostValueTypeName(HostValueType type);
