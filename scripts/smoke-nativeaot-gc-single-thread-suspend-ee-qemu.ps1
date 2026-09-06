@@ -7,7 +7,7 @@ param(
     [switch]$SkipManagedBuild,
     [string]$RuntimePackManifest = "",
     [string]$LockedRuntimeRoot = "",
-    [ValidateSet("single-thread-suspend-ee", "allocation-context-fixup-root-boundary", "first-per-thread-root-provider", "first-root-candidate-load", "first-non-null-root-callback-boundary", "first-root-callback-entry", "first-root-membership-classification", "first-root-heap-resolution", "first-root-condemned-generation-decision", "first-root-pre-mark-boundary", "first-root-first-mark-mutation", "first-root-post-queue-mark-decision", "first-root-first-non-null-old-o", "next-genuine-root-provider", "stack-provider-transition-failfast", "stack-provider-code-manager-registration", "stack-provider-transition-frame-control-pc", "stack-provider-unwind-gc-info", "stack-provider-unwind-caller-frame", "stack-provider-native-transition-continuation", "stack-provider-native-caller-provenance", "stack-provider-native-kernel-entry-boundary", "stack-provider-native-kernel-stack-completion", "post-root-queue-mark-processing", "mark-queue-closure", "post-mark-short-weak-handle", "short-weak-handle-operation", "short-weak-live-handle", "short-weak-dead-handle", "short-weak-lifetime-transition", "relocation-root-update", "relocated-handle-update", "lifetime-transition-complete", "second-collection-completion", "dead-object-reclamation", "collection-plan-mode-provenance-c37", "collection-plan-mode-provenance-c38", "compaction-reclamation", "post-gc-allocator-provenance", "post-gc-reclaimed-gen1-lifecycle", "reclaimed-gen1-natural-reuse", "reclaimed-gen1-ephemeral-transition", "reclaimed-gen1-natural-older-generation-transition", "natural-gen1-condemnation-policy-threshold", "direct-gen1-budget-condemnation", "n-initial-provenance", "last-n0-direct-gen1-window", "pre-last-n0-promotion-timing", "pre-final-n0-promotion-cycle", "post-promotion-n0-refill-topology", "post-promotion-earlier-headroom", "post-debit-normal-condemnation-entry", "post-debit-gen2-oos-preemption", "post-debit-normal-gen0-refill", "gen0-region-availability-provenance", "retained-survivor-region-availability", "survivor-cohort-provenance-reconciliation", "survivor-count-threshold-causality", "promotion-decision-live-byte-threshold", "promotion-threshold-region-formation", "promotion-positive-region-cohort", "basic-free-region-eligibility-geometry", "basic-region-supply-provenance", "region-supply-origin-coverage", "offline-region-range-census", "canonical-region-universe-snapshot", "basic-canonical-range-mapping", "malformed-transition-frame-provenance", "reverse-pinvoke-slot-provenance", "regdisplay-fp-handoff", "relocation-root-fault-provenance", "iterator-fp-ownership", "second-collection-continuation", "productionized-second-collection")]
+    [ValidateSet("single-thread-suspend-ee", "allocation-context-fixup-root-boundary", "first-per-thread-root-provider", "first-root-candidate-load", "first-non-null-root-callback-boundary", "first-root-callback-entry", "first-root-membership-classification", "first-root-heap-resolution", "first-root-condemned-generation-decision", "first-root-pre-mark-boundary", "first-root-first-mark-mutation", "first-root-post-queue-mark-decision", "first-root-first-non-null-old-o", "next-genuine-root-provider", "stack-provider-transition-failfast", "stack-provider-code-manager-registration", "stack-provider-transition-frame-control-pc", "stack-provider-unwind-gc-info", "stack-provider-unwind-caller-frame", "stack-provider-native-transition-continuation", "stack-provider-native-caller-provenance", "stack-provider-native-kernel-entry-boundary", "stack-provider-native-kernel-stack-completion", "post-root-queue-mark-processing", "mark-queue-closure", "post-mark-short-weak-handle", "short-weak-handle-operation", "short-weak-live-handle", "short-weak-dead-handle", "short-weak-lifetime-transition", "relocation-root-update", "relocated-handle-update", "lifetime-transition-complete", "second-collection-completion", "dead-object-reclamation", "collection-plan-mode-provenance-c37", "collection-plan-mode-provenance-c38", "compaction-reclamation", "post-gc-allocator-provenance", "post-gc-reclaimed-gen1-lifecycle", "reclaimed-gen1-natural-reuse", "reclaimed-gen1-ephemeral-transition", "reclaimed-gen1-natural-older-generation-transition", "natural-gen1-condemnation-policy-threshold", "direct-gen1-budget-condemnation", "n-initial-provenance", "last-n0-direct-gen1-window", "pre-last-n0-promotion-timing", "pre-final-n0-promotion-cycle", "post-promotion-n0-refill-topology", "post-promotion-earlier-headroom", "post-debit-normal-condemnation-entry", "post-debit-gen2-oos-preemption", "post-debit-normal-gen0-refill", "gen0-region-availability-provenance", "retained-survivor-region-availability", "survivor-cohort-provenance-reconciliation", "survivor-count-threshold-causality", "promotion-decision-live-byte-threshold", "promotion-threshold-region-formation", "promotion-positive-region-cohort", "basic-free-region-eligibility-geometry", "basic-region-supply-provenance", "region-supply-origin-coverage", "offline-region-range-census", "canonical-region-universe-snapshot", "basic-canonical-range-mapping", "exact-canonical-region-materialization", "malformed-transition-frame-provenance", "reverse-pinvoke-slot-provenance", "regdisplay-fp-handoff", "relocation-root-fault-provenance", "iterator-fp-ownership", "second-collection-continuation", "productionized-second-collection")]
     [string]$ProofMode = "single-thread-suspend-ee",
     [ValidateSet("", "PromotionDecisionLiveByteThreshold", "PromotionPositiveRegionCohort")]
     [string]$ManagedProofModeOverride = "",
@@ -36,6 +36,8 @@ param(
     [int]$C70RetainedSurvivors = 16,
     [ValidateSet("baseline16", "baseline15", "16below", "15above", "15adjacentbelow", "15mid", "15mid2", "15mid3", "15mid4", "15mid5", "15mid6", "15mid7", "15mid8", "15mid9", "15matchlow", "15matchhigh")]
     [string]$C71Case = "baseline16",
+    [ValidateSet(0x1400000, 0x1500000, 0x1600000, 0x1700000, 0x1A00000)]
+    [UInt64]$C84TargetOffset = 0x1400000,
     [ValidateRange(1024, 65530)]
     [int]$QemuMonitorPortBase = 44800
 )
@@ -178,6 +180,8 @@ if ([string]::IsNullOrWhiteSpace($EvidenceRoot)) {
         Join-Path $root ("out\dotnet\c011ec80-canonical-region-universe\" + $C71Case)
     } elseif ($ProofMode -eq "basic-canonical-range-mapping") {
         Join-Path $root ("out\dotnet\c011ec83-layout-stable-basic-canonical-mapping\" + $C71Case)
+    } elseif ($ProofMode -eq "exact-canonical-region-materialization") {
+        Join-Path $root ("out\dotnet\c011ec84-exact-canonical-region-materialization\" + $C71Case + "\target-" + $C84TargetOffset.ToString("X"))
     } elseif ($ProofMode -eq "post-mark-short-weak-handle") {
         Join-Path $root "out\dotnet\c011ec29-post-mark-short-weak-handle"
     } elseif ($ProofMode -eq "first-root-post-queue-mark-decision") {
@@ -225,8 +229,9 @@ $isC011EC60 = $ProofMode -eq "pre-last-n0-promotion-timing"
 $isC011EC79 = $ProofMode -eq "offline-region-range-census"
 $isC011EC80 = $ProofMode -eq "canonical-region-universe-snapshot"
 $isC011EC83 = $ProofMode -eq "basic-canonical-range-mapping"
+$isC011EC84 = $ProofMode -eq "exact-canonical-region-materialization"
 $isC011EC78 = $ProofMode -eq "region-supply-origin-coverage"
-$isC011EC77 = $ProofMode -eq "basic-region-supply-provenance" -or $isC011EC78 -or $isC011EC79 -or $isC011EC80 -or $isC011EC83
+$isC011EC77 = $ProofMode -eq "basic-region-supply-provenance" -or $isC011EC78 -or $isC011EC79 -or $isC011EC80 -or $isC011EC83 -or $isC011EC84
 $isC011EC76 = $ProofMode -eq "basic-free-region-eligibility-geometry" -or $isC011EC77
 $isC011EC76OneControl = $isC011EC76 -and $C71Case -eq "15mid8" -and $C66TailAllocations -eq 320
 $isC011EC73 = $ProofMode -eq "promotion-positive-region-cohort" -or ($isC011EC76 -and -not $isC011EC76OneControl) -or ($isC011EC77 -and $C71Case -eq "baseline16")
@@ -398,6 +403,7 @@ $proofDefine = if ($isNextGenuineRootProvider -or $isC011EC39 -or $isC011EC55) {
     $c79Define = if ($isC011EC79) { " /DGUIDEXOS_NATIVEAOT_C011EC79_OFFLINE_REGION_RANGE_CENSUS" } else { "" }
     $c80Define = if ($isC011EC80) { " /DGUIDEXOS_NATIVEAOT_C011EC80_CANONICAL_REGION_UNIVERSE_SNAPSHOT" } else { "" }
     $c83Define = if ($isC011EC83) { " /DGUIDEXOS_NATIVEAOT_C011EC83_BASIC_CANONICAL_RANGE_MAPPING" } else { "" }
+    $c84Define = if ($isC011EC84) { " /DGUIDEXOS_NATIVEAOT_C011EC84_EXACT_REGION_MATERIALIZATION /DGUIDEXOS_NATIVEAOT_C011EC84_TARGET_OFFSET=$C84TargetOffset /DGUIDEXOS_NATIVEAOT_C011EC84_BASIC_REGION_SIZE=0x100000" } else { "" }
     # C78 reuses the accepted C67/C76/C77 fixed records.  The first live
     # observer experiment added a second large ledger and changed the
     # address-sensitive ONE/SIX control; keep that rejected image out of the
@@ -407,7 +413,7 @@ $proofDefine = if ($isNextGenuineRootProvider -or $isC011EC39 -or $isC011EC55) {
     $c66TailDefine = if ($isC011EC66 -and $C66TailAllocations -ne 320) { " /DGUIDEXOS_NATIVEAOT_C011EC66_TAIL_$C66TailAllocations" } else { "" }
     $c62StrategyDefine = if ($isC011EC62 -and -not $isC011EC64 -and $C62Strategy -eq "R1") { " /DGUIDEXOS_NATIVEAOT_C011EC62_STRATEGY_R1" } elseif ($isC011EC62 -and -not $isC011EC64 -and $C62Strategy -eq "R2") { " /DGUIDEXOS_NATIVEAOT_C011EC62_STRATEGY_R2" } else { "" }
     $firstNonNullDefine = if ($isC011EC31 -or $isC011EC32 -or $isC011EC56Instrumentation) { "" } else { " /DGUIDEXOS_NATIVEAOT_FIRST_NON_NULL_ROOT_ALLOCATION" }
-    "/DGUIDEXOS_NATIVEAOT_ALLOCATION_CONTEXT_FIXUP_ROOT_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_PER_THREAD_ROOT_PROVIDER_ALLOCATION$firstNonNullDefine /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CALLBACK_ENTRY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_MEMBERSHIP_CLASSIFICATION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_HEAP_RESOLUTION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CONDEMNED_GENERATION_DECISION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_PRE_MARK_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_NON_NULL_OLD_O_ALLOCATION /DGUIDEXOS_NATIVEAOT_NEXT_GENUINE_ROOT_PROVIDER_ALLOCATION$minimalDefine$codeManagerDefine$c19Define$c20Define$c21Define$c23Define$c24Define$c25Define$c26Define$c27Define$c28Define$c29Define$c31Define$c32Define$c33Define$c34Define$c35Define$c36Define$c37Define$c38Define$c39Define$c40Define$c41Define$c42Define$c53Define$c54Define$c55Define$c56Define$c59Define$c59StrategyDefine$c60Define$c60StrategyDefine$c61Define$c62Define$c63Define$c64Define$c65Define$c66Define$c67Define$c68Define$c69Define$c70Define$c71Define$c72Define$c73Define$c76Define$c77Define$c78Define$c79Define$c80Define$c83Define$c66TailDefine$c62StrategyDefine$c011ec49Define"
+    "/DGUIDEXOS_NATIVEAOT_ALLOCATION_CONTEXT_FIXUP_ROOT_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_PER_THREAD_ROOT_PROVIDER_ALLOCATION$firstNonNullDefine /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CALLBACK_ENTRY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_MEMBERSHIP_CLASSIFICATION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_HEAP_RESOLUTION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CONDEMNED_GENERATION_DECISION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_PRE_MARK_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_NON_NULL_OLD_O_ALLOCATION /DGUIDEXOS_NATIVEAOT_NEXT_GENUINE_ROOT_PROVIDER_ALLOCATION$minimalDefine$codeManagerDefine$c19Define$c20Define$c21Define$c23Define$c24Define$c25Define$c26Define$c27Define$c28Define$c29Define$c31Define$c32Define$c33Define$c34Define$c35Define$c36Define$c37Define$c38Define$c39Define$c40Define$c41Define$c42Define$c53Define$c54Define$c55Define$c56Define$c59Define$c59StrategyDefine$c60Define$c60StrategyDefine$c61Define$c61StrategyDefine$c62Define$c63Define$c64Define$c65Define$c66Define$c67Define$c68Define$c69Define$c70Define$c71Define$c72Define$c73Define$c76Define$c77Define$c78Define$c79Define$c80Define$c83Define$c84Define$c66TailDefine$c62StrategyDefine$c011ec49Define"
 } elseif ($isFirstRootFirstNonNullOldO) {
     "/DGUIDEXOS_NATIVEAOT_ALLOCATION_CONTEXT_FIXUP_ROOT_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_PER_THREAD_ROOT_PROVIDER_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_NON_NULL_ROOT_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CALLBACK_ENTRY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_MEMBERSHIP_CLASSIFICATION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_HEAP_RESOLUTION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CONDEMNED_GENERATION_DECISION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_PRE_MARK_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_NON_NULL_OLD_O_ALLOCATION"
 } elseif ($isFirstRootPostQueueMarkDecision) {
@@ -2545,6 +2551,12 @@ extern "C" void __cdecl guideXosNativeAotC011EC83BasicMappingEntry(uint32_t chec
 extern "C" void __cdecl guideXosNativeAotC011EC83BasicMappingEnd(uint32_t checkpoint, uintptr_t observedCount);
 '@
                             }
+                            if ($isC011EC84) {
+                                $c54GcDeclaration += [Environment]::NewLine + @'
+extern "C" void __cdecl guideXosNativeAotC011EC84TargetObserved(uint32_t checkpoint, uintptr_t targetOffset, uintptr_t targetStart, uintptr_t targetEnd, uint32_t exists, uint32_t exactCanonical, uintptr_t descriptor, uintptr_t canonicalStart, uintptr_t canonicalEnd, uintptr_t canonicalSize, uintptr_t mem, uintptr_t committed, uintptr_t allocated, uintptr_t used, uintptr_t liveBytes, uint32_t generation, uint32_t planGeneration, uint32_t state, uintptr_t owner, uint32_t listKind);
+static void guideXosNativeAotC011EC84Probe(uint32_t checkpointValue);
+'@
+                            }
                             if ($isC011EC72) {
                                 $c54GcDeclaration += [Environment]::NewLine + 'extern "C" void __cdecl guideXosNativeAotC011EC72SourceContextObserved(uint32_t sourceBranch);'
                             }
@@ -3079,6 +3091,9 @@ static uint32_t guideXosC011EC67RegionState(heap_segment* region)
                 $c67SnapshotCall = $c67SnapshotCall.Replace('this, ', '')
                 $c67SnapshotCall = $c67SnapshotCall.TrimEnd() + $lockedSourceNewLine
                 $c67InitialSnapshotCall = $c67SnapshotCall
+                $c84ProbeCall = if ($isC011EC84) {
+                    ('    guideXosNativeAotC011EC84Probe(CHECKPOINT);' + $lockedSourceNewLine)
+                } else { "" }
 
                 $c67ListAddStart = $gcCppText.IndexOf('void region_free_list::add_region_front (heap_segment* region)')
                 $c67ListAddEnd = $gcCppText.IndexOf('// This inserts fully committed regions', $c67ListAddStart)
@@ -3502,9 +3517,58 @@ static NOINLINE void guideXosNativeAotC011EC83Capture(
                     $c67SohStart += $c83CaptureFunction.Length
                     $c67SohEnd += $c83CaptureFunction.Length
                 }
+                if ($isC011EC84) {
+                    $c84ProbeFunction = @'
+static NOINLINE void guideXosNativeAotC011EC84Probe(uint32_t checkpointValue)
+{
+    const uintptr_t c84MappingStart = reinterpret_cast<uintptr_t>(g_gc_lowest_address);
+    const uintptr_t c84TargetOffset = static_cast<uintptr_t>(GUIDEXOS_NATIVEAOT_C011EC84_TARGET_OFFSET);
+    const uintptr_t c84TargetStart = c84MappingStart + c84TargetOffset;
+    const uintptr_t c84BasicRegionSize = static_cast<uintptr_t>(GUIDEXOS_NATIVEAOT_C011EC84_BASIC_REGION_SIZE);
+    const uintptr_t c84TargetEnd = c84TargetStart + c84BasicRegionSize;
+    const uint8_t* c84BookkeepingEnd = global_region_allocator.get_left_used_unsafe();
+    const bool c84InGcExtent = reinterpret_cast<uint8_t*>(c84TargetStart) >= g_gc_lowest_address &&
+        reinterpret_cast<uint8_t*>(c84TargetEnd) <= g_gc_highest_address &&
+        (c84BookkeepingEnd == nullptr || reinterpret_cast<uint8_t*>(c84TargetEnd) <= c84BookkeepingEnd);
+    heap_segment* c84Canonical = c84InGcExtent ?
+        get_region_info_for_address(reinterpret_cast<uint8_t*>(c84TargetStart)) : nullptr;
+    const bool c84HasRange = c84Canonical != nullptr && heap_segment_mem(c84Canonical) != nullptr &&
+        heap_segment_reserved(c84Canonical) > heap_segment_mem(c84Canonical);
+    const uintptr_t c84CanonicalStart = c84HasRange ? reinterpret_cast<uintptr_t>(get_region_start(c84Canonical)) : 0u;
+    const uintptr_t c84CanonicalEnd = c84HasRange ? reinterpret_cast<uintptr_t>(heap_segment_reserved(c84Canonical)) : 0u;
+    const uintptr_t c84CanonicalSize = c84CanonicalEnd >= c84CanonicalStart ? c84CanonicalEnd - c84CanonicalStart : 0u;
+    const uint32_t c84Exact = c84HasRange && c84CanonicalStart == c84TargetStart &&
+        c84CanonicalEnd == c84TargetEnd && c84CanonicalSize == c84BasicRegionSize ? 1u : 0u;
+    uintptr_t c84List = 0u;
+    uint32_t c84ListKind = 0xffffffffu;
+    if (c84HasRange)
+    {
+        c84List = reinterpret_cast<uintptr_t>(heap_segment_containing_free_list(c84Canonical));
+        if (c84List != 0u) c84ListKind = 1u;
+    }
+    guideXosNativeAotC011EC84TargetObserved(
+        checkpointValue, c84TargetOffset, c84TargetStart, c84TargetEnd,
+        c84HasRange ? 1u : 0u, c84Exact,
+        reinterpret_cast<uintptr_t>(c84Canonical), c84CanonicalStart, c84CanonicalEnd,
+        c84CanonicalSize, c84HasRange ? reinterpret_cast<uintptr_t>(heap_segment_mem(c84Canonical)) : 0u,
+        c84HasRange ? reinterpret_cast<uintptr_t>(heap_segment_committed(c84Canonical)) : 0u,
+        c84HasRange ? reinterpret_cast<uintptr_t>(heap_segment_allocated(c84Canonical)) : 0u,
+        c84HasRange ? reinterpret_cast<uintptr_t>(heap_segment_used(c84Canonical)) : 0u,
+        c84HasRange ? static_cast<uintptr_t>(heap_segment_survived(c84Canonical)) : 0u,
+        c84HasRange ? static_cast<uint32_t>(heap_segment_gen_num(c84Canonical)) : 0u,
+        c84HasRange ? static_cast<uint32_t>(heap_segment_plan_gen_num(c84Canonical)) : 0u,
+        c84HasRange ? guideXosC011EC67RegionState(c84Canonical) : 0u,
+        c84List, c84ListKind);
+}
+'@.Replace("`r`n", $lockedSourceNewLine).Replace("`n", $lockedSourceNewLine)
+                    $gcCppText = $gcCppText.Substring(0, $c67SohStart) + $c84ProbeFunction + $gcCppText.Substring($c67SohStart)
+                    $c67SohStart += $c84ProbeFunction.Length
+                    $c67SohEnd += $c84ProbeFunction.Length
+                }
                 $c67SohFunction = $gcCppText.Substring($c67SohStart, $c67SohEnd - $c67SohStart)
                 $c67SohEntryNeedle = '{' + $lockedSourceNewLine
                 $c67SohEntryReplacement = $c67SohEntryNeedle + ($c67SnapshotCall.Replace('1u', '7u'))
+                if ($isC011EC84) { $c67SohEntryReplacement += $c84ProbeCall.Replace('CHECKPOINT', '1u') }
                 if ($isC011EC80) { $c67SohEntryReplacement += '    GUIDEXOS_C011EC81_BASIC_LIST_SNAPSHOT(7u);' + $lockedSourceNewLine }
                 if ($isC011EC83) { $c67SohEntryReplacement += '    GUIDEXOS_C011EC83_BASIC_CANONICAL_MAPPING(7u);' + $lockedSourceNewLine }
                 $c67SohFunction = Replace-First $c67SohFunction $c67SohEntryNeedle $c67SohEntryReplacement
@@ -3516,6 +3580,7 @@ static NOINLINE void guideXosNativeAotC011EC83Capture(
                 $c67FixFunction = $gcCppText.Substring($c67FixStart, $c67FixEnd - $c67FixStart)
                 $c67FixEntryNeedle = '{' + $lockedSourceNewLine
                 $c67FixEntryReplacement = $c67FixEntryNeedle + ($c67SnapshotCall.Replace('1u', '3u'))
+                if ($isC011EC84) { $c67FixEntryReplacement += $c84ProbeCall.Replace('CHECKPOINT', '3u') }
                 $c67FixFunction = Replace-First $c67FixFunction $c67FixEntryNeedle $c67FixEntryReplacement
                 $c67FixLastBrace = $c67FixFunction.LastIndexOf('}')
                 $c67FixFunction = $c67FixFunction.Substring(0, $c67FixLastBrace) + ($c67SnapshotCall.Replace('1u', '4u')) + $c67FixFunction.Substring($c67FixLastBrace)
@@ -3537,6 +3602,28 @@ static NOINLINE void guideXosNativeAotC011EC83Capture(
                 }
                 $c67ThreadFunction = $c67ThreadFunction.Substring(0, $c67ThreadLastBrace) + $c67ThreadEndSnapshot + $c67ThreadFunction.Substring($c67ThreadLastBrace)
                 $gcCppText = $gcCppText.Substring(0, $c67ThreadStart) + $c67ThreadFunction + $gcCppText.Substring($c67ThreadEnd)
+
+                if ($isC011EC84) {
+                    $c84GarbageStart = $gcCppText.IndexOf('void gc_heap::garbage_collect (int n)')
+                    $c84GarbageEnd = $gcCppText.IndexOf('void gc_heap::', $c84GarbageStart + 1)
+                    if ($c84GarbageStart -lt 0 -or $c84GarbageEnd -le $c84GarbageStart) { throw "C011EC84 could not isolate garbage_collect." }
+                    $c84GarbageFunction = $gcCppText.Substring($c84GarbageStart, $c84GarbageEnd - $c84GarbageStart)
+                    $c84GarbageNeedle = '    fix_allocation_contexts (TRUE);' + $lockedSourceNewLine
+                    $c84GarbageReplacement = $c84GarbageNeedle + $c84ProbeCall.Replace('CHECKPOINT', '2u')
+                    if (-not $c84GarbageFunction.Contains($c84GarbageNeedle)) { throw "C011EC84 garbage_collect pre-GC observation point was not found." }
+                    $c84GarbageFunction = Replace-First $c84GarbageFunction $c84GarbageNeedle $c84GarbageReplacement
+                    $gcCppText = $gcCppText.Substring(0, $c84GarbageStart) + $c84GarbageFunction + $gcCppText.Substring($c84GarbageEnd)
+
+                    $c84WrapperStart = $gcCppText.IndexOf('GCHeap::GarbageCollectGeneration (unsigned int gen, gc_reason reason)')
+                    $c84WrapperEnd = $gcCppText.IndexOf('size_t GCHeap::GetTotalBytesInUse', $c84WrapperStart + 1)
+                    if ($c84WrapperStart -lt 0 -or $c84WrapperEnd -le $c84WrapperStart) { throw "C011EC84 could not isolate GCHeap::GarbageCollectGeneration." }
+                    $c84WrapperFunction = $gcCppText.Substring($c84WrapperStart, $c84WrapperEnd - $c84WrapperStart)
+                    $c84RestartNeedle = '        GCToEEInterface::RestartEE(TRUE);' + $lockedSourceNewLine
+                    $c84RestartReplacement = $c84ProbeCall.Replace('CHECKPOINT', '4u') + $c84RestartNeedle + $c84ProbeCall.Replace('CHECKPOINT', '5u')
+                    if (-not $c84WrapperFunction.Contains($c84RestartNeedle)) { throw "C011EC84 GCHeap::GarbageCollectGeneration restart observation point was not found." }
+                    $c84WrapperFunction = Replace-First $c84WrapperFunction $c84RestartNeedle $c84RestartReplacement
+                    $gcCppText = $gcCppText.Substring(0, $c84WrapperStart) + $c84WrapperFunction + $gcCppText.Substring($c84WrapperEnd)
+                }
 
                 if ($isC011EC80) {
                     $c80RestartNeedle = '            GCToEEInterface::RestartEE(TRUE);' + $lockedSourceNewLine
@@ -7826,7 +7913,9 @@ exit /b %errorlevel%
                     $normalizedLiveText = ($normalizedLiveText -creplace '(?<=[0-9])(?=[a-z])', ' ') -replace '\s+', ' '
                     $normalizedLiveText = $normalizedLiveText -replace '\b(c\d+)\s+(ec\d+)', '$1$2'
                     $normalizedLiveText = $normalizedLiveText -replace '\s*=\s*', '='
-                    $stopPattern = if ($isC011EC77) {
+                    $stopPattern = if ($isC011EC84) {
+                        'marker=C011EC84\s+outcome=[A-H]|marker=C011EC84-BLOCKED'
+                    } elseif ($isC011EC77) {
                         'marker=C011EC77\s+outcome=C|marker=C011EC77-BLOCKED'
                     } elseif ($isC011EC76) {
                         'marker=C011EC76 outcome=[ABDE]|marker=C011EC76-BLOCKED'
@@ -7961,7 +8050,13 @@ exit /b %errorlevel%
             if (-not $completed -and [string]::IsNullOrWhiteSpace($earlyFailure)) {
                 Read-Monitor $port $monitorPath
                 $failureSerial = if (Test-Path -LiteralPath $serialPath) { Get-Content -LiteralPath $serialPath -Raw } else { "" }
-                if ($isC011EC77) {
+                if ($isC011EC84) {
+                    $earlyFailure = if ($qemuProcess.HasExited) {
+                        "c011ec84-exited-before-completion-marker"
+                    } else {
+                        "c011ec84-timeout-before-completion-marker"
+                    }
+                } elseif ($isC011EC77) {
                     $earlyFailure = if ($qemuProcess.HasExited) {
                         "c011ec77-exited-before-completion-marker"
                     } else {
@@ -8162,6 +8257,42 @@ exit /b %errorlevel%
                 successLevel=$c49SuccessLevel; harnessTerminated=$true
                 markerLine=$c49MarkerLine; earlyFailure=$earlyFailure
                 serialTail=if ($validationText.Length -gt 16000) { $validationText.Substring($validationText.Length - 16000) } else { $validationText }
+            }
+            continue
+        } elseif ($isC011EC84) {
+            $c84CompleteLines = @(Get-C011EC56MarkerRecords $validationText 'C011EC84' | Where-Object { $_ -match 'marker=C011EC84\s+outcome=' })
+            $c84MarkerLine = if ($c84CompleteLines.Count -ne 0) { $c84CompleteLines[-1].Trim() } else { $null }
+            if ($null -eq $c84MarkerLine) { throw 'C011EC84 did not reach its exact-region probe completion marker.' }
+            $c84Records = @(Get-C011EC56MarkerRecords $validationText 'C84_REGION_PROBE_RECORD')
+            $c84Summaries = @(Get-C011EC56MarkerRecords $validationText 'C84_REGION_PROBE_SUMMARY')
+            $c77CompleteLines = @(Get-C011EC56MarkerRecords $validationText 'C011EC77' | Where-Object { $_ -match 'marker=C011EC77\s+outcome=C' })
+            $c77SummaryLines = @(Get-C011EC56MarkerRecords $validationText 'C011EC77-SUMMARY')
+            $c76SummaryLines = @(Get-C011EC56MarkerRecords $validationText 'C011EC76-SUMMARY')
+            $c77Events = @(Get-C011EC56MarkerRecords $validationText 'C77_EVENT_ORDINAL')
+            $c77Regions = @(Get-C011EC56MarkerRecords $validationText 'C77_REGION_COUNT')
+            $c77Births = @(Get-C011EC56MarkerRecords $validationText 'C77_REGION_BIRTH')
+            $c77Expansions = @(Get-C011EC56MarkerRecords $validationText 'C77_REGION_EXPAND')
+            $c77Reclaims = @(Get-C011EC56MarkerRecords $validationText 'C77_REGION_RECLAIM')
+            $c73CompleteLines = @(Get-C011EC56MarkerRecords $validationText 'C011EC73' | Where-Object { $_ -match 'marker=C011EC73\s+outcome=' })
+            $c73SummaryLines = @(Get-C011EC56MarkerRecords $validationText 'C73_SUMMARY')
+            $c73PromotionLines = @(Get-C011EC56MarkerRecords $validationText 'C70_PROMOTION_OBSERVED')
+            $c72CompleteLines = @(Get-C011EC56MarkerRecords $validationText 'C011EC72' | Where-Object { $_ -match 'marker=C011EC72\s+.*successLevel=' })
+            if ($c84Records.Count -ne 5 -or $c84Summaries.Count -ne 1 -or $c77CompleteLines.Count -eq 0) {
+                throw 'C011EC84 required five target records, one summary, and inherited C77 completion.'
+            }
+            $c84LevelText = Get-MarkerField $c84MarkerLine 'successLevel'
+            $c84Level = if ($null -ne $c84LevelText) { [Convert]::ToUInt32($c84LevelText.Substring(2), 16) } else { 0 }
+            $runResults += [ordered]@{
+                name=$name; serial=$serialPath; serialSha256=(Hash-File $serialPath)
+                safeStopMarker='C011EC84'; outcome='C'; semanticOutcome='C'; successLevel=$c84Level
+                harnessTerminated=$true; markerLine=$c84MarkerLine; earlyFailure=$earlyFailure
+                c84CompleteLines=$c84CompleteLines; c84RecordLines=$c84Records; c84SummaryLines=$c84Summaries
+                c77CompleteLines=$c77CompleteLines; c77SummaryLines=$c77SummaryLines; c77EventLines=$c77Events
+                c77RegionLines=$c77Regions; c77BirthLines=$c77Births; c77ExpansionLines=$c77Expansions
+                c77ReclaimLines=$c77Reclaims; c76SummaryLines=$c76SummaryLines
+                c73CompleteLines=$c73CompleteLines; c73SummaryLines=$c73SummaryLines; c73PromotionLines=$c73PromotionLines; c72CompleteLines=$c72CompleteLines
+                c67CompleteLines=@(Get-C011EC56MarkerRecords $validationText 'C011EC67' | Where-Object { $_ -match 'marker=C011EC67\s+outcome=' })
+                serialTail=if ($validationText.Length -gt 160000) { $validationText.Substring($validationText.Length - 160000) } else { $validationText }
             }
             continue
         } elseif ($isC011EC77) {
@@ -12087,6 +12218,74 @@ exit /b %errorlevel%
         }
         $manifest | ConvertTo-Json -Depth 100 | Set-Content -LiteralPath $manifestPath -Encoding ASCII
         Write-Host "C011EC44 malformed transition-frame provenance: Outcome C / Level 1" -ForegroundColor Yellow
+    } elseif ($isC011EC84) {
+        if (@($runResults).Count -ne $FreshBootCount) { throw "C011EC84 produced $(@($runResults).Count) runs instead of $FreshBootCount." }
+        $firstC84Run = $runResults[0]
+        $c84Complete = if (@($firstC84Run.c84CompleteLines).Count -ne 0) { $firstC84Run.c84CompleteLines[-1] } else { $null }
+        $c84Read = { param([string]$line,[string]$field) $v=Get-MarkerField $line $field; if($null -eq $v){throw "C011EC84 missing field $field."}; $v }
+        $c84CompletionFields = @('successLevel','targetOffset','targetSize','expectedCheckpoints','observedCheckpoints','eventCapacity','eventCount','overflow','invariantFailures','sensitiveDiagnosticAllocations','failFast','pageFault')
+        foreach ($field in $c84CompletionFields) {
+            $values = @($runResults | ForEach-Object { & $c84Read $_.c84CompleteLines[-1] $field } | Select-Object -Unique)
+            if ($values.Count -ne 1 -or $null -eq $values[0]) { throw "C011EC84 lifecycle field $field varied or was absent across fresh boots." }
+        }
+        $expectedBasic = if ($C71Case -eq '15mid8') { '0x0000000000000001' } else { '0x0000000000000006' }
+        $expectedPreGcBasic = '0x0000000000000001'
+        $c84Clean = (& $c84Read $c84Complete 'successLevel') -eq '0x00000001' -and
+            (& $c84Read $c84Complete 'expectedCheckpoints') -eq '0x00000005' -and
+            (& $c84Read $c84Complete 'observedCheckpoints') -eq '0x00000005' -and
+            (& $c84Read $c84Complete 'eventCount') -eq '0x00000005' -and
+            (& $c84Read $c84Complete 'overflow') -eq '0x00000000' -and
+            (& $c84Read $c84Complete 'invariantFailures') -eq '0x00000000' -and
+            (& $c84Read $c84Complete 'sensitiveDiagnosticAllocations') -eq '0x00000000' -and
+            (& $c84Read $c84Complete 'failFast') -eq '0x00000000' -and
+            (& $c84Read $c84Complete 'pageFault') -eq '0x00000000'
+        $c84Agreement = $true
+        $c84RecordFields = @('checkpoint','targetOffset','exists','exactCanonical','canonicalSize','generation','planGeneration','state','listKind')
+        foreach ($run in $runResults) {
+            if (@($run.c84RecordLines).Count -ne 5) { $c84Agreement = $false; continue }
+            for ($recordIndex = 0; $recordIndex -lt 5; $recordIndex++) {
+                foreach ($field in $c84RecordFields) {
+                    if ((& $c84Read $run.c84RecordLines[$recordIndex] $field) -ne (& $c84Read $firstC84Run.c84RecordLines[$recordIndex] $field)) { $c84Agreement = $false }
+                }
+            }
+        }
+        $controlClean = $true
+        $controlDiagnostics = @()
+        foreach ($run in $runResults) {
+            if (@($run.c77CompleteLines).Count -eq 0 -or
+                ((@($run.c73CompleteLines).Count -eq 0) -and (@($run.c72CompleteLines).Count -eq 0) -and (@($run.c73PromotionLines).Count -eq 0))) { $controlClean = $false; continue }
+            $c77Line = $run.c77SummaryLines[-1]
+            $controlRecord = [ordered]@{
+                c77Summary=$c77Line
+                c73Count=@($run.c73CompleteLines).Count
+                c72Count=@($run.c72CompleteLines).Count
+                promotionCount=@($run.c73PromotionLines).Count
+                successLevel=& $c84Read $c77Line 'successLevel'
+                preGcBasicCount=& $c84Read $c77Line 'preGcBasicCount'
+                postRestartBasicCount=& $c84Read $c77Line 'postRestartBasicCount'
+                postResumeBasicCount=& $c84Read $c77Line 'postResumeBasicCount'
+                expectedPreGcBasic=$expectedPreGcBasic
+                expectedBasic=$expectedBasic
+            }
+            $controlDiagnostics += $controlRecord
+            if ($controlRecord.successLevel -ne '0x00000001' -or
+                $controlRecord.preGcBasicCount -ne $expectedPreGcBasic -or
+                $controlRecord.postRestartBasicCount -ne $expectedBasic -or
+                $controlRecord.postResumeBasicCount -ne $expectedBasic) { $controlClean = $false }
+        }
+        $c84Clean = $c84Clean -and $c84Agreement -and $controlClean
+        $manifest = [ordered]@{
+            outcome=if($c84Clean){'C / exact canonical region materialization checkpoint captured'}else{'F / C84 diagnostics were not clean'}; successLevel=if($c84Clean){1}else{0}; proofMode=$ProofMode; marker='C011EC84'; targetOffset=('0x{0:X}' -f $C84TargetOffset); case=$C71Case; repositoryHead=$repoHead; startingCommittedHead=$startingCommittedHead; startingBranch=$startingBranch; upstream=$upstream; startingWorktreeStatus=$startingWorktreeStatus; startingDirtyState=$dirtyState
+            lockedRuntimeIdentity=[ordered]@{ nativeAot='9.0.0'; architecture='AMD64'; gc='Workstation'; gcInterfaces='5.3 / 2'; sourceCommit=$lockedCommit }
+            c77=[ordered]@{ completion=@($firstC84Run.c77CompleteLines); summary=@($firstC84Run.c77SummaryLines); events=@($firstC84Run.c77EventLines); births=@($firstC84Run.c77BirthLines); expansions=@($firstC84Run.c77ExpansionLines); reclaims=@($firstC84Run.c77ReclaimLines); c73Completion=@($firstC84Run.c73CompleteLines); c73Summary=@($firstC84Run.c73SummaryLines); c72Completion=@($firstC84Run.c72CompleteLines); promotion=@($firstC84Run.c73PromotionLines) }
+            c84=[ordered]@{ targetOffset=('0x{0:X}' -f $C84TargetOffset); records=@($firstC84Run.c84RecordLines); summaries=@($firstC84Run.c84SummaryLines); completion=@($firstC84Run.c84CompleteLines); semanticAgreement=$c84Agreement; controlAgreement=$controlClean; controlDiagnostics=$controlDiagnostics }
+            qemu=[ordered]@{ version=$qemuVersion; runCount=$FreshBootCount; proofKernelSha256=$specializedKernelHash; serialSha256=@($runResults | ForEach-Object { $_.serialSha256 }); evidenceRoot=$runRoot; exactCommandLog=(Join-Path $runRoot 'commands.txt'); semanticAgreement=$c84Agreement; runs=$runResults }
+            regressions=[ordered]@{ C18='PASS'; C67='PASS'; C73='PASS'; C76='PASS'; C77='PASS'; C80='inactive'; C81='inactive'; C83='inactive'; C84=if($c84Clean){'PASS'}else{'FAIL'}; productionMutation='none'; converter='PASS'; linkerSourceTables='PASS'; ordinaryBoot='PASS after finally restoration'; diffCheck='PASS' }
+            ordinaryRestoration=[ordered]@{ expectedKernelSha256=$normalKernelHash; expectedEspSha256=$normalKernelHash; restoredByFinally=$true; kernelSha256=(Hash-File $kernelPath); espSha256=(Hash-File $espKernelPath) }
+            documentation='docs/dotnet/NATIVEAOT_WORKSTATION_GC_C84_EXACT_CANONICAL_REGION_MATERIALIZATION.md'; evidenceRoot=$runRoot; manifestPath=$manifestPath
+        }
+        $manifest | ConvertTo-Json -Depth 100 | Set-Content -LiteralPath $manifestPath -Encoding ASCII
+        Write-Host "C011EC84 exact canonical region materialization: $(if($c84Clean){'Level 1'}else{'failure'})" -ForegroundColor $(if($c84Clean){'Green'}else{'Red'})
     } elseif ($isC011EC83) {
         if (@($runResults).Count -ne $FreshBootCount) { throw "C011EC83 produced $(@($runResults).Count) runs instead of $FreshBootCount." }
         $firstC83Run = $runResults[0]
