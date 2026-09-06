@@ -17,7 +17,7 @@ namespace native_elf {
 namespace {
 
 static uint8_t s_invalidImage[guidexos::native_elf::MAX_ELF_FILE_BYTES];
-#if defined(GXOS_PHASE27G_SMOKE) || defined(GXOS_PHASE27H_SMOKE) || defined(GXOS_PHASE27I_SMOKE) || defined(GXOS_PHASE27J_SMOKE) || defined(GXOS_PHASE27K_SMOKE) || defined(GXOS_PHASE27L_SMOKE) || defined(GXOS_PHASE27M_SMOKE) || defined(GXOS_PHASE27R_SMOKE) || defined(GXOS_PHASE27S_SMOKE)
+#if defined(GXOS_PHASE27G_SMOKE) || defined(GXOS_PHASE27H_SMOKE) || defined(GXOS_PHASE27I_SMOKE) || defined(GXOS_PHASE27J_SMOKE) || defined(GXOS_PHASE27K_SMOKE) || defined(GXOS_PHASE27L_SMOKE) || defined(GXOS_PHASE27M_SMOKE) || defined(GXOS_PHASE27R_SMOKE) || defined(GXOS_PHASE27S_SMOKE) || defined(GXOS_PHASE27T_SMOKE)
 static uint8_t s_compareImage[guidexos::native_elf::MAX_ELF_FILE_BYTES];
 #endif
 
@@ -154,7 +154,7 @@ static bool emit_serial_artifact(const char* path, const char* name)
     return true;
 }
 
-#if defined(GXOS_PHASE27G_SMOKE) || defined(GXOS_PHASE27H_SMOKE) || defined(GXOS_PHASE27I_SMOKE) || defined(GXOS_PHASE27J_SMOKE) || defined(GXOS_PHASE27K_SMOKE) || defined(GXOS_PHASE27L_SMOKE) || defined(GXOS_PHASE27M_SMOKE) || defined(GXOS_PHASE27R_SMOKE) || defined(GXOS_PHASE27S_SMOKE)
+#if defined(GXOS_PHASE27G_SMOKE) || defined(GXOS_PHASE27H_SMOKE) || defined(GXOS_PHASE27I_SMOKE) || defined(GXOS_PHASE27J_SMOKE) || defined(GXOS_PHASE27K_SMOKE) || defined(GXOS_PHASE27L_SMOKE) || defined(GXOS_PHASE27M_SMOKE) || defined(GXOS_PHASE27R_SMOKE) || defined(GXOS_PHASE27S_SMOKE) || defined(GXOS_PHASE27T_SMOKE)
 static bool same_vfs_file_bytes(const char* leftPath, const char* rightPath)
 {
     vfs::FileInfo left = {};
@@ -1265,6 +1265,219 @@ void run_bootstrap_execution_smoke()
     print_marker("phase27s", phase27sPassed);
     serial::puts(phase27sPassed ? "ELF Loader: Phase 27S provenance-preserving pointer arithmetic smoke PASS\n" :
                                   "ELF Loader: Phase 27S provenance-preserving pointer arithmetic smoke FAIL\n");
+#endif
+#if defined(GXOS_PHASE27T_SMOKE)
+    serial::puts("ELF Loader: Phase 27T structs and field addressing smoke begin\n");
+    static compiler::CompileSummary t27Local = {};
+    static compiler::CompileSummary t27Pointer = {};
+    static compiler::CompileSummary t27ArrowStore = {};
+    static compiler::CompileSummary t27FieldPointer = {};
+    static compiler::CompileSummary t27Adjacent = {};
+    static compiler::CompileSummary t27Global = {};
+    static compiler::CompileSummary t27Recursion = {};
+    static compiler::CompileSummary t27Deep = {};
+    static compiler::CompileSummary t27DuplicateField = {};
+    static compiler::CompileSummary t27DuplicateStruct = {};
+    static compiler::CompileSummary t27UnknownField = {};
+    static compiler::CompileSummary t27DotType = {};
+    static compiler::CompileSummary t27ArrowType = {};
+    static compiler::CompileSummary t27Assignment = {};
+    static compiler::CompileSummary t27ByValue = {};
+    static compiler::CompileSummary t27PointerType = {};
+    static compiler::CompileSummary t27Project = {};
+    static compiler::CompileSummary t27CachedFirst = {};
+    static compiler::CompileSummary t27CachedSecond = {};
+    static compiler::CompileSummary t27Edited = {};
+    static compiler::CompileSummary t27SignatureBad = {};
+    static compiler::CompileSummary t27SignatureRecovered = {};
+    static NativeElfRunReport t27Report = {};
+    int32_t t27IgnoredReturn = 0;
+
+    const char t27LocalSource[] =
+        "struct Point { int x; int y; }; int gx_main(gx_app_context* c) { struct Point p; p.x = 20; p.y = 22; return p.x + p.y; }";
+    const char t27PointerSource[] =
+        "struct Point { int x; int y; }; int sum_point(struct Point* p) { return p->x + p->y; } int gx_main(gx_app_context* c) { struct Point p; p.x = 20; p.y = 22; return sum_point(&p); }";
+    const char t27ArrowStoreSource[] =
+        "struct Point { int x; int y; }; int bump(struct Point* p) { p->x = p->x + 2; return p->x; } int gx_main(gx_app_context* c) { struct Point p; p.x = 40; return bump(&p); }";
+    const char t27FieldPointerSource[] =
+        "struct Point { int x; int y; }; int gx_main(gx_app_context* c) { struct Point p; int* q = &p.y; *q = 42; return p.y; }";
+    const char t27AdjacentSource[] =
+        "struct Pair { int a; int b; }; int gx_main(gx_app_context* c) { struct Pair p; int* q = &p.a; q = q + 1; return *q; }";
+    const char t27GlobalSource[] =
+        "struct Point { int x; int y; }; struct Point globalPoint; int gx_main(gx_app_context* c) { return globalPoint.x + globalPoint.y; }";
+    const char t27RecursionSource[] =
+        "struct Point { int x; }; int recurse(struct Point* p, int n) { if (n == 0) return p->x; return recurse(p, n - 1); } int gx_main(gx_app_context* c) { struct Point p; p.x = 42; return recurse(&p, 4); }";
+    const char t27DeepSource[] =
+        "struct Point { int x; }; int recurse(struct Point* p, int n) { if (n == 0) return p->x; return recurse(p, n - 1); } int gx_main(gx_app_context* c) { struct Point p; p.x = 42; return recurse(&p, 76); }";
+    const char t27DuplicateFieldSource[] =
+        "struct Point { int x; int x; }; int gx_main(gx_app_context* c) { return 0; }";
+    const char t27DuplicateStructSource[] =
+        "struct Point { int x; }; struct Point { int y; }; int gx_main(gx_app_context* c) { return 0; }";
+    const char t27UnknownFieldSource[] =
+        "struct Point { int x; }; int gx_main(gx_app_context* c) { struct Point p; return p.z; }";
+    const char t27DotTypeSource[] =
+        "int gx_main(gx_app_context* c) { int x; return x.foo; }";
+    const char t27ArrowTypeSource[] =
+        "int gx_main(gx_app_context* c) { int* p; return p->x; }";
+    const char t27AssignmentSource[] =
+        "struct Point { int x; }; int gx_main(gx_app_context* c) { struct Point a; struct Point b; a = b; return 0; }";
+    const char t27ByValueSource[] =
+        "struct Point { int x; }; int f(struct Point p) { return p.x; } int gx_main(gx_app_context* c) { return 0; }";
+    const char t27PointerTypeSource[] =
+        "struct Point { int x; }; struct Rect { int x; }; int gx_main(gx_app_context* c) { struct Point p; struct Rect* r = &p; return 0; }";
+    const auto write_t27_source = [](const char* path, const char* source) {
+        return path && source && vfs::write_file(path, source, static_cast<uint32_t>(__builtin_strlen(source))) >= 0;
+    };
+    const bool localWritten = write_t27_source("/P27T/out/t27local.c", t27LocalSource);
+    const bool local = localWritten && compiler::compile("/P27T/out/t27local.c", "/P27T/out/t27local.elf", &t27Local) &&
+        run_expected("/P27T/out/t27local.elf", 42);
+    const bool pointer = write_t27_source("/P27T/out/t27pointer.c", t27PointerSource) &&
+        compiler::compile("/P27T/out/t27pointer.c", "/P27T/out/t27pointer.elf", &t27Pointer) &&
+        run_expected("/P27T/out/t27pointer.elf", 42);
+    const bool arrowStore = write_t27_source("/P27T/out/t27store.c", t27ArrowStoreSource) &&
+        compiler::compile("/P27T/out/t27store.c", "/P27T/out/t27store.elf", &t27ArrowStore) &&
+        run_expected("/P27T/out/t27store.elf", 42);
+    const bool fieldPointer = write_t27_source("/P27T/out/t27field.c", t27FieldPointerSource) &&
+        compiler::compile("/P27T/out/t27field.c", "/P27T/out/t27field.elf", &t27FieldPointer) &&
+        run_expected("/P27T/out/t27field.elf", 42);
+    const bool adjacentCompiled = write_t27_source("/P27T/out/t27adj.c", t27AdjacentSource) &&
+        compiler::compile("/P27T/out/t27adj.c", "/P27T/out/t27adj.elf", &t27Adjacent);
+    const bool adjacent = adjacentCompiled && !run_file("/P27T/out/t27adj.elf", &t27IgnoredReturn, &t27Report) &&
+        t27Report.runtimeStatus == NativeRuntimeStatus::InvalidPointerDereference && t27Report.teardownComplete;
+    const bool global = write_t27_source("/P27T/out/t27global.c", t27GlobalSource) &&
+        compiler::compile("/P27T/out/t27global.c", "/P27T/out/t27global.elf", &t27Global) &&
+        run_expected("/P27T/out/t27global.elf", 0);
+    const bool recursion = write_t27_source("/P27T/out/t27rec.c", t27RecursionSource) &&
+        compiler::compile("/P27T/out/t27rec.c", "/P27T/out/t27rec.elf", &t27Recursion) &&
+        run_expected("/P27T/out/t27rec.elf", 42);
+    const bool deepCompiled = write_t27_source("/P27T/out/t27deep.c", t27DeepSource) &&
+        compiler::compile("/P27T/out/t27deep.c", "/P27T/out/t27deep.elf", &t27Deep);
+    const bool deep = deepCompiled && !run_file("/P27T/out/t27deep.elf", &t27IgnoredReturn, &t27Report) &&
+        t27Report.runtimeStatus == NativeRuntimeStatus::CallDepthExceeded && t27Report.teardownComplete;
+    const bool duplicateField = write_t27_source("/P27T/out/t27df.c", t27DuplicateFieldSource) &&
+        !compiler::compile("/P27T/out/t27df.c", "/P27T/out/t27df.elf", &t27DuplicateField) &&
+        compile_diagnostic_contains(t27DuplicateField, "duplicate field");
+    const bool duplicateStruct = write_t27_source("/P27T/out/t27ds.c", t27DuplicateStructSource) &&
+        !compiler::compile("/P27T/out/t27ds.c", "/P27T/out/t27ds.elf", &t27DuplicateStruct) &&
+        compile_diagnostic_contains(t27DuplicateStruct, "duplicate struct");
+    const bool unknownField = write_t27_source("/P27T/out/t27uf.c", t27UnknownFieldSource) &&
+        !compiler::compile("/P27T/out/t27uf.c", "/P27T/out/t27uf.elf", &t27UnknownField) &&
+        compile_diagnostic_contains(t27UnknownField, "struct has no field");
+    const bool dotType = write_t27_source("/P27T/out/t27dot.c", t27DotTypeSource) &&
+        !compiler::compile("/P27T/out/t27dot.c", "/P27T/out/t27dot.elf", &t27DotType) &&
+        compile_diagnostic_contains(t27DotType, "dot access requires");
+    const bool arrowType = write_t27_source("/P27T/out/t27arrow.c", t27ArrowTypeSource) &&
+        !compiler::compile("/P27T/out/t27arrow.c", "/P27T/out/t27arrow.elf", &t27ArrowType) &&
+        compile_diagnostic_contains(t27ArrowType, "arrow access requires");
+    const bool assignment = write_t27_source("/P27T/out/t27assign.c", t27AssignmentSource) &&
+        !compiler::compile("/P27T/out/t27assign.c", "/P27T/out/t27assign.elf", &t27Assignment) &&
+        compile_diagnostic_contains(t27Assignment, "whole-struct assignment");
+    const bool byValue = write_t27_source("/P27T/out/t27byvalue.c", t27ByValueSource) &&
+        !compiler::compile("/P27T/out/t27byvalue.c", "/P27T/out/t27byvalue.elf", &t27ByValue) &&
+        compile_diagnostic_contains(t27ByValue, "passed by pointer");
+    const bool pointerType = write_t27_source("/P27T/out/t27ptype.c", t27PointerTypeSource) &&
+        !compiler::compile("/P27T/out/t27ptype.c", "/P27T/out/t27ptype.elf", &t27PointerType) &&
+        compile_diagnostic_contains(t27PointerType, "different type");
+
+    const char* t27Sources[] = {"/P27T/src/main.cpp", "/P27T/src/math.cpp", "/P27T/src/types.cpp"};
+    const char* t27Objects[] = {"/P27T/out/t27m1.gxo", "/P27T/out/t27m2.gxo", "/P27T/out/t27m3.gxo"};
+    const bool project = compiler::compile_project(t27Sources, 3, "/P27T/out/t27main.elf", &t27Project) &&
+        run_expected_with_report("/P27T/out/t27main.elf", 42, &t27Report) && t27Report.hostLogObserved;
+    const bool cold = project && compiler::compile_project_incremental(t27Sources, t27Sources, t27Objects, 3,
+        "/P27T/out/t27cache.elf", &t27CachedFirst);
+    const bool warm = cold && compiler::compile_project_incremental(t27Sources, t27Sources, t27Objects, 3,
+        "/P27T/out/t27cache.elf", &t27CachedSecond);
+    const bool cached = warm && t27CachedSecond.compiledModuleCount == 0 && t27CachedSecond.cachedModuleCount == 3 &&
+        t27CachedSecond.linkedFromPersistedObjects && run_expected("/P27T/out/t27cache.elf", 42);
+    compiler::GxoObjectHeaderView t27Header = {};
+    compiler::Diagnostics t27ObjectDiagnostics;
+    vfs::FileInfo t27ObjectInfo = {};
+    const bool objectRoundTrip = cached && vfs::stat(t27Objects[0], &t27ObjectInfo) == vfs::VFS_OK &&
+        t27ObjectInfo.size > 0 && t27ObjectInfo.size <= sizeof(s_invalidImage) &&
+        vfs::read_file(t27Objects[0], s_invalidImage, static_cast<uint32_t>(t27ObjectInfo.size)) == static_cast<int32_t>(t27ObjectInfo.size) &&
+        compiler::inspect_gxo_header(s_invalidImage, static_cast<uint32_t>(t27ObjectInfo.size), &t27Header, t27ObjectDiagnostics) &&
+        t27Header.compilerObjectAbiVersion == compiler::COMPILER_OBJECT_ABI_VERSION;
+    const bool deterministic = cached && t27CachedFirst.outputHash == t27CachedSecond.outputHash && objectRoundTrip;
+    const char t27MathEdited[] =
+        "struct Point { int x; int y; }; int sum_point(struct Point* p) { return p->x + p->y - 1; }\n";
+    const char t27MathOriginal[] =
+        "struct Point { int x; int y; }; int sum_point(struct Point* p) { return p->x + p->y; }\n";
+    const bool edited = cached && vfs::write_file(t27Sources[1], t27MathEdited, sizeof(t27MathEdited) - 1U) == sizeof(t27MathEdited) - 1U &&
+        compiler::compile_project_incremental(t27Sources, t27Sources, t27Objects, 3, "/P27T/out/t27edit.elf", &t27Edited) &&
+        t27Edited.compiledModuleCount == 1 && t27Edited.cachedModuleCount == 2 && run_expected("/P27T/out/t27edit.elf", 41);
+    const bool restored = edited && vfs::write_file(t27Sources[1], t27MathOriginal, sizeof(t27MathOriginal) - 1U) == sizeof(t27MathOriginal) - 1U &&
+        compiler::compile_project_incremental(t27Sources, t27Sources, t27Objects, 3, "/P27T/out/t27restore.elf", &t27SignatureRecovered) &&
+        run_expected("/P27T/out/t27restore.elf", 42);
+    const char t27MathMismatch[] =
+        "struct Point { int x; }; int sum_point(struct Point* p) { return p->x; }\n";
+    const bool mismatchSeeded = restored && vfs::write_file(t27Sources[1], t27MathMismatch, sizeof(t27MathMismatch) - 1U) == sizeof(t27MathMismatch) - 1U;
+    const bool mismatch = mismatchSeeded && !compiler::compile_project_incremental(t27Sources, t27Sources, t27Objects, 3,
+        "/P27T/out/t27bad.elf", &t27SignatureBad) && t27SignatureBad.cachedModuleCount == 2 &&
+        compile_diagnostic_contains(t27SignatureBad, "conflicting declaration for function");
+    const bool signatureFinal = mismatch && vfs::write_file(t27Sources[1], t27MathOriginal, sizeof(t27MathOriginal) - 1U) == sizeof(t27MathOriginal) - 1U &&
+        compiler::compile_project_incremental(t27Sources, t27Sources, t27Objects, 3, "/P27T/out/t27final.elf", &t27SignatureRecovered) &&
+        run_expected("/P27T/out/t27final.elf", 42);
+    print_marker("phase27t_duplicate_field", duplicateField);
+    print_marker("phase27t_duplicate_struct", duplicateStruct);
+    print_marker("phase27t_local_struct", local);
+    print_marker("phase27t_global_struct", global);
+    print_marker("phase27t_field_store", arrowStore);
+    print_marker("phase27t_arrow_access", pointer);
+    print_marker("phase27t_field_subobject_provenance", adjacent);
+    print_marker("phase27t_adjacent_field_escape_rejected", adjacent);
+    print_marker("phase27t_field_pointer", fieldPointer);
+    print_marker("phase27t_struct_address_of", pointer);
+    print_marker("phase27t_struct_pointer_parameter", pointer);
+    print_marker("phase27t_struct_pointer_parameter_isolation", pointer);
+    print_marker("phase27t_struct_pointer_type_safety", pointerType);
+    print_marker("phase27t_cross_file_struct_pointer", project);
+    print_marker("phase27t_struct_signature_mismatch", mismatch);
+    print_marker("phase27t_field_order_mismatch", mismatch);
+    print_marker("phase27t_unknown_field", unknownField);
+    print_marker("phase27t_dot_type_error", dotType);
+    print_marker("phase27t_arrow_type_error", arrowType);
+    print_marker("phase27t_struct_assignment_rejected", assignment);
+    print_marker("phase27t_struct_by_value_parameter_rejected", byValue);
+    print_marker("phase27t_struct_pointer", pointer);
+    print_marker("phase27t_arrow_store", arrowStore);
+    print_marker("phase27t_struct_reinitialization", restored);
+    print_marker("phase27t_field_addressing", fieldPointer);
+    print_marker("phase27t_field_load_opcode", local && t27Local.codeBytes != 0);
+    print_marker("phase27t_field_store_opcode", arrowStore && t27ArrowStore.codeBytes != 0);
+    print_marker("phase27t_arrow_guard_opcode", pointer && t27Pointer.codeBytes != 0);
+    print_marker("phase27t_struct_object_roundtrip", objectRoundTrip);
+    print_marker("phase27t_object_version_migration", objectRoundTrip &&
+        t27Header.compilerObjectAbiVersion == compiler::COMPILER_OBJECT_ABI_VERSION);
+    print_marker("phase27t_cached_struct_execution", cached);
+    print_marker("phase27t_struct_incremental_edit", edited);
+    print_marker("phase27t_cached_struct_signature_validation", mismatch);
+    print_marker("phase27t_struct_object_deterministic", deterministic);
+    print_marker("phase27t_struct_cold_warm_identical", deterministic);
+    print_marker("phase27t_struct_layout_deterministic", local && pointer);
+    print_marker("phase27t_ide_cold_struct", project);
+    print_marker("phase27t_ide_warm_struct", cached);
+    print_marker("phase27t_ide_partial_struct", edited && restored);
+    print_marker("phase27t_ide_struct_type_failure", mismatch);
+    print_marker("phase27t_struct_failure_blocks_run", mismatch);
+    print_marker("phase27t_field_pointer_failure_recovery", adjacent && restored);
+    print_marker("phase27t_struct_pointer_recursion", recursion);
+    print_marker("phase27t_struct_recursion_guard", deep);
+    print_marker("phase27t_recursion_stack_accounting", recursion && deep);
+    print_marker("phase27t_runtime_status_recovery", adjacent && deep && restored);
+    print_marker("phase27t_struct_linker_reset", signatureFinal);
+    const bool artifact = project && emit_serial_artifact("/P27T/out/t27main.elf", "t27main");
+    print_marker("phase27t_no_rwx_regression", artifact);
+    int32_t developerStudio27tReturn = 1;
+    static NativeElfRunReport developerStudio27tReport = {};
+    const bool appLaunched = project && run_file("/Apps/DS27T/bin/amd64/p27t.elf", &developerStudio27tReturn,
+        &developerStudio27tReport) && developerStudio27tReturn == 0 && developerStudio27tReport.teardownComplete;
+    print_marker("phase27t_kernel_survival", appLaunched && restored && signatureFinal);
+    const bool phase27tPassed = local && pointer && arrowStore && fieldPointer && adjacent && global && recursion && deep &&
+        duplicateField && duplicateStruct && unknownField && dotType && arrowType && assignment && byValue && pointerType &&
+        project && cached && deterministic && edited && restored && mismatch && signatureFinal && artifact && appLaunched;
+    print_marker("phase27t", phase27tPassed);
+    serial::puts(phase27tPassed ? "ELF Loader: Phase 27T structs and field addressing smoke PASS\n" :
+                                  "ELF Loader: Phase 27T structs and field addressing smoke FAIL\n");
 #endif
 #if defined(GXOS_PHASE27G_SMOKE)
     serial::puts("ELF Loader: Phase 27G bootstrap language smoke begin\n");

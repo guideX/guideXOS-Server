@@ -130,6 +130,17 @@ static bool report_kind_conflict(const SourceLocation& location, const char* nam
     return false;
 }
 
+static bool valid_linker_data_signature(SymbolKind kind, uint16_t elementCount, uint16_t elementSize,
+                                        uint32_t size, uint32_t alignment, uint64_t structTypeIdentity)
+{
+    if (kind == SymbolKind::DataStruct)
+        return elementCount == 1 && elementSize == size && size != 0 && size <= COMPILER_MAX_STRUCT_BYTES &&
+            alignment == 4 && structTypeIdentity != 0;
+    return (kind == SymbolKind::Data || kind == SymbolKind::DataArray) && elementCount != 0 &&
+        elementCount <= COMPILER_MAX_ARRAY_ELEMENTS && elementSize == 4 &&
+        size == static_cast<uint32_t>(elementCount) * elementSize && alignment == 4;
+}
+
 } // namespace
 
 bool link_modules(const CompiledModule* modules, uint32_t moduleCount,
@@ -171,6 +182,38 @@ bool link_modules(const CompiledModule* modules, uint32_t moduleCount,
         if (i != 0 && names_equal(ordered[i - 1]->sourcePath, ordered[i]->sourcePath)) {
             diagnostics.error((SourceLocation){0, 1, 1}, "duplicate source entry in project", "source");
             return false;
+        }
+    }
+
+    // Preserve the bounded type table in the linked representation and reject
+    // same-name definitions whose layout identities disagree, even when the
+    // differing type is not reached by a function call in this project.
+    for (uint32_t m = 0; m < moduleCount; ++m) {
+        const CompiledModule& module = *ordered[m];
+        if (module.structTypeCount > COMPILER_MAX_STRUCT_TYPES) {
+            diagnostics.error((SourceLocation){0, 1, 1}, "module struct type capacity exceeded", "struct");
+            return false;
+        }
+        for (uint32_t t = 0; t < module.structTypeCount; ++t) {
+            const StructTypeIR& type = module.structTypes[t];
+            int32_t sameName = -1;
+            int32_t sameIdentity = -1;
+            for (uint32_t existing = 0; existing < output->structTypeCount; ++existing) {
+                if (names_equal(output->structTypes[existing].name, type.name))
+                    sameName = static_cast<int32_t>(existing);
+                if (output->structTypes[existing].identity == type.identity)
+                    sameIdentity = static_cast<int32_t>(existing);
+            }
+            if (sameName >= 0 && output->structTypes[sameName].identity != type.identity) {
+                diagnostics.error((SourceLocation){0, 1, 1}, "incompatible struct type definition across modules", "struct");
+                return false;
+            }
+            if (sameIdentity >= 0) continue;
+            if (output->structTypeCount >= COMPILER_MAX_STRUCT_TYPES) {
+                diagnostics.error((SourceLocation){0, 1, 1}, "linked struct type capacity exceeded", "struct");
+                return false;
+            }
+            output->structTypes[output->structTypeCount++] = type;
         }
     }
 
@@ -265,8 +308,12 @@ bool link_modules(const CompiledModule* modules, uint32_t moduleCount,
             copy_name(global.name, sizeof(global.name), exportSymbol.name);
             global.moduleIndex = static_cast<uint16_t>(m);
             global.parameterCount = exportSymbol.parameterCount;
-            for (uint32_t p = 0; p < exportSymbol.parameterCount; ++p)
+            for (uint32_t p = 0; p < exportSymbol.parameterCount; ++p) {
                 global.parameterKinds[p] = exportSymbol.parameterKinds[p];
+                global.parameterStructTypes[p] = exportSymbol.parameterStructTypes[p];
+            }
+            copy_name(global.structTypeName, sizeof(global.structTypeName), exportSymbol.structTypeName);
+            global.structTypeIdentity = exportSymbol.structTypeIdentity;
             global.moduleCodeOffset = exportSymbol.moduleCodeOffset;
             global.moduleDataOffset = exportSymbol.moduleDataOffset;
             global.size = exportSymbol.size;
@@ -282,10 +329,9 @@ bool link_modules(const CompiledModule* modules, uint32_t moduleCount,
                     return false;
                 }
             } else {
-                if (!symbol_is_data(exportSymbol.kind) || global.elementCount == 0 ||
-                    global.elementSize != 4 ||
-                    global.size != static_cast<uint32_t>(global.elementCount) * global.elementSize ||
-                    global.alignment != 4 ||
+                if (!symbol_is_data(exportSymbol.kind) ||
+                    !valid_linker_data_signature(exportSymbol.kind, global.elementCount, global.elementSize,
+                        global.size, global.alignment, global.structTypeIdentity) ||
                     global.moduleDataOffset > module.mutableDataBytes ||
                     module.mutableDataBytes - global.moduleDataOffset < global.size ||
                     !add_u32(moduleMutableDataOffsets[m], global.moduleDataOffset, &global.finalDataOffset) ||
@@ -346,19 +392,21 @@ bool link_modules(const CompiledModule* modules, uint32_t moduleCount,
             if (importSymbol.kind == SymbolKind::Function) {
                 bool sameSignature = definition.parameterCount == importSymbol.expectedParameterCount;
                 for (uint32_t p = 0; sameSignature && p < importSymbol.expectedParameterCount; ++p)
-                    sameSignature = definition.parameterKinds[p] == importSymbol.parameterKinds[p];
+                    sameSignature = definition.parameterKinds[p] == importSymbol.parameterKinds[p] &&
+                        definition.parameterStructTypes[p] == importSymbol.parameterStructTypes[p];
                 if (!sameSignature) {
                     diagnostics.error_identifier(importSymbol.location, "conflicting declaration for function ",
                                                   importSymbol.name, name_length(importSymbol.name), "function");
                     return false;
                 }
-            } else if (!symbol_is_data(importSymbol.kind) || importSymbol.elementCount == 0 ||
-                       importSymbol.elementSize != 4 ||
-                       importSymbol.size != static_cast<uint32_t>(importSymbol.elementCount) * importSymbol.elementSize ||
-                       importSymbol.alignment != 4 || definition.size != importSymbol.size ||
+            } else if (!symbol_is_data(importSymbol.kind) ||
+                       !valid_linker_data_signature(importSymbol.kind, importSymbol.elementCount,
+                           importSymbol.elementSize, importSymbol.size, importSymbol.alignment,
+                           importSymbol.structTypeIdentity) || definition.size != importSymbol.size ||
                        definition.alignment != importSymbol.alignment ||
                        definition.elementCount != importSymbol.elementCount ||
-                       definition.elementSize != importSymbol.elementSize) {
+                       definition.elementSize != importSymbol.elementSize ||
+                       definition.structTypeIdentity != importSymbol.structTypeIdentity) {
                     diagnostics.error_identifier(importSymbol.location, "conflicting declaration for global ",
                                               importSymbol.name, name_length(importSymbol.name), "linker");
                 return false;

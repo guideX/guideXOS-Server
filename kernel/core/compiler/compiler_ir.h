@@ -26,6 +26,11 @@ static const uint32_t COMPILER_MAX_STRING_LITERALS = 16;
 static const uint32_t COMPILER_MAX_TOTAL_STRING_DATA = 2048;
 static const uint32_t COMPILER_MAX_LOCALS = 32;
 static const uint32_t COMPILER_MAX_ARRAY_ELEMENTS = 256;
+// Eight complete struct descriptors keep the already-large fixed TranslationUnitIR
+// below the host proof stack budget while still covering the bounded language.
+static const uint32_t COMPILER_MAX_STRUCT_TYPES = 8;
+static const uint32_t COMPILER_MAX_STRUCT_FIELDS = 16;
+static const uint32_t COMPILER_MAX_STRUCT_BYTES = 256;
 // Local arrays share one bounded function-frame budget.  A 64-element array
 // is 256 bytes; the aggregate local-storage cap keeps recursion accounting
 // deterministic even when a function has several arrays and scalars.
@@ -63,7 +68,7 @@ static const uint32_t COMPILER_MAX_POINTER_TEMPORARY_SLOTS = COMPILER_MAX_PARAME
 // independent from the compiler phase number: changing object-producing
 // semantics requires incrementing COMPILER_OBJECT_ABI_VERSION.
 static const uint16_t COMPILER_OBJECT_FORMAT_VERSION = 1;
-static const uint16_t COMPILER_OBJECT_ABI_VERSION = 4;
+static const uint16_t COMPILER_OBJECT_ABI_VERSION = 5;
 static const uint32_t COMPILER_OBJECT_ARCH_AMD64 = 1;
 static const uint32_t COMPILER_OBJECT_TARGET_ABI_GUIDEXOS_C_V1 = 1;
 static const uint32_t COMPILER_MAX_OBJECT_BYTES = 131072;
@@ -95,6 +100,13 @@ enum class ExpressionKind : uint8_t {
     AddressOfLocal,
     AddressOfGlobal,
     AddressOfIndexed,
+    LoadStructAddressLocal,
+    LoadStructAddressGlobal,
+    LoadStructPointer,
+    AddressOfStructLocal,
+    AddressOfStructGlobal,
+    LoadField,
+    AddressOfField,
     LoadPointer,
     LoadIndirectInt32,
     PointerAdd,
@@ -104,6 +116,8 @@ enum class ExpressionKind : uint8_t {
 enum class ValueType : uint8_t {
     Int32,
     Int32Pointer,
+    StructValue,
+    StructPointer,
 };
 
 enum class PointerProvenanceKind : uint32_t {
@@ -113,12 +127,43 @@ enum class PointerProvenanceKind : uint32_t {
     LocalArrayElement = 3,
     GlobalArrayElement = 4,
     PointerParameter = 5,
+    LocalStruct = 6,
+    GlobalStruct = 7,
+    StructParameter = 8,
+    FieldSubobject = 9,
 };
 
 enum class StorageKind : uint8_t {
     ScalarInt,
     ArrayInt,
     PointerInt,
+    Struct,
+    PointerStruct,
+};
+
+enum class StructFieldKind : uint8_t {
+    Int32,
+};
+
+struct StructFieldIR {
+    char name[COMPILER_FUNCTION_NAME_CAPACITY];
+    StructFieldKind kind;
+    uint8_t reserved;
+    uint16_t elementCount;
+    uint16_t elementSize;
+    uint32_t offset;
+    uint32_t sizeBytes;
+    uint32_t alignment;
+};
+
+struct StructTypeIR {
+    char name[COMPILER_FUNCTION_NAME_CAPACITY];
+    uint16_t fieldCount;
+    uint16_t reserved;
+    uint32_t sizeBytes;
+    uint32_t alignment;
+    uint64_t identity;
+    StructFieldIR fields[COMPILER_MAX_STRUCT_FIELDS];
 };
 
 enum class IndexedBaseKind : uint8_t {
@@ -158,6 +203,7 @@ enum class StatementKind : uint8_t {
     StoreIndexed,
     StorePointer,
     StoreIndirectInt32,
+    StoreField,
 };
 
 struct Statement {
@@ -190,6 +236,7 @@ enum class ParameterKind : uint8_t {
     Integer,
     Int32Pointer,
     AppContextPointer,
+    StructPointer,
 };
 
 struct ParameterSymbol {
@@ -197,6 +244,8 @@ struct ParameterSymbol {
     ParameterKind kind;
     uint8_t reserved;
     uint16_t slot;
+    uint16_t structTypeIndex;
+    uint64_t structTypeIdentity;
     bool initialized;
 };
 
@@ -207,6 +256,8 @@ struct LocalSymbol {
     uint16_t slot;
     uint16_t elementCount;
     uint16_t elementSize;
+    uint16_t structTypeIndex;
+    uint32_t sizeBytes;
     bool initialized;
 };
 
@@ -222,6 +273,7 @@ struct CallSite {
     uint16_t calleeFunction;
     uint16_t expectedParameterCount;
     ParameterKind expectedParameterKinds[COMPILER_MAX_PARAMETERS];
+    uint64_t expectedParameterStructTypes[COMPILER_MAX_PARAMETERS];
     bool external;
     uint8_t reserved;
     SourceLocation location;
@@ -282,6 +334,7 @@ struct FunctionSymbol {
     uint16_t codeLabel;
     uint16_t reserved;
     ParameterKind parameterKinds[COMPILER_MAX_PARAMETERS];
+    uint64_t parameterStructTypes[COMPILER_MAX_PARAMETERS];
     SourceLocation location;
 };
 
@@ -291,6 +344,7 @@ struct FunctionDeclaration {
     bool usesAppContext;
     uint8_t reserved;
     ParameterKind parameterKinds[COMPILER_MAX_PARAMETERS];
+    uint64_t parameterStructTypes[COMPILER_MAX_PARAMETERS];
     SourceLocation location;
 };
 
@@ -308,10 +362,14 @@ struct GlobalSymbolIR {
     uint32_t moduleDataOffset;
     uint32_t size;
     uint32_t alignment;
+    uint16_t structTypeIndex;
+    uint16_t reservedStruct;
+    uint64_t structTypeIdentity;
     SourceLocation location;
 };
 
 struct TranslationUnitIR {
+    uint32_t structTypeCount;
     uint32_t functionCount;
     uint32_t globalCount;
     uint16_t entryFunction;
@@ -324,6 +382,10 @@ struct TranslationUnitIR {
     GlobalSymbolIR globals[COMPILER_MAX_GLOBALS];
     bool callGraph[COMPILER_MAX_FUNCTIONS][COMPILER_MAX_FUNCTIONS];
     bool recursiveFunction[COMPILER_MAX_FUNCTIONS];
+    // Struct descriptors are held in the parser-owned bounded arena. The
+    // pointer keeps the already-large fixed FunctionIR arena stack-safe for
+    // host proofs; compiled modules take an owning copy.
+    StructTypeIR* structTypes;
 };
 
 enum class RelocationKind : uint8_t {
@@ -336,11 +398,17 @@ enum class SymbolKind : uint8_t {
     Function,
     Data,
     DataArray,
+    DataStruct,
 };
 
 inline bool symbol_is_data(SymbolKind kind)
 {
-    return kind == SymbolKind::Data || kind == SymbolKind::DataArray;
+    return kind == SymbolKind::Data || kind == SymbolKind::DataArray || kind == SymbolKind::DataStruct;
+}
+
+inline bool parameter_kind_is_pointer(ParameterKind kind)
+{
+    return kind == ParameterKind::Int32Pointer || kind == ParameterKind::StructPointer;
 }
 
 struct RelocationRecord {
@@ -366,6 +434,9 @@ struct ExportSymbol {
     bool isEntry;
     uint8_t reserved;
     ParameterKind parameterKinds[COMPILER_MAX_PARAMETERS];
+    uint64_t parameterStructTypes[COMPILER_MAX_PARAMETERS];
+    char structTypeName[COMPILER_FUNCTION_NAME_CAPACITY];
+    uint64_t structTypeIdentity;
     SourceLocation location;
 };
 
@@ -379,6 +450,9 @@ struct ImportSymbol {
     uint16_t elementCount;
     uint16_t elementSize;
     ParameterKind parameterKinds[COMPILER_MAX_PARAMETERS];
+    uint64_t parameterStructTypes[COMPILER_MAX_PARAMETERS];
+    char structTypeName[COMPILER_FUNCTION_NAME_CAPACITY];
+    uint64_t structTypeIdentity;
     SourceLocation location;
 };
 
@@ -413,7 +487,8 @@ struct CompiledModule {
     bool callGraph[COMPILER_MAX_FUNCTIONS][COMPILER_MAX_FUNCTIONS];
     uint64_t sourceHash;
     uint16_t recursiveSccCount;
-    uint16_t reserved;
+    uint16_t structTypeCount;
+    StructTypeIR structTypes[COMPILER_MAX_STRUCT_TYPES];
 };
 
 struct GlobalFunctionSymbol {
@@ -422,6 +497,9 @@ struct GlobalFunctionSymbol {
     uint16_t moduleIndex;
     uint16_t parameterCount;
     ParameterKind parameterKinds[COMPILER_MAX_PARAMETERS];
+    uint64_t parameterStructTypes[COMPILER_MAX_PARAMETERS];
+    char structTypeName[COMPILER_FUNCTION_NAME_CAPACITY];
+    uint64_t structTypeIdentity;
     uint32_t moduleCodeOffset;
     uint32_t finalCodeOffset;
     uint32_t moduleDataOffset;
@@ -436,6 +514,9 @@ struct GlobalFunctionSymbol {
 
 struct LinkedProgram {
     uint32_t moduleCount;
+    uint16_t structTypeCount;
+    uint16_t reservedStructTypes;
+    StructTypeIR structTypes[COMPILER_MAX_STRUCT_TYPES];
     uint32_t codeBytes;
     uint8_t code[COMPILER_MAX_LINKED_CODE_BYTES];
     uint32_t dataBytes;

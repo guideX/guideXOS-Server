@@ -33,6 +33,7 @@ static bool text_equals(const char* source, uint32_t offset, uint32_t length, co
 static TokenKind identifier_kind(const char* source, uint32_t offset, uint32_t length)
 {
     if (text_equals(source, offset, length, "int")) return TokenKind::KeywordInt;
+    if (text_equals(source, offset, length, "struct")) return TokenKind::KeywordStruct;
     if (text_equals(source, offset, length, "gx_main")) return TokenKind::KeywordGxMain;
     if (text_equals(source, offset, length, "gx_app_context")) return TokenKind::KeywordGxAppContext;
     if (text_equals(source, offset, length, "void")) return TokenKind::KeywordVoid;
@@ -89,6 +90,7 @@ const char* token_kind_name(TokenKind kind)
         case TokenKind::Integer: return "integer-literal";
         case TokenKind::StringLiteral: return "string-literal";
         case TokenKind::KeywordInt: return "'int'";
+        case TokenKind::KeywordStruct: return "'struct'";
         case TokenKind::KeywordGxMain: return "'gx_main'";
         case TokenKind::KeywordGxAppContext: return "'gx_app_context'";
         case TokenKind::KeywordVoid: return "'void'";
@@ -120,6 +122,8 @@ const char* token_kind_name(TokenKind kind)
         case TokenKind::LeftBracket: return "'['";
         case TokenKind::RightBracket: return "']'";
         case TokenKind::Ampersand: return "'&'";
+        case TokenKind::Dot: return "'.'";
+        case TokenKind::Arrow: return "'->'";
         default: return "unknown";
     }
 }
@@ -252,7 +256,11 @@ bool lex_source(const char* source, uint32_t sourceLength, Token* tokens,
             case '{': kind = TokenKind::LeftBrace; break;
             case '}': kind = TokenKind::RightBrace; break;
             case ';': kind = TokenKind::Semicolon; break;
-            case '-': kind = TokenKind::Minus; break;
+            case '-':
+                if (index + 1 < sourceLength && source[index + 1] == '>') {
+                    kind = TokenKind::Arrow; tokenLength = 2;
+                } else kind = TokenKind::Minus;
+                break;
             case '+': kind = TokenKind::Plus; break;
             case '=':
                 if (index + 1 < sourceLength && source[index + 1] == '=') {
@@ -288,6 +296,7 @@ bool lex_source(const char* source, uint32_t sourceLength, Token* tokens,
                     kind = TokenKind::Ampersand;
                 }
                 break;
+            case '.': kind = TokenKind::Dot; break;
             case '|':
                 if (index + 1 < sourceLength && source[index + 1] == '|') {
                     kind = TokenKind::LogicalOr; tokenLength = 2;

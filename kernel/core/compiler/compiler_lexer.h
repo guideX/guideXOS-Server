@@ -18,6 +18,7 @@ enum class TokenKind : uint8_t {
     Integer,
     StringLiteral,
     KeywordInt,
+    KeywordStruct,
     KeywordGxMain,
     KeywordGxAppContext,
     KeywordVoid,
@@ -49,6 +50,8 @@ enum class TokenKind : uint8_t {
     LeftBracket,
     RightBracket,
     Ampersand,
+    Dot,
+    Arrow,
 };
 
 struct Token {

@@ -1,0 +1,13 @@
+{
+  "formatVersion": 1,
+  "projectId": "dev.guidexos.phase27t",
+  "displayName": "Phase 27T Struct Field Addressing",
+  "projectKind": "native-gui-application",
+  "defaultTargetProfile": "guidexos.amd64.baremetal.bootstrap.native",
+  "sourceRoot": "src",
+  "applicationManifest": "app/app.json",
+  "entryPoint": "gx_main",
+  "abi": "guidexos-c-abi-v1",
+  "architecture": "amd64",
+  "outputName": "p27t"
+}

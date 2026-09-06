@@ -45,6 +45,17 @@ static bool range_valid(uint32_t offset, uint32_t width, uint32_t size)
     return offset <= size && width <= size - offset;
 }
 
+static bool valid_data_signature(SymbolKind kind, uint16_t elementCount, uint16_t elementSize,
+                                 uint32_t size, uint32_t alignment, uint64_t structTypeIdentity)
+{
+    if (kind == SymbolKind::DataStruct)
+        return elementCount == 1 && elementSize == size && size != 0 && size <= COMPILER_MAX_STRUCT_BYTES &&
+            alignment == 4 && structTypeIdentity != 0;
+    return (kind == SymbolKind::Data || kind == SymbolKind::DataArray) && elementCount != 0 &&
+        elementCount <= COMPILER_MAX_ARRAY_ELEMENTS && elementSize == 4 &&
+        size == static_cast<uint32_t>(elementCount) * elementSize && alignment == 4;
+}
+
 static uint64_t hash_bytes_with_zero_checksum(const uint8_t* bytes, uint32_t count)
 {
     uint64_t hash = 1469598103934665603ULL;
@@ -154,6 +165,50 @@ static bool read_fixed_name(Reader& reader, char* output, uint32_t capacity)
     return valid_name(output, capacity);
 }
 
+static bool read_optional_name(Reader& reader, char* output, uint32_t capacity)
+{
+    if (!reader.bytes(reinterpret_cast<uint8_t*>(output), capacity)) return false;
+    if (output[0] == '\0') {
+        for (uint32_t i = 1; i < capacity; ++i)
+            if (output[i] != '\0') return false;
+        return true;
+    }
+    return valid_name(output, capacity);
+}
+
+static void write_struct_type(Writer& writer, const StructTypeIR& type)
+{
+    write_fixed_name(writer, type.name, sizeof(type.name));
+    writer.u16(type.fieldCount); writer.u16(0);
+    writer.u32(type.sizeBytes); writer.u32(type.alignment); writer.u64(type.identity);
+    for (uint32_t i = 0; i < type.fieldCount; ++i) {
+        const StructFieldIR& field = type.fields[i];
+        write_fixed_name(writer, field.name, sizeof(field.name));
+        writer.u8(static_cast<uint8_t>(field.kind)); writer.u8(0);
+        writer.u16(field.elementCount); writer.u16(field.elementSize);
+        writer.u32(field.offset); writer.u32(field.sizeBytes); writer.u32(field.alignment);
+    }
+}
+
+static bool read_struct_type(Reader& reader, StructTypeIR& type)
+{
+    type = {};
+    if (!read_fixed_name(reader, type.name, sizeof(type.name))) return false;
+    type.fieldCount = reader.u16(); (void)reader.u16();
+    if (type.fieldCount > COMPILER_MAX_STRUCT_FIELDS) return false;
+    type.sizeBytes = reader.u32(); type.alignment = reader.u32(); type.identity = reader.u64();
+    for (uint32_t i = 0; i < type.fieldCount; ++i) {
+        StructFieldIR& field = type.fields[i];
+        if (!read_fixed_name(reader, field.name, sizeof(field.name))) return false;
+        const uint8_t kind = reader.u8(); (void)reader.u8();
+        if (kind > static_cast<uint8_t>(StructFieldKind::Int32)) return false;
+        field.kind = static_cast<StructFieldKind>(kind);
+        field.elementCount = reader.u16(); field.elementSize = reader.u16();
+        field.offset = reader.u32(); field.sizeBytes = reader.u32(); field.alignment = reader.u32();
+    }
+    return reader.ok();
+}
+
 static void write_export(Writer& writer, const ExportSymbol& symbol)
 {
     writer.u8(static_cast<uint8_t>(symbol.kind));
@@ -166,6 +221,10 @@ static void write_export(Writer& writer, const ExportSymbol& symbol)
     writer.u16(symbol.parameterCount); writer.u16(0);
     for (uint32_t i = 0; i < COMPILER_MAX_PARAMETERS; ++i)
         writer.u8(static_cast<uint8_t>(symbol.parameterKinds[i]));
+    for (uint32_t i = 0; i < COMPILER_MAX_PARAMETERS; ++i)
+        writer.u64(symbol.parameterStructTypes[i]);
+    write_fixed_name(writer, symbol.structTypeName, sizeof(symbol.structTypeName));
+    writer.u64(symbol.structTypeIdentity);
     write_location(writer, symbol.location);
 }
 
@@ -175,7 +234,7 @@ static bool read_export(Reader& reader, ExportSymbol& symbol)
     const uint8_t kind = reader.u8();
     const uint8_t entry = reader.u8();
     (void)reader.u16();
-    if (kind > static_cast<uint8_t>(SymbolKind::DataArray) || entry > 1 ||
+    if (kind > static_cast<uint8_t>(SymbolKind::DataStruct) || entry > 1 ||
         !read_fixed_name(reader, symbol.name, sizeof(symbol.name))) return false;
     symbol.kind = static_cast<SymbolKind>(kind); symbol.isEntry = entry != 0;
     symbol.moduleCodeOffset = reader.u32(); symbol.moduleDataOffset = reader.u32();
@@ -184,9 +243,13 @@ static bool read_export(Reader& reader, ExportSymbol& symbol)
     symbol.parameterCount = reader.u16(); (void)reader.u16();
     for (uint32_t i = 0; i < COMPILER_MAX_PARAMETERS; ++i) {
         const uint8_t parameterKind = reader.u8();
-        if (parameterKind > static_cast<uint8_t>(ParameterKind::AppContextPointer)) return false;
+        if (parameterKind > static_cast<uint8_t>(ParameterKind::StructPointer)) return false;
         symbol.parameterKinds[i] = static_cast<ParameterKind>(parameterKind);
     }
+    for (uint32_t i = 0; i < COMPILER_MAX_PARAMETERS; ++i)
+        symbol.parameterStructTypes[i] = reader.u64();
+    if (!read_optional_name(reader, symbol.structTypeName, sizeof(symbol.structTypeName))) return false;
+    symbol.structTypeIdentity = reader.u64();
     symbol.location = read_location(reader);
     return reader.ok();
 }
@@ -200,6 +263,10 @@ static void write_import(Writer& writer, const ImportSymbol& symbol)
     writer.u16(symbol.elementCount); writer.u16(symbol.elementSize);
     for (uint32_t i = 0; i < COMPILER_MAX_PARAMETERS; ++i)
         writer.u8(static_cast<uint8_t>(symbol.parameterKinds[i]));
+    for (uint32_t i = 0; i < COMPILER_MAX_PARAMETERS; ++i)
+        writer.u64(symbol.parameterStructTypes[i]);
+    write_fixed_name(writer, symbol.structTypeName, sizeof(symbol.structTypeName));
+    writer.u64(symbol.structTypeIdentity);
     write_location(writer, symbol.location);
 }
 
@@ -207,7 +274,7 @@ static bool read_import(Reader& reader, ImportSymbol& symbol)
 {
     symbol = {};
     const uint8_t kind = reader.u8(); (void)reader.u8(); (void)reader.u16();
-    if (kind > static_cast<uint8_t>(SymbolKind::DataArray) ||
+    if (kind > static_cast<uint8_t>(SymbolKind::DataStruct) ||
         !read_fixed_name(reader, symbol.name, sizeof(symbol.name))) return false;
     symbol.kind = static_cast<SymbolKind>(kind);
     symbol.expectedParameterCount = reader.u16(); (void)reader.u16();
@@ -215,9 +282,13 @@ static bool read_import(Reader& reader, ImportSymbol& symbol)
     symbol.elementCount = reader.u16(); symbol.elementSize = reader.u16();
     for (uint32_t i = 0; i < COMPILER_MAX_PARAMETERS; ++i) {
         const uint8_t parameterKind = reader.u8();
-        if (parameterKind > static_cast<uint8_t>(ParameterKind::AppContextPointer)) return false;
+        if (parameterKind > static_cast<uint8_t>(ParameterKind::StructPointer)) return false;
         symbol.parameterKinds[i] = static_cast<ParameterKind>(parameterKind);
     }
+    for (uint32_t i = 0; i < COMPILER_MAX_PARAMETERS; ++i)
+        symbol.parameterStructTypes[i] = reader.u64();
+    if (!read_optional_name(reader, symbol.structTypeName, sizeof(symbol.structTypeName))) return false;
+    symbol.structTypeIdentity = reader.u64();
     symbol.location = read_location(reader);
     return reader.ok();
 }
@@ -314,7 +385,14 @@ bool serialize_gxo_object(const CompiledModule& module,
         module.dataBytes > COMPILER_MAX_LINKED_DATA_BYTES || module.mutableDataBytes > COMPILER_MAX_LINKED_DATA_BYTES ||
         module.functionCount > COMPILER_MAX_FUNCTIONS || module.globalCount > COMPILER_MAX_GLOBALS ||
         module.exportCount > COMPILER_MAX_MODULE_SYMBOLS || module.importCount > COMPILER_MAX_MODULE_SYMBOLS ||
-        module.relocationCount > COMPILER_MAX_MODULE_RELOCATIONS || module.recursiveSccCount > COMPILER_MAX_FUNCTIONS) return false;
+        module.relocationCount > COMPILER_MAX_MODULE_RELOCATIONS || module.recursiveSccCount > COMPILER_MAX_FUNCTIONS ||
+        module.structTypeCount > COMPILER_MAX_STRUCT_TYPES) return false;
+    for (uint32_t i = 0; i < module.structTypeCount; ++i) {
+        if (!valid_name(module.structTypes[i].name, sizeof(module.structTypes[i].name)) ||
+            module.structTypes[i].fieldCount == 0 || module.structTypes[i].fieldCount > COMPILER_MAX_STRUCT_FIELDS ||
+            module.structTypes[i].sizeBytes == 0 || module.structTypes[i].sizeBytes > COMPILER_MAX_STRUCT_BYTES ||
+            module.structTypes[i].alignment == 0) return false;
+    }
     for (uint32_t i = 0; i < module.functionCount; ++i)
         if (module.localStorageBytes[i] > COMPILER_MAX_LOCAL_STORAGE_BYTES) return false;
     const uint32_t sourcePathBytes = text_length(module.sourcePath, sizeof(module.sourcePath));
@@ -345,6 +423,8 @@ bool serialize_gxo_object(const CompiledModule& module,
     for (uint32_t i = 0; i < module.functionCount; ++i) writer.u32(module.localStorageBytes[i]);
     for (uint32_t i = 0; i < module.functionCount; ++i)
         for (uint32_t j = 0; j < module.functionCount; ++j) writer.u8(module.callGraph[i][j] ? 1 : 0);
+    writer.u16(module.structTypeCount); writer.u16(0);
+    for (uint32_t i = 0; i < module.structTypeCount; ++i) write_struct_type(writer, module.structTypes[i]);
     writer.bytes(module.code, module.codeBytes); writer.bytes(module.data, module.dataBytes);
     writer.bytes(module.mutableData, module.mutableDataBytes);
     for (uint32_t i = 0; i < module.exportCount; ++i) write_export(writer, module.exports[i]);
@@ -406,6 +486,21 @@ bool deserialize_gxo_object(const uint8_t* bytes, uint32_t byteCount,
         }
     }
     if (edgeCount != header.callGraphEdgeCount || edgeCount > COMPILER_MAX_CALL_GRAPH_EDGES ||
+        !reader.ok()) {
+        diagnostics.error({0, 1, 1}, "GXO call graph or struct metadata is truncated", "object"); return false;
+    }
+    module->structTypeCount = reader.u16(); (void)reader.u16();
+    if (module->structTypeCount > COMPILER_MAX_STRUCT_TYPES) {
+        diagnostics.error({0, 1, 1}, "GXO struct type count is out of bounds", "object"); return false;
+    }
+    for (uint32_t i = 0; i < module->structTypeCount; ++i) {
+        if (!read_struct_type(reader, module->structTypes[i]) ||
+            module->structTypes[i].fieldCount == 0 || module->structTypes[i].sizeBytes == 0 ||
+            module->structTypes[i].sizeBytes > COMPILER_MAX_STRUCT_BYTES || module->structTypes[i].alignment == 0) {
+            diagnostics.error({0, 1, 1}, "GXO struct type metadata is malformed", "object"); return false;
+        }
+    }
+    if (!reader.ok() ||
         !reader.bytes(module->code, module->codeBytes) || !reader.bytes(module->data, module->dataBytes) ||
         !reader.bytes(module->mutableData, module->mutableDataBytes)) {
         diagnostics.error({0, 1, 1}, "GXO payload is truncated", "object"); return false;
@@ -414,9 +509,8 @@ bool deserialize_gxo_object(const uint8_t* bytes, uint32_t byteCount,
         if (!read_export(reader, module->exports[i])) { diagnostics.error({0, 1, 1}, "GXO export table is malformed", "object"); return false; }
         const ExportSymbol& symbol = module->exports[i];
         if ((symbol.kind == SymbolKind::Function && (symbol.moduleCodeOffset >= module->codeBytes || symbol.parameterCount > COMPILER_MAX_PARAMETERS)) ||
-            (symbol_is_data(symbol.kind) && (symbol.elementCount == 0 || symbol.elementCount > COMPILER_MAX_ARRAY_ELEMENTS ||
-                symbol.elementSize != 4 || symbol.size != static_cast<uint32_t>(symbol.elementCount) * symbol.elementSize ||
-                symbol.alignment != 4 ||
+            (symbol_is_data(symbol.kind) && (!valid_data_signature(symbol.kind, symbol.elementCount, symbol.elementSize,
+                symbol.size, symbol.alignment, symbol.structTypeIdentity) ||
                 !range_valid(symbol.moduleDataOffset, symbol.size, module->mutableDataBytes)))) {
             diagnostics.error(symbol.location, "GXO export offset or signature is out of bounds", "object"); return false;
         }
@@ -427,10 +521,9 @@ bool deserialize_gxo_object(const uint8_t* bytes, uint32_t byteCount,
             diagnostics.error(module->imports[i].location, "GXO import signature is out of bounds", "object"); return false;
         }
         if (symbol_is_data(module->imports[i].kind) &&
-            (module->imports[i].elementCount == 0 || module->imports[i].elementCount > COMPILER_MAX_ARRAY_ELEMENTS ||
-             module->imports[i].elementSize != 4 ||
-             module->imports[i].size != static_cast<uint32_t>(module->imports[i].elementCount) * module->imports[i].elementSize ||
-             module->imports[i].alignment != 4)) {
+            !valid_data_signature(module->imports[i].kind, module->imports[i].elementCount,
+                module->imports[i].elementSize, module->imports[i].size, module->imports[i].alignment,
+                module->imports[i].structTypeIdentity)) {
             diagnostics.error(module->imports[i].location, "GXO data import signature is malformed", "object"); return false;
         }
     }

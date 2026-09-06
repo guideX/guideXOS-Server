@@ -111,9 +111,12 @@ static bool append_global_import(CompiledModule* module, const TranslationUnitIR
             return false;
         }
         const GlobalSymbolIR& global = unit.globals[globalIndex];
-        if (module->imports[existing].elementCount != global.elementCount ||
+        if (module->imports[existing].kind != (global.kind == StorageKind::ArrayInt ? SymbolKind::DataArray :
+                                               global.kind == StorageKind::Struct ? SymbolKind::DataStruct : SymbolKind::Data) ||
+            module->imports[existing].elementCount != global.elementCount ||
             module->imports[existing].elementSize != global.elementSize ||
-            module->imports[existing].size != global.size) {
+            module->imports[existing].size != global.size ||
+            module->imports[existing].structTypeIdentity != global.structTypeIdentity) {
             diagnostics.error_identifier(location, "conflicting declaration for global ",
                                          name, name_length(name), "global");
             return false;
@@ -129,11 +132,16 @@ static bool append_global_import(CompiledModule* module, const TranslationUnitIR
     importSymbol.kind = SymbolKind::Data;
     if (!copy_string(importSymbol.name, sizeof(importSymbol.name), name)) return false;
     const GlobalSymbolIR& global = unit.globals[globalIndex];
-    importSymbol.kind = global.kind == StorageKind::ArrayInt ? SymbolKind::DataArray : SymbolKind::Data;
+    importSymbol.kind = global.kind == StorageKind::ArrayInt ? SymbolKind::DataArray :
+        global.kind == StorageKind::Struct ? SymbolKind::DataStruct : SymbolKind::Data;
     importSymbol.elementCount = global.elementCount;
     importSymbol.elementSize = global.elementSize;
     importSymbol.size = global.size;
-    importSymbol.alignment = 4;
+    importSymbol.alignment = global.alignment;
+    importSymbol.structTypeIdentity = global.structTypeIdentity;
+    if (global.kind == StorageKind::Struct && global.structTypeIndex < unit.structTypeCount)
+        copy_string(importSymbol.structTypeName, sizeof(importSymbol.structTypeName),
+                    unit.structTypes[global.structTypeIndex].name);
     importSymbol.location = location;
     return true;
 }
@@ -147,13 +155,14 @@ static bool flatten_global_data(TranslationUnitIR& unit, CompiledModule* module,
         GlobalSymbolIR& global = unit.globals[i];
         if (!global.isDefinition) continue;
         if ((offset & 3U) != 0) offset = (offset + 3U) & ~3U;
-        if (global.elementCount == 0 || global.elementSize != 4 ||
-            global.size != static_cast<uint32_t>(global.elementCount) * global.elementSize ||
-            global.size > sizeof(module->mutableData) - offset) {
+        if (global.elementCount == 0 || global.size == 0 ||
+            global.size > sizeof(module->mutableData) - offset ||
+            (global.kind != StorageKind::Struct && (global.elementSize != 4 ||
+             global.size != static_cast<uint32_t>(global.elementCount) * global.elementSize))) {
             diagnostics.error(global.location, "mutable global data capacity exceeded", "global");
             return false;
         }
-        for (uint32_t element = 0; element < global.elementCount; ++element) {
+        for (uint32_t element = 0; global.kind != StorageKind::Struct && element < global.elementCount; ++element) {
             const int32_t initial = global.kind == StorageKind::ArrayInt
                 ? global.initialValues[element] : global.initialValue;
             const uint32_t value = static_cast<uint32_t>(initial);
@@ -204,6 +213,9 @@ bool compile_module_from_source(const char* sourcePath,
         return false;
 
     module->tokenCount = tokenCount;
+    module->structTypeCount = static_cast<uint16_t>(s_unit.structTypeCount);
+    for (uint32_t i = 0; i < s_unit.structTypeCount; ++i)
+        module->structTypes[i] = s_unit.structTypes[i];
     module->functionCount = s_unit.functionCount;
     module->globalCount = s_unit.globalCount;
     module->recursiveSccCount = s_unit.recursiveSccCount;
@@ -253,8 +265,10 @@ bool compile_module_from_source(const char* sourcePath,
         if (!copy_string(exportSymbol.name, sizeof(exportSymbol.name), function.name)) return false;
         exportSymbol.moduleCodeOffset = function.codeOffset;
         exportSymbol.parameterCount = function.parameterCount;
-        for (uint32_t p = 0; p < function.parameterCount; ++p)
+        for (uint32_t p = 0; p < function.parameterCount; ++p) {
             exportSymbol.parameterKinds[p] = function.parameters[p].kind;
+            exportSymbol.parameterStructTypes[p] = function.parameters[p].structTypeIdentity;
+        }
         exportSymbol.isEntry = module->hasEntry && i == s_unit.entryFunction;
         exportSymbol.location = function.location;
     }
@@ -267,13 +281,18 @@ bool compile_module_from_source(const char* sourcePath,
         }
         ExportSymbol& exportSymbol = module->exports[module->exportCount++];
         exportSymbol = {};
-        exportSymbol.kind = global.kind == StorageKind::ArrayInt ? SymbolKind::DataArray : SymbolKind::Data;
+        exportSymbol.kind = global.kind == StorageKind::ArrayInt ? SymbolKind::DataArray :
+            global.kind == StorageKind::Struct ? SymbolKind::DataStruct : SymbolKind::Data;
         if (!copy_string(exportSymbol.name, sizeof(exportSymbol.name), global.name)) return false;
         exportSymbol.moduleDataOffset = global.moduleDataOffset;
         exportSymbol.size = global.size;
-        exportSymbol.alignment = 4;
+        exportSymbol.alignment = global.alignment;
         exportSymbol.elementCount = global.elementCount;
         exportSymbol.elementSize = global.elementSize;
+        exportSymbol.structTypeIdentity = global.structTypeIdentity;
+        if (global.kind == StorageKind::Struct && global.structTypeIndex < s_unit.structTypeCount)
+            copy_string(exportSymbol.structTypeName, sizeof(exportSymbol.structTypeName),
+                        s_unit.structTypes[global.structTypeIndex].name);
         exportSymbol.location = global.location;
     }
     for (uint32_t i = 0; i < s_unit.functionCount; ++i) {
@@ -285,7 +304,8 @@ bool compile_module_from_source(const char* sourcePath,
             if (existing >= 0) {
                 bool sameSignature = module->imports[existing].expectedParameterCount == call.expectedParameterCount;
                 for (uint32_t p = 0; sameSignature && p < call.expectedParameterCount; ++p)
-                    sameSignature = module->imports[existing].parameterKinds[p] == call.expectedParameterKinds[p];
+                    sameSignature = module->imports[existing].parameterKinds[p] == call.expectedParameterKinds[p] &&
+                        module->imports[existing].parameterStructTypes[p] == call.expectedParameterStructTypes[p];
                 if (!sameSignature) {
                     diagnostics.error_identifier(call.location, "conflicting declaration for function ",
                                                   call.calleeName, name_length(call.calleeName), "function");
@@ -302,8 +322,10 @@ bool compile_module_from_source(const char* sourcePath,
             importSymbol.kind = SymbolKind::Function;
             if (!copy_string(importSymbol.name, sizeof(importSymbol.name), call.calleeName)) return false;
             importSymbol.expectedParameterCount = call.expectedParameterCount;
-            for (uint32_t p = 0; p < call.expectedParameterCount; ++p)
+            for (uint32_t p = 0; p < call.expectedParameterCount; ++p) {
                 importSymbol.parameterKinds[p] = call.expectedParameterKinds[p];
+                importSymbol.parameterStructTypes[p] = call.expectedParameterStructTypes[p];
+            }
             importSymbol.location = call.location;
         }
     }
@@ -312,7 +334,9 @@ bool compile_module_from_source(const char* sourcePath,
         for (uint32_t e = 0; e < function.expressionCount; ++e) {
             const Expression& expression = function.expressions[e];
             const bool globalLoad = expression.kind == ExpressionKind::LoadGlobal ||
-                expression.kind == ExpressionKind::AddressOfGlobal;
+                expression.kind == ExpressionKind::AddressOfGlobal ||
+                expression.kind == ExpressionKind::LoadStructAddressGlobal ||
+                expression.kind == ExpressionKind::AddressOfStructGlobal;
             const bool indexedLoad = (expression.kind == ExpressionKind::LoadIndexed ||
                                       expression.kind == ExpressionKind::AddressOfIndexed) &&
                 expression.indexedBaseKind == IndexedBaseKind::Global;
