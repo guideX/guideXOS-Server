@@ -2086,6 +2086,88 @@ These limitations do not create a mandatory visual blocker for v0.3. The recomme
 
 Implementation commit subject: `Polish Sci-Fi visual consistency`; the exact SHA and final divergence are recorded in the final handoff. Nothing was pushed during Phase 10H.
 
+## Phase 10I - Icon Legibility and Visual Evidence Closeout
+
+### Starting state and bounded objective
+
+Phase 10I began on 2026-09-06 from the Phase 10H release-ready closeout:
+
+* Repository: `D:\dev\guideXOSServerV0.3_SCI_FI_THEME`
+* Branch: `v0.3_SCI_FI_THEME`
+* Starting HEAD: `062efb8e4aee9fa53a5f2145ffa7865ffbbea418` (`Polish Sci-Fi visual consistency`)
+* Baseline commit present in history: yes
+* Upstream: `origin/v0.3_SCI_FI_THEME`
+* Starting worktree: clean; no staged or untracked files
+* Starting divergence: `0 ahead / 0 behind`; the Phase 10H commit had been pushed since the earlier closeout note
+
+The pass was intentionally limited to icon legibility, evidence review, screenshot-friendly presentation, and obvious high-visibility leaks. It did not reopen the theme architecture or add application functionality.
+
+### Starting audit
+
+The existing icon-bearing surfaces were traced through the current shared paths:
+
+* Desktop icons and hosted/bare-metal desktop frames
+* Start-menu application, place, footer, selected, hover, and fallback icons
+* Taskbar application buttons and system/status indicators
+* File Explorer navigation, drive, folder, file, and toolbar icons
+* Navigator's existing toolbar glyphs
+* Task Manager, Device Manager, Disk Manager, Network, Trash, Control Panel, and common dialog utility surfaces
+* Window close, minimize, maximize/restore, and tombstone glyphs
+
+The audit classified potential issues as asset readability, surrounding contrast, frame strength, tint compatibility, Classic leakage, duplicate treatment, or unrelated asset quality. Existing evidence and source review found no release-significant icon defect in those categories. The Flat manifest remains shared through `IconThemeManager`; desktop and Start icon consumers use the existing logical names and fallback path, and File Explorer/Trash continue to use the same shared provider. No raw asset was replaced and no icon-specific Sci-Fi palette was invented.
+
+### Icon audit result
+
+* Desktop icons: existing images remain recognizable; labels remain readable; selected desktop treatment is visible without overpowering the image; Sci-Fi frames use the existing shared control-border relationship.
+* Start: application/place icons remain readable on normal, hover, and selected rows; fallback squares remain bounded and visible when an asset is unavailable; footer/action geometry and launch semantics are unchanged.
+* Taskbar: active/minimized task indicators, clock/date, and network/status indicators remain visible against the Sci-Fi taskbar surface. No taskbar behavior changed.
+* Navigator: existing Back, Forward, Reload/Stop, Home, Bookmarks, and Add glyphs remain readable in the themed toolbar. No navigation or toolbar geometry changed.
+* Utilities: File Explorer, Task Manager, Device Manager, Disk Manager, Network, Trash, and Control Panel retain readable icons or glyphs in representative existing evidence. No universal utility-asset replacement was justified.
+* Window controls: close, minimize, maximize/restore, and tombstone glyphs remain legible in active Sci-Fi chrome. Hover/pressed close treatment remains restrained and hit testing is unchanged.
+
+No targeted visual fix was required. This is deliberate: the audit did not find a clearly visible, low-risk, theme-related defect worth destabilizing the release for. Phase 10I therefore made no production rendering or asset changes. In particular, it did not add a `SciFiIconTheme`, theme-specific registry, giant recoloring path, vector icon engine, or new application icon set.
+
+### Evidence and screenshot set
+
+The existing evidence was reviewed as a presentation set and remains ignored/local under `logs/`:
+
+* Sci-Fi desktop/taskbar and Start: `logs/phase7a-qemu/phase7a-scifi-vga.png`, `logs/phase7a-qemu/phase7a-scifi-start-menu.png`, and the fuller Start sequence under `logs/phase7c-qemu/final-scifi-20260823-150652/`.
+* Sci-Fi multi-window shell: `logs/phase7b-qemu/scifi-20260823-125702-two-windows-after-drag.png` and the matching focus captures.
+* Sci-Fi File Explorer: `logs/phase8b-qemu-scifi-file-explorer.png`, `logs/phase8b-qemu-scifi-file-selected.png`, and `logs/phase8b-qemu-scifi-reopened.png`.
+* Sci-Fi Navigator, Task Manager, Disk Manager, Trash, and network/settings surfaces: retained hosted/source/runtime evidence from Phases 9B/10B-10G, plus the representative local images and serial logs already recorded by those phases.
+* Classic comparison: `logs/phase7c-qemu/final-classic-20260823-150553/`, `logs/phase8b-qemu-classic-apps.png`, and `logs/phase8b-qemu-classic-file-explorer.png`.
+* Fresh Phase 10I startup proof: `logs/desktop-startup-sync-20260906-130618.serial.log` passed Classic and `logs/desktop-startup-sync-20260906-130724.serial.log` passed Sci-Fi. The earlier Sci-Fi attempt at `logs/desktop-startup-sync-20260906-130656.serial.log` ended before producing serial output; the clean retry passed and no product defect was found.
+
+The authoritative theme smoke was extended with bounded Phase 10I source/documentation checks for the shared icon manifest, desktop/Start/File Explorer consumers, the icon audit record, screenshot evidence, Classic comparison, and the freeze decision. No production screenshot framework was added because the existing retained compositor/QEMU path does not safely expose every application surface for deterministic app-by-app capture. The safe manual procedure remains: boot a disposable/staged ESP, select `desktopThemeId=classic` or `scifi`, wait for the desktop marker, launch one existing application, capture through the existing QMP/VGA path, and remove the staged ESP/evidence scratch after review.
+
+### Classic comparison
+
+Classic remains the default and remains the compatibility baseline. Missing, invalid, explicit Classic, and persisted Classic configuration continue to resolve to Classic. The Phase 10I audit found no shared icon or frame change that degraded Classic; because no production icon fix was made, Classic rendering is unchanged by this phase. Existing Classic Start, File Explorer, Calculator/Notepad, taskbar, and window-chrome evidence remains valid.
+
+### Validation and limitations
+
+The hosted and bare-metal validation targets remain the established Phase 10H set. Fresh Phase 10I validation passed `build.bat`, `mingw32-make -C kernel ARCH=amd64 -j2`, `build.ps1 -Arch amd64`, the focused desktop-control-theme test, `smoke-theme-system.ps1 -SkipBuild`, startup/app-model regression, desktop startup sync for Classic and Sci-Fi, live-directory desktop status, hosted display runtime, bootinfo framebuffer, Virtio GPU input routing, the build-wrapper self-test, and `git diff --check`. Startup theme overrides continue to use disposable staged ESP copies, never the workspace ESP as a theme-setting mechanism.
+
+The remaining proof limitations are bounded and already known: generic widget focus is not universally published, retained compositor surfaces are not always independently targetable for direct hosted screenshots, and direct per-utility QEMU launch/capture is partly manual. These limitations do not block icon legibility or the v0.3 presentation result. Wallpaper coupling, blur/glass, transparency, animation, major gradients, shadow rewrite, rounded hit testing, universal icon replacement, and font-engine work remain deferred.
+
+### Release freeze decision
+
+Phase 10I outcome: **Outcome D — no useful production Phase 10I changes required**. The icon audit found acceptable existing legibility and consistency, the representative Classic/Sci-Fi evidence is sufficient for release documentation, and the bounded smoke/documentation checks now record that conclusion. The appropriate release recommendation is **Freeze A — Sci-Fi ready for v0.3 integration**. Sci-Fi development should now be frozen until v0.3 integration; future work should be separately authorized and should not be presented as required pre-release polish.
+
+Recommended public v0.3 screenshot set, based on evidence actually available:
+
+1. Sci-Fi desktop + taskbar: `logs/phase7a-qemu/phase7a-scifi-vga.png`
+2. Sci-Fi Start menu with row state: `logs/phase7c-qemu/final-scifi-20260823-150652/01-start-menu.png` or `05-calculator-hover.png`
+3. Sci-Fi Navigator: retained Navigator capture from the Phase 10B evidence run
+4. Sci-Fi Task Manager: retained Task Manager capture from the Phase 10C evidence run
+5. Sci-Fi Disk Manager: retained Disk Manager capture from the Phase 10E evidence run
+6. Sci-Fi network/settings surface: retained Phase 10F network/settings capture
+7. Sci-Fi Trash or File Explorer: `logs/phase8b-qemu-scifi-file-explorer.png` plus the Phase 10G Trash evidence
+8. Sci-Fi multi-window composition: `logs/phase7b-qemu/scifi-20260823-125702-two-windows-after-drag.png`
+9. Classic control comparison: `logs/phase7c-qemu/final-classic-20260823-150553/01-start-menu.png` or `logs/phase8b-qemu-classic-file-explorer.png`
+
+All listed screenshots/logs remain local ignored evidence and must not be committed as release source. If a public artifact needs stable filenames, copy selected images into the release/evidence process outside this branch rather than changing the product tree.
+
 ## Manual Validation Runbook
 
 * Start the hosted server executable and use `gui.start` to open the compositor.

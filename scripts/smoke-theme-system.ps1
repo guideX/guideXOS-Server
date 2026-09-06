@@ -424,6 +424,17 @@ $phase10HTextParityMatch = Find-RawMatch $compositor 'sciFiTheme \? controlRoles
 $phase10HClassicBoundaryMatch = Find-RawMatch $planDoc 'Classic branches.*?Sci-Fi remains opt-in.*?[Nn]o geometry.*?no input'
 $phase10HFocusLimitMatch = Find-RawMatch $planDoc 'generic widget model.*?universal keyboard-focus field.*?documented limitation'
 $phase10HDeferredEffectsMatch = Find-RawMatch $planDoc 'blur.*?glass.*?animation.*?icon redesign'
+$iconThemeManager = Join-Path $Root "icon_theme_manager.cpp"
+$iconManifestMatch = Find-RawMatch $iconThemeManager 'm_manifest.emplace\("app\.notepad".*?m_manifest.emplace\("trash\.full"'
+$iconConsumerMatch = Find-RawMatch $compositor 'drawStartMenuIcon.*?IconThemeManager.*?drawDesktopThemedIcon.*?IconThemeManager'
+$fileExplorerIconConsumerMatch = Find-RawMatch $fileExplorer 'void FileExplorer::drawIcon.*?IconThemeManager.*?ResolveIconPath'
+$phase10IHeadingMatch = Find-FirstMatch $planDoc '## Phase 10I - Icon Legibility and Visual Evidence Closeout'
+$phase10IAuditMatch = Find-RawMatch $planDoc '## Phase 10I.*?### Starting audit.*?Desktop icons.*?Window close.*?found no release-significant icon defect'
+$phase10IDefectsMatch = Find-RawMatch $planDoc '### Icon audit result.*?No targeted visual fix was required.*?made no production rendering or asset changes'
+$phase10IEvidenceMatch = Find-RawMatch $planDoc '### Evidence and screenshot set.*?phase7c-qemu.*?phase8b-qemu.*?No production screenshot framework was added'
+$phase10IClassicMatch = Find-RawMatch $planDoc '### Classic comparison.*?Classic remains the default.*?Classic rendering is unchanged'
+$phase10IReleaseMatch = Find-RawMatch $planDoc '### Release freeze decision.*?Freeze A.*?Sci-Fi development should now be frozen'
+$phase10INoParallelIconMatch = Find-FirstMatch $planDoc 'did not add a `SciFiIconTheme`'
 
 $checks = @(
     [pscustomobject]@{ Name = "theme header exists"; Pass = (Test-Path -LiteralPath $themeHeader); Match = $null },
@@ -726,7 +737,17 @@ $checks = @(
     [pscustomobject]@{ Name = "phase 10h shell text parity documented"; Pass = $null -ne $phase10HTextParityMatch; Match = $phase10HTextParityMatch },
     [pscustomobject]@{ Name = "phase 10h Classic compatibility boundary documented"; Pass = $null -ne $phase10HClassicBoundaryMatch; Match = $phase10HClassicBoundaryMatch },
     [pscustomobject]@{ Name = "phase 10h focus limitation documented"; Pass = $null -ne $phase10HFocusLimitMatch; Match = $phase10HFocusLimitMatch },
-    [pscustomobject]@{ Name = "phase 10h high-cost effects deferred"; Pass = $null -ne $phase10HDeferredEffectsMatch; Match = $phase10HDeferredEffectsMatch }
+    [pscustomobject]@{ Name = "phase 10h high-cost effects deferred"; Pass = $null -ne $phase10HDeferredEffectsMatch; Match = $phase10HDeferredEffectsMatch },
+    [pscustomobject]@{ Name = "phase 10i shared icon manifest remains bounded"; Pass = $null -ne $iconManifestMatch; Match = $iconManifestMatch },
+    [pscustomobject]@{ Name = "phase 10i desktop and Start icon consumers remain shared"; Pass = $null -ne $iconConsumerMatch; Match = $iconConsumerMatch },
+    [pscustomobject]@{ Name = "phase 10i File Explorer icon consumer remains shared"; Pass = $null -ne $fileExplorerIconConsumerMatch; Match = $fileExplorerIconConsumerMatch },
+    [pscustomobject]@{ Name = "phase 10i heading"; Pass = $null -ne $phase10IHeadingMatch; Match = $phase10IHeadingMatch },
+    [pscustomobject]@{ Name = "phase 10i icon audit documented"; Pass = $null -ne $phase10IAuditMatch; Match = $phase10IAuditMatch },
+    [pscustomobject]@{ Name = "phase 10i icon result and scope documented"; Pass = $null -ne $phase10IDefectsMatch; Match = $phase10IDefectsMatch },
+    [pscustomobject]@{ Name = "phase 10i screenshot evidence documented"; Pass = $null -ne $phase10IEvidenceMatch; Match = $phase10IEvidenceMatch },
+    [pscustomobject]@{ Name = "phase 10i Classic comparison documented"; Pass = $null -ne $phase10IClassicMatch; Match = $phase10IClassicMatch },
+    [pscustomobject]@{ Name = "phase 10i release freeze decision documented"; Pass = $null -ne $phase10IReleaseMatch; Match = $phase10IReleaseMatch },
+    [pscustomobject]@{ Name = "phase 10i no parallel icon subsystem documented"; Pass = $null -ne $phase10INoParallelIconMatch; Match = $phase10INoParallelIconMatch }
 )
 
 $failures = 0
