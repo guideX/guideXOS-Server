@@ -22017,6 +22017,24 @@ guideXosNativeAotC011EC67State() {
 static void guideXosNativeAotC011EC67Put32(const char* name, uint32_t value);
 static void guideXosNativeAotC011EC67Put64(const char* name, uintptr_t value);
 
+#if defined(GUIDEXOS_NATIVEAOT_C011EC83_BASIC_CANONICAL_RANGE_MAPPING)
+extern "C" void __cdecl guideXosNativeAotC011EC83BasicMappingBegin(
+    uint32_t checkpoint, uintptr_t list, uintptr_t expectedCount,
+    uintptr_t basicRegionSize, uintptr_t mappingStart, uintptr_t mappingEnd,
+    uintptr_t mappingEntries);
+extern "C" void __cdecl guideXosNativeAotC011EC83BasicMappingEntry(
+    uint32_t checkpoint, uint32_t ordinal, uintptr_t descriptor,
+    uintptr_t list, uintptr_t rangeStart, uintptr_t rangeEnd,
+    uintptr_t regionSize, uint32_t generation, uint32_t planGeneration,
+    uint32_t state, uintptr_t canonicalDescriptor, uintptr_t canonicalStart,
+    uintptr_t canonicalEnd, uintptr_t canonicalSize, uintptr_t offset,
+    uint32_t lookupStatus, uintptr_t mappingStart, uintptr_t mappingEnd,
+    uintptr_t mappingEntries, uintptr_t expectedCount);
+extern "C" void __cdecl guideXosNativeAotC011EC83BasicMappingEnd(
+    uint32_t checkpoint, uintptr_t observedCount);
+static void guideXosNativeAotC011EC83Emit();
+#endif
+
 #if defined(GUIDEXOS_NATIVEAOT_C011EC80_CANONICAL_REGION_UNIVERSE_SNAPSHOT)
 extern "C" void __cdecl guideXosNativeAotC011EC80SnapshotBegin(
     uint32_t checkpoint, uintptr_t mappingStart, uintptr_t mappingEnd,
@@ -22489,6 +22507,239 @@ static void guideXosNativeAotC011EC80Emit() {
     guideXosNativeAotC011EC67Put32("pageFault", 0u);
     suspendEeSerialPutString(" source=canonical-seg-mapping-table\n");
     lifecycle.completionObserved = 1u;
+}
+#endif
+
+#if defined(GUIDEXOS_NATIVEAOT_C011EC83_BASIC_CANONICAL_RANGE_MAPPING)
+/* C011EC83 deliberately reuses the tail of the already bounded C67 event
+ * array.  The slots are outside C67's eventCount range in the accepted
+ * workload, so this observer adds no diagnostic BSS and does not change the
+ * C67 event stream. */
+enum {
+    GUIDEXOS_NATIVEAOT_C011EC83_MAX_ENTRIES = 6u,
+    GUIDEXOS_NATIVEAOT_C011EC83_SLOT_BASE =
+        GUIDEXOS_NATIVEAOT_C011EC67_MAX_EVENTS -
+        GUIDEXOS_NATIVEAOT_C011EC83_MAX_ENTRIES,
+    GUIDEXOS_NATIVEAOT_C011EC83_EVENT_KIND = 0xC0830001u,
+};
+
+static guidexos_nativeaot_c011ec67_region_event_record*
+guideXosNativeAotC011EC83Slot(uint32_t ordinal) {
+    if (ordinal == 0u ||
+        ordinal > GUIDEXOS_NATIVEAOT_C011EC83_MAX_ENTRIES) {
+        return nullptr;
+    }
+    return &guideXosNativeAotC011EC67State().events[
+        GUIDEXOS_NATIVEAOT_C011EC83_SLOT_BASE + ordinal - 1u];
+}
+
+static const guidexos_nativeaot_c011ec67_region_event_record*
+guideXosNativeAotC011EC83SlotConst(uint32_t ordinal) {
+    if (ordinal == 0u ||
+        ordinal > GUIDEXOS_NATIVEAOT_C011EC83_MAX_ENTRIES) {
+        return nullptr;
+    }
+    return &guideXosNativeAotC011EC67State().events[
+        GUIDEXOS_NATIVEAOT_C011EC83_SLOT_BASE + ordinal - 1u];
+}
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC83BasicMappingBegin(
+    uint32_t checkpoint, uintptr_t list, uintptr_t expectedCount,
+    uintptr_t basicRegionSize, uintptr_t mappingStart, uintptr_t mappingEnd,
+    uintptr_t mappingEntries) {
+    guidexos_nativeaot_c011ec67_lifecycle_record& lifecycle =
+        guideXosNativeAotC011EC67State();
+    if (lifecycle.eventCount > GUIDEXOS_NATIVEAOT_C011EC83_SLOT_BASE) {
+        return;
+    }
+    for (uint32_t ordinal = 1u;
+         ordinal <= GUIDEXOS_NATIVEAOT_C011EC83_MAX_ENTRIES; ++ordinal) {
+        *guideXosNativeAotC011EC83Slot(ordinal) = {};
+    }
+    (void)checkpoint;
+    (void)list;
+    (void)expectedCount;
+    (void)basicRegionSize;
+    (void)mappingStart;
+    (void)mappingEnd;
+    (void)mappingEntries;
+}
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC83BasicMappingEntry(
+    uint32_t checkpoint, uint32_t ordinal, uintptr_t descriptor,
+    uintptr_t list, uintptr_t rangeStart, uintptr_t rangeEnd,
+    uintptr_t regionSize, uint32_t generation, uint32_t planGeneration,
+    uint32_t state, uintptr_t canonicalDescriptor, uintptr_t canonicalStart,
+    uintptr_t canonicalEnd, uintptr_t canonicalSize, uintptr_t offset,
+    uint32_t lookupStatus, uintptr_t mappingStart, uintptr_t mappingEnd,
+    uintptr_t mappingEntries, uintptr_t expectedCount) {
+    guidexos_nativeaot_c011ec67_region_event_record* slot =
+        guideXosNativeAotC011EC83Slot(ordinal);
+    if (slot == nullptr || slot->observed != 0u) {
+        return;
+    }
+    slot->observed = 1u;
+    slot->eventOrdinal = ordinal;
+    slot->kind = GUIDEXOS_NATIVEAOT_C011EC83_EVENT_KIND;
+    slot->checkpoint = checkpoint;
+    slot->listKind = 0u;
+    slot->sourceBranch = lookupStatus;
+    slot->region = descriptor;
+    slot->list = list;
+    slot->mem = rangeStart;
+    slot->reserved = rangeEnd;
+    slot->used = regionSize;
+    slot->allocated = canonicalDescriptor;
+    slot->committed = canonicalStart;
+    slot->freeBytes = canonicalEnd;
+    slot->liveBytes = canonicalSize;
+    slot->headBefore = offset;
+    slot->nextBefore = mappingStart;
+    slot->nextAfter = mappingEnd;
+    slot->previousBefore = mappingEntries;
+    slot->previousAfter = expectedCount;
+    slot->generationBefore = generation;
+    slot->planGenerationBefore = planGeneration;
+    slot->stateBefore = state;
+}
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC83BasicMappingEnd(
+    uint32_t checkpoint, uintptr_t observedCount) {
+    (void)checkpoint;
+    (void)observedCount;
+}
+
+static void guideXosNativeAotC011EC83Emit() {
+    const guidexos_nativeaot_c011ec67_lifecycle_record& lifecycle =
+        guideXosNativeAotC011EC67State();
+    const guidexos_nativeaot_c011ec67_region_event_record* first = nullptr;
+    for (uint32_t ordinal = 1u;
+         ordinal <= GUIDEXOS_NATIVEAOT_C011EC83_MAX_ENTRIES; ++ordinal) {
+        const guidexos_nativeaot_c011ec67_region_event_record& entry =
+            *guideXosNativeAotC011EC83SlotConst(ordinal);
+        if (entry.observed != 0u &&
+            entry.kind == GUIDEXOS_NATIVEAOT_C011EC83_EVENT_KIND) {
+            first = &entry;
+            break;
+        }
+    }
+    const uintptr_t expectedCount = first == nullptr ? 0u : first->previousAfter;
+    const uintptr_t mappingStart = first == nullptr ? 0u : first->nextBefore;
+    const uintptr_t mappingEnd = first == nullptr ? 0u : first->nextAfter;
+    const uintptr_t mappingEntries = first == nullptr ? 0u : first->previousBefore;
+    const uintptr_t basicRegionSize = first == nullptr ? 0u : first->used;
+    uintptr_t observedCount = 0u;
+    uintptr_t lookupFailures = 0u;
+    uint32_t invariantFailures = 0u;
+    uint32_t overflow = expectedCount >
+        GUIDEXOS_NATIVEAOT_C011EC83_MAX_ENTRIES ? 1u : 0u;
+    if (first == nullptr) ++invariantFailures;
+
+    for (uint32_t ordinal = 1u;
+         ordinal <= GUIDEXOS_NATIVEAOT_C011EC83_MAX_ENTRIES; ++ordinal) {
+        const guidexos_nativeaot_c011ec67_region_event_record& entry =
+            *guideXosNativeAotC011EC83SlotConst(ordinal);
+        if (entry.observed == 0u ||
+            entry.kind != GUIDEXOS_NATIVEAOT_C011EC83_EVENT_KIND) {
+            continue;
+        }
+        ++observedCount;
+        if (entry.sourceBranch == 0u) ++lookupFailures;
+        if (entry.checkpoint != 7u || entry.reserved < entry.mem ||
+            entry.used != entry.reserved - entry.mem ||
+            entry.allocated == 0u || entry.freeBytes < entry.committed ||
+            entry.liveBytes != entry.freeBytes - entry.committed ||
+            entry.headBefore != entry.mem - entry.committed ||
+            entry.nextBefore != mappingStart || entry.nextAfter != mappingEnd ||
+            entry.previousBefore != mappingEntries ||
+            entry.previousAfter != expectedCount) {
+            ++invariantFailures;
+        }
+    }
+    if (expectedCount != observedCount || expectedCount == 0u) {
+        ++invariantFailures;
+    }
+    if (observedCount > GUIDEXOS_NATIVEAOT_C011EC83_MAX_ENTRIES) {
+        overflow = 1u;
+    }
+
+    suspendEeSerialPutString(
+        "[nativeaot-gc-short-weak-lifetime] C83_BASIC_MAPPING_SUMMARY marker=C83_BASIC_MAPPING_SUMMARY");
+    guideXosNativeAotC011EC67Put32("checkpoint", first == nullptr ? 0u : first->checkpoint);
+    guideXosNativeAotC011EC67Put64("list", first == nullptr ? 0u : first->list);
+    guideXosNativeAotC011EC67Put64("expectedCount", expectedCount);
+    guideXosNativeAotC011EC67Put64("observedCount", observedCount);
+    guideXosNativeAotC011EC67Put64("recordCapacity", GUIDEXOS_NATIVEAOT_C011EC83_MAX_ENTRIES);
+    guideXosNativeAotC011EC67Put64("basicRegionSize", basicRegionSize);
+    guideXosNativeAotC011EC67Put64("mappingStart", mappingStart);
+    guideXosNativeAotC011EC67Put64("mappingEnd", mappingEnd);
+    guideXosNativeAotC011EC67Put64("mappingEntries", mappingEntries);
+    guideXosNativeAotC011EC67Put32("overflow", overflow);
+    guideXosNativeAotC011EC67Put32("lookupFailures", lookupFailures);
+    guideXosNativeAotC011EC67Put32("invariantFailures", invariantFailures);
+    guideXosNativeAotC011EC67Put32("sensitiveDiagnosticAllocations", lifecycle.sensitiveDiagnosticAllocations);
+    guideXosNativeAotC011EC67Put32("failFast", 0u);
+    guideXosNativeAotC011EC67Put32("pageFault", 0u);
+    suspendEeSerialPutString(
+        " source=gc_heap::free_regions[basic_free_region]+get_region_info_for_address\n");
+
+    for (uint32_t ordinal = 1u;
+         ordinal <= GUIDEXOS_NATIVEAOT_C011EC83_MAX_ENTRIES; ++ordinal) {
+        const guidexos_nativeaot_c011ec67_region_event_record& entry =
+            *guideXosNativeAotC011EC83SlotConst(ordinal);
+        if (entry.observed == 0u ||
+            entry.kind != GUIDEXOS_NATIVEAOT_C011EC83_EVENT_KIND) {
+            continue;
+        }
+        suspendEeSerialPutString(
+            "[nativeaot-gc-short-weak-lifetime] C83_BASIC_MAPPING_RECORD marker=C83_BASIC_MAPPING_RECORD");
+        guideXosNativeAotC011EC67Put32("checkpoint", entry.checkpoint);
+        guideXosNativeAotC011EC67Put32("ordinal", entry.eventOrdinal);
+        guideXosNativeAotC011EC67Put64("descriptor", entry.region);
+        guideXosNativeAotC011EC67Put64("list", entry.list);
+        guideXosNativeAotC011EC67Put64("basicStart", entry.mem);
+        guideXosNativeAotC011EC67Put64("basicEnd", entry.reserved);
+        guideXosNativeAotC011EC67Put64("basicSize", entry.used);
+        guideXosNativeAotC011EC67Put32("generation", entry.generationBefore);
+        guideXosNativeAotC011EC67Put32("planGeneration", entry.planGenerationBefore);
+        guideXosNativeAotC011EC67Put32("state", entry.stateBefore);
+        guideXosNativeAotC011EC67Put64("canonicalDescriptor", entry.allocated);
+        guideXosNativeAotC011EC67Put64("canonicalStart", entry.committed);
+        guideXosNativeAotC011EC67Put64("canonicalEnd", entry.freeBytes);
+        guideXosNativeAotC011EC67Put64("canonicalSize", entry.liveBytes);
+        guideXosNativeAotC011EC67Put64("offset", entry.headBefore);
+        guideXosNativeAotC011EC67Put64("mappingStart", entry.nextBefore);
+        guideXosNativeAotC011EC67Put64("mappingEnd", entry.nextAfter);
+        guideXosNativeAotC011EC67Put64("mappingEntries", entry.previousBefore);
+        guideXosNativeAotC011EC67Put64("expectedCount", entry.previousAfter);
+        guideXosNativeAotC011EC67Put32("lookupStatus", entry.sourceBranch);
+        suspendEeSerialPutString(
+            " source=gc_heap::free_regions[basic_free_region]+get_region_info_for_address\n");
+    }
+
+    const uint32_t clean = expectedCount == observedCount &&
+        expectedCount != 0u && overflow == 0u && lookupFailures == 0u &&
+        invariantFailures == 0u && lifecycle.sensitiveDiagnosticAllocations == 0u;
+    suspendEeSerialPutString(
+        "[nativeaot-gc-short-weak-lifetime] COMPLETE marker=C011EC83 outcome=");
+    suspendEeSerialPutString(clean != 0u ? "C" : "F");
+    guideXosNativeAotC011EC67Put32("successLevel", clean != 0u ? 1u : 0u);
+    guideXosNativeAotC011EC67Put32("checkpoint", first == nullptr ? 0u : first->checkpoint);
+    guideXosNativeAotC011EC67Put64("expectedCount", expectedCount);
+    guideXosNativeAotC011EC67Put64("observedCount", observedCount);
+    guideXosNativeAotC011EC67Put64("eventCapacity", GUIDEXOS_NATIVEAOT_C011EC83_MAX_ENTRIES);
+    guideXosNativeAotC011EC67Put64("eventCount", observedCount);
+    guideXosNativeAotC011EC67Put32("overflow", overflow);
+    guideXosNativeAotC011EC67Put32("lookupFailures", lookupFailures);
+    guideXosNativeAotC011EC67Put32("invariantFailures", invariantFailures);
+    guideXosNativeAotC011EC67Put32("sensitiveDiagnosticAllocations", lifecycle.sensitiveDiagnosticAllocations);
+    guideXosNativeAotC011EC67Put32("failFast", 0u);
+    guideXosNativeAotC011EC67Put32("pageFault", 0u);
+    suspendEeSerialPutString(
+        " source=gc_heap::free_regions[basic_free_region]+get_region_info_for_address\n");
 }
 #endif
 
@@ -25782,6 +26033,10 @@ static void guideXosNativeAotC011EC67Start() {
     suspendEeSerialPutString(
         "[nativeaot-gc-short-weak-lifetime] PREFLIGHT marker=C011EC77-PREFLIGHT bounded=00000001 sourceObserver=C67 lifecycle=region-supply provenance=00000001 allocatorMutation=00000000 plannerMutation=00000000 regionMutation=00000000 regionListMutation=00000000 candidateMutation=00000000 policyMutation=00000000 survivorFabrication=00000000 rootFabrication=00000000 b02=00000000\n");
 #endif
+#if defined(GUIDEXOS_NATIVEAOT_C011EC83_BASIC_CANONICAL_RANGE_MAPPING)
+    suspendEeSerialPutString(
+        "[nativeaot-gc-short-weak-lifetime] PREFLIGHT marker=C011EC83-PREFLIGHT bounded=00000001 storage=C67-event-slot-reuse eventCapacity=00000006 source=free_regions[basic_free_region]+get_region_info_for_address canonicalAuthority=seg_mapping_table allocatorMutation=00000000 regionMutation=00000000 regionListMutation=00000000 plannerMutation=00000000 candidateMutation=00000000 promotionMutation=00000000 survivorFabrication=00000000 rootFabrication=00000000 b02=00000000\n");
+#endif
 #if defined(GUIDEXOS_NATIVEAOT_C011EC71_PROMOTION_DECISION_LIVE_BYTE_THRESHOLD)
     guideXosNativeAotC011EC71Reset();
     g_guideXosNativeAotC011EC71.started = 1u;
@@ -25846,6 +26101,9 @@ static int guideXosNativeAotC011EC67Finish() {
 #endif
 #if defined(GUIDEXOS_NATIVEAOT_C011EC80_CANONICAL_REGION_UNIVERSE_SNAPSHOT)
     guideXosNativeAotC011EC80Emit();
+#endif
+#if defined(GUIDEXOS_NATIVEAOT_C011EC83_BASIC_CANONICAL_RANGE_MAPPING)
+    guideXosNativeAotC011EC83Emit();
 #endif
 #if defined(GUIDEXOS_NATIVEAOT_C011EC77_BASIC_REGION_SUPPLY_PROVENANCE)
     uintptr_t c77MaxTotalRegions = 0u;
