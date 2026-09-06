@@ -99,6 +99,7 @@ $kernelApps = Join-Path $Root "kernel\core\kernel_apps.cpp"
 $kernelCompositor = Join-Path $Root "kernel\core\kernel_compositor.cpp"
 $diskManager = Join-Path $Root "disk_manager.cpp"
 $diskManagerHeader = Join-Path $Root "disk_manager.h"
+$trash = Join-Path $Root "trash.cpp"
 $windowRenderer = Join-Path $Root "window_renderer.h"
 $startupSync = Join-Path $Root "scripts\smoke-desktop-startup-sync.ps1"
 $controlThemeHeader = Join-Path $Root "desktop_control_theme.h"
@@ -402,6 +403,18 @@ $networkConfigThemeMatch = Find-RawMatch $kernelDesktop 'static void draw_networ
 $networkStatusRolesMatch = Find-RawMatch $kernelDesktop 'network_adapter_status_color\(.*?theme\.accent.*?roles\.statusWarning.*?network_adapter_status_text_color'
 $networkClassicFallbackMatch = Find-RawMatch $kernelDesktop 'sciFiTheme \? roles\.panelBackground : rgb\(35, 35, 45\).*?sciFiTheme \? theme\.titleBarBackground : rgb\(50, 70, 110\)'
 $networkDataBoundaryMatch = Find-RawMatch $kernelDesktop 'Intel Ethernet Adapter.*?Realtek PCIe GbE Controller.*?TCP/IPv4 Properties.*?Configuration applied'
+$phase10GHeadingMatch = Find-FirstMatch $planDoc '## Phase 10G - Remaining System Utility Sci-Fi Theming'
+$phase10GInventoryMatch = Find-RawMatch $planDoc '### Remaining GUI utility inventory.*?Trash.*?Native App Debug Viewer.*?HDInstaller'
+$phase10GOwnershipMatch = Find-RawMatch $planDoc 'Trash.*?Hosted.*?bare-metal.*?application owns client paint while the compositor owns outer chrome'
+$phase10GRationaleMatch = Find-RawMatch $planDoc '### Candidate selection and rationale.*?Trash is the best bounded target'
+$trashHostedThemeMatch = Find-FirstMatch $trash 'currentTrashSurfaceColors'
+$trashHostedRolesMatch = Find-RawMatch $trash 'GetDesktopControlTheme.*?DesktopSelectionColor.*?roles\.statusWarning'
+$trashHostedSurfaceMatch = Find-RawMatch $trash 'Trash::render\(.*?drawSurfaceRect.*?headerBackground.*?propertiesPanel.*?confirmPanel'
+$trashHostedButtonMatch = Find-FirstMatch $trash 'addButton\(windowId, 210'
+$trashBareMetalRolesMatch = Find-RawMatch $kernelApps 'TrashApp::draw\(.*?GetBareMetalControlTheme.*?DesktopSelectionColor.*?roles\.tableHeaderBackground.*?roles\.separator.*?roles\.statusWarning'
+$trashBehaviorMatch = Find-RawMatch $trash 'restoreEntry\(.*?deleteEntryPermanently\(.*?purgeContents\('
+$phase10GNoNewRoleMatch = Find-RawMatch $planDoc 'Phase 10G.*?No new shared theme roles or APIs were required'
+$phase10GNoLocalPaletteMatch = Find-RawMatch $planDoc 'No Trash-specific Sci-Fi palette'
 
 $checks = @(
     [pscustomobject]@{ Name = "theme header exists"; Pass = (Test-Path -LiteralPath $themeHeader); Match = $null },
@@ -683,7 +696,19 @@ $checks = @(
     [pscustomobject]@{ Name = "phase 10f IPv4 form consumes shared input and control roles"; Pass = $null -ne $networkConfigThemeMatch; Match = $networkConfigThemeMatch },
     [pscustomobject]@{ Name = "phase 10f status semantics consume shared roles"; Pass = $null -ne $networkStatusRolesMatch; Match = $networkStatusRolesMatch },
     [pscustomobject]@{ Name = "phase 10f Classic network fallback remains present"; Pass = $null -ne $networkClassicFallbackMatch; Match = $networkClassicFallbackMatch },
-    [pscustomobject]@{ Name = "phase 10f network data and action strings remain unchanged"; Pass = $null -ne $networkDataBoundaryMatch; Match = $networkDataBoundaryMatch }
+    [pscustomobject]@{ Name = "phase 10f network data and action strings remain unchanged"; Pass = $null -ne $networkDataBoundaryMatch; Match = $networkDataBoundaryMatch },
+    [pscustomobject]@{ Name = "phase 10g heading"; Pass = $null -ne $phase10GHeadingMatch; Match = $phase10GHeadingMatch },
+    [pscustomobject]@{ Name = "phase 10g remaining utility inventory documented"; Pass = $null -ne $phase10GInventoryMatch; Match = $phase10GInventoryMatch },
+    [pscustomobject]@{ Name = "phase 10g Trash ownership documented"; Pass = $null -ne $phase10GOwnershipMatch; Match = $phase10GOwnershipMatch },
+    [pscustomobject]@{ Name = "phase 10g target rationale documented"; Pass = $null -ne $phase10GRationaleMatch; Match = $phase10GRationaleMatch },
+    [pscustomobject]@{ Name = "phase 10g hosted Trash theme helper exists"; Pass = $null -ne $trashHostedThemeMatch; Match = $trashHostedThemeMatch },
+    [pscustomobject]@{ Name = "phase 10g hosted Trash consumes shared roles"; Pass = $null -ne $trashHostedRolesMatch; Match = $trashHostedRolesMatch },
+    [pscustomobject]@{ Name = "phase 10g hosted Trash surfaces themed"; Pass = $null -ne $trashHostedSurfaceMatch; Match = $trashHostedSurfaceMatch },
+    [pscustomobject]@{ Name = "phase 10g hosted Trash action controls retained"; Pass = $null -ne $trashHostedButtonMatch; Match = $trashHostedButtonMatch },
+    [pscustomobject]@{ Name = "phase 10g bare-metal Trash consumes shared roles"; Pass = $null -ne $trashBareMetalRolesMatch; Match = $trashBareMetalRolesMatch },
+    [pscustomobject]@{ Name = "phase 10g Trash behavior boundaries retained"; Pass = $null -ne $trashBehaviorMatch; Match = $trashBehaviorMatch },
+    [pscustomobject]@{ Name = "phase 10g no new role documented"; Pass = $null -ne $phase10GNoNewRoleMatch; Match = $phase10GNoNewRoleMatch },
+    [pscustomobject]@{ Name = "phase 10g no local palette documented"; Pass = $null -ne $phase10GNoLocalPaletteMatch; Match = $phase10GNoLocalPaletteMatch }
 )
 
 $failures = 0

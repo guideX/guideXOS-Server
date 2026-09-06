@@ -6,6 +6,7 @@
 #include "icon_theme_manager.h"
 #include "logger.h"
 #include "process.h"
+#include "desktop_control_theme.h"
 
 #include <algorithm>
 #include <exception>
@@ -147,6 +148,83 @@ namespace {
         if (value.size() <= width) return value;
         if (width <= 3) return value.substr(0, width);
         return value.substr(0, width - 3) + "...";
+    }
+
+    struct TrashSurfaceColors {
+        bool sciFi;
+        uint32_t body;
+        uint32_t panel;
+        uint32_t row;
+        uint32_t border;
+        uint32_t headerBackground;
+        uint32_t headerText;
+        uint32_t primaryText;
+        uint32_t secondaryText;
+        uint32_t selection;
+        uint32_t selectionText;
+        uint32_t separator;
+        uint32_t statusWarning;
+        uint32_t propertiesPanel;
+        uint32_t propertiesTitle;
+        uint32_t propertiesText;
+        uint32_t confirmPanel;
+        uint32_t confirmHeading;
+        uint32_t confirmText;
+    };
+
+    TrashSurfaceColors currentTrashSurfaceColors() {
+        const DesktopTheme& theme = GetCurrentDesktopTheme();
+        if (theme.id != DesktopThemeId::SciFi) {
+            return {
+                false,
+                0xFF2C2E36u,
+                0xFF1E2026u,
+                0xFF1E2026u,
+                0xFF3C4350u,
+                0xFF1E2026u,
+                0xFFBEC3CDu,
+                0xFFDCE1EBu,
+                0xFFA5AAB9u,
+                0xFF465A87u,
+                0xFFDCE1EBu,
+                0xFF3C4350u,
+                0xFFB8A0A0u,
+                0xFF2D2D37u,
+                0xFFE6EBF5u,
+                0xFFC8CDD7u,
+                0xFF373030u,
+                0xFFF0E6E6u,
+                0xFFD2CDCDu
+            };
+        }
+
+        const DesktopControlTheme roles = GetDesktopControlTheme(theme);
+        return {
+            true,
+            roles.panelBackground,
+            roles.raisedPanel,
+            roles.recessedField,
+            roles.border,
+            roles.tableHeaderBackground,
+            roles.tableHeaderText,
+            roles.primaryText,
+            roles.secondaryText,
+            DesktopSelectionColor(roles, true),
+            roles.selectionText,
+            roles.separator,
+            roles.statusWarning,
+            BlendDesktopThemeColor(roles.raisedPanel, roles.panelBackground, 18),
+            roles.tableHeaderText,
+            roles.primaryText,
+            BlendDesktopThemeColor(roles.panelBackground, roles.statusWarning, 22),
+            roles.statusWarning,
+            roles.secondaryText
+        };
+    }
+
+    bool trashStatusNeedsWarning(const std::string& status) {
+        return status.find("failed") != std::string::npos ||
+            status.find("error") != std::string::npos;
     }
 
     void publishGui(MsgType type, const std::string& payload) {
@@ -356,9 +434,36 @@ bool Trash::purgeContents(std::string& error, size_t& deletedCount) {
 }
 
 void Trash::render(uint64_t windowId, bool confirmEmpty, bool showProperties, int selectedIndex, const std::string& status) {
+    const TrashSurfaceColors colors = currentTrashSurfaceColors();
     publishGui(MsgType::MT_DrawText, std::to_string(windowId) + "|\f");
-    drawRect(windowId, 0, 0, 420, 240, 44, 46, 54);
-    drawRect(windowId, 16, 18, 388, 196, 30, 32, 38);
+    drawRect(windowId, 0, 0, 420, 240,
+        static_cast<int>((colors.body >> 16) & 0xFF),
+        static_cast<int>((colors.body >> 8) & 0xFF),
+        static_cast<int>(colors.body & 0xFF));
+    drawRect(windowId, 16, 18, 388, 196,
+        static_cast<int>((colors.panel >> 16) & 0xFF),
+        static_cast<int>((colors.panel >> 8) & 0xFF),
+        static_cast<int>(colors.panel & 0xFF));
+
+    auto drawSurfaceRect = [&](int x, int y, int w, int h, uint32_t color) {
+        drawRect(windowId, x, y, w, h,
+            static_cast<int>((color >> 16) & 0xFF),
+            static_cast<int>((color >> 8) & 0xFF),
+            static_cast<int>(color & 0xFF));
+    };
+    auto drawSurfaceText = [&](int x, int y, const std::string& text, uint32_t color) {
+        drawTextAt(windowId, x, y, text,
+            static_cast<int>((color >> 16) & 0xFF),
+            static_cast<int>((color >> 8) & 0xFF),
+            static_cast<int>(color & 0xFF));
+    };
+
+    if (colors.sciFi) {
+        drawSurfaceRect(16, 18, 388, 1, colors.border);
+        drawSurfaceRect(16, 213, 388, 1, colors.border);
+        drawSurfaceRect(16, 18, 1, 196, colors.border);
+        drawSurfaceRect(403, 18, 1, 196, colors.border);
+    }
 
     std::vector<TrashEntry> items = listEntries();
     Logger::write(LogLevel::Info, std::string("Trash window render; item count=") + std::to_string(items.size()));
@@ -370,50 +475,81 @@ void Trash::render(uint64_t windowId, bool confirmEmpty, bool showProperties, in
     addButton(windowId, 213, 366, 6, 50, 20, "Refresh");
 
     if (items.empty()) {
-        drawTextAt(windowId, 26, 34, "Trash is empty.", 220, 225, 235);
-        drawTextAt(windowId, 26, 58, status.empty() ? "Deleted files will appear here." : status, 165, 170, 185);
+        drawSurfaceText(26, 34, "Trash is empty.", colors.primaryText);
+        const std::string emptyStatus = status.empty() ? "Deleted files will appear here." : status;
+        drawSurfaceText(26, 58, emptyStatus,
+            colors.sciFi && trashStatusNeedsWarning(emptyStatus) ? colors.statusWarning : colors.secondaryText);
     } else {
         std::ostringstream summary;
         summary << "Trash contains " << items.size() << " item(s).";
-        drawTextAt(windowId, 26, 32, summary.str(), 220, 225, 235);
-        drawTextAt(windowId, 46, 52, "Name", 190, 195, 205);
-        drawTextAt(windowId, 162, 52, "Original", 190, 195, 205);
-        drawTextAt(windowId, 248, 52, "Size", 190, 195, 205);
-        drawTextAt(windowId, 300, 52, "Type", 190, 195, 205);
-        drawTextAt(windowId, 360, 52, "Deleted", 190, 195, 205);
+        drawSurfaceText(26, 32, summary.str(), colors.primaryText);
+        if (colors.sciFi) {
+            drawSurfaceRect(22, 48, 374, 20, colors.headerBackground);
+            drawSurfaceRect(22, 68, 374, 1, colors.separator);
+        }
+        drawSurfaceText(46, 52, "Name", colors.headerText);
+        drawSurfaceText(162, 52, "Original", colors.headerText);
+        drawSurfaceText(248, 52, "Size", colors.headerText);
+        drawSurfaceText(300, 52, "Type", colors.headerText);
+        drawSurfaceText(360, 52, "Deleted", colors.headerText);
         int y = 70;
         for (size_t i = 0; i < items.size() && i < 6; ++i) {
             bool selected = static_cast<int>(i) == selectedIndex;
-            if (selected) drawRect(windowId, 22, y - 2, 374, 18, 70, 90, 135);
+            if (colors.sciFi) {
+                drawSurfaceRect(22, y - 2, 374, 18,
+                    selected ? colors.selection : colors.row);
+                if (i + 1 < items.size() && i < 5) {
+                    drawSurfaceRect(22, y + 17, 374, 1, colors.separator);
+                }
+            } else if (selected) {
+                drawRect(windowId, 22, y - 2, 374, 18, 70, 90, 135);
+            }
             std::string iconPath = gxos::gui::IconThemeManager::Instance().ResolveIconPath(items[i].iconKey, 16);
             if (!iconPath.empty()) drawImage(windowId, 26, y - 2, iconPath);
-            drawTextAt(windowId, 46, y + 2, truncateText(items[i].name, 16), 220, 225, 235);
-            drawTextAt(windowId, 162, y + 2, truncateText(items[i].originalFolder, 12), 165, 170, 185);
-            drawTextAt(windowId, 248, y + 2, items[i].isDirectory ? "Folder" : formatSize(items[i].size), 165, 170, 185);
-            drawTextAt(windowId, 300, y + 2, truncateText(items[i].type, 9), 165, 170, 185);
-            drawTextAt(windowId, 360, y + 2, truncateText(items[i].deletedText, 8), 165, 170, 185);
+            const uint32_t rowPrimary = selected && colors.sciFi ? colors.selectionText : colors.primaryText;
+            const uint32_t rowSecondary = selected && colors.sciFi ? colors.selectionText : colors.secondaryText;
+            drawSurfaceText(46, y + 2, truncateText(items[i].name, 16), rowPrimary);
+            drawSurfaceText(162, y + 2, truncateText(items[i].originalFolder, 12), rowSecondary);
+            drawSurfaceText(248, y + 2, items[i].isDirectory ? "Folder" : formatSize(items[i].size), rowSecondary);
+            drawSurfaceText(300, y + 2, truncateText(items[i].type, 9), rowSecondary);
+            drawSurfaceText(360, y + 2, truncateText(items[i].deletedText, 8), rowSecondary);
             addButton(windowId, 3000 + static_cast<int>(i), 22, y - 2, 374, 18, "");
             y += 20;
         }
     }
 
-    if (!status.empty() && !items.empty()) drawTextAt(windowId, 26, 182, status, 185, 190, 205);
+    if (!status.empty() && !items.empty()) {
+        drawSurfaceText(26, 182, status,
+            colors.sciFi && trashStatusNeedsWarning(status) ? colors.statusWarning : colors.secondaryText);
+    }
     if (showProperties && selectedIndex >= 0 && selectedIndex < static_cast<int>(items.size())) {
         const TrashEntry& item = items[selectedIndex];
-        drawRect(windowId, 54, 52, 312, 138, 45, 45, 55);
-        drawTextAt(windowId, 74, 70, "Properties", 230, 235, 245);
-        drawTextAt(windowId, 74, 94, "Name: " + item.name, 200, 205, 215);
-        drawTextAt(windowId, 74, 112, "Type: " + item.type, 200, 205, 215);
-        drawTextAt(windowId, 74, 130, "Size: " + (item.isDirectory ? std::string("Folder") : formatSize(item.size)), 200, 205, 215);
-        drawTextAt(windowId, 74, 148, "Original: " + truncateText(item.originalPath, 34), 200, 205, 215);
-        drawTextAt(windowId, 74, 166, "Trash: " + item.currentPath, 200, 205, 215);
+        drawSurfaceRect(54, 52, 312, 138, colors.propertiesPanel);
+        if (colors.sciFi) {
+            drawSurfaceRect(54, 52, 312, 1, colors.border);
+            drawSurfaceRect(54, 189, 312, 1, colors.border);
+            drawSurfaceRect(54, 52, 1, 138, colors.border);
+            drawSurfaceRect(365, 52, 1, 138, colors.border);
+        }
+        drawSurfaceText(74, 70, "Properties", colors.propertiesTitle);
+        drawSurfaceText(74, 94, "Name: " + item.name, colors.propertiesText);
+        drawSurfaceText(74, 112, "Type: " + item.type, colors.propertiesText);
+        drawSurfaceText(74, 130, "Size: " + (item.isDirectory ? std::string("Folder") : formatSize(item.size)), colors.propertiesText);
+        drawSurfaceText(74, 148, "Original: " + truncateText(item.originalPath, 34), colors.propertiesText);
+        drawSurfaceText(74, 166, "Trash: " + item.currentPath, colors.propertiesText);
         addButton(windowId, 214, 270, 164, 60, 22, "Close");
     }
     if (confirmEmpty) {
-        drawRect(windowId, 64, 70, 292, 104, 55, 48, 48);
-        drawTextAt(windowId, 84, 88, "Empty Trash?", 240, 230, 230);
-        drawTextAt(windowId, 84, 112, "This will permanently delete all", 210, 205, 205);
-        drawTextAt(windowId, 84, 130, "items in Trash.", 210, 205, 205);
+        drawSurfaceRect(64, 70, 292, 104, colors.confirmPanel);
+        if (colors.sciFi) {
+            drawSurfaceRect(64, 70, 292, 1, colors.statusWarning);
+            drawSurfaceRect(64, 173, 292, 1, colors.statusWarning);
+            drawSurfaceRect(64, 70, 1, 104, colors.statusWarning);
+            drawSurfaceRect(355, 70, 1, 104, colors.statusWarning);
+        }
+        drawSurfaceText(84, 88, "Empty Trash?", colors.confirmHeading);
+        drawSurfaceText(84, 112, "This will permanently delete all", colors.confirmText);
+        drawSurfaceText(84, 130, "items in Trash.", colors.confirmText);
         addButton(windowId, 201, 92, 146, 100, 22, "Empty Trash");
         addButton(windowId, 202, 214, 146, 70, 22, "Cancel");
     }

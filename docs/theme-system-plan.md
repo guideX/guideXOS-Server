@@ -1835,6 +1835,122 @@ branches, not Phase 10F.
   added to improve that harness.
 * Nothing is pushed by Phase 10F unless explicitly requested.
 
+## Phase 10G - Remaining System Utility Sci-Fi Theming
+
+### Starting state and audit method
+
+Phase 10G began on 2026-09-06 from the Phase 10F closeout:
+
+* Repository: `D:\dev\guideXOSServerV0.3_SCI_FI_THEME`
+* Branch: `v0.3_SCI_FI_THEME`
+* Starting HEAD: `3d251b6331acc4275123ffdee93ab5c215beb482`
+* Baseline commit present in history: `3d251b63 Theme network utilities for Sci-Fi mode`
+* Upstream: `origin/v0.3_SCI_FI_THEME`
+* Starting worktree: clean, with no staged or untracked files
+* Starting divergence measured against the current upstream: `0 ahead / 0 behind`
+
+The historical Phase 10F closeout noted `1 ahead / 0 behind`, but the starting audit for this phase found that the Phase 10F commit is already present at the configured origin and the local branch was equal to it. Nothing was pushed during Phase 10G.
+
+The audit searched the active hosted and AMD64/bare-metal application registrations, source files, compositor paths, existing theme smoke coverage, and prior phase records. Previously completed shell, desktop, taskbar, Start, window chrome, Navigator, Task Manager, Device Manager, Disk Manager, and network utility families were excluded. The audit did not create a replacement utility for an absent candidate.
+
+### Remaining GUI utility inventory
+
+| Candidate | Ownership and rendering | Complexity / reusable surfaces | Classic and Sci-Fi status | Activity and bounded-scope assessment |
+| --- | --- | --- | --- | --- |
+| Clock | Hosted `Clock`; bare-metal clock app; application-owned interior with compositor-owned chrome | Small readout/face, date/time text, labels, and existing controls | Hosted Clock already has meaningful Phase 3F Sci-Fi coverage; not reopened | Real, but already tracked as themed; revisiting it would be polish rather than the next unthemed utility |
+| Control Panel / Display Options | Hosted and bare-metal application surfaces; compositor owns outer chrome and generic widgets | Cards, tabs, labels, settings controls, and status text | Covered by earlier phases | Real and active, but excluded as completed |
+| System Information / About / System Properties | No standalone graphical utility implementation was found; only labels, metadata, diagnostics, or system strings | No reusable utility surface exists to theme | No complete app-specific Classic/Sci-Fi paths | Absent as a real v0.3 utility; creating one would violate the visual-only boundary |
+| Date/Time, power, service/status, and boot/system-information utilities | No standalone graphical utility was found; related behavior belongs to existing subsystems or serial/diagnostic paths | No bounded application surface exists | No target-specific Classic/Sci-Fi paths | Absent or non-graphical; not valid implementation targets for this phase |
+| Native App Debug Viewer | Hosted diagnostic registration; current launch path is application/desktop-service related, with no bare-metal utility surface | Potential text/diagnostic viewer, but no normal usable v0.3 launch path | No complete utility-interior Sci-Fi path | Low-value diagnostic; its existing launch mapping issue is unrelated functionality and was not expanded into this phase |
+| Console | Hosted console application; application-owned text/input surface | Real text and input controls, but shell-adjacent and tied to shell behavior | Existing console path is not a remaining system-utility interior target | Active, but shell architecture work is explicitly out of scope |
+| HDInstaller | Hosted registration with installation/storage mutation behavior | Installer controls would require a different lifecycle and safety surface | Not an ordinary v0.3 system utility launch target | Unavailable for a safe visual-only phase; excluded |
+| Trash / Recycle Bin | Hosted `gxos::apps::Trash` and bare-metal `kernel::apps::TrashApp`; application owns client paint while the compositor owns outer chrome and generic buttons | Medium: list/table header, rows, selection, action buttons, properties overlay, confirmation overlay, empty/status/error states | Existing Classic paths were retained; interior Sci-Fi routing was missing | Active, visible in normal v0.3 desktop use, and fully themeable without functionality work |
+
+### Candidate selection and rationale
+
+Trash is the best bounded target. It is a real registered utility in both ownership paths, it is reachable through the desktop system-object/Start launch model, and it contains enough existing visual structure to exercise the shared panel, table, selection, text, status, modal, and generic control roles. Its filesystem actions already exist and can remain untouched. The other plausible candidates were either already covered (Clock and settings), absent as graphical utilities, shell-adjacent, diagnostic-only, or coupled to unrelated installer functionality.
+
+### Architecture and ownership
+
+The repository continues to use one shared theme architecture:
+
+* `DesktopTheme` selects Classic or opt-in Sci-Fi and remains the source of global theme data.
+* `DesktopControlTheme`, `GetDesktopControlTheme`, and `GetBareMetalControlTheme` expose semantic application/control roles.
+* `DesktopControlState` and the generic `DesktopControlFillColor`, `DesktopControlBorderColor`, and `DesktopControlTextColor` lookup path continue to own generic button states.
+* `DesktopSelectionColor` supplies selected-row treatment.
+* The hosted Trash client in `trash.cpp` owns its interior draw messages and existing state overlays; the hosted compositor owns outer window chrome and shared generic widget rendering.
+* The bare-metal `TrashApp` in `kernel/core/kernel_apps.cpp` owns framebuffer client painting and state overlays; the kernel compositor owns outer chrome and generic widget state rendering.
+
+No second theme architecture, utility-specific Sci-Fi palette, new configuration path, or new shared theme role was introduced. No new shared theme roles or APIs were required.
+
+### Trash surfaces themed
+
+The existing hosted and bare-metal Trash interiors now route their Sci-Fi presentation through the established shared roles while preserving their Classic branches and geometry:
+
+* body, recessed/raised panels, panel borders, table header background, and crisp separators;
+* primary, secondary, header, selected-row, and empty-state text;
+* list rows and existing selected-row treatment;
+* Restore, Restore All, Delete Perm, Empty, Refresh, row, Properties-close, confirmation, and Cancel buttons through the existing generic control-state path;
+* existing Properties and Empty Trash overlays, including their titles, detail text, borders, and warning treatment;
+* existing status/error text, with real failure/error messages using the shared warning role;
+* the existing empty-list presentation.
+
+Trash has no app-owned tabs, editable fields, radio buttons, checkboxes, or custom scrollbar that required additional plumbing. Existing item ordering, selection, keyboard behavior, scrolling/lifecycle behavior, file restore, permanent delete, purge, refresh, and close behavior were not changed. No decorative section or fake status content was added.
+
+### Shared roles and compatibility result
+
+The implementation reuses `GetDesktopControlTheme` in hosted Trash and `GetBareMetalControlTheme` in bare-metal Trash, including `panelBackground`, `raisedPanel`, `recessedField`, `border`, `tableHeaderBackground`, `tableHeaderText`, `primaryText`, `secondaryText`, `selectionText`, `separator`, and `statusWarning`, plus `DesktopSelectionColor`. Existing generic buttons continue to use `DesktopControlState` and the shared fill/border/text lookups.
+
+Classic remains the default and the existing Classic Trash colors and geometry remain in the Classic branch. Missing, invalid, and unspecified configuration continue to normalize to Classic through the existing theme configuration path. Explicit and persisted Sci-Fi select the shared role-backed Sci-Fi surface; switching back to Classic does not require a Trash-specific setting.
+
+No Trash-specific Sci-Fi palette was added. The only color construction beyond direct shared roles is the existing shared blend helper for restrained overlay surfaces, keeping the modal surfaces in the same technical palette.
+
+### Validation and evidence
+
+The bounded source probes in `scripts/smoke-theme-system.ps1` cover the Phase 10G inventory/rationale, hosted shared-role consumption, hosted list/modal/button surfaces, bare-metal shared-role consumption, retained Trash behavior calls, and the no-new-role/no-local-palette boundary. Existing theme fallback and shared-control probes remain authoritative for Classic/default/invalid configuration behavior.
+
+Hosted validation passed `build.bat`, the hosted `guideXOSServer.exe` direct launch path, and `smoke-hosted-display-runtime.ps1`. Direct command probes ran `gui.start`, `desktop.launch Trash`, and `desktop.showconfig` in both states: Classic reported `Theme: Classic (classic)` and `Desktop launch successful: Trash`; Sci-Fi reported `Theme: Sci Fi (scifi)` and the same successful Trash launch. Both runs emitted `Trash window render; item count=0`. The existing target launch path remains registered as `Trash` and retains the existing `DesktopService` launch dispatch and IPC lifecycle. The direct probe exercised launch and initial rendering; source checks cover shared-role consumption and retained controls. Direct per-utility screenshot retention and automated modal/button clicking remain limited by the current harness.
+
+AMD64 validation uses the canonical build and disposable/staged ESP startup path. Classic and Sci-Fi startup/theme paths are attempted without changing the workspace ESP configuration. The startup harness proves desktop construction and shared role wiring, but it does not provide a reliable automated launch-and-screenshot sequence for every Start/system-object utility, so a direct QEMU Trash screenshot is a harness limitation rather than a product defect.
+
+Validation results for this phase:
+
+* `build.bat`: PASS; hosted executable rebuilt successfully.
+* `mingw32-make -C kernel ARCH=amd64 -j2`: PASS; existing warnings only.
+* `build.ps1 -Arch amd64`: PASS; bootloader, kernel, and staged ESP completed.
+* `smoke-theme-system.ps1 -SkipBuild`: PASS, including the Phase 10G Trash/documentation probes.
+* `smoke-startup-appmodel-regression.ps1 -SkipBuild`: PASS.
+* `smoke-desktop-startup-sync.ps1 -DesktopThemeId classic -TimeoutSeconds 90`: PASS; serial evidence recorded `loaded desktop theme=classic source=primary`.
+* `smoke-desktop-startup-sync.ps1 -DesktopThemeId scifi -TimeoutSeconds 90`: PASS; serial evidence recorded `loaded desktop theme=scifi source=primary`.
+* `smoke-live-directory-desktop-status.ps1`: PASS.
+* `smoke-hosted-display-runtime.ps1`: PASS across normal, synthetic-only, and dual-window modes.
+* `smoke-bootinfo-framebuffer-array.ps1`: PASS.
+* `smoke-virtio-gpu-input-routing.ps1 -TimeoutSeconds 120`: PASS; source/input routing checks passed.
+* `test-build-wrapper.ps1`: PASS.
+* Focused `desktop_control_theme_test.cpp` compiled with the repository `-iquote .` include path and passed Classic/Sci-Fi role and fallback assertions.
+* `smoke-file-operations-runtime.ps1 -TrashOnly -TimeoutSeconds 180`: did not reach QEMU because the nested `build-kernel.bat` invocation failed to resolve `Get-FileHash` in its profiled PowerShell process. This is a harness/environment limitation; no Trash runtime result was claimed from that attempt.
+* `git diff --check`: PASS after the final source/doc edits.
+
+### Functional regression and defect classification
+
+No Trash filesystem, selection, input, refresh, persistence, lifecycle, or hosted/bare-metal behavior was intentionally changed. Existing file-operation coverage remains the relevant behavioral guard. The audit observed that the hosted `Native App Debug Viewer` label currently maps through the existing Console launch path; this is a pre-existing launch/diagnostic issue, not a Phase 10G theme regression, and it was left untouched. No new defect was discovered in the selected Trash implementation.
+
+### Phase 10G outcome
+
+* Outcome: **Outcome B — Phase 10G complete with minor limitations.** Trash is fully integrated through the shared theme architecture in hosted and bare-metal ownership paths, Classic remains stable/default, Sci-Fi is opt-in, and the relevant build/source/runtime regressions are covered. The remaining limitation is bounded direct QEMU per-utility launch/screenshot retention in the existing harness.
+* Implementation commit: `Theme Trash utility for Sci-Fi mode`; the final SHA and divergence are recorded in the final handoff.
+
+### Remaining inventory after Phase 10G and Phase 10H recommendation
+
+No other meaningful, active, unthemed system utility comparable to Trash remains after this phase. The residual inventory is limited to:
+
+* Native App Debug Viewer, a hosted diagnostic/launch-mapping surface with an unrelated pre-existing dispatch issue;
+* HDInstaller, an unavailable installer/storage-mutation path rather than a normal v0.3 utility;
+* Console, which is active but shell-adjacent and belongs to a later shell-focused scope;
+* absent System Information/About/System Properties, Date/Time settings, power settings, service viewer, and boot/system-information GUI utilities, which must not be invented for theme work.
+
+Clock, Control Panel, Display Options, Navigator, Task Manager, Device Manager, Disk Manager, and the network utility surfaces remain covered by their prior phase records. The recommendation for Phase 10H is to **transition into high-visibility Sci-Fi visual polish**, including retained screenshot/focus-state coverage and consistency review, rather than continue utility theming. Further utility work should wait for a genuinely existing graphical utility or a separately authorized feature phase.
+
 ## Manual Validation Runbook
 
 * Start the hosted server executable and use `gui.start` to open the compositor.

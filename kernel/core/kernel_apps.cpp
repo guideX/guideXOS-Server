@@ -6874,13 +6874,38 @@ void TrashApp::shutdown()
 
 void TrashApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h)
 {
-    framebuffer::fill_rect(x, y, w, h, rgb(38, 40, 46));
+    const DesktopTheme& theme = GetCurrentDesktopTheme();
+    const DesktopControlTheme roles = GetBareMetalControlTheme(theme);
+    const bool sciFiTheme = theme.id == DesktopThemeId::SciFi;
+    const uint32_t bodyColor = sciFiTheme ? roles.panelBackground : rgb(38, 40, 46);
+    const uint32_t panelColor = sciFiTheme ? roles.raisedPanel : rgb(28, 30, 36);
+    const uint32_t rowColor = sciFiTheme ? roles.recessedField : panelColor;
+    const uint32_t primaryTextColor = sciFiTheme ? roles.primaryText : rgb(220, 225, 235);
+    const uint32_t secondaryTextColor = sciFiTheme ? roles.secondaryText : rgb(165, 170, 185);
+    const uint32_t headerTextColor = sciFiTheme ? roles.tableHeaderText : rgb(190, 195, 205);
+    const uint32_t selectionColor = sciFiTheme ? DesktopSelectionColor(roles, true) : rgb(70, 90, 135);
+    const uint32_t selectionTextColor = sciFiTheme ? roles.selectionText : primaryTextColor;
+    const bool statusWarning = m_status[0] &&
+        (strstr(m_status, "failed") != nullptr ||
+         strstr(m_status, "error") != nullptr);
+    const uint32_t statusTextColor = sciFiTheme
+        ? (statusWarning ? roles.statusWarning : roles.secondaryText)
+        : rgb(185, 190, 205);
+
+    framebuffer::fill_rect(x, y, w, h, bodyColor);
     if (w > 32 && h > 36) {
-        framebuffer::fill_rect(x + 16, y + 18, w - 32, h - 36, rgb(28, 30, 36));
+        framebuffer::fill_rect(x + 16, y + 18, w - 32, h - 36, panelColor);
+        if (sciFiTheme) {
+            framebuffer::fill_rect(x + 16, y + 18, w - 32, 1, roles.border);
+            framebuffer::fill_rect(x + 16, y + h - 19, w - 32, 1, roles.border);
+            framebuffer::fill_rect(x + 16, y + 18, 1, h - 36, roles.border);
+            framebuffer::fill_rect(x + w - 17, y + 18, 1, h - 36, roles.border);
+        }
     }
     if (m_entryCount == 0) {
-        appDrawText(x + 26, y + 34, "Trash is empty.", rgb(220, 225, 235));
-        appDrawText(x + 26, y + 58, m_status[0] ? m_status : "Deleted files will appear here.", rgb(165, 170, 185));
+        appDrawText(x + 26, y + 34, "Trash is empty.", primaryTextColor);
+        appDrawText(x + 26, y + 58, m_status[0] ? m_status : "Deleted files will appear here.",
+            sciFiTheme && m_status[0] && statusWarning ? roles.statusWarning : secondaryTextColor);
         if (m_confirmEmpty) m_confirmEmpty = false;
         updateButtons();
         return;
@@ -6900,49 +6925,84 @@ void TrashApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h)
     digits[di] = '\0';
     strappend(countText, digits, sizeof(countText));
     strappend(countText, " item(s).", sizeof(countText));
-    appDrawText(x + 26, y + 34, countText, rgb(220, 225, 235));
+    appDrawText(x + 26, y + 34, countText, primaryTextColor);
 
-    appDrawText(x + 46, y + 52, "Name", rgb(190, 195, 205));
-    appDrawText(x + 156, y + 52, "Original", rgb(190, 195, 205));
-    appDrawText(x + 238, y + 52, "Size", rgb(190, 195, 205));
-    appDrawText(x + 286, y + 52, "Type", rgb(190, 195, 205));
-    appDrawText(x + 350, y + 52, "Deleted", rgb(190, 195, 205));
+    if (sciFiTheme) {
+        framebuffer::fill_rect(x + 22, y + 48, 374, 20, roles.tableHeaderBackground);
+        framebuffer::fill_rect(x + 22, y + 68, 374, 1, roles.separator);
+    }
+    appDrawText(x + 46, y + 52, "Name", headerTextColor);
+    appDrawText(x + 156, y + 52, "Original", headerTextColor);
+    appDrawText(x + 238, y + 52, "Size", headerTextColor);
+    appDrawText(x + 286, y + 52, "Type", headerTextColor);
+    appDrawText(x + 350, y + 52, "Deleted", headerTextColor);
 
     for (int i = 0; i < m_entryCount && i < 6; ++i) {
         uint32_t rowY = y + 70 + (uint32_t)i * 20;
-        if (i == m_selectedIndex) framebuffer::fill_rect(x + 22, rowY - 2, 374, 18, rgb(70, 90, 135));
+        if (sciFiTheme) {
+            framebuffer::fill_rect(x + 22, rowY - 2, 374, 18,
+                i == m_selectedIndex ? selectionColor : rowColor);
+            if (i + 1 < m_entryCount && i < 5) {
+                framebuffer::fill_rect(x + 22, rowY + 17, 374, 1, roles.separator);
+            }
+        } else if (i == m_selectedIndex) {
+            framebuffer::fill_rect(x + 22, rowY - 2, 374, 18, selectionColor);
+        }
         if (!FileExplorerApp::drawThemedIcon(x + 26, rowY - 2, 16, iconForEntry(m_entries[i]))) FileExplorerApp::drawPlaceholderIcon(x + 26, rowY - 2, 16);
-        appDrawText(x + 46, rowY + 2, m_entries[i].name, rgb(220, 225, 235));
-        appDrawText(x + 156, rowY + 2, m_entries[i].originalFolder, rgb(165, 170, 185));
-        if (m_entries[i].isDir) appDrawText(x + 238, rowY + 2, "Folder", rgb(165, 170, 185));
+        const bool selected = i == m_selectedIndex;
+        appDrawText(x + 46, rowY + 2, m_entries[i].name, selected ? selectionTextColor : primaryTextColor);
+        appDrawText(x + 156, rowY + 2, m_entries[i].originalFolder, selected && sciFiTheme ? selectionTextColor : secondaryTextColor);
+        if (m_entries[i].isDir) appDrawText(x + 238, rowY + 2, "Folder", selected && sciFiTheme ? selectionTextColor : secondaryTextColor);
         else {
             char sizeText[24];
             formatSize(m_entries[i].size, sizeText, sizeof(sizeText));
-            appDrawText(x + 238, rowY + 2, sizeText, rgb(165, 170, 185));
+            appDrawText(x + 238, rowY + 2, sizeText, selected && sciFiTheme ? selectionTextColor : secondaryTextColor);
         }
-        appDrawText(x + 286, rowY + 2, typeForEntry(m_entries[i]), rgb(165, 170, 185));
-        appDrawText(x + 350, rowY + 2, m_entries[i].deletedText, rgb(165, 170, 185));
+        appDrawText(x + 286, rowY + 2, typeForEntry(m_entries[i]), selected && sciFiTheme ? selectionTextColor : secondaryTextColor);
+        appDrawText(x + 350, rowY + 2, m_entries[i].deletedText, selected && sciFiTheme ? selectionTextColor : secondaryTextColor);
     }
 
     if (m_status[0]) {
-        appDrawText(x + 26, y + 182, m_status, rgb(185, 190, 205));
+        appDrawText(x + 26, y + 182, m_status, statusTextColor);
     }
 
     if (m_confirmEmpty) {
-        framebuffer::fill_rect(x + 64, y + 70, 292, 104, rgb(55, 48, 48));
-        appDrawText(x + 84, y + 88, "Empty Trash?", rgb(240, 230, 230));
-        appDrawText(x + 84, y + 112, "This will permanently delete all", rgb(210, 205, 205));
-        appDrawText(x + 84, y + 130, "items in Trash.", rgb(210, 205, 205));
+        const uint32_t confirmPanel = sciFiTheme
+            ? BlendDesktopThemeColor(roles.panelBackground, roles.statusWarning, 22)
+            : rgb(55, 48, 48);
+        const uint32_t confirmHeading = sciFiTheme ? roles.statusWarning : rgb(240, 230, 230);
+        const uint32_t confirmText = sciFiTheme ? roles.secondaryText : rgb(210, 205, 205);
+        framebuffer::fill_rect(x + 64, y + 70, 292, 104, confirmPanel);
+        if (sciFiTheme) {
+            framebuffer::fill_rect(x + 64, y + 70, 292, 1, roles.statusWarning);
+            framebuffer::fill_rect(x + 64, y + 173, 292, 1, roles.statusWarning);
+            framebuffer::fill_rect(x + 64, y + 70, 1, 104, roles.statusWarning);
+            framebuffer::fill_rect(x + 355, y + 70, 1, 104, roles.statusWarning);
+        }
+        appDrawText(x + 84, y + 88, "Empty Trash?", confirmHeading);
+        appDrawText(x + 84, y + 112, "This will permanently delete all", confirmText);
+        appDrawText(x + 84, y + 130, "items in Trash.", confirmText);
     }
     if (m_showProperties && m_selectedIndex >= 0 && m_selectedIndex < m_entryCount) {
         TrashEntry& item = m_entries[m_selectedIndex];
-        framebuffer::fill_rect(x + 54, y + 52, 312, 138, rgb(45, 45, 55));
-        appDrawText(x + 74, y + 70, "Properties", rgb(230, 235, 245));
-        appDrawText(x + 74, y + 94, item.name, rgb(200, 205, 215));
-        appDrawText(x + 74, y + 112, typeForEntry(item), rgb(200, 205, 215));
-        appDrawText(x + 74, y + 130, item.originalPath, rgb(200, 205, 215));
-        appDrawText(x + 74, y + 148, item.trashRoot, rgb(200, 205, 215));
-        appDrawText(x + 74, y + 166, item.deletedText, rgb(200, 205, 215));
+        const uint32_t propertiesPanel = sciFiTheme
+            ? BlendDesktopThemeColor(roles.raisedPanel, roles.panelBackground, 18)
+            : rgb(45, 45, 55);
+        const uint32_t propertiesTitle = sciFiTheme ? roles.tableHeaderText : rgb(230, 235, 245);
+        const uint32_t propertiesText = sciFiTheme ? roles.primaryText : rgb(200, 205, 215);
+        framebuffer::fill_rect(x + 54, y + 52, 312, 138, propertiesPanel);
+        if (sciFiTheme) {
+            framebuffer::fill_rect(x + 54, y + 52, 312, 1, roles.border);
+            framebuffer::fill_rect(x + 54, y + 189, 312, 1, roles.border);
+            framebuffer::fill_rect(x + 54, y + 52, 1, 138, roles.border);
+            framebuffer::fill_rect(x + 365, y + 52, 1, 138, roles.border);
+        }
+        appDrawText(x + 74, y + 70, "Properties", propertiesTitle);
+        appDrawText(x + 74, y + 94, item.name, propertiesText);
+        appDrawText(x + 74, y + 112, typeForEntry(item), propertiesText);
+        appDrawText(x + 74, y + 130, item.originalPath, propertiesText);
+        appDrawText(x + 74, y + 148, item.trashRoot, propertiesText);
+        appDrawText(x + 74, y + 166, item.deletedText, propertiesText);
     }
     updateButtons();
 }
