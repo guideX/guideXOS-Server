@@ -1951,6 +1951,141 @@ No other meaningful, active, unthemed system utility comparable to Trash remains
 
 Clock, Control Panel, Display Options, Navigator, Task Manager, Device Manager, Disk Manager, and the network utility surfaces remain covered by their prior phase records. The recommendation for Phase 10H is to **transition into high-visibility Sci-Fi visual polish**, including retained screenshot/focus-state coverage and consistency review, rather than continue utility theming. Further utility work should wait for a genuinely existing graphical utility or a separately authorized feature phase.
 
+## Phase 10H - Sci-Fi Visual Consistency and High-Visibility Polish
+
+### Starting state and prioritized audit
+
+Phase 10H began on 2026-09-06 from the Phase 10G closeout with the explicit goal of making the already-themed system feel like one visual system rather than adding another isolated utility:
+
+* Repository: `D:\dev\guideXOSServerV0.3_SCI_FI_THEME`
+* Branch: `v0.3_SCI_FI_THEME`
+* Starting HEAD: `02902306901f36678dde15c29e20c63b7a50898d`
+* Baseline commit present in history: `02902306 Theme Trash utility for Sci-Fi mode`
+* Upstream: `origin/v0.3_SCI_FI_THEME`
+* Starting worktree: clean, with no staged or untracked files
+* Starting divergence measured against the configured upstream: `0 ahead / 0 behind`
+
+The supplied Phase 10G closeout described a historical `1 ahead / 0 behind` state and said that nothing was pushed. The Phase 10H starting audit found that `02902306` is already present at the configured origin, so the actual starting state for this phase was equal to upstream. Nothing was pushed during Phase 10H.
+
+The audit reviewed the desktop, taskbar, Start menu, hosted window renderer, generic hosted widgets, generic bare-metal framebuffer compositor, File Explorer, Navigator, Task Manager, Device Manager, Disk Manager, Network utilities, Trash, Control Panel/Display Options, Notepad, Calculator, common dialogs/menus, and application launch/shutdown/notification surfaces. It also searched the shared role definitions and major consumers for local Sci-Fi colors.
+
+### Starting audit and prioritized findings
+
+The highest-value defects were concentrated at the shared compositor boundary:
+
+1. The generic bare-metal framebuffer compositor still used fixed gray/blue literals for Sci-Fi window bodies, title bars, borders, close buttons, default text, and Start-menu surfaces.
+2. Those literals made bare-metal chrome visibly diverge from the already themed hosted renderer and from the kernel compositor’s shared control roles.
+3. Bare-metal Start-menu selection, idle rows, panel borders, and footer buttons did not follow the same hierarchy as hosted Start.
+4. Generic hosted widgets have hover, pressed, and enabled/disabled publication, but no safe generic keyboard-focus publication. Adding a new cross-system focus protocol would have exceeded a visual polish pass, so this limitation is documented and existing app-owned focus indicators are retained.
+5. A smaller set of hosted shell fallbacks, including taskbar clock/show-desktop and generic popup text, still used local literals. These were safe, recurring consumers of existing primary, secondary, panel, and control roles.
+
+The first three findings were prioritized because they affected the shell/application boundary and hosted/bare-metal parity. The focus limitation was recorded rather than expanded into input plumbing. No one-pixel geometry issue, obscure diagnostic surface, or unrelated application feature was promoted above these recurring defects.
+
+### Implementation boundary
+
+The implementation remains inside the existing architecture. `DesktopTheme`, `DesktopControlTheme`, `GetDesktopControlTheme`, `GetBareMetalControlTheme`, `DesktopControlState`, shared fill/border/text roles, `DesktopSelectionColor`, and existing semantic status roles remain authoritative. No second theme system, new configuration path, new focus protocol, or new application-local Sci-Fi palette was created.
+
+The shared compositor now applies those roles to the affected hosted shell fallbacks and to the generic bare-metal framebuffer path. The bare-metal path uses small local adapter helpers only to preserve its existing rendering API while expressing the same title-bar, body, border, close-button, text, and shadow relationships as hosted chrome. Classic branches retain their pre-Phase-10H literals and geometry. No application lifecycle, input routing, hit testing, filesystem, networking, storage, or process-management behavior changed.
+
+### Focus-state consistency
+
+Existing focus publication was audited across buttons, edit fields, lists/tables, tabs, checkboxes, radio controls, menus, and keyboard-driven application surfaces. Existing app-owned focus indicators and the compositor’s current focused-window treatment remain in use. Shared focused control borders continue to resolve through `DesktopControlState::Focused` where a control publishes that state.
+
+The generic widget model still exposes hover/pressed/enabled state but does not expose a universal keyboard-focus field. This is a documented limitation, not a Phase 10H regression: generic focus publication would require invasive input/state plumbing. The focused-window title-bar highlight and existing application-level focus indicators remain visible and restrained.
+
+### Hover, pressed, disabled, and selected states
+
+The hosted Start menu’s selected rows, hover rows, right-column hover, All Programs, and Shutdown controls now use the shared selection and control-state roles. The bare-metal Start menu uses the same active selection, idle panel, border, and control relationships. Bare-metal close-button hover and pressed flags now affect the Sci-Fi close-button fill without changing hit testing or close behavior.
+
+The existing generic control lookup continues to distinguish normal, hover, pressed, focused, and disabled text/border/fill roles. Focused borders remain distinct from hover borders, pressed fills remain distinct from hover fills, and disabled text remains readable while visibly de-emphasized. Small focused role assertions were added to `tests/desktop_control_theme_test.cpp` to protect these recurring relationships.
+
+### Selection consistency
+
+Selection continues to use `DesktopSelectionColor` and `selectionText` across the previously themed File Explorer, Navigator-owned lists where applicable, Task Manager, Device Manager, Disk Manager, Network lists, and Trash surfaces. Phase 10H extends that same active-selection relationship to hosted and bare-metal Start rows. Idle rows continue to use raised/panel roles, so selection is distinct from hover and from an unselected panel.
+
+No per-application selection palette or new inactive-selection concept was introduced.
+
+### Panel and background hierarchy
+
+Sci-Fi now maintains a deliberate hierarchy of desktop, window client, panel, recessed input/list, table-header, selected-row, menu/dialog, and status/footer surfaces through the existing role values. The generic bare-metal window client uses `windowBackground`; bare-metal Start uses `panelBackground`; idle rows use `raisedPanel`; inputs and lists retain recessed roles; selected rows use the active selection role. The hosted taskbar/Start fallbacks use the corresponding control and panel roles.
+
+The pass did not flatten surfaces into one near-black value and did not add a large set of near-duplicate colors. Classic background values remain untouched.
+
+### Borders, separators, tables, and headers
+
+Bare-metal generic window borders now follow the same focused/inactive relationship as hosted chrome, with a restrained accent blend for the active boundary and a muted blend for inactive windows. The Sci-Fi title-bar highlight is a single existing-style edge treatment, not a new effect system. Start borders, footer button borders, desktop icon frames, and shell separators now use the existing border/control-hover-border/separator roles where they were previously local literals.
+
+Table headers, table-header text, selected rows, separators, and secondary text in Task Manager, Device Manager, Disk Manager, Trash, and the other previously covered list surfaces already consume the shared roles. Phase 10H did not redesign table geometry or introduce another header palette.
+
+### Semantic status colors
+
+Normal/healthy, warning, error, inactive, disabled, and unknown semantics were reviewed in the existing utilities. Existing shared status roles, including `statusWarning`, remain authoritative. No unrelated status was invented and no new status token was added because the recurring inconsistency was resolved by the existing roles and prior utility coverage.
+
+### Icon legibility
+
+The bounded icon pass found no need for a universal icon redesign or asset pipeline. Bare-metal desktop icon frames now use the Sci-Fi control-hover border and icon labels use the shared primary text role, improving bounded contrast on the themed desktop. Hosted taskbar/Start/toolbar/File Explorer/Navigator and utility icons retain their existing assets and surrounding treatment. No application identity or icon set was changed.
+
+Remaining icon work is limited to occasional asset-specific legibility issues that would justify a dedicated future icon pass, not more Phase 10H palette work.
+
+### Wallpaper and background coupling
+
+No new wallpaper subsystem or theme-specific asset coupling was needed. The existing desktop theme background treatment remains theme-aware where already supported, while user wallpaper behavior remains global. A Sci-Fi-only wallpaper asset was not introduced, so Classic does not depend on Sci-Fi resources. Wallpaper coupling remains optional and deferred.
+
+### Typography
+
+No font engine, font asset, or global text metric change was made. Generic hosted and bare-metal fallback text now follows the shared primary/secondary/title roles, including taskbar labels, clock/date, desktop labels, Start text, and generic window text. Existing font roles and geometry remain stable.
+
+### Window chrome and shell/application cohesion
+
+Hosted and bare-metal window interiors now meet the title bar, client background, border, close-button, text, shadow, and active/inactive hierarchy through the same theme relationships. The shared compositor also aligns taskbar labels, clock/date, show-desktop, Start rows, Start footer controls, desktop icon frames, and generic popup/default text with the themed application language.
+
+This gives the desktop, taskbar, Start, window chrome, Navigator, Task Manager, Device Manager, Disk Manager, Network utilities, Trash, settings, Notepad, Calculator, dialogs, menus, and input/list surfaces one consistent Sci-Fi palette without expanding any application’s behavior. The goal is shared design language, not pixel-identical output across different renderers.
+
+### Hosted and bare-metal parity
+
+The principal parity defect was the generic bare-metal framebuffer fallback, which bypassed shared role relationships even though the hosted compositor and kernel application surfaces were already largely themed. Its window body/title/border/close-button/text and Start-menu routes now consume the same `DesktopTheme`/`DesktopControlTheme` relationships as hosted rendering. A small adapter layer preserves renderer-specific APIs and Classic fallbacks.
+
+Parity is semantic and visual in hierarchy; exact pixels remain renderer-dependent because hosted GDI-style drawing and bare-metal framebuffer drawing have different primitives.
+
+### Visual evidence improvement and limitations
+
+The existing deterministic theme smoke now checks the Phase 10H audit record, hosted shared-role consumption, bare-metal chrome and Start role consumption, Classic compatibility boundary, the documented focus limitation, and deferred high-cost effects. The focused shared-control test now checks normal/hover/pressed/focused/disabled distinctions and active selection against an idle panel.
+
+Hosted build/runtime checks and the canonical staged-ESP startup path remain the strongest available product evidence. The current QEMU/startup harness reliably proves theme loading, desktop startup, and serial/runtime markers, but does not reliably launch and retain screenshots for every Start/system-object application or modal interaction. Phase 10H did not add production behavior or an elaborate screenshot-diff framework solely to work around that limitation. Representative source/runtime evidence therefore covers shell, generic chrome, Start, and technical-utility role consumers, while direct per-application QEMU screenshot retention remains a minor harness limitation.
+
+### Classic and Sci-Fi compatibility
+
+Classic remains the default. Missing, invalid, unspecified, and explicit Classic theme configuration continue to normalize to Classic; persisted Classic remains Classic. Sci-Fi remains opt-in through the existing `scifi` token and shared theme lookup. Classic branches in the touched compositor paths retain their prior colors, geometry, and interaction behavior. No geometry changes and no input semantics changes were introduced by this visual pass.
+
+### Validation results
+
+The following checks were run or are the authoritative validation targets for this closeout:
+
+* `build.bat`: PASS; hosted executable rebuilt successfully.
+* Focused `desktop_control_theme_test.cpp` with the repository’s `-iquote .` include mode: PASS.
+* `smoke-theme-system.ps1 -SkipBuild`: PASS, including the Phase 10H source/documentation probes.
+* `mingw32-make -C kernel ARCH=amd64 -j2`: PASS; the bare-metal target was up to date.
+* `build.ps1 -Arch amd64`: PASS through the canonical AMD64 release path; the first sandboxed attempt was retried with elevated access because Visual Studio FileTracker denied access.
+* `smoke-startup-appmodel-regression.ps1 -SkipBuild`: PASS for application-model coverage.
+* `smoke-desktop-startup-sync.ps1 -DesktopThemeId classic -TimeoutSeconds 90`: PASS with disposable/staged ESP handling; serial evidence recorded `loaded desktop theme=classic source=primary`.
+* `smoke-desktop-startup-sync.ps1 -DesktopThemeId scifi -TimeoutSeconds 90`: PASS with disposable/staged ESP handling; serial evidence recorded `loaded desktop theme=scifi source=primary`.
+* `smoke-live-directory-desktop-status.ps1`: PASS.
+* `smoke-hosted-display-runtime.ps1`: PASS across normal, synthetic-only, and dual-window modes; its first sandboxed attempt was retried elevated because the harness needed a temporary git index refresh.
+* `smoke-bootinfo-framebuffer-array.ps1`: PASS.
+* `smoke-virtio-gpu-input-routing.ps1`: PASS.
+* `test-build-wrapper.ps1`: PASS.
+* `git diff --check`: PASS at closeout.
+
+No functional defect was discovered or fixed. The direct source defect fixed by this phase was visual: generic bare-metal Sci-Fi chrome and Start surfaces leaked pre-theme gray/blue literals and no longer matched the hosted/shared role hierarchy.
+
+### Deferred work and remaining visual gaps
+
+The following remain explicitly deferred: blur, glass/acrylic, transparency architecture, animation, a shadow-engine rewrite, rounded-window hit-testing architecture, universal icon replacement, font-engine replacement, major gradients, and wallpaper-subsystem work. The documented generic keyboard-focus publication gap, occasional asset-specific icon legibility issues, global wallpaper coupling, and bounded direct per-application QEMU screenshot retention are the remaining obvious limitations.
+
+These limitations do not create a mandatory visual blocker for v0.3. The recommendation is **Outcome B — Phase 10H complete with minor limitations**: Sci-Fi is visually coherent enough for v0.3 release after this pass, with the evidence/focus-plumbing limitations recorded. Phase 10I should be optional follow-up work focused on a safe generic focus-state/evidence improvement or a dedicated icon-legibility pass, not another utility-by-utility theming campaign. No additional mandatory polish phase is recommended before v0.3 visual closeout.
+
+Implementation commit subject: `Polish Sci-Fi visual consistency`; the exact SHA and final divergence are recorded in the final handoff. Nothing was pushed during Phase 10H.
+
 ## Manual Validation Runbook
 
 * Start the hosted server executable and use `gui.start` to open the compositor.

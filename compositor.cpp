@@ -4489,6 +4489,7 @@ namespace gxos {
                 // offscreen buffer, then compose the window stack on top.
                 const DesktopTheme& theme = GetCurrentDesktopTheme();
                 const bool sciFiTheme = hostedSciFiTheme(theme);
+                const DesktopControlTheme controlRoles = GetDesktopControlTheme(theme);
                 auto colorFromTheme = [](uint32_t value) -> COLORREF {
                     return RGB((value >> 16) & 0xFF, (value >> 8) & 0xFF, value & 0xFF);
                 };
@@ -4647,13 +4648,16 @@ namespace gxos {
                     }
                     for (const auto& tx : winfo.positionedTexts) {
                         SystemFont::DrawText(dc, contentX + tx.x, contentY + tx.y, tx.text.c_str(), (int)tx.text.size(),
-                            tx.hasColor ? RGB(tx.r, tx.g, tx.b) : RGB(220, 220, 220), FontRole::Default);
+                            tx.hasColor
+                                ? RGB(tx.r, tx.g, tx.b)
+                                : colorFromTheme(sciFiTheme ? controlRoles.primaryText : 0xFFDCDCDCu),
+                            FontRole::Default);
                     }
                     int ty = contentY;
                     for (const auto& tx : winfo.texts) {
                         const COLORREF textColor = isSciFiDialogSurface(winfo, theme)
                             ? colorFromTheme(theme.titleBarText)
-                            : RGB(220, 220, 220);
+                            : colorFromTheme(sciFiTheme ? controlRoles.primaryText : 0xFFDCDCDCu);
                         drawUiText(dc, contentX, ty, tx, textColor, FontRole::Default);
                         ty += uiTextHeight(FontRole::Default);
                     }
@@ -4767,7 +4771,7 @@ namespace gxos {
                         }
                         // Active indicator line at bottom for focused window
                         if (id == g_focus) { HBRUSH ind = CreateSolidBrush(colorFromTheme(sciFiTheme ? WindowRenderer::BlendThemeColor(theme.accent, theme.mutedAccent, 14) : theme.accent)); RECT indR{ br.left + 2,br.bottom - 3,br.right - 2,br.bottom - 1 }; FillRect(dc, &indR, ind); DeleteObject(ind); }
-                        RECT iconRect{ br.left + 4, br.top + 4, br.left + 20, br.top + 20 }; drawBitmapCentered(dc, it->second.taskbarIcon, iconRect); if (!taskbarVertical) drawUiText(dc, br.left + theme.taskbarItemPadding + 12, br.top + 8, label, RGB(230, 230, 240), FontRole::Small); if (taskbarVertical) btnY += bh + 4; else btnX += bw + theme.taskbarItemPadding / 2;
+                        RECT iconRect{ br.left + 4, br.top + 4, br.left + 20, br.top + 20 }; drawBitmapCentered(dc, it->second.taskbarIcon, iconRect); if (!taskbarVertical) drawUiText(dc, br.left + theme.taskbarItemPadding + 12, br.top + 8, label, sciFiTheme ? colorFromTheme(controlRoles.primaryText) : RGB(230, 230, 240), FontRole::Small); if (taskbarVertical) btnY += bh + 4; else btnX += bw + theme.taskbarItemPadding / 2;
                     }
                     // System tray area (before clock)
                     if (!taskbarVertical) drawSystemTray(dc, cr, taskbarH);
@@ -4783,14 +4787,16 @@ namespace gxos {
                         int clockX = tb.right - clockW - theme.taskbarPadding;
                         int timeY = tb.top + 6;
                         int dateY = timeY + lineH - 1;
-                        drawUiText(dc, clockX + (clockW - timeW) / 2, timeY, timeText.c_str(), (int)timeText.size(), RGB(200, 200, 210), FontRole::Small);
-                        drawUiText(dc, clockX + (clockW - dateW) / 2, dateY, dateText.c_str(), (int)dateText.size(), RGB(150, 150, 165), FontRole::Small);
+                        drawUiText(dc, clockX + (clockW - timeW) / 2, timeY, timeText.c_str(), (int)timeText.size(), sciFiTheme ? colorFromTheme(controlRoles.primaryText) : RGB(200, 200, 210), FontRole::Small);
+                        drawUiText(dc, clockX + (clockW - dateW) / 2, dateY, dateText.c_str(), (int)dateText.size(), sciFiTheme ? colorFromTheme(controlRoles.secondaryText) : RGB(150, 150, 165), FontRole::Small);
                     }
                     // Show Desktop button (thin sliver on far right, matching Legacy)
                     {
                         int sdW = 6; RECT sdRect = taskbarVertical ? RECT{ tb.left, tb.bottom - sdW, tb.right, tb.bottom } : RECT{ tb.right - sdW, tb.top, tb.right, tb.bottom };
                         bool hoverSD = (cursor.x >= sdRect.left && cursor.y >= sdRect.top && cursor.x <= sdRect.right && cursor.y <= sdRect.bottom);
-                        HBRUSH sdBrush = CreateSolidBrush(hoverSD ? RGB(70, 80, 100) : RGB(50, 50, 60));
+                        HBRUSH sdBrush = CreateSolidBrush(sciFiTheme
+                            ? colorFromTheme(hoverSD ? controlRoles.controlHover : controlRoles.raisedPanel)
+                            : (hoverSD ? RGB(70, 80, 100) : RGB(50, 50, 60)));
                         FillRect(dc, &sdRect, sdBrush); DeleteObject(sdBrush);
                     }
                     // Taskbar button tooltip (drawn last so it overlaps everything)
@@ -4911,10 +4917,10 @@ namespace gxos {
                             bool isHover = !freezeStartMenuHover && (cursor.x >= r.left && cursor.x <= r.right && cursor.y >= r.top && cursor.y <= r.bottom);
                             const uint32_t rowColor = sciFiTheme
                                 ? (isSel
-                                    ? WindowRenderer::BlendThemeColor(hostedPanelSurfaceColor(theme), theme.accent, 22)
+                                    ? DesktopSelectionColor(controlRoles, true)
                                     : (isHover
-                                        ? WindowRenderer::BlendThemeColor(hostedPanelSurfaceColor(theme), theme.mutedAccent, 16)
-                                        : WindowRenderer::BlendThemeColor(hostedPanelSurfaceColor(theme), theme.windowBorder, 8)))
+                                        ? DesktopControlFillColor(controlRoles, DesktopControlState::Hover)
+                                        : controlRoles.raisedPanel))
                                 : (isSel ? RGB(80, 100, 150) : (isHover ? RGB(70, 90, 130) : RGB(55, 55, 70)));
                             HBRUSH rb = CreateSolidBrush(colorFromTheme(rowColor));
                             FillRect(dc, &r, rb);
@@ -4928,7 +4934,7 @@ namespace gxos {
                             std::string txt = g_startMenuAllProgsSorted[i];
                             int textX = r.left + 4;
                             drawStartMenuIcon(dc, r, txt, textX);
-                            drawUiText(dc, textX, centeredUiTextY(r.top, rowH), txt, sciFiTheme ? RGB(232, 236, 246) : RGB(230, 230, 230), FontRole::Default);
+                            drawUiText(dc, textX, centeredUiTextY(r.top, rowH), txt, sciFiTheme ? colorFromTheme(controlRoles.primaryText) : RGB(230, 230, 230), FontRole::Default);
                             y += rowH; row++;
                         }
                     } else {
@@ -4939,10 +4945,10 @@ namespace gxos {
                             bool isHover = !freezeStartMenuHover && (cursor.x >= r.left && cursor.x <= r.right && cursor.y >= r.top && cursor.y <= r.bottom);
                             const uint32_t rowColor = sciFiTheme
                                 ? (isSel
-                                    ? WindowRenderer::BlendThemeColor(hostedPanelSurfaceColor(theme), theme.accent, 22)
+                                    ? DesktopSelectionColor(controlRoles, true)
                                     : (isHover
-                                        ? WindowRenderer::BlendThemeColor(hostedPanelSurfaceColor(theme), theme.mutedAccent, 16)
-                                        : WindowRenderer::BlendThemeColor(hostedPanelSurfaceColor(theme), theme.windowBorder, 8)))
+                                        ? DesktopControlFillColor(controlRoles, DesktopControlState::Hover)
+                                        : controlRoles.raisedPanel))
                                 : (isSel ? RGB(80, 100, 150) : (isHover ? RGB(70, 90, 130) : RGB(55, 55, 70)));
                             HBRUSH rb = CreateSolidBrush(colorFromTheme(rowColor));
                             FillRect(dc, &r, rb);
@@ -4956,7 +4962,7 @@ namespace gxos {
                             std::string txt = g_startMenuPinnedRecent[i];
                             int textX = r.left + 4;
                             drawStartMenuIcon(dc, r, txt, textX);
-                            drawUiText(dc, textX, centeredUiTextY(r.top, rowH), txt, sciFiTheme ? RGB(232, 236, 246) : RGB(230, 230, 230), FontRole::Default);
+                            drawUiText(dc, textX, centeredUiTextY(r.top, rowH), txt, sciFiTheme ? colorFromTheme(controlRoles.primaryText) : RGB(230, 230, 230), FontRole::Default);
                             y += rowH; row++;
                         }
                     }
@@ -4964,18 +4970,20 @@ namespace gxos {
                     // Right column - shortcuts
                     int rcX = sm.left + leftColW + 4;
                     int rcY = sm.top + 6;
-                    SetTextColor(dc, RGB(200, 200, 200));
+                    SetTextColor(dc, sciFiTheme ? colorFromTheme(controlRoles.secondaryText) : RGB(200, 200, 200));
                     for (const auto& shortcut : kStartMenuRightColumnShortcuts) {
                         RECT rc{ rcX, rcY, sm.right - 6, rcY + rowH };
                         bool isHover = !freezeStartMenuHover && (cursor.x >= rc.left && cursor.x <= rc.right && cursor.y >= rc.top && cursor.y <= rc.bottom);
                         if (isHover) {
-                            HBRUSH hb = CreateSolidBrush(colorFromTheme(sciFiTheme ? WindowRenderer::BlendThemeColor(hostedPanelSurfaceColor(theme), theme.accent, 18) : RGB(70, 90, 130)));
+                            HBRUSH hb = CreateSolidBrush(colorFromTheme(sciFiTheme
+                                ? DesktopControlFillColor(controlRoles, DesktopControlState::Hover)
+                                : RGB(70, 90, 130)));
                             FillRect(dc, &rc, hb);
                             DeleteObject(hb);
                         }
                         int textX = rc.left + 6;
                         drawStartMenuIcon(dc, rc, shortcut.label, textX);
-                        drawUiText(dc, textX, centeredUiTextY(rc.top, rowH), shortcut.label, static_cast<int>(std::strlen(shortcut.label)), sciFiTheme ? RGB(220, 228, 244) : RGB(200, 200, 200), FontRole::Default);
+                        drawUiText(dc, textX, centeredUiTextY(rc.top, rowH), shortcut.label, static_cast<int>(std::strlen(shortcut.label)), sciFiTheme ? colorFromTheme(controlRoles.secondaryText) : RGB(200, 200, 200), FontRole::Default);
                         rcY += rowH + kStartMenuRowGap;
                     }
 
@@ -4984,20 +4992,20 @@ namespace gxos {
                     RECT allProgBtn{ sm.left + 6, btnY, sm.left + leftColW - 6, btnY + 24 };
                     bool overAllProg = !freezeStartMenuHover && (cursor.x >= allProgBtn.left && cursor.x <= allProgBtn.right && cursor.y >= allProgBtn.top && cursor.y <= allProgBtn.bottom);
                     HBRUSH apb = CreateSolidBrush(colorFromTheme(sciFiTheme
-                        ? (overAllProg
-                            ? WindowRenderer::BlendThemeColor(hostedPanelSurfaceColor(theme), theme.mutedAccent, 20)
-                            : WindowRenderer::BlendThemeColor(hostedPanelSurfaceColor(theme), theme.windowBorder, 12))
+                        ? DesktopControlFillColor(controlRoles,
+                            overAllProg ? DesktopControlState::Hover : DesktopControlState::Normal)
                         : (overAllProg ? RGB(70, 80, 100) : RGB(60, 60, 75))));
                     FillRect(dc, &allProgBtn, apb); DeleteObject(apb);
                     if (sciFiTheme) {
-                        HBRUSH apbBorder = CreateSolidBrush(colorFromTheme(hostedPanelBorderColor(theme)));
+                        HBRUSH apbBorder = CreateSolidBrush(colorFromTheme(DesktopControlBorderColor(controlRoles,
+                            overAllProg ? DesktopControlState::Hover : DesktopControlState::Normal)));
                         FrameRect(dc, &allProgBtn, apbBorder);
                         DeleteObject(apbBorder);
                     } else {
                         FrameRect(dc, &allProgBtn, (HBRUSH)GetStockObject(WHITE_BRUSH));
                     }
                     const char* btnText = g_startMenuAllProgs ? "Recent Programs" : "All Programs";
-                    drawUiText(dc, allProgBtn.left + 8, centeredUiTextY(allProgBtn.top, allProgBtn.bottom - allProgBtn.top), btnText, sciFiTheme ? RGB(232, 236, 246) : RGB(230, 230, 230), FontRole::Default);
+                    drawUiText(dc, allProgBtn.left + 8, centeredUiTextY(allProgBtn.top, allProgBtn.bottom - allProgBtn.top), btnText, sciFiTheme ? colorFromTheme(controlRoles.controlText) : RGB(230, 230, 230), FontRole::Default);
 
                     // Power menu area (bottom-right)
                     int shutdownBtnW = 80;
@@ -5005,19 +5013,19 @@ namespace gxos {
                     RECT shutdownBtn{ sm.right - shutdownBtnW - 30, btnY, sm.right - 30, btnY + shutdownBtnH };
                     bool overShutdown = !freezeStartMenuHover && (cursor.x >= shutdownBtn.left && cursor.x <= shutdownBtn.right && cursor.y >= shutdownBtn.top && cursor.y <= shutdownBtn.bottom);
                     HBRUSH sdb = CreateSolidBrush(colorFromTheme(sciFiTheme
-                        ? (overShutdown
-                            ? WindowRenderer::BlendThemeColor(hostedPanelSurfaceColor(theme), theme.accent, 18)
-                            : WindowRenderer::BlendThemeColor(hostedPanelSurfaceColor(theme), theme.windowBorder, 12))
+                        ? DesktopControlFillColor(controlRoles,
+                            overShutdown ? DesktopControlState::Hover : DesktopControlState::Normal)
                         : (overShutdown ? RGB(80, 40, 40) : RGB(60, 60, 75))));
                     FillRect(dc, &shutdownBtn, sdb); DeleteObject(sdb);
                     if (sciFiTheme) {
-                        HBRUSH sbBorder = CreateSolidBrush(colorFromTheme(hostedPanelBorderColor(theme)));
+                        HBRUSH sbBorder = CreateSolidBrush(colorFromTheme(DesktopControlBorderColor(controlRoles,
+                            overShutdown ? DesktopControlState::Hover : DesktopControlState::Normal)));
                         FrameRect(dc, &shutdownBtn, sbBorder);
                         DeleteObject(sbBorder);
                     } else {
                         FrameRect(dc, &shutdownBtn, (HBRUSH)GetStockObject(WHITE_BRUSH));
                     }
-                    drawUiText(dc, shutdownBtn.left + 10, centeredUiTextY(shutdownBtn.top, shutdownBtn.bottom - shutdownBtn.top), "Shutdown", 8, sciFiTheme ? RGB(232, 236, 246) : RGB(230, 230, 230), FontRole::Default);
+                    drawUiText(dc, shutdownBtn.left + 10, centeredUiTextY(shutdownBtn.top, shutdownBtn.bottom - shutdownBtn.top), "Shutdown", 8, sciFiTheme ? colorFromTheme(controlRoles.controlText) : RGB(230, 230, 230), FontRole::Default);
                 }
 
                 // Right-click context menus are top-level popups over Start and desktop surfaces.
@@ -7798,6 +7806,50 @@ namespace gxos {
             return open ? BlendDesktopThemeColor(theme.taskbarBorder, theme.accent, 42)
                         : BlendDesktopThemeColor(theme.taskbarBorder, theme.windowBorder, 18);
         }
+
+        // Keep the generic framebuffer compositor on the same chrome roles as
+        // the hosted renderer.  Classic returns the pre-Phase-10H literals so
+        // this parity cleanup cannot redesign the compatibility theme.
+        static uint32_t bareMetalWindowSurfaceColor(const DesktopTheme& theme) {
+            return theme.id == DesktopThemeId::SciFi ? theme.windowBackground : 0x00303840u;
+        }
+
+        static uint32_t bareMetalTitleBarColor(const DesktopTheme& theme, bool focused) {
+            if (theme.id != DesktopThemeId::SciFi) return focused ? 0x00466496u : 0x00505058u;
+            return focused ? theme.titleBarBackground : theme.taskbarBackground;
+        }
+
+        static uint32_t bareMetalTitleTextColor(const DesktopTheme& theme, bool focused) {
+            if (theme.id != DesktopThemeId::SciFi) return 0x00F0F0F0u;
+            return focused ? theme.titleBarText
+                : BlendDesktopThemeColor(theme.titleBarText, theme.taskbarBackground, 38);
+        }
+
+        static uint32_t bareMetalWindowBorderColor(const DesktopTheme& theme, bool focused) {
+            if (theme.id != DesktopThemeId::SciFi) return focused ? 0x006496C8u : 0x00606068u;
+            return focused
+                ? BlendDesktopThemeColor(theme.windowBorder, theme.accent, 72)
+                : BlendDesktopThemeColor(theme.windowBorder, theme.mutedAccent, 20);
+        }
+
+        static uint32_t bareMetalCloseButtonFillColor(const DesktopTheme& theme,
+                                                       bool focused,
+                                                       bool hover,
+                                                       bool pressed) {
+            if (theme.id != DesktopThemeId::SciFi) return 0x00C83232u;
+            const uint32_t chromeBase = bareMetalTitleBarColor(theme, focused);
+            return pressed
+                ? BlendDesktopThemeColor(chromeBase, 0xFFC83232u, 72)
+                : (hover
+                    ? BlendDesktopThemeColor(chromeBase, 0xFFAA4040u, 58)
+                    : BlendDesktopThemeColor(chromeBase, 0xFF782828u, 42));
+        }
+
+        static uint32_t bareMetalCloseButtonIconColor(const DesktopTheme& theme, bool focused) {
+            if (theme.id != DesktopThemeId::SciFi) return 0x00FFFFFFu;
+            return focused ? theme.titleBarText
+                : BlendDesktopThemeColor(theme.titleBarText, theme.taskbarBackground, 24);
+        }
         
         void Compositor::renderToFramebuffer() {
             if (!g_videoBackend) {
@@ -7834,6 +7886,7 @@ namespace gxos {
             const int fbH = std::max(1, viewport.height);
             const int pitch = g_videoBackend->getPitch();
             const DesktopTheme& theme = GetCurrentDesktopTheme();
+            const DesktopControlTheme controlRoles = GetBareMetalControlTheme(theme);
 
             {
                 std::lock_guard<std::mutex> lk(g_lock);
@@ -7888,7 +7941,8 @@ namespace gxos {
                 int iconX = ix + (cellW - iconW) / 2;
                 int iconY = iy + 6;
                 fbFillRect(pixels, pitch, fbW, fbH, iconX, iconY, iconW, iconH, iconColor);
-                fbDrawRect(pixels, pitch, fbW, fbH, iconX, iconY, iconW, iconH, 0x00B4B4C8);
+                fbDrawRect(pixels, pitch, fbW, fbH, iconX, iconY, iconW, iconH,
+                           sciFiTheme ? controlRoles.controlHoverBorder : 0x00B4B4C8u);
 
                 // Icon label
                 const char* label = item.label.c_str();
@@ -7898,7 +7952,8 @@ namespace gxos {
                 for (const std::string& line : labelLines) {
                     int labelW = fbMeasureText(line.c_str(), static_cast<int>(line.size()), FontRole::Small);
                     fbDrawText(pixels, pitch, fbW, fbH,
-                        ix + (cellW - labelW) / 2, lineY, line, 0x00E6E6F0, FontRole::Small);
+                        ix + (cellW - labelW) / 2, lineY, line,
+                        sciFiTheme ? controlRoles.primaryText : 0x00E6E6F0u, FontRole::Small);
                     lineY += lineH;
                 }
 
@@ -7921,30 +7976,46 @@ namespace gxos {
 
                     bool isFocused = (w.id == g_focus);
 
-                    // Window shadow
-                    fbFillRect(pixels, pitch, fbW, fbH, w.x + 4, w.y + 4, w.w, w.h, 0x00202020);
+                    // Window shadow.  Sci-Fi uses the same restrained dark
+                    // relationship as the hosted chrome; Classic keeps the
+                    // existing framebuffer fallback.
+                    const uint32_t shadowColor = sciFiTheme
+                        ? BlendDesktopThemeColor(theme.windowBorder, 0xFF000000u, 78)
+                        : 0x00202020u;
+                    fbFillRect(pixels, pitch, fbW, fbH, w.x + 4, w.y + 4, w.w, w.h, shadowColor);
 
                     // Window background
-                    fbFillRect(pixels, pitch, fbW, fbH, w.x, w.y, w.w, w.h, 0x00303840);
+                    fbFillRect(pixels, pitch, fbW, fbH, w.x, w.y, w.w, w.h,
+                               bareMetalWindowSurfaceColor(theme));
 
                     // Title bar
-                    uint32_t titleColor = isFocused ? 0x00466496 : 0x00505058;
+                    uint32_t titleColor = bareMetalTitleBarColor(theme, isFocused);
                     fbFillRect(pixels, pitch, fbW, fbH, w.x, w.y, w.w, titleBarH, titleColor);
+                    if (sciFiTheme && titleBarH > 1) {
+                        const uint32_t highlightColor = isFocused
+                            ? BlendDesktopThemeColor(theme.titleBarBackground, theme.accent, 48)
+                            : BlendDesktopThemeColor(theme.taskbarBackground, theme.mutedAccent, 28);
+                        fbFillRect(pixels, pitch, fbW, fbH, w.x, w.y, w.w, 1, highlightColor);
+                    }
 
                     // Title text
                     fbDrawText(pixels, pitch, fbW, fbH,
-                        w.x + theme.titleTextInset, w.y + (titleBarH - SystemFont::MeasureHeight(FontRole::Title)) / 2, w.title, 0x00F0F0F0, FontRole::Title);
+                        w.x + theme.titleTextInset, w.y + (titleBarH - SystemFont::MeasureHeight(FontRole::Title)) / 2, w.title,
+                        bareMetalTitleTextColor(theme, isFocused), FontRole::Title);
 
                     // Close button (X)
                     int btnSize = std::max(12, titleBarH - theme.controlPadding * 2);
                     int closeX = w.x + w.w - theme.controlPadding - btnSize;
                     int closeY = w.y + theme.controlPadding;
-                    fbFillRect(pixels, pitch, fbW, fbH, closeX, closeY, btnSize, btnSize, 0x00C83232);
+                    fbFillRect(pixels, pitch, fbW, fbH, closeX, closeY, btnSize, btnSize,
+                               bareMetalCloseButtonFillColor(theme, isFocused,
+                                   w.titleBtnCloseHover, w.titleBtnClosePressed));
                     BitmapFont::DrawStringToBuffer(pixels, pitch, fbW, fbH,
-                        closeX + (btnSize - 5) / 2, closeY + (btnSize - 7) / 2, "X", 1, 0x00FFFFFF);
+                        closeX + (btnSize - 5) / 2, closeY + (btnSize - 7) / 2, "X", 1,
+                        bareMetalCloseButtonIconColor(theme, isFocused));
 
                     // Window border
-                    uint32_t borderColor = isFocused ? 0x006496C8 : 0x00606068;
+                    uint32_t borderColor = bareMetalWindowBorderColor(theme, isFocused);
                     fbDrawRectThick(pixels, pitch, fbW, fbH, w.x, w.y, w.w, w.h, theme.windowBorderThickness, borderColor);
 
                     // Draw window content (images, widgets, text)
@@ -7995,7 +8066,9 @@ namespace gxos {
                     for (const auto& tx : w.positionedTexts) {
                         fbDrawText(pixels, pitch, fbW, fbH,
                             contentX + tx.x, contentY + tx.y, tx.text,
-                            tx.hasColor ? ((static_cast<uint32_t>(tx.r) << 16) | (static_cast<uint32_t>(tx.g) << 8) | tx.b) : 0x00DCDCDC,
+                            tx.hasColor
+                                ? ((static_cast<uint32_t>(tx.r) << 16) | (static_cast<uint32_t>(tx.g) << 8) | tx.b)
+                                : (sciFiTheme ? controlRoles.primaryText : 0x00DCDCDCu),
                             FontRole::Default);
                     }
 
@@ -8004,7 +8077,9 @@ namespace gxos {
                     for (const auto& tx : w.texts) {
                         fbDrawText(pixels, pitch, fbW, fbH,
                             contentX, ty, tx,
-                            isSciFiDialogSurface(w, theme) ? theme.titleBarText : 0x00DCDCDC,
+                            isSciFiDialogSurface(w, theme)
+                                ? theme.titleBarText
+                                : (sciFiTheme ? controlRoles.primaryText : 0x00DCDCDCu),
                             FontRole::Default);
                         ty += SystemFont::MeasureHeight(FontRole::Default);
                     }
@@ -8070,8 +8145,10 @@ namespace gxos {
                 int smRight = smLeft + smW;
                 int smBottom = smTop + smH;
 
-                fbFillRect(pixels, pitch, fbW, fbH, smLeft, smTop, smW, smH, 0x002D2D37);
-                fbDrawRect(pixels, pitch, fbW, fbH, smLeft, smTop, smW, smH, 0x00FFFFFF);
+                fbFillRect(pixels, pitch, fbW, fbH, smLeft, smTop, smW, smH,
+                           sciFiTheme ? controlRoles.panelBackground : 0x002D2D37u);
+                fbDrawRect(pixels, pitch, fbW, fbH, smLeft, smTop, smW, smH,
+                           sciFiTheme ? controlRoles.border : 0x00FFFFFFu);
 
                 int y = smTop + 4;
                 int row = 0;
@@ -8080,12 +8157,17 @@ namespace gxos {
                     for (size_t i = startIndex; i < g_startMenuAllProgsSorted.size() && row < maxRows; ++i) {
                         int rowX = smLeft + 4;
                         int rowW = leftColW - 8;
-                        uint32_t rowColor = ((int)i == g_startMenuSel) ? 0x00506496 : 0x00373746;
+                        uint32_t rowColor = sciFiTheme
+                            ? (((int)i == g_startMenuSel)
+                                ? DesktopSelectionColor(controlRoles, true)
+                                : controlRoles.raisedPanel)
+                            : (((int)i == g_startMenuSel) ? 0x00506496u : 0x00373746u);
                         fbFillRect(pixels, pitch, fbW, fbH, rowX, y, rowW, rowH, rowColor);
                         std::string txt = g_startMenuAllProgsSorted[i];
                         int textX = rowX + 4;
                         fbDrawStartMenuIcon(pixels, pitch, fbW, fbH, rowX, y, rowH, txt, textX);
-                        fbDrawText(pixels, pitch, fbW, fbH, textX, y + (rowH - SystemFont::MeasureHeight(FontRole::Default)) / 2, txt, 0x00E6E6E6, FontRole::Default);
+                        fbDrawText(pixels, pitch, fbW, fbH, textX, y + (rowH - SystemFont::MeasureHeight(FontRole::Default)) / 2, txt,
+                                   sciFiTheme ? controlRoles.primaryText : 0x00E6E6E6u, FontRole::Default);
                         y += rowH;
                         row++;
                     }
@@ -8093,12 +8175,17 @@ namespace gxos {
                     for (size_t i = startIndex; i < g_startMenuPinnedRecent.size() && row < maxRows; ++i) {
                         int rowX = smLeft + 4;
                         int rowW = leftColW - 8;
-                        uint32_t rowColor = ((int)i == g_startMenuSel) ? 0x00506496 : 0x00373746;
+                        uint32_t rowColor = sciFiTheme
+                            ? (((int)i == g_startMenuSel)
+                                ? DesktopSelectionColor(controlRoles, true)
+                                : controlRoles.raisedPanel)
+                            : (((int)i == g_startMenuSel) ? 0x00506496u : 0x00373746u);
                         fbFillRect(pixels, pitch, fbW, fbH, rowX, y, rowW, rowH, rowColor);
                         std::string txt = g_startMenuPinnedRecent[i];
                         int textX = rowX + 4;
                         fbDrawStartMenuIcon(pixels, pitch, fbW, fbH, rowX, y, rowH, txt, textX);
-                        fbDrawText(pixels, pitch, fbW, fbH, textX, y + (rowH - SystemFont::MeasureHeight(FontRole::Default)) / 2, txt, 0x00E6E6E6, FontRole::Default);
+                        fbDrawText(pixels, pitch, fbW, fbH, textX, y + (rowH - SystemFont::MeasureHeight(FontRole::Default)) / 2, txt,
+                                   sciFiTheme ? controlRoles.primaryText : 0x00E6E6E6u, FontRole::Default);
                         y += rowH;
                         row++;
                     }
@@ -8109,20 +8196,27 @@ namespace gxos {
                 for (const auto& shortcut : kStartMenuRightColumnShortcuts) {
                     int textX = rcX + 4;
                     fbDrawStartMenuIcon(pixels, pitch, fbW, fbH, rcX, rcY, rowH, shortcut.label, textX);
-                    fbDrawText(pixels, pitch, fbW, fbH, textX, rcY + (rowH - SystemFont::MeasureHeight(FontRole::Default)) / 2, shortcut.label, -1, 0x00C8C8C8, FontRole::Default);
+                    fbDrawText(pixels, pitch, fbW, fbH, textX, rcY + (rowH - SystemFont::MeasureHeight(FontRole::Default)) / 2, shortcut.label, -1,
+                               sciFiTheme ? controlRoles.secondaryText : 0x00C8C8C8u, FontRole::Default);
                     rcY += rowH + kStartMenuRowGap;
                 }
 
                 int btnY = smBottom - 30;
-                fbFillRect(pixels, pitch, fbW, fbH, smLeft + 6, btnY, leftColW - 12, 24, 0x003C3C4B);
-                fbDrawRect(pixels, pitch, fbW, fbH, smLeft + 6, btnY, leftColW - 12, 24, 0x00FFFFFF);
+                fbFillRect(pixels, pitch, fbW, fbH, smLeft + 6, btnY, leftColW - 12, 24,
+                           sciFiTheme ? DesktopControlFillColor(controlRoles, DesktopControlState::Normal) : 0x003C3C4Bu);
+                fbDrawRect(pixels, pitch, fbW, fbH, smLeft + 6, btnY, leftColW - 12, 24,
+                           sciFiTheme ? DesktopControlBorderColor(controlRoles, DesktopControlState::Normal) : 0x00FFFFFFu);
                 const char* btnText = g_startMenuAllProgs ? "Recent Programs" : "All Programs";
-                fbDrawText(pixels, pitch, fbW, fbH, smLeft + 14, btnY + (24 - SystemFont::MeasureHeight(FontRole::Default)) / 2, btnText, -1, 0x00E6E6E6, FontRole::Default);
+                fbDrawText(pixels, pitch, fbW, fbH, smLeft + 14, btnY + (24 - SystemFont::MeasureHeight(FontRole::Default)) / 2, btnText, -1,
+                           sciFiTheme ? controlRoles.controlText : 0x00E6E6E6u, FontRole::Default);
 
                 int shutdownBtnW = 80;
-                fbFillRect(pixels, pitch, fbW, fbH, smRight - shutdownBtnW - 30, btnY, shutdownBtnW, 24, 0x003C3C4B);
-                fbDrawRect(pixels, pitch, fbW, fbH, smRight - shutdownBtnW - 30, btnY, shutdownBtnW, 24, 0x00FFFFFF);
-                fbDrawText(pixels, pitch, fbW, fbH, smRight - shutdownBtnW - 20, btnY + (24 - SystemFont::MeasureHeight(FontRole::Default)) / 2, "Shutdown", -1, 0x00E6E6E6, FontRole::Default);
+                fbFillRect(pixels, pitch, fbW, fbH, smRight - shutdownBtnW - 30, btnY, shutdownBtnW, 24,
+                           sciFiTheme ? DesktopControlFillColor(controlRoles, DesktopControlState::Normal) : 0x003C3C4Bu);
+                fbDrawRect(pixels, pitch, fbW, fbH, smRight - shutdownBtnW - 30, btnY, shutdownBtnW, 24,
+                           sciFiTheme ? DesktopControlBorderColor(controlRoles, DesktopControlState::Normal) : 0x00FFFFFFu);
+                fbDrawText(pixels, pitch, fbW, fbH, smRight - shutdownBtnW - 20, btnY + (24 - SystemFont::MeasureHeight(FontRole::Default)) / 2, "Shutdown", -1,
+                           sciFiTheme ? controlRoles.controlText : 0x00E6E6E6u, FontRole::Default);
             }
 
             // Taskbar window buttons
@@ -8170,7 +8264,7 @@ namespace gxos {
             fbDrawText(pixels, pitch, fbW, fbH,
                 clockX + (clockW - dateW) / 2, fbH - taskbarH + 22, dateText.c_str(), -1,
                 theme.id == DesktopThemeId::SciFi
-                    ? BlendDesktopThemeColor(theme.titleBarText, theme.taskbarBackground, 38)
+                    ? controlRoles.secondaryText
                     : 0x009696A5u, FontRole::Small);
 
             // Present to hardware framebuffer

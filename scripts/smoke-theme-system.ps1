@@ -415,6 +415,15 @@ $trashBareMetalRolesMatch = Find-RawMatch $kernelApps 'TrashApp::draw\(.*?GetBar
 $trashBehaviorMatch = Find-RawMatch $trash 'restoreEntry\(.*?deleteEntryPermanently\(.*?purgeContents\('
 $phase10GNoNewRoleMatch = Find-RawMatch $planDoc 'Phase 10G.*?No new shared theme roles or APIs were required'
 $phase10GNoLocalPaletteMatch = Find-RawMatch $planDoc 'No Trash-specific Sci-Fi palette'
+$phase10HHeadingMatch = Find-FirstMatch $planDoc '## Phase 10H .*Sci-Fi Visual Consistency and High-Visibility Polish'
+$phase10HAuditMatch = Find-RawMatch $planDoc '### Starting audit and prioritized findings.*?bare-metal framebuffer compositor.*?generic keyboard-focus publication'
+$phase10HHostedRolesMatch = Find-RawMatch $compositor 'const DesktopControlTheme controlRoles = GetDesktopControlTheme\(theme\).*?DesktopSelectionColor\(controlRoles, true\).*?DesktopControlFillColor\(controlRoles, DesktopControlState::Hover\)'
+$phase10HBareMetalChromeMatch = Find-RawMatch $compositor 'bareMetalWindowSurfaceColor.*?bareMetalTitleBarColor.*?bareMetalTitleTextColor.*?bareMetalWindowBorderColor.*?bareMetalCloseButtonFillColor'
+$phase10HBareMetalStartMatch = Find-RawMatch $compositor 'controlRoles\.panelBackground.*?DesktopSelectionColor\(controlRoles, true\).*?controlRoles\.raisedPanel.*?DesktopControlBorderColor\(controlRoles, DesktopControlState::Normal\)'
+$phase10HTextParityMatch = Find-RawMatch $compositor 'sciFiTheme \? controlRoles\.primaryText.*?controlRoles\.secondaryText'
+$phase10HClassicBoundaryMatch = Find-RawMatch $planDoc 'Classic branches.*?Sci-Fi remains opt-in.*?[Nn]o geometry.*?no input'
+$phase10HFocusLimitMatch = Find-RawMatch $planDoc 'generic widget model.*?universal keyboard-focus field.*?documented limitation'
+$phase10HDeferredEffectsMatch = Find-RawMatch $planDoc 'blur.*?glass.*?animation.*?icon redesign'
 
 $checks = @(
     [pscustomobject]@{ Name = "theme header exists"; Pass = (Test-Path -LiteralPath $themeHeader); Match = $null },
@@ -708,7 +717,16 @@ $checks = @(
     [pscustomobject]@{ Name = "phase 10g bare-metal Trash consumes shared roles"; Pass = $null -ne $trashBareMetalRolesMatch; Match = $trashBareMetalRolesMatch },
     [pscustomobject]@{ Name = "phase 10g Trash behavior boundaries retained"; Pass = $null -ne $trashBehaviorMatch; Match = $trashBehaviorMatch },
     [pscustomobject]@{ Name = "phase 10g no new role documented"; Pass = $null -ne $phase10GNoNewRoleMatch; Match = $phase10GNoNewRoleMatch },
-    [pscustomobject]@{ Name = "phase 10g no local palette documented"; Pass = $null -ne $phase10GNoLocalPaletteMatch; Match = $phase10GNoLocalPaletteMatch }
+    [pscustomobject]@{ Name = "phase 10g no local palette documented"; Pass = $null -ne $phase10GNoLocalPaletteMatch; Match = $phase10GNoLocalPaletteMatch },
+    [pscustomobject]@{ Name = "phase 10h heading"; Pass = $null -ne $phase10HHeadingMatch; Match = $phase10HHeadingMatch },
+    [pscustomobject]@{ Name = "phase 10h starting audit documented"; Pass = $null -ne $phase10HAuditMatch; Match = $phase10HAuditMatch },
+    [pscustomobject]@{ Name = "phase 10h hosted shared control roles consumed"; Pass = $null -ne $phase10HHostedRolesMatch; Match = $phase10HHostedRolesMatch },
+    [pscustomobject]@{ Name = "phase 10h bare-metal chrome roles consumed"; Pass = $null -ne $phase10HBareMetalChromeMatch; Match = $phase10HBareMetalChromeMatch },
+    [pscustomobject]@{ Name = "phase 10h bare-metal Start roles consumed"; Pass = $null -ne $phase10HBareMetalStartMatch; Match = $phase10HBareMetalStartMatch },
+    [pscustomobject]@{ Name = "phase 10h shell text parity documented"; Pass = $null -ne $phase10HTextParityMatch; Match = $phase10HTextParityMatch },
+    [pscustomobject]@{ Name = "phase 10h Classic compatibility boundary documented"; Pass = $null -ne $phase10HClassicBoundaryMatch; Match = $phase10HClassicBoundaryMatch },
+    [pscustomobject]@{ Name = "phase 10h focus limitation documented"; Pass = $null -ne $phase10HFocusLimitMatch; Match = $phase10HFocusLimitMatch },
+    [pscustomobject]@{ Name = "phase 10h high-cost effects deferred"; Pass = $null -ne $phase10HDeferredEffectsMatch; Match = $phase10HDeferredEffectsMatch }
 )
 
 $failures = 0

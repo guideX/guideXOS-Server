@@ -42,6 +42,16 @@ int main()
         "focused control state selects the focus border");
     ok &= expect(DesktopControlTextColor(sciFiRoles, DesktopControlState::Disabled) == sciFiRoles.controlDisabledText,
         "disabled control state selects disabled text");
+    ok &= expect(sciFiRoles.controlBackground != sciFiRoles.controlHover,
+        "hover fill remains distinct from normal control fill");
+    ok &= expect(sciFiRoles.controlHover != sciFiRoles.controlPressed,
+        "pressed fill remains distinct from hover fill");
+    ok &= expect(sciFiRoles.controlFocusBorder != sciFiRoles.controlHoverBorder,
+        "focused border remains distinct from hover border");
+    ok &= expect(sciFiRoles.controlDisabledText != sciFiRoles.controlText,
+        "disabled text remains visibly distinct from enabled text");
+    ok &= expect(sciFiRoles.selectionActive != sciFiRoles.raisedPanel,
+        "active selection remains distinct from an idle raised panel");
     ok &= expect(sciFiRoles.controlBackground != classicRoles.controlBackground,
         "Classic and Sci-Fi control palettes remain distinct");
 
