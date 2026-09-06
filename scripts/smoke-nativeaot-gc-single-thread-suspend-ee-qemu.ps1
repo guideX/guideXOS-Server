@@ -12838,7 +12838,12 @@ exit /b %errorlevel%
             if (@($run.c77CompleteLines).Count -eq 0 -or @($run.c77SummaryLines).Count -eq 0 -or
                 ((@($run.c73CompleteLines).Count -eq 0) -and (@($run.c72CompleteLines).Count -eq 0) -and (@($run.c73PromotionLines).Count -eq 0))) { $controlClean = $false; continue }
             $c77Line = $run.c77SummaryLines[-1]
-            $expectedBasic = if ($C71Case -eq '15mid8') { '0x0000000000000001' } else { '0x0000000000000006' }
+            # C86 keeps the accepted live-byte 15mid8 workload constant and
+            # deliberately changes only the historical tail count.  Under
+            # tail=216 the expected post-restart control is the SIX-like
+            # six-region result; the original C85 15mid8 control remains ONE
+            # for tail=320 and for all other C85 invocations.
+            $expectedBasic = if ($C71Case -eq '15mid8' -and $ManagedProofModeOverride -eq 'PromotionDecisionLiveByteThreshold' -and $C66TailAllocations -eq 216) { '0x0000000000000006' } elseif ($C71Case -eq '15mid8') { '0x0000000000000001' } else { '0x0000000000000006' }
             $controlRecord = [ordered]@{
                 c77Summary=$c77Line; successLevel=& $c85Read $c77Line 'successLevel'
                 preGcBasicCount=& $c85Read $c77Line 'preGcBasicCount'
