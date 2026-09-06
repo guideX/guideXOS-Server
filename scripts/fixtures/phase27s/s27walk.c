@@ -1,0 +1,1 @@
+int gx_main(gx_app_context* ctx) { int values[4]; values[0] = 10; values[1] = 11; values[2] = 12; values[3] = 9; int* p = &values[0]; int total = 0; int i = 0; while (i < 4) { total = total + *p; p = p + 1; i = i + 1; } return total; }

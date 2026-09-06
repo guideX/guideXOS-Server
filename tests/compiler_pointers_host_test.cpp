@@ -151,6 +151,85 @@ static bool valid_pointer_programs()
         "p = &b; *p = *p + 1; return b; }";
     if (!require(compile_and_run(assignment, 42), "pointer assignment changes pointee")) return false;
 
+    const char* walk =
+        "int gx_main(gx_app_context* ctx) { int values[4]; values[0] = 10; values[1] = 11; "
+        "values[2] = 12; values[3] = 9; int* p = &values[0]; int total = 0; int i = 0; "
+        "while (i < 4) { total = total + *p; p = p + 1; i = i + 1; } return total; }";
+    if (!require(compile_and_run(walk, 42), "pointer array walk reaches one-past without dereference")) return false;
+
+    const char* storeWalk =
+        "int gx_main(gx_app_context* ctx) { int values[4]; int* p = &values[0]; int i = 0; "
+        "while (i < 4) { *p = i + 10; p = p + 1; i = i + 1; } "
+        "return values[0] + values[1] + values[2] + values[3] - 4; }";
+    if (!require(compile_and_run(storeWalk, 42), "pointer store walk reaches every array element")) return false;
+
+    const char* retreat =
+        "int gx_main(gx_app_context* ctx) { int values[4]; values[0] = 10; values[1] = 11; "
+        "values[2] = 12; values[3] = 9; int* p = &values[3]; int total = 0; int i = 0; "
+        "while (i < 4) { total = total + *p; if (i < 3) { p = p - 1; } i = i + 1; } "
+        "return total; }";
+    if (!require(compile_and_run(retreat, 42), "pointer retreat walks an array backwards")) return false;
+
+    const char* middle =
+        "int gx_main(gx_app_context* ctx) { int values[4]; int* p = &values[2]; "
+        "p = p - 2; *p = 42; return values[0]; }";
+    if (!require(compile_and_run(middle, 42), "middle-element pointer preserves full array provenance")) return false;
+
+    const char* equality =
+        "int gx_main(gx_app_context* ctx) { int values[4]; int* p = &values[0]; int* q = &values[0]; "
+        "p = p + 2; q = q + 2; if (p == q) { return 42; } return 0; }";
+    if (!require(compile_and_run(equality, 42), "pointer equality compares logical positions")) return false;
+
+    const char* unrelatedEquality =
+        "int gx_main(gx_app_context* ctx) { int a = 1; int b = 2; int* p = &a; int* q = &b; "
+        "if (p == q) { return 0; } if (p != q) { return 42; } return 0; }";
+    if (!require(compile_and_run(unrelatedEquality, 42), "unrelated pointer equality remains deterministic")) return false;
+
+    const char* onePast =
+        "int gx_main(gx_app_context* ctx) { int values[4]; int* p = &values[0]; p = p + 4; "
+        "if (p == p) { return 42; } return 0; }";
+    if (!require(compile_and_run(onePast, 42), "one-past pointer representation is legal")) return false;
+
+    CallResult onePastDerefResult = {};
+    const char* onePastDeref =
+        "int gx_main(gx_app_context* ctx) { int values[4]; int* p = &values[0]; p = p + 4; "
+        "return *p; }";
+    if (!require(compile_and_run(onePastDeref, 0, &onePastDerefResult) &&
+                 (onePastDerefResult.status & 0xFFU) == COMPILER_RUNTIME_STATUS_INVALID_POINTER,
+                 "one-past dereference fails safely")) return false;
+
+    CallResult beyondResult = {};
+    const char* beyond =
+        "int gx_main(gx_app_context* ctx) { int values[4]; int* p = &values[0]; p = p + 5; "
+        "return 42; }";
+    if (!require(compile_and_run(beyond, 0, &beyondResult) &&
+                 (beyondResult.status & 0xFFU) == COMPILER_RUNTIME_STATUS_POINTER_BOUNDS,
+                 "pointer arithmetic beyond one-past fails before producing a descriptor")) return false;
+
+    CallResult beforeResult = {};
+    const char* before =
+        "int gx_main(gx_app_context* ctx) { int values[4]; int* p = &values[0]; p = p - 1; "
+        "return 42; }";
+    if (!require(compile_and_run(before, 0, &beforeResult) &&
+                 (beforeResult.status & 0xFFU) == COMPILER_RUNTIME_STATUS_POINTER_BOUNDS,
+                 "pointer arithmetic before the beginning fails safely")) return false;
+
+    CallResult adjacentResult = {};
+    const char* adjacent =
+        "int gx_main(gx_app_context* ctx) { int a[2]; int b[2]; int* p = &a[0]; p = p + 3; "
+        "return b[0]; }";
+    if (!require(compile_and_run(adjacent, 0, &adjacentResult) &&
+                 (adjacentResult.status & 0xFFU) == COMPILER_RUNTIME_STATUS_POINTER_BOUNDS,
+                 "adjacent objects cannot be reached by pointer arithmetic")) return false;
+
+    CallResult scalarAdjacentResult = {};
+    const char* scalarAdjacent =
+        "int gx_main(gx_app_context* ctx) { int a = 1; int b = 2; int* p = &a; p = p + 1; "
+        "return *p; }";
+    if (!require(compile_and_run(scalarAdjacent, 0, &scalarAdjacentResult) &&
+                 (scalarAdjacentResult.status & 0xFFU) == COMPILER_RUNTIME_STATUS_INVALID_POINTER,
+                 "scalar one-past cannot dereference an adjacent object")) return false;
+
     const char* parameter =
         "int increment(int* p) { *p = *p + 1; return *p; } "
         "int gx_main(gx_app_context* ctx) { int value = 41; increment(&value); return value; }";
@@ -159,12 +238,29 @@ static bool valid_pointer_programs()
         "int gx_main(gx_app_context* ctx) { int value = 41; return probe(&value); }";
     if (!require(compile_and_run(parameterProbe, 42), "pointer parameter call preserves return value")) return false;
     if (!require(compile_and_run(parameter, 42), "pointer parameter preserves aliasing")) return false;
-
+    const char* pointerParameterArithmetic =
+        "int probe_next(int* p) { int* q = p + 1; return *q; } "
+        "int gx_main(gx_app_context* ctx) { int values[2]; values[0] = 41; values[1] = 42; "
+        "return probe_next(&values[0]); }";
+    if (!require(compile_and_run(pointerParameterArithmetic, 42),
+                 "pointer parameter arithmetic preserves provenance")) return false;
+    const char* pointerAndIntegerParameters =
+        "int probe_pair(int* p, int n) { return *p + n; } "
+        "int gx_main(gx_app_context* ctx) { int value = 40; return probe_pair(&value, 2); }";
+    if (!require(compile_and_run(pointerAndIntegerParameters, 42),
+                 "pointer and integer arguments retain independent storage")) return false;
     const char* recursive =
         "int recursive(int n) { int value = n; int* p = &value; if (n == 0) { return *p; } "
         "return *p + recursive(n - 1); } "
         "int gx_main(gx_app_context* ctx) { return recursive(6); }";
     if (!require(compile_and_run(recursive, 21), "recursive pointer locals are activation-local")) return false;
+    const char* recursiveWalk =
+        "int sum_ptr(int* p, int count) { if (count == 0) { return 0; } "
+        "return *p + sum_ptr(p + 1, count - 1); } "
+        "int gx_main(gx_app_context* ctx) { int values[4]; values[0] = 10; values[1] = 11; "
+        "values[2] = 12; values[3] = 9; return sum_ptr(&values[0], 4); }";
+    if (!require(compile_and_run(recursiveWalk, 42),
+                 "recursive pointer arithmetic walks within the array")) return false;
     return true;
 }
 
@@ -176,15 +272,24 @@ static bool diagnostics_and_ir()
                           "cannot assign an int* expression to int"), "pointer to integer conversion is rejected")) return false;
     if (!require(rejected("int gx_main(gx_app_context* ctx) { int x = 1; return *x; }",
                           "cannot dereference non-pointer expression"), "non-pointer dereference is rejected")) return false;
-    if (!require(rejected("int gx_main(gx_app_context* ctx) { int x = 1; int* p = &x; p = p + 1; return 0; }",
-                          "arithmetic requires int expressions"), "pointer arithmetic is rejected")) return false;
+    if (!require(compile_and_run("int gx_main(gx_app_context* ctx) { int values[2]; values[0] = 40; "
+                                 "int* p = &values[0]; p = p + 1; p = p - 1; *p = *p + 2; "
+                                 "return values[0]; }", 42),
+                 "pointer arithmetic advances and retreats safely")) return false;
     CallResult uninitialized = {};
     if (!require(compile_and_run("int gx_main(gx_app_context* ctx) { int* p; return *p; }", 0,
                                  &uninitialized) &&
                  (uninitialized.status & 0xFFU) == COMPILER_RUNTIME_STATUS_INVALID_POINTER,
                  "uninitialized pointer fails safely at runtime")) return false;
-    if (!require(rejected("int gx_main(gx_app_context* ctx) { int a[2]; int* p = a; return 0; }",
-                          "requires an index"), "array decay is rejected")) return false;
+    if (!require(compile_and_run("int gx_main(gx_app_context* ctx) { int a[2]; a[0] = 40; int* p = a; "
+                                 "p = p + 1; p = p - 1; *p = *p + 2; return a[0]; }", 42),
+                 "array-to-pointer decay preserves the full array object")) return false;
+    CallResult overflow = {};
+    if (!require(compile_and_run("int gx_main(gx_app_context* ctx) { int value = 1; int* p = &value; "
+                                 "p = p + 2147483647; return 0; }", 0, &overflow) &&
+                 (overflow.status & 0xFFU) == COMPILER_RUNTIME_STATUS_POINTER_BOUNDS,
+                 "pointer arithmetic overflow is rejected before wraparound")) return false;
+    std::puts("pointer arithmetic overflow rejection = PASS");
     if (!require(rejected("int* p; int gx_main(gx_app_context* ctx) { return 0; }",
                           "global pointer variables are not supported"), "global pointer is rejected")) return false;
     if (!require(rejected("int gx_main(gx_app_context* ctx) { return &42; }",

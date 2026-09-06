@@ -113,6 +113,7 @@ public:
     bool mov_eax_local(int32_t displacement) { return mov_reg_mem32(0, displacement); }
     bool mov_eax_rax() { static const uint8_t v[] = {0x8B, 0x02}; return bytes(v, sizeof(v)); }
     bool mov_rax_eax() { static const uint8_t v[] = {0x89, 0x02}; return bytes(v, sizeof(v)); }
+    bool mov_eax_ecx() { static const uint8_t v[] = {0x89, 0xC8}; return bytes(v, sizeof(v)); }
     bool mov_local_eax(int32_t displacement)
     {
         return bytes(reinterpret_cast<const uint8_t*>("\x89\x85"), 2) && u32(static_cast<uint32_t>(displacement));
@@ -238,8 +239,44 @@ public:
         return bytes(reinterpret_cast<const uint8_t*>("\xF7\xC2"), 2) && u32(value);
     }
     bool cmp_rdx_rcx() { static const uint8_t v[] = {0x48, 0x39, 0xCA}; return bytes(v, sizeof(v)); }
+    bool cmp_rax_rcx() { static const uint8_t v[] = {0x48, 0x39, 0xC8}; return bytes(v, sizeof(v)); }
+    bool cmp_rdx_r9() { static const uint8_t v[] = {0x4C, 0x39, 0xCA}; return bytes(v, sizeof(v)); }
     bool cmp_rdx_r8() { static const uint8_t v[] = {0x4C, 0x39, 0xC2}; return bytes(v, sizeof(v)); }
     bool sub_rdx_rcx() { static const uint8_t v[] = {0x48, 0x29, 0xCA}; return bytes(v, sizeof(v)); }
+    bool cmp_rax_r9() { static const uint8_t v[] = {0x4C, 0x39, 0xC8}; return bytes(v, sizeof(v)); }
+    bool cmp_rax_r10() { static const uint8_t v[] = {0x4C, 0x39, 0xD0}; return bytes(v, sizeof(v)); }
+    bool cmp_rcx_ptr64(uint8_t displacement)
+    {
+        return bytes(reinterpret_cast<const uint8_t*>("\x48\x3B"), 2) &&
+               byte(static_cast<uint8_t>(0x40U | (1U << 3))) && byte(displacement);
+    }
+    bool cmp_r8d_ptr32(uint8_t displacement)
+    {
+        return bytes(reinterpret_cast<const uint8_t*>("\x44\x3B"), 2) &&
+               byte(0x40) && byte(displacement);
+    }
+    bool cmp_r8d_local32(int32_t displacement)
+    {
+        return bytes(reinterpret_cast<const uint8_t*>("\x44\x3B\x85"), 3) &&
+               u32(static_cast<uint32_t>(displacement));
+    }
+    bool add_rax_r10() { static const uint8_t v[] = {0x4C, 0x01, 0xD0}; return bytes(v, sizeof(v)); }
+    bool sub_rax_r10() { static const uint8_t v[] = {0x4C, 0x29, 0xD0}; return bytes(v, sizeof(v)); }
+    bool neg_rdx() { static const uint8_t v[] = {0x48, 0xF7, 0xDA}; return bytes(v, sizeof(v)); }
+    bool neg_r10() { static const uint8_t v[] = {0x49, 0xF7, 0xDA}; return bytes(v, sizeof(v)); }
+    bool test_r10_r10() { static const uint8_t v[] = {0x4D, 0x85, 0xD2}; return bytes(v, sizeof(v)); }
+    bool test_rcx_imm32(uint32_t value)
+    {
+        return bytes(reinterpret_cast<const uint8_t*>("\x48\xF7\xC1"), 3) && u32(value);
+    }
+    bool test_r8d_imm32(uint32_t value)
+    {
+        return bytes(reinterpret_cast<const uint8_t*>("\x41\xF7\xC0"), 3) && u32(value);
+    }
+    bool movsxd_rdx_eax() { static const uint8_t v[] = {0x48, 0x63, 0xD0}; return bytes(v, sizeof(v)); }
+    bool shl_rdx_2() { static const uint8_t v[] = {0x48, 0xC1, 0xE2, 0x02}; return bytes(v, sizeof(v)); }
+    bool mov_r9_rax() { static const uint8_t v[] = {0x49, 0x89, 0xC1}; return bytes(v, sizeof(v)); }
+    bool add_r9_r8() { static const uint8_t v[] = {0x4D, 0x01, 0xC1}; return bytes(v, sizeof(v)); }
     bool cmp_r8d_imm32(uint32_t value)
     {
         return bytes(reinterpret_cast<const uint8_t*>("\x41\x81\xF8"), 3) && u32(value);
@@ -250,9 +287,14 @@ public:
     }
     bool mov_local_rax64(int32_t displacement) { return mov_local_reg64(0, displacement); }
     bool mov_local_rdx64(int32_t displacement) { return mov_local_reg64(2, displacement); }
+    bool mov_local_r10_64(int32_t displacement) { return mov_local_reg64(10, displacement); }
     bool mov_rax_local64(int32_t displacement) { return mov_reg_mem64(0, displacement); }
     bool mov_rdx_ptr64(uint8_t displacement) { return mov_reg_ptr64(2, 0, displacement); }
     bool mov_rcx_ptr64(uint8_t displacement) { return mov_reg_ptr64(1, 0, displacement); }
+    bool mov_rax_ptr64(uint8_t displacement) { return mov_reg_ptr64(0, 0, displacement); }
+    bool mov_r10_ptr64(uint8_t displacement) { return mov_reg_ptr64(10, 0, displacement); }
+    bool mov_r9_rcx() { static const uint8_t v[] = {0x49, 0x89, 0xC9}; return bytes(v, sizeof(v)); }
+    bool mov_r10_rdx() { static const uint8_t v[] = {0x49, 0x89, 0xD2}; return bytes(v, sizeof(v)); }
     bool mov_r8d_ptr32(uint8_t displacement) { return mov_reg_ptr32(8, 0, displacement); }
     bool mov_ecx_ptr32(uint8_t displacement) { return mov_reg_ptr32(1, 0, displacement); }
     bool push_rax()
@@ -338,6 +380,12 @@ public:
         return bytes(reinterpret_cast<const uint8_t*>("\x45\x89\xF7"), 3) &&
                bytes(reinterpret_cast<const uint8_t*>("\x41\xC1\xE7\x08"), 4) &&
                bytes(reinterpret_cast<const uint8_t*>("\x41\x83\xCF\x03"), 4);
+    }
+    bool set_pointer_bounds_failure()
+    {
+        return bytes(reinterpret_cast<const uint8_t*>("\x45\x89\xF7"), 3) &&
+               bytes(reinterpret_cast<const uint8_t*>("\x41\xC1\xE7\x08"), 4) &&
+               bytes(reinterpret_cast<const uint8_t*>("\x41\x83\xCF\x04"), 4);
     }
     bool test_r15d() { return bytes(reinterpret_cast<const uint8_t*>("\x45\x85\xFF"), 3); }
 
@@ -432,6 +480,7 @@ public:
     bool emit_jz(uint16_t label) { return emit_branch(0x84, label); }
     bool emit_jnz(uint16_t label) { return emit_branch(0x85, label); }
     bool emit_jl(uint16_t label) { return emit_branch(0x8C, label); }
+    bool emit_jo(uint16_t label) { return emit_branch(0x80, label); }
     bool emit_jge(uint16_t label) { return emit_branch(0x8D, label); }
     bool emit_jae(uint16_t label) { return emit_branch(0x83, label); }
     bool emit_jb(uint16_t label) { return emit_branch(0x82, label); }
@@ -705,6 +754,33 @@ static bool required_pointer_temporary_slots(const FunctionIR& function, uint16_
         expression.kind == ExpressionKind::Negate ||
         expression.kind == ExpressionKind::LoadIndirectInt32)
         return required_pointer_temporary_slots(function, expression.left, depth + 1U, output);
+    if (expression.kind == ExpressionKind::PointerAdd ||
+        expression.kind == ExpressionKind::PointerSubtractInteger) {
+        const bool pointerLeft = function.expressions[expression.left].type == ValueType::Int32Pointer;
+        const uint16_t pointerChild = pointerLeft ? expression.left : expression.right;
+        const uint16_t integerChild = pointerLeft ? expression.right : expression.left;
+        uint16_t pointerNeeded = 0;
+        uint16_t integerNeeded = 0;
+        if (!required_pointer_temporary_slots(function, pointerChild, depth + 1U, &pointerNeeded) ||
+            !required_pointer_temporary_slots(function, integerChild, depth + 1U, &integerNeeded)) return false;
+        const uint32_t needed = 1U + integerNeeded;
+        *output = static_cast<uint16_t>(needed > pointerNeeded ? needed : pointerNeeded);
+        return needed <= COMPILER_MAX_POINTER_TEMPORARY_SLOTS &&
+               *output <= COMPILER_MAX_POINTER_TEMPORARY_SLOTS;
+    }
+    if ((expression.kind == ExpressionKind::Equal || expression.kind == ExpressionKind::NotEqual) &&
+        expression.left < function.expressionCount &&
+        expression.right < function.expressionCount &&
+        function.expressions[expression.left].type == ValueType::Int32Pointer &&
+        function.expressions[expression.right].type == ValueType::Int32Pointer) {
+        uint16_t leftNeeded = 0;
+        uint16_t rightNeeded = 0;
+        if (!required_pointer_temporary_slots(function, expression.left, depth + 1U, &leftNeeded) ||
+            !required_pointer_temporary_slots(function, expression.right, depth + 1U, &rightNeeded)) return false;
+        const uint32_t needed = 1U + rightNeeded;
+        *output = static_cast<uint16_t>(needed > leftNeeded ? needed : leftNeeded);
+        return *output <= COMPILER_MAX_POINTER_TEMPORARY_SLOTS;
+    }
     if (expression.kind == ExpressionKind::Call) {
         if (!function.calls || !function.callArguments || expression.callIndex >= function.callCount) return false;
         const CallSite& call = function.calls[expression.callIndex];
@@ -786,17 +862,21 @@ static bool emit_zero_pointer_descriptor(Emitter& emitter, int32_t destination)
 
 static bool emit_copy_pointer_descriptor(Emitter& emitter, int32_t destination)
 {
-    return emitter.mov_rdx_ptr64(0) && emitter.mov_local_rdx64(destination) &&
-           emitter.mov_rdx_ptr64(8) && emitter.mov_local_rdx64(destination + 8) &&
-           emitter.mov_rdx_ptr64(16) && emitter.mov_local_rdx64(destination + 16) &&
-           emitter.mov_rdx_ptr64(24) && emitter.mov_local_rdx64(destination + 24);
+    // RDX is the second source argument register. Descriptor copies run in
+    // function prologues as well as call preparation, so keep it intact.
+    return emitter.mov_r10_ptr64(0) && emitter.mov_local_r10_64(destination) &&
+           emitter.mov_r10_ptr64(8) && emitter.mov_local_r10_64(destination + 8) &&
+           emitter.mov_r10_ptr64(16) && emitter.mov_local_r10_64(destination + 16) &&
+           emitter.mov_r10_ptr64(24) && emitter.mov_local_r10_64(destination + 24);
 }
 
 static bool emit_pointer_descriptor_metadata(Emitter& emitter, int32_t destination,
+                                              uint32_t extent, uint32_t elementSize,
                                               PointerProvenanceKind provenance)
 {
-    return emitter.mov_eax_imm32(4) && emitter.mov_local_eax(destination + 16) &&
-           emitter.mov_local_eax(destination + 20) &&
+    return extent != 0 && elementSize != 0 &&
+           emitter.mov_eax_imm32(extent) && emitter.mov_local_eax(destination + 16) &&
+           emitter.mov_eax_imm32(elementSize) && emitter.mov_local_eax(destination + 20) &&
            emitter.mov_eax_imm32(static_cast<uint32_t>(provenance)) &&
            emitter.mov_local_eax(destination + 24) &&
            emitter.mov_eax_imm32(1) && emitter.mov_local_eax(destination + 28);
@@ -823,6 +903,35 @@ static bool emit_pointer_validation(Emitter& emitter, uint16_t failureLabel)
            emitter.cmp_rdx_r8() && emitter.emit_ja(failureLabel);
 }
 
+static bool emit_pointer_position_validation(Emitter& emitter, uint16_t failureLabel)
+{
+    // Arithmetic accepts the one-past position, unlike dereference.  The
+    // descriptor still has to be a well-formed int* object descriptor.
+    return emitter.test_rax_rax() && emitter.emit_jz(failureLabel) &&
+           emitter.mov_ecx_ptr32(28) && emitter.cmp_ecx_imm32(1) && emitter.emit_jnz(failureLabel) &&
+           emitter.mov_ecx_ptr32(20) && emitter.cmp_ecx_imm32(4) && emitter.emit_jnz(failureLabel) &&
+           emitter.mov_r8d_ptr32(16) && emitter.cmp_r8d_imm32(4) && emitter.emit_jb(failureLabel) &&
+           emitter.test_r8d_imm32(3) && emitter.emit_jnz(failureLabel) &&
+           emitter.mov_rdx_ptr64(0) && emitter.mov_rcx_ptr64(8) &&
+           emitter.cmp_rdx_rcx() && emitter.emit_jb(failureLabel) &&
+           emitter.test_rcx_imm32(3) && emitter.emit_jnz(failureLabel) &&
+           emitter.test_edx_imm32(3) && emitter.emit_jnz(failureLabel) &&
+           emitter.mov_r9_rcx() && emitter.add_r9_r8() && emitter.emit_jb(failureLabel) &&
+           emitter.cmp_rdx_r9() && emitter.emit_ja(failureLabel);
+}
+
+static bool emit_pointer_arithmetic_failure(Emitter& emitter, uint16_t epilogueLabel)
+{
+    return emitter.mov_eax_imm32(0) && emitter.set_pointer_bounds_failure() &&
+           emitter.emit_jmp(epilogueLabel);
+}
+
+static bool emit_expression_value(Emitter& emitter, const TranslationUnitIR& unit,
+                                  const FunctionIR& function, const FrameLayout& frame,
+                                  const uint16_t* functionLabels, uint16_t index,
+                                  uint16_t epilogueLabel, uint16_t callFailureLabel,
+                                  uint16_t* pointerResultSlot);
+
 static bool emit_address_of(Emitter& emitter, const TranslationUnitIR& unit,
                             const FunctionIR& function, const FrameLayout& frame,
                             const uint16_t* functionLabels, const Expression& expression,
@@ -837,7 +946,8 @@ static bool emit_address_of(Emitter& emitter, const TranslationUnitIR& unit,
                 scalar = function.locals[i].kind == StorageKind::ScalarInt;
         if (!scalar || !emitter.lea_rax_local(local_displacement(expression.localIndex)) ||
             !emitter.mov_local_rax64(scratch) || !emitter.mov_local_rax64(scratch + 8) ||
-            !emit_pointer_descriptor_metadata(emitter, scratch, PointerProvenanceKind::LocalScalar) ||
+            !emit_pointer_descriptor_metadata(emitter, scratch, 4, 4,
+                                               PointerProvenanceKind::LocalScalar) ||
             !emitter.lea_rax_local(scratch)) return false;
         return true;
     }
@@ -846,7 +956,8 @@ static bool emit_address_of(Emitter& emitter, const TranslationUnitIR& unit,
             unit.globals[expression.globalIndex].kind != StorageKind::ScalarInt ||
             !emitter.emit_global_data_address(unit.globals[expression.globalIndex].name, expression.location) ||
             !emitter.mov_local_rdx64(scratch) || !emitter.mov_local_rdx64(scratch + 8) ||
-            !emit_pointer_descriptor_metadata(emitter, scratch, PointerProvenanceKind::GlobalScalar) ||
+            !emit_pointer_descriptor_metadata(emitter, scratch, 4, 4,
+                                               PointerProvenanceKind::GlobalScalar) ||
             !emitter.lea_rax_local(scratch)) return false;
         return true;
     }
@@ -860,31 +971,50 @@ static bool emit_address_of(Emitter& emitter, const TranslationUnitIR& unit,
     }
     uint16_t boundsFailureLabel = COMPILER_INVALID_INDEX;
     uint16_t endLabel = COMPILER_INVALID_INDEX;
-    if (!emitter.create_label(&boundsFailureLabel) || !emitter.create_label(&endLabel) ||
-        !emit_indexed_address(emitter, unit, function, frame, functionLabels,
-                              expression.left, expression.indexedBaseKind,
-                              expression.indexedBaseKind == IndexedBaseKind::Local
-                                  ? expression.localIndex : expression.globalIndex,
-                              expression.elementCount, expression.location,
-                              boundsFailureLabel, epilogueLabel, callFailureLabel) ||
-        // With pointer arithmetic deferred, an array-element pointer is
-        // represented as the current element with a one-element extent.
-        !emitter.mov_local_rdx64(scratch) || !emitter.mov_local_rdx64(scratch + 8) ||
-        !emitter.mov_eax_imm32(4) ||
-        !emitter.mov_local_eax(scratch + 16) || !emitter.mov_local_eax(scratch + 20) ||
-        !emitter.mov_eax_imm32(static_cast<uint32_t>(expression.indexedBaseKind == IndexedBaseKind::Local
-            ? PointerProvenanceKind::LocalArrayElement : PointerProvenanceKind::GlobalArrayElement)) ||
-        !emitter.mov_local_eax(scratch + 24) || !emitter.mov_eax_imm32(1) ||
-        !emitter.mov_local_eax(scratch + 28) || !emitter.emit_jmp(endLabel) ||
-        !emitter.define_label(boundsFailureLabel) || !emit_array_bounds_failure(emitter, epilogueLabel) ||
-        !emitter.define_label(endLabel) || !emitter.lea_rax_local(scratch)) return false;
+    bool ok = emitter.create_label(&boundsFailureLabel) && emitter.create_label(&endLabel);
+    if (ok) ok = emit_indexed_address(emitter, unit, function, frame, functionLabels,
+                                      expression.left, expression.indexedBaseKind,
+                                      expression.indexedBaseKind == IndexedBaseKind::Local
+                                          ? expression.localIndex : expression.globalIndex,
+                                      expression.elementCount, expression.location,
+                                      boundsFailureLabel, epilogueLabel, callFailureLabel);
+    if (ok) ok = emitter.mov_local_rdx64(scratch);
+    if (ok) {
+        ok = expression.indexedBaseKind == IndexedBaseKind::Local
+            ? (emitter.lea_rax_local(local_displacement(expression.localIndex)) &&
+               emitter.mov_local_rax64(scratch + 8))
+            : (emitter.emit_global_data_address(unit.globals[expression.globalIndex].name,
+                                                expression.location) &&
+               emitter.mov_local_rdx64(scratch + 8));
+    }
+    if (ok) ok = emit_pointer_descriptor_metadata(
+        emitter, scratch,
+        static_cast<uint32_t>(expression.elementCount) * expression.elementSize,
+        expression.elementSize,
+        expression.indexedBaseKind == IndexedBaseKind::Local
+            ? PointerProvenanceKind::LocalArrayElement : PointerProvenanceKind::GlobalArrayElement);
+    if (ok) ok = emitter.emit_jmp(endLabel);
+    if (ok) ok = emitter.define_label(boundsFailureLabel) && emit_array_bounds_failure(emitter, epilogueLabel);
+    if (ok) ok = emitter.define_label(endLabel) && emitter.lea_rax_local(scratch);
+    if (!ok) {
+        return false;
+    }
     return true;
 }
 
 static bool emit_expression(Emitter& emitter, const TranslationUnitIR& unit,
                             const FunctionIR& function, const FrameLayout& frame,
                             const uint16_t* functionLabels, uint16_t index,
-                            uint16_t epilogueLabel, uint16_t callFailureLabel);
+                            uint16_t epilogueLabel, uint16_t callFailureLabel)
+{
+    uint16_t pointerResultSlot = COMPILER_INVALID_INDEX;
+    const bool result = emit_expression_value(emitter, unit, function, frame, functionLabels,
+                                              index, epilogueLabel, callFailureLabel,
+                                              &pointerResultSlot);
+    if (pointerResultSlot != COMPILER_INVALID_INDEX &&
+        !emitter.release_pointer_temporary_slots(1)) return false;
+    return result;
+}
 
 static bool emit_indexed_address(Emitter& emitter, const TranslationUnitIR& unit,
                                  const FunctionIR& function, const FrameLayout& frame,
@@ -917,11 +1047,127 @@ static bool emit_array_bounds_failure(Emitter& emitter, uint16_t epilogueLabel)
            emitter.emit_jmp(epilogueLabel);
 }
 
-static bool emit_expression(Emitter& emitter, const TranslationUnitIR& unit,
-                            const FunctionIR& function, const FrameLayout& frame,
-                            const uint16_t* functionLabels, uint16_t index,
-                            uint16_t epilogueLabel, uint16_t callFailureLabel)
+static bool emit_pointer_arithmetic(Emitter& emitter, const TranslationUnitIR& unit,
+                                    const FunctionIR& function, const FrameLayout& frame,
+                                    const uint16_t* functionLabels, const Expression& expression,
+                                    uint16_t epilogueLabel, uint16_t callFailureLabel,
+                                    uint16_t* pointerResultSlot)
 {
+    if (!pointerResultSlot) return false;
+    *pointerResultSlot = COMPILER_INVALID_INDEX;
+    const bool pointerLeft = function.expressions[expression.left].type == ValueType::Int32Pointer;
+    const uint16_t pointerExpression = pointerLeft ? expression.left : expression.right;
+    const uint16_t integerExpression = pointerLeft ? expression.right : expression.left;
+    uint16_t childSlot = COMPILER_INVALID_INDEX;
+    if (pointerLeft) {
+        if (!emit_expression_value(emitter, unit, function, frame, functionLabels,
+                                    pointerExpression, epilogueLabel, callFailureLabel,
+                                    &childSlot)) return false;
+    } else {
+        if (!emit_expression(emitter, unit, function, frame, functionLabels,
+                              integerExpression, epilogueLabel, callFailureLabel) ||
+            !emitter.push_rax() ||
+            !emit_expression_value(emitter, unit, function, frame, functionLabels,
+                                   pointerExpression, epilogueLabel, callFailureLabel,
+                                   &childSlot)) return false;
+    }
+    // The child descriptor is either borrowed from a local/address-of scratch
+    // or owned by the child expression.  Release the latter before acquiring
+    // the result slot so the bounded allocator remains stack-like.
+    if (childSlot != COMPILER_INVALID_INDEX &&
+        !emitter.release_pointer_temporary_slots(1)) return false;
+    uint16_t resultSlot = COMPILER_INVALID_INDEX;
+    if (!emitter.acquire_pointer_temporary_slots(1, &resultSlot) ||
+        !emit_copy_pointer_descriptor(emitter, pointer_temporary_displacement(frame, resultSlot))) return false;
+    if (!pointerLeft && !emitter.pop_rcx()) return false;
+    if (pointerLeft &&
+        !emit_expression(emitter, unit, function, frame, functionLabels,
+                          integerExpression, epilogueLabel, callFailureLabel)) return false;
+
+    uint16_t failureLabel = COMPILER_INVALID_INDEX;
+    uint16_t negativeLabel = COMPILER_INVALID_INDEX;
+    uint16_t successLabel = COMPILER_INVALID_INDEX;
+    uint16_t doneLabel = COMPILER_INVALID_INDEX;
+    if (!emitter.create_label(&failureLabel) || !emitter.create_label(&negativeLabel) ||
+        !emitter.create_label(&successLabel) || !emitter.create_label(&doneLabel) ||
+        (!pointerLeft && !emitter.mov_eax_ecx()) ||
+        !emitter.movsxd_rdx_eax() || !emitter.shl_rdx_2() ||
+        !emitter.emit_jo(failureLabel) ||
+        (expression.kind == ExpressionKind::PointerSubtractInteger && !emitter.neg_rdx()) ||
+        (expression.kind == ExpressionKind::PointerSubtractInteger && !emitter.emit_jo(failureLabel)) ||
+        !emitter.mov_r10_rdx() ||
+        !emitter.lea_rax_local(pointer_temporary_displacement(frame, resultSlot)) ||
+        !emit_pointer_position_validation(emitter, failureLabel) ||
+        !emitter.mov_rax_ptr64(0) || !emitter.test_r10_r10() ||
+        !emitter.emit_jl(negativeLabel) || !emitter.add_rax_r10() ||
+        !emitter.emit_jb(failureLabel) || !emitter.cmp_rax_r9() ||
+        !emitter.emit_ja(failureLabel) || !emitter.emit_jmp(successLabel) ||
+        !emitter.define_label(negativeLabel) || !emitter.neg_r10() ||
+        !emitter.emit_jo(failureLabel) || !emitter.cmp_rax_r10() ||
+        !emitter.emit_jb(failureLabel) || !emitter.sub_rax_r10() ||
+        !emitter.cmp_rax_rcx() || !emitter.emit_jb(failureLabel) ||
+        !emitter.define_label(successLabel) ||
+        !emitter.mov_local_rax64(pointer_temporary_displacement(frame, resultSlot)) ||
+        !emitter.lea_rax_local(pointer_temporary_displacement(frame, resultSlot)) ||
+        !emitter.emit_jmp(doneLabel) || !emitter.define_label(failureLabel) ||
+        !emit_pointer_arithmetic_failure(emitter, epilogueLabel) ||
+        !emitter.define_label(doneLabel)) return false;
+    *pointerResultSlot = resultSlot;
+    return true;
+}
+
+static bool emit_pointer_equality(Emitter& emitter, const TranslationUnitIR& unit,
+                                  const FunctionIR& function, const FrameLayout& frame,
+                                  const uint16_t* functionLabels, const Expression& expression,
+                                  uint16_t epilogueLabel, uint16_t callFailureLabel)
+{
+    uint16_t leftSlot = COMPILER_INVALID_INDEX;
+    if (!emit_expression_value(emitter, unit, function, frame, functionLabels,
+                                expression.left, epilogueLabel, callFailureLabel,
+                                &leftSlot)) return false;
+    if (leftSlot == COMPILER_INVALID_INDEX) {
+        if (!emitter.acquire_pointer_temporary_slots(1, &leftSlot) ||
+            !emit_copy_pointer_descriptor(emitter, pointer_temporary_displacement(frame, leftSlot))) return false;
+    }
+    uint16_t rightSlot = COMPILER_INVALID_INDEX;
+    if (!emit_expression_value(emitter, unit, function, frame, functionLabels,
+                                expression.right, epilogueLabel, callFailureLabel,
+                                &rightSlot)) return false;
+    uint16_t mismatchLabel = COMPILER_INVALID_INDEX;
+    uint16_t doneLabel = COMPILER_INVALID_INDEX;
+    if (!emitter.create_label(&mismatchLabel) || !emitter.create_label(&doneLabel) ||
+        !emitter.mov_reg_mem64(1, pointer_temporary_displacement(frame, leftSlot)) ||
+        !emitter.cmp_rcx_ptr64(0) || !emitter.emit_jnz(mismatchLabel) ||
+        !emitter.mov_reg_mem64(1, pointer_temporary_displacement(frame, leftSlot) + 8) ||
+        !emitter.cmp_rcx_ptr64(8) || !emitter.emit_jnz(mismatchLabel) ||
+        !emitter.mov_r8d_ptr32(16) ||
+        !emitter.cmp_r8d_local32(pointer_temporary_displacement(frame, leftSlot) + 16) ||
+        !emitter.emit_jnz(mismatchLabel) ||
+        !emitter.mov_r8d_ptr32(20) ||
+        !emitter.cmp_r8d_local32(pointer_temporary_displacement(frame, leftSlot) + 20) ||
+        !emitter.emit_jnz(mismatchLabel) ||
+        !emitter.mov_r8d_ptr32(24) ||
+        !emitter.cmp_r8d_local32(pointer_temporary_displacement(frame, leftSlot) + 24) ||
+        !emitter.emit_jnz(mismatchLabel) ||
+        !emitter.mov_r8d_ptr32(28) ||
+        !emitter.cmp_r8d_local32(pointer_temporary_displacement(frame, leftSlot) + 28) ||
+        !emitter.emit_jnz(mismatchLabel) ||
+        !emitter.mov_eax_imm32(expression.kind == ExpressionKind::Equal ? 1U : 0U) ||
+        !emitter.emit_jmp(doneLabel) || !emitter.define_label(mismatchLabel) ||
+        !emitter.mov_eax_imm32(expression.kind == ExpressionKind::Equal ? 0U : 1U) ||
+        !emitter.define_label(doneLabel)) return false;
+    if (rightSlot != COMPILER_INVALID_INDEX &&
+        !emitter.release_pointer_temporary_slots(1)) return false;
+    return emitter.release_pointer_temporary_slots(1);
+}
+
+static bool emit_expression_value(Emitter& emitter, const TranslationUnitIR& unit,
+                                  const FunctionIR& function, const FrameLayout& frame,
+                                  const uint16_t* functionLabels, uint16_t index,
+                                  uint16_t epilogueLabel, uint16_t callFailureLabel,
+                                  uint16_t* pointerResultSlot)
+{
+    if (pointerResultSlot) *pointerResultSlot = COMPILER_INVALID_INDEX;
     if (index == COMPILER_INVALID_INDEX || index >= function.expressionCount || !functionLabels) return false;
     const Expression& expression = function.expressions[index];
     if (expression.kind == ExpressionKind::LogicalAnd || expression.kind == ExpressionKind::LogicalOr) {
@@ -963,22 +1209,26 @@ static bool emit_expression(Emitter& emitter, const TranslationUnitIR& unit,
             !emitter.acquire_pointer_temporary_slots(pointerArgumentCount, &pointerBase)) return false;
         uint16_t pointerArgumentIndex = 0;
         for (uint32_t i = 0; i < call.argumentCount; ++i) {
-            if (!emit_expression(emitter, unit, function, frame, functionLabels,
-                                 function.callArguments[call.argumentStart + i],
-                                 epilogueLabel, callFailureLabel)) return false;
+            uint16_t argumentPointerSlot = COMPILER_INVALID_INDEX;
+            if (!emit_expression_value(emitter, unit, function, frame, functionLabels,
+                                       function.callArguments[call.argumentStart + i],
+                                       epilogueLabel, callFailureLabel,
+                                       &argumentPointerSlot)) return false;
             if (call.expectedParameterKinds[i] == ParameterKind::Int32Pointer) {
                 if (!emit_copy_pointer_descriptor(emitter,
-                        pointer_temporary_displacement(frame, pointerArgumentIndex++))) return false;
+                        pointer_temporary_displacement(frame, pointerBase + pointerArgumentIndex++))) return false;
             } else if (!emitter.mov_local_eax(temporary_displacement(frame, static_cast<uint16_t>(base + i)))) {
                 return false;
             }
+            if (argumentPointerSlot != COMPILER_INVALID_INDEX &&
+                !emitter.release_pointer_temporary_slots(1)) return false;
         }
         static const uint8_t argumentRegisters[] = {1, 2, 8, 9}; // ECX, EDX, R8D, R9D
         pointerArgumentIndex = 0;
         for (uint32_t i = 0; i < call.argumentCount; ++i) {
             if (call.expectedParameterKinds[i] == ParameterKind::Int32Pointer) {
                 if (!emitter.lea_reg_local64(argumentRegisters[i],
-                        pointer_temporary_displacement(frame, pointerArgumentIndex++))) return false;
+                        pointer_temporary_displacement(frame, pointerBase + pointerArgumentIndex++))) return false;
             } else if (!emitter.mov_reg_mem32(argumentRegisters[i],
                        temporary_displacement(frame, static_cast<uint16_t>(base + i)))) return false;
         }
@@ -1038,16 +1288,23 @@ static bool emit_expression(Emitter& emitter, const TranslationUnitIR& unit,
         case ExpressionKind::AddressOfIndexed:
             return emit_address_of(emitter, unit, function, frame, functionLabels, expression,
                                    epilogueLabel, callFailureLabel);
+        case ExpressionKind::PointerAdd:
+        case ExpressionKind::PointerSubtractInteger:
+            return emit_pointer_arithmetic(emitter, unit, function, frame, functionLabels, expression,
+                                           epilogueLabel, callFailureLabel, pointerResultSlot);
         case ExpressionKind::LoadIndirectInt32: {
             uint16_t failureLabel = COMPILER_INVALID_INDEX;
             uint16_t endLabel = COMPILER_INVALID_INDEX;
+            uint16_t pointerChildSlot = COMPILER_INVALID_INDEX;
             if (!emitter.create_label(&failureLabel) || !emitter.create_label(&endLabel) ||
-                !emit_expression(emitter, unit, function, frame, functionLabels, expression.left,
-                                 epilogueLabel, callFailureLabel) ||
+                !emit_expression_value(emitter, unit, function, frame, functionLabels, expression.left,
+                                       epilogueLabel, callFailureLabel, &pointerChildSlot) ||
                 !emit_pointer_validation(emitter, failureLabel) ||
                 !emitter.mov_rdx_ptr64(0) || !emitter.mov_eax_rax() || !emitter.emit_jmp(endLabel) ||
                 !emitter.define_label(failureLabel) || !emit_pointer_failure(emitter, epilogueLabel) ||
                 !emitter.define_label(endLabel)) return false;
+            if (pointerChildSlot != COMPILER_INVALID_INDEX &&
+                !emitter.release_pointer_temporary_slots(1)) return false;
             return true;
         }
         case ExpressionKind::Negate:
@@ -1062,6 +1319,11 @@ static bool emit_expression(Emitter& emitter, const TranslationUnitIR& unit,
         case ExpressionKind::LessEqual:
         case ExpressionKind::Greater:
         case ExpressionKind::GreaterEqual:
+            if ((expression.kind == ExpressionKind::Equal || expression.kind == ExpressionKind::NotEqual) &&
+                function.expressions[expression.left].type == ValueType::Int32Pointer &&
+                function.expressions[expression.right].type == ValueType::Int32Pointer)
+                return emit_pointer_equality(emitter, unit, function, frame, functionLabels, expression,
+                                             epilogueLabel, callFailureLabel);
             if (!emit_expression(emitter, unit, function, frame, functionLabels, expression.left,
                                  epilogueLabel, callFailureLabel) || !emitter.push_rax() ||
                 !emit_expression(emitter, unit, function, frame, functionLabels, expression.right,
@@ -1106,9 +1368,13 @@ static bool emit_statement(Emitter& emitter, const TranslationUnitIR& unit, cons
                 if (statement.expression == COMPILER_INVALID_INDEX)
                     return emit_zero_pointer_descriptor(emitter,
                                                         local_displacement(statement.localIndex));
-                return emit_expression(emitter, unit, function, frame, functionLabels, statement.expression,
-                                       epilogueLabel, callFailureLabel) &&
-                    emit_copy_pointer_descriptor(emitter, local_displacement(statement.localIndex));
+                uint16_t pointerSlot = COMPILER_INVALID_INDEX;
+                if (!emit_expression_value(emitter, unit, function, frame, functionLabels,
+                                           statement.expression, epilogueLabel, callFailureLabel,
+                                           &pointerSlot) ||
+                    !emit_copy_pointer_descriptor(emitter, local_displacement(statement.localIndex))) return false;
+                return pointerSlot == COMPILER_INVALID_INDEX ||
+                       emitter.release_pointer_temporary_slots(1);
             }
             return statement.expression != COMPILER_INVALID_INDEX &&
                 emit_expression(emitter, unit, function, frame, functionLabels, statement.expression,
@@ -1121,10 +1387,17 @@ static bool emit_statement(Emitter& emitter, const TranslationUnitIR& unit, cons
                                 epilogueLabel, callFailureLabel) &&
                 emitter.mov_local_eax(local_displacement(statement.localIndex));
         case StatementKind::StorePointer:
-            return statement.localIndex < function.parameterStorageBytes / 4U + function.localStorageBytes / 4U &&
-                emit_expression(emitter, unit, function, frame, functionLabels, statement.expression,
-                                epilogueLabel, callFailureLabel) &&
-                emit_copy_pointer_descriptor(emitter, local_displacement(statement.localIndex));
+            if (statement.localIndex >= function.parameterStorageBytes / 4U + function.localStorageBytes / 4U)
+                return false;
+            {
+                uint16_t pointerSlot = COMPILER_INVALID_INDEX;
+                if (!emit_expression_value(emitter, unit, function, frame, functionLabels,
+                                            statement.expression, epilogueLabel, callFailureLabel,
+                                            &pointerSlot) ||
+                    !emit_copy_pointer_descriptor(emitter, local_displacement(statement.localIndex))) return false;
+                return pointerSlot == COMPILER_INVALID_INDEX ||
+                       emitter.release_pointer_temporary_slots(1);
+            }
         case StatementKind::StoreGlobal:
             if (statement.globalIndex >= unit.globalCount) return false;
             return emit_expression(emitter, unit, function, frame, functionLabels, statement.expression,
@@ -1162,15 +1435,19 @@ static bool emit_statement(Emitter& emitter, const TranslationUnitIR& unit, cons
                 !emitter.mov_local_eax(temporary_displacement(frame, temporaryBase))) return false;
             uint16_t failureLabel = COMPILER_INVALID_INDEX;
             uint16_t endLabel = COMPILER_INVALID_INDEX;
+            uint16_t pointerTargetSlot = COMPILER_INVALID_INDEX;
             if (!emitter.create_label(&failureLabel) || !emitter.create_label(&endLabel) ||
-                !emit_expression(emitter, unit, function, frame, functionLabels, statement.targetExpression,
-                                 epilogueLabel, callFailureLabel) ||
+                !emit_expression_value(emitter, unit, function, frame, functionLabels,
+                                       statement.targetExpression, epilogueLabel, callFailureLabel,
+                                       &pointerTargetSlot) ||
                 !emit_pointer_validation(emitter, failureLabel) ||
                 !emitter.mov_rdx_ptr64(0) ||
                 !emitter.mov_eax_local(temporary_displacement(frame, temporaryBase)) ||
                 !emitter.mov_rax_eax() || !emitter.emit_jmp(endLabel) ||
                 !emitter.define_label(failureLabel) || !emit_pointer_failure(emitter, epilogueLabel) ||
                 !emitter.define_label(endLabel) || !emitter.release_temporary_slots(1)) return false;
+            if (pointerTargetSlot != COMPILER_INVALID_INDEX &&
+                !emitter.release_pointer_temporary_slots(1)) return false;
             return true;
         }
         case StatementKind::EvaluateExpression:

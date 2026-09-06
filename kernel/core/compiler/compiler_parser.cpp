@@ -797,7 +797,9 @@ private:
         expression.type = (kind == ExpressionKind::AddressOfLocal ||
                            kind == ExpressionKind::AddressOfGlobal ||
                            kind == ExpressionKind::AddressOfIndexed ||
-                           kind == ExpressionKind::LoadPointer)
+                           kind == ExpressionKind::LoadPointer ||
+                           kind == ExpressionKind::PointerAdd ||
+                           kind == ExpressionKind::PointerSubtractInteger)
             ? ValueType::Int32Pointer : ValueType::Int32;
         expression.left = left;
         expression.right = right;
@@ -885,9 +887,12 @@ private:
             ++(*m_index);
             const uint16_t right = parse_relational(depth);
             if (right == COMPILER_INVALID_INDEX) return COMPILER_INVALID_INDEX;
-            if (m_output->expressions[left].type != ValueType::Int32 ||
-                m_output->expressions[right].type != ValueType::Int32) {
-                m_diagnostics.error(operatorToken.location, "comparisons require int expressions", "type");
+            const ValueType leftType = m_output->expressions[left].type;
+            const ValueType rightType = m_output->expressions[right].type;
+            if (leftType != rightType ||
+                (leftType != ValueType::Int32 && leftType != ValueType::Int32Pointer)) {
+                m_diagnostics.error(operatorToken.location,
+                                    "comparisons require two int expressions or two int* expressions", "type");
                 return COMPILER_INVALID_INDEX;
             }
             left = make_expression(operation == TokenKind::EqualEqual ? ExpressionKind::Equal : ExpressionKind::NotEqual,
@@ -932,13 +937,28 @@ private:
             ++(*m_index);
             const uint16_t right = parse_multiplicative(depth);
             if (right == COMPILER_INVALID_INDEX) return COMPILER_INVALID_INDEX;
-            if (m_output->expressions[left].type != ValueType::Int32 ||
-                m_output->expressions[right].type != ValueType::Int32) {
-                m_diagnostics.error(operatorToken.location, "arithmetic requires int expressions", "type");
+            const ValueType leftType = m_output->expressions[left].type;
+            const ValueType rightType = m_output->expressions[right].type;
+            ExpressionKind kind = ExpressionKind::Add;
+            if (leftType == ValueType::Int32 && rightType == ValueType::Int32) {
+                kind = operation == TokenKind::Plus ? ExpressionKind::Add : ExpressionKind::Subtract;
+            } else if (operation == TokenKind::Plus &&
+                       leftType == ValueType::Int32Pointer && rightType == ValueType::Int32) {
+                kind = ExpressionKind::PointerAdd;
+            } else if (operation == TokenKind::Plus &&
+                       leftType == ValueType::Int32 && rightType == ValueType::Int32Pointer) {
+                kind = ExpressionKind::PointerAdd;
+            } else if (operation == TokenKind::Minus &&
+                       leftType == ValueType::Int32Pointer && rightType == ValueType::Int32) {
+                kind = ExpressionKind::PointerSubtractInteger;
+            } else {
+                m_diagnostics.error(operatorToken.location,
+                                    "pointer arithmetic requires exactly one int* and one int expression",
+                                    "type");
                 return COMPILER_INVALID_INDEX;
             }
-            left = make_expression(operation == TokenKind::Plus ? ExpressionKind::Add : ExpressionKind::Subtract,
-                                   operatorToken.location, left, right, COMPILER_INVALID_INDEX, 0);
+            left = make_expression(kind, operatorToken.location, left, right,
+                                   COMPILER_INVALID_INDEX, 0);
         }
         return left;
     }
@@ -1178,10 +1198,20 @@ private:
             }
             if (local) {
                 if (local->kind == StorageKind::ArrayInt) {
-                    m_diagnostics.error_identifier_suffix(token.location, "array '",
-                                                          m_source + token.location.offset, token.length,
-                                                          "' requires an index", "array");
-                    return COMPILER_INVALID_INDEX;
+                    // Controlled array-to-pointer decay is deliberately
+                    // represented by the same full-provenance node as
+                    // &array[0].  The source language still has no array
+                    // value, so this can only be consumed as int*.
+                    const uint16_t zero = make_constant(0, token.location);
+                    const uint16_t expression = make_expression(ExpressionKind::AddressOfIndexed,
+                        token.location, zero, COMPILER_INVALID_INDEX,
+                        local->slot, 0);
+                    if (expression == COMPILER_INVALID_INDEX) return expression;
+                    m_output->expressions[expression].elementCount = local->elementCount;
+                    m_output->expressions[expression].elementSize = local->elementSize;
+                    m_output->expressions[expression].indexedBaseKind = IndexedBaseKind::Local;
+                    m_output->expressions[expression].globalIndex = COMPILER_INVALID_INDEX;
+                    return expression;
                 }
                 if (!local->initialized && local->kind != StorageKind::PointerInt) {
                     m_diagnostics.error(token.location, local->kind == StorageKind::PointerInt
@@ -1196,10 +1226,16 @@ private:
             const int32_t global = find_global(token);
             if (global >= 0) {
                 if (m_unit->globals[global].kind == StorageKind::ArrayInt) {
-                    m_diagnostics.error_identifier_suffix(token.location, "array '",
-                                                          m_source + token.location.offset, token.length,
-                                                          "' requires an index", "array");
-                    return COMPILER_INVALID_INDEX;
+                    const uint16_t zero = make_constant(0, token.location);
+                    const uint16_t expression = make_expression(ExpressionKind::AddressOfIndexed,
+                        token.location, zero, COMPILER_INVALID_INDEX,
+                        COMPILER_INVALID_INDEX, 0);
+                    if (expression == COMPILER_INVALID_INDEX) return expression;
+                    m_output->expressions[expression].globalIndex = static_cast<uint16_t>(global);
+                    m_output->expressions[expression].elementCount = m_unit->globals[global].elementCount;
+                    m_output->expressions[expression].elementSize = m_unit->globals[global].elementSize;
+                    m_output->expressions[expression].indexedBaseKind = IndexedBaseKind::Global;
+                    return expression;
                 }
                 if (m_unit->globals[global].kind == StorageKind::PointerInt) {
                     m_diagnostics.error(token.location, "global pointer variables are not supported in Phase 27R", "pointer");
@@ -1252,6 +1288,12 @@ private:
             expression.kind == ExpressionKind::AddressOfGlobal ||
             expression.kind == ExpressionKind::AddressOfIndexed ||
             expression.kind == ExpressionKind::LoadIndirectInt32) return false;
+        if (expression.kind == ExpressionKind::PointerAdd ||
+            expression.kind == ExpressionKind::PointerSubtractInteger ||
+            ((expression.kind == ExpressionKind::Equal || expression.kind == ExpressionKind::NotEqual) &&
+             expression.type == ValueType::Int32 &&
+             expression.left < m_output->expressionCount &&
+             m_output->expressions[expression.left].type == ValueType::Int32Pointer)) return false;
         if (expression.kind == ExpressionKind::Negate)
             return evaluate_expression(expression.left, depth + 1U, bits) && (*bits = 0U - *bits, true);
         if (!evaluate_expression(expression.left, depth + 1U, &left)) return false;

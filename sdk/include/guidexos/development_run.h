@@ -70,7 +70,8 @@ typedef enum gx_development_run_error_code {
     /* Runtime/compiler safety failures are distinct from application exits. */
     GX_DEVELOPMENT_RUN_ERROR_CALL_DEPTH_EXCEEDED = 32,
     GX_DEVELOPMENT_RUN_ERROR_ARRAY_BOUNDS_EXCEEDED = 33,
-    GX_DEVELOPMENT_RUN_ERROR_INVALID_POINTER_DEREFERENCE = 34
+    GX_DEVELOPMENT_RUN_ERROR_INVALID_POINTER_DEREFERENCE = 34,
+    GX_DEVELOPMENT_RUN_ERROR_POINTER_OUT_OF_BOUNDS = 35
 } gx_development_run_error_code;
 
 typedef struct gx_development_run_request {

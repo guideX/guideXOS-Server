@@ -56,6 +56,7 @@ enum class NativeRuntimeStatus : uint32_t {
     CallDepthExceeded = 1,
     ArrayBoundsExceeded = 2,
     InvalidPointerDereference = 3,
+    PointerOutOfBounds = 4,
 };
 
 inline const char* native_runtime_status_name(NativeRuntimeStatus status)
@@ -65,6 +66,7 @@ inline const char* native_runtime_status_name(NativeRuntimeStatus status)
     case NativeRuntimeStatus::CallDepthExceeded: return "CallDepthExceeded";
     case NativeRuntimeStatus::ArrayBoundsExceeded: return "ArrayBoundsExceeded";
     case NativeRuntimeStatus::InvalidPointerDereference: return "InvalidPointerDereference";
+    case NativeRuntimeStatus::PointerOutOfBounds: return "PointerOutOfBounds";
     }
     return "Unknown";
 }

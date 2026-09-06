@@ -7,6 +7,7 @@
 #include "native_elf_contract.h"
 #include "native_elf_loader.h"
 #include "../compiler/compiler_driver.h"
+#include "../compiler/compiler_object.h"
 #include "arch/amd64/compiler_backend.h"
 #include "kernel/serial_debug.h"
 #include "kernel/vfs.h"
@@ -16,7 +17,7 @@ namespace native_elf {
 namespace {
 
 static uint8_t s_invalidImage[guidexos::native_elf::MAX_ELF_FILE_BYTES];
-#if defined(GXOS_PHASE27G_SMOKE) || defined(GXOS_PHASE27H_SMOKE) || defined(GXOS_PHASE27I_SMOKE) || defined(GXOS_PHASE27J_SMOKE) || defined(GXOS_PHASE27K_SMOKE) || defined(GXOS_PHASE27L_SMOKE) || defined(GXOS_PHASE27M_SMOKE) || defined(GXOS_PHASE27R_SMOKE)
+#if defined(GXOS_PHASE27G_SMOKE) || defined(GXOS_PHASE27H_SMOKE) || defined(GXOS_PHASE27I_SMOKE) || defined(GXOS_PHASE27J_SMOKE) || defined(GXOS_PHASE27K_SMOKE) || defined(GXOS_PHASE27L_SMOKE) || defined(GXOS_PHASE27M_SMOKE) || defined(GXOS_PHASE27R_SMOKE) || defined(GXOS_PHASE27S_SMOKE)
 static uint8_t s_compareImage[guidexos::native_elf::MAX_ELF_FILE_BYTES];
 #endif
 
@@ -153,7 +154,7 @@ static bool emit_serial_artifact(const char* path, const char* name)
     return true;
 }
 
-#if defined(GXOS_PHASE27G_SMOKE) || defined(GXOS_PHASE27H_SMOKE) || defined(GXOS_PHASE27I_SMOKE) || defined(GXOS_PHASE27J_SMOKE) || defined(GXOS_PHASE27K_SMOKE) || defined(GXOS_PHASE27L_SMOKE) || defined(GXOS_PHASE27M_SMOKE) || defined(GXOS_PHASE27R_SMOKE)
+#if defined(GXOS_PHASE27G_SMOKE) || defined(GXOS_PHASE27H_SMOKE) || defined(GXOS_PHASE27I_SMOKE) || defined(GXOS_PHASE27J_SMOKE) || defined(GXOS_PHASE27K_SMOKE) || defined(GXOS_PHASE27L_SMOKE) || defined(GXOS_PHASE27M_SMOKE) || defined(GXOS_PHASE27R_SMOKE) || defined(GXOS_PHASE27S_SMOKE)
 static bool same_vfs_file_bytes(const char* leftPath, const char* rightPath)
 {
     vfs::FileInfo left = {};
@@ -956,10 +957,10 @@ void run_bootstrap_execution_smoke()
         compile_diagnostic_contains(r27Invalid, "expression is not addressable");
     const bool invalidDeref = !compiler::compile("/P27R/r27invalid_deref.c", "/P27R/out/r27invalidd.elf", &r27InvalidDeref) &&
         compile_diagnostic_contains(r27InvalidDeref, "cannot dereference non-pointer expression");
-    const bool noDecay = !compiler::compile("/P27R/r27invalid_decay.c", "/P27R/out/r27decay.elf", &r27InvalidDecay) &&
-        compile_diagnostic_contains(r27InvalidDecay, "requires an index");
-    const bool pointerArithmetic = !compiler::compile("/P27R/r27invalid_arithmetic.c", "/P27R/out/r27arith.elf", &r27InvalidArithmetic) &&
-        compile_diagnostic_contains(r27InvalidArithmetic, "arithmetic requires int expressions");
+    const bool arrayDecay = compiler::compile("/P27R/r27invalid_decay.c", "/P27R/out/r27decay.elf", &r27InvalidDecay) &&
+        run_expected("/P27R/out/r27decay.elf", 42);
+    const bool pointerArithmetic = compiler::compile("/P27R/r27invalid_arithmetic.c", "/P27R/out/r27arith.elf", &r27InvalidArithmetic) &&
+        run_expected("/P27R/out/r27arith.elf", 0);
     const bool pointerType = !compiler::compile("/P27R/r27invalid_type.c", "/P27R/out/r27type.elf", &r27InvalidType) &&
         compile_diagnostic_contains(r27InvalidType, "cannot initialize int*");
     const bool globalPointer = !compiler::compile("/P27R/r27invalid_global.c", "/P27R/out/r27globalp.elf", &r27InvalidGlobal) &&
@@ -970,8 +971,8 @@ void run_bootstrap_execution_smoke()
         r27InvalidPointerReport.teardownComplete;
     print_marker("phase27r_invalid_address_of", invalidAddress);
     print_marker("phase27r_nonpointer_dereference", invalidDeref);
-    print_marker("phase27r_no_array_decay", noDecay);
-    print_marker("phase27r_pointer_arithmetic_rejected", pointerArithmetic);
+    print_marker("phase27r_array_decay", arrayDecay);
+    print_marker("phase27r_pointer_arithmetic_supported", pointerArithmetic);
     print_marker("phase27r_integer_pointer_cast_rejected", pointerType);
     print_marker("phase27r_pointer_type_mismatch", pointerType);
     print_marker("phase27r_global_pointer_rejected", globalPointer);
@@ -1071,13 +1072,199 @@ void run_bootstrap_execution_smoke()
     print_marker("phase27r_kernel_survival", appLaunched && r27StudioReport.finalState == NativeAppExecutionState::Cleaned);
 
     const bool phase27rPassed = localRun && globalRun && arrayRun && dynamicRun && copyRun && assignmentRun &&
-        parameterRun && recursiveRun && oobFailure && invalidAddress && invalidDeref && noDecay &&
+        parameterRun && recursiveRun && oobFailure && invalidAddress && invalidDeref && arrayDecay &&
         pointerArithmetic && pointerType && globalPointer && invalidPointer && projectRun && cachedPointer &&
         deterministic && edited && restored && signatureChanged && signatureRecovered && invalidated &&
         staleBlocked && artifact && appLaunched;
     print_marker("phase27r", phase27rPassed);
     serial::puts(phase27rPassed ? "ELF Loader: Phase 27R typed pointer smoke PASS\n" :
                                   "ELF Loader: Phase 27R typed pointer smoke FAIL\n");
+#endif
+#if defined(GXOS_PHASE27S_SMOKE)
+    serial::puts("ELF Loader: Phase 27S provenance-preserving pointer arithmetic smoke begin\n");
+    static compiler::CompileSummary s27Walk = {};
+    static compiler::CompileSummary s27Store = {};
+    static compiler::CompileSummary s27Retreat = {};
+    static compiler::CompileSummary s27Middle = {};
+    static compiler::CompileSummary s27Equality = {};
+    static compiler::CompileSummary s27Copy = {};
+    static compiler::CompileSummary s27Parameter = {};
+    static compiler::CompileSummary s27Condition = {};
+    static compiler::CompileSummary s27OnePast = {};
+    static compiler::CompileSummary s27OnePastDeref = {};
+    static compiler::CompileSummary s27Beyond = {};
+    static compiler::CompileSummary s27Before = {};
+    static compiler::CompileSummary s27Scalar = {};
+    static compiler::CompileSummary s27Adjacent = {};
+    static compiler::CompileSummary s27ScalarAdjacent = {};
+    static compiler::CompileSummary s27Overflow = {};
+    static compiler::CompileSummary s27Type = {};
+    static compiler::CompileSummary s27Raw = {};
+    static compiler::CompileSummary s27Rvalue = {};
+    static compiler::CompileSummary s27Recursion = {};
+    static compiler::CompileSummary s27Deep = {};
+    static compiler::CompileSummary s27Global = {};
+    static compiler::CompileSummary s27Project = {};
+    static compiler::CompileSummary s27CachedFirst = {};
+    static compiler::CompileSummary s27CachedSecond = {};
+    static compiler::CompileSummary s27Edited = {};
+    static compiler::CompileSummary s27SignatureBad = {};
+    static compiler::CompileSummary s27SignatureRecovered = {};
+    static NativeElfRunReport s27Report = {};
+    int32_t s27IgnoredReturn = 0;
+
+    const uint8_t pointerArithmeticOpcode[] = {0x48, 0x63, 0xD0};
+    const uint8_t pointerScaleOpcode[] = {0x48, 0xC1, 0xE2, 0x02};
+    const uint8_t dereferenceGuardOpcode[] = {0x40, 0x8B, 0x48, 0x1C};
+    const uint8_t globalAddressOpcode[] = {0x48, 0xBA};
+    const bool walk = compiler::compile("/P27S/s27walk.c", "/P27S/out/s27walk.elf", &s27Walk) &&
+        run_expected("/P27S/out/s27walk.elf", 42);
+    const bool store = compiler::compile("/P27S/s27store.c", "/P27S/out/s27store.elf", &s27Store) &&
+        run_expected("/P27S/out/s27store.elf", 42);
+    const bool retreat = compiler::compile("/P27S/s27retreat.c", "/P27S/out/s27ret.elf", &s27Retreat) &&
+        run_expected("/P27S/out/s27ret.elf", 42);
+    const bool middle = compiler::compile("/P27S/s27middle.c", "/P27S/out/s27mid.elf", &s27Middle) &&
+        run_expected("/P27S/out/s27mid.elf", 42);
+    const bool equality = compiler::compile("/P27S/s27equality.c", "/P27S/out/s27eq.elf", &s27Equality) &&
+        run_expected("/P27S/out/s27eq.elf", 42);
+    const bool copy = compiler::compile("/P27S/s27copy.c", "/P27S/out/s27copy.elf", &s27Copy) &&
+        run_expected("/P27S/out/s27copy.elf", 42);
+    const bool parameter = compiler::compile("/P27S/s27param_isolation.c", "/P27S/out/s27param.elf", &s27Parameter) &&
+        run_expected("/P27S/out/s27param.elf", 42);
+    const bool condition = compiler::compile("/P27S/s27condition.c", "/P27S/out/s27cond.elf", &s27Condition) &&
+        run_expected("/P27S/out/s27cond.elf", 42);
+    const bool onePast = compiler::compile("/P27S/s27onepast.c", "/P27S/out/s27opst.elf", &s27OnePast) &&
+        run_expected("/P27S/out/s27opst.elf", 42);
+    const bool scalar = compiler::compile("/P27S/s27scalar.c", "/P27S/out/s27sca.elf", &s27Scalar) &&
+        run_expected("/P27S/out/s27sca.elf", 42);
+    const bool onePastDerefCompiled = compiler::compile("/P27S/s27onepast_deref.c", "/P27S/out/s27opd.elf", &s27OnePastDeref);
+    const bool onePastDeref = onePastDerefCompiled && !run_file("/P27S/out/s27opd.elf", &s27IgnoredReturn, &s27Report) &&
+        s27Report.runtimeStatus == NativeRuntimeStatus::InvalidPointerDereference && s27Report.teardownComplete;
+    const bool beyondCompiled = compiler::compile("/P27S/s27beyond.c", "/P27S/out/s27bey.elf", &s27Beyond);
+    const bool beyond = beyondCompiled && !run_file("/P27S/out/s27bey.elf", &s27IgnoredReturn, &s27Report) &&
+        s27Report.runtimeStatus == NativeRuntimeStatus::PointerOutOfBounds && s27Report.teardownComplete;
+    const bool beforeCompiled = compiler::compile("/P27S/s27before.c", "/P27S/out/s27bef.elf", &s27Before);
+    const bool before = beforeCompiled && !run_file("/P27S/out/s27bef.elf", &s27IgnoredReturn, &s27Report) &&
+        s27Report.runtimeStatus == NativeRuntimeStatus::PointerOutOfBounds && s27Report.teardownComplete;
+    const bool adjacentCompiled = compiler::compile("/P27S/s27adjacent.c", "/P27S/out/s27adj.elf", &s27Adjacent);
+    const bool adjacent = adjacentCompiled && !run_file("/P27S/out/s27adj.elf", &s27IgnoredReturn, &s27Report) &&
+        s27Report.runtimeStatus == NativeRuntimeStatus::PointerOutOfBounds && s27Report.teardownComplete;
+    const bool scalarAdjacentCompiled = compiler::compile("/P27S/s27scalar_adjacent.c", "/P27S/out/s27sadj.elf", &s27ScalarAdjacent);
+    const bool scalarAdjacent = scalarAdjacentCompiled && !run_file("/P27S/out/s27sadj.elf", &s27IgnoredReturn, &s27Report) &&
+        s27Report.runtimeStatus == NativeRuntimeStatus::InvalidPointerDereference && s27Report.teardownComplete;
+    const bool overflow = compiler::compile("/P27S/s27overflow.c", "/P27S/out/s27ovf.elf", &s27Overflow) &&
+        !run_file("/P27S/out/s27ovf.elf", &s27IgnoredReturn, &s27Report) &&
+        s27Report.runtimeStatus == NativeRuntimeStatus::PointerOutOfBounds && s27Report.teardownComplete;
+    const bool pointerType = !compiler::compile("/P27S/s27type.c", "/P27S/out/s27type.elf", &s27Type) &&
+        compile_diagnostic_contains(s27Type, "pointer arithmetic requires exactly");
+    const bool rawPointer = !compiler::compile("/P27S/s27raw.c", "/P27S/out/s27raw.elf", &s27Raw) &&
+        compile_diagnostic_contains(s27Raw, "cannot initialize int");
+    const bool rvalue = !compiler::compile("/P27S/s27rvalue.c", "/P27S/out/s27rvalue.elf", &s27Rvalue) &&
+        compile_diagnostic_contains(s27Rvalue, "expression is not addressable");
+    const bool recursion = compiler::compile("/P27S/s27recursion.c", "/P27S/out/s27rec.elf", &s27Recursion) &&
+        run_expected("/P27S/out/s27rec.elf", 42);
+    const bool deep = compiler::compile("/P27S/s27deep.c", "/P27S/out/s27deep.elf", &s27Deep) &&
+        !run_file("/P27S/out/s27deep.elf", &s27IgnoredReturn, &s27Report) &&
+        s27Report.runtimeStatus == NativeRuntimeStatus::CallDepthExceeded && s27Report.teardownComplete;
+    const bool global = compiler::compile("/P27S/s27global.c", "/P27S/out/s27glob.elf", &s27Global) &&
+        run_expected("/P27S/out/s27glob.elf", 42);
+    print_marker("phase27s_one_past_representation", onePast);
+    print_marker("phase27s_beyond_one_past_rejected", beyond);
+    print_marker("phase27s_before_begin_rejected", before);
+    print_marker("phase27s_address_of_element", middle);
+    print_marker("phase27s_scalar_pointer_extent", scalar);
+    print_marker("phase27s_pointer_bounds_failure", beyond && before && overflow);
+    print_marker("phase27s_one_past_deref_rejected", onePastDeref);
+    print_marker("phase27s_pointer_array_walk", walk);
+    print_marker("phase27s_pointer_store_walk", store);
+    print_marker("phase27s_pointer_retreat", retreat);
+    print_marker("phase27s_middle_element_provenance", middle);
+    print_marker("phase27s_pointer_equality", equality);
+    print_marker("phase27s_pointer_copy", copy);
+    print_marker("phase27s_pointer_parameter_isolation", parameter);
+    print_marker("phase27s_pointer_arithmetic_opcode", walk && compile_code_contains(s27Walk, pointerArithmeticOpcode, sizeof(pointerArithmeticOpcode)) && compile_code_contains(s27Walk, pointerScaleOpcode, sizeof(pointerScaleOpcode)));
+    print_marker("phase27s_deref_guard_opcode", onePastDerefCompiled && compile_code_contains(s27OnePastDeref, dereferenceGuardOpcode, sizeof(dereferenceGuardOpcode)));
+    print_marker("phase27s_no_raw_pointer_escape", rawPointer);
+    print_marker("phase27s_pointer_integer_type_safety", rawPointer && pointerType);
+    print_marker("phase27s_pointer_add_pointer_rejected", pointerType);
+    print_marker("phase27s_address_of_rvalue_rejected", rvalue);
+    print_marker("phase27s_offset_pointer_store", middle && store);
+    print_marker("phase27s_pointer_loop", walk);
+    print_marker("phase27s_pointer_condition", condition);
+    print_marker("phase27s_pointer_recursion", recursion);
+    print_marker("phase27s_pointer_recursion_guard", deep);
+    print_marker("phase27s_global_array_pointer", global);
+    print_marker("phase27s_provenance_isolation", adjacent && scalarAdjacent && equality);
+    print_marker("phase27s_descriptor_integrity", copy && parameter);
+    print_marker("phase27s_adjacent_object_escape_rejected", adjacent);
+    print_marker("phase27s_scalar_adjacent_deref_rejected", scalarAdjacent);
+    print_marker("phase27s_array_decay", global);
+
+    const char* s27Sources[] = {"/P27S/src/main.cpp", "/P27S/src/math.cpp", "/P27S/src/state.cpp"};
+    const char* s27Objects[] = {"/P27S/out/s27m1.gxo", "/P27S/out/s27m2.gxo", "/P27S/out/s27m3.gxo"};
+    const bool project = compiler::compile_project(s27Sources, 3, "/P27S/out/s27main.elf", &s27Project) &&
+        run_expected_with_report("/P27S/out/s27main.elf", 42, &s27Report) && s27Report.hostLogObserved;
+    const bool cold = compiler::compile_project_incremental(s27Sources, s27Sources, s27Objects, 3,
+        "/P27S/out/s27cache.elf", &s27CachedFirst);
+    const bool warm = cold && compiler::compile_project_incremental(s27Sources, s27Sources, s27Objects, 3,
+        "/P27S/out/s27cache.elf", &s27CachedSecond);
+    const bool cached = warm && s27CachedSecond.compiledModuleCount == 0 && s27CachedSecond.cachedModuleCount == 3 &&
+        s27CachedSecond.linkedFromPersistedObjects && run_expected("/P27S/out/s27cache.elf", 42);
+    vfs::FileInfo objectInfo = {};
+    const bool objectRead = cached && vfs::stat(s27Objects[0], &objectInfo) == vfs::VFS_OK &&
+        objectInfo.size > 0 && objectInfo.size <= sizeof(s_invalidImage) &&
+        vfs::read_file(s27Objects[0], s_invalidImage, static_cast<uint32_t>(objectInfo.size)) == static_cast<int32_t>(objectInfo.size);
+    compiler::GxoObjectHeaderView objectHeader = {};
+    compiler::Diagnostics objectDiagnostics;
+    const bool version = objectRead && compiler::inspect_gxo_header(s_invalidImage, static_cast<uint32_t>(objectInfo.size),
+        &objectHeader, objectDiagnostics) && objectHeader.compilerObjectAbiVersion == compiler::COMPILER_OBJECT_ABI_VERSION;
+    const bool deterministic = cached && s27CachedFirst.outputHash == s27CachedSecond.outputHash && version;
+    const char s27MathEdited[] = "extern int values[4];\nint fill_values() { values[0] = 10; values[1] = 11; values[2] = 12; values[3] = 8; return 0; }\nint sum_pointer(int* p) { int total = 0; int i = 0; while (i < 4) { total = total + *p; p = p + 1; i = i + 1; } return total; }\n";
+    const char s27MathOriginal[] = "extern int values[4];\nint fill_values() { values[0] = 10; values[1] = 11; values[2] = 12; values[3] = 9; return 0; }\nint sum_pointer(int* p) { int total = 0; int i = 0; while (i < 4) { total = total + *p; p = p + 1; i = i + 1; } return total; }\n";
+    const bool edited = cached && vfs::write_file(s27Sources[1], s27MathEdited, sizeof(s27MathEdited) - 1U) == sizeof(s27MathEdited) - 1U &&
+        compiler::compile_project_incremental(s27Sources, s27Sources, s27Objects, 3, "/P27S/out/s27edit.elf", &s27Edited) &&
+        s27Edited.compiledModuleCount == 1 && s27Edited.cachedModuleCount == 2 && run_expected("/P27S/out/s27edit.elf", 41);
+    const bool restored = edited && vfs::write_file(s27Sources[1], s27MathOriginal, sizeof(s27MathOriginal) - 1U) == sizeof(s27MathOriginal) - 1U &&
+        compiler::compile_project_incremental(s27Sources, s27Sources, s27Objects, 3, "/P27S/out/s27rest.elf", &s27SignatureRecovered) &&
+        run_expected("/P27S/out/s27rest.elf", 42);
+    const char s27BrokenSignature[] = "extern int values[4];\nint fill_values() { return 0; }\nint sum_pointer(int p) { return p; }\n";
+    const bool signatureSeeded = restored && vfs::write_file(s27Sources[1], s27BrokenSignature, sizeof(s27BrokenSignature) - 1U) == sizeof(s27BrokenSignature) - 1U;
+    const bool signatureMismatch = signatureSeeded && !compiler::compile_project_incremental(s27Sources, s27Sources, s27Objects, 3,
+        "/P27S/out/s27bad.elf", &s27SignatureBad) && s27SignatureBad.cachedModuleCount == 2 &&
+        compile_diagnostic_contains(s27SignatureBad, "conflicting declaration for function");
+    const bool signatureFinal = signatureMismatch && vfs::write_file(s27Sources[1], s27MathOriginal, sizeof(s27MathOriginal) - 1U) == sizeof(s27MathOriginal) - 1U &&
+        compiler::compile_project_incremental(s27Sources, s27Sources, s27Objects, 3, "/P27S/out/s27final.elf", &s27SignatureRecovered) &&
+        run_expected("/P27S/out/s27final.elf", 42);
+    print_marker("phase27s_pointer_parameter_walk", project);
+    print_marker("phase27s_cross_file_pointer_walk", project);
+    print_marker("phase27s_pointer_signature_validation", project);
+    print_marker("phase27s_cached_pointer_signature", signatureMismatch);
+    print_marker("phase27s_pointer_object_roundtrip", cached);
+    print_marker("phase27s_cached_pointer_execution", cached);
+    print_marker("phase27s_pointer_incremental_edit", edited);
+    print_marker("phase27s_cold_warm_identical", deterministic);
+    print_marker("phase27s_pointer_object_deterministic", deterministic);
+    print_marker("phase27s_runtime_status_recovery", beyond && project && deep && restored);
+    print_marker("phase27s_pointer_failure_recovery", beyond && restored);
+    print_marker("phase27s_cross_file_global_pointer", project);
+    print_marker("phase27s_pointer_global_relocation", project && compile_code_contains(s27Project, globalAddressOpcode, sizeof(globalAddressOpcode)));
+    print_marker("phase27s_object_version_migration", version);
+    const bool artifact = project && emit_serial_artifact("/P27S/out/s27main.elf", "s27main");
+    print_marker("phase27s_no_rwx_regression", artifact);
+    print_marker("phase27s_pointer_failure_blocks_run", signatureMismatch);
+    print_marker("phase27s_pointer_linker_reset", signatureFinal);
+    int32_t developerStudio27sReturn = 1;
+    static NativeElfRunReport developerStudio27sReport = {};
+    const bool appLaunched = project && run_file("/Apps/DS27S/bin/amd64/p27s.elf", &developerStudio27sReturn,
+        &developerStudio27sReport) && developerStudio27sReturn == 0 && developerStudio27sReport.teardownComplete;
+    print_marker("phase27s_kernel_survival", appLaunched && restored && signatureFinal);
+    const bool phase27sPassed = walk && store && retreat && middle && equality && copy && parameter && condition &&
+        onePast && scalar && onePastDeref && beyond && before && adjacent && scalarAdjacent && overflow && pointerType &&
+        rawPointer && rvalue && recursion && deep && global && project && cached && deterministic && edited && restored &&
+        signatureMismatch && signatureFinal && artifact && appLaunched;
+    print_marker("phase27s", phase27sPassed);
+    serial::puts(phase27sPassed ? "ELF Loader: Phase 27S provenance-preserving pointer arithmetic smoke PASS\n" :
+                                  "ELF Loader: Phase 27S provenance-preserving pointer arithmetic smoke FAIL\n");
 #endif
 #if defined(GXOS_PHASE27G_SMOKE)
     serial::puts("ELF Loader: Phase 27G bootstrap language smoke begin\n");

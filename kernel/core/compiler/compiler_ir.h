@@ -63,13 +63,14 @@ static const uint32_t COMPILER_MAX_POINTER_TEMPORARY_SLOTS = COMPILER_MAX_PARAME
 // independent from the compiler phase number: changing object-producing
 // semantics requires incrementing COMPILER_OBJECT_ABI_VERSION.
 static const uint16_t COMPILER_OBJECT_FORMAT_VERSION = 1;
-static const uint16_t COMPILER_OBJECT_ABI_VERSION = 3;
+static const uint16_t COMPILER_OBJECT_ABI_VERSION = 4;
 static const uint32_t COMPILER_OBJECT_ARCH_AMD64 = 1;
 static const uint32_t COMPILER_OBJECT_TARGET_ABI_GUIDEXOS_C_V1 = 1;
 static const uint32_t COMPILER_MAX_OBJECT_BYTES = 131072;
 static const uint32_t COMPILER_RUNTIME_STATUS_CALL_DEPTH = 1;
 static const uint32_t COMPILER_RUNTIME_STATUS_ARRAY_BOUNDS = 2;
 static const uint32_t COMPILER_RUNTIME_STATUS_INVALID_POINTER = 3;
+static const uint32_t COMPILER_RUNTIME_STATUS_POINTER_BOUNDS = 4;
 
 static const uint16_t COMPILER_INVALID_INDEX = 0xFFFFU;
 
@@ -96,6 +97,8 @@ enum class ExpressionKind : uint8_t {
     AddressOfIndexed,
     LoadPointer,
     LoadIndirectInt32,
+    PointerAdd,
+    PointerSubtractInteger,
 };
 
 enum class ValueType : uint8_t {

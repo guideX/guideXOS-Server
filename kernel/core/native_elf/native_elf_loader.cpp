@@ -918,7 +918,9 @@ static bool run_file_internal(const char* path,
             ? "ELF Loader: Application terminated: array index out of bounds.\n"
             : (s_appRuntime.runtimeStatus == NativeRuntimeStatus::InvalidPointerDereference
                 ? "ELF Loader: Application terminated: invalid pointer dereference.\n"
-                : "ELF Loader: Application terminated: recursive call depth limit exceeded.\n"));
+                : (s_appRuntime.runtimeStatus == NativeRuntimeStatus::PointerOutOfBounds
+                    ? "ELF Loader: Application terminated: pointer arithmetic moved outside its object.\n"
+                    : "ELF Loader: Application terminated: recursive call depth limit exceeded.\n")));
     }
     const bool teardownComplete = teardown_application(report);
     if (report) {
@@ -929,7 +931,9 @@ static bool run_file_internal(const char* path,
                   ? "ELF Loader: Application terminated: array index out of bounds."
                   : (s_appRuntime.runtimeStatus == NativeRuntimeStatus::InvalidPointerDereference
                       ? "ELF Loader: Application terminated: invalid pointer dereference."
-                      : "ELF Loader: Application terminated: recursive call depth limit exceeded.")));
+                      : (s_appRuntime.runtimeStatus == NativeRuntimeStatus::PointerOutOfBounds
+                          ? "ELF Loader: Application terminated: pointer arithmetic moved outside its object."
+                          : "ELF Loader: Application terminated: recursive call depth limit exceeded."))));
     }
     serial::puts(teardownComplete ? "ELF Loader: teardown PASS\n"
                                   : "ELF Loader: teardown FAIL\n");
