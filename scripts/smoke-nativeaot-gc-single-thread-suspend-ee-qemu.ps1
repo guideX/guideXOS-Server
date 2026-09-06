@@ -2522,7 +2522,7 @@ extern "C" void __cdecl guideXosNativeAotC011EC67ExpansionObserved(uintptr_t seg
                                 $c54GcDeclaration += [Environment]::NewLine + @'
 extern "C" void __cdecl guideXosNativeAotC011EC80SnapshotBegin(uint32_t checkpoint, uintptr_t mappingStart, uintptr_t mappingEnd, uintptr_t regionAlignment, uintptr_t mappingEntries);
 extern "C" void __cdecl guideXosNativeAotC011EC80RegionObserved(uint32_t checkpoint, uintptr_t mappingIndex, uintptr_t descriptor, uintptr_t owner, uintptr_t list, uintptr_t basicRegionCount, uintptr_t rangeStart, uintptr_t rangeEnd, uintptr_t committed, uintptr_t allocated, uintptr_t used, uintptr_t liveBytes, uint32_t generation, uint32_t planGeneration, uint32_t state, uint32_t listKind, uint32_t active, uint32_t specialFlags, uint32_t tailRole);
-extern "C" void __cdecl guideXosNativeAotC011EC80SnapshotEnd(uint32_t checkpoint, uintptr_t visitedEntries, uintptr_t excludedEntries, uintptr_t materializedRegions);
+extern "C" void __cdecl guideXosNativeAotC011EC80SnapshotEnd(uint32_t checkpoint, uintptr_t visitedEntries, uintptr_t excludedEntries, uintptr_t materializedRegions, uintptr_t duplicateDescriptorCount, uintptr_t duplicateRangeCount, uintptr_t invalidRangeCount);
 '@
                             }
                             if ($isC011EC72) {
@@ -2598,7 +2598,12 @@ static uint32_t guideXosC011EC67RegionState(heap_segment* region)
         uintptr_t visitedEntries = 0u; \
         uintptr_t excludedEntries = 0u; \
         uintptr_t materializedRegions = 0u; \
+        uintptr_t duplicateDescriptorCount = 0u; \
+        uintptr_t duplicateRangeCount = 0u; \
+        uintptr_t invalidRangeCount = 0u; \
         uintptr_t priorDescriptor = 0u; \
+        uintptr_t priorRangeStart = 0u; \
+        uintptr_t priorRangeEnd = 0u; \
         guideXosNativeAotC011EC80SnapshotBegin( \
             (checkpointValue), mappingStart, mappingEnd, regionAlignment, mappingEntries); \
         for (uintptr_t mappingIndex = 0u; mappingIndex < mappingEntries; ++mappingIndex) \
@@ -2610,9 +2615,21 @@ static uint32_t guideXosC011EC67RegionState(heap_segment* region)
                 continue; \
             } \
             heap_segment* region = get_region_at_index(static_cast<size_t>(mappingIndex)); \
+            if (region == nullptr) \
+            { \
+                ++excludedEntries; \
+                ++invalidRangeCount; \
+                continue; \
+            } \
             const ptrdiff_t firstField = (ptrdiff_t)heap_segment_allocated(region); \
             if (firstField < 0 && static_cast<uintptr_t>(-firstField) <= mappingIndex) \
                 region = get_region_at_index(static_cast<size_t>(mappingIndex + firstField)); \
+            if (region == nullptr) \
+            { \
+                ++excludedEntries; \
+                ++invalidRangeCount; \
+                continue; \
+            } \
             if (region == nullptr || heap_segment_mem(region) == nullptr || \
                 heap_segment_reserved(region) <= heap_segment_mem(region)) \
             { \
@@ -2621,15 +2638,23 @@ static uint32_t guideXosC011EC67RegionState(heap_segment* region)
             } \
             const uintptr_t descriptor = reinterpret_cast<uintptr_t>(region); \
             if (descriptor == priorDescriptor) \
+            { \
+                ++duplicateDescriptorCount; \
                 continue; \
+            } \
             priorDescriptor = descriptor; \
             const uintptr_t rangeStart = reinterpret_cast<uintptr_t>(get_region_start(region)); \
             const uintptr_t rangeEnd = reinterpret_cast<uintptr_t>(heap_segment_reserved(region)); \
+            if (rangeStart == priorRangeStart && rangeEnd == priorRangeEnd) \
+                ++duplicateRangeCount; \
+            priorRangeStart = rangeStart; \
+            priorRangeEnd = rangeEnd; \
             const uintptr_t basicRegionCount = rangeEnd >= rangeStart && regionAlignment != 0u \
                 ? (rangeEnd - rangeStart) / regionAlignment : 0u; \
             if (basicRegionCount == 0u) \
             { \
                 ++excludedEntries; \
+                ++invalidRangeCount; \
                 continue; \
             } \
             ++materializedRegions; \
@@ -2656,7 +2681,8 @@ static uint32_t guideXosC011EC67RegionState(heap_segment* region)
                 static_cast<uint32_t>(region->flags), basicRegionCount > 1u ? 1u : 0u); \
         } \
         guideXosNativeAotC011EC80SnapshotEnd( \
-            (checkpointValue), visitedEntries, excludedEntries, materializedRegions); \
+            (checkpointValue), visitedEntries, excludedEntries, materializedRegions, \
+            duplicateDescriptorCount, duplicateRangeCount, invalidRangeCount); \
     } \
 } while (0)
 '@.Replace("`r`n", $lockedSourceNewLine).Replace("`n", $lockedSourceNewLine)
@@ -11922,7 +11948,7 @@ exit /b %errorlevel%
             (& $c80Read $c80Complete 'pageFault') -eq '0x00000000'
         if (-not $c80Clean) { throw 'C011EC80 canonical snapshot diagnostics were not clean.' }
         $c80Agreement = $true
-        $c80SummaryFields = @('checkpoint','mappingEntries','visitedEntries','representedEntries','excludedEntries','materializedRegions','recordsWritten','recordCapacity','overflow','snapshotCompleteness')
+        $c80SummaryFields = @('checkpoint','mappingEntries','visitedEntries','representedEntries','excludedEntries','materializedRegions','recordsWritten','recordCapacity','duplicateDescriptorCount','duplicateRangeCount','invalidRangeCount','overflow','snapshotCompleteness')
         foreach ($run in $runResults) {
             if (@($run.c80SummaryLines).Count -ne @($firstC80Run.c80SummaryLines).Count -or
                 @($run.c80RecordLines).Count -ne @($firstC80Run.c80RecordLines).Count) {

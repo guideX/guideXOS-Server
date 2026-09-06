@@ -22031,7 +22031,8 @@ extern "C" void __cdecl guideXosNativeAotC011EC80RegionObserved(
     uint32_t tailRole);
 extern "C" void __cdecl guideXosNativeAotC011EC80SnapshotEnd(
     uint32_t checkpoint, uintptr_t visitedEntries, uintptr_t excludedEntries,
-    uintptr_t materializedRegions);
+    uintptr_t materializedRegions, uintptr_t duplicateDescriptorCount,
+    uintptr_t duplicateRangeCount, uintptr_t invalidRangeCount);
 static void guideXosNativeAotC011EC80Emit();
 #endif
 
@@ -22155,7 +22156,8 @@ guideXosNativeAotC011EC80RegionObserved(
 extern "C" void __cdecl
 guideXosNativeAotC011EC80SnapshotEnd(
     uint32_t checkpoint, uintptr_t visitedEntries, uintptr_t excludedEntries,
-    uintptr_t materializedRegions) {
+    uintptr_t materializedRegions, uintptr_t duplicateDescriptorCount,
+    uintptr_t duplicateRangeCount, uintptr_t invalidRangeCount) {
     guidexos_nativeaot_c011ec80_lifecycle_record& lifecycle =
         guideXosNativeAotC011EC80State();
     if (lifecycle.activeSnapshot == UINT32_MAX ||
@@ -22167,6 +22169,9 @@ guideXosNativeAotC011EC80SnapshotEnd(
         lifecycle.snapshots[lifecycle.activeSnapshot];
     snapshot.visitedEntries = visitedEntries;
     snapshot.excludedEntries = excludedEntries;
+    snapshot.duplicateDescriptorCount = duplicateDescriptorCount;
+    snapshot.duplicateRangeCount = duplicateRangeCount;
+    snapshot.invalidRangeCount = invalidRangeCount;
     if (snapshot.materializedRegions != materializedRegions ||
         snapshot.checkpoint != checkpoint ||
         snapshot.visitedEntries != snapshot.mappingEntries ||
@@ -22241,6 +22246,9 @@ static void guideXosNativeAotC011EC80Emit() {
         guideXosNativeAotC011EC67Put64("materializedRegions", snapshot.materializedRegions);
         guideXosNativeAotC011EC67Put64("recordsWritten", snapshot.recordsWritten);
         guideXosNativeAotC011EC67Put64("recordCapacity", snapshot.recordCapacity);
+        guideXosNativeAotC011EC67Put64("duplicateDescriptorCount", snapshot.duplicateDescriptorCount);
+        guideXosNativeAotC011EC67Put64("duplicateRangeCount", snapshot.duplicateRangeCount);
+        guideXosNativeAotC011EC67Put64("invalidRangeCount", snapshot.invalidRangeCount);
         guideXosNativeAotC011EC67Put32("overflow", snapshot.overflow);
         guideXosNativeAotC011EC67Put32("snapshotCompleteness", snapshot.complete);
         suspendEeSerialPutString(" source=canonical-seg-mapping-table\n");

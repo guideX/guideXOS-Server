@@ -2430,7 +2430,7 @@ typedef struct guidexos_nativeaot_c011ec67_lifecycle_record {
  * authentic mapping-entry span at each checkpoint, and overflow is a hard
  * diagnostic outcome rather than a silently truncated snapshot. */
 enum {
-    GUIDEXOS_NATIVEAOT_C011EC80_MAX_REGIONS = 32u,
+    GUIDEXOS_NATIVEAOT_C011EC80_MAX_REGIONS = 64u,
     GUIDEXOS_NATIVEAOT_C011EC80_MAX_SNAPSHOTS = 4u,
 };
 
@@ -2479,6 +2479,9 @@ typedef struct guidexos_nativeaot_c011ec80_snapshot_record {
     uintptr_t materializedRegions;
     uintptr_t recordsWritten;
     uintptr_t recordCapacity;
+    uintptr_t duplicateDescriptorCount;
+    uintptr_t duplicateRangeCount;
+    uintptr_t invalidRangeCount;
     guidexos_nativeaot_c011ec80_region_record regions[
         GUIDEXOS_NATIVEAOT_C011EC80_MAX_REGIONS];
 } guidexos_nativeaot_c011ec80_snapshot_record;
