@@ -117,6 +117,8 @@ const char* token_kind_name(TokenKind kind)
         case TokenKind::Comma: return "','";
         case TokenKind::LogicalAnd: return "'&&'";
         case TokenKind::LogicalOr: return "'||'";
+        case TokenKind::LeftBracket: return "'['";
+        case TokenKind::RightBracket: return "']'";
         default: return "unknown";
     }
 }
@@ -276,6 +278,8 @@ bool lex_source(const char* source, uint32_t sourceLength, Token* tokens,
                 } else kind = TokenKind::Greater;
                 break;
             case ',': kind = TokenKind::Comma; break;
+            case '[': kind = TokenKind::LeftBracket; break;
+            case ']': kind = TokenKind::RightBracket; break;
             case '&':
                 if (index + 1 < sourceLength && source[index + 1] == '&') {
                     kind = TokenKind::LogicalAnd; tokenLength = 2;

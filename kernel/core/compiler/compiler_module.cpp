@@ -105,9 +105,17 @@ static bool append_global_import(CompiledModule* module, const TranslationUnitIR
     if (globalIndex >= 0 && unit.globals[globalIndex].isDefinition) return true;
     const int32_t existing = find_import(*module, name);
     if (existing >= 0) {
-        if (module->imports[existing].kind != SymbolKind::Data) {
+        if (!symbol_is_data(module->imports[existing].kind)) {
             diagnostics.error_identifier_suffix(location, "symbol ", name, name_length(name),
                                                 " used as both function and global", "global");
+            return false;
+        }
+        const GlobalSymbolIR& global = unit.globals[globalIndex];
+        if (module->imports[existing].elementCount != global.elementCount ||
+            module->imports[existing].elementSize != global.elementSize ||
+            module->imports[existing].size != global.size) {
+            diagnostics.error_identifier(location, "conflicting declaration for global ",
+                                         name, name_length(name), "global");
             return false;
         }
         return true;
@@ -120,7 +128,11 @@ static bool append_global_import(CompiledModule* module, const TranslationUnitIR
     importSymbol = {};
     importSymbol.kind = SymbolKind::Data;
     if (!copy_string(importSymbol.name, sizeof(importSymbol.name), name)) return false;
-    importSymbol.size = 4;
+    const GlobalSymbolIR& global = unit.globals[globalIndex];
+    importSymbol.kind = global.kind == StorageKind::ArrayInt ? SymbolKind::DataArray : SymbolKind::Data;
+    importSymbol.elementCount = global.elementCount;
+    importSymbol.elementSize = global.elementSize;
+    importSymbol.size = global.size;
     importSymbol.alignment = 4;
     importSymbol.location = location;
     return true;
@@ -135,17 +147,24 @@ static bool flatten_global_data(TranslationUnitIR& unit, CompiledModule* module,
         GlobalSymbolIR& global = unit.globals[i];
         if (!global.isDefinition) continue;
         if ((offset & 3U) != 0) offset = (offset + 3U) & ~3U;
-        if (offset > sizeof(module->mutableData) - 4U) {
+        if (global.elementCount == 0 || global.elementSize != 4 ||
+            global.size != static_cast<uint32_t>(global.elementCount) * global.elementSize ||
+            global.size > sizeof(module->mutableData) - offset) {
             diagnostics.error(global.location, "mutable global data capacity exceeded", "global");
             return false;
         }
-        const uint32_t value = static_cast<uint32_t>(global.initialValue);
-        module->mutableData[offset] = static_cast<uint8_t>(value);
-        module->mutableData[offset + 1U] = static_cast<uint8_t>(value >> 8);
-        module->mutableData[offset + 2U] = static_cast<uint8_t>(value >> 16);
-        module->mutableData[offset + 3U] = static_cast<uint8_t>(value >> 24);
+        for (uint32_t element = 0; element < global.elementCount; ++element) {
+            const int32_t initial = global.kind == StorageKind::ArrayInt
+                ? global.initialValues[element] : global.initialValue;
+            const uint32_t value = static_cast<uint32_t>(initial);
+            const uint32_t at = offset + element * 4U;
+            module->mutableData[at] = static_cast<uint8_t>(value);
+            module->mutableData[at + 1U] = static_cast<uint8_t>(value >> 8);
+            module->mutableData[at + 2U] = static_cast<uint8_t>(value >> 16);
+            module->mutableData[at + 3U] = static_cast<uint8_t>(value >> 24);
+        }
         global.moduleDataOffset = offset;
-        offset += 4U;
+        offset += global.size;
     }
     module->mutableDataBytes = offset;
     return true;
@@ -188,8 +207,10 @@ bool compile_module_from_source(const char* sourcePath,
     module->functionCount = s_unit.functionCount;
     module->globalCount = s_unit.globalCount;
     module->recursiveSccCount = s_unit.recursiveSccCount;
-    for (uint32_t i = 0; i < COMPILER_MAX_FUNCTIONS; ++i)
+    for (uint32_t i = 0; i < COMPILER_MAX_FUNCTIONS; ++i) {
         module->recursiveFunction[i] = s_unit.recursiveFunction[i];
+        module->localStorageBytes[i] = s_unit.functions[i].localStorageBytes;
+    }
     for (uint32_t i = 0; i < COMPILER_MAX_FUNCTIONS; ++i)
         for (uint32_t j = 0; j < COMPILER_MAX_FUNCTIONS; ++j)
             module->callGraph[i][j] = s_unit.callGraph[i][j];
@@ -244,11 +265,13 @@ bool compile_module_from_source(const char* sourcePath,
         }
         ExportSymbol& exportSymbol = module->exports[module->exportCount++];
         exportSymbol = {};
-        exportSymbol.kind = SymbolKind::Data;
+        exportSymbol.kind = global.kind == StorageKind::ArrayInt ? SymbolKind::DataArray : SymbolKind::Data;
         if (!copy_string(exportSymbol.name, sizeof(exportSymbol.name), global.name)) return false;
         exportSymbol.moduleDataOffset = global.moduleDataOffset;
-        exportSymbol.size = 4;
+        exportSymbol.size = global.size;
         exportSymbol.alignment = 4;
+        exportSymbol.elementCount = global.elementCount;
+        exportSymbol.elementSize = global.elementSize;
         exportSymbol.location = global.location;
     }
     for (uint32_t i = 0; i < s_unit.functionCount; ++i) {
@@ -281,16 +304,22 @@ bool compile_module_from_source(const char* sourcePath,
         const FunctionIR& function = s_unit.functions[i];
         for (uint32_t e = 0; e < function.expressionCount; ++e) {
             const Expression& expression = function.expressions[e];
-            if (expression.kind != ExpressionKind::LoadGlobal ||
-                expression.globalIndex >= s_unit.globalCount) continue;
-            if (!append_global_import(module, s_unit, s_unit.globals[expression.globalIndex].name,
+            const bool globalLoad = expression.kind == ExpressionKind::LoadGlobal;
+            const bool indexedLoad = expression.kind == ExpressionKind::LoadIndexed &&
+                expression.indexedBaseKind == IndexedBaseKind::Global;
+            const uint16_t globalIndex = globalLoad ? expression.globalIndex : expression.globalIndex;
+            if ((!globalLoad && !indexedLoad) || globalIndex >= s_unit.globalCount) continue;
+            if (!append_global_import(module, s_unit, s_unit.globals[globalIndex].name,
                                       expression.location, diagnostics)) return false;
         }
         for (uint32_t s = 0; s < function.statementCount; ++s) {
             const Statement& statement = function.statements[s];
-            if (statement.kind != StatementKind::StoreGlobal ||
-                statement.globalIndex >= s_unit.globalCount) continue;
-            if (!append_global_import(module, s_unit, s_unit.globals[statement.globalIndex].name,
+            const bool globalStore = statement.kind == StatementKind::StoreGlobal;
+            const bool indexedStore = statement.kind == StatementKind::StoreIndexed &&
+                statement.indexedBaseKind == IndexedBaseKind::Global;
+            const uint16_t globalIndex = statement.globalIndex;
+            if ((!globalStore && !indexedStore) || globalIndex >= s_unit.globalCount) continue;
+            if (!append_global_import(module, s_unit, s_unit.globals[globalIndex].name,
                                       statement.location, diagnostics)) return false;
         }
     }

@@ -75,13 +75,13 @@ invoke_native_entry_on_stack:
 
     ; EAX is the gx_main result.  R12 is nonvolatile under the target ABI.
     mov     [r12 + 0x00], eax
-    xor     eax, eax
-    test    r15d, r15d
-    jz      .runtime_status_stored
-    mov     eax, 1
+    mov     eax, r15d
+    mov     edx, eax
+    and     eax, 0xFF
+    shr     edx, 8
 .runtime_status_stored:
     mov     [r12 + 0x10], eax
-    mov     [r12 + 0x14], r15d
+    mov     [r12 + 0x14], edx
 
     ; Restore the kernel caller's exact stack and all nonvolatile state.
     mov     rsp, r13

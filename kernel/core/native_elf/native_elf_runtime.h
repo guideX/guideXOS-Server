@@ -54,6 +54,7 @@ enum class NativeAppExecutionState : uint8_t {
 enum class NativeRuntimeStatus : uint32_t {
     None = 0,
     CallDepthExceeded = 1,
+    ArrayBoundsExceeded = 2,
 };
 
 inline const char* native_runtime_status_name(NativeRuntimeStatus status)
@@ -61,6 +62,7 @@ inline const char* native_runtime_status_name(NativeRuntimeStatus status)
     switch (status) {
     case NativeRuntimeStatus::None: return "None";
     case NativeRuntimeStatus::CallDepthExceeded: return "CallDepthExceeded";
+    case NativeRuntimeStatus::ArrayBoundsExceeded: return "ArrayBoundsExceeded";
     }
     return "Unknown";
 }

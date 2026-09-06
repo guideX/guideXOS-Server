@@ -224,6 +224,13 @@ private:
         return -1;
     }
 
+    const LocalSymbol* find_local_symbol(uint16_t slot) const
+    {
+        for (uint32_t i = 0; i < m_output->localCount; ++i)
+            if (m_output->locals[i].slot == slot) return &m_output->locals[i];
+        return nullptr;
+    }
+
     int32_t find_variable(const Token& token) const
     {
         const int32_t parameter = find_integer_parameter(token);
@@ -245,7 +252,8 @@ private:
         return false;
     }
 
-    bool add_local(const Token& token, uint16_t* slot)
+    bool add_local(const Token& token, StorageKind kind, uint16_t elementCount,
+                   uint16_t* slot)
     {
         if (name_already_declared(token)) {
             m_diagnostics.error_identifier(token.location, "duplicate local ",
@@ -256,13 +264,55 @@ private:
             m_diagnostics.error(token.location, "too many local variables", "identifier");
             return false;
         }
-        const uint16_t newSlot = static_cast<uint16_t>(m_output->integerParameterCount + m_output->localCount);
+        const uint32_t elementBytes = static_cast<uint32_t>(elementCount) * 4U;
+        if (elementCount == 0 || elementCount > COMPILER_MAX_LOCAL_ARRAY_ELEMENTS ||
+            elementBytes > COMPILER_MAX_LOCAL_STORAGE_BYTES - m_output->localStorageBytes) {
+            m_diagnostics.error(token.location, "local array storage exceeds the bounded function-frame limit", "array");
+            return false;
+        }
+        const uint32_t storageStart = m_output->integerParameterCount +
+            m_output->localStorageBytes / 4U;
+        // Stack slots grow toward lower addresses.  Store the array symbol's
+        // slot at its highest logical element so base + index*4 walks upward
+        // through element zero, one, ... in source order.
+        const uint16_t newSlot = static_cast<uint16_t>(
+            storageStart + (kind == StorageKind::ArrayInt ? elementCount - 1U : 0U));
         LocalSymbol& local = m_output->locals[m_output->localCount++];
         local = {};
+        local.kind = kind;
         local.slot = newSlot;
-        local.initialized = false;
+        local.elementCount = elementCount;
+        local.elementSize = 4;
+        local.initialized = kind == StorageKind::ArrayInt ? true : false;
         if (!copy_identifier(local.name, sizeof(local.name), token)) return false;
+        m_output->localStorageBytes += elementBytes;
         if (slot) *slot = newSlot;
+        return true;
+    }
+
+    bool parse_array_length(uint16_t maximum, uint16_t* elementCount)
+    {
+        if (current().kind != TokenKind::LeftBracket) {
+            if (elementCount) *elementCount = 1;
+            return true;
+        }
+        ++(*m_index);
+        const Token lengthToken = current();
+        if (lengthToken.kind != TokenKind::Integer) {
+            m_diagnostics.error(lengthToken.location,
+                                "array length must be a positive integer constant", "array");
+            return false;
+        }
+        int32_t length = 0;
+        if (!parse_integer(m_source, lengthToken, false, &length, m_diagnostics)) return false;
+        ++(*m_index);
+        if (!expect(TokenKind::RightBracket, "expected ']' after array length")) return false;
+        if (length <= 0 || static_cast<uint32_t>(length) > maximum) {
+            m_diagnostics.error(lengthToken.location,
+                                "array length must be a positive integer constant", "array");
+            return false;
+        }
+        if (elementCount) *elementCount = static_cast<uint16_t>(length);
         return true;
     }
 
@@ -395,9 +445,13 @@ private:
             return false;
         }
         const Token name = current();
-        uint16_t slot = COMPILER_INVALID_INDEX;
-        if (!add_local(name, &slot)) return false;
         ++(*m_index);
+        const bool wasArray = current().kind == TokenKind::LeftBracket;
+        uint16_t elementCount = 1;
+        if (!parse_array_length(COMPILER_MAX_LOCAL_ARRAY_ELEMENTS, &elementCount)) return false;
+        uint16_t slot = COMPILER_INVALID_INDEX;
+        const StorageKind declaredKind = wasArray ? StorageKind::ArrayInt : StorageKind::ScalarInt;
+        if (!add_local(name, declaredKind, elementCount, &slot)) return false;
         uint16_t expression = COMPILER_INVALID_INDEX;
         if (current().kind == TokenKind::Equal) {
             ++(*m_index);
@@ -431,15 +485,59 @@ private:
             return false;
         }
         ++(*m_index);
+        if (current().kind == TokenKind::LeftBracket) {
+            const bool isLocal = slot >= 0;
+            const LocalSymbol* local = isLocal ? find_local_symbol(static_cast<uint16_t>(slot)) : nullptr;
+            const GlobalSymbolIR* globalSymbol = global >= 0 ? &m_unit->globals[global] : nullptr;
+            const bool isArray = (local && local->kind == StorageKind::ArrayInt) ||
+                (globalSymbol && globalSymbol->kind == StorageKind::ArrayInt);
+            if (!isArray) {
+                m_diagnostics.error(name.location, "indexed access requires an array", "array");
+                return false;
+            }
+            ++(*m_index);
+            const uint16_t indexExpression = parse_expression(0);
+            if (indexExpression == COMPILER_INVALID_INDEX) return false;
+            if (!expect(TokenKind::RightBracket, "expected ']' after array index") ||
+                !expect(TokenKind::Equal, "expected '=' in indexed assignment")) return false;
+            const uint16_t expression = parse_expression(0);
+            if (expression == COMPILER_INVALID_INDEX ||
+                !expect(TokenKind::Semicolon, "expected ';' after indexed assignment")) return false;
+            const uint16_t elementCount = local ? local->elementCount : globalSymbol->elementCount;
+            if (!validate_index_constant(indexExpression, elementCount, name.location)) return false;
+            if (!append_statement(blockIndex, StatementKind::StoreIndexed, name.location, expression,
+                                  local ? static_cast<uint16_t>(slot) : COMPILER_INVALID_INDEX,
+                                  COMPILER_INVALID_INDEX, COMPILER_INVALID_INDEX, COMPILER_INVALID_INDEX,
+                                  local ? COMPILER_INVALID_INDEX : static_cast<uint16_t>(global))) return false;
+            Statement& statement = m_output->statements[m_output->statementCount - 1U];
+            statement.indexExpression = indexExpression;
+            statement.elementCount = elementCount;
+            statement.elementSize = local ? local->elementSize : globalSymbol->elementSize;
+            statement.indexedBaseKind = local ? IndexedBaseKind::Local : IndexedBaseKind::Global;
+            if (local) {
+                for (uint32_t i = 0; i < m_output->localCount; ++i)
+                    if (m_output->locals[i].slot == static_cast<uint16_t>(slot)) m_output->locals[i].initialized = true;
+            }
+            return true;
+        }
         if (!expect(TokenKind::Equal, "expected '=' in assignment")) return false;
         const uint16_t expression = parse_expression(0);
         if (expression == COMPILER_INVALID_INDEX) return false;
         if (!expect(TokenKind::Semicolon, "expected ';' after assignment")) return false;
         if (slot >= 0) {
+            const LocalSymbol* local = find_local_symbol(static_cast<uint16_t>(slot));
+            if (local && local->kind == StorageKind::ArrayInt) {
+                m_diagnostics.error(name.location, "array value cannot be assigned directly", "array");
+                return false;
+            }
             for (uint32_t i = 0; i < m_output->localCount; ++i)
                 if (m_output->locals[i].slot == static_cast<uint16_t>(slot)) m_output->locals[i].initialized = true;
             return append_statement(blockIndex, StatementKind::StoreLocal, name.location, expression,
                                     static_cast<uint16_t>(slot), COMPILER_INVALID_INDEX);
+        }
+        if (global >= 0 && m_unit->globals[global].kind == StorageKind::ArrayInt) {
+            m_diagnostics.error(name.location, "array value cannot be assigned directly", "array");
+            return false;
         }
         return append_statement(blockIndex, StatementKind::StoreGlobal, name.location, expression,
                                 COMPILER_INVALID_INDEX, COMPILER_INVALID_INDEX,
@@ -605,6 +703,19 @@ private:
         return make_expression(ExpressionKind::Constant, location,
                                COMPILER_INVALID_INDEX, COMPILER_INVALID_INDEX,
                                COMPILER_INVALID_INDEX, value);
+    }
+
+    bool validate_index_constant(uint16_t expression, uint16_t elementCount,
+                                 SourceLocation location)
+    {
+        uint32_t bits = 0;
+        if (elementCount == 0 || !evaluate_expression(expression, 0, &bits)) return true;
+        const int32_t index = bits_to_i32(bits);
+        if (index < 0 || static_cast<uint32_t>(index) >= elementCount) {
+            m_diagnostics.error(location, "array index is out of bounds", "array");
+            return false;
+        }
+        return true;
     }
 
     uint16_t parse_expression(uint32_t depth)
@@ -800,9 +911,46 @@ private:
             if (call) return parse_call(token, depth);
             ++(*m_index);
             const int32_t slot = find_variable(token);
+            const bool indexed = current().kind == TokenKind::LeftBracket;
+            if (indexed) {
+                const LocalSymbol* local = slot >= 0 ? find_local_symbol(static_cast<uint16_t>(slot)) : nullptr;
+                const int32_t global = slot < 0 ? find_global(token) : -1;
+                const GlobalSymbolIR* globalSymbol = global >= 0 ? &m_unit->globals[global] : nullptr;
+                const bool isArray = (local && local->kind == StorageKind::ArrayInt) ||
+                    (globalSymbol && globalSymbol->kind == StorageKind::ArrayInt);
+                if (!isArray) {
+                    m_diagnostics.error(token.location, "indexed access requires an array", "array");
+                    return COMPILER_INVALID_INDEX;
+                }
+                ++(*m_index);
+                const uint16_t indexExpression = parse_expression(depth + 1U);
+                if (indexExpression == COMPILER_INVALID_INDEX ||
+                    !expect(TokenKind::RightBracket, "expected ']' after array index"))
+                    return COMPILER_INVALID_INDEX;
+                const uint16_t elementCount = local ? local->elementCount : globalSymbol->elementCount;
+                if (!validate_index_constant(indexExpression, elementCount, token.location))
+                    return COMPILER_INVALID_INDEX;
+                const uint16_t expression = make_expression(ExpressionKind::LoadIndexed, token.location,
+                    indexExpression, COMPILER_INVALID_INDEX,
+                    local ? static_cast<uint16_t>(slot) : COMPILER_INVALID_INDEX, 0);
+                if (expression == COMPILER_INVALID_INDEX) return expression;
+                m_output->expressions[expression].globalIndex =
+                    local ? COMPILER_INVALID_INDEX : static_cast<uint16_t>(global);
+                m_output->expressions[expression].elementCount = elementCount;
+                m_output->expressions[expression].elementSize = local ? local->elementSize : globalSymbol->elementSize;
+                m_output->expressions[expression].indexedBaseKind =
+                    local ? IndexedBaseKind::Local : IndexedBaseKind::Global;
+                return expression;
+            }
             if (slot < 0) {
                 const int32_t global = find_global(token);
                 if (global >= 0) {
+                    if (m_unit->globals[global].kind == StorageKind::ArrayInt) {
+                        m_diagnostics.error_identifier_suffix(token.location, "array '",
+                                                              m_source + token.location.offset, token.length,
+                                                              "' requires an index", "array");
+                        return COMPILER_INVALID_INDEX;
+                    }
                     const uint16_t expression = make_expression(ExpressionKind::LoadGlobal, token.location,
                         COMPILER_INVALID_INDEX, COMPILER_INVALID_INDEX,
                         COMPILER_INVALID_INDEX, 0);
@@ -822,6 +970,13 @@ private:
                 if (m_output->parameters[i].slot == static_cast<uint16_t>(slot)) initialized = m_output->parameters[i].initialized;
             for (uint32_t i = 0; i < m_output->localCount; ++i)
                 if (m_output->locals[i].slot == static_cast<uint16_t>(slot)) initialized = m_output->locals[i].initialized;
+            const LocalSymbol* local = find_local_symbol(static_cast<uint16_t>(slot));
+            if (local && local->kind == StorageKind::ArrayInt) {
+                m_diagnostics.error_identifier_suffix(token.location, "array '",
+                                                      m_source + token.location.offset, token.length,
+                                                      "' requires an index", "array");
+                return COMPILER_INVALID_INDEX;
+            }
             if (!initialized) {
                 m_diagnostics.error(token.location, "local used before initialization", "identifier");
                 return COMPILER_INVALID_INDEX;
@@ -1000,6 +1155,68 @@ static void classify_recursive_sccs(TranslationUnitIR* unit)
 
 } // namespace
 
+static bool parse_global_array_length(const char* source, const Token* tokens,
+                                      uint32_t tokenCount, uint32_t* index,
+                                      uint16_t maximum, bool* isArray,
+                                      uint16_t* elementCount, Diagnostics& diagnostics)
+{
+    if (!source || !tokens || !index || !isArray || !elementCount) return false;
+    *isArray = false;
+    *elementCount = 1;
+    if (tokens[token_index_or_eof(*index, tokenCount)].kind != TokenKind::LeftBracket) return true;
+    *isArray = true;
+    ++(*index);
+    const Token lengthToken = tokens[token_index_or_eof(*index, tokenCount)];
+    if (lengthToken.kind != TokenKind::Integer) {
+        diagnostics.error(lengthToken.location, "array length must be a positive integer constant", "array");
+        return false;
+    }
+    int32_t length = 0;
+    if (!parse_integer(source, lengthToken, false, &length, diagnostics)) return false;
+    ++(*index);
+    if (tokens[token_index_or_eof(*index, tokenCount)].kind != TokenKind::RightBracket) {
+        diagnostics.error(tokens[token_index_or_eof(*index, tokenCount)].location,
+                          "expected ']' after array length", "array");
+        return false;
+    }
+    ++(*index);
+    if (length <= 0 || static_cast<uint32_t>(length) > maximum) {
+        diagnostics.error(lengthToken.location, "array length must be a positive integer constant", "array");
+        return false;
+    }
+    *elementCount = static_cast<uint16_t>(length);
+    return true;
+}
+
+static bool parse_global_initializer_value(const char* source, const Token* tokens,
+                                           uint32_t tokenCount, uint32_t* index,
+                                           int32_t* value, Diagnostics& diagnostics)
+{
+    if (!source || !tokens || !index || !value) return false;
+    bool negative = false;
+    if (tokens[token_index_or_eof(*index, tokenCount)].kind == TokenKind::Minus) {
+        negative = true;
+        ++(*index);
+    }
+    const Token literal = tokens[token_index_or_eof(*index, tokenCount)];
+    if (literal.kind != TokenKind::Integer) {
+        diagnostics.error(literal.location, "global initializer must be a constant integer", "global");
+        return false;
+    }
+    int32_t magnitude = 0;
+    if (!parse_integer(source, literal, negative, &magnitude, diagnostics)) return false;
+    *value = negative && magnitude != static_cast<int32_t>(0x80000000U) ? -magnitude : magnitude;
+    ++(*index);
+    return true;
+}
+
+static bool global_signature_matches(const GlobalSymbolIR& global, StorageKind kind,
+                                     uint16_t elementCount)
+{
+    return global.kind == kind && global.elementCount == elementCount &&
+        global.elementSize == 4 && global.size == static_cast<uint32_t>(elementCount) * 4U;
+}
+
 bool parse_translation_unit(const char* source, const Token* tokens, uint32_t tokenCount,
                             TranslationUnitIR* output, Diagnostics& diagnostics,
                             CallSite* callStorage, uint16_t* callArgumentStorage)
@@ -1043,6 +1260,11 @@ bool parse_translation_unit(const char* source, const Token* tokens, uint32_t to
                 if (token_text_equals(source, nameToken, output->declarations[i].name))
                     return report_symbol_kind_conflict(nameToken.location, name, diagnostics);
             ++index;
+            bool isArray = false;
+            uint16_t elementCount = 1;
+            if (!parse_global_array_length(source, tokens, tokenCount, &index,
+                                           COMPILER_MAX_ARRAY_ELEMENTS, &isArray,
+                                           &elementCount, diagnostics)) return false;
             if (tokens[token_index_or_eof(index, tokenCount)].kind != TokenKind::Semicolon) {
                 diagnostics.error(tokens[token_index_or_eof(index, tokenCount)].location,
                                   "expected ';' after extern global declaration", "global");
@@ -1060,8 +1282,17 @@ bool parse_translation_unit(const char* source, const Token* tokens, uint32_t to
                 global = {};
                 for (uint32_t i = 0; i <= nameToken.length; ++i) global.name[i] = name[i];
                 global.location = nameToken.location;
-                global.size = 4;
+                global.kind = isArray ? StorageKind::ArrayInt : StorageKind::ScalarInt;
+                global.elementCount = elementCount;
+                global.elementSize = 4;
+                global.size = static_cast<uint32_t>(elementCount) * 4U;
                 global.alignment = 4;
+            } else if (!global_signature_matches(output->globals[globalIndex],
+                                                 isArray ? StorageKind::ArrayInt : StorageKind::ScalarInt,
+                                                 elementCount)) {
+                diagnostics.error_identifier(nameToken.location, "conflicting declaration for global ",
+                                              name, name_length(name), "global");
+                return false;
             }
             continue;
         }
@@ -1094,30 +1325,53 @@ bool parse_translation_unit(const char* source, const Token* tokens, uint32_t to
                     return report_symbol_kind_conflict(nameToken.location, name, diagnostics);
 
             ++index;
+            bool isArray = false;
+            uint16_t elementCount = 1;
+            if (!parse_global_array_length(source, tokens, tokenCount, &index,
+                                           COMPILER_MAX_ARRAY_ELEMENTS, &isArray,
+                                           &elementCount, diagnostics)) return false;
             int32_t initialValue = 0;
             bool hasInitializer = false;
+            uint16_t initializerCount = 0;
+            int32_t initialValues[COMPILER_MAX_ARRAY_ELEMENTS] = {};
             if (tokens[token_index_or_eof(index, tokenCount)].kind == TokenKind::Equal) {
                 hasInitializer = true;
                 ++index;
-                bool negative = false;
-                if (tokens[token_index_or_eof(index, tokenCount)].kind == TokenKind::Minus) {
-                    negative = true;
+                if (isArray && tokens[token_index_or_eof(index, tokenCount)].kind == TokenKind::LeftBrace) {
                     ++index;
+                    if (tokens[token_index_or_eof(index, tokenCount)].kind != TokenKind::RightBrace) {
+                        while (true) {
+                            if (initializerCount >= elementCount || initializerCount >= COMPILER_MAX_ARRAY_ELEMENTS) {
+                                diagnostics.error(tokens[token_index_or_eof(index, tokenCount)].location,
+                                                  "array initializer has more elements than its declared length", "global");
+                                return false;
+                            }
+                            if (!parse_global_initializer_value(source, tokens, tokenCount, &index,
+                                                                &initialValues[initializerCount], diagnostics)) return false;
+                            ++initializerCount;
+                            if (tokens[token_index_or_eof(index, tokenCount)].kind != TokenKind::Comma) break;
+                            ++index;
+                        }
+                    }
+                    if (tokens[token_index_or_eof(index, tokenCount)].kind != TokenKind::RightBrace) {
+                        diagnostics.error(tokens[token_index_or_eof(index, tokenCount)].location,
+                                          "expected '}' after global array initializer", "global");
+                        return false;
+                    }
+                    ++index;
+                } else {
+                    if (isArray) {
+                        diagnostics.error(tokens[token_index_or_eof(index, tokenCount)].location,
+                                          "global array initializer must be a bounded integer list", "global");
+                        return false;
+                    }
+                    if (!parse_global_initializer_value(source, tokens, tokenCount, &index,
+                                                        &initialValue, diagnostics)) return false;
                 }
-                const Token literal = tokens[token_index_or_eof(index, tokenCount)];
-                if (literal.kind != TokenKind::Integer) {
-                    diagnostics.error(literal.location, "global initializer must be a constant integer", "global");
-                    return false;
-                }
-                int32_t magnitude = 0;
-                if (!parse_integer(source, literal, negative, &magnitude, diagnostics)) return false;
-                if (negative && magnitude != static_cast<int32_t>(0x80000000U))
-                    initialValue = -magnitude;
-                else initialValue = magnitude;
-                ++index;
             }
             if (tokens[token_index_or_eof(index, tokenCount)].kind != TokenKind::Semicolon) {
                 diagnostics.error(tokens[token_index_or_eof(index, tokenCount)].location,
+                                  isArray ? "expected ';' after global array definition" :
                                   "global initializer must be a constant integer", "global");
                 return false;
             }
@@ -1130,9 +1384,18 @@ bool parse_translation_unit(const char* source, const Token* tokens, uint32_t to
                                                   name, name_length(name), "global");
                     return false;
                 }
+                if (!global_signature_matches(global,
+                                              isArray ? StorageKind::ArrayInt : StorageKind::ScalarInt,
+                                              elementCount)) {
+                    diagnostics.error_identifier(nameToken.location, "conflicting declaration for global ",
+                                                  name, name_length(name), "global");
+                    return false;
+                }
                 global.isDefinition = true;
                 global.hasInitializer = hasInitializer;
                 global.initialValue = initialValue;
+                global.initializerCount = initializerCount;
+                for (uint32_t i = 0; i < initializerCount; ++i) global.initialValues[i] = initialValues[i];
                 global.location = nameToken.location;
             } else {
                 if (output->globalCount >= COMPILER_MAX_GLOBALS) {
@@ -1145,8 +1408,13 @@ bool parse_translation_unit(const char* source, const Token* tokens, uint32_t to
                 global.isDefinition = true;
                 global.hasInitializer = hasInitializer;
                 global.initialValue = initialValue;
+                global.kind = isArray ? StorageKind::ArrayInt : StorageKind::ScalarInt;
+                global.elementCount = elementCount;
+                global.elementSize = 4;
+                global.initializerCount = initializerCount;
+                for (uint32_t i = 0; i < initializerCount; ++i) global.initialValues[i] = initialValues[i];
                 global.location = nameToken.location;
-                global.size = 4;
+                global.size = static_cast<uint32_t>(elementCount) * 4U;
                 global.alignment = 4;
             }
             continue;
@@ -1265,6 +1533,11 @@ bool parse_translation_unit(const char* source, const Token* tokens, uint32_t to
                         parameterSymbol.slot = static_cast<uint16_t>(parameterIndex);
                         parameterSymbol.initialized = true;
                         ++index;
+                        if (tokens[token_index_or_eof(index, tokenCount)].kind == TokenKind::LeftBracket) {
+                            diagnostics.error(tokens[token_index_or_eof(index, tokenCount)].location,
+                                              "array parameters are not supported in Phase 27Q", "parameter");
+                            return false;
+                        }
                     }
                     ++parameterIndex;
                     if (tokens[token_index_or_eof(index, tokenCount)].kind != TokenKind::Comma) break;

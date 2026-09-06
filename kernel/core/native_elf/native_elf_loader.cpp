@@ -914,13 +914,18 @@ static bool run_file_internal(const char* path,
     serial::putc('\n');
     const bool runtimeSucceeded = s_appRuntime.runtimeStatus == NativeRuntimeStatus::None;
     if (!runtimeSucceeded) {
-        serial::puts("ELF Loader: Application terminated: recursive call depth limit exceeded.\n");
+        serial::puts(s_appRuntime.runtimeStatus == NativeRuntimeStatus::ArrayBoundsExceeded
+            ? "ELF Loader: Application terminated: array index out of bounds.\n"
+            : "ELF Loader: Application terminated: recursive call depth limit exceeded.\n");
     }
     const bool teardownComplete = teardown_application(report);
     if (report) {
         report->success = teardownComplete && runtimeSucceeded;
         report->error = !teardownComplete ? s_appRuntime.error :
-            (runtimeSucceeded ? "" : "ELF Loader: Application terminated: recursive call depth limit exceeded.");
+            (runtimeSucceeded ? "" :
+             (s_appRuntime.runtimeStatus == NativeRuntimeStatus::ArrayBoundsExceeded
+                  ? "ELF Loader: Application terminated: array index out of bounds."
+                  : "ELF Loader: Application terminated: recursive call depth limit exceeded."));
     }
     serial::puts(teardownComplete ? "ELF Loader: teardown PASS\n"
                                   : "ELF Loader: teardown FAIL\n");

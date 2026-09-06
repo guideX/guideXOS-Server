@@ -250,7 +250,7 @@ bool link_modules(const CompiledModule* modules, uint32_t moduleCount,
                 if (output->exports[existing].kind != exportSymbol.kind)
                     return report_kind_conflict(exportSymbol.location, exportSymbol.name, diagnostics);
                 diagnostics.error_identifier(exportSymbol.location,
-                    exportSymbol.kind == SymbolKind::Data ? "duplicate definition for global " :
+                    symbol_is_data(exportSymbol.kind) ? "duplicate definition for global " :
                     "duplicate definition for function ", exportSymbol.name,
                     name_length(exportSymbol.name), "linker");
                 return false;
@@ -269,6 +269,8 @@ bool link_modules(const CompiledModule* modules, uint32_t moduleCount,
             global.moduleDataOffset = exportSymbol.moduleDataOffset;
             global.size = exportSymbol.size;
             global.alignment = exportSymbol.alignment;
+            global.elementCount = exportSymbol.elementCount;
+            global.elementSize = exportSymbol.elementSize;
             global.isEntry = exportSymbol.isEntry;
             if (exportSymbol.kind == SymbolKind::Function) {
                 if (global.moduleCodeOffset >= module.codeBytes ||
@@ -278,7 +280,10 @@ bool link_modules(const CompiledModule* modules, uint32_t moduleCount,
                     return false;
                 }
             } else {
-                if (global.size != 4 || global.alignment != 4 ||
+                if (!symbol_is_data(exportSymbol.kind) || global.elementCount == 0 ||
+                    global.elementSize != 4 ||
+                    global.size != static_cast<uint32_t>(global.elementCount) * global.elementSize ||
+                    global.alignment != 4 ||
                     global.moduleDataOffset > module.mutableDataBytes ||
                     module.mutableDataBytes - global.moduleDataOffset < global.size ||
                     !add_u32(moduleMutableDataOffsets[m], global.moduleDataOffset, &global.finalDataOffset) ||
@@ -322,22 +327,33 @@ bool link_modules(const CompiledModule* modules, uint32_t moduleCount,
             const int32_t symbolIndex = find_symbol(*output, importSymbol.name);
             if (symbolIndex < 0) {
                 diagnostics.error_identifier(importSymbol.location,
-                    importSymbol.kind == SymbolKind::Data ? "undefined external global " :
+                    symbol_is_data(importSymbol.kind) ? "undefined external global " :
                     "undefined external function ", importSymbol.name,
                     name_length(importSymbol.name), "linker");
                 return false;
             }
             const GlobalFunctionSymbol& definition = output->exports[symbolIndex];
-            if (definition.kind != importSymbol.kind)
+            if (definition.kind != importSymbol.kind) {
+                if (symbol_is_data(definition.kind) && symbol_is_data(importSymbol.kind)) {
+                    diagnostics.error_identifier(importSymbol.location, "conflicting declaration for global ",
+                                                  importSymbol.name, name_length(importSymbol.name), "linker");
+                    return false;
+                }
                 return report_kind_conflict(importSymbol.location, importSymbol.name, diagnostics);
+            }
             if (importSymbol.kind == SymbolKind::Function) {
                 if (definition.parameterCount != importSymbol.expectedParameterCount) {
                     diagnostics.error_identifier(importSymbol.location, "conflicting declaration for function ",
                                                   importSymbol.name, name_length(importSymbol.name), "function");
                     return false;
                 }
-            } else if (importSymbol.size != 4 || importSymbol.alignment != 4 ||
-                       definition.size != importSymbol.size || definition.alignment != importSymbol.alignment) {
+            } else if (!symbol_is_data(importSymbol.kind) || importSymbol.elementCount == 0 ||
+                       importSymbol.elementSize != 4 ||
+                       importSymbol.size != static_cast<uint32_t>(importSymbol.elementCount) * importSymbol.elementSize ||
+                       importSymbol.alignment != 4 || definition.size != importSymbol.size ||
+                       definition.alignment != importSymbol.alignment ||
+                       definition.elementCount != importSymbol.elementCount ||
+                       definition.elementSize != importSymbol.elementSize) {
                     diagnostics.error_identifier(importSymbol.location, "conflicting declaration for global ",
                                               importSymbol.name, name_length(importSymbol.name), "linker");
                 return false;
@@ -465,7 +481,7 @@ bool link_modules(const CompiledModule* modules, uint32_t moduleCount,
                                                   name_length(relocation.targetSymbolName), "linker");
                     return false;
                 }
-                if (output->exports[targetIndex].kind != SymbolKind::Data ||
+                if (!symbol_is_data(output->exports[targetIndex].kind) ||
                     output->mutableDataFileOffset == 0 ||
                     !patch_u64(output->code, output->codeBytes, finalPatch,
                                BOOTSTRAP_IMAGE_BASE + output->mutableDataFileOffset +

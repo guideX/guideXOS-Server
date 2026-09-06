@@ -6,5 +6,5 @@ int recurse(int n)
 
 int gx_main(gx_app_context* ctx)
 {
-    return recurse(89);
+    return recurse(74);
 }

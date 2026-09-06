@@ -465,7 +465,9 @@ gx_result start(gx_development_run_handle handle) {
         s_operation.state = GX_DEVELOPMENT_RUN_FAILED;
         s_operation.error = s_operation.report.runtimeStatus == NativeRuntimeStatus::CallDepthExceeded
             ? GX_DEVELOPMENT_RUN_ERROR_CALL_DEPTH_EXCEEDED
-            : GX_DEVELOPMENT_RUN_ERROR_LAUNCH_FAILED;
+            : (s_operation.report.runtimeStatus == NativeRuntimeStatus::ArrayBoundsExceeded
+                ? GX_DEVELOPMENT_RUN_ERROR_ARRAY_BOUNDS_EXCEEDED
+                : GX_DEVELOPMENT_RUN_ERROR_LAUNCH_FAILED);
         copy_text(s_operation.errorMessage, sizeof(s_operation.errorMessage),
                   s_operation.report.error ? s_operation.report.error : "NativeElf application launch failed");
         return GX_OK;

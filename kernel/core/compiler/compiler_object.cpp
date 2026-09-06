@@ -162,6 +162,7 @@ static void write_export(Writer& writer, const ExportSymbol& symbol)
     write_fixed_name(writer, symbol.name, sizeof(symbol.name));
     writer.u32(symbol.moduleCodeOffset); writer.u32(symbol.moduleDataOffset);
     writer.u32(symbol.size); writer.u32(symbol.alignment);
+    writer.u16(symbol.elementCount); writer.u16(symbol.elementSize);
     writer.u16(symbol.parameterCount); writer.u16(0);
     write_location(writer, symbol.location);
 }
@@ -172,11 +173,12 @@ static bool read_export(Reader& reader, ExportSymbol& symbol)
     const uint8_t kind = reader.u8();
     const uint8_t entry = reader.u8();
     (void)reader.u16();
-    if (kind > static_cast<uint8_t>(SymbolKind::Data) || entry > 1 ||
+    if (kind > static_cast<uint8_t>(SymbolKind::DataArray) || entry > 1 ||
         !read_fixed_name(reader, symbol.name, sizeof(symbol.name))) return false;
     symbol.kind = static_cast<SymbolKind>(kind); symbol.isEntry = entry != 0;
     symbol.moduleCodeOffset = reader.u32(); symbol.moduleDataOffset = reader.u32();
     symbol.size = reader.u32(); symbol.alignment = reader.u32();
+    symbol.elementCount = reader.u16(); symbol.elementSize = reader.u16();
     symbol.parameterCount = reader.u16(); (void)reader.u16();
     symbol.location = read_location(reader);
     return reader.ok();
@@ -188,6 +190,7 @@ static void write_import(Writer& writer, const ImportSymbol& symbol)
     write_fixed_name(writer, symbol.name, sizeof(symbol.name));
     writer.u16(symbol.expectedParameterCount); writer.u16(0);
     writer.u32(symbol.size); writer.u32(symbol.alignment);
+    writer.u16(symbol.elementCount); writer.u16(symbol.elementSize);
     write_location(writer, symbol.location);
 }
 
@@ -195,11 +198,12 @@ static bool read_import(Reader& reader, ImportSymbol& symbol)
 {
     symbol = {};
     const uint8_t kind = reader.u8(); (void)reader.u8(); (void)reader.u16();
-    if (kind > static_cast<uint8_t>(SymbolKind::Data) ||
+    if (kind > static_cast<uint8_t>(SymbolKind::DataArray) ||
         !read_fixed_name(reader, symbol.name, sizeof(symbol.name))) return false;
     symbol.kind = static_cast<SymbolKind>(kind);
     symbol.expectedParameterCount = reader.u16(); (void)reader.u16();
     symbol.size = reader.u32(); symbol.alignment = reader.u32();
+    symbol.elementCount = reader.u16(); symbol.elementSize = reader.u16();
     symbol.location = read_location(reader);
     return reader.ok();
 }
@@ -297,6 +301,8 @@ bool serialize_gxo_object(const CompiledModule& module,
         module.functionCount > COMPILER_MAX_FUNCTIONS || module.globalCount > COMPILER_MAX_GLOBALS ||
         module.exportCount > COMPILER_MAX_MODULE_SYMBOLS || module.importCount > COMPILER_MAX_MODULE_SYMBOLS ||
         module.relocationCount > COMPILER_MAX_MODULE_RELOCATIONS || module.recursiveSccCount > COMPILER_MAX_FUNCTIONS) return false;
+    for (uint32_t i = 0; i < module.functionCount; ++i)
+        if (module.localStorageBytes[i] > COMPILER_MAX_LOCAL_STORAGE_BYTES) return false;
     const uint32_t sourcePathBytes = text_length(module.sourcePath, sizeof(module.sourcePath));
     uint32_t callGraphEdges = 0;
     for (uint32_t i = 0; i < module.functionCount; ++i)
@@ -322,6 +328,7 @@ bool serialize_gxo_object(const CompiledModule& module,
     writer.bytes(reinterpret_cast<const uint8_t*>(module.sourcePath), sourcePathBytes);
     writer.u32(module.tokenCount); writer.u32(static_cast<uint32_t>(module.returnConstant));
     for (uint32_t i = 0; i < module.functionCount; ++i) writer.u8(module.recursiveFunction[i] ? 1 : 0);
+    for (uint32_t i = 0; i < module.functionCount; ++i) writer.u32(module.localStorageBytes[i]);
     for (uint32_t i = 0; i < module.functionCount; ++i)
         for (uint32_t j = 0; j < module.functionCount; ++j) writer.u8(module.callGraph[i][j] ? 1 : 0);
     writer.bytes(module.code, module.codeBytes); writer.bytes(module.data, module.dataBytes);
@@ -369,6 +376,13 @@ bool deserialize_gxo_object(const uint8_t* bytes, uint32_t byteCount,
         if (flag > 1) { diagnostics.error({0, 1, 1}, "GXO recursive metadata is malformed", "object"); return false; }
         module->recursiveFunction[i] = flag != 0;
     }
+    for (uint32_t i = 0; i < module->functionCount; ++i) {
+        module->localStorageBytes[i] = reader.u32();
+        if (module->localStorageBytes[i] > COMPILER_MAX_LOCAL_STORAGE_BYTES) {
+            diagnostics.error({0, 1, 1}, "GXO local-array storage metadata is out of bounds", "object");
+            return false;
+        }
+    }
     uint32_t edgeCount = 0;
     for (uint32_t i = 0; i < module->functionCount; ++i) {
         for (uint32_t j = 0; j < module->functionCount; ++j) {
@@ -386,7 +400,9 @@ bool deserialize_gxo_object(const uint8_t* bytes, uint32_t byteCount,
         if (!read_export(reader, module->exports[i])) { diagnostics.error({0, 1, 1}, "GXO export table is malformed", "object"); return false; }
         const ExportSymbol& symbol = module->exports[i];
         if ((symbol.kind == SymbolKind::Function && (symbol.moduleCodeOffset >= module->codeBytes || symbol.parameterCount > COMPILER_MAX_PARAMETERS)) ||
-            (symbol.kind == SymbolKind::Data && (symbol.size != 4 || symbol.alignment != 4 ||
+            (symbol_is_data(symbol.kind) && (symbol.elementCount == 0 || symbol.elementCount > COMPILER_MAX_ARRAY_ELEMENTS ||
+                symbol.elementSize != 4 || symbol.size != static_cast<uint32_t>(symbol.elementCount) * symbol.elementSize ||
+                symbol.alignment != 4 ||
                 !range_valid(symbol.moduleDataOffset, symbol.size, module->mutableDataBytes)))) {
             diagnostics.error(symbol.location, "GXO export offset or signature is out of bounds", "object"); return false;
         }
@@ -396,7 +412,11 @@ bool deserialize_gxo_object(const uint8_t* bytes, uint32_t byteCount,
         if (module->imports[i].kind == SymbolKind::Function && module->imports[i].expectedParameterCount > COMPILER_MAX_PARAMETERS) {
             diagnostics.error(module->imports[i].location, "GXO import signature is out of bounds", "object"); return false;
         }
-        if (module->imports[i].kind == SymbolKind::Data && (module->imports[i].size != 4 || module->imports[i].alignment != 4)) {
+        if (symbol_is_data(module->imports[i].kind) &&
+            (module->imports[i].elementCount == 0 || module->imports[i].elementCount > COMPILER_MAX_ARRAY_ELEMENTS ||
+             module->imports[i].elementSize != 4 ||
+             module->imports[i].size != static_cast<uint32_t>(module->imports[i].elementCount) * module->imports[i].elementSize ||
+             module->imports[i].alignment != 4)) {
             diagnostics.error(module->imports[i].location, "GXO data import signature is malformed", "object"); return false;
         }
     }

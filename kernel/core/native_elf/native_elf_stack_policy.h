@@ -35,8 +35,9 @@ static const uint32_t COMPILER_MAX_TRANSIENT_STACK_BYTES =
     COMPILER_MAX_EXPRESSION_NESTING * 8U;
 
 // frame_size is 40 bytes of fixed compiler frame area plus the largest legal
-// parameter/local/temporary storage, rounded to the required 16-byte boundary.
-static const uint32_t COMPILER_MAX_GENERATED_FRAME_BYTES = 448U;
+// parameter/local-array/temporary storage, rounded to the required 16-byte
+// boundary. Phase 27Q keeps aggregate local storage at 256 bytes.
+static const uint32_t COMPILER_MAX_GENERATED_FRAME_BYTES = 576U;
 static const uint32_t COMPILER_MAX_GENERATED_ACTIVATION_STACK_COST =
     native_elf::NATIVE_ELF_RETURN_ADDRESS_BYTES +
     native_elf::NATIVE_ELF_SAVED_RBP_BYTES +
@@ -56,10 +57,10 @@ static const uint32_t COMPILER_MAX_RUNTIME_CALL_DEPTH =
 
 static_assert(COMPILER_MAX_GENERATED_FRAME_BYTES ==
                   ((40U + COMPILER_MAX_PARAMETERS * 4U +
-                    COMPILER_MAX_LOCALS * 4U + COMPILER_MAX_TEMPORARY_SLOTS * 4U +
+                    COMPILER_MAX_LOCAL_STORAGE_BYTES + COMPILER_MAX_TEMPORARY_SLOTS * 4U +
                     15U) & ~15U),
               "compiler frame bound must match the legal IR maxima");
-static_assert(COMPILER_MAX_RUNTIME_CALL_DEPTH == 90U,
+static_assert(COMPILER_MAX_RUNTIME_CALL_DEPTH == 75U,
               "review the recursion limit when stack policy changes");
 static_assert(COMPILER_MAX_RUNTIME_CALL_DEPTH *
                   COMPILER_MAX_GENERATED_ACTIVATION_STACK_COST +

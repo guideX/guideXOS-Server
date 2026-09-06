@@ -130,7 +130,9 @@ static GeneratedCallResult call_generated_entry(void* entry)
         "call *%[entry]\n\t"
         "movq 32(%%rsp), %%r11\n\t"
         "movl %%r15d, 4(%%r11)\n\t"
-        "movl %%r15d, 8(%%r11)\n\t"
+        "movl %%r15d, %%r10d\n\t"
+        "shrl $8, %%r10d\n\t"
+        "movl %%r10d, 8(%%r11)\n\t"
         "addq $64, %%rsp\n\t"
         "popq %%r15\n\t"
         "popq %%r14\n\t"
@@ -443,18 +445,18 @@ static bool test_recursion_and_safety()
                  execute_entry(g_first, 42), "recursive call expression returns 42")) return false;
 
     amd64::FrameLayout maximum = {};
-    if (!require(amd64::calculate_frame_layout(COMPILER_MAX_PARAMETERS, COMPILER_MAX_LOCALS,
+    if (!require(amd64::calculate_frame_layout(COMPILER_MAX_PARAMETERS, COMPILER_MAX_LOCAL_STORAGE_BYTES / 4U,
                                                COMPILER_MAX_TEMPORARY_SLOTS, false,
                                                COMPILER_MAX_TRANSIENT_STACK_BYTES, &maximum) &&
                  maximum.frameBytes == COMPILER_MAX_GENERATED_FRAME_BYTES &&
                  maximum.transientBytes == COMPILER_MAX_TRANSIENT_STACK_BYTES &&
                  maximum.activationBytes == COMPILER_MAX_GENERATED_ACTIVATION_STACK_COST &&
-                 COMPILER_MAX_RUNTIME_CALL_DEPTH == 90,
+                 COMPILER_MAX_RUNTIME_CALL_DEPTH == 75,
                  "recursive stack accounting matches the shared safety policy")) return false;
 
     const char* boundary =
         "int recurse(int n) { if (n == 0) { return 42; } return recurse(n - 1); }\n"
-        "int gx_main(gx_app_context* ctx) { return recurse(88); }\n";
+        "int gx_main(gx_app_context* ctx) { return recurse(73); }\n";
     if (!require(compile_unit(boundary, &g_first, &diagnostics), "safe depth boundary compiles")) return false;
     GeneratedCallResult boundaryResult = {};
     if (!require(execute_entry(g_first, 42, &boundaryResult) && boundaryResult.runtimeFailure == 0,
@@ -462,7 +464,7 @@ static bool test_recursion_and_safety()
 
     const char* overBoundary =
         "int recurse(int n) { if (n == 0) { return 42; } return recurse(n - 1); }\n"
-        "int gx_main(gx_app_context* ctx) { return recurse(89); }\n";
+        "int gx_main(gx_app_context* ctx) { return recurse(74); }\n";
     if (!require(compile_unit(overBoundary, &g_first, &diagnostics), "excess boundary source compiles")) return false;
     GeneratedCallResult overBoundaryResult = {};
     if (!require(execute_entry(g_first, 0, &overBoundaryResult) && overBoundaryResult.runtimeFailure != 0 &&

@@ -68,7 +68,8 @@ typedef enum gx_development_run_error_code {
     GX_DEVELOPMENT_RUN_ERROR_CANCEL_UNSUPPORTED = 30,
     GX_DEVELOPMENT_RUN_ERROR_CANCELLED = 31,
     /* Runtime/compiler safety failures are distinct from application exits. */
-    GX_DEVELOPMENT_RUN_ERROR_CALL_DEPTH_EXCEEDED = 32
+    GX_DEVELOPMENT_RUN_ERROR_CALL_DEPTH_EXCEEDED = 32,
+    GX_DEVELOPMENT_RUN_ERROR_ARRAY_BOUNDS_EXCEEDED = 33
 } gx_development_run_error_code;
 
 typedef struct gx_development_run_request {

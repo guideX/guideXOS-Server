@@ -33,6 +33,54 @@ static void print_marker(const char* name, bool pass)
     serial::puts(pass ? "=PASS\n" : "=FAIL\n");
 }
 
+static bool compile_code_contains(const compiler::CompileSummary& summary,
+                                  const uint8_t* pattern, uint32_t patternBytes)
+{
+    if (!pattern || patternBytes == 0 || patternBytes > summary.codeBytes) return false;
+    for (uint32_t i = 0; i + patternBytes <= summary.codeBytes; ++i) {
+        bool same = true;
+        for (uint32_t j = 0; j < patternBytes; ++j)
+            if (summary.code[i + j] != pattern[j]) same = false;
+        if (same) return true;
+    }
+    return false;
+}
+
+static bool compile_diagnostic_contains(const compiler::CompileSummary& summary, const char* text)
+{
+    if (!text) return false;
+    for (uint32_t i = 0; i < summary.diagnosticCount; ++i) {
+        const char* message = summary.diagnostics[i].message;
+        if (!message) continue;
+        uint32_t at = 0;
+        while (message[at] != '\0') {
+            uint32_t j = 0;
+            while (text[j] != '\0' && message[at + j] == text[j]) ++j;
+            if (text[j] == '\0') return true;
+            ++at;
+        }
+    }
+    return false;
+}
+
+static bool file_contains_bytes(const char* path, const uint8_t* pattern, uint32_t patternBytes)
+{
+    if (!path || !pattern || patternBytes == 0 || patternBytes > sizeof(s_invalidImage)) return false;
+    vfs::FileInfo info = {};
+    if (vfs::stat(path, &info) != vfs::VFS_OK || info.type != vfs::FILE_TYPE_REGULAR ||
+        info.size == 0 || info.size > sizeof(s_invalidImage)) return false;
+    const uint32_t bytes = static_cast<uint32_t>(info.size);
+    if (vfs::read_file(path, s_invalidImage, bytes) != static_cast<int32_t>(bytes)) return false;
+    for (uint32_t i = 0; i + patternBytes <= bytes; ++i) {
+        bool same = true;
+        for (uint32_t j = 0; j < patternBytes; ++j) {
+            if (s_invalidImage[i + j] != pattern[j]) same = false;
+        }
+        if (same) return true;
+    }
+    return false;
+}
+
 #if defined(GXOS_PHASE27M_SMOKE)
 static void print_decimal(uint32_t value)
 {
@@ -254,7 +302,7 @@ static bool has_call_depth_guard(const compiler::CompileSummary& summary)
 {
     for (uint32_t i = 0; i + 16U <= summary.codeBytes; ++i) {
         if (summary.code[i] != 0x41 || summary.code[i + 1] != 0x81 ||
-            summary.code[i + 2] != 0xFE || summary.code[i + 3] != 0x5A ||
+            summary.code[i + 2] != 0xFE || summary.code[i + 3] != 0x4B ||
             summary.code[i + 4] != 0x00 || summary.code[i + 5] != 0x00 ||
             summary.code[i + 6] != 0x00 || summary.code[i + 7] != 0x0F ||
             summary.code[i + 8] != 0x83 || summary.code[i + 13] != 0x41 ||
@@ -578,6 +626,249 @@ void run_bootstrap_execution_smoke()
     serial::puts(developerStudio27pLaunched && phase27pArtifactEvidence ?
                  "ELF Loader: Phase 27P persistent object smoke PASS\n" :
                  "ELF Loader: Phase 27P persistent object smoke FAIL\n");
+#endif
+#if defined(GXOS_PHASE27Q_SMOKE)
+    serial::puts("ELF Loader: Phase 27Q bounded array smoke begin\n");
+    static compiler::CompileSummary q27Local = {};
+    static compiler::CompileSummary q27Global = {};
+    static compiler::CompileSummary q27Bounds = {};
+    static compiler::CompileSummary q27Negative = {};
+    static compiler::CompileSummary q27Project = {};
+    static compiler::CompileSummary q27CachedFirst = {};
+    static compiler::CompileSummary q27CachedSecond = {};
+    static compiler::CompileSummary q27Isolation = {};
+    static compiler::CompileSummary q27Recursive = {};
+    static compiler::CompileSummary q27RecursionGuard = {};
+    static compiler::CompileSummary q27Mismatch = {};
+    static compiler::CompileSummary q27ScalarConflict = {};
+    static compiler::CompileSummary q27Capacity = {};
+    static compiler::CompileSummary q27GlobalCapacity = {};
+    static compiler::CompileSummary q27Reset = {};
+    static compiler::CompileSummary q27Scalar = {};
+    static compiler::CompileSummary q27SignatureFirst = {};
+    static compiler::CompileSummary q27SignatureChanged = {};
+    static compiler::CompileSummary q27SignatureRecovery = {};
+    static compiler::CompileSummary q27Invalidated = {};
+    const uint8_t localLea[] = {0x48, 0x8D, 0x94, 0x85};
+    const uint8_t scaledIndex[] = {0x48, 0x63, 0xC0};
+    const uint8_t loadOpcode[] = {0x8B, 0x02};
+    const uint8_t storeOpcode[] = {0x89, 0x02};
+    const uint8_t boundsBranch[] = {0x0F, 0x8C};
+    const uint8_t globalLea[] = {0x48, 0x8D, 0x14, 0x82};
+    int32_t ignoredReturn = 0;
+
+    const bool localCompiled = compiler::compile("/P27Q/q27local.c", "/P27Q/out/q27local.elf", &q27Local);
+    const bool localRun = localCompiled && run_expected("/P27Q/out/q27local.elf", 42);
+    print_marker("phase27q_local_array", localRun);
+    print_marker("phase27q_array_loop", localRun);
+    print_marker("phase27q_dynamic_store", localRun);
+    print_marker("phase27q_indexed_addressing", localCompiled &&
+                 compile_code_contains(q27Local, localLea, sizeof(localLea)) &&
+                 compile_code_contains(q27Local, scaledIndex, sizeof(scaledIndex)));
+    print_marker("phase27q_indexed_load_opcode", localCompiled &&
+                 compile_code_contains(q27Local, loadOpcode, sizeof(loadOpcode)));
+    print_marker("phase27q_indexed_store_opcode", localCompiled &&
+                 compile_code_contains(q27Local, storeOpcode, sizeof(storeOpcode)));
+    print_marker("phase27q_scaled_index_opcode", localCompiled &&
+                 compile_code_contains(q27Local, scaledIndex, sizeof(scaledIndex)));
+    print_marker("phase27q_bounds_guard_opcode", localCompiled &&
+                 compile_code_contains(q27Local, boundsBranch, sizeof(boundsBranch)));
+    print_marker("phase27q_zero_index_valid", localRun);
+    print_marker("phase27q_last_index_valid", localRun);
+
+    const bool isolationCompiled = compiler::compile(
+        "/P27Q/q27isol.c", "/P27Q/out/q27isol.elf", &q27Isolation);
+    const bool isolationRun = isolationCompiled && run_expected("/P27Q/out/q27isol.elf", 42);
+    print_marker("phase27q_local_array_isolation", isolationRun);
+
+    const bool recursiveCompiled = compiler::compile(
+        "/P27Q/q27recu.c", "/P27Q/out/q27recu.elf", &q27Recursive);
+    const bool recursiveRun = recursiveCompiled && run_expected("/P27Q/out/q27recu.elf", 42);
+    print_marker("phase27q_recursive_local_array", recursiveRun);
+
+    const bool recursionGuardCompiled = compiler::compile(
+        "/P27Q/q27rgd.c", "/P27Q/out/q27rgd.elf", &q27RecursionGuard);
+    static NativeElfRunReport recursionGuardReport = {};
+    const bool recursionGuard = recursionGuardCompiled &&
+        !run_file("/P27Q/out/q27rgd.elf", &ignoredReturn, &recursionGuardReport) &&
+        recursionGuardReport.runtimeStatus == NativeRuntimeStatus::CallDepthExceeded &&
+        recursionGuardReport.teardownComplete;
+    print_marker("phase27q_array_recursion_guard", recursionGuard);
+
+    const bool globalCompiled = compiler::compile("/P27Q/q27global.c", "/P27Q/out/q27glob.elf", &q27Global);
+    const bool globalRun = globalCompiled && run_expected("/P27Q/out/q27glob.elf", 42);
+    const uint8_t globalInitializer[] = {
+        10, 0, 0, 0, 11, 0, 0, 0, 12, 0, 0, 0, 9, 0, 0, 0};
+    print_marker("phase27q_global_array", globalRun);
+    print_marker("phase27q_global_array_initializer", globalRun &&
+                 file_contains_bytes("/P27Q/out/q27glob.elf", globalInitializer,
+                                     sizeof(globalInitializer)));
+    print_marker("phase27q_array_relocation", globalCompiled &&
+                 compile_code_contains(q27Global, globalLea, sizeof(globalLea)));
+    print_marker("phase27q_array_rw_segment", globalRun);
+    print_marker("phase27q_no_rwx_regression", globalRun);
+
+    const bool boundsCompiled = compiler::compile("/P27Q/q27bounds.c", "/P27Q/out/q27bnds.elf", &q27Bounds);
+    static NativeElfRunReport boundsReport = {};
+    const bool upperFailure = boundsCompiled && !run_file("/P27Q/out/q27bnds.elf", &ignoredReturn, &boundsReport) &&
+        boundsReport.runtimeStatus == NativeRuntimeStatus::ArrayBoundsExceeded &&
+        boundsReport.teardownComplete;
+    print_marker("phase27q_bounds_failure", upperFailure);
+    print_marker("phase27q_global_bounds_failure", upperFailure);
+    print_marker("phase27q_upper_index_guard", upperFailure);
+    print_marker("phase27q_runtime_status_reset", upperFailure);
+
+    const bool negativeCompiled = compiler::compile("/P27Q/q27negative.c", "/P27Q/out/q27neg.elf", &q27Negative);
+    static NativeElfRunReport negativeReport = {};
+    const bool negativeFailure = negativeCompiled &&
+        !run_file("/P27Q/out/q27neg.elf", &ignoredReturn, &negativeReport) &&
+        negativeReport.runtimeStatus == NativeRuntimeStatus::ArrayBoundsExceeded &&
+        negativeReport.teardownComplete;
+    print_marker("phase27q_negative_index_guard", negativeFailure);
+    print_marker("phase27q_nested_bounds_failure", negativeFailure);
+
+    const bool recovery = localRun && upperFailure && run_expected("/P27Q/out/q27local.elf", 42);
+    print_marker("phase27q_bounds_recovery", recovery);
+    print_marker("phase27q_post_failure_array_reset", recovery && globalRun &&
+                 run_expected("/P27Q/out/q27glob.elf", 42));
+
+    const bool lengthRejected = !compiler::compile("/P27Q/q27invalid_length.c", "/P27Q/out/q27len.elf", &q27Bounds) &&
+        compile_diagnostic_contains(q27Bounds, "array length must be a positive integer constant");
+    const bool bareRejected = !compiler::compile("/P27Q/q27invalid_bare.c", "/P27Q/out/q27bare.elf", &q27Bounds) &&
+        compile_diagnostic_contains(q27Bounds, "requires an index");
+    const bool constantOobRejected = !compiler::compile("/P27Q/q27invalid_oob.c", "/P27Q/out/q27oob.elf", &q27Bounds) &&
+        compile_diagnostic_contains(q27Bounds, "array index is out of bounds");
+    const bool arrayParameterRejected = !compiler::compile("/P27Q/q27invalid_param.c", "/P27Q/out/q27parm.elf", &q27Bounds) &&
+        compile_diagnostic_contains(q27Bounds, "array parameters are not supported in Phase 27Q");
+    const bool arrayAssignmentRejected = !compiler::compile("/P27Q/q27invalid_assign.c", "/P27Q/out/q27asn.elf", &q27Bounds) &&
+        compile_diagnostic_contains(q27Bounds, "array value cannot be assigned directly");
+    print_marker("phase27q_array_length_validation", lengthRejected);
+    print_marker("phase27q_array_requires_index", bareRejected);
+    print_marker("phase27q_constant_oob_rejected", constantOobRejected);
+    print_marker("phase27q_array_parameter_rejected", arrayParameterRejected);
+    print_marker("phase27q_array_assignment_rejected", arrayAssignmentRejected);
+
+    const char* mismatchSources[] = {"/P27Q/q27mis_main.c", "/P27Q/q27mis_state.c"};
+    const bool signatureMismatch = !compiler::compile_project(
+        mismatchSources, 2, "/P27Q/out/q27mis.elf", &q27Mismatch) &&
+        compile_diagnostic_contains(q27Mismatch, "conflicting declaration for global");
+    print_marker("phase27q_array_signature_mismatch", signatureMismatch);
+
+    const char* scalarConflictSources[] = {"/P27Q/q27scl_main.c", "/P27Q/q27scl_state.c"};
+    const bool scalarArrayConflict = !compiler::compile_project(
+        scalarConflictSources, 2, "/P27Q/out/q27scl.elf", &q27ScalarConflict) &&
+        compile_diagnostic_contains(q27ScalarConflict, "conflicting declaration for global");
+    print_marker("phase27q_scalar_array_conflict", scalarArrayConflict);
+
+    const bool localCapacityRejected = !compiler::compile(
+        "/P27Q/q27acap.c", "/P27Q/out/q27acap.elf", &q27Capacity) &&
+        compile_diagnostic_contains(q27Capacity, "local array storage exceeds the bounded function-frame limit");
+    const bool globalCapacityRejected = !compiler::compile(
+        "/P27Q/q27gcap.c", "/P27Q/out/q27gcap.elf", &q27GlobalCapacity) &&
+        compile_diagnostic_contains(q27GlobalCapacity, "array length must be a positive integer constant");
+    print_marker("phase27q_array_capacity_rejected", localCapacityRejected);
+    print_marker("phase27q_global_rw_capacity_rejected", globalCapacityRejected);
+    const bool scalarGlobalRegression = compiler::compile(
+        "/P27Q/q27scalar.c", "/P27Q/out/q27sclr.elf", &q27Scalar) &&
+        run_expected("/P27Q/out/q27sclr.elf", 42);
+    print_marker("phase27q_scalar_global_regression", scalarGlobalRegression);
+
+    const char* q27ProjectSources[] = {
+        "/P27Q/src/main.cpp", "/P27Q/src/math.cpp", "/P27Q/src/state.cpp"};
+    const bool projectCompiled = compiler::compile_project(q27ProjectSources, 3,
+        "/P27Q/out/q27main.elf", &q27Project);
+    const bool projectRun = projectCompiled && run_expected_with_report(
+        "/P27Q/out/q27main.elf", 42, &boundsReport);
+    print_marker("phase27q_cross_file_array", projectRun);
+    print_marker("phase27q_shared_array_storage", projectRun && q27Project.dataBytes != 0);
+    const char* q27CacheSources[] = {
+        "/P27Q/src/main.cpp", "/P27Q/src/math.cpp", "/P27Q/src/state.cpp"};
+    const char* q27CacheObjects[] = {
+        "/P27Q/out/q27m1.gxo", "/P27Q/out/q27m2.gxo", "/P27Q/out/q27m3.gxo"};
+    const bool cacheFirst = compiler::compile_project_incremental(
+        q27CacheSources, q27CacheSources, q27CacheObjects, 3,
+        "/P27Q/out/q27cach.elf", &q27CachedFirst);
+    const bool cacheSecond = compiler::compile_project_incremental(
+        q27CacheSources, q27CacheSources, q27CacheObjects, 3,
+        "/P27Q/out/q27cach.elf", &q27CachedSecond);
+    const bool objectRoundTrip = cacheFirst && cacheSecond &&
+        q27CachedSecond.cachedModuleCount == 3 &&
+        q27CachedSecond.linkedFromPersistedObjects;
+    const bool objectDeterministic = objectRoundTrip &&
+        q27CachedFirst.outputHash == q27CachedSecond.outputHash;
+    print_marker("phase27q_cached_global_array", objectRoundTrip);
+    print_marker("phase27q_cached_local_array", objectRoundTrip);
+    print_marker("phase27q_array_object_roundtrip", objectRoundTrip);
+    print_marker("phase27q_array_object_deterministic", objectDeterministic);
+    print_marker("phase27q_array_cold_warm_identical", objectDeterministic);
+
+    vfs::FileInfo cachedObjectInfo = {};
+    const bool cachedObjectRead = vfs::stat("/P27Q/out/q27m1.gxo", &cachedObjectInfo) == vfs::VFS_OK &&
+        cachedObjectInfo.size > 0 && cachedObjectInfo.size <= sizeof(s_invalidImage) &&
+        vfs::read_file("/P27Q/out/q27m1.gxo", s_invalidImage,
+                       static_cast<uint32_t>(cachedObjectInfo.size)) == cachedObjectInfo.size;
+    if (cachedObjectRead) s_invalidImage[0] ^= 0xFFU;
+    const bool corruptedObjectWritten = cachedObjectRead &&
+        vfs::write_file("/P27Q/out/q27m1.gxo", s_invalidImage,
+                        static_cast<uint32_t>(cachedObjectInfo.size)) == cachedObjectInfo.size;
+    const bool invalidatedBuild = corruptedObjectWritten && compiler::compile_project_incremental(
+        q27CacheSources, q27CacheSources, q27CacheObjects, 3,
+        "/P27Q/out/q27invl.elf", &q27Invalidated);
+    const bool oldObjectInvalidated = invalidatedBuild &&
+        q27Invalidated.compiledModuleCount == 1 && q27Invalidated.cachedModuleCount == 2 &&
+        run_expected("/P27Q/out/q27invl.elf", 42);
+    print_marker("phase27q_old_object_invalidated", oldObjectInvalidated);
+
+    const char* q27SignatureSources[] = {"/P27Q/q27sig_main.c", "/P27Q/q27sig_state.c"};
+    const char* q27SignatureObjects[] = {"/P27Q/out/q27s1.gxo", "/P27Q/out/q27s2.gxo"};
+    const bool signatureFirst = compiler::compile_project_incremental(
+        q27SignatureSources, q27SignatureSources, q27SignatureObjects, 2,
+        "/P27Q/out/q27sig.elf", &q27SignatureFirst);
+    const char changedSignatureDefinition[] = "int values[8];\n";
+    const bool changedSignatureWritten = vfs::write_file(
+        "/P27Q/q27sig_state.c", changedSignatureDefinition,
+        sizeof(changedSignatureDefinition) - 1U) == sizeof(changedSignatureDefinition) - 1U;
+    const bool cachedSignatureRejected = signatureFirst && changedSignatureWritten &&
+        !compiler::compile_project_incremental(
+            q27SignatureSources, q27SignatureSources, q27SignatureObjects, 2,
+            "/P27Q/out/q27sig.elf", &q27SignatureChanged) &&
+        q27SignatureChanged.cachedModuleCount == 1 &&
+        compile_diagnostic_contains(q27SignatureChanged, "conflicting declaration for global");
+    const char originalSignatureDefinition[] = "int values[4];\n";
+    const bool signatureRestored = vfs::write_file(
+        "/P27Q/q27sig_state.c", originalSignatureDefinition,
+        sizeof(originalSignatureDefinition) - 1U) == sizeof(originalSignatureDefinition) - 1U;
+    const bool signatureRecovered = signatureRestored && compiler::compile_project_incremental(
+        q27SignatureSources, q27SignatureSources, q27SignatureObjects, 2,
+        "/P27Q/out/q27sig.elf", &q27SignatureRecovery) &&
+        run_expected("/P27Q/out/q27sig.elf", 42);
+    print_marker("phase27q_cached_array_signature_validation", cachedSignatureRejected);
+    print_marker("phase27q_array_linker_reset", cachedSignatureRejected && signatureRecovered);
+    print_marker("phase27q_array_reinitialization", recovery && globalRun &&
+                 run_expected("/P27Q/out/q27glob.elf", 42));
+
+    const bool q27ArtifactEvidence = projectRun && emit_serial_artifact("/P27Q/out/q27main.elf", "q27main");
+    print_marker("phase27q_artifact_evidence", q27ArtifactEvidence);
+
+    int32_t developerStudio27qReturn = 1;
+    static NativeElfRunReport developerStudio27qReport = {};
+    const bool developerStudio27qLaunched = projectRun &&
+        run_file("/Apps/DS27Q/bin/amd64/p27q.elf", &developerStudio27qReturn,
+                 &developerStudio27qReport) && developerStudio27qReturn == 0 &&
+        developerStudio27qReport.teardownComplete;
+    print_marker("phase27q_app_launch", developerStudio27qLaunched);
+    print_marker("phase27q_kernel_survival", developerStudio27qLaunched &&
+                 developerStudio27qReport.finalState == NativeAppExecutionState::Cleaned);
+    const bool phase27qPassed = localRun && globalRun && upperFailure && negativeFailure && recovery &&
+        isolationRun && recursiveRun && recursionGuard && lengthRejected && bareRejected &&
+        constantOobRejected && arrayParameterRejected && arrayAssignmentRejected &&
+        signatureMismatch && scalarArrayConflict && localCapacityRejected &&
+        globalCapacityRejected && scalarGlobalRegression && projectRun && objectRoundTrip && objectDeterministic &&
+        oldObjectInvalidated && cachedSignatureRejected && signatureRecovered &&
+        q27ArtifactEvidence && developerStudio27qLaunched;
+    print_marker("phase27q", phase27qPassed);
+    serial::puts(phase27qPassed ? "ELF Loader: Phase 27Q bounded array smoke PASS\n" :
+                                   "ELF Loader: Phase 27Q bounded array smoke FAIL\n");
 #endif
 #if defined(GXOS_PHASE27G_SMOKE)
     serial::puts("ELF Loader: Phase 27G bootstrap language smoke begin\n");
@@ -1409,6 +1700,8 @@ void run_bootstrap_execution_smoke()
         has_call_to_offset(mSummary, 0));
     print_marker("phase27m_no_recursion_unrolling", directRecursion && mSummary.codeBytes < 4096);
     print_marker("phase27m_recursion_policy_migrated", directRecursion);
+    const bool directGuardAndBoundedCode = directCallOpcode && mSummary.codeBytes < 4096 &&
+        has_call_depth_guard(mSummary);
 
     const bool recursiveLocalIsolation = runMFixture("/P27M/tests/m27local.c", m27PrimaryArtifact,
                                                      &mSummary, 42);
@@ -1429,9 +1722,6 @@ void run_bootstrap_execution_smoke()
                                                      &mSummary, 42);
     print_marker("phase27m_recursive_call_expression", recursiveCallExpression);
 
-    const bool directGuardAndBoundedCode = directCallOpcode && mSummary.codeBytes < 4096 &&
-        has_call_depth_guard(mSummary);
-
     bool mutualForward = false;
     bool mutualBackward = false;
     const bool mutualRecursion = runMFixture("/P27M/tests/m27mutual.c", m27PrimaryArtifact,
@@ -1442,7 +1732,7 @@ void run_bootstrap_execution_smoke()
     print_marker("phase27m_mutual_rel32", mutualRecursion);
 
     compiler::amd64::FrameLayout mLayout = {};
-    const bool stackAccounting = compiler::amd64::calculate_frame_layout(4, 32, 64, true, 128,
+    const bool stackAccounting = compiler::amd64::calculate_frame_layout(4, 64, 64, true, 128,
                                                                            &mLayout) &&
         mLayout.frameBytes == compiler::COMPILER_MAX_GENERATED_FRAME_BYTES &&
         mLayout.transientBytes == compiler::COMPILER_MAX_TRANSIENT_STACK_BYTES &&

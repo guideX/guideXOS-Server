@@ -25,6 +25,12 @@ static const uint32_t COMPILER_MAX_STRING_LITERAL_BYTES = 255;
 static const uint32_t COMPILER_MAX_STRING_LITERALS = 16;
 static const uint32_t COMPILER_MAX_TOTAL_STRING_DATA = 2048;
 static const uint32_t COMPILER_MAX_LOCALS = 32;
+static const uint32_t COMPILER_MAX_ARRAY_ELEMENTS = 256;
+// Local arrays share one bounded function-frame budget.  A 64-element array
+// is 256 bytes; the aggregate local-storage cap keeps recursion accounting
+// deterministic even when a function has several arrays and scalars.
+static const uint32_t COMPILER_MAX_LOCAL_ARRAY_ELEMENTS = 64;
+static const uint32_t COMPILER_MAX_LOCAL_STORAGE_BYTES = 256;
 static const uint32_t COMPILER_MAX_STATEMENTS = 256;
 static const uint32_t COMPILER_MAX_EXPRESSION_NODES = 1024;
 static const uint32_t COMPILER_MAX_EXPRESSION_NESTING = 16;
@@ -51,10 +57,12 @@ static const uint32_t COMPILER_MAX_MODULE_SYMBOLS = COMPILER_MAX_FUNCTIONS + COM
 // independent from the compiler phase number: changing object-producing
 // semantics requires incrementing COMPILER_OBJECT_ABI_VERSION.
 static const uint16_t COMPILER_OBJECT_FORMAT_VERSION = 1;
-static const uint16_t COMPILER_OBJECT_ABI_VERSION = 1;
+static const uint16_t COMPILER_OBJECT_ABI_VERSION = 2;
 static const uint32_t COMPILER_OBJECT_ARCH_AMD64 = 1;
 static const uint32_t COMPILER_OBJECT_TARGET_ABI_GUIDEXOS_C_V1 = 1;
 static const uint32_t COMPILER_MAX_OBJECT_BYTES = 131072;
+static const uint32_t COMPILER_RUNTIME_STATUS_CALL_DEPTH = 1;
+static const uint32_t COMPILER_RUNTIME_STATUS_ARRAY_BOUNDS = 2;
 
 static const uint16_t COMPILER_INVALID_INDEX = 0xFFFFU;
 
@@ -75,6 +83,17 @@ enum class ExpressionKind : uint8_t {
     LogicalAnd,
     LogicalOr,
     Call,
+    LoadIndexed,
+};
+
+enum class StorageKind : uint8_t {
+    ScalarInt,
+    ArrayInt,
+};
+
+enum class IndexedBaseKind : uint8_t {
+    Local,
+    Global,
 };
 
 struct Expression {
@@ -85,6 +104,10 @@ struct Expression {
     uint16_t localIndex;
     uint16_t globalIndex;
     uint16_t callIndex;
+    uint16_t elementCount;
+    uint16_t elementSize;
+    IndexedBaseKind indexedBaseKind;
+    uint8_t indexedReserved;
     int32_t value;
     SourceLocation location;
 };
@@ -101,6 +124,7 @@ enum class StatementKind : uint8_t {
     Break,
     Continue,
     Block,
+    StoreIndexed,
 };
 
 struct Statement {
@@ -113,6 +137,11 @@ struct Statement {
     uint16_t thenBlock;
     uint16_t elseBlock;
     uint16_t nextStatement;
+    uint16_t indexExpression;
+    uint16_t elementCount;
+    uint16_t elementSize;
+    IndexedBaseKind indexedBaseKind;
+    uint8_t indexedReserved;
     SourceLocation location;
 };
 
@@ -138,7 +167,11 @@ struct ParameterSymbol {
 
 struct LocalSymbol {
     char name[COMPILER_FUNCTION_NAME_CAPACITY];
+    StorageKind kind;
+    uint8_t reserved;
     uint16_t slot;
+    uint16_t elementCount;
+    uint16_t elementSize;
     bool initialized;
 };
 
@@ -180,6 +213,7 @@ struct FunctionIR {
     uint32_t blockCount;
     uint32_t expressionCount;
     uint32_t localCount;
+    uint32_t localStorageBytes;
     uint32_t stringCount;
     uint32_t stringDataBytes;
     uint16_t returnExpression;
@@ -222,10 +256,15 @@ struct FunctionDeclaration {
 
 struct GlobalSymbolIR {
     char name[COMPILER_FUNCTION_NAME_CAPACITY];
+    StorageKind kind;
     bool isDefinition;
     bool hasInitializer;
-    uint16_t reserved;
+    uint16_t elementCount;
+    uint16_t elementSize;
     int32_t initialValue;
+    uint16_t initializerCount;
+    uint16_t reserved;
+    int32_t initialValues[COMPILER_MAX_ARRAY_ELEMENTS];
     uint32_t moduleDataOffset;
     uint32_t size;
     uint32_t alignment;
@@ -256,7 +295,13 @@ enum class RelocationKind : uint8_t {
 enum class SymbolKind : uint8_t {
     Function,
     Data,
+    DataArray,
 };
+
+inline bool symbol_is_data(SymbolKind kind)
+{
+    return kind == SymbolKind::Data || kind == SymbolKind::DataArray;
+}
 
 struct RelocationRecord {
     RelocationKind kind;
@@ -275,6 +320,8 @@ struct ExportSymbol {
     uint32_t moduleDataOffset;
     uint32_t size;
     uint32_t alignment;
+    uint16_t elementCount;
+    uint16_t elementSize;
     uint16_t parameterCount;
     bool isEntry;
     uint8_t reserved;
@@ -288,6 +335,8 @@ struct ImportSymbol {
     uint16_t reserved;
     uint32_t size;
     uint32_t alignment;
+    uint16_t elementCount;
+    uint16_t elementSize;
     SourceLocation location;
 };
 
@@ -318,6 +367,7 @@ struct CompiledModule {
     bool returnConstantValid;
     int32_t returnConstant;
     bool recursiveFunction[COMPILER_MAX_FUNCTIONS];
+    uint32_t localStorageBytes[COMPILER_MAX_FUNCTIONS];
     bool callGraph[COMPILER_MAX_FUNCTIONS][COMPILER_MAX_FUNCTIONS];
     uint64_t sourceHash;
     uint16_t recursiveSccCount;
@@ -335,6 +385,8 @@ struct GlobalFunctionSymbol {
     uint32_t finalDataOffset;
     uint32_t size;
     uint32_t alignment;
+    uint16_t elementCount;
+    uint16_t elementSize;
     bool isEntry;
     uint8_t reserved[3];
 };

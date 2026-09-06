@@ -63,10 +63,10 @@ int main()
     if (!require(NATIVE_ELF_APPLICATION_STACK_SIZE == 64U * 1024U &&
                  NATIVE_ELF_RUNTIME_SAFETY_RESERVE_BYTES == 8192U &&
                  NATIVE_ELF_TRAMPOLINE_ENTRY_OVERHEAD_BYTES == 0x28U &&
-                 COMPILER_MAX_GENERATED_FRAME_BYTES == 448U &&
+                 COMPILER_MAX_GENERATED_FRAME_BYTES == 576U &&
                  COMPILER_MAX_TRANSIENT_STACK_BYTES == 128U &&
-                 COMPILER_MAX_GENERATED_ACTIVATION_STACK_COST == 632U &&
-                 COMPILER_MAX_RUNTIME_CALL_DEPTH == 90U,
+                 COMPILER_MAX_GENERATED_ACTIVATION_STACK_COST == 760U &&
+                 COMPILER_MAX_RUNTIME_CALL_DEPTH == 75U,
                  "Phase 27M stack policy constants are stable")) return 1;
     if (!require(sizeof(NativeElfTrampolineResult) == 24U &&
                  offsetof(NativeElfTrampolineResult, returnValue) == 0U &&
@@ -173,7 +173,7 @@ int main()
     if (!require(context.state == NativeAppExecutionState::Cleaned,
                  "runtime state enum supports deterministic lifecycle")) return 1;
     if (!require(context.runtimeStatus == NativeRuntimeStatus::CallDepthExceeded &&
-                 context.runtimeCallDepth == 90U,
+                 context.runtimeCallDepth == 75U,
                  "runtime state carries bounded-call failure details")) return 1;
 
     std::puts("native_elf_runtime_host_test: PASS");

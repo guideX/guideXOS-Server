@@ -105,6 +105,16 @@ public:
     {
         return bytes(reinterpret_cast<const uint8_t*>("\x89\x85"), 2) && u32(static_cast<uint32_t>(displacement));
     }
+    bool mov_local_rax(int32_t displacement)
+    {
+        return bytes(reinterpret_cast<const uint8_t*>("\x48\x89\x85"), 3) &&
+               u32(static_cast<uint32_t>(displacement));
+    }
+    bool mov_rax_local(int32_t displacement)
+    {
+        return bytes(reinterpret_cast<const uint8_t*>("\x48\x8B\x85"), 3) &&
+               u32(static_cast<uint32_t>(displacement));
+    }
     bool mov_reg_local32(uint8_t reg, int32_t displacement)
     {
         if (reg < 8) {
@@ -125,6 +135,17 @@ public:
     bool mov_rdx_imm64(uint64_t address)
     {
         return bytes(reinterpret_cast<const uint8_t*>("\x48\xBA"), 2) && u64(address);
+    }
+    bool movsxd_rax_eax() { static const uint8_t v[] = {0x48, 0x63, 0xC0}; return bytes(v, sizeof(v)); }
+    bool lea_rdx_local_rax(int32_t displacement)
+    {
+        return bytes(reinterpret_cast<const uint8_t*>("\x48\x8D\x94\x85"), 4) &&
+               u32(static_cast<uint32_t>(displacement));
+    }
+    bool lea_rdx_global_rax()
+    {
+        static const uint8_t v[] = {0x48, 0x8D, 0x14, 0x82};
+        return bytes(v, sizeof(v));
     }
     bool load_host_log()
     {
@@ -195,12 +216,24 @@ public:
     {
         return bytes(reinterpret_cast<const uint8_t*>("\x41\x81\xFE"), 3) && u32(value);
     }
+    bool cmp_eax_imm32(uint32_t value)
+    {
+        return bytes(reinterpret_cast<const uint8_t*>("\x3D"), 1) && u32(value);
+    }
     bool inc_r14d() { return bytes(reinterpret_cast<const uint8_t*>("\x41\xFF\xC6"), 3); }
     bool dec_r14d() { return bytes(reinterpret_cast<const uint8_t*>("\x41\xFF\xCE"), 3); }
-    bool set_runtime_failure()
+    bool set_runtime_failure(uint32_t status)
     {
         return bytes(reinterpret_cast<const uint8_t*>("\x41\xBF"), 2) &&
-               u32(COMPILER_MAX_RUNTIME_CALL_DEPTH);
+               u32((COMPILER_MAX_RUNTIME_CALL_DEPTH << 8U) | status);
+    }
+    bool set_array_bounds_failure()
+    {
+        // Preserve the current activation depth in the high bits while the
+        // low byte carries the distinct bounds status.
+        return bytes(reinterpret_cast<const uint8_t*>("\x45\x89\xF7"), 3) &&
+               bytes(reinterpret_cast<const uint8_t*>("\x41\xC1\xE7\x08"), 4) &&
+               bytes(reinterpret_cast<const uint8_t*>("\x41\x83\xCF\x02"), 4);
     }
     bool test_r15d() { return bytes(reinterpret_cast<const uint8_t*>("\x45\x85\xFF"), 3); }
 
@@ -278,6 +311,8 @@ public:
     }
     bool emit_jz(uint16_t label) { return emit_branch(0x84, label); }
     bool emit_jnz(uint16_t label) { return emit_branch(0x85, label); }
+    bool emit_jl(uint16_t label) { return emit_branch(0x8C, label); }
+    bool emit_jge(uint16_t label) { return emit_branch(0x8D, label); }
     bool emit_jae(uint16_t label) { return emit_branch(0x83, label); }
     bool emit_jmp(uint16_t label)
     {
@@ -413,6 +448,15 @@ static bool is_legacy_single_log(const FunctionIR& function)
            function.expressions[function.returnExpression].kind == ExpressionKind::Constant;
 }
 
+static bool has_indexed_access(const FunctionIR& function)
+{
+    for (uint32_t i = 0; i < function.expressionCount; ++i)
+        if (function.expressions[i].kind == ExpressionKind::LoadIndexed) return true;
+    for (uint32_t i = 0; i < function.statementCount; ++i)
+        if (function.statements[i].kind == StatementKind::StoreIndexed) return true;
+    return false;
+}
+
 static bool emit_log(Emitter& emitter, const FunctionIR& function, const Statement& statement,
                      uint64_t dataAddress, bool framed, int32_t contextDisplacement)
 {
@@ -460,6 +504,8 @@ static bool required_temporary_slots(const FunctionIR& function, uint16_t index,
         *output = 0;
         return true;
     }
+    if (expression.kind == ExpressionKind::LoadIndexed)
+        return required_temporary_slots(function, expression.left, depth + 1U, output);
     if (expression.kind == ExpressionKind::Negate)
         return required_temporary_slots(function, expression.left, depth + 1U, output);
     if (!required_temporary_slots(function, expression.left, depth + 1U, &left)) return false;
@@ -480,6 +526,8 @@ static bool required_transient_stack_bytes(const FunctionIR& function, uint16_t 
         *output = 0;
         return true;
     }
+    if (expression.kind == ExpressionKind::LoadIndexed)
+        return required_transient_stack_bytes(function, expression.left, depth + 1U, output);
     if (expression.kind == ExpressionKind::Call) {
         if (!function.calls || !function.callArguments || expression.callIndex >= function.callCount) return false;
         const CallSite& call = function.calls[expression.callIndex];
@@ -506,6 +554,60 @@ static bool required_transient_stack_bytes(const FunctionIR& function, uint16_t 
         (left > 8U + right ? left : 8U + right);
     *output = needed;
     return needed <= COMPILER_MAX_TRANSIENT_STACK_BYTES;
+}
+
+static bool required_statement_temporary_slots(const FunctionIR& function, uint16_t* output)
+{
+    if (!output) return false;
+    *output = 0;
+    for (uint32_t i = 0; i < function.statementCount; ++i) {
+        const Statement& statement = function.statements[i];
+        if (statement.kind != StatementKind::StoreIndexed) continue;
+        uint16_t right = 0;
+        uint16_t index = 0;
+        if (!required_temporary_slots(function, statement.expression, 0, &right) ||
+            !required_temporary_slots(function, statement.indexExpression, 0, &index)) return false;
+        const uint32_t needed = 1U + (right > index ? right : index);
+        if (needed > COMPILER_MAX_TEMPORARY_SLOTS) return false;
+        if (needed > *output) *output = static_cast<uint16_t>(needed);
+    }
+    return true;
+}
+
+static bool emit_expression(Emitter& emitter, const TranslationUnitIR& unit,
+                            const FunctionIR& function, const FrameLayout& frame,
+                            const uint16_t* functionLabels, uint16_t index,
+                            uint16_t epilogueLabel, uint16_t callFailureLabel);
+
+static bool emit_indexed_address(Emitter& emitter, const TranslationUnitIR& unit,
+                                 const FunctionIR& function, const FrameLayout& frame,
+                                 const uint16_t* functionLabels, uint16_t indexExpression,
+                                 IndexedBaseKind baseKind, uint16_t baseIndex,
+                                 uint16_t elementCount, SourceLocation location,
+                                 uint16_t boundsFailureLabel, uint16_t epilogueLabel,
+                                 uint16_t callFailureLabel)
+{
+    if (elementCount == 0 || elementCount > COMPILER_MAX_ARRAY_ELEMENTS ||
+        !emit_expression(emitter, unit, function, frame, functionLabels, indexExpression,
+                         epilogueLabel, callFailureLabel) ||
+        !emitter.cmp_eax_imm32(0) || !emitter.emit_jl(boundsFailureLabel) ||
+        !emitter.cmp_eax_imm32(elementCount) || !emitter.emit_jge(boundsFailureLabel) ||
+        !emitter.movsxd_rax_eax()) return false;
+    if (baseKind == IndexedBaseKind::Local) {
+        if (baseIndex >= function.integerParameterCount + function.localStorageBytes / 4U)
+            return false;
+        return emitter.lea_rdx_local_rax(local_displacement(baseIndex));
+    }
+    if (baseIndex >= unit.globalCount) return false;
+    return emitter.emit_global_data_address(unit.globals[baseIndex].name, location) &&
+           emitter.lea_rdx_global_rax();
+}
+
+static bool emit_array_bounds_failure(Emitter& emitter, uint16_t epilogueLabel)
+{
+    return emitter.mov_eax_imm32(0) &&
+           emitter.set_array_bounds_failure() &&
+           emitter.emit_jmp(epilogueLabel);
 }
 
 static bool emit_expression(Emitter& emitter, const TranslationUnitIR& unit,
@@ -575,12 +677,28 @@ static bool emit_expression(Emitter& emitter, const TranslationUnitIR& unit,
         case ExpressionKind::Constant:
             return emitter.mov_eax_imm32(static_cast<uint32_t>(expression.value));
         case ExpressionKind::LoadLocal:
-            if (expression.localIndex >= function.integerParameterCount + function.localCount) return false;
+            if (expression.localIndex >= function.integerParameterCount + function.localStorageBytes / 4U) return false;
             return emitter.mov_eax_local(local_displacement(expression.localIndex));
         case ExpressionKind::LoadGlobal:
             if (expression.globalIndex >= unit.globalCount) return false;
             return emitter.emit_global_data_address(unit.globals[expression.globalIndex].name,
                                                     expression.location) && emitter.mov_eax_rax();
+        case ExpressionKind::LoadIndexed: {
+            uint16_t boundsFailureLabel = COMPILER_INVALID_INDEX;
+            uint16_t endLabel = COMPILER_INVALID_INDEX;
+            const uint16_t baseIndex = expression.indexedBaseKind == IndexedBaseKind::Local
+                ? expression.localIndex : expression.globalIndex;
+            if (!emitter.create_label(&boundsFailureLabel) || !emitter.create_label(&endLabel) ||
+                !emit_indexed_address(emitter, unit, function, frame, functionLabels,
+                                      expression.left, expression.indexedBaseKind, baseIndex,
+                                      expression.elementCount, expression.location,
+                                      boundsFailureLabel, epilogueLabel, callFailureLabel) ||
+                !emitter.mov_eax_rax() || !emitter.emit_jmp(endLabel) ||
+                !emitter.define_label(boundsFailureLabel) ||
+                !emit_array_bounds_failure(emitter, epilogueLabel) ||
+                !emitter.define_label(endLabel)) return false;
+            return true;
+        }
         case ExpressionKind::Negate:
             return emit_expression(emitter, unit, function, frame, functionLabels, expression.left,
                                    epilogueLabel, callFailureLabel) && emitter.neg_eax();
@@ -630,7 +748,7 @@ static bool emit_statement(Emitter& emitter, const TranslationUnitIR& unit, cons
     switch (statement.kind) {
         case StatementKind::DeclareLocal:
         case StatementKind::StoreLocal:
-            return statement.localIndex < function.integerParameterCount + function.localCount &&
+            return statement.localIndex < function.integerParameterCount + function.localStorageBytes / 4U &&
                 emit_expression(emitter, unit, function, frame, functionLabels, statement.expression,
                                 epilogueLabel, callFailureLabel) &&
                 emitter.mov_local_eax(local_displacement(statement.localIndex));
@@ -640,6 +758,29 @@ static bool emit_statement(Emitter& emitter, const TranslationUnitIR& unit, cons
                                    epilogueLabel, callFailureLabel) &&
                 emitter.emit_global_data_address(unit.globals[statement.globalIndex].name,
                                                  statement.location) && emitter.mov_rax_eax();
+        case StatementKind::StoreIndexed: {
+            const uint16_t baseIndex = statement.indexedBaseKind == IndexedBaseKind::Local
+                ? statement.localIndex : statement.globalIndex;
+            uint16_t temporaryBase = 0;
+            if (!emitter.acquire_temporary_slots(1, &temporaryBase) ||
+                !emit_expression(emitter, unit, function, frame, functionLabels, statement.expression,
+                                 epilogueLabel, callFailureLabel) ||
+                !emitter.mov_local_eax(temporary_displacement(frame, temporaryBase))) return false;
+            uint16_t boundsFailureLabel = COMPILER_INVALID_INDEX;
+            uint16_t endLabel = COMPILER_INVALID_INDEX;
+            if (!emitter.create_label(&boundsFailureLabel) || !emitter.create_label(&endLabel) ||
+                !emit_indexed_address(emitter, unit, function, frame, functionLabels,
+                                      statement.indexExpression, statement.indexedBaseKind,
+                                      baseIndex, statement.elementCount, statement.location,
+                                      boundsFailureLabel, epilogueLabel, callFailureLabel) ||
+                !emitter.mov_eax_local(temporary_displacement(frame, temporaryBase)) ||
+                !emitter.mov_rax_eax() || !emitter.emit_jmp(endLabel) ||
+                !emitter.define_label(boundsFailureLabel) ||
+                !emit_array_bounds_failure(emitter, epilogueLabel) ||
+                !emitter.define_label(endLabel) ||
+                !emitter.release_temporary_slots(1)) return false;
+            return true;
+        }
         case StatementKind::EvaluateExpression:
             return emit_expression(emitter, unit, function, frame, functionLabels, statement.expression,
                                    epilogueLabel, callFailureLabel);
@@ -755,7 +896,7 @@ bool calculate_signed_rel32(uint64_t targetAddress, uint64_t addressAfterBranch,
 
 bool calculate_frame_layout(uint32_t localCount, FrameLayout* output)
 {
-    if (!output || localCount > COMPILER_MAX_LOCALS) return false;
+    if (!output || localCount > COMPILER_MAX_LOCAL_STORAGE_BYTES / 4U) return false;
     const uint32_t localBytes = localCount * 4U;
     const uint32_t requested = 40U + localBytes;
     uint32_t frameBytes = 0;
@@ -786,7 +927,8 @@ bool calculate_frame_layout(uint32_t parameterCount, uint32_t localCount,
                             uint32_t temporarySlots, bool hasContext,
                             uint32_t transientBytes, FrameLayout* output)
 {
-    if (!output || parameterCount > COMPILER_MAX_PARAMETERS || localCount > COMPILER_MAX_LOCALS ||
+    if (!output || parameterCount > COMPILER_MAX_PARAMETERS ||
+        localCount > COMPILER_MAX_LOCAL_STORAGE_BYTES / 4U ||
         temporarySlots > COMPILER_MAX_TEMPORARY_SLOTS ||
         transientBytes > COMPILER_MAX_TRANSIENT_STACK_BYTES) return false;
     const uint32_t parameterBytes = parameterCount * 4U;
@@ -841,6 +983,7 @@ static bool emit_translation_unit_impl(const TranslationUnitIR& unit, uint64_t r
             function.callArgumentCount > COMPILER_MAX_CALL_ARGUMENT_NODES ||
             function.statementCount > COMPILER_MAX_STATEMENTS || function.blockCount > COMPILER_MAX_BLOCKS ||
             function.expressionCount > COMPILER_MAX_EXPRESSION_NODES ||
+            function.localStorageBytes > COMPILER_MAX_LOCAL_STORAGE_BYTES ||
             function.stringCount > COMPILER_MAX_STRING_LITERALS ||
             function.usesAppContext != (function.parameterCount == 1 && function.integerParameterCount == 0) ||
             (function.callCount != 0 && !function.calls) ||
@@ -868,8 +1011,12 @@ static bool emit_translation_unit_impl(const TranslationUnitIR& unit, uint64_t r
             if (expressionNeeded > needed) needed = expressionNeeded;
             if (expressionTransient > transientBytes) transientBytes = expressionTransient;
         }
+        uint16_t statementNeeded = 0;
+        if (!required_statement_temporary_slots(unit.functions[i], &statementNeeded)) return false;
+        if (statementNeeded > needed) needed = statementNeeded;
         if (needed > COMPILER_MAX_TEMPORARY_SLOTS ||
-            !calculate_frame_layout(unit.functions[i].integerParameterCount, unit.functions[i].localCount,
+            !calculate_frame_layout(unit.functions[i].integerParameterCount,
+                                     unit.functions[i].localStorageBytes / 4U,
                                      needed, unit.functions[i].usesAppContext, transientBytes,
                                      &frames[i])) return false;
     }
@@ -886,7 +1033,8 @@ static bool emit_translation_unit_impl(const TranslationUnitIR& unit, uint64_t r
             return true;
         }
         if (function.localCount == 0 && function.integerParameterCount == 0 && function.callCount == 0 &&
-            !function.hasHostLog && function.blockCount == 1 && function.statementCount == 1 &&
+            !function.hasHostLog && !has_indexed_access(function) &&
+            function.blockCount == 1 && function.statementCount == 1 &&
             function.returnCount == 1) {
             emitter = Emitter(output, outputCapacity, relocations, relocationCapacity, relocationCount);
             if (!emit_expression(emitter, unit, function, frames[0], functionLabels, function.returnExpression,
@@ -922,7 +1070,7 @@ static bool emit_translation_unit_impl(const TranslationUnitIR& unit, uint64_t r
             (function.callCount != 0 && !emitter.emit_jmp(epilogueLabel))) return false;
         if (function.callCount != 0 &&
             (!emitter.define_label(callFailureLabel) || !emitter.mov_eax_imm32(0) ||
-             !emitter.set_runtime_failure() ||
+             !emitter.set_runtime_failure(COMPILER_RUNTIME_STATUS_CALL_DEPTH) ||
              !emitter.emit_jmp(epilogueLabel))) return false;
         if (!emitter.define_label(epilogueLabel) || !emitter.dec_r14d() || !emitter.epilogue()) return false;
         if (emitter.max_transient_bytes() > frame.transientBytes) return false;
