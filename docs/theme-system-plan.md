@@ -1441,6 +1441,115 @@ Task Manager functionality that does not yet exist: richer process APIs, process
 
 The shared table-header roles and existing control/selection/state lookups now provide a small reusable path for later Device Manager, Disk Manager, or Network utility surfaces. Future work should continue to audit each real application first, add only semantic roles with an immediate consumer, and keep utility feature development separate from theme integration.
 
+## Phase 10D - Device Manager Interior Sci-Fi Theming
+
+Phase 10D themes the existing Device Manager surface without expanding device
+enumeration, driver ownership, hardware mutation, or application behavior. The
+phase remains a paint-only integration pass over the established shared
+`DesktopTheme`/`DesktopControlTheme` architecture.
+
+### Closeout metadata
+
+* Starting HEAD: `c6581438ec24528a4c85a40d04b51e5191b7b967` (`Theme Task Manager interior for Sci-Fi mode`).
+* Starting branch: `v0.3_SCI_FI_THEME`; upstream: `origin/v0.3_SCI_FI_THEME`; starting divergence: `0 ahead / 0 behind`; starting worktree and index were clean and there were no untracked files.
+* Phase 10C was already present at the starting checkpoint and had already been pushed; the Phase 10D implementation itself was not pushed.
+* The final Phase 10D commit SHA, final divergence, and final clean-worktree result are recorded in the implementation report for this phase.
+
+### Architecture and ownership audit
+
+The repository has no hosted Device Manager implementation. Hosted
+`control_panel.cpp` exposes a `DeviceManager` card and launch label, but hosted
+launch dispatch has no corresponding Device Manager application handler. The
+real current surface is the bare-metal embedded modal owned by
+`kernel/core/desktop.cpp`: `s_deviceManagerOpen`, the fixed `s_devices` fixture,
+`draw_device_manager()`, and `hit_test_device_manager()` are all kernel desktop
+state and framebuffer drawing. The compositor only owns the surrounding
+desktop/input dispatch; no separate hosted or compositor-owned Device Manager
+interior exists in this phase.
+
+The browsing model is a fixed, flat three-column table with eight existing
+inventory rows (`Device`, `Status`, and `Details`). Category names are part of
+device labels such as `Audio:` and `Network:`; there are no category header
+rows, tree indentation, expand/collapse affordances, detail/property pane,
+tabs, context menu, scrollbar, hover model, or separate keyboard-focus model.
+The existing Network `Config` action continues to open the existing network
+configuration surface. No new hardware or device state was introduced.
+
+### Surfaces themed and shared roles reused
+
+Sci-Fi now routes the existing Device Manager modal through
+`GetCurrentDesktopTheme()` and `GetBareMetalControlTheme()` for its shadow,
+outer panel, border, title bar, title text, content field, table header, list
+rows, row separators, selected row, device names, status text/indicators,
+vendor/device identifiers, and existing `Config`/close controls. The selected
+row uses `DesktopSelectionColor`; table hierarchy uses
+`tableHeaderBackground`/`tableHeaderText`; boundaries use `border` and
+`separator`; primary and identifier text use `primaryText`/`secondaryText`;
+existing `Not found` status semantics use `statusWarning`; and existing
+controls use `DesktopControlState` fill/border/text lookup for their Sci-Fi
+normal state.
+
+No new reusable role or API was necessary. No Device Manager-specific Sci-Fi
+palette, second theme selector, category model, tree model, scrollbar, or
+hardware abstraction was added. The existing fixture's status meanings are
+preserved: detected rows use the Sci-Fi accent, not-found rows use the shared
+warning role, and neutral inventory information uses secondary text.
+
+### Classic and Sci-Fi results
+
+Classic remains the default and retains the prior Device Manager colors,
+geometry, hit regions, selection behavior, network Config guard, close path,
+and data fixture. Missing, invalid, explicit, and persisted Classic
+configuration continue to resolve through the existing fallback path. Sci-Fi
+is still opt-in and provides a dark technical surface, clear table hierarchy,
+readable device identifiers, restrained accent selection, visible warning
+semantics, and a crisp selected row without changing enumeration or input
+behavior.
+
+### Validation and evidence
+
+The focused theme-system/source checks cover Device Manager's shared-role
+consumer, table-header and selection lookup, warning-role mapping, and the
+preserved existing Config action guard. The AMD64 build and the existing
+startup-sync path provide bare-metal boot/theme-load evidence. The startup-sync
+harness does not directly launch the embedded Device Manager modal or retain a
+fresh per-window screenshot, so source coverage, build evidence, and existing
+Control Panel-to-Device-Manager input paths are the strongest available proof;
+the missing retained screenshot is a harness limitation, not a product
+failure. No Device Manager-specific hosted runtime proof is possible because
+the hosted implementation is absent at this checkpoint.
+
+The completed validation matrix is:
+
+* `build.bat`, `build.ps1 -Arch amd64`, and `mingw32-make -C kernel ARCH=amd64 -j2`: pass.
+* Focused `desktop_control_theme_test`: pass; `smoke-theme-system.ps1 -SkipBuild`: pass; `git diff --check`: pass.
+* Canonical startup sync: Classic pass (`logs/desktop-startup-sync-20260906-080039.serial.log`) and Sci-Fi pass (`logs/desktop-startup-sync-20260906-080112.serial.log`); both reported the expected loaded theme token.
+* Startup/app-model, live-directory status, hosted-display, BootInfo framebuffer, VirtIO input-routing, and build-wrapper regressions: pass.
+* The existing Task Manager snapshot harness passed its snapshot, network-stability, tombstone, and data assertions but still reports its known standalone launch-marker failure; Phase 10D does not touch that harness or Task Manager code.
+
+Functional validation preserves the existing launch from bare-metal Control
+Panel, row selection, network Config dispatch, close/Alt-F4 modal lifecycle,
+and unchanged fixture data. No device was disabled, reset, detached, rescanned,
+or otherwise mutated for testing. Driver, PCI, USB, ACPI, storage, network,
+resource, and input ownership remain outside this visual phase.
+
+### Limitations and deferred Device Manager work
+
+This phase does not add a hosted Device Manager, live hardware refresh,
+enumeration changes, categories, tree expansion, scrolling, properties, tabs,
+context menus, enable/disable actions, driver operations, resource decoding,
+hot-plug support, or new dialogs. Those are product/application or hardware
+subsystem work and remain deferred. The bounded embedded table is ready for
+later Disk Manager and Network utility theming through the same shared header,
+selection, status, panel, separator, scrollbar, and control-state roles.
+
+### Phase 10D closeout
+
+* Outcome: Outcome B — the existing Device Manager is themed in Sci-Fi mode through the shared role system, with Classic/default behavior preserved; no new hosted Device Manager or hardware functionality was invented.
+* Implementation commit: `Theme Device Manager interior for Sci-Fi mode`; the exact ending SHA and final repository counts are recorded in the final handoff report.
+* Final validation is the matrix above. The only non-zero regression result is the pre-existing Task Manager standalone launch-marker limitation; all of its substantive assertions passed.
+* Nothing was pushed by Phase 10D. The final worktree was cleaned of generated build and harness artifacts before commit.
+
 ## Manual Validation Runbook
 
 * Start the hosted server executable and use `gui.start` to open the compositor.

@@ -94,6 +94,7 @@ $fileExplorerHeader = Join-Path $Root "file_explorer.h"
 $imageViewer = Join-Path $Root "image_viewer.cpp"
 $taskManager = Join-Path $Root "task_manager.cpp"
 $compositor = Join-Path $Root "compositor.cpp"
+$kernelDesktop = Join-Path $Root "kernel\core\desktop.cpp"
 $kernelApps = Join-Path $Root "kernel\core\kernel_apps.cpp"
 $kernelCompositor = Join-Path $Root "kernel\core\kernel_compositor.cpp"
 $windowRenderer = Join-Path $Root "window_renderer.h"
@@ -128,6 +129,17 @@ $phase10CSharedRolesMatch = Find-RawMatch $planDoc '### Shared roles and reusabl
 $phase10CClassicMatch = Find-RawMatch $planDoc '### Classic and Sci-Fi behavior.*?Classic remains the default.*?Sci-Fi is opt-in.*?action semantics are unchanged'
 $phase10CValidationMatch = Find-RawMatch $planDoc '### Validation and evidence.*?focused control-theme test.*?AMD64 validation uses `build\.ps1 -Arch amd64`'
 $phase10CBoundaryMatch = Find-RawMatch $planDoc 'Visual theming completed now:.*?Task Manager functionality that does not yet exist:.*?deliberately deferred product work, not theme defects'
+$phase10DHeadingMatch = Find-FirstMatch $planDoc '## Phase 10D - Device Manager Interior Sci-Fi Theming'
+$phase10DOwnershipMatch = Find-RawMatch $planDoc 'The repository has no hosted Device Manager implementation.*?bare-metal embedded modal owned by\s*`kernel/core/desktop\.cpp`'
+$phase10DModelMatch = Find-FirstMatch $planDoc 'fixed, flat three-column table'
+$phase10DModelLimitMatch = Find-FirstMatch $planDoc 'category header'
+$phase10DSurfaceMatch = Find-RawMatch $kernelDesktop 'static void draw_device_manager\(\).*?GetBareMetalControlTheme.*?tableHeaderBackground.*?DesktopSelectionColor.*?DesktopControlFillColor'
+$phase10DStatusMatch = Find-RawMatch $kernelDesktop 'device_manager_status_color\(.*?roles\.statusWarning.*?device_manager_status_text_color'
+$phase10DGuardMatch = Find-RawMatch $kernelDesktop 'device_manager_config_available\(.*?device\.isNetwork.*?device\.statusColor == 0xFF5FB878.*?if \(device_manager_config_available'
+$phase10DSafetyMatch = Find-FirstMatch $planDoc 'No device was disabled'
+$phase10DSafetyOwnershipMatch = Find-FirstMatch $planDoc 'Driver, PCI'
+$phase10DNoNewRoleMatch = Find-FirstMatch $planDoc 'No new reusable role or API was necessary'
+$phase10DNoLocalPaletteMatch = Find-FirstMatch $planDoc 'No Device Manager-specific Sci-Fi'
 $displayOptionsThemeHelperMatch = Find-FirstMatch $displayOptions 'IsSciFiThemeActive|DisplayOptionsBodyColor|DisplayOptionsPanelColor|DisplayOptionsCardColor|DisplayOptionsButtonFillColor|DisplayOptionsButtonBorderColor|DisplayOptionsTextColor|DisplayOptionsMutedTextColor|DisplayOptionsAccentColor'
 $displayOptionsThemeFieldMatch = Find-FirstMatch $displayOptions 'windowBackground|windowBorder|accent|mutedAccent|taskbarBackground|taskbarBorder|titleBarText'
 $displayOptionsTextColorMatch = Find-FirstMatch $displayOptions 'MT_DrawTextAtColor|DisplayOptionsMutedTextColor\(\)|DisplayOptionsTextColor\(\)'
@@ -471,6 +483,13 @@ $checks = @(
     [pscustomobject]@{ Name = "phase 10c Task Manager Sci-Fi active tab state"; Pass = $null -ne $taskManagerActiveTabMatch; Match = $taskManagerActiveTabMatch },
     [pscustomobject]@{ Name = "phase 10c shared table header roles exist"; Pass = $null -ne $taskManagerControlRoleMatch; Match = $taskManagerControlRoleMatch },
     [pscustomobject]@{ Name = "phase 4e no app model status gate dependency"; Pass = $null -eq $smokeNoAppModelStatusMatch; Match = $smokeNoAppModelStatusMatch },
+    [pscustomobject]@{ Name = "phase 10d docs heading"; Pass = $null -ne $phase10DHeadingMatch; Match = $phase10DHeadingMatch },
+    [pscustomobject]@{ Name = "phase 10d hosted and bare-metal ownership documented"; Pass = $null -ne $phase10DOwnershipMatch; Match = $phase10DOwnershipMatch },
+    [pscustomobject]@{ Name = "phase 10d flat Device Manager model documented"; Pass = $null -ne $phase10DModelMatch -and $null -ne $phase10DModelLimitMatch; Match = $(if ($null -ne $phase10DModelMatch) { $phase10DModelMatch } else { $phase10DModelLimitMatch }) },
+    [pscustomobject]@{ Name = "phase 10d bare-metal shared roles consumed"; Pass = $null -ne $phase10DSurfaceMatch -and $null -ne $phase10DStatusMatch; Match = $(if ($null -ne $phase10DSurfaceMatch) { $phase10DSurfaceMatch } else { $phase10DStatusMatch }) },
+    [pscustomobject]@{ Name = "phase 10d existing Config guard preserved"; Pass = $null -ne $phase10DGuardMatch; Match = $phase10DGuardMatch },
+    [pscustomobject]@{ Name = "phase 10d hardware-safety boundary documented"; Pass = $null -ne $phase10DSafetyMatch -and $null -ne $phase10DSafetyOwnershipMatch; Match = $(if ($null -ne $phase10DSafetyMatch) { $phase10DSafetyMatch } else { $phase10DSafetyOwnershipMatch }) },
+    [pscustomobject]@{ Name = "phase 10d no new theme role or local palette"; Pass = $null -ne $phase10DNoNewRoleMatch -and $null -ne $phase10DNoLocalPaletteMatch; Match = $(if ($null -ne $phase10DNoNewRoleMatch) { $phase10DNoNewRoleMatch } else { $phase10DNoLocalPaletteMatch }) },
     [pscustomobject]@{ Name = "phase 4f docs heading"; Pass = $null -ne $phase4fHeadingMatch; Match = $phase4fHeadingMatch },
     [pscustomobject]@{ Name = "phase 4f docs body"; Pass = $null -ne $phase4fBodyMatch; Match = $phase4fBodyMatch },
     [pscustomobject]@{ Name = "phase 4f inventory complete"; Pass = $null -ne $phase4fInventoryMatch; Match = $phase4fInventoryMatch },

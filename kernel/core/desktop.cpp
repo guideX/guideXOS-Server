@@ -8240,47 +8240,101 @@ static const DeviceEntry s_devices[] = {
 };
 static const int kDeviceCount = 8;
 
+static uint32_t device_manager_status_color(const DeviceEntry& device,
+                                            const DesktopTheme& theme,
+                                            const BareMetalControlTheme& roles)
+{
+    if (theme.id != DesktopThemeId::SciFi) {
+        return device.statusColor;
+    }
+
+    // Keep the existing fixture semantics: green means detected, red means
+    // not found, and the remaining inventory labels are neutral information.
+    // Sci-Fi maps those real states to shared semantic roles instead of a
+    // Device Manager-local palette.
+    if (device.statusColor == 0xFF5FB878) return theme.accent;
+    if (device.statusColor == 0xFFD96C6C) return roles.statusWarning;
+    return roles.secondaryText;
+}
+
+static uint32_t device_manager_status_text_color(const DeviceEntry& device,
+                                                 const DesktopTheme& theme,
+                                                 const BareMetalControlTheme& roles)
+{
+    if (theme.id != DesktopThemeId::SciFi) {
+        return rgb(200, 200, 215);
+    }
+    if (device.statusColor == 0xFFD96C6C) return roles.statusWarning;
+    if (device.statusColor == 0xFF5FB878) return roles.primaryText;
+    return roles.secondaryText;
+}
+
+static bool device_manager_config_available(const DeviceEntry& device)
+{
+    // This is the pre-existing action guard.  The theme pass only changes how
+    // the already-available Config action is painted.
+    return device.isNetwork && device.statusColor == 0xFF5FB878;
+}
+
 static void draw_device_manager()
 {
     if (!s_deviceManagerOpen) return;
 
     uint32_t dlgX = (s_screenW - kDeviceMgrW) / 2;
     uint32_t dlgY = (s_screenH - kDeviceMgrH) / 2;
+    const DesktopTheme& theme = GetCurrentDesktopTheme();
+    const bool sciFiTheme = theme.id == DesktopThemeId::SciFi;
+    const BareMetalControlTheme roles = GetBareMetalControlTheme(theme);
 
     // Shadow
-    framebuffer::fill_rect(dlgX + 4, dlgY + 4, kDeviceMgrW, kDeviceMgrH, rgb(10, 10, 15));
+    framebuffer::fill_rect(dlgX + 4, dlgY + 4, kDeviceMgrW, kDeviceMgrH,
+        sciFiTheme ? BlendDesktopThemeColor(theme.desktopBackground, roles.panelBackground, 40) : rgb(10, 10, 15));
 
     // Window background
-    framebuffer::fill_rect(dlgX, dlgY, kDeviceMgrW, kDeviceMgrH, rgb(35, 35, 45));
-    draw_rect(dlgX, dlgY, kDeviceMgrW, kDeviceMgrH, rgb(70, 90, 130));
+    framebuffer::fill_rect(dlgX, dlgY, kDeviceMgrW, kDeviceMgrH,
+        sciFiTheme ? roles.panelBackground : rgb(35, 35, 45));
+    draw_rect(dlgX, dlgY, kDeviceMgrW, kDeviceMgrH,
+        sciFiTheme ? BlendDesktopThemeColor(roles.border, theme.accent, 38) : rgb(70, 90, 130));
 
     // Title bar
-    framebuffer::fill_rect(dlgX + 1, dlgY + 1, kDeviceMgrW - 2, 28, rgb(50, 70, 110));
-    draw_text(dlgX + 12, dlgY + 8, "Device Manager", rgb(220, 225, 240), 1);
+    framebuffer::fill_rect(dlgX + 1, dlgY + 1, kDeviceMgrW - 2, 28,
+        sciFiTheme ? theme.titleBarBackground : rgb(50, 70, 110));
+    draw_text(dlgX + 12, dlgY + 8, "Device Manager",
+        sciFiTheme ? roles.primaryText : rgb(220, 225, 240), 1);
 
     // Close button
     uint32_t closeBtnX = dlgX + kDeviceMgrW - 26;
     uint32_t closeBtnY = dlgY + 4;
-    framebuffer::fill_rect(closeBtnX, closeBtnY, 20, 20, rgb(180, 60, 60));
-    draw_rect(closeBtnX, closeBtnY, 20, 20, rgb(200, 80, 80));
-    draw_text(closeBtnX + 6, closeBtnY + 5, "x", rgb(240, 220, 220), 1);
+    const DesktopControlState closeState = DesktopControlState::Normal;
+    framebuffer::fill_rect(closeBtnX, closeBtnY, 20, 20,
+        sciFiTheme ? DesktopControlFillColor(roles, closeState) : rgb(180, 60, 60));
+    draw_rect(closeBtnX, closeBtnY, 20, 20,
+        sciFiTheme ? DesktopControlBorderColor(roles, closeState) : rgb(200, 80, 80));
+    draw_text(closeBtnX + 6, closeBtnY + 5, "x",
+        sciFiTheme ? DesktopControlTextColor(roles, closeState) : rgb(240, 220, 220), 1);
 
     // Content area
     uint32_t contentY = dlgY + 36;
-    framebuffer::fill_rect(dlgX + 8, contentY, kDeviceMgrW - 16, kDeviceMgrH - 44, rgb(28, 28, 35));
+    framebuffer::fill_rect(dlgX + 8, contentY, kDeviceMgrW - 16, kDeviceMgrH - 44,
+        sciFiTheme ? roles.recessedField : rgb(28, 28, 35));
 
     // Header
-    draw_text(dlgX + 20, contentY + 8, "Hardware Inventory", rgb(200, 200, 220), 1);
+    draw_text(dlgX + 20, contentY + 8, "Hardware Inventory",
+        sciFiTheme ? roles.primaryText : rgb(200, 200, 220), 1);
 
     // Column headers
     uint32_t listY = contentY + 30;
     uint32_t nameW = (uint32_t)((kDeviceMgrW - 32) * 0.38f);
     uint32_t statusW = (uint32_t)((kDeviceMgrW - 32) * 0.22f);
 
-    framebuffer::fill_rect(dlgX + 12, listY, kDeviceMgrW - 24, kDeviceMgrRowH, rgb(40, 45, 55));
-    draw_text(dlgX + 18, listY + 6, "Device", rgb(180, 180, 200), 1);
-    draw_text(dlgX + 18 + nameW, listY + 6, "Status", rgb(180, 180, 200), 1);
-    draw_text(dlgX + 18 + nameW + statusW, listY + 6, "Details", rgb(180, 180, 200), 1);
+    framebuffer::fill_rect(dlgX + 12, listY, kDeviceMgrW - 24, kDeviceMgrRowH,
+        sciFiTheme ? roles.tableHeaderBackground : rgb(40, 45, 55));
+    draw_text(dlgX + 18, listY + 6, "Device",
+        sciFiTheme ? roles.tableHeaderText : rgb(180, 180, 200), 1);
+    draw_text(dlgX + 18 + nameW, listY + 6, "Status",
+        sciFiTheme ? roles.tableHeaderText : rgb(180, 180, 200), 1);
+    draw_text(dlgX + 18 + nameW + statusW, listY + 6, "Details",
+        sciFiTheme ? roles.tableHeaderText : rgb(180, 180, 200), 1);
 
     // Device list
     listY += kDeviceMgrRowH + 2;
@@ -8288,24 +8342,46 @@ static void draw_device_manager()
         uint32_t rowY = listY + (uint32_t)i * kDeviceMgrRowH;
         if (rowY + kDeviceMgrRowH > dlgY + kDeviceMgrH - 12) break;
 
-        uint32_t rowBg = (i % 2 == 0) ? rgb(32, 32, 40) : rgb(28, 28, 36);
-        if (s_deviceManagerSelected == i) rowBg = rgb(50, 70, 100);
+        uint32_t rowBg = sciFiTheme
+            ? ((i % 2 == 0) ? roles.raisedPanel
+                            : BlendDesktopThemeColor(roles.raisedPanel, roles.panelBackground, 24))
+            : ((i % 2 == 0) ? rgb(32, 32, 40) : rgb(28, 28, 36));
+        if (s_deviceManagerSelected == i) {
+            rowBg = sciFiTheme ? DesktopSelectionColor(roles, true) : rgb(50, 70, 100);
+        }
         framebuffer::fill_rect(dlgX + 12, rowY, kDeviceMgrW - 24, kDeviceMgrRowH - 1, rowBg);
+        if (sciFiTheme) {
+            framebuffer::fill_rect(dlgX + 12, rowY + kDeviceMgrRowH - 1,
+                kDeviceMgrW - 24, 1, roles.separator);
+        }
 
-        draw_text(dlgX + 18, rowY + 5, s_devices[i].name, rgb(210, 210, 225), 1);
+        draw_text(dlgX + 18, rowY + 5, s_devices[i].name,
+            sciFiTheme ? roles.primaryText : rgb(210, 210, 225), 1);
 
         uint32_t statusX = dlgX + 18 + nameW;
-        framebuffer::fill_rect(statusX, rowY + 8, 8, 8, s_devices[i].statusColor);
-        draw_text(statusX + 12, rowY + 5, s_devices[i].status, rgb(200, 200, 215), 1);
+        framebuffer::fill_rect(statusX, rowY + 8, 8, 8,
+            device_manager_status_color(s_devices[i], theme, roles));
+        draw_text(statusX + 12, rowY + 5, s_devices[i].status,
+            device_manager_status_text_color(s_devices[i], theme, roles), 1);
 
-        draw_text(dlgX + 18 + nameW + statusW, rowY + 5, s_devices[i].detail, rgb(160, 160, 180), 1);
+        draw_text(dlgX + 18 + nameW + statusW, rowY + 5, s_devices[i].detail,
+            sciFiTheme ? roles.secondaryText : rgb(160, 160, 180), 1);
 
-        if (s_devices[i].isNetwork && s_devices[i].statusColor == 0xFF5FB878) {
+        if (device_manager_config_available(s_devices[i])) {
             uint32_t btnX = dlgX + kDeviceMgrW - 90;
             uint32_t btnY2 = rowY + 2;
-            framebuffer::fill_rect(btnX, btnY2, 70, kDeviceMgrRowH - 4, rgb(50, 80, 120));
-            draw_rect(btnX, btnY2, 70, kDeviceMgrRowH - 4, rgb(70, 100, 150));
-            draw_text_centered(btnX, btnY2, 70, kDeviceMgrRowH - 4, "Config", rgb(200, 210, 230), 1);
+            if (sciFiTheme) {
+                framebuffer::fill_rect(btnX, btnY2, 70, kDeviceMgrRowH - 4,
+                    DesktopControlFillColor(roles, DesktopControlState::Normal));
+                draw_rect(btnX, btnY2, 70, kDeviceMgrRowH - 4,
+                    DesktopControlBorderColor(roles, DesktopControlState::Normal));
+                draw_text_centered(btnX, btnY2, 70, kDeviceMgrRowH - 4, "Config",
+                    DesktopControlTextColor(roles, DesktopControlState::Normal), 1);
+            } else {
+                framebuffer::fill_rect(btnX, btnY2, 70, kDeviceMgrRowH - 4, rgb(50, 80, 120));
+                draw_rect(btnX, btnY2, 70, kDeviceMgrRowH - 4, rgb(70, 100, 150));
+                draw_text_centered(btnX, btnY2, 70, kDeviceMgrRowH - 4, "Config", rgb(200, 210, 230), 1);
+            }
         }
     }
 }
