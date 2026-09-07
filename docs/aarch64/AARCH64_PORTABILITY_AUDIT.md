@@ -493,16 +493,17 @@ ESR/ELR/FAR/SPSR diagnostics, ARM architectural timer, pinned GIC, and a
 page-map/allocator smoke test.
 
 The Phase 2 QEMU virt proof pins the first interrupt path to DTB-discovered
-GICv2 and the non-secure physical generic timer.  AARCH64-3 should preserve
-the generic-kernel boundary while adding DTB-selected GICv3 support and
-architecture service interfaces; it should not broaden into scheduler or
-userspace work until those interfaces are independently validated.
+GICv2 and the non-secure physical generic timer.  AARCH64-3 preserves that
+platform foundation and places it behind architecture-facing services; GICv3
+coverage remains a later platform-expansion task.
 
-### AARCH64-3 — Architecture services and scheduler
+### AARCH64-3 — Common kernel scheduler on ARM64
 
-Move core code to generic CPU/MMU/interrupt/timer/context/console interfaces.
-Prove kernel threads, context switching, idle, interrupt masking, and one
-timer-driven scheduler test while AMD64 remains green.
+Route the AArch64 handoff through the common kernel entry and scheduler.
+Provide the minimal CPU, interrupt-state, timer, context, barrier, and idle
+interfaces; prove ARM64 kernel-thread context switching, timer preemption,
+idle wake, and sustained scheduling integrity on the existing GICv2 path.
+Keep AMD64 behavior additive and preserve Phase 1/2 regressions.
 
 ### AARCH64-4 — Core kernel and filesystem
 

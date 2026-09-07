@@ -199,8 +199,8 @@ filesystem, networking, or any desktop/App Model work.  The low-2-GiB and
 DTB exposure, and four-tuple timer binding are explicit temporary scope.
 
 Recommended exact AARCH64-3 scope: retain this Phase 2 harness and introduce
-the generic architecture-facing interfaces for page allocation/table
-activation, interrupt masking/acknowledgement, timer deadlines, barriers and
-CPU idle; then add a bounded GICv3 path selected by DTB on QEMU `virt`
-without changing the generic kernel call sites.  Keep SMP, scheduler, userspace
-and device-driver integration out of that first architecture-boundary phase.
+the generic architecture-facing interfaces for interrupt masking,
+acknowledgement, timer deadlines, barriers, CPU idle, and context switching;
+then route the common guideXOS scheduler through the existing GICv2 path.
+GICv3 remains deferred platform-expansion work.  Keep SMP, userspace, and
+device-driver integration out of that first architecture-boundary phase.
