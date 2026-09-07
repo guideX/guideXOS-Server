@@ -3281,11 +3281,13 @@ compile lanes. The hosted fixtures are
 
 The complete focused matrix contains lexer, parser, runtime, and JS6 through
 JS29: all 27 suites pass. The normal native `build.bat` completes
-successfully. The hosted aggregate reports 423 passed and 7 failed out of 430
-checks; the seven failures remain the unrelated CSS baselines CSS 3C, CSS 3G,
-CSS 6A, three CSS 6B checks, and CSS 6C. The kernel retry builds the
-bootloader and reaches the kernel, but remains blocked by the existing Mbed
-TLS configuration errors in `third_party/mbedtls/library/mbedtls_check_config.h`
+successfully. The hosted aggregate reports 435 passed and 7 failed out of 442
+checks. All 12 JS29 hosted checks pass, including authentic physical-pointer
+click cancellation through the shared seam; the seven remaining failures are
+the unrelated CSS baselines CSS 3C, CSS 3G, CSS 6A, three CSS 6B checks, and
+CSS 6C. The kernel retry builds the bootloader and reaches the kernel, but
+remains blocked by the existing Mbed TLS configuration errors in
+`third_party/mbedtls/library/mbedtls_check_config.h`
 (partial ECC acceleration and incomplete ECDHE-RSA prerequisites). QEMU was
 not launched because no kernel image was produced; no TLS configuration was
 changed.

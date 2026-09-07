@@ -4,6 +4,18 @@
 <body>
 <h1>Navigator JavaScript JS29</h1>
 <p>Programmatic click shares cancelable native default actions.</p>
+<p>
+  <button id="js29-trigger-ordinary" type="button">ordinary.click()</button>
+  <button id="js29-trigger-box" type="button">checkbox.click()</button>
+  <button id="js29-trigger-cancel-box" type="button">cancel checkbox.click()</button>
+  <button id="js29-trigger-radio" type="button">radio.click()</button>
+  <button id="js29-trigger-submit" type="button">submit.click()</button>
+  <button id="js29-trigger-cancel-click" type="button">cancel submit click</button>
+  <button id="js29-trigger-cancel-submit" type="button">cancel submit event</button>
+  <button id="js29-trigger-input-submit" type="button">input submit.click()</button>
+  <button id="js29-trigger-cancel-pointer" type="button">cancel next pointer checkbox</button>
+  <button id="js29-trigger-allow-pointer" type="button">allow next pointer checkbox</button>
+</p>
 <div id="js29-parent">
   <div id="js29-ordinary">ordinary target</div>
   <form id="js29-form" action="javascript-js29-target.html" method="get">
@@ -18,18 +30,44 @@
 <p id="js29-state">initial</p>
 <script>
 var js29State = document.getElementById("js29-state");
+var js29Ordinary = document.getElementById("js29-ordinary");
 var js29Box = document.getElementById("js29-box");
 var js29RadioA = document.getElementById("js29-radio-a");
 var js29RadioB = document.getElementById("js29-radio-b");
 var js29Submit = document.getElementById("js29-submit");
+var js29InputSubmit = document.getElementById("js29-input-submit");
 var js29Form = document.getElementById("js29-form");
 var js29Plain = document.getElementById("js29-plain");
+var js29OrdinaryTrigger = document.getElementById("js29-trigger-ordinary");
+var js29BoxTrigger = document.getElementById("js29-trigger-box");
+var js29CancelBoxTrigger = document.getElementById("js29-trigger-cancel-box");
+var js29RadioTrigger = document.getElementById("js29-trigger-radio");
+var js29SubmitTrigger = document.getElementById("js29-trigger-submit");
+var js29CancelClickTrigger = document.getElementById("js29-trigger-cancel-click");
+var js29CancelSubmitTrigger = document.getElementById("js29-trigger-cancel-submit");
+var js29InputSubmitTrigger = document.getElementById("js29-trigger-input-submit");
+var js29CancelPointerTrigger = document.getElementById("js29-trigger-cancel-pointer");
+var js29AllowPointerTrigger = document.getElementById("js29-trigger-allow-pointer");
 var js29Log = "";
+var js29CancelBox = false;
+var js29CancelSubmitClick = false;
+var js29CancelSubmitEvent = false;
 function js29Record(value) {
     js29Log = js29Log + value;
     js29State.textContent = js29Log;
 }
+js29OrdinaryTrigger.addEventListener("click", function() {
+    js29Ordinary.click();
+});
+document.getElementById("js29-ordinary").addEventListener("click", function() {
+    js29Record("ordinary-click;");
+});
 js29Box.addEventListener("click", function(event) {
+    if (js29CancelBox) {
+        js29Record("box-cancel-before-" + js29Box.checked + ";");
+        event.preventDefault();
+        return;
+    }
     js29Record("box-click-before-" + js29Box.checked + ";");
 });
 js29Box.addEventListener("input", function() {
@@ -41,12 +79,54 @@ js29Box.addEventListener("change", function() {
 js29RadioB.addEventListener("click", function() {
     js29Record("radio-click-" + js29RadioA.checked + ":" + js29RadioB.checked + ";");
 });
-js29Form.addEventListener("submit", function(event) {
-    js29Record("submit-" + event.defaultPrevented + ";");
-    event.preventDefault();
+js29Submit.addEventListener("click", function(event) {
+    if (js29CancelSubmitClick) {
+        js29Record("submit-click-cancelled;");
+        event.preventDefault();
+    } else {
+        js29Record("submit-click;");
+    }
 });
-js29Submit.addEventListener("click", function() {
-    js29Record("submit-click;");
+js29Form.addEventListener("submit", function(event) {
+    js29Record("submit-" + js29CancelSubmitEvent + ";");
+    if (js29CancelSubmitEvent) event.preventDefault();
+});
+js29BoxTrigger.addEventListener("click", function() {
+    js29CancelBox = false;
+    js29Box.click();
+});
+js29CancelBoxTrigger.addEventListener("click", function() {
+    js29CancelBox = true;
+    js29Box.click();
+});
+js29RadioTrigger.addEventListener("click", function() {
+    js29RadioB.click();
+});
+js29SubmitTrigger.addEventListener("click", function() {
+    js29CancelSubmitClick = false;
+    js29CancelSubmitEvent = false;
+    js29Submit.click();
+});
+js29CancelClickTrigger.addEventListener("click", function() {
+    js29CancelSubmitClick = true;
+    js29CancelSubmitEvent = false;
+    js29Submit.click();
+});
+js29CancelSubmitTrigger.addEventListener("click", function() {
+    js29CancelSubmitClick = false;
+    js29CancelSubmitEvent = true;
+    js29Submit.click();
+});
+js29InputSubmitTrigger.addEventListener("click", function() {
+    js29CancelSubmitClick = false;
+    js29CancelSubmitEvent = false;
+    js29InputSubmit.click();
+});
+js29CancelPointerTrigger.addEventListener("click", function() {
+    js29CancelBox = true;
+});
+js29AllowPointerTrigger.addEventListener("click", function() {
+    js29CancelBox = false;
 });
 js29Plain.addEventListener("click", function() {
     js29Record("plain-click;");

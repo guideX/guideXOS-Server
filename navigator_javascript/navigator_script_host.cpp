@@ -406,6 +406,15 @@ bool NavigatorScriptHostAdapter::requestElementActivation(
     const bool dispatched = dispatchClick(runtime, serial, error,
         &clickDefaultPrevented);
     if (defaultPrevented != nullptr) *defaultPrevented = clickDefaultPrevented;
+    // A listener may perform a nested activation that navigates away.  The
+    // outer physical/programmatic trigger has then been consumed by that
+    // navigation; do not report the old target becoming stale as a second
+    // activation error to its caller.
+    if (!dispatched && generation_ != activationGeneration) {
+        error = RuntimeErrorCode::None;
+        --activationDepth_;
+        return true;
+    }
     if (dispatched && !clickDefaultPrevented &&
         generation_ == activationGeneration && document_ != nullptr &&
         isKnownElementSerial(serial) && activationDefaultActionCallback_ != nullptr) {

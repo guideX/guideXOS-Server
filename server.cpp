@@ -1658,13 +1658,21 @@ static std::string navigatorHostedSmokeDiagnostic() {
         std::string("hit=") + yesNo(js17CancelHit) + ",cancelled=" +
         yesNo(js17CancelledClick) + ",url=" +
         gxos::apps::Navigator::SmokeCurrentUrl());
+    const bool js17CleanupNavigate = gxos::apps::Navigator::SmokeNavigateToQuiet(
+        "http://127.0.0.1:8080/navigator-smoke/javascript-js17-target.html");
+    const size_t js17CleanupHandlers =
+        gxos::apps::Navigator::SmokeJavaScriptHandlerCount();
+    const size_t js17CleanupListeners =
+        gxos::apps::Navigator::SmokeJavaScriptListenerCount();
+    const std::string js17CleanupError =
+        gxos::apps::Navigator::SmokeJavaScriptLastError();
     add("JS17 hosted navigation cleanup clears listener tables",
-        gxos::apps::Navigator::SmokeNavigateToQuiet(
-            "http://127.0.0.1:8080/navigator-smoke/javascript-js17-target.html") &&
-        gxos::apps::Navigator::SmokeJavaScriptHandlerCount() == 0u &&
-        gxos::apps::Navigator::SmokeJavaScriptListenerCount() == 0u &&
-        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
-        "replacement page starts without JS17 registrations");
+        js17CleanupNavigate && js17CleanupHandlers == 0u &&
+        js17CleanupListeners == 0u && js17CleanupError.empty(),
+        std::string("navigate=") + yesNo(js17CleanupNavigate) + ",handlers=" +
+        std::to_string(js17CleanupHandlers) + ",listeners=" +
+        std::to_string(js17CleanupListeners) + ",error=" +
+        (js17CleanupError.empty() ? "none" : js17CleanupError));
 
     const bool js18Loaded = gxos::apps::Navigator::SmokeNavigateToQuiet(
         "http://127.0.0.1:8080/navigator-smoke/javascript-js18.html");
@@ -2638,6 +2646,161 @@ static std::string navigatorHostedSmokeDiagnostic() {
         gxos::apps::Navigator::SmokeJavaScriptListenerCount() == 0u &&
         gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
         "replacement page starts without JS28 registrations or errors");
+
+    const std::string js29FixtureUrl =
+        "http://127.0.0.1:8080/navigator-smoke/javascript-js29.html";
+    const bool js29Loaded = gxos::apps::Navigator::SmokeNavigateToQuiet(
+        js29FixtureUrl);
+    const std::string js29InitialText =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS29 hosted fixture loads programmatic activation controls",
+        js29Loaded && gxos::apps::Navigator::SmokeCurrentUrl() == js29FixtureUrl &&
+        contains(js29InitialText, "Navigator JavaScript JS29") &&
+        contains(js29InitialText, "Programmatic click shares cancelable native default actions") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("loaded=") + yesNo(js29Loaded) + ",url=" +
+        gxos::apps::Navigator::SmokeCurrentUrl() + ",listeners=" +
+        std::to_string(gxos::apps::Navigator::SmokeJavaScriptListenerCount()));
+
+    const bool js29OrdinaryTrigger =
+        gxos::apps::Navigator::SmokeClickFormControlById("js29-trigger-ordinary");
+    const std::string js29AfterOrdinary =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS29 ordinary element.click dispatches click",
+        js29OrdinaryTrigger && contains(js29AfterOrdinary, "ordinary-click;") &&
+        gxos::apps::Navigator::SmokeCurrentUrl() == js29FixtureUrl,
+        std::string("trigger=") + yesNo(js29OrdinaryTrigger) + ",text=" +
+        summarizeText(js29AfterOrdinary, 280));
+
+    const bool js29BoxTrigger =
+        gxos::apps::Navigator::SmokeClickFormControlById("js29-trigger-box");
+    const std::string js29AfterBox =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    const std::size_t js29BoxInputOffset =
+        js29AfterBox.find("box-input-true;");
+    const std::size_t js29BoxChangeOffset =
+        js29AfterBox.find("box-change-true;");
+    add("JS29 checkbox.click toggles and orders input before change",
+        js29BoxTrigger &&
+        gxos::apps::Navigator::SmokeFormControlCheckedById("js29-box") &&
+        contains(js29AfterBox, "box-click-before-false;") &&
+        js29BoxInputOffset != std::string::npos &&
+        js29BoxChangeOffset > js29BoxInputOffset &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("trigger=") + yesNo(js29BoxTrigger) + ",input=" +
+        std::to_string(js29BoxInputOffset) + ",change=" +
+        std::to_string(js29BoxChangeOffset));
+
+    const bool js29CancelBoxTrigger =
+        gxos::apps::Navigator::SmokeClickFormControlById("js29-trigger-cancel-box");
+    const std::string js29AfterCancelledBox =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS29 canceled checkbox.click suppresses mutation",
+        js29CancelBoxTrigger &&
+        gxos::apps::Navigator::SmokeFormControlCheckedById("js29-box") &&
+        contains(js29AfterCancelledBox, "box-cancel-before-true;") &&
+        js29AfterCancelledBox.find("box-input-false;") == std::string::npos,
+        std::string("trigger=") + yesNo(js29CancelBoxTrigger) + ",checked=" +
+        yesNo(gxos::apps::Navigator::SmokeFormControlCheckedById("js29-box")));
+
+    const bool js29RadioTrigger =
+        gxos::apps::Navigator::SmokeClickFormControlById("js29-trigger-radio");
+    const std::string js29AfterRadio =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS29 radio.click preserves group exclusivity",
+        js29RadioTrigger &&
+        !gxos::apps::Navigator::SmokeFormControlCheckedById("js29-radio-a") &&
+        gxos::apps::Navigator::SmokeFormControlCheckedById("js29-radio-b") &&
+        contains(js29AfterRadio, "radio-click-true:false;") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("trigger=") + yesNo(js29RadioTrigger) + ",a=" +
+        yesNo(gxos::apps::Navigator::SmokeFormControlCheckedById("js29-radio-a")) +
+        ",b=" + yesNo(gxos::apps::Navigator::SmokeFormControlCheckedById("js29-radio-b")));
+
+    const bool js29ResetBox =
+        gxos::apps::Navigator::SmokeClickFormControlById("js29-trigger-box");
+    const bool js29CancelPointer =
+        gxos::apps::Navigator::SmokeClickFormControlById("js29-trigger-cancel-pointer");
+    const bool js29PhysicalCancelledBox =
+        gxos::apps::Navigator::SmokeClickFormControlById("js29-box");
+    const std::string js29AfterPhysicalCancelledBox =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS29 physical checkbox activation shares click cancellation seam",
+        js29ResetBox && js29CancelPointer && js29PhysicalCancelledBox &&
+        !gxos::apps::Navigator::SmokeFormControlCheckedById("js29-box") &&
+        contains(js29AfterPhysicalCancelledBox, "box-cancel-before-false;"),
+        std::string("reset=") + yesNo(js29ResetBox) + ",cancel=" +
+        yesNo(js29CancelPointer) + ",physical=" + yesNo(js29PhysicalCancelledBox));
+
+    const bool js29PlainButton =
+        gxos::apps::Navigator::SmokeClickFormControlById("js29-plain");
+    add("JS29 type=button does not submit its containing form",
+        js29PlainButton && gxos::apps::Navigator::SmokeCurrentUrl() == js29FixtureUrl &&
+        contains(gxos::apps::Navigator::SmokeCurrentDocumentText(), "plain-click;"),
+        std::string("click=") + yesNo(js29PlainButton) + ",url=" +
+        gxos::apps::Navigator::SmokeCurrentUrl());
+
+    const bool js29ReloadForClickCancel =
+        gxos::apps::Navigator::SmokeNavigateToQuiet(js29FixtureUrl);
+    const bool js29ClickCancelTrigger =
+        gxos::apps::Navigator::SmokeClickFormControlById("js29-trigger-cancel-click");
+    const std::string js29AfterClickCancelText =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS29 click cancellation suppresses submit entirely",
+        js29ReloadForClickCancel && js29ClickCancelTrigger &&
+        gxos::apps::Navigator::SmokeCurrentUrl() == js29FixtureUrl &&
+        contains(js29AfterClickCancelText, "submit-click-cancelled;") &&
+        js29AfterClickCancelText.find("submit-") ==
+            js29AfterClickCancelText.find("submit-click-cancelled;"),
+        std::string("reload=") + yesNo(js29ReloadForClickCancel) + ",trigger=" +
+        yesNo(js29ClickCancelTrigger) + ",url=" +
+        gxos::apps::Navigator::SmokeCurrentUrl());
+
+    const bool js29ReloadForSubmitCancel =
+        gxos::apps::Navigator::SmokeNavigateToQuiet(js29FixtureUrl);
+    const bool js29SubmitCancelTrigger =
+        gxos::apps::Navigator::SmokeClickFormControlById("js29-trigger-cancel-submit");
+    const std::string js29AfterSubmitCancelText =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS29 submit cancellation suppresses only form action",
+        js29ReloadForSubmitCancel && js29SubmitCancelTrigger &&
+        gxos::apps::Navigator::SmokeCurrentUrl() == js29FixtureUrl &&
+        contains(js29AfterSubmitCancelText, "submit-click;") &&
+        contains(js29AfterSubmitCancelText, "submit-true;"),
+        std::string("reload=") + yesNo(js29ReloadForSubmitCancel) + ",trigger=" +
+        yesNo(js29SubmitCancelTrigger) + ",url=" +
+        gxos::apps::Navigator::SmokeCurrentUrl());
+
+    const bool js29ReloadForSubmit =
+        gxos::apps::Navigator::SmokeNavigateToQuiet(js29FixtureUrl);
+    const bool js29SubmitTrigger =
+        gxos::apps::Navigator::SmokeClickFormControlById("js29-trigger-submit");
+    const std::string js29SubmitUrl = gxos::apps::Navigator::SmokeCurrentUrl();
+    add("JS29 submit button click reaches JS28 form action",
+        js29ReloadForSubmit && js29SubmitTrigger &&
+        contains(js29SubmitUrl, "javascript-js29-target.html") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("reload=") + yesNo(js29ReloadForSubmit) + ",trigger=" +
+        yesNo(js29SubmitTrigger) + ",url=" + js29SubmitUrl);
+
+    const bool js29ReloadForInputSubmit =
+        gxos::apps::Navigator::SmokeNavigateToQuiet(js29FixtureUrl);
+    const bool js29InputSubmitTrigger =
+        gxos::apps::Navigator::SmokeClickFormControlById("js29-trigger-input-submit");
+    const std::string js29InputSubmitUrl = gxos::apps::Navigator::SmokeCurrentUrl();
+    add("JS29 input type=submit follows the shared activation path",
+        js29ReloadForInputSubmit && js29InputSubmitTrigger &&
+        contains(js29InputSubmitUrl, "javascript-js29-target.html") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("reload=") + yesNo(js29ReloadForInputSubmit) + ",trigger=" +
+        yesNo(js29InputSubmitTrigger) + ",url=" + js29InputSubmitUrl);
+
+    add("JS29 navigation cleanup clears activation listeners",
+        gxos::apps::Navigator::SmokeNavigateToQuiet("about:navigator") &&
+        gxos::apps::Navigator::SmokeJavaScriptHandlerCount() == 0u &&
+        gxos::apps::Navigator::SmokeJavaScriptListenerCount() == 0u &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        "replacement page starts without JS29 registrations or errors");
 
     bool cssInlineLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-inline.html");
     std::string cssInlineText = gxos::apps::Navigator::SmokeCurrentDocumentText();

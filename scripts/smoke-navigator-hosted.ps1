@@ -70,6 +70,14 @@ $tlsKey = Join-Path $Root "scripts\fixtures\navigator-smoke-localhost.key"
 $httpsArgs = @("`"$httpServer`"", "--port", "8443", "--host", "127.0.0.1", "--root", "`"$Root`"",
     "--http-port", "8080", "--tls-cert", "`"$tlsCert`"", "--tls-key", "`"$tlsKey`"")
 $httpsProc = Start-Process -FilePath $python -ArgumentList $httpsArgs -PassThru -WindowStyle Hidden -RedirectStandardOutput $httpsLog -RedirectStandardError $httpsErrLog
+Start-Sleep -Milliseconds 1500
+if ($httpProc.HasExited) {
+    throw "local HTTP smoke server exited early; see $httpLog"
+}
+if ($httpsProc.HasExited) {
+    throw "local HTTPS smoke server exited early; see $httpsLog"
+}
+
 Start-Sleep -Milliseconds 500
 if ($httpProc.HasExited) {
     throw "local HTTP smoke server exited early; see $httpLog"
