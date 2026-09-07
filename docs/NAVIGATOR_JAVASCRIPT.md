@@ -3067,7 +3067,86 @@ remains blocked by the existing Mbed TLS configuration errors in
 `third_party/mbedtls/library/mbedtls_check_config.h`; no full-kernel or QEMU
 JS26 proof is claimed.
 
-The recommended JS27 direction is to choose one bounded extension explicitly:
-either checkbox/radio/select user-value transitions, or a separately specified
-`InputEvent`/`beforeinput` and selection model. Those should not be inferred
-from JS26's generic Event contract.
+JS27 implements the first of those bounded extensions: checkbox, radio, and
+single-select state plus authentic user `input`/`change` transitions. A future
+phase may specify `InputEvent`/`beforeinput` and selection independently; those
+semantics are still not inferred from JS27's generic `Event` contract.
+
+## Phase JS27: checkbox, radio, and select form controls
+
+JS27 extends the existing JS26 form-event seam to the three discrete controls
+already parsed by Forms-lite:
+
+```javascript
+checkbox.checked = true;
+radio.checked = true;
+select.value = "two";
+```
+
+The host exposes `.checked` on checkbox and radio elements and `.value` on a
+bounded single-select. Reads return the authoritative runtime projection, so
+listeners see the same state through `event.target.checked` or
+`event.target.value` and through the element getter. Unsupported receivers,
+`<select multiple>`, unknown option values, disabled controls, and malformed
+metadata fail closed without mutating an unrelated block. Select assignment is
+an exact value match; an unknown value retains the current selection. The
+bounded select model does not add option collections, selected-index APIs,
+keyboard search, or general browser form APIs.
+
+Script assignment is deliberately silent. Boolean conversion for `.checked`
+uses the runtime's bounded primitive conversion rules, radio assignment to
+`true` unchecks matching peers, and `.value` assignment updates the selected
+option and rendered/form projections without synthesizing `input` or `change`.
+All script writes use the existing per-document mutation budget and host value
+bounds; there is no second JavaScript-side form model.
+
+Authentic pointer and Space-key activation mutate the native runtime state
+first. A changed checkbox toggle, radio selection, or single-select step then
+dispatches exactly one generic `input` followed immediately by one generic
+`change`. Both events use the existing cached Event object, bubble through the
+structural ancestor path, and are non-cancelable. The listener-visible order is
+`keydown`, state transition, `input`, `change`, `keyup` for Space activation;
+pointer activation follows the existing click path and commits the state
+before the form events. Re-selecting an already checked radio, a disabled
+control, or a select with no enabled next option emits neither event.
+
+Radio exclusivity uses the existing bounded native group rule: matching form
+ownership, fieldset ownership, and non-empty name are required. A scripted or
+user selection unchecks only matching peers, and all peer projections are
+updated before the target's event dispatch. Listener-side assignments remain
+silent and can safely perform bounded re-entrant normalization. Checkbox/radio
+`:checked` styling, accessibility metadata, form serialization projections,
+and select option selection are recomputed from the same runtime state.
+
+The JS26 generic listener registry remains the only listener store. JS27 adds
+no separate discrete-control listener list, preserves the global 64-listener
+cap, and keeps existing capture/target/bubble ordering, `once`, removal,
+`stopPropagation`, stale-document guards, and navigation cleanup unchanged.
+The implementation remains limited to the existing fixed-capacity runtime
+table and the already-supported document controls.
+
+### JS27 validation result
+
+The dedicated proof is
+`tests/navigator_javascript_js27_test.cpp`, run by
+`scripts/smoke-navigator-javascript-js27.ps1`. It covers initial checked and
+selected projections, silent script assignments, checkbox transitions, radio
+group exclusivity, re-entrant listeners, select stepping and exact-value
+assignment, input/change metadata and propagation, listener removal and
+capacity, focus redirection, and document reset. The hosted fixture is
+`navigator-smoke/javascript-js27.html`; the production aggregate performs
+real checkbox, radio, select, and Space-key activations, checks listener-visible
+ordering, verifies the script-silent marker, and confirms navigation cleanup.
+
+The focused JS27 suite reports 304 checks with 0 failures, including its
+`GXOS_BARE_METAL` and strict `-Wall -Wextra -Werror -pedantic` adapter/runtime
+compile lanes. The complete matrix contains lexer, parser, runtime, and JS6
+through JS27: all 25 suites pass. The normal native `build.bat` completes
+successfully. The hosted aggregate passes all JS27 checks and reports 416
+passed and 7 failed out of 423 checks; the seven failures remain the unrelated
+CSS baselines CSS 3C, CSS 3G, CSS 6A, three CSS 6B checks, and CSS 6C. The
+kernel retry builds the bootloader and reaches the kernel, then remains blocked
+by the existing Mbed TLS configuration errors in
+`third_party/mbedtls/library/mbedtls_check_config.h` (partial ECC acceleration
+and incomplete ECDHE-RSA prerequisites); no full-kernel or QEMU JS27 proof is
+claimed.

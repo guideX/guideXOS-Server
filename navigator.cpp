@@ -15950,6 +15950,17 @@ bool Navigator::SmokeFormControlCheckedById(const std::string& id)
 	return blockIndex >= 0 && runtimeChecked(s_currentDoc.blocks[static_cast<size_t>(blockIndex)]);
 }
 
+std::string Navigator::SmokeFormControlValueById(const std::string& id)
+{
+	const int blockIndex = findBlockById(id, false);
+	if (blockIndex < 0) return {};
+	const DocBlock& block = s_currentDoc.blocks[static_cast<size_t>(blockIndex)];
+	if (block.type != BlockType::FormSelect &&
+		block.type != BlockType::FormTextInput &&
+		block.type != BlockType::FormTextarea) return {};
+	return block.inputValue;
+}
+
 bool Navigator::SmokeFormControlDisabledById(const std::string& id)
 {
 	const int blockIndex = findBlockById(id, false);
@@ -17698,7 +17709,11 @@ bool Navigator::isRuntimeButton(const DocBlock& block)
 
 bool Navigator::isRuntimeFormControl(const DocBlock& block)
 {
-	return isRuntimeCheckable(block) || isRuntimeButton(block);
+	return isRuntimeCheckable(block) || isRuntimeButton(block) ||
+		(block.type == BlockType::FormSelect &&
+			block.formControl.metadataComplete && block.formControl.supported &&
+			block.formControl.logicalSerial != 0 &&
+			block.formControl.type == FormControlType::Select);
 }
 
 const FormRuntimeControlState* Navigator::runtimeStateForBlock(const DocBlock& block)
@@ -18250,7 +18265,7 @@ bool Navigator::smokeClickBlock(int blockIndex, bool label)
 	auto acceptableTarget = [&](HitTarget target, int index) {
 		return index == blockIndex && (label ? target == HitTarget::FormLabel :
 			(target == HitTarget::FormCheckbox || target == HitTarget::FormRadio ||
-			 target == HitTarget::FormSubmit));
+				target == HitTarget::FormSelect || target == HitTarget::FormSubmit));
 	};
 	HitTarget expected = hitTest(x, y, hitIndex);
 	if (!acceptableTarget(expected, hitIndex)) {
@@ -19342,52 +19357,113 @@ void Navigator::focusNextFormControl(bool reverse)
 	updateDisplay();
 }
 
-void Navigator::activateFormControl(int blockIndex)
+bool Navigator::activateFormControl(int blockIndex)
 {
-	if (blockIndex < 0 || blockIndex >= static_cast<int>(s_currentDoc.blocks.size())) return;
+	if (blockIndex < 0 || blockIndex >= static_cast<int>(s_currentDoc.blocks.size())) return false;
 	DocBlock& block = s_currentDoc.blocks[blockIndex];
-	if (!isRuntimeFormControl(block)) return;
+	if (!isRuntimeFormControl(block)) return false;
 	if (runtimeDisabled(block)) {
 		++s_currentDoc.formsDiagnostics.formDisabledActivationBlocks;
 		updateStatus("Disabled form control.");
-		return;
+		return false;
 	}
 	FormRuntimeControlState* state = runtimeStateForBlock(block);
-	if (!state) return; // Fail closed if bounded runtime metadata is incomplete.
+	if (!state) return false; // Fail closed if bounded runtime metadata is incomplete.
+	const std::uint64_t serial = block.formControl.logicalSerial;
+	bool changed = false;
 	if (block.type == BlockType::FormCheckbox) {
 		++state->activationCount;
 		++s_currentDoc.formsDiagnostics.formCheckboxActivations;
 		state->checked = !state->checked;
 		++s_currentDoc.formsDiagnostics.formCheckboxToggles;
+		block.checked = state->checked;
+		block.formControl.checked = state->checked;
+		for (HtmlElementRef& element : s_currentDoc.structuralElements) {
+			if (element.serial == serial) element.formControl.checked = state->checked;
+		}
+		changed = true;
 		s_focusedInputBlockIndex = blockIndex;
-		recomputeFormControlStyles();
-		updateDisplay();
-		return;
-	}
-	if (block.type == BlockType::FormRadio) {
+	} else if (block.type == BlockType::FormRadio) {
 		++state->activationCount;
 		++s_currentDoc.formsDiagnostics.formRadioActivations;
-		for (DocBlock& candidate : s_currentDoc.blocks) {
-			if (&candidate == &block || !radioGroupMatches(candidate, block)) continue;
-			FormRuntimeControlState* candidateState = runtimeStateForBlock(candidate);
-			if (candidateState && candidateState->checked) {
-				candidateState->checked = false;
-				++s_currentDoc.formsDiagnostics.formRadioGroupUnchecks;
+		if (!state->checked) {
+			for (DocBlock& candidate : s_currentDoc.blocks) {
+				if (&candidate == &block || !radioGroupMatches(candidate, block)) continue;
+				FormRuntimeControlState* candidateState = runtimeStateForBlock(candidate);
+				if (candidateState && candidateState->checked) {
+					candidateState->checked = false;
+					candidate.checked = false;
+					candidate.formControl.checked = false;
+					for (HtmlElementRef& element : s_currentDoc.structuralElements) {
+						if (element.serial == candidate.formControl.logicalSerial)
+							element.formControl.checked = false;
+					}
+					++s_currentDoc.formsDiagnostics.formRadioGroupUnchecks;
+				}
+			}
+			state->checked = true;
+			block.checked = true;
+			block.formControl.checked = true;
+			for (HtmlElementRef& element : s_currentDoc.structuralElements) {
+				if (element.serial == serial) element.formControl.checked = true;
+			}
+			changed = true;
+		}
+		s_focusedInputBlockIndex = blockIndex;
+	} else if (block.type == BlockType::FormSelect) {
+		// JS27 keeps the existing select widget bounded to one selection. A
+		// pointer/Space activation advances to the next enabled option; no
+		// popup or browser-complete keyboard model is introduced here.
+		if (!block.formControl.multiple && !block.options.empty()) {
+			const int optionCount = static_cast<int>(block.options.size());
+			const int current = block.selectedOption;
+			int next = current < 0 ? 0 : (current + 1) % optionCount;
+			bool foundEnabled = false;
+			for (int attempts = 0; attempts < optionCount; ++attempts) {
+				if (!block.options[static_cast<size_t>(next)].disabled) {
+					foundEnabled = true;
+					break;
+				}
+				next = (next + 1) % optionCount;
+			}
+			if (foundEnabled && next != current) {
+				block.selectedOption = next;
+				block.inputValue = block.options[static_cast<size_t>(next)].value;
+				block.text = block.options[static_cast<size_t>(next)].text;
+				block.formControl.selectedOptionIndex = next;
+				block.formControl.value = block.inputValue;
+				for (size_t index = 0; index < block.options.size(); ++index)
+					block.options[index].selected = static_cast<int>(index) == next;
+				for (HtmlElementRef& element : s_currentDoc.structuralElements) {
+					if (element.serial == serial) {
+						element.formControl.selectedOptionIndex = next;
+						element.formControl.value = block.inputValue;
+						break;
+					}
+				}
+				changed = true;
 			}
 		}
-		state->checked = true;
 		s_focusedInputBlockIndex = blockIndex;
-		recomputeFormControlStyles();
-		updateDisplay();
-		return;
-	}
-	if (block.type == BlockType::FormSubmit) {
+	} else if (block.type == BlockType::FormSubmit) {
 		++state->activationCount;
 		++s_currentDoc.formsDiagnostics.formButtonActivations;
 		s_focusedInputBlockIndex = blockIndex;
 		updateStatus("Button activated (session-local; no submission).");
 		storePageMetadata(s_pageMetadata, s_currentDoc);
 	}
+	if (changed) {
+		// The state transition is complete before either callback runs. Discrete
+		// controls commit immediately and never use text-edit blur bookkeeping.
+		dispatchJavaScriptInputEvent(serial);
+		dispatchJavaScriptChangeEvent(serial);
+	}
+	if (block.type == BlockType::FormCheckbox ||
+		block.type == BlockType::FormRadio || block.type == BlockType::FormSelect) {
+		recomputeFormControlStyles();
+		updateDisplay();
+	}
+	return changed;
 }
 
 void Navigator::armKeyboardActivation(int keyCode)
@@ -19421,7 +19497,8 @@ void Navigator::armKeyboardActivation(int keyCode)
 		return;
 	}
 	const bool activatable = keyCode == 32
-		? (isRuntimeCheckable(block) || isRuntimeButton(block))
+		? (isRuntimeCheckable(block) || isRuntimeButton(block) ||
+			block.type == BlockType::FormSelect)
 		: isRuntimeButton(block);
 	if (!activatable) return;
 	runtime.pressedKeyboardLogicalSerial = block.formControl.logicalSerial;
@@ -19454,7 +19531,8 @@ void Navigator::finishKeyboardActivation(int keyCode)
 	}
 	const DocBlock& block = s_currentDoc.blocks[static_cast<size_t>(blockIndex)];
 	if (runtimeDisabled(block) ||
-		(keyCode == 32 ? (!isRuntimeCheckable(block) && !isRuntimeButton(block)) : !isRuntimeButton(block))) {
+		(keyCode == 32 ? (!isRuntimeCheckable(block) && !isRuntimeButton(block) &&
+			block.type != BlockType::FormSelect) : !isRuntimeButton(block))) {
 		cancelKeyboardActivation(FormFocusCancellationReason::StateChange);
 		++s_currentDoc.formsDiagnostics.formStaleKeyActivationBlocks;
 		clearDocumentFocus(true, FormFocusCancellationReason::StateChange);
@@ -19674,9 +19752,21 @@ void Navigator::handleKeyPress(int keyCode, const std::string& action)
 		return;
 	}
 	bool javascriptDefaultPrevented = false;
-	if (action == "down" || action == "up")
+	if (action == "down")
 		dispatchJavaScriptKeyboardEvent(keyCode, action,
 			&javascriptDefaultPrevented);
+	else if (action == "up" && (keyCode == 32 || keyCode == 13)) {
+		// Discrete-control default action belongs between keydown and keyup:
+		// finish the armed native transition, emit input/change, then expose
+		// keyup. This preserves the established key listeners while making the
+		// listener-visible control state deterministic.
+		finishKeyboardActivation(keyCode);
+		dispatchJavaScriptKeyboardEvent(keyCode, action,
+			&javascriptDefaultPrevented);
+	} else if (action == "up") {
+		dispatchJavaScriptKeyboardEvent(keyCode, action,
+			&javascriptDefaultPrevented);
+	}
 	if (keyCode == 17) {
 		s_ctrlPressed = (action == "down");
 		return;
@@ -19700,10 +19790,7 @@ void Navigator::handleKeyPress(int keyCode, const std::string& action)
 		focusNextFormControl(s_shiftPressed);
 		return;
 	}
-	if (action == "up") {
-		if (keyCode == 32 || keyCode == 13) finishKeyboardActivation(keyCode);
-		return;
-	}
+	if (action == "up") return;
 	if (action != "down") return;
 
 	// --- Address bar editing mode ---

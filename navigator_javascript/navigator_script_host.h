@@ -132,6 +132,7 @@ public:
     bool beginFormEditSession(HostInstanceId serial);
     bool commitFormEditSession(HostInstanceId serial, bool& changed);
     bool setFormValueFromUser(HostInstanceId serial, const std::string& value);
+    bool setFormControlFromUser(HostInstanceId serial, bool& changed);
     bool hasClickHandler(HostInstanceId serial) const;
     std::size_t clickListenerCount() const { return clickListenerCount_; }
     // Compatibility diagnostic: the number of Elements with at least one
@@ -205,6 +206,9 @@ private:
     bool eventTypeFor(SourceView type,
         NavigatorScriptEventType& eventType) const;
     bool isTextEditableFormElement(HostInstanceId serial) const;
+    bool isDiscreteFormElement(HostInstanceId serial) const;
+    bool isCheckableFormElement(HostInstanceId serial) const;
+    bool isSelectFormElement(HostInstanceId serial) const;
     gxos::web::DocBlock* formControlBlock(HostInstanceId serial);
     const gxos::web::DocBlock* formControlBlock(HostInstanceId serial) const;
     gxos::web::FormRuntimeControlState* formRuntimeState(HostInstanceId serial);
@@ -212,6 +216,16 @@ private:
         HostInstanceId serial) const;
     HostResult setElementValue(HostInstanceId serial, const std::string& value,
         bool scriptMutation);
+    HostResult setElementChecked(HostInstanceId serial, bool checked,
+        bool scriptMutation);
+    HostResult setSelectValue(HostInstanceId serial, const std::string& value,
+        bool scriptMutation);
+    bool radioGroupMatches(const gxos::web::DocBlock& left,
+        const gxos::web::DocBlock& right) const;
+    bool updateDiscreteFormControlFromUser(HostInstanceId serial,
+        bool& changed);
+    void syncCheckableState(HostInstanceId serial, bool checked);
+    void syncSelectState(gxos::web::DocBlock& block);
     bool eventNameForKey(int keyCode, bool shiftPressed,
         std::string& key, std::string& code) const;
     HostResult callInternal(const HostObjectReference* receiver,
@@ -290,6 +304,11 @@ public:
     // then dispatches keyup.
     bool dispatchFocusedUserEdit(int keyCode, bool shiftPressed,
         RuntimeErrorCode& error, bool* defaultPrevented = nullptr);
+    // Focused discrete-control proof boundary. The transition mutates the
+    // same document state used by Navigator activation, then dispatches the
+    // generic input/change events only when the selection actually changes.
+    bool dispatchFocusedUserFormControl(RuntimeErrorCode& error,
+        bool* defaultPrevented = nullptr);
     bool relayout();
     std::uint64_t focusedElementSerial() const { return focusedElementSerial_; }
 

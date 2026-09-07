@@ -853,6 +853,7 @@ public:
 	static bool SmokeClickFormControlById(const std::string& id);
 	static bool SmokeClickFormLabelById(const std::string& id);
 	static bool SmokeFormControlCheckedById(const std::string& id);
+	static std::string SmokeFormControlValueById(const std::string& id);
 	static bool SmokeFormControlDisabledById(const std::string& id);
 	static bool SmokeFormHitTargetById(const std::string& id);
 	static int SmokeFormActivationCountById(const std::string& id);
@@ -1057,7 +1058,7 @@ private:
 	static bool ensureFocusedControlStillValid();
 	static void revealFocusedFormControl(int blockIndex);
 	static int formControlHeight(const DocBlock& block);
-	static void activateFormControl(int blockIndex);
+	static bool activateFormControl(int blockIndex);
 	static void initializeFormRuntimeState();
 	static void updateFormAccessibilityMetadata();
 	static gxos::web::FormAccessibilityRecord* accessibilityRecordForSerial(uint64_t serial);

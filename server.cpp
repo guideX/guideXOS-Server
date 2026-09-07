@@ -2417,6 +2417,121 @@ static std::string navigatorHostedSmokeDiagnostic() {
         gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
         "replacement page starts without JS26 registrations or errors");
 
+    const bool js27Loaded = gxos::apps::Navigator::SmokeNavigateToQuiet(
+        "http://127.0.0.1:8080/navigator-smoke/javascript-js27.html");
+    const std::string js27InitialText =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    const size_t js27InitialHandlers =
+        gxos::apps::Navigator::SmokeJavaScriptHandlerCount();
+    const size_t js27InitialListeners =
+        gxos::apps::Navigator::SmokeJavaScriptListenerCount();
+    const std::string js27InitialError =
+        gxos::apps::Navigator::SmokeJavaScriptLastError();
+    add("JS27 hosted fixture loads discrete-control listeners",
+        js27Loaded && contains(js27InitialText, "Navigator JavaScript JS27") &&
+        contains(js27InitialText, "script-check=false;script-select=one;events=0/0;") &&
+        js27InitialHandlers == 5u && js27InitialListeners == 12u &&
+        gxos::apps::Navigator::SmokeFormControlCheckedById("js27-script-checkbox") == false &&
+        gxos::apps::Navigator::SmokeFormControlCheckedById("js27-radio-a") &&
+        gxos::apps::Navigator::SmokeFormControlValueById("js27-select") == "one" &&
+        js27InitialError.empty(),
+        std::string("loaded=") + yesNo(js27Loaded) + ",handlers=" +
+        std::to_string(js27InitialHandlers) + ",listeners=" +
+        std::to_string(js27InitialListeners) + ",select=" +
+        gxos::apps::Navigator::SmokeFormControlValueById("js27-select") +
+        ",error=" + (js27InitialError.empty() ? "none" : js27InitialError));
+
+    const bool js27CheckboxClick =
+        gxos::apps::Navigator::SmokeClickFormControlById("js27-checkbox");
+    const std::string js27AfterCheckbox =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    const size_t js27CheckboxInputOffset =
+        js27AfterCheckbox.find("checkbox-input-true;");
+    const size_t js27CheckboxChangeOffset =
+        js27AfterCheckbox.find("checkbox-change-true;");
+    add("JS27 checkbox click mutates state and orders input before change",
+        js27CheckboxClick &&
+        gxos::apps::Navigator::SmokeFormControlCheckedById("js27-checkbox") &&
+        js27CheckboxInputOffset != std::string::npos &&
+        js27CheckboxChangeOffset > js27CheckboxInputOffset &&
+        contains(js27AfterCheckbox, "document-input-js27-checkbox;") &&
+        contains(js27AfterCheckbox, "parent-input-js27-checkbox;") &&
+        contains(js27AfterCheckbox, "parent-input-bubble-js27-checkbox;") &&
+        contains(js27AfterCheckbox, "document-change-js27-checkbox;") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("click=") + yesNo(js27CheckboxClick) + ",input=" +
+        std::to_string(js27CheckboxInputOffset) + ",change=" +
+        std::to_string(js27CheckboxChangeOffset) + ",text=" +
+        summarizeText(js27AfterCheckbox, 420));
+
+    const bool js27RadioClick =
+        gxos::apps::Navigator::SmokeClickFormControlById("js27-radio-b");
+    const std::string js27AfterRadio =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    const size_t js27RadioInputOffset =
+        js27AfterRadio.find("radio-input-false:true;");
+    const size_t js27RadioChangeOffset =
+        js27AfterRadio.find("radio-change-false:true;");
+    add("JS27 radio click enforces exclusivity before input/change",
+        js27RadioClick &&
+        !gxos::apps::Navigator::SmokeFormControlCheckedById("js27-radio-a") &&
+        gxos::apps::Navigator::SmokeFormControlCheckedById("js27-radio-b") &&
+        js27RadioInputOffset != std::string::npos &&
+        js27RadioChangeOffset > js27RadioInputOffset &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("click=") + yesNo(js27RadioClick) + ",a=" +
+        yesNo(gxos::apps::Navigator::SmokeFormControlCheckedById("js27-radio-a")) +
+        ",b=" + yesNo(gxos::apps::Navigator::SmokeFormControlCheckedById("js27-radio-b")) +
+        ",text=" + summarizeText(js27AfterRadio, 360));
+
+    const std::string js27BeforeRadioReselect =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    const bool js27RadioReselect =
+        gxos::apps::Navigator::SmokeClickFormControlById("js27-radio-b");
+    const std::string js27AfterRadioReselect =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS27 already-checked radio emits no redundant form events",
+        js27RadioReselect && js27BeforeRadioReselect == js27AfterRadioReselect &&
+        gxos::apps::Navigator::SmokeFormControlCheckedById("js27-radio-b"),
+        std::string("reselect=") + yesNo(js27RadioReselect) + ",unchanged=" +
+        yesNo(js27BeforeRadioReselect == js27AfterRadioReselect));
+
+    const bool js27SelectClick =
+        gxos::apps::Navigator::SmokeClickFormControlById("js27-select");
+    const std::string js27AfterSelect =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    const size_t js27SelectInputOffset =
+        js27AfterSelect.find("select-input-two;");
+    const size_t js27SelectChangeOffset =
+        js27AfterSelect.find("select-change-two;");
+    add("JS27 select click exposes the new value before input/change",
+        js27SelectClick &&
+        gxos::apps::Navigator::SmokeFormControlValueById("js27-select") == "two" &&
+        js27SelectInputOffset != std::string::npos &&
+        js27SelectChangeOffset > js27SelectInputOffset &&
+        gxos::apps::Navigator::SmokeFormControlValueById("js27-other-select") == "red" &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("click=") + yesNo(js27SelectClick) + ",value=" +
+        gxos::apps::Navigator::SmokeFormControlValueById("js27-select") +
+        ",text=" + summarizeText(js27AfterSelect, 360));
+
+    const bool js27KeyboardDown = gxos::apps::Navigator::SmokeKeyPress(32, "down");
+    const bool js27KeyboardUp = gxos::apps::Navigator::SmokeKeyPress(32, "up");
+    add("JS27 select keyboard activation keeps input/change path",
+        js27KeyboardDown && js27KeyboardUp &&
+        gxos::apps::Navigator::SmokeFormControlValueById("js27-select") == "three" &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("down=") + yesNo(js27KeyboardDown) + ",up=" +
+        yesNo(js27KeyboardUp) + ",select-value=" +
+        gxos::apps::Navigator::SmokeFormControlValueById("js27-select"));
+
+    add("JS27 navigation cleanup clears discrete-control listeners",
+        gxos::apps::Navigator::SmokeNavigateToQuiet("about:navigator") &&
+        gxos::apps::Navigator::SmokeJavaScriptHandlerCount() == 0u &&
+        gxos::apps::Navigator::SmokeJavaScriptListenerCount() == 0u &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        "replacement page starts without JS27 registrations or errors");
+
     bool cssInlineLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-inline.html");
     std::string cssInlineText = gxos::apps::Navigator::SmokeCurrentDocumentText();
     std::string cssInlineReport = gxos::apps::Navigator::SmokeRuntimeReport();

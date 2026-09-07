@@ -441,7 +441,8 @@ bool NavigatorScriptHostAdapter::dispatchInputEvent(
     RuntimeContext& runtime, HostInstanceId targetSerial,
     RuntimeErrorCode& error, bool* defaultPrevented)
 {
-    if (!isTextEditableFormElement(targetSerial)) {
+    if (!isTextEditableFormElement(targetSerial) &&
+        !isDiscreteFormElement(targetSerial)) {
         error = RuntimeErrorCode::StaleHostObject;
         if (defaultPrevented != nullptr) *defaultPrevented = false;
         return false;
@@ -457,7 +458,8 @@ bool NavigatorScriptHostAdapter::dispatchChangeEvent(
     RuntimeContext& runtime, HostInstanceId targetSerial,
     RuntimeErrorCode& error, bool* defaultPrevented)
 {
-    if (!isTextEditableFormElement(targetSerial)) {
+    if (!isTextEditableFormElement(targetSerial) &&
+        !isDiscreteFormElement(targetSerial)) {
         error = RuntimeErrorCode::StaleHostObject;
         if (defaultPrevented != nullptr) *defaultPrevented = false;
         return false;
@@ -499,6 +501,12 @@ bool NavigatorScriptHostAdapter::setFormValueFromUser(
     HostInstanceId serial, const std::string& value)
 {
     return setElementValue(serial, value, false).succeeded();
+}
+
+bool NavigatorScriptHostAdapter::setFormControlFromUser(
+    HostInstanceId serial, bool& changed)
+{
+    return updateDiscreteFormControlFromUser(serial, changed);
 }
 
 bool NavigatorScriptHostAdapter::dispatchEvent(RuntimeContext& runtime,
@@ -827,13 +835,41 @@ bool NavigatorScriptHostAdapter::isTextEditableFormElement(
         block->type == gxos::web::BlockType::FormTextarea;
 }
 
+bool NavigatorScriptHostAdapter::isCheckableFormElement(
+    HostInstanceId serial) const
+{
+    const gxos::web::DocBlock* block = formControlBlock(serial);
+    if (block == nullptr || !block->formControl.metadataComplete ||
+        !block->formControl.supported) return false;
+    return block->type == gxos::web::BlockType::FormCheckbox ||
+        block->type == gxos::web::BlockType::FormRadio;
+}
+
+bool NavigatorScriptHostAdapter::isSelectFormElement(
+    HostInstanceId serial) const
+{
+    const gxos::web::DocBlock* block = formControlBlock(serial);
+    return block != nullptr && block->formControl.metadataComplete &&
+        block->formControl.supported &&
+        block->type == gxos::web::BlockType::FormSelect;
+}
+
+bool NavigatorScriptHostAdapter::isDiscreteFormElement(
+    HostInstanceId serial) const
+{
+    return isCheckableFormElement(serial) || isSelectFormElement(serial);
+}
+
 gxos::web::DocBlock* NavigatorScriptHostAdapter::formControlBlock(
     HostInstanceId serial)
 {
     if (document_ == nullptr || serial == 0) return nullptr;
     for (gxos::web::DocBlock& block : document_->blocks) {
         if ((block.type == gxos::web::BlockType::FormTextInput ||
-                block.type == gxos::web::BlockType::FormTextarea) &&
+                block.type == gxos::web::BlockType::FormTextarea ||
+                block.type == gxos::web::BlockType::FormCheckbox ||
+                block.type == gxos::web::BlockType::FormRadio ||
+                block.type == gxos::web::BlockType::FormSelect) &&
             block.formControl.logicalSerial == serial)
             return &block;
     }
@@ -846,7 +882,10 @@ const gxos::web::DocBlock* NavigatorScriptHostAdapter::formControlBlock(
     if (document_ == nullptr || serial == 0) return nullptr;
     for (const gxos::web::DocBlock& block : document_->blocks) {
         if ((block.type == gxos::web::BlockType::FormTextInput ||
-                block.type == gxos::web::BlockType::FormTextarea) &&
+                block.type == gxos::web::BlockType::FormTextarea ||
+                block.type == gxos::web::BlockType::FormCheckbox ||
+                block.type == gxos::web::BlockType::FormRadio ||
+                block.type == gxos::web::BlockType::FormSelect) &&
             block.formControl.logicalSerial == serial)
             return &block;
     }
@@ -907,6 +946,178 @@ HostResult NavigatorScriptHostAdapter::setElementValue(
     document_->layoutDirty = true;
     if (scriptMutation) ++document_->scriptMutationCount;
     return HostResult();
+}
+
+void NavigatorScriptHostAdapter::syncCheckableState(
+    HostInstanceId serial, bool checked)
+{
+    if (document_ == nullptr) return;
+    for (gxos::web::DocBlock& block : document_->blocks) {
+        if (block.formControl.logicalSerial != serial) continue;
+        block.checked = checked;
+        block.formControl.checked = checked;
+    }
+    for (gxos::web::HtmlElementRef& element : document_->structuralElements) {
+        if (element.serial != serial) continue;
+        element.formControl.checked = checked;
+    }
+}
+
+void NavigatorScriptHostAdapter::syncSelectState(gxos::web::DocBlock& block)
+{
+    block.formControl.selectedOptionIndex = block.selectedOption;
+    block.formControl.value = block.inputValue;
+    for (std::size_t index = 0; index < block.options.size(); ++index)
+        block.options[index].selected =
+            static_cast<int>(index) == block.selectedOption;
+    if (document_ == nullptr) return;
+    for (gxos::web::HtmlElementRef& element : document_->structuralElements) {
+        if (element.serial != block.formControl.logicalSerial) continue;
+        element.formControl.selectedOptionIndex = block.selectedOption;
+        element.formControl.value = block.inputValue;
+        break;
+    }
+}
+
+bool NavigatorScriptHostAdapter::radioGroupMatches(
+    const gxos::web::DocBlock& left, const gxos::web::DocBlock& right) const
+{
+    if (left.type != gxos::web::BlockType::FormRadio ||
+        right.type != gxos::web::BlockType::FormRadio) return false;
+    if (left.formControl.name.empty() || right.formControl.name.empty())
+        return left.formControl.logicalSerial == right.formControl.logicalSerial;
+    if (left.formIndex >= 0 || right.formIndex >= 0)
+        return left.formIndex >= 0 && right.formIndex == left.formIndex &&
+            left.formControl.name == right.formControl.name;
+    if (left.formControl.parentFormSerial != 0 ||
+        right.formControl.parentFormSerial != 0)
+        return left.formControl.parentFormSerial != 0 &&
+            right.formControl.parentFormSerial == left.formControl.parentFormSerial &&
+            left.formControl.name == right.formControl.name;
+    if (left.formControl.parentFieldsetSerial != 0 ||
+        right.formControl.parentFieldsetSerial != 0)
+        return left.formControl.parentFieldsetSerial != 0 &&
+            right.formControl.parentFieldsetSerial == left.formControl.parentFieldsetSerial &&
+            left.formControl.name == right.formControl.name;
+    return left.formControl.name == right.formControl.name;
+}
+
+HostResult NavigatorScriptHostAdapter::setElementChecked(
+    HostInstanceId serial, bool checked, bool scriptMutation)
+{
+    if (document_ == nullptr || !isCheckableFormElement(serial))
+        return HostResult{HostResultCode::PropertyWriteFailed};
+    if (scriptMutation && document_->scriptMutationCount >=
+        limits_.maxDocumentMutations)
+        return HostResult{HostResultCode::DocumentMutationLimitExceeded};
+
+    gxos::web::DocBlock* block = formControlBlock(serial);
+    gxos::web::FormRuntimeControlState* state = formRuntimeState(serial);
+    if (block == nullptr || state == nullptr)
+        return HostResult{HostResultCode::PropertyWriteFailed};
+
+    if (block->type == gxos::web::BlockType::FormRadio && checked) {
+        for (gxos::web::DocBlock& candidate : document_->blocks) {
+            if (&candidate == block || !radioGroupMatches(candidate, *block)) continue;
+            gxos::web::FormRuntimeControlState* candidateState =
+                formRuntimeState(candidate.formControl.logicalSerial);
+            if (candidateState != nullptr) candidateState->checked = false;
+            syncCheckableState(candidate.formControl.logicalSerial, false);
+        }
+    }
+    state->checked = checked;
+    syncCheckableState(serial, checked);
+    document_->layoutDirty = true;
+    if (scriptMutation) ++document_->scriptMutationCount;
+    return HostResult();
+}
+
+HostResult NavigatorScriptHostAdapter::setSelectValue(
+    HostInstanceId serial, const std::string& value, bool scriptMutation)
+{
+    if (document_ == nullptr || !isSelectFormElement(serial))
+        return HostResult{HostResultCode::PropertyWriteFailed};
+    if (value.size() > kNavigatorScriptMaxFormValueBytes)
+        return HostResult{HostResultCode::DocumentTextLimitExceeded};
+    if (scriptMutation && document_->scriptMutationCount >=
+        limits_.maxDocumentMutations)
+        return HostResult{HostResultCode::DocumentMutationLimitExceeded};
+
+    gxos::web::DocBlock* block = formControlBlock(serial);
+    if (block == nullptr) return HostResult{HostResultCode::PropertyWriteFailed};
+    if (block->formControl.multiple) {
+        // JS27 is deliberately single-select only. A multiple select keeps
+        // its existing native state and safely ignores this bounded setter.
+        if (scriptMutation) ++document_->scriptMutationCount;
+        return HostResult();
+    }
+    int match = -1;
+    for (int index = 0; index < static_cast<int>(block->options.size()); ++index) {
+        if (block->options[static_cast<std::size_t>(index)].value == value) {
+            match = index;
+            break;
+        }
+    }
+    if (match >= 0 && match != block->selectedOption) {
+        block->selectedOption = match;
+        block->inputValue = value;
+        block->text = block->options[static_cast<std::size_t>(match)].text;
+        syncSelectState(*block);
+        document_->layoutDirty = true;
+    }
+    if (scriptMutation) ++document_->scriptMutationCount;
+    return HostResult();
+}
+
+bool NavigatorScriptHostAdapter::updateDiscreteFormControlFromUser(
+    HostInstanceId serial, bool& changed)
+{
+    changed = false;
+    if (document_ == nullptr || !isDiscreteFormElement(serial)) return false;
+    gxos::web::DocBlock* block = formControlBlock(serial);
+    gxos::web::FormRuntimeControlState* state = formRuntimeState(serial);
+    if (block == nullptr || state == nullptr || state->disabled ||
+        block->formControl.disabled) return false;
+
+    if (block->type == gxos::web::BlockType::FormCheckbox) {
+        state->checked = !state->checked;
+        syncCheckableState(serial, state->checked);
+        changed = true;
+    } else if (block->type == gxos::web::BlockType::FormRadio) {
+        if (state->checked) return true;
+        for (gxos::web::DocBlock& candidate : document_->blocks) {
+            if (&candidate == block || !radioGroupMatches(candidate, *block)) continue;
+            if (gxos::web::FormRuntimeControlState* candidateState =
+                    formRuntimeState(candidate.formControl.logicalSerial)) {
+                candidateState->checked = false;
+                syncCheckableState(candidate.formControl.logicalSerial, false);
+            }
+        }
+        state->checked = true;
+        syncCheckableState(serial, true);
+        changed = true;
+    } else if (block->type == gxos::web::BlockType::FormSelect) {
+        if (block->formControl.multiple || block->options.empty()) return true;
+        const int optionCount = static_cast<int>(block->options.size());
+        const int current = block->selectedOption;
+        int next = current < 0 ? 0 : (current + 1) % optionCount;
+        bool foundEnabled = false;
+        for (int checked = 0; checked < optionCount; ++checked) {
+            if (!block->options[static_cast<std::size_t>(next)].disabled) {
+                foundEnabled = true;
+                break;
+            }
+            next = (next + 1) % optionCount;
+        }
+        if (!foundEnabled || next == current) return true;
+        block->selectedOption = next;
+        block->inputValue = block->options[static_cast<std::size_t>(next)].value;
+        block->text = block->options[static_cast<std::size_t>(next)].text;
+        syncSelectState(*block);
+        document_->layoutDirty = true;
+        changed = true;
+    }
+    return true;
 }
 
 bool NavigatorScriptHostAdapter::eventNameForKey(int keyCode,
@@ -1055,10 +1266,20 @@ HostResult NavigatorScriptHostAdapter::getProperty(
     }
     if (textEquals(property, "value")) {
         const gxos::web::DocBlock* block = formControlBlock(element->serial);
-        if (block == nullptr || !isTextEditableFormElement(element->serial))
+        if (block == nullptr || (!isTextEditableFormElement(element->serial) &&
+                !isSelectFormElement(element->serial)))
             return HostResult{HostResultCode::PropertyNotFound};
         result = HostValue::string(SourceView(block->inputValue.data(),
             block->inputValue.size()));
+        return HostResult();
+    }
+    if (textEquals(property, "checked")) {
+        if (!isCheckableFormElement(element->serial))
+            return HostResult{HostResultCode::PropertyNotFound};
+        const gxos::web::FormRuntimeControlState* state =
+            formRuntimeState(element->serial);
+        if (state == nullptr) return HostResult{HostResultCode::StaleObject};
+        result = HostValue::boolean(state->checked);
         return HostResult();
     }
     if (textEquals(property, "onclick")) {
@@ -1304,7 +1525,33 @@ HostResult NavigatorScriptHostAdapter::setProperty(
         std::string text;
         const HostResult conversion = convertTextValue(value, text);
         if (!conversion.succeeded()) return conversion;
+        if (isSelectFormElement(object.instanceId))
+            return setSelectValue(object.instanceId, text, true);
         return setElementValue(object.instanceId, text, true);
+    }
+    if (textEquals(property, "checked")) {
+        if (!isCheckableFormElement(object.instanceId))
+            return HostResult{HostResultCode::PropertyWriteFailed};
+        bool checked = false;
+        switch (value.type) {
+        case HostValueType::Boolean:
+            checked = value.booleanValue;
+            break;
+        case HostValueType::Number:
+            checked = value.numberValue != 0.0 && !std::isnan(value.numberValue);
+            break;
+        case HostValueType::String:
+            checked = value.stringValue.length != 0;
+            break;
+        case HostValueType::Null:
+        case HostValueType::Undefined:
+            checked = false;
+            break;
+        default:
+            checked = true;
+            break;
+        }
+        return setElementChecked(object.instanceId, checked, true);
     }
     if (textEquals(property, "onclick")) {
         const bool hadAnyHandler = hasAnyEventHandler(
@@ -1663,6 +1910,8 @@ bool NavigatorScriptExecutionHarness::loadParsedDocument(
         state.type = metadata.type;
         state.parentFormSerial = metadata.parentFormSerial;
         state.parentFieldsetSerial = metadata.parentFieldsetSerial;
+        state.checked = metadata.checked;
+        state.initialChecked = metadata.checked;
         state.disabled = metadata.disabled;
         state.metadataValid = true;
     }
@@ -1973,6 +2222,29 @@ bool NavigatorScriptExecutionHarness::dispatchFocusedUserEdit(
     const std::uint64_t keyupTarget = focusedElementSerial_;
     return adapter_.dispatchKeyboardEvent(runtime_, keyupTarget, keyCode,
         false, shiftPressed, error, nullptr);
+}
+
+bool NavigatorScriptExecutionHarness::dispatchFocusedUserFormControl(
+    RuntimeErrorCode& error, bool* defaultPrevented)
+{
+    error = RuntimeErrorCode::None;
+    if (!loaded_ || focusedElementSerial_ == 0) {
+        error = RuntimeErrorCode::StaleHostObject;
+        if (defaultPrevented != nullptr) *defaultPrevented = false;
+        return false;
+    }
+    if (defaultPrevented != nullptr) *defaultPrevented = false;
+    bool changed = false;
+    if (!adapter_.setFormControlFromUser(focusedElementSerial_, changed)) {
+        error = RuntimeErrorCode::StaleHostObject;
+        return false;
+    }
+    if (!changed) return true;
+    if (!adapter_.dispatchInputEvent(runtime_, focusedElementSerial_, error))
+        return false;
+    if (!adapter_.dispatchChangeEvent(runtime_, focusedElementSerial_, error))
+        return false;
+    return true;
 }
 
 bool NavigatorScriptExecutionHarness::relayout()

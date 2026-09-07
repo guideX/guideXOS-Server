@@ -6764,8 +6764,18 @@ static void handleOpenTag(ParserState& st, const std::string& tagBody)
 		elementRef.formControl.required = st.currentSelectRequired;
 		elementRef.formControl.multiple = st.currentSelectMultiple;
 		elementRef.formControl.size = st.currentSelectSize;
-		if (pushElement(st, elementRef) && !st.openElements.empty())
+		if (pushElement(st, elementRef) && !st.openElements.empty()) {
 			st.currentSelectSerial = st.openElements.back().serial;
+			// The serial is assigned by pushElement. Keep the structural
+			// metadata as complete as the eventual rendered select block so
+			// focus and host-property validation see the same control.
+			st.openElements.back().formControl.metadataComplete =
+				st.uncapturedOpenElementDepth == 0;
+			if (HtmlElementRef* stored = findStructuralElement(st,
+				st.openElements.back().serial))
+				stored->formControl.metadataComplete =
+					st.openElements.back().formControl.metadataComplete;
+		}
 		++st.doc.formsDiagnostics.htmlSelectsParsed;
 		activateCurrentBlock(st);
 		st.open = OpenTag::None;

@@ -1,0 +1,96 @@
+<!doctype html>
+<html>
+<head><title>Navigator JavaScript JS27</title></head>
+<body>
+<h1>Navigator JavaScript JS27</h1>
+<p>Discrete controls expose native checked/value state and immediate input/change transitions.</p>
+<div id="js27-root">
+  <div id="js27-parent">
+    <input id="js27-script-checkbox" type="checkbox" name="script-check" value="yes">
+    <input id="js27-checkbox" type="checkbox" name="enabled" value="yes">
+    <input id="js27-radio-a" type="radio" name="mode" value="a" checked>
+    <input id="js27-radio-b" type="radio" name="mode" value="b">
+    <select id="js27-select" name="mode-select">
+      <option value="one" selected>One</option>
+      <option value="two">Two</option>
+      <option value="three">Three</option>
+    </select>
+    <select id="js27-other-select" name="other-select">
+      <option value="red" selected>Red</option>
+      <option value="blue">Blue</option>
+    </select>
+    <input id="js27-focus-target" type="text" value="">
+  </div>
+</div>
+<p id="js27-state">initial</p>
+<script>
+var js27State = document.getElementById("js27-state");
+var js27Parent = document.getElementById("js27-parent");
+var js27ScriptCheckbox = document.getElementById("js27-script-checkbox");
+var js27Checkbox = document.getElementById("js27-checkbox");
+var js27RadioA = document.getElementById("js27-radio-a");
+var js27RadioB = document.getElementById("js27-radio-b");
+var js27Select = document.getElementById("js27-select");
+var js27OtherSelect = document.getElementById("js27-other-select");
+var js27Log = "";
+var js27Inputs = 0;
+var js27Changes = 0;
+function js27Record(value) {
+    js27Log = js27Log + value;
+    js27State.textContent = js27Log;
+}
+document.addEventListener("input", function(event) {
+    js27Record("document-input-" + event.target.id + ";");
+}, true);
+js27Parent.addEventListener("input", function(event) {
+    js27Record("parent-input-" + event.target.id + ";");
+}, true);
+js27Parent.addEventListener("input", function(event) {
+    js27Record("parent-input-bubble-" + event.target.id + ";");
+});
+document.addEventListener("change", function(event) {
+    js27Record("document-change-" + event.target.id + ";");
+}, true);
+js27Parent.addEventListener("change", function(event) {
+    js27Record("parent-change-" + event.target.id + ";");
+}, true);
+js27Parent.addEventListener("change", function(event) {
+    js27Record("parent-change-bubble-" + event.target.id + ";");
+});
+js27Checkbox.addEventListener("input", function(event) {
+    js27Inputs = js27Inputs + 1;
+    js27Record("checkbox-input-" + js27Checkbox.checked + ";");
+});
+js27Checkbox.addEventListener("change", function(event) {
+    js27Changes = js27Changes + 1;
+    js27Record("checkbox-change-" + js27Checkbox.checked + ";");
+});
+js27RadioB.addEventListener("input", function(event) {
+    js27Inputs = js27Inputs + 1;
+    js27Record("radio-input-" + js27RadioA.checked + ":" + js27RadioB.checked + ";");
+});
+js27RadioB.addEventListener("change", function(event) {
+    js27Changes = js27Changes + 1;
+    js27Record("radio-change-" + js27RadioA.checked + ":" + js27RadioB.checked + ";");
+});
+js27Select.addEventListener("input", function(event) {
+    js27Inputs = js27Inputs + 1;
+    js27Record("select-input-" + js27Select.value + ";");
+});
+js27Select.addEventListener("change", function(event) {
+    js27Changes = js27Changes + 1;
+    js27Record("select-change-" + js27Select.value + ";");
+});
+
+// Scripted state changes are intentionally silent. The final values provide
+// hosted evidence that the normal host setters, not a JS-only cache, ran.
+js27ScriptCheckbox.checked = true;
+js27ScriptCheckbox.checked = false;
+js27Select.value = "two";
+js27Select.value = "one";
+js27Record("script-check=" + js27ScriptCheckbox.checked + ";script-select=" +
+    js27Select.value + ";events=" + js27Inputs + "/" + js27Changes + ";");
+js27Checkbox.focus();
+</script>
+</body>
+</html>
