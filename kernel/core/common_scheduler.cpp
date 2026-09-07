@@ -138,6 +138,7 @@ Task* create_task(uint32_t id, const char* name, kernel::arch::thread_entry_t en
     Task* task = &s_tasks[s_task_count];
     uint64_t stack_base = 0;
     s_config.allocate_pages(s_config.stack_pages, &stack_base);
+    if (stack_base == 0 || (stack_base & UINT64_C(0xfff)) != 0) return 0;
     uint64_t stack_end = 0;
     if (!gxos_scheduler_add_u64(stack_base, stack_size, &stack_end) ||
         stack_end < UINT64_C(0x10) ||
@@ -201,6 +202,11 @@ bool reset_task(Task* task, kernel::arch::thread_entry_t entry, void* argument, 
 void set_phase(Phase phase)
 {
     s_phase = phase;
+    // Each bounded phase starts a fresh round-robin walk.  Carrying the
+    // cooperative cursor into preemption can select a newly enabled service
+    // task as the very first exception-return destination instead of entering
+    // the normal preemptive worker context.
+    s_round_robin_cursor = 0;
 }
 
 void set_completion_task(Task* task)

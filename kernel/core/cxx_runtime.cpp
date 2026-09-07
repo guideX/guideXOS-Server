@@ -489,6 +489,27 @@ namespace {
             merge_with_next(block);
         }
     }
+
+    void* kernel_alloc_aligned(size_t size, size_t alignment)
+    {
+        if (alignment < KERNEL_HEAP_ALIGNMENT ||
+            (alignment & (alignment - 1)) != 0 ||
+            size > static_cast<size_t>(-1) - alignment - sizeof(void*)) return nullptr;
+        const size_t requested = size + alignment + sizeof(void*);
+        void* raw = kernel_alloc(requested);
+        if (!raw) return nullptr;
+        const uintptr_t rawAddress = reinterpret_cast<uintptr_t>(raw) + sizeof(void*);
+        const uintptr_t alignedAddress =
+            (rawAddress + alignment - 1) & ~(static_cast<uintptr_t>(alignment) - 1);
+        reinterpret_cast<void**>(alignedAddress)[-1] = raw;
+        return reinterpret_cast<void*>(alignedAddress);
+    }
+
+    void kernel_free_aligned(void* ptr)
+    {
+        if (!ptr) return;
+        kernel_free(reinterpret_cast<void**>(ptr)[-1]);
+    }
 }
 
 // ============================================================================
@@ -566,6 +587,16 @@ extern "C" size_t gxos_kernel_heap_largest_free_bytes()
         }
     }
     return largest;
+}
+
+extern "C" void* gxos_kernel_heap_alloc_aligned(size_t size, size_t alignment)
+{
+    return kernel_alloc_aligned(size, alignment);
+}
+
+extern "C" void gxos_kernel_heap_free_aligned(void* ptr)
+{
+    kernel_free_aligned(ptr);
 }
 
 // GCC emits references to __dso_handle for static object destruction

@@ -3,12 +3,18 @@
 #include "phase3_timer.h"
 #include "../../../aarch64/phase2/phase2_platform.h"
 #include "../../../kernel/core/include/kernel/common_scheduler.h"
+#if defined(GXOS_AARCH64_PHASE4)
+#include "../../../kernel/core/include/kernel/irq_registry.h"
+#endif
 
 extern "C" uint32_t phase3_irq_acknowledge();
 extern "C" void phase3_irq_complete(uint32_t acknowledgement);
 extern "C" uint32_t phase3_irq_id(uint32_t acknowledgement);
 extern "C" void phase3_serial_print(const char* text);
 extern "C" void phase3_serial_hex(uint64_t value);
+#if defined(GXOS_AARCH64_PHASE4)
+extern "C" void* phase4_irq_dispatch(uint32_t irq, void* frame);
+#endif
 
 namespace {
 
@@ -55,7 +61,12 @@ static void fatal(const char* reason)
     phase3_serial_hex(read_far());
     phase3_serial_print(" SP=");
     phase3_serial_hex(read_sp());
-    phase3_serial_print("\n[guideXOS] AARCH64_PHASE3_ERROR\n");
+    phase3_serial_print("\n[guideXOS] ");
+#if defined(GXOS_AARCH64_PHASE4)
+    phase3_serial_print("AARCH64_PHASE4_ERROR\n");
+#else
+    phase3_serial_print("AARCH64_PHASE3_ERROR\n");
+#endif
     for (;;) __asm__ volatile("wfi");
 }
 
@@ -79,10 +90,14 @@ extern "C" void* phase3_exception_dispatch(uint64_t* frame, uint64_t vector_clas
             phase3_serial_print("\n");
             fatal("unexpected timer/IRQ");
         }
-        // Rearm before selecting the next task.  IRQs remain masked until the
-        // exception-return path restores the selected task's SPSR.
+        // The Phase-4 path routes timer policy through the common registry;
+        // Phase 3 retains its direct, already-validated semantics.
+#if defined(GXOS_AARCH64_PHASE4)
+        void* next = phase4_irq_dispatch(irq, frame);
+#else
         phase3_timer_ack_and_rearm();
         void* next = kernel::scheduler::timer_interrupt(frame);
+#endif
         phase3_irq_complete(acknowledgement);
         return next;
     }

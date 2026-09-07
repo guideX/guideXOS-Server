@@ -210,16 +210,11 @@ an SMP/per-CPU scheduler.  The ARM64 proof still uses identity-mapped Phase-2
 tables, the Phase-2 physical allocator, polled PL011 output, GICv2 Group-0,
 and the QEMU `virt` platform.
 
-Recommended exact AARCH64-4 scope:
+AARCH64-4 is implemented in `AARCH64_PHASE4_MEMORY_VFS.md`.  It introduces the
+common UEFI/ramdisk boot resources, production common physical allocator,
+aligned common heap entry points, loader-supplied FAT/VFS proof, generic IRQ
+registry, and the combined preemption/filesystem durability workload while
+retaining this Phase-3 architecture contract.
 
-1. Introduce the common kernel handoff for the full UEFI memory map and
-   ramdisk while retaining the Phase-3 architecture contract.
-2. Replace the bounded page allocator callback with the common physical
-   allocator and add stack/task teardown ownership.
-3. Add architecture-neutral block/VFS interfaces and an ARM64 virt storage
-   path; mount the ramdisk and prove file read/write.
-4. Preserve the tested GICv2 timer/preemption path while adding generic IRQ
-   registration and task sleep/wake only as required by the filesystem path.
-
-GICv3, SMP, userspace, demand paging, networking, NativeElf, and desktop
-integration remain later work.
+The next phase can address framebuffer/input, GICv3, SMP/per-CPU scheduling,
+userspace, demand paging, networking, NativeElf, and desktop integration.

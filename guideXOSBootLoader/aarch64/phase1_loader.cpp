@@ -8,7 +8,22 @@
 #include "../Uefi.h"
 #include "../Protocol/LoadedImage.h"
 #include "../Protocol/SimpleFileSystem.h"
-#ifdef GXOS_AARCH64_PHASE2
+#ifdef GXOS_AARCH64_PHASE4
+#include "../../aarch64/phase4/phase4_contract.h"
+using Aarch64Handoff = gxos_aarch64_phase4_handoff;
+#define GXOS_AARCH64_HANDOFF_MAGIC GXOS_AARCH64_PHASE4_HANDOFF_MAGIC
+#define GXOS_AARCH64_HANDOFF_VERSION GXOS_AARCH64_PHASE4_HANDOFF_VERSION
+#define GXOS_AARCH64_KERNEL_LOAD_ADDRESS GXOS_AARCH64_PHASE4_KERNEL_LOAD_ADDRESS
+#define GXOS_AARCH64_UART_BASE GXOS_AARCH64_PHASE4_UART_FALLBACK
+#define GXOS_AARCH64_FLAG_EBS_COMPLETE GXOS_AARCH64_PHASE4_FLAG_EBS_COMPLETE
+#define GXOS_AARCH64_FLAG_IDENTITY_LOAD GXOS_AARCH64_PHASE4_FLAG_IDENTITY_LOAD
+#define GXOS_AARCH64_FLAG_MMU_OFF_ON_ENTRY GXOS_AARCH64_PHASE4_FLAG_MMU_OFF_ON_ENTRY
+#define GXOS_AARCH64_FLAG_STACK_ALLOCATED GXOS_AARCH64_PHASE4_FLAG_STACK_ALLOCATED
+#define GXOS_AARCH64_FLAG_MEMORY_MAP_VALID GXOS_AARCH64_PHASE4_FLAG_MEMORY_MAP_VALID
+#define GXOS_AARCH64_FLAG_DTB_VALID GXOS_AARCH64_PHASE4_FLAG_DTB_VALID
+#define GXOS_AARCH64_FLAG_DTB_COPIED GXOS_AARCH64_PHASE4_FLAG_DTB_COPIED
+#define GXOS_AARCH64_FLAG_RAMDISK_VALID GXOS_AARCH64_PHASE4_FLAG_RAMDISK_VALID
+#elif defined(GXOS_AARCH64_PHASE2)
 #include "../../aarch64/phase2/phase2_contract.h"
 using Aarch64Handoff = gxos_aarch64_phase2_handoff;
 #define GXOS_AARCH64_HANDOFF_MAGIC GXOS_AARCH64_PHASE2_HANDOFF_MAGIC
@@ -104,7 +119,7 @@ static const EFI_GUID kSimpleFileSystemProtocolGuid =
 static const EFI_GUID kFileInfoGuid =
     { 0x09576e92, 0x6d3f, 0x11d2, { 0x8e, 0x39, 0x00, 0xa0, 0xc9, 0x69, 0x72, 0x3b } };
 
-#ifdef GXOS_AARCH64_PHASE2
+#if defined(GXOS_AARCH64_PHASE2) || defined(GXOS_AARCH64_PHASE4)
 // EFI_DTB_TABLE_GUID from the UEFI Device Tree Configuration Table protocol.
 static const EFI_GUID kDtbTableGuid =
     { 0xb1b621d5, 0xf19c, 0x41a5, { 0x83, 0x0b, 0xd9, 0x15, 0x2c, 0x69, 0xaa, 0xe0 } };
@@ -257,6 +272,37 @@ static EFI_STATUS open_kernel(EFI_HANDLE imageHandle, EFI_FILE_PROTOCOL** root, 
     if (EFI_ERROR(status) || !*kernel) return fail("kernel.elf not found");
     return EFI_SUCCESS;
 }
+
+#if defined(GXOS_AARCH64_PHASE4)
+static EFI_STATUS open_ramdisk(EFI_HANDLE imageHandle, EFI_FILE_PROTOCOL** root,
+                                EFI_FILE_PROTOCOL** ramdisk)
+{
+    if (!gSystemTable || !gSystemTable->BootServices || !root || !ramdisk) {
+        return EFI_INVALID_PARAMETER;
+    }
+    *root = nullptr;
+    *ramdisk = nullptr;
+
+    EFI_LOADED_IMAGE_PROTOCOL* loadedImage = nullptr;
+    EFI_STATUS status = gSystemTable->BootServices->HandleProtocol(
+        imageHandle, (EFI_GUID*)&kLoadedImageProtocolGuid, (VOID**)&loadedImage);
+    if (EFI_ERROR(status) || !loadedImage) return fail("loaded-image protocol unavailable");
+
+    EFI_SIMPLE_FILE_SYSTEM_PROTOCOL* fileSystem = nullptr;
+    status = gSystemTable->BootServices->HandleProtocol(
+        loadedImage->DeviceHandle, (EFI_GUID*)&kSimpleFileSystemProtocolGuid, (VOID**)&fileSystem);
+    if (EFI_ERROR(status) || !fileSystem || !fileSystem->OpenVolume) {
+        return fail("simple-file-system protocol unavailable");
+    }
+    status = fileSystem->OpenVolume(fileSystem, root);
+    if (EFI_ERROR(status) || !*root) return fail("could not reopen ESP root for ramdisk");
+
+    static const CHAR16 ramdiskName[] = { 'r','a','m','d','i','s','k','.', 'i','m','g', 0 };
+    status = (*root)->Open(*root, ramdisk, (CHAR16*)ramdiskName, EFI_FILE_MODE_READ, 0);
+    if (EFI_ERROR(status) || !*ramdisk) return fail("ramdisk.img not found");
+    return EFI_SUCCESS;
+}
+#endif
 
 static EFI_STATUS read_file(EFI_FILE_PROTOCOL* file, uint8_t** bytes, UINTN* size)
 {
@@ -505,7 +551,7 @@ static EFI_STATUS exit_boot_services(EFI_HANDLE imageHandle, Aarch64Handoff* han
     return fail("ExitBootServices retry limit exceeded");
 }
 
-#ifdef GXOS_AARCH64_PHASE2
+#if defined(GXOS_AARCH64_PHASE2) || defined(GXOS_AARCH64_PHASE4)
 static bool validate_dtb_blob(const uint8_t* blob, uint64_t available, uint32_t* totalSize)
 {
     if (!blob || available < 40 || available > UINT64_C(16) * 1024 * 1024 ||
@@ -590,6 +636,24 @@ extern "C" EFI_STATUS efi_main(EFI_HANDLE imageHandle, EFI_SYSTEM_TABLE* systemT
     if (kernelFile->Close) ((CloseFileFn)kernelFile->Close)(kernelFile);
     if (root && root->Close) ((CloseFileFn)root->Close)(root);
 
+#if defined(GXOS_AARCH64_PHASE4)
+    // The image is kept in EfiLoaderData memory and is intentionally not
+    // freed after ExitBootServices.  The kernel validates and reserves this
+    // exact range before it initializes the common physical allocator.
+    EFI_FILE_PROTOCOL* ramdiskRoot = nullptr;
+    EFI_FILE_PROTOCOL* ramdiskFile = nullptr;
+    status = open_ramdisk(imageHandle, &ramdiskRoot, &ramdiskFile);
+    if (EFI_ERROR(status)) return status;
+    uint8_t* ramdiskBytes = nullptr;
+    UINTN ramdiskSize = 0;
+    status = read_file(ramdiskFile, &ramdiskBytes, &ramdiskSize);
+    if (ramdiskFile && ramdiskFile->Close) ((CloseFileFn)ramdiskFile->Close)(ramdiskFile);
+    if (ramdiskRoot && ramdiskRoot->Close) ((CloseFileFn)ramdiskRoot->Close)(ramdiskRoot);
+    if (EFI_ERROR(status) || !ramdiskBytes || ramdiskSize == 0) {
+        return fail("ramdisk image read failed");
+    }
+#endif
+
     uint64_t stackBase = 0;
     uint64_t stackSize = 0;
     uint64_t stackTop = 0;
@@ -618,8 +682,13 @@ extern "C" EFI_STATUS efi_main(EFI_HANDLE imageHandle, EFI_SYSTEM_TABLE* systemT
     handoff->initial_current_el = initialEl;
     handoff->loader_sctlr_el1 = loaderSctlr;
     handoff->uart_base = GXOS_AARCH64_UART_BASE;
+#if defined(GXOS_AARCH64_PHASE4)
+    handoff->ramdisk_base = (uint64_t)(UINTN)ramdiskBytes;
+    handoff->ramdisk_size = (uint64_t)ramdiskSize;
+    handoff->flags |= GXOS_AARCH64_FLAG_RAMDISK_VALID;
+#endif
 
-#ifdef GXOS_AARCH64_PHASE2
+#if defined(GXOS_AARCH64_PHASE2) || defined(GXOS_AARCH64_PHASE4)
     status = copy_dtb_from_configuration_table(handoff);
     if (EFI_ERROR(status)) return status;
 #endif

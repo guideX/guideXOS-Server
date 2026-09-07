@@ -16,6 +16,22 @@
 #ifndef ARCH_HAS_PORT_IO
 #if defined(ARCH_X86) || defined(ARCH_AMD64) || defined(__i386__) || defined(__x86_64__)
     #define ARCH_HAS_PORT_IO 1
+#elif defined(GXOS_AARCH64_PHASE4)
+
+extern "C" void phase4_serial_init();
+extern "C" void phase4_serial_putc(char);
+extern "C" void phase4_serial_print(const char*);
+extern "C" void phase4_serial_hex(uint64_t);
+extern "C" void phase4_serial_dec(uint64_t);
+
+inline void init() { phase4_serial_init(); }
+inline void putc(char c) { phase4_serial_putc(c); }
+inline void puts(const char* s) { phase4_serial_print(s); }
+inline void put_hex8(uint8_t v) { phase4_serial_hex(v); }
+inline void put_hex32(uint32_t v) { phase4_serial_hex(v); }
+inline void put_hex16(uint16_t v) { phase4_serial_hex(v); }
+inline void put_hex64(uint64_t v) { phase4_serial_hex(v); }
+
 #else
     #define ARCH_HAS_PORT_IO 0
 #endif

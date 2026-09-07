@@ -270,6 +270,7 @@ uint8_t create(size_t sizeBytes, const char* name)
     strcopy(bdev.name, disk.name, sizeof(bdev.name));
     bdev.readFn = read_sectors;
     bdev.writeFn = write_sectors;
+    bdev.flushFn = nullptr;
     
     block::register_device(bdev);
     
@@ -343,6 +344,7 @@ uint8_t create_at(void* memory, size_t sizeBytes, const char* name)
     strcopy(bdev.name, disk.name, sizeof(bdev.name));
     bdev.readFn = read_sectors;
     bdev.writeFn = write_sectors;
+    bdev.flushFn = nullptr;
     
     block::register_device(bdev);
     
@@ -413,6 +415,7 @@ uint8_t create_readonly_at(const void* memory, size_t sizeBytes, const char* nam
     strcopy(bdev.name, disk.name, sizeof(bdev.name));
     bdev.readFn = read_sectors;
     bdev.writeFn = nullptr;
+    bdev.flushFn = nullptr;
 
     block::register_device(bdev);
 
