@@ -370,6 +370,26 @@ bool Navigator::dispatchJavaScriptSubmitEvent(std::uint64_t formSerial,
 	return true;
 }
 
+bool Navigator::requestFormReset(std::uint64_t formSerial,
+	bool* defaultPrevented)
+{
+	if (defaultPrevented != nullptr) *defaultPrevented = false;
+	if (formSerial == 0 || s_scriptHostAdapter.document() != &s_currentDoc ||
+		!s_scriptRuntime.builtInsInitialized()) return false;
+	RuntimeErrorCode error = RuntimeErrorCode::None;
+	if (!s_scriptHostAdapter.requestFormReset(s_scriptRuntime, formSerial,
+		error, defaultPrevented)) {
+		recordJavaScriptError("reset", error);
+		return false;
+	}
+	if (s_scriptHostAdapter.document() == &s_currentDoc &&
+		s_currentDoc.layoutDirty) {
+		ensureInlineLayout(s_currentDoc);
+		updateDisplay();
+	}
+	return true;
+}
+
 void Navigator::commitJavaScriptFormEdit(std::uint64_t targetSerial)
 {
 	bool changed = false;
@@ -18150,8 +18170,21 @@ void Navigator::initializeFormRuntimeState()
 		state.parentFieldsetSerial = metadata.parentFieldsetSerial;
 		state.checked = metadata.type == FormControlType::Option ? metadata.selected : metadata.checked;
 		state.initialChecked = state.checked;
+		state.initialValue = metadata.value;
+		state.initialSelectedOption = metadata.selectedOptionIndex;
 		state.disabled = metadata.disabled;
 		state.metadataValid = true;
+		for (const DocBlock& block : s_currentDoc.blocks) {
+			if (block.formControl.logicalSerial != element.serial) continue;
+			if (block.type == BlockType::FormTextInput ||
+				block.type == BlockType::FormTextarea) {
+				state.initialValue = block.inputValue;
+			} else if (block.type == BlockType::FormSelect) {
+				state.initialValue = block.inputValue;
+				state.initialSelectedOption = block.selectedOption;
+			}
+			break;
+		}
 		++s_currentDoc.formsDiagnostics.formRuntimeControlsInitialized;
 	}
 	// Some forgiving HTML paths retain a valid rendered control block even when
@@ -18182,6 +18215,8 @@ void Navigator::initializeFormRuntimeState()
 			block.formControl.type == FormControlType::Radio
 			? block.formControl.checked : false;
 		state.initialChecked = state.checked;
+		state.initialValue = block.inputValue;
+		state.initialSelectedOption = block.selectedOption;
 		state.disabled = block.formControl.disabled;
 		state.metadataValid = true;
 		++s_currentDoc.formsDiagnostics.formRuntimeControlsInitialized;
@@ -19511,10 +19546,12 @@ bool Navigator::activateFormControl(int blockIndex)
 		s_focusedInputBlockIndex = blockIndex;
 		if (block.formControl.type == FormControlType::Submit) {
 			submitFormForBlock(blockIndex);
+		} else if (block.formControl.type == FormControlType::Reset) {
+			bool resetDefaultPrevented = false;
+			requestFormReset(block.formControl.parentFormSerial,
+				&resetDefaultPrevented);
 		} else {
-			// Plain buttons remain activation-only. Reset semantics are also
-			// intentionally deferred; JS28 only gives submit controls a real
-			// form default action.
+			// Plain buttons remain activation-only.
 			updateStatus("Button activated (no form submission).");
 			storePageMetadata(s_pageMetadata, s_currentDoc);
 		}

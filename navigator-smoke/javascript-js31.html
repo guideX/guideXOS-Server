@@ -1,0 +1,116 @@
+<!doctype html>
+<html>
+<head><title>Navigator JavaScript JS31</title></head>
+<body>
+<h1>Navigator JavaScript JS31</h1>
+<p>Cancelable form reset restores authoritative parser defaults.</p>
+<form id="js31-form" action="javascript-js31-target.html" method="get">
+  <input id="js31-name" type="text" name="name" value="alice">
+  <textarea id="js31-notes" name="notes">hello</textarea>
+  <input id="js31-yes" type="checkbox" name="yes" value="yes" checked>
+  <input id="js31-radio-a" type="radio" name="mode" value="a" checked>
+  <input id="js31-radio-b" type="radio" name="mode" value="b">
+  <select id="js31-mode" name="mode-select">
+    <option value="a" selected>A</option><option value="b">B</option>
+  </select>
+  <button id="js31-reset" type="reset">Reset button</button>
+  <input id="js31-input-reset" type="reset" value="Reset input">
+  <button id="js31-plain" type="button">Plain button</button>
+  <button id="js31-submit" type="submit">Submit</button>
+</form>
+<form id="js31-form-b"><input id="js31-other" type="text" name="other" value="other-default"></form>
+<input id="js31-unowned" type="text" value="unowned-default">
+<button id="js31-trigger-reset" type="button">mutate then reset</button>
+<button id="js31-trigger-cancel" type="button">mutate then cancel reset</button>
+<button id="js31-trigger-click-cancel" type="button">cancel reset click</button>
+<button id="js31-trigger-input-reset" type="button">input reset</button>
+<button id="js31-trigger-plain" type="button">plain stays mutated</button>
+<button id="js31-trigger-submit-reset" type="button">submit listener resets</button>
+<button id="js31-trigger-focus-reset" type="button">focused reset</button>
+<button id="js31-trigger-submit-authoritative" type="button">reset then submit defaults</button>
+<p id="js31-state">initial</p>
+<script>
+var js31Form = document.getElementById("js31-form");
+var js31Other = document.getElementById("js31-other");
+var js31Unowned = document.getElementById("js31-unowned");
+var js31Name = document.getElementById("js31-name");
+var js31Notes = document.getElementById("js31-notes");
+var js31Yes = document.getElementById("js31-yes");
+var js31RadioA = document.getElementById("js31-radio-a");
+var js31RadioB = document.getElementById("js31-radio-b");
+var js31Mode = document.getElementById("js31-mode");
+var js31Reset = document.getElementById("js31-reset");
+var js31InputReset = document.getElementById("js31-input-reset");
+var js31Plain = document.getElementById("js31-plain");
+var js31Submit = document.getElementById("js31-submit");
+var js31State = document.getElementById("js31-state");
+var js31Log = "";
+var js31CancelReset = false;
+var js31CancelClick = false;
+var js31AllowNativeSubmit = false;
+var js31ResetCount = 0;
+var js31InputCount = 0;
+var js31ChangeCount = 0;
+
+function js31Mutate() {
+  js31Name.value = "mutated";
+  js31Notes.value = "changed";
+  js31Yes.checked = false;
+  js31RadioB.checked = true;
+  js31Mode.value = "b";
+  js31Other.value = "other-mutated";
+  js31Unowned.value = "unowned-mutated";
+}
+function js31Snapshot(label) {
+  js31State.textContent = label + ":" + js31Name.value + ":" +
+    js31Notes.value + ":" + js31Yes.checked + ":" +
+    js31RadioA.checked + ":" + js31RadioB.checked + ":" + js31Mode.value +
+    ":active=" + (document.activeElement === js31Name) +
+    ":resets=" + js31ResetCount + ":input=" + js31InputCount +
+    ":change=" + js31ChangeCount + ":log=" + js31Log;
+}
+js31Form.addEventListener("reset", function(event) {
+  js31ResetCount = js31ResetCount + 1;
+  js31Log = js31Log + "reset:" + (event.target === js31Form) + ":" +
+    event.bubbles + ":" + event.cancelable + ":" + event.defaultPrevented + ";";
+  if (js31CancelReset) event.preventDefault();
+});
+js31Form.addEventListener("input", function() { js31InputCount = js31InputCount + 1; });
+js31Form.addEventListener("change", function() { js31ChangeCount = js31ChangeCount + 1; });
+js31Reset.addEventListener("click", function(event) {
+  if (js31CancelClick) event.preventDefault();
+});
+js31Form.addEventListener("submit", function(event) {
+  if (!js31AllowNativeSubmit) {
+    event.preventDefault();
+    js31Log = js31Log + "submit;";
+    js31Form.reset();
+  }
+});
+document.getElementById("js31-trigger-reset").addEventListener("click", function() {
+  js31Mutate(); js31CancelReset = false; js31Reset.click(); js31Snapshot("reset");
+});
+document.getElementById("js31-trigger-cancel").addEventListener("click", function() {
+  js31Mutate(); js31CancelReset = true; js31Reset.click(); js31CancelReset = false; js31Snapshot("cancel");
+});
+document.getElementById("js31-trigger-click-cancel").addEventListener("click", function() {
+  js31Mutate(); js31CancelClick = true; js31Reset.click(); js31CancelClick = false; js31Snapshot("click-cancel");
+});
+document.getElementById("js31-trigger-input-reset").addEventListener("click", function() {
+  js31Mutate(); js31InputReset.click(); js31Snapshot("input-reset");
+});
+document.getElementById("js31-trigger-plain").addEventListener("click", function() {
+  js31Mutate(); js31Plain.click(); js31Snapshot("plain");
+});
+document.getElementById("js31-trigger-submit-reset").addEventListener("click", function() {
+  js31Mutate(); js31Submit.click(); js31Snapshot("submit-reset");
+});
+document.getElementById("js31-trigger-focus-reset").addEventListener("click", function() {
+  js31Name.focus(); js31Mutate(); js31Form.reset(); js31Snapshot("focus-reset");
+});
+document.getElementById("js31-trigger-submit-authoritative").addEventListener("click", function() {
+  js31Mutate(); js31Form.reset(); js31AllowNativeSubmit = true; js31Submit.click();
+});
+</script>
+</body>
+</html>

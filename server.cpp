@@ -2938,6 +2938,150 @@ static std::string navigatorHostedSmokeDiagnostic() {
         yesNo(js30Reloaded) + ",handlers=" +
         std::to_string(gxos::apps::Navigator::SmokeJavaScriptHandlerCount()));
 
+    const std::string js31FixtureUrl =
+        "http://127.0.0.1:8080/navigator-smoke/javascript-js31.html";
+    const bool js31Loaded = gxos::apps::Navigator::SmokeNavigateToQuiet(
+        js31FixtureUrl);
+    const std::string js31InitialText =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS31 hosted fixture loads reset controls and listeners",
+        js31Loaded && gxos::apps::Navigator::SmokeCurrentUrl() == js31FixtureUrl &&
+        contains(js31InitialText, "Navigator JavaScript JS31") &&
+        gxos::apps::Navigator::SmokeJavaScriptHandlerCount() > 0u &&
+        gxos::apps::Navigator::SmokeJavaScriptListenerCount() > 0u &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("loaded=") + yesNo(js31Loaded) + ",url=" +
+        gxos::apps::Navigator::SmokeCurrentUrl());
+
+    const bool js31ResetTrigger =
+        gxos::apps::Navigator::SmokeClickFormControlById("js31-trigger-reset");
+    const std::string js31AfterReset =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS31 form.reset restores text, textarea, discrete state silently",
+        js31ResetTrigger &&
+        gxos::apps::Navigator::SmokeFormControlValueById("js31-name") == "alice" &&
+        gxos::apps::Navigator::SmokeFormControlValueById("js31-notes") == "hello" &&
+        gxos::apps::Navigator::SmokeFormControlCheckedById("js31-yes") &&
+        gxos::apps::Navigator::SmokeFormControlCheckedById("js31-radio-a") &&
+        !gxos::apps::Navigator::SmokeFormControlCheckedById("js31-radio-b") &&
+        gxos::apps::Navigator::SmokeFormControlValueById("js31-mode") == "a" &&
+        contains(js31AfterReset, "reset:true:true:true:false;") &&
+        contains(js31AfterReset, "resets=1") &&
+        contains(js31AfterReset, "input=0:change=0") &&
+        gxos::apps::Navigator::SmokeFormControlValueById("js31-other") == "other-mutated" &&
+        gxos::apps::Navigator::SmokeFormControlValueById("js31-unowned") == "unowned-mutated" &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("trigger=") + yesNo(js31ResetTrigger) + ",text=" +
+        summarizeText(js31AfterReset, 520));
+
+    const bool js31ResetCancelTrigger =
+        gxos::apps::Navigator::SmokeClickFormControlById("js31-trigger-cancel");
+    const std::string js31AfterResetCancel =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS31 reset cancellation preserves mutated state",
+        js31ResetCancelTrigger &&
+        gxos::apps::Navigator::SmokeFormControlValueById("js31-name") == "mutated" &&
+        gxos::apps::Navigator::SmokeFormControlValueById("js31-notes") == "changed" &&
+        !gxos::apps::Navigator::SmokeFormControlCheckedById("js31-yes") &&
+        gxos::apps::Navigator::SmokeFormControlCheckedById("js31-radio-b") &&
+        gxos::apps::Navigator::SmokeFormControlValueById("js31-mode") == "b" &&
+        contains(js31AfterResetCancel, "cancel:mutated:changed:false:false:true:b") &&
+        contains(js31AfterResetCancel, "resets=2") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("trigger=") + yesNo(js31ResetCancelTrigger) + ",text=" +
+        summarizeText(js31AfterResetCancel, 520));
+
+    const bool js31ClickCancelTrigger =
+        gxos::apps::Navigator::SmokeClickFormControlById("js31-trigger-click-cancel");
+    const std::string js31AfterClickCancel =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS31 canceled reset-button click suppresses reset event",
+        js31ClickCancelTrigger &&
+        gxos::apps::Navigator::SmokeFormControlValueById("js31-name") == "mutated" &&
+        contains(js31AfterClickCancel, "click-cancel:mutated:changed:false:false:true:b") &&
+        contains(js31AfterClickCancel, "resets=2") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("trigger=") + yesNo(js31ClickCancelTrigger) + ",text=" +
+        summarizeText(js31AfterClickCancel, 420));
+
+    const bool js31InputResetTrigger =
+        gxos::apps::Navigator::SmokeClickFormControlById("js31-trigger-input-reset");
+    const std::string js31AfterInputReset =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS31 input type=reset shares the form reset seam",
+        js31InputResetTrigger &&
+        gxos::apps::Navigator::SmokeFormControlValueById("js31-name") == "alice" &&
+        contains(js31AfterInputReset, "input-reset:alice:hello:true:true:false:a") &&
+        contains(js31AfterInputReset, "resets=3") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("trigger=") + yesNo(js31InputResetTrigger) + ",text=" +
+        summarizeText(js31AfterInputReset, 420));
+
+    const bool js31PlainTrigger =
+        gxos::apps::Navigator::SmokeClickFormControlById("js31-trigger-plain");
+    const std::string js31AfterPlain =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS31 ordinary button does not reset",
+        js31PlainTrigger &&
+        gxos::apps::Navigator::SmokeFormControlValueById("js31-name") == "mutated" &&
+        contains(js31AfterPlain, "plain:mutated:changed:false:false:true:b") &&
+        contains(js31AfterPlain, "resets=3") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("trigger=") + yesNo(js31PlainTrigger) + ",text=" +
+        summarizeText(js31AfterPlain, 420));
+
+    const bool js31SubmitResetTrigger =
+        gxos::apps::Navigator::SmokeClickFormControlById("js31-trigger-submit-reset");
+    const std::string js31AfterSubmitReset =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS31 submit listener can reset without cancellation leakage",
+        js31SubmitResetTrigger &&
+        gxos::apps::Navigator::SmokeFormControlValueById("js31-name") == "alice" &&
+        contains(js31AfterSubmitReset, "submit-reset:alice:hello:true:true:false:a") &&
+        contains(js31AfterSubmitReset, "submit;") && contains(js31AfterSubmitReset, "resets=4") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("trigger=") + yesNo(js31SubmitResetTrigger) + ",text=" +
+        summarizeText(js31AfterSubmitReset, 520));
+
+    const bool js31FocusResetTrigger =
+        gxos::apps::Navigator::SmokeClickFormControlById("js31-trigger-focus-reset");
+    const std::string js31AfterFocusReset =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS31 reset preserves authoritative activeElement during listener reset",
+        js31FocusResetTrigger &&
+        gxos::apps::Navigator::SmokeFormControlValueById("js31-name") == "alice" &&
+        gxos::apps::Navigator::SmokeFormControlFocusedById("js31-name") &&
+        contains(js31AfterFocusReset, "focus-reset:alice:hello:true:true:false:a:active=true") &&
+        contains(js31AfterFocusReset, "resets=5") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("trigger=") + yesNo(js31FocusResetTrigger) + ",focused=" +
+        gxos::apps::Navigator::SmokeFocusedFormControlId() + ",text=" +
+        summarizeText(js31AfterFocusReset, 520));
+
+    const bool js31ReloadForSubmit =
+        gxos::apps::Navigator::SmokeNavigateToQuiet(js31FixtureUrl);
+    const bool js31AuthoritativeSubmitTrigger =
+        gxos::apps::Navigator::SmokeClickFormControlById(
+            "js31-trigger-submit-authoritative");
+    const std::string js31AuthoritativeSubmitUrl =
+        gxos::apps::Navigator::SmokeCurrentUrl();
+    add("JS31 reset then submit serializes restored authoritative defaults",
+        js31ReloadForSubmit && js31AuthoritativeSubmitTrigger &&
+        contains(js31AuthoritativeSubmitUrl,
+            "javascript-js31-target.html") &&
+        contains(js31AuthoritativeSubmitUrl, "name=alice") &&
+        contains(js31AuthoritativeSubmitUrl, "notes=hello") &&
+        contains(js31AuthoritativeSubmitUrl, "yes=yes") &&
+        contains(js31AuthoritativeSubmitUrl, "mode=a") &&
+        contains(js31AuthoritativeSubmitUrl, "mode-select=a") &&
+        js31AuthoritativeSubmitUrl.find("mutated") == std::string::npos &&
+        js31AuthoritativeSubmitUrl.find("changed") == std::string::npos &&
+        js31AuthoritativeSubmitUrl.find("unowned") == std::string::npos &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("reload=") + yesNo(js31ReloadForSubmit) + ",click=" +
+        yesNo(js31AuthoritativeSubmitTrigger) + ",url=" +
+        js31AuthoritativeSubmitUrl);
+
     bool cssInlineLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-inline.html");
     std::string cssInlineText = gxos::apps::Navigator::SmokeCurrentDocumentText();
     std::string cssInlineReport = gxos::apps::Navigator::SmokeRuntimeReport();

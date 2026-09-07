@@ -144,7 +144,8 @@ bool NavigatorScriptHostAdapter::allowsReentrantCall(
 {
     return methodId == kNavigatorFocusMethod ||
         methodId == kNavigatorBlurMethod ||
-        methodId == kNavigatorClickMethod;
+        methodId == kNavigatorClickMethod ||
+        methodId == kNavigatorResetMethod;
 }
 
 std::size_t NavigatorScriptHostAdapter::callbackLimit() const
@@ -546,6 +547,42 @@ bool NavigatorScriptHostAdapter::dispatchSubmitEvent(
         false, error, defaultPrevented);
 }
 
+bool NavigatorScriptHostAdapter::requestFormReset(
+    RuntimeContext& runtime, HostInstanceId formSerial,
+    RuntimeErrorCode& error, bool* defaultPrevented)
+{
+    error = RuntimeErrorCode::None;
+    if (defaultPrevented != nullptr) *defaultPrevented = false;
+    if (!isFormElement(formSerial)) {
+        error = RuntimeErrorCode::StaleHostObject;
+        return false;
+    }
+    if (resetDepth_ >= kNavigatorScriptMaxActivationDepth) {
+        error = RuntimeErrorCode::HostReentryUnsupported;
+        return false;
+    }
+
+    const HostGenerationId resetGeneration = generation_;
+    ++resetDepth_;
+    bool resetDefaultPrevented = false;
+    const bool dispatched = dispatchEvent(runtime, SourceView("reset", 5u),
+        NavigatorScriptEventType::Reset,
+        HostObjectReference{formSerial, generation_, kNavigatorElementHostKind},
+        SourceView(), SourceView(), false, error, &resetDefaultPrevented);
+    if (defaultPrevented != nullptr) *defaultPrevented = resetDefaultPrevented;
+
+    // A reset listener may replace the document. Never apply the old
+    // document's defaults after that lifecycle boundary.
+    if (dispatched && resetGeneration == generation_ && document_ != nullptr &&
+        isFormElement(formSerial) && !resetDefaultPrevented) {
+        if (!restoreFormDefaults(formSerial)) {
+            error = RuntimeErrorCode::StaleHostObject;
+        }
+    }
+    --resetDepth_;
+    return dispatched && error == RuntimeErrorCode::None;
+}
+
 bool NavigatorScriptHostAdapter::beginFormEditSession(HostInstanceId serial)
 {
     gxos::web::DocBlock* block = formControlBlock(serial);
@@ -669,7 +706,8 @@ bool NavigatorScriptHostAdapter::dispatchEvent(RuntimeContext& runtime,
     const bool cancelable = eventType == NavigatorScriptEventType::Click ||
         eventType == NavigatorScriptEventType::Keydown ||
         eventType == NavigatorScriptEventType::Keyup ||
-        eventType == NavigatorScriptEventType::Submit;
+        eventType == NavigatorScriptEventType::Submit ||
+        eventType == NavigatorScriptEventType::Reset;
     if (!runtime.createOrUpdateEventObject(type, target,
             HostObjectReference{propagationPath[0].serial,
                 dispatchGeneration, propagationPath[0].kind}, key, code,
@@ -905,6 +943,10 @@ bool NavigatorScriptHostAdapter::eventTypeFor(SourceView type,
         eventType = NavigatorScriptEventType::Submit;
         return true;
     }
+    if (textEquals(type, "reset")) {
+        eventType = NavigatorScriptEventType::Reset;
+        return true;
+    }
     return false;
 }
 
@@ -1067,6 +1109,120 @@ void NavigatorScriptHostAdapter::syncSelectState(gxos::web::DocBlock& block)
         element.formControl.value = block.inputValue;
         break;
     }
+}
+
+bool NavigatorScriptHostAdapter::restoreFormDefaults(HostInstanceId formSerial)
+{
+    if (document_ == nullptr || !isFormElement(formSerial)) return false;
+
+    // The reset pass has no script callbacks. First establish every current
+    // state, including a radio group-wide all-off phase, then mirror it to
+    // the compact document projections. This keeps the operation atomic from
+    // JavaScript's point of view and avoids input/change dispatch entirely.
+    for (gxos::web::DocBlock& block : document_->blocks) {
+        if (block.formControl.parentFormSerial != formSerial) continue;
+        gxos::web::FormRuntimeControlState* state =
+            formRuntimeState(block.formControl.logicalSerial);
+        if (state == nullptr) continue;
+        if (block.type == gxos::web::BlockType::FormRadio) {
+            state->checked = false;
+        } else if (block.type == gxos::web::BlockType::FormCheckbox) {
+            state->checked = state->initialChecked;
+        }
+    }
+
+    // Preserve the parser/runtime's bounded interpretation for malformed
+    // radio markup: the first initially checked member in document order wins.
+    for (std::size_t index = 0; index < document_->blocks.size(); ++index) {
+        gxos::web::DocBlock& block = document_->blocks[index];
+        if (block.type != gxos::web::BlockType::FormRadio ||
+            block.formControl.parentFormSerial != formSerial) continue;
+        gxos::web::FormRuntimeControlState* state =
+            formRuntimeState(block.formControl.logicalSerial);
+        if (state == nullptr || !state->initialChecked) continue;
+        bool earlierSelected = false;
+        for (std::size_t prior = 0; prior < index; ++prior) {
+            const gxos::web::DocBlock& candidate = document_->blocks[prior];
+            if (candidate.type != gxos::web::BlockType::FormRadio ||
+                candidate.formControl.parentFormSerial != formSerial ||
+                !radioGroupMatches(candidate, block)) continue;
+            const gxos::web::FormRuntimeControlState* candidateState =
+                formRuntimeState(candidate.formControl.logicalSerial);
+            if (candidateState != nullptr && candidateState->checked) {
+                earlierSelected = true;
+                break;
+            }
+        }
+        if (!earlierSelected) state->checked = true;
+    }
+
+    for (gxos::web::DocBlock& block : document_->blocks) {
+        if (block.formControl.parentFormSerial != formSerial) continue;
+        gxos::web::FormRuntimeControlState* state =
+            formRuntimeState(block.formControl.logicalSerial);
+        if (state == nullptr) continue;
+        if (block.type == gxos::web::BlockType::FormTextInput ||
+            block.type == gxos::web::BlockType::FormTextarea) {
+            block.inputValue = state->initialValue;
+            block.text = block.type == gxos::web::BlockType::FormTextInput &&
+                block.inputValue.empty() && !block.placeholder.empty()
+                ? block.placeholder : block.inputValue;
+            block.formControl.value = state->initialValue;
+            for (gxos::web::HtmlElementRef& element : document_->structuralElements) {
+                if (element.serial == block.formControl.logicalSerial)
+                    element.formControl.value = state->initialValue;
+            }
+        } else if (block.type == gxos::web::BlockType::FormSelect) {
+            if (!block.formControl.multiple) {
+                block.selectedOption = state->initialSelectedOption;
+                if (block.selectedOption >= 0 &&
+                    block.selectedOption < static_cast<int>(block.options.size())) {
+                    block.inputValue = block.options[static_cast<std::size_t>(
+                        block.selectedOption)].value;
+                    block.text = block.options[static_cast<std::size_t>(
+                        block.selectedOption)].text;
+                } else {
+                    block.inputValue.clear();
+                    block.text.clear();
+                }
+                syncSelectState(block);
+            }
+        } else if (block.type == gxos::web::BlockType::FormCheckbox ||
+                   block.type == gxos::web::BlockType::FormRadio) {
+            syncCheckableState(block.formControl.logicalSerial, state->checked);
+        }
+    }
+
+    const HostInstanceId focusedSerial =
+        document_->formRuntimeState.focusValid
+            ? document_->formRuntimeState.focusedLogicalSerial : 0;
+    const bool focusGenerationValid = document_->formRuntimeState.focusValid &&
+        document_->formRuntimeState.documentGeneration != 0 &&
+        document_->formRuntimeState.focusedDocumentGeneration ==
+            document_->formRuntimeState.documentGeneration;
+    const std::size_t stateCount = std::min(
+        document_->formRuntimeState.count,
+        gxos::web::kFormRuntimeControlCap);
+    for (std::size_t index = 0; index < stateCount; ++index) {
+        gxos::web::FormRuntimeControlState& state =
+            document_->formRuntimeState.controls[index];
+        if (!state.metadataValid || state.parentFormSerial != formSerial)
+            continue;
+        state.editBaselineValid = false;
+        if (focusGenerationValid && state.logicalSerial == focusedSerial &&
+            (state.type == gxos::web::FormControlType::Text ||
+             state.type == gxos::web::FormControlType::Password ||
+             state.type == gxos::web::FormControlType::Search ||
+             state.type == gxos::web::FormControlType::Email ||
+             state.type == gxos::web::FormControlType::Url ||
+             state.type == gxos::web::FormControlType::Number ||
+             state.type == gxos::web::FormControlType::Textarea)) {
+            state.editBaselineValue = state.initialValue;
+            state.editBaselineValid = true;
+        }
+    }
+    document_->layoutDirty = true;
+    return true;
 }
 
 bool NavigatorScriptHostAdapter::radioGroupMatches(
@@ -1444,6 +1600,12 @@ HostResult NavigatorScriptHostAdapter::getProperty(
     }
     if (textEquals(property, "click")) {
         result = HostValue::method(kNavigatorClickMethod, true, true);
+        return HostResult();
+    }
+    if (textEquals(property, "reset")) {
+        if (!isFormElement(element->serial))
+            return HostResult{HostResultCode::PropertyNotFound};
+        result = HostValue::method(kNavigatorResetMethod, true, true);
         return HostResult();
     }
     return HostResult{HostResultCode::PropertyNotFound};
@@ -1854,6 +2016,24 @@ HostResult NavigatorScriptHostAdapter::callInternal(
         result = HostValue::undefined();
         return HostResult();
     }
+    if (methodId == kNavigatorResetMethod) {
+        if (receiver->kind != kNavigatorElementHostKind ||
+            argumentCount != 0u || runtime == nullptr ||
+            !isFormElement(receiver->instanceId))
+            return HostResult{HostResultCode::InvalidValue};
+        RuntimeErrorCode error = RuntimeErrorCode::None;
+        bool defaultPrevented = false;
+        if (!requestFormReset(*runtime, receiver->instanceId, error,
+                &defaultPrevented)) {
+            return error == RuntimeErrorCode::StaleHostObject
+                ? HostResult{HostResultCode::StaleObject}
+                : error == RuntimeErrorCode::HostReentryUnsupported
+                    ? HostResult{HostResultCode::ReentryUnsupported}
+                    : HostResult{HostResultCode::CallFailed};
+        }
+        result = HostValue::undefined();
+        return HostResult();
+    }
     if (methodId == kNavigatorFocusMethod ||
         methodId == kNavigatorBlurMethod) {
         if (receiver->kind != kNavigatorElementHostKind ||
@@ -2076,8 +2256,21 @@ bool NavigatorScriptExecutionHarness::loadParsedDocument(
         state.parentFieldsetSerial = metadata.parentFieldsetSerial;
         state.checked = metadata.checked;
         state.initialChecked = metadata.checked;
+        state.initialValue = metadata.value;
+        state.initialSelectedOption = metadata.selectedOptionIndex;
         state.disabled = metadata.disabled;
         state.metadataValid = true;
+        for (const gxos::web::DocBlock& block : document_.blocks) {
+            if (block.formControl.logicalSerial != element.serial) continue;
+            if (block.type == gxos::web::BlockType::FormTextInput ||
+                block.type == gxos::web::BlockType::FormTextarea) {
+                state.initialValue = block.inputValue;
+            } else if (block.type == gxos::web::BlockType::FormSelect) {
+                state.initialValue = block.inputValue;
+                state.initialSelectedOption = block.selectedOption;
+            }
+            break;
+        }
     }
     focusedElementSerial_ = 0;
     focusedInputCaret_ = 0;
@@ -2198,6 +2391,14 @@ bool NavigatorScriptExecutionHarness::performElementDefaultAction(
         RuntimeErrorCode error = RuntimeErrorCode::None;
         bool defaultPrevented = false;
         if (!adapter_.dispatchSubmitEvent(runtime_,
+                block->formControl.parentFormSerial, error,
+                &defaultPrevented)) return false;
+    } else if (block->type == gxos::web::BlockType::FormSubmit &&
+        block->formControl.type == gxos::web::FormControlType::Reset &&
+        block->formControl.parentFormSerial != 0) {
+        RuntimeErrorCode error = RuntimeErrorCode::None;
+        bool defaultPrevented = false;
+        if (!adapter_.requestFormReset(runtime_,
                 block->formControl.parentFormSerial, error,
                 &defaultPrevented)) return false;
     }

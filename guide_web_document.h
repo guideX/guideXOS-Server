@@ -170,6 +170,10 @@ struct FormRuntimeControlState {
 	uint64_t parentFieldsetSerial = 0;
 	bool checked = false;
 	bool initialChecked = false;
+	// One parser-time default snapshot. Current control values remain on the
+	// DocBlock; these fields are document-owned reset metadata, not a JS copy.
+	std::string initialValue;
+	int initialSelectedOption = -1;
 	bool disabled = false;
 	uint32_t activationCount = 0;
 	bool metadataValid = false;

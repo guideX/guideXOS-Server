@@ -25,6 +25,7 @@ constexpr std::uint32_t kNavigatorRemoveEventListenerMethod = 3u;
 constexpr std::uint32_t kNavigatorFocusMethod = 4u;
 constexpr std::uint32_t kNavigatorBlurMethod = 5u;
 constexpr std::uint32_t kNavigatorClickMethod = 6u;
+constexpr std::uint32_t kNavigatorResetMethod = 7u;
 
 constexpr std::size_t kNavigatorScriptMaxDocumentIdLength = 256u;
 constexpr std::size_t kNavigatorScriptMaxTextContentAssignment = 64u * 1024u;
@@ -47,6 +48,7 @@ enum class NavigatorScriptEventType : std::uint8_t {
     Input,
     Change,
     Submit,
+    Reset,
 };
 
 enum class NavigatorScriptActivationProvenance : std::uint8_t {
@@ -154,6 +156,11 @@ public:
     // form data and therefore keeps the default-action decision separate.
     bool dispatchSubmitEvent(RuntimeContext& runtime, HostInstanceId formSerial,
         RuntimeErrorCode& error, bool* defaultPrevented = nullptr);
+    // One shared form-reset request seam for form.reset() and reset-control
+    // activation. It dispatches reset first and restores defaults only when
+    // the cancelable default action remains allowed.
+    bool requestFormReset(RuntimeContext& runtime, HostInstanceId formSerial,
+        RuntimeErrorCode& error, bool* defaultPrevented = nullptr);
     // These helpers keep edit-session bookkeeping on the authoritative
     // WebDocument form runtime. They never store a JavaScript-only value.
     bool beginFormEditSession(HostInstanceId serial);
@@ -254,6 +261,7 @@ private:
         bool& changed);
     void syncCheckableState(HostInstanceId serial, bool checked);
     void syncSelectState(gxos::web::DocBlock& block);
+    bool restoreFormDefaults(HostInstanceId formSerial);
     bool eventNameForKey(int keyCode, bool shiftPressed,
         std::string& key, std::string& code) const;
     HostResult callInternal(const HostObjectReference* receiver,
@@ -291,6 +299,7 @@ private:
     std::uint64_t nextListenerRegistrationSequence_ = 1u;
     bool clickDispatchActive_ = false;
     std::size_t activationDepth_ = 0;
+    std::size_t resetDepth_ = 0;
     FocusRequestCallback focusRequestCallback_ = nullptr;
     void* focusRequestContext_ = nullptr;
     DispatchCompleteCallback dispatchCompleteCallback_ = nullptr;

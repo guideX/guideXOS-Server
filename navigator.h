@@ -1038,6 +1038,8 @@ private:
 	static bool dispatchJavaScriptChangeEvent(std::uint64_t targetSerial);
 	static bool dispatchJavaScriptSubmitEvent(std::uint64_t formSerial,
 		bool* defaultPrevented = nullptr);
+	static bool requestFormReset(std::uint64_t formSerial,
+		bool* defaultPrevented = nullptr);
 	static void commitJavaScriptFormEdit(std::uint64_t targetSerial);
 	static bool requestJavaScriptFocus(void* context, std::uint64_t serial,
 		bool focus);

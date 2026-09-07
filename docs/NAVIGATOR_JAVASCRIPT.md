@@ -3355,7 +3355,102 @@ errors in `third_party/mbedtls/library/mbedtls_check_config.h`:
 QEMU was not launched because no kernel image was produced; no TLS
 configuration was changed.
 
-The recommended JS31 direction is `relatedTarget` snapshots for the existing
+## Phase JS31: form reset event and authoritative default actions
+
+JS31 adds the bounded form reset path:
+
+```javascript
+form.addEventListener("reset", function (event) {
+    event.preventDefault();
+});
+form.reset();
+```
+
+`reset` is the existing generic Event object with `bubbles === true` and
+`cancelable === true`. Its target is the form, and it uses the normal
+capture/target/bubble path. `preventDefault()` is inspected only after the
+complete dispatch; if cancellation is present, the default action does not
+touch any control state. Cancellation is dispatch-local and does not leak into
+later reset, click, submit, input, or change events.
+
+`form.reset()` is a receiver-checked host method with zero arguments. It and
+`<button type="reset">` / `<input type="reset">` share one reset-request seam:
+click dispatch and click cancellation happen first for a reset control, then
+the form reset Event is dispatched, then the default reset action runs only if
+neither boundary canceled it. `stopPropagation()` or
+`stopImmediatePropagation()` alone does not cancel the reset default action.
+Ordinary buttons remain activation-only and submit buttons remain submit
+controls.
+
+The default action restores the document-owned parser-time state already
+associated with the production `WebDocument` form runtime. The bounded
+`FormRuntimeControlState` now retains one initial value and one initial
+selected-option index in addition to the existing initial checked bit. Current
+text/textarea values remain on `DocBlock::inputValue`; current checkbox/radio
+state remains in the runtime table; and current select selection remains on
+the select block. No JavaScript-owned reset snapshot or history is created.
+
+Supported text inputs, textareas, checkboxes, radio groups, and single-selects
+restore their initial values silently. Reset does not synthesize `input`,
+`change`, or click events. Radio restoration is group-aware and performs a
+bounded all-off/first-initially-checked pass, so malformed multiple-checked
+markup uses the existing document-order interpretation without claiming full
+HTML parser correction semantics. A select with no explicit selected option
+restores the parser-established fallback index rather than recomputing a new
+JS31 rule.
+
+Reset also synchronizes the focused text control's existing edit-session
+baseline. Reset does not blur or move focus; `document.activeElement` therefore
+continues to project the same native owner where the surrounding activation
+path leaves it. A later blur cannot manufacture a stale `change` from the
+pre-reset value. Listener mutations run before the default action: an
+uncanceled reset restores defaults over those mutations, while a canceled reset
+leaves the listener's mutation in place. Nested reset requests use the existing
+16-level bounded event/re-entry policy and fail closed at the bound. A reset
+listener that replaces the document is revalidated before any default action,
+and document replacement clears the old default table with the rest of the
+document state.
+
+The focused proof is
+`tests/navigator_javascript_js31_test.cpp`, run by
+`scripts/smoke-navigator-javascript-js31.ps1`. It covers reset metadata,
+receiver and stale-handle validation, cancellation, all supported control
+families, parser/user/script mutation provenance, silent restoration, edit
+baselines, focus projection, listener propagation/options, click-vs-reset
+cancellation, cross-form and unowned-control isolation, nested submit/reset,
+bounded recursive reset, and document replacement. Default-value and
+defaultChecked DOM properties were audited and deferred because the internal
+default snapshot is already directly used by reset and exposing new properties
+would not be necessary for this bounded phase.
+
+The hosted fixture is `navigator-smoke/javascript-js31.html`. It exercises
+mutate-then-reset, canceled reset, canceled reset-button click, input reset,
+ordinary-button routing, submit-listener reset, cross-form isolation,
+unowned-control isolation, silent input/change behavior, and focused reset
+through the production Navigator activation seams. Its final reset-then-submit
+path also checks that the existing GET serializer sees the restored text,
+checkbox, radio, and select defaults. Full HTML form compliance,
+FormData, requestSubmit, constraint validation, defaultValue/defaultChecked,
+multiple select, dynamic options, and named form collections remain deferred.
+
+The focused JS31 suite passes all 258 checks, and the complete JS6-through-JS31
+matrix passes all 26 repository scripts. The normal native `build.bat` also
+completes successfully. The hosted aggregate reports 454 passed and 7 failed
+out of 461 checks; all seven failures remain the unrelated CSS baselines CSS
+3C, CSS 3G, CSS 6A, three CSS 6B checks, and CSS 6C. Every JS31 hosted check
+passes, including reset cancellation, reset-button click cancellation, focus
+preservation, cross-form isolation, silent restoration, and reset-then-submit
+serialization.
+
+The required `build-kernel.bat` retry builds the PacMan image and bootloader,
+then reaches kernel compilation and stops at the existing Mbed TLS configuration
+errors in `third_party/mbedtls/library/mbedtls_check_config.h`:
+`Unsupported partial support for ECC curves acceleration` and
+`MBEDTLS_KEY_EXCHANGE_ECDHE_RSA_ENABLED defined, but not all prerequisites`.
+QEMU was not launched because no kernel image was produced; no TLS
+configuration was changed.
+
+The recommended JS32 direction is `relatedTarget` snapshots for the existing
 focus transition events, after the event-value lifetime and nested-dispatch
 rules are specified. `document.hasFocus()` should wait until authentic window
 activation state exists; it should not be inferred from the form-control owner.
