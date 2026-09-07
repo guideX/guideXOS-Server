@@ -148,6 +148,12 @@ static const uint32_t E1000_TCTL_PSP   = (1u << 3);   // Pad Short Packets
 static const uint32_t E1000_TCTL_CT_SHIFT  = 4;       // Collision Threshold
 static const uint32_t E1000_TCTL_COLD_SHIFT = 12;     // Collision Distance
 
+// TXDCTL is a threshold register on I219/PCH; it has no queue-enable bit.
+static const uint32_t E1000_TXDCTL_PTHRESH_MASK = 0x0000003Fu;
+static const uint32_t E1000_TXDCTL_HTHRESH_MASK = 0x00003F00u;
+static const uint32_t E1000_TXDCTL_WTHRESH_MASK = 0x003F0000u;
+static const uint32_t E1000_TXDCTL_GRAN        = (1u << 24);
+
 // I219/PCH SPT silicon workaround used by upstream e1000e. It reduces the
 // number of outstanding TX DMA requests to avoid the documented TX hang.
 static const uint32_t E1000_RCTL_RDMTS_HEX = (1u << 16);
@@ -305,10 +311,19 @@ inline bool phy_identifier_is_valid(uint16_t id1, uint16_t id2)
 // ================================================================
 
 static const uint16_t NUM_RX_DESC = 32;
-static const uint16_t NUM_TX_DESC = 8;
+// Intel's register definition permits any TDLEN that is a multiple of 128
+// bytes, but the upstream e1000e driver establishes 64 descriptors as the
+// supported minimum for this device family. Keep the TX ring at that
+// smallest established driver-compatible size instead of relying on QEMU's
+// acceptance of an 8-descriptor ring.
+static const uint16_t E1000E_MIN_TX_DESC = 64;
+static const uint16_t TX_DESC_COUNT_GRANULARITY = 8;
+static const uint16_t NUM_TX_DESC = E1000E_MIN_TX_DESC;
 static const uint16_t RX_BUFFER_SIZE = 2048;
 
 static const uint64_t KERNEL_LINK_VIRTUAL_BASE = 0x100000ULL;
+static const uint64_t TX_DESC_RING_BASE_ALIGNMENT = 16ULL;
+static const uint32_t TX_DESC_RING_LENGTH_GRANULARITY = 128u;
 
 // The loader maps the loaded kernel image at its linked virtual base and
 // publishes the physical backing base in BootInfo. This is the only supported
@@ -327,6 +342,34 @@ inline bool translate_kernel_dma_address(uint64_t virtualAddress,
     if (physical == 0) return false;
     *physicalOut = physical;
     return true;
+}
+
+// Overflow-safe virtual/physical range membership checks used by both the
+// freestanding validation path and hosted provenance tests.
+inline bool dma_range_contains(uint64_t rangeBase, uint64_t rangeLength,
+                               uint64_t address, uint64_t length)
+{
+    if (rangeLength == 0u || length == 0u || address < rangeBase) {
+        return false;
+    }
+    if (rangeBase > (~0ULL - (rangeLength - 1u)) ||
+        address > (~0ULL - (length - 1u))) {
+        return false;
+    }
+    const uint64_t rangeEnd = rangeBase + rangeLength;
+    const uint64_t addressEnd = address + length;
+    return addressEnd >= address && addressEnd <= rangeEnd;
+}
+
+inline bool kernel_image_range_contains(uint64_t virtualAddress,
+                                        uint64_t length,
+                                        uint64_t imageVirtualStart,
+                                        uint64_t imageVirtualEnd)
+{
+    if (imageVirtualEnd < imageVirtualStart) return false;
+    return dma_range_contains(imageVirtualStart,
+                              imageVirtualEnd - imageVirtualStart,
+                              virtualAddress, length);
 }
 
 // ================================================================
@@ -377,6 +420,71 @@ static_assert(offsetof(TxDescriptor, cmd) == 11u,
               "legacy TX command offset changed");
 static_assert(offsetof(TxDescriptor, status) == 12u,
               "legacy TX status offset changed");
+
+inline uint32_t tx_ring_length_bytes(uint16_t descriptorCount)
+{
+    return static_cast<uint32_t>(descriptorCount) * sizeof(TxDescriptor);
+}
+
+inline bool tx_ring_configuration_valid(uint16_t descriptorCount,
+                                        uint64_t ringPhysicalAddress)
+{
+    const uint32_t ringLength = tx_ring_length_bytes(descriptorCount);
+    return descriptorCount >= E1000E_MIN_TX_DESC &&
+           (descriptorCount % TX_DESC_COUNT_GRANULARITY) == 0u &&
+           ringPhysicalAddress != 0u &&
+           (ringPhysicalAddress % TX_DESC_RING_BASE_ALIGNMENT) == 0u &&
+           (ringLength % TX_DESC_RING_LENGTH_GRANULARITY) == 0u;
+}
+
+inline bool tx_descriptor_physical_address(uint64_t ringPhysicalAddress,
+                                           uint16_t descriptorIndex,
+                                           uint64_t* physicalOut)
+{
+    if (!physicalOut || descriptorIndex >= NUM_TX_DESC) return false;
+    const uint64_t offset = static_cast<uint64_t>(descriptorIndex) *
+                            sizeof(TxDescriptor);
+    if (ringPhysicalAddress > (~0ULL - offset)) return false;
+    *physicalOut = ringPhysicalAddress + offset;
+    return *physicalOut != 0u;
+}
+
+inline uint32_t dma_address_register_low(uint64_t physicalAddress)
+{
+    return static_cast<uint32_t>(physicalAddress & 0xFFFFFFF0ULL);
+}
+
+inline uint32_t dma_address_register_high(uint64_t physicalAddress)
+{
+    return static_cast<uint32_t>(physicalAddress >> 32);
+}
+
+inline uint64_t dma_address_register_value(uint32_t low, uint32_t high)
+{
+    return (static_cast<uint64_t>(high) << 32) |
+           (static_cast<uint64_t>(low) & 0xFFFFFFF0ULL);
+}
+
+inline bool tx_descriptor_buffer_matches(const TxDescriptor& descriptor,
+                                         uint64_t translatedBufferAddress)
+{
+    return descriptor.bufferAddr == translatedBufferAddress;
+}
+
+inline uint64_t tx_descriptor_raw_word1(const TxDescriptor& descriptor)
+{
+    return static_cast<uint64_t>(descriptor.length) |
+           (static_cast<uint64_t>(descriptor.cso) << 16) |
+           (static_cast<uint64_t>(descriptor.cmd) << 24) |
+           (static_cast<uint64_t>(descriptor.status) << 32) |
+           (static_cast<uint64_t>(descriptor.css) << 40) |
+           (static_cast<uint64_t>(descriptor.special) << 48);
+}
+
+inline bool tx_engine_enabled(uint32_t tctl)
+{
+    return (tctl & E1000_TCTL_EN) != 0u;
+}
 
 #if !defined(__GNUC__) && !defined(__clang__)
 #pragma pack(pop)
@@ -628,6 +736,10 @@ enum class TxFailureReason : uint8_t {
     DescriptorNotConsumed,
     CompletionTimeout,
     DmaAddressInvalid,
+    DmaTranslationInvalid,
+    RingAddressMismatch,
+    RingAlignmentInvalid,
+    RingLengthInvalid,
     EngineDisabled,
     StatusReadError,
 };
@@ -642,6 +754,10 @@ inline const char* tx_failure_reason_name(TxFailureReason reason)
         case TxFailureReason::DescriptorNotConsumed: return "TX_DESCRIPTOR_NOT_CONSUMED";
         case TxFailureReason::CompletionTimeout:     return "TX_COMPLETION_TIMEOUT";
         case TxFailureReason::DmaAddressInvalid:     return "TX_DMA_ADDRESS_INVALID";
+        case TxFailureReason::DmaTranslationInvalid:return "TX_DMA_TRANSLATION_INVALID";
+        case TxFailureReason::RingAddressMismatch:   return "TX_RING_ADDRESS_MISMATCH";
+        case TxFailureReason::RingAlignmentInvalid:  return "TX_RING_ALIGNMENT_INVALID";
+        case TxFailureReason::RingLengthInvalid:     return "TX_RING_LENGTH_INVALID";
         case TxFailureReason::EngineDisabled:        return "TX_ENGINE_DISABLED";
         case TxFailureReason::StatusReadError:       return "TX_STATUS_READ_ERROR";
         default:                                     return "none";
@@ -674,9 +790,18 @@ struct TxDiagnostics {
     uint16_t tailAfter;
     uint16_t lastLength;
     uint16_t tdtWritten;
+    uint64_t kernelPhysicalBase;
+    uint64_t kernelImageVirtualStart;
+    uint64_t kernelImageVirtualEnd;
+    uint64_t descriptorRingVirtualAddress;
     uint64_t lastBufferAddress;
     uint64_t descriptorRingAddress;
+    uint64_t lastDescriptorVirtualAddress;
     uint64_t lastDescriptorAddress;
+    uint64_t lastBufferVirtualAddress;
+    uint64_t lastDescriptorBufferAddress;
+    uint64_t lastDescriptorRaw0;
+    uint64_t lastDescriptorRaw1;
     uint8_t  lastCommand;
     uint8_t  lastDescriptorStatusBefore;
     uint8_t  lastDescriptorStatus;
@@ -687,6 +812,12 @@ struct TxDiagnostics {
     uint32_t observedTail;
     uint32_t control;
     bool     descriptorPublished;
+    bool     dmaTranslationValid;
+    bool     ringAddressMatches;
+    bool     ringAlignmentValid;
+    bool     ringLengthValid;
+    bool     bufferAddressMatches;
+    bool     txEngineEnabled;
     bool     doorbellReadbackMatches;
     bool     ringPoisoned;
     TxFailureReason failureReason;

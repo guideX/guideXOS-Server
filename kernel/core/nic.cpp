@@ -47,10 +47,16 @@ static NICDevice   s_device;
 static bool        s_initialised = false;
 static uint64_t    s_kernelPhysicalBase = 0x100000;
 
+// These linker symbols delimit the exact linked image that the UEFI loader
+// allocates contiguously and maps at KERNEL_LINK_VIRTUAL_BASE. DMA objects
+// must be inside this range before the affine BootInfo translation is used.
+extern "C" char __kernel_start;
+extern "C" char __kernel_end;
+
 // Descriptor rings (statically allocated in the loaded kernel image). The
 // descriptor ABI only requires 16-byte alignment; keeping the existing
 // storage model makes the loader-provided physical translation auditable and
-// avoids introducing a new allocator/bounce-buffer dependency in Phase 13.
+// avoids introducing a new allocator/bounce-buffer dependency in Phase 14.
 #if defined(__GNUC__) || defined(__clang__)
 static RxDescriptor s_rxDescs[NUM_RX_DESC] __attribute__((aligned(16)));
 static TxDescriptor s_txDescs[NUM_TX_DESC] __attribute__((aligned(16)));
@@ -113,6 +119,7 @@ static void snapshot_tx_registers(TxRegisterSnapshot* destination)
     s_device.tx.observedHead = destination->tdh;
     s_device.tx.observedTail = destination->tdt;
     s_device.tx.control = destination->tctl;
+    s_device.tx.txEngineEnabled = tx_engine_enabled(destination->tctl);
 }
 
 static bool is_i219_device(uint16_t deviceId)
@@ -616,7 +623,14 @@ static bool dma_ranges_overlap(uint64_t first, uint64_t firstLength,
 // loader maps that complete image and the physical translation below uses the
 // same image base supplied in BootInfo. Validate the complete small layout
 // before handing any ring to hardware so a bad translation fails closed.
-static bool validate_dma_layout()
+static bool dma_layout_failure(TxFailureReason* failureReason,
+                               TxFailureReason reason)
+{
+    if (failureReason) *failureReason = reason;
+    return false;
+}
+
+static bool validate_dma_layout(TxFailureReason* failureReason = nullptr)
 {
     static_assert(sizeof(RxDescriptor) == 16u, "RX descriptor size changed");
     static_assert(sizeof(TxDescriptor) == 16u, "TX descriptor size changed");
@@ -625,18 +639,57 @@ static bool validate_dma_layout()
     static_assert((NUM_TX_DESC * sizeof(TxDescriptor)) % 128u == 0u,
                   "TX ring length must be 128-byte aligned");
 
+    const uint64_t imageVirtualStart =
+        reinterpret_cast<uint64_t>(&__kernel_start);
+    const uint64_t imageVirtualEnd =
+        reinterpret_cast<uint64_t>(&__kernel_end);
+    if (imageVirtualStart != KERNEL_LINK_VIRTUAL_BASE ||
+        imageVirtualEnd <= imageVirtualStart ||
+        !kernel_image_range_contains(
+            reinterpret_cast<uint64_t>(&s_rxDescs[0]),
+            NUM_RX_DESC * sizeof(RxDescriptor), imageVirtualStart,
+            imageVirtualEnd) ||
+        !kernel_image_range_contains(
+            reinterpret_cast<uint64_t>(&s_txDescs[0]),
+            NUM_TX_DESC * sizeof(TxDescriptor), imageVirtualStart,
+            imageVirtualEnd) ||
+        !kernel_image_range_contains(
+            reinterpret_cast<uint64_t>(&s_rxBuffers[0][0]),
+            sizeof(s_rxBuffers), imageVirtualStart, imageVirtualEnd) ||
+        !kernel_image_range_contains(
+            reinterpret_cast<uint64_t>(&s_txBuffer[0]), sizeof(s_txBuffer),
+            imageVirtualStart, imageVirtualEnd)) {
+        return dma_layout_failure(failureReason,
+                                  TxFailureReason::DmaTranslationInvalid);
+    }
+
     uint64_t rxDescPhys = 0;
     uint64_t txDescPhys = 0;
     uint64_t txBufferPhys = 0;
     if (!dma_address_range(&s_rxDescs[0],
-                           NUM_RX_DESC * sizeof(RxDescriptor), 16u,
+                           NUM_RX_DESC * sizeof(RxDescriptor), 0u,
                            &rxDescPhys) ||
         !dma_address_range(&s_txDescs[0],
-                           NUM_TX_DESC * sizeof(TxDescriptor), 16u,
+                           NUM_TX_DESC * sizeof(TxDescriptor), 0u,
                            &txDescPhys) ||
-        !dma_address_range(&s_txBuffer[0], sizeof(s_txBuffer), 16u,
+        !dma_address_range(&s_txBuffer[0], sizeof(s_txBuffer), 0u,
                            &txBufferPhys)) {
-        return false;
+        return dma_layout_failure(failureReason,
+                                  TxFailureReason::DmaTranslationInvalid);
+    }
+
+    if ((rxDescPhys % TX_DESC_RING_BASE_ALIGNMENT) != 0u ||
+        (txBufferPhys % TX_DESC_RING_BASE_ALIGNMENT) != 0u) {
+        return dma_layout_failure(failureReason,
+                                  TxFailureReason::DmaTranslationInvalid);
+    }
+    if ((txDescPhys % TX_DESC_RING_BASE_ALIGNMENT) != 0u) {
+        return dma_layout_failure(failureReason,
+                                  TxFailureReason::RingAlignmentInvalid);
+    }
+    if (!tx_ring_configuration_valid(NUM_TX_DESC, txDescPhys)) {
+        return dma_layout_failure(failureReason,
+                                  TxFailureReason::RingLengthInvalid);
     }
 
     if (dma_ranges_overlap(rxDescPhys, NUM_RX_DESC * sizeof(RxDescriptor),
@@ -645,14 +698,16 @@ static bool validate_dma_layout()
                            txBufferPhys, sizeof(s_txBuffer)) ||
         dma_ranges_overlap(txDescPhys, NUM_TX_DESC * sizeof(TxDescriptor),
                            txBufferPhys, sizeof(s_txBuffer))) {
-        return false;
+        return dma_layout_failure(failureReason,
+                                  TxFailureReason::DmaTranslationInvalid);
     }
 
     uint64_t rxBufferPhys[NUM_RX_DESC];
     for (uint16_t i = 0; i < NUM_RX_DESC; ++i) {
         if (!dma_address_range(&s_rxBuffers[i][0], RX_BUFFER_SIZE, 16u,
                                &rxBufferPhys[i])) {
-            return false;
+            return dma_layout_failure(failureReason,
+                                      TxFailureReason::DmaTranslationInvalid);
         }
         if (dma_ranges_overlap(rxDescPhys, NUM_RX_DESC * sizeof(RxDescriptor),
                                rxBufferPhys[i], RX_BUFFER_SIZE) ||
@@ -660,12 +715,14 @@ static bool validate_dma_layout()
                                rxBufferPhys[i], RX_BUFFER_SIZE) ||
             dma_ranges_overlap(txBufferPhys, sizeof(s_txBuffer),
                                rxBufferPhys[i], RX_BUFFER_SIZE)) {
-            return false;
+            return dma_layout_failure(failureReason,
+                                      TxFailureReason::DmaTranslationInvalid);
         }
         for (uint16_t previous = 0; previous < i; ++previous) {
             if (dma_ranges_overlap(rxBufferPhys[previous], RX_BUFFER_SIZE,
                                    rxBufferPhys[i], RX_BUFFER_SIZE)) {
-                return false;
+                return dma_layout_failure(
+                    failureReason, TxFailureReason::DmaTranslationInvalid);
             }
         }
     }
@@ -1226,7 +1283,25 @@ static void apply_i219_spt_tx_workaround(uint64_t mmioBase)
 
 static bool init_tx(uint64_t mmioBase)
 {
-    if (!validate_dma_layout()) return false;
+    s_device.tx.kernelPhysicalBase = s_kernelPhysicalBase;
+    s_device.tx.kernelImageVirtualStart =
+        reinterpret_cast<uint64_t>(&__kernel_start);
+    s_device.tx.kernelImageVirtualEnd =
+        reinterpret_cast<uint64_t>(&__kernel_end);
+    s_device.tx.descriptorRingVirtualAddress =
+        reinterpret_cast<uint64_t>(&s_txDescs[0]);
+    s_device.tx.dmaTranslationValid = false;
+    s_device.tx.ringAddressMatches = false;
+    s_device.tx.ringAlignmentValid = false;
+    s_device.tx.ringLengthValid = false;
+    s_device.tx.bufferAddressMatches = false;
+    s_device.tx.txEngineEnabled = false;
+
+    TxFailureReason layoutFailure = TxFailureReason::DmaTranslationInvalid;
+    if (!validate_dma_layout(&layoutFailure)) {
+        s_device.tx.failureReason = layoutFailure;
+        return false;
+    }
 
     for (uint16_t i = 0; i < NUM_TX_DESC; ++i) {
         memzero(&s_txDescs[i], sizeof(TxDescriptor));
@@ -1236,15 +1311,24 @@ static bool init_tx(uint64_t mmioBase)
     // Program the TX descriptor ring base address
     uint64_t txDescPhys = 0;
     if (!dma_address_range(&s_txDescs[0],
-                           NUM_TX_DESC * sizeof(TxDescriptor), 16u,
+                           NUM_TX_DESC * sizeof(TxDescriptor), 0u,
                            &txDescPhys)) {
+        s_device.tx.failureReason = TxFailureReason::DmaTranslationInvalid;
         return false;
     }
-    mmio_write32(mmioBase, E1000_TDBAL, static_cast<uint32_t>(txDescPhys & 0xFFFFFFFF));
-    mmio_write32(mmioBase, E1000_TDBAH, static_cast<uint32_t>(txDescPhys >> 32));
+    s_device.tx.dmaTranslationValid = true;
+    s_device.tx.ringAlignmentValid =
+        (txDescPhys % TX_DESC_RING_BASE_ALIGNMENT) == 0u;
+    s_device.tx.ringLengthValid =
+        tx_ring_configuration_valid(NUM_TX_DESC, txDescPhys);
+    s_device.tx.descriptorRingAddress = txDescPhys;
+    mmio_write32(mmioBase, E1000_TDBAL,
+                 dma_address_register_low(txDescPhys));
+    mmio_write32(mmioBase, E1000_TDBAH,
+                 dma_address_register_high(txDescPhys));
 
     // Descriptor ring length (in bytes)
-    mmio_write32(mmioBase, E1000_TDLEN, NUM_TX_DESC * sizeof(TxDescriptor));
+    mmio_write32(mmioBase, E1000_TDLEN, tx_ring_length_bytes(NUM_TX_DESC));
 
     // Head = Tail = 0 (empty ring)
     mmio_write32(mmioBase, E1000_TDH, 0);
@@ -1263,21 +1347,36 @@ static bool init_tx(uint64_t mmioBase)
 
     apply_i219_spt_tx_workaround(mmioBase);
     s_txPoisoned = false;
-    s_device.tx.descriptorRingAddress = txDescPhys;
     s_device.tx.failureReason = TxFailureReason::None;
     s_device.tx.ringPoisoned = false;
     snapshot_tx_registers(&s_device.tx.initialRegisters);
+    s_device.tx.ringAddressMatches =
+        s_device.tx.initialRegisters.valid &&
+        dma_address_register_value(s_device.tx.initialRegisters.tdbal,
+                                   s_device.tx.initialRegisters.tdbah) ==
+            txDescPhys;
+    s_device.tx.txEngineEnabled =
+        s_device.tx.initialRegisters.valid &&
+        tx_engine_enabled(s_device.tx.initialRegisters.tctl);
     if (!s_device.tx.initialRegisters.valid ||
-        s_device.tx.initialRegisters.tdbal !=
-            static_cast<uint32_t>(txDescPhys & 0xFFFFFFF0ULL) ||
-        s_device.tx.initialRegisters.tdbah !=
-            static_cast<uint32_t>(txDescPhys >> 32) ||
+        !s_device.tx.ringAddressMatches ||
         s_device.tx.initialRegisters.tdlen !=
-            NUM_TX_DESC * sizeof(TxDescriptor) ||
+            tx_ring_length_bytes(NUM_TX_DESC) ||
         (s_device.tx.initialRegisters.tdh & 0xFFFFu) != 0u ||
         (s_device.tx.initialRegisters.tdt & 0xFFFFu) != 0u ||
-        (s_device.tx.initialRegisters.tctl & E1000_TCTL_EN) == 0u) {
-        s_device.tx.failureReason = TxFailureReason::RingInvalid;
+        !s_device.tx.txEngineEnabled) {
+        if (!s_device.tx.initialRegisters.valid) {
+            s_device.tx.failureReason = TxFailureReason::RingInvalid;
+        } else if (!s_device.tx.ringAddressMatches) {
+            s_device.tx.failureReason = TxFailureReason::RingAddressMismatch;
+        } else if (s_device.tx.initialRegisters.tdlen !=
+                   tx_ring_length_bytes(NUM_TX_DESC)) {
+            s_device.tx.failureReason = TxFailureReason::RingLengthInvalid;
+        } else if (!s_device.tx.txEngineEnabled) {
+            s_device.tx.failureReason = TxFailureReason::EngineDisabled;
+        } else {
+            s_device.tx.failureReason = TxFailureReason::RingInvalid;
+        }
         return false;
     }
     s_device.txRingInitialized = true;
@@ -1620,7 +1719,7 @@ static bool init_e1000(uint64_t mmioBase)
     if (i219P7) {
         serial::puts("[AIDA-I219-P7] tx-ring=ready\n");
     } else if (!i219) {
-        serial::puts("[NIC] TX ring setup: 8 descriptors ready\n");
+        serial::puts("[NIC] TX ring setup: 64 descriptors ready\n");
     }
 
     if (i219P7) {
@@ -1633,7 +1732,7 @@ static bool init_e1000(uint64_t mmioBase)
         }
     } else if (i219) {
         serial::puts("[NIC] RX ring setup: 32 descriptors ready\n");
-        serial::puts("[NIC] TX ring setup: 8 descriptors ready\n");
+        serial::puts("[NIC] TX ring setup: 64 descriptors ready\n");
         mask_nic_interrupts(mmioBase);
         phase5_stage_complete(6);
         if (GXOS_AIDA_I219_PHASE5_STAGE == 6) {
@@ -2321,8 +2420,13 @@ Status send_frame(const uint8_t* data, uint16_t len)
     s_device.tx.lastDescriptor = s_txCur;
     s_device.tx.lastLength = len;
     s_device.tx.tdtWritten = s_txCur;
+    s_device.tx.lastDescriptorVirtualAddress = 0;
     s_device.tx.lastBufferAddress = 0;
     s_device.tx.lastDescriptorAddress = 0;
+    s_device.tx.lastBufferVirtualAddress = 0;
+    s_device.tx.lastDescriptorBufferAddress = 0;
+    s_device.tx.lastDescriptorRaw0 = 0;
+    s_device.tx.lastDescriptorRaw1 = 0;
     s_device.tx.lastCommand = 0;
     s_device.tx.lastDescriptorStatusBefore = 0;
     s_device.tx.lastDescriptorStatus = 0;
@@ -2330,6 +2434,7 @@ Status send_frame(const uint8_t* data, uint16_t len)
     s_device.tx.completionPolls = 0;
     s_device.tx.completionPollLimit = TX_COMPLETION_POLL_LIMIT;
     s_device.tx.descriptorPublished = false;
+    s_device.tx.bufferAddressMatches = false;
     s_device.tx.doorbellReadbackMatches = false;
     s_device.tx.failureReason = TxFailureReason::None;
     snapshot_tx_registers(&s_device.tx.beforeRegisters);
@@ -2363,18 +2468,54 @@ Status send_frame(const uint8_t* data, uint16_t len)
     // Copy frame data to TX buffer
     memcopy(s_txBuffer, data, static_cast<uint32_t>(len));
 
+    // Prove that the descriptor VA selected by the CPU translates to the
+    // exact slot hardware reaches from TDBAL/TDBAH. Do not submit if this
+    // relationship is not deterministic.
+    const uint64_t descriptorVirtualAddress =
+        reinterpret_cast<uint64_t>(&s_txDescs[s_txCur]);
+    s_device.tx.lastDescriptorVirtualAddress = descriptorVirtualAddress;
+    uint64_t descriptorPhysicalAddress = 0;
+    if (!dma_address(&s_txDescs[s_txCur], &descriptorPhysicalAddress)) {
+        serial::puts("[NIC] send_frame: TX descriptor DMA address unavailable\n");
+        s_device.stats.txErrors++;
+        s_device.tx.driverErrors++;
+        s_device.tx.failureReason = TxFailureReason::DmaTranslationInvalid;
+        s_device.tx.lastStatus = NIC_ERR_INIT_FAIL;
+        snapshot_tx_registers(&s_device.tx.finalRegisters);
+        return NIC_ERR_INIT_FAIL;
+    }
+    s_device.tx.lastDescriptorAddress = descriptorPhysicalAddress;
+    uint64_t expectedDescriptorAddress = 0;
+    s_device.tx.ringAddressMatches =
+        tx_descriptor_physical_address(s_device.tx.descriptorRingAddress,
+                                       s_txCur, &expectedDescriptorAddress) &&
+        expectedDescriptorAddress == descriptorPhysicalAddress &&
+        dma_range_contains(s_device.tx.descriptorRingAddress,
+                           tx_ring_length_bytes(NUM_TX_DESC),
+                           descriptorPhysicalAddress,
+                           sizeof(TxDescriptor));
+    if (!s_device.tx.ringAddressMatches) {
+        serial::puts("[NIC] send_frame: TX descriptor ring address mismatch\n");
+        s_device.stats.txErrors++;
+        s_device.tx.driverErrors++;
+        s_device.tx.failureReason = TxFailureReason::RingAddressMismatch;
+        s_device.tx.lastStatus = NIC_ERR_INIT_FAIL;
+        snapshot_tx_registers(&s_device.tx.finalRegisters);
+        return NIC_ERR_INIT_FAIL;
+    }
+
     // Set up the descriptor
     uint64_t bufAddr = 0;
     if (!dma_address(s_txBuffer, &bufAddr)) {
         serial::puts("[NIC] send_frame: TX buffer DMA address unavailable\n");
         s_device.stats.txErrors++;
         s_device.tx.driverErrors++;
-        s_device.tx.failureReason = TxFailureReason::DmaAddressInvalid;
+        s_device.tx.failureReason = TxFailureReason::DmaTranslationInvalid;
         s_device.tx.lastStatus = NIC_ERR_INIT_FAIL;
         snapshot_tx_registers(&s_device.tx.finalRegisters);
         return NIC_ERR_INIT_FAIL;
     }
-    dma_memory_barrier();
+    s_device.tx.lastBufferVirtualAddress = reinterpret_cast<uint64_t>(&s_txBuffer[0]);
     s_txDescs[s_txCur].bufferAddr = bufAddr;
     s_txDescs[s_txCur].length     = static_cast<uint16_t>(len);
     s_txDescs[s_txCur].cmd        = E1000_TXD_CMD_EOP |
@@ -2382,10 +2523,23 @@ Status send_frame(const uint8_t* data, uint16_t len)
                                     E1000_TXD_CMD_RS;
     s_txDescs[s_txCur].status     = 0;
     s_device.tx.lastBufferAddress = bufAddr;
-    s_device.tx.lastDescriptorAddress =
-        s_device.tx.descriptorRingAddress +
-        static_cast<uint64_t>(s_txCur) * sizeof(TxDescriptor);
+    s_device.tx.lastDescriptorBufferAddress = s_txDescs[s_txCur].bufferAddr;
+    s_device.tx.bufferAddressMatches =
+        tx_descriptor_buffer_matches(s_txDescs[s_txCur], bufAddr);
+    s_device.tx.lastDescriptorRaw0 = s_txDescs[s_txCur].bufferAddr;
+    s_device.tx.lastDescriptorRaw1 =
+        tx_descriptor_raw_word1(s_txDescs[s_txCur]);
     s_device.tx.lastCommand = s_txDescs[s_txCur].cmd;
+    if (!s_device.tx.bufferAddressMatches) {
+        serial::puts("[NIC] send_frame: TX descriptor buffer address mismatch\n");
+        s_txDescs[s_txCur].status = E1000_TXD_STAT_DD;
+        s_device.stats.txErrors++;
+        s_device.tx.driverErrors++;
+        s_device.tx.failureReason = TxFailureReason::DmaAddressInvalid;
+        s_device.tx.lastStatus = NIC_ERR_INIT_FAIL;
+        snapshot_tx_registers(&s_device.tx.finalRegisters);
+        return NIC_ERR_INIT_FAIL;
+    }
     s_device.tx.descriptorPublished = true;
     s_device.tx.descriptorPublications++;
     dma_publish_barrier();
@@ -2421,8 +2575,8 @@ Status send_frame(const uint8_t* data, uint16_t len)
 
     // Wait for transmission to complete (busy-poll descriptor status)
     for (uint32_t i = 0; i < TX_COMPLETION_POLL_LIMIT; ++i) {
-        const uint8_t status = s_txDescs[oldTx].status;
         dma_completion_barrier();
+        const uint8_t status = s_txDescs[oldTx].status;
         s_device.tx.completionPolls = i + 1u;
         if (status & E1000_TXD_STAT_DD) {
             s_device.stats.txFrames++;

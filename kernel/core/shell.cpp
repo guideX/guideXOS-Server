@@ -2123,20 +2123,60 @@ static void cmd_nicinfo_tx()
     output_string(hexStr);
     output_string("\n");
 
-    output_string("ringPA=0x");
+    output_string("ringVA=0x");
+    uint_hex64_to_str(tx.descriptorRingVirtualAddress, hex64Str);
+    output_string(hex64Str);
+    output_string(" ringPA=0x");
     uint_hex64_to_str(tx.descriptorRingAddress, hex64Str);
+    output_string(hex64Str);
+    output_string(" kernelPA=0x");
+    uint_hex64_to_str(tx.kernelPhysicalBase, hex64Str);
     output_string(hex64Str);
     output_string(" descPA=0x");
     uint_hex64_to_str(tx.lastDescriptorAddress, hex64Str);
     output_string(hex64Str);
     output_string("\n");
-    output_string("bufPA=0x");
+    output_string("descVA=0x");
+    uint_hex64_to_str(tx.lastDescriptorVirtualAddress, hex64Str);
+    output_string(hex64Str);
+    output_string(" bufVA=0x");
+    uint_hex64_to_str(tx.lastBufferVirtualAddress, hex64Str);
+    output_string(hex64Str);
+    output_string(" bufPA=0x");
     uint_hex64_to_str(tx.lastBufferAddress, hex64Str);
+    output_string(hex64Str);
+    output_string(" hwBuf=0x");
+    uint_hex64_to_str(tx.lastDescriptorBufferAddress, hex64Str);
     output_string(hex64Str);
     output_string(" published=");
     output_string(tx.descriptorPublished ? "yes" : "no");
     output_string(" doorbell=");
     output_string(tx.doorbellReadbackMatches ? "yes" : "no");
+    output_string("\n");
+    output_string("raw0=0x");
+    uint_hex64_to_str(tx.lastDescriptorRaw0, hex64Str);
+    output_string(hex64Str);
+    output_string(" raw1=0x");
+    uint_hex64_to_str(tx.lastDescriptorRaw1, hex64Str);
+    output_string(hex64Str);
+    output_string(" ringMatch=");
+    output_string(tx.ringAddressMatches ? "yes" : "no");
+    output_string(" bufferMatch=");
+    output_string(tx.bufferAddressMatches ? "yes" : "no");
+    output_string("\n");
+
+    output_string("translation: imageVA=0x");
+    uint_hex64_to_str(tx.kernelImageVirtualStart, hex64Str);
+    output_string(hex64Str);
+    output_string("..0x");
+    uint_hex64_to_str(tx.kernelImageVirtualEnd, hex64Str);
+    output_string(hex64Str);
+    output_string(" valid=");
+    output_string(tx.dmaTranslationValid ? "yes" : "no");
+    output_string(" ringAlign=");
+    output_string(tx.ringAlignmentValid ? "yes" : "no");
+    output_string(" ringLen=");
+    output_string(tx.ringLengthValid ? "yes" : "no");
     output_string("\n");
 
     output_string("init: TDBAL=0x");
@@ -2176,9 +2216,25 @@ static void cmd_nicinfo_tx()
     output_string(" TCTL=0x");
     uint_hex_to_str(final.tctl, 8, hexStr);
     output_string(hexStr);
+    output_string(" engine=");
+    output_string(tx.txEngineEnabled ? "enabled" : "disabled");
     output_string(" TIPG=0x");
     uint_hex_to_str(final.tipg, 8, hexStr);
     output_string(hexStr);
+    output_string(" queue-enable=not-applicable");
+    output_string(" PTHRESH=");
+    uint_to_str(final.txdctl & nic::E1000_TXDCTL_PTHRESH_MASK, numStr);
+    output_string(numStr);
+    output_string(" HTHRESH=");
+    uint_to_str((final.txdctl & nic::E1000_TXDCTL_HTHRESH_MASK) >> 8,
+                numStr);
+    output_string(numStr);
+    output_string(" WTHRESH=");
+    uint_to_str((final.txdctl & nic::E1000_TXDCTL_WTHRESH_MASK) >> 16,
+                numStr);
+    output_string(numStr);
+    output_string(" GRAN=");
+    output_string((final.txdctl & nic::E1000_TXDCTL_GRAN) != 0u ? "yes" : "no");
     output_string("\n");
 
     output_string("TXDCTL=0x");
