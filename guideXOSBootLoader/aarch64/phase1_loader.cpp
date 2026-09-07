@@ -8,7 +8,24 @@
 #include "../Uefi.h"
 #include "../Protocol/LoadedImage.h"
 #include "../Protocol/SimpleFileSystem.h"
-#ifdef GXOS_AARCH64_PHASE4
+#if defined(GXOS_AARCH64_PHASE6)
+#include "../Protocol/GraphicsOutput.h"
+#include "../../aarch64/phase6/phase6_contract.h"
+using Aarch64Handoff = gxos_aarch64_phase6_handoff;
+#define GXOS_AARCH64_HANDOFF_MAGIC GXOS_AARCH64_PHASE6_HANDOFF_MAGIC
+#define GXOS_AARCH64_HANDOFF_VERSION GXOS_AARCH64_PHASE6_HANDOFF_VERSION
+#define GXOS_AARCH64_KERNEL_LOAD_ADDRESS GXOS_AARCH64_PHASE6_KERNEL_LOAD_ADDRESS
+#define GXOS_AARCH64_UART_BASE GXOS_AARCH64_PHASE6_UART_FALLBACK
+#define GXOS_AARCH64_FLAG_EBS_COMPLETE GXOS_AARCH64_PHASE6_FLAG_EBS_COMPLETE
+#define GXOS_AARCH64_FLAG_IDENTITY_LOAD GXOS_AARCH64_PHASE6_FLAG_IDENTITY_LOAD
+#define GXOS_AARCH64_FLAG_MMU_OFF_ON_ENTRY GXOS_AARCH64_PHASE6_FLAG_MMU_OFF_ON_ENTRY
+#define GXOS_AARCH64_FLAG_STACK_ALLOCATED GXOS_AARCH64_PHASE6_FLAG_STACK_ALLOCATED
+#define GXOS_AARCH64_FLAG_MEMORY_MAP_VALID GXOS_AARCH64_PHASE6_FLAG_MEMORY_MAP_VALID
+#define GXOS_AARCH64_FLAG_DTB_VALID GXOS_AARCH64_PHASE6_FLAG_DTB_VALID
+#define GXOS_AARCH64_FLAG_DTB_COPIED GXOS_AARCH64_PHASE6_FLAG_DTB_COPIED
+#define GXOS_AARCH64_FLAG_RAMDISK_VALID GXOS_AARCH64_PHASE6_FLAG_RAMDISK_VALID
+#define GXOS_AARCH64_FLAG_FRAMEBUFFER_VALID GXOS_AARCH64_PHASE6_FLAG_FRAMEBUFFER_VALID
+#elif defined(GXOS_AARCH64_PHASE4)
 #include "../../aarch64/phase4/phase4_contract.h"
 using Aarch64Handoff = gxos_aarch64_phase4_handoff;
 #define GXOS_AARCH64_HANDOFF_MAGIC GXOS_AARCH64_PHASE4_HANDOFF_MAGIC
@@ -119,13 +136,108 @@ static const EFI_GUID kSimpleFileSystemProtocolGuid =
 static const EFI_GUID kFileInfoGuid =
     { 0x09576e92, 0x6d3f, 0x11d2, { 0x8e, 0x39, 0x00, 0xa0, 0xc9, 0x69, 0x72, 0x3b } };
 
-#if defined(GXOS_AARCH64_PHASE2) || defined(GXOS_AARCH64_PHASE4)
+#if defined(GXOS_AARCH64_PHASE2) || defined(GXOS_AARCH64_PHASE4) || defined(GXOS_AARCH64_PHASE6)
 // EFI_DTB_TABLE_GUID from the UEFI Device Tree Configuration Table protocol.
 static const EFI_GUID kDtbTableGuid =
     { 0xb1b621d5, 0xf19c, 0x41a5, { 0x83, 0x0b, 0xd9, 0x15, 0x2c, 0x69, 0xaa, 0xe0 } };
 #endif
 
 static EFI_SYSTEM_TABLE* gSystemTable = nullptr;
+static bool add_u64(uint64_t a, uint64_t b, uint64_t* result);
+static bool mul_u64(uint64_t a, uint64_t b, uint64_t* result);
+static void print_ascii(const char* text);
+static void print_hex_u32(uint32_t value);
+static EFI_STATUS fail(const char* message);
+
+#if defined(GXOS_AARCH64_PHASE6)
+struct GopCapture {
+    uint64_t base;
+    uint64_t size;
+    uint32_t width;
+    uint32_t height;
+    uint32_t pitch;
+    uint32_t bpp;
+    uint32_t format;
+    uint32_t redMask;
+    uint32_t greenMask;
+    uint32_t blueMask;
+    uint32_t reservedMask;
+};
+
+static EFI_STATUS capture_gop(GopCapture* capture)
+{
+    if (!capture || !gSystemTable || !gSystemTable->BootServices ||
+        !gSystemTable->BootServices->LocateProtocol) return fail("GOP protocol unavailable");
+    EFI_GUID gopGuid = EFI_GRAPHICS_OUTPUT_PROTOCOL_GUID;
+    VOID* interface = nullptr;
+    EFI_STATUS status = gSystemTable->BootServices->LocateProtocol(
+        &gopGuid, nullptr, &interface);
+    if (EFI_ERROR(status) || !interface) return fail("UEFI GOP not found");
+
+    EFI_GRAPHICS_OUTPUT_PROTOCOL* gop =
+        reinterpret_cast<EFI_GRAPHICS_OUTPUT_PROTOCOL*>(interface);
+    if (!gop->Mode || !gop->Mode->Info) return fail("UEFI GOP mode unavailable");
+    const EFI_GRAPHICS_OUTPUT_MODE_INFORMATION* info = gop->Mode->Info;
+    print_ascii("[A64 UEFI] GOP raw format=");
+    print_hex_u32(static_cast<uint32_t>(info->PixelFormat));
+    print_ascii(" masks=");
+    print_hex_u32(info->PixelInformation.RedMask);
+    print_ascii(",");
+    print_hex_u32(info->PixelInformation.GreenMask);
+    print_ascii(",");
+    print_hex_u32(info->PixelInformation.BlueMask);
+    print_ascii(",");
+    print_hex_u32(info->PixelInformation.ReservedMask);
+    print_ascii("\r\n");
+    uint32_t format = GXOS_AARCH64_PHASE6_PIXEL_FORMAT_UNKNOWN;
+    uint32_t redMask = info->PixelInformation.RedMask;
+    uint32_t greenMask = info->PixelInformation.GreenMask;
+    uint32_t blueMask = info->PixelInformation.BlueMask;
+    uint32_t reservedMask = info->PixelInformation.ReservedMask;
+    if (info->PixelFormat == PixelRedGreenBlueReserved8BitPerColor) {
+        format = GXOS_AARCH64_PHASE6_PIXEL_FORMAT_R8G8B8A8;
+    } else if (info->PixelFormat == PixelBlueGreenRedReserved8BitPerColor) {
+        format = GXOS_AARCH64_PHASE6_PIXEL_FORMAT_B8G8R8A8;
+    } else if (info->PixelFormat == PixelBitMask &&
+               ((redMask == UINT32_C(0x00ff0000) && greenMask == UINT32_C(0x0000ff00) &&
+                 blueMask == UINT32_C(0x000000ff)) ||
+                (redMask == UINT32_C(0x000000ff) && greenMask == UINT32_C(0x0000ff00) &&
+                 blueMask == UINT32_C(0x00ff0000)))) {
+        format = redMask == UINT32_C(0x00ff0000)
+            ? GXOS_AARCH64_PHASE6_PIXEL_FORMAT_R8G8B8A8
+            : GXOS_AARCH64_PHASE6_PIXEL_FORMAT_B8G8R8A8;
+    } else {
+        return fail("UEFI GOP pixel format unsupported");
+    }
+
+    const uint64_t width = info->HorizontalResolution;
+    const uint64_t height = info->VerticalResolution;
+    const uint64_t scanlines = info->PixelsPerScanLine;
+    uint64_t pitch = 0;
+    uint64_t size = 0;
+    if (width == 0 || height == 0 || scanlines < width ||
+        !mul_u64(scanlines, 4, &pitch) || !mul_u64(pitch, height, &size) ||
+        pitch > UINT32_MAX || size == 0 || gop->Mode->FrameBufferBase == 0 ||
+        gop->Mode->FrameBufferSize < (UINTN)size ||
+        !add_u64((uint64_t)gop->Mode->FrameBufferBase, size, &pitch)) {
+        return fail("UEFI GOP framebuffer bounds invalid");
+    }
+
+    capture->base = (uint64_t)gop->Mode->FrameBufferBase;
+    capture->size = (uint64_t)gop->Mode->FrameBufferSize;
+    capture->width = (uint32_t)width;
+    capture->height = (uint32_t)height;
+    capture->pitch = (uint32_t)(scanlines * 4);
+    capture->bpp = 32;
+    capture->format = format;
+    capture->redMask = redMask;
+    capture->greenMask = greenMask;
+    capture->blueMask = blueMask;
+    capture->reservedMask = reservedMask;
+    print_ascii("[A64 UEFI] GOP framebuffer acquired\r\n");
+    return EFI_SUCCESS;
+}
+#endif
 
 static bool add_u64(uint64_t a, uint64_t b, uint64_t* result)
 {
@@ -176,6 +288,19 @@ static void print_ascii(const char* text)
     }
     buffer[count] = 0;
     gSystemTable->ConOut->OutputString(gSystemTable->ConOut, buffer);
+}
+
+static void print_hex_u32(uint32_t value)
+{
+    static const char digits[] = "0123456789abcdef";
+    char text[11];
+    text[0] = '0';
+    text[1] = 'x';
+    for (uint32_t i = 0; i < 8; ++i) {
+        text[2 + i] = digits[(value >> (28 - (i * 4))) & 0xf];
+    }
+    text[10] = '\0';
+    print_ascii(text);
 }
 
 static EFI_STATUS fail(const char* message)
@@ -273,7 +398,7 @@ static EFI_STATUS open_kernel(EFI_HANDLE imageHandle, EFI_FILE_PROTOCOL** root, 
     return EFI_SUCCESS;
 }
 
-#if defined(GXOS_AARCH64_PHASE4)
+#if defined(GXOS_AARCH64_PHASE4) || defined(GXOS_AARCH64_PHASE6)
 static EFI_STATUS open_ramdisk(EFI_HANDLE imageHandle, EFI_FILE_PROTOCOL** root,
                                 EFI_FILE_PROTOCOL** ramdisk)
 {
@@ -522,6 +647,10 @@ static EFI_STATUS exit_boot_services(EFI_HANDLE imageHandle, Aarch64Handoff* han
     EFI_MEMORY_DESCRIPTOR* memoryMap = nullptr;
 
     for (UINTN attempt = 0; attempt < 6; ++attempt) {
+        // Do not call any firmware console/GOP service after GetMemoryMap:
+        // PixelBltOnly firmware may allocate while flushing console output,
+        // invalidating the map key immediately before ExitBootServices.
+        print_ascii("[A64 UEFI] memory map requested\r\n");
         EFI_STATUS status = acquire_memory_map(&memoryMap, &capacity, &mapSize, &mapKey,
                                                &descriptorSize, &descriptorVersion);
         if (EFI_ERROR(status)) return status;
@@ -537,8 +666,6 @@ static EFI_STATUS exit_boot_services(EFI_HANDLE imageHandle, Aarch64Handoff* han
         handoff->flags |= GXOS_AARCH64_FLAG_MEMORY_MAP_VALID;
         *mapBuffer = memoryMap;
 
-        print_ascii("[A64 UEFI] memory map acquired\r\n");
-        print_ascii("[A64 UEFI] ExitBootServices requested\r\n");
         status = gSystemTable->BootServices->ExitBootServices(imageHandle, mapKey);
         if (!EFI_ERROR(status)) {
             handoff->flags |= GXOS_AARCH64_FLAG_EBS_COMPLETE;
@@ -551,7 +678,7 @@ static EFI_STATUS exit_boot_services(EFI_HANDLE imageHandle, Aarch64Handoff* han
     return fail("ExitBootServices retry limit exceeded");
 }
 
-#if defined(GXOS_AARCH64_PHASE2) || defined(GXOS_AARCH64_PHASE4)
+#if defined(GXOS_AARCH64_PHASE2) || defined(GXOS_AARCH64_PHASE4) || defined(GXOS_AARCH64_PHASE6)
 static bool validate_dtb_blob(const uint8_t* blob, uint64_t available, uint32_t* totalSize)
 {
     if (!blob || available < 40 || available > UINT64_C(16) * 1024 * 1024 ||
@@ -636,7 +763,7 @@ extern "C" EFI_STATUS efi_main(EFI_HANDLE imageHandle, EFI_SYSTEM_TABLE* systemT
     if (kernelFile->Close) ((CloseFileFn)kernelFile->Close)(kernelFile);
     if (root && root->Close) ((CloseFileFn)root->Close)(root);
 
-#if defined(GXOS_AARCH64_PHASE4)
+#if defined(GXOS_AARCH64_PHASE4) || defined(GXOS_AARCH64_PHASE6)
     // The image is kept in EfiLoaderData memory and is intentionally not
     // freed after ExitBootServices.  The kernel validates and reserves this
     // exact range before it initializes the common physical allocator.
@@ -682,13 +809,31 @@ extern "C" EFI_STATUS efi_main(EFI_HANDLE imageHandle, EFI_SYSTEM_TABLE* systemT
     handoff->initial_current_el = initialEl;
     handoff->loader_sctlr_el1 = loaderSctlr;
     handoff->uart_base = GXOS_AARCH64_UART_BASE;
-#if defined(GXOS_AARCH64_PHASE4)
+#if defined(GXOS_AARCH64_PHASE4) || defined(GXOS_AARCH64_PHASE6)
     handoff->ramdisk_base = (uint64_t)(UINTN)ramdiskBytes;
     handoff->ramdisk_size = (uint64_t)ramdiskSize;
     handoff->flags |= GXOS_AARCH64_FLAG_RAMDISK_VALID;
 #endif
 
-#if defined(GXOS_AARCH64_PHASE2) || defined(GXOS_AARCH64_PHASE4)
+#if defined(GXOS_AARCH64_PHASE6)
+    GopCapture gop{};
+    status = capture_gop(&gop);
+    if (EFI_ERROR(status)) return status;
+    handoff->framebuffer_base = gop.base;
+    handoff->framebuffer_size = gop.size;
+    handoff->framebuffer_width = gop.width;
+    handoff->framebuffer_height = gop.height;
+    handoff->framebuffer_pitch = gop.pitch;
+    handoff->framebuffer_bpp = gop.bpp;
+    handoff->framebuffer_format = gop.format;
+    handoff->framebuffer_red_mask = gop.redMask;
+    handoff->framebuffer_green_mask = gop.greenMask;
+    handoff->framebuffer_blue_mask = gop.blueMask;
+    handoff->framebuffer_reserved_mask = gop.reservedMask;
+    handoff->flags |= GXOS_AARCH64_FLAG_FRAMEBUFFER_VALID;
+#endif
+
+#if defined(GXOS_AARCH64_PHASE2) || defined(GXOS_AARCH64_PHASE4) || defined(GXOS_AARCH64_PHASE6)
     status = copy_dtb_from_configuration_table(handoff);
     if (EFI_ERROR(status)) return status;
 #endif

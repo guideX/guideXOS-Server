@@ -22,6 +22,7 @@ static const uint64_t kTableDescriptor = UINT64_C(0x3);
 static const uint64_t kPageDescriptor = UINT64_C(0x3);
 static const uint64_t kAttrDevice = 0;
 static const uint64_t kAttrNormal = 1;
+static const uint64_t kAttrFramebuffer = 2;
 static const uint64_t kShareInner = UINT64_C(3) << 8;
 static const uint64_t kAccessFlag = UINT64_C(1) << 10;
 static const uint64_t kApReadOnlyEl1 = UINT64_C(2) << 6;
@@ -154,6 +155,36 @@ static uint64_t make_normal_descriptor()
     return kPageDescriptor | (kAttrNormal << 2) | kShareInner | kAccessFlag | kUxn;
 }
 
+static uint64_t make_framebuffer_descriptor()
+{
+    // Firmware-owned linear scanout memory is normal, inner-shareable,
+    // non-cacheable memory.  It is not ordinary WBWA RAM and is never
+    // executable.
+    return kPageDescriptor | (kAttrFramebuffer << 2) | kShareInner |
+           kAccessFlag | kPxn | kUxn;
+}
+
+#if defined(GXOS_AARCH64_PHASE6)
+static bool map_framebuffer_range(uint64_t base, uint64_t size)
+{
+    uint64_t end = 0;
+    if (!range_end(base, size, &end)) return false;
+    const uint64_t start = base & ~kPageMask;
+    uint64_t roundedEnd = 0;
+    if (!gxos_aarch64_add_u64(end, kPageMask, &roundedEnd)) return false;
+    roundedEnd &= ~kPageMask;
+    if (roundedEnd <= start || roundedEnd > kMappedPhysicalLimit) return false;
+    const uint64_t descriptor = make_framebuffer_descriptor();
+    for (uint64_t page = start; page < roundedEnd; page += GXOS_AARCH64_PHASE2_MMU_GRANULE) {
+        uint64_t* l3 = nullptr;
+        if (!ensure_l3(page, &l3)) return false;
+        const uint32_t l3Index = (uint32_t)((page >> 12) & 0x1ff);
+        l3[l3Index] = descriptor | page;
+    }
+    return true;
+}
+#endif
+
 static void clean_tables()
 {
     const uint64_t start = (uint64_t)(uintptr_t)__translation_tables_start;
@@ -192,9 +223,54 @@ uint8_t phase2_mmu_build(const gxos_aarch64_phase2_platform* platform,
     return 1;
 }
 
+#if defined(GXOS_AARCH64_PHASE6)
+uint8_t phase2_mmu_build_with_framebuffer(const gxos_aarch64_phase2_platform* platform,
+                                          uint64_t kernel_base, uint64_t kernel_size,
+                                          uint64_t framebuffer_base,
+                                          uint64_t framebuffer_size)
+{
+    if (!platform || !platform->valid || kernel_size == 0 || framebuffer_size == 0) return 0;
+    uint64_t kernelEnd = 0;
+    uint64_t framebufferEnd = 0;
+    if (!gxos_aarch64_add_u64(kernel_base, kernel_size, &kernelEnd) ||
+        kernelEnd > kMappedPhysicalLimit ||
+        !range_end(framebuffer_base, framebuffer_size, &framebufferEnd) ||
+        framebufferEnd > kMappedPhysicalLimit ||
+        range_intersects(framebuffer_base, framebufferEnd, kernel_base, kernel_size) ||
+        range_intersects(framebuffer_base, framebufferEnd, platform->uart_base, platform->uart_size) ||
+        range_intersects(framebuffer_base, framebufferEnd, platform->gicd_base, platform->gicd_size) ||
+        range_intersects(framebuffer_base, framebufferEnd, platform->gicc_base, platform->gicc_size)) return 0;
+
+    gNextTable = 0;
+    gRoot = (uint64_t)(uintptr_t)allocate_table();
+    if (gRoot == 0 || (gRoot & kPageMask) != 0) return 0;
+    for (uint32_t i = 0; i < platform->ram_count; ++i) {
+        const uint64_t base = platform->ram[i].base;
+        uint64_t end = 0;
+        if (!range_end(base, platform->ram[i].size, &end) || base >= kMappedPhysicalLimit ||
+            end > kMappedPhysicalLimit || (base & kPageMask) != 0 ||
+            (platform->ram[i].size & kPageMask) != 0) return 0;
+        if (!map_range(base, platform->ram[i].size, make_normal_descriptor(),
+                       kernel_base, kernelEnd, false)) return 0;
+    }
+    // This may replace the normal-RAM attribute on pages that contain the
+    // GOP scanout, while still mapping a framebuffer outside DTB RAM.
+    if (!map_framebuffer_range(framebuffer_base, framebuffer_size)) return 0;
+    if (!map_range(platform->uart_base, platform->uart_size, make_device_descriptor(), kernel_base, kernelEnd, true) ||
+        !map_range(platform->gicd_base, platform->gicd_size, make_device_descriptor(), kernel_base, kernelEnd, true) ||
+        !map_range(platform->gicc_base, platform->gicc_size, make_device_descriptor(), kernel_base, kernelEnd, true)) return 0;
+    clean_tables();
+    return 1;
+}
+#endif
+
 void phase2_mmu_enable()
 {
-    const uint64_t mair = UINT64_C(0x000000000000ff00); // Attr0=device-nGnRnE, Attr1=normal WBWA
+#if defined(GXOS_AARCH64_PHASE6)
+    const uint64_t mair = UINT64_C(0x000000000044ff00); // Attr0=device, Attr1=normal WBWA, Attr2=normal NC
+#else
+    const uint64_t mair = UINT64_C(0x000000000000ff00); // Attr0=device, Attr1=normal WBWA
+#endif
     const uint64_t tcr = (UINT64_C(2) << 32) | // IPS=40-bit PA
                          (UINT64_C(1) << 23) | // EPD1: TTBR1 is intentionally unused
                          (UINT64_C(2) << 30) | // TG1=4 KiB

@@ -3,8 +3,9 @@
 
 #include "types.h"
 #include "arch.h"
+#include "boot_info.h"
 
-// Forward declaration for BootInfo (x86/amd64 only)
+// Forward declaration for the legacy AMD64 BootInfo.
 #if ARCH_HAS_PIC_8259
 namespace guideXOS {
     struct BootInfo;
@@ -22,6 +23,10 @@ bool init(void* multiboot_info);
 bool init_from_bootinfo(const guideXOS::BootInfo* bootinfo);
 #endif
 
+// Initialize the common framebuffer abstraction from architecture-neutral
+// BootInfo data captured before ExitBootServices.
+bool init_from_common_bootinfo(const kernel::boot::CommonBootInfo* bootinfo);
+
 // Initialize framebuffer via VESA/BGA mode setting (x86/amd64).
 // Uses the Bochs Graphics Adapter if available, otherwise falls
 // back to the PCI VGA BAR0 linear framebuffer.
@@ -31,6 +36,10 @@ bool init_vesa(uint16_t width, uint16_t height, uint8_t bpp);
 // The EFI firmware provides the framebuffer address and pixel format.
 bool init_efi_gop(uint64_t lfbBase, uint32_t width, uint32_t height,
                   uint32_t pitch, uint8_t bpp);
+
+bool init_efi_gop_ex(uint64_t lfbBase, uint64_t framebufferSize,
+                     uint32_t width, uint32_t height, uint32_t pitch,
+                     uint8_t bpp, uint32_t pixelFormat);
 
 // Initialize Sun4m TCX framebuffer (SPARC v8 only, known MMIO address)
 bool init_sun4m();
@@ -141,6 +150,9 @@ bool is_double_buffered();
 // Present back buffer to screen (copy back buffer to front buffer)
 // Call this after all drawing operations are complete for a frame
 void present();
+
+// Deterministic FNV-1a hash over normalized ARGB pixels in a bounded region.
+uint64_t verification_hash(uint32_t x, uint32_t y, uint32_t width, uint32_t height);
 
 // Get the back buffer pointer (for direct access if needed)
 uint32_t* get_back_buffer();

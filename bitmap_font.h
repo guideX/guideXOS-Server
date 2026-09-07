@@ -6,7 +6,11 @@
 
 #if defined(GXOS_BARE_METAL)
 #include "kernel/core/include/kernel/types.h"
+#if defined(__has_include)
+#if __has_include(<string.h>)
 #include <string.h>
+#endif
+#endif
 #else
 #include <cstdint>
 #include <cstring>

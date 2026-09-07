@@ -1,6 +1,23 @@
 #include <stdint.h>
 
+#if defined(GXOS_AARCH64_PHASE6)
+#include "../../../aarch64/phase6/phase6_contract.h"
+using Aarch64Handoff = gxos_aarch64_phase6_handoff;
+#define GXOS_AARCH64_PHASE4_HANDOFF_MAGIC GXOS_AARCH64_PHASE6_HANDOFF_MAGIC
+#define GXOS_AARCH64_PHASE4_HANDOFF_VERSION GXOS_AARCH64_PHASE6_HANDOFF_VERSION
+#define GXOS_AARCH64_PHASE4_KERNEL_LOAD_ADDRESS GXOS_AARCH64_PHASE6_KERNEL_LOAD_ADDRESS
+#define GXOS_AARCH64_PHASE4_FLAG_EBS_COMPLETE GXOS_AARCH64_PHASE6_FLAG_EBS_COMPLETE
+#define GXOS_AARCH64_PHASE4_FLAG_IDENTITY_LOAD GXOS_AARCH64_PHASE6_FLAG_IDENTITY_LOAD
+#define GXOS_AARCH64_PHASE4_FLAG_MMU_OFF_ON_ENTRY GXOS_AARCH64_PHASE6_FLAG_MMU_OFF_ON_ENTRY
+#define GXOS_AARCH64_PHASE4_FLAG_STACK_ALLOCATED GXOS_AARCH64_PHASE6_FLAG_STACK_ALLOCATED
+#define GXOS_AARCH64_PHASE4_FLAG_MEMORY_MAP_VALID GXOS_AARCH64_PHASE6_FLAG_MEMORY_MAP_VALID
+#define GXOS_AARCH64_PHASE4_FLAG_DTB_VALID GXOS_AARCH64_PHASE6_FLAG_DTB_VALID
+#define GXOS_AARCH64_PHASE4_FLAG_DTB_COPIED GXOS_AARCH64_PHASE6_FLAG_DTB_COPIED
+#define GXOS_AARCH64_PHASE4_FLAG_RAMDISK_VALID GXOS_AARCH64_PHASE6_FLAG_RAMDISK_VALID
+#else
 #include "../../../aarch64/phase4/phase4_contract.h"
+using Aarch64Handoff = gxos_aarch64_phase4_handoff;
+#endif
 #include "../../../aarch64/phase2/phase2_platform.h"
 #include "../../../aarch64/phase2/phase2_validation.h"
 #include "../../../kernel/core/include/kernel/arch_interface.h"
@@ -13,11 +30,15 @@
 #include "../../../kernel/core/include/kernel/fs_fat.h"
 #include "../../../kernel/core/include/kernel/ramdisk.h"
 #include "../../../kernel/core/include/kernel/vfs.h"
-#if defined(GXOS_AARCH64_PHASE5)
+#if defined(GXOS_AARCH64_PHASE5) || defined(GXOS_AARCH64_PHASE6)
 #include "../../../kernel/core/include/kernel/native_elf_baremetal.h"
 #endif
 #include "phase2_mmu.h"
 #include "phase3_timer.h"
+#if defined(GXOS_AARCH64_PHASE6)
+#include "../../../kernel/core/include/kernel/desktop.h"
+#include "../../../kernel/core/include/kernel/framebuffer.h"
+#endif
 
 extern "C" void phase3_serial_init();
 extern "C" void phase3_serial_set_base(uint64_t base);
@@ -68,6 +89,14 @@ static volatile uint8_t g_first_task_entered = 0;
 static volatile uint8_t g_register_failure = 0;
 static volatile uint8_t g_fs_failure = 0;
 static kernel::boot::CommonBootInfo g_boot_info{};
+#if defined(GXOS_AARCH64_PHASE6)
+static volatile uint8_t g_graphics_failure = 0;
+static volatile uint8_t g_graphics_complete = 0;
+static volatile uint8_t g_graphics_in_progress = 0;
+static volatile uint32_t g_graphics_redraws = 0;
+static volatile uint64_t g_graphics_hash = 0;
+static kernel::scheduler::Task* g_completion_task = 0;
+#endif
 #if defined(GXOS_AARCH64_PHASE5)
 static volatile uint8_t g_app_failure = 0;
 static volatile uint8_t g_app_complete = 0;
@@ -86,11 +115,29 @@ static void allocate_pages(uint64_t pages, uint64_t* base)
 
 static void print(const char* value) { phase3_serial_print(value); }
 
+#if defined(GXOS_AARCH64_PHASE6)
+static void phase6_maybe_arm_completion()
+{
+    // The common scheduler hands control back to bootstrap at its configured
+    // preemption target.  Graphics, App Model, and VFS run concurrently, so
+    // the completion task must not be eligible until all three proofs have
+    // actually reached their postconditions.
+    if (g_completion_task && g_graphics_complete && g_app_complete &&
+        g_fs_work.reads != 0 && g_fs_work.enumerations != 0) {
+        kernel::scheduler::set_completion_task(g_completion_task);
+    }
+}
+#endif
+
 static void fail(const char* reason)
 {
     print("[guideXOS] ");
     print(reason);
+#if defined(GXOS_AARCH64_PHASE6)
+    print("\n[guideXOS] AARCH64_PHASE6_ERROR\n");
+#else
     print("\n[guideXOS] AARCH64_PHASE4_ERROR\n");
+#endif
     for (;;) __asm__ volatile("wfi");
 }
 
@@ -101,7 +148,7 @@ static bool add_u64(uint64_t a, uint64_t b, uint64_t* result)
     return *result > a;
 }
 
-static bool stack_is_owned(const gxos_aarch64_phase4_handoff* handoff, uint64_t sp)
+static bool stack_is_owned(const Aarch64Handoff* handoff, uint64_t sp)
 {
     uint64_t end = 0;
     return handoff && handoff->stack_size != 0 &&
@@ -124,7 +171,7 @@ static uint64_t read_sp()
     return value;
 }
 
-static bool valid_handoff(const gxos_aarch64_phase4_handoff* handoff)
+static bool valid_handoff(const Aarch64Handoff* handoff)
 {
     if (!handoff || handoff->magic != GXOS_AARCH64_PHASE4_HANDOFF_MAGIC ||
         handoff->version != GXOS_AARCH64_PHASE4_HANDOFF_VERSION ||
@@ -145,12 +192,26 @@ static bool valid_handoff(const gxos_aarch64_phase4_handoff* handoff)
         handoff->dtb_base == 0 || handoff->dtb_size == 0) return false;
     uint64_t end = 0;
     uint64_t kernel_end = 0;
-    return add_u64(handoff->kernel_base, handoff->kernel_size, &kernel_end) &&
+    const bool common = add_u64(handoff->kernel_base, handoff->kernel_size, &kernel_end) &&
            handoff->kernel_entry >= handoff->kernel_base && handoff->kernel_entry < kernel_end &&
            add_u64(handoff->stack_base, handoff->stack_size, &end) && handoff->stack_top == end &&
            add_u64(handoff->memory_map, handoff->memory_map_size, &end) &&
            add_u64(handoff->dtb_base, handoff->dtb_size, &end) &&
            add_u64(handoff->ramdisk_base, handoff->ramdisk_size, &end);
+#if defined(GXOS_AARCH64_PHASE6)
+    uint64_t framebufferEnd = 0;
+    return common && (handoff->flags & GXOS_AARCH64_PHASE6_FLAG_FRAMEBUFFER_VALID) != 0 &&
+           handoff->framebuffer_base != 0 && handoff->framebuffer_size != 0 &&
+           handoff->framebuffer_width != 0 && handoff->framebuffer_height != 0 &&
+           handoff->framebuffer_bpp == 32 &&
+           static_cast<uint64_t>(handoff->framebuffer_pitch) >= static_cast<uint64_t>(handoff->framebuffer_width) * 4u &&
+           (handoff->framebuffer_format == GXOS_AARCH64_PHASE6_PIXEL_FORMAT_R8G8B8A8 ||
+            handoff->framebuffer_format == GXOS_AARCH64_PHASE6_PIXEL_FORMAT_B8G8R8A8) &&
+           add_u64(handoff->framebuffer_base, handoff->framebuffer_size, &framebufferEnd) &&
+           static_cast<uint64_t>(handoff->framebuffer_pitch) * handoff->framebuffer_height <= handoff->framebuffer_size;
+#else
+    return common;
+#endif
 }
 
 static bool work_valid(const Work* work)
@@ -236,10 +297,24 @@ static bool enumerate_phase4(bool* saw_hello, bool* saw_nested)
 
 static void filesystem_task(void*)
 {
+#if defined(GXOS_AARCH64_PHASE6)
+    // The desktop task mounts the normal /system wallpaper resource through
+    // the common VFS before the worker opens its fixture.  Keep this initial
+    // lookup behind the same barrier used for the steady-state workload so
+    // the two common VFS clients cannot race mount-table initialization.
+    while (g_graphics_in_progress) {
+        kernel::scheduler::note_execution();
+    }
+#endif
     uint8_t handle = kernel::vfs::open("/phase4/hello.txt", kernel::vfs::OPEN_READ);
     uint8_t buffer[128];
     if (handle == 0xff) { g_fs_failure = 1; for (;;) kernel::arch::idle(); }
     for (;;) {
+#if defined(GXOS_AARCH64_PHASE6)
+        while (g_graphics_in_progress) {
+            kernel::scheduler::note_execution();
+        }
+#endif
 #if defined(GXOS_AARCH64_PHASE5)
         if (g_app_vfs_exclusive) {
             kernel::scheduler::note_execution();
@@ -268,6 +343,9 @@ static void filesystem_task(void*)
             }
             ++g_fs_work.enumerations;
         }
+#if defined(GXOS_AARCH64_PHASE6)
+        phase6_maybe_arm_completion();
+#endif
 #if defined(GXOS_AARCH64_PHASE5)
         g_filesystem_vfs_active = 0;
 #endif
@@ -275,13 +353,26 @@ static void filesystem_task(void*)
     }
 }
 
-static void completion_task(void*) { kernel::scheduler::return_to_bootstrap(); }
+static void completion_task(void*)
+{
+#if defined(GXOS_AARCH64_PHASE6)
+    while (!g_graphics_complete || !g_app_complete || g_fs_work.reads == 0 ||
+           g_fs_work.enumerations == 0 || !kernel::scheduler::preemptive_complete()) {
+        kernel::scheduler::note_execution();
+    }
+    print("[guideXOS] scheduler completion task: entered\n");
+#endif
+    kernel::scheduler::return_to_bootstrap();
+}
 
 #if defined(GXOS_AARCH64_PHASE5)
 static void app_model_task(void*)
 {
     const uint64_t pagesBefore = kernel::memory::allocated_pages();
     const char* appName = "com.guidexos.phase5.arm64proof";
+#if defined(GXOS_AARCH64_PHASE6)
+    while (g_graphics_in_progress) kernel::scheduler::note_execution();
+#endif
     g_app_vfs_exclusive = 1;
     while (g_filesystem_vfs_active) kernel::scheduler::note_execution();
     if (!kernel::native_elf::is_available(appName) ||
@@ -313,9 +404,78 @@ static void app_model_task(void*)
         print(" allocator-delta-pages=0\n");
     }
     g_app_complete = 1;
+#if defined(GXOS_AARCH64_PHASE6)
+    phase6_maybe_arm_completion();
+#endif
     for (;;) {
         kernel::scheduler::note_execution();
     }
+}
+#endif
+
+#if defined(GXOS_AARCH64_PHASE6)
+static void graphics_task(void*)
+{
+    kernel::desktop::set_wallpaper_image_pack(
+        reinterpret_cast<const void*>(static_cast<uintptr_t>(g_boot_info.ramdisk_base)),
+        g_boot_info.ramdisk_size);
+    kernel::vfs::FileInfo wallpaper{};
+    if (kernel::vfs::stat("/system/wall/blueflwr.gxi", &wallpaper) != kernel::vfs::VFS_OK ||
+        wallpaper.size == 0) {
+        print("[guideXOS] graphics diagnostic: wallpaper stat unavailable\n");
+        g_graphics_failure = 1;
+        g_graphics_complete = 1;
+        g_graphics_in_progress = 0;
+        for (;;) kernel::scheduler::note_execution();
+    }
+    uint8_t wallpaperHandle = kernel::vfs::open("/system/wall/blueflwr.gxi", kernel::vfs::OPEN_READ);
+    uint8_t wallpaperHeader[16] = {};
+    const int32_t wallpaperHeaderBytes = wallpaperHandle == 0xff
+        ? -1 : kernel::vfs::read(wallpaperHandle, wallpaperHeader, sizeof(wallpaperHeader));
+    if (wallpaperHandle != 0xff) kernel::vfs::close(wallpaperHandle);
+    if (wallpaperHeaderBytes != static_cast<int32_t>(sizeof(wallpaperHeader))) {
+        print("[guideXOS] graphics diagnostic: wallpaper header read unavailable\n");
+        g_graphics_failure = 1;
+        g_graphics_complete = 1;
+        g_graphics_in_progress = 0;
+        for (;;) kernel::scheduler::note_execution();
+    }
+    kernel::desktop::init();
+    if (!kernel::desktop::is_initialized() || !kernel::desktop::is_compositor_available()) {
+        print("[guideXOS] graphics diagnostic: desktop initialization unavailable\n");
+        g_graphics_failure = 1;
+        g_graphics_complete = 1;
+        g_graphics_in_progress = 0;
+        for (;;) kernel::scheduler::note_execution();
+    }
+    kernel::desktop::enable_phase6_branding();
+    print("[guideXOS] compositor: initialized\n");
+    kernel::desktop::draw();
+    const uint64_t firstHash = kernel::framebuffer::verification_hash(
+        0, 0, kernel::framebuffer::get_width(), kernel::framebuffer::get_height());
+    g_graphics_hash = firstHash;
+    if (firstHash == 0) g_graphics_failure = 1;
+    print("[guideXOS] text rendering: PASS\n");
+    print("[guideXOS] desktop resources: OK\n");
+    print("[guideXOS] desktop frame: rendered\n");
+    for (uint32_t redraw = 0; redraw < 96; ++redraw) {
+        kernel::desktop::draw();
+        ++g_graphics_redraws;
+    }
+    const uint64_t finalHash = kernel::framebuffer::verification_hash(
+        0, 0, kernel::framebuffer::get_width(), kernel::framebuffer::get_height());
+    if (finalHash != firstHash) g_graphics_failure = 1;
+    print("[guideXOS] framebuffer verification: PASS hash=");
+    phase3_serial_hex(firstHash);
+    print("\n");
+    print("[guideXOS] graphics primitives: PASS\n");
+    print("[guideXOS] graphics durability: PASS redraws=");
+    phase3_serial_dec(g_graphics_redraws);
+    print("\n");
+    g_graphics_complete = 1;
+    g_graphics_in_progress = 0;
+    phase6_maybe_arm_completion();
+    for (;;) kernel::scheduler::note_execution();
 }
 #endif
 
@@ -446,7 +606,7 @@ extern "C" void* phase4_irq_dispatch(uint32_t irq, void* frame)
     return kernel::irq::dispatch(irq, frame);
 }
 
-extern "C" void phase3_main(const gxos_aarch64_phase4_handoff* handoff, uint64_t initial_el)
+extern "C" void phase3_main(const Aarch64Handoff* handoff, uint64_t initial_el)
 {
     phase3_serial_init();
     print("[guideXOS] AARCH64 kernel entry\n");
@@ -469,7 +629,14 @@ extern "C" void phase3_main(const gxos_aarch64_phase4_handoff* handoff, uint64_t
     phase3_serial_init();
     print("[guideXOS] PL011: active console validated\n");
 
+#if defined(GXOS_AARCH64_PHASE6)
+    if (!phase2_mmu_build_with_framebuffer(&platform, handoff->kernel_base, handoff->kernel_size,
+                                           handoff->framebuffer_base, handoff->framebuffer_size)) {
+        fail("MMU tables: FAIL");
+    }
+#else
     if (!phase2_mmu_build(&platform, handoff->kernel_base, handoff->kernel_size)) fail("MMU tables: FAIL");
+#endif
     print("[guideXOS] MMU tables: built\n");
     phase2_mmu_enable();
     print("[guideXOS] MMU: guideXOS tables active\n");
@@ -477,6 +644,29 @@ extern "C" void phase3_main(const gxos_aarch64_phase4_handoff* handoff, uint64_t
     __asm__ volatile("mrs %0, vbar_el1" : "=r"(vbar));
     if (vbar != (uint64_t)(uintptr_t)phase3_vectors || (vbar & 0x7ff) != 0) fail("exception vectors: FAIL");
     print("[guideXOS] exception vectors: OK\n");
+#if defined(GXOS_AARCH64_PHASE6)
+    const uint64_t framebufferDescriptor = phase2_mmu_descriptor_for(handoff->framebuffer_base);
+    if ((framebufferDescriptor & 3u) != 3u || ((framebufferDescriptor >> 2) & 7u) != 2u) {
+        fail("framebuffer mapping: FAIL");
+    }
+    print("[guideXOS] GOP framebuffer: OK\n");
+    print("[guideXOS] framebuffer mapping: OK\n");
+    print("[guideXOS] framebuffer: base=");
+    phase3_serial_hex(handoff->framebuffer_base);
+    print(" size=");
+    phase3_serial_hex(handoff->framebuffer_size);
+    print(" width=");
+    phase3_serial_dec(handoff->framebuffer_width);
+    print(" height=");
+    phase3_serial_dec(handoff->framebuffer_height);
+    print(" pitch=");
+    phase3_serial_dec(handoff->framebuffer_pitch);
+    print(" bpp=");
+    phase3_serial_dec(handoff->framebuffer_bpp);
+    print(" format=");
+    phase3_serial_dec(handoff->framebuffer_format);
+    print("\n");
+#endif
 
     g_boot_info.magic = kernel::boot::kCommonBootInfoMagic;
     g_boot_info.version = kernel::boot::kCommonBootInfoVersion;
@@ -507,6 +697,17 @@ extern "C" void phase3_main(const gxos_aarch64_phase4_handoff* handoff, uint64_t
     g_boot_info.mmio_ranges[1] = { platform.gicd_base, platform.gicd_size };
     g_boot_info.mmio_ranges[2] = { platform.gicc_base, platform.gicc_size };
     g_boot_info.mmio_range_count = 3;
+#if defined(GXOS_AARCH64_PHASE6)
+    g_boot_info.framebuffer = {
+        handoff->framebuffer_base, handoff->framebuffer_size,
+        handoff->framebuffer_width, handoff->framebuffer_height,
+        handoff->framebuffer_pitch, handoff->framebuffer_bpp,
+        handoff->framebuffer_format,
+        handoff->framebuffer_red_mask, handoff->framebuffer_green_mask,
+        handoff->framebuffer_blue_mask, handoff->framebuffer_reserved_mask
+    };
+    g_boot_info.flags |= kernel::boot::kBootFlagFramebuffer;
+#endif
     if (!kernel::boot::validate(&g_boot_info)) fail("common boot resources: FAIL");
     print("[guideXOS] common boot resources: OK\n");
 
@@ -518,6 +719,23 @@ extern "C" void phase3_main(const gxos_aarch64_phase4_handoff* handoff, uint64_t
     print("\n");
     if (!heap_stress()) fail("kernel heap: FAIL");
     print("[guideXOS] kernel heap: PASS\n");
+
+#if defined(GXOS_AARCH64_PHASE6)
+    if (!kernel::framebuffer::init_from_common_bootinfo(&g_boot_info)) {
+        fail("framebuffer initialization: FAIL");
+    }
+    const uint32_t width = kernel::framebuffer::get_width();
+    const uint32_t height = kernel::framebuffer::get_height();
+    kernel::framebuffer::put_front_pixel(0, 0, 0xFFFF0000u);
+    kernel::framebuffer::put_front_pixel(width - 1, height - 1, 0xFF00FF00u);
+    kernel::framebuffer::put_front_pixel(width / 2, height / 2, 0xFF0000FFu);
+    if (kernel::framebuffer::get_front_pixel(0, 0) != 0xFFFF0000u ||
+        kernel::framebuffer::get_front_pixel(width - 1, height - 1) != 0xFF00FF00u ||
+        kernel::framebuffer::get_front_pixel(width / 2, height / 2) != 0xFF0000FFu) {
+        fail("framebuffer sanity proof: FAIL");
+    }
+    print("[guideXOS] pixel format: OK\n");
+#endif
 
     if (!vfs_boot_proof()) fail("ramdisk/VFS proof: FAIL");
     if (!kernel::irq::initialize() ||
@@ -543,6 +761,9 @@ extern "C" void phase3_main(const gxos_aarch64_phase4_handoff* handoff, uint64_t
     }
     kernel::scheduler::Task* fs_task = kernel::scheduler::create_task(4, "vfs-worker", filesystem_task, nullptr, false);
     kernel::scheduler::Task* completion = kernel::scheduler::create_task(99, "scheduler-report", completion_task, nullptr, false);
+#if defined(GXOS_AARCH64_PHASE6)
+    kernel::scheduler::Task* graphics = nullptr;
+#endif
 #if defined(GXOS_AARCH64_PHASE5)
     kernel::scheduler::Task* app_task = kernel::scheduler::create_task(5, "app-model", app_model_task, nullptr, false);
     if (!fs_task || !completion || !app_task || kernel::scheduler::task_count() != 6) fail("thread context: FAIL");
@@ -560,6 +781,12 @@ extern "C" void phase3_main(const gxos_aarch64_phase4_handoff* handoff, uint64_t
     phase3_serial_dec(kernel::scheduler::cooperative_switches());
     print("\n");
 
+#if defined(GXOS_AARCH64_PHASE6)
+    graphics = kernel::scheduler::create_task(6, "desktop-render", graphics_task, nullptr, false);
+    if (!graphics || kernel::scheduler::task_count() != 7) fail("thread context: FAIL");
+    g_graphics_in_progress = 1;
+#endif
+
     for (uint32_t i = 0; i < 3; ++i) {
         if (!kernel::scheduler::reset_task(workers[i], phase3_preemptive_worker, &g_work[i], true)) fail("preemption setup: FAIL");
         g_work[i].counter = 0;
@@ -569,7 +796,17 @@ extern "C" void phase3_main(const gxos_aarch64_phase4_handoff* handoff, uint64_t
 #if defined(GXOS_AARCH64_PHASE5)
     if (!kernel::scheduler::reset_task(app_task, app_model_task, nullptr, true)) fail("preemption setup: FAIL");
 #endif
+#if defined(GXOS_AARCH64_PHASE6)
+    if (!kernel::scheduler::reset_task(graphics, graphics_task, nullptr, true)) fail("preemption setup: FAIL");
+#endif
+#if defined(GXOS_AARCH64_PHASE6)
+    g_completion_task = completion;
+    // Keep the completion task's prepared interrupt context, but withhold the
+    // handoff until the graphics/App Model/VFS tasks have all completed.
+    kernel::scheduler::set_completion_task(nullptr);
+#else
     kernel::scheduler::set_completion_task(completion);
+#endif
     kernel::scheduler::set_phase(kernel::scheduler::PHASE_PREEMPTIVE);
     if (!kernel::scheduler::prepare_interrupt_contexts()) fail("preemption setup: FAIL");
     phase3_timer_start();
@@ -579,12 +816,37 @@ extern "C" void phase3_main(const gxos_aarch64_phase4_handoff* handoff, uint64_t
     if (!kernel::scheduler::preemptive_complete() || kernel::scheduler::failed() ||
         kernel::scheduler::preemptions() < kPreemptionTarget || g_fs_failure || g_fs_work.failures != 0 ||
         g_fs_work.reads == 0 || g_fs_work.enumerations == 0 || !kernel::scheduler::stack_integrity()) {
+#if defined(GXOS_AARCH64_PHASE6)
+        print("[guideXOS] scheduler diagnostics: preemptions=");
+        phase3_serial_dec(kernel::scheduler::preemptions());
+        print(" fs-reads=");
+        phase3_serial_dec(g_fs_work.reads);
+        print(" fs-enumerations=");
+        phase3_serial_dec(g_fs_work.enumerations);
+        print(" fs-failures=");
+        phase3_serial_dec(g_fs_work.failures);
+        print(" fs-failure=");
+        phase3_serial_dec(g_fs_failure);
+        print(" graphics-complete=");
+        phase3_serial_dec(g_graphics_complete);
+        print(" app-complete=");
+        phase3_serial_dec(g_app_complete);
+        print(" graphics-redraws=");
+        phase3_serial_dec(g_graphics_redraws);
+        print("\n");
+#endif
         fail("scheduler/VFS integration: FAIL");
     }
 #if defined(GXOS_AARCH64_PHASE5)
     if (!g_app_complete || g_app_failure || g_app_launches != kAppDurabilityLaunches) {
         fail("App Model durability: FAIL");
     }
+#endif
+#if defined(GXOS_AARCH64_PHASE6)
+    if (!g_graphics_complete || g_graphics_failure || g_graphics_redraws != 96) {
+        fail("graphics/scheduler integration: FAIL");
+    }
+    print("[guideXOS] graphics/scheduler integration: PASS\n");
 #endif
     print("[guideXOS] scheduler/VFS integration: PASS reads=");
     phase3_serial_dec(g_fs_work.reads);
@@ -614,7 +876,9 @@ extern "C" void phase3_main(const gxos_aarch64_phase4_handoff* handoff, uint64_t
     phase3_serial_dec(stats.unexpected_irqs);
     print(" exceptions=");
     phase3_serial_dec(phase3_exception_count());
-#if defined(GXOS_AARCH64_PHASE5)
+#if defined(GXOS_AARCH64_PHASE6)
+    print("\nAARCH64_PHASE6_PASS\n");
+#elif defined(GXOS_AARCH64_PHASE5)
     print("\nAARCH64_PHASE5_PASS\n");
 #else
     print("\nAARCH64_PHASE4_PASS\n");

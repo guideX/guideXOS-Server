@@ -165,6 +165,11 @@ void reload_persisted_system_desktop_icons();
 // Attach a boot-time wallpaper image pack loaded from ramdisk.img.
 void set_wallpaper_image_pack(const void* packBase, uint64_t packSize);
 
+// Enable the normal desktop branding overlay for the first static desktop
+// proof.  This only changes the common theme state; it does not add an
+// architecture-specific renderer.
+void enable_phase6_branding();
+
 // Draw a built-in wallpaper thumbnail if the image pack contains it.
 bool draw_wallpaper_thumbnail_by_id(const char* wallpaperId, uint32_t x, uint32_t y, uint32_t w, uint32_t h);
 

@@ -10,6 +10,12 @@
 
 uint8_t phase2_mmu_build(const gxos_aarch64_phase2_platform* platform,
                          uint64_t kernel_base, uint64_t kernel_size);
+#if defined(GXOS_AARCH64_PHASE6)
+uint8_t phase2_mmu_build_with_framebuffer(const gxos_aarch64_phase2_platform* platform,
+                                          uint64_t kernel_base, uint64_t kernel_size,
+                                          uint64_t framebuffer_base,
+                                          uint64_t framebuffer_size);
+#endif
 void phase2_mmu_enable();
 uint64_t phase2_mmu_tables_start();
 uint64_t phase2_mmu_tables_end();

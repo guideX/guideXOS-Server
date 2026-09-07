@@ -511,25 +511,39 @@ Pass the UEFI memory map and ramdisk to the normal kernel. Prove allocator,
 block layer, VFS, filesystem mount, and file read/write on virt without x86
 port I/O.
 
-### AARCH64-5 — Framebuffer, input, desktop
+### AARCH64-5 — Common kernel, VFS, and NativeElf App Model
 
-Discover an explicit QEMU graphics device or firmware GOP, map it correctly,
-add one ARM64 input path, and prove framebuffer console, compositor, desktop,
-and taskbar smoke markers.
+Pass the UEFI memory map and ramdisk to the normal kernel, prove allocator,
+filesystem/VFS and `/Apps`, and execute a native `EM_AARCH64` package through
+`gx_main` with cleanup, relaunch, and wrong-architecture rejection. The
+completed implementation is documented in `AARCH64_PHASE5_APP_MODEL.md`.
 
-### AARCH64-6 — ARM64 NativeElf/App Model
+### AARCH64-6 — First common ARM64 graphics and desktop
 
-Enforce e_machine, ABI, type, segments, permissions, stack alignment, and
-relocation policy. Document/version the AAPCS64 guideXOS ABI and preserve the
-package container semantics.
+Reuse UEFI GOP through the common BootInfo/framebuffer abstraction, map the
+linear scanout safely, and bring up the production/common drawing primitives,
+font path, compositor foundation, theme, wallpaper resource path, taskbar,
+Start button, and desktop icon rendering. Prove deterministic pixels,
+preemptive scheduling during redraw, durability, the Phase-5 App Model
+regression, and three fresh boots. Input is intentionally deferred. See
+`AARCH64_PHASE6_GRAPHICS_DESKTOP.md`.
 
-### AARCH64-7 — First real ARM64 application
+### AARCH64-7 — ARM64 interactive input
 
-Run a static ARM64 app through gx_main, a host call, rendering/logging, exit,
-and cleanup. Prove a dual-architecture package selects the correct binary and
-fails deterministically for missing/wrong architectures.
+Add the smallest validated input path for the selected QEMU platform, then
+connect keyboard/mouse events to cursor rendering, click routing, Start Menu
+interaction, and window movement. Preserve the static GOP desktop proof while
+bringing up input incrementally; USB HID and virtio-input are not prerequisites
+for the Phase-6 desktop frame.
 
-### AARCH64-8 — Developer Studio ARM64 compilation
+### AARCH64-8 — First real ARM64 application window
+
+Extend the proven NativeElf/App Model path with the smallest common window or
+surface submission path, then show a real ARM64 application window without
+making networking, Navigator, physical storage, SMP, or GPU acceleration
+prerequisites.
+
+### AARCH64-9 — Developer Studio ARM64 compilation
 
 Compile the ARM64 application target from Developer Studio with a pinned
 SDK/toolchain. Distinguish host, target, ABI, and package architecture and

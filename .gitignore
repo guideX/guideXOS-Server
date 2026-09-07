@@ -46,6 +46,9 @@
 /out/aarch64-phase3/
 /out/aarch64-phase4/
 /out/aarch64-phase5/
+/out/aarch64-phase5-baseline/
+/out/aarch64-phase6/
+/out/aarch64-phase6-probe/
 /tools/__pycache__/
 /out/wallpaper-pack/certs/ca-bundle.manifest
 /out/wallpaper-pack/config/certs/ca-bundle.manifest

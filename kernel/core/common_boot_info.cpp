@@ -1,4 +1,5 @@
 #include "include/kernel/boot_info.h"
+#include "include/kernel/framebuffer_contract.h"
 
 namespace kernel {
 namespace boot {
@@ -45,6 +46,14 @@ bool validate(const CommonBootInfo* info)
     if ((info->flags & kBootFlagDtb) != 0 &&
         (info->dtb_base == 0 || info->dtb_size == 0 ||
          !add_u64(info->dtb_base, info->dtb_size, &ignored))) return false;
+    if ((info->flags & kBootFlagFramebuffer) != 0) {
+        const CommonFramebufferInfo& fb = info->framebuffer;
+        const framebuffer::Geometry geometry = {
+            fb.base, fb.size, fb.width, fb.height, fb.pitch,
+            fb.bits_per_pixel, fb.format
+        };
+        if (!framebuffer::validate_geometry(geometry)) return false;
+    }
     return true;
 }
 

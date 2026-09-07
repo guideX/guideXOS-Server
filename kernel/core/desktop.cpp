@@ -388,6 +388,8 @@ void perform_sleep()
     // Other architectures: halt with interrupts enabled
 #if defined(_MSC_VER)
     // MSVC: no standard way, just return
+#elif defined(ARCH_ARM64)
+    asm volatile ("wfi");
 #else
     asm volatile ("sti; hlt");
 #endif
@@ -5398,6 +5400,11 @@ void set_wallpaper_image_pack(const void* packBase, uint64_t packSize)
     serial::puts("[desktop] mounted wallpaper image pack at /system; wallpapers live at /system/wall\n");
 }
 
+void enable_phase6_branding()
+{
+    s_wallpaperConfig.showBranding = true;
+}
+
 bool draw_wallpaper_thumbnail_by_id(const char* wallpaperId, uint32_t x, uint32_t y, uint32_t w, uint32_t h)
 {
     if (!s_wallpaperPackMounted) {
@@ -8843,7 +8850,9 @@ void init()
     serial::puts("[desktop] bare-metal desktop icon init completed\n");
 #endif
     init_time();  // Initialize time only if a real clock source is available
+#if !defined(GXOS_AARCH64_PHASE6)
     shell::init();
+#endif
 
     s_wallpaperConfig.type = WallpaperType::BuiltIn;
     s_wallpaperConfig.topColor = 0xFF142850;
@@ -8862,7 +8871,9 @@ void init()
     
     // Initialize kernel app framework
     ipc::IpcManager::init();
+#if !defined(GXOS_AARCH64_PHASE6)
     apps::registerKernelApps();
+#endif
     compositor::KernelCompositor::init(s_screenW, s_screenH, kTaskbarH);
 #if ARCH_HAS_PIC_8259
     log_diagnostic_framebuffer_inventory();
@@ -9155,7 +9166,11 @@ void draw()
     
     // Draw windows in proper z-order based on focus
     // Shell window is drawn first if not active, last if active
+ #if defined(GXOS_AARCH64_PHASE6)
+    const bool shellVisible = false;
+ #else
     bool shellVisible = shell::is_open() && !s_shellMinimized;
+ #endif
     
     // Draw shell window first if not active (so compositor windows appear on top)
     if (shellVisible && !s_shellActive) {

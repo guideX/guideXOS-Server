@@ -8,8 +8,13 @@
 
 #include "include/kernel/framebuffer.h"
 #include "include/kernel/arch.h"
+#include "include/kernel/framebuffer_contract.h"
 
+#if defined(__has_include)
+#if __has_include(<string.h>)
 #include <string.h>
+#endif
+#endif
 
 #if ARCH_HAS_PIC_8259
 #include "include/kernel/multiboot.h"
@@ -27,12 +32,18 @@ static uint32_t g_width = 0;
 static uint32_t g_height = 0;
 static uint32_t g_pitch = 0;
 static uint8_t g_bpp = 0;
+static uint64_t g_framebufferSize = 0;
+static uint32_t g_pixelFormat = kPixelFormatB8G8R8A8;
 static bool g_available = false;
 static bool g_doubleBuffered = false;
+#if ARCH_HAS_PIC_8259
 static kernel::framebuffer::DiagnosticFramebufferInventorySummary g_diagnosticInventorySummary{};
 static kernel::framebuffer::DiagnosticFramebufferCandidate g_diagnosticInventoryCandidates[guideXOS::GUIDEXOS_MAX_FRAMEBUFFERS]{};
 static uint32_t g_diagnosticInventoryCandidateCount = 0;
 static bool g_hasDiagnosticInventory = false;
+#endif
+
+extern "C" void* memcpy(void* destination, const void* source, size_t count);
 
 // Static back buffer storage (allocated in BSS segment)
 // Max resolution support: 1920x1080 = 2,073,600 pixels * 4 bytes = ~8MB
@@ -47,14 +58,17 @@ static uint32_t bytes_per_pixel()
 
 static void reset_diagnostic_framebuffer_inventory()
 {
+#if ARCH_HAS_PIC_8259
     g_diagnosticInventorySummary = {};
     g_diagnosticInventoryCandidateCount = 0;
     g_hasDiagnosticInventory = false;
     for (uint32_t i = 0; i < guideXOS::GUIDEXOS_MAX_FRAMEBUFFERS; ++i) {
         g_diagnosticInventoryCandidates[i] = {};
     }
+#endif
 }
 
+#if ARCH_HAS_PIC_8259
 static void cache_diagnostic_framebuffer_inventory(const guideXOS::BootInfo* bootinfo)
 {
     reset_diagnostic_framebuffer_inventory();
@@ -126,10 +140,34 @@ static void cache_diagnostic_framebuffer_inventory(const guideXOS::BootInfo* boo
     g_diagnosticInventorySummary.DisabledCandidateCount =
         g_diagnosticInventoryCandidateCount > 0u ? (g_diagnosticInventoryCandidateCount - 1u) : 0u;
 }
+#else
+static void cache_diagnostic_framebuffer_inventory(const void*) {}
+#endif
 
+#if ARCH_HAS_PIC_8259
 static bool diagnostic_framebuffer_candidate_valid(uint32_t index)
 {
     return g_hasDiagnosticInventory && index < g_diagnosticInventoryCandidateCount;
+}
+#else
+static bool diagnostic_framebuffer_candidate_valid(uint32_t) { return false; }
+#endif
+
+static bool initialize_common_geometry(const Geometry& geometry)
+{
+    if (!validate_geometry(geometry)) return false;
+    g_buffer = reinterpret_cast<uint32_t*>(static_cast<uintptr_t>(geometry.base));
+    g_width = geometry.width;
+    g_height = geometry.height;
+    g_pitch = geometry.pitch;
+    g_bpp = static_cast<uint8_t>(geometry.bits_per_pixel);
+    g_framebufferSize = geometry.size;
+    g_pixelFormat = geometry.format;
+    g_drawTarget = g_buffer;
+    g_backBuffer = nullptr;
+    g_available = true;
+    g_doubleBuffered = false;
+    return true;
 }
 
 static bool supports_direct_color_bpp()
@@ -164,9 +202,15 @@ static void write_front_pixel(uint32_t x, uint32_t y, uint32_t color)
 
     switch (g_bpp) {
         case 32:
-            pixel[0] = static_cast<uint8_t>(color & 0xFF);
-            pixel[1] = static_cast<uint8_t>((color >> 8) & 0xFF);
-            pixel[2] = static_cast<uint8_t>((color >> 16) & 0xFF);
+            if (g_pixelFormat == kPixelFormatR8G8B8A8) {
+                pixel[0] = static_cast<uint8_t>((color >> 16) & 0xFF);
+                pixel[1] = static_cast<uint8_t>((color >> 8) & 0xFF);
+                pixel[2] = static_cast<uint8_t>(color & 0xFF);
+            } else {
+                pixel[0] = static_cast<uint8_t>(color & 0xFF);
+                pixel[1] = static_cast<uint8_t>((color >> 8) & 0xFF);
+                pixel[2] = static_cast<uint8_t>((color >> 16) & 0xFF);
+            }
             pixel[3] = static_cast<uint8_t>((color >> 24) & 0xFF);
             break;
         case 24:
@@ -196,6 +240,10 @@ static uint32_t read_front_pixel(uint32_t x, uint32_t y)
 
     switch (g_bpp) {
         case 32:
+            if (g_pixelFormat == kPixelFormatR8G8B8A8) {
+                return 0xFF000000u | (static_cast<uint32_t>(pixel[0]) << 16) |
+                       (static_cast<uint32_t>(pixel[1]) << 8) | pixel[2];
+            }
             return 0xFF000000u | (static_cast<uint32_t>(pixel[2]) << 16) |
                    (static_cast<uint32_t>(pixel[1]) << 8) | pixel[0];
         case 24:
@@ -235,6 +283,8 @@ bool init(void* multiboot_info_ptr)
     g_height = info->framebuffer_height;
     g_pitch = info->framebuffer_pitch;
     g_bpp = info->framebuffer_bpp;
+    g_framebufferSize = static_cast<uint64_t>(g_pitch) * g_height;
+    g_pixelFormat = kPixelFormatB8G8R8A8;
     
     // Validate
     if (!g_buffer || g_width == 0 || g_height == 0) {
@@ -268,16 +318,17 @@ bool init_from_bootinfo(const guideXOS::BootInfo* bootinfo)
         return false;
     }
     
-    // Initialize framebuffer from BootInfo
-    g_buffer = reinterpret_cast<uint32_t*>(bootinfo->FramebufferBase);
-    g_width = bootinfo->FramebufferWidth;
-    g_height = bootinfo->FramebufferHeight;
-    g_pitch = bootinfo->FramebufferPitch;
-    g_bpp = 32;  // BootInfo always uses 32-bit format
-    
-    g_drawTarget = g_buffer;  // Draw directly to video memory by default
-    g_available = true;
-    return true;
+    kernel::boot::CommonFramebufferInfo common{};
+    common.base = bootinfo->FramebufferBase;
+    common.size = bootinfo->FramebufferSize;
+    common.width = bootinfo->FramebufferWidth;
+    common.height = bootinfo->FramebufferHeight;
+    common.pitch = bootinfo->FramebufferPitch;
+    common.bits_per_pixel = 32;
+    common.format = static_cast<uint32_t>(bootinfo->FramebufferFormat);
+    if (common.format == 0) common.format = kPixelFormatB8G8R8A8;
+    return initialize_common_geometry({common.base, common.size, common.width, common.height,
+                                       common.pitch, common.bits_per_pixel, common.format});
 }
 
 #else // !ARCH_HAS_PIC_8259
@@ -350,6 +401,15 @@ bool init_riscv_ramfb(uint64_t, uint32_t, uint32_t, uint32_t, uint8_t) { return 
 #endif
 
 #endif // ARCH_HAS_PIC_8259
+
+bool init_from_common_bootinfo(const kernel::boot::CommonBootInfo* bootinfo)
+{
+    reset_diagnostic_framebuffer_inventory();
+    if (!bootinfo || (bootinfo->flags & kernel::boot::kBootFlagFramebuffer) == 0) return false;
+    const kernel::boot::CommonFramebufferInfo& fb = bootinfo->framebuffer;
+    return initialize_common_geometry({fb.base, fb.size, fb.width, fb.height, fb.pitch,
+                                       fb.bits_per_pixel, fb.format});
+}
 
 // ================================================================
 // VESA / BGA init (x86 / amd64)
@@ -443,17 +503,18 @@ bool init_vesa(uint16_t width, uint16_t height, uint8_t bpp)
 bool init_efi_gop(uint64_t lfbBase, uint32_t width, uint32_t height,
                   uint32_t pitch, uint8_t bpp)
 {
-    reset_diagnostic_framebuffer_inventory();
-    if (lfbBase == 0 || width == 0 || height == 0) return false;
+    uint64_t size = static_cast<uint64_t>(pitch) * height;
+    return init_efi_gop_ex(lfbBase, size, width, height, pitch, bpp,
+                           kPixelFormatB8G8R8A8);
+}
 
-    g_buffer = reinterpret_cast<uint32_t*>(static_cast<uintptr_t>(lfbBase));
-    g_width  = width;
-    g_height = height;
-    g_pitch  = pitch;
-    g_bpp    = bpp;
-    g_drawTarget = g_buffer;  // Draw directly to video memory by default
-    g_available = true;
-    return true;
+bool init_efi_gop_ex(uint64_t lfbBase, uint64_t framebufferSize,
+                     uint32_t width, uint32_t height, uint32_t pitch,
+                     uint8_t bpp, uint32_t pixelFormat)
+{
+    reset_diagnostic_framebuffer_inventory();
+    return initialize_common_geometry({lfbBase, framebufferSize, width, height,
+                                       pitch, bpp, pixelFormat});
 }
 
 // ================================================================
@@ -463,16 +524,24 @@ bool init_efi_gop(uint64_t lfbBase, uint32_t width, uint32_t height,
 bool init_manual(uint64_t lfbBase, uint32_t width, uint32_t height,
                  uint32_t pitch, uint8_t bpp)
 {
+    uint64_t size = static_cast<uint64_t>(pitch) * height;
+    if (bpp == 32) {
+        return init_efi_gop_ex(lfbBase, size, width, height, pitch, bpp,
+                               kPixelFormatB8G8R8A8);
+    }
     reset_diagnostic_framebuffer_inventory();
-    if (lfbBase == 0 || width == 0 || height == 0) return false;
-
+    if (lfbBase == 0 || width == 0 || height == 0 || pitch == 0 || size == 0) return false;
     g_buffer = reinterpret_cast<uint32_t*>(static_cast<uintptr_t>(lfbBase));
-    g_width  = width;
+    g_width = width;
     g_height = height;
-    g_pitch  = pitch;
-    g_bpp    = bpp;
-    g_drawTarget = g_buffer;  // Draw directly to video memory by default
+    g_pitch = pitch;
+    g_bpp = bpp;
+    g_framebufferSize = size;
+    g_pixelFormat = kPixelFormatB8G8R8A8;
+    g_drawTarget = g_buffer;
+    g_backBuffer = nullptr;
     g_available = true;
+    g_doubleBuffered = false;
     return true;
 }
 
@@ -538,6 +607,7 @@ bool is_available()
     return g_available;
 }
 
+#if ARCH_HAS_PIC_8259
 bool has_diagnostic_framebuffer_inventory()
 {
     return g_hasDiagnosticInventory;
@@ -562,15 +632,32 @@ bool diagnostic_framebuffer_candidate(uint32_t index, DiagnosticFramebufferCandi
     outCandidate = g_diagnosticInventoryCandidates[index];
     return true;
 }
+#else
+bool has_diagnostic_framebuffer_inventory() { return false; }
+
+const DiagnosticFramebufferInventorySummary& diagnostic_framebuffer_inventory_summary()
+{
+    static const DiagnosticFramebufferInventorySummary empty{};
+    return empty;
+}
+
+uint32_t diagnostic_framebuffer_candidate_count() { return 0; }
+
+bool diagnostic_framebuffer_candidate(uint32_t, DiagnosticFramebufferCandidate&)
+{
+    return false;
+}
+#endif
 
 void clear(uint32_t color)
 {
     if (!g_available) return;
 
     if (g_doubleBuffered && g_backBuffer) {
-        uint32_t pixels = g_width * g_height;
-        for (uint32_t i = 0; i < pixels; i++) {
-            g_backBuffer[i] = color;
+        for (uint32_t y = 0; y < g_height; ++y) {
+            for (uint32_t x = 0; x < g_width; ++x) {
+                g_backBuffer[static_cast<uint64_t>(y) * g_width + x] = color;
+            }
         }
         return;
     }
@@ -619,19 +706,31 @@ uint32_t get_front_pixel(uint32_t x, uint32_t y)
 
 void fill_rect(uint32_t x, uint32_t y, uint32_t width, uint32_t height, uint32_t color)
 {
-    if (!g_available || x >= g_width || y >= g_height) return;
-
-    if (x + width > g_width) width = g_width - x;
-    if (y + height > g_height) height = g_height - y;
+    if (!g_available) return;
+    ClippedRect clipped{};
+    if (!clip_rect(x, y, width, height, g_width, g_height, &clipped)) return;
+    x = clipped.x;
+    y = clipped.y;
+    width = clipped.width;
+    height = clipped.height;
 
     if (g_bpp == 32) {
         uint32_t* base = (g_doubleBuffered && g_backBuffer) ? g_backBuffer : g_buffer;
         if (!base) return;
         const uint32_t stride = (g_doubleBuffered && g_backBuffer) ? g_width : (g_pitch / 4);
-        for (uint32_t dy = 0; dy < height; dy++) {
-            uint32_t* row = base + static_cast<uint64_t>(y + dy) * stride + x;
-            for (uint32_t dx = 0; dx < width; dx++) {
-                row[dx] = color;
+        if (g_doubleBuffered || (g_pixelFormat == kPixelFormatB8G8R8A8 &&
+                                 (g_pitch & 3u) == 0u)) {
+            for (uint32_t dy = 0; dy < height; dy++) {
+                uint32_t* row = base + static_cast<uint64_t>(y + dy) * stride + x;
+                for (uint32_t dx = 0; dx < width; dx++) {
+                    row[dx] = color;
+                }
+            }
+        } else {
+            for (uint32_t dy = 0; dy < height; ++dy) {
+                for (uint32_t dx = 0; dx < width; ++dx) {
+                    write_front_pixel(x + dx, y + dy, color);
+                }
             }
         }
         return;
@@ -674,18 +773,20 @@ void draw_line(uint32_t x1, uint32_t y1, uint32_t x2, uint32_t y2, uint32_t colo
 
 void blit(uint32_t* buffer, uint32_t x, uint32_t y, uint32_t width, uint32_t height)
 {
-    if (!g_available || !buffer) return;
+    if (!g_available || !buffer || x >= g_width || y >= g_height || width == 0 || height == 0) return;
 
-    if (g_bpp == 32) {
+    const uint32_t sourceWidth = width;
+    if (width > g_width - x) width = g_width - x;
+    if (height > g_height - y) height = g_height - y;
+
+    if (g_bpp == 32 && (g_doubleBuffered ||
+                        (g_pixelFormat == kPixelFormatB8G8R8A8 && (g_pitch & 3u) == 0u))) {
         uint32_t* base = (g_doubleBuffered && g_backBuffer) ? g_backBuffer : g_buffer;
         if (!base) return;
         const uint32_t stride = (g_doubleBuffered && g_backBuffer) ? g_width : (g_pitch / 4);
-        if (x >= g_width || y >= g_height) return;
-        if (x + width > g_width) width = g_width - x;
-        if (y + height > g_height) height = g_height - y;
         for (uint32_t dy = 0; dy < height; dy++) {
             uint32_t* dstRow = base + static_cast<uint64_t>(y + dy) * stride + x;
-            const uint32_t* srcRow = buffer + static_cast<uint64_t>(dy) * width;
+            const uint32_t* srcRow = buffer + static_cast<uint64_t>(dy) * sourceWidth;
             memcpy(dstRow, srcRow, static_cast<size_t>(width) * sizeof(uint32_t));
         }
         return;
@@ -693,7 +794,7 @@ void blit(uint32_t* buffer, uint32_t x, uint32_t y, uint32_t width, uint32_t hei
 
     for (uint32_t dy = 0; dy < height; dy++) {
         for (uint32_t dx = 0; dx < width; dx++) {
-            uint32_t color = buffer[dy * width + dx];
+            uint32_t color = buffer[static_cast<uint64_t>(dy) * sourceWidth + dx];
             put_pixel(x + dx, y + dy, color);
         }
     }
@@ -701,11 +802,14 @@ void blit(uint32_t* buffer, uint32_t x, uint32_t y, uint32_t width, uint32_t hei
 
 void blit_alpha(const uint32_t* buffer, uint32_t x, uint32_t y, uint32_t width, uint32_t height)
 {
-    if (!g_available || !buffer) return;
+    if (!g_available || !buffer || x >= g_width || y >= g_height || width == 0 || height == 0) return;
+    const uint32_t sourceWidth = width;
+    if (width > g_width - x) width = g_width - x;
+    if (height > g_height - y) height = g_height - y;
 
     for (uint32_t dy = 0; dy < height; dy++) {
         for (uint32_t dx = 0; dx < width; dx++) {
-            uint32_t src = buffer[dy * width + dx];
+            uint32_t src = buffer[static_cast<uint64_t>(dy) * sourceWidth + dx];
             uint8_t a = (src >> 24) & 0xFF;
             if (a == 0) continue;
             if (a == 0xFF) {
@@ -741,8 +845,8 @@ bool enable_double_buffering()
     }
     
     // Check if resolution fits in our static back buffer
-    uint32_t totalPixels = g_width * g_height;
-    if (totalPixels > MAX_BACKBUFFER_PIXELS) {
+    const uint64_t totalPixels = static_cast<uint64_t>(g_width) * g_height;
+    if (totalPixels == 0 || totalPixels > MAX_BACKBUFFER_PIXELS) {
         return false;  // Resolution too high for our static buffer
     }
     
@@ -750,7 +854,7 @@ bool enable_double_buffering()
     g_backBuffer = g_backBufferStorage;
     
     // Clear the back buffer
-    for (uint32_t i = 0; i < totalPixels; i++) {
+    for (uint64_t i = 0; i < totalPixels; i++) {
         g_backBuffer[i] = 0;
     }
     
@@ -771,26 +875,33 @@ void present()
 {
     if (!g_available || !g_doubleBuffered || !g_backBuffer || !g_buffer) return;
 
-    if (g_bpp == 32) {
-        const uint32_t frontStride = g_pitch / 4;
-        if (frontStride == g_width) {
-            memcpy(g_buffer, g_backBuffer, static_cast<size_t>(g_width) * g_height * sizeof(uint32_t));
-            return;
-        }
-
-        for (uint32_t y = 0; y < g_height; y++) {
-            memcpy(g_buffer + static_cast<size_t>(y) * frontStride,
-                   g_backBuffer + static_cast<size_t>(y) * g_width,
-                   static_cast<size_t>(g_width) * sizeof(uint32_t));
-        }
-        return;
-    }
-
     for (uint32_t y = 0; y < g_height; y++) {
         for (uint32_t x = 0; x < g_width; x++) {
             write_front_pixel(x, y, g_backBuffer[y * g_width + x]);
         }
     }
+#if defined(ARCH_ARM64)
+    __asm__ volatile("dsb sy" ::: "memory");
+#endif
+}
+
+uint64_t verification_hash(uint32_t x, uint32_t y, uint32_t width, uint32_t height)
+{
+    if (!g_available || x >= g_width || y >= g_height || width == 0 || height == 0) return 0;
+    if (width > g_width - x) width = g_width - x;
+    if (height > g_height - y) height = g_height - y;
+
+    uint64_t hash = UINT64_C(1469598103934665603);
+    for (uint32_t row = 0; row < height; ++row) {
+        for (uint32_t column = 0; column < width; ++column) {
+            const uint32_t pixel = get_front_pixel(x + column, y + row);
+            for (uint32_t byte = 0; byte < 4; ++byte) {
+                hash ^= (pixel >> (byte * 8)) & 0xffu;
+                hash *= UINT64_C(1099511628211);
+            }
+        }
+    }
+    return hash;
 }
 
 uint32_t* get_back_buffer()

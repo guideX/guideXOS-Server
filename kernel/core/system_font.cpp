@@ -11,7 +11,11 @@
 #endif
 
 #if defined(GXOS_BARE_METAL)
+#if defined(__has_include)
+#if __has_include(<string.h>)
 #include <string.h>
+#endif
+#endif
 #else
 #include <cstring>
 #endif
