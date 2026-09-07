@@ -18298,6 +18298,10 @@ extern "C" void __cdecl guideXosNativeAotC011EC67RegionSourceObserved(
     uintptr_t region, uintptr_t activeRegion, uintptr_t nextRegion,
     uintptr_t freeCountBefore, uintptr_t freeCountAfter,
     uintptr_t allocatorFreeBefore, uintptr_t allocatorFreeAfter,
+    uintptr_t activeMem, uintptr_t activeCommitted, uintptr_t activeAllocated,
+    uintptr_t activeReserved, uintptr_t selectedMem,
+    uintptr_t selectedCommitted, uintptr_t selectedAllocated,
+    uintptr_t selectedReserved,
     uint32_t result, uint32_t sourceBranch);
 extern "C" void __cdecl guideXosNativeAotC011EC67RegionCreateObserved(
     uint32_t generation, uintptr_t region, uintptr_t start, uintptr_t end,
@@ -20767,7 +20771,8 @@ guideXosNativeAotC011EC64ManagedAllocationReturned(
     uintptr_t allocationLimitAfter) {
     guidexos_nativeaot_c011ec64_lifecycle_record& r =
         guideXosNativeAotC011EC64State();
-    const uint32_t ordinal = r.activeAllocationOrdinal;
+    const uint32_t ordinal = r.activeAllocationOrdinal != 0u
+        ? r.activeAllocationOrdinal : r.allocationCount;
     if (r.started == 0u || ordinal == 0u ||
         ordinal > r.allocationCount) return;
     guidexos_nativeaot_c011ec64_allocation_record& a =
@@ -25285,6 +25290,10 @@ guideXosNativeAotC011EC67RegionSourceObserved(
     uintptr_t region, uintptr_t activeRegion, uintptr_t nextRegion,
     uintptr_t freeCountBefore, uintptr_t freeCountAfter,
     uintptr_t allocatorFreeBefore, uintptr_t allocatorFreeAfter,
+    uintptr_t activeMem, uintptr_t activeCommitted, uintptr_t activeAllocated,
+    uintptr_t activeReserved, uintptr_t selectedMem,
+    uintptr_t selectedCommitted, uintptr_t selectedAllocated,
+    uintptr_t selectedReserved,
     uint32_t result, uint32_t sourceBranch) {
     guidexos_nativeaot_c011ec67_lifecycle_record& r =
         guideXosNativeAotC011EC67State();
@@ -25323,8 +25332,44 @@ guideXosNativeAotC011EC67RegionSourceObserved(
     e->allocatorFreeBefore = allocatorFreeBefore;
     e->allocatorFreeAfter = allocatorFreeAfter;
     e->freeBytes = size;
+    e->committed = selectedCommitted;
+    e->allocated = selectedAllocated;
+    e->reserved = selectedReserved;
+    e->used = selectedMem;
+    e->previousBefore = activeCommitted;
+    e->previousAfter = activeAllocated;
+    e->headBefore = activeMem;
+    e->headAfter = activeReserved;
     e->result = result;
     e->sourceBranch = sourceBranch;
+#if defined(GUIDEXOS_NATIVEAOT_C011EC89_EXACT_ALLOCATION_OOM_ARITHMETIC)
+    const guidexos_nativeaot_c011ec65_lifecycle_record& c65 =
+        g_guideXosAllocationDiagnostics.c011ec65Lifecycle;
+    const guidexos_nativeaot_c011ec64_lifecycle_record& c64 =
+        g_guideXosAllocationDiagnostics.c011ec64Lifecycle;
+    const uint32_t allocationOrdinal = c64.activeAllocationOrdinal != 0u
+        ? c64.activeAllocationOrdinal : c64.allocationCount;
+    for (uint32_t index = c65.eventCount; index != 0u; --index) {
+        const guidexos_nativeaot_c011ec65_event_record& attempt =
+            c65.events[index - 1u];
+        if (attempt.phase != 2u || attempt.generation != 0u ||
+            attempt.requestSize == 0u ||
+            (attempt.kind != GUIDEXOS_NATIVEAOT_C011EC65_EVENT_ATTEMPT &&
+             attempt.kind != GUIDEXOS_NATIVEAOT_C011EC65_EVENT_NORMAL_REFILL &&
+             attempt.kind != GUIDEXOS_NATIVEAOT_C011EC65_EVENT_POST_DEBIT &&
+             attempt.kind != GUIDEXOS_NATIVEAOT_C011EC65_EVENT_ALLOC_FAIL)) {
+            continue;
+        }
+        if (allocationOrdinal == 0u) continue;
+        e->planGenerationBefore = allocationOrdinal;
+        e->planGenerationAfter = static_cast<uint32_t>(attempt.requestSize);
+        e->liveBytes = attempt.allocationContext;
+        e->tailBefore = attempt.allocationPointer;
+        e->tailAfter = attempt.allocationLimit;
+        e->reserved0 = attempt.activeSegment != 0u ? 1u : 0u;
+        break;
+    }
+#endif
     if (kind == GUIDEXOS_NATIVEAOT_C011EC67_EVENT_GET_FREE_REGION ||
         kind == GUIDEXOS_NATIVEAOT_C011EC67_EVENT_GET_NEW_REGION) {
         guideXosNativeAotC011EC67ObserveCandidateCount(
@@ -26950,6 +26995,15 @@ static int guideXosNativeAotC011EC67Finish() {
         } else if (e.kind == GUIDEXOS_NATIVEAOT_C011EC67_EVENT_SNAPSHOT) {
             marker = "C77_REGION_COUNT"; operation = "snapshot";
         }
+#if defined(GUIDEXOS_NATIVEAOT_C011EC89_EXACT_ALLOCATION_OOM_ARITHMETIC)
+        const bool c89Boundary =
+            (e.kind == GUIDEXOS_NATIVEAOT_C011EC67_EVENT_GET_FREE_REGION ||
+             e.kind == GUIDEXOS_NATIVEAOT_C011EC67_EVENT_GET_NEW_REGION) &&
+            e.planGenerationBefore != 0u;
+        if (c89Boundary) {
+            marker = "C011EC89-REGION-SOURCE";
+        }
+#endif
         suspendEeSerialPutString(
             "[nativeaot-gc-short-weak-lifetime] ");
         suspendEeSerialPutString(marker);
@@ -26978,6 +27032,32 @@ static int guideXosNativeAotC011EC67Finish() {
         guideXosNativeAotC011EC67Put32("stateAfter", e.stateAfter);
         guideXosNativeAotC011EC67Put64("freeCountBefore", e.freeCountBefore);
         guideXosNativeAotC011EC67Put64("freeCountAfter", e.freeCountAfter);
+#if defined(GUIDEXOS_NATIVEAOT_C011EC89_EXACT_ALLOCATION_OOM_ARITHMETIC)
+        if (c89Boundary) {
+            guideXosNativeAotC011EC67Put32(
+                "allocationOrdinal", e.planGenerationBefore);
+            guideXosNativeAotC011EC67Put64(
+                "allocationRequest", e.planGenerationAfter);
+            guideXosNativeAotC011EC67Put64("allocationContext", e.liveBytes);
+            guideXosNativeAotC011EC67Put64(
+                "allocationPointer", e.tailBefore);
+            guideXosNativeAotC011EC67Put64(
+                "allocationLimit", e.tailAfter);
+            guideXosNativeAotC011EC67Put64(
+                "contextHeadroom", e.tailAfter >= e.tailBefore
+                    ? e.tailAfter - e.tailBefore : 0u);
+            guideXosNativeAotC011EC67Put64("previousMem", e.headBefore);
+            guideXosNativeAotC011EC67Put64(
+                "previousCommitted", e.previousBefore);
+            guideXosNativeAotC011EC67Put64(
+                "previousAllocated", e.previousAfter);
+            guideXosNativeAotC011EC67Put64("previousReserved", e.headAfter);
+            guideXosNativeAotC011EC67Put64("selectedMem", e.used);
+            guideXosNativeAotC011EC67Put64("selectedCommitted", e.committed);
+            guideXosNativeAotC011EC67Put64("selectedAllocated", e.allocated);
+            guideXosNativeAotC011EC67Put64("selectedReserved", e.reserved);
+        }
+#endif
         suspendEeSerialPutString(" operation=");
         suspendEeSerialPutString(operation);
         suspendEeSerialPutString(" source=guidexos_nativeaot_c011ec67_lifecycle\n");
