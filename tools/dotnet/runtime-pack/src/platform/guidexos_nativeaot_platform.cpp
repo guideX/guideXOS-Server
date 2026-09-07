@@ -18176,6 +18176,109 @@ extern "C" void __cdecl guideXosNativeAotC011EC65EntryObserved(
     uint32_t requestedGeneration, uint32_t selectedGeneration,
     uint32_t originBranch, uint32_t lastGcBeforeOom);
 #endif
+#if defined(GUIDEXOS_NATIVEAOT_C011EC87_DECOMMIT_BALANCE)
+static void guideXosNativeAotC011EC67Put32(const char* name, uint32_t value);
+static void guideXosNativeAotC011EC67Put64(const char* name, uintptr_t value);
+
+static void guideXosNativeAotC011EC87Put32(const char* name, uint32_t value) {
+    guideXosNativeAotC011EC67Put32(name, value);
+}
+
+static void guideXosNativeAotC011EC87Put64(const char* name, uintptr_t value) {
+    guideXosNativeAotC011EC67Put64(name, value);
+}
+
+extern "C" void __cdecl guideXosNativeAotC011EC87PolicyObserved(
+    uint32_t kind, uintptr_t freeCount, uintptr_t freeListCount,
+    uintptr_t surplus, uintptr_t totalBudget, uintptr_t hugeUnits,
+    int64_t balance, uintptr_t regionsToMove, uintptr_t regionSize,
+    uintptr_t regionFactor, uintptr_t heapBudget, uintptr_t globalDecommitCount,
+    uintptr_t allocatorUsed, uintptr_t allocatorFree,
+    uint32_t collectionReason) {
+    suspendEeSerialPutString(
+        "[nativeaot-gc-short-weak-lifetime] C87_POLICY marker=C011EC87-POLICY");
+    guideXosNativeAotC011EC87Put32("kind", kind);
+    guideXosNativeAotC011EC87Put64("freeCount", freeCount);
+    guideXosNativeAotC011EC87Put64("freeListCount", freeListCount);
+    guideXosNativeAotC011EC87Put64("surplus", surplus);
+    guideXosNativeAotC011EC87Put64("totalBudget", totalBudget);
+    guideXosNativeAotC011EC87Put64("hugeUnits", hugeUnits);
+    guideXosNativeAotC011EC87Put64("balance", static_cast<uintptr_t>(balance));
+    guideXosNativeAotC011EC87Put64("regionsToMove", regionsToMove);
+    guideXosNativeAotC011EC87Put64("regionSize", regionSize);
+    guideXosNativeAotC011EC87Put64("regionFactor", regionFactor);
+    guideXosNativeAotC011EC87Put64("heapBudget", heapBudget);
+    guideXosNativeAotC011EC87Put64("globalDecommitCount", globalDecommitCount);
+    guideXosNativeAotC011EC87Put64("allocatorUsed", allocatorUsed);
+    guideXosNativeAotC011EC87Put64("allocatorFree", allocatorFree);
+    guideXosNativeAotC011EC87Put32("collectionReason", collectionReason);
+    suspendEeSerialPutString(" source=gc_heap::distribute_free_regions\n");
+}
+
+extern "C" void __cdecl guideXosNativeAotC011EC87MoveObserved(
+    uint32_t kind, uintptr_t region, uintptr_t rangeStart, uintptr_t rangeEnd,
+    uintptr_t mapOrdinal, uintptr_t regionUnits, uintptr_t requestBefore,
+    uintptr_t requestAfter, uint32_t generation, uint32_t state) {
+    suspendEeSerialPutString(
+        "[nativeaot-gc-short-weak-lifetime] C87_MOVE marker=C011EC87-MOVE");
+    guideXosNativeAotC011EC87Put32("kind", kind);
+    guideXosNativeAotC011EC87Put64("region", region);
+    guideXosNativeAotC011EC87Put64("rangeStart", rangeStart);
+    guideXosNativeAotC011EC87Put64("rangeEnd", rangeEnd);
+    guideXosNativeAotC011EC87Put64("mapOrdinal", mapOrdinal);
+    guideXosNativeAotC011EC87Put64("regionUnits", regionUnits);
+    guideXosNativeAotC011EC87Put64("requestBefore", requestBefore);
+    guideXosNativeAotC011EC87Put64("requestAfter", requestAfter);
+    guideXosNativeAotC011EC87Put32("generation", generation);
+    guideXosNativeAotC011EC87Put32("state", state);
+    suspendEeSerialPutString(" source=region_allocator::move_highest_free_regions\n");
+}
+
+extern "C" void __cdecl guideXosNativeAotC011EC87AgingObserved(
+    uint32_t kind, uintptr_t region, uintptr_t rangeStart, uintptr_t ageInFree,
+    uintptr_t committedSize, uintptr_t freeCountBefore, uintptr_t freeCountAfter,
+    uintptr_t globalCountBefore, uintptr_t globalCountAfter, uint32_t generation,
+    uint32_t state) {
+    suspendEeSerialPutString(
+        "[nativeaot-gc-short-weak-lifetime] C87_AGING marker=C011EC87-AGING");
+    guideXosNativeAotC011EC87Put32("kind", kind);
+    guideXosNativeAotC011EC87Put64("region", region);
+    guideXosNativeAotC011EC87Put64("rangeStart", rangeStart);
+    guideXosNativeAotC011EC87Put64("ageInFree", ageInFree);
+    guideXosNativeAotC011EC87Put64("committedSize", committedSize);
+    guideXosNativeAotC011EC87Put64("freeCountBefore", freeCountBefore);
+    guideXosNativeAotC011EC87Put64("freeCountAfter", freeCountAfter);
+    guideXosNativeAotC011EC87Put64("globalCountBefore", globalCountBefore);
+    guideXosNativeAotC011EC87Put64("globalCountAfter", globalCountAfter);
+    guideXosNativeAotC011EC87Put32("generation", generation);
+    guideXosNativeAotC011EC87Put32("state", state);
+    suspendEeSerialPutString(
+        " source=gc_heap::distribute_free_regions.aged-free-region\n");
+}
+
+extern "C" void __cdecl guideXosNativeAotC011EC87DecommitObserved(
+    uint32_t phase, uintptr_t region, uintptr_t rangeStart, uintptr_t pageStart,
+    uintptr_t decommitSize, uintptr_t mem, uintptr_t committed,
+    uintptr_t reserved, uintptr_t globalCountBefore, uintptr_t globalCountAfter,
+    uint32_t decommitSucceeded, uint32_t generation, uint32_t state) {
+    suspendEeSerialPutString(
+        "[nativeaot-gc-short-weak-lifetime] C87_DECOMMIT marker=C011EC87-DECOMMIT");
+    guideXosNativeAotC011EC87Put32("phase", phase);
+    guideXosNativeAotC011EC87Put64("region", region);
+    guideXosNativeAotC011EC87Put64("rangeStart", rangeStart);
+    guideXosNativeAotC011EC87Put64("pageStart", pageStart);
+    guideXosNativeAotC011EC87Put64("decommitSize", decommitSize);
+    guideXosNativeAotC011EC87Put64("mem", mem);
+    guideXosNativeAotC011EC87Put64("committed", committed);
+    guideXosNativeAotC011EC87Put64("reserved", reserved);
+    guideXosNativeAotC011EC87Put64("globalCountBefore", globalCountBefore);
+    guideXosNativeAotC011EC87Put64("globalCountAfter", globalCountAfter);
+    guideXosNativeAotC011EC87Put32("decommitSucceeded", decommitSucceeded);
+    guideXosNativeAotC011EC87Put32("generation", generation);
+    guideXosNativeAotC011EC87Put32("state", state);
+    suspendEeSerialPutString(" source=gc_heap::decommit_region\n");
+}
+#endif
 #if defined(GUIDEXOS_NATIVEAOT_C011EC67_GEN0_REGION_AVAILABILITY)
 extern "C" void __cdecl guideXosNativeAotC011EC67RegionListMutationObserved(
     uint32_t kind, uint32_t listKind, uintptr_t list, uintptr_t region,

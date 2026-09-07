@@ -7,7 +7,7 @@ param(
     [switch]$SkipManagedBuild,
     [string]$RuntimePackManifest = "",
     [string]$LockedRuntimeRoot = "",
-    [ValidateSet("single-thread-suspend-ee", "allocation-context-fixup-root-boundary", "first-per-thread-root-provider", "first-root-candidate-load", "first-non-null-root-callback-boundary", "first-root-callback-entry", "first-root-membership-classification", "first-root-heap-resolution", "first-root-condemned-generation-decision", "first-root-pre-mark-boundary", "first-root-first-mark-mutation", "first-root-post-queue-mark-decision", "first-root-first-non-null-old-o", "next-genuine-root-provider", "stack-provider-transition-failfast", "stack-provider-code-manager-registration", "stack-provider-transition-frame-control-pc", "stack-provider-unwind-gc-info", "stack-provider-unwind-caller-frame", "stack-provider-native-transition-continuation", "stack-provider-native-caller-provenance", "stack-provider-native-kernel-entry-boundary", "stack-provider-native-kernel-stack-completion", "post-root-queue-mark-processing", "mark-queue-closure", "post-mark-short-weak-handle", "short-weak-handle-operation", "short-weak-live-handle", "short-weak-dead-handle", "short-weak-lifetime-transition", "relocation-root-update", "relocated-handle-update", "lifetime-transition-complete", "second-collection-completion", "dead-object-reclamation", "collection-plan-mode-provenance-c37", "collection-plan-mode-provenance-c38", "compaction-reclamation", "post-gc-allocator-provenance", "post-gc-reclaimed-gen1-lifecycle", "reclaimed-gen1-natural-reuse", "reclaimed-gen1-ephemeral-transition", "reclaimed-gen1-natural-older-generation-transition", "natural-gen1-condemnation-policy-threshold", "direct-gen1-budget-condemnation", "n-initial-provenance", "last-n0-direct-gen1-window", "pre-last-n0-promotion-timing", "pre-final-n0-promotion-cycle", "post-promotion-n0-refill-topology", "post-promotion-earlier-headroom", "post-debit-normal-condemnation-entry", "post-debit-gen2-oos-preemption", "post-debit-normal-gen0-refill", "gen0-region-availability-provenance", "retained-survivor-region-availability", "survivor-cohort-provenance-reconciliation", "survivor-count-threshold-causality", "promotion-decision-live-byte-threshold", "promotion-threshold-region-formation", "promotion-positive-region-cohort", "basic-free-region-eligibility-geometry", "basic-region-supply-provenance", "region-supply-origin-coverage", "offline-region-range-census", "canonical-region-universe-snapshot", "basic-canonical-range-mapping", "exact-canonical-region-materialization", "basic-free-removal-recycle-chronology", "malformed-transition-frame-provenance", "reverse-pinvoke-slot-provenance", "regdisplay-fp-handoff", "relocation-root-fault-provenance", "iterator-fp-ownership", "second-collection-continuation", "productionized-second-collection")]
+    [ValidateSet("single-thread-suspend-ee", "allocation-context-fixup-root-boundary", "first-per-thread-root-provider", "first-root-candidate-load", "first-non-null-root-callback-boundary", "first-root-callback-entry", "first-root-membership-classification", "first-root-heap-resolution", "first-root-condemned-generation-decision", "first-root-pre-mark-boundary", "first-root-first-mark-mutation", "first-root-post-queue-mark-decision", "first-root-first-non-null-old-o", "next-genuine-root-provider", "stack-provider-transition-failfast", "stack-provider-code-manager-registration", "stack-provider-transition-frame-control-pc", "stack-provider-unwind-gc-info", "stack-provider-unwind-caller-frame", "stack-provider-native-transition-continuation", "stack-provider-native-caller-provenance", "stack-provider-native-kernel-entry-boundary", "stack-provider-native-kernel-stack-completion", "post-root-queue-mark-processing", "mark-queue-closure", "post-mark-short-weak-handle", "short-weak-handle-operation", "short-weak-live-handle", "short-weak-dead-handle", "short-weak-lifetime-transition", "relocation-root-update", "relocated-handle-update", "lifetime-transition-complete", "second-collection-completion", "dead-object-reclamation", "collection-plan-mode-provenance-c37", "collection-plan-mode-provenance-c38", "compaction-reclamation", "post-gc-allocator-provenance", "post-gc-reclaimed-gen1-lifecycle", "reclaimed-gen1-natural-reuse", "reclaimed-gen1-ephemeral-transition", "reclaimed-gen1-natural-older-generation-transition", "natural-gen1-condemnation-policy-threshold", "direct-gen1-budget-condemnation", "n-initial-provenance", "last-n0-direct-gen1-window", "pre-last-n0-promotion-timing", "pre-final-n0-promotion-cycle", "post-promotion-n0-refill-topology", "post-promotion-earlier-headroom", "post-debit-normal-condemnation-entry", "post-debit-gen2-oos-preemption", "post-debit-normal-gen0-refill", "gen0-region-availability-provenance", "retained-survivor-region-availability", "survivor-cohort-provenance-reconciliation", "survivor-count-threshold-causality", "promotion-decision-live-byte-threshold", "promotion-threshold-region-formation", "promotion-positive-region-cohort", "basic-free-region-eligibility-geometry", "basic-region-supply-provenance", "region-supply-origin-coverage", "offline-region-range-census", "canonical-region-universe-snapshot", "basic-canonical-range-mapping", "exact-canonical-region-materialization", "basic-free-removal-recycle-chronology", "decommit-budget-free-region-balance", "malformed-transition-frame-provenance", "reverse-pinvoke-slot-provenance", "regdisplay-fp-handoff", "relocation-root-fault-provenance", "iterator-fp-ownership", "second-collection-continuation", "productionized-second-collection")]
     [string]$ProofMode = "single-thread-suspend-ee",
     [ValidateSet("", "PromotionDecisionLiveByteThreshold", "PromotionPositiveRegionCohort")]
     [string]$ManagedProofModeOverride = "",
@@ -186,6 +186,8 @@ if ([string]::IsNullOrWhiteSpace($EvidenceRoot)) {
         Join-Path $root ("out\dotnet\c011ec84-exact-canonical-region-materialization\" + $C71Case + "\target-" + $C84TargetOffset.ToString("X"))
     } elseif ($ProofMode -eq "basic-free-removal-recycle-chronology") {
         Join-Path $root ("out\dotnet\c011ec85-basic-free-removal-recycle\" + $C71Case + "\target-" + $C85TargetOffset.ToString("X"))
+    } elseif ($ProofMode -eq "decommit-budget-free-region-balance") {
+        Join-Path $root ("out\dotnet\c011ec87-decommit-budget-free-region-balance\" + $C71Case + "\tail-" + $C66TailAllocations)
     } elseif ($ProofMode -eq "post-mark-short-weak-handle") {
         Join-Path $root "out\dotnet\c011ec29-post-mark-short-weak-handle"
     } elseif ($ProofMode -eq "first-root-post-queue-mark-decision") {
@@ -235,8 +237,9 @@ $isC011EC80 = $ProofMode -eq "canonical-region-universe-snapshot"
 $isC011EC83 = $ProofMode -eq "basic-canonical-range-mapping"
 $isC011EC84 = $ProofMode -eq "exact-canonical-region-materialization"
 $isC011EC85 = $ProofMode -eq "basic-free-removal-recycle-chronology"
+$isC011EC87 = $ProofMode -eq "decommit-budget-free-region-balance"
 $isC011EC78 = $ProofMode -eq "region-supply-origin-coverage"
-$isC011EC77 = $ProofMode -eq "basic-region-supply-provenance" -or $isC011EC78 -or $isC011EC79 -or $isC011EC80 -or $isC011EC83 -or $isC011EC84 -or $isC011EC85
+$isC011EC77 = $ProofMode -eq "basic-region-supply-provenance" -or $isC011EC78 -or $isC011EC79 -or $isC011EC80 -or $isC011EC83 -or $isC011EC84 -or $isC011EC85 -or $isC011EC87
 $isC011EC76 = $ProofMode -eq "basic-free-region-eligibility-geometry" -or $isC011EC77
 $isC011EC76OneControl = $isC011EC76 -and $C71Case -eq "15mid8" -and $C66TailAllocations -eq 320
 $isC011EC73 = $ProofMode -eq "promotion-positive-region-cohort" -or ($isC011EC76 -and -not $isC011EC76OneControl) -or ($isC011EC77 -and $C71Case -eq "baseline16")
@@ -409,8 +412,9 @@ $proofDefine = if ($isNextGenuineRootProvider -or $isC011EC39 -or $isC011EC55) {
     $c80Define = if ($isC011EC80) { " /DGUIDEXOS_NATIVEAOT_C011EC80_CANONICAL_REGION_UNIVERSE_SNAPSHOT" } else { "" }
     $c83Define = if ($isC011EC83) { " /DGUIDEXOS_NATIVEAOT_C011EC83_BASIC_CANONICAL_RANGE_MAPPING" } else { "" }
 $c84ProbeTargetOffset = if ($isC011EC85) { $C85TargetOffset } else { $C84TargetOffset }
-$c84Define = if ($isC011EC84 -or $isC011EC85) { " /DGUIDEXOS_NATIVEAOT_C011EC84_EXACT_REGION_MATERIALIZATION /DGUIDEXOS_NATIVEAOT_C011EC84_TARGET_OFFSET=$c84ProbeTargetOffset /DGUIDEXOS_NATIVEAOT_C011EC84_BASIC_REGION_SIZE=0x100000" } else { "" }
+$c84Define = if ($isC011EC84 -or $isC011EC85 -or $isC011EC87) { " /DGUIDEXOS_NATIVEAOT_C011EC84_EXACT_REGION_MATERIALIZATION /DGUIDEXOS_NATIVEAOT_C011EC84_TARGET_OFFSET=$c84ProbeTargetOffset /DGUIDEXOS_NATIVEAOT_C011EC84_BASIC_REGION_SIZE=0x100000" } else { "" }
 $c85Define = if ($false) { " /DGUIDEXOS_NATIVEAOT_C011EC85_BASIC_FREE_REMOVAL_RECYCLE_CHRONOLOGY /DGUIDEXOS_NATIVEAOT_C011EC85_TARGET_OFFSET=$C85TargetOffset /DGUIDEXOS_NATIVEAOT_C011EC85_BASIC_REGION_SIZE=0x100000" } else { "" }
+$c87Define = if ($isC011EC87) { " /DGUIDEXOS_NATIVEAOT_C011EC87_DECOMMIT_BALANCE" } else { "" }
     # C78 reuses the accepted C67/C76/C77 fixed records.  The first live
     # observer experiment added a second large ledger and changed the
     # address-sensitive ONE/SIX control; keep that rejected image out of the
@@ -420,7 +424,7 @@ $c85Define = if ($false) { " /DGUIDEXOS_NATIVEAOT_C011EC85_BASIC_FREE_REMOVAL_RE
     $c66TailDefine = if ($isC011EC66 -and $C66TailAllocations -ne 320) { " /DGUIDEXOS_NATIVEAOT_C011EC66_TAIL_$C66TailAllocations" } else { "" }
     $c62StrategyDefine = if ($isC011EC62 -and -not $isC011EC64 -and $C62Strategy -eq "R1") { " /DGUIDEXOS_NATIVEAOT_C011EC62_STRATEGY_R1" } elseif ($isC011EC62 -and -not $isC011EC64 -and $C62Strategy -eq "R2") { " /DGUIDEXOS_NATIVEAOT_C011EC62_STRATEGY_R2" } else { "" }
     $firstNonNullDefine = if ($isC011EC31 -or $isC011EC32 -or $isC011EC56Instrumentation) { "" } else { " /DGUIDEXOS_NATIVEAOT_FIRST_NON_NULL_ROOT_ALLOCATION" }
-    "/DGUIDEXOS_NATIVEAOT_ALLOCATION_CONTEXT_FIXUP_ROOT_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_PER_THREAD_ROOT_PROVIDER_ALLOCATION$firstNonNullDefine /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CALLBACK_ENTRY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_MEMBERSHIP_CLASSIFICATION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_HEAP_RESOLUTION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CONDEMNED_GENERATION_DECISION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_PRE_MARK_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_NON_NULL_OLD_O_ALLOCATION /DGUIDEXOS_NATIVEAOT_NEXT_GENUINE_ROOT_PROVIDER_ALLOCATION$minimalDefine$codeManagerDefine$c19Define$c20Define$c21Define$c23Define$c24Define$c25Define$c26Define$c27Define$c28Define$c29Define$c31Define$c32Define$c33Define$c34Define$c35Define$c36Define$c37Define$c38Define$c39Define$c40Define$c41Define$c42Define$c53Define$c54Define$c55Define$c56Define$c59Define$c59StrategyDefine$c60Define$c60StrategyDefine$c61Define$c61StrategyDefine$c62Define$c63Define$c64Define$c65Define$c66Define$c67Define$c68Define$c69Define$c70Define$c71Define$c72Define$c73Define$c76Define$c77Define$c78Define$c79Define$c80Define$c83Define$c84Define$c85Define$c66TailDefine$c62StrategyDefine$c011ec49Define"
+    "/DGUIDEXOS_NATIVEAOT_ALLOCATION_CONTEXT_FIXUP_ROOT_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_PER_THREAD_ROOT_PROVIDER_ALLOCATION$firstNonNullDefine /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CALLBACK_ENTRY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_MEMBERSHIP_CLASSIFICATION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_HEAP_RESOLUTION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CONDEMNED_GENERATION_DECISION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_PRE_MARK_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_NON_NULL_OLD_O_ALLOCATION /DGUIDEXOS_NATIVEAOT_NEXT_GENUINE_ROOT_PROVIDER_ALLOCATION$minimalDefine$codeManagerDefine$c19Define$c20Define$c21Define$c23Define$c24Define$c25Define$c26Define$c27Define$c28Define$c29Define$c31Define$c32Define$c33Define$c34Define$c35Define$c36Define$c37Define$c38Define$c39Define$c40Define$c41Define$c42Define$c53Define$c54Define$c55Define$c56Define$c59Define$c59StrategyDefine$c60Define$c60StrategyDefine$c61Define$c61StrategyDefine$c62Define$c63Define$c64Define$c65Define$c66Define$c67Define$c68Define$c69Define$c70Define$c71Define$c72Define$c73Define$c76Define$c77Define$c78Define$c79Define$c80Define$c83Define$c84Define$c85Define$c87Define$c66TailDefine$c62StrategyDefine$c011ec49Define"
 } elseif ($isFirstRootFirstNonNullOldO) {
     "/DGUIDEXOS_NATIVEAOT_ALLOCATION_CONTEXT_FIXUP_ROOT_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_PER_THREAD_ROOT_PROVIDER_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_NON_NULL_ROOT_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CALLBACK_ENTRY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_MEMBERSHIP_CLASSIFICATION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_HEAP_RESOLUTION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CONDEMNED_GENERATION_DECISION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_PRE_MARK_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_NON_NULL_OLD_O_ALLOCATION"
 } elseif ($isFirstRootPostQueueMarkDecision) {
@@ -2643,6 +2647,14 @@ extern "C" void __cdecl guideXosNativeAotC011EC67RegionGenerationObserved(uintpt
 extern "C" void __cdecl guideXosNativeAotC011EC67SnapshotObserved(uint32_t checkpoint, uintptr_t activeRegion, uintptr_t allocationRegion, uintptr_t nextRegion, uintptr_t totalRegions, uintptr_t gen0Regions, uintptr_t candidateRegions, uintptr_t candidateHead, uintptr_t candidateTail, uintptr_t allocatorUsedRegions, uintptr_t allocatorFreeBytes);
 extern "C" void __cdecl guideXosNativeAotC011EC67ExpansionObserved(uintptr_t segment, uintptr_t requestSize, uintptr_t committed, uintptr_t reserved, uint32_t succeeded, uint32_t hardLimitShort);
 '@
+                            if ($isC011EC87) {
+                                $c54GcDeclaration += [Environment]::NewLine + @'
+extern "C" void __cdecl guideXosNativeAotC011EC87PolicyObserved(uint32_t kind, uintptr_t freeCount, uintptr_t freeListCount, uintptr_t surplus, uintptr_t totalBudget, uintptr_t hugeUnits, int64_t balance, uintptr_t regionsToMove, uintptr_t regionSize, uintptr_t regionFactor, uintptr_t heapBudget, uintptr_t globalDecommitCount, uintptr_t allocatorUsed, uintptr_t allocatorFree, uint32_t collectionReason);
+    extern "C" void __cdecl guideXosNativeAotC011EC87MoveObserved(uint32_t kind, uintptr_t region, uintptr_t rangeStart, uintptr_t rangeEnd, uintptr_t mapOrdinal, uintptr_t regionUnits, uintptr_t requestBefore, uintptr_t requestAfter, uint32_t generation, uint32_t state);
+    extern "C" void __cdecl guideXosNativeAotC011EC87AgingObserved(uint32_t kind, uintptr_t region, uintptr_t rangeStart, uintptr_t ageInFree, uintptr_t committedSize, uintptr_t freeCountBefore, uintptr_t freeCountAfter, uintptr_t globalCountBefore, uintptr_t globalCountAfter, uint32_t generation, uint32_t state);
+extern "C" void __cdecl guideXosNativeAotC011EC87DecommitObserved(uint32_t phase, uintptr_t region, uintptr_t rangeStart, uintptr_t pageStart, uintptr_t decommitSize, uintptr_t mem, uintptr_t committed, uintptr_t reserved, uintptr_t globalCountBefore, uintptr_t globalCountAfter, uint32_t decommitSucceeded, uint32_t generation, uint32_t state);
+'@
+                            }
                             if ($isC011EC80) {
                                 $c54GcDeclaration += [Environment]::NewLine + @'
 extern "C" void __cdecl guideXosNativeAotC011EC80SnapshotBegin(uint32_t checkpoint, uintptr_t mappingStart, uintptr_t mappingEnd, uintptr_t regionAlignment, uintptr_t mappingEntries);
@@ -2660,7 +2672,7 @@ extern "C" void __cdecl guideXosNativeAotC011EC83BasicMappingEntry(uint32_t chec
 extern "C" void __cdecl guideXosNativeAotC011EC83BasicMappingEnd(uint32_t checkpoint, uintptr_t observedCount);
 '@
                             }
-if ($isC011EC84 -or $isC011EC85) {
+if ($isC011EC84 -or $isC011EC85 -or $isC011EC87) {
                                 $c54GcDeclaration += [Environment]::NewLine + @'
 extern "C" void __cdecl guideXosNativeAotC011EC84TargetObserved(uint32_t checkpoint, uintptr_t targetOffset, uintptr_t targetStart, uintptr_t targetEnd, uint32_t exists, uint32_t exactCanonical, uintptr_t descriptor, uintptr_t canonicalStart, uintptr_t canonicalEnd, uintptr_t canonicalSize, uintptr_t mem, uintptr_t committed, uintptr_t allocated, uintptr_t used, uintptr_t liveBytes, uint32_t generation, uint32_t planGeneration, uint32_t state, uintptr_t owner, uint32_t listKind);
 static void guideXosNativeAotC011EC84Probe(uint32_t checkpointValue);
@@ -2982,6 +2994,137 @@ static uint32_t guideXosC011EC67RegionState(heap_segment* region)
             }
             $gcCppText = $gcCppText.Replace('#include "gcpriv.h"', '#include "gcpriv.h"' + [Environment]::NewLine + [Environment]::NewLine + $c54GcDeclaration.TrimEnd() + $c67GcHelper)
 
+            if ($isC011EC87) {
+                $c87BalanceNeedle = '        ptrdiff_t balance = total_num_free_regions[kind] + num_huge_region_units_to_consider[kind] - total_budget_in_region_units[kind];' + $lockedSourceNewLine
+                $c87BalanceReplacement = $c87BalanceNeedle + @'
+#if defined(GUIDEXOS_NATIVEAOT_C011EC87_DECOMMIT_BALANCE)
+        guideXosNativeAotC011EC87PolicyObserved(
+            static_cast<uint32_t>(kind),
+            static_cast<uintptr_t>(total_num_free_regions[kind]),
+            static_cast<uintptr_t>(free_regions[kind].get_num_free_regions()),
+            static_cast<uintptr_t>(num_regions_to_decommit[kind]),
+            static_cast<uintptr_t>(total_budget_in_region_units[kind]),
+            static_cast<uintptr_t>(num_huge_region_units_to_consider[kind]),
+            static_cast<int64_t>(balance),
+            balance > 0 ? static_cast<uintptr_t>(balance) : 0u,
+            static_cast<uintptr_t>(region_size[kind]),
+            static_cast<uintptr_t>(region_factor[kind]),
+            static_cast<uintptr_t>(heap_budget_in_region_units[0][kind]),
+            static_cast<uintptr_t>(global_regions_to_decommit[kind].get_num_free_regions()),
+            static_cast<uintptr_t>(global_region_allocator.get_used_region_count()),
+            static_cast<uintptr_t>(global_region_allocator.get_free()),
+            static_cast<uint32_t>(settings.reason));
+#endif
+'@.Replace("`r`n", $lockedSourceNewLine).Replace("`n", $lockedSourceNewLine)
+                if (-not $gcCppText.Contains($c87BalanceNeedle)) { throw "C011EC87 distribute_free_regions balance predicate was not found." }
+                $gcCppText = Replace-First $gcCppText $c87BalanceNeedle $c87BalanceReplacement
+
+                $c87MoveNeedle = @'
+                    n -= current_num_units;
+
+                    region_free_list::unlink_region (region);
+
+                    region_free_list::add_region (region, to_free_list);
+'@.Replace("`r`n", $lockedSourceNewLine).Replace("`n", $lockedSourceNewLine)
+                $c87MoveReplacement = @'
+                    const int64_t guideXosC011EC87RequestBefore = n;
+                    n -= current_num_units;
+
+                    region_free_list::unlink_region (region);
+
+                    region_free_list::add_region (region, to_free_list);
+#if defined(GUIDEXOS_NATIVEAOT_C011EC87_DECOMMIT_BALANCE)
+                    guideXosNativeAotC011EC87MoveObserved(
+                        small_region_p ? 0u : 1u,
+                        reinterpret_cast<uintptr_t>(region),
+                        reinterpret_cast<uintptr_t>(get_region_start(region)),
+                        reinterpret_cast<uintptr_t>(heap_segment_reserved(region)),
+                        static_cast<uintptr_t>(current_index - region_map_left_start),
+                        static_cast<uintptr_t>(current_num_units),
+                        static_cast<uintptr_t>(guideXosC011EC87RequestBefore),
+                        static_cast<uintptr_t>(n),
+                        static_cast<uint32_t>(heap_segment_gen_num(region)),
+                        guideXosC011EC67RegionState(region));
+#endif
+'@.Replace("`r`n", $lockedSourceNewLine).Replace("`n", $lockedSourceNewLine)
+                $c87AgingNeedle = '                    region_free_list::unlink_region (region);' + $lockedSourceNewLine + '                    region_free_list::add_region (region, global_regions_to_decommit);' + $lockedSourceNewLine
+                $c87AgingReplacement = $c87AgingNeedle + @'
+#if defined(GUIDEXOS_NATIVEAOT_C011EC87_DECOMMIT_BALANCE)
+                    guideXosNativeAotC011EC87AgingObserved(
+                        static_cast<uint32_t>(kind),
+                        reinterpret_cast<uintptr_t>(region),
+                        reinterpret_cast<uintptr_t>(get_region_start(region)),
+                        static_cast<uintptr_t>(age_in_free_to_decommit),
+                        static_cast<uintptr_t>(get_region_committed_size(region)),
+                        static_cast<uintptr_t>(region_list.get_num_free_regions() + 1),
+                        static_cast<uintptr_t>(region_list.get_num_free_regions()),
+                        guideXosC011EC87GlobalCountBefore,
+                        static_cast<uintptr_t>(global_regions_to_decommit[kind].get_num_free_regions()),
+                        static_cast<uint32_t>(heap_segment_gen_num(region)),
+                        guideXosC011EC67RegionState(region));
+#endif
+'@.Replace("`r`n", $lockedSourceNewLine).Replace("`n", $lockedSourceNewLine)
+                $c87AgingAddNeedle = '                    region_free_list::add_region (region, global_regions_to_decommit);' + $lockedSourceNewLine
+                $c87AgingAddReplacement = '                    const uintptr_t guideXosC011EC87GlobalCountBefore = static_cast<uintptr_t>(global_regions_to_decommit[kind].get_num_free_regions());' + $lockedSourceNewLine + $c87AgingAddNeedle
+                $c87AgingReplacement = $c87AgingReplacement.Replace($c87AgingNeedle, $c87AgingNeedle.Replace($c87AgingAddNeedle, $c87AgingAddReplacement))
+                $c87AgingReplacement += $lockedSourceNewLine
+                if (-not $gcCppText.Contains($c87AgingNeedle)) { throw "C011EC87 aged-free-region transfer point was not found." }
+                $gcCppText = Replace-First $gcCppText $c87AgingNeedle $c87AgingReplacement
+
+                if (-not $gcCppText.Contains($c87MoveNeedle)) { throw "C011EC87 move_highest_free_regions selection point was not found." }
+                $gcCppText = Replace-First $gcCppText $c87MoveNeedle $c87MoveReplacement
+
+                $c87StepNeedle = @'
+            heap_segment* region = global_regions_to_decommit[kind].unlink_region_front();
+            size_t size = decommit_region (region, recorded_committed_free_bucket, -1);
+'@.Replace("`r`n", $lockedSourceNewLine).Replace("`n", $lockedSourceNewLine)
+                $c87StepReplacement = @'
+            const uintptr_t guideXosC011EC87GlobalCountBefore = static_cast<uintptr_t>(global_regions_to_decommit[kind].get_num_free_regions());
+            heap_segment* region = global_regions_to_decommit[kind].unlink_region_front();
+#if defined(GUIDEXOS_NATIVEAOT_C011EC87_DECOMMIT_BALANCE)
+            guideXosNativeAotC011EC87DecommitObserved(
+                1u,
+                reinterpret_cast<uintptr_t>(region),
+                reinterpret_cast<uintptr_t>(get_region_start(region)),
+                reinterpret_cast<uintptr_t>(get_region_start(region)),
+                0u,
+                reinterpret_cast<uintptr_t>(heap_segment_mem(region)),
+                reinterpret_cast<uintptr_t>(heap_segment_committed(region)),
+                reinterpret_cast<uintptr_t>(heap_segment_reserved(region)),
+                guideXosC011EC87GlobalCountBefore,
+                static_cast<uintptr_t>(global_regions_to_decommit[kind].get_num_free_regions()),
+                0u,
+                static_cast<uint32_t>(heap_segment_gen_num(region)),
+                guideXosC011EC67RegionState(region));
+#endif
+            size_t size = decommit_region (region, recorded_committed_free_bucket, -1);
+'@.Replace("`r`n", $lockedSourceNewLine).Replace("`n", $lockedSourceNewLine)
+                if (-not $gcCppText.Contains($c87StepNeedle)) { throw "C011EC87 decommit_step unlink point was not found." }
+                $gcCppText = Replace-First $gcCppText $c87StepNeedle $c87StepReplacement
+
+                $c87RegionNeedle = '    global_region_allocator.delete_region (get_region_start (region));' + $lockedSourceNewLine
+                $c87RegionReplacement = @'
+#if defined(GUIDEXOS_NATIVEAOT_C011EC87_DECOMMIT_BALANCE)
+    guideXosNativeAotC011EC87DecommitObserved(
+        2u,
+        reinterpret_cast<uintptr_t>(region),
+        reinterpret_cast<uintptr_t>(get_region_start(region)),
+        reinterpret_cast<uintptr_t>(page_start),
+        static_cast<uintptr_t>(decommit_size),
+        reinterpret_cast<uintptr_t>(heap_segment_mem(region)),
+        reinterpret_cast<uintptr_t>(heap_segment_committed(region)),
+        reinterpret_cast<uintptr_t>(heap_segment_reserved(region)),
+        0u,
+        0u,
+        decommit_succeeded_p ? 1u : 0u,
+        static_cast<uint32_t>(heap_segment_gen_num(region)),
+        guideXosC011EC67RegionState(region));
+#endif
+'@.Replace("`r`n", $lockedSourceNewLine).Replace("`n", $lockedSourceNewLine) + $c87RegionNeedle
+                if (-not $gcCppText.Contains($c87RegionNeedle)) { throw "C011EC87 decommit_region delete point was not found." }
+                $gcCppText = Replace-First $gcCppText $c87RegionNeedle $c87RegionReplacement
+            }
+
             if ($isC011EC62) {
                 $c62SohStart = $gcCppText.IndexOf('BOOL gc_heap::soh_try_fit (int gen_number,')
                 $c62SohEnd = $gcCppText.IndexOf('allocation_state gc_heap::allocate_soh (int gen_number,', $c62SohStart)
@@ -3207,7 +3350,7 @@ static uint32_t guideXosC011EC67RegionState(heap_segment* region)
                 $c67SnapshotCall = $c67SnapshotCall.Replace('this, ', '')
                 $c67SnapshotCall = $c67SnapshotCall.TrimEnd() + $lockedSourceNewLine
                 $c67InitialSnapshotCall = $c67SnapshotCall
-                $c84ProbeCall = if ($isC011EC84 -or $isC011EC85) {
+                $c84ProbeCall = if ($isC011EC84 -or $isC011EC85 -or $isC011EC87) {
                     ('    guideXosNativeAotC011EC84Probe(CHECKPOINT);' + $lockedSourceNewLine)
                 } else { "" }
                 $c85ProbeCall = if ($false) {
@@ -3949,7 +4092,7 @@ static NOINLINE void guideXosNativeAotC011EC83Capture(
                     $c67SohStart += $c83CaptureFunction.Length
                     $c67SohEnd += $c83CaptureFunction.Length
                 }
-                if ($isC011EC84 -or $isC011EC85) {
+                if ($isC011EC84 -or $isC011EC85 -or $isC011EC87) {
                     $c84ProbeFunction = @'
 static NOINLINE void guideXosNativeAotC011EC84Probe(uint32_t checkpointValue)
 {
@@ -4046,7 +4189,7 @@ static NOINLINE void guideXosNativeAotC011EC85Probe(uint32_t checkpointValue)
                 $c67SohFunction = $gcCppText.Substring($c67SohStart, $c67SohEnd - $c67SohStart)
                 $c67SohEntryNeedle = '{' + $lockedSourceNewLine
                 $c67SohEntryReplacement = $c67SohEntryNeedle + ($c67SnapshotCall.Replace('1u', '7u'))
-                if ($isC011EC84 -or $isC011EC85) { $c67SohEntryReplacement += $c84ProbeCall.Replace('CHECKPOINT', '1u') }
+                if ($isC011EC84 -or $isC011EC85 -or $isC011EC87) { $c67SohEntryReplacement += $c84ProbeCall.Replace('CHECKPOINT', '1u') }
                 if ($isC011EC80) { $c67SohEntryReplacement += '    GUIDEXOS_C011EC81_BASIC_LIST_SNAPSHOT(7u);' + $lockedSourceNewLine }
                 if ($isC011EC83) { $c67SohEntryReplacement += '    GUIDEXOS_C011EC83_BASIC_CANONICAL_MAPPING(7u);' + $lockedSourceNewLine }
                 $c67SohFunction = Replace-First $c67SohFunction $c67SohEntryNeedle $c67SohEntryReplacement
@@ -4058,7 +4201,7 @@ static NOINLINE void guideXosNativeAotC011EC85Probe(uint32_t checkpointValue)
                 $c67FixFunction = $gcCppText.Substring($c67FixStart, $c67FixEnd - $c67FixStart)
                 $c67FixEntryNeedle = '{' + $lockedSourceNewLine
                 $c67FixEntryReplacement = $c67FixEntryNeedle + ($c67SnapshotCall.Replace('1u', '3u'))
-                if ($isC011EC84 -or $isC011EC85) { $c67FixEntryReplacement += $c84ProbeCall.Replace('CHECKPOINT', '3u') }
+                if ($isC011EC84 -or $isC011EC85 -or $isC011EC87) { $c67FixEntryReplacement += $c84ProbeCall.Replace('CHECKPOINT', '3u') }
                 $c67FixFunction = Replace-First $c67FixFunction $c67FixEntryNeedle $c67FixEntryReplacement
                 $c67FixLastBrace = $c67FixFunction.LastIndexOf('}')
                 $c67FixFunction = $c67FixFunction.Substring(0, $c67FixLastBrace) + ($c67SnapshotCall.Replace('1u', '4u')) + $c67FixFunction.Substring($c67FixLastBrace)
@@ -4106,7 +4249,7 @@ static NOINLINE void guideXosNativeAotC011EC85Probe(uint32_t checkpointValue)
                 $c67ThreadFunction = $c67ThreadFunction.Substring(0, $c67ThreadLastBrace) + $c67ThreadEndSnapshot + $c67ThreadFunction.Substring($c67ThreadLastBrace)
                 $gcCppText = $gcCppText.Substring(0, $c67ThreadStart) + $c67ThreadFunction + $gcCppText.Substring($c67ThreadEnd)
 
-                if ($isC011EC84 -or $isC011EC85) {
+                if ($isC011EC84 -or $isC011EC85 -or $isC011EC87) {
                     $c84GarbageStart = $gcCppText.IndexOf('void gc_heap::garbage_collect (int n)')
                     $c84GarbageEnd = $gcCppText.IndexOf('void gc_heap::', $c84GarbageStart + 1)
                     if ($c84GarbageStart -lt 0 -or $c84GarbageEnd -le $c84GarbageStart) { throw "C011EC84 could not isolate garbage_collect." }
@@ -8300,6 +8443,9 @@ exit /b %errorlevel%
             }
             if ($isC011EC67) {
                 $requiredSymbols += @("guideXosNativeAotC011EC67RegionListMutationObserved", "guideXosNativeAotC011EC67RegionSourceObserved", "guideXosNativeAotC011EC67RegionCreateObserved", "guideXosNativeAotC011EC67RegionCommitObserved", "guideXosNativeAotC011EC67RegionGenerationObserved", "guideXosNativeAotC011EC67SnapshotObserved", "guideXosNativeAotC011EC67ExpansionObserved")
+                if ($isC011EC87) {
+                    $requiredSymbols += @("guideXosNativeAotC011EC87PolicyObserved", "guideXosNativeAotC011EC87MoveObserved", "guideXosNativeAotC011EC87DecommitObserved")
+                }
             }
             if ($isC011EC63) {
                 $requiredSymbols += @("guideXosNativeAotC011EC63Start", "guideXosNativeAotC011EC63Finish")
