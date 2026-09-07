@@ -94,7 +94,7 @@ static_assert(offsetof(gx_build_request, configuration) == 64, "build request co
 static_assert(sizeof(gx_build_output_line) == 260, "build output line size changed");
 static_assert(offsetof(gx_build_snapshot, handle) == 8, "build snapshot handle offset changed");
 static_assert(offsetof(gx_build_snapshot, artifactPath) == 72, "build snapshot artifact offset changed");
-static_assert(sizeof(gx_build_snapshot) == 8784, "build snapshot size changed");
+static_assert(sizeof(gx_build_snapshot) == 8800, "build snapshot size changed");
 
 int main() {
     const bool appended = offsetof(gx_host_calls, get_ticks_ms) >

@@ -82,3 +82,7 @@ maintained in the Developer Studio checkout. Interactive F5 driving remains a
 separate compositor-input validation step; the experimental shell exposes
 `gui.key` for focused-window checks, but it is not a replacement for visual
 manual validation.
+
+The bare-metal Developer Studio build/run extension, including its bounded
+temporary registration model and Phase 27W QEMU evidence, is documented in
+`docs/DEVELOPER_STUDIO_PHASE27W_RUN_PROJECT.md`.

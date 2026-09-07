@@ -4,8 +4,10 @@
 
 #include "native_elf_run_service.h"
 
+#include "native_elf_development_app_model.h"
 #include "native_elf_loader.h"
 #include "native_elf_validator.h"
+#include "../include/kernel/kernel_app.h"
 #include "kernel/vfs.h"
 
 namespace kernel {
@@ -29,6 +31,10 @@ struct Operation {
     gx_development_run_state state;
     gx_development_run_error_code error;
     bool closeRequested;
+    bool appModelRegistered;
+    bool cleanupComplete;
+    bool nativeRuntimeStarted;
+    uint64_t registrationGeneration;
     uint64_t artifactSize;
     char projectRoot[GX_DEVELOPMENT_RUN_MAX_PROJECT_ROOT_BYTES];
     char projectId[GX_DEVELOPMENT_RUN_MAX_PROJECT_ID_BYTES];
@@ -39,6 +45,7 @@ struct Operation {
     char artifactSha256[GX_DEVELOPMENT_RUN_MAX_SHA256_BYTES];
     char artifactArchitecture[32];
     char artifactAbi[64];
+    char applicationId[GX_DEVELOPMENT_RUN_MAX_APP_ID_BYTES];
     char displayName[GX_DEVELOPMENT_RUN_MAX_DISPLAY_NAME_BYTES];
     char resolvedArtifact[kMaxPath];
     NativeElfRunReport report;
@@ -84,6 +91,17 @@ static bool equal_text(const char* left, const char* right) {
     return left[i] == right[i];
 }
 
+static bool starts_with(const char* value, const char* prefix)
+{
+    if (!value || !prefix) return false;
+    uint32_t i = 0;
+    while (prefix[i] != '\0') {
+        if (value[i] != prefix[i]) return false;
+        ++i;
+    }
+    return true;
+}
+
 static uint32_t snapshot_capacity(const gx_development_run_snapshot* snapshot) {
     if (!snapshot) return 0;
     return snapshot->size < sizeof(gx_development_run_snapshot)
@@ -126,8 +144,8 @@ static void snapshot_operation(const Operation& operation, gx_development_run_sn
     snapshot->state = operation.state;
     snapshot->errorCode = operation.error;
     snapshot->exitCode = operation.exitCode;
-    snapshot->cleanupComplete = operation.report.teardownComplete ? 1U : 0U;
-    copy_text(snapshot->applicationId, sizeof(snapshot->applicationId), operation.projectId);
+    snapshot->cleanupComplete = operation.cleanupComplete ? 1U : 0U;
+    copy_text(snapshot->applicationId, sizeof(snapshot->applicationId), operation.applicationId);
     copy_text(snapshot->displayName, sizeof(snapshot->displayName), operation.displayName);
     copy_text(snapshot->artifactSha256, sizeof(snapshot->artifactSha256), operation.artifactSha256);
     copy_text(snapshot->errorMessage, sizeof(snapshot->errorMessage), operation.errorMessage);
@@ -342,7 +360,8 @@ static bool validate_request(Operation& operation, const gx_development_run_requ
     if (!equal_text(operation.projectKind, kProjectKind) || !equal_text(operation.targetProfile, kTarget) ||
         !equal_text(operation.artifactArchitecture, kArchitecture) || !equal_text(operation.artifactAbi, kAbi) ||
         !equal_text(operation.manifestPath, kManifest) || text_length(operation.artifactSha256, sizeof(operation.artifactSha256)) != 64 ||
-        operation.artifactSize == 0 || !safe_relative(operation.artifactPath)) {
+        operation.artifactSize == 0 || !safe_relative(operation.artifactPath) ||
+        !starts_with(operation.projectId, "dev.guidexos.")) {
         operation.error = GX_DEVELOPMENT_RUN_ERROR_UNSUPPORTED_TARGET;
         copy_text(operation.errorMessage, sizeof(operation.errorMessage), "Bare-metal Run supports bootstrap NativeElf AMD64 projects only");
         return false;
@@ -400,7 +419,36 @@ static bool validate_request(Operation& operation, const gx_development_run_requ
         copy_text(operation.errorMessage, sizeof(operation.errorMessage), "Application manifest does not match BuildResult");
         return false;
     }
-    return validate_identity(operation);
+    if (!validate_identity(operation)) return false;
+    return copy_text(operation.applicationId, sizeof(operation.applicationId), operation.projectId);
+}
+
+static bool unregister_application(Operation& operation)
+{
+    if (!operation.appModelRegistered) {
+        operation.cleanupComplete = true;
+        return true;
+    }
+    const bool removed = NativeElfDevelopmentAppModel::unregister_temporary(
+        operation.handle, operation.registrationGeneration, operation.applicationId);
+    if (removed || !NativeElfDevelopmentAppModel::has_active_registration())
+        operation.appModelRegistered = false;
+    operation.cleanupComplete = !operation.appModelRegistered;
+    return operation.cleanupComplete;
+}
+
+static void fail_and_cleanup(Operation& operation,
+                             gx_development_run_error_code error,
+                             const char* message)
+{
+    operation.state = GX_DEVELOPMENT_RUN_CLEANING_UP;
+    operation.error = error;
+    copy_text(operation.errorMessage, sizeof(operation.errorMessage), message);
+    const bool registrationClean = unregister_application(operation);
+    const bool runtimeClean = !operation.nativeRuntimeStarted || operation.report.teardownComplete;
+    operation.report.teardownComplete = runtimeClean && registrationClean;
+    operation.cleanupComplete = registrationClean && runtimeClean;
+    operation.state = GX_DEVELOPMENT_RUN_FAILED;
 }
 
 static bool decode(gx_development_run_handle handle) {
@@ -427,12 +475,54 @@ gx_result prepare(const gx_development_run_request& request,
     s_operation.error = GX_DEVELOPMENT_RUN_ERROR_NONE;
     if (!validate_request(s_operation, request)) {
         s_operation.state = GX_DEVELOPMENT_RUN_FAILED;
+        s_operation.cleanupComplete = true;
         s_operation.report.teardownComplete = true;
         snapshot_operation(s_operation, outSnapshot);
         s_operation = Operation();
         return GX_OK;
     }
-    s_operation.state = GX_DEVELOPMENT_RUN_PREPARED;
+    if (app::AppManager::isAppAvailable(s_operation.applicationId)) {
+        s_operation.state = GX_DEVELOPMENT_RUN_FAILED;
+        s_operation.error = GX_DEVELOPMENT_RUN_ERROR_APPLICATION_ID_INSTALLED;
+        copy_text(s_operation.errorMessage, sizeof(s_operation.errorMessage),
+                  "Development identity collides with a registered kernel application");
+        s_operation.cleanupComplete = true;
+        s_operation.report.teardownComplete = true;
+        snapshot_operation(s_operation, outSnapshot);
+        s_operation = Operation();
+        return GX_OK;
+    }
+    NativeElfDevelopmentAppModel::RegistrationRequest registrationRequest = {};
+    registrationRequest.handle = s_operation.handle;
+    registrationRequest.generation = s_operation.handle;
+    registrationRequest.applicationId = s_operation.applicationId;
+    registrationRequest.displayName = s_operation.displayName;
+    registrationRequest.projectRoot = s_operation.projectRoot;
+    registrationRequest.artifactPath = s_operation.artifactPath;
+    registrationRequest.artifactSize = s_operation.artifactSize;
+    registrationRequest.artifactSha256 = s_operation.artifactSha256;
+    NativeElfDevelopmentAppModel::Registration registration = {};
+    const NativeElfDevelopmentAppModel::RegistrationResult registrationResult =
+        NativeElfDevelopmentAppModel::register_temporary(registrationRequest, &registration);
+    if (registrationResult != NativeElfDevelopmentAppModel::RegistrationResult::Registered) {
+        s_operation.state = GX_DEVELOPMENT_RUN_FAILED;
+        s_operation.error = registrationResult == NativeElfDevelopmentAppModel::RegistrationResult::DeploymentAlreadyActive
+            ? GX_DEVELOPMENT_RUN_ERROR_DEPLOYMENT_ALREADY_ACTIVE
+            : (registrationResult == NativeElfDevelopmentAppModel::RegistrationResult::ApplicationIdInUse
+                ? GX_DEVELOPMENT_RUN_ERROR_APPLICATION_ID_IN_USE
+                : GX_DEVELOPMENT_RUN_ERROR_INTERNAL);
+        copy_text(s_operation.errorMessage, sizeof(s_operation.errorMessage),
+                  "Temporary NativeElf App Model registration failed");
+        s_operation.cleanupComplete = !NativeElfDevelopmentAppModel::has_active_registration();
+        s_operation.report.teardownComplete = s_operation.cleanupComplete;
+        snapshot_operation(s_operation, outSnapshot);
+        s_operation = Operation();
+        return GX_OK;
+    }
+    s_operation.appModelRegistered = true;
+    s_operation.registrationGeneration = registration.generation;
+    s_operation.cleanupComplete = false;
+    s_operation.state = GX_DEVELOPMENT_RUN_REGISTERED;
     *outHandle = s_operation.handle;
     snapshot_operation(s_operation, outSnapshot);
     return GX_OK;
@@ -440,30 +530,47 @@ gx_result prepare(const gx_development_run_request& request,
 
 gx_result start(gx_development_run_handle handle) {
     if (!decode(handle)) return GX_ERROR_FAILED;
-    if (s_operation.state != GX_DEVELOPMENT_RUN_PREPARED) return GX_ERROR_BUSY;
+    if (s_operation.state != GX_DEVELOPMENT_RUN_REGISTERED) return GX_ERROR_BUSY;
     if (s_operation.closeRequested) {
-        s_operation.state = GX_DEVELOPMENT_RUN_FAILED;
-        s_operation.error = GX_DEVELOPMENT_RUN_ERROR_CANCELLED;
-        copy_text(s_operation.errorMessage, sizeof(s_operation.errorMessage), "Bare-metal Run was cancelled before start");
-        s_operation.report.teardownComplete = true;
+        fail_and_cleanup(s_operation, GX_DEVELOPMENT_RUN_ERROR_CANCELLED,
+                         "Bare-metal Run was cancelled before start");
+        return GX_OK;
+    }
+    NativeElfDevelopmentAppModel::Registration registration = {};
+    if (!NativeElfDevelopmentAppModel::resolve_temporary(
+            s_operation.handle, s_operation.registrationGeneration,
+            s_operation.applicationId, &registration) ||
+        !equal_text(registration.artifactPath, s_operation.artifactPath) ||
+        registration.artifactSize != s_operation.artifactSize ||
+        !equal_text(registration.artifactSha256, s_operation.artifactSha256)) {
+        fail_and_cleanup(s_operation, GX_DEVELOPMENT_RUN_ERROR_STALE_DEPLOYMENT,
+                         "Temporary NativeElf deployment is stale");
         return GX_OK;
     }
     // Prepare records the exact BuildResult identity, but the file can still
     // be replaced before Start. Revalidate immediately before launch so a
     // stale or tampered artifact is never executed.
     if (!validate_identity(s_operation)) {
-        s_operation.state = GX_DEVELOPMENT_RUN_FAILED;
-        s_operation.report.teardownComplete = true;
+        const gx_development_run_error_code error = s_operation.error;
+        char message[GX_DEVELOPMENT_RUN_MAX_ERROR_BYTES] = {};
+        copy_text(message, sizeof(message), s_operation.errorMessage);
+        fail_and_cleanup(s_operation, error, message);
         return GX_OK;
     }
     s_operation.state = GX_DEVELOPMENT_RUN_LAUNCHING;
     s_operation.state = GX_DEVELOPMENT_RUN_RUNNING;
     s_operation.report = NativeElfRunReport();
+    s_operation.nativeRuntimeStarted = true;
     s_operation.exitCode = 0;
-    const bool success = run_file_nested(s_operation.resolvedArtifact, &s_operation.exitCode, &s_operation.report);
+    // Developer Studio normally calls this service from the active NativeElf
+    // host application, where nested execution preserves the host image.  The
+    // kernel bootstrap proof has no parent NativeElf image, so it uses the
+    // same production loader/runtime through the ordinary top-level entry.
+    const bool success = native_elf_execution_active()
+        ? run_file_nested(s_operation.resolvedArtifact, &s_operation.exitCode, &s_operation.report)
+        : run_file(s_operation.resolvedArtifact, &s_operation.exitCode, &s_operation.report);
     if (!success) {
-        s_operation.state = GX_DEVELOPMENT_RUN_FAILED;
-        s_operation.error = s_operation.report.runtimeStatus == NativeRuntimeStatus::CallDepthExceeded
+        const gx_development_run_error_code error = s_operation.report.runtimeStatus == NativeRuntimeStatus::CallDepthExceeded
             ? GX_DEVELOPMENT_RUN_ERROR_CALL_DEPTH_EXCEEDED
             : (s_operation.report.runtimeStatus == NativeRuntimeStatus::ArrayBoundsExceeded
                 ? GX_DEVELOPMENT_RUN_ERROR_ARRAY_BOUNDS_EXCEEDED
@@ -472,15 +579,17 @@ gx_result start(gx_development_run_handle handle) {
                     : (s_operation.report.runtimeStatus == NativeRuntimeStatus::PointerOutOfBounds
                         ? GX_DEVELOPMENT_RUN_ERROR_POINTER_OUT_OF_BOUNDS
                         : GX_DEVELOPMENT_RUN_ERROR_LAUNCH_FAILED)));
-        copy_text(s_operation.errorMessage, sizeof(s_operation.errorMessage),
-                  s_operation.report.error ? s_operation.report.error : "NativeElf application launch failed");
+        const char* message = s_operation.report.error ? s_operation.report.error : "NativeElf application launch failed";
+        fail_and_cleanup(s_operation, error, message);
         return GX_OK;
     }
     s_operation.state = GX_DEVELOPMENT_RUN_EXITED;
     s_operation.state = GX_DEVELOPMENT_RUN_CLEANING_UP;
-    s_operation.state = s_operation.report.teardownComplete ? GX_DEVELOPMENT_RUN_COMPLETED : GX_DEVELOPMENT_RUN_FAILED;
-    s_operation.error = s_operation.report.teardownComplete ? GX_DEVELOPMENT_RUN_ERROR_NONE : GX_DEVELOPMENT_RUN_ERROR_INTERNAL;
-    if (!s_operation.report.teardownComplete) copy_text(s_operation.errorMessage, sizeof(s_operation.errorMessage), "NativeElf runtime teardown failed");
+    const bool registrationClean = unregister_application(s_operation);
+    s_operation.cleanupComplete = registrationClean && s_operation.report.teardownComplete;
+    s_operation.state = s_operation.cleanupComplete ? GX_DEVELOPMENT_RUN_COMPLETED : GX_DEVELOPMENT_RUN_FAILED;
+    s_operation.error = s_operation.cleanupComplete ? GX_DEVELOPMENT_RUN_ERROR_NONE : GX_DEVELOPMENT_RUN_ERROR_INTERNAL;
+    if (!s_operation.cleanupComplete) copy_text(s_operation.errorMessage, sizeof(s_operation.errorMessage), "NativeElf run cleanup failed");
     return GX_OK;
 }
 
@@ -494,12 +603,10 @@ gx_result poll(gx_development_run_handle handle, gx_development_run_snapshot* ou
 gx_result request_close(gx_development_run_handle handle) {
     if (!decode(handle)) return GX_ERROR_FAILED;
     if (s_operation.state == GX_DEVELOPMENT_RUN_COMPLETED || s_operation.state == GX_DEVELOPMENT_RUN_FAILED) return GX_OK;
-    if (s_operation.state == GX_DEVELOPMENT_RUN_PREPARED) {
+    if (s_operation.state == GX_DEVELOPMENT_RUN_REGISTERED) {
         s_operation.closeRequested = true;
-        s_operation.state = GX_DEVELOPMENT_RUN_FAILED;
-        s_operation.error = GX_DEVELOPMENT_RUN_ERROR_CANCELLED;
-        copy_text(s_operation.errorMessage, sizeof(s_operation.errorMessage), "Bare-metal Run cancelled before start");
-        s_operation.report.teardownComplete = true;
+        fail_and_cleanup(s_operation, GX_DEVELOPMENT_RUN_ERROR_CANCELLED,
+                         "Bare-metal Run cancelled before start");
         return GX_OK;
     }
     return GX_ERROR_UNSUPPORTED;
@@ -508,6 +615,7 @@ gx_result request_close(gx_development_run_handle handle) {
 gx_result release(gx_development_run_handle handle) {
     if (!decode(handle)) return GX_ERROR_FAILED;
     if (s_operation.state != GX_DEVELOPMENT_RUN_COMPLETED && s_operation.state != GX_DEVELOPMENT_RUN_FAILED) return GX_ERROR_BUSY;
+    (void)unregister_application(s_operation);
     s_operation = Operation();
     return GX_OK;
 }

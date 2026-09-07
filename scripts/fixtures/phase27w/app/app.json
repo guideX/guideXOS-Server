@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "id": "dev.guidexos.phase27w",
+  "displayName": "Phase 27W Run Project",
+  "version": "0.1.0",
+  "publisher": "guideXOS",
+  "description": "Build-to-run deployment and lifecycle proof.",
+  "category": "Development",
+  "kind": "NativeElf",
+  "icon": "",
+  "minGuideXOSVersion": "0.5.0",
+  "supportedArchitectures": ["amd64"],
+  "entries": [{
+    "architecture": "amd64",
+    "path": "bin/amd64/p27w.elf",
+    "entryPoint": "gx_main",
+    "abi": "guidexos-c-abi-v1",
+    "runtime": "native-elf"
+  }]
+}
