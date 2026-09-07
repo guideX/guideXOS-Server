@@ -138,6 +138,7 @@ enum class StorageKind : uint8_t {
     ArrayInt,
     PointerInt,
     Struct,
+    ArrayStruct,
     PointerStruct,
 };
 
@@ -184,6 +185,7 @@ struct Expression {
     uint16_t elementSize;
     IndexedBaseKind indexedBaseKind;
     uint8_t indexedReserved;
+    uint16_t structTypeIndex;
     int32_t value;
     SourceLocation location;
 };
@@ -404,6 +406,11 @@ enum class SymbolKind : uint8_t {
 inline bool symbol_is_data(SymbolKind kind)
 {
     return kind == SymbolKind::Data || kind == SymbolKind::DataArray || kind == SymbolKind::DataStruct;
+}
+
+inline bool storage_kind_is_struct(StorageKind kind)
+{
+    return kind == StorageKind::Struct || kind == StorageKind::ArrayStruct;
 }
 
 inline bool parameter_kind_is_pointer(ParameterKind kind)

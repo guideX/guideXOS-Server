@@ -57,6 +57,24 @@ static uint32_t name_length(const char* name)
     return length;
 }
 
+static bool checked_mul_u32(uint32_t left, uint32_t right, uint32_t* output)
+{
+    if (!output || (right != 0 && left > 0xFFFFFFFFU / right)) return false;
+    *output = left * right;
+    return true;
+}
+
+static uint16_t expression_struct_type_index(const TranslationUnitIR& unit,
+                                             const Expression& expression)
+{
+    if (expression.type != ValueType::StructPointer) return COMPILER_INVALID_INDEX;
+    if (expression.kind == ExpressionKind::AddressOfIndexed &&
+        expression.structTypeIndex < unit.structTypeCount)
+        return expression.structTypeIndex;
+    return expression.elementCount < unit.structTypeCount
+        ? expression.elementCount : COMPILER_INVALID_INDEX;
+}
+
 static uint64_t struct_type_identity(const StructTypeIR& type)
 {
     uint64_t hash = 1469598103934665603ULL;
@@ -280,6 +298,36 @@ private:
         return nullptr;
     }
 
+    bool array_has_field_suffix(uint32_t start) const
+    {
+        if (start >= m_tokenCount || m_tokens[start].kind != TokenKind::LeftBracket) return false;
+        uint32_t cursor = start;
+        uint32_t bracketDepth = 0;
+        while (cursor < m_tokenCount) {
+            const TokenKind kind = m_tokens[cursor].kind;
+            if (kind == TokenKind::LeftBracket) {
+                ++bracketDepth;
+            } else if (kind == TokenKind::RightBracket) {
+                if (bracketDepth == 0) return false;
+                --bracketDepth;
+                if (bracketDepth == 0) {
+                    const uint32_t next = cursor + 1U;
+                    return next < m_tokenCount &&
+                        (m_tokens[next].kind == TokenKind::Dot || m_tokens[next].kind == TokenKind::Arrow);
+                }
+            } else if (kind == TokenKind::EndOfFile) {
+                return false;
+            }
+            ++cursor;
+        }
+        return false;
+    }
+
+    bool array_has_field_suffix() const
+    {
+        return m_index && array_has_field_suffix(*m_index);
+    }
+
     int32_t find_variable(const Token& token) const
     {
         const int32_t parameter = find_integer_parameter(token);
@@ -311,6 +359,11 @@ private:
         return -1;
     }
 
+    uint16_t struct_type_for_expression(const Expression& expression) const
+    {
+        return m_unit ? expression_struct_type_index(*m_unit, expression) : COMPILER_INVALID_INDEX;
+    }
+
     bool name_already_declared(const Token& token) const
     {
         if (is_context_parameter(token) || find_parameter_symbol(token) || find_local(token) >= 0)
@@ -331,12 +384,19 @@ private:
             return false;
         }
         const bool pointer = kind == StorageKind::PointerInt || kind == StorageKind::PointerStruct;
+        const bool structStorage = storage_kind_is_struct(kind);
         const uint32_t elementBytes = pointer
             ? COMPILER_POINTER_DESCRIPTOR_BYTES
-            : (kind == StorageKind::Struct && m_unit && structTypeIndex < m_unit->structTypeCount
+            : (structStorage && m_unit && structTypeIndex < m_unit->structTypeCount
                 ? m_unit->structTypes[structTypeIndex].sizeBytes
                 : static_cast<uint32_t>(elementCount) * 4U);
-        if ((kind == StorageKind::Struct &&
+        uint32_t totalBytes = elementBytes;
+        if (kind == StorageKind::ArrayStruct &&
+            (!checked_mul_u32(elementCount, elementBytes, &totalBytes) || totalBytes == 0)) {
+            m_diagnostics.error(token.location, "struct array storage size overflows the bounded compiler", "array");
+            return false;
+        }
+        if ((structStorage &&
              (!m_unit || structTypeIndex >= m_unit->structTypeCount || elementBytes == 0)) ||
             (kind != StorageKind::Struct && !pointer &&
              (elementCount == 0 || elementCount > COMPILER_MAX_LOCAL_ARRAY_ELEMENTS)) ||
@@ -348,7 +408,7 @@ private:
         const uint32_t storageStart = pointer && (localBase & (COMPILER_POINTER_DESCRIPTOR_ALIGNMENT - 1U)) != 0
             ? localBase + (COMPILER_POINTER_DESCRIPTOR_ALIGNMENT - (localBase & (COMPILER_POINTER_DESCRIPTOR_ALIGNMENT - 1U)))
             : localBase;
-        const uint32_t storageEnd = storageStart + elementBytes;
+        const uint32_t storageEnd = storageStart + totalBytes;
         if (storageEnd < storageStart || storageEnd < m_output->parameterStorageBytes ||
             storageEnd - m_output->parameterStorageBytes > COMPILER_MAX_LOCAL_STORAGE_BYTES) {
             m_diagnostics.error(token.location, "local storage exceeds the bounded function-frame limit", "local");
@@ -359,17 +419,18 @@ private:
         // through element zero, one, ... in source order.
         const uint16_t newSlot = static_cast<uint16_t>(
             storageStart / 4U + (kind == StorageKind::ArrayInt ? elementCount - 1U :
+                                  (kind == StorageKind::ArrayStruct ? totalBytes / 4U - 1U :
                                   (kind == StorageKind::Struct ? elementBytes / 4U - 1U :
-                                  (pointer ? COMPILER_POINTER_DESCRIPTOR_BYTES / 4U - 1U : 0U))));
+                                  (pointer ? COMPILER_POINTER_DESCRIPTOR_BYTES / 4U - 1U : 0U)))));
         LocalSymbol& local = m_output->locals[m_output->localCount++];
         local = {};
         local.kind = kind;
         local.slot = newSlot;
         local.elementCount = elementCount;
-        local.elementSize = 4;
+        local.elementSize = structStorage ? static_cast<uint16_t>(elementBytes) : 4;
         local.structTypeIndex = structTypeIndex;
-        local.sizeBytes = elementBytes;
-        local.initialized = kind == StorageKind::ArrayInt ? true : false;
+        local.sizeBytes = totalBytes;
+        local.initialized = kind == StorageKind::ArrayInt || kind == StorageKind::ArrayStruct;
         if (!copy_identifier(local.name, sizeof(local.name), token)) return false;
         m_output->localStorageBytes = storageEnd - m_output->parameterStorageBytes;
         if (slot) *slot = newSlot;
@@ -543,13 +604,19 @@ private:
             return false;
         }
         ++(*m_index);
-        if (current().kind == TokenKind::LeftBracket) {
-            m_diagnostics.error(current().location, "arrays of structs are deferred in Phase 27T", "struct");
+        uint16_t elementCount = 1;
+        if (pointer) {
+            if (current().kind == TokenKind::LeftBracket) {
+                m_diagnostics.error(current().location, "pointer declarators cannot have an array suffix", "pointer");
+                return false;
+            }
+        } else if (!parse_array_length(COMPILER_MAX_LOCAL_ARRAY_ELEMENTS, &elementCount)) {
             return false;
         }
-        const StorageKind kind = pointer ? StorageKind::PointerStruct : StorageKind::Struct;
+        const StorageKind kind = pointer ? StorageKind::PointerStruct :
+            (elementCount == 1 ? StorageKind::Struct : StorageKind::ArrayStruct);
         uint16_t slot = COMPILER_INVALID_INDEX;
-        if (!add_local(name, kind, 1, &slot, static_cast<uint16_t>(structType))) return false;
+        if (!add_local(name, kind, elementCount, &slot, static_cast<uint16_t>(structType))) return false;
         uint16_t expression = COMPILER_INVALID_INDEX;
         if (current().kind == TokenKind::Equal) {
             ++(*m_index);
@@ -560,16 +627,17 @@ private:
             expression = parse_expression(0);
             if (expression == COMPILER_INVALID_INDEX ||
                 m_output->expressions[expression].type != ValueType::StructPointer ||
-                m_output->expressions[expression].elementCount != static_cast<uint16_t>(structType)) {
+                struct_type_for_expression(m_output->expressions[expression]) != static_cast<uint16_t>(structType)) {
                 m_diagnostics.error(name.location, "cannot initialize struct pointer with a different type", "type");
                 return false;
             }
-        } else if (!pointer) {
+        } else if (kind == StorageKind::Struct) {
             expression = make_constant(0, name.location);
             if (expression == COMPILER_INVALID_INDEX) return false;
         }
         if (!expect(TokenKind::Semicolon, "expected ';' after struct declaration")) return false;
-        m_output->locals[m_output->localCount - 1U].initialized = expression != COMPILER_INVALID_INDEX;
+        m_output->locals[m_output->localCount - 1U].initialized =
+            pointer ? expression != COMPILER_INVALID_INDEX : true;
         return append_statement(blockIndex, StatementKind::DeclareLocal, location, expression, slot,
                                 COMPILER_INVALID_INDEX);
     }
@@ -650,18 +718,53 @@ private:
 
     uint16_t parse_field_access(const Token& name, bool addressOf, uint32_t depth)
     {
+        const ParameterSymbol* parameter = find_parameter_symbol(name);
+        const LocalSymbol* local = find_local_name_symbol(name);
+        const int32_t global = (!parameter && !local) ? find_global(name) : -1;
+        uint16_t structTypeIndex = COMPILER_INVALID_INDEX;
+        uint16_t baseExpression = COMPILER_INVALID_INDEX;
+        const bool localStructArray = local && local->kind == StorageKind::ArrayStruct;
+        const bool globalStructArray = global >= 0 && m_unit->globals[global].kind == StorageKind::ArrayStruct;
+        const bool indexed = current().kind == TokenKind::LeftBracket;
+        if (indexed) {
+            if (!localStructArray && !globalStructArray) {
+                m_diagnostics.error(name.location, "indexed field access requires an array of structs", "type");
+                return COMPILER_INVALID_INDEX;
+            }
+            ++(*m_index);
+            const uint16_t indexExpression = parse_expression(depth + 1U);
+            if (indexExpression == COMPILER_INVALID_INDEX ||
+                m_output->expressions[indexExpression].type != ValueType::Int32 ||
+                !expect(TokenKind::RightBracket, "expected ']' after array index"))
+                return COMPILER_INVALID_INDEX;
+            const uint16_t elementCount = localStructArray ? local->elementCount :
+                m_unit->globals[global].elementCount;
+            if (!validate_index_constant(indexExpression, elementCount, name.location))
+                return COMPILER_INVALID_INDEX;
+            structTypeIndex = localStructArray ? local->structTypeIndex :
+                m_unit->globals[global].structTypeIndex;
+            const uint16_t expression = make_expression(ExpressionKind::AddressOfIndexed, name.location,
+                indexExpression, COMPILER_INVALID_INDEX,
+                localStructArray ? local->slot : COMPILER_INVALID_INDEX, 0);
+            if (expression == COMPILER_INVALID_INDEX) return expression;
+            m_output->expressions[expression].globalIndex = localStructArray
+                ? COMPILER_INVALID_INDEX : static_cast<uint16_t>(global);
+            m_output->expressions[expression].elementCount = elementCount;
+            m_output->expressions[expression].elementSize = localStructArray
+                ? local->elementSize : m_unit->globals[global].elementSize;
+            m_output->expressions[expression].indexedBaseKind = localStructArray
+                ? IndexedBaseKind::Local : IndexedBaseKind::Global;
+            m_output->expressions[expression].type = ValueType::StructPointer;
+            m_output->expressions[expression].structTypeIndex = structTypeIndex;
+            baseExpression = expression;
+        }
         const TokenKind operatorKind = current().kind;
         const bool arrow = operatorKind == TokenKind::Arrow;
         if (!arrow && operatorKind != TokenKind::Dot) {
             m_diagnostics.error(name.location, "expected struct field operator", "struct");
             return COMPILER_INVALID_INDEX;
         }
-        const ParameterSymbol* parameter = find_parameter_symbol(name);
-        const LocalSymbol* local = find_local_name_symbol(name);
-        const int32_t global = (!parameter && !local) ? find_global(name) : -1;
-        uint16_t structTypeIndex = COMPILER_INVALID_INDEX;
-        uint16_t baseExpression = COMPILER_INVALID_INDEX;
-        if (!arrow) {
+        if (!indexed && !arrow) {
             if (local && local->kind == StorageKind::Struct) {
                 structTypeIndex = local->structTypeIndex;
                 baseExpression = make_expression(ExpressionKind::LoadStructAddressLocal, name.location,
@@ -678,7 +781,7 @@ private:
                 m_diagnostics.error(name.location, "dot access requires a struct value", "type");
                 return COMPILER_INVALID_INDEX;
             }
-        } else {
+        } else if (!indexed) {
             if (local && local->kind == StorageKind::PointerStruct) {
                 structTypeIndex = local->structTypeIndex;
                 baseExpression = make_expression(ExpressionKind::LoadStructPointer, name.location,
@@ -693,6 +796,9 @@ private:
                 m_diagnostics.error(name.location, "arrow access requires a struct pointer", "type");
                 return COMPILER_INVALID_INDEX;
             }
+        } else if (arrow) {
+            m_diagnostics.error(name.location, "arrow access requires a struct pointer", "type");
+            return COMPILER_INVALID_INDEX;
         }
         if (baseExpression == COMPILER_INVALID_INDEX) return baseExpression;
         ++(*m_index);
@@ -709,8 +815,8 @@ private:
         }
         ++(*m_index);
         const StructFieldIR& field = m_unit->structTypes[structTypeIndex].fields[fieldIndex];
-        if (m_output->expressions[baseExpression].type == ValueType::StructValue ||
-            m_output->expressions[baseExpression].type == ValueType::StructPointer)
+        if (!indexed && (m_output->expressions[baseExpression].type == ValueType::StructValue ||
+                         m_output->expressions[baseExpression].type == ValueType::StructPointer))
             m_output->expressions[baseExpression].elementCount = structTypeIndex;
         const uint16_t result = make_expression(addressOf ? ExpressionKind::AddressOfField : ExpressionKind::LoadField,
                                                  name.location, baseExpression, COMPILER_INVALID_INDEX,
@@ -747,9 +853,15 @@ private:
     bool parse_assignment(uint16_t blockIndex)
     {
         const Token name = current();
+        const LocalSymbol* namedLocal = find_local_name_symbol(name);
+        const int32_t namedGlobal = namedLocal ? -1 : find_global(name);
+        const bool namedStructArray = (namedLocal && namedLocal->kind == StorageKind::ArrayStruct) ||
+            (namedGlobal >= 0 && m_unit->globals[namedGlobal].kind == StorageKind::ArrayStruct);
         if (m_index && *m_index + 1 < m_tokenCount &&
             (m_tokens[*m_index + 1].kind == TokenKind::Dot ||
-             m_tokens[*m_index + 1].kind == TokenKind::Arrow))
+             m_tokens[*m_index + 1].kind == TokenKind::Arrow ||
+             (namedStructArray && m_tokens[*m_index + 1].kind == TokenKind::LeftBracket &&
+              array_has_field_suffix(*m_index + 1U))))
             return parse_field_assignment(blockIndex);
         const ParameterSymbol* parameter = find_parameter_symbol(name);
         const LocalSymbol* localByName = find_local_name_symbol(name);
@@ -819,9 +931,8 @@ private:
             const ValueType expected = pointer ? ValueType::Int32Pointer :
                 (structPointer ? ValueType::StructPointer : ValueType::Int32);
             const bool incompatibleStructPointer = structPointer &&
-                (m_output->expressions[expression].elementCount == COMPILER_INVALID_INDEX ||
-                 m_output->expressions[expression].elementCount >= m_unit->structTypeCount ||
-                 m_unit->structTypes[m_output->expressions[expression].elementCount].identity !=
+                (struct_type_for_expression(m_output->expressions[expression]) == COMPILER_INVALID_INDEX ||
+                 m_unit->structTypes[struct_type_for_expression(m_output->expressions[expression])].identity !=
                     (parameter ? parameter->structTypeIdentity :
                      m_unit->structTypes[localByName->structTypeIndex].identity));
             if (m_output->expressions[expression].type != expected || incompatibleStructPointer) {
@@ -838,7 +949,8 @@ private:
             }
             for (uint32_t i = 0; i < m_output->localCount; ++i)
                 if (m_output->locals[i].slot == static_cast<uint16_t>(slot)) m_output->locals[i].initialized = true;
-            return append_statement(blockIndex, pointer ? StatementKind::StorePointer : StatementKind::StoreLocal,
+            return append_statement(blockIndex, (pointer || structPointer)
+                                        ? StatementKind::StorePointer : StatementKind::StoreLocal,
                                     name.location, expression,
                                     static_cast<uint16_t>(slot), COMPILER_INVALID_INDEX);
         }
@@ -1025,6 +1137,7 @@ private:
         expression.right = right;
         expression.localIndex = localIndex;
         expression.callIndex = callIndex;
+        expression.structTypeIndex = COMPILER_INVALID_INDEX;
         if (kind == ExpressionKind::AddressOfStructLocal || kind == ExpressionKind::AddressOfStructGlobal)
             expression.type = ValueType::StructPointer;
         expression.value = value;
@@ -1165,13 +1278,16 @@ private:
             if (leftType == ValueType::Int32 && rightType == ValueType::Int32) {
                 kind = operation == TokenKind::Plus ? ExpressionKind::Add : ExpressionKind::Subtract;
             } else if (operation == TokenKind::Plus &&
-                       leftType == ValueType::Int32Pointer && rightType == ValueType::Int32) {
+                       (leftType == ValueType::Int32Pointer || leftType == ValueType::StructPointer) &&
+                       rightType == ValueType::Int32) {
                 kind = ExpressionKind::PointerAdd;
             } else if (operation == TokenKind::Plus &&
-                       leftType == ValueType::Int32 && rightType == ValueType::Int32Pointer) {
+                       leftType == ValueType::Int32 &&
+                       (rightType == ValueType::Int32Pointer || rightType == ValueType::StructPointer)) {
                 kind = ExpressionKind::PointerAdd;
             } else if (operation == TokenKind::Minus &&
-                       leftType == ValueType::Int32Pointer && rightType == ValueType::Int32) {
+                       (leftType == ValueType::Int32Pointer || leftType == ValueType::StructPointer) &&
+                       rightType == ValueType::Int32) {
                 kind = ExpressionKind::PointerSubtractInteger;
             } else {
                 m_diagnostics.error(operatorToken.location,
@@ -1179,8 +1295,19 @@ private:
                                     "type");
                 return COMPILER_INVALID_INDEX;
             }
-            left = make_expression(kind, operatorToken.location, left, right,
+            const uint16_t leftOperand = left;
+            const uint16_t rightOperand = right;
+            left = make_expression(kind, operatorToken.location, leftOperand, rightOperand,
                                    COMPILER_INVALID_INDEX, 0);
+            if (left != COMPILER_INVALID_INDEX && kind != ExpressionKind::Add &&
+                kind != ExpressionKind::Subtract) {
+                const uint16_t pointerExpression = leftType == ValueType::Int32
+                    ? rightOperand : leftOperand;
+                m_output->expressions[left].type = m_output->expressions[pointerExpression].type;
+                if (m_output->expressions[left].type == ValueType::StructPointer)
+                    m_output->expressions[left].elementCount =
+                        struct_type_for_expression(m_output->expressions[pointerExpression]);
+            }
         }
         return left;
     }
@@ -1257,7 +1384,10 @@ private:
         const LocalSymbol* local = find_local_name_symbol(name);
         const int32_t global = (!parameter && !local) ? find_global(name) : -1;
         ++(*m_index);
-        if (current().kind == TokenKind::Dot || current().kind == TokenKind::Arrow) {
+        const bool structArray = (local && local->kind == StorageKind::ArrayStruct) ||
+            (global >= 0 && m_unit->globals[global].kind == StorageKind::ArrayStruct);
+        if (current().kind == TokenKind::Dot || current().kind == TokenKind::Arrow ||
+            (structArray && current().kind == TokenKind::LeftBracket && array_has_field_suffix())) {
             return parse_field_access(name, true, depth + 1U);
         }
         const bool indexed = current().kind == TokenKind::LeftBracket;
@@ -1300,8 +1430,10 @@ private:
             return COMPILER_INVALID_INDEX;
         }
         const bool isLocal = local != nullptr;
-        const bool isArray = (local && local->kind == StorageKind::ArrayInt) ||
-            (global >= 0 && m_unit->globals[global].kind == StorageKind::ArrayInt);
+        const bool isArray = (local && (local->kind == StorageKind::ArrayInt ||
+                                        local->kind == StorageKind::ArrayStruct)) ||
+            (global >= 0 && (m_unit->globals[global].kind == StorageKind::ArrayInt ||
+                             m_unit->globals[global].kind == StorageKind::ArrayStruct));
         if (!isArray) {
             m_diagnostics.error(location, "indexed access requires an array", "array");
             return COMPILER_INVALID_INDEX;
@@ -1322,6 +1454,11 @@ private:
         m_output->expressions[expression].elementCount = elementCount;
         m_output->expressions[expression].elementSize = isLocal ? local->elementSize : m_unit->globals[global].elementSize;
         m_output->expressions[expression].indexedBaseKind = isLocal ? IndexedBaseKind::Local : IndexedBaseKind::Global;
+        if (structArray) {
+            m_output->expressions[expression].type = ValueType::StructPointer;
+            m_output->expressions[expression].structTypeIndex = isLocal
+                ? local->structTypeIndex : m_unit->globals[global].structTypeIndex;
+        }
         return expression;
     }
 
@@ -1393,16 +1530,21 @@ private:
             ++(*m_index);
             const ParameterSymbol* parameter = find_parameter_symbol(token);
             const LocalSymbol* local = find_local_name_symbol(token);
-            if (current().kind == TokenKind::Dot || current().kind == TokenKind::Arrow)
+            const int32_t namedGlobal = (!parameter && !local) ? find_global(token) : -1;
+            const bool structArray = (local && local->kind == StorageKind::ArrayStruct) ||
+                (namedGlobal >= 0 && m_unit->globals[namedGlobal].kind == StorageKind::ArrayStruct);
+            if (current().kind == TokenKind::Dot || current().kind == TokenKind::Arrow ||
+                (structArray && current().kind == TokenKind::LeftBracket && array_has_field_suffix()))
                 return parse_field_access(token, false, depth + 1U);
             const bool indexed = current().kind == TokenKind::LeftBracket;
             if (indexed) {
-                const int32_t global = (!parameter && !local) ? find_global(token) : -1;
+                const int32_t global = namedGlobal;
                 const GlobalSymbolIR* globalSymbol = global >= 0 ? &m_unit->globals[global] : nullptr;
                 const bool isArray = (local && local->kind == StorageKind::ArrayInt) ||
                     (globalSymbol && globalSymbol->kind == StorageKind::ArrayInt);
                 if (!isArray) {
-                    m_diagnostics.error(token.location, "indexed access requires an array", "array");
+                    m_diagnostics.error(token.location, structArray
+                        ? "struct array element requires a field access" : "indexed access requires an array", "array");
                     return COMPILER_INVALID_INDEX;
                 }
                 ++(*m_index);
@@ -1451,6 +1593,10 @@ private:
                     m_diagnostics.error(token.location, "struct value requires a field access", "struct");
                     return COMPILER_INVALID_INDEX;
                 }
+                if (local->kind == StorageKind::ArrayStruct) {
+                    m_diagnostics.error(token.location, "struct array value requires an indexed field access", "array");
+                    return COMPILER_INVALID_INDEX;
+                }
                 if (local->kind == StorageKind::PointerStruct) {
                     const uint16_t expression = make_expression(ExpressionKind::LoadStructPointer, token.location,
                         COMPILER_INVALID_INDEX, COMPILER_INVALID_INDEX, local->slot, 0);
@@ -1488,6 +1634,10 @@ private:
             if (global >= 0) {
                 if (m_unit->globals[global].kind == StorageKind::Struct) {
                     m_diagnostics.error(token.location, "struct value requires a field access", "struct");
+                    return COMPILER_INVALID_INDEX;
+                }
+                if (m_unit->globals[global].kind == StorageKind::ArrayStruct) {
+                    m_diagnostics.error(token.location, "struct array value requires an indexed field access", "array");
                     return COMPILER_INVALID_INDEX;
                 }
                 if (m_unit->globals[global].kind == StorageKind::ArrayInt) {
@@ -1774,6 +1924,16 @@ static bool global_signature_matches(const GlobalSymbolIR& global, StorageKind k
         global.elementSize == 4 && global.size == static_cast<uint32_t>(elementCount) * 4U;
 }
 
+static bool struct_global_signature_matches(const GlobalSymbolIR& global,
+                                            StorageKind kind, uint16_t elementCount,
+                                            uint16_t elementSize, uint32_t size,
+                                            uint64_t structTypeIdentity)
+{
+    return global.kind == kind && global.elementCount == elementCount &&
+        global.elementSize == elementSize && global.size == size &&
+        global.structTypeIdentity == structTypeIdentity && global.alignment == 4;
+}
+
 static int32_t find_struct_type_name(const TranslationUnitIR& unit, const char* name)
 {
     for (uint32_t i = 0; i < unit.structTypeCount; ++i)
@@ -1899,6 +2059,11 @@ static bool parse_struct_external_declaration(const char* source, const Token* t
         diagnostics.error(variableToken.location, "struct return values are not supported", "function");
         return false;
     }
+    bool isArray = false;
+    uint16_t elementCount = 1;
+    if (!parse_global_array_length(source, tokens, tokenCount, index,
+                                   COMPILER_MAX_ARRAY_ELEMENTS, &isArray,
+                                   &elementCount, diagnostics)) return false;
     if (tokens[token_index_or_eof(*index, tokenCount)].kind != TokenKind::Semicolon) {
         diagnostics.error(tokens[token_index_or_eof(*index, tokenCount)].location,
                           "expected ';' after struct global declaration", "global");
@@ -1910,9 +2075,18 @@ static bool parse_struct_external_declaration(const char* source, const Token* t
     variableName[variableToken.length] = '\0';
     const int32_t existing = find_global(*output, variableName);
     const StructTypeIR& type = output->structTypes[typeIndex];
+    uint32_t totalBytes = 0;
+    if (!checked_mul_u32(elementCount, type.sizeBytes, &totalBytes) ||
+        totalBytes == 0 || totalBytes > COMPILER_MAX_LINKED_DATA_BYTES) {
+        diagnostics.error(variableToken.location, "global struct array exceeds bounded data capacity", "global");
+        return false;
+    }
+    const StorageKind kind = isArray ? StorageKind::ArrayStruct : StorageKind::Struct;
     if (existing >= 0) {
         GlobalSymbolIR& global = output->globals[existing];
-        if (global.kind != StorageKind::Struct || global.structTypeIdentity != type.identity ||
+        if (!struct_global_signature_matches(global, kind, elementCount,
+                                             static_cast<uint16_t>(type.sizeBytes), totalBytes,
+                                             type.identity) ||
             (external && global.isDefinition)) {
             diagnostics.error_identifier(variableToken.location, "conflicting declaration for global ",
                                          variableName, name_length(variableName), "global");
@@ -1928,13 +2102,13 @@ static bool parse_struct_external_declaration(const char* source, const Token* t
     GlobalSymbolIR& global = output->globals[output->globalCount++];
     global = {};
     for (uint32_t i = 0; i <= variableToken.length; ++i) global.name[i] = variableName[i];
-    global.kind = StorageKind::Struct;
+    global.kind = kind;
     global.isDefinition = !external;
-    global.elementCount = 1;
+    global.elementCount = elementCount;
     global.elementSize = static_cast<uint16_t>(type.sizeBytes);
     global.structTypeIndex = static_cast<uint16_t>(typeIndex);
     global.structTypeIdentity = type.identity;
-    global.size = type.sizeBytes;
+    global.size = totalBytes;
     global.alignment = type.alignment;
     global.location = variableToken.location;
     return true;
@@ -2468,8 +2642,8 @@ bool parse_translation_unit(const char* source, const Token* tokens, uint32_t to
                      function.expressions[argument].type != ValueType::Int32Pointer) ||
                     (expectedKind == ParameterKind::StructPointer &&
                      (function.expressions[argument].type != ValueType::StructPointer ||
-                      function.expressions[argument].elementCount >= output->structTypeCount ||
-                      output->structTypes[function.expressions[argument].elementCount].identity !=
+                      expression_struct_type_index(*output, function.expressions[argument]) == COMPILER_INVALID_INDEX ||
+                      output->structTypes[expression_struct_type_index(*output, function.expressions[argument])].identity !=
                           call.expectedParameterStructTypes[a]))) {
                     diagnostics.error(call.location,
                                       expectedKind == ParameterKind::Int32Pointer

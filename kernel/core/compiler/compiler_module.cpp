@@ -112,7 +112,7 @@ static bool append_global_import(CompiledModule* module, const TranslationUnitIR
         }
         const GlobalSymbolIR& global = unit.globals[globalIndex];
         if (module->imports[existing].kind != (global.kind == StorageKind::ArrayInt ? SymbolKind::DataArray :
-                                               global.kind == StorageKind::Struct ? SymbolKind::DataStruct : SymbolKind::Data) ||
+                                               storage_kind_is_struct(global.kind) ? SymbolKind::DataStruct : SymbolKind::Data) ||
             module->imports[existing].elementCount != global.elementCount ||
             module->imports[existing].elementSize != global.elementSize ||
             module->imports[existing].size != global.size ||
@@ -133,13 +133,13 @@ static bool append_global_import(CompiledModule* module, const TranslationUnitIR
     if (!copy_string(importSymbol.name, sizeof(importSymbol.name), name)) return false;
     const GlobalSymbolIR& global = unit.globals[globalIndex];
     importSymbol.kind = global.kind == StorageKind::ArrayInt ? SymbolKind::DataArray :
-        global.kind == StorageKind::Struct ? SymbolKind::DataStruct : SymbolKind::Data;
+        storage_kind_is_struct(global.kind) ? SymbolKind::DataStruct : SymbolKind::Data;
     importSymbol.elementCount = global.elementCount;
     importSymbol.elementSize = global.elementSize;
     importSymbol.size = global.size;
     importSymbol.alignment = global.alignment;
     importSymbol.structTypeIdentity = global.structTypeIdentity;
-    if (global.kind == StorageKind::Struct && global.structTypeIndex < unit.structTypeCount)
+    if (storage_kind_is_struct(global.kind) && global.structTypeIndex < unit.structTypeCount)
         copy_string(importSymbol.structTypeName, sizeof(importSymbol.structTypeName),
                     unit.structTypes[global.structTypeIndex].name);
     importSymbol.location = location;
@@ -157,12 +157,12 @@ static bool flatten_global_data(TranslationUnitIR& unit, CompiledModule* module,
         if ((offset & 3U) != 0) offset = (offset + 3U) & ~3U;
         if (global.elementCount == 0 || global.size == 0 ||
             global.size > sizeof(module->mutableData) - offset ||
-            (global.kind != StorageKind::Struct && (global.elementSize != 4 ||
+            (!storage_kind_is_struct(global.kind) && (global.elementSize != 4 ||
              global.size != static_cast<uint32_t>(global.elementCount) * global.elementSize))) {
             diagnostics.error(global.location, "mutable global data capacity exceeded", "global");
             return false;
         }
-        for (uint32_t element = 0; global.kind != StorageKind::Struct && element < global.elementCount; ++element) {
+        for (uint32_t element = 0; !storage_kind_is_struct(global.kind) && element < global.elementCount; ++element) {
             const int32_t initial = global.kind == StorageKind::ArrayInt
                 ? global.initialValues[element] : global.initialValue;
             const uint32_t value = static_cast<uint32_t>(initial);
@@ -282,7 +282,7 @@ bool compile_module_from_source(const char* sourcePath,
         ExportSymbol& exportSymbol = module->exports[module->exportCount++];
         exportSymbol = {};
         exportSymbol.kind = global.kind == StorageKind::ArrayInt ? SymbolKind::DataArray :
-            global.kind == StorageKind::Struct ? SymbolKind::DataStruct : SymbolKind::Data;
+            storage_kind_is_struct(global.kind) ? SymbolKind::DataStruct : SymbolKind::Data;
         if (!copy_string(exportSymbol.name, sizeof(exportSymbol.name), global.name)) return false;
         exportSymbol.moduleDataOffset = global.moduleDataOffset;
         exportSymbol.size = global.size;
@@ -290,7 +290,7 @@ bool compile_module_from_source(const char* sourcePath,
         exportSymbol.elementCount = global.elementCount;
         exportSymbol.elementSize = global.elementSize;
         exportSymbol.structTypeIdentity = global.structTypeIdentity;
-        if (global.kind == StorageKind::Struct && global.structTypeIndex < s_unit.structTypeCount)
+        if (storage_kind_is_struct(global.kind) && global.structTypeIndex < s_unit.structTypeCount)
             copy_string(exportSymbol.structTypeName, sizeof(exportSymbol.structTypeName),
                         s_unit.structTypes[global.structTypeIndex].name);
         exportSymbol.location = global.location;

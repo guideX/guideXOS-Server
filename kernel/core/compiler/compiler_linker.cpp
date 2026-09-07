@@ -134,8 +134,10 @@ static bool valid_linker_data_signature(SymbolKind kind, uint16_t elementCount, 
                                         uint32_t size, uint32_t alignment, uint64_t structTypeIdentity)
 {
     if (kind == SymbolKind::DataStruct)
-        return elementCount == 1 && elementSize == size && size != 0 && size <= COMPILER_MAX_STRUCT_BYTES &&
-            alignment == 4 && structTypeIdentity != 0;
+        return elementCount != 0 && elementCount <= COMPILER_MAX_ARRAY_ELEMENTS && elementSize != 0 &&
+            elementSize <= COMPILER_MAX_STRUCT_BYTES && size != 0 &&
+            size == static_cast<uint32_t>(elementCount) * elementSize &&
+            size <= COMPILER_MAX_LINKED_DATA_BYTES && alignment == 4 && structTypeIdentity != 0;
     return (kind == SymbolKind::Data || kind == SymbolKind::DataArray) && elementCount != 0 &&
         elementCount <= COMPILER_MAX_ARRAY_ELEMENTS && elementSize == 4 &&
         size == static_cast<uint32_t>(elementCount) * elementSize && alignment == 4;

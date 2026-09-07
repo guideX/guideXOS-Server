@@ -18,7 +18,7 @@ namespace native_elf {
 namespace {
 
 static uint8_t s_invalidImage[guidexos::native_elf::MAX_ELF_FILE_BYTES];
-#if defined(GXOS_PHASE27G_SMOKE) || defined(GXOS_PHASE27H_SMOKE) || defined(GXOS_PHASE27I_SMOKE) || defined(GXOS_PHASE27J_SMOKE) || defined(GXOS_PHASE27K_SMOKE) || defined(GXOS_PHASE27L_SMOKE) || defined(GXOS_PHASE27M_SMOKE) || defined(GXOS_PHASE27P_SMOKE) || defined(GXOS_PHASE27R_SMOKE) || defined(GXOS_PHASE27S_SMOKE) || defined(GXOS_PHASE27T_SMOKE)
+#if defined(GXOS_PHASE27G_SMOKE) || defined(GXOS_PHASE27H_SMOKE) || defined(GXOS_PHASE27I_SMOKE) || defined(GXOS_PHASE27J_SMOKE) || defined(GXOS_PHASE27K_SMOKE) || defined(GXOS_PHASE27L_SMOKE) || defined(GXOS_PHASE27M_SMOKE) || defined(GXOS_PHASE27P_SMOKE) || defined(GXOS_PHASE27R_SMOKE) || defined(GXOS_PHASE27S_SMOKE) || defined(GXOS_PHASE27T_SMOKE) || defined(GXOS_PHASE27U_SMOKE)
 static uint8_t s_compareImage[guidexos::native_elf::MAX_ELF_FILE_BYTES];
 #endif
 
@@ -155,7 +155,7 @@ static bool emit_serial_artifact(const char* path, const char* name)
     return true;
 }
 
-#if defined(GXOS_PHASE27G_SMOKE) || defined(GXOS_PHASE27H_SMOKE) || defined(GXOS_PHASE27I_SMOKE) || defined(GXOS_PHASE27J_SMOKE) || defined(GXOS_PHASE27K_SMOKE) || defined(GXOS_PHASE27L_SMOKE) || defined(GXOS_PHASE27M_SMOKE) || defined(GXOS_PHASE27P_SMOKE) || defined(GXOS_PHASE27R_SMOKE) || defined(GXOS_PHASE27S_SMOKE) || defined(GXOS_PHASE27T_SMOKE)
+#if defined(GXOS_PHASE27G_SMOKE) || defined(GXOS_PHASE27H_SMOKE) || defined(GXOS_PHASE27I_SMOKE) || defined(GXOS_PHASE27J_SMOKE) || defined(GXOS_PHASE27K_SMOKE) || defined(GXOS_PHASE27L_SMOKE) || defined(GXOS_PHASE27M_SMOKE) || defined(GXOS_PHASE27P_SMOKE) || defined(GXOS_PHASE27R_SMOKE) || defined(GXOS_PHASE27S_SMOKE) || defined(GXOS_PHASE27T_SMOKE) || defined(GXOS_PHASE27U_SMOKE)
 static bool same_vfs_file_bytes(const char* leftPath, const char* rightPath)
 {
     vfs::FileInfo left = {};
@@ -1768,6 +1768,157 @@ void run_bootstrap_execution_smoke()
     print_marker("phase27t", phase27tPassed);
     serial::puts(phase27tPassed ? "ELF Loader: Phase 27T structs and field addressing smoke PASS\n" :
                                   "ELF Loader: Phase 27T structs and field addressing smoke FAIL\n");
+#endif
+#if defined(GXOS_PHASE27U_SMOKE)
+    serial::puts("ELF Loader: Phase 27U arrays of structs and struct-pointer traversal smoke begin\n");
+    static compiler::CompileSummary u27Clean = {};
+    static compiler::CompileSummary u27Warm = {};
+    static compiler::CompileSummary u27Edited = {};
+    static compiler::CompileSummary u27Failed = {};
+    static compiler::CompileSummary u27Restored = {};
+    static compiler::CompileSummary u27Deterministic = {};
+    static compiler::CompileSummary u27Nested = {};
+    static compiler::CompileSummary u27Global = {};
+
+    const char* u27Sources[] = {
+        "/P27U/src/main.cpp", "/P27U/src/math.cpp", "/P27U/src/types.cpp"
+    };
+    const char* u27Identities[] = {"src/main.cpp", "src/math.cpp", "src/types.cpp"};
+    const char* u27Objects[] = {
+        "/P27U/out/main.gxo", "/P27U/out/math.gxo", "/P27U/out/types.gxo"
+    };
+    const char* u27DeterministicObjects[] = {
+        "/P27U/out/repmain.gxo", "/P27U/out/repmath.gxo", "/P27U/out/reptypes.gxo"
+    };
+    const bool clean = compiler::compile_project_incremental(
+        u27Sources, u27Identities, u27Objects, 3, "/P27U/out/u27main.elf", &u27Clean) &&
+        u27Clean.compiledModuleCount == 3 && u27Clean.cachedModuleCount == 0 &&
+        u27Clean.linkedModuleCount == 3 && run_expected("/P27U/out/u27main.elf", 40);
+
+    const bool warm = clean && compiler::compile_project_incremental(
+        u27Sources, u27Identities, u27Objects, 3, "/P27U/out/u27warm.elf", &u27Warm) &&
+        u27Warm.compiledModuleCount == 0 && u27Warm.cachedModuleCount == 3 &&
+        u27Warm.linkedModuleCount == 3 && u27Warm.linkedFromPersistedObjects &&
+        u27Warm.persistentObjectsReopened && run_expected("/P27U/out/u27warm.elf", 40);
+
+    const bool deterministicBuild = warm && compiler::compile_project_incremental(
+        u27Sources, u27Identities, u27DeterministicObjects, 3, "/P27U/out/u27main.elf",
+        &u27Deterministic) && u27Deterministic.compiledModuleCount == 3 &&
+        same_vfs_file_bytes(u27Objects[0], u27DeterministicObjects[0]) &&
+        same_vfs_file_bytes(u27Objects[1], u27DeterministicObjects[1]) &&
+        same_vfs_file_bytes(u27Objects[2], u27DeterministicObjects[2]) &&
+        u27Clean.outputHash == u27Deterministic.outputHash;
+    if (deterministicBuild) {
+        (void)vfs::unlink(u27DeterministicObjects[0]);
+        (void)vfs::unlink(u27DeterministicObjects[1]);
+        (void)vfs::unlink(u27DeterministicObjects[2]);
+    }
+
+    const char u27MathEdited[] =
+        "struct Point { int x; int y; int tag; };\n"
+        "int point_value(struct Point* p) { return p->x + p->y + p->tag + 1; }\n";
+    const char u27MathOriginal[] =
+        "struct Point { int x; int y; int tag; };\n"
+        "int point_value(struct Point* p) { return p->x + p->y + p->tag; }\n";
+    const char u27MathInvalid[] =
+        "struct Point { int x; int y; int tag; };\n"
+        "int point_value(struct Point* p { return p->x; }\n";
+    const bool editedSource = warm &&
+        vfs::write_file(u27Sources[1], u27MathEdited, sizeof(u27MathEdited) - 1U) ==
+            static_cast<int32_t>(sizeof(u27MathEdited) - 1U);
+    const bool edited = editedSource && compiler::compile_project_incremental(
+        u27Sources, u27Identities, u27Objects, 3, "/P27U/out/u27warm.elf", &u27Edited) &&
+        u27Edited.compiledModuleCount == 1 && u27Edited.cachedModuleCount == 2 &&
+        u27Edited.success && run_expected("/P27U/out/u27warm.elf", 41);
+    const bool failedSource = edited &&
+        vfs::write_file(u27Sources[1], u27MathInvalid, sizeof(u27MathInvalid) - 1U) ==
+            static_cast<int32_t>(sizeof(u27MathInvalid) - 1U);
+    const bool failedRebuild = failedSource &&
+        !compiler::compile_project_incremental(u27Sources, u27Identities, u27Objects, 3,
+                                                "/P27U/out/u27fail.elf", &u27Failed) &&
+        run_expected("/P27U/out/u27warm.elf", 41);
+    const bool restoredSource = failedRebuild &&
+        vfs::write_file(u27Sources[1], u27MathOriginal, sizeof(u27MathOriginal) - 1U) ==
+            static_cast<int32_t>(sizeof(u27MathOriginal) - 1U);
+    const bool restored = restoredSource && compiler::compile_project_incremental(
+        u27Sources, u27Identities, u27Objects, 3, "/P27U/out/u27back.elf", &u27Restored) &&
+        u27Restored.compiledModuleCount == 1 && u27Restored.cachedModuleCount == 2 &&
+        run_expected("/P27U/out/u27back.elf", 40);
+
+    const char u27NestedSource[] =
+        "struct Point { int x; int y; int tag; }; "
+        "int gx_main(gx_app_context* c) { struct Point points[3]; int* px; "
+        "points[1].x = 2; px = &points[1].x; *px = 99; return points[1].x; }";
+    const int32_t nestedWrite = restored
+        ? vfs::write_file("/P27U/out/unested.c", u27NestedSource,
+                          sizeof(u27NestedSource) - 1U) : -1;
+    const bool nested = restored && nestedWrite ==
+        static_cast<int32_t>(sizeof(u27NestedSource) - 1U) &&
+        compiler::compile("/P27U/out/unested.c", "/P27U/out/u27aux.elf", &u27Nested) &&
+        run_expected("/P27U/out/u27aux.elf", 99);
+    if (nested) (void)vfs::unlink("/P27U/out/u27aux.elf");
+
+    const char u27GlobalSource[] =
+        "struct Point { int x; int y; int tag; }; struct Point global_points[3]; "
+        "int gx_main(gx_app_context* c) { struct Point* p; "
+        "global_points[1].x = 40; p = &global_points[1]; return p->x; }";
+    const int32_t globalWrite = nested
+        ? vfs::write_file("/P27U/out/uglob.c", u27GlobalSource,
+                          sizeof(u27GlobalSource) - 1U) : -1;
+    const bool global = nested && globalWrite ==
+        static_cast<int32_t>(sizeof(u27GlobalSource) - 1U) &&
+        compiler::compile("/P27U/out/uglob.c", "/P27U/out/u27glo.elf", &u27Global) &&
+        run_expected("/P27U/out/u27glo.elf", 40) && u27Global.success;
+
+    compiler::GxoObjectHeaderView u27Header = {};
+    compiler::Diagnostics u27ObjectDiagnostics;
+    uint32_t u27ObjectBytes = 0;
+    const bool objectReopen = restored &&
+        read_vfs_image(u27Objects[0], s_invalidImage, sizeof(s_invalidImage), &u27ObjectBytes) &&
+        compiler::inspect_gxo_header(s_invalidImage, u27ObjectBytes, &u27Header, u27ObjectDiagnostics) &&
+        u27Header.compilerObjectAbiVersion == compiler::COMPILER_OBJECT_ABI_VERSION &&
+        u27Restored.persistentObjectsReopened;
+    static NativeElfRunReport u27Report = {};
+    const bool native = restored && run_expected_with_report("/P27U/out/u27back.elf", 40, &u27Report) &&
+        u27Report.teardownComplete;
+    const bool artifact = native && emit_serial_artifact("/P27U/out/u27back.elf", "u27main");
+
+    const bool layout = clean && u27Clean.outputBytes != 0 && u27Clean.codeBytes != 0;
+    const bool indexedFields = clean;
+    const bool structPointer = clean;
+    const bool pointerScaling = clean && compile_code_contains(u27Clean,
+        reinterpret_cast<const uint8_t*>("\x48\x69\xC0\x0C\x00\x00\x00"), 7);
+    const bool arrowLoadStore = clean;
+    const bool isolation = clean;
+    const bool addressEquivalence = clean;
+    const bool crossFile = clean && u27Clean.linkedModuleCount == 3;
+    print_marker("phase27u_struct_array_layout", layout);
+    print_marker("phase27u_indexed_fields", indexedFields);
+    print_marker("phase27u_struct_pointer", structPointer);
+    print_marker("phase27u_pointer_scaling", pointerScaling);
+    print_marker("phase27u_arrow_load_store", arrowLoadStore);
+    print_marker("phase27u_element_isolation", isolation);
+    print_marker("phase27u_address_equivalence", addressEquivalence);
+    print_marker("phase27u_nested_field_address", nested);
+    print_marker("phase27u_global_struct_array", global);
+    print_marker("phase27u_cross_file_struct_pointer", crossFile);
+    print_marker("phase27u_object_reopen", objectReopen);
+    print_marker("phase27u_incremental_reuse", warm);
+    print_marker("phase27u_incremental_edit", edited && restored);
+    print_marker("phase27u_failed_rebuild_recovery", failedRebuild && restored);
+    print_marker("phase27u_object_deterministic", deterministicBuild);
+    print_marker("phase27u_native_execution", native);
+    print_marker("phase27u_artifact", artifact);
+    const bool phase27uPassed = layout && indexedFields && structPointer && pointerScaling &&
+        arrowLoadStore && isolation && addressEquivalence && nested && global && crossFile &&
+        objectReopen && warm && edited && failedRebuild && restored && deterministicBuild && native && artifact;
+    print_marker("phase27u", phase27uPassed);
+    serial::puts(phase27uPassed ?
+        "ELF Loader: Phase 27U arrays of structs and struct-pointer traversal smoke PASS\n" :
+        "ELF Loader: Phase 27U arrays of structs and struct-pointer traversal smoke FAIL\n");
+    if (phase27uPassed) {
+        serial::puts("DEVELOPER_STUDIO_PHASE27U_PASS\n");
+    }
 #endif
 #if defined(GXOS_PHASE27G_SMOKE)
     serial::puts("ELF Loader: Phase 27G bootstrap language smoke begin\n");
