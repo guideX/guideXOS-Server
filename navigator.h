@@ -1022,6 +1022,14 @@ private:
 	static void executeJavaScriptDocumentScripts();
 	static bool dispatchJavaScriptClick(int blockIndex,
 		bool* defaultPrevented = nullptr);
+	static bool requestJavaScriptElementActivation(void* context,
+		std::uint64_t serial,
+		gxos::javascript::NavigatorScriptActivationProvenance provenance);
+	static bool requestElementActivation(std::uint64_t serial,
+		gxos::javascript::NavigatorScriptActivationProvenance provenance,
+		bool* defaultPrevented = nullptr);
+	static bool performElementDefaultAction(std::uint64_t serial,
+		gxos::javascript::NavigatorScriptActivationProvenance provenance);
 	static bool dispatchJavaScriptKeyboardEvent(int keyCode,
 		const std::string& action, bool* defaultPrevented = nullptr);
 	static bool dispatchJavaScriptFocusEvent(std::uint64_t targetSerial,
@@ -1076,6 +1084,7 @@ private:
 	static int findBlockById(const std::string& id, bool labelOnly);
 	static uint64_t associatedControlSerialForLabel(const DocBlock& label);
 	static int blockIndexForControlSerial(uint64_t serial);
+	static int blockIndexForElementSerial(uint64_t serial);
 	static bool radioGroupMatches(const DocBlock& left, const DocBlock& right);
 	static bool activateLabelBlock(int blockIndex);
 	static bool smokeClickBlock(int blockIndex, bool label);

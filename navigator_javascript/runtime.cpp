@@ -2030,10 +2030,14 @@ bool RuntimeContext::createOrUpdateEventObject(SourceView type,
     if (!createHostObject(currentTarget, currentTargetObject, error, true))
         return false;
 
+    if (eventObject_ == kInvalidRuntimeObjectId && eventDispatchDepth_ > 0u)
+        eventObject_ = eventObjectCache_[eventDispatchDepth_ - 1u];
     if (eventObject_ == kInvalidRuntimeObjectId ||
         objectAt(eventObject_) == nullptr) {
         const std::vector<Value> noElements;
         if (!createObject(false, noElements, eventObject_, error)) return false;
+        if (eventDispatchDepth_ > 0u)
+            eventObjectCache_[eventDispatchDepth_ - 1u] = eventObject_;
         if (!createNativeFunction(NativeFunctionId::EventStopPropagation,
                 eventStopPropagationFunction_, error)) {
             eventObject_ = kInvalidRuntimeObjectId;
@@ -2123,8 +2127,20 @@ bool RuntimeContext::createOrUpdateEventObject(SourceView type,
     return true;
 }
 
-void RuntimeContext::beginEventDispatch()
+bool RuntimeContext::beginEventDispatch()
 {
+    if (eventDispatchDepth_ >= kMaxEventDispatchDepth) return false;
+    if (eventDispatchDepth_ > 0u) {
+        EventDispatchState& saved = eventDispatchStack_[eventDispatchDepth_];
+        saved.eventObject = eventObject_;
+        saved.eventPhase = eventPhase_;
+        saved.propagationStopped = eventPropagationStopped_;
+        saved.immediatePropagationStopped = eventImmediatePropagationStopped_;
+        saved.defaultPrevented = eventDefaultPrevented_;
+        saved.cancelable = eventCancelable_;
+    }
+    ++eventDispatchDepth_;
+    eventObject_ = eventObjectCache_[eventDispatchDepth_ - 1u];
     eventDispatchActive_ = true;
     eventPhase_ = kEventPhaseNone;
     eventPropagationStopped_ = false;
@@ -2139,11 +2155,32 @@ void RuntimeContext::beginEventDispatch()
         objectAt(eventObject_) != nullptr)
         (void)updateExistingProperty(eventObject_, "eventPhase",
             Value::number(static_cast<double>(eventPhase_)), ignored);
+    return true;
 }
 
 void RuntimeContext::endEventDispatch()
 {
+    if (eventDispatchDepth_ == 0u) return;
+    if (eventObject_ != kInvalidRuntimeObjectId &&
+        objectAt(eventObject_) != nullptr) {
+        RuntimeErrorCode ignored = RuntimeErrorCode::None;
+        (void)updateExistingProperty(eventObject_, "eventPhase",
+            Value::number(static_cast<double>(kEventPhaseNone)), ignored);
+    }
+    --eventDispatchDepth_;
+    if (eventDispatchDepth_ > 0u) {
+        const EventDispatchState& saved = eventDispatchStack_[eventDispatchDepth_];
+        eventObject_ = saved.eventObject;
+        eventPhase_ = saved.eventPhase;
+        eventPropagationStopped_ = saved.propagationStopped;
+        eventImmediatePropagationStopped_ = saved.immediatePropagationStopped;
+        eventDefaultPrevented_ = saved.defaultPrevented;
+        eventCancelable_ = saved.cancelable;
+        eventDispatchActive_ = true;
+        return;
+    }
     eventDispatchActive_ = false;
+    eventObject_ = eventObjectCache_[0];
     eventPhase_ = kEventPhaseNone;
     eventPropagationStopped_ = false;
     eventImmediatePropagationStopped_ = false;
@@ -2201,6 +2238,9 @@ void RuntimeContext::clearRuntimeState()
     mathObject_ = kInvalidRuntimeObjectId;
     eventConstantsObject_ = kInvalidRuntimeObjectId;
     eventObject_ = kInvalidRuntimeObjectId;
+    eventObjectCache_.fill(kInvalidRuntimeObjectId);
+    eventDispatchStack_ = {};
+    eventDispatchDepth_ = 0;
     eventStopPropagationFunction_ = kInvalidRuntimeFunctionId;
     eventStopImmediatePropagationFunction_ = kInvalidRuntimeFunctionId;
     eventPreventDefaultFunction_ = kInvalidRuntimeFunctionId;

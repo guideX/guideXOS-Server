@@ -24,6 +24,7 @@ constexpr std::uint32_t kNavigatorAddEventListenerMethod = 2u;
 constexpr std::uint32_t kNavigatorRemoveEventListenerMethod = 3u;
 constexpr std::uint32_t kNavigatorFocusMethod = 4u;
 constexpr std::uint32_t kNavigatorBlurMethod = 5u;
+constexpr std::uint32_t kNavigatorClickMethod = 6u;
 
 constexpr std::size_t kNavigatorScriptMaxDocumentIdLength = 256u;
 constexpr std::size_t kNavigatorScriptMaxTextContentAssignment = 64u * 1024u;
@@ -47,11 +48,21 @@ enum class NavigatorScriptEventType : std::uint8_t {
     Change,
     Submit,
 };
+
+enum class NavigatorScriptActivationProvenance : std::uint8_t {
+    Pointer = 0u,
+    Keyboard,
+    Programmatic,
+};
 // JS13/JS17 snapshots at most 32 serials, including the clicked Element and the
 // document's html/body ancestors. The path is deliberately smaller than the
 // 1024-node document metadata bound so dispatch cannot consume an unbounded
 // native traversal stack.
 constexpr std::size_t kNavigatorScriptMaxPropagationDepth = 32u;
+// Click dispatch adds one bounded document entry after the existing DOM path.
+constexpr std::size_t kNavigatorScriptMaxClickPropagationDepth =
+    kNavigatorScriptMaxPropagationDepth + 1u;
+constexpr std::size_t kNavigatorScriptMaxActivationDepth = 16u;
 
 struct NavigatorScriptHostLimits {
     std::size_t maxDocumentIdLength = kNavigatorScriptMaxDocumentIdLength;
@@ -73,6 +84,8 @@ public:
     using FocusRequestCallback = bool (*)(void* context,
         HostInstanceId serial, bool focus);
     using DispatchCompleteCallback = void (*)(void* context);
+    using ActivationDefaultActionCallback = bool (*)(void* context,
+        HostInstanceId serial, NavigatorScriptActivationProvenance provenance);
 
     explicit NavigatorScriptHostAdapter(HostGenerationId generation = 1u,
         NavigatorScriptHostLimits limits = NavigatorScriptHostLimits());
@@ -88,6 +101,8 @@ public:
         void* context);
     void setDispatchCompleteCallback(DispatchCompleteCallback callback,
         void* context);
+    void setActivationDefaultActionCallback(
+        ActivationDefaultActionCallback callback, void* context);
     bool eventDispatchActive() const { return clickDispatchActive_; }
     HostGenerationId generation() const { return generation_; }
     gxos::web::WebDocument* document() const { return document_; }
@@ -112,6 +127,12 @@ public:
     // already-installed realm; no source is reparsed and no new realm is
     // created for the click.
     bool dispatchClick(RuntimeContext& runtime, HostInstanceId serial,
+        RuntimeErrorCode& error, bool* defaultPrevented = nullptr);
+    // One bounded activation seam shared by pointer, keyboard, and
+    // programmatic activation. The click dispatcher runs first; the supplied
+    // default action callback runs only when the click remains uncanceled.
+    bool requestElementActivation(RuntimeContext& runtime,
+        HostInstanceId serial, NavigatorScriptActivationProvenance provenance,
         RuntimeErrorCode& error, bool* defaultPrevented = nullptr);
     // Production and hosted-proof input boundary. targetSerial is the
     // focused element serial, or zero to target the document fallback.
@@ -238,7 +259,7 @@ private:
     HostResult callInternal(const HostObjectReference* receiver,
         std::uint32_t methodId, const HostValue* arguments,
         std::size_t argumentCount, HostValue& result, bool once,
-        bool capture, bool optionsSupplied);
+        bool capture, bool optionsSupplied, RuntimeContext* runtime);
     gxos::web::HtmlElementRef* findElement(HostInstanceId serial);
     const gxos::web::HtmlElementRef* findElement(HostInstanceId serial) const;
     bool isKnownElementSerial(HostInstanceId serial) const;
@@ -268,10 +289,13 @@ private:
     std::size_t clickListenerCount_ = 0;
     std::uint64_t nextListenerRegistrationSequence_ = 1u;
     bool clickDispatchActive_ = false;
+    std::size_t activationDepth_ = 0;
     FocusRequestCallback focusRequestCallback_ = nullptr;
     void* focusRequestContext_ = nullptr;
     DispatchCompleteCallback dispatchCompleteCallback_ = nullptr;
     void* dispatchCompleteContext_ = nullptr;
+    ActivationDefaultActionCallback activationDefaultActionCallback_ = nullptr;
+    void* activationDefaultActionContext_ = nullptr;
     // Returned strings are copied synchronously by RuntimeContext. Keeping
     // one adapter-owned scratch value avoids exposing mutable document memory.
     mutable std::string returnBuffer_;
@@ -338,7 +362,11 @@ private:
     static bool focusRequestCallback(void* context, HostInstanceId serial,
         bool focus);
     static void dispatchCompleteCallback(void* context);
+    static bool activationDefaultActionCallback(void* context,
+        HostInstanceId serial, NavigatorScriptActivationProvenance provenance);
     bool requestFocus(HostInstanceId serial, bool focus);
+    bool performElementDefaultAction(HostInstanceId serial,
+        NavigatorScriptActivationProvenance provenance);
     bool focusElementInternal(std::uint64_t serial, RuntimeErrorCode& error);
     bool clearFocusInternal(RuntimeErrorCode& error);
     bool drainPendingFocusRequests(RuntimeErrorCode& error);

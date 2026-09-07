@@ -6,6 +6,7 @@
 #include "parser.h"
 #include "value.h"
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <string>
@@ -260,7 +261,7 @@ public:
     // these calls. Event propagation methods are methods on the cached Event
     // object; outside this active window they are harmless no-ops and cannot
     // affect a later event.
-    void beginEventDispatch();
+    bool beginEventDispatch();
     void endEventDispatch();
     // The host updates one dispatch-scoped byte at stage boundaries. The
     // cached Event property mirrors this value and remains host-owned.
@@ -454,6 +455,18 @@ private:
     bool eventImmediatePropagationStopped_ = false;
     bool eventDefaultPrevented_ = false;
     bool eventCancelable_ = true;
+    struct EventDispatchState {
+        RuntimeObjectId eventObject = kInvalidRuntimeObjectId;
+        std::uint8_t eventPhase = kEventPhaseNone;
+        bool propagationStopped = false;
+        bool immediatePropagationStopped = false;
+        bool defaultPrevented = false;
+        bool cancelable = true;
+    };
+    static constexpr std::size_t kMaxEventDispatchDepth = 16u;
+    std::array<RuntimeObjectId, kMaxEventDispatchDepth> eventObjectCache_{};
+    std::array<EventDispatchState, kMaxEventDispatchDepth> eventDispatchStack_{};
+    std::size_t eventDispatchDepth_ = 0;
     HostAdapter* hostAdapter_ = nullptr;
     HostGenerationId hostGeneration_ = kInvalidHostGenerationId;
     std::vector<HostObjectRecord> hostObjects_;

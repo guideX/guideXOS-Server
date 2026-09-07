@@ -3222,3 +3222,70 @@ kernel build, but remains blocked by the existing Mbed TLS configuration
 errors in `third_party/mbedtls/library/mbedtls_check_config.h` (partial ECC
 acceleration and incomplete ECDHE-RSA prerequisites). QEMU was not launched
 because no kernel image was produced; no TLS configuration was changed.
+
+## Phase JS29: programmatic `Element.click()` and shared activation defaults
+
+JS29 adds the receiver-aware `element.click()` host method for every live
+element handle. It accepts zero arguments, returns `undefined`, fails closed
+for stale or non-element receivers, and uses the existing bounded host-call
+protocol; no parser special case or general DOM method table was added.
+
+Programmatic activation, pointer click, and keyboard activation now share one
+adapter seam. The seam dispatches a bubbling, cancelable generic `click` and
+invokes the authoritative Navigator default-action callback only when the
+complete path is not canceled. The click path is target → structural
+ancestors → document, with the existing capture/target/bubble phases, `once`,
+removal, `stopPropagation()`, `stopImmediatePropagation()`, listener-state
+mutation, stale-document guards, and 64-registration cap. `preventDefault()`
+and propagation stopping remain independent; `defaultPrevented` is local to
+the active click and cannot leak into a later or nested dispatch.
+
+The fixed-resource bounds are explicit: 16 nested activation requests, 16
+nested cached `Event` dispatch states/objects, and 32 structural propagation
+entries plus the document slot for clicks. Nested dispatch restores the outer
+event object and flags after the inner click returns. Self-recursive
+`element.click()` therefore fails as a bounded host re-entry instead of
+allocating an unbounded event stack.
+
+The native default actions are the existing authoritative form and navigation
+paths. Uncanceled checkbox clicks toggle once and then emit `input` followed
+by `change`; canceled clicks preserve state and emit neither event. Radio
+activation selects the target and unchecks only the matching bounded group,
+with no redundant transition when it is already selected. Submit-button and
+`input type=submit` clicks dispatch `submit` on the containing form after the
+click; click cancellation suppresses submit, and submit cancellation suppresses
+serialization/navigation. `type=button` remains non-submitting. Existing link
+navigation, label forwarding, and bounded single-select activation also pass
+through the same seam. Disabled controls remain no-ops, and text controls do
+not gain caret or selection behavior from `.click()`.
+
+The keyboard path retains its existing keydown/keyup boundary and repeat and
+stale-release guards, while its activation now enters the same click/default
+action seam. Pointer activation likewise uses the same seam. Scripted
+`.checked`, `.value`, and text `.value` assignments remain silent: they do not
+synthesize click, input, or change events.
+
+### JS29 validation result
+
+The dedicated proof is
+`tests/navigator_javascript_js29_test.cpp`, run by
+`scripts/smoke-navigator-javascript-js29.ps1`. It reports 173 checks with 0
+failures, including receiver validation, event metadata and propagation,
+preventDefault/default-action ordering, checkbox/radio/submit matrices,
+programmatic and nested activation, outer-event restoration, listener
+mutation, focus redirection, recursion bounds, stale handles, and listener
+capacity. The script also passes the bare-metal and strict adapter/runtime
+compile lanes. The hosted fixtures are
+`navigator-smoke/javascript-js29.html` and
+`navigator-smoke/javascript-js29-target.html`.
+
+The complete focused matrix contains lexer, parser, runtime, and JS6 through
+JS29: all 27 suites pass. The normal native `build.bat` completes
+successfully. The hosted aggregate reports 423 passed and 7 failed out of 430
+checks; the seven failures remain the unrelated CSS baselines CSS 3C, CSS 3G,
+CSS 6A, three CSS 6B checks, and CSS 6C. The kernel retry builds the
+bootloader and reaches the kernel, but remains blocked by the existing Mbed
+TLS configuration errors in `third_party/mbedtls/library/mbedtls_check_config.h`
+(partial ECC acceleration and incomplete ECDHE-RSA prerequisites). QEMU was
+not launched because no kernel image was produced; no TLS configuration was
+changed.

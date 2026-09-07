@@ -1,0 +1,56 @@
+<!doctype html>
+<html>
+<head><title>Navigator JavaScript JS29</title></head>
+<body>
+<h1>Navigator JavaScript JS29</h1>
+<p>Programmatic click shares cancelable native default actions.</p>
+<div id="js29-parent">
+  <div id="js29-ordinary">ordinary target</div>
+  <form id="js29-form" action="javascript-js29-target.html" method="get">
+    <input id="js29-box" type="checkbox" name="enabled" value="yes">
+    <input id="js29-radio-a" type="radio" name="choice" value="a" checked>
+    <input id="js29-radio-b" type="radio" name="choice" value="b">
+    <button id="js29-submit" type="submit">Submit button</button>
+    <input id="js29-input-submit" type="submit" value="Input submit">
+    <button id="js29-plain" type="button">Plain button</button>
+  </form>
+</div>
+<p id="js29-state">initial</p>
+<script>
+var js29State = document.getElementById("js29-state");
+var js29Box = document.getElementById("js29-box");
+var js29RadioA = document.getElementById("js29-radio-a");
+var js29RadioB = document.getElementById("js29-radio-b");
+var js29Submit = document.getElementById("js29-submit");
+var js29Form = document.getElementById("js29-form");
+var js29Plain = document.getElementById("js29-plain");
+var js29Log = "";
+function js29Record(value) {
+    js29Log = js29Log + value;
+    js29State.textContent = js29Log;
+}
+js29Box.addEventListener("click", function(event) {
+    js29Record("box-click-before-" + js29Box.checked + ";");
+});
+js29Box.addEventListener("input", function() {
+    js29Record("box-input-" + js29Box.checked + ";");
+});
+js29Box.addEventListener("change", function() {
+    js29Record("box-change-" + js29Box.checked + ";");
+});
+js29RadioB.addEventListener("click", function() {
+    js29Record("radio-click-" + js29RadioA.checked + ":" + js29RadioB.checked + ";");
+});
+js29Form.addEventListener("submit", function(event) {
+    js29Record("submit-" + event.defaultPrevented + ";");
+    event.preventDefault();
+});
+js29Submit.addEventListener("click", function() {
+    js29Record("submit-click;");
+});
+js29Plain.addEventListener("click", function() {
+    js29Record("plain-click;");
+});
+</script>
+</body>
+</html>

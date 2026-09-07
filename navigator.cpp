@@ -159,6 +159,12 @@ std::string Navigator::s_clipboardMode = "Navigator internal clipboard";
 std::vector<int> Navigator::s_registeredWidgetIds;
 static std::unordered_set<std::string> s_visitedUrls;
 
+namespace {
+
+static void ensureInlineLayout(const WebDocument& doc);
+
+}
+
 constexpr uint64_t kNavigatorLifecycleCounterCap = 1000000;
 
 static void incrementLifecycleCounter(uint64_t& value)
@@ -189,6 +195,8 @@ bool Navigator::resetJavaScriptRealmForNavigation()
 		nullptr);
 	s_scriptHostAdapter.setDispatchCompleteCallback(
 		&Navigator::completeJavaScriptFocusDispatch, nullptr);
+	s_scriptHostAdapter.setActivationDefaultActionCallback(
+		&Navigator::requestJavaScriptElementActivation, nullptr);
 	s_scriptRuntime.setHostAdapter(&s_scriptHostAdapter);
 	s_scriptRuntime.reset();
 	if (s_scriptRuntime.lastResult().succeeded()) return true;
@@ -236,6 +244,58 @@ bool Navigator::dispatchJavaScriptClick(int blockIndex, bool* defaultPrevented)
 		defaultPrevented))
 		recordJavaScriptError("click", error);
 	return true;
+}
+
+bool Navigator::requestJavaScriptElementActivation(void*,
+	std::uint64_t serial,
+	gxos::javascript::NavigatorScriptActivationProvenance provenance)
+{
+	return performElementDefaultAction(serial, provenance);
+}
+
+bool Navigator::requestElementActivation(
+	std::uint64_t serial,
+	gxos::javascript::NavigatorScriptActivationProvenance provenance,
+	bool* defaultPrevented)
+{
+	RuntimeErrorCode error = RuntimeErrorCode::None;
+	const bool activated = s_scriptHostAdapter.requestElementActivation(
+		s_scriptRuntime, serial, provenance, error, defaultPrevented);
+	if (error != RuntimeErrorCode::None)
+		recordJavaScriptError("activation", error);
+	if (s_scriptHostAdapter.document() == &s_currentDoc &&
+		s_currentDoc.layoutDirty) {
+		ensureInlineLayout(s_currentDoc);
+		updateDisplay();
+	}
+	return activated;
+}
+
+bool Navigator::performElementDefaultAction(
+	std::uint64_t serial,
+	gxos::javascript::NavigatorScriptActivationProvenance)
+{
+	if (serial == 0 || s_scriptHostAdapter.document() != &s_currentDoc)
+		return false;
+	const int blockIndex = blockIndexForElementSerial(serial);
+	if (blockIndex < 0 || blockIndex >= static_cast<int>(s_currentDoc.blocks.size()))
+		return true; // Ordinary structural elements have no native default action.
+	DocBlock& block = s_currentDoc.blocks[static_cast<std::size_t>(blockIndex)];
+	switch (block.type) {
+	case BlockType::Link:
+		if (!block.url.empty()) navigateTo(block.url);
+		return true;
+	case BlockType::FormLabel:
+		return activateLabelBlock(blockIndex);
+	case BlockType::FormCheckbox:
+	case BlockType::FormRadio:
+	case BlockType::FormSelect:
+	case BlockType::FormSubmit:
+		activateFormControl(blockIndex);
+		return true;
+	default:
+		return true;
+	}
 }
 
 bool Navigator::dispatchJavaScriptKeyboardEvent(int keyCode,
@@ -17973,6 +18033,18 @@ int Navigator::blockIndexForControlSerial(uint64_t serial)
 	return -1;
 }
 
+int Navigator::blockIndexForElementSerial(uint64_t serial)
+{
+	if (serial == 0) return -1;
+	for (int i = 0; i < static_cast<int>(s_currentDoc.blocks.size()); ++i) {
+		const DocBlock& block = s_currentDoc.blocks[static_cast<std::size_t>(i)];
+		if (block.elementMetadata.serial == serial ||
+			block.formControl.logicalSerial == serial)
+			return i;
+	}
+	return -1;
+}
+
 int Navigator::findBlockById(const std::string& id, bool labelOnly)
 {
 	if (id.empty()) return -1;
@@ -18310,52 +18382,24 @@ bool Navigator::smokeClickBlock(int blockIndex, bool label)
 
 void Navigator::handleDocumentClick(HitTarget target, int linkBlockIndex)
 {
+	const bool activatableTarget = target == HitTarget::Link ||
+		target == HitTarget::FormLabel || target == HitTarget::FormCheckbox ||
+		target == HitTarget::FormRadio || target == HitTarget::FormSelect ||
+		target == HitTarget::FormSubmit;
+	if (!activatableTarget || linkBlockIndex < 0 ||
+		linkBlockIndex >= static_cast<int>(s_currentDoc.blocks.size())) return;
+	const DocBlock& block = s_currentDoc.blocks[
+		static_cast<std::size_t>(linkBlockIndex)];
+	const std::uint64_t serial = block.elementMetadata.serial != 0
+		? block.elementMetadata.serial : block.formControl.logicalSerial;
+	if (serial == 0) return;
 	bool defaultPrevented = false;
-	const bool callbackRegistered =
-		(target == HitTarget::Link || target == HitTarget::FormLabel ||
-		 target == HitTarget::FormCheckbox || target == HitTarget::FormRadio ||
-		 target == HitTarget::FormSelect || target == HitTarget::FormSubmit) &&
-		linkBlockIndex >= 0 &&
-		linkBlockIndex < static_cast<int>(s_currentDoc.blocks.size()) &&
-		dispatchJavaScriptClick(linkBlockIndex, &defaultPrevented);
-	if (callbackRegistered && s_currentDoc.layoutDirty) {
-		// Hosted smoke may defer compositor paint submission, but a successful
-		// script DOM mutation still has to consume the layout-dirty boundary so
-		// hit geometry and the document revision remain authoritative.
-		ensureInlineLayout(s_currentDoc);
-		updateDisplay();
-	}
-
-	// JS9/JS16 policy: dispatch the direct onclick first, then preserve the
-	// pre-existing activation behavior unless the Event was canceled.
-	if (target == HitTarget::Link && !defaultPrevented &&
-		linkBlockIndex >= 0 &&
-		linkBlockIndex < static_cast<int>(s_currentDoc.blocks.size()))
-	{
-		navigateTo(s_currentDoc.blocks[linkBlockIndex].url);
-	} else if (target == HitTarget::FormLabel &&
-		linkBlockIndex >= 0 &&
-		linkBlockIndex < static_cast<int>(s_currentDoc.blocks.size()))
-	{
-		activateLabelBlock(linkBlockIndex);
-	} else if ((target == HitTarget::FormCheckbox ||
-				target == HitTarget::FormRadio ||
-				target == HitTarget::FormSelect) &&
-		linkBlockIndex >= 0 &&
-		linkBlockIndex < static_cast<int>(s_currentDoc.blocks.size()))
-	{
-		if (isFocusableFormControl(s_currentDoc.blocks[static_cast<size_t>(linkBlockIndex)]))
-			focusDocumentInput(linkBlockIndex, FormFocusOrigin::Mouse);
-		activateFormControl(linkBlockIndex);
-	} else if (target == HitTarget::FormSubmit &&
-		linkBlockIndex >= 0 &&
-		linkBlockIndex < static_cast<int>(s_currentDoc.blocks.size()))
-	{
-		// Submit controls use the same click/default-action seam as links:
-		// click cancellation prevents activation, while an uncanceled click
-		// enters the native form activation and submit-event path.
-		if (!defaultPrevented) activateFormControl(linkBlockIndex);
-	}
+	// Physical activation and Element.click() both enter this bounded seam:
+	// dispatch click, then run the authoritative native default action only
+	// when the complete propagation path leaves it uncanceled.
+	requestElementActivation(serial,
+		gxos::javascript::NavigatorScriptActivationProvenance::Pointer,
+		&defaultPrevented);
 }
 
 void Navigator::handleMouseInput(int x, int y, int button, const std::string& action)
@@ -19565,7 +19609,11 @@ void Navigator::finishKeyboardActivation(int keyCode)
 	++s_currentDoc.formsDiagnostics.formKeyboardActivations;
 	if (keyCode == 32) ++s_currentDoc.formsDiagnostics.formSpaceActivations;
 	else ++s_currentDoc.formsDiagnostics.formEnterActivations;
-	activateFormControl(blockIndex);
+	// Keyboard activation enters the same click/default-action seam as pointer
+	// activation. The existing keydown/keyup boundary remains intact, while
+	// click cancellation can now suppress the native control action.
+	requestElementActivation(serial,
+		gxos::javascript::NavigatorScriptActivationProvenance::Keyboard);
 }
 
 void Navigator::updateFindMatches(bool keepCurrent)

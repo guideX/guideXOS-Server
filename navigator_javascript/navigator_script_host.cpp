@@ -132,11 +132,19 @@ void NavigatorScriptHostAdapter::setDispatchCompleteCallback(
     dispatchCompleteContext_ = context;
 }
 
+void NavigatorScriptHostAdapter::setActivationDefaultActionCallback(
+    ActivationDefaultActionCallback callback, void* context)
+{
+    activationDefaultActionCallback_ = callback;
+    activationDefaultActionContext_ = context;
+}
+
 bool NavigatorScriptHostAdapter::allowsReentrantCall(
     std::uint32_t methodId) const
 {
     return methodId == kNavigatorFocusMethod ||
-        methodId == kNavigatorBlurMethod;
+        methodId == kNavigatorBlurMethod ||
+        methodId == kNavigatorClickMethod;
 }
 
 std::size_t NavigatorScriptHostAdapter::callbackLimit() const
@@ -376,6 +384,48 @@ bool NavigatorScriptHostAdapter::dispatchClick(RuntimeContext& runtime,
         true, error, defaultPrevented);
 }
 
+bool NavigatorScriptHostAdapter::requestElementActivation(
+    RuntimeContext& runtime, HostInstanceId serial,
+    NavigatorScriptActivationProvenance provenance, RuntimeErrorCode& error,
+    bool* defaultPrevented)
+{
+    error = RuntimeErrorCode::None;
+    if (defaultPrevented != nullptr) *defaultPrevented = false;
+    if (document_ == nullptr || serial == 0 || !isKnownElementSerial(serial)) {
+        error = RuntimeErrorCode::StaleHostObject;
+        return false;
+    }
+    if (activationDepth_ >= kNavigatorScriptMaxActivationDepth) {
+        error = RuntimeErrorCode::HostReentryUnsupported;
+        return false;
+    }
+
+    const HostGenerationId activationGeneration = generation_;
+    ++activationDepth_;
+    bool clickDefaultPrevented = false;
+    const bool dispatched = dispatchClick(runtime, serial, error,
+        &clickDefaultPrevented);
+    if (defaultPrevented != nullptr) *defaultPrevented = clickDefaultPrevented;
+    if (dispatched && !clickDefaultPrevented &&
+        generation_ == activationGeneration && document_ != nullptr &&
+        isKnownElementSerial(serial) && activationDefaultActionCallback_ != nullptr) {
+        if (!activationDefaultActionCallback_(activationDefaultActionContext_,
+                serial, provenance)) {
+            // A valid ordinary element may simply have no default action. The
+            // callback returns false only for a stale or otherwise invalid
+            // target, which should fail closed without dereferencing it.
+            if (generation_ == activationGeneration &&
+                isKnownElementSerial(serial)) {
+                error = RuntimeErrorCode::None;
+            } else {
+                error = RuntimeErrorCode::StaleHostObject;
+            }
+        }
+    }
+    --activationDepth_;
+    return dispatched && error == RuntimeErrorCode::None;
+}
+
 bool NavigatorScriptHostAdapter::dispatchKeyboardEvent(
     RuntimeContext& runtime, HostInstanceId targetSerial, int keyCode,
     bool down, bool shiftPressed, RuntimeErrorCode& error,
@@ -543,11 +593,6 @@ bool NavigatorScriptHostAdapter::dispatchEvent(RuntimeContext& runtime,
         error = RuntimeErrorCode::StaleHostObject;
         return false;
     }
-    if (clickDispatchActive_) {
-        error = RuntimeErrorCode::HostReentryUnsupported;
-        return false;
-    }
-
     // Snapshot the DOM ownership chain before entering user code. The serial
     // array is fixed-size and contains no native pointers; every subsequent
     // entry is revalidated against the same document and generation before it
@@ -556,7 +601,7 @@ bool NavigatorScriptHostAdapter::dispatchEvent(RuntimeContext& runtime,
         HostObjectKind kind = 0;
         HostInstanceId serial = 0;
     };
-    std::array<EventPathEntry, kNavigatorScriptMaxPropagationDepth>
+    std::array<EventPathEntry, kNavigatorScriptMaxClickPropagationDepth>
         propagationPath{};
     std::size_t propagationLength = 0;
     if (target.kind == kNavigatorElementHostKind) {
@@ -581,14 +626,15 @@ bool NavigatorScriptHostAdapter::dispatchEvent(RuntimeContext& runtime,
             currentSerial = parentSerial;
         }
     }
-    if (eventType != NavigatorScriptEventType::Click) {
-        if (propagationLength >= propagationPath.size()) {
-            error = RuntimeErrorCode::PropagationPathLimitExceeded;
-            return false;
-        }
-        propagationPath[propagationLength++] = EventPathEntry{
-            kNavigatorDocumentHostKind, kNavigatorDocumentHostInstance};
+    // Clicks participate in the same bounded document propagation path as the
+    // other event types. The document entry is what lets an ancestor/document
+    // listener cancel a control's default action after target dispatch.
+    if (propagationLength >= propagationPath.size()) {
+        error = RuntimeErrorCode::PropagationPathLimitExceeded;
+        return false;
     }
+    propagationPath[propagationLength++] = EventPathEntry{
+        kNavigatorDocumentHostKind, kNavigatorDocumentHostInstance};
 
     bool hasDispatchableHandler = false;
     for (std::size_t index = 0; index < propagationLength; ++index) {
@@ -601,6 +647,13 @@ bool NavigatorScriptHostAdapter::dispatchEvent(RuntimeContext& runtime,
     if (!hasDispatchableHandler) return true;
 
     const HostGenerationId dispatchGeneration = generation_;
+    const bool previousClickDispatchActive = clickDispatchActive_;
+    clickDispatchActive_ = true;
+    if (!runtime.beginEventDispatch()) {
+        clickDispatchActive_ = previousClickDispatchActive;
+        error = RuntimeErrorCode::HostReentryUnsupported;
+        return false;
+    }
     Value event;
     const bool bubbles = eventType != NavigatorScriptEventType::Focus &&
         eventType != NavigatorScriptEventType::Blur;
@@ -612,17 +665,17 @@ bool NavigatorScriptHostAdapter::dispatchEvent(RuntimeContext& runtime,
             HostObjectReference{propagationPath[0].serial,
                 dispatchGeneration, propagationPath[0].kind}, key, code,
             bubbles, cancelable, event, error)) {
+        runtime.endEventDispatch();
+        clickDispatchActive_ = previousClickDispatchActive;
         return false;
     }
-    clickDispatchActive_ = true;
-    runtime.beginEventDispatch();
     std::vector<Value> arguments;
     try {
         arguments.reserve(1u);
         arguments.push_back(event);
     } catch (const std::bad_alloc&) {
-        clickDispatchActive_ = false;
         runtime.endEventDispatch();
+        clickDispatchActive_ = previousClickDispatchActive;
         error = RuntimeErrorCode::AllocationFailure;
         return false;
     }
@@ -793,7 +846,7 @@ bool NavigatorScriptHostAdapter::dispatchEvent(RuntimeContext& runtime,
     if (defaultPrevented != nullptr)
         *defaultPrevented = dispatchDefaultPrevented;
     runtime.endEventDispatch();
-    clickDispatchActive_ = false;
+    clickDispatchActive_ = previousClickDispatchActive;
     error = firstError;
     if (dispatchCompleteCallback_ != nullptr)
         dispatchCompleteCallback_(dispatchCompleteContext_);
@@ -1333,6 +1386,10 @@ HostResult NavigatorScriptHostAdapter::getProperty(
         result = HostValue::method(kNavigatorBlurMethod, true, true);
         return HostResult();
     }
+    if (textEquals(property, "click")) {
+        result = HostValue::method(kNavigatorClickMethod, true, true);
+        return HostResult();
+    }
     return HostResult{HostResultCode::PropertyNotFound};
 }
 
@@ -1641,15 +1698,15 @@ HostResult NavigatorScriptHostAdapter::call(
         // deterministic for embedders that do not have a RuntimeContext.
         if (arguments[2].type == HostValueType::Boolean) {
             return callInternal(receiver, methodId, arguments, argumentCount,
-                result, false, arguments[2].booleanValue, true);
+                result, false, arguments[2].booleanValue, true, nullptr);
         }
         if (arguments[2].type == HostValueType::Undefined) {
             return callInternal(receiver, methodId, arguments, argumentCount,
-                result, false, false, true);
+                result, false, false, true, nullptr);
         }
     }
     return callInternal(receiver, methodId, arguments, argumentCount, result,
-        false, false, false);
+        false, false, false, nullptr);
 }
 
 HostResult NavigatorScriptHostAdapter::callWithRuntime(
@@ -1708,18 +1765,36 @@ HostResult NavigatorScriptHostAdapter::callWithRuntime(
         }
     }
     return callInternal(receiver, methodId, arguments, argumentCount, result,
-        once, capture, optionsSupplied);
+        once, capture, optionsSupplied, &runtime);
 }
 
 HostResult NavigatorScriptHostAdapter::callInternal(
     const HostObjectReference* receiver,
     std::uint32_t methodId, const HostValue* arguments,
     std::size_t argumentCount, HostValue& result, bool once,
-    bool capture, bool optionsSupplied)
+    bool capture, bool optionsSupplied, RuntimeContext* runtime)
 {
     if (receiver == nullptr) return HostResult{HostResultCode::InvalidObject};
     const HostResult receiverResult = validate(*receiver);
     if (!receiverResult.succeeded()) return receiverResult;
+    if (methodId == kNavigatorClickMethod) {
+        if (receiver->kind != kNavigatorElementHostKind || argumentCount != 0u ||
+            runtime == nullptr)
+            return HostResult{HostResultCode::InvalidValue};
+        RuntimeErrorCode error = RuntimeErrorCode::None;
+        bool defaultPrevented = false;
+        if (!requestElementActivation(*runtime, receiver->instanceId,
+                NavigatorScriptActivationProvenance::Programmatic, error,
+                &defaultPrevented)) {
+            return error == RuntimeErrorCode::StaleHostObject
+                ? HostResult{HostResultCode::StaleObject}
+                : error == RuntimeErrorCode::HostReentryUnsupported
+                    ? HostResult{HostResultCode::ReentryUnsupported}
+                    : HostResult{HostResultCode::CallFailed};
+        }
+        result = HostValue::undefined();
+        return HostResult();
+    }
     if (methodId == kNavigatorFocusMethod ||
         methodId == kNavigatorBlurMethod) {
         if (receiver->kind != kNavigatorElementHostKind ||
@@ -1898,6 +1973,8 @@ NavigatorScriptExecutionHarness::NavigatorScriptExecutionHarness(
         &NavigatorScriptExecutionHarness::focusRequestCallback, this);
     adapter_.setDispatchCompleteCallback(
         &NavigatorScriptExecutionHarness::dispatchCompleteCallback, this);
+    adapter_.setActivationDefaultActionCallback(
+        &NavigatorScriptExecutionHarness::activationDefaultActionCallback, this);
     runtime_.setHostAdapter(&adapter_);
 }
 
@@ -2015,6 +2092,57 @@ void NavigatorScriptExecutionHarness::dispatchCompleteCallback(void* context)
     if (harness->focusTransitionActive_) return;
     RuntimeErrorCode error = RuntimeErrorCode::None;
     (void)harness->drainPendingFocusRequests(error);
+}
+
+bool NavigatorScriptExecutionHarness::activationDefaultActionCallback(
+    void* context, HostInstanceId serial,
+    NavigatorScriptActivationProvenance provenance)
+{
+    if (context == nullptr) return false;
+    return static_cast<NavigatorScriptExecutionHarness*>(context)
+        ->performElementDefaultAction(serial, provenance);
+}
+
+bool NavigatorScriptExecutionHarness::performElementDefaultAction(
+    HostInstanceId serial, NavigatorScriptActivationProvenance)
+{
+    if (!loaded_ || serial == 0 || adapter_.document() != &document_)
+        return false;
+    const gxos::web::DocBlock* block = nullptr;
+    for (const gxos::web::DocBlock& candidate : document_.blocks) {
+        if (candidate.elementMetadata.serial == serial ||
+            candidate.formControl.logicalSerial == serial) {
+            block = &candidate;
+            break;
+        }
+    }
+    if (block == nullptr) return true;
+    if (block->formControl.disabled) return true;
+
+    if (block->type == gxos::web::BlockType::FormCheckbox ||
+        block->type == gxos::web::BlockType::FormRadio ||
+        block->type == gxos::web::BlockType::FormSelect) {
+        bool changed = false;
+        if (!adapter_.setFormControlFromUser(serial, changed)) return true;
+        if (changed) {
+            RuntimeErrorCode error = RuntimeErrorCode::None;
+            if (!adapter_.dispatchInputEvent(runtime_, serial, error) ||
+                !adapter_.dispatchChangeEvent(runtime_, serial, error))
+                return false;
+        }
+        return true;
+    }
+
+    if (block->type == gxos::web::BlockType::FormSubmit &&
+        block->formControl.type == gxos::web::FormControlType::Submit &&
+        block->formControl.parentFormSerial != 0) {
+        RuntimeErrorCode error = RuntimeErrorCode::None;
+        bool defaultPrevented = false;
+        if (!adapter_.dispatchSubmitEvent(runtime_,
+                block->formControl.parentFormSerial, error,
+                &defaultPrevented)) return false;
+    }
+    return true;
 }
 
 bool NavigatorScriptExecutionHarness::requestFocus(HostInstanceId serial,
