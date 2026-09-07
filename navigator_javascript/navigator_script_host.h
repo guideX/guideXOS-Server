@@ -274,6 +274,7 @@ private:
         const std::string& text);
     HostResult appendBoundedText(std::string& target, const std::string& text,
         std::size_t& operations) const;
+    HostInstanceId activeElementSerial() const;
 
     gxos::web::WebDocument* document_ = nullptr;
     HostGenerationId generation_ = 1u;

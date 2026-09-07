@@ -2952,9 +2952,9 @@ JS23 keyboard targeting follows the same owner. After `input.focus()`, the
 normal Navigator key transition dispatches `keydown`/`keyup` to that element
 and existing text editing remains on the same input path. After
 `input.blur()`, the no-focus fallback is the existing document target; JS25
-does not introduce a second keyboard-target state. `document.activeElement` was
-audited but intentionally deferred: Navigator has no existing tiny direct
-projection, and adding it would expand the bounded DOM object-model scope.
+does not introduce a second keyboard-target state. JS30 later exposes that
+same authoritative owner through the read-only `document.activeElement`
+projection.
 
 ### JS25 validation result
 
@@ -2987,8 +2987,10 @@ was changed.
 JS26 should remain narrow: add bounded `input` and `change` events only after
 the existing focus ownership, keyboard/text-editing path, and DOM value
 mutation seam are specified. This phase does not implement those events or
-any broader focus API such as `FocusEvent`, `relatedTarget`, `activeElement`,
-focus options, `tabindex`, autofocus, or sequential Tab expansion.
+any broader focus API such as `FocusEvent`, `relatedTarget`, focus options,
+`tabindex`, autofocus, or sequential Tab expansion. The later JS30
+`activeElement` projection is a read-only view of the existing owner, not a
+new focus subsystem.
 
 ## Phase JS26: form editing events
 
@@ -3291,3 +3293,69 @@ remains blocked by the existing Mbed TLS configuration errors in
 (partial ECC acceleration and incomplete ECDHE-RSA prerequisites). QEMU was
 not launched because no kernel image was produced; no TLS configuration was
 changed.
+
+## Phase JS30: `document.activeElement` and authoritative focus projection
+
+JS30 adds the narrow, read-only document projection:
+
+```javascript
+document.activeElement
+```
+
+The getter reads the existing `WebDocument::formRuntimeState` owner rather than
+introducing a second focus model. A focused result is valid only when the
+focused logical serial, focused document generation, and current document
+generation agree, and the serial still resolves to a supported, visible,
+enabled form-control block. The result is the normal generation-bound Element
+host value, so repeated `getElementById()` lookup and `activeElement` compare by
+the existing host identity rules. With no valid focused control, navigation,
+replacement, reload, deactivation, or a stale serial, the getter returns the
+existing `null` sentinel. The property is read-only; assignment fails with the
+existing `HostPropertyReadOnly` host error and cannot alter native focus.
+
+Reads are side-effect free: they do not dispatch events, mutate runtime state,
+allocate listener records, or synthesize focus. Native pointer focus, existing
+keyboard Tab traversal, `focus()`/`blur()`, JS29 activation, input/change
+commit, and bounded re-entrant focus redirects all continue to use the same
+Navigator transition boundary. During a transfer, old-owner `blur`,
+`focusout`, and `change` listeners observe the old active element; new-owner
+`focus` and `focusin` listeners observe the new one. Focus requests made while
+dispatching remain synchronous-but-deferred, last-request-wins, and bounded by
+the existing 16-redirect drain. There is no `hasFocus()`, `relatedTarget`,
+focus-options dictionary, `tabindex`, autofocus, or new window-focus state in
+this phase.
+
+### JS30 validation result
+
+The focused proof is
+`tests/navigator_javascript_js30_test.cpp`, run by
+`scripts/smoke-navigator-javascript-js30.ps1`. It reports 137 checks with 0
+failures and passes the GXOS_BARE_METAL and strict
+`-Wall -Wextra -Werror -pedantic` adapter/runtime lanes. Coverage includes
+identity and read-only behavior, no-focus fallback, exact old/new event
+observation, all supported form-control kinds, input/change visibility,
+re-entrant focus and nested activation, lifecycle replacement, stale serial
+safety, and keyboard-owner projection.
+
+The hosted fixture is `navigator-smoke/javascript-js30.html`. Its 10 JS30
+aggregate checks pass: initial null, programmatic identity, A-to-B transfer,
+physical pointer focus, existing Tab traversal, deferred focus redirect,
+programmatic and canceled activation, physical blur to null, and navigation
+reset. The complete focused matrix contains lexer, parser, runtime, and JS6
+through JS30: all 28 suites pass. The normal native `build.bat` completes
+successfully. The hosted aggregate reports 445 passed and 7 failed out of 452
+checks; the seven failures remain unrelated CSS baselines: CSS 3C, CSS 3G,
+CSS 6A, three CSS 6B checks, and CSS 6C. No JS30 hosted check fails.
+
+The required `build-kernel.bat` retry builds the PacMan image and bootloader,
+reaches kernel compilation, and stops at the existing Mbed TLS configuration
+errors in `third_party/mbedtls/library/mbedtls_check_config.h`:
+`Unsupported partial support for ECC curves acceleration` and
+`MBEDTLS_KEY_EXCHANGE_ECDHE_RSA_ENABLED defined, but not all prerequisites`.
+QEMU was not launched because no kernel image was produced; no TLS
+configuration was changed.
+
+The recommended JS31 direction is `relatedTarget` snapshots for the existing
+focus transition events, after the event-value lifetime and nested-dispatch
+rules are specified. `document.hasFocus()` should wait until authentic window
+activation state exists; it should not be inferred from the form-control owner.

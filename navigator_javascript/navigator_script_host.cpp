@@ -1283,6 +1283,43 @@ bool NavigatorScriptHostAdapter::isKnownElementSerial(
     return findElement(serial) != nullptr;
 }
 
+HostInstanceId NavigatorScriptHostAdapter::activeElementSerial() const
+{
+    if (document_ == nullptr) return 0;
+    const gxos::web::FormRuntimeStateTable& runtime =
+        document_->formRuntimeState;
+    if (!runtime.initialized || !runtime.focusValid ||
+        runtime.documentGeneration == 0 ||
+        runtime.focusedDocumentGeneration != runtime.documentGeneration ||
+        runtime.focusedLogicalSerial == 0) return 0;
+
+    // The focused serial is authoritative, but the projection still validates
+    // its current document membership and bounded form metadata before
+    // creating the ordinary Element host value. A stale or malformed handle
+    // therefore fails closed without creating a second focus state.
+    if (findElement(runtime.focusedLogicalSerial) == nullptr) return 0;
+    bool hasFocusableControl = false;
+    if (document_ != nullptr) {
+        for (const gxos::web::DocBlock& block : document_->blocks) {
+            if (block.formControl.logicalSerial != runtime.focusedLogicalSerial ||
+                !block.formControl.metadataComplete ||
+                !block.formControl.supported || block.formUnsupported ||
+                block.formControl.hidden || block.formControl.disabled) continue;
+            if (block.type == gxos::web::BlockType::FormTextInput ||
+                block.type == gxos::web::BlockType::FormTextarea ||
+                block.type == gxos::web::BlockType::FormCheckbox ||
+                block.type == gxos::web::BlockType::FormRadio ||
+                block.type == gxos::web::BlockType::FormSelect ||
+                block.type == gxos::web::BlockType::FormSubmit) {
+                hasFocusableControl = true;
+                break;
+            }
+        }
+    }
+    if (!hasFocusableControl) return 0;
+    return runtime.focusedLogicalSerial;
+}
+
 bool NavigatorScriptHostAdapter::isDescendantOrSelf(
     std::uint64_t serial, std::uint64_t ancestorSerial) const
 {
@@ -1317,6 +1354,16 @@ HostResult NavigatorScriptHostAdapter::getProperty(
     if (object.kind == kNavigatorDocumentHostKind) {
         if (textEquals(property, "getElementById")) {
             result = HostValue::method(kNavigatorGetElementByIdMethod, true);
+            return HostResult();
+        }
+        if (textEquals(property, "activeElement")) {
+            const HostInstanceId serial = activeElementSerial();
+            if (serial == 0) {
+                result = HostValue::nullValue();
+            } else {
+                result = HostValue::fromHostObject(HostObjectReference{
+                    serial, generation_, kNavigatorElementHostKind});
+            }
             return HostResult();
         }
         if (textEquals(property, "addEventListener")) {
@@ -1611,6 +1658,9 @@ HostResult NavigatorScriptHostAdapter::setProperty(
 {
     const HostResult validation = validate(object);
     if (!validation.succeeded()) return validation;
+    if (object.kind == kNavigatorDocumentHostKind &&
+        textEquals(property, "activeElement"))
+        return HostResult{HostResultCode::PropertyReadOnly};
     if (object.kind != kNavigatorElementHostKind)
         return HostResult{HostResultCode::PropertyWriteFailed};
     if (textEquals(property, "id") || textEquals(property, "tagName"))
@@ -2159,10 +2209,18 @@ bool NavigatorScriptExecutionHarness::requestFocus(HostInstanceId serial,
 {
     const gxos::web::HtmlElementRef* element = findElementInDocument(document_,
         serial, adapter_.limits().maxDocumentNodes);
-    const bool focusable = loaded_ && element != nullptr && serial != 0 &&
-        element->formControl.metadataComplete &&
-        element->formControl.supported && !element->formControl.hidden &&
-        !element->formControl.disabled;
+    const gxos::web::DocBlock* focusBlock = nullptr;
+    for (const gxos::web::DocBlock& candidate : document_.blocks) {
+        if (candidate.formControl.logicalSerial == serial) {
+            focusBlock = &candidate;
+            break;
+        }
+    }
+    const bool focusable = loaded_ && element != nullptr &&
+        focusBlock != nullptr && serial != 0 &&
+        focusBlock->formControl.metadataComplete &&
+        focusBlock->formControl.supported && !focusBlock->formUnsupported &&
+        !focusBlock->formControl.hidden && !focusBlock->formControl.disabled;
     const bool ownsFocus = focusedElementSerial_ == serial &&
         document_.formRuntimeState.focusValid;
     if (focus) {
@@ -2191,10 +2249,17 @@ bool NavigatorScriptExecutionHarness::focusElementInternal(
     error = RuntimeErrorCode::None;
     const gxos::web::HtmlElementRef* element = findElementInDocument(document_,
         serial, adapter_.limits().maxDocumentNodes);
-    if (!loaded_ || element == nullptr || serial == 0 ||
-        !element->formControl.metadataComplete ||
-        !element->formControl.supported || element->formControl.hidden ||
-        element->formControl.disabled) {
+    const gxos::web::DocBlock* focusBlock = nullptr;
+    for (const gxos::web::DocBlock& candidate : document_.blocks) {
+        if (candidate.formControl.logicalSerial == serial) {
+            focusBlock = &candidate;
+            break;
+        }
+    }
+    if (!loaded_ || element == nullptr || focusBlock == nullptr ||
+        serial == 0 || !focusBlock->formControl.metadataComplete ||
+        !focusBlock->formControl.supported || focusBlock->formUnsupported ||
+        focusBlock->formControl.hidden || focusBlock->formControl.disabled) {
         error = RuntimeErrorCode::StaleHostObject;
         return false;
     }

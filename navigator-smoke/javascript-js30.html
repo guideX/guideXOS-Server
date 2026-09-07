@@ -1,0 +1,124 @@
+<!doctype html>
+<html>
+<head><title>Navigator JavaScript JS30</title></head>
+<body>
+<h1>Navigator JavaScript JS30</h1>
+<p>document.activeElement projects Navigator's authoritative form focus.</p>
+<form id="js30-form">
+  <input id="js30-a" type="text" value="alpha">
+  <input id="js30-b" type="text" value="bravo">
+  <textarea id="js30-c">charlie</textarea>
+  <input id="js30-d" type="checkbox" name="d" value="yes">
+  <input id="js30-e" type="radio" name="mode" value="e">
+  <button id="js30-f" type="button">Plain button</button>
+  <select id="js30-g" name="mode-select">
+    <option value="one" selected>One</option>
+    <option value="two">Two</option>
+  </select>
+  <button id="js30-submit" type="submit">Submit</button>
+</form>
+<div id="js30-plain">non-focusable</div>
+<p id="js30-state">initial:null</p>
+<p>
+  <button id="js30-trigger-a" type="button">focus A</button>
+  <button id="js30-trigger-b" type="button">focus B</button>
+  <button id="js30-trigger-redirect" type="button">redirect A to B</button>
+  <button id="js30-trigger-activation" type="button">programmatic activation</button>
+  <button id="js30-trigger-cancel" type="button">canceled activation</button>
+  <button id="js30-trigger-nested" type="button">nested click</button>
+</p>
+<script>
+var js30State = document.getElementById("js30-state");
+var js30A = document.getElementById("js30-a");
+var js30B = document.getElementById("js30-b");
+var js30C = document.getElementById("js30-c");
+var js30D = document.getElementById("js30-d");
+var js30F = document.getElementById("js30-f");
+var js30Form = document.getElementById("js30-form");
+var js30TriggerA = document.getElementById("js30-trigger-a");
+var js30TriggerB = document.getElementById("js30-trigger-b");
+var js30TriggerRedirect = document.getElementById("js30-trigger-redirect");
+var js30TriggerActivation = document.getElementById("js30-trigger-activation");
+var js30TriggerCancel = document.getElementById("js30-trigger-cancel");
+var js30TriggerNested = document.getElementById("js30-trigger-nested");
+var js30Log = "";
+var js30Redirect = false;
+var js30Cancel = false;
+var js30Nested = false;
+var js30NestedMetadata = false;
+var js30NestedSawC = false;
+
+function js30Record(label, expected) {
+    js30Log = js30Log + label + ":" + (document.activeElement === expected) + ";";
+    js30State.textContent = js30Log;
+}
+
+js30A.addEventListener("focus", function() {
+    js30Record("focus-a", js30A);
+    js30Record("identity-a", js30A);
+    if (js30Redirect) {
+        js30Redirect = false;
+        js30Record("redirect-inside-a", js30A);
+        js30B.focus();
+    }
+});
+js30A.addEventListener("blur", function() { js30Record("blur-a", js30A); });
+js30A.addEventListener("focusout", function() { js30Record("focusout-a", js30A); });
+js30A.addEventListener("change", function() { js30Record("change-a", js30A); });
+js30A.addEventListener("input", function() { js30Record("input-a", js30A); });
+js30B.addEventListener("focus", function() { js30Record("focus-b", js30B); });
+js30B.addEventListener("focusin", function() { js30Record("focusin-b", js30B); });
+js30B.addEventListener("click", function() { js30Record("pointer-click-b", js30B); });
+js30C.addEventListener("click", function() {
+    js30Record("click-c-before-blur", js30C);
+    js30C.blur();
+});
+js30F.addEventListener("click", function() {
+    js30Record("click-f-before-blur", js30F);
+    js30F.blur();
+});
+js30D.addEventListener("click", function(event) {
+    if (js30Cancel) event.preventDefault();
+});
+js30Form.addEventListener("submit", function(event) {
+    event.preventDefault();
+    js30Record("submit", js30B);
+});
+js30A.addEventListener("click", function(event) {
+    if (!js30Nested) return;
+    js30NestedMetadata = event.target === js30A &&
+        event.currentTarget === js30A && event.eventPhase == 2;
+    js30NestedSawC = document.activeElement === js30C;
+    js30B.focus();
+    js30C.click();
+    js30NestedMetadata = js30NestedMetadata && event.target === js30A &&
+        event.currentTarget === js30A && event.eventPhase == 2;
+});
+js30TriggerA.addEventListener("click", function() {
+    js30A.focus();
+});
+js30TriggerB.addEventListener("click", function() { js30B.focus(); });
+js30TriggerRedirect.addEventListener("click", function() {
+    js30Redirect = true;
+    js30A.focus();
+});
+js30TriggerActivation.addEventListener("click", function() {
+    js30B.focus();
+    js30D.click();
+    js30Record("activation-focus", js30B);
+});
+js30TriggerCancel.addEventListener("click", function() {
+    js30B.focus();
+    js30Cancel = true;
+    js30D.click();
+    js30Cancel = false;
+    js30Record("canceled-activation-focus", js30B);
+});
+js30TriggerNested.addEventListener("click", function() {
+    js30Nested = true;
+    js30A.click();
+    js30Nested = false;
+});
+</script>
+</body>
+</html>

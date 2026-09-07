@@ -2802,6 +2802,142 @@ static std::string navigatorHostedSmokeDiagnostic() {
         gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
         "replacement page starts without JS29 registrations or errors");
 
+    const std::string js30FixtureUrl =
+        "http://127.0.0.1:8080/navigator-smoke/javascript-js30.html";
+    const bool js30Loaded = gxos::apps::Navigator::SmokeNavigateToQuiet(
+        js30FixtureUrl);
+    const std::string js30InitialText =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS30 hosted fixture loads with deterministic no-focus fallback",
+        js30Loaded && gxos::apps::Navigator::SmokeCurrentUrl() == js30FixtureUrl &&
+        contains(js30InitialText, "Navigator JavaScript JS30") &&
+        contains(js30InitialText, "initial:null") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("loaded=") + yesNo(js30Loaded) + ",url=" +
+        gxos::apps::Navigator::SmokeCurrentUrl());
+
+    const bool js30ProgrammaticA =
+        gxos::apps::Navigator::SmokeClickFormControlById("js30-trigger-a");
+    const std::string js30AfterProgrammaticA =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS30 programmatic focus projects A and preserves identity",
+        js30ProgrammaticA && contains(js30AfterProgrammaticA, "focus-a:true;") &&
+        contains(js30AfterProgrammaticA, "identity-a:true;") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("trigger=") + yesNo(js30ProgrammaticA) + ",text=" +
+        summarizeText(js30AfterProgrammaticA, 360));
+
+    const bool js30ProgrammaticB =
+        gxos::apps::Navigator::SmokeClickFormControlById("js30-trigger-b");
+    const std::string js30AfterProgrammaticB =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS30 A-to-B focus transfer exposes B",
+        js30ProgrammaticB && contains(js30AfterProgrammaticB, "focus-b:true;") &&
+        contains(js30AfterProgrammaticB, "focusin-b:true;") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("trigger=") + yesNo(js30ProgrammaticB) + ",text=" +
+        summarizeText(js30AfterProgrammaticB, 360));
+
+    const bool js30PointerPrep =
+        gxos::apps::Navigator::SmokeClickFormControlById("js30-trigger-a");
+    const std::string js30BeforePhysicalB =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    const bool js30PhysicalB =
+        gxos::apps::Navigator::SmokeMouseDownFormControlById("js30-b") &&
+        gxos::apps::Navigator::SmokeMouseUp();
+    const std::string js30AfterPhysicalB =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS30 physical pointer focus reaches activeElement through native seam",
+        js30PointerPrep && js30PhysicalB &&
+        contains(js30AfterPhysicalB, "focus-b:true;") &&
+        js30AfterPhysicalB != js30BeforePhysicalB &&
+        gxos::apps::Navigator::SmokeFormControlFocusedById("js30-b") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("prep=") + yesNo(js30PointerPrep) + ",pointer=" +
+        yesNo(js30PhysicalB) + ",focused=" +
+        yesNo(gxos::apps::Navigator::SmokeFormControlFocusedById("js30-b")));
+
+    const bool js30KeyboardPrep =
+        gxos::apps::Navigator::SmokeFocusFormControlById("js30-a", true);
+    const bool js30TabDown = gxos::apps::Navigator::SmokeKeyPress(9, "down");
+    const bool js30TabUp = gxos::apps::Navigator::SmokeKeyPress(9, "up");
+    const std::string js30AfterTab =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS30 existing keyboard Tab traversal projects its native target",
+        js30KeyboardPrep && js30TabDown && js30TabUp &&
+        gxos::apps::Navigator::SmokeFocusedFormControlId() == "js30-b" &&
+        contains(js30AfterTab, "focus-b:true;") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("prep=") + yesNo(js30KeyboardPrep) + ",down=" +
+        yesNo(js30TabDown) + ",up=" + yesNo(js30TabUp) + ",owner=" +
+        gxos::apps::Navigator::SmokeFocusedFormControlId());
+
+    const bool js30Redirect =
+        gxos::apps::Navigator::SmokeClickFormControlById("js30-trigger-redirect");
+    const std::string js30AfterRedirect =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS30 re-entrant focus redirect exposes A then final B",
+        js30Redirect && contains(js30AfterRedirect, "redirect-inside-a:true;") &&
+        contains(js30AfterRedirect, "focusin-b:true;") &&
+        gxos::apps::Navigator::SmokeFormControlFocusedById("js30-b") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("trigger=") + yesNo(js30Redirect) + ",focused=" +
+        gxos::apps::Navigator::SmokeFocusedFormControlId());
+
+    const bool js30Activation =
+        gxos::apps::Navigator::SmokeClickFormControlById("js30-trigger-activation");
+    const std::string js30AfterActivation =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS30 JS29 programmatic activation leaves authoritative focus intact",
+        js30Activation &&
+        gxos::apps::Navigator::SmokeFormControlCheckedById("js30-d") &&
+        contains(js30AfterActivation, "activation-focus:true;") &&
+        gxos::apps::Navigator::SmokeFormControlFocusedById("js30-b") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("trigger=") + yesNo(js30Activation) + ",checked=" +
+        yesNo(gxos::apps::Navigator::SmokeFormControlCheckedById("js30-d")));
+
+    const bool js30CanceledActivation =
+        gxos::apps::Navigator::SmokeClickFormControlById("js30-trigger-cancel");
+    const std::string js30AfterCanceledActivation =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS30 canceled JS29 activation preserves focus and form state",
+        js30CanceledActivation &&
+        gxos::apps::Navigator::SmokeFormControlCheckedById("js30-d") &&
+        contains(js30AfterCanceledActivation, "canceled-activation-focus:true;") &&
+        gxos::apps::Navigator::SmokeFormControlFocusedById("js30-b") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("trigger=") + yesNo(js30CanceledActivation) + ",checked=" +
+        yesNo(gxos::apps::Navigator::SmokeFormControlCheckedById("js30-d")));
+
+    const bool js30ClearByPhysicalClick =
+        gxos::apps::Navigator::SmokeClickFormControlById("js30-f");
+    const std::string js30AfterClear =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS30 physical click plus blur reaches the no-focus fallback",
+        js30ClearByPhysicalClick && contains(js30AfterClear,
+            "click-f-before-blur:true;") &&
+        gxos::apps::Navigator::SmokeFocusedFormControlId().empty() &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("click=") + yesNo(js30ClearByPhysicalClick) + ",owner=" +
+        gxos::apps::Navigator::SmokeFocusedFormControlId());
+
+    const bool js30NavigatedAway =
+        gxos::apps::Navigator::SmokeNavigateToQuiet("about:navigator");
+    const bool js30Reloaded =
+        gxos::apps::Navigator::SmokeNavigateToQuiet(js30FixtureUrl);
+    const std::string js30AfterReload =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS30 navigation reset clears old activeElement state",
+        js30NavigatedAway && js30Reloaded && contains(js30AfterReload,
+            "initial:null") &&
+        gxos::apps::Navigator::SmokeJavaScriptHandlerCount() > 0u &&
+        gxos::apps::Navigator::SmokeJavaScriptListenerCount() > 0u &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("away=") + yesNo(js30NavigatedAway) + ",reload=" +
+        yesNo(js30Reloaded) + ",handlers=" +
+        std::to_string(gxos::apps::Navigator::SmokeJavaScriptHandlerCount()));
+
     bool cssInlineLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-inline.html");
     std::string cssInlineText = gxos::apps::Navigator::SmokeCurrentDocumentText();
     std::string cssInlineReport = gxos::apps::Navigator::SmokeRuntimeReport();
