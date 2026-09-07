@@ -372,6 +372,55 @@ static bool test_failures_and_isolation()
     return true;
 }
 
+static bool test_struct_pointer_contracts()
+{
+    const char* declarationSource =
+        "struct Point { int x; int y; int tag; };\n"
+        "extern int point_value(struct Point* p);\n"
+        "int gx_main(gx_app_context* ctx) { struct Point p; return point_value(&p); }\n";
+    const char* definitionSource =
+        "struct Point { int x; int y; int tag; };\n"
+        "int point_value(struct Point* p) { return p->x + p->y + p->tag; }\n";
+    CompiledModule declaration = {};
+    CompiledModule definition = {};
+    Diagnostics declarationDiagnostics;
+    Diagnostics definitionDiagnostics;
+    if (!require(compile_text("src/main.cpp", declarationSource, &declaration, &declarationDiagnostics),
+                 "extern struct-pointer declaration compiles")) return false;
+    if (!require(compile_text("src/math.cpp", definitionSource, &definition, &definitionDiagnostics),
+                 "struct-pointer definition compiles")) return false;
+    CompiledModule compatible[2] = {declaration, definition};
+    LinkedProgram linked = {};
+    Diagnostics linkDiagnostics;
+    if (!require(link_modules(compatible, 2, &linked, linkDiagnostics),
+                 "compatible shared struct-pointer contracts link")) return false;
+
+    const char* badDefinitionSource =
+        "struct Point { int x; int tag; };\n"
+        "int point_value(struct Point* p) { return p->x + p->tag; }\n";
+    CompiledModule badDefinition = {};
+    Diagnostics badDefinitionDiagnostics;
+    if (!require(compile_text("src/math.cpp", badDefinitionSource, &badDefinition,
+                             &badDefinitionDiagnostics),
+                 "incompatible struct-pointer definition compiles independently")) return false;
+    CompiledModule structMismatch[2] = {declaration, badDefinition};
+    linkDiagnostics = Diagnostics();
+    if (!require(!link_modules(structMismatch, 2, &linked, linkDiagnostics) &&
+                 diagnostic_contains(linkDiagnostics, "incompatible struct type definition"),
+                 "struct identity mismatch is rejected before link output")) return false;
+
+    const char* badAbiSource = "int point_value(int p) { return p; }\n";
+    CompiledModule badAbi = {};
+    Diagnostics badAbiDiagnostics;
+    if (!require(compile_text("src/math.cpp", badAbiSource, &badAbi, &badAbiDiagnostics),
+                 "incompatible function ABI definition compiles independently")) return false;
+    CompiledModule abiMismatch[2] = {declaration, badAbi};
+    linkDiagnostics = Diagnostics();
+    return require(!link_modules(abiMismatch, 2, &linked, linkDiagnostics) &&
+                    diagnostic_contains(linkDiagnostics, "conflicting declaration for function 'point_value'"),
+                    "function ABI mismatch is rejected before link output");
+}
+
 } // namespace
 
 int main()
@@ -381,6 +430,7 @@ int main()
     if (!test_data_relocation()) return 1;
     if (!test_cross_module_recursion()) return 1;
     if (!test_failures_and_isolation()) return 1;
+    if (!test_struct_pointer_contracts()) return 1;
     if (!test_linker_bounds_and_reset()) return 1;
     std::puts("compiler_multifile_host_test: PASS");
     return 0;

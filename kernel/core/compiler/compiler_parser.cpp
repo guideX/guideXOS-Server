@@ -2135,7 +2135,7 @@ bool parse_translation_unit(const char* source, const Token* tokens, uint32_t to
     }
     uint32_t index = 0;
     while (tokens[token_index_or_eof(index, tokenCount)].kind != TokenKind::EndOfFile) {
-        const Token externalToken = tokens[token_index_or_eof(index, tokenCount)];
+        Token externalToken = tokens[token_index_or_eof(index, tokenCount)];
         if (externalToken.kind == TokenKind::KeywordStruct) {
             if (!parse_struct_external_declaration(source, tokens, tokenCount, &index,
                                                    output, diagnostics, false)) return false;
@@ -2153,6 +2153,14 @@ bool parse_translation_unit(const char* source, const Token* tokens, uint32_t to
                 diagnostics.error(intToken.location, "expected 'int' after 'extern'", "parser");
                 return false;
             }
+            // Function prototypes may use the familiar `extern int f(...)`
+            // spelling.  Re-enter the ordinary int declaration path below so
+            // there is still exactly one function-signature implementation.
+            const Token externName = tokens[token_index_or_eof(index + 1U, tokenCount)];
+            const Token externAfterName = tokens[token_index_or_eof(index + 2U, tokenCount)];
+            if (token_is_name(externName) && externAfterName.kind == TokenKind::LeftParen) {
+                externalToken.kind = TokenKind::KeywordInt;
+            } else {
             ++index;
             if (tokens[token_index_or_eof(index, tokenCount)].kind == TokenKind::Star) {
                 diagnostics.error(tokens[token_index_or_eof(index, tokenCount)].location,
@@ -2209,6 +2217,7 @@ bool parse_translation_unit(const char* source, const Token* tokens, uint32_t to
                 return false;
             }
             continue;
+            }
         }
         if (externalToken.kind != TokenKind::KeywordInt) {
             diagnostics.error(tokens[token_index_or_eof(index, tokenCount)].location,

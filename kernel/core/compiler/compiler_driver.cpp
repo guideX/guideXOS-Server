@@ -21,6 +21,7 @@ static uint8_t s_elf[COMPILER_MAX_OUTPUT_BYTES];
 static uint8_t s_reopened[COMPILER_MAX_OUTPUT_BYTES];
 static uint8_t s_compare[COMPILER_MAX_OUTPUT_BYTES];
 static uint8_t s_object[COMPILER_MAX_OBJECT_BYTES];
+static uint8_t s_headerSource[COMPILER_MAX_INCLUDE_DEPTH][COMPILER_MAX_DECLARATION_FILE_BYTES + 1];
 static CompiledModule s_modules[COMPILER_MAX_TRANSLATION_UNITS] = {};
 static LinkedProgram s_linked = {};
 
@@ -169,6 +170,373 @@ static bool copy_text(char* output, uint32_t capacity, const char* input)
     return true;
 }
 
+static bool text_equal(const char* left, const char* right)
+{
+    if (!left || !right) return false;
+    uint32_t i = 0;
+    while (left[i] || right[i]) {
+        if (left[i] != right[i]) return false;
+        ++i;
+    }
+    return true;
+}
+
+static bool valid_relative_path(const char* path)
+{
+    if (!path || path[0] == '\0' || path[0] == '/' || path[0] == '\\') return false;
+    uint32_t length = 0;
+    while (path[length]) {
+        if (++length >= COMPILER_MAX_SOURCE_PATH_BYTES) return false;
+    }
+    uint32_t componentStart = 0;
+    for (uint32_t i = 0; i <= length; ++i) {
+        if (path[i] != '/' && path[i] != '\\' && path[i] != '\0') continue;
+        const uint32_t componentBytes = i - componentStart;
+        if (componentBytes == 0 || (componentBytes == 1 && path[componentStart] == '.') ||
+            (componentBytes == 2 && path[componentStart] == '.' && path[componentStart + 1] == '.')) return false;
+        componentStart = i + 1;
+    }
+    return true;
+}
+
+static bool normalize_relative_path(const char* input, char* output, uint32_t capacity)
+{
+    if (!input || !output || capacity == 0) return false;
+    uint32_t written = 0;
+    uint32_t componentStart = 0;
+    const uint32_t inputBytes = string_length(input);
+    if (!valid_relative_path(input)) return false;
+    for (uint32_t i = 0; i <= inputBytes; ++i) {
+        if (input[i] != '/' && input[i] != '\\' && input[i] != '\0') continue;
+        const uint32_t componentBytes = i - componentStart;
+        if (written != 0 && written + 1 >= capacity) return false;
+        if (written != 0) output[written++] = '/';
+        for (uint32_t j = 0; j < componentBytes; ++j) {
+            if (written + 1 >= capacity) return false;
+            output[written++] = input[componentStart + j];
+        }
+        componentStart = i + 1;
+    }
+    if (written == 0) return false;
+    output[written] = '\0';
+    return true;
+}
+
+static bool append_text_bounded(char* output, uint32_t capacity, uint32_t* used,
+                                const char* text, uint32_t bytes)
+{
+    if (!output || !used || !text || *used > capacity || bytes > capacity - *used) return false;
+    for (uint32_t i = 0; i < bytes; ++i) output[*used + i] = text[i];
+    *used += bytes;
+    return true;
+}
+
+static bool path_join(const char* root, const char* relative, char* output, uint32_t capacity)
+{
+    if (!root || !relative || !output || !valid_relative_path(relative)) return false;
+    const uint32_t rootBytes = string_length(root);
+    const bool slash = rootBytes != 0 && root[rootBytes - 1] != '/';
+    if (rootBytes + (slash ? 1U : 0U) + string_length(relative) + 1U > capacity) return false;
+    uint32_t at = 0;
+    for (uint32_t i = 0; i < rootBytes; ++i) output[at++] = root[i];
+    if (slash) output[at++] = '/';
+    for (uint32_t i = 0; relative[i]; ++i) output[at++] = relative[i] == '\\' ? '/' : relative[i];
+    output[at] = '\0';
+    return true;
+}
+
+static bool project_root_for_source(const char* sourcePath, const char* sourceIdentityPath,
+                                    char* root, uint32_t capacity)
+{
+    if (!sourcePath || !sourceIdentityPath || !root || capacity == 0) return false;
+    const uint32_t sourceBytes = string_length(sourcePath);
+    const uint32_t identityBytes = string_length(sourceIdentityPath);
+    if (identityBytes == 0) return false;
+    if (sourceBytes <= identityBytes || sourcePath[sourceBytes - identityBytes - 1] != '/') {
+        // The native smoke fixtures call the compiler directly with the
+        // absolute source path as both identity values.  Keep that legacy
+        // form usable; the Developer Studio service supplies a project-
+        // relative identity and takes the stricter branch above.
+        uint32_t slash = 0xFFFFFFFFU;
+        for (uint32_t i = 0; i < sourceBytes; ++i)
+            if (sourcePath[i] == '/' || sourcePath[i] == '\\') slash = i;
+        if (slash == 0xFFFFFFFFU || slash + 1U > capacity) return false;
+        for (uint32_t i = 0; i < slash; ++i) root[i] = sourcePath[i];
+        root[slash] = '\0';
+        return true;
+    }
+    for (uint32_t i = 0; i < identityBytes; ++i) {
+        const char actual = sourcePath[sourceBytes - identityBytes + i] == '\\' ? '/' : sourcePath[sourceBytes - identityBytes + i];
+        if (actual != sourceIdentityPath[i]) return false;
+    }
+    const uint32_t rootBytes = sourceBytes - identityBytes - 1U;
+    if (rootBytes + 1U > capacity) return false;
+    for (uint32_t i = 0; i < rootBytes; ++i) root[i] = sourcePath[i];
+    root[rootBytes] = '\0';
+    return true;
+}
+
+struct IncludeExpansion {
+    char projectRoot[COMPILER_MAX_SOURCE_PATH_BYTES];
+    char output[COMPILER_MAX_DECLARATION_BYTES + 1];
+    uint32_t outputBytes;
+    uint32_t includedBytes;
+    uint16_t dependencyCount;
+    DeclarationDependency dependencies[COMPILER_MAX_DECLARATION_DEPENDENCIES];
+    char active[COMPILER_MAX_INCLUDE_DEPTH][COMPILER_MAX_SOURCE_PATH_BYTES];
+    uint16_t activeCount;
+};
+
+static IncludeExpansion s_includeExpansion = {};
+
+static int32_t dependency_index(const IncludeExpansion& expansion, const char* path)
+{
+    for (uint32_t i = 0; i < expansion.dependencyCount; ++i)
+        if (text_equal(expansion.dependencies[i].path, path)) return static_cast<int32_t>(i);
+    return -1;
+}
+
+static int32_t active_index(const IncludeExpansion& expansion, const char* path)
+{
+    for (uint32_t i = 0; i < expansion.activeCount; ++i)
+        if (text_equal(expansion.active[i], path)) return static_cast<int32_t>(i);
+    return -1;
+}
+
+static bool header_candidate(const char* includingRelative, const char* requested, uint32_t variant, char* relative,
+                             uint32_t capacity)
+{
+    char directory[COMPILER_MAX_SOURCE_PATH_BYTES] = {};
+    const uint32_t includingBytes = string_length(includingRelative);
+    uint32_t slash = 0xFFFFFFFFU;
+    for (uint32_t i = 0; i < includingBytes; ++i)
+        if (includingRelative[i] == '/') slash = i;
+    if (variant == 0 && slash != 0xFFFFFFFFU) {
+        if (slash + 1U >= sizeof(directory)) return false;
+        for (uint32_t i = 0; i < slash; ++i) directory[i] = includingRelative[i];
+        directory[slash] = '\0';
+        char joined[COMPILER_MAX_SOURCE_PATH_BYTES] = {};
+        if (!copy_text(joined, sizeof(joined), directory)) return false;
+        if (string_length(joined) + 1U + string_length(requested) + 1U > sizeof(joined)) return false;
+        const uint32_t at = string_length(joined);
+        joined[at] = '/'; joined[at + 1] = '\0';
+        if (!copy_text(joined + at + 1U, sizeof(joined) - at - 1U, requested)) return false;
+        return normalize_relative_path(joined, relative, capacity);
+    }
+    if (variant == 1) return normalize_relative_path(requested, relative, capacity);
+    char underInclude[COMPILER_MAX_SOURCE_PATH_BYTES] = {};
+    if (string_length(requested) + 9U >= sizeof(underInclude)) return false;
+    copy_text(underInclude, sizeof(underInclude), "include/");
+    const uint32_t at = string_length(underInclude);
+    if (!copy_text(underInclude + at, sizeof(underInclude) - at, requested)) return false;
+    return normalize_relative_path(underInclude, relative, capacity);
+}
+
+static bool read_header(const IncludeExpansion& expansion, const char* relative,
+                        uint8_t* buffer, uint32_t* bytes)
+{
+    char absolute[COMPILER_MAX_SOURCE_PATH_BYTES] = {};
+    if (!path_join(expansion.projectRoot, relative, absolute, sizeof(absolute))) return false;
+    vfs::FileInfo info = {};
+    if (vfs::stat(absolute, &info) != vfs::VFS_OK || info.type != vfs::FILE_TYPE_REGULAR ||
+        info.size > COMPILER_MAX_DECLARATION_FILE_BYTES) return false;
+    const uint32_t count = static_cast<uint32_t>(info.size);
+    if (vfs::read_file(absolute, buffer, count) != static_cast<int32_t>(count)) return false;
+    if (bytes) *bytes = count;
+    return true;
+}
+
+static bool parse_include_line(const char* line, uint32_t bytes, char* requested,
+                               uint32_t capacity, bool* isDirective, Diagnostics& diagnostics)
+{
+    if (!line || !requested || !isDirective) return false;
+    *isDirective = false;
+    uint32_t at = 0;
+    while (at < bytes && (line[at] == ' ' || line[at] == '\t')) ++at;
+    if (at == bytes || line[at] != '#') return true;
+    *isDirective = true;
+    ++at;
+    if (at + 7U > bytes || line[at] != 'i' || line[at + 1] != 'n' || line[at + 2] != 'c' ||
+        line[at + 3] != 'l' || line[at + 4] != 'u' || line[at + 5] != 'd' || line[at + 6] != 'e') {
+        diagnostics.error({0, 1, 1}, "unsupported preprocessor directive; only #include is supported", "include");
+        return false;
+    }
+    at += 7;
+    while (at < bytes && (line[at] == ' ' || line[at] == '\t')) ++at;
+    if (at >= bytes || line[at] != '"') {
+        diagnostics.error({0, 1, 1}, "quoted local header path is required", "include");
+        return false;
+    }
+    ++at;
+    const uint32_t start = at;
+    while (at < bytes && line[at] != '"') ++at;
+    if (at == bytes || at == start || at - start + 1U > capacity) {
+        diagnostics.error({0, 1, 1}, "invalid local header path", "include");
+        return false;
+    }
+    for (uint32_t i = start; i < at; ++i) requested[i - start] = line[i];
+    requested[at - start] = '\0';
+    ++at;
+    while (at < bytes && (line[at] == ' ' || line[at] == '\t' || line[at] == '\r')) ++at;
+    if (at != bytes) {
+        diagnostics.error({0, 1, 1}, "trailing text after #include is not supported", "include");
+        return false;
+    }
+    if (!valid_relative_path(requested)) {
+        diagnostics.error({0, 1, 1}, "invalid or escaping local header path", "include");
+        return false;
+    }
+    return true;
+}
+
+static bool expand_include_file(IncludeExpansion& expansion, const char* relative,
+                                const uint8_t* bytes, uint32_t byteCount, uint16_t depth,
+                                Diagnostics& diagnostics)
+{
+    if (depth > COMPILER_MAX_INCLUDE_DEPTH) {
+        diagnostics.error({0, 1, 1}, "include depth exceeded", "include");
+        return false;
+    }
+    if (depth != 0) {
+        if (active_index(expansion, relative) >= 0) {
+            diagnostics.error({0, 1, 1}, "include cycle detected", "include");
+            return false;
+        }
+        if (expansion.activeCount >= COMPILER_MAX_INCLUDE_DEPTH) {
+            diagnostics.error({0, 1, 1}, "include depth exceeded", "include");
+            return false;
+        }
+        copy_text(expansion.active[expansion.activeCount++], sizeof(expansion.active[0]), relative);
+    }
+    uint32_t lineStart = 0;
+    while (lineStart < byteCount) {
+        uint32_t lineEnd = lineStart;
+        while (lineEnd < byteCount && bytes[lineEnd] != '\n' && bytes[lineEnd] != '\r') ++lineEnd;
+        uint32_t lineBytes = lineEnd - lineStart;
+        char requested[COMPILER_MAX_SOURCE_PATH_BYTES] = {};
+        bool directive = false;
+        if (!parse_include_line(reinterpret_cast<const char*>(bytes + lineStart), lineBytes,
+                                requested, sizeof(requested), &directive, diagnostics)) return false;
+        if (!directive) {
+            if (!append_text_bounded(expansion.output, sizeof(expansion.output) - 1U,
+                                     &expansion.outputBytes, reinterpret_cast<const char*>(bytes + lineStart), lineBytes)) return false;
+            if (lineEnd < byteCount) {
+                const uint32_t newlineBytes = bytes[lineEnd] == '\r' && lineEnd + 1U < byteCount && bytes[lineEnd + 1U] == '\n' ? 2U : 1U;
+                if (!append_text_bounded(expansion.output, sizeof(expansion.output) - 1U,
+                                         &expansion.outputBytes, "\n", 1)) return false;
+                lineEnd += newlineBytes;
+            }
+        } else {
+            char resolved[COMPILER_MAX_SOURCE_PATH_BYTES] = {};
+            bool found = false;
+            for (uint32_t variant = 0; variant < 3 && !found; ++variant) {
+                if (!header_candidate(relative, requested, variant, resolved, sizeof(resolved))) continue;
+                if (depth >= COMPILER_MAX_INCLUDE_DEPTH) {
+                    diagnostics.error({0, 1, 1}, "include depth exceeded", "include");
+                    return false;
+                }
+                uint8_t* scratch = s_headerSource[depth];
+                for (uint32_t clear = 0; clear < COMPILER_MAX_DECLARATION_FILE_BYTES + 1U; ++clear) scratch[clear] = 0;
+                uint32_t headerBytes = 0;
+                if (read_header(expansion, resolved, scratch, &headerBytes)) {
+                    found = true;
+                    if (active_index(expansion, resolved) >= 0) {
+                        diagnostics.error({0, 1, 1}, "include cycle detected", "include");
+                        return false;
+                    }
+                    const int32_t existing = dependency_index(expansion, resolved);
+                    if (existing < 0) {
+                        if (expansion.dependencyCount >= COMPILER_MAX_DECLARATION_DEPENDENCIES ||
+                            expansion.includedBytes > COMPILER_MAX_DECLARATION_BYTES - headerBytes) {
+                            diagnostics.error({0, 1, 1}, "declaration dependency capacity exceeded", "include");
+                            return false;
+                        }
+                        DeclarationDependency& dependency = expansion.dependencies[expansion.dependencyCount++];
+                        dependency = {};
+                        copy_text(dependency.path, sizeof(dependency.path), resolved);
+                        dependency.bytes = headerBytes;
+                        dependency.hash = hash_bytes(scratch, headerBytes);
+                        expansion.includedBytes += headerBytes;
+                        if (!append_text_bounded(expansion.output, sizeof(expansion.output) - 1U,
+                                                 &expansion.outputBytes, "\n", 1) ||
+                            !expand_include_file(expansion, resolved, scratch, headerBytes,
+                                                 static_cast<uint16_t>(depth + 1U), diagnostics)) return false;
+                    }
+                    break;
+                }
+            }
+            if (!found) {
+                diagnostics.error({0, 1, 1}, "header not found", "include");
+                return false;
+            }
+            if (!append_text_bounded(expansion.output, sizeof(expansion.output) - 1U,
+                                     &expansion.outputBytes, "\n", 1)) return false;
+            if (lineEnd < byteCount) lineEnd += bytes[lineEnd] == '\r' && lineEnd + 1U < byteCount && bytes[lineEnd + 1U] == '\n' ? 2U : 1U;
+        }
+        lineStart = lineEnd;
+    }
+    if (depth != 0 && expansion.activeCount != 0) --expansion.activeCount;
+    return true;
+}
+
+static bool prepare_source_with_headers(const char* sourcePath, const char* sourceIdentityPath,
+                                        const uint8_t* source, uint32_t sourceBytes,
+                                        const char** expandedSource, uint32_t* expandedBytes,
+                                        DeclarationDependency* dependencies, uint16_t* dependencyCount,
+                                        Diagnostics& diagnostics)
+{
+    if (!sourcePath || !sourceIdentityPath || !source || !expandedSource || !expandedBytes ||
+        !dependencies || !dependencyCount || sourceBytes > COMPILER_MAX_SOURCE_BYTES) return false;
+    s_includeExpansion = {};
+    IncludeExpansion& expansion = s_includeExpansion;
+    if (!project_root_for_source(sourcePath, sourceIdentityPath, expansion.projectRoot, sizeof(expansion.projectRoot))) {
+        diagnostics.error({0, 1, 1}, "source path is outside its project build boundary", "include");
+        return false;
+    }
+    if (!expand_include_file(expansion, sourceIdentityPath, source, sourceBytes, 0, diagnostics)) return false;
+    expansion.output[expansion.outputBytes] = '\0';
+    *expandedSource = reinterpret_cast<const char*>(expansion.output);
+    *expandedBytes = expansion.outputBytes;
+    for (uint32_t i = 0; i < expansion.dependencyCount; ++i) {
+        for (uint32_t j = i + 1; j < expansion.dependencyCount; ++j) {
+            uint32_t at = 0;
+            while (expansion.dependencies[i].path[at] && expansion.dependencies[j].path[at] &&
+                   expansion.dependencies[i].path[at] == expansion.dependencies[j].path[at]) ++at;
+            if (static_cast<unsigned char>(expansion.dependencies[j].path[at]) <
+                static_cast<unsigned char>(expansion.dependencies[i].path[at])) {
+                DeclarationDependency swap = expansion.dependencies[i];
+                expansion.dependencies[i] = expansion.dependencies[j];
+                expansion.dependencies[j] = swap;
+            }
+        }
+    }
+    *dependencyCount = expansion.dependencyCount;
+    for (uint32_t i = 0; i < expansion.dependencyCount; ++i) dependencies[i] = expansion.dependencies[i];
+    return true;
+}
+
+static bool declaration_dependencies_current(const CompiledModule& module,
+                                             const char* sourcePath,
+                                             const char* sourceIdentityPath)
+{
+    if (module.dependencyCount > COMPILER_MAX_DECLARATION_DEPENDENCIES) return false;
+    char root[COMPILER_MAX_SOURCE_PATH_BYTES] = {};
+    if (!project_root_for_source(sourcePath, sourceIdentityPath, root, sizeof(root))) return false;
+    for (uint32_t i = 0; i < module.dependencyCount; ++i) {
+        const DeclarationDependency& dependency = module.dependencies[i];
+        if (!valid_relative_path(dependency.path) || dependency.bytes > COMPILER_MAX_DECLARATION_FILE_BYTES) return false;
+        char absolute[COMPILER_MAX_SOURCE_PATH_BYTES] = {};
+        if (!path_join(root, dependency.path, absolute, sizeof(absolute))) return false;
+        vfs::FileInfo info = {};
+        if (vfs::stat(absolute, &info) != vfs::VFS_OK || info.type != vfs::FILE_TYPE_REGULAR ||
+            info.size != dependency.bytes || info.size > COMPILER_MAX_DECLARATION_FILE_BYTES) return false;
+        uint8_t buffer[COMPILER_MAX_DECLARATION_FILE_BYTES + 1] = {};
+        if (vfs::read_file(absolute, buffer, dependency.bytes) != static_cast<int32_t>(dependency.bytes) ||
+            hash_bytes(buffer, dependency.bytes) != dependency.hash) return false;
+    }
+    return true;
+}
+
 static bool temporary_sibling_path(const char* objectPath, char* output, uint32_t capacity)
 {
     if (!copy_text(output, capacity, objectPath)) return false;
@@ -182,11 +550,11 @@ static bool temporary_sibling_path(const char* objectPath, char* output, uint32_
     return true;
 }
 
-static bool load_cached_object(const char* objectPath, const char* sourceIdentityPath,
-                               uint32_t sourceBytes, uint64_t sourceHash,
+static bool load_cached_object(const char* objectPath, const char* sourcePath,
+                               const char* sourceIdentityPath, uint32_t sourceBytes, uint64_t sourceHash,
                                CompiledModule* module)
 {
-    if (!objectPath || !sourceIdentityPath || !module || objectPath[0] == '\0') return false;
+    if (!objectPath || !sourcePath || !sourceIdentityPath || !module || objectPath[0] == '\0') return false;
     vfs::FileInfo info = {};
     if (vfs::stat(objectPath, &info) != vfs::VFS_OK || info.type != vfs::FILE_TYPE_REGULAR ||
         info.size < COMPILER_ELF_OBJECT_HEADER_BYTES || info.size > COMPILER_MAX_OBJECT_BYTES) return false;
@@ -200,6 +568,10 @@ static bool load_cached_object(const char* objectPath, const char* sourceIdentit
     }
     if (!elf_object_identity_matches(loaded, sourceIdentityPath, sourceBytes, sourceHash)) {
         serial::puts("Compiler: cache_reject "); serial::puts(objectPath); serial::puts(" reason=source identity mismatch\n");
+        return false;
+    }
+    if (!declaration_dependencies_current(loaded, sourcePath, sourceIdentityPath)) {
+        serial::puts("Compiler: cache_reject "); serial::puts(objectPath); serial::puts(" reason=declaration dependency mismatch\n");
         return false;
     }
     *module = loaded;
@@ -307,18 +679,31 @@ static bool compile_project_impl(const char* const* sourcePaths,
         s_source[sourceBytes] = '\0';
         const uint64_t sourceHash = hash_bytes(s_source, sourceBytes);
         if (objectPaths && objectPaths[i] &&
-            load_cached_object(objectPaths[i], sourceIdentityPath, sourceBytes, sourceHash, &s_modules[i])) {
+            load_cached_object(objectPaths[i], sourcePath, sourceIdentityPath, sourceBytes, sourceHash, &s_modules[i])) {
             if (summary) {
                 summary->moduleStatus[i] = COMPILE_MODULE_CACHE_HIT;
             }
             ++cachedModuleCount;
             serial::puts("Compiler: cache_hit "); serial::puts(sourceIdentityPath); serial::putc('\n');
-        } else if (!compile_module_from_source(sourceIdentityPath, reinterpret_cast<const char*>(s_source), sourceBytes,
-                                               &s_modules[i], diagnostics)) {
+        } else {
+            const char* expandedSource = nullptr;
+            uint32_t expandedBytes = 0;
+            DeclarationDependency dependencies[COMPILER_MAX_DECLARATION_DEPENDENCIES] = {};
+            uint16_t dependencyCount = 0;
+            if (!prepare_source_with_headers(sourcePath, sourceIdentityPath, s_source, sourceBytes,
+                                             &expandedSource, &expandedBytes, dependencies,
+                                             &dependencyCount, diagnostics) ||
+                !compile_module_from_source(sourceIdentityPath, expandedSource, expandedBytes,
+                                            &s_modules[i], diagnostics)) {
             if (summary) append_diagnostics(diagnostics, summary, sourcePath);
             compileFailed = true;
             continue;
-        } else {
+            }
+            s_modules[i].sourceBytes = sourceBytes;
+            s_modules[i].sourceHash = sourceHash;
+            s_modules[i].dependencyCount = dependencyCount;
+            for (uint32_t dependency = 0; dependency < dependencyCount; ++dependency)
+                s_modules[i].dependencies[dependency] = dependencies[dependency];
             if (summary) {
                 summary->moduleStatus[i] = COMPILE_MODULE_COMPILED;
             }
@@ -334,7 +719,7 @@ static bool compile_project_impl(const char* const* sourcePaths,
                 // linker sees it. This makes the clean-build path exercise
                 // the same close/reopen boundary as a cache hit.
                 s_modules[i] = {};
-                if (!load_cached_object(objectPaths[i], sourceIdentityPath, sourceBytes, sourceHash, &s_modules[i])) {
+                if (!load_cached_object(objectPaths[i], sourcePath, sourceIdentityPath, sourceBytes, sourceHash, &s_modules[i])) {
                     diagnostics.error(driverLocation, "published ELF object could not be reopened", "object");
                     if (summary) append_diagnostics(diagnostics, summary, sourcePath);
                     compileFailed = true;

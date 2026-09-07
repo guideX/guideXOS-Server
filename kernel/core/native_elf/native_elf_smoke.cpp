@@ -18,7 +18,7 @@ namespace native_elf {
 namespace {
 
 static uint8_t s_invalidImage[guidexos::native_elf::MAX_ELF_FILE_BYTES];
-#if defined(GXOS_PHASE27G_SMOKE) || defined(GXOS_PHASE27H_SMOKE) || defined(GXOS_PHASE27I_SMOKE) || defined(GXOS_PHASE27J_SMOKE) || defined(GXOS_PHASE27K_SMOKE) || defined(GXOS_PHASE27L_SMOKE) || defined(GXOS_PHASE27M_SMOKE) || defined(GXOS_PHASE27P_SMOKE) || defined(GXOS_PHASE27R_SMOKE) || defined(GXOS_PHASE27S_SMOKE) || defined(GXOS_PHASE27T_SMOKE) || defined(GXOS_PHASE27U_SMOKE)
+#if defined(GXOS_PHASE27G_SMOKE) || defined(GXOS_PHASE27H_SMOKE) || defined(GXOS_PHASE27I_SMOKE) || defined(GXOS_PHASE27J_SMOKE) || defined(GXOS_PHASE27K_SMOKE) || defined(GXOS_PHASE27L_SMOKE) || defined(GXOS_PHASE27M_SMOKE) || defined(GXOS_PHASE27P_SMOKE) || defined(GXOS_PHASE27R_SMOKE) || defined(GXOS_PHASE27S_SMOKE) || defined(GXOS_PHASE27T_SMOKE) || defined(GXOS_PHASE27U_SMOKE) || defined(GXOS_PHASE27V_SMOKE)
 static uint8_t s_compareImage[guidexos::native_elf::MAX_ELF_FILE_BYTES];
 #endif
 
@@ -155,7 +155,7 @@ static bool emit_serial_artifact(const char* path, const char* name)
     return true;
 }
 
-#if defined(GXOS_PHASE27G_SMOKE) || defined(GXOS_PHASE27H_SMOKE) || defined(GXOS_PHASE27I_SMOKE) || defined(GXOS_PHASE27J_SMOKE) || defined(GXOS_PHASE27K_SMOKE) || defined(GXOS_PHASE27L_SMOKE) || defined(GXOS_PHASE27M_SMOKE) || defined(GXOS_PHASE27P_SMOKE) || defined(GXOS_PHASE27R_SMOKE) || defined(GXOS_PHASE27S_SMOKE) || defined(GXOS_PHASE27T_SMOKE) || defined(GXOS_PHASE27U_SMOKE)
+#if defined(GXOS_PHASE27G_SMOKE) || defined(GXOS_PHASE27H_SMOKE) || defined(GXOS_PHASE27I_SMOKE) || defined(GXOS_PHASE27J_SMOKE) || defined(GXOS_PHASE27K_SMOKE) || defined(GXOS_PHASE27L_SMOKE) || defined(GXOS_PHASE27M_SMOKE) || defined(GXOS_PHASE27P_SMOKE) || defined(GXOS_PHASE27R_SMOKE) || defined(GXOS_PHASE27S_SMOKE) || defined(GXOS_PHASE27T_SMOKE) || defined(GXOS_PHASE27U_SMOKE) || defined(GXOS_PHASE27V_SMOKE)
 static bool same_vfs_file_bytes(const char* leftPath, const char* rightPath)
 {
     vfs::FileInfo left = {};
@@ -239,6 +239,30 @@ static bool same_buffer(const uint8_t* left, const uint8_t* right, uint32_t byte
     if (!left || !right) return false;
     for (uint32_t i = 0; i < bytes; ++i) if (left[i] != right[i]) return false;
     return true;
+}
+#endif
+
+#if defined(GXOS_PHASE27V_SMOKE)
+static bool run_phase27v_build(gx_build_snapshot* snapshot)
+{
+    gx_build_request request = {};
+    request.size = sizeof(request);
+    request.version = GX_BUILD_API_VERSION;
+    request.projectRoot = "/P27V";
+    request.projectId = "dev.guidexos.phase27v";
+    request.projectKind = "native-gui-application";
+    request.targetProfile = "guidexos.amd64.baremetal.bootstrap.native";
+    request.buildSystem = "guidexos-native-baremetal-bootstrap-v1";
+    request.buildScript = "";
+    request.expectedArtifact = "build/bin/amd64/v27.elf";
+    request.configuration = "Debug";
+    gx_build_handle handle = 0;
+    if (compiler::BareMetalBuildService::start(&request, &handle) != GX_OK) return false;
+    gx_build_snapshot local = {};
+    bool ok = compiler::BareMetalBuildService::poll(handle, &local) == GX_OK;
+    ok = compiler::BareMetalBuildService::release(handle) == GX_OK && ok;
+    if (snapshot) *snapshot = local;
+    return ok && local.state == GX_BUILD_SUCCEEDED;
 }
 #endif
 
@@ -1919,6 +1943,204 @@ void run_bootstrap_execution_smoke()
     if (phase27uPassed) {
         serial::puts("DEVELOPER_STUDIO_PHASE27U_PASS\n");
     }
+#endif
+#if defined(GXOS_PHASE27V_SMOKE)
+    serial::puts("ELF Loader: Phase 27V shared declarations and dependency smoke begin\n");
+    const char v27PointHeader[] =
+        "#include \"common.h\"\n"
+        "struct Point { int x; int y; int tag; };\n"
+        "extern int point_value(struct Point* p);\n";
+    const char v27PointHeaderEdited[] =
+        "#include \"common.h\"\n"
+        "struct Point { int x; int y; int tag; int bonus; };\n"
+        "extern int point_value(struct Point* p);\n";
+    const char v27CommonHeader[] = "extern int shared_bias();\n";
+    const char v27Main[] =
+        "#include \"point.h\"\n"
+        "int gx_main(gx_app_context* c) { struct Point points[3]; struct Point* p; "
+        "points[1].x = 2; points[1].y = 3; points[1].tag = 4; "
+        "p = &points[0]; p = p + 1; return point_value(p); }\n";
+    const char v27MainEdited[] =
+        "#include \"point.h\"\n"
+        "int gx_main(gx_app_context* c) { struct Point points[3]; struct Point* p; "
+        "points[1].x = 2; points[1].y = 3; points[1].tag = 4; points[1].bonus = 10; "
+        "p = &points[0]; p = p + 1; return point_value(p); }\n";
+    const char v27Math[] =
+        "#include \"point.h\"\n"
+        "int point_value(struct Point* p) { return p->x * 100 + p->y * 10 + p->tag + shared_bias(); }\n";
+    const char v27MathEdited[] =
+        "#include \"point.h\"\n"
+        "int point_value(struct Point* p) { return p->x * 100 + p->y * 10 + p->tag + p->bonus + shared_bias(); }\n";
+    const char v27Util[] = "int shared_bias() { return 1; }\n";
+    const char v27MathBadStruct[] =
+        "struct Point { int x; int tag; };\n"
+        "int point_value(struct Point* p) { return p->x + p->tag; }\n";
+    const char v27MathBadAbi[] = "int point_value(int p) { return p; }\n";
+    const char v27MalformedHeader[] = "struct Point { int x;\n";
+    const char v27CycleA[] = "#include \"b.h\"\n";
+    const char v27CycleB[] = "#include \"a.h\"\n";
+    const char v27CycleSource[] =
+        "#include \"a.h\"\n"
+        "int gx_main(gx_app_context* c) { return 0; }\n";
+    const char v27EscapeSource[] =
+        "#include \"../point.h\"\n"
+        "int gx_main(gx_app_context* c) { return 0; }\n";
+    const auto write_v27 = [](const char* path, const char* text) {
+        return path && text && vfs::write_file(path, text,
+            static_cast<uint32_t>(__builtin_strlen(text))) ==
+            static_cast<int32_t>(__builtin_strlen(text));
+    };
+    const bool files =
+        write_v27("/P27V/include/common.h", v27CommonHeader) &&
+        write_v27("/P27V/include/point.h", v27PointHeader) &&
+        write_v27("/P27V/src/main.cpp", v27Main) &&
+        write_v27("/P27V/src/math.cpp", v27Math) &&
+        write_v27("/P27V/src/util.cpp", v27Util);
+    const char* v27Sources[] = {"/P27V/src/main.cpp", "/P27V/src/math.cpp", "/P27V/src/util.cpp"};
+    const char* v27Identities[] = {"src/main.cpp", "src/math.cpp", "src/util.cpp"};
+    const char* v27Objects[] = {"/P27V/out/main.gxo", "/P27V/out/math.gxo", "/P27V/out/util.gxo"};
+    const char* v27Deterministic[] = {"/P27V/out/repmain.gxo", "/P27V/out/repmath.gxo", "/P27V/out/reputil.gxo"};
+    static compiler::CompileSummary v27Clean = {};
+    static compiler::CompileSummary v27Warm = {};
+    static compiler::CompileSummary v27Edit = {};
+    static compiler::CompileSummary v27Restore = {};
+    static compiler::CompileSummary v27Missing = {};
+    static compiler::CompileSummary v27Corrupt = {};
+    static compiler::CompileSummary v27StructMismatch = {};
+    static compiler::CompileSummary v27AbiMismatch = {};
+    static compiler::CompileSummary v27Malformed = {};
+    static compiler::CompileSummary v27Cycle = {};
+    static compiler::CompileSummary v27Escape = {};
+
+    const bool clean = files && compiler::compile_project_incremental(
+        v27Sources, v27Identities, v27Objects, 3, "/P27V/out/v27main.elf", &v27Clean) &&
+        v27Clean.compiledModuleCount == 3 && v27Clean.cachedModuleCount == 0 &&
+        run_expected("/P27V/out/v27main.elf", 235);
+    const bool warm = clean && compiler::compile_project_incremental(
+        v27Sources, v27Identities, v27Objects, 3, "/P27V/out/v27warm.elf", &v27Warm) &&
+        v27Warm.compiledModuleCount == 0 && v27Warm.cachedModuleCount == 3 &&
+        v27Warm.persistentObjectsReopened && run_expected("/P27V/out/v27warm.elf", 235);
+    const bool deterministic = warm && compiler::compile_project_incremental(
+        v27Sources, v27Identities, v27Deterministic, 3, "/P27V/out/v27main.elf", &v27Clean) &&
+        v27Clean.compiledModuleCount == 3 && same_vfs_file_bytes(v27Objects[0], v27Deterministic[0]) &&
+        same_vfs_file_bytes(v27Objects[1], v27Deterministic[1]) && same_vfs_file_bytes(v27Objects[2], v27Deterministic[2]);
+    const bool v27ArtifactEvidence = deterministic &&
+        emit_serial_artifact("/P27V/out/v27main.elf", "v27main");
+    compiler::ElfObjectHeaderView v27Header = {};
+    compiler::Diagnostics v27HeaderDiagnostics;
+    uint32_t v27ObjectBytes = 0;
+    const bool dependencyMetadata = clean && read_vfs_image(v27Objects[0], s_invalidImage,
+        sizeof(s_invalidImage), &v27ObjectBytes) &&
+        compiler::inspect_elf_object(s_invalidImage, v27ObjectBytes, &v27Header,
+            v27HeaderDiagnostics) && v27Header.dependencyCount == 2 &&
+        v27Header.dependencyMetadataBytes != 0;
+
+    const bool editedFiles = warm && write_v27("/P27V/include/point.h", v27PointHeaderEdited) &&
+        write_v27("/P27V/src/main.cpp", v27MainEdited) && write_v27("/P27V/src/math.cpp", v27MathEdited);
+    const bool editedBuild = editedFiles && compiler::compile_project_incremental(
+        v27Sources, v27Identities, v27Objects, 3, "/P27V/out/v27edit.elf", &v27Edit);
+    const bool edited = editedBuild && v27Edit.compiledModuleCount == 2 && v27Edit.cachedModuleCount == 1 &&
+        run_expected("/P27V/out/v27edit.elf", 245);
+    const bool restoredFiles = edited && write_v27("/P27V/include/point.h", v27PointHeader) &&
+        write_v27("/P27V/src/main.cpp", v27Main) && write_v27("/P27V/src/math.cpp", v27Math);
+    const bool restored = restoredFiles && compiler::compile_project_incremental(
+        v27Sources, v27Identities, v27Objects, 3, "/P27V/out/v27rst.elf", &v27Restore) &&
+        v27Restore.compiledModuleCount == 2 && v27Restore.cachedModuleCount == 1 &&
+        run_expected("/P27V/out/v27rst.elf", 235);
+    static gx_build_snapshot v27ServiceClean = {};
+    static gx_build_snapshot v27ServiceWarm = {};
+    const bool serviceClean = restored && run_phase27v_build(&v27ServiceClean) &&
+        v27ServiceClean.compiledModuleCount == 3 && v27ServiceClean.cachedModuleCount == 0 &&
+        run_expected("/P27V/build/bin/amd64/v27.elf", 235);
+    const bool serviceRecreation = serviceClean && run_phase27v_build(&v27ServiceWarm) &&
+        v27ServiceWarm.compiledModuleCount == 0 && v27ServiceWarm.cachedModuleCount == 3 &&
+        run_expected("/P27V/build/bin/amd64/v27.elf", 235);
+
+    const bool missingHeader = restored && vfs::unlink("/P27V/include/point.h") == vfs::VFS_OK &&
+        !compiler::compile_project_incremental(v27Sources, v27Identities, v27Objects, 3,
+            "/P27V/out/v27miss.elf", &v27Missing) && v27Missing.cachedModuleCount == 1 &&
+        compile_diagnostic_contains(v27Missing, "header not found") &&
+        run_expected("/P27V/out/v27rst.elf", 235);
+    const bool headerRestored = missingHeader && write_v27("/P27V/include/point.h", v27PointHeader) &&
+        compiler::compile_project_incremental(v27Sources, v27Identities, v27Objects, 3,
+            "/P27V/out/v27rpr.elf", &v27Restore);
+
+    const bool corruptRead = headerRestored && read_vfs_image(v27Objects[0], s_invalidImage,
+        sizeof(s_invalidImage), &v27ObjectBytes);
+    const bool corruptObject = corruptRead && s_invalidImage[0] != 'X' &&
+        (s_invalidImage[0] = 'X', vfs::write_file(v27Objects[0], s_invalidImage, v27ObjectBytes) ==
+            static_cast<int32_t>(v27ObjectBytes)) &&
+        compiler::compile_project_incremental(v27Sources, v27Identities, v27Objects, 3,
+            "/P27V/out/v27cor.elf", &v27Corrupt) && v27Corrupt.compiledModuleCount == 1 &&
+        v27Corrupt.cachedModuleCount == 2 && run_expected("/P27V/out/v27cor.elf", 235);
+
+    const bool structMismatchWritten = corruptObject && write_v27("/P27V/src/math.cpp", v27MathBadStruct);
+    const bool structMismatch = structMismatchWritten &&
+        !compiler::compile_project_incremental(v27Sources, v27Identities, v27Objects, 3,
+            "/P27V/out/v27str.elf", &v27StructMismatch) &&
+        v27StructMismatch.cachedModuleCount == 2 &&
+        compile_diagnostic_contains(v27StructMismatch, "incompatible struct type definition") &&
+        run_expected("/P27V/out/v27cor.elf", 235);
+    const bool abiMismatchWritten = structMismatch && write_v27("/P27V/src/math.cpp", v27MathBadAbi);
+    const bool abiMismatch = abiMismatchWritten &&
+        !compiler::compile_project_incremental(v27Sources, v27Identities, v27Objects, 3,
+            "/P27V/out/v27badabi.elf", &v27AbiMismatch) &&
+        v27AbiMismatch.cachedModuleCount == 2 &&
+        compile_diagnostic_contains(v27AbiMismatch, "conflicting declaration for function");
+    const bool mismatchRestored = abiMismatch && write_v27("/P27V/src/math.cpp", v27Math) &&
+        compiler::compile_project_incremental(v27Sources, v27Identities, v27Objects, 3,
+            "/P27V/out/v27aft.elf", &v27Restore) && run_expected("/P27V/out/v27aft.elf", 235);
+
+    const bool malformedWritten = mismatchRestored && write_v27("/P27V/include/point.h", v27MalformedHeader);
+    const bool malformed = malformedWritten &&
+        !compiler::compile_project_incremental(v27Sources, v27Identities, v27Objects, 3,
+            "/P27V/out/v27mal.elf", &v27Malformed) &&
+        compile_diagnostic_contains(v27Malformed, "struct") &&
+        run_expected("/P27V/out/v27aft.elf", 235);
+    const bool repaired = malformed && write_v27("/P27V/include/point.h", v27PointHeader) &&
+        compiler::compile_project_incremental(v27Sources, v27Identities, v27Objects, 3,
+            "/P27V/out/v27rep.elf", &v27Restore) && run_expected("/P27V/out/v27rep.elf", 235);
+
+    const bool cycleFiles = repaired && write_v27("/P27V/include/a.h", v27CycleA) &&
+        write_v27("/P27V/include/b.h", v27CycleB) && write_v27("/P27V/src/cycle.cpp", v27CycleSource);
+    const char* cycleSources[] = {"/P27V/src/cycle.cpp"};
+    const char* cycleIds[] = {"src/cycle.cpp"};
+    const char* cycleObjects[] = {"/P27V/out/cycle.gxo"};
+    const bool cycle = cycleFiles && !compiler::compile_project_incremental(cycleSources, cycleIds,
+        cycleObjects, 1, "/P27V/out/cycle.elf", &v27Cycle) &&
+        compile_diagnostic_contains(v27Cycle, "include cycle detected");
+    const bool escapeFiles = cycle && write_v27("/P27V/src/escape.cpp", v27EscapeSource);
+    const char* escapeSources[] = {"/P27V/src/escape.cpp"};
+    const char* escapeIds[] = {"src/escape.cpp"};
+    const char* escapeObjects[] = {"/P27V/out/escape.gxo"};
+    const bool escape = escapeFiles && !compiler::compile_project_incremental(escapeSources, escapeIds,
+        escapeObjects, 1, "/P27V/out/escape.elf", &v27Escape) &&
+        compile_diagnostic_contains(v27Escape, "invalid or escaping local header path");
+
+    print_marker("phase27v_shared_declarations", clean && dependencyMetadata);
+    print_marker("phase27v_header_dependencies", clean && warm && deterministic);
+    print_marker("phase27v_shared_struct_identity", clean && edited && restored);
+    print_marker("phase27v_selective_invalidation", edited && editedFiles &&
+        v27Edit.compiledModuleCount == 2 && v27Edit.cachedModuleCount == 1);
+    print_marker("phase27v_native_execution", clean && warm && edited && restored && serviceRecreation);
+    print_marker("phase27v_external_abi_validation", abiMismatch);
+    print_marker("phase27v_type_mismatch_rejection", structMismatch);
+    print_marker("phase27v_object_reopen", dependencyMetadata && warm);
+    print_marker("phase27v_build_service_recreation", serviceRecreation);
+    print_marker("phase27v_missing_header", missingHeader && headerRestored);
+    print_marker("phase27v_malformed_header", malformed && repaired);
+    print_marker("phase27v_corrupt_metadata_recovery", corruptObject);
+    print_marker("phase27v_include_cycle", cycle);
+    print_marker("phase27v_path_validation", escape);
+    const bool phase27vPassed = clean && warm && deterministic && v27ArtifactEvidence && dependencyMetadata && edited &&
+        serviceRecreation &&
+        restored && missingHeader && headerRestored && corruptObject && structMismatch && abiMismatch &&
+        mismatchRestored && malformed && repaired && cycle && escape;
+    print_marker("phase27v", phase27vPassed);
+    serial::puts(phase27vPassed ?
+        "ELF Loader: Phase 27V shared declarations and dependency smoke PASS\n" :
+        "ELF Loader: Phase 27V shared declarations and dependency smoke FAIL\n");
+    if (phase27vPassed) serial::puts("DEVELOPER_STUDIO_PHASE27V_PASS\n");
 #endif
 #if defined(GXOS_PHASE27G_SMOKE)
     serial::puts("ELF Loader: Phase 27G bootstrap language smoke begin\n");

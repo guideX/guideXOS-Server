@@ -177,6 +177,13 @@ static bool test_round_trip_and_determinism()
         "int gx_main(gx_app_context* ctx) { add_two(); log(ctx, \"persisted\"); return answer; }\n";
     CompiledModule original = {};
     if (!require(compile_text("src/main.cpp", source, &original), "global/import module compiles")) return false;
+    original.dependencyCount = 2;
+    std::strcpy(original.dependencies[0].path, "include/common.h");
+    original.dependencies[0].bytes = 26;
+    original.dependencies[0].hash = 0x1111222233334444ULL;
+    std::strcpy(original.dependencies[1].path, "include/point.h");
+    original.dependencies[1].bytes = 102;
+    original.dependencies[1].hash = 0x5555666677778888ULL;
     uint8_t first[COMPILER_MAX_OBJECT_BYTES] = {};
     uint8_t second[COMPILER_MAX_OBJECT_BYTES] = {};
     uint32_t firstBytes = 0, secondBytes = 0;
@@ -194,7 +201,8 @@ static bool test_round_trip_and_determinism()
     if (!require(header.elfType == 1 && header.machine == 62 && header.formatVersion == COMPILER_OBJECT_FORMAT_VERSION &&
                  header.targetArchitecture == COMPILER_OBJECT_ARCH_AMD64 &&
                  header.targetAbi == COMPILER_OBJECT_TARGET_ABI_GUIDEXOS_C_V1 &&
-                 header.compilerObjectAbiVersion == COMPILER_OBJECT_ABI_VERSION,
+                 header.compilerObjectAbiVersion == COMPILER_OBJECT_ABI_VERSION &&
+                 header.dependencyCount == 2 && header.dependencyMetadataBytes != 0,
                  "object identity is explicit")) return false;
     CompiledModule restored = {};
     Diagnostics restoreDiagnostics;
@@ -211,7 +219,14 @@ static bool test_round_trip_and_determinism()
                  same_bytes(restored.data, original.data, original.dataBytes) &&
                  same_bytes(restored.mutableData, original.mutableData, original.mutableDataBytes) &&
                  restored.exportCount == original.exportCount && restored.importCount == original.importCount &&
-                 restored.relocationCount == original.relocationCount,
+                 restored.relocationCount == original.relocationCount &&
+                 restored.dependencyCount == original.dependencyCount &&
+                 std::strcmp(restored.dependencies[0].path, original.dependencies[0].path) == 0 &&
+                 std::strcmp(restored.dependencies[1].path, original.dependencies[1].path) == 0 &&
+                 restored.dependencies[0].bytes == original.dependencies[0].bytes &&
+                 restored.dependencies[1].bytes == original.dependencies[1].bytes &&
+                 restored.dependencies[0].hash == original.dependencies[0].hash &&
+                 restored.dependencies[1].hash == original.dependencies[1].hash,
                  "round-trip module is byte/metadata equivalent")) return false;
     if (!require(elf_object_identity_matches(restored, "src/main.cpp", original.sourceBytes, original.sourceHash) &&
                  !elf_object_identity_matches(restored, "tests/main.cpp", original.sourceBytes, original.sourceHash) &&
