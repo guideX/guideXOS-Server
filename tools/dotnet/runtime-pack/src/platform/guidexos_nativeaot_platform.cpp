@@ -22120,6 +22120,73 @@ guideXosNativeAotC011EC67State() {
 static void guideXosNativeAotC011EC67Put32(const char* name, uint32_t value);
 static void guideXosNativeAotC011EC67Put64(const char* name, uintptr_t value);
 
+#if defined(GUIDEXOS_NATIVEAOT_C011EC88_AGED_FREE_REGION_TRANSFER_PROVENANCE)
+extern "C" uint32_t __cdecl
+guideXosNativeAotC011EC67EventCountObserved() {
+    return guideXosNativeAotC011EC67State().eventCount;
+}
+
+static const char* guideXosNativeAotC011EC88StageName(uint32_t stage) {
+    switch (stage) {
+    case 1u: return "LIST_ADD";
+    case 2u: return "AGE_UPDATE";
+    case 3u: return "AGE_EVAL";
+    case 4u: return "AGE_TRANSFER";
+    case 5u: return "ADDRESS_ORDER_MOVE";
+    case 6u: return "DECOMMIT_QUEUE";
+    case 7u: return "DECOMMIT_COMPLETE";
+    default: return "UNKNOWN";
+    }
+}
+
+extern "C" void __cdecl guideXosNativeAotC011EC88Observed(
+    uint32_t stage, uint32_t kind, uint32_t eventOrdinal,
+    uintptr_t targetOffset, uintptr_t region, uintptr_t sourceList,
+    uintptr_t destinationList, uintptr_t listOrdinal,
+    uintptr_t listCountBefore, uintptr_t listCountAfter,
+    uintptr_t globalCountBefore, uintptr_t globalCountAfter,
+    uintptr_t ageBefore, uintptr_t ageAfter, uintptr_t ageThreshold,
+    uintptr_t committedSize, uintptr_t mem, uintptr_t reserved,
+    uintptr_t next, uintptr_t previous, uintptr_t mapOrdinal,
+    uintptr_t regionUnits, uintptr_t decommitSize,
+    uint32_t ageEligible, uint32_t oomEligible, uint32_t transferObserved,
+    uint32_t decommitSucceeded, uint32_t generation, uint32_t state) {
+    suspendEeSerialPutString(
+        "[nativeaot-gc-short-weak-lifetime] C88_EVENT marker=C011EC88-EVENT stageName=");
+    suspendEeSerialPutString(guideXosNativeAotC011EC88StageName(stage));
+    guideXosNativeAotC011EC67Put32("stage", stage);
+    guideXosNativeAotC011EC67Put32("kind", kind);
+    guideXosNativeAotC011EC67Put32("eventOrdinal", eventOrdinal);
+    guideXosNativeAotC011EC67Put64("targetOffset", targetOffset);
+    guideXosNativeAotC011EC67Put64("region", region);
+    guideXosNativeAotC011EC67Put64("sourceList", sourceList);
+    guideXosNativeAotC011EC67Put64("destinationList", destinationList);
+    guideXosNativeAotC011EC67Put64("listOrdinal", listOrdinal);
+    guideXosNativeAotC011EC67Put64("listCountBefore", listCountBefore);
+    guideXosNativeAotC011EC67Put64("listCountAfter", listCountAfter);
+    guideXosNativeAotC011EC67Put64("globalCountBefore", globalCountBefore);
+    guideXosNativeAotC011EC67Put64("globalCountAfter", globalCountAfter);
+    guideXosNativeAotC011EC67Put64("ageBefore", ageBefore);
+    guideXosNativeAotC011EC67Put64("ageAfter", ageAfter);
+    guideXosNativeAotC011EC67Put64("ageThreshold", ageThreshold);
+    guideXosNativeAotC011EC67Put64("committedSize", committedSize);
+    guideXosNativeAotC011EC67Put64("mem", mem);
+    guideXosNativeAotC011EC67Put64("reserved", reserved);
+    guideXosNativeAotC011EC67Put64("next", next);
+    guideXosNativeAotC011EC67Put64("previous", previous);
+    guideXosNativeAotC011EC67Put64("mapOrdinal", mapOrdinal);
+    guideXosNativeAotC011EC67Put64("regionUnits", regionUnits);
+    guideXosNativeAotC011EC67Put64("decommitSize", decommitSize);
+    guideXosNativeAotC011EC67Put32("ageEligible", ageEligible);
+    guideXosNativeAotC011EC67Put32("oomEligible", oomEligible);
+    guideXosNativeAotC011EC67Put32("transferObserved", transferObserved);
+    guideXosNativeAotC011EC67Put32("decommitSucceeded", decommitSucceeded);
+    guideXosNativeAotC011EC67Put32("generation", generation);
+    guideXosNativeAotC011EC67Put32("state", state);
+    suspendEeSerialPutString(" source=locked-gc-aged-free-region-transfer\n");
+}
+#endif
+
 #if defined(GUIDEXOS_NATIVEAOT_C011EC83_BASIC_CANONICAL_RANGE_MAPPING)
 extern "C" void __cdecl guideXosNativeAotC011EC83BasicMappingBegin(
     uint32_t checkpoint, uintptr_t list, uintptr_t expectedCount,
