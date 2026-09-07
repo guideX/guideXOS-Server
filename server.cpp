@@ -2532,6 +2532,113 @@ static std::string navigatorHostedSmokeDiagnostic() {
         gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
         "replacement page starts without JS27 registrations or errors");
 
+    const std::string js28FixtureUrl =
+        "http://127.0.0.1:8080/navigator-smoke/javascript-js28.html";
+    const bool js28Loaded = gxos::apps::Navigator::SmokeNavigateToQuiet(
+        js28FixtureUrl);
+    const std::string js28InitialText =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    const std::string js28InitialUrl = gxos::apps::Navigator::SmokeCurrentUrl();
+    add("JS28 hosted fixture loads submit listeners",
+        js28Loaded && js28InitialUrl == js28FixtureUrl &&
+        contains(js28InitialText, "Navigator JavaScript JS28") &&
+        gxos::apps::Navigator::SmokeJavaScriptHandlerCount() == 4u &&
+        gxos::apps::Navigator::SmokeJavaScriptListenerCount() == 6u &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("loaded=") + yesNo(js28Loaded) + ",listeners=" +
+        std::to_string(gxos::apps::Navigator::SmokeJavaScriptListenerCount()) +
+        ",url=" + js28InitialUrl);
+
+    const bool js28PlainClick =
+        gxos::apps::Navigator::SmokeClickFormControlById("js28-plain");
+    const std::string js28AfterPlainUrl =
+        gxos::apps::Navigator::SmokeCurrentUrl();
+    add("JS28 type=button does not submit its containing form",
+        js28PlainClick && js28AfterPlainUrl == js28FixtureUrl &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("click=") + yesNo(js28PlainClick) + ",url=" +
+        js28AfterPlainUrl);
+
+    const bool js28CancelClick =
+        gxos::apps::Navigator::SmokeClickFormControlById("js28-cancel-submit");
+    const std::string js28AfterCancelText =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    const std::string js28AfterCancelUrl =
+        gxos::apps::Navigator::SmokeCurrentUrl();
+    const std::size_t js28CancelCapture =
+        js28AfterCancelText.find("document-capture-js28-cancel-form:1;");
+    const std::size_t js28CancelTarget =
+        js28AfterCancelText.find("cancel-target-true:true:true;");
+    const std::size_t js28CancelBubble =
+        js28AfterCancelText.find("document-bubble-js28-cancel-form:3;");
+    add("JS28 preventDefault cancels native submit navigation after propagation",
+        js28CancelClick && js28AfterCancelUrl == js28FixtureUrl &&
+        js28CancelCapture != std::string::npos &&
+        js28CancelTarget > js28CancelCapture &&
+        contains(js28AfterCancelText, "cancel-default-true;") &&
+        js28CancelBubble > js28CancelTarget &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("click=") + yesNo(js28CancelClick) + ",url=" +
+        js28AfterCancelUrl + ",text=" + summarizeText(js28AfterCancelText, 520));
+
+    const bool js28ReloadForButton =
+        gxos::apps::Navigator::SmokeNavigateToQuiet(js28FixtureUrl);
+    const bool js28ButtonClick =
+        gxos::apps::Navigator::SmokeClickFormControlById("js28-allow-submit");
+    const std::string js28ButtonUrl = gxos::apps::Navigator::SmokeCurrentUrl();
+    add("JS28 uncanceled button submit uses existing GET serializer",
+        js28ReloadForButton && js28ButtonClick &&
+        contains(js28ButtonUrl, "javascript-js28-target.html?case=allow") &&
+        contains(js28ButtonUrl, "user=normalized") &&
+        contains(js28ButtonUrl, "note=note") &&
+        contains(js28ButtonUrl, "choice=b") &&
+        contains(js28ButtonUrl, "mode=advanced") &&
+        js28ButtonUrl.find("remember=yes") == std::string::npos &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("reload=") + yesNo(js28ReloadForButton) + ",click=" +
+        yesNo(js28ButtonClick) + ",url=" + js28ButtonUrl);
+
+    const bool js28ReloadForInput =
+        gxos::apps::Navigator::SmokeNavigateToQuiet(js28FixtureUrl);
+    const bool js28InputSubmitClick =
+        gxos::apps::Navigator::SmokeClickFormControlById("js28-input-submit");
+    const std::string js28InputSubmitUrl =
+        gxos::apps::Navigator::SmokeCurrentUrl();
+    add("JS28 input type=submit follows the same activation path",
+        js28ReloadForInput && js28InputSubmitClick &&
+        contains(js28InputSubmitUrl, "javascript-js28-target.html?case=allow") &&
+        contains(js28InputSubmitUrl, "user=normalized") &&
+        contains(js28InputSubmitUrl, "choice=b") &&
+        contains(js28InputSubmitUrl, "mode=advanced") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("reload=") + yesNo(js28ReloadForInput) + ",click=" +
+        yesNo(js28InputSubmitClick) + ",url=" + js28InputSubmitUrl);
+
+    const bool js28ReloadForEnter =
+        gxos::apps::Navigator::SmokeNavigateToQuiet(js28FixtureUrl);
+    const bool js28EnterFocus =
+        gxos::apps::Navigator::SmokeFocusFormControlById("js28-allow-submit", true);
+    const bool js28EnterDown =
+        gxos::apps::Navigator::SmokeKeyPress(13, "down");
+    const bool js28EnterUp = gxos::apps::Navigator::SmokeKeyPress(13, "up");
+    const std::string js28EnterUrl = gxos::apps::Navigator::SmokeCurrentUrl();
+    add("JS28 existing Enter activation submits the focused button",
+        js28ReloadForEnter && js28EnterFocus && js28EnterDown && js28EnterUp &&
+        contains(js28EnterUrl, "javascript-js28-target.html?case=allow") &&
+        contains(js28EnterUrl, "user=normalized") &&
+        contains(js28EnterUrl, "choice=b") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("reload=") + yesNo(js28ReloadForEnter) + ",focus=" +
+        yesNo(js28EnterFocus) + ",down=" + yesNo(js28EnterDown) + ",up=" +
+        yesNo(js28EnterUp) + ",url=" + js28EnterUrl);
+
+    add("JS28 navigation cleanup clears submit listeners",
+        gxos::apps::Navigator::SmokeNavigateToQuiet("about:navigator") &&
+        gxos::apps::Navigator::SmokeJavaScriptHandlerCount() == 0u &&
+        gxos::apps::Navigator::SmokeJavaScriptListenerCount() == 0u &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        "replacement page starts without JS28 registrations or errors");
+
     bool cssInlineLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-inline.html");
     std::string cssInlineText = gxos::apps::Navigator::SmokeCurrentDocumentText();
     std::string cssInlineReport = gxos::apps::Navigator::SmokeRuntimeReport();

@@ -45,6 +45,7 @@ enum class NavigatorScriptEventType : std::uint8_t {
     Focusout,
     Input,
     Change,
+    Submit,
 };
 // JS13/JS17 snapshots at most 32 serials, including the clicked Element and the
 // document's html/body ancestors. The path is deliberately smaller than the
@@ -127,6 +128,11 @@ public:
         RuntimeErrorCode& error, bool* defaultPrevented = nullptr);
     bool dispatchChangeEvent(RuntimeContext& runtime, HostInstanceId targetSerial,
         RuntimeErrorCode& error, bool* defaultPrevented = nullptr);
+    // Navigator calls this from the existing form activation seam. The form
+    // serial is the event target; the adapter does not serialize or submit
+    // form data and therefore keeps the default-action decision separate.
+    bool dispatchSubmitEvent(RuntimeContext& runtime, HostInstanceId formSerial,
+        RuntimeErrorCode& error, bool* defaultPrevented = nullptr);
     // These helpers keep edit-session bookkeeping on the authoritative
     // WebDocument form runtime. They never store a JavaScript-only value.
     bool beginFormEditSession(HostInstanceId serial);
@@ -205,6 +211,7 @@ private:
         bool* defaultPrevented);
     bool eventTypeFor(SourceView type,
         NavigatorScriptEventType& eventType) const;
+    bool isFormElement(HostInstanceId serial) const;
     bool isTextEditableFormElement(HostInstanceId serial) const;
     bool isDiscreteFormElement(HostInstanceId serial) const;
     bool isCheckableFormElement(HostInstanceId serial) const;
@@ -291,6 +298,10 @@ public:
     // Production-boundary proof hook: feed the authoritative document
     // element serial returned by a Navigator hit test into the real adapter.
     bool dispatchClick(std::uint64_t serial, RuntimeErrorCode& error,
+        bool* defaultPrevented = nullptr);
+    // Submit proof boundary. This dispatches the form-targeted event through
+    // the same adapter used by the production Navigator seam.
+    bool dispatchSubmit(std::uint64_t formSerial, RuntimeErrorCode& error,
         bool* defaultPrevented = nullptr);
     // Focus proof boundary. This updates the same bounded document focus
     // fields that Navigator owns before/after using the shared event adapter;

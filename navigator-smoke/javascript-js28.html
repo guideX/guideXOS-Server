@@ -1,0 +1,69 @@
+<!doctype html>
+<html>
+<head><title>Navigator JavaScript JS28</title></head>
+<body>
+<h1>Navigator JavaScript JS28</h1>
+<p>Form submit dispatch shares the native default-action seam.</p>
+<div id="js28-parent">
+  <form id="js28-cancel-form" action="javascript-js28-target.html?case=cancel" method="get">
+    <input id="js28-cancel-user" type="text" name="cancel" value="cancel">
+    <button id="js28-cancel-submit" type="submit">Cancel submit</button>
+  </form>
+  <form id="js28-allow-form" action="javascript-js28-target.html?case=allow" method="get">
+    <input id="js28-user" type="text" name="user" value="before">
+    <textarea id="js28-note" name="note">note</textarea>
+    <input id="js28-remember" type="checkbox" name="remember" value="yes" checked>
+    <input id="js28-radio-a" type="radio" name="choice" value="a" checked>
+    <input id="js28-radio-b" type="radio" name="choice" value="b">
+    <select id="js28-mode" name="mode">
+      <option value="basic" selected>Basic</option>
+      <option value="advanced">Advanced</option>
+    </select>
+    <button id="js28-plain" type="button">Plain button</button>
+    <button id="js28-allow-submit" type="submit">Button submit</button>
+    <input id="js28-input-submit" type="submit" value="Input submit">
+  </form>
+</div>
+<p id="js28-state">initial</p>
+<script>
+var js28State = document.getElementById("js28-state");
+var js28Parent = document.getElementById("js28-parent");
+var js28CancelForm = document.getElementById("js28-cancel-form");
+var js28AllowForm = document.getElementById("js28-allow-form");
+var js28User = document.getElementById("js28-user");
+var js28Remember = document.getElementById("js28-remember");
+var js28RadioB = document.getElementById("js28-radio-b");
+var js28Mode = document.getElementById("js28-mode");
+var js28Log = "";
+function js28Record(value) {
+    js28Log = js28Log + value;
+    js28State.textContent = js28Log;
+}
+document.addEventListener("submit", function(event) {
+    js28Record("document-capture-" + event.target.id + ":" + event.eventPhase + ";");
+}, true);
+js28Parent.addEventListener("submit", function(event) {
+    js28Record("parent-capture-" + event.target.id + ":" + event.eventPhase + ";");
+}, true);
+js28CancelForm.addEventListener("submit", function(event) {
+    js28Record("cancel-target-" + (event.target === js28CancelForm) + ":" +
+        event.bubbles + ":" + event.cancelable + ";");
+    event.preventDefault();
+    js28Record("cancel-default-" + event.defaultPrevented + ";");
+});
+js28AllowForm.addEventListener("submit", function(event) {
+    js28Record("allow-target-" + (event.target === js28AllowForm) + ";");
+    js28User.value = "normalized";
+    js28Remember.checked = false;
+    js28RadioB.checked = true;
+    js28Mode.value = "advanced";
+});
+js28Parent.addEventListener("submit", function(event) {
+    js28Record("parent-bubble-" + event.target.id + ":" + event.eventPhase + ";");
+});
+document.addEventListener("submit", function(event) {
+    js28Record("document-bubble-" + event.target.id + ":" + event.eventPhase + ";");
+});
+</script>
+</body>
+</html>

@@ -296,6 +296,20 @@ bool Navigator::dispatchJavaScriptChangeEvent(std::uint64_t targetSerial)
 	return true;
 }
 
+bool Navigator::dispatchJavaScriptSubmitEvent(std::uint64_t formSerial,
+	bool* defaultPrevented)
+{
+	if (defaultPrevented != nullptr) *defaultPrevented = false;
+	if (formSerial == 0 || s_scriptHostAdapter.document() != &s_currentDoc ||
+		!s_scriptRuntime.builtInsInitialized()) return false;
+	RuntimeErrorCode error = RuntimeErrorCode::None;
+	if (!s_scriptHostAdapter.dispatchSubmitEvent(s_scriptRuntime, formSerial,
+		error, defaultPrevented)) {
+		recordJavaScriptError("submit", error);
+	}
+	return true;
+}
+
 void Navigator::commitJavaScriptFormEdit(std::uint64_t targetSerial)
 {
 	bool changed = false;
@@ -17615,7 +17629,7 @@ void Navigator::updateHoverStatus(HitTarget target, int linkBlockIndex)
 	case HitTarget::FormRadio:   next = "Select radio option"; break;
 	case HitTarget::FormLabel:   next = "Activate associated choice"; break;
 	case HitTarget::FormSelect:  next = "Cycle select option"; break;
-	case HitTarget::FormSubmit:  next = "Activate inert button"; break;
+	case HitTarget::FormSubmit:  next = "Activate form submit control"; break;
 	case HitTarget::ElementScrollbar: next = "Element scrollbar"; break;
 	case HitTarget::Link:
 		if (linkBlockIndex >= 0 &&
@@ -18337,9 +18351,10 @@ void Navigator::handleDocumentClick(HitTarget target, int linkBlockIndex)
 		linkBlockIndex >= 0 &&
 		linkBlockIndex < static_cast<int>(s_currentDoc.blocks.size()))
 	{
-		// Phase 2F buttons are deliberately inert.  The existing Forms-lite
-		// submit path remains available to its explicit legacy callers.
-		activateFormControl(linkBlockIndex);
+		// Submit controls use the same click/default-action seam as links:
+		// click cancellation prevents activation, while an uncanceled click
+		// enters the native form activation and submit-event path.
+		if (!defaultPrevented) activateFormControl(linkBlockIndex);
 	}
 }
 
@@ -19361,6 +19376,7 @@ bool Navigator::activateFormControl(int blockIndex)
 {
 	if (blockIndex < 0 || blockIndex >= static_cast<int>(s_currentDoc.blocks.size())) return false;
 	DocBlock& block = s_currentDoc.blocks[blockIndex];
+	const BlockType activatedType = block.type;
 	if (!isRuntimeFormControl(block)) return false;
 	if (runtimeDisabled(block)) {
 		++s_currentDoc.formsDiagnostics.formDisabledActivationBlocks;
@@ -19445,12 +19461,19 @@ bool Navigator::activateFormControl(int blockIndex)
 			}
 		}
 		s_focusedInputBlockIndex = blockIndex;
-	} else if (block.type == BlockType::FormSubmit) {
+	} else if (activatedType == BlockType::FormSubmit) {
 		++state->activationCount;
 		++s_currentDoc.formsDiagnostics.formButtonActivations;
 		s_focusedInputBlockIndex = blockIndex;
-		updateStatus("Button activated (session-local; no submission).");
-		storePageMetadata(s_pageMetadata, s_currentDoc);
+		if (block.formControl.type == FormControlType::Submit) {
+			submitFormForBlock(blockIndex);
+		} else {
+			// Plain buttons remain activation-only. Reset semantics are also
+			// intentionally deferred; JS28 only gives submit controls a real
+			// form default action.
+			updateStatus("Button activated (no form submission).");
+			storePageMetadata(s_pageMetadata, s_currentDoc);
+		}
 	}
 	if (changed) {
 		// The state transition is complete before either callback runs. Discrete
@@ -19458,8 +19481,8 @@ bool Navigator::activateFormControl(int blockIndex)
 		dispatchJavaScriptInputEvent(serial);
 		dispatchJavaScriptChangeEvent(serial);
 	}
-	if (block.type == BlockType::FormCheckbox ||
-		block.type == BlockType::FormRadio || block.type == BlockType::FormSelect) {
+	if (activatedType == BlockType::FormCheckbox ||
+		activatedType == BlockType::FormRadio || activatedType == BlockType::FormSelect) {
 		recomputeFormControlStyles();
 		updateDisplay();
 	}
@@ -19615,6 +19638,26 @@ void Navigator::submitFormForBlock(int blockIndex)
 	const DocBlock& source = s_currentDoc.blocks[blockIndex];
 	if (source.formControl.disabled) {
 		updateStatus("Disabled form control.");
+		return;
+	}
+	const std::uint64_t formSerial = source.formControl.parentFormSerial;
+	if (formSerial == 0) {
+		updateStatus("Submit control has no containing form.");
+		return;
+	}
+	// This is the native form/default-action seam. The shared Event dispatcher
+	// owns propagation and cancellation; only an uncanceled dispatch reaches
+	// the existing serializer and navigation/request path below.
+	bool submitDefaultPrevented = false;
+	dispatchJavaScriptSubmitEvent(formSerial, &submitDefaultPrevented);
+	if (submitDefaultPrevented) {
+		s_lastSubmittedFormAction = source.formAction.empty()
+			? s_currentDoc.url : source.formAction;
+		s_lastSubmittedFormMethod = toLowerAscii(source.formMethod.empty()
+			? "get" : source.formMethod);
+		s_lastSubmittedFormStatus = "submission canceled";
+		updateStatus("Form submission canceled.");
+		storePageMetadata(s_pageMetadata, s_currentDoc);
 		return;
 	}
 	std::string method = toLowerAscii(source.formMethod.empty() ? "get" : source.formMethod);

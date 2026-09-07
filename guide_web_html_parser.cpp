@@ -6561,6 +6561,11 @@ static void handleOpenTag(ParserState& st, const std::string& tagBody)
 		elementRef.formControl.value = boundedDecodedFormText(extractAttr(tagBody, "value"), kFormMaxValueBytes, st.doc.formsDiagnostics);
 		elementRef.formControl.placeholder = boundedDecodedFormText(extractAttr(tagBody, "placeholder"), kFormMaxPlaceholderBytes, st.doc.formsDiagnostics);
 		elementRef.formControl.size = parseBoundedFormInt(tagBody, "size", kFormMaxSize, st.doc.formsDiagnostics);
+		// Input controls use the direct registration path below rather than
+		// makeFormControlMetadata; preserve the same containment metadata so
+		// input type=submit reaches the native form activation seam.
+		elementRef.formControl.parentFormSerial = nearestAncestorSerial(st, "form");
+		elementRef.formControl.parentFieldsetSerial = nearestAncestorSerial(st, "fieldset");
 		const HtmlElementRef inputElement = registerStructuralElement(st, elementRef);
 		for (HtmlElementRef& stored : st.structuralElements) {
 			if (stored.serial == inputElement.serial) stored.formControl.logicalSerial = inputElement.serial;

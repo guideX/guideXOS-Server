@@ -3150,3 +3150,75 @@ by the existing Mbed TLS configuration errors in
 `third_party/mbedtls/library/mbedtls_check_config.h` (partial ECC acceleration
 and incomplete ECDHE-RSA prerequisites); no full-kernel or QEMU JS27 proof is
 claimed.
+
+## Phase JS28: form submission and default actions
+
+JS28 adds the first form default-action event to the existing generic event
+dispatcher:
+
+```javascript
+form.addEventListener("submit", handler);
+```
+
+The event target is the containing `<form>`. It bubbles, is cancelable, and
+uses the same cached `Event` object, capture/target/bubble path, listener
+registry, propagation controls, stale-document checks, and 64-registration
+bound as the earlier event types. `preventDefault()` affects only the current
+submission dispatch; `defaultPrevented` is observable by later listeners and
+by Navigator's native activation seam. The event is not a `SubmitEvent` and
+does not expose `submitter` or other expanded form-event fields.
+
+The production path is deliberately ordered around the existing native form
+implementation. A pointer activation first dispatches the existing `click`
+event; a canceled click suppresses activation. An uncanceled submit control
+activation then dispatches `submit` on its containing form. If that event is
+canceled, Navigator records the bounded cancellation status and suppresses
+the existing serializer and navigation/request path. If it is not canceled,
+the pre-existing Forms-lite serializer proceeds using the current authoritative
+document state. Handler-side `.value` and `.checked` changes therefore affect
+the serialized result, while scripted changes remain silent and do not
+synthesize `input` or `change`.
+
+Supported activation sources are `<button type="submit">`, `<input
+type="submit">`, and the existing focused-button keyboard path for Enter and
+Space. `<button type="button">` and `<input type="button">` remain
+activation-only and do not submit. Existing reset controls retain their
+activation-only behavior; reset default semantics are deferred. Implicit
+Enter submission from a text input is not inferred because no such native
+Navigator path existed in the audited baseline.
+
+Serialization remains the existing bounded GET/POST behavior: named text
+inputs and textareas, checked named checkboxes/radios, and the selected value
+of a single-select are URL-encoded from the current `DocBlock` and form
+runtime state. Existing action resolution, method/encoding support, local
+POST handling, hosted POST transport, and redirect policy are unchanged.
+JS28 does not add `requestSubmit()`, `form.submit()`, HTML constraint
+validation, `FormData`, successful-control edge cases beyond Forms-lite, or a
+second JavaScript-side form model.
+
+### JS28 validation result
+
+The dedicated proof is
+`tests/navigator_javascript_js28_test.cpp`, run by
+`scripts/smoke-navigator-javascript-js28.ps1`. It reports 492 checks with 0
+failures, including submit metadata and document/form propagation order,
+cancellation, listener `once`/removal/stop controls, exact event-name
+validation, non-cancelable input/change regression, authoritative handler
+mutation and cross-form isolation, re-entrant focus and retained-event
+lifetime, generation reset, and the unchanged 64-listener capacity.
+
+The hosted fixture is `navigator-smoke/javascript-js28.html`; its seven
+aggregate checks cover type=button non-submission, canceled submit with
+complete propagation, uncanceled button serialization, input type=submit,
+focused Enter activation, and navigation cleanup. All seven JS28 hosted checks
+pass. The complete matrix contains lexer, parser, runtime, and JS6 through
+JS28: all 26 suites pass. The normal native `build.bat` completes
+successfully. The hosted aggregate reports 423 passed and 7 failed out of 430
+checks; the seven failures remain the unrelated CSS baselines CSS 3C, CSS 3G,
+CSS 6A, three CSS 6B checks, and CSS 6C.
+
+The required `build-kernel.bat` retry builds the bootloader and reaches the
+kernel build, but remains blocked by the existing Mbed TLS configuration
+errors in `third_party/mbedtls/library/mbedtls_check_config.h` (partial ECC
+acceleration and incomplete ECDHE-RSA prerequisites). QEMU was not launched
+because no kernel image was produced; no TLS configuration was changed.

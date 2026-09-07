@@ -471,6 +471,22 @@ bool NavigatorScriptHostAdapter::dispatchChangeEvent(
         false, error, defaultPrevented);
 }
 
+bool NavigatorScriptHostAdapter::dispatchSubmitEvent(
+    RuntimeContext& runtime, HostInstanceId formSerial,
+    RuntimeErrorCode& error, bool* defaultPrevented)
+{
+    if (!isFormElement(formSerial)) {
+        error = RuntimeErrorCode::StaleHostObject;
+        if (defaultPrevented != nullptr) *defaultPrevented = false;
+        return false;
+    }
+    const HostObjectReference target{
+        formSerial, generation_, kNavigatorElementHostKind};
+    return dispatchEvent(runtime, SourceView("submit", 6u),
+        NavigatorScriptEventType::Submit, target, SourceView(), SourceView(),
+        false, error, defaultPrevented);
+}
+
 bool NavigatorScriptHostAdapter::beginFormEditSession(HostInstanceId serial)
 {
     gxos::web::DocBlock* block = formControlBlock(serial);
@@ -590,7 +606,8 @@ bool NavigatorScriptHostAdapter::dispatchEvent(RuntimeContext& runtime,
         eventType != NavigatorScriptEventType::Blur;
     const bool cancelable = eventType == NavigatorScriptEventType::Click ||
         eventType == NavigatorScriptEventType::Keydown ||
-        eventType == NavigatorScriptEventType::Keyup;
+        eventType == NavigatorScriptEventType::Keyup ||
+        eventType == NavigatorScriptEventType::Submit;
     if (!runtime.createOrUpdateEventObject(type, target,
             HostObjectReference{propagationPath[0].serial,
                 dispatchGeneration, propagationPath[0].kind}, key, code,
@@ -822,7 +839,18 @@ bool NavigatorScriptHostAdapter::eventTypeFor(SourceView type,
         eventType = NavigatorScriptEventType::Change;
         return true;
     }
+    if (textEquals(type, "submit")) {
+        eventType = NavigatorScriptEventType::Submit;
+        return true;
+    }
     return false;
+}
+
+bool NavigatorScriptHostAdapter::isFormElement(HostInstanceId serial) const
+{
+    const gxos::web::HtmlElementRef* element = findElement(serial);
+    if (element == nullptr) return false;
+    return element->tagName == "form" || element->tagName == "FORM";
 }
 
 bool NavigatorScriptHostAdapter::isTextEditableFormElement(
@@ -1962,6 +1990,13 @@ bool NavigatorScriptExecutionHarness::dispatchClick(std::uint64_t serial,
     RuntimeErrorCode& error, bool* defaultPrevented)
 {
     return adapter_.dispatchClick(runtime_, serial, error, defaultPrevented);
+}
+
+bool NavigatorScriptExecutionHarness::dispatchSubmit(
+    std::uint64_t formSerial, RuntimeErrorCode& error, bool* defaultPrevented)
+{
+    return adapter_.dispatchSubmitEvent(runtime_, formSerial, error,
+        defaultPrevented);
 }
 
 bool NavigatorScriptExecutionHarness::focusRequestCallback(

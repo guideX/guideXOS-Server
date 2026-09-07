@@ -1445,7 +1445,7 @@ class NavigatorSmokeHandler(BaseHTTPRequestHandler):
                              b"<input id=\"phase2f-hidden\" type=\"hidden\" value=\"phase2f-secret\">"
                              b"<button id=\"phase2f-button\" type=\"button\">Inert button</button>"
                              b"<input id=\"phase2f-input-button\" type=\"button\" value=\"Input inert button\">"
-                             b"<input id=\"phase2f-submit\" type=\"submit\" value=\"Visual submit\"><input id=\"phase2f-reset\" type=\"reset\" value=\"Visual reset\">"
+                             b"<input id=\"phase2f-submit\" type=\"button\" value=\"Visual button\"><input id=\"phase2f-reset\" type=\"reset\" value=\"Visual reset\">"
                              b"<button id=\"phase2f-disabled-button\" type=\"button\" disabled>Disabled button</button>"
                              b"<p id=\"phase2f-important\">Important cascade marker</p>"
                              b"</fieldset></form>"
@@ -1481,7 +1481,7 @@ class NavigatorSmokeHandler(BaseHTTPRequestHandler):
                              b"<input id=\"phase2g-text\" type=\"text\" value=\"stable text marker\"><textarea id=\"phase2g-textarea\">Stable textarea marker</textarea>"
                              b"<select id=\"phase2g-select\"><option>First select option</option><option>Second select option</option></select>"
                              b"<button id=\"phase2g-button\" type=\"button\">Inert button</button>"
-                             b"<input id=\"phase2g-submit\" type=\"submit\" value=\"Visual submit only\"><input id=\"phase2g-reset\" type=\"reset\" value=\"Visual reset only\">"
+                             b"<input id=\"phase2g-submit\" type=\"button\" value=\"Visual button only\"><input id=\"phase2g-reset\" type=\"reset\" value=\"Visual reset only\">"
                              b"<button id=\"phase2g-disabled-button\" type=\"button\" disabled>Disabled button</button>"
                              b"<input id=\"phase2g-source-order\" type=\"checkbox\"><input id=\"phase2g-inline\" type=\"checkbox\" style=\"color:#1d4ed8;\"><input id=\"phase2g-important\" type=\"checkbox\">"
                              b"</fieldset></form></body></html>")
