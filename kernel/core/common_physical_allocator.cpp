@@ -200,6 +200,41 @@ bool allocate_pages(uint64_t pages, uint64_t* base)
     return false;
 }
 
+bool allocate_pages_at(uint64_t base, uint64_t pages)
+{
+    if (!g_ready || pages == 0 || (base & kPageMask) != 0 ||
+        pages > UINT64_MAX / kPageSize) return false;
+    const uint64_t bytes = pages * kPageSize;
+    uint64_t end = 0;
+    if (!add_u64(base, bytes, &end) || end <= base) return false;
+    for (uint32_t i = 0; i < g_free_count; ++i) {
+        if (base < g_free[i].start || end > g_free[i].end) continue;
+        if (g_allocated_pages > UINT64_MAX - pages) return false;
+        uint32_t slot = kMaxAllocations;
+        for (uint32_t a = 0; a < kMaxAllocations; ++a) {
+            if (!g_allocations[a].active) { slot = a; break; }
+        }
+        if (slot == kMaxAllocations) return false;
+        if (base == g_free[i].start && end == g_free[i].end) {
+            g_free[i] = g_free[--g_free_count];
+        } else if (base == g_free[i].start) {
+            g_free[i].start = end;
+        } else if (end == g_free[i].end) {
+            g_free[i].end = base;
+        } else {
+            if (g_free_count >= kMaxRanges) return false;
+            const Range right = { end, g_free[i].end };
+            g_free[i].end = base;
+            g_free[g_free_count++] = right;
+        }
+        g_allocations[slot] = { base, pages, true };
+        g_free_pages -= pages;
+        g_allocated_pages += pages;
+        return true;
+    }
+    return false;
+}
+
 bool release_pages(uint64_t base, uint64_t pages)
 {
     if (!g_ready || pages == 0 || (base & kPageMask) != 0) return false;

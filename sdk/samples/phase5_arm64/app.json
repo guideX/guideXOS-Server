@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "id": "com.guidexos.phase5.arm64proof",
+  "displayName": "Phase 5 ARM64 Proof",
+  "version": "0.1.0",
+  "publisher": "guideXOS",
+  "description": "Freestanding ARM64 NativeElf App Model proof.",
+  "category": "System",
+  "kind": "NativeElf",
+  "icon": "",
+  "minGuideXOSVersion": "0.1.0",
+  "supportedArchitectures": [ "arm64" ],
+  "entries": [
+    {
+      "architecture": "arm64",
+      "path": "bin/arm64/phase5-arm64-proof.elf",
+      "entryPoint": "gx_main",
+      "abi": "guidexos-c-abi-v1",
+      "runtime": "native-elf"
+    }
+  ],
+  "permissions": [ "log" ],
+  "fileAssociations": []
+}

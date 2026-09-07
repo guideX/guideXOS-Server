@@ -19,3 +19,15 @@ uint64_t phase2_mmu_read_tcr();
 uint64_t phase2_mmu_read_ttbr0();
 uint64_t phase2_mmu_read_sctlr();
 uint64_t phase2_mmu_descriptor_for(uint64_t virtual_address);
+
+// Change permissions on identity-mapped application pages after the loader
+// has copied the PT_LOAD contents.  The Phase-2 table remains the common
+// identity map; only the leaf AP/PXN/UXN bits are changed here.
+#ifdef __cplusplus
+extern "C" {
+#endif
+uint8_t phase2_mmu_set_range_permissions(uint64_t base, uint64_t size,
+                                         uint8_t executable, uint8_t writable);
+#ifdef __cplusplus
+}
+#endif

@@ -1,4 +1,5 @@
 #include "include/kernel/native_elf_baremetal.h"
+#if defined(ARCH_AMD64)
 #include "include/kernel/native_elf_fault.h"
 
 #include "include/kernel/arch.h"
@@ -16,6 +17,12 @@
 #include "bitmap_font.h"
 #include "sdk/include/guidexos/abi.h"
 #include "sdk/include/guidexos/app.h"
+#elif defined(GXOS_AARCH64_PHASE5)
+#include "include/kernel/common_physical_allocator.h"
+#include "include/kernel/vfs.h"
+#include "sdk/include/guidexos/abi.h"
+#include "sdk/include/guidexos/app.h"
+#endif
 
 namespace kernel {
 namespace native_elf {
@@ -1520,10 +1527,17 @@ bool launch(const char* appName) {
     return result;
 }
 
+bool last_launch_rejected_wrong_architecture() { return false; }
+
+#elif defined(GXOS_AARCH64_PHASE5)
+
+#include "native_elf_baremetal_arm64.inc"
+
 #else
 
 void discover() {}
 bool launch(const char*) { return false; }
+bool last_launch_rejected_wrong_architecture() { return false; }
 bool is_available(const char*) { return false; }
 const PackageInfo* lookup_package(const char*) { return nullptr; }
 uint32_t package_count() { return 0; }

@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "id": "com.guidexos.phase5.wrongmachine",
+  "displayName": "Phase 5 Wrong Machine Fixture",
+  "version": "0.1.0",
+  "publisher": "guideXOS",
+  "description": "Negative control: AMD64 ELF presented to the ARM64 loader.",
+  "category": "Tests",
+  "kind": "NativeElf",
+  "icon": "",
+  "minGuideXOSVersion": "0.1.0",
+  "supportedArchitectures": [ "arm64" ],
+  "entries": [
+    {
+      "architecture": "arm64",
+      "path": "bin/arm64/wrongmachine.elf",
+      "entryPoint": "gx_main",
+      "abi": "guidexos-c-abi-v1",
+      "runtime": "native-elf"
+    }
+  ],
+  "permissions": [ "log" ],
+  "fileAssociations": []
+}

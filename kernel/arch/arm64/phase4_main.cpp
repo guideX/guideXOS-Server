@@ -13,6 +13,9 @@
 #include "../../../kernel/core/include/kernel/fs_fat.h"
 #include "../../../kernel/core/include/kernel/ramdisk.h"
 #include "../../../kernel/core/include/kernel/vfs.h"
+#if defined(GXOS_AARCH64_PHASE5)
+#include "../../../kernel/core/include/kernel/native_elf_baremetal.h"
+#endif
 #include "phase2_mmu.h"
 #include "phase3_timer.h"
 
@@ -65,6 +68,14 @@ static volatile uint8_t g_first_task_entered = 0;
 static volatile uint8_t g_register_failure = 0;
 static volatile uint8_t g_fs_failure = 0;
 static kernel::boot::CommonBootInfo g_boot_info{};
+#if defined(GXOS_AARCH64_PHASE5)
+static volatile uint8_t g_app_failure = 0;
+static volatile uint8_t g_app_complete = 0;
+static volatile uint32_t g_app_launches = 0;
+static volatile uint8_t g_app_vfs_exclusive = 0;
+static volatile uint8_t g_filesystem_vfs_active = 0;
+static const uint32_t kAppDurabilityLaunches = 100;
+#endif
 
 static void allocate_pages(uint64_t pages, uint64_t* base)
 {
@@ -229,6 +240,13 @@ static void filesystem_task(void*)
     uint8_t buffer[128];
     if (handle == 0xff) { g_fs_failure = 1; for (;;) kernel::arch::idle(); }
     for (;;) {
+#if defined(GXOS_AARCH64_PHASE5)
+        if (g_app_vfs_exclusive) {
+            kernel::scheduler::note_execution();
+            continue;
+        }
+        g_filesystem_vfs_active = 1;
+#endif
         if (kernel::vfs::seek(handle, 0, kernel::vfs::SEEK_SET) != kernel::vfs::VFS_OK) {
             ++g_fs_work.failures; g_fs_failure = 1;
         }
@@ -250,11 +268,56 @@ static void filesystem_task(void*)
             }
             ++g_fs_work.enumerations;
         }
+#if defined(GXOS_AARCH64_PHASE5)
+        g_filesystem_vfs_active = 0;
+#endif
         kernel::scheduler::note_execution();
     }
 }
 
 static void completion_task(void*) { kernel::scheduler::return_to_bootstrap(); }
+
+#if defined(GXOS_AARCH64_PHASE5)
+static void app_model_task(void*)
+{
+    const uint64_t pagesBefore = kernel::memory::allocated_pages();
+    const char* appName = "com.guidexos.phase5.arm64proof";
+    g_app_vfs_exclusive = 1;
+    while (g_filesystem_vfs_active) kernel::scheduler::note_execution();
+    if (!kernel::native_elf::is_available(appName) ||
+        !kernel::native_elf::lookup_package(appName)) {
+        g_app_failure = 1;
+    } else {
+        for (uint32_t launch = 0; launch < kAppDurabilityLaunches; ++launch) {
+            if (!kernel::native_elf::launch(appName)) {
+                g_app_failure = 1;
+                break;
+            }
+            ++g_app_launches;
+            if (kernel::memory::allocated_pages() != pagesBefore) {
+                g_app_failure = 1;
+                break;
+            }
+            if (launch == 1) print("[guideXOS] ARM64 App Model relaunch: PASS\n");
+        }
+        const bool wrongRejected = !kernel::native_elf::launch("com.guidexos.phase5.wrongmachine") &&
+            kernel::native_elf::last_launch_rejected_wrong_architecture();
+        if (!wrongRejected) g_app_failure = 1;
+    }
+    g_app_vfs_exclusive = 0;
+    if (!g_app_failure && g_app_launches == kAppDurabilityLaunches) {
+        print("[guideXOS] App Model durability: PASS launches=");
+        phase3_serial_dec(g_app_launches);
+        print(" completed=");
+        phase3_serial_dec(g_app_launches);
+        print(" allocator-delta-pages=0\n");
+    }
+    g_app_complete = 1;
+    for (;;) {
+        kernel::scheduler::note_execution();
+    }
+}
+#endif
 
 static void* timer_handler(uint32_t, void* frame, void*)
 {
@@ -480,7 +543,12 @@ extern "C" void phase3_main(const gxos_aarch64_phase4_handoff* handoff, uint64_t
     }
     kernel::scheduler::Task* fs_task = kernel::scheduler::create_task(4, "vfs-worker", filesystem_task, nullptr, false);
     kernel::scheduler::Task* completion = kernel::scheduler::create_task(99, "scheduler-report", completion_task, nullptr, false);
+#if defined(GXOS_AARCH64_PHASE5)
+    kernel::scheduler::Task* app_task = kernel::scheduler::create_task(5, "app-model", app_model_task, nullptr, false);
+    if (!fs_task || !completion || !app_task || kernel::scheduler::task_count() != 6) fail("thread context: FAIL");
+#else
     if (!fs_task || !completion || kernel::scheduler::task_count() != 5) fail("thread context: FAIL");
+#endif
     print("[guideXOS] ARM64 thread context: OK\n");
     kernel::scheduler::set_phase(kernel::scheduler::PHASE_COOPERATIVE);
     kernel::scheduler::start();
@@ -498,6 +566,9 @@ extern "C" void phase3_main(const gxos_aarch64_phase4_handoff* handoff, uint64_t
     }
     if (!kernel::scheduler::reset_task(fs_task, filesystem_task, nullptr, true) ||
         !kernel::scheduler::reset_task(completion, completion_task, nullptr, true)) fail("preemption setup: FAIL");
+#if defined(GXOS_AARCH64_PHASE5)
+    if (!kernel::scheduler::reset_task(app_task, app_model_task, nullptr, true)) fail("preemption setup: FAIL");
+#endif
     kernel::scheduler::set_completion_task(completion);
     kernel::scheduler::set_phase(kernel::scheduler::PHASE_PREEMPTIVE);
     if (!kernel::scheduler::prepare_interrupt_contexts()) fail("preemption setup: FAIL");
@@ -510,6 +581,11 @@ extern "C" void phase3_main(const gxos_aarch64_phase4_handoff* handoff, uint64_t
         g_fs_work.reads == 0 || g_fs_work.enumerations == 0 || !kernel::scheduler::stack_integrity()) {
         fail("scheduler/VFS integration: FAIL");
     }
+#if defined(GXOS_AARCH64_PHASE5)
+    if (!g_app_complete || g_app_failure || g_app_launches != kAppDurabilityLaunches) {
+        fail("App Model durability: FAIL");
+    }
+#endif
     print("[guideXOS] scheduler/VFS integration: PASS reads=");
     phase3_serial_dec(g_fs_work.reads);
     print(" enumerations=");
@@ -538,6 +614,10 @@ extern "C" void phase3_main(const gxos_aarch64_phase4_handoff* handoff, uint64_t
     phase3_serial_dec(stats.unexpected_irqs);
     print(" exceptions=");
     phase3_serial_dec(phase3_exception_count());
+#if defined(GXOS_AARCH64_PHASE5)
+    print("\nAARCH64_PHASE5_PASS\n");
+#else
     print("\nAARCH64_PHASE4_PASS\n");
+#endif
     for (;;) __asm__ volatile("wfi");
 }

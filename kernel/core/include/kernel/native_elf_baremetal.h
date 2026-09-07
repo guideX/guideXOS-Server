@@ -26,6 +26,7 @@ struct PackageInfo {
     char executable[160];
     char entryPoint[48];
     char abi[64];
+    char architecture[16];
     uint64_t executableBytes;
     bool startMenuVisible;
 };
@@ -36,6 +37,10 @@ void discover();
 // Launch a discovered package by display name, id, package directory, or the
 // short PacMan compatibility label.  Returns only after the app exits.
 bool launch(const char* appName);
+
+// The ARM64 Phase-5 negative control reports this separately from a normal
+// application return so the harness can prove rejection before entry.
+bool last_launch_rejected_wrong_architecture();
 
 // Whether a supported external NativeElf package was discovered.
 bool is_available(const char* appName);
