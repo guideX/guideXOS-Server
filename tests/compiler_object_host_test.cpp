@@ -29,15 +29,143 @@ static bool same_bytes(const uint8_t* left, const uint8_t* right, uint32_t count
     return true;
 }
 
-static void put_u64(uint8_t* bytes, uint64_t value)
+static uint16_t elf_u16(const uint8_t* bytes, uint32_t offset)
 {
-    for (uint32_t i = 0; i < 8; ++i) bytes[i] = static_cast<uint8_t>(value >> (i * 8U));
+    return static_cast<uint16_t>(bytes[offset]) |
+        static_cast<uint16_t>(bytes[offset + 1]) << 8;
 }
 
-static void rechecksum(uint8_t* bytes, uint32_t count)
+static uint32_t elf_u32(const uint8_t* bytes, uint32_t offset)
 {
-    put_u64(bytes + 92, 0);
-    put_u64(bytes + 92, gxo_object_checksum(bytes, count));
+    return static_cast<uint32_t>(bytes[offset]) |
+        static_cast<uint32_t>(bytes[offset + 1]) << 8 |
+        static_cast<uint32_t>(bytes[offset + 2]) << 16 |
+        static_cast<uint32_t>(bytes[offset + 3]) << 24;
+}
+
+static uint64_t elf_u64(const uint8_t* bytes, uint32_t offset)
+{
+    uint64_t value = 0;
+    for (uint32_t i = 0; i < 8; ++i)
+        value |= static_cast<uint64_t>(bytes[offset + i]) << (i * 8U);
+    return value;
+}
+
+static bool elf_string_equals(const uint8_t* bytes, uint32_t offset, uint32_t size,
+                              uint32_t nameOffset, const char* expected)
+{
+    if (!bytes || !expected || nameOffset >= size) return false;
+    uint32_t i = 0;
+    while (nameOffset + i < size && bytes[offset + nameOffset + i] != 0 && expected[i] != 0) {
+        if (bytes[offset + nameOffset + i] != static_cast<uint8_t>(expected[i])) return false;
+        ++i;
+    }
+    return nameOffset + i < size && bytes[offset + nameOffset + i] == 0 && expected[i] == 0;
+}
+
+static bool elf_find_section(const uint8_t* bytes, uint32_t byteCount, const char* expected,
+                             uint16_t* outIndex, uint32_t* outOffset, uint32_t* outSize)
+{
+    if (!bytes || !expected || byteCount < COMPILER_ELF_OBJECT_HEADER_BYTES) return false;
+    const uint64_t sectionHeaderOffset = elf_u64(bytes, 40);
+    const uint16_t sectionEntryBytes = elf_u16(bytes, 58);
+    const uint16_t sectionCount = elf_u16(bytes, 60);
+    const uint16_t shstrIndex = elf_u16(bytes, 62);
+    if (sectionEntryBytes < 64 || sectionCount == 0 || shstrIndex >= sectionCount ||
+        sectionHeaderOffset > byteCount ||
+        static_cast<uint64_t>(sectionCount) >
+            (static_cast<uint64_t>(byteCount) - sectionHeaderOffset) / sectionEntryBytes) return false;
+    const uint32_t shstrHeader = static_cast<uint32_t>(sectionHeaderOffset) +
+        static_cast<uint32_t>(shstrIndex) * sectionEntryBytes;
+    const uint32_t shstrOffset = static_cast<uint32_t>(elf_u64(bytes, shstrHeader + 24));
+    const uint32_t shstrSize = static_cast<uint32_t>(elf_u64(bytes, shstrHeader + 32));
+    if (shstrOffset > byteCount || shstrSize > byteCount - shstrOffset) return false;
+    for (uint16_t i = 0; i < sectionCount; ++i) {
+        const uint32_t header = static_cast<uint32_t>(sectionHeaderOffset) +
+            static_cast<uint32_t>(i) * sectionEntryBytes;
+        const uint32_t offset = static_cast<uint32_t>(elf_u64(bytes, header + 24));
+        const uint32_t size = static_cast<uint32_t>(elf_u64(bytes, header + 32));
+        const uint32_t name = elf_u32(bytes, header);
+        if (offset > byteCount || size > byteCount - offset) return false;
+        if (!elf_string_equals(bytes, shstrOffset, shstrSize, name, expected)) continue;
+        if (outIndex) *outIndex = i;
+        if (outOffset) *outOffset = offset;
+        if (outSize) *outSize = size;
+        return true;
+    }
+    return false;
+}
+
+static bool test_elf_sections_symbols_and_relocations()
+{
+    const char* source =
+        "extern int shared_value;\n"
+        "int helper();\n"
+        "int gx_main(gx_app_context* ctx) { return helper() + shared_value; }\n";
+    CompiledModule module = {};
+    if (!require(compile_text("src/consumer.cpp", source, &module), "external-data module compiles")) return false;
+    uint8_t bytes[COMPILER_MAX_OBJECT_BYTES] = {};
+    uint32_t byteCount = 0;
+    if (!require(serialize_elf_object(module, bytes, sizeof(bytes), &byteCount), "external-data ELF serializes")) return false;
+
+    uint16_t textIndex = 0, relaIndex = 0, symtabIndex = 0, strtabIndex = 0;
+    uint32_t textOffset = 0, textSize = 0, relaOffset = 0, relaSize = 0;
+    if (!require(elf_find_section(bytes, byteCount, ".text", &textIndex, &textOffset, &textSize) &&
+                 elf_find_section(bytes, byteCount, ".rela.text", &relaIndex, &relaOffset, &relaSize) &&
+                 elf_find_section(bytes, byteCount, ".symtab", &symtabIndex, nullptr, nullptr) &&
+                 elf_find_section(bytes, byteCount, ".strtab", &strtabIndex, nullptr, nullptr) &&
+                 elf_find_section(bytes, byteCount, ".shstrtab", nullptr, nullptr, nullptr) &&
+                 elf_find_section(bytes, byteCount, ".gx.meta", nullptr, nullptr, nullptr),
+                 "required ELF sections exist")) return false;
+    const uint64_t sectionHeaderOffset = elf_u64(bytes, 40);
+    const uint16_t sectionEntryBytes = elf_u16(bytes, 58);
+    const uint32_t symtabHeader = static_cast<uint32_t>(sectionHeaderOffset) +
+        static_cast<uint32_t>(symtabIndex) * sectionEntryBytes;
+    const uint32_t strtabHeader = static_cast<uint32_t>(sectionHeaderOffset) +
+        static_cast<uint32_t>(strtabIndex) * sectionEntryBytes;
+    const uint32_t symtabOffset = static_cast<uint32_t>(elf_u64(bytes, symtabHeader + 24));
+    const uint32_t symtabSize = static_cast<uint32_t>(elf_u64(bytes, symtabHeader + 32));
+    const uint32_t strtabOffset = static_cast<uint32_t>(elf_u64(bytes, strtabHeader + 24));
+    const uint32_t strtabSize = static_cast<uint32_t>(elf_u64(bytes, strtabHeader + 32));
+    if (!require(elf_u32(bytes, symtabHeader + 40) == strtabIndex &&
+                 elf_u32(bytes, symtabHeader + 44) == elf_u16(bytes, 60) &&
+                 symtabSize % 24U == 0 && strtabSize != 0,
+                 "ELF symbol table links and local-symbol boundary are valid")) return false;
+
+    bool foundEntry = false, foundUndefinedFunction = false, foundUndefinedData = false;
+    const uint32_t symbolCount = symtabSize / 24U;
+    for (uint32_t i = 0; i < symbolCount; ++i) {
+        const uint32_t symbol = symtabOffset + i * 24U;
+        const uint32_t name = elf_u32(bytes, symbol);
+        const uint8_t info = bytes[symbol + 4];
+        const uint16_t section = elf_u16(bytes, symbol + 6);
+        if (i < elf_u32(bytes, symtabHeader + 44)) continue;
+        if (elf_string_equals(bytes, strtabOffset, strtabSize, name, "gx_main"))
+            foundEntry = (info >> 4) == 1 && (info & 0x0F) == 2 && section == textIndex;
+        if (elf_string_equals(bytes, strtabOffset, strtabSize, name, "helper"))
+            foundUndefinedFunction = (info >> 4) == 1 && (info & 0x0F) == 2 && section == 0;
+        if (elf_string_equals(bytes, strtabOffset, strtabSize, name, "shared_value"))
+            foundUndefinedData = (info >> 4) == 1 && (info & 0x0F) == 1 && section == 0;
+    }
+    if (!require(foundEntry && foundUndefinedFunction && foundUndefinedData,
+                 "defined and undefined ELF symbols retain binding/type/section semantics")) return false;
+
+    const uint32_t relaHeader = static_cast<uint32_t>(sectionHeaderOffset) +
+        static_cast<uint32_t>(relaIndex) * sectionEntryBytes;
+    if (!require(elf_u32(bytes, relaHeader + 40) == symtabIndex &&
+                 elf_u32(bytes, relaHeader + 44) == textIndex &&
+                 elf_u64(bytes, relaHeader + 56) == 24 && relaSize % 24U == 0,
+                 "ELF relocations link to the symbol table and text section")) return false;
+    bool sawPc32 = false, sawAbsolute64 = false;
+    for (uint32_t offset = 0; offset < relaSize; offset += 24U) {
+        const uint32_t relocation = relaOffset + offset;
+        const uint32_t symbol = static_cast<uint32_t>(elf_u64(bytes, relocation + 8) >> 32);
+        const uint32_t type = static_cast<uint32_t>(elf_u64(bytes, relocation + 8));
+        if (symbol >= symbolCount || elf_u64(bytes, relocation) + (type == 2 ? 4U : 8U) > textSize) return false;
+        sawPc32 |= type == 2;
+        sawAbsolute64 |= type == 1;
+    }
+    return require(sawPc32 && sawAbsolute64, "required AMD64 relocation types reference valid symbols");
 }
 
 static bool test_round_trip_and_determinism()
@@ -52,20 +180,25 @@ static bool test_round_trip_and_determinism()
     uint8_t first[COMPILER_MAX_OBJECT_BYTES] = {};
     uint8_t second[COMPILER_MAX_OBJECT_BYTES] = {};
     uint32_t firstBytes = 0, secondBytes = 0;
-    if (!require(serialize_gxo_object(original, first, sizeof(first), &firstBytes), "object serializes")) return false;
-    if (!require(serialize_gxo_object(original, second, sizeof(second), &secondBytes), "object serializes deterministically")) return false;
-    if (!require(firstBytes == secondBytes && same_bytes(first, second, firstBytes), "identical module has identical GXO bytes")) return false;
-    GxoObjectHeaderView header = {};
+    if (!require(serialize_elf_object(original, first, sizeof(first), &firstBytes), "ELF object serializes")) return false;
+    if (!require(serialize_elf_object(original, second, sizeof(second), &secondBytes), "ELF object serializes deterministically")) return false;
+    if (!require(firstBytes == secondBytes && same_bytes(first, second, firstBytes), "identical module has identical ELF object bytes")) return false;
+    if (!require(elf_find_section(first, firstBytes, ".text", nullptr, nullptr, nullptr) &&
+                 elf_find_section(first, firstBytes, ".rodata", nullptr, nullptr, nullptr) &&
+                 elf_find_section(first, firstBytes, ".data", nullptr, nullptr, nullptr) &&
+                 elf_find_section(first, firstBytes, ".rela.text", nullptr, nullptr, nullptr),
+                 "content-bearing ELF sections are emitted when needed")) return false;
+    ElfObjectHeaderView header = {};
     Diagnostics inspectDiagnostics;
-    if (!require(inspect_gxo_header(first, firstBytes, &header, inspectDiagnostics), "object header validates")) return false;
-    if (!require(header.formatVersion == COMPILER_OBJECT_FORMAT_VERSION &&
+    if (!require(inspect_elf_object(first, firstBytes, &header, inspectDiagnostics), "ELF object header validates")) return false;
+    if (!require(header.elfType == 1 && header.machine == 62 && header.formatVersion == COMPILER_OBJECT_FORMAT_VERSION &&
                  header.targetArchitecture == COMPILER_OBJECT_ARCH_AMD64 &&
                  header.targetAbi == COMPILER_OBJECT_TARGET_ABI_GUIDEXOS_C_V1 &&
                  header.compilerObjectAbiVersion == COMPILER_OBJECT_ABI_VERSION,
                  "object identity is explicit")) return false;
     CompiledModule restored = {};
     Diagnostics restoreDiagnostics;
-    if (!deserialize_gxo_object(first, firstBytes, &restored, restoreDiagnostics)) {
+    if (!deserialize_elf_object(first, firstBytes, &restored, restoreDiagnostics)) {
         for (uint32_t i = 0; i < restoreDiagnostics.count(); ++i)
             std::fprintf(stderr, "restore diagnostic: %s\n", restoreDiagnostics.at(i).message);
         return require(false, "object deserializes");
@@ -80,9 +213,9 @@ static bool test_round_trip_and_determinism()
                  restored.exportCount == original.exportCount && restored.importCount == original.importCount &&
                  restored.relocationCount == original.relocationCount,
                  "round-trip module is byte/metadata equivalent")) return false;
-    if (!require(gxo_object_identity_matches(restored, "src/main.cpp", original.sourceBytes, original.sourceHash) &&
-                 !gxo_object_identity_matches(restored, "tests/main.cpp", original.sourceBytes, original.sourceHash) &&
-                 !gxo_object_identity_matches(restored, "src/main.cpp", original.sourceBytes, original.sourceHash ^ 1ULL),
+    if (!require(elf_object_identity_matches(restored, "src/main.cpp", original.sourceBytes, original.sourceHash) &&
+                 !elf_object_identity_matches(restored, "tests/main.cpp", original.sourceBytes, original.sourceHash) &&
+                 !elf_object_identity_matches(restored, "src/main.cpp", original.sourceBytes, original.sourceHash ^ 1ULL),
                  "source path and hash are authoritative cache identity")) return false;
 
     CompiledModule modulesA[1] = {original};
@@ -110,10 +243,10 @@ static bool test_recursive_metadata_round_trip()
                  "recursive SCC metadata is produced")) return false;
     uint8_t bytes[COMPILER_MAX_OBJECT_BYTES] = {};
     uint32_t byteCount = 0;
-    if (!require(serialize_gxo_object(recursive, bytes, sizeof(bytes), &byteCount), "recursive module serializes")) return false;
+    if (!require(serialize_elf_object(recursive, bytes, sizeof(bytes), &byteCount), "recursive module serializes")) return false;
     CompiledModule restored = {};
     Diagnostics diagnostics;
-    if (!require(deserialize_gxo_object(bytes, byteCount, &restored, diagnostics), "recursive module deserializes")) return false;
+    if (!require(deserialize_elf_object(bytes, byteCount, &restored, diagnostics), "recursive module deserializes")) return false;
     if (!require(restored.recursiveSccCount == recursive.recursiveSccCount &&
                  restored.recursiveFunction[0] == recursive.recursiveFunction[0] &&
                  restored.callGraph[0][0] == recursive.callGraph[0][0],
@@ -131,32 +264,39 @@ static bool test_rejection_and_bounds()
     if (!require(compile_text("src/reject.cpp", "int gx_main(gx_app_context* ctx) { return 42; }\n", &module), "rejection fixture compiles")) return false;
     uint8_t bytes[COMPILER_MAX_OBJECT_BYTES] = {};
     uint32_t byteCount = 0;
-    if (!require(serialize_gxo_object(module, bytes, sizeof(bytes), &byteCount), "rejection fixture serializes")) return false;
+    if (!require(serialize_elf_object(module, bytes, sizeof(bytes), &byteCount), "rejection fixture serializes")) return false;
     const uint8_t originalMagic = bytes[0];
     bytes[0] = 'X';
     Diagnostics diagnostics;
     CompiledModule restored = {};
-    if (!require(!deserialize_gxo_object(bytes, byteCount, &restored, diagnostics), "wrong magic is rejected")) return false;
+    if (!require(!deserialize_elf_object(bytes, byteCount, &restored, diagnostics), "wrong magic is rejected")) return false;
     bytes[0] = originalMagic;
     bytes[100] ^= 1;
     diagnostics = Diagnostics();
-    if (!require(!deserialize_gxo_object(bytes, byteCount, &restored, diagnostics), "corrupt payload is rejected by checksum")) return false;
+    if (!require(!deserialize_elf_object(bytes, byteCount, &restored, diagnostics), "corrupt payload is rejected by checksum")) return false;
 
-    if (!require(serialize_gxo_object(module, bytes, sizeof(bytes), &byteCount), "version fixture serializes")) return false;
-    bytes[4] = static_cast<uint8_t>(COMPILER_OBJECT_FORMAT_VERSION - 1);
-    rechecksum(bytes, byteCount);
+    if (!require(serialize_elf_object(module, bytes, sizeof(bytes), &byteCount), "version fixture serializes")) return false;
+    ElfObjectHeaderView header = {};
+    Diagnostics headerDiagnostics;
+    if (!require(inspect_elf_object(bytes, byteCount, &header, headerDiagnostics), "version fixture header inspects")) return false;
+    bytes[header.metaOffset + 4] = static_cast<uint8_t>(COMPILER_OBJECT_FORMAT_VERSION - 1);
     diagnostics = Diagnostics();
-    if (!require(!deserialize_gxo_object(bytes, byteCount, &restored, diagnostics), "old object version is rejected")) return false;
-    if (!require(serialize_gxo_object(module, bytes, sizeof(bytes), &byteCount), "architecture fixture serializes")) return false;
-    bytes[8] = 2;
-    rechecksum(bytes, byteCount);
+    if (!require(!deserialize_elf_object(bytes, byteCount, &restored, diagnostics), "old object version is rejected")) return false;
+    if (!require(serialize_elf_object(module, bytes, sizeof(bytes), &byteCount), "architecture fixture serializes")) return false;
+    inspect_elf_object(bytes, byteCount, &header, headerDiagnostics);
+    bytes[header.metaOffset + 8] = 2;
     diagnostics = Diagnostics();
-    if (!require(!deserialize_gxo_object(bytes, byteCount, &restored, diagnostics), "wrong architecture is rejected")) return false;
-    if (!require(serialize_gxo_object(module, bytes, sizeof(bytes), &byteCount), "ABI fixture serializes")) return false;
-    bytes[12] = 2;
-    rechecksum(bytes, byteCount);
+    if (!require(!deserialize_elf_object(bytes, byteCount, &restored, diagnostics), "wrong architecture is rejected")) return false;
+    if (!require(serialize_elf_object(module, bytes, sizeof(bytes), &byteCount), "ABI fixture serializes")) return false;
+    inspect_elf_object(bytes, byteCount, &header, headerDiagnostics);
+    bytes[header.metaOffset + 12] = 2;
     diagnostics = Diagnostics();
-    if (!require(!deserialize_gxo_object(bytes, byteCount, &restored, diagnostics), "wrong ABI is rejected")) return false;
+    if (!require(!deserialize_elf_object(bytes, byteCount, &restored, diagnostics), "wrong ABI is rejected")) return false;
+    if (!require(serialize_elf_object(module, bytes, sizeof(bytes), &byteCount), "section-header fixture serializes")) return false;
+    bytes[58] = 0;
+    bytes[59] = 0;
+    diagnostics = Diagnostics();
+    if (!require(!deserialize_elf_object(bytes, byteCount, &restored, diagnostics), "zero-sized section headers are rejected safely")) return false;
 
     CompiledModule relocation = module;
     relocation.relocationCount = 1;
@@ -165,14 +305,13 @@ static bool test_rejection_and_bounds()
     relocation.relocations[0].width = 4;
     relocation.relocations[0].patchOffset = relocation.codeBytes;
     std::strcpy(relocation.relocations[0].targetSymbolName, "gx_main");
-    if (!require(serialize_gxo_object(relocation, bytes, sizeof(bytes), &byteCount), "malformed relocation serializes for validation test")) return false;
-    diagnostics = Diagnostics();
-    if (!require(!deserialize_gxo_object(bytes, byteCount, &restored, diagnostics), "out-of-range relocation is rejected")) return false;
+    if (!require(!serialize_elf_object(relocation, bytes, sizeof(bytes), &byteCount), "out-of-range relocation is rejected by writer")) return false;
     return true;
 }
 
 int main()
 {
+    if (!test_elf_sections_symbols_and_relocations()) return 1;
     if (!test_round_trip_and_determinism()) return 1;
     if (!test_rejection_and_bounds()) return 1;
     if (!test_recursive_metadata_round_trip()) return 1;

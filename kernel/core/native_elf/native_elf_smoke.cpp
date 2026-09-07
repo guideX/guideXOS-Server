@@ -7,6 +7,7 @@
 #include "native_elf_contract.h"
 #include "native_elf_loader.h"
 #include "../compiler/compiler_driver.h"
+#include "../compiler/compiler_build_service.h"
 #include "../compiler/compiler_object.h"
 #include "arch/amd64/compiler_backend.h"
 #include "kernel/serial_debug.h"
@@ -17,7 +18,7 @@ namespace native_elf {
 namespace {
 
 static uint8_t s_invalidImage[guidexos::native_elf::MAX_ELF_FILE_BYTES];
-#if defined(GXOS_PHASE27G_SMOKE) || defined(GXOS_PHASE27H_SMOKE) || defined(GXOS_PHASE27I_SMOKE) || defined(GXOS_PHASE27J_SMOKE) || defined(GXOS_PHASE27K_SMOKE) || defined(GXOS_PHASE27L_SMOKE) || defined(GXOS_PHASE27M_SMOKE) || defined(GXOS_PHASE27R_SMOKE) || defined(GXOS_PHASE27S_SMOKE) || defined(GXOS_PHASE27T_SMOKE)
+#if defined(GXOS_PHASE27G_SMOKE) || defined(GXOS_PHASE27H_SMOKE) || defined(GXOS_PHASE27I_SMOKE) || defined(GXOS_PHASE27J_SMOKE) || defined(GXOS_PHASE27K_SMOKE) || defined(GXOS_PHASE27L_SMOKE) || defined(GXOS_PHASE27M_SMOKE) || defined(GXOS_PHASE27P_SMOKE) || defined(GXOS_PHASE27R_SMOKE) || defined(GXOS_PHASE27S_SMOKE) || defined(GXOS_PHASE27T_SMOKE)
 static uint8_t s_compareImage[guidexos::native_elf::MAX_ELF_FILE_BYTES];
 #endif
 
@@ -82,7 +83,7 @@ static bool file_contains_bytes(const char* path, const uint8_t* pattern, uint32
     return false;
 }
 
-#if defined(GXOS_PHASE27M_SMOKE)
+#if defined(GXOS_PHASE27M_SMOKE) || defined(GXOS_PHASE27P_SMOKE)
 static void print_decimal(uint32_t value)
 {
     char digits[10] = {};
@@ -154,7 +155,7 @@ static bool emit_serial_artifact(const char* path, const char* name)
     return true;
 }
 
-#if defined(GXOS_PHASE27G_SMOKE) || defined(GXOS_PHASE27H_SMOKE) || defined(GXOS_PHASE27I_SMOKE) || defined(GXOS_PHASE27J_SMOKE) || defined(GXOS_PHASE27K_SMOKE) || defined(GXOS_PHASE27L_SMOKE) || defined(GXOS_PHASE27M_SMOKE) || defined(GXOS_PHASE27R_SMOKE) || defined(GXOS_PHASE27S_SMOKE) || defined(GXOS_PHASE27T_SMOKE)
+#if defined(GXOS_PHASE27G_SMOKE) || defined(GXOS_PHASE27H_SMOKE) || defined(GXOS_PHASE27I_SMOKE) || defined(GXOS_PHASE27J_SMOKE) || defined(GXOS_PHASE27K_SMOKE) || defined(GXOS_PHASE27L_SMOKE) || defined(GXOS_PHASE27M_SMOKE) || defined(GXOS_PHASE27P_SMOKE) || defined(GXOS_PHASE27R_SMOKE) || defined(GXOS_PHASE27S_SMOKE) || defined(GXOS_PHASE27T_SMOKE)
 static bool same_vfs_file_bytes(const char* leftPath, const char* rightPath)
 {
     vfs::FileInfo left = {};
@@ -178,6 +179,68 @@ static bool reset_vfs_file(const char* path)
     const bool exists = vfs::exists(path);
     return !exists || vfs::unlink(path) == vfs::VFS_OK;
 }
+
+static bool read_vfs_image(const char* path, uint8_t* buffer, uint32_t capacity,
+                           uint32_t* outBytes)
+{
+    if (!path || !buffer || capacity == 0 || !outBytes) return false;
+    vfs::FileInfo info = {};
+    if (vfs::stat(path, &info) != vfs::VFS_OK || info.type != vfs::FILE_TYPE_REGULAR ||
+        info.size == 0 || info.size > capacity) return false;
+    const uint32_t bytes = static_cast<uint32_t>(info.size);
+    if (vfs::read_file(path, buffer, bytes) != static_cast<int32_t>(bytes)) return false;
+    *outBytes = bytes;
+    return true;
+}
+
+#if defined(GXOS_PHASE27P_SMOKE)
+static bool run_phase27p_build(gx_build_snapshot* snapshot)
+{
+    gx_build_request request = {};
+    request.size = sizeof(request);
+    request.version = GX_BUILD_API_VERSION;
+    request.projectRoot = "/P27P";
+    request.projectId = "dev.guidexos.phase27p";
+    request.projectKind = "native-gui-application";
+    request.targetProfile = "guidexos.amd64.baremetal.bootstrap.native";
+    request.buildSystem = "guidexos-native-baremetal-bootstrap-v1";
+    request.buildScript = "";
+    request.expectedArtifact = "build/bin/amd64/p27p.elf";
+    request.configuration = "Debug";
+    gx_build_handle handle = 0;
+    if (compiler::BareMetalBuildService::start(&request, &handle) != GX_OK) return false;
+    gx_build_snapshot local = {};
+    bool ok = compiler::BareMetalBuildService::poll(handle, &local) == GX_OK;
+    ok = compiler::BareMetalBuildService::release(handle) == GX_OK && ok;
+    if (!ok || local.state != GX_BUILD_SUCCEEDED) {
+        serial::puts("NativeElf: phase27p_build_error code=");
+        print_decimal(local.errorCode); serial::puts(" message=");
+        serial::puts(local.errorMessage); serial::putc('\n');
+        for (uint32_t i = 0; i < local.outputCount; ++i) {
+            serial::puts("NativeElf: phase27p_build_output=");
+            serial::puts(local.output[i].text); serial::putc('\n');
+        }
+    }
+    if (snapshot) *snapshot = local;
+    return ok && local.state == GX_BUILD_SUCCEEDED;
+}
+
+static void print_phase27p_counts(const char* name, const gx_build_snapshot& snapshot)
+{
+    serial::puts("NativeElf: phase27p_"); serial::puts(name); serial::puts(" compiled=");
+    print_decimal(snapshot.compiledModuleCount); serial::puts(" reused=");
+    print_decimal(snapshot.cachedModuleCount); serial::puts(" objects=");
+    print_decimal(snapshot.sourceFileCount); serial::puts(" linked=");
+    print_decimal(snapshot.linkedModuleCount); serial::putc('\n');
+}
+
+static bool same_buffer(const uint8_t* left, const uint8_t* right, uint32_t bytes)
+{
+    if (!left || !right) return false;
+    for (uint32_t i = 0; i < bytes; ++i) if (left[i] != right[i]) return false;
+    return true;
+}
+#endif
 
 static bool branch_skips_local_load(const compiler::CompileSummary& summary,
                                     uint8_t conditionalOpcode,
@@ -612,21 +675,230 @@ void run_bootstrap_execution_smoke()
 #endif
 #if defined(GXOS_PHASE27P_SMOKE)
     serial::puts("ELF Loader: Phase 27P persistent object smoke begin\n");
+    const char* p27pSources[] = {
+        "/P27P/src/main.cpp", "/P27P/src/math.cpp", "/P27P/src/state.cpp"};
+    const char* p27pObjects[] = {
+        "/P27P/build/obj/amd64/src/main.o", "/P27P/build/obj/amd64/src/math.o",
+        "/P27P/build/obj/amd64/src/state.o"};
+    const char p27pMain[] =
+        "extern int answer;\n"
+        "int add_two();\n"
+        "int gx_main(gx_app_context* ctx) { add_two(); log(ctx, \"persistent\"); return answer; }\n";
+    const char p27pMath[] =
+        "extern int answer;\n"
+        "int add_two() { answer = answer + 2; return answer; }\n";
+    const char p27pMathEdited[] =
+        "extern int answer;\n"
+        "int add_two() { answer = answer + 5; return answer; }\n";
+    const char p27pMathRenamed[] =
+        "extern int answer;\n"
+        "int add_three() { answer = answer + 2; return answer; }\n";
+    const char p27pMathBroken[] =
+        "extern int answer;\n"
+        "int add_two( { return answer; }\n";
+    const char p27pState40[] = "int answer = 40;\n";
+    const char p27pState41[] = "int answer = 41;\n";
+    const uint32_t p27pMainBytes = sizeof(p27pMain) - 1U;
+    const uint32_t p27pMathBytes = sizeof(p27pMath) - 1U;
+    const uint32_t p27pMathEditedBytes = sizeof(p27pMathEdited) - 1U;
+    const uint32_t p27pMathRenamedBytes = sizeof(p27pMathRenamed) - 1U;
+    const uint32_t p27pMathBrokenBytes = sizeof(p27pMathBroken) - 1U;
+    const uint32_t p27pState40Bytes = sizeof(p27pState40) - 1U;
+    const uint32_t p27pState41Bytes = sizeof(p27pState41) - 1U;
+    const char* p27pArtifact = "/P27P/build/bin/amd64/p27p.elf";
+
+    for (uint32_t i = 0; i < 3; ++i) reset_vfs_file(p27pObjects[i]);
+    reset_vfs_file(p27pArtifact);
+    const bool sourcesWritten =
+        vfs::write_file(p27pSources[0], p27pMain, p27pMainBytes) == static_cast<int32_t>(p27pMainBytes) &&
+        vfs::write_file(p27pSources[1], p27pMath, p27pMathBytes) == static_cast<int32_t>(p27pMathBytes) &&
+        vfs::write_file(p27pSources[2], p27pState40, p27pState40Bytes) == static_cast<int32_t>(p27pState40Bytes);
+    gx_build_snapshot p27pClean = {}, p27pNoop = {};
+    const bool cleanBuild = sourcesWritten && run_phase27p_build(&p27pClean);
+    if (cleanBuild) print_phase27p_counts("clean", p27pClean);
+    const bool objectsPresent = cleanBuild && vfs::exists(p27pObjects[0]) &&
+        vfs::exists(p27pObjects[1]) && vfs::exists(p27pObjects[2]);
+    compiler::ElfObjectHeaderView p27pObjectHeader = {};
+    compiler::Diagnostics p27pObjectDiagnostics;
+    uint32_t p27pObjectBytes = 0;
+    const bool objectRead = read_vfs_image(p27pObjects[0], s_invalidImage,
+        sizeof(s_invalidImage), &p27pObjectBytes);
+    const bool objectHeader = objectRead && compiler::inspect_elf_object(
+        s_invalidImage, p27pObjectBytes, &p27pObjectHeader, p27pObjectDiagnostics) &&
+        p27pObjectHeader.elfType == 1 && p27pObjectHeader.machine == 62 &&
+        p27pObjectHeader.formatVersion == compiler::COMPILER_OBJECT_FORMAT_VERSION &&
+        p27pObjectHeader.compilerObjectAbiVersion == compiler::COMPILER_OBJECT_ABI_VERSION;
+    print_marker("phase27p_object_format", objectHeader);
+    print_marker("phase27p_persistent_objects", objectsPresent && objectHeader);
+    const bool objectReopen = cleanBuild && p27pClean.compiledModuleCount == 3 &&
+        p27pClean.cachedModuleCount == 0 && p27pClean.linkedModuleCount == 3;
+    print_marker("phase27p_reopen", objectReopen);
+
+    uint32_t savedMathBytes = 0;
+    const bool savedMath = read_vfs_image(p27pObjects[1], s_compareImage,
+        sizeof(s_compareImage), &savedMathBytes);
+    const bool cleanReset = cleanBuild;
+    for (uint32_t i = 0; i < 3; ++i) reset_vfs_file(p27pObjects[i]);
+    reset_vfs_file(p27pArtifact);
+    gx_build_snapshot p27pCleanRegenerated = {};
+    const bool deterministicBuild = cleanReset && run_phase27p_build(&p27pCleanRegenerated);
+    uint32_t regeneratedMathBytes = 0;
+    const bool deterministicObject = savedMath && deterministicBuild &&
+        read_vfs_image(p27pObjects[1], s_invalidImage, sizeof(s_invalidImage), &regeneratedMathBytes) &&
+        regeneratedMathBytes == savedMathBytes && same_buffer(s_compareImage, s_invalidImage, savedMathBytes);
+    print_marker("phase27p_object_deterministic", deterministicObject);
+
+    const bool noOpBuild = deterministicBuild && run_phase27p_build(&p27pNoop);
+    if (noOpBuild) print_phase27p_counts("noop", p27pNoop);
+    const bool noOpCounts = noOpBuild && p27pNoop.compiledModuleCount == 0 &&
+        p27pNoop.cachedModuleCount == 3 && p27pNoop.linkedModuleCount == 3;
+    print_marker("phase27p_noop_build", noOpCounts);
+
+    gx_build_snapshot p27pFunctionEdit = {};
+    const bool functionEditWritten = vfs::write_file(p27pSources[1], p27pMathEdited,
+        p27pMathEditedBytes) == static_cast<int32_t>(p27pMathEditedBytes);
+    const bool functionEditBuild = functionEditWritten && run_phase27p_build(&p27pFunctionEdit);
+    if (functionEditBuild) print_phase27p_counts("function_edit", p27pFunctionEdit);
+    const bool functionEdit = functionEditBuild && p27pFunctionEdit.compiledModuleCount == 1 &&
+        p27pFunctionEdit.cachedModuleCount == 2 && run_expected(p27pArtifact, 45);
+    print_marker("phase27p_single_source_edit", functionEdit);
+
+    gx_build_snapshot p27pGlobalEdit = {};
+    const bool globalEditWritten = vfs::write_file(p27pSources[2], p27pState41,
+        p27pState41Bytes) == static_cast<int32_t>(p27pState41Bytes);
+    const bool globalEditBuild = globalEditWritten && run_phase27p_build(&p27pGlobalEdit);
+    if (globalEditBuild) print_phase27p_counts("global_edit", p27pGlobalEdit);
+    const bool globalEdit = globalEditBuild && p27pGlobalEdit.compiledModuleCount == 1 &&
+        p27pGlobalEdit.cachedModuleCount == 2 && run_expected(p27pArtifact, 46);
+    print_marker("phase27p_global_initializer", globalEdit);
+
+    gx_build_snapshot p27pStateRestore = {};
+    const bool stateRestoreWritten = vfs::write_file(p27pSources[2], p27pState40,
+        p27pState40Bytes) == static_cast<int32_t>(p27pState40Bytes);
+    const bool stateRestoreBuild = stateRestoreWritten && run_phase27p_build(&p27pStateRestore);
+    if (stateRestoreBuild) print_phase27p_counts("state_restore", p27pStateRestore);
+    const bool stateRestore = stateRestoreBuild && p27pStateRestore.compiledModuleCount == 1 &&
+        p27pStateRestore.cachedModuleCount == 2 && run_expected(p27pArtifact, 45);
+    print_marker("phase27p_source_restore", stateRestore);
+
+    gx_build_snapshot p27pBaselineRestore = {};
+    const bool baselineRestoreWritten = vfs::write_file(p27pSources[1], p27pMath,
+        p27pMathBytes) == static_cast<int32_t>(p27pMathBytes);
+    const bool baselineRestoreBuild = baselineRestoreWritten && run_phase27p_build(&p27pBaselineRestore);
+    const bool baselineRestore = baselineRestoreBuild && p27pBaselineRestore.compiledModuleCount == 1 &&
+        p27pBaselineRestore.cachedModuleCount == 2 && run_expected(p27pArtifact, 42);
+    print_marker("phase27p_restore", baselineRestore);
+
+    uint32_t savedArtifactBytes = 0;
+    const bool savedArtifact = read_vfs_image(p27pArtifact, s_compareImage,
+        sizeof(s_compareImage), &savedArtifactBytes);
+    gx_build_snapshot p27pStale = {};
+    const bool staleWritten = vfs::write_file(p27pSources[1], p27pMathRenamed,
+        p27pMathRenamedBytes) == static_cast<int32_t>(p27pMathRenamedBytes);
+    const bool staleBuildFailed = staleWritten && !run_phase27p_build(&p27pStale);
+    uint32_t staleArtifactBytes = 0;
+    const bool staleArtifactPreserved = savedArtifact &&
+        read_vfs_image(p27pArtifact, s_invalidImage, sizeof(s_invalidImage), &staleArtifactBytes) &&
+        staleArtifactBytes == savedArtifactBytes && same_buffer(s_compareImage, s_invalidImage, savedArtifactBytes);
+    const bool staleSymbol = staleBuildFailed && p27pStale.compiledModuleCount == 1 &&
+        p27pStale.cachedModuleCount == 2 && p27pStale.errorCode == GX_BUILD_ERROR_COMPILER_FAILED;
+    print_marker("phase27p_stale_symbol", staleSymbol);
+    print_marker("phase27p_failed_build_preserves", staleArtifactPreserved);
+
+    gx_build_snapshot p27pRecovery = {};
+    const bool staleRecoveryWritten = vfs::write_file(p27pSources[1], p27pMath,
+        p27pMathBytes) == static_cast<int32_t>(p27pMathBytes);
+    const bool staleRecoveryBuild = staleRecoveryWritten && run_phase27p_build(&p27pRecovery);
+    if (staleRecoveryBuild) print_phase27p_counts("symbol_recovery", p27pRecovery);
+    const bool staleRecovery = staleRecoveryBuild && p27pRecovery.compiledModuleCount == 1 &&
+        p27pRecovery.cachedModuleCount == 2 && run_expected(p27pArtifact, 42);
+    print_marker("phase27p_recovery", staleRecovery);
+
+    const bool missingRemoved = reset_vfs_file(p27pObjects[0]);
+    gx_build_snapshot p27pMissing = {};
+    const bool missingBuild = missingRemoved && run_phase27p_build(&p27pMissing);
+    if (missingBuild) print_phase27p_counts("missing_object", p27pMissing);
+    const bool missingRecovery = missingBuild && p27pMissing.compiledModuleCount == 1 &&
+        p27pMissing.cachedModuleCount == 2 && run_expected(p27pArtifact, 42);
+    print_marker("phase27p_missing_object", missingRecovery);
+
+    uint32_t corruptObjectBytes = 0;
+    const bool corruptRead = read_vfs_image(p27pObjects[1], s_invalidImage,
+        sizeof(s_invalidImage), &corruptObjectBytes);
+    if (corruptRead) s_invalidImage[0] = 0;
+    const bool corruptWritten = corruptRead && vfs::write_file(p27pObjects[1], s_invalidImage,
+        corruptObjectBytes) == static_cast<int32_t>(corruptObjectBytes);
+    gx_build_snapshot p27pCorrupt = {};
+    const bool corruptBuild = corruptWritten && run_phase27p_build(&p27pCorrupt);
+    if (corruptBuild) print_phase27p_counts("corrupt_object", p27pCorrupt);
+    const bool corruptRecovery = corruptBuild && p27pCorrupt.compiledModuleCount == 1 &&
+        p27pCorrupt.cachedModuleCount == 2 && run_expected(p27pArtifact, 42);
+    print_marker("phase27p_corrupt_object", corruptRecovery);
+
+    uint32_t metadataObjectBytes = 0;
+    const bool metadataRead = read_vfs_image(p27pObjects[1], s_invalidImage,
+        sizeof(s_invalidImage), &metadataObjectBytes);
+    compiler::ElfObjectHeaderView metadataHeader = {};
+    compiler::Diagnostics metadataDiagnostics;
+    const bool metadataInspected = metadataRead && compiler::inspect_elf_object(
+        s_invalidImage, metadataObjectBytes, &metadataHeader, metadataDiagnostics);
+    if (metadataInspected) s_invalidImage[metadataHeader.metaOffset + 4U] ^= 1U;
+    const bool metadataWritten = metadataInspected && vfs::write_file(p27pObjects[1], s_invalidImage,
+        metadataObjectBytes) == static_cast<int32_t>(metadataObjectBytes);
+    gx_build_snapshot p27pMetadata = {};
+    const bool metadataBuild = metadataWritten && run_phase27p_build(&p27pMetadata);
+    if (metadataBuild) print_phase27p_counts("metadata_corruption", p27pMetadata);
+    const bool metadataRecovery = metadataBuild && p27pMetadata.compiledModuleCount == 1 &&
+        p27pMetadata.cachedModuleCount == 2 && run_expected(p27pArtifact, 42);
+    print_marker("phase27p_metadata_corruption", metadataRecovery);
+
+    uint32_t syntaxArtifactBytes = 0;
+    const bool syntaxSaved = read_vfs_image(p27pArtifact, s_compareImage,
+        sizeof(s_compareImage), &syntaxArtifactBytes);
+    gx_build_snapshot p27pSyntax = {};
+    const bool syntaxWritten = vfs::write_file(p27pSources[1], p27pMathBroken,
+        p27pMathBrokenBytes) == static_cast<int32_t>(p27pMathBrokenBytes);
+    const bool syntaxFailed = syntaxWritten && !run_phase27p_build(&p27pSyntax);
+    uint32_t syntaxCurrentBytes = 0;
+    const bool syntaxPreserved = syntaxSaved &&
+        read_vfs_image(p27pArtifact, s_invalidImage, sizeof(s_invalidImage), &syntaxCurrentBytes) &&
+        syntaxCurrentBytes == syntaxArtifactBytes && same_buffer(s_compareImage, s_invalidImage, syntaxArtifactBytes);
+    print_marker("phase27p_compile_failure_preserves", syntaxFailed && syntaxPreserved);
+
+    gx_build_snapshot p27pFinalRecovery = {}, p27pRecreated = {};
+    const bool syntaxRecoveryWritten = vfs::write_file(p27pSources[1], p27pMath,
+        p27pMathBytes) == static_cast<int32_t>(p27pMathBytes);
+    const bool syntaxRecovery = syntaxRecoveryWritten && run_phase27p_build(&p27pFinalRecovery);
+    if (syntaxRecovery) print_phase27p_counts("compile_recovery", p27pFinalRecovery);
+    const bool finalRecovery = syntaxRecovery && p27pFinalRecovery.compiledModuleCount == 0 &&
+        p27pFinalRecovery.cachedModuleCount == 3 && run_expected(p27pArtifact, 42);
+    const bool recreatedBuild = finalRecovery && run_phase27p_build(&p27pRecreated);
+    if (recreatedBuild) print_phase27p_counts("service_recreation", p27pRecreated);
+    const bool serviceRecreation = recreatedBuild && p27pRecreated.compiledModuleCount == 0 &&
+        p27pRecreated.cachedModuleCount == 3 && run_expected(p27pArtifact, 42);
+    print_marker("phase27p_service_recreation", serviceRecreation);
+
     int32_t developerStudio27pReturn = 1;
     static NativeElfRunReport developerStudio27pReport = {};
-    const bool developerStudio27pLaunched =
-        run_file("/Apps/DS27P/bin/amd64/p27p.elf",
-                 &developerStudio27pReturn, &developerStudio27pReport) &&
-        developerStudio27pReturn == 0 && developerStudio27pReport.teardownComplete;
+    const bool developerStudio27pLaunched = run_file(p27pArtifact, &developerStudio27pReturn,
+        &developerStudio27pReport) && developerStudio27pReturn == 42 &&
+        developerStudio27pReport.teardownComplete;
+    print_marker("phase27p_native_execution", developerStudio27pLaunched);
     print_marker("phase27p_app_launch", developerStudio27pLaunched);
     print_marker("phase27p_kernel_survival", developerStudio27pLaunched &&
         developerStudio27pReport.finalState == NativeAppExecutionState::Cleaned);
     const bool phase27pArtifactEvidence = developerStudio27pLaunched &&
-        emit_serial_artifact("/P27P/build/bin/amd64/p27p.elf", "p27primary");
+        emit_serial_artifact(p27pArtifact, "p27primary");
     print_marker("phase27p_artifact_evidence", phase27pArtifactEvidence);
-    serial::puts(developerStudio27pLaunched && phase27pArtifactEvidence ?
-                 "ELF Loader: Phase 27P persistent object smoke PASS\n" :
-                 "ELF Loader: Phase 27P persistent object smoke FAIL\n");
+    const bool phase27pPassed = cleanBuild && objectReopen && noOpCounts && functionEdit &&
+        globalEdit && stateRestore && baselineRestore && staleSymbol && staleArtifactPreserved &&
+        staleRecovery && missingRecovery && corruptRecovery && metadataRecovery &&
+        syntaxFailed && syntaxPreserved && finalRecovery && serviceRecreation &&
+        deterministicObject && phase27pArtifactEvidence && developerStudio27pLaunched &&
+        developerStudio27pReport.finalState == NativeAppExecutionState::Cleaned;
+    print_marker("phase27p", phase27pPassed);
+    serial::puts(phase27pPassed ? "ELF Loader: Phase 27P persistent object smoke PASS\n"
+                                 : "ELF Loader: Phase 27P persistent object smoke FAIL\n");
 #endif
 #if defined(GXOS_PHASE27Q_SMOKE)
     serial::puts("ELF Loader: Phase 27Q bounded array smoke begin\n");

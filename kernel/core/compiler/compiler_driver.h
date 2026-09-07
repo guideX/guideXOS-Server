@@ -55,6 +55,7 @@ struct CompileSummary {
     uint32_t cachedModuleCount;
     uint32_t linkedModuleCount;
     bool linkedFromPersistedObjects;
+    bool persistentObjectsReopened;
     CompileModuleStatus moduleStatus[COMPILER_MAX_TRANSLATION_UNITS];
     uint32_t diagnosticCount;
     bool diagnosticsTruncated;
@@ -66,7 +67,7 @@ bool compile(const char* sourcePath,
              CompileSummary* summary);
 
 // Compile each source path as an independent translation unit, then link the
-// resulting bounded in-memory modules into one NativeElf application.
+// resulting bounded modules into one NativeElf application.
 bool compile_project(const char* const* sourcePaths,
                      uint32_t sourceCount,
                      const char* outputPath,
@@ -75,7 +76,7 @@ bool compile_project(const char* const* sourcePaths,
 // Incremental project build.  sourcePaths are VFS paths used for reading;
 // sourceIdentityPaths are normalized project-relative paths persisted in the
 // object and consumed by the deterministic linker; objectPaths are the
-// project-local .gxo cache paths.  The final ELF is always relinked.
+// project-local ELF64 relocatable .o cache paths. The final ELF is always relinked.
 bool compile_project_incremental(const char* const* sourcePaths,
                                  const char* const* sourceIdentityPaths,
                                  const char* const* objectPaths,

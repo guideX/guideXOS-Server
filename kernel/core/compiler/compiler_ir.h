@@ -67,8 +67,8 @@ static const uint32_t COMPILER_MAX_POINTER_TEMPORARY_SLOTS = COMPILER_MAX_PARAME
 // Persistent guideXOS object identity.  These values are intentionally
 // independent from the compiler phase number: changing object-producing
 // semantics requires incrementing COMPILER_OBJECT_ABI_VERSION.
-static const uint16_t COMPILER_OBJECT_FORMAT_VERSION = 1;
-static const uint16_t COMPILER_OBJECT_ABI_VERSION = 5;
+static const uint16_t COMPILER_OBJECT_FORMAT_VERSION = 2;
+static const uint16_t COMPILER_OBJECT_ABI_VERSION = 6;
 static const uint32_t COMPILER_OBJECT_ARCH_AMD64 = 1;
 static const uint32_t COMPILER_OBJECT_TARGET_ABI_GUIDEXOS_C_V1 = 1;
 static const uint32_t COMPILER_MAX_OBJECT_BYTES = 131072;

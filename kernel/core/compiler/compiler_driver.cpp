@@ -169,20 +169,16 @@ static bool copy_text(char* output, uint32_t capacity, const char* input)
     return true;
 }
 
-static bool temporary_object_path(const char* objectPath, char* output, uint32_t capacity)
+static bool temporary_sibling_path(const char* objectPath, char* output, uint32_t capacity)
 {
     if (!copy_text(output, capacity, objectPath)) return false;
-    uint32_t lastSlash = 0;
     uint32_t lastDot = 0xFFFFFFFFU;
     for (uint32_t i = 0; output[i] != '\0'; ++i) {
-        if (output[i] == '/' || output[i] == '\\') lastSlash = i + 1U;
-        else if (output[i] == '.') lastDot = i;
+        if (output[i] == '.') lastDot = i;
     }
-    if (lastDot == 0xFFFFFFFFU || lastDot < lastSlash ||
-        string_length(output) - lastDot != 4U) return false;
-    output[lastDot + 1U] = 'g';
-    output[lastDot + 2U] = 'x';
-    output[lastDot + 3U] = 't';
+    if (lastDot == 0xFFFFFFFFU) return false;
+    if (lastDot + 4U >= capacity) return false;
+    output[lastDot + 1U] = 't'; output[lastDot + 2U] = 'm'; output[lastDot + 3U] = 'p'; output[lastDot + 4U] = '\0';
     return true;
 }
 
@@ -193,13 +189,19 @@ static bool load_cached_object(const char* objectPath, const char* sourceIdentit
     if (!objectPath || !sourceIdentityPath || !module || objectPath[0] == '\0') return false;
     vfs::FileInfo info = {};
     if (vfs::stat(objectPath, &info) != vfs::VFS_OK || info.type != vfs::FILE_TYPE_REGULAR ||
-        info.size < COMPILER_GXO_HEADER_BYTES || info.size > COMPILER_MAX_OBJECT_BYTES) return false;
+        info.size < COMPILER_ELF_OBJECT_HEADER_BYTES || info.size > COMPILER_MAX_OBJECT_BYTES) return false;
     const uint32_t bytes = static_cast<uint32_t>(info.size);
     if (vfs::read_file(objectPath, s_object, bytes) != static_cast<int32_t>(bytes)) return false;
     Diagnostics diagnostics;
     CompiledModule loaded = {};
-    if (!deserialize_gxo_object(s_object, bytes, &loaded, diagnostics) ||
-        !gxo_object_identity_matches(loaded, sourceIdentityPath, sourceBytes, sourceHash)) return false;
+    if (!deserialize_elf_object(s_object, bytes, &loaded, diagnostics)) {
+        serial::puts("Compiler: cache_reject "); serial::puts(objectPath); serial::puts(" reason=malformed ELF object\n");
+        return false;
+    }
+    if (!elf_object_identity_matches(loaded, sourceIdentityPath, sourceBytes, sourceHash)) {
+        serial::puts("Compiler: cache_reject "); serial::puts(objectPath); serial::puts(" reason=source identity mismatch\n");
+        return false;
+    }
     *module = loaded;
     return true;
 }
@@ -208,15 +210,12 @@ static bool publish_object(const char* objectPath, const CompiledModule& module)
 {
     if (!objectPath || objectPath[0] == '\0') return false;
     uint32_t bytes = 0;
-    if (!serialize_gxo_object(module, s_object, sizeof(s_object), &bytes)) return false;
+    if (!serialize_elf_object(module, s_object, sizeof(s_object), &bytes)) return false;
     CompiledModule checked = {};
     Diagnostics diagnostics;
-    if (!deserialize_gxo_object(s_object, bytes, &checked, diagnostics)) return false;
+    if (!deserialize_elf_object(s_object, bytes, &checked, diagnostics)) return false;
     char temporary[COMPILER_MAX_SOURCE_PATH_BYTES + 1] = {};
-    // The bare-metal FAT volume currently supports 8.3 names.  A suffix such
-    // as ".gxo.tmp" would therefore fail before the publication transaction
-    // begins; use a sibling three-character extension instead.
-    if (!temporary_object_path(objectPath, temporary, sizeof(temporary))) return false;
+    if (!temporary_sibling_path(objectPath, temporary, sizeof(temporary))) return false;
     if (vfs::exists(temporary)) (void)vfs::unlink(temporary);
     const int32_t temporaryWrite = vfs::write_file(temporary, s_object, bytes);
     if (temporaryWrite != static_cast<int32_t>(bytes)) {
@@ -272,6 +271,8 @@ static bool compile_project_impl(const char* const* sourcePaths,
 
     if (summary) summary->sourceFileCount = sourceCount;
     bool compileFailed = false;
+    uint32_t compiledModuleCount = 0;
+    uint32_t cachedModuleCount = 0;
     uint32_t totalSourceBytes = 0;
     uint32_t totalTokenCount = 0;
     uint64_t projectSourceHash = 0;
@@ -309,8 +310,8 @@ static bool compile_project_impl(const char* const* sourcePaths,
             load_cached_object(objectPaths[i], sourceIdentityPath, sourceBytes, sourceHash, &s_modules[i])) {
             if (summary) {
                 summary->moduleStatus[i] = COMPILE_MODULE_CACHE_HIT;
-                ++summary->cachedModuleCount;
             }
+            ++cachedModuleCount;
             serial::puts("Compiler: cache_hit "); serial::puts(sourceIdentityPath); serial::putc('\n');
         } else if (!compile_module_from_source(sourceIdentityPath, reinterpret_cast<const char*>(s_source), sourceBytes,
                                                &s_modules[i], diagnostics)) {
@@ -320,13 +321,25 @@ static bool compile_project_impl(const char* const* sourcePaths,
         } else {
             if (summary) {
                 summary->moduleStatus[i] = COMPILE_MODULE_COMPILED;
-                ++summary->compiledModuleCount;
             }
+            ++compiledModuleCount;
             if (objectPaths && objectPaths[i] && !publish_object(objectPaths[i], s_modules[i])) {
                 diagnostics.error(driverLocation, "compiled object could not be published safely", "object");
                 if (summary) append_diagnostics(diagnostics, summary, sourcePath);
                 compileFailed = true;
                 continue;
+            }
+            if (objectPaths && objectPaths[i]) {
+                // The compiler product is deliberately discarded before the
+                // linker sees it. This makes the clean-build path exercise
+                // the same close/reopen boundary as a cache hit.
+                s_modules[i] = {};
+                if (!load_cached_object(objectPaths[i], sourceIdentityPath, sourceBytes, sourceHash, &s_modules[i])) {
+                    diagnostics.error(driverLocation, "published ELF object could not be reopened", "object");
+                    if (summary) append_diagnostics(diagnostics, summary, sourcePath);
+                    compileFailed = true;
+                    continue;
+                }
             }
             serial::puts("Compiler: compiled "); serial::puts(sourceIdentityPath); serial::putc('\n');
         }
@@ -343,7 +356,29 @@ static bool compile_project_impl(const char* const* sourcePaths,
         put_decimal_u64(s_modules[i].relocationCount);
         serial::putc('\n');
     }
+    // Keep the counters in scalar locals while the per-module compiler and
+    // object reader use their large bounded work buffers.  Publish the final
+    // values after all module transitions so the build-service snapshot sees
+    // the authoritative counts even when a later source fails to compile.
+    if (summary) {
+        summary->sourceFileCount = sourceCount;
+        summary->compiledModuleCount = compiledModuleCount;
+        summary->cachedModuleCount = cachedModuleCount;
+    }
+
     if (compileFailed) return fail_project(summary);
+
+    if (objectPaths) {
+        serial::puts("Compiler: incremental_counts compiled=");
+        put_decimal_u64(compiledModuleCount);
+        serial::puts(" reused=");
+        put_decimal_u64(cachedModuleCount);
+        serial::puts(" sources=");
+        put_decimal_u64(sourceCount);
+        serial::putc('\n');
+        if (summary) summary->persistentObjectsReopened = true;
+        serial::puts("[DeveloperStudio] relocatable object reopen: PASS\n");
+    }
 
     Diagnostics linkerDiagnostics;
     serial::puts("Compiler: linking modules=");
@@ -355,7 +390,7 @@ static bool compile_project_impl(const char* const* sourcePaths,
     }
     if (summary) {
         summary->linkedModuleCount = sourceCount;
-        summary->linkedFromPersistedObjects = summary->cachedModuleCount != 0;
+        summary->linkedFromPersistedObjects = cachedModuleCount != 0;
     }
 
     if (s_linked.dataBytes != 0) print_data(s_linked.data, s_linked.dataBytes);
@@ -465,6 +500,11 @@ static bool compile_project_impl(const char* const* sourcePaths,
         summary->dataBytes = s_linked.dataBytes;
         summary->outputBytes = layout.outputBytes;
         summary->sourceHash = sourceCount == 1 ? s_modules[0].sourceHash : projectSourceHash;
+        summary->sourceFileCount = sourceCount;
+        summary->compiledModuleCount = compiledModuleCount;
+        summary->cachedModuleCount = cachedModuleCount;
+        summary->linkedModuleCount = sourceCount;
+        summary->linkedFromPersistedObjects = cachedModuleCount != 0;
         summary->outputHash = outputHash;
         summary->reopenedHash = reopenedHash;
         summary->dataHash = hash_bytes(s_linked.data, s_linked.dataBytes);

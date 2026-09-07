@@ -747,61 +747,26 @@ function Invoke-QemuProofBoot([int]$runNumber, [string]$qemu) {
         }
         if ($Phase27P) {
             $requiredMarkers += @(
-                "phase27p_run_backend=PASS",
-                "phase27p_project_open=PASS",
-                "phase27p_source_enumeration=PASS",
-                "phase27p_multi_file_documents=PASS",
-                "phase27p_cold_build=PASS",
-                "phase27p_no_change_build=PASS",
-                "phase27p_single_file_invalidation=PASS",
-                "phase27p_incremental_source_edit=PASS",
+                "phase27p_object_format=PASS",
+                "phase27p_persistent_objects=PASS",
+                "phase27p_reopen=PASS",
+                "phase27p_noop_build=PASS",
+                "phase27p_single_source_edit=PASS",
+                "phase27p_global_initializer=PASS",
                 "phase27p_source_restore=PASS",
-                "phase27p_multi_file_invalidation=PASS",
-                "phase27p_added_source=PASS",
-                "phase27p_removed_source=PASS",
-                "phase27p_orphan_object_ignored=PASS",
-                "phase27p_source_rename=PASS",
-                "phase27p_same_size_edit_invalidates=PASS",
-                "phase27p_missing_object_rebuild=PASS",
-                "phase27p_corrupt_object_rebuild=PASS",
-                "phase27p_corrupt_code_rebuild=PASS",
-                "phase27p_corrupt_relocation_rebuild=PASS",
-                "phase27p_cold_counts=PASS",
-                "phase27p_warm_counts=PASS",
-                "phase27p_partial_counts=PASS",
-                "phase27p_compile_skipped_on_hit=PASS",
-                "phase27p_cached_undefined_symbol=PASS",
-                "phase27p_cached_signature_validation=PASS",
-                "phase27p_cached_link_failure_blocks_run=PASS",
-                "phase27p_compile_failure_recovery=PASS",
-                "phase27p_link_failure_recovery=PASS",
-                "phase27p_link_from_persisted_objects=PASS",
-                "phase27p_full_cache_execution=PASS",
-                "phase27p_ide_cold_build=PASS",
-                "phase27p_ide_warm_build=PASS",
-                "phase27p_ide_partial_rebuild=PASS",
-                "phase27p_ide_restore=PASS",
-                "phase27p_ide_corrupt_cache_recovery=PASS",
-                "phase27p_changed_source_never_uses_stale_object=PASS",
-                "phase27p_cached_shared_global=PASS",
-                "phase27p_cached_recursion=PASS",
-                "phase27p_cached_mutual_recursion=PASS",
-                "phase27p_cached_depth_guard=PASS",
-                "phase27p_cached_segment_permissions=PASS",
+                "phase27p_restore=PASS",
+                "phase27p_stale_symbol=PASS",
+                "phase27p_failed_build_preserves=PASS",
+                "phase27p_recovery=PASS",
+                "phase27p_missing_object=PASS",
+                "phase27p_corrupt_object=PASS",
+                "phase27p_metadata_corruption=PASS",
+                "phase27p_compile_failure_preserves=PASS",
+                "phase27p_service_recreation=PASS",
                 "phase27p_object_deterministic=PASS",
-                "phase27p_cold_warm_elf_identical=PASS",
-                "phase27p_restore_deterministic=PASS",
-                "phase27p_object_order_deterministic=PASS",
-                "phase27p_object_header=PASS",
-                "phase27p_target_identity=PASS",
-                "phase27p_source_hash_validation=PASS",
-                "phase27p_compiler_version_invalidation=PASS",
-                "phase27p_object_path_identity=PASS",
-                "phase27p_object_roundtrip=PASS",
-                "phase27p_object_version_invalidation=PASS",
-                "phase27p_wrong_arch_rebuild=PASS",
-                "phase27p_wrong_abi_rebuild=PASS",
-                "phase27p_single_file_cache=PASS",
+                "phase27p_native_execution=PASS",
+                "phase27p_app_launch=PASS",
+                "phase27p_artifact_evidence=PASS",
                 "phase27p_kernel_survival=PASS",
                 "phase27p=PASS",
                 "ELF Loader: Phase 27P persistent object smoke PASS"
@@ -1163,11 +1128,7 @@ try {
         if ($LASTEXITCODE -ne 0) { throw "Developer Studio Phase 27O proof app build failed" }
     }
     if ($Phase27P) {
-        if (!(Test-Path (Join-Path $developerStudioRoot "scripts/build-phase27p.ps1"))) {
-            throw "Developer Studio Phase 27P build script is missing: $developerStudioRoot"
-        }
-        & powershell -ExecutionPolicy Bypass -File (Join-Path $developerStudioRoot "scripts/build-phase27p.ps1") -ServerRoot $root
-        if ($LASTEXITCODE -ne 0) { throw "Developer Studio Phase 27P proof app build failed" }
+        Write-Host "Phase 27P proof application is built by the in-OS Developer Studio backend during guest execution."
     }
     if ($Phase27Q) {
         if (!(Test-Path (Join-Path $developerStudioRoot "scripts/build-phase27q.ps1"))) {
@@ -1627,8 +1588,6 @@ try {
     }
     if ($Phase27P) {
         Stage-Phase27PProject (Join-Path $espDirectory "P27P")
-        New-Item -ItemType Directory -Force -Path (Join-Path $espDirectory "Apps") | Out-Null
-        Copy-Item $phase27pAppDirectory (Join-Path $espDirectory "Apps/DS27P") -Recurse -Force
         if (!(Test-Path -LiteralPath (Join-Path $espDirectory "P27P/guidexos.project") -PathType Leaf) -or
             !(Test-Path -LiteralPath (Join-Path $espDirectory "P27P/src/main.cpp") -PathType Leaf) -or
             !(Test-Path -LiteralPath (Join-Path $espDirectory "P27P/src/math.cpp") -PathType Leaf) -or

@@ -419,7 +419,7 @@ static bool object_path_for_source(const char* root, const char* relative,
         if (relative[i] == '.') lastDot = i;
     for (uint32_t i = 0; i < relativeBytes; ++i) {
         if (lastDot != 0xFFFFFFFFU && i == lastDot) {
-            if (!append_text(output, capacity, ".gxo")) return false;
+            if (!append_text(output, capacity, ".o")) return false;
             break;
         }
         char one[2] = { relative[i], '\0' };
@@ -528,10 +528,6 @@ static void run_build_core(const gx_build_request* request)
             return;
         }
     }
-    if (vfs::exists(artifactPath) && vfs::unlink(artifactPath) != vfs::VFS_OK) {
-        failure(GX_BUILD_ERROR_ARTIFACT_INVALID, "stale artifact could not be removed");
-        return;
-    }
     s_job.snapshot.state = GX_BUILD_RUNNING;
     const char* sourcePaths[kMaxProjectSources] = {};
     const char* sourceIdentityPaths[kMaxProjectSources] = {};
@@ -570,6 +566,14 @@ static void run_build_core(const gx_build_request* request)
     s_job.snapshot.compiledModuleCount = summary.compiledModuleCount;
     s_job.snapshot.cachedModuleCount = summary.cachedModuleCount;
     s_job.snapshot.linkedModuleCount = summary.linkedModuleCount;
+    char counterLine[GX_BUILD_MAX_OUTPUT_LINE_BYTES] = {};
+    copy_text(counterLine, sizeof(counterLine), "Object counters: compiled=");
+    append_dec(counterLine, sizeof(counterLine), summary.compiledModuleCount);
+    append_text(counterLine, sizeof(counterLine), " reused=");
+    append_dec(counterLine, sizeof(counterLine), summary.cachedModuleCount);
+    append_text(counterLine, sizeof(counterLine), " sources=");
+    append_dec(counterLine, sizeof(counterLine), summary.sourceFileCount);
+    output_line(counterLine, 1);
     if (!compiled) {
         for (uint32_t i = 0; i < summary.diagnosticCount; ++i) {
             char line[GX_BUILD_MAX_OUTPUT_LINE_BYTES] = {};
