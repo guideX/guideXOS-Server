@@ -13,6 +13,7 @@
 #include "../compiler/compiler_object.h"
 #include "arch/amd64/compiler_backend.h"
 #include "kernel/serial_debug.h"
+#include "kernel/kernel_compositor.h"
 #include "kernel/vfs.h"
 
 namespace kernel {
@@ -20,7 +21,7 @@ namespace native_elf {
 namespace {
 
 static uint8_t s_invalidImage[guidexos::native_elf::MAX_ELF_FILE_BYTES];
-#if defined(GXOS_PHASE27G_SMOKE) || defined(GXOS_PHASE27H_SMOKE) || defined(GXOS_PHASE27I_SMOKE) || defined(GXOS_PHASE27J_SMOKE) || defined(GXOS_PHASE27K_SMOKE) || defined(GXOS_PHASE27L_SMOKE) || defined(GXOS_PHASE27M_SMOKE) || defined(GXOS_PHASE27P_SMOKE) || defined(GXOS_PHASE27R_SMOKE) || defined(GXOS_PHASE27S_SMOKE) || defined(GXOS_PHASE27T_SMOKE) || defined(GXOS_PHASE27U_SMOKE) || defined(GXOS_PHASE27V_SMOKE) || defined(GXOS_PHASE27W_SMOKE)
+#if defined(GXOS_PHASE27G_SMOKE) || defined(GXOS_PHASE27H_SMOKE) || defined(GXOS_PHASE27I_SMOKE) || defined(GXOS_PHASE27J_SMOKE) || defined(GXOS_PHASE27K_SMOKE) || defined(GXOS_PHASE27L_SMOKE) || defined(GXOS_PHASE27M_SMOKE) || defined(GXOS_PHASE27P_SMOKE) || defined(GXOS_PHASE27R_SMOKE) || defined(GXOS_PHASE27S_SMOKE) || defined(GXOS_PHASE27T_SMOKE) || defined(GXOS_PHASE27U_SMOKE) || defined(GXOS_PHASE27V_SMOKE) || defined(GXOS_PHASE27W_SMOKE) || defined(GXOS_PHASE27X_SMOKE)
 static uint8_t s_compareImage[guidexos::native_elf::MAX_ELF_FILE_BYTES];
 #endif
 
@@ -168,7 +169,7 @@ static bool emit_serial_artifact(const char* path, const char* name)
     return true;
 }
 
-#if defined(GXOS_PHASE27G_SMOKE) || defined(GXOS_PHASE27H_SMOKE) || defined(GXOS_PHASE27I_SMOKE) || defined(GXOS_PHASE27J_SMOKE) || defined(GXOS_PHASE27K_SMOKE) || defined(GXOS_PHASE27L_SMOKE) || defined(GXOS_PHASE27M_SMOKE) || defined(GXOS_PHASE27P_SMOKE) || defined(GXOS_PHASE27R_SMOKE) || defined(GXOS_PHASE27S_SMOKE) || defined(GXOS_PHASE27T_SMOKE) || defined(GXOS_PHASE27U_SMOKE) || defined(GXOS_PHASE27V_SMOKE) || defined(GXOS_PHASE27W_SMOKE)
+#if defined(GXOS_PHASE27G_SMOKE) || defined(GXOS_PHASE27H_SMOKE) || defined(GXOS_PHASE27I_SMOKE) || defined(GXOS_PHASE27J_SMOKE) || defined(GXOS_PHASE27K_SMOKE) || defined(GXOS_PHASE27L_SMOKE) || defined(GXOS_PHASE27M_SMOKE) || defined(GXOS_PHASE27P_SMOKE) || defined(GXOS_PHASE27R_SMOKE) || defined(GXOS_PHASE27S_SMOKE) || defined(GXOS_PHASE27T_SMOKE) || defined(GXOS_PHASE27U_SMOKE) || defined(GXOS_PHASE27V_SMOKE) || defined(GXOS_PHASE27W_SMOKE) || defined(GXOS_PHASE27X_SMOKE)
 static bool same_vfs_file_bytes(const char* leftPath, const char* rightPath)
 {
     vfs::FileInfo left = {};
@@ -392,6 +393,103 @@ static bool phase27w_reject_request(const gx_build_snapshot& build,
 static bool phase27w_failed_build_blocks_run(const gx_build_snapshot& build)
 {
     gx_development_run_request request = phase27w_run_request(build);
+    gx_development_run_handle handle = 0;
+    gx_development_run_snapshot snapshot = {};
+    snapshot.size = sizeof(snapshot);
+    const bool rejected = NativeElfRunService::prepare(request, &handle, &snapshot) == GX_OK &&
+        handle == 0 && snapshot.state == GX_DEVELOPMENT_RUN_FAILED &&
+        snapshot.errorCode == GX_DEVELOPMENT_RUN_ERROR_UNSUPPORTED_TARGET;
+    return rejected && !NativeElfDevelopmentAppModel::has_active_registration();
+}
+#endif
+
+#if defined(GXOS_PHASE27X_SMOKE)
+static bool run_phase27x_build(gx_build_snapshot* snapshot)
+{
+    gx_build_request request = {};
+    request.size = sizeof(request);
+    request.version = GX_BUILD_API_VERSION;
+    request.projectRoot = "/P27X";
+    request.projectId = "dev.guidexos.phase27x";
+    request.projectKind = "native-gui-application";
+    request.targetProfile = "guidexos.amd64.baremetal.bootstrap.native";
+    request.buildSystem = "guidexos-native-baremetal-bootstrap-v1";
+    request.buildScript = "";
+    request.expectedArtifact = "build/bin/amd64/p27x.elf";
+    request.configuration = "Debug";
+    gx_build_handle handle = 0;
+    if (compiler::BareMetalBuildService::start(&request, &handle) != GX_OK) return false;
+    gx_build_snapshot local = {};
+    const bool polled = compiler::BareMetalBuildService::poll(handle, &local) == GX_OK;
+    const bool released = compiler::BareMetalBuildService::release(handle) == GX_OK;
+    if (snapshot) *snapshot = local;
+    return polled && released;
+}
+
+static gx_development_run_request phase27x_run_request(const gx_build_snapshot& build)
+{
+    gx_development_run_request request = {};
+    request.size = sizeof(request);
+    request.version = GX_DEVELOPMENT_RUN_API_VERSION;
+    request.projectRoot = "/P27X";
+    request.projectId = "dev.guidexos.phase27x";
+    request.projectKind = "native-gui-application";
+    request.targetProfile = "guidexos.amd64.baremetal.bootstrap.native";
+    request.manifestPath = "app/app.json";
+    request.artifactPath = build.artifactPath;
+    request.artifactSha256 = build.artifactSha256;
+    request.flags = 0;
+    request.artifactSize = build.artifactSize;
+    request.artifactArchitecture = build.artifactArchitecture;
+    request.artifactAbi = "guidexos-c-abi-v1";
+    return request;
+}
+
+static bool run_phase27x_session(const gx_build_snapshot& build,
+                                 const char* expectedContent,
+                                 bool* deployed,
+                                 bool* running,
+                                 bool* closed,
+                                 bool* cleaned)
+{
+    if (deployed) *deployed = false;
+    if (running) *running = false;
+    if (closed) *closed = false;
+    if (cleaned) *cleaned = false;
+    gx_development_run_request request = phase27x_run_request(build);
+    gx_development_run_handle handle = 0;
+    gx_development_run_snapshot prepared = {};
+    prepared.size = sizeof(prepared);
+    if (NativeElfRunService::prepare(request, &handle, &prepared) != GX_OK || handle == 0) return false;
+    const bool registration = prepared.state == GX_DEVELOPMENT_RUN_REGISTERED &&
+        prepared.cleanupComplete == 0 && equal_text(prepared.applicationId, request.projectId);
+    if (deployed) *deployed = registration;
+
+    set_gui_automation_close(true);
+    const bool started = NativeElfRunService::start(handle) == GX_OK;
+    set_gui_automation_close(false);
+    gx_development_run_snapshot completed = {};
+    completed.size = sizeof(completed);
+    const bool polled = started && NativeElfRunService::poll(handle, &completed) == GX_OK;
+    NativeElfGuiRuntimeSnapshot gui = {};
+    const bool proof = polled && native_elf_gui_runtime_snapshot(&gui);
+    const bool livePump = proof && gui.rendered && gui.renderCount > 0 && gui.pumpCount >= 2;
+    const bool normalClose = proof && gui.applicationCreated && gui.windowCreated &&
+        gui.closedNormally && equal_text(gui.content, expectedContent) &&
+        gui.generation == static_cast<uint64_t>(handle) && gui.windowId != 0 &&
+        compositor::KernelCompositor::getWindow(gui.windowId) == nullptr &&
+        compositor::KernelCompositor::getWindowCount() == 0;
+    if (running) *running = livePump;
+    if (closed) *closed = normalClose;
+    const bool release = polled && NativeElfRunService::release(handle) == GX_OK;
+    if (cleaned) *cleaned = release && completed.cleanupComplete != 0 &&
+        !NativeElfDevelopmentAppModel::has_active_registration() && !gui.active;
+    return registration && livePump && normalClose && release;
+}
+
+static bool phase27x_failed_build_blocks_run(const gx_build_snapshot& build)
+{
+    gx_development_run_request request = phase27x_run_request(build);
     gx_development_run_handle handle = 0;
     gx_development_run_snapshot snapshot = {};
     snapshot.size = sizeof(snapshot);
@@ -2480,6 +2578,137 @@ void run_bootstrap_execution_smoke()
     serial::puts(phase27wPassed ?
         "ELF Loader: Phase 27W Run Project smoke PASS\nDEVELOPER_STUDIO_PHASE27W_PASS\n" :
         "ELF Loader: Phase 27W Run Project smoke FAIL\n");
+#endif
+#if defined(GXOS_PHASE27X_SMOKE)
+    serial::puts("ELF Loader: Phase 27X compiler-built GUI application smoke begin\n");
+    serial::puts("DEVELOPER_STUDIO_PHASE27X_BEGIN\n");
+    const char x27Header[] =
+        "extern int gx_window_create(int width, int height, char* title);\n"
+        "extern int gx_window_set_text(int window, char* text);\n"
+        "extern int gx_window_destroy(int window);\n"
+        "extern int gx_window_run(int window);\n"
+        "// declaration-set A\n";
+    const char x27HeaderEdited[] =
+        "extern int gx_window_create(int width, int height, char* title);\n"
+        "extern int gx_window_set_text(int window, char* text);\n"
+        "extern int gx_window_destroy(int window);\n"
+        "extern int gx_window_run(int window);\n"
+        "// declaration-set B\n";
+    const char x27HeaderBad[] =
+        "extern int gx_window_create(int width, int height, int title);\n"
+        "extern int gx_window_set_text(int window, char* text);\n"
+        "extern int gx_window_destroy(int window);\n"
+        "extern int gx_window_run(int window);\n";
+    const char x27Main27[] =
+        "#include \"guidexos_app.h\"\n"
+        "int gx_main(gx_app_context* ctx) { int window = gx_window_create(320, 180, \"Developer Studio Phase 27X\"); "
+        "if (window == 0) return -1; if (gx_window_set_text(window, \"27X GUI 27\") != 0) return -2; int result = gx_window_run(window); if (gx_window_destroy(window) != 0) return -3; return result; }\n";
+    const char x27Main28[] =
+        "#include \"guidexos_app.h\"\n"
+        "int gx_main(gx_app_context* ctx) { int window = gx_window_create(320, 180, \"Developer Studio Phase 27X\"); "
+        "if (window == 0) return -1; if (gx_window_set_text(window, \"27X GUI 28\") != 0) return -2; int result = gx_window_run(window); if (gx_window_destroy(window) != 0) return -3; return result; }\n";
+    const auto write_x27 = [](const char* path, const char* text) {
+        const bool written = path && text && vfs::write_file(path, text,
+            static_cast<uint32_t>(__builtin_strlen(text))) ==
+            static_cast<int32_t>(__builtin_strlen(text));
+        if (!written) {
+            serial::puts("phase27x_write_fail=");
+            serial::puts(path ? path : "<null>");
+            serial::puts("\n");
+        }
+        return written;
+    };
+    const bool fixture = write_x27("/P27X/include/guidexos_app.h", x27Header) &&
+        write_x27("/P27X/src/main.cpp", x27Main27);
+    static gx_build_snapshot x27Clean = {};
+    static gx_build_snapshot x27Warm = {};
+    static gx_build_snapshot x27Edited = {};
+    static gx_build_snapshot x27Failed = {};
+    static gx_build_snapshot x27Restored = {};
+    const bool cleanBuild = fixture && run_phase27x_build(&x27Clean) &&
+        x27Clean.state == GX_BUILD_SUCCEEDED && x27Clean.artifactValid != 0 &&
+        x27Clean.compiledModuleCount == 1 && x27Clean.cachedModuleCount == 0 &&
+        x27Clean.artifactSize != 0;
+    print_marker("phase27x_build_pass", cleanBuild);
+    if (cleanBuild) serial::puts("DEVELOPER_STUDIO_PHASE27X_BUILD_PASS\n");
+
+    bool firstDeploy = false;
+    bool firstRunning = false;
+    bool firstClose = false;
+    bool firstCleanup = false;
+    const bool firstRun = cleanBuild && run_phase27x_session(
+        x27Clean, "27X GUI 27", &firstDeploy, &firstRunning,
+        &firstClose, &firstCleanup);
+    print_marker("phase27x_deploy_pass", firstDeploy);
+    if (firstDeploy) serial::puts("DEVELOPER_STUDIO_PHASE27X_DEPLOY_PASS\n");
+    print_marker("phase27x_app_create_pass", firstRun);
+    if (firstRun) serial::puts("DEVELOPER_STUDIO_PHASE27X_APP_CREATE_PASS\n");
+    print_marker("phase27x_window_create_pass", firstRun);
+    if (firstRun) serial::puts("DEVELOPER_STUDIO_PHASE27X_WINDOW_CREATE_PASS\n");
+    print_marker("phase27x_render_27_pass", firstRun && firstClose);
+    if (firstRun && firstClose) serial::puts("DEVELOPER_STUDIO_PHASE27X_RENDER_27_PASS\n");
+    print_marker("phase27x_running_pass", firstRunning);
+    if (firstRunning) serial::puts("DEVELOPER_STUDIO_PHASE27X_RUNNING_PASS\n");
+    print_marker("phase27x_close_pass", firstClose);
+    if (firstClose) serial::puts("DEVELOPER_STUDIO_PHASE27X_CLOSE_PASS\n");
+    print_marker("phase27x_cleanup_pass", firstCleanup);
+    if (firstCleanup) serial::puts("DEVELOPER_STUDIO_PHASE27X_CLEANUP_PASS\n");
+
+    const bool warmBuild = firstRun && run_phase27x_build(&x27Warm) &&
+        x27Warm.state == GX_BUILD_SUCCEEDED && x27Warm.compiledModuleCount == 0 &&
+        x27Warm.cachedModuleCount == 1;
+    const bool editedFiles = warmBuild && write_x27("/P27X/include/guidexos_app.h", x27HeaderEdited) &&
+        write_x27("/P27X/src/main.cpp", x27Main28);
+    const bool editedBuild = editedFiles && run_phase27x_build(&x27Edited) &&
+        x27Edited.state == GX_BUILD_SUCCEEDED && x27Edited.artifactValid != 0 &&
+        x27Edited.compiledModuleCount == 1 && x27Edited.cachedModuleCount == 0 &&
+        !equal_text(x27Clean.artifactSha256, x27Edited.artifactSha256);
+    print_marker("phase27x_rebuild_pass", editedBuild);
+    if (editedBuild) serial::puts("DEVELOPER_STUDIO_PHASE27X_REBUILD_PASS\n");
+
+    bool secondDeploy = false;
+    bool secondRunning = false;
+    bool secondClose = false;
+    bool secondCleanup = false;
+    const bool secondRun = editedBuild && run_phase27x_session(
+        x27Edited, "27X GUI 28", &secondDeploy, &secondRunning,
+        &secondClose, &secondCleanup);
+    const bool rerun = secondRun && secondDeploy && secondRunning && secondClose && secondCleanup;
+    print_marker("phase27x_render_28_pass", secondRun && secondClose);
+    if (secondRun && secondClose) serial::puts("DEVELOPER_STUDIO_PHASE27X_RENDER_28_PASS\n");
+    print_marker("phase27x_rerun_pass", rerun);
+    if (rerun) serial::puts("DEVELOPER_STUDIO_PHASE27X_RERUN_PASS\n");
+
+    const bool badSource = secondRun && write_x27("/P27X/src/main.cpp",
+        "#include \"guidexos_app.h\"\nint gx_main(gx_app_context* ctx) { return ;\n");
+    const bool failedBuild = badSource && run_phase27x_build(&x27Failed) &&
+        x27Failed.state == GX_BUILD_FAILED && x27Failed.artifactValid == 0;
+    const bool staleRejected = failedBuild && phase27x_failed_build_blocks_run(x27Failed) &&
+        !NativeElfDevelopmentAppModel::has_active_registration();
+    print_marker("phase27x_stale_block_pass", staleRejected);
+    if (staleRejected) serial::puts("DEVELOPER_STUDIO_PHASE27X_STALE_BLOCK_PASS\n");
+
+    const bool badAbi = failedBuild && write_x27("/P27X/include/guidexos_app.h", x27HeaderBad) &&
+        write_x27("/P27X/src/main.cpp", x27Main27);
+    const bool negativeBuild = badAbi && run_phase27x_build(&x27Failed) &&
+        x27Failed.state == GX_BUILD_FAILED && x27Failed.artifactValid == 0 &&
+        phase27x_failed_build_blocks_run(x27Failed);
+    print_marker("phase27x_negative_pass", negativeBuild);
+    if (negativeBuild) serial::puts("DEVELOPER_STUDIO_PHASE27X_NEGATIVE_PASS\n");
+
+    const bool restoredFiles = negativeBuild && write_x27("/P27X/include/guidexos_app.h", x27HeaderEdited) &&
+        write_x27("/P27X/src/main.cpp", x27Main28);
+    const bool restoredBuild = restoredFiles && run_phase27x_build(&x27Restored) &&
+        x27Restored.state == GX_BUILD_SUCCEEDED && x27Restored.artifactValid != 0;
+    const bool xArtifactEvidence = restoredBuild &&
+        emit_serial_artifact("/P27X/build/bin/amd64/p27x.elf", "x27main");
+    const bool phase27xPassed = cleanBuild && firstRun && firstDeploy && firstRunning && firstClose && firstCleanup &&
+        warmBuild && editedBuild && secondRun && rerun && failedBuild && staleRejected && negativeBuild &&
+        restoredBuild && xArtifactEvidence && !NativeElfDevelopmentAppModel::has_active_registration();
+    print_marker("phase27x", phase27xPassed);
+    serial::puts(phase27xPassed ?
+        "ELF Loader: Phase 27X compiler-built GUI application smoke PASS\nDEVELOPER_STUDIO_PHASE27X_PASS\n" :
+        "ELF Loader: Phase 27X compiler-built GUI application smoke FAIL\n");
 #endif
 #if defined(GXOS_PHASE27G_SMOKE)
     serial::puts("ELF Loader: Phase 27G bootstrap language smoke begin\n");

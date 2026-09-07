@@ -1131,8 +1131,9 @@ private:
                            kind == ExpressionKind::PointerSubtractInteger)
             ? ValueType::Int32Pointer :
               (kind == ExpressionKind::LoadStructPointer ? ValueType::StructPointer :
-               (kind == ExpressionKind::LoadStructAddressLocal ||
-                kind == ExpressionKind::LoadStructAddressGlobal ? ValueType::StructValue : ValueType::Int32));
+              (kind == ExpressionKind::LoadStructAddressLocal ||
+               kind == ExpressionKind::LoadStructAddressGlobal ? ValueType::StructValue :
+               (kind == ExpressionKind::StringLiteral ? ValueType::StringPointer : ValueType::Int32)));
         expression.left = left;
         expression.right = right;
         expression.localIndex = localIndex;
@@ -1524,6 +1525,14 @@ private:
             if (!parse_integer(m_source, token, false, &value, m_diagnostics)) return COMPILER_INVALID_INDEX;
             return make_constant(value, token.location);
         }
+        if (token.kind == TokenKind::StringLiteral) {
+            ++(*m_index);
+            uint16_t stringIndex = COMPILER_INVALID_INDEX;
+            if (!add_string(token, &stringIndex)) return COMPILER_INVALID_INDEX;
+            return make_expression(ExpressionKind::StringLiteral, token.location,
+                                   COMPILER_INVALID_INDEX, COMPILER_INVALID_INDEX,
+                                   COMPILER_INVALID_INDEX, stringIndex);
+        }
         if (token_is_name(token)) {
             const bool call = *m_index + 1U < m_tokenCount && m_tokens[*m_index + 1U].kind == TokenKind::LeftParen;
             if (call) return parse_call(token, depth);
@@ -1583,10 +1592,14 @@ private:
                         m_output->expressions[expression].elementCount = parameter->structTypeIndex;
                     return expression;
                 }
-                return make_expression(parameter->kind == ParameterKind::Int32Pointer
-                                           ? ExpressionKind::LoadPointer : ExpressionKind::LoadLocal,
-                                       token.location, COMPILER_INVALID_INDEX, COMPILER_INVALID_INDEX,
-                                       parameter->slot, 0);
+                const uint16_t expression = make_expression(
+                    parameter->kind == ParameterKind::Int32Pointer
+                        ? ExpressionKind::LoadPointer : ExpressionKind::LoadLocal,
+                    token.location, COMPILER_INVALID_INDEX, COMPILER_INVALID_INDEX,
+                    parameter->slot, 0);
+                if (expression != COMPILER_INVALID_INDEX && parameter->kind == ParameterKind::StringPointer)
+                    m_output->expressions[expression].type = ValueType::StringPointer;
+                return expression;
             }
             if (local) {
                 if (local->kind == StorageKind::Struct) {
@@ -2431,9 +2444,10 @@ bool parse_translation_unit(const char* source, const Token* tokens, uint32_t to
                     }
                     const Token parameterType = tokens[token_index_or_eof(index, tokenCount)];
                     const bool structParameter = parameterType.kind == TokenKind::KeywordStruct;
-                    if (!structParameter && parameterType.kind != TokenKind::KeywordInt) {
+                    const bool stringPointerParameter = parameterType.kind == TokenKind::KeywordChar;
+                    if (!structParameter && !stringPointerParameter && parameterType.kind != TokenKind::KeywordInt) {
                         diagnostics.error(parameterType.location,
-                                          "ordinary functions accept only int or struct-pointer parameters", "parameter");
+                                          "ordinary functions accept only int, char*, or struct-pointer parameters", "parameter");
                         return false;
                     }
                     uint16_t structTypeIndex = COMPILER_INVALID_INDEX;
@@ -2466,6 +2480,11 @@ bool parse_translation_unit(const char* source, const Token* tokens, uint32_t to
                         ++index;
                     }
                     const bool pointerParameter = tokens[token_index_or_eof(index, tokenCount)].kind == TokenKind::Star;
+                    if (stringPointerParameter && !pointerParameter) {
+                        diagnostics.error(tokens[token_index_or_eof(index, tokenCount)].location,
+                                          "char parameters must be passed by pointer", "parameter");
+                        return false;
+                    }
                     if (pointerParameter) ++index;
                     const Token parameter = tokens[token_index_or_eof(index, tokenCount)];
                     const bool hasParameterName = token_is_name(parameter) && parameter.kind != TokenKind::KeywordGxMain;
@@ -2491,20 +2510,24 @@ bool parse_translation_unit(const char* source, const Token* tokens, uint32_t to
                         parameterSymbol = {};
                         for (uint32_t i = 0; i < parameter.length; ++i) parameterSymbol.name[i] = source[parameter.location.offset + i];
                         parameterSymbol.kind = structParameter ? ParameterKind::StructPointer :
-                            (pointerParameter ? ParameterKind::Int32Pointer : ParameterKind::Integer);
+                            (stringPointerParameter ? ParameterKind::StringPointer :
+                             (pointerParameter ? ParameterKind::Int32Pointer : ParameterKind::Integer));
                         parameterSymbol.structTypeIndex = structTypeIndex;
                         parameterSymbol.structTypeIdentity = structTypeIndex < output->structTypeCount
                             ? output->structTypes[structTypeIndex].identity : 0;
-                        const bool descriptorParameter = pointerParameter || structParameter;
+                        const bool descriptorParameter = (pointerParameter && !stringPointerParameter) || structParameter;
+                        const bool rawPointerParameter = stringPointerParameter;
                         uint32_t parameterStart = function.parameterStorageBytes;
                         if (descriptorParameter && (parameterStart & (COMPILER_POINTER_DESCRIPTOR_ALIGNMENT - 1U)) != 0)
                             parameterStart += COMPILER_POINTER_DESCRIPTOR_ALIGNMENT -
                                 (parameterStart & (COMPILER_POINTER_DESCRIPTOR_ALIGNMENT - 1U));
                         parameterSymbol.slot = static_cast<uint16_t>(parameterStart / 4U +
-                            (descriptorParameter ? COMPILER_POINTER_DESCRIPTOR_BYTES / 4U - 1U : 0U));
+                            (descriptorParameter ? COMPILER_POINTER_DESCRIPTOR_BYTES / 4U - 1U :
+                             (rawPointerParameter ? 1U : 0U)));
                         parameterSymbol.initialized = true;
                         function.parameterStorageBytes = parameterStart +
-                            (descriptorParameter ? COMPILER_POINTER_DESCRIPTOR_BYTES : 4U);
+                            (descriptorParameter ? COMPILER_POINTER_DESCRIPTOR_BYTES :
+                             (rawPointerParameter ? 8U : 4U));
                         if (pointerParameter || structParameter) ++function.pointerParameterCount;
                         else ++function.integerParameterCount;
                         ++index;
@@ -2653,19 +2676,33 @@ bool parse_translation_unit(const char* source, const Token* tokens, uint32_t to
                      (function.expressions[argument].type != ValueType::StructPointer ||
                       expression_struct_type_index(*output, function.expressions[argument]) == COMPILER_INVALID_INDEX ||
                       output->structTypes[expression_struct_type_index(*output, function.expressions[argument])].identity !=
-                          call.expectedParameterStructTypes[a]))) {
+                          call.expectedParameterStructTypes[a])) ||
+                    (expectedKind == ParameterKind::StringPointer &&
+                     function.expressions[argument].type != ValueType::StringPointer)) {
                     diagnostics.error(call.location,
                                       expectedKind == ParameterKind::Int32Pointer
                                           ? "function argument requires int*"
                                           : (expectedKind == ParameterKind::StructPointer
                                               ? "function argument requires a compatible struct pointer"
-                                              : "function argument requires int"),
+                                              : (expectedKind == ParameterKind::StringPointer
+                                                  ? "function argument requires char*"
+                                                  : "function argument requires int")),
                                       "type");
                     return false;
                 }
             }
             call.external = callee < 0;
             call.calleeFunction = callee < 0 ? COMPILER_INVALID_INDEX : static_cast<uint16_t>(callee);
+            if (call.external) {
+                const CompilerNativeAppCall nativeCall = compiler_native_app_call(call.calleeName);
+                if (nativeCall != CompilerNativeAppCall::None &&
+                    !compiler_native_app_signature_matches(nativeCall, call.expectedParameterCount,
+                                                           call.expectedParameterKinds)) {
+                    diagnostics.error(call.location,
+                                      "native application call has an incompatible ABI signature", "call");
+                    return false;
+                }
+            }
             if (callee >= 0 && !output->callGraph[i][callee]) {
                 if (output->callGraphEdgeCount >= COMPILER_MAX_CALL_GRAPH_EDGES) {
                     diagnostics.error(call.location, "call graph edge capacity exceeded", "call-graph");

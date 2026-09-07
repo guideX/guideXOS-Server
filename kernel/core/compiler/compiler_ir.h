@@ -73,7 +73,7 @@ static const uint32_t COMPILER_MAX_POINTER_TEMPORARY_SLOTS = COMPILER_MAX_PARAME
 // independent from the compiler phase number: changing object-producing
 // semantics requires incrementing COMPILER_OBJECT_ABI_VERSION.
 static const uint16_t COMPILER_OBJECT_FORMAT_VERSION = 2;
-static const uint16_t COMPILER_OBJECT_ABI_VERSION = 7;
+static const uint16_t COMPILER_OBJECT_ABI_VERSION = 8;
 static const uint32_t COMPILER_OBJECT_ARCH_AMD64 = 1;
 static const uint32_t COMPILER_OBJECT_TARGET_ABI_GUIDEXOS_C_V1 = 1;
 static const uint32_t COMPILER_MAX_OBJECT_BYTES = 131072;
@@ -116,6 +116,7 @@ enum class ExpressionKind : uint8_t {
     LoadIndirectInt32,
     PointerAdd,
     PointerSubtractInteger,
+    StringLiteral,
 };
 
 enum class ValueType : uint8_t {
@@ -123,6 +124,7 @@ enum class ValueType : uint8_t {
     Int32Pointer,
     StructValue,
     StructPointer,
+    StringPointer,
 };
 
 enum class PointerProvenanceKind : uint32_t {
@@ -244,6 +246,7 @@ enum class ParameterKind : uint8_t {
     Int32Pointer,
     AppContextPointer,
     StructPointer,
+    StringPointer,
 };
 
 struct ParameterSymbol {
@@ -420,7 +423,62 @@ inline bool storage_kind_is_struct(StorageKind kind)
 
 inline bool parameter_kind_is_pointer(ParameterKind kind)
 {
+    return kind == ParameterKind::Int32Pointer || kind == ParameterKind::StructPointer ||
+           kind == ParameterKind::StringPointer;
+}
+
+inline bool parameter_kind_is_descriptor_pointer(ParameterKind kind)
+{
     return kind == ParameterKind::Int32Pointer || kind == ParameterKind::StructPointer;
+}
+
+enum class CompilerNativeAppCall : uint8_t {
+    None,
+    WindowCreate,
+    WindowSetText,
+    WindowDestroy,
+    WindowRun,
+};
+
+inline bool compiler_name_equals(const char* left, const char* right)
+{
+    if (!left || !right) return false;
+    uint32_t i = 0;
+    while (left[i] || right[i]) {
+        if (left[i] != right[i]) return false;
+        ++i;
+    }
+    return true;
+}
+
+inline CompilerNativeAppCall compiler_native_app_call(const char* name)
+{
+    if (compiler_name_equals(name, "gx_window_create")) return CompilerNativeAppCall::WindowCreate;
+    if (compiler_name_equals(name, "gx_window_set_text")) return CompilerNativeAppCall::WindowSetText;
+    if (compiler_name_equals(name, "gx_window_destroy")) return CompilerNativeAppCall::WindowDestroy;
+    if (compiler_name_equals(name, "gx_window_run")) return CompilerNativeAppCall::WindowRun;
+    return CompilerNativeAppCall::None;
+}
+
+inline bool compiler_native_app_signature_matches(CompilerNativeAppCall call,
+                                                   uint16_t count,
+                                                   const ParameterKind* kinds)
+{
+    if (!kinds) return false;
+    switch (call) {
+    case CompilerNativeAppCall::WindowCreate:
+        return count == 3 && kinds[0] == ParameterKind::Integer &&
+               kinds[1] == ParameterKind::Integer && kinds[2] == ParameterKind::StringPointer;
+    case CompilerNativeAppCall::WindowSetText:
+        return count == 2 && kinds[0] == ParameterKind::Integer &&
+               kinds[1] == ParameterKind::StringPointer;
+    case CompilerNativeAppCall::WindowDestroy:
+    case CompilerNativeAppCall::WindowRun:
+        return count == 1 && kinds[0] == ParameterKind::Integer;
+    case CompilerNativeAppCall::None:
+        return false;
+    }
+    return false;
 }
 
 struct RelocationRecord {

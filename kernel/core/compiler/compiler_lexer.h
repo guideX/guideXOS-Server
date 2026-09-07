@@ -18,6 +18,7 @@ enum class TokenKind : uint8_t {
     Integer,
     StringLiteral,
     KeywordInt,
+    KeywordChar,
     KeywordStruct,
     KeywordGxMain,
     KeywordGxAppContext,

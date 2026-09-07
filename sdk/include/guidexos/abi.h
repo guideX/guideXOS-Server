@@ -160,6 +160,13 @@ typedef struct gx_host_calls {
     gx_result (GX_CALL *bare_metal_development_run_poll)(gx_app_context* ctx, gx_development_run_handle handle, gx_development_run_snapshot* outSnapshot);
     gx_result (GX_CALL *bare_metal_development_run_request_close)(gx_app_context* ctx, gx_development_run_handle handle);
     gx_result (GX_CALL *bare_metal_development_run_release)(gx_app_context* ctx, gx_development_run_handle handle);
+    /* Versioned compiler-facing NativeElf application surface. These calls
+     * deliberately hide compositor objects behind bounded integer handles;
+     * they are advertised only by runtimes that implement the surface. */
+    gx_handle (GX_CALL *native_window_create)(gx_app_context* ctx, int width, int height, const char* title);
+    gx_result (GX_CALL *native_window_set_text)(gx_app_context* ctx, gx_handle window, const char* text);
+    gx_result (GX_CALL *native_window_destroy)(gx_app_context* ctx, gx_handle window);
+    gx_result (GX_CALL *native_window_run)(gx_app_context* ctx, gx_handle window);
 } gx_host_calls;
 
 #ifdef __cplusplus

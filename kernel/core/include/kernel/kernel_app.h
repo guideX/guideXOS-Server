@@ -243,6 +243,11 @@ public:
     Widget* getWidget(int id);
     
 protected:
+    // Create the single window owned by this application. This is the common
+    // production path used by kernel applications and NativeElf bridges; it
+    // never exposes the compositor's internal window table to callers.
+    bool createWindow(int width, int height, const char* title,
+                      uint32_t flags = WF_VISIBLE | WF_TITLEBAR | WF_CLOSABLE);
     char m_name[MAX_APP_NAME];
     AppState m_state;
     KernelWindow* m_window;

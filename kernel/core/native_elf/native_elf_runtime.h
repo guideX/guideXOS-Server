@@ -126,6 +126,15 @@ static_assert(offsetof(gx_app_context, userData) == 16, "gx_app_context userData
 static_assert(sizeof(gx_app_context) == 24, "gx_app_context size changed");
 static_assert(offsetof(gx_host_calls, log) == 8, "gx_host_calls log offset changed");
 static_assert(offsetof(gx_host_calls, get_api_version) == 16, "gx_host_calls version offset changed");
+static_assert(offsetof(gx_host_calls, native_window_create) == 352,
+              "gx_host_calls native window create offset changed");
+static_assert(offsetof(gx_host_calls, native_window_set_text) == 360,
+              "gx_host_calls native window text offset changed");
+static_assert(offsetof(gx_host_calls, native_window_destroy) == 368,
+              "gx_host_calls native window destroy offset changed");
+static_assert(offsetof(gx_host_calls, native_window_run) == 376,
+              "gx_host_calls native window run offset changed");
+static_assert(sizeof(gx_host_calls) == 384, "gx_host_calls size changed");
 
 inline bool calculate_application_stack_layout(uint64_t base,
                                                uint64_t size,

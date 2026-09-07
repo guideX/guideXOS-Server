@@ -299,7 +299,7 @@ bool compile_module_from_source(const char* sourcePath,
         const FunctionIR& function = s_unit.functions[i];
         for (uint32_t c = 0; c < function.callCount; ++c) {
             const CallSite& call = function.calls[c];
-            if (!call.external) continue;
+            if (!call.external || compiler_native_app_call(call.calleeName) != CompilerNativeAppCall::None) continue;
             const int32_t existing = find_import(*module, call.calleeName);
             if (existing >= 0) {
                 bool sameSignature = module->imports[existing].expectedParameterCount == call.expectedParameterCount;

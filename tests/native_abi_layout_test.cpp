@@ -63,7 +63,11 @@ static_assert(offsetof(gx_host_calls, bare_metal_development_run_start) == 320, 
 static_assert(offsetof(gx_host_calls, bare_metal_development_run_poll) == 328, "bare-metal run poll slot changed");
 static_assert(offsetof(gx_host_calls, bare_metal_development_run_request_close) == 336, "bare-metal run close slot changed");
 static_assert(offsetof(gx_host_calls, bare_metal_development_run_release) == 344, "bare-metal run release slot changed");
-static_assert(sizeof(gx_host_calls) == 352, "gx_host_calls size changed");
+static_assert(offsetof(gx_host_calls, native_window_create) == 352, "native window create slot changed");
+static_assert(offsetof(gx_host_calls, native_window_set_text) == 360, "native window set text slot changed");
+static_assert(offsetof(gx_host_calls, native_window_destroy) == 368, "native window destroy slot changed");
+static_assert(offsetof(gx_host_calls, native_window_run) == 376, "native window run slot changed");
+static_assert(sizeof(gx_host_calls) == 384, "gx_host_calls size changed");
 static_assert(sizeof(gx_development_run_request) == 96, "development run request size changed");
 static_assert(offsetof(gx_development_run_request, projectRoot) == 8, "development run request project root offset changed");
 static_assert(offsetof(gx_development_run_request, artifactSha256) == 56, "development run request artifact hash offset changed");

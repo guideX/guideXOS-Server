@@ -86,3 +86,7 @@ manual validation.
 The bare-metal Developer Studio build/run extension, including its bounded
 temporary registration model and Phase 27W QEMU evidence, is documented in
 `docs/DEVELOPER_STUDIO_PHASE27W_RUN_PROJECT.md`.
+
+The compiler-built NativeElf GUI extension and its Phase 27X evidence are
+documented in
+`docs/DEVELOPER_STUDIO_PHASE27X_COMPILER_BUILT_GUI_APPLICATION.md`.

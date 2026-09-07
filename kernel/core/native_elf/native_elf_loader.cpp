@@ -9,8 +9,11 @@
 #include "native_elf_run_service.h"
 #include "arch/amd64.h"
 #include "kernel/desktop_font.h"
+#include "kernel/desktop.h"
 #include "kernel/framebuffer.h"
 #include "kernel/input_manager.h"
+#include "kernel/kernel_app.h"
+#include "kernel/kernel_compositor.h"
 #include "kernel/pit.h"
 #include "kernel/ps2keyboard.h"
 #include "kernel/serial_debug.h"
@@ -44,6 +47,161 @@ static uint64_t s_parentImagePtes[guidexos::native_elf::MAX_MAPPED_BYTES /
                                   guidexos::native_elf::PAGE_SIZE] = {};
 static uint32_t s_parentImagePteCount = 0;
 static NativeAppExecutionContext s_parentRuntime = {};
+static uint64_t s_developmentGeneration = 0;
+static char s_developmentApplicationId[GX_DEVELOPMENT_RUN_MAX_APP_ID_BYTES] = {};
+
+static bool s_guiApplicationCreated = false;
+static bool s_guiWindowCreated = false;
+static bool s_guiRendered = false;
+static bool s_guiClosedNormally = false;
+static bool s_guiCloseLifecycleRequested = false;
+static bool s_guiForcedCleanup = false;
+static bool s_guiAutomationClose = false;
+static bool s_guiRenderAnnounced = false;
+static uint32_t s_guiWindowId = 0;
+static uint32_t s_guiRenderCount = 0;
+static uint32_t s_guiPumpCount = 0;
+static uint64_t s_guiGeneration = 0;
+static uint64_t s_guiContentHash = 0;
+static uint64_t s_guiLastDestroyedWindow = 0;
+static char s_guiContent[256] = {};
+
+static uint64_t fnv1a_text(const char* text)
+{
+    uint64_t hash = 1469598103934665603ULL;
+    if (!text) return hash;
+    for (uint32_t i = 0; i < 255 && text[i] != '\0'; ++i) {
+        hash ^= static_cast<uint8_t>(text[i]);
+        hash *= 1099511628211ULL;
+    }
+    return hash;
+}
+
+static void copy_bounded_text(char* destination, uint32_t capacity, const char* source)
+{
+    if (!destination || capacity == 0) return;
+    uint32_t i = 0;
+    if (source) while (i + 1 < capacity && source[i] != '\0') {
+        destination[i] = source[i];
+        ++i;
+    }
+    destination[i] = '\0';
+}
+
+class NativeElfGuiApplication final : public app::KernelApp {
+public:
+    NativeElfGuiApplication() : m_label(-1) {
+        copy_bounded_text(m_name, sizeof(m_name),
+                          s_developmentApplicationId[0] ? s_developmentApplicationId : "NativeElf Development App");
+    }
+
+    bool init() override { return false; }
+
+    bool initialize(int width, int height, const char* title)
+    {
+        if (!createWindow(width, height, title)) return false;
+        m_label = addLabel(16, 30, width - 32, 32, "");
+        if (m_label < 0) {
+            requestClose();
+            return false;
+        }
+        return true;
+    }
+
+    void shutdown() override
+    {
+        if (s_guiCloseLifecycleRequested) s_guiClosedNormally = true;
+    }
+
+    void onWindowClose() override
+    {
+        // The close request reached the application-owned lifecycle before
+        // KernelApp releases its compositor window.
+        if (!s_guiForcedCleanup) s_guiCloseLifecycleRequested = true;
+    }
+
+    void draw(uint32_t, uint32_t, uint32_t, uint32_t) override
+    {
+        if (s_guiRenderCount != 0xFFFFFFFFU) ++s_guiRenderCount;
+        s_guiRendered = true;
+        s_guiContentHash = fnv1a_text(m_content);
+        if (!s_guiRenderAnnounced) {
+            serial::puts("NativeElf: compositor_render window=");
+            serial::put_hex32(s_guiWindowId);
+            serial::puts(" text=");
+            serial::puts(m_content);
+            serial::puts(" hash=fnv1a64:");
+            serial::put_hex64(s_guiContentHash);
+            serial::putc('\n');
+            s_guiRenderAnnounced = true;
+        }
+    }
+
+    bool setContent(const char* text)
+    {
+        if (!text || m_label < 0) return false;
+        copy_bounded_text(m_content, sizeof(m_content), text);
+        copy_bounded_text(s_guiContent, sizeof(s_guiContent), m_content);
+        setWidgetText(m_label, m_content);
+        s_guiContentHash = fnv1a_text(m_content);
+        return true;
+    }
+
+private:
+    int m_label;
+    char m_content[256] = {};
+};
+
+static NativeElfGuiApplication* s_guiApplication = nullptr;
+
+static void reset_gui_runtime()
+{
+    s_guiApplicationCreated = false;
+    s_guiWindowCreated = false;
+    s_guiRendered = false;
+    s_guiClosedNormally = false;
+    s_guiCloseLifecycleRequested = false;
+    s_guiForcedCleanup = false;
+    s_guiRenderAnnounced = false;
+    s_guiWindowId = 0;
+    s_guiRenderCount = 0;
+    s_guiPumpCount = 0;
+    s_guiGeneration = 0;
+    s_guiContentHash = fnv1a_text("");
+    s_guiLastDestroyedWindow = 0;
+    s_guiContent[0] = '\0';
+}
+
+static void destroy_native_gui()
+{
+    if (s_guiApplication) {
+        if (s_guiApplication->getWindow()) {
+            s_guiCloseLifecycleRequested = false;
+            s_guiForcedCleanup = true;
+            s_guiApplication->requestClose();
+            s_guiForcedCleanup = false;
+        }
+        delete s_guiApplication;
+        s_guiApplication = nullptr;
+    }
+    if (s_guiWindowId != 0) s_guiLastDestroyedWindow = s_guiWindowId;
+    s_guiWindowCreated = false;
+}
+
+static void copy_gui_proof(NativeElfRunReport* report)
+{
+    if (!report) return;
+    report->guiApplicationCreated = s_guiApplicationCreated;
+    report->guiWindowCreated = s_guiWindowCreated || s_guiWindowId != 0;
+    report->guiRendered = s_guiRendered;
+    report->guiClosedNormally = s_guiClosedNormally;
+    report->guiWindowId = s_guiWindowId;
+    report->guiRenderCount = s_guiRenderCount;
+    report->guiPumpCount = s_guiPumpCount;
+    report->guiGeneration = s_guiGeneration;
+    report->guiContentHash = s_guiContentHash;
+    copy_bounded_text(report->guiContent, sizeof(report->guiContent), s_guiContent);
+}
 
 struct NestedInvocation {
     const char* path;
@@ -233,7 +391,10 @@ static gx_result GX_CALL host_bare_file_remove(gx_app_context* context, const ch
 
 static bool native_window_valid(gx_app_context* context, gx_handle window)
 {
-    return app_context_valid(context) && window == 1;
+    return app_context_valid(context) && s_guiApplication &&
+        s_guiApplication->getWindow() && s_guiWindowCreated &&
+        window == static_cast<gx_handle>(s_guiWindowId) &&
+        s_guiApplication->getState() == app::AppState::Running;
 }
 
 static gx_result GX_CALL host_bare_request_window(gx_app_context* context, const char*, int width, int height, gx_handle* output)
@@ -318,6 +479,100 @@ static uint64_t GX_CALL host_bare_get_ticks_ms(gx_app_context* context)
     return app_context_valid(context) ? pit::ticks() * 10ULL : 0;
 }
 
+static void put_decimal_u64(uint64_t value);
+
+static gx_handle GX_CALL host_native_window_create(gx_app_context* context,
+                                                     int width,
+                                                     int height,
+                                                     const char* title)
+{
+    if (!app_context_valid(context) || s_guiApplication || width < 200 || height < 120 ||
+        width > 1024 || height > 768 || !title) return 0;
+
+    char localTitle[64] = {};
+    if (!app_string(title, localTitle, sizeof(localTitle))) return 0;
+    reset_gui_runtime();
+    s_guiApplication = new NativeElfGuiApplication();
+    if (!s_guiApplication || !s_guiApplication->initialize(width, height, localTitle)) {
+        delete s_guiApplication;
+        s_guiApplication = nullptr;
+        return 0;
+    }
+    s_guiApplicationCreated = true;
+    s_guiWindowCreated = true;
+    s_guiWindowId = s_guiApplication->getWindow()->id;
+    s_guiGeneration = s_developmentGeneration;
+    serial::puts("NativeElf: app_create generation=");
+    serial::put_hex64(s_guiGeneration);
+    serial::puts(" id=");
+    serial::puts(s_developmentApplicationId);
+    serial::putc('\n');
+    serial::puts("NativeElf: window_create id=");
+    serial::put_hex32(s_guiWindowId);
+    serial::puts(" width=");
+    put_decimal_u64(static_cast<uint32_t>(width));
+    serial::puts(" height=");
+    put_decimal_u64(static_cast<uint32_t>(height));
+    serial::putc('\n');
+    return static_cast<gx_handle>(s_guiWindowId);
+}
+
+static gx_result GX_CALL host_native_window_set_text(gx_app_context* context,
+                                                      gx_handle window,
+                                                      const char* text)
+{
+    if (!native_window_valid(context, window) || !text) return GX_ERROR_INVALID_ARGUMENT;
+    char localText[256] = {};
+    if (!app_string(text, localText, sizeof(localText))) return GX_ERROR_INVALID_ARGUMENT;
+    return s_guiApplication->setContent(localText) ? GX_OK : GX_ERROR_FAILED;
+}
+
+static gx_result GX_CALL host_native_window_destroy(gx_app_context* context,
+                                                     gx_handle window)
+{
+    if (!app_context_valid(context)) return GX_ERROR_PERMISSION_DENIED;
+    if (!s_guiWindowCreated && window == static_cast<gx_handle>(s_guiLastDestroyedWindow)) return GX_OK;
+    if (!native_window_valid(context, window)) return GX_ERROR_INVALID_ARGUMENT;
+    destroy_native_gui();
+    return GX_OK;
+}
+
+static gx_result GX_CALL host_native_window_run(gx_app_context* context,
+                                                 gx_handle window)
+{
+    if (!native_window_valid(context, window)) return GX_ERROR_INVALID_ARGUMENT;
+
+    // This is the same desktop/compositor path used by the kernel's main
+    // loop.  The NativeElf call remains synchronous, but it yields between
+    // pumps so input, compositor repaint, and scheduler bookkeeping proceed.
+    desktop::draw();
+    while (native_window_valid(context, window)) {
+        desktop::cooperative_yield();
+        desktop::tick();
+        if (s_guiPumpCount != 0xFFFFFFFFU) ++s_guiPumpCount;
+
+        if (s_guiAutomationClose && s_guiRendered && s_guiPumpCount >= 2) {
+            s_guiCloseLifecycleRequested = true;
+            serial::puts("NativeElf: close_request id=");
+            serial::put_hex32(s_guiWindowId);
+            serial::putc('\n');
+            if (!compositor::KernelCompositor::requestCloseWindow(s_guiWindowId)) {
+                return GX_ERROR_FAILED;
+            }
+            // KernelApp has completed the normal close callback and released
+            // the compositor window. Keep the generation's handle tombstone
+            // so a repeated destroy is an idempotent, bounded operation.
+            s_guiLastDestroyedWindow = s_guiWindowId;
+            s_guiWindowCreated = false;
+        }
+        if (!native_window_valid(context, window)) break;
+        arch::halt();
+    }
+    serial::puts(s_guiClosedNormally ? "NativeElf: close_complete normal\n"
+                                     : "NativeElf: close_complete abnormal\n");
+    return s_guiClosedNormally ? GX_OK : GX_ERROR_FAILED;
+}
+
 static gx_result GX_CALL host_bare_build_start(gx_app_context* context, const gx_build_request* request, gx_build_handle* output)
 {
     if (!app_context_valid(context) || !request || !output || !app_pointer_range(request, sizeof(*request)) || !app_pointer_range(output, sizeof(*output))) return GX_ERROR_PERMISSION_DENIED;
@@ -349,6 +604,7 @@ static gx_result GX_CALL host_bare_build_release(gx_app_context* context, gx_bui
 }
 
 static void copy_bytes(uint8_t* destination, const uint8_t* source, uint64_t count);
+static void put_decimal_u64(uint64_t value);
 
 static bool copy_run_snapshot_to_app(const gx_development_run_snapshot& source,
                                      gx_development_run_snapshot* destination)
@@ -534,6 +790,10 @@ static void initialize_app_context()
     s_appRuntime.hostCalls.bare_metal_development_run_poll = host_bare_run_poll;
     s_appRuntime.hostCalls.bare_metal_development_run_request_close = host_bare_run_request_close;
     s_appRuntime.hostCalls.bare_metal_development_run_release = host_bare_run_release;
+    s_appRuntime.hostCalls.native_window_create = host_native_window_create;
+    s_appRuntime.hostCalls.native_window_set_text = host_native_window_set_text;
+    s_appRuntime.hostCalls.native_window_destroy = host_native_window_destroy;
+    s_appRuntime.hostCalls.native_window_run = host_native_window_run;
 
     s_appRuntime.appContext = {};
     s_appRuntime.appContext.size = sizeof(gx_app_context);
@@ -545,6 +805,8 @@ static void initialize_app_context()
 static bool teardown_application(NativeElfRunReport* report)
 {
     bool clean = true;
+    copy_gui_proof(report);
+    destroy_native_gui();
     if (s_appRuntime.imageBase != 0 && s_appRuntime.imageSize != 0) {
         uint64_t imageEnd = 0;
         if (s_appRuntime.imageBase > ~static_cast<uint64_t>(0) - s_appRuntime.imageSize) {
@@ -758,6 +1020,47 @@ bool execution_context_configured()
     return s_contextConfigured;
 }
 
+bool configure_development_identity(uint64_t generation, const char* applicationId)
+{
+    if (generation == 0 || !applicationId) return false;
+    uint32_t i = 0;
+    for (; i + 1 < GX_DEVELOPMENT_RUN_MAX_APP_ID_BYTES && applicationId[i] != '\0'; ++i) {}
+    if (applicationId[i] != '\0') return false;
+    s_developmentGeneration = generation;
+    copy_bounded_text(s_developmentApplicationId,
+                      sizeof(s_developmentApplicationId), applicationId);
+    return true;
+}
+
+void clear_development_identity()
+{
+    s_developmentGeneration = 0;
+    s_developmentApplicationId[0] = '\0';
+}
+
+void set_gui_automation_close(bool enabled)
+{
+    s_guiAutomationClose = enabled;
+}
+
+bool native_elf_gui_runtime_snapshot(NativeElfGuiRuntimeSnapshot* output)
+{
+    if (!output) return false;
+    *output = {};
+    output->active = s_guiApplication && s_guiApplication->getWindow() != nullptr;
+    output->applicationCreated = s_guiApplicationCreated;
+    output->windowCreated = s_guiWindowCreated || s_guiWindowId != 0;
+    output->rendered = s_guiRendered;
+    output->closedNormally = s_guiClosedNormally;
+    output->windowId = s_guiWindowId;
+    output->renderCount = s_guiRenderCount;
+    output->pumpCount = s_guiPumpCount;
+    output->generation = s_guiGeneration;
+    output->contentHash = s_guiContentHash;
+    copy_bounded_text(output->content, sizeof(output->content), s_guiContent);
+    return true;
+}
+
 static bool run_file_internal(const char* path,
                               int32_t* returnValue,
                               NativeElfRunReport* report,
@@ -778,6 +1081,7 @@ static bool run_file_internal(const char* path,
     }
     s_appRuntime = {};
     s_appRuntime.state = NativeAppExecutionState::Empty;
+    reset_gui_runtime();
 
     serial::puts("ELF Loader: file=");
     serial::puts(path);

@@ -153,6 +153,10 @@ struct NativeHostCallTable {
     gx_result (*bare_metal_development_run_poll)(NativeGxAppContext* ctx, gx_development_run_handle handle, gx_development_run_snapshot* outSnapshot) = nullptr;
     gx_result (*bare_metal_development_run_request_close)(NativeGxAppContext* ctx, gx_development_run_handle handle) = nullptr;
     gx_result (*bare_metal_development_run_release)(NativeGxAppContext* ctx, gx_development_run_handle handle) = nullptr;
+    gx_handle (*native_window_create)(NativeGxAppContext* ctx, int width, int height, const char* title) = nullptr;
+    gx_result (*native_window_set_text)(NativeGxAppContext* ctx, gx_handle window, const char* text) = nullptr;
+    gx_result (*native_window_destroy)(NativeGxAppContext* ctx, gx_handle window) = nullptr;
+    gx_result (*native_window_run)(NativeGxAppContext* ctx, gx_handle window) = nullptr;
 };
 
 static_assert(offsetof(NativeHostCallTable, log) == 8, "native ABI log slot changed");
@@ -193,7 +197,11 @@ static_assert(offsetof(NativeHostCallTable, bare_metal_development_run_start) ==
 static_assert(offsetof(NativeHostCallTable, bare_metal_development_run_poll) == 328, "native ABI bare-metal run poll slot changed");
 static_assert(offsetof(NativeHostCallTable, bare_metal_development_run_request_close) == 336, "native ABI bare-metal run close slot changed");
 static_assert(offsetof(NativeHostCallTable, bare_metal_development_run_release) == 344, "native ABI bare-metal run release slot changed");
-static_assert(sizeof(NativeHostCallTable) == 352, "native ABI host call table size changed");
+static_assert(offsetof(NativeHostCallTable, native_window_create) == 352, "native ABI native window create slot changed");
+static_assert(offsetof(NativeHostCallTable, native_window_set_text) == 360, "native ABI native window set text slot changed");
+static_assert(offsetof(NativeHostCallTable, native_window_destroy) == 368, "native ABI native window destroy slot changed");
+static_assert(offsetof(NativeHostCallTable, native_window_run) == 376, "native ABI native window run slot changed");
+static_assert(sizeof(NativeHostCallTable) == 384, "native ABI host call table size changed");
 
 enum class NativeAppLifecycleState {
     Created = 0,

@@ -558,6 +558,12 @@ gx_result start(gx_development_run_handle handle) {
         return GX_OK;
     }
     s_operation.state = GX_DEVELOPMENT_RUN_LAUNCHING;
+    if (!configure_development_identity(s_operation.registrationGeneration,
+                                        s_operation.applicationId)) {
+        fail_and_cleanup(s_operation, GX_DEVELOPMENT_RUN_ERROR_INTERNAL,
+                         "NativeElf development identity could not be bound");
+        return GX_OK;
+    }
     s_operation.state = GX_DEVELOPMENT_RUN_RUNNING;
     s_operation.report = NativeElfRunReport();
     s_operation.nativeRuntimeStarted = true;
@@ -569,6 +575,7 @@ gx_result start(gx_development_run_handle handle) {
     const bool success = native_elf_execution_active()
         ? run_file_nested(s_operation.resolvedArtifact, &s_operation.exitCode, &s_operation.report)
         : run_file(s_operation.resolvedArtifact, &s_operation.exitCode, &s_operation.report);
+    clear_development_identity();
     if (!success) {
         const gx_development_run_error_code error = s_operation.report.runtimeStatus == NativeRuntimeStatus::CallDepthExceeded
             ? GX_DEVELOPMENT_RUN_ERROR_CALL_DEPTH_EXCEEDED

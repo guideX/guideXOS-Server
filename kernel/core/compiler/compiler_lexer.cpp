@@ -33,6 +33,7 @@ static bool text_equals(const char* source, uint32_t offset, uint32_t length, co
 static TokenKind identifier_kind(const char* source, uint32_t offset, uint32_t length)
 {
     if (text_equals(source, offset, length, "int")) return TokenKind::KeywordInt;
+    if (text_equals(source, offset, length, "char")) return TokenKind::KeywordChar;
     if (text_equals(source, offset, length, "struct")) return TokenKind::KeywordStruct;
     if (text_equals(source, offset, length, "gx_main")) return TokenKind::KeywordGxMain;
     if (text_equals(source, offset, length, "gx_app_context")) return TokenKind::KeywordGxAppContext;
@@ -90,6 +91,7 @@ const char* token_kind_name(TokenKind kind)
         case TokenKind::Integer: return "integer-literal";
         case TokenKind::StringLiteral: return "string-literal";
         case TokenKind::KeywordInt: return "'int'";
+        case TokenKind::KeywordChar: return "'char'";
         case TokenKind::KeywordStruct: return "'struct'";
         case TokenKind::KeywordGxMain: return "'gx_main'";
         case TokenKind::KeywordGxAppContext: return "'gx_app_context'";

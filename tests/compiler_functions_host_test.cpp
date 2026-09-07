@@ -338,6 +338,7 @@ static bool test_diagnostics_and_limits()
             "int bad(int a, int b, int c, int d, int e) { return a; } int gx_main(gx_app_context* ctx) { return 0; }",
             "function parameter limit exceeded"), "parameter capacity rejection")) return false;
 
+    Diagnostics diagnostics;
     std::string tooManyFunctions;
     for (uint32_t i = 0; i < COMPILER_MAX_FUNCTIONS; ++i) {
         char name[32] = {};
@@ -348,8 +349,25 @@ static bool test_diagnostics_and_limits()
     if (!require(expect_rejected(tooManyFunctions.c_str(), "function capacity exceeded"),
                  "function-table capacity rejection")) return false;
 
+    const char* nativeGui =
+        "extern int gx_window_create(int width, int height, char* title);\n"
+        "extern int gx_window_set_text(int window, char* text);\n"
+        "extern int gx_window_run(int window);\n"
+        "int gx_main(gx_app_context* ctx) { int window = gx_window_create(320, 180, \"27X GUI 27\"); "
+        "if (window == 0) { return 1; } return gx_window_set_text(window, \"27X GUI 27\") + gx_window_run(window); }\n";
+    if (!require(compile_unit(nativeGui, &g_first, &diagnostics),
+                 "compiler-facing native GUI declarations compile")) return false;
+    const uint8_t nativeWindowLoad[] = {0x48, 0x8B, 0x80, 0x60, 0x01, 0x00, 0x00};
+    if (!require(g_first.unit.functions[g_first.unit.entryFunction].callCount == 3 &&
+                 contains_bytes(g_first, nativeWindowLoad, sizeof(nativeWindowLoad)),
+                 "native GUI calls load the versioned host table instead of external symbols")) return false;
+    if (!require(expect_rejected(
+            "extern int gx_window_create(int width, int height, int title);\n"
+            "int gx_main(gx_app_context* ctx) { return gx_window_create(320, 180, 1); }",
+            "native application call has an incompatible ABI signature"),
+                 "incompatible native GUI ABI is rejected by the compiler")) return false;
+
     const char* valid = "int answer() { return 42; } int gx_main(gx_app_context* ctx) { return answer(); }";
-    Diagnostics diagnostics;
     if (!require(compile_unit(valid, &g_first, &diagnostics), "valid source for output-capacity test")) return false;
     uint8_t tiny[8] = {};
     uint32_t tinyBytes = 0;

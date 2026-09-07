@@ -68,6 +68,30 @@ KernelApp::~KernelApp() {
     }
 }
 
+bool KernelApp::createWindow(int width, int height, const char* title, uint32_t flags) {
+    if (m_window || !title || width < compositor::MIN_WINDOW_WIDTH ||
+        height < compositor::MIN_WINDOW_HEIGHT || width > 1024 || height > 768) {
+        return false;
+    }
+    KernelWindow* window = new KernelWindow();
+    if (!window) return false;
+    window->w = width;
+    window->h = height;
+    window->x = 48;
+    window->y = 48;
+    window->flags = flags;
+    window->owner = this;
+    strcopy(window->title, title, MAX_TITLE_LEN);
+    if (!compositor::KernelCompositor::registerWindow(window)) {
+        delete window;
+        return false;
+    }
+    m_window = window;
+    m_state = AppState::Running;
+    desktop_request_redraw();
+    return true;
+}
+
 void KernelApp::setTitle(const char* title) {
     if (m_window && title) {
         strcopy(m_window->title, title, MAX_TITLE_LEN);

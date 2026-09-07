@@ -55,12 +55,14 @@ public:
     Emitter(uint8_t* output, uint32_t capacity,
             RelocationRecord* relocations = nullptr,
             uint32_t relocationCapacity = 0,
-            uint32_t* relocationCount = nullptr)
+            uint32_t* relocationCount = nullptr,
+            uint64_t readOnlyDataAddress = 0)
         : m_output(output), m_capacity(capacity), m_offset(0), m_labelCount(0), m_fixupCount(0),
           m_loopDepth(0), m_rspMod16(8), m_temporaryDepth(0), m_maxTemporaryDepth(0),
           m_pointerTemporaryDepth(0), m_maxPointerTemporaryDepth(0),
           m_transientBytes(0), m_maxTransientBytes(0), m_relocations(relocations),
-          m_relocationCapacity(relocationCapacity), m_relocationCount(relocationCount)
+          m_relocationCapacity(relocationCapacity), m_relocationCount(relocationCount),
+          m_readOnlyDataAddress(readOnlyDataAddress)
     {
         for (uint32_t i = 0; i < COMPILER_MAX_BRANCH_LABELS; ++i) m_labels[i] = {};
         for (uint32_t i = 0; i < COMPILER_MAX_BRANCH_FIXUPS; ++i) m_fixups[i] = {};
@@ -156,6 +158,7 @@ public:
         if (reg < 8) return byte(0x48) && byte(0x89) && byte(static_cast<uint8_t>(0xC0U | (reg << 3)));
         return byte(0x4C) && byte(0x89) && byte(static_cast<uint8_t>(0xC0U | ((reg - 8U) << 3)));
     }
+    bool mov_rax_rdx() { static const uint8_t v[] = {0x48, 0x89, 0xD0}; return bytes(v, sizeof(v)); }
     bool lea_rax_local(int32_t displacement)
     {
         return bytes(reinterpret_cast<const uint8_t*>("\x48\x8D\x85"), 3) &&
@@ -233,6 +236,13 @@ public:
         static const uint8_t first[] = {0x48, 0x8B, 0x41, static_cast<uint8_t>(offsetof(gx_app_context, host))};
         static const uint8_t second[] = {0x48, 0x8B, 0x40, static_cast<uint8_t>(offsetof(gx_host_calls, log))};
         return bytes(first, sizeof(first)) && bytes(second, sizeof(second));
+    }
+    bool load_host_call(uint32_t offset)
+    {
+        if (!bytes(reinterpret_cast<const uint8_t*>("\x48\x8B\x41\x08"), 4)) return false;
+        if (offset <= 127U)
+            return bytes(reinterpret_cast<const uint8_t*>("\x48\x8B\x40"), 3) && byte(static_cast<uint8_t>(offset));
+        return bytes(reinterpret_cast<const uint8_t*>("\x48\x8B\x80"), 3) && u32(offset);
     }
     bool add_eax_ecx() { static const uint8_t v[] = {0x01, 0xC8}; return bytes(v, sizeof(v)); }
     bool sub_eax_ecx() { static const uint8_t v[] = {0x29, 0xC8}; return bytes(v, sizeof(v)); }
@@ -561,6 +571,11 @@ public:
         relocation.location = location;
         return true;
     }
+    bool emit_string_address(uint32_t dataOffset, SourceLocation location)
+    {
+        if (m_readOnlyDataAddress != 0) return mov_rdx_imm64(m_readOnlyDataAddress + dataOffset);
+        return emit_data_address(dataOffset, location);
+    }
     bool emit_global_data_address(const char* name, SourceLocation location)
     {
         if (!name || !m_relocations || !m_relocationCount ||
@@ -618,6 +633,7 @@ private:
     RelocationRecord* m_relocations;
     uint32_t m_relocationCapacity;
     uint32_t* m_relocationCount;
+    uint64_t m_readOnlyDataAddress;
     BranchLabel m_labels[COMPILER_MAX_BRANCH_LABELS];
     BranchFixup m_fixups[COMPILER_MAX_BRANCH_FIXUPS];
     LoopTarget m_loopStack[COMPILER_MAX_LOOP_TARGET_DEPTH] = {};
@@ -718,6 +734,7 @@ static bool required_temporary_slots(const FunctionIR& function, uint16_t index,
         return true;
     }
     if (expression.kind == ExpressionKind::Constant ||
+        expression.kind == ExpressionKind::StringLiteral ||
         expression.kind == ExpressionKind::LoadLocal ||
         expression.kind == ExpressionKind::LoadGlobal ||
         expression.kind == ExpressionKind::LoadPointer ||
@@ -749,6 +766,7 @@ static bool required_transient_stack_bytes(const FunctionIR& function, uint16_t 
         depth > COMPILER_MAX_EXPRESSION_NODES) return false;
     const Expression& expression = function.expressions[index];
     if (expression.kind == ExpressionKind::Constant ||
+        expression.kind == ExpressionKind::StringLiteral ||
         expression.kind == ExpressionKind::LoadLocal ||
         expression.kind == ExpressionKind::LoadGlobal ||
         expression.kind == ExpressionKind::LoadPointer ||
@@ -801,6 +819,7 @@ static bool required_pointer_temporary_slots(const FunctionIR& function, uint16_
     const Expression& expression = function.expressions[index];
     *output = 0;
     if (expression.kind == ExpressionKind::Constant ||
+        expression.kind == ExpressionKind::StringLiteral ||
         expression.kind == ExpressionKind::LoadLocal ||
         expression.kind == ExpressionKind::LoadGlobal ||
         expression.kind == ExpressionKind::LoadPointer ||
@@ -1390,9 +1409,11 @@ static bool emit_expression_value(Emitter& emitter, const TranslationUnitIR& uni
                                        function.callArguments[call.argumentStart + i],
                                        epilogueLabel, callFailureLabel,
                                        &argumentPointerSlot)) return false;
-            if (parameter_kind_is_pointer(call.expectedParameterKinds[i])) {
+            if (parameter_kind_is_descriptor_pointer(call.expectedParameterKinds[i])) {
                 if (!emit_copy_pointer_descriptor(emitter,
                         pointer_temporary_displacement(frame, pointerBase + pointerArgumentIndex++))) return false;
+            } else if (call.expectedParameterKinds[i] == ParameterKind::StringPointer) {
+                if (!emitter.mov_local_rax64(pointer_temporary_displacement(frame, pointerBase + pointerArgumentIndex++))) return false;
             } else if (!emitter.mov_local_eax(temporary_displacement(frame, static_cast<uint16_t>(base + i)))) {
                 return false;
             }
@@ -1400,12 +1421,20 @@ static bool emit_expression_value(Emitter& emitter, const TranslationUnitIR& uni
                 !emitter.release_pointer_temporary_slots(1)) return false;
         }
         static const uint8_t argumentRegisters[] = {1, 2, 8, 9}; // ECX, EDX, R8D, R9D
+        const CompilerNativeAppCall nativeCall = call.external
+            ? compiler_native_app_call(call.calleeName) : CompilerNativeAppCall::None;
+        static const uint8_t nativeArgumentRegisters[] = {2, 8, 9}; // context occupies RCX
         pointerArgumentIndex = 0;
         for (uint32_t i = 0; i < call.argumentCount; ++i) {
-            if (parameter_kind_is_pointer(call.expectedParameterKinds[i])) {
-                if (!emitter.lea_reg_local64(argumentRegisters[i],
+            const uint8_t registerIndex = nativeCall != CompilerNativeAppCall::None
+                ? nativeArgumentRegisters[i] : argumentRegisters[i];
+            if (parameter_kind_is_descriptor_pointer(call.expectedParameterKinds[i])) {
+                if (!emitter.lea_reg_local64(registerIndex,
                         pointer_temporary_displacement(frame, pointerBase + pointerArgumentIndex++))) return false;
-            } else if (!emitter.mov_reg_mem32(argumentRegisters[i],
+            } else if (call.expectedParameterKinds[i] == ParameterKind::StringPointer) {
+                if (!emitter.mov_reg_mem64(registerIndex,
+                        pointer_temporary_displacement(frame, pointerBase + pointerArgumentIndex++))) return false;
+            } else if (!emitter.mov_reg_mem32(registerIndex,
                        temporary_displacement(frame, static_cast<uint16_t>(base + i)))) return false;
         }
         if (callFailureLabel == COMPILER_INVALID_INDEX || epilogueLabel == COMPILER_INVALID_INDEX) return false;
@@ -1413,7 +1442,17 @@ static bool emit_expression_value(Emitter& emitter, const TranslationUnitIR& uni
         if (!emitter.cmp_r14d_imm32(COMPILER_MAX_RUNTIME_CALL_DEPTH) ||
             !emitter.emit_jae(callFailureLabel) || !emitter.inc_r14d() ||
             !emitter.sub_rsp(reserve)) return false;
-        if (call.external) {
+        if (nativeCall != CompilerNativeAppCall::None) {
+            if (call.argumentCount > 3 || !emitter.mov_rcx_context_local(frame.contextDisplacement)) return false;
+            const uint32_t hostOffset = nativeCall == CompilerNativeAppCall::WindowCreate
+                ? static_cast<uint32_t>(offsetof(gx_host_calls, native_window_create))
+                : (nativeCall == CompilerNativeAppCall::WindowSetText
+                    ? static_cast<uint32_t>(offsetof(gx_host_calls, native_window_set_text))
+                    : (nativeCall == CompilerNativeAppCall::WindowDestroy
+                        ? static_cast<uint32_t>(offsetof(gx_host_calls, native_window_destroy))
+                        : static_cast<uint32_t>(offsetof(gx_host_calls, native_window_run))));
+            if (!emitter.load_host_call(hostOffset) || !emitter.call_rax()) return false;
+        } else if (call.external) {
             if (!emitter.emit_call_external(call.calleeName, call.location)) return false;
         } else if (!emitter.emit_call(functionLabels[call.calleeFunction])) {
             return false;
@@ -1426,14 +1465,23 @@ static bool emit_expression_value(Emitter& emitter, const TranslationUnitIR& uni
     switch (expression.kind) {
         case ExpressionKind::Constant:
             return emitter.mov_eax_imm32(static_cast<uint32_t>(expression.value));
+        case ExpressionKind::StringLiteral:
+            if (static_cast<uint32_t>(expression.value) >= function.stringCount) return false;
+            return emitter.emit_string_address(
+                function.dataOffset + function.stringOffsets[static_cast<uint32_t>(expression.value)],
+                expression.location) && emitter.mov_rax_rdx();
         case ExpressionKind::LoadLocal:
             if (expression.localIndex >= function.parameterStorageBytes / 4U + function.localStorageBytes / 4U) return false;
+            for (uint32_t p = 0; p < function.parameterCount; ++p)
+                if (function.parameters[p].slot == expression.localIndex &&
+                    function.parameters[p].kind == ParameterKind::StringPointer)
+                    return emitter.mov_rax_local(local_displacement(expression.localIndex));
             return emitter.mov_eax_local(local_displacement(expression.localIndex));
         case ExpressionKind::LoadPointer: {
             bool pointerSlot = false;
             for (uint32_t p = 0; p < function.parameterCount; ++p)
                 if (function.parameters[p].slot == expression.localIndex &&
-                    parameter_kind_is_pointer(function.parameters[p].kind)) pointerSlot = true;
+                    parameter_kind_is_descriptor_pointer(function.parameters[p].kind)) pointerSlot = true;
             for (uint32_t l = 0; l < function.localCount; ++l)
                 if (function.locals[l].slot == expression.localIndex &&
                     (function.locals[l].kind == StorageKind::PointerInt ||
@@ -1920,7 +1968,8 @@ static bool emit_translation_unit_impl(const TranslationUnitIR& unit, uint64_t r
                                     function.stringCount == 0 || logs == 0)) return false;
     }
 
-    Emitter emitter(output, outputCapacity, relocations, relocationCapacity, relocationCount);
+    Emitter emitter(output, outputCapacity, relocations, relocationCapacity, relocationCount,
+                    readOnlyDataAddress);
     uint16_t functionLabels[COMPILER_MAX_FUNCTIONS] = {};
     FrameLayout frames[COMPILER_MAX_FUNCTIONS] = {};
     for (uint32_t i = 0; i < unit.functionCount; ++i) {
@@ -1967,7 +2016,8 @@ static bool emit_translation_unit_impl(const TranslationUnitIR& unit, uint64_t r
     if (unit.functionCount == 1 && is_gx_main(unit.functions[0].name)) {
         const FunctionIR& function = unit.functions[0];
         if (is_legacy_single_log(function)) {
-            emitter = Emitter(output, outputCapacity, relocations, relocationCapacity, relocationCount);
+            emitter = Emitter(output, outputCapacity, relocations, relocationCapacity, relocationCount,
+                              readOnlyDataAddress);
             if (!emit_legacy_log(function, readOnlyDataAddress, emitter) || !emitter.byte(0xC3) ||
                 !emitter.patch_branches()) return false;
             *outputSize = emitter.size();
@@ -1978,7 +2028,8 @@ static bool emit_translation_unit_impl(const TranslationUnitIR& unit, uint64_t r
             !function.hasHostLog && !has_indexed_access(function) &&
             function.blockCount == 1 && function.statementCount == 1 &&
             function.returnCount == 1) {
-            emitter = Emitter(output, outputCapacity, relocations, relocationCapacity, relocationCount);
+            emitter = Emitter(output, outputCapacity, relocations, relocationCapacity, relocationCount,
+                              readOnlyDataAddress);
             if (!emit_expression(emitter, unit, function, frames[0], functionLabels, function.returnExpression,
                                  COMPILER_INVALID_INDEX, COMPILER_INVALID_INDEX) ||
                 !emitter.byte(0xC3) || !emitter.patch_branches()) return false;
@@ -2005,6 +2056,9 @@ static bool emit_translation_unit_impl(const TranslationUnitIR& unit, uint64_t r
             if (function.parameters[p].kind == ParameterKind::Integer) {
                 if (!emitter.mov_reg_local32(argumentRegisters[p],
                                              local_displacement(function.parameters[p].slot))) return false;
+            } else if (function.parameters[p].kind == ParameterKind::StringPointer) {
+                if (!emitter.mov_rax_reg64(argumentRegisters[p]) ||
+                    !emitter.mov_local_rax(local_displacement(function.parameters[p].slot))) return false;
             } else if (parameter_kind_is_pointer(function.parameters[p].kind)) {
                 if (!emitter.mov_rax_reg64(argumentRegisters[p]) ||
                     !emit_copy_pointer_descriptor(emitter,
