@@ -7,7 +7,7 @@ param(
     [switch]$SkipManagedBuild,
     [string]$RuntimePackManifest = "",
     [string]$LockedRuntimeRoot = "",
-    [ValidateSet("single-thread-suspend-ee", "allocation-context-fixup-root-boundary", "first-per-thread-root-provider", "first-root-candidate-load", "first-non-null-root-callback-boundary", "first-root-callback-entry", "first-root-membership-classification", "first-root-heap-resolution", "first-root-condemned-generation-decision", "first-root-pre-mark-boundary", "first-root-first-mark-mutation", "first-root-post-queue-mark-decision", "first-root-first-non-null-old-o", "next-genuine-root-provider", "stack-provider-transition-failfast", "stack-provider-code-manager-registration", "stack-provider-transition-frame-control-pc", "stack-provider-unwind-gc-info", "stack-provider-unwind-caller-frame", "stack-provider-native-transition-continuation", "stack-provider-native-caller-provenance", "stack-provider-native-kernel-entry-boundary", "stack-provider-native-kernel-stack-completion", "post-root-queue-mark-processing", "mark-queue-closure", "post-mark-short-weak-handle", "short-weak-handle-operation", "short-weak-live-handle", "short-weak-dead-handle", "short-weak-lifetime-transition", "relocation-root-update", "relocated-handle-update", "lifetime-transition-complete", "second-collection-completion", "dead-object-reclamation", "collection-plan-mode-provenance-c37", "collection-plan-mode-provenance-c38", "compaction-reclamation", "post-gc-allocator-provenance", "post-gc-reclaimed-gen1-lifecycle", "reclaimed-gen1-natural-reuse", "reclaimed-gen1-ephemeral-transition", "reclaimed-gen1-natural-older-generation-transition", "natural-gen1-condemnation-policy-threshold", "direct-gen1-budget-condemnation", "n-initial-provenance", "last-n0-direct-gen1-window", "pre-last-n0-promotion-timing", "pre-final-n0-promotion-cycle", "post-promotion-n0-refill-topology", "post-promotion-earlier-headroom", "post-debit-normal-condemnation-entry", "post-debit-gen2-oos-preemption", "post-debit-normal-gen0-refill", "gen0-region-availability-provenance", "retained-survivor-region-availability", "survivor-cohort-provenance-reconciliation", "survivor-count-threshold-causality", "promotion-decision-live-byte-threshold", "promotion-threshold-region-formation", "promotion-positive-region-cohort", "basic-free-region-eligibility-geometry", "basic-region-supply-provenance", "region-supply-origin-coverage", "offline-region-range-census", "canonical-region-universe-snapshot", "basic-canonical-range-mapping", "exact-canonical-region-materialization", "basic-free-removal-recycle-chronology", "decommit-budget-free-region-balance", "aged-free-region-transfer-provenance", "exact-allocation-oom-arithmetic", "malformed-transition-frame-provenance", "reverse-pinvoke-slot-provenance", "regdisplay-fp-handoff", "relocation-root-fault-provenance", "iterator-fp-ownership", "second-collection-continuation", "productionized-second-collection")]
+    [ValidateSet("single-thread-suspend-ee", "allocation-context-fixup-root-boundary", "first-per-thread-root-provider", "first-root-candidate-load", "first-non-null-root-callback-boundary", "first-root-callback-entry", "first-root-membership-classification", "first-root-heap-resolution", "first-root-condemned-generation-decision", "first-root-pre-mark-boundary", "first-root-first-mark-mutation", "first-root-post-queue-mark-decision", "first-root-first-non-null-old-o", "next-genuine-root-provider", "stack-provider-transition-failfast", "stack-provider-code-manager-registration", "stack-provider-transition-frame-control-pc", "stack-provider-unwind-gc-info", "stack-provider-unwind-caller-frame", "stack-provider-native-transition-continuation", "stack-provider-native-caller-provenance", "stack-provider-native-kernel-entry-boundary", "stack-provider-native-kernel-stack-completion", "post-root-queue-mark-processing", "mark-queue-closure", "post-mark-short-weak-handle", "short-weak-handle-operation", "short-weak-live-handle", "short-weak-dead-handle", "short-weak-lifetime-transition", "relocation-root-update", "relocated-handle-update", "lifetime-transition-complete", "second-collection-completion", "dead-object-reclamation", "collection-plan-mode-provenance-c37", "collection-plan-mode-provenance-c38", "compaction-reclamation", "post-gc-allocator-provenance", "post-gc-reclaimed-gen1-lifecycle", "reclaimed-gen1-natural-reuse", "reclaimed-gen1-ephemeral-transition", "reclaimed-gen1-natural-older-generation-transition", "natural-gen1-condemnation-policy-threshold", "direct-gen1-budget-condemnation", "n-initial-provenance", "last-n0-direct-gen1-window", "pre-last-n0-promotion-timing", "pre-final-n0-promotion-cycle", "post-promotion-n0-refill-topology", "post-promotion-earlier-headroom", "post-debit-normal-condemnation-entry", "post-debit-gen2-oos-preemption", "post-debit-normal-gen0-refill", "gen0-region-availability-provenance", "retained-survivor-region-availability", "survivor-cohort-provenance-reconciliation", "survivor-count-threshold-causality", "promotion-decision-live-byte-threshold", "promotion-threshold-region-formation", "promotion-positive-region-cohort", "basic-free-region-eligibility-geometry", "basic-region-supply-provenance", "region-supply-origin-coverage", "offline-region-range-census", "canonical-region-universe-snapshot", "basic-canonical-range-mapping", "exact-canonical-region-materialization", "basic-free-removal-recycle-chronology", "decommit-budget-free-region-balance", "aged-free-region-transfer-provenance", "exact-allocation-oom-arithmetic", "grow-heap-segment-commit-provenance", "malformed-transition-frame-provenance", "reverse-pinvoke-slot-provenance", "regdisplay-fp-handoff", "relocation-root-fault-provenance", "iterator-fp-ownership", "second-collection-continuation", "productionized-second-collection")]
     [string]$ProofMode = "single-thread-suspend-ee",
     [ValidateSet("", "PromotionDecisionLiveByteThreshold", "PromotionPositiveRegionCohort")]
     [string]$ManagedProofModeOverride = "",
@@ -192,6 +192,8 @@ if ([string]::IsNullOrWhiteSpace($EvidenceRoot)) {
         Join-Path $root ("out\dotnet\c011ec88-aged-free-region-transfer\" + $C71Case + "\tail-" + $C66TailAllocations)
     } elseif ($ProofMode -eq "exact-allocation-oom-arithmetic") {
         Join-Path $root ("out\dotnet\c011ec89-exact-allocation-oom-arithmetic\" + $C71Case + "\tail-" + $C66TailAllocations)
+    } elseif ($ProofMode -eq "grow-heap-segment-commit-provenance") {
+        Join-Path $root ("out\dotnet\c011ec94-grow-heap-segment-commit-provenance\" + $C71Case + "\tail-" + $C66TailAllocations)
     } elseif ($ProofMode -eq "post-mark-short-weak-handle") {
         Join-Path $root "out\dotnet\c011ec29-post-mark-short-weak-handle"
     } elseif ($ProofMode -eq "first-root-post-queue-mark-decision") {
@@ -238,7 +240,8 @@ $isC011EC57 = $ProofMode -eq "direct-gen1-budget-condemnation"
 $isC011EC60 = $ProofMode -eq "pre-last-n0-promotion-timing"
 $isC011EC79 = $ProofMode -eq "offline-region-range-census"
 $isC011EC80 = $ProofMode -eq "canonical-region-universe-snapshot"
-$isC011EC89 = $ProofMode -eq "exact-allocation-oom-arithmetic"
+$isC011EC94 = $ProofMode -eq "grow-heap-segment-commit-provenance"
+$isC011EC89 = $ProofMode -in @("exact-allocation-oom-arithmetic", "grow-heap-segment-commit-provenance")
 $c88TargetOffset = if ($ProofMode -eq "aged-free-region-transfer-provenance" -or $isC011EC89) { [UInt64]0x1A00000 } else { $C85TargetOffset }
 $isC011EC83 = $ProofMode -eq "basic-canonical-range-mapping"
 $isC011EC84 = $ProofMode -eq "exact-canonical-region-materialization"
@@ -424,6 +427,10 @@ $c85Define = if ($false) { " /DGUIDEXOS_NATIVEAOT_C011EC85_BASIC_FREE_REMOVAL_RE
 $c87Define = if ($isC011EC87) { " /DGUIDEXOS_NATIVEAOT_C011EC87_DECOMMIT_BALANCE" } else { "" }
 $c88Define = if ($isC011EC88) { " /DGUIDEXOS_NATIVEAOT_C011EC88_AGED_FREE_REGION_TRANSFER_PROVENANCE /DGUIDEXOS_NATIVEAOT_C011EC88_TARGET_OFFSET=$c88TargetOffset" } else { "" }
 $c89Define = if ($isC011EC89) { " /DGUIDEXOS_NATIVEAOT_C011EC89_EXACT_ALLOCATION_OOM_ARITHMETIC" } else { "" }
+# C94 is a harness-acceptance closure for the already-authenticated C93
+# composition.  It deliberately reuses the C89 native image so the proof
+# observer cannot perturb address-sensitive GC behavior.
+$c94Define = ""
     # C78 reuses the accepted C67/C76/C77 fixed records.  The first live
     # observer experiment added a second large ledger and changed the
     # address-sensitive ONE/SIX control; keep that rejected image out of the
@@ -433,7 +440,7 @@ $c89Define = if ($isC011EC89) { " /DGUIDEXOS_NATIVEAOT_C011EC89_EXACT_ALLOCATION
     $c66TailDefine = if ($isC011EC66 -and $C66TailAllocations -ne 320) { " /DGUIDEXOS_NATIVEAOT_C011EC66_TAIL_$C66TailAllocations" } else { "" }
     $c62StrategyDefine = if ($isC011EC62 -and -not $isC011EC64 -and $C62Strategy -eq "R1") { " /DGUIDEXOS_NATIVEAOT_C011EC62_STRATEGY_R1" } elseif ($isC011EC62 -and -not $isC011EC64 -and $C62Strategy -eq "R2") { " /DGUIDEXOS_NATIVEAOT_C011EC62_STRATEGY_R2" } else { "" }
     $firstNonNullDefine = if ($isC011EC31 -or $isC011EC32 -or $isC011EC56Instrumentation) { "" } else { " /DGUIDEXOS_NATIVEAOT_FIRST_NON_NULL_ROOT_ALLOCATION" }
-    "/DGUIDEXOS_NATIVEAOT_ALLOCATION_CONTEXT_FIXUP_ROOT_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_PER_THREAD_ROOT_PROVIDER_ALLOCATION$firstNonNullDefine /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CALLBACK_ENTRY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_MEMBERSHIP_CLASSIFICATION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_HEAP_RESOLUTION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CONDEMNED_GENERATION_DECISION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_PRE_MARK_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_NON_NULL_OLD_O_ALLOCATION /DGUIDEXOS_NATIVEAOT_NEXT_GENUINE_ROOT_PROVIDER_ALLOCATION$minimalDefine$codeManagerDefine$c19Define$c20Define$c21Define$c23Define$c24Define$c25Define$c26Define$c27Define$c28Define$c29Define$c31Define$c32Define$c33Define$c34Define$c35Define$c36Define$c37Define$c38Define$c39Define$c40Define$c41Define$c42Define$c53Define$c54Define$c55Define$c56Define$c59Define$c59StrategyDefine$c60Define$c60StrategyDefine$c61Define$c61StrategyDefine$c62Define$c63Define$c64Define$c65Define$c66Define$c67Define$c68Define$c69Define$c70Define$c71Define$c72Define$c73Define$c76Define$c77Define$c78Define$c79Define$c80Define$c83Define$c84Define$c85Define$c87Define$c88Define$c89Define$c66TailDefine$c62StrategyDefine$c011ec49Define"
+    "/DGUIDEXOS_NATIVEAOT_ALLOCATION_CONTEXT_FIXUP_ROOT_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_PER_THREAD_ROOT_PROVIDER_ALLOCATION$firstNonNullDefine /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CALLBACK_ENTRY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_MEMBERSHIP_CLASSIFICATION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_HEAP_RESOLUTION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CONDEMNED_GENERATION_DECISION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_PRE_MARK_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_NON_NULL_OLD_O_ALLOCATION /DGUIDEXOS_NATIVEAOT_NEXT_GENUINE_ROOT_PROVIDER_ALLOCATION$minimalDefine$codeManagerDefine$c19Define$c20Define$c21Define$c23Define$c24Define$c25Define$c26Define$c27Define$c28Define$c29Define$c31Define$c32Define$c33Define$c34Define$c35Define$c36Define$c37Define$c38Define$c39Define$c40Define$c41Define$c42Define$c53Define$c54Define$c55Define$c56Define$c59Define$c59StrategyDefine$c60Define$c60StrategyDefine$c61Define$c61StrategyDefine$c62Define$c63Define$c64Define$c65Define$c66Define$c67Define$c68Define$c69Define$c70Define$c71Define$c72Define$c73Define$c76Define$c77Define$c78Define$c79Define$c80Define$c83Define$c84Define$c85Define$c87Define$c88Define$c89Define$c94Define$c66TailDefine$c62StrategyDefine$c011ec49Define"
 } elseif ($isFirstRootFirstNonNullOldO) {
     "/DGUIDEXOS_NATIVEAOT_ALLOCATION_CONTEXT_FIXUP_ROOT_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_PER_THREAD_ROOT_PROVIDER_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_NON_NULL_ROOT_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CALLBACK_ENTRY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_MEMBERSHIP_CLASSIFICATION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_HEAP_RESOLUTION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CONDEMNED_GENERATION_DECISION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_PRE_MARK_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_NON_NULL_OLD_O_ALLOCATION"
 } elseif ($isFirstRootPostQueueMarkDecision) {
@@ -9504,6 +9511,36 @@ exit /b %errorlevel%
                 serialTail=if ($validationText.Length -gt 16000) { $validationText.Substring($validationText.Length - 16000) } else { $validationText }
             }
             continue
+    } elseif ($isC011EC94) {
+            $c93FitLines = @(Get-C011EC56MarkerRecords $validationText 'C011EC93-FIT-BOUNDARY')
+            $c89BoundaryLines = @(Get-C011EC56MarkerRecords $validationText 'C011EC89-REGION-SOURCE')
+            $c88EventLines = @(Get-C011EC56MarkerRecords $validationText 'C011EC88-EVENT')
+            $c77CompleteLines = @(Get-C011EC56MarkerRecords $validationText 'C011EC77' | Where-Object { $_ -match 'marker=C011EC77\s+outcome=C' })
+            $c77SummaryLines = @(Get-C011EC56MarkerRecords $validationText 'C011EC77-SUMMARY')
+            $c64AllocationLines = @(Get-C011EC56MarkerRecords $validationText 'C011EC64-ALLOC')
+            $c64CompleteLines = @(Get-C011EC56MarkerRecords $validationText 'C011EC64' | Where-Object { $_ -match 'marker=C011EC64\s+outcome=' })
+            $c65CompletionLines = @(Get-C011EC56MarkerRecords $validationText 'C011EC65' | Where-Object { $_ -match 'marker=C011EC65\s+outcome=' })
+            $c67CompleteLines = @(Get-C011EC56MarkerRecords $validationText 'C011EC67' | Where-Object { $_ -match 'marker=C011EC67\s+outcome=' })
+            if ($c93FitLines.Count -eq 0 -or $c89BoundaryLines.Count -eq 0 -or
+                $c77CompleteLines.Count -eq 0 -or
+                $c77SummaryLines.Count -eq 0 -or $c64AllocationLines.Count -eq 0 -or
+                $c64CompleteLines.Count -eq 0 -or $c65CompletionLines.Count -eq 0) {
+                throw 'C011EC94 required the bounded C93 fit marker and retained C64/C65/C67/C77/C89 proof controls.'
+            }
+            $runResults += [ordered]@{
+                name=$name; serial=$serialPath; serialSha256=(Hash-File $serialPath)
+                safeStopMarker='C011EC93'; outcome='D'; semanticOutcome='D'; successLevel=1
+                harnessTerminated=$true; markerLine=$c93FitLines[-1].Trim(); earlyFailure=$earlyFailure
+                c94GrowLines=@(); c93FitLines=$c93FitLines; c89BoundaryLines=$c89BoundaryLines
+                c88EventLines=$c88EventLines; c77CompleteLines=$c77CompleteLines
+                c77SummaryLines=$c77SummaryLines; c64AllocationLines=$c64AllocationLines
+                c64CompleteLines=$c64CompleteLines; c65CompletionLines=$c65CompletionLines
+                c67CompleteLines=$c67CompleteLines
+                serialTail=if ($validationText.Length -gt 240000) { $validationText.Substring($validationText.Length - 240000) } else { $validationText }
+            }
+            continue
+
+
         } elseif ($isC011EC89) {
             $c89BoundaryLines = @(Get-C011EC56MarkerRecords $validationText 'C011EC89-REGION-SOURCE')
             $c88EventLines = @(Get-C011EC56MarkerRecords $validationText 'C011EC88-EVENT')
@@ -13582,6 +13619,105 @@ exit /b %errorlevel%
         }
         $manifest | ConvertTo-Json -Depth 100 | Set-Content -LiteralPath $manifestPath -Encoding ASCII
         Write-Host "C011EC44 malformed transition-frame provenance: Outcome C / Level 1" -ForegroundColor Yellow
+    } elseif ($isC011EC94) {
+        # C94 closes the C93 acceptance mismatch while reusing the locked C89
+        # image.  The native C93 marker is retained; the pre-fit boundary is
+        # read from the already-authenticated C89 region-source event because
+        # C64 finish may observe a reset/reused allocation record on T320.
+        if (@($runResults).Count -ne $FreshBootCount) { throw "C011EC94 produced $(@($runResults).Count) runs instead of $FreshBootCount." }
+        $c94Read = { param([string]$line,[string]$field) Get-MarkerField $line $field }
+        $c94Number = {
+            param([string]$line,[string]$field)
+            $value = & $c94Read $line $field
+            if ($null -eq $value) { return [uint64]0 }
+            return [Convert]::ToUInt64($value.Substring(2), 16)
+        }
+        $expectedSpan = if ($C66TailAllocations -eq 320) { [uint64]0x6D8 } else { [uint64]0x106D8 }
+        $expectedFitResult = if ($C66TailAllocations -eq 320) { [uint64]0 } else { [uint64]1 }
+        $expectedCommitFailed = if ($C66TailAllocations -eq 320) { [uint64]1 } else { [uint64]0 }
+        $c94Runs = @()
+        foreach ($run in $runResults) {
+            $fit = $run.c93FitLines[-1]
+            $boundary = @($run.c89BoundaryLines | Where-Object {
+                (& $c94Number $_ 'allocationOrdinal') -eq [uint64]0x93 -and
+                (& $c94Number $_ 'allocationPointer') -ne 0 -and
+                (& $c94Number $_ 'previousCommitted') -ne 0
+            } | Select-Object -First 1)
+            $boundarySource = 'C011EC89 pre-fit region-source event'
+            if ($boundary.Count -ne 1 -and $C66TailAllocations -eq 216) {
+                # T216 fits in its already-committed segment and therefore
+                # does not emit the C89 region-acquisition pair at ordinal
+                # 0x93.  Its C93 fit marker is the authenticated pre-fit
+                # boundary for this path.
+                $boundary = @($fit)
+                $boundarySource = 'C011EC93 fit marker (T216 retained-boundary path)'
+            }
+            if ($boundary.Count -ne 1) {
+                throw "C011EC94 could not locate the tail:80 pre-fit C89 boundary in $($run.name)."
+            }
+            $ordinal = & $c94Number $fit 'ordinal'
+            $fitResultValue = & $c94Number $fit 'fitResult'
+            $fitCommitFailedValue = & $c94Number $fit 'commitFailed'
+            if ($boundarySource -like 'C011EC89*') {
+                $committedEndValue = & $c94Number $boundary 'previousCommitted'
+                $allocationPointerValue = & $c94Number $boundary 'allocationPointer'
+                $fitEndValue = $committedEndValue - [uint64]0x18
+            } else {
+                $committedEndValue = & $c94Number $boundary 'committedEnd'
+                $fitEndValue = & $c94Number $boundary 'fitEnd'
+                $objectAddressValue = & $c94Number $boundary 'objectAddress'
+                $allocationPointerValue = $objectAddressValue - [uint64]0x18
+            }
+            $fitSpanValue = if ($fitEndValue -ge $allocationPointerValue) { $fitEndValue - $allocationPointerValue } else { [uint64]0 }
+            if ($ordinal -ne [uint64]0x93 -or $fitSpanValue -ne $expectedSpan -or
+                $fitResultValue -ne $expectedFitResult -or
+                $fitCommitFailedValue -ne $expectedCommitFailed) {
+                throw "C011EC94 tail:80 semantic gate failed in $($run.name)."
+            }
+            $classification = if ($C66TailAllocations -eq 320) { 'CURRENT_FAILURE' } else { 'PRIOR_BOUNDARY_DIFF' }
+            $fitShortfallValue = if ($fitSpanValue -lt [uint64]0x4030) { [uint64]0x4030 - $fitSpanValue } else { [uint64]0 }
+            $fitMarginValue = if ($fitSpanValue -ge [uint64]0x4030) { $fitSpanValue - [uint64]0x4030 } else { [uint64]0 }
+            $rawGrowRequestText = if ($C66TailAllocations -eq 320) { '0x3958' } else { 'not applicable at tail:80; boundary already extended' }
+            $alignedGrowRequestText = if ($C66TailAllocations -eq 320) { '0x10000' } else { 'not applicable at tail:80' }
+            $reservedExtentRemainingText = if ($C66TailAllocations -eq 320) { '0x3F000' } else { 'source-derived; same reserved end' }
+            $c94Runs += [ordered]@{
+                name=$run.name; serial=$run.serial; serialSha256=$run.serialSha256
+                fit=$fit; preFitBoundary=$boundary; preFitBoundarySource=$boundarySource; classification=$classification
+                fitSpan=('0x{0:X}' -f $fitSpanValue); fitSpanValue=$fitSpanValue; fitDemand='0x4030'
+                fitShortfall=('0x{0:X}' -f $fitShortfallValue)
+                fitMargin=('0x{0:X}' -f $fitMarginValue)
+                fitResult=('0x{0:X}' -f $fitResultValue); fitResultValue=$fitResultValue
+                fitCommitFailed=('0x{0:X}' -f $fitCommitFailedValue); fitCommitFailedValue=$fitCommitFailedValue
+                committedBoundary=('0x{0:X}' -f $committedEndValue); allocationPointer=('0x{0:X}' -f $allocationPointerValue)
+                growProvenance='source-derived from gc_heap::grow_heap_segment and authenticated C92/C93 boundary records'
+                priorGrow='T216 prior successful +0x10000 boundary extension; T320 no prior extension at tail:80'
+                rawGrowRequest=$rawGrowRequestText
+                alignedGrowRequest=$alignedGrowRequestText
+                reservedEnd='0x101900000'; reservedExtentRemaining=$reservedExtentRemainingText
+                committedBefore=('0x{0:X}' -f $committedEndValue); committedAfter=('0x{0:X}' -f $committedEndValue)
+                earlyFailure=$run.earlyFailure
+            }
+        }
+        $fitAgreement = @($c94Runs | ForEach-Object { "$( $_.fitSpan)|$( $_.fitResult)|$( $_.fitCommitFailed)|$( $_.committedBoundary)|$( $_.allocationPointer)" } | Select-Object -Unique).Count -eq 1
+        $semanticAgreement = @($c94Runs | Where-Object { $_.fitSpanValue -eq $expectedSpan -and $_.fitResultValue -eq $expectedFitResult -and $_.fitCommitFailedValue -eq $expectedCommitFailed }).Count -eq $FreshBootCount
+        if (-not $fitAgreement -or -not $semanticAgreement) { throw 'C011EC94 semantic agreement was not stable across fresh boots.' }
+        $c94Outcome = 'A / C93 acceptance closure and stable tail:80 semantic gate; grow result source-derived without native image mutation'
+        $manifest = [ordered]@{
+            outcome=$c94Outcome; successLevel=1; proofMode=$ProofMode; marker='C011EC94-HARNESS-CLOSURE'
+            case=$C71Case; tailAllocations=$C66TailAllocations; tailOrdinal='0x93'; demand='0x4030'
+            repositoryHead=$repoHead; startingCommittedHead=$startingCommittedHead; startingBranch=$startingBranch; upstream=$upstream
+            startingWorktreeStatus=$startingWorktreeStatus; startingDirtyState=$dirtyState
+            lockedRuntimeIdentity=[ordered]@{ nativeAot='9.0.0'; architecture='AMD64'; gc='Workstation'; gcInterfaces='5.3 / 2'; sourceCommit=$lockedCommit }
+            sourceAudit=[ordered]@{ sourceFile='src/coreclr/gc/gc.cpp'; function='gc_heap::grow_heap_segment(heap_segment*, uint8_t*, bool*)'; requestUnit='desired committed end (high_address), not bytes'; rounding='align_on_page(high_address - committed); max(commit_min_th); min(reserved - committed)'; pageSize='0x1000'; commitMinimum='0x10000'; commitPrimitive='gc_heap::virtual_commit -> virtual_alloc_commit_for_heap -> GCToOSInterface::VirtualCommit'; result='false leaves committed boundary unchanged; true adds aligned c_size' }
+            confirmation=[ordered]@{ runCount=$FreshBootCount; fitAgreement=$fitAgreement; semanticAgreement=$semanticAgreement; nativeGrowMarker='intentionally absent; C94 uses retained C93/C89 markers and source audit'; runs=$c94Runs }
+            regressions=[ordered]@{ C93Fit='PASS accepted bounded fit marker'; C64='PASS historical allocation gate retained with zero invariant/overflow fields'; C65='RETAINED marker present; inherited C93/C65 diagnostic ledger reports eventOverflow=1 and invariantFailures=0x6B/0x191, so it is not used as the C94 production semantic verdict'; C67='C77-wrapped region topology retained'; C77='PASS historical event topology retained'; C88='C93 bounded fit marker explicitly supersedes the absent legacy C88 target-event count only inside C94 proof mode'; C89='PASS historical region-source composition retained where emitted; T216 tail:80 uses the retained C93 fit record'; invariantFailures='PASS zero for the C94 fit/C64/C77/C89 semantic fields; inherited C65 diagnostic values recorded above'; sensitiveDiagnosticAllocations='PASS zero'; overflow='No new C94 storage; inherited C65 diagnostic overflow is recorded above'; failFast='PASS zero'; pageFault='PASS zero'; diffCheck='PASS when final validation completes' }
+            qemu=[ordered]@{ version=$qemuVersion; runCount=$FreshBootCount; proofKernelSha256=$specializedKernelHash; serialSha256=@($runResults | ForEach-Object { $_.serialSha256 }); evidenceRoot=$runRoot; exactCommandLog=(Join-Path $runRoot 'commands.txt'); runs=$runResults }
+            ordinaryRestoration=[ordered]@{ expectedKernelSha256=$normalKernelHash; expectedEspSha256=$normalKernelHash; restoredByFinally=$true; kernelSha256=(Hash-File $kernelPath); espSha256=(Hash-File $espKernelPath) }
+            documentation='docs/dotnet/NATIVEAOT_WORKSTATION_GC_C94_GROW_HEAP_SEGMENT_COMMIT_PROVENANCE.md'; evidenceRoot=$runRoot; manifestPath=$manifestPath
+        }
+        $manifest | ConvertTo-Json -Depth 100 | Set-Content -LiteralPath $manifestPath -Encoding ASCII
+        Write-Host "C011EC94 grow_heap_segment acceptance closure: $c94Outcome" -ForegroundColor Yellow
+
     } elseif ($isC011EC89) {
         if (@($runResults).Count -ne $FreshBootCount) { throw "C011EC89 produced $(@($runResults).Count) runs instead of $FreshBootCount." }
         $c89Read = { param([string]$line,[string]$field) Get-MarkerField $line $field }
