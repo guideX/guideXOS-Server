@@ -26,6 +26,7 @@ constexpr std::uint32_t kNavigatorFocusMethod = 4u;
 constexpr std::uint32_t kNavigatorBlurMethod = 5u;
 constexpr std::uint32_t kNavigatorClickMethod = 6u;
 constexpr std::uint32_t kNavigatorResetMethod = 7u;
+constexpr std::uint32_t kNavigatorHasFocusMethod = 8u;
 
 constexpr std::size_t kNavigatorScriptMaxDocumentIdLength = 256u;
 constexpr std::size_t kNavigatorScriptMaxTextContentAssignment = 64u * 1024u;
@@ -145,7 +146,8 @@ public:
     // Navigator calls this from its authoritative form-focus transition seam.
     // The event is observational: dispatch never changes the focus owner.
     bool dispatchFocusEvent(RuntimeContext& runtime, HostInstanceId targetSerial,
-        bool gained, bool bubblingVariant, RuntimeErrorCode& error,
+        bool gained, bool bubblingVariant, HostInstanceId relatedTargetSerial,
+        RuntimeErrorCode& error,
         bool* defaultPrevented = nullptr);
     bool dispatchInputEvent(RuntimeContext& runtime, HostInstanceId targetSerial,
         RuntimeErrorCode& error, bool* defaultPrevented = nullptr);
@@ -234,7 +236,8 @@ private:
     bool allocateListenerSequence(std::uint64_t& sequence);
     bool dispatchEvent(RuntimeContext& runtime, SourceView type,
         NavigatorScriptEventType eventType,
-        const HostObjectReference& target, SourceView key, SourceView code,
+        const HostObjectReference& target, HostInstanceId relatedTargetSerial,
+        SourceView key, SourceView code,
         bool includeOnclick, RuntimeErrorCode& error,
         bool* defaultPrevented);
     bool eventTypeFor(SourceView type,

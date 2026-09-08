@@ -1033,7 +1033,8 @@ private:
 	static bool dispatchJavaScriptKeyboardEvent(int keyCode,
 		const std::string& action, bool* defaultPrevented = nullptr);
 	static bool dispatchJavaScriptFocusEvent(std::uint64_t targetSerial,
-		bool gained, bool bubblingVariant = false);
+		bool gained, bool bubblingVariant = false,
+		std::uint64_t relatedTargetSerial = 0);
 	static bool dispatchJavaScriptInputEvent(std::uint64_t targetSerial);
 	static bool dispatchJavaScriptChangeEvent(std::uint64_t targetSerial);
 	static bool dispatchJavaScriptSubmitEvent(std::uint64_t formSerial,

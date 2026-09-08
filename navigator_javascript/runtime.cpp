@@ -2002,7 +2002,8 @@ bool RuntimeContext::invokeFunctionInSameRealm(const Value& function,
 bool RuntimeContext::createOrUpdateEventObject(SourceView type,
     const HostObjectReference& target,
     const HostObjectReference& currentTarget, SourceView key,
-    SourceView code, bool bubbles, bool cancelable, Value& result,
+    SourceView code, bool bubbles, bool cancelable,
+    const HostObjectReference* relatedTarget, Value& result,
     RuntimeErrorCode& error)
 {
     error = RuntimeErrorCode::None;
@@ -2029,6 +2030,13 @@ bool RuntimeContext::createOrUpdateEventObject(SourceView type,
     RuntimeHostObjectId currentTargetObject = kInvalidRuntimeHostObjectId;
     if (!createHostObject(currentTarget, currentTargetObject, error, true))
         return false;
+    Value relatedTargetValue = Value::nullValue();
+    if (relatedTarget != nullptr) {
+        RuntimeHostObjectId relatedTargetObject = kInvalidRuntimeHostObjectId;
+        if (!createHostObject(*relatedTarget, relatedTargetObject, error, true))
+            return false;
+        relatedTargetValue = Value::hostObject(relatedTargetObject);
+    }
 
     if (eventObject_ == kInvalidRuntimeObjectId && eventDispatchDepth_ > 0u)
         eventObject_ = eventObjectCache_[eventDispatchDepth_ - 1u];
@@ -2064,6 +2072,8 @@ bool RuntimeContext::createOrUpdateEventObject(SourceView type,
         if (!writeProperty(eventObject_, "type", typeValue, error, true) ||
             !writeProperty(eventObject_, "target",
                 Value::hostObject(targetObject), error, true) ||
+            !writeProperty(eventObject_, "relatedTarget", relatedTargetValue,
+                error, true) ||
             !writeProperty(eventObject_, "currentTarget",
                 Value::hostObject(currentTargetObject), error, true) ||
             !writeProperty(eventObject_, "bubbles", Value::boolean(bubbles),
@@ -2094,6 +2104,8 @@ bool RuntimeContext::createOrUpdateEventObject(SourceView type,
     } else if (!updateExistingProperty(eventObject_, "type", typeValue, error) ||
         !updateExistingProperty(eventObject_, "target",
             Value::hostObject(targetObject), error) ||
+        !updateExistingProperty(eventObject_, "relatedTarget", relatedTargetValue,
+            error) ||
         !updateExistingProperty(eventObject_, "currentTarget",
             Value::hostObject(currentTargetObject), error) ||
         !updateExistingProperty(eventObject_, "bubbles", Value::boolean(bubbles),

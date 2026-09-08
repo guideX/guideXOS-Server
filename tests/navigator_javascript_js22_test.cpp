@@ -644,8 +644,8 @@ root.addEventListener("click", function(event) { onceBubbleCalls = onceBubbleCal
         "stress: target/currentTarget/phase metadata remains coherent");
     expect(stress.runtime().objectCount() == objects + 1u,
         "stress: 100 clicks create no Event object growth");
-    expect(stress.runtime().propertyCount() == properties + 10u,
-        "stress: 100 clicks create one cached Event with ten properties");
+    expect(stress.runtime().propertyCount() == properties + 11u,
+        "stress: 100 clicks create one cached Event with eleven properties");
     expect(stress.runtime().hostObjectCount() == hosts,
         "stress: 100 clicks create no host-object growth");
     expect(stress.hostAdapter().clickListenerCount() == 4u,

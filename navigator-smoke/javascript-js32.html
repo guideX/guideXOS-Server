@@ -1,0 +1,186 @@
+<!doctype html>
+<html>
+<head><title>Navigator JavaScript JS32</title></head>
+<body>
+<h1>Navigator JavaScript JS32</h1>
+<p>Focus events expose relatedTarget and document.hasFocus() through the
+  authoritative Navigator focus seam.</p>
+<form id="js32-form">
+  <input id="js32-a" type="text" name="a" value="alpha">
+  <input id="js32-b" type="text" name="b" value="bravo">
+  <input id="js32-c" type="text" name="c" value="charlie">
+  <button id="js32-pointer" type="button">Pointer event</button>
+  <button id="js32-nested" type="button">Nested focus redirect</button>
+  <button id="js32-submit" type="submit">Submit event</button>
+  <button id="js32-reset" type="reset">Reset event</button>
+</form>
+<p id="js32-state">initial:active=null:hasFocus=false</p>
+<script>
+var js32StateNode = document.getElementById("js32-state");
+var js32Form = document.getElementById("js32-form");
+var js32A = document.getElementById("js32-a");
+var js32B = document.getElementById("js32-b");
+var js32C = document.getElementById("js32-c");
+var js32Pointer = document.getElementById("js32-pointer");
+var js32NestedButton = document.getElementById("js32-nested");
+var js32Submit = document.getElementById("js32-submit");
+var js32Reset = document.getElementById("js32-reset");
+var js32InitialNull = false;
+var js32FocusInInitialNull = false;
+var js32BlurTransfer = false;
+var js32FocusOutTransfer = false;
+var js32FocusTransfer = false;
+var js32FocusInTransfer = false;
+var js32BlurClearNull = false;
+var js32FocusOutClearNull = false;
+var js32FocusAStage = false;
+var js32FocusInAStage = false;
+var js32BlurAStage = false;
+var js32FocusOutAStage = false;
+var js32ReadOnly = false;
+var js32Nested = false;
+var js32NestedStable = false;
+var js32NestedFinal = false;
+var js32PointerEvent = false;
+var js32InputNull = false;
+var js32ChangeNull = false;
+var js32SubmitNull = false;
+var js32ResetNull = false;
+var js32Log = "";
+var js32NestedClickEnabled = true;
+
+function js32ActiveName() {
+  if (document.activeElement === null) return "null";
+  if (document.activeElement === js32A) return "a";
+  if (document.activeElement === js32B) return "b";
+  if (document.activeElement === js32C) return "c";
+  if (document.activeElement === js32Pointer) return "pointer";
+  if (document.activeElement === js32NestedButton) return "nested";
+  return "other";
+}
+function js32RelatedName(value) {
+  if (value === null) return "null";
+  if (value === js32A) return "a";
+  if (value === js32B) return "b";
+  if (value === js32C) return "c";
+  return "other";
+}
+function js32Snapshot(label) {
+  js32StateNode.textContent = label + ":active=" + js32ActiveName() +
+    ":hasFocus=" + document.hasFocus() + ":initialNull=" + js32InitialNull +
+    ":transfer=" + js32BlurTransfer + ":nestedStable=" + js32NestedStable +
+    ":nestedFinal=" + js32NestedFinal + ":pointer=" + js32PointerEvent +
+    ":inputNull=" + js32InputNull + ":changeNull=" + js32ChangeNull +
+    ":submitNull=" + js32SubmitNull + ":resetNull=" + js32ResetNull +
+    ":log=" + js32Log;
+}
+function js32FocusRecord(label, event, expected) {
+  js32Log = js32Log + label + ":" + js32RelatedName(event.relatedTarget) +
+    ":active=" + (document.activeElement === expected) +
+    ":hasFocus=" + document.hasFocus() + ";";
+}
+
+js32A.addEventListener("focus", function(event) {
+  js32InitialNull = js32InitialNull || event.relatedTarget === null;
+  js32FocusAStage = document.activeElement === js32A && document.hasFocus();
+  js32FocusRecord("focus-a", event, js32A);
+  event.relatedTarget = js32B;
+  js32ReadOnly = event.relatedTarget === null;
+  if (js32Nested) {
+    js32NestedStable = event.relatedTarget === null &&
+      document.activeElement === js32A;
+    js32B.focus();
+    js32C.focus();
+    js32NestedStable = js32NestedStable && event.relatedTarget === null &&
+      document.activeElement === js32A;
+    js32NestedFinal = document.activeElement === js32A;
+  }
+  js32Snapshot("focus-event");
+});
+js32A.addEventListener("focusin", function(event) {
+  js32FocusInInitialNull = js32FocusInInitialNull ||
+    event.relatedTarget === null;
+  js32FocusInAStage = document.activeElement === js32A && document.hasFocus();
+  js32FocusRecord("focusin-a", event, js32A);
+  js32Snapshot("focusin-event");
+});
+js32A.addEventListener("blur", function(event) {
+  js32BlurTransfer = js32BlurTransfer || event.relatedTarget === js32B;
+  js32BlurAStage = document.activeElement === js32A && document.hasFocus();
+  js32FocusRecord("blur-a", event, js32A);
+  event.relatedTarget = js32A;
+  js32ReadOnly = js32ReadOnly && event.relatedTarget === js32B;
+  js32Snapshot("blur-event");
+});
+js32A.addEventListener("focusout", function(event) {
+  js32FocusOutTransfer = js32FocusOutTransfer || event.relatedTarget === js32B;
+  js32FocusOutAStage = document.activeElement === js32A && document.hasFocus();
+  js32FocusRecord("focusout-a", event, js32A);
+  js32Snapshot("focusout-event");
+});
+js32B.addEventListener("focus", function(event) {
+  js32FocusTransfer = js32FocusTransfer || event.relatedTarget === js32A;
+  js32FocusRecord("focus-b", event, js32B);
+  js32Snapshot("focus-event");
+});
+js32B.addEventListener("focusin", function(event) {
+  js32FocusInTransfer = js32FocusInTransfer || event.relatedTarget === js32A;
+  js32FocusRecord("focusin-b", event, js32B);
+  js32Snapshot("focusin-event");
+});
+js32B.addEventListener("blur", function(event) {
+  js32BlurClearNull = js32BlurClearNull || event.relatedTarget === null;
+  js32BlurTransfer = js32BlurTransfer || event.relatedTarget === js32A;
+  js32FocusRecord("blur-b", event, js32B);
+  js32Snapshot("blur-event");
+});
+js32B.addEventListener("focusout", function(event) {
+  js32FocusOutClearNull = js32FocusOutClearNull || event.relatedTarget === null;
+  js32FocusRecord("focusout-b", event, js32B);
+  js32Snapshot("focusout-event");
+});
+js32NestedButton.addEventListener("click", function(event) {
+  if (js32NestedClickEnabled) {
+    js32NestedClickEnabled = false;
+    js32Nested = true;
+    js32NestedStable = event.target === js32NestedButton &&
+      event.currentTarget === js32NestedButton && event.eventPhase == 2 &&
+      event.relatedTarget === null &&
+      document.activeElement === js32NestedButton;
+    js32B.focus();
+    js32C.focus();
+    js32NestedStable = js32NestedStable && event.target === js32NestedButton &&
+      event.currentTarget === js32NestedButton && event.eventPhase == 2 &&
+      event.relatedTarget === null &&
+      document.activeElement === js32NestedButton;
+    js32NestedFinal = document.activeElement === js32NestedButton;
+    js32Nested = false;
+    js32Snapshot("nested");
+  }
+});
+js32A.addEventListener("click", function(event) {
+  js32PointerEvent = event.relatedTarget === null && event.target === js32A;
+  js32FocusRecord("pointer-click", event, js32A);
+  js32Snapshot("pointer");
+});
+js32A.addEventListener("input", function(event) {
+  js32InputNull = event.relatedTarget === null;
+  js32Snapshot("input-event");
+});
+js32A.addEventListener("change", function(event) {
+  js32ChangeNull = event.relatedTarget === null;
+  js32Snapshot("change-event");
+});
+js32Form.addEventListener("submit", function(event) {
+  js32SubmitNull = event.relatedTarget === null;
+  event.preventDefault();
+  js32Snapshot("submit-event");
+});
+js32Form.addEventListener("reset", function(event) {
+  js32ResetNull = event.relatedTarget === null;
+  js32Snapshot("reset-event");
+});
+js32Snapshot("initial");
+</script>
+</body>
+</html>

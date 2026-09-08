@@ -557,8 +557,8 @@ treeB.addEventListener("click", function(event) { if (event.target === bChild) t
         "stress: independent trees start fresh");
     expect(harness.runtime().objectCount() == objects + 1u,
         "stress: 100 clicks create no Event growth");
-    expect(harness.runtime().propertyCount() == properties + 10u,
-        "stress: 100 clicks create one cached Event with ten properties");
+    expect(harness.runtime().propertyCount() == properties + 11u,
+        "stress: 100 clicks create one cached Event with eleven properties");
     expect(harness.runtime().hostObjectCount() == hosts,
         "stress: 100 clicks create no host-object growth");
     expect(harness.hostAdapter().clickListenerCount() == 8u,

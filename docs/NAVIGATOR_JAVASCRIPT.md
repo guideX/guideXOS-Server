@@ -3450,7 +3450,99 @@ errors in `third_party/mbedtls/library/mbedtls_check_config.h`:
 QEMU was not launched because no kernel image was produced; no TLS
 configuration was changed.
 
-The recommended JS32 direction is `relatedTarget` snapshots for the existing
-focus transition events, after the event-value lifetime and nested-dispatch
-rules are specified. `document.hasFocus()` should wait until authentic window
-activation state exists; it should not be inferred from the form-control owner.
+## Phase JS32: `relatedTarget` and `document.hasFocus()`
+
+JS32 adds two bounded focus-observation surfaces:
+
+```javascript
+event.relatedTarget
+document.hasFocus()
+```
+
+`relatedTarget` is a read-only property on the existing generic Event object.
+It is either the canonical generation-bound Element host object for the other
+side of a focus transition or the existing `null` sentinel. The production
+Navigator transition seam supplies only the logical serial of the opposite
+focus owner; the adapter resolves that serial against the currently installed
+document and fails closed to `null` when it is absent or stale. This preserves
+the repository's existing host-object identity rule, so
+`event.relatedTarget === document.getElementById("b")` is true for the same
+document.
+
+The event values follow the existing authoritative focus timing:
+
+- The initial `focus`/`focusin` gain has `relatedTarget === null`.
+- A transfer from A to B gives A's `blur`/`focusout` a related target of B and
+  gives B's `focus`/`focusin` a related target of A.
+- A clear has `null` on `blur`/`focusout`; there is no incoming focus event.
+- Same-owner `focus()` and non-owner `blur()` remain no-ops and dispatch no
+  synthetic transfer.
+
+`relatedTarget` is included in the runtime's per-dispatch-depth Event cache.
+Nested focus or click dispatch therefore receives its own Event object while
+the outer listener's `target`, `currentTarget`, phase, and `relatedTarget`
+remain stable before and after the nested call. Non-focus events refresh the
+same cached object with `relatedTarget === null`, preventing metadata leakage
+from a prior focus event. The existing 16-level dispatch/re-entry bounds still
+apply.
+
+`document.hasFocus()` is a zero-argument, read-only host method. This build has
+no separate OS/window focus owner in the Navigator JavaScript contract, so its
+narrow deterministic meaning is: true exactly when the current document has a
+valid authoritative supported, visible, enabled form-control focus owner—the
+same validated projection used by `document.activeElement`. It is false for a
+new document, after focus clear, after replacement, or when the stored serial
+or generation is stale. The query is pure: it does not dispatch events, mutate
+focus state, allocate listeners, or synthesize focus. A stale document receiver
+fails through the normal generation validation path, and extra arguments are
+rejected with the existing `HostInvalidValue` error.
+
+The implementation keeps `WebDocument::formRuntimeState` authoritative. It
+does not add a second focus registry, window-focus flag, or JavaScript-owned
+related-target snapshot. Production programmatic focus, pointer focus, and
+existing keyboard Tab traversal all reach the same Navigator transition seam;
+only the opposite logical serial is threaded into the shared event adapter.
+
+### JS32 validation result
+
+The focused proof is
+`tests/navigator_javascript_js32_test.cpp`, run by
+`scripts/smoke-navigator-javascript-js32.ps1`. It reports 273 checks with 0
+failures and passes both the optimized `GXOS_BARE_METAL` harness and the
+strict `-Wall -Wextra -Werror -pedantic` adapter/runtime syntax lane. Coverage
+includes initial/transfer/clear related-target mappings, canonical identity,
+read-only assignment, same-owner and unrelated blur no-ops, hasFocus stage
+observations, non-focus cache hygiene, nested and re-entrant event lifetime,
+stale related serials, stale document receivers, document replacement, and
+the 64-listener capacity boundary.
+
+The hosted fixture is `navigator-smoke/javascript-js32.html`. The production
+`navigator.smoke` aggregate drives its programmatic A/B focus, clear, nested
+redirect, physical pointer click, keyboard input plus Tab traversal, reset and
+submit non-focus events, and navigation replacement. Its in-page state text
+records deterministic `active`, `hasFocus`, related-target, and cache-hygiene
+flags so the aggregate does not depend on browser-only inspection APIs.
+
+The complete JS6-through-JS32 matrix passes all 27 repository scripts. The
+normal native `build.bat` completes successfully, and the hosted aggregate
+reports 464 passed and 7 failed out of 471 checks. All ten JS32 hosted checks
+pass; the seven failures are the same unrelated CSS baselines CSS 3C, CSS 3G,
+CSS 6A, three CSS 6B checks, and CSS 6C. The required `build-kernel.bat`
+retry builds the PacMan image and bootloader, then stops at the existing Mbed
+TLS configuration errors in
+`third_party/mbedtls/library/mbedtls_check_config.h`:
+`Unsupported partial support for ECC curves acceleration` and
+`MBEDTLS_KEY_EXCHANGE_ECDHE_RSA_ENABLED defined, but not all prerequisites`.
+QEMU was not launched because no kernel image was produced; no TLS
+configuration was changed.
+
+Window/OS activation state, focus options, autofocus, `tabindex` traversal
+expansion, pointer hover/mouseover related-target events, page visibility,
+`window.hasFocus()`, and full browser focus navigation remain deferred. This
+phase also does not claim a separate browsing-context focus model or add
+`defaultValue`/`defaultChecked` form properties from JS31.
+
+The recommended JS33 direction is to extend the same logical-serial and
+per-dispatch-depth discipline to the next explicitly requested event family,
+with a fresh stale-handle and nested-dispatch contract before exposing new
+browser state.

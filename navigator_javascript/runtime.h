@@ -254,7 +254,8 @@ public:
     bool createOrUpdateEventObject(SourceView type,
         const HostObjectReference& target,
         const HostObjectReference& currentTarget, SourceView key,
-        SourceView code, bool bubbles, bool cancelable, Value& result,
+        SourceView code, bool bubbles, bool cancelable,
+        const HostObjectReference* relatedTarget, Value& result,
         RuntimeErrorCode& error);
 
     // The Navigator click adapter brackets one synchronous dispatch with

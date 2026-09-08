@@ -3082,6 +3082,161 @@ static std::string navigatorHostedSmokeDiagnostic() {
         yesNo(js31AuthoritativeSubmitTrigger) + ",url=" +
         js31AuthoritativeSubmitUrl);
 
+    const std::string js32FixtureUrl =
+        "http://127.0.0.1:8080/navigator-smoke/javascript-js32.html";
+    const bool js32Loaded = gxos::apps::Navigator::SmokeNavigateToQuiet(
+        js32FixtureUrl);
+    const std::string js32InitialText =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS32 hosted fixture loads relatedTarget and hasFocus checks",
+        js32Loaded && gxos::apps::Navigator::SmokeCurrentUrl() == js32FixtureUrl &&
+        contains(js32InitialText, "Navigator JavaScript JS32") &&
+        contains(js32InitialText, "initial:active=null:hasFocus=false") &&
+        gxos::apps::Navigator::SmokeJavaScriptHandlerCount() > 0u &&
+        gxos::apps::Navigator::SmokeJavaScriptListenerCount() > 0u &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("loaded=") + yesNo(js32Loaded) + ",url=" +
+        gxos::apps::Navigator::SmokeCurrentUrl());
+
+    const bool js32FocusATrigger =
+        gxos::apps::Navigator::SmokeFocusFormControlById("js32-a", true);
+    const std::string js32AfterFocusA =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS32 programmatic focus exposes A and initial null relatedTarget",
+        js32FocusATrigger && contains(js32AfterFocusA,
+            "focus-a:null:active=true:hasFocus=true;") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("trigger=") + yesNo(js32FocusATrigger) + ",text=" +
+        summarizeText(js32AfterFocusA, 420));
+
+    const bool js32FocusBTrigger =
+        gxos::apps::Navigator::SmokeFocusFormControlById("js32-b", true);
+    const std::string js32AfterFocusB =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS32 A-to-B transfer exposes opposite relatedTarget on both sides",
+        js32FocusBTrigger && contains(js32AfterFocusB,
+            "focus-b:a:active=true:hasFocus=true;") &&
+        contains(js32AfterFocusB, "blur-a:b:active=true:hasFocus=true;") &&
+        contains(js32AfterFocusB, "focus-b:a:active=true:hasFocus=true;") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("trigger=") + yesNo(js32FocusBTrigger) + ",text=" +
+        summarizeText(js32AfterFocusB, 520));
+
+    gxos::apps::Navigator::SmokeDeactivateWindow();
+    const bool js32ClearTrigger =
+        gxos::apps::Navigator::SmokeFocusedFormControlId().empty();
+    const std::string js32AfterClear =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS32 clear focus reports null relatedTarget and hasFocus false",
+        js32ClearTrigger && contains(js32AfterClear,
+            "blur-b:null:active=true:hasFocus=true;") &&
+        gxos::apps::Navigator::SmokeFocusedFormControlId().empty() &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("trigger=") + yesNo(js32ClearTrigger) + ",owner=" +
+        gxos::apps::Navigator::SmokeFocusedFormControlId());
+
+    const bool js32NestedTrigger =
+        gxos::apps::Navigator::SmokeFocusFormControlById("js32-a", true) &&
+        gxos::apps::Navigator::SmokeClickFormControlById("js32-nested");
+    const std::string js32AfterNested =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    const bool js32NestedState = contains(js32AfterNested,
+        "nested:active=nested:hasFocus=true") &&
+        contains(js32AfterNested, "nestedStable=true:nestedFinal=true");
+    const bool js32NestedOwner =
+        gxos::apps::Navigator::SmokeFormControlFocusedById("js32-c");
+    add("JS32 nested focus redirects preserve the outer Event and settle on C",
+        js32NestedTrigger && js32NestedState && js32NestedOwner &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("trigger=") + yesNo(js32NestedTrigger) + ",state=" +
+        yesNo(js32NestedState) + ",owner=" + yesNo(js32NestedOwner) +
+        ",focused=" + gxos::apps::Navigator::SmokeFocusedFormControlId() +
+        ",error=" + gxos::apps::Navigator::SmokeJavaScriptLastError() +
+        ",text=" +
+        summarizeText(js32AfterNested, 760));
+
+    const bool js32PointerPrep =
+        gxos::apps::Navigator::SmokeFocusFormControlById("js32-b", true);
+    const bool js32PointerClick =
+        js32PointerPrep &&
+        gxos::apps::Navigator::SmokeMouseDownFormControlById("js32-a") &&
+        gxos::apps::Navigator::SmokeMouseUp();
+    const std::string js32AfterPointer =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    const bool js32PointerBlur = contains(js32AfterPointer,
+        "blur-b:a:active=true:hasFocus=true;");
+    const bool js32PointerFocus = contains(js32AfterPointer,
+        "focus-a:b:active=true:hasFocus=true;");
+    const bool js32PointerOwner =
+        gxos::apps::Navigator::SmokeFormControlFocusedById("js32-a");
+    add("JS32 physical pointer transfer carries focus transition context",
+        js32PointerClick && js32PointerBlur && js32PointerFocus &&
+        js32PointerOwner &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("pointer=") + yesNo(js32PointerClick) + ",blur=" +
+        yesNo(js32PointerBlur) + ",focus=" + yesNo(js32PointerFocus) +
+        ",owner=" + yesNo(js32PointerOwner) +
+        ",error=" + gxos::apps::Navigator::SmokeJavaScriptLastError() +
+        ",focused=" + gxos::apps::Navigator::SmokeFocusedFormControlId() +
+        ",text=" + summarizeText(js32AfterPointer, 760));
+
+    const bool js32KeyboardPrep =
+        gxos::apps::Navigator::SmokeFocusFormControlById("js32-a", true);
+    const bool js32KeyADown = gxos::apps::Navigator::SmokeKeyPress(65, "down");
+    const bool js32KeyAUp = gxos::apps::Navigator::SmokeKeyPress(65, "up");
+    const bool js32TabDown = gxos::apps::Navigator::SmokeKeyPress(9, "down");
+    const bool js32TabUp = gxos::apps::Navigator::SmokeKeyPress(9, "up");
+    const std::string js32AfterKeyboard =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS32 keyboard input and Tab traversal retain focus-event metadata",
+        js32KeyboardPrep && js32KeyADown && js32KeyAUp && js32TabDown &&
+        js32TabUp && gxos::apps::Navigator::SmokeFocusedFormControlId() ==
+            "js32-b" && contains(js32AfterKeyboard, "inputNull=true") &&
+        contains(js32AfterKeyboard, "changeNull=true") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("prep=") + yesNo(js32KeyboardPrep) + ",key-down=" +
+        yesNo(js32KeyADown) + ",key-up=" + yesNo(js32KeyAUp) + ",tab=" +
+        yesNo(js32TabDown && js32TabUp) + ",owner=" +
+        gxos::apps::Navigator::SmokeFocusedFormControlId());
+
+    const bool js32ResetClick =
+        gxos::apps::Navigator::SmokeClickFormControlById("js32-reset");
+    const std::string js32AfterReset =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS32 reset event stays in the non-focus relatedTarget null lane",
+        js32ResetClick && contains(js32AfterReset, "resetNull=true") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("reset=") + yesNo(js32ResetClick) + ",text=" +
+        summarizeText(js32AfterReset, 420));
+
+    const bool js32SubmitClick =
+        gxos::apps::Navigator::SmokeClickFormControlById("js32-submit");
+    const std::string js32AfterSubmit =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS32 submit event stays cancelable with null relatedTarget",
+        js32SubmitClick && gxos::apps::Navigator::SmokeCurrentUrl() ==
+            js32FixtureUrl && contains(js32AfterSubmit, "submitNull=true") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("submit=") + yesNo(js32SubmitClick) + ",url=" +
+        gxos::apps::Navigator::SmokeCurrentUrl());
+
+    const bool js32NavigatedAway =
+        gxos::apps::Navigator::SmokeNavigateToQuiet("about:navigator");
+    const bool js32Reloaded =
+        gxos::apps::Navigator::SmokeNavigateToQuiet(js32FixtureUrl);
+    const std::string js32AfterReload =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS32 navigation replacement clears old focus and listener state",
+        js32NavigatedAway && js32Reloaded && contains(js32AfterReload,
+            "initial:active=null:hasFocus=false") &&
+        gxos::apps::Navigator::SmokeJavaScriptHandlerCount() > 0u &&
+        gxos::apps::Navigator::SmokeJavaScriptListenerCount() > 0u &&
+        gxos::apps::Navigator::SmokeFocusedFormControlId().empty() &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("away=") + yesNo(js32NavigatedAway) + ",reload=" +
+        yesNo(js32Reloaded) + ",focused=" +
+        gxos::apps::Navigator::SmokeFocusedFormControlId());
+
     bool cssInlineLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-inline.html");
     std::string cssInlineText = gxos::apps::Navigator::SmokeCurrentDocumentText();
     std::string cssInlineReport = gxos::apps::Navigator::SmokeRuntimeReport();

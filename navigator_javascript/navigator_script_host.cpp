@@ -145,7 +145,8 @@ bool NavigatorScriptHostAdapter::allowsReentrantCall(
     return methodId == kNavigatorFocusMethod ||
         methodId == kNavigatorBlurMethod ||
         methodId == kNavigatorClickMethod ||
-        methodId == kNavigatorResetMethod;
+        methodId == kNavigatorResetMethod ||
+        methodId == kNavigatorHasFocusMethod;
 }
 
 std::size_t NavigatorScriptHostAdapter::callbackLimit() const
@@ -381,7 +382,7 @@ bool NavigatorScriptHostAdapter::dispatchClick(RuntimeContext& runtime,
     const HostObjectReference target{
         serial, generation_, kNavigatorElementHostKind};
     return dispatchEvent(runtime, SourceView("click", 5u),
-        NavigatorScriptEventType::Click, target, SourceView(), SourceView(),
+        NavigatorScriptEventType::Click, target, 0u, SourceView(), SourceView(),
         true, error, defaultPrevented);
 }
 
@@ -456,13 +457,14 @@ bool NavigatorScriptHostAdapter::dispatchKeyboardEvent(
     return dispatchEvent(runtime, SourceView(typeText, down ? 7u : 5u),
         down ? NavigatorScriptEventType::Keydown :
             NavigatorScriptEventType::Keyup, target,
-        SourceView(key.data(), key.size()), SourceView(code.data(), code.size()),
-        false, error, defaultPrevented);
+        0u, SourceView(key.data(), key.size()),
+        SourceView(code.data(), code.size()), false, error, defaultPrevented);
 }
 
 bool NavigatorScriptHostAdapter::dispatchFocusEvent(
     RuntimeContext& runtime, HostInstanceId targetSerial, bool gained,
-    bool bubblingVariant, RuntimeErrorCode& error, bool* defaultPrevented)
+    bool bubblingVariant, HostInstanceId relatedTargetSerial,
+    RuntimeErrorCode& error, bool* defaultPrevented)
 {
     if (targetSerial == 0) {
         error = RuntimeErrorCode::StaleHostObject;
@@ -494,7 +496,8 @@ bool NavigatorScriptHostAdapter::dispatchFocusEvent(
     const HostObjectReference target{
         targetSerial, generation_, kNavigatorElementHostKind};
     return dispatchEvent(runtime, SourceView(typeText, typeLength), eventType,
-        target, SourceView(), SourceView(), false, error, defaultPrevented);
+        target, relatedTargetSerial, SourceView(), SourceView(), false, error,
+        defaultPrevented);
 }
 
 bool NavigatorScriptHostAdapter::dispatchInputEvent(
@@ -510,7 +513,7 @@ bool NavigatorScriptHostAdapter::dispatchInputEvent(
     const HostObjectReference target{
         targetSerial, generation_, kNavigatorElementHostKind};
     return dispatchEvent(runtime, SourceView("input", 5u),
-        NavigatorScriptEventType::Input, target, SourceView(), SourceView(),
+        NavigatorScriptEventType::Input, target, 0u, SourceView(), SourceView(),
         false, error, defaultPrevented);
 }
 
@@ -527,7 +530,7 @@ bool NavigatorScriptHostAdapter::dispatchChangeEvent(
     const HostObjectReference target{
         targetSerial, generation_, kNavigatorElementHostKind};
     return dispatchEvent(runtime, SourceView("change", 6u),
-        NavigatorScriptEventType::Change, target, SourceView(), SourceView(),
+        NavigatorScriptEventType::Change, target, 0u, SourceView(), SourceView(),
         false, error, defaultPrevented);
 }
 
@@ -543,7 +546,7 @@ bool NavigatorScriptHostAdapter::dispatchSubmitEvent(
     const HostObjectReference target{
         formSerial, generation_, kNavigatorElementHostKind};
     return dispatchEvent(runtime, SourceView("submit", 6u),
-        NavigatorScriptEventType::Submit, target, SourceView(), SourceView(),
+        NavigatorScriptEventType::Submit, target, 0u, SourceView(), SourceView(),
         false, error, defaultPrevented);
 }
 
@@ -568,7 +571,7 @@ bool NavigatorScriptHostAdapter::requestFormReset(
     const bool dispatched = dispatchEvent(runtime, SourceView("reset", 5u),
         NavigatorScriptEventType::Reset,
         HostObjectReference{formSerial, generation_, kNavigatorElementHostKind},
-        SourceView(), SourceView(), false, error, &resetDefaultPrevented);
+        0u, SourceView(), SourceView(), false, error, &resetDefaultPrevented);
     if (defaultPrevented != nullptr) *defaultPrevented = resetDefaultPrevented;
 
     // A reset listener may replace the document. Never apply the old
@@ -623,7 +626,8 @@ bool NavigatorScriptHostAdapter::setFormControlFromUser(
 
 bool NavigatorScriptHostAdapter::dispatchEvent(RuntimeContext& runtime,
     SourceView type, NavigatorScriptEventType eventType,
-    const HostObjectReference& target, SourceView key, SourceView code,
+    const HostObjectReference& target, HostInstanceId relatedTargetSerial,
+    SourceView key, SourceView code,
     bool includeOnclick, RuntimeErrorCode& error, bool* defaultPrevented)
 {
     error = RuntimeErrorCode::None;
@@ -693,6 +697,17 @@ bool NavigatorScriptHostAdapter::dispatchEvent(RuntimeContext& runtime,
     if (!hasDispatchableHandler) return true;
 
     const HostGenerationId dispatchGeneration = generation_;
+    HostObjectReference relatedTargetReference;
+    const HostObjectReference* relatedTarget = nullptr;
+    // The transition seam supplies a logical serial, not a native pointer.
+    // Resolve it against the current document for each dispatch and fail
+    // closed to the existing null sentinel if the opposite side has already
+    // become stale.
+    if (relatedTargetSerial != 0 && findElement(relatedTargetSerial) != nullptr) {
+        relatedTargetReference = HostObjectReference{
+            relatedTargetSerial, dispatchGeneration, kNavigatorElementHostKind};
+        relatedTarget = &relatedTargetReference;
+    }
     const bool previousClickDispatchActive = clickDispatchActive_;
     clickDispatchActive_ = true;
     if (!runtime.beginEventDispatch()) {
@@ -711,7 +726,7 @@ bool NavigatorScriptHostAdapter::dispatchEvent(RuntimeContext& runtime,
     if (!runtime.createOrUpdateEventObject(type, target,
             HostObjectReference{propagationPath[0].serial,
                 dispatchGeneration, propagationPath[0].kind}, key, code,
-            bubbles, cancelable, event, error)) {
+            bubbles, cancelable, relatedTarget, event, error)) {
         runtime.endEventDispatch();
         clickDispatchActive_ = previousClickDispatchActive;
         return false;
@@ -768,7 +783,8 @@ bool NavigatorScriptHostAdapter::dispatchEvent(RuntimeContext& runtime,
             current.serial, dispatchGeneration, current.kind};
         RuntimeErrorCode eventError = RuntimeErrorCode::None;
         if (!runtime.createOrUpdateEventObject(type, target, currentTarget,
-                key, code, bubbles, cancelable, event, eventError)) {
+                key, code, bubbles, cancelable, relatedTarget, event,
+                eventError)) {
             if (firstError == RuntimeErrorCode::None) firstError = eventError;
             succeeded = false;
             dispatchAborted = true;
@@ -805,7 +821,8 @@ bool NavigatorScriptHostAdapter::dispatchEvent(RuntimeContext& runtime,
             current.serial, dispatchGeneration, current.kind};
         RuntimeErrorCode eventError = RuntimeErrorCode::None;
         if (!runtime.createOrUpdateEventObject(type, target, currentTarget,
-                key, code, bubbles, cancelable, event, eventError)) {
+                key, code, bubbles, cancelable, relatedTarget, event,
+                eventError)) {
             if (firstError == RuntimeErrorCode::None) firstError = eventError;
             succeeded = false;
             dispatchAborted = true;
@@ -1522,6 +1539,10 @@ HostResult NavigatorScriptHostAdapter::getProperty(
             }
             return HostResult();
         }
+        if (textEquals(property, "hasFocus")) {
+            result = HostValue::method(kNavigatorHasFocusMethod, true);
+            return HostResult();
+        }
         if (textEquals(property, "addEventListener")) {
             result = HostValue::method(kNavigatorAddEventListenerMethod, true,
                 true);
@@ -2045,6 +2066,15 @@ HostResult NavigatorScriptHostAdapter::callInternal(
         result = HostValue::undefined();
         return HostResult();
     }
+    if (methodId == kNavigatorHasFocusMethod) {
+        if (receiver->kind != kNavigatorDocumentHostKind ||
+            argumentCount != 0u) return HostResult{HostResultCode::InvalidValue};
+        // Navigator has no separate OS/window focus owner. The narrow,
+        // authoritative meaning is therefore a valid current-document form
+        // focus owner, exactly the same projection used by activeElement.
+        result = HostValue::boolean(activeElementSerial() != 0);
+        return HostResult();
+    }
     if (methodId == kNavigatorAddEventListenerMethod) {
         if ((receiver->kind != kNavigatorElementHostKind &&
                 receiver->kind != kNavigatorDocumentHostKind) ||
@@ -2468,8 +2498,8 @@ bool NavigatorScriptExecutionHarness::focusElementInternal(
     const std::uint64_t previousSerial = focusedElementSerial_;
     if (previousSerial != 0) {
         if (!adapter_.dispatchFocusEvent(runtime_, previousSerial, false, false,
-                error) || !adapter_.dispatchFocusEvent(runtime_, previousSerial,
-                false, true, error)) return false;
+                serial, error) || !adapter_.dispatchFocusEvent(runtime_,
+                previousSerial, false, true, serial, error)) return false;
         bool changed = false;
         if (!adapter_.commitFormEditSession(previousSerial, changed))
             changed = false;
@@ -2492,8 +2522,10 @@ bool NavigatorScriptExecutionHarness::focusElementInternal(
             break;
         }
     }
-    if (!adapter_.dispatchFocusEvent(runtime_, serial, true, false, error) ||
-        !adapter_.dispatchFocusEvent(runtime_, serial, true, true, error))
+    if (!adapter_.dispatchFocusEvent(runtime_, serial, true, false,
+            previousSerial, error) ||
+        !adapter_.dispatchFocusEvent(runtime_, serial, true, true,
+            previousSerial, error))
         return false;
     return true;
 }
@@ -2505,8 +2537,8 @@ bool NavigatorScriptExecutionHarness::clearFocusInternal(
     if (focusedElementSerial_ == 0) return true;
     const std::uint64_t previousSerial = focusedElementSerial_;
     if (!adapter_.dispatchFocusEvent(runtime_, previousSerial, false, false,
-            error) || !adapter_.dispatchFocusEvent(runtime_, previousSerial,
-            false, true, error)) return false;
+            0, error) || !adapter_.dispatchFocusEvent(runtime_, previousSerial,
+            false, true, 0, error)) return false;
     bool changed = false;
     if (!adapter_.commitFormEditSession(previousSerial, changed))
         changed = false;

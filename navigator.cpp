@@ -319,13 +319,13 @@ bool Navigator::dispatchJavaScriptKeyboardEvent(int keyCode,
 }
 
 bool Navigator::dispatchJavaScriptFocusEvent(std::uint64_t targetSerial,
-	bool gained, bool bubblingVariant)
+    bool gained, bool bubblingVariant, std::uint64_t relatedTargetSerial)
 {
 	if (targetSerial == 0 || s_scriptHostAdapter.document() != &s_currentDoc ||
 		!s_scriptRuntime.builtInsInitialized()) return false;
-	RuntimeErrorCode error = RuntimeErrorCode::None;
-	if (!s_scriptHostAdapter.dispatchFocusEvent(s_scriptRuntime, targetSerial,
-		gained, bubblingVariant, error)) {
+    RuntimeErrorCode error = RuntimeErrorCode::None;
+    if (!s_scriptHostAdapter.dispatchFocusEvent(s_scriptRuntime, targetSerial,
+        gained, bubblingVariant, relatedTargetSerial, error)) {
 		recordJavaScriptError(gained ? (bubblingVariant ? "focusin" : "focus") :
 			(bubblingVariant ? "focusout" : "blur"), error);
 	}
@@ -18303,8 +18303,8 @@ void Navigator::clearDocumentFocusInternal(bool recomputeStyles,
 	if (previousSerial != 0) {
 		// JS24 deliberately exposes the established Navigator ordering: the
 		// non-bubbling loss event is delivered before its bubbling counterpart.
-		dispatchJavaScriptFocusEvent(previousSerial, false, false);
-		dispatchJavaScriptFocusEvent(previousSerial, false, true);
+		dispatchJavaScriptFocusEvent(previousSerial, false, false, 0);
+		dispatchJavaScriptFocusEvent(previousSerial, false, true, 0);
 		// Preserve JS24's loss ordering, then commit the edit session before the
 		// next control receives focus.
 		commitJavaScriptFormEdit(previousSerial);
@@ -18793,8 +18793,10 @@ void Navigator::focusDocumentInputInternal(int blockIndex, FormFocusOrigin origi
 	if (changed && previousSerial != 0) {
 		// Keep the focus owner Navigator-owned. The old element receives its
 		// complete loss notification before the new owner is installed.
-		dispatchJavaScriptFocusEvent(previousSerial, false, false);
-		dispatchJavaScriptFocusEvent(previousSerial, false, true);
+		dispatchJavaScriptFocusEvent(previousSerial, false, false,
+			block.formControl.logicalSerial);
+		dispatchJavaScriptFocusEvent(previousSerial, false, true,
+			block.formControl.logicalSerial);
 		// Preserve JS24's loss ordering, then commit the edit session before the
 		// next control receives focus.
 		commitJavaScriptFormEdit(previousSerial);
@@ -18822,8 +18824,10 @@ void Navigator::focusDocumentInputInternal(int blockIndex, FormFocusOrigin origi
 	if (changed && isFocusedFormControl(block)) {
 		// The gain notification is emitted only after the authoritative owner and
 		// its style-validity checkpoint both agree that this element is focused.
-		dispatchJavaScriptFocusEvent(block.formControl.logicalSerial, true, false);
-		dispatchJavaScriptFocusEvent(block.formControl.logicalSerial, true, true);
+		dispatchJavaScriptFocusEvent(block.formControl.logicalSerial, true, false,
+			previousSerial);
+		dispatchJavaScriptFocusEvent(block.formControl.logicalSerial, true, true,
+			previousSerial);
 	}
 	revealFocusedFormControl(blockIndex);
 }
