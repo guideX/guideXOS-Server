@@ -167,6 +167,9 @@ typedef struct gx_host_calls {
     gx_result (GX_CALL *native_window_set_text)(gx_app_context* ctx, gx_handle window, const char* text);
     gx_result (GX_CALL *native_window_destroy)(gx_app_context* ctx, gx_handle window);
     gx_result (GX_CALL *native_window_run)(gx_app_context* ctx, gx_handle window);
+    /* Appended asynchronous Run cancellation. Kept after the existing GUI
+     * slots so every earlier host-call offset remains stable. */
+    gx_result (GX_CALL *bare_metal_development_run_cancel)(gx_app_context* ctx, gx_development_run_handle handle);
 } gx_host_calls;
 
 #ifdef __cplusplus

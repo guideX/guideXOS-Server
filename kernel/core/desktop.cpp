@@ -37,6 +37,9 @@
 #include "include/kernel/ramdisk.h"
 #include "include/kernel/block_device.h"
 #if defined(GXOS_BARE_METAL)
+#include "native_elf/native_elf_scheduler.h"
+#endif
+#if defined(GXOS_BARE_METAL)
 #include "include/kernel/app_launch_target_resolver.h"
 #endif
 #if !defined(GXOS_BARE_METAL)
@@ -8416,6 +8419,14 @@ void tick()
     
     // Update taskbar buttons for kernel apps
     compositor::TaskbarManager::updateButtons();
+
+    // The bare-metal NativeElf Run service owns at most one cooperative target
+    // context.  Give it one bounded slice from the normal desktop scheduler
+    // boundary; a target-side tick is ignored by the scheduler guard.
+#if defined(GXOS_BARE_METAL)
+    if (!kernel::native_elf::NativeElfRunService::native_elf_scheduler_in_target())
+        (void)kernel::native_elf::NativeElfRunService::native_elf_scheduler_pump();
+#endif
 }
 
 void record_cpu_busy_ticks(uint64_t tickCount)

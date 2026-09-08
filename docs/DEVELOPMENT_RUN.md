@@ -90,3 +90,11 @@ temporary registration model and Phase 27W QEMU evidence, is documented in
 The compiler-built NativeElf GUI extension and its Phase 27X evidence are
 documented in
 `docs/DEVELOPER_STUDIO_PHASE27X_COMPILER_BUILT_GUI_APPLICATION.md`.
+
+Phase 27Y moves the bare-metal NativeElf target behind a bounded cooperative
+execution owner. `start()` returns after the first target yield while the
+compiler-built GUI remains alive, and the owner can poll, request production
+compositor close, request safe cooperative cancellation, observe completion,
+and rerun after cleanup. Its lifecycle, generation, stale-build, race, and
+QEMU proof are documented in
+`docs/DEVELOPER_STUDIO_PHASE27Y_ASYNC_RUN_OWNERSHIP.md`.

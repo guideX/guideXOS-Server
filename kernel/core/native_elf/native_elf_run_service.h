@@ -17,9 +17,11 @@ gx_result prepare(const gx_development_run_request& request,
                   gx_development_run_handle* outHandle,
                   gx_development_run_snapshot* outSnapshot);
 gx_result start(gx_development_run_handle handle);
+gx_result pump(gx_development_run_handle handle);
 gx_result poll(gx_development_run_handle handle,
                gx_development_run_snapshot* outSnapshot);
 gx_result request_close(gx_development_run_handle handle);
+gx_result cancel(gx_development_run_handle handle);
 gx_result release(gx_development_run_handle handle);
 
 } // namespace NativeElfRunService

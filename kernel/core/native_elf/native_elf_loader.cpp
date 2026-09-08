@@ -5,6 +5,7 @@
 #include "native_elf_loader.h"
 
 #include "native_elf_executor.h"
+#include "native_elf_scheduler.h"
 #include "../compiler/compiler_build_service.h"
 #include "native_elf_run_service.h"
 #include "arch/amd64.h"
@@ -543,8 +544,8 @@ static gx_result GX_CALL host_native_window_run(gx_app_context* context,
     if (!native_window_valid(context, window)) return GX_ERROR_INVALID_ARGUMENT;
 
     // This is the same desktop/compositor path used by the kernel's main
-    // loop.  The NativeElf call remains synchronous, but it yields between
-    // pumps so input, compositor repaint, and scheduler bookkeeping proceed.
+    // loop.  An asynchronous Run owner suspends at each bounded pump; the
+    // legacy direct-loader route retains its synchronous lifetime.
     desktop::draw();
     while (native_window_valid(context, window)) {
         desktop::cooperative_yield();
@@ -566,7 +567,10 @@ static gx_result GX_CALL host_native_window_run(gx_app_context* context,
             s_guiWindowCreated = false;
         }
         if (!native_window_valid(context, window)) break;
-        arch::halt();
+        // A service-owned asynchronous run must return the CPU to its owner
+        // after each bounded pump.  The legacy direct-loader route has no
+        // owner, so it retains the interrupt-driven halt behavior.
+        if (!NativeElfRunService::native_elf_scheduler_yield()) arch::halt();
     }
     serial::puts(s_guiClosedNormally ? "NativeElf: close_complete normal\n"
                                      : "NativeElf: close_complete abnormal\n");
@@ -683,6 +687,13 @@ static gx_result GX_CALL host_bare_run_request_close(gx_app_context* context,
     return NativeElfRunService::request_close(handle);
 }
 
+static gx_result GX_CALL host_bare_run_cancel(gx_app_context* context,
+                                               gx_development_run_handle handle)
+{
+    if (!app_context_valid(context)) return GX_ERROR_PERMISSION_DENIED;
+    return NativeElfRunService::cancel(handle);
+}
+
 static gx_result GX_CALL host_bare_run_release(gx_app_context* context,
                                                 gx_development_run_handle handle)
 {
@@ -794,6 +805,7 @@ static void initialize_app_context()
     s_appRuntime.hostCalls.native_window_set_text = host_native_window_set_text;
     s_appRuntime.hostCalls.native_window_destroy = host_native_window_destroy;
     s_appRuntime.hostCalls.native_window_run = host_native_window_run;
+    s_appRuntime.hostCalls.bare_metal_development_run_cancel = host_bare_run_cancel;
 
     s_appRuntime.appContext = {};
     s_appRuntime.appContext.size = sizeof(gx_app_context);
@@ -1058,6 +1070,22 @@ bool native_elf_gui_runtime_snapshot(NativeElfGuiRuntimeSnapshot* output)
     output->generation = s_guiGeneration;
     output->contentHash = s_guiContentHash;
     copy_bounded_text(output->content, sizeof(output->content), s_guiContent);
+    return true;
+}
+
+bool request_native_elf_gui_close(uint64_t generation)
+{
+    if (generation == 0 || generation != s_guiGeneration || !s_guiApplication) return false;
+    if (s_guiClosedNormally || !s_guiApplication->getWindow()) return s_guiClosedNormally;
+    if (s_guiWindowId == 0) return false;
+
+    s_guiCloseLifecycleRequested = true;
+    serial::puts("NativeElf: external_close_request id=");
+    serial::put_hex32(s_guiWindowId);
+    serial::putc('\n');
+    if (!compositor::KernelCompositor::requestCloseWindow(s_guiWindowId)) return false;
+    s_guiLastDestroyedWindow = s_guiWindowId;
+    s_guiWindowCreated = false;
     return true;
 }
 

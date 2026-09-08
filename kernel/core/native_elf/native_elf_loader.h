@@ -84,6 +84,10 @@ void clear_development_identity();
 void set_gui_automation_close(bool enabled);
 bool native_elf_gui_runtime_snapshot(NativeElfGuiRuntimeSnapshot* output);
 
+// Request the current generation's normal compositor close path.  This is an
+// owner-side control operation; it never destroys an application stack.
+bool request_native_elf_gui_close(uint64_t generation);
+
 // Loads one validated ET_EXEC NativeElf file into the reusable reserved
 // window, invokes its validated gx_main(gx_app_context*) entry on the
 // dedicated bootstrap stack, and returns only after control has returned to

@@ -21,7 +21,7 @@ namespace native_elf {
 namespace {
 
 static uint8_t s_invalidImage[guidexos::native_elf::MAX_ELF_FILE_BYTES];
-#if defined(GXOS_PHASE27G_SMOKE) || defined(GXOS_PHASE27H_SMOKE) || defined(GXOS_PHASE27I_SMOKE) || defined(GXOS_PHASE27J_SMOKE) || defined(GXOS_PHASE27K_SMOKE) || defined(GXOS_PHASE27L_SMOKE) || defined(GXOS_PHASE27M_SMOKE) || defined(GXOS_PHASE27P_SMOKE) || defined(GXOS_PHASE27R_SMOKE) || defined(GXOS_PHASE27S_SMOKE) || defined(GXOS_PHASE27T_SMOKE) || defined(GXOS_PHASE27U_SMOKE) || defined(GXOS_PHASE27V_SMOKE) || defined(GXOS_PHASE27W_SMOKE) || defined(GXOS_PHASE27X_SMOKE)
+#if defined(GXOS_PHASE27G_SMOKE) || defined(GXOS_PHASE27H_SMOKE) || defined(GXOS_PHASE27I_SMOKE) || defined(GXOS_PHASE27J_SMOKE) || defined(GXOS_PHASE27K_SMOKE) || defined(GXOS_PHASE27L_SMOKE) || defined(GXOS_PHASE27M_SMOKE) || defined(GXOS_PHASE27P_SMOKE) || defined(GXOS_PHASE27R_SMOKE) || defined(GXOS_PHASE27S_SMOKE) || defined(GXOS_PHASE27T_SMOKE) || defined(GXOS_PHASE27U_SMOKE) || defined(GXOS_PHASE27V_SMOKE) || defined(GXOS_PHASE27W_SMOKE) || defined(GXOS_PHASE27X_SMOKE) || defined(GXOS_PHASE27Y_SMOKE)
 static uint8_t s_compareImage[guidexos::native_elf::MAX_ELF_FILE_BYTES];
 #endif
 
@@ -169,7 +169,7 @@ static bool emit_serial_artifact(const char* path, const char* name)
     return true;
 }
 
-#if defined(GXOS_PHASE27G_SMOKE) || defined(GXOS_PHASE27H_SMOKE) || defined(GXOS_PHASE27I_SMOKE) || defined(GXOS_PHASE27J_SMOKE) || defined(GXOS_PHASE27K_SMOKE) || defined(GXOS_PHASE27L_SMOKE) || defined(GXOS_PHASE27M_SMOKE) || defined(GXOS_PHASE27P_SMOKE) || defined(GXOS_PHASE27R_SMOKE) || defined(GXOS_PHASE27S_SMOKE) || defined(GXOS_PHASE27T_SMOKE) || defined(GXOS_PHASE27U_SMOKE) || defined(GXOS_PHASE27V_SMOKE) || defined(GXOS_PHASE27W_SMOKE) || defined(GXOS_PHASE27X_SMOKE)
+#if defined(GXOS_PHASE27G_SMOKE) || defined(GXOS_PHASE27H_SMOKE) || defined(GXOS_PHASE27I_SMOKE) || defined(GXOS_PHASE27J_SMOKE) || defined(GXOS_PHASE27K_SMOKE) || defined(GXOS_PHASE27L_SMOKE) || defined(GXOS_PHASE27M_SMOKE) || defined(GXOS_PHASE27P_SMOKE) || defined(GXOS_PHASE27R_SMOKE) || defined(GXOS_PHASE27S_SMOKE) || defined(GXOS_PHASE27T_SMOKE) || defined(GXOS_PHASE27U_SMOKE) || defined(GXOS_PHASE27V_SMOKE) || defined(GXOS_PHASE27W_SMOKE) || defined(GXOS_PHASE27X_SMOKE) || defined(GXOS_PHASE27Y_SMOKE)
 static bool same_vfs_file_bytes(const char* leftPath, const char* rightPath)
 {
     vfs::FileInfo left = {};
@@ -467,19 +467,30 @@ static bool run_phase27x_session(const gx_build_snapshot& build,
 
     set_gui_automation_close(true);
     const bool started = NativeElfRunService::start(handle) == GX_OK;
+    gx_development_run_snapshot startedSnapshot = {};
+    startedSnapshot.size = sizeof(startedSnapshot);
+    const bool startReturnedRunning = started &&
+        NativeElfRunService::poll(handle, &startedSnapshot) == GX_OK &&
+        startedSnapshot.state == GX_DEVELOPMENT_RUN_RUNNING;
+    // Phase 27X predates the externally-owned scheduler proof, but its GUI
+    // regression must now explicitly advance one owner-controlled slice before
+    // asking the automation close path to finish the target.
+    const bool advancedAfterStart = startReturnedRunning &&
+        NativeElfRunService::pump(handle) == GX_OK;
     set_gui_automation_close(false);
     gx_development_run_snapshot completed = {};
     completed.size = sizeof(completed);
     const bool polled = started && NativeElfRunService::poll(handle, &completed) == GX_OK;
     NativeElfGuiRuntimeSnapshot gui = {};
     const bool proof = polled && native_elf_gui_runtime_snapshot(&gui);
-    const bool livePump = proof && gui.rendered && gui.renderCount > 0 && gui.pumpCount >= 2;
+    const bool livePump = startReturnedRunning && advancedAfterStart && proof &&
+        gui.rendered && gui.renderCount > 0 && gui.pumpCount >= 2;
     const bool normalClose = proof && gui.applicationCreated && gui.windowCreated &&
         gui.closedNormally && equal_text(gui.content, expectedContent) &&
         gui.generation == static_cast<uint64_t>(handle) && gui.windowId != 0 &&
         compositor::KernelCompositor::getWindow(gui.windowId) == nullptr &&
         compositor::KernelCompositor::getWindowCount() == 0;
-    if (running) *running = livePump;
+    if (running) *running = startReturnedRunning;
     if (closed) *closed = normalClose;
     const bool release = polled && NativeElfRunService::release(handle) == GX_OK;
     if (cleaned) *cleaned = release && completed.cleanupComplete != 0 &&
@@ -497,6 +508,259 @@ static bool phase27x_failed_build_blocks_run(const gx_build_snapshot& build)
         handle == 0 && snapshot.state == GX_DEVELOPMENT_RUN_FAILED &&
         snapshot.errorCode == GX_DEVELOPMENT_RUN_ERROR_UNSUPPORTED_TARGET;
     return rejected && !NativeElfDevelopmentAppModel::has_active_registration();
+}
+#endif
+
+#if defined(GXOS_PHASE27Y_SMOKE)
+static bool run_phase27y_build(gx_build_snapshot* snapshot)
+{
+    gx_build_request request = {};
+    request.size = sizeof(request);
+    request.version = GX_BUILD_API_VERSION;
+    request.projectRoot = "/P27Y";
+    request.projectId = "dev.guidexos.phase27y";
+    request.projectKind = "native-gui-application";
+    request.targetProfile = "guidexos.amd64.baremetal.bootstrap.native";
+    request.buildSystem = "guidexos-native-baremetal-bootstrap-v1";
+    request.buildScript = "";
+    request.expectedArtifact = "build/bin/amd64/p27y.elf";
+    request.configuration = "Debug";
+    gx_build_handle handle = 0;
+    if (compiler::BareMetalBuildService::start(&request, &handle) != GX_OK) return false;
+    gx_build_snapshot local = {};
+    const bool polled = compiler::BareMetalBuildService::poll(handle, &local) == GX_OK;
+    const bool released = compiler::BareMetalBuildService::release(handle) == GX_OK;
+    if (snapshot) *snapshot = local;
+    return polled && released;
+}
+
+static gx_development_run_request phase27y_run_request(const gx_build_snapshot& build)
+{
+    gx_development_run_request request = {};
+    request.size = sizeof(request);
+    request.version = GX_DEVELOPMENT_RUN_API_VERSION;
+    request.projectRoot = "/P27Y";
+    request.projectId = "dev.guidexos.phase27y";
+    request.projectKind = "native-gui-application";
+    request.targetProfile = "guidexos.amd64.baremetal.bootstrap.native";
+    request.manifestPath = "app/app.json";
+    request.artifactPath = build.artifactPath;
+    request.artifactSha256 = build.artifactSha256;
+    request.flags = 0;
+    request.artifactSize = build.artifactSize;
+    request.artifactArchitecture = build.artifactArchitecture;
+    request.artifactAbi = "guidexos-c-abi-v1";
+    return request;
+}
+
+static bool run_phase27y_session(const gx_build_snapshot& build,
+                                 const char* expectedContent,
+                                 bool cancellation,
+                                 gx_development_run_handle staleHandle,
+                                 gx_development_run_handle* outHandle,
+                                 bool* deployed,
+                                 bool* startReturned,
+                                 bool* running,
+                                 bool* ownerActive,
+                                 bool* alreadyRunningRejected,
+                                 bool* staleHandleRejected,
+                                 bool* closeRequested,
+                                 bool* completed,
+                                 bool* completionBeforePoll,
+                                 bool* cleaned)
+{
+    if (outHandle) *outHandle = 0;
+    if (deployed) *deployed = false;
+    if (startReturned) *startReturned = false;
+    if (running) *running = false;
+    if (ownerActive) *ownerActive = false;
+    if (alreadyRunningRejected) *alreadyRunningRejected = false;
+    if (staleHandleRejected) *staleHandleRejected = false;
+    if (closeRequested) *closeRequested = false;
+    if (completed) *completed = false;
+    if (completionBeforePoll) *completionBeforePoll = false;
+    if (cleaned) *cleaned = false;
+
+    gx_development_run_request request = phase27y_run_request(build);
+    gx_development_run_handle handle = 0;
+    gx_development_run_snapshot prepared = {};
+    prepared.size = sizeof(prepared);
+    const gx_result prepareResult = NativeElfRunService::prepare(request, &handle, &prepared);
+    if (prepareResult != GX_OK || handle == 0) return false;
+    if (outHandle) *outHandle = handle;
+    const bool registration = prepared.state == GX_DEVELOPMENT_RUN_REGISTERED &&
+        prepared.errorCode == GX_DEVELOPMENT_RUN_ERROR_NONE && prepared.cleanupComplete == 0 &&
+        prepared.generation == static_cast<uint64_t>(handle) &&
+        equal_text(prepared.applicationId, request.projectId);
+    const bool firstEvidence = equal_text(expectedContent, "27Y GUI 27");
+    if (deployed) *deployed = registration;
+    if (firstEvidence && registration)
+        serial::puts("DEVELOPER_STUDIO_PHASE27Y_DEPLOY_PASS\n");
+
+    gx_development_run_handle duplicateHandle = 0;
+    gx_development_run_snapshot duplicate = {};
+    duplicate.size = sizeof(duplicate);
+    const bool duplicateCall = NativeElfRunService::prepare(request, &duplicateHandle, &duplicate) == GX_OK;
+    const bool busyRejected = duplicateCall && duplicateHandle == 0 &&
+        duplicate.state == GX_DEVELOPMENT_RUN_FAILED &&
+        duplicate.errorCode == GX_DEVELOPMENT_RUN_ERROR_RUNTIME_BUSY &&
+        NativeElfDevelopmentAppModel::has_active_registration();
+    if (alreadyRunningRejected) *alreadyRunningRejected = busyRejected;
+    if (firstEvidence && busyRejected)
+        serial::puts("DEVELOPER_STUDIO_PHASE27Y_BUSY_REJECT_PASS\n");
+
+    set_gui_automation_close(false);
+    const bool started = NativeElfRunService::start(handle) == GX_OK;
+    gx_development_run_snapshot startedSnapshot = {};
+    startedSnapshot.size = sizeof(startedSnapshot);
+    const bool returnedRunning = started && NativeElfRunService::poll(handle, &startedSnapshot) == GX_OK &&
+        startedSnapshot.state == GX_DEVELOPMENT_RUN_RUNNING &&
+        startedSnapshot.generation == static_cast<uint64_t>(handle);
+    if (startReturned) *startReturned = returnedRunning;
+    if (firstEvidence && returnedRunning)
+        serial::puts("DEVELOPER_STUDIO_PHASE27Y_START_PASS\nDEVELOPER_STUDIO_PHASE27Y_START_RETURNED\n");
+
+    NativeElfGuiRuntimeSnapshot gui = {};
+    const bool guiSnapshot = returnedRunning && native_elf_gui_runtime_snapshot(&gui);
+    const bool live = guiSnapshot && gui.active && gui.applicationCreated && gui.windowCreated &&
+        gui.rendered && gui.renderCount > 0 && gui.windowId != 0 &&
+        gui.generation == static_cast<uint64_t>(handle) && equal_text(gui.content, expectedContent);
+    if (running) *running = live;
+    if (firstEvidence && live)
+        serial::puts("DEVELOPER_STUDIO_PHASE27Y_RUNNING_PASS\nDEVELOPER_STUDIO_PHASE27Y_RENDER_27_PASS\n");
+    if (!firstEvidence && live)
+        serial::puts("DEVELOPER_STUDIO_PHASE27Y_RENDER_28_PASS\n");
+
+    static uint32_t ownerHeartbeat = 0;
+    const uint32_t heartbeatBefore = ownerHeartbeat;
+    ++ownerHeartbeat;
+    gx_development_run_snapshot ownerSnapshot = {};
+    ownerSnapshot.size = sizeof(ownerSnapshot);
+    const bool ownerWork = NativeElfRunService::poll(handle, &ownerSnapshot) == GX_OK;
+    const bool ownerProof = live && ownerWork && ownerHeartbeat != heartbeatBefore &&
+        ownerSnapshot.state == GX_DEVELOPMENT_RUN_RUNNING;
+    if (ownerActive) *ownerActive = ownerProof;
+    if (firstEvidence && ownerProof)
+        serial::puts("DEVELOPER_STUDIO_PHASE27Y_OWNER_ACTIVE_PASS\n");
+
+    bool staleRejected = staleHandle == 0;
+    if (staleHandle != 0) {
+        const bool oldClose = NativeElfRunService::request_close(staleHandle) == GX_ERROR_FAILED;
+        const bool oldCancel = NativeElfRunService::cancel(staleHandle) == GX_ERROR_FAILED;
+        gx_development_run_snapshot stillCurrent = {};
+        stillCurrent.size = sizeof(stillCurrent);
+        staleRejected = oldClose && oldCancel &&
+            NativeElfRunService::poll(handle, &stillCurrent) == GX_OK &&
+            stillCurrent.state == GX_DEVELOPMENT_RUN_RUNNING &&
+            stillCurrent.generation == static_cast<uint64_t>(handle);
+    }
+    if (staleHandleRejected) *staleHandleRejected = staleRejected;
+    if (!firstEvidence && staleRejected)
+        serial::puts("DEVELOPER_STUDIO_PHASE27Y_STALE_HANDLE_PASS\n");
+
+    const gx_result closeResult = cancellation
+        ? NativeElfRunService::cancel(handle)
+        : NativeElfRunService::request_close(handle);
+    gx_development_run_snapshot requested = {};
+    requested.size = sizeof(requested);
+    const bool requestedSnapshot = NativeElfRunService::poll(handle, &requested) == GX_OK;
+    const bool requestObserved = closeResult == GX_OK && requestedSnapshot &&
+        (cancellation ? requested.cancellationRequested != 0 : requested.closeRequested != 0);
+    if (closeRequested) *closeRequested = requestObserved;
+    if (firstEvidence && requestObserved)
+        serial::puts("DEVELOPER_STUDIO_PHASE27Y_CLOSE_REQUEST_PASS\n");
+    // A second close/cancel is intentionally issued after the first owner-side
+    // request.  Terminal handling makes this idempotent and race-safe.
+    const gx_result duplicateClose = cancellation
+        ? NativeElfRunService::cancel(handle)
+        : NativeElfRunService::request_close(handle);
+
+    gx_development_run_snapshot finished = {};
+    finished.size = sizeof(finished);
+    const bool firstCompletionPoll = NativeElfRunService::poll(handle, &finished) == GX_OK;
+    const gx_development_run_state expectedState = cancellation
+        ? GX_DEVELOPMENT_RUN_CANCELLED : GX_DEVELOPMENT_RUN_COMPLETED;
+    const bool terminal = firstCompletionPoll && finished.state == expectedState &&
+        finished.cleanupComplete != 0 && finished.generation == static_cast<uint64_t>(handle);
+    if (completionBeforePoll) *completionBeforePoll = requestObserved && terminal;
+    if (firstEvidence && requestObserved && terminal)
+        serial::puts("DEVELOPER_STUDIO_PHASE27Y_COMPLETION_BEFORE_POLL_PASS\n");
+
+    NativeElfGuiRuntimeSnapshot finishedGui = {};
+    const bool guiFinished = native_elf_gui_runtime_snapshot(&finishedGui);
+    const bool normalLifecycle = guiFinished && finishedGui.closedNormally &&
+        finishedGui.generation == static_cast<uint64_t>(handle) &&
+        equal_text(finishedGui.content, expectedContent) && !finishedGui.active &&
+        compositor::KernelCompositor::getWindowCount() == 0 && duplicateClose == GX_OK;
+    if (firstEvidence && normalLifecycle)
+        serial::puts("DEVELOPER_STUDIO_PHASE27Y_CLOSE_COMPLETE_PASS\n");
+    const bool released = terminal && NativeElfRunService::release(handle) == GX_OK;
+    const bool clean = released && !NativeElfDevelopmentAppModel::has_active_registration() &&
+        !finishedGui.active && compositor::KernelCompositor::getWindowCount() == 0;
+    if (firstEvidence && clean)
+        serial::puts("DEVELOPER_STUDIO_PHASE27Y_CLEANUP_PASS\n");
+    if (completed) *completed = terminal && (cancellation || normalLifecycle);
+    if (cleaned) *cleaned = clean;
+    return registration && busyRejected && returnedRunning && live && ownerProof && staleRejected &&
+        requestObserved && terminal && normalLifecycle && released && clean;
+}
+
+static bool phase27y_failed_build_blocks_run(const gx_build_snapshot& build)
+{
+    gx_development_run_request request = phase27y_run_request(build);
+    gx_development_run_handle handle = 0;
+    gx_development_run_snapshot snapshot = {};
+    snapshot.size = sizeof(snapshot);
+    const bool rejected = NativeElfRunService::prepare(request, &handle, &snapshot) == GX_OK &&
+        handle == 0 && snapshot.state == GX_DEVELOPMENT_RUN_FAILED &&
+        snapshot.errorCode == GX_DEVELOPMENT_RUN_ERROR_UNSUPPORTED_TARGET;
+    return rejected && !NativeElfDevelopmentAppModel::has_active_registration();
+}
+
+static bool phase27y_immediate_close_race(const gx_build_snapshot& build)
+{
+    gx_development_run_request request = phase27y_run_request(build);
+    gx_development_run_handle handle = 0;
+    gx_development_run_snapshot prepared = {};
+    prepared.size = sizeof(prepared);
+    if (NativeElfRunService::prepare(request, &handle, &prepared) != GX_OK || handle == 0)
+        return false;
+
+    // Do not poll or perform owner work between Start and the first close:
+    // this is the close-immediately-after-Start race.
+    const bool started = NativeElfRunService::start(handle) == GX_OK;
+    const bool close = started && NativeElfRunService::request_close(handle) == GX_OK;
+    const bool duplicateClose = close && NativeElfRunService::request_close(handle) == GX_OK;
+    gx_development_run_snapshot finished = {};
+    finished.size = sizeof(finished);
+    const bool terminal = close && NativeElfRunService::poll(handle, &finished) == GX_OK &&
+        finished.state == GX_DEVELOPMENT_RUN_COMPLETED && finished.closeRequested != 0 &&
+        finished.cleanupComplete != 0 && finished.generation == static_cast<uint64_t>(handle);
+    NativeElfGuiRuntimeSnapshot gui = {};
+    const bool guiClean = native_elf_gui_runtime_snapshot(&gui) && gui.closedNormally &&
+        !gui.active && compositor::KernelCompositor::getWindowCount() == 0;
+    const bool released = terminal && duplicateClose && NativeElfRunService::release(handle) == GX_OK;
+    return released && guiClean && !NativeElfDevelopmentAppModel::has_active_registration();
+}
+
+static bool phase27y_registered_cancel(const gx_build_snapshot& build)
+{
+    gx_development_run_request request = phase27y_run_request(build);
+    gx_development_run_handle handle = 0;
+    gx_development_run_snapshot prepared = {};
+    prepared.size = sizeof(prepared);
+    if (NativeElfRunService::prepare(request, &handle, &prepared) != GX_OK || handle == 0)
+        return false;
+    const bool cancelled = NativeElfRunService::cancel(handle) == GX_OK;
+    gx_development_run_snapshot finished = {};
+    finished.size = sizeof(finished);
+    const bool observed = cancelled && NativeElfRunService::poll(handle, &finished) == GX_OK &&
+        finished.state == GX_DEVELOPMENT_RUN_CANCELLED &&
+        finished.errorCode == GX_DEVELOPMENT_RUN_ERROR_CANCELLED &&
+        finished.cancellationRequested != 0 && finished.cleanupComplete != 0;
+    const bool released = observed && NativeElfRunService::release(handle) == GX_OK;
+    return released && !NativeElfDevelopmentAppModel::has_active_registration() &&
+        compositor::KernelCompositor::getWindowCount() == 0;
 }
 #endif
 
@@ -2561,7 +2825,7 @@ void run_bootstrap_execution_smoke()
         finished.size = sizeof(finished);
         const bool polled = NativeElfRunService::poll(handle, &finished) == GX_OK;
         const bool released = NativeElfRunService::release(handle) == GX_OK;
-        return polled && released && finished.state == GX_DEVELOPMENT_RUN_FAILED &&
+        return polled && released && finished.state == GX_DEVELOPMENT_RUN_CANCELLED &&
             finished.errorCode == GX_DEVELOPMENT_RUN_ERROR_CANCELLED &&
             finished.cleanupComplete != 0 && !NativeElfDevelopmentAppModel::has_active_registration();
     }();
@@ -2709,6 +2973,173 @@ void run_bootstrap_execution_smoke()
     serial::puts(phase27xPassed ?
         "ELF Loader: Phase 27X compiler-built GUI application smoke PASS\nDEVELOPER_STUDIO_PHASE27X_PASS\n" :
         "ELF Loader: Phase 27X compiler-built GUI application smoke FAIL\n");
+#endif
+#if defined(GXOS_PHASE27Y_SMOKE)
+    serial::puts("ELF Loader: Phase 27Y asynchronous Run ownership smoke begin\n");
+    serial::puts("DEVELOPER_STUDIO_PHASE27Y_BEGIN\n");
+    const char y27Header[] =
+        "extern int gx_window_create(int width, int height, char* title);\n"
+        "extern int gx_window_set_text(int window, char* text);\n"
+        "extern int gx_window_destroy(int window);\n"
+        "extern int gx_window_run(int window);\n"
+        "// declaration-set async A\n";
+    const char y27HeaderEdited[] =
+        "extern int gx_window_create(int width, int height, char* title);\n"
+        "extern int gx_window_set_text(int window, char* text);\n"
+        "extern int gx_window_destroy(int window);\n"
+        "extern int gx_window_run(int window);\n"
+        "// declaration-set async B\n";
+    const char y27Main27[] =
+        "#include \"guidexos_app.h\"\n"
+        "int gx_main(gx_app_context* ctx) { int window = gx_window_create(320, 180, \"Developer Studio Phase 27Y\"); "
+        "if (window == 0) return -1; if (gx_window_set_text(window, \"27Y GUI 27\") != 0) return -2; int result = gx_window_run(window); if (gx_window_destroy(window) != 0) return -3; return result; }\n";
+    const char y27Main28[] =
+        "#include \"guidexos_app.h\"\n"
+        "int gx_main(gx_app_context* ctx) { int window = gx_window_create(320, 180, \"Developer Studio Phase 27Y\"); "
+        "if (window == 0) return -1; if (gx_window_set_text(window, \"27Y GUI 28\") != 0) return -2; int result = gx_window_run(window); if (gx_window_destroy(window) != 0) return -3; return result; }\n";
+    const auto write_y27 = [](const char* path, const char* text) {
+        const bool written = path && text && vfs::write_file(path, text,
+            static_cast<uint32_t>(__builtin_strlen(text))) ==
+            static_cast<int32_t>(__builtin_strlen(text));
+        if (!written) {
+            serial::puts("phase27y_write_fail=");
+            serial::puts(path ? path : "<null>");
+            serial::puts("\n");
+        }
+        return written;
+    };
+    const bool fixture = write_y27("/P27Y/include/guidexos_app.h", y27Header) &&
+        write_y27("/P27Y/src/main.cpp", y27Main27);
+    static gx_build_snapshot y27Clean = {};
+    static gx_build_snapshot y27Warm = {};
+    static gx_build_snapshot y27Edited = {};
+    static gx_build_snapshot y27Failed = {};
+    static gx_build_snapshot y27Restored = {};
+    const bool cleanBuild = fixture && run_phase27y_build(&y27Clean) &&
+        y27Clean.state == GX_BUILD_SUCCEEDED && y27Clean.artifactValid != 0 &&
+        y27Clean.compiledModuleCount == 1 && y27Clean.cachedModuleCount == 0 &&
+        y27Clean.artifactSize != 0;
+    print_marker("phase27y_build_pass", cleanBuild);
+    if (cleanBuild) serial::puts("DEVELOPER_STUDIO_PHASE27Y_BUILD_PASS\n");
+
+    bool firstDeploy = false;
+    bool firstStartReturned = false;
+    bool firstRunning = false;
+    bool firstOwnerActive = false;
+    bool firstBusyRejected = false;
+    bool firstStaleHandleRejected = false;
+    bool firstCloseRequested = false;
+    bool firstCompleted = false;
+    bool firstCompletionBeforePoll = false;
+    bool firstCleanup = false;
+    gx_development_run_handle firstHandle = 0;
+    const bool firstRun = cleanBuild && run_phase27y_session(
+        y27Clean, "27Y GUI 27", false, 0, &firstHandle, &firstDeploy,
+        &firstStartReturned, &firstRunning, &firstOwnerActive, &firstBusyRejected,
+        &firstStaleHandleRejected, &firstCloseRequested, &firstCompleted,
+        &firstCompletionBeforePoll, &firstCleanup);
+    print_marker("phase27y_deploy_pass", firstDeploy);
+    print_marker("phase27y_start_pass", firstStartReturned);
+    print_marker("phase27y_running_pass", firstRunning);
+    print_marker("phase27y_render_27_pass", firstRunning);
+    print_marker("phase27y_owner_active_pass", firstOwnerActive);
+    print_marker("phase27y_busy_reject_pass", firstBusyRejected);
+    print_marker("phase27y_close_request_pass", firstCloseRequested);
+    print_marker("phase27y_completion_before_poll_pass", firstCompletionBeforePoll);
+    print_marker("phase27y_close_complete_pass", firstCompleted);
+    print_marker("phase27y_cleanup_pass", firstCleanup);
+
+    const bool warmBuild = firstRun && run_phase27y_build(&y27Warm) &&
+        y27Warm.state == GX_BUILD_SUCCEEDED && y27Warm.compiledModuleCount == 0 &&
+        y27Warm.cachedModuleCount == 1;
+    const bool editedFiles = warmBuild && write_y27("/P27Y/include/guidexos_app.h", y27HeaderEdited) &&
+        write_y27("/P27Y/src/main.cpp", y27Main28);
+    const bool editedBuild = editedFiles && run_phase27y_build(&y27Edited) &&
+        y27Edited.state == GX_BUILD_SUCCEEDED && y27Edited.artifactValid != 0 &&
+        y27Edited.compiledModuleCount == 1 && y27Edited.cachedModuleCount == 0 &&
+        !equal_text(y27Clean.artifactSha256, y27Edited.artifactSha256);
+    print_marker("phase27y_rebuild_pass", editedBuild);
+    if (editedBuild) serial::puts("DEVELOPER_STUDIO_PHASE27Y_REBUILD_PASS\n");
+
+    bool secondDeploy = false;
+    bool secondStartReturned = false;
+    bool secondRunning = false;
+    bool secondOwnerActive = false;
+    bool secondBusyRejected = false;
+    bool secondStaleHandleRejected = false;
+    bool secondCloseRequested = false;
+    bool secondCompleted = false;
+    bool secondCompletionBeforePoll = false;
+    bool secondCleanup = false;
+    const bool secondRun = editedBuild && run_phase27y_session(
+        y27Edited, "27Y GUI 28", false, firstHandle, nullptr, &secondDeploy,
+        &secondStartReturned, &secondRunning, &secondOwnerActive, &secondBusyRejected,
+        &secondStaleHandleRejected, &secondCloseRequested, &secondCompleted,
+        &secondCompletionBeforePoll, &secondCleanup);
+    const bool rerun = secondRun && secondDeploy && secondStartReturned && secondRunning &&
+        secondOwnerActive && secondStaleHandleRejected && secondCloseRequested &&
+        secondCompleted && secondCompletionBeforePoll && secondCleanup;
+    print_marker("phase27y_render_28_pass", secondRunning);
+    print_marker("phase27y_stale_handle_pass", secondStaleHandleRejected);
+    print_marker("phase27y_rerun_pass", rerun);
+    if (rerun) serial::puts("DEVELOPER_STUDIO_PHASE27Y_RERUN_PASS\n");
+
+    const bool badSource = rerun && write_y27("/P27Y/src/main.cpp",
+        "#include \"guidexos_app.h\"\nint gx_main(gx_app_context* ctx) { return ;\n");
+    const bool failedBuild = badSource && run_phase27y_build(&y27Failed) &&
+        y27Failed.state == GX_BUILD_FAILED && y27Failed.artifactValid == 0;
+    const bool staleRejected = failedBuild && phase27y_failed_build_blocks_run(y27Failed) &&
+        !NativeElfDevelopmentAppModel::has_active_registration();
+    print_marker("phase27y_stale_build_block_pass", staleRejected);
+    if (staleRejected) serial::puts("DEVELOPER_STUDIO_PHASE27Y_STALE_BUILD_BLOCK_PASS\n");
+
+    const bool restoredFiles = staleRejected && write_y27("/P27Y/include/guidexos_app.h", y27HeaderEdited) &&
+        write_y27("/P27Y/src/main.cpp", y27Main28);
+    const bool restoredBuild = restoredFiles && run_phase27y_build(&y27Restored) &&
+        y27Restored.state == GX_BUILD_SUCCEEDED && y27Restored.artifactValid != 0;
+    bool cancelDeploy = false;
+    bool cancelStartReturned = false;
+    bool cancelRunning = false;
+    bool cancelOwnerActive = false;
+    bool cancelBusyRejected = false;
+    bool cancelStaleHandleRejected = false;
+    bool cancelCloseRequested = false;
+    bool cancelCompleted = false;
+    bool cancelCompletionBeforePoll = false;
+    bool cancelCleanup = false;
+    const bool cancelRun = restoredBuild && run_phase27y_session(
+        y27Restored, "27Y GUI 28", true, 0, nullptr, &cancelDeploy,
+        &cancelStartReturned, &cancelRunning, &cancelOwnerActive, &cancelBusyRejected,
+        &cancelStaleHandleRejected, &cancelCloseRequested, &cancelCompleted,
+        &cancelCompletionBeforePoll, &cancelCleanup);
+    print_marker("phase27y_cancel_pass", cancelRun && cancelCompleted && cancelCleanup);
+    if (cancelRun && cancelCompleted && cancelCleanup)
+        serial::puts("DEVELOPER_STUDIO_PHASE27Y_CANCEL_PASS\n");
+
+    const bool immediateClose = restoredBuild && phase27y_immediate_close_race(y27Restored);
+    if (immediateClose) serial::puts("DEVELOPER_STUDIO_PHASE27Y_IMMEDIATE_CLOSE_RACE_PASS\n");
+    const bool registeredCancel = immediateClose && phase27y_registered_cancel(y27Restored);
+    if (registeredCancel) serial::puts("DEVELOPER_STUDIO_PHASE27Y_CANCEL_BEFORE_START_PASS\n");
+
+    const bool negative = firstRun && firstStaleHandleRejected && firstCompletionBeforePoll &&
+        secondRun && secondBusyRejected && secondStaleHandleRejected && staleRejected && cancelRun &&
+        immediateClose && registeredCancel &&
+        !NativeElfDevelopmentAppModel::has_active_registration();
+    print_marker("phase27y_negative_pass", negative);
+    if (negative) serial::puts("DEVELOPER_STUDIO_PHASE27Y_NEGATIVE_PASS\n");
+    const bool yArtifactEvidence = restoredBuild &&
+        emit_serial_artifact("/P27Y/build/bin/amd64/p27y.elf", "y27main");
+    const bool phase27yPassed = cleanBuild && firstRun && firstDeploy && firstStartReturned &&
+        firstRunning && firstOwnerActive && firstBusyRejected && firstCloseRequested &&
+        firstCompletionBeforePoll && firstCompleted && firstCleanup && warmBuild && editedBuild &&
+        secondRun && rerun && failedBuild && staleRejected && restoredBuild && cancelRun &&
+        immediateClose && registeredCancel &&
+        cancelCompleted && cancelCleanup && yArtifactEvidence && negative &&
+        !NativeElfDevelopmentAppModel::has_active_registration();
+    print_marker("phase27y", phase27yPassed);
+    serial::puts(phase27yPassed ?
+        "ELF Loader: Phase 27Y asynchronous Run ownership smoke PASS\nDEVELOPER_STUDIO_PHASE27Y_PASS\n" :
+        "ELF Loader: Phase 27Y asynchronous Run ownership smoke FAIL\n");
 #endif
 #if defined(GXOS_PHASE27G_SMOKE)
     serial::puts("ELF Loader: Phase 27G bootstrap language smoke begin\n");

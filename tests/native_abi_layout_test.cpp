@@ -67,7 +67,9 @@ static_assert(offsetof(gx_host_calls, native_window_create) == 352, "native wind
 static_assert(offsetof(gx_host_calls, native_window_set_text) == 360, "native window set text slot changed");
 static_assert(offsetof(gx_host_calls, native_window_destroy) == 368, "native window destroy slot changed");
 static_assert(offsetof(gx_host_calls, native_window_run) == 376, "native window run slot changed");
-static_assert(sizeof(gx_host_calls) == 384, "gx_host_calls size changed");
+static_assert(offsetof(gx_host_calls, bare_metal_development_run_cancel) == 384,
+              "bare-metal run cancel slot changed");
+static_assert(sizeof(gx_host_calls) == 392, "gx_host_calls size changed");
 static_assert(sizeof(gx_development_run_request) == 96, "development run request size changed");
 static_assert(offsetof(gx_development_run_request, projectRoot) == 8, "development run request project root offset changed");
 static_assert(offsetof(gx_development_run_request, artifactSha256) == 56, "development run request artifact hash offset changed");
@@ -88,7 +90,13 @@ static_assert(offsetof(gx_development_debug_snapshot, stackHigh) == 464, "develo
 static_assert(offsetof(gx_development_debug_snapshot, internalBreakpointPurpose) == 432,
               "internal breakpoint purpose must occupy the appended snapshot slot");
 static_assert(sizeof(gx_development_debug_snapshot) == 472, "development debug snapshot size changed");
-static_assert(sizeof(gx_development_run_snapshot) == 4552, "development run snapshot size changed");
+static_assert(offsetof(gx_development_run_snapshot, closeRequested) == 4552,
+              "development run close-request slot changed");
+static_assert(offsetof(gx_development_run_snapshot, cancellationRequested) == 4556,
+              "development run cancellation slot changed");
+static_assert(offsetof(gx_development_run_snapshot, generation) == 4560,
+              "development run generation slot changed");
+static_assert(sizeof(gx_development_run_snapshot) == 4568, "development run snapshot size changed");
 static_assert(offsetof(gx_development_run_snapshot, processId) == 24, "development run process id offset changed");
 static_assert(offsetof(gx_development_run_snapshot, applicationId) == 56, "development run application id offset changed");
 static_assert(offsetof(gx_development_run_snapshot, outputCount) == 448, "development run output count offset changed");

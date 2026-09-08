@@ -61,9 +61,11 @@ native_window_destroy(ctx, handle)               -> result
 ```
 
 The table is versioned by the existing NativeElf application ABI. The new
-slots are at offsets 352, 360, 368, and 376; the full table is 384 bytes.
-`native_elf_runtime.h`, `native_app_runtime.h`, the SDK ABI header, and
-`native_abi_layout_test.cpp` assert these offsets and size.
+Phase 27X slots are at offsets 352, 360, 368, and 376; Phase 27Y appends its
+generation-bound cancellation slot at offset 384, making the current full
+table 392 bytes. `native_elf_runtime.h`, `native_app_runtime.h`, the SDK ABI
+header, and `native_abi_layout_test.cpp` assert these offsets and size while
+preserving every Phase 27X offset.
 
 This shape is deliberately narrower than exposing compositor objects. The
 kernel validates the application context and host table, copies title/text

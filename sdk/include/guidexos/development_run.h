@@ -30,7 +30,10 @@ typedef enum gx_development_run_state {
     GX_DEVELOPMENT_RUN_EXITED = 6,
     GX_DEVELOPMENT_RUN_CLEANING_UP = 7,
     GX_DEVELOPMENT_RUN_COMPLETED = 8,
-    GX_DEVELOPMENT_RUN_FAILED = 9
+    GX_DEVELOPMENT_RUN_FAILED = 9,
+    /* Append-only lifecycle states for asynchronous bare-metal ownership. */
+    GX_DEVELOPMENT_RUN_CLOSING = 10,
+    GX_DEVELOPMENT_RUN_CANCELLED = 11
 } gx_development_run_state;
 
 typedef enum gx_development_run_error_code {
@@ -118,6 +121,10 @@ typedef struct gx_development_run_snapshot {
     uint32_t outputCount;
     uint32_t outputTruncated;
     gx_development_run_output_line output[GX_DEVELOPMENT_RUN_MAX_OUTPUT_LINES];
+    /* Append-only asynchronous session observations. */
+    uint32_t closeRequested;
+    uint32_t cancellationRequested;
+    uint64_t generation;
 } gx_development_run_snapshot;
 
 #ifdef __cplusplus

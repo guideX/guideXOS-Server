@@ -6,9 +6,15 @@
 
 #include "native_elf_development_app_model.h"
 #include "native_elf_loader.h"
+#include "native_elf_scheduler.h"
 #include "native_elf_validator.h"
 #include "../include/kernel/kernel_app.h"
 #include "kernel/vfs.h"
+
+#if defined(__x86_64__)
+#include "arch/amd64.h"
+#include "arch/context_switch.h"
+#endif
 
 namespace kernel {
 namespace native_elf {
@@ -31,6 +37,7 @@ struct Operation {
     gx_development_run_state state;
     gx_development_run_error_code error;
     bool closeRequested;
+    bool cancellationRequested;
     bool appModelRegistered;
     bool cleanupComplete;
     bool nativeRuntimeStarted;
@@ -58,6 +65,17 @@ static gx_development_run_handle s_nextHandle = 1;
 static char s_projectText[kMaxProjectBytes + 1] = {};
 static char s_manifestText[kMaxProjectBytes + 1] = {};
 static uint8_t s_artifact[NATIVE_APP_MAX_ELF_FILE_BYTES] = {};
+
+#if defined(__x86_64__)
+static const uint32_t kSchedulerStackBytes = 32U * 1024U;
+static uint8_t s_schedulerStack[kSchedulerStackBytes] __attribute__((aligned(16))) = {};
+using SchedulerContext = arch::amd64::context::SwitchContext;
+static SchedulerContext* s_ownerContext = nullptr;
+static SchedulerContext* s_targetContext = nullptr;
+static bool s_schedulerActive = false;
+static bool s_schedulerInTarget = false;
+static bool s_schedulerTargetComplete = false;
+#endif
 
 static uint32_t text_length(const char* text, uint32_t capacity) {
     if (!text) return 0;
@@ -163,6 +181,18 @@ static void snapshot_operation(const Operation& operation, gx_development_run_sn
         }
         for (uint32_t i = 0; i < snapshot->outputCount; ++i)
             copy_text(snapshot->output[i].text, sizeof(snapshot->output[i].text), operation.report.hostLog[i]);
+    }
+    if (snapshot_has(snapshot, offsetof(gx_development_run_snapshot, closeRequested),
+                     sizeof(snapshot->closeRequested))) {
+        snapshot->closeRequested = operation.closeRequested ? 1U : 0U;
+    }
+    if (snapshot_has(snapshot, offsetof(gx_development_run_snapshot, cancellationRequested),
+                     sizeof(snapshot->cancellationRequested))) {
+        snapshot->cancellationRequested = operation.cancellationRequested ? 1U : 0U;
+    }
+    if (snapshot_has(snapshot, offsetof(gx_development_run_snapshot, generation),
+                     sizeof(snapshot->generation))) {
+        snapshot->generation = operation.registrationGeneration;
     }
 }
 
@@ -455,7 +485,110 @@ static bool decode(gx_development_run_handle handle) {
     return s_operation.used && handle != 0 && handle == s_operation.handle;
 }
 
+static gx_development_run_error_code runtime_error_code(const NativeElfRunReport& report)
+{
+    return report.runtimeStatus == NativeRuntimeStatus::CallDepthExceeded
+        ? GX_DEVELOPMENT_RUN_ERROR_CALL_DEPTH_EXCEEDED
+        : (report.runtimeStatus == NativeRuntimeStatus::ArrayBoundsExceeded
+            ? GX_DEVELOPMENT_RUN_ERROR_ARRAY_BOUNDS_EXCEEDED
+            : (report.runtimeStatus == NativeRuntimeStatus::InvalidPointerDereference
+                ? GX_DEVELOPMENT_RUN_ERROR_INVALID_POINTER_DEREFERENCE
+                : (report.runtimeStatus == NativeRuntimeStatus::PointerOutOfBounds
+                    ? GX_DEVELOPMENT_RUN_ERROR_POINTER_OUT_OF_BOUNDS
+                    : GX_DEVELOPMENT_RUN_ERROR_LAUNCH_FAILED)));
+}
+
+static void finish_execution(Operation& operation, bool success)
+{
+    clear_development_identity();
+    if (!success) {
+        const gx_development_run_error_code error = runtime_error_code(operation.report);
+        const char* message = operation.report.error
+            ? operation.report.error : "NativeElf application launch failed";
+        fail_and_cleanup(operation, error, message);
+        return;
+    }
+
+    operation.state = GX_DEVELOPMENT_RUN_EXITED;
+    operation.state = GX_DEVELOPMENT_RUN_CLEANING_UP;
+    const bool registrationClean = unregister_application(operation);
+    const bool runtimeClean = operation.report.teardownComplete;
+    operation.cleanupComplete = registrationClean && runtimeClean;
+    operation.report.teardownComplete = operation.cleanupComplete;
+    if (!operation.cleanupComplete) {
+        operation.error = GX_DEVELOPMENT_RUN_ERROR_INTERNAL;
+        copy_text(operation.errorMessage, sizeof(operation.errorMessage),
+                  "NativeElf run cleanup failed");
+        operation.state = GX_DEVELOPMENT_RUN_FAILED;
+        return;
+    }
+
+    operation.error = GX_DEVELOPMENT_RUN_ERROR_NONE;
+    operation.state = operation.cancellationRequested
+        ? GX_DEVELOPMENT_RUN_CANCELLED : GX_DEVELOPMENT_RUN_COMPLETED;
+}
+
+#if defined(__x86_64__)
+static void scheduled_task_entry(void*)
+{
+    s_schedulerInTarget = true;
+    s_operation.nativeRuntimeStarted = true;
+    int32_t exitCode = 0;
+    const bool success = native_elf_execution_active()
+        ? run_file_nested(s_operation.resolvedArtifact, &exitCode, &s_operation.report)
+        : run_file(s_operation.resolvedArtifact, &exitCode, &s_operation.report);
+    s_operation.exitCode = exitCode;
+    finish_execution(s_operation, success);
+    s_schedulerTargetComplete = true;
+    s_schedulerInTarget = false;
+    s_schedulerActive = false;
+    arch::amd64::context::switch_context(&s_targetContext, s_ownerContext);
+    for (;;) arch::amd64::halt();
+}
+#endif
+
 } // namespace
+
+bool native_elf_scheduler_in_target()
+{
+#if defined(__x86_64__)
+    return s_schedulerInTarget;
+#else
+    return false;
+#endif
+}
+
+bool native_elf_scheduler_yield()
+{
+#if defined(__x86_64__)
+    if (!s_schedulerActive || !s_schedulerInTarget || !s_ownerContext || !s_targetContext)
+        return false;
+    s_schedulerInTarget = false;
+    arch::amd64::context::switch_context(&s_targetContext, s_ownerContext);
+    s_schedulerInTarget = true;
+    return true;
+#else
+    return false;
+#endif
+}
+
+bool native_elf_scheduler_pump()
+{
+#if defined(__x86_64__)
+    if (!s_schedulerActive || s_schedulerTargetComplete || s_schedulerInTarget ||
+        !s_targetContext) return false;
+    // The owner context is a continuation on this individual pump call's
+    // stack.  Start() must not leave a later desktop tick resuming through a
+    // dead start() frame, so every owner-side pump captures a fresh context.
+    s_ownerContext = nullptr;
+    s_schedulerInTarget = true;
+    arch::amd64::context::switch_context(&s_ownerContext, s_targetContext);
+    s_schedulerInTarget = false;
+    return true;
+#else
+    return false;
+#endif
+}
 
 gx_result prepare(const gx_development_run_request& request,
                   gx_development_run_handle* outHandle,
@@ -566,37 +699,49 @@ gx_result start(gx_development_run_handle handle) {
     }
     s_operation.state = GX_DEVELOPMENT_RUN_RUNNING;
     s_operation.report = NativeElfRunReport();
-    s_operation.nativeRuntimeStarted = true;
     s_operation.exitCode = 0;
-    // Developer Studio normally calls this service from the active NativeElf
-    // host application, where nested execution preserves the host image.  The
-    // kernel bootstrap proof has no parent NativeElf image, so it uses the
-    // same production loader/runtime through the ordinary top-level entry.
-    const bool success = native_elf_execution_active()
-        ? run_file_nested(s_operation.resolvedArtifact, &s_operation.exitCode, &s_operation.report)
-        : run_file(s_operation.resolvedArtifact, &s_operation.exitCode, &s_operation.report);
-    clear_development_identity();
-    if (!success) {
-        const gx_development_run_error_code error = s_operation.report.runtimeStatus == NativeRuntimeStatus::CallDepthExceeded
-            ? GX_DEVELOPMENT_RUN_ERROR_CALL_DEPTH_EXCEEDED
-            : (s_operation.report.runtimeStatus == NativeRuntimeStatus::ArrayBoundsExceeded
-                ? GX_DEVELOPMENT_RUN_ERROR_ARRAY_BOUNDS_EXCEEDED
-                : (s_operation.report.runtimeStatus == NativeRuntimeStatus::InvalidPointerDereference
-                    ? GX_DEVELOPMENT_RUN_ERROR_INVALID_POINTER_DEREFERENCE
-                    : (s_operation.report.runtimeStatus == NativeRuntimeStatus::PointerOutOfBounds
-                        ? GX_DEVELOPMENT_RUN_ERROR_POINTER_OUT_OF_BOUNDS
-                        : GX_DEVELOPMENT_RUN_ERROR_LAUNCH_FAILED)));
-        const char* message = s_operation.report.error ? s_operation.report.error : "NativeElf application launch failed";
-        fail_and_cleanup(s_operation, error, message);
+
+#if defined(__x86_64__)
+    // The existing AMD64 context-switch primitive supplies one cooperative
+    // execution owner.  Start gives that owner exactly one bounded slice; the
+    // target returns through native_elf_scheduler_yield at the next desktop
+    // pump, so this call never owns the target lifetime synchronously.
+    s_schedulerActive = true;
+    s_schedulerInTarget = false;
+    s_schedulerTargetComplete = false;
+    s_ownerContext = nullptr;
+    s_targetContext = arch::amd64::context::init_context(
+        reinterpret_cast<uint64_t>(s_schedulerStack + sizeof(s_schedulerStack)),
+        &scheduled_task_entry,
+        &s_operation);
+    if (!s_targetContext) {
+        s_schedulerActive = false;
+        fail_and_cleanup(s_operation, GX_DEVELOPMENT_RUN_ERROR_LAUNCH_UNAVAILABLE,
+                         "NativeElf execution context could not be created");
         return GX_OK;
     }
-    s_operation.state = GX_DEVELOPMENT_RUN_EXITED;
-    s_operation.state = GX_DEVELOPMENT_RUN_CLEANING_UP;
-    const bool registrationClean = unregister_application(s_operation);
-    s_operation.cleanupComplete = registrationClean && s_operation.report.teardownComplete;
-    s_operation.state = s_operation.cleanupComplete ? GX_DEVELOPMENT_RUN_COMPLETED : GX_DEVELOPMENT_RUN_FAILED;
-    s_operation.error = s_operation.cleanupComplete ? GX_DEVELOPMENT_RUN_ERROR_NONE : GX_DEVELOPMENT_RUN_ERROR_INTERNAL;
-    if (!s_operation.cleanupComplete) copy_text(s_operation.errorMessage, sizeof(s_operation.errorMessage), "NativeElf run cleanup failed");
+    if (!native_elf_scheduler_pump()) {
+        s_schedulerActive = false;
+        s_targetContext = nullptr;
+        fail_and_cleanup(s_operation, GX_DEVELOPMENT_RUN_ERROR_LAUNCH_UNAVAILABLE,
+                         "NativeElf execution owner could not be scheduled");
+    }
+#else
+    fail_and_cleanup(s_operation, GX_DEVELOPMENT_RUN_ERROR_LAUNCH_UNAVAILABLE,
+                     "Asynchronous NativeElf ownership is unavailable on this architecture");
+#endif
+    return GX_OK;
+}
+
+gx_result pump(gx_development_run_handle handle) {
+    if (!decode(handle)) return GX_ERROR_FAILED;
+    if (s_operation.state == GX_DEVELOPMENT_RUN_COMPLETED ||
+        s_operation.state == GX_DEVELOPMENT_RUN_FAILED ||
+        s_operation.state == GX_DEVELOPMENT_RUN_CANCELLED) return GX_OK;
+    if (s_operation.state != GX_DEVELOPMENT_RUN_RUNNING &&
+        s_operation.state != GX_DEVELOPMENT_RUN_CLOSING &&
+        s_operation.state != GX_DEVELOPMENT_RUN_LAUNCHING) return GX_ERROR_BUSY;
+    (void)native_elf_scheduler_pump();
     return GX_OK;
 }
 
@@ -609,20 +754,71 @@ gx_result poll(gx_development_run_handle handle, gx_development_run_snapshot* ou
 
 gx_result request_close(gx_development_run_handle handle) {
     if (!decode(handle)) return GX_ERROR_FAILED;
-    if (s_operation.state == GX_DEVELOPMENT_RUN_COMPLETED || s_operation.state == GX_DEVELOPMENT_RUN_FAILED) return GX_OK;
+    if (s_operation.state == GX_DEVELOPMENT_RUN_COMPLETED ||
+        s_operation.state == GX_DEVELOPMENT_RUN_FAILED ||
+        s_operation.state == GX_DEVELOPMENT_RUN_CANCELLED) return GX_OK;
     if (s_operation.state == GX_DEVELOPMENT_RUN_REGISTERED) {
         s_operation.closeRequested = true;
         fail_and_cleanup(s_operation, GX_DEVELOPMENT_RUN_ERROR_CANCELLED,
                          "Bare-metal Run cancelled before start");
+        s_operation.state = GX_DEVELOPMENT_RUN_CANCELLED;
         return GX_OK;
     }
-    return GX_ERROR_UNSUPPORTED;
+    if (s_operation.state == GX_DEVELOPMENT_RUN_CLOSING) return GX_OK;
+    if (s_operation.state != GX_DEVELOPMENT_RUN_RUNNING) return GX_ERROR_BUSY;
+
+    s_operation.closeRequested = true;
+    s_operation.state = GX_DEVELOPMENT_RUN_CLOSING;
+    if (!request_native_elf_gui_close(s_operation.registrationGeneration)) {
+        s_operation.state = GX_DEVELOPMENT_RUN_RUNNING;
+        s_operation.closeRequested = false;
+        return GX_ERROR_UNSUPPORTED;
+    }
+    (void)native_elf_scheduler_pump();
+    return GX_OK;
+}
+
+gx_result cancel(gx_development_run_handle handle) {
+    if (!decode(handle)) return GX_ERROR_FAILED;
+    if (s_operation.state == GX_DEVELOPMENT_RUN_COMPLETED ||
+        s_operation.state == GX_DEVELOPMENT_RUN_FAILED ||
+        s_operation.state == GX_DEVELOPMENT_RUN_CANCELLED) return GX_OK;
+    if (s_operation.state == GX_DEVELOPMENT_RUN_REGISTERED) {
+        s_operation.cancellationRequested = true;
+        fail_and_cleanup(s_operation, GX_DEVELOPMENT_RUN_ERROR_CANCELLED,
+                         "Bare-metal Run cancelled before start");
+        s_operation.state = GX_DEVELOPMENT_RUN_CANCELLED;
+        return GX_OK;
+    }
+    if (s_operation.state == GX_DEVELOPMENT_RUN_CLOSING) return GX_OK;
+    if (s_operation.state != GX_DEVELOPMENT_RUN_RUNNING) return GX_ERROR_BUSY;
+
+    s_operation.cancellationRequested = true;
+    s_operation.state = GX_DEVELOPMENT_RUN_CLOSING;
+    // Safe cancellation is deliberately cooperative: only a suspended GUI
+    // target can be closed without destroying an arbitrary NativeElf stack.
+    if (!request_native_elf_gui_close(s_operation.registrationGeneration)) {
+        s_operation.state = GX_DEVELOPMENT_RUN_RUNNING;
+        s_operation.cancellationRequested = false;
+        return GX_ERROR_UNSUPPORTED;
+    }
+    (void)native_elf_scheduler_pump();
+    return GX_OK;
 }
 
 gx_result release(gx_development_run_handle handle) {
     if (!decode(handle)) return GX_ERROR_FAILED;
-    if (s_operation.state != GX_DEVELOPMENT_RUN_COMPLETED && s_operation.state != GX_DEVELOPMENT_RUN_FAILED) return GX_ERROR_BUSY;
+    if (s_operation.state != GX_DEVELOPMENT_RUN_COMPLETED &&
+        s_operation.state != GX_DEVELOPMENT_RUN_FAILED &&
+        s_operation.state != GX_DEVELOPMENT_RUN_CANCELLED) return GX_ERROR_BUSY;
     (void)unregister_application(s_operation);
+#if defined(__x86_64__)
+    s_schedulerActive = false;
+    s_schedulerInTarget = false;
+    s_schedulerTargetComplete = false;
+    s_ownerContext = nullptr;
+    s_targetContext = nullptr;
+#endif
     s_operation = Operation();
     return GX_OK;
 }

@@ -81,13 +81,16 @@ SwitchContext* init_context(uint64_t stack_top, void (*entry_point)(void*), void
     // Align stack to 16 bytes (AMD64 ABI requirement)
     stack_top &= ~0xFULL;
     
-    // Reserve space for SwitchContext on the stack
-    stack_top -= sizeof(SwitchContext);
+    // Reserve a context plus a synthetic return slot.  Existing contexts
+    // resume through ret, so the initial context needs the same shape.
+    stack_top -= sizeof(SwitchContext) + sizeof(uint64_t);
     SwitchContext* ctx = reinterpret_cast<SwitchContext*>(stack_top);
     
     // Initialize all callee-saved registers to zero
     ctx->rbx = 0;
     ctx->rbp = 0;
+    ctx->rdi = 0;
+    ctx->rsi = 0;
     ctx->r12 = 0;
     ctx->r13 = 0;
     ctx->r14 = 0;
@@ -96,6 +99,7 @@ SwitchContext* init_context(uint64_t stack_top, void (*entry_point)(void*), void
     // Set up for first context switch
     // The "return address" is the thread entry wrapper
     ctx->rip = reinterpret_cast<uint64_t>(&thread_entry_wrapper);
+    reinterpret_cast<uint64_t*>(stack_top)[sizeof(SwitchContext) / sizeof(uint64_t)] = ctx->rip;
     
     // Stack pointer points to the context (will be restored)
     ctx->rsp = stack_top;
@@ -148,8 +152,8 @@ extern "C" void restore_full_context(FullContext* ctx)
 // AMD64 Context Switch Assembly
 //
 // switch_context(SwitchContext** old_ctx, SwitchContext* new_ctx)
-//   RDI = old_ctx (pointer to pointer) - System V ABI
-//   RSI = new_ctx (pointer to new context)
+//   RCX = old_ctx (pointer to pointer) - Windows AMD64 ABI
+//   RDX = new_ctx (pointer to new context)
 //
 // This function saves the current context, stores its address in
 // *old_ctx, then restores new_ctx and returns there.
@@ -163,48 +167,49 @@ asm(
     "switch_context:\n"
     
     // ---- Save current context ----
-    // Allocate space on stack for SwitchContext (64 bytes)
-    "    sub     $64, %rsp\n"
+    // Allocate space on stack for SwitchContext (80 bytes)
+    "    sub     $80, %rsp\n"
     
     // Save callee-saved registers
     "    mov     %rbx, 0(%rsp)\n"     // rbx
     "    mov     %rbp, 8(%rsp)\n"     // rbp
-    "    mov     %r12, 16(%rsp)\n"    // r12
-    "    mov     %r13, 24(%rsp)\n"    // r13
-    "    mov     %r14, 32(%rsp)\n"    // r14
-    "    mov     %r15, 40(%rsp)\n"    // r15
+    "    mov     %rdi, 16(%rsp)\n"    // rdi
+    "    mov     %rsi, 24(%rsp)\n"    // rsi
+    "    mov     %r12, 32(%rsp)\n"    // r12
+    "    mov     %r13, 40(%rsp)\n"    // r13
+    "    mov     %r14, 48(%rsp)\n"    // r14
+    "    mov     %r15, 56(%rsp)\n"    // r15
     
     // Save stack pointer (after adjustment)
-    "    mov     %rsp, 48(%rsp)\n"    // rsp
+    "    mov     %rsp, 64(%rsp)\n"    // rsp
     
     // Save return address (from caller's stack frame)
     // The return address is at the original RSP position
-    "    mov     64(%rsp), %rax\n"    // Get return address
-    "    mov     %rax, 56(%rsp)\n"    // Store as rip
+    "    mov     80(%rsp), %rax\n"    // Get return address
+    "    mov     %rax, 72(%rsp)\n"    // Store as rip
     
-    // Store context pointer to *old_ctx (RDI)
-    "    mov     %rsp, (%rdi)\n"      // *old_ctx = current rsp (context)
+    // Store context pointer to *old_ctx (RCX)
+    "    mov     %rsp, (%rcx)\n"      // *old_ctx = current rsp (context)
     
     // ---- Restore new context ----
     // Load new stack pointer from new_ctx->rsp
-    "    mov     48(%rsi), %rsp\n"    // rsp = new_ctx->rsp
+    "    mov     64(%rdx), %rsp\n"    // rsp = new_ctx->rsp
     
     // Restore callee-saved registers
     "    mov     0(%rsp), %rbx\n"
     "    mov     8(%rsp), %rbp\n"
-    "    mov     16(%rsp), %r12\n"
-    "    mov     24(%rsp), %r13\n"
-    "    mov     32(%rsp), %r14\n"
-    "    mov     40(%rsp), %r15\n"
-    
-    // Get return address
-    "    mov     56(%rsp), %rax\n"
-    
-    // Deallocate context frame
-    "    add     $64, %rsp\n"
-    
-    // Jump to new thread's return address
-    "    jmp     *%rax\n"
+    "    mov     16(%rsp), %rdi\n"
+    "    mov     24(%rsp), %rsi\n"
+    "    mov     32(%rsp), %r12\n"
+    "    mov     40(%rsp), %r13\n"
+    "    mov     48(%rsp), %r14\n"
+    "    mov     56(%rsp), %r15\n"
+
+    // Deallocate context frame and resume through its saved return slot.
+    // For a suspended call this pops the original call return address; for
+    // init_context it pops the synthetic thread-entry address.
+    "    add     $80, %rsp\n"
+    "    ret\n"
 #if defined(__ELF__)
     ".size switch_context, .-switch_context\n"
 #endif

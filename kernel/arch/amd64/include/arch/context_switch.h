@@ -9,8 +9,8 @@
 // AMD64 register set:
 //   - 16 general-purpose registers (RAX, RBX, RCX, RDX, RSI, RDI,
 //     RBP, RSP, R8-R15)
-//   - Callee-saved: RBX, RBP, R12-R15
-//   - Caller-saved: RAX, RCX, RDX, RSI, RDI, R8-R11
+//   - Callee-saved: RBX, RBP, RDI, RSI, R12-R15 (Windows AMD64 ABI)
+//   - Caller-saved: RAX, RCX, RDX, R8-R11
 //   - RSP = stack pointer
 //   - RIP = instruction pointer (implicitly saved via CALL/RET)
 //
@@ -43,7 +43,7 @@ namespace context {
 //   - Segment registers (CS, SS, DS, ES, FS, GS)
 //
 // Minimal context (for voluntary context switch):
-//   - Callee-saved registers (RBX, RBP, R12-R15)
+//   - Callee-saved registers (RBX, RBP, RDI, RSI, R12-R15)
 //   - Stack pointer (RSP)
 //   - Return address (RIP, implicitly via stack)
 // ================================================================
@@ -94,6 +94,8 @@ struct FullContext {
 struct SwitchContext {
     uint64_t rbx;    // Callee-saved
     uint64_t rbp;    // Base pointer / frame pointer
+    uint64_t rdi;    // Callee-saved under the Windows AMD64 ABI
+    uint64_t rsi;    // Callee-saved under the Windows AMD64 ABI
     uint64_t r12;    // Callee-saved
     uint64_t r13;    // Callee-saved
     uint64_t r14;    // Callee-saved
