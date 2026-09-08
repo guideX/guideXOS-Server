@@ -59,6 +59,7 @@ struct Stats {
     uint64_t idle_wake_ticks;
     uint32_t task_count;
     uint32_t unexpected_irqs;
+    uint32_t last_unexpected_irq;
 };
 
 bool initialize(const Config& config);
@@ -86,7 +87,7 @@ uint64_t idle_wake_ticks();
 bool preemptive_complete();
 bool failed();
 bool stack_integrity();
-void note_unexpected_irq();
+void note_unexpected_irq(uint32_t irq);
 void get_stats(Stats* stats);
 
 } // namespace scheduler
@@ -94,4 +95,3 @@ void get_stats(Stats* stats);
 
 extern "C" void scheduler_yield();
 extern "C" void scheduler_thread_exit();
-

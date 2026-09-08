@@ -740,6 +740,7 @@ static uint32_t s_taskbarScreenW = 0;
 static uint32_t s_taskbarScreenH = 0;
 static volatile bool s_needsRedraw = false;
 static volatile uint64_t s_redrawGeneration = 1;
+static bool s_inputStressRenderSuppressed = false;
 
 // Shutdown dialog state
 static bool s_shutdownDialogOpen = false;
@@ -9089,13 +9090,19 @@ void cooperative_yield()
     const uint32_t now = (uint32_t)pit::ticks();
     const bool initialFileOperationPaint = file_clipboard::operation_active() &&
         file_clipboard::operation_state() == file_clipboard::OperationState::Preparing;
-    if (initialFileOperationPaint || now - lastPresentTick >= 10) {
+    if (!s_inputStressRenderSuppressed &&
+        (initialFileOperationPaint || now - lastPresentTick >= 10)) {
         lastPresentTick = now;
         draw();
         draw_cursor(input::mouse_x(), input::mouse_y());
     }
 
     pumping = false;
+}
+
+void set_input_stress_render_suppressed(bool suppressed)
+{
+    s_inputStressRenderSuppressed = suppressed;
 }
 
 
@@ -9192,7 +9199,7 @@ static void draw_shell_window()
 
 void draw()
 {
-    if (!s_initialized || !framebuffer::is_available()) return;
+    if (s_inputStressRenderSuppressed || !s_initialized || !framebuffer::is_available()) return;
 
     forget_cursor_save();
 
@@ -12062,6 +12069,7 @@ static void restore_under_cursor()
 
 void draw_cursor(int32_t mx, int32_t my)
 {
+    if (s_inputStressRenderSuppressed) return;
     // Restore previous cursor area
     restore_under_cursor();
 
@@ -12114,6 +12122,14 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
         s_phase7MouseButtonRoutingPassed = true;
         kernel::serial::puts("[guideXOS] mouse button routing: PASS\n");
     }
+    // The durability gate starts only after the real cursor, button, focus,
+    // drag, keyboard, text, and Start-button proofs have completed.  Keep
+    // the live position/button mirror above authoritative for every hardware
+    // report, but do not dispatch each stress edge through the full desktop
+    // action/compositor path.  The stress gate proves transport, queue
+    // consumption, ordering, and released state; normal desktop dispatch is
+    // covered by the preceding high-level proof and remains unchanged.
+    if (s_inputStressRenderSuppressed) return;
 #endif
 
     apply_taskbar_layout();

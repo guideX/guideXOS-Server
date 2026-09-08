@@ -144,8 +144,14 @@ static uint64_t s_buttonEvents = 0;
 static uint64_t s_keyboardEvents = 0;
 static uint64_t s_malformedEvents = 0;
 static uint64_t s_interruptsObserved = 0;
+static uint64_t s_pollCount = 0;
+static uint64_t s_drainedEvents = 0;
+static uint64_t s_interruptStatusAcks = 0;
 static bool s_irqHandlersRegistered = false;
 static bool s_shift = false;
+static bool s_ctrl = false;
+static bool s_alt = false;
+static bool s_meta = false;
 static bool s_capsLock = false;
 
 static uint32_t read32(uint64_t base, uint32_t offset)
@@ -432,6 +438,9 @@ static void process_keyboard(const InputEvent& event)
 {
     const bool down = event.value != 0;
     if (event.code == kKeyLeftShift || event.code == kKeyRightShift) s_shift = down;
+    if (event.code == kKeyLeftCtrl || event.code == kKeyRightCtrl) s_ctrl = down;
+    if (event.code == kKeyLeftAlt || event.code == kKeyRightAlt) s_alt = down;
+    if (event.code == kKeyLeftMeta || event.code == kKeyRightMeta) s_meta = down;
     if (event.code == kKeyCapsLock && down) s_capsLock = !s_capsLock;
     const uint32_t special = special_key(event.code);
     const char printable = printable_key(event.code);
@@ -443,9 +452,25 @@ static void process_keyboard(const InputEvent& event)
         ++s_malformedEvents;
         return;
     }
+    uint8_t keyIndex = 0xff;
+    for (uint8_t i = 0; i < s_keyboardState.keyCount; ++i) {
+        if (s_keyboardState.keys[i] == static_cast<uint8_t>(event.code)) {
+            keyIndex = i;
+            break;
+        }
+    }
+    if (down && keyIndex == 0xff && s_keyboardState.keyCount < 6) {
+        s_keyboardState.keys[s_keyboardState.keyCount++] = static_cast<uint8_t>(event.code);
+    } else if (!down && keyIndex != 0xff) {
+        const uint8_t last = static_cast<uint8_t>(s_keyboardState.keyCount - 1u);
+        s_keyboardState.keys[keyIndex] = s_keyboardState.keys[last];
+        s_keyboardState.keys[last] = 0;
+        --s_keyboardState.keyCount;
+    }
     input::submit_platform_key(key, down);
     s_keyboardState.modifiers = static_cast<uint8_t>((s_shift ? 1u : 0u) |
-        (s_capsLock ? 2u : 0u));
+        (s_capsLock ? 2u : 0u) | (s_ctrl ? 4u : 0u) |
+        (s_alt ? 8u : 0u) | (s_meta ? 16u : 0u));
     s_keyboardDirty = true;
 }
 
@@ -486,9 +511,10 @@ static void process_event(DeviceState* device, const InputEvent& event)
 static void poll_device(DeviceState* device)
 {
     if (!device->active) return;
+    ++s_pollCount;
     const uint32_t interruptStatus = read32(device->base, kMmioInterruptStatus);
     if (interruptStatus != 0) {
-        ++s_interruptsObserved;
+        ++s_interruptStatusAcks;
         write32(device->base, kMmioInterruptAck, interruptStatus);
     }
     __asm__ volatile("dmb ish" ::: "memory");
@@ -509,6 +535,7 @@ static void poll_device(DeviceState* device)
         ++device->lastUsed;
         ++processed;
     }
+    s_drainedEvents += processed;
     if (processed != 0) write32(device->base, kMmioQueueNotify, 0);
     if (device->interruptPending) {
         device->interruptPending = 0;
@@ -534,8 +561,12 @@ void init(uint32_t screen_width, uint32_t screen_height,
     s_deviceCount = 0;
     s_hardwareEvents = s_pointerEvents = s_buttonEvents = s_keyboardEvents = 0;
     s_malformedEvents = s_interruptsObserved = 0;
+    s_pollCount = s_drainedEvents = s_interruptStatusAcks = 0;
     s_irqHandlersRegistered = false;
     s_shift = false;
+    s_ctrl = false;
+    s_alt = false;
+    s_meta = false;
     s_capsLock = false;
     for (uint32_t i = 0; i < kMaxDevices; ++i) s_devices[i] = DeviceState{};
 
@@ -607,7 +638,13 @@ const MouseState* get_mouse_state() { return &s_mouseState; }
 bool mouse_dirty() { return s_mouseDirty; }
 void mouse_clear_dirty() { s_mouseDirty = false; s_mouseState.x = 0; s_mouseState.y = 0; s_mouseState.wheel = 0; }
 const KeyboardState* get_keyboard_state() { return &s_keyboardState; }
-bool is_key_pressed(uint16_t) { return false; }
+bool is_key_pressed(uint16_t keycode)
+{
+    for (uint8_t i = 0; i < s_keyboardState.keyCount; ++i) {
+        if (s_keyboardState.keys[i] == static_cast<uint8_t>(keycode)) return true;
+    }
+    return false;
+}
 bool keyboard_dirty() { return s_keyboardDirty; }
 void keyboard_clear_dirty() { s_keyboardDirty = false; }
 uint64_t hardware_events_received() { return s_hardwareEvents; }
@@ -616,6 +653,9 @@ uint64_t hardware_button_events() { return s_buttonEvents; }
 uint64_t hardware_keyboard_events() { return s_keyboardEvents; }
 uint64_t malformed_events() { return s_malformedEvents; }
 uint64_t device_interrupts_observed() { return s_interruptsObserved; }
+uint64_t virtqueue_poll_count() { return s_pollCount; }
+uint64_t virtqueue_drained_events() { return s_drainedEvents; }
+uint64_t virtqueue_interrupt_status_acks() { return s_interruptStatusAcks; }
 
 } // namespace virtio_input
 } // namespace kernel

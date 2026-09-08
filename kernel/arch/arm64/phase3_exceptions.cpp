@@ -84,7 +84,7 @@ extern "C" void* phase3_exception_dispatch(uint64_t* frame, uint64_t vector_clas
         const uint32_t irq = phase3_irq_id(acknowledgement);
 #if defined(GXOS_AARCH64_PHASE4)
         if (!kernel::irq::has_handler(irq)) {
-            kernel::scheduler::note_unexpected_irq();
+            kernel::scheduler::note_unexpected_irq(irq);
             phase3_irq_complete(acknowledgement);
             phase3_serial_print("[guideXOS] unexpected IRQ ID=");
             phase3_serial_hex(irq);
@@ -93,7 +93,7 @@ extern "C" void* phase3_exception_dispatch(uint64_t* frame, uint64_t vector_clas
         }
 #else
         if (irq != phase3_timer_irq()) {
-            kernel::scheduler::note_unexpected_irq();
+            kernel::scheduler::note_unexpected_irq(irq);
             phase3_irq_complete(acknowledgement);
             phase3_serial_print("[guideXOS] unexpected IRQ ID=");
             phase3_serial_hex(irq);

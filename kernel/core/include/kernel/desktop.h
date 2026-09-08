@@ -64,6 +64,11 @@ CpuTelemetrySnapshot cpu_telemetry_snapshot();
 // present the desktop without taking ownership of app animation state.
 void cooperative_yield();
 
+// Bounded transport stress may suppress redundant full-frame repainting while
+// retaining input polling, routing, and desktop state updates.  The caller
+// must restore normal presentation before framebuffer verification.
+void set_input_stress_render_suppressed(bool suppressed);
+
 // Check if redraw is needed (called from main loop)
 bool needs_redraw();
 

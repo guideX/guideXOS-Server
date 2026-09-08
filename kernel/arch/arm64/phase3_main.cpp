@@ -350,6 +350,8 @@ extern "C" void phase3_main(const gxos_aarch64_phase2_handoff* handoff,
     phase3_serial_dec(stats.unexpected_irqs);
     phase3_serial_print(" exceptions=");
     phase3_serial_dec(phase3_exception_count());
+    phase3_serial_print(" last-unexpected-irq=");
+    phase3_serial_dec(stats.last_unexpected_irq);
     phase3_serial_print(" task-A=");
     phase3_serial_dec(gWork[0].counter);
     phase3_serial_print(" task-B=");

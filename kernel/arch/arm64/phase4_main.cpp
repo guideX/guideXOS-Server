@@ -539,35 +539,45 @@ static void graphics_task(void*)
     bool buttonRoutingPassed = false;
     bool inputIntegrationPassed = false;
     bool durabilityPassed = false;
+    bool stressReady = false;
+    bool pointerStressPassed = false;
+    bool buttonStressPassed = false;
+    bool keyboardStressPassed = false;
+    bool queueIntegrityPassed = false;
+    bool finalStatePassed = false;
+    uint64_t stressPointerBase = 0;
+    uint64_t stressButtonBase = 0;
+    uint64_t stressKeyboardBase = 0;
+    uint64_t stressDroppedBase = 0;
+    uint64_t stressMalformedBase = 0;
+    uint64_t nextTelemetryPointer = 0;
+    uint64_t nextTelemetryButton = 0;
+    uint64_t nextTelemetryKeyboard = 0;
+    const uint64_t kStressPointerTarget = UINT64_C(10000);
+    const uint64_t kStressButtonTarget = UINT64_C(1000);
+    const uint64_t kStressKeyboardTarget = UINT64_C(1000);
+    // Keep telemetry checkpoints aligned with the host's bounded watermark so
+    // every producer checkpoint has a guest-observed progress sample without
+    // printing once per event.
+    const uint64_t kTelemetryQuantum = UINT64_C(32);
     // QEMU's QMP input producer is intentionally paced and the TCG guest may
     // spend several scheduler slices draining a full virtio queue.  Keep the
     // failure bound finite, but large enough that the durability workload can
     // finish without turning producer latency into a false desktop failure.
-    const uint64_t kPhase7FrameLimit = UINT64_C(200000);
+    const uint64_t kPhase7FrameLimit = UINT64_C(2000000);
     for (uint64_t frame = 0; frame < kPhase7FrameLimit; ++frame) {
         kernel::desktop::cooperative_yield();
         // Input handlers redraw immediately on state changes.  Keep a bounded
         // background repaint cadence here so the durability workload cannot be
         // starved by redundant full-frame wallpaper renders.
-        if ((frame & 63u) == 0) {
+        // Input handlers request redraws for interactive state changes.  The
+        // stress loop must not turn every idle scheduler slice into an
+        // expensive full wallpaper/compositor repaint; retain a bounded
+        // background refresh for normal desktop liveness.
+        if ((frame & 1023u) == 0) {
             kernel::desktop::draw();
             ++g_graphics_redraws;
         }
-#if defined(GXOS_AARCH64_PHASE7)
-        if ((frame & 0xFFFu) == 0 && frame != 0) {
-            print("[guideXOS] input progress pointer=");
-            phase3_serial_dec(kernel::virtio_input::hardware_pointer_events());
-            print(" buttons=");
-            phase3_serial_dec(kernel::virtio_input::hardware_button_events());
-            print(" keyboard=");
-            phase3_serial_dec(kernel::virtio_input::hardware_keyboard_events());
-            print(" queue=");
-            phase3_serial_dec(kernel::input_queue::size());
-            print(" dropped=");
-            phase3_serial_dec(kernel::input_queue::events_dropped());
-            print("\n");
-        }
-#endif
         kernel::app::KernelWindow* proofWindow = kernel::phase7_input_proof::window();
         if (!dragPassed && proofWindow &&
             (proofWindow->x != initialWindowX || proofWindow->y != initialWindowY) &&
@@ -593,15 +603,127 @@ static void graphics_task(void*)
         }
         const uint64_t pointerEvents = kernel::virtio_input::hardware_pointer_events();
         const uint64_t keyboardEvents = kernel::virtio_input::hardware_keyboard_events();
-        if (!durabilityPassed && pointerEvents >= 10000 && buttonEvents >= 1000 &&
-            keyboardEvents >= 1000 && kernel::input_queue::events_dropped() == 0) {
-            durabilityPassed = true;
-            print("[guideXOS] input durability: PASS pointer=");
+        if (!stressReady && kernel::phase7_input_proof::focus_passed() &&
+            kernel::phase7_input_proof::keyboard_passed() && dragPassed &&
+            buttonRoutingPassed && kernel::desktop::phase7_start_button_input_passed()) {
+            stressPointerBase = pointerEvents;
+            stressButtonBase = buttonEvents;
+            stressKeyboardBase = keyboardEvents;
+            stressDroppedBase = kernel::input_queue::events_dropped();
+            stressMalformedBase = kernel::virtio_input::malformed_events();
+            nextTelemetryPointer = pointerEvents + kTelemetryQuantum;
+            nextTelemetryButton = buttonEvents + kTelemetryQuantum;
+            nextTelemetryKeyboard = keyboardEvents + kTelemetryQuantum;
+            stressReady = true;
+            kernel::desktop::set_input_stress_render_suppressed(true);
+            print("[guideXOS] input stress: ready pointer-base=");
+            phase3_serial_dec(stressPointerBase);
+            print(" button-base=");
+            phase3_serial_dec(stressButtonBase);
+            print(" keyboard-base=");
+            phase3_serial_dec(stressKeyboardBase);
+            print(" semantics=hardware-reports-key-events-individual\n");
+        }
+        if (stressReady && (pointerEvents >= nextTelemetryPointer ||
+                            buttonEvents >= nextTelemetryButton ||
+                            keyboardEvents >= nextTelemetryKeyboard)) {
+            print("[guideXOS] input stress progress pointer=");
             phase3_serial_dec(pointerEvents);
             print(" buttons=");
             phase3_serial_dec(buttonEvents);
             print(" keyboard=");
             phase3_serial_dec(keyboardEvents);
+            print(" queue=");
+            phase3_serial_dec(kernel::input_queue::size());
+            print(" queue-high-water=");
+            phase3_serial_dec(kernel::input_queue::high_water_mark());
+            print(" drops=");
+            phase3_serial_dec(kernel::input_queue::events_dropped());
+            print(" coalesced=");
+            phase3_serial_dec(kernel::input_queue::events_coalesced());
+            print(" virtio-irq=");
+            phase3_serial_dec(kernel::virtio_input::device_interrupts_observed());
+            print(" virtio-polls=");
+            phase3_serial_dec(kernel::virtio_input::virtqueue_poll_count());
+            print(" virtio-drains=");
+            phase3_serial_dec(kernel::virtio_input::virtqueue_drained_events());
+            print(" unknown-irq=");
+            kernel::scheduler::Stats telemetryStats{};
+            kernel::scheduler::get_stats(&telemetryStats);
+            phase3_serial_dec(telemetryStats.unexpected_irqs);
+            print("\n");
+            while (pointerEvents >= nextTelemetryPointer) nextTelemetryPointer += kTelemetryQuantum;
+            while (buttonEvents >= nextTelemetryButton) nextTelemetryButton += kTelemetryQuantum;
+            while (keyboardEvents >= nextTelemetryKeyboard) nextTelemetryKeyboard += kTelemetryQuantum;
+        }
+        const uint64_t stressPointers = pointerEvents >= stressPointerBase
+            ? pointerEvents - stressPointerBase : 0;
+        const uint64_t stressButtons = buttonEvents >= stressButtonBase
+            ? buttonEvents - stressButtonBase : 0;
+        const uint64_t stressKeyboard = keyboardEvents >= stressKeyboardBase
+            ? keyboardEvents - stressKeyboardBase : 0;
+        if (!pointerStressPassed && stressReady && stressPointers >= kStressPointerTarget) {
+            pointerStressPassed = true;
+            print("[guideXOS] input stress pointer: PASS count=");
+            phase3_serial_dec(stressPointers);
+            print("\n");
+        }
+        if (!buttonStressPassed && stressReady && stressButtons >= kStressButtonTarget) {
+            buttonStressPassed = true;
+            print("[guideXOS] input stress buttons: PASS count=");
+            phase3_serial_dec(stressButtons);
+            print("\n");
+        }
+        if (!keyboardStressPassed && stressReady && stressKeyboard >= kStressKeyboardTarget) {
+            keyboardStressPassed = true;
+            print("[guideXOS] input stress keyboard: PASS count=");
+            phase3_serial_dec(stressKeyboard);
+            print("\n");
+        }
+        const kernel::virtio_input::MouseState* finalMouse =
+            kernel::virtio_input::get_mouse_state();
+        const kernel::virtio_input::KeyboardState* finalKeyboard =
+            kernel::virtio_input::get_keyboard_state();
+        const bool queueClean = kernel::input_queue::size() == 0 &&
+            kernel::input_queue::events_dropped() == stressDroppedBase &&
+            kernel::virtio_input::malformed_events() == stressMalformedBase;
+        const bool finalInputStateClean = finalMouse && finalKeyboard &&
+            finalMouse->buttons == 0 && finalKeyboard->keyCount == 0 &&
+            finalKeyboard->modifiers == 0 &&
+            !kernel::compositor::KernelCompositor::isButtonPressActive() &&
+            kernel::input::mouse_x() >= 0 &&
+            kernel::input::mouse_y() >= 0 &&
+            kernel::input::mouse_x() < static_cast<int32_t>(kernel::framebuffer::get_width()) &&
+            kernel::input::mouse_y() < static_cast<int32_t>(kernel::framebuffer::get_height());
+        if (!queueIntegrityPassed && stressReady && pointerStressPassed &&
+            buttonStressPassed && keyboardStressPassed && queueClean) {
+            queueIntegrityPassed = true;
+            print("[guideXOS] input queue integrity: PASS depth=0 high-water=");
+            phase3_serial_dec(kernel::input_queue::high_water_mark());
+            print(" drops=");
+            phase3_serial_dec(kernel::input_queue::events_dropped() - stressDroppedBase);
+            print(" coalesced=");
+            phase3_serial_dec(kernel::input_queue::events_coalesced());
+            print("\n");
+        }
+        if (!finalStatePassed && stressReady && queueIntegrityPassed && finalInputStateClean) {
+            finalStatePassed = true;
+            print("[guideXOS] input final state: PASS buttons=0 keys=0 modifiers=0 drag=0 cursor=");
+            phase3_serial_dec(static_cast<uint64_t>(kernel::input::mouse_x()));
+            print(",");
+            phase3_serial_dec(static_cast<uint64_t>(kernel::input::mouse_y()));
+            print("\n");
+        }
+        if (!durabilityPassed && stressReady && pointerStressPassed &&
+            buttonStressPassed && keyboardStressPassed && queueIntegrityPassed &&
+            finalStatePassed) {
+            durabilityPassed = true;
+            print("[guideXOS] input durability: PASS pointer=");
+            phase3_serial_dec(stressPointers);
+            print(" buttons=");
+            phase3_serial_dec(stressButtons);
+            print(" keyboard=");
+            phase3_serial_dec(stressKeyboard);
             print(" queue-high-water=");
             phase3_serial_dec(kernel::input_queue::high_water_mark());
             print(" dropped=");
@@ -613,8 +735,13 @@ static void graphics_task(void*)
         if (!inputIntegrationPassed && kernel::phase7_input_proof::focus_passed() &&
             kernel::phase7_input_proof::keyboard_passed() && dragPassed &&
             buttonRoutingPassed && kernel::desktop::phase7_start_button_input_passed() &&
-            durabilityPassed) {
+            durabilityPassed && kernel::scheduler::stack_integrity() &&
+            !kernel::scheduler::failed() && phase3_exception_count() == 0) {
             inputIntegrationPassed = true;
+            kernel::desktop::set_input_stress_render_suppressed(false);
+            kernel::desktop::draw();
+            kernel::desktop::draw_cursor(kernel::input::mouse_x(), kernel::input::mouse_y());
+            ++g_graphics_redraws;
             const uint64_t interactiveHash = kernel::framebuffer::verification_hash(
                 0, 0, kernel::framebuffer::get_width(), kernel::framebuffer::get_height());
             g_graphics_interactive_hash = interactiveHash;
@@ -663,6 +790,23 @@ static void graphics_task(void*)
     phase3_serial_dec(kernel::virtio_input::device_interrupts_observed());
     print(" malformed=");
     phase3_serial_dec(kernel::virtio_input::malformed_events());
+    print(" queue-depth=");
+    phase3_serial_dec(kernel::input_queue::size());
+    print(" virtio-polls=");
+    phase3_serial_dec(kernel::virtio_input::virtqueue_poll_count());
+    print(" virtio-drains=");
+    phase3_serial_dec(kernel::virtio_input::virtqueue_drained_events());
+    print(" irq-status-acks=");
+    phase3_serial_dec(kernel::virtio_input::virtqueue_interrupt_status_acks());
+    print(" stress-pointer=");
+    phase3_serial_dec(kernel::virtio_input::hardware_pointer_events() >= stressPointerBase
+        ? kernel::virtio_input::hardware_pointer_events() - stressPointerBase : 0);
+    print(" stress-buttons=");
+    phase3_serial_dec(kernel::virtio_input::hardware_button_events() >= stressButtonBase
+        ? kernel::virtio_input::hardware_button_events() - stressButtonBase : 0);
+    print(" stress-keyboard=");
+    phase3_serial_dec(kernel::virtio_input::hardware_keyboard_events() >= stressKeyboardBase
+        ? kernel::virtio_input::hardware_keyboard_events() - stressKeyboardBase : 0);
     print("\n");
     g_graphics_complete = 1;
     g_graphics_in_progress = 0;
@@ -1095,6 +1239,8 @@ extern "C" void phase3_main(const Aarch64Handoff* handoff, uint64_t initial_el)
     phase3_serial_dec(stats.unexpected_irqs);
     print(" exceptions=");
     phase3_serial_dec(phase3_exception_count());
+    print(" last-unexpected-irq=");
+    phase3_serial_dec(stats.last_unexpected_irq);
 #if defined(GXOS_AARCH64_PHASE7)
     print("\nAARCH64_PHASE7_PASS\n");
 #elif defined(GXOS_AARCH64_PHASE6)

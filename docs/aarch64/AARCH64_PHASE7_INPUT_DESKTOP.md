@@ -3,13 +3,14 @@
 ## Status
 
 This pass brings up the real QEMU input path and the common interactive
-desktop path.  The validated boundary is Outcome B: virtio keyboard/tablet
-events reach the common input queue, move the common cursor, activate the
-real Start button, focus a common compositor window, route text, and drag the
-window.  The high-rate durability workload remains incomplete because the
-QEMU 11 `input-send-event` producer coalesces or back-pressures long bursts
-before the guest can observe the requested event counts.  Therefore this
-pass does not claim `AARCH64_PHASE7_PASS` or Outcome A.
+desktop path.  The validated high-level boundary remains the prior Outcome-B
+proof: virtio keyboard/tablet events reach the common input queue, move the
+common cursor, activate the real Start button, focus a common compositor
+window, route text, and drag the window.  Phase-7B closes the investigation as
+Outcome E rather than claiming Outcome A: QEMU 11's acknowledged
+`input-send-event` producer still cannot deliver the requested full durability
+workload through this QMP path.  Therefore this pass does not claim
+`AARCH64_PHASE7_PASS` for full stress.
 
 The historical static Phase-6 desktop path remains separate and unchanged
 when no input is supplied.  The Phase-6 regression was rerun after the
@@ -133,28 +134,90 @@ coalescing, drop-newest overflow, invalid event rejection, signed relative
 clipping, and absolute bounds.  They pass with
 `AARCH64_PHASE7_HOST_CONTROLS_PASS`.
 
-## Durability result and limitation
+The QMP harness also has fail-closed controls for malformed JSON, impossible
+batch sizes, unmatched/error responses, bounded read timeouts, QEMU exit, and
+guest watermark timeout/retry exhaustion.  The final run exercised the normal
+QMP framing and batch controls before the bounded guest watermark failure; no
+orphan QEMU process remained.
 
-The guest queue remains bounded and safe: observed progress lines retain
-`queue=0 dropped=0`, and no exception, fatal marker, or unexpected IRQ was
-observed.  However, the current QEMU/QMP burst producer does not deliver the
-full requested stress volume to the guest.  The finalized paced run observed
-`pointer=10157 buttons=147 keyboard=100` before the producer stalled, with
-`queue=0 dropped=0`; earlier pacing attempts observed smaller subsets.  The
-guest consequently does not emit `input durability: PASS`,
-`input/scheduler integration: PASS`, or `AARCH64_PHASE7_PASS` for this pass.
+## Phase-7B closure: deterministic transport audit
 
-The queue high-water mark and coalesce total are intentionally not presented
-as completed-stress statistics: the burst stopped before the guest emitted
-its final totals.  The observed progress lines showed no queue overflow,
-exception, fatal marker, or unexpected IRQ, and the normal architectural
-timer/preemption workload remained live while the input producer was active.
+Phase 7B did not close the durability gate.  It classifies the remaining
+failure as Outcome E: QEMU 11.0.0's `input-send-event` producer path cannot be
+driven reliably to the requested 10,000/1,000/1,000 guest-observed workload
+through this QMP interface, even after acknowledged and adaptively paced
+delivery.  The original finalized run had observed approximately
+`pointer=10157 buttons=147 keyboard=100`; that result was not accepted as a
+durability pass because the button and keyboard thresholds were not reached.
 
-This is an honest acceptance boundary, not a synthetic success marker.  The
-next input pass should either use a QMP producer that preserves individual
-events at a controlled rate or add a validated QEMU-side event pacing method,
-then require the original 10,000/1,000/1,000 observed guest counts and three
-fresh successful boots.
+The final bounded diagnostic run made the boundary explicit.  The host
+intended 2,080 pointer reports, sent 260 QMP `input-send-event` commands, and
+received all 260 command responses.  The guest reached total
+`pointer=2087 buttons=7 keyboard=16`, including stress deltas
+`stress-pointer=2072 stress-buttons=0 stress-keyboard=0`, then reached its
+finite integration guard.  Its final telemetry was:
+
+```text
+queue-depth=0 queue-high-water=12 dropped=0 coalesced=1817
+virtio-irq=269 virtio-polls=4000002 virtio-drains=2393 irq-status-acks=41
+malformed=0 unknown-irq=0 exceptions=0
+```
+
+The host-side stress interval was 39.64 seconds at the point of failure,
+which is 52.5 intended pointer reports/sec and 6.6 QMP acknowledgements/sec.
+No QMP retry was needed in this particular run because the guest stopped at the
+finite guard before the first bounded retry checkpoint; other runs exercised
+the four-attempt, two-second watermark retry path and failed in the same
+producer boundary.  Earlier paced variants reached approximately 2,300,
+3,200, 7,300, and 10,000 pointer reports but stopped before all three class
+thresholds.  Across those attempts the queue remained empty or nearly empty,
+with zero drops and no unexplained IRQ storm.
+
+The root cause is mixed at the host/QEMU device boundary, not a common queue
+overflow or a guest IRQ loss bug.  QMP command acknowledgement means that QEMU
+accepted and parsed the command; it does not mean that the virtio-input device
+has placed every report in the used ring.  The guest continued to receive
+virtio interrupts and drain used entries while QMP acknowledgements continued,
+but the producer ceased making progress before the requested workload was
+consumed.  The guest-side evidence is the opposite of overflow: queue depth
+returned to zero, `dropped=0`, `malformed=0`, `unknown-irq=0`, and no exception
+marker appeared.
+
+The producer protocol was changed from the prior burst-style path to a
+persistent QMP session with greeting validation, `qmp_capabilities`,
+`query-commands`, `query-version`, request IDs, response matching, error
+validation, and response draining.  Stress uses one eight-report command at a
+time (`QmpBatchSize=8`, one command in flight), waits for its QMP response,
+then applies a 120 ms inter-group delay for pointer reports and 50 ms for
+button/keyboard reports.  Every 32 reports the host waits for a guest telemetry
+watermark; a missing watermark has a bounded two-second wait and up to four
+retries.  The workloads are padded only to that telemetry boundary:
+10,016 pointer reports, 1,024 button reports, and 1,024 keyboard reports.
+The acceptance thresholds remain unchanged at 10,000, 1,000, and 1,000.
+
+Event-count semantics are explicit.  Pointer counts are hardware absolute
+reports observed by the virtio driver, not common routed events.  The common
+queue may safely coalesce adjacent motion events; the final coalesced count is
+reported separately.  Button counts are individual hardware press/release
+reports, and the stress sequence alternates down/up so its requested endpoint
+is released.  Keyboard counts are individual hardware key reports; 1,000
+reports therefore represent 500 press/release actions in the repeated `a`
+pattern.  Text-widget storage capacity is not used as the keyboard durability
+counter.
+
+Guest telemetry is periodic rather than per-event and includes pointer,
+button, keyboard, queue depth, queue high-water, drops, coalesces, virtio IRQs,
+virtqueue polls/drains, and unexpected IRQs.  A stress-only render suppression
+is enabled only after the already-proven cursor/focus/drag/keyboard/Start proof
+has completed.  It prevents the test from turning every stress report into a
+full wallpaper redraw while preserving the normal desktop path for the real
+interaction proof and restoring normal drawing before any successful final
+framebuffer verification.  It did not manufacture guest counters or markers.
+
+The Phase-7 guest still emits `AARCH64_PHASE7_ERROR` when its finite bounded
+integration loop expires; it never emits `AARCH64_PHASE7_PASS` for an
+incomplete stress run.  Thus this is a fail-closed Outcome E, not a weakened
+threshold or synthetic pass.
 
 ## Regression and AMD64 status
 
@@ -202,6 +265,13 @@ QMP, requires the guest to observe the counts, and only then permits the
 Phase-7 pass marker.  On QEMU 11.0.0 the long QMP producer stalls before the
 button and keyboard thresholds, so the test exits without a false success.
 
+No three-boot full-durability result is claimed for this Outcome-E run:
+the first fresh full-stress boot terminates at the bounded guest guard, and
+the harness cleans up QEMU before another stress boot can be called complete.
+The three-boot result that is complete is the historical high-level routing
+probe above; it is intentionally not substituted for the requested durability
+gate.
+
 ## Files and tooling
 
 - `scripts/build-aarch64-phase7.ps1` — loader, kernel, proof app, host controls,
@@ -214,9 +284,11 @@ button and keyboard thresholds, so the test exits without a false success.
 
 ## Exact AARCH64-8 recommendation
 
-Do not expand to general USB or physical hardware yet.  AARCH64-8 should
-first finish the QEMU input-event pacing/durability proof, then expose one
-real ARM64 NativeElf application window through the already-proven common
-compositor and App Model.  Require three fresh boots, the original Phase-5
-regression, the static Phase-6 hash, and the full Phase-7 observed stress
-counts before adding richer application-window behavior.
+Do not add NativeElf GUI windows or broaden device scope yet.  First upgrade
+QEMU beyond 11.0.0, or validate another standard QEMU hardware-input
+automation mechanism that still targets the existing virtio keyboard/tablet
+devices.  Re-run this exact guest path with the unchanged 10,000/1,000/1,000
+guest-observed thresholds, separate submitted/acknowledged/observed counts,
+and three fresh complete durability boots.  Only after that gate passes should
+AARCH64-8 expose one real ARM64 NativeElf application window through the
+already-proven common compositor and App Model.

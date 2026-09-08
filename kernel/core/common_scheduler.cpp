@@ -364,9 +364,10 @@ bool stack_integrity()
     return true;
 }
 
-void note_unexpected_irq()
+void note_unexpected_irq(uint32_t irq)
 {
     ++s_stats.unexpected_irqs;
+    s_stats.last_unexpected_irq = irq;
     mark_failure();
 }
 
@@ -382,6 +383,7 @@ void get_stats(Stats* stats)
     stats->idle_wake_ticks = s_stats.idle_wake_ticks;
     stats->task_count = s_task_count;
     stats->unexpected_irqs = s_stats.unexpected_irqs;
+    stats->last_unexpected_irq = s_stats.last_unexpected_irq;
 }
 
 } // namespace scheduler

@@ -146,6 +146,9 @@ uint64_t hardware_button_events();
 uint64_t hardware_keyboard_events();
 uint64_t malformed_events();
 uint64_t device_interrupts_observed();
+uint64_t virtqueue_poll_count();
+uint64_t virtqueue_drained_events();
+uint64_t virtqueue_interrupt_status_acks();
 
 // Release all VirtIO input devices
 void shutdown();
