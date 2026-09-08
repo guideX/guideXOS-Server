@@ -33,14 +33,19 @@ static const uint32_t MAX_ARGS = 16;
 // future changes have a stable bound to check.
 static const uint32_t NICINFO_BRIEF_MAX_LINES = 20;
 static const uint32_t NICINFO_BRIEF_EXPECTED_LINES = 19;
+static const uint32_t NICINFO_TX_BRIEF_MAX_LINES = 20;
+static const uint32_t NICINFO_TX_BRIEF_EXPECTED_LINES = 19;
 static_assert(NICINFO_BRIEF_EXPECTED_LINES <= NICINFO_BRIEF_MAX_LINES,
               "nicinfo brief expected output must stay within its line bound");
+static_assert(NICINFO_TX_BRIEF_EXPECTED_LINES <= NICINFO_TX_BRIEF_MAX_LINES,
+              "nicinfo tx brief expected output must stay within its line bound");
 
 enum NicInfoMode : uint8_t {
     NICINFO_MODE_FULL = 0,
     NICINFO_MODE_BRIEF,
     NICINFO_MODE_LINK,
     NICINFO_MODE_TX,
+    NICINFO_MODE_TX_BRIEF,
     NICINFO_MODE_INVALID,
 };
 

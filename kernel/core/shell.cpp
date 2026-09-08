@@ -379,7 +379,7 @@ static void cmd_help() {
     output_string("Network:\n");
     output_string("  ping <ip>      - Send ICMP echo request\n");
     output_string("  ifconfig, ip   - Network interface info\n");
-    output_string("  nicinfo [brief|link|tx] - NIC diagnostics; link refreshes, tx shows one TX descriptor\n");
+    output_string("  nicinfo [brief|link|tx [brief]] - NIC diagnostics\n");
     output_string("  netdiag         - Bare-metal NIC/DHCP/ARP diagnostics\n");
     output_string("  ipconfig       - Windows-style IP config\n");
     output_string("  ipconfig /all  - Full IP configuration\n");
@@ -2164,6 +2164,25 @@ static void cmd_nicinfo_tx()
     output_string(" bufferMatch=");
     output_string(tx.bufferAddressMatches ? "yes" : "no");
     output_string("\n");
+    output_string("raw-pre=0x");
+    uint_hex64_to_str(tx.lastDescriptorRaw0BeforePublication, hex64Str);
+    output_string(hex64Str);
+    output_string("/0x");
+    uint_hex64_to_str(tx.lastDescriptorRaw1BeforePublication, hex64Str);
+    output_string(hex64Str);
+    output_string(" raw-doorbell=0x");
+    uint_hex64_to_str(tx.lastDescriptorRaw0AfterDoorbell, hex64Str);
+    output_string(hex64Str);
+    output_string("/0x");
+    uint_hex64_to_str(tx.lastDescriptorRaw1AfterDoorbell, hex64Str);
+    output_string(hex64Str);
+    output_string(" raw-final=0x");
+    uint_hex64_to_str(tx.lastDescriptorRaw0Final, hex64Str);
+    output_string(hex64Str);
+    output_string("/0x");
+    uint_hex64_to_str(tx.lastDescriptorRaw1Final, hex64Str);
+    output_string(hex64Str);
+    output_string("\n");
 
     output_string("translation: imageVA=0x");
     uint_hex64_to_str(tx.kernelImageVirtualStart, hex64Str);
@@ -2237,18 +2256,75 @@ static void cmd_nicinfo_tx()
     output_string((final.txdctl & nic::E1000_TXDCTL_GRAN) != 0u ? "yes" : "no");
     output_string("\n");
 
+    output_string("TCTL fields: EN=");
+    output_string((final.tctl & nic::E1000_TCTL_EN) != 0u ? "yes" : "no");
+    output_string(" PSP=");
+    output_string((final.tctl & nic::E1000_TCTL_PSP) != 0u ? "yes" : "no");
+    output_string(" RTLC=");
+    output_string((final.tctl & nic::E1000_TCTL_RTLC) != 0u ? "yes" : "no");
+    output_string(" MULR=");
+    output_string((final.tctl & nic::E1000_TCTL_MULR) != 0u ? "yes" : "no");
+    output_string(" CT=");
+    uint_to_str((final.tctl & nic::E1000_TCTL_CT_MASK) >>
+                    nic::E1000_TCTL_CT_SHIFT, numStr);
+    output_string(numStr);
+    output_string(" COLD=");
+    uint_to_str((final.tctl & nic::E1000_TCTL_COLD_MASK) >>
+                    nic::E1000_TCTL_COLD_SHIFT, numStr);
+    output_string(numStr);
+    output_string("\n");
+
+    output_string("TIPG fields: IPGT=");
+    uint_to_str(final.tipg & 0x3FFu, numStr);
+    output_string(numStr);
+    output_string(" IPGR1=");
+    uint_to_str((final.tipg >> 10) & 0x3FFu, numStr);
+    output_string(numStr);
+    output_string(" IPGR2=");
+    uint_to_str((final.tipg >> 20) & 0x3FFu, numStr);
+    output_string(numStr);
+    output_string("\n");
+
     output_string("TXDCTL=0x");
     uint_hex_to_str(final.txdctl, 8, hexStr);
     output_string(hexStr);
     output_string(" TARC0=0x");
     uint_hex_to_str(final.tarc0, 8, hexStr);
     output_string(hexStr);
+    output_string(" TXDCTL1=0x");
+    uint_hex_to_str(final.txdctl1, 8, hexStr);
+    output_string(hexStr);
+    output_string(" TARC1=0x");
+    uint_hex_to_str(final.tarc1, 8, hexStr);
+    output_string(hexStr);
     output_string(" IOSFPC=0x");
     uint_hex_to_str(final.iosfpc, 8, hexStr);
+    output_string(hexStr);
+    output_string(" CTRL-EXT=0x");
+    uint_hex_to_str(final.ctrlExt, 8, hexStr);
+    output_string(hexStr);
+    output_string(" PBA=0x");
+    uint_hex_to_str(final.pba, 8, hexStr);
+    output_string(hexStr);
+    output_string(" FWSM=0x");
+    uint_hex_to_str(final.fwsm, 8, hexStr);
     output_string(hexStr);
     output_string(" PCI-CMD=0x");
     uint_hex_to_str(final.pciCommand, 4, hexStr);
     output_string(hexStr);
+    output_string("\n");
+
+    output_string("ring-registers: before=0x");
+    uint_hex_to_str(tx.beforeRegisters.tdlen, 8, hexStr);
+    output_string(hexStr);
+    output_string(" pre=0x");
+    uint_hex_to_str(tx.preDoorbellRegisters.tdlen, 8, hexStr);
+    output_string(hexStr);
+    output_string(" final=0x");
+    uint_hex_to_str(final.tdlen, 8, hexStr);
+    output_string(hexStr);
+    output_string(" stable=");
+    output_string(tx.ringRegistersPersisted ? "yes" : "no");
     output_string("\n");
 
     output_string("polls=");
@@ -2262,6 +2338,226 @@ static void cmd_nicinfo_tx()
     output_string(" poisoned=");
     output_string(tx.ringPoisoned ? "yes" : "no");
     output_string(" failure=");
+    output_string(nic::tx_failure_reason_name(tx.failureReason));
+    output_string("\n");
+}
+
+// One-screen TX evidence for the physical bring-up loop. This remains
+// observational and is deliberately capped at the shell contract above.
+static void cmd_nicinfo_tx_brief()
+{
+    const nic::NICDevice* dev = nic::get_device();
+    char numStr[16];
+    char hexStr[9];
+    char hex64Str[17];
+
+    output_string("NIC TX brief\n");
+    if (!dev) {
+        output_string("TX: no recorded NIC state\n");
+        return;
+    }
+
+    const nic::TxDiagnostics& tx = dev->tx;
+    const nic::TxRegisterSnapshot& final = tx.finalRegisters.valid
+        ? tx.finalRegisters : tx.initialRegisters;
+
+    output_string("id=0x");
+    uint_hex_to_str(dev->deviceId, 4, hexStr);
+    output_string(hexStr);
+    output_string(" family=");
+    output_string(nic::device_family_name(
+        nic::device_family_for(dev->vendorId, dev->deviceId)));
+    output_string("\n");
+
+    output_string("ringPA=0x");
+    uint_hex64_to_str(tx.descriptorRingAddress, hex64Str);
+    output_string(hex64Str);
+    output_string(" match=");
+    output_string(tx.ringAddressMatches ? "yes" : "no");
+    output_string(" ringVA-in-image=");
+    output_string(tx.dmaTranslationValid ? "yes" : "no");
+    output_string("\n");
+
+    output_string("descPA=0x");
+    uint_hex64_to_str(tx.lastDescriptorAddress, hex64Str);
+    output_string(hex64Str);
+    output_string(" ring+offset=");
+    output_string(tx.ringAddressMatches ? "yes" : "no");
+    output_string("\n");
+
+    output_string("bufPA=0x");
+    uint_hex64_to_str(tx.lastBufferAddress, hex64Str);
+    output_string(hex64Str);
+    output_string(" descBuf=");
+    output_string(tx.bufferAddressMatches ? "yes" : "no");
+    output_string("\n");
+
+    output_string("ring=count=");
+    uint_to_str(nic::NUM_TX_DESC, numStr);
+    output_string(numStr);
+    output_string(" len=");
+    uint_to_str(nic::tx_ring_length_bytes(nic::NUM_TX_DESC), numStr);
+    output_string(numStr);
+    output_string(" align=");
+    output_string(tx.ringAlignmentValid ? "yes" : "no");
+    output_string(" valid=");
+    output_string(tx.ringLengthValid ? "yes" : "no");
+    output_string("\n");
+
+    output_string("TDBA=0x");
+    uint_hex_to_str(final.tdbal, 8, hexStr);
+    output_string(hexStr);
+    output_string("/0x");
+    uint_hex_to_str(final.tdbah, 8, hexStr);
+    output_string(hexStr);
+    output_string(" match=");
+    output_string(nic::tx_ring_registers_match(
+        final, tx.descriptorRingAddress,
+        nic::tx_ring_length_bytes(nic::NUM_TX_DESC)) ? "yes" : "no");
+    output_string("\n");
+
+    output_string("TDLEN=0x");
+    uint_hex_to_str(final.tdlen, 8, hexStr);
+    output_string(hexStr);
+    output_string(" TDH/TDT=0x");
+    uint_hex_to_str(final.tdh, 4, hexStr);
+    output_string(hexStr);
+    output_string("/0x");
+    uint_hex_to_str(final.tdt, 4, hexStr);
+    output_string(hexStr);
+    output_string(" stable=");
+    output_string(tx.ringRegistersPersisted ? "yes" : "no");
+    output_string("\n");
+
+    output_string("desc status=");
+    uint_hex_to_str(tx.lastDescriptorStatusBefore, 2, hexStr);
+    output_string(hexStr);
+    output_string("->");
+    uint_hex_to_str(tx.lastDescriptorStatus, 2, hexStr);
+    output_string(hexStr);
+    output_string(" DD=");
+    output_string((tx.lastDescriptorStatus & nic::E1000_TXD_STAT_DD) != 0u
+                  ? "yes" : "no");
+    output_string("\n");
+
+    output_string("raw pub=0x");
+    uint_hex64_to_str(tx.lastDescriptorRaw0, hex64Str);
+    output_string(hex64Str);
+    output_string("/0x");
+    uint_hex64_to_str(tx.lastDescriptorRaw1, hex64Str);
+    output_string(hex64Str);
+    output_string("\n");
+
+    output_string("raw bd=0x");
+    uint_hex64_to_str(tx.lastDescriptorRaw0AfterDoorbell, hex64Str);
+    output_string(hex64Str);
+    output_string("/0x");
+    uint_hex64_to_str(tx.lastDescriptorRaw1AfterDoorbell, hex64Str);
+    output_string(hex64Str);
+    output_string("\n");
+
+    output_string("raw final=0x");
+    uint_hex64_to_str(tx.lastDescriptorRaw0Final, hex64Str);
+    output_string(hex64Str);
+    output_string("/0x");
+    uint_hex64_to_str(tx.lastDescriptorRaw1Final, hex64Str);
+    output_string(hex64Str);
+    output_string("\n");
+
+    output_string("TCTL=0x");
+    uint_hex_to_str(final.tctl, 8, hexStr);
+    output_string(hexStr);
+    output_string(" EN=");
+    output_string((final.tctl & nic::E1000_TCTL_EN) != 0u ? "yes" : "no");
+    output_string(" PSP=");
+    output_string((final.tctl & nic::E1000_TCTL_PSP) != 0u ? "yes" : "no");
+    output_string(" RTLC=");
+    output_string((final.tctl & nic::E1000_TCTL_RTLC) != 0u ? "yes" : "no");
+    output_string(" CT=");
+    uint_to_str((final.tctl & nic::E1000_TCTL_CT_MASK) >>
+                    nic::E1000_TCTL_CT_SHIFT, numStr);
+    output_string(numStr);
+    output_string(" COLD=");
+    uint_to_str((final.tctl & nic::E1000_TCTL_COLD_MASK) >>
+                    nic::E1000_TCTL_COLD_SHIFT, numStr);
+    output_string(numStr);
+    output_string("\n");
+
+    output_string("TXDCTL0=0x");
+    uint_hex_to_str(final.txdctl, 8, hexStr);
+    output_string(hexStr);
+    output_string(" count=");
+    output_string((final.txdctl & nic::E1000_TXDCTL_COUNT_DESC) != 0u
+                  ? "yes" : "no");
+    output_string(" P=");
+    uint_to_str(final.txdctl & nic::E1000_TXDCTL_PTHRESH_MASK, numStr);
+    output_string(numStr);
+    output_string(" H=");
+    uint_to_str((final.txdctl & nic::E1000_TXDCTL_HTHRESH_MASK) >> 8, numStr);
+    output_string(numStr);
+    output_string(" W=");
+    uint_to_str((final.txdctl & nic::E1000_TXDCTL_WTHRESH_MASK) >> 16,
+                numStr);
+    output_string(numStr);
+    output_string(" G=");
+    output_string((final.txdctl & nic::E1000_TXDCTL_GRAN) != 0u ? "1" : "0");
+    output_string("\n");
+
+    output_string("TXDCTL1=0x");
+    uint_hex_to_str(final.txdctl1, 8, hexStr);
+    output_string(hexStr);
+    output_string(" valid=");
+    output_string(nic::i219_spt_txdctl_configuration_valid(final.txdctl1)
+                  ? "yes" : "no");
+    output_string("\n");
+
+    output_string("TIPG=0x");
+    uint_hex_to_str(final.tipg, 8, hexStr);
+    output_string(hexStr);
+    output_string(" IPGT=");
+    uint_to_str(final.tipg & 0x3FFu, numStr);
+    output_string(numStr);
+    output_string(" IPGR1=");
+    uint_to_str((final.tipg >> 10) & 0x3FFu, numStr);
+    output_string(numStr);
+    output_string(" IPGR2=");
+    uint_to_str((final.tipg >> 20) & 0x3FFu, numStr);
+    output_string(numStr);
+    output_string("\n");
+
+    output_string("TARC0=0x");
+    uint_hex_to_str(final.tarc0, 8, hexStr);
+    output_string(hexStr);
+    output_string(" TARC1=0x");
+    uint_hex_to_str(final.tarc1, 8, hexStr);
+    output_string(hexStr);
+    output_string(" IOSFPC=0x");
+    uint_hex_to_str(final.iosfpc, 8, hexStr);
+    output_string(hexStr);
+    output_string("\n");
+
+    output_string("CTRL-EXT=0x");
+    uint_hex_to_str(final.ctrlExt, 8, hexStr);
+    output_string(hexStr);
+    output_string(" PBA=0x");
+    uint_hex_to_str(final.pba, 8, hexStr);
+    output_string(hexStr);
+    output_string(" FWSM=0x");
+    uint_hex_to_str(final.fwsm, 8, hexStr);
+    output_string(hexStr);
+    output_string(" PCI=0x");
+    uint_hex_to_str(final.pciCommand, 4, hexStr);
+    output_string(hexStr);
+    output_string("\n");
+
+    output_string("polls=");
+    uint_to_str(tx.completionPolls, numStr);
+    output_string(numStr);
+    output_string(" timeout=");
+    output_string(tx.hardwareTimeouts != 0u ? "yes" : "no");
+    output_string(" poison=");
+    output_string(tx.ringPoisoned ? "yes" : "no");
+    output_string(" fail=");
     output_string(nic::tx_failure_reason_name(tx.failureReason));
     output_string("\n");
 }
@@ -4595,7 +4891,10 @@ static void execute_command(const char* cmd) {
                str_eq(command, "netdiag")) {
         const NicInfoMode nicInfoMode =
             (argCount <= 1) ? NICINFO_MODE_FULL :
-            (argCount == 2 ? nicinfo_mode_from_arg(arg1) : NICINFO_MODE_INVALID);
+            (argCount == 2 ? nicinfo_mode_from_arg(arg1) :
+             (argCount == 3 && str_eq(arg1, "tx") &&
+              str_eq(args[2], "brief") ? NICINFO_MODE_TX_BRIEF
+                                         : NICINFO_MODE_INVALID));
         if (nicInfoMode == NICINFO_MODE_FULL) {
             cmd_nicinfo();
         } else if (nicInfoMode == NICINFO_MODE_BRIEF) {
@@ -4604,11 +4903,14 @@ static void execute_command(const char* cmd) {
             cmd_nicinfo_link();
         } else if (nicInfoMode == NICINFO_MODE_TX) {
             cmd_nicinfo_tx();
+        } else if (nicInfoMode == NICINFO_MODE_TX_BRIEF) {
+            cmd_nicinfo_tx_brief();
         } else {
-            output_string("Usage: nicinfo [brief|link|tx]\n");
+            output_string("Usage: nicinfo [brief|link|tx [brief]]\n");
             output_string("  brief: recorded NIC initialization/link state only\n");
             output_string("  link: one bounded, read-only current link refresh\n");
             output_string("  tx: one TX descriptor and bounded register snapshot\n");
+            output_string("  tx brief: compact one-screen TX evidence\n");
         }
     } else if (str_eq(command, "netstat") || str_eq(command, "ss")) {
         cmd_netstat();

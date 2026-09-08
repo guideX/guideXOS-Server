@@ -104,6 +104,11 @@ static TxRegisterSnapshot read_tx_registers()
     snapshot.txdctl = mmio_read32(s_device.mmioBase, E1000_TXDCTL);
     snapshot.tarc0 = mmio_read32(s_device.mmioBase, E1000_TARC0);
     snapshot.iosfpc = mmio_read32(s_device.mmioBase, E1000_IOSFPC);
+    snapshot.txdctl1 = mmio_read32(s_device.mmioBase, E1000_TXDCTL1);
+    snapshot.tarc1 = mmio_read32(s_device.mmioBase, E1000_TARC1);
+    snapshot.ctrlExt = mmio_read32(s_device.mmioBase, E1000_CTRL_EXT);
+    snapshot.pba = mmio_read32(s_device.mmioBase, E1000_PBA);
+    snapshot.fwsm = mmio_read32(s_device.mmioBase, E1000_FWSM);
     snapshot.pciCommand = pci_read16(s_device.pciBus, s_device.pciSlot,
                                      s_device.pciFunc, 0x04);
     snapshot.valid = true;
@@ -1281,6 +1286,49 @@ static void apply_i219_spt_tx_workaround(uint64_t mmioBase)
     mmio_write32(mmioBase, E1000_TARC0, correctedTarc0);
 }
 
+// The SPT/PCH e1000e path initializes TXDCTL before enabling TCTL.  The
+// direct physical Phase 14 observation was TXDCTL=0, so this is the one
+// production correction selected for Phase 15.  It is intentionally limited
+// to 8086:156F and mirrors the upstream field operations instead of writing a
+// device-independent magic value.  Both queue registers are initialized as
+// upstream does, even though guideXOS currently submits only queue 0.
+static bool configure_i219_spt_tx_descriptor_control(uint64_t mmioBase)
+{
+    if (!is_i219_device(s_device.deviceId)) return true;
+
+    const uint32_t current0 = mmio_read32(mmioBase, E1000_TXDCTL);
+    const uint32_t current1 = mmio_read32(mmioBase, E1000_TXDCTL1);
+    const uint32_t configured0 = i219_spt_txdctl_configuration(current0);
+    const uint32_t configured1 = i219_spt_txdctl_configuration(current1);
+    mmio_write32(mmioBase, E1000_TXDCTL, configured0);
+    const uint32_t readback0 = mmio_read32(mmioBase, E1000_TXDCTL);
+    mmio_write32(mmioBase, E1000_TXDCTL1, configured1);
+    const uint32_t readback1 = mmio_read32(mmioBase, E1000_TXDCTL1);
+    return i219_spt_txdctl_configuration_valid(readback0) &&
+           i219_spt_txdctl_configuration_valid(readback1);
+}
+
+static void snapshot_tx_final_registers()
+{
+    snapshot_tx_registers(&s_device.tx.finalRegisters);
+    s_device.tx.ringRegistersPersisted =
+        tx_ring_registers_persisted(
+            s_device.tx.initialRegisters,
+            s_device.tx.beforeRegisters,
+            s_device.tx.preDoorbellRegisters,
+            s_device.tx.afterDoorbellRegisters,
+            s_device.tx.finalRegisters,
+            s_device.tx.descriptorRingAddress,
+            tx_ring_length_bytes(NUM_TX_DESC));
+}
+
+static void capture_tx_descriptor_raw(const TxDescriptor& descriptor,
+                                      uint64_t* raw0, uint64_t* raw1)
+{
+    if (raw0) *raw0 = descriptor.bufferAddr;
+    if (raw1) *raw1 = tx_descriptor_raw_word1(descriptor);
+}
+
 static bool init_tx(uint64_t mmioBase)
 {
     s_device.tx.kernelPhysicalBase = s_kernelPhysicalBase;
@@ -1296,6 +1344,7 @@ static bool init_tx(uint64_t mmioBase)
     s_device.tx.ringLengthValid = false;
     s_device.tx.bufferAddressMatches = false;
     s_device.tx.txEngineEnabled = false;
+    s_device.tx.ringRegistersPersisted = false;
 
     TxFailureReason layoutFailure = TxFailureReason::DmaTranslationInvalid;
     if (!validate_dma_layout(&layoutFailure)) {
@@ -1335,6 +1384,11 @@ static bool init_tx(uint64_t mmioBase)
     mmio_write32(mmioBase, E1000_TDT, 0);
     s_txCur = 0;
 
+    if (!configure_i219_spt_tx_descriptor_control(mmioBase)) {
+        s_device.tx.failureReason = TxFailureReason::FetchControlInvalid;
+        return false;
+    }
+
     // Program TIPG before enabling TX. CT=0x0F and COLD=0x03F are the
     // documented full-duplex legacy values; this is shared by QEMU E1000 and
     // physical I219.
@@ -1364,7 +1418,8 @@ static bool init_tx(uint64_t mmioBase)
             tx_ring_length_bytes(NUM_TX_DESC) ||
         (s_device.tx.initialRegisters.tdh & 0xFFFFu) != 0u ||
         (s_device.tx.initialRegisters.tdt & 0xFFFFu) != 0u ||
-        !s_device.tx.txEngineEnabled) {
+        !s_device.tx.txEngineEnabled ||
+        !pci_dma_access_enabled(s_device.tx.initialRegisters.pciCommand)) {
         if (!s_device.tx.initialRegisters.valid) {
             s_device.tx.failureReason = TxFailureReason::RingInvalid;
         } else if (!s_device.tx.ringAddressMatches) {
@@ -1374,6 +1429,9 @@ static bool init_tx(uint64_t mmioBase)
             s_device.tx.failureReason = TxFailureReason::RingLengthInvalid;
         } else if (!s_device.tx.txEngineEnabled) {
             s_device.tx.failureReason = TxFailureReason::EngineDisabled;
+        } else if (!pci_dma_access_enabled(
+                       s_device.tx.initialRegisters.pciCommand)) {
+            s_device.tx.failureReason = TxFailureReason::DmaEngineDisabled;
         } else {
             s_device.tx.failureReason = TxFailureReason::RingInvalid;
         }
@@ -2095,7 +2153,8 @@ bool init_from_bootinfo(const NicBootInfo* nicInfo)
         s_device.initStage = NIC_INIT_PCI;
         uint16_t command = pci_read16(s_device.pciBus, s_device.pciSlot,
                                       s_device.pciFunc, 0x04);
-        const uint16_t requiredCommand = static_cast<uint16_t>((1u << 1) | (1u << 2));
+        const uint16_t requiredCommand = static_cast<uint16_t>(
+            PCI_COMMAND_MEMORY_SPACE | PCI_COMMAND_BUS_MASTER);
         if ((command & requiredCommand) != requiredCommand) {
             uint32_t commandReg = pci_read32(s_device.pciBus, s_device.pciSlot,
                                               s_device.pciFunc, 0x04);
@@ -2108,7 +2167,7 @@ bool init_from_bootinfo(const NicBootInfo* nicInfo)
         serial::puts("[AIDA-I219-P5] pci-command=");
         serial::put_hex32(s_device.pciCommand);
         serial::putc('\n');
-        if ((s_device.pciCommand & requiredCommand) != requiredCommand) {
+        if (!pci_dma_access_enabled(s_device.pciCommand)) {
             phase5_stage_failed(1);
             set_init_failure(NIC_INIT_PCI, "PCI memory-space/bus-master enable failed");
             return false;
@@ -2149,7 +2208,9 @@ bool init_from_bootinfo(const NicBootInfo* nicInfo)
         s_device.initStage = NIC_INIT_PCI;
         uint16_t command = pci_read16(s_device.pciBus, s_device.pciSlot,
                                       s_device.pciFunc, 0x04);
-        command = static_cast<uint16_t>(command | (1u << 1) | (1u << 2));
+        command = static_cast<uint16_t>(command |
+                                        PCI_COMMAND_MEMORY_SPACE |
+                                        PCI_COMMAND_BUS_MASTER);
         pci_write32(s_device.pciBus, s_device.pciSlot, s_device.pciFunc, 0x04,
                     (pci_read32(s_device.pciBus, s_device.pciSlot, s_device.pciFunc, 0x04) &
                      0xFFFF0000u) | command);
@@ -2158,7 +2219,7 @@ bool init_from_bootinfo(const NicBootInfo* nicInfo)
         serial::puts("[NIC] PCI command: ");
         serial::put_hex32(s_device.pciCommand);
         serial::puts(" (memory+bus-master enabled)\n");
-        if ((s_device.pciCommand & ((1u << 1) | (1u << 2))) != ((1u << 1) | (1u << 2))) {
+        if (!pci_dma_access_enabled(s_device.pciCommand)) {
             set_init_failure(NIC_INIT_PCI, "PCI memory-space/bus-master enable failed");
             return false;
         }
@@ -2427,6 +2488,12 @@ Status send_frame(const uint8_t* data, uint16_t len)
     s_device.tx.lastDescriptorBufferAddress = 0;
     s_device.tx.lastDescriptorRaw0 = 0;
     s_device.tx.lastDescriptorRaw1 = 0;
+    s_device.tx.lastDescriptorRaw0BeforePublication = 0;
+    s_device.tx.lastDescriptorRaw1BeforePublication = 0;
+    s_device.tx.lastDescriptorRaw0AfterDoorbell = 0;
+    s_device.tx.lastDescriptorRaw1AfterDoorbell = 0;
+    s_device.tx.lastDescriptorRaw0Final = 0;
+    s_device.tx.lastDescriptorRaw1Final = 0;
     s_device.tx.lastCommand = 0;
     s_device.tx.lastDescriptorStatusBefore = 0;
     s_device.tx.lastDescriptorStatus = 0;
@@ -2439,6 +2506,21 @@ Status send_frame(const uint8_t* data, uint16_t len)
     s_device.tx.failureReason = TxFailureReason::None;
     snapshot_tx_registers(&s_device.tx.beforeRegisters);
 
+    // Revalidate the PCI memory-space and bus-master bits at the submission
+    // boundary. Initialization already checked them, but this closes the
+    // evidence gap if firmware or another owner changes PCI command state
+    // after initialization and before a descriptor is published.
+    if (!s_device.tx.beforeRegisters.valid ||
+        !pci_dma_access_enabled(s_device.tx.beforeRegisters.pciCommand)) {
+        serial::puts("[NIC] send_frame: PCI DMA access is disabled\n");
+        s_device.stats.txErrors++;
+        s_device.tx.driverErrors++;
+        s_device.tx.failureReason = TxFailureReason::DmaEngineDisabled;
+        s_device.tx.lastStatus = NIC_ERR_INIT_FAIL;
+        snapshot_tx_final_registers();
+        return NIC_ERR_INIT_FAIL;
+    }
+
     if (s_txPoisoned) {
         // A timeout leaves ownership ambiguous: hardware may still hold the
         // descriptor and the shared payload buffer. Never overwrite either
@@ -2449,7 +2531,7 @@ Status send_frame(const uint8_t* data, uint16_t len)
         s_device.tx.ringPoisoned = true;
         s_device.tx.failureReason = TxFailureReason::RingInvalid;
         s_device.tx.lastStatus = NIC_ERR_TX_FULL;
-        snapshot_tx_registers(&s_device.tx.finalRegisters);
+        snapshot_tx_final_registers();
         return NIC_ERR_TX_FULL;
     }
 
@@ -2461,9 +2543,14 @@ Status send_frame(const uint8_t* data, uint16_t len)
         s_device.tx.driverErrors++;
         s_device.tx.failureReason = TxFailureReason::DescriptorInvalid;
         s_device.tx.lastStatus = NIC_ERR_TX_FULL;
-        snapshot_tx_registers(&s_device.tx.finalRegisters);
+        snapshot_tx_final_registers();
         return NIC_ERR_TX_FULL;
     }
+
+    capture_tx_descriptor_raw(
+        s_txDescs[s_txCur],
+        &s_device.tx.lastDescriptorRaw0BeforePublication,
+        &s_device.tx.lastDescriptorRaw1BeforePublication);
 
     // Copy frame data to TX buffer
     memcopy(s_txBuffer, data, static_cast<uint32_t>(len));
@@ -2481,7 +2568,7 @@ Status send_frame(const uint8_t* data, uint16_t len)
         s_device.tx.driverErrors++;
         s_device.tx.failureReason = TxFailureReason::DmaTranslationInvalid;
         s_device.tx.lastStatus = NIC_ERR_INIT_FAIL;
-        snapshot_tx_registers(&s_device.tx.finalRegisters);
+        snapshot_tx_final_registers();
         return NIC_ERR_INIT_FAIL;
     }
     s_device.tx.lastDescriptorAddress = descriptorPhysicalAddress;
@@ -2500,7 +2587,7 @@ Status send_frame(const uint8_t* data, uint16_t len)
         s_device.tx.driverErrors++;
         s_device.tx.failureReason = TxFailureReason::RingAddressMismatch;
         s_device.tx.lastStatus = NIC_ERR_INIT_FAIL;
-        snapshot_tx_registers(&s_device.tx.finalRegisters);
+        snapshot_tx_final_registers();
         return NIC_ERR_INIT_FAIL;
     }
 
@@ -2512,7 +2599,7 @@ Status send_frame(const uint8_t* data, uint16_t len)
         s_device.tx.driverErrors++;
         s_device.tx.failureReason = TxFailureReason::DmaTranslationInvalid;
         s_device.tx.lastStatus = NIC_ERR_INIT_FAIL;
-        snapshot_tx_registers(&s_device.tx.finalRegisters);
+        snapshot_tx_final_registers();
         return NIC_ERR_INIT_FAIL;
     }
     s_device.tx.lastBufferVirtualAddress = reinterpret_cast<uint64_t>(&s_txBuffer[0]);
@@ -2537,7 +2624,7 @@ Status send_frame(const uint8_t* data, uint16_t len)
         s_device.tx.driverErrors++;
         s_device.tx.failureReason = TxFailureReason::DmaAddressInvalid;
         s_device.tx.lastStatus = NIC_ERR_INIT_FAIL;
-        snapshot_tx_registers(&s_device.tx.finalRegisters);
+        snapshot_tx_final_registers();
         return NIC_ERR_INIT_FAIL;
     }
     s_device.tx.descriptorPublished = true;
@@ -2550,6 +2637,11 @@ Status send_frame(const uint8_t* data, uint16_t len)
     s_txCur = (s_txCur + 1) % NUM_TX_DESC;
     s_device.tx.tdtWritten = s_txCur;
     mmio_write32(s_device.mmioBase, E1000_TDT, s_txCur);
+    dma_completion_barrier();
+    capture_tx_descriptor_raw(
+        s_txDescs[oldTx],
+        &s_device.tx.lastDescriptorRaw0AfterDoorbell,
+        &s_device.tx.lastDescriptorRaw1AfterDoorbell);
     snapshot_tx_registers(&s_device.tx.afterDoorbellRegisters);
     s_device.tx.tailAfter = static_cast<uint16_t>(
         s_device.tx.afterDoorbellRegisters.tdt & 0xFFFFu);
@@ -2564,7 +2656,7 @@ Status send_frame(const uint8_t* data, uint16_t len)
         s_device.tx.lastStatus = NIC_ERR_INIT_FAIL;
         s_txPoisoned = true;
         s_device.tx.ringPoisoned = true;
-        snapshot_tx_registers(&s_device.tx.finalRegisters);
+        snapshot_tx_final_registers();
         return NIC_ERR_INIT_FAIL;
     }
 
@@ -2585,7 +2677,11 @@ Status send_frame(const uint8_t* data, uint16_t len)
             s_device.tx.lastDescriptorStatus = status;
             s_device.tx.lastStatus = NIC_OK;
             s_device.tx.failureReason = TxFailureReason::None;
-            snapshot_tx_registers(&s_device.tx.finalRegisters);
+            capture_tx_descriptor_raw(
+                s_txDescs[oldTx],
+                &s_device.tx.lastDescriptorRaw0Final,
+                &s_device.tx.lastDescriptorRaw1Final);
+            snapshot_tx_final_registers();
             return NIC_OK;
         }
     }
@@ -2596,6 +2692,10 @@ Status send_frame(const uint8_t* data, uint16_t len)
     s_device.stats.txErrors++;
     s_device.tx.hardwareTimeouts++;
     s_device.tx.lastDescriptorStatus = s_txDescs[oldTx].status;
+    capture_tx_descriptor_raw(
+        s_txDescs[oldTx],
+        &s_device.tx.lastDescriptorRaw0Final,
+        &s_device.tx.lastDescriptorRaw1Final);
     s_device.tx.lastStatus = NIC_ERR_INIT_FAIL;
     s_txPoisoned = true;
     s_device.tx.ringPoisoned = true;
@@ -2612,7 +2712,7 @@ Status send_frame(const uint8_t* data, uint16_t len)
     } else {
         s_device.tx.failureReason = TxFailureReason::CompletionTimeout;
     }
-    snapshot_tx_registers(&s_device.tx.finalRegisters);
+    snapshot_tx_final_registers();
     return NIC_ERR_INIT_FAIL;
 #else
     (void)data;

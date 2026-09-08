@@ -79,6 +79,14 @@ static const uint16_t PCI_DEVICE_E1000   = 0x100E;  // 82540EM (QEMU default)
 static const uint16_t PCI_DEVICE_E1000E  = 0x10D3;  // 82574L
 static const uint16_t PCI_DEVICE_I217    = 0x153A;   // I217-LM
 static const uint16_t PCI_DEVICE_I219_LM = 0x156F;   // I219-LM/PCH
+static const uint16_t PCI_COMMAND_MEMORY_SPACE = (1u << 1);
+static const uint16_t PCI_COMMAND_BUS_MASTER = (1u << 2);
+
+inline bool pci_dma_access_enabled(uint16_t command)
+{
+    return (command & (PCI_COMMAND_MEMORY_SPACE | PCI_COMMAND_BUS_MASTER)) ==
+           (PCI_COMMAND_MEMORY_SPACE | PCI_COMMAND_BUS_MASTER);
+}
 
 static const uint8_t  PCI_CLASS_NETWORK  = 0x02;
 static const uint8_t  PCI_SUBCLASS_ETH   = 0x00;
@@ -93,6 +101,7 @@ static const uint32_t E1000_EECD     = 0x0010;  // EEPROM/Flash Control
 static const uint32_t E1000_EERD     = 0x0014;  // EEPROM Read
 static const uint32_t E1000_CTRL_EXT  = 0x0018;  // Extended Device Control
 static const uint32_t E1000_MDIC     = 0x0020;  // MDI/PHY management
+static const uint32_t E1000_PBA      = 0x1000;  // Packet Buffer Allocation
 static const uint32_t E1000_ICR      = 0x00C0;  // Interrupt Cause Read
 static const uint32_t E1000_ICS      = 0x00C8;  // Interrupt Cause Set
 static const uint32_t E1000_IMS      = 0x00D0;  // Interrupt Mask Set
@@ -111,8 +120,11 @@ static const uint32_t E1000_TDLEN    = 0x3808;  // TX Descriptor Length
 static const uint32_t E1000_TDH      = 0x3810;  // TX Descriptor Head
 static const uint32_t E1000_TDT      = 0x3818;  // TX Descriptor Tail
 static const uint32_t E1000_TXDCTL   = 0x3828;  // TX Descriptor Control
+static const uint32_t E1000_TXDCTL1  = 0x3928;  // TX Descriptor Control Q1
 static const uint32_t E1000_TARC0    = 0x3840;  // TX Arbitration Counter Q0
+static const uint32_t E1000_TARC1    = 0x3940;  // TX Arbitration Counter Q1
 static const uint32_t E1000_IOSFPC   = 0x0F28;  // I219 TX DMA erratum control
+static const uint32_t E1000_FWSM     = 0x5B54;  // Firmware Semaphore
 static const uint32_t E1000_MTA      = 0x5200;  // Multicast Table Array (128 dwords)
 static const uint32_t E1000_RAL0     = 0x5400;  // Receive Address Low  (MAC [0])
 static const uint32_t E1000_RAH0     = 0x5404;  // Receive Address High (MAC [0])
@@ -147,12 +159,45 @@ static const uint32_t E1000_TCTL_EN    = (1u << 1);   // Transmitter Enable
 static const uint32_t E1000_TCTL_PSP   = (1u << 3);   // Pad Short Packets
 static const uint32_t E1000_TCTL_CT_SHIFT  = 4;       // Collision Threshold
 static const uint32_t E1000_TCTL_COLD_SHIFT = 12;     // Collision Distance
+static const uint32_t E1000_TCTL_CT_MASK = 0x00000FF0u;
+static const uint32_t E1000_TCTL_COLD_MASK = 0x003FF000u;
+static const uint32_t E1000_TCTL_RTLC  = (1u << 24);  // Retransmit late collision
+static const uint32_t E1000_TCTL_MULR  = (1u << 28);  // Multiple request support
 
-// TXDCTL is a threshold register on I219/PCH; it has no queue-enable bit.
+// TXDCTL is a threshold/counting register on I219/PCH; it has no separate
+// queue-enable bit.  These are the fields used by upstream e1000e's PCH
+// initialization for the full-descriptor writeback/prefetch policy.
 static const uint32_t E1000_TXDCTL_PTHRESH_MASK = 0x0000003Fu;
 static const uint32_t E1000_TXDCTL_HTHRESH_MASK = 0x00003F00u;
 static const uint32_t E1000_TXDCTL_WTHRESH_MASK = 0x003F0000u;
 static const uint32_t E1000_TXDCTL_GRAN        = (1u << 24);
+static const uint32_t E1000_TXDCTL_COUNT_DESC  = (1u << 22);
+static const uint32_t E1000_TXDCTL_FULL_TX_DESC_WB =
+    E1000_TXDCTL_GRAN | (1u << 16);
+static const uint32_t E1000_TXDCTL_MAX_TX_DESC_PREFETCH =
+    E1000_TXDCTL_GRAN | 0x1Fu;
+
+// This mirrors e1000_init_hw_ich8lan(): COUNT_DESC is enabled by the PCH
+// hardware-bit setup, then PTHRESH=31, WTHRESH=1, and GRAN=1 are established
+// for both queues. HTHRESH is intentionally preserved because upstream does
+// not set it in this PCH initialization path.
+inline uint32_t i219_spt_txdctl_configuration(uint32_t current)
+{
+    current |= E1000_TXDCTL_COUNT_DESC;
+    current = (current & ~E1000_TXDCTL_WTHRESH_MASK) |
+              E1000_TXDCTL_FULL_TX_DESC_WB;
+    current = (current & ~E1000_TXDCTL_PTHRESH_MASK) |
+              E1000_TXDCTL_MAX_TX_DESC_PREFETCH;
+    return current;
+}
+
+inline bool i219_spt_txdctl_configuration_valid(uint32_t value)
+{
+    return (value & E1000_TXDCTL_COUNT_DESC) != 0u &&
+           (value & E1000_TXDCTL_GRAN) != 0u &&
+           (value & E1000_TXDCTL_PTHRESH_MASK) == 0x1Fu &&
+           ((value & E1000_TXDCTL_WTHRESH_MASK) >> 16) == 1u;
+}
 
 // I219/PCH SPT silicon workaround used by upstream e1000e. It reduces the
 // number of outstanding TX DMA requests to avoid the documented TX hang.
@@ -742,6 +787,8 @@ enum class TxFailureReason : uint8_t {
     RingLengthInvalid,
     EngineDisabled,
     StatusReadError,
+    FetchControlInvalid,
+    DmaEngineDisabled,
 };
 
 inline const char* tx_failure_reason_name(TxFailureReason reason)
@@ -760,6 +807,8 @@ inline const char* tx_failure_reason_name(TxFailureReason reason)
         case TxFailureReason::RingLengthInvalid:     return "TX_RING_LENGTH_INVALID";
         case TxFailureReason::EngineDisabled:        return "TX_ENGINE_DISABLED";
         case TxFailureReason::StatusReadError:       return "TX_STATUS_READ_ERROR";
+        case TxFailureReason::FetchControlInvalid:   return "TX_FETCH_CONTROL_INVALID";
+        case TxFailureReason::DmaEngineDisabled:     return "TX_DMA_ENGINE_DISABLED";
         default:                                     return "none";
     }
 }
@@ -775,6 +824,11 @@ struct TxRegisterSnapshot {
     uint32_t txdctl;
     uint32_t tarc0;
     uint32_t iosfpc;
+    uint32_t txdctl1;
+    uint32_t tarc1;
+    uint32_t ctrlExt;
+    uint32_t pba;
+    uint32_t fwsm;
     uint16_t pciCommand;
     bool     valid;
 };
@@ -802,6 +856,12 @@ struct TxDiagnostics {
     uint64_t lastDescriptorBufferAddress;
     uint64_t lastDescriptorRaw0;
     uint64_t lastDescriptorRaw1;
+    uint64_t lastDescriptorRaw0BeforePublication;
+    uint64_t lastDescriptorRaw1BeforePublication;
+    uint64_t lastDescriptorRaw0AfterDoorbell;
+    uint64_t lastDescriptorRaw1AfterDoorbell;
+    uint64_t lastDescriptorRaw0Final;
+    uint64_t lastDescriptorRaw1Final;
     uint8_t  lastCommand;
     uint8_t  lastDescriptorStatusBefore;
     uint8_t  lastDescriptorStatus;
@@ -820,6 +880,7 @@ struct TxDiagnostics {
     bool     txEngineEnabled;
     bool     doorbellReadbackMatches;
     bool     ringPoisoned;
+    bool     ringRegistersPersisted;
     TxFailureReason failureReason;
     TxRegisterSnapshot initialRegisters;
     TxRegisterSnapshot beforeRegisters;
@@ -827,6 +888,33 @@ struct TxDiagnostics {
     TxRegisterSnapshot afterDoorbellRegisters;
     TxRegisterSnapshot finalRegisters;
 };
+
+inline bool tx_ring_registers_match(const TxRegisterSnapshot& snapshot,
+                                    uint64_t ringPhysicalAddress,
+                                    uint32_t ringLength)
+{
+    return snapshot.valid &&
+           dma_address_register_value(snapshot.tdbal, snapshot.tdbah) ==
+               ringPhysicalAddress &&
+           snapshot.tdlen == ringLength;
+}
+
+inline bool tx_ring_registers_persisted(const TxRegisterSnapshot& initial,
+                                        const TxRegisterSnapshot& before,
+                                        const TxRegisterSnapshot& preDoorbell,
+                                        const TxRegisterSnapshot& afterDoorbell,
+                                        const TxRegisterSnapshot& final,
+                                        uint64_t ringPhysicalAddress,
+                                        uint32_t ringLength)
+{
+    return tx_ring_registers_match(initial, ringPhysicalAddress, ringLength) &&
+           tx_ring_registers_match(before, ringPhysicalAddress, ringLength) &&
+           tx_ring_registers_match(preDoorbell, ringPhysicalAddress,
+                                   ringLength) &&
+           tx_ring_registers_match(afterDoorbell, ringPhysicalAddress,
+                                   ringLength) &&
+           tx_ring_registers_match(final, ringPhysicalAddress, ringLength);
+}
 
 // A bounded observation of one send_frame() call. This keeps upper-layer
 // diagnostics tied to descriptor deltas rather than guessing from a generic
