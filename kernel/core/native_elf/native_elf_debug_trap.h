@@ -7,8 +7,9 @@ namespace kernel {
 namespace native_elf {
 namespace NativeElfDebugTrap {
 
-// Register image supplied by the temporary vector-3 gate. The layout is
-// intentionally bounded and matches the save/restore sequence in the gate.
+// Register image supplied by the temporary vector-1/vector-3 gates. The
+// layout is intentionally bounded and matches the save/restore sequence in
+// both gates.
 struct BreakpointContext {
     // The first field is a copied pre-trap target RSP. The assembly gate
     // stores it in the padding slot so the saved general-purpose registers
@@ -44,9 +45,11 @@ static_assert(sizeof(BreakpointContext) == 152, "debug trap frame size");
 
 typedef bool (*BreakpointHandler)(BreakpointContext* context);
 
-// Temporarily replaces IDT vector 3 and restores the exact previous gate on
-// teardown. This is used only for the one active NativeElf debug generation.
-bool install(BreakpointHandler handler);
+// Temporarily replaces IDT vectors 1 and 3 and restores the exact previous
+// gates on teardown. This is used only for the one active NativeElf debug
+// generation.
+bool install(BreakpointHandler breakpointHandler,
+             BreakpointHandler singleStepHandler);
 void uninstall();
 
 } // namespace NativeElfDebugTrap

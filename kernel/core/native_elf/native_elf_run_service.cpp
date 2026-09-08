@@ -32,6 +32,8 @@ static const uint32_t kLegacySnapshotBytes =
     static_cast<uint32_t>(offsetof(gx_development_run_snapshot, outputCount));
 static const uint32_t kMaxPath = 256U;
 static const uint32_t kMaxProjectBytes = 16U * 1024U;
+static const uint64_t kAmd64TrapFlag = 0x100ULL;
+static const uint32_t kDebugStartBytes = 16U;
 
 struct Operation {
     bool used;
@@ -47,14 +49,26 @@ struct Operation {
     bool debugBreakpointInstalled;
     bool debugBreakpointHit;
     bool debugCancelRequested;
+    bool debugStepActive;
+    bool debugStepTrapObserved;
     bool debugSourceSelected;
     uint64_t registrationGeneration;
     uint64_t debugBreakpointAddress;
     uint8_t debugBreakpointOriginalByte;
     uint64_t debugStopGeneration;
+    uint64_t debugStepToken;
+    uint64_t debugStepStartRip;
+    uint64_t debugStepRflagsBefore;
+    uint64_t debugStepRflagsWithTrapFlag;
+    uint64_t debugStepRflagsAfterClear;
+    uint64_t debugStepTrapRip;
     uint32_t debugSourceLine;
     uint32_t debugSourceColumn;
     uint32_t debugResolvedFinalCodeOffset;
+    uint32_t debugSourceInstructionBytes;
+    uint32_t debugStartByteCount;
+    uint8_t debugStartBytes[kDebugStartBytes];
+    NativeElfDebugTrap::BreakpointContext* debugContext;
     char debugSourcePath[GX_DEVELOPMENT_RUN_MAX_PATH_BYTES];
     char debugFunctionName[GX_DEVELOPMENT_DEBUG_MAX_FUNCTION_NAME_BYTES];
     gx_development_debug_snapshot debugSnapshot;
@@ -92,6 +106,8 @@ static SchedulerContext* s_targetContext = nullptr;
 static bool s_schedulerActive = false;
 static bool s_schedulerInTarget = false;
 static bool s_schedulerTargetComplete = false;
+static void scheduled_debug_cancel_entry();
+static SchedulerContext* make_debug_cancel_context();
 #endif
 
 static uint32_t text_length(const char* text, uint32_t capacity) {
@@ -268,12 +284,41 @@ static void set_debug_identity(const Operation& operation,
 }
 
 static void set_debug_ready_snapshot(const Operation& operation,
-                                     gx_development_debug_snapshot* snapshot)
+                                      gx_development_debug_snapshot* snapshot)
 {
     clear_debug_snapshot(snapshot);
     if (!snapshot) return;
     snapshot->status = GX_DEVELOPMENT_DEBUG_STATUS_READY;
     set_debug_identity(operation, snapshot);
+}
+
+static bool debug_source_mapping_contains(const Operation& operation,
+                                          uint64_t address)
+{
+    if (!operation.debugSourceSelected || operation.debugSourceInstructionBytes == 0 ||
+        address < operation.debugBreakpointAddress) return false;
+    const uint64_t delta = address - operation.debugBreakpointAddress;
+    return delta < operation.debugSourceInstructionBytes;
+}
+
+static void clear_unmapped_source_identity(gx_development_debug_snapshot* snapshot)
+{
+    if (!snapshot) return;
+    snapshot->sourceMappingValid = 0;
+    snapshot->sourcePath[0] = '\0';
+    snapshot->sourceLine = 0;
+    snapshot->sourceColumn = 0;
+}
+
+static void copy_debug_start_bytes(const Operation& operation,
+                                   gx_development_debug_snapshot* snapshot)
+{
+    if (!snapshot) return;
+    snapshot->byteCount = operation.debugStartByteCount;
+    if (snapshot->byteCount > sizeof(snapshot->bytes))
+        snapshot->byteCount = sizeof(snapshot->bytes);
+    for (uint32_t i = 0; i < snapshot->byteCount; ++i)
+        snapshot->bytes[i] = operation.debugStartBytes[i];
 }
 
 static bool debug_request_identity_matches(const Operation& operation,
@@ -300,6 +345,28 @@ static void serial_debug_hex(const char* prefix, uint64_t value)
 {
     serial::puts(prefix);
     serial::put_hex64(value);
+}
+
+static void capture_debug_start_bytes(Operation& operation,
+                                      const NativeAppExecutionContext& runtime,
+                                      uint8_t originalByte)
+{
+    operation.debugStartByteCount = 0;
+    for (uint32_t i = 0; i < kDebugStartBytes; ++i) operation.debugStartBytes[i] = 0;
+    if (operation.debugBreakpointAddress < runtime.imageBase ||
+        runtime.imageBase > ~static_cast<uint64_t>(0) - runtime.imageSize ||
+        operation.debugBreakpointAddress >= runtime.imageBase + runtime.imageSize) return;
+    const uint64_t available = runtime.imageBase + runtime.imageSize -
+        operation.debugBreakpointAddress;
+    const uint32_t count = available < kDebugStartBytes
+        ? static_cast<uint32_t>(available) : kDebugStartBytes;
+    if (count == 0) return;
+    operation.debugStartBytes[0] = originalByte;
+    for (uint32_t i = 1; i < count; ++i) {
+        operation.debugStartBytes[i] = reinterpret_cast<const uint8_t*>(
+            static_cast<uintptr_t>(operation.debugBreakpointAddress))[i];
+    }
+    operation.debugStartByteCount = count;
 }
 
 #if defined(__x86_64__)
@@ -522,6 +589,7 @@ static bool validate_identity(Operation& operation) {
         }
         operation.debugBreakpointAddress = mapping.targetAddress;
         operation.debugResolvedFinalCodeOffset = mapping.finalCodeOffset;
+        operation.debugSourceInstructionBytes = mapping.instructionBytes;
         copy_text(operation.debugFunctionName, sizeof(operation.debugFunctionName), mapping.functionName);
     }
     return true;
@@ -733,6 +801,41 @@ static void scheduled_task_entry(void*)
     arch::amd64::context::switch_context(&s_targetContext, s_ownerContext);
     for (;;) arch::amd64::halt();
 }
+
+static void scheduled_debug_cancel_entry()
+{
+    // The paused application stack is not a valid call stack for an
+    // arbitrary return. Teardown therefore begins on the reserved scheduler
+    // stack, then uses the normal completion path to report cancellation.
+    const bool runtimeClean = abort_execution(&s_operation.report);
+    finish_execution(s_operation, runtimeClean);
+    s_schedulerTargetComplete = true;
+    s_schedulerInTarget = false;
+    s_schedulerActive = false;
+    arch::amd64::context::switch_context(&s_targetContext, s_ownerContext);
+    for (;;) arch::halt();
+}
+
+static SchedulerContext* make_debug_cancel_context()
+{
+    uint64_t stackTop = reinterpret_cast<uint64_t>(s_schedulerStack + sizeof(s_schedulerStack));
+    stackTop &= ~0xFULL;
+    stackTop -= sizeof(SchedulerContext) + sizeof(uint64_t);
+    SchedulerContext* context = reinterpret_cast<SchedulerContext*>(stackTop);
+    context->rbx = 0;
+    context->rbp = 0;
+    context->rdi = 0;
+    context->rsi = 0;
+    context->r12 = 0;
+    context->r13 = 0;
+    context->r14 = 0;
+    context->r15 = 0;
+    context->rsp = stackTop;
+    context->rip = reinterpret_cast<uint64_t>(&scheduled_debug_cancel_entry);
+    reinterpret_cast<uint64_t*>(stackTop)[sizeof(SchedulerContext) / sizeof(uint64_t)] =
+        context->rip;
+    return context;
+}
 #endif
 
 } // namespace
@@ -911,7 +1014,8 @@ gx_result start(gx_development_run_handle handle) {
         return GX_OK;
     }
     if (s_operation.debugControlled &&
-        !NativeElfDebugTrap::install(native_elf_debug_breakpoint_exception)) {
+        !NativeElfDebugTrap::install(native_elf_debug_breakpoint_exception,
+                                     native_elf_debug_single_step_exception)) {
         native_elf_debug_breakpoint_install_failed();
         s_schedulerActive = false;
         s_targetContext = nullptr;
@@ -1084,6 +1188,11 @@ bool native_elf_debug_breakpoint_exception(
     ++s_operation.debugStopGeneration;
     if (s_operation.debugStopGeneration == 0) s_operation.debugStopGeneration = 1;
     s_operation.debugBreakpointHit = true;
+    s_operation.debugContext = context;
+    s_operation.debugStepActive = false;
+    s_operation.debugStepTrapObserved = false;
+    capture_debug_start_bytes(s_operation, *runtime,
+                              s_operation.debugBreakpointOriginalByte);
     s_operation.state = GX_DEVELOPMENT_RUN_PAUSED;
     gx_development_debug_snapshot& snapshot = s_operation.debugSnapshot;
     clear_debug_snapshot(&snapshot);
@@ -1123,6 +1232,8 @@ bool native_elf_debug_breakpoint_exception(
     snapshot.context.r13 = context->r13;
     snapshot.context.r14 = context->r14;
     snapshot.context.r15 = context->r15;
+    copy_debug_start_bytes(s_operation, &snapshot);
+    snapshot.rflagsAfterTrapFlagClear = context->rflags & ~kAmd64TrapFlag;
     serial_debug_hex(s_operation.debugSourceSelected
                          ? "DEVELOPER_STUDIO_PHASE28A_BREAKPOINT_HIT target=0x"
                          : "DEVELOPER_STUDIO_PHASE27Z_BREAKPOINT_HIT target=0x",
@@ -1141,6 +1252,124 @@ bool native_elf_debug_breakpoint_exception(
     context->rip = s_operation.debugCancelRequested
         ? reinterpret_cast<uint64_t>(&native_elf_debug_cancel_return)
         : s_operation.debugBreakpointAddress;
+    return true;
+#else
+    (void)context;
+    return false;
+#endif
+}
+
+bool native_elf_debug_single_step_exception(
+    NativeElfDebugTrap::BreakpointContext* context)
+{
+#if defined(__x86_64__)
+    const NativeAppExecutionContext* runtime = native_elf_runtime_context();
+    const bool validProvenance = context && s_operation.used && s_operation.debugControlled &&
+        s_operation.debugStepActive && !s_operation.debugStepTrapObserved &&
+        s_operation.state == GX_DEVELOPMENT_RUN_STEPPING && s_schedulerActive &&
+        s_schedulerInTarget && s_ownerContext && s_targetContext && context->cs == 0x08 &&
+        (context->rflags & kAmd64TrapFlag) != 0 && s_operation.debugStepToken != 0 &&
+        runtime && runtime->state == NativeAppExecutionState::Running &&
+        native_app_pointer_in_range(context->rip, runtime->imageBase, runtime->imageSize) &&
+        context->rsp >= runtime->stackBase &&
+        context->rsp < runtime->stackBase + runtime->stackSize;
+    if (!validProvenance) {
+        serial::puts("DEVELOPER_STUDIO_PHASE28B_VECTOR1_REJECT state=");
+        serial::put_hex32(static_cast<uint32_t>(s_operation.state));
+        serial::puts(" active="); serial::put_hex32(s_operation.debugStepActive ? 1U : 0U);
+        serial::puts(" in_target="); serial::put_hex32(s_schedulerInTarget ? 1U : 0U);
+        serial::puts(" cs="); serial::put_hex64(context ? context->cs : 0);
+        serial::puts(" rip=0x="); serial::put_hex64(context ? context->rip : 0);
+        serial::puts(" rsp=0x"); serial::put_hex64(context ? context->rsp : 0);
+        serial::puts(" tf="); serial::put_hex32(context && (context->rflags & kAmd64TrapFlag) ? 1U : 0U);
+        serial::puts(" runtime="); serial::put_hex32(runtime ? static_cast<uint32_t>(runtime->state) : 0U);
+        serial::putc('\n');
+        return false;
+    }
+
+    const uint64_t trapRip = context->rip;
+    // The application may have changed RSP since the previous instruction,
+    // so each #DB naturally owns a fresh hardware frame. Preserve provenance
+    // through the active scheduler/runtime identity and the bounded target
+    // stack, then make this current frame the one used by the next command.
+    s_operation.debugContext = context;
+    s_operation.debugStepTrapRip = trapRip;
+    s_operation.debugStepRflagsAfterClear = context->rflags & ~kAmd64TrapFlag;
+    context->rflags = s_operation.debugStepRflagsAfterClear;
+    s_operation.debugStepActive = false;
+    s_operation.debugStepTrapObserved = true;
+    ++s_operation.debugStopGeneration;
+    if (s_operation.debugStopGeneration == 0) s_operation.debugStopGeneration = 1;
+    s_operation.state = GX_DEVELOPMENT_RUN_PAUSED;
+
+    gx_development_debug_snapshot& snapshot = s_operation.debugSnapshot;
+    clear_debug_snapshot(&snapshot);
+    snapshot.status = GX_DEVELOPMENT_DEBUG_STATUS_TRAP;
+    snapshot.trapKind = GX_DEVELOPMENT_DEBUG_TRAP_SINGLE_STEP;
+    snapshot.singleStepKind = GX_DEVELOPMENT_DEBUG_SINGLE_STEP_USER_SOURCE;
+    set_debug_identity(s_operation, &snapshot);
+    snapshot.targetAddress = s_operation.debugBreakpointAddress;
+    snapshot.instructionPointer = trapRip;
+    snapshot.rawTrapRip = trapRip;
+    snapshot.pauseReason = GX_DEVELOPMENT_DEBUG_PAUSE_REASON_SINGLE_STEP;
+    if (!debug_source_mapping_contains(s_operation, trapRip))
+        clear_unmapped_source_identity(&snapshot);
+    snapshot.stackLow = runtime->stackBase;
+    snapshot.stackHigh = runtime->stackBase <= ~static_cast<uint64_t>(0) - runtime->stackSize
+        ? runtime->stackBase + runtime->stackSize : 0;
+    snapshot.context.architecture = GX_DEVELOPMENT_DEBUG_ARCHITECTURE_AMD64;
+    snapshot.context.valid = 1;
+    snapshot.context.processId = 0;
+    snapshot.context.nativeRuntimeId = s_operation.registrationGeneration;
+    snapshot.context.threadId = 1;
+    snapshot.context.sessionGeneration = s_operation.registrationGeneration;
+    snapshot.context.stopGeneration = s_operation.debugStopGeneration;
+    snapshot.context.rip = trapRip;
+    snapshot.context.rflags = context->rflags;
+    snapshot.context.rsp = context->rsp;
+    snapshot.context.rbp = context->rbp;
+    snapshot.context.rax = context->rax;
+    snapshot.context.rbx = context->rbx;
+    snapshot.context.rcx = context->rcx;
+    snapshot.context.rdx = context->rdx;
+    snapshot.context.rsi = context->rsi;
+    snapshot.context.rdi = context->rdi;
+    snapshot.context.r8 = context->r8;
+    snapshot.context.r9 = context->r9;
+    snapshot.context.r10 = context->r10;
+    snapshot.context.r11 = context->r11;
+    snapshot.context.r12 = context->r12;
+    snapshot.context.r13 = context->r13;
+    snapshot.context.r14 = context->r14;
+    snapshot.context.r15 = context->r15;
+    snapshot.rflagsBeforeStep = s_operation.debugStepRflagsBefore;
+    snapshot.rflagsWithTrapFlag = s_operation.debugStepRflagsWithTrapFlag;
+    snapshot.rflagsAfterTrapFlagClear = s_operation.debugStepRflagsAfterClear;
+    copy_debug_start_bytes(s_operation, &snapshot);
+
+    serial_debug_hex("DEVELOPER_STUDIO_PHASE28B_SINGLE_STEP_TRAP trap_rip=0x", trapRip);
+    serial_debug_hex(" rflags_with_tf=0x", s_operation.debugStepRflagsWithTrapFlag);
+    serial_debug_hex(" rflags_after_clear=0x", s_operation.debugStepRflagsAfterClear);
+    serial::puts(" token=");
+    serial::put_hex64(s_operation.debugStepToken);
+    serial::putc('\n');
+    serial_debug_hex("DEVELOPER_STUDIO_PHASE28B_PAUSED_AFTER_STEP rip=0x", trapRip);
+    serial::puts(" stop=");
+    serial::put_hex64(s_operation.debugStopGeneration);
+    serial::putc('\n');
+
+    if (!native_elf_scheduler_yield()) return false;
+    if (s_operation.debugCancelRequested) {
+        context->rflags &= ~kAmd64TrapFlag;
+        context->rip = reinterpret_cast<uint64_t>(&native_elf_debug_cancel_return);
+    } else if (s_operation.debugStepActive) {
+        // A subsequent Step command arms the saved iretq frame while this
+        // vector-1 handler is suspended. Preserve that arm across the owner
+        // round-trip so the next architectural instruction reaches #DB.
+        context->rflags |= kAmd64TrapFlag;
+    } else {
+        context->rflags &= ~kAmd64TrapFlag;
+    }
     return true;
 #else
     (void)context;
@@ -1171,10 +1400,18 @@ gx_result debug(const gx_development_debug_request& request,
         return GX_ERROR_FAILED;
     }
 
+    const bool debugStepWasObserved = s_operation.debugStepTrapObserved;
     switch (request.command) {
     case GX_DEVELOPMENT_DEBUG_POLL:
         if (s_operation.state == GX_DEVELOPMENT_RUN_PAUSED) {
             *outSnapshot = s_operation.debugSnapshot;
+        } else if (s_operation.state == GX_DEVELOPMENT_RUN_STEPPING) {
+            set_debug_ready_snapshot(s_operation, outSnapshot);
+            outSnapshot->status = GX_DEVELOPMENT_DEBUG_STATUS_SINGLE_STEP_PENDING;
+            outSnapshot->singleStepKind = GX_DEVELOPMENT_DEBUG_SINGLE_STEP_USER_SOURCE;
+            outSnapshot->targetAddress = s_operation.debugBreakpointAddress;
+            outSnapshot->rflagsBeforeStep = s_operation.debugStepRflagsBefore;
+            outSnapshot->rflagsWithTrapFlag = s_operation.debugStepRflagsWithTrapFlag;
         } else if (s_operation.state == GX_DEVELOPMENT_RUN_RUNNING ||
                    s_operation.state == GX_DEVELOPMENT_RUN_LAUNCHING ||
                    s_operation.state == GX_DEVELOPMENT_RUN_REGISTERED) {
@@ -1187,45 +1424,118 @@ gx_result debug(const gx_development_debug_request& request,
 
     case GX_DEVELOPMENT_DEBUG_RESUME:
         if (s_operation.state != GX_DEVELOPMENT_RUN_PAUSED ||
-            !s_operation.debugBreakpointInstalled) {
-            set_debug_error(outSnapshot, "NativeElf entry breakpoint is not paused");
+            (!s_operation.debugBreakpointInstalled && !s_operation.debugStepTrapObserved)) {
+            set_debug_error(outSnapshot, "NativeElf target is not paused at a resumable debug stop");
             return GX_ERROR_BUSY;
         }
-        if (!restore_debug_entry_breakpoint()) {
+        if (s_operation.debugBreakpointInstalled && !restore_debug_entry_breakpoint()) {
             set_debug_error(outSnapshot, "NativeElf breakpoint could not be restored");
             return GX_ERROR_FAILED;
         }
+        if (s_operation.debugContext) s_operation.debugContext->rflags &= ~kAmd64TrapFlag;
         s_operation.debugBreakpointInstalled = false;
         s_operation.debugBreakpointHit = false;
+        s_operation.debugStepActive = false;
+        s_operation.debugStepTrapObserved = false;
         s_operation.state = GX_DEVELOPMENT_RUN_RUNNING;
         set_debug_ready_snapshot(s_operation, outSnapshot);
-        serial::puts(s_operation.debugSourceSelected
-                         ? "DEVELOPER_STUDIO_PHASE28A_RESUME\n"
-                         : "DEVELOPER_STUDIO_PHASE27Z_RESUME\n");
+        serial::puts(debugStepWasObserved
+                         ? "DEVELOPER_STUDIO_PHASE28B_RESUME\n"
+                         : s_operation.debugSourceSelected
+                             ? "DEVELOPER_STUDIO_PHASE28A_RESUME\n"
+                             : "DEVELOPER_STUDIO_PHASE27Z_RESUME\n");
         if (!native_elf_scheduler_pump()) return GX_ERROR_FAILED;
         if (s_operation.state == GX_DEVELOPMENT_RUN_PAUSED)
             *outSnapshot = s_operation.debugSnapshot;
         return GX_OK;
 
-    case GX_DEVELOPMENT_DEBUG_CANCEL_EXECUTION:
+    case GX_DEVELOPMENT_DEBUG_STEP_INSTRUCTION:
         if (s_operation.state != GX_DEVELOPMENT_RUN_PAUSED ||
-            !s_operation.debugBreakpointInstalled) {
-            set_debug_error(outSnapshot, "NativeElf debug session is not paused");
+            (!s_operation.debugBreakpointInstalled && !s_operation.debugStepTrapObserved) ||
+            !s_operation.debugContext || s_operation.debugStepActive ||
+            s_operation.debugContext->cs != 0x08) {
+            set_debug_error(outSnapshot, "NativeElf Step Into requires a current Paused target context");
             return GX_ERROR_BUSY;
         }
-        if (!restore_debug_entry_breakpoint()) {
-            set_debug_error(outSnapshot, "NativeElf breakpoint could not be restored for cancel");
+        if (s_operation.debugContext->rflags & kAmd64TrapFlag) {
+            set_debug_error(outSnapshot, "NativeElf target context already owns Trap Flag");
+            return GX_ERROR_FAILED;
+        }
+        if (s_operation.debugBreakpointInstalled && !restore_debug_entry_breakpoint()) {
+            set_debug_error(outSnapshot, "NativeElf breakpoint could not be restored before Step Into");
             return GX_ERROR_FAILED;
         }
         s_operation.debugBreakpointInstalled = false;
+        s_operation.debugStepStartRip = s_operation.debugContext->rip;
+        s_operation.debugStepRflagsBefore = s_operation.debugContext->rflags;
+        s_operation.debugStepRflagsWithTrapFlag =
+            s_operation.debugStepRflagsBefore | kAmd64TrapFlag;
+        s_operation.debugContext->rflags = s_operation.debugStepRflagsWithTrapFlag;
+        ++s_operation.debugStepToken;
+        if (s_operation.debugStepToken == 0) s_operation.debugStepToken = 1;
+        s_operation.debugStepActive = true;
+        s_operation.debugStepTrapObserved = false;
+        s_operation.state = GX_DEVELOPMENT_RUN_STEPPING;
+        clear_debug_snapshot(outSnapshot);
+        outSnapshot->status = GX_DEVELOPMENT_DEBUG_STATUS_SINGLE_STEP_PENDING;
+        outSnapshot->singleStepKind = GX_DEVELOPMENT_DEBUG_SINGLE_STEP_USER_SOURCE;
+        set_debug_identity(s_operation, outSnapshot);
+        outSnapshot->targetAddress = s_operation.debugBreakpointAddress;
+        outSnapshot->instructionPointer = s_operation.debugStepStartRip;
+        outSnapshot->rflagsBeforeStep = s_operation.debugStepRflagsBefore;
+        outSnapshot->rflagsWithTrapFlag = s_operation.debugStepRflagsWithTrapFlag;
+        copy_debug_start_bytes(s_operation, outSnapshot);
+        serial::puts("DEVELOPER_STUDIO_PHASE28B_STEP_REQUEST_PASS\n");
+        serial_debug_hex("DEVELOPER_STUDIO_PHASE28B_TF_SET_PASS before=0x",
+                         s_operation.debugStepRflagsBefore);
+        serial_debug_hex(" armed=0x", s_operation.debugStepRflagsWithTrapFlag);
+        serial::putc('\n');
+        if (!native_elf_scheduler_pump()) {
+            s_operation.debugContext->rflags &= ~kAmd64TrapFlag;
+            s_operation.debugStepActive = false;
+            set_debug_error(outSnapshot, "NativeElf Step Into could not resume the target");
+            return GX_ERROR_FAILED;
+        }
+        if (s_operation.state != GX_DEVELOPMENT_RUN_PAUSED ||
+            !s_operation.debugStepTrapObserved) {
+            set_debug_error(outSnapshot, "NativeElf Step Into did not return through vector 1");
+            return GX_ERROR_FAILED;
+        }
+        *outSnapshot = s_operation.debugSnapshot;
+        serial::puts("DEVELOPER_STUDIO_PHASE28B_PAUSED_AFTER_STEP_PASS\n");
+        serial::puts("DEVELOPER_STUDIO_PHASE28B_TF_CLEAR_PASS\n");
+        return GX_OK;
+
+    case GX_DEVELOPMENT_DEBUG_CANCEL_EXECUTION:
+        if (s_operation.state != GX_DEVELOPMENT_RUN_PAUSED ||
+            (!s_operation.debugBreakpointInstalled && !s_operation.debugStepTrapObserved)) {
+            set_debug_error(outSnapshot, "NativeElf debug session is not paused");
+            return GX_ERROR_BUSY;
+        }
+        if (s_operation.debugBreakpointInstalled && !restore_debug_entry_breakpoint()) {
+            set_debug_error(outSnapshot, "NativeElf breakpoint could not be restored for cancel");
+            return GX_ERROR_FAILED;
+        }
+        if (s_operation.debugContext) s_operation.debugContext->rflags &= ~kAmd64TrapFlag;
+        s_operation.debugBreakpointInstalled = false;
         s_operation.debugBreakpointHit = false;
+        s_operation.debugStepActive = false;
         s_operation.debugCancelRequested = true;
         s_operation.cancellationRequested = true;
         s_operation.closeRequested = true;
         s_operation.state = GX_DEVELOPMENT_RUN_CLOSING;
-        serial::puts(s_operation.debugSourceSelected
-                         ? "DEVELOPER_STUDIO_PHASE28A_CANCEL_PAUSED\n"
-                         : "DEVELOPER_STUDIO_PHASE27Z_CANCEL_PAUSED\n");
+        serial::puts(s_operation.debugStepTrapObserved
+                         ? "DEVELOPER_STUDIO_PHASE28B_CANCEL_AFTER_STEP\n"
+                         : s_operation.debugSourceSelected
+                             ? "DEVELOPER_STUDIO_PHASE28A_CANCEL_PAUSED\n"
+                             : "DEVELOPER_STUDIO_PHASE27Z_CANCEL_PAUSED\n");
+#if defined(__x86_64__)
+        s_targetContext = make_debug_cancel_context();
+        if (!s_targetContext) {
+            set_debug_error(outSnapshot, "NativeElf paused cancel context could not be created");
+            return GX_ERROR_FAILED;
+        }
+#endif
         if (!native_elf_scheduler_pump()) return GX_ERROR_FAILED;
         if (s_operation.state == GX_DEVELOPMENT_RUN_PAUSED) {
             set_debug_error(outSnapshot, "NativeElf paused cancel did not return to the owner");

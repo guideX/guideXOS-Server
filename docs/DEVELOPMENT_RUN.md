@@ -107,3 +107,13 @@ identity and raw/normalized RIP while paused, then resumes into the normal GUI
 and cleanup lifecycle. Its object ABI, mapping policy, stale-source controls,
 and focused QEMU proof are documented in
 `docs/DEVELOPER_STUDIO_PHASE28A_SOURCE_BREAKPOINT.md`.
+
+Phase 28B adds architectural single-instruction Step Into for a genuine
+Phase 28A paused source breakpoint. The target's restored context resumes
+with AMD64 `RFLAGS.TF`; vector 1 `#DB` is accepted only for the active
+debugger generation, step token, scheduler target, expected code selector, TF
+ownership, and validated image/stack ranges. The accepted trap clears TF in
+the saved context before exposing `GX_DEVELOPMENT_RUN_PAUSED` again and
+returns a `SINGLE_STEP` snapshot. See
+`docs/DEVELOPER_STUDIO_PHASE28B_SINGLE_INSTRUCTION_STEP.md` for the exact
+fixture, three-step proof, cancellation ordering, and QEMU evidence.

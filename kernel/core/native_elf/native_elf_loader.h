@@ -102,5 +102,9 @@ bool debug_entry_breakpoint_installed();
 // the kernel and teardown has completed.
 bool run_file(const char* path, int32_t* returnValue, NativeElfRunReport* report = nullptr);
 
+// Abort the currently running NativeElf image from the owner-side scheduler
+// stack. The caller must not be executing on the application stack.
+bool abort_execution(NativeElfRunReport* report = nullptr);
+
 } // namespace native_elf
 } // namespace kernel

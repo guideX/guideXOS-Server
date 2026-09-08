@@ -34,6 +34,7 @@ bool native_elf_debug_entry_breakpoint_requested();
 bool native_elf_debug_breakpoint_target(uint64_t* targetAddress);
 bool native_elf_debug_breakpoint_installed(uint64_t targetAddress, uint8_t originalByte);
 bool native_elf_debug_breakpoint_exception(NativeElfDebugTrap::BreakpointContext* context);
+bool native_elf_debug_single_step_exception(NativeElfDebugTrap::BreakpointContext* context);
 void native_elf_debug_breakpoint_install_failed();
 
 } // namespace NativeElfRunService

@@ -28,10 +28,13 @@ struct Idtr {
     uint64_t base;
 } __attribute__((packed));
 
-static BreakpointHandler s_handler = nullptr;
+static BreakpointHandler s_breakpointHandler = nullptr;
+static BreakpointHandler s_singleStepHandler = nullptr;
 static bool s_installed = false;
-static IdtEntry s_savedEntry = {};
-static IdtEntry* s_liveEntry = nullptr;
+static IdtEntry s_savedBreakpointEntry = {};
+static IdtEntry s_savedSingleStepEntry = {};
+static IdtEntry* s_liveBreakpointEntry = nullptr;
+static IdtEntry* s_liveSingleStepEntry = nullptr;
 
 static void copy_entry(IdtEntry* destination, const IdtEntry* source)
 {
@@ -49,14 +52,20 @@ static void set_entry_target(IdtEntry* entry, uint64_t address)
 }
 
 extern "C" void native_elf_debug_trap_stub();
+extern "C" void native_elf_single_step_trap_stub();
 
-extern "C" bool native_elf_debug_trap_dispatch(BreakpointContext* context)
+extern "C" bool native_elf_debug_trap_dispatch(BreakpointContext* context,
+                                                uint32_t vector)
 {
-    if (s_handler && s_handler(context)) return true;
+    BreakpointHandler handler = vector == 1U ? s_singleStepHandler : s_breakpointHandler;
+    if (handler && handler(context)) return true;
 
-    // The existing kernel has no vector-3 consumer. An unrelated #BP is
-    // therefore reported and halted rather than being silently resumed.
-    serial::puts("NativeElf: unowned vector3 breakpoint trap\n");
+    // The existing kernel has no vector-1/vector-3 consumer. An unrelated
+    // debug exception is therefore reported and halted rather than being
+    // silently resumed.
+    serial::puts(vector == 1U
+        ? "NativeElf: unowned vector1 debug trap\n"
+        : "NativeElf: unowned vector3 breakpoint trap\n");
     for (;;) arch::halt();
 }
 
@@ -92,10 +101,12 @@ asm(
 #if defined(__MINGW32__) || defined(__MINGW64__) || defined(_WIN64)
     "    sub $40, %rsp\n"
     "    lea 40(%rsp), %rcx\n"
+    "    mov $3, %edx\n"
     "    call native_elf_debug_trap_dispatch\n"
     "    add $40, %rsp\n"
 #else
     "    mov %rsp, %rdi\n"
+    "    mov $3, %esi\n"
     "    call native_elf_debug_trap_dispatch\n"
 #endif
     "    add $8, %rsp\n"
@@ -118,32 +129,107 @@ asm(
 #if defined(__ELF__)
     ".size native_elf_debug_trap_stub, .-native_elf_debug_trap_stub\n"
 #endif
+
+    ".global native_elf_single_step_trap_stub\n"
+#if defined(__ELF__)
+    ".type native_elf_single_step_trap_stub, @function\n"
+#endif
+    "native_elf_single_step_trap_stub:\n"
+    // AMD64 #DB has the same no-error-code hardware frame as #BP. Clear the
+    // live TF before entering C so the owner/kernel continuation cannot
+    // inherit target tracing semantics. The saved target RFLAGS remains in
+    // the copied hardware frame and is cleared by the run-service handler
+    // before the target is exposed as Paused.
+    "    pushfq\n"
+    "    andq $~0x100, (%rsp)\n"
+    "    popfq\n"
+    "    push %r15\n"
+    "    push %r14\n"
+    "    push %r13\n"
+    "    push %r12\n"
+    "    push %r11\n"
+    "    push %r10\n"
+    "    push %r9\n"
+    "    push %r8\n"
+    "    push %rbp\n"
+    "    push %rdi\n"
+    "    push %rsi\n"
+    "    push %rdx\n"
+    "    push %rcx\n"
+    "    push %rbx\n"
+    "    push %rax\n"
+    "    sub $8, %rsp\n"
+    "    lea 152(%rsp), %rax\n"
+    "    mov %rax, 0(%rsp)\n"
+#if defined(__MINGW32__) || defined(__MINGW64__) || defined(_WIN64)
+    "    sub $40, %rsp\n"
+    "    lea 40(%rsp), %rcx\n"
+    "    mov $1, %edx\n"
+    "    call native_elf_debug_trap_dispatch\n"
+    "    add $40, %rsp\n"
+#else
+    "    mov %rsp, %rdi\n"
+    "    mov $1, %esi\n"
+    "    call native_elf_debug_trap_dispatch\n"
+#endif
+    "    add $8, %rsp\n"
+    "    pop %rax\n"
+    "    pop %rbx\n"
+    "    pop %rcx\n"
+    "    pop %rdx\n"
+    "    pop %rsi\n"
+    "    pop %rdi\n"
+    "    pop %rbp\n"
+    "    pop %r8\n"
+    "    pop %r9\n"
+    "    pop %r10\n"
+    "    pop %r11\n"
+    "    pop %r12\n"
+    "    pop %r13\n"
+    "    pop %r14\n"
+    "    pop %r15\n"
+    "    iretq\n"
+#if defined(__ELF__)
+    ".size native_elf_single_step_trap_stub, .-native_elf_single_step_trap_stub\n"
+#endif
 );
 #endif
 
 } // namespace
 
-bool install(BreakpointHandler handler)
+bool install(BreakpointHandler breakpointHandler,
+             BreakpointHandler singleStepHandler)
 {
 #if defined(__x86_64__) && (defined(__GNUC__) || defined(__clang__))
-    if (!handler || s_installed) return false;
+    if (!breakpointHandler || !singleStepHandler || s_installed) return false;
     Idtr idtr = {};
     asm volatile("sidt %0" : "=m"(idtr));
     if (idtr.base == 0 || idtr.limit < 3U * sizeof(IdtEntry) + sizeof(IdtEntry) - 1U) return false;
-    IdtEntry* entry = reinterpret_cast<IdtEntry*>(static_cast<uintptr_t>(idtr.base)) + 3;
-    copy_entry(&s_savedEntry, entry);
-    s_liveEntry = entry;
-    s_handler = handler;
-    set_entry_target(entry, reinterpret_cast<uint64_t>(&native_elf_debug_trap_stub));
-    entry->selector = 0x08;
-    entry->ist = 0;
-    entry->typeAttributes = 0x8E;
-    entry->reserved = 0;
+    IdtEntry* table = reinterpret_cast<IdtEntry*>(static_cast<uintptr_t>(idtr.base));
+    IdtEntry* breakpointEntry = table + 3;
+    IdtEntry* singleStepEntry = table + 1;
+    copy_entry(&s_savedBreakpointEntry, breakpointEntry);
+    copy_entry(&s_savedSingleStepEntry, singleStepEntry);
+    s_liveBreakpointEntry = breakpointEntry;
+    s_liveSingleStepEntry = singleStepEntry;
+    s_breakpointHandler = breakpointHandler;
+    s_singleStepHandler = singleStepHandler;
+    set_entry_target(breakpointEntry, reinterpret_cast<uint64_t>(&native_elf_debug_trap_stub));
+    set_entry_target(singleStepEntry, reinterpret_cast<uint64_t>(&native_elf_single_step_trap_stub));
+    breakpointEntry->selector = 0x08;
+    breakpointEntry->ist = 0;
+    breakpointEntry->typeAttributes = 0x8E;
+    breakpointEntry->reserved = 0;
+    singleStepEntry->selector = 0x08;
+    singleStepEntry->ist = 0;
+    singleStepEntry->typeAttributes = 0x8E;
+    singleStepEntry->reserved = 0;
     asm volatile("lidt %0" : : "m"(idtr) : "memory");
     s_installed = true;
     return true;
 #else
-    (void)handler;
+    (void)breakpointHandler;
+    (void)singleStepHandler;
     return false;
 #endif
 }
@@ -152,10 +238,13 @@ void uninstall()
 {
 #if defined(__x86_64__) && (defined(__GNUC__) || defined(__clang__))
     if (!s_installed) return;
-    if (s_liveEntry) copy_entry(s_liveEntry, &s_savedEntry);
+    if (s_liveBreakpointEntry) copy_entry(s_liveBreakpointEntry, &s_savedBreakpointEntry);
+    if (s_liveSingleStepEntry) copy_entry(s_liveSingleStepEntry, &s_savedSingleStepEntry);
     asm volatile("mfence" : : : "memory");
-    s_liveEntry = nullptr;
-    s_handler = nullptr;
+    s_liveBreakpointEntry = nullptr;
+    s_liveSingleStepEntry = nullptr;
+    s_breakpointHandler = nullptr;
+    s_singleStepHandler = nullptr;
     s_installed = false;
 #endif
 }

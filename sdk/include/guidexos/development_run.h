@@ -35,7 +35,9 @@ typedef enum gx_development_run_state {
     GX_DEVELOPMENT_RUN_CLOSING = 10,
     GX_DEVELOPMENT_RUN_CANCELLED = 11,
     /* Append-only debugger state: the target is stopped at gx_main entry. */
-    GX_DEVELOPMENT_RUN_PAUSED = 12
+    GX_DEVELOPMENT_RUN_PAUSED = 12,
+    /* Append-only debugger state: one architectural instruction is in flight. */
+    GX_DEVELOPMENT_RUN_STEPPING = 13
 } gx_development_run_state;
 
 typedef enum gx_development_run_error_code {

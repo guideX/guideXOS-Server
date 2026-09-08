@@ -1063,6 +1063,15 @@ static bool prepare_page_tables(const NativeElfValidationResult& validation,
 
 } // namespace
 
+bool abort_execution(NativeElfRunReport* report)
+{
+    if (s_appRuntime.state != NativeAppExecutionState::Running) {
+        if (report) report->teardownComplete = true;
+        return true;
+    }
+    return teardown_application(report);
+}
+
 bool configure_execution_context(const NativeElfExecutionContext& context)
 {
     if (context.pageTableRoot == 0 || context.regionBase != guidexos::native_elf::IMAGE_BASE ||
