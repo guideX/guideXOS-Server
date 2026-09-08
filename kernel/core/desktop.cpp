@@ -23,6 +23,9 @@
 #include "include/kernel/kernel_compositor.h"
 #include "include/kernel/kernel_ipc.h"
 #include "include/kernel/input_manager.h"
+#if defined(KERNEL_HAS_COMMON_INPUT_QUEUE)
+#include "include/kernel/input_queue.h"
+#endif
 #include "include/kernel/pit.h"
 #include "include/kernel/ps2keyboard.h"
 #include "include/kernel/serial_debug.h"
@@ -718,6 +721,12 @@ static void desktop_append_int(char* dst, int* pos, int dstSize, int32_t value)
 
 
 static bool s_initialized = false;
+#if defined(GXOS_AARCH64_PHASE7)
+static bool s_phase7MouseButtonRoutingPassed = false;
+static bool s_phase7StartButtonInputPassed = false;
+static bool s_phase7MouseButtonDown = false;
+static bool s_phase7MouseButtonUp = false;
+#endif
 static bool s_startMenuOpen = false;
 static bool s_rightClickMenuOpen = false;
 static uint32_t s_rightClickX = 0;
@@ -8807,6 +8816,24 @@ bool is_initialized()
     return s_initialized;
 }
 
+bool phase7_mouse_button_routing_passed()
+{
+#if defined(GXOS_AARCH64_PHASE7)
+    return s_phase7MouseButtonRoutingPassed;
+#else
+    return false;
+#endif
+}
+
+bool phase7_start_button_input_passed()
+{
+#if defined(GXOS_AARCH64_PHASE7)
+    return s_phase7StartButtonInputPassed;
+#else
+    return false;
+#endif
+}
+
 void reconcile_display_topology(uint32_t virtualDesktopWidth,
                                 uint32_t virtualDesktopHeight,
                                 uint32_t primaryWidth,
@@ -9033,6 +9060,21 @@ void cooperative_yield()
 
     if (file_clipboard::operation_active()) update_clock_during_file_operation();
     input::poll();
+#if defined(KERNEL_HAS_COMMON_INPUT_QUEUE)
+    input_queue::Event queuedEvent{};
+    while (input_queue::pop(&queuedEvent)) {
+        if (queuedEvent.type == input_queue::EventType::Pointer) {
+            handle_mouse(queuedEvent.x, queuedEvent.y, queuedEvent.buttons);
+        } else if (queuedEvent.type == input_queue::EventType::KeyDown &&
+                   queuedEvent.key != 0) {
+            handle_key(queuedEvent.key);
+        }
+    }
+    // The common queue is authoritative for the Phase-7 provider.  Clear the
+    // compatibility dirty bit after draining it so the legacy state mirror
+    // cannot dispatch the same hardware report a second time.
+    input::mouse_clear_dirty();
+#else
     if (input::mouse_dirty()) {
         input::mouse_clear_dirty();
         handle_mouse(input::mouse_x(), input::mouse_y(), input::mouse_buttons());
@@ -9042,6 +9084,7 @@ void cooperative_yield()
         uint32_t key = ps2keyboard::get_key();
         if (key != 0) handle_key(key);
     }
+#endif
 
     const uint32_t now = (uint32_t)pit::ticks();
     const bool initialFileOperationPaint = file_clipboard::operation_active() &&
@@ -12063,6 +12106,15 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
     uint8_t pressed  = buttons & ~s_prevButtons;   // newly pressed
     uint8_t released = s_prevButtons & ~buttons;    // newly released
     s_prevButtons = buttons;
+#if defined(GXOS_AARCH64_PHASE7)
+    if (pressed & 0x01) s_phase7MouseButtonDown = true;
+    if (released & 0x01) s_phase7MouseButtonUp = true;
+    if (s_phase7MouseButtonDown && s_phase7MouseButtonUp &&
+        !s_phase7MouseButtonRoutingPassed) {
+        s_phase7MouseButtonRoutingPassed = true;
+        kernel::serial::puts("[guideXOS] mouse button routing: PASS\n");
+    }
+#endif
 
     apply_taskbar_layout();
     DesktopRect workArea = get_current_work_area();
@@ -12710,8 +12762,12 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
         }
 
         // Start button area follows the current taskbar dock position.
-        if (point_in_rect(mx, my, get_start_button_rect())) {
+        if ((pressed & 0x01) && point_in_rect(mx, my, get_start_button_rect())) {
             toggle_start_menu();
+#if defined(GXOS_AARCH64_PHASE7)
+            s_phase7StartButtonInputPassed = true;
+            kernel::serial::puts("[guideXOS] Start button input: PASS\n");
+#endif
             draw();
             draw_cursor(mx, my);
             return;

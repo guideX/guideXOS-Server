@@ -530,18 +530,21 @@ regression, and three fresh boots. Input is intentionally deferred. See
 
 ### AARCH64-7 — ARM64 interactive input
 
-Add the smallest validated input path for the selected QEMU platform, then
-connect keyboard/mouse events to cursor rendering, click routing, Start Menu
-interaction, and window movement. Preserve the static GOP desktop proof while
-bringing up input incrementally; USB HID and virtio-input are not prerequisites
-for the Phase-6 desktop frame.
+Phase 7 adds the selected virtio-MMIO keyboard/tablet provider, the bounded
+common input queue, QMP-driven real-device interaction, cursor routing, Start
+button hit testing, compositor focus, textbox key routing, and bounded common
+window dragging. The interactive path reaches Outcome B: the high-level
+proofs pass, but the requested high-rate QEMU/QMP durability counts still
+need a validated producer pacing method before Outcome A and
+`AARCH64_PHASE7_PASS` can be claimed. See `AARCH64_PHASE7_INPUT_DESKTOP.md`.
 
 ### AARCH64-8 — First real ARM64 application window
 
-Extend the proven NativeElf/App Model path with the smallest common window or
-surface submission path, then show a real ARM64 application window without
-making networking, Navigator, physical storage, SMP, or GPU acceleration
-prerequisites.
+First close the Phase-7 QEMU input pacing/durability gap and repeat the full
+three-boot input proof. Then extend the proven NativeElf/App Model path with
+the smallest common window or surface submission path, showing one real
+ARM64 application window without making networking, Navigator, physical
+storage, SMP, or GPU acceleration prerequisites.
 
 ### AARCH64-9 — Developer Studio ARM64 compilation
 

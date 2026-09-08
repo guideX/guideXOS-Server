@@ -7,6 +7,7 @@ namespace {
 static volatile uint32_t* gDistributor = nullptr;
 static volatile uint32_t* gCpuInterface = nullptr;
 static uint32_t gTimerIrq = 0;
+static uint32_t gInterruptRegisters = 0;
 
 static inline void gic_barrier()
 {
@@ -31,9 +32,9 @@ uint8_t phase2_gic_init(const gxos_aarch64_phase2_platform* platform, uint32_t t
 
     gDistributor[0x000 / 4] = 0;
     const uint32_t type = gDistributor[0x004 / 4];
-    uint32_t interruptRegisters = (type & 0x1f) + 1;
-    if (interruptRegisters == 0 || interruptRegisters > 32) interruptRegisters = 32;
-    for (uint32_t i = 0; i < interruptRegisters; ++i) {
+    gInterruptRegisters = (type & 0x1f) + 1;
+    if (gInterruptRegisters == 0 || gInterruptRegisters > 32) gInterruptRegisters = 32;
+    for (uint32_t i = 0; i < gInterruptRegisters; ++i) {
         gDistributor[(0x180 / 4) + i] = 0xffffffff; // disable
         gDistributor[(0x280 / 4) + i] = 0xffffffff; // clear pending
         gDistributor[(0x080 / 4) + i] = 0xffffffff; // Group 1 / non-secure
@@ -53,6 +54,30 @@ uint8_t phase2_gic_init(const gxos_aarch64_phase2_platform* platform, uint32_t t
     gCpuInterface[0x008 / 4] = 0;
     gCpuInterface[0x000 / 4] = 1; // Group 0 enabled
     gDistributor[0x000 / 4] = 1;
+    gic_barrier();
+    return 1;
+}
+
+uint8_t phase2_gic_enable_irq(uint32_t irq)
+{
+    if (!gDistributor || irq < 32u || irq / 32u >= gInterruptRegisters) return 0;
+    const uint32_t bit = UINT32_C(1) << (irq % 32u);
+    // Keep platform device interrupts in Group 0, matching the simple
+    // GICC_IAR/GICC_EOIR path used by this GICv2 bring-up.
+    gDistributor[(0x080 / 4) + (irq / 32u)] &= ~bit;
+    volatile uint8_t* priority = (volatile uint8_t*)(uintptr_t)gDistributor;
+    priority[0x400 + irq] = 0x80;
+    // Route every discovered SPI to the only Phase-7 CPU.
+    priority[0x800 + irq] = 0x01;
+    gDistributor[(0x100 / 4) + (irq / 32u)] |= bit;
+    gic_barrier();
+    return 1;
+}
+
+uint8_t phase2_gic_disable_irq(uint32_t irq)
+{
+    if (!gDistributor || irq < 32u || irq / 32u >= gInterruptRegisters) return 0;
+    gDistributor[(0x180 / 4) + (irq / 32u)] = UINT32_C(1) << (irq % 32u);
     gic_barrier();
     return 1;
 }

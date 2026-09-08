@@ -39,6 +39,13 @@ using Aarch64Handoff = gxos_aarch64_phase4_handoff;
 #include "../../../kernel/core/include/kernel/desktop.h"
 #include "../../../kernel/core/include/kernel/framebuffer.h"
 #endif
+#if defined(GXOS_AARCH64_PHASE7)
+#include "../../../kernel/core/include/kernel/input_manager.h"
+#include "../../../kernel/core/include/kernel/input_queue.h"
+#include "../../../kernel/core/include/kernel/virtio_input.h"
+#include "../../../kernel/core/include/kernel/kernel_compositor.h"
+#include "../../../kernel/core/include/kernel/phase7_input_proof.h"
+#endif
 
 extern "C" void phase3_serial_init();
 extern "C" void phase3_serial_set_base(uint64_t base);
@@ -51,6 +58,7 @@ extern "C" void phase3_register_probe(uint64_t task_id, uint64_t register_base);
 extern "C" void phase3_preemptive_worker(void* argument);
 extern "C" uint8_t phase3_irq_controller_init(
     const gxos_aarch64_phase2_platform* platform, uint32_t timer_irq);
+extern "C" uint8_t phase3_irq_enable(uint32_t irq);
 extern "C" uint32_t phase3_exception_count();
 extern "C" uint8_t phase3_vectors[];
 extern "C" void* gxos_kernel_heap_alloc_aligned(size_t, size_t);
@@ -95,6 +103,9 @@ static volatile uint8_t g_graphics_complete = 0;
 static volatile uint8_t g_graphics_in_progress = 0;
 static volatile uint32_t g_graphics_redraws = 0;
 static volatile uint64_t g_graphics_hash = 0;
+#if defined(GXOS_AARCH64_PHASE7)
+static volatile uint64_t g_graphics_interactive_hash = 0;
+#endif
 static kernel::scheduler::Task* g_completion_task = 0;
 #endif
 #if defined(GXOS_AARCH64_PHASE5)
@@ -105,6 +116,7 @@ static volatile uint8_t g_app_vfs_exclusive = 0;
 static volatile uint8_t g_filesystem_vfs_active = 0;
 static const uint32_t kAppDurabilityLaunches = 100;
 #endif
+static gxos_aarch64_phase2_platform* g_platform_for_tasks = nullptr;
 
 static void allocate_pages(uint64_t pages, uint64_t* base)
 {
@@ -133,7 +145,9 @@ static void fail(const char* reason)
 {
     print("[guideXOS] ");
     print(reason);
-#if defined(GXOS_AARCH64_PHASE6)
+#if defined(GXOS_AARCH64_PHASE7)
+    print("\n[guideXOS] AARCH64_PHASE7_ERROR\n");
+#elif defined(GXOS_AARCH64_PHASE6)
     print("\n[guideXOS] AARCH64_PHASE6_ERROR\n");
 #else
     print("\n[guideXOS] AARCH64_PHASE4_ERROR\n");
@@ -458,6 +472,202 @@ static void graphics_task(void*)
     print("[guideXOS] text rendering: PASS\n");
     print("[guideXOS] desktop resources: OK\n");
     print("[guideXOS] desktop frame: rendered\n");
+#if defined(GXOS_AARCH64_PHASE7)
+    kernel::input::PlatformInputDevice devices[GXOS_AARCH64_PHASE2_MAX_VIRTIO_MMIO] = {};
+    const uint32_t deviceCount = g_platform_for_tasks
+        ? g_platform_for_tasks->virtio_mmio_count : 0;
+    print("[guideXOS] input platform descriptors=");
+    phase3_serial_dec(deviceCount);
+    if (deviceCount != 0 && g_platform_for_tasks) {
+        print(" first=0x");
+        phase3_serial_hex(g_platform_for_tasks->virtio_mmio[0].base);
+        print(" last=0x");
+        phase3_serial_hex(g_platform_for_tasks->virtio_mmio[deviceCount - 1].base);
+    }
+    print("\n");
+    for (uint32_t i = 0; i < deviceCount && i < GXOS_AARCH64_PHASE2_MAX_VIRTIO_MMIO; ++i) {
+        devices[i].base = g_platform_for_tasks->virtio_mmio[i].base;
+        devices[i].size = g_platform_for_tasks->virtio_mmio[i].size;
+        devices[i].irq = g_platform_for_tasks->virtio_mmio[i].irq;
+    }
+    kernel::input::init(kernel::framebuffer::get_width(), kernel::framebuffer::get_height(),
+                        devices, static_cast<uint8_t>(deviceCount));
+    if (!kernel::input::is_source_available(kernel::input::InputSource::VirtIO)) {
+        print("[guideXOS] input device discovery: FAIL\n");
+        g_graphics_failure = 1;
+        g_graphics_complete = 1;
+        g_graphics_in_progress = 0;
+        for (;;) kernel::scheduler::note_execution();
+    }
+    if (!kernel::virtio_input::register_irq_handlers()) {
+        print("[guideXOS] input IRQ registry: FAIL\n");
+        g_graphics_failure = 1;
+        g_graphics_complete = 1;
+        g_graphics_in_progress = 0;
+        for (;;) kernel::scheduler::note_execution();
+    }
+    // Device setup may leave a configuration/queue notification pending.
+    // Drain it in scheduler context before unmasking the discovered SPI so
+    // the first live IRQ cannot become a level-triggered interrupt storm.
+    kernel::virtio_input::poll();
+    const kernel::arch::interrupt_state_t irqState = kernel::arch::irq_save();
+    for (uint8_t i = 0; i < kernel::virtio_input::active_device_count(); ++i) {
+        if (!phase3_irq_enable(kernel::virtio_input::active_device_irq(i))) {
+            print("[guideXOS] input IRQ enable: FAIL\n");
+            g_graphics_failure = 1;
+            g_graphics_complete = 1;
+            g_graphics_in_progress = 0;
+            for (;;) kernel::scheduler::note_execution();
+        }
+    }
+    kernel::arch::irq_restore(irqState);
+    print("[guideXOS] input IRQ registry: OK\n");
+    print("[guideXOS] common input queue: OK capacity=256 policy=drop-newest\n");
+    if (!kernel::phase7_input_proof::initialize()) {
+        print("[guideXOS] input proof window: FAIL\n");
+        g_graphics_failure = 1;
+        g_graphics_complete = 1;
+        g_graphics_in_progress = 0;
+        for (;;) kernel::scheduler::note_execution();
+    }
+    print("[guideXOS] input proof window: ready\n");
+    kernel::desktop::draw();
+
+    const int initialWindowX = kernel::phase7_input_proof::initial_x();
+    const int initialWindowY = kernel::phase7_input_proof::initial_y();
+    bool dragPassed = false;
+    bool buttonRoutingPassed = false;
+    bool inputIntegrationPassed = false;
+    bool durabilityPassed = false;
+    // QEMU's QMP input producer is intentionally paced and the TCG guest may
+    // spend several scheduler slices draining a full virtio queue.  Keep the
+    // failure bound finite, but large enough that the durability workload can
+    // finish without turning producer latency into a false desktop failure.
+    const uint64_t kPhase7FrameLimit = UINT64_C(200000);
+    for (uint64_t frame = 0; frame < kPhase7FrameLimit; ++frame) {
+        kernel::desktop::cooperative_yield();
+        // Input handlers redraw immediately on state changes.  Keep a bounded
+        // background repaint cadence here so the durability workload cannot be
+        // starved by redundant full-frame wallpaper renders.
+        if ((frame & 63u) == 0) {
+            kernel::desktop::draw();
+            ++g_graphics_redraws;
+        }
+#if defined(GXOS_AARCH64_PHASE7)
+        if ((frame & 0xFFFu) == 0 && frame != 0) {
+            print("[guideXOS] input progress pointer=");
+            phase3_serial_dec(kernel::virtio_input::hardware_pointer_events());
+            print(" buttons=");
+            phase3_serial_dec(kernel::virtio_input::hardware_button_events());
+            print(" keyboard=");
+            phase3_serial_dec(kernel::virtio_input::hardware_keyboard_events());
+            print(" queue=");
+            phase3_serial_dec(kernel::input_queue::size());
+            print(" dropped=");
+            phase3_serial_dec(kernel::input_queue::events_dropped());
+            print("\n");
+        }
+#endif
+        kernel::app::KernelWindow* proofWindow = kernel::phase7_input_proof::window();
+        if (!dragPassed && proofWindow &&
+            (proofWindow->x != initialWindowX || proofWindow->y != initialWindowY) &&
+            !kernel::compositor::KernelCompositor::isButtonPressActive()) {
+            dragPassed = true;
+            print("[guideXOS] window drag: PASS initial=");
+            phase3_serial_dec(static_cast<uint64_t>(initialWindowX));
+            print(",");
+            phase3_serial_dec(static_cast<uint64_t>(initialWindowY));
+            print(" final=");
+            phase3_serial_dec(static_cast<uint64_t>(proofWindow->x));
+            print(",");
+            phase3_serial_dec(static_cast<uint64_t>(proofWindow->y));
+            print(" delta=");
+            phase3_serial_dec(static_cast<uint64_t>(proofWindow->x - initialWindowX));
+            print(",");
+            phase3_serial_dec(static_cast<uint64_t>(proofWindow->y - initialWindowY));
+            print("\n");
+        }
+        const uint64_t buttonEvents = kernel::virtio_input::hardware_button_events();
+        if (!buttonRoutingPassed && kernel::desktop::phase7_mouse_button_routing_passed()) {
+            buttonRoutingPassed = true;
+        }
+        const uint64_t pointerEvents = kernel::virtio_input::hardware_pointer_events();
+        const uint64_t keyboardEvents = kernel::virtio_input::hardware_keyboard_events();
+        if (!durabilityPassed && pointerEvents >= 10000 && buttonEvents >= 1000 &&
+            keyboardEvents >= 1000 && kernel::input_queue::events_dropped() == 0) {
+            durabilityPassed = true;
+            print("[guideXOS] input durability: PASS pointer=");
+            phase3_serial_dec(pointerEvents);
+            print(" buttons=");
+            phase3_serial_dec(buttonEvents);
+            print(" keyboard=");
+            phase3_serial_dec(keyboardEvents);
+            print(" queue-high-water=");
+            phase3_serial_dec(kernel::input_queue::high_water_mark());
+            print(" dropped=");
+            phase3_serial_dec(kernel::input_queue::events_dropped());
+            print(" coalesced=");
+            phase3_serial_dec(kernel::input_queue::events_coalesced());
+            print("\n");
+        }
+        if (!inputIntegrationPassed && kernel::phase7_input_proof::focus_passed() &&
+            kernel::phase7_input_proof::keyboard_passed() && dragPassed &&
+            buttonRoutingPassed && kernel::desktop::phase7_start_button_input_passed() &&
+            durabilityPassed) {
+            inputIntegrationPassed = true;
+            const uint64_t interactiveHash = kernel::framebuffer::verification_hash(
+                0, 0, kernel::framebuffer::get_width(), kernel::framebuffer::get_height());
+            g_graphics_interactive_hash = interactiveHash;
+            print("[guideXOS] framebuffer interaction verification: PASS hash=");
+            phase3_serial_hex(interactiveHash);
+            print("\n");
+            print("[guideXOS] input/scheduler integration: PASS\n");
+            break;
+        }
+        kernel::scheduler::note_execution();
+    }
+    if (!inputIntegrationPassed) {
+        print("[guideXOS] input diagnostics: pointer=");
+        phase3_serial_dec(kernel::virtio_input::hardware_pointer_events());
+        print(" buttons=");
+        phase3_serial_dec(kernel::virtio_input::hardware_button_events());
+        print(" keyboard=");
+        phase3_serial_dec(kernel::virtio_input::hardware_keyboard_events());
+        print(" focus=");
+        phase3_serial_dec(kernel::phase7_input_proof::focus_passed());
+        print(" keyboard-pass=");
+        phase3_serial_dec(kernel::phase7_input_proof::keyboard_passed());
+        print(" drag=");
+        phase3_serial_dec(dragPassed);
+        print(" queue-dropped=");
+        phase3_serial_dec(kernel::input_queue::events_dropped());
+        print("\n");
+        g_graphics_failure = 1;
+    }
+    // Emit the transport totals before releasing the shared completion task;
+    // otherwise a failed/slow producer could let the scheduler completion
+    // task return to bootstrap before the final diagnostic line is serialized.
+    print("[guideXOS] input durability stats: pointer=");
+    phase3_serial_dec(kernel::virtio_input::hardware_pointer_events());
+    print(" buttons=");
+    phase3_serial_dec(kernel::virtio_input::hardware_button_events());
+    print(" keyboard=");
+    phase3_serial_dec(kernel::virtio_input::hardware_keyboard_events());
+    print(" queue-high-water=");
+    phase3_serial_dec(kernel::input_queue::high_water_mark());
+    print(" dropped=");
+    phase3_serial_dec(kernel::input_queue::events_dropped());
+    print(" coalesced=");
+    phase3_serial_dec(kernel::input_queue::events_coalesced());
+    print(" irq=");
+    phase3_serial_dec(kernel::virtio_input::device_interrupts_observed());
+    print(" malformed=");
+    phase3_serial_dec(kernel::virtio_input::malformed_events());
+    print("\n");
+    g_graphics_complete = 1;
+    g_graphics_in_progress = 0;
+    phase6_maybe_arm_completion();
+#else
     for (uint32_t redraw = 0; redraw < 96; ++redraw) {
         kernel::desktop::draw();
         ++g_graphics_redraws;
@@ -475,6 +685,7 @@ static void graphics_task(void*)
     g_graphics_complete = 1;
     g_graphics_in_progress = 0;
     phase6_maybe_arm_completion();
+#endif
     for (;;) kernel::scheduler::note_execution();
 }
 #endif
@@ -623,6 +834,7 @@ extern "C" void phase3_main(const Aarch64Handoff* handoff, uint64_t initial_el)
     if (!gxos_aarch64_phase2_parse_dtb((const void*)(uintptr_t)handoff->dtb_base,
                                        handoff->dtb_size, &platform) ||
         platform.timer_source != 2 || platform.gic_version != 2) fail("DTB: FAIL");
+    g_platform_for_tasks = &platform;
     print("[guideXOS] DTB: OK\n");
     phase3_serial_set_base(platform.uart_base);
     phase4_serial_set_base(platform.uart_base);
@@ -843,10 +1055,17 @@ extern "C" void phase3_main(const Aarch64Handoff* handoff, uint64_t initial_el)
     }
 #endif
 #if defined(GXOS_AARCH64_PHASE6)
+#if defined(GXOS_AARCH64_PHASE7)
+    if (!g_graphics_complete || g_graphics_failure || g_graphics_redraws == 0) {
+        fail("graphics/scheduler integration: FAIL");
+    }
+    print("[guideXOS] graphics/scheduler integration: PASS\n");
+#else
     if (!g_graphics_complete || g_graphics_failure || g_graphics_redraws != 96) {
         fail("graphics/scheduler integration: FAIL");
     }
     print("[guideXOS] graphics/scheduler integration: PASS\n");
+#endif
 #endif
     print("[guideXOS] scheduler/VFS integration: PASS reads=");
     phase3_serial_dec(g_fs_work.reads);
@@ -876,7 +1095,9 @@ extern "C" void phase3_main(const Aarch64Handoff* handoff, uint64_t initial_el)
     phase3_serial_dec(stats.unexpected_irqs);
     print(" exceptions=");
     phase3_serial_dec(phase3_exception_count());
-#if defined(GXOS_AARCH64_PHASE6)
+#if defined(GXOS_AARCH64_PHASE7)
+    print("\nAARCH64_PHASE7_PASS\n");
+#elif defined(GXOS_AARCH64_PHASE6)
     print("\nAARCH64_PHASE6_PASS\n");
 #elif defined(GXOS_AARCH64_PHASE5)
     print("\nAARCH64_PHASE5_PASS\n");

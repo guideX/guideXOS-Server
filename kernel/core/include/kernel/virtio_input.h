@@ -16,6 +16,7 @@
 #define KERNEL_VIRTIO_INPUT_H
 
 #include "kernel/types.h"
+#include "kernel/input_provider.h"
 
 namespace kernel {
 namespace virtio_input {
@@ -123,10 +124,28 @@ struct DeviceInfo {
 
 // Initialize VirtIO input subsystem
 // Scans PCI for virtio-input devices
-void init(uint32_t screen_width, uint32_t screen_height);
+void init(uint32_t screen_width, uint32_t screen_height,
+          const input::PlatformInputDevice* devices = nullptr,
+          uint8_t device_count = 0);
 
 // Poll for new input events
 void poll();
+
+// Register the discovered transport IRQs with the common IRQ registry.  The
+// handler only acknowledges the MMIO interrupt and marks work pending;
+// descriptor consumption remains in the scheduler context.
+bool register_irq_handlers();
+uint8_t active_device_count();
+uint32_t active_device_irq(uint8_t index);
+
+// Counters and diagnostics are intentionally read-only; they are used by the
+// Phase-7 proof and remain bounded in the production driver.
+uint64_t hardware_events_received();
+uint64_t hardware_pointer_events();
+uint64_t hardware_button_events();
+uint64_t hardware_keyboard_events();
+uint64_t malformed_events();
+uint64_t device_interrupts_observed();
 
 // Release all VirtIO input devices
 void shutdown();

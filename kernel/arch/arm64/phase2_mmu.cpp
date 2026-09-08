@@ -218,6 +218,10 @@ uint8_t phase2_mmu_build(const gxos_aarch64_phase2_platform* platform,
     if (!map_range(platform->uart_base, platform->uart_size, make_device_descriptor(), kernel_base, kernelEnd, true) ||
         !map_range(platform->gicd_base, platform->gicd_size, make_device_descriptor(), kernel_base, kernelEnd, true) ||
         !map_range(platform->gicc_base, platform->gicc_size, make_device_descriptor(), kernel_base, kernelEnd, true)) return 0;
+    for (uint32_t i = 0; i < platform->virtio_mmio_count; ++i) {
+        if (!map_range(platform->virtio_mmio[i].base, platform->virtio_mmio[i].size,
+                       make_device_descriptor(), kernel_base, kernelEnd, true)) return 0;
+    }
 
     clean_tables();
     return 1;
@@ -240,6 +244,10 @@ uint8_t phase2_mmu_build_with_framebuffer(const gxos_aarch64_phase2_platform* pl
         range_intersects(framebuffer_base, framebufferEnd, platform->uart_base, platform->uart_size) ||
         range_intersects(framebuffer_base, framebufferEnd, platform->gicd_base, platform->gicd_size) ||
         range_intersects(framebuffer_base, framebufferEnd, platform->gicc_base, platform->gicc_size)) return 0;
+    for (uint32_t i = 0; i < platform->virtio_mmio_count; ++i) {
+        if (range_intersects(framebuffer_base, framebufferEnd,
+                             platform->virtio_mmio[i].base, platform->virtio_mmio[i].size)) return 0;
+    }
 
     gNextTable = 0;
     gRoot = (uint64_t)(uintptr_t)allocate_table();
@@ -259,6 +267,10 @@ uint8_t phase2_mmu_build_with_framebuffer(const gxos_aarch64_phase2_platform* pl
     if (!map_range(platform->uart_base, platform->uart_size, make_device_descriptor(), kernel_base, kernelEnd, true) ||
         !map_range(platform->gicd_base, platform->gicd_size, make_device_descriptor(), kernel_base, kernelEnd, true) ||
         !map_range(platform->gicc_base, platform->gicc_size, make_device_descriptor(), kernel_base, kernelEnd, true)) return 0;
+    for (uint32_t i = 0; i < platform->virtio_mmio_count; ++i) {
+        if (!map_range(platform->virtio_mmio[i].base, platform->virtio_mmio[i].size,
+                       make_device_descriptor(), kernel_base, kernelEnd, true)) return 0;
+    }
     clean_tables();
     return 1;
 }

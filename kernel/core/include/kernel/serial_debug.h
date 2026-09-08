@@ -16,7 +16,7 @@
 #ifndef ARCH_HAS_PORT_IO
 #if defined(ARCH_X86) || defined(ARCH_AMD64) || defined(__i386__) || defined(__x86_64__)
     #define ARCH_HAS_PORT_IO 1
-#elif defined(GXOS_AARCH64_PHASE4)
+#elif defined(GXOS_AARCH64_PHASE4) || defined(ARCH_ARM64)
 
 extern "C" void phase4_serial_init();
 extern "C" void phase4_serial_putc(char);
@@ -35,6 +35,13 @@ inline void put_hex64(uint64_t v) { phase4_serial_hex(v); }
 #else
     #define ARCH_HAS_PORT_IO 0
 #endif
+#endif
+
+#if defined(ARCH_ARM64)
+extern "C" void phase3_serial_init();
+extern "C" void phase3_serial_putc(char);
+extern "C" void phase3_serial_print(const char*);
+extern "C" void phase3_serial_hex(uint64_t);
 #endif
 
 namespace kernel {
@@ -101,6 +108,16 @@ inline void put_hex64(uint64_t v)
         putc(hex[(v >> i) & 0xF]);
     }
 }
+
+#elif defined(ARCH_ARM64)
+
+inline void init() { phase3_serial_init(); }
+inline void putc(char c) { phase3_serial_putc(c); }
+inline void puts(const char* s) { phase3_serial_print(s); }
+inline void put_hex8(uint8_t v) { phase3_serial_hex(v); }
+inline void put_hex32(uint32_t v) { phase3_serial_hex(v); }
+inline void put_hex16(uint16_t v) { phase3_serial_hex(v); }
+inline void put_hex64(uint64_t v) { phase3_serial_hex(v); }
 
 #else
 

@@ -29,6 +29,7 @@ struct FdtNode {
     uint8_t is_uart;
     uint8_t is_gic;
     uint8_t is_timer;
+    uint8_t is_virtio_mmio;
     uint8_t gic_version;
     uint32_t interrupt_cells;
     const uint8_t* reg_value;
@@ -100,6 +101,20 @@ static void add_ram(gxos_aarch64_phase2_platform* platform, uint64_t base, uint6
     ++platform->ram_count;
 }
 
+static void add_virtio_mmio(gxos_aarch64_phase2_platform* platform,
+                            uint64_t base, uint64_t size)
+{
+    if (platform->virtio_mmio_count >= GXOS_AARCH64_PHASE2_MAX_VIRTIO_MMIO || size == 0) return;
+    uint64_t end = 0;
+    if (!gxos_aarch64_add_u64(base, size, &end) || end <= base) return;
+    gxos_aarch64_phase2_virtio_mmio& device =
+        platform->virtio_mmio[platform->virtio_mmio_count++];
+    device.base = base;
+    device.size = size;
+    device.irq = 0;
+    device.reserved = 0;
+}
+
 static void parse_reg(const uint8_t* value, uint32_t length, const FdtNode& node,
                       gxos_aarch64_phase2_platform* platform)
 {
@@ -129,8 +144,24 @@ static void parse_reg(const uint8_t* value, uint32_t length, const FdtNode& node
                 platform->gicc_size = size;
             }
         }
+        if (node.is_virtio_mmio && entry == 0) add_virtio_mmio(platform, base, size);
         ++entry;
     }
+}
+
+static void parse_virtio_interrupts(const FdtNode& node,
+                                    gxos_aarch64_phase2_platform* platform)
+{
+    if (!node.is_virtio_mmio || platform->virtio_mmio_count == 0 ||
+        !node.interrupts_value || node.interrupts_length < 12 ||
+        (node.interrupts_length % 12) != 0) return;
+    // On the QEMU virt machine the interrupt-parent is the GIC and the
+    // binding is <type, number, flags>.  A type of zero denotes a SPI whose
+    // global interrupt number is 32 + number.
+    const uint32_t type = load_be32(node.interrupts_value);
+    const uint32_t number = load_be32(node.interrupts_value + 4);
+    if (type != 0 || number > 95) return;
+    platform->virtio_mmio[platform->virtio_mmio_count - 1].irq = 32 + number;
 }
 
 static void parse_timer_interrupts(const uint8_t* value, uint32_t length,
@@ -165,6 +196,7 @@ static void classify_compatible(const uint8_t* value, uint32_t length, FdtNode* 
         node->gic_version = 3;
     }
     if (has_compatible(value, length, "arm,armv8-timer")) node->is_timer = 1;
+    if (has_compatible(value, length, "virtio,mmio")) node->is_virtio_mmio = 1;
 }
 
 static bool property_name(const uint8_t* strings, uint32_t stringsSize, uint32_t nameOffset,
@@ -228,6 +260,7 @@ extern "C" uint8_t gxos_aarch64_phase2_parse_dtb(const void* blob, uint64_t blob
             if (node.is_timer && node.interrupts_value) {
                 parse_timer_interrupts(node.interrupts_value, node.interrupts_length, platform);
             }
+            if (node.is_virtio_mmio) parse_virtio_interrupts(node, platform);
             --depth;
         } else if (token == kFdtProp) {
             if (depth == 0 || structSize - offset < 8) return 0;

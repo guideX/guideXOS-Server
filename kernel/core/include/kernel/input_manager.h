@@ -16,6 +16,7 @@
 
 #include "kernel/types.h"
 #include "kernel/display_input_mapper.h"
+#include "kernel/input_provider.h"
 
 namespace kernel {
 namespace input {
@@ -85,7 +86,9 @@ struct KeyboardState {
 
 // Initialize the input manager with screen dimensions.
 // Probes all available input sources and selects the best one.
-void init(uint32_t screen_width, uint32_t screen_height);
+void init(uint32_t screen_width, uint32_t screen_height,
+          const PlatformInputDevice* platform_devices = nullptr,
+          uint8_t platform_device_count = 0);
 
 // Replace the default single-monitor geometry with the active virtual
 // desktop. This is called by the QEMU-only display probe after virtio-gpu
@@ -100,6 +103,17 @@ void set_mapping_diagnostics(bool enabled, uint32_t eventLimit);
 // Poll all active input sources for new data.
 // Should be called regularly from the main loop or timer interrupt.
 void poll();
+
+// Platform drivers terminate at these common submission functions.  They
+// perform coordinate mapping, clipping, state tracking, and queue insertion;
+// desktop code never sees a device-specific report.
+void submit_platform_pointer_relative(int32_t dx, int32_t dy, uint8_t buttons,
+                                      int16_t wheel);
+void submit_platform_pointer_absolute(int32_t raw_x, int32_t raw_y,
+                                      int32_t raw_min_x, int32_t raw_max_x,
+                                      int32_t raw_min_y, int32_t raw_max_y,
+                                      uint8_t buttons, int16_t wheel);
+void submit_platform_key(uint32_t key, bool down);
 
 // ----------------------------------------------------------------
 // Mouse accessors

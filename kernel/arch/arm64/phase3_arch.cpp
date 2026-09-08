@@ -189,6 +189,16 @@ extern "C" uint32_t phase3_irq_acknowledge()
     return phase2_gic_acknowledge();
 }
 
+extern "C" uint8_t phase3_irq_enable(uint32_t irq)
+{
+    return phase2_gic_enable_irq(irq);
+}
+
+extern "C" uint8_t phase3_irq_disable(uint32_t irq)
+{
+    return phase2_gic_disable_irq(irq);
+}
+
 extern "C" void phase3_irq_complete(uint32_t acknowledgement)
 {
     phase2_gic_complete(acknowledgement);

@@ -19,12 +19,14 @@
 namespace kernel {
 namespace input {
 
+#if !defined(GXOS_AARCH64_PHASE7)
 void poll() {}
 int32_t mouse_x() { return 0; }
 int32_t mouse_y() { return 0; }
 uint8_t mouse_buttons() { return ButtonNone; }
 bool mouse_dirty() { return false; }
 void mouse_clear_dirty() {}
+#endif
 
 } // namespace input
 

@@ -197,6 +197,11 @@ bool is_compositor_available();
 // registry, and compositor have all been initialized.
 bool is_initialized();
 
+// Phase-7 acceptance state is reported by the normal desktop input path;
+// these accessors do not inject or synthesize events.
+bool phase7_mouse_button_routing_passed();
+bool phase7_start_button_input_passed();
+
 // Keep normal desktop layout state aligned with the committed virtual
 // desktop dimensions reported by the QEMU-only display configuration service.
 void reconcile_display_topology(uint32_t virtualDesktopWidth,

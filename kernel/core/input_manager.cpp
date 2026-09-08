@@ -11,6 +11,10 @@
 #include "include/kernel/arch.h"
 #include "include/kernel/serial_debug.h"
 
+#if defined(KERNEL_HAS_COMMON_INPUT_QUEUE)
+#include "include/kernel/input_queue.h"
+#endif
+
 // Include available input backends
 #if ARCH_HAS_PS2
 #include "include/kernel/ps2mouse.h"
@@ -54,6 +58,9 @@ static uint32_t s_mappingDiagnosticLimit = 0;
 static uint32_t s_mappingDiagnosticCount = 0;
 static int32_t s_lastPs2X = 0;
 static int32_t s_lastPs2Y = 0;
+static int32_t s_initialCursorX = 0;
+static int32_t s_initialCursorY = 0;
+static bool s_hardwareCursorProof = false;
 
 // ================================================================
 // Helpers
@@ -140,6 +147,19 @@ static void apply_mapping_event(const display_input::DisplayPointerEvent& event,
     s_mouse.scrollY = static_cast<int8_t>(event.wheelDelta);
     s_mouse.scrollX = 0;
     log_mapping_event(event);
+
+#if defined(KERNEL_HAS_COMMON_INPUT_QUEUE)
+    if (source == InputSource::VirtIO && event.valid) {
+        input_queue::push_pointer(event.virtualX, event.virtualY,
+                                  event.buttonMask, event.wheelDelta,
+                                  input_queue::OriginVirtioHardware);
+        if (!s_hardwareCursorProof &&
+            (event.virtualX != s_initialCursorX || event.virtualY != s_initialCursorY)) {
+            s_hardwareCursorProof = true;
+            serial::puts("[guideXOS] cursor routing: PASS\n");
+        }
+    }
+#endif
 }
 
 // ================================================================
@@ -281,27 +301,6 @@ static void poll_usb_hid_mouse()
 static void poll_virtio_input()
 {
     virtio_input::poll();
-    
-    const virtio_input::MouseState* vioMouse = virtio_input::get_mouse_state();
-    if (!vioMouse) return;
-    
-    // VirtIO input typically provides absolute coordinates
-    display_input::DisplayPointerEvent event;
-    if (vioMouse->is_absolute) {
-        event = s_displayMapper.mapUnknownHeadAbsolute(
-            display_input::PointerSourceType::VirtioInputAbsolute,
-            vioMouse->x, vioMouse->y, 0, 32767, 0, 32767,
-            s_screenWidth, s_screenHeight, vioMouse->buttons, vioMouse->wheel);
-    } else {
-        event = s_displayMapper.mapRelativePointer(
-            display_input::PointerSourceType::VirtioInputRelative,
-            vioMouse->x, vioMouse->y, vioMouse->buttons, vioMouse->wheel);
-    }
-    if (event.virtualX != s_mouse.x || event.virtualY != s_mouse.y ||
-        vioMouse->buttons != s_mouse.buttons || vioMouse->wheel != 0) {
-        s_mouse.dirty = true;
-    }
-    apply_mapping_event(event, InputSource::VirtIO);
 }
 #endif
 
@@ -309,7 +308,9 @@ static void poll_virtio_input()
 // Public API implementation
 // ================================================================
 
-void init(uint32_t screen_width, uint32_t screen_height)
+void init(uint32_t screen_width, uint32_t screen_height,
+          const PlatformInputDevice* platform_devices,
+          uint8_t platform_device_count)
 {
     serial::puts("[INPUT] Initializing input manager\n");
     
@@ -329,7 +330,14 @@ void init(uint32_t screen_width, uint32_t screen_height)
     s_displayMapper.setCursor(s_mouse.x, s_mouse.y);
     s_lastPs2X = s_mouse.x;
     s_lastPs2Y = s_mouse.y;
+    s_initialCursorX = s_mouse.x;
+    s_initialCursorY = s_mouse.y;
+    s_hardwareCursorProof = false;
     s_mappingDiagnosticCount = 0;
+
+#if defined(KERNEL_HAS_COMMON_INPUT_QUEUE)
+    input_queue::initialize();
+#endif
     
 #if ARCH_HAS_USB && defined(KERNEL_HAS_USB_HID)
     // Initialize USB HID subsystem
@@ -342,7 +350,8 @@ void init(uint32_t screen_width, uint32_t screen_height)
 #endif
 
 #if defined(KERNEL_HAS_VIRTIO_INPUT)
-    virtio_input::init(screen_width, screen_height);
+    virtio_input::init(screen_width, screen_height, platform_devices,
+                       platform_device_count);
 #endif
     
     // Detect available sources
@@ -438,6 +447,46 @@ void poll()
             serial::putc('\n');
         }
     }
+}
+
+void submit_platform_pointer_relative(int32_t dx, int32_t dy, uint8_t buttons,
+                                      int16_t wheel)
+{
+    const display_input::DisplayPointerEvent event = s_displayMapper.mapRelativePointer(
+        display_input::PointerSourceType::VirtioInputRelative, dx, dy,
+        buttons, wheel);
+    const bool changed = event.virtualX != s_mouse.x || event.virtualY != s_mouse.y ||
+                         buttons != s_mouse.buttons || wheel != 0;
+    apply_mapping_event(event, InputSource::VirtIO);
+    if (changed) s_mouse.dirty = true;
+}
+
+void submit_platform_pointer_absolute(int32_t raw_x, int32_t raw_y,
+                                      int32_t raw_min_x, int32_t raw_max_x,
+                                      int32_t raw_min_y, int32_t raw_max_y,
+                                      uint8_t buttons, int16_t wheel)
+{
+    const display_input::DisplayPointerEvent event = s_displayMapper.mapUnknownHeadAbsolute(
+        display_input::PointerSourceType::VirtioInputAbsolute, raw_x, raw_y,
+        raw_min_x, raw_max_x, raw_min_y, raw_max_y,
+        s_screenWidth, s_screenHeight, buttons, wheel);
+    const bool changed = event.virtualX != s_mouse.x || event.virtualY != s_mouse.y ||
+                         buttons != s_mouse.buttons || wheel != 0;
+    apply_mapping_event(event, InputSource::VirtIO);
+    if (changed) s_mouse.dirty = true;
+}
+
+void submit_platform_key(uint32_t key, bool down)
+{
+    s_keyboard.dirty = true;
+#if defined(KERNEL_HAS_COMMON_INPUT_QUEUE)
+    input_queue::push_key(down ? input_queue::EventType::KeyDown
+                               : input_queue::EventType::KeyUp,
+                          key, input_queue::OriginVirtioHardware);
+#else
+    (void)key;
+    (void)down;
+#endif
 }
 
 // ----------------------------------------------------------------

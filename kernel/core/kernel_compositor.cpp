@@ -322,7 +322,13 @@ void KernelCompositor::setFocus(uint32_t windowId) {
         if (oldWin) {
             oldWin->flags &= ~app::WF_FOCUSED;
             oldWin->dirty = true;
+            if (oldWin->owner) oldWin->owner->onWindowBlur();
         }
+    }
+
+    if (windowId == 0) {
+        s_focusedWindowId = 0;
+        return;
     }
     
     // Set focus flag on new window
@@ -332,6 +338,7 @@ void KernelCompositor::setFocus(uint32_t windowId) {
         newWin->dirty = true;
         s_focusedWindowId = windowId;
         bringToFront(windowId);
+        if (newWin->owner) newWin->owner->onWindowFocus();
     }
 }
 

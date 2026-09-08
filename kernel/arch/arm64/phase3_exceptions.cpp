@@ -82,6 +82,16 @@ extern "C" void* phase3_exception_dispatch(uint64_t* frame, uint64_t vector_clas
     if (vector_class == 1) {
         const uint32_t acknowledgement = phase3_irq_acknowledge();
         const uint32_t irq = phase3_irq_id(acknowledgement);
+#if defined(GXOS_AARCH64_PHASE4)
+        if (!kernel::irq::has_handler(irq)) {
+            kernel::scheduler::note_unexpected_irq();
+            phase3_irq_complete(acknowledgement);
+            phase3_serial_print("[guideXOS] unexpected IRQ ID=");
+            phase3_serial_hex(irq);
+            phase3_serial_print("\n");
+            return nullptr;
+        }
+#else
         if (irq != phase3_timer_irq()) {
             kernel::scheduler::note_unexpected_irq();
             phase3_irq_complete(acknowledgement);
@@ -90,6 +100,7 @@ extern "C" void* phase3_exception_dispatch(uint64_t* frame, uint64_t vector_clas
             phase3_serial_print("\n");
             fatal("unexpected timer/IRQ");
         }
+#endif
         // The Phase-4 path routes timer policy through the common registry;
         // Phase 3 retains its direct, already-validated semantics.
 #if defined(GXOS_AARCH64_PHASE4)

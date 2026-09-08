@@ -4,7 +4,10 @@ namespace kernel {
 namespace irq {
 
 namespace {
-static const uint32_t kMaxIrqs = 64;
+// GICv2 SPI numbers used by QEMU virtio-MMIO devices are in the 32..95
+// range.  Keep the common registry large enough for those platform IRQs;
+// callers still receive a bounded failure for IDs outside this table.
+static const uint32_t kMaxIrqs = 128;
 struct Entry { Handler handler; void* context; uint64_t dispatches; };
 static Entry g_entries[kMaxIrqs];
 }
@@ -24,6 +27,11 @@ bool register_handler(uint32_t irq, Handler handler, void* context)
     if (irq >= kMaxIrqs || !handler) return false;
     g_entries[irq] = { handler, context, 0 };
     return true;
+}
+
+bool has_handler(uint32_t irq)
+{
+    return irq < kMaxIrqs && g_entries[irq].handler != nullptr;
 }
 
 void* dispatch(uint32_t irq, void* frame)

@@ -5,6 +5,8 @@
 #include "../../../aarch64/phase2/phase2_platform.h"
 
 uint8_t phase2_gic_init(const gxos_aarch64_phase2_platform* platform, uint32_t timer_irq);
+uint8_t phase2_gic_enable_irq(uint32_t irq);
+uint8_t phase2_gic_disable_irq(uint32_t irq);
 uint32_t phase2_gic_acknowledge();
 void phase2_gic_complete(uint32_t acknowledgement);
 uint32_t phase2_gic_irq_id(uint32_t acknowledgement);
