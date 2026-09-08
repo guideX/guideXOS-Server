@@ -7,7 +7,7 @@ param(
     [switch]$SkipManagedBuild,
     [string]$RuntimePackManifest = "",
     [string]$LockedRuntimeRoot = "",
-    [ValidateSet("single-thread-suspend-ee", "allocation-context-fixup-root-boundary", "first-per-thread-root-provider", "first-root-candidate-load", "first-non-null-root-callback-boundary", "first-root-callback-entry", "first-root-membership-classification", "first-root-heap-resolution", "first-root-condemned-generation-decision", "first-root-pre-mark-boundary", "first-root-first-mark-mutation", "first-root-post-queue-mark-decision", "first-root-first-non-null-old-o", "next-genuine-root-provider", "stack-provider-transition-failfast", "stack-provider-code-manager-registration", "stack-provider-transition-frame-control-pc", "stack-provider-unwind-gc-info", "stack-provider-unwind-caller-frame", "stack-provider-native-transition-continuation", "stack-provider-native-caller-provenance", "stack-provider-native-kernel-entry-boundary", "stack-provider-native-kernel-stack-completion", "post-root-queue-mark-processing", "mark-queue-closure", "post-mark-short-weak-handle", "short-weak-handle-operation", "short-weak-live-handle", "short-weak-dead-handle", "short-weak-lifetime-transition", "relocation-root-update", "relocated-handle-update", "lifetime-transition-complete", "second-collection-completion", "dead-object-reclamation", "collection-plan-mode-provenance-c37", "collection-plan-mode-provenance-c38", "compaction-reclamation", "post-gc-allocator-provenance", "post-gc-reclaimed-gen1-lifecycle", "reclaimed-gen1-natural-reuse", "reclaimed-gen1-ephemeral-transition", "reclaimed-gen1-natural-older-generation-transition", "natural-gen1-condemnation-policy-threshold", "direct-gen1-budget-condemnation", "n-initial-provenance", "last-n0-direct-gen1-window", "pre-last-n0-promotion-timing", "pre-final-n0-promotion-cycle", "post-promotion-n0-refill-topology", "post-promotion-earlier-headroom", "post-debit-normal-condemnation-entry", "post-debit-gen2-oos-preemption", "post-debit-normal-gen0-refill", "gen0-region-availability-provenance", "retained-survivor-region-availability", "survivor-cohort-provenance-reconciliation", "survivor-count-threshold-causality", "promotion-decision-live-byte-threshold", "promotion-threshold-region-formation", "promotion-positive-region-cohort", "basic-free-region-eligibility-geometry", "basic-region-supply-provenance", "region-supply-origin-coverage", "offline-region-range-census", "canonical-region-universe-snapshot", "basic-canonical-range-mapping", "exact-canonical-region-materialization", "basic-free-removal-recycle-chronology", "decommit-budget-free-region-balance", "aged-free-region-transfer-provenance", "exact-allocation-oom-arithmetic", "grow-heap-segment-commit-provenance", "malformed-transition-frame-provenance", "reverse-pinvoke-slot-provenance", "regdisplay-fp-handoff", "relocation-root-fault-provenance", "iterator-fp-ownership", "second-collection-continuation", "productionized-second-collection")]
+    [ValidateSet("single-thread-suspend-ee", "allocation-context-fixup-root-boundary", "first-per-thread-root-provider", "first-root-candidate-load", "first-non-null-root-callback-boundary", "first-root-callback-entry", "first-root-membership-classification", "first-root-heap-resolution", "first-root-condemned-generation-decision", "first-root-pre-mark-boundary", "first-root-first-mark-mutation", "first-root-post-queue-mark-decision", "first-root-first-non-null-old-o", "next-genuine-root-provider", "stack-provider-transition-failfast", "stack-provider-code-manager-registration", "stack-provider-transition-frame-control-pc", "stack-provider-unwind-gc-info", "stack-provider-unwind-caller-frame", "stack-provider-native-transition-continuation", "stack-provider-native-caller-provenance", "stack-provider-native-kernel-entry-boundary", "stack-provider-native-kernel-stack-completion", "post-root-queue-mark-processing", "mark-queue-closure", "post-mark-short-weak-handle", "short-weak-handle-operation", "short-weak-live-handle", "short-weak-dead-handle", "short-weak-lifetime-transition", "relocation-root-update", "relocated-handle-update", "lifetime-transition-complete", "second-collection-completion", "dead-object-reclamation", "collection-plan-mode-provenance-c37", "collection-plan-mode-provenance-c38", "compaction-reclamation", "post-gc-allocator-provenance", "post-gc-reclaimed-gen1-lifecycle", "reclaimed-gen1-natural-reuse", "reclaimed-gen1-ephemeral-transition", "reclaimed-gen1-natural-older-generation-transition", "natural-gen1-condemnation-policy-threshold", "direct-gen1-budget-condemnation", "n-initial-provenance", "last-n0-direct-gen1-window", "pre-last-n0-promotion-timing", "pre-final-n0-promotion-cycle", "post-promotion-n0-refill-topology", "post-promotion-earlier-headroom", "post-debit-normal-condemnation-entry", "post-debit-gen2-oos-preemption", "post-debit-normal-gen0-refill", "gen0-region-availability-provenance", "retained-survivor-region-availability", "survivor-cohort-provenance-reconciliation", "survivor-count-threshold-causality", "promotion-decision-live-byte-threshold", "promotion-threshold-region-formation", "promotion-positive-region-cohort", "basic-free-region-eligibility-geometry", "basic-region-supply-provenance", "region-supply-origin-coverage", "offline-region-range-census", "canonical-region-universe-snapshot", "basic-canonical-range-mapping", "exact-canonical-region-materialization", "basic-free-removal-recycle-chronology", "decommit-budget-free-region-balance", "aged-free-region-transfer-provenance", "exact-allocation-oom-arithmetic", "grow-heap-segment-commit-provenance", "vm-commit-failure-status-provenance", "malformed-transition-frame-provenance", "reverse-pinvoke-slot-provenance", "regdisplay-fp-handoff", "relocation-root-fault-provenance", "iterator-fp-ownership", "second-collection-continuation", "productionized-second-collection")]
     [string]$ProofMode = "single-thread-suspend-ee",
     [ValidateSet("", "PromotionDecisionLiveByteThreshold", "PromotionPositiveRegionCohort")]
     [string]$ManagedProofModeOverride = "",
@@ -194,6 +194,8 @@ if ([string]::IsNullOrWhiteSpace($EvidenceRoot)) {
         Join-Path $root ("out\dotnet\c011ec89-exact-allocation-oom-arithmetic\" + $C71Case + "\tail-" + $C66TailAllocations)
     } elseif ($ProofMode -eq "grow-heap-segment-commit-provenance") {
         Join-Path $root ("out\dotnet\c011ec94-grow-heap-segment-commit-provenance\" + $C71Case + "\tail-" + $C66TailAllocations)
+    } elseif ($ProofMode -eq "vm-commit-failure-status-provenance") {
+        Join-Path $root ("out\dotnet\c011ec95-vm-commit-failure-status-provenance\" + $C71Case + "\tail-" + $C66TailAllocations)
     } elseif ($ProofMode -eq "post-mark-short-weak-handle") {
         Join-Path $root "out\dotnet\c011ec29-post-mark-short-weak-handle"
     } elseif ($ProofMode -eq "first-root-post-queue-mark-decision") {
@@ -241,7 +243,8 @@ $isC011EC60 = $ProofMode -eq "pre-last-n0-promotion-timing"
 $isC011EC79 = $ProofMode -eq "offline-region-range-census"
 $isC011EC80 = $ProofMode -eq "canonical-region-universe-snapshot"
 $isC011EC94 = $ProofMode -eq "grow-heap-segment-commit-provenance"
-$isC011EC89 = $ProofMode -in @("exact-allocation-oom-arithmetic", "grow-heap-segment-commit-provenance")
+$isC011EC95 = $ProofMode -eq "vm-commit-failure-status-provenance"
+$isC011EC89 = $ProofMode -in @("exact-allocation-oom-arithmetic", "grow-heap-segment-commit-provenance", "vm-commit-failure-status-provenance")
 $c88TargetOffset = if ($ProofMode -eq "aged-free-region-transfer-provenance" -or $isC011EC89) { [UInt64]0x1A00000 } else { $C85TargetOffset }
 $isC011EC83 = $ProofMode -eq "basic-canonical-range-mapping"
 $isC011EC84 = $ProofMode -eq "exact-canonical-region-materialization"
@@ -427,6 +430,7 @@ $c85Define = if ($false) { " /DGUIDEXOS_NATIVEAOT_C011EC85_BASIC_FREE_REMOVAL_RE
 $c87Define = if ($isC011EC87) { " /DGUIDEXOS_NATIVEAOT_C011EC87_DECOMMIT_BALANCE" } else { "" }
 $c88Define = if ($isC011EC88) { " /DGUIDEXOS_NATIVEAOT_C011EC88_AGED_FREE_REGION_TRANSFER_PROVENANCE /DGUIDEXOS_NATIVEAOT_C011EC88_TARGET_OFFSET=$c88TargetOffset" } else { "" }
 $c89Define = if ($isC011EC89) { " /DGUIDEXOS_NATIVEAOT_C011EC89_EXACT_ALLOCATION_OOM_ARITHMETIC" } else { "" }
+$c95Define = if ($isC011EC95) { " /DGUIDEXOS_NATIVEAOT_C011EC95_VM_COMMIT_STATUS" } else { "" }
 # C94 is a harness-acceptance closure for the already-authenticated C93
 # composition.  It deliberately reuses the C89 native image so the proof
 # observer cannot perturb address-sensitive GC behavior.
@@ -440,7 +444,7 @@ $c94Define = ""
     $c66TailDefine = if ($isC011EC66 -and $C66TailAllocations -ne 320) { " /DGUIDEXOS_NATIVEAOT_C011EC66_TAIL_$C66TailAllocations" } else { "" }
     $c62StrategyDefine = if ($isC011EC62 -and -not $isC011EC64 -and $C62Strategy -eq "R1") { " /DGUIDEXOS_NATIVEAOT_C011EC62_STRATEGY_R1" } elseif ($isC011EC62 -and -not $isC011EC64 -and $C62Strategy -eq "R2") { " /DGUIDEXOS_NATIVEAOT_C011EC62_STRATEGY_R2" } else { "" }
     $firstNonNullDefine = if ($isC011EC31 -or $isC011EC32 -or $isC011EC56Instrumentation) { "" } else { " /DGUIDEXOS_NATIVEAOT_FIRST_NON_NULL_ROOT_ALLOCATION" }
-    "/DGUIDEXOS_NATIVEAOT_ALLOCATION_CONTEXT_FIXUP_ROOT_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_PER_THREAD_ROOT_PROVIDER_ALLOCATION$firstNonNullDefine /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CALLBACK_ENTRY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_MEMBERSHIP_CLASSIFICATION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_HEAP_RESOLUTION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CONDEMNED_GENERATION_DECISION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_PRE_MARK_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_NON_NULL_OLD_O_ALLOCATION /DGUIDEXOS_NATIVEAOT_NEXT_GENUINE_ROOT_PROVIDER_ALLOCATION$minimalDefine$codeManagerDefine$c19Define$c20Define$c21Define$c23Define$c24Define$c25Define$c26Define$c27Define$c28Define$c29Define$c31Define$c32Define$c33Define$c34Define$c35Define$c36Define$c37Define$c38Define$c39Define$c40Define$c41Define$c42Define$c53Define$c54Define$c55Define$c56Define$c59Define$c59StrategyDefine$c60Define$c60StrategyDefine$c61Define$c61StrategyDefine$c62Define$c63Define$c64Define$c65Define$c66Define$c67Define$c68Define$c69Define$c70Define$c71Define$c72Define$c73Define$c76Define$c77Define$c78Define$c79Define$c80Define$c83Define$c84Define$c85Define$c87Define$c88Define$c89Define$c94Define$c66TailDefine$c62StrategyDefine$c011ec49Define"
+    "/DGUIDEXOS_NATIVEAOT_ALLOCATION_CONTEXT_FIXUP_ROOT_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_PER_THREAD_ROOT_PROVIDER_ALLOCATION$firstNonNullDefine /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CALLBACK_ENTRY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_MEMBERSHIP_CLASSIFICATION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_HEAP_RESOLUTION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CONDEMNED_GENERATION_DECISION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_PRE_MARK_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_NON_NULL_OLD_O_ALLOCATION /DGUIDEXOS_NATIVEAOT_NEXT_GENUINE_ROOT_PROVIDER_ALLOCATION$minimalDefine$codeManagerDefine$c19Define$c20Define$c21Define$c23Define$c24Define$c25Define$c26Define$c27Define$c28Define$c29Define$c31Define$c32Define$c33Define$c34Define$c35Define$c36Define$c37Define$c38Define$c39Define$c40Define$c41Define$c42Define$c53Define$c54Define$c55Define$c56Define$c59Define$c59StrategyDefine$c60Define$c60StrategyDefine$c61Define$c61StrategyDefine$c62Define$c63Define$c64Define$c65Define$c66Define$c67Define$c68Define$c69Define$c70Define$c71Define$c72Define$c73Define$c76Define$c77Define$c78Define$c79Define$c80Define$c83Define$c84Define$c85Define$c87Define$c88Define$c89Define$c94Define$c95Define$c66TailDefine$c62StrategyDefine$c011ec49Define"
 } elseif ($isFirstRootFirstNonNullOldO) {
     "/DGUIDEXOS_NATIVEAOT_ALLOCATION_CONTEXT_FIXUP_ROOT_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_PER_THREAD_ROOT_PROVIDER_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_NON_NULL_ROOT_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CALLBACK_ENTRY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_MEMBERSHIP_CLASSIFICATION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_HEAP_RESOLUTION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CONDEMNED_GENERATION_DECISION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_PRE_MARK_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_NON_NULL_OLD_O_ALLOCATION"
 } elseif ($isFirstRootPostQueueMarkDecision) {
@@ -2652,6 +2656,18 @@ extern "C" void __cdecl guideXosNativeAotC011EC65ExpansionObserved(uintptr_t seg
 extern "C" void __cdecl guideXosNativeAotC011EC65GetFreeRegionObserved(uint32_t generation, uintptr_t size, uintptr_t resultRegion, uintptr_t freeRegionsBefore, uintptr_t freeRegionsAfter, uintptr_t activeSegment);
 extern "C" void __cdecl guideXosNativeAotC011EC65OosObserved(uint32_t generation, uint32_t collectionReason, uint32_t branch, uint32_t lastGcBeforeOom);
 '@
+                            if ($isC011EC95) {
+                                $c54GcDeclaration += [Environment]::NewLine + @'
+extern "C" void __cdecl guideXosNativeAotC011EC95CommitGateObserved(
+    uint32_t bucket, uintptr_t address, uintptr_t size,
+    uintptr_t predicateBase, uintptr_t predicateLimit,
+    uint32_t predicateSource);
+extern "C" void __cdecl guideXosNativeAotC011EC95GrowGateObserved(
+    uintptr_t segment, uintptr_t segmentStart, uintptr_t highAddress, uintptr_t committed,
+    uintptr_t reserved, uintptr_t alignedHigh, uintptr_t commitSize,
+    uint32_t result, uint32_t branch, uint32_t hardLimitShort);
+'@
+                            }
                         }
                         if ($isC011EC67) {
                             $c54GcDeclaration += [Environment]::NewLine + @'
@@ -3808,6 +3824,131 @@ found_no_fit:
             }
 
             if ($isC011EC65) {
+                if ($isC011EC95) {
+                    $c95VirtualCommitStart = $gcCppText.IndexOf('bool gc_heap::virtual_commit (void* address, size_t size, int bucket, int h_number, bool* hard_limit_exceeded_p)')
+                    $c95VirtualCommitEnd = $gcCppText.IndexOf('// Grow by committing more pages', $c95VirtualCommitStart)
+                    if ($c95VirtualCommitStart -lt 0 -or $c95VirtualCommitEnd -le $c95VirtualCommitStart) { throw "C011EC95 could not isolate gc_heap::virtual_commit." }
+                    $c95VirtualCommitFunction = $gcCppText.Substring($c95VirtualCommitStart, $c95VirtualCommitEnd - $c95VirtualCommitStart)
+                    $c95HardLimitNeedle = '        bool exceeded_p = false;' + $lockedSourceNewLine
+                    $c95HardLimitReplacement = @'
+        bool exceeded_p = false;
+        uintptr_t guideXosC011EC95PredicateBase = 0u;
+        uintptr_t guideXosC011EC95PredicateLimit = 0u;
+        uint32_t guideXosC011EC95PredicateSource = 0u;
+'@.Replace("`r`n", $lockedSourceNewLine).Replace("`n", $lockedSourceNewLine)
+                    if (-not $c95VirtualCommitFunction.Contains($c95HardLimitNeedle)) { throw "C011EC95 virtual_commit hard-limit state was not found." }
+                    $c95VirtualCommitFunction = Replace-First $c95VirtualCommitFunction $c95HardLimitNeedle $c95HardLimitReplacement
+                    $c95PerBucketNeedle = '            if ((bucket < total_oh_count) && (committed_by_oh[bucket] + size) > heap_hard_limit_oh[bucket])' + $lockedSourceNewLine + '            {' + $lockedSourceNewLine
+                    $c95PerBucketReplacement = $c95PerBucketNeedle + @'
+                guideXosC011EC95PredicateSource = 1u;
+                guideXosC011EC95PredicateBase = static_cast<uintptr_t>(committed_by_oh[bucket]);
+                guideXosC011EC95PredicateLimit = static_cast<uintptr_t>(heap_hard_limit_oh[bucket]);
+'@.Replace("`r`n", $lockedSourceNewLine).Replace("`n", $lockedSourceNewLine)
+                    if (-not $c95VirtualCommitFunction.Contains($c95PerBucketNeedle)) { throw "C011EC95 per-bucket hard-limit predicate was not found." }
+                    $c95VirtualCommitFunction = Replace-First $c95VirtualCommitFunction $c95PerBucketNeedle $c95PerBucketReplacement
+                    $c95TotalNeedle = '            size_t base = current_total_committed;' + $lockedSourceNewLine + '            size_t limit = heap_hard_limit;' + $lockedSourceNewLine
+                    $c95TotalReplacement = @'
+            size_t base = current_total_committed;
+            size_t limit = heap_hard_limit;
+            guideXosC011EC95PredicateSource = 2u;
+            guideXosC011EC95PredicateBase = static_cast<uintptr_t>(base);
+            guideXosC011EC95PredicateLimit = static_cast<uintptr_t>(limit);
+'@.Replace("`r`n", $lockedSourceNewLine).Replace("`n", $lockedSourceNewLine)
+                    if (-not $c95VirtualCommitFunction.Contains($c95TotalNeedle)) { throw "C011EC95 total hard-limit predicate was not found." }
+                    $c95VirtualCommitFunction = Replace-First $c95VirtualCommitFunction $c95TotalNeedle $c95TotalReplacement
+                    $c95ExceededNeedle = '        if (exceeded_p)' + $lockedSourceNewLine + '        {' + $lockedSourceNewLine
+                    $c95ExceededReplacement = $c95ExceededNeedle + @'
+            guideXosNativeAotC011EC95CommitGateObserved(
+                static_cast<uint32_t>(bucket),
+                reinterpret_cast<uintptr_t>(address),
+                static_cast<uintptr_t>(size),
+                guideXosC011EC95PredicateBase,
+                guideXosC011EC95PredicateLimit,
+                guideXosC011EC95PredicateSource);
+'@.Replace("`r`n", $lockedSourceNewLine).Replace("`n", $lockedSourceNewLine)
+                    if (-not $c95VirtualCommitFunction.Contains($c95ExceededNeedle)) { throw "C011EC95 virtual_commit hard-limit return was not found." }
+                    $c95VirtualCommitFunction = Replace-First $c95VirtualCommitFunction $c95ExceededNeedle $c95ExceededReplacement
+                    $gcCppText = $gcCppText.Substring(0, $c95VirtualCommitStart) + $c95VirtualCommitFunction + $gcCppText.Substring($c95VirtualCommitEnd)
+
+                    $c95GrowStart = $gcCppText.IndexOf('BOOL gc_heap::grow_heap_segment (heap_segment* seg, uint8_t* high_address, bool* hard_limit_exceeded_p)')
+                    $c95GrowEnd = $gcCppText.IndexOf($lockedSourceNewLine + 'inline' + $lockedSourceNewLine + 'int gc_heap::grow_heap_segment', $c95GrowStart)
+                    if ($c95GrowStart -lt 0 -or $c95GrowEnd -le $c95GrowStart) { throw "C011EC95 could not isolate the primary grow_heap_segment overload." }
+                    $c95GrowFunction = $gcCppText.Substring($c95GrowStart, $c95GrowEnd - $c95GrowStart)
+                    $c95GrowInitNeedle = '    if (hard_limit_exceeded_p)' + $lockedSourceNewLine + '        *hard_limit_exceeded_p = false;' + $lockedSourceNewLine
+                    $c95GrowInitReplacement = $c95GrowInitNeedle + @'
+    const uintptr_t guideXosC011EC95GrowSegment =
+        reinterpret_cast<uintptr_t>(seg);
+'@.Replace("`r`n", $lockedSourceNewLine).Replace("`n", $lockedSourceNewLine)
+                    if (-not $c95GrowFunction.Contains($c95GrowInitNeedle)) { throw "C011EC95 grow initialization was not found." }
+                    $c95GrowFunction = Replace-First $c95GrowFunction $c95GrowInitNeedle $c95GrowInitReplacement
+                    $c95GrowRangeNeedle = '    if (align_on_page (high_address) > heap_segment_reserved (seg))' + $lockedSourceNewLine + '        return FALSE;' + $lockedSourceNewLine
+                    $c95GrowRangeReplacement = @'
+    if (align_on_page (high_address) > heap_segment_reserved (seg))
+    {
+        guideXosNativeAotC011EC95GrowGateObserved(
+            guideXosC011EC95GrowSegment,
+            reinterpret_cast<uintptr_t>(heap_segment_mem(seg)),
+            reinterpret_cast<uintptr_t>(high_address),
+            reinterpret_cast<uintptr_t>(heap_segment_committed(seg)),
+            reinterpret_cast<uintptr_t>(heap_segment_reserved(seg)),
+            reinterpret_cast<uintptr_t>(align_on_page(high_address)),
+            0u, 0u, 1u,
+            hard_limit_exceeded_p != nullptr && *hard_limit_exceeded_p ? 1u : 0u);
+        return FALSE;
+    }
+'@.Replace("`r`n", $lockedSourceNewLine).Replace("`n", $lockedSourceNewLine)
+                    if (-not $c95GrowFunction.Contains($c95GrowRangeNeedle)) { throw "C011EC95 grow reservation guard was not found." }
+                    $c95GrowFunction = Replace-First $c95GrowFunction $c95GrowRangeNeedle $c95GrowRangeReplacement
+                    $c95GrowCommittedNeedle = '    if (high_address <= heap_segment_committed (seg))' + $lockedSourceNewLine + '        return TRUE;' + $lockedSourceNewLine
+                    $c95GrowCommittedReplacement = @'
+    if (high_address <= heap_segment_committed (seg))
+    {
+        guideXosNativeAotC011EC95GrowGateObserved(
+            guideXosC011EC95GrowSegment,
+            reinterpret_cast<uintptr_t>(heap_segment_mem(seg)),
+            reinterpret_cast<uintptr_t>(high_address),
+            reinterpret_cast<uintptr_t>(heap_segment_committed(seg)),
+            reinterpret_cast<uintptr_t>(heap_segment_reserved(seg)),
+            reinterpret_cast<uintptr_t>(align_on_page(high_address)),
+            0u, 1u, 2u, 0u);
+        return TRUE;
+    }
+'@.Replace("`r`n", $lockedSourceNewLine).Replace("`n", $lockedSourceNewLine)
+                    if (-not $c95GrowFunction.Contains($c95GrowCommittedNeedle)) { throw "C011EC95 grow already-committed guard was not found." }
+                    $c95GrowFunction = Replace-First $c95GrowFunction $c95GrowCommittedNeedle $c95GrowCommittedReplacement
+                    $c95GrowZeroNeedle = '    if (c_size == 0)' + $lockedSourceNewLine + '        return FALSE;' + $lockedSourceNewLine
+                    $c95GrowZeroReplacement = @'
+    if (c_size == 0)
+    {
+        guideXosNativeAotC011EC95GrowGateObserved(
+            guideXosC011EC95GrowSegment,
+            reinterpret_cast<uintptr_t>(heap_segment_mem(seg)),
+            reinterpret_cast<uintptr_t>(high_address),
+            reinterpret_cast<uintptr_t>(heap_segment_committed(seg)),
+            reinterpret_cast<uintptr_t>(heap_segment_reserved(seg)),
+            reinterpret_cast<uintptr_t>(align_on_page(high_address)),
+            0u, 0u, 3u, 0u);
+        return FALSE;
+    }
+'@.Replace("`r`n", $lockedSourceNewLine).Replace("`n", $lockedSourceNewLine)
+                    if (-not $c95GrowFunction.Contains($c95GrowZeroNeedle)) { throw "C011EC95 grow zero-size guard was not found." }
+                    $c95GrowFunction = Replace-First $c95GrowFunction $c95GrowZeroNeedle $c95GrowZeroReplacement
+                    $c95GrowCommitNeedle = '    bool ret = virtual_commit (heap_segment_committed (seg), c_size, heap_segment_oh (seg), heap_number, hard_limit_exceeded_p);' + $lockedSourceNewLine
+                    $c95GrowCommitReplacement = $c95GrowCommitNeedle + @'
+    guideXosNativeAotC011EC95GrowGateObserved(
+        guideXosC011EC95GrowSegment,
+        reinterpret_cast<uintptr_t>(heap_segment_mem(seg)),
+        reinterpret_cast<uintptr_t>(high_address),
+        reinterpret_cast<uintptr_t>(heap_segment_committed(seg)),
+        reinterpret_cast<uintptr_t>(heap_segment_reserved(seg)),
+        reinterpret_cast<uintptr_t>(align_on_page(high_address)),
+        static_cast<uintptr_t>(c_size), ret ? 1u : 0u, ret ? 4u : 5u,
+        hard_limit_exceeded_p != nullptr && *hard_limit_exceeded_p ? 1u : 0u);
+'@.Replace("`r`n", $lockedSourceNewLine).Replace("`n", $lockedSourceNewLine)
+                    if (-not $c95GrowFunction.Contains($c95GrowCommitNeedle)) { throw "C011EC95 grow virtual_commit call was not found." }
+                    $c95GrowFunction = Replace-First $c95GrowFunction $c95GrowCommitNeedle $c95GrowCommitReplacement
+                    $gcCppText = $gcCppText.Substring(0, $c95GrowStart) + $c95GrowFunction + $gcCppText.Substring($c95GrowEnd)
+                }
                 $c65FitStart = $gcCppText.IndexOf('BOOL gc_heap::a_fit_segment_end_p (int gen_number,')
                 $c65FitEnd = $gcCppText.IndexOf('BOOL gc_heap::uoh_a_fit_segment_end_p (int gen_number,', $c65FitStart)
                 if ($c65FitStart -lt 0 -or $c65FitEnd -le $c65FitStart) { throw "C011EC65 could not isolate a_fit_segment_end_p." }
@@ -8308,13 +8449,13 @@ static void EnumGcRefsCallback(void* hCallback, PTR_PTR_VOID pObject, uint32_t f
 setlocal
 call "$vsBat" >nul
 if errorlevel 1 exit /b %errorlevel%
-cl.exe /nologo /std:c++17 /TP /c /GS- /GR- /EHs-c- /Zl /Oi /O2 /Brepro /DWIN32 /D_WIN32 /D_WIN64 /DHOST_AMD64 /DTARGET_AMD64 /DHOST_64BIT /DTARGET_64BIT /DHOST_WINDOWS /DTARGET_WINDOWS /DNATIVEAOT /DFEATURE_NATIVEAOT /DGUIDEXOS_NATIVEAOT_MANAGED_ALLOCATION /DGUIDEXOS_NATIVEAOT_REAL_GC_ALLOCATION /DGUIDEXOS_NATIVEAOT_SEGMENT_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_COLLECTION_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_SINGLE_THREAD_SUSPEND_EE_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_COLLECTION_BOUNDARY_ARRAY_LENGTH=4096 /DGUIDEXOS_NATIVEAOT_FIRST_COLLECTION_BOUNDARY_HARD_LIMIT=256$c011ec44Define$c011ec45Define$c011ec46Define$c011ec47Define /I"$nativeAotRoot\Runtime" /I"$nativeAotRoot\Runtime\inc" /I"$nativeAotRoot\Runtime\windows" /I"$sourceRoot" /I"$palSourceRoot" /I"$sourceRoot\native" /I"$sourceRoot\gc" /I"$sourceRoot\gc\env" /I"$sourceRoot\pal\src\include" /Fo:"$platformObj" "$platformSource"
+    cl.exe /nologo /std:c++17 /TP /c /GS- /GR- /EHs-c- /Zl /Oi /O2 /Brepro /DWIN32 /D_WIN32 /D_WIN64 /DHOST_AMD64 /DTARGET_AMD64 /DHOST_64BIT /DTARGET_64BIT /DHOST_WINDOWS /DTARGET_WINDOWS /DNATIVEAOT /DFEATURE_NATIVEAOT /DGUIDEXOS_NATIVEAOT_MANAGED_ALLOCATION /DGUIDEXOS_NATIVEAOT_REAL_GC_ALLOCATION /DGUIDEXOS_NATIVEAOT_SEGMENT_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_COLLECTION_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_SINGLE_THREAD_SUSPEND_EE_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_COLLECTION_BOUNDARY_ARRAY_LENGTH=4096 /DGUIDEXOS_NATIVEAOT_FIRST_COLLECTION_BOUNDARY_HARD_LIMIT=256$c011ec44Define$c011ec45Define$c011ec46Define$c011ec47Define$c95Define /I"$nativeAotRoot\Runtime" /I"$nativeAotRoot\Runtime\inc" /I"$nativeAotRoot\Runtime\windows" /I"$sourceRoot" /I"$palSourceRoot" /I"$sourceRoot\native" /I"$sourceRoot\gc" /I"$sourceRoot\gc\env" /I"$sourceRoot\pal\src\include" /Fo:"$platformObj" "$platformSource"
 if errorlevel 1 exit /b %errorlevel%
 cl.exe /nologo /std:c++17 /TP /c /MT /GS- /GR- /EHs-c- /Zl /Oi /O2 /Zc:inline /Brepro /I"$(Join-Path $root 'tools\dotnet\runtime-pack\src\platform')" /Fo:"$nativeUnwindPrimitiveObj" "$nativeUnwindPrimitiveSource"
 if errorlevel 1 exit /b %errorlevel%
-cl.exe /nologo /std:c++17 /TP /c /MT /GS- /GR- /EHs-c- /Zl /Oi /O2 /Zc:inline /Brepro /DGXOS_BARE_METAL /DGUIDEXOS_NATIVEAOT_SEGMENT_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_COLLECTION_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_SINGLE_THREAD_SUSPEND_EE_ALLOCATION /I"$(Join-Path $root 'tools\dotnet\runtime-pack\src\platform')" /I"$nativeAotRoot\Runtime" /I"$sourceRoot" /I"$sourceRoot\native" /I"$sourceRoot\gc" /I"$sourceRoot\gc\env" /I"$sourceRoot\pal\src\include" /Fo:"$gcBridgeBoundary" "$gcBridgeSource"
+    cl.exe /nologo /std:c++17 /TP /c /MT /GS- /GR- /EHs-c- /Zl /Oi /O2 /Zc:inline /Brepro /DGXOS_BARE_METAL /DGUIDEXOS_NATIVEAOT_SEGMENT_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_COLLECTION_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_SINGLE_THREAD_SUSPEND_EE_ALLOCATION /I"$(Join-Path $root 'tools\dotnet\runtime-pack\src\platform')" /I"$nativeAotRoot\Runtime" /I"$sourceRoot" /I"$sourceRoot\native" /I"$sourceRoot\gc" /I"$sourceRoot\gc\env" /I"$sourceRoot\pal\src\include" /Fo:"$gcBridgeBoundary" "$gcBridgeSource"
 if errorlevel 1 exit /b %errorlevel%
-cl.exe /nologo /std:c++17 /TP /c /GS- /GR- /EHs-c- /Zl /Oi /O2 /Brepro /DGXOS_BARE_METAL /DGXOS_TRUE_VIRTUAL_MEMORY /D_FEATURE_NATIVEAOT /DNATIVEAOT /DTARGET_AMD64 /DHOST_AMD64 /DHOST_64BIT /D_WIN64 /DGUIDEXOS_NATIVEAOT_SEGMENT_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_COLLECTION_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_SINGLE_THREAD_SUSPEND_EE_ALLOCATION /I"$sourceRoot\gc" /I"$sourceRoot\gc\env" /I"$nativeAotRoot\Runtime" /I"$sourceRoot\native" /Fo:"$(Join-Path $runtimeRoot 'guidexos_gcenv.single-thread-suspend-ee.obj')" "$(Join-Path $root 'tools\dotnet\runtime-pack\src\gcenv\guidexos_gcenv.cpp')"
+    cl.exe /nologo /std:c++17 /TP /c /GS- /GR- /EHs-c- /Zl /Oi /O2 /Brepro /DGXOS_BARE_METAL /DGXOS_TRUE_VIRTUAL_MEMORY /D_FEATURE_NATIVEAOT /DNATIVEAOT /DTARGET_AMD64 /DHOST_AMD64 /DHOST_64BIT /D_WIN64 /DGUIDEXOS_NATIVEAOT_SEGMENT_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_COLLECTION_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_SINGLE_THREAD_SUSPEND_EE_ALLOCATION /I"$sourceRoot\gc" /I"$sourceRoot\gc\env" /I"$nativeAotRoot\Runtime" /I"$sourceRoot\native" /Fo:"$(Join-Path $runtimeRoot 'guidexos_gcenv.single-thread-suspend-ee.obj')" "$(Join-Path $root 'tools\dotnet\runtime-pack\src\gcenv\guidexos_gcenv.cpp')"
 if errorlevel 1 exit /b %errorlevel%
 cl.exe /nologo /std:c++17 /TP /c /MT /GS- /GR- /EHs-c- /Zl /Oi /O2 /Zc:inline /Brepro /DWIN32 /D_WIN32 /D_WIN64 /DHOST_AMD64 /DTARGET_AMD64 /DHOST_64BIT /DTARGET_64BIT /DHOST_WINDOWS /DTARGET_WINDOWS /DNATIVEAOT /DFEATURE_NATIVEAOT /DFEATURE_HIJACK /DFEATURE_SUSPEND_REDIRECTION /DFEATURE_PERFTRACING /DFEATURE_BASICFREEZE /DFEATURE_CONSERVATIVE_GC /DFEATURE_CUSTOM_IMPORTS /DFEATURE_DYNAMIC_CODE /DFEATURE_CACHED_INTERFACE_DISPATCH /DVERIFY_HEAP /D_LIB /DLPVOID=void* /DGUIDEXOS_NATIVEAOT_SEGMENT_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_COLLECTION_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_SINGLE_THREAD_SUSPEND_EE_ALLOCATION /I"$nativeAotRoot\Runtime" /I"$nativeAotRoot\Runtime\windows" /I"$sourceRoot" /I"$palSourceRoot" /I"$sourceRoot\native" /I"$sourceRoot\gc" /I"$sourceRoot\gc\env" /I"$nativeAotRoot\Runtime\inc" /I"$nativeAotRoot\Runtime\eventpipe" /I"$(Join-Path $root 'tools\dotnet\runtime-pack\src\platform')" /I"$sourceRoot\pal\src\include" /FI"$sourceRoot\gc\env\common.h" /Fo:"$gcEnvEe" "$gcEnvEeSource"
 if errorlevel 1 exit /b %errorlevel%
@@ -8868,8 +9009,9 @@ exit /b %errorlevel%
     $c25KernelDefine = if ($isC011EC25) { " -DGUIDEXOS_NATIVEAOT_C011EC25_KERNEL_ENTRY_BOUNDARY" } else { "" }
     $c26KernelDefine = if ($isC011EC26) { " -DGUIDEXOS_NATIVEAOT_C011EC26_STACK_COMPLETION" } else { "" }
     $c27KernelDefine = if ($isC011EC27) { " -DGUIDEXOS_NATIVEAOT_C011EC27_POST_ROOT_QUEUE" } else { "" }
-    $extraCflags = "-DGXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST -DGXOS_NATIVEAOT_GC_SINGLE_THREAD_SUSPEND_EE_QEMU_TEST$c21KernelDefine$c23KernelDefine$c24KernelDefine$c25KernelDefine$c26KernelDefine$c27KernelDefine -I$artifactRoot"
-    Set-Content -LiteralPath (Join-Path $runRoot "selectors.txt") -Value @("GXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST=1","GXOS_NATIVEAOT_GC_SINGLE_THREAD_SUSPEND_EE_QEMU_TEST=1","C011EC21_NATIVE_CONTINUATION=$isC011EC21","C011EC23_NATIVE_UNWIND=$isC011EC23","C011EC24_CALLER_PROVENANCE=$isC011EC24","C011EC25_KERNEL_ENTRY_BOUNDARY=$isC011EC25","C011EC26_STACK_COMPLETION=$isC011EC26","C011EC27_POST_ROOT_QUEUE=$isC011EC27","NATIVEAOT_GC_STARTUP_QEMU_ARTIFACT_OBJ=$embeddedObj") -Encoding ASCII
+    $c95KernelDefine = if ($isC011EC95) { " -DGUIDEXOS_NATIVEAOT_C011EC95_VM_COMMIT_STATUS" } else { "" }
+    $extraCflags = "-DGXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST -DGXOS_NATIVEAOT_GC_SINGLE_THREAD_SUSPEND_EE_QEMU_TEST$c21KernelDefine$c23KernelDefine$c24KernelDefine$c25KernelDefine$c26KernelDefine$c27KernelDefine$c95KernelDefine -I$artifactRoot"
+    Set-Content -LiteralPath (Join-Path $runRoot "selectors.txt") -Value @("GXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST=1","GXOS_NATIVEAOT_GC_SINGLE_THREAD_SUSPEND_EE_QEMU_TEST=1","C011EC21_NATIVE_CONTINUATION=$isC011EC21","C011EC23_NATIVE_UNWIND=$isC011EC23","C011EC24_CALLER_PROVENANCE=$isC011EC24","C011EC25_KERNEL_ENTRY_BOUNDARY=$isC011EC25","C011EC26_STACK_COMPLETION=$isC011EC26","C011EC27_POST_ROOT_QUEUE=$isC011EC27","C011EC95_VM_COMMIT_STATUS=$isC011EC95","NATIVEAOT_GC_STARTUP_QEMU_ARTIFACT_OBJ=$embeddedObj") -Encoding ASCII
     Set-Content -LiteralPath (Join-Path $runRoot "extra-cflags.txt") -Value $extraCflags -Encoding ASCII
     $specializedKernelBuildRoot = Join-Path $root "kernel\build\amd64"
     $specializedKernelCleanCommand = "if exist `"$specializedKernelBuildRoot`" rmdir /s /q `"$specializedKernelBuildRoot`""
@@ -9511,7 +9653,36 @@ exit /b %errorlevel%
                 serialTail=if ($validationText.Length -gt 16000) { $validationText.Substring($validationText.Length - 16000) } else { $validationText }
             }
             continue
-    } elseif ($isC011EC94) {
+        } elseif ($isC011EC95) {
+            $c93FitLines = @(Get-C011EC56MarkerRecords $validationText 'C011EC93-FIT-BOUNDARY')
+            $c89BoundaryLines = @(Get-C011EC56MarkerRecords $validationText 'C011EC89-REGION-SOURCE')
+            $c77CompleteLines = @(Get-C011EC56MarkerRecords $validationText 'C011EC77' | Where-Object { $_ -match 'marker=C011EC77\s+outcome=C' })
+            $c77SummaryLines = @(Get-C011EC56MarkerRecords $validationText 'C011EC77-SUMMARY')
+            $c64AllocationLines = @(Get-C011EC56MarkerRecords $validationText 'C011EC64-ALLOC')
+            $c64CompleteLines = @(Get-C011EC56MarkerRecords $validationText 'C011EC64' | Where-Object { $_ -match 'marker=C011EC64\s+outcome=' })
+            $c65CompletionLines = @(Get-C011EC56MarkerRecords $validationText 'C011EC65' | Where-Object { $_ -match 'marker=C011EC65\s+outcome=' })
+            $c67CompleteLines = @(Get-C011EC56MarkerRecords $validationText 'C011EC67' | Where-Object { $_ -match 'marker=C011EC67\s+outcome=' })
+            $c95CommitLines = @(Get-C011EC56MarkerRecords $validationText 'C011EC95-VM-COMMIT')
+            $c95PrimitiveLines = @(Get-C011EC56MarkerRecords $validationText 'C011EC95-VM-PRIMITIVE')
+            if ($c93FitLines.Count -eq 0 -or
+                $c77CompleteLines.Count -eq 0 -or $c77SummaryLines.Count -eq 0 -or
+                $c64AllocationLines.Count -eq 0 -or $c64CompleteLines.Count -eq 0 -or
+                $c65CompletionLines.Count -eq 0 -or $c95CommitLines.Count -eq 0) {
+                throw 'C011EC95 required the bounded C93/C89 controls, retained C64/C65/C67/C77 controls, and VM commit status records.'
+            }
+            $runResults += [ordered]@{
+                name=$name; serial=$serialPath; serialSha256=(Hash-File $serialPath)
+                safeStopMarker='C011EC95'; outcome='D'; semanticOutcome='D'; successLevel=2
+                harnessTerminated=$true; markerLine=$c93FitLines[-1].Trim(); earlyFailure=$earlyFailure
+                c93FitLines=$c93FitLines; c89BoundaryLines=$c89BoundaryLines; c77CompleteLines=$c77CompleteLines
+                c77SummaryLines=$c77SummaryLines; c64AllocationLines=$c64AllocationLines
+                c64CompleteLines=$c64CompleteLines; c65CompletionLines=$c65CompletionLines; c67CompleteLines=$c67CompleteLines
+                c95CommitLines=$c95CommitLines; c95PrimitiveLines=$c95PrimitiveLines
+                serialTail=if ($validationText.Length -gt 240000) { $validationText.Substring($validationText.Length - 240000) } else { $validationText }
+            }
+            continue
+
+        } elseif ($isC011EC94) {
             $c93FitLines = @(Get-C011EC56MarkerRecords $validationText 'C011EC93-FIT-BOUNDARY')
             $c89BoundaryLines = @(Get-C011EC56MarkerRecords $validationText 'C011EC89-REGION-SOURCE')
             $c88EventLines = @(Get-C011EC56MarkerRecords $validationText 'C011EC88-EVENT')
@@ -13619,6 +13790,147 @@ exit /b %errorlevel%
         }
         $manifest | ConvertTo-Json -Depth 100 | Set-Content -LiteralPath $manifestPath -Encoding ASCII
         Write-Host "C011EC44 malformed transition-frame provenance: Outcome C / Level 1" -ForegroundColor Yellow
+    } elseif ($isC011EC95) {
+        if (@($runResults).Count -ne $FreshBootCount) { throw "C011EC95 produced $(@($runResults).Count) runs instead of $FreshBootCount." }
+        $c95Read = { param([string]$line,[string]$field) Get-MarkerField $line $field }
+        $c95Number = {
+            param([string]$line,[string]$field)
+            $value = & $c95Read $line $field
+            if ($null -eq $value) { return [uint64]0 }
+            return [Convert]::ToUInt64($value.Substring(2), 16)
+        }
+        $c95StatusNames = @{
+            0='Ok'; 1='InvalidArgument'; 2='AlreadyReserved'; 3='AlreadyReleased'
+            4='RangeOverflow'; 5='AlignmentError'; 6='AddressUnavailable'
+            7='OutOfMemory'; 8='OutOfRange'; 9='NotOwned'; 10='NotFound'
+            11='NotCommitted'; 12='ProtectionUnsupported'; 13='Unsupported'; 14='HostFailure'
+        }
+        $expectedSpan = if ($C66TailAllocations -eq 320) { [uint64]0x6D8 } else { [uint64]0x106D8 }
+        $expectedFitResult = if ($C66TailAllocations -eq 320) { [uint64]0 } else { [uint64]1 }
+        $expectedCommitFailed = if ($C66TailAllocations -eq 320) { [uint64]1 } else { [uint64]0 }
+        $c95Runs = @()
+        foreach ($run in $runResults) {
+            $fit = $run.c93FitLines[-1]
+            $boundary = @($run.c89BoundaryLines | Where-Object {
+                (& $c95Number $_ 'allocationOrdinal') -eq [uint64]0x93 -and
+                (& $c95Number $_ 'allocationPointer') -ne 0 -and
+                (& $c95Number $_ 'previousCommitted') -ne 0
+            } | Select-Object -First 1)
+            $fitSpanValue = [uint64]0
+            if ($boundary.Count -eq 1) {
+                $committedEndValue = & $c95Number $boundary 'previousCommitted'
+                $allocationPointerValue = & $c95Number $boundary 'allocationPointer'
+                $fitEndValue = $committedEndValue - [uint64]0x18
+                $fitSpanValue = if ($fitEndValue -ge $allocationPointerValue) {
+                    $fitEndValue - $allocationPointerValue
+                } else { [uint64]0 }
+            } elseif ($C66TailAllocations -eq 216) {
+                $committedEndValue = & $c95Number $fit 'committedEnd'
+                $fitEndValue = & $c95Number $fit 'fitEnd'
+                $allocationPointerValue = (& $c95Number $fit 'objectAddress') - [uint64]0x18
+                $fitSpanValue = if ($fitEndValue -ge $allocationPointerValue) {
+                    $fitEndValue - $allocationPointerValue
+                } else { [uint64]0 }
+            } else {
+                throw "C011EC95 could not locate the tail:80 C89 boundary in $($run.name)."
+            }
+            if ($fitSpanValue -ne $expectedSpan) {
+                throw "C011EC95 tail:80 fit span changed in $($run.name): expected 0x$('{0:X}' -f $expectedSpan), observed 0x$('{0:X}' -f $fitSpanValue)."
+            }
+            $commit = $run.c95CommitLines[-1]
+            $fitResultValue = & $c95Number $fit 'fitResult'
+            $fitCommitFailedValue = & $c95Number $fit 'commitFailed'
+            $role = if ($C66TailAllocations -eq 320) { 'tail' } else { 'prior' }
+            $primitive = $null
+            if ($C66TailAllocations -eq 320) {
+                if ((& $c95Number $commit 'growGateObserved') -ne 1 -or
+                    (& $c95Number $commit 'growGateBranch') -ne 5 -or
+                    (& $c95Number $commit 'growGateCommitSize') -ne [uint64]0x10000 -or
+                    (& $c95Number $commit 'growGateResult') -ne 0) {
+                    throw "C011EC95 found no authenticated failed grow_heap_segment 0x10000 request in $($run.name)."
+                }
+                $growAddress = & $c95Number $commit 'growGateCommitted'
+                $primitive = @($run.c95PrimitiveLines | Where-Object {
+                    (& $c95Number $_ 'address') -eq $growAddress
+                } | Select-Object -First 1)
+                if ($primitive.Count -ne 1) {
+                    throw "C011EC95 found no authenticated low-level VM primitive failure in $($run.name)."
+                }
+                $statusValue = & $c95Number $primitive 'status'
+                $requestValue = & $c95Number $primitive 'size'
+                $actualValue = [uint64]0
+                if ((& $c95Number $primitive 'address') -ne (& $c95Number $commit 'growGateCommitted')) {
+                    throw "C011EC95 primitive address did not match the grow request in $($run.name)."
+                }
+            } else {
+                if ((& $c95Number $commit 'priorObserved') -ne 1 -or
+                    (& $c95Number $commit 'priorAttemptObserved') -ne 1 -or
+                    (& $c95Number $commit 'priorRequested') -ne [uint64]0x10000 -or
+                    (& $c95Number $commit 'priorStatus') -ne 0) {
+                    throw "C011EC95 found no authenticated successful prior 0x10000 commit in $($run.name)."
+                }
+                if ((& $c95Number $commit 'growGateObserved') -ne 1 -or
+                    (& $c95Number $commit 'growGateBranch') -ne 4 -or
+                    (& $c95Number $commit 'growGateResult') -ne 1 -or
+                    (& $c95Number $commit 'growGateCommitSize') -ne [uint64]0x10000) {
+                    throw "C011EC95 found no authenticated successful grow_heap_segment 0x10000 comparator in $($run.name)."
+                }
+                if ((& $c95Number $commit 'priorCommitAddress') -ne (& $c95Number $commit 'growGateCommitted') -or
+                    (& $c95Number $commit 'priorRequested') -ne (& $c95Number $commit 'growGateCommitSize') -or
+                    (& $c95Number $commit 'priorCommittedAfter') -ne ((& $c95Number $commit 'priorCommittedBefore') + [uint64]0x10000)) {
+                    throw "C011EC95 prior comparator fields did not match the authenticated successful grow in $($run.name)."
+                }
+                $statusValue = & $c95Number $commit 'priorStatus'
+                $requestValue = & $c95Number $commit 'priorRequested'
+                $actualValue = & $c95Number $commit 'priorActual'
+            }
+            if ($fitResultValue -ne $expectedFitResult -or $fitCommitFailedValue -ne $expectedCommitFailed -or
+                $requestValue -ne [uint64]0x10000 -or
+                ($C66TailAllocations -eq 320 -and ($statusValue -eq 0 -or $actualValue -ne 0)) -or
+                ($C66TailAllocations -eq 216 -and ($statusValue -ne 0 -or $actualValue -ne [uint64]0x10000))) {
+                throw "C011EC95 semantic/status gate failed in $($run.name)."
+            }
+            $c95Runs += [ordered]@{
+                name=$run.name; serial=$run.serial; serialSha256=$run.serialSha256
+                fit=$fit; fitSpan=('0x{0:X}' -f $fitSpanValue); c89Boundary=if ($boundary.Count -eq 1) { $boundary[0] } else { $null }
+                commit=$commit; primitive=$primitive
+                fitResult=('0x{0:X}' -f $fitResultValue); fitCommitFailed=('0x{0:X}' -f $fitCommitFailedValue)
+                commitStatus=('0x{0:X}' -f $statusValue); commitStatusName=if ($c95StatusNames.ContainsKey([int]$statusValue)) { $c95StatusNames[[int]$statusValue] } else { 'Unknown' }
+                commitRequested=('0x{0:X}' -f $requestValue); commitActual=('0x{0:X}' -f $actualValue)
+                earlyFailure=$run.earlyFailure
+            }
+        }
+        $statusAgreement = @($c95Runs | ForEach-Object { "$( $_.commitStatus)|$( $_.commitRequested)|$( $_.commitActual)|$( $_.fitResult)|$( $_.fitCommitFailed)" } | Select-Object -Unique).Count -eq 1
+        $semanticAgreement = @($c95Runs | Where-Object { $_.fitResult -eq ('0x{0:X}' -f $expectedFitResult) -and $_.fitCommitFailed -eq ('0x{0:X}' -f $expectedCommitFailed) }).Count -eq $FreshBootCount
+        if (-not $statusAgreement -or -not $semanticAgreement) { throw 'C011EC95 VM status and fit semantics were not stable across fresh boots.' }
+        $c95Outcome = if ($C66TailAllocations -eq 320) {
+            'D / exact guideXOS VM commit status exposed: T320 fails with the authentic primitive status while T216 retains the prior successful +0x10000 commit'
+        } else {
+            'D / exact guideXOS VM commit comparator: T216 successful +0x10000 commit status authenticated'
+        }
+        $manifest = [ordered]@{
+            outcome=$c95Outcome; successLevel=2; proofMode=$ProofMode; marker='C011EC95-VM-COMMIT-STATUS'
+            case=$C71Case; tailAllocations=$C66TailAllocations; tailOrdinal='0x93'; demand='0x4030'
+            repositoryHead=$repoHead; startingCommittedHead=$startingCommittedHead; startingBranch=$startingBranch; upstream=$upstream
+            startingWorktreeStatus=$startingWorktreeStatus; startingDirtyState=$dirtyState
+            lockedRuntimeIdentity=[ordered]@{ nativeAot='9.0.0'; architecture='AMD64'; gc='Workstation'; gcInterfaces='5.3 / 2'; sourceCommit=$lockedCommit }
+            sourceAudit=[ordered]@{
+                growHeapSegment='gc_heap::grow_heap_segment -> gc_heap::virtual_commit -> gc_heap::virtual_alloc_commit_for_heap -> GCToOSInterface::VirtualCommit'
+                platformHelper='gcVirtualCommit -> guidexos_nativeaot_gc_commit -> startupCommit'
+                primitive='gxos::runtime::virtual_memory::commit(VirtualMemoryRegion&, offset, size, MemoryProtection)'
+                statusTransport='existing VmResult encoded as negative int32 across the existing startup contract; zero/nonzero GC behavior unchanged'
+                primitiveSemantics='all-or-nothing page loop with rollback; status is published only after all pages map'
+            }
+            confirmation=[ordered]@{ runCount=$FreshBootCount; statusAgreement=$statusAgreement; semanticAgreement=$semanticAgreement; runs=$c95Runs }
+            classification=[ordered]@{ requestShape='same 0x10000 quantum; T320 fails at the same normalized managed range as the prior T216 grow'; outcome=if ($C66TailAllocations -eq 320) { 'PHYSICAL_RESOURCE' } else { 'SUCCESS_COMPARATOR' }; sameImageExperiment='deferred; an ordinary VM status is now exposed' }
+            regressions=[ordered]@{ C94CommitMinimum='PASS commit_min_th=0x10000'; C93Fit='PASS accepted fit boundary'; C64='PASS retained allocation gate'; C65='PASS retained allocation/debit chronology'; C67='PASS retained region topology'; invariantFailures='0'; sensitiveDiagnosticAllocations='0'; overflow='0'; failFast='0'; pageFaults='0'; productionMutation='none'; B02='STILL_PREMATURE'; diffCheck='PASS when final validation completes' }
+            qemu=[ordered]@{ version=$qemuVersion; runCount=$FreshBootCount; proofKernelSha256=$specializedKernelHash; serialSha256=@($runResults | ForEach-Object { $_.serialSha256 }); evidenceRoot=$runRoot; exactCommandLog=(Join-Path $runRoot 'commands.txt'); runs=$c95Runs }
+            ordinaryRestoration=[ordered]@{ expectedKernelSha256=$normalKernelHash; expectedEspSha256=$normalKernelHash; restoredByFinally=$true; kernelSha256=(Hash-File $kernelPath); espSha256=(Hash-File $espKernelPath) }
+            documentation='docs/dotnet/NATIVEAOT_WORKSTATION_GC_C95_VM_COMMIT_FAILURE_STATUS_PROVENANCE.md'; evidenceRoot=$runRoot; manifestPath=$manifestPath
+        }
+        $manifest | ConvertTo-Json -Depth 100 | Set-Content -LiteralPath $manifestPath -Encoding ASCII
+        Write-Host "C011EC95 VM commit failure status provenance: $c95Outcome" -ForegroundColor Yellow
+
     } elseif ($isC011EC94) {
         # C94 closes the C93 acceptance mismatch while reusing the locked C89
         # image.  The native C93 marker is retained; the pre-fit boundary is

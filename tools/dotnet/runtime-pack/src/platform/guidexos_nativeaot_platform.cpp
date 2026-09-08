@@ -20847,6 +20847,16 @@ guideXosNativeAotC011EC64Start(
     return 0;
 }
 
+#if defined(GUIDEXOS_NATIVEAOT_SEGMENT_BOUNDARY_ALLOCATION)
+using GuideXosVmTraceCountFn =
+    ::nativeaot_vm_size (*)();
+using GuideXosVmTraceAtFn = bool (*) (
+    ::nativeaot_vm_size,
+    guidexos::nativeaot::virtual_memory::TraceEvent*);
+GuideXosVmTraceCountFn g_guideXosVmTraceCount = nullptr;
+GuideXosVmTraceAtFn g_guideXosVmTraceAt = nullptr;
+#endif
+
 extern "C" __declspec(dllexport) int __cdecl
 guideXosNativeAotC011EC64Finish() {
     guidexos_nativeaot_c011ec64_lifecycle_record& r =
@@ -20901,6 +20911,242 @@ guideXosNativeAotC011EC64Finish() {
             suspendEeSerialPutString("\n");
         }
     }
+#if defined(GUIDEXOS_NATIVEAOT_C011EC95_VM_COMMIT_STATUS)
+    // The C93 terminal point can precede the generic refill dump.  Read the
+    // already-bounded VM trace directly here so the status remains available
+    // at the earliest accepted terminal marker, without adding a new trace.
+    guidexos::nativeaot::virtual_memory::TraceEvent tailCommit{};
+    guidexos::nativeaot::virtual_memory::TraceEvent priorSuccessfulCommit{};
+    guidexos::nativeaot::virtual_memory::TraceEvent failedCommitAnySize{};
+    bool tailCommitObserved = false;
+    bool priorSuccessfulCommitObserved = false;
+    bool failedCommitAnySizeObserved = false;
+    const gx_size traceCount = g_guideXosVmTraceCount == nullptr
+        ? 0u : g_guideXosVmTraceCount();
+    for (gx_size index = 0u; index < traceCount; ++index) {
+        guidexos::nativeaot::virtual_memory::TraceEvent event{};
+        if (g_guideXosVmTraceAt == nullptr || !g_guideXosVmTraceAt(index, &event) ||
+            event.operation != guidexos::nativeaot::virtual_memory::TraceOperation::Commit) {
+            continue;
+        }
+        if (event.result != gxos::runtime::virtual_memory::VmResult::Ok &&
+            !failedCommitAnySizeObserved) {
+            failedCommitAnySize = event;
+            failedCommitAnySizeObserved = true;
+        }
+        if (event.size != 0x10000u) continue;
+        if (event.result != gxos::runtime::virtual_memory::VmResult::Ok &&
+            !tailCommitObserved) {
+            tailCommit = event;
+            tailCommitObserved = true;
+        }
+        if (event.result == gxos::runtime::virtual_memory::VmResult::Ok) {
+            priorSuccessfulCommit = event;
+            priorSuccessfulCommitObserved = true;
+        }
+    }
+    guidexos_nativeaot_c011ec65_event_record commitGate{};
+    bool commitGateObserved = false;
+    guidexos_nativeaot_c011ec65_event_record growResult{};
+    bool growResultObserved = false;
+    guidexos_nativeaot_c011ec65_event_record growGate{};
+    bool growGateObserved = false;
+    guidexos_nativeaot_c011ec65_event_record vmPrimitive{};
+    bool vmPrimitiveObserved = false;
+    const guidexos_nativeaot_c011ec64_lifecycle_record& c64Lifecycle =
+        g_guideXosAllocationDiagnostics.c011ec64Lifecycle;
+    const guidexos_nativeaot_c011ec64_allocation_record& commitSideband =
+        c64Lifecycle.allocations[GUIDEXOS_NATIVEAOT_C011EC64_MAX_ALLOCATIONS - 2u];
+    const guidexos_nativeaot_c011ec64_allocation_record& growSideband =
+        c64Lifecycle.allocations[GUIDEXOS_NATIVEAOT_C011EC64_MAX_ALLOCATIONS - 1u];
+    const guidexos_nativeaot_c011ec64_allocation_record& vmSideband =
+        c64Lifecycle.allocations[GUIDEXOS_NATIVEAOT_C011EC64_MAX_ALLOCATIONS - 3u];
+    if (commitSideband.reserved[0] == 0xC95C001u) {
+        commitGate.branch = commitSideband.reserved[2];
+        commitGate.result = commitSideband.reserved[3];
+        commitGate.commitFailed = 1u;
+        commitGate.requestSize = commitSideband.payloadSize;
+        commitGate.activeSegment = commitSideband.requestedSize;
+        commitGate.allocationContext = commitSideband.allocationContext;
+        commitGate.allocationPointer = commitSideband.allocationPointer;
+        commitGate.reserved[1] = commitSideband.reserved[1];
+        commitGateObserved = true;
+    }
+    if (growSideband.reserved[0] == 0xC95C002u) {
+        growGate.result = growSideband.reserved[1];
+        growGate.branch = growSideband.reserved[2];
+        growGate.commitFailed = growSideband.reserved[3];
+        growGate.requestSize = growSideband.payloadSize;
+        growGate.activeSegment = growSideband.requestedSize;
+        growGate.allocationContext = growSideband.allocationContext;
+        growGate.allocationPointer = growSideband.allocationPointer;
+        growGate.allocationLimit = growSideband.allocationLimit;
+        growGate.committedBytes = growSideband.objectAddress;
+        growGate.reservedBytes = growSideband.payloadSize;
+        growGate.candidateRegion = growSideband.allocationPointerAfter;
+        growGateObserved = true;
+    }
+    if (vmSideband.reserved[0] == 0xC95C003u) {
+        vmPrimitive.branch = vmSideband.reserved[1];
+        vmPrimitive.result = vmSideband.reserved[2];
+        vmPrimitive.commitFailed = vmSideband.reserved[3];
+        vmPrimitive.requestSize = vmSideband.payloadSize;
+        vmPrimitive.activeSegment = vmSideband.requestedSize;
+        vmPrimitiveObserved = true;
+    }
+    const guidexos_nativeaot_c011ec65_lifecycle_record& c65Lifecycle =
+        g_guideXosAllocationDiagnostics.c011ec65Lifecycle;
+    for (uint32_t index = 0u; index < c65Lifecycle.eventCount &&
+         index < GUIDEXOS_NATIVEAOT_C011EC65_MAX_EVENTS; ++index) {
+        const guidexos_nativeaot_c011ec65_event_record& event =
+            c65Lifecycle.events[index];
+        if (event.kind == GUIDEXOS_NATIVEAOT_C011EC65_EVENT_EXPANSION &&
+            event.reserved[0] != 0xC95C001u &&
+            event.reserved[0] != 0xC95C002u &&
+            event.reserved[0] != 0xC95C003u) {
+            growResult = event;
+            growResultObserved = true;
+        }
+    }
+    suspendEeSerialPutString(
+        "[nativeaot-gc-short-weak-lifetime] C95-VM-COMMIT marker=C011EC95-VM-COMMIT");
+    guideXosNativeAotC011EC64Put32("commitGateObserved",
+        commitGateObserved ? 1u : 0u);
+    guideXosNativeAotC011EC64Put32("commitGateEventOrdinal",
+        commitGateObserved ? commitGate.eventOrdinal : 0u);
+    guideXosNativeAotC011EC64Put32("commitGateBucket",
+        commitGateObserved ? commitGate.reserved[1] : 0u);
+    guideXosNativeAotC011EC64Put32("commitGateSource",
+        commitGateObserved ? commitGate.branch : 0u);
+    guideXosNativeAotC011EC64Put32("commitGateResult",
+        commitGateObserved ? commitGate.result : 0u);
+    guideXosNativeAotC011EC64Put64("commitGateAddress",
+        commitGateObserved ? commitGate.activeSegment : 0u);
+    guideXosNativeAotC011EC64Put64("commitGateSize",
+        commitGateObserved ? commitGate.requestSize : 0u);
+    guideXosNativeAotC011EC64Put64("commitGatePredicateBase",
+        commitGateObserved ? commitGate.allocationContext : 0u);
+    guideXosNativeAotC011EC64Put64("commitGatePredicateLimit",
+        commitGateObserved ? commitGate.allocationPointer : 0u);
+    guideXosNativeAotC011EC64Put32("growGateObserved",
+        growGateObserved ? 1u : 0u);
+    guideXosNativeAotC011EC64Put32("growGateEventOrdinal",
+        growGateObserved ? growGate.eventOrdinal : 0u);
+    guideXosNativeAotC011EC64Put32("growGateResult",
+        growGateObserved ? growGate.result : 0u);
+    guideXosNativeAotC011EC64Put32("growGateBranch",
+        growGateObserved ? growGate.branch : 0u);
+    guideXosNativeAotC011EC64Put32("growGateHardLimit",
+        growGateObserved ? growGate.commitFailed : 0u);
+    guideXosNativeAotC011EC64Put64("growGateSegment",
+        growGateObserved ? growGate.activeSegment : 0u);
+    guideXosNativeAotC011EC64Put64("growGateHighAddress",
+        growGateObserved ? growGate.allocationContext : 0u);
+    guideXosNativeAotC011EC64Put64("growGateCommitted",
+        growGateObserved ? growGate.allocationPointer : 0u);
+    guideXosNativeAotC011EC64Put64("growGateReserved",
+        growGateObserved ? growGate.allocationLimit : 0u);
+    guideXosNativeAotC011EC64Put64("growGateAlignedHigh",
+        growGateObserved ? growGate.committedBytes : 0u);
+    guideXosNativeAotC011EC64Put64("growGateCommitSize",
+        growGateObserved ? growGate.reservedBytes : 0u);
+    guideXosNativeAotC011EC64Put64("growGateSegmentStart",
+        growGateObserved ? growGate.candidateRegion : 0u);
+    guideXosNativeAotC011EC64Put32("vmPrimitiveObserved",
+        vmPrimitiveObserved ? 1u : 0u);
+    guideXosNativeAotC011EC64Put32("vmPrimitiveStatus",
+        vmPrimitiveObserved ? vmPrimitive.branch : 0u);
+    guideXosNativeAotC011EC64Put32("vmPrimitiveResult",
+        vmPrimitiveObserved ? vmPrimitive.result : 0u);
+    guideXosNativeAotC011EC64Put64("vmPrimitiveAddress",
+        vmPrimitiveObserved ? vmPrimitive.activeSegment : 0u);
+    guideXosNativeAotC011EC64Put64("vmPrimitiveSize",
+        vmPrimitiveObserved ? vmPrimitive.requestSize : 0u);
+    guideXosNativeAotC011EC64Put32("growResultObserved",
+        growResultObserved ? 1u : 0u);
+    guideXosNativeAotC011EC64Put32("growResultEventOrdinal",
+        growResultObserved ? growResult.eventOrdinal : 0u);
+    guideXosNativeAotC011EC64Put32("growResultPhase",
+        growResultObserved ? growResult.phase : 0u);
+    guideXosNativeAotC011EC64Put32("growResultValue",
+        growResultObserved ? growResult.result : 0u);
+    guideXosNativeAotC011EC64Put32("growResultBranch",
+        growResultObserved ? growResult.branch : 0u);
+    guideXosNativeAotC011EC64Put64("growResultSegment",
+        growResultObserved ? growResult.activeSegment : 0u);
+    guideXosNativeAotC011EC64Put64("growResultRequestSize",
+        growResultObserved ? growResult.requestSize : 0u);
+    guideXosNativeAotC011EC64Put64("growResultCommitted",
+        growResultObserved ? growResult.committedBytes : 0u);
+    guideXosNativeAotC011EC64Put64("growResultReserved",
+        growResultObserved ? growResult.reservedBytes : 0u);
+    guideXosNativeAotC011EC64Put32("failedCommitAnySizeObserved",
+        failedCommitAnySizeObserved ? 1u : 0u);
+    guideXosNativeAotC011EC64Put32("failedCommitAnySizeStatus",
+        failedCommitAnySizeObserved
+            ? static_cast<uint32_t>(failedCommitAnySize.result) : 0u);
+    guideXosNativeAotC011EC64Put64("failedCommitAnySizeAddress",
+        failedCommitAnySizeObserved
+            ? reinterpret_cast<gx_uintptr>(failedCommitAnySize.address) : 0u);
+    guideXosNativeAotC011EC64Put64("failedCommitAnySizeRequested",
+        failedCommitAnySizeObserved ? failedCommitAnySize.size : 0u);
+    guideXosNativeAotC011EC64Put32("tailObserved", tailCommitObserved ? 1u : 0u);
+    guideXosNativeAotC011EC64Put32("tailAllocationOrdinal", tailCommitObserved ? 0x93u : 0u);
+    guideXosNativeAotC011EC64Put32("tailStatus",
+        tailCommitObserved ? static_cast<uint32_t>(tailCommit.result) : 0u);
+    guideXosNativeAotC011EC64Put32("tailAttemptObserved", tailCommitObserved ? 1u : 0u);
+    guideXosNativeAotC011EC64Put64("tailCommitAddress",
+        tailCommitObserved ? reinterpret_cast<gx_uintptr>(tailCommit.address) : 0u);
+    guideXosNativeAotC011EC64Put64("tailRequested",
+        tailCommitObserved ? tailCommit.size : 0u);
+    guideXosNativeAotC011EC64Put64("tailActual",
+        tailCommitObserved && tailCommit.result == gxos::runtime::virtual_memory::VmResult::Ok
+            ? tailCommit.size : 0u);
+    guideXosNativeAotC011EC64Put64("tailCommittedBefore",
+        tailCommitObserved ? reinterpret_cast<gx_uintptr>(tailCommit.address) : 0u);
+    guideXosNativeAotC011EC64Put64("tailCommittedAfter",
+        tailCommitObserved && tailCommit.result == gxos::runtime::virtual_memory::VmResult::Ok
+            ? reinterpret_cast<gx_uintptr>(tailCommit.address) + tailCommit.size
+            : (tailCommitObserved ? reinterpret_cast<gx_uintptr>(tailCommit.address) : 0u));
+    guideXosNativeAotC011EC64Put64("tailSegmentCommitted", 0u);
+    guideXosNativeAotC011EC64Put64("tailSegmentReserved", 0u);
+#if defined(GUIDEXOS_NATIVEAOT_C011EC66_TAIL_216)
+    const bool c95PriorObserved = growGateObserved;
+    const gx_uintptr c95PriorAddress = growGateObserved ? growGate.allocationPointer : 0u;
+    const gx_uintptr c95PriorSize = growGateObserved ? growGate.reservedBytes : 0u;
+    const gx_uintptr c95PriorAfter = growGateObserved && growGate.result != 0u
+        ? growGate.allocationPointer + growGate.reservedBytes : c95PriorAddress;
+#else
+    const bool c95PriorObserved = priorSuccessfulCommitObserved;
+    const gx_uintptr c95PriorAddress = priorSuccessfulCommitObserved
+        ? reinterpret_cast<gx_uintptr>(priorSuccessfulCommit.address) : 0u;
+    const gx_uintptr c95PriorSize = priorSuccessfulCommitObserved
+        ? priorSuccessfulCommit.size : 0u;
+    const gx_uintptr c95PriorAfter = priorSuccessfulCommitObserved
+        ? reinterpret_cast<gx_uintptr>(priorSuccessfulCommit.address) + priorSuccessfulCommit.size : 0u;
+#endif
+    guideXosNativeAotC011EC64Put32("priorObserved",
+        c95PriorObserved ? 1u : 0u);
+    guideXosNativeAotC011EC64Put32("priorAllocationOrdinal",
+        c95PriorObserved ? 0u : 0u);
+    guideXosNativeAotC011EC64Put32("priorAttemptObserved",
+        c95PriorObserved ? 1u : 0u);
+    guideXosNativeAotC011EC64Put32("priorStatus",
+        c95PriorObserved ? 0u : 0u);
+    guideXosNativeAotC011EC64Put64("priorCommitAddress",
+        c95PriorAddress);
+    guideXosNativeAotC011EC64Put64("priorRequested",
+        c95PriorSize);
+    guideXosNativeAotC011EC64Put64("priorActual",
+        c95PriorObserved ? c95PriorSize : 0u);
+    guideXosNativeAotC011EC64Put64("priorCommittedBefore",
+        c95PriorAddress);
+    guideXosNativeAotC011EC64Put64("priorCommittedAfter",
+        c95PriorAfter);
+    guideXosNativeAotC011EC64Put64("priorSegmentCommitted", 0u);
+    guideXosNativeAotC011EC64Put64("priorSegmentReserved", 0u);
+    suspendEeSerialPutString("\n");
+#endif
     suspendEeSerialPutString(
         "[nativeaot-gc-short-weak-lifetime] SUMMARY marker=C011EC64-SUMMARY");
     guideXosNativeAotC011EC64Put32("promotionObserved", r.promotionObserved);
@@ -21012,6 +21258,94 @@ guideXosNativeAotC011EC65BeginEvent(uint32_t kind, uint32_t phase) {
         .c011ec54Lifecycle.collectionEntryCount + 1u;
     return &e;
 }
+
+#if defined(GUIDEXOS_NATIVEAOT_C011EC95_VM_COMMIT_STATUS)
+extern "C" void __cdecl
+guideXosNativeAotC011EC95CommitGateObserved(
+    uint32_t bucket, uintptr_t address, uintptr_t size,
+    uintptr_t predicateBase, uintptr_t predicateLimit,
+    uint32_t predicateSource) {
+    guidexos_nativeaot_c011ec64_lifecycle_record& r =
+        g_guideXosAllocationDiagnostics.c011ec64Lifecycle;
+    if (r.started == 0u) return;
+    // Use the final three pre-existing C64 allocation records as C95 sideband
+    // storage.  They are outside allocationCount, so this observer cannot
+    // change C64 allocation ordinals or lifecycle invariants.
+    guidexos_nativeaot_c011ec64_allocation_record* e = &r.allocations[
+        GUIDEXOS_NATIVEAOT_C011EC64_MAX_ALLOCATIONS - 2u];
+    *e = {};
+    e->observed = 1u;
+    e->reserved[0] = 0xC95C001u;
+    e->reserved[1] = bucket;
+    e->reserved[2] = predicateSource;
+    e->reserved[3] = 0u;
+    e->payloadSize = size;
+    e->requestedSize = address;
+    e->allocationContext = predicateBase;
+    e->allocationPointer = predicateLimit;
+    /* The tag distinguishes this gate record from the existing C64 workload
+     * records without adding a new trace or array. */
+}
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC95GrowGateObserved(
+    uintptr_t segment, uintptr_t segmentStart, uintptr_t highAddress, uintptr_t committed,
+    uintptr_t reserved, uintptr_t alignedHigh, uintptr_t commitSize,
+    uint32_t result, uint32_t branch, uint32_t hardLimitShort) {
+#if defined(GUIDEXOS_NATIVEAOT_C011EC95_VM_COMMIT_STATUS)
+#if defined(GUIDEXOS_NATIVEAOT_C011EC66_TAIL_216)
+    // T216 records the nearest successful +0x10000 grow for the comparator.
+    if (branch != 4u || result != 1u || commitSize != 0x10000u) return;
+#else
+    // T320 records the decisive failed +0x10000 grow.  Later failures are
+    // downstream pressure and must not replace this bounded sideband.
+    if (branch != 5u || result != 0u || commitSize != 0x10000u) return;
+#endif
+#endif
+    guidexos_nativeaot_c011ec64_lifecycle_record& r =
+        g_guideXosAllocationDiagnostics.c011ec64Lifecycle;
+    if (r.started == 0u) return;
+    guidexos_nativeaot_c011ec64_allocation_record* e = &r.allocations[
+        GUIDEXOS_NATIVEAOT_C011EC64_MAX_ALLOCATIONS - 1u];
+#if defined(GUIDEXOS_NATIVEAOT_C011EC95_VM_COMMIT_STATUS)
+    // Preserve the first authenticated failed quantum.  Later startup and
+    // segment-transition failures are downstream VM pressure, not the
+    // tail:80 grow request being compared by C95.
+    if (e->reserved[0] == 0xC95C002u) return;
+#endif
+    *e = {};
+    e->observed = 1u;
+    e->reserved[0] = 0xC95C002u;
+    e->reserved[1] = result;
+    e->reserved[2] = branch;
+    e->reserved[3] = hardLimitShort;
+    e->payloadSize = commitSize;
+    e->requestedSize = segment;
+    e->allocationContext = highAddress;
+    e->allocationPointer = committed;
+    e->allocationLimit = reserved;
+    e->objectAddress = alignedHigh;
+    e->allocationPointerAfter = segmentStart;
+}
+
+extern "C" void __cdecl
+guideXosNativeAotC011EC95VmPrimitiveObserved(
+    uintptr_t address, uintptr_t size, uint32_t status) {
+    guidexos_nativeaot_c011ec64_lifecycle_record& r =
+        g_guideXosAllocationDiagnostics.c011ec64Lifecycle;
+    if (r.started == 0u) return;
+    guidexos_nativeaot_c011ec64_allocation_record* e = &r.allocations[
+        GUIDEXOS_NATIVEAOT_C011EC64_MAX_ALLOCATIONS - 3u];
+    *e = {};
+    e->observed = 1u;
+    e->reserved[0] = 0xC95C003u;
+    e->reserved[1] = status;
+    e->reserved[2] = status == 0u ? 1u : 0u;
+    e->reserved[3] = status == 0u ? 0u : 1u;
+    e->payloadSize = size;
+    e->requestedSize = address;
+}
+#endif
 
 static void guideXosNativeAotC011EC65CopyRefill(
     guidexos_nativeaot_c011ec65_refill_record& d,
@@ -31588,16 +31922,9 @@ void emitFirstPerThreadRootProviderSafeStop() {
 
 #if defined(GUIDEXOS_NATIVEAOT_MANAGED_ALLOCATION) && defined(GUIDEXOS_NATIVEAOT_REAL_GC_ALLOCATION)
 #if defined(GUIDEXOS_NATIVEAOT_SEGMENT_BOUNDARY_ALLOCATION)
-using GuideXosVmTraceCountFn =
-    ::nativeaot_vm_size (*)();
-using GuideXosVmTraceAtFn = bool (*) (
-    ::nativeaot_vm_size,
-    guidexos::nativeaot::virtual_memory::TraceEvent*);
 using GuideXosSegmentDescribeFn = int32_t (*) (
     void*, gx_uintptr*, gx_uintptr*, gx_uintptr*, gx_uintptr*, gx_uintptr*,
     gx_uint32*, gx_uint32*);
-GuideXosVmTraceCountFn g_guideXosVmTraceCount = nullptr;
-GuideXosVmTraceAtFn g_guideXosVmTraceAt = nullptr;
 GuideXosSegmentDescribeFn g_guideXosSegmentDescribe = nullptr;
 bool g_guideXosSegmentBoundaryExperimentRequested = false;
 #if defined(GUIDEXOS_NATIVEAOT_FIRST_COLLECTION_BOUNDARY_ALLOCATION)
@@ -31829,6 +32156,35 @@ void recordSegmentBoundaryRefill(
         entry.committedBefore = g_guideXosAllocationDiagnostics.boundaryCommittedBefore;
         entry.committedAfter = g_guideXosAllocationDiagnostics.boundaryCommittedAfter;
     }
+#if defined(GUIDEXOS_NATIVEAOT_C011EC95_VM_COMMIT_STATUS)
+    // C64/C65/C67 already reserve two scalar words in each refill record.
+    // Reuse them for the authentic VM enum and an attempt bit; do not add a
+    // record field or emit a new per-page/per-commit diagnostic stream.
+    const gx_uintptr rangeStart = segmentBase >= 0x1000u
+        ? segmentBase - 0x1000u : segmentBase;
+    const gx_uintptr rangeEnd = segmentReserved >= rangeStart
+        ? segmentReserved : 0u;
+    for (gx_uint32 index = entry.traceStart; index < entry.traceEnd; ++index) {
+        guidexos::nativeaot::virtual_memory::TraceEvent event{};
+        if (g_guideXosVmTraceAt == nullptr || !g_guideXosVmTraceAt(index, &event) ||
+            event.operation != guidexos::nativeaot::virtual_memory::TraceOperation::Commit) {
+            continue;
+        }
+        const gx_uintptr commitStart = reinterpret_cast<gx_uintptr>(event.address);
+        const gx_uintptr commitEnd = event.size > (~static_cast<gx_uintptr>(0) - commitStart)
+            ? ~static_cast<gx_uintptr>(0) : commitStart + event.size;
+        if (commitStart >= rangeEnd || commitEnd <= rangeStart) continue;
+        entry.reserved1 = 1u;
+        entry.reserved0 = static_cast<gx_uint32>(event.result);
+        entry.vmCommitObserved = event.result == gxos::runtime::virtual_memory::VmResult::Ok ? 1u : 0u;
+        entry.commitAddress = commitStart;
+        entry.commitRequested = event.size;
+        entry.commitActual = entry.vmCommitObserved != 0u ? event.size : 0u;
+        entry.committedBefore = commitStart;
+        entry.committedAfter = entry.vmCommitObserved != 0u ? commitEnd : commitStart;
+        break;
+    }
+#endif
     ++g_guideXosAllocationDiagnostics.refillHistoryCount;
 }
 

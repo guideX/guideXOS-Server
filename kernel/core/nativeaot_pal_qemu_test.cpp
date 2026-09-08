@@ -928,13 +928,70 @@ void* GUIDEXOS_NATIVEAOT_PAL_CALL startupReserve(
 int32_t GUIDEXOS_NATIVEAOT_PAL_CALL startupCommit(
     void* address, uintptr_t size, uint16_t) {
     GcVmSlot* slot = findGcVm(address);
+#if defined(GUIDEXOS_NATIVEAOT_C011EC95_VM_COMMIT_STATUS)
+    if (slot == nullptr) {
+        return -static_cast<int32_t>(
+            gxos::runtime::virtual_memory::VmResult::NotOwned);
+    }
+    if (size == 0) {
+        return -static_cast<int32_t>(
+            gxos::runtime::virtual_memory::VmResult::InvalidArgument);
+    }
+#else
     if (slot == nullptr || size == 0) return -1;
+#endif
     const uintptr_t offset = reinterpret_cast<uintptr_t>(address) -
         reinterpret_cast<uintptr_t>(slot->region.base);
-    return gxos::runtime::virtual_memory::commit(
-               slot->region, offset, size,
-               gxos::runtime::virtual_memory::MemoryProtection::ReadWrite) ==
-            gxos::runtime::virtual_memory::VmResult::Ok ? 0 : -1;
+    const uintptr_t committedBefore = slot->region.committedSize;
+    const gxos::runtime::virtual_memory::VmResult result =
+        gxos::runtime::virtual_memory::commit(
+            slot->region, offset, size,
+            gxos::runtime::virtual_memory::MemoryProtection::ReadWrite);
+#if defined(GUIDEXOS_NATIVEAOT_C011EC95_VM_COMMIT_STATUS)
+    if (result != gxos::runtime::virtual_memory::VmResult::Ok &&
+        size == UINT64_C(0x10000) &&
+        (g_startupLegacyAllocCalls & 0x80000000u) == 0u) {
+        // Reuse the existing startup counter's high bit as a per-boot
+        // publication guard; the printed counter masks the observer bit.
+        g_startupLegacyAllocCalls |= 0x80000000u;
+        const char* resultDetail =
+            gxos::runtime::virtual_memory::lastDiagnostic();
+        const gxos::runtime::virtual_memory::VirtualMemoryStats vmStats =
+            gxos::runtime::virtual_memory::stats();
+        serial::puts("[nativeaot-gc-c95-vm] C95-VM-PRIMITIVE marker=C011EC95-VM-PRIMITIVE");
+        serial::puts(" address=");
+        serial::put_hex64(reinterpret_cast<uintptr_t>(address));
+        serial::puts(" offset=");
+        serial::put_hex64(offset);
+        serial::puts(" size=");
+        serial::put_hex64(size);
+        serial::puts(" pageSize=");
+        serial::put_hex64(kPageSize);
+        serial::puts(" committedBefore=");
+        serial::put_hex64(committedBefore);
+        serial::puts(" committedAfter=");
+        serial::put_hex64(slot->region.committedSize);
+        serial::puts(" reservedSize=");
+        serial::put_hex64(slot->region.reservedSize);
+        serial::puts(" status=");
+        serial::put_hex32(static_cast<uint32_t>(result));
+        serial::puts(" statusName=");
+        serial::puts(gxos::runtime::virtual_memory::vmResultName(result));
+        serial::puts(" detail=");
+        serial::puts(resultDetail);
+        serial::puts(" freeFrames=");
+        serial::put_hex64(vmStats.freeFrames);
+        serial::puts(" allocatedFrames=");
+        serial::put_hex64(vmStats.allocatedFrames);
+        serial::puts(" regionOwnedFrames=");
+        serial::put_hex64(vmStats.regionOwnedFrames);
+        serial::puts("\n");
+    }
+    return result == gxos::runtime::virtual_memory::VmResult::Ok
+        ? 0 : -static_cast<int32_t>(result);
+#else
+    return result == gxos::runtime::virtual_memory::VmResult::Ok ? 0 : -1;
+#endif
 }
 
 int32_t GUIDEXOS_NATIVEAOT_PAL_CALL startupDecommit(
@@ -1231,7 +1288,7 @@ void runStartupImpl(const uint8_t* artifact, size_t artifactSize,
     serial::put_hex32(g_activeCallbacks);
     serial::puts("\n");
     serial::puts("[nativeaot-gc-startup-qemu-test] legacyAllocCalls=");
-    serial::put_hex32(g_startupLegacyAllocCalls);
+    serial::put_hex32(g_startupLegacyAllocCalls & 0x7FFFFFFFu);
     serial::puts(" lastSize=");
     serial::put_hex64(g_startupLegacyLastSize);
     serial::puts(" success=");
@@ -1837,6 +1894,12 @@ void runSegmentBoundaryManagedBoundary(
         serial::put_hex64(entry.segmentReserved);
         serial::puts(" vmCommitObserved=");
         serial::put_hex32(entry.vmCommitObserved);
+#if defined(GUIDEXOS_NATIVEAOT_C011EC95_VM_COMMIT_STATUS)
+        serial::puts(" commitAttemptObserved=");
+        serial::put_hex32(entry.reserved1);
+        serial::puts(" commitStatus=");
+        serial::put_hex32(entry.reserved0);
+#endif
         serial::puts(" boundaryType=");
         serial::put_hex32(entry.boundaryType);
         serial::puts(" commitAddress=");
