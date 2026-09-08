@@ -19,7 +19,8 @@ param(
     [ValidateRange(0, 6)]
     [int]$I219Phase6Stage = 0,
     [ValidateRange(0, 4)]
-    [int]$I219Phase7Stage = 0
+    [int]$I219Phase7Stage = 0,
+    [switch]$I219TxDmaPlacementExperiment
 )
 
 Set-StrictMode -Version Latest
@@ -426,10 +427,13 @@ function Invoke-CanonicalBuild {
     $buildArgs = @('-Arch', $Arch, '-I219Phase5Stage', [string]$I219Phase5Stage,
                    '-I219Phase6Stage', [string]$I219Phase6Stage,
                    '-I219Phase7Stage', [string]$I219Phase7Stage)
+    if ($I219TxDmaPlacementExperiment) { $buildArgs += '-I219TxDmaPlacementExperiment' }
     if ($Clean) { $buildArgs = @('-Clean', '-Arch', $Arch,
                                   '-I219Phase5Stage', [string]$I219Phase5Stage,
                                   '-I219Phase6Stage', [string]$I219Phase6Stage,
-                                  '-I219Phase7Stage', [string]$I219Phase7Stage) }
+                                  '-I219Phase7Stage', [string]$I219Phase7Stage)
+        if ($I219TxDmaPlacementExperiment) { $buildArgs += '-I219TxDmaPlacementExperiment' }
+    }
     Write-Host "[release-iso] invoking canonical build.ps1 with supported arguments" -ForegroundColor Cyan
     Invoke-ExternalChecked -FilePath $powershell.Source -Arguments (@('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $BuildScript) + $buildArgs) | Out-Null
 }
@@ -504,6 +508,11 @@ try {
         if ($phase7StageMatch.Success -and [int]$phase7StageMatch.Groups[1].Value -ne $I219Phase7Stage) {
             Fail "ESP build identity stage $($phase7StageMatch.Groups[1].Value) does not match requested I219 Phase 7 stage $I219Phase7Stage. Rebuild without -SkipBuild."
         }
+        $txDmaExperimentMatch = [regex]::Match($identityText, '(?m)^i219TxDmaPlacementExperiment=(True|False)\s*$')
+        if ($txDmaExperimentMatch.Success -and
+            ([bool]::Parse($txDmaExperimentMatch.Groups[1].Value) -ne $I219TxDmaPlacementExperiment.IsPresent)) {
+            Fail "ESP build identity TX DMA experiment flag does not match the requested packaging mode. Rebuild without -SkipBuild."
+        }
     }
 
     $bootloader = Get-Item -LiteralPath (Join-Path $EspRoot 'EFI\BOOT\BOOTX64.EFI')
@@ -544,6 +553,7 @@ try {
         ("I219 Phase 5 stage selector: $I219Phase5Stage"),
         ("I219 Phase 6 micro-stage selector: $I219Phase6Stage"),
         ("I219 Phase 7 stage selector: $I219Phase7Stage ($I219Phase7StageName)"),
+        ("I219 TX DMA placement experiment: $($I219TxDmaPlacementExperiment.IsPresent)"),
         ("Unique build identity: $uniqueBuildId"),
         '',
         ("The bootable UEFI FAT image is $bootImageIsoPath."),
@@ -599,7 +609,7 @@ try {
         fs = '2.4.16'
         pycdlib = '1.16.0'
         isoBackend = $IsoBackend
-        canonicalBuild = 'build.ps1 -Arch amd64 -I219Phase5Stage ' + $I219Phase5Stage + ' -I219Phase6Stage ' + $I219Phase6Stage + ' -I219Phase7Stage ' + $I219Phase7Stage + $(if ($Clean) { ' -Clean' } else { '' })
+        canonicalBuild = 'build.ps1 -Arch amd64 -I219Phase5Stage ' + $I219Phase5Stage + ' -I219Phase6Stage ' + $I219Phase6Stage + ' -I219Phase7Stage ' + $I219Phase7Stage + $(if ($I219TxDmaPlacementExperiment) { ' -I219TxDmaPlacementExperiment' } else { '' }) + $(if ($Clean) { ' -Clean' } else { '' })
     }
     if ($IsoBackend -eq 'Oscdimg') {
         $toolRecords.oscdimg = Get-ToolRecord $oscdimg $oscdimgVersion
@@ -614,6 +624,7 @@ try {
         i219Phase6Stage = $I219Phase6Stage
         i219Phase7Stage = $I219Phase7Stage
         i219Phase7StageName = $I219Phase7StageName
+        i219TxDmaPlacementExperiment = [bool]$I219TxDmaPlacementExperiment.IsPresent
         uniqueBuildId = $uniqueBuildId
         isoBackend = $IsoBackend
         isoFilename = $isoName

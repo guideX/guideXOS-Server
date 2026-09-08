@@ -36,6 +36,7 @@
     <GXOS_AIDA_I219_PHASE5_STAGE Condition="'$(GXOS_AIDA_I219_PHASE5_STAGE)'==''">8</GXOS_AIDA_I219_PHASE5_STAGE>
     <GXOS_AIDA_I219_PHASE6_STAGE Condition="'$(GXOS_AIDA_I219_PHASE6_STAGE)'==''">0</GXOS_AIDA_I219_PHASE6_STAGE>
     <GXOS_AIDA_I219_PHASE7_STAGE Condition="'$(GXOS_AIDA_I219_PHASE7_STAGE)'==''">0</GXOS_AIDA_I219_PHASE7_STAGE>
+    <GXOS_I219_TX_DMA_PLACEMENT_EXPERIMENT Condition="'$(GXOS_I219_TX_DMA_PLACEMENT_EXPERIMENT)'==''">0</GXOS_I219_TX_DMA_PLACEMENT_EXPERIMENT>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <EmbedManifest>false</EmbedManifest>
@@ -45,7 +46,7 @@
     <ClCompile>
       <WarningLevel>Level3</WarningLevel>
       <SDLCheck>true</SDLCheck>
-      <PreprocessorDefinitions>_DEBUG;GXOS_AIDA_I219_PHASE5_STAGE=$(GXOS_AIDA_I219_PHASE5_STAGE);GXOS_AIDA_I219_PHASE6_STAGE=$(GXOS_AIDA_I219_PHASE6_STAGE);GXOS_AIDA_I219_PHASE7_STAGE=$(GXOS_AIDA_I219_PHASE7_STAGE);%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>_DEBUG;GXOS_AIDA_I219_PHASE5_STAGE=$(GXOS_AIDA_I219_PHASE5_STAGE);GXOS_AIDA_I219_PHASE6_STAGE=$(GXOS_AIDA_I219_PHASE6_STAGE);GXOS_AIDA_I219_PHASE7_STAGE=$(GXOS_AIDA_I219_PHASE7_STAGE);GXOS_I219_TX_DMA_PLACEMENT_EXPERIMENT=$(GXOS_I219_TX_DMA_PLACEMENT_EXPERIMENT);%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <AdditionalIncludeDirectories>$(ProjectDir);D:\devgitlab\guideXOS\guideXOS.SERVER\edk2-master\MdePkg\Include;D:\devgitlab\guideXOS\guideXOS.SERVER\edk2-master\MdePkg\Include\X64;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <BasicRuntimeChecks>Default</BasicRuntimeChecks>
@@ -68,7 +69,7 @@
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <SDLCheck>true</SDLCheck>
-      <PreprocessorDefinitions>NDEBUG;GXOS_AIDA_I219_PHASE5_STAGE=$(GXOS_AIDA_I219_PHASE5_STAGE);GXOS_AIDA_I219_PHASE6_STAGE=$(GXOS_AIDA_I219_PHASE6_STAGE);GXOS_AIDA_I219_PHASE7_STAGE=$(GXOS_AIDA_I219_PHASE7_STAGE);%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>NDEBUG;GXOS_AIDA_I219_PHASE5_STAGE=$(GXOS_AIDA_I219_PHASE5_STAGE);GXOS_AIDA_I219_PHASE6_STAGE=$(GXOS_AIDA_I219_PHASE6_STAGE);GXOS_AIDA_I219_PHASE7_STAGE=$(GXOS_AIDA_I219_PHASE7_STAGE);GXOS_I219_TX_DMA_PLACEMENT_EXPERIMENT=$(GXOS_I219_TX_DMA_PLACEMENT_EXPERIMENT);%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <AdditionalIncludeDirectories>$(ProjectDir);D:\devgitlab\guideXOS\guideXOS.SERVER\edk2-master\MdePkg\Include;D:\devgitlab\guideXOS\guideXOS.SERVER\edk2-master\MdePkg\Include\X64;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <BasicRuntimeChecks>Default</BasicRuntimeChecks>

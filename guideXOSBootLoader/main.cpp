@@ -686,6 +686,57 @@ static void ZeroBootInfo(BootInfo* bi) {
     SetMem(bi, sizeof(BootInfo), 0);
 }
 
+static bool PhysicalRangeValid(uint64_t base, uint64_t size)
+{
+    return base != 0u && size != 0u && base <= (~0ULL - (size - 1u));
+}
+
+static bool PhysicalRangesOverlap(uint64_t firstBase, uint64_t firstSize,
+                                  uint64_t secondBase, uint64_t secondSize)
+{
+    if (!PhysicalRangeValid(firstBase, firstSize) ||
+        !PhysicalRangeValid(secondBase, secondSize)) {
+        return false;
+    }
+    return firstBase < secondBase + secondSize &&
+           secondBase < firstBase + firstSize;
+}
+
+static bool OptionalPhysicalRangeValid(uint64_t base, uint64_t size)
+{
+    return (base == 0u && size == 0u) || PhysicalRangeValid(base, size);
+}
+
+static bool MemoryMapContainsLoaderData(
+    const EFI_MEMORY_DESCRIPTOR* memoryMap, UINTN entryCount,
+    UINTN descriptorSize, uint64_t regionBase, uint64_t regionSize)
+{
+    if (!memoryMap || entryCount == 0u || descriptorSize < 32u ||
+        descriptorSize > 0x1000u ||
+        entryCount > (~0ULL / descriptorSize) ||
+        !PhysicalRangeValid(regionBase, regionSize)) {
+        return false;
+    }
+    const uint8_t* bytes = reinterpret_cast<const uint8_t*>(memoryMap);
+    for (UINTN i = 0; i < entryCount; ++i) {
+        const uint8_t* descriptor = bytes + i * descriptorSize;
+        const EFI_MEMORY_DESCRIPTOR* typed =
+            reinterpret_cast<const EFI_MEMORY_DESCRIPTOR*>(descriptor);
+        if (typed->Type != EfiLoaderData || typed->NumberOfPages == 0u ||
+            typed->NumberOfPages > (~0ULL / EFI_PAGE_SIZE)) {
+            continue;
+        }
+        const uint64_t descriptorSizeBytes =
+            typed->NumberOfPages * EFI_PAGE_SIZE;
+        if (PhysicalRangeValid(typed->PhysicalStart, descriptorSizeBytes) &&
+            regionBase >= typed->PhysicalStart &&
+            regionBase + regionSize <= typed->PhysicalStart + descriptorSizeBytes) {
+            return true;
+        }
+    }
+    return false;
+}
+
 EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE* SystemTable) {
     // Set global SystemTable pointer for uefi_shim.h functions
     gST = SystemTable;
@@ -1036,6 +1087,90 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE* SystemTable) {
     }
     Print(L"=========================\n\n");
 
+    // Phase 16 controlled TX DMA placement. Allocate only for the exact
+    // AIDA I219 register path so the existing QEMU E1000 path remains the
+    // Phase 15/kernel-image control. AllocateMaxAddress is the ownership
+    // boundary: UEFI selects a free EfiLoaderData extent and retains it in
+    // the final memory map after ExitBootServices.
+    if (pciResult.nic != nullptr &&
+        pciResult.nic->vendorId == guideXOS::pci::PCI_VENDOR_INTEL &&
+        pciResult.nic->deviceId == guideXOS::pci::PCI_DEVICE_I219_LM &&
+        GXOS_I219_TX_DMA_PLACEMENT_EXPERIMENT != 0) {
+        const UINTN txDmaPages = 2;
+        const UINT64 txDmaSize = txDmaPages * EFI_PAGE_SIZE;
+        EFI_PHYSICAL_ADDRESS txDmaMaxAddress = 0xFFFFFFFFULL;
+        EFI_STATUS txDmaStatus = SystemTable->BootServices->AllocatePages(
+            AllocateMaxAddress,
+            EfiLoaderData,
+            txDmaPages,
+            &txDmaMaxAddress);
+
+        bool txDmaReservationValid = !EFI_ERROR(txDmaStatus) &&
+            PhysicalRangeValid(txDmaMaxAddress, txDmaSize) &&
+            txDmaMaxAddress + txDmaSize <= 0x100000000ULL;
+
+        // The UEFI allocator already excludes allocated firmware/kernel
+        // ranges. Keep an explicit audit against every known handoff object
+        // as a second proof and fail closed if any arithmetic says overlap.
+        const uint64_t kernelVirtualSpan =
+            (kernelTotalSize <= (~0ULL - (EFI_PAGE_SIZE - 1u)))
+                ? ((kernelTotalSize + EFI_PAGE_SIZE - 1u) &
+                   ~(EFI_PAGE_SIZE - 1u)) : 0u;
+        const struct {
+            uint64_t base;
+            uint64_t size;
+        } protectedRanges[] = {
+            { kernelBase, kernelTotalSize },
+            // The identity-mapped DMA VA must not collide with the linked
+            // kernel virtual range, which is remapped to kernelBase below.
+            { kernelMinVaddr, kernelVirtualSpan },
+            { bootInfoPhys, EFI_PAGE_SIZE },
+            { ramdiskPhys, ramdiskSize },
+            { stackPhys, stackPages * EFI_PAGE_SIZE },
+            { trampolinePhys, trampolinePages * EFI_PAGE_SIZE },
+            { v1BootInfo->FramebufferBase, v1BootInfo->FramebufferSize },
+        };
+        for (const auto& protectedRange : protectedRanges) {
+            if (!OptionalPhysicalRangeValid(protectedRange.base,
+                                            protectedRange.size) ||
+                PhysicalRangesOverlap(txDmaMaxAddress, txDmaSize,
+                                      protectedRange.base,
+                                      protectedRange.size)) {
+                txDmaReservationValid = false;
+                break;
+            }
+        }
+
+        if (txDmaReservationValid) {
+            SetMem((void*)(UINTN)txDmaMaxAddress, txDmaSize, 0);
+            v1BootInfo->TxDmaRegion.Base = txDmaMaxAddress;
+            v1BootInfo->TxDmaRegion.Size = txDmaSize;
+            v1BootInfo->TxDmaRegion.Flags =
+                guideXOS::TX_DMA_REGION_FLAG_VALID |
+                guideXOS::TX_DMA_REGION_FLAG_OWNED |
+                guideXOS::TX_DMA_REGION_FLAG_CONTIGUOUS |
+                guideXOS::TX_DMA_REGION_FLAG_IDENTITY |
+                guideXOS::TX_DMA_REGION_FLAG_BELOW_4G |
+                guideXOS::TX_DMA_REGION_FLAG_CACHEABLE;
+            v1BootInfo->TxDmaRegion.MemoryType =
+                guideXOS::TX_DMA_EFI_LOADER_DATA_TYPE;
+            Print(L"[AIDA-I219-P16] TX DMA reserved: base=%016lx end=%016lx size=%lx below4G=yes owner=EfiLoaderData contiguous=yes\n",
+                  txDmaMaxAddress,
+                  txDmaMaxAddress + txDmaSize,
+                  txDmaSize);
+        } else {
+            if (!EFI_ERROR(txDmaStatus)) {
+                SystemTable->BootServices->FreePages(txDmaMaxAddress,
+                                                     txDmaPages);
+            }
+            SetMem(&v1BootInfo->TxDmaRegion,
+                   sizeof(v1BootInfo->TxDmaRegion), 0);
+            Print(L"[AIDA-I219-P16] TX_DMA_EXPERIMENT_UNAVAILABLE: reservation invalid or overlaps a protected range\n");
+        }
+    } else if (GXOS_I219_TX_DMA_PLACEMENT_EXPERIMENT != 0) {
+        Print(L"[AIDA-I219-P16] TX DMA experiment inactive: selected PCI device is not I219 8086:156F\n");
+    }
+
     // --- Build identity-mapped page tables BEFORE ExitBootServices ---
     // We must build page tables while BootServices are still available.
     
@@ -1122,7 +1257,23 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE* SystemTable) {
         Print(L"Mapping ramdisk: %p size %Lu\n", (VOID*)(UINTN)ramdiskPhys, ramdiskSize);
     }
 
-    // 8. ACPI RSDP region (map at least one page for RSDP, kernel will map more as needed)
+    // 8. Phase 16 TX DMA reservation. It is ordinary coherent RAM and is
+    // identity-mapped so the kernel can use the physical address as its CPU
+    // VA while preserving an explicit VA->PA provenance proof.
+    if ((v1BootInfo->TxDmaRegion.Flags &
+         guideXOS::TX_DMA_REGION_FLAG_VALID) != 0u &&
+        v1BootInfo->TxDmaRegion.Base != 0u &&
+        v1BootInfo->TxDmaRegion.Size != 0u) {
+        ranges[rangeCount] = v1BootInfo->TxDmaRegion.Base;
+        sizes[rangeCount] = (UINTN)v1BootInfo->TxDmaRegion.Size;
+        rangeCount++;
+        Print(L"Mapping Phase 16 TX DMA: Phys=%016lx Virt=%016lx size=%lx cacheable=yes\n",
+              v1BootInfo->TxDmaRegion.Base,
+              v1BootInfo->TxDmaRegion.Base,
+              v1BootInfo->TxDmaRegion.Size);
+    }
+
+    // 9. ACPI RSDP region (map at least one page for RSDP, kernel will map more as needed)
     if (rsdp != nullptr) {
         ranges[rangeCount] = (EFI_PHYSICAL_ADDRESS)(UINTN)rsdp & ~0xFFFull; // Page-align down
         sizes[rangeCount] = EFI_PAGE_SIZE * 4; // Map a few pages for RSDP + nearby tables
@@ -1130,7 +1281,7 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE* SystemTable) {
         Print(L"Mapping ACPI RSDP region: %p\n", (VOID*)(UINTN)rsdp);
     }
 
-    // 9. CRITICAL: Map the bootloader/trampoline code region
+    // 10. CRITICAL: Map the bootloader/trampoline code region
     // After we load CR3 with new page tables, the CPU is still executing in the
     // trampoline code. If that code isn't mapped, we triple-fault immediately!
     // We need to identity-map the bootloader's loaded image.
@@ -1160,12 +1311,12 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE* SystemTable) {
         }
     }
 
-    // 10. Trampoline executable buffer
+    // 11. Trampoline executable buffer
     ranges[rangeCount] = trampolinePhys;
     sizes[rangeCount] = trampolinePages * EFI_PAGE_SIZE;
     rangeCount++;
 
-    // 11. CRITICAL: Map the allocator region the kernel will use
+    // 12. CRITICAL: Map the allocator region the kernel will use
     // The kernel's Allocator.Initialize() uses 0x4000000 (64MB) as the base
     // Map a large region starting there for heap allocations
     ranges[rangeCount] = 0x4000000ULL;  // 64MB
@@ -1173,14 +1324,14 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE* SystemTable) {
     rangeCount++;
     Print(L"Mapping allocator region: 0x4000000 size 64MB\n");
 
-    // 12. Map additional stack regions we might use
+    // 13. Map additional stack regions we might use
     // The preferred stack location is around 2MB mark
     ranges[rangeCount] = 0x100000ULL; // 1MB
     sizes[rangeCount] = 2u * 1024u * 1024u; // 2MB (covers 1MB-3MB region)
     rangeCount++;
     Print(L"Mapping low memory stack region: 0x100000 size 2MB\n");
 
-    // 13. NIC MMIO region - CRITICAL for network driver
+    // 14. NIC MMIO region - CRITICAL for network driver
     // Map the selected NIC register BAR so the kernel can access hardware registers
     if (nicMmioPhys != 0 && nicMmioSize != 0) {
         // Align to page boundary
@@ -1313,6 +1464,20 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE* SystemTable) {
     v1BootInfo->MemoryMapDescriptorSize = (uint64_t)memoryMapDescSize;
     v1BootInfo->Flags |= (1u << 0); // memory map valid
 
+    // Reconcile the reservation against the final pre-EBS memory map. This
+    // is the handoff-time ownership proof consumed by the kernel. If the
+    // firmware did not preserve the expected EfiLoaderData descriptor, clear
+    // the experiment instead of claiming that an unproven region is active.
+    if ((v1BootInfo->TxDmaRegion.Flags &
+         guideXOS::TX_DMA_REGION_FLAG_VALID) != 0u &&
+        !MemoryMapContainsLoaderData(
+            memoryMap, memoryMapCount, memoryMapDescSize,
+            v1BootInfo->TxDmaRegion.Base,
+            v1BootInfo->TxDmaRegion.Size)) {
+        SetMem(&v1BootInfo->TxDmaRegion,
+               sizeof(v1BootInfo->TxDmaRegion), 0);
+    }
+
     // === POST-EBS FRAMEBUFFER MARKER (Stage 2: Cyan = MemMap filled) ===
     if (v1BootInfo->FramebufferBase != 0) {
         volatile uint32_t* fb = (volatile uint32_t*)(UINTN)v1BootInfo->FramebufferBase;
@@ -1404,6 +1569,15 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE* SystemTable) {
     guideXOS::debug::SerialPrint("x");
     guideXOS::debug::SerialPrintHex32(v1BootInfo->FramebufferHeight);
     guideXOS::debug::SerialPrint(")\n");
+    guideXOS::debug::SerialPrint("TX DMA region: ");
+    guideXOS::debug::SerialPrintHex64(v1BootInfo->TxDmaRegion.Base);
+    guideXOS::debug::SerialPrint(" size=");
+    guideXOS::debug::SerialPrintHex64(v1BootInfo->TxDmaRegion.Size);
+    guideXOS::debug::SerialPrint(" flags=");
+    guideXOS::debug::SerialPrintHex32(v1BootInfo->TxDmaRegion.Flags);
+    guideXOS::debug::SerialPrint(" ownerType=");
+    guideXOS::debug::SerialPrintHex32(v1BootInfo->TxDmaRegion.MemoryType);
+    guideXOS::debug::SerialPrint("\n");
     guideXOS::debug::ShowProgress(v1BootInfo, 2);
 
     guideXOS::debug::ValidateKernelEntry(entryPhys, v1BootInfo);

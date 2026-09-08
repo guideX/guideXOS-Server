@@ -53,21 +53,32 @@ static uint64_t    s_kernelPhysicalBase = 0x100000;
 extern "C" char __kernel_start;
 extern "C" char __kernel_end;
 
-// Descriptor rings (statically allocated in the loaded kernel image). The
-// descriptor ABI only requires 16-byte alignment; keeping the existing
-// storage model makes the loader-provided physical translation auditable and
-// avoids introducing a new allocator/bounce-buffer dependency in Phase 14.
+// RX remains statically allocated in the loaded kernel image and is the
+// physically proven control. Phase 15's static TX objects remain available
+// for non-I219/QEMU builds; Phase 16 selects a separate loader-owned region
+// only for the opt-in I219 experiment.
 #if defined(__GNUC__) || defined(__clang__)
 static RxDescriptor s_rxDescs[NUM_RX_DESC] __attribute__((aligned(16)));
-static TxDescriptor s_txDescs[NUM_TX_DESC] __attribute__((aligned(16)));
+static TxDescriptor s_kernelImageTxDescs[NUM_TX_DESC] __attribute__((aligned(16)));
 static uint8_t s_rxBuffers[NUM_RX_DESC][RX_BUFFER_SIZE] __attribute__((aligned(16)));
-static uint8_t s_txBuffer[ETH_FRAME_MAX] __attribute__((aligned(16)));
+static uint8_t s_kernelImageTxBuffer[ETH_FRAME_MAX] __attribute__((aligned(16)));
 #else
 __declspec(align(16)) static RxDescriptor s_rxDescs[NUM_RX_DESC];
-__declspec(align(16)) static TxDescriptor s_txDescs[NUM_TX_DESC];
+__declspec(align(16)) static TxDescriptor s_kernelImageTxDescs[NUM_TX_DESC];
 __declspec(align(16)) static uint8_t s_rxBuffers[NUM_RX_DESC][RX_BUFFER_SIZE];
-__declspec(align(16)) static uint8_t s_txBuffer[ETH_FRAME_MAX];
+__declspec(align(16)) static uint8_t s_kernelImageTxBuffer[ETH_FRAME_MAX];
 #endif
+
+static TxDescriptor* s_txDescs = s_kernelImageTxDescs;
+static uint8_t* s_txBuffer = s_kernelImageTxBuffer;
+static TxDmaMode s_txDmaMode = TxDmaMode::KernelImage;
+static bool s_txDmaRegionHandoffValid = false;
+static uint64_t s_txDmaRegionPhysicalBase = 0;
+static uint64_t s_txDmaRegionSize = 0;
+static uint32_t s_txDmaRegionFlags = 0;
+static uint32_t s_txDmaRegionMemoryType = 0;
+static TxFailureReason s_txDmaRegionFailure =
+    TxFailureReason::DmaRegionUnavailable;
 
 // Current descriptor indices
 static uint16_t s_rxCur = 0;
@@ -83,6 +94,7 @@ static const uint32_t I219_PHASE5_HW_WAIT_LIMIT = 100000u;
 static void mask_nic_interrupts(uint64_t mmioBase);
 static inline void mmio_write32(uint64_t base, uint32_t reg, uint32_t val);
 static inline uint32_t mmio_read32(uint64_t base, uint32_t reg);
+static void select_tx_dma_storage(bool i219);
 
 #if ARCH_HAS_PORT_IO
 static uint16_t pci_read16(uint8_t bus, uint8_t dev, uint8_t func,
@@ -600,6 +612,32 @@ static bool dma_address(const void* ptr, uint64_t* physicalOut)
     if (ptr == nullptr || physicalOut == nullptr) return false;
 
     const uint64_t virt = reinterpret_cast<uint64_t>(ptr);
+    if (s_txDmaMode == TxDmaMode::ConstrainedLow) {
+        if (s_txDmaRegionHandoffValid &&
+            dma_range_contains(s_txDmaRegionPhysicalBase,
+                               s_txDmaRegionSize, virt, 1u)) {
+            if (!tx_dma_identity_mapping_valid(
+                    s_txDmaRegionPhysicalBase,
+                    s_txDmaRegionPhysicalBase,
+                    s_txDmaRegionSize)) {
+                return false;
+            }
+            *physicalOut = s_txDmaRegionPhysicalBase +
+                           (virt - s_txDmaRegionPhysicalBase);
+            return *physicalOut != 0u;
+        }
+        if (!s_txDmaRegionHandoffValid ||
+            !tx_dma_identity_mapping_valid(
+                s_txDmaRegionPhysicalBase,
+                s_txDmaRegionPhysicalBase,
+                s_txDmaRegionSize)) {
+            // The static RX control still uses the loader's kernel-image
+            // affine translation while the selected TX objects use identity
+            // mapping. An invalid TX pointer is rejected by TX layout checks.
+            return translate_kernel_dma_address(virt, s_kernelPhysicalBase,
+                                                physicalOut);
+        }
+    }
     return translate_kernel_dma_address(virt, s_kernelPhysicalBase,
                                         physicalOut);
 }
@@ -612,22 +650,21 @@ static bool dma_address_range(const void* ptr, uint64_t length,
         return false;
     }
     if (*physicalOut > (~0ULL - (length - 1u))) return false;
+    if (s_txDmaMode == TxDmaMode::ConstrainedLow &&
+        dma_range_contains(s_txDmaRegionPhysicalBase,
+                           s_txDmaRegionSize,
+                           reinterpret_cast<uint64_t>(ptr), 1u) &&
+        !dma_range_contains(s_txDmaRegionPhysicalBase,
+                            s_txDmaRegionSize, *physicalOut, length)) {
+        return false;
+    }
     return true;
 }
 
-static bool dma_ranges_overlap(uint64_t first, uint64_t firstLength,
-                               uint64_t second, uint64_t secondLength)
-{
-    if (firstLength == 0u || secondLength == 0u) return false;
-    const uint64_t firstEnd = first + firstLength;
-    const uint64_t secondEnd = second + secondLength;
-    return first < secondEnd && second < firstEnd;
-}
-
-// All DMA objects are static storage in the loaded kernel image. The UEFI
-// loader maps that complete image and the physical translation below uses the
-// same image base supplied in BootInfo. Validate the complete small layout
-// before handing any ring to hardware so a bad translation fails closed.
+// RX is intentionally unchanged: its ring and buffers remain static storage
+// in the loaded kernel image and use the original affine translation. TX is
+// validated separately so the Phase 16 experiment does not perturb this
+// physically working control.
 static bool dma_layout_failure(TxFailureReason* failureReason,
                                TxFailureReason reason)
 {
@@ -635,14 +672,12 @@ static bool dma_layout_failure(TxFailureReason* failureReason,
     return false;
 }
 
-static bool validate_dma_layout(TxFailureReason* failureReason = nullptr)
+static bool validate_rx_dma_layout(TxFailureReason* failureReason = nullptr)
 {
     static_assert(sizeof(RxDescriptor) == 16u, "RX descriptor size changed");
     static_assert(sizeof(TxDescriptor) == 16u, "TX descriptor size changed");
     static_assert((NUM_RX_DESC * sizeof(RxDescriptor)) % 128u == 0u,
                   "RX ring length must be 128-byte aligned");
-    static_assert((NUM_TX_DESC * sizeof(TxDescriptor)) % 128u == 0u,
-                  "TX ring length must be 128-byte aligned");
 
     const uint64_t imageVirtualStart =
         reinterpret_cast<uint64_t>(&__kernel_start);
@@ -655,54 +690,22 @@ static bool validate_dma_layout(TxFailureReason* failureReason = nullptr)
             NUM_RX_DESC * sizeof(RxDescriptor), imageVirtualStart,
             imageVirtualEnd) ||
         !kernel_image_range_contains(
-            reinterpret_cast<uint64_t>(&s_txDescs[0]),
-            NUM_TX_DESC * sizeof(TxDescriptor), imageVirtualStart,
-            imageVirtualEnd) ||
-        !kernel_image_range_contains(
             reinterpret_cast<uint64_t>(&s_rxBuffers[0][0]),
             sizeof(s_rxBuffers), imageVirtualStart, imageVirtualEnd) ||
-        !kernel_image_range_contains(
-            reinterpret_cast<uint64_t>(&s_txBuffer[0]), sizeof(s_txBuffer),
-            imageVirtualStart, imageVirtualEnd)) {
+        imageVirtualEnd <= imageVirtualStart) {
         return dma_layout_failure(failureReason,
                                   TxFailureReason::DmaTranslationInvalid);
     }
 
     uint64_t rxDescPhys = 0;
-    uint64_t txDescPhys = 0;
-    uint64_t txBufferPhys = 0;
     if (!dma_address_range(&s_rxDescs[0],
                            NUM_RX_DESC * sizeof(RxDescriptor), 0u,
-                           &rxDescPhys) ||
-        !dma_address_range(&s_txDescs[0],
-                           NUM_TX_DESC * sizeof(TxDescriptor), 0u,
-                           &txDescPhys) ||
-        !dma_address_range(&s_txBuffer[0], sizeof(s_txBuffer), 0u,
-                           &txBufferPhys)) {
+                           &rxDescPhys)) {
         return dma_layout_failure(failureReason,
                                   TxFailureReason::DmaTranslationInvalid);
     }
 
-    if ((rxDescPhys % TX_DESC_RING_BASE_ALIGNMENT) != 0u ||
-        (txBufferPhys % TX_DESC_RING_BASE_ALIGNMENT) != 0u) {
-        return dma_layout_failure(failureReason,
-                                  TxFailureReason::DmaTranslationInvalid);
-    }
-    if ((txDescPhys % TX_DESC_RING_BASE_ALIGNMENT) != 0u) {
-        return dma_layout_failure(failureReason,
-                                  TxFailureReason::RingAlignmentInvalid);
-    }
-    if (!tx_ring_configuration_valid(NUM_TX_DESC, txDescPhys)) {
-        return dma_layout_failure(failureReason,
-                                  TxFailureReason::RingLengthInvalid);
-    }
-
-    if (dma_ranges_overlap(rxDescPhys, NUM_RX_DESC * sizeof(RxDescriptor),
-                           txDescPhys, NUM_TX_DESC * sizeof(TxDescriptor)) ||
-        dma_ranges_overlap(rxDescPhys, NUM_RX_DESC * sizeof(RxDescriptor),
-                           txBufferPhys, sizeof(s_txBuffer)) ||
-        dma_ranges_overlap(txDescPhys, NUM_TX_DESC * sizeof(TxDescriptor),
-                           txBufferPhys, sizeof(s_txBuffer))) {
+    if ((rxDescPhys % TX_DESC_RING_BASE_ALIGNMENT) != 0u) {
         return dma_layout_failure(failureReason,
                                   TxFailureReason::DmaTranslationInvalid);
     }
@@ -715,10 +718,6 @@ static bool validate_dma_layout(TxFailureReason* failureReason = nullptr)
                                       TxFailureReason::DmaTranslationInvalid);
         }
         if (dma_ranges_overlap(rxDescPhys, NUM_RX_DESC * sizeof(RxDescriptor),
-                               rxBufferPhys[i], RX_BUFFER_SIZE) ||
-            dma_ranges_overlap(txDescPhys, NUM_TX_DESC * sizeof(TxDescriptor),
-                               rxBufferPhys[i], RX_BUFFER_SIZE) ||
-            dma_ranges_overlap(txBufferPhys, sizeof(s_txBuffer),
                                rxBufferPhys[i], RX_BUFFER_SIZE)) {
             return dma_layout_failure(failureReason,
                                       TxFailureReason::DmaTranslationInvalid);
@@ -729,6 +728,101 @@ static bool validate_dma_layout(TxFailureReason* failureReason = nullptr)
                 return dma_layout_failure(
                     failureReason, TxFailureReason::DmaTranslationInvalid);
             }
+        }
+    }
+    return true;
+}
+
+static bool validate_tx_dma_layout(TxFailureReason* failureReason = nullptr)
+{
+    static_assert((NUM_TX_DESC * sizeof(TxDescriptor)) % 128u == 0u,
+                  "TX ring length must be 128-byte aligned");
+    if (!s_txDescs || !s_txBuffer) {
+        return dma_layout_failure(failureReason, s_txDmaRegionFailure);
+    }
+
+    const uint64_t imageVirtualStart =
+        reinterpret_cast<uint64_t>(&__kernel_start);
+    const uint64_t imageVirtualEnd =
+        reinterpret_cast<uint64_t>(&__kernel_end);
+    const uint64_t ringVirtual = reinterpret_cast<uint64_t>(&s_txDescs[0]);
+    const uint64_t bufferVirtual = reinterpret_cast<uint64_t>(&s_txBuffer[0]);
+    const bool ringInImage = kernel_image_range_contains(
+        ringVirtual, NUM_TX_DESC * sizeof(TxDescriptor), imageVirtualStart,
+        imageVirtualEnd);
+    const bool bufferInImage = kernel_image_range_contains(
+        bufferVirtual, ETH_FRAME_MAX, imageVirtualStart, imageVirtualEnd);
+
+    if (s_txDmaMode == TxDmaMode::KernelImage) {
+        if (imageVirtualStart != KERNEL_LINK_VIRTUAL_BASE ||
+            imageVirtualEnd <= imageVirtualStart || !ringInImage ||
+            !bufferInImage) {
+            return dma_layout_failure(failureReason,
+                                      TxFailureReason::DmaTranslationInvalid);
+        }
+    } else if (s_txDmaMode == TxDmaMode::ConstrainedLow) {
+        uint64_t expectedRing = 0;
+        uint64_t expectedBuffer = 0;
+        if (!s_txDmaRegionHandoffValid ||
+            !tx_dma_region_layout_valid(s_txDmaRegionPhysicalBase,
+                                        s_txDmaRegionSize,
+                                        &expectedRing, &expectedBuffer) ||
+            ringVirtual != s_txDmaRegionPhysicalBase ||
+            bufferVirtual != expectedBuffer ||
+            !tx_dma_identity_mapping_valid(ringVirtual, expectedRing,
+                                            NUM_TX_DESC * sizeof(TxDescriptor)) ||
+            !tx_dma_identity_mapping_valid(bufferVirtual, expectedBuffer,
+                                            ETH_FRAME_MAX)) {
+            return dma_layout_failure(failureReason,
+                                      TxFailureReason::DmaRegionMappingInvalid);
+        }
+    } else {
+        return dma_layout_failure(failureReason, s_txDmaRegionFailure);
+    }
+
+    uint64_t txDescPhys = 0;
+    uint64_t txBufferPhys = 0;
+    if (!dma_address_range(s_txDescs,
+                           NUM_TX_DESC * sizeof(TxDescriptor), 0u,
+                           &txDescPhys) ||
+        !dma_address_range(s_txBuffer, ETH_FRAME_MAX, 16u,
+                           &txBufferPhys)) {
+        return dma_layout_failure(failureReason,
+                                  TxFailureReason::DmaTranslationInvalid);
+    }
+    if ((txDescPhys % TX_DESC_RING_BASE_ALIGNMENT) != 0u) {
+        return dma_layout_failure(failureReason,
+                                  TxFailureReason::RingAlignmentInvalid);
+    }
+    if (!tx_ring_configuration_valid(NUM_TX_DESC, txDescPhys)) {
+        return dma_layout_failure(failureReason,
+                                  TxFailureReason::RingLengthInvalid);
+    }
+
+    uint64_t rxDescPhys = 0;
+    if (!dma_address_range(&s_rxDescs[0],
+                           NUM_RX_DESC * sizeof(RxDescriptor), 16u,
+                           &rxDescPhys) ||
+        dma_ranges_overlap(rxDescPhys, NUM_RX_DESC * sizeof(RxDescriptor),
+                           txDescPhys, NUM_TX_DESC * sizeof(TxDescriptor)) ||
+        dma_ranges_overlap(rxDescPhys, NUM_RX_DESC * sizeof(RxDescriptor),
+                           txBufferPhys, ETH_FRAME_MAX) ||
+        dma_ranges_overlap(txDescPhys, NUM_TX_DESC * sizeof(TxDescriptor),
+                           txBufferPhys, ETH_FRAME_MAX)) {
+        return dma_layout_failure(failureReason,
+                                  TxFailureReason::DmaRegionOverlap);
+    }
+
+    uint64_t rxBufferPhys[NUM_RX_DESC];
+    for (uint16_t i = 0; i < NUM_RX_DESC; ++i) {
+        if (!dma_address_range(&s_rxBuffers[i][0], RX_BUFFER_SIZE, 16u,
+                               &rxBufferPhys[i]) ||
+            dma_ranges_overlap(txDescPhys, NUM_TX_DESC * sizeof(TxDescriptor),
+                               rxBufferPhys[i], RX_BUFFER_SIZE) ||
+            dma_ranges_overlap(txBufferPhys, ETH_FRAME_MAX,
+                               rxBufferPhys[i], RX_BUFFER_SIZE)) {
+            return dma_layout_failure(failureReason,
+                                      TxFailureReason::DmaRegionOverlap);
         }
     }
     return true;
@@ -1224,7 +1318,10 @@ static bool prepare_i219_phy_access(uint64_t mmioBase)
 
 static bool init_rx(uint64_t mmioBase)
 {
-    if (!validate_dma_layout()) return false;
+    if (!validate_rx_dma_layout()) return false;
+
+    uint64_t firstRxBufferPhys = 0;
+    uint64_t lastRxBufferPhys = 0;
 
     // Initialise each RX descriptor to point at its buffer
     for (uint16_t i = 0; i < NUM_RX_DESC; ++i) {
@@ -1234,6 +1331,8 @@ static bool init_rx(uint64_t mmioBase)
                                &bufferPhys)) return false;
         s_rxDescs[i].bufferAddr = bufferPhys;
         s_rxDescs[i].status     = 0;
+        if (i == 0u) firstRxBufferPhys = bufferPhys;
+        if (i == NUM_RX_DESC - 1u) lastRxBufferPhys = bufferPhys;
     }
 
     // Program the RX descriptor ring base address
@@ -1261,6 +1360,13 @@ static bool init_rx(uint64_t mmioBase)
                     E1000_RCTL_SECRC;          // strip CRC
     dma_memory_barrier();
     mmio_write32(mmioBase, E1000_RCTL, rctl);
+    s_device.tx.rxDescriptorRingAddress = rxDescPhys;
+    s_device.tx.rxBufferPhysicalBase = firstRxBufferPhys;
+    s_device.tx.rxBufferPhysicalEnd =
+        lastRxBufferPhys + RX_BUFFER_SIZE;
+    s_device.tx.rxBufferRangeValid =
+        firstRxBufferPhys != 0u && lastRxBufferPhys != 0u &&
+        lastRxBufferPhys <= (~0ULL - RX_BUFFER_SIZE);
     s_device.rxRingInitialized = true;
     return true;
 }
@@ -1331,14 +1437,38 @@ static void capture_tx_descriptor_raw(const TxDescriptor& descriptor,
 
 static bool init_tx(uint64_t mmioBase)
 {
+    s_device.tx.dmaMode = s_txDmaMode;
+    s_device.tx.dmaRegionFlags = s_txDmaRegionFlags;
+    s_device.tx.dmaRegionMemoryType = s_txDmaRegionMemoryType;
+    s_device.tx.dmaRegionPhysicalBase = s_txDmaRegionPhysicalBase;
+    s_device.tx.dmaRegionSize = s_txDmaRegionSize;
+    s_device.tx.dmaRegionPhysicalEnd =
+        (s_txDmaRegionPhysicalBase != 0u &&
+         s_txDmaRegionSize <= (~0ULL - s_txDmaRegionPhysicalBase))
+            ? s_txDmaRegionPhysicalBase + s_txDmaRegionSize : 0u;
+    s_device.tx.dmaRegionGeometryValid =
+        tx_dma_region_layout_valid(s_txDmaRegionPhysicalBase,
+                                    s_txDmaRegionSize);
+    s_device.tx.dmaRegionOwnershipValid = s_txDmaRegionHandoffValid;
+    s_device.tx.dmaRegionMappingValid =
+        (s_txDmaRegionFlags & TX_DMA_REGION_FLAG_IDENTITY) != 0u &&
+        s_txDmaRegionHandoffValid;
+    s_device.tx.dmaRegionContiguous =
+        (s_txDmaRegionFlags & TX_DMA_REGION_FLAG_CONTIGUOUS) != 0u;
+    s_device.tx.dmaRegionCacheable =
+        (s_txDmaRegionFlags & TX_DMA_REGION_FLAG_CACHEABLE) != 0u;
+    s_device.tx.dmaRegionBelow4G =
+        tx_dma_region_below_4g(s_txDmaRegionPhysicalBase,
+                               s_txDmaRegionSize);
     s_device.tx.kernelPhysicalBase = s_kernelPhysicalBase;
     s_device.tx.kernelImageVirtualStart =
         reinterpret_cast<uint64_t>(&__kernel_start);
     s_device.tx.kernelImageVirtualEnd =
         reinterpret_cast<uint64_t>(&__kernel_end);
-    s_device.tx.descriptorRingVirtualAddress =
-        reinterpret_cast<uint64_t>(&s_txDescs[0]);
+    s_device.tx.descriptorRingVirtualAddress = s_txDescs
+        ? reinterpret_cast<uint64_t>(&s_txDescs[0]) : 0u;
     s_device.tx.dmaTranslationValid = false;
+    s_device.tx.ringVirtualAddressInKernelImage = false;
     s_device.tx.ringAddressMatches = false;
     s_device.tx.ringAlignmentValid = false;
     s_device.tx.ringLengthValid = false;
@@ -1346,11 +1476,24 @@ static bool init_tx(uint64_t mmioBase)
     s_device.tx.txEngineEnabled = false;
     s_device.tx.ringRegistersPersisted = false;
 
+    if (is_i219_device(s_device.deviceId) &&
+        s_txDmaMode != TxDmaMode::ConstrainedLow) {
+        s_device.tx.failureReason = s_txDmaRegionFailure;
+        return false;
+    }
+
     TxFailureReason layoutFailure = TxFailureReason::DmaTranslationInvalid;
-    if (!validate_dma_layout(&layoutFailure)) {
+    if (!validate_tx_dma_layout(&layoutFailure)) {
         s_device.tx.failureReason = layoutFailure;
         return false;
     }
+
+    s_device.tx.ringVirtualAddressInKernelImage =
+        kernel_image_range_contains(
+            s_device.tx.descriptorRingVirtualAddress,
+            NUM_TX_DESC * sizeof(TxDescriptor),
+            s_device.tx.kernelImageVirtualStart,
+            s_device.tx.kernelImageVirtualEnd);
 
     for (uint16_t i = 0; i < NUM_TX_DESC; ++i) {
         memzero(&s_txDescs[i], sizeof(TxDescriptor));
@@ -1359,7 +1502,7 @@ static bool init_tx(uint64_t mmioBase)
 
     // Program the TX descriptor ring base address
     uint64_t txDescPhys = 0;
-    if (!dma_address_range(&s_txDescs[0],
+    if (!dma_address_range(s_txDescs,
                            NUM_TX_DESC * sizeof(TxDescriptor), 0u,
                            &txDescPhys)) {
         s_device.tx.failureReason = TxFailureReason::DmaTranslationInvalid;
@@ -1446,6 +1589,84 @@ void set_kernel_physical_base(uint64_t physicalBase)
     if (physicalBase != 0) {
         s_kernelPhysicalBase = physicalBase;
     }
+}
+
+void set_tx_dma_region(uint64_t physicalBase, uint64_t size,
+                       uint32_t flags, uint32_t memoryType,
+                       const void* memoryMap, uint64_t entryCount,
+                       uint64_t descriptorSize)
+{
+    s_txDmaRegionHandoffValid = false;
+    s_txDmaRegionPhysicalBase = physicalBase;
+    s_txDmaRegionSize = size;
+    s_txDmaRegionFlags = flags;
+    s_txDmaRegionMemoryType = memoryType;
+    s_txDmaRegionFailure = TxFailureReason::DmaRegionUnavailable;
+
+    if (physicalBase == 0u || size == 0u || flags == 0u) {
+        return;
+    }
+    if (!tx_dma_region_layout_valid(physicalBase, size)) {
+        s_txDmaRegionFailure = TxFailureReason::DmaRegionMappingInvalid;
+        return;
+    }
+    if (!tx_dma_region_below_4g(physicalBase, size) ||
+        (flags & TX_DMA_REGION_FLAG_BELOW_4G) == 0u) {
+        s_txDmaRegionFailure = TxFailureReason::DmaAddressWidthMismatch;
+        return;
+    }
+    if ((flags & TX_DMA_REGION_FLAG_IDENTITY) == 0u ||
+        (flags & TX_DMA_REGION_FLAG_CONTIGUOUS) == 0u ||
+        (flags & TX_DMA_REGION_FLAG_CACHEABLE) == 0u ||
+        !tx_dma_identity_mapping_valid(physicalBase, physicalBase, size)) {
+        s_txDmaRegionFailure = TxFailureReason::DmaRegionMappingInvalid;
+        return;
+    }
+    if (memoryType != TX_DMA_EFI_LOADER_DATA_TYPE ||
+        (flags & TX_DMA_REGION_FLAG_OWNED) == 0u ||
+        !tx_dma_region_owned_by_loader_memory_map(
+            memoryMap, entryCount, descriptorSize, physicalBase, size)) {
+        s_txDmaRegionFailure = TxFailureReason::DmaRegionNotOwned;
+        return;
+    }
+    if ((flags & TX_DMA_REGION_FLAG_VALID) == 0u) {
+        s_txDmaRegionFailure = TxFailureReason::DmaExperimentNotActive;
+        return;
+    }
+    s_txDmaRegionHandoffValid = true;
+    s_txDmaRegionFailure = TxFailureReason::None;
+}
+
+static void select_tx_dma_storage(bool i219)
+{
+    s_txDescs = s_kernelImageTxDescs;
+    s_txBuffer = s_kernelImageTxBuffer;
+    s_txDmaMode = TxDmaMode::KernelImage;
+
+#if GXOS_I219_TX_DMA_PLACEMENT_EXPERIMENT
+    if (i219) {
+        s_txDmaMode = TxDmaMode::Unavailable;
+        s_txDescs = nullptr;
+        s_txBuffer = nullptr;
+        if (s_txDmaRegionHandoffValid) {
+            uint64_t ringPhysical = 0;
+            uint64_t bufferPhysical = 0;
+            if (tx_dma_region_layout_valid(
+                    s_txDmaRegionPhysicalBase, s_txDmaRegionSize,
+                    &ringPhysical, &bufferPhysical)) {
+                s_txDescs = reinterpret_cast<TxDescriptor*>(
+                    static_cast<uintptr_t>(ringPhysical));
+                s_txBuffer = reinterpret_cast<uint8_t*>(
+                    static_cast<uintptr_t>(bufferPhysical));
+                s_txDmaMode = TxDmaMode::ConstrainedLow;
+            } else {
+                s_txDmaRegionFailure = TxFailureReason::DmaRegionMappingInvalid;
+            }
+        }
+    }
+#else
+    (void)i219;
+#endif
 }
 
 // ================================================================
@@ -1745,9 +1966,10 @@ static bool init_e1000(uint64_t mmioBase)
         mmio_write32(mmioBase, E1000_MTA + (i * 4), 0);
     }
 
-    // Initialise RX and TX descriptor rings.  The static storage is part of
-    // the kernel image and translated through the supplied physical base;
-    // no stack memory is ever handed to the device.
+    // Initialise RX and TX descriptor rings. RX keeps its static image
+    // placement; TX is selected above as either the legacy image control or
+    // the Phase 16 loader-owned constrained region. No stack memory is ever
+    // handed to the device.
     s_device.initStage = NIC_INIT_RX_RING;
     if (!init_rx(mmioBase)) {
         if (i219P7) {
@@ -1999,9 +2221,13 @@ bool init_from_bootinfo(const NicBootInfo* nicInfo)
     // Preserve the bound identity even if a later hardware stage fails.  The
     // shell can then report the exact frontier instead of collapsing back to
     // "no NIC device structure".
+    const bool bootInfoI219 = is_i219_device(nicInfo->deviceId);
+    select_tx_dma_storage(bootInfoI219);
     memzero(&s_device, sizeof(s_device));
     memzero(s_rxDescs, sizeof(s_rxDescs));
-    memzero(s_txDescs, sizeof(s_txDescs));
+    if (s_txDescs) {
+        memzero(s_txDescs, tx_ring_length_bytes(NUM_TX_DESC));
+    }
     s_rxCur = 0;
     s_txCur = 0;
     s_initialised = true;
@@ -2283,9 +2509,15 @@ bool init_from_bootinfo(const NicBootInfo* nicInfo)
 
 void init()
 {
+    // The legacy PCI-scan path has no BootInfo reservation handoff. Keep the
+    // proven kernel-image storage for non-I219 devices; an I219 discovered
+    // through this path will fail closed at the Phase 16 experiment boundary.
+    select_tx_dma_storage(false);
     memzero(&s_device, sizeof(s_device));
     memzero(s_rxDescs, sizeof(s_rxDescs));
-    memzero(s_txDescs, sizeof(s_txDescs));
+    if (s_txDescs) {
+        memzero(s_txDescs, tx_ring_length_bytes(NUM_TX_DESC));
+    }
     s_initialised = false;
     s_rxCur = 0;
     s_txCur = 0;

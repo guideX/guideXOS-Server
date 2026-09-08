@@ -2105,6 +2105,29 @@ static void cmd_nicinfo_tx()
     const nic::TxRegisterSnapshot& doorbell = tx.afterDoorbellRegisters;
     const nic::TxRegisterSnapshot& final = tx.finalRegisters.valid
         ? tx.finalRegisters : init;
+    const uint64_t reconstructedTdbA =
+        nic::dma_address_register_value(init.tdbal, init.tdbah);
+
+    output_string("dma mode=");
+    output_string(nic::tx_dma_mode_name(tx.dmaMode));
+    output_string(" region=0x");
+    uint_hex64_to_str(tx.dmaRegionPhysicalBase, hex64Str);
+    output_string(hex64Str);
+    output_string("..0x");
+    uint_hex64_to_str(tx.dmaRegionPhysicalEnd, hex64Str);
+    output_string(hex64Str);
+    output_string(" owned=");
+    output_string(tx.dmaRegionOwnershipValid ? "yes" : "no");
+    output_string(" mapped=");
+    output_string(tx.dmaRegionMappingValid ? "yes" : "no");
+    output_string(" contiguous=");
+    output_string(tx.dmaRegionContiguous ? "yes" : "no");
+    output_string(" cacheable=");
+    output_string(tx.dmaRegionCacheable ? "yes" : "no");
+    output_string(" below4G=");
+    output_string(tx.dmaRegionBelow4G ? "yes" : "no");
+    output_string(" geometry=");
+    output_string(tx.dmaRegionGeometryValid ? "yes\n" : "no\n");
 
     output_string("idx=");
     uint_to_str(tx.lastDescriptor, numStr);
@@ -2153,6 +2176,17 @@ static void cmd_nicinfo_tx()
     output_string(" doorbell=");
     output_string(tx.doorbellReadbackMatches ? "yes" : "no");
     output_string("\n");
+    output_string("rx ringPA=0x");
+    uint_hex64_to_str(tx.rxDescriptorRingAddress, hex64Str);
+    output_string(hex64Str);
+    output_string(" bufPA=0x");
+    uint_hex64_to_str(tx.rxBufferPhysicalBase, hex64Str);
+    output_string(hex64Str);
+    output_string("..0x");
+    uint_hex64_to_str(tx.rxBufferPhysicalEnd, hex64Str);
+    output_string(hex64Str);
+    output_string(" range=");
+    output_string(tx.rxBufferRangeValid ? "valid\n" : "invalid\n");
     output_string("raw0=0x");
     uint_hex64_to_str(tx.lastDescriptorRaw0, hex64Str);
     output_string(hex64Str);
@@ -2196,7 +2230,8 @@ static void cmd_nicinfo_tx()
     output_string(tx.ringAlignmentValid ? "yes" : "no");
     output_string(" ringLen=");
     output_string(tx.ringLengthValid ? "yes" : "no");
-    output_string("\n");
+    output_string(" ringImage=");
+    output_string(tx.ringVirtualAddressInKernelImage ? "yes\n" : "no\n");
 
     output_string("init: TDBAL=0x");
     uint_hex_to_str(init.tdbal, 8, hexStr);
@@ -2214,6 +2249,11 @@ static void cmd_nicinfo_tx()
     uint_hex_to_str(init.tdt, 4, hexStr);
     output_string(hexStr);
     output_string("\n");
+    output_string("TDBA reconstructed=0x");
+    uint_hex64_to_str(reconstructedTdbA, hex64Str);
+    output_string(hex64Str);
+    output_string(" match=");
+    output_string(reconstructedTdbA == tx.descriptorRingAddress ? "yes\n" : "no\n");
 
     output_string("doorbell: TDH/TDT=0x");
     uint_hex_to_str(doorbell.tdh, 4, hexStr);
@@ -2351,7 +2391,7 @@ static void cmd_nicinfo_tx_brief()
     char hexStr[9];
     char hex64Str[17];
 
-    output_string("NIC TX brief\n");
+    output_string("NIC TX brief ");
     if (!dev) {
         output_string("TX: no recorded NIC state\n");
         return;
@@ -2360,6 +2400,8 @@ static void cmd_nicinfo_tx_brief()
     const nic::TxDiagnostics& tx = dev->tx;
     const nic::TxRegisterSnapshot& final = tx.finalRegisters.valid
         ? tx.finalRegisters : tx.initialRegisters;
+    const uint64_t reconstructedTdbA =
+        nic::dma_address_register_value(final.tdbal, final.tdbah);
 
     output_string("id=0x");
     uint_hex_to_str(dev->deviceId, 4, hexStr);
@@ -2369,13 +2411,40 @@ static void cmd_nicinfo_tx_brief()
         nic::device_family_for(dev->vendorId, dev->deviceId)));
     output_string("\n");
 
-    output_string("ringPA=0x");
+    output_string("mode=");
+    output_string(nic::tx_dma_mode_name(tx.dmaMode));
+    output_string(" region=0x");
+    uint_hex64_to_str(tx.dmaRegionPhysicalBase, hex64Str);
+    output_string(hex64Str);
+    output_string("..0x");
+    uint_hex64_to_str(tx.dmaRegionPhysicalEnd, hex64Str);
+    output_string(hex64Str);
+    output_string(" owned=");
+    output_string(tx.dmaRegionOwnershipValid ? "yes" : "no");
+    output_string(" mapped=");
+    output_string(tx.dmaRegionMappingValid ? "yes" : "no");
+    output_string(" contig=");
+    output_string(tx.dmaRegionContiguous ? "yes" : "no");
+    output_string(" cache=");
+    output_string(tx.dmaRegionCacheable ? "yes" : "no");
+    output_string(" below4G=");
+    output_string(tx.dmaRegionBelow4G ? "yes" : "no");
+    output_string(" geometry=");
+    output_string(tx.dmaRegionGeometryValid ? "yes" : "no");
+    output_string("\n");
+
+    output_string("ringVA=0x");
+    uint_hex64_to_str(tx.descriptorRingVirtualAddress, hex64Str);
+    output_string(hex64Str);
+    output_string(" ringPA=0x");
     uint_hex64_to_str(tx.descriptorRingAddress, hex64Str);
     output_string(hex64Str);
     output_string(" match=");
     output_string(tx.ringAddressMatches ? "yes" : "no");
-    output_string(" ringVA-in-image=");
+    output_string(" map=");
     output_string(tx.dmaTranslationValid ? "yes" : "no");
+    output_string(" image=");
+    output_string(tx.ringVirtualAddressInKernelImage ? "yes" : "no");
     output_string("\n");
 
     output_string("descPA=0x");
@@ -2383,13 +2452,22 @@ static void cmd_nicinfo_tx_brief()
     output_string(hex64Str);
     output_string(" ring+offset=");
     output_string(tx.ringAddressMatches ? "yes" : "no");
+    output_string(" bufVA=0x");
+    uint_hex64_to_str(tx.lastBufferVirtualAddress, hex64Str);
+    output_string(hex64Str);
     output_string("\n");
 
     output_string("bufPA=0x");
     uint_hex64_to_str(tx.lastBufferAddress, hex64Str);
     output_string(hex64Str);
-    output_string(" descBuf=");
+    output_string(" hwBuf=0x");
+    uint_hex64_to_str(tx.lastDescriptorBufferAddress, hex64Str);
+    output_string(hex64Str);
+    output_string(" match=");
     output_string(tx.bufferAddressMatches ? "yes" : "no");
+    output_string(" rxPA=0x");
+    uint_hex64_to_str(tx.rxBufferPhysicalBase, hex64Str);
+    output_string(hex64Str);
     output_string("\n");
 
     output_string("ring=count=");
@@ -2405,11 +2483,8 @@ static void cmd_nicinfo_tx_brief()
     output_string("\n");
 
     output_string("TDBA=0x");
-    uint_hex_to_str(final.tdbal, 8, hexStr);
-    output_string(hexStr);
-    output_string("/0x");
-    uint_hex_to_str(final.tdbah, 8, hexStr);
-    output_string(hexStr);
+    uint_hex64_to_str(reconstructedTdbA, hex64Str);
+    output_string(hex64Str);
     output_string(" match=");
     output_string(nic::tx_ring_registers_match(
         final, tx.descriptorRingAddress,

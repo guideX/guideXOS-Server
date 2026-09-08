@@ -57,6 +57,16 @@
 #error GXOS_AIDA_I219_PHASE7_STAGE must be in the range 0..4
 #endif
 
+// Phase 16 is an opt-in, I219-only DMA-placement experiment.  A zero value
+// preserves the Phase 15 kernel-image placement and the existing QEMU path.
+#ifndef GXOS_I219_TX_DMA_PLACEMENT_EXPERIMENT
+#define GXOS_I219_TX_DMA_PLACEMENT_EXPERIMENT 0
+#endif
+
+#if GXOS_I219_TX_DMA_PLACEMENT_EXPERIMENT < 0 || GXOS_I219_TX_DMA_PLACEMENT_EXPERIMENT > 1
+#error GXOS_I219_TX_DMA_PLACEMENT_EXPERIMENT must be 0 or 1
+#endif
+
 namespace kernel {
 namespace nic {
 
@@ -69,6 +79,37 @@ static const uint16_t ETH_HLEN      = 14;      // Ethernet header size
 static const uint16_t ETH_MTU       = 1500;    // standard MTU
 static const uint16_t ETH_FRAME_MAX = 1518;    // header + MTU + FCS
 static const uint16_t ETH_FRAME_MIN = 60;      // minimum frame (no FCS)
+
+// Phase 16 handoff contract. The loader allocates exactly two contiguous
+// pages with AllocateMaxAddress below 4 GiB. TX uses page 0 for the 64 x
+// 16-byte descriptor ring and page 1 for the one shared packet buffer.
+static const uint64_t TX_DMA_REGION_PAGE_SIZE       = 0x1000ULL;
+static const uint64_t TX_DMA_REGION_SIZE            = 0x2000ULL;
+static const uint64_t TX_DMA_REGION_MAX_EXCLUSIVE   = 0x100000000ULL;
+static const uint64_t TX_DMA_REGION_RING_OFFSET     = 0x0000ULL;
+static const uint64_t TX_DMA_REGION_BUFFER_OFFSET   = 0x1000ULL;
+static const uint32_t TX_DMA_REGION_FLAG_VALID      = (1u << 0);
+static const uint32_t TX_DMA_REGION_FLAG_OWNED      = (1u << 1);
+static const uint32_t TX_DMA_REGION_FLAG_CONTIGUOUS  = (1u << 2);
+static const uint32_t TX_DMA_REGION_FLAG_IDENTITY   = (1u << 3);
+static const uint32_t TX_DMA_REGION_FLAG_BELOW_4G   = (1u << 4);
+static const uint32_t TX_DMA_REGION_FLAG_CACHEABLE  = (1u << 5);
+static const uint32_t TX_DMA_EFI_LOADER_DATA_TYPE   = 2u;
+
+enum class TxDmaMode : uint8_t {
+    KernelImage = 0,
+    ConstrainedLow,
+    Unavailable,
+};
+
+inline const char* tx_dma_mode_name(TxDmaMode mode)
+{
+    switch (mode) {
+        case TxDmaMode::KernelImage:     return "kernel-image";
+        case TxDmaMode::ConstrainedLow:  return "constrained-low";
+        default:                         return "unavailable";
+    }
+}
 
 // ================================================================
 // PCI identification
@@ -365,14 +406,16 @@ static const uint16_t E1000E_MIN_TX_DESC = 64;
 static const uint16_t TX_DESC_COUNT_GRANULARITY = 8;
 static const uint16_t NUM_TX_DESC = E1000E_MIN_TX_DESC;
 static const uint16_t RX_BUFFER_SIZE = 2048;
+static const uint32_t TX_DMA_RING_LENGTH_BYTES =
+    static_cast<uint32_t>(NUM_TX_DESC) * 16u;
 
 static const uint64_t KERNEL_LINK_VIRTUAL_BASE = 0x100000ULL;
 static const uint64_t TX_DESC_RING_BASE_ALIGNMENT = 16ULL;
 static const uint32_t TX_DESC_RING_LENGTH_GRANULARITY = 128u;
 
 // The loader maps the loaded kernel image at its linked virtual base and
-// publishes the physical backing base in BootInfo. This is the only supported
-// DMA translation for the static rings/buffers used by this driver.
+// publishes the physical backing base in BootInfo. Phase 16 additionally
+// permits the explicitly identity-mapped TX reservation described above.
 inline bool translate_kernel_dma_address(uint64_t virtualAddress,
                                          uint64_t kernelPhysicalBase,
                                          uint64_t* physicalOut)
@@ -404,6 +447,117 @@ inline bool dma_range_contains(uint64_t rangeBase, uint64_t rangeLength,
     const uint64_t rangeEnd = rangeBase + rangeLength;
     const uint64_t addressEnd = address + length;
     return addressEnd >= address && addressEnd <= rangeEnd;
+}
+
+inline bool dma_ranges_overlap(uint64_t first, uint64_t firstLength,
+                               uint64_t second, uint64_t secondLength)
+{
+    if (firstLength == 0u || secondLength == 0u) return false;
+    if (first > (~0ULL - (firstLength - 1u)) ||
+        second > (~0ULL - (secondLength - 1u))) return false;
+    const uint64_t firstEnd = first + firstLength;
+    const uint64_t secondEnd = second + secondLength;
+    return first < secondEnd && second < firstEnd;
+}
+
+inline bool tx_dma_region_layout_valid(uint64_t regionBase,
+                                       uint64_t regionSize,
+                                       uint64_t* ringPhysicalOut = nullptr,
+                                       uint64_t* bufferPhysicalOut = nullptr)
+{
+    if (regionBase == 0u || regionSize < TX_DMA_REGION_SIZE ||
+        (regionBase % TX_DMA_REGION_PAGE_SIZE) != 0u ||
+        regionBase >= TX_DMA_REGION_MAX_EXCLUSIVE ||
+        regionSize > (~0ULL - regionBase) ||
+        regionBase + regionSize > TX_DMA_REGION_MAX_EXCLUSIVE) {
+        return false;
+    }
+
+    const uint64_t ringPhysical = regionBase + TX_DMA_REGION_RING_OFFSET;
+    const uint64_t bufferPhysical = regionBase + TX_DMA_REGION_BUFFER_OFFSET;
+    if (!dma_range_contains(regionBase, regionSize, ringPhysical,
+                            TX_DMA_RING_LENGTH_BYTES) ||
+        !dma_range_contains(regionBase, regionSize, bufferPhysical,
+                            ETH_FRAME_MAX) ||
+        dma_ranges_overlap(ringPhysical, TX_DMA_RING_LENGTH_BYTES,
+                           bufferPhysical, ETH_FRAME_MAX)) {
+        return false;
+    }
+    if (ringPhysicalOut) *ringPhysicalOut = ringPhysical;
+    if (bufferPhysicalOut) *bufferPhysicalOut = bufferPhysical;
+    return true;
+}
+
+inline bool tx_dma_region_below_4g(uint64_t regionBase, uint64_t regionSize)
+{
+    return regionBase != 0u && regionSize != 0u &&
+           regionSize <= TX_DMA_REGION_MAX_EXCLUSIVE &&
+           regionBase <= (TX_DMA_REGION_MAX_EXCLUSIVE - regionSize) &&
+           regionBase + regionSize <= TX_DMA_REGION_MAX_EXCLUSIVE;
+}
+
+inline bool tx_dma_identity_mapping_valid(uint64_t virtualBase,
+                                          uint64_t physicalBase,
+                                          uint64_t length)
+{
+    return virtualBase != 0u && physicalBase != 0u && length != 0u &&
+           virtualBase == physicalBase;
+}
+
+// UEFI EFI_MEMORY_DESCRIPTOR fields used here are stable at offsets 0, 8,
+// and 24 even when firmware adds trailing fields. This helper deliberately
+// accepts the descriptor stride supplied by BootInfo instead of assuming the
+// firmware's native descriptor size.
+inline bool tx_dma_region_owned_by_loader_memory_map(
+    const void* memoryMap, uint64_t entryCount, uint64_t descriptorSize,
+    uint64_t regionBase, uint64_t regionSize)
+{
+    if (!memoryMap || entryCount == 0u || descriptorSize < 32u ||
+        descriptorSize > 0x1000u || regionBase == 0u || regionSize == 0u) {
+        return false;
+    }
+    const uint8_t* bytes = static_cast<const uint8_t*>(memoryMap);
+    for (uint64_t index = 0; index < entryCount; ++index) {
+        if (index > (~0ULL / descriptorSize)) return false;
+        const uint64_t offset = index * descriptorSize;
+        const uint8_t* descriptor = bytes + offset;
+        const uint32_t type = *reinterpret_cast<const uint32_t*>(descriptor);
+        const uint64_t physicalStart =
+            *reinterpret_cast<const uint64_t*>(descriptor + 8u);
+        const uint64_t pages =
+            *reinterpret_cast<const uint64_t*>(descriptor + 24u);
+        if (type != TX_DMA_EFI_LOADER_DATA_TYPE || pages == 0u ||
+            pages > (~0ULL / TX_DMA_REGION_PAGE_SIZE)) {
+            continue;
+        }
+        const uint64_t descriptorLength = pages * TX_DMA_REGION_PAGE_SIZE;
+        if (dma_range_contains(physicalStart, descriptorLength,
+                               regionBase, regionSize)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+inline bool tx_dma_region_handoff_valid(
+    uint64_t regionBase, uint64_t regionSize, uint32_t flags,
+    uint32_t memoryType, const void* memoryMap, uint64_t entryCount,
+    uint64_t descriptorSize)
+{
+    const uint32_t requiredFlags =
+        TX_DMA_REGION_FLAG_VALID |
+        TX_DMA_REGION_FLAG_OWNED |
+        TX_DMA_REGION_FLAG_CONTIGUOUS |
+        TX_DMA_REGION_FLAG_IDENTITY |
+        TX_DMA_REGION_FLAG_BELOW_4G |
+        TX_DMA_REGION_FLAG_CACHEABLE;
+    return tx_dma_region_layout_valid(regionBase, regionSize) &&
+           tx_dma_region_below_4g(regionBase, regionSize) &&
+           memoryType == TX_DMA_EFI_LOADER_DATA_TYPE &&
+           (flags & requiredFlags) == requiredFlags &&
+           tx_dma_region_owned_by_loader_memory_map(
+               memoryMap, entryCount, descriptorSize,
+               regionBase, regionSize);
 }
 
 inline bool kernel_image_range_contains(uint64_t virtualAddress,
@@ -789,6 +943,12 @@ enum class TxFailureReason : uint8_t {
     StatusReadError,
     FetchControlInvalid,
     DmaEngineDisabled,
+    DmaRegionUnavailable,
+    DmaRegionOverlap,
+    DmaRegionMappingInvalid,
+    DmaRegionNotOwned,
+    DmaAddressWidthMismatch,
+    DmaExperimentNotActive,
 };
 
 inline const char* tx_failure_reason_name(TxFailureReason reason)
@@ -809,6 +969,12 @@ inline const char* tx_failure_reason_name(TxFailureReason reason)
         case TxFailureReason::StatusReadError:       return "TX_STATUS_READ_ERROR";
         case TxFailureReason::FetchControlInvalid:   return "TX_FETCH_CONTROL_INVALID";
         case TxFailureReason::DmaEngineDisabled:     return "TX_DMA_ENGINE_DISABLED";
+        case TxFailureReason::DmaRegionUnavailable:  return "TX_DMA_REGION_UNAVAILABLE";
+        case TxFailureReason::DmaRegionOverlap:      return "TX_DMA_REGION_OVERLAP";
+        case TxFailureReason::DmaRegionMappingInvalid:return "TX_DMA_REGION_MAPPING_INVALID";
+        case TxFailureReason::DmaRegionNotOwned:     return "TX_DMA_REGION_NOT_OWNED";
+        case TxFailureReason::DmaAddressWidthMismatch:return "TX_DMA_ADDRESS_WIDTH_MISMATCH";
+        case TxFailureReason::DmaExperimentNotActive:return "TX_DMA_EXPERIMENT_NOT_ACTIVE";
         default:                                     return "none";
     }
 }
@@ -866,6 +1032,15 @@ struct TxDiagnostics {
     uint8_t  lastDescriptorStatusBefore;
     uint8_t  lastDescriptorStatus;
     uint8_t  lastStatus;
+    TxDmaMode dmaMode;
+    uint32_t dmaRegionFlags;
+    uint32_t dmaRegionMemoryType;
+    uint64_t dmaRegionPhysicalBase;
+    uint64_t dmaRegionPhysicalEnd;
+    uint64_t dmaRegionSize;
+    uint64_t rxDescriptorRingAddress;
+    uint64_t rxBufferPhysicalBase;
+    uint64_t rxBufferPhysicalEnd;
     uint32_t completionPolls;
     uint32_t completionPollLimit;
     uint32_t observedHead;
@@ -873,6 +1048,14 @@ struct TxDiagnostics {
     uint32_t control;
     bool     descriptorPublished;
     bool     dmaTranslationValid;
+    bool     ringVirtualAddressInKernelImage;
+    bool     dmaRegionGeometryValid;
+    bool     dmaRegionOwnershipValid;
+    bool     dmaRegionMappingValid;
+    bool     dmaRegionContiguous;
+    bool     dmaRegionCacheable;
+    bool     dmaRegionBelow4G;
+    bool     rxBufferRangeValid;
     bool     ringAddressMatches;
     bool     ringAlignmentValid;
     bool     ringLengthValid;
@@ -1149,6 +1332,14 @@ inline bool is_driver_ready(const NICDevice& device)
 
 // Set the physical address where the kernel image was loaded.
 void set_kernel_physical_base(uint64_t physicalBase);
+
+// Provide the loader-owned Phase 16 TX reservation. The memory-map pointer
+// is an identity-mapped UEFI final map retained in BootInfo; the driver
+// validates the loader-data descriptor before activating the experiment.
+void set_tx_dma_region(uint64_t physicalBase, uint64_t size,
+                       uint32_t flags, uint32_t memoryType,
+                       const void* memoryMap, uint64_t entryCount,
+                       uint64_t descriptorSize);
 
 // Scan PCI bus for network controllers and initialise the first
 // supported NIC found.  Sets up RX/TX descriptor rings and

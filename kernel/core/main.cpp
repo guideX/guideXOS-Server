@@ -746,6 +746,14 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
             kernel::serial::puts("[KERNEL] Boot method: UEFI BootInfo\n");
             kernel::mmio::set_kernel_physical_base(bootinfo->KernelPhysicalBase);
             kernel::nic::set_kernel_physical_base(bootinfo->KernelPhysicalBase);
+            kernel::nic::set_tx_dma_region(
+                bootinfo->TxDmaRegion.Base,
+                bootinfo->TxDmaRegion.Size,
+                bootinfo->TxDmaRegion.Flags,
+                bootinfo->TxDmaRegion.MemoryType,
+                reinterpret_cast<const void*>(static_cast<uintptr_t>(bootinfo->MemoryMap)),
+                bootinfo->MemoryMapEntryCount,
+                bootinfo->MemoryMapDescriptorSize);
             kernel::virtio::rng::set_kernel_physical_base(bootinfo->KernelPhysicalBase);
             kernel::virtio::gpu::set_kernel_physical_base(bootinfo->KernelPhysicalBase);
         }

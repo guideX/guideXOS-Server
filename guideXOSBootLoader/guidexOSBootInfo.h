@@ -83,6 +83,26 @@ namespace guideXOS
     static const uint32_t NIC_FLAG_MAPPED = (1u << 1);
     static const uint32_t NIC_FLAG_ACTIVE = (1u << 2);
 
+    // Phase 16 I219-only TX DMA placement experiment. The reservation is
+    // allocated with UEFI AllocatePages(EfiLoaderData) and identity-mapped
+    // before ExitBootServices. Zeroed fields mean the experiment is not
+    // available; the kernel must never silently fall back for I219.
+    static const uint32_t TX_DMA_REGION_FLAG_VALID      = (1u << 0);
+    static const uint32_t TX_DMA_REGION_FLAG_OWNED      = (1u << 1);
+    static const uint32_t TX_DMA_REGION_FLAG_CONTIGUOUS = (1u << 2);
+    static const uint32_t TX_DMA_REGION_FLAG_IDENTITY   = (1u << 3);
+    static const uint32_t TX_DMA_REGION_FLAG_BELOW_4G   = (1u << 4);
+    static const uint32_t TX_DMA_REGION_FLAG_CACHEABLE  = (1u << 5);
+    static const uint32_t TX_DMA_EFI_LOADER_DATA_TYPE   = 2u;
+
+    struct TxDmaRegionDescriptor
+    {
+        uint64_t Base;
+        uint64_t Size;
+        uint32_t Flags;
+        uint32_t MemoryType;
+    };
+
     struct BootInfo
     {
         uint32_t Magic;
@@ -112,6 +132,7 @@ namespace guideXOS
         // NIC information (uses former Reserved space)
         NicInfo  Nic;
         uint64_t KernelPhysicalBase;
+        TxDmaRegionDescriptor TxDmaRegion;
     };
 
     static inline bool guidexos_framebuffer_descriptor_identity_matches(
