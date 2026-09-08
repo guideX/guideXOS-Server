@@ -322,6 +322,105 @@ bool resolve_bootstrap_source_mapping(const uint8_t* image, uint32_t imageBytes,
     return false;
 }
 
+bool resolve_bootstrap_source_mapping_at_address(
+    const uint8_t* image, uint32_t imageBytes, uint64_t imageBase,
+    uint32_t codeFileOffset, uint32_t codeBytes, uint64_t address,
+    ResolvedSourceMapping* result, const char** error)
+{
+    if (error) *error = "source-map trailer is invalid";
+    if (result) *result = {};
+    if (!image || imageBytes < kSourceMapFooterBytes || codeBytes == 0 ||
+        imageBase > ~static_cast<uint64_t>(0) - codeFileOffset ||
+        address < imageBase + codeFileOffset) {
+        if (error) *error = "source-map address request is incomplete";
+        return false;
+    }
+    const uint64_t relativeAddress = address - (imageBase + codeFileOffset);
+    if (relativeAddress >= codeBytes) {
+        if (error) *error = "source-map address is outside executable code";
+        return false;
+    }
+    const uint32_t footer = imageBytes - kSourceMapFooterBytes;
+    if (get_u32(image, footer) != 0x454D5847U) {
+        if (error) *error = "source-map trailer footer is missing";
+        return false;
+    }
+    const uint32_t payload = get_u32(image, footer + 4);
+    if (payload < BOOTSTRAP_SOURCE_MAP_HEADER_BYTES + kSourceMapFooterBytes ||
+        payload > imageBytes) return false;
+    const uint32_t start = imageBytes - payload;
+    if (get_u32(image, start) != 0x4D535847U ||
+        get_u16(image, start + 4) != kSourceMapVersion ||
+        get_u16(image, start + 6) != BOOTSTRAP_SOURCE_MAP_HEADER_BYTES ||
+        get_u32(image, start + 24) != payload ||
+        get_u64(image, start + 32) != source_map_hash(image + start, payload, 32, 8)) return false;
+    const uint32_t fileCount = get_u16(image, start + 8);
+    const uint32_t functionCount = get_u16(image, start + 10);
+    const uint32_t mapCount = get_u32(image, start + 12);
+    const uint32_t trailerCodeOffset = get_u32(image, start + 16);
+    const uint32_t trailerCodeBytes = get_u32(image, start + 20);
+    if (fileCount == 0 || fileCount > COMPILER_MAX_TRANSLATION_UNITS ||
+        functionCount > COMPILER_MAX_SOURCE_MAP_FUNCTIONS || mapCount == 0 ||
+        mapCount > COMPILER_MAX_LINKED_SOURCE_MAPPINGS ||
+        trailerCodeOffset != codeFileOffset || trailerCodeBytes != codeBytes) return false;
+    const uint64_t expected = static_cast<uint64_t>(BOOTSTRAP_SOURCE_MAP_HEADER_BYTES) +
+        static_cast<uint64_t>(fileCount) * BOOTSTRAP_SOURCE_MAP_FILE_BYTES +
+        static_cast<uint64_t>(functionCount) * BOOTSTRAP_SOURCE_MAP_FUNCTION_BYTES +
+        static_cast<uint64_t>(mapCount) * BOOTSTRAP_SOURCE_MAP_RECORD_BYTES +
+        kSourceMapFooterBytes;
+    if (expected != payload) return false;
+
+    const uint32_t fileStart = start + BOOTSTRAP_SOURCE_MAP_HEADER_BYTES;
+    const uint32_t functionStart = fileStart + fileCount * BOOTSTRAP_SOURCE_MAP_FILE_BYTES;
+    const uint32_t mappingStart = functionStart + functionCount * BOOTSTRAP_SOURCE_MAP_FUNCTION_BYTES;
+    for (uint32_t i = 0; i < fileCount; ++i) {
+        const uint32_t fileOffset = fileStart + i * BOOTSTRAP_SOURCE_MAP_FILE_BYTES;
+        if (!fixed_text_valid(reinterpret_cast<const char*>(image + fileOffset),
+                              COMPILER_MAX_SOURCE_PATH_BYTES) ||
+            get_u32(image, fileOffset + COMPILER_MAX_SOURCE_PATH_BYTES) > COMPILER_MAX_SOURCE_BYTES)
+            return false;
+    }
+    for (uint32_t i = 0; i < functionCount; ++i) {
+        if (!fixed_text_valid(reinterpret_cast<const char*>(
+                                  image + functionStart + i * BOOTSTRAP_SOURCE_MAP_FUNCTION_BYTES),
+                              COMPILER_FUNCTION_NAME_CAPACITY)) return false;
+    }
+    for (uint32_t i = 0; i < mapCount; ++i) {
+        const uint32_t offset = mappingStart + i * BOOTSTRAP_SOURCE_MAP_RECORD_BYTES;
+        const uint16_t fileIndex = get_u16(image, offset + 0);
+        const uint16_t functionIndex = get_u16(image, offset + 2);
+        const uint32_t mappedLine = get_u32(image, offset + 4);
+        const uint32_t mappedColumn = get_u32(image, offset + 8);
+        const uint32_t finalOffset = get_u32(image, offset + 12);
+        const uint32_t instructionBytes = get_u32(image, offset + 16);
+        if (fileIndex >= fileCount || functionIndex >= functionCount || mappedLine == 0 ||
+            !source_map_range(finalOffset, instructionBytes, codeBytes)) return false;
+        if (instructionBytes == 0 || relativeAddress < finalOffset ||
+            relativeAddress - finalOffset >= instructionBytes) continue;
+        if (result) {
+            result->finalCodeOffset = finalOffset;
+            result->instructionBytes = instructionBytes;
+            result->line = mappedLine;
+            result->column = mappedColumn;
+            const uint32_t fileOffset = fileStart + fileIndex * BOOTSTRAP_SOURCE_MAP_FILE_BYTES;
+            for (uint32_t j = 0; j < COMPILER_MAX_SOURCE_PATH_BYTES; ++j)
+                result->sourcePath[j] = static_cast<char>(image[fileOffset + j]);
+            result->sourceBytes = get_u32(image, fileOffset + COMPILER_MAX_SOURCE_PATH_BYTES);
+            result->sourceHash = get_u64(image, fileOffset + COMPILER_MAX_SOURCE_PATH_BYTES + 4);
+            const uint32_t functionOffset = functionStart +
+                functionIndex * BOOTSTRAP_SOURCE_MAP_FUNCTION_BYTES;
+            for (uint32_t j = 0; j < COMPILER_FUNCTION_NAME_CAPACITY; ++j)
+                result->functionName[j] = static_cast<char>(image[functionOffset + j]);
+            if (imageBase > ~static_cast<uint64_t>(0) - codeFileOffset ||
+                imageBase + codeFileOffset > ~static_cast<uint64_t>(0) - finalOffset) return false;
+            result->targetAddress = imageBase + codeFileOffset + finalOffset;
+        }
+        return true;
+    }
+    if (error) *error = "source-map address is unmapped";
+    return false;
+}
+
 bool write_bootstrap_elf(const uint8_t* code,
                          uint32_t codeBytes,
                          const uint8_t* readOnlyData,

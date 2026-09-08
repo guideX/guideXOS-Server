@@ -126,6 +126,14 @@ bool resolve_bootstrap_source_mapping(const uint8_t* image, uint32_t imageBytes,
                                       ResolvedSourceMapping* result,
                                       const char** error);
 
+// Resolve the trusted source record containing an architectural RIP.  A
+// valid GXSM trailer with no record at the address is reported as an
+// unmapped gap; malformed trailer/record data is reported as invalid.
+bool resolve_bootstrap_source_mapping_at_address(
+    const uint8_t* image, uint32_t imageBytes, uint64_t imageBase,
+    uint32_t codeFileOffset, uint32_t codeBytes, uint64_t address,
+    ResolvedSourceMapping* result, const char** error);
+
 bool validate_bootstrap_elf(const uint8_t* image,
                             uint32_t imageBytes,
                             uint64_t expectedImageBase,

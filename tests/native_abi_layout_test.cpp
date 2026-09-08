@@ -105,7 +105,15 @@ static_assert(offsetof(gx_development_debug_snapshot, sourcePath) == 560, "devel
 static_assert(offsetof(gx_development_debug_snapshot, sourceLine) == 720, "development debug source line offset changed");
 static_assert(offsetof(gx_development_debug_snapshot, sourceColumn) == 724, "development debug source column offset changed");
 static_assert(offsetof(gx_development_debug_snapshot, sourceMappingValid) == 728, "development debug source mapping offset changed");
-static_assert(sizeof(gx_development_debug_snapshot) == 736, "development debug snapshot size changed");
+static_assert(offsetof(gx_development_debug_snapshot, sourceStepResult) == 736,
+              "source-step result must be appended after Phase 28A snapshot fields");
+static_assert(offsetof(gx_development_debug_snapshot, sourceStepStartRip) == 752,
+              "source-step start RIP offset changed");
+static_assert(offsetof(gx_development_debug_snapshot, sourceStepStartPath) == 776,
+              "source-step starting source path offset changed");
+static_assert(offsetof(gx_development_debug_snapshot, sourceStepStartFunctionName) == 936,
+              "source-step starting function offset changed");
+static_assert(sizeof(gx_development_debug_snapshot) == 1000, "development debug snapshot size changed");
 static_assert(offsetof(gx_development_run_snapshot, closeRequested) == 4552,
               "development run close-request slot changed");
 static_assert(offsetof(gx_development_run_snapshot, cancellationRequested) == 4556,

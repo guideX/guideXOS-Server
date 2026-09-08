@@ -260,6 +260,19 @@ static bool test_round_trip_and_determinism()
                                                   "src/main.cpp", 4, 0, &resolved,
                                                   &resolveError) && resolved.targetAddress > layout.entryPoint,
                  "final ELF source mapping resolves to a real mid-function address")) return false;
+    ResolvedSourceMapping byAddress = {};
+    if (!require(resolve_bootstrap_source_mapping_at_address(
+                     image, layout.outputBytes, layout.imageBase, layout.codeOffset,
+                     layout.codeBytes, resolved.targetAddress, &byAddress, &resolveError) &&
+                 byAddress.line == resolved.line && byAddress.column == resolved.column &&
+                 std::strcmp(byAddress.sourcePath, resolved.sourcePath) == 0 &&
+                 std::strcmp(byAddress.functionName, resolved.functionName) == 0,
+                 "architectural address resolves through the trusted source-map record")) return false;
+    if (!require(!resolve_bootstrap_source_mapping_at_address(
+                     image, layout.outputBytes, layout.imageBase, layout.codeOffset,
+                     layout.codeBytes, layout.imageBase + layout.codeOffset + layout.codeBytes + 1U,
+                     nullptr, &resolveError),
+                 "an address outside executable code is rejected by source-map lookup")) return false;
     return require(linkedA.codeBytes == linkedB.codeBytes && linkedA.dataBytes == linkedB.dataBytes &&
                    linkedA.mutableDataBytes == linkedB.mutableDataBytes &&
                    same_bytes(linkedA.code, linkedB.code, linkedA.codeBytes) &&

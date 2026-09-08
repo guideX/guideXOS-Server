@@ -27,7 +27,9 @@ typedef enum gx_development_debug_command {
     GX_DEVELOPMENT_DEBUG_STEP_INTERNAL_TRAP = 13,
     GX_DEVELOPMENT_DEBUG_STEP_OUT_RETURN = 14,
     /* Phase 27Z: one bare-metal entry breakpoint control. */
-    GX_DEVELOPMENT_DEBUG_RESUME = 15
+    GX_DEVELOPMENT_DEBUG_RESUME = 15,
+    /* Phase 28C: repeatedly execute instructions until a new source location. */
+    GX_DEVELOPMENT_DEBUG_STEP_SOURCE_INTO = 16
 } gx_development_debug_command;
 
 typedef enum gx_development_debug_status {
@@ -140,6 +142,17 @@ typedef struct gx_development_debug_snapshot {
     uint32_t sourceColumn;
     uint32_t sourceMappingValid;
     uint32_t reserved4;
+    /* Append-only Phase 28C source-aware Step Into result and provenance. */
+    uint32_t sourceStepResult;
+    uint32_t sourceStepInstructionCount;
+    uint32_t sourceStepInstructionLimit;
+    uint32_t sourceStepStartingMappingValid;
+    uint64_t sourceStepStartRip;
+    uint64_t sourceStepFinalRip;
+    uint32_t sourceStepStartLine;
+    uint32_t sourceStepStartColumn;
+    char sourceStepStartPath[GX_DEVELOPMENT_DEBUG_MAX_SOURCE_PATH_BYTES];
+    char sourceStepStartFunctionName[GX_DEVELOPMENT_DEBUG_MAX_FUNCTION_NAME_BYTES];
 } gx_development_debug_snapshot;
 
 enum {
@@ -164,8 +177,26 @@ enum {
     GX_DEVELOPMENT_DEBUG_PAUSE_REASON_NONE = 0,
     GX_DEVELOPMENT_DEBUG_PAUSE_REASON_ENTRY_BREAKPOINT = 1,
     GX_DEVELOPMENT_DEBUG_PAUSE_REASON_SOURCE_BREAKPOINT = 2,
-    GX_DEVELOPMENT_DEBUG_PAUSE_REASON_SINGLE_STEP = 3
+    GX_DEVELOPMENT_DEBUG_PAUSE_REASON_SINGLE_STEP = 3,
+    GX_DEVELOPMENT_DEBUG_PAUSE_REASON_SOURCE_STEP = 4
 };
+
+/* A source step is a bounded composite of the Phase 28B instruction step. */
+enum {
+    GX_DEVELOPMENT_DEBUG_SOURCE_STEP_RESULT_NONE = 0,
+    GX_DEVELOPMENT_DEBUG_SOURCE_STEP_RESULT_PENDING = 1,
+    GX_DEVELOPMENT_DEBUG_SOURCE_STEP_RESULT_COMPLETED = 2,
+    GX_DEVELOPMENT_DEBUG_SOURCE_STEP_RESULT_LIMIT = 3,
+    GX_DEVELOPMENT_DEBUG_SOURCE_STEP_RESULT_TARGET_COMPLETED = 4,
+    GX_DEVELOPMENT_DEBUG_SOURCE_STEP_RESULT_TARGET_FAILED = 5,
+    GX_DEVELOPMENT_DEBUG_SOURCE_STEP_RESULT_CANCELLED = 6,
+    GX_DEVELOPMENT_DEBUG_SOURCE_STEP_RESULT_NO_SOURCE_MAPPING = 7,
+    GX_DEVELOPMENT_DEBUG_SOURCE_STEP_RESULT_INVALID_SOURCE_MAP = 8,
+    GX_DEVELOPMENT_DEBUG_SOURCE_STEP_RESULT_UNSAFE_RUNTIME_BOUNDARY = 9,
+    GX_DEVELOPMENT_DEBUG_SOURCE_STEP_RESULT_STALE = 10
+};
+
+#define GX_DEVELOPMENT_DEBUG_SOURCE_STEP_MAX_INSTRUCTIONS 128u
 
 #ifdef __cplusplus
 }

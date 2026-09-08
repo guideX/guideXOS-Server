@@ -117,3 +117,12 @@ the saved context before exposing `GX_DEVELOPMENT_RUN_PAUSED` again and
 returns a `SINGLE_STEP` snapshot. See
 `docs/DEVELOPER_STUDIO_PHASE28B_SINGLE_INSTRUCTION_STEP.md` for the exact
 fixture, three-step proof, cancellation ordering, and QEMU evidence.
+
+Phase 28C adds bounded source-aware Step Into on top of that primitive. It
+uses exact final-ELF `GXSM` address mappings and the trusted
+`path/function/line/column` identity, stopping when the executed identity
+changes without guessing across unmapped gaps. The request is capped at 128
+instructions and stops safely at an application-to-runtime boundary without
+exposing runtime source identity. See
+`docs/DEVELOPER_STUDIO_PHASE28C_SOURCE_STEP_INTO.md` for the state machine,
+snapshot/result contract, direct callee proof, and three-boot QEMU evidence.
