@@ -30,7 +30,7 @@ using Aarch64Handoff = gxos_aarch64_phase4_handoff;
 #include "../../../kernel/core/include/kernel/fs_fat.h"
 #include "../../../kernel/core/include/kernel/ramdisk.h"
 #include "../../../kernel/core/include/kernel/vfs.h"
-#if defined(GXOS_AARCH64_PHASE5) || defined(GXOS_AARCH64_PHASE6)
+#if defined(GXOS_AARCH64_PHASE5) || defined(GXOS_AARCH64_PHASE6) || defined(GXOS_AARCH64_PHASE8)
 #include "../../../kernel/core/include/kernel/native_elf_baremetal.h"
 #endif
 #include "phase2_mmu.h"
@@ -39,12 +39,14 @@ using Aarch64Handoff = gxos_aarch64_phase4_handoff;
 #include "../../../kernel/core/include/kernel/desktop.h"
 #include "../../../kernel/core/include/kernel/framebuffer.h"
 #endif
-#if defined(GXOS_AARCH64_PHASE7)
+#if defined(GXOS_AARCH64_PHASE7) || defined(GXOS_AARCH64_PHASE8)
 #include "../../../kernel/core/include/kernel/input_manager.h"
 #include "../../../kernel/core/include/kernel/input_queue.h"
 #include "../../../kernel/core/include/kernel/virtio_input.h"
 #include "../../../kernel/core/include/kernel/kernel_compositor.h"
+#if defined(GXOS_AARCH64_PHASE7)
 #include "../../../kernel/core/include/kernel/phase7_input_proof.h"
+#endif
 #endif
 
 extern "C" void phase3_serial_init();
@@ -114,7 +116,12 @@ static volatile uint8_t g_app_complete = 0;
 static volatile uint32_t g_app_launches = 0;
 static volatile uint8_t g_app_vfs_exclusive = 0;
 static volatile uint8_t g_filesystem_vfs_active = 0;
-static const uint32_t kAppDurabilityLaunches = 100;
+static const uint32_t kAppDurabilityLaunches =
+#if defined(GXOS_AARCH64_PHASE8)
+    25;
+#else
+    100;
+#endif
 #endif
 static gxos_aarch64_phase2_platform* g_platform_for_tasks = nullptr;
 
@@ -145,7 +152,9 @@ static void fail(const char* reason)
 {
     print("[guideXOS] ");
     print(reason);
-#if defined(GXOS_AARCH64_PHASE7)
+#if defined(GXOS_AARCH64_PHASE8)
+    print("\n[guideXOS] AARCH64_PHASE8_ERROR\n");
+#elif defined(GXOS_AARCH64_PHASE7)
     print("\n[guideXOS] AARCH64_PHASE7_ERROR\n");
 #elif defined(GXOS_AARCH64_PHASE6)
     print("\n[guideXOS] AARCH64_PHASE6_ERROR\n");
@@ -383,7 +392,12 @@ static void completion_task(void*)
 static void app_model_task(void*)
 {
     const uint64_t pagesBefore = kernel::memory::allocated_pages();
-    const char* appName = "com.guidexos.phase5.arm64proof";
+    const char* appName =
+#if defined(GXOS_AARCH64_PHASE8)
+        "com.guidexos.phase8.arm64guiproof";
+#else
+        "com.guidexos.phase5.arm64proof";
+#endif
 #if defined(GXOS_AARCH64_PHASE6)
     while (g_graphics_in_progress) kernel::scheduler::note_execution();
 #endif
@@ -393,6 +407,9 @@ static void app_model_task(void*)
         !kernel::native_elf::lookup_package(appName)) {
         g_app_failure = 1;
     } else {
+#if defined(GXOS_AARCH64_PHASE8)
+        print("[guideXOS] App Model: ARM64 GUI app found\n");
+#endif
         for (uint32_t launch = 0; launch < kAppDurabilityLaunches; ++launch) {
             if (!kernel::native_elf::launch(appName)) {
                 g_app_failure = 1;
@@ -403,15 +420,31 @@ static void app_model_task(void*)
                 g_app_failure = 1;
                 break;
             }
-            if (launch == 1) print("[guideXOS] ARM64 App Model relaunch: PASS\n");
+            if (launch == 1) {
+#if defined(GXOS_AARCH64_PHASE8)
+                print("[guideXOS] ARM64 GUI App Model relaunch: PASS\n");
+#else
+                print("[guideXOS] ARM64 App Model relaunch: PASS\n");
+#endif
+            }
         }
+#if defined(GXOS_AARCH64_PHASE8)
+        const bool wrongRejected = !kernel::native_elf::launch("com.guidexos.phase8.wrongmachine") &&
+#else
         const bool wrongRejected = !kernel::native_elf::launch("com.guidexos.phase5.wrongmachine") &&
+#endif
             kernel::native_elf::last_launch_rejected_wrong_architecture();
         if (!wrongRejected) g_app_failure = 1;
     }
     g_app_vfs_exclusive = 0;
     if (!g_app_failure && g_app_launches == kAppDurabilityLaunches) {
-        print("[guideXOS] App Model durability: PASS launches=");
+        print(
+#if defined(GXOS_AARCH64_PHASE8)
+            "[guideXOS] GUI App Model durability: PASS launches="
+#else
+            "[guideXOS] App Model durability: PASS launches="
+#endif
+        );
         phase3_serial_dec(g_app_launches);
         print(" completed=");
         phase3_serial_dec(g_app_launches);
@@ -472,7 +505,7 @@ static void graphics_task(void*)
     print("[guideXOS] text rendering: PASS\n");
     print("[guideXOS] desktop resources: OK\n");
     print("[guideXOS] desktop frame: rendered\n");
-#if defined(GXOS_AARCH64_PHASE7)
+#if defined(GXOS_AARCH64_PHASE7) || defined(GXOS_AARCH64_PHASE8)
     kernel::input::PlatformInputDevice devices[GXOS_AARCH64_PHASE2_MAX_VIRTIO_MMIO] = {};
     const uint32_t deviceCount = g_platform_for_tasks
         ? g_platform_for_tasks->virtio_mmio_count : 0;
@@ -523,6 +556,26 @@ static void graphics_task(void*)
     kernel::arch::irq_restore(irqState);
     print("[guideXOS] input IRQ registry: OK\n");
     print("[guideXOS] common input queue: OK capacity=256 policy=drop-newest\n");
+#if defined(GXOS_AARCH64_PHASE8)
+    // Phase 8 deliberately leaves window creation to the independently
+    // loaded NativeElf application.  The graphics task owns only the common
+    // desktop/input service and never creates a proof window on the app's
+    // behalf.
+    print("[guideXOS] NativeElf application input bridge: ready\n");
+    kernel::desktop::draw();
+    ++g_graphics_redraws;
+    g_graphics_complete = 1;
+    g_graphics_in_progress = 0;
+    phase6_maybe_arm_completion();
+    for (;;) {
+        // The NativeElf event bridge owns the scheduler/UI pump while its
+        // application is active.  Keeping this worker out of cooperative_yield
+        // prevents two scheduler contexts from consuming the stateful
+        // virtio-input ring concurrently.  Timer preemption and the app-side
+        // pump keep the desktop, compositor, and common workers live.
+        kernel::scheduler::note_execution();
+    }
+#elif defined(GXOS_AARCH64_PHASE7)
     if (!kernel::phase7_input_proof::initialize()) {
         print("[guideXOS] input proof window: FAIL\n");
         g_graphics_failure = 1;
@@ -811,6 +864,7 @@ static void graphics_task(void*)
     g_graphics_complete = 1;
     g_graphics_in_progress = 0;
     phase6_maybe_arm_completion();
+#endif
 #else
     for (uint32_t redraw = 0; redraw < 96; ++redraw) {
         kernel::desktop::draw();
@@ -1241,7 +1295,9 @@ extern "C" void phase3_main(const Aarch64Handoff* handoff, uint64_t initial_el)
     phase3_serial_dec(phase3_exception_count());
     print(" last-unexpected-irq=");
     phase3_serial_dec(stats.last_unexpected_irq);
-#if defined(GXOS_AARCH64_PHASE7)
+#if defined(GXOS_AARCH64_PHASE8)
+    print("\nAARCH64_PHASE8_PASS\n");
+#elif defined(GXOS_AARCH64_PHASE7)
     print("\nAARCH64_PHASE7_PASS\n");
 #elif defined(GXOS_AARCH64_PHASE6)
     print("\nAARCH64_PHASE6_PASS\n");

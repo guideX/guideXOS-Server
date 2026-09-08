@@ -68,8 +68,12 @@ struct Arm64Elf64ProgramHeader {
 static_assert(sizeof(Arm64Elf64Header) == 64, "ARM64 ELF header layout changed");
 static_assert(sizeof(Arm64Elf64ProgramHeader) == 56, "ARM64 ELF program header layout changed");
 
+struct Arm64Runtime;
+class Arm64GuiOwner;
+
 struct Arm64Runtime {
     Arm64Package* package;
+    Arm64GuiOwner* guiOwner;
     gx_app_context context;
     gx_host_calls host;
     gx_result (GX_CALL *entry)(gx_app_context*);
@@ -83,6 +87,29 @@ struct Arm64Runtime {
     uint64_t stackPages;
     bool entered;
     bool verbose;
+#if defined(GXOS_AARCH64_PHASE8)
+    uint64_t generation;
+    gx_handle guiWindow;
+    uint32_t guiWidgetCount;
+    uint8_t guiCreated;
+    uint8_t guiFocusPassed;
+    uint8_t guiTextPassed;
+    uint8_t guiButtonPassed;
+    uint8_t guiClosePassed;
+    uint8_t guiDragPassed;
+    uint8_t reservedGuiFlags[2];
+    bool guiAutoClose;
+    bool guiAutoCloseIssued;
+    bool guiPollEntered;
+    bool guiPumpTraceDone;
+    bool guiPumpObservedInput;
+    int32_t guiInitialX;
+    int32_t guiInitialY;
+    uint64_t guiInitialHash;
+    uint64_t guiTextHash;
+    uint64_t guiButtonHash;
+    uint64_t guiDragHash;
+#endif
 };
 
 static Arm64Package s_arm64Packages[kArm64MaxPackages];
@@ -92,8 +119,213 @@ static bool s_arm64Discovered = false;
 static bool s_arm64LaunchInProgress = false;
 static bool s_arm64LastWrongArchitecture = false;
 static uint32_t s_arm64SuccessfulLaunches = 0;
+#if defined(GXOS_AARCH64_PHASE8)
+static uint64_t s_arm64GuiGeneration = 0;
+static uint32_t s_arm64GuiLaunches = 0;
+#endif
 
 static void arm64_print(const char* text) { phase3_serial_print(text ? text : ""); }
+
+#if defined(GXOS_AARCH64_PHASE8)
+static const uint64_t kArm64GuiHandleMagic = UINT64_C(0x4758000000000000);
+static const uint32_t kArm64GuiWindowHandleKind = 1;
+static const uint32_t kArm64GuiWidgetHandleKind = 2;
+static const uint32_t kArm64GuiEventCapacity = 32;
+static const uint32_t kArm64GuiMaxDimension = 640;
+
+static bool arm64_equal(const char* left, const char* right);
+
+static gx_handle arm64_gui_handle(const Arm64Runtime* runtime, uint32_t kind, uint32_t id)
+{
+    if (!runtime || runtime->generation == 0 || id == 0) return 0;
+    return kArm64GuiHandleMagic |
+        ((runtime->generation & UINT64_C(0xffff)) << 32) |
+        ((static_cast<uint64_t>(kind) & UINT64_C(0xf)) << 28) |
+        (static_cast<uint64_t>(id) & UINT64_C(0x0fffffff));
+}
+
+static bool arm64_gui_string(const char* value)
+{
+    if (!value) return false;
+    for (uint32_t i = 0; i < GX_ABI_MAX_STRING_BYTES; ++i) {
+        if (value[i] == '\0') return true;
+    }
+    return false;
+}
+
+static bool arm64_gui_copy_string(char* destination, uint32_t capacity, const char* value)
+{
+    if (!destination || capacity == 0 || !arm64_gui_string(value)) return false;
+    uint32_t i = 0;
+    while (value[i] && i + 1 < capacity) {
+        destination[i] = value[i];
+        ++i;
+    }
+    destination[i] = '\0';
+    return value[i] == '\0';
+}
+
+class Arm64GuiOwner final : public app::KernelApp {
+public:
+    explicit Arm64GuiOwner(Arm64Runtime* runtime)
+        : m_runtime(runtime), m_eventHead(0), m_eventTail(0), m_eventCount(0),
+          m_focusedWidget(-1), m_closed(false), m_widgetHandles{} {}
+
+    ~Arm64GuiOwner() override = default;
+
+    bool init() override
+    {
+        m_state = app::AppState::Running;
+        return true;
+    }
+
+    void shutdown() override
+    {
+        m_closed = true;
+    }
+
+    void draw(uint32_t, uint32_t, uint32_t, uint32_t) override {}
+
+    bool create(const char* title, int32_t width, int32_t height, uint32_t flags);
+    gx_handle create_widget(uint32_t type, int32_t x, int32_t y, int32_t width,
+                            int32_t height, const char* text);
+    bool set_widget_text(gx_handle handle, const char* text);
+    bool set_widget_value(gx_handle handle, int32_t value);
+    bool destroy_window(gx_handle handle);
+    bool pop_event(gx_event* event);
+    bool closed() const { return m_closed || !m_window; }
+    app::KernelWindow* window() const { return m_window; }
+    gx_handle window_handle() const { return m_runtime ? m_runtime->guiWindow : 0; }
+    int initial_x() const { return m_runtime ? m_runtime->guiInitialX : 0; }
+    int initial_y() const { return m_runtime ? m_runtime->guiInitialY : 0; }
+
+    void onMouseMove(int x, int y) override
+    {
+        queue_event(GX_EVENT_MOUSE, window_handle(), x, y, GX_MOUSE_PACK(GX_MOUSE_BUTTON_NONE, GX_MOUSE_ACTION_MOVE));
+    }
+
+    void onMouseDown(int x, int y, uint8_t button) override
+    {
+        queue_event(GX_EVENT_MOUSE, window_handle(), x, y,
+                    GX_MOUSE_PACK(button, GX_MOUSE_ACTION_DOWN));
+    }
+
+    void onMouseUp(int x, int y, uint8_t button) override
+    {
+        queue_event(GX_EVENT_MOUSE, window_handle(), x, y,
+                    GX_MOUSE_PACK(button, GX_MOUSE_ACTION_UP));
+    }
+
+    void onKeyDown(uint32_t key) override
+    {
+        queue_event(GX_EVENT_KEY, window_handle(), static_cast<int32_t>(key),
+                    GX_KEY_ACTION_DOWN, 0);
+    }
+
+    void onWidgetClick(int widgetId) override
+    {
+        if (!m_window || widgetId < 0 || widgetId >= m_window->widgetCount) return;
+        app::Widget* widget = getWidget(widgetId);
+        if (!widget || !widget->enabled || !widget->visible) return;
+        if (widget->type == app::WidgetType::TextBox) {
+            m_focusedWidget = widgetId;
+            if (m_runtime) {
+                arm64_print("[guideXOS] phase8 desktop input: textbox focus callback\n");
+            }
+        } else if (widget->type == app::WidgetType::Button && m_runtime) {
+            m_runtime->guiButtonPassed = 1;
+            arm64_print("[guideXOS] phase8 desktop input: button callback\n");
+        }
+        queue_event(GX_EVENT_WIDGET, widget_handle(widgetId), widgetId, 0, 0);
+    }
+
+    void onKeyChar(char c) override
+    {
+        if (!m_window || m_focusedWidget < 0) return;
+        app::Widget* widget = getWidget(m_focusedWidget);
+        if (!widget || widget->type != app::WidgetType::TextBox ||
+            !widget->enabled || !widget->visible) return;
+        uint32_t length = 0;
+        while (length < sizeof(widget->text) && widget->text[length]) ++length;
+        if (length + 1 >= sizeof(widget->text)) return;
+        widget->text[length] = c;
+        widget->text[length + 1] = '\0';
+        if (m_runtime && !m_runtime->guiTextPassed) {
+            arm64_print("[guideXOS] phase8 desktop input: key callback\n");
+        }
+        invalidate();
+        queue_event(GX_EVENT_TEXT_INPUT, widget_handle(m_focusedWidget), static_cast<uint8_t>(c), 0, 0);
+        if (arm64_equal(widget->text, "arm64") && m_runtime && !m_runtime->guiTextPassed) {
+            desktop::draw();
+            m_runtime->guiTextPassed = 1;
+            m_runtime->guiTextHash = framebuffer::verification_hash(
+                static_cast<uint32_t>(m_window->x), static_cast<uint32_t>(m_window->y),
+                static_cast<uint32_t>(m_window->w), static_cast<uint32_t>(m_window->h));
+        }
+    }
+
+    void onWindowClose() override
+    {
+        if (m_runtime && !m_runtime->guiClosePassed) {
+            m_runtime->guiClosePassed = 1;
+            queue_event(GX_EVENT_WINDOW_CLOSE, window_handle(), 0, 0, 0);
+        }
+        m_closed = true;
+    }
+
+    void onWindowFocus() override
+    {
+        if (m_runtime && m_runtime->guiWindow != 0) {
+            m_runtime->guiFocusPassed = 1;
+            queue_event(GX_EVENT_WINDOW_FOCUS, window_handle(), 0, 0, 0);
+        }
+    }
+
+    void onWindowBlur() override
+    {
+        if (m_runtime && m_runtime->guiWindow != 0)
+            queue_event(GX_EVENT_WINDOW_BLUR, window_handle(), 0, 0, 0);
+    }
+
+private:
+    gx_handle widget_handle(int widgetId) const
+    {
+        return widgetId >= 0 && widgetId < app::KernelWindow::MAX_WIDGETS
+            ? m_widgetHandles[widgetId] : 0;
+    }
+
+    void queue_event(gx_event_type type, gx_handle object, int32_t p1, int32_t p2, int32_t p3)
+    {
+        if (m_eventCount >= kArm64GuiEventCapacity) {
+            // A close request is a lifecycle event and must not be lost behind
+            // stale pointer motion.  Drop the oldest queued event only for a
+            // close; all other events use bounded drop-newest semantics.
+            if (type != GX_EVENT_WINDOW_CLOSE) return;
+            m_eventHead = (m_eventHead + 1) % kArm64GuiEventCapacity;
+            --m_eventCount;
+        }
+        gx_event& event = m_events[m_eventTail];
+        event.size = sizeof(gx_event);
+        event.type = type;
+        event.window = object;
+        event.param1 = p1;
+        event.param2 = p2;
+        event.param3 = p3;
+        event.param4 = 0;
+        m_eventTail = (m_eventTail + 1) % kArm64GuiEventCapacity;
+        ++m_eventCount;
+    }
+
+    Arm64Runtime* m_runtime;
+    gx_event m_events[kArm64GuiEventCapacity];
+    uint32_t m_eventHead;
+    uint32_t m_eventTail;
+    uint32_t m_eventCount;
+    int m_focusedWidget;
+    bool m_closed;
+    gx_handle m_widgetHandles[app::KernelWindow::MAX_WIDGETS];
+};
+#endif
 
 static bool arm64_add(uint64_t left, uint64_t right, uint64_t* result)
 {
@@ -141,6 +373,120 @@ static bool arm64_equal(const char* left, const char* right)
     }
     return left[i] == '\0' && right[i] == '\0';
 }
+
+#if defined(GXOS_AARCH64_PHASE8)
+bool Arm64GuiOwner::create(const char* title, int32_t width, int32_t height, uint32_t flags)
+{
+    if (!m_runtime || m_window || !arm64_gui_string(title) || width <= 0 || height <= 0 ||
+        width > static_cast<int32_t>(kArm64GuiMaxDimension) ||
+        height > static_cast<int32_t>(kArm64GuiMaxDimension)) return false;
+    const uint32_t screenWidth = framebuffer::get_width();
+    const uint32_t screenHeight = framebuffer::get_height();
+    if (screenWidth < static_cast<uint32_t>(width) || screenHeight < static_cast<uint32_t>(height)) return false;
+
+    app::KernelWindow* window = new app::KernelWindow();
+    if (!window || !arm64_gui_copy_string(window->title, sizeof(window->title), title)) {
+        delete window;
+        return false;
+    }
+    window->w = width;
+    window->h = height;
+    window->x = static_cast<int>((screenWidth - static_cast<uint32_t>(width)) / 2u);
+    window->y = static_cast<int>((screenHeight - static_cast<uint32_t>(height)) / 2u);
+    window->flags = app::WF_VISIBLE | app::WF_TITLEBAR | app::WF_CLOSABLE;
+    if (flags & GX_WINDOW_FLAG_RESIZABLE) window->flags |= app::WF_RESIZABLE;
+    window->owner = this;
+    m_window = window;
+    if (!compositor::KernelCompositor::registerWindow(m_window)) {
+        m_window = nullptr;
+        delete window;
+        return false;
+    }
+
+    // Registration follows the common compositor contract and momentarily
+    // focuses a new window.  Clear it here so Phase 8 can prove focus via a
+    // real virtio-tablet click, exactly as a normal desktop launch would.
+    m_runtime->guiWindow = arm64_gui_handle(m_runtime, kArm64GuiWindowHandleKind, m_window->id);
+    m_runtime->guiInitialX = m_window->x;
+    m_runtime->guiInitialY = m_window->y;
+    m_runtime->guiCreated = 1;
+    compositor::KernelCompositor::setFocus(0);
+    arm64_print("[guideXOS] NativeElf GUI window: created\n");
+    return init();
+}
+
+gx_handle Arm64GuiOwner::create_widget(uint32_t type, int32_t x, int32_t y, int32_t width,
+                                       int32_t height, const char* text)
+{
+    if (!m_runtime || !m_window || !arm64_gui_string(text) || x < 0 || y < 0 || width <= 0 || height <= 0 ||
+        width > static_cast<int32_t>(kArm64GuiMaxDimension) || height > static_cast<int32_t>(kArm64GuiMaxDimension)) return 0;
+    const int32_t clientHeight = m_window->h - compositor::TITLEBAR_HEIGHT;
+    if (x > m_window->w || y > clientHeight || width > m_window->w - x || height > clientHeight - y) return 0;
+    int id = -1;
+    switch (type) {
+        case GX_WIDGET_LABEL: id = addLabel(x, y, width, height, text); break;
+        case GX_WIDGET_BUTTON: id = addButton(x, y, width, height, text); break;
+        case GX_WIDGET_TEXTBOX: id = addTextBox(x, y, width, height, text); break;
+        default: return 0;
+    }
+    if (id < 0 || id >= app::KernelWindow::MAX_WIDGETS) return 0;
+    const gx_handle handle = arm64_gui_handle(m_runtime, kArm64GuiWidgetHandleKind,
+                                                static_cast<uint32_t>(id + 1));
+    m_widgetHandles[id] = handle;
+    ++m_runtime->guiWidgetCount;
+    if (m_runtime->guiWidgetCount >= 5 && m_runtime->guiInitialHash == 0) {
+        desktop::draw();
+        m_runtime->guiInitialHash = framebuffer::verification_hash(
+            static_cast<uint32_t>(m_window->x), static_cast<uint32_t>(m_window->y),
+            static_cast<uint32_t>(m_window->w), static_cast<uint32_t>(m_window->h));
+    }
+    return handle;
+}
+
+bool Arm64GuiOwner::set_widget_text(gx_handle handle, const char* text)
+{
+    if (!m_runtime || !m_window || !arm64_gui_string(text)) return false;
+    for (int i = 0; i < m_window->widgetCount; ++i) {
+        if (m_widgetHandles[i] != handle) continue;
+        setWidgetText(i, text);
+        desktop::draw();
+        if (m_runtime->guiButtonPassed && m_runtime->guiButtonHash == 0) {
+            m_runtime->guiButtonHash = framebuffer::verification_hash(
+                static_cast<uint32_t>(m_window->x), static_cast<uint32_t>(m_window->y),
+                static_cast<uint32_t>(m_window->w), static_cast<uint32_t>(m_window->h));
+        }
+        return true;
+    }
+    return false;
+}
+
+bool Arm64GuiOwner::set_widget_value(gx_handle handle, int32_t value)
+{
+    if (!m_runtime || !m_window) return false;
+    for (int i = 0; i < m_window->widgetCount; ++i) {
+        if (m_widgetHandles[i] != handle) continue;
+        setWidgetValue(i, value);
+        return true;
+    }
+    return false;
+}
+
+bool Arm64GuiOwner::destroy_window(gx_handle handle)
+{
+    if (!m_runtime || !m_window || handle == 0 || handle != m_runtime->guiWindow) return false;
+    requestClose();
+    return true;
+}
+
+bool Arm64GuiOwner::pop_event(gx_event* event)
+{
+    if (!event || m_eventCount == 0) return false;
+    *event = m_events[m_eventHead];
+    m_eventHead = (m_eventHead + 1) % kArm64GuiEventCapacity;
+    --m_eventCount;
+    return true;
+}
+#endif
 
 static bool arm64_copy(char* destination, uint32_t capacity, const char* source)
 {
@@ -494,6 +840,7 @@ static void arm64_initialize_host(Arm64Runtime* runtime)
     for (uint32_t i = 0; i < sizeof(runtime->host); ++i) bytes[i] = 0;
     runtime->host.size = sizeof(runtime->host);
     runtime->host.version = GX_API_VERSION;
+    runtime->host.guiVersion = GX_GUI_ABI_VERSION;
     runtime->host.log = arm64_host_log;
     runtime->host.get_api_version = arm64_host_api_version;
     runtime->host.exit = arm64_host_exit;
@@ -550,6 +897,327 @@ static bool arm64_run_package(Arm64Package* package, bool verbose)
     return returned && imagePermissionsRestored && stackReleased && imageReleased && noLeak;
 }
 
+#if defined(GXOS_AARCH64_PHASE8)
+static Arm64Runtime* arm64_gui_runtime(gx_app_context* context)
+{
+    if (!context) return nullptr;
+    Arm64Runtime* runtime = static_cast<Arm64Runtime*>(context->userData);
+    return runtime && context == &runtime->context && context->host == &runtime->host
+        ? runtime : nullptr;
+}
+
+static bool arm64_gui_window_valid(Arm64Runtime* runtime, gx_handle handle)
+{
+    return runtime && runtime->guiOwner && runtime->guiOwner->window() &&
+           runtime->guiWindow != 0 && handle == runtime->guiWindow;
+}
+
+static int arm64_gui_widget_id(Arm64Runtime* runtime, gx_handle handle)
+{
+    if (!runtime || !runtime->guiOwner || !runtime->guiOwner->window() || handle == 0) return -1;
+    for (int i = 0; i < runtime->guiOwner->window()->widgetCount; ++i) {
+        // A widget handle is only meaningful inside this runtime generation;
+        // the owner table is the final type/lifetime check.
+        gx_handle expected = arm64_gui_handle(runtime, kArm64GuiWidgetHandleKind,
+                                                static_cast<uint32_t>(i + 1));
+        if (expected == handle) return i;
+    }
+    return -1;
+}
+
+static gx_result GX_CALL arm64_gui_host_log(gx_app_context* context, const char* message)
+{
+    Arm64Runtime* runtime = arm64_gui_runtime(context);
+    if (runtime) runtime->entered = true;
+    if (!runtime || !arm64_gui_string(message)) return GX_ERROR_INVALID_ARGUMENT;
+    arm64_print("[phase8-app] ");
+    arm64_print(message);
+    arm64_print("\n");
+    return GX_OK;
+}
+
+static uint32_t GX_CALL arm64_gui_host_api_version(gx_app_context* context)
+{
+    return arm64_gui_runtime(context) ? GX_API_VERSION : 0xffffffffu;
+}
+
+static gx_result GX_CALL arm64_gui_host_exit(gx_app_context* context, gx_result code)
+{
+    Arm64Runtime* runtime = arm64_gui_runtime(context);
+    return runtime ? code : GX_ERROR_INVALID_ARGUMENT;
+}
+
+static gx_result GX_CALL arm64_gui_host_request_window_ex(gx_app_context* context, const char* title,
+                                                           int32_t width, int32_t height, uint32_t flags,
+                                                           gx_handle* outWindow)
+{
+    Arm64Runtime* runtime = arm64_gui_runtime(context);
+    if (!runtime || !outWindow || runtime->guiOwner || !arm64_gui_string(title) || width <= 0 || height <= 0 ||
+        width > static_cast<int32_t>(kArm64GuiMaxDimension) || height > static_cast<int32_t>(kArm64GuiMaxDimension)) {
+        return GX_ERROR_INVALID_ARGUMENT;
+    }
+    runtime->guiOwner = new Arm64GuiOwner(runtime);
+    if (!runtime->guiOwner || !runtime->guiOwner->create(title, width, height, flags)) {
+        delete runtime->guiOwner;
+        runtime->guiOwner = nullptr;
+        return GX_ERROR_FAILED;
+    }
+    *outWindow = runtime->guiWindow;
+    return GX_OK;
+}
+
+static gx_result GX_CALL arm64_gui_host_request_window(gx_app_context* context, const char* title,
+                                                        int32_t width, int32_t height, gx_handle* outWindow)
+{
+    return arm64_gui_host_request_window_ex(context, title, width, height,
+                                             GX_WINDOW_FLAG_FIXED_SIZE, outWindow);
+}
+
+static gx_result GX_CALL arm64_gui_host_window_destroy(gx_app_context* context, gx_handle window)
+{
+    Arm64Runtime* runtime = arm64_gui_runtime(context);
+    if (!arm64_gui_window_valid(runtime, window)) return GX_ERROR_INVALID_ARGUMENT;
+    return runtime->guiOwner->destroy_window(window) ? GX_OK : GX_ERROR_FAILED;
+}
+
+static gx_result GX_CALL arm64_gui_host_widget_create(gx_app_context* context, gx_handle window,
+                                                       uint32_t type, int32_t x, int32_t y,
+                                                       int32_t width, int32_t height, const char* text,
+                                                       gx_handle* outWidget)
+{
+    Arm64Runtime* runtime = arm64_gui_runtime(context);
+    if (!arm64_gui_window_valid(runtime, window) || !outWidget || !arm64_gui_string(text) ||
+        type == GX_WIDGET_NONE || type > GX_WIDGET_TEXTBOX) return GX_ERROR_INVALID_ARGUMENT;
+    const gx_handle handle = runtime->guiOwner->create_widget(type, x, y, width, height, text);
+    if (handle == 0) return GX_ERROR_UNSUPPORTED;
+    *outWidget = handle;
+    return GX_OK;
+}
+
+static gx_result GX_CALL arm64_gui_host_widget_set_text(gx_app_context* context, gx_handle widget,
+                                                         const char* text)
+{
+    Arm64Runtime* runtime = arm64_gui_runtime(context);
+    if (!runtime || arm64_gui_widget_id(runtime, widget) < 0 || !arm64_gui_string(text))
+        return GX_ERROR_INVALID_ARGUMENT;
+    return runtime->guiOwner->set_widget_text(widget, text) ? GX_OK : GX_ERROR_FAILED;
+}
+
+static gx_result GX_CALL arm64_gui_host_widget_set_value(gx_app_context* context, gx_handle widget,
+                                                          int32_t value)
+{
+    Arm64Runtime* runtime = arm64_gui_runtime(context);
+    if (!runtime || arm64_gui_widget_id(runtime, widget) < 0)
+        return GX_ERROR_INVALID_ARGUMENT;
+    return runtime->guiOwner->set_widget_value(widget, value) ? GX_OK : GX_ERROR_FAILED;
+}
+
+static void arm64_gui_detect_drag(Arm64Runtime* runtime)
+{
+    if (!runtime || !runtime->guiOwner || !runtime->guiOwner->window() || runtime->guiDragPassed ||
+        compositor::KernelCompositor::isButtonPressActive()) return;
+    app::KernelWindow* window = runtime->guiOwner->window();
+    if (window->x == runtime->guiInitialX && window->y == runtime->guiInitialY) return;
+    runtime->guiDragPassed = 1;
+    runtime->guiDragHash = framebuffer::verification_hash(
+        static_cast<uint32_t>(window->x), static_cast<uint32_t>(window->y),
+        static_cast<uint32_t>(window->w), static_cast<uint32_t>(window->h));
+    arm64_print("[guideXOS] application window drag: PASS initial=");
+    phase3_serial_dec(static_cast<uint64_t>(runtime->guiInitialX));
+    arm64_print(",");
+    phase3_serial_dec(static_cast<uint64_t>(runtime->guiInitialY));
+    arm64_print(" final=");
+    phase3_serial_dec(static_cast<uint64_t>(window->x));
+    arm64_print(",");
+    phase3_serial_dec(static_cast<uint64_t>(window->y));
+    arm64_print(" delta=");
+    phase3_serial_dec(static_cast<uint64_t>(window->x - runtime->guiInitialX));
+    arm64_print(",");
+    phase3_serial_dec(static_cast<uint64_t>(window->y - runtime->guiInitialY));
+    arm64_print("\n");
+}
+
+static gx_result GX_CALL arm64_gui_host_poll_event(gx_app_context* context, gx_event* outEvent,
+                                                    int32_t timeoutMs)
+{
+    Arm64Runtime* runtime = arm64_gui_runtime(context);
+    if (!runtime || !outEvent || timeoutMs < 0) return GX_ERROR_INVALID_ARGUMENT;
+    if (!runtime->guiPollEntered) {
+        runtime->guiPollEntered = true;
+        arm64_print("[guideXOS] phase8 app event loop: polling\n");
+    }
+    outEvent->size = sizeof(gx_event);
+    outEvent->type = GX_EVENT_NONE;
+    outEvent->window = runtime->guiWindow;
+    outEvent->param1 = outEvent->param2 = outEvent->param3 = outEvent->param4 = 0;
+    const uint64_t start = phase3_timer_count();
+    const uint64_t deadline = start + static_cast<uint64_t>((timeoutMs + 9) / 10);
+    for (;;) {
+        if (runtime->guiOwner && runtime->guiOwner->pop_event(outEvent)) return GX_OK;
+        if (!runtime->guiOwner) return GX_ERROR_FAILED;
+        if (!runtime->guiPumpTraceDone) {
+            arm64_print("[guideXOS] phase8 input bridge: calling desktop pump\n");
+        }
+        // NativeElf runs on a private application stack, so it stays in the
+        // scheduler/UI context while it pumps the common input queue.  The
+        // Phase-8 graphics worker deliberately does not call this stateful
+        // pump concurrently; timer preemption still keeps that worker and
+        // the rest of the scheduler alive.
+        desktop::cooperative_yield();
+        if (!runtime->guiPumpTraceDone) {
+            runtime->guiPumpTraceDone = true;
+            arm64_print("[guideXOS] phase8 input bridge: desktop pump returned devices=");
+            phase3_serial_dec(virtio_input::active_device_count());
+            arm64_print(" events=");
+            phase3_serial_dec(virtio_input::hardware_events_received());
+            arm64_print("\n");
+        }
+        if (!runtime->guiPumpObservedInput &&
+            virtio_input::hardware_events_received() != 0) {
+            runtime->guiPumpObservedInput = true;
+            arm64_print("[guideXOS] phase8 input bridge: hardware delivered events=");
+            phase3_serial_dec(virtio_input::hardware_events_received());
+            arm64_print(" pointer=");
+            phase3_serial_dec(virtio_input::hardware_pointer_events());
+            arm64_print(" buttons=");
+            phase3_serial_dec(virtio_input::hardware_button_events());
+            arm64_print(" keyboard=");
+            phase3_serial_dec(virtio_input::hardware_keyboard_events());
+            arm64_print("\n");
+        }
+        arm64_gui_detect_drag(runtime);
+        if (runtime->guiAutoClose && !runtime->guiAutoCloseIssued && runtime->guiOwner->window() &&
+            phase3_timer_count() - start >= 3) {
+            runtime->guiAutoCloseIssued = true;
+            compositor::KernelCompositor::requestCloseWindow(runtime->guiOwner->window()->id);
+        }
+        if (runtime->guiOwner->pop_event(outEvent)) return GX_OK;
+        if (runtime->guiOwner->closed()) {
+            outEvent->type = GX_EVENT_WINDOW_CLOSE;
+            outEvent->window = runtime->guiWindow;
+            return GX_OK;
+        }
+        if (timeoutMs == 0 || phase3_timer_count() >= deadline) return GX_ERROR_TIMEOUT;
+        // NativeElf is executing on its private stack, so use the normal
+        // interrupt-backed idle instruction rather than switching a common
+        // scheduler context from inside the trampoline.  Timer preemption
+        // wakes this wait and keeps the other kernel tasks runnable.
+        kernel::arch::idle();
+    }
+}
+
+static gx_result GX_CALL arm64_gui_host_wait_for_close(gx_app_context* context, gx_handle window,
+                                                        int32_t timeoutMs)
+{
+    Arm64Runtime* runtime = arm64_gui_runtime(context);
+    if (!arm64_gui_window_valid(runtime, window)) return GX_ERROR_INVALID_ARGUMENT;
+    for (;;) {
+        gx_event event{};
+        const gx_result result = arm64_gui_host_poll_event(context, &event, timeoutMs);
+        if (result != GX_OK) return result;
+        if (event.type == GX_EVENT_WINDOW_CLOSE) return GX_OK;
+    }
+}
+
+static void arm64_gui_initialize_host(Arm64Runtime* runtime)
+{
+    uint8_t* bytes = reinterpret_cast<uint8_t*>(&runtime->host);
+    for (uint32_t i = 0; i < sizeof(runtime->host); ++i) bytes[i] = 0;
+    runtime->host.size = sizeof(runtime->host);
+    runtime->host.version = GX_API_VERSION;
+    runtime->host.guiVersion = GX_GUI_ABI_VERSION;
+    runtime->host.log = arm64_gui_host_log;
+    runtime->host.get_api_version = arm64_gui_host_api_version;
+    runtime->host.request_window = arm64_gui_host_request_window;
+    runtime->host.request_window_ex = arm64_gui_host_request_window_ex;
+    runtime->host.wait_for_close = arm64_gui_host_wait_for_close;
+    runtime->host.poll_event = arm64_gui_host_poll_event;
+    runtime->host.exit = arm64_gui_host_exit;
+    runtime->host.window_destroy = arm64_gui_host_window_destroy;
+    runtime->host.widget_create = arm64_gui_host_widget_create;
+    runtime->host.widget_set_text = arm64_gui_host_widget_set_text;
+    runtime->host.widget_set_value = arm64_gui_host_widget_set_value;
+}
+
+static bool arm64_gui_run_package(Arm64Package* package, bool verbose)
+{
+    Arm64Runtime runtime{};
+    runtime.package = package;
+    runtime.verbose = verbose;
+    runtime.generation = ++s_arm64GuiGeneration;
+    runtime.guiAutoClose = s_arm64GuiLaunches >= 2;
+    const uint64_t pagesBefore = kernel::memory::allocated_pages();
+    arm64_gui_initialize_host(&runtime);
+    runtime.context.size = sizeof(runtime.context);
+    runtime.context.apiVersion = GX_API_VERSION;
+    runtime.context.host = &runtime.host;
+    runtime.context.userData = &runtime;
+    if (!arm64_load_image(&runtime)) return false;
+    if (!kernel::memory::allocate_pages(kArm64ApplicationStackPages, &runtime.stackBase)) {
+        kernel::memory::release_pages(runtime.imageBase, runtime.imagePages);
+        runtime.image = nullptr;
+        arm64_load_failure("application-stack-allocation");
+        return false;
+    }
+    runtime.stackPages = kArm64ApplicationStackPages;
+    runtime.stackBytes = runtime.stackPages * kArm64PageSize;
+    runtime.stack = reinterpret_cast<uint8_t*>(static_cast<uintptr_t>(runtime.stackBase));
+    *reinterpret_cast<uint64_t*>(runtime.stack) = kArm64LowCanary;
+    *reinterpret_cast<uint64_t*>(runtime.stack + runtime.stackBytes - sizeof(uint64_t)) = kArm64HighCanary;
+    if (!phase2_mmu_set_range_permissions(runtime.stackBase, runtime.stackBytes, 0, 1)) {
+        kernel::memory::release_pages(runtime.stackBase, runtime.stackPages);
+        kernel::memory::release_pages(runtime.imageBase, runtime.imagePages);
+        runtime.image = nullptr;
+        return false;
+    }
+    const gx_result result = gxos_native_call_on_stack(
+        runtime.entry, &runtime.context, runtime.stack + runtime.stackBytes - 16);
+    const bool canaries = *reinterpret_cast<uint64_t*>(runtime.stack) == kArm64LowCanary &&
+        *reinterpret_cast<uint64_t*>(runtime.stack + runtime.stackBytes - sizeof(uint64_t)) == kArm64HighCanary;
+    const bool guiProof = result == 42 && runtime.entered && runtime.guiCreated &&
+        runtime.guiWidgetCount == 5 && runtime.guiClosePassed && runtime.guiInitialHash != 0 &&
+        (runtime.guiAutoClose || (runtime.guiFocusPassed && runtime.guiTextPassed &&
+                                  runtime.guiButtonPassed && runtime.guiDragPassed));
+
+    if (result == 42 && runtime.entered) arm64_print("[guideXOS] NativeElf GUI return: 42\n");
+    if (!runtime.guiAutoClose && runtime.guiFocusPassed)
+        arm64_print("[guideXOS] application focus routing: PASS\n");
+    if (!runtime.guiAutoClose && runtime.guiTextPassed && runtime.guiButtonPassed)
+        arm64_print("[guideXOS] application input routing: PASS\n");
+    if (!runtime.guiAutoClose && runtime.guiInitialHash != 0 && runtime.guiTextHash != 0 &&
+        runtime.guiButtonHash != 0 && runtime.guiDragHash != 0) {
+        arm64_print("[guideXOS] framebuffer GUI regions: PASS initial=0x");
+        phase3_serial_hex(runtime.guiInitialHash);
+        arm64_print(" text=0x");
+        phase3_serial_hex(runtime.guiTextHash);
+        arm64_print(" button=0x");
+        phase3_serial_hex(runtime.guiButtonHash);
+        arm64_print(" drag=0x");
+        phase3_serial_hex(runtime.guiDragHash);
+        arm64_print("\n");
+    }
+
+    if (runtime.guiOwner) {
+        if (runtime.guiOwner->window()) runtime.guiOwner->requestClose();
+        delete runtime.guiOwner;
+        runtime.guiOwner = nullptr;
+    }
+    const bool compositorClean = compositor::KernelCompositor::getWindowCount() == 0;
+    const bool imagePermissionsRestored = phase2_mmu_set_range_permissions(
+        runtime.imageBase, runtime.imageBytes, 0, 1) != 0;
+    const bool stackReleased = kernel::memory::release_pages(runtime.stackBase, runtime.stackPages);
+    const bool imageReleased = kernel::memory::release_pages(runtime.imageBase, runtime.imagePages);
+    runtime.stack = nullptr;
+    runtime.image = nullptr;
+    const bool noLeak = kernel::memory::allocated_pages() == pagesBefore;
+    const bool cleanup = compositorClean && imagePermissionsRestored && stackReleased && imageReleased && noLeak;
+    if (cleanup) {
+        arm64_print("[guideXOS] NativeElf GUI cleanup: PASS windows=0 controls=0 mappings=0 allocator-delta-pages=0\n");
+    }
+    return guiProof && canaries && cleanup;
+}
+#endif
+
 bool launch(const char* name)
 {
     s_arm64LastWrongArchitecture = false;
@@ -558,8 +1226,14 @@ bool launch(const char* name)
     Arm64Package* package = arm64_find_package(name);
     if (!package) return false;
     s_arm64LaunchInProgress = true;
-    const bool result = arm64_run_package(package, s_arm64SuccessfulLaunches == 0);
+    bool result = false;
+#if defined(GXOS_AARCH64_PHASE8)
+    result = arm64_gui_run_package(package, s_arm64GuiLaunches == 0);
+    if (result && arm64_equal(package->id, "com.guidexos.phase8.arm64guiproof")) ++s_arm64GuiLaunches;
+#else
+    result = arm64_run_package(package, s_arm64SuccessfulLaunches == 0);
     if (result && arm64_equal(package->id, "com.guidexos.phase5.arm64proof")) ++s_arm64SuccessfulLaunches;
+#endif
     s_arm64LaunchInProgress = false;
     return result;
 }

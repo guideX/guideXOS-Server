@@ -11,7 +11,6 @@ static_assert(offsetof(gx_event, type) == 4, "gx_event.type offset changed");
 static_assert(offsetof(gx_event, window) == 8, "gx_event.window offset changed");
 static_assert(offsetof(gx_event, param1) == 16, "gx_event.param1 offset changed");
 static_assert(offsetof(gx_event, param4) == 28, "gx_event.param4 offset changed");
-static_assert(sizeof(gx_host_calls) == 120, "gx_host_calls size must remain 120 bytes on amd64");
 static_assert(offsetof(gx_host_calls, get_ticks_ms) > offsetof(gx_host_calls, present_frame),
               "get_ticks_ms must be appended to the ABI table");
 static_assert(sizeof(uint64_t) == 8, "Native ABI ticks must remain 64-bit");
@@ -61,7 +60,13 @@ static_assert(offsetof(gx_host_calls, development_run_poll) == 208, "development
 static_assert(offsetof(gx_host_calls, development_run_request_close) == 216, "development run close slot changed");
 static_assert(offsetof(gx_host_calls, development_run_release) == 224, "development run release slot changed");
 static_assert(offsetof(gx_host_calls, development_debug) == 232, "development debug slot changed");
-static_assert(sizeof(gx_host_calls) == 240, "gx_host_calls size changed");
+static_assert(offsetof(gx_host_calls, guiVersion) == 240, "GUI ABI version slot changed");
+static_assert(offsetof(gx_host_calls, window_destroy) == 248, "window destroy slot changed");
+static_assert(offsetof(gx_host_calls, widget_create) == 256, "widget create slot changed");
+static_assert(offsetof(gx_host_calls, widget_set_text) == 264, "widget set text slot changed");
+static_assert(offsetof(gx_host_calls, widget_set_value) == 272, "widget set value slot changed");
+static_assert(sizeof(gx_host_calls) == 280, "gx_host_calls size changed");
+static_assert(GX_GUI_HOST_CALLS_SIZE == 280, "GUI ABI table size changed");
 static_assert(sizeof(gx_development_run_request) == 72, "development run request size changed");
 static_assert(offsetof(gx_development_run_request, projectRoot) == 8, "development run request project root offset changed");
 static_assert(offsetof(gx_development_run_request, artifactSha256) == 56, "development run request artifact hash offset changed");
@@ -107,7 +112,9 @@ int main() {
                                offsetof(gx_host_calls, file_remove);
     const bool runAppended = offsetof(gx_host_calls, development_run_prepare) >
                              offsetof(gx_host_calls, build_project_release);
-    if (!appended || !workspaceAppended || !buildAppended || !runAppended) return 1;
+    const bool guiAppended = offsetof(gx_host_calls, widget_set_value) >
+                             offsetof(gx_host_calls, development_debug);
+    if (!appended || !workspaceAppended || !buildAppended || !runAppended || !guiAppended) return 1;
     std::cout << "Native ABI layout test PASS\n";
     return 0;
 }

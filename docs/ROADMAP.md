@@ -105,21 +105,21 @@
 
 ## ?? **PLANNED PHASES**
 
-### Phase 8: Polish & UX (Planned) ??
-**Duration:** 1-2 weeks  
-**Status:** Planned, document created
+### Phase 8: NativeElf GUI application (Complete) ✅
+**Status:** Complete on `AARCH64_SUPPORT`; the first architecture-neutral
+ARM64 NativeElf application owns a common guideXOS window, receives real
+virtio keyboard/tablet input, closes, cleans up, relaunches, and passes
+bounded GUI lifecycle durability.
 
 **Goals:**
-- Visual polish all apps
-- UX improvements
-- Performance optimization
-- Complete documentation
-- Production-ready system
+- Native `/Apps` discovery of an independently compiled `EM_AARCH64` GUI app
+- Common window, labels, button, textbox, focus, drag, close, and return path
+- Resource ownership validation and 25-cycle GUI lifecycle durability
+- Three fresh QEMU boots with real-device interaction
 
-**Priority:** High  
-**Start:** After Phase 7
+**Priority:** High
 
-**Details:** See `PHASE8_PLAN.md`
+**Details:** See `aarch64/AARCH64_PHASE8_NATIVEELF_GUI.md`
 
 ---
 
@@ -378,6 +378,7 @@ Timeline:
 - `PHASE7_LAUNCH.md` - Phase 7 overview
 - `RapidValidation.md` - Quick test (NEW!)
 - `PHASE8_PLAN.md` - Next phase plan (NEW!)
+- `aarch64/AARCH64_PHASE8_NATIVEELF_GUI.md` - NativeElf GUI boundary and proof
 
 ### Next Action
 ```sh
@@ -389,9 +390,8 @@ Timeline:
 
 ---
 
-**Status:** ?? **At Phase 7 - Ready to Test**  
-**Progress:** ?? **80% to Production**  
-**Next:** ?? **Execute Testing or Move to Phase 8**  
+**Status:** Phase 8 NativeElf GUI proof complete on `AARCH64_SUPPORT`
+**Next:** Harden the application event service and multi-window ownership in AARCH64-9
 
 **You're almost there!** ???
 

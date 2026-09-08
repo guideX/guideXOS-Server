@@ -17,11 +17,26 @@
 #include "bitmap_font.h"
 #include "sdk/include/guidexos/abi.h"
 #include "sdk/include/guidexos/app.h"
-#elif defined(GXOS_AARCH64_PHASE5)
+#elif defined(GXOS_AARCH64_PHASE5) || defined(GXOS_AARCH64_PHASE8)
 #include "include/kernel/common_physical_allocator.h"
+#if defined(GXOS_AARCH64_PHASE8)
+#include "include/kernel/desktop.h"
+#include "include/kernel/framebuffer.h"
+#include "include/kernel/kernel_app.h"
+#include "include/kernel/kernel_compositor.h"
+#include "include/kernel/input_manager.h"
+#include "include/kernel/input_queue.h"
+#include "include/kernel/virtio_input.h"
+#include "include/kernel/serial_debug.h"
+#include "include/kernel/common_scheduler.h"
+#endif
 #include "include/kernel/vfs.h"
 #include "sdk/include/guidexos/abi.h"
 #include "sdk/include/guidexos/app.h"
+#endif
+
+#if defined(GXOS_AARCH64_PHASE8)
+extern uint64_t phase3_timer_count();
 #endif
 
 namespace kernel {
@@ -1530,6 +1545,10 @@ bool launch(const char* appName) {
 bool last_launch_rejected_wrong_architecture() { return false; }
 
 #elif defined(GXOS_AARCH64_PHASE5)
+
+#include "native_elf_baremetal_arm64.inc"
+
+#elif defined(GXOS_AARCH64_PHASE8)
 
 #include "native_elf_baremetal_arm64.inc"
 

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <stddef.h>
+
 #include "types.h"
 #include "build.h"
 #include "development_run.h"
@@ -11,6 +13,8 @@ extern "C" {
 
 #define GX_API_VERSION 0u
 #define GX_ABI_NAME "guidexos-c-abi-v1"
+#define GX_GUI_ABI_VERSION 1u
+#define GX_ABI_MAX_STRING_BYTES 256u
 
 #if defined(__x86_64__)
 #define GX_CALL __attribute__((ms_abi))
@@ -27,8 +31,17 @@ typedef enum gx_event_type {
     GX_EVENT_WINDOW_BLUR = 3,
     GX_EVENT_KEY = 4,
     GX_EVENT_MOUSE = 5,
-    GX_EVENT_WINDOW_PAINT = 6
+    GX_EVENT_WINDOW_PAINT = 6,
+    GX_EVENT_TEXT_INPUT = 7,
+    GX_EVENT_WIDGET = 8
 } gx_event_type;
+
+typedef enum gx_widget_type {
+    GX_WIDGET_NONE = 0,
+    GX_WIDGET_LABEL = 1,
+    GX_WIDGET_BUTTON = 2,
+    GX_WIDGET_TEXTBOX = 3
+} gx_widget_type;
 
 enum {
     GX_KEY_ACTION_UP = 0,
@@ -67,10 +80,10 @@ typedef struct gx_event {
     uint32_t size;
     gx_event_type type;
     gx_handle window;
-    int param1;
-    int param2;
-    int param3;
-    int param4;
+    int32_t param1;
+    int32_t param2;
+    int32_t param3;
+    int32_t param4;
 } gx_event;
 
 enum {
@@ -138,7 +151,20 @@ typedef struct gx_host_calls {
     /* Hosted-development software breakpoint operations. This is appended to
      * preserve every existing host-call slot and is not a bare-metal ABI. */
     gx_result (GX_CALL *development_debug)(gx_app_context* ctx, const gx_development_debug_request* request, gx_development_debug_snapshot* outSnapshot);
+    /* Architecture-neutral bare-metal GUI services.  These are appended after
+     * all hosted-development slots so guidexos-c-abi-v1 legacy layouts remain
+     * binary-compatible.  guiVersion and size are checked before exposing
+     * these calls. */
+    uint32_t guiVersion;
+    gx_result (GX_CALL *window_destroy)(gx_app_context* ctx, gx_handle window);
+    gx_result (GX_CALL *widget_create)(gx_app_context* ctx, gx_handle window, uint32_t type,
+                                       int32_t x, int32_t y, int32_t width, int32_t height,
+                                       const char* text, gx_handle* outWidget);
+    gx_result (GX_CALL *widget_set_text)(gx_app_context* ctx, gx_handle widget, const char* text);
+    gx_result (GX_CALL *widget_set_value)(gx_app_context* ctx, gx_handle widget, int32_t value);
 } gx_host_calls;
+
+#define GX_GUI_HOST_CALLS_SIZE ((uint32_t)(offsetof(gx_host_calls, widget_set_value) + sizeof(((gx_host_calls*)0)->widget_set_value)))
 
 #ifdef __cplusplus
 }
