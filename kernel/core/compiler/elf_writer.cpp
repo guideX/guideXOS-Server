@@ -22,6 +22,10 @@ static const uint32_t ELF_HEADER_BYTES = 64;
 static const uint32_t PROGRAM_HEADER_BYTES = 56;
 static const uint32_t SEGMENT_ALIGNMENT = 0x1000;
 static const uint32_t BOOTSTRAP_DATA_BYTES_LIMIT = COMPILER_MAX_LINKED_DATA_BYTES;
+static const uint8_t kSourceMapMagic[4] = {'G', 'X', 'S', 'M'};
+static const uint8_t kSourceMapFooterMagic[4] = {'G', 'X', 'M', 'E'};
+static const uint16_t kSourceMapVersion = 1;
+static const uint32_t kSourceMapFooterBytes = 8;
 
 struct LoadRange {
     uint64_t fileStart;
@@ -107,7 +111,216 @@ static bool fail(ElfValidationResult* result, const char* error)
     return false;
 }
 
+static uint64_t source_map_hash(const uint8_t* bytes, uint32_t count,
+                                uint32_t zeroOffset, uint32_t zeroBytes)
+{
+    if (!bytes || zeroOffset > count || zeroBytes > count - zeroOffset) return 0;
+    uint64_t hash = 1469598103934665603ULL;
+    for (uint32_t i = 0; i < count; ++i) {
+        const uint8_t value = i >= zeroOffset && i < zeroOffset + zeroBytes ? 0 : bytes[i];
+        hash ^= value;
+        hash *= 1099511628211ULL;
+    }
+    return hash;
+}
+
+static bool fixed_text_valid(const char* value, uint32_t capacity)
+{
+    if (!value || capacity == 0) return false;
+    uint32_t i = 0;
+    while (i < capacity) {
+        if (value[i] == '\0') return true;
+        ++i;
+    }
+    return false;
+}
+
+static bool source_map_equal(const char* left, const char* right)
+{
+    if (!fixed_text_valid(left, COMPILER_MAX_SOURCE_PATH_BYTES) || !right) return false;
+    uint32_t i = 0;
+    while (i < COMPILER_MAX_SOURCE_PATH_BYTES && left[i] != '\0' && right[i] != '\0') {
+        if (left[i] != right[i]) return false;
+        ++i;
+    }
+    return i < COMPILER_MAX_SOURCE_PATH_BYTES && left[i] == '\0' && right[i] == '\0';
+}
+
+static bool source_map_range(uint32_t offset, uint32_t size, uint32_t limit)
+{
+    return offset <= limit && size <= limit - offset;
+}
+
 } // namespace
+
+bool append_bootstrap_source_map(const LinkedProgram& program,
+                                 uint8_t* output, uint32_t outputCapacity,
+                                 ElfLayout* layout)
+{
+    if (!output || !layout || layout->outputBytes > outputCapacity ||
+        program.sourceFileCount > COMPILER_MAX_TRANSLATION_UNITS ||
+        program.sourceMapFunctionCount > COMPILER_MAX_SOURCE_MAP_FUNCTIONS ||
+        program.sourceMappingCount > COMPILER_MAX_LINKED_SOURCE_MAPPINGS ||
+        (program.sourceMappingCount != 0 &&
+         (program.sourceFileCount == 0 || program.sourceMapFunctionCount == 0))) return false;
+    for (uint32_t i = 0; i < program.sourceFileCount; ++i) {
+        if (!fixed_text_valid(program.sourceFiles[i].path, COMPILER_MAX_SOURCE_PATH_BYTES) ||
+            program.sourceFiles[i].sourceBytes > COMPILER_MAX_SOURCE_BYTES) return false;
+    }
+    for (uint32_t i = 0; i < program.sourceMapFunctionCount; ++i)
+        if (!fixed_text_valid(program.sourceMapFunctions[i].name, COMPILER_FUNCTION_NAME_CAPACITY)) return false;
+    if (program.sourceMappingCount == 0) return true;
+    const uint64_t payload = static_cast<uint64_t>(BOOTSTRAP_SOURCE_MAP_HEADER_BYTES) +
+        static_cast<uint64_t>(program.sourceFileCount) * BOOTSTRAP_SOURCE_MAP_FILE_BYTES +
+        static_cast<uint64_t>(program.sourceMapFunctionCount) * BOOTSTRAP_SOURCE_MAP_FUNCTION_BYTES +
+        static_cast<uint64_t>(program.sourceMappingCount) * BOOTSTRAP_SOURCE_MAP_RECORD_BYTES +
+        kSourceMapFooterBytes;
+    if (payload > 0xFFFFFFFFULL || layout->outputBytes > outputCapacity - payload ||
+        layout->outputBytes + payload > BOOTSTRAP_MAX_ELF_BYTES) return false;
+    const uint32_t start = layout->outputBytes;
+    const uint32_t total = static_cast<uint32_t>(payload);
+    clear_bytes(output + start, total);
+    put_u32(output, start + 0, 0x4D535847U);
+    put_u16(output, start + 4, kSourceMapVersion);
+    put_u16(output, start + 6, BOOTSTRAP_SOURCE_MAP_HEADER_BYTES);
+    put_u16(output, start + 8, program.sourceFileCount);
+    put_u16(output, start + 10, program.sourceMapFunctionCount);
+    put_u32(output, start + 12, program.sourceMappingCount);
+    put_u32(output, start + 16, layout->codeOffset);
+    put_u32(output, start + 20, layout->codeBytes);
+    put_u32(output, start + 24, total);
+    put_u64(output, start + 32, 0);
+    uint32_t cursor = start + BOOTSTRAP_SOURCE_MAP_HEADER_BYTES;
+    for (uint32_t i = 0; i < program.sourceFileCount; ++i) {
+        for (uint32_t j = 0; j < COMPILER_MAX_SOURCE_PATH_BYTES; ++j)
+            output[cursor + j] = static_cast<uint8_t>(program.sourceFiles[i].path[j]);
+        put_u32(output, cursor + COMPILER_MAX_SOURCE_PATH_BYTES, program.sourceFiles[i].sourceBytes);
+        put_u64(output, cursor + COMPILER_MAX_SOURCE_PATH_BYTES + 4, program.sourceFiles[i].sourceHash);
+        cursor += BOOTSTRAP_SOURCE_MAP_FILE_BYTES;
+    }
+    for (uint32_t i = 0; i < program.sourceMapFunctionCount; ++i) {
+        for (uint32_t j = 0; j < COMPILER_FUNCTION_NAME_CAPACITY; ++j)
+            output[cursor + j] = static_cast<uint8_t>(program.sourceMapFunctions[i].name[j]);
+        cursor += BOOTSTRAP_SOURCE_MAP_FUNCTION_BYTES;
+    }
+    for (uint32_t i = 0; i < program.sourceMappingCount; ++i) {
+        const LinkedProgram::LinkedSourceMapping& mapping = program.sourceMappings[i];
+        put_u16(output, cursor + 0, mapping.sourceFileIndex);
+        put_u16(output, cursor + 2, mapping.functionIndex);
+        put_u32(output, cursor + 4, mapping.line);
+        put_u32(output, cursor + 8, mapping.column);
+        put_u32(output, cursor + 12, mapping.finalCodeOffset);
+        put_u32(output, cursor + 16, mapping.instructionBytes);
+        cursor += BOOTSTRAP_SOURCE_MAP_RECORD_BYTES;
+    }
+    put_u32(output, cursor + 0, 0x454D5847U);
+    put_u32(output, cursor + 4, total);
+    put_u64(output, start + 32, source_map_hash(output + start, total, 32, 8));
+    layout->outputBytes += total;
+    return true;
+}
+
+bool resolve_bootstrap_source_mapping(const uint8_t* image, uint32_t imageBytes,
+                                      uint64_t imageBase, uint32_t codeFileOffset,
+                                      uint32_t codeBytes, const char* sourcePath,
+                                      uint32_t line, uint32_t column,
+                                      ResolvedSourceMapping* result,
+                                      const char** error)
+{
+    if (error) *error = "source-map trailer is invalid";
+    if (result) *result = {};
+    if (!image || !sourcePath || sourcePath[0] == '\0' || line == 0 ||
+        imageBytes < kSourceMapFooterBytes) {
+        if (error) *error = "source-map request is incomplete";
+        return false;
+    }
+    const uint32_t footer = imageBytes - kSourceMapFooterBytes;
+    if (get_u32(image, footer) != 0x454D5847U) {
+        if (error) *error = "source-map trailer footer is missing";
+        return false;
+    }
+    const uint32_t payload = get_u32(image, footer + 4);
+    if (payload < BOOTSTRAP_SOURCE_MAP_HEADER_BYTES + kSourceMapFooterBytes ||
+        payload > imageBytes) return false;
+    const uint32_t start = imageBytes - payload;
+    if (get_u32(image, start) != 0x4D535847U || get_u16(image, start + 4) != kSourceMapVersion ||
+        get_u16(image, start + 6) != BOOTSTRAP_SOURCE_MAP_HEADER_BYTES ||
+        get_u32(image, start + 24) != payload ||
+        get_u64(image, start + 32) != source_map_hash(image + start, payload, 32, 8)) return false;
+    const uint32_t fileCount = get_u16(image, start + 8);
+    const uint32_t functionCount = get_u16(image, start + 10);
+    const uint32_t mapCount = get_u32(image, start + 12);
+    const uint32_t trailerCodeOffset = get_u32(image, start + 16);
+    const uint32_t trailerCodeBytes = get_u32(image, start + 20);
+    if (fileCount == 0 || fileCount > COMPILER_MAX_TRANSLATION_UNITS ||
+        functionCount > COMPILER_MAX_SOURCE_MAP_FUNCTIONS ||
+        mapCount == 0 || mapCount > COMPILER_MAX_LINKED_SOURCE_MAPPINGS ||
+        trailerCodeOffset != codeFileOffset || trailerCodeBytes != codeBytes) return false;
+    const uint64_t expected = static_cast<uint64_t>(BOOTSTRAP_SOURCE_MAP_HEADER_BYTES) +
+        static_cast<uint64_t>(fileCount) * BOOTSTRAP_SOURCE_MAP_FILE_BYTES +
+        static_cast<uint64_t>(functionCount) * BOOTSTRAP_SOURCE_MAP_FUNCTION_BYTES +
+        static_cast<uint64_t>(mapCount) * BOOTSTRAP_SOURCE_MAP_RECORD_BYTES +
+        kSourceMapFooterBytes;
+    if (expected != payload) return false;
+    uint32_t cursor = start + BOOTSTRAP_SOURCE_MAP_HEADER_BYTES;
+    uint32_t matchingFile = 0xFFFFFFFFU;
+    for (uint32_t i = 0; i < fileCount; ++i) {
+        const char* path = reinterpret_cast<const char*>(image + cursor);
+        if (!fixed_text_valid(path, COMPILER_MAX_SOURCE_PATH_BYTES) ||
+            get_u32(image, cursor + COMPILER_MAX_SOURCE_PATH_BYTES) > COMPILER_MAX_SOURCE_BYTES) {
+            if (error) *error = "source-map file identity is invalid";
+            return false;
+        }
+        if (source_map_equal(path, sourcePath)) matchingFile = i;
+        cursor += BOOTSTRAP_SOURCE_MAP_FILE_BYTES;
+    }
+    if (matchingFile == 0xFFFFFFFFU) {
+        if (error) *error = "source path is absent from the final ELF source map";
+        return false;
+    }
+    const uint32_t functionStart = cursor;
+    for (uint32_t i = 0; i < functionCount; ++i) {
+        if (!fixed_text_valid(reinterpret_cast<const char*>(image + cursor),
+                              COMPILER_FUNCTION_NAME_CAPACITY)) return false;
+        cursor += BOOTSTRAP_SOURCE_MAP_FUNCTION_BYTES;
+    }
+    for (uint32_t i = 0; i < mapCount; ++i) {
+        const uint16_t fileIndex = get_u16(image, cursor + 0);
+        const uint16_t functionIndex = get_u16(image, cursor + 2);
+        const uint32_t mappedLine = get_u32(image, cursor + 4);
+        const uint32_t mappedColumn = get_u32(image, cursor + 8);
+        const uint32_t finalOffset = get_u32(image, cursor + 12);
+        const uint32_t instructionBytes = get_u32(image, cursor + 16);
+        if (fileIndex >= fileCount || functionIndex >= functionCount || mappedLine == 0 ||
+            !source_map_range(finalOffset, instructionBytes, codeBytes)) return false;
+        if (fileIndex == matchingFile && mappedLine == line &&
+            (column == 0 || mappedColumn == column)) {
+            if (result) {
+                result->finalCodeOffset = finalOffset;
+                result->instructionBytes = instructionBytes;
+                result->line = mappedLine;
+                result->column = mappedColumn;
+                const uint32_t fileOffset = start + BOOTSTRAP_SOURCE_MAP_HEADER_BYTES +
+                    fileIndex * BOOTSTRAP_SOURCE_MAP_FILE_BYTES;
+                for (uint32_t j = 0; j < COMPILER_MAX_SOURCE_PATH_BYTES; ++j)
+                    result->sourcePath[j] = static_cast<char>(image[fileOffset + j]);
+                result->sourceBytes = get_u32(image, fileOffset + COMPILER_MAX_SOURCE_PATH_BYTES);
+                result->sourceHash = get_u64(image, fileOffset + COMPILER_MAX_SOURCE_PATH_BYTES + 4);
+                const uint32_t functionOffset = functionStart +
+                    functionIndex * BOOTSTRAP_SOURCE_MAP_FUNCTION_BYTES;
+                for (uint32_t j = 0; j < COMPILER_FUNCTION_NAME_CAPACITY; ++j)
+                    result->functionName[j] = static_cast<char>(image[functionOffset + j]);
+                if (imageBase > ~static_cast<uint64_t>(0) - codeFileOffset ||
+                    imageBase + codeFileOffset > ~static_cast<uint64_t>(0) - finalOffset) return false;
+                result->targetAddress = imageBase + codeFileOffset + finalOffset;
+            }
+            return true;
+        }
+        cursor += BOOTSTRAP_SOURCE_MAP_RECORD_BYTES;
+    }
+    if (error) *error = "requested source line has no executable mapping";
+    return false;
+}
 
 bool write_bootstrap_elf(const uint8_t* code,
                          uint32_t codeBytes,
@@ -210,6 +423,7 @@ bool write_bootstrap_elf(const uint8_t* code,
     layout->imageBase = BOOTSTRAP_IMAGE_BASE;
     layout->entryPoint = entryPoint;
     layout->codeOffset = BOOTSTRAP_CODE_OFFSET;
+    layout->codeBytes = codeBytes;
     layout->entryCodeOffset = entryCodeOffset;
     layout->dataOffset = rodataOffset;
     layout->dataAddress = readOnlyDataBytes == 0 ? 0 : BOOTSTRAP_IMAGE_BASE + rodataOffset;

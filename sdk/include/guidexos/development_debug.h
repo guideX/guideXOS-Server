@@ -9,6 +9,7 @@ extern "C" {
 #define GX_DEVELOPMENT_DEBUG_API_VERSION 1u
 #define GX_DEVELOPMENT_DEBUG_MAX_ERROR_BYTES 128u
 #define GX_DEVELOPMENT_DEBUG_MAX_FUNCTION_NAME_BYTES 64u
+#define GX_DEVELOPMENT_DEBUG_MAX_SOURCE_PATH_BYTES 160u
 
 typedef enum gx_development_debug_command {
     GX_DEVELOPMENT_DEBUG_BIND_SOFTWARE_BREAKPOINT = 1,
@@ -132,6 +133,13 @@ typedef struct gx_development_debug_snapshot {
     uint32_t pauseReason;
     uint32_t reserved3;
     char functionName[GX_DEVELOPMENT_DEBUG_MAX_FUNCTION_NAME_BYTES];
+    /* Append-only Phase 28A source-breakpoint identity. */
+    uint64_t rawTrapRip;
+    char sourcePath[GX_DEVELOPMENT_DEBUG_MAX_SOURCE_PATH_BYTES];
+    uint32_t sourceLine;
+    uint32_t sourceColumn;
+    uint32_t sourceMappingValid;
+    uint32_t reserved4;
 } gx_development_debug_snapshot;
 
 enum {
@@ -154,7 +162,8 @@ enum {
 
 enum {
     GX_DEVELOPMENT_DEBUG_PAUSE_REASON_NONE = 0,
-    GX_DEVELOPMENT_DEBUG_PAUSE_REASON_ENTRY_BREAKPOINT = 1
+    GX_DEVELOPMENT_DEBUG_PAUSE_REASON_ENTRY_BREAKPOINT = 1,
+    GX_DEVELOPMENT_DEBUG_PAUSE_REASON_SOURCE_BREAKPOINT = 2
 };
 
 #ifdef __cplusplus

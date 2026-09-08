@@ -96,6 +96,10 @@ typedef struct gx_development_run_request {
     uint64_t artifactSize;
     const char* artifactArchitecture;
     const char* artifactAbi;
+    /* Optional source breakpoint selection used with DEBUG_CONTROLLED. */
+    const char* debugSourcePath;
+    uint32_t debugSourceLine;
+    uint32_t debugSourceColumn;
 } gx_development_run_request;
 
 typedef struct gx_development_run_output_line {

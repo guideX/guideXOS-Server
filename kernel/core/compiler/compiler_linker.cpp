@@ -166,7 +166,8 @@ bool link_modules(const CompiledModule* modules, uint32_t moduleCount,
             module.mutableDataBytes > COMPILER_MAX_LINKED_DATA_BYTES ||
             module.exportCount > COMPILER_MAX_MODULE_SYMBOLS ||
             module.importCount > COMPILER_MAX_MODULE_SYMBOLS ||
-            module.relocationCount > COMPILER_MAX_MODULE_RELOCATIONS) {
+            module.relocationCount > COMPILER_MAX_MODULE_RELOCATIONS ||
+            module.sourceMapCount > COMPILER_MAX_SOURCE_MAPPINGS) {
             diagnostics.error((SourceLocation){0, 1, 1},
                               "compiled module exceeds bounded representation", "linker");
             return false;
@@ -363,6 +364,64 @@ bool link_modules(const CompiledModule* modules, uint32_t moduleCount,
     if (entryCount != 1) {
         diagnostics.error((SourceLocation){0, 1, 1}, "duplicate gx_main entry function", "linker");
         return false;
+    }
+
+    // Carry the source identity and statement ranges through the link in the
+    // same deterministic source-path order as the object cache.
+    output->sourceFileCount = static_cast<uint16_t>(moduleCount);
+    for (uint32_t m = 0; m < moduleCount; ++m) {
+        const CompiledModule& module = *ordered[m];
+        copy_name(output->sourceFiles[m].path, sizeof(output->sourceFiles[m].path), module.sourcePath);
+        output->sourceFiles[m].sourceBytes = module.sourceBytes;
+        output->sourceFiles[m].sourceHash = module.sourceHash;
+        for (uint32_t i = 0; i < module.sourceMapCount; ++i) {
+            const SourceMapping& mapping = module.sourceMappings[i];
+            if (mapping.functionIndex >= module.functionCount || mapping.line == 0 ||
+                mapping.column == 0 || mapping.moduleCodeOffset > module.codeBytes ||
+                mapping.instructionBytes > module.codeBytes - mapping.moduleCodeOffset) {
+                diagnostics.error((SourceLocation){0, 1, 1}, "source-map range is out of bounds", "source-map");
+                return false;
+            }
+            const int32_t functionExport = find_module_function_export(module, mapping.functionIndex);
+            if (functionExport < 0) {
+                diagnostics.error((SourceLocation){0, 1, 1}, "source-map function is missing", "source-map");
+                return false;
+            }
+            uint16_t functionIndex = COMPILER_INVALID_INDEX;
+            for (uint32_t f = 0; f < output->sourceMapFunctionCount; ++f) {
+                if (names_equal(output->sourceMapFunctions[f].name,
+                                module.exports[functionExport].name)) {
+                    functionIndex = static_cast<uint16_t>(f);
+                    break;
+                }
+            }
+            if (functionIndex == COMPILER_INVALID_INDEX) {
+                if (output->sourceMapFunctionCount >= COMPILER_MAX_SOURCE_MAP_FUNCTIONS) {
+                    diagnostics.error((SourceLocation){0, 1, 1}, "source-map function capacity exceeded", "source-map");
+                    return false;
+                }
+                functionIndex = output->sourceMapFunctionCount++;
+                copy_name(output->sourceMapFunctions[functionIndex].name,
+                          sizeof(output->sourceMapFunctions[functionIndex].name),
+                          module.exports[functionExport].name);
+            }
+            if (output->sourceMappingCount >= COMPILER_MAX_LINKED_SOURCE_MAPPINGS) {
+                diagnostics.error((SourceLocation){0, 1, 1}, "linked source-map capacity exceeded", "source-map");
+                return false;
+            }
+            LinkedProgram::LinkedSourceMapping& linked =
+                output->sourceMappings[output->sourceMappingCount++];
+            linked = {};
+            linked.sourceFileIndex = static_cast<uint16_t>(m);
+            linked.functionIndex = functionIndex;
+            linked.line = mapping.line;
+            linked.column = mapping.column;
+            if (!add_u32(moduleCodeOffsets[m], mapping.moduleCodeOffset, &linked.finalCodeOffset)) {
+                diagnostics.error((SourceLocation){0, 1, 1}, "source-map code offset overflowed", "source-map");
+                return false;
+            }
+            linked.instructionBytes = mapping.instructionBytes;
+        }
     }
 
     // Imports are declarations that are actually used by generated code.

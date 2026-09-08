@@ -29,8 +29,9 @@ gx_result debug(const gx_development_debug_request& request,
                 gx_development_debug_snapshot* outSnapshot);
 
 // Loader/debug-trap integration hooks. They are intentionally limited to the
-// one compiler-known gx_main entry breakpoint used by Phase 27Z.
+// one compiler-known gx_main entry breakpoint or one mapped source breakpoint.
 bool native_elf_debug_entry_breakpoint_requested();
+bool native_elf_debug_breakpoint_target(uint64_t* targetAddress);
 bool native_elf_debug_breakpoint_installed(uint64_t targetAddress, uint8_t originalByte);
 bool native_elf_debug_breakpoint_exception(NativeElfDebugTrap::BreakpointContext* context);
 void native_elf_debug_breakpoint_install_failed();

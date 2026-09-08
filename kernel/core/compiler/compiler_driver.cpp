@@ -794,6 +794,13 @@ static bool compile_project_impl(const char* const* sourcePaths,
         return fail_project(summary);
     }
 
+    if (!append_bootstrap_source_map(s_linked, s_elf, sizeof(s_elf), &layout)) {
+        Diagnostics diagnostics;
+        diagnostics.error(driverLocation, "ELF source map could not be appended", "source-map");
+        if (summary) append_diagnostics(diagnostics, summary, "<link>");
+        return fail_project(summary);
+    }
+
     ElfValidationResult producedValidation = {};
     if (!validate_bootstrap_elf(s_elf, layout.outputBytes, layout.imageBase,
                                 layout.codeOffset, s_linked.code, s_linked.codeBytes,

@@ -235,10 +235,12 @@ bool compile_module_from_source(const char* sourcePath,
     if (!flatten_global_data(s_unit, module, diagnostics)) return false;
 
 #if defined(__x86_64__)
-    if (!amd64::emit_translation_unit_module(s_unit, module->code, sizeof(module->code),
-                                             &module->codeBytes, &module->entryCodeOffset,
-                                             module->relocations, COMPILER_MAX_MODULE_RELOCATIONS,
-                                             &module->relocationCount)) {
+    if (!amd64::emit_translation_unit_module_with_source_map(
+            s_unit, module->code, sizeof(module->code), &module->codeBytes,
+            &module->entryCodeOffset, module->relocations,
+            COMPILER_MAX_MODULE_RELOCATIONS, &module->relocationCount,
+            module->sourceMappings, COMPILER_MAX_SOURCE_MAPPINGS,
+            &module->sourceMapCount)) {
         diagnostics.error({0, 1, 1}, "AMD64 backend rejected target-neutral IR", "backend");
         return false;
     }

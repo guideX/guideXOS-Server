@@ -73,6 +73,14 @@ bool emit_translation_unit_module(const TranslationUnitIR& unit,
                                   uint32_t relocationCapacity,
                                   uint32_t* relocationCount);
 
+bool emit_translation_unit_module_with_source_map(
+    const TranslationUnitIR& unit,
+    uint8_t* output, uint32_t outputCapacity,
+    uint32_t* outputSize, uint32_t* entryCodeOffset,
+    RelocationRecord* relocations, uint32_t relocationCapacity,
+    uint32_t* relocationCount, SourceMapping* sourceMappings,
+    uint32_t sourceMappingCapacity, uint32_t* sourceMappingCount);
+
 bool emit_function(const FunctionIR& function,
                    uint8_t* output,
                    uint32_t outputCapacity,

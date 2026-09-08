@@ -55,6 +55,9 @@ static const uint32_t COMPILER_MAX_PROJECT_IMPORTS = 128;
 static const uint32_t COMPILER_MAX_PROJECT_RELOCATIONS = 256;
 static const uint32_t COMPILER_MAX_MODULE_RELOCATIONS = 64;
 static const uint32_t COMPILER_MAX_SOURCE_PATH_BYTES = 256;
+static const uint32_t COMPILER_MAX_SOURCE_MAPPINGS = COMPILER_MAX_STATEMENTS;
+static const uint32_t COMPILER_MAX_LINKED_SOURCE_MAPPINGS = 256;
+static const uint32_t COMPILER_MAX_SOURCE_MAP_FUNCTIONS = COMPILER_MAX_FUNCTIONS * COMPILER_MAX_TRANSLATION_UNITS;
 static const uint32_t COMPILER_MAX_DECLARATION_DEPENDENCIES = 32;
 static const uint32_t COMPILER_MAX_DECLARATION_BYTES = 64 * 1024;
 static const uint32_t COMPILER_MAX_INCLUDE_DEPTH = 8;
@@ -73,7 +76,7 @@ static const uint32_t COMPILER_MAX_POINTER_TEMPORARY_SLOTS = COMPILER_MAX_PARAME
 // independent from the compiler phase number: changing object-producing
 // semantics requires incrementing COMPILER_OBJECT_ABI_VERSION.
 static const uint16_t COMPILER_OBJECT_FORMAT_VERSION = 2;
-static const uint16_t COMPILER_OBJECT_ABI_VERSION = 8;
+static const uint16_t COMPILER_OBJECT_ABI_VERSION = 9;
 static const uint32_t COMPILER_OBJECT_ARCH_AMD64 = 1;
 static const uint32_t COMPILER_OBJECT_TARGET_ABI_GUIDEXOS_C_V1 = 1;
 static const uint32_t COMPILER_MAX_OBJECT_BYTES = 131072;
@@ -491,6 +494,15 @@ struct RelocationRecord {
     SourceLocation location;
 };
 
+struct SourceMapping {
+    uint16_t functionIndex;
+    uint16_t reserved;
+    uint32_t line;
+    uint32_t column;
+    uint32_t moduleCodeOffset;
+    uint32_t instructionBytes;
+};
+
 // A dependency is a canonical project-relative declaration path plus the
 // exact content identity read during compilation.  It is persisted in .gx.meta
 // so cache reuse never depends on process-lifetime state or timestamps.
@@ -571,6 +583,8 @@ struct CompiledModule {
     uint16_t dependencyCount;
     uint16_t reservedDependencies;
     DeclarationDependency dependencies[COMPILER_MAX_DECLARATION_DEPENDENCIES];
+    uint32_t sourceMapCount;
+    SourceMapping sourceMappings[COMPILER_MAX_SOURCE_MAPPINGS];
 };
 
 struct GlobalFunctionSymbol {
@@ -614,6 +628,25 @@ struct LinkedProgram {
     uint32_t relocationCount;
     uint16_t recursiveSccCount;
     bool recursiveFunction[COMPILER_MAX_PROJECT_EXPORTS];
+    uint16_t sourceFileCount;
+    uint16_t sourceMapFunctionCount;
+    uint32_t sourceMappingCount;
+    struct SourceMapFile {
+        char path[COMPILER_MAX_SOURCE_PATH_BYTES];
+        uint32_t sourceBytes;
+        uint64_t sourceHash;
+    } sourceFiles[COMPILER_MAX_TRANSLATION_UNITS];
+    struct SourceMapFunction {
+        char name[COMPILER_FUNCTION_NAME_CAPACITY];
+    } sourceMapFunctions[COMPILER_MAX_SOURCE_MAP_FUNCTIONS];
+    struct LinkedSourceMapping {
+        uint16_t sourceFileIndex;
+        uint16_t functionIndex;
+        uint32_t line;
+        uint32_t column;
+        uint32_t finalCodeOffset;
+        uint32_t instructionBytes;
+    } sourceMappings[COMPILER_MAX_LINKED_SOURCE_MAPPINGS];
     bool linked;
 };
 

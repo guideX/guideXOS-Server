@@ -36,7 +36,7 @@ static bool s_nxEnabled = false;
 static uint8_t s_file[NATIVE_APP_MAX_ELF_FILE_BYTES];
 static NativeAppExecutionContext s_appRuntime = {};
 static char s_bareBuildStrings[8][768] = {};
-static char s_bareRunStrings[9][768] = {};
+static char s_bareRunStrings[10][768] = {};
 static char s_bareDebugStrings[1][GX_DEVELOPMENT_RUN_MAX_SHA256_BYTES] = {};
 static const uint64_t NESTED_APPLICATION_STACK_BASE =
     APPLICATION_STACK_BASE - APPLICATION_STACK_SIZE;
@@ -655,6 +655,12 @@ static gx_result GX_CALL host_bare_run_prepare(
     copied.artifactSha256 = s_bareRunStrings[6];
     copied.artifactArchitecture = s_bareRunStrings[7];
     copied.artifactAbi = s_bareRunStrings[8];
+    copied.debugSourcePath = nullptr;
+    if (request->debugSourcePath) {
+        if (!app_string(request->debugSourcePath, s_bareRunStrings[9], sizeof(s_bareRunStrings[9])))
+            return GX_ERROR_INVALID_ARGUMENT;
+        copied.debugSourcePath = s_bareRunStrings[9];
+    }
 
     gx_development_run_snapshot local = {};
     local.size = sizeof(local);
@@ -1144,10 +1150,10 @@ static void flush_debug_instruction(uint8_t* address)
 #endif
 }
 
-bool install_debug_entry_breakpoint(uint64_t targetAddress, uint8_t* originalByte)
+bool install_debug_breakpoint(uint64_t targetAddress, uint8_t* originalByte)
 {
     if (!originalByte || s_debugEntryBreakpointInstalled || targetAddress == 0 ||
-        targetAddress != s_appRuntime.entryPoint || s_appRuntime.imageBase == 0 ||
+        s_appRuntime.imageBase == 0 ||
         s_appRuntime.imageSize == 0 ||
         !native_app_pointer_in_range(targetAddress, s_appRuntime.imageBase,
                                      s_appRuntime.imageSize)) return false;
@@ -1185,6 +1191,11 @@ bool install_debug_entry_breakpoint(uint64_t targetAddress, uint8_t* originalByt
     s_debugEntryBreakpointOriginalByte = original;
     *originalByte = original;
     return true;
+}
+
+bool install_debug_entry_breakpoint(uint64_t targetAddress, uint8_t* originalByte)
+{
+    return install_debug_breakpoint(targetAddress, originalByte);
 }
 
 bool restore_debug_entry_breakpoint()
@@ -1321,15 +1332,19 @@ static bool run_file_internal(const char* path,
         s_appRuntime.appContext.userData == &s_appRuntime;
 
     if (NativeElfRunService::native_elf_debug_entry_breakpoint_requested()) {
+        uint64_t breakpointTarget = validation.entryPoint;
+        uint64_t requestedTarget = 0;
+        if (NativeElfRunService::native_elf_debug_breakpoint_target(&requestedTarget) &&
+            requestedTarget != 0) breakpointTarget = requestedTarget;
         uint8_t originalByte = 0;
-        if (!install_debug_entry_breakpoint(validation.entryPoint, &originalByte) ||
+        if (!install_debug_breakpoint(breakpointTarget, &originalByte) ||
             !NativeElfRunService::native_elf_debug_breakpoint_installed(
-                validation.entryPoint, originalByte)) {
+                breakpointTarget, originalByte)) {
             (void)restore_debug_entry_breakpoint();
             s_appRuntime.state = NativeAppExecutionState::Failed;
             (void)teardown_application(report);
             return fail_report(report,
-                               "NativeElf debug entry breakpoint could not be installed");
+                               "NativeElf debug breakpoint could not be installed");
         }
     }
 

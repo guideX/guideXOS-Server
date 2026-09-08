@@ -10,7 +10,7 @@ namespace kernel {
 namespace compiler {
 
 static const uint32_t COMPILER_ELF_OBJECT_HEADER_BYTES = 64;
-static const uint32_t COMPILER_ELF_OBJECT_META_HEADER_BYTES = 104;
+static const uint32_t COMPILER_ELF_OBJECT_META_HEADER_BYTES = 112;
 
 struct ElfObjectHeaderView {
     uint16_t elfType;
@@ -43,6 +43,8 @@ struct ElfObjectHeaderView {
     uint32_t metaOffset;
     uint32_t dependencyCount;
     uint32_t dependencyMetadataBytes;
+    uint32_t sourceMapCount;
+    uint32_t sourceMapMetadataBytes;
     uint32_t metaBytes;
     uint32_t objectBytes;
     uint64_t objectChecksum;

@@ -98,3 +98,12 @@ compositor close, request safe cooperative cancellation, observe completion,
 and rerun after cleanup. Its lifecycle, generation, stale-build, race, and
 QEMU proof are documented in
 `docs/DEVELOPER_STUDIO_PHASE27Y_ASYNC_RUN_OWNERSHIP.md`.
+
+Phase 28A carries compiler-emitted source mappings through object reopen,
+linking, and a deterministic final-ELF `GXSM` trailer. A pre-launch request
+can select one project-relative source file and executable line; the NativeElf
+run owner resolves that line, installs a one-shot `INT3`, reports the source
+identity and raw/normalized RIP while paused, then resumes into the normal GUI
+and cleanup lifecycle. Its object ABI, mapping policy, stale-source controls,
+and focused QEMU proof are documented in
+`docs/DEVELOPER_STUDIO_PHASE28A_SOURCE_BREAKPOINT.md`.

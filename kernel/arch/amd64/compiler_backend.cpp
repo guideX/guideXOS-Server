@@ -56,13 +56,18 @@ public:
             RelocationRecord* relocations = nullptr,
             uint32_t relocationCapacity = 0,
             uint32_t* relocationCount = nullptr,
-            uint64_t readOnlyDataAddress = 0)
+            uint64_t readOnlyDataAddress = 0,
+            SourceMapping* sourceMappings = nullptr,
+            uint32_t sourceMappingCapacity = 0,
+            uint32_t* sourceMappingCount = nullptr)
         : m_output(output), m_capacity(capacity), m_offset(0), m_labelCount(0), m_fixupCount(0),
           m_loopDepth(0), m_rspMod16(8), m_temporaryDepth(0), m_maxTemporaryDepth(0),
           m_pointerTemporaryDepth(0), m_maxPointerTemporaryDepth(0),
           m_transientBytes(0), m_maxTransientBytes(0), m_relocations(relocations),
           m_relocationCapacity(relocationCapacity), m_relocationCount(relocationCount),
-          m_readOnlyDataAddress(readOnlyDataAddress)
+          m_readOnlyDataAddress(readOnlyDataAddress), m_sourceMappings(sourceMappings),
+          m_sourceMappingCapacity(sourceMappingCapacity), m_sourceMappingCount(sourceMappingCount),
+          m_sourceFunctionIndex(0)
     {
         for (uint32_t i = 0; i < COMPILER_MAX_BRANCH_LABELS; ++i) m_labels[i] = {};
         for (uint32_t i = 0; i < COMPILER_MAX_BRANCH_FIXUPS; ++i) m_fixups[i] = {};
@@ -89,6 +94,21 @@ public:
         return bytes(bytesValue, sizeof(bytesValue));
     }
     uint32_t size() const { return m_offset; }
+
+    void set_source_function(uint16_t functionIndex) { m_sourceFunctionIndex = functionIndex; }
+    void record_source_mapping(const SourceLocation& location, uint32_t start)
+    {
+        if (!m_sourceMappings || !m_sourceMappingCount || location.line == 0 ||
+            location.column == 0 || start >= m_offset ||
+            *m_sourceMappingCount >= m_sourceMappingCapacity) return;
+        SourceMapping& mapping = m_sourceMappings[(*m_sourceMappingCount)++];
+        mapping = {};
+        mapping.functionIndex = m_sourceFunctionIndex;
+        mapping.line = location.line;
+        mapping.column = location.column;
+        mapping.moduleCodeOffset = start;
+        mapping.instructionBytes = m_offset - start;
+    }
 
     void begin_function()
     {
@@ -634,6 +654,10 @@ private:
     uint32_t m_relocationCapacity;
     uint32_t* m_relocationCount;
     uint64_t m_readOnlyDataAddress;
+    SourceMapping* m_sourceMappings;
+    uint32_t m_sourceMappingCapacity;
+    uint32_t* m_sourceMappingCount;
+    uint16_t m_sourceFunctionIndex;
     BranchLabel m_labels[COMPILER_MAX_BRANCH_LABELS];
     BranchFixup m_fixups[COMPILER_MAX_BRANCH_FIXUPS];
     LoopTarget m_loopStack[COMPILER_MAX_LOOP_TARGET_DEPTH] = {};
@@ -1806,9 +1830,13 @@ static bool emit_block(Emitter& emitter, const TranslationUnitIR& unit, const Fu
     uint16_t statementIndex = block.firstStatement;
     uint32_t visited = 0;
     while (statementIndex != COMPILER_INVALID_INDEX && visited++ < COMPILER_MAX_STATEMENTS) {
-        if (statementIndex >= function.statementCount ||
-            !emit_statement(emitter, unit, function, function.statements[statementIndex], dataAddress, frame,
-                             functionLabels, epilogueLabel, callFailureLabel, depth, loopDepth)) return false;
+        if (statementIndex >= function.statementCount) return false;
+        const Statement& statement = function.statements[statementIndex];
+        const uint32_t statementStart = emitter.size();
+        if (!emit_statement(emitter, unit, function, statement, dataAddress, frame,
+                            functionLabels, epilogueLabel, callFailureLabel, depth, loopDepth)) return false;
+        if (statement.kind != StatementKind::Block)
+            emitter.record_source_mapping(statement.location, statementStart);
         statementIndex = function.statements[statementIndex].nextStatement;
     }
     return statementIndex == COMPILER_INVALID_INDEX;
@@ -1928,13 +1956,17 @@ static bool emit_translation_unit_impl(const TranslationUnitIR& unit, uint64_t r
                                        uint32_t* entryCodeOffset,
                                        RelocationRecord* relocations,
                                        uint32_t relocationCapacity,
-                                       uint32_t* relocationCount)
+                                       uint32_t* relocationCount,
+                                       SourceMapping* sourceMappings,
+                                       uint32_t sourceMappingCapacity,
+                                       uint32_t* sourceMappingCount)
 {
     static_assert(offsetof(gx_app_context, host) == 8, "generated gx_app_context host offset changed");
     static_assert(offsetof(gx_host_calls, log) == 8, "generated gx_host_calls log offset changed");
     if (outputSize) *outputSize = 0;
     if (entryCodeOffset) *entryCodeOffset = 0;
     if (relocationCount) *relocationCount = 0;
+    if (sourceMappingCount) *sourceMappingCount = 0;
     if (!output || !outputSize || !entryCodeOffset || outputCapacity == 0 ||
          unit.functionCount > COMPILER_MAX_FUNCTIONS ||
          unit.globalCount > COMPILER_MAX_GLOBALS ||
@@ -1969,7 +2001,8 @@ static bool emit_translation_unit_impl(const TranslationUnitIR& unit, uint64_t r
     }
 
     Emitter emitter(output, outputCapacity, relocations, relocationCapacity, relocationCount,
-                    readOnlyDataAddress);
+                    readOnlyDataAddress, sourceMappings, sourceMappingCapacity,
+                    sourceMappingCount);
     uint16_t functionLabels[COMPILER_MAX_FUNCTIONS] = {};
     FrameLayout frames[COMPILER_MAX_FUNCTIONS] = {};
     for (uint32_t i = 0; i < unit.functionCount; ++i) {
@@ -2017,9 +2050,18 @@ static bool emit_translation_unit_impl(const TranslationUnitIR& unit, uint64_t r
         const FunctionIR& function = unit.functions[0];
         if (is_legacy_single_log(function)) {
             emitter = Emitter(output, outputCapacity, relocations, relocationCapacity, relocationCount,
-                              readOnlyDataAddress);
+                              readOnlyDataAddress, sourceMappings, sourceMappingCapacity,
+                              sourceMappingCount);
+            emitter.set_source_function(0);
+            const uint32_t statementStart = emitter.size();
             if (!emit_legacy_log(function, readOnlyDataAddress, emitter) || !emitter.byte(0xC3) ||
                 !emitter.patch_branches()) return false;
+            for (uint32_t i = 0; i < function.statementCount; ++i) {
+                if (function.statements[i].kind == StatementKind::HostLog) {
+                    emitter.record_source_mapping(function.statements[i].location, statementStart);
+                    break;
+                }
+            }
             *outputSize = emitter.size();
             *entryCodeOffset = 0;
             return true;
@@ -2029,10 +2071,14 @@ static bool emit_translation_unit_impl(const TranslationUnitIR& unit, uint64_t r
             function.blockCount == 1 && function.statementCount == 1 &&
             function.returnCount == 1) {
             emitter = Emitter(output, outputCapacity, relocations, relocationCapacity, relocationCount,
-                              readOnlyDataAddress);
+                              readOnlyDataAddress, sourceMappings, sourceMappingCapacity,
+                              sourceMappingCount);
+            emitter.set_source_function(0);
+            const uint32_t statementStart = emitter.size();
             if (!emit_expression(emitter, unit, function, frames[0], functionLabels, function.returnExpression,
                                  COMPILER_INVALID_INDEX, COMPILER_INVALID_INDEX) ||
                 !emitter.byte(0xC3) || !emitter.patch_branches()) return false;
+            emitter.record_source_mapping(function.statements[0].location, statementStart);
             *outputSize = emitter.size();
             *entryCodeOffset = 0;
             return true;
@@ -2043,6 +2089,7 @@ static bool emit_translation_unit_impl(const TranslationUnitIR& unit, uint64_t r
         const FunctionIR& function = unit.functions[i];
         const uint32_t start = emitter.size();
         const uint32_t functionStart = emitter.size();
+        emitter.set_source_function(static_cast<uint16_t>(i));
         if (!emitter.define_label(functionLabels[i])) return false;
         const_cast<FunctionIR&>(unit.functions[i]).codeOffset = functionStart;
         if (i == unit.entryFunction) *entryCodeOffset = start;
@@ -2081,6 +2128,17 @@ static bool emit_translation_unit_impl(const TranslationUnitIR& unit, uint64_t r
     }
     if (!emitter.patch_branches() ||
         (unit.entryFunction != COMPILER_INVALID_INDEX && *entryCodeOffset >= emitter.size())) return false;
+    if (sourceMappings && sourceMappingCount) {
+        for (uint32_t i = 1; i < *sourceMappingCount; ++i) {
+            SourceMapping current = sourceMappings[i];
+            uint32_t j = i;
+            while (j != 0 && sourceMappings[j - 1U].moduleCodeOffset > current.moduleCodeOffset) {
+                sourceMappings[j] = sourceMappings[j - 1U];
+                --j;
+            }
+            sourceMappings[j] = current;
+        }
+    }
     *outputSize = emitter.size();
     return *outputSize != 0;
 }
@@ -2090,7 +2148,8 @@ bool emit_translation_unit(const TranslationUnitIR& unit, uint64_t readOnlyDataA
                            uint32_t* entryCodeOffset)
 {
     return emit_translation_unit_impl(unit, readOnlyDataAddress, output, outputCapacity,
-                                      outputSize, entryCodeOffset, nullptr, 0, nullptr);
+                                      outputSize, entryCodeOffset, nullptr, 0, nullptr,
+                                      nullptr, 0, nullptr);
 }
 
 bool emit_translation_unit_module(const TranslationUnitIR& unit,
@@ -2103,7 +2162,22 @@ bool emit_translation_unit_module(const TranslationUnitIR& unit,
     if (!relocations || !relocationCount) return false;
     return emit_translation_unit_impl(unit, 0, output, outputCapacity, outputSize,
                                       entryCodeOffset, relocations, relocationCapacity,
-                                      relocationCount);
+                                      relocationCount, nullptr, 0, nullptr);
+}
+
+bool emit_translation_unit_module_with_source_map(
+    const TranslationUnitIR& unit, uint8_t* output, uint32_t outputCapacity,
+    uint32_t* outputSize, uint32_t* entryCodeOffset, RelocationRecord* relocations,
+    uint32_t relocationCapacity, uint32_t* relocationCount,
+    SourceMapping* sourceMappings, uint32_t sourceMappingCapacity,
+    uint32_t* sourceMappingCount)
+{
+    if (!relocations || !relocationCount || !sourceMappings || !sourceMappingCount)
+        return false;
+    return emit_translation_unit_impl(unit, 0, output, outputCapacity, outputSize,
+                                      entryCodeOffset, relocations, relocationCapacity,
+                                      relocationCount, sourceMappings,
+                                      sourceMappingCapacity, sourceMappingCount);
 }
 
 bool emit_function(const FunctionIR& function, uint64_t readOnlyDataAddress,

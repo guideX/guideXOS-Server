@@ -5,6 +5,7 @@
 #include "kernel/core/compiler/compiler_linker.h"
 #include "kernel/core/compiler/compiler_module.h"
 #include "kernel/core/compiler/compiler_object.h"
+#include "kernel/core/compiler/elf_writer.h"
 
 using namespace kernel::compiler;
 
@@ -177,6 +178,7 @@ static bool test_round_trip_and_determinism()
         "int gx_main(gx_app_context* ctx) { add_two(); log(ctx, \"persisted\"); return answer; }\n";
     CompiledModule original = {};
     if (!require(compile_text("src/main.cpp", source, &original), "global/import module compiles")) return false;
+    if (!require(original.sourceMapCount != 0, "module source mappings are produced")) return false;
     original.dependencyCount = 2;
     std::strcpy(original.dependencies[0].path, "include/common.h");
     original.dependencies[0].bytes = 26;
@@ -220,6 +222,9 @@ static bool test_round_trip_and_determinism()
                  same_bytes(restored.mutableData, original.mutableData, original.mutableDataBytes) &&
                  restored.exportCount == original.exportCount && restored.importCount == original.importCount &&
                  restored.relocationCount == original.relocationCount &&
+                 restored.sourceMapCount == original.sourceMapCount &&
+                 restored.sourceMappings[0].line == original.sourceMappings[0].line &&
+                 restored.sourceMappings[0].moduleCodeOffset == original.sourceMappings[0].moduleCodeOffset &&
                  restored.dependencyCount == original.dependencyCount &&
                  std::strcmp(restored.dependencies[0].path, original.dependencies[0].path) == 0 &&
                  std::strcmp(restored.dependencies[1].path, original.dependencies[1].path) == 0 &&
@@ -239,6 +244,22 @@ static bool test_round_trip_and_determinism()
     Diagnostics linkA, linkB;
     if (!require(link_modules(modulesA, 1, &linkedA, linkA), "original module links")) return false;
     if (!require(link_modules(modulesB, 1, &linkedB, linkB), "deserialized module links")) return false;
+    if (!require(linkedA.sourceMappingCount != 0 && linkedA.sourceFileCount == 1,
+                 "linked source mappings retain source identity")) return false;
+    uint8_t image[BOOTSTRAP_MAX_ELF_BYTES] = {};
+    ElfLayout layout = {};
+    if (!require(write_bootstrap_elf(linkedA.code, linkedA.codeBytes, linkedA.data, linkedA.dataBytes,
+                                     linkedA.mutableData, linkedA.mutableDataBytes,
+                                     linkedA.entryCodeOffset, image, sizeof(image), &layout) &&
+                 append_bootstrap_source_map(linkedA, image, sizeof(image), &layout),
+                 "final ELF source-map trailer is emitted")) return false;
+    ResolvedSourceMapping resolved = {};
+    const char* resolveError = nullptr;
+    if (!require(resolve_bootstrap_source_mapping(image, layout.outputBytes, layout.imageBase,
+                                                  layout.codeOffset, layout.codeBytes,
+                                                  "src/main.cpp", 4, 0, &resolved,
+                                                  &resolveError) && resolved.targetAddress > layout.entryPoint,
+                 "final ELF source mapping resolves to a real mid-function address")) return false;
     return require(linkedA.codeBytes == linkedB.codeBytes && linkedA.dataBytes == linkedB.dataBytes &&
                    linkedA.mutableDataBytes == linkedB.mutableDataBytes &&
                    same_bytes(linkedA.code, linkedB.code, linkedA.codeBytes) &&
@@ -271,6 +292,109 @@ static bool test_recursive_metadata_round_trip()
     Diagnostics linkDiagnostics;
     return require(link_modules(linkedModules, 1, &linked, linkDiagnostics),
                    "deserialized recursive module links");
+}
+
+static bool test_source_map_relocation_and_multifile()
+{
+    const char* firstSource =
+        "int gx_main(gx_app_context* ctx)\n"
+        "{\n"
+        "    log(ctx, \"relocate\");\n"
+        "    return 42;\n"
+        "}\n";
+    const char* movedSource =
+        "int gx_main(gx_app_context* ctx)\n"
+        "{\n"
+        "    int padding = 0;\n"
+        "    log(ctx, \"relocate\");\n"
+        "    return 42;\n"
+        "}\n";
+    CompiledModule first = {}, moved = {};
+    if (!require(compile_text("src/main.cpp", firstSource, &first), "relocation baseline compiles") ||
+        !require(compile_text("src/main.cpp", movedSource, &moved), "relocation rebuild compiles")) return false;
+    CompiledModule firstModules[1] = {first};
+    CompiledModule movedModules[1] = {moved};
+    LinkedProgram firstLinked = {}, movedLinked = {};
+    Diagnostics firstDiagnostics, movedDiagnostics;
+    if (!require(link_modules(firstModules, 1, &firstLinked, firstDiagnostics) &&
+                 link_modules(movedModules, 1, &movedLinked, movedDiagnostics),
+                 "relocation modules link")) return false;
+    static uint8_t firstImage[BOOTSTRAP_MAX_ELF_BYTES] = {};
+    static uint8_t movedImage[BOOTSTRAP_MAX_ELF_BYTES] = {};
+    ElfLayout firstLayout = {}, movedLayout = {};
+    if (!require(write_bootstrap_elf(firstLinked.code, firstLinked.codeBytes,
+                                     firstLinked.data, firstLinked.dataBytes,
+                                     firstLinked.mutableData, firstLinked.mutableDataBytes,
+                                     firstLinked.entryCodeOffset, firstImage, sizeof(firstImage),
+                                     &firstLayout) &&
+                 append_bootstrap_source_map(firstLinked, firstImage, sizeof(firstImage), &firstLayout) &&
+                 write_bootstrap_elf(movedLinked.code, movedLinked.codeBytes,
+                                     movedLinked.data, movedLinked.dataBytes,
+                                     movedLinked.mutableData, movedLinked.mutableDataBytes,
+                                     movedLinked.entryCodeOffset, movedImage, sizeof(movedImage),
+                                     &movedLayout) &&
+                 append_bootstrap_source_map(movedLinked, movedImage, sizeof(movedImage), &movedLayout),
+                 "relocation images emit source maps")) return false;
+    ResolvedSourceMapping firstResolved = {}, movedResolved = {};
+    const char* error = nullptr;
+    const bool relocationResolved = resolve_bootstrap_source_mapping(firstImage, firstLayout.outputBytes,
+                                                   firstLayout.imageBase, firstLayout.codeOffset,
+                                                   firstLayout.codeBytes, "src/main.cpp", 3, 0,
+                                                   &firstResolved, &error) &&
+                 resolve_bootstrap_source_mapping(movedImage, movedLayout.outputBytes,
+                                                   movedLayout.imageBase, movedLayout.codeOffset,
+                                                   movedLayout.codeBytes, "src/main.cpp", 4, 0,
+                                                   &movedResolved, &error) &&
+                 firstResolved.targetAddress != movedResolved.targetAddress &&
+                 firstResolved.finalCodeOffset != movedResolved.finalCodeOffset;
+    if (!require(relocationResolved,
+                 "rebuild relocates the selected source line")) return false;
+    if (!require(!resolve_bootstrap_source_mapping(firstImage, firstLayout.outputBytes,
+                                                    firstLayout.imageBase, firstLayout.codeOffset,
+                                                    firstLayout.codeBytes, "src/missing.cpp", 3, 0,
+                                                    nullptr, &error) &&
+                 !resolve_bootstrap_source_mapping(firstImage, firstLayout.outputBytes,
+                                                    firstLayout.imageBase, firstLayout.codeOffset,
+                                                    firstLayout.codeBytes, "src/main.cpp", 1, 0,
+                                                    nullptr, &error),
+                 "unknown and non-executable source lines are rejected")) return false;
+    static uint8_t corruptImage[BOOTSTRAP_MAX_ELF_BYTES] = {};
+    std::memcpy(corruptImage, firstImage, firstLayout.outputBytes);
+    corruptImage[firstLayout.outputBytes - 1U] ^= 1U;
+    if (!require(!resolve_bootstrap_source_mapping(corruptImage, firstLayout.outputBytes,
+                                                    firstLayout.imageBase, firstLayout.codeOffset,
+                                                    firstLayout.codeBytes, "src/main.cpp", 3, 0,
+                                                    nullptr, &error),
+                 "corrupt source-map trailer is rejected")) return false;
+
+    const char* mainSource =
+        "int helper();\n"
+        "int gx_main(gx_app_context* ctx) { return helper(); }\n";
+    const char* helperSource = "int helper() { return 1; }\n";
+    CompiledModule mainModule = {}, helperModule = {};
+    if (!require(compile_text("src/main.cpp", mainSource, &mainModule) &&
+                 compile_text("src/helper.cpp", helperSource, &helperModule),
+                 "multi-file source-map modules compile")) return false;
+    CompiledModule multiModules[2] = {mainModule, helperModule};
+    LinkedProgram multiLinked = {};
+    Diagnostics multiDiagnostics;
+    if (!require(link_modules(multiModules, 2, &multiLinked, multiDiagnostics) &&
+                 multiLinked.sourceFileCount == 2,
+                 "multi-file source-map identities remain distinct")) return false;
+    static uint8_t multiImage[BOOTSTRAP_MAX_ELF_BYTES] = {};
+    ElfLayout multiLayout = {};
+    if (!require(write_bootstrap_elf(multiLinked.code, multiLinked.codeBytes,
+                                     multiLinked.data, multiLinked.dataBytes,
+                                     multiLinked.mutableData, multiLinked.mutableDataBytes,
+                                     multiLinked.entryCodeOffset, multiImage, sizeof(multiImage),
+                                     &multiLayout) &&
+                 append_bootstrap_source_map(multiLinked, multiImage, sizeof(multiImage), &multiLayout) &&
+                 resolve_bootstrap_source_mapping(multiImage, multiLayout.outputBytes,
+                                                   multiLayout.imageBase, multiLayout.codeOffset,
+                                                   multiLayout.codeBytes, "src/helper.cpp", 1, 0,
+                                                   nullptr, &error),
+                 "multi-file helper source mapping resolves")) return false;
+    return true;
 }
 
 static bool test_rejection_and_bounds()
@@ -330,6 +454,7 @@ int main()
     if (!test_round_trip_and_determinism()) return 1;
     if (!test_rejection_and_bounds()) return 1;
     if (!test_recursive_metadata_round_trip()) return 1;
+    if (!test_source_map_relocation_and_multifile()) return 1;
     std::puts("compiler_object_host_test: PASS");
     return 0;
 }

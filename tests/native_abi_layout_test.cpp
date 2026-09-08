@@ -72,7 +72,7 @@ static_assert(offsetof(gx_host_calls, bare_metal_development_run_cancel) == 384,
 static_assert(offsetof(gx_host_calls, bare_metal_development_debug) == 392,
               "bare-metal development debug slot changed");
 static_assert(sizeof(gx_host_calls) == 400, "gx_host_calls size changed");
-static_assert(sizeof(gx_development_run_request) == 96, "development run request size changed");
+static_assert(sizeof(gx_development_run_request) == 112, "development run request size changed");
 static_assert(offsetof(gx_development_run_request, projectRoot) == 8, "development run request project root offset changed");
 static_assert(offsetof(gx_development_run_request, artifactSha256) == 56, "development run request artifact hash offset changed");
 static_assert(offsetof(gx_development_run_request, flags) == 64, "development run request flags offset changed");
@@ -80,6 +80,9 @@ static_assert(offsetof(gx_development_run_request, reserved) == 68, "development
 static_assert(offsetof(gx_development_run_request, artifactSize) == 72, "development run artifact size offset changed");
 static_assert(offsetof(gx_development_run_request, artifactArchitecture) == 80, "development run artifact architecture offset changed");
 static_assert(offsetof(gx_development_run_request, artifactAbi) == 88, "development run artifact ABI offset changed");
+static_assert(offsetof(gx_development_run_request, debugSourcePath) == 96, "development run source path offset changed");
+static_assert(offsetof(gx_development_run_request, debugSourceLine) == 104, "development run source line offset changed");
+static_assert(offsetof(gx_development_run_request, debugSourceColumn) == 108, "development run source column offset changed");
 static_assert(sizeof(gx_development_debug_request) == 104, "development debug request size changed");
 static_assert(GX_DEVELOPMENT_DEBUG_STEP_OUT_RETURN == 14, "Step Out command must be appended after command 13");
 static_assert(offsetof(gx_development_debug_request, threadId) == 72, "development debug thread id offset changed");
@@ -97,7 +100,12 @@ static_assert(offsetof(gx_development_debug_snapshot, functionName) == 488,
               "development debug function name offset changed");
 static_assert(offsetof(gx_development_debug_snapshot, internalBreakpointPurpose) == 432,
               "internal breakpoint purpose must occupy the appended snapshot slot");
-static_assert(sizeof(gx_development_debug_snapshot) == 552, "development debug snapshot size changed");
+static_assert(offsetof(gx_development_debug_snapshot, rawTrapRip) == 552, "development debug raw RIP offset changed");
+static_assert(offsetof(gx_development_debug_snapshot, sourcePath) == 560, "development debug source path offset changed");
+static_assert(offsetof(gx_development_debug_snapshot, sourceLine) == 720, "development debug source line offset changed");
+static_assert(offsetof(gx_development_debug_snapshot, sourceColumn) == 724, "development debug source column offset changed");
+static_assert(offsetof(gx_development_debug_snapshot, sourceMappingValid) == 728, "development debug source mapping offset changed");
+static_assert(sizeof(gx_development_debug_snapshot) == 736, "development debug snapshot size changed");
 static_assert(offsetof(gx_development_run_snapshot, closeRequested) == 4552,
               "development run close-request slot changed");
 static_assert(offsetof(gx_development_run_snapshot, cancellationRequested) == 4556,
