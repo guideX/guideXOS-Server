@@ -3595,7 +3595,86 @@ capacity, event cache, JS26–JS32 editing/focus behavior, and existing
 `document.activeElement`/event read-only properties remain unchanged. This is
 bounded form-state projection, not full HTML forms DOM compatibility.
 
-The recommended JS34 direction is to audit whether a tiny canonical
-`option.defaultSelected` projection can be added without introducing option
-collections or a second selection model; otherwise continue with bounded form
-submission observability.
+## Phase JS34: bounded form/select collections
+
+JS34 adds live, bounded host projections for the existing form controls:
+
+```javascript
+form.elements
+form.length
+select.options
+select.length
+form.elements[0]
+select.options[0]
+```
+
+`form.elements` is ordered by document structure and includes supported
+`input` controls (text, password, search, email, URL, number, checkbox, radio,
+button, submit, and reset), `textarea`, and `select`. Hidden, unsupported, and
+`option` nodes are excluded. `select.options` is ordered by the select's
+bounded option vector. Both collections expose a read-only `length`, return
+`undefined` for non-canonical or out-of-range numeric properties, and reject
+replacement writes. The collection itself is canonical for its owner and
+document generation, and each indexed element resolves to the same canonical
+host object returned by ordinary DOM lookup.
+
+The implementation does not add JavaScript-owned arrays or a second form
+model. A collection host stores only its owner serial, generation, and
+collection kind; each indexed read scans the bounded structural metadata or
+the existing select option vector. Form membership uses parser-recorded
+containment (`parentFormSerial`), so controls in another form or outside a
+form cannot leak into the projection. The parser now also completes button
+metadata after assigning its structural serial, allowing button, submit, and
+reset controls to participate in the same collection contract.
+
+Option hosts reuse their existing structural option serials. They expose
+read-only `value`, writable `selected`, and writable `defaultSelected`:
+
+- `selected = true` makes that option current, updates `selectedIndex` and
+  `value`, and clears the other options; `selected = false` clears the
+  single-select when that option is current.
+- `defaultSelected = true` selects that option as the single reset default;
+  setting it false clears the default only when it is the active default. The
+  current selection is not changed by a default write.
+- These scripted option writes are silent. They do not synthesize `input`,
+  `change`, or `reset`; an uncanceled reset applies the mutable default, and
+  submit reads the current selection.
+
+All indexed collection and option operations use the normal host generation
+guard. Old form, collection, select, and option handles fail closed after
+document invalidation or replacement, while a new document receives
+independent collections and defaults. Collection reads are bounded by the
+existing structural/control/option caps and do not allocate a second
+proportional snapshot.
+
+The focused proof is
+`tests/navigator_javascript_js34_test.cpp`, run by
+`scripts/smoke-navigator-javascript-js34.ps1`. It reports 221 checks with 0
+failures and passes both the optimized `GXOS_BARE_METAL` harness and the
+strict `-Wall -Wextra -Werror -pedantic` adapter/runtime syntax lane. Coverage
+includes form/select lengths, canonical indexed identity and ordering,
+cross-form isolation, bounds and read-only behavior, option current/default
+separation, selected-index/value coherence, silent writes, reset and submit,
+focus and button activation through indexed controls, stale handles, document
+replacement, and JS26/JS30/JS33 regression baselines.
+
+The hosted fixture is `navigator-smoke/javascript-js34.html`. The production
+`navigator.smoke` aggregate covers initial collection projection, exclusive
+default selection, indexed current selection, focus, reset, current-value
+submit, and document replacement. The full repository JavaScript matrix is 32
+scripts: JS6 through JS34 plus the lexer, parser, and runtime lanes; all pass.
+In the final hosted run, all seven JS34 checks passed; the aggregate reported
+477 passed and 7 failed out of 484. Those seven failures are the existing
+unrelated CSS 3C, CSS 3G, CSS 6A, three CSS 6B checks, and CSS 6C.
+The production `build.bat` completed successfully. The required
+`build-kernel.bat` retry built the PacMan image, ramdisk, and UEFI bootloader,
+then stopped at the existing Mbed TLS configuration errors in
+`third_party/mbedtls/library/mbedtls_check_config.h`: `Unsupported partial
+support for ECC curves acceleration` and `MBEDTLS_KEY_EXCHANGE_ECDHE_RSA_ENABLED
+defined, but not all prerequisites`. QEMU was not launched because no fresh
+kernel image was produced; no TLS configuration was changed.
+
+The recommended JS35 direction is bounded `document.forms` plus a deliberately
+small named lookup contract, reusing the same owner-serial/generation pattern
+without adding live collection mutation or broad HTMLFormControlsCollection
+compatibility.

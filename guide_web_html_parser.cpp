@@ -6941,12 +6941,25 @@ static void handleOpenTag(ParserState& st, const std::string& tagBody)
 		std::string type = toLower(trim(extractAttr(tagBody, "type")));
 		if (type.empty()) type = "submit";
 		if (type == "submit" || type == "button" || type == "reset") {
-			elementRef.formControl = makeFormControlMetadata(st, elementRef,
+            elementRef.formControl = makeFormControlMetadata(st, elementRef,
 				type == "button" ? FormControlType::Button : (type == "reset" ? FormControlType::Reset : FormControlType::Submit),
 				type, true);
-			elementRef.formControl.disabled = hasAttr(tagBody, "disabled") || disabledByFieldset(st);
-			st.open = OpenTag::ButtonSubmit;
-			if (pushElement(st, elementRef)) ++st.doc.formsDiagnostics.htmlButtonsParsed;
+            elementRef.formControl.disabled = hasAttr(tagBody, "disabled") || disabledByFieldset(st);
+            st.open = OpenTag::ButtonSubmit;
+            if (pushElement(st, elementRef)) {
+                st.openElements.back().formControl.logicalSerial =
+                    st.openElements.back().serial;
+                st.openElements.back().formControl.metadataComplete =
+                    st.uncapturedOpenElementDepth == 0;
+                if (HtmlElementRef* stored = findStructuralElement(st,
+                        st.openElements.back().serial)) {
+                    stored->formControl.logicalSerial =
+                        st.openElements.back().serial;
+                    stored->formControl.metadataComplete =
+                        st.openElements.back().formControl.metadataComplete;
+                }
+                ++st.doc.formsDiagnostics.htmlButtonsParsed;
+            }
 			activateCurrentBlock(st);
 		} else {
 			++st.doc.formsDiagnostics.unsupportedControlCount;

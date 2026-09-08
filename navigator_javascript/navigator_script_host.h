@@ -17,6 +17,8 @@ namespace javascript {
 // Element and the fixed document instance for the document root.
 constexpr HostObjectKind kNavigatorDocumentHostKind = 0x4A530801u;
 constexpr HostObjectKind kNavigatorElementHostKind = 0x4A530802u;
+constexpr HostObjectKind kNavigatorFormCollectionHostKind = 0x4A530803u;
+constexpr HostObjectKind kNavigatorOptionsCollectionHostKind = 0x4A530804u;
 constexpr HostInstanceId kNavigatorDocumentHostInstance = 1u;
 
 constexpr std::uint32_t kNavigatorGetElementByIdMethod = 1u;
@@ -247,6 +249,17 @@ private:
     bool isDiscreteFormElement(HostInstanceId serial) const;
     bool isCheckableFormElement(HostInstanceId serial) const;
     bool isSelectFormElement(HostInstanceId serial) const;
+    bool isOptionElement(HostInstanceId serial) const;
+    bool optionIndexFor(HostInstanceId optionSerial,
+        HostInstanceId& selectSerial, std::size_t& optionIndex) const;
+    bool formElementAt(HostInstanceId formSerial, std::size_t index,
+        HostInstanceId& elementSerial) const;
+    std::size_t formElementCount(HostInstanceId formSerial) const;
+    bool selectOptionAt(HostInstanceId selectSerial, std::size_t index,
+        HostInstanceId& optionSerial) const;
+    HostResult setOptionSelected(HostInstanceId optionSerial, bool selected);
+    HostResult setOptionDefaultSelected(HostInstanceId optionSerial,
+        bool selected);
     gxos::web::DocBlock* formControlBlock(HostInstanceId serial);
     const gxos::web::DocBlock* formControlBlock(HostInstanceId serial) const;
     gxos::web::FormRuntimeControlState* formRuntimeState(HostInstanceId serial);

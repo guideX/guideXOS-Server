@@ -23,6 +23,39 @@ bool textEquals(SourceView text, const char* expected)
         std::string(text.data, text.length) == expected;
 }
 
+bool parseCanonicalIndex(SourceView text, std::size_t& index)
+{
+    index = 0;
+    if (text.data == nullptr || text.length == 0) return false;
+    if (text.length > 1u && text.data[0] == '0') return false;
+    for (std::size_t position = 0; position < text.length; ++position) {
+        const unsigned char character = static_cast<unsigned char>(
+            text.data[position]);
+        if (character < static_cast<unsigned char>('0') ||
+            character > static_cast<unsigned char>('9')) return false;
+    }
+    const auto parsed = std::from_chars(text.data, text.data + text.length,
+        index);
+    return parsed.ec == std::errc() && parsed.ptr == text.data + text.length;
+}
+
+bool booleanFromHostValue(const HostValue& value)
+{
+    switch (value.type) {
+    case HostValueType::Boolean:
+        return value.booleanValue;
+    case HostValueType::Number:
+        return value.numberValue != 0.0 && !std::isnan(value.numberValue);
+    case HostValueType::String:
+        return value.stringValue.length != 0;
+    case HostValueType::Null:
+    case HostValueType::Undefined:
+        return false;
+    default:
+        return true;
+    }
+}
+
 const gxos::web::HtmlElementRef* findElementInDocument(
     const gxos::web::WebDocument& document, HostInstanceId serial,
     std::size_t nodeLimit)
@@ -1003,6 +1036,143 @@ bool NavigatorScriptHostAdapter::isSelectFormElement(
         block->type == gxos::web::BlockType::FormSelect;
 }
 
+bool NavigatorScriptHostAdapter::isOptionElement(HostInstanceId serial) const
+{
+    const gxos::web::HtmlElementRef* element = findElement(serial);
+    return element != nullptr &&
+        element->formControl.supported &&
+        element->formControl.type == gxos::web::FormControlType::Option;
+}
+
+bool NavigatorScriptHostAdapter::optionIndexFor(HostInstanceId optionSerial,
+    HostInstanceId& selectSerial, std::size_t& optionIndex) const
+{
+    selectSerial = 0;
+    optionIndex = 0;
+    const gxos::web::HtmlElementRef* option = findElement(optionSerial);
+    if (option == nullptr || !isOptionElement(optionSerial) ||
+        option->parentSerial == 0) return false;
+    const gxos::web::DocBlock* select = formControlBlock(option->parentSerial);
+    if (select == nullptr || select->type != gxos::web::BlockType::FormSelect)
+        return false;
+
+    std::size_t index = 0;
+    const std::size_t count = std::min(limits_.maxDocumentNodes,
+        document_->structuralElements.size());
+    for (std::size_t position = 0; position < count; ++position) {
+        const gxos::web::HtmlElementRef& candidate =
+            document_->structuralElements[position];
+        if (candidate.formControl.type != gxos::web::FormControlType::Option ||
+            candidate.parentSerial != option->parentSerial) continue;
+        if (candidate.serial == optionSerial) {
+            if (index >= select->options.size()) return false;
+            selectSerial = option->parentSerial;
+            optionIndex = index;
+            return true;
+        }
+        ++index;
+    }
+    return false;
+}
+
+bool NavigatorScriptHostAdapter::formElementAt(HostInstanceId formSerial,
+    std::size_t index, HostInstanceId& elementSerial) const
+{
+    elementSerial = 0;
+    if (!isFormElement(formSerial)) return false;
+    std::size_t matched = 0;
+    const std::size_t count = std::min(limits_.maxDocumentNodes,
+        document_->structuralElements.size());
+    for (std::size_t position = 0; position < count; ++position) {
+        const gxos::web::HtmlElementRef& element =
+            document_->structuralElements[position];
+        const gxos::web::FormControlMetadata& metadata = element.formControl;
+        if (element.serial == 0 || !metadata.metadataComplete ||
+            !metadata.supported || metadata.parentFormSerial != formSerial ||
+            metadata.type == gxos::web::FormControlType::None ||
+            metadata.type == gxos::web::FormControlType::Option ||
+            metadata.type == gxos::web::FormControlType::Unsupported) continue;
+        if (matched == index) {
+            elementSerial = element.serial;
+            return true;
+        }
+        ++matched;
+    }
+    return false;
+}
+
+std::size_t NavigatorScriptHostAdapter::formElementCount(
+    HostInstanceId formSerial) const
+{
+    if (!isFormElement(formSerial)) return 0;
+    std::size_t count = 0;
+    HostInstanceId ignored = 0;
+    while (formElementAt(formSerial, count, ignored)) ++count;
+    return count;
+}
+
+bool NavigatorScriptHostAdapter::selectOptionAt(HostInstanceId selectSerial,
+    std::size_t index, HostInstanceId& optionSerial) const
+{
+    optionSerial = 0;
+    const gxos::web::DocBlock* select = formControlBlock(selectSerial);
+    if (select == nullptr || select->type != gxos::web::BlockType::FormSelect ||
+        index >= select->options.size()) return false;
+
+    std::size_t matched = 0;
+    const std::size_t count = std::min(limits_.maxDocumentNodes,
+        document_->structuralElements.size());
+    for (std::size_t position = 0; position < count; ++position) {
+        const gxos::web::HtmlElementRef& element =
+            document_->structuralElements[position];
+        if (element.formControl.type != gxos::web::FormControlType::Option ||
+            element.parentSerial != selectSerial) continue;
+        if (matched == index) {
+            optionSerial = element.serial;
+            return optionSerial != 0;
+        }
+        ++matched;
+    }
+    return false;
+}
+
+HostResult NavigatorScriptHostAdapter::setOptionSelected(
+    HostInstanceId optionSerial, bool selected)
+{
+    HostInstanceId selectSerial = 0;
+    std::size_t optionIndex = 0;
+    if (!optionIndexFor(optionSerial, selectSerial, optionIndex))
+        return HostResult{HostResultCode::PropertyWriteFailed};
+    const gxos::web::DocBlock* select = formControlBlock(selectSerial);
+    if (select == nullptr || select->formControl.multiple)
+        return HostResult{HostResultCode::PropertyWriteFailed};
+    if (!selected && select->selectedOption != static_cast<int>(optionIndex))
+        return HostResult();
+    return setSelectIndex(selectSerial, selected
+        ? static_cast<int>(optionIndex) : -1, true);
+}
+
+HostResult NavigatorScriptHostAdapter::setOptionDefaultSelected(
+    HostInstanceId optionSerial, bool selected)
+{
+    HostInstanceId selectSerial = 0;
+    std::size_t optionIndex = 0;
+    if (!optionIndexFor(optionSerial, selectSerial, optionIndex))
+        return HostResult{HostResultCode::PropertyWriteFailed};
+    const gxos::web::DocBlock* select = formControlBlock(selectSerial);
+    gxos::web::FormRuntimeControlState* state = formRuntimeState(selectSerial);
+    if (select == nullptr || state == nullptr || select->formControl.multiple)
+        return HostResult{HostResultCode::PropertyWriteFailed};
+    if (document_->scriptMutationCount >= limits_.maxDocumentMutations)
+        return HostResult{HostResultCode::DocumentMutationLimitExceeded};
+    state->defaultSelectedOption = selected
+        ? static_cast<int>(optionIndex) :
+        (state->defaultSelectedOption == static_cast<int>(optionIndex)
+            ? -1 : state->defaultSelectedOption);
+    ++document_->scriptMutationCount;
+    return HostResult();
+}
+
 bool NavigatorScriptHostAdapter::isDiscreteFormElement(
     HostInstanceId serial) const
 {
@@ -1596,6 +1766,14 @@ HostResult NavigatorScriptHostAdapter::validate(
         isKnownElementSerial(object.instanceId)) {
         return HostResult();
     }
+    if (object.kind == kNavigatorFormCollectionHostKind &&
+        isFormElement(object.instanceId)) {
+        return HostResult();
+    }
+    if (object.kind == kNavigatorOptionsCollectionHostKind &&
+        isSelectFormElement(object.instanceId)) {
+        return HostResult();
+    }
     return HostResult{HostResultCode::InvalidObject};
 }
 
@@ -1637,8 +1815,79 @@ HostResult NavigatorScriptHostAdapter::getProperty(
         return HostResult{HostResultCode::PropertyNotFound};
     }
 
+    if (object.kind == kNavigatorFormCollectionHostKind) {
+        if (textEquals(property, "length")) {
+            result = HostValue::number(static_cast<double>(
+                formElementCount(object.instanceId)));
+            return HostResult();
+        }
+        std::size_t index = 0;
+        if (!parseCanonicalIndex(property, index))
+            return HostResult{HostResultCode::PropertyNotFound};
+        HostInstanceId elementSerial = 0;
+        if (!formElementAt(object.instanceId, index, elementSerial)) {
+            result = HostValue::undefined();
+            return HostResult();
+        }
+        result = HostValue::fromHostObject(HostObjectReference{
+            elementSerial, generation_, kNavigatorElementHostKind});
+        return HostResult();
+    }
+
+    if (object.kind == kNavigatorOptionsCollectionHostKind) {
+        const gxos::web::DocBlock* select =
+            formControlBlock(object.instanceId);
+        if (select == nullptr || select->type != gxos::web::BlockType::FormSelect)
+            return HostResult{HostResultCode::InvalidObject};
+        if (textEquals(property, "length")) {
+            result = HostValue::number(static_cast<double>(
+                select->options.size()));
+            return HostResult();
+        }
+        std::size_t index = 0;
+        if (!parseCanonicalIndex(property, index))
+            return HostResult{HostResultCode::PropertyNotFound};
+        HostInstanceId optionSerial = 0;
+        if (!selectOptionAt(object.instanceId, index, optionSerial)) {
+            result = HostValue::undefined();
+            return HostResult();
+        }
+        result = HostValue::fromHostObject(HostObjectReference{
+            optionSerial, generation_, kNavigatorElementHostKind});
+        return HostResult();
+    }
+
     const gxos::web::HtmlElementRef* element = findElement(object.instanceId);
     if (element == nullptr) return HostResult{HostResultCode::InvalidObject};
+    if (textEquals(property, "elements")) {
+        if (!isFormElement(element->serial))
+            return HostResult{HostResultCode::PropertyNotFound};
+        result = HostValue::fromHostObject(HostObjectReference{
+            element->serial, generation_, kNavigatorFormCollectionHostKind});
+        return HostResult();
+    }
+    if (textEquals(property, "options")) {
+        if (!isSelectFormElement(element->serial))
+            return HostResult{HostResultCode::PropertyNotFound};
+        result = HostValue::fromHostObject(HostObjectReference{
+            element->serial, generation_, kNavigatorOptionsCollectionHostKind});
+        return HostResult();
+    }
+    if (textEquals(property, "length")) {
+        if (isFormElement(element->serial)) {
+            result = HostValue::number(static_cast<double>(
+                formElementCount(element->serial)));
+            return HostResult();
+        }
+        if (isSelectFormElement(element->serial)) {
+            const gxos::web::DocBlock* block =
+                formControlBlock(element->serial);
+            result = HostValue::number(static_cast<double>(
+                block == nullptr ? 0u : block->options.size()));
+            return HostResult();
+        }
+        return HostResult{HostResultCode::PropertyNotFound};
+    }
     if (textEquals(property, "id")) {
         result = HostValue::string(SourceView(element->id.data(),
             element->id.size()));
@@ -1660,6 +1909,17 @@ HostResult NavigatorScriptHostAdapter::getProperty(
         return HostResult();
     }
     if (textEquals(property, "value")) {
+        HostInstanceId selectSerial = 0;
+        std::size_t optionIndex = 0;
+        if (optionIndexFor(element->serial, selectSerial, optionIndex)) {
+            const gxos::web::DocBlock* block = formControlBlock(selectSerial);
+            if (block == nullptr || optionIndex >= block->options.size())
+                return HostResult{HostResultCode::InvalidObject};
+            result = HostValue::string(SourceView(
+                block->options[optionIndex].value.data(),
+                block->options[optionIndex].value.size()));
+            return HostResult();
+        }
         const gxos::web::DocBlock* block = formControlBlock(element->serial);
         if (block == nullptr || (!isTextEditableFormElement(element->serial) &&
                 !isSelectFormElement(element->serial)))
@@ -1694,6 +1954,31 @@ HostResult NavigatorScriptHostAdapter::getProperty(
             formRuntimeState(element->serial);
         if (state == nullptr) return HostResult{HostResultCode::StaleObject};
         result = HostValue::boolean(state->defaultChecked);
+        return HostResult();
+    }
+    if (textEquals(property, "selected")) {
+        HostInstanceId selectSerial = 0;
+        std::size_t optionIndex = 0;
+        if (!optionIndexFor(element->serial, selectSerial, optionIndex))
+            return HostResult{HostResultCode::PropertyNotFound};
+        const gxos::web::DocBlock* block = formControlBlock(selectSerial);
+        if (block == nullptr || optionIndex >= block->options.size())
+            return HostResult{HostResultCode::InvalidObject};
+        result = HostValue::boolean(block->selectedOption ==
+            static_cast<int>(optionIndex));
+        return HostResult();
+    }
+    if (textEquals(property, "defaultSelected")) {
+        HostInstanceId selectSerial = 0;
+        std::size_t optionIndex = 0;
+        if (!optionIndexFor(element->serial, selectSerial, optionIndex))
+            return HostResult{HostResultCode::PropertyNotFound};
+        const gxos::web::FormRuntimeControlState* state =
+            formRuntimeState(selectSerial);
+        if (state == nullptr)
+            return HostResult{HostResultCode::StaleObject};
+        result = HostValue::boolean(state->defaultSelectedOption ==
+            static_cast<int>(optionIndex));
         return HostResult();
     }
     if (textEquals(property, "selectedIndex")) {
@@ -1953,9 +2238,21 @@ HostResult NavigatorScriptHostAdapter::setProperty(
     if (object.kind == kNavigatorDocumentHostKind &&
         textEquals(property, "activeElement"))
         return HostResult{HostResultCode::PropertyReadOnly};
+    if (object.kind == kNavigatorFormCollectionHostKind ||
+        object.kind == kNavigatorOptionsCollectionHostKind)
+        return HostResult{HostResultCode::PropertyReadOnly};
     if (object.kind != kNavigatorElementHostKind)
         return HostResult{HostResultCode::PropertyWriteFailed};
+    if ((isFormElement(object.instanceId) &&
+            (textEquals(property, "elements") ||
+             textEquals(property, "length"))) ||
+        (isSelectFormElement(object.instanceId) &&
+            (textEquals(property, "options") ||
+             textEquals(property, "length"))))
+        return HostResult{HostResultCode::PropertyReadOnly};
     if (textEquals(property, "id") || textEquals(property, "tagName"))
+        return HostResult{HostResultCode::PropertyReadOnly};
+    if (textEquals(property, "value") && isOptionElement(object.instanceId))
         return HostResult{HostResultCode::PropertyReadOnly};
     if (textEquals(property, "value")) {
         std::string text;
@@ -2018,6 +2315,18 @@ HostResult NavigatorScriptHostAdapter::setProperty(
             break;
         }
         return setElementDefaultChecked(object.instanceId, checked);
+    }
+    if (textEquals(property, "selected")) {
+        if (!isOptionElement(object.instanceId))
+            return HostResult{HostResultCode::PropertyWriteFailed};
+        return setOptionSelected(object.instanceId,
+            booleanFromHostValue(value));
+    }
+    if (textEquals(property, "defaultSelected")) {
+        if (!isOptionElement(object.instanceId))
+            return HostResult{HostResultCode::PropertyWriteFailed};
+        return setOptionDefaultSelected(object.instanceId,
+            booleanFromHostValue(value));
     }
     if (textEquals(property, "selectedIndex")) {
         if (!isSelectFormElement(object.instanceId) ||

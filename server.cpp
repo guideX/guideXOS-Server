@@ -3322,6 +3322,106 @@ static std::string navigatorHostedSmokeDiagnostic() {
         std::string("away=") + yesNo(js33NavigatedAway) + ",reload=" +
         yesNo(js33Reloaded) + ",text=" + summarizeText(js33AfterReload, 520));
 
+    const std::string js34FixtureUrl =
+        "http://127.0.0.1:8080/navigator-smoke/javascript-js34.html";
+    const bool js34Loaded = gxos::apps::Navigator::SmokeNavigateToQuiet(
+        js34FixtureUrl);
+    const std::string js34InitialText =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS34 hosted fixture loads bounded form and options collections",
+        js34Loaded && gxos::apps::Navigator::SmokeCurrentUrl() == js34FixtureUrl &&
+        contains(js34InitialText, "Navigator JavaScript JS34") &&
+        contains(js34InitialText,
+            "initial:length=7:formLength=7:order=true:identity=true:options=3:selectLength=3:optionValue=b:index=0:value=a:selectedA=true:selectedB=false:selectedC=false:defaultA=true:defaultB=false:defaultC=false:name=alice:notes=hello:checked=true:input=0:change=0:resets=0:submit=none") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("loaded=") + yesNo(js34Loaded) + ",text=" +
+        summarizeText(js34InitialText, 760));
+
+    const bool js34MutateTrigger =
+        gxos::apps::Navigator::SmokeClickFormControlById("js34-trigger-mutate");
+    const std::string js34AfterMutate =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS34 option defaultSelected is exclusive while current selection stays separate",
+        js34MutateTrigger &&
+        gxos::apps::Navigator::SmokeFormControlValueById("js34-name") ==
+            "current" &&
+        !gxos::apps::Navigator::SmokeFormControlCheckedById("js34-yes") &&
+        contains(js34AfterMutate,
+            "mutated:length=7:formLength=7:order=true:identity=true:options=3:selectLength=3:optionValue=b:index=2:value=c:selectedA=false:selectedB=false:selectedC=true:defaultA=false:defaultB=true:defaultC=false:name=current:notes=current-notes:checked=false:input=0:change=0") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("mutate=") + yesNo(js34MutateTrigger) + ",text=" +
+        summarizeText(js34AfterMutate, 820));
+
+    const bool js34SelectTrigger =
+        gxos::apps::Navigator::SmokeClickFormControlById("js34-trigger-select");
+    const std::string js34AfterSelect =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS34 indexed option selection keeps selectedIndex, value, and events coherent",
+        js34SelectTrigger && contains(js34AfterSelect,
+            "selected:length=7:formLength=7:order=true:identity=true:options=3:selectLength=3:optionValue=b:index=1:value=b:selectedA=false:selectedB=true:selectedC=false:defaultA=false:defaultB=true:defaultC=false:name=current:notes=current-notes:checked=false:input=0:change=0") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("select=") + yesNo(js34SelectTrigger) + ",text=" +
+        summarizeText(js34AfterSelect, 820));
+
+    const bool js34FocusTrigger =
+        gxos::apps::Navigator::SmokeClickFormControlById("js34-trigger-focus");
+    const std::string js34AfterFocus =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS34 form collection focus resolves the indexed control",
+        js34FocusTrigger &&
+        gxos::apps::Navigator::SmokeFocusedFormControlId() == "js34-name" &&
+        contains(js34AfterFocus, "focused:length=7:formLength=7:order=true") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("focus=") + yesNo(js34FocusTrigger) + ",focused=" +
+        gxos::apps::Navigator::SmokeFocusedFormControlId() + ",text=" +
+        summarizeText(js34AfterFocus, 360));
+
+    const bool js34ResetTrigger =
+        gxos::apps::Navigator::SmokeClickFormControlById("js34-reset");
+    const bool js34ResetObservation =
+        gxos::apps::Navigator::SmokeClickFormControlById("js34-trigger-focus");
+    const std::string js34AfterReset =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS34 reset restores the default option and current form values",
+        js34ResetTrigger && js34ResetObservation &&
+        gxos::apps::Navigator::SmokeFormControlValueById("js34-name") ==
+            "alice" &&
+        gxos::apps::Navigator::SmokeFormControlValueById("js34-mode") == "b" &&
+        gxos::apps::Navigator::SmokeFormControlCheckedById("js34-yes") &&
+        contains(js34AfterReset,
+            "focused:length=7:formLength=7:order=true:identity=true:options=3:selectLength=3:optionValue=b:index=1:value=b:selectedA=false:selectedB=true:selectedC=false:defaultA=false:defaultB=true:defaultC=false:name=alice:notes=hello:checked=true:input=0:change=0:resets=1:submit=none") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("reset=") + yesNo(js34ResetTrigger) + ",observe=" +
+        yesNo(js34ResetObservation) + ",text=" +
+        summarizeText(js34AfterReset, 820));
+
+    const bool js34SubmitTrigger =
+        gxos::apps::Navigator::SmokeClickFormControlById("js34-trigger-submit");
+    const std::string js34AfterSubmit =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS34 submit reads current indexed selection without synthetic input/change events",
+        js34SubmitTrigger && gxos::apps::Navigator::SmokeCurrentUrl() ==
+            js34FixtureUrl && contains(js34AfterSubmit,
+            "submit:length=7:formLength=7:order=true:identity=true:options=3:selectLength=3:optionValue=b:index=2:value=c:selectedA=false:selectedB=false:selectedC=true:defaultA=false:defaultB=true:defaultC=false:name=alice:notes=hello:checked=true:input=0:change=0:resets=1:submit=alice:c:hello:true") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("submit=") + yesNo(js34SubmitTrigger) + ",url=" +
+        gxos::apps::Navigator::SmokeCurrentUrl() + ",text=" +
+        summarizeText(js34AfterSubmit, 900));
+
+    const bool js34NavigatedAway =
+        gxos::apps::Navigator::SmokeNavigateToQuiet("about:navigator");
+    const bool js34Reloaded = gxos::apps::Navigator::SmokeNavigateToQuiet(
+        js34FixtureUrl);
+    const std::string js34AfterReload =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS34 document replacement restores independent collection state",
+        js34NavigatedAway && js34Reloaded && contains(js34AfterReload,
+            "initial:length=7:formLength=7:order=true:identity=true:options=3:selectLength=3:optionValue=b:index=0:value=a:selectedA=true:selectedB=false:selectedC=false:defaultA=true:defaultB=false:defaultC=false:name=alice:notes=hello:checked=true") &&
+        gxos::apps::Navigator::SmokeFocusedFormControlId().empty() &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("away=") + yesNo(js34NavigatedAway) + ",reload=" +
+        yesNo(js34Reloaded) + ",text=" + summarizeText(js34AfterReload, 820));
+
     bool cssInlineLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-inline.html");
     std::string cssInlineText = gxos::apps::Navigator::SmokeCurrentDocumentText();
     std::string cssInlineReport = gxos::apps::Navigator::SmokeRuntimeReport();

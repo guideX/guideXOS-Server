@@ -1,0 +1,112 @@
+<!doctype html>
+<html>
+<head><title>Navigator JavaScript JS34</title></head>
+<body>
+<h1>Navigator JavaScript JS34</h1>
+<p>Bounded form and select collections expose live indexed projections of
+  Navigator's document-owned form state.</p>
+<form id="js34-form">
+  <input id="js34-name" type="text" name="name" value="alice">
+  <select id="js34-mode" name="mode">
+    <option id="js34-option-a" value="a" selected>A</option>
+    <option id="js34-option-b" value="b">B</option>
+    <option id="js34-option-c" value="c">C</option>
+  </select>
+  <textarea id="js34-notes" name="notes">hello</textarea>
+  <input id="js34-yes" type="checkbox" name="yes" value="yes" checked>
+  <button id="js34-button" type="button">Button</button>
+  <button id="js34-submit" type="submit">Submit</button>
+  <button id="js34-reset" type="reset">Reset</button>
+</form>
+<button id="js34-trigger-mutate" type="button">Mutate</button>
+<button id="js34-trigger-select" type="button">Select</button>
+<button id="js34-trigger-reset" type="button">Reset form</button>
+<button id="js34-trigger-submit" type="button">Submit form</button>
+<button id="js34-trigger-focus" type="button">Focus</button>
+<form id="js34-form-b"><input id="js34-other" type="text" value="other"></form>
+<input id="js34-unowned" type="text" value="unowned">
+<p id="js34-state">initial</p>
+<script>
+var js34Form = document.getElementById("js34-form");
+var js34Name = document.getElementById("js34-name");
+var js34Mode = document.getElementById("js34-mode");
+var js34Notes = document.getElementById("js34-notes");
+var js34Yes = document.getElementById("js34-yes");
+var js34Button = document.getElementById("js34-button");
+var js34Submit = document.getElementById("js34-submit");
+var js34Reset = document.getElementById("js34-reset");
+var js34OptionA = document.getElementById("js34-option-a");
+var js34OptionB = document.getElementById("js34-option-b");
+var js34OptionC = document.getElementById("js34-option-c");
+var js34State = document.getElementById("js34-state");
+var js34Mutate = document.getElementById("js34-trigger-mutate");
+var js34Select = document.getElementById("js34-trigger-select");
+var js34ResetTrigger = document.getElementById("js34-trigger-reset");
+var js34SubmitTrigger = document.getElementById("js34-trigger-submit");
+var js34Focus = document.getElementById("js34-trigger-focus");
+var js34Inputs = 0;
+var js34Changes = 0;
+var js34Resets = 0;
+var js34SubmitValue = "none";
+var js34ButtonClicks = 0;
+
+function js34Snapshot(label) {
+  var elements = js34Form.elements;
+  var options = js34Mode.options;
+  js34State.textContent = label + ":length=" + elements.length +
+    ":formLength=" + js34Form.length + ":order=" +
+    (elements[0] === js34Name && elements[1] === js34Mode &&
+     elements[2] === js34Notes && elements[3] === js34Yes &&
+     elements[4] === js34Button && elements[5] === js34Submit &&
+     elements[6] === js34Reset) + ":identity=" +
+    (elements[0] === js34Form.elements[0] && options[0] === js34OptionA) +
+    ":options=" + options.length + ":selectLength=" + js34Mode.length +
+    ":optionValue=" + options[1].value + ":index=" + js34Mode.selectedIndex +
+    ":value=" + js34Mode.value + ":selectedA=" + js34OptionA.selected +
+    ":selectedB=" + js34OptionB.selected + ":selectedC=" +
+    js34OptionC.selected + ":defaultA=" + js34OptionA.defaultSelected +
+    ":defaultB=" + js34OptionB.defaultSelected + ":defaultC=" +
+    js34OptionC.defaultSelected + ":name=" + js34Name.value +
+    ":notes=" + js34Notes.value + ":checked=" + js34Yes.checked +
+    ":input=" + js34Inputs + ":change=" + js34Changes +
+    ":resets=" + js34Resets + ":submit=" + js34SubmitValue +
+    ":buttonClicks=" + js34ButtonClicks;
+}
+js34Form.addEventListener("input", function() { js34Inputs = js34Inputs + 1; });
+js34Form.addEventListener("change", function() { js34Changes = js34Changes + 1; });
+js34Form.addEventListener("reset", function() {
+  js34Resets = js34Resets + 1;
+  js34Snapshot("reset");
+});
+js34Form.addEventListener("submit", function(event) {
+  js34SubmitValue = js34Name.value + ":" + js34Mode.value + ":" +
+    js34Notes.value + ":" + js34Yes.checked;
+  event.preventDefault();
+  js34Snapshot("submit");
+});
+js34Button.addEventListener("click", function() { js34ButtonClicks = js34ButtonClicks + 1; });
+js34Mutate.addEventListener("click", function() {
+  js34Name.value = "current";
+  js34Notes.value = "current-notes";
+  js34Yes.checked = false;
+  js34OptionB.defaultSelected = true;
+  js34OptionC.selected = true;
+  js34Snapshot("mutated");
+});
+js34Select.addEventListener("click", function() {
+  js34Mode.options[1].selected = true;
+  js34Snapshot("selected");
+});
+js34ResetTrigger.addEventListener("click", function() { js34Reset.click(); });
+js34SubmitTrigger.addEventListener("click", function() {
+  js34OptionC.selected = true;
+  js34Submit.click();
+});
+js34Focus.addEventListener("click", function() {
+  js34Form.elements[0].focus();
+  js34Snapshot("focused");
+});
+js34Snapshot("initial");
+</script>
+</body>
+</html>
