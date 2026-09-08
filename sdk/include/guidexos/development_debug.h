@@ -8,6 +8,7 @@ extern "C" {
 
 #define GX_DEVELOPMENT_DEBUG_API_VERSION 1u
 #define GX_DEVELOPMENT_DEBUG_MAX_ERROR_BYTES 128u
+#define GX_DEVELOPMENT_DEBUG_MAX_FUNCTION_NAME_BYTES 64u
 
 typedef enum gx_development_debug_command {
     GX_DEVELOPMENT_DEBUG_BIND_SOFTWARE_BREAKPOINT = 1,
@@ -23,7 +24,9 @@ typedef enum gx_development_debug_command {
     GX_DEVELOPMENT_DEBUG_STEP_OVER_CALL = 11,
     GX_DEVELOPMENT_DEBUG_RESUME_INTERNAL_TRAP = 12,
     GX_DEVELOPMENT_DEBUG_STEP_INTERNAL_TRAP = 13,
-    GX_DEVELOPMENT_DEBUG_STEP_OUT_RETURN = 14
+    GX_DEVELOPMENT_DEBUG_STEP_OUT_RETURN = 14,
+    /* Phase 27Z: one bare-metal entry breakpoint control. */
+    GX_DEVELOPMENT_DEBUG_RESUME = 15
 } gx_development_debug_command;
 
 typedef enum gx_development_debug_status {
@@ -124,6 +127,11 @@ typedef struct gx_development_debug_snapshot {
        Native ELF thread stack; they are not host-process memory bounds. */
     uint64_t stackLow;
     uint64_t stackHigh;
+    /* Append-only Phase 27Z entry-stop identity. */
+    uint64_t sessionGeneration;
+    uint32_t pauseReason;
+    uint32_t reserved3;
+    char functionName[GX_DEVELOPMENT_DEBUG_MAX_FUNCTION_NAME_BYTES];
 } gx_development_debug_snapshot;
 
 enum {
@@ -142,6 +150,11 @@ enum {
     GX_DEVELOPMENT_DEBUG_INTERNAL_BREAKPOINT_NONE = 0,
     GX_DEVELOPMENT_DEBUG_INTERNAL_BREAKPOINT_STEP_OVER = 1,
     GX_DEVELOPMENT_DEBUG_INTERNAL_BREAKPOINT_STEP_OUT = 2
+};
+
+enum {
+    GX_DEVELOPMENT_DEBUG_PAUSE_REASON_NONE = 0,
+    GX_DEVELOPMENT_DEBUG_PAUSE_REASON_ENTRY_BREAKPOINT = 1
 };
 
 #ifdef __cplusplus

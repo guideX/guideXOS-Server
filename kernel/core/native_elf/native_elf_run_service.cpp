@@ -9,6 +9,7 @@
 #include "native_elf_scheduler.h"
 #include "native_elf_validator.h"
 #include "../include/kernel/kernel_app.h"
+#include "kernel/serial_debug.h"
 #include "kernel/vfs.h"
 
 #if defined(__x86_64__)
@@ -41,7 +42,15 @@ struct Operation {
     bool appModelRegistered;
     bool cleanupComplete;
     bool nativeRuntimeStarted;
+    bool debugControlled;
+    bool debugBreakpointInstalled;
+    bool debugBreakpointHit;
+    bool debugCancelRequested;
     uint64_t registrationGeneration;
+    uint64_t debugBreakpointAddress;
+    uint8_t debugBreakpointOriginalByte;
+    uint64_t debugStopGeneration;
+    gx_development_debug_snapshot debugSnapshot;
     uint64_t artifactSize;
     char projectRoot[GX_DEVELOPMENT_RUN_MAX_PROJECT_ROOT_BYTES];
     char projectId[GX_DEVELOPMENT_RUN_MAX_PROJECT_ID_BYTES];
@@ -195,6 +204,84 @@ static void snapshot_operation(const Operation& operation, gx_development_run_sn
         snapshot->generation = operation.registrationGeneration;
     }
 }
+
+static void clear_debug_snapshot(gx_development_debug_snapshot* snapshot)
+{
+    if (!snapshot) return;
+    *snapshot = {};
+    snapshot->size = sizeof(*snapshot);
+    snapshot->version = GX_DEVELOPMENT_DEBUG_API_VERSION;
+    snapshot->status = GX_DEVELOPMENT_DEBUG_STATUS_NONE;
+}
+
+static void set_debug_error(gx_development_debug_snapshot* snapshot, const char* message)
+{
+    clear_debug_snapshot(snapshot);
+    if (!snapshot) return;
+    snapshot->status = GX_DEVELOPMENT_DEBUG_STATUS_REJECTED;
+    copy_text(snapshot->errorMessage, sizeof(snapshot->errorMessage),
+              message ? message : "NativeElf debug request rejected");
+}
+
+static void set_debug_identity(const Operation& operation,
+                               gx_development_debug_snapshot* snapshot)
+{
+    if (!snapshot) return;
+    snapshot->bindingId = 1;
+    snapshot->processId = 0;
+    snapshot->nativeRuntimeId = operation.registrationGeneration;
+    snapshot->threadId = 1;
+    snapshot->sessionGeneration = operation.registrationGeneration;
+    snapshot->targetAddress = operation.debugBreakpointAddress;
+    snapshot->originalByte = operation.debugBreakpointOriginalByte;
+    snapshot->installedByte = operation.debugBreakpointInstalled ? 0xCC : operation.debugBreakpointOriginalByte;
+    snapshot->originalByteValid = operation.debugBreakpointInstalled || operation.debugBreakpointHit ? 1U : 0U;
+    snapshot->bindingInstalled = operation.debugBreakpointInstalled ? 1U : 0U;
+    snapshot->bindingCount = operation.debugBreakpointInstalled ? 1U : 0U;
+    copy_text(snapshot->functionName, sizeof(snapshot->functionName), "gx_main");
+}
+
+static void set_debug_ready_snapshot(const Operation& operation,
+                                     gx_development_debug_snapshot* snapshot)
+{
+    clear_debug_snapshot(snapshot);
+    if (!snapshot) return;
+    snapshot->status = GX_DEVELOPMENT_DEBUG_STATUS_READY;
+    set_debug_identity(operation, snapshot);
+}
+
+static bool debug_request_identity_matches(const Operation& operation,
+                                           const gx_development_debug_request& request)
+{
+    if (request.handle != operation.handle) return false;
+    if (request.sessionGeneration != 0 &&
+        request.sessionGeneration != operation.registrationGeneration) return false;
+    if (request.processId != 0) return false;
+    if (request.nativeRuntimeId != 0 &&
+        request.nativeRuntimeId != operation.registrationGeneration) return false;
+    if (request.threadId != 0 && request.threadId != 1) return false;
+    if (request.breakpointId != 0 && request.breakpointId != 1) return false;
+    if (request.targetAddress != 0 &&
+        request.targetAddress != operation.debugBreakpointAddress) return false;
+    if (request.artifactSha256 &&
+        !equal_text(request.artifactSha256, operation.artifactSha256)) return false;
+    if (request.stopGeneration != 0 &&
+        request.stopGeneration != operation.debugStopGeneration) return false;
+    return true;
+}
+
+static void serial_debug_hex(const char* prefix, uint64_t value)
+{
+    serial::puts(prefix);
+    serial::put_hex64(value);
+}
+
+#if defined(__x86_64__)
+extern "C" __attribute__((noinline)) int32_t native_elf_debug_cancel_return()
+{
+    return 0;
+}
+#endif
 
 static bool is_slash(char value) { return value == '/' || value == '\\'; }
 
@@ -500,7 +587,15 @@ static gx_development_run_error_code runtime_error_code(const NativeElfRunReport
 
 static void finish_execution(Operation& operation, bool success)
 {
+    const bool debugClean = restore_debug_entry_breakpoint();
+    if (operation.debugControlled) NativeElfDebugTrap::uninstall();
     clear_development_identity();
+    if (!debugClean) {
+        operation.report.teardownComplete = false;
+        fail_and_cleanup(operation, GX_DEVELOPMENT_RUN_ERROR_INTERNAL,
+                         "NativeElf debug breakpoint cleanup failed");
+        return;
+    }
     if (!success) {
         const gx_development_run_error_code error = runtime_error_code(operation.report);
         const char* message = operation.report.error
@@ -523,7 +618,8 @@ static void finish_execution(Operation& operation, bool success)
         return;
     }
 
-    operation.error = GX_DEVELOPMENT_RUN_ERROR_NONE;
+    operation.error = operation.cancellationRequested
+        ? GX_DEVELOPMENT_RUN_ERROR_CANCELLED : GX_DEVELOPMENT_RUN_ERROR_NONE;
     operation.state = operation.cancellationRequested
         ? GX_DEVELOPMENT_RUN_CANCELLED : GX_DEVELOPMENT_RUN_COMPLETED;
 }
@@ -614,6 +710,8 @@ gx_result prepare(const gx_development_run_request& request,
         s_operation = Operation();
         return GX_OK;
     }
+    s_operation.debugControlled =
+        (request.flags & GX_DEVELOPMENT_RUN_FLAG_DEBUG_CONTROLLED) != 0;
     if (app::AppManager::isAppAvailable(s_operation.applicationId)) {
         s_operation.state = GX_DEVELOPMENT_RUN_FAILED;
         s_operation.error = GX_DEVELOPMENT_RUN_ERROR_APPLICATION_ID_INSTALLED;
@@ -720,6 +818,15 @@ gx_result start(gx_development_run_handle handle) {
                          "NativeElf execution context could not be created");
         return GX_OK;
     }
+    if (s_operation.debugControlled &&
+        !NativeElfDebugTrap::install(native_elf_debug_breakpoint_exception)) {
+        native_elf_debug_breakpoint_install_failed();
+        s_schedulerActive = false;
+        s_targetContext = nullptr;
+        fail_and_cleanup(s_operation, GX_DEVELOPMENT_RUN_ERROR_LAUNCH_UNAVAILABLE,
+                         "NativeElf debug trap could not be installed");
+        return GX_OK;
+    }
     if (!native_elf_scheduler_pump()) {
         s_schedulerActive = false;
         s_targetContext = nullptr;
@@ -727,8 +834,13 @@ gx_result start(gx_development_run_handle handle) {
                          "NativeElf execution owner could not be scheduled");
     }
 #else
-    fail_and_cleanup(s_operation, GX_DEVELOPMENT_RUN_ERROR_LAUNCH_UNAVAILABLE,
-                     "Asynchronous NativeElf ownership is unavailable on this architecture");
+    fail_and_cleanup(s_operation,
+                     s_operation.debugControlled
+                         ? GX_DEVELOPMENT_RUN_ERROR_UNSUPPORTED_TARGET
+                         : GX_DEVELOPMENT_RUN_ERROR_LAUNCH_UNAVAILABLE,
+                     s_operation.debugControlled
+                         ? "NativeElf entry debugging is unavailable on this architecture"
+                         : "Asynchronous NativeElf ownership is unavailable on this architecture");
 #endif
     return GX_OK;
 }
@@ -806,12 +918,212 @@ gx_result cancel(gx_development_run_handle handle) {
     return GX_OK;
 }
 
+bool native_elf_debug_entry_breakpoint_requested()
+{
+    return s_operation.used && s_operation.debugControlled &&
+        s_operation.state != GX_DEVELOPMENT_RUN_COMPLETED &&
+        s_operation.state != GX_DEVELOPMENT_RUN_FAILED &&
+        s_operation.state != GX_DEVELOPMENT_RUN_CANCELLED;
+}
+
+bool native_elf_debug_breakpoint_installed(uint64_t targetAddress,
+                                           uint8_t originalByte)
+{
+    if (!s_operation.used || !s_operation.debugControlled ||
+        s_operation.state != GX_DEVELOPMENT_RUN_RUNNING ||
+        !debug_entry_breakpoint_installed() || targetAddress == 0) return false;
+    s_operation.debugBreakpointInstalled = true;
+    s_operation.debugBreakpointAddress = targetAddress;
+    s_operation.debugBreakpointOriginalByte = originalByte;
+    serial_debug_hex("DEVELOPER_STUDIO_PHASE27Z_BREAKPOINT_INSTALLED target=0x",
+                     targetAddress);
+    serial::puts(" function=gx_main original=0x");
+    serial::put_hex32(originalByte);
+    serial::putc('\n');
+    return true;
+}
+
+void native_elf_debug_breakpoint_install_failed()
+{
+    s_operation.debugBreakpointInstalled = false;
+    s_operation.debugBreakpointHit = false;
+    s_operation.debugBreakpointAddress = 0;
+    s_operation.debugBreakpointOriginalByte = 0;
+    if (s_operation.used && s_operation.debugControlled)
+        serial::puts("DEVELOPER_STUDIO_PHASE27Z_BREAKPOINT_INSTALL_FAIL\n");
+}
+
+bool native_elf_debug_breakpoint_exception(
+    NativeElfDebugTrap::BreakpointContext* context)
+{
+#if defined(__x86_64__)
+    if (!context || !s_operation.used || !s_operation.debugControlled ||
+        !s_operation.debugBreakpointInstalled || s_operation.debugBreakpointHit ||
+        s_operation.state != GX_DEVELOPMENT_RUN_RUNNING || !s_schedulerActive ||
+        !s_schedulerInTarget || !s_ownerContext || !s_targetContext ||
+        context->cs != 0x08 || context->rip != s_operation.debugBreakpointAddress + 1ULL) {
+        return false;
+    }
+    const NativeAppExecutionContext* runtime = native_elf_runtime_context();
+    if (!runtime || runtime->state != NativeAppExecutionState::Running ||
+        runtime->entryPoint != s_operation.debugBreakpointAddress ||
+        !native_app_pointer_in_range(runtime->entryPoint, runtime->imageBase,
+                                     runtime->imageSize)) return false;
+
+    ++s_operation.debugStopGeneration;
+    if (s_operation.debugStopGeneration == 0) s_operation.debugStopGeneration = 1;
+    s_operation.debugBreakpointHit = true;
+    s_operation.state = GX_DEVELOPMENT_RUN_PAUSED;
+    gx_development_debug_snapshot& snapshot = s_operation.debugSnapshot;
+    clear_debug_snapshot(&snapshot);
+    snapshot.status = GX_DEVELOPMENT_DEBUG_STATUS_TRAP;
+    snapshot.trapKind = GX_DEVELOPMENT_DEBUG_TRAP_BREAKPOINT;
+    set_debug_identity(s_operation, &snapshot);
+    snapshot.instructionPointer = s_operation.debugBreakpointAddress;
+    snapshot.pauseReason = GX_DEVELOPMENT_DEBUG_PAUSE_REASON_ENTRY_BREAKPOINT;
+    snapshot.stackLow = runtime->stackBase;
+    snapshot.stackHigh = runtime->stackBase <= ~static_cast<uint64_t>(0) - runtime->stackSize
+        ? runtime->stackBase + runtime->stackSize : 0;
+    snapshot.context.architecture = GX_DEVELOPMENT_DEBUG_ARCHITECTURE_AMD64;
+    snapshot.context.valid = 1;
+    snapshot.context.processId = 0;
+    snapshot.context.nativeRuntimeId = s_operation.registrationGeneration;
+    snapshot.context.threadId = 1;
+    snapshot.context.sessionGeneration = s_operation.registrationGeneration;
+    snapshot.context.stopGeneration = s_operation.debugStopGeneration;
+    snapshot.context.rip = s_operation.debugBreakpointAddress;
+    snapshot.context.rflags = context->rflags;
+    snapshot.context.rsp = context->rsp;
+    snapshot.context.rbp = context->rbp;
+    snapshot.context.rax = context->rax;
+    snapshot.context.rbx = context->rbx;
+    snapshot.context.rcx = context->rcx;
+    snapshot.context.rdx = context->rdx;
+    snapshot.context.rsi = context->rsi;
+    snapshot.context.rdi = context->rdi;
+    snapshot.context.r8 = context->r8;
+    snapshot.context.r9 = context->r9;
+    snapshot.context.r10 = context->r10;
+    snapshot.context.r11 = context->r11;
+    snapshot.context.r12 = context->r12;
+    snapshot.context.r13 = context->r13;
+    snapshot.context.r14 = context->r14;
+    snapshot.context.r15 = context->r15;
+    serial_debug_hex("DEVELOPER_STUDIO_PHASE27Z_BREAKPOINT_HIT target=0x",
+                     s_operation.debugBreakpointAddress);
+    serial_debug_hex(" raw_rip=0x", context->rip);
+    serial::puts(" function=gx_main stop=");
+    serial::put_hex64(s_operation.debugStopGeneration);
+    serial::putc('\n');
+    serial::puts("DEVELOPER_STUDIO_PHASE27Z_PAUSED\n");
+
+    if (!native_elf_scheduler_yield()) return false;
+    context->rip = s_operation.debugCancelRequested
+        ? reinterpret_cast<uint64_t>(&native_elf_debug_cancel_return)
+        : s_operation.debugBreakpointAddress;
+    return true;
+#else
+    (void)context;
+    return false;
+#endif
+}
+
+gx_result debug(const gx_development_debug_request& request,
+                gx_development_debug_snapshot* outSnapshot)
+{
+    if (!outSnapshot) return GX_ERROR_INVALID_ARGUMENT;
+    clear_debug_snapshot(outSnapshot);
+    if (request.size < sizeof(request) ||
+        request.version != GX_DEVELOPMENT_DEBUG_API_VERSION) {
+        set_debug_error(outSnapshot, "NativeElf debug request version or size is invalid");
+        return GX_ERROR_INVALID_ARGUMENT;
+    }
+    if (!decode(request.handle)) {
+        set_debug_error(outSnapshot, "NativeElf debug handle is stale");
+        return GX_ERROR_FAILED;
+    }
+    if (!s_operation.debugControlled) {
+        set_debug_error(outSnapshot, "Run generation is not debugger-controlled");
+        return GX_ERROR_UNSUPPORTED;
+    }
+    if (!debug_request_identity_matches(s_operation, request)) {
+        set_debug_error(outSnapshot, "NativeElf debug session identity is stale");
+        return GX_ERROR_FAILED;
+    }
+
+    switch (request.command) {
+    case GX_DEVELOPMENT_DEBUG_POLL:
+        if (s_operation.state == GX_DEVELOPMENT_RUN_PAUSED) {
+            *outSnapshot = s_operation.debugSnapshot;
+        } else if (s_operation.state == GX_DEVELOPMENT_RUN_RUNNING ||
+                   s_operation.state == GX_DEVELOPMENT_RUN_LAUNCHING ||
+                   s_operation.state == GX_DEVELOPMENT_RUN_REGISTERED) {
+            set_debug_ready_snapshot(s_operation, outSnapshot);
+        } else {
+            set_debug_error(outSnapshot, "NativeElf debug session is no longer active");
+            return GX_ERROR_FAILED;
+        }
+        return GX_OK;
+
+    case GX_DEVELOPMENT_DEBUG_RESUME:
+        if (s_operation.state != GX_DEVELOPMENT_RUN_PAUSED ||
+            !s_operation.debugBreakpointInstalled) {
+            set_debug_error(outSnapshot, "NativeElf entry breakpoint is not paused");
+            return GX_ERROR_BUSY;
+        }
+        if (!restore_debug_entry_breakpoint()) {
+            set_debug_error(outSnapshot, "NativeElf entry breakpoint could not be restored");
+            return GX_ERROR_FAILED;
+        }
+        s_operation.debugBreakpointInstalled = false;
+        s_operation.debugBreakpointHit = false;
+        s_operation.state = GX_DEVELOPMENT_RUN_RUNNING;
+        set_debug_ready_snapshot(s_operation, outSnapshot);
+        serial::puts("DEVELOPER_STUDIO_PHASE27Z_RESUME\n");
+        if (!native_elf_scheduler_pump()) return GX_ERROR_FAILED;
+        if (s_operation.state == GX_DEVELOPMENT_RUN_PAUSED)
+            *outSnapshot = s_operation.debugSnapshot;
+        return GX_OK;
+
+    case GX_DEVELOPMENT_DEBUG_CANCEL_EXECUTION:
+        if (s_operation.state != GX_DEVELOPMENT_RUN_PAUSED ||
+            !s_operation.debugBreakpointInstalled) {
+            set_debug_error(outSnapshot, "NativeElf debug session is not paused");
+            return GX_ERROR_BUSY;
+        }
+        if (!restore_debug_entry_breakpoint()) {
+            set_debug_error(outSnapshot, "NativeElf entry breakpoint could not be restored for cancel");
+            return GX_ERROR_FAILED;
+        }
+        s_operation.debugBreakpointInstalled = false;
+        s_operation.debugBreakpointHit = false;
+        s_operation.debugCancelRequested = true;
+        s_operation.cancellationRequested = true;
+        s_operation.closeRequested = true;
+        s_operation.state = GX_DEVELOPMENT_RUN_CLOSING;
+        serial::puts("DEVELOPER_STUDIO_PHASE27Z_CANCEL_PAUSED\n");
+        if (!native_elf_scheduler_pump()) return GX_ERROR_FAILED;
+        if (s_operation.state == GX_DEVELOPMENT_RUN_PAUSED) {
+            set_debug_error(outSnapshot, "NativeElf paused cancel did not return to the owner");
+            return GX_ERROR_FAILED;
+        }
+        set_debug_ready_snapshot(s_operation, outSnapshot);
+        return GX_OK;
+
+    default:
+        set_debug_error(outSnapshot, "Phase 27Z supports only POLL, RESUME, and paused CANCEL");
+        return GX_ERROR_UNSUPPORTED;
+    }
+}
+
 gx_result release(gx_development_run_handle handle) {
     if (!decode(handle)) return GX_ERROR_FAILED;
     if (s_operation.state != GX_DEVELOPMENT_RUN_COMPLETED &&
         s_operation.state != GX_DEVELOPMENT_RUN_FAILED &&
         s_operation.state != GX_DEVELOPMENT_RUN_CANCELLED) return GX_ERROR_BUSY;
     (void)unregister_application(s_operation);
+    (void)restore_debug_entry_breakpoint();
+    if (s_operation.debugControlled) NativeElfDebugTrap::uninstall();
 #if defined(__x86_64__)
     s_schedulerActive = false;
     s_schedulerInTarget = false;

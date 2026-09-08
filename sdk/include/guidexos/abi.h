@@ -170,6 +170,10 @@ typedef struct gx_host_calls {
     /* Appended asynchronous Run cancellation. Kept after the existing GUI
      * slots so every earlier host-call offset remains stable. */
     gx_result (GX_CALL *bare_metal_development_run_cancel)(gx_app_context* ctx, gx_development_run_handle handle);
+    /* Appended Phase 27Z bare-metal entry-breakpoint control. */
+    gx_result (GX_CALL *bare_metal_development_debug)(gx_app_context* ctx,
+                                                       const gx_development_debug_request* request,
+                                                       gx_development_debug_snapshot* snapshot);
 } gx_host_calls;
 
 #ifdef __cplusplus

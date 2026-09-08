@@ -134,9 +134,11 @@ static_assert(offsetof(gx_host_calls, native_window_destroy) == 368,
               "gx_host_calls native window destroy offset changed");
 static_assert(offsetof(gx_host_calls, native_window_run) == 376,
               "gx_host_calls native window run offset changed");
-static_assert(offsetof(gx_host_calls, bare_metal_development_run_cancel) == 384,
+    static_assert(offsetof(gx_host_calls, bare_metal_development_run_cancel) == 384,
               "gx_host_calls bare-metal run cancel offset changed");
-static_assert(sizeof(gx_host_calls) == 392, "gx_host_calls size changed");
+    static_assert(offsetof(gx_host_calls, bare_metal_development_debug) == 392,
+                  "gx_host_calls bare-metal development debug offset changed");
+    static_assert(sizeof(gx_host_calls) == 400, "gx_host_calls size changed");
 
 inline bool calculate_application_stack_layout(uint64_t base,
                                                uint64_t size,

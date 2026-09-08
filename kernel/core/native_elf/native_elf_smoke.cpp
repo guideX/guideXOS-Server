@@ -21,8 +21,314 @@ namespace native_elf {
 namespace {
 
 static uint8_t s_invalidImage[guidexos::native_elf::MAX_ELF_FILE_BYTES];
-#if defined(GXOS_PHASE27G_SMOKE) || defined(GXOS_PHASE27H_SMOKE) || defined(GXOS_PHASE27I_SMOKE) || defined(GXOS_PHASE27J_SMOKE) || defined(GXOS_PHASE27K_SMOKE) || defined(GXOS_PHASE27L_SMOKE) || defined(GXOS_PHASE27M_SMOKE) || defined(GXOS_PHASE27P_SMOKE) || defined(GXOS_PHASE27R_SMOKE) || defined(GXOS_PHASE27S_SMOKE) || defined(GXOS_PHASE27T_SMOKE) || defined(GXOS_PHASE27U_SMOKE) || defined(GXOS_PHASE27V_SMOKE) || defined(GXOS_PHASE27W_SMOKE) || defined(GXOS_PHASE27X_SMOKE) || defined(GXOS_PHASE27Y_SMOKE)
+#if defined(GXOS_PHASE27G_SMOKE) || defined(GXOS_PHASE27H_SMOKE) || defined(GXOS_PHASE27I_SMOKE) || defined(GXOS_PHASE27J_SMOKE) || defined(GXOS_PHASE27K_SMOKE) || defined(GXOS_PHASE27L_SMOKE) || defined(GXOS_PHASE27M_SMOKE) || defined(GXOS_PHASE27P_SMOKE) || defined(GXOS_PHASE27R_SMOKE) || defined(GXOS_PHASE27S_SMOKE) || defined(GXOS_PHASE27T_SMOKE) || defined(GXOS_PHASE27U_SMOKE) || defined(GXOS_PHASE27V_SMOKE) || defined(GXOS_PHASE27W_SMOKE) || defined(GXOS_PHASE27X_SMOKE) || defined(GXOS_PHASE27Y_SMOKE) || defined(GXOS_PHASE27Z_SMOKE)
 static uint8_t s_compareImage[guidexos::native_elf::MAX_ELF_FILE_BYTES];
+#endif
+#if defined(GXOS_PHASE27Z_SMOKE)
+static bool equal_text(const char* left, const char* right);
+static uint8_t s_phase27zProjectBackup[4096];
+
+static bool run_phase27z_build(gx_build_snapshot* snapshot)
+{
+    gx_build_request request = {};
+    request.size = sizeof(request);
+    request.version = GX_BUILD_API_VERSION;
+    request.projectRoot = "/P27Z";
+    request.projectId = "dev.guidexos.phase27z";
+    request.projectKind = "native-gui-application";
+    request.targetProfile = "guidexos.amd64.baremetal.bootstrap.native";
+    request.buildSystem = "guidexos-native-baremetal-bootstrap-v1";
+    request.buildScript = "";
+    request.expectedArtifact = "build/bin/amd64/p27z.elf";
+    request.configuration = "Debug";
+    gx_build_handle handle = 0;
+    if (compiler::BareMetalBuildService::start(&request, &handle) != GX_OK) return false;
+    gx_build_snapshot local = {};
+    const bool polled = compiler::BareMetalBuildService::poll(handle, &local) == GX_OK;
+    const bool released = compiler::BareMetalBuildService::release(handle) == GX_OK;
+    if (snapshot) *snapshot = local;
+    return polled && released;
+}
+
+static gx_development_run_request phase27z_run_request(const gx_build_snapshot& build,
+                                                       bool debugControlled)
+{
+    gx_development_run_request request = {};
+    request.size = sizeof(request);
+    request.version = GX_DEVELOPMENT_RUN_API_VERSION;
+    request.projectRoot = "/P27Z";
+    request.projectId = "dev.guidexos.phase27z";
+    request.projectKind = "native-gui-application";
+    request.targetProfile = "guidexos.amd64.baremetal.bootstrap.native";
+    request.manifestPath = "app/app.json";
+    request.artifactPath = build.artifactPath;
+    request.artifactSha256 = build.artifactSha256;
+    request.flags = debugControlled ? GX_DEVELOPMENT_RUN_FLAG_DEBUG_CONTROLLED : 0;
+    request.artifactSize = build.artifactSize;
+    request.artifactArchitecture = build.artifactArchitecture;
+    request.artifactAbi = "guidexos-c-abi-v1";
+    return request;
+}
+
+static gx_development_debug_request phase27z_debug_request(
+    const gx_build_snapshot& build,
+    gx_development_run_handle handle,
+    uint64_t sessionGeneration,
+    uint32_t command,
+    const gx_development_debug_snapshot* stop)
+{
+    gx_development_debug_request request = {};
+    request.size = sizeof(request);
+    request.version = GX_DEVELOPMENT_DEBUG_API_VERSION;
+    request.command = command;
+    request.handle = handle;
+    request.sessionGeneration = sessionGeneration;
+    request.nativeRuntimeId = sessionGeneration;
+    request.breakpointId = stop ? stop->bindingId : 1;
+    request.targetAddress = stop ? stop->targetAddress : 0;
+    request.artifactSha256 = build.artifactSha256;
+    request.threadId = 1;
+    request.stopGeneration = stop ? stop->context.stopGeneration : 0;
+    return request;
+}
+
+static bool phase27z_output_contains(const gx_development_run_snapshot& snapshot,
+                                     const char* expected)
+{
+    return snapshot.outputCount == 1 && expected &&
+        equal_text(snapshot.output[0].text, expected);
+}
+
+static bool run_phase27z_normal_session(const gx_build_snapshot& build,
+                                        gx_development_run_handle* outHandle)
+{
+    if (outHandle) *outHandle = 0;
+    gx_development_run_request request = phase27z_run_request(build, false);
+    gx_development_run_handle handle = 0;
+    gx_development_run_snapshot prepared = {};
+    prepared.size = sizeof(prepared);
+    if (NativeElfRunService::prepare(request, &handle, &prepared) != GX_OK || handle == 0)
+        return false;
+    if (outHandle) *outHandle = handle;
+    set_gui_automation_close(true);
+    const bool started = NativeElfRunService::start(handle) == GX_OK;
+    gx_development_run_snapshot running = {};
+    running.size = sizeof(running);
+    const bool startObserved = started && NativeElfRunService::poll(handle, &running) == GX_OK &&
+        (running.state == GX_DEVELOPMENT_RUN_RUNNING ||
+         running.state == GX_DEVELOPMENT_RUN_COMPLETED);
+    if (running.state == GX_DEVELOPMENT_RUN_RUNNING)
+        (void)NativeElfRunService::pump(handle);
+    gx_development_run_snapshot completed = {};
+    completed.size = sizeof(completed);
+    const bool terminal = startObserved && NativeElfRunService::poll(handle, &completed) == GX_OK &&
+        completed.state == GX_DEVELOPMENT_RUN_COMPLETED && completed.cleanupComplete != 0 &&
+        phase27z_output_contains(completed,
+            "DEVELOPER_STUDIO_PHASE27Z_FIRST_USER_OPERATION_ONCE");
+    NativeElfGuiRuntimeSnapshot gui = {};
+    const bool guiProof = native_elf_gui_runtime_snapshot(&gui) && gui.closedNormally &&
+        !gui.active && compositor::KernelCompositor::getWindowCount() == 0;
+    const bool released = terminal && NativeElfRunService::release(handle) == GX_OK;
+    set_gui_automation_close(false);
+    return released && guiProof && !NativeElfDevelopmentAppModel::has_active_registration();
+}
+
+static bool run_phase27z_debug_session(const gx_build_snapshot& build,
+                                       bool cancelWhilePaused,
+                                       gx_development_run_handle staleHandle,
+                                       bool* outPaused,
+                                       bool* outSnapshot,
+                                       bool* outOwnerActive,
+                                       bool* outIdentityReject,
+                                       bool* outResumed,
+                                       bool* outCancelled,
+                                       bool* outClean,
+                                       gx_development_run_handle* outHandle)
+{
+    if (outPaused) *outPaused = false;
+    if (outSnapshot) *outSnapshot = false;
+    if (outOwnerActive) *outOwnerActive = false;
+    if (outIdentityReject) *outIdentityReject = false;
+    if (outResumed) *outResumed = false;
+    if (outCancelled) *outCancelled = false;
+    if (outClean) *outClean = false;
+    if (outHandle) *outHandle = 0;
+
+    gx_development_run_request runRequest = phase27z_run_request(build, true);
+    gx_development_run_handle handle = 0;
+    gx_development_run_snapshot prepared = {};
+    prepared.size = sizeof(prepared);
+    if (NativeElfRunService::prepare(runRequest, &handle, &prepared) != GX_OK || handle == 0)
+        return false;
+    if (outHandle) *outHandle = handle;
+    const uint64_t generation = prepared.generation;
+    set_gui_automation_close(false);
+    serial::puts("DEVELOPER_STUDIO_PHASE27Z_DEBUG_START\n");
+    if (NativeElfRunService::start(handle) != GX_OK) return false;
+
+    gx_development_run_snapshot pausedRun = {};
+    pausedRun.size = sizeof(pausedRun);
+    const bool paused = NativeElfRunService::poll(handle, &pausedRun) == GX_OK &&
+        pausedRun.state == GX_DEVELOPMENT_RUN_PAUSED;
+    if (outPaused) *outPaused = paused;
+    if (paused) serial::puts("DEVELOPER_STUDIO_PHASE27Z_RUN_PAUSED_PASS\n");
+
+    gx_development_debug_snapshot stopped = {};
+    const gx_development_debug_request pollRequest = phase27z_debug_request(
+        build, handle, generation, GX_DEVELOPMENT_DEBUG_POLL, nullptr);
+    const bool snapshotCall = paused && NativeElfRunService::debug(pollRequest, &stopped) == GX_OK;
+    const bool exactStop = snapshotCall && stopped.status == GX_DEVELOPMENT_DEBUG_STATUS_TRAP &&
+        stopped.trapKind == GX_DEVELOPMENT_DEBUG_TRAP_BREAKPOINT &&
+        stopped.pauseReason == GX_DEVELOPMENT_DEBUG_PAUSE_REASON_ENTRY_BREAKPOINT &&
+        stopped.bindingId == 1 && stopped.bindingInstalled != 0 && stopped.originalByteValid != 0 &&
+        stopped.installedByte == 0xCC && stopped.targetAddress != 0 &&
+        stopped.instructionPointer == stopped.targetAddress &&
+        stopped.context.valid != 0 && stopped.context.rip == stopped.targetAddress &&
+        stopped.context.architecture == GX_DEVELOPMENT_DEBUG_ARCHITECTURE_AMD64 &&
+        stopped.context.sessionGeneration == generation &&
+        stopped.context.stopGeneration != 0 &&
+        equal_text(stopped.functionName, "gx_main") && stopped.stackHigh > stopped.stackLow &&
+        stopped.context.rsp >= stopped.stackLow && stopped.context.rsp < stopped.stackHigh;
+    if (outSnapshot) *outSnapshot = exactStop;
+    if (exactStop) {
+        serial::puts("DEVELOPER_STUDIO_PHASE27Z_ENTRY_IDENTITY_PASS\n");
+        serial::puts("DEVELOPER_STUDIO_PHASE27Z_PRE_USER_CODE_PASS\n");
+    }
+
+    NativeElfGuiRuntimeSnapshot beforeResumeGui = {};
+    const bool noUserEffect = exactStop && native_elf_gui_runtime_snapshot(&beforeResumeGui) &&
+        !beforeResumeGui.active && !beforeResumeGui.applicationCreated &&
+        !beforeResumeGui.windowCreated && !beforeResumeGui.rendered &&
+        compositor::KernelCompositor::getWindowCount() == 0;
+    if (noUserEffect) serial::puts("DEVELOPER_STUDIO_PHASE27Z_NO_GUI_BEFORE_RESUME_PASS\n");
+
+    static uint32_t ownerHeartbeat = 0;
+    const uint32_t heartbeatBefore = ownerHeartbeat++;
+    gx_development_debug_snapshot ownerPoll = {};
+    const bool ownerPollCall = exactStop &&
+        NativeElfRunService::debug(phase27z_debug_request(
+            build, handle, generation, GX_DEVELOPMENT_DEBUG_POLL, nullptr), &ownerPoll) == GX_OK;
+    const bool ownerActive = ownerPollCall && ownerPoll.status == GX_DEVELOPMENT_DEBUG_STATUS_TRAP &&
+        ownerPoll.context.stopGeneration == stopped.context.stopGeneration && ownerHeartbeat != heartbeatBefore;
+    if (outOwnerActive) *outOwnerActive = ownerActive;
+    if (ownerActive) serial::puts("DEVELOPER_STUDIO_PHASE27Z_OWNER_ACTIVE_PASS\n");
+
+    gx_development_debug_request wrongAddress = phase27z_debug_request(
+        build, handle, generation, GX_DEVELOPMENT_DEBUG_RESUME, &stopped);
+    wrongAddress.targetAddress = stopped.targetAddress + 1;
+    gx_development_debug_snapshot rejected = {};
+    const bool wrongAddressRejected = NativeElfRunService::debug(wrongAddress, &rejected) == GX_ERROR_FAILED &&
+        rejected.status == GX_DEVELOPMENT_DEBUG_STATUS_REJECTED;
+    gx_development_debug_request wrongGeneration = phase27z_debug_request(
+        build, handle, generation + 1, GX_DEVELOPMENT_DEBUG_RESUME, &stopped);
+    const bool wrongGenerationRejected = NativeElfRunService::debug(wrongGeneration, &rejected) == GX_ERROR_FAILED;
+    gx_development_run_snapshot stillPaused = {};
+    stillPaused.size = sizeof(stillPaused);
+    const bool pauseUnchanged = NativeElfRunService::poll(handle, &stillPaused) == GX_OK &&
+        stillPaused.state == GX_DEVELOPMENT_RUN_PAUSED;
+    const bool staleRejected = staleHandle == 0 ||
+        NativeElfRunService::debug(phase27z_debug_request(
+            build, staleHandle, generation, GX_DEVELOPMENT_DEBUG_POLL, nullptr), &rejected) == GX_ERROR_FAILED;
+    const bool identityReject = wrongAddressRejected && wrongGenerationRejected &&
+        pauseUnchanged && staleRejected;
+    if (outIdentityReject) *outIdentityReject = identityReject;
+    if (identityReject) serial::puts("DEVELOPER_STUDIO_PHASE27Z_STALE_IDENTITY_PASS\n");
+
+    const gx_development_debug_request controlRequest = phase27z_debug_request(
+        build, handle, generation, cancelWhilePaused
+            ? GX_DEVELOPMENT_DEBUG_CANCEL_EXECUTION : GX_DEVELOPMENT_DEBUG_RESUME, &stopped);
+    gx_development_debug_snapshot controlSnapshot = {};
+    const gx_result controlResult = NativeElfRunService::debug(controlRequest, &controlSnapshot);
+    if (cancelWhilePaused) {
+        gx_development_run_snapshot cancelled = {};
+        cancelled.size = sizeof(cancelled);
+        const bool observed = controlResult == GX_OK && NativeElfRunService::poll(handle, &cancelled) == GX_OK &&
+            cancelled.state == GX_DEVELOPMENT_RUN_CANCELLED && cancelled.cleanupComplete != 0 &&
+            cancelled.errorCode == GX_DEVELOPMENT_RUN_ERROR_CANCELLED && cancelled.outputCount == 0;
+        NativeElfGuiRuntimeSnapshot gui = {};
+        const bool noGui = native_elf_gui_runtime_snapshot(&gui) && !gui.active &&
+            compositor::KernelCompositor::getWindowCount() == 0;
+        if (outCancelled) *outCancelled = observed && noGui;
+        if (observed && noGui) serial::puts("DEVELOPER_STUDIO_PHASE27Z_CANCEL_PAUSED_PASS\n");
+    } else {
+        gx_development_run_snapshot running = {};
+        running.size = sizeof(running);
+        const bool resumed = controlResult == GX_OK && NativeElfRunService::poll(handle, &running) == GX_OK &&
+            running.state == GX_DEVELOPMENT_RUN_RUNNING;
+        NativeElfGuiRuntimeSnapshot gui = {};
+        const bool guiStarted = resumed && native_elf_gui_runtime_snapshot(&gui) && gui.active &&
+            gui.applicationCreated && gui.windowCreated && gui.rendered &&
+            equal_text(gui.content, "27Z GUI 27");
+        if (resumed && guiStarted) serial::puts("DEVELOPER_STUDIO_PHASE27Z_RESUME_GUI_PASS\n");
+        const bool close = resumed && NativeElfRunService::request_close(handle) == GX_OK;
+        gx_development_run_snapshot completed = {};
+        completed.size = sizeof(completed);
+        const bool terminal = close && NativeElfRunService::poll(handle, &completed) == GX_OK &&
+            completed.state == GX_DEVELOPMENT_RUN_COMPLETED && completed.cleanupComplete != 0 &&
+            phase27z_output_contains(completed,
+                "DEVELOPER_STUDIO_PHASE27Z_FIRST_USER_OPERATION_ONCE");
+        NativeElfGuiRuntimeSnapshot finishedGui = {};
+        const bool normalClose = native_elf_gui_runtime_snapshot(&finishedGui) &&
+            finishedGui.closedNormally && !finishedGui.active &&
+            compositor::KernelCompositor::getWindowCount() == 0;
+        const bool resumeProof = resumed && guiStarted && terminal && normalClose;
+        if (outResumed) *outResumed = resumeProof;
+        if (resumeProof) serial::puts("DEVELOPER_STUDIO_PHASE27Z_RESUME_PASS\n");
+    }
+    const bool released = NativeElfRunService::release(handle) == GX_OK;
+    const bool clean = released && !NativeElfDevelopmentAppModel::has_active_registration() &&
+        compositor::KernelCompositor::getWindowCount() == 0;
+    if (outClean) *outClean = clean;
+    if (clean) serial::puts("DEVELOPER_STUDIO_PHASE27Z_CLEANUP_PASS\n");
+    return paused && exactStop && noUserEffect && ownerActive && identityReject && clean;
+}
+
+static bool phase27z_rejects_stale_artifact(const gx_build_snapshot& build)
+{
+    gx_development_run_request request = phase27z_run_request(build, true);
+    static const char kWrongHash[] =
+        "0000000000000000000000000000000000000000000000000000000000000000";
+    request.artifactSha256 = kWrongHash;
+    gx_development_run_handle handle = 0;
+    gx_development_run_snapshot snapshot = {};
+    snapshot.size = sizeof(snapshot);
+    const bool rejected = NativeElfRunService::prepare(request, &handle, &snapshot) == GX_OK &&
+        handle == 0 && snapshot.state == GX_DEVELOPMENT_RUN_FAILED &&
+        snapshot.errorCode == GX_DEVELOPMENT_RUN_ERROR_ARTIFACT_CHANGED;
+    return rejected && !NativeElfDevelopmentAppModel::has_active_registration();
+}
+
+static bool phase27z_rejects_missing_entry_metadata(const gx_build_snapshot& build)
+{
+    static const char kProjectWithoutEntry[] =
+        "{\n"
+        "  \"projectId\": \"dev.guidexos.phase27z\",\n"
+        "  \"displayName\": \"Phase 27Z Entry Debugger\",\n"
+        "  \"projectKind\": \"native-gui-application\",\n"
+        "  \"defaultTargetProfile\": \"guidexos.amd64.baremetal.bootstrap.native\",\n"
+        "  \"abi\": \"guidexos-c-abi-v1\",\n"
+        "  \"architecture\": \"amd64\",\n"
+        "  \"outputName\": \"p27z\"\n"
+        "}\n";
+    const int32_t originalBytes = vfs::read_file(
+        "/P27Z/guidexos.project", s_phase27zProjectBackup,
+        static_cast<uint32_t>(sizeof(s_phase27zProjectBackup)));
+    if (originalBytes <= 0 || vfs::write_file(
+            "/P27Z/guidexos.project", kProjectWithoutEntry,
+            static_cast<uint32_t>(sizeof(kProjectWithoutEntry) - 1U)) < 0) return false;
+
+    gx_development_run_request request = phase27z_run_request(build, true);
+    gx_development_run_handle handle = 0;
+    gx_development_run_snapshot snapshot = {};
+    snapshot.size = sizeof(snapshot);
+    const bool rejected = NativeElfRunService::prepare(request, &handle, &snapshot) == GX_OK &&
+        handle == 0 && snapshot.state == GX_DEVELOPMENT_RUN_FAILED &&
+        snapshot.errorCode == GX_DEVELOPMENT_RUN_ERROR_PROJECT_INVALID;
+    const bool restored = vfs::write_file(
+        "/P27Z/guidexos.project", s_phase27zProjectBackup,
+        static_cast<uint32_t>(originalBytes)) == originalBytes;
+    return rejected && restored && !NativeElfDevelopmentAppModel::has_active_registration();
+}
 #endif
 
 static void put_u64(uint8_t* bytes, uint32_t offset, uint64_t value)
@@ -3140,6 +3446,77 @@ void run_bootstrap_execution_smoke()
     serial::puts(phase27yPassed ?
         "ELF Loader: Phase 27Y asynchronous Run ownership smoke PASS\nDEVELOPER_STUDIO_PHASE27Y_PASS\n" :
         "ELF Loader: Phase 27Y asynchronous Run ownership smoke FAIL\n");
+#endif
+#if defined(GXOS_PHASE27Z_SMOKE)
+    serial::puts("ELF Loader: Phase 27Z bare-metal entry debugger smoke begin\n");
+    serial::puts("DEVELOPER_STUDIO_PHASE27Z_BEGIN\n");
+    static gx_build_snapshot z27Build = {};
+    const bool z27BuildPass = run_phase27z_build(&z27Build) &&
+        z27Build.state == GX_BUILD_SUCCEEDED && z27Build.artifactValid != 0 &&
+        z27Build.artifactSize != 0 && equal_text(z27Build.artifactArchitecture, "amd64");
+    print_marker("phase27z_build_pass", z27BuildPass);
+    if (z27BuildPass) serial::puts("DEVELOPER_STUDIO_PHASE27Z_BUILD_PASS\n");
+
+    const bool z27StaleArtifact = z27BuildPass && phase27z_rejects_stale_artifact(z27Build);
+    print_marker("phase27z_stale_artifact_pass", z27StaleArtifact);
+    if (z27StaleArtifact) serial::puts("DEVELOPER_STUDIO_PHASE27Z_STALE_ARTIFACT_PASS\n");
+    const bool z27MissingMetadata = z27BuildPass &&
+        phase27z_rejects_missing_entry_metadata(z27Build);
+    print_marker("phase27z_missing_metadata_pass", z27MissingMetadata);
+    if (z27MissingMetadata) serial::puts("DEVELOPER_STUDIO_PHASE27Z_MISSING_METADATA_PASS\n");
+
+    gx_development_run_handle z27NormalHandle = 0;
+    const bool z27NormalRun = z27BuildPass &&
+        run_phase27z_normal_session(z27Build, &z27NormalHandle);
+    print_marker("phase27z_normal_run_pass", z27NormalRun);
+    if (z27NormalRun) serial::puts("DEVELOPER_STUDIO_PHASE27Z_NORMAL_RUN_PASS\n");
+
+    bool z27Paused = false;
+    bool z27Snapshot = false;
+    bool z27OwnerActive = false;
+    bool z27IdentityReject = false;
+    bool z27Resumed = false;
+    bool z27Cancelled = false;
+    bool z27Clean = false;
+    gx_development_run_handle z27DebugHandle = 0;
+    const bool z27DebugRun = z27BuildPass && run_phase27z_debug_session(
+        z27Build, false, z27NormalHandle, &z27Paused, &z27Snapshot, &z27OwnerActive,
+        &z27IdentityReject, &z27Resumed, &z27Cancelled, &z27Clean, &z27DebugHandle);
+    print_marker("phase27z_paused_pass", z27Paused);
+    print_marker("phase27z_snapshot_pass", z27Snapshot);
+    print_marker("phase27z_owner_active_pass", z27OwnerActive);
+    print_marker("phase27z_identity_reject_pass", z27IdentityReject);
+    print_marker("phase27z_resume_pass", z27Resumed);
+    print_marker("phase27z_cleanup_pass", z27Clean);
+
+    bool z27CancelPaused = false;
+    bool z27CancelClean = false;
+    const bool z27CancelRun = z27BuildPass && run_phase27z_debug_session(
+        z27Build, true, z27DebugHandle, nullptr, nullptr, nullptr, nullptr, nullptr,
+        &z27CancelPaused, &z27CancelClean, nullptr);
+    print_marker("phase27z_cancel_paused_pass", z27CancelPaused);
+    print_marker("phase27z_cancel_cleanup_pass", z27CancelClean);
+
+    const bool z27PostCancelRun = z27BuildPass && z27CancelRun && z27CancelPaused &&
+        run_phase27z_normal_session(z27Build, nullptr);
+    print_marker("phase27z_post_cancel_run_pass", z27PostCancelRun);
+    if (z27PostCancelRun) serial::puts("DEVELOPER_STUDIO_PHASE27Z_POST_CANCEL_RUN_PASS\n");
+
+    const bool z27ArtifactEvidence = z27BuildPass &&
+        emit_serial_artifact("/P27Z/build/bin/amd64/p27z.elf", "z27main");
+    if (z27ArtifactEvidence) serial::puts("DEVELOPER_STUDIO_PHASE27Z_ARTIFACT_PASS\n");
+
+    const bool phase27zPassed = z27BuildPass && z27StaleArtifact && z27NormalRun && z27DebugRun &&
+        z27MissingMetadata &&
+        z27Paused && z27Snapshot && z27OwnerActive && z27IdentityReject &&
+        z27Resumed && z27Clean && z27CancelRun && z27CancelPaused && z27CancelClean &&
+        z27PostCancelRun && z27ArtifactEvidence &&
+        !NativeElfDevelopmentAppModel::has_active_registration() &&
+        compositor::KernelCompositor::getWindowCount() == 0;
+    print_marker("phase27z", phase27zPassed);
+    serial::puts(phase27zPassed ?
+        "ELF Loader: Phase 27Z bare-metal entry debugger smoke PASS\nDEVELOPER_STUDIO_PHASE27Z_PASS\n" :
+        "ELF Loader: Phase 27Z bare-metal entry debugger smoke FAIL\n");
 #endif
 #if defined(GXOS_PHASE27G_SMOKE)
     serial::puts("ELF Loader: Phase 27G bootstrap language smoke begin\n");

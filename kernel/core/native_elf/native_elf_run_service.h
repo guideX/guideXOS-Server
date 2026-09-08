@@ -8,6 +8,8 @@
 #pragma once
 
 #include "../../../sdk/include/guidexos/development_run.h"
+#include "../../../sdk/include/guidexos/development_debug.h"
+#include "native_elf_debug_trap.h"
 
 namespace kernel {
 namespace native_elf {
@@ -23,6 +25,15 @@ gx_result poll(gx_development_run_handle handle,
 gx_result request_close(gx_development_run_handle handle);
 gx_result cancel(gx_development_run_handle handle);
 gx_result release(gx_development_run_handle handle);
+gx_result debug(const gx_development_debug_request& request,
+                gx_development_debug_snapshot* outSnapshot);
+
+// Loader/debug-trap integration hooks. They are intentionally limited to the
+// one compiler-known gx_main entry breakpoint used by Phase 27Z.
+bool native_elf_debug_entry_breakpoint_requested();
+bool native_elf_debug_breakpoint_installed(uint64_t targetAddress, uint8_t originalByte);
+bool native_elf_debug_breakpoint_exception(NativeElfDebugTrap::BreakpointContext* context);
+void native_elf_debug_breakpoint_install_failed();
 
 } // namespace NativeElfRunService
 } // namespace native_elf

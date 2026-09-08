@@ -69,7 +69,9 @@ static_assert(offsetof(gx_host_calls, native_window_destroy) == 368, "native win
 static_assert(offsetof(gx_host_calls, native_window_run) == 376, "native window run slot changed");
 static_assert(offsetof(gx_host_calls, bare_metal_development_run_cancel) == 384,
               "bare-metal run cancel slot changed");
-static_assert(sizeof(gx_host_calls) == 392, "gx_host_calls size changed");
+static_assert(offsetof(gx_host_calls, bare_metal_development_debug) == 392,
+              "bare-metal development debug slot changed");
+static_assert(sizeof(gx_host_calls) == 400, "gx_host_calls size changed");
 static_assert(sizeof(gx_development_run_request) == 96, "development run request size changed");
 static_assert(offsetof(gx_development_run_request, projectRoot) == 8, "development run request project root offset changed");
 static_assert(offsetof(gx_development_run_request, artifactSha256) == 56, "development run request artifact hash offset changed");
@@ -87,9 +89,15 @@ static_assert(offsetof(gx_development_debug_request, readByteCount) == 96, "deve
 static_assert(sizeof(gx_development_debug_register_context) == 192, "development debug register context size changed");
 static_assert(offsetof(gx_development_debug_snapshot, stackLow) == 456, "development debug stack low offset changed");
 static_assert(offsetof(gx_development_debug_snapshot, stackHigh) == 464, "development debug stack high offset changed");
+static_assert(offsetof(gx_development_debug_snapshot, sessionGeneration) == 472,
+              "development debug session generation offset changed");
+static_assert(offsetof(gx_development_debug_snapshot, pauseReason) == 480,
+              "development debug pause reason offset changed");
+static_assert(offsetof(gx_development_debug_snapshot, functionName) == 488,
+              "development debug function name offset changed");
 static_assert(offsetof(gx_development_debug_snapshot, internalBreakpointPurpose) == 432,
               "internal breakpoint purpose must occupy the appended snapshot slot");
-static_assert(sizeof(gx_development_debug_snapshot) == 472, "development debug snapshot size changed");
+static_assert(sizeof(gx_development_debug_snapshot) == 552, "development debug snapshot size changed");
 static_assert(offsetof(gx_development_run_snapshot, closeRequested) == 4552,
               "development run close-request slot changed");
 static_assert(offsetof(gx_development_run_snapshot, cancellationRequested) == 4556,

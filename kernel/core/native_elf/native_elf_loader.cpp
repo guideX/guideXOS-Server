@@ -37,6 +37,7 @@ static uint8_t s_file[NATIVE_APP_MAX_ELF_FILE_BYTES];
 static NativeAppExecutionContext s_appRuntime = {};
 static char s_bareBuildStrings[8][768] = {};
 static char s_bareRunStrings[9][768] = {};
+static char s_bareDebugStrings[1][GX_DEVELOPMENT_RUN_MAX_SHA256_BYTES] = {};
 static const uint64_t NESTED_APPLICATION_STACK_BASE =
     APPLICATION_STACK_BASE - APPLICATION_STACK_SIZE;
 static const uint64_t NESTED_SERVICE_STACK_BASE =
@@ -66,6 +67,10 @@ static uint64_t s_guiGeneration = 0;
 static uint64_t s_guiContentHash = 0;
 static uint64_t s_guiLastDestroyedWindow = 0;
 static char s_guiContent[256] = {};
+
+static bool s_debugEntryBreakpointInstalled = false;
+static uint64_t s_debugEntryBreakpointAddress = 0;
+static uint8_t s_debugEntryBreakpointOriginalByte = 0;
 
 static uint64_t fnv1a_text(const char* text)
 {
@@ -701,6 +706,44 @@ static gx_result GX_CALL host_bare_run_release(gx_app_context* context,
     return NativeElfRunService::release(handle);
 }
 
+static bool copy_debug_snapshot_to_app(const gx_development_debug_snapshot& source,
+                                       gx_development_debug_snapshot* destination)
+{
+    if (!destination || !app_pointer_range(destination, sizeof(uint32_t))) return false;
+    const uint32_t requested = destination->size;
+    if (requested < static_cast<uint32_t>(offsetof(gx_development_debug_snapshot, stackLow))) return false;
+    const uint32_t bytes = requested < sizeof(source) ? requested : static_cast<uint32_t>(sizeof(source));
+    if (!app_pointer_range(destination, bytes)) return false;
+    copy_bytes(reinterpret_cast<uint8_t*>(destination),
+               reinterpret_cast<const uint8_t*>(&source), bytes);
+    return true;
+}
+
+static gx_result GX_CALL host_bare_development_debug(
+    gx_app_context* context,
+    const gx_development_debug_request* request,
+    gx_development_debug_snapshot* outputSnapshot)
+{
+    if (!app_context_valid(context) || !request || !outputSnapshot ||
+        !app_pointer_range(request, sizeof(*request)) ||
+        !app_pointer_range(outputSnapshot, sizeof(uint32_t))) return GX_ERROR_PERMISSION_DENIED;
+    if (request->size < sizeof(*request) ||
+        request->version != GX_DEVELOPMENT_DEBUG_API_VERSION) return GX_ERROR_INVALID_ARGUMENT;
+    gx_development_debug_request copied = *request;
+    copied.artifactSha256 = nullptr;
+    if (request->artifactSha256) {
+        if (!app_string(request->artifactSha256, s_bareDebugStrings[0],
+                        sizeof(s_bareDebugStrings[0]))) return GX_ERROR_INVALID_ARGUMENT;
+        copied.artifactSha256 = s_bareDebugStrings[0];
+    }
+    gx_development_debug_snapshot local = {};
+    local.size = sizeof(local);
+    local.version = GX_DEVELOPMENT_DEBUG_API_VERSION;
+    const gx_result result = NativeElfRunService::debug(copied, &local);
+    if (!copy_debug_snapshot_to_app(local, outputSnapshot)) return GX_ERROR_PERMISSION_DENIED;
+    return result;
+}
+
 static void clear_report(NativeElfRunReport* report)
 {
     if (!report) return;
@@ -806,6 +849,7 @@ static void initialize_app_context()
     s_appRuntime.hostCalls.native_window_destroy = host_native_window_destroy;
     s_appRuntime.hostCalls.native_window_run = host_native_window_run;
     s_appRuntime.hostCalls.bare_metal_development_run_cancel = host_bare_run_cancel;
+    s_appRuntime.hostCalls.bare_metal_development_debug = host_bare_development_debug;
 
     s_appRuntime.appContext = {};
     s_appRuntime.appContext.size = sizeof(gx_app_context);
@@ -817,6 +861,7 @@ static void initialize_app_context()
 static bool teardown_application(NativeElfRunReport* report)
 {
     bool clean = true;
+    if (!restore_debug_entry_breakpoint()) clean = false;
     copy_gui_proof(report);
     destroy_native_gui();
     if (s_appRuntime.imageBase != 0 && s_appRuntime.imageSize != 0) {
@@ -1089,6 +1134,91 @@ bool request_native_elf_gui_close(uint64_t generation)
     return true;
 }
 
+static void flush_debug_instruction(uint8_t* address)
+{
+#if defined(__GNUC__) || defined(__clang__)
+    asm volatile("clflush (%0)" : : "r"(address) : "memory");
+    asm volatile("mfence" : : : "memory");
+#else
+    (void)address;
+#endif
+}
+
+bool install_debug_entry_breakpoint(uint64_t targetAddress, uint8_t* originalByte)
+{
+    if (!originalByte || s_debugEntryBreakpointInstalled || targetAddress == 0 ||
+        targetAddress != s_appRuntime.entryPoint || s_appRuntime.imageBase == 0 ||
+        s_appRuntime.imageSize == 0 ||
+        !native_app_pointer_in_range(targetAddress, s_appRuntime.imageBase,
+                                     s_appRuntime.imageSize)) return false;
+
+    const uint64_t page = targetAddress &
+        ~(static_cast<uint64_t>(guidexos::native_elf::PAGE_SIZE) - 1ULL);
+    if (page < s_appRuntime.imageBase ||
+        (s_appRuntime.imageBase > ~static_cast<uint64_t>(0) - s_appRuntime.imageSize) ||
+        page >= s_appRuntime.imageBase + s_appRuntime.imageSize ||
+        !set_page_permissions(page, page + guidexos::native_elf::PAGE_SIZE,
+                               true, false)) return false;
+
+    uint8_t* writableByte = reinterpret_cast<uint8_t*>(
+        static_cast<uintptr_t>(targetAddress));
+    volatile uint8_t* byte = writableByte;
+    const uint8_t original = *byte;
+    if (original == 0xCC) {
+        (void)set_page_permissions(page, page + guidexos::native_elf::PAGE_SIZE,
+                                   false, true);
+        return false;
+    }
+    *byte = 0xCC;
+    flush_debug_instruction(writableByte);
+    if (!set_page_permissions(page, page + guidexos::native_elf::PAGE_SIZE,
+                               false, true)) {
+        *byte = original;
+        flush_debug_instruction(writableByte);
+        (void)set_page_permissions(page, page + guidexos::native_elf::PAGE_SIZE,
+                                   false, true);
+        return false;
+    }
+
+    s_debugEntryBreakpointInstalled = true;
+    s_debugEntryBreakpointAddress = targetAddress;
+    s_debugEntryBreakpointOriginalByte = original;
+    *originalByte = original;
+    return true;
+}
+
+bool restore_debug_entry_breakpoint()
+{
+    if (!s_debugEntryBreakpointInstalled) return true;
+    if (s_appRuntime.imageBase == 0 || s_appRuntime.imageSize == 0 ||
+        !native_app_pointer_in_range(s_debugEntryBreakpointAddress,
+                                     s_appRuntime.imageBase,
+                                     s_appRuntime.imageSize)) return false;
+    const uint64_t page = s_debugEntryBreakpointAddress &
+        ~(static_cast<uint64_t>(guidexos::native_elf::PAGE_SIZE) - 1ULL);
+    if (!set_page_permissions(page, page + guidexos::native_elf::PAGE_SIZE,
+                              true, false)) return false;
+    volatile uint8_t* byte = reinterpret_cast<volatile uint8_t*>(
+        static_cast<uintptr_t>(s_debugEntryBreakpointAddress));
+    uint8_t* writableByte = reinterpret_cast<uint8_t*>(
+        static_cast<uintptr_t>(s_debugEntryBreakpointAddress));
+    *byte = s_debugEntryBreakpointOriginalByte;
+    flush_debug_instruction(writableByte);
+    const bool restored = set_page_permissions(page,
+        page + guidexos::native_elf::PAGE_SIZE, false, true);
+    if (restored) {
+        s_debugEntryBreakpointInstalled = false;
+        s_debugEntryBreakpointAddress = 0;
+        s_debugEntryBreakpointOriginalByte = 0;
+    }
+    return restored;
+}
+
+bool debug_entry_breakpoint_installed()
+{
+    return s_debugEntryBreakpointInstalled;
+}
+
 static bool run_file_internal(const char* path,
                               int32_t* returnValue,
                               NativeElfRunReport* report,
@@ -1189,6 +1319,19 @@ static bool run_file_internal(const char* path,
         s_appRuntime.appContext.host == &s_appRuntime.hostCalls &&
         s_appRuntime.appContext.host->log != nullptr &&
         s_appRuntime.appContext.userData == &s_appRuntime;
+
+    if (NativeElfRunService::native_elf_debug_entry_breakpoint_requested()) {
+        uint8_t originalByte = 0;
+        if (!install_debug_entry_breakpoint(validation.entryPoint, &originalByte) ||
+            !NativeElfRunService::native_elf_debug_breakpoint_installed(
+                validation.entryPoint, originalByte)) {
+            (void)restore_debug_entry_breakpoint();
+            s_appRuntime.state = NativeAppExecutionState::Failed;
+            (void)teardown_application(report);
+            return fail_report(report,
+                               "NativeElf debug entry breakpoint could not be installed");
+        }
+    }
 
     serial::puts("ELF Loader: dedicated application stack base=0x");
     serial::put_hex64(s_appRuntime.stackBase);

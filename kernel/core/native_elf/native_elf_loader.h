@@ -88,6 +88,13 @@ bool native_elf_gui_runtime_snapshot(NativeElfGuiRuntimeSnapshot* output);
 // owner-side control operation; it never destroys an application stack.
 bool request_native_elf_gui_close(uint64_t generation);
 
+// Phase 27Z uses one in-memory INT3 patch at the validated gx_main entry.
+// These helpers own the NativeElf page-permission transition and never touch
+// the persistent VFS artifact.
+bool install_debug_entry_breakpoint(uint64_t targetAddress, uint8_t* originalByte);
+bool restore_debug_entry_breakpoint();
+bool debug_entry_breakpoint_installed();
+
 // Loads one validated ET_EXEC NativeElf file into the reusable reserved
 // window, invokes its validated gx_main(gx_app_context*) entry on the
 // dedicated bootstrap stack, and returns only after control has returned to
