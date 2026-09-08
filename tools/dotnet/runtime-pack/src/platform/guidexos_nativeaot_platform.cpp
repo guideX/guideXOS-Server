@@ -18114,7 +18114,8 @@ extern "C" void __cdecl guideXosNativeAotC011EC62SohTryFitObserved(
     uint32_t generation, uintptr_t size, uintptr_t allocationContext,
     uintptr_t allocationPointer, uintptr_t allocationLimit,
     uintptr_t activeRegion, uint32_t canAllocate,
-    uint32_t commitFailed, uint32_t shortSegmentEnd);
+    uint32_t commitFailed, uint32_t shortSegmentEnd,
+    uintptr_t committedEnd);
 extern "C" void __cdecl guideXosNativeAotC011EC62AllocateSohStateObserved(
     uint32_t generation, uintptr_t size, uintptr_t allocationContext,
     uint32_t allocationState, uint32_t completed,
@@ -18147,7 +18148,8 @@ extern "C" void __cdecl guideXosNativeAotC011EC65SohTryFitObserved(
     uint32_t generation, uintptr_t size, uintptr_t allocationContext,
     uintptr_t allocationPointer, uintptr_t allocationLimit,
     uintptr_t activeRegion, uint32_t canAllocate,
-    uint32_t commitFailed, uint32_t shortSegmentEnd);
+    uint32_t commitFailed, uint32_t shortSegmentEnd,
+    uintptr_t committedEnd);
 extern "C" void __cdecl guideXosNativeAotC011EC65AllocateSohStateObserved(
     uint32_t generation, uintptr_t size, uintptr_t allocationContext,
     uint32_t allocationState, uint32_t completed,
@@ -20874,6 +20876,31 @@ guideXosNativeAotC011EC64Finish() {
         (authentic ? 5u :
         (r.postDebitNormalN0Observed != 0u ? 4u :
         (r.candidateCount != 0u ? 2u : 1u)));
+    if (r.allocationCount >= 0x93u) {
+        const guidexos_nativeaot_c011ec64_allocation_record& target =
+            r.allocations[0x93u - 1u];
+        if (target.reserved[0] == 0xC9300001u) {
+            const uintptr_t committedEnd =
+                static_cast<uintptr_t>(target.reserved[2]) |
+                (static_cast<uintptr_t>(target.reserved[3]) <<
+                    (sizeof(uint32_t) * 8u));
+            const uintptr_t fitEnd = committedEnd >= 0x18u
+                ? committedEnd - 0x18u : 0u;
+            suspendEeSerialPutString(
+                "[nativeaot-gc-short-weak-lifetime] C93-FIT-BOUNDARY marker=C011EC93-FIT-BOUNDARY");
+            guideXosNativeAotC011EC64Put32("ordinal", target.ordinal);
+            guideXosNativeAotC011EC64Put32("fitResult",
+                target.reserved[1] & 1u);
+            guideXosNativeAotC011EC64Put32("commitFailed",
+                (target.reserved[1] >> 1u) & 1u);
+            guideXosNativeAotC011EC64Put64("committedEnd", committedEnd);
+            guideXosNativeAotC011EC64Put64("fitEnd", fitEnd);
+            guideXosNativeAotC011EC64Put64("objectAddress", target.objectAddress);
+            guideXosNativeAotC011EC64Put64("allocationPointerAfter",
+                target.allocationPointerAfter);
+            suspendEeSerialPutString("\n");
+        }
+    }
     suspendEeSerialPutString(
         "[nativeaot-gc-short-weak-lifetime] SUMMARY marker=C011EC64-SUMMARY");
     guideXosNativeAotC011EC64Put32("promotionObserved", r.promotionObserved);
@@ -20992,7 +21019,8 @@ static void guideXosNativeAotC011EC65CopyRefill(
     uintptr_t allocationContext, uintptr_t allocationPointer,
     uintptr_t allocationLimit, uintptr_t activeRegion,
     uint32_t canAllocate, uint32_t commitFailed,
-    uint32_t shortSegmentEnd, uint32_t allocationState) {
+    uint32_t shortSegmentEnd, uintptr_t committedEnd,
+    uint32_t allocationState) {
     d.observed = 1u;
     d.phase = phase;
     d.generation = generation;
@@ -21007,6 +21035,7 @@ static void guideXosNativeAotC011EC65CopyRefill(
     d.allocationPointer = allocationPointer;
     d.allocationLimit = allocationLimit;
     d.activeSegment = activeRegion;
+    d.committedEnd = committedEnd;
     d.regionRemaining = allocationLimit >= allocationPointer
         ? allocationLimit - allocationPointer : 0u;
 }
@@ -21132,7 +21161,8 @@ guideXosNativeAotC011EC65SohTryFitObserved(
     uint32_t generation, uintptr_t size, uintptr_t allocationContext,
     uintptr_t allocationPointer, uintptr_t allocationLimit,
     uintptr_t activeRegion, uint32_t canAllocate,
-    uint32_t commitFailed, uint32_t shortSegmentEnd) {
+    uint32_t commitFailed, uint32_t shortSegmentEnd,
+    uintptr_t committedEnd) {
     guidexos_nativeaot_c011ec65_lifecycle_record& r =
         guideXosNativeAotC011EC65State();
     if (r.started == 0u) return;
@@ -21149,6 +21179,7 @@ guideXosNativeAotC011EC65SohTryFitObserved(
         *e, generation, size, allocationContext, allocationPointer,
         allocationLimit, activeRegion, canAllocate, commitFailed,
         shortSegmentEnd, 0u);
+    e->committedBytes = committedEnd;
     if (phase == 1u && canAllocate != 0u &&
         r.normalRefillObserved == 0u) {
         r.normalRefillObserved = 1u;
@@ -21157,7 +21188,7 @@ guideXosNativeAotC011EC65SohTryFitObserved(
         guideXosNativeAotC011EC65CopyRefill(
             r.normalRefill, phase, generation, size, allocationContext,
             allocationPointer, allocationLimit, activeRegion, canAllocate,
-            commitFailed, shortSegmentEnd, 0u);
+            commitFailed, shortSegmentEnd, committedEnd, 0u);
     }
     const uintptr_t remaining = allocationLimit >= allocationPointer
         ? allocationLimit - allocationPointer : 0u;
@@ -21186,7 +21217,7 @@ guideXosNativeAotC011EC65SohTryFitObserved(
         guideXosNativeAotC011EC65CopyRefill(
             r.postNormalRefill, phase, generation, size, allocationContext,
             allocationPointer, allocationLimit, activeRegion, canAllocate,
-            commitFailed, shortSegmentEnd, 0u);
+            commitFailed, shortSegmentEnd, committedEnd, 0u);
         r.postNormalRefill.regionResult = r.allocationRegionResult;
         r.postNormalRefill.regionBranch = r.allocationRegionBranch;
         r.postNormalRefill.freeRegionsBefore = r.allocationRegionFreeBefore;
@@ -21212,7 +21243,7 @@ guideXosNativeAotC011EC65SohTryFitObserved(
         guideXosNativeAotC011EC65CopyRefill(
             r.postRefill, phase, generation, size, allocationContext,
             allocationPointer, allocationLimit, activeRegion, canAllocate,
-            commitFailed, shortSegmentEnd, 0u);
+            commitFailed, shortSegmentEnd, committedEnd, 0u);
         r.postRefill.expansionAttempted = r.postExpansionAttempted;
         r.postRefill.expansionSucceeded = r.postExpansionSucceeded;
     }
@@ -21488,6 +21519,7 @@ static void guideXosNativeAotC011EC65EmitRefill(
     guideXosNativeAotC011EC65Put64("allocationContext", d.allocationContext);
     guideXosNativeAotC011EC65Put64("allocationPointer", d.allocationPointer);
     guideXosNativeAotC011EC65Put64("allocationLimit", d.allocationLimit);
+    guideXosNativeAotC011EC65Put64("committedEnd", d.committedEnd);
     guideXosNativeAotC011EC65Put64("remainingBytes", d.regionRemaining);
     guideXosNativeAotC011EC65Put64("activeSegment", d.activeSegment);
     guideXosNativeAotC011EC65Put32("fitResult", d.fitResult);
@@ -21751,6 +21783,7 @@ static void guideXosNativeAotC011EC66Emit() {
     guideXosNativeAotC011EC66Put64("allocationContext", r.postNormalRefill.allocationContext);
     guideXosNativeAotC011EC66Put64("allocationPointer", r.postNormalRefill.allocationPointer);
     guideXosNativeAotC011EC66Put64("allocationLimit", r.postNormalRefill.allocationLimit);
+    guideXosNativeAotC011EC66Put64("committedEnd", r.postNormalRefill.committedEnd);
     guideXosNativeAotC011EC66Put64("remainingBytes", r.postNormalRefill.regionRemaining);
     guideXosNativeAotC011EC66Put64("activeSegment", r.postNormalRefill.activeSegment);
     guideXosNativeAotC011EC66Put32("fitResult", r.postNormalRefill.fitResult);
@@ -28847,13 +28880,35 @@ guideXosNativeAotC011EC62SohTryFitObserved(
     uint32_t generation, uintptr_t size, uintptr_t allocationContext,
     uintptr_t allocationPointer, uintptr_t allocationLimit,
     uintptr_t activeRegion, uint32_t canAllocate,
-    uint32_t commitFailed, uint32_t shortSegmentEnd) {
+    uint32_t commitFailed, uint32_t shortSegmentEnd,
+    uintptr_t committedEnd) {
 #if defined(GUIDEXOS_NATIVEAOT_C011EC65_POST_DEBIT_GEN2_OOS_PREEMPTION)
     guideXosNativeAotC011EC65SohTryFitObserved(
         generation, size, allocationContext, allocationPointer,
         allocationLimit, activeRegion, canAllocate, commitFailed,
-        shortSegmentEnd);
+        shortSegmentEnd, committedEnd);
 #endif
+    /* C93 reuses the C64 allocation record's reserved words.  The active
+     * C64 ordinal is the managed allocation currently spanning this fit
+     * attempt.  Capture only its first fit result; no new array or callback
+     * is introduced. */
+    guidexos_nativeaot_c011ec64_lifecycle_record& c64 =
+        g_guideXosAllocationDiagnostics.c011ec64Lifecycle;
+    if (c64.activeAllocationOrdinal != 0u &&
+        c64.activeAllocationOrdinal <= c64.allocationCount) {
+        guidexos_nativeaot_c011ec64_allocation_record& allocation =
+            c64.allocations[c64.activeAllocationOrdinal - 1u];
+        const bool preserveFailure = allocation.reserved[0] == 0xC9300001u &&
+            (allocation.reserved[1] & 2u) != 0u;
+        if (!preserveFailure || commitFailed != 0u) {
+            allocation.reserved[0] = 0xC9300001u;
+            allocation.reserved[1] = (canAllocate != 0u ? 1u : 0u) |
+                (commitFailed != 0u ? 2u : 0u);
+            allocation.reserved[2] = static_cast<uint32_t>(committedEnd);
+            allocation.reserved[3] = static_cast<uint32_t>(
+                committedEnd >> (sizeof(uint32_t) * 8u));
+        }
+    }
     guidexos_nativeaot_c011ec62_lifecycle_record& r =
         guideXosNativeAotC011EC62State();
     if (r.started == 0u || r.windowOpen == 0u ||

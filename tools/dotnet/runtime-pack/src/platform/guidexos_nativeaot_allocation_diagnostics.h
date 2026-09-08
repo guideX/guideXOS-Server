@@ -2098,6 +2098,7 @@ typedef struct guidexos_nativeaot_c011ec65_refill_record {
     uintptr_t allocationPointer;
     uintptr_t allocationLimit;
     uintptr_t activeSegment;
+    uintptr_t committedEnd;
     uintptr_t regionRemaining;
     uintptr_t freeRegionsBefore;
     uintptr_t freeRegionsAfter;

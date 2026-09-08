@@ -2629,7 +2629,7 @@ extern "C" void __cdecl guideXosNativeAotC011EC62PolicyObserved(uint32_t entryOr
 extern "C" void __cdecl guideXosNativeAotC011EC62B02Observed(uint32_t nInitial, uint32_t nBefore, uint32_t nAfter, int64_t budgetValue, uint32_t policyEntryOrdinal);
 extern "C" void __cdecl guideXosNativeAotC011EC62RestartObserved(uint32_t collectionOrdinal, uint32_t restartObserved, uint32_t managedResumeObserved);
 extern "C" void __cdecl guideXosNativeAotC011EC62GcHeapAllocObserved(uintptr_t size, uint32_t flags, uintptr_t allocationContext);
-extern "C" void __cdecl guideXosNativeAotC011EC62SohTryFitObserved(uint32_t generation, uintptr_t size, uintptr_t allocationContext, uintptr_t allocationPointer, uintptr_t allocationLimit, uintptr_t activeRegion, uint32_t canAllocate, uint32_t commitFailed, uint32_t shortSegmentEnd);
+extern "C" void __cdecl guideXosNativeAotC011EC62SohTryFitObserved(uint32_t generation, uintptr_t size, uintptr_t allocationContext, uintptr_t allocationPointer, uintptr_t allocationLimit, uintptr_t activeRegion, uint32_t canAllocate, uint32_t commitFailed, uint32_t shortSegmentEnd, uintptr_t committedEnd);
 extern "C" void __cdecl guideXosNativeAotC011EC62AllocateSohStateObserved(uint32_t generation, uintptr_t size, uintptr_t allocationContext, uint32_t allocationState, uint32_t completed, uint32_t allocationSucceeded, uintptr_t allocationPointer, uintptr_t allocationLimit);
 extern "C" void __cdecl guideXosNativeAotC011EC62FreeRegionObserved(uint32_t result, uint32_t branch, uintptr_t freeRegionsBefore, uintptr_t freeRegionsAfter, uintptr_t candidateRegion);
 extern "C" void __cdecl guideXosNativeAotC011EC62N2CommitObserved(uint32_t sourceBranch, uint32_t callerGeneration, uint32_t candidateGeneration, uint32_t collectionReason, uint32_t lastGcBeforeOom);
@@ -2638,7 +2638,7 @@ extern "C" void __cdecl guideXosNativeAotC011EC62N2CommitObserved(uint32_t sourc
                         if ($isC011EC65) {
                             $c54GcDeclaration += [Environment]::NewLine + @'
 extern "C" void __cdecl guideXosNativeAotC011EC65AllocationAttemptObserved(uintptr_t requestSize, uint32_t generation, uintptr_t allocationContext, uintptr_t allocationPointer, uintptr_t allocationLimit, uintptr_t allocationSegment);
-extern "C" void __cdecl guideXosNativeAotC011EC65SohTryFitObserved(uint32_t generation, uintptr_t size, uintptr_t allocationContext, uintptr_t allocationPointer, uintptr_t allocationLimit, uintptr_t activeRegion, uint32_t canAllocate, uint32_t commitFailed, uint32_t shortSegmentEnd);
+extern "C" void __cdecl guideXosNativeAotC011EC65SohTryFitObserved(uint32_t generation, uintptr_t size, uintptr_t allocationContext, uintptr_t allocationPointer, uintptr_t allocationLimit, uintptr_t activeRegion, uint32_t canAllocate, uint32_t commitFailed, uint32_t shortSegmentEnd, uintptr_t committedEnd);
 extern "C" void __cdecl guideXosNativeAotC011EC65AllocateSohStateObserved(uint32_t generation, uintptr_t size, uintptr_t allocationContext, uint32_t allocationState, uint32_t completed, uint32_t allocationSucceeded, uintptr_t allocationPointer, uintptr_t allocationLimit);
 extern "C" void __cdecl guideXosNativeAotC011EC65FreeRegionObserved(uint32_t result, uint32_t branch, uintptr_t freeRegionsBefore, uintptr_t freeRegionsAfter, uintptr_t candidateRegion);
 extern "C" void __cdecl guideXosNativeAotC011EC65ExpansionObserved(uintptr_t segment, uintptr_t requestSize, uintptr_t committedBytes, uintptr_t reservedBytes, uint32_t succeeded, uint32_t hardLimitShort);
@@ -3608,10 +3608,52 @@ static void guideXosNativeAotC011EC84Probe(uint32_t checkpointValue);
             }
 
             if ($isC011EC62) {
+                $c62FitStart = $gcCppText.IndexOf('BOOL gc_heap::a_fit_segment_end_p (')
+                $c62FitEnd = $gcCppText.IndexOf('BOOL gc_heap::uoh_a_fit_segment_end_p (', $c62FitStart)
+                if ($c62FitStart -lt 0 -or $c62FitEnd -le $c62FitStart) { throw "C011EC93 could not isolate a_fit_segment_end_p." }
+                $c62FitFunction = $gcCppText.Substring($c62FitStart, $c62FitEnd - $c62FitStart)
+                $c93FitFailureNeedle = 'found_no_fit:' + $lockedSourceNewLine + $lockedSourceNewLine + '    return FALSE;' + $lockedSourceNewLine
+                $c93FitFailureReplacement = @'
+found_no_fit:
+
+    guideXosNativeAotC011EC62SohTryFitObserved(
+        static_cast<uint32_t>(gen_number), static_cast<uintptr_t>(size),
+        reinterpret_cast<uintptr_t>(acontext),
+        reinterpret_cast<uintptr_t>(acontext->alloc_ptr),
+        reinterpret_cast<uintptr_t>(acontext->alloc_limit),
+        reinterpret_cast<uintptr_t>(seg), 0u,
+        (commit_failed_p != nullptr && *commit_failed_p) ? 1u : 0u,
+        0u,
+        reinterpret_cast<uintptr_t>(heap_segment_committed(seg)));
+    return FALSE;
+'@.Replace("`r`n", $lockedSourceNewLine).Replace("`n", $lockedSourceNewLine)
+                if (-not $c62FitFunction.Contains($c93FitFailureNeedle)) { throw "C011EC93 a_fit_segment_end_p failure return was not found." }
+                $c62FitFunction = Replace-First $c62FitFunction $c93FitFailureNeedle $c93FitFailureReplacement
+                $gcCppText = $gcCppText.Substring(0, $c62FitStart) + $c62FitFunction + $gcCppText.Substring($c62FitEnd)
                 $c62SohStart = $gcCppText.IndexOf('BOOL gc_heap::soh_try_fit (int gen_number,')
                 $c62SohEnd = $gcCppText.IndexOf('allocation_state gc_heap::allocate_soh (int gen_number,', $c62SohStart)
                 if ($c62SohStart -lt 0 -or $c62SohEnd -le $c62SohStart) { throw "C011EC62 could not isolate soh_try_fit." }
                 $c62SohFunction = $gcCppText.Substring($c62SohStart, $c62SohEnd - $c62SohStart)
+                $c93SegmentFitNeedle = @'
+                can_allocate = a_fit_segment_end_p (gen_number, ephemeral_heap_segment, size,
+                                                    acontext, flags, align_const, commit_failed_p);
+'@.Replace("`r`n", $lockedSourceNewLine).Replace("`n", $lockedSourceNewLine)
+                $c93SegmentFitReplacement = $c93SegmentFitNeedle + @'
+                guideXosNativeAotC011EC62SohTryFitObserved(
+                    static_cast<uint32_t>(gen_number), static_cast<uintptr_t>(size),
+                    reinterpret_cast<uintptr_t>(acontext),
+                    reinterpret_cast<uintptr_t>(acontext->alloc_ptr),
+                    reinterpret_cast<uintptr_t>(acontext->alloc_limit),
+                    reinterpret_cast<uintptr_t>(ephemeral_heap_segment),
+                    can_allocate ? 1u : 0u,
+                    (commit_failed_p != nullptr && *commit_failed_p) ? 1u : 0u,
+                    (short_seg_end_p != nullptr && *short_seg_end_p) ? 1u : 0u,
+                    ephemeral_heap_segment != nullptr
+                        ? reinterpret_cast<uintptr_t>(heap_segment_committed(ephemeral_heap_segment))
+                        : 0u);
+'@.Replace("`r`n", $lockedSourceNewLine).Replace("`n", $lockedSourceNewLine)
+                if (-not $c62SohFunction.Contains($c93SegmentFitNeedle)) { throw "C011EC93 soh_try_fit segment fit call was not found." }
+                $c62SohFunction = Replace-First $c62SohFunction $c93SegmentFitNeedle $c93SegmentFitReplacement
                 $c62SohFailureNeedle = '                    return FALSE;' + $lockedSourceNewLine
                 $c62SohFailureReplacement = @'
                     guideXosNativeAotC011EC62SohTryFitObserved(
@@ -3622,7 +3664,11 @@ static void guideXosNativeAotC011EC84Probe(uint32_t checkpointValue);
                         reinterpret_cast<uintptr_t>(ephemeral_heap_segment),
                         can_allocate ? 1u : 0u,
                         (commit_failed_p != nullptr && *commit_failed_p) ? 1u : 0u,
-                        (short_seg_end_p != nullptr && *short_seg_end_p) ? 1u : 0u);
+                        (short_seg_end_p != nullptr && *short_seg_end_p) ? 1u : 0u,
+                        ephemeral_heap_segment != nullptr
+                            ? reinterpret_cast<uintptr_t>(heap_segment_committed(ephemeral_heap_segment))
+                            : 0u);
+'@.Replace("`r`n", $lockedSourceNewLine).Replace("`n", $lockedSourceNewLine) + @'
                     return FALSE;
 '@.Replace("`r`n", $lockedSourceNewLine).Replace("`n", $lockedSourceNewLine)
                 if (-not $c62SohFunction.Contains($c62SohFailureNeedle)) { throw "C011EC62 soh_try_fit failure return was not found." }
@@ -3637,7 +3683,11 @@ static void guideXosNativeAotC011EC84Probe(uint32_t checkpointValue);
         reinterpret_cast<uintptr_t>(ephemeral_heap_segment),
         can_allocate ? 1u : 0u,
         (commit_failed_p != nullptr && *commit_failed_p) ? 1u : 0u,
-        (short_seg_end_p != nullptr && *short_seg_end_p) ? 1u : 0u);
+        (short_seg_end_p != nullptr && *short_seg_end_p) ? 1u : 0u,
+        ephemeral_heap_segment != nullptr
+            ? reinterpret_cast<uintptr_t>(heap_segment_committed(ephemeral_heap_segment))
+            : 0u);
+'@.Replace("`r`n", $lockedSourceNewLine).Replace("`n", $lockedSourceNewLine) + @'
     return can_allocate;
 '@.Replace("`r`n", $lockedSourceNewLine).Replace("`n", $lockedSourceNewLine)
                 if (-not $c62SohFunction.Contains($c62SohReturnNeedle)) { throw "C011EC62 soh_try_fit final return was not found." }
