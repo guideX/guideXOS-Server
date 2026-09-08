@@ -3237,6 +3237,91 @@ static std::string navigatorHostedSmokeDiagnostic() {
         yesNo(js32Reloaded) + ",focused=" +
         gxos::apps::Navigator::SmokeFocusedFormControlId());
 
+    const std::string js33FixtureUrl =
+        "http://127.0.0.1:8080/navigator-smoke/javascript-js33.html";
+    const bool js33Loaded = gxos::apps::Navigator::SmokeNavigateToQuiet(
+        js33FixtureUrl);
+    const std::string js33InitialText =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS33 hosted fixture loads default form state projection",
+        js33Loaded && gxos::apps::Navigator::SmokeCurrentUrl() == js33FixtureUrl &&
+        contains(js33InitialText, "Navigator JavaScript JS33") &&
+        contains(js33InitialText,
+            "initial:value=alice:default=alice:notes=hello:checked=true:defaultChecked=true:radioA=true:radioB=false:radioDefaultB=false:index=0:select=a:input=0:change=0:resets=0:submit=none") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("loaded=") + yesNo(js33Loaded) + ",text=" +
+        summarizeText(js33InitialText, 560));
+
+    const bool js33MutateTrigger =
+        gxos::apps::Navigator::SmokeClickFormControlById("js33-mutate");
+    const std::string js33AfterMutate =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS33 default setters preserve current state and stay silent",
+        js33MutateTrigger &&
+        gxos::apps::Navigator::SmokeFormControlValueById("js33-name") == "current" &&
+        !gxos::apps::Navigator::SmokeFormControlCheckedById("js33-yes") &&
+        contains(js33AfterMutate,
+            "mutated:value=current:default=new-default:notes=new-notes:checked=false:defaultChecked=true:radioA=true:radioB=false:radioDefaultB=true:index=2:select=c:input=0:change=0") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("mutate=") + yesNo(js33MutateTrigger) + ",text=" +
+        summarizeText(js33AfterMutate, 620));
+
+    const bool js33ResetTrigger =
+        gxos::apps::Navigator::SmokeClickFormControlById("js33-reset");
+    const std::string js33AfterReset =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS33 reset restores mutated text, checkbox, radio, and select defaults",
+        js33ResetTrigger &&
+        gxos::apps::Navigator::SmokeFormControlValueById("js33-name") == "new-default" &&
+        gxos::apps::Navigator::SmokeFormControlValueById("js33-notes") == "new-notes" &&
+        gxos::apps::Navigator::SmokeFormControlCheckedById("js33-yes") &&
+        gxos::apps::Navigator::SmokeFormControlCheckedById("js33-radio-b") &&
+        gxos::apps::Navigator::SmokeFormControlValueById("js33-mode") == "a" &&
+        contains(js33AfterReset, "reset-event:") && contains(js33AfterReset, "resets=1") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("reset=") + yesNo(js33ResetTrigger) + ",text=" +
+        summarizeText(js33AfterReset, 560));
+
+    const bool js33SubmitTrigger =
+        gxos::apps::Navigator::SmokeClickFormControlById("js33-submit");
+    const std::string js33AfterSubmit =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS33 reset-then-submit uses restored current values",
+        js33SubmitTrigger && gxos::apps::Navigator::SmokeCurrentUrl() ==
+            js33FixtureUrl && contains(js33AfterSubmit,
+            "submit:value=new-default:default=new-default:notes=new-notes") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("submit=") + yesNo(js33SubmitTrigger) + ",url=" +
+        gxos::apps::Navigator::SmokeCurrentUrl() + ",text=" +
+        summarizeText(js33AfterSubmit, 520));
+
+    const bool js33SelectTrigger =
+        gxos::apps::Navigator::SmokeClickFormControlById("js33-select");
+    const std::string js33AfterSelect =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS33 selectedIndex and value stay coherent and silent",
+        js33SelectTrigger &&
+        gxos::apps::Navigator::SmokeFormControlValueById("js33-mode") == "b" &&
+        contains(js33AfterSelect,
+            "selected:value=new-default:default=new-default:notes=new-notes:checked=true:defaultChecked=true:radioA=false:radioB=true:radioDefaultB=true:index=1:select=b:input=0:change=0") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("select=") + yesNo(js33SelectTrigger) + ",text=" +
+        summarizeText(js33AfterSelect, 620));
+
+    const bool js33NavigatedAway =
+        gxos::apps::Navigator::SmokeNavigateToQuiet("about:navigator");
+    const bool js33Reloaded = gxos::apps::Navigator::SmokeNavigateToQuiet(
+        js33FixtureUrl);
+    const std::string js33AfterReload =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS33 document replacement restores parser defaults without leakage",
+        js33NavigatedAway && js33Reloaded && contains(js33AfterReload,
+            "initial:value=alice:default=alice:notes=hello") &&
+        contains(js33AfterReload, "index=0:select=a") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("away=") + yesNo(js33NavigatedAway) + ",reload=" +
+        yesNo(js33Reloaded) + ",text=" + summarizeText(js33AfterReload, 520));
+
     bool cssInlineLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-inline.html");
     std::string cssInlineText = gxos::apps::Navigator::SmokeCurrentDocumentText();
     std::string cssInlineReport = gxos::apps::Navigator::SmokeRuntimeReport();

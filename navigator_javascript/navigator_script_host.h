@@ -256,6 +256,11 @@ private:
         bool scriptMutation);
     HostResult setElementChecked(HostInstanceId serial, bool checked,
         bool scriptMutation);
+    HostResult setElementDefaultValue(HostInstanceId serial,
+        const std::string& value);
+    HostResult setElementDefaultChecked(HostInstanceId serial, bool checked);
+    HostResult setSelectIndex(HostInstanceId serial, int index,
+        bool scriptMutation);
     HostResult setSelectValue(HostInstanceId serial, const std::string& value,
         bool scriptMutation);
     bool radioGroupMatches(const gxos::web::DocBlock& left,

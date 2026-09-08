@@ -1,0 +1,86 @@
+<!doctype html>
+<html>
+<head><title>Navigator JavaScript JS33</title></head>
+<body>
+<h1>Navigator JavaScript JS33</h1>
+<p>Default form properties project onto the same reset state owned by
+  Navigator while current values remain separate.</p>
+<form id="js33-form">
+  <input id="js33-name" type="text" name="name" value="alice">
+  <textarea id="js33-notes" name="notes">hello</textarea>
+  <input id="js33-yes" type="checkbox" name="yes" value="yes" checked>
+  <input id="js33-radio-a" type="radio" name="mode" value="a" checked>
+  <input id="js33-radio-b" type="radio" name="mode" value="b">
+  <select id="js33-mode" name="mode">
+    <option value="a" selected>A</option>
+    <option value="b">B</option>
+    <option value="c">C</option>
+  </select>
+  <button id="js33-mutate" type="button">Mutate defaults</button>
+  <button id="js33-select" type="button">Select index</button>
+  <button id="js33-reset" type="reset">Reset</button>
+  <button id="js33-submit" type="submit">Submit</button>
+</form>
+<p id="js33-state">initial</p>
+<script>
+var js33Form = document.getElementById("js33-form");
+var js33Name = document.getElementById("js33-name");
+var js33Notes = document.getElementById("js33-notes");
+var js33Yes = document.getElementById("js33-yes");
+var js33RadioA = document.getElementById("js33-radio-a");
+var js33RadioB = document.getElementById("js33-radio-b");
+var js33Mode = document.getElementById("js33-mode");
+var js33State = document.getElementById("js33-state");
+var js33Mutate = document.getElementById("js33-mutate");
+var js33Select = document.getElementById("js33-select");
+var js33Reset = document.getElementById("js33-reset");
+var js33Submit = document.getElementById("js33-submit");
+var js33Inputs = 0;
+var js33Changes = 0;
+var js33Resets = 0;
+var js33SubmitValue = "none";
+
+function js33Snapshot(label) {
+  js33State.textContent = label + ":value=" + js33Name.value +
+    ":default=" + js33Name.defaultValue + ":notes=" + js33Notes.defaultValue +
+    ":checked=" + js33Yes.checked + ":defaultChecked=" +
+    js33Yes.defaultChecked + ":radioA=" + js33RadioA.checked +
+    ":radioB=" + js33RadioB.checked + ":radioDefaultB=" +
+    js33RadioB.defaultChecked + ":index=" + js33Mode.selectedIndex +
+    ":select=" + js33Mode.value + ":input=" + js33Inputs +
+    ":change=" + js33Changes + ":resets=" + js33Resets +
+    ":submit=" + js33SubmitValue;
+}
+js33Form.addEventListener("input", function() { js33Inputs = js33Inputs + 1; });
+js33Form.addEventListener("change", function() { js33Changes = js33Changes + 1; });
+js33Form.addEventListener("reset", function() {
+  js33Resets = js33Resets + 1;
+});
+js33Form.addEventListener("submit", function(event) {
+  js33SubmitValue = js33Name.value + ":" + js33Yes.checked + ":" + js33Mode.value;
+  event.preventDefault();
+  js33Snapshot("submit");
+});
+js33Mutate.addEventListener("click", function() {
+  js33Name.value = "current";
+  js33Notes.value = "current-notes";
+  js33Name.defaultValue = "new-default";
+  js33Notes.defaultValue = "new-notes";
+  js33Yes.checked = false;
+  js33Yes.defaultChecked = true;
+  js33RadioA.defaultChecked = false;
+  js33RadioB.defaultChecked = true;
+  js33Mode.selectedIndex = 2;
+  js33Snapshot("mutated");
+});
+js33Select.addEventListener("click", function() {
+  js33Mode.selectedIndex = 1;
+  js33Snapshot("selected");
+});
+js33Form.addEventListener("reset", function() {
+  js33Snapshot("reset-event");
+});
+js33Snapshot("initial");
+</script>
+</body>
+</html>

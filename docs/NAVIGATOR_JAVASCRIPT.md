@@ -3382,16 +3382,16 @@ neither boundary canceled it. `stopPropagation()` or
 Ordinary buttons remain activation-only and submit buttons remain submit
 controls.
 
-The default action restores the document-owned parser-time state already
-associated with the production `WebDocument` form runtime. The bounded
-`FormRuntimeControlState` now retains one initial value and one initial
-selected-option index in addition to the existing initial checked bit. Current
+The default action restores the document-owned reset state already associated
+with the production `WebDocument` form runtime. The bounded
+`FormRuntimeControlState` retains mutable default value, default checked, and
+default selected-option fields alongside the current projections. Current
 text/textarea values remain on `DocBlock::inputValue`; current checkbox/radio
 state remains in the runtime table; and current select selection remains on
 the select block. No JavaScript-owned reset snapshot or history is created.
 
 Supported text inputs, textareas, checkboxes, radio groups, and single-selects
-restore their initial values silently. Reset does not synthesize `input`,
+restore their stored defaults silently. Reset does not synthesize `input`,
 `change`, or click events. Radio restoration is group-aware and performs a
 bounded all-off/first-initially-checked pass, so malformed multiple-checked
 markup uses the existing document-order interpretation without claiming full
@@ -3418,10 +3418,9 @@ receiver and stale-handle validation, cancellation, all supported control
 families, parser/user/script mutation provenance, silent restoration, edit
 baselines, focus projection, listener propagation/options, click-vs-reset
 cancellation, cross-form and unowned-control isolation, nested submit/reset,
-bounded recursive reset, and document replacement. Default-value and
-defaultChecked DOM properties were audited and deferred because the internal
-default snapshot is already directly used by reset and exposing new properties
-would not be necessary for this bounded phase.
+bounded recursive reset, and document replacement. `defaultValue` and
+`defaultChecked` were intentionally deferred to JS33, where they can project
+the same reset fields instead of creating a second default model.
 
 The hosted fixture is `navigator-smoke/javascript-js31.html`. It exercises
 mutate-then-reset, canceled reset, canceled reset-button click, input reset,
@@ -3429,9 +3428,9 @@ ordinary-button routing, submit-listener reset, cross-form isolation,
 unowned-control isolation, silent input/change behavior, and focused reset
 through the production Navigator activation seams. Its final reset-then-submit
 path also checks that the existing GET serializer sees the restored text,
-checkbox, radio, and select defaults. Full HTML form compliance,
-FormData, requestSubmit, constraint validation, defaultValue/defaultChecked,
-multiple select, dynamic options, and named form collections remain deferred.
+checkbox, radio, and select defaults. Full HTML form compliance, FormData,
+requestSubmit, constraint validation, multiple select, dynamic options, and
+named form collections remain deferred.
 
 The focused JS31 suite passes all 258 checks, and the complete JS6-through-JS31
 matrix passes all 26 repository scripts. The normal native `build.bat` also
@@ -3539,10 +3538,64 @@ configuration was changed.
 Window/OS activation state, focus options, autofocus, `tabindex` traversal
 expansion, pointer hover/mouseover related-target events, page visibility,
 `window.hasFocus()`, and full browser focus navigation remain deferred. This
-phase also does not claim a separate browsing-context focus model or add
-`defaultValue`/`defaultChecked` form properties from JS31.
+phase also does not claim a separate browsing-context focus model.
 
-The recommended JS33 direction is to extend the same logical-serial and
-per-dispatch-depth discipline to the next explicitly requested event family,
-with a fresh stale-handle and nested-dispatch contract before exposing new
-browser state.
+## Phase JS33: default form-state DOM properties
+
+JS33 exposes the existing document-owned reset state through these writable
+host properties:
+
+```javascript
+input.defaultValue
+textarea.defaultValue
+checkbox.defaultChecked
+radio.defaultChecked
+select.selectedIndex
+```
+
+`defaultValue` and `defaultChecked` are distinct from current `value` and
+`checked`. Their setters update only the reset defaults, are silent, and do not
+dispatch `input`, `change`, `reset`, or `click`. A later uncanceled
+`form.reset()` reads those same mutable fields, so defaults persist across
+repeated resets. Reset listeners run first; a listener's default mutation is
+therefore used by an uncanceled reset, while a canceled reset leaves both the
+current value and the listener's default mutation intact.
+
+For radios, parser-time defaults and scripted `defaultChecked = true` use the
+same bounded group policy: the first checked default in document order wins.
+Changing a default radio never changes the current radio selection; only reset
+applies the default group. This is intentionally narrower than full browser
+radio/attribute synchronization.
+
+`select.selectedIndex` is current selection only for single-select controls and
+is zero-based. `-1` clears selection and makes `value` empty; an index below
+`-1` or beyond the option list is a safe no-op. A valid index updates the same
+selection used by `.value`, and `.value = matchingValue` updates the index.
+Assignments remain silent. The internal reset selected-option index is not
+exposed as a non-standard default-selection property, and `option.defaultSelected`,
+options collections, multiple select, and dynamic option mutation remain
+deferred.
+
+The focused proof is
+`tests/navigator_javascript_js33_test.cpp`, run by
+`scripts/smoke-navigator-javascript-js33.ps1`. It covers parser projection,
+current/default separation, writable text and checkable defaults, radio-group
+normalization, selected-index/value coherence and bounds, silent writes,
+reset-listener timing and cancellation, focused baseline synchronization,
+event metadata, bounded reset re-entry, document replacement, stale handles,
+unsupported members, and read-only regression checks. The hosted fixture is
+`navigator-smoke/javascript-js33.html`; its production smoke path covers
+initial projection, default mutation, reset restoration, radio/select state,
+silent scripted assignment, reset-then-submit, and lifecycle replacement.
+
+The implementation keeps `WebDocument::formRuntimeState` authoritative and
+does not reparse attributes or cache defaults globally. Host generation checks
+make old handles fail closed after replacement or invalidation. The 64-listener
+capacity, event cache, JS26–JS32 editing/focus behavior, and existing
+`document.activeElement`/event read-only properties remain unchanged. This is
+bounded form-state projection, not full HTML forms DOM compatibility.
+
+The recommended JS34 direction is to audit whether a tiny canonical
+`option.defaultSelected` projection can be added without introducing option
+collections or a second selection model; otherwise continue with bounded form
+submission observability.

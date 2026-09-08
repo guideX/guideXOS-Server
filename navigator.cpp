@@ -18169,19 +18169,19 @@ void Navigator::initializeFormRuntimeState()
 		state.parentFormSerial = metadata.parentFormSerial;
 		state.parentFieldsetSerial = metadata.parentFieldsetSerial;
 		state.checked = metadata.type == FormControlType::Option ? metadata.selected : metadata.checked;
-		state.initialChecked = state.checked;
-		state.initialValue = metadata.value;
-		state.initialSelectedOption = metadata.selectedOptionIndex;
+		state.defaultChecked = state.checked;
+		state.defaultValue = metadata.value;
+		state.defaultSelectedOption = metadata.selectedOptionIndex;
 		state.disabled = metadata.disabled;
 		state.metadataValid = true;
 		for (const DocBlock& block : s_currentDoc.blocks) {
 			if (block.formControl.logicalSerial != element.serial) continue;
 			if (block.type == BlockType::FormTextInput ||
 				block.type == BlockType::FormTextarea) {
-				state.initialValue = block.inputValue;
+				state.defaultValue = block.inputValue;
 			} else if (block.type == BlockType::FormSelect) {
-				state.initialValue = block.inputValue;
-				state.initialSelectedOption = block.selectedOption;
+				state.defaultValue = block.inputValue;
+				state.defaultSelectedOption = block.selectedOption;
 			}
 			break;
 		}
@@ -18214,12 +18214,46 @@ void Navigator::initializeFormRuntimeState()
 		state.checked = block.formControl.type == FormControlType::Checkbox ||
 			block.formControl.type == FormControlType::Radio
 			? block.formControl.checked : false;
-		state.initialChecked = state.checked;
-		state.initialValue = block.inputValue;
-		state.initialSelectedOption = block.selectedOption;
+		state.defaultChecked = state.checked;
+		state.defaultValue = block.inputValue;
+		state.defaultSelectedOption = block.selectedOption;
 		state.disabled = block.formControl.disabled;
 		state.metadataValid = true;
 		++s_currentDoc.formsDiagnostics.formRuntimeControlsInitialized;
+	}
+	// Normalize parser-time radio defaults with the same document-order policy
+	// used by reset. Scripted defaultChecked=true uses the equivalent bounded
+	// group replacement in the JavaScript adapter.
+	for (size_t index = 0; index < s_currentDoc.blocks.size(); ++index) {
+		const DocBlock& block = s_currentDoc.blocks[index];
+		if (block.type != BlockType::FormRadio) continue;
+		FormRuntimeControlState* state = nullptr;
+		for (size_t stateIndex = 0; stateIndex < s_currentDoc.formRuntimeState.count;
+			++stateIndex) {
+			if (s_currentDoc.formRuntimeState.controls[stateIndex].logicalSerial ==
+				block.formControl.logicalSerial) {
+				state = &s_currentDoc.formRuntimeState.controls[stateIndex];
+				break;
+			}
+		}
+		if (state == nullptr || !state->defaultChecked) continue;
+		for (size_t prior = 0; prior < index; ++prior) {
+			const DocBlock& candidate = s_currentDoc.blocks[prior];
+			if (candidate.type != BlockType::FormRadio ||
+				!radioGroupMatches(candidate, block)) continue;
+			for (size_t candidateIndex = 0;
+				candidateIndex < s_currentDoc.formRuntimeState.count;
+				++candidateIndex) {
+				const FormRuntimeControlState& candidateState =
+					s_currentDoc.formRuntimeState.controls[candidateIndex];
+				if (candidateState.logicalSerial == candidate.formControl.logicalSerial &&
+					candidateState.defaultChecked) {
+					state->defaultChecked = false;
+					break;
+				}
+			}
+			if (!state->defaultChecked) break;
+		}
 	}
 	updateFormAccessibilityMetadata();
 }
