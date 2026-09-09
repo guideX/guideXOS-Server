@@ -29,7 +29,9 @@ typedef enum gx_development_debug_command {
     /* Phase 27Z: one bare-metal entry breakpoint control. */
     GX_DEVELOPMENT_DEBUG_RESUME = 15,
     /* Phase 28C: repeatedly execute instructions until a new source location. */
-    GX_DEVELOPMENT_DEBUG_STEP_SOURCE_INTO = 16
+    GX_DEVELOPMENT_DEBUG_STEP_SOURCE_INTO = 16,
+    /* Phase 28D: execute one source operation without entering a direct user call. */
+    GX_DEVELOPMENT_DEBUG_STEP_SOURCE_OVER = 17
 } gx_development_debug_command;
 
 typedef enum gx_development_debug_status {
@@ -153,6 +155,27 @@ typedef struct gx_development_debug_snapshot {
     uint32_t sourceStepStartColumn;
     char sourceStepStartPath[GX_DEVELOPMENT_DEBUG_MAX_SOURCE_PATH_BYTES];
     char sourceStepStartFunctionName[GX_DEVELOPMENT_DEBUG_MAX_FUNCTION_NAME_BYTES];
+    /* Append-only Phase 28D direct-call Step Over evidence. */
+    uint32_t sourceStepOverResult;
+    uint32_t sourceStepOverInstructionCount;
+    uint32_t sourceStepOverInstructionLimit;
+    uint32_t sourceStepOverCallDetected;
+    uint32_t sourceStepOverNestedReturnCount;
+    uint32_t sourceStepOverTemporaryBreakpointCount;
+    uint64_t sourceStepOverCallRip;
+    uint64_t sourceStepOverCallTargetAddress;
+    uint64_t sourceStepOverReturnAddress;
+    uint64_t sourceStepOverStartingRsp;
+    uint64_t sourceStepOverStartingRbp;
+    uint64_t sourceStepOverReturnTrapRip;
+    uint64_t sourceStepOverFinalRsp;
+    uint64_t sourceStepOverFinalRbp;
+    uint32_t sourceStepOverInternalMachineStepCount;
+    uint32_t sourceStepOverCallerFrameVerified;
+    char sourceStepOverCalleeFunctionName[GX_DEVELOPMENT_DEBUG_MAX_FUNCTION_NAME_BYTES];
+    uint8_t sourceStepOverOriginalReturnByte;
+    uint8_t sourceStepOverOriginalReturnByteValid;
+    uint8_t sourceStepOverReserved[2];
 } gx_development_debug_snapshot;
 
 enum {
@@ -178,7 +201,8 @@ enum {
     GX_DEVELOPMENT_DEBUG_PAUSE_REASON_ENTRY_BREAKPOINT = 1,
     GX_DEVELOPMENT_DEBUG_PAUSE_REASON_SOURCE_BREAKPOINT = 2,
     GX_DEVELOPMENT_DEBUG_PAUSE_REASON_SINGLE_STEP = 3,
-    GX_DEVELOPMENT_DEBUG_PAUSE_REASON_SOURCE_STEP = 4
+    GX_DEVELOPMENT_DEBUG_PAUSE_REASON_SOURCE_STEP = 4,
+    GX_DEVELOPMENT_DEBUG_PAUSE_REASON_SOURCE_STEP_OVER = 5
 };
 
 /* A source step is a bounded composite of the Phase 28B instruction step. */

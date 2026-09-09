@@ -113,7 +113,17 @@ static_assert(offsetof(gx_development_debug_snapshot, sourceStepStartPath) == 77
               "source-step starting source path offset changed");
 static_assert(offsetof(gx_development_debug_snapshot, sourceStepStartFunctionName) == 936,
               "source-step starting function offset changed");
-static_assert(sizeof(gx_development_debug_snapshot) == 1000, "development debug snapshot size changed");
+static_assert(GX_DEVELOPMENT_DEBUG_STEP_SOURCE_OVER == 17,
+              "source Step Over command must be appended after Phase 28C");
+static_assert(offsetof(gx_development_debug_snapshot, sourceStepOverResult) == 1000,
+              "source Step Over result must be appended after Phase 28C fields");
+static_assert(offsetof(gx_development_debug_snapshot, sourceStepOverCallRip) == 1024,
+              "source Step Over call RIP offset changed");
+static_assert(offsetof(gx_development_debug_snapshot, sourceStepOverReturnAddress) == 1040,
+              "source Step Over return address offset changed");
+static_assert(offsetof(gx_development_debug_snapshot, sourceStepOverCalleeFunctionName) == 1096,
+              "source Step Over callee function offset changed");
+static_assert(sizeof(gx_development_debug_snapshot) == 1168, "development debug snapshot size changed");
 static_assert(offsetof(gx_development_run_snapshot, closeRequested) == 4552,
               "development run close-request slot changed");
 static_assert(offsetof(gx_development_run_snapshot, cancellationRequested) == 4556,

@@ -37,12 +37,17 @@ int main()
     const SourceStepLocation nextLine = location("src/main.cpp", "gx_main", 11, 4);
     const SourceStepLocation helper = location("src/helper.cpp", "helper", 4, 1);
     const SourceStepLocation branch = location("src/main.cpp", "gx_main", 13, 1);
+    const SourceStepLocation callerAfterCall = location("src/main.cpp", "gx_main", 15, 1);
     SourceStepLocation unmapped = {};
 
     if (!require(kernel::native_elf::source_step_start_valid(start),
                  "mapped paused source identity is accepted")) return 1;
     if (!require(!kernel::native_elf::source_step_start_valid(unmapped),
                  "unmapped paused source identity is rejected")) return 1;
+    if (!require(kernel::native_elf::source_step_over_same_caller_function(start, callerAfterCall),
+                 "source Step Over accepts a later mapping in the caller function")) return 1;
+    if (!require(!kernel::native_elf::source_step_over_same_caller_function(start, helper),
+                 "source Step Over rejects a callee function as the caller frame")) return 1;
 
     uint32_t count = 0;
     SourceStepObservation observation = kernel::native_elf::source_step_observe(

@@ -59,6 +59,14 @@ inline bool source_step_start_valid(const SourceStepLocation& location)
         location.functionName[0] != '\0';
 }
 
+inline bool source_step_over_same_caller_function(
+    const SourceStepLocation& starting, const SourceStepLocation& current)
+{
+    return source_step_start_valid(starting) && source_step_start_valid(current) &&
+        source_step_text_equal(starting.sourcePath, current.sourcePath) &&
+        source_step_text_equal(starting.functionName, current.functionName);
+}
+
 inline SourceStepObservation source_step_observe(
     const SourceStepLocation& starting, const SourceStepLocation& current,
     uint32_t completedInstructions, uint32_t instructionLimit,

@@ -35,6 +35,9 @@ static const uint32_t kMaxPath = 256U;
 static const uint32_t kMaxProjectBytes = 16U * 1024U;
 static const uint64_t kAmd64TrapFlag = 0x100ULL;
 static const uint32_t kDebugStartBytes = 16U;
+static const uint32_t kStepOverCallBytes = 5U;
+static const uint32_t kStepOverFunctionProbeBytes = 256U;
+static const uint32_t kStepOverNestedReturnLimit = 8U;
 
 struct Operation {
     bool used;
@@ -53,6 +56,9 @@ struct Operation {
     bool debugStepActive;
     bool debugStepTrapObserved;
     bool debugSourceStepActive;
+    bool debugStepOverActive;
+    bool debugStepOverReturnBreakpointInstalled;
+    bool debugStepOverReturnBreakpointHit;
     bool debugSourceSelected;
     bool debugCurrentSourceMappingValid;
     uint64_t registrationGeneration;
@@ -65,6 +71,21 @@ struct Operation {
     uint64_t debugStepRflagsWithTrapFlag;
     uint64_t debugStepRflagsAfterClear;
     uint64_t debugStepTrapRip;
+    uint64_t debugStepOverToken;
+    uint64_t debugStepOverCallRip;
+    uint64_t debugStepOverCallTargetAddress;
+    uint64_t debugStepOverReturnAddress;
+    uint64_t debugStepOverStartingRsp;
+    uint64_t debugStepOverStartingRbp;
+    uint64_t debugStepOverReturnTrapRip;
+    uint64_t debugStepOverFinalRsp;
+    uint64_t debugStepOverFinalRbp;
+    uint8_t debugStepOverOriginalReturnByte;
+    uint8_t debugStepOverOriginalReturnByteValid;
+    uint32_t debugStepOverNestedReturnCount;
+    uint32_t debugStepOverTemporaryBreakpointCount;
+    uint32_t debugStepOverInternalMachineStepCount;
+    uint32_t debugStepOverCallerFrameVerified;
     uint32_t debugSourceLine;
     uint32_t debugSourceColumn;
     uint32_t debugResolvedFinalCodeOffset;
@@ -79,6 +100,7 @@ struct Operation {
     uint32_t debugSourceStepStartColumn;
     char debugSourceStepStartPath[GX_DEVELOPMENT_DEBUG_MAX_SOURCE_PATH_BYTES];
     char debugSourceStepStartFunctionName[GX_DEVELOPMENT_DEBUG_MAX_FUNCTION_NAME_BYTES];
+    char debugStepOverCalleeFunctionName[GX_DEVELOPMENT_DEBUG_MAX_FUNCTION_NAME_BYTES];
     uint32_t debugStartByteCount;
     uint8_t debugStartBytes[kDebugStartBytes];
     NativeElfDebugTrap::BreakpointContext* debugContext;
@@ -299,6 +321,8 @@ static void set_debug_identity(const Operation& operation,
 
 static void set_source_step_metadata(const Operation& operation,
                                      gx_development_debug_snapshot* snapshot);
+static void set_source_step_over_metadata(
+    const Operation& operation, gx_development_debug_snapshot* snapshot);
 
 static void set_debug_ready_snapshot(const Operation& operation,
                                       gx_development_debug_snapshot* snapshot)
@@ -308,6 +332,7 @@ static void set_debug_ready_snapshot(const Operation& operation,
     snapshot->status = GX_DEVELOPMENT_DEBUG_STATUS_READY;
     set_debug_identity(operation, snapshot);
     set_source_step_metadata(operation, snapshot);
+    if (operation.debugStepOverActive) set_source_step_over_metadata(operation, snapshot);
 }
 
 static bool resolve_debug_mapping_at_address(
@@ -370,6 +395,36 @@ static void set_source_step_metadata(const Operation& operation,
               operation.debugSourceStepStartFunctionName);
 }
 
+static void set_source_step_over_metadata(
+    const Operation& operation, gx_development_debug_snapshot* snapshot)
+{
+    if (!snapshot) return;
+    snapshot->sourceStepOverResult = operation.debugSourceStepResult;
+    snapshot->sourceStepOverInstructionCount = operation.debugSourceStepInstructionCount;
+    snapshot->sourceStepOverInstructionLimit = kNativeElfSourceStepInstructionLimit;
+    snapshot->sourceStepOverCallDetected =
+        (operation.debugStepOverActive || operation.debugStepOverCallRip != 0) ? 1U : 0U;
+    snapshot->sourceStepOverNestedReturnCount = operation.debugStepOverNestedReturnCount;
+    snapshot->sourceStepOverTemporaryBreakpointCount = operation.debugStepOverTemporaryBreakpointCount;
+    snapshot->sourceStepOverCallRip = operation.debugStepOverCallRip;
+    snapshot->sourceStepOverCallTargetAddress = operation.debugStepOverCallTargetAddress;
+    snapshot->sourceStepOverReturnAddress = operation.debugStepOverReturnAddress;
+    snapshot->sourceStepOverStartingRsp = operation.debugStepOverStartingRsp;
+    snapshot->sourceStepOverStartingRbp = operation.debugStepOverStartingRbp;
+    snapshot->sourceStepOverReturnTrapRip = operation.debugStepOverReturnTrapRip;
+    snapshot->sourceStepOverFinalRsp = operation.debugStepOverFinalRsp;
+    snapshot->sourceStepOverFinalRbp = operation.debugStepOverFinalRbp;
+    snapshot->sourceStepOverInternalMachineStepCount =
+        operation.debugStepOverInternalMachineStepCount;
+    snapshot->sourceStepOverCallerFrameVerified = operation.debugStepOverCallerFrameVerified;
+    copy_text(snapshot->sourceStepOverCalleeFunctionName,
+              sizeof(snapshot->sourceStepOverCalleeFunctionName),
+              operation.debugStepOverCalleeFunctionName);
+    snapshot->sourceStepOverOriginalReturnByte = operation.debugStepOverOriginalReturnByte;
+    snapshot->sourceStepOverOriginalReturnByteValid =
+        operation.debugStepOverOriginalReturnByteValid;
+}
+
 static SourceStepLocation source_step_location_from_mapping(
     const compiler::ResolvedSourceMapping& mapping)
 {
@@ -380,6 +435,114 @@ static SourceStepLocation source_step_location_from_mapping(
     copy_text(location.sourcePath, sizeof(location.sourcePath), mapping.sourcePath);
     copy_text(location.functionName, sizeof(location.functionName), mapping.functionName);
     return location;
+}
+
+struct DirectUserCallPlan {
+    bool callFound;
+    bool valid;
+    uint64_t callRip;
+    uint64_t targetAddress;
+    uint64_t returnAddress;
+    char calleeFunctionName[GX_DEVELOPMENT_DEBUG_MAX_FUNCTION_NAME_BYTES];
+};
+
+static bool debug_code_address(const Operation& operation, uint64_t address)
+{
+    const NativeAppExecutionContext* runtime = native_elf_runtime_context();
+    if (!runtime || operation.debugCodeBytes == 0 ||
+        runtime->imageBase > ~static_cast<uint64_t>(0) - operation.debugCodeFileOffset) return false;
+    const uint64_t codeStart = runtime->imageBase + operation.debugCodeFileOffset;
+    return address >= codeStart && address - codeStart < operation.debugCodeBytes;
+}
+
+static bool debug_read_code_byte(const Operation& operation, uint64_t address, uint8_t* value)
+{
+    if (!value || !debug_code_address(operation, address)) return false;
+    *value = *reinterpret_cast<const volatile uint8_t*>(static_cast<uintptr_t>(address));
+    return true;
+}
+
+static bool debug_function_at_entry(const Operation& operation, uint64_t address,
+                                    const char* callerFunction, char* calleeFunction,
+                                    uint32_t calleeCapacity)
+{
+    if (!calleeFunction || calleeCapacity == 0 || !debug_code_address(operation, address)) return false;
+    calleeFunction[0] = '\0';
+    for (uint32_t offset = 0; offset < kStepOverFunctionProbeBytes; ++offset) {
+        if (address > ~static_cast<uint64_t>(0) - offset) break;
+        if (!debug_code_address(operation, address + offset)) break;
+        compiler::ResolvedSourceMapping mapping = {};
+        const char* error = nullptr;
+        if (!resolve_debug_mapping_at_address(operation, address + offset, &mapping, &error)) continue;
+        if (callerFunction && equal_text(mapping.functionName, callerFunction)) continue;
+        return copy_text(calleeFunction, calleeCapacity, mapping.functionName);
+    }
+    return false;
+}
+
+static DirectUserCallPlan classify_direct_user_call(
+    const Operation& operation, const compiler::ResolvedSourceMapping& sourceMapping,
+    const char** error)
+{
+    DirectUserCallPlan plan = {};
+    if (error) *error = nullptr;
+    const uint64_t mappingStart = sourceMapping.targetAddress;
+    if (!debug_code_address(operation, mappingStart) || sourceMapping.instructionBytes == 0 ||
+        sourceMapping.instructionBytes > kNativeElfSourceStepInstructionLimit * 64U) {
+        if (error) *error = "source operation has no bounded executable span";
+        return plan;
+    }
+    const uint64_t currentRip = operation.debugContext ? operation.debugContext->rip : mappingStart;
+    const uint64_t start = currentRip > mappingStart ? currentRip : mappingStart;
+    if (start < mappingStart || start - mappingStart >= sourceMapping.instructionBytes) {
+        if (error) *error = "paused RIP is outside its trusted source operation";
+        return plan;
+    }
+    const uint64_t end = mappingStart + sourceMapping.instructionBytes;
+    uint32_t callCount = 0;
+    for (uint64_t address = start; address < end; ++address) {
+        uint8_t opcode = 0;
+        if (!debug_read_code_byte(operation, address, &opcode)) break;
+        if (opcode != 0xE8 || end - address < kStepOverCallBytes) continue;
+        ++callCount;
+        if (callCount != 1) continue;
+        uint8_t displacementBytes[4] = {};
+        for (uint32_t i = 0; i < sizeof(displacementBytes); ++i) {
+            if (!debug_read_code_byte(operation, address + 1U + i, &displacementBytes[i])) {
+                if (error) *error = "direct call displacement is unreadable";
+                return plan;
+            }
+        }
+        const uint32_t rawDisplacement = static_cast<uint32_t>(displacementBytes[0]) |
+            (static_cast<uint32_t>(displacementBytes[1]) << 8) |
+            (static_cast<uint32_t>(displacementBytes[2]) << 16) |
+            (static_cast<uint32_t>(displacementBytes[3]) << 24);
+        const int64_t displacement = static_cast<int32_t>(rawDisplacement);
+        const uint64_t afterCall = address + kStepOverCallBytes;
+        const uint64_t target = displacement >= 0
+            ? afterCall + static_cast<uint64_t>(displacement)
+            : afterCall - static_cast<uint64_t>(-displacement);
+        plan.callRip = address;
+        plan.targetAddress = target;
+        plan.returnAddress = afterCall;
+    }
+    if (callCount == 0) return plan;
+    if (callCount != 1) {
+        if (error) *error = "multiple direct calls on one source operation are unsupported";
+        return plan;
+    }
+    plan.callFound = true;
+    if (!debug_code_address(operation, plan.targetAddress) ||
+        !debug_code_address(operation, plan.returnAddress) ||
+        !debug_function_at_entry(operation, plan.targetAddress,
+                                 sourceMapping.functionName,
+                                 plan.calleeFunctionName,
+                                 sizeof(plan.calleeFunctionName))) {
+        if (error) *error = "direct call target is not a mapped user function";
+        return plan;
+    }
+    plan.valid = true;
+    return plan;
 }
 
 static void copy_debug_start_bytes(const Operation& operation,
@@ -827,6 +990,8 @@ static gx_development_run_error_code runtime_error_code(const NativeElfRunReport
 static void finish_execution(Operation& operation, bool success)
 {
     const bool debugClean = restore_debug_entry_breakpoint();
+    operation.debugStepOverReturnBreakpointInstalled = false;
+    operation.debugStepOverActive = false;
     if (operation.debugControlled) NativeElfDebugTrap::uninstall();
     clear_development_identity();
     if (!debugClean) {
@@ -1252,6 +1417,91 @@ bool native_elf_debug_breakpoint_exception(
     NativeElfDebugTrap::BreakpointContext* context)
 {
 #if defined(__x86_64__)
+    const NativeAppExecutionContext* runtime = native_elf_runtime_context();
+    const bool stepOverReturnTrap = context && s_operation.used && s_operation.debugControlled &&
+        s_operation.debugStepOverActive && s_operation.debugStepOverReturnBreakpointInstalled &&
+        !s_operation.debugStepOverReturnBreakpointHit &&
+        s_operation.state == GX_DEVELOPMENT_RUN_STEPPING && s_schedulerActive &&
+        s_schedulerInTarget && s_ownerContext && s_targetContext && context->cs == 0x08 &&
+        context->rip == s_operation.debugStepOverReturnAddress + 1ULL && runtime &&
+        runtime->state == NativeAppExecutionState::Running &&
+        debug_code_address(s_operation, s_operation.debugStepOverReturnAddress) &&
+        context->rsp >= runtime->stackBase &&
+        context->rsp < runtime->stackBase + runtime->stackSize;
+    if (stepOverReturnTrap) {
+        const uint64_t rawTrapRip = context->rip;
+        if (!restore_debug_entry_breakpoint()) return false;
+        s_operation.debugStepOverReturnBreakpointInstalled = false;
+        s_operation.debugStepOverReturnBreakpointHit = true;
+        s_operation.debugStepOverReturnTrapRip = rawTrapRip;
+        s_operation.debugContext = context;
+        s_operation.debugStepActive = false;
+        s_operation.debugStepTrapObserved = true;
+        ++s_operation.debugStopGeneration;
+        if (s_operation.debugStopGeneration == 0) s_operation.debugStopGeneration = 1;
+        s_operation.state = GX_DEVELOPMENT_RUN_PAUSED;
+        context->rip = s_operation.debugStepOverReturnAddress;
+
+        gx_development_debug_snapshot& snapshot = s_operation.debugSnapshot;
+        clear_debug_snapshot(&snapshot);
+        snapshot.status = GX_DEVELOPMENT_DEBUG_STATUS_TRAP;
+        snapshot.trapKind = GX_DEVELOPMENT_DEBUG_TRAP_BREAKPOINT;
+        snapshot.internalBreakpointTrap = 1;
+        snapshot.internalBreakpointId = s_operation.debugStepOverToken;
+        snapshot.internalBreakpointPurpose = GX_DEVELOPMENT_DEBUG_INTERNAL_BREAKPOINT_STEP_OVER;
+        set_debug_identity(s_operation, &snapshot);
+        snapshot.targetAddress = s_operation.debugStepOverReturnAddress;
+        snapshot.instructionPointer = s_operation.debugStepOverReturnAddress;
+        snapshot.rawTrapRip = rawTrapRip;
+        snapshot.internalBreakpointTrap = 1;
+        snapshot.pauseReason = GX_DEVELOPMENT_DEBUG_PAUSE_REASON_NONE;
+        snapshot.stackLow = runtime->stackBase;
+        snapshot.stackHigh = runtime->stackBase <= ~static_cast<uint64_t>(0) - runtime->stackSize
+            ? runtime->stackBase + runtime->stackSize : 0;
+        snapshot.context.architecture = GX_DEVELOPMENT_DEBUG_ARCHITECTURE_AMD64;
+        snapshot.context.valid = 1;
+        snapshot.context.nativeRuntimeId = s_operation.registrationGeneration;
+        snapshot.context.threadId = 1;
+        snapshot.context.sessionGeneration = s_operation.registrationGeneration;
+        snapshot.context.stopGeneration = s_operation.debugStopGeneration;
+        snapshot.context.rip = s_operation.debugStepOverReturnAddress;
+        snapshot.context.rflags = context->rflags;
+        snapshot.context.rsp = context->rsp;
+        snapshot.context.rbp = context->rbp;
+        snapshot.context.rax = context->rax;
+        snapshot.context.rbx = context->rbx;
+        snapshot.context.rcx = context->rcx;
+        snapshot.context.rdx = context->rdx;
+        snapshot.context.rsi = context->rsi;
+        snapshot.context.rdi = context->rdi;
+        snapshot.context.r8 = context->r8;
+        snapshot.context.r9 = context->r9;
+        snapshot.context.r10 = context->r10;
+        snapshot.context.r11 = context->r11;
+        snapshot.context.r12 = context->r12;
+        snapshot.context.r13 = context->r13;
+        snapshot.context.r14 = context->r14;
+        snapshot.context.r15 = context->r15;
+        snapshot.sourceStepOverOriginalReturnByte = s_operation.debugStepOverOriginalReturnByte;
+        snapshot.sourceStepOverOriginalReturnByteValid =
+            s_operation.debugStepOverOriginalReturnByteValid;
+        set_source_step_metadata(s_operation, &snapshot);
+        set_source_step_over_metadata(s_operation, &snapshot);
+        serial_debug_hex("DEVELOPER_STUDIO_PHASE28D_RETURN_TRAP rip=0x", rawTrapRip);
+        serial::puts(" return=0x"); serial::put_hex64(s_operation.debugStepOverReturnAddress);
+        serial::puts(" rbp=0x"); serial::put_hex64(context->rbp);
+        serial::puts(" rsp=0x"); serial::put_hex64(context->rsp); serial::putc('\n');
+        if (!native_elf_scheduler_yield()) return false;
+        if (s_operation.debugCancelRequested) {
+            context->rflags &= ~kAmd64TrapFlag;
+            context->rip = reinterpret_cast<uint64_t>(&native_elf_debug_cancel_return);
+        } else if (s_operation.debugStepActive) {
+            context->rflags |= kAmd64TrapFlag;
+        } else {
+            context->rflags &= ~kAmd64TrapFlag;
+        }
+        return true;
+    }
     if (!context || !s_operation.used || !s_operation.debugControlled ||
         !s_operation.debugBreakpointInstalled || s_operation.debugBreakpointHit ||
         s_operation.state != GX_DEVELOPMENT_RUN_RUNNING || !s_schedulerActive ||
@@ -1259,7 +1509,7 @@ bool native_elf_debug_breakpoint_exception(
         context->cs != 0x08 || context->rip != s_operation.debugBreakpointAddress + 1ULL) {
         return false;
     }
-    const NativeAppExecutionContext* runtime = native_elf_runtime_context();
+    runtime = native_elf_runtime_context();
     if (!runtime || runtime->state != NativeAppExecutionState::Running ||
         !native_app_pointer_in_range(s_operation.debugBreakpointAddress, runtime->imageBase,
                                      runtime->imageSize)) return false;
@@ -1436,6 +1686,7 @@ bool native_elf_debug_single_step_exception(
     snapshot.rflagsAfterTrapFlagClear = s_operation.debugStepRflagsAfterClear;
     copy_debug_start_bytes(s_operation, &snapshot);
     set_source_step_metadata(s_operation, &snapshot);
+    if (s_operation.debugStepOverActive) set_source_step_over_metadata(s_operation, &snapshot);
 
     serial_debug_hex("DEVELOPER_STUDIO_PHASE28B_SINGLE_STEP_TRAP trap_rip=0x", trapRip);
     serial_debug_hex(" rflags_with_tf=0x", s_operation.debugStepRflagsWithTrapFlag);
@@ -1499,6 +1750,37 @@ static bool begin_debug_instruction_step(
     copy_debug_start_bytes(operation, outSnapshot);
     if (sourceStep) set_source_step_metadata(operation, outSnapshot);
     return true;
+}
+
+static bool step_over_caller_frame_matches(
+    const Operation& operation, const NativeElfDebugTrap::BreakpointContext* context)
+{
+    if (!context || !operation.debugStepOverActive || context->cs != 0x08) return false;
+    if (operation.debugStepOverStartingRbp != 0 &&
+        context->rbp != operation.debugStepOverStartingRbp) return false;
+    return true;
+}
+
+static bool step_over_install_return_breakpoint(Operation& operation)
+{
+    if (!operation.debugStepOverActive || operation.debugStepOverReturnAddress == 0 ||
+        operation.debugStepOverReturnBreakpointInstalled) return false;
+    uint8_t originalByte = 0;
+    if (!install_debug_breakpoint(operation.debugStepOverReturnAddress, &originalByte)) return false;
+    operation.debugStepOverOriginalReturnByte = originalByte;
+    operation.debugStepOverOriginalReturnByteValid = 1;
+    operation.debugStepOverReturnBreakpointInstalled = true;
+    operation.debugStepOverReturnBreakpointHit = false;
+    ++operation.debugStepOverTemporaryBreakpointCount;
+    return true;
+}
+
+static void step_over_clear_state(Operation& operation)
+{
+    operation.debugStepOverActive = false;
+    operation.debugStepOverReturnBreakpointInstalled = false;
+    operation.debugStepOverReturnBreakpointHit = false;
+    operation.debugStepOverToken = 0;
 }
 
 static bool complete_debug_instruction_step(
@@ -1690,6 +1972,360 @@ static gx_result source_step_into(gx_development_debug_snapshot* outSnapshot)
     }
 }
 
+static gx_result source_step_over(gx_development_debug_snapshot* outSnapshot)
+{
+    Operation& operation = s_operation;
+    if (operation.state != GX_DEVELOPMENT_RUN_PAUSED ||
+        (!operation.debugBreakpointInstalled && !operation.debugStepTrapObserved) ||
+        !operation.debugContext || operation.debugStepActive ||
+        !operation.debugSourceSelected || operation.debugContext->cs != 0x08) {
+        set_debug_error(outSnapshot,
+                        "NativeElf Source Step Over requires a mapped Paused source target");
+        outSnapshot->sourceStepResult = GX_DEVELOPMENT_DEBUG_SOURCE_STEP_RESULT_NO_SOURCE_MAPPING;
+        outSnapshot->sourceStepOverResult =
+            GX_DEVELOPMENT_DEBUG_SOURCE_STEP_RESULT_NO_SOURCE_MAPPING;
+        return GX_ERROR_BUSY;
+    }
+    if (operation.debugContext->rflags & kAmd64TrapFlag) {
+        set_debug_error(outSnapshot, "NativeElf source target context already owns Trap Flag");
+        return GX_ERROR_FAILED;
+    }
+
+    if (operation.debugBreakpointInstalled) {
+        if (!restore_debug_entry_breakpoint()) {
+            set_debug_error(outSnapshot, "NativeElf source breakpoint could not be restored");
+            return GX_ERROR_FAILED;
+        }
+        operation.debugBreakpointInstalled = false;
+        // The paused breakpoint context is a valid starting context even
+        // though the source INT3 has now been removed.
+        operation.debugStepTrapObserved = true;
+    }
+
+    compiler::ResolvedSourceMapping startingMapping = {};
+    const char* mappingError = nullptr;
+    if (!resolve_debug_mapping_at_address(operation, operation.debugContext->rip,
+                                          &startingMapping, &mappingError)) {
+        set_debug_error(outSnapshot, mappingError ? mappingError :
+                        "NativeElf paused RIP has no trustworthy source mapping");
+        outSnapshot->sourceStepResult = GX_DEVELOPMENT_DEBUG_SOURCE_STEP_RESULT_NO_SOURCE_MAPPING;
+        outSnapshot->sourceStepOverResult =
+            GX_DEVELOPMENT_DEBUG_SOURCE_STEP_RESULT_NO_SOURCE_MAPPING;
+        return GX_ERROR_FAILED;
+    }
+    const SourceStepLocation start = source_step_location_from_mapping(startingMapping);
+    if (!source_step_start_valid(start)) {
+        set_debug_error(outSnapshot, "NativeElf paused source identity is incomplete");
+        outSnapshot->sourceStepResult = GX_DEVELOPMENT_DEBUG_SOURCE_STEP_RESULT_NO_SOURCE_MAPPING;
+        outSnapshot->sourceStepOverResult =
+            GX_DEVELOPMENT_DEBUG_SOURCE_STEP_RESULT_NO_SOURCE_MAPPING;
+        return GX_ERROR_FAILED;
+    }
+
+    operation.debugSourceStepActive = true;
+    operation.debugSourceStepResult = GX_DEVELOPMENT_DEBUG_SOURCE_STEP_RESULT_PENDING;
+    operation.debugSourceStepInstructionCount = 0;
+    operation.debugSourceStepStartRip = operation.debugContext->rip;
+    operation.debugSourceStepFinalRip = operation.debugContext->rip;
+    operation.debugSourceStepStartLine = start.line;
+    operation.debugSourceStepStartColumn = start.column;
+    copy_text(operation.debugSourceStepStartPath, sizeof(operation.debugSourceStepStartPath),
+              start.sourcePath);
+    copy_text(operation.debugSourceStepStartFunctionName,
+              sizeof(operation.debugSourceStepStartFunctionName), start.functionName);
+    operation.debugStepOverActive = false;
+    operation.debugStepOverReturnBreakpointInstalled = false;
+    operation.debugStepOverReturnBreakpointHit = false;
+    operation.debugStepOverToken = 0;
+    operation.debugStepOverCallRip = 0;
+    operation.debugStepOverCallTargetAddress = 0;
+    operation.debugStepOverReturnAddress = 0;
+    operation.debugStepOverStartingRsp = operation.debugContext->rsp;
+    operation.debugStepOverStartingRbp = operation.debugContext->rbp;
+    operation.debugStepOverReturnTrapRip = 0;
+    operation.debugStepOverFinalRsp = operation.debugContext->rsp;
+    operation.debugStepOverFinalRbp = operation.debugContext->rbp;
+    operation.debugStepOverOriginalReturnByte = 0;
+    operation.debugStepOverOriginalReturnByteValid = 0;
+    operation.debugStepOverNestedReturnCount = 0;
+    operation.debugStepOverTemporaryBreakpointCount = 0;
+    operation.debugStepOverInternalMachineStepCount = 0;
+    operation.debugStepOverCallerFrameVerified = 0;
+    operation.debugStepOverCalleeFunctionName[0] = '\0';
+
+    const char* callError = nullptr;
+    const DirectUserCallPlan call = classify_direct_user_call(operation, startingMapping,
+                                                               &callError);
+    if (!call.callFound) {
+        if (callError) {
+            operation.debugSourceStepActive = false;
+            operation.debugSourceStepResult =
+                GX_DEVELOPMENT_DEBUG_SOURCE_STEP_RESULT_INVALID_SOURCE_MAP;
+            set_debug_error(outSnapshot, callError);
+            outSnapshot->sourceStepResult = operation.debugSourceStepResult;
+            set_source_step_over_metadata(operation, outSnapshot);
+            return GX_ERROR_FAILED;
+        }
+
+        // Ordinary source locations use the already-proven Phase 28C
+        // controller. The command remains distinct in the ABI and the
+        // returned pause is labeled Source Step Over.
+        serial::puts("DEVELOPER_STUDIO_PHASE28D_STEP_OVER_FALLBACK_PASS\n");
+        const gx_result result = source_step_into(outSnapshot);
+        operation.debugSourceStepActive = false;
+        if (outSnapshot && outSnapshot->status != GX_DEVELOPMENT_DEBUG_STATUS_REJECTED) {
+            outSnapshot->pauseReason = GX_DEVELOPMENT_DEBUG_PAUSE_REASON_SOURCE_STEP_OVER;
+            set_source_step_over_metadata(operation, outSnapshot);
+        }
+        return result;
+    }
+    if (!call.valid) {
+        operation.debugSourceStepActive = false;
+        operation.debugSourceStepResult =
+            GX_DEVELOPMENT_DEBUG_SOURCE_STEP_RESULT_INVALID_SOURCE_MAP;
+        set_debug_error(outSnapshot, callError ? callError :
+                        "NativeElf direct call target is not a mapped user function");
+        outSnapshot->sourceStepResult = operation.debugSourceStepResult;
+        set_source_step_over_metadata(operation, outSnapshot);
+        return GX_ERROR_FAILED;
+    }
+
+    operation.debugStepOverActive = true;
+    ++operation.debugStepOverToken;
+    if (operation.debugStepOverToken == 0) operation.debugStepOverToken = 1;
+    operation.debugStepOverCallRip = call.callRip;
+    operation.debugStepOverCallTargetAddress = call.targetAddress;
+    operation.debugStepOverReturnAddress = call.returnAddress;
+    copy_text(operation.debugStepOverCalleeFunctionName,
+              sizeof(operation.debugStepOverCalleeFunctionName), call.calleeFunctionName);
+    serial::puts("DEVELOPER_STUDIO_PHASE28D_STEP_OVER_REQUEST_PASS start=0x");
+    serial::put_hex64(operation.debugSourceStepStartRip);
+    serial::puts(" call=0x"); serial::put_hex64(call.callRip);
+    serial::puts(" target=0x"); serial::put_hex64(call.targetAddress);
+    serial::puts(" return=0x"); serial::put_hex64(call.returnAddress);
+    serial::puts(" callee="); serial::puts(operation.debugStepOverCalleeFunctionName);
+    serial::putc('\n');
+    serial::puts("DEVELOPER_STUDIO_PHASE28D_CALL_CLASSIFY_PASS\n");
+    serial::puts("DEVELOPER_STUDIO_PHASE28D_RETURN_TARGET_PASS\n");
+    if (!step_over_install_return_breakpoint(operation)) {
+        operation.debugStepOverActive = false;
+        operation.debugSourceStepActive = false;
+        operation.debugSourceStepResult =
+            GX_DEVELOPMENT_DEBUG_SOURCE_STEP_RESULT_TARGET_FAILED;
+        set_debug_error(outSnapshot,
+                        "NativeElf Step Over return breakpoint could not be installed");
+        outSnapshot->sourceStepResult = operation.debugSourceStepResult;
+        set_source_step_over_metadata(operation, outSnapshot);
+        return GX_ERROR_FAILED;
+    }
+    operation.state = GX_DEVELOPMENT_RUN_STEPPING;
+    operation.debugStepActive = false;
+    operation.debugStepTrapObserved = false;
+    serial::puts("DEVELOPER_STUDIO_PHASE28D_TEMP_BREAKPOINT_PASS address=0x");
+    serial::put_hex64(operation.debugStepOverReturnAddress);
+    serial::putc('\n');
+
+    if (!native_elf_scheduler_pump()) {
+        operation.debugSourceStepActive = false;
+        operation.debugSourceStepResult =
+            GX_DEVELOPMENT_DEBUG_SOURCE_STEP_RESULT_TARGET_FAILED;
+        step_over_clear_state(operation);
+        set_debug_error(outSnapshot, "NativeElf Step Over could not resume the target");
+        return GX_ERROR_FAILED;
+    }
+
+    for (;;) {
+        if (operation.state != GX_DEVELOPMENT_RUN_PAUSED ||
+            !operation.debugStepOverReturnBreakpointHit) {
+            const bool completed = operation.state == GX_DEVELOPMENT_RUN_COMPLETED;
+            const bool failed = operation.state == GX_DEVELOPMENT_RUN_FAILED;
+            operation.debugSourceStepActive = false;
+            operation.debugSourceStepResult = completed
+                ? GX_DEVELOPMENT_DEBUG_SOURCE_STEP_RESULT_TARGET_COMPLETED
+                : GX_DEVELOPMENT_DEBUG_SOURCE_STEP_RESULT_TARGET_FAILED;
+            step_over_clear_state(operation);
+            set_source_step_metadata(operation, &operation.debugSnapshot);
+            set_source_step_over_metadata(operation, &operation.debugSnapshot);
+            if (outSnapshot) *outSnapshot = operation.debugSnapshot;
+            return failed ? GX_ERROR_FAILED : (completed ? GX_OK : GX_ERROR_FAILED);
+        }
+        if (!step_over_caller_frame_matches(operation, operation.debugContext)) {
+            ++operation.debugStepOverNestedReturnCount;
+            if (operation.debugStepOverNestedReturnCount > kStepOverNestedReturnLimit) {
+                operation.debugSourceStepActive = false;
+                operation.debugSourceStepResult =
+                    GX_DEVELOPMENT_DEBUG_SOURCE_STEP_RESULT_TARGET_FAILED;
+                step_over_clear_state(operation);
+                set_debug_error(outSnapshot,
+                                "NativeElf Step Over caller frame was not restored");
+                outSnapshot->sourceStepResult = operation.debugSourceStepResult;
+                set_source_step_over_metadata(operation, outSnapshot);
+                return GX_ERROR_FAILED;
+            }
+            operation.debugStepOverReturnBreakpointHit = false;
+            if (!step_over_install_return_breakpoint(operation)) {
+                operation.debugSourceStepActive = false;
+                operation.debugSourceStepResult =
+                    GX_DEVELOPMENT_DEBUG_SOURCE_STEP_RESULT_TARGET_FAILED;
+                step_over_clear_state(operation);
+                set_debug_error(outSnapshot,
+                                "NativeElf nested Step Over return trap could not be rearmed");
+                outSnapshot->sourceStepResult = operation.debugSourceStepResult;
+                set_source_step_over_metadata(operation, outSnapshot);
+                return GX_ERROR_FAILED;
+            }
+            operation.state = GX_DEVELOPMENT_RUN_STEPPING;
+            operation.debugStepTrapObserved = false;
+            if (!native_elf_scheduler_pump()) return GX_ERROR_FAILED;
+            continue;
+        }
+
+        operation.debugStepOverCallerFrameVerified = 1;
+        serial::puts("DEVELOPER_STUDIO_PHASE28D_CALLER_FRAME_PASS rbp=0x");
+        serial::put_hex64(operation.debugContext ? operation.debugContext->rbp : 0);
+        serial::putc('\n');
+        break;
+    }
+
+    for (;;) {
+        if (!begin_debug_instruction_step(operation, outSnapshot, true)) {
+            operation.debugSourceStepActive = false;
+            operation.debugSourceStepResult =
+                GX_DEVELOPMENT_DEBUG_SOURCE_STEP_RESULT_TARGET_FAILED;
+            set_debug_error(outSnapshot, "NativeElf source caller step could not be armed");
+            outSnapshot->sourceStepResult = operation.debugSourceStepResult;
+            set_source_step_over_metadata(operation, outSnapshot);
+            return GX_ERROR_FAILED;
+        }
+        ++operation.debugStepOverInternalMachineStepCount;
+        if (!complete_debug_instruction_step(operation, outSnapshot)) {
+            const bool completed = operation.state == GX_DEVELOPMENT_RUN_COMPLETED;
+            const bool failed = operation.state == GX_DEVELOPMENT_RUN_FAILED;
+            operation.debugSourceStepActive = false;
+            operation.debugSourceStepResult = completed
+                ? GX_DEVELOPMENT_DEBUG_SOURCE_STEP_RESULT_TARGET_COMPLETED
+                : GX_DEVELOPMENT_DEBUG_SOURCE_STEP_RESULT_TARGET_FAILED;
+            step_over_clear_state(operation);
+            set_source_step_metadata(operation, &operation.debugSnapshot);
+            set_source_step_over_metadata(operation, &operation.debugSnapshot);
+            if (outSnapshot) *outSnapshot = operation.debugSnapshot;
+            return failed ? GX_ERROR_FAILED : (completed ? GX_OK : GX_ERROR_FAILED);
+        }
+
+        operation.debugSourceStepFinalRip = operation.debugStepTrapRip;
+        ++operation.debugSourceStepInstructionCount;
+        operation.debugStepOverFinalRsp = operation.debugContext ? operation.debugContext->rsp : 0;
+        operation.debugStepOverFinalRbp = operation.debugContext ? operation.debugContext->rbp : 0;
+        if (!step_over_caller_frame_matches(operation, operation.debugContext)) {
+            operation.debugSourceStepActive = false;
+            operation.debugSourceStepResult =
+                GX_DEVELOPMENT_DEBUG_SOURCE_STEP_RESULT_TARGET_FAILED;
+            set_debug_error(outSnapshot,
+                            "NativeElf Step Over crossed the caller frame boundary");
+            outSnapshot->sourceStepResult = operation.debugSourceStepResult;
+            set_source_step_over_metadata(operation, outSnapshot);
+            return GX_ERROR_FAILED;
+        }
+
+        const NativeAppExecutionContext* runtime = native_elf_runtime_context();
+        if (!runtime || !native_app_pointer_in_range(
+                operation.debugStepTrapRip, runtime->imageBase, runtime->imageSize)) {
+            operation.debugSourceStepActive = false;
+            operation.debugSourceStepResult =
+                GX_DEVELOPMENT_DEBUG_SOURCE_STEP_RESULT_UNSAFE_RUNTIME_BOUNDARY;
+            operation.debugSnapshot.pauseReason =
+                GX_DEVELOPMENT_DEBUG_PAUSE_REASON_SOURCE_STEP_OVER;
+            step_over_clear_state(operation);
+            set_source_step_metadata(operation, &operation.debugSnapshot);
+            set_source_step_over_metadata(operation, &operation.debugSnapshot);
+            if (outSnapshot) *outSnapshot = operation.debugSnapshot;
+            serial::puts("DEVELOPER_STUDIO_PHASE28D_UNSAFE_RUNTIME_BOUNDARY_PASS rip=0x");
+            serial::put_hex64(operation.debugStepTrapRip);
+            serial::putc('\n');
+            return GX_OK;
+        }
+
+        compiler::ResolvedSourceMapping currentMapping = {};
+        const char* currentError = nullptr;
+        const bool mapped = resolve_debug_mapping_at_address(
+            operation, operation.debugStepTrapRip, &currentMapping, &currentError);
+        if (!mapped && currentError &&
+            !source_step_text_equal(currentError, "source-map address is unmapped")) {
+            operation.debugSourceStepActive = false;
+            operation.debugSourceStepResult =
+                GX_DEVELOPMENT_DEBUG_SOURCE_STEP_RESULT_INVALID_SOURCE_MAP;
+            step_over_clear_state(operation);
+            set_source_step_metadata(operation, &operation.debugSnapshot);
+            set_source_step_over_metadata(operation, &operation.debugSnapshot);
+            if (outSnapshot) *outSnapshot = operation.debugSnapshot;
+            return GX_ERROR_FAILED;
+        }
+        const SourceStepLocation current = mapped
+            ? source_step_location_from_mapping(currentMapping)
+            : SourceStepLocation();
+        if (mapped && !source_step_over_same_caller_function(start, current)) {
+            operation.debugSourceStepActive = false;
+            operation.debugSourceStepResult =
+                GX_DEVELOPMENT_DEBUG_SOURCE_STEP_RESULT_TARGET_FAILED;
+            set_debug_error(outSnapshot,
+                            "NativeElf Step Over crossed into a different user function");
+            outSnapshot->sourceStepResult = operation.debugSourceStepResult;
+            set_source_step_over_metadata(operation, outSnapshot);
+            return GX_ERROR_FAILED;
+        }
+        uint32_t nextCount = operation.debugSourceStepInstructionCount;
+        const SourceStepObservation observation = source_step_observe(
+            start, current, operation.debugSourceStepInstructionCount,
+            kNativeElfSourceStepInstructionLimit, true, false, &nextCount);
+        operation.debugSourceStepInstructionCount = nextCount;
+        if (mapped) set_debug_source_mapping(operation, &operation.debugSnapshot, currentMapping);
+        else {
+            operation.debugCurrentSourceMappingValid = false;
+            clear_unmapped_source_identity(&operation.debugSnapshot);
+        }
+        set_source_step_metadata(operation, &operation.debugSnapshot);
+        set_source_step_over_metadata(operation, &operation.debugSnapshot);
+
+        if (observation == SourceStepObservation::Completed) {
+            operation.debugSourceStepActive = false;
+            operation.debugSourceStepResult = GX_DEVELOPMENT_DEBUG_SOURCE_STEP_RESULT_COMPLETED;
+            operation.debugSnapshot.pauseReason =
+                GX_DEVELOPMENT_DEBUG_PAUSE_REASON_SOURCE_STEP_OVER;
+            set_debug_source_mapping(operation, &operation.debugSnapshot, currentMapping);
+            step_over_clear_state(operation);
+            set_source_step_metadata(operation, &operation.debugSnapshot);
+            set_source_step_over_metadata(operation, &operation.debugSnapshot);
+            if (outSnapshot) *outSnapshot = operation.debugSnapshot;
+            serial::puts("DEVELOPER_STUDIO_PHASE28D_NEXT_SOURCE_PASS rip=0x");
+            serial::put_hex64(operation.debugStepTrapRip);
+            serial::puts(" line="); serial::put_hex32(currentMapping.line);
+            serial::puts(" function="); serial::puts(currentMapping.functionName);
+            serial::puts(" instructions=");
+            serial::put_hex32(operation.debugSourceStepInstructionCount);
+            serial::putc('\n');
+            return GX_OK;
+        }
+        if (observation == SourceStepObservation::Limit) {
+            operation.debugSourceStepActive = false;
+            operation.debugSourceStepResult = GX_DEVELOPMENT_DEBUG_SOURCE_STEP_RESULT_LIMIT;
+            operation.debugSnapshot.pauseReason =
+                GX_DEVELOPMENT_DEBUG_PAUSE_REASON_SOURCE_STEP_OVER;
+            step_over_clear_state(operation);
+            set_source_step_metadata(operation, &operation.debugSnapshot);
+            set_source_step_over_metadata(operation, &operation.debugSnapshot);
+            if (outSnapshot) *outSnapshot = operation.debugSnapshot;
+            serial::puts("DEVELOPER_STUDIO_PHASE28D_STEP_LIMIT_PASS instructions=");
+            serial::put_hex32(operation.debugSourceStepInstructionCount);
+            serial::putc('\n');
+            return GX_OK;
+        }
+        serial::puts("DEVELOPER_STUDIO_PHASE28D_INTERNAL_STEP_PASS count=");
+        serial::put_hex32(operation.debugSourceStepInstructionCount);
+        serial::puts(" rip=0x"); serial::put_hex64(operation.debugStepTrapRip);
+        serial::putc('\n');
+    }
+}
+
 gx_result debug(const gx_development_debug_request& request,
                 gx_development_debug_snapshot* outSnapshot)
 {
@@ -1726,6 +2362,8 @@ gx_result debug(const gx_development_debug_request& request,
             outSnapshot->rflagsBeforeStep = s_operation.debugStepRflagsBefore;
             outSnapshot->rflagsWithTrapFlag = s_operation.debugStepRflagsWithTrapFlag;
             set_source_step_metadata(s_operation, outSnapshot);
+            if (s_operation.debugStepOverActive)
+                set_source_step_over_metadata(s_operation, outSnapshot);
         } else if (s_operation.state == GX_DEVELOPMENT_RUN_RUNNING ||
                    s_operation.state == GX_DEVELOPMENT_RUN_LAUNCHING ||
                    s_operation.state == GX_DEVELOPMENT_RUN_REGISTERED) {
@@ -1746,12 +2384,19 @@ gx_result debug(const gx_development_debug_request& request,
             set_debug_error(outSnapshot, "NativeElf breakpoint could not be restored");
             return GX_ERROR_FAILED;
         }
+        if (s_operation.debugStepOverReturnBreakpointInstalled &&
+            !restore_debug_entry_breakpoint()) {
+            set_debug_error(outSnapshot,
+                            "NativeElf Step Over return breakpoint could not be restored");
+            return GX_ERROR_FAILED;
+        }
         if (s_operation.debugContext) s_operation.debugContext->rflags &= ~kAmd64TrapFlag;
         s_operation.debugBreakpointInstalled = false;
         s_operation.debugBreakpointHit = false;
         s_operation.debugStepActive = false;
         s_operation.debugStepTrapObserved = false;
         s_operation.debugSourceStepActive = false;
+        step_over_clear_state(s_operation);
         s_operation.state = GX_DEVELOPMENT_RUN_RUNNING;
         set_debug_ready_snapshot(s_operation, outSnapshot);
         serial::puts(debugStepWasObserved
@@ -1766,6 +2411,10 @@ gx_result debug(const gx_development_debug_request& request,
 
     case GX_DEVELOPMENT_DEBUG_STEP_SOURCE_INTO:
         return source_step_into(outSnapshot);
+
+    case GX_DEVELOPMENT_DEBUG_STEP_OVER_CALL:
+    case GX_DEVELOPMENT_DEBUG_STEP_SOURCE_OVER:
+        return source_step_over(outSnapshot);
 
     case GX_DEVELOPMENT_DEBUG_STEP_INSTRUCTION:
         if (s_operation.state != GX_DEVELOPMENT_RUN_PAUSED ||
@@ -1808,11 +2457,18 @@ gx_result debug(const gx_development_debug_request& request,
             set_debug_error(outSnapshot, "NativeElf breakpoint could not be restored for cancel");
             return GX_ERROR_FAILED;
         }
+        if (s_operation.debugStepOverReturnBreakpointInstalled &&
+            !restore_debug_entry_breakpoint()) {
+            set_debug_error(outSnapshot,
+                            "NativeElf Step Over return breakpoint could not be restored for cancel");
+            return GX_ERROR_FAILED;
+        }
         if (s_operation.debugContext) s_operation.debugContext->rflags &= ~kAmd64TrapFlag;
         s_operation.debugBreakpointInstalled = false;
         s_operation.debugBreakpointHit = false;
         s_operation.debugStepActive = false;
         s_operation.debugSourceStepActive = false;
+        step_over_clear_state(s_operation);
         s_operation.debugCancelRequested = true;
         s_operation.cancellationRequested = true;
         s_operation.closeRequested = true;
@@ -1838,7 +2494,8 @@ gx_result debug(const gx_development_debug_request& request,
         return GX_OK;
 
     default:
-        set_debug_error(outSnapshot, "NativeElf supports only POLL, RESUME, and paused CANCEL");
+        set_debug_error(outSnapshot,
+                        "NativeElf supports POLL, RESUME, source stepping, and paused CANCEL");
         return GX_ERROR_UNSUPPORTED;
     }
 }
@@ -1850,6 +2507,7 @@ gx_result release(gx_development_run_handle handle) {
         s_operation.state != GX_DEVELOPMENT_RUN_CANCELLED) return GX_ERROR_BUSY;
     (void)unregister_application(s_operation);
     (void)restore_debug_entry_breakpoint();
+    step_over_clear_state(s_operation);
     if (s_operation.debugControlled) NativeElfDebugTrap::uninstall();
 #if defined(__x86_64__)
     s_schedulerActive = false;
