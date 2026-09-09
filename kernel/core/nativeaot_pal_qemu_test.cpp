@@ -115,6 +115,71 @@ extern "C" void guideXosNativeAotC011EC96RollbackObserved(
     serial::puts("\n");
 }
 #endif
+
+#if defined(GUIDEXOS_NATIVEAOT_C011EC97)
+uint32_t g_c97TailSelector = 0u;
+
+const char* c97CheckpointName(uint32_t checkpoint) {
+    switch (checkpoint) {
+        case 1u: return "tail-001";
+        case 79u: return "tail-079";
+        case 80u: return "tail-080";
+        case 143u: return "tail-143";
+        case 203u: return "tail-203";
+        case 216u: return "tail-216";
+        case 217u: return "tail-217";
+        default: return "invalid";
+    }
+}
+
+void emitC97FrameStatsNamed(
+    const char* checkpointName, uint32_t checkpoint,
+    uint32_t allocationPresent) {
+    const gxos::runtime::virtual_memory::VirtualMemoryStats stats =
+        gxos::runtime::virtual_memory::stats();
+    serial::puts("[nativeaot-gc-c97-frame] marker=C011EC97-FRAME checkpoint=");
+    serial::puts(checkpointName);
+    serial::puts(" checkpointOrdinal=");
+    serial::put_hex32(checkpoint);
+    serial::puts(" allocationPresent=");
+    serial::put_hex32(allocationPresent);
+    serial::puts(" selector=");
+    serial::put_hex32(g_c97TailSelector);
+    serial::puts(" totalKnownFrames=");
+    serial::put_hex64(stats.totalKnownFrames);
+    serial::puts(" freeFrames=");
+    serial::put_hex64(stats.freeFrames);
+    serial::puts(" allocatedFrames=");
+    serial::put_hex64(stats.allocatedFrames);
+    serial::puts(" regionOwnedFrames=");
+    serial::put_hex64(stats.regionOwnedFrames);
+    serial::puts(" pageTableFrames=");
+    serial::put_hex64(stats.pageTableFrames);
+    serial::puts(" mappingCount=");
+    serial::put_hex64(stats.mappingCount);
+    serial::puts("\n");
+}
+
+void emitC97FrameStats(uint32_t checkpoint, uint32_t allocationPresent) {
+    emitC97FrameStatsNamed(c97CheckpointName(checkpoint), checkpoint,
+                           allocationPresent);
+}
+
+void emitC97StageStats(const char* checkpointName) {
+    emitC97FrameStatsNamed(checkpointName, 0u, 0u);
+}
+
+extern "C" int guideXosNativeAotC011EC97Checkpoint(
+    uint32_t checkpoint, uint32_t allocationPresent) {
+    if ((g_c97TailSelector != 216u && g_c97TailSelector != 320u) ||
+        c97CheckpointName(checkpoint)[0] == 'i' ||
+        allocationPresent > 1u) {
+        return -1;
+    }
+    emitC97FrameStats(checkpoint, allocationPresent);
+    return 0;
+}
+#endif
 namespace {
 
 constexpr uintptr_t kPageSize = 0x1000u;
@@ -1255,6 +1320,10 @@ void fillStartupPlatformTable(
     table->reserved[GUIDEXOS_NATIVEAOT_NATIVE_UNWIND_CLASSIFY_PLATFORM_RESERVED_INDEX] =
         reinterpret_cast<uintptr_t>(&guideXosNativeUnwindClassify);
 #endif
+#if defined(GUIDEXOS_NATIVEAOT_C011EC97)
+    table->reserved[7] = reinterpret_cast<uintptr_t>(
+        &guideXosNativeAotC011EC97Checkpoint);
+#endif
 }
 
 void runStartupImpl(const uint8_t* artifact, size_t artifactSize,
@@ -1683,10 +1752,17 @@ void runSegmentBoundaryManagedBoundary(
     FirstRealAllocationContext context{};
     context.size = sizeof(context);
     context.apiVersion = 0u;
+#if defined(GUIDEXOS_NATIVEAOT_C011EC97)
+    context.userData = reinterpret_cast<void*>(
+        static_cast<uintptr_t>(g_c97TailSelector));
+#endif
 #if defined(GXOS_NATIVEAOT_GC_SINGLE_THREAD_SUSPEND_EE_QEMU_TEST)
     #if defined(GUIDEXOS_NATIVEAOT_C011EC96_PHYSICAL_FRAME_PROVENANCE)
     emitC96Checkpoint("pre-tail");
     #endif
+#if defined(GUIDEXOS_NATIVEAOT_C011EC97)
+    emitC97StageStats("pre-tail");
+#endif
     serial::puts("[nativeaot-gc-single-thread-suspend-ee] entering ManagedMain once\n");
     reinterpret_cast<SegmentBoundaryManagedMain>(managedMainAddress)(&context);
     return;
@@ -2112,6 +2188,9 @@ void runFirstRealAllocationImpl(
 #if defined(GUIDEXOS_NATIVEAOT_C011EC96_PHYSICAL_FRAME_PROVENANCE)
     emitC96Checkpoint("pre-managed");
 #endif
+#if defined(GUIDEXOS_NATIVEAOT_C011EC97)
+    emitC97StageStats("pre-managed");
+#endif
     const bool loaded = loadArtifact(artifact, artifactSize, &base, &size);
     firstAllocationStatus("Artifact staged", loaded, allPassed);
     if (!loaded) {
@@ -2120,6 +2199,9 @@ void runFirstRealAllocationImpl(
     }
 #if defined(GUIDEXOS_NATIVEAOT_C011EC96_PHYSICAL_FRAME_PROVENANCE)
     emitC96Checkpoint("post-image");
+#endif
+#if defined(GUIDEXOS_NATIVEAOT_C011EC97)
+    emitC97StageStats("post-image");
 #endif
 
 #if defined(GUIDEXOS_NATIVEAOT_C011EC21_NATIVE_CONTINUATION)
@@ -2249,6 +2331,9 @@ void runFirstRealAllocationImpl(
 #if defined(GUIDEXOS_NATIVEAOT_C011EC96_PHYSICAL_FRAME_PROVENANCE)
     emitC96Checkpoint("post-startup");
 #endif
+#if defined(GUIDEXOS_NATIVEAOT_C011EC97)
+    emitC97StageStats("post-startup");
+#endif
 
     const bool tlsInstalled = installNativeAotCurrentThreadTls();
     firstAllocationStatus("NativeAOT current-thread TLS vector", tlsInstalled, allPassed);
@@ -2313,6 +2398,10 @@ void runFirstRealAllocationImpl(
     FirstRealAllocationContext context{};
     context.size = sizeof(context);
     context.apiVersion = 0u;
+#if defined(GUIDEXOS_NATIVEAOT_C011EC97)
+    context.userData = reinterpret_cast<void*>(
+        static_cast<uintptr_t>(g_c97TailSelector));
+#endif
     using GetThreadStaticDiagnostics = const guidexos_nativeaot_thread_static_diagnostics*
         (GUIDEXOS_NATIVEAOT_PAL_CALL *)(void);
     serial::puts("[nativeaot-thread-static] entering ManagedMain once\n");
@@ -2608,6 +2697,12 @@ void runFirstRealAllocationImpl(
 #endif
 
 } // namespace
+
+#if defined(GUIDEXOS_NATIVEAOT_C011EC97)
+void setC011EC97TailSelector(uint32_t selector) {
+    g_c97TailSelector = selector;
+}
+#endif
 
 #if defined(GUIDEXOS_NATIVEAOT_C011EC21_NATIVE_CONTINUATION)
 extern "C" void __cdecl guideXosNativeAotC011EC21DescribeNativeCaller(

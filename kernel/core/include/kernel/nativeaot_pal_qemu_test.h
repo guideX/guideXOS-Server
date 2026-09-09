@@ -6,6 +6,10 @@
 namespace kernel {
 namespace nativeaot_pal_qemu_test {
 
+#if defined(GUIDEXOS_NATIVEAOT_C011EC97)
+void setC011EC97TailSelector(uint32_t selector);
+#endif
+
 void run(const uint8_t* artifact, size_t artifactSize,
          uintptr_t installAddress, uintptr_t mainAddress,
          uintptr_t uninstallAddress);

@@ -1157,10 +1157,16 @@ public static unsafe class Program
 
     [DllImport("__Internal", EntryPoint = "guideXosNativeAotC011EC64Finish")]
     private static extern int GuideXosNativeAotC011EC64Finish();
+#if HOSTLOGPROOF_C011EC97
+    [DllImport("__Internal", EntryPoint = "guideXosNativeAotC011EC97Checkpoint")]
+    private static extern int GuideXosNativeAotC011EC97Checkpoint(
+        uint checkpoint, uint allocationPresent);
+#endif
 #endif
 
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private static int RunC011EC61PreFinalN0PromotionCycle()
+    private static int RunC011EC61PreFinalN0PromotionCycle(
+        uint c97TailSelector = 0u)
     {
 #if HOSTLOGPROOF_C011EC66_P1 || HOSTLOGPROOF_C011EC61_P1
         const uint mainCohorts = 5u;
@@ -1175,6 +1181,13 @@ public static unsafe class Program
         const uint payloadSize = 65536u;
 #if HOSTLOGPROOF_C011EC64
         const uint postDebitPayloadSize = 16384u;
+#if HOSTLOGPROOF_C011EC97
+        uint postDebitTailAllocations = c97TailSelector;
+        if (postDebitTailAllocations != 216u && postDebitTailAllocations != 320u)
+        {
+            return -1;
+        }
+#else
 #if HOSTLOGPROOF_C011EC64_W1
         const uint postDebitTailAllocations = 224u;
 #elif HOSTLOGPROOF_C011EC64_W2
@@ -1193,6 +1206,7 @@ public static unsafe class Program
         const uint postDebitTailAllocations = 320u;
 #else
         const uint postDebitTailAllocations = 192u;
+#endif
 #endif
 #elif HOSTLOGPROOF_C011EC62_R1
         const uint postDebitPayloadSize = 8192u;
@@ -1587,6 +1601,23 @@ public static unsafe class Program
                 {
                     return -1;
                 }
+#if HOSTLOGPROOF_C011EC97
+                uint completedTailAllocations = offset + 1u;
+                if (completedTailAllocations == 1u ||
+                    completedTailAllocations == 79u ||
+                    completedTailAllocations == 80u ||
+                    completedTailAllocations == 143u ||
+                    completedTailAllocations == 203u ||
+                    completedTailAllocations == 216u ||
+                    completedTailAllocations == 217u)
+                {
+                    if (GuideXosNativeAotC011EC97Checkpoint(
+                            completedTailAllocations, 1u) != 0)
+                    {
+                        return -1;
+                    }
+                }
+#endif
                 int managedCollection = GC.CollectionCount(0);
                 if (managedCollection != lastManagedCollection)
                 {
@@ -1602,6 +1633,13 @@ public static unsafe class Program
                 GC.KeepAlive(survivors);
                 GC.KeepAlive(value);
             }
+#if HOSTLOGPROOF_C011EC97
+            if (postDebitTailAllocations == 216u &&
+                GuideXosNativeAotC011EC97Checkpoint(217u, 0u) != 0)
+            {
+                return -1;
+            }
+#endif
         }
         int finalManagedCollection = GC.CollectionCount(0);
         if (finalManagedCollection != lastManagedCollection)
@@ -2250,8 +2288,14 @@ public static unsafe class Program
                     return GxAbi.ErrorInvalidArgument;
                 }
 #if HOSTLOGPROOF_C011EC64
+#if HOSTLOGPROOF_C011EC97
+                return RunC011EC61PreFinalN0PromotionCycle(
+                        unchecked((uint)(nuint)ctx->userData)) == 0
+                    ? 0 : GxAbi.ErrorInvalidArgument;
+#else
                 return RunC011EC61PreFinalN0PromotionCycle() == 0
                     ? 0 : GxAbi.ErrorInvalidArgument;
+#endif
 #elif HOSTLOGPROOF_C011EC63
                 return RunC011EC61PreFinalN0PromotionCycle() == 0
                     ? 0 : GxAbi.ErrorInvalidArgument;

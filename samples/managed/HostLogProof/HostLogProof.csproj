@@ -202,6 +202,9 @@
   <PropertyGroup Condition="('$(HostLogProofMode)' == 'PostDebitNormalGen0Refill' or '$(HostLogProofMode)' == 'RetainedSurvivorRegionAvailability' or '$(HostLogProofMode)' == 'SurvivorCohortProvenanceReconciliation' or '$(HostLogProofMode)' == 'SurvivorCountThresholdCausality' or '$(HostLogProofMode)' == 'PromotionPositiveRegionCohort' or '$(HostLogProofMode)' == 'PromotionDecisionLiveByteThreshold') and '$(HostLogProofC66TailAllocations)' == '224'">
     <DefineConstants>$(DefineConstants);HOSTLOGPROOF_C011EC66_T224</DefineConstants>
   </PropertyGroup>
+  <PropertyGroup Condition="'$(HostLogProofC97)' == 'true'">
+    <DefineConstants>$(DefineConstants);HOSTLOGPROOF_C011EC97</DefineConstants>
+  </PropertyGroup>
   <PropertyGroup Condition="'$(HostLogProofMode)' == 'RetainedSurvivorRegionAvailability' and '$(HostLogProofC68RetainedSurvivors)' == '1'">
     <DefineConstants>$(DefineConstants);HOSTLOGPROOF_C011EC68_SURVIVORS_1</DefineConstants>
   </PropertyGroup>

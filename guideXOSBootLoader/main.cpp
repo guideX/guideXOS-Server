@@ -73,6 +73,38 @@ EFI_STATUS LoadFile(EFI_FILE_PROTOCOL** file, CHAR16* path, EFI_HANDLE ImageHand
     return s;
 }
 
+// C97 uses the existing scalar CommandLine handoff as a launch-time value.
+// The selector is deliberately external to kernel.elf and the managed image:
+// each proof ESP may carry only this four-byte file difference.
+static void LoadC97TailSelector(
+    EFI_HANDLE ImageHandle,
+    EFI_SYSTEM_TABLE* SystemTable,
+    guideXOS::BootInfo* bootInfo)
+{
+    EFI_FILE_PROTOCOL* selectorFile = NULL;
+    EFI_STATUS status = LoadFile(
+        &selectorFile,
+        (CHAR16*)L"C97TAIL.BIN",
+        ImageHandle,
+        SystemTable);
+    if (EFI_ERROR(status) || selectorFile == NULL) {
+        return;
+    }
+
+    UINT32 selector = 0;
+    UINTN readSize = sizeof(selector);
+    status = selectorFile->Read(selectorFile, &readSize, &selector);
+    reinterpret_cast<EFI_STATUS (EFIAPI *)(EFI_FILE_PROTOCOL*)>(
+        selectorFile->Close)(selectorFile);
+    if (!EFI_ERROR(status) && readSize == sizeof(selector) &&
+        (selector == 216u || selector == 320u)) {
+        bootInfo->CommandLine = selector;
+        Print((CONST CHAR16*)L"C97 tail selector: %u\n", selector);
+    } else {
+        Print((CONST CHAR16*)L"Invalid C97 tail selector file\n");
+    }
+}
+
 
 // New helper: exits boot services with retry and returns a stable memory map
 // (Kept for compatibility; handoff path uses ExitBootServicesWithMemoryMapInBuffer)
@@ -388,6 +420,10 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE* SystemTable) {
     Print(L"Kernel loaded at: %p - %p\n", (VOID*)(UINTN)kernelBase, (VOID*)(UINTN)(kernelBase + kernelTotalSize));
 
     v1BootInfo->KernelPhysicalBase = kernelBase;
+
+    // Optional launch-time C97 selector.  Ordinary ESPs do not contain this
+    // file, so their BootInfo path remains unchanged.
+    LoadC97TailSelector(ImageHandle, SystemTable, v1BootInfo);
 
     // --- Load Ramdisk ---
     EFI_PHYSICAL_ADDRESS ramdiskPhys = 0;

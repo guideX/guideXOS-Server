@@ -1,7 +1,7 @@
 #include <intrin.h>
 #include "guidexos_nativeaot_allocation_diagnostics.h"
 #include "guidexos_nativeaot_amd64_unwind_primitive.h"
-#if defined(GUIDEXOS_NATIVEAOT_C011EC21_NATIVE_CONTINUATION)
+#if defined(GUIDEXOS_NATIVEAOT_C011EC21_NATIVE_CONTINUATION) || defined(GUIDEXOS_NATIVEAOT_C011EC97)
 #include "guidexos_nativeaot_gc_startup_platform_contract.h"
 #endif
 #if defined(GUIDEXOS_NATIVEAOT_THREAD_STATIC_PROOF)
@@ -10678,6 +10678,11 @@ extern "C" __declspec(dllexport) int __cdecl guideXosNativeAotC011EC33LifetimeBo
 extern "C" void* __pinvoke_HostLogProof__Module____Internal__guideXosNativeAotC011EC37ManagedCheckpoint__Ansi;
 extern "C" __declspec(dllexport) int __cdecl guideXosNativeAotC011EC37ManagedCheckpoint(
     uint32_t checkpoint, uintptr_t weakHandleSlot);
+#if defined(GUIDEXOS_NATIVEAOT_C011EC97)
+extern "C" void* __pinvoke_HostLogProof__Module____Internal__guideXosNativeAotC011EC97Checkpoint__Ansi;
+extern "C" __declspec(dllexport) int __cdecl guideXosNativeAotC011EC97Checkpoint(
+    uint32_t checkpoint, uint32_t allocationPresent);
+#endif
 #if defined(GUIDEXOS_NATIVEAOT_C011EC38_DEAD_OBJECT_RECLAMATION)
 extern "C" void* __pinvoke_HostLogProof__Module____Internal__guideXosNativeAotC011EC38BeforeAllocation__Ansi;
 extern "C" void* __pinvoke_HostLogProof__Module____Internal__guideXosNativeAotC011EC38AfterAllocation__Ansi;
@@ -13769,6 +13774,14 @@ guideXosNativeAotC011EC37ManagedCheckpoint(
 #endif
     return 0;
 }
+
+#if defined(GUIDEXOS_NATIVEAOT_C011EC97)
+extern "C" __declspec(dllexport) int __cdecl
+guideXosNativeAotC011EC97Checkpoint(
+    uint32_t checkpoint, uint32_t allocationPresent) {
+    return guidexos_nativeaot_gc_c97_checkpoint(checkpoint, allocationPresent);
+}
+#endif
 #endif
 
 #if defined(GUIDEXOS_NATIVEAOT_C011EC49_SECOND_COLLECTION_CONTINUATION)
@@ -34357,6 +34370,13 @@ extern "C" __declspec(noinline) void __cdecl RhpReversePInvoke(void* frame) {
     __pinvoke_HostLogProof__Module____Internal__guideXosNativeAotC011EC37ManagedCheckpoint__Ansi =
         reinterpret_cast<void*>(static_cast<GuideXosNativeAotC011EC37ManagedCheckpointFn>(
             guideXosNativeAotC011EC37ManagedCheckpoint));
+#if defined(GUIDEXOS_NATIVEAOT_C011EC97)
+    using GuideXosNativeAotC011EC97CheckpointFn = int (__cdecl*)(
+        uint32_t, uint32_t);
+    __pinvoke_HostLogProof__Module____Internal__guideXosNativeAotC011EC97Checkpoint__Ansi =
+        reinterpret_cast<void*>(static_cast<GuideXosNativeAotC011EC97CheckpointFn>(
+            guideXosNativeAotC011EC97Checkpoint));
+#endif
 #if defined(GUIDEXOS_NATIVEAOT_C011EC39_PLAN_PROVENANCE) && !defined(GUIDEXOS_NATIVEAOT_C011EC56_POLICY_THRESHOLD)
 #if !defined(GUIDEXOS_NATIVEAOT_C011EC40_COMPACTION_RECLAMATION)
     using GuideXosNativeAotC011EC39FinishFn = int (__cdecl*)(void);

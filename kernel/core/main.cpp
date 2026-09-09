@@ -272,6 +272,18 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         if (bootinfo && bootinfo->Magic == guideXOS::GUIDEXOS_BOOTINFO_MAGIC) {
             is_bootinfo = true;
             kernel::serial::puts("[KERNEL] Boot method: UEFI BootInfo\n");
+#if defined(GUIDEXOS_NATIVEAOT_C011EC97)
+            const uint64_t c97Selector = bootinfo->CommandLine;
+            if (c97Selector == 216u || c97Selector == 320u) {
+                kernel::nativeaot_pal_qemu_test::setC011EC97TailSelector(
+                    static_cast<uint32_t>(c97Selector));
+                kernel::serial::puts("[nativeaot-gc-c97] launch selector=");
+                kernel::serial::put_hex32(static_cast<uint32_t>(c97Selector));
+                kernel::serial::puts("\n");
+            } else {
+                kernel::serial::puts("[nativeaot-gc-c97] invalid launch selector\n");
+            }
+#endif
 #if defined(GUIDEXOS_NATIVEAOT_C011EC21_NATIVE_CONTINUATION)
             guideXosNativeUnwindSetKernelPhysicalBase(
                 static_cast<uintptr_t>(bootinfo->KernelPhysicalBase));

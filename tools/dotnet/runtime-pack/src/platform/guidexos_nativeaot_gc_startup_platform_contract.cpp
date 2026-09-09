@@ -104,6 +104,15 @@ guidexos_nativeaot_gc_native_unwind_classify(
     return hook(control_pc, result);
 }
 
+extern "C" int32_t GUIDEXOS_NATIVEAOT_PAL_CALL
+guidexos_nativeaot_gc_c97_checkpoint(
+    uint32_t checkpoint, uint32_t allocation_present) {
+    if (!installed() || g_table.reserved[7] == 0u) return -1;
+    const auto hook = reinterpret_cast<guidexos_nativeaot_gc_c97_checkpoint_hook>(
+        static_cast<uintptr_t>(g_table.reserved[7]));
+    return hook(checkpoint, allocation_present);
+}
+
 extern "C" void* GUIDEXOS_NATIVEAOT_PAL_CALL
 guidexos_nativeaot_gc_create_event(uint32_t manual_reset, uint32_t initial_state) {
     return installed() ? g_table.create_event(manual_reset, initial_state) : nullptr;

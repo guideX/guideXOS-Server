@@ -46,6 +46,8 @@ typedef void (GUIDEXOS_NATIVEAOT_PAL_CALL *guidexos_nativeaot_gc_memory_status_h
     uint64_t* available_physical, uint64_t* available_page_file);
 typedef void (GUIDEXOS_NATIVEAOT_PAL_CALL *guidexos_nativeaot_gc_native_continuation_hook)(
     uintptr_t recovered_rip, uintptr_t recovered_rsp, uintptr_t recovered_rbp);
+typedef int32_t (GUIDEXOS_NATIVEAOT_PAL_CALL *guidexos_nativeaot_gc_c97_checkpoint_hook)(
+    uint32_t checkpoint, uint32_t allocation_present);
 
 #pragma pack(push, 8)
 typedef struct guidexos_nativeaot_gc_startup_platform_table_v1 {
@@ -117,6 +119,10 @@ int32_t GUIDEXOS_NATIVEAOT_PAL_CALL
 guidexos_nativeaot_gc_native_unwind_classify(
     uintptr_t control_pc,
     guidexos_nativeaot_native_unwind_lookup_result* result);
+
+int32_t GUIDEXOS_NATIVEAOT_PAL_CALL
+guidexos_nativeaot_gc_c97_checkpoint(
+    uint32_t checkpoint, uint32_t allocation_present);
 
 void* GUIDEXOS_NATIVEAOT_PAL_CALL
 guidexos_nativeaot_gc_create_event(uint32_t manual_reset, uint32_t initial_state);

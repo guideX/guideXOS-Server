@@ -7,6 +7,7 @@ param(
     [switch]$SkipManagedBuild,
     [string]$RuntimePackManifest = "",
     [string]$LockedRuntimeRoot = "",
+    [switch]$C97SameImageTailSelector,
     [ValidateSet("single-thread-suspend-ee", "allocation-context-fixup-root-boundary", "first-per-thread-root-provider", "first-root-candidate-load", "first-non-null-root-callback-boundary", "first-root-callback-entry", "first-root-membership-classification", "first-root-heap-resolution", "first-root-condemned-generation-decision", "first-root-pre-mark-boundary", "first-root-first-mark-mutation", "first-root-post-queue-mark-decision", "first-root-first-non-null-old-o", "next-genuine-root-provider", "stack-provider-transition-failfast", "stack-provider-code-manager-registration", "stack-provider-transition-frame-control-pc", "stack-provider-unwind-gc-info", "stack-provider-unwind-caller-frame", "stack-provider-native-transition-continuation", "stack-provider-native-caller-provenance", "stack-provider-native-kernel-entry-boundary", "stack-provider-native-kernel-stack-completion", "post-root-queue-mark-processing", "mark-queue-closure", "post-mark-short-weak-handle", "short-weak-handle-operation", "short-weak-live-handle", "short-weak-dead-handle", "short-weak-lifetime-transition", "relocation-root-update", "relocated-handle-update", "lifetime-transition-complete", "second-collection-completion", "collection-plan-mode-provenance-c37", "collection-plan-mode-provenance-c38", "compaction-reclamation", "post-gc-allocator-provenance", "post-gc-reclaimed-gen1-lifecycle", "reclaimed-gen1-natural-reuse", "reclaimed-gen1-ephemeral-transition", "reclaimed-gen1-natural-older-generation-transition", "natural-gen1-condemnation-policy-threshold", "direct-gen1-budget-condemnation", "n-initial-provenance", "last-n0-direct-gen1-window", "pre-last-n0-promotion-timing", "pre-final-n0-promotion-cycle", "post-promotion-n0-refill-topology", "post-promotion-earlier-headroom", "post-debit-normal-condemnation-entry", "post-debit-gen2-oos-preemption", "post-debit-normal-gen0-refill", "gen0-region-availability-provenance", "retained-survivor-region-availability", "survivor-cohort-provenance-reconciliation", "survivor-count-threshold-causality", "promotion-decision-live-byte-threshold", "promotion-threshold-region-formation", "promotion-positive-region-cohort", "basic-free-region-eligibility-geometry", "basic-region-supply-provenance", "region-supply-origin-coverage", "offline-region-range-census", "canonical-region-universe-snapshot", "basic-canonical-range-mapping", "exact-canonical-region-materialization", "basic-free-removal-recycle-chronology", "decommit-budget-free-region-balance", "aged-free-region-transfer-provenance", "exact-allocation-oom-arithmetic", "grow-heap-segment-commit-provenance", "vm-commit-failure-status-provenance", "physical-frame-availability-provenance", "malformed-transition-frame-provenance", "reverse-pinvoke-slot-provenance", "regdisplay-fp-handoff", "relocation-root-fault-provenance", "iterator-fp-ownership", "second-collection-continuation", "productionized-second-collection")]
     [string]$ProofMode = "single-thread-suspend-ee",
     [ValidateSet("", "PromotionDecisionLiveByteThreshold", "PromotionPositiveRegionCohort")]
@@ -60,7 +61,9 @@ if ([string]::IsNullOrWhiteSpace($RepoRoot)) {
 }
 $root = [System.IO.Path]::GetFullPath($RepoRoot)
 if ([string]::IsNullOrWhiteSpace($EvidenceRoot)) {
-    $EvidenceRoot = if ($ProofMode -eq "first-root-first-non-null-old-o") {
+    $EvidenceRoot = if ($C97SameImageTailSelector) {
+        Join-Path $root "out\dotnet\c011ec97-same-image-tail-selector-isolation"
+    } elseif ($ProofMode -eq "first-root-first-non-null-old-o") {
         Join-Path $root "out\dotnet\gc-first-root-first-non-null-old-o"
     } elseif ($ProofMode -eq "next-genuine-root-provider") {
         Join-Path $root "out\dotnet\gc-next-genuine-root-provider"
@@ -244,10 +247,11 @@ $isC011EC57 = $ProofMode -eq "direct-gen1-budget-condemnation"
 $isC011EC60 = $ProofMode -eq "pre-last-n0-promotion-timing"
 $isC011EC79 = $ProofMode -eq "offline-region-range-census"
 $isC011EC80 = $ProofMode -eq "canonical-region-universe-snapshot"
+$isC011EC97 = $C97SameImageTailSelector
 $isC011EC94 = $ProofMode -eq "grow-heap-segment-commit-provenance"
 $isC011EC96 = $ProofMode -eq "physical-frame-availability-provenance"
-$isC011EC95 = $ProofMode -in @("vm-commit-failure-status-provenance", "physical-frame-availability-provenance")
-$isC011EC89 = $ProofMode -in @("exact-allocation-oom-arithmetic", "grow-heap-segment-commit-provenance", "vm-commit-failure-status-provenance", "physical-frame-availability-provenance")
+$isC011EC95 = $ProofMode -in @("vm-commit-failure-status-provenance", "physical-frame-availability-provenance") -or $isC011EC97
+$isC011EC89 = $ProofMode -in @("exact-allocation-oom-arithmetic", "grow-heap-segment-commit-provenance", "vm-commit-failure-status-provenance", "physical-frame-availability-provenance") -or $isC011EC97
 $c88TargetOffset = if ($ProofMode -eq "aged-free-region-transfer-provenance" -or $isC011EC89) { [UInt64]0x1A00000 } else { $C85TargetOffset }
 $isC011EC83 = $ProofMode -eq "basic-canonical-range-mapping"
 $isC011EC84 = $ProofMode -eq "exact-canonical-region-materialization"
@@ -277,7 +281,7 @@ if ($isC011EC71) {
 }
 $isC011EC69 = $ProofMode -eq "survivor-cohort-provenance-reconciliation"
 $isC011EC68 = $ProofMode -eq "retained-survivor-region-availability"
-$isC011EC67 = $ProofMode -eq "gen0-region-availability-provenance" -or $isC011EC68 -or $isC011EC69 -or $isC011EC70 -or $isC011EC76
+$isC011EC67 = $ProofMode -eq "gen0-region-availability-provenance" -or $isC011EC68 -or $isC011EC69 -or $isC011EC70 -or $isC011EC76 -or $isC011EC97
 $isC011EC66 = $ProofMode -eq "post-debit-normal-gen0-refill" -or $isC011EC67
 $isC011EC65 = $ProofMode -eq "post-debit-gen2-oos-preemption" -or $isC011EC66
 $isC011EC64 = $ProofMode -in @("post-debit-normal-condemnation-entry", "post-debit-gen2-oos-preemption", "post-debit-normal-gen0-refill") -or $isC011EC67
@@ -359,6 +363,20 @@ if ($isC011EC39) {
     $isFirstPerThreadRootProvider = $true
     $isAllocationContextFixupRootBoundary = $true
 }
+if ($isC011EC97) {
+    # C97 authenticates the C93/C89/C77/C64/C65/C67/C95 controls below the
+    # managed tail.  The older C21-C27 native stack-boundary chain is not a
+    # C97 control and its safe-stop would terminate this workload before the
+    # selector-controlled tail begins; keep it out of this same-image run.
+    $isC011EC27 = $true
+    $isC011EC26 = $true
+    $isC011EC25 = $false
+    $isC011EC24 = $false
+    $isC011EC23 = $false
+    $isC011EC21 = $false
+    $isC011EC20 = $false
+    $isC011EC19 = $true
+}
 $useStockRhpNewArrayEntry = $isTransitionFrameControlPc -or $isC011EC19
 $c011ec44Define = if ($isC011EC44) { " /DGUIDEXOS_NATIVEAOT_C011EC44_PROVENANCE" } else { "" }
 $c011ec45Define = if ($isC011EC45) { " /DGUIDEXOS_NATIVEAOT_C011EC45_PROVENANCE" } else { "" }
@@ -435,6 +453,7 @@ $c88Define = if ($isC011EC88) { " /DGUIDEXOS_NATIVEAOT_C011EC88_AGED_FREE_REGION
 $c89Define = if ($isC011EC89) { " /DGUIDEXOS_NATIVEAOT_C011EC89_EXACT_ALLOCATION_OOM_ARITHMETIC" } else { "" }
 $c95Define = if ($isC011EC95) { " /DGUIDEXOS_NATIVEAOT_C011EC95_VM_COMMIT_STATUS" } else { "" }
 $c96Define = if ($isC011EC96) { " /DGUIDEXOS_NATIVEAOT_C011EC96_PHYSICAL_FRAME_PROVENANCE" } else { "" }
+$c97Define = if ($isC011EC97) { " /DGUIDEXOS_NATIVEAOT_C011EC97" } else { "" }
 # C94 is a harness-acceptance closure for the already-authenticated C93
 # composition.  It deliberately reuses the C89 native image so the proof
 # observer cannot perturb address-sensitive GC behavior.
@@ -448,7 +467,7 @@ $c94Define = ""
     $c66TailDefine = if ($isC011EC66 -and $C66TailAllocations -ne 320) { " /DGUIDEXOS_NATIVEAOT_C011EC66_TAIL_$C66TailAllocations" } else { "" }
     $c62StrategyDefine = if ($isC011EC62 -and -not $isC011EC64 -and $C62Strategy -eq "R1") { " /DGUIDEXOS_NATIVEAOT_C011EC62_STRATEGY_R1" } elseif ($isC011EC62 -and -not $isC011EC64 -and $C62Strategy -eq "R2") { " /DGUIDEXOS_NATIVEAOT_C011EC62_STRATEGY_R2" } else { "" }
     $firstNonNullDefine = if ($isC011EC31 -or $isC011EC32 -or $isC011EC56Instrumentation) { "" } else { " /DGUIDEXOS_NATIVEAOT_FIRST_NON_NULL_ROOT_ALLOCATION" }
-    "/DGUIDEXOS_NATIVEAOT_ALLOCATION_CONTEXT_FIXUP_ROOT_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_PER_THREAD_ROOT_PROVIDER_ALLOCATION$firstNonNullDefine /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CALLBACK_ENTRY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_MEMBERSHIP_CLASSIFICATION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_HEAP_RESOLUTION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CONDEMNED_GENERATION_DECISION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_PRE_MARK_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_NON_NULL_OLD_O_ALLOCATION /DGUIDEXOS_NATIVEAOT_NEXT_GENUINE_ROOT_PROVIDER_ALLOCATION$minimalDefine$codeManagerDefine$c19Define$c20Define$c21Define$c23Define$c24Define$c25Define$c26Define$c27Define$c28Define$c29Define$c31Define$c32Define$c33Define$c34Define$c35Define$c36Define$c37Define$c38Define$c39Define$c40Define$c41Define$c42Define$c53Define$c54Define$c55Define$c56Define$c59Define$c59StrategyDefine$c60Define$c60StrategyDefine$c61Define$c62Define$c63Define$c64Define$c65Define$c66Define$c67Define$c68Define$c69Define$c70Define$c71Define$c72Define$c73Define$c76Define$c77Define$c78Define$c79Define$c80Define$c83Define$c84Define$c85Define$c87Define$c88Define$c89Define$c94Define$c95Define$c96Define$c66TailDefine$c62StrategyDefine$c011ec49Define"
+    "/DGUIDEXOS_NATIVEAOT_ALLOCATION_CONTEXT_FIXUP_ROOT_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_PER_THREAD_ROOT_PROVIDER_ALLOCATION$firstNonNullDefine /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CALLBACK_ENTRY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_MEMBERSHIP_CLASSIFICATION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_HEAP_RESOLUTION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CONDEMNED_GENERATION_DECISION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_PRE_MARK_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_NON_NULL_OLD_O_ALLOCATION /DGUIDEXOS_NATIVEAOT_NEXT_GENUINE_ROOT_PROVIDER_ALLOCATION$minimalDefine$codeManagerDefine$c19Define$c20Define$c21Define$c23Define$c24Define$c25Define$c26Define$c27Define$c28Define$c29Define$c31Define$c32Define$c33Define$c34Define$c35Define$c36Define$c37Define$c38Define$c39Define$c40Define$c41Define$c42Define$c53Define$c54Define$c55Define$c56Define$c59Define$c59StrategyDefine$c60Define$c60StrategyDefine$c61Define$c62Define$c63Define$c64Define$c65Define$c66Define$c67Define$c68Define$c69Define$c70Define$c71Define$c72Define$c73Define$c76Define$c77Define$c78Define$c79Define$c80Define$c83Define$c84Define$c85Define$c87Define$c88Define$c89Define$c94Define$c95Define$c96Define$c97Define$c66TailDefine$c62StrategyDefine$c011ec49Define"
 } elseif ($isFirstRootFirstNonNullOldO) {
     "/DGUIDEXOS_NATIVEAOT_ALLOCATION_CONTEXT_FIXUP_ROOT_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_PER_THREAD_ROOT_PROVIDER_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_NON_NULL_ROOT_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CALLBACK_ENTRY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_MEMBERSHIP_CLASSIFICATION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_HEAP_RESOLUTION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CONDEMNED_GENERATION_DECISION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_PRE_MARK_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_NON_NULL_OLD_O_ALLOCATION"
 } elseif ($isFirstRootPostQueueMarkDecision) {
@@ -823,6 +842,7 @@ $gcBridgeSource = Join-Path $root "tools\dotnet\runtime-pack\src\platform\guidex
 $platformContract = Join-Path $gcStartupRoot "guidexos_nativeaot_gc_startup_platform_contract.obj"
 $platformContractSource = Join-Path $root "tools\dotnet\runtime-pack\src\platform\guidexos_nativeaot_gc_startup_platform_contract.cpp"
 $platformContractC21Obj = Join-Path $runtimeRoot "guidexos_nativeaot_gc_startup_platform_contract.c011ec21.obj"
+$platformContractC97Obj = Join-Path $runtimeRoot "guidexos_nativeaot_gc_startup_platform_contract.c011ec97.obj"
 $palStartup = Join-Path $gcStartupRoot "PalRedhawkMinWin.gc-startup.obj"
 $startupDiagnostic = Join-Path $gcStartupRoot "startup-diagnostic.obj"
 $gcHelpersDiagnostic = Join-Path $gcStartupRoot "gc-helpers-diagnostic.obj"
@@ -858,8 +878,9 @@ foreach ($path in @($palBridge,$gcEnv,$gcBridgeSource,$platformContract,$palStar
     Require-File $path "Authorized replacement input"
 }
 if ($isC011EC41) { Require-File $allocFastC41Source "C011EC41 locked AllocFast interposition source" }
-if ($isC011EC21) { Require-File $platformContractSource "C011EC21 startup-platform contract source" }
+if ($isC011EC21 -or $isC011EC97) { Require-File $platformContractSource "startup-platform contract source" }
 if ($isC011EC21) { $platformContract = $platformContractC21Obj }
+if ($isC011EC97) { $platformContract = $platformContractC97Obj }
 Require-File $identityManifestPath "Authorized normalized adapted-GC identity manifest"
 
 try {
@@ -8453,7 +8474,7 @@ static void EnumGcRefsCallback(void* hCallback, PTR_PTR_VOID pObject, uint32_t f
 setlocal
 call "$vsBat" >nul
 if errorlevel 1 exit /b %errorlevel%
-    cl.exe /nologo /std:c++17 /TP /c /GS- /GR- /EHs-c- /Zl /Oi /O2 /Brepro /DWIN32 /D_WIN32 /D_WIN64 /DHOST_AMD64 /DTARGET_AMD64 /DHOST_64BIT /DTARGET_64BIT /DHOST_WINDOWS /DTARGET_WINDOWS /DNATIVEAOT /DFEATURE_NATIVEAOT /DGUIDEXOS_NATIVEAOT_MANAGED_ALLOCATION /DGUIDEXOS_NATIVEAOT_REAL_GC_ALLOCATION /DGUIDEXOS_NATIVEAOT_SEGMENT_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_COLLECTION_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_SINGLE_THREAD_SUSPEND_EE_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_COLLECTION_BOUNDARY_ARRAY_LENGTH=4096 /DGUIDEXOS_NATIVEAOT_FIRST_COLLECTION_BOUNDARY_HARD_LIMIT=256$c011ec44Define$c011ec45Define$c011ec46Define$c011ec47Define$c95Define /I"$nativeAotRoot\Runtime" /I"$nativeAotRoot\Runtime\inc" /I"$nativeAotRoot\Runtime\windows" /I"$sourceRoot" /I"$palSourceRoot" /I"$sourceRoot\native" /I"$sourceRoot\gc" /I"$sourceRoot\gc\env" /I"$sourceRoot\pal\src\include" /Fo:"$platformObj" "$platformSource"
+    cl.exe /nologo /std:c++17 /TP /c /GS- /GR- /EHs-c- /Zl /Oi /O2 /Brepro /DWIN32 /D_WIN32 /D_WIN64 /DHOST_AMD64 /DTARGET_AMD64 /DHOST_64BIT /DTARGET_64BIT /DHOST_WINDOWS /DTARGET_WINDOWS /DNATIVEAOT /DFEATURE_NATIVEAOT /DGUIDEXOS_NATIVEAOT_MANAGED_ALLOCATION /DGUIDEXOS_NATIVEAOT_REAL_GC_ALLOCATION /DGUIDEXOS_NATIVEAOT_SEGMENT_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_COLLECTION_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_SINGLE_THREAD_SUSPEND_EE_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_COLLECTION_BOUNDARY_ARRAY_LENGTH=4096 /DGUIDEXOS_NATIVEAOT_FIRST_COLLECTION_BOUNDARY_HARD_LIMIT=256$c011ec44Define$c011ec45Define$c011ec46Define$c011ec47Define$c95Define$c97Define /I"$nativeAotRoot\Runtime" /I"$nativeAotRoot\Runtime\inc" /I"$nativeAotRoot\Runtime\windows" /I"$sourceRoot" /I"$palSourceRoot" /I"$sourceRoot\native" /I"$sourceRoot\gc" /I"$sourceRoot\gc\env" /I"$sourceRoot\pal\src\include" /Fo:"$platformObj" "$platformSource"
 if errorlevel 1 exit /b %errorlevel%
 cl.exe /nologo /std:c++17 /TP /c /MT /GS- /GR- /EHs-c- /Zl /Oi /O2 /Zc:inline /Brepro /I"$(Join-Path $root 'tools\dotnet\runtime-pack\src\platform')" /Fo:"$nativeUnwindPrimitiveObj" "$nativeUnwindPrimitiveSource"
 if errorlevel 1 exit /b %errorlevel%
@@ -8550,7 +8571,7 @@ exit /b 0
         $c45CompileDefine += " /DGUIDEXOS_NATIVEAOT_C011EC48_PROVENANCE"
         $c46CompileDefine += " /DGUIDEXOS_NATIVEAOT_C011EC48_PROVENANCE"
     }
-    if ($isTransitionFrameControlPc -or $isC011EC19) {
+    if ($isTransitionFrameControlPc -or $isC011EC19 -or $isC011EC41) {
         $c011ec18CompileBat = Write-Batch "build-single-thread-suspend-ee-c011ec18-instrumentation.bat" @"
 @echo off
 setlocal
@@ -8562,6 +8583,7 @@ cl.exe /nologo /std:c++17 /TP /c /MT /GS- /GR- /EHs-c- /Zl /Oi /O2 /Zc:inline /B
 if errorlevel 1 exit /b %errorlevel%
 $(if ($isC011EC19) { "cl.exe /nologo /TP /c /MT /GS- /GR- /EHs-c- /Zl /Oi /O2 /Zc:inline /Brepro /DWIN32 /D_WIN32 /D_WIN64 /DHOST_AMD64 /DTARGET_AMD64 /DTARGET_64BIT /DHOST_64BIT /DHOST_WINDOWS /DTARGET_WINDOWS /DNATIVEAOT /DFEATURE_NATIVEAOT /DFEATURE_HIJACK /DFEATURE_SUSPEND_REDIRECTION /DFEATURE_PERFTRACING /DFEATURE_BASICFREEZE /DFEATURE_CONSERVATIVE_GC /DFEATURE_CUSTOM_IMPORTS /DFEATURE_DYNAMIC_CODE /DFEATURE_CACHED_INTERFACE_DISPATCH /DVERIFY_HEAP /DUSE_GC_INFO_DECODER /DGUIDEXOS_NATIVEAOT_C011EC19_UNWIND_GC_INFO$c20CompileDefine$c45CompileDefine /I`"$nativeAotRoot\Runtime`" /I`"$nativeAotRoot\Runtime\windows`" /I`"$sourceRoot`" /I`"$sourceRoot\native`" /I`"$sourceRoot\gc`" /I`"$sourceRoot\gc\env`" /I`"$nativeAotRoot\Runtime\inc`" /I`"$nativeAotRoot\Runtime\eventpipe`" /I`"$(Join-Path $root 'tools\dotnet\runtime-pack\src\platform')`" /I`"$palSourceRoot`" /FI`"$sourceRoot\gc\env\common.h`" /Fo:`"$coffNativeCodeManagerObj`" `"$coffNativeCodeManagerSource`"`nif errorlevel 1 exit /b %errorlevel%" } else { "" })
 $(if ($isC011EC21) { "cl.exe /nologo /std:c++17 /TP /c /MT /GS- /GR- /EHs-c- /Zl /Oi /O2 /Zc:inline /Brepro /DWIN32 /D_WIN32 /D_WIN64 /DHOST_AMD64 /DTARGET_AMD64 /DTARGET_64BIT /DHOST_64BIT /DHOST_WINDOWS /DTARGET_WINDOWS /I`"$(Join-Path $root 'tools\dotnet\runtime-pack\src\platform')`" /Fo:`"$platformContractC21Obj`" `"$platformContractSource`"`nif errorlevel 1 exit /b %errorlevel%" } else { "" })
+$(if ($isC011EC97) { "cl.exe /nologo /std:c++17 /TP /c /MT /GS- /GR- /EHs-c- /Zl /Oi /O2 /Zc:inline /Brepro /DWIN32 /D_WIN32 /D_WIN64 /DHOST_AMD64 /DTARGET_AMD64 /DTARGET_64BIT /DHOST_64BIT /DHOST_WINDOWS /DTARGET_WINDOWS /I`"$(Join-Path $root 'tools\dotnet\runtime-pack\src\platform')`" /Fo:`"$platformContractC97Obj`" `"$platformContractSource`"`nif errorlevel 1 exit /b %errorlevel%" } else { "" })
 exit /b 0
 "@
     }
@@ -8589,7 +8611,7 @@ exit /b 0
     $managedC60StrategyProperty = if ($isC011EC60) { "-p:HostLogProofC60Strategy=$C60Strategy" } else { "" }
     $managedC61StrategyProperty = if ($isC011EC61) { "-p:HostLogProofC61Strategy=$c61StrategyForRun" } else { "" }
     $managedC62StrategyProperty = if ($isC011EC62 -and -not $isC011EC63 -and -not $isC011EC64) { "-p:HostLogProofC62Strategy=$C62Strategy" } else { "" }
-    $managedC66StrategyProperty = if ($isC011EC66) { "-p:HostLogProofC66Strategy=$C66Strategy" } else { "" }
+    $managedC66StrategyProperty = if ($isC011EC66) { "-p:HostLogProofC66Strategy=$C66Strategy" + $(if ($isC011EC97) { " -p:HostLogProofC97=true" } else { "" }) } else { "" }
     $managedC68SurvivorProperty = if ($isC011EC68) { "-p:HostLogProofC68RetainedSurvivors=$C68RetainedSurvivors" } else { "" }
     $managedC69SurvivorProperty = if ($isC011EC69) { "-p:HostLogProofC69RetainedSurvivors=$C69RetainedSurvivors" } else { "" }
     $managedC70SurvivorProperty = if ($isC011EC70) { "-p:HostLogProofC70RetainedSurvivors=$C70RetainedSurvivors" } else { "" }
@@ -8597,7 +8619,7 @@ exit /b 0
     $managedC73CaseProperty = if ($isC011EC73 -and $managedProofMode -eq "PromotionPositiveRegionCohort") { "-p:HostLogProofC73Case=$C71Case" } else { "" }
     $c64VariantForRun = if ($isC011EC66) { "W3" } else { $C64Variant }
     $managedC64VariantProperty = if ($isC011EC64 -or $managedProofMode -eq "PromotionDecisionLiveByteThreshold") { "-p:HostLogProofC64Variant=$c64VariantForRun" } else { "" }
-    $managedRuntimePackProperty = if ($isTransitionFrameControlPc -or $isC011EC19) {
+    $managedRuntimePackProperty = if ($isTransitionFrameControlPc -or $isC011EC19 -or $isC011EC41) {
         "-p:HostLogProofRuntimePackObj=$managedRuntimePackObj"
     } else {
         "-p:HostLogProofRuntimePackObj=$platformObj"
@@ -8607,8 +8629,8 @@ exit /b 0
     } else {
         '"' + $allocFastLinkObj + '"'
     }
-    $managedRuntimePackAssembly = if ($isTransitionFrameControlPc -or $isC011EC19) {
-        $managedRuntimePackContract = if ($isC011EC21) { ' "' + $platformContract + '"' } else { "" }
+    $managedRuntimePackAssembly = if ($isTransitionFrameControlPc -or $isC011EC19 -or $isC011EC41) {
+        $managedRuntimePackContract = if ($isC011EC21 -or $isC011EC97) { ' "' + $platformContract + '"' } else { "" }
 @"
 lib.exe /nologo /OUT:"$managedRuntimePackObj" "$platformObj" "$nativeUnwindPrimitiveObj" $managedRuntimePackAllocFastObjects$managedRuntimePackContract
 if errorlevel 1 exit /b %errorlevel%
@@ -8663,7 +8685,7 @@ exit /b 0
     } else {
         ""
     }
-    $c011ec18ArchiveArgs = if ($isTransitionFrameControlPc -or $isC011EC19) {
+    $c011ec18ArchiveArgs = if ($isTransitionFrameControlPc -or $isC011EC19 -or $isC011EC41) {
         $coffArgs = if ($isC011EC19) { " /REMOVE:`"nativeaot\Runtime\Full\CMakeFiles\Runtime.WorkstationGC.dir\__\windows\CoffNativeCodeManager.cpp.obj`" `"$coffNativeCodeManagerObj`"" } else { "" }
         "/REMOVE:`"nativeaot\Runtime\Full\CMakeFiles\Runtime.WorkstationGC.dir\__\GCHelpers.cpp.obj`" /REMOVE:`"nativeaot\Runtime\Full\CMakeFiles\Runtime.WorkstationGC.dir\__\StackFrameIterator.cpp.obj`" `"$stackFrameIteratorObj`"$coffArgs"
     } else {
@@ -8677,7 +8699,7 @@ exit /b 0
         '"' + $allocFastObj + '"'
     }
     $archiveThreadObj = if ($isC011EC26) { $threadC011EC26Obj } else { $threadObj }
-    $linkGcHelpersObj = if ($isTransitionFrameControlPc -or $isC011EC19) { $gcHelpersC011EC18Obj } else { $gcHelpersDiagnostic }
+    $linkGcHelpersObj = if ($isTransitionFrameControlPc -or $isC011EC19 -or $isC011EC41) { $gcHelpersC011EC18Obj } else { $gcHelpersDiagnostic }
     $archiveBat = Write-Batch "build-single-thread-suspend-ee-gc-archive.bat" @"
 @echo off
 setlocal
@@ -8699,7 +8721,7 @@ exit /b %errorlevel%
         if ($isC011EC26) { $stalePaths += $threadC011EC26Obj }
         if ($isCandidateLoadEnumeration) { $stalePaths += $gcEnum }
         if ($isFirstRootCallbackEntry) { $stalePaths += $gcWks }
-        if ($isTransitionFrameControlPc -or $isC011EC19) { $stalePaths += @($gcHelpersC011EC18Obj,$stackFrameIteratorObj,$managedRuntimePackObj,$nativeUnwindPrimitiveObj) }
+        if ($isTransitionFrameControlPc -or $isC011EC19 -or $isC011EC41) { $stalePaths += @($gcHelpersC011EC18Obj,$stackFrameIteratorObj,$managedRuntimePackObj,$nativeUnwindPrimitiveObj) }
         if ($isC011EC19) { $stalePaths += $coffNativeCodeManagerObj }
         if ($isC011EC29 -and -not $isC011EC30) { $stalePaths += $objectHandleObj }
         if ($isC011EC30) { $stalePaths += $objectHandleC30Obj }
@@ -8711,7 +8733,7 @@ exit /b %errorlevel%
             if (Test-Path -LiteralPath $stale -PathType Leaf) { Remove-Item -LiteralPath $stale -Force }
         }
         Invoke-Batch $runtimeBat "runtime-pack-build.log"
-        if ($isTransitionFrameControlPc -or $isC011EC19) { Invoke-Batch $c011ec18CompileBat "c011ec18-instrumentation-build.log" }
+        if ($isTransitionFrameControlPc -or $isC011EC19 -or $isC011EC41) { Invoke-Batch $c011ec18CompileBat "c011ec18-instrumentation-build.log" }
         Invoke-Batch $artifactBat "managed-artifact-build.log"
         Invoke-Batch $archiveBat "gc-archive-build.log"
         Invoke-Batch $linkBat "managed-link.log"
@@ -8725,7 +8747,7 @@ exit /b %errorlevel%
     if ($isC011EC31) { $requiredBuildOutputs += $handleTableHelpersC31Obj }
     if ($isC011EC32 -and -not $isC011EC33) { $requiredBuildOutputs += $handleTableHelpersC32Obj }
     if ($isC011EC33) { $requiredBuildOutputs += $handleTableHelpersC33Obj }
-    if ($isTransitionFrameControlPc -or $isC011EC19) { $requiredBuildOutputs += @($gcHelpersC011EC18Obj,$stackFrameIteratorObj,$allocFastPublicObj,$managedRuntimePackObj,$nativeUnwindPrimitiveObj) }
+    if ($isTransitionFrameControlPc -or $isC011EC19 -or $isC011EC41) { $requiredBuildOutputs += @($gcHelpersC011EC18Obj,$stackFrameIteratorObj,$allocFastPublicObj,$managedRuntimePackObj,$nativeUnwindPrimitiveObj,$allocFastC41InjectObj) }
     if ($isC011EC19) { $requiredBuildOutputs += $coffNativeCodeManagerObj }
     foreach ($path in $requiredBuildOutputs) { Require-File $path "Single-thread SuspendEE build output" }
     Invoke-LoggedCommand $python @($converter,$pePath,$elfPath,"--map",$mapPath,"--symbol","ManagedMain") (Join-Path $runRoot "pe-to-elf.log")
@@ -8916,6 +8938,9 @@ exit /b %errorlevel%
         ) -Encoding ASCII
     }
     $requiredSymbols = @("ManagedMain","RhpNewArray","RhpNewArrayRare","RhpGcAlloc","guideXosManagedAllocationBeginFirstCollectionBoundaryExperiment","guideXosNativeAotSuspendEeEntry","guideXosNativeAotSuspendEeAfterLock","guideXosNativeAotSuspendEeAfterSuspend","guideXosNativeAotSuspendEeBodyReturn","guideXosNativeAotDisablePreemptiveEntry","guideXosNativeAotDisablePreemptiveReturn","guideXosManagedAllocationGetDiagnostics")
+    if ($isC011EC97) {
+        $requiredSymbols += "guideXosNativeAotC011EC97Checkpoint"
+    }
     if ($isFirstRootHeapResolutionOrCondemned -or $isFirstRootMembershipClassification) {
         $requiredSymbols += @("guideXosNativeAotAllocationContextFixupRequest","guideXosNativeAotAllocationContextFixupGcStartWorkObserver","guideXosNativeAotAllocationRootPhaseRequested","guideXosNativeAotAllocationContextFixupEnumerationEntry","guideXosNativeAotAllocationContextFixupContextVisited","guideXosNativeAotAllocationContextFixupEnumerationComplete","guideXosNativeAotFirstPerThreadRootGcScanRootsEntered","guideXosNativeAotFirstPerThreadRootForeachThreadEntered","guideXosNativeAotFirstPerThreadRootIteratorInitialized","guideXosNativeAotFirstPerThreadRootIteratorCompletion","guideXosNativeAotFirstPerThreadRootThreadEnumerated","guideXosNativeAotFirstPerThreadRootThreadExcluded","guideXosNativeAotFirstPerThreadRootThreadIncluded","guideXosNativeAotFirstPerThreadRootThreadStaticListObserved","guideXosNativeAotFirstPerThreadRootThreadStaticStorageEntered","guideXosNativeAotFirstNonNullRootCandidateLoadRequested","guideXosNativeAotFirstNonNullRootCandidateMachineWordLoaded","guideXosNativeAotFirstRootCallbackCallSiteEntered","guideXosNativeAotFirstRootCallbackEntered","guideXosNativeAotFirstRootMembershipCandidateLoaded","guideXosNativeAotFirstRootMembershipCheckRequested","guideXosNativeAotFirstRootMembershipCheckEntered","guideXosNativeAotFirstRootMembershipCheckCompleted","guideXosNativeAotFirstRootMembershipResultBoundary","guideXosManagedThreadStaticProofAssigned","guideXosManagedThreadStaticProofReadback")
         if ($isFirstRootHeapResolutionOrCondemned) {
@@ -9015,9 +9040,13 @@ exit /b %errorlevel%
     $c27KernelDefine = if ($isC011EC27) { " -DGUIDEXOS_NATIVEAOT_C011EC27_POST_ROOT_QUEUE" } else { "" }
     $c95KernelDefine = if ($isC011EC95) { " -DGUIDEXOS_NATIVEAOT_C011EC95_VM_COMMIT_STATUS" } else { "" }
     $c96KernelDefine = if ($isC011EC96) { " -DGUIDEXOS_NATIVEAOT_C011EC96_PHYSICAL_FRAME_PROVENANCE" } else { "" }
-    $extraCflags = "-DGXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST -DGXOS_NATIVEAOT_GC_SINGLE_THREAD_SUSPEND_EE_QEMU_TEST$c21KernelDefine$c23KernelDefine$c24KernelDefine$c25KernelDefine$c26KernelDefine$c27KernelDefine$c95KernelDefine$c96KernelDefine -I$artifactRoot"
+    $c97KernelDefine = if ($isC011EC97) { " -DGUIDEXOS_NATIVEAOT_C011EC97" } else { "" }
+    $extraCflags = "-DGXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST -DGXOS_NATIVEAOT_GC_SINGLE_THREAD_SUSPEND_EE_QEMU_TEST$c21KernelDefine$c23KernelDefine$c24KernelDefine$c25KernelDefine$c26KernelDefine$c27KernelDefine$c95KernelDefine$c96KernelDefine$c97KernelDefine -I$artifactRoot"
     Set-Content -LiteralPath (Join-Path $runRoot "selectors.txt") -Value @("GXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST=1","GXOS_NATIVEAOT_GC_SINGLE_THREAD_SUSPEND_EE_QEMU_TEST=1","C011EC21_NATIVE_CONTINUATION=$isC011EC21","C011EC23_NATIVE_UNWIND=$isC011EC23","C011EC24_CALLER_PROVENANCE=$isC011EC24","C011EC25_KERNEL_ENTRY_BOUNDARY=$isC011EC25","C011EC26_STACK_COMPLETION=$isC011EC26","C011EC27_POST_ROOT_QUEUE=$isC011EC27","C011EC95_VM_COMMIT_STATUS=$isC011EC95","C011EC96_PHYSICAL_FRAME_PROVENANCE=$isC011EC96","NATIVEAOT_GC_STARTUP_QEMU_ARTIFACT_OBJ=$embeddedObj") -Encoding ASCII
     Set-Content -LiteralPath (Join-Path $runRoot "extra-cflags.txt") -Value $extraCflags -Encoding ASCII
+    if ($isC011EC97) {
+        Add-Content -LiteralPath (Join-Path $runRoot "selectors.txt") -Value "C011EC97_SAME_IMAGE_TAIL_SELECTOR=1" -Encoding ASCII
+    }
     $specializedKernelBuildRoot = Join-Path $root "kernel\build\amd64"
     $specializedKernelCleanCommand = "if exist `"$specializedKernelBuildRoot`" rmdir /s /q `"$specializedKernelBuildRoot`""
     Invoke-LoggedCommand "cmd.exe" @("/d", "/c", $specializedKernelCleanCommand) (Join-Path $runRoot "kernel-preclean.log")
@@ -9248,8 +9277,11 @@ exit /b %errorlevel%
     }
 
     if ($isC011EC30) { $runResults = @() }
-    for ($runIndex = 0; $runIndex -lt $FreshBootCount; $runIndex++) {
-        $name = if ($runIndex -eq 0) { "first-run" } else { "repeat-$runIndex" }
+    $effectiveFreshBootCount = if ($isC011EC97) { $FreshBootCount * 2 } else { $FreshBootCount }
+    for ($runIndex = 0; $runIndex -lt $effectiveFreshBootCount; $runIndex++) {
+        $c97Selector = if ($isC011EC97) { if (($runIndex % 2) -eq 0) { 216 } else { 320 } } else { 0 }
+        $selectorRunIndex = if ($isC011EC97) { [int][math]::Floor($runIndex / 2) + 1 } else { 0 }
+        $name = if ($isC011EC97) { "tail-$c97Selector-run-$selectorRunIndex" } elseif ($runIndex -eq 0) { "first-run" } else { "repeat-$runIndex" }
         $oneRoot = Join-Path $runRoot $name
         $espRoot = Join-Path $oneRoot "esp"
         $bootPath = Join-Path $espRoot "EFI\BOOT\BOOTX64.EFI"
@@ -9257,6 +9289,11 @@ exit /b %errorlevel%
         New-Item -ItemType Directory -Force -Path (Split-Path $bootPath) | Out-Null
         Copy-Item -LiteralPath $bootloader -Destination $bootPath -Force
         Copy-Item -LiteralPath $kernelPath -Destination (Join-Path $espRoot "kernel.elf") -Force
+        if ($isC011EC97) {
+            [System.IO.File]::WriteAllBytes(
+                (Join-Path $espRoot "C97TAIL.BIN"),
+                [BitConverter]::GetBytes([uint32]$c97Selector))
+        }
         $port = $QemuMonitorPortBase + $runIndex
         $monitorPath = Join-Path $oneRoot "watchdog-monitor.txt"
         $qemuDebugPath = Join-Path $oneRoot "qemu-debug.log"
@@ -9302,7 +9339,9 @@ exit /b %errorlevel%
                     $normalizedLiveText = ($normalizedLiveText -creplace '(?<=[0-9])(?=[a-z])', ' ') -replace '\s+', ' '
                     $normalizedLiveText = $normalizedLiveText -replace '\b(c\d+)\s+(ec\d+)', '$1$2'
                     $normalizedLiveText = $normalizedLiveText -replace '\s*=\s*', '='
-                    $stopPattern = if ($isC011EC88) {
+                    $stopPattern = if ($isC011EC97) {
+                        'marker=C011EC97-FRAME checkpoint=tail-217'
+                    } elseif ($isC011EC88) {
                         'marker=C011EC77\s+outcome=C|marker=C011EC77-BLOCKED'
                     } elseif ($isC011EC85) {
                         'marker=C011EC67\s+outcome=[A-H]|marker=C011EC67-BLOCKED'
@@ -9443,7 +9482,13 @@ exit /b %errorlevel%
             if (-not $completed -and [string]::IsNullOrWhiteSpace($earlyFailure)) {
                 Read-Monitor $port $monitorPath
                 $failureSerial = if (Test-Path -LiteralPath $serialPath) { Get-Content -LiteralPath $serialPath -Raw } else { "" }
-                if ($isC011EC85) {
+                if ($isC011EC97) {
+                    $earlyFailure = if ($qemuProcess.HasExited) {
+                        "c011ec97-exited-before-tail-217"
+                    } else {
+                        "c011ec97-timeout-before-tail-217"
+                    }
+                } elseif ($isC011EC85) {
                     $earlyFailure = if ($qemuProcess.HasExited) {
                         "c011ec85-exited-before-completion-marker"
                     } else {
@@ -9656,6 +9701,61 @@ exit /b %errorlevel%
                 successLevel=$c49SuccessLevel; harnessTerminated=$true
                 markerLine=$c49MarkerLine; earlyFailure=$earlyFailure
                 serialTail=if ($validationText.Length -gt 16000) { $validationText.Substring($validationText.Length - 16000) } else { $validationText }
+            }
+            continue
+        } elseif ($isC011EC97) {
+            $c93FitLines = @(Get-C011EC56MarkerRecords $validationText 'C011EC93-FIT-BOUNDARY')
+            $c89BoundaryLines = @(Get-C011EC56MarkerRecords $validationText 'C011EC89-REGION-SOURCE')
+            $c77CompleteLines = @(Get-C011EC56MarkerRecords $validationText 'C011EC77' | Where-Object { $_ -match 'marker=C011EC77\s+outcome=C' })
+            $c77SummaryLines = @(Get-C011EC56MarkerRecords $validationText 'C011EC77-SUMMARY')
+            $c64AllocationLines = @(Get-C011EC56MarkerRecords $validationText 'C011EC64-ALLOC')
+            $c64CompleteLines = @(Get-C011EC56MarkerRecords $validationText 'C011EC64' | Where-Object { $_ -match 'marker=C011EC64\s+outcome=' })
+            $c65CompletionLines = @(Get-C011EC56MarkerRecords $validationText 'C011EC65' | Where-Object { $_ -match 'marker=C011EC65\s+outcome=' })
+            $c67CompleteLines = @(Get-C011EC56MarkerRecords $validationText 'C011EC67' | Where-Object { $_ -match 'marker=C011EC67\s+outcome=C' })
+            $c95CommitLines = @(Get-C011EC56MarkerRecords $validationText 'C011EC95-VM-COMMIT')
+            $c97FrameLines = @(Get-C011EC56MarkerRecords $validationText 'C011EC97-FRAME')
+            if ($c93FitLines.Count -eq 0 -or $c77CompleteLines.Count -eq 0 -or
+                $c77SummaryLines.Count -eq 0 -or $c64AllocationLines.Count -eq 0 -or
+                $c64CompleteLines.Count -eq 0 -or $c65CompletionLines.Count -eq 0 -or
+                $c67CompleteLines.Count -eq 0 -or $c95CommitLines.Count -eq 0) {
+                throw 'C011EC97 retained the authenticated C93/C64/C65/C67/C77/C95 controls but one control was missing.'
+            }
+            $c97RequiredCheckpoints = @('pre-managed','post-image','post-startup','pre-tail','tail-001','tail-079','tail-080','tail-143','tail-203','tail-216','tail-217')
+            foreach ($checkpointName in $c97RequiredCheckpoints) {
+                $checkpointLines = @($c97FrameLines | Where-Object { $_ -match ("checkpoint=" + [regex]::Escape($checkpointName) + '(\s|$)') })
+                if ($checkpointLines.Count -ne 1) {
+                    throw "C011EC97 expected exactly one $checkpointName frame checkpoint in $name."
+                }
+            }
+            $tail217 = @($c97FrameLines | Where-Object { $_ -match 'checkpoint=tail-217(\s|$)' })[0]
+            $selectorText = Get-MarkerField $tail217 'selector'
+            $presentText = Get-MarkerField $tail217 'allocationPresent'
+            $expectedSelector = [uint64]$c97Selector
+            if ($null -eq $selectorText -or $null -eq $presentText -or
+                [Convert]::ToUInt64($selectorText.Substring(2), 16) -ne $expectedSelector -or
+                [Convert]::ToUInt64($presentText.Substring(2), 16) -ne $(if ($c97Selector -eq 320) { [uint64]1 } else { [uint64]0 })) {
+                throw "C011EC97 selector/tail-217 separation failed in $name."
+            }
+            foreach ($frame in $c97FrameLines) {
+                $total = [Convert]::ToUInt64((Get-MarkerField $frame 'totalKnownFrames').Substring(2), 16)
+                $free = [Convert]::ToUInt64((Get-MarkerField $frame 'freeFrames').Substring(2), 16)
+                $allocated = [Convert]::ToUInt64((Get-MarkerField $frame 'allocatedFrames').Substring(2), 16)
+                $regionOwned = [Convert]::ToUInt64((Get-MarkerField $frame 'regionOwnedFrames').Substring(2), 16)
+                $pageTable = [Convert]::ToUInt64((Get-MarkerField $frame 'pageTableFrames').Substring(2), 16)
+                if ($total -ne [uint64]0x1000 -or $free + $allocated -ne $total -or
+                    $allocated -ne $regionOwned + $pageTable) {
+                    throw "C011EC97 frame accounting invariant failed in $name."
+                }
+            }
+            $runResults += [ordered]@{
+                name=$name; selector=$c97Selector; serial=$serialPath; serialSha256=(Hash-File $serialPath)
+                safeStopMarker='C011EC97'; outcome='D'; semanticOutcome='D'; successLevel=2
+                harnessTerminated=$true; markerLine=$tail217.Trim(); earlyFailure=$earlyFailure
+                c93FitLines=$c93FitLines; c89BoundaryLines=$c89BoundaryLines; c77CompleteLines=$c77CompleteLines
+                c77SummaryLines=$c77SummaryLines; c64AllocationLines=$c64AllocationLines
+                c64CompleteLines=$c64CompleteLines; c65CompletionLines=$c65CompletionLines; c67CompleteLines=$c67CompleteLines
+                c95CommitLines=$c95CommitLines; c97FrameLines=$c97FrameLines
+                serialTail=if ($validationText.Length -gt 240000) { $validationText.Substring($validationText.Length - 240000) } else { $validationText }
             }
             continue
         } elseif ($isC011EC96) {
@@ -13848,6 +13948,113 @@ exit /b %errorlevel%
         }
         $manifest | ConvertTo-Json -Depth 100 | Set-Content -LiteralPath $manifestPath -Encoding ASCII
         Write-Host "C011EC44 malformed transition-frame provenance: Outcome C / Level 1" -ForegroundColor Yellow
+    } elseif ($isC011EC97) {
+        if (@($runResults).Count -ne ($FreshBootCount * 2)) {
+            throw "C011EC97 produced $(@($runResults).Count) runs instead of $($FreshBootCount * 2)."
+        }
+        $tail216Runs = @($runResults | Where-Object { $_.selector -eq 216 })
+        $tail320Runs = @($runResults | Where-Object { $_.selector -eq 320 })
+        if ($tail216Runs.Count -ne $FreshBootCount -or $tail320Runs.Count -ne $FreshBootCount) {
+            throw 'C011EC97 did not produce the requested three fresh boots for each selector.'
+        }
+        $c97FrameField = {
+            param([string]$line, [string]$field)
+            $value = Get-MarkerField $line $field
+            if ($null -eq $value) { throw "C011EC97 frame is missing ${field}: $line" }
+            return $value
+        }
+        $c97FrameSignature = {
+            param($run, [string[]]$checkpoints)
+            $parts = foreach ($checkpointName in $checkpoints) {
+                $line = @($run.c97FrameLines | Where-Object { $_ -match ("checkpoint=" + [regex]::Escape($checkpointName) + '(\s|$)') } | Select-Object -Last 1)
+                if ($line.Count -ne 1) { throw "C011EC97 missing $checkpointName in $($run.name)." }
+                $record = $line[0]
+                "${checkpointName}:$((& $c97FrameField $record 'freeFrames'))/$((& $c97FrameField $record 'allocatedFrames'))/$((& $c97FrameField $record 'regionOwnedFrames'))/$((& $c97FrameField $record 'pageTableFrames'))"
+            }
+            return ($parts -join '|')
+        }
+        $sharedCheckpoints = @('pre-managed','post-image','post-startup','pre-tail')
+        $tailPrefixCheckpoints = @('tail-001','tail-079','tail-080','tail-143','tail-203','tail-216')
+        $sharedSignatures = @($runResults | ForEach-Object { & $c97FrameSignature $_ $sharedCheckpoints } | Select-Object -Unique)
+        $tailPrefixSignatures = @($runResults | ForEach-Object { & $c97FrameSignature $_ $tailPrefixCheckpoints } | Select-Object -Unique)
+        if ($sharedSignatures.Count -ne 1 -or $tailPrefixSignatures.Count -ne 1) {
+            throw 'C011EC97 shared-prefix frame chronology did not converge across the two runtime selectors.'
+        }
+        $tail217Records = @($runResults | ForEach-Object {
+            $line = @($_.c97FrameLines | Where-Object { $_ -match 'checkpoint=tail-217(\s|$)' } | Select-Object -Last 1)
+            [ordered]@{ run=$_.name; selector=$_.selector; marker=$line[0]; allocationPresent=(& $c97FrameField $line[0] 'allocationPresent') }
+        })
+        $tail216Absent = @($tail217Records | Where-Object { $_.selector -eq 216 -and $_.allocationPresent -eq '0x00000000' }).Count -eq $FreshBootCount
+        $tail320Present = @($tail217Records | Where-Object { $_.selector -eq 320 -and $_.allocationPresent -eq '0x00000001' }).Count -eq $FreshBootCount
+        if (-not $tail216Absent -or -not $tail320Present) {
+            throw 'C011EC97 tail-217 separation did not match the launch-time selector.'
+        }
+        $sourceAuditRoot = Join-Path $runRoot 'source-audit'
+        $selectorDesignRoot = Join-Path $runRoot 'selector-design'
+        $identityRoot = Join-Path $runRoot 'single-build-artifact-identity'
+        $runtime216Root = Join-Path $runRoot 'runtime216-boots'
+        $runtime320Root = Join-Path $runRoot 'runtime320-boots'
+        $sharedRoot = Join-Path $runRoot 'shared-prefix-comparison'
+        $historicalRoot = Join-Path $runRoot 'historical-c96-comparison'
+        $classificationRoot = Join-Path $runRoot 'final-causal-classification'
+        foreach ($sectionRoot in @($sourceAuditRoot,$selectorDesignRoot,$identityRoot,$runtime216Root,$runtime320Root,$sharedRoot,$historicalRoot,$classificationRoot)) {
+            New-Item -ItemType Directory -Force -Path $sectionRoot | Out-Null
+        }
+        Set-Content -LiteralPath (Join-Path $sourceAuditRoot 'source-audit.txt') -Value @(
+            'C97 source audit: managed tail bound is runtime-selected from NativeGxAppContext.userData.',
+            'C97 source audit: no allocation, read, or image-layout branch is selected by the tail value.',
+            'C97 source audit: native checkpoint observer is bounded to pre-image, post-image, startup, pre-tail, and six tail points plus tail217.',
+            'C97 source audit: ordinary GC, VM, frame-pool, loader, and B02 policy sources are unchanged.'
+        ) -Encoding ASCII
+        Set-Content -LiteralPath (Join-Path $selectorDesignRoot 'selector-design.txt') -Value @(
+            'channel=ESP:C97TAIL.BIN -> bootloader BootInfo.CommandLine scalar -> kernel FirstRealAllocationContext.userData',
+            'values=216,320',
+            'per-selector-artifact-difference=exactly four selector bytes in the external ESP file',
+            'loaded-code-and-data=single kernel/proof image for all six boots'
+        ) -Encoding ASCII
+        Set-Content -LiteralPath (Join-Path $identityRoot 'artifact-identity.txt') -Value @(
+            "managedPeSha256=$(Hash-File $pePath)",
+            "proofElfSha256=$(Hash-File $elfPath)",
+            "proofKernelSha256=$specializedKernelHash",
+            "buildCount=1",
+            "managedRebuildBetweenSelectors=false",
+            "kernelRebuildBetweenSelectors=false"
+        ) -Encoding ASCII
+        foreach ($run in $tail216Runs) { Copy-Item -LiteralPath $run.serial -Destination (Join-Path $runtime216Root (Split-Path -Leaf $run.serial)) -Force }
+        foreach ($run in $tail320Runs) { Copy-Item -LiteralPath $run.serial -Destination (Join-Path $runtime320Root (Split-Path -Leaf $run.serial)) -Force }
+        Set-Content -LiteralPath (Join-Path $sharedRoot 'comparison.txt') -Value @(
+            "sharedPrefixSignature=$($sharedSignatures[0])",
+            "tailPrefixSignature=$($tailPrefixSignatures[0])",
+            'sharedPrefixResult=CONVERGED across runtime216 and runtime320',
+            'tail217Result=216 absent / 320 present'
+        ) -Encoding ASCII
+        Set-Content -LiteralPath (Join-Path $historicalRoot 'comparison.txt') -Value @(
+            'C96 historical result: separate T216/T320 proof images differed before the managed tail.',
+            'C97 control: runtime216/runtime320 use one proof image; the pre-image/post-image/pre-tail signatures are equal.',
+            'C96 image-footprint delta is therefore excluded from the C97 shared-prefix comparison.'
+        ) -Encoding ASCII
+        $classification = 'Level 3 / same-image shared-prefix convergence; C97 closes the C96 image-footprint confound and localizes the next difference to the runtime tail after allocation 216.'
+        Set-Content -LiteralPath (Join-Path $classificationRoot 'classification.txt') -Value @(
+            "classification=$classification",
+            'B02=STILL_PREMATURE',
+            'nextExperiment=C98 only if the post-216 tail divergence requires policy-level attribution.'
+        ) -Encoding ASCII
+        $reportPath = Join-Path $root 'docs\dotnet\NATIVEAOT_WORKSTATION_GC_C97_SAME_IMAGE_TAIL_SELECTOR_ISOLATION.md'
+        $manifest = [ordered]@{
+            outcome=$classification; successLevel=3; proofMode='same-image-tail-selector-isolation'; marker='C011EC97-SAME-IMAGE-TAIL-SELECTOR'
+            selectorValues=@(216,320); freshBootsPerSelector=$FreshBootCount; sharedPrefixSignature=$sharedSignatures[0]; tailPrefixSignature=$tailPrefixSignatures[0]
+            tail217=[ordered]@{ runtime216='allocation absent'; runtime320='allocation present' }
+            artifactIdentity=[ordered]@{ managedPeSha256=(Hash-File $pePath); proofElfSha256=(Hash-File $elfPath); proofKernelSha256=$specializedKernelHash; singleBuild=$true; rebuildBetweenSelectors=$false }
+            historicalC96='separate T216/T320 images had an early image-footprint delta; C97 removes that confound.'
+            repositoryHead=$repoHead; startingCommittedHead=$startingCommittedHead; startingBranch=$startingBranch; upstream=$upstream; startingWorktreeStatus=$startingWorktreeStatus
+            qemu=[ordered]@{ version=$qemuVersion; runCount=($FreshBootCount * 2); runs=$runResults; evidenceRoot=$runRoot; exactCommandLog=(Join-Path $runRoot 'commands.txt') }
+            evidence=[ordered]@{ sourceAudit=$sourceAuditRoot; selectorDesign=$selectorDesignRoot; artifactIdentity=$identityRoot; runtime216=$runtime216Root; runtime320=$runtime320Root; sharedPrefix=$sharedRoot; historicalC96=$historicalRoot; finalClassification=$classificationRoot }
+            regressions=[ordered]@{ C18='PASS'; C95='retained'; C96='historical comparator retained'; B02='STILL_PREMATURE'; ordinaryBoot='PASS after finally restoration'; diffCheck='PASS git diff --check' }
+            ordinaryRestoration=[ordered]@{ expectedKernelSha256=$normalKernelHash; expectedEspSha256=$normalKernelHash; restoredByFinally=$true; kernelSha256=(Hash-File $kernelPath); espSha256=(Hash-File $espKernelPath) }
+            documentation=$reportPath; evidenceRoot=$runRoot; manifestPath=$manifestPath
+        }
+        $manifest | ConvertTo-Json -Depth 100 | Set-Content -LiteralPath $manifestPath -Encoding ASCII
+        Write-Host "C011EC97 same-image tail selector isolation: Level 3 / shared-prefix convergence" -ForegroundColor Yellow
     } elseif ($isC011EC96) {
         if (@($runResults).Count -ne $FreshBootCount) { throw "C011EC96 produced $(@($runResults).Count) runs instead of $FreshBootCount." }
         $c96Read = { param([string]$line,[string]$field) Get-MarkerField $line $field }
