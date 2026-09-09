@@ -32,6 +32,15 @@ function Wait-LogMatch {
     return $false
 }
 
+function Stop-GuestQemu([string]$LogPath) {
+    $guestProcesses = Get-CimInstance Win32_Process -Filter "Name='qemu-system-aarch64.exe'" -ErrorAction SilentlyContinue
+    foreach ($guest in $guestProcesses) {
+        if ($guest.CommandLine -and $guest.CommandLine.Contains($LogPath)) {
+            Stop-Process -Id $guest.ProcessId -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
 function Receive-Qmp {
     param([Net.Sockets.NetworkStream]$Stream, [byte[]]$Buffer)
     $text = ''
@@ -114,11 +123,9 @@ for ($boot = 1; $boot -le $Boots; ++$boot) {
         if (!$runner.HasExited) { $runner.Kill() }
         throw "Boot $boot did not reach the App A QMP gate"
     }
-    if (!(Wait-LogMatch $logPath 'application wait/wake: PASS' $deadline)) {
-        if (!$runner.HasExited) { $runner.Kill() }
-        throw "Boot $boot did not reach the concurrent App B wait/wake gate"
-    }
-
+    # Open QMP as soon as App A has created its windows.  The first text-box
+    # click below is intentionally the event that proves wait/wake; waiting
+    # for that marker before injecting input would deadlock a fresh boot.
     $qmp = Open-Qmp $port $deadline
     try {
         Send-Qmp $qmp.Stream $qmp.Buffer '{"execute":"qmp_capabilities"}'
@@ -175,6 +182,8 @@ for ($boot = 1; $boot -le $Boots; ++$boot) {
     }
     if (!$runner.HasExited) { $runner.Kill() }
     $runner.WaitForExit()
+    Start-Sleep -Milliseconds 200
+    Stop-GuestQemu $logPath
     $output = if (Test-Path -LiteralPath $logPath) { Get-Content -Raw -LiteralPath $logPath } else { '' }
     if ($output -notmatch 'AARCH64_PHASE9_PASS') {
         $tail = (($output -split "`r?`n") | Select-Object -Last 25) -join "`n"

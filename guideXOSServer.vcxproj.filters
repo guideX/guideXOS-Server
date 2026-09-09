@@ -624,6 +624,9 @@
     <ClInclude Include="kernel\core\include\kernel\architecture_detector.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="kernel\core\include\kernel\native_architecture.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="gxapp_container.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -676,6 +679,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="app_launch_resolver.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="app_payload_resolver.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="elf_validator.h">
@@ -1304,6 +1310,9 @@
     <ClCompile Include="kernel\core\architecture_detector.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="kernel\core\native_architecture.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="gxapp_container.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -1347,6 +1356,9 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="app_launch_resolver.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="app_payload_resolver.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="elf_validator.cpp">

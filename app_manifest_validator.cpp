@@ -1,5 +1,7 @@
 #include "app_manifest_validator.h"
 
+#include "app_payload_resolver.h"
+
 #include <algorithm>
 #include <cctype>
 #include <filesystem>
@@ -12,6 +14,10 @@ bool isRelativePath(const std::string& value) {
     if (value.empty()) return true;
     std::filesystem::path path(value);
     return path.is_relative() && value.find(':') == std::string::npos;
+}
+
+bool isSafeRelativePath(const std::string& value) {
+    return AppPayloadResolver::IsSafeRelativePath(value);
 }
 
 bool isValidFileExtension(const std::string& extension) {
@@ -83,8 +89,20 @@ AppManifestValidationResult AppManifestValidator::Validate(const AppManifest& ma
         addError(result.errors, "Manifest icon path must be relative.");
     }
 
+    if (!manifest.executable.empty() && !AppPayloadResolver::IsSafeExecutableName(manifest.executable)) {
+        addError(result.errors, "Manifest executable must be a safe relative file name.");
+    }
+
+    if ((manifest.kind == AppKind::NativeElf || manifest.kind == AppKind::GXAppPackage) &&
+        manifest.entries.empty() && manifest.executable.empty()) {
+        addError(result.errors, "Native package requires entries or a canonical executable name.");
+    }
+
     for (const AppEntry& entry : manifest.entries) {
-        if (!isRelativePath(entry.path)) {
+        if (entry.architecture.size() > 16) {
+            addError(result.errors, "Invalid manifest entry: architecture identifier is too long.");
+        }
+        if (!isRelativePath(entry.path) || !isSafeRelativePath(entry.path)) {
             addError(result.errors, "Invalid manifest entry: entry path must be relative: " + entry.path);
         }
         if ((manifest.kind == AppKind::NativeElf || manifest.kind == AppKind::GXAppPackage) && entry.path.empty()) {
@@ -92,6 +110,24 @@ AppManifestValidationResult AppManifestValidator::Validate(const AppManifest& ma
         }
         if ((manifest.kind == AppKind::NativeElf || manifest.kind == AppKind::GXAppPackage) && entry.architecture.empty()) {
             addError(result.errors, "Invalid manifest entry: entry architecture is required.");
+        }
+    }
+
+    for (const std::string& architecture : manifest.supportedArchitectures) {
+        if (architecture.size() > 16) {
+            addError(result.errors, "Invalid manifest: architecture identifier is too long.");
+        }
+    }
+
+    for (size_t i = 0; i < manifest.entries.size(); ++i) {
+        if (manifest.entries[i].architecture == "any" || manifest.entries[i].architecture == "*") continue;
+        const NativeArchitecture current = NativeArchitectureFromString(manifest.entries[i].architecture.c_str());
+        if (current == NativeArchitecture::Unknown) continue;
+        for (size_t j = i + 1; j < manifest.entries.size(); ++j) {
+            if (NativeArchitectureFromString(manifest.entries[j].architecture.c_str()) == current) {
+                addError(result.errors, "Duplicate native payload architecture: " + manifest.entries[i].architecture);
+                break;
+            }
         }
     }
 

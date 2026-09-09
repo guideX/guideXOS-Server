@@ -1,30 +1,39 @@
 #include "app_launch_resolver.h"
 
+#include "app_payload_resolver.h"
+
 #include "logger.h"
 
 #include <sstream>
 
 namespace gxos {
 namespace apps {
-namespace {
-
-bool architectureMatches(const std::string& candidate, const std::string& currentArchitecture) {
-    return candidate == currentArchitecture || candidate == "any" || candidate == "*";
-}
-
-} // namespace
-
 AppLaunchResolver::AppLaunchResolver(const AppRegistry& registry, const std::string& currentArchitecture)
     : m_registry(registry), m_currentArchitecture(currentArchitecture.empty() ? CurrentArchitecture() : currentArchitecture) {
+    const NativeArchitecture architecture = NativeArchitectureFromString(m_currentArchitecture.c_str());
+    if (architecture != NativeArchitecture::Unknown) {
+        m_currentArchitecture = NativeArchitectureToString(architecture);
+    }
 }
 
 LaunchDecision AppLaunchResolver::ResolveLaunch(const RegisteredApp& app) const {
     AppLaunchStrategy strategy = StrategyForKind(app.manifest.kind);
+    if (app.manifest.id.empty()) return MakeFailure(app, strategy, "Manifest id is required");
+    if (!IsArchitectureSupportedByManifest(app.manifest))
+        return MakeFailure(app, strategy, "Application does not support current architecture: " + m_currentArchitecture);
+
     const AppEntry* entry = m_registry.FindCompatibleEntry(app.manifest.id, m_currentArchitecture);
     if (!entry) entry = app.FindCompatibleEntry(m_currentArchitecture);
 
-    if (app.manifest.id.empty()) return MakeFailure(app, strategy, "Manifest id is required");
-    if (!IsArchitectureSupportedByManifest(app.manifest)) return MakeFailure(app, strategy, "Application does not support current architecture: " + m_currentArchitecture);
+    AppPayloadResolution payload;
+    if (strategy == AppLaunchStrategy::NativeElf || strategy == AppLaunchStrategy::GXAppPackage) {
+        payload = AppPayloadResolver::Resolve(app.manifest, app.appDirectory, m_currentArchitecture);
+        if (!payload.success) {
+            return MakeFailure(app, strategy,
+                               std::string(AppPayloadResolver::StatusToString(payload.status)) + ": " + payload.reason);
+        }
+        entry = &payload.entry;
+    }
 
     switch (strategy) {
     case AppLaunchStrategy::BuiltIn:
@@ -56,8 +65,8 @@ LaunchDecision AppLaunchResolver::ResolveLaunch(const RegisteredApp& app) const 
     LaunchDecision decision;
     decision.success = true;
     decision.strategy = strategy;
-    decision.architecture = entry ? entry->architecture : m_currentArchitecture;
-    decision.entryPath = entry ? ResolveEntryPath(app, *entry) : std::string();
+    decision.architecture = payload.success ? payload.architectureName : (entry ? entry->architecture : m_currentArchitecture);
+    decision.entryPath = payload.success ? payload.relativePath : (entry ? ResolveEntryPath(app, *entry) : std::string());
     decision.runtime = entry ? entry->runtime : std::string();
     decision.reason = "Launch resolved";
     decision.launchName = LaunchNameForApp(app, entry);
@@ -67,31 +76,7 @@ LaunchDecision AppLaunchResolver::ResolveLaunch(const RegisteredApp& app) const 
 }
 
 std::string AppLaunchResolver::CurrentArchitecture() {
-#if defined(__x86_64__) || defined(_M_X64)
-    return "amd64";
-#elif defined(__i386__) || defined(_M_IX86)
-    return "x86";
-#elif defined(__aarch64__) || defined(_M_ARM64)
-    return "arm64";
-#elif defined(__arm__) || defined(_M_ARM)
-    return "arm";
-#elif defined(__ia64__) || defined(_M_IA64)
-    return "ia64";
-#elif defined(__mips64)
-    return "mips64";
-#elif defined(__sparc__) && defined(__arch64__)
-    return "sparc64";
-#elif defined(__sparc__)
-    return "sparc";
-#elif defined(__powerpc64__) || defined(__ppc64__)
-    return "ppc64";
-#elif defined(__riscv) && (__riscv_xlen == 64)
-    return "riscv64";
-#elif defined(__loongarch64)
-    return "loongarch64";
-#else
-    return "x86";
-#endif
+    return NativeArchitectureToString(CurrentNativeArchitecture());
 }
 
 const char* AppLaunchResolver::ToString(AppLaunchStrategy strategy) {
@@ -134,8 +119,11 @@ AppLaunchStrategy AppLaunchResolver::StrategyForKind(AppKind kind) const {
 
 bool AppLaunchResolver::IsArchitectureSupportedByManifest(const AppManifest& manifest) const {
     if (manifest.supportedArchitectures.empty()) return true;
+    const NativeArchitecture current = NativeArchitectureFromString(m_currentArchitecture.c_str());
     for (const std::string& architecture : manifest.supportedArchitectures) {
-        if (architectureMatches(architecture, m_currentArchitecture)) return true;
+        if (architecture == "any" || architecture == "*" ||
+            (current != NativeArchitecture::Unknown &&
+             NativeArchitectureFromString(architecture.c_str()) == current)) return true;
     }
     return false;
 }

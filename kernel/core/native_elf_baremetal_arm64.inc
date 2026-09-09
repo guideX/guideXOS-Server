@@ -550,12 +550,22 @@ static bool arm64_package_path(const Arm64Package* package, const char* relative
     if (!package || !relative || !relative[0] || relative[0] == '/') return false;
     const uint32_t rootLength = arm64_length(package->root);
     const uint32_t relativeLength = arm64_length(relative);
-    if (rootLength + 1 + relativeLength + 1 > capacity) return false;
+    if (rootLength == 0 || rootLength >= sizeof(package->root) || relativeLength == 0 ||
+        relativeLength >= sizeof(package->executable) || rootLength + 1u + relativeLength + 1u > capacity) return false;
+    uint32_t componentLength = 0;
     for (uint32_t i = 0; i < relativeLength; ++i) {
-        if (relative[i] == '\\' || (relative[i] == '.' &&
-            (i == 0 || relative[i - 1] == '/') &&
-            (relative[i + 1] == '\0' || relative[i + 1] == '/'))) return false;
+        const unsigned char character = static_cast<unsigned char>(relative[i]);
+        if (character < 0x20 || character == 0x7f || relative[i] == '\\' || relative[i] == ':') return false;
+        if (relative[i] == '/') {
+            if (componentLength == 0 || componentLength == 1 && relative[i - componentLength] == '.' ||
+                componentLength == 2 && relative[i - componentLength] == '.' && relative[i - componentLength + 1] == '.') return false;
+            componentLength = 0;
+            continue;
+        }
+        ++componentLength;
     }
+    if (componentLength == 0 || componentLength == 1 && relative[relativeLength - 1] == '.' ||
+        componentLength == 2 && relative[relativeLength - 2] == '.' && relative[relativeLength - 1] == '.') return false;
     for (uint32_t i = 0; i < rootLength; ++i) output[i] = package->root[i];
     output[rootLength] = '/';
     for (uint32_t i = 0; i < relativeLength; ++i) output[rootLength + 1 + i] = relative[i];
@@ -637,6 +647,8 @@ static bool arm64_parse_package(const char* directory, Arm64Package* package)
     const char* entries = arm64_find(s_arm64Manifest, "\"entries\"");
     const char* cursor = entries;
     bool selected = false;
+    const char* currentArchitecture = gxos::apps::NativeArchitectureToString(
+        gxos::apps::CurrentNativeArchitecture());
     while (cursor && *cursor) {
         const char* archKey = arm64_find(cursor, "\"architecture\"");
         if (!archKey) break;
@@ -644,11 +656,11 @@ static bool arm64_parse_package(const char* directory, Arm64Package* package)
         if (!objectEnd) break;
         char architecture[16];
         if (arm64_json_between(archKey, objectEnd, "\"architecture\"", architecture, sizeof(architecture)) &&
-            arm64_equal(architecture, "arm64")) {
+            arm64_equal(architecture, currentArchitecture)) {
             if (!arm64_json_between(archKey, objectEnd, "\"path\"", package->executable, sizeof(package->executable)) ||
                 !arm64_json_between(archKey, objectEnd, "\"entryPoint\"", package->entryPoint, sizeof(package->entryPoint)) ||
                 !arm64_json_between(archKey, objectEnd, "\"abi\"", package->abi, sizeof(package->abi))) return false;
-            arm64_copy(package->architecture, sizeof(package->architecture), "arm64");
+            arm64_copy(package->architecture, sizeof(package->architecture), currentArchitecture);
             selected = true;
             break;
         }
@@ -665,6 +677,10 @@ static bool arm64_parse_package(const char* directory, Arm64Package* package)
         info.size == 0 || info.size > UINT32_MAX) return false;
     package->executableBytes = info.size;
     package->valid = true;
+#if defined(GXOS_AARCH64_PHASE10)
+    arm64_print("[guideXOS] package architecture: "); arm64_print(package->architecture); arm64_print("\n");
+    arm64_print("[guideXOS] selected payload: "); arm64_print(package->executable); arm64_print("\n");
+#endif
     arm64_print("[guideXOS] App discovery: ARM64 proof app found package=");
     arm64_print(package->directory); arm64_print(" id="); arm64_print(package->id);
     arm64_print(" manifest="); arm64_print(manifestPath); arm64_print(" executable=");
@@ -769,6 +785,11 @@ static bool arm64_load_image(Arm64Runtime* runtime)
         s_arm64LastWrongArchitecture = header.machine == kArm64ElfMachineAmd64;
         return false;
     }
+#if defined(GXOS_AARCH64_PHASE10)
+    if (runtime->verbose) {
+        arm64_print("[guideXOS] selected ELF machine: EM_AARCH64\n");
+    }
+#endif
     uint64_t phBytes = 0;
     if (header.ident[0] != 0x7f || header.ident[1] != 'E' || header.ident[2] != 'L' || header.ident[3] != 'F' ||
         header.ident[4] != 2 || header.ident[5] != 1 || header.ident[6] != 1 || header.type != kArm64ElfTypeExec ||
@@ -1358,6 +1379,7 @@ struct Phase9Runtime {
     bool autoClose;
     bool closeRequested;
     bool isAppA;
+    bool isPhase10;
     bool entered;
     uint64_t startTick;
     uint32_t buttonClicks;
@@ -1395,6 +1417,12 @@ static volatile uint8_t s_phase9LoaderBusy = 0;
 static volatile uint32_t s_phase9VfsUsers = 0;
 static bool s_phase9AppAImagePrimed = false;
 static bool s_phase9AppBImagePrimed = false;
+#if defined(GXOS_AARCH64_PHASE10)
+static uint32_t s_phase10Launches = 0;
+static bool s_phase10WaitWakeLogged = false;
+static bool s_phase10WaitLogged = false;
+static bool s_phase10AllComplete = false;
+#endif
 
 bool phase9_vfs_exclusive() { return s_phase9VfsUsers != 0; }
 
@@ -1790,7 +1818,7 @@ static gx_result GX_CALL phase9_log(gx_app_context* context, const char* message
     if (!runtime || !phase9_string_valid(message)) return GX_ERROR_INVALID_ARGUMENT;
     runtime->entered = true;
     const arch::interrupt_state_t state = arch::irq_save();
-    arm64_print(runtime->isAppA ? "[phase9-app-a] " : "[phase9-app-b] "); arm64_print(message); arm64_print("\n");
+    arm64_print(runtime->isPhase10 ? "[phase10-app] " : (runtime->isAppA ? "[phase9-app-a] " : "[phase9-app-b] ")); arm64_print(message); arm64_print("\n");
     if (runtime->isAppA && arm64_equal(message, "focus/input isolation: PASS value=appa"))
         arm64_print("[guideXOS] cross-app focus isolation: PASS\n");
     if (!runtime->isAppA && arm64_equal(message, "focus/input isolation: PASS value=appb"))
@@ -1885,12 +1913,24 @@ static gx_result GX_CALL phase9_wait_event(gx_app_context* context, gx_event* ev
         runtime->owner->request_auto_close();
     if (runtime->common.state() == application::LifecycleState::Running)
         runtime->common.transition(application::LifecycleState::Waiting);
+#if defined(GXOS_AARCH64_PHASE10)
+    if (runtime->isPhase10 && !s_phase10WaitLogged) {
+        s_phase10WaitLogged = true;
+        arm64_print("[guideXOS] multiarch app waiting: PASS\n");
+    }
+#endif
     const gx_result result = runtime->common.events().wait(event);
     if (runtime->common.state() == application::LifecycleState::Waiting)
         runtime->common.transition(application::LifecycleState::Running);
     if (runtime->isAppA) { s_phase9AppAWaits = runtime->common.events().waits(); s_phase9AppAWakes = runtime->common.events().wakes(); }
     else { s_phase9AppBWaits = runtime->common.events().waits(); s_phase9AppBWakes = runtime->common.events().wakes(); }
-    if (result == GX_OK && runtime->common.events().wakes() != 0 && !s_phase9WaitWakeLogged) {
+#if defined(GXOS_AARCH64_PHASE10)
+    if (result == GX_OK && runtime->common.events().wakes() != 0 && runtime->isPhase10 && !s_phase10WaitWakeLogged) {
+        s_phase10WaitWakeLogged = true;
+        arm64_print("[guideXOS] multiarch app wait/wake: PASS\n");
+    }
+#endif
+    if (result == GX_OK && runtime->common.events().wakes() != 0 && !runtime->isPhase10 && !s_phase9WaitWakeLogged) {
         s_phase9WaitWakeLogged = true;
         arm64_print("[guideXOS] application wait/wake: PASS\n");
     }
@@ -2098,6 +2138,67 @@ uint64_t phase9_app_a_waits() { return s_phase9AppAWaits; }
 uint64_t phase9_app_a_wakes() { return s_phase9AppAWakes; }
 uint64_t phase9_app_b_waits() { return s_phase9AppBWaits; }
 uint64_t phase9_app_b_wakes() { return s_phase9AppBWakes; }
+
+#if defined(GXOS_AARCH64_PHASE10)
+bool phase10_run_application(const char* appName, bool autoClose)
+{
+    if (s_arm64LaunchInProgress) return false;
+    if (!s_arm64Discovered) {
+        phase9_vfs_enter();
+        phase9_acquire_loader();
+        if (!s_arm64Discovered) discover();
+        phase9_release_loader();
+        phase9_vfs_exit();
+    }
+    Arm64Package* package = arm64_find_package(appName);
+    if (!package || !arm64_equal(package->id, "com.guidexos.phase10.multiarchproof")) return false;
+
+    s_arm64LaunchInProgress = true;
+    arm64_print("[guideXOS] App Model package: "); arm64_print(package->id); arm64_print("\n");
+    arm64_print("[guideXOS] native architecture: "); arm64_print(package->architecture); arm64_print("\n");
+    arm64_print("[guideXOS] selected payload: "); arm64_print(package->executable); arm64_print("\n");
+
+    Phase9Runtime runtime{};
+    runtime.loader.package = package;
+    runtime.loader.verbose = true;
+    runtime.loader.preferredBase = kArm64PreferredBase;
+    const uint8_t runtimeId = static_cast<uint8_t>((++s_phase9RuntimeSequence % 255u) + 1u);
+    const uint16_t generation = static_cast<uint16_t>((++s_phase9Generation & 0xffffu) ?
+        (s_phase9Generation & 0xffffu) : 1u);
+    if (!runtime.common.initialize(package->id, package->architecture, runtimeId, generation,
+                                   kPhase9Quotas)) {
+        s_arm64LaunchInProgress = false;
+        return false;
+    }
+    runtime.owner = new Phase9GuiOwner(&runtime);
+    if (!runtime.owner) {
+        runtime.common.cleanup();
+        s_arm64LaunchInProgress = false;
+        return false;
+    }
+    runtime.autoClose = autoClose;
+    runtime.closeRequested = false;
+    runtime.isAppA = true;
+    runtime.isPhase10 = true;
+    runtime.startTick = phase3_timer_count();
+    runtime.loader.context.userData = &runtime;
+    const bool result = phase9_load_and_run(&runtime);
+    s_arm64LaunchInProgress = false;
+    if (!result) return false;
+
+    ++s_phase10Launches;
+    arm64_print("[guideXOS] multiarch app cleanup: PASS\n");
+    if (s_phase10Launches == 2) arm64_print("[guideXOS] multiarch package relaunch: PASS\n");
+    return true;
+}
+
+bool phase10_all_complete() { return s_phase10AllComplete || s_phase10Launches >= 26; }
+uint32_t phase10_launches() { return s_phase10Launches; }
+#else
+bool phase10_run_application(const char*, bool) { return false; }
+bool phase10_all_complete() { return false; }
+uint32_t phase10_launches() { return 0; }
+#endif
 
 #endif
 

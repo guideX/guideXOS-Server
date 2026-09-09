@@ -78,6 +78,7 @@ std::string elfTypeName(uint16_t type) {
 }
 
 std::string architectureForMachine(uint16_t machine, uint8_t elfClass) {
+    (void)elfClass;
     switch (machine) {
     case 0x03: return "x86";
     case 0x08: return "mips64";

@@ -49,6 +49,9 @@ struct AppManifest {
     std::string category;
     AppKind kind = AppKind::Unknown;
     std::string icon;
+    // Optional canonical NativeElf payload name. When entries is empty, the
+    // common resolver expands this to bin/<architecture>/<executable>.
+    std::string executable;
     std::string minGuideXOSVersion;
     std::vector<std::string> supportedArchitectures;
     std::vector<AppEntry> entries;

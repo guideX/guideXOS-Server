@@ -134,6 +134,7 @@
   <ItemGroup>
     <ClInclude Include="allocator.h" />
     <ClInclude Include="app_launch_resolver.h" />
+    <ClInclude Include="app_payload_resolver.h" />
     <ClInclude Include="app_manifest.h" />
     <ClInclude Include="app_manifest_loader.h" />
     <ClInclude Include="app_manifest_validator.h" />
@@ -243,6 +244,7 @@
     <ClInclude Include="kernel\arch\x86\include\arch\syscall.h" />
     <ClInclude Include="kernel\arch\x86\include\arch\usb_hci.h" />
     <ClInclude Include="kernel\core\include\kernel\architecture_detector.h" />
+    <ClInclude Include="kernel\core\include\kernel\native_architecture.h" />
     <ClInclude Include="kernel\core\include\kernel\ata.h" />
     <ClInclude Include="kernel\core\include\kernel\block_device.h" />
     <ClInclude Include="kernel\core\include\kernel\desktop.h" />
@@ -384,6 +386,7 @@
   <ItemGroup>
     <ClCompile Include="allocator.cpp" />
     <ClCompile Include="app_launch_resolver.cpp" />
+    <ClCompile Include="app_payload_resolver.cpp" />
     <ClCompile Include="app_manifest.cpp" />
     <ClCompile Include="app_manifest_loader.cpp" />
     <ClCompile Include="app_manifest_validator.cpp" />
@@ -507,6 +510,7 @@
       <ObjectFileName>$(IntDir)arch_core.obj</ObjectFileName>
     </ClCompile>
     <ClCompile Include="kernel\core\architecture_detector.cpp" />
+    <ClCompile Include="kernel\core\native_architecture.cpp" />
     <ClCompile Include="kernel\core\ata.cpp" />
     <ClCompile Include="kernel\core\block_device.cpp" />
     <ClCompile Include="kernel\core\cxx_runtime.cpp" />

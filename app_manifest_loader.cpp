@@ -291,6 +291,7 @@ AppManifest manifestFromJson(const JsonValue& root) {
     manifest.category = stringProperty(root, "category");
     manifest.kind = AppKindFromString(stringProperty(root, "kind"));
     manifest.icon = stringProperty(root, "icon");
+    manifest.executable = stringProperty(root, "executable");
     manifest.minGuideXOSVersion = stringProperty(root, "minGuideXOSVersion");
     manifest.supportedArchitectures = stringArrayProperty(root, "supportedArchitectures");
     manifest.permissions = stringArrayProperty(root, "permissions");

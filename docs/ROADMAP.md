@@ -1,7 +1,7 @@
 # ??? guideXOSServer Development Roadmap
 
 **Last Updated:** 2026-09-09
-**Current Status:** AARCH64 Phase 9 runtime services implemented
+**Current Status:** AARCH64 Phase 10 multi-architecture NativeElf packages implemented
 **Overall Progress:** ~80% to Production Release
 
 ---
@@ -14,6 +14,7 @@
 ?? Phase 7: Testing & Quality (High-rate QMP limitation remains)
 ? Phase 8: NativeElf GUI (ARM64 complete)
 ? Phase 9: NativeElf runtime services (ARM64 complete)
+? Phase 10: Multi-architecture NativeElf packages (AMD64 + ARM64 complete)
 ?? Phase 10: Ecosystem (Future)
 ```
 
@@ -134,6 +135,18 @@ and a repeatable three-boot QMP harness are implemented and documented.
 
 The unresolved Phase 7 high-rate QEMU/QMP stress limitation remains explicitly
 out of scope; this roadmap does not claim `AARCH64_PHASE7_PASS`.
+
+### Phase 10: Multi-architecture NativeElf packages (Complete) ✅
+**Status:** Implemented on `AARCH64_SUPPORT`.
+
+One App Model identity and one manifest now contain independently compiled
+AMD64 and ARM64 payloads. The common architecture-neutral resolver selects
+`bin/<architecture>/...`, rejects missing or unknown architectures without
+fallback, and preserves ELF machine validation. The ARM64 package is launched
+through the hardened Phase-9 runtime with real GUI input, wait/wake,
+cleanup/relaunch, and three fresh-boot acceptance coverage.
+
+**Details:** See `aarch64/AARCH64_PHASE10_MULTIARCH_PACKAGE.md`
 
 ---
 

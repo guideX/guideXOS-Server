@@ -45,6 +45,7 @@ REM Source files (exclude kernel)
 set SOURCES=^
 allocator.cpp ^
 app_launch_resolver.cpp ^
+app_payload_resolver.cpp ^
 app_manifest.cpp ^
 app_manifest_loader.cpp ^
 app_manifest_validator.cpp ^
@@ -87,6 +88,7 @@ ipc_bus.cpp ^
 guide_web_html_parser.cpp ^
 guide_web_http.cpp ^
 kernel/core/architecture_detector.cpp ^
+kernel/core/native_architecture.cpp ^
 kernel/core/system_font.cpp ^
 lifecycle.cpp ^
 logger.cpp ^

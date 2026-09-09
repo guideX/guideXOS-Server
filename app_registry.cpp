@@ -1,6 +1,7 @@
 #include "app_registry.h"
 
 #include "app_manifest_loader.h"
+#include "app_payload_resolver.h"
 #include "built_in_app_metadata.h"
 
 #include <algorithm>
@@ -26,21 +27,6 @@ std::string joinKnownAliases(const BuiltInAppMetadata& metadata) {
 
 bool architectureMatches(const std::string& entryArchitecture, const std::string& currentArchitecture) {
     return entryArchitecture == currentArchitecture || entryArchitecture == "any" || entryArchitecture == "*";
-}
-
-bool entryPathIsContainedAndPresent(const RegisteredApp& app, const AppEntry& entry) {
-    if (entry.path.empty() || app.appDirectory.empty()) return false;
-
-    std::error_code error;
-    const std::filesystem::path root = std::filesystem::weakly_canonical(app.appDirectory, error);
-    if (error) return false;
-    const std::filesystem::path candidate = std::filesystem::weakly_canonical(app.appDirectory / std::filesystem::path(entry.path), error);
-    if (error) return false;
-    const std::filesystem::path relative = std::filesystem::relative(candidate, root, error);
-    if (error || relative.empty() || relative == "." || relative == ".." || relative.string().rfind(".." + std::string(1, std::filesystem::path::preferred_separator), 0) == 0) {
-        return false;
-    }
-    return std::filesystem::is_regular_file(candidate, error) && !error;
 }
 
 RegisteredApp makeBuiltInApp(const BuiltInAppMetadata& metadata) {
@@ -270,14 +256,31 @@ DisplayNameResolution AppRegistry::ResolveByDisplayName(const std::string& displ
         } else {
             const AppEntry* entry = app.FindCompatibleEntry(currentArchitecture);
             if (!entry) {
-                match.eligible = false;
-                match.reason = "no compatible launch entry";
+                if (app.manifest.kind == AppKind::NativeElf || app.manifest.kind == AppKind::GXAppPackage) {
+                    const AppPayloadResolution payload = AppPayloadResolver::Resolve(
+                        app.manifest, app.appDirectory, currentArchitecture);
+                    if (!payload.success) {
+                        match.eligible = false;
+                        match.reason = payload.reason;
+                    }
+                } else {
+                    match.eligible = false;
+                    match.reason = "no compatible launch entry";
+                }
             } else if ((app.manifest.kind == AppKind::NativeElf || app.manifest.kind == AppKind::GXAppPackage) &&
-                       (entry->path.empty() || app.appDirectory.empty())) {
+                       app.appDirectory.empty()) {
                 match.eligible = false;
                 match.reason = "entry path is unavailable";
             } else if ((app.manifest.kind == AppKind::NativeElf || app.manifest.kind == AppKind::GXAppPackage) &&
-                       !entryPathIsContainedAndPresent(app, *entry)) {
+                       entry->path.empty()) {
+                const AppPayloadResolution payload = AppPayloadResolver::Resolve(
+                    app.manifest, app.appDirectory, currentArchitecture);
+                if (!payload.success) {
+                    match.eligible = false;
+                    match.reason = payload.reason;
+                }
+            } else if ((app.manifest.kind == AppKind::NativeElf || app.manifest.kind == AppKind::GXAppPackage) &&
+                       !AppPayloadResolver::Resolve(app.manifest, app.appDirectory, currentArchitecture).success) {
                 match.eligible = false;
                 match.reason = "entry path is missing or outside the application directory";
             }

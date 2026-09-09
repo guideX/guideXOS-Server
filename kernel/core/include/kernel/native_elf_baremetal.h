@@ -71,6 +71,12 @@ bool phase9_vfs_exclusive();
 void phase9_vfs_enter();
 void phase9_vfs_exit();
 
+/* Phase-10 uses the hardened Phase-9 runtime with a normal application-ID
+ * launch.  The caller supplies no architecture-specific executable path. */
+bool phase10_run_application(const char* appName, bool autoClose);
+bool phase10_all_complete();
+uint32_t phase10_launches();
+
 } // namespace native_elf
 } // namespace kernel
 
