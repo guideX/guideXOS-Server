@@ -647,6 +647,23 @@ gx_result Debug(NativeAppRuntimeContext& owner, const gx_development_debug_reque
     return result;
 }
 
+gx_result DebugCallStack(NativeAppRuntimeContext& owner, const gx_development_debug_request& request,
+                         gx_development_debug_call_stack* outResult) {
+    if (!outResult || request.command != GX_DEVELOPMENT_DEBUG_CALL_STACK) return GX_ERROR_INVALID_ARGUMENT;
+    std::string expectedArtifact;
+    {
+        std::lock_guard<std::mutex> lock(g_mutex);
+        Slot* slot = findOwnedLocked(request.handle, owner.runtimeId);
+        if (!slot) return GX_ERROR_FAILED;
+        if (!slot->deployment.debugControlled) return GX_ERROR_UNSUPPORTED;
+        if (slot->deployment.processId != request.processId ||
+            slot->deployment.nativeRuntimeId == 0 ||
+            slot->deployment.nativeRuntimeId != request.nativeRuntimeId) return GX_ERROR_FAILED;
+        expectedArtifact = slot->deployment.artifactSha256;
+    }
+    return NativeAppDebugger::CallStack(request, expectedArtifact, outResult);
+}
+
 gx_result Poll(NativeAppRuntimeContext& owner, gx_development_run_handle handle, gx_development_run_snapshot* outSnapshot) {
     if (!outSnapshot) return GX_ERROR_INVALID_ARGUMENT;
     clearSnapshot(outSnapshot);

@@ -1032,6 +1032,33 @@ gx_result hostDevelopmentDebug(NativeGxAppContext* ctx, const gx_development_deb
     return result;
 }
 
+gx_result hostDevelopmentDebugCallStack(NativeGxAppContext* ctx,
+                                         const gx_development_debug_request* request,
+                                         gx_development_debug_call_stack* outResult) {
+    NativeAppRuntimeContext* context = runtimeContextFor(ctx);
+    if (!context || !request || !outResult ||
+        !nativeBufferRangeContains(*context, request, sizeof(gx_development_debug_request)) ||
+        !nativeBufferRangeContains(*context, outResult, sizeof(gx_development_debug_call_stack)) ||
+        request->size < sizeof(gx_development_debug_request) ||
+        request->version != GX_DEVELOPMENT_DEBUG_API_VERSION ||
+        request->command != GX_DEVELOPMENT_DEBUG_CALL_STACK ||
+        outResult->size < sizeof(gx_development_debug_call_stack) ||
+        outResult->version != GX_DEVELOPMENT_DEBUG_API_VERSION) {
+        return GX_ERROR_INVALID_ARGUMENT;
+    }
+    gx_development_debug_request copied = *request;
+    std::string artifact;
+    if (request->artifactSha256 &&
+        !copyNativeString(*context, request->artifactSha256,
+                          GX_DEVELOPMENT_RUN_MAX_SHA256_BYTES, artifact)) {
+        return GX_ERROR_INVALID_ARGUMENT;
+    }
+    copied.artifactSha256 = artifact.empty() ? nullptr : artifact.c_str();
+    const gx_result result = DevelopmentRunService::DebugCallStack(*context, copied, outResult);
+    NativeAppProcessTable::UpdateFromRuntime(*context);
+    return result;
+}
+
 gx_result hostFileExists(NativeGxAppContext* ctx, const char* path, uint32_t* outExists) {
     NativeAppRuntimeContext* context = runtimeContextFor(ctx);
     if (!context) {
@@ -1806,6 +1833,7 @@ NativeAppRuntimeContext NativeAppRuntime::Prepare(
     context.hostCalls.development_run_request_close = hostDevelopmentRunRequestClose;
     context.hostCalls.development_run_release = hostDevelopmentRunRelease;
     context.hostCalls.development_debug = hostDevelopmentDebug;
+    context.hostCalls.development_debug_call_stack = hostDevelopmentDebugCallStack;
 
     if (launchDecision.strategy != AppLaunchStrategy::NativeElf) {
         addDiagnostic(context, "Launch decision strategy is not NativeElf");

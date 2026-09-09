@@ -33,8 +33,67 @@ typedef enum gx_development_debug_command {
     /* Phase 28D: execute one source operation without entering a direct user call. */
     GX_DEVELOPMENT_DEBUG_STEP_SOURCE_OVER = 17,
     /* Phase 28E: execute the current user frame until its caller resumes. */
-    GX_DEVELOPMENT_DEBUG_STEP_SOURCE_OUT = 18
+    GX_DEVELOPMENT_DEBUG_STEP_SOURCE_OUT = 18,
+    /* Phase 28F: inspect the bounded user frame chain without resuming it. */
+    GX_DEVELOPMENT_DEBUG_CALL_STACK = 19
 } gx_development_debug_command;
+
+#define GX_DEVELOPMENT_DEBUG_MAX_CALL_STACK_FRAMES 16u
+
+typedef enum gx_development_debug_call_stack_status {
+    GX_DEVELOPMENT_DEBUG_CALL_STACK_STATUS_NONE = 0,
+    GX_DEVELOPMENT_DEBUG_CALL_STACK_STATUS_SUCCESS = 1,
+    GX_DEVELOPMENT_DEBUG_CALL_STACK_STATUS_TRUNCATED = 2,
+    GX_DEVELOPMENT_DEBUG_CALL_STACK_STATUS_REJECTED = 3,
+    GX_DEVELOPMENT_DEBUG_CALL_STACK_STATUS_NO_PAUSED_CONTEXT = 4,
+    GX_DEVELOPMENT_DEBUG_CALL_STACK_STATUS_STALE = 5,
+    GX_DEVELOPMENT_DEBUG_CALL_STACK_STATUS_INVALID_FRAME = 6,
+    GX_DEVELOPMENT_DEBUG_CALL_STACK_STATUS_INVALID_RETURN_ADDRESS = 7,
+    GX_DEVELOPMENT_DEBUG_CALL_STACK_STATUS_UNSUPPORTED_FRAME = 8
+} gx_development_debug_call_stack_status;
+
+enum {
+    GX_DEVELOPMENT_DEBUG_CALL_STACK_FRAME_VALIDATED = 1u,
+    GX_DEVELOPMENT_DEBUG_CALL_STACK_FRAME_FUNCTION_RESOLVED = 2u,
+    GX_DEVELOPMENT_DEBUG_CALL_STACK_FRAME_SOURCE_MAPPED = 4u,
+    GX_DEVELOPMENT_DEBUG_CALL_STACK_FRAME_CALL_SITE_MAPPED = 8u,
+    GX_DEVELOPMENT_DEBUG_CALL_STACK_FRAME_ROOT = 16u,
+    GX_DEVELOPMENT_DEBUG_CALL_STACK_FRAME_RETURN_ADDRESS_VALID = 32u,
+    GX_DEVELOPMENT_DEBUG_CALL_STACK_FRAME_POINTER_VALID = 64u,
+    GX_DEVELOPMENT_DEBUG_CALL_STACK_FRAME_SOURCE_UNAVAILABLE = 128u
+};
+
+typedef struct gx_development_debug_call_stack_frame {
+    uint32_t depth;
+    uint32_t flags;
+    uint64_t instructionPointer;
+    uint64_t stackPointer;
+    uint64_t framePointer;
+    uint64_t returnAddress;
+    uint32_t sourceLine;
+    uint32_t sourceColumn;
+    char functionName[GX_DEVELOPMENT_DEBUG_MAX_FUNCTION_NAME_BYTES];
+    char sourcePath[GX_DEVELOPMENT_DEBUG_MAX_SOURCE_PATH_BYTES];
+} gx_development_debug_call_stack_frame;
+
+typedef struct gx_development_debug_call_stack {
+    uint32_t size;
+    uint32_t version;
+    uint32_t status;
+    uint32_t frameCount;
+    uint32_t truncated;
+    uint32_t reserved;
+    uint64_t handle;
+    uint64_t processId;
+    uint64_t nativeRuntimeId;
+    uint64_t threadId;
+    uint64_t sessionGeneration;
+    uint64_t stopGeneration;
+    uint64_t stackLow;
+    uint64_t stackHigh;
+    char errorMessage[GX_DEVELOPMENT_DEBUG_MAX_ERROR_BYTES];
+    gx_development_debug_call_stack_frame frames[GX_DEVELOPMENT_DEBUG_MAX_CALL_STACK_FRAMES];
+} gx_development_debug_call_stack;
 
 typedef enum gx_development_debug_status {
     GX_DEVELOPMENT_DEBUG_STATUS_NONE = 0,

@@ -174,6 +174,13 @@ typedef struct gx_host_calls {
     gx_result (GX_CALL *bare_metal_development_debug)(gx_app_context* ctx,
                                                        const gx_development_debug_request* request,
                                                        gx_development_debug_snapshot* snapshot);
+    /* Appended Phase 28F read-only NativeElf Call Stack inspection. */
+    gx_result (GX_CALL *development_debug_call_stack)(gx_app_context* ctx,
+                                                       const gx_development_debug_request* request,
+                                                       gx_development_debug_call_stack* result);
+    gx_result (GX_CALL *bare_metal_development_debug_call_stack)(gx_app_context* ctx,
+                                                                  const gx_development_debug_request* request,
+                                                                  gx_development_debug_call_stack* result);
 } gx_host_calls;
 
 #ifdef __cplusplus

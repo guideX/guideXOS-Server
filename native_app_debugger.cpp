@@ -1,6 +1,7 @@
 #include "native_app_debugger.h"
 
 #include "allocator.h"
+#include "kernel/core/native_elf/native_elf_call_stack.h"
 #include "logger.h"
 
 #include <algorithm>
@@ -49,6 +50,15 @@ struct PhysicalBinding {
     uint64_t owners[kMaxLogicalOwners] = {};
 };
 
+struct DebugSourceMapping {
+    uint64_t start = 0;
+    uint64_t end = 0;
+    uint32_t line = 0;
+    uint32_t column = 0;
+    char sourcePath[256] = {};
+    char functionName[64] = {};
+};
+
 struct DebugRuntime {
     std::atomic<bool> active{false};
     std::atomic<bool> gateOpen{false};
@@ -92,6 +102,9 @@ struct DebugRuntime {
     std::atomic<uint32_t> singleStepKind{GX_DEVELOPMENT_DEBUG_SINGLE_STEP_NONE};
     gx_development_debug_register_context trapContext{};
     gx_development_debug_register_context singleStepContext{};
+    std::vector<DebugSourceMapping> sourceMappings;
+    bool sourceMetadataPresent = false;
+    bool sourceMetadataValid = false;
     std::atomic<bool> stepOverActive{false};
     std::atomic<uint64_t> stepOverInternalOwnerId{0};
     std::atomic<uint64_t> stepOverReturnBindingId{0};
@@ -113,6 +126,9 @@ std::array<DebugRuntime, kMaxDebugRuntimes> g_runtimes;
 std::mutex g_mutex;
 std::once_flag g_handlerOnce;
 
+bool executableAddress(const DebugRuntime& runtime, uint64_t address, DebugSegment** outSegment);
+bool stackAddressRangeContains(const DebugRuntime& runtime, uint64_t address, uint64_t bytes);
+
 void clearSnapshot(gx_development_debug_snapshot* snapshot) {
     if (!snapshot) return;
     *snapshot = gx_development_debug_snapshot{};
@@ -127,6 +143,250 @@ void setError(gx_development_debug_snapshot* snapshot, const char* message) {
     if (!message) message = "debug operation rejected";
     std::strncpy(snapshot->errorMessage, message, sizeof(snapshot->errorMessage) - 1);
     snapshot->errorMessage[sizeof(snapshot->errorMessage) - 1] = '\0';
+}
+
+void clearCallStack(gx_development_debug_call_stack* result) {
+    if (!result) return;
+    *result = gx_development_debug_call_stack{};
+    result->size = sizeof(gx_development_debug_call_stack);
+    result->version = GX_DEVELOPMENT_DEBUG_API_VERSION;
+    result->status = GX_DEVELOPMENT_DEBUG_CALL_STACK_STATUS_NONE;
+}
+
+void setCallStackError(gx_development_debug_call_stack* result, uint32_t status,
+                       const char* message) {
+    if (!result) return;
+    result->status = status;
+    if (!message) message = "call stack operation rejected";
+    std::strncpy(result->errorMessage, message, sizeof(result->errorMessage) - 1);
+    result->errorMessage[sizeof(result->errorMessage) - 1] = '\0';
+}
+
+uint16_t sourceMapU16(const std::vector<uint8_t>& bytes, uint32_t offset) {
+    return static_cast<uint16_t>(bytes[offset]) |
+        static_cast<uint16_t>(static_cast<uint16_t>(bytes[offset + 1]) << 8);
+}
+
+uint32_t sourceMapU32(const std::vector<uint8_t>& bytes, uint32_t offset) {
+    return static_cast<uint32_t>(bytes[offset]) |
+        (static_cast<uint32_t>(bytes[offset + 1]) << 8) |
+        (static_cast<uint32_t>(bytes[offset + 2]) << 16) |
+        (static_cast<uint32_t>(bytes[offset + 3]) << 24);
+}
+
+uint64_t sourceMapU64(const std::vector<uint8_t>& bytes, uint32_t offset) {
+    uint64_t value = 0;
+    for (uint32_t index = 0; index < 8; ++index)
+        value |= static_cast<uint64_t>(bytes[offset + index]) << (index * 8);
+    return value;
+}
+
+uint64_t sourceMapHash(const std::vector<uint8_t>& bytes, uint32_t start, uint32_t count) {
+    uint64_t hash = 1469598103934665603ULL;
+    for (uint32_t index = 0; index < count; ++index) {
+        const uint32_t absolute = start + index;
+        const uint8_t value = index >= 32 && index < 40 ? 0 : bytes[absolute];
+        hash ^= value;
+        hash *= 1099511628211ULL;
+    }
+    return hash;
+}
+
+bool fixedSourceTextValid(const char* value, uint32_t capacity) {
+    if (!value || capacity == 0) return false;
+    for (uint32_t index = 0; index < capacity; ++index)
+        if (value[index] == '\0') return true;
+    return false;
+}
+
+bool parseSourceMappings(const NativeElfImage& image, DebugRuntime& runtime,
+                         std::string& error) {
+    runtime.sourceMappings.clear();
+    runtime.sourceMetadataPresent = false;
+    runtime.sourceMetadataValid = false;
+    const std::vector<uint8_t>& bytes = image.imageBytes;
+    if (bytes.size() < 8 || sourceMapU32(bytes, static_cast<uint32_t>(bytes.size() - 8)) != 0x454D5847U)
+        return true;
+    runtime.sourceMetadataPresent = true;
+    if (bytes.size() > 0xFFFFFFFFu) {
+        error = "GXSM artifact is too large";
+        return false;
+    }
+    const uint32_t imageBytes = static_cast<uint32_t>(bytes.size());
+    const uint32_t footer = imageBytes - 8;
+    const uint32_t payload = sourceMapU32(bytes, footer + 4);
+    if (payload < 48 || payload > imageBytes) {
+        error = "GXSM payload is invalid";
+        return false;
+    }
+    const uint32_t start = imageBytes - payload;
+    if (sourceMapU32(bytes, start) != 0x4D535847U || sourceMapU16(bytes, start + 4) != 1 ||
+        sourceMapU16(bytes, start + 6) != 40 || sourceMapU32(bytes, start + 24) != payload ||
+        sourceMapU64(bytes, start + 32) != sourceMapHash(bytes, start, payload)) {
+        error = "GXSM header or checksum is invalid";
+        return false;
+    }
+    const uint32_t fileCount = sourceMapU16(bytes, start + 8);
+    const uint32_t functionCount = sourceMapU16(bytes, start + 10);
+    const uint32_t mapCount = sourceMapU32(bytes, start + 12);
+    const uint32_t codeFileOffset = sourceMapU32(bytes, start + 16);
+    const uint32_t codeBytes = sourceMapU32(bytes, start + 20);
+    if (fileCount == 0 || fileCount > 16 || functionCount == 0 || functionCount > 256 ||
+        mapCount == 0 || mapCount > 256 || codeBytes == 0) {
+        error = "GXSM counts are invalid";
+        return false;
+    }
+    const uint64_t expected = 40ULL + static_cast<uint64_t>(fileCount) * 268ULL +
+        static_cast<uint64_t>(functionCount) * 64ULL + static_cast<uint64_t>(mapCount) * 24ULL + 8ULL;
+    if (expected != payload) {
+        error = "GXSM size accounting is invalid";
+        return false;
+    }
+    std::array<std::array<char, 256>, 16> paths{};
+    std::array<std::array<char, 64>, 256> functions{};
+    uint32_t cursor = start + 40;
+    for (uint32_t index = 0; index < fileCount; ++index) {
+        std::memcpy(paths[index].data(), bytes.data() + cursor, 256);
+        if (!fixedSourceTextValid(paths[index].data(), 256) || sourceMapU32(bytes, cursor + 256) > 64U * 1024U) {
+            error = "GXSM source-file identity is invalid";
+            return false;
+        }
+        cursor += 268;
+    }
+    for (uint32_t index = 0; index < functionCount; ++index) {
+        std::memcpy(functions[index].data(), bytes.data() + cursor, 64);
+        if (!fixedSourceTextValid(functions[index].data(), 64)) {
+            error = "GXSM function identity is invalid";
+            return false;
+        }
+        cursor += 64;
+    }
+    for (uint32_t index = 0; index < mapCount; ++index) {
+        const uint32_t record = cursor + index * 24;
+        const uint32_t fileIndex = sourceMapU16(bytes, record);
+        const uint32_t functionIndex = sourceMapU16(bytes, record + 2);
+        const uint32_t line = sourceMapU32(bytes, record + 4);
+        const uint32_t column = sourceMapU32(bytes, record + 8);
+        const uint32_t finalOffset = sourceMapU32(bytes, record + 12);
+        const uint32_t instructionBytes = sourceMapU32(bytes, record + 16);
+        if (fileIndex >= fileCount || functionIndex >= functionCount || line == 0 ||
+            instructionBytes == 0 || finalOffset >= codeBytes || instructionBytes > codeBytes - finalOffset) {
+            error = "GXSM source mapping record is invalid";
+            return false;
+        }
+        if (image.preferredBaseAddress > std::numeric_limits<uint64_t>::max() - codeFileOffset - finalOffset) {
+            error = "GXSM source mapping address overflows";
+            return false;
+        }
+        DebugSourceMapping mapping;
+        mapping.start = image.preferredBaseAddress + codeFileOffset + finalOffset;
+        mapping.end = mapping.start + instructionBytes;
+        mapping.line = line;
+        mapping.column = column;
+        std::memcpy(mapping.sourcePath, paths[fileIndex].data(), sizeof(mapping.sourcePath));
+        std::memcpy(mapping.functionName, functions[functionIndex].data(), sizeof(mapping.functionName));
+        runtime.sourceMappings.push_back(mapping);
+    }
+    runtime.sourceMetadataValid = true;
+    return true;
+}
+
+const DebugSourceMapping* sourceMappingAt(const DebugRuntime& runtime, uint64_t address) {
+    for (const DebugSourceMapping& mapping : runtime.sourceMappings)
+        if (address >= mapping.start && address < mapping.end) return &mapping;
+    return nullptr;
+}
+
+const DebugSourceMapping* sourceMappingNear(const DebugRuntime& runtime, uint64_t address) {
+    const DebugSourceMapping* best = nullptr;
+    uint64_t bestDistance = std::numeric_limits<uint64_t>::max();
+    for (const DebugSourceMapping& mapping : runtime.sourceMappings) {
+        const uint64_t distance = address < mapping.start ? mapping.start - address :
+            (address >= mapping.end ? address - mapping.end + 1 : 0);
+        if (distance > 256 || distance >= bestDistance) continue;
+        best = &mapping;
+        bestDistance = distance;
+    }
+    return best;
+}
+
+const DebugSourceMapping* sourceMappingForward(const DebugRuntime& runtime, uint64_t address) {
+    const DebugSourceMapping* exact = sourceMappingAt(runtime, address);
+    if (exact) return exact;
+    for (uint64_t distance = 1; distance <= 256; ++distance) {
+        if (address > std::numeric_limits<uint64_t>::max() - distance) break;
+        const DebugSourceMapping* nearby = sourceMappingAt(runtime, address + distance);
+        if (nearby) return nearby;
+    }
+    return nullptr;
+}
+
+bool readOwnedStackU64(const DebugRuntime& runtime, uint64_t address, uint64_t* value) {
+    if (!value || (address & 7ULL) != 0 || !stackAddressRangeContains(runtime, address, 8)) return false;
+    *value = *reinterpret_cast<volatile const uint64_t*>(static_cast<uintptr_t>(address));
+    return true;
+}
+
+bool readCallStackCodeByte(const DebugRuntime& runtime, uint64_t address, uint8_t* value) {
+    if (!value || !runtime.mapping.base || !executableAddress(runtime, address, nullptr) ||
+        address < runtime.imageBase || address >= runtime.imageEnd) return false;
+    *value = *reinterpret_cast<volatile const uint8_t*>(
+        static_cast<const char*>(runtime.mapping.base) + static_cast<size_t>(address - runtime.imageBase));
+    for (const PhysicalBinding& binding : runtime.bindings)
+        if (binding.used && binding.address == address && binding.installed) *value = binding.originalByte;
+    return true;
+}
+
+bool resolveDirectCallSite(const DebugRuntime& runtime, uint64_t returnAddress,
+                           const char* expectedCallee, uint64_t* callRip,
+                           const DebugSourceMapping** callMapping) {
+    if (callMapping) *callMapping = nullptr;
+    if (!expectedCallee || !callRip || returnAddress < 5) return false;
+    const uint64_t candidate = returnAddress - 5;
+    uint8_t opcode = 0;
+    if (!readCallStackCodeByte(runtime, candidate, &opcode) || opcode != 0xE8) return false;
+    uint8_t displacementBytes[4] = {};
+    for (uint32_t index = 0; index < 4; ++index)
+        if (!readCallStackCodeByte(runtime, candidate + 1 + index, &displacementBytes[index])) return false;
+    const uint32_t raw = static_cast<uint32_t>(displacementBytes[0]) |
+        (static_cast<uint32_t>(displacementBytes[1]) << 8) |
+        (static_cast<uint32_t>(displacementBytes[2]) << 16) |
+        (static_cast<uint32_t>(displacementBytes[3]) << 24);
+    const int64_t displacement = static_cast<int32_t>(raw);
+    uint64_t target = 0;
+    if (displacement >= 0) {
+        const uint64_t amount = static_cast<uint64_t>(displacement);
+        if (returnAddress > std::numeric_limits<uint64_t>::max() - amount) return false;
+        target = returnAddress + amount;
+    } else {
+        const uint64_t amount = static_cast<uint64_t>(-displacement);
+        if (returnAddress < amount) return false;
+        target = returnAddress - amount;
+    }
+    if (!executableAddress(runtime, target, nullptr)) return false;
+    const DebugSourceMapping* targetMapping = sourceMappingForward(runtime, target);
+    if (!targetMapping || std::strcmp(targetMapping->functionName, expectedCallee) != 0) return false;
+    const DebugSourceMapping* mapping = sourceMappingAt(runtime, candidate);
+    if (!mapping || mapping->functionName[0] == '\0') return false;
+    *callRip = candidate;
+    if (callMapping) *callMapping = mapping;
+    return true;
+}
+
+void fillFrameText(gx_development_debug_call_stack_frame& frame,
+                   const DebugSourceMapping& mapping, bool sourceLocation) {
+    std::strncpy(frame.functionName, mapping.functionName, sizeof(frame.functionName) - 1);
+    frame.functionName[sizeof(frame.functionName) - 1] = '\0';
+    frame.flags |= GX_DEVELOPMENT_DEBUG_CALL_STACK_FRAME_FUNCTION_RESOLVED;
+    if (!sourceLocation || std::strlen(mapping.sourcePath) >= sizeof(frame.sourcePath)) {
+        frame.flags |= GX_DEVELOPMENT_DEBUG_CALL_STACK_FRAME_SOURCE_UNAVAILABLE;
+        return;
+    }
+    std::strncpy(frame.sourcePath, mapping.sourcePath, sizeof(frame.sourcePath) - 1);
+    frame.sourcePath[sizeof(frame.sourcePath) - 1] = '\0';
+    frame.sourceLine = mapping.line;
+    frame.sourceColumn = mapping.column;
+    frame.flags |= GX_DEVELOPMENT_DEBUG_CALL_STACK_FRAME_SOURCE_MAPPED;
 }
 
 ExecutableMemoryProtection originalProtection(uint32_t flags) {
@@ -589,6 +849,9 @@ bool NativeAppDebugger::RegisterRuntime(NativeAppRuntimeContext& context,
         runtime.singleStepKind.store(GX_DEVELOPMENT_DEBUG_SINGLE_STEP_NONE, std::memory_order_release);
         runtime.trapContext = gx_development_debug_register_context{};
         runtime.singleStepContext = gx_development_debug_register_context{};
+        runtime.sourceMappings.clear();
+        runtime.sourceMetadataPresent = false;
+        runtime.sourceMetadataValid = false;
         clearStepOverRuntime(runtime);
         clearStepOutRuntime(runtime);
         runtime.stepOverCallBindingId.store(0, std::memory_order_release);
@@ -639,6 +902,10 @@ bool NativeAppDebugger::RegisterRuntime(NativeAppRuntimeContext& context,
         if (runtime.segmentCount == 0) {
             error = "Native ELF image has no executable segment";
             return false;
+        }
+        std::string sourceMapError;
+        if (!parseSourceMappings(image, runtime, sourceMapError)) {
+            Logger::write(LogLevel::Warn, "[NativeAppDebugger] GXSM metadata unavailable: " + sourceMapError);
         }
 #ifdef _WIN32
         runtime.gateEvent = CreateEventA(nullptr, TRUE, gateExecution ? FALSE : TRUE, nullptr);
@@ -1366,6 +1633,229 @@ gx_result NativeAppDebugger::Command(const gx_development_debug_request& request
     default:
         setError(snapshot, "unknown debug command");
         return GX_ERROR_INVALID_ARGUMENT;
+    }
+}
+
+gx_result NativeAppDebugger::CallStack(const gx_development_debug_request& request,
+                                       const std::string& expectedArtifactSha256,
+                                       gx_development_debug_call_stack* result) {
+    if (!result || request.size < sizeof(gx_development_debug_request) ||
+        request.version != GX_DEVELOPMENT_DEBUG_API_VERSION ||
+        request.command != GX_DEVELOPMENT_DEBUG_CALL_STACK || request.handle == 0 ||
+        request.sessionGeneration == 0 || request.processId == 0 || request.nativeRuntimeId == 0) {
+        if (result) {
+            clearCallStack(result);
+            setCallStackError(result, GX_DEVELOPMENT_DEBUG_CALL_STACK_STATUS_REJECTED,
+                              "call stack request identity is incomplete");
+        }
+        return GX_ERROR_INVALID_ARGUMENT;
+    }
+    clearCallStack(result);
+    result->handle = request.handle;
+    result->sessionGeneration = request.sessionGeneration;
+    if (expectedArtifactSha256.empty() || !request.artifactSha256 ||
+        expectedArtifactSha256 != request.artifactSha256) {
+        setCallStackError(result, GX_DEVELOPMENT_DEBUG_CALL_STACK_STATUS_REJECTED,
+                          "artifact identity mismatch");
+        return GX_ERROR_FAILED;
+    }
+
+    std::lock_guard<std::mutex> lock(g_mutex);
+    DebugRuntime* runtime = findRuntimeLocked(request.nativeRuntimeId, request.processId);
+    if (!runtime) {
+        setCallStackError(result, GX_DEVELOPMENT_DEBUG_CALL_STACK_STATUS_STALE,
+                          "target runtime is not registered");
+        return GX_ERROR_FAILED;
+    }
+    result->processId = runtime->processId;
+    result->nativeRuntimeId = runtime->runtimeId;
+    result->stackLow = runtime->stackLow;
+    result->stackHigh = runtime->stackHigh;
+
+    if (request.threadId == 0 || request.stopGeneration == 0) {
+        setCallStackError(result, GX_DEVELOPMENT_DEBUG_CALL_STACK_STATUS_REJECTED,
+                          "paused thread identity is incomplete");
+        return GX_ERROR_INVALID_ARGUMENT;
+    }
+    if (runtime->singleStepPending.load(std::memory_order_acquire) ||
+        runtime->stepOverActive.load(std::memory_order_acquire) ||
+        runtime->stepOutActive.load(std::memory_order_acquire)) {
+        setCallStackError(result, GX_DEVELOPMENT_DEBUG_CALL_STACK_STATUS_NO_PAUSED_CONTEXT,
+                          "call stack is unavailable while the target is stepping");
+        return GX_ERROR_FAILED;
+    }
+
+    gx_development_debug_register_context context{};
+    uint64_t normalizedRip = 0;
+    bool stopped = false;
+    if (runtime->trapObserved.load(std::memory_order_acquire)) {
+        if (runtime->trapInternalBreakpoint.load(std::memory_order_acquire)) {
+            setCallStackError(result, GX_DEVELOPMENT_DEBUG_CALL_STACK_STATUS_NO_PAUSED_CONTEXT,
+                              "internal debugger trap is not a user pause");
+            return GX_ERROR_FAILED;
+        }
+        context = runtime->trapContext;
+        normalizedRip = runtime->trapAddress.load(std::memory_order_acquire);
+        stopped = true;
+    } else if (runtime->userStepStopPending.load(std::memory_order_acquire)) {
+        context = runtime->singleStepContext;
+        normalizedRip = context.rip;
+        stopped = true;
+    }
+    if (!stopped || !context.valid || normalizedRip == 0) {
+        setCallStackError(result, GX_DEVELOPMENT_DEBUG_CALL_STACK_STATUS_NO_PAUSED_CONTEXT,
+                          "target has no complete paused user context");
+        return GX_ERROR_FAILED;
+    }
+    if (context.threadId != request.threadId || context.stopGeneration != request.stopGeneration ||
+        context.sessionGeneration != request.sessionGeneration) {
+        setCallStackError(result, GX_DEVELOPMENT_DEBUG_CALL_STACK_STATUS_STALE,
+                          "stale or mismatched paused context");
+        return GX_ERROR_FAILED;
+    }
+    result->threadId = context.threadId;
+    result->stopGeneration = context.stopGeneration;
+    if (!runtime->sourceMetadataPresent || !runtime->sourceMetadataValid) {
+        setCallStackError(result, GX_DEVELOPMENT_DEBUG_CALL_STACK_STATUS_UNSUPPORTED_FRAME,
+                          "authoritative GXSM metadata is unavailable");
+        return GX_ERROR_UNSUPPORTED;
+    }
+    if (!executableAddress(*runtime, normalizedRip, nullptr)) {
+        setCallStackError(result, GX_DEVELOPMENT_DEBUG_CALL_STACK_STATUS_INVALID_RETURN_ADDRESS,
+                          "paused instruction is outside executable user code");
+        return GX_ERROR_FAILED;
+    }
+    const DebugSourceMapping* topMapping = sourceMappingAt(*runtime, normalizedRip);
+    if (!topMapping || topMapping->functionName[0] == '\0') {
+        setCallStackError(result, GX_DEVELOPMENT_DEBUG_CALL_STACK_STATUS_UNSUPPORTED_FRAME,
+                          "paused instruction has no trustworthy user function");
+        return GX_ERROR_UNSUPPORTED;
+    }
+    if (!kernel::native_elf::native_elf_frame_shape_valid(context.rsp, context.rbp,
+                                                          runtime->stackLow, runtime->stackHigh)) {
+        setCallStackError(result, GX_DEVELOPMENT_DEBUG_CALL_STACK_STATUS_INVALID_FRAME,
+                          "paused frame pointer shape is invalid");
+        return GX_ERROR_FAILED;
+    }
+
+    gx_development_debug_call_stack_frame& top = result->frames[0];
+    top.depth = 0;
+    top.flags = GX_DEVELOPMENT_DEBUG_CALL_STACK_FRAME_VALIDATED |
+        GX_DEVELOPMENT_DEBUG_CALL_STACK_FRAME_POINTER_VALID;
+    top.instructionPointer = normalizedRip;
+    top.stackPointer = context.rsp;
+    top.framePointer = context.rbp;
+    fillFrameText(top, *topMapping, true);
+    result->frameCount = 1;
+    uint64_t seen[GX_DEVELOPMENT_DEBUG_MAX_CALL_STACK_FRAMES] = {};
+    seen[0] = context.rbp;
+    if (std::strcmp(topMapping->functionName, "gx_main") == 0) {
+        top.flags |= GX_DEVELOPMENT_DEBUG_CALL_STACK_FRAME_ROOT;
+        result->status = GX_DEVELOPMENT_DEBUG_CALL_STACK_STATUS_SUCCESS;
+        return GX_OK;
+    }
+
+    uint64_t currentRbp = context.rbp;
+    uint64_t currentReturnAddress = 0;
+    uint64_t nextRbp = 0;
+    if (!readOwnedStackU64(*runtime, currentRbp, &nextRbp) ||
+        !readOwnedStackU64(*runtime, currentRbp + 8, &currentReturnAddress) ||
+        !kernel::native_elf::native_elf_caller_link_valid(
+            currentRbp, nextRbp, currentReturnAddress, runtime->stackLow, runtime->stackHigh,
+            runtime->imageBase, runtime->imageEnd - runtime->imageBase)) {
+        setCallStackError(result, currentReturnAddress == 0 ?
+                              GX_DEVELOPMENT_DEBUG_CALL_STACK_STATUS_INVALID_FRAME :
+                              GX_DEVELOPMENT_DEBUG_CALL_STACK_STATUS_INVALID_RETURN_ADDRESS,
+                          "top frame caller link is invalid");
+        return GX_ERROR_FAILED;
+    }
+    top.returnAddress = currentReturnAddress;
+    top.flags |= GX_DEVELOPMENT_DEBUG_CALL_STACK_FRAME_RETURN_ADDRESS_VALID;
+    char currentFunction[sizeof(top.functionName)] = {};
+    std::memcpy(currentFunction, top.functionName, sizeof(currentFunction));
+
+    for (;;) {
+        if (!executableAddress(*runtime, currentReturnAddress, nullptr)) {
+            setCallStackError(result, GX_DEVELOPMENT_DEBUG_CALL_STACK_STATUS_INVALID_RETURN_ADDRESS,
+                              "caller return address is outside executable user code");
+            return GX_ERROR_FAILED;
+        }
+        uint64_t callerInstructionPointer = currentReturnAddress;
+        const DebugSourceMapping* callerMapping = nullptr;
+        bool callSiteMapped = false;
+        uint64_t resolvedCallRip = 0;
+        if (resolveDirectCallSite(*runtime, currentReturnAddress, currentFunction,
+                                  &resolvedCallRip, &callerMapping)) {
+            callerInstructionPointer = resolvedCallRip;
+            callSiteMapped = true;
+        } else {
+            callerMapping = sourceMappingAt(*runtime, currentReturnAddress);
+            if (!callerMapping) callerMapping = sourceMappingNear(*runtime, currentReturnAddress);
+        }
+        if (!callerMapping || callerMapping->functionName[0] == '\0') {
+            setCallStackError(result, GX_DEVELOPMENT_DEBUG_CALL_STACK_STATUS_INVALID_RETURN_ADDRESS,
+                              "caller return address has no trustworthy user function");
+            return GX_ERROR_FAILED;
+        }
+        if (result->frameCount >= GX_DEVELOPMENT_DEBUG_MAX_CALL_STACK_FRAMES) {
+            result->truncated = 1;
+            result->status = GX_DEVELOPMENT_DEBUG_CALL_STACK_STATUS_TRUNCATED;
+            return GX_OK;
+        }
+        if (!kernel::native_elf::native_elf_frame_pointer_valid(
+                nextRbp, runtime->stackLow, runtime->stackHigh) ||
+            kernel::native_elf::native_elf_call_stack_frame_pointer_seen(
+                seen, result->frameCount, nextRbp)) {
+            setCallStackError(result, GX_DEVELOPMENT_DEBUG_CALL_STACK_STATUS_INVALID_FRAME,
+                              "caller frame chain is cyclic or outside the owned stack");
+            return GX_ERROR_FAILED;
+        }
+
+        gx_development_debug_call_stack_frame& caller = result->frames[result->frameCount];
+        caller.depth = result->frameCount;
+        caller.flags = GX_DEVELOPMENT_DEBUG_CALL_STACK_FRAME_VALIDATED |
+            GX_DEVELOPMENT_DEBUG_CALL_STACK_FRAME_POINTER_VALID |
+            GX_DEVELOPMENT_DEBUG_CALL_STACK_FRAME_RETURN_ADDRESS_VALID;
+        caller.instructionPointer = callerInstructionPointer;
+        caller.framePointer = nextRbp;
+        if (callSiteMapped) {
+            fillFrameText(caller, *callerMapping, true);
+            caller.flags |= GX_DEVELOPMENT_DEBUG_CALL_STACK_FRAME_CALL_SITE_MAPPED;
+        } else {
+            const bool exactSource = sourceMappingAt(*runtime, currentReturnAddress) == callerMapping;
+            fillFrameText(caller, *callerMapping, exactSource);
+        }
+        if (std::strcmp(callerMapping->functionName, "gx_main") == 0) {
+            caller.flags |= GX_DEVELOPMENT_DEBUG_CALL_STACK_FRAME_ROOT;
+            caller.returnAddress = 0;
+            seen[result->frameCount] = nextRbp;
+            ++result->frameCount;
+            result->status = GX_DEVELOPMENT_DEBUG_CALL_STACK_STATUS_SUCCESS;
+            return GX_OK;
+        }
+
+        uint64_t candidateSavedRbp = 0;
+        uint64_t candidateReturnAddress = 0;
+        if (!readOwnedStackU64(*runtime, nextRbp, &candidateSavedRbp) ||
+            !readOwnedStackU64(*runtime, nextRbp + 8, &candidateReturnAddress) ||
+            !kernel::native_elf::native_elf_caller_link_valid(
+                nextRbp, candidateSavedRbp, candidateReturnAddress,
+                runtime->stackLow, runtime->stackHigh,
+                runtime->imageBase, runtime->imageEnd - runtime->imageBase)) {
+            setCallStackError(result, candidateReturnAddress == 0 ?
+                                  GX_DEVELOPMENT_DEBUG_CALL_STACK_STATUS_INVALID_FRAME :
+                                  GX_DEVELOPMENT_DEBUG_CALL_STACK_STATUS_INVALID_RETURN_ADDRESS,
+                              "caller frame link is invalid");
+            return GX_ERROR_FAILED;
+        }
+        caller.returnAddress = candidateReturnAddress;
+        seen[result->frameCount] = nextRbp;
+        ++result->frameCount;
+        currentRbp = nextRbp;
+        (void)currentRbp;
+        std::memcpy(currentFunction, callerMapping->functionName, sizeof(currentFunction));
+        currentReturnAddress = candidateReturnAddress;
+        nextRbp = candidateSavedRbp;
     }
 }
 

@@ -25,6 +25,9 @@ public:
     static gx_result Command(const gx_development_debug_request& request,
                              const std::string& expectedArtifactSha256,
                              gx_development_debug_snapshot* snapshot);
+    static gx_result CallStack(const gx_development_debug_request& request,
+                               const std::string& expectedArtifactSha256,
+                               gx_development_debug_call_stack* result);
     static void CancelProcess(uint64_t processId);
 };
 

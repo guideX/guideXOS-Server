@@ -71,7 +71,11 @@ static_assert(offsetof(gx_host_calls, bare_metal_development_run_cancel) == 384,
               "bare-metal run cancel slot changed");
 static_assert(offsetof(gx_host_calls, bare_metal_development_debug) == 392,
               "bare-metal development debug slot changed");
-static_assert(sizeof(gx_host_calls) == 400, "gx_host_calls size changed");
+static_assert(offsetof(gx_host_calls, development_debug_call_stack) == 400,
+              "hosted call stack slot changed");
+static_assert(offsetof(gx_host_calls, bare_metal_development_debug_call_stack) == 408,
+              "bare-metal call stack slot changed");
+static_assert(sizeof(gx_host_calls) == 416, "gx_host_calls size changed");
 static_assert(sizeof(gx_development_run_request) == 112, "development run request size changed");
 static_assert(offsetof(gx_development_run_request, projectRoot) == 8, "development run request project root offset changed");
 static_assert(offsetof(gx_development_run_request, artifactSha256) == 56, "development run request artifact hash offset changed");
@@ -85,6 +89,7 @@ static_assert(offsetof(gx_development_run_request, debugSourceLine) == 104, "dev
 static_assert(offsetof(gx_development_run_request, debugSourceColumn) == 108, "development run source column offset changed");
 static_assert(sizeof(gx_development_debug_request) == 104, "development debug request size changed");
 static_assert(GX_DEVELOPMENT_DEBUG_STEP_OUT_RETURN == 14, "Step Out command must be appended after command 13");
+static_assert(GX_DEVELOPMENT_DEBUG_CALL_STACK == 19, "Call Stack command must be appended after source Step Out");
 static_assert(offsetof(gx_development_debug_request, threadId) == 72, "development debug thread id offset changed");
 static_assert(offsetof(gx_development_debug_request, stopGeneration) == 80, "development debug stop generation offset changed");
 static_assert(offsetof(gx_development_debug_request, auxiliaryAddress) == 88, "development debug auxiliary address offset changed");
@@ -138,6 +143,16 @@ static_assert(offsetof(gx_development_debug_snapshot, sourceStepOutCallerSourceP
 static_assert(offsetof(gx_development_debug_snapshot, sourceStepOutOriginalReturnByte) == 1564,
               "source Step Out original byte offset changed");
 static_assert(sizeof(gx_development_debug_snapshot) == 1576, "development debug snapshot size changed");
+static_assert(offsetof(gx_development_debug_call_stack_frame, instructionPointer) == 8,
+              "call stack frame instruction pointer offset changed");
+static_assert(offsetof(gx_development_debug_call_stack_frame, sourcePath) == 112,
+              "call stack frame source path offset changed");
+static_assert(sizeof(gx_development_debug_call_stack_frame) == 272,
+              "call stack frame size changed");
+static_assert(offsetof(gx_development_debug_call_stack, frames) == 216,
+              "call stack frames offset changed");
+static_assert(sizeof(gx_development_debug_call_stack) == 4568,
+              "call stack result size changed");
 static_assert(offsetof(gx_development_run_snapshot, closeRequested) == 4552,
               "development run close-request slot changed");
 static_assert(offsetof(gx_development_run_snapshot, cancellationRequested) == 4556,

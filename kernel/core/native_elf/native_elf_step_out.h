@@ -10,28 +10,25 @@
 
 #include <stdint.h>
 
+#include "native_elf_frame_policy.h"
+
 namespace kernel {
 namespace native_elf {
 
 static const uint32_t kNativeElfStepOutInstructionLimit = 128U;
-static const uint32_t kNativeElfStepOutMaxFrameDistance = 4096U;
-static const uint32_t kNativeElfStepOutFrameLinkBytes = 16U;
+static const uint32_t kNativeElfStepOutMaxFrameDistance = kNativeElfMaxFrameDistance;
+static const uint32_t kNativeElfStepOutFrameLinkBytes = kNativeElfFrameLinkBytes;
 
 inline bool step_out_stack_range_contains(uint64_t stackLow, uint64_t stackHigh,
                                           uint64_t address, uint64_t bytes)
 {
-    return stackHigh > stackLow && address >= stackLow && address < stackHigh &&
-        bytes <= stackHigh - address;
+    return native_elf_stack_range_contains(stackLow, stackHigh, address, bytes);
 }
 
 inline bool step_out_frame_shape_valid(uint64_t rsp, uint64_t rbp,
                                        uint64_t stackLow, uint64_t stackHigh)
 {
-    return (rbp & 7ULL) == 0 &&
-        step_out_stack_range_contains(stackLow, stackHigh, rsp, 1) &&
-        step_out_stack_range_contains(stackLow, stackHigh, rbp,
-                                       kNativeElfStepOutFrameLinkBytes) &&
-        rbp >= rsp && rbp - rsp <= kNativeElfStepOutMaxFrameDistance;
+    return native_elf_frame_shape_valid(rsp, rbp, stackLow, stackHigh);
 }
 
 inline bool step_out_caller_link_valid(uint64_t currentRbp, uint64_t savedCallerRbp,
@@ -39,22 +36,15 @@ inline bool step_out_caller_link_valid(uint64_t currentRbp, uint64_t savedCaller
                                        uint64_t stackLow, uint64_t stackHigh,
                                        uint64_t imageBase, uint64_t imageSize)
 {
-    if (stackHigh <= stackLow) return false;
-    if (savedCallerRbp == 0 || (savedCallerRbp & 7ULL) != 0 ||
-        savedCallerRbp <= currentRbp ||
-        !step_out_stack_range_contains(stackLow, stackHigh, savedCallerRbp,
-                                        kNativeElfStepOutFrameLinkBytes) ||
-        returnAddress == 0 || imageSize == 0 ||
-        imageBase > ~static_cast<uint64_t>(0) - imageSize) return false;
-    return returnAddress >= imageBase && returnAddress < imageBase + imageSize;
+    return native_elf_caller_link_valid(currentRbp, savedCallerRbp, returnAddress,
+                                        stackLow, stackHigh, imageBase, imageSize);
 }
 
 inline bool step_out_caller_frame_matches(uint64_t rsp, uint64_t rbp,
                                           uint64_t expectedRbp,
                                           uint64_t stackLow, uint64_t stackHigh)
 {
-    return rbp == expectedRbp &&
-        step_out_frame_shape_valid(rsp, rbp, stackLow, stackHigh);
+    return native_elf_caller_frame_matches(rsp, rbp, expectedRbp, stackLow, stackHigh);
 }
 
 } // namespace native_elf

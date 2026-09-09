@@ -27,6 +27,10 @@ struct NativeElfImage {
     uint64_t entryPointVirtualAddress = 0;
     uint64_t preferredBaseAddress = 0;
     uint64_t imageSize = 0;
+    /* The final ELF bytes include the non-loadable GXSM trailer.  Retain the
+     * bounded artifact copy so hosted debugger inspection can use the same
+     * authoritative source/function metadata as the NativeElf kernel path. */
+    std::vector<uint8_t> imageBytes;
     std::vector<NativeElfSegment> loadedSegments;
     std::vector<std::string> requiredPermissions;
     bool isPositionIndependent = false;

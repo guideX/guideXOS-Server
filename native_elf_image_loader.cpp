@@ -262,6 +262,7 @@ NativeElfImage NativeElfImageLoader::LoadImage(const NativeElfLaunchResult& laun
 
     image.preferredBaseAddress = image.isPositionIndependent ? 0 : minVirtualAddress;
     image.imageSize = maxVirtualAddress - minVirtualAddress;
+    image.imageBytes = std::move(elfBytes);
     image.success = true;
     addDiagnostic(image, "Native ELF image loaded");
     LogImage(image);

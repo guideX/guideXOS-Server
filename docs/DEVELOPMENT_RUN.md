@@ -137,3 +137,13 @@ is `src/helper.cpp:8 helper` to `src/main.cpp:15 gx_main`; root `gx_main` Step
 Out is rejected as `NO_CALLER_FRAME`. See
 `docs/DEVELOPER_STUDIO_PHASE28E_SOURCE_STEP_OUT.md` for the ABI, frame
 contract, live QEMU evidence, focused regressions, and remaining limitations.
+
+Phase 28F adds bounded read-only NativeElf Call Stack inspection. A paused
+compiler-built target can expose up to 16 validated user frames from the
+current function through the `gx_main` root, with exact GXSM source identity
+where available. The query is rejected for Running, Stepping, terminal, stale,
+or incomplete contexts and does not mutate registers, stack memory, or
+breakpoints. See
+`docs/DEVELOPER_STUDIO_PHASE28F_CALL_STACK_INSPECTION.md` for the fixed ABI,
+frame policy, nested cross-file proof, Step Out stack shrink, and three-boot
+QEMU evidence.

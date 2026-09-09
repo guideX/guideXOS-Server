@@ -10,6 +10,7 @@
 #include "native_elf_validator.h"
 #include "native_elf_source_step.h"
 #include "native_elf_step_out.h"
+#include "native_elf_call_stack.h"
 #include "../compiler/elf_writer.h"
 #include "../include/kernel/kernel_app.h"
 #include "kernel/serial_debug.h"
@@ -373,7 +374,7 @@ static bool resolve_debug_mapping_at_address(
     const Operation& operation, uint64_t address,
     compiler::ResolvedSourceMapping* mapping, const char** error)
 {
-    if (!operation.debugSourceSelected || operation.debugCodeBytes == 0) {
+    if (operation.debugCodeBytes == 0) {
         if (error) *error = "debug session has no source-map code range";
         return false;
     }
@@ -526,7 +527,8 @@ static bool debug_code_address(const Operation& operation, uint64_t address)
     if (!runtime || operation.debugCodeBytes == 0 ||
         runtime->imageBase > ~static_cast<uint64_t>(0) - operation.debugCodeFileOffset) return false;
     const uint64_t codeStart = runtime->imageBase + operation.debugCodeFileOffset;
-    return address >= codeStart && address - codeStart < operation.debugCodeBytes;
+    return operation.debugCodeBytes <= ~static_cast<uint64_t>(0) - codeStart &&
+        address >= codeStart && address - codeStart < operation.debugCodeBytes;
 }
 
 static bool debug_read_stack_u64(const Operation& operation, uint64_t address,
@@ -606,6 +608,24 @@ static bool resolve_debug_mapping_near_address(
                 if (error) *error = nearbyError;
                 return false;
             }
+        }
+    }
+    return false;
+}
+
+static bool resolve_debug_mapping_forward_address(
+    const Operation& operation, uint64_t address,
+    compiler::ResolvedSourceMapping* mapping)
+{
+    if (mapping) *mapping = {};
+    if (resolve_debug_mapping_at_address(operation, address, mapping, nullptr)) return true;
+    for (uint32_t distance = 1; distance <= kStepOutCallerProbeBytes; ++distance) {
+        if (address > ~static_cast<uint64_t>(0) - distance) break;
+        compiler::ResolvedSourceMapping nearby = {};
+        if (resolve_debug_mapping_at_address(operation, address + distance,
+                                              &nearby, nullptr)) {
+            if (mapping) *mapping = nearby;
+            return true;
         }
     }
     return false;
@@ -1025,15 +1045,18 @@ static bool validate_identity(Operation& operation) {
         copy_text(operation.errorMessage, sizeof(operation.errorMessage), "Build artifact failed NativeElf validation");
         return false;
     }
+    if (validation.entryLoadIndex >= validation.loadCount ||
+        validation.loads[validation.entryLoadIndex].fileSize < compiler::BOOTSTRAP_CODE_OFFSET ||
+        validation.loads[validation.entryLoadIndex].fileSize - compiler::BOOTSTRAP_CODE_OFFSET > 0xFFFFFFFFULL) {
+        operation.error = GX_DEVELOPMENT_RUN_ERROR_ARTIFACT_INVALID;
+        copy_text(operation.errorMessage, sizeof(operation.errorMessage),
+                  "Build artifact has no bounded executable code range");
+        return false;
+    }
+    operation.debugCodeFileOffset = compiler::BOOTSTRAP_CODE_OFFSET;
+    operation.debugCodeBytes = static_cast<uint32_t>(
+        validation.loads[validation.entryLoadIndex].fileSize - compiler::BOOTSTRAP_CODE_OFFSET);
     if (operation.debugSourceSelected) {
-        if (validation.entryLoadIndex >= validation.loadCount ||
-            validation.loads[validation.entryLoadIndex].fileSize < compiler::BOOTSTRAP_CODE_OFFSET ||
-            validation.loads[validation.entryLoadIndex].fileSize - compiler::BOOTSTRAP_CODE_OFFSET > 0xFFFFFFFFULL) {
-            operation.error = GX_DEVELOPMENT_RUN_ERROR_ARTIFACT_INVALID;
-            copy_text(operation.errorMessage, sizeof(operation.errorMessage),
-                      "Build artifact has no bounded executable source-map range");
-            return false;
-        }
         compiler::ResolvedSourceMapping mapping = {};
         const char* mappingError = nullptr;
         if (!compiler::resolve_bootstrap_source_mapping(
@@ -1063,9 +1086,6 @@ static bool validate_identity(Operation& operation) {
         operation.debugBreakpointAddress = mapping.targetAddress;
         operation.debugResolvedFinalCodeOffset = mapping.finalCodeOffset;
         operation.debugSourceInstructionBytes = mapping.instructionBytes;
-        operation.debugCodeFileOffset = compiler::BOOTSTRAP_CODE_OFFSET;
-        operation.debugCodeBytes = static_cast<uint32_t>(
-            validation.loads[validation.entryLoadIndex].fileSize - compiler::BOOTSTRAP_CODE_OFFSET);
         operation.debugCurrentSourceMappingValid = true;
         copy_text(operation.debugSourcePath, sizeof(operation.debugSourcePath), mapping.sourcePath);
         operation.debugSourceLine = mapping.line;
@@ -3115,6 +3135,314 @@ static gx_result source_step_out(gx_development_debug_snapshot* outSnapshot)
             serial::puts("DEVELOPER_STUDIO_PHASE28E_STEP_OUT_PASS\n");
             return GX_OK;
         }
+    }
+}
+
+static void clear_call_stack(gx_development_debug_call_stack* result)
+{
+    if (!result) return;
+    *result = {};
+    result->size = sizeof(*result);
+    result->version = GX_DEVELOPMENT_DEBUG_API_VERSION;
+    result->status = GX_DEVELOPMENT_DEBUG_CALL_STACK_STATUS_NONE;
+}
+
+static void set_call_stack_error(gx_development_debug_call_stack* result,
+                                 uint32_t status, const char* message)
+{
+    if (!result) return;
+    result->status = status;
+    copy_text(result->errorMessage, sizeof(result->errorMessage),
+              message ? message : "NativeElf Call Stack request rejected");
+}
+
+static void set_call_stack_identity(const Operation& operation,
+                                    gx_development_debug_call_stack* result,
+                                    const NativeAppExecutionContext& runtime)
+{
+    if (!result) return;
+    result->handle = operation.handle;
+    result->processId = 0;
+    result->nativeRuntimeId = operation.registrationGeneration;
+    result->threadId = 1;
+    result->sessionGeneration = operation.registrationGeneration;
+    result->stopGeneration = operation.debugStopGeneration;
+    result->stackLow = runtime.stackBase;
+    result->stackHigh = runtime.stackBase <=
+        ~static_cast<uint64_t>(0) - runtime.stackSize
+        ? runtime.stackBase + runtime.stackSize : 0;
+}
+
+static bool set_call_stack_mapping(
+    gx_development_debug_call_stack_frame* frame,
+    const compiler::ResolvedSourceMapping& mapping, bool sourceLocation)
+{
+    if (!frame || !copy_text(frame->functionName, sizeof(frame->functionName),
+                             mapping.functionName)) return false;
+    frame->flags |= GX_DEVELOPMENT_DEBUG_CALL_STACK_FRAME_FUNCTION_RESOLVED;
+    if (!sourceLocation || !copy_text(frame->sourcePath, sizeof(frame->sourcePath),
+                                      mapping.sourcePath)) {
+        frame->flags |= GX_DEVELOPMENT_DEBUG_CALL_STACK_FRAME_SOURCE_UNAVAILABLE;
+        return true;
+    }
+    frame->sourceLine = mapping.line;
+    frame->sourceColumn = mapping.column;
+    frame->flags |= GX_DEVELOPMENT_DEBUG_CALL_STACK_FRAME_SOURCE_MAPPED;
+    return true;
+}
+
+static bool resolve_call_stack_direct_call(
+    const Operation& operation, uint64_t returnAddress, const char* expectedCallee,
+    uint64_t* callRip, compiler::ResolvedSourceMapping* callerMapping)
+{
+    if (callRip) *callRip = 0;
+    if (callerMapping) *callerMapping = {};
+    if (!expectedCallee || !callRip || !callerMapping || returnAddress < kStepOverCallBytes)
+        return false;
+    const uint64_t candidate = returnAddress - kStepOverCallBytes;
+    uint8_t opcode = 0;
+    if (!debug_read_code_byte(operation, candidate, &opcode) || opcode != 0xE8) return false;
+    uint8_t displacementBytes[4] = {};
+    for (uint32_t index = 0; index < sizeof(displacementBytes); ++index) {
+        if (!debug_read_code_byte(operation, candidate + 1U + index,
+                                  &displacementBytes[index])) return false;
+    }
+    const uint32_t rawDisplacement = static_cast<uint32_t>(displacementBytes[0]) |
+        (static_cast<uint32_t>(displacementBytes[1]) << 8) |
+        (static_cast<uint32_t>(displacementBytes[2]) << 16) |
+        (static_cast<uint32_t>(displacementBytes[3]) << 24);
+    const int64_t displacement = static_cast<int32_t>(rawDisplacement);
+    uint64_t target = 0;
+    if (displacement >= 0) {
+        const uint64_t amount = static_cast<uint64_t>(displacement);
+        if (returnAddress > ~static_cast<uint64_t>(0) - amount) return false;
+        target = returnAddress + amount;
+    } else {
+        const uint64_t amount = static_cast<uint64_t>(-displacement);
+        if (returnAddress < amount) return false;
+        target = returnAddress - amount;
+    }
+    compiler::ResolvedSourceMapping calleeMapping = {};
+    const bool targetMapped = debug_code_address(operation, target) &&
+        debug_code_address(operation, returnAddress) &&
+        resolve_debug_mapping_forward_address(operation, target, &calleeMapping);
+    if (!targetMapped || !equal_text(calleeMapping.functionName, expectedCallee)) return false;
+    const bool callerMapped = resolve_debug_mapping_at_address(operation, candidate, callerMapping, nullptr) ||
+        resolve_debug_mapping_at_address(operation, returnAddress, callerMapping, nullptr);
+    if (!callerMapped) {
+        return false;
+    }
+    *callRip = candidate;
+    return true;
+}
+
+gx_result call_stack(const gx_development_debug_request& request,
+                     gx_development_debug_call_stack* outResult)
+{
+    if (!outResult) return GX_ERROR_INVALID_ARGUMENT;
+    clear_call_stack(outResult);
+    if (request.size < sizeof(request) ||
+        request.version != GX_DEVELOPMENT_DEBUG_API_VERSION ||
+        request.command != GX_DEVELOPMENT_DEBUG_CALL_STACK) {
+        set_call_stack_error(outResult, GX_DEVELOPMENT_DEBUG_CALL_STACK_STATUS_REJECTED,
+                             "NativeElf Call Stack request version or command is invalid");
+        return GX_ERROR_INVALID_ARGUMENT;
+    }
+    if (!decode(request.handle)) {
+        set_call_stack_error(outResult, GX_DEVELOPMENT_DEBUG_CALL_STACK_STATUS_STALE,
+                             "NativeElf Call Stack handle is stale");
+        return GX_ERROR_FAILED;
+    }
+    if (!s_operation.debugControlled) {
+        set_call_stack_error(outResult, GX_DEVELOPMENT_DEBUG_CALL_STACK_STATUS_REJECTED,
+                             "Run generation is not debugger-controlled");
+        return GX_ERROR_UNSUPPORTED;
+    }
+    if (request.sessionGeneration == 0 || request.nativeRuntimeId == 0 ||
+        request.threadId == 0 || request.stopGeneration == 0 ||
+        !request.artifactSha256 || !equal_text(request.artifactSha256, s_operation.artifactSha256) ||
+        !debug_request_identity_matches(s_operation, request)) {
+        set_call_stack_error(outResult, request.sessionGeneration != 0 &&
+                                     request.sessionGeneration != s_operation.registrationGeneration
+                                 ? GX_DEVELOPMENT_DEBUG_CALL_STACK_STATUS_STALE
+                                 : GX_DEVELOPMENT_DEBUG_CALL_STACK_STATUS_REJECTED,
+                             "NativeElf Call Stack session identity is stale");
+        return GX_ERROR_FAILED;
+    }
+    if (s_operation.state != GX_DEVELOPMENT_RUN_PAUSED ||
+        (!s_operation.debugBreakpointHit && !s_operation.debugStepTrapObserved) ||
+        s_operation.debugStepActive || s_operation.debugSourceStepActive ||
+        s_operation.debugStepOverActive || s_operation.debugStepOutActive ||
+        !s_operation.debugContext || s_operation.debugContext->cs != 0x08) {
+        set_call_stack_error(outResult,
+                             GX_DEVELOPMENT_DEBUG_CALL_STACK_STATUS_NO_PAUSED_CONTEXT,
+                             "NativeElf target has no complete paused user context");
+        return GX_ERROR_BUSY;
+    }
+    const NativeAppExecutionContext* runtime = native_elf_runtime_context();
+    if (!runtime || runtime->state != NativeAppExecutionState::Running ||
+        runtime->stackBase == 0 || runtime->stackSize == 0 ||
+        runtime->stackBase > ~static_cast<uint64_t>(0) - runtime->stackSize) {
+        set_call_stack_error(outResult, GX_DEVELOPMENT_DEBUG_CALL_STACK_STATUS_NO_PAUSED_CONTEXT,
+                             "NativeElf runtime stack identity is unavailable");
+        return GX_ERROR_FAILED;
+    }
+    set_call_stack_identity(s_operation, outResult, *runtime);
+    const NativeElfDebugTrap::BreakpointContext& context = *s_operation.debugContext;
+    if (!debug_code_address(s_operation, context.rip)) {
+        set_call_stack_error(outResult,
+                             GX_DEVELOPMENT_DEBUG_CALL_STACK_STATUS_INVALID_RETURN_ADDRESS,
+                             "NativeElf paused RIP is outside the user image");
+        return GX_ERROR_FAILED;
+    }
+    compiler::ResolvedSourceMapping topMapping = {};
+    if (!resolve_debug_mapping_at_address(s_operation, context.rip, &topMapping, nullptr) ||
+        topMapping.functionName[0] == '\0') {
+        set_call_stack_error(outResult,
+                             GX_DEVELOPMENT_DEBUG_CALL_STACK_STATUS_UNSUPPORTED_FRAME,
+                             "NativeElf paused RIP has no trustworthy user function");
+        return GX_ERROR_UNSUPPORTED;
+    }
+    const uint64_t stackHigh = runtime->stackBase + runtime->stackSize;
+    if (!step_out_frame_shape_valid(context.rsp, context.rbp,
+                                    runtime->stackBase, stackHigh)) {
+        set_call_stack_error(outResult, GX_DEVELOPMENT_DEBUG_CALL_STACK_STATUS_INVALID_FRAME,
+                             "NativeElf paused frame pointer shape is invalid");
+        return GX_ERROR_FAILED;
+    }
+
+    gx_development_debug_call_stack_frame& top = outResult->frames[0];
+    top.depth = 0;
+    top.flags = GX_DEVELOPMENT_DEBUG_CALL_STACK_FRAME_VALIDATED |
+        GX_DEVELOPMENT_DEBUG_CALL_STACK_FRAME_POINTER_VALID;
+    top.instructionPointer = context.rip;
+    top.stackPointer = context.rsp;
+    top.framePointer = context.rbp;
+    if (!set_call_stack_mapping(&top, topMapping, true)) {
+        set_call_stack_error(outResult,
+                             GX_DEVELOPMENT_DEBUG_CALL_STACK_STATUS_UNSUPPORTED_FRAME,
+                             "NativeElf top frame function identity is too long");
+        return GX_ERROR_UNSUPPORTED;
+    }
+    outResult->frameCount = 1;
+    uint64_t seen[GX_DEVELOPMENT_DEBUG_MAX_CALL_STACK_FRAMES] = {};
+    seen[0] = context.rbp;
+    if (equal_text(topMapping.functionName, "gx_main")) {
+        top.flags |= GX_DEVELOPMENT_DEBUG_CALL_STACK_FRAME_ROOT;
+        outResult->status = GX_DEVELOPMENT_DEBUG_CALL_STACK_STATUS_SUCCESS;
+        return GX_OK;
+    }
+
+    uint64_t nextRbp = 0;
+    uint64_t currentReturnAddress = 0;
+    if (!debug_read_stack_u64(s_operation, context.rbp, &nextRbp) ||
+        !debug_read_stack_u64(s_operation, context.rbp + sizeof(uint64_t),
+                              &currentReturnAddress) ||
+        !step_out_caller_link_valid(context.rbp, nextRbp, currentReturnAddress,
+                                    runtime->stackBase, stackHigh,
+                                    runtime->imageBase, runtime->imageSize)) {
+        set_call_stack_error(outResult, currentReturnAddress == 0
+                                 ? GX_DEVELOPMENT_DEBUG_CALL_STACK_STATUS_INVALID_FRAME
+                                 : GX_DEVELOPMENT_DEBUG_CALL_STACK_STATUS_INVALID_RETURN_ADDRESS,
+                             "NativeElf top frame caller link is invalid");
+        return GX_ERROR_FAILED;
+    }
+    top.returnAddress = currentReturnAddress;
+    top.flags |= GX_DEVELOPMENT_DEBUG_CALL_STACK_FRAME_RETURN_ADDRESS_VALID;
+    char currentFunction[GX_DEVELOPMENT_DEBUG_MAX_FUNCTION_NAME_BYTES] = {};
+    if (!copy_text(currentFunction, sizeof(currentFunction), topMapping.functionName)) {
+        set_call_stack_error(outResult, GX_DEVELOPMENT_DEBUG_CALL_STACK_STATUS_UNSUPPORTED_FRAME,
+                             "NativeElf top frame function identity is invalid");
+        return GX_ERROR_UNSUPPORTED;
+    }
+
+    for (;;) {
+        compiler::ResolvedSourceMapping callerMapping = {};
+        uint64_t callerInstructionPointer = currentReturnAddress;
+        bool callSiteMapped = false;
+        uint64_t resolvedCallRip = 0;
+        if (resolve_call_stack_direct_call(s_operation, currentReturnAddress,
+                                           currentFunction, &resolvedCallRip,
+                                           &callerMapping)) {
+            callerInstructionPointer = resolvedCallRip;
+            callSiteMapped = true;
+        } else if (!resolve_debug_mapping_near_address(
+                       s_operation, currentReturnAddress, &callerMapping, nullptr)) {
+            set_call_stack_error(outResult,
+                                 GX_DEVELOPMENT_DEBUG_CALL_STACK_STATUS_INVALID_RETURN_ADDRESS,
+                                 "NativeElf caller return address has no user mapping");
+            return GX_ERROR_FAILED;
+        }
+        if (callerMapping.functionName[0] == '\0') {
+            set_call_stack_error(outResult,
+                                 GX_DEVELOPMENT_DEBUG_CALL_STACK_STATUS_INVALID_RETURN_ADDRESS,
+                                 "NativeElf caller function identity is missing");
+            return GX_ERROR_FAILED;
+        }
+        if (outResult->frameCount >= GX_DEVELOPMENT_DEBUG_MAX_CALL_STACK_FRAMES) {
+            outResult->truncated = 1;
+            outResult->status = GX_DEVELOPMENT_DEBUG_CALL_STACK_STATUS_TRUNCATED;
+            return GX_OK;
+        }
+        if (!native_elf_frame_pointer_valid(nextRbp, runtime->stackBase, stackHigh) ||
+            native_elf_call_stack_frame_pointer_seen(seen, outResult->frameCount, nextRbp)) {
+            set_call_stack_error(outResult, GX_DEVELOPMENT_DEBUG_CALL_STACK_STATUS_INVALID_FRAME,
+                                 "NativeElf caller frame chain is cyclic or outside the stack");
+            return GX_ERROR_FAILED;
+        }
+        gx_development_debug_call_stack_frame& caller =
+            outResult->frames[outResult->frameCount];
+        caller.depth = outResult->frameCount;
+        caller.flags = GX_DEVELOPMENT_DEBUG_CALL_STACK_FRAME_VALIDATED |
+            GX_DEVELOPMENT_DEBUG_CALL_STACK_FRAME_POINTER_VALID |
+            GX_DEVELOPMENT_DEBUG_CALL_STACK_FRAME_RETURN_ADDRESS_VALID;
+        caller.instructionPointer = callerInstructionPointer;
+        caller.framePointer = nextRbp;
+        const bool exactSource = callSiteMapped ||
+            resolve_debug_mapping_at_address(s_operation, currentReturnAddress,
+                                             &callerMapping, nullptr);
+        if (!set_call_stack_mapping(&caller, callerMapping, exactSource)) {
+            set_call_stack_error(outResult,
+                                 GX_DEVELOPMENT_DEBUG_CALL_STACK_STATUS_UNSUPPORTED_FRAME,
+                                 "NativeElf caller function identity is too long");
+            return GX_ERROR_UNSUPPORTED;
+        }
+        if (callSiteMapped) caller.flags |= GX_DEVELOPMENT_DEBUG_CALL_STACK_FRAME_CALL_SITE_MAPPED;
+        if (equal_text(callerMapping.functionName, "gx_main")) {
+            caller.flags |= GX_DEVELOPMENT_DEBUG_CALL_STACK_FRAME_ROOT;
+            caller.returnAddress = 0;
+            seen[outResult->frameCount] = nextRbp;
+            ++outResult->frameCount;
+            outResult->status = GX_DEVELOPMENT_DEBUG_CALL_STACK_STATUS_SUCCESS;
+            return GX_OK;
+        }
+
+        uint64_t candidateSavedRbp = 0;
+        uint64_t candidateReturnAddress = 0;
+        if (!debug_read_stack_u64(s_operation, nextRbp, &candidateSavedRbp) ||
+            !debug_read_stack_u64(s_operation, nextRbp + sizeof(uint64_t),
+                                  &candidateReturnAddress) ||
+            !step_out_caller_link_valid(nextRbp, candidateSavedRbp,
+                                        candidateReturnAddress,
+                                        runtime->stackBase, stackHigh,
+                                        runtime->imageBase, runtime->imageSize)) {
+            set_call_stack_error(outResult, candidateReturnAddress == 0
+                                     ? GX_DEVELOPMENT_DEBUG_CALL_STACK_STATUS_INVALID_FRAME
+                                     : GX_DEVELOPMENT_DEBUG_CALL_STACK_STATUS_INVALID_RETURN_ADDRESS,
+                                 "NativeElf caller frame link is invalid");
+            return GX_ERROR_FAILED;
+        }
+        caller.returnAddress = candidateReturnAddress;
+        seen[outResult->frameCount] = nextRbp;
+        ++outResult->frameCount;
+        if (!copy_text(currentFunction, sizeof(currentFunction), callerMapping.functionName)) {
+            set_call_stack_error(outResult,
+                                 GX_DEVELOPMENT_DEBUG_CALL_STACK_STATUS_UNSUPPORTED_FRAME,
+                                 "NativeElf caller function identity is invalid");
+            return GX_ERROR_UNSUPPORTED;
+        }
+        currentReturnAddress = candidateReturnAddress;
+        nextRbp = candidateSavedRbp;
     }
 }
 

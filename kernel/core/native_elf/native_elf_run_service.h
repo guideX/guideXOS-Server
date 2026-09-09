@@ -27,6 +27,8 @@ gx_result cancel(gx_development_run_handle handle);
 gx_result release(gx_development_run_handle handle);
 gx_result debug(const gx_development_debug_request& request,
                 gx_development_debug_snapshot* outSnapshot);
+gx_result call_stack(const gx_development_debug_request& request,
+                     gx_development_debug_call_stack* outResult);
 
 // Loader/debug-trap integration hooks. They are intentionally limited to the
 // one compiler-known gx_main entry breakpoint or one mapped source breakpoint.
