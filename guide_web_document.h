@@ -707,6 +707,7 @@ struct FormContainerMetadata {
 	std::string tagName;
 	std::string className;
 	std::string id;
+	std::string name;
 	std::string inlineStyle;
 	std::string legendText;
 	uint64_t serial = 0;

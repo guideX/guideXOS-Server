@@ -1,0 +1,105 @@
+<!doctype html>
+<html>
+<head><title>Navigator JavaScript JS35</title></head>
+<body>
+<h1>Navigator JavaScript JS35</h1>
+<form id="js35-login" name="login">
+  <input id="js35-user" type="text" name="user" value="seed">
+  <select id="js35-mode" name="mode">
+    <option id="js35-mode-a" value="a">A</option>
+    <option id="js35-mode-b" value="b" selected>B</option>
+    <option id="js35-mode-c" value="c">C</option>
+  </select>
+  <textarea id="js35-notes" name="notes">hello</textarea>
+  <input id="js35-check" type="checkbox" name="flag" value="yes" checked>
+  <button id="js35-action" type="button" name="action">Action</button>
+  <button id="js35-submit" type="submit" name="submit">Submit</button>
+  <button id="js35-reset" type="reset" name="reset">Reset</button>
+</form>
+<form id="js35-second" name="duplicate"><input id="js35-second-value" name="value" value="second"></form>
+<form id="js35-third" name="duplicate"><input id="js35-third-value" name="value" value="third"></form>
+<input id="js35-unowned" type="text" name="user" value="outside">
+<button id="js35-trigger-mutate" type="button">Mutate named controls</button>
+<button id="js35-trigger-select" type="button">Select named option</button>
+<button id="js35-trigger-focus" type="button">Focus named control</button>
+<button id="js35-trigger-submit" type="button">Submit named form</button>
+<button id="js35-trigger-reset" type="button">Reset named form</button>
+<p id="js35-state">initial</p>
+<script>
+var js35State = document.getElementById("js35-state");
+var js35Forms = document.forms;
+var js35Form = js35Forms["login"];
+var js35Second = document.getElementById("js35-second");
+var js35Elements = js35Form.elements;
+var js35User = js35Elements["user"];
+var js35Mode = js35Elements["mode"];
+var js35Notes = js35Elements["notes"];
+var js35Check = js35Elements["flag"];
+var js35Action = js35Elements["action"];
+var js35Submit = js35Elements["submit"];
+var js35Reset = js35Elements["reset"];
+var js35Clicks = 0;
+var js35Resets = 0;
+var js35Submitted = "none";
+var js35Mutate = document.getElementById("js35-trigger-mutate");
+var js35Select = document.getElementById("js35-trigger-select");
+var js35Focus = document.getElementById("js35-trigger-focus");
+var js35SubmitTrigger = document.getElementById("js35-trigger-submit");
+var js35ResetTrigger = document.getElementById("js35-trigger-reset");
+function js35Snapshot(label) {
+  var order = js35Forms[0] === js35Form && js35Forms[1] === js35Second;
+  var identity = js35Forms["login"] === js35Form &&
+    js35Form === document.getElementById("js35-login");
+  var duplicate = js35Forms["duplicate"] === js35Second;
+  var namedIdentity = js35Form.elements["user"] === js35User &&
+    js35Form.elements[0] === js35User;
+  var active = document.activeElement === js35Notes;
+  js35State.textContent = label + ":forms=" + js35Forms.length +
+    ":order=" + order + ":identity=" + identity +
+    ":duplicate=" + duplicate + ":controls=" + js35Form.elements.length +
+    ":namedIdentity=" + namedIdentity + ":user=" + js35User.value +
+    ":notes=" + js35Notes.value + ":checked=" + js35Check.checked +
+    ":mode=" + js35Mode.value + ":index=" + js35Mode.selectedIndex +
+    ":options=" + js35Mode.options.length + ":active=" + active +
+    ":clicks=" + js35Clicks + ":resets=" + js35Resets +
+    ":submit=" + js35Submitted;
+}
+js35Form.addEventListener("submit", function(event) {
+  js35Submitted = js35Form.elements["user"].value + ":" +
+    js35Form.elements["mode"].value + ":" +
+    js35Form.elements["notes"].value + ":" +
+    js35Form.elements["flag"].checked;
+  event.preventDefault();
+  js35Snapshot("submit");
+});
+js35Form.addEventListener("reset", function() {
+  js35Resets = js35Resets + 1;
+  js35Snapshot("reset");
+});
+js35Action.addEventListener("click", function() {
+  js35Clicks = js35Clicks + 1;
+  js35Snapshot("action");
+});
+js35Mutate.addEventListener("click", function() {
+  js35Form.elements["user"].value = "alice";
+  js35Form.elements["notes"].value = "named";
+  js35Form.elements["flag"].checked = false;
+  js35Form.elements["mode"].options[2].selected = true;
+  js35Snapshot("mutated");
+});
+js35Select.addEventListener("click", function() {
+  js35Form.elements["mode"].options[0].selected = true;
+  js35Snapshot("selected");
+});
+js35Focus.addEventListener("click", function() {
+  js35Form.elements["notes"].focus();
+  js35Snapshot("focused");
+});
+js35SubmitTrigger.addEventListener("click", function() {
+});
+js35ResetTrigger.addEventListener("click", function() {
+});
+js35Snapshot("initial");
+</script>
+</body>
+</html>

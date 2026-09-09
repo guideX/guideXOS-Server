@@ -3422,6 +3422,116 @@ static std::string navigatorHostedSmokeDiagnostic() {
         std::string("away=") + yesNo(js34NavigatedAway) + ",reload=" +
         yesNo(js34Reloaded) + ",text=" + summarizeText(js34AfterReload, 820));
 
+    const std::string js35FixtureUrl =
+        "http://127.0.0.1:8080/navigator-smoke/javascript-js35.html";
+    const bool js35Loaded = gxos::apps::Navigator::SmokeNavigateToQuiet(
+        js35FixtureUrl);
+    const std::string js35InitialText =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS35 hosted fixture loads document.forms and named controls",
+        js35Loaded && gxos::apps::Navigator::SmokeCurrentUrl() == js35FixtureUrl &&
+        contains(js35InitialText, "Navigator JavaScript JS35") &&
+        contains(js35InitialText,
+            "initial:forms=3:order=true:identity=true:duplicate=true:controls=7:namedIdentity=true:user=seed:notes=hello:checked=true:mode=b:index=1:options=3:active=false:clicks=0:resets=0:submit=none") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("loaded=") + yesNo(js35Loaded) + ",text=" +
+        summarizeText(js35InitialText, 760) + ",error=" +
+        gxos::apps::Navigator::SmokeJavaScriptLastError());
+
+    const bool js35MutateTrigger =
+        gxos::apps::Navigator::SmokeClickFormControlById("js35-trigger-mutate");
+    const std::string js35AfterMutate =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS35 named text, checkbox, and select mutation use canonical controls",
+        js35MutateTrigger &&
+        gxos::apps::Navigator::SmokeFormControlValueById("js35-user") == "alice" &&
+        !gxos::apps::Navigator::SmokeFormControlCheckedById("js35-check") &&
+        contains(js35AfterMutate,
+            "mutated:forms=3:order=true:identity=true:duplicate=true:controls=7:namedIdentity=true:user=alice:notes=named:checked=false:mode=c:index=2:options=3") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("mutate=") + yesNo(js35MutateTrigger) + ",text=" +
+        summarizeText(js35AfterMutate, 820) + ",error=" +
+        gxos::apps::Navigator::SmokeJavaScriptLastError());
+
+    const bool js35SelectTrigger =
+        gxos::apps::Navigator::SmokeClickFormControlById("js35-trigger-select");
+    const std::string js35AfterSelect =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS35 named select exposes options and selectedIndex coherently",
+        js35SelectTrigger &&
+        gxos::apps::Navigator::SmokeFormControlValueById("js35-mode") == "a" &&
+        contains(js35AfterSelect,
+            "selected:forms=3:order=true:identity=true:duplicate=true:controls=7:namedIdentity=true:user=alice:notes=named:checked=false:mode=a:index=0:options=3") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("select=") + yesNo(js35SelectTrigger) + ",text=" +
+        summarizeText(js35AfterSelect, 820) + ",error=" +
+        gxos::apps::Navigator::SmokeJavaScriptLastError());
+
+    const bool js35FocusTrigger =
+        gxos::apps::Navigator::SmokeClickFormControlById("js35-trigger-focus");
+    const std::string js35AfterFocus =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS35 named focus reaches the authoritative active element",
+        js35FocusTrigger &&
+        gxos::apps::Navigator::SmokeFocusedFormControlId() == "js35-notes" &&
+        contains(js35AfterFocus,
+            "focused:forms=3:order=true:identity=true:duplicate=true:controls=7:namedIdentity=true:user=alice:notes=named:checked=false:mode=a:index=0:options=3") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("focus=") + yesNo(js35FocusTrigger) + ",focused=" +
+        gxos::apps::Navigator::SmokeFocusedFormControlId() + ",text=" +
+        summarizeText(js35AfterFocus, 820) + ",error=" +
+        gxos::apps::Navigator::SmokeJavaScriptLastError());
+
+    const bool js35SubmitTrigger =
+        gxos::apps::Navigator::SmokeClickFormControlById("js35-trigger-submit");
+    const bool js35NamedSubmitClick =
+        gxos::apps::Navigator::SmokeClickFormControlById("js35-submit");
+    const std::string js35AfterSubmit =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS35 named submit click uses current authoritative values",
+        js35SubmitTrigger && js35NamedSubmitClick &&
+        gxos::apps::Navigator::SmokeCurrentUrl() ==
+            js35FixtureUrl && contains(js35AfterSubmit,
+            "submit:forms=3:order=true:identity=true:duplicate=true:controls=7:namedIdentity=true:user=alice:notes=named:checked=false:mode=a:index=0:options=3:active=false:clicks=0:resets=0:submit=alice:a:named:false") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("submit=") + yesNo(js35SubmitTrigger) + ",url=" +
+        gxos::apps::Navigator::SmokeCurrentUrl() + ",text=" +
+        summarizeText(js35AfterSubmit, 900) + ",error=" +
+        gxos::apps::Navigator::SmokeJavaScriptLastError());
+
+    const bool js35ResetTrigger =
+        gxos::apps::Navigator::SmokeClickFormControlById("js35-trigger-reset");
+    const bool js35NamedResetClick =
+        gxos::apps::Navigator::SmokeClickFormControlById("js35-reset");
+    const std::string js35AfterReset =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS35 named reset click restores defaults through the same form state",
+        js35ResetTrigger && js35NamedResetClick &&
+        gxos::apps::Navigator::SmokeFormControlValueById("js35-user") == "seed" &&
+        gxos::apps::Navigator::SmokeFormControlValueById("js35-mode") == "b" &&
+        gxos::apps::Navigator::SmokeFormControlCheckedById("js35-check") &&
+        contains(js35AfterReset,
+            "reset:forms=3:order=true:identity=true:duplicate=true:controls=7:namedIdentity=true:user=alice:notes=named:checked=false:mode=a:index=0:options=3:active=false:clicks=0:resets=1:submit=alice:a:named:false") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("reset=") + yesNo(js35ResetTrigger) + ",text=" +
+        summarizeText(js35AfterReset, 900) + ",error=" +
+        gxos::apps::Navigator::SmokeJavaScriptLastError());
+
+    const bool js35NavigatedAway =
+        gxos::apps::Navigator::SmokeNavigateToQuiet("about:navigator");
+    const bool js35Reloaded = gxos::apps::Navigator::SmokeNavigateToQuiet(
+        js35FixtureUrl);
+    const std::string js35AfterReload =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS35 document replacement restores independent named collection state",
+        js35NavigatedAway && js35Reloaded && contains(js35AfterReload,
+            "initial:forms=3:order=true:identity=true:duplicate=true:controls=7:namedIdentity=true:user=seed:notes=hello:checked=true:mode=b:index=1:options=3:active=false") &&
+        gxos::apps::Navigator::SmokeFocusedFormControlId().empty() &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("away=") + yesNo(js35NavigatedAway) + ",reload=" +
+        yesNo(js35Reloaded) + ",text=" + summarizeText(js35AfterReload, 820) +
+        ",error=" + gxos::apps::Navigator::SmokeJavaScriptLastError());
+
     bool cssInlineLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-inline.html");
     std::string cssInlineText = gxos::apps::Navigator::SmokeCurrentDocumentText();
     std::string cssInlineReport = gxos::apps::Navigator::SmokeRuntimeReport();

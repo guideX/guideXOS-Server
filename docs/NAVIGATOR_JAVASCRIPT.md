@@ -3674,7 +3674,58 @@ support for ECC curves acceleration` and `MBEDTLS_KEY_EXCHANGE_ECDHE_RSA_ENABLED
 defined, but not all prerequisites`. QEMU was not launched because no fresh
 kernel image was produced; no TLS configuration was changed.
 
-The recommended JS35 direction is bounded `document.forms` plus a deliberately
-small named lookup contract, reusing the same owner-serial/generation pattern
-without adding live collection mutation or broad HTMLFormControlsCollection
-compatibility.
+## JS35: `document.forms` and named form/control lookup
+
+JS35 adds the next bounded projection over the JS34 form-control model:
+
+- `document.forms` is a live, read-only collection with `.length`, canonical
+  numeric index access, and exact string lookup.
+- Named form lookup checks an exact `id` first, then an exact non-empty `name`;
+  duplicate names return the first form in document order. Matching is case
+  sensitive, does not use prefixes, and canonical numeric strings such as
+  `"0"` remain indexed access.
+- `form.elements` keeps the JS34 indexed projection and adds the same exact
+  id-first/name-second lookup. Duplicate control names return the first
+  matching supported control in document order; controls owned by another
+  form, empty names, and unsupported metadata are excluded.
+- Returned forms, controls, collections, selects, options, and `document`
+  retain canonical identity. Every host reference carries the existing owner
+  serial, document generation, and host-kind guard, so stale references fail
+  closed after replacement or invalidation.
+- Collection properties are read-only. JS35 deliberately does not add a
+  general `HTMLCollection`, `item()`, `namedItem()`, `RadioNodeList`, dot-name
+  magic, global named properties, or collection mutation semantics.
+
+The implementation reuses the existing bounded structural `HtmlElementRef`
+and `FormControlMetadata` records. Form names are retained on the existing
+bounded `FormContainerMetadata` entries; no JavaScript registry or second
+proportional HTML collection is introduced. Indexed and named reads use the
+same bounded structural scans and the existing JS34 form/control caps.
+
+The focused proof is
+`tests/navigator_javascript_js35_test.cpp`, run by
+`scripts/smoke-navigator-javascript-js35.ps1`. It reports 162 checks with 0
+failures and passes the optimized bare-metal harness plus the strict adapter
+and runtime syntax lane. Coverage includes live collection identity and
+ordering, lengths and bounds, exact id/name precedence, duplicate and empty
+name behavior, canonical numeric strings, read-only assignment failures,
+cross-form isolation, text/checkbox/select/option projections, focus,
+submit/reset/click integration, stale references, document replacement, and
+JS33/JS34 regression baselines. The full repository JavaScript matrix is now
+33 scripts (JS6 through JS35 plus lexer, parser, and runtime); all passed.
+
+The hosted fixture is `navigator-smoke/javascript-js35.html`. The final
+`navigator.smoke` run passed all seven JS35 checks: initial `document.forms`
+projection, named mutation, named select/options, focus, named submit,
+named reset, and document replacement. The aggregate reported 484 passed and
+7 failed out of 491; the seven failures remain the unrelated CSS 3C, CSS 3G,
+CSS 6A, three CSS 6B checks, and CSS 6C.
+
+`build.bat` completed successfully. The required `build-kernel.bat` retry
+successfully built the PacMan package, ramdisk staging, and UEFI bootloader,
+then stopped at the existing Mbed TLS configuration errors in
+`third_party/mbedtls/library/mbedtls_check_config.h`:
+`Unsupported partial support for ECC curves acceleration` and
+`MBEDTLS_KEY_EXCHANGE_ECDHE_RSA_ENABLED defined, but not all prerequisites`.
+No QEMU run was claimed because the kernel image was not freshly produced,
+and no TLS configuration was changed.

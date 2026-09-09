@@ -19,6 +19,7 @@ constexpr HostObjectKind kNavigatorDocumentHostKind = 0x4A530801u;
 constexpr HostObjectKind kNavigatorElementHostKind = 0x4A530802u;
 constexpr HostObjectKind kNavigatorFormCollectionHostKind = 0x4A530803u;
 constexpr HostObjectKind kNavigatorOptionsCollectionHostKind = 0x4A530804u;
+constexpr HostObjectKind kNavigatorDocumentFormsCollectionHostKind = 0x4A530805u;
 constexpr HostInstanceId kNavigatorDocumentHostInstance = 1u;
 
 constexpr std::uint32_t kNavigatorGetElementByIdMethod = 1u;
@@ -250,11 +251,18 @@ private:
     bool isCheckableFormElement(HostInstanceId serial) const;
     bool isSelectFormElement(HostInstanceId serial) const;
     bool isOptionElement(HostInstanceId serial) const;
+    bool documentFormAt(std::size_t index,
+        HostInstanceId& formSerial) const;
+    std::size_t documentFormCount() const;
+    bool documentFormNamed(SourceView property,
+        HostInstanceId& formSerial) const;
     bool optionIndexFor(HostInstanceId optionSerial,
         HostInstanceId& selectSerial, std::size_t& optionIndex) const;
     bool formElementAt(HostInstanceId formSerial, std::size_t index,
         HostInstanceId& elementSerial) const;
     std::size_t formElementCount(HostInstanceId formSerial) const;
+    bool formElementNamed(HostInstanceId formSerial, SourceView property,
+        HostInstanceId& elementSerial) const;
     bool selectOptionAt(HostInstanceId selectSerial, std::size_t index,
         HostInstanceId& optionSerial) const;
     HostResult setOptionSelected(HostInstanceId optionSerial, bool selected);

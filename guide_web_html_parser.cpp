@@ -6421,6 +6421,14 @@ static void handleOpenTag(ParserState& st, const std::string& tagBody)
 			if (unsupportedEncoding) st.doc.formsDiagnostics.hasUnsupportedEncoding = true;
 			const bool pushed = pushElement(st, elementRef);
 			st.currentFormSerial = pushed && !st.openElements.empty() ? st.openElements.back().serial : 0;
+			if (pushed && !st.openElements.empty()) {
+				registerFormContainer(st, st.openElements.back(), "form");
+				if (FormContainerMetadata* form = findFormContainer(st,
+					st.currentFormSerial)) {
+					form->name = boundedDecodedFormText(extractAttr(tagBody, "name"),
+						kFormMaxLabelBytes, st.doc.formsDiagnostics);
+				}
+			}
 			return;
 		}
 		if (name == "fieldset") {
@@ -6944,6 +6952,9 @@ static void handleOpenTag(ParserState& st, const std::string& tagBody)
             elementRef.formControl = makeFormControlMetadata(st, elementRef,
 				type == "button" ? FormControlType::Button : (type == "reset" ? FormControlType::Reset : FormControlType::Submit),
 				type, true);
+			elementRef.formControl.name = boundedDecodedFormText(
+				extractAttr(tagBody, "name"), kFormMaxLabelBytes,
+				st.doc.formsDiagnostics);
             elementRef.formControl.disabled = hasAttr(tagBody, "disabled") || disabledByFieldset(st);
             st.open = OpenTag::ButtonSubmit;
             if (pushElement(st, elementRef)) {

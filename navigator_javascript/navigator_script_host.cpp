@@ -1044,6 +1044,77 @@ bool NavigatorScriptHostAdapter::isOptionElement(HostInstanceId serial) const
         element->formControl.type == gxos::web::FormControlType::Option;
 }
 
+bool NavigatorScriptHostAdapter::documentFormAt(std::size_t index,
+    HostInstanceId& formSerial) const
+{
+    formSerial = 0;
+    if (document_ == nullptr) return false;
+    std::size_t matched = 0;
+    const std::size_t count = std::min(limits_.maxDocumentNodes,
+        document_->structuralElements.size());
+    for (std::size_t position = 0; position < count; ++position) {
+        const gxos::web::HtmlElementRef& element =
+            document_->structuralElements[position];
+        if (element.serial == 0 || element.tagName != "form") continue;
+        if (matched == index) {
+            formSerial = element.serial;
+            return true;
+        }
+        ++matched;
+    }
+    return false;
+}
+
+std::size_t NavigatorScriptHostAdapter::documentFormCount() const
+{
+    std::size_t count = 0;
+    HostInstanceId ignored = 0;
+    while (documentFormAt(count, ignored)) ++count;
+    return count;
+}
+
+bool NavigatorScriptHostAdapter::documentFormNamed(SourceView property,
+    HostInstanceId& formSerial) const
+{
+    formSerial = 0;
+    if (document_ == nullptr || property.data == nullptr ||
+        property.length == 0 || property.length > limits_.maxDocumentIdLength)
+        return false;
+    const std::string key(property.data, property.length);
+    const std::size_t count = std::min(limits_.maxDocumentNodes,
+        document_->structuralElements.size());
+
+    // Match ids first, in document order. This is the same canonical element
+    // metadata later used by getElementById(), without creating a form map.
+    for (std::size_t position = 0; position < count; ++position) {
+        const gxos::web::HtmlElementRef& element =
+            document_->structuralElements[position];
+        if (element.serial != 0 && element.tagName == "form" &&
+            !element.id.empty() && element.id == key) {
+            formSerial = element.serial;
+            return true;
+        }
+    }
+
+    // Form names are parser-owned container metadata. Empty names are not
+    // useful named properties, and duplicate names intentionally resolve to
+    // the first form encountered in document order.
+    for (std::size_t position = 0; position < count; ++position) {
+        const gxos::web::HtmlElementRef& element =
+            document_->structuralElements[position];
+        if (element.serial == 0 || element.tagName != "form") continue;
+        for (const gxos::web::FormContainerMetadata& container :
+                 document_->formContainers) {
+            if (container.serial == element.serial && !container.name.empty() &&
+                container.name == key) {
+                formSerial = element.serial;
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 bool NavigatorScriptHostAdapter::optionIndexFor(HostInstanceId optionSerial,
     HostInstanceId& selectSerial, std::size_t& optionIndex) const
 {
@@ -1109,6 +1180,49 @@ std::size_t NavigatorScriptHostAdapter::formElementCount(
     HostInstanceId ignored = 0;
     while (formElementAt(formSerial, count, ignored)) ++count;
     return count;
+}
+
+bool NavigatorScriptHostAdapter::formElementNamed(HostInstanceId formSerial,
+    SourceView property, HostInstanceId& elementSerial) const
+{
+    elementSerial = 0;
+    if (!isFormElement(formSerial) || property.data == nullptr ||
+        property.length == 0 || property.length > limits_.maxDocumentIdLength)
+        return false;
+    const std::string key(property.data, property.length);
+    const std::size_t count = std::min(limits_.maxDocumentNodes,
+        document_->structuralElements.size());
+    const auto isOwnedSupportedControl = [&](
+        const gxos::web::HtmlElementRef& element) {
+        const gxos::web::FormControlMetadata& metadata = element.formControl;
+        return element.serial != 0 && metadata.metadataComplete &&
+            metadata.supported && metadata.parentFormSerial == formSerial &&
+            metadata.type != gxos::web::FormControlType::None &&
+            metadata.type != gxos::web::FormControlType::Option &&
+            metadata.type != gxos::web::FormControlType::Unsupported;
+    };
+
+    // Both named collection views use exact id-first matching. The scan order
+    // gives duplicate names the bounded first-in-document-order behavior.
+    for (std::size_t position = 0; position < count; ++position) {
+        const gxos::web::HtmlElementRef& element =
+            document_->structuralElements[position];
+        if (isOwnedSupportedControl(element) && !element.id.empty() &&
+            element.id == key) {
+            elementSerial = element.serial;
+            return true;
+        }
+    }
+    for (std::size_t position = 0; position < count; ++position) {
+        const gxos::web::HtmlElementRef& element =
+            document_->structuralElements[position];
+        if (isOwnedSupportedControl(element) && !element.formControl.name.empty() &&
+            element.formControl.name == key) {
+            elementSerial = element.serial;
+            return true;
+        }
+    }
+    return false;
 }
 
 bool NavigatorScriptHostAdapter::selectOptionAt(HostInstanceId selectSerial,
@@ -1766,6 +1880,10 @@ HostResult NavigatorScriptHostAdapter::validate(
         isKnownElementSerial(object.instanceId)) {
         return HostResult();
     }
+    if (object.kind == kNavigatorDocumentFormsCollectionHostKind &&
+        object.instanceId == kNavigatorDocumentHostInstance) {
+        return HostResult();
+    }
     if (object.kind == kNavigatorFormCollectionHostKind &&
         isFormElement(object.instanceId)) {
         return HostResult();
@@ -1802,6 +1920,12 @@ HostResult NavigatorScriptHostAdapter::getProperty(
             result = HostValue::method(kNavigatorHasFocusMethod, true);
             return HostResult();
         }
+        if (textEquals(property, "forms")) {
+            result = HostValue::fromHostObject(HostObjectReference{
+                kNavigatorDocumentHostInstance, generation_,
+                kNavigatorDocumentFormsCollectionHostKind});
+            return HostResult();
+        }
         if (textEquals(property, "addEventListener")) {
             result = HostValue::method(kNavigatorAddEventListenerMethod, true,
                 true);
@@ -1815,6 +1939,33 @@ HostResult NavigatorScriptHostAdapter::getProperty(
         return HostResult{HostResultCode::PropertyNotFound};
     }
 
+    if (object.kind == kNavigatorDocumentFormsCollectionHostKind) {
+        if (textEquals(property, "length")) {
+            result = HostValue::number(static_cast<double>(
+                documentFormCount()));
+            return HostResult();
+        }
+        std::size_t index = 0;
+        if (parseCanonicalIndex(property, index)) {
+            HostInstanceId formSerial = 0;
+            if (!documentFormAt(index, formSerial)) {
+                result = HostValue::undefined();
+                return HostResult();
+            }
+            result = HostValue::fromHostObject(HostObjectReference{
+                formSerial, generation_, kNavigatorElementHostKind});
+            return HostResult();
+        }
+        HostInstanceId formSerial = 0;
+        if (!documentFormNamed(property, formSerial)) {
+            result = HostValue::undefined();
+            return HostResult();
+        }
+        result = HostValue::fromHostObject(HostObjectReference{
+            formSerial, generation_, kNavigatorElementHostKind});
+        return HostResult();
+    }
+
     if (object.kind == kNavigatorFormCollectionHostKind) {
         if (textEquals(property, "length")) {
             result = HostValue::number(static_cast<double>(
@@ -1822,10 +1973,18 @@ HostResult NavigatorScriptHostAdapter::getProperty(
             return HostResult();
         }
         std::size_t index = 0;
-        if (!parseCanonicalIndex(property, index))
-            return HostResult{HostResultCode::PropertyNotFound};
+        if (parseCanonicalIndex(property, index)) {
+            HostInstanceId elementSerial = 0;
+            if (!formElementAt(object.instanceId, index, elementSerial)) {
+                result = HostValue::undefined();
+                return HostResult();
+            }
+            result = HostValue::fromHostObject(HostObjectReference{
+                elementSerial, generation_, kNavigatorElementHostKind});
+            return HostResult();
+        }
         HostInstanceId elementSerial = 0;
-        if (!formElementAt(object.instanceId, index, elementSerial)) {
+        if (!formElementNamed(object.instanceId, property, elementSerial)) {
             result = HostValue::undefined();
             return HostResult();
         }
@@ -2238,7 +2397,11 @@ HostResult NavigatorScriptHostAdapter::setProperty(
     if (object.kind == kNavigatorDocumentHostKind &&
         textEquals(property, "activeElement"))
         return HostResult{HostResultCode::PropertyReadOnly};
-    if (object.kind == kNavigatorFormCollectionHostKind ||
+    if (object.kind == kNavigatorDocumentHostKind &&
+        textEquals(property, "forms"))
+        return HostResult{HostResultCode::PropertyReadOnly};
+    if (object.kind == kNavigatorDocumentFormsCollectionHostKind ||
+        object.kind == kNavigatorFormCollectionHostKind ||
         object.kind == kNavigatorOptionsCollectionHostKind)
         return HostResult{HostResultCode::PropertyReadOnly};
     if (object.kind != kNavigatorElementHostKind)
