@@ -51,6 +51,70 @@ namespace nativeaot_pal_qemu_test {
 extern "C" void __cdecl guideXosNativeAotC011EC21DescribeNativeCaller(
     uintptr_t recoveredRip, uintptr_t recoveredRsp, uintptr_t recoveredRbp);
 #endif
+#if defined(GUIDEXOS_NATIVEAOT_C011EC96_PHYSICAL_FRAME_PROVENANCE)
+void emitC96FrameStats(const char* marker, const char* checkpoint,
+                       uint64_t address, uint64_t size, uint32_t result,
+                       const gxos::runtime::virtual_memory::VirtualMemoryStats& stats) {
+    serial::puts("[nativeaot-gc-c96-frame] ");
+    serial::puts(marker);
+    serial::puts(" marker=C011EC96-");
+    serial::puts(marker);
+    serial::puts(" checkpoint=");
+    serial::puts(checkpoint);
+    serial::puts(" address=");
+    serial::put_hex64(address);
+    serial::puts(" size=");
+    serial::put_hex64(size);
+    serial::puts(" result=");
+    serial::put_hex32(result);
+    serial::puts(" totalKnownFrames=");
+    serial::put_hex64(stats.totalKnownFrames);
+    serial::puts(" freeFrames=");
+    serial::put_hex64(stats.freeFrames);
+    serial::puts(" allocatedFrames=");
+    serial::put_hex64(stats.allocatedFrames);
+    serial::puts(" regionOwnedFrames=");
+    serial::put_hex64(stats.regionOwnedFrames);
+    serial::puts(" pageTableFrames=");
+    serial::put_hex64(stats.pageTableFrames);
+    serial::puts(" mappingCount=");
+    serial::put_hex64(stats.mappingCount);
+    serial::puts(" framesReleasedByDecommit=");
+    serial::put_hex64(stats.framesReleasedByDecommit);
+    serial::puts(" framesReleasedByRelease=");
+    serial::put_hex64(stats.framesReleasedByRelease);
+    serial::puts("\n");
+}
+
+void emitC96Checkpoint(const char* checkpoint) {
+    emitC96FrameStats("FRAME", checkpoint, 0, 0, 0,
+        gxos::runtime::virtual_memory::stats());
+}
+
+extern "C" void guideXosNativeAotC011EC96RollbackObserved(
+    uint32_t stage, uint64_t firstPage, uint64_t pageCount,
+    uint64_t newlyAllocatedPages) {
+    const gxos::runtime::virtual_memory::VirtualMemoryStats stats =
+        gxos::runtime::virtual_memory::stats();
+    serial::puts("[nativeaot-gc-c96-frame] ROLLBACK marker=C011EC96-ROLLBACK stage=");
+    serial::put_hex32(stage);
+    serial::puts(" firstPage=");
+    serial::put_hex64(firstPage);
+    serial::puts(" pageCount=");
+    serial::put_hex64(pageCount);
+    serial::puts(" newlyAllocatedPages=");
+    serial::put_hex64(newlyAllocatedPages);
+    serial::puts(" freeFrames=");
+    serial::put_hex64(stats.freeFrames);
+    serial::puts(" allocatedFrames=");
+    serial::put_hex64(stats.allocatedFrames);
+    serial::puts(" regionOwnedFrames=");
+    serial::put_hex64(stats.regionOwnedFrames);
+    serial::puts(" pageTableFrames=");
+    serial::put_hex64(stats.pageTableFrames);
+    serial::puts("\n");
+}
+#endif
 namespace {
 
 constexpr uintptr_t kPageSize = 0x1000u;
@@ -943,10 +1007,23 @@ int32_t GUIDEXOS_NATIVEAOT_PAL_CALL startupCommit(
     const uintptr_t offset = reinterpret_cast<uintptr_t>(address) -
         reinterpret_cast<uintptr_t>(slot->region.base);
     const uintptr_t committedBefore = slot->region.committedSize;
+#if defined(GUIDEXOS_NATIVEAOT_C011EC96_PHYSICAL_FRAME_PROVENANCE)
+    const gxos::runtime::virtual_memory::VirtualMemoryStats c96Before =
+        gxos::runtime::virtual_memory::stats();
+#endif
     const gxos::runtime::virtual_memory::VmResult result =
         gxos::runtime::virtual_memory::commit(
             slot->region, offset, size,
             gxos::runtime::virtual_memory::MemoryProtection::ReadWrite);
+#if defined(GUIDEXOS_NATIVEAOT_C011EC96_PHYSICAL_FRAME_PROVENANCE)
+    const gxos::runtime::virtual_memory::VirtualMemoryStats c96After =
+        gxos::runtime::virtual_memory::stats();
+    emitC96FrameStats("COMMIT-BEFORE", "vm-commit-before",
+        reinterpret_cast<uintptr_t>(address), size, 0, c96Before);
+    emitC96FrameStats("COMMIT-AFTER", "vm-commit-after",
+        reinterpret_cast<uintptr_t>(address), size,
+        static_cast<uint32_t>(result), c96After);
+#endif
 #if defined(GUIDEXOS_NATIVEAOT_C011EC95_VM_COMMIT_STATUS)
     if (result != gxos::runtime::virtual_memory::VmResult::Ok &&
         size == UINT64_C(0x10000) &&
@@ -1607,6 +1684,9 @@ void runSegmentBoundaryManagedBoundary(
     context.size = sizeof(context);
     context.apiVersion = 0u;
 #if defined(GXOS_NATIVEAOT_GC_SINGLE_THREAD_SUSPEND_EE_QEMU_TEST)
+    #if defined(GUIDEXOS_NATIVEAOT_C011EC96_PHYSICAL_FRAME_PROVENANCE)
+    emitC96Checkpoint("pre-tail");
+    #endif
     serial::puts("[nativeaot-gc-single-thread-suspend-ee] entering ManagedMain once\n");
     reinterpret_cast<SegmentBoundaryManagedMain>(managedMainAddress)(&context);
     return;
@@ -2029,12 +2109,18 @@ void runFirstRealAllocationImpl(
 
     uintptr_t base = 0;
     uintptr_t size = 0;
+#if defined(GUIDEXOS_NATIVEAOT_C011EC96_PHYSICAL_FRAME_PROVENANCE)
+    emitC96Checkpoint("pre-managed");
+#endif
     const bool loaded = loadArtifact(artifact, artifactSize, &base, &size);
     firstAllocationStatus("Artifact staged", loaded, allPassed);
     if (!loaded) {
         serial::puts("[nativeaot-gc-first-allocation] ALL_FAIL\n");
         return;
     }
+#if defined(GUIDEXOS_NATIVEAOT_C011EC96_PHYSICAL_FRAME_PROVENANCE)
+    emitC96Checkpoint("post-image");
+#endif
 
 #if defined(GUIDEXOS_NATIVEAOT_C011EC21_NATIVE_CONTINUATION)
     // The kernel native module is registered before NativeAOT initialization
@@ -2160,6 +2246,9 @@ void runFirstRealAllocationImpl(
         serial::puts("[nativeaot-gc-first-allocation] ALL_FAIL\n");
         return;
     }
+#if defined(GUIDEXOS_NATIVEAOT_C011EC96_PHYSICAL_FRAME_PROVENANCE)
+    emitC96Checkpoint("post-startup");
+#endif
 
     const bool tlsInstalled = installNativeAotCurrentThreadTls();
     firstAllocationStatus("NativeAOT current-thread TLS vector", tlsInstalled, allPassed);

@@ -7,7 +7,7 @@ param(
     [switch]$SkipManagedBuild,
     [string]$RuntimePackManifest = "",
     [string]$LockedRuntimeRoot = "",
-    [ValidateSet("single-thread-suspend-ee", "allocation-context-fixup-root-boundary", "first-per-thread-root-provider", "first-root-candidate-load", "first-non-null-root-callback-boundary", "first-root-callback-entry", "first-root-membership-classification", "first-root-heap-resolution", "first-root-condemned-generation-decision", "first-root-pre-mark-boundary", "first-root-first-mark-mutation", "first-root-post-queue-mark-decision", "first-root-first-non-null-old-o", "next-genuine-root-provider", "stack-provider-transition-failfast", "stack-provider-code-manager-registration", "stack-provider-transition-frame-control-pc", "stack-provider-unwind-gc-info", "stack-provider-unwind-caller-frame", "stack-provider-native-transition-continuation", "stack-provider-native-caller-provenance", "stack-provider-native-kernel-entry-boundary", "stack-provider-native-kernel-stack-completion", "post-root-queue-mark-processing", "mark-queue-closure", "post-mark-short-weak-handle", "short-weak-handle-operation", "short-weak-live-handle", "short-weak-dead-handle", "short-weak-lifetime-transition", "relocation-root-update", "relocated-handle-update", "lifetime-transition-complete", "second-collection-completion", "dead-object-reclamation", "collection-plan-mode-provenance-c37", "collection-plan-mode-provenance-c38", "compaction-reclamation", "post-gc-allocator-provenance", "post-gc-reclaimed-gen1-lifecycle", "reclaimed-gen1-natural-reuse", "reclaimed-gen1-ephemeral-transition", "reclaimed-gen1-natural-older-generation-transition", "natural-gen1-condemnation-policy-threshold", "direct-gen1-budget-condemnation", "n-initial-provenance", "last-n0-direct-gen1-window", "pre-last-n0-promotion-timing", "pre-final-n0-promotion-cycle", "post-promotion-n0-refill-topology", "post-promotion-earlier-headroom", "post-debit-normal-condemnation-entry", "post-debit-gen2-oos-preemption", "post-debit-normal-gen0-refill", "gen0-region-availability-provenance", "retained-survivor-region-availability", "survivor-cohort-provenance-reconciliation", "survivor-count-threshold-causality", "promotion-decision-live-byte-threshold", "promotion-threshold-region-formation", "promotion-positive-region-cohort", "basic-free-region-eligibility-geometry", "basic-region-supply-provenance", "region-supply-origin-coverage", "offline-region-range-census", "canonical-region-universe-snapshot", "basic-canonical-range-mapping", "exact-canonical-region-materialization", "basic-free-removal-recycle-chronology", "decommit-budget-free-region-balance", "aged-free-region-transfer-provenance", "exact-allocation-oom-arithmetic", "grow-heap-segment-commit-provenance", "vm-commit-failure-status-provenance", "malformed-transition-frame-provenance", "reverse-pinvoke-slot-provenance", "regdisplay-fp-handoff", "relocation-root-fault-provenance", "iterator-fp-ownership", "second-collection-continuation", "productionized-second-collection")]
+    [ValidateSet("single-thread-suspend-ee", "allocation-context-fixup-root-boundary", "first-per-thread-root-provider", "first-root-candidate-load", "first-non-null-root-callback-boundary", "first-root-callback-entry", "first-root-membership-classification", "first-root-heap-resolution", "first-root-condemned-generation-decision", "first-root-pre-mark-boundary", "first-root-first-mark-mutation", "first-root-post-queue-mark-decision", "first-root-first-non-null-old-o", "next-genuine-root-provider", "stack-provider-transition-failfast", "stack-provider-code-manager-registration", "stack-provider-transition-frame-control-pc", "stack-provider-unwind-gc-info", "stack-provider-unwind-caller-frame", "stack-provider-native-transition-continuation", "stack-provider-native-caller-provenance", "stack-provider-native-kernel-entry-boundary", "stack-provider-native-kernel-stack-completion", "post-root-queue-mark-processing", "mark-queue-closure", "post-mark-short-weak-handle", "short-weak-handle-operation", "short-weak-live-handle", "short-weak-dead-handle", "short-weak-lifetime-transition", "relocation-root-update", "relocated-handle-update", "lifetime-transition-complete", "second-collection-completion", "collection-plan-mode-provenance-c37", "collection-plan-mode-provenance-c38", "compaction-reclamation", "post-gc-allocator-provenance", "post-gc-reclaimed-gen1-lifecycle", "reclaimed-gen1-natural-reuse", "reclaimed-gen1-ephemeral-transition", "reclaimed-gen1-natural-older-generation-transition", "natural-gen1-condemnation-policy-threshold", "direct-gen1-budget-condemnation", "n-initial-provenance", "last-n0-direct-gen1-window", "pre-last-n0-promotion-timing", "pre-final-n0-promotion-cycle", "post-promotion-n0-refill-topology", "post-promotion-earlier-headroom", "post-debit-normal-condemnation-entry", "post-debit-gen2-oos-preemption", "post-debit-normal-gen0-refill", "gen0-region-availability-provenance", "retained-survivor-region-availability", "survivor-cohort-provenance-reconciliation", "survivor-count-threshold-causality", "promotion-decision-live-byte-threshold", "promotion-threshold-region-formation", "promotion-positive-region-cohort", "basic-free-region-eligibility-geometry", "basic-region-supply-provenance", "region-supply-origin-coverage", "offline-region-range-census", "canonical-region-universe-snapshot", "basic-canonical-range-mapping", "exact-canonical-region-materialization", "basic-free-removal-recycle-chronology", "decommit-budget-free-region-balance", "aged-free-region-transfer-provenance", "exact-allocation-oom-arithmetic", "grow-heap-segment-commit-provenance", "vm-commit-failure-status-provenance", "physical-frame-availability-provenance", "malformed-transition-frame-provenance", "reverse-pinvoke-slot-provenance", "regdisplay-fp-handoff", "relocation-root-fault-provenance", "iterator-fp-ownership", "second-collection-continuation", "productionized-second-collection")]
     [string]$ProofMode = "single-thread-suspend-ee",
     [ValidateSet("", "PromotionDecisionLiveByteThreshold", "PromotionPositiveRegionCohort")]
     [string]$ManagedProofModeOverride = "",
@@ -194,6 +194,8 @@ if ([string]::IsNullOrWhiteSpace($EvidenceRoot)) {
         Join-Path $root ("out\dotnet\c011ec89-exact-allocation-oom-arithmetic\" + $C71Case + "\tail-" + $C66TailAllocations)
     } elseif ($ProofMode -eq "grow-heap-segment-commit-provenance") {
         Join-Path $root ("out\dotnet\c011ec94-grow-heap-segment-commit-provenance\" + $C71Case + "\tail-" + $C66TailAllocations)
+    } elseif ($ProofMode -eq "physical-frame-availability-provenance") {
+        Join-Path $root ("out\dotnet\c011ec96-physical-frame-availability-provenance\" + $C71Case + "\tail-" + $C66TailAllocations)
     } elseif ($ProofMode -eq "vm-commit-failure-status-provenance") {
         Join-Path $root ("out\dotnet\c011ec95-vm-commit-failure-status-provenance\" + $C71Case + "\tail-" + $C66TailAllocations)
     } elseif ($ProofMode -eq "post-mark-short-weak-handle") {
@@ -243,8 +245,9 @@ $isC011EC60 = $ProofMode -eq "pre-last-n0-promotion-timing"
 $isC011EC79 = $ProofMode -eq "offline-region-range-census"
 $isC011EC80 = $ProofMode -eq "canonical-region-universe-snapshot"
 $isC011EC94 = $ProofMode -eq "grow-heap-segment-commit-provenance"
-$isC011EC95 = $ProofMode -eq "vm-commit-failure-status-provenance"
-$isC011EC89 = $ProofMode -in @("exact-allocation-oom-arithmetic", "grow-heap-segment-commit-provenance", "vm-commit-failure-status-provenance")
+$isC011EC96 = $ProofMode -eq "physical-frame-availability-provenance"
+$isC011EC95 = $ProofMode -in @("vm-commit-failure-status-provenance", "physical-frame-availability-provenance")
+$isC011EC89 = $ProofMode -in @("exact-allocation-oom-arithmetic", "grow-heap-segment-commit-provenance", "vm-commit-failure-status-provenance", "physical-frame-availability-provenance")
 $c88TargetOffset = if ($ProofMode -eq "aged-free-region-transfer-provenance" -or $isC011EC89) { [UInt64]0x1A00000 } else { $C85TargetOffset }
 $isC011EC83 = $ProofMode -eq "basic-canonical-range-mapping"
 $isC011EC84 = $ProofMode -eq "exact-canonical-region-materialization"
@@ -431,6 +434,7 @@ $c87Define = if ($isC011EC87) { " /DGUIDEXOS_NATIVEAOT_C011EC87_DECOMMIT_BALANCE
 $c88Define = if ($isC011EC88) { " /DGUIDEXOS_NATIVEAOT_C011EC88_AGED_FREE_REGION_TRANSFER_PROVENANCE /DGUIDEXOS_NATIVEAOT_C011EC88_TARGET_OFFSET=$c88TargetOffset" } else { "" }
 $c89Define = if ($isC011EC89) { " /DGUIDEXOS_NATIVEAOT_C011EC89_EXACT_ALLOCATION_OOM_ARITHMETIC" } else { "" }
 $c95Define = if ($isC011EC95) { " /DGUIDEXOS_NATIVEAOT_C011EC95_VM_COMMIT_STATUS" } else { "" }
+$c96Define = if ($isC011EC96) { " /DGUIDEXOS_NATIVEAOT_C011EC96_PHYSICAL_FRAME_PROVENANCE" } else { "" }
 # C94 is a harness-acceptance closure for the already-authenticated C93
 # composition.  It deliberately reuses the C89 native image so the proof
 # observer cannot perturb address-sensitive GC behavior.
@@ -444,7 +448,7 @@ $c94Define = ""
     $c66TailDefine = if ($isC011EC66 -and $C66TailAllocations -ne 320) { " /DGUIDEXOS_NATIVEAOT_C011EC66_TAIL_$C66TailAllocations" } else { "" }
     $c62StrategyDefine = if ($isC011EC62 -and -not $isC011EC64 -and $C62Strategy -eq "R1") { " /DGUIDEXOS_NATIVEAOT_C011EC62_STRATEGY_R1" } elseif ($isC011EC62 -and -not $isC011EC64 -and $C62Strategy -eq "R2") { " /DGUIDEXOS_NATIVEAOT_C011EC62_STRATEGY_R2" } else { "" }
     $firstNonNullDefine = if ($isC011EC31 -or $isC011EC32 -or $isC011EC56Instrumentation) { "" } else { " /DGUIDEXOS_NATIVEAOT_FIRST_NON_NULL_ROOT_ALLOCATION" }
-    "/DGUIDEXOS_NATIVEAOT_ALLOCATION_CONTEXT_FIXUP_ROOT_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_PER_THREAD_ROOT_PROVIDER_ALLOCATION$firstNonNullDefine /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CALLBACK_ENTRY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_MEMBERSHIP_CLASSIFICATION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_HEAP_RESOLUTION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CONDEMNED_GENERATION_DECISION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_PRE_MARK_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_NON_NULL_OLD_O_ALLOCATION /DGUIDEXOS_NATIVEAOT_NEXT_GENUINE_ROOT_PROVIDER_ALLOCATION$minimalDefine$codeManagerDefine$c19Define$c20Define$c21Define$c23Define$c24Define$c25Define$c26Define$c27Define$c28Define$c29Define$c31Define$c32Define$c33Define$c34Define$c35Define$c36Define$c37Define$c38Define$c39Define$c40Define$c41Define$c42Define$c53Define$c54Define$c55Define$c56Define$c59Define$c59StrategyDefine$c60Define$c60StrategyDefine$c61Define$c61StrategyDefine$c62Define$c63Define$c64Define$c65Define$c66Define$c67Define$c68Define$c69Define$c70Define$c71Define$c72Define$c73Define$c76Define$c77Define$c78Define$c79Define$c80Define$c83Define$c84Define$c85Define$c87Define$c88Define$c89Define$c94Define$c95Define$c66TailDefine$c62StrategyDefine$c011ec49Define"
+    "/DGUIDEXOS_NATIVEAOT_ALLOCATION_CONTEXT_FIXUP_ROOT_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_PER_THREAD_ROOT_PROVIDER_ALLOCATION$firstNonNullDefine /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CALLBACK_ENTRY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_MEMBERSHIP_CLASSIFICATION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_HEAP_RESOLUTION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CONDEMNED_GENERATION_DECISION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_PRE_MARK_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_NON_NULL_OLD_O_ALLOCATION /DGUIDEXOS_NATIVEAOT_NEXT_GENUINE_ROOT_PROVIDER_ALLOCATION$minimalDefine$codeManagerDefine$c19Define$c20Define$c21Define$c23Define$c24Define$c25Define$c26Define$c27Define$c28Define$c29Define$c31Define$c32Define$c33Define$c34Define$c35Define$c36Define$c37Define$c38Define$c39Define$c40Define$c41Define$c42Define$c53Define$c54Define$c55Define$c56Define$c59Define$c59StrategyDefine$c60Define$c60StrategyDefine$c61Define$c62Define$c63Define$c64Define$c65Define$c66Define$c67Define$c68Define$c69Define$c70Define$c71Define$c72Define$c73Define$c76Define$c77Define$c78Define$c79Define$c80Define$c83Define$c84Define$c85Define$c87Define$c88Define$c89Define$c94Define$c95Define$c96Define$c66TailDefine$c62StrategyDefine$c011ec49Define"
 } elseif ($isFirstRootFirstNonNullOldO) {
     "/DGUIDEXOS_NATIVEAOT_ALLOCATION_CONTEXT_FIXUP_ROOT_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_PER_THREAD_ROOT_PROVIDER_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_NON_NULL_ROOT_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CALLBACK_ENTRY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_MEMBERSHIP_CLASSIFICATION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_HEAP_RESOLUTION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_CONDEMNED_GENERATION_DECISION_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_PRE_MARK_BOUNDARY_ALLOCATION /DGUIDEXOS_NATIVEAOT_FIRST_ROOT_NON_NULL_OLD_O_ALLOCATION"
 } elseif ($isFirstRootPostQueueMarkDecision) {
@@ -9010,8 +9014,9 @@ exit /b %errorlevel%
     $c26KernelDefine = if ($isC011EC26) { " -DGUIDEXOS_NATIVEAOT_C011EC26_STACK_COMPLETION" } else { "" }
     $c27KernelDefine = if ($isC011EC27) { " -DGUIDEXOS_NATIVEAOT_C011EC27_POST_ROOT_QUEUE" } else { "" }
     $c95KernelDefine = if ($isC011EC95) { " -DGUIDEXOS_NATIVEAOT_C011EC95_VM_COMMIT_STATUS" } else { "" }
-    $extraCflags = "-DGXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST -DGXOS_NATIVEAOT_GC_SINGLE_THREAD_SUSPEND_EE_QEMU_TEST$c21KernelDefine$c23KernelDefine$c24KernelDefine$c25KernelDefine$c26KernelDefine$c27KernelDefine$c95KernelDefine -I$artifactRoot"
-    Set-Content -LiteralPath (Join-Path $runRoot "selectors.txt") -Value @("GXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST=1","GXOS_NATIVEAOT_GC_SINGLE_THREAD_SUSPEND_EE_QEMU_TEST=1","C011EC21_NATIVE_CONTINUATION=$isC011EC21","C011EC23_NATIVE_UNWIND=$isC011EC23","C011EC24_CALLER_PROVENANCE=$isC011EC24","C011EC25_KERNEL_ENTRY_BOUNDARY=$isC011EC25","C011EC26_STACK_COMPLETION=$isC011EC26","C011EC27_POST_ROOT_QUEUE=$isC011EC27","C011EC95_VM_COMMIT_STATUS=$isC011EC95","NATIVEAOT_GC_STARTUP_QEMU_ARTIFACT_OBJ=$embeddedObj") -Encoding ASCII
+    $c96KernelDefine = if ($isC011EC96) { " -DGUIDEXOS_NATIVEAOT_C011EC96_PHYSICAL_FRAME_PROVENANCE" } else { "" }
+    $extraCflags = "-DGXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST -DGXOS_NATIVEAOT_GC_SINGLE_THREAD_SUSPEND_EE_QEMU_TEST$c21KernelDefine$c23KernelDefine$c24KernelDefine$c25KernelDefine$c26KernelDefine$c27KernelDefine$c95KernelDefine$c96KernelDefine -I$artifactRoot"
+    Set-Content -LiteralPath (Join-Path $runRoot "selectors.txt") -Value @("GXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST=1","GXOS_NATIVEAOT_GC_SINGLE_THREAD_SUSPEND_EE_QEMU_TEST=1","C011EC21_NATIVE_CONTINUATION=$isC011EC21","C011EC23_NATIVE_UNWIND=$isC011EC23","C011EC24_CALLER_PROVENANCE=$isC011EC24","C011EC25_KERNEL_ENTRY_BOUNDARY=$isC011EC25","C011EC26_STACK_COMPLETION=$isC011EC26","C011EC27_POST_ROOT_QUEUE=$isC011EC27","C011EC95_VM_COMMIT_STATUS=$isC011EC95","C011EC96_PHYSICAL_FRAME_PROVENANCE=$isC011EC96","NATIVEAOT_GC_STARTUP_QEMU_ARTIFACT_OBJ=$embeddedObj") -Encoding ASCII
     Set-Content -LiteralPath (Join-Path $runRoot "extra-cflags.txt") -Value $extraCflags -Encoding ASCII
     $specializedKernelBuildRoot = Join-Path $root "kernel\build\amd64"
     $specializedKernelCleanCommand = "if exist `"$specializedKernelBuildRoot`" rmdir /s /q `"$specializedKernelBuildRoot`""
@@ -9651,6 +9656,59 @@ exit /b %errorlevel%
                 successLevel=$c49SuccessLevel; harnessTerminated=$true
                 markerLine=$c49MarkerLine; earlyFailure=$earlyFailure
                 serialTail=if ($validationText.Length -gt 16000) { $validationText.Substring($validationText.Length - 16000) } else { $validationText }
+            }
+            continue
+        } elseif ($isC011EC96) {
+            $c93FitLines = @(Get-C011EC56MarkerRecords $validationText 'C011EC93-FIT-BOUNDARY')
+            $c89BoundaryLines = @(Get-C011EC56MarkerRecords $validationText 'C011EC89-REGION-SOURCE')
+            $c77CompleteLines = @(Get-C011EC56MarkerRecords $validationText 'C011EC77' | Where-Object { $_ -match 'marker=C011EC77\s+outcome=C' })
+            $c77SummaryLines = @(Get-C011EC56MarkerRecords $validationText 'C011EC77-SUMMARY')
+            $c64AllocationLines = @(Get-C011EC56MarkerRecords $validationText 'C011EC64-ALLOC')
+            $c64CompleteLines = @(Get-C011EC56MarkerRecords $validationText 'C011EC64' | Where-Object { $_ -match 'marker=C011EC64\s+outcome=' })
+            $c65CompletionLines = @(Get-C011EC56MarkerRecords $validationText 'C011EC65' | Where-Object { $_ -match 'marker=C011EC65\s+outcome=' })
+            $c67CompleteLines = @(Get-C011EC56MarkerRecords $validationText 'C011EC67' | Where-Object { $_ -match 'marker=C011EC67\s+outcome=C' })
+            $c95CommitLines = @(Get-C011EC56MarkerRecords $validationText 'C011EC95-VM-COMMIT')
+            $c95PrimitiveLines = @(Get-C011EC56MarkerRecords $validationText 'C011EC95-VM-PRIMITIVE')
+            $c96FrameLines = @(Get-C011EC56MarkerRecords $validationText 'C011EC96-FRAME')
+            $c96CommitBeforeLines = @(Get-C011EC56MarkerRecords $validationText 'C011EC96-COMMIT-BEFORE')
+            $c96CommitAfterLines = @(Get-C011EC56MarkerRecords $validationText 'C011EC96-COMMIT-AFTER')
+            $c96RollbackLines = @(Get-C011EC56MarkerRecords $validationText 'C011EC96-ROLLBACK')
+            if ($c95CommitLines.Count -gt 0) {
+                $c96GrowAddressText = Get-MarkerField $c95CommitLines[-1] 'growGateCommitted'
+                if ($null -ne $c96GrowAddressText) {
+                    $c96GrowAddress = [Convert]::ToUInt64($c96GrowAddressText.Substring(2), 16)
+                    $c96TargetPage = ($c96GrowAddress - [uint64]0x100000000) / [uint64]0x1000
+                    $c96RollbackLines = @($c96RollbackLines | Where-Object {
+                        $firstPageText = Get-MarkerField $_ 'firstPage'
+                        $null -ne $firstPageText -and [Convert]::ToUInt64($firstPageText.Substring(2), 16) -eq $c96TargetPage
+                    })
+                }
+            }
+            if ($c93FitLines.Count -eq 0 -or
+                $c77CompleteLines.Count -eq 0 -or $c77SummaryLines.Count -eq 0 -or
+                $c64AllocationLines.Count -eq 0 -or $c64CompleteLines.Count -eq 0 -or
+                $c65CompletionLines.Count -eq 0 -or $c95CommitLines.Count -eq 0 -or
+                $c96FrameLines.Count -lt 3 -or $c96CommitBeforeLines.Count -eq 0 -or
+                $c96CommitAfterLines.Count -eq 0) {
+                throw 'C011EC96 required the retained C93/C89/C64/C65/C67/C77 controls, C95 status records, and bounded physical-frame observer records.'
+            }
+            if ($C66TailAllocations -eq 320 -and $c96RollbackLines.Count -lt 2) {
+                throw 'C011EC96 T320 required both pre-rollback and post-rollback physical-frame records.'
+            }
+            if ($C66TailAllocations -eq 216 -and $c96RollbackLines.Count -ne 0) {
+                throw 'C011EC96 T216 unexpectedly emitted a rollback record.'
+            }
+            $runResults += [ordered]@{
+                name=$name; serial=$serialPath; serialSha256=(Hash-File $serialPath)
+                safeStopMarker='C011EC96'; outcome='D'; semanticOutcome='D'; successLevel=2
+                harnessTerminated=$true; markerLine=$c93FitLines[-1].Trim(); earlyFailure=$earlyFailure
+                c93FitLines=$c93FitLines; c89BoundaryLines=$c89BoundaryLines; c77CompleteLines=$c77CompleteLines
+                c77SummaryLines=$c77SummaryLines; c64AllocationLines=$c64AllocationLines
+                c64CompleteLines=$c64CompleteLines; c65CompletionLines=$c65CompletionLines; c67CompleteLines=$c67CompleteLines
+                c95CommitLines=$c95CommitLines; c95PrimitiveLines=$c95PrimitiveLines
+                c96FrameLines=$c96FrameLines; c96CommitBeforeLines=$c96CommitBeforeLines
+                c96CommitAfterLines=$c96CommitAfterLines; c96RollbackLines=$c96RollbackLines
+                serialTail=if ($validationText.Length -gt 240000) { $validationText.Substring($validationText.Length - 240000) } else { $validationText }
             }
             continue
         } elseif ($isC011EC95) {
@@ -13790,6 +13848,175 @@ exit /b %errorlevel%
         }
         $manifest | ConvertTo-Json -Depth 100 | Set-Content -LiteralPath $manifestPath -Encoding ASCII
         Write-Host "C011EC44 malformed transition-frame provenance: Outcome C / Level 1" -ForegroundColor Yellow
+    } elseif ($isC011EC96) {
+        if (@($runResults).Count -ne $FreshBootCount) { throw "C011EC96 produced $(@($runResults).Count) runs instead of $FreshBootCount." }
+        $c96Read = { param([string]$line,[string]$field) Get-MarkerField $line $field }
+        $c96Number = {
+            param([string]$line,[string]$field)
+            $value = & $c96Read $line $field
+            if ($null -eq $value) { return [uint64]0 }
+            return [Convert]::ToUInt64($value.Substring(2), 16)
+        }
+        $c96Checkpoint = {
+            param([string]$line)
+            $match = [regex]::Match($line, 'checkpoint=(\S+)')
+            if ($match.Success) { return $match.Groups[1].Value }
+            return $null
+        }
+        $c96StatusNames = @{
+            0='Ok'; 1='InvalidArgument'; 2='AlreadyReserved'; 3='AlreadyReleased'
+            4='RangeOverflow'; 5='AlignmentError'; 6='AddressUnavailable'
+            7='OutOfMemory'; 8='OutOfRange'; 9='NotOwned'; 10='NotFound'
+            11='NotCommitted'; 12='ProtectionUnsupported'; 13='Unsupported'; 14='HostFailure'
+        }
+        $expectedSpan = if ($C66TailAllocations -eq 320) { [uint64]0x6D8 } else { [uint64]0x106D8 }
+        $expectedFitResult = if ($C66TailAllocations -eq 320) { [uint64]0 } else { [uint64]1 }
+        $expectedCommitFailed = if ($C66TailAllocations -eq 320) { [uint64]1 } else { [uint64]0 }
+        $c96Runs = @()
+        foreach ($run in $runResults) {
+            $fit = $run.c93FitLines[-1]
+            $commit = $run.c95CommitLines[-1]
+            $fitResultValue = & $c96Number $fit 'fitResult'
+            $fitCommitFailedValue = & $c96Number $fit 'commitFailed'
+            if ($fitResultValue -ne $expectedFitResult -or $fitCommitFailedValue -ne $expectedCommitFailed) {
+                throw "C011EC96 retained C93 fit semantics changed in $($run.name)."
+            }
+            $growAddress = & $c96Number $commit 'growGateCommitted'
+            $expectedCommitStatus = if ($C66TailAllocations -eq 320) { [uint64]7 } else { [uint64]0 }
+            $expectedCommitResult = $expectedCommitStatus
+            if ($C66TailAllocations -eq 320) {
+                if ((& $c96Number $commit 'growGateObserved') -ne 1 -or
+                    (& $c96Number $commit 'growGateBranch') -ne 5 -or
+                    (& $c96Number $commit 'growGateCommitSize') -ne [uint64]0x10000 -or
+                    (& $c96Number $commit 'growGateResult') -ne 0) {
+                    throw "C011EC96 found no authenticated failed C95 grow request in $($run.name)."
+                }
+            } else {
+                if ((& $c96Number $commit 'priorObserved') -ne 1 -or
+                    (& $c96Number $commit 'priorAttemptObserved') -ne 1 -or
+                    (& $c96Number $commit 'priorRequested') -ne [uint64]0x10000 -or
+                    (& $c96Number $commit 'priorStatus') -ne 0 -or
+                    (& $c96Number $commit 'growGateObserved') -ne 1 -or
+                    (& $c96Number $commit 'growGateBranch') -ne 4 -or
+                    (& $c96Number $commit 'growGateResult') -ne 1 -or
+                    (& $c96Number $commit 'growGateCommitSize') -ne [uint64]0x10000) {
+                    throw "C011EC96 found no authenticated successful C95 comparator in $($run.name)."
+                }
+            }
+            $frameLines = @($run.c96FrameLines)
+            foreach ($frame in $frameLines) {
+                $total = & $c96Number $frame 'totalKnownFrames'
+                $free = & $c96Number $frame 'freeFrames'
+                $allocated = & $c96Number $frame 'allocatedFrames'
+                $regionOwned = & $c96Number $frame 'regionOwnedFrames'
+                $pageTable = & $c96Number $frame 'pageTableFrames'
+                if ($total -ne [uint64]0x1000 -or $free + $allocated -ne $total -or
+                    $allocated -ne $regionOwned + $pageTable) {
+                    throw "C011EC96 frame accounting invariant failed in $($run.name): $frame"
+                }
+            }
+            $checkpointRecords = [ordered]@{}
+            foreach ($checkpointName in @('pre-managed','post-image','post-startup','pre-tail')) {
+                $record = @($frameLines | Where-Object { (& $c96Checkpoint $_) -eq $checkpointName } | Select-Object -Last 1)
+                if ($record.Count -ne 1) { throw "C011EC96 missing $checkpointName checkpoint in $($run.name)." }
+                $checkpointRecords[$checkpointName] = $record[0]
+            }
+            $commitBefore = @($run.c96CommitBeforeLines | Where-Object {
+                (& $c96Number $_ 'address') -eq $growAddress -and (& $c96Number $_ 'size') -eq [uint64]0x10000
+            } | Select-Object -Last 1)
+            $commitAfter = @($run.c96CommitAfterLines | Where-Object {
+                (& $c96Number $_ 'address') -eq $growAddress -and (& $c96Number $_ 'size') -eq [uint64]0x10000
+            } | Select-Object -Last 1)
+            if ($commitBefore.Count -ne 1 -or $commitAfter.Count -ne 1) {
+                throw "C011EC96 could not correlate VM commit before/after records with the C95 request in $($run.name)."
+            }
+            if ((& $c96Number $commitAfter[0] 'result') -ne $expectedCommitResult) {
+                throw "C011EC96 VM commit result disagreed with the C95 comparator in $($run.name)."
+            }
+            foreach ($commitRecord in @($commitBefore[0], $commitAfter[0])) {
+                if ((& $c96Number $commitRecord 'totalKnownFrames') -ne [uint64]0x1000 -or
+                    (& $c96Number $commitRecord 'freeFrames') + (& $c96Number $commitRecord 'allocatedFrames') -ne [uint64]0x1000 -or
+                    (& $c96Number $commitRecord 'allocatedFrames') -ne ((& $c96Number $commitRecord 'regionOwnedFrames') + (& $c96Number $commitRecord 'pageTableFrames'))) {
+                    throw "C011EC96 commit checkpoint accounting failed in $($run.name)."
+                }
+            }
+            $rollbackRecords = @($run.c96RollbackLines)
+            $rollbackSummary = @()
+            if ($C66TailAllocations -eq 320) {
+                $stage1 = @($rollbackRecords | Where-Object { (& $c96Number $_ 'stage') -eq 1 } | Select-Object -Last 1)
+                $stage2 = @($rollbackRecords | Where-Object { (& $c96Number $_ 'stage') -eq 2 } | Select-Object -Last 1)
+                if ($stage1.Count -ne 1 -or $stage2.Count -ne 1) { throw "C011EC96 T320 rollback stages were not both observed in $($run.name)." }
+                foreach ($rollback in @($stage1[0], $stage2[0])) {
+                    if ((& $c96Number $rollback 'firstPage') -ne (& $c96Number $stage1[0] 'firstPage') -or
+                        (& $c96Number $rollback 'pageCount') -ne [uint64]0x10 -or
+                        (& $c96Number $rollback 'newlyAllocatedPages') -ne [uint64]1) {
+                        throw "C011EC96 T320 rollback request shape changed in $($run.name)."
+                    }
+                }
+                if ((& $c96Number $stage1[0] 'freeFrames') -ne 0 -or
+                    (& $c96Number $stage1[0] 'allocatedFrames') -ne [uint64]0x1000 -or
+                    (& $c96Number $stage1[0] 'regionOwnedFrames') -ne [uint64]0xFF2 -or
+                    (& $c96Number $stage1[0] 'pageTableFrames') -ne [uint64]0xE -or
+                    (& $c96Number $stage2[0] 'freeFrames') -ne 1 -or
+                    (& $c96Number $stage2[0] 'allocatedFrames') -ne [uint64]0xFFF -or
+                    (& $c96Number $stage2[0] 'regionOwnedFrames') -ne [uint64]0xFF1 -or
+                    (& $c96Number $stage2[0] 'pageTableFrames') -ne [uint64]0xE) {
+                    throw "C011EC96 T320 did not prove one tentative page consumed and then returned the final physical frame in $($run.name)."
+                }
+                $rollbackSummary = @($stage1[0], $stage2[0])
+            } elseif ($rollbackRecords.Count -ne 0) {
+                throw "C011EC96 T216 unexpectedly observed a rollback in $($run.name)."
+            }
+            $checkpointSignature = ($checkpointRecords.GetEnumerator() | ForEach-Object {
+                $line = $_.Value
+                "$($_.Key):$((& $c96Number $line 'freeFrames'))/$((& $c96Number $line 'allocatedFrames'))/$((& $c96Number $line 'regionOwnedFrames'))/$((& $c96Number $line 'pageTableFrames'))"
+            }) -join '|'
+            $c96Runs += [ordered]@{
+                name=$run.name; serial=$run.serial; serialSha256=$run.serialSha256
+                fit=$fit; c95Commit=$commit; c96CommitBefore=$commitBefore[0]; c96CommitAfter=$commitAfter[0]
+                c96Checkpoints=$checkpointRecords; c96Rollback=$rollbackSummary
+                framePool=[ordered]@{ totalKnownFrames=('0x{0:X}' -f (& $c96Number $commitAfter[0] 'totalKnownFrames')); freeFrames=('0x{0:X}' -f (& $c96Number $commitAfter[0] 'freeFrames')); allocatedFrames=('0x{0:X}' -f (& $c96Number $commitAfter[0] 'allocatedFrames')); regionOwnedFrames=('0x{0:X}' -f (& $c96Number $commitAfter[0] 'regionOwnedFrames')); pageTableFrames=('0x{0:X}' -f (& $c96Number $commitAfter[0] 'pageTableFrames')) }
+                commitStatus=('0x{0:X}' -f (& $c96Number $commitAfter[0] 'result')); commitStatusName=$c96StatusNames[[int](& $c96Number $commitAfter[0] 'result')]
+                checkpointSignature=$checkpointSignature; earlyFailure=$run.earlyFailure
+            }
+        }
+        $frameAgreement = @($c96Runs | ForEach-Object { $_.checkpointSignature + '|' + $_.commitStatus + '|' + (@($_.c96Rollback) -join '|') } | Select-Object -Unique).Count -eq 1
+        if (-not $frameAgreement) { throw 'C011EC96 physical-frame ownership/checkpoint chronology was not stable across fresh boots.' }
+        $c96Outcome = if ($C66TailAllocations -eq 320) {
+            'D / exact physical-frame exhaustion proven: one boot-provisioned frame is consumed by the tentative VM page and returned by commit rollback'
+        } else {
+            'D / exact physical-frame availability comparator: the same normalized +0x10000 VM commit succeeds with the final frame available'
+        }
+        $manifest = [ordered]@{
+            outcome=$c96Outcome; successLevel=2; proofMode=$ProofMode; marker='C011EC96-PHYSICAL-FRAME-PROVENANCE'
+            case=$C71Case; tailAllocations=$C66TailAllocations; tailOrdinal='0x93'; demand='0x4030'
+            repositoryHead=$repoHead; startingCommittedHead=$startingCommittedHead; startingBranch=$startingBranch; upstream=$upstream
+            startingWorktreeStatus=$startingWorktreeStatus; startingDirtyState=$dirtyState
+            lockedRuntimeIdentity=[ordered]@{ nativeAot='9.0.0'; architecture='AMD64'; gc='Workstation'; gcInterfaces='5.3 / 2'; sourceCommit=$lockedCommit }
+            physicalFrameSource=[ordered]@{
+                bootloader='guideXOSBootLoader/main.cpp runtimeFramePoolPages=4096'
+                poolSize='0x1000 pages / 0x1000000 bytes'; pageSize='0x1000'
+                unavailableFrames='0x0; the boot-provided pool is the complete known-frame universe'
+                ownerDomains='VmRegion / PageTable'; allocator='address_space::allocateFrame scans the first free pool slot'
+                release='releaseFrame requires matching owner and rejects mapped frames; commit rollback releases only tentative VmRegion frames'
+                accounting='totalKnownFrames = freeFrames + allocatedFrames; allocatedFrames = regionOwnedFrames + pageTableFrames'
+            }
+            sourceAudit=[ordered]@{
+                addressSpace='kernel/core/address_space.cpp and kernel/core/include/kernel/address_space.h'
+                virtualMemory='runtime/memory/guidexos_virtual_memory_region_baremetal.cpp commit all-or-nothing page loop'
+                failureTransport='allocateFrame(VmRegion)==0 -> rollbackNewPages -> VmResult::OutOfMemory'
+                observer='bounded C011EC96 frame checkpoints plus two rollback callbacks; no per-frame ledger'
+                productionMutation='none; observer compiled only under GUIDEXOS_NATIVEAOT_C011EC96_PHYSICAL_FRAME_PROVENANCE'
+            }
+            confirmation=[ordered]@{ runCount=$FreshBootCount; frameAgreement=$frameAgreement; retainedC95Fit='PASS'; retainedC95Status='PASS'; runs=$c96Runs }
+            classification=[ordered]@{ T320=if ($C66TailAllocations -eq 320) { 'PHYSICAL_RESOURCE' } else { 'not-run' }; T216=if ($C66TailAllocations -eq 216) { 'SUCCESS_COMPARATOR' } else { 'not-run' }; B02='not attempted; remains premature' }
+            regressions=[ordered]@{ C95='PASS retained VM commit status'; C94='PASS retained +0x10000 minimum'; C93='PASS retained fit boundary'; C64='PASS retained allocation gate'; C65='PASS retained allocation/debit chronology'; C67='PASS retained region topology'; observerStorage='PASS bounded serial checkpoints; no static frame ledger'; invariantFailures='0'; sensitiveDiagnosticAllocations='0'; overflow='0'; failFast='0'; pageFaults='0'; productionMutation='none'; B02='STILL_PREMATURE'; diffCheck='PASS when final validation completes' }
+            qemu=[ordered]@{ version=$qemuVersion; runCount=$FreshBootCount; proofKernelSha256=$specializedKernelHash; serialSha256=@($runResults | ForEach-Object { $_.serialSha256 }); evidenceRoot=$runRoot; exactCommandLog=(Join-Path $runRoot 'commands.txt'); runs=$c96Runs }
+            ordinaryRestoration=[ordered]@{ expectedKernelSha256=$normalKernelHash; expectedEspSha256=$normalKernelHash; restoredByFinally=$true; kernelSha256=(Hash-File $kernelPath); espSha256=(Hash-File $espKernelPath) }
+            documentation='docs/dotnet/NATIVEAOT_WORKSTATION_GC_C96_PHYSICAL_FRAME_AVAILABILITY_PROVENANCE.md'; evidenceRoot=$runRoot; manifestPath=$manifestPath
+        }
+        $manifest | ConvertTo-Json -Depth 100 | Set-Content -LiteralPath $manifestPath -Encoding ASCII
+        Write-Host "C011EC96 physical-frame availability provenance: $c96Outcome" -ForegroundColor Yellow
     } elseif ($isC011EC95) {
         if (@($runResults).Count -ne $FreshBootCount) { throw "C011EC95 produced $(@($runResults).Count) runs instead of $FreshBootCount." }
         $c95Read = { param([string]$line,[string]$field) Get-MarkerField $line $field }

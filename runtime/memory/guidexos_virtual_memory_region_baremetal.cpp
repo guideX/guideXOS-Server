@@ -7,6 +7,7 @@
 namespace gxos_vm_true_compat {
 using size_t = ::size_t;
 using uint8_t = ::uint8_t;
+using uint32_t = ::uint32_t;
 using uint64_t = ::uint64_t;
 using uintptr_t = ::uintptr_t;
 }
@@ -32,6 +33,12 @@ using kernel::memory::address_space::FrameOwner;
 using kernel::memory::address_space::FrameReleaseReason;
 using kernel::memory::address_space::FrameAccounting;
 using kernel::memory::address_space::MappingInfo;
+
+#if defined(GUIDEXOS_NATIVEAOT_C011EC96_PHYSICAL_FRAME_PROVENANCE)
+extern "C" void guideXosNativeAotC011EC96RollbackObserved(
+    uint32_t stage, uint64_t firstPage, uint64_t pageCount,
+    uint64_t newlyAllocatedPages);
+#endif
 
 constexpr std::size_t kPageSize = 4096;
 constexpr std::uintptr_t kRuntimeRangeBase = 0x100000000ULL;
@@ -367,7 +374,22 @@ VmResult commit(VirtualMemoryRegion& region, std::size_t offset,
         const std::uint64_t physical = kernel::memory::address_space::allocateFrame(
             FrameOwner::VmRegion);
         if (physical == 0) {
+#if defined(GUIDEXOS_NATIVEAOT_C011EC96_PHYSICAL_FRAME_PROVENANCE)
+            // The failed allocation is observed before rollback.  In the
+            // C95 16-page exhaustion case, newCount is the exact number of
+            // tentative pages that consumed the pool first.
+            guideXosNativeAotC011EC96RollbackObserved(
+                1u, static_cast<uint64_t>(firstPage),
+                static_cast<uint64_t>(pageCount),
+                static_cast<uint64_t>(newCount));
+#endif
             rollbackNewPages(*state, newly, firstPage, pageCount);
+#if defined(GUIDEXOS_NATIVEAOT_C011EC96_PHYSICAL_FRAME_PROVENANCE)
+            guideXosNativeAotC011EC96RollbackObserved(
+                2u, static_cast<uint64_t>(firstPage),
+                static_cast<uint64_t>(pageCount),
+                static_cast<uint64_t>(newCount));
+#endif
             diagnostic("physical frame allocation exhausted during commit");
             return VmResult::OutOfMemory;
         }
