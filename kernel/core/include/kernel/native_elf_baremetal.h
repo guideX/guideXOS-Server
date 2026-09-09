@@ -54,6 +54,23 @@ const PackageInfo* lookup_package(const char* appName);
 uint32_t package_count();
 const PackageInfo* package_at(uint32_t index);
 
+/* Phase-9 concurrent runtime driver.  The loader remains architecture
+ * specific, while the lifetime, event, quota, and scheduler contracts are
+ * common kernel services used by both ARM64 application tasks. */
+bool phase9_run_application(const char* appName, bool autoClose);
+void phase9_service();
+bool phase9_all_complete();
+bool phase9_app_a_image_primed();
+bool phase9_app_b_survived_a_close();
+uint32_t phase9_app_a_launches();
+uint64_t phase9_app_a_waits();
+uint64_t phase9_app_a_wakes();
+uint64_t phase9_app_b_waits();
+uint64_t phase9_app_b_wakes();
+bool phase9_vfs_exclusive();
+void phase9_vfs_enter();
+void phase9_vfs_exit();
+
 } // namespace native_elf
 } // namespace kernel
 

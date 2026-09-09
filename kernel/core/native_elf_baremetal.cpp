@@ -17,9 +17,12 @@
 #include "bitmap_font.h"
 #include "sdk/include/guidexos/abi.h"
 #include "sdk/include/guidexos/app.h"
-#elif defined(GXOS_AARCH64_PHASE5) || defined(GXOS_AARCH64_PHASE8)
+#elif defined(GXOS_AARCH64_PHASE5) || defined(GXOS_AARCH64_PHASE8) || defined(GXOS_AARCH64_PHASE9)
 #include "include/kernel/common_physical_allocator.h"
-#if defined(GXOS_AARCH64_PHASE8)
+#if defined(GXOS_AARCH64_PHASE9)
+#include "include/kernel/application_runtime.h"
+#endif
+#if defined(GXOS_AARCH64_PHASE8) || defined(GXOS_AARCH64_PHASE9)
 #include "include/kernel/desktop.h"
 #include "include/kernel/framebuffer.h"
 #include "include/kernel/kernel_app.h"
@@ -35,7 +38,7 @@
 #include "sdk/include/guidexos/app.h"
 #endif
 
-#if defined(GXOS_AARCH64_PHASE8)
+#if defined(GXOS_AARCH64_PHASE8) || defined(GXOS_AARCH64_PHASE9)
 extern uint64_t phase3_timer_count();
 #endif
 
@@ -1548,7 +1551,7 @@ bool last_launch_rejected_wrong_architecture() { return false; }
 
 #include "native_elf_baremetal_arm64.inc"
 
-#elif defined(GXOS_AARCH64_PHASE8)
+#elif defined(GXOS_AARCH64_PHASE8) || defined(GXOS_AARCH64_PHASE9)
 
 #include "native_elf_baremetal_arm64.inc"
 

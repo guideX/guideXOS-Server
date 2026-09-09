@@ -162,9 +162,15 @@ typedef struct gx_host_calls {
                                        const char* text, gx_handle* outWidget);
     gx_result (GX_CALL *widget_set_text)(gx_app_context* ctx, gx_handle widget, const char* text);
     gx_result (GX_CALL *widget_set_value)(gx_app_context* ctx, gx_handle widget, int32_t value);
+    /* Optional append-only wait service.  A client compiled against the
+     * original GUI v1 table remains compatible because size is checked before
+     * this slot is read.  The service blocks the owning application task when
+     * its event queue is empty; it is not a poll/yield loop. */
+    gx_result (GX_CALL *wait_event)(gx_app_context* ctx, gx_event* outEvent);
 } gx_host_calls;
 
-#define GX_GUI_HOST_CALLS_SIZE ((uint32_t)(offsetof(gx_host_calls, widget_set_value) + sizeof(((gx_host_calls*)0)->widget_set_value)))
+#define GX_GUI_V1_HOST_CALLS_SIZE ((uint32_t)(offsetof(gx_host_calls, widget_set_value) + sizeof(((gx_host_calls*)0)->widget_set_value)))
+#define GX_GUI_HOST_CALLS_SIZE ((uint32_t)(offsetof(gx_host_calls, wait_event) + sizeof(((gx_host_calls*)0)->wait_event)))
 
 #ifdef __cplusplus
 }

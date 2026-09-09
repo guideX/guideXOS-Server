@@ -49,6 +49,8 @@
 /out/aarch64-phase5-baseline/
 /out/aarch64-phase6/
 /out/aarch64-phase6-probe/
+/out/aarch64-phase9/
+/out/aarch64-phase9-host-tests.exe
 /tools/__pycache__/
 /out/wallpaper-pack/certs/ca-bundle.manifest
 /out/wallpaper-pack/config/certs/ca-bundle.manifest

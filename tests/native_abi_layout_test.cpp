@@ -65,8 +65,10 @@ static_assert(offsetof(gx_host_calls, window_destroy) == 248, "window destroy sl
 static_assert(offsetof(gx_host_calls, widget_create) == 256, "widget create slot changed");
 static_assert(offsetof(gx_host_calls, widget_set_text) == 264, "widget set text slot changed");
 static_assert(offsetof(gx_host_calls, widget_set_value) == 272, "widget set value slot changed");
-static_assert(sizeof(gx_host_calls) == 280, "gx_host_calls size changed");
-static_assert(GX_GUI_HOST_CALLS_SIZE == 280, "GUI ABI table size changed");
+static_assert(sizeof(gx_host_calls) == 288, "gx_host_calls size changed");
+static_assert(offsetof(gx_host_calls, wait_event) == 280, "wait_event slot changed");
+static_assert(GX_GUI_V1_HOST_CALLS_SIZE == 280, "GUI v1 size changed");
+static_assert(GX_GUI_HOST_CALLS_SIZE == 288, "GUI ABI table size changed");
 static_assert(sizeof(gx_development_run_request) == 72, "development run request size changed");
 static_assert(offsetof(gx_development_run_request, projectRoot) == 8, "development run request project root offset changed");
 static_assert(offsetof(gx_development_run_request, artifactSha256) == 56, "development run request artifact hash offset changed");

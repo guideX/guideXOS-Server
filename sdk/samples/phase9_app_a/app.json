@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "id": "com.guidexos.phase9.appa",
+  "displayName": "Phase 9 App A",
+  "version": "0.1.0",
+  "publisher": "guideXOS",
+  "description": "Concurrent NativeElf App A with two windows.",
+  "category": "System",
+  "kind": "NativeElf",
+  "icon": "",
+  "minGuideXOSVersion": "0.1.0",
+  "supportedArchitectures": [ "arm64" ],
+  "entries": [{
+    "architecture": "arm64",
+    "path": "bin/arm64/phase9-app-a.elf",
+    "entryPoint": "gx_main",
+    "abi": "guidexos-c-abi-v1",
+    "runtime": "native-elf"
+  }],
+  "permissions": [ "log", "gui" ],
+  "fileAssociations": []
+}

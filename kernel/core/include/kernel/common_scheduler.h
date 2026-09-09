@@ -42,6 +42,8 @@ struct Task {
     uint8_t reserved;
     uint64_t execution_count;
     uint64_t preemption_count;
+    uint64_t wait_count;
+    uint64_t wake_count;
 };
 
 struct Config {
@@ -60,6 +62,8 @@ struct Stats {
     uint32_t task_count;
     uint32_t unexpected_irqs;
     uint32_t last_unexpected_irq;
+    uint64_t waits;
+    uint64_t wakes;
 };
 
 bool initialize(const Config& config);
@@ -72,6 +76,11 @@ void set_idle_task(Task* task);
 bool prepare_interrupt_contexts();
 void start();
 void yield();
+/* Called with interrupts already masked by a wait service.  The check,
+ * TASK_BLOCKED transition, and switch are one scheduler critical section. */
+bool block_current_locked();
+void wake_task_locked(Task* task);
+void wake_task(Task* task);
 void mark_cooperative_complete();
 void* timer_interrupt(void* frame);
 void return_to_bootstrap();

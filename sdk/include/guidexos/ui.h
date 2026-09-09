@@ -58,6 +58,13 @@ static inline gx_result gx_request_fixed_window(gx_app_context* ctx, const char*
     return ctx->host->request_window_ex(ctx, title, width, height, GX_WINDOW_FLAG_FIXED_SIZE, outWindow);
 }
 
+static inline gx_result gx_wait_event(gx_app_context* ctx, gx_event* outEvent) {
+    if (!ctx || !ctx->host || ctx->host->size <
+        (uint32_t)(offsetof(gx_host_calls, wait_event) + sizeof(ctx->host->wait_event)) ||
+        !ctx->host->wait_event) return GX_ERROR_UNSUPPORTED;
+    return ctx->host->wait_event(ctx, outEvent);
+}
+
 static inline gx_result gx_present_frame(gx_app_context* ctx, gx_handle window, int x, int y, int width, int height,
                                          uint32_t strideBytes, uint32_t pixelFormat, const void* pixels, uint32_t pixelBytes) {
     if (!ctx || !ctx->host || !ctx->host->present_frame) return GX_ERROR_UNSUPPORTED;

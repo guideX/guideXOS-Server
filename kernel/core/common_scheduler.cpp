@@ -12,7 +12,7 @@ namespace scheduler {
 
 namespace {
 
-static const uint32_t kMaxTasks = 8;
+static const uint32_t kMaxTasks = 16;
 static const uint64_t kLowCanary = UINT64_C(0x47584f535441434b);
 static const uint64_t kHighCanary = UINT64_C(0x43414e415259454e);
 
@@ -30,7 +30,6 @@ static bool s_cooperative_complete = false;
 static bool s_preemptive_complete = false;
 static bool s_failed = false;
 static Stats s_stats{};
-
 static void zero_bytes(void* destination, uint64_t size)
 {
     uint8_t* bytes = static_cast<uint8_t*>(destination);
@@ -79,8 +78,18 @@ static bool task_is_runnable(const Task* task)
 static Task* find_next(Task* current, bool include_completion)
 {
     if (s_task_count == 0) return 0;
+    uint32_t start = s_round_robin_cursor;
+    // Interrupt-return selection can enter a task from its prepared frame
+    // without passing through the cooperative cursor update.  Anchor the
+    // next walk to the task that is actually running so a blocked task hands
+    // off to its immediate runnable successor.
+    const uintptr_t currentAddress = reinterpret_cast<uintptr_t>(current);
+    const uintptr_t firstTaskAddress = reinterpret_cast<uintptr_t>(&s_tasks[0]);
+    const uintptr_t endTaskAddress = reinterpret_cast<uintptr_t>(&s_tasks[s_task_count]);
+    if (currentAddress >= firstTaskAddress && currentAddress < endTaskAddress)
+        start = static_cast<uint32_t>(current - &s_tasks[0]);
     for (uint32_t offset = 1; offset <= s_task_count; ++offset) {
-        const uint32_t index = (s_round_robin_cursor + offset) % s_task_count;
+        const uint32_t index = (start + offset) % s_task_count;
         Task* candidate = &s_tasks[index];
         if (candidate == current || !task_is_runnable(candidate)) continue;
         if (!include_completion && candidate == s_completion_task) continue;
@@ -196,6 +205,8 @@ bool reset_task(Task* task, kernel::arch::thread_entry_t entry, void* argument, 
     task->state = enabled ? TASK_RUNNABLE : TASK_BLOCKED;
     task->execution_count = 0;
     task->preemption_count = 0;
+    task->wait_count = 0;
+    task->wake_count = 0;
     return true;
 }
 
@@ -277,6 +288,41 @@ void yield()
     kernel::arch::context_switch(&old->context, next == &s_bootstrap
                                                    ? s_bootstrap_context
                                                    : next->context);
+    kernel::arch::irq_restore(state);
+}
+
+bool block_current_locked()
+{
+    if (!is_real_task(s_current) || !task_is_runnable(s_current) || s_failed) return false;
+    Task* old = s_current;
+    old->state = TASK_BLOCKED;
+    ++old->wait_count;
+    ++s_stats.waits;
+    /* The caller is running from an interrupt-return context in the
+     * preemptive phase.  A cooperative context_switch here would resume the
+     * destination's initial/stale stack frame.  Leave the current task in a
+     * masked, blocked state and let the timer exception select and restore
+     * the next task's interrupt frame.  The blocked task resumes at the WFI
+     * below after wake_task_locked marks it runnable. */
+    kernel::arch::irq_enable();
+    for (;;) {
+        if (old->state != TASK_BLOCKED) return !s_failed;
+        kernel::arch::idle();
+    }
+}
+
+void wake_task_locked(Task* task)
+{
+    if (!is_real_task(task) || task->state != TASK_BLOCKED || task->enabled == 0) return;
+    task->state = TASK_RUNNABLE;
+    ++task->wake_count;
+    ++s_stats.wakes;
+}
+
+void wake_task(Task* task)
+{
+    const kernel::arch::interrupt_state_t state = kernel::arch::irq_save();
+    wake_task_locked(task);
     kernel::arch::irq_restore(state);
 }
 
@@ -384,6 +430,8 @@ void get_stats(Stats* stats)
     stats->task_count = s_task_count;
     stats->unexpected_irqs = s_stats.unexpected_irqs;
     stats->last_unexpected_irq = s_stats.last_unexpected_irq;
+    stats->waits = s_stats.waits;
+    stats->wakes = s_stats.wakes;
 }
 
 } // namespace scheduler

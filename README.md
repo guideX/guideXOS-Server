@@ -202,13 +202,15 @@ Uses:
 
 ## Roadmap (Realistic)
 
-### Phase 8 (Current Focus)
+### ARM64 Phase 9 (Current Focus)
 
-* Developer SDK
-* `.gxapp` universal format
-* Cross-architecture toolchains
-* musl libc integration
-* Package management
+* NativeElf per-application runtime services
+* Wait/wake event queues and lifecycle-safe close delivery
+* Generation-checked handles and resource quotas
+* Concurrent ARM64 GUI runtimes and three-boot QMP proof
+
+The Phase 7 high-rate QEMU/QMP limitation remains documented and is not claimed
+as `AARCH64_PHASE7_PASS`.
 
 ### Path Forward
 

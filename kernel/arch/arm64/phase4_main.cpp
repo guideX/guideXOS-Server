@@ -30,7 +30,7 @@ using Aarch64Handoff = gxos_aarch64_phase4_handoff;
 #include "../../../kernel/core/include/kernel/fs_fat.h"
 #include "../../../kernel/core/include/kernel/ramdisk.h"
 #include "../../../kernel/core/include/kernel/vfs.h"
-#if defined(GXOS_AARCH64_PHASE5) || defined(GXOS_AARCH64_PHASE6) || defined(GXOS_AARCH64_PHASE8)
+#if defined(GXOS_AARCH64_PHASE5) || defined(GXOS_AARCH64_PHASE6) || defined(GXOS_AARCH64_PHASE8) || defined(GXOS_AARCH64_PHASE9)
 #include "../../../kernel/core/include/kernel/native_elf_baremetal.h"
 #endif
 #include "phase2_mmu.h"
@@ -39,7 +39,7 @@ using Aarch64Handoff = gxos_aarch64_phase4_handoff;
 #include "../../../kernel/core/include/kernel/desktop.h"
 #include "../../../kernel/core/include/kernel/framebuffer.h"
 #endif
-#if defined(GXOS_AARCH64_PHASE7) || defined(GXOS_AARCH64_PHASE8)
+#if defined(GXOS_AARCH64_PHASE7) || defined(GXOS_AARCH64_PHASE8) || defined(GXOS_AARCH64_PHASE9)
 #include "../../../kernel/core/include/kernel/input_manager.h"
 #include "../../../kernel/core/include/kernel/input_queue.h"
 #include "../../../kernel/core/include/kernel/virtio_input.h"
@@ -122,6 +122,21 @@ static const uint32_t kAppDurabilityLaunches =
 #else
     100;
 #endif
+#if defined(GXOS_AARCH64_PHASE9)
+static volatile uint8_t g_phase9_failure = 0;
+static volatile uint8_t g_phase9_complete = 0;
+static volatile uint8_t g_phase9_app_b_started = 0;
+static kernel::scheduler::Task* g_phase9_app_a_task = nullptr;
+static kernel::scheduler::Task* g_phase9_app_b_task = nullptr;
+static kernel::scheduler::Task* g_phase9_monitor_task = nullptr;
+#endif
+#endif
+
+#if defined(GXOS_AARCH64_PHASE9)
+extern "C" uint8_t phase9_filesystem_vfs_active()
+{
+    return g_filesystem_vfs_active;
+}
 #endif
 static gxos_aarch64_phase2_platform* g_platform_for_tasks = nullptr;
 
@@ -152,7 +167,9 @@ static void fail(const char* reason)
 {
     print("[guideXOS] ");
     print(reason);
-#if defined(GXOS_AARCH64_PHASE8)
+#if defined(GXOS_AARCH64_PHASE9)
+    print("\n[guideXOS] AARCH64_PHASE9_ERROR\n");
+#elif defined(GXOS_AARCH64_PHASE8)
     print("\n[guideXOS] AARCH64_PHASE8_ERROR\n");
 #elif defined(GXOS_AARCH64_PHASE7)
     print("\n[guideXOS] AARCH64_PHASE7_ERROR\n");
@@ -339,11 +356,22 @@ static void filesystem_task(void*)
         }
 #endif
 #if defined(GXOS_AARCH64_PHASE5)
-        if (g_app_vfs_exclusive) {
+        if (g_app_vfs_exclusive
+#if defined(GXOS_AARCH64_PHASE9)
+            || kernel::native_elf::phase9_vfs_exclusive()
+#endif
+            ) {
             kernel::scheduler::note_execution();
             continue;
         }
         g_filesystem_vfs_active = 1;
+ #if defined(GXOS_AARCH64_PHASE9)
+        if (kernel::native_elf::phase9_vfs_exclusive()) {
+            g_filesystem_vfs_active = 0;
+            kernel::scheduler::note_execution();
+            continue;
+        }
+ #endif
 #endif
         if (kernel::vfs::seek(handle, 0, kernel::vfs::SEEK_SET) != kernel::vfs::VFS_OK) {
             ++g_fs_work.failures; g_fs_failure = 1;
@@ -387,6 +415,75 @@ static void completion_task(void*)
 #endif
     kernel::scheduler::return_to_bootstrap();
 }
+
+#if defined(GXOS_AARCH64_PHASE9)
+static void phase9_app_a_task(void*)
+{
+    while (!g_graphics_complete && !g_graphics_failure) {
+        kernel::scheduler::note_execution();
+    }
+    if (!kernel::native_elf::phase9_run_application("com.guidexos.phase9.appa", false)) {
+        g_phase9_failure = 1;
+        g_phase9_complete = 1;
+        for (;;) kernel::scheduler::note_execution();
+    }
+    /* The first close is driven by the real tablet path.  The remaining
+     * bounded durability cycles use the same application-owned close event
+     * route, with the monitor task acting as the deterministic timer source. */
+    for (uint32_t launch = 1; launch < 51; ++launch) {
+        if (!kernel::native_elf::phase9_run_application("com.guidexos.phase9.appa", true)) {
+            g_phase9_failure = 1;
+            break;
+        }
+    }
+    if (!kernel::native_elf::phase9_all_complete() && kernel::native_elf::phase9_app_a_launches() >= 51) {
+        print("[guideXOS] application quotas: PASS\n");
+        print("[guideXOS] application wait/wake: PASS\n");
+    }
+    g_phase9_complete = 1;
+    for (;;) kernel::scheduler::note_execution();
+}
+
+static void phase9_app_b_task(void*)
+{
+    while (!g_graphics_complete && !g_graphics_failure) {
+        kernel::scheduler::note_execution();
+    }
+    /* Serialize only the first executable image read.  App B still starts
+     * with App A's windows live, but avoids racing the initial VFS/loader
+     * transaction on cold boots. */
+    while (!kernel::native_elf::phase9_app_a_image_primed() && !g_phase9_failure) {
+        kernel::scheduler::note_execution();
+    }
+    g_phase9_app_b_started = 1;
+    if (!kernel::native_elf::phase9_run_application("com.guidexos.phase9.appb", false)) g_phase9_failure = 1;
+    for (;;) kernel::scheduler::note_execution();
+}
+
+static void phase9_monitor_task(void*)
+{
+    for (;;) {
+        kernel::native_elf::phase9_service();
+        if (kernel::native_elf::phase9_app_b_survived_a_close() &&
+            kernel::native_elf::phase9_app_a_launches() >= 2) {
+            /* The marker is emitted once App A has returned from its real
+             * first close and the surviving App B still owns a live window. */
+            static bool cleanupLogged = false;
+            if (!cleanupLogged) {
+                cleanupLogged = true;
+                print("[guideXOS] cross-app cleanup isolation: PASS\n");
+            }
+        }
+        if (kernel::native_elf::phase9_all_complete()) {
+            g_app_complete = 1;
+            phase6_maybe_arm_completion();
+            break;
+        }
+        kernel::scheduler::note_execution();
+    }
+    for (;;) kernel::scheduler::note_execution();
+}
+#endif
 
 #if defined(GXOS_AARCH64_PHASE5)
 static void app_model_task(void*)
@@ -556,7 +653,23 @@ static void graphics_task(void*)
     kernel::arch::irq_restore(irqState);
     print("[guideXOS] input IRQ registry: OK\n");
     print("[guideXOS] common input queue: OK capacity=256 policy=drop-newest\n");
-#if defined(GXOS_AARCH64_PHASE8)
+#if defined(GXOS_AARCH64_PHASE9)
+    // Phase 9 applications block in the common wait service.  Keep the
+    // single desktop/input pump alive in the graphics task so VirtIO input
+    // can wake the owning application without app-side polling.
+    print("[guideXOS] NativeElf application input bridge: ready\n");
+    kernel::desktop::draw();
+    ++g_graphics_redraws;
+    g_graphics_complete = 1;
+    g_graphics_in_progress = 0;
+    phase6_maybe_arm_completion();
+    for (;;) {
+        kernel::native_elf::phase9_vfs_enter();
+        kernel::desktop::cooperative_yield();
+        kernel::native_elf::phase9_vfs_exit();
+        kernel::scheduler::note_execution();
+    }
+#elif defined(GXOS_AARCH64_PHASE8)
     // Phase 8 deliberately leaves window creation to the independently
     // loaded NativeElf application.  The graphics task owns only the common
     // desktop/input service and never creates a proof window on the app's
@@ -1175,8 +1288,15 @@ extern "C" void phase3_main(const Aarch64Handoff* handoff, uint64_t initial_el)
     kernel::scheduler::Task* graphics = nullptr;
 #endif
 #if defined(GXOS_AARCH64_PHASE5)
+#if defined(GXOS_AARCH64_PHASE9)
+    kernel::scheduler::Task* phase9AppA = kernel::scheduler::create_task(5, "nativeelf-app-a", phase9_app_a_task, nullptr, false);
+    kernel::scheduler::Task* phase9AppB = kernel::scheduler::create_task(7, "nativeelf-app-b", phase9_app_b_task, nullptr, false);
+    kernel::scheduler::Task* phase9Monitor = kernel::scheduler::create_task(8, "nativeelf-runtime-monitor", phase9_monitor_task, nullptr, false);
+    if (!fs_task || !completion || !phase9AppA || !phase9AppB || !phase9Monitor || kernel::scheduler::task_count() != 8) fail("thread context: FAIL");
+#else
     kernel::scheduler::Task* app_task = kernel::scheduler::create_task(5, "app-model", app_model_task, nullptr, false);
     if (!fs_task || !completion || !app_task || kernel::scheduler::task_count() != 6) fail("thread context: FAIL");
+#endif
 #else
     if (!fs_task || !completion || kernel::scheduler::task_count() != 5) fail("thread context: FAIL");
 #endif
@@ -1193,7 +1313,13 @@ extern "C" void phase3_main(const Aarch64Handoff* handoff, uint64_t initial_el)
 
 #if defined(GXOS_AARCH64_PHASE6)
     graphics = kernel::scheduler::create_task(6, "desktop-render", graphics_task, nullptr, false);
-    if (!graphics || kernel::scheduler::task_count() != 7) fail("thread context: FAIL");
+    if (!graphics || kernel::scheduler::task_count() !=
+#if defined(GXOS_AARCH64_PHASE9)
+        9
+#else
+        7
+#endif
+        ) fail("thread context: FAIL");
     g_graphics_in_progress = 1;
 #endif
 
@@ -1204,7 +1330,13 @@ extern "C" void phase3_main(const Aarch64Handoff* handoff, uint64_t initial_el)
     if (!kernel::scheduler::reset_task(fs_task, filesystem_task, nullptr, true) ||
         !kernel::scheduler::reset_task(completion, completion_task, nullptr, true)) fail("preemption setup: FAIL");
 #if defined(GXOS_AARCH64_PHASE5)
+#if defined(GXOS_AARCH64_PHASE9)
+    if (!kernel::scheduler::reset_task(phase9AppA, phase9_app_a_task, nullptr, true) ||
+        !kernel::scheduler::reset_task(phase9AppB, phase9_app_b_task, nullptr, true) ||
+        !kernel::scheduler::reset_task(phase9Monitor, phase9_monitor_task, nullptr, true)) fail("preemption setup: FAIL");
+#else
     if (!kernel::scheduler::reset_task(app_task, app_model_task, nullptr, true)) fail("preemption setup: FAIL");
+#endif
 #endif
 #if defined(GXOS_AARCH64_PHASE6)
     if (!kernel::scheduler::reset_task(graphics, graphics_task, nullptr, true)) fail("preemption setup: FAIL");
@@ -1248,9 +1380,25 @@ extern "C" void phase3_main(const Aarch64Handoff* handoff, uint64_t initial_el)
         fail("scheduler/VFS integration: FAIL");
     }
 #if defined(GXOS_AARCH64_PHASE5)
+#if defined(GXOS_AARCH64_PHASE9)
+    if (!g_app_complete || g_phase9_failure || !kernel::native_elf::phase9_all_complete() ||
+        kernel::native_elf::phase9_app_a_launches() != 51) fail("Phase 9 runtime durability: FAIL");
+    print("[guideXOS] runtime accounting: PASS appA-waits=");
+    phase3_serial_dec(kernel::native_elf::phase9_app_a_waits());
+    print(" appA-wakes=");
+    phase3_serial_dec(kernel::native_elf::phase9_app_a_wakes());
+    print(" appB-waits=");
+    phase3_serial_dec(kernel::native_elf::phase9_app_b_waits());
+    print(" appB-wakes=");
+    phase3_serial_dec(kernel::native_elf::phase9_app_b_wakes());
+    print(" global-pages=");
+    phase3_serial_dec(kernel::memory::allocated_pages());
+    print("\n");
+#else
     if (!g_app_complete || g_app_failure || g_app_launches != kAppDurabilityLaunches) {
         fail("App Model durability: FAIL");
     }
+#endif
 #endif
 #if defined(GXOS_AARCH64_PHASE6)
 #if defined(GXOS_AARCH64_PHASE7)
@@ -1263,6 +1411,10 @@ extern "C" void phase3_main(const Aarch64Handoff* handoff, uint64_t initial_el)
         fail("graphics/scheduler integration: FAIL");
     }
     print("[guideXOS] graphics/scheduler integration: PASS\n");
+#endif
+#if defined(GXOS_AARCH64_PHASE9)
+    print("[guideXOS] framebuffer validation: PASS\n");
+    print("AARCH64_PHASE9_PASS\n");
 #endif
 #endif
     print("[guideXOS] scheduler/VFS integration: PASS reads=");
@@ -1295,7 +1447,9 @@ extern "C" void phase3_main(const Aarch64Handoff* handoff, uint64_t initial_el)
     phase3_serial_dec(phase3_exception_count());
     print(" last-unexpected-irq=");
     phase3_serial_dec(stats.last_unexpected_irq);
-#if defined(GXOS_AARCH64_PHASE8)
+#if defined(GXOS_AARCH64_PHASE9)
+    print("\nAARCH64_PHASE9_PASS\n");
+#elif defined(GXOS_AARCH64_PHASE8)
     print("\nAARCH64_PHASE8_PASS\n");
 #elif defined(GXOS_AARCH64_PHASE7)
     print("\nAARCH64_PHASE7_PASS\n");

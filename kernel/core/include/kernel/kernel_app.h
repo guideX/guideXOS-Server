@@ -228,7 +228,7 @@ public:
     void setTitle(const char* title);
     void setSize(int w, int h);
     void setPosition(int x, int y);
-    void requestClose();
+    virtual void requestClose();
     void invalidate();
     
     // Widget helpers

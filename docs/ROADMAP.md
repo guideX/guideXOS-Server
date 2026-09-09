@@ -1,7 +1,7 @@
 # ??? guideXOSServer Development Roadmap
 
-**Last Updated:** Current Session  
-**Current Status:** Phase 7 (Testing) Infrastructure Complete  
+**Last Updated:** 2026-09-09
+**Current Status:** AARCH64 Phase 9 runtime services implemented
 **Overall Progress:** ~80% to Production Release
 
 ---
@@ -11,9 +11,9 @@
 ```
 ? Phase 1-5: Foundation & Core Systems (100%)
 ? Phase 6: Application Development (95%)
-?? Phase 7: Testing & Quality (Infrastructure Ready)
-?? Phase 8: Polish & UX (Planned)
-?? Phase 9: Advanced Features (Future)
+?? Phase 7: Testing & Quality (High-rate QMP limitation remains)
+? Phase 8: NativeElf GUI (ARM64 complete)
+? Phase 9: NativeElf runtime services (ARM64 complete)
 ?? Phase 10: Ecosystem (Future)
 ```
 
@@ -120,6 +120,20 @@ bounded GUI lifecycle durability.
 **Priority:** High
 
 **Details:** See `aarch64/AARCH64_PHASE8_NATIVEELF_GUI.md`
+
+---
+
+### Phase 9: NativeElf runtime services (Complete) ✅
+**Status:** Complete on `AARCH64_SUPPORT`.
+
+Per-application lifecycle state, generation-checked handles, quotas, bounded
+event queues, wait/wake, idempotent cleanup, concurrent App A/App B runtimes,
+and a repeatable three-boot QMP harness are implemented and documented.
+
+**Details:** See `aarch64/AARCH64_PHASE9_APP_RUNTIME.md`
+
+The unresolved Phase 7 high-rate QEMU/QMP stress limitation remains explicitly
+out of scope; this roadmap does not claim `AARCH64_PHASE7_PASS`.
 
 ---
 

@@ -182,12 +182,11 @@ GUI application source with AMD64 freestanding flags. This validates the
 architecture-neutral contract even where the existing full AMD64 NativeElf
 runtime remains subject to its separate Mbed TLS build issue.
 
-## Recommended AARCH64-9 scope
+## AARCH64-9 follow-up
 
-Keep AARCH64-9 focused on making the now-proven boundary safer and more
-general: move NativeElf GUI dispatch toward a kernel-owned per-application
-event service with explicit wait/wake primitives, add a documented close and
-resource-quota contract, and test multiple simultaneous NativeElf windows.
-EL0 isolation, SMP, GPU acceleration, networking, QMP transport redesign,
-and new device classes remain out of scope until that ABI/lifetime work is
-stable.
+The recommended runtime-service work is implemented in
+`AARCH64_PHASE9_APP_RUNTIME.md`: per-application event queues, explicit
+wait/wake, generation-checked handles, quotas, idempotent cleanup, concurrent
+App A/App B runtimes, and a three-boot QMP harness. EL0 isolation, SMP, GPU
+acceleration, networking, QMP transport redesign, and new device classes remain
+out of scope.

@@ -17,6 +17,7 @@ static const uint32_t kArm64ElfLoad = 1;
 
 extern "C" void phase3_serial_print(const char* text);
 extern "C" void phase3_serial_dec(uint64_t value);
+extern "C" uint8_t phase9_filesystem_vfs_active();
 extern "C" uint8_t phase2_mmu_set_range_permissions(uint64_t base, uint64_t size,
                                                        uint8_t executable, uint8_t writable);
 extern "C" gx_result gxos_native_call_on_stack(
@@ -85,6 +86,9 @@ struct Arm64Runtime {
     uint64_t stackBase;
     uint64_t stackBytes;
     uint64_t stackPages;
+#if defined(GXOS_AARCH64_PHASE9)
+    uint64_t preferredBase;
+#endif
     bool entered;
     bool verbose;
 #if defined(GXOS_AARCH64_PHASE8)
@@ -575,6 +579,41 @@ static bool arm64_read_at(const char* path, uint64_t offset, void* buffer, uint3
     return okay && total == bytes;
 }
 
+static bool arm64_read_at_for_runtime(const Arm64Runtime* runtime, const char* path,
+                                      uint64_t offset, void* buffer, uint32_t bytes)
+{
+#if defined(GXOS_AARCH64_PHASE9)
+    static const uint32_t kPhase9CacheBytes = 64u * 1024u;
+    struct ImageCache {
+        const Arm64Package* package;
+        uint32_t bytes;
+        uint8_t data[kPhase9CacheBytes];
+    };
+    static ImageCache caches[2]{};
+    if (!runtime || !runtime->package || runtime->package->executableBytes > kPhase9CacheBytes)
+        return arm64_read_at(path, offset, buffer, bytes);
+    const uint32_t slot = arm64_equal(runtime->package->id, "com.guidexos.phase9.appb") ? 1u : 0u;
+    ImageCache& cache = caches[slot];
+    if (cache.package != runtime->package) {
+        if (!arm64_read_at(path, 0, cache.data,
+                           static_cast<uint32_t>(runtime->package->executableBytes))) {
+            cache.package = nullptr;
+            cache.bytes = 0;
+            return false;
+        }
+        cache.package = runtime->package;
+        cache.bytes = static_cast<uint32_t>(runtime->package->executableBytes);
+    }
+    if (offset > cache.bytes || bytes > cache.bytes - offset) return false;
+    for (uint32_t i = 0; i < bytes; ++i)
+        static_cast<uint8_t*>(buffer)[i] = cache.data[offset + i];
+    return true;
+#else
+    (void)runtime;
+    return arm64_read_at(path, offset, buffer, bytes);
+#endif
+}
+
 static bool arm64_parse_package(const char* directory, Arm64Package* package)
 {
     if (!directory || !package) return false;
@@ -723,7 +762,7 @@ static bool arm64_load_image(Arm64Runtime* runtime)
     char path[256];
     if (!arm64_package_path(runtime->package, runtime->package->executable, path, sizeof(path))) return false;
     Arm64Elf64Header header{};
-    if (!arm64_read_at(path, 0, &header, sizeof(header))) { arm64_load_failure("header-read"); return false; }
+    if (!arm64_read_at_for_runtime(runtime, path, 0, &header, sizeof(header))) { arm64_load_failure("header-read"); return false; }
     if (header.machine != kArm64ElfMachine) {
         if (header.machine == kArm64ElfMachineAmd64) arm64_print("[guideXOS] NativeElf wrong architecture: rejected\n");
         else arm64_load_failure("unsupported-machine");
@@ -745,7 +784,7 @@ static bool arm64_load_image(Arm64Runtime* runtime)
     for (uint16_t i = 0; i < header.phnum; ++i) {
         uint64_t offset = 0;
         if (!arm64_mul(i, header.phentsize, &offset) || !arm64_add(header.phoff, offset, &offset) ||
-            !arm64_read_at(path, offset, &headers[i], sizeof(headers[i]))) {
+            !arm64_read_at_for_runtime(runtime, path, offset, &headers[i], sizeof(headers[i]))) {
             arm64_load_failure("program-header-bounds"); return false;
         }
         const Arm64Elf64ProgramHeader& program = headers[i];
@@ -774,10 +813,16 @@ static bool arm64_load_image(Arm64Runtime* runtime)
         if ((program.flags & 1u) && header.entry >= program.vaddr && header.entry < segmentEnd) entryExecutable = true;
         ++loadCount;
     }
-    if (loadCount == 0 || minimum != kArm64PreferredBase || maximum <= minimum ||
+    const uint64_t preferredBase =
+#if defined(GXOS_AARCH64_PHASE9)
+        runtime->preferredBase != 0 ? runtime->preferredBase : kArm64PreferredBase;
+#else
+        kArm64PreferredBase;
+#endif
+    if (loadCount == 0 || minimum != preferredBase || maximum <= minimum ||
         maximum - minimum > kArm64MaxImageBytes || header.entry < minimum || header.entry >= maximum ||
         !entryExecutable) {
-        arm64_load_failure(minimum != kArm64PreferredBase ? "fixed-address-contract" : "load-layout"); return false;
+        arm64_load_failure(minimum != preferredBase ? "fixed-address-contract" : "load-layout"); return false;
     }
     const uint64_t imageBytes = maximum - minimum;
     const uint64_t pages = imageBytes / kArm64PageSize;
@@ -793,7 +838,7 @@ static bool arm64_load_image(Arm64Runtime* runtime)
         while (copied < program.filesz) {
             const uint64_t remaining = program.filesz - copied;
             const uint32_t chunk = remaining > 65536 ? 65536 : static_cast<uint32_t>(remaining);
-            if (!arm64_read_at(path, program.offset + copied, destination + copied, chunk)) {
+            if (!arm64_read_at_for_runtime(runtime, path, program.offset + copied, destination + copied, chunk)) {
                 kernel::memory::release_pages(runtime->imageBase, runtime->imagePages); runtime->image = nullptr;
                 arm64_load_failure("segment-copy"); return false;
             }
@@ -1216,6 +1261,844 @@ static bool arm64_gui_run_package(Arm64Package* package, bool verbose)
     }
     return guiProof && canaries && cleanup;
 }
+#endif
+
+#if defined(GXOS_AARCH64_PHASE9)
+
+/* -------------------------------------------------------------------------
+ * Phase-9 concurrent NativeElf adapter
+ * -------------------------------------------------------------------------
+ * This is deliberately a thin ARM64 boundary.  Identity, lifecycle, quota,
+ * handle, queue, and wait/wake policy live in the common ApplicationRuntime;
+ * this section supplies only ELF mapping, AAPCS64 entry, and KernelWindow
+ * translation. */
+
+static const application::ApplicationQuotas kPhase9Quotas = {
+    3, 16, application::ApplicationEventService::kCapacity, 4096, 32, 2048
+};
+static const uint32_t kPhase9MaxWindows = 3;
+static const uint32_t kPhase9MaxWidgets = 32;
+
+struct Phase9Runtime;
+
+class Phase9GuiOwner final : public app::KernelApp {
+public:
+    explicit Phase9GuiOwner(Phase9Runtime* runtime);
+    ~Phase9GuiOwner() override;
+
+    bool init() override;
+    void shutdown() override;
+    void draw(uint32_t, uint32_t, uint32_t, uint32_t) override {}
+    void requestClose() override;
+
+    bool create_window(const char* title, int32_t width, int32_t height, uint32_t flags,
+                       gx_handle* outWindow);
+    gx_handle create_widget(gx_handle window, uint32_t type, int32_t x, int32_t y,
+                            int32_t width, int32_t height, const char* text);
+    bool set_widget_text(gx_handle widget, const char* text);
+    bool set_widget_value(gx_handle widget, int32_t value);
+    bool destroy_window(gx_handle window);
+    bool pop_event(gx_event* event);
+    void request_auto_close();
+    bool validate_window(gx_handle handle) const;
+    bool validate_widget(gx_handle handle) const;
+    gx_handle first_window_handle() const { return m_windowHandles[0]; }
+    gx_handle first_widget_handle() const { return m_widgetHandles[0]; }
+    uint32_t window_count() const { return m_windowCount; }
+    uint32_t widget_count() const { return m_widgetCount; }
+    bool close_seen() const { return m_closeSeen; }
+    bool has_windows() const { return m_windowCount != 0; }
+
+    void onMouseMove(int x, int y) override;
+    void onMouseDown(int x, int y, uint8_t button) override;
+    void onMouseUp(int x, int y, uint8_t button) override;
+    void onKeyDown(uint32_t key) override;
+    void onWidgetClick(int widgetId) override;
+    void onKeyChar(char c) override;
+    void onWindowClose() override;
+    void onWindowFocus() override;
+    void onWindowBlur() override;
+
+private:
+    struct WidgetSlot {
+        uint16_t generation;
+        uint16_t windowIndex;
+        uint16_t localId;
+        uint16_t stringBytes;
+        bool live;
+    };
+
+    static bool copy_string(char* destination, uint32_t capacity, const char* value);
+    int window_index(gx_handle handle) const;
+    int widget_slot(gx_handle handle) const;
+    int focused_window_index() const;
+    gx_handle widget_handle(int windowIndex, int localId) const;
+    void queue(gx_event_type type, gx_handle object, int32_t p1, int32_t p2,
+               int32_t p3, bool lifecycle = false);
+    void close_window_index(int index);
+    void update_current_window(app::KernelWindow* window);
+
+    Phase9Runtime* m_runtime;
+    app::KernelWindow* m_windows[kPhase9MaxWindows];
+    gx_handle m_windowHandles[kPhase9MaxWindows];
+    uint16_t m_windowGenerations[kPhase9MaxWindows];
+    WidgetSlot m_widgets[kPhase9MaxWidgets];
+    gx_handle m_widgetHandles[kPhase9MaxWidgets];
+    uint32_t m_windowCount;
+    uint32_t m_widgetCount;
+    int m_focusedWidget;
+    int m_closingWindow;
+    bool m_closeSeen;
+};
+
+struct Phase9Runtime {
+    Arm64Runtime loader;
+    application::ApplicationRuntime common;
+    Phase9GuiOwner* owner;
+    bool autoClose;
+    bool closeRequested;
+    bool isAppA;
+    bool entered;
+    uint64_t startTick;
+    uint32_t buttonClicks;
+    gx_handle firstWindowHandle;
+    gx_handle firstWidgetHandle;
+    uint32_t peakWindowCount;
+    uint32_t peakWidgetCount;
+    bool staleWindowRejected;
+    bool staleWidgetRejected;
+};
+
+static Phase9Runtime* s_phase9AppA = nullptr;
+static Phase9Runtime* s_phase9AppB = nullptr;
+static uint64_t s_phase9Generation = 0;
+static uint32_t s_phase9RuntimeSequence = 0;
+static uint32_t s_phase9AppALaunches = 0;
+static bool s_phase9AppAInitialDone = false;
+static bool s_phase9AppADurabilityDone = false;
+static uint64_t s_phase9AppADurabilityTick = 0;
+/* The QMP harness exercises App B before App A teardown; this short fallback
+ * keeps headless boots deterministic after the durability proof completes. */
+static const uint64_t kPhase9AppBGraceTicks = 200;
+static bool s_phase9AppBSurvived = false;
+static bool s_phase9AllComplete = false;
+static gx_handle s_phase9OldAWindow = 0;
+static gx_handle s_phase9OldAWidget = 0;
+static uint64_t s_phase9AppAWaits = 0;
+static uint64_t s_phase9AppAWakes = 0;
+static uint64_t s_phase9AppBWaits = 0;
+static uint64_t s_phase9AppBWakes = 0;
+static bool s_phase9WaitWakeLogged = false;
+static bool s_phase9AppAButtonLogged = false;
+static bool s_phase9AppBButtonLogged = false;
+static volatile uint8_t s_phase9LoaderBusy = 0;
+static volatile uint32_t s_phase9VfsUsers = 0;
+static bool s_phase9AppAImagePrimed = false;
+static bool s_phase9AppBImagePrimed = false;
+
+bool phase9_vfs_exclusive() { return s_phase9VfsUsers != 0; }
+
+void phase9_vfs_enter()
+{
+    while (phase9_filesystem_vfs_active()) scheduler::note_execution();
+    const arch::interrupt_state_t state = arch::irq_save();
+    ++s_phase9VfsUsers;
+    arch::irq_restore(state);
+}
+
+void phase9_vfs_exit()
+{
+    const arch::interrupt_state_t state = arch::irq_save();
+    if (s_phase9VfsUsers != 0) --s_phase9VfsUsers;
+    arch::irq_restore(state);
+}
+
+static void phase9_acquire_loader()
+{
+    for (;;) {
+        const arch::interrupt_state_t state = arch::irq_save();
+        if (!s_phase9LoaderBusy) {
+            s_phase9LoaderBusy = 1;
+            arch::irq_restore(state);
+            return;
+        }
+        arch::irq_restore(state);
+        arch::idle();
+    }
+}
+
+static void phase9_release_loader()
+{
+    const arch::interrupt_state_t state = arch::irq_save();
+    s_phase9LoaderBusy = 0;
+    arch::irq_restore(state);
+}
+
+static bool phase9_string_valid(const char* value)
+{
+    return arm64_gui_string(value);
+}
+
+bool Phase9GuiOwner::copy_string(char* destination, uint32_t capacity, const char* value)
+{
+    if (!destination || capacity == 0 || !phase9_string_valid(value)) return false;
+    uint32_t i = 0;
+    while (value[i] && i + 1u < capacity) { destination[i] = value[i]; ++i; }
+    destination[i] = '\0';
+    return value[i] == '\0';
+}
+
+Phase9GuiOwner::Phase9GuiOwner(Phase9Runtime* runtime)
+    : m_runtime(runtime), m_windows{}, m_windowHandles{}, m_windowGenerations{},
+      m_widgets{}, m_widgetHandles{}, m_windowCount(0), m_widgetCount(0),
+      m_focusedWidget(-1), m_closingWindow(-1), m_closeSeen(false) {
+    for (uint32_t i = 0; i < kPhase9MaxWindows; ++i) m_windowGenerations[i] = 1;
+    for (uint32_t i = 0; i < kPhase9MaxWidgets; ++i) m_widgets[i].generation = 1;
+}
+
+Phase9GuiOwner::~Phase9GuiOwner()
+{
+    for (int i = static_cast<int>(kPhase9MaxWindows) - 1; i >= 0; --i) {
+        if (!m_windows[i]) continue;
+        for (uint32_t widget = 0; widget < kPhase9MaxWidgets; ++widget) {
+            if (!m_widgets[widget].live || m_widgets[widget].windowIndex != static_cast<uint16_t>(i)) continue;
+            if (m_runtime) {
+                m_runtime->common.release_widgets();
+                m_runtime->common.release_strings(m_widgets[widget].stringBytes);
+            }
+            m_widgets[widget].live = false;
+            ++m_widgets[widget].generation;
+            if (m_widgetCount != 0) --m_widgetCount;
+        }
+        compositor::KernelCompositor::unregisterWindow(m_windows[i]);
+        delete m_windows[i];
+        m_windows[i] = nullptr;
+        if (m_runtime) m_runtime->common.release_windows();
+    }
+    m_windowCount = 0;
+    m_window = nullptr;
+}
+
+bool Phase9GuiOwner::init()
+{
+    m_state = app::AppState::Running;
+    return true;
+}
+
+void Phase9GuiOwner::shutdown()
+{
+    m_state = app::AppState::Terminated;
+}
+
+void Phase9GuiOwner::update_current_window(app::KernelWindow* window)
+{
+    m_window = window;
+}
+
+int Phase9GuiOwner::window_index(gx_handle handle) const
+{
+    for (uint32_t i = 0; i < kPhase9MaxWindows; ++i) {
+        if (m_windows[i] && m_windowHandles[i] == handle &&
+            application::handle_matches(handle, m_runtime->common.runtime_id(),
+                                        m_runtime->common.generation(), application::HandleKind::Window,
+                                        m_windowGenerations[i], static_cast<uint16_t>(i + 1))) return static_cast<int>(i);
+    }
+    return -1;
+}
+
+int Phase9GuiOwner::widget_slot(gx_handle handle) const
+{
+    for (uint32_t i = 0; i < kPhase9MaxWidgets; ++i) {
+        if (m_widgets[i].live && m_widgetHandles[i] == handle &&
+            application::handle_matches(handle, m_runtime->common.runtime_id(),
+                                        m_runtime->common.generation(), application::HandleKind::Widget,
+                                        m_widgets[i].generation, static_cast<uint16_t>(i + 1))) return static_cast<int>(i);
+    }
+    return -1;
+}
+
+int Phase9GuiOwner::focused_window_index() const
+{
+    app::KernelWindow* focused = compositor::KernelCompositor::getFocusedWindow();
+    if (!focused) return -1;
+    for (uint32_t i = 0; i < kPhase9MaxWindows; ++i) if (m_windows[i] == focused) return static_cast<int>(i);
+    return -1;
+}
+
+gx_handle Phase9GuiOwner::widget_handle(int windowIndex, int localId) const
+{
+    for (uint32_t i = 0; i < kPhase9MaxWidgets; ++i) {
+        if (m_widgets[i].live && m_widgets[i].windowIndex == static_cast<uint16_t>(windowIndex) &&
+            m_widgets[i].localId == static_cast<uint16_t>(localId)) return m_widgetHandles[i];
+    }
+    return 0;
+}
+
+void Phase9GuiOwner::queue(gx_event_type type, gx_handle object, int32_t p1, int32_t p2,
+                           int32_t p3, bool lifecycle)
+{
+    if (!m_runtime || !m_runtime->common.events().valid()) return;
+    gx_event value{};
+    value.size = sizeof(gx_event);
+    value.type = type;
+    value.window = object;
+    value.param1 = p1;
+    value.param2 = p2;
+    value.param3 = p3;
+    value.param4 = 0;
+    m_runtime->common.events().enqueue(value, lifecycle);
+    m_runtime->common.note_event_high_water(m_runtime->common.events().high_water());
+}
+
+bool Phase9GuiOwner::create_window(const char* title, int32_t width, int32_t height,
+                                   uint32_t flags, gx_handle* outWindow)
+{
+    if (!m_runtime || !outWindow || !m_runtime->common.can_create_objects() ||
+        !phase9_string_valid(title) || width <= 0 || height <= 0 || width > 640 || height > 640 ||
+        m_windowCount >= kPhase9MaxWindows || !m_runtime->common.reserve_windows()) return false;
+    app::KernelWindow* window = new app::KernelWindow();
+    if (!window || !copy_string(window->title, sizeof(window->title), title)) {
+        delete window;
+        m_runtime->common.release_windows();
+        return false;
+    }
+    const uint32_t screenW = framebuffer::get_width();
+    const uint32_t screenH = framebuffer::get_height();
+    if (static_cast<uint32_t>(width) >= screenW || static_cast<uint32_t>(height) + compositor::TITLEBAR_HEIGHT >= screenH) {
+        delete window;
+        m_runtime->common.release_windows();
+        return false;
+    }
+    const bool appA = m_runtime->isAppA;
+    const uint32_t ordinal = m_windowCount;
+    if (appA && ordinal == 0) { window->x = 55; window->y = 95; }
+    else if (appA) { window->x = 410; window->y = 135; }
+    else { window->x = 90; window->y = 350; }
+    if (window->x + width > static_cast<int>(screenW)) window->x = static_cast<int>(screenW) - width - 4;
+    if (window->y + height + compositor::TITLEBAR_HEIGHT > static_cast<int>(screenH)) window->y = 40;
+    window->w = width;
+    window->h = height;
+    window->flags = app::WF_VISIBLE | app::WF_TITLEBAR | app::WF_CLOSABLE;
+    if (flags & GX_WINDOW_FLAG_RESIZABLE) window->flags |= app::WF_RESIZABLE;
+    window->owner = this;
+    uint32_t slot = kPhase9MaxWindows;
+    for (uint32_t i = 0; i < kPhase9MaxWindows; ++i) if (!m_windows[i]) { slot = i; break; }
+    if (slot == kPhase9MaxWindows || !compositor::KernelCompositor::registerWindow(window)) {
+        delete window;
+        m_runtime->common.release_windows();
+        return false;
+    }
+    m_windows[slot] = window;
+    m_windowHandles[slot] = application::make_handle(
+        m_runtime->common.runtime_id(), m_runtime->common.generation(), application::HandleKind::Window,
+        m_windowGenerations[slot], static_cast<uint16_t>(slot + 1));
+    ++m_windowCount;
+    update_current_window(window);
+    if (!init()) return false;
+    *outWindow = m_windowHandles[slot];
+    if (s_phase9OldAWindow != 0 && m_runtime->isAppA && s_phase9AppALaunches > 0)
+        m_runtime->staleWindowRejected = !validate_window(s_phase9OldAWindow);
+    return true;
+}
+
+gx_handle Phase9GuiOwner::create_widget(gx_handle windowHandle, uint32_t type, int32_t x, int32_t y,
+                                        int32_t width, int32_t height, const char* text)
+{
+    const int wi = window_index(windowHandle);
+    if (wi < 0 || !m_runtime || !m_runtime->common.can_create_objects() || !phase9_string_valid(text) ||
+        x < 0 || y < 0 || width <= 0 || height <= 0 || width > 640 || height > 640) return 0;
+    app::KernelWindow* target = m_windows[wi];
+    const int32_t clientHeight = target->h - compositor::TITLEBAR_HEIGHT;
+    if (x > target->w || y > clientHeight || width > target->w - x || height > clientHeight - y) return 0;
+    uint32_t length = arm64_length(text);
+    if (length >= 64) return 0;
+    if (!m_runtime->common.reserve_widgets()) return 0;
+    if (!m_runtime->common.reserve_strings(length + 1u)) {
+        m_runtime->common.release_widgets();
+        return 0;
+    }
+    uint32_t slot = kPhase9MaxWidgets;
+    for (uint32_t i = 0; i < kPhase9MaxWidgets; ++i) if (!m_widgets[i].live) { slot = i; break; }
+    if (slot == kPhase9MaxWidgets) {
+        m_runtime->common.release_widgets(); m_runtime->common.release_strings(length + 1u); return 0;
+    }
+    app::KernelWindow* saved = m_window;
+    m_window = target;
+    int local = -1;
+    if (type == GX_WIDGET_LABEL) local = addLabel(x, y, width, height, text);
+    else if (type == GX_WIDGET_BUTTON) local = addButton(x, y, width, height, text);
+    else if (type == GX_WIDGET_TEXTBOX) local = addTextBox(x, y, width, height, text);
+    m_window = saved;
+    if (local < 0) {
+        m_runtime->common.release_widgets(); m_runtime->common.release_strings(length + 1u); return 0;
+    }
+    m_widgets[slot] = { m_widgets[slot].generation, static_cast<uint16_t>(wi), static_cast<uint16_t>(local),
+                        static_cast<uint16_t>(length + 1u), true };
+    m_widgetHandles[slot] = application::make_handle(
+        m_runtime->common.runtime_id(), m_runtime->common.generation(), application::HandleKind::Widget,
+        m_widgets[slot].generation, static_cast<uint16_t>(slot + 1));
+    ++m_widgetCount;
+    if (s_phase9OldAWidget != 0 && m_runtime->isAppA && s_phase9AppALaunches > 0)
+        m_runtime->staleWidgetRejected = !validate_widget(s_phase9OldAWidget);
+    return m_widgetHandles[slot];
+}
+
+bool Phase9GuiOwner::set_widget_text(gx_handle handle, const char* text)
+{
+    const int slot = widget_slot(handle);
+    if (slot < 0 || !phase9_string_valid(text)) return false;
+    const uint32_t length = arm64_length(text);
+    if (length >= 64) return false;
+    app::KernelWindow* target = m_windows[m_widgets[slot].windowIndex];
+    app::KernelWindow* saved = m_window;
+    m_window = target;
+    setWidgetText(m_widgets[slot].localId, text);
+    m_window = saved;
+    const uint32_t newBytes = length + 1u;
+    if (newBytes > m_widgets[slot].stringBytes) {
+        if (!m_runtime->common.reserve_strings(newBytes - m_widgets[slot].stringBytes)) return false;
+    } else {
+        m_runtime->common.release_strings(m_widgets[slot].stringBytes - newBytes);
+    }
+    m_widgets[slot].stringBytes = static_cast<uint16_t>(newBytes);
+    return true;
+}
+
+bool Phase9GuiOwner::set_widget_value(gx_handle handle, int32_t value)
+{
+    const int slot = widget_slot(handle);
+    if (slot < 0) return false;
+    app::KernelWindow* saved = m_window;
+    m_window = m_windows[m_widgets[slot].windowIndex];
+    setWidgetValue(m_widgets[slot].localId, value);
+    m_window = saved;
+    return true;
+}
+
+void Phase9GuiOwner::close_window_index(int index)
+{
+    if (index < 0 || index >= static_cast<int>(kPhase9MaxWindows) || !m_windows[index]) return;
+    app::KernelWindow* target = m_windows[index];
+    app::KernelWindow* saved = m_window;
+    m_window = target;
+    m_closingWindow = index;
+    KernelApp::requestClose();
+    m_closingWindow = -1;
+    m_windows[index] = nullptr;
+    m_windowHandles[index] = 0;
+    ++m_windowGenerations[index];
+    m_runtime->common.release_windows();
+    for (uint32_t i = 0; i < kPhase9MaxWidgets; ++i) {
+        if (m_widgets[i].live && m_widgets[i].windowIndex == static_cast<uint16_t>(index)) {
+            m_runtime->common.release_widgets();
+            m_runtime->common.release_strings(m_widgets[i].stringBytes);
+            m_widgets[i].live = false;
+            ++m_widgets[i].generation;
+            --m_widgetCount;
+        }
+    }
+    m_window = saved && saved != target ? saved : nullptr;
+    if (!m_window) for (uint32_t i = 0; i < kPhase9MaxWindows; ++i) if (m_windows[i]) { m_window = m_windows[i]; break; }
+    if (m_windowCount != 0) --m_windowCount;
+    if (m_windowCount != 0 && m_runtime->common.state() == application::LifecycleState::Closing)
+        m_runtime->common.transition(application::LifecycleState::Running);
+}
+
+void Phase9GuiOwner::requestClose()
+{
+    const int focused = focused_window_index();
+    close_window_index(focused >= 0 ? focused : (m_windowCount ? 0 : -1));
+}
+
+bool Phase9GuiOwner::destroy_window(gx_handle handle)
+{
+    const int index = window_index(handle);
+    if (index < 0) return false;
+    close_window_index(index);
+    return true;
+}
+
+void Phase9GuiOwner::request_auto_close()
+{
+    if (m_windowCount != 0) close_window_index(0);
+}
+
+bool Phase9GuiOwner::validate_window(gx_handle handle) const { return window_index(handle) >= 0; }
+bool Phase9GuiOwner::validate_widget(gx_handle handle) const { return widget_slot(handle) >= 0; }
+bool Phase9GuiOwner::pop_event(gx_event* event) { return m_runtime && m_runtime->common.events().try_pop(event); }
+
+void Phase9GuiOwner::onMouseMove(int x, int y) { const int i = focused_window_index(); if (i >= 0) queue(GX_EVENT_MOUSE, m_windowHandles[i], x, y, GX_MOUSE_PACK(0, GX_MOUSE_ACTION_MOVE)); }
+void Phase9GuiOwner::onMouseDown(int x, int y, uint8_t button) { const int i = focused_window_index(); if (i >= 0) queue(GX_EVENT_MOUSE, m_windowHandles[i], x, y, GX_MOUSE_PACK(button, GX_MOUSE_ACTION_DOWN)); }
+void Phase9GuiOwner::onMouseUp(int x, int y, uint8_t button) { const int i = focused_window_index(); if (i >= 0) queue(GX_EVENT_MOUSE, m_windowHandles[i], x, y, GX_MOUSE_PACK(button, GX_MOUSE_ACTION_UP)); }
+void Phase9GuiOwner::onKeyDown(uint32_t key) { const int i = focused_window_index(); if (i >= 0) queue(GX_EVENT_KEY, m_windowHandles[i], static_cast<int32_t>(key), GX_KEY_ACTION_DOWN, 0); }
+
+void Phase9GuiOwner::onWidgetClick(int widgetId)
+{
+    const int wi = focused_window_index();
+    if (wi < 0 || !m_windows[wi] || widgetId < 0 || widgetId >= m_windows[wi]->widgetCount) return;
+    app::Widget* widget = &m_windows[wi]->widgets[widgetId];
+    if (widget->type == app::WidgetType::TextBox) m_focusedWidget = widgetId;
+    if (widget->type == app::WidgetType::Button && m_runtime) ++m_runtime->buttonClicks;
+    queue(GX_EVENT_WIDGET, widget_handle(wi, widgetId), widgetId, 0, 0);
+}
+
+void Phase9GuiOwner::onKeyChar(char c)
+{
+    const int wi = focused_window_index();
+    if (wi < 0 || m_focusedWidget < 0 || !m_windows[wi] || m_focusedWidget >= m_windows[wi]->widgetCount) return;
+    app::Widget* widget = &m_windows[wi]->widgets[m_focusedWidget];
+    if (widget->type != app::WidgetType::TextBox || !widget->enabled || !widget->visible) return;
+    uint32_t length = arm64_length(widget->text);
+    if (length + 1u >= sizeof(widget->text)) return;
+    widget->text[length] = c; widget->text[length + 1u] = '\0';
+    queue(GX_EVENT_TEXT_INPUT, widget_handle(wi, m_focusedWidget), static_cast<uint8_t>(c), 0, 0);
+}
+
+void Phase9GuiOwner::onWindowClose()
+{
+    const int index = m_closingWindow >= 0 ? m_closingWindow : focused_window_index();
+    if (index >= 0 && index < static_cast<int>(kPhase9MaxWindows)) {
+        m_closeSeen = true;
+        if (m_windowCount == 1) m_runtime->common.begin_closing();
+        queue(GX_EVENT_WINDOW_CLOSE, m_windowHandles[index], 0, 0, 0, true);
+    }
+}
+
+void Phase9GuiOwner::onWindowFocus()
+{
+    const int index = focused_window_index();
+    if (index >= 0) queue(GX_EVENT_WINDOW_FOCUS, m_windowHandles[index], 0, 0, 0);
+}
+
+void Phase9GuiOwner::onWindowBlur()
+{
+    const int index = focused_window_index();
+    if (index >= 0) queue(GX_EVENT_WINDOW_BLUR, m_windowHandles[index], 0, 0, 0);
+}
+
+static Phase9Runtime* phase9_runtime(gx_app_context* context)
+{
+    if (!context) return nullptr;
+    Phase9Runtime* runtime = static_cast<Phase9Runtime*>(context->userData);
+    return runtime && context == &runtime->loader.context && context->host == &runtime->loader.host
+        ? runtime : nullptr;
+}
+
+static gx_result GX_CALL phase9_log(gx_app_context* context, const char* message)
+{
+    Phase9Runtime* runtime = phase9_runtime(context);
+    if (!runtime || !phase9_string_valid(message)) return GX_ERROR_INVALID_ARGUMENT;
+    runtime->entered = true;
+    const arch::interrupt_state_t state = arch::irq_save();
+    arm64_print(runtime->isAppA ? "[phase9-app-a] " : "[phase9-app-b] "); arm64_print(message); arm64_print("\n");
+    if (runtime->isAppA && arm64_equal(message, "focus/input isolation: PASS value=appa"))
+        arm64_print("[guideXOS] cross-app focus isolation: PASS\n");
+    if (!runtime->isAppA && arm64_equal(message, "focus/input isolation: PASS value=appb"))
+        arm64_print("[guideXOS] cross-app input isolation: PASS\n");
+    if (arm64_equal(message, "button: PASS count=1")) {
+        if (runtime->isAppA) s_phase9AppAButtonLogged = true; else s_phase9AppBButtonLogged = true;
+        if (s_phase9AppAButtonLogged && s_phase9AppBButtonLogged)
+            arm64_print("[guideXOS] cross-app control routing: PASS\n");
+    }
+    arch::irq_restore(state);
+    return GX_OK;
+}
+
+static uint32_t GX_CALL phase9_api_version(gx_app_context* context) { return phase9_runtime(context) ? GX_API_VERSION : UINT32_MAX; }
+static gx_result GX_CALL phase9_exit(gx_app_context* context, gx_result code) { return phase9_runtime(context) ? code : GX_ERROR_INVALID_ARGUMENT; }
+
+static gx_result GX_CALL phase9_request_window(gx_app_context* context, const char* title, int32_t width,
+                                                int32_t height, uint32_t flags, gx_handle* outWindow)
+{
+    Phase9Runtime* runtime = phase9_runtime(context);
+    if (!runtime || !runtime->owner || !outWindow) return GX_ERROR_INVALID_ARGUMENT;
+    if (runtime->common.resources().windows >= runtime->common.quotas().windows) return GX_ERROR_QUOTA;
+    const bool created = runtime->owner->create_window(title, width, height, flags, outWindow);
+    return created ? GX_OK : GX_ERROR_FAILED;
+}
+
+static gx_result GX_CALL phase9_request_window_ex(gx_app_context* context, const char* title, int32_t width,
+                                                   int32_t height, uint32_t flags, gx_handle* outWindow)
+{
+    return phase9_request_window(context, title, width, height, flags, outWindow);
+}
+
+static gx_result GX_CALL phase9_request_window_legacy(gx_app_context* context, const char* title,
+                                                       int32_t width, int32_t height, gx_handle* outWindow)
+{
+    return phase9_request_window_ex(context, title, width, height, GX_WINDOW_FLAG_FIXED_SIZE, outWindow);
+}
+
+static gx_result GX_CALL phase9_window_destroy(gx_app_context* context, gx_handle window)
+{
+    Phase9Runtime* runtime = phase9_runtime(context);
+    if (!runtime || !runtime->owner || !runtime->owner->validate_window(window)) return GX_ERROR_INVALID_ARGUMENT;
+    return runtime->owner->destroy_window(window) ? GX_OK : GX_ERROR_FAILED;
+}
+
+static gx_result GX_CALL phase9_widget_create(gx_app_context* context, gx_handle window, uint32_t type,
+                                               int32_t x, int32_t y, int32_t width, int32_t height,
+                                               const char* text, gx_handle* outWidget)
+{
+    Phase9Runtime* runtime = phase9_runtime(context);
+    if (!runtime || !runtime->owner || !outWidget) return GX_ERROR_INVALID_ARGUMENT;
+    if (runtime->common.resources().widgets >= runtime->common.quotas().widgets) return GX_ERROR_QUOTA;
+    gx_handle handle = runtime->owner->create_widget(window, type, x, y, width, height, text);
+    if (!handle) return phase9_string_valid(text) && arm64_length(text) >= 64 ? GX_ERROR_QUOTA : GX_ERROR_INVALID_ARGUMENT;
+    *outWidget = handle;
+    return GX_OK;
+}
+
+static gx_result GX_CALL phase9_widget_set_text(gx_app_context* context, gx_handle widget, const char* text)
+{
+    Phase9Runtime* runtime = phase9_runtime(context);
+    if (!runtime || !runtime->owner || !runtime->owner->validate_widget(widget)) return GX_ERROR_INVALID_ARGUMENT;
+    if (!phase9_string_valid(text) || arm64_length(text) >= 64) return GX_ERROR_QUOTA;
+    return runtime->owner->set_widget_text(widget, text) ? GX_OK : GX_ERROR_FAILED;
+}
+
+static gx_result GX_CALL phase9_widget_set_value(gx_app_context* context, gx_handle widget, int32_t value)
+{
+    Phase9Runtime* runtime = phase9_runtime(context);
+    if (!runtime || !runtime->owner || !runtime->owner->validate_widget(widget)) return GX_ERROR_INVALID_ARGUMENT;
+    return runtime->owner->set_widget_value(widget, value) ? GX_OK : GX_ERROR_FAILED;
+}
+
+static gx_result GX_CALL phase9_poll_event(gx_app_context* context, gx_event* event, int32_t timeoutMs)
+{
+    Phase9Runtime* runtime = phase9_runtime(context);
+    if (!runtime || !runtime->owner || !event || timeoutMs < 0) return GX_ERROR_INVALID_ARGUMENT;
+    if (runtime->owner->pop_event(event)) return GX_OK;
+    event->size = sizeof(gx_event); event->type = GX_EVENT_NONE; event->window = 0;
+    return GX_ERROR_TIMEOUT;
+}
+
+static gx_result GX_CALL phase9_wait_event(gx_app_context* context, gx_event* event)
+{
+    Phase9Runtime* runtime = phase9_runtime(context);
+    if (!runtime || !runtime->owner || !event) return GX_ERROR_INVALID_ARGUMENT;
+    /* Repeated durability launches use the same application-owned close
+     * callback as the interactive path.  Requesting it at the wait boundary
+     * keeps the bounded proof independent of monitor-task scheduling while
+     * still delivering a normal queued lifecycle event through wait/wake. */
+    if (runtime->autoClose && runtime->owner->has_windows())
+        runtime->owner->request_auto_close();
+    if (runtime->common.state() == application::LifecycleState::Running)
+        runtime->common.transition(application::LifecycleState::Waiting);
+    const gx_result result = runtime->common.events().wait(event);
+    if (runtime->common.state() == application::LifecycleState::Waiting)
+        runtime->common.transition(application::LifecycleState::Running);
+    if (runtime->isAppA) { s_phase9AppAWaits = runtime->common.events().waits(); s_phase9AppAWakes = runtime->common.events().wakes(); }
+    else { s_phase9AppBWaits = runtime->common.events().waits(); s_phase9AppBWakes = runtime->common.events().wakes(); }
+    if (result == GX_OK && runtime->common.events().wakes() != 0 && !s_phase9WaitWakeLogged) {
+        s_phase9WaitWakeLogged = true;
+        arm64_print("[guideXOS] application wait/wake: PASS\n");
+    }
+    return result;
+}
+
+static void phase9_initialize_host(Phase9Runtime* runtime)
+{
+    uint8_t* bytes = reinterpret_cast<uint8_t*>(&runtime->loader.host);
+    for (uint32_t i = 0; i < sizeof(runtime->loader.host); ++i) bytes[i] = 0;
+    runtime->loader.host.size = sizeof(runtime->loader.host);
+    runtime->loader.host.version = GX_API_VERSION;
+    runtime->loader.host.guiVersion = GX_GUI_ABI_VERSION;
+    runtime->loader.host.log = phase9_log;
+    runtime->loader.host.get_api_version = phase9_api_version;
+    runtime->loader.host.request_window = phase9_request_window_legacy;
+    runtime->loader.host.request_window_ex = phase9_request_window_ex;
+    runtime->loader.host.window_destroy = phase9_window_destroy;
+    runtime->loader.host.widget_create = phase9_widget_create;
+    runtime->loader.host.widget_set_text = phase9_widget_set_text;
+    runtime->loader.host.widget_set_value = phase9_widget_set_value;
+    runtime->loader.host.poll_event = phase9_poll_event;
+    runtime->loader.host.wait_event = phase9_wait_event;
+    runtime->loader.host.exit = phase9_exit;
+}
+
+static bool phase9_load_and_run(Phase9Runtime* runtime)
+{
+    phase9_initialize_host(runtime);
+    runtime->loader.context.size = sizeof(runtime->loader.context);
+    runtime->loader.context.apiVersion = GX_API_VERSION;
+    runtime->loader.context.host = &runtime->loader.host;
+    runtime->loader.context.userData = runtime;
+    const bool needsImageVfs = runtime->isAppA ? !s_phase9AppAImagePrimed : !s_phase9AppBImagePrimed;
+    if (needsImageVfs) phase9_vfs_enter();
+    phase9_acquire_loader();
+    const bool imageLoaded = arm64_load_image(&runtime->loader);
+    phase9_release_loader();
+    if (needsImageVfs) phase9_vfs_exit();
+    if (imageLoaded && needsImageVfs) {
+        if (runtime->isAppA) s_phase9AppAImagePrimed = true;
+        else s_phase9AppBImagePrimed = true;
+    }
+    if (!imageLoaded) return false;
+    if (!runtime->common.reserve_pages(static_cast<uint32_t>(runtime->loader.imagePages))) {
+        kernel::memory::release_pages(runtime->loader.imageBase, runtime->loader.imagePages);
+        runtime->loader.image = nullptr;
+        return false;
+    }
+    if (!kernel::memory::allocate_pages(kArm64ApplicationStackPages, &runtime->loader.stackBase) ||
+        !runtime->common.reserve_stack_pages(kArm64ApplicationStackPages)) {
+        if (runtime->loader.stackBase) kernel::memory::release_pages(runtime->loader.stackBase, kArm64ApplicationStackPages);
+        if (runtime->common.resources().stackPages != 0)
+            runtime->common.release_stack_pages(runtime->common.resources().stackPages);
+        kernel::memory::release_pages(runtime->loader.imageBase, runtime->loader.imagePages);
+        runtime->common.release_pages(static_cast<uint32_t>(runtime->loader.imagePages));
+        if (runtime->owner) { delete runtime->owner; runtime->owner = nullptr; }
+        runtime->common.cleanup();
+        runtime->loader.image = nullptr;
+        return false;
+    }
+    runtime->loader.stackPages = kArm64ApplicationStackPages;
+    runtime->loader.stackBytes = runtime->loader.stackPages * kArm64PageSize;
+    runtime->loader.stack = reinterpret_cast<uint8_t*>(static_cast<uintptr_t>(runtime->loader.stackBase));
+    *reinterpret_cast<uint64_t*>(runtime->loader.stack) = kArm64LowCanary;
+    *reinterpret_cast<uint64_t*>(runtime->loader.stack + runtime->loader.stackBytes - sizeof(uint64_t)) = kArm64HighCanary;
+    if (!phase2_mmu_set_range_permissions(runtime->loader.stackBase, runtime->loader.stackBytes, 0, 1)) {
+        kernel::memory::release_pages(runtime->loader.stackBase, runtime->loader.stackPages);
+        kernel::memory::release_pages(runtime->loader.imageBase, runtime->loader.imagePages);
+        runtime->common.release_stack_pages(runtime->loader.stackPages);
+        runtime->common.release_pages(static_cast<uint32_t>(runtime->loader.imagePages));
+        if (runtime->owner) { delete runtime->owner; runtime->owner = nullptr; }
+        runtime->common.cleanup();
+        runtime->loader.stack = nullptr; runtime->loader.image = nullptr;
+        return false;
+    }
+    runtime->common.transition(application::LifecycleState::Running);
+    const gx_result result = gxos_native_call_on_stack(
+        runtime->loader.entry, &runtime->loader.context,
+        runtime->loader.stack + runtime->loader.stackBytes - 16);
+    /* Give the other runtime and the monitor one interrupt boundary before
+     * tearing down this runtime's compositor objects and mappings. */
+    kernel::arch::idle();
+    const bool canaries = *reinterpret_cast<uint64_t*>(runtime->loader.stack) == kArm64LowCanary &&
+        *reinterpret_cast<uint64_t*>(runtime->loader.stack + runtime->loader.stackBytes - sizeof(uint64_t)) == kArm64HighCanary;
+    if (runtime->owner) {
+        runtime->firstWindowHandle = runtime->owner->first_window_handle();
+        runtime->firstWidgetHandle = runtime->owner->first_widget_handle();
+        runtime->peakWindowCount = runtime->owner->window_count();
+        runtime->peakWidgetCount = runtime->owner->widget_count();
+    }
+    if (runtime->owner) {
+        const arch::interrupt_state_t cleanupState = arch::irq_save();
+        runtime->owner->shutdown();
+        delete runtime->owner;
+        runtime->owner = nullptr;
+        arch::irq_restore(cleanupState);
+    }
+    const bool imagePermissionsRestored = phase2_mmu_set_range_permissions(
+        runtime->loader.imageBase, runtime->loader.imageBytes, 0, 1) != 0;
+    const bool stackReleased = kernel::memory::release_pages(runtime->loader.stackBase, runtime->loader.stackPages);
+    const bool imageReleased = kernel::memory::release_pages(runtime->loader.imageBase, runtime->loader.imagePages);
+    runtime->common.release_pages(static_cast<uint32_t>(runtime->loader.imagePages));
+    runtime->common.release_stack_pages(runtime->loader.stackPages);
+    runtime->loader.stack = nullptr; runtime->loader.image = nullptr;
+    const bool noLeak = runtime->common.resources().mappedPages == 0 &&
+        runtime->common.resources().stackPages == 0 &&
+        runtime->common.resources().windows == 0 &&
+        runtime->common.resources().widgets == 0;
+    runtime->common.mark_exited();
+    runtime->common.cleanup();
+    const bool cleanup = result == 42 && runtime->entered && canaries && imagePermissionsRestored && stackReleased && imageReleased && noLeak;
+    if (cleanup) arm64_print("[guideXOS] NativeElf GUI cleanup: PASS mappings=0 windows=0 widgets=0\n");
+    return cleanup;
+}
+
+bool phase9_run_application(const char* appName, bool autoClose)
+{
+    if (!s_arm64Discovered) {
+        phase9_vfs_enter();
+        phase9_acquire_loader();
+        if (!s_arm64Discovered) discover();
+        phase9_release_loader();
+        phase9_vfs_exit();
+    }
+    Arm64Package* package = arm64_find_package(appName);
+    if (!package || s_phase9AppA == nullptr && s_phase9AppB == nullptr && s_arm64LaunchInProgress) return false;
+    Phase9Runtime runtime{};
+    runtime.loader.package = package;
+    runtime.loader.verbose = false;
+    runtime.loader.preferredBase = arm64_equal(package->id, "com.guidexos.phase9.appb") ? UINT64_C(0x52000000) : kArm64PreferredBase;
+    const uint8_t runtimeId = static_cast<uint8_t>((++s_phase9RuntimeSequence % 255u) + 1u);
+    const uint16_t generation = static_cast<uint16_t>((++s_phase9Generation & 0xffffu) ? (s_phase9Generation & 0xffffu) : 1u);
+    if (!runtime.common.initialize(package->id, "AARCH64", runtimeId, generation,
+                              kPhase9Quotas)) return false;
+    runtime.owner = new Phase9GuiOwner(&runtime);
+    if (!runtime.owner) {
+        runtime.common.cleanup();
+        return false;
+    }
+    runtime.autoClose = autoClose;
+    runtime.closeRequested = false;
+    runtime.isAppA = arm64_equal(package->id, "com.guidexos.phase9.appa");
+    runtime.startTick = phase3_timer_count();
+    runtime.loader.context.userData = &runtime;
+    if (runtime.isAppA && s_phase9AppALaunches == 0) {
+        arm64_print("[guideXOS] application runtime: initialized\n");
+        arm64_print("[guideXOS] application event service: initialized\n");
+    }
+    if (runtime.isAppA) s_phase9AppA = &runtime; else s_phase9AppB = &runtime;
+    if (s_phase9AppA && s_phase9AppB && s_phase9AppALaunches == 0)
+        arm64_print("[guideXOS] concurrent NativeElf runtimes: PASS\n");
+    const bool result = phase9_load_and_run(&runtime);
+    if (runtime.isAppA) {
+        ++s_phase9AppALaunches;
+        if (!s_phase9AppAInitialDone) {
+            s_phase9AppAInitialDone = result;
+            s_phase9OldAWindow = runtime.firstWindowHandle;
+            s_phase9OldAWidget = runtime.firstWidgetHandle;
+            s_phase9AppBSurvived = s_phase9AppB != nullptr;
+            if (result && s_phase9AppBSurvived) arm64_print("[guideXOS] cross-app cleanup isolation: PASS\n");
+        }
+        if (s_phase9AppALaunches == 2 && result) arm64_print("[guideXOS] application generation relaunch: PASS\n");
+        if (s_phase9AppALaunches >= 51) {
+            s_phase9AppADurabilityDone = result;
+            if (result) {
+                s_phase9AppADurabilityTick = phase3_timer_count();
+                arm64_print("[guideXOS] runtime lifecycle durability: PASS launches=51\n");
+            }
+        }
+        s_phase9AppA = nullptr;
+    } else {
+        s_phase9AppB = nullptr;
+    }
+    return result;
+}
+
+void phase9_service()
+{
+    const uint64_t now = phase3_timer_count();
+    Phase9GuiOwner* appBOwner = nullptr;
+    const bool closeMayBeNeeded =
+       (s_phase9AppB && s_phase9AppADurabilityDone && s_phase9AppADurabilityTick != 0 &&
+         now - s_phase9AppADurabilityTick >= kPhase9AppBGraceTicks && !s_phase9AppB->closeRequested &&
+         s_phase9AppB->owner);
+    if (closeMayBeNeeded) {
+        const arch::interrupt_state_t state = arch::irq_save();
+        Phase9Runtime* appB = s_phase9AppB;
+        if (appB && s_phase9AppADurabilityDone && s_phase9AppADurabilityTick != 0 &&
+            now - s_phase9AppADurabilityTick >= kPhase9AppBGraceTicks && !appB->closeRequested && appB->owner) {
+            appB->closeRequested = true;
+            appBOwner = appB->owner;
+        }
+        if (appBOwner) appBOwner->request_auto_close();
+        arch::irq_restore(state);
+    }
+    s_phase9AllComplete = s_phase9AppADurabilityDone && s_phase9AppB == nullptr;
+}
+
+bool phase9_all_complete() { return s_phase9AllComplete; }
+bool phase9_app_a_image_primed() { return s_phase9AppAImagePrimed; }
+bool phase9_app_b_survived_a_close() { return s_phase9AppBSurvived; }
+uint32_t phase9_app_a_launches() { return s_phase9AppALaunches; }
+uint64_t phase9_app_a_waits() { return s_phase9AppAWaits; }
+uint64_t phase9_app_a_wakes() { return s_phase9AppAWakes; }
+uint64_t phase9_app_b_waits() { return s_phase9AppBWaits; }
+uint64_t phase9_app_b_wakes() { return s_phase9AppBWakes; }
+
 #endif
 
 bool launch(const char* name)

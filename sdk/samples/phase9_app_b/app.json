@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "id": "com.guidexos.phase9.appb",
+  "displayName": "Phase 9 App B",
+  "version": "0.1.0",
+  "publisher": "guideXOS",
+  "description": "Independently compiled concurrent NativeElf App B.",
+  "category": "System",
+  "kind": "NativeElf",
+  "icon": "",
+  "minGuideXOSVersion": "0.1.0",
+  "supportedArchitectures": [ "arm64" ],
+  "entries": [{
+    "architecture": "arm64",
+    "path": "bin/arm64/phase9-app-b.elf",
+    "entryPoint": "gx_main",
+    "abi": "guidexos-c-abi-v1",
+    "runtime": "native-elf"
+  }],
+  "permissions": [ "log", "gui" ],
+  "fileAssociations": []
+}
