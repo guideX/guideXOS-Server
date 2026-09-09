@@ -127,7 +127,9 @@ const char* c97CheckpointName(uint32_t checkpoint) {
         case 143u: return "tail-143";
         case 203u: return "tail-203";
         case 216u: return "tail-216";
+        case 0x217u: return "tail-217-pre";
         case 217u: return "tail-217";
+        case 218u: return "tail-complete";
         default: return "invalid";
     }
 }
@@ -167,6 +169,29 @@ void emitC97FrameStats(uint32_t checkpoint, uint32_t allocationPresent) {
 
 void emitC97StageStats(const char* checkpointName) {
     emitC97FrameStatsNamed(checkpointName, 0u, 0u);
+}
+
+uint64_t c97ArtifactId(const uint8_t* artifact, size_t artifactSize) {
+    // A bounded, allocation-free identity for the exact staged NativeAOT
+    // bytes.  The host records the SHA-256 alongside this marker; the runtime
+    // marker proves that both selector boots hashed the bytes they actually
+    // staged, rather than merely reusing a host-side filename.
+    uint64_t hash = 0xCBF29CE484222325ull;
+    for (size_t index = 0; index < artifactSize; ++index) {
+        hash ^= artifact[index];
+        hash *= 0x100000001B3ull;
+    }
+    return hash;
+}
+
+void emitC97SelectorArtifact(const uint8_t* artifact, size_t artifactSize) {
+    serial::puts("[nativeaot-gc-c97] marker=C011EC97-SELECTOR selector=");
+    serial::put_hex32(g_c97TailSelector);
+    serial::puts(" artifactId=");
+    serial::put_hex64(c97ArtifactId(artifact, artifactSize));
+    serial::puts(" artifactBytes=");
+    serial::put_hex64(static_cast<uint64_t>(artifactSize));
+    serial::puts("\n");
 }
 
 extern "C" int guideXosNativeAotC011EC97Checkpoint(
@@ -2202,6 +2227,7 @@ void runFirstRealAllocationImpl(
 #endif
 #if defined(GUIDEXOS_NATIVEAOT_C011EC97)
     emitC97StageStats("post-image");
+    emitC97SelectorArtifact(artifact, artifactSize);
 #endif
 
 #if defined(GUIDEXOS_NATIVEAOT_C011EC21_NATIVE_CONTINUATION)

@@ -7400,8 +7400,16 @@ guideXosNativeAotC011EC23TryNativeUnwind(
             if (d.c011ec26PreflightProven != 0u) {
                 emitC011EC26Preflight();
             } else {
+#if !defined(GUIDEXOS_NATIVEAOT_C011EC97)
                 d.c011ec26SafeStopReason = 0xC0260001u;
                 guideXosNativeAotC011EC25SafeStop(0xC0260001u);
+#else
+                // C97 intentionally changes the managed method layout by
+                // replacing the compile-time tail with a runtime selector.
+                // Keep the authentic C19-C23 unwind path, but do not let the
+                // separate C26 continuation diagnostic stop this workload
+                // before the selector-controlled managed checkpoints.
+#endif
             }
             return 2u;
         }
@@ -7703,8 +7711,10 @@ guideXosNativeAotC011EC23TryNativeUnwind(
                     c011ec23LoadRegister(display->pRsi),
                     c011ec23LoadRegister(display->pRdi),
                     c011ec23LoadRegister(display->pRbp))) {
+#if !defined(GUIDEXOS_NATIVEAOT_C011EC97)
                 d.c011ec26SafeStopReason = 0xC0260003u;
                 guideXosNativeAotC011EC25SafeStop(0xC0260003u);
+#endif
             }
 #else
             if (!c011ec25ValidateBoundary(

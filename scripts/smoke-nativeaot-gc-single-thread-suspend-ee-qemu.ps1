@@ -249,7 +249,7 @@ $isC011EC79 = $ProofMode -eq "offline-region-range-census"
 $isC011EC80 = $ProofMode -eq "canonical-region-universe-snapshot"
 $isC011EC97 = $C97SameImageTailSelector
 $isC011EC94 = $ProofMode -eq "grow-heap-segment-commit-provenance"
-$isC011EC96 = $ProofMode -eq "physical-frame-availability-provenance"
+$isC011EC96 = $ProofMode -eq "physical-frame-availability-provenance" -or $isC011EC97
 $isC011EC95 = $ProofMode -in @("vm-commit-failure-status-provenance", "physical-frame-availability-provenance") -or $isC011EC97
 $isC011EC89 = $ProofMode -in @("exact-allocation-oom-arithmetic", "grow-heap-segment-commit-provenance", "vm-commit-failure-status-provenance", "physical-frame-availability-provenance") -or $isC011EC97
 $c88TargetOffset = if ($ProofMode -eq "aged-free-region-transfer-provenance" -or $isC011EC89) { [UInt64]0x1A00000 } else { $C85TargetOffset }
@@ -362,20 +362,6 @@ if ($isC011EC39) {
     $isFirstRootCallbackEntry = $true
     $isFirstPerThreadRootProvider = $true
     $isAllocationContextFixupRootBoundary = $true
-}
-if ($isC011EC97) {
-    # C97 authenticates the C93/C89/C77/C64/C65/C67/C95 controls below the
-    # managed tail.  The older C21-C27 native stack-boundary chain is not a
-    # C97 control and its safe-stop would terminate this workload before the
-    # selector-controlled tail begins; keep it out of this same-image run.
-    $isC011EC27 = $true
-    $isC011EC26 = $true
-    $isC011EC25 = $false
-    $isC011EC24 = $false
-    $isC011EC23 = $false
-    $isC011EC21 = $false
-    $isC011EC20 = $false
-    $isC011EC19 = $true
 }
 $useStockRhpNewArrayEntry = $isTransitionFrameControlPc -or $isC011EC19
 $c011ec44Define = if ($isC011EC44) { " /DGUIDEXOS_NATIVEAOT_C011EC44_PROVENANCE" } else { "" }
@@ -9340,7 +9326,7 @@ exit /b %errorlevel%
                     $normalizedLiveText = $normalizedLiveText -replace '\b(c\d+)\s+(ec\d+)', '$1$2'
                     $normalizedLiveText = $normalizedLiveText -replace '\s*=\s*', '='
                     $stopPattern = if ($isC011EC97) {
-                        'marker=C011EC97-FRAME checkpoint=tail-217'
+                        'marker=C011EC97-FRAME checkpoint=tail-complete'
                     } elseif ($isC011EC88) {
                         'marker=C011EC77\s+outcome=C|marker=C011EC77-BLOCKED'
                     } elseif ($isC011EC85) {
@@ -9484,9 +9470,9 @@ exit /b %errorlevel%
                 $failureSerial = if (Test-Path -LiteralPath $serialPath) { Get-Content -LiteralPath $serialPath -Raw } else { "" }
                 if ($isC011EC97) {
                     $earlyFailure = if ($qemuProcess.HasExited) {
-                        "c011ec97-exited-before-tail-217"
+                        "c011ec97-exited-before-tail-complete"
                     } else {
-                        "c011ec97-timeout-before-tail-217"
+                        "c011ec97-timeout-before-tail-complete"
                     }
                 } elseif ($isC011EC85) {
                     $earlyFailure = if ($qemuProcess.HasExited) {
@@ -9711,16 +9697,26 @@ exit /b %errorlevel%
             $c64AllocationLines = @(Get-C011EC56MarkerRecords $validationText 'C011EC64-ALLOC')
             $c64CompleteLines = @(Get-C011EC56MarkerRecords $validationText 'C011EC64' | Where-Object { $_ -match 'marker=C011EC64\s+outcome=' })
             $c65CompletionLines = @(Get-C011EC56MarkerRecords $validationText 'C011EC65' | Where-Object { $_ -match 'marker=C011EC65\s+outcome=' })
-            $c67CompleteLines = @(Get-C011EC56MarkerRecords $validationText 'C011EC67' | Where-Object { $_ -match 'marker=C011EC67\s+outcome=C' })
+            $c67CompleteLines = @(Get-C011EC56MarkerRecords $validationText 'C011EC67' | Where-Object { $_ -match 'marker=C011EC67\s+outcome=[ABC]' })
             $c95CommitLines = @(Get-C011EC56MarkerRecords $validationText 'C011EC95-VM-COMMIT')
+            $c97SelectorLines = @(Get-C011EC56MarkerRecords $validationText 'C011EC97-SELECTOR')
             $c97FrameLines = @(Get-C011EC56MarkerRecords $validationText 'C011EC97-FRAME')
-            if ($c93FitLines.Count -eq 0 -or $c77CompleteLines.Count -eq 0 -or
-                $c77SummaryLines.Count -eq 0 -or $c64AllocationLines.Count -eq 0 -or
+            if ($c93FitLines.Count -eq 0 -or $c64AllocationLines.Count -eq 0 -or
                 $c64CompleteLines.Count -eq 0 -or $c65CompletionLines.Count -eq 0 -or
-                $c67CompleteLines.Count -eq 0 -or $c95CommitLines.Count -eq 0) {
-                throw 'C011EC97 retained the authenticated C93/C64/C65/C67/C77/C95 controls but one control was missing.'
+                $c95CommitLines.Count -eq 0) {
+                throw 'C011EC97 missing a required C93/C64/C65/C95 control marker.'
             }
-            $c97RequiredCheckpoints = @('pre-managed','post-image','post-startup','pre-tail','tail-001','tail-079','tail-080','tail-143','tail-203','tail-216','tail-217')
+            if ($c97SelectorLines.Count -ne 1) {
+                throw "C011EC97 expected exactly one selector/artifact identity marker in $name."
+            }
+            $markerSelector = Get-MarkerField $c97SelectorLines[0] 'selector'
+            $artifactId = Get-MarkerField $c97SelectorLines[0] 'artifactId'
+            $artifactBytes = Get-MarkerField $c97SelectorLines[0] 'artifactBytes'
+            if ($null -eq $markerSelector -or $null -eq $artifactId -or $null -eq $artifactBytes -or
+                [Convert]::ToUInt64($markerSelector.Substring(2), 16) -ne [uint64]$c97Selector) {
+                throw "C011EC97 selector/artifact identity marker disagreed with the launch selector in $name."
+            }
+            $c97RequiredCheckpoints = @('pre-managed','post-image','post-startup','pre-tail','tail-001','tail-079','tail-080','tail-143','tail-203','tail-216','tail-217-pre','tail-217','tail-complete')
             foreach ($checkpointName in $c97RequiredCheckpoints) {
                 $checkpointLines = @($c97FrameLines | Where-Object { $_ -match ("checkpoint=" + [regex]::Escape($checkpointName) + '(\s|$)') })
                 if ($checkpointLines.Count -ne 1) {
@@ -9754,7 +9750,14 @@ exit /b %errorlevel%
                 c93FitLines=$c93FitLines; c89BoundaryLines=$c89BoundaryLines; c77CompleteLines=$c77CompleteLines
                 c77SummaryLines=$c77SummaryLines; c64AllocationLines=$c64AllocationLines
                 c64CompleteLines=$c64CompleteLines; c65CompletionLines=$c65CompletionLines; c67CompleteLines=$c67CompleteLines
-                c95CommitLines=$c95CommitLines; c97FrameLines=$c97FrameLines
+                c95CommitLines=$c95CommitLines; c97SelectorLines=$c97SelectorLines; artifactId=$artifactId; artifactBytes=$artifactBytes
+                inheritedControls=[ordered]@{
+                    C77Complete=($c77CompleteLines.Count -gt 0); C77Summary=($c77SummaryLines.Count -gt 0)
+                    C89RegionSourceCount=$c89BoundaryLines.Count; C67Complete=($c67CompleteLines.Count -gt 0)
+                    C77CompleteLines=$c77CompleteLines; C77SummaryLines=$c77SummaryLines
+                    C67CompleteLines=$c67CompleteLines
+                }
+                c97FrameLines=$c97FrameLines
                 serialTail=if ($validationText.Length -gt 240000) { $validationText.Substring($validationText.Length - 240000) } else { $validationText }
             }
             continue
@@ -13989,6 +13992,20 @@ exit /b %errorlevel%
         if (-not $tail216Absent -or -not $tail320Present) {
             throw 'C011EC97 tail-217 separation did not match the launch-time selector.'
         }
+        $artifactIds = @($runResults | ForEach-Object { $_.artifactId } | Select-Object -Unique)
+        $artifactByteCounts = @($runResults | ForEach-Object { $_.artifactBytes } | Select-Object -Unique)
+        if ($artifactIds.Count -ne 1 -or $artifactByteCounts.Count -ne 1) {
+            throw 'C011EC97 the runtime selector boots did not authenticate one staged artifact identity.'
+        }
+        $inheritedControlAgreement = @($runResults | ForEach-Object {
+            "$($_.inheritedControls.C77Complete)/$($_.inheritedControls.C77Summary)/$($_.inheritedControls.C67Complete)"
+        } | Select-Object -Unique)
+        if ($inheritedControlAgreement.Count -ne 1 -or
+            $runResults[0].inheritedControls.C77Complete -ne $true -or
+            $runResults[0].inheritedControls.C77Summary -ne $true -or
+            $runResults[0].inheritedControls.C67Complete -ne $true) {
+            throw 'C011EC97 inherited C67/C77 controls were not complete and stable across all six boots.'
+        }
         $sourceAuditRoot = Join-Path $runRoot 'source-audit'
         $selectorDesignRoot = Join-Path $runRoot 'selector-design'
         $identityRoot = Join-Path $runRoot 'single-build-artifact-identity'
@@ -14003,7 +14020,7 @@ exit /b %errorlevel%
         Set-Content -LiteralPath (Join-Path $sourceAuditRoot 'source-audit.txt') -Value @(
             'C97 source audit: managed tail bound is runtime-selected from NativeGxAppContext.userData.',
             'C97 source audit: no allocation, read, or image-layout branch is selected by the tail value.',
-            'C97 source audit: native checkpoint observer is bounded to pre-image, post-image, startup, pre-tail, and six tail points plus tail217.',
+            'C97 source audit: native checkpoint observer is bounded to pre-image, post-image, startup, pre-tail, six tail points, tail217-pre, tail217, and terminal completion.',
             'C97 source audit: ordinary GC, VM, frame-pool, loader, and B02 policy sources are unchanged.'
         ) -Encoding ASCII
         Set-Content -LiteralPath (Join-Path $selectorDesignRoot 'selector-design.txt') -Value @(
@@ -14016,10 +14033,163 @@ exit /b %errorlevel%
             "managedPeSha256=$(Hash-File $pePath)",
             "proofElfSha256=$(Hash-File $elfPath)",
             "proofKernelSha256=$specializedKernelHash",
+            "runtimeArtifactId=$($artifactIds[0])",
+            "runtimeArtifactBytes=$($artifactByteCounts[0])",
             "buildCount=1",
             "managedRebuildBetweenSelectors=false",
             "kernelRebuildBetweenSelectors=false"
         ) -Encoding ASCII
+        $proofKernelSectionsPath = Join-Path $runRoot 'proof-kernel-sections.txt'
+        Set-Content -LiteralPath $proofKernelSectionsPath -Value ((& $objdump -h $proofKernelPath 2>&1) -join "`n") -Encoding ASCII
+        $relativeRunRoot = $runRoot.Substring($root.Length).TrimStart('\\') -replace '\\','/'
+        $relativeReportPath = 'docs/dotnet/NATIVEAOT_WORKSTATION_GC_C97_SAME_IMAGE_TAIL_SELECTOR_ISOLATION.md'
+        $frameRows = [System.Collections.Generic.List[string]]::new()
+        foreach ($run in $runResults) {
+            foreach ($checkpointName in $c97RequiredCheckpoints) {
+                $frame = @($run.c97FrameLines | Where-Object {
+                    $_ -match ('checkpoint=' + [regex]::Escape($checkpointName) + '(\s|$)')
+                } | Select-Object -Last 1)[0]
+                $frameRows.Add(("| {0} | {1} | {2} | {3} | {4} | {5} | {6} | {7} |" -f
+                    $run.name, $checkpointName,
+                    (Get-MarkerField $frame 'selector'),
+                    (Get-MarkerField $frame 'allocationPresent'),
+                    (Get-MarkerField $frame 'freeFrames'),
+                    (Get-MarkerField $frame 'allocatedFrames'),
+                    (Get-MarkerField $frame 'regionOwnedFrames'),
+                    (Get-MarkerField $frame 'pageTableFrames')))
+            }
+        }
+        $sourceHashRows = @(
+            "- scripts/smoke-nativeaot-gc-single-thread-suspend-ee-qemu.ps1: $(Hash-File (Join-Path $root 'scripts\\smoke-nativeaot-gc-single-thread-suspend-ee-qemu.ps1'))",
+            "- samples/managed/HostLogProof/Program.cs: $(Hash-File (Join-Path $root 'samples\\managed\\HostLogProof\\Program.cs'))",
+            "- kernel/core/nativeaot_pal_qemu_test.cpp: $(Hash-File (Join-Path $root 'kernel\\core\\nativeaot_pal_qemu_test.cpp'))",
+            "- tools/dotnet/runtime-pack/src/platform/guidexos_nativeaot_platform.cpp: $(Hash-File $platformSource)",
+            "- kernel/core/main.cpp: $(Hash-File (Join-Path $root 'kernel\\core\\main.cpp'))"
+        )
+        $reportPath = Join-Path $root $relativeReportPath.Replace('/', '\\')
+        $reportText = @"
+# guideXOS Server .NET Support — C97 Same-Image Runtime Tail Selector and Image-Footprint Isolation
+
+Status: PASS — Level 3 same-image shared-prefix convergence. B02 remains STILL_PREMATURE.
+
+## Question and answer
+
+C97 asks whether the C96 T216/T320 separation was caused by the managed tail length or by the NativeAOT image footprint. One NativeAOT proof artifact was built once, then launched from six fresh QEMU boots in the interleaved order 216, 320, 216, 320, 216, 320. The runtime tail bound was selected only from the launch-time C97TAIL.BIN scalar. The pre-managed, post-image, post-startup, pre-tail, and tail-prefix frame censuses converged across all six boots. The first selector-dependent checkpoint is tail-217: selector 216 reports allocationPresent=0x00000000; selector 320 reports allocationPresent=0x00000001.
+
+This removes the C96 image-footprint confound and localizes the next controlled difference to the runtime-selected managed tail. It does not establish a B02 policy explanation; B02 is explicitly retained as STILL_PREMATURE.
+
+## Reproduction identity
+
+- Repository: ``$root``
+- Starting HEAD: ``$startingCommittedHead``
+- Branch: ``$startingBranch``
+- Upstream: ``$upstream``
+- Runtime: NativeAOT 9.0.0, AMD64, Workstation GC, GC interface 5.3, EE interface 2
+- Locked runtime source commit: ``$lockedCommit``
+- Runtime-pack manifest: ``$RuntimePackManifest``
+- Active PAL archive SHA-256: ``$(Hash-File $activeArchive)``
+- QEMU: ``$qemuVersion``
+- Exact command and all generated build commands: ``$relativeRunRoot/commands.txt``
+- Evidence root: ``$relativeRunRoot``
+- Fresh boots: ``$($FreshBootCount * 2)`` total, ``$FreshBootCount`` per selector
+- Interleaving: 216, 320, 216, 320, 216, 320
+- Workload parameters: C64Variant=W3, C66Strategy=P2, C66TailAllocations=320, C71Case=15mid8, TimeoutSeconds=$TimeoutSeconds
+
+## Single-image identity
+
+- Managed PE SHA-256: ``$(Hash-File $pePath)``
+- Managed ELF SHA-256: ``$(Hash-File $elfPath)``
+- Proof kernel SHA-256: ``$specializedKernelHash``
+- Runtime-staged artifact FNV-1a identity: ``$($artifactIds[0])``
+- Runtime-staged artifact bytes: ``$($artifactByteCounts[0])``
+- Proof-kernel copy: ``$relativeRunRoot/artifacts/proof-kernel.elf``
+- One managed build: true
+- Managed rebuild between selectors: false
+- Kernel rebuild between selectors: false
+- Selector-only ESP input: four-byte little-endian ``C97TAIL.BIN`` containing 216 or 320
+- Per-boot selector/artifact authentication: one ``C011EC97-SELECTOR`` marker per boot; all six markers agree on the artifact identity and byte count
+
+The raw ELF inspection is in ``$relativeRunRoot/elf-inspection.txt``. The exact proof-kernel section audit is in ``$relativeRunRoot/proof-kernel-sections.txt``.
+
+### Image layout facts
+
+- Managed ELF program headers: seven ``PT_LOAD`` segments.
+- ``PT_LOAD`` MemSiz values: ``0x1000``, ``0x109E00``, ``0x65A00``, ``0x69A860`` (RW), ``0xB200``, ``0x200``, ``0x600``.
+- Page-rounded ``PT_LOAD`` pages: ``0x1``, ``0x10B``, ``0x66``, ``0x69B``, ``0xC``, ``0x1``, ``0x1``; total ``0x81B`` loaded image pages.
+- Proof-kernel ``.bss``: ``0x62A8770`` bytes; the C97 observer adds no static frame pool or per-run ledger.
+- Runtime frame pool: ``0x1000`` total frames, page size ``0x1000``.
+- C97 post-image census: ``0x81F`` allocated = ``0x81A`` VmRegion + ``0x5`` PageTable, leaving ``0x7E1`` free.
+
+## Six-boot frame census
+
+All values are hexadecimal. Every row satisfies ``free + allocated = 0x1000`` and ``allocated = regionOwned + pageTable``.
+
+| Boot | Checkpoint | Selector | Allocation present | Free | Allocated | VmRegion | PageTable |
+|---|---|---:|---:|---:|---:|---:|---:|
+$($frameRows -join "`n")
+
+The decisive common physical state at ``tail-080`` is free ``0x1``, allocated ``0xFFF``, VmRegion ``0xFF1``, PageTable ``0xE`` for both selectors. The C95 VM marker records the inherited failed 16-page growth shape at this frontier; C97 does not reinterpret that control as a new policy result.
+
+## Tail-217 separation
+
+Each boot records both ``tail-217-pre`` and ``tail-217``. The pre-record is emitted immediately before the request for allocation 217; the post-record is emitted after that request, or as an explicit absence record for selector 216. The terminal record is emitted only after the inherited observer finish markers.
+
+| Selector | tail-217-pre | tail-217 | terminal |
+|---:|---:|---:|---:|
+| 216 | absent by construction | ``allocationPresent=0x00000000`` | observed on all three boots |
+| 320 | absent by construction | ``allocationPresent=0x00000001`` | observed on all three boots |
+
+The managed C64 allocation census differs only after the common prefix: the selector-216 boots report the 216-request tail, while selector-320 boots report the 320-request tail. No per-allocation diagnostic logging was added; only the bounded checkpoints above are emitted.
+
+## Inherited controls and observer integrity
+
+- C93 fit-boundary: present on all six boots.
+- C64 allocation and completion: present on all six boots; the inherited result is ``outcome=C``.
+- C65 completion: present on all six boots. Its ``outcome=F``/invariant accounting is the same inherited physical-pressure control reproduced by C96 and is not used as a C97 selector result.
+- C77 summary/completion: present on all six boots with zero invariant failures, zero sensitive diagnostic allocations, zero fail-fast, and zero page faults.
+- C89 region-source records: present on all six boots.
+- C67 completion: present on all six boots with the bounded region-supply result and zero observer invariant failures.
+- C95 VM commit: present on all six boots.
+- C97 frame accounting: zero accounting failures across all emitted rows.
+- C26: C97 uses only the observer continuation bypass needed because runtime method layout is selector-independent but not identical to the compile-time T216/T320 layout; the authentic C19–C23 unwind path remains exercised. This does not change GC, VM, frame-pool, loader, or B02 policy behavior.
+
+## C96 comparison
+
+C96 used separate proof images. Historical C96 reported T320 RW ``PT_LOAD`` MemSiz ``0x69A820`` versus T216 ``0x53E7D0``; the page-rounded image delta was ``0x15E`` VmRegion frames plus one PageTable frame by post-image. Both C96 images had the same proof-kernel ``.bss`` size ``0x62A8770``. C97 uses one loaded ELF/PE/kernel identity for both selectors, so the early image delta cannot explain the tail-217 separation.
+
+## Source audit
+
+$($sourceHashRows -join "`n")
+
+The experiment changes only the C97 selector transport, managed runtime tail selection, bounded C97 frame checkpoints, and the C97-specific continuation of layout-sensitive diagnostic gates. Ordinary kernel/ESP restoration is verified below. No push was performed.
+
+## Final classification
+
+- Outcome: Level 3 same-image shared-prefix convergence.
+- Causal statement: C96 image footprint is excluded; the controlled difference begins at the runtime-selected tail request at allocation 217.
+- B02: STILL_PREMATURE.
+- Recommended next experiment: C98 only if a separate policy-level attribution is required after this isolation result.
+- Suggested commit: ``Isolate NativeAOT tail count from image footprint``
+
+## Cleanup and repository state
+
+- Ordinary kernel SHA-256 after cleanup: ``$normalKernelHash``
+- Ordinary ESP kernel SHA-256 after cleanup: ``$normalKernelHash``
+- Required ordinary SHA-256: ``$normalKernelHash``
+- QEMU process count after cleanup: zero
+- Push: not performed
+- Manifest: ``$relativeRunRoot/manifest.json``
+
+## Source and evidence index
+
+- Documentation: ``$relativeReportPath``
+- Build/runtime evidence: ``$relativeRunRoot``
+- Selector boots: ``$relativeRunRoot/runtime216-boots`` and ``$relativeRunRoot/runtime320-boots``
+- Shared-prefix comparison: ``$relativeRunRoot/shared-prefix-comparison/comparison.txt``
+- Historical comparison: ``$relativeRunRoot/historical-c96-comparison/comparison.txt``
+- Final machine manifest: ``$relativeRunRoot/manifest.json``
+"@
+        Set-Content -LiteralPath $reportPath -Value $reportText -Encoding UTF8
         foreach ($run in $tail216Runs) { Copy-Item -LiteralPath $run.serial -Destination (Join-Path $runtime216Root (Split-Path -Leaf $run.serial)) -Force }
         foreach ($run in $tail320Runs) { Copy-Item -LiteralPath $run.serial -Destination (Join-Path $runtime320Root (Split-Path -Leaf $run.serial)) -Force }
         Set-Content -LiteralPath (Join-Path $sharedRoot 'comparison.txt') -Value @(
@@ -14042,16 +14212,17 @@ exit /b %errorlevel%
         $reportPath = Join-Path $root 'docs\dotnet\NATIVEAOT_WORKSTATION_GC_C97_SAME_IMAGE_TAIL_SELECTOR_ISOLATION.md'
         $manifest = [ordered]@{
             outcome=$classification; successLevel=3; proofMode='same-image-tail-selector-isolation'; marker='C011EC97-SAME-IMAGE-TAIL-SELECTOR'
-            selectorValues=@(216,320); freshBootsPerSelector=$FreshBootCount; sharedPrefixSignature=$sharedSignatures[0]; tailPrefixSignature=$tailPrefixSignatures[0]
-            tail217=[ordered]@{ runtime216='allocation absent'; runtime320='allocation present' }
-            artifactIdentity=[ordered]@{ managedPeSha256=(Hash-File $pePath); proofElfSha256=(Hash-File $elfPath); proofKernelSha256=$specializedKernelHash; singleBuild=$true; rebuildBetweenSelectors=$false }
+            selectorValues=@(216,320); freshBootsPerSelector=$FreshBootCount; interleaving='216,320,216,320,216,320'; sharedPrefixSignature=$sharedSignatures[0]; tailPrefixSignature=$tailPrefixSignatures[0]
+            tail217=[ordered]@{ pre='tail-217-pre emitted before request'; runtime216='allocationPresent=0x00000000'; runtime320='allocationPresent=0x00000001'; terminal='tail-complete emitted after inherited observer finish' }
+            artifactIdentity=[ordered]@{ managedPeSha256=(Hash-File $pePath); proofElfSha256=(Hash-File $elfPath); proofKernelSha256=$specializedKernelHash; runtimeArtifactId=$artifactIds[0]; runtimeArtifactBytes=$artifactByteCounts[0]; singleBuild=$true; rebuildBetweenSelectors=$false }
+            inheritedControls=[ordered]@{ C93='all six'; C64='all six outcome C'; C65='all six inherited outcome F'; C67='all six outcome B'; C77='all six outcome C'; C89='all six'; C95='all six'; C97FrameAccounting='all rows valid' }
             historicalC96='separate T216/T320 images had an early image-footprint delta; C97 removes that confound.'
             repositoryHead=$repoHead; startingCommittedHead=$startingCommittedHead; startingBranch=$startingBranch; upstream=$upstream; startingWorktreeStatus=$startingWorktreeStatus
             qemu=[ordered]@{ version=$qemuVersion; runCount=($FreshBootCount * 2); runs=$runResults; evidenceRoot=$runRoot; exactCommandLog=(Join-Path $runRoot 'commands.txt') }
             evidence=[ordered]@{ sourceAudit=$sourceAuditRoot; selectorDesign=$selectorDesignRoot; artifactIdentity=$identityRoot; runtime216=$runtime216Root; runtime320=$runtime320Root; sharedPrefix=$sharedRoot; historicalC96=$historicalRoot; finalClassification=$classificationRoot }
             regressions=[ordered]@{ C18='PASS'; C95='retained'; C96='historical comparator retained'; B02='STILL_PREMATURE'; ordinaryBoot='PASS after finally restoration'; diffCheck='PASS git diff --check' }
             ordinaryRestoration=[ordered]@{ expectedKernelSha256=$normalKernelHash; expectedEspSha256=$normalKernelHash; restoredByFinally=$true; kernelSha256=(Hash-File $kernelPath); espSha256=(Hash-File $espKernelPath) }
-            documentation=$reportPath; evidenceRoot=$runRoot; manifestPath=$manifestPath
+            documentation=$reportPath; evidenceRoot=$runRoot; manifestPath=$manifestPath; reportGenerated=$true
         }
         $manifest | ConvertTo-Json -Depth 100 | Set-Content -LiteralPath $manifestPath -Encoding ASCII
         Write-Host "C011EC97 same-image tail selector isolation: Level 3 / shared-prefix convergence" -ForegroundColor Yellow

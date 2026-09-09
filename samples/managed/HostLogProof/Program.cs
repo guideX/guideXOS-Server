@@ -1588,6 +1588,17 @@ public static unsafe class Program
         {
             for (uint offset = 0u; offset < postDebitTailAllocations; offset++)
             {
+                if (offset == 216u)
+                {
+#if HOSTLOGPROOF_C011EC97
+                    // Capture the same-image state immediately before the
+                    // selector-controlled tail requests allocation 217.
+                    if (GuideXosNativeAotC011EC97Checkpoint(0x217u, 0u) != 0)
+                    {
+                        return -1;
+                    }
+#endif
+                }
                 uint ordinal = allocationOrdinal++;
                 // The continuation is intentionally plain managed pressure.
                 // The C57 allocation wrapper has completed its promotion
@@ -1635,6 +1646,11 @@ public static unsafe class Program
             }
 #if HOSTLOGPROOF_C011EC97
             if (postDebitTailAllocations == 216u &&
+                GuideXosNativeAotC011EC97Checkpoint(0x217u, 0u) != 0)
+            {
+                return -1;
+            }
+            if (postDebitTailAllocations == 216u &&
                 GuideXosNativeAotC011EC97Checkpoint(217u, 0u) != 0)
             {
                 return -1;
@@ -1658,7 +1674,15 @@ public static unsafe class Program
         int c64Status = GuideXosNativeAotC011EC64Finish();
 #if HOSTLOGPROOF_C011EC65
         int c65Status = GuideXosNativeAotC011EC65Finish();
+#if HOSTLOGPROOF_C011EC97
+        // Emit the terminal C97 checkpoint only after every inherited
+        // observer has published its completion record.  This lets the
+        // watchdog stop without truncating C65/C67/C77 evidence.
+        int c97Status = GuideXosNativeAotC011EC97Checkpoint(218u, 0u);
+        return c57Status == 0 && c64Status == 0 && c65Status == 0 && c97Status == 0 ? 0 : -1;
+#else
         return c57Status == 0 && c64Status == 0 && c65Status == 0 ? 0 : -1;
+#endif
 #else
         return c57Status == 0 && c64Status == 0 ? 0 : -1;
 #endif
