@@ -1435,6 +1435,69 @@ static void capture_tx_descriptor_raw(const TxDescriptor& descriptor,
     if (raw1) *raw1 = tx_descriptor_raw_word1(descriptor);
 }
 
+static void record_raw_tx_request(TxRawPath path, const uint8_t* frame,
+                                  uint16_t frameLength, bool frameValid)
+{
+    TxRawDiagnostics& raw = s_device.tx.raw;
+    memzero(&raw, sizeof(raw));
+    raw.attempted = true;
+    raw.frameValid = frameValid;
+    raw.path = path;
+    raw.frameLength = frameLength;
+    if (!frameValid || !frame) return;
+
+    raw.etherType = (static_cast<uint16_t>(frame[12]) << 8) |
+                    static_cast<uint16_t>(frame[13]);
+    for (uint8_t i = 0; i < ETH_ALEN; ++i) {
+        raw.destination[i] = frame[i];
+        raw.source[i] = frame[ETH_ALEN + i];
+    }
+}
+
+static void retain_raw_tx_submission(Status result)
+{
+    TxRawDiagnostics& raw = s_device.tx.raw;
+    if (!raw.attempted) return;
+
+    raw.descriptorSubmissionAttempted = s_device.tx.descriptorPublished;
+    raw.completed = raw.descriptorSubmissionAttempted && result == NIC_OK;
+    raw.failureReason = s_device.tx.failureReason;
+    raw.timedOut = s_device.tx.hardwareTimeouts != 0u;
+    raw.poisoned = s_device.tx.ringPoisoned;
+    raw.descriptorIndex = s_device.tx.lastDescriptor;
+    raw.descriptorLength = raw.descriptorSubmissionAttempted
+        ? s_device.tx.lastLength : 0u;
+    raw.descriptorCommand = raw.descriptorSubmissionAttempted
+        ? s_device.tx.lastCommand : 0u;
+    raw.descriptorStatusBefore = raw.descriptorSubmissionAttempted
+        ? s_device.tx.lastDescriptorStatusBefore : 0u;
+    raw.descriptorStatusFinal = raw.descriptorSubmissionAttempted
+        ? s_device.tx.lastDescriptorStatus : 0u;
+    raw.tdtBefore = static_cast<uint16_t>(
+        s_device.tx.beforeRegisters.tdt & 0xFFFFu);
+    raw.tdtWritten = static_cast<uint16_t>(s_device.tx.tdtWritten & 0xFFFFu);
+    const TxRegisterSnapshot& final = s_device.tx.finalRegisters.valid
+        ? s_device.tx.finalRegisters : s_device.tx.initialRegisters;
+    raw.tdtFinal = static_cast<uint16_t>(final.tdt & 0xFFFFu);
+    raw.tdhBefore = static_cast<uint16_t>(
+        s_device.tx.beforeRegisters.tdh & 0xFFFFu);
+    raw.tdhFinal = static_cast<uint16_t>(final.tdh & 0xFFFFu);
+    raw.completionPolls = s_device.tx.completionPolls;
+
+    if (!raw.descriptorSubmissionAttempted) return;
+
+    // lastDescriptorRaw0 is the prepared descriptor immediately before the
+    // TDT write; the following two snapshots are captured after doorbell and
+    // at completion/timeout. Preserve them here so a later DHCP attempt does
+    // not overwrite the Phase 17 evidence.
+    raw.descriptorRaw0BeforeTdt = s_device.tx.lastDescriptorRaw0;
+    raw.descriptorRaw1BeforeTdt = s_device.tx.lastDescriptorRaw1;
+    raw.descriptorRaw0AfterTdt = s_device.tx.lastDescriptorRaw0AfterDoorbell;
+    raw.descriptorRaw1AfterTdt = s_device.tx.lastDescriptorRaw1AfterDoorbell;
+    raw.descriptorRaw0Final = s_device.tx.lastDescriptorRaw0Final;
+    raw.descriptorRaw1Final = s_device.tx.lastDescriptorRaw1Final;
+}
+
 static bool init_tx(uint64_t mmioBase)
 {
     s_device.tx.dmaMode = s_txDmaMode;
@@ -1477,7 +1540,7 @@ static bool init_tx(uint64_t mmioBase)
     s_device.tx.ringRegistersPersisted = false;
 
     if (is_i219_device(s_device.deviceId) &&
-        s_txDmaMode != TxDmaMode::ConstrainedLow) {
+        !tx_dma_experiment_active(s_txDmaMode)) {
         s_device.tx.failureReason = s_txDmaRegionFailure;
         return false;
     }
@@ -2688,10 +2751,10 @@ void enable_deferred_interrupts()
 }
 
 // ================================================================
-// send_frame - transmit a raw Ethernet frame
+// submit_frame - common guarded TX descriptor primitive
 // ================================================================
 
-Status send_frame(const uint8_t* data, uint16_t len)
+static Status submit_frame(const uint8_t* data, uint16_t len)
 {
     if (!s_initialised || !s_device.active) {
         serial::puts("[NIC] send_frame: not initialized or not active\n");
@@ -2837,10 +2900,13 @@ Status send_frame(const uint8_t* data, uint16_t len)
     s_device.tx.lastBufferVirtualAddress = reinterpret_cast<uint64_t>(&s_txBuffer[0]);
     s_txDescs[s_txCur].bufferAddr = bufAddr;
     s_txDescs[s_txCur].length     = static_cast<uint16_t>(len);
+    s_txDescs[s_txCur].cso        = 0u;
     s_txDescs[s_txCur].cmd        = E1000_TXD_CMD_EOP |
                                     E1000_TXD_CMD_IFCS |
                                     E1000_TXD_CMD_RS;
     s_txDescs[s_txCur].status     = 0;
+    s_txDescs[s_txCur].css        = 0u;
+    s_txDescs[s_txCur].special    = 0u;
     s_device.tx.lastBufferAddress = bufAddr;
     s_device.tx.lastDescriptorBufferAddress = s_txDescs[s_txCur].bufferAddr;
     s_device.tx.bufferAddressMatches =
@@ -2951,6 +3017,65 @@ Status send_frame(const uint8_t* data, uint16_t len)
     (void)len;
     return NIC_ERR_NO_DEVICE;
 #endif
+}
+
+Status send_frame(const uint8_t* data, uint16_t len)
+{
+    return submit_frame(data, len);
+}
+
+Status send_raw_diagnostic_frame(TxRawPath path)
+{
+    uint8_t frame[TX_RAW_FRAME_LENGTH] = {};
+    uint16_t frameLength = 0u;
+    const uint8_t* mac = get_mac_address();
+    const bool frameValid = build_raw_tx_frame(
+        frame, sizeof(frame), mac, &frameLength);
+    record_raw_tx_request(path, frame, frameLength, frameValid);
+
+    if (path != TxRawPath::Normal && path != TxRawPath::Direct) {
+        s_device.tx.failureReason = TxFailureReason::RawFrameInvalid;
+        s_device.tx.lastStatus = NIC_ERR_INIT_FAIL;
+        s_device.tx.raw.failureReason = TxFailureReason::RawFrameInvalid;
+        s_device.tx.driverErrors++;
+        return NIC_ERR_INIT_FAIL;
+    }
+    if (!frameValid) {
+        s_device.tx.failureReason = TxFailureReason::RawFrameInvalid;
+        s_device.tx.lastStatus = NIC_ERR_NO_DEVICE;
+        s_device.tx.raw.failureReason = TxFailureReason::RawFrameInvalid;
+        s_device.tx.driverErrors++;
+        return NIC_ERR_NO_DEVICE;
+    }
+
+    // Phase 17 must never silently fall back to the Phase 15 kernel-image
+    // placement. This check is intentionally before any descriptor or TDT
+    // access, so an inactive experiment cannot create ambiguous ownership.
+    if (!tx_dma_experiment_active(s_device.tx.dmaMode)) {
+        serial::puts("[NIC] raw TX refused: constrained DMA experiment is inactive\n");
+        s_device.tx.failureReason = TxFailureReason::DmaExperimentNotActive;
+        s_device.tx.lastStatus = NIC_ERR_INIT_FAIL;
+        s_device.tx.raw.failureReason = TxFailureReason::DmaExperimentNotActive;
+        s_device.tx.driverErrors++;
+        return NIC_ERR_INIT_FAIL;
+    }
+    if (!s_initialised || !s_device.active) {
+        s_device.tx.failureReason = TxFailureReason::NotReady;
+        s_device.tx.lastStatus = NIC_ERR_NO_DEVICE;
+        s_device.tx.raw.failureReason = TxFailureReason::NotReady;
+        s_device.tx.driverErrors++;
+        return NIC_ERR_NO_DEVICE;
+    }
+
+    // The normal variant deliberately enters through the exported helper so
+    // it exercises the same public raw-frame boundary as DHCP. The direct
+    // variant calls the shared primitive itself; it does not create a second
+    // ring, descriptor format, or retry path.
+    const Status result = path == TxRawPath::Normal
+        ? send_frame(frame, frameLength)
+        : submit_frame(frame, frameLength);
+    retain_raw_tx_submission(result);
+    return result;
 }
 
 // ================================================================

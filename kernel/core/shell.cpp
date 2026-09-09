@@ -379,7 +379,7 @@ static void cmd_help() {
     output_string("Network:\n");
     output_string("  ping <ip>      - Send ICMP echo request\n");
     output_string("  ifconfig, ip   - Network interface info\n");
-    output_string("  nicinfo [brief|link|tx [brief]] - NIC diagnostics\n");
+    output_string("  nicinfo [brief|link|tx [brief|raw [direct|status]]] - NIC diagnostics\n");
     output_string("  netdiag         - Bare-metal NIC/DHCP/ARP diagnostics\n");
     output_string("  ipconfig       - Windows-style IP config\n");
     output_string("  ipconfig /all  - Full IP configuration\n");
@@ -2382,6 +2382,204 @@ static void cmd_nicinfo_tx()
     output_string("\n");
 }
 
+static void cmd_nicinfo_tx_raw_status()
+{
+    const nic::NICDevice* dev = nic::get_device();
+    char numStr[16];
+    char hexStr[9];
+    char hex64Str[17];
+    char dstMac[18];
+    char srcMac[18];
+
+    output_string("NIC TX raw status\n");
+    if (!dev) {
+        output_string("mode=raw attempted=no result=not-ready\n");
+        return;
+    }
+
+    const nic::TxDiagnostics& tx = dev->tx;
+    const nic::TxRawDiagnostics& raw = tx.raw;
+    const nic::TxRegisterSnapshot& final = tx.finalRegisters.valid
+        ? tx.finalRegisters : tx.initialRegisters;
+    const uint64_t reconstructedTdbA =
+        nic::dma_address_register_value(final.tdbal, final.tdbah);
+
+    ethernet::mac_to_string(raw.destination, dstMac);
+    ethernet::mac_to_string(raw.source, srcMac);
+    output_string("mode=raw path=");
+    output_string(nic::tx_raw_path_name(raw.path));
+    output_string(" attempted=");
+    output_string(raw.attempted ? "yes" : "no");
+    output_string(" result=");
+    output_string(raw.completed ? "complete\n" :
+                  (raw.attempted ? "fail\n" : "not-attempted\n"));
+
+    output_string("dma-mode=");
+    output_string(nic::tx_dma_mode_name(tx.dmaMode));
+    output_string(" experiment-active=");
+    output_string(nic::tx_dma_experiment_active(tx.dmaMode) ? "yes\n" : "no\n");
+    output_string("frame-len=");
+    uint_to_str(raw.frameLength, numStr);
+    output_string(numStr);
+    output_string(" valid=");
+    output_string(raw.frameValid ? "yes" : "no");
+    output_string(" dst=");
+    output_string(dstMac);
+    output_string("\n");
+    output_string("src=");
+    output_string(srcMac);
+    output_string(" ethertype=0x");
+    uint_hex_to_str(raw.etherType, 4, hexStr);
+    output_string(hexStr);
+    output_string(" marker=GXOS-I219-P17 valid=");
+    output_string(raw.frameValid ? "yes\n" : "no\n");
+
+    output_string("desc-idx=");
+    uint_to_str(raw.descriptorIndex, numStr);
+    output_string(numStr);
+    output_string(" desc-len=");
+    uint_to_str(raw.descriptorLength, numStr);
+    output_string(numStr);
+    output_string(" cmd=0x");
+    uint_hex_to_str(raw.descriptorCommand, 2, hexStr);
+    output_string(hexStr);
+    output_string(" prepared=");
+    output_string(raw.descriptorSubmissionAttempted ? "yes\n" : "no\n");
+
+    output_string("status-before=");
+    if (raw.descriptorSubmissionAttempted) {
+        uint_hex_to_str(raw.descriptorStatusBefore, 2, hexStr);
+        output_string("0x");
+        output_string(hexStr);
+    } else {
+        output_string("not-submitted");
+    }
+    output_string(" final=");
+    if (raw.descriptorSubmissionAttempted) {
+        uint_hex_to_str(raw.descriptorStatusFinal, 2, hexStr);
+        output_string("0x");
+        output_string(hexStr);
+    } else {
+        output_string("not-submitted");
+    }
+    output_string(" DD=");
+    output_string(raw.completed ? "yes\n" : "no\n");
+
+    output_string("TDT before=0x");
+    uint_hex_to_str(raw.tdtBefore, 4, hexStr);
+    output_string(hexStr);
+    output_string(" written=0x");
+    uint_hex_to_str(raw.tdtWritten, 4, hexStr);
+    output_string(hexStr);
+    output_string(" final=0x");
+    uint_hex_to_str(raw.tdtFinal, 4, hexStr);
+    output_string(hexStr);
+    output_string("\n");
+    output_string("TDH before=0x");
+    uint_hex_to_str(raw.tdhBefore, 4, hexStr);
+    output_string(hexStr);
+    output_string(" final=0x");
+    uint_hex_to_str(raw.tdhFinal, 4, hexStr);
+    output_string(hexStr);
+    output_string("\n");
+
+    output_string("polls=");
+    uint_to_str(raw.completionPolls, numStr);
+    output_string(numStr);
+    output_string(" timeout=");
+    output_string(raw.timedOut ? "yes" : "no");
+    output_string(" poison=");
+    output_string(raw.poisoned ? "yes" : "no");
+    output_string(" failure=");
+    output_string(nic::tx_failure_reason_name(raw.failureReason));
+    output_string("\n");
+
+    output_string("ringPA=0x");
+    uint_hex64_to_str(tx.descriptorRingAddress, hex64Str);
+    output_string(hex64Str);
+    output_string(" bufPA=0x");
+    uint_hex64_to_str(tx.lastBufferAddress, hex64Str);
+    output_string(hex64Str);
+    output_string("\n");
+    output_string("TDBA=0x");
+    uint_hex64_to_str(reconstructedTdbA, hex64Str);
+    output_string(hex64Str);
+    output_string(" match=");
+    output_string(nic::tx_ring_registers_match(
+        final, tx.descriptorRingAddress,
+        nic::tx_ring_length_bytes(nic::NUM_TX_DESC)) ? "yes" : "no");
+    output_string(" buffer-match=");
+    output_string(tx.bufferAddressMatches ? "yes\n" : "no\n");
+    output_string("TDBAL=0x");
+    uint_hex_to_str(final.tdbal, 8, hexStr);
+    output_string(hexStr);
+    output_string(" TDBAH=0x");
+    uint_hex_to_str(final.tdbah, 8, hexStr);
+    output_string(hexStr);
+    output_string(" LEN=0x");
+    uint_hex_to_str(final.tdlen, 8, hexStr);
+    output_string(hexStr);
+    output_string("\n");
+
+    output_string("TXDCTL1=0x");
+    uint_hex_to_str(final.txdctl1, 8, hexStr);
+    output_string(hexStr);
+    output_string(" valid=");
+    output_string(nic::i219_spt_txdctl_configuration_valid(final.txdctl1)
+                  ? "yes" : "no");
+    output_string(" TCTL=0x");
+    uint_hex_to_str(final.tctl, 8, hexStr);
+    output_string(hexStr);
+    output_string("\n");
+    output_string("TIPG=0x");
+    uint_hex_to_str(final.tipg, 8, hexStr);
+    output_string(hexStr);
+    output_string(" TARC0=0x");
+    uint_hex_to_str(final.tarc0, 8, hexStr);
+    output_string(hexStr);
+    output_string(" IOSFPC=0x");
+    uint_hex_to_str(final.iosfpc, 8, hexStr);
+    output_string(hexStr);
+    output_string("\n");
+    output_string("PCI-CMD=0x");
+    uint_hex_to_str(final.pciCommand, 4, hexStr);
+    output_string(hexStr);
+    output_string(" owned=");
+    output_string(tx.dmaRegionOwnershipValid ? "yes" : "no");
+    output_string(" mapped=");
+    output_string(tx.dmaRegionMappingValid ? "yes\n" : "no\n");
+
+    output_string("raw-before-tdt=0x");
+    uint_hex64_to_str(raw.descriptorRaw0BeforeTdt, hex64Str);
+    output_string(hex64Str);
+    output_string("/0x");
+    uint_hex64_to_str(raw.descriptorRaw1BeforeTdt, hex64Str);
+    output_string(hex64Str);
+    output_string("\n");
+    output_string("raw-after-tdt=0x");
+    uint_hex64_to_str(raw.descriptorRaw0AfterTdt, hex64Str);
+    output_string(hex64Str);
+    output_string("/0x");
+    uint_hex64_to_str(raw.descriptorRaw1AfterTdt, hex64Str);
+    output_string(hex64Str);
+    output_string("\n");
+    output_string("raw-final=0x");
+    uint_hex64_to_str(raw.descriptorRaw0Final, hex64Str);
+    output_string(hex64Str);
+    output_string("/0x");
+    uint_hex64_to_str(raw.descriptorRaw1Final, hex64Str);
+    output_string(hex64Str);
+    output_string("\n");
+}
+
+static void cmd_nicinfo_tx_raw(bool direct)
+{
+    const nic::TxRawPath path = direct
+        ? nic::TxRawPath::Direct : nic::TxRawPath::Normal;
+    (void)nic::send_raw_diagnostic_frame(path);
+    cmd_nicinfo_tx_raw_status();
+}
+
 // One-screen TX evidence for the physical bring-up loop. This remains
 // observational and is deliberately capped at the shell contract above.
 static void cmd_nicinfo_tx_brief()
@@ -2413,6 +2611,8 @@ static void cmd_nicinfo_tx_brief()
 
     output_string("mode=");
     output_string(nic::tx_dma_mode_name(tx.dmaMode));
+    output_string(" experiment-active=");
+    output_string(nic::tx_dma_experiment_active(tx.dmaMode) ? "yes" : "no");
     output_string(" region=0x");
     uint_hex64_to_str(tx.dmaRegionPhysicalBase, hex64Str);
     output_string(hex64Str);
@@ -4964,12 +5164,19 @@ static void execute_command(const char* cmd) {
         cmd_ifconfig();
     } else if (str_eq(command, "nicinfo") || str_eq(command, "nicstat") ||
                str_eq(command, "netdiag")) {
-        const NicInfoMode nicInfoMode =
-            (argCount <= 1) ? NICINFO_MODE_FULL :
-            (argCount == 2 ? nicinfo_mode_from_arg(arg1) :
-             (argCount == 3 && str_eq(arg1, "tx") &&
-              str_eq(args[2], "brief") ? NICINFO_MODE_TX_BRIEF
-                                         : NICINFO_MODE_INVALID));
+        NicInfoMode nicInfoMode = NICINFO_MODE_INVALID;
+        if (argCount <= 1) {
+            nicInfoMode = NICINFO_MODE_FULL;
+        } else if (argCount == 2) {
+            nicInfoMode = nicinfo_mode_from_arg(arg1);
+        } else if (argCount == 3 && str_eq(arg1, "tx") &&
+                   str_eq(args[2], "brief")) {
+            nicInfoMode = NICINFO_MODE_TX_BRIEF;
+        } else if (argCount == 3) {
+            nicInfoMode = nicinfo_mode_from_args(arg1, args[2], nullptr);
+        } else if (argCount == 4) {
+            nicInfoMode = nicinfo_mode_from_args(arg1, args[2], args[3]);
+        }
         if (nicInfoMode == NICINFO_MODE_FULL) {
             cmd_nicinfo();
         } else if (nicInfoMode == NICINFO_MODE_BRIEF) {
@@ -4980,12 +5187,21 @@ static void execute_command(const char* cmd) {
             cmd_nicinfo_tx();
         } else if (nicInfoMode == NICINFO_MODE_TX_BRIEF) {
             cmd_nicinfo_tx_brief();
+        } else if (nicInfoMode == NICINFO_MODE_TX_RAW) {
+            cmd_nicinfo_tx_raw(false);
+        } else if (nicInfoMode == NICINFO_MODE_TX_RAW_DIRECT) {
+            cmd_nicinfo_tx_raw(true);
+        } else if (nicInfoMode == NICINFO_MODE_TX_RAW_STATUS) {
+            cmd_nicinfo_tx_raw_status();
         } else {
-            output_string("Usage: nicinfo [brief|link|tx [brief]]\n");
+            output_string("Usage: nicinfo [brief|link|tx [brief|raw [direct|status]]]\n");
             output_string("  brief: recorded NIC initialization/link state only\n");
             output_string("  link: one bounded, read-only current link refresh\n");
             output_string("  tx: one TX descriptor and bounded register snapshot\n");
             output_string("  tx brief: compact one-screen TX evidence\n");
+            output_string("  tx raw: one fixed raw Ethernet TX attempt\n");
+            output_string("  tx raw direct: same fixture via direct submit\n");
+            output_string("  tx raw status: last raw attempt and descriptor bytes\n");
         }
     } else if (str_eq(command, "netstat") || str_eq(command, "ss")) {
         cmd_netstat();

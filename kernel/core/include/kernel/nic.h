@@ -80,6 +80,13 @@ static const uint16_t ETH_MTU       = 1500;    // standard MTU
 static const uint16_t ETH_FRAME_MAX = 1518;    // header + MTU + FCS
 static const uint16_t ETH_FRAME_MIN = 60;      // minimum frame (no FCS)
 
+// Phase 17 is deliberately a fixed, protocol-independent TX fixture. The
+// EtherType is in the IEEE local experimental range; hardware appends FCS
+// because the descriptor uses IFCS. The helper pads to a legal 60-byte frame.
+static const uint16_t TX_RAW_ETHERTYPE = 0x88B5;
+static const char TX_RAW_PAYLOAD_MARKER[] = "GXOS-I219-P17";
+static const uint16_t TX_RAW_FRAME_LENGTH = ETH_FRAME_MIN;
+
 // Phase 16 handoff contract. The loader allocates exactly two contiguous
 // pages with AllocateMaxAddress below 4 GiB. TX uses page 0 for the 64 x
 // 16-byte descriptor ring and page 1 for the one shared packet buffer.
@@ -101,6 +108,11 @@ enum class TxDmaMode : uint8_t {
     ConstrainedLow,
     Unavailable,
 };
+
+inline bool tx_dma_experiment_active(TxDmaMode mode)
+{
+    return mode == TxDmaMode::ConstrainedLow;
+}
 
 inline const char* tx_dma_mode_name(TxDmaMode mode)
 {
@@ -949,6 +961,7 @@ enum class TxFailureReason : uint8_t {
     DmaRegionNotOwned,
     DmaAddressWidthMismatch,
     DmaExperimentNotActive,
+    RawFrameInvalid,
 };
 
 inline const char* tx_failure_reason_name(TxFailureReason reason)
@@ -975,9 +988,57 @@ inline const char* tx_failure_reason_name(TxFailureReason reason)
         case TxFailureReason::DmaRegionNotOwned:     return "TX_DMA_REGION_NOT_OWNED";
         case TxFailureReason::DmaAddressWidthMismatch:return "TX_DMA_ADDRESS_WIDTH_MISMATCH";
         case TxFailureReason::DmaExperimentNotActive:return "TX_DMA_EXPERIMENT_NOT_ACTIVE";
+        case TxFailureReason::RawFrameInvalid:        return "TX_RAW_FRAME_INVALID";
         default:                                     return "none";
     }
 }
+
+enum class TxRawPath : uint8_t {
+    None = 0,
+    Normal,
+    Direct,
+};
+
+inline const char* tx_raw_path_name(TxRawPath path)
+{
+    switch (path) {
+        case TxRawPath::Normal: return "normal";
+        case TxRawPath::Direct: return "direct";
+        default:                return "none";
+    }
+}
+
+struct TxRawDiagnostics {
+    bool       attempted;
+    bool       frameValid;
+    bool       descriptorSubmissionAttempted;
+    bool       completed;
+    bool       timedOut;
+    bool       poisoned;
+    TxRawPath  path;
+    TxFailureReason failureReason;
+    uint16_t   frameLength;
+    uint16_t   etherType;
+    uint16_t   descriptorIndex;
+    uint16_t   descriptorLength;
+    uint8_t    descriptorCommand;
+    uint8_t    descriptorStatusBefore;
+    uint8_t    descriptorStatusFinal;
+    uint16_t   tdtBefore;
+    uint16_t   tdtWritten;
+    uint16_t   tdtFinal;
+    uint16_t   tdhBefore;
+    uint16_t   tdhFinal;
+    uint32_t   completionPolls;
+    uint8_t    destination[ETH_ALEN];
+    uint8_t    source[ETH_ALEN];
+    uint64_t   descriptorRaw0BeforeTdt;
+    uint64_t   descriptorRaw1BeforeTdt;
+    uint64_t   descriptorRaw0AfterTdt;
+    uint64_t   descriptorRaw1AfterTdt;
+    uint64_t   descriptorRaw0Final;
+    uint64_t   descriptorRaw1Final;
+};
 
 struct TxRegisterSnapshot {
     uint32_t tdbal;
@@ -1046,6 +1107,7 @@ struct TxDiagnostics {
     uint32_t observedHead;
     uint32_t observedTail;
     uint32_t control;
+    TxRawDiagnostics raw;
     bool     descriptorPublished;
     bool     dmaTranslationValid;
     bool     ringVirtualAddressInKernelImage;
@@ -1305,6 +1367,36 @@ inline bool is_valid_station_mac(const uint8_t* mac)
     return !allZero && !allFF && ((mac[0] & 0x01u) == 0u);
 }
 
+// Build the exact Phase 17 Ethernet-II fixture without invoking any network
+// protocol. The frame excludes FCS; E1000_TXD_CMD_IFCS asks the NIC to append
+// it. Zero-filled padding keeps every byte deterministic.
+inline bool build_raw_tx_frame(uint8_t* frame, uint16_t capacity,
+                               const uint8_t* sourceMac,
+                               uint16_t* lengthOut)
+{
+    if (!frame || !sourceMac || !lengthOut ||
+        capacity < TX_RAW_FRAME_LENGTH || !is_valid_station_mac(sourceMac)) {
+        return false;
+    }
+
+    for (uint16_t i = 0; i < TX_RAW_FRAME_LENGTH; ++i) frame[i] = 0u;
+    for (uint8_t i = 0; i < ETH_ALEN; ++i) frame[i] = 0xFFu;
+    for (uint8_t i = 0; i < ETH_ALEN; ++i) {
+        frame[ETH_ALEN + i] = sourceMac[i];
+    }
+    frame[12] = static_cast<uint8_t>(TX_RAW_ETHERTYPE >> 8);
+    frame[13] = static_cast<uint8_t>(TX_RAW_ETHERTYPE & 0xFFu);
+
+    const uint16_t markerLength =
+        static_cast<uint16_t>(sizeof(TX_RAW_PAYLOAD_MARKER) - 1u);
+    for (uint16_t i = 0; i < markerLength; ++i) {
+        frame[ETH_HLEN + i] =
+            static_cast<uint8_t>(TX_RAW_PAYLOAD_MARKER[i]);
+    }
+    *lengthOut = TX_RAW_FRAME_LENGTH;
+    return true;
+}
+
 // Hardware initialization is complete only after every required state gate
 // for the selected device family has passed. This is separate from NIC
 // registration and the legacy `active` field.
@@ -1391,6 +1483,12 @@ void enable_deferred_interrupts();
 // the 14-byte Ethernet header; FCS is appended by hardware).
 // Returns NIC_OK on success.
 Status send_frame(const uint8_t* data, uint16_t len);
+
+// Submit one fixed Phase 17 Ethernet fixture. Normal enters through the
+// exported send_frame() helper; Direct calls the same guarded descriptor
+// primitive without the generic wrapper. Both paths require the constrained-
+// low Phase 16 DMA handoff and never retry a poisoned ring.
+Status send_raw_diagnostic_frame(TxRawPath path);
 
 // Receive a raw Ethernet frame into 'buffer'.
 // On success, writes the frame (including 14-byte header, excluding
