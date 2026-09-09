@@ -1,0 +1,86 @@
+<!doctype html>
+<html>
+<head><title>Navigator JavaScript JS36</title></head>
+<body>
+<h1>Navigator JavaScript JS36</h1>
+<div id="js36-container" class="outer wrapper">
+  <span id="js36-first" class="item warning"></span>
+  <span id="js36-second" class="item"></span>
+  <div id="js36-nested" class="item"><button id="js36-nested-button">Nested</button></div>
+</div>
+<div id="js36-outside" class="item"></div>
+<form id="js36-login" name="login" class="panel">
+  <input id="js36-user" name="user" type="text" value="seed">
+  <select id="js36-mode" name="mode">
+    <option id="js36-mode-a" value="a" selected>A</option>
+    <option id="js36-mode-b" value="b">B</option>
+  </select>
+  <input id="js36-submit" type="submit" value="Submit">
+  <input id="js36-reset" type="reset" value="Reset">
+</form>
+<input id="js36-unowned" class="required" type="text" value="outside">
+<button id="js36-trigger-query" type="button">Query</button>
+<button id="js36-trigger-focus" type="button">Focus</button>
+<button id="js36-trigger-submit" type="button">Submit</button>
+<button id="js36-trigger-reset" type="button">Reset</button>
+<p id="js36-state">initial</p>
+<script>
+var js36State = document.getElementById("js36-state");
+var js36Container = document.querySelector("#js36-container");
+var js36Form = document.querySelector("form#js36-login");
+var js36User = document.querySelector("#js36-user");
+var js36Submit = document.querySelector("#js36-submit");
+var js36Reset = document.querySelector("#js36-reset");
+var js36Query = document.querySelector("#js36-trigger-query");
+var js36Focus = document.querySelector("#js36-trigger-focus");
+var js36SubmitTrigger = document.querySelector("#js36-trigger-submit");
+var js36ResetTrigger = document.querySelector("#js36-trigger-reset");
+var js36FocusSeen = false;
+var js36Submitted = "none";
+var js36ResetSeen = false;
+function js36Snapshot(label) {
+  var items = document.querySelectorAll(".item");
+  var scoped = js36Container.querySelectorAll(".item");
+  var inputs = document.querySelectorAll("input");
+  var unsupported = document.querySelector("form input") === null &&
+    document.querySelectorAll("form input").length === 0;
+  var identity = js36Form === document.forms["login"] &&
+    js36User === js36Form.elements[0];
+  js36State.textContent = label + ":id=" + (js36User ===
+    document.getElementById("js36-user")) + ":class=" +
+    (items[0] === document.getElementById("js36-first")) +
+    ":tag=" + (inputs[0] === js36User) + ":all=" + items.length +
+    ":scope=" + scoped.length + ":identity=" + identity +
+    ":unsupported=" + unsupported + ":focus=" + js36FocusSeen +
+    ":submitted=" + js36Submitted + ":reset=" + js36ResetSeen;
+}
+js36User.addEventListener("focus", function(event) {
+  js36FocusSeen = document.querySelector("#js36-user") === event.target;
+});
+js36Form.addEventListener("submit", function(event) {
+  js36Submitted = document.querySelector("#js36-user").value;
+  event.preventDefault();
+});
+js36Form.addEventListener("reset", function() {
+  js36ResetSeen = document.querySelector("#js36-user") === js36User;
+});
+js36Query.addEventListener("click", function() { js36Snapshot("query"); });
+js36Focus.addEventListener("click", function() {
+  js36User.focus();
+  js36Snapshot("focus");
+});
+js36SubmitTrigger.addEventListener("click", function() {
+  js36User.value = "alice";
+  js36Submit.click();
+  js36Snapshot("submit");
+});
+js36ResetTrigger.addEventListener("click", function() {
+  js36User.defaultValue = "reset-value";
+  js36User.value = "changed";
+  js36Reset.click();
+  js36Snapshot("reset");
+});
+js36Snapshot("initial");
+</script>
+</body>
+</html>

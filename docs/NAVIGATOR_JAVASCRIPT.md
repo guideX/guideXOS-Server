@@ -3729,3 +3729,78 @@ then stopped at the existing Mbed TLS configuration errors in
 `MBEDTLS_KEY_EXCHANGE_ECDHE_RSA_ENABLED defined, but not all prerequisites`.
 No QEMU run was claimed because the kernel image was not freshly produced,
 and no TLS configuration was changed.
+
+## JS36: bounded DOM selectors
+
+JS36 projects familiar selector lookup over the existing parsed structural
+metadata:
+
+```javascript
+document.querySelector("#login")
+document.querySelectorAll("input")
+form.querySelector(".required")
+form.querySelectorAll("input")
+```
+
+The mandatory grammar is exact `#id`, `.class`, and tag matching. The bounded
+parser also supports the cheap compound forms `tag.class` and `tag#id`.
+Outer ASCII whitespace is trimmed. Tag comparison uses the existing parsed tag
+representation with ASCII case normalization; id and class tokens are exact,
+and class matching splits the existing bounded `className` text on ASCII
+whitespace rather than using substring or dynamic-regex matching.
+
+`querySelector()` returns the first valid match in structural document order or
+the host null sentinel. `querySelectorAll()` returns a read-only, bounded live
+collection with `length` and numeric indexed access; each read rescans the
+current finite structural metadata. The collection retains only a parsed
+selector descriptor, scope serial, and current host generation. Indexed misses
+return `undefined`; array methods, mutation, and general NodeList semantics are
+not implemented.
+
+Element-scoped queries use the existing `parentSerial` chain and search strict
+descendants only. Form ownership, focus, layout, render visibility, and ids are
+not used as containment shortcuts. All returned elements are the same
+generation-checked host objects used by `getElementById()`, `document.forms`,
+`form.elements`, `select.options`, focus, click, reset, submit, and events.
+
+Selectors are limited to 256 input bytes and ordinary ASCII identifier
+characters (`A-Z`, `a-z`, digits, `-`, and `_`). Empty, malformed, oversized,
+unsupported, descendant/combinator, list, attribute, pseudo-class,
+pseudo-element, universal, and escaped CSS selectors fail closed: `querySelector`
+returns `null` and `querySelectorAll` returns an empty bounded collection.
+There is no DOMException or full CSS selector engine in this phase.
+
+The focused proof is
+`tests/navigator_javascript_js36_test.cpp`, run by
+`scripts/smoke-navigator-javascript-js36.ps1`. It covers id/class/tag and
+compound selectors, token/case behavior, document order, strict element
+scoping, leaf queries, bounded empty/read-only collections, canonical form and
+option identity, focus/click/submit/reset integration, re-entrant lookup, and
+stale generations. It reports 99 checks with 0 failures and passes the
+optimized bare-metal harness plus the strict adapter and runtime syntax lane.
+The full repository JavaScript matrix is now 34 scripts (JS6 through JS36 plus
+lexer, parser, and runtime); all 34 passed. The hosted fixture is
+`navigator-smoke/javascript-js36.html`, and the production aggregate exercises
+the same selector-returned objects through query, focus, submit, reset, and
+unsupported-selector paths.
+
+The final hosted aggregate added five JS36 checks, all of which passed:
+fixture load, query/order/scope/identity/safe rejection, focus, submit, and
+reset. The aggregate reported 489 passed and 7 failed out of 496; the seven
+failures remain the unrelated CSS 3C, CSS 3G, CSS 6A, three CSS 6B checks, and
+CSS 6C. `build.bat` also completed successfully with no JS36 diagnostics.
+
+The requested `build-kernel.bat` retry staged the PacMan package, wallpaper
+image, ramdisk, and UEFI bootloader, then stopped at the existing Mbed TLS
+configuration guards in
+`third_party/mbedtls/library/mbedtls_check_config.h`:
+`Unsupported partial support for ECC curves acceleration` and
+`MBEDTLS_KEY_EXCHANGE_ECDHE_RSA_ENABLED defined, but not all prerequisites`.
+No third-party TLS configuration was changed and no QEMU result is claimed.
+
+JS36 intentionally does not add descendant or sibling combinators, selector
+lists, attribute selectors, pseudo-classes, pseudo-elements, CSS escapes,
+`closest()`, live DOM mutation, general NodeLists/HTMLCollections, or array
+methods. The next bounded direction is JS37: only add a narrowly justified
+selector capability after preserving the same structural metadata, scope,
+generation, identity, and bare-metal limits.

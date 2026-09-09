@@ -114,6 +114,164 @@ std::string canonicalTagName(const std::string& tagName)
     return result;
 }
 
+bool isSelectorAsciiWhitespace(char character)
+{
+    return character == ' ' || character == '\t' || character == '\r' ||
+        character == '\n' || character == '\f';
+}
+
+bool isSelectorIdentifierCharacter(char character)
+{
+    const unsigned char value = static_cast<unsigned char>(character);
+    return (value >= static_cast<unsigned char>('a') &&
+            value <= static_cast<unsigned char>('z')) ||
+        (value >= static_cast<unsigned char>('A') &&
+            value <= static_cast<unsigned char>('Z')) ||
+        (value >= static_cast<unsigned char>('0') &&
+            value <= static_cast<unsigned char>('9')) ||
+        character == '-' || character == '_';
+}
+
+bool isSelectorTagName(SourceView source, std::size_t begin,
+    std::size_t end)
+{
+    if (begin >= end) return false;
+    const unsigned char first = static_cast<unsigned char>(source.data[begin]);
+    const bool startsWithLetter =
+        (first >= static_cast<unsigned char>('a') &&
+            first <= static_cast<unsigned char>('z')) ||
+        (first >= static_cast<unsigned char>('A') &&
+            first <= static_cast<unsigned char>('Z'));
+    if (!startsWithLetter) return false;
+    for (std::size_t index = begin + 1u; index < end; ++index) {
+        if (!isSelectorIdentifierCharacter(source.data[index])) return false;
+    }
+    return true;
+}
+
+bool isSelectorIdentifier(SourceView source, std::size_t begin,
+    std::size_t end)
+{
+    if (begin >= end) return false;
+    for (std::size_t index = begin; index < end; ++index) {
+        if (!isSelectorIdentifierCharacter(source.data[index])) return false;
+    }
+    return true;
+}
+
+bool copySelectorPart(NavigatorScriptSelectorDescriptor& selector,
+    SourceView source, std::size_t begin, std::size_t end,
+    std::uint16_t& offset, std::uint16_t& length)
+{
+    if (begin > end || end - begin >
+            kNavigatorScriptMaxSelectorLength - selector.textLength)
+        return false;
+    offset = selector.textLength;
+    length = static_cast<std::uint16_t>(end - begin);
+    for (std::size_t index = begin; index < end; ++index)
+        selector.text[selector.textLength++] = source.data[index];
+    return true;
+}
+
+bool parseBoundedSelector(SourceView source,
+    NavigatorScriptSelectorDescriptor& selector)
+{
+    selector = NavigatorScriptSelectorDescriptor();
+    if (source.data == nullptr || source.length == 0u ||
+        source.length > kNavigatorScriptMaxSelectorLength) return false;
+
+    std::size_t begin = 0;
+    std::size_t end = source.length;
+    while (begin < end && isSelectorAsciiWhitespace(source.data[begin]))
+        ++begin;
+    while (end > begin && isSelectorAsciiWhitespace(source.data[end - 1u]))
+        --end;
+    if (begin == end) return false;
+
+    const char first = source.data[begin];
+    if (first == '#' || first == '.') {
+        const std::size_t partBegin = begin + 1u;
+        if (!isSelectorIdentifier(source, partBegin, end)) return false;
+        if (first == '#') {
+            selector.kind = NavigatorScriptSelectorKind::Id;
+            return copySelectorPart(selector, source, partBegin, end,
+                selector.idOffset, selector.idLength);
+        }
+        selector.kind = NavigatorScriptSelectorKind::Class;
+        return copySelectorPart(selector, source, partBegin, end,
+            selector.classOffset, selector.classLength);
+    }
+
+    std::size_t specialPosition = end;
+    char special = '\0';
+    std::size_t specialCount = 0;
+    for (std::size_t index = begin; index < end; ++index) {
+        if (source.data[index] != '#' && source.data[index] != '.') continue;
+        specialPosition = index;
+        special = source.data[index];
+        ++specialCount;
+    }
+    if (specialCount == 0u) {
+        if (!isSelectorTagName(source, begin, end)) return false;
+        selector.kind = NavigatorScriptSelectorKind::Tag;
+        return copySelectorPart(selector, source, begin, end,
+            selector.tagOffset, selector.tagLength);
+    }
+    if (specialCount != 1u || !isSelectorTagName(source, begin,
+            specialPosition) || !isSelectorIdentifier(source,
+            specialPosition + 1u, end)) return false;
+    if (!copySelectorPart(selector, source, begin, specialPosition,
+            selector.tagOffset, selector.tagLength)) return false;
+    if (special == '#') {
+        selector.kind = NavigatorScriptSelectorKind::TagId;
+        return copySelectorPart(selector, source, specialPosition + 1u, end,
+            selector.idOffset, selector.idLength);
+    }
+    selector.kind = NavigatorScriptSelectorKind::TagClass;
+    return copySelectorPart(selector, source, specialPosition + 1u, end,
+        selector.classOffset, selector.classLength);
+}
+
+SourceView selectorPart(const NavigatorScriptSelectorDescriptor& selector,
+    std::uint16_t offset, std::uint16_t length)
+{
+    return SourceView(selector.text.data() + offset, length);
+}
+
+bool selectorTextEquals(SourceView left, SourceView right)
+{
+    return left.length == right.length &&
+        (left.length == 0u || std::char_traits<char>::compare(left.data,
+            right.data, left.length) == 0);
+}
+
+bool selectorTagEquals(const std::string& tagName, SourceView selector)
+{
+    if (tagName.size() != selector.length) return false;
+    for (std::size_t index = 0; index < tagName.size(); ++index) {
+        const unsigned char left = static_cast<unsigned char>(tagName[index]);
+        const unsigned char right = static_cast<unsigned char>(selector.data[index]);
+        if (std::toupper(left) != std::toupper(right)) return false;
+    }
+    return true;
+}
+
+bool classTokenMatches(const std::string& className, SourceView selector)
+{
+    std::size_t position = 0;
+    while (position < className.size()) {
+        while (position < className.size() &&
+            isSelectorAsciiWhitespace(className[position])) ++position;
+        const std::size_t tokenBegin = position;
+        while (position < className.size() &&
+            !isSelectorAsciiWhitespace(className[position])) ++position;
+        if (position > tokenBegin && selectorTextEquals(
+                SourceView(className.data() + tokenBegin,
+                    position - tokenBegin), selector)) return true;
+    }
+    return false;
+}
+
 } // namespace
 
 NavigatorScriptHostAdapter::NavigatorScriptHostAdapter(
@@ -135,6 +293,7 @@ void NavigatorScriptHostAdapter::attachDocument(
     document_ = &document;
     generation_ = generation;
     clearClickHandlers();
+    selectorCollections_ = {};
     returnBuffer_.clear();
 }
 
@@ -142,12 +301,16 @@ void NavigatorScriptHostAdapter::detachDocument()
 {
     document_ = nullptr;
     clearClickHandlers();
+    selectorCollections_ = {};
     returnBuffer_.clear();
 }
 
 void NavigatorScriptHostAdapter::setGeneration(HostGenerationId generation)
 {
-    if (generation_ != generation) clearClickHandlers();
+    if (generation_ != generation) {
+        clearClickHandlers();
+        selectorCollections_ = {};
+    }
     generation_ = generation;
 }
 
@@ -179,7 +342,9 @@ bool NavigatorScriptHostAdapter::allowsReentrantCall(
         methodId == kNavigatorBlurMethod ||
         methodId == kNavigatorClickMethod ||
         methodId == kNavigatorResetMethod ||
-        methodId == kNavigatorHasFocusMethod;
+        methodId == kNavigatorHasFocusMethod ||
+        methodId == kNavigatorQuerySelectorMethod ||
+        methodId == kNavigatorQuerySelectorAllMethod;
 }
 
 std::size_t NavigatorScriptHostAdapter::callbackLimit() const
@@ -1865,6 +2030,201 @@ bool NavigatorScriptHostAdapter::isDescendantOrSelf(
         ancestorSerial, limits_.maxDocumentNodes);
 }
 
+const NavigatorScriptHostAdapter::SelectorCollectionRecord*
+NavigatorScriptHostAdapter::selectorCollectionFor(HostInstanceId token) const
+{
+    if (token == 0u) return nullptr;
+    const std::size_t index = static_cast<std::size_t>(token - 1u);
+    const std::size_t limit = std::min(limits_.maxSelectorCollections,
+        selectorCollections_.size());
+    if (index >= limit || !selectorCollections_[index].active) return nullptr;
+    return &selectorCollections_[index];
+}
+
+NavigatorScriptHostAdapter::SelectorCollectionRecord*
+NavigatorScriptHostAdapter::selectorCollectionFor(HostInstanceId token)
+{
+    if (token == 0u) return nullptr;
+    const std::size_t index = static_cast<std::size_t>(token - 1u);
+    const std::size_t limit = std::min(limits_.maxSelectorCollections,
+        selectorCollections_.size());
+    if (index >= limit || !selectorCollections_[index].active) return nullptr;
+    return &selectorCollections_[index];
+}
+
+bool NavigatorScriptHostAdapter::selectorDescriptorEquals(
+    const NavigatorScriptSelectorDescriptor& left,
+    const NavigatorScriptSelectorDescriptor& right) const
+{
+    if (left.kind != right.kind || left.tagLength != right.tagLength ||
+        left.idLength != right.idLength ||
+        left.classLength != right.classLength) return false;
+    return selectorTextEquals(selectorPart(left, left.tagOffset,
+            left.tagLength), selectorPart(right, right.tagOffset,
+            right.tagLength)) &&
+        selectorTextEquals(selectorPart(left, left.idOffset, left.idLength),
+            selectorPart(right, right.idOffset, right.idLength)) &&
+        selectorTextEquals(selectorPart(left, left.classOffset,
+            left.classLength), selectorPart(right, right.classOffset,
+            right.classLength));
+}
+
+bool NavigatorScriptHostAdapter::selectorElementMatches(
+    const gxos::web::HtmlElementRef& element,
+    const NavigatorScriptSelectorDescriptor& selector) const
+{
+    if (element.serial == 0u || element.tagName.empty()) return false;
+    const SourceView tag = selectorPart(selector, selector.tagOffset,
+        selector.tagLength);
+    const SourceView id = selectorPart(selector, selector.idOffset,
+        selector.idLength);
+    const SourceView className = selectorPart(selector, selector.classOffset,
+        selector.classLength);
+    switch (selector.kind) {
+    case NavigatorScriptSelectorKind::Id:
+        return selectorTextEquals(SourceView(element.id.data(),
+                element.id.size()), id);
+    case NavigatorScriptSelectorKind::Class:
+        return classTokenMatches(element.className, className);
+    case NavigatorScriptSelectorKind::Tag:
+        return selectorTagEquals(element.tagName, tag);
+    case NavigatorScriptSelectorKind::TagClass:
+        return selectorTagEquals(element.tagName, tag) &&
+            classTokenMatches(element.className, className);
+    case NavigatorScriptSelectorKind::TagId:
+        return selectorTagEquals(element.tagName, tag) &&
+            selectorTextEquals(SourceView(element.id.data(),
+                element.id.size()), id);
+    case NavigatorScriptSelectorKind::Invalid:
+        return false;
+    }
+    return false;
+}
+
+bool NavigatorScriptHostAdapter::selectorScopeMatches(
+    const gxos::web::HtmlElementRef& element, HostInstanceId scopeSerial) const
+{
+    if (scopeSerial == 0u) return true;
+    if (element.serial == scopeSerial) return false;
+    return isDescendantInDocument(*document_, element.serial, scopeSerial,
+        limits_.maxDocumentNodes);
+}
+
+std::size_t NavigatorScriptHostAdapter::selectorMatchCount(
+    const SelectorCollectionRecord& record) const
+{
+    if (document_ == nullptr || record.selector.kind ==
+            NavigatorScriptSelectorKind::Invalid) return 0u;
+    const std::size_t count = std::min(limits_.maxDocumentNodes,
+        document_->structuralElements.size());
+    std::size_t matches = 0u;
+    for (std::size_t position = 0; position < count; ++position) {
+        const gxos::web::HtmlElementRef& element =
+            document_->structuralElements[position];
+        if (selectorScopeMatches(element, record.scopeSerial) &&
+            selectorElementMatches(element, record.selector)) ++matches;
+    }
+    return matches;
+}
+
+bool NavigatorScriptHostAdapter::selectorMatchAt(
+    const SelectorCollectionRecord& record, std::size_t index,
+    HostInstanceId& serial) const
+{
+    serial = 0u;
+    if (document_ == nullptr || record.selector.kind ==
+            NavigatorScriptSelectorKind::Invalid) return false;
+    const std::size_t count = std::min(limits_.maxDocumentNodes,
+        document_->structuralElements.size());
+    std::size_t matched = 0u;
+    for (std::size_t position = 0; position < count; ++position) {
+        const gxos::web::HtmlElementRef& element =
+            document_->structuralElements[position];
+        if (!selectorScopeMatches(element, record.scopeSerial) ||
+            !selectorElementMatches(element, record.selector)) continue;
+        if (matched == index) {
+            serial = element.serial;
+            return true;
+        }
+        ++matched;
+    }
+    return false;
+}
+
+bool NavigatorScriptHostAdapter::getOrCreateSelectorCollection(
+    HostInstanceId scopeSerial,
+    const NavigatorScriptSelectorDescriptor& selector, HostInstanceId& token)
+{
+    token = 0u;
+    const std::size_t limit = std::min(limits_.maxSelectorCollections,
+        selectorCollections_.size());
+    for (std::size_t index = 0; index < limit; ++index) {
+        const SelectorCollectionRecord& record = selectorCollections_[index];
+        if (record.active && record.scopeSerial == scopeSerial &&
+            selectorDescriptorEquals(record.selector, selector)) {
+            token = static_cast<HostInstanceId>(index + 1u);
+            return true;
+        }
+    }
+    for (std::size_t index = 0; index < limit; ++index) {
+        SelectorCollectionRecord& record = selectorCollections_[index];
+        if (record.active) continue;
+        record.active = true;
+        record.scopeSerial = scopeSerial;
+        record.selector = selector;
+        token = static_cast<HostInstanceId>(index + 1u);
+        return true;
+    }
+    return false;
+}
+
+HostResult NavigatorScriptHostAdapter::querySelector(HostInstanceId scopeSerial,
+    const HostValue* arguments, std::size_t argumentCount, HostValue& result)
+{
+    NavigatorScriptSelectorDescriptor selector;
+    const bool parsed = arguments != nullptr && argumentCount == 1u &&
+        arguments[0].type == HostValueType::String &&
+        parseBoundedSelector(arguments[0].stringValue, selector);
+    if (!parsed || document_ == nullptr) {
+        result = HostValue::nullValue();
+        return HostResult();
+    }
+    if (document_->structuralElements.size() > limits_.maxDocumentNodes)
+        return HostResult{HostResultCode::DocumentLookupLimitExceeded};
+    const std::size_t count = document_->structuralElements.size();
+    for (std::size_t position = 0; position < count; ++position) {
+        const gxos::web::HtmlElementRef& element =
+            document_->structuralElements[position];
+        if (!selectorScopeMatches(element, scopeSerial) ||
+            !selectorElementMatches(element, selector)) continue;
+        result = HostValue::fromHostObject(HostObjectReference{
+            element.serial, generation_, kNavigatorElementHostKind});
+        return HostResult();
+    }
+    result = HostValue::nullValue();
+    return HostResult();
+}
+
+HostResult NavigatorScriptHostAdapter::querySelectorAll(HostInstanceId scopeSerial,
+    const HostValue* arguments, std::size_t argumentCount, HostValue& result)
+{
+    NavigatorScriptSelectorDescriptor selector;
+    if (arguments == nullptr || argumentCount != 1u ||
+        arguments[0].type != HostValueType::String ||
+        !parseBoundedSelector(arguments[0].stringValue, selector)) {
+        selector = NavigatorScriptSelectorDescriptor();
+    } else if (document_ != nullptr && document_->structuralElements.size() >
+            limits_.maxDocumentNodes) {
+        return HostResult{HostResultCode::DocumentLookupLimitExceeded};
+    }
+    HostInstanceId token = 0u;
+    if (!getOrCreateSelectorCollection(scopeSerial, selector, token))
+        return HostResult{HostResultCode::DocumentLookupLimitExceeded};
+    result = HostValue::fromHostObject(HostObjectReference{
+        token, generation_, kNavigatorSelectorCollectionHostKind});
+    return HostResult();
+}
+
 HostResult NavigatorScriptHostAdapter::validate(
     const HostObjectReference& object)
 {
@@ -1892,6 +2252,10 @@ HostResult NavigatorScriptHostAdapter::validate(
         isSelectFormElement(object.instanceId)) {
         return HostResult();
     }
+    if (object.kind == kNavigatorSelectorCollectionHostKind &&
+        selectorCollectionFor(object.instanceId) != nullptr) {
+        return HostResult();
+    }
     return HostResult{HostResultCode::InvalidObject};
 }
 
@@ -1904,6 +2268,14 @@ HostResult NavigatorScriptHostAdapter::getProperty(
     if (object.kind == kNavigatorDocumentHostKind) {
         if (textEquals(property, "getElementById")) {
             result = HostValue::method(kNavigatorGetElementByIdMethod, true);
+            return HostResult();
+        }
+        if (textEquals(property, "querySelector")) {
+            result = HostValue::method(kNavigatorQuerySelectorMethod, true);
+            return HostResult();
+        }
+        if (textEquals(property, "querySelectorAll")) {
+            result = HostValue::method(kNavigatorQuerySelectorAllMethod, true);
             return HostResult();
         }
         if (textEquals(property, "activeElement")) {
@@ -2016,6 +2388,28 @@ HostResult NavigatorScriptHostAdapter::getProperty(
         return HostResult();
     }
 
+    if (object.kind == kNavigatorSelectorCollectionHostKind) {
+        const SelectorCollectionRecord* record =
+            selectorCollectionFor(object.instanceId);
+        if (record == nullptr) return HostResult{HostResultCode::InvalidObject};
+        if (textEquals(property, "length")) {
+            result = HostValue::number(static_cast<double>(
+                selectorMatchCount(*record)));
+            return HostResult();
+        }
+        std::size_t index = 0;
+        if (!parseCanonicalIndex(property, index))
+            return HostResult{HostResultCode::PropertyNotFound};
+        HostInstanceId serial = 0;
+        if (!selectorMatchAt(*record, index, serial)) {
+            result = HostValue::undefined();
+            return HostResult();
+        }
+        result = HostValue::fromHostObject(HostObjectReference{
+            serial, generation_, kNavigatorElementHostKind});
+        return HostResult();
+    }
+
     const gxos::web::HtmlElementRef* element = findElement(object.instanceId);
     if (element == nullptr) return HostResult{HostResultCode::InvalidObject};
     if (textEquals(property, "elements")) {
@@ -2023,6 +2417,14 @@ HostResult NavigatorScriptHostAdapter::getProperty(
             return HostResult{HostResultCode::PropertyNotFound};
         result = HostValue::fromHostObject(HostObjectReference{
             element->serial, generation_, kNavigatorFormCollectionHostKind});
+        return HostResult();
+    }
+    if (textEquals(property, "querySelector")) {
+        result = HostValue::method(kNavigatorQuerySelectorMethod, true, true);
+        return HostResult();
+    }
+    if (textEquals(property, "querySelectorAll")) {
+        result = HostValue::method(kNavigatorQuerySelectorAllMethod, true, true);
         return HostResult();
     }
     if (textEquals(property, "options")) {
@@ -2402,7 +2804,8 @@ HostResult NavigatorScriptHostAdapter::setProperty(
         return HostResult{HostResultCode::PropertyReadOnly};
     if (object.kind == kNavigatorDocumentFormsCollectionHostKind ||
         object.kind == kNavigatorFormCollectionHostKind ||
-        object.kind == kNavigatorOptionsCollectionHostKind)
+        object.kind == kNavigatorOptionsCollectionHostKind ||
+        object.kind == kNavigatorSelectorCollectionHostKind)
         return HostResult{HostResultCode::PropertyReadOnly};
     if (object.kind != kNavigatorElementHostKind)
         return HostResult{HostResultCode::PropertyWriteFailed};
@@ -2642,6 +3045,17 @@ HostResult NavigatorScriptHostAdapter::callInternal(
     if (receiver == nullptr) return HostResult{HostResultCode::InvalidObject};
     const HostResult receiverResult = validate(*receiver);
     if (!receiverResult.succeeded()) return receiverResult;
+    if (methodId == kNavigatorQuerySelectorMethod ||
+        methodId == kNavigatorQuerySelectorAllMethod) {
+        if (receiver->kind != kNavigatorDocumentHostKind &&
+            receiver->kind != kNavigatorElementHostKind)
+            return HostResult{HostResultCode::InvalidValue};
+        const HostInstanceId scopeSerial = receiver->kind ==
+            kNavigatorDocumentHostKind ? 0u : receiver->instanceId;
+        return methodId == kNavigatorQuerySelectorMethod
+            ? querySelector(scopeSerial, arguments, argumentCount, result)
+            : querySelectorAll(scopeSerial, arguments, argumentCount, result);
+    }
     if (methodId == kNavigatorClickMethod) {
         if (receiver->kind != kNavigatorElementHostKind || argumentCount != 0u ||
             runtime == nullptr)

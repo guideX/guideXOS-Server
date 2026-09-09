@@ -20,6 +20,7 @@ constexpr HostObjectKind kNavigatorElementHostKind = 0x4A530802u;
 constexpr HostObjectKind kNavigatorFormCollectionHostKind = 0x4A530803u;
 constexpr HostObjectKind kNavigatorOptionsCollectionHostKind = 0x4A530804u;
 constexpr HostObjectKind kNavigatorDocumentFormsCollectionHostKind = 0x4A530805u;
+constexpr HostObjectKind kNavigatorSelectorCollectionHostKind = 0x4A530806u;
 constexpr HostInstanceId kNavigatorDocumentHostInstance = 1u;
 
 constexpr std::uint32_t kNavigatorGetElementByIdMethod = 1u;
@@ -30,6 +31,8 @@ constexpr std::uint32_t kNavigatorBlurMethod = 5u;
 constexpr std::uint32_t kNavigatorClickMethod = 6u;
 constexpr std::uint32_t kNavigatorResetMethod = 7u;
 constexpr std::uint32_t kNavigatorHasFocusMethod = 8u;
+constexpr std::uint32_t kNavigatorQuerySelectorMethod = 9u;
+constexpr std::uint32_t kNavigatorQuerySelectorAllMethod = 10u;
 
 constexpr std::size_t kNavigatorScriptMaxDocumentIdLength = 256u;
 constexpr std::size_t kNavigatorScriptMaxTextContentAssignment = 64u * 1024u;
@@ -38,6 +41,8 @@ constexpr std::size_t kNavigatorScriptMaxElementHostObjects = 1024u;
 constexpr std::size_t kNavigatorScriptMaxDocumentMutations = 1024u;
 constexpr std::size_t kNavigatorScriptMaxDocumentNodes = 1024u;
 constexpr std::size_t kNavigatorScriptMaxClickHandlers = 64u;
+constexpr std::size_t kNavigatorScriptMaxSelectorLength = 256u;
+constexpr std::size_t kNavigatorScriptMaxSelectorCollections = 128u;
 constexpr std::size_t kNavigatorScriptMaxFormValueBytes = 256u;
 constexpr std::uint32_t kNavigatorClickListenerOnceFlag = 1u;
 constexpr std::uint32_t kNavigatorClickListenerCaptureFlag = 2u;
@@ -80,6 +85,32 @@ struct NavigatorScriptHostLimits {
     std::size_t maxDocumentNodes = kNavigatorScriptMaxDocumentNodes;
     std::size_t maxClickHandlers = kNavigatorScriptMaxClickHandlers;
     std::size_t maxClickListeners = kNavigatorScriptMaxClickHandlers;
+    std::size_t maxSelectorCollections =
+        kNavigatorScriptMaxSelectorCollections;
+};
+
+enum class NavigatorScriptSelectorKind : std::uint8_t {
+    Invalid = 0u,
+    Id,
+    Class,
+    Tag,
+    TagClass,
+    TagId,
+};
+
+// A selector is retained only as its parsed, bounded components.  The shared
+// storage keeps querySelectorAll live without retaining an arbitrary raw
+// selector string in a host value or creating a second DOM representation.
+struct NavigatorScriptSelectorDescriptor {
+    NavigatorScriptSelectorKind kind = NavigatorScriptSelectorKind::Invalid;
+    std::array<char, kNavigatorScriptMaxSelectorLength> text{};
+    std::uint16_t tagOffset = 0;
+    std::uint16_t tagLength = 0;
+    std::uint16_t idOffset = 0;
+    std::uint16_t idLength = 0;
+    std::uint16_t classOffset = 0;
+    std::uint16_t classLength = 0;
+    std::uint16_t textLength = 0;
 };
 
 // The adapter never stores a JavaScript pointer and never creates a
@@ -208,6 +239,12 @@ private:
     static_assert(sizeof(ClickListenerSnapshotEntry) == 16u,
         "Navigator listener snapshots must remain 16 bytes");
 
+    struct SelectorCollectionRecord {
+        bool active = false;
+        HostInstanceId scopeSerial = 0;
+        NavigatorScriptSelectorDescriptor selector;
+    };
+
     std::size_t callbackLimit() const;
     std::size_t listenerLimit() const;
     ClickHandlerRecord* clickHandlerFor(HostInstanceId serial);
@@ -302,6 +339,28 @@ private:
     bool isKnownElementSerial(HostInstanceId serial) const;
     bool isDescendantOrSelf(std::uint64_t serial,
         std::uint64_t ancestorSerial) const;
+    const SelectorCollectionRecord* selectorCollectionFor(
+        HostInstanceId token) const;
+    SelectorCollectionRecord* selectorCollectionFor(HostInstanceId token);
+    bool selectorDescriptorEquals(
+        const NavigatorScriptSelectorDescriptor& left,
+        const NavigatorScriptSelectorDescriptor& right) const;
+    bool selectorElementMatches(const gxos::web::HtmlElementRef& element,
+        const NavigatorScriptSelectorDescriptor& selector) const;
+    bool selectorScopeMatches(const gxos::web::HtmlElementRef& element,
+        HostInstanceId scopeSerial) const;
+    std::size_t selectorMatchCount(const SelectorCollectionRecord& record) const;
+    bool selectorMatchAt(const SelectorCollectionRecord& record,
+        std::size_t index, HostInstanceId& serial) const;
+    bool getOrCreateSelectorCollection(HostInstanceId scopeSerial,
+        const NavigatorScriptSelectorDescriptor& selector,
+        HostInstanceId& token);
+    HostResult querySelector(HostInstanceId scopeSerial,
+        const HostValue* arguments, std::size_t argumentCount,
+        HostValue& result);
+    HostResult querySelectorAll(HostInstanceId scopeSerial,
+        const HostValue* arguments, std::size_t argumentCount,
+        HostValue& result);
     HostResult validateDocumentReceiver(const HostObjectReference* receiver);
     HostResult textContentForElement(std::uint64_t serial,
         std::string& result) const;
@@ -320,6 +379,8 @@ private:
         clickHandlers_{};
     std::array<ClickListenerRecord, kNavigatorScriptMaxClickHandlers>
         clickListeners_{};
+    std::array<SelectorCollectionRecord,
+        kNavigatorScriptMaxSelectorCollections> selectorCollections_{};
     // Number of Elements represented by either table, retained for the
     // historical clickHandlerCount() diagnostic.
     std::size_t clickHandlerCount_ = 0;

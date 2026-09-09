@@ -3532,6 +3532,76 @@ static std::string navigatorHostedSmokeDiagnostic() {
         yesNo(js35Reloaded) + ",text=" + summarizeText(js35AfterReload, 820) +
         ",error=" + gxos::apps::Navigator::SmokeJavaScriptLastError());
 
+    const std::string js36FixtureUrl =
+        "http://127.0.0.1:8080/navigator-smoke/javascript-js36.html";
+    const bool js36Loaded = gxos::apps::Navigator::SmokeNavigateToQuiet(
+        js36FixtureUrl);
+    const std::string js36InitialText =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS36 hosted fixture loads bounded selector projections",
+        js36Loaded && gxos::apps::Navigator::SmokeCurrentUrl() == js36FixtureUrl &&
+        contains(js36InitialText, "Navigator JavaScript JS36") &&
+        contains(js36InitialText,
+            "initial:id=true:class=true:tag=true:all=4:scope=3:identity=true:unsupported=true:focus=false:submitted=none:reset=false") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("loaded=") + yesNo(js36Loaded) + ",text=" +
+        summarizeText(js36InitialText, 820) + ",error=" +
+        gxos::apps::Navigator::SmokeJavaScriptLastError());
+
+    const bool js36QueryTrigger =
+        gxos::apps::Navigator::SmokeClickFormControlById("js36-trigger-query");
+    const std::string js36AfterQuery =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS36 hosted selectors preserve order, scope, identity, and safe rejection",
+        js36QueryTrigger && contains(js36AfterQuery,
+            "query:id=true:class=true:tag=true:all=4:scope=3:identity=true:unsupported=true") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("query=") + yesNo(js36QueryTrigger) + ",text=" +
+        summarizeText(js36AfterQuery, 820) + ",error=" +
+        gxos::apps::Navigator::SmokeJavaScriptLastError());
+
+    const bool js36FocusTrigger =
+        gxos::apps::Navigator::SmokeClickFormControlById("js36-trigger-focus");
+    const std::string js36AfterFocus =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS36 selector-returned focus reaches activeElement",
+        js36FocusTrigger &&
+        gxos::apps::Navigator::SmokeFocusedFormControlId() == "js36-user" &&
+        contains(js36AfterFocus, "focus:id=true:class=true:tag=true:all=4:scope=3:identity=true:unsupported=true:focus=true") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("focus=") + yesNo(js36FocusTrigger) + ",focused=" +
+        gxos::apps::Navigator::SmokeFocusedFormControlId() + ",text=" +
+        summarizeText(js36AfterFocus, 820) + ",error=" +
+        gxos::apps::Navigator::SmokeJavaScriptLastError());
+
+    const bool js36SubmitTrigger =
+        gxos::apps::Navigator::SmokeClickFormControlById("js36-trigger-submit");
+    const std::string js36AfterSubmit =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS36 selector-returned submit preserves current values",
+        js36SubmitTrigger && gxos::apps::Navigator::SmokeCurrentUrl() ==
+            js36FixtureUrl && contains(js36AfterSubmit,
+            "submit:id=true:class=true:tag=true:all=4:scope=3:identity=true:unsupported=true:focus=true:submitted=alice") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("submit=") + yesNo(js36SubmitTrigger) + ",url=" +
+        gxos::apps::Navigator::SmokeCurrentUrl() + ",text=" +
+        summarizeText(js36AfterSubmit, 820) + ",error=" +
+        gxos::apps::Navigator::SmokeJavaScriptLastError());
+
+    const bool js36ResetTrigger =
+        gxos::apps::Navigator::SmokeClickFormControlById("js36-trigger-reset");
+    const std::string js36AfterReset =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS36 selector-returned reset preserves default timing",
+        js36ResetTrigger &&
+        gxos::apps::Navigator::SmokeFormControlValueById("js36-user") ==
+            "reset-value" && contains(js36AfterReset,
+            "reset:id=true:class=true:tag=true:all=4:scope=3:identity=true:unsupported=true:focus=true:submitted=alice:reset=true") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("reset=") + yesNo(js36ResetTrigger) + ",text=" +
+        summarizeText(js36AfterReset, 820) + ",error=" +
+        gxos::apps::Navigator::SmokeJavaScriptLastError());
+
     bool cssInlineLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-inline.html");
     std::string cssInlineText = gxos::apps::Navigator::SmokeCurrentDocumentText();
     std::string cssInlineReport = gxos::apps::Navigator::SmokeRuntimeReport();
