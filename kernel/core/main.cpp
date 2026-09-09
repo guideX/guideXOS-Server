@@ -36,6 +36,10 @@
 #if defined(GXOS_NATIVE_VIRTUAL_MEMORY_QEMU_TEST)
 #include "include/kernel/native_virtual_memory_qemu_test.h"
 #endif
+#if defined(GXOS_C011EC99_PHYSICAL_FRAME_SCALING_QEMU_TEST)
+#include "include/kernel/native_physical_frame_scaling_qemu_test.h"
+#include "include/kernel/native_virtual_memory_qemu_test.h"
+#endif
 #if defined(GXOS_NATIVEAOT_PAL_QEMU_TEST)
 #include "include/kernel/nativeaot_pal_qemu_test.h"
 #include "guidexos_nativeaot_pal_qemu_exports.h"
@@ -291,9 +295,9 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
             kernel::nic::set_kernel_physical_base(bootinfo->KernelPhysicalBase);
             kernel::virtio::rng::set_kernel_physical_base(bootinfo->KernelPhysicalBase);
             if (kernel::memory::address_space::initialize(bootinfo)) {
-                kernel::serial::puts("[KERNEL] Generic address-space frame pool initialized\n");
+                kernel::serial::puts("[KERNEL] Physical-frame allocator initialized from firmware map\n");
             } else {
-                kernel::serial::puts("[KERNEL] Generic address-space frame pool unavailable\n");
+                kernel::serial::puts("[KERNEL] Physical-frame allocator unavailable\n");
             }
         }
     }
@@ -303,6 +307,20 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         kernel::serial::puts("[KERNEL] ERROR: No valid boot method detected, halting\n");
         while(1) { }
     }
+
+#if defined(GXOS_C011EC99_PHYSICAL_FRAME_SCALING_QEMU_TEST)
+    kernel::native_physical_frame_scaling_qemu_test::run(bootinfo);
+#if defined(GXOS_NATIVE_VIRTUAL_MEMORY_QEMU_TEST)
+    // Reuse the existing PAL/VM adapter proof against the same production
+    // physical-frame allocator after the C99 boundary checks complete.
+    kernel::interrupts::init();
+    kernel::native_virtual_memory_qemu_test::run();
+#endif
+    while (1) {
+        kernel::arch::disable_interrupts();
+        kernel::arch::halt();
+    }
+#endif
 
 #if defined(GXOS_NATIVE_THREAD_QEMU_TEST) && !defined(GXOS_NATIVE_MUTEX_QEMU_TEST)
     // The opt-in lifecycle test intentionally skips the desktop and storage

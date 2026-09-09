@@ -71,11 +71,11 @@ namespace guideXOS
         // NIC information (uses former Reserved space)
         NicInfo  Nic;
         uint64_t KernelPhysicalBase;
-        // Kernel-owned, page-aligned physical-frame pool.  The pool is
-        // explicitly mapped by the bootloader and is consumed by the generic
-        // address-space layer for VM data and page-table pages.
-        uint64_t RuntimeFramePoolBase;
-        uint64_t RuntimeFramePoolPages;
+        // Kernel-owned, page-aligned metadata backing.  The metadata is
+        // allocated from loader data pages and is therefore absent from the
+        // usable firmware ranges handed to the kernel.
+        uint64_t PhysicalFrameMetadataBase;
+        uint64_t PhysicalFrameMetadataPages;
     };
 }
 
@@ -86,6 +86,20 @@ namespace guideXOS
     // Magic and version constants for BootInfo v1
     static const uint32_t GUIDEXOS_BOOTINFO_MAGIC   = 0x49425847; // 'GXBI'
     static const uint16_t GUIDEXOS_BOOTINFO_VERSION = 1;
+
+    // UEFI memory-map type values used by the post-ExitBootServices physical
+    // frame allocator.  Boot-services code/data become OS-owned after
+    // ExitBootServices; loader/runtime/MMIO/ACPI pages remain excluded.
+    static const uint32_t GUIDEXOS_MEMORY_TYPE_BOOT_SERVICES_CODE = 3u;
+    static const uint32_t GUIDEXOS_MEMORY_TYPE_BOOT_SERVICES_DATA = 4u;
+    static const uint32_t GUIDEXOS_MEMORY_TYPE_CONVENTIONAL       = 7u;
+
+    static inline bool guidexos_memory_type_is_usable(uint32_t type)
+    {
+        return type == GUIDEXOS_MEMORY_TYPE_BOOT_SERVICES_CODE ||
+               type == GUIDEXOS_MEMORY_TYPE_BOOT_SERVICES_DATA ||
+               type == GUIDEXOS_MEMORY_TYPE_CONVENTIONAL;
+    }
 
     // Early panic: implemented in a .cpp file, infinite loop and/or framebuffer error.
     [[noreturn]] void guidexos_early_panic(const BootInfo* bi);

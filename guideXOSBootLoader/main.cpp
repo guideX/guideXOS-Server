@@ -48,6 +48,76 @@ extern "C" void BootHandoffTrampoline(void* kernelEntry, void* bootInfo, void* s
 extern "C" void SetupTrampoline(void* executableMemory);
 extern "C" UINTN GetTrampolineCodeSize(void);
 
+namespace {
+
+constexpr UINTN kMaxIdentityMapRanges = 256;
+// These arrays are bounded bootstrap bookkeeping. Keep them out of efi_main's
+// stack frame because the freestanding PE link does not provide __chkstk.
+static EFI_PHYSICAL_ADDRESS gIdentityMapRanges[kMaxIdentityMapRanges];
+static UINTN gIdentityMapSizes[kMaxIdentityMapRanges];
+
+bool AddNoOverflow(UINT64 left, UINT64 right, UINT64* result)
+{
+    if (result == nullptr || left > (UINT64)-1 - right) return false;
+    *result = left + right;
+    return true;
+}
+
+bool DescriptorRange(const EFI_MEMORY_DESCRIPTOR* descriptor,
+                     EFI_PHYSICAL_ADDRESS* start, UINTN* sizeBytes)
+{
+    if (descriptor == nullptr || start == nullptr || sizeBytes == nullptr ||
+        descriptor->NumberOfPages == 0 ||
+        descriptor->NumberOfPages > (UINT64)-1 / EFI_PAGE_SIZE) {
+        return false;
+    }
+
+    UINT64 bytes = descriptor->NumberOfPages * EFI_PAGE_SIZE;
+    UINT64 end = 0;
+    if (!AddNoOverflow(descriptor->PhysicalStart, bytes, &end) ||
+        bytes > (UINT64)(UINTN)-1) {
+        return false;
+    }
+    (void)end;
+    *start = descriptor->PhysicalStart;
+    *sizeBytes = (UINTN)bytes;
+    return true;
+}
+
+bool IsAllocatorUsableType(UINT32 type)
+{
+    return type == guideXOS::GUIDEXOS_MEMORY_TYPE_BOOT_SERVICES_CODE ||
+           type == guideXOS::GUIDEXOS_MEMORY_TYPE_BOOT_SERVICES_DATA ||
+           type == guideXOS::GUIDEXOS_MEMORY_TYPE_CONVENTIONAL;
+}
+
+bool CountAllocatorUsablePages(EFI_MEMORY_DESCRIPTOR* map,
+                               UINTN mapBytes, UINTN descriptorSize,
+                               UINT64* pagesOut)
+{
+    if (map == nullptr || pagesOut == nullptr || descriptorSize < sizeof(EFI_MEMORY_DESCRIPTOR) ||
+        descriptorSize == 0 || mapBytes < descriptorSize) {
+        return false;
+    }
+    const UINTN count = mapBytes / descriptorSize;
+    UINT64 pages = 0;
+    for (UINTN index = 0; index < count; ++index) {
+        EFI_MEMORY_DESCRIPTOR* descriptor = reinterpret_cast<EFI_MEMORY_DESCRIPTOR*>(
+            reinterpret_cast<UINT8*>(map) + index * descriptorSize);
+        if (!IsAllocatorUsableType(descriptor->Type)) continue;
+        EFI_PHYSICAL_ADDRESS rangeStart = 0;
+        UINTN rangeSize = 0;
+        if (!DescriptorRange(descriptor, &rangeStart, &rangeSize)) return false;
+        (void)rangeStart;
+        (void)rangeSize;
+        if (!AddNoOverflow(pages, descriptor->NumberOfPages, &pages)) return false;
+    }
+    *pagesOut = pages;
+    return pages != 0;
+}
+
+} // namespace
+
 // Local aliases for compatibility with existing code
 #define Acpi20TableGuid gEfiAcpi20TableGuid
 #define Acpi10TableGuid gEfiAcpi10TableGuid
@@ -709,29 +779,63 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE* SystemTable) {
         SetMem((void*)(UINTN)preMemMapPhys, preMemMapPages * EFI_PAGE_SIZE, 0);
     }
 
-    // --- Allocate the generic runtime frame pool ---
-    // The pool is deliberately explicit and bounded.  It is the only source
-    // used by the kernel address-space layer for VM data and page-table pages;
-    // reservation itself never consumes these pages.
-    constexpr UINTN runtimeFramePoolPages = 4096; // 16 MiB for startup-QEMU GC reservations
-    EFI_PHYSICAL_ADDRESS runtimeFramePoolPhys = 0;
+    // --- Size physical-frame metadata from the firmware map ---
+    // The final map is not available until ExitBootServices, but this snapshot
+    // already describes every pre-existing usable range.  Allocating metadata
+    // now marks its pages EfiLoaderData, so those pages are absent from the
+    // final usable set and cannot be returned by the kernel allocator.
+    EFI_MEMORY_DESCRIPTOR* sizingMap = (EFI_MEMORY_DESCRIPTOR*)(UINTN)preMemMapPhys;
+    UINTN sizingMapBytes = preMemMapBytes;
+    UINTN sizingMapKey = 0;
+    UINTN sizingMapDescriptorSize = 0;
+    UINT32 sizingMapDescriptorVersion = 0;
+    EFI_STATUS sizingMapStatus = SystemTable->BootServices->GetMemoryMap(
+        &sizingMapBytes,
+        sizingMap,
+        &sizingMapKey,
+        &sizingMapDescriptorSize,
+        &sizingMapDescriptorVersion);
+    if (EFI_ERROR(sizingMapStatus)) {
+        Print(L"Failed to capture memory map for frame metadata sizing\n");
+        return sizingMapStatus;
+    }
+
+    UINT64 discoveredUsablePages = 0;
+    if (!CountAllocatorUsablePages(sizingMap, sizingMapBytes,
+                                   sizingMapDescriptorSize,
+                                   &discoveredUsablePages) ||
+        discoveredUsablePages > (UINT64)-1 - (EFI_PAGE_SIZE - 1)) {
+        Print(L"Memory map has no safely representable usable pages\n");
+        return EFI_OUT_OF_RESOURCES;
+    }
+
+    const UINT64 metadataPageCount64 =
+        (discoveredUsablePages + EFI_PAGE_SIZE - 1) / EFI_PAGE_SIZE;
+    if (metadataPageCount64 == 0 || metadataPageCount64 > (UINT64)(UINTN)-1) {
+        Print(L"Physical-frame metadata size is not representable\n");
+        return EFI_OUT_OF_RESOURCES;
+    }
+
+    const UINTN physicalFrameMetadataPages = (UINTN)metadataPageCount64;
+    EFI_PHYSICAL_ADDRESS physicalFrameMetadataPhys = 0;
     {
         EFI_STATUS st = SystemTable->BootServices->AllocatePages(
             AllocateAnyPages,
             EfiLoaderData,
-            runtimeFramePoolPages,
-            &runtimeFramePoolPhys);
+            physicalFrameMetadataPages,
+            &physicalFrameMetadataPhys);
         if (EFI_ERROR(st)) {
-            Print(L"Failed to allocate generic runtime frame pool\n");
+            Print(L"Failed to allocate physical-frame metadata\n");
             return st;
         }
-        SetMem((void*)(UINTN)runtimeFramePoolPhys,
-               runtimeFramePoolPages * EFI_PAGE_SIZE, 0);
-        v1BootInfo->RuntimeFramePoolBase = runtimeFramePoolPhys;
-        v1BootInfo->RuntimeFramePoolPages = runtimeFramePoolPages;
-        Print(L"Runtime frame pool: %p pages=%u\n",
-              (VOID*)(UINTN)runtimeFramePoolPhys,
-              (UINT32)runtimeFramePoolPages);
+        SetMem((void*)(UINTN)physicalFrameMetadataPhys,
+               physicalFrameMetadataPages * EFI_PAGE_SIZE, 0);
+        v1BootInfo->PhysicalFrameMetadataBase = physicalFrameMetadataPhys;
+        v1BootInfo->PhysicalFrameMetadataPages = physicalFrameMetadataPages;
+        Print(L"Physical-frame metadata: %p pages=%u for discovered usable pages=%Lu\n",
+              (VOID*)(UINTN)physicalFrameMetadataPhys,
+              (UINT32)physicalFrameMetadataPages,
+              discoveredUsablePages);
     }
 
     // --- Build comprehensive identity mappings ---
@@ -748,9 +852,10 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE* SystemTable) {
     const EFI_PHYSICAL_ADDRESS kernelPhysBase = (EFI_PHYSICAL_ADDRESS)kernelBase;
     const UINTN kernelSpanBytes = (kernelTotalSize != 0) ? (UINTN)kernelTotalSize : (64u * 1024u * 1024u);
 
-    // Use a dynamic array for ranges (max 20 should be plenty)
-    EFI_PHYSICAL_ADDRESS ranges[20];
-    UINTN sizes[20];
+    // Keep the normalized-map input bounded and explicit.  This is a page
+    // table bootstrap bound, not a physical-frame capacity bound.
+    EFI_PHYSICAL_ADDRESS* ranges = gIdentityMapRanges;
+    UINTN* sizes = gIdentityMapSizes;
     UINTN rangeCount = 0;
 
     // 1. Low 1MB for legacy compatibility
@@ -781,13 +886,46 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE* SystemTable) {
     sizes[rangeCount] = preMemMapBytes;
     rangeCount++;
 
-    // 6. Generic runtime frame pool.  It must be identity-mapped so the
-    // kernel can zero and edit page-table frames after ExitBootServices.
-    ranges[rangeCount] = runtimeFramePoolPhys;
-    sizes[rangeCount] = runtimeFramePoolPages * EFI_PAGE_SIZE;
+    // 6. Physical-frame metadata.  It must be identity-mapped so the kernel
+    // can initialize and update ownership state after ExitBootServices.
+    ranges[rangeCount] = physicalFrameMetadataPhys;
+    sizes[rangeCount] = physicalFrameMetadataPages * EFI_PAGE_SIZE;
     rangeCount++;
 
-    // 7. Framebuffer - CRITICAL for any display output after ExitBootServices
+    // 7. Identity-map every usable firmware range.  The allocator uses the
+    // same normalized descriptor set after ExitBootServices; mapping these
+    // ranges here makes zeroing and page-table edits valid for every enrolled
+    // frame, including frames above the historical 16-MiB window.
+    const UINTN sizingMapCount = sizingMapBytes / sizingMapDescriptorSize;
+    // The fixed ranges below currently need fewer than ten slots.  Reserve
+    // that space before appending map descriptors so a fragmented firmware
+    // map fails closed instead of overrunning the bootstrap arrays.
+    constexpr UINTN kPostMapRangeReserve = 10;
+    if (rangeCount > kMaxIdentityMapRanges - kPostMapRangeReserve ||
+        sizingMapCount > kMaxIdentityMapRanges - rangeCount - kPostMapRangeReserve) {
+        Print(L"Too many memory-map ranges for identity-map bootstrap\n");
+        return EFI_OUT_OF_RESOURCES;
+    }
+    for (UINTN mapIndex = 0; mapIndex < sizingMapCount; ++mapIndex) {
+        EFI_MEMORY_DESCRIPTOR* descriptor = reinterpret_cast<EFI_MEMORY_DESCRIPTOR*>(
+            reinterpret_cast<UINT8*>(sizingMap) + mapIndex * sizingMapDescriptorSize);
+        if (!IsAllocatorUsableType(descriptor->Type)) continue;
+        EFI_PHYSICAL_ADDRESS usableStart = 0;
+        UINTN usableSize = 0;
+        if (!DescriptorRange(descriptor, &usableStart, &usableSize)) {
+            Print(L"Memory map contains an unusable physical range\n");
+            return EFI_OUT_OF_RESOURCES;
+        }
+        if (rangeCount >= kMaxIdentityMapRanges) {
+            Print(L"Too many usable memory ranges for identity-map bootstrap\n");
+            return EFI_OUT_OF_RESOURCES;
+        }
+        ranges[rangeCount] = usableStart;
+        sizes[rangeCount] = usableSize;
+        ++rangeCount;
+    }
+
+    // 8. Framebuffer - CRITICAL for any display output after ExitBootServices
     if (v1BootInfo->FramebufferBase != 0 && v1BootInfo->FramebufferSize != 0) {
         ranges[rangeCount] = (EFI_PHYSICAL_ADDRESS)v1BootInfo->FramebufferBase;
         sizes[rangeCount] = (UINTN)v1BootInfo->FramebufferSize;
@@ -796,7 +934,7 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE* SystemTable) {
               (VOID*)(UINTN)v1BootInfo->FramebufferBase, v1BootInfo->FramebufferSize);
     }
 
-    // 8. Ramdisk - if loaded
+    // 9. Ramdisk - if loaded
     if (ramdiskPhys != 0 && ramdiskSize != 0) {
         ranges[rangeCount] = ramdiskPhys;
         sizes[rangeCount] = (UINTN)ramdiskSize;
@@ -804,7 +942,7 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE* SystemTable) {
         Print(L"Mapping ramdisk: %p size %Lu\n", (VOID*)(UINTN)ramdiskPhys, ramdiskSize);
     }
 
-    // 9. ACPI RSDP region (map at least one page for RSDP, kernel will map more as needed)
+    // 10. ACPI RSDP region (map at least one page for RSDP, kernel will map more as needed)
     if (rsdp != nullptr) {
         ranges[rangeCount] = (EFI_PHYSICAL_ADDRESS)(UINTN)rsdp & ~0xFFFull; // Page-align down
         sizes[rangeCount] = EFI_PAGE_SIZE * 4; // Map a few pages for RSDP + nearby tables
@@ -812,7 +950,7 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE* SystemTable) {
         Print(L"Mapping ACPI RSDP region: %p\n", (VOID*)(UINTN)rsdp);
     }
 
-    // 10. CRITICAL: Map the bootloader/trampoline code region
+    // 11. CRITICAL: Map the bootloader/trampoline code region
     // After we load CR3 with new page tables, the CPU is still executing in the
     // trampoline code. If that code isn't mapped, we triple-fault immediately!
     // We need to identity-map the bootloader's loaded image.
@@ -842,12 +980,12 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE* SystemTable) {
         }
     }
 
-    // 11. Trampoline executable buffer
+    // 12. Trampoline executable buffer
     ranges[rangeCount] = trampolinePhys;
     sizes[rangeCount] = trampolinePages * EFI_PAGE_SIZE;
     rangeCount++;
 
-    // 12. CRITICAL: Map the allocator region the kernel will use
+    // 13. CRITICAL: Map the allocator region the kernel will use
     // The kernel's Allocator.Initialize() uses 0x4000000 (64MB) as the base
     // Map a large region starting there for heap allocations
     ranges[rangeCount] = 0x4000000ULL;  // 64MB
@@ -855,14 +993,14 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE* SystemTable) {
     rangeCount++;
     Print(L"Mapping allocator region: 0x4000000 size 64MB\n");
 
-    // 13. Map additional stack regions we might use
+    // 14. Map additional stack regions we might use
     // The preferred stack location is around 2MB mark
     ranges[rangeCount] = 0x100000ULL; // 1MB
     sizes[rangeCount] = 2u * 1024u * 1024u; // 2MB (covers 1MB-3MB region)
     rangeCount++;
     Print(L"Mapping low memory stack region: 0x100000 size 2MB\n");
 
-    // 14. NIC MMIO region - CRITICAL for network driver
+    // 15. NIC MMIO region - CRITICAL for network driver
     // Map the NIC's BAR0 MMIO region so the kernel can access hardware registers
     if (nicMmioPhys != 0 && nicMmioSize != 0) {
         // Align to page boundary

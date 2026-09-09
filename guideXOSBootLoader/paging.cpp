@@ -10,7 +10,10 @@ namespace paging
     static inline UINT64* PhysToPtr(EFI_PHYSICAL_ADDRESS p) { return (UINT64*)(UINTN)p; }
 
     // Track allocated page table pages so we can identity-map them
-    static constexpr UINTN MAX_PT_PAGES = 512;
+    // Tracking is only for self-mapping bookkeeping; the physical-frame
+    // allocator capacity comes from the firmware map.  Leave enough room for
+    // 4 KiB page tables covering current x86_64 QEMU memory configurations.
+    static constexpr UINTN MAX_PT_PAGES = 2048;
     static EFI_PHYSICAL_ADDRESS g_ptPages[MAX_PT_PAGES];
     static UINTN g_ptPageCount = 0;
 
@@ -87,6 +90,10 @@ namespace paging
     EFI_STATUS MapIdentityRange(EFI_SYSTEM_TABLE* SystemTable, EFI_PHYSICAL_ADDRESS pml4Phys, EFI_PHYSICAL_ADDRESS physBase, UINTN sizeBytes)
     {
         if (sizeBytes == 0) return EFI_SUCCESS;
+        if (physBase > (EFI_PHYSICAL_ADDRESS)-1 - (EFI_PHYSICAL_ADDRESS)sizeBytes ||
+            physBase + (EFI_PHYSICAL_ADDRESS)sizeBytes > (EFI_PHYSICAL_ADDRESS)-1 - 0xFFF) {
+            return EFI_INVALID_PARAMETER;
+        }
 
         EFI_PHYSICAL_ADDRESS start = AlignDown4K(physBase);
         EFI_PHYSICAL_ADDRESS end   = AlignUp4K(physBase + (EFI_PHYSICAL_ADDRESS)sizeBytes);
@@ -123,6 +130,12 @@ namespace paging
         UINTN sizeBytes)
     {
         if (sizeBytes == 0) return EFI_SUCCESS;
+        if (virtBase > (UINT64)-1 - (UINT64)sizeBytes ||
+            physBase > (EFI_PHYSICAL_ADDRESS)-1 - (EFI_PHYSICAL_ADDRESS)sizeBytes ||
+            virtBase + (UINT64)sizeBytes > (UINT64)-1 - 0xFFF ||
+            physBase + (EFI_PHYSICAL_ADDRESS)sizeBytes > (EFI_PHYSICAL_ADDRESS)-1 - 0xFFF) {
+            return EFI_INVALID_PARAMETER;
+        }
 
         UINT64 vStart = virtBase & ~0xFFFULL;
         UINT64 vEnd   = (virtBase + (UINT64)sizeBytes + 0xFFFULL) & ~0xFFFULL;

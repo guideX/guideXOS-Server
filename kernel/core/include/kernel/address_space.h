@@ -24,7 +24,13 @@ enum class FrameReleaseReason : uint8_t {
 };
 
 struct FrameAccounting {
+    // Frame capacity is derived from the usable UEFI descriptors, not from a
+    // fixed pool constant.  Metadata is packed one byte per enrolled frame.
     uint64_t totalKnownFrames;
+    uint64_t discoveredUsableFrames;
+    uint64_t metadataFrames;
+    uint64_t usableRangeCount;
+    uint64_t highestPhysicalAddress;
     uint64_t freeFrames;
     uint64_t allocatedFrames;
     uint64_t regionOwnedFrames;
@@ -61,6 +67,10 @@ uint64_t allocateFrame(FrameOwner owner);
 bool releaseFrame(uint64_t physicalAddress, FrameOwner owner,
                   FrameReleaseReason reason);
 bool zeroFrame(uint64_t physicalAddress);
+
+// Allocation-free diagnostics used by bounded physical-frame proofs.  The
+// invalid sentinel is deliberately distinct from every valid frame index.
+uint64_t frameIndexForPhysical(uint64_t physicalAddress);
 
 bool mapPage(AddressSpace* owner, uintptr_t virtualAddress,
              uint64_t physicalAddress, uint64_t flags);
