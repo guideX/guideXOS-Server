@@ -31,7 +31,9 @@ typedef enum gx_development_debug_command {
     /* Phase 28C: repeatedly execute instructions until a new source location. */
     GX_DEVELOPMENT_DEBUG_STEP_SOURCE_INTO = 16,
     /* Phase 28D: execute one source operation without entering a direct user call. */
-    GX_DEVELOPMENT_DEBUG_STEP_SOURCE_OVER = 17
+    GX_DEVELOPMENT_DEBUG_STEP_SOURCE_OVER = 17,
+    /* Phase 28E: execute the current user frame until its caller resumes. */
+    GX_DEVELOPMENT_DEBUG_STEP_SOURCE_OUT = 18
 } gx_development_debug_command;
 
 typedef enum gx_development_debug_status {
@@ -176,6 +178,31 @@ typedef struct gx_development_debug_snapshot {
     uint8_t sourceStepOverOriginalReturnByte;
     uint8_t sourceStepOverOriginalReturnByteValid;
     uint8_t sourceStepOverReserved[2];
+    /* Append-only Phase 28E source-aware Step Out evidence. */
+    uint32_t sourceStepOutResult;
+    uint32_t sourceStepOutInstructionCount;
+    uint32_t sourceStepOutInstructionLimit;
+    uint32_t sourceStepOutCurrentFrameValid;
+    uint64_t sourceStepOutStartRip;
+    uint64_t sourceStepOutStartRsp;
+    uint64_t sourceStepOutStartRbp;
+    uint64_t sourceStepOutSavedCallerRbp;
+    uint64_t sourceStepOutReturnAddress;
+    uint64_t sourceStepOutReturnTrapRip;
+    uint64_t sourceStepOutFinalRip;
+    uint64_t sourceStepOutFinalRsp;
+    uint64_t sourceStepOutFinalRbp;
+    uint32_t sourceStepOutTemporaryBreakpointCount;
+    uint32_t sourceStepOutInternalMachineStepCount;
+    uint32_t sourceStepOutCallerFrameVerified;
+    uint32_t sourceStepOutRemainingCalleeExecuted;
+    uint32_t sourceStepOutIntermediatePauseCount;
+    char sourceStepOutCalleeFunctionName[GX_DEVELOPMENT_DEBUG_MAX_FUNCTION_NAME_BYTES];
+    char sourceStepOutCallerFunctionName[GX_DEVELOPMENT_DEBUG_MAX_FUNCTION_NAME_BYTES];
+    char sourceStepOutCallerSourcePath[GX_DEVELOPMENT_DEBUG_MAX_SOURCE_PATH_BYTES];
+    uint8_t sourceStepOutOriginalReturnByte;
+    uint8_t sourceStepOutOriginalReturnByteValid;
+    uint8_t sourceStepOutReserved[6];
 } gx_development_debug_snapshot;
 
 enum {
@@ -202,7 +229,8 @@ enum {
     GX_DEVELOPMENT_DEBUG_PAUSE_REASON_SOURCE_BREAKPOINT = 2,
     GX_DEVELOPMENT_DEBUG_PAUSE_REASON_SINGLE_STEP = 3,
     GX_DEVELOPMENT_DEBUG_PAUSE_REASON_SOURCE_STEP = 4,
-    GX_DEVELOPMENT_DEBUG_PAUSE_REASON_SOURCE_STEP_OVER = 5
+    GX_DEVELOPMENT_DEBUG_PAUSE_REASON_SOURCE_STEP_OVER = 5,
+    GX_DEVELOPMENT_DEBUG_PAUSE_REASON_SOURCE_STEP_OUT = 6
 };
 
 /* A source step is a bounded composite of the Phase 28B instruction step. */
@@ -218,6 +246,25 @@ enum {
     GX_DEVELOPMENT_DEBUG_SOURCE_STEP_RESULT_INVALID_SOURCE_MAP = 8,
     GX_DEVELOPMENT_DEBUG_SOURCE_STEP_RESULT_UNSAFE_RUNTIME_BOUNDARY = 9,
     GX_DEVELOPMENT_DEBUG_SOURCE_STEP_RESULT_STALE = 10
+};
+
+/* Step Out has its own result channel so a rejected caller/frame shape is
+   never confused with a completed Source Step Into/Over operation. */
+enum {
+    GX_DEVELOPMENT_DEBUG_SOURCE_STEP_OUT_RESULT_NONE = 0,
+    GX_DEVELOPMENT_DEBUG_SOURCE_STEP_OUT_RESULT_PENDING = 1,
+    GX_DEVELOPMENT_DEBUG_SOURCE_STEP_OUT_RESULT_COMPLETED = 2,
+    GX_DEVELOPMENT_DEBUG_SOURCE_STEP_OUT_RESULT_NO_CALLER_FRAME = 3,
+    GX_DEVELOPMENT_DEBUG_SOURCE_STEP_OUT_RESULT_UNSUPPORTED_FRAME = 4,
+    GX_DEVELOPMENT_DEBUG_SOURCE_STEP_OUT_RESULT_INVALID_FRAME = 5,
+    GX_DEVELOPMENT_DEBUG_SOURCE_STEP_OUT_RESULT_INVALID_RETURN_ADDRESS = 6,
+    GX_DEVELOPMENT_DEBUG_SOURCE_STEP_OUT_RESULT_LIMIT = 7,
+    GX_DEVELOPMENT_DEBUG_SOURCE_STEP_OUT_RESULT_TARGET_COMPLETED = 8,
+    GX_DEVELOPMENT_DEBUG_SOURCE_STEP_OUT_RESULT_TARGET_FAILED = 9,
+    GX_DEVELOPMENT_DEBUG_SOURCE_STEP_OUT_RESULT_CANCELLED = 10,
+    GX_DEVELOPMENT_DEBUG_SOURCE_STEP_OUT_RESULT_INVALID_SOURCE_MAP = 11,
+    GX_DEVELOPMENT_DEBUG_SOURCE_STEP_OUT_RESULT_UNSAFE_RUNTIME_BOUNDARY = 12,
+    GX_DEVELOPMENT_DEBUG_SOURCE_STEP_OUT_RESULT_STALE = 13
 };
 
 #define GX_DEVELOPMENT_DEBUG_SOURCE_STEP_MAX_INSTRUCTIONS 128u

@@ -1,4 +1,5 @@
 #include "kernel/core/native_elf/native_elf_source_step.h"
+#include "kernel/core/native_elf/native_elf_step_out.h"
 
 #include <cstring>
 #include <iostream>
@@ -92,6 +93,32 @@ int main()
         start, sameLine, 0, 128, true, true, &count);
     if (!require(observation == SourceStepObservation::TargetFailed,
                  "target failure is not reported as source success")) return 1;
+
+    if (!require(kernel::native_elf::kNativeElfStepOutInstructionLimit == 128U,
+                 "Step Out has a finite instruction limit")) return 1;
+    if (!require(kernel::native_elf::step_out_frame_shape_valid(
+                     0x7008, 0x7040, 0x7000, 0x8000),
+                 "framed AMD64 context inside the NativeElf stack is accepted")) return 1;
+    if (!require(!kernel::native_elf::step_out_frame_shape_valid(
+                     0x7008, 0x7041, 0x7000, 0x8000),
+                 "unaligned frame pointer is rejected")) return 1;
+    if (!require(!kernel::native_elf::step_out_frame_shape_valid(
+                     0x7008, 0x9000, 0x7000, 0xA000),
+                 "oversized frame distance is rejected")) return 1;
+    if (!require(kernel::native_elf::step_out_caller_link_valid(
+                     0x7040, 0x7080, 0x10000120, 0x7000, 0x8000,
+                     0x10000000, 0x1000),
+                 "saved caller frame and return address inside the image are accepted")) return 1;
+    if (!require(!kernel::native_elf::step_out_caller_link_valid(
+                     0x7040, 0x7080, 0x20000120, 0x7000, 0x8000,
+                     0x10000000, 0x1000),
+                 "return address outside the loaded image is rejected")) return 1;
+    if (!require(kernel::native_elf::step_out_caller_frame_matches(
+                     0x7048, 0x7080, 0x7080, 0x7000, 0x8000),
+                 "post-return caller frame identity is accepted")) return 1;
+    if (!require(!kernel::native_elf::step_out_caller_frame_matches(
+                     0x7048, 0x7090, 0x7080, 0x7000, 0x8000),
+                 "post-return unexpected frame identity is rejected")) return 1;
 
     std::cout << "native_source_step_controller_test: PASS\n";
     return 0;

@@ -126,3 +126,14 @@ instructions and stops safely at an application-to-runtime boundary without
 exposing runtime source identity. See
 `docs/DEVELOPER_STUDIO_PHASE28C_SOURCE_STEP_INTO.md` for the state machine,
 snapshot/result contract, direct callee proof, and three-boot QEMU evidence.
+
+Phase 28E adds the distinct source-aware Step Out operation. From a genuine
+paused user frame it validates the compiler's AMD64 frame-pointer ABI, recovers
+`[RBP]`/`[RBP+8]`, reuses the generation-bound temporary return `INT3`, runs the
+remaining callee body without exposing intermediate source pauses, validates
+the caller frame, and stops at the first mapped caller source line. It keeps
+object ABI 9 and appends the debug snapshot tail. The primary cross-file proof
+is `src/helper.cpp:8 helper` to `src/main.cpp:15 gx_main`; root `gx_main` Step
+Out is rejected as `NO_CALLER_FRAME`. See
+`docs/DEVELOPER_STUDIO_PHASE28E_SOURCE_STEP_OUT.md` for the ABI, frame
+contract, live QEMU evidence, focused regressions, and remaining limitations.
