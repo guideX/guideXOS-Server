@@ -75,7 +75,11 @@ static_assert(offsetof(gx_host_calls, development_debug_call_stack) == 400,
               "hosted call stack slot changed");
 static_assert(offsetof(gx_host_calls, bare_metal_development_debug_call_stack) == 408,
               "bare-metal call stack slot changed");
-static_assert(sizeof(gx_host_calls) == 416, "gx_host_calls size changed");
+static_assert(offsetof(gx_host_calls, development_debug_inspect_variables) == 416,
+              "hosted variable inspection slot changed");
+static_assert(offsetof(gx_host_calls, bare_metal_development_debug_inspect_variables) == 424,
+              "bare-metal variable inspection slot changed");
+static_assert(sizeof(gx_host_calls) == 432, "gx_host_calls size changed");
 static_assert(sizeof(gx_development_run_request) == 112, "development run request size changed");
 static_assert(offsetof(gx_development_run_request, projectRoot) == 8, "development run request project root offset changed");
 static_assert(offsetof(gx_development_run_request, artifactSha256) == 56, "development run request artifact hash offset changed");
@@ -88,8 +92,26 @@ static_assert(offsetof(gx_development_run_request, debugSourcePath) == 96, "deve
 static_assert(offsetof(gx_development_run_request, debugSourceLine) == 104, "development run source line offset changed");
 static_assert(offsetof(gx_development_run_request, debugSourceColumn) == 108, "development run source column offset changed");
 static_assert(sizeof(gx_development_debug_request) == 104, "development debug request size changed");
+static_assert(sizeof(gx_development_debug_variable) == 128, "development debug variable size changed");
+static_assert(offsetof(gx_development_debug_variable, kind) == 64, "development debug variable kind offset changed");
+static_assert(offsetof(gx_development_debug_variable, frameOffset) == 92,
+              "development debug variable frame offset changed");
+static_assert(offsetof(gx_development_debug_variable, rawValue) == 104,
+              "development debug variable value offset changed");
+static_assert(offsetof(gx_development_debug_variables, functionName) == 104,
+              "development debug variables function name offset changed");
+static_assert(offsetof(gx_development_debug_variables, sourcePath) == 168,
+              "development debug variables source path offset changed");
+static_assert(offsetof(gx_development_debug_variables, errorMessage) == 328,
+              "development debug variables error offset changed");
+static_assert(offsetof(gx_development_debug_variables, variables) == 456,
+              "development debug variables array offset changed");
+static_assert(sizeof(gx_development_debug_variables) == 4552,
+              "development debug variables size changed");
 static_assert(GX_DEVELOPMENT_DEBUG_STEP_OUT_RETURN == 14, "Step Out command must be appended after command 13");
 static_assert(GX_DEVELOPMENT_DEBUG_CALL_STACK == 19, "Call Stack command must be appended after source Step Out");
+static_assert(GX_DEVELOPMENT_DEBUG_INSPECT_VARIABLES == 20,
+              "Variable inspection command must be appended after Call Stack");
 static_assert(offsetof(gx_development_debug_request, threadId) == 72, "development debug thread id offset changed");
 static_assert(offsetof(gx_development_debug_request, stopGeneration) == 80, "development debug stop generation offset changed");
 static_assert(offsetof(gx_development_debug_request, auxiliaryAddress) == 88, "development debug auxiliary address offset changed");

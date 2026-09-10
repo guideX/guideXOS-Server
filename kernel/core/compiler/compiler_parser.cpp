@@ -431,6 +431,7 @@ private:
         local.structTypeIndex = structTypeIndex;
         local.sizeBytes = totalBytes;
         local.initialized = kind == StorageKind::ArrayInt || kind == StorageKind::ArrayStruct;
+        local.declaration = token.location;
         if (!copy_identifier(local.name, sizeof(local.name), token)) return false;
         m_output->localStorageBytes = storageEnd - m_output->parameterStorageBytes;
         if (slot) *slot = newSlot;
@@ -2423,6 +2424,7 @@ bool parse_translation_unit(const char* source, const Token* tokens, uint32_t to
             function.parameters[0].kind = ParameterKind::AppContextPointer;
             function.parameters[0].slot = COMPILER_INVALID_INDEX;
             function.parameters[0].initialized = true;
+            function.parameters[0].declaration = parameter.location;
             function.parameterCount = 1;
             function.parameters[0].kind = ParameterKind::AppContextPointer;
             function.usesAppContext = true;
@@ -2515,6 +2517,7 @@ bool parse_translation_unit(const char* source, const Token* tokens, uint32_t to
                         parameterSymbol.structTypeIndex = structTypeIndex;
                         parameterSymbol.structTypeIdentity = structTypeIndex < output->structTypeCount
                             ? output->structTypes[structTypeIndex].identity : 0;
+                        parameterSymbol.declaration = parameter.location;
                         const bool descriptorParameter = (pointerParameter && !stringPointerParameter) || structParameter;
                         const bool rawPointerParameter = stringPointerParameter;
                         uint32_t parameterStart = function.parameterStorageBytes;

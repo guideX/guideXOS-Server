@@ -1059,6 +1059,33 @@ gx_result hostDevelopmentDebugCallStack(NativeGxAppContext* ctx,
     return result;
 }
 
+gx_result hostDevelopmentDebugInspectVariables(
+    NativeGxAppContext* ctx, const gx_development_debug_request* request,
+    gx_development_debug_variables* outResult) {
+    NativeAppRuntimeContext* context = runtimeContextFor(ctx);
+    if (!context || !request || !outResult ||
+        !nativeBufferRangeContains(*context, request, sizeof(gx_development_debug_request)) ||
+        !nativeBufferRangeContains(*context, outResult, sizeof(gx_development_debug_variables)) ||
+        request->size < sizeof(gx_development_debug_request) ||
+        request->version != GX_DEVELOPMENT_DEBUG_API_VERSION ||
+        request->command != GX_DEVELOPMENT_DEBUG_INSPECT_VARIABLES ||
+        outResult->size < sizeof(gx_development_debug_variables) ||
+        outResult->version != GX_DEVELOPMENT_DEBUG_API_VERSION) {
+        return GX_ERROR_INVALID_ARGUMENT;
+    }
+    gx_development_debug_request copied = *request;
+    std::string artifact;
+    if (request->artifactSha256 &&
+        !copyNativeString(*context, request->artifactSha256,
+                          GX_DEVELOPMENT_RUN_MAX_SHA256_BYTES, artifact)) {
+        return GX_ERROR_INVALID_ARGUMENT;
+    }
+    copied.artifactSha256 = artifact.empty() ? nullptr : artifact.c_str();
+    const gx_result result = DevelopmentRunService::DebugVariables(*context, copied, outResult);
+    NativeAppProcessTable::UpdateFromRuntime(*context);
+    return result;
+}
+
 gx_result hostFileExists(NativeGxAppContext* ctx, const char* path, uint32_t* outExists) {
     NativeAppRuntimeContext* context = runtimeContextFor(ctx);
     if (!context) {
@@ -1834,6 +1861,7 @@ NativeAppRuntimeContext NativeAppRuntime::Prepare(
     context.hostCalls.development_run_release = hostDevelopmentRunRelease;
     context.hostCalls.development_debug = hostDevelopmentDebug;
     context.hostCalls.development_debug_call_stack = hostDevelopmentDebugCallStack;
+    context.hostCalls.development_debug_inspect_variables = hostDevelopmentDebugInspectVariables;
 
     if (launchDecision.strategy != AppLaunchStrategy::NativeElf) {
         addDiagnostic(context, "Launch decision strategy is not NativeElf");

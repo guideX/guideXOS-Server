@@ -27,12 +27,13 @@ $outputDirectory = Split-Path -Parent $output
 New-Item -ItemType Directory -Force -Path $outputDirectory | Out-Null
 
 $arguments = @(
-    "-std=c++17", "-Wall", "-Wextra", "-O2", "-idirafter", ".",
+    "-std=c++17", "-Wall", "-Wextra", "-O2", "-idirafter", ".", "-iquote", "kernel/core/include",
     "-Ithird_party/mbedtls/include",
     "-Ithird_party/mbedtls/tf-psa-crypto/include",
     "-DGX_ENABLE_EXPERIMENTAL_NATIVE_ELF_EXECUTION",
     "-DGX_NATIVE_FILESYSTEM_CONTRACT_TEST",
-    "tests/native_filesystem_contract_test.cpp"
+    "tests/native_filesystem_contract_test.cpp",
+    "kernel/core/compiler/elf_writer.cpp"
 ) + $sources + @(
     "-lws2_32", "-lsecur32", "-lcrypt32", "-lbcrypt", "-lgdi32", "-luser32", "-lmsimg32",
     "-o", $output

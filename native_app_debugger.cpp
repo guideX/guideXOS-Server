@@ -1,6 +1,7 @@
 #include "native_app_debugger.h"
 
 #include "allocator.h"
+#include "kernel/core/compiler/elf_writer.h"
 #include "kernel/core/native_elf/native_elf_call_stack.h"
 #include "logger.h"
 
@@ -103,6 +104,9 @@ struct DebugRuntime {
     gx_development_debug_register_context trapContext{};
     gx_development_debug_register_context singleStepContext{};
     std::vector<DebugSourceMapping> sourceMappings;
+    std::vector<uint8_t> imageBytes;
+    uint32_t debugCodeFileOffset = 0;
+    uint32_t debugCodeBytes = 0;
     bool sourceMetadataPresent = false;
     bool sourceMetadataValid = false;
     std::atomic<bool> stepOverActive{false};
@@ -158,6 +162,23 @@ void setCallStackError(gx_development_debug_call_stack* result, uint32_t status,
     if (!result) return;
     result->status = status;
     if (!message) message = "call stack operation rejected";
+    std::strncpy(result->errorMessage, message, sizeof(result->errorMessage) - 1);
+    result->errorMessage[sizeof(result->errorMessage) - 1] = '\0';
+}
+
+void clearVariables(gx_development_debug_variables* result) {
+    if (!result) return;
+    *result = gx_development_debug_variables{};
+    result->size = sizeof(gx_development_debug_variables);
+    result->version = GX_DEVELOPMENT_DEBUG_API_VERSION;
+    result->status = GX_DEVELOPMENT_DEBUG_VARIABLES_STATUS_NONE;
+}
+
+void setVariablesError(gx_development_debug_variables* result, uint32_t status,
+                       const char* message) {
+    if (!result) return;
+    result->status = status;
+    if (!message) message = "variable inspection rejected";
     std::strncpy(result->errorMessage, message, sizeof(result->errorMessage) - 1);
     result->errorMessage[sizeof(result->errorMessage) - 1] = '\0';
 }
@@ -220,8 +241,12 @@ bool parseSourceMappings(const NativeElfImage& image, DebugRuntime& runtime,
         return false;
     }
     const uint32_t start = imageBytes - payload;
-    if (sourceMapU32(bytes, start) != 0x4D535847U || sourceMapU16(bytes, start + 4) != 1 ||
-        sourceMapU16(bytes, start + 6) != 40 || sourceMapU32(bytes, start + 24) != payload ||
+    const uint16_t version = sourceMapU16(bytes, start + 4);
+    const uint32_t headerBytes = version == 1 ? 40U :
+        version == 2 ? kernel::compiler::BOOTSTRAP_SOURCE_MAP_V2_HEADER_BYTES : 0U;
+    if (headerBytes == 0 || payload < headerBytes + 8U ||
+        sourceMapU32(bytes, start) != 0x4D535847U ||
+        sourceMapU16(bytes, start + 6) != headerBytes || sourceMapU32(bytes, start + 24) != payload ||
         sourceMapU64(bytes, start + 32) != sourceMapHash(bytes, start, payload)) {
         error = "GXSM header or checksum is invalid";
         return false;
@@ -231,20 +256,26 @@ bool parseSourceMappings(const NativeElfImage& image, DebugRuntime& runtime,
     const uint32_t mapCount = sourceMapU32(bytes, start + 12);
     const uint32_t codeFileOffset = sourceMapU32(bytes, start + 16);
     const uint32_t codeBytes = sourceMapU32(bytes, start + 20);
+    const uint32_t variableCount = version == 2 ? sourceMapU32(bytes, start + 40) : 0;
+    const uint32_t variableBytes = version == 2 ? sourceMapU32(bytes, start + 44) : 0;
     if (fileCount == 0 || fileCount > 16 || functionCount == 0 || functionCount > 256 ||
-        mapCount == 0 || mapCount > 256 || codeBytes == 0) {
+        mapCount == 0 || mapCount > 256 || codeBytes == 0 ||
+        variableCount > kernel::compiler::COMPILER_MAX_DEBUG_VARIABLES * kernel::compiler::COMPILER_MAX_TRANSLATION_UNITS ||
+        variableBytes != variableCount * kernel::compiler::BOOTSTRAP_SOURCE_MAP_VARIABLE_BYTES) {
         error = "GXSM counts are invalid";
         return false;
     }
-    const uint64_t expected = 40ULL + static_cast<uint64_t>(fileCount) * 268ULL +
+    const uint64_t expected = headerBytes + static_cast<uint64_t>(fileCount) * 268ULL +
         static_cast<uint64_t>(functionCount) * 64ULL + static_cast<uint64_t>(mapCount) * 24ULL + 8ULL;
-    if (expected != payload) {
+    if (expected + variableBytes != payload) {
         error = "GXSM size accounting is invalid";
         return false;
     }
     std::array<std::array<char, 256>, 16> paths{};
     std::array<std::array<char, 64>, 256> functions{};
-    uint32_t cursor = start + 40;
+    runtime.debugCodeFileOffset = codeFileOffset;
+    runtime.debugCodeBytes = codeBytes;
+    uint32_t cursor = start + headerBytes;
     for (uint32_t index = 0; index < fileCount; ++index) {
         std::memcpy(paths[index].data(), bytes.data() + cursor, 256);
         if (!fixedSourceTextValid(paths[index].data(), 256) || sourceMapU32(bytes, cursor + 256) > 64U * 1024U) {
@@ -324,6 +355,15 @@ const DebugSourceMapping* sourceMappingForward(const DebugRuntime& runtime, uint
 bool readOwnedStackU64(const DebugRuntime& runtime, uint64_t address, uint64_t* value) {
     if (!value || (address & 7ULL) != 0 || !stackAddressRangeContains(runtime, address, 8)) return false;
     *value = *reinterpret_cast<volatile const uint64_t*>(static_cast<uintptr_t>(address));
+    return true;
+}
+
+bool readOwnedStackBytes(const DebugRuntime& runtime, uint64_t address,
+                         uint32_t bytes, uint8_t* value) {
+    if (!value || bytes == 0 || !stackAddressRangeContains(runtime, address, bytes)) return false;
+    volatile const uint8_t* source = reinterpret_cast<volatile const uint8_t*>(
+        static_cast<uintptr_t>(address));
+    for (uint32_t index = 0; index < bytes; ++index) value[index] = source[index];
     return true;
 }
 
@@ -850,6 +890,9 @@ bool NativeAppDebugger::RegisterRuntime(NativeAppRuntimeContext& context,
         runtime.trapContext = gx_development_debug_register_context{};
         runtime.singleStepContext = gx_development_debug_register_context{};
         runtime.sourceMappings.clear();
+        runtime.imageBytes.clear();
+        runtime.debugCodeFileOffset = 0;
+        runtime.debugCodeBytes = 0;
         runtime.sourceMetadataPresent = false;
         runtime.sourceMetadataValid = false;
         clearStepOverRuntime(runtime);
@@ -884,6 +927,7 @@ bool NativeAppDebugger::RegisterRuntime(NativeAppRuntimeContext& context,
             return false;
         }
         runtime.mapping = mapping;
+        runtime.imageBytes = image.imageBytes;
         for (const NativeElfSegment& segment : image.loadedSegments) {
             if ((segment.flags & kPfX) == 0) continue;
             if (runtime.segmentCount >= sizeof(runtime.segments) / sizeof(runtime.segments[0])) {
@@ -1857,6 +1901,184 @@ gx_result NativeAppDebugger::CallStack(const gx_development_debug_request& reque
         currentReturnAddress = candidateReturnAddress;
         nextRbp = candidateSavedRbp;
     }
+}
+
+gx_result NativeAppDebugger::InspectVariables(
+    const gx_development_debug_request& request,
+    const std::string& expectedArtifactSha256,
+    gx_development_debug_variables* result) {
+    if (!result || request.size < sizeof(gx_development_debug_request) ||
+        request.version != GX_DEVELOPMENT_DEBUG_API_VERSION ||
+        request.command != GX_DEVELOPMENT_DEBUG_INSPECT_VARIABLES || request.handle == 0 ||
+        request.sessionGeneration == 0 || request.processId == 0 ||
+        request.nativeRuntimeId == 0) {
+        if (result) {
+            clearVariables(result);
+            setVariablesError(result, GX_DEVELOPMENT_DEBUG_VARIABLES_STATUS_REJECTED,
+                              "variable inspection request identity is incomplete");
+        }
+        return GX_ERROR_INVALID_ARGUMENT;
+    }
+    clearVariables(result);
+    result->handle = request.handle;
+    result->sessionGeneration = request.sessionGeneration;
+    if (expectedArtifactSha256.empty() || !request.artifactSha256 ||
+        expectedArtifactSha256 != request.artifactSha256) {
+        setVariablesError(result, GX_DEVELOPMENT_DEBUG_VARIABLES_STATUS_REJECTED,
+                          "artifact identity mismatch");
+        return GX_ERROR_FAILED;
+    }
+
+    std::lock_guard<std::mutex> lock(g_mutex);
+    DebugRuntime* runtime = findRuntimeLocked(request.nativeRuntimeId, request.processId);
+    if (!runtime) {
+        setVariablesError(result, GX_DEVELOPMENT_DEBUG_VARIABLES_STATUS_STALE,
+                          "target runtime is not registered");
+        return GX_ERROR_FAILED;
+    }
+    result->processId = runtime->processId;
+    result->nativeRuntimeId = runtime->runtimeId;
+    result->stackLow = runtime->stackLow;
+    result->stackHigh = runtime->stackHigh;
+    if (request.threadId == 0 || request.stopGeneration == 0) {
+        setVariablesError(result, GX_DEVELOPMENT_DEBUG_VARIABLES_STATUS_REJECTED,
+                          "paused thread identity is incomplete");
+        return GX_ERROR_INVALID_ARGUMENT;
+    }
+    if (runtime->singleStepPending.load(std::memory_order_acquire) ||
+        runtime->stepOverActive.load(std::memory_order_acquire) ||
+        runtime->stepOutActive.load(std::memory_order_acquire)) {
+        setVariablesError(result, GX_DEVELOPMENT_DEBUG_VARIABLES_STATUS_NO_PAUSED_CONTEXT,
+                          "variables are unavailable while the target is stepping");
+        return GX_ERROR_FAILED;
+    }
+
+    gx_development_debug_register_context context{};
+    uint64_t normalizedRip = 0;
+    bool stopped = false;
+    if (runtime->trapObserved.load(std::memory_order_acquire)) {
+        if (runtime->trapInternalBreakpoint.load(std::memory_order_acquire)) {
+            setVariablesError(result, GX_DEVELOPMENT_DEBUG_VARIABLES_STATUS_NO_PAUSED_CONTEXT,
+                              "internal debugger trap is not a user pause");
+            return GX_ERROR_FAILED;
+        }
+        context = runtime->trapContext;
+        normalizedRip = runtime->trapAddress.load(std::memory_order_acquire);
+        stopped = true;
+    } else if (runtime->userStepStopPending.load(std::memory_order_acquire)) {
+        context = runtime->singleStepContext;
+        normalizedRip = context.rip;
+        stopped = true;
+    }
+    if (!stopped || !context.valid || normalizedRip == 0) {
+        setVariablesError(result, GX_DEVELOPMENT_DEBUG_VARIABLES_STATUS_NO_PAUSED_CONTEXT,
+                          "target has no complete paused user context");
+        return GX_ERROR_FAILED;
+    }
+    if (context.threadId != request.threadId || context.stopGeneration != request.stopGeneration ||
+        context.sessionGeneration != request.sessionGeneration) {
+        setVariablesError(result, GX_DEVELOPMENT_DEBUG_VARIABLES_STATUS_STALE,
+                          "stale or mismatched paused context");
+        return GX_ERROR_FAILED;
+    }
+    result->threadId = context.threadId;
+    result->stopGeneration = context.stopGeneration;
+    result->instructionPointer = normalizedRip;
+    result->framePointer = context.rbp;
+    if (!runtime->sourceMetadataPresent || !runtime->sourceMetadataValid ||
+        runtime->imageBytes.empty()) {
+        setVariablesError(result, GX_DEVELOPMENT_DEBUG_VARIABLES_STATUS_UNSUPPORTED,
+                          "authoritative GXSM variable metadata is unavailable");
+        return GX_ERROR_UNSUPPORTED;
+    }
+    if (!executableAddress(*runtime, normalizedRip, nullptr)) {
+        setVariablesError(result, GX_DEVELOPMENT_DEBUG_VARIABLES_STATUS_INVALID_FRAME,
+                          "paused instruction is outside executable user code");
+        return GX_ERROR_FAILED;
+    }
+    const DebugSourceMapping* topMapping = sourceMappingAt(*runtime, normalizedRip);
+    if (!topMapping || topMapping->functionName[0] == '\0') {
+        setVariablesError(result, GX_DEVELOPMENT_DEBUG_VARIABLES_STATUS_UNSUPPORTED,
+                          "paused instruction has no trustworthy user function");
+        return GX_ERROR_UNSUPPORTED;
+    }
+    if (!kernel::native_elf::native_elf_frame_shape_valid(context.rsp, context.rbp,
+                                                          runtime->stackLow, runtime->stackHigh)) {
+        setVariablesError(result, GX_DEVELOPMENT_DEBUG_VARIABLES_STATUS_INVALID_FRAME,
+                          "paused frame pointer shape is invalid");
+        return GX_ERROR_FAILED;
+    }
+    std::strncpy(result->functionName, topMapping->functionName,
+                 sizeof(result->functionName) - 1);
+    result->functionName[sizeof(result->functionName) - 1] = '\0';
+    std::strncpy(result->sourcePath, topMapping->sourcePath,
+                 sizeof(result->sourcePath) - 1);
+    result->sourcePath[sizeof(result->sourcePath) - 1] = '\0';
+
+    kernel::compiler::ResolvedDebugVariable variables[GX_DEVELOPMENT_DEBUG_MAX_VARIABLES] = {};
+    uint32_t variableCount = 0;
+    uint32_t truncated = 0;
+    const char* resolverError = nullptr;
+    if (!kernel::compiler::resolve_bootstrap_debug_variables_at_address(
+            runtime->imageBytes.data(), static_cast<uint32_t>(runtime->imageBytes.size()),
+            runtime->imageBase, runtime->debugCodeFileOffset, runtime->debugCodeBytes,
+            normalizedRip, topMapping->functionName, variables,
+            GX_DEVELOPMENT_DEBUG_MAX_VARIABLES, &variableCount, &truncated,
+            &resolverError)) {
+        setVariablesError(result, GX_DEVELOPMENT_DEBUG_VARIABLES_STATUS_UNSUPPORTED,
+                          resolverError ? resolverError : "no debug variables are live");
+        return GX_ERROR_UNSUPPORTED;
+    }
+    for (uint32_t index = 0; index < variableCount; ++index) {
+        const kernel::compiler::ResolvedDebugVariable& source = variables[index];
+        gx_development_debug_variable& target = result->variables[index];
+        std::memcpy(target.name, source.name, sizeof(target.name));
+        target.name[sizeof(target.name) - 1] = '\0';
+        target.kind = source.kind == kernel::compiler::DebugVariableKind::Parameter
+            ? GX_DEVELOPMENT_DEBUG_VARIABLE_KIND_ARGUMENT
+            : GX_DEVELOPMENT_DEBUG_VARIABLE_KIND_LOCAL;
+        target.type = source.type == kernel::compiler::DebugVariableTypeKind::Pointer
+            ? GX_DEVELOPMENT_DEBUG_VARIABLE_TYPE_POINTER
+            : GX_DEVELOPMENT_DEBUG_VARIABLE_TYPE_SIGNED_INT32;
+        target.location = GX_DEVELOPMENT_DEBUG_VARIABLE_LOCATION_RBP_RELATIVE;
+        target.flags = GX_DEVELOPMENT_DEBUG_VARIABLE_VALIDATED |
+            GX_DEVELOPMENT_DEBUG_VARIABLE_LIVE |
+            GX_DEVELOPMENT_DEBUG_VARIABLE_INITIALIZED |
+            GX_DEVELOPMENT_DEBUG_VARIABLE_STABLE_FRAME_SLOT;
+        target.sizeBytes = source.sizeBytes;
+        target.declarationLine = source.declaration.line;
+        target.declarationColumn = source.declaration.column;
+        target.frameOffset = source.frameOffset;
+        uint64_t magnitude = static_cast<uint64_t>(-(static_cast<int64_t>(source.frameOffset)));
+        if (source.frameOffset >= 0 || context.rbp < magnitude ||
+            !stackAddressRangeContains(*runtime, context.rbp - magnitude, source.sizeBytes)) {
+            setVariablesError(result, GX_DEVELOPMENT_DEBUG_VARIABLES_STATUS_INVALID_LOCATION,
+                              "debug variable location is outside the owned paused frame");
+            return GX_ERROR_FAILED;
+        }
+        uint8_t bytes[sizeof(uint64_t)] = {};
+        if (!readOwnedStackBytes(*runtime, context.rbp - magnitude, source.sizeBytes, bytes)) {
+            setVariablesError(result, GX_DEVELOPMENT_DEBUG_VARIABLES_STATUS_INVALID_LOCATION,
+                              "debug variable value could not be read from the owned stack");
+            return GX_ERROR_FAILED;
+        }
+        uint64_t raw = 0;
+        for (uint32_t byte = 0; byte < source.sizeBytes; ++byte)
+            raw |= static_cast<uint64_t>(bytes[byte]) << (byte * 8);
+        target.rawValue = raw;
+        target.unsignedValue = source.type == kernel::compiler::DebugVariableTypeKind::Pointer
+            ? raw : static_cast<uint64_t>(static_cast<uint32_t>(raw));
+        target.signedValue = source.type == kernel::compiler::DebugVariableTypeKind::Pointer
+            ? static_cast<int64_t>(raw)
+            : static_cast<int64_t>(static_cast<int32_t>(static_cast<uint32_t>(raw)));
+        target.availability = GX_DEVELOPMENT_DEBUG_VARIABLE_AVAILABILITY_AVAILABLE;
+        target.flags |= GX_DEVELOPMENT_DEBUG_VARIABLE_VALUE_VALID;
+    }
+    result->variableCount = variableCount;
+    result->truncated = truncated;
+    result->status = truncated ? GX_DEVELOPMENT_DEBUG_VARIABLES_STATUS_TRUNCATED
+                               : GX_DEVELOPMENT_DEBUG_VARIABLES_STATUS_SUCCESS;
+    return GX_OK;
 }
 
 void NativeAppDebugger::CancelProcess(uint64_t processId) {

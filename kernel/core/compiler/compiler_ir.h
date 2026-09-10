@@ -76,7 +76,7 @@ static const uint32_t COMPILER_MAX_POINTER_TEMPORARY_SLOTS = COMPILER_MAX_PARAME
 // independent from the compiler phase number: changing object-producing
 // semantics requires incrementing COMPILER_OBJECT_ABI_VERSION.
 static const uint16_t COMPILER_OBJECT_FORMAT_VERSION = 2;
-static const uint16_t COMPILER_OBJECT_ABI_VERSION = 9;
+static const uint16_t COMPILER_OBJECT_ABI_VERSION = 10;
 static const uint32_t COMPILER_OBJECT_ARCH_AMD64 = 1;
 static const uint32_t COMPILER_OBJECT_TARGET_ABI_GUIDEXOS_C_V1 = 1;
 static const uint32_t COMPILER_MAX_OBJECT_BYTES = 131072;
@@ -252,6 +252,46 @@ enum class ParameterKind : uint8_t {
     StringPointer,
 };
 
+// Phase 28G deliberately describes only values whose AMD64 representation is
+// already stable in the compiler: signed int32 values and raw 64-bit pointer
+// parameters. Descriptor-backed int* and aggregate values are not exposed as
+// scalar debugger variables.
+static const uint32_t COMPILER_MAX_DEBUG_VARIABLES = COMPILER_MAX_PARAMETERS + COMPILER_MAX_LOCALS;
+static const uint32_t COMPILER_DEBUG_VARIABLE_NAME_CAPACITY = COMPILER_FUNCTION_NAME_CAPACITY;
+
+enum class DebugVariableKind : uint8_t {
+    Parameter = 1,
+    Local = 2,
+};
+
+enum class DebugVariableTypeKind : uint8_t {
+    SignedInt32 = 1,
+    Pointer = 2,
+};
+
+enum class DebugVariableLocationKind : uint8_t {
+    RbpRelative = 1,
+};
+
+enum {
+    COMPILER_DEBUG_VARIABLE_FLAG_INITIALIZED = 1u << 0,
+    COMPILER_DEBUG_VARIABLE_FLAG_STABLE_FRAME_SLOT = 1u << 1,
+};
+
+struct DebugVariableRecord {
+    char name[COMPILER_DEBUG_VARIABLE_NAME_CAPACITY];
+    uint16_t functionIndex;
+    DebugVariableKind kind;
+    DebugVariableTypeKind type;
+    DebugVariableLocationKind location;
+    uint8_t flags;
+    uint32_t sizeBytes;
+    SourceLocation declaration;
+    int32_t frameOffset;
+    uint32_t liveStart;
+    uint32_t liveEnd;
+};
+
 struct ParameterSymbol {
     char name[COMPILER_PARAMETER_NAME_CAPACITY];
     ParameterKind kind;
@@ -260,6 +300,7 @@ struct ParameterSymbol {
     uint16_t structTypeIndex;
     uint64_t structTypeIdentity;
     bool initialized;
+    SourceLocation declaration;
 };
 
 struct LocalSymbol {
@@ -272,6 +313,7 @@ struct LocalSymbol {
     uint16_t structTypeIndex;
     uint32_t sizeBytes;
     bool initialized;
+    SourceLocation declaration;
 };
 
 struct StringLiteral {
@@ -585,6 +627,8 @@ struct CompiledModule {
     DeclarationDependency dependencies[COMPILER_MAX_DECLARATION_DEPENDENCIES];
     uint32_t sourceMapCount;
     SourceMapping sourceMappings[COMPILER_MAX_SOURCE_MAPPINGS];
+    uint32_t debugVariableCount;
+    DebugVariableRecord debugVariables[COMPILER_MAX_DEBUG_VARIABLES];
 };
 
 struct GlobalFunctionSymbol {
@@ -647,6 +691,21 @@ struct LinkedProgram {
         uint32_t finalCodeOffset;
         uint32_t instructionBytes;
     } sourceMappings[COMPILER_MAX_LINKED_SOURCE_MAPPINGS];
+    struct LinkedDebugVariable {
+        uint16_t sourceFileIndex;
+        uint16_t functionIndex;
+        DebugVariableKind kind;
+        DebugVariableTypeKind type;
+        DebugVariableLocationKind location;
+        uint8_t flags;
+        uint32_t sizeBytes;
+        SourceLocation declaration;
+        int32_t frameOffset;
+        uint32_t finalLiveStart;
+        uint32_t finalLiveEnd;
+        char name[COMPILER_DEBUG_VARIABLE_NAME_CAPACITY];
+    } debugVariables[COMPILER_MAX_DEBUG_VARIABLES * COMPILER_MAX_TRANSLATION_UNITS];
+    uint32_t debugVariableCount;
     bool linked;
 };
 

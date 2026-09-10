@@ -739,6 +739,20 @@ static bool copy_debug_call_stack_to_app(
     return true;
 }
 
+static bool copy_debug_variables_to_app(
+    const gx_development_debug_variables& source,
+    gx_development_debug_variables* destination)
+{
+    if (!destination || !app_pointer_range(destination, sizeof(uint32_t))) return false;
+    const uint32_t requested = destination->size;
+    if (requested < static_cast<uint32_t>(offsetof(gx_development_debug_variables, variables))) return false;
+    const uint32_t bytes = requested < sizeof(source) ? requested : static_cast<uint32_t>(sizeof(source));
+    if (!app_pointer_range(destination, bytes)) return false;
+    copy_bytes(reinterpret_cast<uint8_t*>(destination),
+               reinterpret_cast<const uint8_t*>(&source), bytes);
+    return true;
+}
+
 static gx_result GX_CALL host_bare_development_debug(
     gx_app_context* context,
     const gx_development_debug_request* request,
@@ -787,6 +801,32 @@ static gx_result GX_CALL host_bare_development_debug_call_stack(
     local.version = GX_DEVELOPMENT_DEBUG_API_VERSION;
     const gx_result result = NativeElfRunService::call_stack(copied, &local);
     if (!copy_debug_call_stack_to_app(local, outputResult)) return GX_ERROR_PERMISSION_DENIED;
+    return result;
+}
+
+static gx_result GX_CALL host_bare_development_debug_inspect_variables(
+    gx_app_context* context,
+    const gx_development_debug_request* request,
+    gx_development_debug_variables* outputResult)
+{
+    if (!app_context_valid(context) || !request || !outputResult ||
+        !app_pointer_range(request, sizeof(*request)) ||
+        !app_pointer_range(outputResult, sizeof(uint32_t))) return GX_ERROR_PERMISSION_DENIED;
+    if (request->size < sizeof(*request) ||
+        request->version != GX_DEVELOPMENT_DEBUG_API_VERSION ||
+        request->command != GX_DEVELOPMENT_DEBUG_INSPECT_VARIABLES) return GX_ERROR_INVALID_ARGUMENT;
+    gx_development_debug_request copied = *request;
+    copied.artifactSha256 = nullptr;
+    if (request->artifactSha256) {
+        if (!app_string(request->artifactSha256, s_bareDebugStrings[0],
+                        sizeof(s_bareDebugStrings[0]))) return GX_ERROR_INVALID_ARGUMENT;
+        copied.artifactSha256 = s_bareDebugStrings[0];
+    }
+    gx_development_debug_variables local = {};
+    local.size = sizeof(local);
+    local.version = GX_DEVELOPMENT_DEBUG_API_VERSION;
+    const gx_result result = NativeElfRunService::inspect_variables(copied, &local);
+    if (!copy_debug_variables_to_app(local, outputResult)) return GX_ERROR_PERMISSION_DENIED;
     return result;
 }
 
@@ -898,6 +938,8 @@ static void initialize_app_context()
     s_appRuntime.hostCalls.bare_metal_development_debug = host_bare_development_debug;
     s_appRuntime.hostCalls.bare_metal_development_debug_call_stack =
         host_bare_development_debug_call_stack;
+    s_appRuntime.hostCalls.bare_metal_development_debug_inspect_variables =
+        host_bare_development_debug_inspect_variables;
 
     s_appRuntime.appContext = {};
     s_appRuntime.appContext.size = sizeof(gx_app_context);

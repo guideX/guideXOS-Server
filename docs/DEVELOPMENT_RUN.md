@@ -147,3 +147,11 @@ breakpoints. See
 `docs/DEVELOPER_STUDIO_PHASE28F_CALL_STACK_INSPECTION.md` for the fixed ABI,
 frame policy, nested cross-file proof, Step Out stack shrink, and three-boot
 QEMU evidence.
+
+Phase 28G adds compiler-owned persisted arguments/locals metadata and bounded,
+read-only paused top-frame inspection through debug command 20. It advances
+the compiler-object ABI to 10 and the final ELF `GXSM` metadata to version 2
+when variable records are present. See
+`docs/DEVELOPER_STUDIO_PHASE28G_ARGUMENTS_LOCALS_INSPECTION.md` for the fixed
+record contract, RBP-slot policy, live-range rules, hosted/bare-metal routing,
+and QEMU proof sequence.

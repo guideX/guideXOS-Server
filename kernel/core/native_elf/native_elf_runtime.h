@@ -142,7 +142,11 @@ static_assert(offsetof(gx_host_calls, native_window_run) == 376,
                   "gx_host_calls hosted call stack offset changed");
     static_assert(offsetof(gx_host_calls, bare_metal_development_debug_call_stack) == 408,
                   "gx_host_calls bare-metal call stack offset changed");
-    static_assert(sizeof(gx_host_calls) == 416, "gx_host_calls size changed");
+    static_assert(offsetof(gx_host_calls, development_debug_inspect_variables) == 416,
+                  "gx_host_calls hosted variable inspection offset changed");
+    static_assert(offsetof(gx_host_calls, bare_metal_development_debug_inspect_variables) == 424,
+                  "gx_host_calls bare-metal variable inspection offset changed");
+    static_assert(sizeof(gx_host_calls) == 432, "gx_host_calls size changed");
 
 inline bool calculate_application_stack_layout(uint64_t base,
                                                uint64_t size,

@@ -1959,7 +1959,10 @@ static bool emit_translation_unit_impl(const TranslationUnitIR& unit, uint64_t r
                                        uint32_t* relocationCount,
                                        SourceMapping* sourceMappings,
                                        uint32_t sourceMappingCapacity,
-                                       uint32_t* sourceMappingCount)
+                                       uint32_t* sourceMappingCount,
+                                       DebugVariableRecord* debugVariables,
+                                       uint32_t debugVariableCapacity,
+                                       uint32_t* debugVariableCount)
 {
     static_assert(offsetof(gx_app_context, host) == 8, "generated gx_app_context host offset changed");
     static_assert(offsetof(gx_host_calls, log) == 8, "generated gx_host_calls log offset changed");
@@ -1967,6 +1970,7 @@ static bool emit_translation_unit_impl(const TranslationUnitIR& unit, uint64_t r
     if (entryCodeOffset) *entryCodeOffset = 0;
     if (relocationCount) *relocationCount = 0;
     if (sourceMappingCount) *sourceMappingCount = 0;
+    if (debugVariableCount) *debugVariableCount = 0;
     if (!output || !outputSize || !entryCodeOffset || outputCapacity == 0 ||
          unit.functionCount > COMPILER_MAX_FUNCTIONS ||
          unit.globalCount > COMPILER_MAX_GLOBALS ||
@@ -2139,6 +2143,83 @@ static bool emit_translation_unit_impl(const TranslationUnitIR& unit, uint64_t r
             sourceMappings[j] = current;
         }
     }
+    if (debugVariables && debugVariableCount) {
+        if (debugVariableCapacity == 0) return false;
+        for (uint32_t i = 0; i < unit.functionCount; ++i) {
+            const FunctionIR& function = unit.functions[i];
+            const uint32_t functionStart = function.codeOffset;
+            uint32_t functionEnd = emitter.size();
+            for (uint32_t j = 0; j < unit.functionCount; ++j) {
+                if (j == i) continue;
+                const uint32_t candidate = unit.functions[j].codeOffset;
+                if (candidate > functionStart && candidate < functionEnd) functionEnd = candidate;
+            }
+            if (functionEnd <= functionStart) return false;
+            for (uint32_t p = 0; p < function.parameterCount; ++p) {
+                const ParameterSymbol& parameter = function.parameters[p];
+                DebugVariableTypeKind type = DebugVariableTypeKind::SignedInt32;
+                uint32_t size = 4;
+                if (parameter.kind == ParameterKind::StringPointer) {
+                    type = DebugVariableTypeKind::Pointer;
+                    size = 8;
+                } else if (parameter.kind != ParameterKind::Integer) {
+                    continue;
+                }
+                if (*debugVariableCount >= debugVariableCapacity) return false;
+                DebugVariableRecord& record = debugVariables[(*debugVariableCount)++];
+                record = {};
+                for (uint32_t c = 0; c < COMPILER_DEBUG_VARIABLE_NAME_CAPACITY; ++c)
+                    record.name[c] = parameter.name[c];
+                record.functionIndex = static_cast<uint16_t>(i);
+                record.kind = DebugVariableKind::Parameter;
+                record.type = type;
+                record.location = DebugVariableLocationKind::RbpRelative;
+                record.flags = COMPILER_DEBUG_VARIABLE_FLAG_INITIALIZED |
+                    COMPILER_DEBUG_VARIABLE_FLAG_STABLE_FRAME_SLOT;
+                record.sizeBytes = size;
+                record.declaration = parameter.declaration;
+                record.frameOffset = slot_displacement(parameter.slot);
+                record.liveStart = functionStart;
+                record.liveEnd = functionEnd;
+            }
+            for (uint32_t l = 0; l < function.localCount; ++l) {
+                const LocalSymbol& local = function.locals[l];
+                if (local.kind != StorageKind::ScalarInt || !local.initialized) continue;
+                uint32_t liveStart = functionStart;
+                bool foundDeclaration = false;
+                uint32_t declarationMappingColumn = 0;
+                if (sourceMappings && sourceMappingCount) {
+                    for (uint32_t m = 0; m < *sourceMappingCount; ++m) {
+                        const SourceMapping& mapping = sourceMappings[m];
+                        if (mapping.functionIndex != i || mapping.line != local.declaration.line ||
+                            mapping.column > local.declaration.column ||
+                            (foundDeclaration && mapping.column < declarationMappingColumn)) continue;
+                        if (mapping.moduleCodeOffset > 0xFFFFFFFFU - mapping.instructionBytes) return false;
+                        liveStart = mapping.moduleCodeOffset + mapping.instructionBytes;
+                        foundDeclaration = true;
+                        declarationMappingColumn = mapping.column;
+                    }
+                }
+                if (!foundDeclaration || liveStart >= functionEnd) continue;
+                if (*debugVariableCount >= debugVariableCapacity) return false;
+                DebugVariableRecord& record = debugVariables[(*debugVariableCount)++];
+                record = {};
+                for (uint32_t c = 0; c < COMPILER_DEBUG_VARIABLE_NAME_CAPACITY; ++c)
+                    record.name[c] = local.name[c];
+                record.functionIndex = static_cast<uint16_t>(i);
+                record.kind = DebugVariableKind::Local;
+                record.type = DebugVariableTypeKind::SignedInt32;
+                record.location = DebugVariableLocationKind::RbpRelative;
+                record.flags = COMPILER_DEBUG_VARIABLE_FLAG_INITIALIZED |
+                    COMPILER_DEBUG_VARIABLE_FLAG_STABLE_FRAME_SLOT;
+                record.sizeBytes = 4;
+                record.declaration = local.declaration;
+                record.frameOffset = slot_displacement(local.slot);
+                record.liveStart = liveStart;
+                record.liveEnd = functionEnd;
+            }
+        }
+    }
     *outputSize = emitter.size();
     return *outputSize != 0;
 }
@@ -2149,7 +2230,7 @@ bool emit_translation_unit(const TranslationUnitIR& unit, uint64_t readOnlyDataA
 {
     return emit_translation_unit_impl(unit, readOnlyDataAddress, output, outputCapacity,
                                       outputSize, entryCodeOffset, nullptr, 0, nullptr,
-                                      nullptr, 0, nullptr);
+                                      nullptr, 0, nullptr, nullptr, 0, nullptr);
 }
 
 bool emit_translation_unit_module(const TranslationUnitIR& unit,
@@ -2162,7 +2243,7 @@ bool emit_translation_unit_module(const TranslationUnitIR& unit,
     if (!relocations || !relocationCount) return false;
     return emit_translation_unit_impl(unit, 0, output, outputCapacity, outputSize,
                                       entryCodeOffset, relocations, relocationCapacity,
-                                      relocationCount, nullptr, 0, nullptr);
+                                      relocationCount, nullptr, 0, nullptr, nullptr, 0, nullptr);
 }
 
 bool emit_translation_unit_module_with_source_map(
@@ -2177,7 +2258,24 @@ bool emit_translation_unit_module_with_source_map(
     return emit_translation_unit_impl(unit, 0, output, outputCapacity, outputSize,
                                       entryCodeOffset, relocations, relocationCapacity,
                                       relocationCount, sourceMappings,
-                                      sourceMappingCapacity, sourceMappingCount);
+                                      sourceMappingCapacity, sourceMappingCount, nullptr, 0, nullptr);
+}
+
+bool emit_translation_unit_module_with_source_map_and_debug_variables(
+    const TranslationUnitIR& unit, uint8_t* output, uint32_t outputCapacity,
+    uint32_t* outputSize, uint32_t* entryCodeOffset, RelocationRecord* relocations,
+    uint32_t relocationCapacity, uint32_t* relocationCount,
+    SourceMapping* sourceMappings, uint32_t sourceMappingCapacity,
+    uint32_t* sourceMappingCount, DebugVariableRecord* debugVariables,
+    uint32_t debugVariableCapacity, uint32_t* debugVariableCount)
+{
+    if (!relocations || !relocationCount || !sourceMappings || !sourceMappingCount ||
+        !debugVariables || !debugVariableCount) return false;
+    return emit_translation_unit_impl(unit, 0, output, outputCapacity, outputSize,
+                                      entryCodeOffset, relocations, relocationCapacity,
+                                      relocationCount, sourceMappings, sourceMappingCapacity,
+                                      sourceMappingCount, debugVariables, debugVariableCapacity,
+                                      debugVariableCount);
 }
 
 bool emit_function(const FunctionIR& function, uint64_t readOnlyDataAddress,

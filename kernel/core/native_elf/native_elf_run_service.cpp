@@ -546,6 +546,23 @@ static bool debug_read_stack_u64(const Operation& operation, uint64_t address,
     return true;
 }
 
+static bool debug_read_stack_bytes(const Operation& operation, uint64_t address,
+                                   uint32_t bytes, uint8_t* value)
+{
+    const NativeAppExecutionContext* runtime = native_elf_runtime_context();
+    if (!value || !runtime || bytes == 0 || runtime->stackBase == 0 ||
+        runtime->stackSize == 0 || runtime->stackBase >
+            ~static_cast<uint64_t>(0) - runtime->stackSize ||
+        !step_out_stack_range_contains(runtime->stackBase,
+                                        runtime->stackBase + runtime->stackSize,
+                                        address, bytes)) return false;
+    (void)operation;
+    volatile const uint8_t* source = reinterpret_cast<volatile const uint8_t*>(
+        static_cast<uintptr_t>(address));
+    for (uint32_t index = 0; index < bytes; ++index) value[index] = source[index];
+    return true;
+}
+
 static bool debug_read_code_byte(const Operation& operation, uint64_t address,
                                  uint8_t* value);
 
@@ -3191,6 +3208,24 @@ static bool set_call_stack_mapping(
     return true;
 }
 
+static void clear_debug_variables(gx_development_debug_variables* result)
+{
+    if (!result) return;
+    *result = {};
+    result->size = sizeof(*result);
+    result->version = GX_DEVELOPMENT_DEBUG_API_VERSION;
+    result->status = GX_DEVELOPMENT_DEBUG_VARIABLES_STATUS_NONE;
+}
+
+static void set_debug_variables_error(gx_development_debug_variables* result,
+                                      uint32_t status, const char* message)
+{
+    if (!result) return;
+    result->status = status;
+    copy_text(result->errorMessage, sizeof(result->errorMessage),
+              message ? message : "NativeElf variable inspection rejected");
+}
+
 static bool resolve_call_stack_direct_call(
     const Operation& operation, uint64_t returnAddress, const char* expectedCallee,
     uint64_t* callRip, compiler::ResolvedSourceMapping* callerMapping)
@@ -3444,6 +3479,166 @@ gx_result call_stack(const gx_development_debug_request& request,
         currentReturnAddress = candidateReturnAddress;
         nextRbp = candidateSavedRbp;
     }
+}
+
+gx_result inspect_variables(const gx_development_debug_request& request,
+                            gx_development_debug_variables* outResult)
+{
+    if (!outResult) return GX_ERROR_INVALID_ARGUMENT;
+    clear_debug_variables(outResult);
+    if (request.size < sizeof(request) ||
+        request.version != GX_DEVELOPMENT_DEBUG_API_VERSION ||
+        request.command != GX_DEVELOPMENT_DEBUG_INSPECT_VARIABLES) {
+        set_debug_variables_error(outResult, GX_DEVELOPMENT_DEBUG_VARIABLES_STATUS_REJECTED,
+                                  "NativeElf variable inspection request version or command is invalid");
+        return GX_ERROR_INVALID_ARGUMENT;
+    }
+    if (!decode(request.handle)) {
+        set_debug_variables_error(outResult, GX_DEVELOPMENT_DEBUG_VARIABLES_STATUS_STALE,
+                                  "NativeElf variable inspection handle is stale");
+        return GX_ERROR_FAILED;
+    }
+    if (!s_operation.debugControlled) {
+        set_debug_variables_error(outResult, GX_DEVELOPMENT_DEBUG_VARIABLES_STATUS_REJECTED,
+                                  "Run generation is not debugger-controlled");
+        return GX_ERROR_UNSUPPORTED;
+    }
+    if (request.sessionGeneration == 0 || request.nativeRuntimeId == 0 ||
+        request.threadId == 0 || request.stopGeneration == 0 ||
+        !request.artifactSha256 || !equal_text(request.artifactSha256, s_operation.artifactSha256) ||
+        !debug_request_identity_matches(s_operation, request)) {
+        set_debug_variables_error(outResult,
+                                  request.sessionGeneration != 0 &&
+                                      request.sessionGeneration != s_operation.registrationGeneration
+                                      ? GX_DEVELOPMENT_DEBUG_VARIABLES_STATUS_STALE
+                                      : GX_DEVELOPMENT_DEBUG_VARIABLES_STATUS_REJECTED,
+                                  "NativeElf variable inspection session identity is stale");
+        return GX_ERROR_FAILED;
+    }
+    if (s_operation.state != GX_DEVELOPMENT_RUN_PAUSED ||
+        (!s_operation.debugBreakpointHit && !s_operation.debugStepTrapObserved) ||
+        s_operation.debugStepActive || s_operation.debugSourceStepActive ||
+        s_operation.debugStepOverActive || s_operation.debugStepOutActive ||
+        !s_operation.debugContext || s_operation.debugContext->cs != 0x08) {
+        set_debug_variables_error(outResult,
+                                  GX_DEVELOPMENT_DEBUG_VARIABLES_STATUS_NO_PAUSED_CONTEXT,
+                                  "NativeElf target has no complete paused user context");
+        return GX_ERROR_BUSY;
+    }
+    const NativeAppExecutionContext* runtime = native_elf_runtime_context();
+    if (!runtime || runtime->state != NativeAppExecutionState::Running ||
+        runtime->stackBase == 0 || runtime->stackSize == 0 ||
+        runtime->stackBase > ~static_cast<uint64_t>(0) - runtime->stackSize) {
+        set_debug_variables_error(outResult,
+                                  GX_DEVELOPMENT_DEBUG_VARIABLES_STATUS_NO_PAUSED_CONTEXT,
+                                  "NativeElf runtime stack identity is unavailable");
+        return GX_ERROR_FAILED;
+    }
+    const NativeElfDebugTrap::BreakpointContext& context = *s_operation.debugContext;
+    compiler::ResolvedSourceMapping topMapping = {};
+    if (!debug_code_address(s_operation, context.rip) ||
+        !resolve_debug_mapping_at_address(s_operation, context.rip, &topMapping, nullptr) ||
+        topMapping.functionName[0] == '\0') {
+        set_debug_variables_error(outResult,
+                                  GX_DEVELOPMENT_DEBUG_VARIABLES_STATUS_UNSUPPORTED,
+                                  "NativeElf paused RIP has no trustworthy user function");
+        return GX_ERROR_UNSUPPORTED;
+    }
+    const uint64_t stackHigh = runtime->stackBase + runtime->stackSize;
+    if (!step_out_frame_shape_valid(context.rsp, context.rbp,
+                                    runtime->stackBase, stackHigh)) {
+        set_debug_variables_error(outResult, GX_DEVELOPMENT_DEBUG_VARIABLES_STATUS_INVALID_FRAME,
+                                  "NativeElf paused frame pointer shape is invalid");
+        return GX_ERROR_FAILED;
+    }
+    outResult->handle = s_operation.handle;
+    outResult->nativeRuntimeId = s_operation.registrationGeneration;
+    outResult->threadId = 1;
+    outResult->sessionGeneration = s_operation.registrationGeneration;
+    outResult->stopGeneration = s_operation.debugStopGeneration;
+    outResult->instructionPointer = context.rip;
+    outResult->framePointer = context.rbp;
+    outResult->stackLow = runtime->stackBase;
+    outResult->stackHigh = stackHigh;
+    if (!copy_text(outResult->functionName, sizeof(outResult->functionName), topMapping.functionName) ||
+        !copy_text(outResult->sourcePath, sizeof(outResult->sourcePath), topMapping.sourcePath)) {
+        set_debug_variables_error(outResult, GX_DEVELOPMENT_DEBUG_VARIABLES_STATUS_UNSUPPORTED,
+                                  "NativeElf top frame source identity is too long");
+        return GX_ERROR_UNSUPPORTED;
+    }
+
+    compiler::ResolvedDebugVariable variables[GX_DEVELOPMENT_DEBUG_MAX_VARIABLES] = {};
+    uint32_t variableCount = 0;
+    uint32_t truncated = 0;
+    const char* resolverError = nullptr;
+    if (!compiler::resolve_bootstrap_debug_variables_at_address(
+            s_artifact, static_cast<uint32_t>(s_operation.artifactSize),
+            runtime->imageBase, s_operation.debugCodeFileOffset,
+            s_operation.debugCodeBytes, context.rip, topMapping.functionName,
+            variables, GX_DEVELOPMENT_DEBUG_MAX_VARIABLES, &variableCount,
+            &truncated, &resolverError)) {
+        set_debug_variables_error(outResult, GX_DEVELOPMENT_DEBUG_VARIABLES_STATUS_UNSUPPORTED,
+                                  resolverError ? resolverError : "no debug variables are live");
+        return GX_ERROR_UNSUPPORTED;
+    }
+    for (uint32_t index = 0; index < variableCount; ++index) {
+        const compiler::ResolvedDebugVariable& source = variables[index];
+        gx_development_debug_variable& target = outResult->variables[index];
+        if (!copy_text(target.name, sizeof(target.name), source.name)) {
+            set_debug_variables_error(outResult, GX_DEVELOPMENT_DEBUG_VARIABLES_STATUS_UNSUPPORTED,
+                                      "NativeElf debug variable name is too long");
+            return GX_ERROR_UNSUPPORTED;
+        }
+        target.kind = source.kind == compiler::DebugVariableKind::Parameter
+            ? GX_DEVELOPMENT_DEBUG_VARIABLE_KIND_ARGUMENT
+            : GX_DEVELOPMENT_DEBUG_VARIABLE_KIND_LOCAL;
+        target.type = source.type == compiler::DebugVariableTypeKind::Pointer
+            ? GX_DEVELOPMENT_DEBUG_VARIABLE_TYPE_POINTER
+            : GX_DEVELOPMENT_DEBUG_VARIABLE_TYPE_SIGNED_INT32;
+        target.location = GX_DEVELOPMENT_DEBUG_VARIABLE_LOCATION_RBP_RELATIVE;
+        target.flags = GX_DEVELOPMENT_DEBUG_VARIABLE_VALIDATED |
+            GX_DEVELOPMENT_DEBUG_VARIABLE_LIVE |
+            GX_DEVELOPMENT_DEBUG_VARIABLE_INITIALIZED |
+            GX_DEVELOPMENT_DEBUG_VARIABLE_STABLE_FRAME_SLOT;
+        target.sizeBytes = source.sizeBytes;
+        target.declarationLine = source.declaration.line;
+        target.declarationColumn = source.declaration.column;
+        target.frameOffset = source.frameOffset;
+        const uint64_t magnitude = static_cast<uint64_t>(
+            -(static_cast<int64_t>(source.frameOffset)));
+        if (source.frameOffset >= 0 || context.rbp < magnitude ||
+            !step_out_stack_range_contains(runtime->stackBase, stackHigh,
+                                            context.rbp - magnitude, source.sizeBytes)) {
+            set_debug_variables_error(outResult,
+                                      GX_DEVELOPMENT_DEBUG_VARIABLES_STATUS_INVALID_LOCATION,
+                                      "NativeElf debug variable location is outside the owned frame");
+            return GX_ERROR_FAILED;
+        }
+        uint8_t bytes[sizeof(uint64_t)] = {};
+        if (!debug_read_stack_bytes(s_operation, context.rbp - magnitude,
+                                    source.sizeBytes, bytes)) {
+            set_debug_variables_error(outResult,
+                                      GX_DEVELOPMENT_DEBUG_VARIABLES_STATUS_INVALID_LOCATION,
+                                      "NativeElf debug variable value could not be read");
+            return GX_ERROR_FAILED;
+        }
+        uint64_t raw = 0;
+        for (uint32_t byte = 0; byte < source.sizeBytes; ++byte)
+            raw |= static_cast<uint64_t>(bytes[byte]) << (byte * 8);
+        target.rawValue = raw;
+        target.unsignedValue = source.type == compiler::DebugVariableTypeKind::Pointer
+            ? raw : static_cast<uint64_t>(static_cast<uint32_t>(raw));
+        target.signedValue = source.type == compiler::DebugVariableTypeKind::Pointer
+            ? static_cast<int64_t>(raw)
+            : static_cast<int64_t>(static_cast<int32_t>(static_cast<uint32_t>(raw)));
+        target.availability = GX_DEVELOPMENT_DEBUG_VARIABLE_AVAILABILITY_AVAILABLE;
+        target.flags |= GX_DEVELOPMENT_DEBUG_VARIABLE_VALUE_VALID;
+    }
+    outResult->variableCount = variableCount;
+    outResult->truncated = truncated;
+    outResult->status = truncated ? GX_DEVELOPMENT_DEBUG_VARIABLES_STATUS_TRUNCATED
+                                  : GX_DEVELOPMENT_DEBUG_VARIABLES_STATUS_SUCCESS;
+    return GX_OK;
 }
 
 gx_result debug(const gx_development_debug_request& request,

@@ -20,9 +20,11 @@ static const uint32_t BOOTSTRAP_CODE_OFFSET = 0x1000;
 static const uint32_t BOOTSTRAP_DATA_OFFSET = 0x2000;
 static const uint32_t BOOTSTRAP_MAX_ELF_BYTES = 98304;
 static const uint32_t BOOTSTRAP_SOURCE_MAP_HEADER_BYTES = 40;
+static const uint32_t BOOTSTRAP_SOURCE_MAP_V2_HEADER_BYTES = 48;
 static const uint32_t BOOTSTRAP_SOURCE_MAP_FILE_BYTES = COMPILER_MAX_SOURCE_PATH_BYTES + 12;
 static const uint32_t BOOTSTRAP_SOURCE_MAP_FUNCTION_BYTES = COMPILER_FUNCTION_NAME_CAPACITY;
 static const uint32_t BOOTSTRAP_SOURCE_MAP_RECORD_BYTES = 24;
+static const uint32_t BOOTSTRAP_SOURCE_MAP_VARIABLE_BYTES = 100;
 
 struct ElfLayout {
     uint64_t imageBase;
@@ -65,6 +67,23 @@ struct ResolvedSourceMapping {
     uint64_t sourceHash;
     char sourcePath[COMPILER_MAX_SOURCE_PATH_BYTES];
     char functionName[COMPILER_FUNCTION_NAME_CAPACITY];
+};
+
+struct ResolvedDebugVariable {
+    char name[COMPILER_DEBUG_VARIABLE_NAME_CAPACITY];
+    char sourcePath[COMPILER_MAX_SOURCE_PATH_BYTES];
+    char functionName[COMPILER_FUNCTION_NAME_CAPACITY];
+    uint16_t sourceFileIndex;
+    uint16_t functionIndex;
+    DebugVariableKind kind;
+    DebugVariableTypeKind type;
+    DebugVariableLocationKind location;
+    uint8_t flags;
+    uint32_t sizeBytes;
+    SourceLocation declaration;
+    int32_t frameOffset;
+    uint32_t liveStart;
+    uint32_t liveEnd;
 };
 
 bool write_bootstrap_elf(const uint8_t* code,
@@ -133,6 +152,13 @@ bool resolve_bootstrap_source_mapping_at_address(
     const uint8_t* image, uint32_t imageBytes, uint64_t imageBase,
     uint32_t codeFileOffset, uint32_t codeBytes, uint64_t address,
     ResolvedSourceMapping* result, const char** error);
+
+bool resolve_bootstrap_debug_variables_at_address(
+    const uint8_t* image, uint32_t imageBytes, uint64_t imageBase,
+    uint32_t codeFileOffset, uint32_t codeBytes, uint64_t address,
+    const char* functionName, ResolvedDebugVariable* variables,
+    uint32_t variableCapacity, uint32_t* variableCount, uint32_t* truncated,
+    const char** error);
 
 bool validate_bootstrap_elf(const uint8_t* image,
                             uint32_t imageBytes,

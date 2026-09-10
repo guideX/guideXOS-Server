@@ -29,6 +29,8 @@ gx_result debug(const gx_development_debug_request& request,
                 gx_development_debug_snapshot* outSnapshot);
 gx_result call_stack(const gx_development_debug_request& request,
                      gx_development_debug_call_stack* outResult);
+gx_result inspect_variables(const gx_development_debug_request& request,
+                            gx_development_debug_variables* outResult);
 
 // Loader/debug-trap integration hooks. They are intentionally limited to the
 // one compiler-known gx_main entry breakpoint or one mapped source breakpoint.

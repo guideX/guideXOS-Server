@@ -307,6 +307,80 @@ static bool test_recursive_metadata_round_trip()
                    "deserialized recursive module links");
 }
 
+static bool test_debug_variable_metadata_round_trip()
+{
+    const char* source =
+        "int inspect(int argument) { int local = argument + 1; return local; }\n"
+        "int gx_main(gx_app_context* ctx) { return inspect(4); }\n";
+    CompiledModule original = {};
+    if (!require(compile_text("src/variables.cpp", source, &original),
+                 "debug-variable module compiles")) return false;
+    if (!require(original.debugVariableCount >= 2, "compiler persists argument and local metadata")) return false;
+    bool foundArgument = false;
+    bool foundLocal = false;
+    for (uint32_t i = 0; i < original.debugVariableCount; ++i) {
+        const DebugVariableRecord& variable = original.debugVariables[i];
+        foundArgument |= std::strcmp(variable.name, "argument") == 0 &&
+            variable.kind == DebugVariableKind::Parameter &&
+            variable.type == DebugVariableTypeKind::SignedInt32;
+        foundLocal |= std::strcmp(variable.name, "local") == 0 &&
+            variable.kind == DebugVariableKind::Local &&
+            variable.type == DebugVariableTypeKind::SignedInt32;
+        if (!require(variable.location == DebugVariableLocationKind::RbpRelative &&
+                     variable.frameOffset < 0 && variable.liveStart < variable.liveEnd &&
+                     variable.liveEnd <= original.codeBytes &&
+                     variable.declaration.line != 0 && variable.declaration.column != 0,
+                     "debug-variable record has a bounded stable frame location")) return false;
+    }
+    if (!require(foundArgument && foundLocal, "argument and local identities are explicit")) return false;
+
+    uint8_t bytes[COMPILER_MAX_OBJECT_BYTES] = {};
+    uint32_t byteCount = 0;
+    if (!require(serialize_elf_object(original, bytes, sizeof(bytes), &byteCount),
+                 "debug-variable module serializes")) return false;
+    ElfObjectHeaderView header = {};
+    Diagnostics headerDiagnostics;
+    if (!require(inspect_elf_object(bytes, byteCount, &header, headerDiagnostics) &&
+                 header.debugVariableCount == original.debugVariableCount &&
+                 header.debugVariableMetadataBytes == original.debugVariableCount * 100U,
+                 "object header persists debug-variable metadata accounting")) return false;
+    CompiledModule restored = {};
+    Diagnostics restoreDiagnostics;
+    if (!require(deserialize_elf_object(bytes, byteCount, &restored, restoreDiagnostics) &&
+                 restored.debugVariableCount == original.debugVariableCount,
+                 "debug-variable metadata survives object round trip")) return false;
+
+    CompiledModule modules[1] = {restored};
+    LinkedProgram linked = {};
+    Diagnostics linkDiagnostics;
+    if (!require(link_modules(modules, 1, &linked, linkDiagnostics) &&
+                 linked.debugVariableCount == original.debugVariableCount,
+                 "debug-variable metadata survives linking")) return false;
+    static uint8_t image[BOOTSTRAP_MAX_ELF_BYTES] = {};
+    ElfLayout layout = {};
+    if (!require(write_bootstrap_elf(linked.code, linked.codeBytes,
+                                     linked.data, linked.dataBytes,
+                                     linked.mutableData, linked.mutableDataBytes,
+                                     linked.entryCodeOffset, image, sizeof(image), &layout) &&
+                 append_bootstrap_source_map(linked, image, sizeof(image), &layout),
+                 "debug-variable source trailer emits")) return false;
+    uint32_t resolvedCount = 0;
+    uint32_t truncated = 0;
+    ResolvedDebugVariable resolved[COMPILER_MAX_DEBUG_VARIABLES] = {};
+    const LinkedProgram::LinkedDebugVariable& first = linked.debugVariables[0];
+    const uint64_t address = layout.imageBase + layout.codeOffset + first.finalLiveStart;
+    const char* functionName = linked.sourceMapFunctions[first.functionIndex].name;
+    const char* error = nullptr;
+    if (!require(resolve_bootstrap_debug_variables_at_address(
+                     image, layout.outputBytes, layout.imageBase, layout.codeOffset,
+                     layout.codeBytes, address, functionName, resolved,
+                     COMPILER_MAX_DEBUG_VARIABLES, &resolvedCount, &truncated, &error) &&
+                 resolvedCount != 0 && !truncated,
+                 "final ELF debug-variable lookup resolves the live top frame")) return false;
+    return require(std::strcmp(resolved[0].functionName, functionName) == 0,
+                   "resolved debug-variable function identity is authoritative");
+}
+
 static bool test_source_map_relocation_and_multifile()
 {
     const char* firstSource =
@@ -467,6 +541,7 @@ int main()
     if (!test_round_trip_and_determinism()) return 1;
     if (!test_rejection_and_bounds()) return 1;
     if (!test_recursive_metadata_round_trip()) return 1;
+    if (!test_debug_variable_metadata_round_trip()) return 1;
     if (!test_source_map_relocation_and_multifile()) return 1;
     std::puts("compiler_object_host_test: PASS");
     return 0;

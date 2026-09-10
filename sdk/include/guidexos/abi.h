@@ -181,6 +181,13 @@ typedef struct gx_host_calls {
     gx_result (GX_CALL *bare_metal_development_debug_call_stack)(gx_app_context* ctx,
                                                                   const gx_development_debug_request* request,
                                                                   gx_development_debug_call_stack* result);
+    /* Appended Phase 28G read-only top-frame argument/local inspection. */
+    gx_result (GX_CALL *development_debug_inspect_variables)(gx_app_context* ctx,
+                                                              const gx_development_debug_request* request,
+                                                              gx_development_debug_variables* result);
+    gx_result (GX_CALL *bare_metal_development_debug_inspect_variables)(gx_app_context* ctx,
+                                                                         const gx_development_debug_request* request,
+                                                                         gx_development_debug_variables* result);
 } gx_host_calls;
 
 #ifdef __cplusplus

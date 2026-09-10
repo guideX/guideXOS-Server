@@ -35,7 +35,9 @@ typedef enum gx_development_debug_command {
     /* Phase 28E: execute the current user frame until its caller resumes. */
     GX_DEVELOPMENT_DEBUG_STEP_SOURCE_OUT = 18,
     /* Phase 28F: inspect the bounded user frame chain without resuming it. */
-    GX_DEVELOPMENT_DEBUG_CALL_STACK = 19
+    GX_DEVELOPMENT_DEBUG_CALL_STACK = 19,
+    /* Phase 28G: inspect validated top-frame arguments and locals. */
+    GX_DEVELOPMENT_DEBUG_INSPECT_VARIABLES = 20
 } gx_development_debug_command;
 
 #define GX_DEVELOPMENT_DEBUG_MAX_CALL_STACK_FRAMES 16u
@@ -94,6 +96,78 @@ typedef struct gx_development_debug_call_stack {
     char errorMessage[GX_DEVELOPMENT_DEBUG_MAX_ERROR_BYTES];
     gx_development_debug_call_stack_frame frames[GX_DEVELOPMENT_DEBUG_MAX_CALL_STACK_FRAMES];
 } gx_development_debug_call_stack;
+
+#define GX_DEVELOPMENT_DEBUG_MAX_VARIABLES 32u
+#define GX_DEVELOPMENT_DEBUG_MAX_VARIABLE_NAME_BYTES 64u
+
+typedef enum gx_development_debug_variables_status {
+    GX_DEVELOPMENT_DEBUG_VARIABLES_STATUS_NONE = 0,
+    GX_DEVELOPMENT_DEBUG_VARIABLES_STATUS_SUCCESS = 1,
+    GX_DEVELOPMENT_DEBUG_VARIABLES_STATUS_TRUNCATED = 2,
+    GX_DEVELOPMENT_DEBUG_VARIABLES_STATUS_REJECTED = 3,
+    GX_DEVELOPMENT_DEBUG_VARIABLES_STATUS_NO_PAUSED_CONTEXT = 4,
+    GX_DEVELOPMENT_DEBUG_VARIABLES_STATUS_STALE = 5,
+    GX_DEVELOPMENT_DEBUG_VARIABLES_STATUS_INVALID_FRAME = 6,
+    GX_DEVELOPMENT_DEBUG_VARIABLES_STATUS_INVALID_LOCATION = 7,
+    GX_DEVELOPMENT_DEBUG_VARIABLES_STATUS_UNSUPPORTED = 8
+} gx_development_debug_variables_status;
+
+enum {
+    GX_DEVELOPMENT_DEBUG_VARIABLE_VALIDATED = 1u,
+    GX_DEVELOPMENT_DEBUG_VARIABLE_LIVE = 2u,
+    GX_DEVELOPMENT_DEBUG_VARIABLE_INITIALIZED = 4u,
+    GX_DEVELOPMENT_DEBUG_VARIABLE_STABLE_FRAME_SLOT = 8u,
+    GX_DEVELOPMENT_DEBUG_VARIABLE_VALUE_VALID = 16u
+};
+
+enum {
+    GX_DEVELOPMENT_DEBUG_VARIABLE_KIND_ARGUMENT = 1u,
+    GX_DEVELOPMENT_DEBUG_VARIABLE_KIND_LOCAL = 2u,
+    GX_DEVELOPMENT_DEBUG_VARIABLE_TYPE_SIGNED_INT32 = 1u,
+    GX_DEVELOPMENT_DEBUG_VARIABLE_TYPE_POINTER = 2u,
+    GX_DEVELOPMENT_DEBUG_VARIABLE_LOCATION_RBP_RELATIVE = 1u,
+    GX_DEVELOPMENT_DEBUG_VARIABLE_AVAILABILITY_AVAILABLE = 1u,
+    GX_DEVELOPMENT_DEBUG_VARIABLE_AVAILABILITY_UNAVAILABLE = 2u
+};
+
+typedef struct gx_development_debug_variable {
+    char name[GX_DEVELOPMENT_DEBUG_MAX_VARIABLE_NAME_BYTES];
+    uint32_t kind;
+    uint32_t type;
+    uint32_t location;
+    uint32_t flags;
+    uint32_t sizeBytes;
+    uint32_t declarationLine;
+    uint32_t declarationColumn;
+    int32_t frameOffset;
+    uint32_t availability;
+    uint64_t rawValue;
+    int64_t signedValue;
+    uint64_t unsignedValue;
+} gx_development_debug_variable;
+
+typedef struct gx_development_debug_variables {
+    uint32_t size;
+    uint32_t version;
+    uint32_t status;
+    uint32_t variableCount;
+    uint32_t truncated;
+    uint32_t reserved;
+    uint64_t handle;
+    uint64_t processId;
+    uint64_t nativeRuntimeId;
+    uint64_t threadId;
+    uint64_t sessionGeneration;
+    uint64_t stopGeneration;
+    uint64_t instructionPointer;
+    uint64_t framePointer;
+    uint64_t stackLow;
+    uint64_t stackHigh;
+    char functionName[GX_DEVELOPMENT_DEBUG_MAX_FUNCTION_NAME_BYTES];
+    char sourcePath[GX_DEVELOPMENT_DEBUG_MAX_SOURCE_PATH_BYTES];
+    char errorMessage[GX_DEVELOPMENT_DEBUG_MAX_ERROR_BYTES];
+    gx_development_debug_variable variables[GX_DEVELOPMENT_DEBUG_MAX_VARIABLES];
+} gx_development_debug_variables;
 
 typedef enum gx_development_debug_status {
     GX_DEVELOPMENT_DEBUG_STATUS_NONE = 0,

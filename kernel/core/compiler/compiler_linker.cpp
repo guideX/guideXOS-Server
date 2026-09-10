@@ -167,7 +167,8 @@ bool link_modules(const CompiledModule* modules, uint32_t moduleCount,
             module.exportCount > COMPILER_MAX_MODULE_SYMBOLS ||
             module.importCount > COMPILER_MAX_MODULE_SYMBOLS ||
             module.relocationCount > COMPILER_MAX_MODULE_RELOCATIONS ||
-            module.sourceMapCount > COMPILER_MAX_SOURCE_MAPPINGS) {
+            module.sourceMapCount > COMPILER_MAX_SOURCE_MAPPINGS ||
+            module.debugVariableCount > COMPILER_MAX_DEBUG_VARIABLES) {
             diagnostics.error((SourceLocation){0, 1, 1},
                               "compiled module exceeds bounded representation", "linker");
             return false;
@@ -421,6 +422,69 @@ bool link_modules(const CompiledModule* modules, uint32_t moduleCount,
                 return false;
             }
             linked.instructionBytes = mapping.instructionBytes;
+        }
+        for (uint32_t i = 0; i < module.debugVariableCount; ++i) {
+            const DebugVariableRecord& variable = module.debugVariables[i];
+            if (!variable.name[0] || variable.functionIndex >= module.functionCount ||
+                variable.kind < DebugVariableKind::Parameter ||
+                variable.kind > DebugVariableKind::Local ||
+                variable.type < DebugVariableTypeKind::SignedInt32 ||
+                variable.type > DebugVariableTypeKind::Pointer ||
+                variable.location != DebugVariableLocationKind::RbpRelative ||
+                variable.sizeBytes != (variable.type == DebugVariableTypeKind::Pointer ? 8U : 4U) ||
+                variable.frameOffset >= 0 || variable.liveStart >= variable.liveEnd ||
+                variable.liveEnd > module.codeBytes || variable.declaration.line == 0 ||
+                variable.declaration.column == 0) {
+                diagnostics.error(variable.declaration, "debug-variable record is invalid", "debug");
+                return false;
+            }
+            const int32_t functionExport = find_module_function_export(module, variable.functionIndex);
+            if (functionExport < 0) {
+                diagnostics.error(variable.declaration, "debug-variable function is missing", "debug");
+                return false;
+            }
+            uint16_t functionIndex = COMPILER_INVALID_INDEX;
+            for (uint32_t f = 0; f < output->sourceMapFunctionCount; ++f) {
+                if (names_equal(output->sourceMapFunctions[f].name,
+                                module.exports[functionExport].name)) {
+                    functionIndex = static_cast<uint16_t>(f);
+                    break;
+                }
+            }
+            if (functionIndex == COMPILER_INVALID_INDEX) {
+                if (output->sourceMapFunctionCount >= COMPILER_MAX_SOURCE_MAP_FUNCTIONS) {
+                    diagnostics.error(variable.declaration, "debug function capacity exceeded", "debug");
+                    return false;
+                }
+                functionIndex = output->sourceMapFunctionCount++;
+                copy_name(output->sourceMapFunctions[functionIndex].name,
+                          sizeof(output->sourceMapFunctions[functionIndex].name),
+                          module.exports[functionExport].name);
+            }
+            if (output->debugVariableCount >=
+                COMPILER_MAX_DEBUG_VARIABLES * COMPILER_MAX_TRANSLATION_UNITS) {
+                diagnostics.error(variable.declaration, "linked debug-variable capacity exceeded", "debug");
+                return false;
+            }
+            LinkedProgram::LinkedDebugVariable& linked =
+                output->debugVariables[output->debugVariableCount++];
+            linked = {};
+            linked.sourceFileIndex = static_cast<uint16_t>(m);
+            linked.functionIndex = functionIndex;
+            linked.kind = variable.kind;
+            linked.type = variable.type;
+            linked.location = variable.location;
+            linked.flags = variable.flags;
+            linked.sizeBytes = variable.sizeBytes;
+            linked.declaration = variable.declaration;
+            linked.frameOffset = variable.frameOffset;
+            if (!add_u32(moduleCodeOffsets[m], variable.liveStart, &linked.finalLiveStart) ||
+                !add_u32(moduleCodeOffsets[m], variable.liveEnd, &linked.finalLiveEnd) ||
+                linked.finalLiveEnd > output->codeBytes) {
+                diagnostics.error(variable.declaration, "debug-variable live range overflowed", "debug");
+                return false;
+            }
+            copy_name(linked.name, sizeof(linked.name), variable.name);
         }
     }
 

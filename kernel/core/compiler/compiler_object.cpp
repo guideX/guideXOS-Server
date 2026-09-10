@@ -324,6 +324,49 @@ static bool read_optional_name(Reader& reader, char* output, uint32_t capacity)
     return valid_name(output, capacity);
 }
 
+static const uint32_t kDebugVariableRecordBytes = 100U;
+
+static void write_debug_variable(Writer& writer, const DebugVariableRecord& variable)
+{
+    write_fixed_name(writer, variable.name, sizeof(variable.name));
+    writer.u16(variable.functionIndex);
+    writer.u8(static_cast<uint8_t>(variable.kind));
+    writer.u8(static_cast<uint8_t>(variable.type));
+    writer.u8(static_cast<uint8_t>(variable.location));
+    writer.u8(variable.flags);
+    writer.u32(variable.sizeBytes);
+    write_location(writer, variable.declaration);
+    writer.u32(static_cast<uint32_t>(variable.frameOffset));
+    writer.u32(variable.liveStart);
+    writer.u32(variable.liveEnd);
+    writer.u16(0);
+}
+
+static bool read_debug_variable(Reader& reader, DebugVariableRecord& variable)
+{
+    variable = {};
+    if (!read_fixed_name(reader, variable.name, sizeof(variable.name))) return false;
+    variable.functionIndex = reader.u16();
+    const uint8_t kind = reader.u8();
+    const uint8_t type = reader.u8();
+    const uint8_t location = reader.u8();
+    variable.flags = reader.u8();
+    variable.kind = static_cast<DebugVariableKind>(kind);
+    variable.type = static_cast<DebugVariableTypeKind>(type);
+    variable.location = static_cast<DebugVariableLocationKind>(location);
+    variable.sizeBytes = reader.u32();
+    variable.declaration = read_location(reader);
+    variable.frameOffset = static_cast<int32_t>(reader.u32());
+    variable.liveStart = reader.u32();
+    variable.liveEnd = reader.u32();
+    if (reader.u16() != 0 || kind < static_cast<uint8_t>(DebugVariableKind::Parameter) ||
+        kind > static_cast<uint8_t>(DebugVariableKind::Local) ||
+        type < static_cast<uint8_t>(DebugVariableTypeKind::SignedInt32) ||
+        type > static_cast<uint8_t>(DebugVariableTypeKind::Pointer) ||
+        location != static_cast<uint8_t>(DebugVariableLocationKind::RbpRelative)) return false;
+    return reader.ok();
+}
+
 static void write_struct_type(Writer& writer, const StructTypeIR& type)
 {
     write_fixed_name(writer, type.name, sizeof(type.name)); writer.u16(type.fieldCount); writer.u16(0);
@@ -488,7 +531,8 @@ static bool validate_module_for_serialization(const CompiledModule& module)
     for (uint32_t i = 0; i < module.exportCount; ++i) { const ExportSymbol& symbol = module.exports[i]; if (!valid_name(symbol.name, sizeof(symbol.name))) return false; if (symbol.kind == SymbolKind::Function) { if (symbol.moduleCodeOffset >= module.codeBytes || symbol.parameterCount > COMPILER_MAX_PARAMETERS || function_symbol_size(module, i) == 0) return false; } else if (!valid_data_signature(symbol.kind, symbol.elementCount, symbol.elementSize, symbol.size, symbol.alignment, symbol.structTypeIdentity) || !range32(symbol.moduleDataOffset, symbol.size, module.mutableDataBytes)) return false; }
     for (uint32_t i = 0; i < module.importCount; ++i) { const ImportSymbol& symbol = module.imports[i]; if (!valid_name(symbol.name, sizeof(symbol.name))) return false; if (symbol.kind == SymbolKind::Function && symbol.expectedParameterCount > COMPILER_MAX_PARAMETERS) return false; if (symbol_is_data(symbol.kind) && !valid_data_signature(symbol.kind, symbol.elementCount, symbol.elementSize, symbol.size, symbol.alignment, symbol.structTypeIdentity)) return false; }
     if (module.dependencyCount > COMPILER_MAX_DECLARATION_DEPENDENCIES ||
-        module.sourceMapCount > COMPILER_MAX_SOURCE_MAPPINGS) return false;
+        module.sourceMapCount > COMPILER_MAX_SOURCE_MAPPINGS ||
+        module.debugVariableCount > COMPILER_MAX_DEBUG_VARIABLES) return false;
     for (uint32_t i = 0; i < module.dependencyCount; ++i) {
         const DeclarationDependency& dependency = module.dependencies[i];
         if (!valid_dependency_path(dependency.path, sizeof(dependency.path)) ||
@@ -502,6 +546,22 @@ static bool validate_module_for_serialization(const CompiledModule& module)
                                                mapping.instructionBytes, module.codeBytes)) return false;
         if (i != 0 && mapping.moduleCodeOffset < module.sourceMappings[i - 1].moduleCodeOffset)
             return false;
+    }
+    for (uint32_t i = 0; i < module.debugVariableCount; ++i) {
+        const DebugVariableRecord& variable = module.debugVariables[i];
+        if (!valid_name(variable.name, sizeof(variable.name)) ||
+            variable.functionIndex >= module.functionCount ||
+            variable.kind < DebugVariableKind::Parameter ||
+            variable.kind > DebugVariableKind::Local ||
+            variable.type < DebugVariableTypeKind::SignedInt32 ||
+            variable.type > DebugVariableTypeKind::Pointer ||
+            variable.location != DebugVariableLocationKind::RbpRelative ||
+            variable.flags != (COMPILER_DEBUG_VARIABLE_FLAG_INITIALIZED |
+                               COMPILER_DEBUG_VARIABLE_FLAG_STABLE_FRAME_SLOT) ||
+            variable.sizeBytes != (variable.type == DebugVariableTypeKind::Pointer ? 8U : 4U) ||
+            variable.declaration.line == 0 || variable.declaration.column == 0 ||
+            variable.frameOffset >= 0 || variable.liveStart >= variable.liveEnd ||
+            variable.liveEnd > module.codeBytes) return false;
     }
     for (uint32_t i = 0; i < module.relocationCount; ++i) { const RelocationRecord& relocation = module.relocations[i]; const uint32_t width = relocation.kind == RelocationKind::CallRel32 ? 4U : 8U; if (relocation.kind > RelocationKind::GlobalDataAddress64 || relocation.width != width || !range32(relocation.patchOffset, width, module.codeBytes)) return false; if (relocation.kind == RelocationKind::DataAddress64) { if (module.dataBytes == 0 || relocation.dataOffset >= module.dataBytes) return false; } else if (!valid_name(relocation.targetSymbolName, sizeof(relocation.targetSymbolName)) || (find_export_symbol(module, relocation.targetSymbolName) < 0 && find_import_symbol(module, relocation.targetSymbolName) < 0)) return false; }
     return true;
@@ -517,7 +577,7 @@ static bool write_metadata(const CompiledModule& module, uint32_t sectionCount, 
     uint32_t flags = module.hasEntry ? kFlagHasEntry : 0; if (module.hasHostLog) flags |= kFlagHasHostLog; if (module.returnConstantValid) flags |= kFlagReturnConstantValid;
     writer.u32(flags); writer.u64(module.sourceHash); writer.u32(module.sourceBytes); const uint32_t sourcePathBytes = text_length(module.sourcePath, sizeof(module.sourcePath)); writer.u32(sourcePathBytes); writer.u32(module.tokenCount); writer.u32(static_cast<uint32_t>(module.returnConstant)); writer.u32(module.entryCodeOffset); writer.u32(module.functionCount); writer.u32(module.globalCount); writer.u16(module.recursiveSccCount); writer.u16(module.structTypeCount);
     uint32_t edgeCount = 0; for (uint32_t i = 0; i < module.functionCount; ++i) for (uint32_t j = 0; j < module.functionCount; ++j) if (module.callGraph[i][j]) ++edgeCount;
-    writer.u32(edgeCount); writer.u32(module.exportCount); writer.u32(module.importCount); writer.u32(module.relocationCount); writer.u32(module.dependencyCount); writer.u32(0); writer.u32(module.sourceMapCount); writer.u32(0); writer.u32(0); writer.u32(objectBytes); writer.u64(0);
+    writer.u32(edgeCount); writer.u32(module.exportCount); writer.u32(module.importCount); writer.u32(module.relocationCount); writer.u32(module.dependencyCount); writer.u32(0); writer.u32(module.sourceMapCount); writer.u32(0); writer.u32(module.debugVariableCount); writer.u32(0); writer.u32(0); writer.u32(objectBytes); writer.u64(0);
     writer.bytes(reinterpret_cast<const uint8_t*>(module.sourcePath), sourcePathBytes);
     for (uint32_t i = 0; i < module.functionCount; ++i) writer.u8(module.recursiveFunction[i] ? 1 : 0);
     for (uint32_t i = 0; i < module.functionCount; ++i) writer.u32(module.localStorageBytes[i]);
@@ -537,9 +597,14 @@ static bool write_metadata(const CompiledModule& module, uint32_t sectionCount, 
         writer.u32(mapping.instructionBytes);
     }
     writer.patch_u32(92, writer.position() - sourceMapStart);
+    const uint32_t debugVariableStart = writer.position();
+    for (uint32_t i = 0; i < module.debugVariableCount; ++i)
+        write_debug_variable(writer, module.debugVariables[i]);
+    writer.patch_u32(100, writer.position() - debugVariableStart);
     if (!writer.ok() || writer.position() > COMPILER_MAX_OBJECT_BYTES) return false;
     writer.patch_u32(88, module.sourceMapCount);
-    writer.patch_u32(96, writer.position()); *outputBytes = writer.position(); return writer.ok();
+    writer.patch_u32(96, module.debugVariableCount);
+    writer.patch_u32(104, writer.position()); *outputBytes = writer.position(); return writer.ok();
 }
 
 static bool serialize_sections(const CompiledModule& module, uint32_t strtabBytes, uint32_t shstrtabBytes,
@@ -636,7 +701,7 @@ static bool serialize_sections(const CompiledModule& module, uint32_t strtabByte
         const uint32_t at = sectionHeaderOffset + static_cast<uint32_t>(i) * 64U;
         put_u32(output, at, sections[i].nameOffset); put_u32(output, at + 4, sections[i].type); put_u64(output, at + 8, sections[i].flags); put_u64(output, at + 16, 0); put_u64(output, at + 24, sections[i].offset); put_u64(output, at + 32, sections[i].size); put_u32(output, at + 40, sections[i].link); put_u32(output, at + 44, sections[i].info); put_u64(output, at + 48, sections[i].align); put_u64(output, at + 56, sections[i].entsize);
     }
-    const uint32_t checksumOffset = sections[meta].offset + 104U;
+    const uint32_t checksumOffset = sections[meta].offset + 112U;
     const uint64_t checksum = elf_object_checksum(output, totalBytes, checksumOffset);
     put_u64(output, checksumOffset, checksum); *outputBytes = totalBytes; return true;
 }
@@ -727,8 +792,8 @@ static bool parse_elf(const uint8_t* bytes, uint32_t byteCount, ParsedElf* parse
     const uint32_t metaOffset = static_cast<uint32_t>(meta.offset); const uint32_t metaBytes = static_cast<uint32_t>(meta.size);
     if (bytes[metaOffset] != kMetaMagic[0] || bytes[metaOffset + 1] != kMetaMagic[1] || bytes[metaOffset + 2] != kMetaMagic[2] || bytes[metaOffset + 3] != kMetaMagic[3]) return reject(diagnostics, "ELF compiler metadata magic is invalid");
     parsed->header = {};
-    parsed->header.elfType = get_u16(bytes, 16); parsed->header.machine = get_u16(bytes, 18); parsed->header.formatVersion = get_u16(bytes, metaOffset + 4); parsed->header.metaHeaderSize = get_u16(bytes, metaOffset + 6); parsed->header.targetArchitecture = get_u32(bytes, metaOffset + 8); parsed->header.targetAbi = get_u32(bytes, metaOffset + 12); parsed->header.compilerObjectAbiVersion = get_u32(bytes, metaOffset + 16); parsed->header.flags = get_u32(bytes, metaOffset + 20); parsed->header.sourceHash = get_u64(bytes, metaOffset + 24); parsed->header.sourceSize = get_u32(bytes, metaOffset + 32); parsed->header.sourcePathBytes = get_u32(bytes, metaOffset + 36); parsed->header.tokenCount = get_u32(bytes, metaOffset + 40); parsed->header.returnConstant = static_cast<int32_t>(get_u32(bytes, metaOffset + 44)); parsed->header.entryCodeOffset = get_u32(bytes, metaOffset + 48); parsed->header.functionCount = get_u32(bytes, metaOffset + 52); parsed->header.globalCount = get_u32(bytes, metaOffset + 56); parsed->header.recursiveSccCount = get_u16(bytes, metaOffset + 60); parsed->header.structTypeCount = get_u16(bytes, metaOffset + 62); parsed->header.callGraphEdgeCount = get_u32(bytes, metaOffset + 64); parsed->header.exportCount = get_u32(bytes, metaOffset + 68); parsed->header.importCount = get_u32(bytes, metaOffset + 72); parsed->header.relocationCount = get_u32(bytes, metaOffset + 76); parsed->header.dependencyCount = get_u32(bytes, metaOffset + 80); parsed->header.dependencyMetadataBytes = get_u32(bytes, metaOffset + 84); parsed->header.sourceMapCount = get_u32(bytes, metaOffset + 88); parsed->header.sourceMapMetadataBytes = get_u32(bytes, metaOffset + 92); parsed->header.metaBytes = get_u32(bytes, metaOffset + 96); parsed->header.objectBytes = get_u32(bytes, metaOffset + 100); parsed->header.objectChecksum = get_u64(bytes, metaOffset + 104); parsed->header.codeSize = text ? static_cast<uint32_t>(text->size) : 0; parsed->header.rodataSize = parsed->rodata < 0 ? 0 : static_cast<uint32_t>(parsed->sections[parsed->rodata].size); parsed->header.rwdataSize = parsed->data < 0 ? 0 : static_cast<uint32_t>(parsed->sections[parsed->data].size); parsed->header.metaOffset = metaOffset; parsed->header.sectionCount = sectionCount; parsed->header.symbolCount = static_cast<uint32_t>(symtab.size / 24U);
-    if (parsed->header.formatVersion != COMPILER_OBJECT_FORMAT_VERSION || parsed->header.metaHeaderSize != COMPILER_ELF_OBJECT_META_HEADER_BYTES || parsed->header.targetArchitecture != COMPILER_OBJECT_ARCH_AMD64 || parsed->header.targetAbi != COMPILER_OBJECT_TARGET_ABI_GUIDEXOS_C_V1 || parsed->header.compilerObjectAbiVersion != COMPILER_OBJECT_ABI_VERSION || (parsed->header.flags & ~kKnownMetaFlags) != 0 || parsed->header.metaBytes != metaBytes || parsed->header.objectBytes != byteCount || parsed->header.sourceSize > COMPILER_MAX_SOURCE_BYTES || parsed->header.sourcePathBytes == 0 || parsed->header.sourcePathBytes >= COMPILER_MAX_SOURCE_PATH_BYTES || parsed->header.functionCount > COMPILER_MAX_FUNCTIONS || parsed->header.globalCount > COMPILER_MAX_GLOBALS || parsed->header.exportCount > COMPILER_MAX_MODULE_SYMBOLS || parsed->header.importCount > COMPILER_MAX_MODULE_SYMBOLS || parsed->header.relocationCount > COMPILER_MAX_MODULE_RELOCATIONS || parsed->header.structTypeCount > COMPILER_MAX_STRUCT_TYPES || parsed->header.recursiveSccCount > COMPILER_MAX_FUNCTIONS || parsed->header.dependencyCount > COMPILER_MAX_DECLARATION_DEPENDENCIES || parsed->header.dependencyMetadataBytes > COMPILER_MAX_DEPENDENCY_METADATA_BYTES || parsed->header.sourceMapCount > COMPILER_MAX_SOURCE_MAPPINGS || parsed->header.sourceMapMetadataBytes != parsed->header.sourceMapCount * 20U || ((parsed->header.flags & kFlagHasEntry) != 0 && (parsed->header.codeSize == 0 || parsed->header.entryCodeOffset >= parsed->header.codeSize)) || parsed->header.metaBytes < COMPILER_ELF_OBJECT_META_HEADER_BYTES || parsed->header.objectChecksum != elf_object_checksum(bytes, byteCount, metaOffset + 104U)) return reject(diagnostics, "ELF object compiler identity, metadata, or checksum is invalid");
+    parsed->header.elfType = get_u16(bytes, 16); parsed->header.machine = get_u16(bytes, 18); parsed->header.formatVersion = get_u16(bytes, metaOffset + 4); parsed->header.metaHeaderSize = get_u16(bytes, metaOffset + 6); parsed->header.targetArchitecture = get_u32(bytes, metaOffset + 8); parsed->header.targetAbi = get_u32(bytes, metaOffset + 12); parsed->header.compilerObjectAbiVersion = get_u32(bytes, metaOffset + 16); parsed->header.flags = get_u32(bytes, metaOffset + 20); parsed->header.sourceHash = get_u64(bytes, metaOffset + 24); parsed->header.sourceSize = get_u32(bytes, metaOffset + 32); parsed->header.sourcePathBytes = get_u32(bytes, metaOffset + 36); parsed->header.tokenCount = get_u32(bytes, metaOffset + 40); parsed->header.returnConstant = static_cast<int32_t>(get_u32(bytes, metaOffset + 44)); parsed->header.entryCodeOffset = get_u32(bytes, metaOffset + 48); parsed->header.functionCount = get_u32(bytes, metaOffset + 52); parsed->header.globalCount = get_u32(bytes, metaOffset + 56); parsed->header.recursiveSccCount = get_u16(bytes, metaOffset + 60); parsed->header.structTypeCount = get_u16(bytes, metaOffset + 62); parsed->header.callGraphEdgeCount = get_u32(bytes, metaOffset + 64); parsed->header.exportCount = get_u32(bytes, metaOffset + 68); parsed->header.importCount = get_u32(bytes, metaOffset + 72); parsed->header.relocationCount = get_u32(bytes, metaOffset + 76); parsed->header.dependencyCount = get_u32(bytes, metaOffset + 80); parsed->header.dependencyMetadataBytes = get_u32(bytes, metaOffset + 84); parsed->header.sourceMapCount = get_u32(bytes, metaOffset + 88); parsed->header.sourceMapMetadataBytes = get_u32(bytes, metaOffset + 92); parsed->header.debugVariableCount = get_u32(bytes, metaOffset + 96); parsed->header.debugVariableMetadataBytes = get_u32(bytes, metaOffset + 100); parsed->header.metaBytes = get_u32(bytes, metaOffset + 104); parsed->header.objectBytes = get_u32(bytes, metaOffset + 108); parsed->header.objectChecksum = get_u64(bytes, metaOffset + 112); parsed->header.codeSize = text ? static_cast<uint32_t>(text->size) : 0; parsed->header.rodataSize = parsed->rodata < 0 ? 0 : static_cast<uint32_t>(parsed->sections[parsed->rodata].size); parsed->header.rwdataSize = parsed->data < 0 ? 0 : static_cast<uint32_t>(parsed->sections[parsed->data].size); parsed->header.metaOffset = metaOffset; parsed->header.sectionCount = sectionCount; parsed->header.symbolCount = static_cast<uint32_t>(symtab.size / 24U);
+    if (parsed->header.formatVersion != COMPILER_OBJECT_FORMAT_VERSION || parsed->header.metaHeaderSize != COMPILER_ELF_OBJECT_META_HEADER_BYTES || parsed->header.targetArchitecture != COMPILER_OBJECT_ARCH_AMD64 || parsed->header.targetAbi != COMPILER_OBJECT_TARGET_ABI_GUIDEXOS_C_V1 || parsed->header.compilerObjectAbiVersion != COMPILER_OBJECT_ABI_VERSION || (parsed->header.flags & ~kKnownMetaFlags) != 0 || parsed->header.metaBytes != metaBytes || parsed->header.objectBytes != byteCount || parsed->header.sourceSize > COMPILER_MAX_SOURCE_BYTES || parsed->header.sourcePathBytes == 0 || parsed->header.sourcePathBytes >= COMPILER_MAX_SOURCE_PATH_BYTES || parsed->header.functionCount > COMPILER_MAX_FUNCTIONS || parsed->header.globalCount > COMPILER_MAX_GLOBALS || parsed->header.exportCount > COMPILER_MAX_MODULE_SYMBOLS || parsed->header.importCount > COMPILER_MAX_MODULE_SYMBOLS || parsed->header.relocationCount > COMPILER_MAX_MODULE_RELOCATIONS || parsed->header.structTypeCount > COMPILER_MAX_STRUCT_TYPES || parsed->header.recursiveSccCount > COMPILER_MAX_FUNCTIONS || parsed->header.dependencyCount > COMPILER_MAX_DECLARATION_DEPENDENCIES || parsed->header.dependencyMetadataBytes > COMPILER_MAX_DEPENDENCY_METADATA_BYTES || parsed->header.sourceMapCount > COMPILER_MAX_SOURCE_MAPPINGS || parsed->header.sourceMapMetadataBytes != parsed->header.sourceMapCount * 20U || parsed->header.debugVariableCount > COMPILER_MAX_DEBUG_VARIABLES || parsed->header.debugVariableMetadataBytes != parsed->header.debugVariableCount * kDebugVariableRecordBytes || ((parsed->header.flags & kFlagHasEntry) != 0 && (parsed->header.codeSize == 0 || parsed->header.entryCodeOffset >= parsed->header.codeSize)) || parsed->header.metaBytes < COMPILER_ELF_OBJECT_META_HEADER_BYTES || parsed->header.objectChecksum != elf_object_checksum(bytes, byteCount, metaOffset + 112U)) return reject(diagnostics, "ELF object compiler identity, metadata, or checksum is invalid");
     const uint32_t firstGlobalSymbol = sectionCount;
     if (parsed->header.symbolCount != firstGlobalSymbol + parsed->header.exportCount + parsed->header.importCount || symtab.info != firstGlobalSymbol || ((parsed->header.relocationCount != 0) != (parsed->relaText >= 0))) return reject(diagnostics, "ELF object symbol or relocation counts are inconsistent");
     if (parsed->relaText >= 0) { const SectionView& rela = parsed->sections[parsed->relaText]; if (rela.type != kSectionRela || rela.entsize != 24 || rela.size != static_cast<uint64_t>(parsed->header.relocationCount) * 24ULL || rela.link != static_cast<uint32_t>(parsed->symtab) || rela.info != static_cast<uint32_t>(parsed->text)) return reject(diagnostics, "ELF relocation table metadata is invalid"); }
@@ -818,7 +883,22 @@ static bool validate_metadata_payload(const uint8_t* bytes, const ParsedElf& par
             (i != 0 && mapping.moduleCodeOffset < module->sourceMappings[i - 1].moduleCodeOffset))
             return reject(diagnostics, "ELF source-map metadata is malformed");
     }
-    if (reader.position() - sourceMapStart != parsed.header.sourceMapMetadataBytes ||
+    if (reader.position() - sourceMapStart != parsed.header.sourceMapMetadataBytes)
+        return reject(diagnostics, "ELF source-map metadata size is inconsistent");
+    module->debugVariableCount = parsed.header.debugVariableCount;
+    const uint32_t debugVariableStart = reader.position();
+    for (uint32_t i = 0; i < module->debugVariableCount; ++i) {
+        DebugVariableRecord& variable = module->debugVariables[i];
+        if (!read_debug_variable(reader, variable) || variable.functionIndex >= module->functionCount ||
+            variable.sizeBytes != (variable.type == DebugVariableTypeKind::Pointer ? 8U : 4U) ||
+            variable.declaration.line == 0 || variable.declaration.column == 0 ||
+            variable.frameOffset >= 0 || variable.liveStart >= variable.liveEnd ||
+            variable.liveEnd > parsed.header.codeSize ||
+            variable.flags != (COMPILER_DEBUG_VARIABLE_FLAG_INITIALIZED |
+                               COMPILER_DEBUG_VARIABLE_FLAG_STABLE_FRAME_SLOT))
+            return reject(diagnostics, "ELF debug-variable metadata is malformed");
+    }
+    if (reader.position() - debugVariableStart != parsed.header.debugVariableMetadataBytes ||
         !reader.ok() || reader.position() != parsed.header.metaBytes - COMPILER_ELF_OBJECT_META_HEADER_BYTES) return reject(diagnostics, "ELF compiler metadata has trailing or truncated bytes");
 
     const SectionView* text = parsed.text < 0 ? nullptr : &parsed.sections[parsed.text];

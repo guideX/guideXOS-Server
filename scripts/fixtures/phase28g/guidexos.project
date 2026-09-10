@@ -1,0 +1,12 @@
+{
+  "projectId": "dev.guidexos.phase28g",
+  "displayName": "Developer Studio Phase 28G Arguments and Locals",
+  "projectKind": "native-gui-application",
+  "defaultTargetProfile": "guidexos.amd64.baremetal.bootstrap.native",
+  "abi": "guidexos-c-abi-v1",
+  "architecture": "amd64",
+  "applicationManifest": "app/app.json",
+  "entryPoint": "gx_main",
+  "sourceRoot": "src",
+  "outputName": "p28g"
+}

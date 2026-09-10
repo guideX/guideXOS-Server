@@ -25,6 +25,7 @@ static const uint32_t BOOTSTRAP_DATA_BYTES_LIMIT = COMPILER_MAX_LINKED_DATA_BYTE
 static const uint8_t kSourceMapMagic[4] = {'G', 'X', 'S', 'M'};
 static const uint8_t kSourceMapFooterMagic[4] = {'G', 'X', 'M', 'E'};
 static const uint16_t kSourceMapVersion = 1;
+static const uint16_t kSourceMapVersionWithVariables = 2;
 static const uint32_t kSourceMapFooterBytes = 8;
 
 struct LoadRange {
@@ -163,17 +164,45 @@ bool append_bootstrap_source_map(const LinkedProgram& program,
         program.sourceMappingCount > COMPILER_MAX_LINKED_SOURCE_MAPPINGS ||
         (program.sourceMappingCount != 0 &&
          (program.sourceFileCount == 0 || program.sourceMapFunctionCount == 0))) return false;
+    if (program.debugVariableCount > COMPILER_MAX_DEBUG_VARIABLES * COMPILER_MAX_TRANSLATION_UNITS)
+        return false;
+    if (program.debugVariableCount != 0 && program.sourceMappingCount == 0) return false;
     for (uint32_t i = 0; i < program.sourceFileCount; ++i) {
         if (!fixed_text_valid(program.sourceFiles[i].path, COMPILER_MAX_SOURCE_PATH_BYTES) ||
             program.sourceFiles[i].sourceBytes > COMPILER_MAX_SOURCE_BYTES) return false;
     }
     for (uint32_t i = 0; i < program.sourceMapFunctionCount; ++i)
         if (!fixed_text_valid(program.sourceMapFunctions[i].name, COMPILER_FUNCTION_NAME_CAPACITY)) return false;
-    if (program.sourceMappingCount == 0) return true;
-    const uint64_t payload = static_cast<uint64_t>(BOOTSTRAP_SOURCE_MAP_HEADER_BYTES) +
+    if (program.sourceMappingCount == 0 && program.debugVariableCount == 0) return true;
+    const bool hasVariables = program.debugVariableCount != 0;
+    const uint32_t headerBytes = hasVariables ? BOOTSTRAP_SOURCE_MAP_V2_HEADER_BYTES :
+        BOOTSTRAP_SOURCE_MAP_HEADER_BYTES;
+    for (uint32_t i = 0; i < program.debugVariableCount; ++i) {
+        const LinkedProgram::LinkedDebugVariable& variable = program.debugVariables[i];
+        if (variable.sourceFileIndex >= program.sourceFileCount ||
+            variable.functionIndex >= program.sourceMapFunctionCount ||
+            !fixed_text_valid(variable.name, COMPILER_DEBUG_VARIABLE_NAME_CAPACITY) ||
+            variable.kind < DebugVariableKind::Parameter ||
+            variable.kind > DebugVariableKind::Local ||
+            variable.type < DebugVariableTypeKind::SignedInt32 ||
+            variable.type > DebugVariableTypeKind::Pointer ||
+            variable.location != DebugVariableLocationKind::RbpRelative ||
+            variable.sizeBytes != (variable.type == DebugVariableTypeKind::Pointer ? 8U : 4U) ||
+            variable.declaration.line == 0 || variable.declaration.column == 0 ||
+            variable.frameOffset >= 0 || variable.finalLiveStart >= variable.finalLiveEnd ||
+            variable.finalLiveEnd > program.codeBytes ||
+            (variable.flags & (COMPILER_DEBUG_VARIABLE_FLAG_INITIALIZED |
+                               COMPILER_DEBUG_VARIABLE_FLAG_STABLE_FRAME_SLOT)) !=
+                (COMPILER_DEBUG_VARIABLE_FLAG_INITIALIZED |
+                 COMPILER_DEBUG_VARIABLE_FLAG_STABLE_FRAME_SLOT)) return false;
+    }
+    const uint64_t variableMetadataBytes = static_cast<uint64_t>(program.debugVariableCount) *
+        BOOTSTRAP_SOURCE_MAP_VARIABLE_BYTES;
+    const uint64_t payload = static_cast<uint64_t>(headerBytes) +
         static_cast<uint64_t>(program.sourceFileCount) * BOOTSTRAP_SOURCE_MAP_FILE_BYTES +
         static_cast<uint64_t>(program.sourceMapFunctionCount) * BOOTSTRAP_SOURCE_MAP_FUNCTION_BYTES +
         static_cast<uint64_t>(program.sourceMappingCount) * BOOTSTRAP_SOURCE_MAP_RECORD_BYTES +
+        variableMetadataBytes +
         kSourceMapFooterBytes;
     if (payload > 0xFFFFFFFFULL || layout->outputBytes > outputCapacity - payload ||
         layout->outputBytes + payload > BOOTSTRAP_MAX_ELF_BYTES) return false;
@@ -181,8 +210,8 @@ bool append_bootstrap_source_map(const LinkedProgram& program,
     const uint32_t total = static_cast<uint32_t>(payload);
     clear_bytes(output + start, total);
     put_u32(output, start + 0, 0x4D535847U);
-    put_u16(output, start + 4, kSourceMapVersion);
-    put_u16(output, start + 6, BOOTSTRAP_SOURCE_MAP_HEADER_BYTES);
+    put_u16(output, start + 4, hasVariables ? kSourceMapVersionWithVariables : kSourceMapVersion);
+    put_u16(output, start + 6, static_cast<uint16_t>(headerBytes));
     put_u16(output, start + 8, program.sourceFileCount);
     put_u16(output, start + 10, program.sourceMapFunctionCount);
     put_u32(output, start + 12, program.sourceMappingCount);
@@ -190,7 +219,11 @@ bool append_bootstrap_source_map(const LinkedProgram& program,
     put_u32(output, start + 20, layout->codeBytes);
     put_u32(output, start + 24, total);
     put_u64(output, start + 32, 0);
-    uint32_t cursor = start + BOOTSTRAP_SOURCE_MAP_HEADER_BYTES;
+    if (hasVariables) {
+        put_u32(output, start + 40, program.debugVariableCount);
+        put_u32(output, start + 44, static_cast<uint32_t>(variableMetadataBytes));
+    }
+    uint32_t cursor = start + headerBytes;
     for (uint32_t i = 0; i < program.sourceFileCount; ++i) {
         for (uint32_t j = 0; j < COMPILER_MAX_SOURCE_PATH_BYTES; ++j)
             output[cursor + j] = static_cast<uint8_t>(program.sourceFiles[i].path[j]);
@@ -212,6 +245,25 @@ bool append_bootstrap_source_map(const LinkedProgram& program,
         put_u32(output, cursor + 12, mapping.finalCodeOffset);
         put_u32(output, cursor + 16, mapping.instructionBytes);
         cursor += BOOTSTRAP_SOURCE_MAP_RECORD_BYTES;
+    }
+    for (uint32_t i = 0; i < program.debugVariableCount; ++i) {
+        const LinkedProgram::LinkedDebugVariable& variable = program.debugVariables[i];
+        put_u16(output, cursor + 0, variable.sourceFileIndex);
+        put_u16(output, cursor + 2, variable.functionIndex);
+        output[cursor + 4] = static_cast<uint8_t>(variable.kind);
+        output[cursor + 5] = static_cast<uint8_t>(variable.type);
+        output[cursor + 6] = static_cast<uint8_t>(variable.location);
+        output[cursor + 7] = variable.flags;
+        put_u32(output, cursor + 8, variable.sizeBytes);
+        put_u32(output, cursor + 12, variable.declaration.offset);
+        put_u32(output, cursor + 16, variable.declaration.line);
+        put_u32(output, cursor + 20, variable.declaration.column);
+        put_u32(output, cursor + 24, static_cast<uint32_t>(variable.frameOffset));
+        put_u32(output, cursor + 28, variable.finalLiveStart);
+        put_u32(output, cursor + 32, variable.finalLiveEnd);
+        for (uint32_t j = 0; j < COMPILER_DEBUG_VARIABLE_NAME_CAPACITY; ++j)
+            output[cursor + 36 + j] = static_cast<uint8_t>(variable.name[j]);
+        cursor += BOOTSTRAP_SOURCE_MAP_VARIABLE_BYTES;
     }
     put_u32(output, cursor + 0, 0x454D5847U);
     put_u32(output, cursor + 4, total);
@@ -243,8 +295,13 @@ bool resolve_bootstrap_source_mapping(const uint8_t* image, uint32_t imageBytes,
     if (payload < BOOTSTRAP_SOURCE_MAP_HEADER_BYTES + kSourceMapFooterBytes ||
         payload > imageBytes) return false;
     const uint32_t start = imageBytes - payload;
-    if (get_u32(image, start) != 0x4D535847U || get_u16(image, start + 4) != kSourceMapVersion ||
-        get_u16(image, start + 6) != BOOTSTRAP_SOURCE_MAP_HEADER_BYTES ||
+    const uint16_t version = get_u16(image, start + 4);
+    const uint32_t headerBytes = version == kSourceMapVersionWithVariables ?
+        BOOTSTRAP_SOURCE_MAP_V2_HEADER_BYTES : BOOTSTRAP_SOURCE_MAP_HEADER_BYTES;
+    if (payload < headerBytes + kSourceMapFooterBytes) return false;
+    if (get_u32(image, start) != 0x4D535847U ||
+        (version != kSourceMapVersion && version != kSourceMapVersionWithVariables) ||
+        get_u16(image, start + 6) != headerBytes ||
         get_u32(image, start + 24) != payload ||
         get_u64(image, start + 32) != source_map_hash(image + start, payload, 32, 8)) return false;
     const uint32_t fileCount = get_u16(image, start + 8);
@@ -252,17 +309,22 @@ bool resolve_bootstrap_source_mapping(const uint8_t* image, uint32_t imageBytes,
     const uint32_t mapCount = get_u32(image, start + 12);
     const uint32_t trailerCodeOffset = get_u32(image, start + 16);
     const uint32_t trailerCodeBytes = get_u32(image, start + 20);
+    const uint32_t variableCount = version == kSourceMapVersionWithVariables ? get_u32(image, start + 40) : 0;
+    const uint32_t variableBytes = version == kSourceMapVersionWithVariables ? get_u32(image, start + 44) : 0;
     if (fileCount == 0 || fileCount > COMPILER_MAX_TRANSLATION_UNITS ||
         functionCount > COMPILER_MAX_SOURCE_MAP_FUNCTIONS ||
         mapCount == 0 || mapCount > COMPILER_MAX_LINKED_SOURCE_MAPPINGS ||
+        variableCount > COMPILER_MAX_DEBUG_VARIABLES * COMPILER_MAX_TRANSLATION_UNITS ||
+        variableBytes != variableCount * BOOTSTRAP_SOURCE_MAP_VARIABLE_BYTES ||
         trailerCodeOffset != codeFileOffset || trailerCodeBytes != codeBytes) return false;
-    const uint64_t expected = static_cast<uint64_t>(BOOTSTRAP_SOURCE_MAP_HEADER_BYTES) +
+    const uint64_t expected = static_cast<uint64_t>(headerBytes) +
         static_cast<uint64_t>(fileCount) * BOOTSTRAP_SOURCE_MAP_FILE_BYTES +
         static_cast<uint64_t>(functionCount) * BOOTSTRAP_SOURCE_MAP_FUNCTION_BYTES +
         static_cast<uint64_t>(mapCount) * BOOTSTRAP_SOURCE_MAP_RECORD_BYTES +
+        variableBytes +
         kSourceMapFooterBytes;
     if (expected != payload) return false;
-    uint32_t cursor = start + BOOTSTRAP_SOURCE_MAP_HEADER_BYTES;
+    uint32_t cursor = start + headerBytes;
     uint32_t matchingFile = 0xFFFFFFFFU;
     for (uint32_t i = 0; i < fileCount; ++i) {
         const char* path = reinterpret_cast<const char*>(image + cursor);
@@ -292,7 +354,7 @@ bool resolve_bootstrap_source_mapping(const uint8_t* image, uint32_t imageBytes,
         const uint32_t finalOffset = get_u32(image, cursor + 12);
         const uint32_t instructionBytes = get_u32(image, cursor + 16);
         if (fileIndex >= fileCount || functionIndex >= functionCount || mappedLine == 0 ||
-            !source_map_range(finalOffset, instructionBytes, codeBytes)) return false;
+            instructionBytes == 0 || !source_map_range(finalOffset, instructionBytes, codeBytes)) return false;
         if (fileIndex == matchingFile && mappedLine == line &&
             (column == 0 || mappedColumn == column)) {
             if (result) {
@@ -300,7 +362,7 @@ bool resolve_bootstrap_source_mapping(const uint8_t* image, uint32_t imageBytes,
                 result->instructionBytes = instructionBytes;
                 result->line = mappedLine;
                 result->column = mappedColumn;
-                const uint32_t fileOffset = start + BOOTSTRAP_SOURCE_MAP_HEADER_BYTES +
+                const uint32_t fileOffset = start + headerBytes +
                     fileIndex * BOOTSTRAP_SOURCE_MAP_FILE_BYTES;
                 for (uint32_t j = 0; j < COMPILER_MAX_SOURCE_PATH_BYTES; ++j)
                     result->sourcePath[j] = static_cast<char>(image[fileOffset + j]);
@@ -349,9 +411,13 @@ bool resolve_bootstrap_source_mapping_at_address(
     if (payload < BOOTSTRAP_SOURCE_MAP_HEADER_BYTES + kSourceMapFooterBytes ||
         payload > imageBytes) return false;
     const uint32_t start = imageBytes - payload;
+    const uint16_t version = get_u16(image, start + 4);
+    const uint32_t headerBytes = version == kSourceMapVersionWithVariables ?
+        BOOTSTRAP_SOURCE_MAP_V2_HEADER_BYTES : BOOTSTRAP_SOURCE_MAP_HEADER_BYTES;
+    if (payload < headerBytes + kSourceMapFooterBytes) return false;
     if (get_u32(image, start) != 0x4D535847U ||
-        get_u16(image, start + 4) != kSourceMapVersion ||
-        get_u16(image, start + 6) != BOOTSTRAP_SOURCE_MAP_HEADER_BYTES ||
+        (version != kSourceMapVersion && version != kSourceMapVersionWithVariables) ||
+        get_u16(image, start + 6) != headerBytes ||
         get_u32(image, start + 24) != payload ||
         get_u64(image, start + 32) != source_map_hash(image + start, payload, 32, 8)) return false;
     const uint32_t fileCount = get_u16(image, start + 8);
@@ -359,18 +425,23 @@ bool resolve_bootstrap_source_mapping_at_address(
     const uint32_t mapCount = get_u32(image, start + 12);
     const uint32_t trailerCodeOffset = get_u32(image, start + 16);
     const uint32_t trailerCodeBytes = get_u32(image, start + 20);
+    const uint32_t variableCount = version == kSourceMapVersionWithVariables ? get_u32(image, start + 40) : 0;
+    const uint32_t variableBytes = version == kSourceMapVersionWithVariables ? get_u32(image, start + 44) : 0;
     if (fileCount == 0 || fileCount > COMPILER_MAX_TRANSLATION_UNITS ||
         functionCount > COMPILER_MAX_SOURCE_MAP_FUNCTIONS || mapCount == 0 ||
         mapCount > COMPILER_MAX_LINKED_SOURCE_MAPPINGS ||
+        variableCount > COMPILER_MAX_DEBUG_VARIABLES * COMPILER_MAX_TRANSLATION_UNITS ||
+        variableBytes != variableCount * BOOTSTRAP_SOURCE_MAP_VARIABLE_BYTES ||
         trailerCodeOffset != codeFileOffset || trailerCodeBytes != codeBytes) return false;
-    const uint64_t expected = static_cast<uint64_t>(BOOTSTRAP_SOURCE_MAP_HEADER_BYTES) +
+    const uint64_t expected = static_cast<uint64_t>(headerBytes) +
         static_cast<uint64_t>(fileCount) * BOOTSTRAP_SOURCE_MAP_FILE_BYTES +
         static_cast<uint64_t>(functionCount) * BOOTSTRAP_SOURCE_MAP_FUNCTION_BYTES +
         static_cast<uint64_t>(mapCount) * BOOTSTRAP_SOURCE_MAP_RECORD_BYTES +
+        variableBytes +
         kSourceMapFooterBytes;
     if (expected != payload) return false;
 
-    const uint32_t fileStart = start + BOOTSTRAP_SOURCE_MAP_HEADER_BYTES;
+    const uint32_t fileStart = start + headerBytes;
     const uint32_t functionStart = fileStart + fileCount * BOOTSTRAP_SOURCE_MAP_FILE_BYTES;
     const uint32_t mappingStart = functionStart + functionCount * BOOTSTRAP_SOURCE_MAP_FUNCTION_BYTES;
     for (uint32_t i = 0; i < fileCount; ++i) {
@@ -394,7 +465,7 @@ bool resolve_bootstrap_source_mapping_at_address(
         const uint32_t finalOffset = get_u32(image, offset + 12);
         const uint32_t instructionBytes = get_u32(image, offset + 16);
         if (fileIndex >= fileCount || functionIndex >= functionCount || mappedLine == 0 ||
-            !source_map_range(finalOffset, instructionBytes, codeBytes)) return false;
+            instructionBytes == 0 || !source_map_range(finalOffset, instructionBytes, codeBytes)) return false;
         if (instructionBytes == 0 || relativeAddress < finalOffset ||
             relativeAddress - finalOffset >= instructionBytes) continue;
         if (result) {
@@ -419,6 +490,169 @@ bool resolve_bootstrap_source_mapping_at_address(
     }
     if (error) *error = "source-map address is unmapped";
     return false;
+}
+
+bool resolve_bootstrap_debug_variables_at_address(
+    const uint8_t* image, uint32_t imageBytes, uint64_t imageBase,
+    uint32_t codeFileOffset, uint32_t codeBytes, uint64_t address,
+    const char* functionName, ResolvedDebugVariable* variables,
+    uint32_t variableCapacity, uint32_t* variableCount, uint32_t* truncated,
+    const char** error)
+{
+    if (error) *error = "debug-variable trailer is invalid";
+    if (variableCount) *variableCount = 0;
+    if (truncated) *truncated = 0;
+    if (!image || !functionName || functionName[0] == '\0' || codeBytes == 0 ||
+        imageBytes < kSourceMapFooterBytes ||
+        imageBase > ~static_cast<uint64_t>(0) - codeFileOffset ||
+        address < imageBase + codeFileOffset) {
+        if (error) *error = "debug-variable request is incomplete";
+        return false;
+    }
+    const uint64_t relativeAddress = address - (imageBase + codeFileOffset);
+    if (relativeAddress >= codeBytes) {
+        if (error) *error = "debug-variable address is outside executable code";
+        return false;
+    }
+    const uint32_t footer = imageBytes - kSourceMapFooterBytes;
+    if (get_u32(image, footer) != 0x454D5847U) {
+        if (error) *error = "debug-variable trailer footer is missing";
+        return false;
+    }
+    const uint32_t payload = get_u32(image, footer + 4);
+    if (payload < BOOTSTRAP_SOURCE_MAP_V2_HEADER_BYTES + kSourceMapFooterBytes ||
+        payload > imageBytes) return false;
+    const uint32_t start = imageBytes - payload;
+    if (get_u32(image, start) != 0x4D535847U ||
+        get_u16(image, start + 4) != kSourceMapVersionWithVariables ||
+        get_u16(image, start + 6) != BOOTSTRAP_SOURCE_MAP_V2_HEADER_BYTES ||
+        get_u32(image, start + 24) != payload ||
+        get_u64(image, start + 32) != source_map_hash(image + start, payload, 32, 8)) {
+        if (error) *error = "debug-variable trailer version or checksum is invalid";
+        return false;
+    }
+    const uint32_t fileCount = get_u16(image, start + 8);
+    const uint32_t functionCount = get_u16(image, start + 10);
+    const uint32_t mapCount = get_u32(image, start + 12);
+    const uint32_t trailerCodeOffset = get_u32(image, start + 16);
+    const uint32_t trailerCodeBytes = get_u32(image, start + 20);
+    const uint32_t trailerVariableCount = get_u32(image, start + 40);
+    const uint32_t trailerVariableBytes = get_u32(image, start + 44);
+    if (fileCount == 0 || fileCount > COMPILER_MAX_TRANSLATION_UNITS ||
+        functionCount == 0 || functionCount > COMPILER_MAX_SOURCE_MAP_FUNCTIONS ||
+        mapCount > COMPILER_MAX_LINKED_SOURCE_MAPPINGS ||
+        trailerVariableCount > COMPILER_MAX_DEBUG_VARIABLES * COMPILER_MAX_TRANSLATION_UNITS ||
+        trailerVariableBytes != trailerVariableCount * BOOTSTRAP_SOURCE_MAP_VARIABLE_BYTES ||
+        trailerCodeOffset != codeFileOffset || trailerCodeBytes != codeBytes) return false;
+    const uint64_t expected = static_cast<uint64_t>(BOOTSTRAP_SOURCE_MAP_V2_HEADER_BYTES) +
+        static_cast<uint64_t>(fileCount) * BOOTSTRAP_SOURCE_MAP_FILE_BYTES +
+        static_cast<uint64_t>(functionCount) * BOOTSTRAP_SOURCE_MAP_FUNCTION_BYTES +
+        static_cast<uint64_t>(mapCount) * BOOTSTRAP_SOURCE_MAP_RECORD_BYTES +
+        trailerVariableBytes + kSourceMapFooterBytes;
+    if (expected != payload) return false;
+
+    const uint32_t fileStart = start + BOOTSTRAP_SOURCE_MAP_V2_HEADER_BYTES;
+    const uint32_t functionStart = fileStart + fileCount * BOOTSTRAP_SOURCE_MAP_FILE_BYTES;
+    const uint32_t mappingStart = functionStart + functionCount * BOOTSTRAP_SOURCE_MAP_FUNCTION_BYTES;
+    const uint32_t variableStart = mappingStart + mapCount * BOOTSTRAP_SOURCE_MAP_RECORD_BYTES;
+    int32_t requestedFunction = -1;
+    for (uint32_t i = 0; i < fileCount; ++i) {
+        const uint32_t offset = fileStart + i * BOOTSTRAP_SOURCE_MAP_FILE_BYTES;
+        if (!fixed_text_valid(reinterpret_cast<const char*>(image + offset),
+                              COMPILER_MAX_SOURCE_PATH_BYTES) ||
+            get_u32(image, offset + COMPILER_MAX_SOURCE_PATH_BYTES) > COMPILER_MAX_SOURCE_BYTES)
+            return false;
+    }
+    for (uint32_t i = 0; i < functionCount; ++i) {
+        const char* current = reinterpret_cast<const char*>(
+            image + functionStart + i * BOOTSTRAP_SOURCE_MAP_FUNCTION_BYTES);
+        if (!fixed_text_valid(current, COMPILER_FUNCTION_NAME_CAPACITY)) return false;
+        uint32_t j = 0;
+        while (j < COMPILER_FUNCTION_NAME_CAPACITY && current[j] && functionName[j] &&
+               current[j] == functionName[j]) ++j;
+        if (j < COMPILER_FUNCTION_NAME_CAPACITY && current[j] == '\0' && functionName[j] == '\0')
+            requestedFunction = static_cast<int32_t>(i);
+    }
+    if (requestedFunction < 0) return false;
+    for (uint32_t i = 0; i < mapCount; ++i) {
+        const uint32_t offset = mappingStart + i * BOOTSTRAP_SOURCE_MAP_RECORD_BYTES;
+        const uint16_t fileIndex = get_u16(image, offset + 0);
+        const uint16_t functionIndex = get_u16(image, offset + 2);
+        const uint32_t line = get_u32(image, offset + 4);
+        const uint32_t column = get_u32(image, offset + 8);
+        const uint32_t finalOffset = get_u32(image, offset + 12);
+        const uint32_t instructionBytes = get_u32(image, offset + 16);
+        if (fileIndex >= fileCount || functionIndex >= functionCount || line == 0 ||
+            column == 0 || !source_map_range(finalOffset, instructionBytes, codeBytes)) return false;
+    }
+
+    uint32_t selected = 0;
+    for (uint32_t i = 0; i < trailerVariableCount; ++i) {
+        const uint32_t offset = variableStart + i * BOOTSTRAP_SOURCE_MAP_VARIABLE_BYTES;
+        const uint16_t sourceFileIndex = get_u16(image, offset + 0);
+        const uint16_t functionIndex = get_u16(image, offset + 2);
+        const uint8_t kind = image[offset + 4];
+        const uint8_t type = image[offset + 5];
+        const uint8_t location = image[offset + 6];
+        const uint8_t flags = image[offset + 7];
+        const uint32_t sizeBytes = get_u32(image, offset + 8);
+        const int32_t frameOffset = static_cast<int32_t>(get_u32(image, offset + 24));
+        const uint32_t liveStart = get_u32(image, offset + 28);
+        const uint32_t liveEnd = get_u32(image, offset + 32);
+        const char* name = reinterpret_cast<const char*>(image + offset + 36);
+        if (sourceFileIndex >= fileCount || functionIndex >= functionCount ||
+            !fixed_text_valid(name, COMPILER_DEBUG_VARIABLE_NAME_CAPACITY) ||
+            kind < static_cast<uint8_t>(DebugVariableKind::Parameter) ||
+            kind > static_cast<uint8_t>(DebugVariableKind::Local) ||
+            type < static_cast<uint8_t>(DebugVariableTypeKind::SignedInt32) ||
+            type > static_cast<uint8_t>(DebugVariableTypeKind::Pointer) ||
+            location != static_cast<uint8_t>(DebugVariableLocationKind::RbpRelative) ||
+            sizeBytes != (type == static_cast<uint8_t>(DebugVariableTypeKind::Pointer) ? 8U : 4U) ||
+            get_u32(image, offset + 16) == 0 || get_u32(image, offset + 20) == 0 ||
+            frameOffset >= 0 || liveStart >= liveEnd || liveEnd > codeBytes ||
+            (flags & (COMPILER_DEBUG_VARIABLE_FLAG_INITIALIZED |
+                      COMPILER_DEBUG_VARIABLE_FLAG_STABLE_FRAME_SLOT)) !=
+                (COMPILER_DEBUG_VARIABLE_FLAG_INITIALIZED |
+                 COMPILER_DEBUG_VARIABLE_FLAG_STABLE_FRAME_SLOT)) return false;
+        if (functionIndex != static_cast<uint16_t>(requestedFunction) ||
+            relativeAddress < liveStart || relativeAddress >= liveEnd) continue;
+        if (selected >= variableCapacity) {
+            if (truncated) *truncated = 1;
+            ++selected;
+            continue;
+        }
+        if (!variables) return false;
+        ResolvedDebugVariable& result = variables[selected];
+        result = {};
+        for (uint32_t j = 0; j < COMPILER_DEBUG_VARIABLE_NAME_CAPACITY; ++j)
+            result.name[j] = name[j];
+        const uint32_t fileOffset = fileStart + sourceFileIndex * BOOTSTRAP_SOURCE_MAP_FILE_BYTES;
+        for (uint32_t j = 0; j < COMPILER_MAX_SOURCE_PATH_BYTES; ++j)
+            result.sourcePath[j] = static_cast<char>(image[fileOffset + j]);
+        const uint32_t functionOffset = functionStart + functionIndex * BOOTSTRAP_SOURCE_MAP_FUNCTION_BYTES;
+        for (uint32_t j = 0; j < COMPILER_FUNCTION_NAME_CAPACITY; ++j)
+            result.functionName[j] = static_cast<char>(image[functionOffset + j]);
+        result.sourceFileIndex = sourceFileIndex;
+        result.functionIndex = functionIndex;
+        result.kind = static_cast<DebugVariableKind>(kind);
+        result.type = static_cast<DebugVariableTypeKind>(type);
+        result.location = static_cast<DebugVariableLocationKind>(location);
+        result.flags = flags;
+        result.sizeBytes = sizeBytes;
+        result.declaration.offset = get_u32(image, offset + 12);
+        result.declaration.line = get_u32(image, offset + 16);
+        result.declaration.column = get_u32(image, offset + 20);
+        result.frameOffset = frameOffset;
+        result.liveStart = liveStart;
+        result.liveEnd = liveEnd;
+        ++selected;
+    }
+    if (selected == 0) {
+        if (error) *error = "no debug variables are live at the paused address";
+        return false;
+    }
+    if (variableCount) *variableCount = selected > variableCapacity ? variableCapacity : selected;
+    return true;
 }
 
 bool write_bootstrap_elf(const uint8_t* code,

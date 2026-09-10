@@ -81,6 +81,16 @@ bool emit_translation_unit_module_with_source_map(
     uint32_t* relocationCount, SourceMapping* sourceMappings,
     uint32_t sourceMappingCapacity, uint32_t* sourceMappingCount);
 
+bool emit_translation_unit_module_with_source_map_and_debug_variables(
+    const TranslationUnitIR& unit,
+    uint8_t* output, uint32_t outputCapacity,
+    uint32_t* outputSize, uint32_t* entryCodeOffset,
+    RelocationRecord* relocations, uint32_t relocationCapacity,
+    uint32_t* relocationCount, SourceMapping* sourceMappings,
+    uint32_t sourceMappingCapacity, uint32_t* sourceMappingCount,
+    DebugVariableRecord* debugVariables, uint32_t debugVariableCapacity,
+    uint32_t* debugVariableCount);
+
 bool emit_function(const FunctionIR& function,
                    uint8_t* output,
                    uint32_t outputCapacity,

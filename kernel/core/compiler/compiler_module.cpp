@@ -235,12 +235,13 @@ bool compile_module_from_source(const char* sourcePath,
     if (!flatten_global_data(s_unit, module, diagnostics)) return false;
 
 #if defined(__x86_64__)
-    if (!amd64::emit_translation_unit_module_with_source_map(
+    if (!amd64::emit_translation_unit_module_with_source_map_and_debug_variables(
             s_unit, module->code, sizeof(module->code), &module->codeBytes,
             &module->entryCodeOffset, module->relocations,
             COMPILER_MAX_MODULE_RELOCATIONS, &module->relocationCount,
             module->sourceMappings, COMPILER_MAX_SOURCE_MAPPINGS,
-            &module->sourceMapCount)) {
+            &module->sourceMapCount, module->debugVariables,
+            COMPILER_MAX_DEBUG_VARIABLES, &module->debugVariableCount)) {
         diagnostics.error({0, 1, 1}, "AMD64 backend rejected target-neutral IR", "backend");
         return false;
     }
@@ -266,6 +267,13 @@ bool compile_module_from_source(const char* sourcePath,
         exportSymbol.kind = SymbolKind::Function;
         if (!copy_string(exportSymbol.name, sizeof(exportSymbol.name), function.name)) return false;
         exportSymbol.moduleCodeOffset = function.codeOffset;
+        uint32_t functionEnd = module->codeBytes;
+        for (uint32_t candidate = 0; candidate < s_unit.functionCount; ++candidate) {
+            const uint32_t candidateOffset = s_unit.functions[candidate].codeOffset;
+            if (candidateOffset > function.codeOffset && candidateOffset < functionEnd)
+                functionEnd = candidateOffset;
+        }
+        exportSymbol.size = functionEnd - function.codeOffset;
         exportSymbol.parameterCount = function.parameterCount;
         for (uint32_t p = 0; p < function.parameterCount; ++p) {
             exportSymbol.parameterKinds[p] = function.parameters[p].kind;
