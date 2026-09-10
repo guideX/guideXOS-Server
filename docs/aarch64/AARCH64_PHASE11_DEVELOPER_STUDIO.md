@@ -142,7 +142,7 @@ three independent UEFI variable files and checks all application markers.
 3. Starting subject: `appmodel: add multi-architecture native packages`.
 4. Upstream: `origin` at `git@github.com:guideX/guideXOS-Server.git`.
 5. Starting divergence: one local commit ahead of `origin/AARCH64_SUPPORT`.
-6. Pre-existing dirty compiler work was preserved.
+6. The starting worktree was clean; pre-existing compiler design and App Model work was preserved.
 7. No push was performed.
 8. The frontend remains resident in the ARM64 kernel.
 9. Source input is read through VFS.
