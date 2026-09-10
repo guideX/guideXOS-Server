@@ -344,7 +344,24 @@ bool NavigatorScriptHostAdapter::allowsReentrantCall(
         methodId == kNavigatorResetMethod ||
         methodId == kNavigatorHasFocusMethod ||
         methodId == kNavigatorQuerySelectorMethod ||
-        methodId == kNavigatorQuerySelectorAllMethod;
+        methodId == kNavigatorQuerySelectorAllMethod ||
+        methodId == kNavigatorMatchesMethod ||
+        methodId == kNavigatorClosestMethod;
+}
+
+bool NavigatorScriptHostAdapter::allowsStaleHostProperty(
+    const HostObjectReference& object, SourceView property) const
+{
+    return object.kind == kNavigatorElementHostKind &&
+        (textEquals(property, "matches") ||
+            textEquals(property, "closest"));
+}
+
+bool NavigatorScriptHostAdapter::allowsStaleHostMethod(
+    std::uint32_t methodId) const
+{
+    return methodId == kNavigatorMatchesMethod ||
+        methodId == kNavigatorClosestMethod;
 }
 
 std::size_t NavigatorScriptHostAdapter::callbackLimit() const
@@ -2101,6 +2118,36 @@ bool NavigatorScriptHostAdapter::selectorElementMatches(
     return false;
 }
 
+bool NavigatorScriptHostAdapter::selectorClosestMatch(
+    HostInstanceId receiverSerial,
+    const NavigatorScriptSelectorDescriptor& selector,
+    HostInstanceId& matchSerial) const
+{
+    matchSerial = 0u;
+    if (document_ == nullptr || receiverSerial == 0u ||
+        selector.kind == NavigatorScriptSelectorKind::Invalid) return false;
+
+    // The structural document-node capacity is also the maximum ancestry
+    // walk. A malformed parent cycle therefore terminates without recursion
+    // or unbounded native work.
+    const std::size_t depthLimit = std::min(limits_.maxDocumentNodes,
+        document_->structuralElements.size());
+    HostInstanceId candidateSerial = receiverSerial;
+    for (std::size_t depth = 0; depth < depthLimit && candidateSerial != 0u;
+            ++depth) {
+        const gxos::web::HtmlElementRef* candidate =
+            findElement(candidateSerial);
+        if (candidate == nullptr) return false;
+        if (selectorElementMatches(*candidate, selector)) {
+            matchSerial = candidate->serial;
+            return true;
+        }
+        if (candidate->parentSerial == candidate->serial) break;
+        candidateSerial = candidate->parentSerial;
+    }
+    return false;
+}
+
 bool NavigatorScriptHostAdapter::selectorScopeMatches(
     const gxos::web::HtmlElementRef& element, HostInstanceId scopeSerial) const
 {
@@ -2262,6 +2309,19 @@ HostResult NavigatorScriptHostAdapter::validate(
 HostResult NavigatorScriptHostAdapter::getProperty(
     const HostObjectReference& object, SourceView property, HostValue& result)
 {
+    // Keep the two pure selector predicates fail-closed for an already-held
+    // Element handle after a navigation-generation change. The method value
+    // itself was obtained in the old realm, so exposing the same bounded
+    // method here lets callInternal return false/null without dereferencing
+    // stale structural metadata.
+    if (object.kind == kNavigatorElementHostKind &&
+        object.generation != generation_ &&
+        (textEquals(property, "matches") ||
+            textEquals(property, "closest"))) {
+        result = HostValue::method(textEquals(property, "matches")
+            ? kNavigatorMatchesMethod : kNavigatorClosestMethod, true, true);
+        return HostResult();
+    }
     const HostResult validation = validate(object);
     if (!validation.succeeded()) return validation;
 
@@ -2425,6 +2485,14 @@ HostResult NavigatorScriptHostAdapter::getProperty(
     }
     if (textEquals(property, "querySelectorAll")) {
         result = HostValue::method(kNavigatorQuerySelectorAllMethod, true, true);
+        return HostResult();
+    }
+    if (textEquals(property, "matches")) {
+        result = HostValue::method(kNavigatorMatchesMethod, true, true);
+        return HostResult();
+    }
+    if (textEquals(property, "closest")) {
+        result = HostValue::method(kNavigatorClosestMethod, true, true);
         return HostResult();
     }
     if (textEquals(property, "options")) {
@@ -3043,6 +3111,15 @@ HostResult NavigatorScriptHostAdapter::callInternal(
     bool capture, bool optionsSupplied, RuntimeContext* runtime)
 {
     if (receiver == nullptr) return HostResult{HostResultCode::InvalidObject};
+    if ((methodId == kNavigatorMatchesMethod ||
+            methodId == kNavigatorClosestMethod) &&
+        receiver->kind == kNavigatorElementHostKind &&
+        (receiver->generation != generation_ ||
+            findElement(receiver->instanceId) == nullptr)) {
+        result = methodId == kNavigatorMatchesMethod
+            ? HostValue::boolean(false) : HostValue::nullValue();
+        return HostResult();
+    }
     const HostResult receiverResult = validate(*receiver);
     if (!receiverResult.succeeded()) return receiverResult;
     if (methodId == kNavigatorQuerySelectorMethod ||
@@ -3055,6 +3132,36 @@ HostResult NavigatorScriptHostAdapter::callInternal(
         return methodId == kNavigatorQuerySelectorMethod
             ? querySelector(scopeSerial, arguments, argumentCount, result)
             : querySelectorAll(scopeSerial, arguments, argumentCount, result);
+    }
+    if (methodId == kNavigatorMatchesMethod ||
+        methodId == kNavigatorClosestMethod) {
+        if (receiver->kind != kNavigatorElementHostKind) {
+            return HostResult{HostResultCode::InvalidValue};
+        }
+
+        NavigatorScriptSelectorDescriptor selector;
+        const bool parsed = arguments != nullptr && argumentCount == 1u &&
+            arguments[0].type == HostValueType::String &&
+            parseBoundedSelector(arguments[0].stringValue, selector);
+        if (methodId == kNavigatorMatchesMethod) {
+            // Selector failures follow querySelector's bounded, fail-closed
+            // policy and do not allocate or retain a selector collection.
+            const gxos::web::HtmlElementRef* element =
+                findElement(receiver->instanceId);
+            result = HostValue::boolean(parsed && element != nullptr &&
+                selectorElementMatches(*element, selector));
+            return HostResult();
+        }
+
+        HostInstanceId matchSerial = 0u;
+        if (!parsed || !selectorClosestMatch(receiver->instanceId, selector,
+                matchSerial)) {
+            result = HostValue::nullValue();
+            return HostResult();
+        }
+        result = HostValue::fromHostObject(HostObjectReference{
+            matchSerial, generation_, kNavigatorElementHostKind});
+        return HostResult();
     }
     if (methodId == kNavigatorClickMethod) {
         if (receiver->kind != kNavigatorElementHostKind || argumentCount != 0u ||

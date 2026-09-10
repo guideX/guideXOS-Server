@@ -33,6 +33,8 @@ constexpr std::uint32_t kNavigatorResetMethod = 7u;
 constexpr std::uint32_t kNavigatorHasFocusMethod = 8u;
 constexpr std::uint32_t kNavigatorQuerySelectorMethod = 9u;
 constexpr std::uint32_t kNavigatorQuerySelectorAllMethod = 10u;
+constexpr std::uint32_t kNavigatorMatchesMethod = 11u;
+constexpr std::uint32_t kNavigatorClosestMethod = 12u;
 
 constexpr std::size_t kNavigatorScriptMaxDocumentIdLength = 256u;
 constexpr std::size_t kNavigatorScriptMaxTextContentAssignment = 64u * 1024u;
@@ -158,6 +160,9 @@ public:
         const HostValue* arguments, std::size_t argumentCount,
         HostValue& result) override;
     bool allowsReentrantCall(std::uint32_t methodId) const override;
+    bool allowsStaleHostProperty(const HostObjectReference& object,
+        SourceView property) const override;
+    bool allowsStaleHostMethod(std::uint32_t methodId) const override;
 
     // Navigator calls this only after its normal hit test has selected a
     // document element serial. The callback is invoked in the supplied,
@@ -347,6 +352,9 @@ private:
         const NavigatorScriptSelectorDescriptor& right) const;
     bool selectorElementMatches(const gxos::web::HtmlElementRef& element,
         const NavigatorScriptSelectorDescriptor& selector) const;
+    bool selectorClosestMatch(HostInstanceId receiverSerial,
+        const NavigatorScriptSelectorDescriptor& selector,
+        HostInstanceId& matchSerial) const;
     bool selectorScopeMatches(const gxos::web::HtmlElementRef& element,
         HostInstanceId scopeSerial) const;
     std::size_t selectorMatchCount(const SelectorCollectionRecord& record) const;

@@ -210,6 +210,23 @@ public:
         (void)methodId;
         return false;
     }
+
+    // A very small set of pure host predicates may choose to fail closed on
+    // an already-held stale receiver. The default remains strict stale-host
+    // rejection for every other property and method.
+    virtual bool allowsStaleHostProperty(const HostObjectReference& object,
+        SourceView property) const
+    {
+        (void)object;
+        (void)property;
+        return false;
+    }
+
+    virtual bool allowsStaleHostMethod(std::uint32_t methodId) const
+    {
+        (void)methodId;
+        return false;
+    }
 };
 
 const char* hostValueTypeName(HostValueType type);

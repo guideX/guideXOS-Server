@@ -1,0 +1,95 @@
+<!doctype html>
+<html>
+<head><title>Navigator JavaScript JS37</title></head>
+<body>
+<h1>Navigator JavaScript JS37</h1>
+<div id="js37-outer" class="panel outer">
+  <div id="js37-inner" class="panel inner">
+    <button id="js37-x" class="action leaf" type="button">Nested action</button>
+  </div>
+</div>
+<div id="js37-actions" class="action-zone">
+  <button id="js37-save" class="action primary" type="button">Save</button>
+</div>
+<form id="js37-settings" name="settings" class="form panel">
+  <input id="js37-name" name="name" type="text" value="seed">
+  <select id="js37-mode" name="mode">
+    <option id="js37-mode-a" value="a" selected>A</option>
+    <option id="js37-mode-b" value="b">B</option>
+  </select>
+  <input id="js37-submit" name="submit" type="submit" value="Submit">
+  <input id="js37-reset" type="reset" value="Reset">
+</form>
+<button id="js37-trigger-click" type="button">Delegated click</button>
+<button id="js37-trigger-focus" type="button">Delegated focus</button>
+<button id="js37-trigger-submit" type="button">Delegated submit</button>
+<button id="js37-trigger-reset" type="button">Delegated reset</button>
+<p id="js37-state">initial</p>
+<script>
+var js37State = document.getElementById("js37-state");
+var js37X = document.querySelector("#js37-x");
+var js37Inner = document.querySelector("#js37-inner");
+var js37Outer = document.querySelector("#js37-outer");
+var js37Actions = document.querySelector("#js37-actions");
+var js37Save = document.querySelector("#js37-save");
+var js37Form = document.forms["settings"];
+var js37Name = js37Form.elements["name"];
+var js37Select = document.querySelector("#js37-mode");
+var js37Option = js37Select.options[0];
+var js37ClickSeen = false;
+var js37OwnerSeen = false;
+var js37FocusSeen = false;
+var js37SubmitSeen = false;
+var js37ResetSeen = false;
+function js37Snapshot(label) {
+  var unsupported = document.querySelector("form input") === null &&
+    document.querySelectorAll("form input").length === 0 &&
+    js37X.matches("[name=x]") === false &&
+    js37X.closest("form input") === null;
+  var identity = js37Form === document.querySelector("form#js37-settings") &&
+    js37Form === document.forms[0] && js37Name === js37Form.elements[0];
+  js37State.textContent = label + ":self=" +
+    (js37X.closest(".action") === js37X) + ":parent=" +
+    (js37X.closest("#js37-inner") === js37Inner) + ":nearest=" +
+    (js37X.closest(".panel") === js37Inner) + ":outer=" +
+    (js37X.closest("div#js37-outer") === js37Outer) + ":form=" +
+    (js37Name.closest("FORM") === js37Form) + ":option=" +
+    (js37Option.closest("select") === js37Select) + ":identity=" + identity +
+    ":unsupported=" + unsupported + ":click=" + js37ClickSeen +
+    ":owner=" + js37OwnerSeen + ":focus=" + js37FocusSeen +
+    ":submit=" + js37SubmitSeen + ":reset=" + js37ResetSeen;
+}
+js37Actions.addEventListener("click", function(event) {
+  if (event.target.matches(".action")) {
+    js37ClickSeen = true;
+    js37OwnerSeen = event.target.closest("#js37-actions") === js37Actions &&
+      event.target === js37Save && event.currentTarget === js37Actions;
+  }
+});
+js37Name.addEventListener("focus", function(event) {
+  js37FocusSeen = event.target.matches("input") &&
+    event.target.closest("form") === js37Form && event.target === js37Name;
+  js37Snapshot("focus-event");
+});
+js37Form.addEventListener("submit", function(event) {
+  js37SubmitSeen = event.target.matches("form") &&
+    event.target.closest("#js37-settings") === js37Form;
+  event.preventDefault();
+});
+js37Form.addEventListener("reset", function(event) {
+  js37ResetSeen = event.target.matches("form") &&
+    event.target.closest("form") === js37Form;
+});
+document.getElementById("js37-trigger-click").addEventListener("click",
+  function() { js37Save.click(); js37Snapshot("click"); });
+document.getElementById("js37-trigger-focus").addEventListener("click",
+  function() { js37Name.focus(); js37Snapshot("focus"); });
+document.getElementById("js37-trigger-submit").addEventListener("click",
+  function() { js37Form.elements["name"].value = "alice";
+    js37Form.elements["submit"].click(); js37Snapshot("submit"); });
+document.getElementById("js37-trigger-reset").addEventListener("click",
+  function() { js37Form.reset(); js37Snapshot("reset"); });
+js37Snapshot("initial");
+</script>
+</body>
+</html>

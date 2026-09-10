@@ -3567,7 +3567,7 @@ static std::string navigatorHostedSmokeDiagnostic() {
     add("JS36 selector-returned focus reaches activeElement",
         js36FocusTrigger &&
         gxos::apps::Navigator::SmokeFocusedFormControlId() == "js36-user" &&
-        contains(js36AfterFocus, "focus:id=true:class=true:tag=true:all=4:scope=3:identity=true:unsupported=true:focus=true") &&
+        contains(js36AfterFocus, "focus-event:id=true:class=true:tag=true:all=4:scope=3:identity=true:unsupported=true:focus=true") &&
         gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
         std::string("focus=") + yesNo(js36FocusTrigger) + ",focused=" +
         gxos::apps::Navigator::SmokeFocusedFormControlId() + ",text=" +
@@ -3600,6 +3600,74 @@ static std::string navigatorHostedSmokeDiagnostic() {
         gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
         std::string("reset=") + yesNo(js36ResetTrigger) + ",text=" +
         summarizeText(js36AfterReset, 820) + ",error=" +
+        gxos::apps::Navigator::SmokeJavaScriptLastError());
+
+    const std::string js37FixtureUrl =
+        "http://127.0.0.1:8080/navigator-smoke/javascript-js37.html";
+    const bool js37Loaded = gxos::apps::Navigator::SmokeNavigateToQuiet(
+        js37FixtureUrl);
+    const std::string js37InitialText =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS37 hosted fixture loads shared matches/closest selectors",
+        js37Loaded && gxos::apps::Navigator::SmokeCurrentUrl() == js37FixtureUrl &&
+        contains(js37InitialText, "Navigator JavaScript JS37") &&
+        contains(js37InitialText,
+            "initial:self=true:parent=true:nearest=true:outer=true:form=true:option=true:identity=true:unsupported=true:click=false:owner=false:focus=false:submit=false:reset=false") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("loaded=") + yesNo(js37Loaded) + ",text=" +
+        summarizeText(js37InitialText, 860) + ",error=" +
+        gxos::apps::Navigator::SmokeJavaScriptLastError());
+
+    const bool js37ClickTrigger =
+        gxos::apps::Navigator::SmokeClickFormControlById("js37-trigger-click");
+    const std::string js37AfterClick =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS37 hosted event delegation uses event.target.matches and closest",
+        js37ClickTrigger && contains(js37AfterClick,
+            "click:self=true:parent=true:nearest=true:outer=true:form=true:option=true:identity=true:unsupported=true:click=true:owner=true") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("click=") + yesNo(js37ClickTrigger) + ",text=" +
+        summarizeText(js37AfterClick, 860) + ",error=" +
+        gxos::apps::Navigator::SmokeJavaScriptLastError());
+
+    const bool js37FocusTrigger =
+        gxos::apps::Navigator::SmokeClickFormControlById("js37-trigger-focus");
+    const std::string js37AfterFocus =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS37 hosted focus listener preserves selector identity",
+        js37FocusTrigger &&
+        gxos::apps::Navigator::SmokeFocusedFormControlId() == "js37-name" &&
+        contains(js37AfterFocus, "focus-event:self=true:parent=true:nearest=true:outer=true:form=true:option=true:identity=true:unsupported=true:click=true:owner=true:focus=true") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("focus=") + yesNo(js37FocusTrigger) + ",focused=" +
+        gxos::apps::Navigator::SmokeFocusedFormControlId() + ",text=" +
+        summarizeText(js37AfterFocus, 900) + ",error=" +
+        gxos::apps::Navigator::SmokeJavaScriptLastError());
+
+    const bool js37SubmitTrigger =
+        gxos::apps::Navigator::SmokeClickFormControlById("js37-trigger-submit");
+    const std::string js37AfterSubmit =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS37 hosted submit listener remains cancelable and pure",
+        js37SubmitTrigger && gxos::apps::Navigator::SmokeCurrentUrl() ==
+            js37FixtureUrl && contains(js37AfterSubmit,
+            "submit:self=true:parent=true:nearest=true:outer=true:form=true:option=true:identity=true:unsupported=true:click=true:owner=true:focus=true:submit=true") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("submit=") + yesNo(js37SubmitTrigger) + ",url=" +
+        gxos::apps::Navigator::SmokeCurrentUrl() + ",text=" +
+        summarizeText(js37AfterSubmit, 900) + ",error=" +
+        gxos::apps::Navigator::SmokeJavaScriptLastError());
+
+    const bool js37ResetTrigger =
+        gxos::apps::Navigator::SmokeClickFormControlById("js37-trigger-reset");
+    const std::string js37AfterReset =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS37 hosted reset listener remains pure",
+        js37ResetTrigger && contains(js37AfterReset,
+            "reset:self=true:parent=true:nearest=true:outer=true:form=true:option=true:identity=true:unsupported=true:click=true:owner=true:focus=true:submit=true:reset=true") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("reset=") + yesNo(js37ResetTrigger) + ",text=" +
+        summarizeText(js37AfterReset, 900) + ",error=" +
         gxos::apps::Navigator::SmokeJavaScriptLastError());
 
     bool cssInlineLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-inline.html");

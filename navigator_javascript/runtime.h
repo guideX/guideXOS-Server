@@ -397,6 +397,8 @@ private:
         bool validateAdapter);
     bool resolveHostObject(RuntimeHostObjectId object,
         HostObjectReference& reference, RuntimeErrorCode& error) const;
+    bool resolveHostObjectIgnoringGeneration(RuntimeHostObjectId object,
+        HostObjectReference& reference) const;
     bool consumeHostOperation(SourceLocation location);
     bool readHostProperty(RuntimeHostObjectId object, const std::string& key,
         Value& value, RuntimeErrorCode& error, SourceLocation location);

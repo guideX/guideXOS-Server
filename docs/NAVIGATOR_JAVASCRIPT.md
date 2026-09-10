@@ -3804,3 +3804,60 @@ lists, attribute selectors, pseudo-classes, pseudo-elements, CSS escapes,
 methods. The next bounded direction is JS37: only add a narrowly justified
 selector capability after preserving the same structural metadata, scope,
 generation, identity, and bare-metal limits.
+
+## JS37: `Element.matches()` and `Element.closest()`
+
+JS37 reuses the JS36 bounded selector parser and the single
+`selectorElementMatches()` predicate. It does not add a second selector engine,
+DOM traversal subsystem, JavaScript-side element metadata, regular expressions,
+or persistent result collections.
+
+The supported grammar remains exactly JS36's bounded subset:
+`#id`, `.class`, `tag`, `tag.class`, and `tag#id`. Input is capped at 256
+bytes, outer ASCII whitespace is trimmed, tags compare ASCII
+case-insensitively, and ids/classes retain exact case-sensitive semantics.
+Unsupported, malformed, non-string, missing, and oversized selectors fail
+closed: `matches()` returns `false` and `closest()` returns the existing null
+sentinel. Full browser Selectors API behavior, DOMExceptions, descendant and
+child combinators, selector lists, attributes, pseudo-classes, pseudo-elements,
+and CSS escapes remain unsupported.
+
+`element.matches(selector)` parses once and evaluates only the canonical
+receiver. It does not search descendants or ancestors, allocate a selector
+collection, mutate layout or form state, change focus, dispatch events, or
+change document generation. `element.closest(selector)` parses once, tests the
+receiver first, then walks the structural `parentSerial` chain to the nearest
+matching ancestor. The walk is bounded by the live structural document-node
+capacity (`min(maxDocumentNodes, structuralElements.size())`), stops safely on a
+self-parent, and therefore terminates even if malformed metadata contains a
+cycle. A successful ancestor result is the same generation-checked canonical
+host identity returned by `querySelector()`, `document.forms`,
+`form.elements`, and `select.options`.
+
+Both methods are receiver-checked Element methods. Collections and unrelated
+host object kinds cannot invoke them. Old-generation handles fail closed for
+these pure predicates (`false`/`null`); other stale host operations retain the
+strict existing stale-host error behavior. This keeps document replacement and
+serial reuse from scanning the new document with old metadata.
+
+The focused proof is `tests/navigator_javascript_js37_test.cpp`, run by
+`scripts/smoke-navigator-javascript-js37.ps1`. It covers selector grammar and
+invalid-selector consistency, self/parent/grandparent/nearest behavior,
+structural option and form ancestry, querySelector receiver exclusion versus
+closest self inclusion, bounded malformed cycles, stale generations, pure
+no-side-effect checks, event-target delegation, focus/input/change/submit/reset
+listeners, nested dispatch, and JS36/JS35 identity regression. The hosted
+fixture is `navigator-smoke/javascript-js37.html`; the production aggregate
+drives authentic click, focus, submit, reset, event-target `matches()`, and
+event-target `closest()` paths. Final live evidence is 180/180 focused JS37
+checks, 99/99 focused JS36 checks, 162/162 focused JS35 checks, 35/35 scripts
+in the JavaScript smoke matrix, and 5/5 JS37 hosted aggregate checks. The
+full hosted aggregate is 494 passed and 7 failed; the seven failures are the
+pre-existing CSS phases 3C, 3G, 6A, 6B (three checks), and 6C.
+
+JS37 remains intentionally narrow. It does not add new selector grammar,
+`parentElement`, `parentNode`, `children`, `childNodes`, dynamic DOM mutation,
+general collection APIs, or full browser compatibility. The recommended JS38
+direction is another small identity/lifecycle capability only after the shared
+selector predicate, bounded ancestry, event metadata, and bare-metal lanes
+remain green.

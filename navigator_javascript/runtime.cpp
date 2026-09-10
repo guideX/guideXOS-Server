@@ -2889,6 +2889,18 @@ bool RuntimeContext::resolveHostObject(RuntimeHostObjectId object,
     return true;
 }
 
+bool RuntimeContext::resolveHostObjectIgnoringGeneration(
+    RuntimeHostObjectId object, HostObjectReference& reference) const
+{
+    if (object == kInvalidRuntimeHostObjectId) return false;
+    const std::size_t slot = hostObjectSlot(object);
+    if (slot >= hostObjects_.size()) return false;
+    const HostObjectRecord& record = hostObjects_[slot];
+    if (!record.reference.valid()) return false;
+    reference = record.reference;
+    return true;
+}
+
 bool RuntimeContext::validateAdapterReference(
     const HostObjectReference& reference, RuntimeErrorCode& error)
 {
@@ -3081,11 +3093,18 @@ bool RuntimeContext::readHostProperty(RuntimeHostObjectId object,
         error = RuntimeErrorCode::HostOperationBudgetExceeded;
         return false;
     }
-    HostObjectReference reference;
-    if (!resolveHostObject(object, reference, error)) return false;
     if (hostAdapter_ == nullptr) {
         error = RuntimeErrorCode::InvalidHostObject;
         return false;
+    }
+    HostObjectReference reference;
+    bool stalePureProperty = false;
+    if (!resolveHostObject(object, reference, error)) {
+        if (!resolveHostObjectIgnoringGeneration(object, reference) ||
+            reference.generation == hostGeneration_ ||
+            !hostAdapter_->allowsStaleHostProperty(reference,
+                SourceView(key.data(), key.size()))) return false;
+        stalePureProperty = true;
     }
     if (hostCallActive_ && !hostReentryAllowed_) {
         error = RuntimeErrorCode::HostReentryUnsupported;
@@ -3098,7 +3117,8 @@ bool RuntimeContext::readHostProperty(RuntimeHostObjectId object,
     const bool previousHostCallActive = hostCallActive_;
     hostCallActive_ = true;
     try {
-        validation = hostAdapter_->validate(reference);
+        validation = stalePureProperty ? HostResult() :
+            hostAdapter_->validate(reference);
         if (validation.succeeded()) {
             operation = hostAdapter_->getProperty(reference,
                 SourceView(key.data(), key.size()), hostValue);
@@ -3336,8 +3356,13 @@ bool RuntimeContext::invokeHostMethod(const FunctionRecord& function,
             return false;
         }
         if (!resolveHostObject(receiver.hostObjectId(), target, error)) {
-            setRuntimeError(error, location);
-            return false;
+            if (!resolveHostObjectIgnoringGeneration(receiver.hostObjectId(),
+                    target) || target.generation == hostGeneration_ ||
+                hostAdapter_ == nullptr ||
+                !hostAdapter_->allowsStaleHostMethod(function.hostMethod)) {
+                setRuntimeError(error, location);
+                return false;
+            }
         }
         receiverReference = &target;
     }
@@ -3380,8 +3405,11 @@ bool RuntimeContext::invokeHostMethod(const FunctionRecord& function,
     const bool previousHostReentryAllowed = hostReentryAllowed_;
     hostCallActive_ = true;
     if (methodAllowsReentry) hostReentryAllowed_ = true;
+    const bool stalePureMethod = target.generation != hostGeneration_ &&
+        hostAdapter_->allowsStaleHostMethod(function.hostMethod);
     try {
-        validation = hostAdapter_->validate(target);
+        validation = stalePureMethod ? HostResult() :
+            hostAdapter_->validate(target);
         if (validation.succeeded()) {
             operation = hostAdapter_->callWithRuntime(*this, receiverReference,
                 function.hostMethod,
