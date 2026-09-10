@@ -26,6 +26,7 @@
 #include "include/kernel/desktop_capabilities.h"
 #include "include/kernel/app_launch_target_resolver.h"
 #include "include/kernel/address_space.h"
+#include "include/kernel/nativeaot_application.h"
 
 #if defined(GXOS_NATIVE_THREAD_QEMU_TEST)
 #include "include/kernel/native_thread_qemu_test.h"
@@ -908,6 +909,26 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         kernel::serial::puts("[IMAGEVIEWER-RUNTIME-SMOKE] issuing command=desktop.smoke.imageviewer-runtime\n");
         kernel::desktop::run_imageviewer_runtime_smoke();
         kernel::serial::puts("[IMAGEVIEWER-RUNTIME-SMOKE] done\n");
+#endif
+
+#if defined(GXOS_C102_PRODUCTION_LAUNCH) || defined(GXOS_C102_NEGATIVE_LAUNCH)
+        kernel::nativeaot::LaunchReport c102Report{};
+        const char* c102Path =
+#if defined(GXOS_C102_NEGATIVE_LAUNCH)
+            "/system/wall/MISSING.ELF";
+#else
+            "/system/wall/C102.ELF";
+#endif
+        kernel::serial::puts("[C102-LAUNCH] ordinary application discovery path=");
+        kernel::serial::puts(c102Path);
+        kernel::serial::puts(" proofMode=0\n");
+        const kernel::nativeaot::LaunchStatus c102Status =
+            kernel::nativeaot::launch(c102Path, &c102Report);
+        kernel::serial::puts("[C102-LAUNCH] result=");
+        kernel::serial::puts(kernel::nativeaot::launchStatusName(c102Status));
+        kernel::serial::puts(" managedReturn=");
+        kernel::serial::put_hex32(static_cast<uint32_t>(c102Report.managedReturn));
+        kernel::serial::puts("\n");
 #endif
         
         kernel::serial::puts("[KERNEL] Entering main loop (waiting for input)...\n");

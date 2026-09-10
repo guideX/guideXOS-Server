@@ -43,11 +43,20 @@ extern "C" void guideXosNativeAotC011EC96RollbackObserved(
 constexpr std::size_t kPageSize = 4096;
 constexpr std::uintptr_t kRuntimeRangeBase = 0x100000000ULL;
 constexpr std::size_t kRuntimeRangeSize = 128 * 1024 * 1024;
+#if defined(GXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST) || defined(GXOS_NATIVEAOT_PRODUCTION_APPLICATION)
+// NativeAOT startup keeps a bounded set of ordinary PAL allocations live
+// while Workstation GC constructs its initial heap.  This is still the same
+// production reservation backend, with a larger metadata bound for the
+// application path.
+constexpr std::size_t kMaxRegions = 128;
+#else
 constexpr std::size_t kMaxRegions = 32;
-#if defined(GXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST)
-// The Workstation GC startup dry run reserves larger initial segments than
-// the ordinary VM smoke tests.  Keep this enlargement opt-in to that QEMU
-// build; the generic backend's normal bound remains 4 MiB.
+#endif
+#if defined(GXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST) || defined(GXOS_NATIVEAOT_PRODUCTION_APPLICATION)
+// The Workstation GC reserves a larger initial region than the ordinary VM
+// smoke tests.  The production NativeAOT application path uses the same
+// normal reservation backend and needs this capacity without enabling any
+// proof-mode launcher or diagnostic VM hook.
 constexpr std::size_t kMaxRegionPages = 32768;
 #else
 constexpr std::size_t kMaxRegionPages = 1024;

@@ -6,6 +6,7 @@ namespace {
 
 guidexos_nativeaot_pal_hooks g_pal_hooks = {};
 guidexos_nativeaot_fls_hooks g_fls_hooks = {};
+guidexos_nativeaot_startup_marker_hook g_startup_marker = nullptr;
 #if !defined(GUIDEXOS_NATIVEAOT_PAL_ACTIVE_ARCHIVE)
 guidexos_nativeaot_pal_hook_table_v1 g_hook_table = {};
 bool g_hook_table_installed = false;
@@ -140,6 +141,17 @@ guidexos_nativeaot_pal_install_hooks(const guidexos_nativeaot_pal_hooks* hooks) 
     if (!validPalHooks(hooks)) return -1;
     g_pal_hooks = *hooks;
     return 0;
+}
+
+extern "C" void GUIDEXOS_NATIVEAOT_PAL_CALL
+guidexos_nativeaot_pal_set_startup_marker(
+    guidexos_nativeaot_startup_marker_hook marker) {
+    g_startup_marker = marker;
+}
+
+extern "C" void GUIDEXOS_NATIVEAOT_PAL_CALL
+guidexos_nativeaot_pal_startup_marker(uint32_t stage) {
+    if (g_startup_marker != nullptr) g_startup_marker(stage);
 }
 
 extern "C" int32_t GUIDEXOS_NATIVEAOT_PAL_CALL

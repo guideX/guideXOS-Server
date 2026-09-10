@@ -14,7 +14,8 @@ namespace address_space {
 // allocator and are accounted separately; there is no second frame pool.
 enum class FrameOwner : uint8_t {
     VmRegion = 1,
-    PageTable = 2
+    PageTable = 2,
+    Kernel = 3
 };
 
 enum class FrameReleaseReason : uint8_t {
@@ -35,6 +36,7 @@ struct FrameAccounting {
     uint64_t allocatedFrames;
     uint64_t regionOwnedFrames;
     uint64_t pageTableFrames;
+    uint64_t kernelOwnedFrames;
     // Leaf mappings installed through this address-space API. A committed
     // NoAccess page still owns a non-present PTE, so this counts mapping
     // ownership rather than only translations currently usable by the CPU.
@@ -62,6 +64,11 @@ struct AddressSpace {
 bool initialize(const guideXOS::BootInfo* bootInfo);
 bool isInitialized();
 AddressSpace* current();
+
+// Claims the bootloader-loaded kernel image in the same frame ledger used by
+// VM and page-table allocations.  The claim is idempotent and prevents a
+// production application mapping from recycling the live kernel/boot stack.
+bool reserveCurrentKernelImage();
 
 uint64_t allocateFrame(FrameOwner owner);
 bool releaseFrame(uint64_t physicalAddress, FrameOwner owner,

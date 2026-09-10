@@ -64,6 +64,24 @@ extern "C" bool RhRegisterOSModule(
     uint32_t nClasslibFunctions);
 #endif
 
+#if defined(GUIDEXOS_NATIVEAOT_MANAGED_ALLOCATION)
+extern bool g_guideXosNativeAotCodeManagerRegistered;
+
+bool getNativeAotRange(void* start, void* end, void** rangeStart, uint32_t* rangeSize) {
+    if (start == nullptr || end == nullptr || rangeStart == nullptr || rangeSize == nullptr) {
+        return false;
+    }
+    const uintptr_t startAddress = reinterpret_cast<uintptr_t>(start);
+    const uintptr_t endAddress = reinterpret_cast<uintptr_t>(end);
+    if (endAddress <= startAddress || endAddress - startAddress > 0xFFFFFFFFu) {
+        return false;
+    }
+    *rangeStart = start;
+    *rangeSize = static_cast<uint32_t>(endAddress - startAddress);
+    return *rangeSize != 0u;
+}
+#endif
+
 namespace {
 
 using gx_uintptr = unsigned __int64;
@@ -158,23 +176,6 @@ guideXosNativeAotC011EC32HelperReturned(
 }
 #endif
 
-#if defined(GUIDEXOS_NATIVEAOT_MANAGED_ALLOCATION)
-extern bool g_guideXosNativeAotCodeManagerRegistered;
-
-bool getNativeAotRange(void* start, void* end, void** rangeStart, uint32_t* rangeSize) {
-    if (start == nullptr || end == nullptr || rangeStart == nullptr || rangeSize == nullptr) {
-        return false;
-    }
-    const uintptr_t startAddress = reinterpret_cast<uintptr_t>(start);
-    const uintptr_t endAddress = reinterpret_cast<uintptr_t>(end);
-    if (endAddress <= startAddress || endAddress - startAddress > 0xFFFFFFFFu) {
-        return false;
-    }
-    *rangeStart = start;
-    *rangeSize = static_cast<uint32_t>(endAddress - startAddress);
-    return *rangeSize != 0u;
-}
-#endif
 #endif
 
 #if defined(GUIDEXOS_NATIVEAOT_SINGLE_THREAD_SUSPEND_EE_ALLOCATION)
@@ -32663,7 +32664,7 @@ extern "C" void* __pinvoke_HostLogProof__Module____Internal__guideXosNativeAotC0
 extern "C" __declspec(dllexport) int __cdecl guideXosNativeAotC011EC31StrongRootRecorded(
     uintptr_t strongRootSlot, uintptr_t strongRootValue);
 #endif
-#if !defined(GUIDEXOS_NATIVEAOT_MANAGED_REPEATED_ALLOCATION) && !defined(GUIDEXOS_NATIVEAOT_REAL_GC_ALLOCATION)
+#if !defined(GUIDEXOS_NATIVEAOT_PRODUCTION_APPLICATION) && !defined(GUIDEXOS_NATIVEAOT_MANAGED_REPEATED_ALLOCATION) && !defined(GUIDEXOS_NATIVEAOT_REAL_GC_ALLOCATION)
 extern "C" void* __pinvoke_HostLogProof__Module____Internal__guideXosManagedArrayHostLog__Ansi;
 #endif
 #if defined(GUIDEXOS_NATIVEAOT_MANAGED_REPEATED_ALLOCATION)
@@ -34296,7 +34297,7 @@ extern "C" __declspec(noinline) int __cdecl FlsSetValue(gx_uint32 index, void* v
 extern "C" __declspec(selectany) void* __imp_FlsGetValue = reinterpret_cast<void*>(&FlsGetValue);
 extern "C" __declspec(selectany) void* __imp_FlsSetValue = reinterpret_cast<void*>(&FlsSetValue);
 
-#if !defined(GUIDEXOS_NATIVEAOT_GC_STARTUP)
+#if !defined(GUIDEXOS_NATIVEAOT_RUNTIME_STARTUP)
 extern "C" __declspec(noinline) void __cdecl RhpReversePInvoke(void* frame) {
 #if defined(GUIDEXOS_NATIVEAOT_REAL_GC_ALLOCATION)
     const bool firstManagedEntry = !g_guideXosRealGcDiagnosticsInitialized;
@@ -34633,7 +34634,7 @@ extern "C" __declspec(noinline) void __cdecl RhpReversePInvoke(void* frame) {
 #endif
 #endif
 #endif
-#if !defined(GUIDEXOS_NATIVEAOT_MANAGED_REPEATED_ALLOCATION) && !defined(GUIDEXOS_NATIVEAOT_REAL_GC_ALLOCATION)
+#if !defined(GUIDEXOS_NATIVEAOT_PRODUCTION_APPLICATION) && !defined(GUIDEXOS_NATIVEAOT_MANAGED_REPEATED_ALLOCATION) && !defined(GUIDEXOS_NATIVEAOT_REAL_GC_ALLOCATION)
     using GuideXosManagedArrayHostLogFn = int (__cdecl*)(void*, void*);
     __pinvoke_HostLogProof__Module____Internal__guideXosManagedArrayHostLog__Ansi = reinterpret_cast<void*>(static_cast<GuideXosManagedArrayHostLogFn>(guideXosManagedArrayHostLog));
 #endif

@@ -225,8 +225,9 @@ VmResult initializeVirtualMemoryAdapter() {
     g_segmentBoundaryTraceCount = 0;
     g_segmentBoundaryTraceSequence = 0;
 #endif
-    return guidexos_nativeaot_gc_page_size() == kPageSize
+    const VmResult result = guidexos_nativeaot_gc_page_size() == kPageSize
         ? VmResult::Ok : VmResult::HostFailure;
+    return result;
 }
 
 VmResult shutdownVirtualMemoryAdapter(bool) {

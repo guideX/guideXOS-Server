@@ -10,6 +10,7 @@
     [ValidateSet("NonAllocating", "Allocating", "Repeated")]
     [string]$AllocationMode = "NonAllocating",
     [string]$RuntimePackOutputRoot = "",
+    [switch]$ProductionApplication,
     [ValidateSet("Primary64KiB", "Small4KiB")]
     [string]$HeapConfiguration = "Primary64KiB",
     [switch]$Clean
@@ -126,6 +127,7 @@ $runtimePackObject = $null
 $runtimePackSdkPath = $null
 $runtimePackManifestHash = $null
 $runtimePackObjectHash = $null
+$startupImportsObj = $null
 if ($UseGuideXosRuntimePack) {
     if ([string]::IsNullOrWhiteSpace($RuntimePackRoot)) {
         $RuntimePackRoot = Join-Path $RepoRoot "tools\dotnet\runtime-pack"
@@ -149,6 +151,7 @@ if ($UseGuideXosRuntimePack) {
     if ($Clean) { $runtimePackBuildArguments += "-Clean" }
     if ($AllocationMode -eq "Repeated") { $runtimePackBuildArguments += "-ManagedRepeatedAllocation" }
     elseif ($AllocationMode -eq "Allocating") { $runtimePackBuildArguments += "-ManagedAllocation" }
+    if ($ProductionApplication) { $runtimePackBuildArguments += "-ProductionApplication" }
     if ($HeapConfiguration -ne "Primary64KiB") { $runtimePackBuildArguments += @("-HeapConfiguration", $HeapConfiguration) }
     & powershell -ExecutionPolicy Bypass -File $runtimePackBuild @runtimePackBuildArguments
     if ($LASTEXITCODE -ne 0) {
@@ -172,6 +175,12 @@ if ($UseGuideXosRuntimePack) {
         throw "GuideXOS runtime-pack SDK path is missing: $runtimePackSdkPath"
     }
     $runtimePackManifestHash = (Get-FileHash -LiteralPath $runtimePackManifest -Algorithm SHA256).Hash.ToUpperInvariant()
+    if ($ProductionApplication) {
+        $startupImportsObj = Join-Path $runtimePackOutputRoot "guidexos_nativeaot_startup_imports.production.obj"
+        if (-not (Test-Path -LiteralPath $startupImportsObj)) {
+            throw "Production NativeAOT import shim object not found: $startupImportsObj"
+        }
+    }
 }
 
 if (-not (Test-Path -LiteralPath $projectFile)) {
@@ -261,6 +270,14 @@ $artifactPythonInfo = Join-Path $artifactRoot "python-info.txt"
 $buildBatch = Join-Path $artifactRoot "build-native-hostlog.bat"
 $runtimeSupportSource = Join-Path $projectDir "runtime_support.c"
 $runtimeSupportObj = Join-Path $artifactRoot "runtime_support.obj"
+$c102StartupSource = Join-Path $projectDir "c102_startup.c"
+$c102StartupObj = Join-Path $artifactRoot "c102_startup.obj"
+$palMinWinSource = Join-Path $RuntimePackRoot "src\platform\guidexos_nativeaot_pal_minwin_replacement.cpp"
+$palMinWinObj = Join-Path $artifactRoot "guidexos_nativeaot_pal_minwin_replacement.obj"
+$palContractSource = Join-Path $RuntimePackRoot "src\platform\guidexos_nativeaot_pal_contract.cpp"
+$palContractObj = Join-Path $artifactRoot "guidexos_nativeaot_pal_contract.obj"
+$gcStartupContractSource = Join-Path $RuntimePackRoot "src\platform\guidexos_nativeaot_gc_startup_platform_contract.cpp"
+$gcStartupContractObj = Join-Path $artifactRoot "guidexos_nativeaot_gc_startup_platform_contract.obj"
 
 if ($Clean) {
     Assert-WithinRoot $OutputRoot $RepoRoot "Output"
@@ -303,6 +320,16 @@ $toolchainLines = @(
     "VcVars64=$vcvars64"
     "RuntimeSupportSource=$runtimeSupportSource"
     "RuntimeSupportObj=$runtimeSupportObj"
+    "C102StartupSource=$c102StartupSource"
+    "C102StartupObj=$c102StartupObj"
+    "PalMinWinSource=$palMinWinSource"
+    "PalMinWinObj=$palMinWinObj"
+    "PalContractSource=$palContractSource"
+    "PalContractObj=$palContractObj"
+    "GcStartupContractSource=$gcStartupContractSource"
+    "GcStartupContractObj=$gcStartupContractObj"
+    "NativeImportObj=$startupImportsObj"
+    "ProductionApplication=$ProductionApplication"
         "UseGuideXosRuntimePack=$UseGuideXosRuntimePack"
         "AllocationMode=$AllocationMode"
     "RuntimePackRoot=$RuntimePackRoot"
@@ -330,16 +357,24 @@ try {
         throw "dotnet executable not found."
     }
 
+    $managedProjectMode = if ($ProductionApplication) { "Production" } else { $AllocationMode }
     $publishProperties = @(
         "-p:HostLogProofRuntimeSupportObj=$runtimeSupportObj",
         "-p:HostLogProofMapPath=$artifactMap",
-        "-p:HostLogProofMode=$AllocationMode",
+        "-p:HostLogProofMode=$managedProjectMode",
         "-p:BaseOutputPath=$binRoot\",
         "-p:BaseIntermediateOutputPath=$objRoot\"
     )
     if ($UseGuideXosRuntimePack) {
         $publishProperties += "-p:HostLogProofRuntimePackObj=$runtimePackObject"
         $publishProperties += "-p:IlcSdkPath=$runtimePackSdkPath\"
+    }
+    if ($ProductionApplication) {
+        $publishProperties += "-p:HostLogProofPalContractObj=$palContractObj"
+        $publishProperties += "-p:HostLogProofGcStartupContractObj=$gcStartupContractObj"
+        $publishProperties += "-p:HostLogProofC102StartupObj=$c102StartupObj"
+        $publishProperties += "-p:HostLogProofPalMinWinObj=$palMinWinObj"
+        $publishProperties += "-p:HostLogProofNativeImportObj=$startupImportsObj"
     }
     $publishBatch = @(
         "@echo off"
@@ -350,6 +385,8 @@ try {
         "where cl.exe"
         "cl.exe /nologo /TC /c /GS- /Zl /Fo:`"$runtimeSupportObj`" `"$runtimeSupportSource`""
         "if errorlevel 1 exit /b %errorlevel%"
+        $(if ($ProductionApplication) { "cl.exe /nologo /std:c++17 /TP /c /MT /GS- /GR- /EHs-c- /Zl /Oi /O2 /Zc:inline /Brepro /DWIN32 /D_WIN32 /D_WIN64 /DHOST_WINDOWS /DTARGET_WINDOWS /DHOST_AMD64 /DTARGET_AMD64 /DTARGET_64BIT /DHOST_64BIT /DNATIVEAOT /DFEATURE_NATIVEAOT /DFEATURE_HIJACK /DFEATURE_SUSPEND_REDIRECTION /DFEATURE_PERFTRACING /DFEATURE_BASICFREEZE /DFEATURE_CONSERVATIVE_GC /DFEATURE_CUSTOM_IMPORTS /DFEATURE_DYNAMIC_CODE /DFEATURE_CACHED_INTERFACE_DISPATCH /DVERIFY_HEAP /D_LIB /DGUIDEXOS_NATIVEAOT_RUNTIME_STARTUP /I`"$(Join-Path $RuntimePackRoot 'src\platform')`" /Fo:`"$palMinWinObj`" `"$palMinWinSource`""; "if errorlevel 1 exit /b %errorlevel%"; "cl.exe /nologo /std:c++17 /TP /c /MT /GS- /GR- /EHs-c- /Zl /Oi /O2 /Zc:inline /Brepro /I`"$(Join-Path $RuntimePackRoot 'src\platform')`" /Fo:`"$palContractObj`" `"$palContractSource`""; "if errorlevel 1 exit /b %errorlevel%"; "cl.exe /nologo /std:c++17 /TP /c /MT /GS- /GR- /EHs-c- /Zl /Oi /O2 /Zc:inline /Brepro /I`"$(Join-Path $RuntimePackRoot 'src\platform')`" /Fo:`"$gcStartupContractObj`" `"$gcStartupContractSource`""; "if errorlevel 1 exit /b %errorlevel%" } else { $null })
+        $(if ($ProductionApplication) { "cl.exe /nologo /TC /c /GS- /Zl /Fo:`"$c102StartupObj`" `"$c102StartupSource`""; "if errorlevel 1 exit /b %errorlevel%" } else { $null })
         "`"$dotnetExePath`" publish `"$projectFile`" -c Release -r win-x64 --self-contained true -p:PublishAot=true -p:InvariantGlobalization=true -p:IlcGenerateStackTraceData=false -p:IlcUseEnvironmentalTools=true $($publishProperties -join ' ')"
         "exit /b %errorlevel%"
     )
@@ -380,7 +417,8 @@ if (-not [string]::IsNullOrWhiteSpace($publishMap) -and (Test-Path -LiteralPath 
 
 $mapArg = @()
 if (Test-Path -LiteralPath $artifactMap) {
-    $mapArg = @("--map", $artifactMap, "--symbol", "ManagedMain")
+    $mapSymbol = if ($ProductionApplication) { "GuideXosNativeAotApplicationEntry" } else { "ManagedMain" }
+    $mapArg = @("--map", $artifactMap, "--symbol", $mapSymbol)
 }
 
 & $PythonExe $PeToElfScript $artifactExe $artifactElf @mapArg
@@ -446,7 +484,7 @@ if ($UseGuideXosRuntimePack) {
     }
 }
 Assert-ManagedHostLogFileNotContains $artifactPeDump @('ucrtbase\.dll', 'msvcrt\.dll', 'ntdll\.dll') "Intermediate PE forbidden imports"
-Assert-ManagedHostLogElfEnvelope -ElfPath $artifactElf -PePath $artifactExe -PeDumpPath $artifactPeDump -MapPath $artifactMap -NativeObjectDumpPath $artifactNativeObjDump -ElfReadelfPath $artifactElfReadelf -ElfDumpPath $artifactElfDump -RuntimeSupportSourcePath $runtimeSupportSource -GuideXosRuntimePack:$UseGuideXosRuntimePack -ManagedAllocation:($AllocationMode -in @("Allocating", "Repeated")) -RepeatedAllocation:($AllocationMode -eq "Repeated") | Out-Null
+Assert-ManagedHostLogElfEnvelope -ElfPath $artifactElf -PePath $artifactExe -PeDumpPath $artifactPeDump -MapPath $artifactMap -NativeObjectDumpPath $artifactNativeObjDump -ElfReadelfPath $artifactElfReadelf -ElfDumpPath $artifactElfDump -RuntimeSupportSourcePath $runtimeSupportSource -GuideXosRuntimePack:$UseGuideXosRuntimePack -ManagedAllocation:($AllocationMode -in @("Allocating", "Repeated") -or $ProductionApplication) -RepeatedAllocation:($AllocationMode -eq "Repeated") -ProductionApplication:$ProductionApplication | Out-Null
 
 Write-Host "Managed host-log proof built successfully." -ForegroundColor Green
 Write-Host "Output root: $OutputRoot" -ForegroundColor Cyan

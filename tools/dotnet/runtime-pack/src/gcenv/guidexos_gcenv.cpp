@@ -19,6 +19,7 @@
 #include "../platform/guidexos_nativeaot_critical_section_adapter.h"
 #include "../platform/guidexos_nativeaot_event_adapter.h"
 #include "../platform/guidexos_nativeaot_virtual_memory_adapter.h"
+#include "../platform/guidexos_nativeaot_pal_contract.h"
 #include "guidexos_gc_platform_services.h"
 
 #if defined(GUIDEXOS_NATIVEAOT_SEGMENT_BOUNDARY_ALLOCATION)

@@ -1979,7 +1979,7 @@ public static unsafe class Program
 #endif
 #endif
 
-#if !HOSTLOGPROOF_FIRST_REAL_ALLOCATION && !HOSTLOGPROOF_FIRST_REFILL_ALLOCATION && !HOSTLOGPROOF_SEGMENT_BOUNDARY_ALLOCATION && !HOSTLOGPROOF_SEGMENT_TRANSITION_ALLOCATION && !HOSTLOGPROOF_FIRST_COLLECTION_BOUNDARY_ALLOCATION && !HOSTLOGPROOF_THREAD_STATIC_PRIMITIVE && !HOSTLOGPROOF_THREAD_STATIC_REFERENCE && !HOSTLOGPROOF_THREAD_STATIC_COMBINED
+#if !HOSTLOGPROOF_PRODUCTION && !HOSTLOGPROOF_FIRST_REAL_ALLOCATION && !HOSTLOGPROOF_FIRST_REFILL_ALLOCATION && !HOSTLOGPROOF_SEGMENT_BOUNDARY_ALLOCATION && !HOSTLOGPROOF_SEGMENT_TRANSITION_ALLOCATION && !HOSTLOGPROOF_FIRST_COLLECTION_BOUNDARY_ALLOCATION && !HOSTLOGPROOF_THREAD_STATIC_PRIMITIVE && !HOSTLOGPROOF_THREAD_STATIC_REFERENCE && !HOSTLOGPROOF_THREAD_STATIC_COMBINED
     [DllImport("__Internal", EntryPoint = "guideXosManagedArrayHostLog")]
     private static extern int GuideXosManagedArrayHostLog(NativeGxAppContext* context, nint arrayObject);
 #endif
@@ -2005,6 +2005,52 @@ public static unsafe class Program
         {
             return GxAbi.ErrorUnsupported;
         }
+
+#if HOSTLOGPROOF_PRODUCTION
+        // C102 deliberately uses only the application host-call ABI for
+        // output. The launcher supplies this table; these bytes therefore
+        // originate in managed Main and cross the ordinary native callback
+        // boundary, rather than being emitted by the kernel or a proof hook.
+        ReadOnlySpan<byte> entryText = "C102-MANAGED-ENTRY"u8;
+        Span<byte> entryBuffer = stackalloc byte[entryText.Length + 1];
+        entryText.CopyTo(entryBuffer);
+        entryBuffer[entryText.Length] = 0;
+        fixed (byte* entry = entryBuffer)
+        {
+            if (ctx->host == null || ctx->host->log == null ||
+                ctx->host->log(ctx, entry) != 0)
+            {
+                return GxAbi.ErrorInvalidArgument;
+            }
+        }
+
+        byte[] values = new byte[8];
+        int sum = 0;
+        for (int index = 0; index < values.Length; index++)
+        {
+            values[index] = (byte)(index + 1);
+            sum += values[index];
+        }
+        bool valid = sum == 36 && values[0] == 1 && values[7] == 8;
+        GC.KeepAlive(values);
+        if (!valid)
+        {
+            return GxAbi.ErrorInvalidArgument;
+        }
+
+        ReadOnlySpan<byte> passText = "C102-MANAGED-PASS"u8;
+        Span<byte> passBuffer = stackalloc byte[passText.Length + 1];
+        passText.CopyTo(passBuffer);
+        passBuffer[passText.Length] = 0;
+        fixed (byte* pass = passBuffer)
+        {
+            if (ctx->host->log(ctx, pass) != 0)
+            {
+                return GxAbi.ErrorInvalidArgument;
+            }
+        }
+        return 0;
+#endif
 
 #if !HOSTLOGPROOF_FIRST_REAL_ALLOCATION && !HOSTLOGPROOF_FIRST_REFILL_ALLOCATION && !HOSTLOGPROOF_SEGMENT_BOUNDARY_ALLOCATION && !HOSTLOGPROOF_SEGMENT_TRANSITION_ALLOCATION && !HOSTLOGPROOF_FIRST_COLLECTION_BOUNDARY_ALLOCATION && !HOSTLOGPROOF_THREAD_STATIC_PRIMITIVE && !HOSTLOGPROOF_THREAD_STATIC_REFERENCE && !HOSTLOGPROOF_THREAD_STATIC_COMBINED
         if (ctx->host == null || ctx->host->log == null)

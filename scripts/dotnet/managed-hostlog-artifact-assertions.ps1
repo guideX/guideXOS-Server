@@ -11,7 +11,7 @@ function Get-ManagedHostLogMapSymbolAddress([string]$Path, [string]$Symbol, [str
     throw "$Label symbol not found in map: $Symbol"
 }
 
-function Assert-ManagedHostLogReversePInvokeChain([string]$ElfPath, [string]$MapPath, [string]$PeDumpPath, [switch]$GuideXosRuntimePack, [switch]$ManagedAllocation, [switch]$RepeatedAllocation) {
+function Assert-ManagedHostLogReversePInvokeChain([string]$ElfPath, [string]$MapPath, [string]$PeDumpPath, [switch]$GuideXosRuntimePack, [switch]$ManagedAllocation, [switch]$RepeatedAllocation, [switch]$ProductionApplication) {
     $managedMain = Get-ManagedHostLogMapSymbolAddress $MapPath "ManagedMain" "Managed entry"
     $reversePInvoke = Get-ManagedHostLogMapSymbolAddress $MapPath "RhpReversePInvoke" "RhpReversePInvoke"
     $reverseReturn = Get-ManagedHostLogMapSymbolAddress $MapPath "RhpReversePInvokeReturn" "RhpReversePInvokeReturn"
@@ -26,6 +26,10 @@ function Assert-ManagedHostLogReversePInvokeChain([string]$ElfPath, [string]$Map
     $flsImport = [uint64]0
     if ($GuideXosRuntimePack) {
         Assert-ManagedHostLogFileContains $MapPath @('guidexos_nativeaot_platform\.obj', 'RhpReversePInvoke', 'RhpReversePInvokeReturn') "GuideXOS runtime-pack reverse-P/Invoke map evidence"
+        if ($ProductionApplication) {
+            Assert-ManagedHostLogFileContains $MapPath @('guidexos_nativeaot_pal_minwin_replacement\.obj', 'PalInit', 'PalStartFinalizerThread') "Production PAL replacement map evidence"
+            Assert-ManagedHostLogFileNotContains $MapPath @('Runtime.WorkstationGC:PalRedhawkMinWin\.cpp\.obj') "Stock NativeAOT PAL exclusion"
+        }
         Assert-ManagedHostLogFileNotContains $PeDumpPath @('FlsGetValue', 'FlsSetValue') "GuideXOS runtime-pack FLS import elimination"
     } else {
         $attach = Get-ManagedHostLogMapSymbolAddress $MapPath "RhpReversePInvokeAttachOrTrapThread2" "RhpReversePInvokeAttachOrTrapThread2"
@@ -46,23 +50,27 @@ function Assert-ManagedHostLogReversePInvokeChain([string]$ElfPath, [string]$Map
         }
     }
 
-    $elf = Read-ManagedHostLogElfEnvelope $ElfPath
-    $executableSegment = $elf.LoadSegments | Where-Object { ($_.Flags -band 1) -ne 0 } | Select-Object -First 1
-    if ($null -eq $executableSegment) { throw "No executable PT_LOAD found for reverse-P/Invoke chain assertion." }
-    $entryFileOffset = [int]($executableSegment.Offset + ($elf.Entry - $executableSegment.VirtualAddress))
-    $reverseCallFound = $false
-    for ($offset = 0; $offset -lt 0x90; $offset++) {
-        $callOffset = $entryFileOffset + $offset
-        if ($elf.Bytes[$callOffset] -ne 0xE8) { continue }
-        $relativeCall = [BitConverter]::ToInt32($elf.Bytes, $callOffset + 1)
-        $callTarget = [uint64]($elf.Entry + $offset + 5 + [int64]$relativeCall)
-        if ($callTarget -eq $reversePInvoke) {
-            $reverseCallFound = $true
-            break
+    if (-not $ProductionApplication) {
+        $elf = Read-ManagedHostLogElfEnvelope $ElfPath
+        $executableSegment = $elf.LoadSegments | Where-Object { ($_.Flags -band 1) -ne 0 } | Select-Object -First 1
+        if ($null -eq $executableSegment) { throw "No executable PT_LOAD found for reverse-P/Invoke chain assertion." }
+        $entryFileOffset = [int]($executableSegment.Offset + ($elf.Entry - $executableSegment.VirtualAddress))
+        $reverseCallFound = $false
+        for ($offset = 0; $offset -lt 0x90; $offset++) {
+            $callOffset = $entryFileOffset + $offset
+            if ($elf.Bytes[$callOffset] -ne 0xE8) { continue }
+            $relativeCall = [BitConverter]::ToInt32($elf.Bytes, $callOffset + 1)
+            $callTargetSigned = [int64]$elf.Entry + $offset + 5 + [int64]$relativeCall
+            if ($callTargetSigned -lt 0) { continue }
+            $callTarget = [uint64]$callTargetSigned
+            if ($callTarget -eq $reversePInvoke) {
+                $reverseCallFound = $true
+                break
+            }
         }
-    }
-    if (-not $reverseCallFound) {
-        throw "ManagedMain no longer contains a direct call to RhpReversePInvoke in its entry prologue."
+        if (-not $reverseCallFound) {
+            throw "ManagedMain no longer contains a direct call to RhpReversePInvoke in its entry prologue."
+        }
     }
 
     if ($ManagedAllocation) {
@@ -313,13 +321,16 @@ function Assert-ManagedHostLogElfEnvelope(
     [string]$RuntimeSupportSourcePath,
     [switch]$GuideXosRuntimePack,
     [switch]$ManagedAllocation,
-    [switch]$RepeatedAllocation) {
+    [switch]$RepeatedAllocation,
+    [switch]$ProductionApplication) {
     $elf = Read-ManagedHostLogElfEnvelope $ElfPath
     $pe = Get-ManagedHostLogPeImageEnvelope $PePath
     $managedMain = Get-ManagedHostLogMapSymbolAddress $MapPath "ManagedMain" "Managed entry"
-    $null = Assert-ManagedHostLogReversePInvokeChain $ElfPath $MapPath $PeDumpPath -GuideXosRuntimePack:$GuideXosRuntimePack -ManagedAllocation:$ManagedAllocation -RepeatedAllocation:$RepeatedAllocation
+    $entrySymbol = if ($ProductionApplication) { "GuideXosNativeAotApplicationEntry" } else { "ManagedMain" }
+    $entryAddress = Get-ManagedHostLogMapSymbolAddress $MapPath $entrySymbol "ELF entry"
+    $null = Assert-ManagedHostLogReversePInvokeChain $ElfPath $MapPath $PeDumpPath -GuideXosRuntimePack:$GuideXosRuntimePack -ManagedAllocation:$ManagedAllocation -RepeatedAllocation:$RepeatedAllocation -ProductionApplication:$ProductionApplication
 
-    if ($elf.Entry -ne $managedMain) { throw ("ELF entry 0x{0:X} is not ManagedMain 0x{1:X}." -f $elf.Entry, $managedMain) }
+    if ($elf.Entry -ne $entryAddress) { throw ("ELF entry 0x{0:X} is not {1} 0x{2:X}." -f $elf.Entry, $entrySymbol, $entryAddress) }
     if ($elf.LoadSegments.Count -eq 0) { throw "ELF has no PT_LOAD segments." }
     $first = $elf.LoadSegments[0]
     if ($first.VirtualAddress -ne $pe.ImageBase) { throw ("First PT_LOAD base 0x{0:X} does not match PE image base 0x{1:X}." -f $first.VirtualAddress, $pe.ImageBase) }
@@ -362,7 +373,13 @@ function Assert-ManagedHostLogElfEnvelope(
     Assert-ManagedHostLogFileNotContains $ElfReadelfPath @('NEEDED', 'PT_INTERP', 'rwx') "ELF dependency scan"
 
     if ($ManagedAllocation) {
-        if ($RepeatedAllocation) {
+        if ($ProductionApplication) {
+            Assert-ManagedHostLogFileContains $MapPath @(
+                'GuideXosNativeAotApplicationEntry\s+[0-9A-Fa-f]{16}',
+                'RhpNewArray\s+[0-9A-Fa-f]{16}',
+                'g_guideXosManagedHeap'
+            ) "Production managed allocation runtime-pack evidence"
+        } elseif ($RepeatedAllocation) {
             Assert-ManagedHostLogFileContains $NativeObjectDumpPath @(
                 'HostLogProof_HostLogProof_Program__ManagedMain>',
                 'guideXosManagedAllocationCanFit',

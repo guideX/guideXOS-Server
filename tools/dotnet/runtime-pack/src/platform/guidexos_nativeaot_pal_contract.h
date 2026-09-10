@@ -47,6 +47,7 @@
 typedef uintptr_t guidexos_nativeaot_pal_opaque_handle;
 
 typedef uintptr_t (GUIDEXOS_NATIVEAOT_PAL_CALL *guidexos_nativeaot_thread_entry)(void* context);
+typedef void (GUIDEXOS_NATIVEAOT_PAL_CALL *guidexos_nativeaot_startup_marker_hook)(uint32_t stage);
 
 typedef void (GUIDEXOS_NATIVEAOT_PAL_CALL *guidexos_nativeaot_fls_detach_callback)(void* value);
 
@@ -248,6 +249,12 @@ extern "C" {
 // silently reaching a Windows import or fabricating a platform result.
 int32_t GUIDEXOS_NATIVEAOT_PAL_CALL
 guidexos_nativeaot_pal_install_hooks(const guidexos_nativeaot_pal_hooks* hooks);
+
+void GUIDEXOS_NATIVEAOT_PAL_CALL
+guidexos_nativeaot_pal_set_startup_marker(guidexos_nativeaot_startup_marker_hook marker);
+
+void GUIDEXOS_NATIVEAOT_PAL_CALL
+guidexos_nativeaot_pal_startup_marker(uint32_t stage);
 
 int32_t GUIDEXOS_NATIVEAOT_PAL_CALL
 guidexos_nativeaot_pal_install_fls_hooks(const guidexos_nativeaot_fls_hooks* hooks);

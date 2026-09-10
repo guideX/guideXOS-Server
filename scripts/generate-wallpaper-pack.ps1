@@ -4,7 +4,8 @@ param(
     [string]$OutputImage = "ESP/ramdisk.img",
     [int]$ImageSizeMB = 64,
     [switch]$SmokeCaFixture,
-    [string]$ImageViewerRuntimeSmokePath
+    [string]$ImageViewerRuntimeSmokePath,
+    [string]$C102ApplicationPath = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -1276,6 +1277,16 @@ foreach ($name in $WallpaperNames) {
         }
         $staged += Get-Item $targetGximg
     }
+}
+
+if (-not [string]::IsNullOrWhiteSpace($C102ApplicationPath)) {
+    if (-not (Test-Path -LiteralPath $C102ApplicationPath -PathType Leaf)) {
+        throw "C102 staging ELF was not found: $C102ApplicationPath"
+    }
+    $c102Target = Join-Path $wallpaperDir "C102.ELF"
+    Copy-Item -LiteralPath $C102ApplicationPath -Destination $c102Target -Force
+    $staged += Get-Item $c102Target
+    Write-Host "      staged C102 NativeAOT application at /wall/C102.ELF" -ForegroundColor Yellow
 }
 
 # Deterministic large PNG fixture for the bare-metal Image Viewer smoke.

@@ -18,6 +18,11 @@ namespace kernel {
 namespace memory {
 namespace address_space {
 
+#if defined(ARCH_AMD64)
+extern "C" unsigned char __kernel_start[];
+extern "C" unsigned char __kernel_end[];
+#endif
+
 namespace {
 
 constexpr uint64_t kPageSize = 4096;
@@ -29,6 +34,14 @@ constexpr uint64_t kMaxUsableRanges = 256;
 constexpr uint64_t kPtePresent = 1ULL << 0;
 constexpr uint64_t kPteWritable = 1ULL << 1;
 constexpr uint64_t kPtePageSize = 1ULL << 7;
+// The bootloader identity-maps the allocator window at 0x04000000-0x08000000,
+// then overlays the kernel virtual image starting at 0x00100000.  The tail
+// remains identity-mapped and is reserved here as a short-lived physical-page
+// access window.  Physical frames are not assumed to be directly addressable
+// by their numeric address after the kernel mapping is installed.
+constexpr uintptr_t kPhysicalAccessWindow = 0x07F00000u;
+constexpr uint32_t kPhysicalAccessTableSlot = 0;
+constexpr uint32_t kPhysicalAccessDataSlot = 7;
 constexpr uint8_t kFrameStateMask = 0x03;
 constexpr uint8_t kFrameMappedBit = 0x04;
 constexpr uint64_t kInvalidFrameIndex = static_cast<uint64_t>(-1);
@@ -36,7 +49,8 @@ constexpr uint64_t kInvalidFrameIndex = static_cast<uint64_t>(-1);
 enum class FrameState : uint8_t {
     Free = 0,
     VmRegion = 1,
-    PageTable = 2
+    PageTable = 2,
+    Kernel = 3
 };
 
 AddressSpace g_current = {0, false};
@@ -56,6 +70,9 @@ uint8_t* g_frameMetadata = nullptr;
 uint64_t g_allocatedFrames = 0;
 uint64_t g_regionOwnedFrames = 0;
 uint64_t g_pageTableFrames = 0;
+uint64_t g_kernelOwnedFrames = 0;
+uint64_t g_kernelPhysicalBase = 0;
+bool g_kernelImageReserved = false;
 uint64_t g_mappingCount = 0;
 uint64_t g_releasedByDecommit = 0;
 uint64_t g_releasedByRelease = 0;
@@ -194,6 +211,50 @@ uint64_t* physicalPointer(uint64_t physicalAddress) {
     return reinterpret_cast<uint64_t*>(static_cast<uintptr_t>(physicalAddress));
 }
 
+uint64_t* physicalAccessPte(uint32_t slot) {
+#if defined(ARCH_AMD64)
+    if (slot >= 8) return nullptr;
+    const uintptr_t virtualAddress = kPhysicalAccessWindow +
+        static_cast<uintptr_t>(slot) * kPageSize;
+    const uint64_t rootPhysical = arch::amd64::read_cr3() & kPageMask;
+    uint64_t* pml4 = physicalPointer(rootPhysical);
+    uint64_t entry = pml4[(virtualAddress >> 39) & 0x1FFULL];
+    if ((entry & kPtePresent) == 0) return nullptr;
+    uint64_t* pdpt = physicalPointer(entry & kPageMask);
+    entry = pdpt[(virtualAddress >> 30) & 0x1FFULL];
+    if ((entry & kPtePresent) == 0 || (entry & kPtePageSize) != 0) return nullptr;
+    uint64_t* pd = physicalPointer(entry & kPageMask);
+    entry = pd[(virtualAddress >> 21) & 0x1FFULL];
+    if ((entry & kPtePresent) == 0 || (entry & kPtePageSize) != 0) return nullptr;
+    uint64_t* pt = physicalPointer(entry & kPageMask);
+    return &pt[(virtualAddress >> 12) & 0x1FFULL];
+#else
+    (void)slot;
+    return nullptr;
+#endif
+}
+
+uint64_t* mapPhysicalPage(uint64_t physicalAddress, uint32_t slot) {
+#if defined(ARCH_AMD64)
+    if (!aligned(physicalAddress)) return nullptr;
+    uint64_t* entry = physicalAccessPte(slot);
+    if (entry == nullptr) return nullptr;
+    *entry = (physicalAddress & kPageMask) | kPtePresent | kPteWritable;
+    ::kernel::memory::address_space::invalidateTlb(kPhysicalAccessWindow +
+        static_cast<uintptr_t>(slot) * kPageSize);
+    return reinterpret_cast<uint64_t*>(
+        kPhysicalAccessWindow + static_cast<uintptr_t>(slot) * kPageSize);
+#else
+    (void)physicalAddress;
+    (void)slot;
+    return nullptr;
+#endif
+}
+
+uint64_t* tablePointer(uint64_t physicalAddress, uint32_t slot) {
+    return mapPhysicalPage(physicalAddress, slot);
+}
+
 bool poolIndex(uint64_t physicalAddress, uint64_t* index) {
     if (index == nullptr || !aligned(physicalAddress) || g_frameCount == 0) return false;
     for (uint64_t rangeIndex = 0; rangeIndex < g_usableRangeCount; ++rangeIndex) {
@@ -209,11 +270,13 @@ bool poolIndex(uint64_t physicalAddress, uint64_t* index) {
 
 bool frameOwnerMatches(FrameState state, FrameOwner owner) {
     return (owner == FrameOwner::VmRegion && state == FrameState::VmRegion) ||
-           (owner == FrameOwner::PageTable && state == FrameState::PageTable);
+           (owner == FrameOwner::PageTable && state == FrameState::PageTable) ||
+           (owner == FrameOwner::Kernel && state == FrameState::Kernel);
 }
 
 bool validOwner(FrameOwner owner) {
-    return owner == FrameOwner::VmRegion || owner == FrameOwner::PageTable;
+    return owner == FrameOwner::VmRegion || owner == FrameOwner::PageTable ||
+           owner == FrameOwner::Kernel;
 }
 
 uint64_t allocateFrameInternal(FrameOwner owner) {
@@ -223,14 +286,19 @@ uint64_t allocateFrameInternal(FrameOwner owner) {
         g_vmRegionFramesAllocatedSinceLimit >= g_vmRegionFrameLimit) return 0;
     for (uint64_t index = 0; index < g_frameCount; ++index) {
         if (frameState(index) != FrameState::Free) continue;
-        setFrameMetadata(index, static_cast<uint8_t>(owner == FrameOwner::VmRegion
-            ? FrameState::VmRegion : FrameState::PageTable));
+        const FrameState state = owner == FrameOwner::VmRegion
+            ? FrameState::VmRegion
+            : owner == FrameOwner::PageTable ? FrameState::PageTable
+                                             : FrameState::Kernel;
+        setFrameMetadata(index, static_cast<uint8_t>(state));
         ++g_allocatedFrames;
         if (owner == FrameOwner::VmRegion) {
             ++g_regionOwnedFrames;
             ++g_vmRegionFramesAllocatedSinceLimit;
-        } else {
+        } else if (owner == FrameOwner::PageTable) {
             ++g_pageTableFrames;
+        } else {
+            ++g_kernelOwnedFrames;
         }
         const uint64_t physical = physicalForFrame(index);
         if (physical == 0) {
@@ -239,8 +307,10 @@ uint64_t allocateFrameInternal(FrameOwner owner) {
             if (owner == FrameOwner::VmRegion) {
                 --g_regionOwnedFrames;
                 --g_vmRegionFramesAllocatedSinceLimit;
-            } else {
+            } else if (owner == FrameOwner::PageTable) {
                 --g_pageTableFrames;
+            } else {
+                --g_kernelOwnedFrames;
             }
             return 0;
         }
@@ -283,7 +353,9 @@ bool pageTableEntry(uintptr_t virtualAddress, uint64_t** entryOut,
         pml4[pml4Index] = table | kPtePresent | kPteWritable;
         entry = pml4[pml4Index];
     }
-    uint64_t* pdpt = physicalPointer(entry & kPageMask);
+    uint64_t* pdpt = reinterpret_cast<uint64_t*>(
+        tablePointer(entry & kPageMask, kPhysicalAccessTableSlot));
+    if (pdpt == nullptr) return false;
 
     entry = pdpt[pdptIndex];
     if ((entry & kPtePresent) == 0) {
@@ -295,7 +367,9 @@ bool pageTableEntry(uintptr_t virtualAddress, uint64_t** entryOut,
     } else if ((entry & kPtePageSize) != 0) {
         return false;
     }
-    uint64_t* pd = physicalPointer(entry & kPageMask);
+    uint64_t* pd = reinterpret_cast<uint64_t*>(
+        tablePointer(entry & kPageMask, kPhysicalAccessTableSlot + 1));
+    if (pd == nullptr) return false;
 
     entry = pd[pdIndex];
     if ((entry & kPtePresent) == 0) {
@@ -307,13 +381,86 @@ bool pageTableEntry(uintptr_t virtualAddress, uint64_t** entryOut,
     } else if ((entry & kPtePageSize) != 0) {
         return false;
     }
-    uint64_t* pt = physicalPointer(entry & kPageMask);
+    uint64_t* pt = reinterpret_cast<uint64_t*>(
+        tablePointer(entry & kPageMask, kPhysicalAccessTableSlot + 2));
+    if (pt == nullptr) return false;
     *entryOut = &pt[ptIndex];
     return true;
 #else
     (void)virtualAddress;
     (void)entryOut;
     (void)createTables;
+    return false;
+#endif
+}
+
+bool reserveKernelPhysicalRange(uint64_t physicalStart, uint64_t byteCount) {
+    if (byteCount == 0 || physicalStart > static_cast<uint64_t>(-1) - byteCount) {
+        return false;
+    }
+    const uint64_t physicalEnd = physicalStart + byteCount;
+    if (physicalEnd > static_cast<uint64_t>(-1) - (kPageSize - 1u)) return false;
+    const uint64_t alignedStart = physicalStart & ~(kPageSize - 1u);
+    const uint64_t alignedEnd = (physicalEnd + kPageSize - 1u) & ~(kPageSize - 1u);
+    for (uint64_t physical = alignedStart; physical < alignedEnd;
+         physical += kPageSize) {
+        uint64_t index = 0;
+        if (!poolIndex(physical, &index)) continue;
+        const FrameState state = frameState(index);
+        if (state == FrameState::Kernel) continue;
+        if (state != FrameState::Free) return false;
+        setFrameMetadata(index, static_cast<uint8_t>(FrameState::Kernel));
+        ++g_allocatedFrames;
+        ++g_kernelOwnedFrames;
+    }
+    return true;
+}
+
+bool reserveActivePageTableFrame(uint64_t physicalAddress) {
+    uint64_t index = 0;
+    if (!poolIndex(physicalAddress & kPageMask, &index)) return true;
+    const FrameState state = frameState(index);
+    if (state == FrameState::Kernel) return true;
+    if (state != FrameState::Free) return false;
+    setFrameMetadata(index, static_cast<uint8_t>(FrameState::Kernel));
+    ++g_allocatedFrames;
+    ++g_kernelOwnedFrames;
+    return true;
+}
+
+bool reserveActivePageTables() {
+#if defined(ARCH_AMD64)
+    const uint64_t rootPhysical = arch::amd64::read_cr3() & kPageMask;
+    if (!reserveActivePageTableFrame(rootPhysical)) return false;
+    const uint64_t* pml4 = reinterpret_cast<const uint64_t*>(
+        static_cast<uintptr_t>(rootPhysical));
+    for (uint64_t pml4Index = 0; pml4Index < 512; ++pml4Index) {
+        const uint64_t pml4Entry = pml4[pml4Index];
+        if ((pml4Entry & kPtePresent) == 0) continue;
+        const uint64_t pdptPhysical = pml4Entry & kPageMask;
+        if (!reserveActivePageTableFrame(pdptPhysical)) return false;
+        const uint64_t* pdpt = reinterpret_cast<const uint64_t*>(
+            static_cast<uintptr_t>(pdptPhysical));
+        for (uint64_t pdptIndex = 0; pdptIndex < 512; ++pdptIndex) {
+            const uint64_t pdptEntry = pdpt[pdptIndex];
+            if ((pdptEntry & kPtePresent) == 0 ||
+                (pdptEntry & kPtePageSize) != 0) continue;
+            const uint64_t pdPhysical = pdptEntry & kPageMask;
+            if (!reserveActivePageTableFrame(pdPhysical)) return false;
+            const uint64_t* pd = reinterpret_cast<const uint64_t*>(
+                static_cast<uintptr_t>(pdPhysical));
+            for (uint64_t pdIndex = 0; pdIndex < 512; ++pdIndex) {
+                const uint64_t pdEntry = pd[pdIndex];
+                if ((pdEntry & kPtePresent) == 0 ||
+                    (pdEntry & kPtePageSize) != 0) continue;
+                if (!reserveActivePageTableFrame(pdEntry & kPageMask)) {
+                    return false;
+                }
+            }
+        }
+    }
+    return true;
+#else
     return false;
 #endif
 }
@@ -341,6 +488,9 @@ bool initialize(const guideXOS::BootInfo* bootInfo) {
     g_allocatedFrames = 0;
     g_regionOwnedFrames = 0;
     g_pageTableFrames = 0;
+    g_kernelOwnedFrames = 0;
+    g_kernelPhysicalBase = bootInfo->KernelPhysicalBase;
+    g_kernelImageReserved = false;
     g_mappingCount = 0;
     g_releasedByDecommit = 0;
     g_releasedByRelease = 0;
@@ -366,6 +516,33 @@ bool isInitialized() { return g_current.alive; }
 
 AddressSpace* current() { return g_current.alive ? &g_current : nullptr; }
 
+bool reserveCurrentKernelImage() {
+#if defined(ARCH_AMD64)
+    if (!g_current.alive || g_kernelImageReserved || g_kernelPhysicalBase == 0) {
+        return g_kernelImageReserved;
+    }
+    const uint64_t linkedStart = reinterpret_cast<uintptr_t>(__kernel_start);
+    const uint64_t linkedEnd = reinterpret_cast<uintptr_t>(__kernel_end);
+    if (linkedEnd <= linkedStart ||
+        linkedEnd - linkedStart > static_cast<uint64_t>(-1) - g_kernelPhysicalBase) {
+        return false;
+    }
+    // The bootloader keeps low memory identity-mapped for the handoff stack,
+    // firmware tables, and legacy devices. Claim that live range and every
+    // active page-table frame before an application can consume them; this is
+    // boot/runtime ownership, not a private NativeAOT pool.
+    if (!reserveKernelPhysicalRange(kPageSize, 0x4000000u - kPageSize) ||
+        !reserveActivePageTables() ||
+        !reserveKernelPhysicalRange(g_kernelPhysicalBase, linkedEnd - linkedStart)) {
+        return false;
+    }
+    g_kernelImageReserved = true;
+    return true;
+#else
+    return false;
+#endif
+}
+
 uint64_t allocateFrame(FrameOwner owner) { return allocateFrameInternal(owner); }
 
 bool releaseFrame(uint64_t physicalAddress, FrameOwner owner,
@@ -378,8 +555,10 @@ bool releaseFrame(uint64_t physicalAddress, FrameOwner owner,
     --g_allocatedFrames;
     if (owner == FrameOwner::VmRegion) {
         --g_regionOwnedFrames;
-    } else {
+    } else if (owner == FrameOwner::PageTable) {
         --g_pageTableFrames;
+    } else {
+        --g_kernelOwnedFrames;
     }
     if (reason == FrameReleaseReason::Decommit) ++g_releasedByDecommit;
     if (reason == FrameReleaseReason::Release) ++g_releasedByRelease;
@@ -390,7 +569,8 @@ bool zeroFrame(uint64_t physicalAddress) {
     uint64_t index = 0;
     if (!poolIndex(physicalAddress, &index)) return false;
     volatile uint8_t* bytes = reinterpret_cast<volatile uint8_t*>(
-        static_cast<uintptr_t>(physicalAddress));
+        mapPhysicalPage(physicalAddress, kPhysicalAccessDataSlot));
+    if (bytes == nullptr) return false;
     for (uint64_t i = 0; i < kPageSize; ++i) bytes[i] = 0;
     return true;
 }
@@ -524,6 +704,7 @@ FrameAccounting accounting() {
         ? g_frameCount - g_allocatedFrames : 0;
     result.regionOwnedFrames = g_regionOwnedFrames;
     result.pageTableFrames = g_pageTableFrames;
+    result.kernelOwnedFrames = g_kernelOwnedFrames;
     result.mappingCount = g_mappingCount;
     result.framesReleasedByDecommit = g_releasedByDecommit;
     result.framesReleasedByRelease = g_releasedByRelease;

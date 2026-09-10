@@ -9,20 +9,23 @@
 
 // PalInit is the NativeAOT GC platform initialization boundary.  These are
 // the exact locked source declarations used by the stock Windows PAL; the
-// implementations are supplied by the adapted guideXOS gcenv object in the
-// startup-only link image.
-#if defined(GUIDEXOS_NATIVEAOT_GC_STARTUP)
-#include "gcenv.h"
-#include "gcenv.ee.h"
-#include "gcconfig.h"
+// implementations are supplied by the locked Workstation GC objects in the
+// NativeAOT link image.  Keep these declarations narrow: pulling the Unix PAL
+// umbrella headers into this Windows-side replacement would change the
+// compile environment without adding any runtime behavior.
+#if defined(GUIDEXOS_NATIVEAOT_RUNTIME_STARTUP)
+class GCConfig {
+public:
+    static void Initialize();
+};
+class GCToOSInterface {
+public:
+    static bool Initialize();
+};
 #endif
 
 #define GUIDEXOS_NATIVEAOT_PAL_EXPORT extern "C"
 #define GUIDEXOS_NATIVEAOT_PAL_API __stdcall
-
-#if defined(GUIDEXOS_NATIVEAOT_GC_STARTUP)
-extern "C" uint32_t g_guidexos_nativeaot_gc_startup_pal_stage = 0;
-#endif
 
 namespace {
 
@@ -43,12 +46,12 @@ BackgroundWork g_qemuBackgroundWork = {};
 bool g_qemuBackgroundActive = false;
 #endif
 
-#if defined(GUIDEXOS_NATIVEAOT_GC_STARTUP)
+#if defined(GUIDEXOS_NATIVEAOT_RUNTIME_STARTUP)
 // RhInitialize starts the NativeAOT finalizer helper.  The locked PAL API has
 // no shutdown operation, so the startup dry run keeps this worker parked until
-// its disposable QEMU process exits instead of joining it from this call.
-guidexos_nativeaot_pal_opaque_handle g_qemuStartupBackgroundHandle = 0;
-bool g_qemuStartupBackgroundActive = false;
+// the process exits instead of joining it from this call.
+guidexos_nativeaot_pal_opaque_handle g_runtimeStartupBackgroundHandle = 0;
+bool g_runtimeStartupBackgroundActive = false;
 #endif
 
 uintptr_t GUIDEXOS_NATIVEAOT_PAL_CALL backgroundEntry(void* raw) {
@@ -95,26 +98,17 @@ void __cdecl InitHijackingAPIs() {
 }
 
 GUIDEXOS_NATIVEAOT_PAL_EXPORT bool GUIDEXOS_NATIVEAOT_PAL_API PalInit() {
-#if defined(GUIDEXOS_NATIVEAOT_GC_STARTUP)
-    g_guidexos_nativeaot_gc_startup_pal_stage = 1u;
-#endif
     if (g_flsIndex != kFlsOutOfIndexes) {
         (void)guidexos_nativeaot_pal_fls_free(g_flsIndex);
         g_flsIndex = kFlsOutOfIndexes;
     }
     g_flsIndex = guidexos_nativeaot_pal_fls_alloc(FiberDetachCallback);
     if (g_flsIndex == kFlsOutOfIndexes) return false;
-#if defined(GUIDEXOS_NATIVEAOT_GC_STARTUP)
-    g_guidexos_nativeaot_gc_startup_pal_stage = 2u;
-#endif
-
-#if defined(GUIDEXOS_NATIVEAOT_GC_STARTUP)
+#if defined(GUIDEXOS_NATIVEAOT_RUNTIME_STARTUP)
     GCConfig::Initialize();
-    g_guidexos_nativeaot_gc_startup_pal_stage = 3u;
     if (!GCToOSInterface::Initialize()) {
         return false;
     }
-    g_guidexos_nativeaot_gc_startup_pal_stage = 4u;
 #endif
 
     InitializeCurrentProcessCpuCount();
@@ -260,7 +254,7 @@ PalGetHijackTarget(void* default_target) {
 GUIDEXOS_NATIVEAOT_PAL_EXPORT bool GUIDEXOS_NATIVEAOT_PAL_API
 PalStartBackgroundWork(uint32_t (__stdcall* callback)(void*),
                        void* callback_context,
-                       int32_t high_priority) {
+    int32_t high_priority) {
     if (callback == nullptr) return false;
     BackgroundWork* work = nullptr;
 #if defined(GUIDEXOS_NATIVEAOT_PAL_QEMU_PROBE)
@@ -281,19 +275,17 @@ PalStartBackgroundWork(uint32_t (__stdcall* callback)(void*),
 #else
         delete work;
 #endif
-#if defined(GUIDEXOS_NATIVEAOT_GC_STARTUP)
-        g_qemuStartupBackgroundActive = false;
-        g_guidexos_nativeaot_gc_startup_pal_stage = 0x0Fu;
+#if defined(GUIDEXOS_NATIVEAOT_RUNTIME_STARTUP)
+        g_runtimeStartupBackgroundActive = false;
 #endif
         return false;
     }
-#if defined(GUIDEXOS_NATIVEAOT_GC_STARTUP)
-    g_qemuStartupBackgroundHandle = handle;
-    g_qemuStartupBackgroundActive = true;
-    g_guidexos_nativeaot_gc_startup_pal_stage = 0x02u;
+#if defined(GUIDEXOS_NATIVEAOT_RUNTIME_STARTUP)
+    g_runtimeStartupBackgroundHandle = handle;
+    g_runtimeStartupBackgroundActive = true;
     // There is no RhShutdown in the locked NativeAOT source contract.  The
-    // process-lifetime QEMU harness kills the disposable process after the
-    // startup marker, while the artifact and callback targets remain mapped.
+    // application-lifetime launcher retains the worker and callback targets
+    // until the current process image is torn down.
     return true;
 #else
     // This API intentionally has no joinable result in its source contract;

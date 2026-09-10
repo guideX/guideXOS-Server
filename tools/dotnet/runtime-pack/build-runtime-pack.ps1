@@ -6,6 +6,7 @@ param(
     [string]$ExternalRuntimeRoot = "",
     [switch]$ManagedAllocation,
     [switch]$ManagedRepeatedAllocation,
+    [switch]$ProductionApplication,
     [switch]$NativeAotFpRepair,
     [ValidateSet("Primary64KiB", "Small4KiB")]
     [string]$HeapConfiguration = "Primary64KiB",
@@ -249,11 +250,21 @@ Get-ChildItem -LiteralPath $stockSdk -Filter "*.dll" -File | ForEach-Object {
     Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $sdkOutput $_.Name) -Force
 }
 $stockRuntimeLibrary = Join-Path $stockSdk "Runtime.WorkstationGC.lib"
+$runtimeLibraryInput = $stockRuntimeLibrary
 $adaptedRuntimeLibrary = Join-Path $sdkOutput "Runtime.WorkstationGC.lib"
 $removedRuntimeMembers = @(
     "nativeaot\Runtime\Full\CMakeFiles\Runtime.WorkstationGC.dir\__\EHHelpers.cpp.obj",
     "nativeaot\Runtime\Full\CMakeFiles\Runtime.WorkstationGC.dir\__\thread.cpp.obj"
 )
+if ($ProductionApplication) {
+    $removedRuntimeMembers += @(
+        "nativeaot\Runtime\Full\CMakeFiles\Runtime.WorkstationGC.dir\__\__\__\gc\windows\gcenv.windows.cpp.obj",
+        "nativeaot\Runtime\Full\CMakeFiles\Runtime.WorkstationGC.dir\__\windows\PalRedhawkMinWin.cpp.obj",
+        "nativeaot\Runtime\Full\CMakeFiles\Runtime.WorkstationGC.dir\__\__\__\gc\gcconfig.cpp.obj",
+        "nativeaot\Runtime\Full\CMakeFiles\Runtime.WorkstationGC.dir\__\RhConfig.cpp.obj",
+        "nativeaot\Runtime\Full\CMakeFiles\Runtime.WorkstationGC.dir\__\startup.cpp.obj"
+    )
+}
 if ($NativeAotFpRepair) {
     $removedRuntimeMembers += @($fpStackMember, $fpCoffMember)
 }
@@ -344,12 +355,112 @@ $fpArchiveObjects = if ($NativeAotFpRepair) {
 } else {
     ""
 }
+$productionGcEnvironmentObjects = ""
+if ($ProductionApplication) {
+    # The PE-to-ELF image has no Windows loader to resolve gcenv.windows.cpp.
+    # Compile the existing guideXOS-neutral GC environment and its Win64-side
+    # startup bridge into the authenticated Workstation GC archive.  The
+    # collector objects remain the locked NativeAOT 9.0.0 Workstation GC; only
+    # the OS environment object is replaced.
+    $gcSourceRoot = Join-Path $lockedExternalRuntimeRoot "src\coreclr"
+    $gcEnvSource = Join-Path $RuntimePackRoot "src\gcenv\guidexos_gcenv.cpp"
+    $gcBridgeSource = Join-Path $RuntimePackRoot "src\platform\guidexos_nativeaot_gcenv_startup_bridge.cpp"
+    $startupImportsSource = Join-Path $RuntimePackRoot "src\platform\guidexos_nativeaot_startup_imports.cpp"
+    $gcConfigSource = Join-Path $gcSourceRoot "gc\gcconfig.cpp"
+    $gcConfigWrapperSource = Join-Path $OutputRoot "guidexos_nativeaot_gcconfig_replacement.cpp"
+    $rhConfigSource = Join-Path $gcSourceRoot "nativeaot\Runtime\RhConfig.cpp"
+    $rhConfigWrapperSource = Join-Path $OutputRoot "guidexos_nativeaot_rhconfig_replacement.cpp"
+    $startupSource = Join-Path $gcSourceRoot "nativeaot\Runtime\startup.cpp"
+    $startupWrapperSource = Join-Path $OutputRoot "guidexos_nativeaot_startup_replacement.cpp"
+    $gcEnvObject = Join-Path $OutputRoot "guidexos_gcenv.production.obj"
+    $gcBridgeObject = Join-Path $OutputRoot "guidexos_nativeaot_gcenv_startup_bridge.production.obj"
+    $startupImportsObject = Join-Path $OutputRoot "guidexos_nativeaot_startup_imports.production.obj"
+    $gcConfigObject = Join-Path $OutputRoot "guidexos_nativeaot_gcconfig_replacement.production.obj"
+    $rhConfigObject = Join-Path $OutputRoot "guidexos_nativeaot_rhconfig_replacement.production.obj"
+    $startupObject = Join-Path $OutputRoot "guidexos_nativeaot_startup_replacement.production.obj"
+    $gcSupportRoot = Join-Path $OutputRoot "gcconfig-support"
+    $gcSupportMinipal = Join-Path $gcSupportRoot "minipal"
+    $gcSupportUtils = Join-Path $gcSupportMinipal "utils.h"
+    foreach ($path in @($gcEnvSource, $gcBridgeSource, $startupImportsSource, $gcConfigSource, $rhConfigSource, $startupSource, $gcSourceRoot)) {
+        if (-not (Test-Path -LiteralPath $path)) {
+            throw "Production NativeAOT GC environment input is missing: $path"
+        }
+    }
+    $gcConfigIncludePath = ([System.IO.Path]::GetFullPath($gcConfigSource)).Replace('\', '/')
+    @(
+        '#include <windows.h>'
+        'extern "C" DWORD WINAPI guidexos_nativeaot_startup_GetLastError();'
+        'extern "C" DWORD WINAPI guidexos_nativeaot_startup_GetEnvironmentVariableW(LPCWSTR, LPWSTR, DWORD);'
+        '#define GetLastError guidexos_nativeaot_startup_GetLastError'
+        '#define GetEnvironmentVariableW guidexos_nativeaot_startup_GetEnvironmentVariableW'
+        "#include `"$gcConfigIncludePath`""
+    ) | Set-Content -LiteralPath $gcConfigWrapperSource -Encoding ASCII
+    $rhConfigIncludePath = ([System.IO.Path]::GetFullPath($rhConfigSource)).Replace('\', '/')
+    @(
+        '#define STRING_LENGTH(value) (static_cast<uint32_t>((sizeof(value) / sizeof((value)[0])) - 1u))'
+        '#define ARRAY_SIZE(value) (static_cast<uint32_t>(sizeof(value) / sizeof((value)[0])))'
+        '#define GetLastError guidexos_nativeaot_startup_GetLastError'
+        '#define GetEnvironmentVariableW guidexos_nativeaot_startup_GetEnvironmentVariableW'
+        "#include `"$rhConfigIncludePath`""
+    ) | Set-Content -LiteralPath $rhConfigWrapperSource -Encoding ASCII
+    $startupIncludePath = ([System.IO.Path]::GetFullPath($startupSource)).Replace('\', '/')
+    @(
+        '#define GetModuleHandleW guidexos_nativeaot_startup_GetModuleHandleW'
+        '#define GetProcAddress guidexos_nativeaot_startup_GetProcAddress'
+        '#define atexit guidexos_nativeaot_startup_atexit'
+        "#include `"$startupIncludePath`""
+    ) | Set-Content -LiteralPath $startupWrapperSource -Encoding ASCII
+    New-Item -ItemType Directory -Path $gcSupportMinipal -Force | Out-Null
+    @(
+        '#pragma once'
+        '// The locked NativeAOT GC configuration source includes this header,'
+        '// but its configuration object does not consume minipal utilities.'
+    ) | Set-Content -LiteralPath $gcSupportUtils -Encoding ASCII
+    $gcSupportCpuFeatures = Join-Path $gcSupportMinipal "cpufeatures.h"
+    @(
+        '#pragma once'
+        'static inline int minipal_getcpufeatures() { return 0; }'
+    ) | Set-Content -LiteralPath $gcSupportCpuFeatures -Encoding ASCII
+    $gcDefines = "/DGXOS_BARE_METAL /DGXOS_TRUE_VIRTUAL_MEMORY /D_FEATURE_NATIVEAOT /DNATIVEAOT /DTARGET_AMD64 /DTARGET_64BIT /DHOST_AMD64 /DHOST_64BIT /D_WIN64 /D_HAS_STD_BYTE=0"
+    $rhConfigDefines = "$gcDefines /DTARGET_WINDOWS /DHOST_WINDOWS /DUNICODE"
+    $startupDefines = "$gcDefines /DTARGET_WINDOWS /DHOST_WINDOWS /DUNICODE"
+    $gcIncludes = "/I`"$(Join-Path $gcSourceRoot 'gc')`" /I`"$(Join-Path $gcSourceRoot 'gc\env')`" /I`"$(Join-Path $gcSourceRoot 'nativeaot\Runtime')`" /I`"$(Join-Path $gcSourceRoot 'nativeaot\Runtime\inc')`" /I`"$(Join-Path $gcSourceRoot 'nativeaot\Runtime\windows')`" /I`"$(Join-Path $gcSourceRoot '..\native')`" /I`"$gcSupportRoot`" /I`"$(Join-Path $RuntimePackRoot 'src\platform')`""
+    $gcBatch = Join-Path $OutputRoot "build-production-gc-environment.bat"
+    $gcLines = @(
+        "@echo off",
+        "setlocal",
+        "call `"$vcvars`" >nul",
+        "if errorlevel 1 exit /b %errorlevel%",
+        "cl.exe /nologo /std:c++17 /TP /c /MT /GS- /GR- /EHs-c- /Zl /Oi /O2 /Zc:inline /Brepro $gcDefines $gcIncludes /Fo:`"$gcEnvObject`" `"$gcEnvSource`"",
+        "if errorlevel 1 exit /b %errorlevel%",
+        "cl.exe /nologo /std:c++17 /TP /c /MT /GS- /GR- /EHs-c- /Zl /Oi /O2 /Zc:inline /Brepro $gcDefines $gcIncludes /Fo:`"$gcBridgeObject`" `"$gcBridgeSource`"",
+        "if errorlevel 1 exit /b %errorlevel%",
+        "cl.exe /nologo /std:c++17 /TP /c /MT /GS- /GR- /EHs-c- /Zl /Oi /O2 /Zc:inline /Brepro $gcDefines /I`"$(Join-Path $RuntimePackRoot 'src\platform')`" /Fo:`"$startupImportsObject`" `"$startupImportsSource`"",
+        "if errorlevel 1 exit /b %errorlevel%",
+        "cl.exe /nologo /std:c++17 /TP /c /MT /GS- /GR- /EHs-c- /Zl /Oi /O2 /Zc:inline /Brepro $gcDefines $gcIncludes /Fo:`"$gcConfigObject`" `"$gcConfigWrapperSource`"",
+        "if errorlevel 1 exit /b %errorlevel%",
+        "cl.exe /nologo /std:c++17 /TP /c /MT /GS- /GR- /EHs-c- /Zl /Oi /O2 /Zc:inline /Brepro $rhConfigDefines $gcIncludes /Fo:`"$rhConfigObject`" `"$rhConfigWrapperSource`"",
+        "if errorlevel 1 exit /b %errorlevel%",
+        "cl.exe /nologo /std:c++17 /TP /c /MT /GS- /GR- /EHs-c- /Zl /Oi /O2 /Zc:inline /Brepro $startupDefines $gcIncludes /Fo:`"$startupObject`" `"$startupWrapperSource`"",
+        "if errorlevel 1 exit /b %errorlevel%",
+        "exit /b 0"
+    )
+    $gcLines | Set-Content -LiteralPath $gcBatch -Encoding ASCII
+    & $gcBatch
+    if ($LASTEXITCODE -ne 0) { throw "Production NativeAOT GC environment compilation failed with exit code $LASTEXITCODE" }
+    foreach ($path in @($gcEnvObject, $gcBridgeObject, $startupImportsObject, $gcConfigObject, $rhConfigObject, $startupObject)) {
+        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+            throw "Production NativeAOT GC environment object was not produced: $path"
+        }
+    }
+    $productionGcEnvironmentObjects = " `"$gcEnvObject`" `"$gcBridgeObject`" `"$startupImportsObject`" `"$gcConfigObject`" `"$rhConfigObject`" `"$startupObject`""
+}
 $sdkLines = @(
     "@echo off",
     "setlocal",
     "call `"$vcvars`" >nul",
     "if errorlevel 1 exit /b %errorlevel%",
-    "lib.exe /nologo /OUT:`"$adaptedRuntimeLibrary`" `"$stockRuntimeLibrary`" $removeArguments `"$threadRenamedMember`" `"$ehRenamedMember`"$allocFastMemberArguments$fpArchiveObjects",
+    "lib.exe /nologo /OUT:`"$adaptedRuntimeLibrary`" `"$runtimeLibraryInput`" $removeArguments `"$threadRenamedMember`" `"$ehRenamedMember`"$allocFastMemberArguments$fpArchiveObjects$productionGcEnvironmentObjects",
     "exit /b %errorlevel%"
 )
 $sdkLines | Set-Content -LiteralPath $sdkBatch -Encoding ASCII
@@ -421,7 +532,7 @@ $lines = @(
     "setlocal",
     "call `"$vcvars`" >nul",
     "if errorlevel 1 exit /b %errorlevel%",
-    "cl.exe /nologo /TP /c /GS- /GR- /EHs-c- /Zl /Oi /O2 /Brepro $(if ($ManagedAllocation) { "/DGUIDEXOS_NATIVEAOT_MANAGED_ALLOCATION /DGUIDEXOS_MANAGED_HEAP_BYTES=$managedHeapBytes $(if ($ManagedRepeatedAllocation) { '/DGUIDEXOS_NATIVEAOT_MANAGED_REPEATED_ALLOCATION' } else { '' })" } else { '' }) /Fo:`"$object`" `"$source`"",
+    "cl.exe /nologo /TP /c /GS- /GR- /EHs-c- /Zl /Oi /O2 /Brepro $(if ($ManagedAllocation) { "/DGUIDEXOS_NATIVEAOT_MANAGED_ALLOCATION /DGUIDEXOS_MANAGED_HEAP_BYTES=$managedHeapBytes $(if ($ManagedRepeatedAllocation) { '/DGUIDEXOS_NATIVEAOT_MANAGED_REPEATED_ALLOCATION' } else { '' }) $(if ($ProductionApplication) { '/DGUIDEXOS_NATIVEAOT_PRODUCTION_APPLICATION' } else { '' })" } else { '' }) /Fo:`"$object`" `"$source`"",
     "exit /b %errorlevel%"
 )
 $lines | Set-Content -LiteralPath $batch -Encoding ASCII
@@ -460,7 +571,7 @@ if ($NativeAotFpRepair) {
 $manifest = [ordered]@{
     schemaVersion = 2
     c51Identifier = if ($NativeAotFpRepair) { "C011EC51" } else { $null }
-    identity = if ($NativeAotFpRepair) { "guidexos-nativeaot-runtime-pack-amd64-workstationgc-fp-repair-v1" } elseif ($ManagedRepeatedAllocation) { "guidexos-nativeaot-runtime-pack-amd64-hostlog-repeated-allocation-nocollection-v1" } elseif ($ManagedAllocation) { "guidexos-nativeaot-runtime-pack-amd64-hostlog-allocating-nocollection-v1" } else { "guidexos-nativeaot-runtime-pack-amd64-hostlog-nonallocating-v1" }
+    identity = if ($ProductionApplication) { "guidexos-nativeaot-runtime-pack-amd64-production-application-v1" } elseif ($NativeAotFpRepair) { "guidexos-nativeaot-runtime-pack-amd64-workstationgc-fp-repair-v1" } elseif ($ManagedRepeatedAllocation) { "guidexos-nativeaot-runtime-pack-amd64-hostlog-repeated-allocation-nocollection-v1" } elseif ($ManagedAllocation) { "guidexos-nativeaot-runtime-pack-amd64-hostlog-allocating-nocollection-v1" } else { "guidexos-nativeaot-runtime-pack-amd64-hostlog-nonallocating-v1" }
     repository = [ordered]@{ root = $RepoRoot; head = $repoHead; subject = $repoSubject; branch = (& git -C $RepoRoot branch --show-current).Trim(); upstream = $repoUpstream; aheadBehind = $repoAheadBehind }
     runtimeIdentity = [ordered]@{ nativeAot = $lock.ilCompiler.version; architecture = "AMD64"; gc = "Workstation"; gcInterface = "5.3"; eeInterface = "2"; targetFramework = $lock.targetFramework; runtimeIdentifier = $lock.runtimeIdentifier; sourceCommit = $lock.ilCompiler.commit }
     architecture = $lock.architecture
@@ -522,6 +633,7 @@ $manifest = [ordered]@{
     managedObjectSize = if ($ManagedRepeatedAllocation) { 280 } elseif ($ManagedAllocation) { 40 } else { 0 }
     managedExceptions = $false
     managedThreads = $false
+    productionApplication = [bool]$ProductionApplication
 }
 $manifest | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $manifestPath -Encoding ASCII
 
