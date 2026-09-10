@@ -3670,6 +3670,75 @@ static std::string navigatorHostedSmokeDiagnostic() {
         summarizeText(js37AfterReset, 900) + ",error=" +
         gxos::apps::Navigator::SmokeJavaScriptLastError());
 
+    const std::string js38FixtureUrl =
+        "http://127.0.0.1:8080/navigator-smoke/javascript-js38.html";
+    const bool js38Loaded = gxos::apps::Navigator::SmokeNavigateToQuiet(
+        js38FixtureUrl);
+    const std::string js38InitialText =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS38 hosted fixture loads bounded structural traversal",
+        js38Loaded && gxos::apps::Navigator::SmokeCurrentUrl() == js38FixtureUrl &&
+        contains(js38InitialText, "Navigator JavaScript JS38") &&
+        contains(js38InitialText,
+            "initial:order=true:count=true:first=true:last=true:siblings=true:parents=true:forms=true:options=true:selectors=true:click=false:focus=false:submit=false:reset=false:value=action-seed") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("loaded=") + yesNo(js38Loaded) + ",text=" +
+        summarizeText(js38InitialText, 920) + ",error=" +
+        gxos::apps::Navigator::SmokeJavaScriptLastError());
+
+    const bool js38ClickTrigger =
+        gxos::apps::Navigator::SmokeClickFormControlById("js38-trigger-click");
+    const std::string js38AfterClick =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS38 hosted event delegation uses target parentElement and closest",
+        js38ClickTrigger && contains(js38AfterClick,
+            "click:order=true:count=true:first=true:last=true:siblings=true:parents=true:forms=true:options=true:selectors=true:click=true") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("click=") + yesNo(js38ClickTrigger) + ",text=" +
+        summarizeText(js38AfterClick, 920) + ",error=" +
+        gxos::apps::Navigator::SmokeJavaScriptLastError());
+
+    const bool js38FocusTrigger =
+        gxos::apps::Navigator::SmokeClickFormControlById("js38-trigger-focus");
+    const std::string js38AfterFocus =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS38 hosted traversal-returned focus reaches activeElement",
+        js38FocusTrigger &&
+        gxos::apps::Navigator::SmokeFocusedFormControlId() == "js38-name" &&
+        contains(js38AfterFocus,
+            "focus:order=true:count=true:first=true:last=true:siblings=true:parents=true:forms=true:options=true:selectors=true:click=true:focus=true") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("focus=") + yesNo(js38FocusTrigger) + ",focused=" +
+        gxos::apps::Navigator::SmokeFocusedFormControlId() + ",text=" +
+        summarizeText(js38AfterFocus, 920) + ",error=" +
+        gxos::apps::Navigator::SmokeJavaScriptLastError());
+
+    const bool js38SubmitTrigger =
+        gxos::apps::Navigator::SmokeClickFormControlById("js38-trigger-submit");
+    const std::string js38AfterSubmit =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS38 hosted direct-child submit preserves event and current value",
+        js38SubmitTrigger && contains(js38AfterSubmit,
+            "submit:order=true:count=true:first=true:last=true:siblings=true:parents=true:forms=true:options=true:selectors=true:click=true:focus=true:submit=true:reset=false:value=hosted-current") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("submit=") + yesNo(js38SubmitTrigger) + ",text=" +
+        summarizeText(js38AfterSubmit, 920) + ",error=" +
+        gxos::apps::Navigator::SmokeJavaScriptLastError());
+
+    const bool js38ResetTrigger =
+        gxos::apps::Navigator::SmokeClickFormControlById("js38-trigger-reset");
+    const std::string js38AfterReset =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS38 hosted direct-child reset restores the default value",
+        js38ResetTrigger &&
+        gxos::apps::Navigator::SmokeFormControlValueById("js38-action-input") ==
+            "action-seed" && contains(js38AfterReset,
+            "reset:order=true:count=true:first=true:last=true:siblings=true:parents=true:forms=true:options=true:selectors=true:click=true:focus=true:submit=true:reset=true:value=action-seed") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("reset=") + yesNo(js38ResetTrigger) + ",text=" +
+        summarizeText(js38AfterReset, 920) + ",error=" +
+        gxos::apps::Navigator::SmokeJavaScriptLastError());
+
     bool cssInlineLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-inline.html");
     std::string cssInlineText = gxos::apps::Navigator::SmokeCurrentDocumentText();
     std::string cssInlineReport = gxos::apps::Navigator::SmokeRuntimeReport();

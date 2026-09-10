@@ -3857,7 +3857,85 @@ pre-existing CSS phases 3C, 3G, 6A, 6B (three checks), and 6C.
 
 JS37 remains intentionally narrow. It does not add new selector grammar,
 `parentElement`, `parentNode`, `children`, `childNodes`, dynamic DOM mutation,
-general collection APIs, or full browser compatibility. The recommended JS38
-direction is another small identity/lifecycle capability only after the shared
-selector predicate, bounded ancestry, event metadata, and bare-metal lanes
-remain green.
+general collection APIs, or full browser compatibility. JS38 adds only the
+bounded structural traversal described below; the shared selector predicate,
+ancestry, event metadata, and bare-metal lanes remain unchanged.
+
+## JS38: bounded DOM element traversal
+
+JS38 adds read-only structural traversal over the existing parser-owned
+`WebDocument::structuralElements` vector:
+
+```javascript
+element.parentElement
+element.children
+element.childElementCount
+element.firstElementChild
+element.lastElementChild
+element.nextElementSibling
+element.previousElementSibling
+```
+
+The vector is still the only structural representation. The implementation
+uses each record's canonical `serial` and `parentSerial`, scans in bounded
+document-vector order, and does not build a second tree, child cache, JavaScript
+array, or mutable DOM. `parentElement` follows structural `parentSerial`; it
+does not use `FormControlMetadata.parentFormSerial`, so a nested wrapper remains
+the parent of a form control even when the control also appears in
+`form.elements`. `select.children` and `select.options` therefore expose the
+same canonical option identities in the same order.
+
+`children` is a generation-checked, read-only `ElementChildren` collection.
+Each `length` or numeric indexed read rescans the current bounded structural
+records using the same direct-child eligibility rule. Indexed misses return
+`undefined`, collection identity is stable for the same owner and generation,
+and returned elements use the canonical Element host identity. `childElementCount`
+shares that count, while `firstElementChild` and `lastElementChild` return the
+corresponding canonical element or `null` for an empty collection. Sibling
+properties scan only the receiver's same-parent group in vector order and return
+`null` at the first/last boundary; missing, self-parent, and malformed parent
+metadata fail closed.
+
+All traversal properties and collection properties are read-only. Supported
+root elements return `null` for `parentElement`; leaf elements return an empty
+collection and count zero. Old-generation Element traversal returns the safe
+sentinels (`null`, zero, or `undefined` as appropriate), while an old captured
+`children` collection remains a strict stale-host error. Every reference keeps
+the existing serial, document-generation, and host-kind guards, so document
+replacement cannot resolve an old element into a new document. Traversal is
+also bounded by the existing `maxDocumentNodes` limit.
+
+The structural surface composes with JS36/JS37 selectors and the existing
+event/default-action paths. The focused JS38 proof covers canonical identity,
+parent/child/sibling round trips, first/last boundaries, direct-child-only
+behavior, child-count walks, form-versus-structural-parent behavior,
+select/options identity, `matches()`/`closest()`/`querySelector()` integration,
+event target and current-target metadata, focus and `activeElement`, traversal-
+returned click, submit, reset, value/default-value behavior, stale generations,
+malformed metadata, read-only assignments, and listener bounds.
+
+The parser limitation remains explicit: metadata-only head/title/meta/link/base/
+style/script records are not structural elements, so only the bounded parsed
+structural surface participates in traversal. JS38 does not add `parentNode`,
+`childNodes`, general Node/HTMLCollection APIs, mutation, array methods,
+descendant or sibling selector syntax, or a full browser DOM.
+
+The focused proof is `tests/navigator_javascript_js38_test.cpp`, run by
+`scripts/smoke-navigator-javascript-js38.ps1`. It reports 152 checks with 0
+failures and passes the optimized bare-metal harness plus the strict adapter
+and runtime syntax lane. The full repository JavaScript matrix is now 36/36:
+JS6 through JS38 plus lexer, parser, and runtime lanes. Focused regression
+evidence includes JS36 at 99/99 and JS37 at 180/180. The hosted fixture is
+`navigator-smoke/javascript-js38.html`; the production aggregate drives five
+checks covering fixture load, delegated traversal events, focus, submit, and
+reset, all 5/5 passing. The final hosted aggregate reports 499 passed and 7
+failed; the seven failures remain the pre-existing CSS phases 3C, 3G, 6A, 6B
+(three checks), and 6C.
+
+`build.bat` completed successfully and produced `guideXOSServer.exe` with no
+JS38 diagnostics. The strict syntax lane passed as part of the JS38 smoke
+script. `build-kernel.bat` staged PacMan, the ramdisk, and the UEFI bootloader
+but stopped at the existing Mbed TLS guards in
+`third_party/mbedtls/library/mbedtls_check_config.h` (partial ECC acceleration
+and missing ECDHE-RSA prerequisites). No TLS configuration was changed and no
+QEMU result is claimed because the kernel image was not freshly produced.

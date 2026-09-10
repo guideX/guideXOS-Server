@@ -21,6 +21,7 @@ constexpr HostObjectKind kNavigatorFormCollectionHostKind = 0x4A530803u;
 constexpr HostObjectKind kNavigatorOptionsCollectionHostKind = 0x4A530804u;
 constexpr HostObjectKind kNavigatorDocumentFormsCollectionHostKind = 0x4A530805u;
 constexpr HostObjectKind kNavigatorSelectorCollectionHostKind = 0x4A530806u;
+constexpr HostObjectKind kNavigatorElementChildrenCollectionHostKind = 0x4A530807u;
 constexpr HostInstanceId kNavigatorDocumentHostInstance = 1u;
 
 constexpr std::uint32_t kNavigatorGetElementByIdMethod = 1u;
@@ -342,6 +343,13 @@ private:
     gxos::web::HtmlElementRef* findElement(HostInstanceId serial);
     const gxos::web::HtmlElementRef* findElement(HostInstanceId serial) const;
     bool isKnownElementSerial(HostInstanceId serial) const;
+    bool resolveStructuralParentSerial(HostInstanceId serial,
+        HostInstanceId& parentSerial) const;
+    bool elementChildAt(HostInstanceId parentSerial, std::size_t index,
+        HostInstanceId& childSerial) const;
+    std::size_t elementChildCount(HostInstanceId parentSerial) const;
+    bool elementSiblingAt(HostInstanceId serial, bool next,
+        HostInstanceId& siblingSerial) const;
     bool isDescendantOrSelf(std::uint64_t serial,
         std::uint64_t ancestorSerial) const;
     const SelectorCollectionRecord* selectorCollectionFor(

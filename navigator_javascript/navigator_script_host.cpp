@@ -354,7 +354,14 @@ bool NavigatorScriptHostAdapter::allowsStaleHostProperty(
 {
     return object.kind == kNavigatorElementHostKind &&
         (textEquals(property, "matches") ||
-            textEquals(property, "closest"));
+            textEquals(property, "closest") ||
+            textEquals(property, "parentElement") ||
+            textEquals(property, "children") ||
+            textEquals(property, "childElementCount") ||
+            textEquals(property, "firstElementChild") ||
+            textEquals(property, "lastElementChild") ||
+            textEquals(property, "nextElementSibling") ||
+            textEquals(property, "previousElementSibling"));
 }
 
 bool NavigatorScriptHostAdapter::allowsStaleHostMethod(
@@ -2003,6 +2010,103 @@ bool NavigatorScriptHostAdapter::isKnownElementSerial(
     return findElement(serial) != nullptr;
 }
 
+bool NavigatorScriptHostAdapter::resolveStructuralParentSerial(
+    HostInstanceId serial, HostInstanceId& parentSerial) const
+{
+    parentSerial = 0u;
+    const gxos::web::HtmlElementRef* element = findElement(serial);
+    if (element == nullptr || element->serial == 0u) return false;
+    if (element->parentSerial == element->serial) return false;
+    if (element->parentSerial != 0u &&
+        findElement(element->parentSerial) == nullptr) return false;
+    parentSerial = element->parentSerial;
+    return true;
+}
+
+bool NavigatorScriptHostAdapter::elementChildAt(
+    HostInstanceId parentSerial, std::size_t index,
+    HostInstanceId& childSerial) const
+{
+    childSerial = 0u;
+    if (document_ == nullptr || parentSerial == 0u ||
+        findElement(parentSerial) == nullptr) return false;
+    const std::size_t count = std::min(limits_.maxDocumentNodes,
+        document_->structuralElements.size());
+    std::size_t matched = 0u;
+    for (std::size_t position = 0u; position < count; ++position) {
+        const gxos::web::HtmlElementRef& candidate =
+            document_->structuralElements[position];
+        if (candidate.serial == 0u || candidate.parentSerial != parentSerial)
+            continue;
+        if (matched == index) {
+            childSerial = candidate.serial;
+            return true;
+        }
+        ++matched;
+    }
+    return false;
+}
+
+std::size_t NavigatorScriptHostAdapter::elementChildCount(
+    HostInstanceId parentSerial) const
+{
+    if (document_ == nullptr || parentSerial == 0u ||
+        findElement(parentSerial) == nullptr) return 0u;
+    const std::size_t count = std::min(limits_.maxDocumentNodes,
+        document_->structuralElements.size());
+    std::size_t children = 0u;
+    for (std::size_t position = 0u; position < count; ++position) {
+        const gxos::web::HtmlElementRef& candidate =
+            document_->structuralElements[position];
+        if (candidate.serial != 0u && candidate.parentSerial == parentSerial)
+            ++children;
+    }
+    return children;
+}
+
+bool NavigatorScriptHostAdapter::elementSiblingAt(
+    HostInstanceId serial, bool next, HostInstanceId& siblingSerial) const
+{
+    siblingSerial = 0u;
+    HostInstanceId parentSerial = 0u;
+    if (!resolveStructuralParentSerial(serial, parentSerial)) return false;
+    if (document_ == nullptr) return false;
+    const std::size_t count = std::min(limits_.maxDocumentNodes,
+        document_->structuralElements.size());
+    std::size_t receiverPosition = count;
+    for (std::size_t position = 0u; position < count; ++position) {
+        if (document_->structuralElements[position].serial == serial) {
+            receiverPosition = position;
+            break;
+        }
+    }
+    if (receiverPosition >= count) return false;
+
+    if (next) {
+        for (std::size_t position = receiverPosition + 1u;
+             position < count; ++position) {
+            const gxos::web::HtmlElementRef& candidate =
+                document_->structuralElements[position];
+            if (candidate.serial != 0u && candidate.parentSerial == parentSerial) {
+                siblingSerial = candidate.serial;
+                return true;
+            }
+        }
+    } else {
+        std::size_t position = receiverPosition;
+        while (position > 0u) {
+            --position;
+            const gxos::web::HtmlElementRef& candidate =
+                document_->structuralElements[position];
+            if (candidate.serial != 0u && candidate.parentSerial == parentSerial) {
+                siblingSerial = candidate.serial;
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 HostInstanceId NavigatorScriptHostAdapter::activeElementSerial() const
 {
     if (document_ == nullptr) return 0;
@@ -2142,8 +2246,9 @@ bool NavigatorScriptHostAdapter::selectorClosestMatch(
             matchSerial = candidate->serial;
             return true;
         }
-        if (candidate->parentSerial == candidate->serial) break;
-        candidateSerial = candidate->parentSerial;
+        HostInstanceId parentSerial = 0u;
+        if (!resolveStructuralParentSerial(candidateSerial, parentSerial)) break;
+        candidateSerial = parentSerial;
     }
     return false;
 }
@@ -2299,6 +2404,10 @@ HostResult NavigatorScriptHostAdapter::validate(
         isSelectFormElement(object.instanceId)) {
         return HostResult();
     }
+    if (object.kind == kNavigatorElementChildrenCollectionHostKind &&
+        isKnownElementSerial(object.instanceId)) {
+        return HostResult();
+    }
     if (object.kind == kNavigatorSelectorCollectionHostKind &&
         selectorCollectionFor(object.instanceId) != nullptr) {
         return HostResult();
@@ -2320,6 +2429,23 @@ HostResult NavigatorScriptHostAdapter::getProperty(
             textEquals(property, "closest"))) {
         result = HostValue::method(textEquals(property, "matches")
             ? kNavigatorMatchesMethod : kNavigatorClosestMethod, true, true);
+        return HostResult();
+    }
+    if (object.kind == kNavigatorElementHostKind &&
+        object.generation != generation_ &&
+        (textEquals(property, "parentElement") ||
+            textEquals(property, "children") ||
+            textEquals(property, "childElementCount") ||
+            textEquals(property, "firstElementChild") ||
+            textEquals(property, "lastElementChild") ||
+            textEquals(property, "nextElementSibling") ||
+            textEquals(property, "previousElementSibling"))) {
+        if (textEquals(property, "childElementCount"))
+            result = HostValue::number(0.0);
+        else if (textEquals(property, "children"))
+            result = HostValue::undefined();
+        else
+            result = HostValue::nullValue();
         return HostResult();
     }
     const HostResult validation = validate(object);
@@ -2448,6 +2574,25 @@ HostResult NavigatorScriptHostAdapter::getProperty(
         return HostResult();
     }
 
+    if (object.kind == kNavigatorElementChildrenCollectionHostKind) {
+        if (textEquals(property, "length")) {
+            result = HostValue::number(static_cast<double>(
+                elementChildCount(object.instanceId)));
+            return HostResult();
+        }
+        std::size_t index = 0u;
+        if (!parseCanonicalIndex(property, index))
+            return HostResult{HostResultCode::PropertyNotFound};
+        HostInstanceId childSerial = 0u;
+        if (!elementChildAt(object.instanceId, index, childSerial)) {
+            result = HostValue::undefined();
+            return HostResult();
+        }
+        result = HostValue::fromHostObject(HostObjectReference{
+            childSerial, generation_, kNavigatorElementHostKind});
+        return HostResult();
+    }
+
     if (object.kind == kNavigatorSelectorCollectionHostKind) {
         const SelectorCollectionRecord* record =
             selectorCollectionFor(object.instanceId);
@@ -2472,6 +2617,56 @@ HostResult NavigatorScriptHostAdapter::getProperty(
 
     const gxos::web::HtmlElementRef* element = findElement(object.instanceId);
     if (element == nullptr) return HostResult{HostResultCode::InvalidObject};
+    if (textEquals(property, "parentElement")) {
+        HostInstanceId parentSerial = 0u;
+        if (!resolveStructuralParentSerial(element->serial, parentSerial) ||
+            parentSerial == 0u) {
+            result = HostValue::nullValue();
+        } else {
+            result = HostValue::fromHostObject(HostObjectReference{
+                parentSerial, generation_, kNavigatorElementHostKind});
+        }
+        return HostResult();
+    }
+    if (textEquals(property, "children")) {
+        result = HostValue::fromHostObject(HostObjectReference{
+            element->serial, generation_,
+            kNavigatorElementChildrenCollectionHostKind});
+        return HostResult();
+    }
+    if (textEquals(property, "childElementCount")) {
+        result = HostValue::number(static_cast<double>(
+            elementChildCount(element->serial)));
+        return HostResult();
+    }
+    if (textEquals(property, "firstElementChild") ||
+        textEquals(property, "lastElementChild")) {
+        const std::size_t childCount = elementChildCount(element->serial);
+        HostInstanceId childSerial = 0u;
+        const bool hasChild = childCount != 0u && elementChildAt(element->serial,
+            textEquals(property, "firstElementChild") ? 0u : childCount - 1u,
+            childSerial);
+        if (!hasChild) {
+            result = HostValue::nullValue();
+        } else {
+            result = HostValue::fromHostObject(HostObjectReference{
+                childSerial, generation_, kNavigatorElementHostKind});
+        }
+        return HostResult();
+    }
+    if (textEquals(property, "nextElementSibling") ||
+        textEquals(property, "previousElementSibling")) {
+        HostInstanceId siblingSerial = 0u;
+        const bool hasSibling = elementSiblingAt(element->serial,
+            textEquals(property, "nextElementSibling"), siblingSerial);
+        if (!hasSibling) {
+            result = HostValue::nullValue();
+        } else {
+            result = HostValue::fromHostObject(HostObjectReference{
+                siblingSerial, generation_, kNavigatorElementHostKind});
+        }
+        return HostResult();
+    }
     if (textEquals(property, "elements")) {
         if (!isFormElement(element->serial))
             return HostResult{HostResultCode::PropertyNotFound};
@@ -2873,10 +3068,19 @@ HostResult NavigatorScriptHostAdapter::setProperty(
     if (object.kind == kNavigatorDocumentFormsCollectionHostKind ||
         object.kind == kNavigatorFormCollectionHostKind ||
         object.kind == kNavigatorOptionsCollectionHostKind ||
+        object.kind == kNavigatorElementChildrenCollectionHostKind ||
         object.kind == kNavigatorSelectorCollectionHostKind)
         return HostResult{HostResultCode::PropertyReadOnly};
     if (object.kind != kNavigatorElementHostKind)
         return HostResult{HostResultCode::PropertyWriteFailed};
+    if (textEquals(property, "parentElement") ||
+        textEquals(property, "children") ||
+        textEquals(property, "childElementCount") ||
+        textEquals(property, "firstElementChild") ||
+        textEquals(property, "lastElementChild") ||
+        textEquals(property, "nextElementSibling") ||
+        textEquals(property, "previousElementSibling"))
+        return HostResult{HostResultCode::PropertyReadOnly};
     if ((isFormElement(object.instanceId) &&
             (textEquals(property, "elements") ||
              textEquals(property, "length"))) ||

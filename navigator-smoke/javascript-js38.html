@@ -1,0 +1,109 @@
+<!doctype html>
+<html>
+<head><title>Navigator JavaScript JS38</title></head>
+<body>
+<h1>Navigator JavaScript JS38</h1>
+<div id="js38-panel" class="container">
+  <button id="js38-first" class="action" type="button">First</button>
+  <div id="js38-middle"><input id="js38-name" type="text" value="seed"></div>
+  <button id="js38-last" class="action" type="button">Last</button>
+</div>
+<form id="js38-form" name="structural-form">
+  <div id="js38-wrapper"><input id="js38-nested" name="nested" type="text" value="nested-seed"></div>
+  <select id="js38-select" name="choice">
+    <option id="js38-option-a" value="a" selected>A</option>
+    <option id="js38-option-b" value="b">B</option>
+  </select>
+  <button id="js38-form-button" type="button">Plain</button>
+</form>
+<form id="js38-action-form">
+  <button id="js38-submit" type="submit">Submit</button>
+  <button id="js38-reset" type="reset">Reset</button>
+  <input id="js38-action-input" name="action" type="text" value="action-seed">
+</form>
+<button id="js38-trigger-click" type="button">Click</button>
+<button id="js38-trigger-focus" type="button">Focus</button>
+<button id="js38-trigger-submit" type="button">Submit</button>
+<button id="js38-trigger-reset" type="button">Reset</button>
+<p id="js38-state">initial</p>
+<script>
+var js38State = document.getElementById("js38-state");
+var js38Panel = document.querySelector("#js38-panel");
+var js38First = js38Panel.firstElementChild;
+var js38Middle = js38Panel.children[1];
+var js38Last = js38Panel.lastElementChild;
+var js38Name = document.querySelector("#js38-name");
+var js38Form = document.querySelector("#js38-form");
+var js38Wrapper = js38Form.children[0];
+var js38Nested = js38Wrapper.children[0];
+var js38Select = js38Form.children[1];
+var js38ActionForm = document.querySelector("#js38-action-form");
+var js38ActionInput = js38ActionForm.children[2];
+var js38ClickSeen = false;
+var js38FocusSeen = false;
+var js38SubmitSeen = false;
+var js38ResetSeen = false;
+function js38Snapshot(label) {
+  var order = js38Panel.children.length === 3 &&
+    js38Panel.children[0] === js38First &&
+    js38Panel.children[1] === js38Middle &&
+    js38Panel.children[2] === js38Last;
+  var siblings = js38First.previousElementSibling === null &&
+    js38First.nextElementSibling === js38Middle &&
+    js38Middle.nextElementSibling === js38Last &&
+    js38Last.nextElementSibling === null;
+  var parents = js38Name.parentElement === js38Middle &&
+    js38Middle.parentElement === js38Panel;
+  var forms = js38Form.children[0] === js38Wrapper &&
+    js38Form.elements[0] === js38Nested &&
+    js38Form.children[0] !== js38Form.elements[0] &&
+    js38Nested.closest("form") === js38Form;
+  var options = js38Select.children[0] === js38Select.options[0] &&
+    js38Select.children[1] === js38Select.options[1];
+  var selectors = js38First.parentElement.matches(".container") &&
+    js38First.closest("#js38-panel") === js38Panel &&
+    js38Middle.querySelector("#js38-name") === js38Name;
+  js38State.textContent = label + ":order=" + order + ":count=" +
+    (js38Panel.childElementCount === 3) + ":first=" +
+    (js38Panel.firstElementChild === js38First) + ":last=" +
+    (js38Panel.lastElementChild === js38Last) + ":siblings=" + siblings +
+    ":parents=" + parents + ":forms=" + forms + ":options=" + options +
+    ":selectors=" + selectors + ":click=" + js38ClickSeen +
+    ":focus=" + js38FocusSeen + ":submit=" + js38SubmitSeen +
+    ":reset=" + js38ResetSeen + ":value=" + js38ActionInput.value;
+}
+js38Panel.addEventListener("click", function(event) {
+  js38ClickSeen = event.target === js38First &&
+    event.target.parentElement === js38Panel &&
+    event.currentTarget === js38Panel && event.relatedTarget === null &&
+    event.defaultPrevented === false &&
+    event.target.closest(".container") === js38Panel;
+});
+js38Name.addEventListener("focus", function(event) {
+  js38FocusSeen = true;
+});
+js38ActionForm.addEventListener("submit", function(event) {
+  js38SubmitSeen = event.target === js38ActionForm &&
+    event.target.children[0] === js38ActionForm.children[0] &&
+    event.currentTarget === js38ActionForm && event.defaultPrevented === false;
+  event.preventDefault();
+});
+js38ActionForm.addEventListener("reset", function(event) {
+  js38ResetSeen = event.target === js38ActionForm &&
+    event.target.children[1] === js38ActionForm.children[1] &&
+    event.currentTarget === js38ActionForm && event.defaultPrevented === false;
+});
+document.getElementById("js38-trigger-click").addEventListener("click",
+  function() { js38First.click(); js38Snapshot("click"); });
+document.getElementById("js38-trigger-focus").addEventListener("click",
+  function() { js38Name.focus(); js38FocusSeen = true; js38Snapshot("focus"); });
+document.getElementById("js38-trigger-submit").addEventListener("click",
+  function() { js38ActionInput.value = "hosted-current";
+    js38ActionForm.children[0].click(); js38Snapshot("submit"); });
+document.getElementById("js38-trigger-reset").addEventListener("click",
+  function() { js38ActionInput.value = "hosted-changed";
+    js38ActionForm.children[1].click(); js38Snapshot("reset"); });
+js38Snapshot("initial");
+</script>
+</body>
+</html>
