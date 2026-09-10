@@ -17,6 +17,7 @@ enum class LaunchStatus : int32_t {
     TlsFailed = -8,
     StartupFailed = -9,
     ManagedFailed = -10,
+    Busy = -11,
 };
 
 struct LaunchReport {
@@ -37,8 +38,18 @@ struct LaunchReport {
     uint64_t postAllocatedFrames;
     uint64_t postVmRegionFrames;
     uint64_t postPageTableFrames;
+    uint64_t mapTotalTracked;
+    uint64_t mapFreeFrames;
+    uint64_t mapAllocatedFrames;
+    uint64_t mapVmRegionFrames;
+    uint64_t mapPageTableFrames;
     uint64_t accountingResidual;
     uint64_t ownerResidual;
+    uint32_t sequence;
+    bool runtimeInitialized;
+    bool runtimeReused;
+    bool residentImage;
+    bool lifecycleReusable;
     bool mappingsPersistentByDesign;
     bool managedEntryReached;
     bool managedPassReached;

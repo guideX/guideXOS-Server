@@ -930,6 +930,53 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         kernel::serial::put_hex32(static_cast<uint32_t>(c102Report.managedReturn));
         kernel::serial::puts("\n");
 #endif
+
+#if defined(GXOS_C103_PRODUCTION_LAUNCH) || defined(GXOS_C103_NEGATIVE_LAUNCH)
+        const char* c103Path = "/system/wall/C102.ELF";
+        kernel::serial::puts("[C103-LAUNCH] ordinary application discovery path=");
+        kernel::serial::puts(c103Path);
+        kernel::serial::puts(" proofMode=0\n");
+        kernel::nativeaot::LaunchReport c103First{};
+        const kernel::nativeaot::LaunchStatus c103FirstStatus =
+            kernel::nativeaot::launch(c103Path, &c103First);
+        kernel::serial::puts("[C103-LAUNCH] sequence=");
+        kernel::serial::put_hex32(c103First.sequence);
+        kernel::serial::puts(" status=");
+        kernel::serial::puts(kernel::nativeaot::launchStatusName(c103FirstStatus));
+        kernel::serial::puts(" managedReturn=");
+        kernel::serial::put_hex32(static_cast<uint32_t>(c103First.managedReturn));
+        kernel::serial::puts(" runtimeInitialized=");
+        kernel::serial::put_hex32(c103First.runtimeInitialized ? 1u : 0u);
+        kernel::serial::puts(" runtimeReused=");
+        kernel::serial::put_hex32(c103First.runtimeReused ? 1u : 0u);
+        kernel::serial::puts(" residentImage=");
+        kernel::serial::put_hex32(c103First.residentImage ? 1u : 0u);
+        kernel::serial::puts("\n");
+#if defined(GXOS_C103_NEGATIVE_LAUNCH)
+        kernel::nativeaot::LaunchReport c103Missing{};
+        const kernel::nativeaot::LaunchStatus c103MissingStatus =
+            kernel::nativeaot::launch("/system/wall/MISSING.ELF", &c103Missing);
+        kernel::serial::puts("[C103-LAUNCH] negative path=/system/wall/MISSING.ELF status=");
+        kernel::serial::puts(kernel::nativeaot::launchStatusName(c103MissingStatus));
+        kernel::serial::puts("\n");
+#endif
+        kernel::nativeaot::LaunchReport c103Second{};
+        const kernel::nativeaot::LaunchStatus c103SecondStatus =
+            kernel::nativeaot::launch(c103Path, &c103Second);
+        kernel::serial::puts("[C103-LAUNCH] sequence=");
+        kernel::serial::put_hex32(c103Second.sequence);
+        kernel::serial::puts(" status=");
+        kernel::serial::puts(kernel::nativeaot::launchStatusName(c103SecondStatus));
+        kernel::serial::puts(" managedReturn=");
+        kernel::serial::put_hex32(static_cast<uint32_t>(c103Second.managedReturn));
+        kernel::serial::puts(" runtimeInitialized=");
+        kernel::serial::put_hex32(c103Second.runtimeInitialized ? 1u : 0u);
+        kernel::serial::puts(" runtimeReused=");
+        kernel::serial::put_hex32(c103Second.runtimeReused ? 1u : 0u);
+        kernel::serial::puts(" residentImage=");
+        kernel::serial::put_hex32(c103Second.residentImage ? 1u : 0u);
+        kernel::serial::puts("\n");
+#endif
         
         kernel::serial::puts("[KERNEL] Entering main loop (waiting for input)...\n");
         

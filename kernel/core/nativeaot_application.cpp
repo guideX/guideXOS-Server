@@ -38,6 +38,7 @@ constexpr uint32_t kMaxWorkerSlots = 4u;
 constexpr uint32_t kMaxFlsSlots = gxos::runtime::kLocalStorageCapacity;
 constexpr uint32_t kMaxFlsContexts = gxos::runtime::kLocalStorageMaximumContexts;
 constexpr uint64_t kMaxArtifactBytes = 4u * 1024u * 1024u;
+constexpr uint32_t kMaxApplicationPath = 128u;
 constexpr uint32_t kElfClass64 = 2u;
 constexpr uint32_t kElfDataLittle = 1u;
 constexpr uint16_t kElfExecutable = 2u;
@@ -144,6 +145,23 @@ struct NativeAotStartupContext {
     void (*startupMarker)(uint32_t stage);
 };
 
+enum class ApplicationLifecycleState : uint32_t {
+    Empty = 0,
+    Loading = 1,
+    Resident = 2,
+};
+
+struct ResidentApplication {
+    ApplicationLifecycleState state;
+    char path[kMaxApplicationPath];
+    uint64_t artifactBytes;
+    uintptr_t artifactBase;
+    uintptr_t artifactSpan;
+    uintptr_t entryPoint;
+    uint16_t loadSegmentCount;
+    uint32_t sequence;
+};
+
 static_assert(sizeof(NativeHostCallTable) == 16, "C102 host callback ABI drift");
 static_assert(sizeof(NativeGxAppContext) == 24, "C102 application ABI drift");
 static_assert(offsetof(NativeAotTlsGsArea, vector) == 0x58,
@@ -165,6 +183,13 @@ alignas(16) uint8_t g_tlsBlock[0x110] = {};
 void* g_tlsVector[1] = {};
 bool g_c102ManagedEntryObserved = false;
 bool g_c102ManagedPassObserved = false;
+ResidentApplication g_application = {};
+
+#if defined(GXOS_C103_PRODUCTION_LAUNCH) || defined(GXOS_C103_NEGATIVE_LAUNCH)
+constexpr bool kC103LifecycleEnabled = true;
+#else
+constexpr bool kC103LifecycleEnabled = false;
+#endif
 
 bool boundedRange(uint64_t offset, uint64_t size, uint64_t limit) {
     return offset <= limit && size <= limit - offset;
@@ -199,6 +224,87 @@ void emitFrameAccounting(const char* phase, const memory::address_space::FrameAc
         ? stats.allocatedFrames - stats.regionOwnedFrames -
               stats.pageTableFrames - stats.kernelOwnedFrames : UINT64_MAX);
     serial::puts("\n");
+}
+
+void emitC103Begin(uint32_t sequence, const char* path, bool reused) {
+    if (!kC103LifecycleEnabled) return;
+    serial::puts("[C103-LAUNCH-BEGIN] sequence=");
+    serial::put_hex32(sequence);
+    serial::puts(" path=");
+    serial::puts(path);
+    serial::puts(" runtime=");
+    serial::puts(reused ? "reused" : "initialized");
+    serial::puts(" image=");
+    serial::puts(reused ? "resident" : "mapped");
+    serial::puts("\n");
+}
+
+void emitC103Frames(const char* phase, uint32_t sequence,
+                    const memory::address_space::FrameAccounting& stats) {
+    if (!kC103LifecycleEnabled) return;
+    serial::puts("[C103-FRAMES] phase=");
+    serial::puts(phase);
+    serial::puts(" sequence=");
+    serial::put_hex32(sequence);
+    serial::puts(" totalTracked=");
+    serial::put_hex64(stats.totalKnownFrames);
+    serial::puts(" free=");
+    serial::put_hex64(stats.freeFrames);
+    serial::puts(" allocated=");
+    serial::put_hex64(stats.allocatedFrames);
+    serial::puts(" vmRegion=");
+    serial::put_hex64(stats.regionOwnedFrames);
+    serial::puts(" pageTable=");
+    serial::put_hex64(stats.pageTableFrames);
+    serial::puts(" residual=");
+    serial::put_hex64(stats.totalKnownFrames >= stats.freeFrames + stats.allocatedFrames
+        ? stats.totalKnownFrames - stats.freeFrames - stats.allocatedFrames : UINT64_MAX);
+    serial::puts(" ownerResidual=");
+    serial::put_hex64(stats.allocatedFrames >=
+            stats.regionOwnedFrames + stats.pageTableFrames + stats.kernelOwnedFrames
+        ? stats.allocatedFrames - stats.regionOwnedFrames -
+              stats.pageTableFrames - stats.kernelOwnedFrames : UINT64_MAX);
+    serial::puts("\n");
+}
+
+void emitC103Lifecycle(uint32_t sequence, const char* state, bool runtimeReused) {
+    if (!kC103LifecycleEnabled) return;
+    serial::puts("[C103-LIFECYCLE] sequence=");
+    serial::put_hex32(sequence);
+    serial::puts(" state=");
+    serial::puts(state);
+    serial::puts(" runtime=");
+    serial::puts(runtimeReused ? "reused" : "initialized");
+    serial::puts(" image=resident reusable=1\n");
+}
+
+void emitC103Return(uint32_t sequence, LaunchStatus status) {
+    if (!kC103LifecycleEnabled) return;
+    serial::puts("[C103-LAUNCH-RETURN] sequence=");
+    serial::put_hex32(sequence);
+    serial::puts(" status=");
+    serial::puts(launchStatusName(status));
+    serial::puts("\n");
+}
+
+bool copyApplicationPath(const char* source, char* destination) {
+    if (source == nullptr || destination == nullptr) return false;
+    uint32_t index = 0;
+    for (; index + 1u < kMaxApplicationPath && source[index] != 0; ++index) {
+        destination[index] = source[index];
+    }
+    if (source[index] != 0) return false;
+    destination[index] = 0;
+    return true;
+}
+
+bool sameApplicationPath(const char* left, const char* right) {
+    if (left == nullptr || right == nullptr) return false;
+    for (uint32_t index = 0; index < kMaxApplicationPath; ++index) {
+        if (left[index] != right[index]) return false;
+        if (left[index] == 0) return true;
+    }
+    return false;
 }
 
 bool installTls() {
@@ -923,8 +1029,127 @@ const char* launchStatusName(LaunchStatus status) {
         case LaunchStatus::TlsFailed: return "tls-failed";
         case LaunchStatus::StartupFailed: return "startup-failed";
         case LaunchStatus::ManagedFailed: return "managed-failed";
+        case LaunchStatus::Busy: return "busy";
     }
     return "unknown";
+}
+
+LaunchStatus launchResident(const char* path, LaunchReport* report) {
+    const uint32_t sequence = g_application.sequence + 1u;
+    emitC103Begin(sequence, path, true);
+    const uint8_t handle = vfs::open(path, vfs::OPEN_READ);
+    if (handle == 0xFFu) {
+        report->status = LaunchStatus::NotFound;
+        serial::puts("[C102-LAUNCH] rejected status=not-found path=");
+        serial::puts(path);
+        serial::puts("\n");
+        emitC103Return(g_application.sequence, report->status);
+        return report->status;
+    }
+    (void)vfs::close(handle);
+    if (!sameApplicationPath(path, g_application.path)) {
+        report->status = LaunchStatus::Busy;
+        emitC103Lifecycle(g_application.sequence, "resident-different-image", true);
+        emitC103Return(g_application.sequence, report->status);
+        return report->status;
+    }
+
+    report->artifactBytes = g_application.artifactBytes;
+    report->artifactBase = g_application.artifactBase;
+    report->artifactSpan = g_application.artifactSpan;
+    report->loadSegmentCount = g_application.loadSegmentCount;
+    report->entryPoint = g_application.entryPoint;
+    report->sequence = sequence;
+    report->runtimeInitialized = true;
+    report->runtimeReused = true;
+    report->residentImage = true;
+    report->lifecycleReusable = true;
+    const memory::address_space::FrameAccounting before =
+        memory::address_space::accounting();
+    report->preTotalTracked = before.totalKnownFrames;
+    report->preFreeFrames = before.freeFrames;
+    report->preAllocatedFrames = before.allocatedFrames;
+    report->preVmRegionFrames = before.regionOwnedFrames;
+    report->prePageTableFrames = before.pageTableFrames;
+    report->mapTotalTracked = before.totalKnownFrames;
+    report->mapFreeFrames = before.freeFrames;
+    report->mapAllocatedFrames = before.allocatedFrames;
+    report->mapVmRegionFrames = before.regionOwnedFrames;
+    report->mapPageTableFrames = before.pageTableFrames;
+    emitFrameAccounting("before", before);
+    emitC103Frames("before", sequence, before);
+    serial::puts("[C103-LOADER] reusing resident ELF64 AMD64 ET_EXEC entry=");
+    serial::put_hex64(report->entryPoint);
+    serial::puts(" base=");
+    serial::put_hex64(report->artifactBase);
+    serial::puts(" span=");
+    serial::put_hex64(report->artifactSpan);
+    serial::puts("\n");
+
+    if (!gxos::runtime::isLocalStorageInitialized() &&
+        gxos::runtime::initializeLocalStorage() != gxos::runtime::LocalStorageResult::Success) {
+        report->status = LaunchStatus::RuntimeFoundationFailed;
+        emitC103Return(sequence, report->status);
+        return report->status;
+    }
+    if (gxos::runtime::attachLocalStorage() != gxos::runtime::LocalStorageResult::Success ||
+        (!guidexos::nativeaot::threadstore::isInitialized() &&
+         guidexos::nativeaot::threadstore::initialize() !=
+             guidexos::nativeaot::threadstore::Result::Success) ||
+        (guidexos::nativeaot::threadstore::getCurrentThread() == nullptr &&
+         guidexos::nativeaot::threadstore::attachCurrentThread() !=
+             guidexos::nativeaot::threadstore::Result::Success)) {
+        report->status = LaunchStatus::RuntimeFoundationFailed;
+        emitC103Return(sequence, report->status);
+        return report->status;
+    }
+    serial::puts("[C103-RUNTIME] resident runtime reused TLS=0\n");
+
+    guidexos_nativeaot_pal_hooks legacy{};
+    fillLegacyHooks(&legacy);
+    guidexos_nativeaot_pal_hook_table_v1 pal{};
+    fillPalTable(&pal, report->artifactBase, report->artifactSpan);
+    guidexos_nativeaot_gc_startup_platform_table_v1 gc{};
+    fillGcTable(&gc);
+    NativeHostCallTable host{ sizeof(NativeHostCallTable), 0u, managedLog };
+    NativeGxAppContext app{ sizeof(NativeGxAppContext), 0u, &host, nullptr };
+    NativeAotStartupContext startup{
+        &legacy, &pal, &gc, &app, startupInstallTls, startupMarker };
+    using Entry = int32_t (GUIDEXOS_NATIVEAOT_PAL_CALL *)(void*);
+    g_c102ManagedEntryObserved = false;
+    g_c102ManagedPassObserved = false;
+    arch::amd64::disable_interrupts();
+    const int32_t managedReturn = reinterpret_cast<Entry>(report->entryPoint)(&startup);
+    arch::amd64::enable_interrupts();
+    report->managedReturn = managedReturn;
+    report->managedEntryReached = g_c102ManagedEntryObserved;
+    report->managedPassReached = g_c102ManagedPassObserved && managedReturn == 0;
+    report->launcherRegainedControl = true;
+    report->mappingsPersistentByDesign = true;
+    g_application.sequence = sequence;
+    emitManagedStatus(report->managedEntryReached, report->managedPassReached);
+    serial::puts("[C102-LAUNCH-RETURN] status=");
+    serial::put_hex32(static_cast<uint32_t>(managedReturn));
+    serial::puts("\n");
+    const memory::address_space::FrameAccounting after = memory::address_space::accounting();
+    report->postTotalTracked = after.totalKnownFrames;
+    report->postFreeFrames = after.freeFrames;
+    report->postAllocatedFrames = after.allocatedFrames;
+    report->postVmRegionFrames = after.regionOwnedFrames;
+    report->postPageTableFrames = after.pageTableFrames;
+    report->accountingResidual = after.totalKnownFrames >= after.freeFrames + after.allocatedFrames
+        ? after.totalKnownFrames - after.freeFrames - after.allocatedFrames : UINT64_MAX;
+    report->ownerResidual = after.allocatedFrames >=
+            after.regionOwnedFrames + after.pageTableFrames + after.kernelOwnedFrames
+        ? after.allocatedFrames - after.regionOwnedFrames -
+              after.pageTableFrames - after.kernelOwnedFrames : UINT64_MAX;
+    emitFrameAccounting("after-return", after);
+    emitC103Frames("after-return", sequence, after);
+    emitC103Frames("after-lifecycle", sequence, after);
+    emitC103Lifecycle(sequence, "resident", true);
+    report->status = managedReturn == 0 ? LaunchStatus::Success : LaunchStatus::ManagedFailed;
+    emitC103Return(sequence, report->status);
+    return report->status;
 }
 
 LaunchStatus launch(const char* path, LaunchReport* report) {
@@ -933,13 +1158,23 @@ LaunchStatus launch(const char* path, LaunchReport* report) {
     *report = {};
     report->status = LaunchStatus::InvalidPath;
     if (path == nullptr || path[0] != '/') return report->status;
+    char requestedPath[kMaxApplicationPath] = {};
+    if (!copyApplicationPath(path, requestedPath)) return report->status;
+    if (g_application.state == ApplicationLifecycleState::Resident) {
+        return launchResident(requestedPath, report);
+    }
+    g_application.state = ApplicationLifecycleState::Loading;
+    const uint32_t sequence = 1u;
+    emitC103Begin(sequence, requestedPath, false);
 
-    const uint8_t handle = vfs::open(path, vfs::OPEN_READ);
+    const uint8_t handle = vfs::open(requestedPath, vfs::OPEN_READ);
     if (handle == 0xFFu) {
         report->status = LaunchStatus::NotFound;
         serial::puts("[C102-LAUNCH] rejected status=not-found path=");
         serial::puts(path);
         serial::puts("\n");
+        g_application.state = ApplicationLifecycleState::Empty;
+        emitC103Return(sequence, report->status);
         return report->status;
     }
     const int64_t fileSize = vfs::file_size(handle);
@@ -947,6 +1182,8 @@ LaunchStatus launch(const char* path, LaunchReport* report) {
         (void)vfs::close(handle);
         report->status = fileSize > static_cast<int64_t>(kMaxArtifactBytes)
             ? LaunchStatus::ArtifactTooLarge : LaunchStatus::ReadFailed;
+        g_application.state = ApplicationLifecycleState::Empty;
+        emitC103Return(sequence, report->status);
         return report->status;
     }
     report->artifactBytes = static_cast<uint64_t>(fileSize);
@@ -959,6 +1196,8 @@ LaunchStatus launch(const char* path, LaunchReport* report) {
         if (read <= 0 || static_cast<uint32_t>(read) != chunk) {
             (void)vfs::close(handle);
             report->status = LaunchStatus::ReadFailed;
+            g_application.state = ApplicationLifecycleState::Empty;
+            emitC103Return(sequence, report->status);
             return report->status;
         }
         loaded += static_cast<uint32_t>(read);
@@ -968,6 +1207,8 @@ LaunchStatus launch(const char* path, LaunchReport* report) {
     if (!memory::address_space::reserveCurrentKernelImage()) {
         report->status = LaunchStatus::RuntimeFoundationFailed;
         serial::puts("[C102-LOADER] rejected status=kernel-frame-claim-failed\n");
+        g_application.state = ApplicationLifecycleState::Empty;
+        emitC103Return(sequence, report->status);
         return report->status;
     }
 
@@ -978,8 +1219,9 @@ LaunchStatus launch(const char* path, LaunchReport* report) {
     report->preVmRegionFrames = before.regionOwnedFrames;
     report->prePageTableFrames = before.pageTableFrames;
     emitFrameAccounting("before", before);
+    emitC103Frames("before", sequence, before);
     serial::puts("[C102-LOADER] validating path=");
-    serial::puts(path);
+    serial::puts(requestedPath);
     serial::puts(" bytes=");
     serial::put_hex64(report->artifactBytes);
     serial::puts("\n");
@@ -987,10 +1229,21 @@ LaunchStatus launch(const char* path, LaunchReport* report) {
     const bool mapped = mapElf(g_artifact, report->artifactBytes, report);
     arch::amd64::enable_interrupts();
     if (!mapped) {
+        releaseMappedPages();
         report->status = LaunchStatus::InvalidElf;
         serial::puts("[C102-LOADER] rejected status=invalid-elf\n");
+        g_application.state = ApplicationLifecycleState::Empty;
+        emitC103Return(sequence, report->status);
         return report->status;
     }
+    const memory::address_space::FrameAccounting afterMap =
+        memory::address_space::accounting();
+    report->mapTotalTracked = afterMap.totalKnownFrames;
+    report->mapFreeFrames = afterMap.freeFrames;
+    report->mapAllocatedFrames = afterMap.allocatedFrames;
+    report->mapVmRegionFrames = afterMap.regionOwnedFrames;
+    report->mapPageTableFrames = afterMap.pageTableFrames;
+    emitC103Frames("after-map", sequence, afterMap);
     serial::puts("[C102-LOADER] mapped ELF64 AMD64 ET_EXEC segments=");
     serial::put_hex32(report->loadSegmentCount);
     serial::puts(" entry=");
@@ -1003,7 +1256,10 @@ LaunchStatus launch(const char* path, LaunchReport* report) {
 
     if (!gxos::runtime::isLocalStorageInitialized() &&
         gxos::runtime::initializeLocalStorage() != gxos::runtime::LocalStorageResult::Success) {
+        releaseMappedPages();
+        g_application.state = ApplicationLifecycleState::Empty;
         report->status = LaunchStatus::RuntimeFoundationFailed;
+        emitC103Return(sequence, report->status);
         return report->status;
     }
     if (gxos::runtime::attachLocalStorage() != gxos::runtime::LocalStorageResult::Success ||
@@ -1012,7 +1268,10 @@ LaunchStatus launch(const char* path, LaunchReport* report) {
              guidexos::nativeaot::threadstore::Result::Success) ||
         guidexos::nativeaot::threadstore::attachCurrentThread() !=
             guidexos::nativeaot::threadstore::Result::Success) {
+        releaseMappedPages();
+        g_application.state = ApplicationLifecycleState::Empty;
         report->status = LaunchStatus::RuntimeFoundationFailed;
+        emitC103Return(sequence, report->status);
         return report->status;
     }
     serial::puts("[C102-RUNTIME] PAL/VM/GC startup seam ready TLS=0\n");
@@ -1041,6 +1300,19 @@ LaunchStatus launch(const char* path, LaunchReport* report) {
     report->managedEntryReached = g_c102ManagedEntryObserved;
     report->managedPassReached = g_c102ManagedPassObserved && managedReturn == 0;
     report->launcherRegainedControl = true;
+    g_application.state = ApplicationLifecycleState::Resident;
+    (void)copyApplicationPath(requestedPath, g_application.path);
+    g_application.artifactBytes = report->artifactBytes;
+    g_application.artifactBase = report->artifactBase;
+    g_application.artifactSpan = report->artifactSpan;
+    g_application.entryPoint = report->entryPoint;
+    g_application.loadSegmentCount = report->loadSegmentCount;
+    g_application.sequence = sequence;
+    report->sequence = sequence;
+    report->runtimeInitialized = true;
+    report->runtimeReused = false;
+    report->residentImage = true;
+    report->lifecycleReusable = true;
     emitManagedStatus(report->managedEntryReached, report->managedPassReached);
     serial::puts("[C102-LAUNCH-RETURN] status=");
     serial::put_hex32(static_cast<uint32_t>(managedReturn));
@@ -1060,7 +1332,11 @@ LaunchStatus launch(const char* path, LaunchReport* report) {
               after.pageTableFrames - after.kernelOwnedFrames : UINT64_MAX;
     report->mappingsPersistentByDesign = true;
     emitFrameAccounting("after-return", after);
+    emitC103Frames("after-return", sequence, after);
+    emitC103Frames("after-lifecycle", sequence, after);
+    emitC103Lifecycle(sequence, "resident", false);
     report->status = managedReturn == 0 ? LaunchStatus::Success : LaunchStatus::ManagedFailed;
+    emitC103Return(sequence, report->status);
     return report->status;
 }
 
