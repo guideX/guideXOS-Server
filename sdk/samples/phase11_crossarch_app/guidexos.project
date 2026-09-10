@@ -1,0 +1,11 @@
+{
+  "projectId": "com.guidexos.phase11.crossarch",
+  "projectKind": "native-gui-application",
+  "defaultTargetProfile": "guidexos.multi.baremetal.bootstrap.native",
+  "abi": "guidexos-c-abi-v1",
+  "architecture": "multi",
+  "sourceRoot": "src",
+  "sourceEntry": "main.c",
+  "outputName": "app",
+  "packageRoot": "/Apps/Phase11CrossArchApp"
+}

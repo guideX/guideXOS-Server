@@ -192,10 +192,11 @@ QMP transport redesign remain out of scope. Full AMD64 bare-metal boot is not
 claimed where the existing Mbed TLS environment blocks it; the genuine AMD64
 ELF, ABI layout, resolver, and machine checks are covered here.
 
-## AARCH64-11 recommendation
+## AARCH64-11 follow-on
 
-Implement package-generation-aware installation/update invalidation and move
-the common payload resolver behind the production package manager boundary,
-then add a real AMD64 guideXOS boot proof. Keep the canonical architecture
-enum and no-fallback rule unchanged while adding the next architecture only
-after its NativeElf ABI and backend validation are independently complete.
+The resident Developer Studio/compiler milestone is documented in
+`AARCH64_PHASE11_DEVELOPER_STUDIO.md`. It reuses this canonical architecture
+enum, exact-entry selection, and no-fallback rule while compiling one VFS
+source tree into both payload slots inside guideXOS. The remaining roadmap is
+package-generation-aware installation/update invalidation, a real AMD64
+guideXOS boot proof, and a larger typed compiler pipeline.

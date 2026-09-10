@@ -65,7 +65,7 @@ static_assert(offsetof(gx_host_calls, window_destroy) == 248, "window destroy sl
 static_assert(offsetof(gx_host_calls, widget_create) == 256, "widget create slot changed");
 static_assert(offsetof(gx_host_calls, widget_set_text) == 264, "widget set text slot changed");
 static_assert(offsetof(gx_host_calls, widget_set_value) == 272, "widget set value slot changed");
-static_assert(sizeof(gx_host_calls) == 288, "gx_host_calls size changed");
+static_assert(sizeof(gx_host_calls) == 360, "gx_host_calls size changed");
 static_assert(offsetof(gx_host_calls, wait_event) == 280, "wait_event slot changed");
 static_assert(GX_GUI_V1_HOST_CALLS_SIZE == 280, "GUI v1 size changed");
 static_assert(GX_GUI_HOST_CALLS_SIZE == 288, "GUI ABI table size changed");
@@ -95,7 +95,7 @@ static_assert(offsetof(gx_build_request, configuration) == 64, "build request co
 static_assert(sizeof(gx_build_output_line) == 260, "build output line size changed");
 static_assert(offsetof(gx_build_snapshot, handle) == 8, "build snapshot handle offset changed");
 static_assert(offsetof(gx_build_snapshot, artifactPath) == 72, "build snapshot artifact offset changed");
-static_assert(sizeof(gx_build_snapshot) == 8784, "build snapshot size changed");
+static_assert(sizeof(gx_build_snapshot) == 9248, "build snapshot size changed");
 
 constexpr uint64_t kPacManFrameWidth = 448;
 constexpr uint64_t kPacManFrameHeight = 553;

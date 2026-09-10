@@ -202,15 +202,18 @@ Uses:
 
 ## Roadmap (Realistic)
 
-### ARM64 Phase 9 (Current Focus)
+### ARM64 Phase 11 (Current Focus)
 
-* NativeElf per-application runtime services
-* Wait/wake event queues and lifecycle-safe close delivery
-* Generation-checked handles and resource quotas
-* Concurrent ARM64 GUI runtimes and three-boot QMP proof
+* Developer Studio compiler frontend resident inside the ARM64 guest
+* ARM64 and AMD64 cross-target emission from one VFS source tree
+* Multi-architecture NativeElf publication, refresh, and exact ARM64 selection
+* Invalid-source recovery and fresh-build package proof across three boots
 
 The Phase 7 high-rate QEMU/QMP limitation remains documented and is not claimed
 as `AARCH64_PHASE7_PASS`.
+
+See `docs/aarch64/AARCH64_PHASE11_DEVELOPER_STUDIO.md` for the bounded language,
+ABI contract, build commands, limitations, and 56-item implementation report.
 
 ### Path Forward
 

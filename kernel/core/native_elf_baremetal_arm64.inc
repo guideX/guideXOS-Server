@@ -714,6 +714,13 @@ void discover()
     arm64_print("[guideXOS] App discovery count="); phase3_serial_dec(s_arm64PackageCount); arm64_print("\n");
 }
 
+void refresh()
+{
+    s_arm64PackageCount = 0;
+    s_arm64Discovered = false;
+    arm64_print("[guideXOS] App Model package refresh: PASS\n");
+}
+
 static Arm64Package* arm64_find_package(const char* name)
 {
     if (!name) return nullptr;
@@ -1380,6 +1387,7 @@ struct Phase9Runtime {
     bool closeRequested;
     bool isAppA;
     bool isPhase10;
+    bool isPhase11;
     bool entered;
     uint64_t startTick;
     uint32_t buttonClicks;
@@ -1418,6 +1426,16 @@ static volatile uint32_t s_phase9VfsUsers = 0;
 static bool s_phase9AppAImagePrimed = false;
 static bool s_phase9AppBImagePrimed = false;
 #if defined(GXOS_AARCH64_PHASE10)
+static const char kPhase11ProjectId[] = "com.guidexos.phase11.crossarch";
+static const char kPhase11ProjectRoot[] = "/Apps/Phase11CrossArchApp";
+static const char kPhase11SourcePath[] = "/Apps/Phase11CrossArchApp/src/main.c";
+static const char kPhase11TargetProfile[] = "guidexos.multi.baremetal.bootstrap.native";
+static const char kPhase11BuildSystem[] = "guidexos-native-baremetal-bootstrap-v1";
+static const char kPhase11BuildArtifact[] = "build/bin/arm64/app.elf";
+static const char kPhase11PackageArtifact[] = "/Apps/Phase11CrossArchApp/bin/arm64/app.elf";
+static const uint32_t kPhase11ArtifactCapacity = 16384u;
+static uint8_t s_phase11BaselineArtifact[kPhase11ArtifactCapacity] = {};
+static uint8_t s_phase11RebuiltArtifact[kPhase11ArtifactCapacity] = {};
 static uint32_t s_phase10Launches = 0;
 static bool s_phase10WaitWakeLogged = false;
 static bool s_phase10WaitLogged = false;
@@ -1818,7 +1836,7 @@ static gx_result GX_CALL phase9_log(gx_app_context* context, const char* message
     if (!runtime || !phase9_string_valid(message)) return GX_ERROR_INVALID_ARGUMENT;
     runtime->entered = true;
     const arch::interrupt_state_t state = arch::irq_save();
-    arm64_print(runtime->isPhase10 ? "[phase10-app] " : (runtime->isAppA ? "[phase9-app-a] " : "[phase9-app-b] ")); arm64_print(message); arm64_print("\n");
+    arm64_print(runtime->isPhase11 ? "[phase11-app] " : (runtime->isPhase10 ? "[phase10-app] " : (runtime->isAppA ? "[phase9-app-a] " : "[phase9-app-b] "))); arm64_print(message); arm64_print("\n");
     if (runtime->isAppA && arm64_equal(message, "focus/input isolation: PASS value=appa"))
         arm64_print("[guideXOS] cross-app focus isolation: PASS\n");
     if (!runtime->isAppA && arm64_equal(message, "focus/input isolation: PASS value=appb"))
@@ -1834,6 +1852,112 @@ static gx_result GX_CALL phase9_log(gx_app_context* context, const char* message
 
 static uint32_t GX_CALL phase9_api_version(gx_app_context* context) { return phase9_runtime(context) ? GX_API_VERSION : UINT32_MAX; }
 static gx_result GX_CALL phase9_exit(gx_app_context* context, gx_result code) { return phase9_runtime(context) ? code : GX_ERROR_INVALID_ARGUMENT; }
+
+#if defined(GXOS_AARCH64_PHASE10)
+static bool phase11_path_valid(const char* path)
+{
+    if (!path || !path[0] || !phase9_string_valid(path)) return false;
+    return path[0] == '/';
+}
+
+static gx_result GX_CALL phase11_file_stat(gx_app_context* context, const char* path, gx_file_info* output)
+{
+    if (!phase9_runtime(context) || !phase11_path_valid(path) || !output) return GX_ERROR_INVALID_ARGUMENT;
+    vfs::FileInfo info = {};
+    if (vfs::stat(path, &info) != vfs::VFS_OK) return GX_ERROR_FAILED;
+    output->type = info.type == vfs::FILE_TYPE_DIRECTORY ? GX_FILE_TYPE_DIRECTORY :
+        (info.type == vfs::FILE_TYPE_REGULAR ? GX_FILE_TYPE_REGULAR : GX_FILE_TYPE_UNKNOWN);
+    output->reserved = 0;
+    output->size = info.size;
+    return GX_OK;
+}
+
+static gx_result GX_CALL phase11_file_read(gx_app_context* context, const char* path, void* buffer,
+                                           uint32_t capacity, uint32_t* outBytes)
+{
+    if (!phase9_runtime(context) || !phase11_path_valid(path) || !outBytes || (!buffer && capacity != 0)) return GX_ERROR_INVALID_ARGUMENT;
+    *outBytes = 0;
+    vfs::FileInfo info = {};
+    if (vfs::stat(path, &info) != vfs::VFS_OK || info.type != vfs::FILE_TYPE_REGULAR || info.size > capacity) return GX_ERROR_FAILED;
+    const uint32_t bytes = static_cast<uint32_t>(info.size);
+    const int32_t read = bytes == 0 ? 0 : vfs::read_file(path, buffer, bytes);
+    if (read < 0 || static_cast<uint32_t>(read) != bytes) return GX_ERROR_FAILED;
+    *outBytes = bytes;
+    return GX_OK;
+}
+
+static gx_result GX_CALL phase11_file_list(gx_app_context* context, const char* path, gx_file_entry* entries,
+                                           uint32_t capacity, uint32_t* outCount, uint32_t* outTruncated)
+{
+    if (!phase9_runtime(context) || !phase11_path_valid(path) || !outCount || !outTruncated ||
+        (capacity != 0 && !entries)) return GX_ERROR_INVALID_ARGUMENT;
+    *outCount = 0; *outTruncated = 0;
+    const uint8_t iterator = vfs::opendir(path);
+    if (iterator == 0xff) return GX_ERROR_FAILED;
+    vfs::DirEntry item = {};
+    while (vfs::readdir(iterator, &item)) {
+        if (*outCount >= capacity) { *outTruncated = 1; continue; }
+        gx_file_entry& output = entries[*outCount];
+        output = {};
+        output.type = item.type == vfs::FILE_TYPE_DIRECTORY ? GX_FILE_TYPE_DIRECTORY :
+            (item.type == vfs::FILE_TYPE_REGULAR ? GX_FILE_TYPE_REGULAR : GX_FILE_TYPE_UNKNOWN);
+        output.size = item.size;
+        uint32_t nameLength = 0;
+        while (nameLength + 1u < sizeof(output.name) && item.name[nameLength]) {
+            output.name[nameLength] = item.name[nameLength];
+            ++nameLength;
+        }
+        output.name[nameLength] = '\0';
+        if (item.name[nameLength] != '\0') { vfs::closedir(iterator); return GX_ERROR_FAILED; }
+        ++*outCount;
+    }
+    vfs::closedir(iterator);
+    return GX_OK;
+}
+
+static gx_result GX_CALL phase11_file_write(gx_app_context* context, const char* path, const void* buffer,
+                                            uint32_t bytes, uint32_t* outBytes)
+{
+    if (!phase9_runtime(context) || !phase11_path_valid(path) || !outBytes || (!buffer && bytes != 0)) return GX_ERROR_INVALID_ARGUMENT;
+    const int32_t written = vfs::write_file(path, buffer, bytes);
+    if (written < 0 || static_cast<uint32_t>(written) != bytes) return GX_ERROR_FAILED;
+    *outBytes = bytes;
+    return GX_OK;
+}
+
+static gx_result GX_CALL phase11_file_mkdir(gx_app_context* context, const char* path)
+{
+    if (!phase9_runtime(context) || !phase11_path_valid(path)) return GX_ERROR_INVALID_ARGUMENT;
+    return vfs::mkdir(path) == vfs::VFS_OK ? GX_OK : GX_ERROR_FAILED;
+}
+
+static gx_result GX_CALL phase11_file_remove(gx_app_context* context, const char* path)
+{
+    if (!phase9_runtime(context) || !phase11_path_valid(path)) return GX_ERROR_INVALID_ARGUMENT;
+    return vfs::unlink(path) == vfs::VFS_OK ? GX_OK : GX_ERROR_FAILED;
+}
+
+static gx_result GX_CALL phase11_build_start(gx_app_context* context, const gx_build_request* request, gx_build_handle* output)
+{
+    if (!phase9_runtime(context)) return GX_ERROR_INVALID_ARGUMENT;
+    phase9_vfs_enter();
+    const gx_result result = kernel::compiler::BareMetalBuildService::start(request, output);
+    phase9_vfs_exit();
+    return result;
+}
+
+static gx_result GX_CALL phase11_build_poll(gx_app_context* context, gx_build_handle handle, gx_build_snapshot* output)
+{
+    if (!phase9_runtime(context)) return GX_ERROR_INVALID_ARGUMENT;
+    return kernel::compiler::BareMetalBuildService::poll(handle, output);
+}
+
+static gx_result GX_CALL phase11_build_release(gx_app_context* context, gx_build_handle handle)
+{
+    if (!phase9_runtime(context)) return GX_ERROR_INVALID_ARGUMENT;
+    return kernel::compiler::BareMetalBuildService::release(handle);
+}
+#endif
 
 static gx_result GX_CALL phase9_request_window(gx_app_context* context, const char* title, int32_t width,
                                                 int32_t height, uint32_t flags, gx_handle* outWindow)
@@ -1955,6 +2079,17 @@ static void phase9_initialize_host(Phase9Runtime* runtime)
     runtime->loader.host.poll_event = phase9_poll_event;
     runtime->loader.host.wait_event = phase9_wait_event;
     runtime->loader.host.exit = phase9_exit;
+#if defined(GXOS_AARCH64_PHASE10)
+    runtime->loader.host.bare_metal_build_project_start = phase11_build_start;
+    runtime->loader.host.bare_metal_build_project_poll = phase11_build_poll;
+    runtime->loader.host.bare_metal_build_project_release = phase11_build_release;
+    runtime->loader.host.bare_metal_file_stat = phase11_file_stat;
+    runtime->loader.host.bare_metal_file_read_workspace = phase11_file_read;
+    runtime->loader.host.bare_metal_file_list = phase11_file_list;
+    runtime->loader.host.bare_metal_file_write_all = phase11_file_write;
+    runtime->loader.host.bare_metal_file_create_directory = phase11_file_mkdir;
+    runtime->loader.host.bare_metal_file_remove = phase11_file_remove;
+#endif
 }
 
 static bool phase9_load_and_run(Phase9Runtime* runtime)
@@ -2194,11 +2329,76 @@ bool phase10_run_application(const char* appName, bool autoClose)
 
 bool phase10_all_complete() { return s_phase10AllComplete || s_phase10Launches >= 26; }
 uint32_t phase10_launches() { return s_phase10Launches; }
+
 #else
 bool phase10_run_application(const char*, bool) { return false; }
 bool phase10_all_complete() { return false; }
 uint32_t phase10_launches() { return 0; }
 #endif
+
+static bool phase11_run_package(Arm64Package* package)
+{
+    if (!package || s_arm64LaunchInProgress) return false;
+    s_arm64LaunchInProgress = true;
+    Phase9Runtime runtime{};
+    runtime.loader.package = package;
+    runtime.loader.verbose = true;
+    runtime.loader.preferredBase = kArm64PreferredBase;
+    const uint8_t runtimeId = static_cast<uint8_t>((++s_phase9RuntimeSequence % 255u) + 1u);
+    const uint16_t generation = static_cast<uint16_t>((++s_phase9Generation & 0xffffu) ?
+        (s_phase9Generation & 0xffffu) : 1u);
+    if (!runtime.common.initialize(package->id, package->architecture, runtimeId, generation,
+                                   kPhase9Quotas)) {
+        s_arm64LaunchInProgress = false;
+        return false;
+    }
+    runtime.owner = new Phase9GuiOwner(&runtime);
+    if (!runtime.owner) {
+        runtime.common.cleanup();
+        s_arm64LaunchInProgress = false;
+        return false;
+    }
+    runtime.autoClose = true;
+    runtime.isAppA = true;
+    runtime.isPhase10 = false;
+    runtime.isPhase11 = true;
+    runtime.startTick = phase3_timer_count();
+    runtime.loader.context.userData = &runtime;
+    const bool result = phase9_load_and_run(&runtime);
+    s_arm64LaunchInProgress = false;
+    return result;
+}
+
+bool phase11_run_developer_studio()
+{
+    if (!s_arm64Discovered) {
+        phase9_vfs_enter();
+        phase9_acquire_loader();
+        if (!s_arm64Discovered) discover();
+        phase9_release_loader();
+        phase9_vfs_exit();
+    }
+    Arm64Package* package = arm64_find_package("com.guidexos.phase11.developerstudio");
+    if (!package) return false;
+    arm64_print("[guideXOS] Developer Studio compiler: initialized\n");
+    return phase11_run_package(package);
+}
+
+bool phase11_run_application(const char* appName, bool autoClose)
+{
+    (void)autoClose;
+    if (!s_arm64Discovered) {
+        phase9_vfs_enter();
+        phase9_acquire_loader();
+        if (!s_arm64Discovered) discover();
+        phase9_release_loader();
+        phase9_vfs_exit();
+    }
+    Arm64Package* package = arm64_find_package(appName);
+    if (!package || !arm64_equal(package->id, "com.guidexos.phase11.crossarch")) return false;
+    arm64_print("[guideXOS] selected generated payload: "); arm64_print(package->executable); arm64_print("\n");
+    return phase11_run_package(package);
+}
 
 #endif
 
@@ -2209,6 +2409,10 @@ bool launch(const char* name)
     if (!s_arm64Discovered) discover();
     Arm64Package* package = arm64_find_package(name);
     if (!package) return false;
+#if defined(GXOS_AARCH64_PHASE10)
+    if (arm64_equal(package->id, kPhase11ProjectId))
+        return phase11_run_application(package->id, true);
+#endif
     s_arm64LaunchInProgress = true;
     bool result = false;
 #if defined(GXOS_AARCH64_PHASE8)

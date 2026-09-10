@@ -7,15 +7,23 @@
   "description": "Bounded native guideXOS workspace and source editor.",
   "category": "Development",
   "kind": "NativeElf",
-  "icon": "app.developerstudio",
+  "icon": "",
   "minGuideXOSVersion": "0.5.0",
   "supportedArchitectures": [
-    "amd64"
+    "amd64",
+    "arm64"
   ],
   "entries": [
     {
       "architecture": "amd64",
       "path": "bin/amd64/developerstudio.elf",
+      "entryPoint": "gx_main",
+      "abi": "guidexos-c-abi-v1",
+      "runtime": "native-elf"
+    },
+    {
+      "architecture": "arm64",
+      "path": "bin/arm64/developerstudio.elf",
       "entryPoint": "gx_main",
       "abi": "guidexos-c-abi-v1",
       "runtime": "native-elf"

@@ -20,6 +20,9 @@
 #elif defined(GXOS_AARCH64_PHASE5) || defined(GXOS_AARCH64_PHASE8) || defined(GXOS_AARCH64_PHASE9) || defined(GXOS_AARCH64_PHASE10)
 #include "include/kernel/common_physical_allocator.h"
 #include "include/kernel/native_architecture.h"
+#if defined(GXOS_AARCH64_PHASE10)
+#include "compiler/compiler_build_service.h"
+#endif
 #if defined(GXOS_AARCH64_PHASE9)
 #include "include/kernel/application_runtime.h"
 #endif

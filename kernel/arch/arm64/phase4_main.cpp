@@ -130,7 +130,11 @@ static kernel::scheduler::Task* g_phase9_app_a_task = nullptr;
 static kernel::scheduler::Task* g_phase9_app_b_task = nullptr;
 static kernel::scheduler::Task* g_phase9_monitor_task = nullptr;
 #endif
-#if defined(GXOS_AARCH64_PHASE10)
+#if defined(GXOS_AARCH64_PHASE11)
+static volatile uint8_t g_phase11_failure = 0;
+static volatile uint8_t g_phase11_complete = 0;
+static kernel::scheduler::Task* g_phase11_app_task = nullptr;
+#elif defined(GXOS_AARCH64_PHASE10)
 static volatile uint8_t g_phase10_failure = 0;
 static volatile uint8_t g_phase10_complete = 0;
 static kernel::scheduler::Task* g_phase10_app_task = nullptr;
@@ -172,7 +176,9 @@ static void fail(const char* reason)
 {
     print("[guideXOS] ");
     print(reason);
-#if defined(GXOS_AARCH64_PHASE10)
+#if defined(GXOS_AARCH64_PHASE11)
+    print("\n[guideXOS] AARCH64_PHASE11_ERROR\n");
+#elif defined(GXOS_AARCH64_PHASE10)
     print("\n[guideXOS] AARCH64_PHASE10_ERROR\n");
 #elif defined(GXOS_AARCH64_PHASE9)
     print("\n[guideXOS] AARCH64_PHASE9_ERROR\n");
@@ -424,7 +430,30 @@ static void completion_task(void*)
 }
 
 #if defined(GXOS_AARCH64_PHASE9)
-#if defined(GXOS_AARCH64_PHASE10)
+#if defined(GXOS_AARCH64_PHASE11)
+static void phase11_app_task(void*)
+{
+    while (!g_graphics_complete && !g_graphics_failure) kernel::scheduler::note_execution();
+    if (!kernel::native_elf::phase11_run_developer_studio()) {
+        g_phase11_failure = 1;
+        g_phase11_complete = 1;
+        g_app_complete = 1;
+        for (;;) kernel::scheduler::note_execution();
+    }
+    print("[guideXOS] Developer Studio build/run: PASS\n");
+    kernel::native_elf::refresh();
+    if (!kernel::native_elf::phase11_run_application("com.guidexos.phase11.crossarch", true)) {
+        g_phase11_failure = 1;
+    } else {
+        print("[guideXOS] App Model automatic ARM64 selection: PASS\n");
+        print("[guideXOS] generated NativeElf return/cleanup: PASS\n");
+    }
+    g_phase11_complete = 1;
+    g_app_complete = 1;
+    phase6_maybe_arm_completion();
+    for (;;) kernel::scheduler::note_execution();
+}
+#elif defined(GXOS_AARCH64_PHASE10)
 static void phase10_app_task(void*)
 {
     while (!g_graphics_complete && !g_graphics_failure) kernel::scheduler::note_execution();
@@ -1325,7 +1354,10 @@ extern "C" void phase3_main(const Aarch64Handoff* handoff, uint64_t initial_el)
     kernel::scheduler::Task* graphics = nullptr;
 #endif
 #if defined(GXOS_AARCH64_PHASE5)
-#if defined(GXOS_AARCH64_PHASE10)
+#if defined(GXOS_AARCH64_PHASE11)
+    g_phase11_app_task = kernel::scheduler::create_task(5, "nativeelf-phase11-developer-studio", phase11_app_task, nullptr, false);
+    if (!fs_task || !completion || !g_phase11_app_task || kernel::scheduler::task_count() != 6) fail("thread context: FAIL");
+#elif defined(GXOS_AARCH64_PHASE10)
     g_phase10_app_task = kernel::scheduler::create_task(5, "nativeelf-phase10-app", phase10_app_task, nullptr, false);
     if (!fs_task || !completion || !g_phase10_app_task || kernel::scheduler::task_count() != 6) fail("thread context: FAIL");
 #elif defined(GXOS_AARCH64_PHASE9)
@@ -1372,7 +1404,9 @@ extern "C" void phase3_main(const Aarch64Handoff* handoff, uint64_t initial_el)
     if (!kernel::scheduler::reset_task(fs_task, filesystem_task, nullptr, true) ||
         !kernel::scheduler::reset_task(completion, completion_task, nullptr, true)) fail("preemption setup: FAIL");
 #if defined(GXOS_AARCH64_PHASE5)
-#if defined(GXOS_AARCH64_PHASE10)
+#if defined(GXOS_AARCH64_PHASE11)
+    if (!kernel::scheduler::reset_task(g_phase11_app_task, phase11_app_task, nullptr, true)) fail("preemption setup: FAIL");
+#elif defined(GXOS_AARCH64_PHASE10)
     if (!kernel::scheduler::reset_task(g_phase10_app_task, phase10_app_task, nullptr, true)) fail("preemption setup: FAIL");
 #elif defined(GXOS_AARCH64_PHASE9)
 #if defined(GXOS_AARCH64_PHASE9)
@@ -1426,7 +1460,10 @@ extern "C" void phase3_main(const Aarch64Handoff* handoff, uint64_t initial_el)
         fail("scheduler/VFS integration: FAIL");
     }
 #if defined(GXOS_AARCH64_PHASE5)
-#if defined(GXOS_AARCH64_PHASE10)
+#if defined(GXOS_AARCH64_PHASE11)
+    if (!g_app_complete || g_phase11_failure || !g_phase11_complete) fail("Phase 11 Developer Studio runtime: FAIL");
+    print("[guideXOS] Phase 11 package/runtime accounting: PASS\n");
+#elif defined(GXOS_AARCH64_PHASE10)
     if (!g_app_complete || g_phase10_failure || !kernel::native_elf::phase10_all_complete() ||
         kernel::native_elf::phase10_launches() != 26) fail("Phase 10 multiarch runtime durability: FAIL");
     print("[guideXOS] multiarch runtime accounting: PASS global-pages=");
@@ -1464,7 +1501,10 @@ extern "C" void phase3_main(const Aarch64Handoff* handoff, uint64_t initial_el)
     }
     print("[guideXOS] graphics/scheduler integration: PASS\n");
 #endif
-#if defined(GXOS_AARCH64_PHASE10)
+#if defined(GXOS_AARCH64_PHASE11)
+    print("[guideXOS] framebuffer validation: PASS\n");
+    print("AARCH64_PHASE11_PASS\n");
+#elif defined(GXOS_AARCH64_PHASE10)
     print("[guideXOS] framebuffer validation: PASS\n");
     print("AARCH64_PHASE10_PASS\n");
 #elif defined(GXOS_AARCH64_PHASE9)
@@ -1502,7 +1542,9 @@ extern "C" void phase3_main(const Aarch64Handoff* handoff, uint64_t initial_el)
     phase3_serial_dec(phase3_exception_count());
     print(" last-unexpected-irq=");
     phase3_serial_dec(stats.last_unexpected_irq);
-#if defined(GXOS_AARCH64_PHASE10)
+#if defined(GXOS_AARCH64_PHASE11)
+    print("\nAARCH64_PHASE11_PASS\n");
+#elif defined(GXOS_AARCH64_PHASE10)
     print("\nAARCH64_PHASE10_PASS\n");
 #elif defined(GXOS_AARCH64_PHASE9)
     print("\nAARCH64_PHASE9_PASS\n");

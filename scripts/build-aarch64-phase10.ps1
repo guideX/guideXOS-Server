@@ -1,7 +1,8 @@
 [CmdletBinding()]
 param(
     [string]$LlvmRoot = 'C:\Program Files\LLVM\bin',
-    [string]$OutputDirectory = ''
+    [string]$OutputDirectory = '',
+    [switch]$Phase11Proof
 )
 
 $ErrorActionPreference = 'Stop'
@@ -46,6 +47,7 @@ $null = New-Item -ItemType Directory -Path (Join-Path $OutputDirectory 'esp\EFI\
 $loaderObject = Join-Path $OutputDirectory 'phase10_loader.obj'
 $efiPath = Join-Path $OutputDirectory 'BOOTAA64.EFI'
 $loaderSource = Join-Path $repoRoot 'guideXOSBootLoader\aarch64\phase1_loader.cpp'
+$phase11Define = if ($Phase11Proof) { '-DGXOS_AARCH64_PHASE11' } else { }
 $loaderFlags = @(
     '--target=aarch64-pc-windows-msvc', '-DGXOS_AARCH64_PHASE4', '-DGXOS_AARCH64_PHASE5', '-DGXOS_AARCH64_PHASE6', '-DGXOS_AARCH64_PHASE7', '-DGXOS_AARCH64_PHASE8', '-DGXOS_AARCH64_PHASE9', '-DGXOS_AARCH64_PHASE10',
     '-O2', '-ffreestanding', '-fno-builtin', '-fno-stack-protector', '-fno-exceptions', '-fno-rtti', '-fno-unwind-tables', '-fno-asynchronous-unwind-tables', '-fno-ident',
@@ -66,7 +68,7 @@ $kernelSources = @(
     'kernel\core\common_physical_allocator.cpp','kernel\core\application_event_service.cpp','kernel\core\application_runtime.cpp',
     'kernel\core\irq_registry.cpp','kernel\core\cxx_runtime.cpp','kernel\core\block_device.cpp','kernel\core\ramdisk.cpp',
     'kernel\core\vfs.cpp','kernel\core\fs_fat.cpp','kernel\core\fs_ext4.cpp','kernel\core\native_architecture.cpp',
-    'kernel\core\native_elf_baremetal.cpp','kernel\core\framebuffer.cpp','kernel\core\desktop.cpp','kernel\core\desktop_font.cpp',
+    'kernel\core\native_elf_baremetal.cpp','kernel\core\compiler\compiler_target.cpp','kernel\core\compiler\compiler_diagnostics.cpp','kernel\core\compiler\compiler_lexer.cpp','kernel\core\compiler\compiler_parser.cpp','kernel\core\compiler\compiler_driver.cpp','kernel\core\compiler\compiler_build_service.cpp','kernel\core\compiler\elf_writer.cpp','kernel\arch\amd64\compiler_backend.cpp','kernel\arch\arm64\compiler_backend.cpp','kernel\core\framebuffer.cpp','kernel\core\desktop.cpp','kernel\core\desktop_font.cpp',
     'kernel\core\system_font.cpp','kernel\core\kernel_compositor.cpp','kernel\core\kernel_ipc.cpp','kernel\core\kernel_app.cpp',
     'kernel\core\input_queue.cpp','kernel\core\input_manager.cpp','kernel\core\display_input_mapper.cpp','kernel\core\virtio_input.cpp',
     'kernel\core\file_clipboard.cpp','kernel\core\desktop_capabilities.cpp','kernel\core\time.cpp','kernel\core\image_adapter.cpp')
@@ -74,15 +76,16 @@ $kernelFlags = @(
     '--target=aarch64-none-elf','-std=c++14','-march=armv8-a','-O2','-ffreestanding','-nostdlib','-nostdinc++','-fno-builtin','-fno-stack-protector',
     '-fno-exceptions','-fno-rtti','-fno-unwind-tables','-fno-asynchronous-unwind-tables','-fno-pic','-fno-pie','-mcmodel=small',
     '-mgeneral-regs-only','-mstrict-align','-mno-outline-atomics','-ffunction-sections','-fdata-sections','-Wno-c++11-narrowing',
-    '-DGXOS_AARCH64_PHASE4','-DGXOS_AARCH64_PHASE5','-DGXOS_AARCH64_PHASE6','-DGXOS_AARCH64_PHASE7','-DGXOS_AARCH64_PHASE8','-DGXOS_AARCH64_PHASE9','-DGXOS_AARCH64_PHASE10',
-    '-DGXOS_BARE_METAL','-DKERNEL_HAS_VIRTIO_INPUT','-DKERNEL_HAS_COMMON_INPUT_QUEUE','-I',$repoRoot,'-I',(Join-Path $repoRoot 'kernel\core\include'),
+    '-DGXOS_AARCH64_PHASE4','-DGXOS_AARCH64_PHASE5','-DGXOS_AARCH64_PHASE6','-DGXOS_AARCH64_PHASE7','-DGXOS_AARCH64_PHASE8','-DGXOS_AARCH64_PHASE9','-DGXOS_AARCH64_PHASE10',$phase11Define,
+    '-DGXOS_BARE_METAL','-DKERNEL_HAS_VIRTIO_INPUT','-DKERNEL_HAS_COMMON_INPUT_QUEUE','-I',$repoRoot,'-I',(Join-Path $repoRoot 'kernel'),'-I',(Join-Path $repoRoot 'sdk\include'),'-I',(Join-Path $repoRoot 'kernel\core\include'),
     '-I',(Join-Path $repoRoot 'kernel\core\freestanding'),'-I',(Join-Path $repoRoot 'kernel\arch\arm64\include'))
 $kernelObjects = @()
+$kernelSourceIndex = 0
 Write-Host '[2/12] Compiling common runtime, graphics, and ARM64 sources...' -ForegroundColor Yellow
 foreach ($relative in $kernelSources) {
     $source = Join-Path $repoRoot $relative
-    $leaf = [IO.Path]::GetFileName($relative)
-    $object = Join-Path $OutputDirectory (($leaf -replace '\.S$','.o' -replace '\.cpp$','.o'))
+    $object = Join-Path $OutputDirectory ('kernel-{0:D3}.o' -f $kernelSourceIndex)
+    ++$kernelSourceIndex
     Invoke-Checked $clang ($kernelFlags + @('-c',$source,'-o',$object))
     $kernelObjects += $object
 }

@@ -1,7 +1,7 @@
 #include <guidexos/ui.h>
 
 static_assert(sizeof(gx_event) == 32, "Phase 10 proof requires the stable event ABI");
-static_assert(sizeof(gx_host_calls) == 288, "Phase 10 proof requires the stable GUI host ABI");
+static_assert(sizeof(gx_host_calls) == 360, "Phase 10 proof requires the stable extended host ABI");
 static_assert(offsetof(gx_host_calls, guiVersion) == 240, "Phase 10 proof requires the stable GUI version offset");
 static_assert(sizeof(gx_app_context) == 24, "Phase 10 proof requires the stable app context ABI");
 

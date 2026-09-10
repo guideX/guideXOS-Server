@@ -167,6 +167,17 @@ typedef struct gx_host_calls {
      * this slot is read.  The service blocks the owning application task when
      * its event queue is empty; it is not a poll/yield loop. */
     gx_result (GX_CALL *wait_event)(gx_app_context* ctx, gx_event* outEvent);
+    /* In-OS Developer Studio build service. These slots are append-only and
+     * are exposed only by a NativeElf runtime with the VFS compiler. */
+    gx_result (GX_CALL *bare_metal_build_project_start)(gx_app_context* ctx, const gx_build_request* request, gx_build_handle* outHandle);
+    gx_result (GX_CALL *bare_metal_build_project_poll)(gx_app_context* ctx, gx_build_handle handle, gx_build_snapshot* outSnapshot);
+    gx_result (GX_CALL *bare_metal_build_project_release)(gx_app_context* ctx, gx_build_handle handle);
+    gx_result (GX_CALL *bare_metal_file_stat)(gx_app_context* ctx, const char* path, gx_file_info* outInfo);
+    gx_result (GX_CALL *bare_metal_file_read_workspace)(gx_app_context* ctx, const char* path, void* buffer, uint32_t bufferSize, uint32_t* outBytesRead);
+    gx_result (GX_CALL *bare_metal_file_list)(gx_app_context* ctx, const char* path, gx_file_entry* entries, uint32_t capacity, uint32_t* outCount, uint32_t* outTruncated);
+    gx_result (GX_CALL *bare_metal_file_write_all)(gx_app_context* ctx, const char* path, const void* buffer, uint32_t bufferSize, uint32_t* outBytesWritten);
+    gx_result (GX_CALL *bare_metal_file_create_directory)(gx_app_context* ctx, const char* path);
+    gx_result (GX_CALL *bare_metal_file_remove)(gx_app_context* ctx, const char* path);
 } gx_host_calls;
 
 #define GX_GUI_V1_HOST_CALLS_SIZE ((uint32_t)(offsetof(gx_host_calls, widget_set_value) + sizeof(((gx_host_calls*)0)->widget_set_value)))

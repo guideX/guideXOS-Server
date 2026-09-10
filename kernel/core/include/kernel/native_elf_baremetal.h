@@ -34,6 +34,10 @@ struct PackageInfo {
 // Scan the mounted /Apps tree for supported NativeElf packages.
 void discover();
 
+// Invalidate the bounded discovery table after Developer Studio publishes a
+// package. The next lookup performs a normal App Model rescan.
+void refresh();
+
 // Launch a discovered package by display name, id, package directory, or the
 // short PacMan compatibility label.  Returns only after the app exits.
 bool launch(const char* appName);
@@ -76,6 +80,11 @@ void phase9_vfs_exit();
 bool phase10_run_application(const char* appName, bool autoClose);
 bool phase10_all_complete();
 uint32_t phase10_launches();
+
+// Phase 11 uses the same Phase-9 runtime and package resolver for the
+// Developer Studio client and the freshly generated proof application.
+bool phase11_run_developer_studio();
+bool phase11_run_application(const char* appName, bool autoClose);
 
 } // namespace native_elf
 } // namespace kernel

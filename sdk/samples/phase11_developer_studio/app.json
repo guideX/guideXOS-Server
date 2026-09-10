@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "id": "com.guidexos.phase11.developerstudio",
+  "displayName": "Developer Studio Phase 11",
+  "version": "0.1.0",
+  "publisher": "guideXOS",
+  "description": "In-OS Developer Studio build client for the Phase 11 proof.",
+  "kind": "NativeElf",
+  "runtime": "native-elf",
+  "supportedArchitectures": [ "arm64" ],
+  "entries": [
+    {
+      "architecture": "arm64",
+      "path": "bin/arm64/developerstudio.elf",
+      "entryPoint": "gx_main",
+      "abi": "guidexos-c-abi-v1",
+      "runtime": "native-elf"
+    }
+  ]
+}

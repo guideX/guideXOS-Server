@@ -1,7 +1,7 @@
 # ??? guideXOSServer Development Roadmap
 
 **Last Updated:** 2026-09-09
-**Current Status:** AARCH64 Phase 10 multi-architecture NativeElf packages implemented
+**Current Status:** AARCH64 Phase 11 Developer Studio resident compiler implemented
 **Overall Progress:** ~80% to Production Release
 
 ---
@@ -15,6 +15,7 @@
 ? Phase 8: NativeElf GUI (ARM64 complete)
 ? Phase 9: NativeElf runtime services (ARM64 complete)
 ? Phase 10: Multi-architecture NativeElf packages (AMD64 + ARM64 complete)
+? Phase 11: Developer Studio resident multi-architecture compiler (complete)
 ?? Phase 10: Ecosystem (Future)
 ```
 
@@ -147,6 +148,22 @@ through the hardened Phase-9 runtime with real GUI input, wait/wake,
 cleanup/relaunch, and three fresh-boot acceptance coverage.
 
 **Details:** See `aarch64/AARCH64_PHASE10_MULTIARCH_PACKAGE.md`
+
+### Phase 11: Developer Studio resident compiler (Complete) ✅
+**Status:** Implemented and validated on `AARCH64_SUPPORT`.
+
+The ARM64 guest now contains the bounded Developer Studio compiler frontend,
+ARM64 and AMD64 code emitters, ELF writer/validator, VFS-backed build service,
+and multi-architecture package publication path. One saved source is compiled
+to both payload slots inside guideXOS; invalid-source recovery retains the
+previous final package, and a successful rebuild refreshes App Model discovery
+before ARM64 execution.
+
+The milestone is intentionally a bootstrap language and does not claim a
+general C/C++ toolchain, multiple translation units, relocations, EL0
+isolation, or full AMD64 guideXOS boot.
+
+**Details:** See `aarch64/AARCH64_PHASE11_DEVELOPER_STUDIO.md`
 
 ---
 
