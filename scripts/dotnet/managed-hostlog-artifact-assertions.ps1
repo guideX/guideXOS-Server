@@ -295,7 +295,9 @@ function Get-ManagedHostLogPeImageEnvelope([string]$PePath) {
     $optionalHeaderOffset = $peOffset + 4 + 20
     if ((Get-ManagedHostLogUInt16 $bytes $optionalHeaderOffset) -ne 0x20b) { throw "Published output is not PE32+." }
     return [pscustomobject]@{
+        Bytes = $bytes
         ImageBase = Get-ManagedHostLogUInt64 $bytes ($optionalHeaderOffset + 24)
+        SizeOfHeaders = Get-ManagedHostLogUInt32 $bytes ($optionalHeaderOffset + 60)
         SizeOfImage = Get-ManagedHostLogUInt32 $bytes ($optionalHeaderOffset + 56)
     }
 }
@@ -321,8 +323,16 @@ function Assert-ManagedHostLogElfEnvelope(
     if ($elf.LoadSegments.Count -eq 0) { throw "ELF has no PT_LOAD segments." }
     $first = $elf.LoadSegments[0]
     if ($first.VirtualAddress -ne $pe.ImageBase) { throw ("First PT_LOAD base 0x{0:X} does not match PE image base 0x{1:X}." -f $first.VirtualAddress, $pe.ImageBase) }
-    if ($first.Offset -ne 0 -or $first.FileSize -ne 0 -or $first.MemorySize -ne 0x1000 -or $first.Flags -ne 4 -or $first.Align -ne 0x1000) {
-        throw "The first PT_LOAD is not the read-only image-base reservation page."
+    if ($first.Offset -ne 0x1000 -or $first.FileSize -ne $pe.SizeOfHeaders -or $first.MemorySize -ne 0x1000 -or $first.Flags -ne 4 -or $first.Align -ne 0x1000) {
+        throw "The first PT_LOAD is not the read-only image-base PE-header page."
+    }
+    if ($first.FileSize -lt 2 -or $elf.Bytes[[int]$first.Offset] -ne 0x4d -or $elf.Bytes[[int]$first.Offset + 1] -ne 0x5a) {
+        throw "The first PT_LOAD does not contain the PE MZ header."
+    }
+    for ($headerIndex = 0; $headerIndex -lt [int]$pe.SizeOfHeaders; $headerIndex++) {
+        if ($elf.Bytes[[int]$first.Offset + $headerIndex] -ne $pe.Bytes[$headerIndex]) {
+            throw "The first PT_LOAD PE header bytes do not match the published PE."
+        }
     }
 
     $imageEnd = [uint64]$pe.ImageBase + [uint64]$pe.SizeOfImage

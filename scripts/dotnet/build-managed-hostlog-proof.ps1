@@ -192,7 +192,7 @@ if (-not (Test-Path -LiteralPath $PeToElfScript)) {
     throw "PE-to-ELF converter not found: $PeToElfScript"
 }
 
-$expectedPeToElfSha256 = "55994B674326D21A8FADE6FDDBA10D6A602E5605F67709C87F9AA57C9212F678"
+$expectedPeToElfSha256 = "5BED5BBE8883EDD700ED2406FA43A7B26F762212D06898BB75B540E07B2F5621"
 $actualPeToElfSha256 = (Get-FileHash -LiteralPath $PeToElfScript -Algorithm SHA256).Hash.ToUpperInvariant()
 if ($actualPeToElfSha256 -ne $expectedPeToElfSha256) {
     throw "PE-to-ELF converter hash mismatch. Expected $expectedPeToElfSha256, got ${actualPeToElfSha256}: $PeToElfScript"
