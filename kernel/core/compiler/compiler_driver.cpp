@@ -76,11 +76,30 @@ static void print_code(const uint8_t* code, uint32_t codeBytes)
     serial::putc('\n');
 }
 
+static void copy_diagnostic_message(char* output, uint32_t capacity, const char* input)
+{
+    if (!output || capacity == 0) return;
+    uint32_t i = 0;
+    if (input) {
+        for (; i + 1 < capacity && input[i] != '\0'; ++i) output[i] = input[i];
+    }
+    output[i] = '\0';
+}
+
 static bool fail_build(Diagnostics& diagnostics, CompileSummary* summary)
 {
     print_diagnostics(diagnostics);
     serial::puts("Compiler: build FAIL\n");
-    if (summary) summary->success = false;
+    if (summary) {
+        summary->success = false;
+        if (diagnostics.count() != 0) {
+            const CompilerDiagnostic& diagnostic = diagnostics.at(0);
+            summary->diagnosticLine = diagnostic.location.line;
+            summary->diagnosticColumn = diagnostic.location.column;
+            summary->diagnosticOffset = diagnostic.location.offset;
+            copy_diagnostic_message(summary->diagnosticMessage, sizeof(summary->diagnosticMessage), diagnostic.message);
+        }
+    }
     return false;
 }
 
@@ -209,7 +228,10 @@ bool compile_for_target(const char* sourcePath,
     print_code(s_code, codeBytes);
 
     ElfLayout layout = {};
-    if (!write_bootstrap_elf_for_target(s_code, codeBytes, resolvedTarget, s_elf, sizeof(s_elf), &layout)) {
+    const uint64_t runtimeImageBase = resolvedTarget == CompilerTarget::Arm64
+        ? UINT64_C(0x51000000) : BOOTSTRAP_IMAGE_BASE;
+    if (!write_bootstrap_elf_for_target_at_base(s_code, codeBytes, resolvedTarget, runtimeImageBase,
+                                                s_elf, sizeof(s_elf), &layout)) {
         diagnostics.error(driverLocation, "ELF writer could not construct bounded image", "elf");
         return fail_build(diagnostics, summary);
     }

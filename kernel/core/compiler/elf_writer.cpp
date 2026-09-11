@@ -93,17 +93,17 @@ static bool fail(ElfValidationResult* result, const char* error)
 
 } // namespace
 
-bool write_bootstrap_elf_for_target(const uint8_t* code,
-                                    uint32_t codeBytes,
-                                    CompilerTarget target,
-                                    uint8_t* output,
-                                    uint32_t outputCapacity,
-                                    ElfLayout* layout)
+bool write_bootstrap_elf_for_target_at_base(const uint8_t* code,
+                                            uint32_t codeBytes,
+                                            CompilerTarget target,
+                                            uint64_t imageBase,
+                                            uint8_t* output,
+                                            uint32_t outputCapacity,
+                                            ElfLayout* layout)
 {
     if (!code || !output || !layout || codeBytes == 0 || !target_is_supported(target)) return false;
 
     const CompilerTarget resolvedTarget = target == CompilerTarget::Current ? current_target() : target;
-    const uint64_t imageBase = resolvedTarget == CompilerTarget::Arm64 ? UINT64_C(0x50000000) : BOOTSTRAP_IMAGE_BASE;
 
     uint32_t outputBytes = 0;
     if (!add_u32(BOOTSTRAP_CODE_OFFSET, codeBytes, &outputBytes) ||
@@ -157,6 +157,19 @@ bool write_bootstrap_elf_for_target(const uint8_t* code,
     layout->codeOffset = BOOTSTRAP_CODE_OFFSET;
     layout->outputBytes = outputBytes;
     return true;
+}
+
+bool write_bootstrap_elf_for_target(const uint8_t* code,
+                                    uint32_t codeBytes,
+                                    CompilerTarget target,
+                                    uint8_t* output,
+                                    uint32_t outputCapacity,
+                                    ElfLayout* layout)
+{
+    const CompilerTarget resolvedTarget = target == CompilerTarget::Current ? current_target() : target;
+    const uint64_t imageBase = resolvedTarget == CompilerTarget::Arm64 ? UINT64_C(0x50000000) : BOOTSTRAP_IMAGE_BASE;
+    return write_bootstrap_elf_for_target_at_base(code, codeBytes, target, imageBase,
+                                                  output, outputCapacity, layout);
 }
 
 bool write_bootstrap_elf(const uint8_t* code,

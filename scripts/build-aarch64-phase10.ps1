@@ -2,7 +2,8 @@
 param(
     [string]$LlvmRoot = 'C:\Program Files\LLVM\bin',
     [string]$OutputDirectory = '',
-    [switch]$Phase11Proof
+    [switch]$Phase11Proof,
+    [switch]$Phase12Proof
 )
 
 $ErrorActionPreference = 'Stop'
@@ -48,8 +49,9 @@ $loaderObject = Join-Path $OutputDirectory 'phase10_loader.obj'
 $efiPath = Join-Path $OutputDirectory 'BOOTAA64.EFI'
 $loaderSource = Join-Path $repoRoot 'guideXOSBootLoader\aarch64\phase1_loader.cpp'
 $phase11Define = if ($Phase11Proof) { '-DGXOS_AARCH64_PHASE11' } else { }
+$phase12Define = if ($Phase12Proof) { '-DGXOS_AARCH64_PHASE12' } else { }
 $loaderFlags = @(
-    '--target=aarch64-pc-windows-msvc', '-DGXOS_AARCH64_PHASE4', '-DGXOS_AARCH64_PHASE5', '-DGXOS_AARCH64_PHASE6', '-DGXOS_AARCH64_PHASE7', '-DGXOS_AARCH64_PHASE8', '-DGXOS_AARCH64_PHASE9', '-DGXOS_AARCH64_PHASE10',
+    '--target=aarch64-pc-windows-msvc', '-DGXOS_AARCH64_PHASE4', '-DGXOS_AARCH64_PHASE5', '-DGXOS_AARCH64_PHASE6', '-DGXOS_AARCH64_PHASE7', '-DGXOS_AARCH64_PHASE8', '-DGXOS_AARCH64_PHASE9', '-DGXOS_AARCH64_PHASE10', $phase12Define,
     '-O2', '-ffreestanding', '-fno-builtin', '-fno-stack-protector', '-fno-exceptions', '-fno-rtti', '-fno-unwind-tables', '-fno-asynchronous-unwind-tables', '-fno-ident',
     '-I', (Join-Path $repoRoot 'guideXOSBootLoader'), '-I', $repoRoot, '-c', $loaderSource, '-o', $loaderObject)
 Write-Host '[1/12] Compiling ARM64 UEFI loader...' -ForegroundColor Yellow
@@ -76,7 +78,7 @@ $kernelFlags = @(
     '--target=aarch64-none-elf','-std=c++14','-march=armv8-a','-O2','-ffreestanding','-nostdlib','-nostdinc++','-fno-builtin','-fno-stack-protector',
     '-fno-exceptions','-fno-rtti','-fno-unwind-tables','-fno-asynchronous-unwind-tables','-fno-pic','-fno-pie','-mcmodel=small',
     '-mgeneral-regs-only','-mstrict-align','-mno-outline-atomics','-ffunction-sections','-fdata-sections','-Wno-c++11-narrowing',
-    '-DGXOS_AARCH64_PHASE4','-DGXOS_AARCH64_PHASE5','-DGXOS_AARCH64_PHASE6','-DGXOS_AARCH64_PHASE7','-DGXOS_AARCH64_PHASE8','-DGXOS_AARCH64_PHASE9','-DGXOS_AARCH64_PHASE10',$phase11Define,
+    '-DGXOS_AARCH64_PHASE4','-DGXOS_AARCH64_PHASE5','-DGXOS_AARCH64_PHASE6','-DGXOS_AARCH64_PHASE7','-DGXOS_AARCH64_PHASE8','-DGXOS_AARCH64_PHASE9','-DGXOS_AARCH64_PHASE10',$phase11Define,$phase12Define,
     '-DGXOS_BARE_METAL','-DKERNEL_HAS_VIRTIO_INPUT','-DKERNEL_HAS_COMMON_INPUT_QUEUE','-I',$repoRoot,'-I',(Join-Path $repoRoot 'kernel'),'-I',(Join-Path $repoRoot 'sdk\include'),'-I',(Join-Path $repoRoot 'kernel\core\include'),
     '-I',(Join-Path $repoRoot 'kernel\core\freestanding'),'-I',(Join-Path $repoRoot 'kernel\arch\arm64\include'))
 $kernelObjects = @()

@@ -916,11 +916,16 @@ gx_result hostBuildProjectRelease(NativeGxAppContext* ctx, gx_build_handle handl
 gx_result hostDevelopmentRunPrepare(NativeGxAppContext* ctx, const gx_development_run_request* request, gx_development_run_handle* outHandle, gx_development_run_snapshot* outSnapshot) {
     NativeAppRuntimeContext* context = runtimeContextFor(ctx);
     if (!context || !request || !outHandle || !outSnapshot ||
-        !nativeBufferRangeContains(*context, request, sizeof(gx_development_run_request)) ||
+        !nativeBufferRangeContains(*context, request, sizeof(uint32_t) * 2u) ||
         !nativeBufferRangeContains(*context, outHandle, sizeof(gx_development_run_handle)) ||
-        !nativeBufferRangeContains(*context, outSnapshot, sizeof(gx_development_run_snapshot)) ||
-        request->size < sizeof(gx_development_run_request) || request->version != GX_DEVELOPMENT_RUN_API_VERSION ||
-        outSnapshot->size < sizeof(gx_development_run_snapshot) || outSnapshot->version != GX_DEVELOPMENT_RUN_API_VERSION) return GX_ERROR_INVALID_ARGUMENT;
+        !nativeBufferRangeContains(*context, outSnapshot, sizeof(uint32_t) * 2u)) return GX_ERROR_INVALID_ARGUMENT;
+    const uint32_t requestBytes = request->size;
+    const uint32_t snapshotBytes = outSnapshot->size;
+    if ((request->version != GX_DEVELOPMENT_RUN_LEGACY_API_VERSION && request->version != GX_DEVELOPMENT_RUN_API_VERSION) ||
+        requestBytes < GX_DEVELOPMENT_RUN_REQUEST_V1_SIZE || requestBytes > sizeof(gx_development_run_request) ||
+        (outSnapshot->version != GX_DEVELOPMENT_RUN_LEGACY_API_VERSION && outSnapshot->version != GX_DEVELOPMENT_RUN_API_VERSION) ||
+        snapshotBytes < GX_DEVELOPMENT_RUN_SNAPSHOT_V1_SIZE || snapshotBytes > sizeof(gx_development_run_snapshot) ||
+        !nativeBufferRangeContains(*context, request, requestBytes) || !nativeBufferRangeContains(*context, outSnapshot, snapshotBytes)) return GX_ERROR_INVALID_ARGUMENT;
     *outHandle = 0;
     std::string projectRoot, projectId, projectKind, targetProfile, manifestPath, artifactPath, artifactSha256;
     if (!copyNativeString(*context, request->projectRoot, GX_DEVELOPMENT_RUN_MAX_PROJECT_ROOT_BYTES, projectRoot) ||
@@ -941,6 +946,12 @@ gx_result hostDevelopmentRunPrepare(NativeGxAppContext* ctx, const gx_developmen
     copied.artifactPath = artifactPath.c_str();
     copied.artifactSha256 = artifactSha256.c_str();
     copied.flags = request->flags;
+    if (requestBytes >= offsetof(gx_development_run_request, artifactSize) + sizeof(request->artifactSize)) {
+        copied.artifactSize = request->artifactSize;
+        copied.artifactArchitecture = request->artifactArchitecture;
+        copied.artifactAbi = request->artifactAbi;
+    }
+    if (requestBytes >= offsetof(gx_development_run_request, capabilities) + sizeof(request->capabilities)) copied.capabilities = request->capabilities;
     const gx_result result = DevelopmentRunService::Prepare(*context, copied, outHandle, outSnapshot);
     NativeAppProcessTable::UpdateFromRuntime(*context);
     return result;
@@ -954,7 +965,11 @@ gx_result hostDevelopmentRunStart(NativeGxAppContext* ctx, gx_development_run_ha
 
 gx_result hostDevelopmentRunPoll(NativeGxAppContext* ctx, gx_development_run_handle handle, gx_development_run_snapshot* outSnapshot) {
     NativeAppRuntimeContext* context = runtimeContextFor(ctx);
-    if (!context || handle == 0 || !outSnapshot || !nativeBufferRangeContains(*context, outSnapshot, sizeof(gx_development_run_snapshot)) || outSnapshot->size < sizeof(gx_development_run_snapshot) || outSnapshot->version != GX_DEVELOPMENT_RUN_API_VERSION) return GX_ERROR_INVALID_ARGUMENT;
+    if (!context || handle == 0 || !outSnapshot || !nativeBufferRangeContains(*context, outSnapshot, sizeof(uint32_t) * 2u)) return GX_ERROR_INVALID_ARGUMENT;
+    const uint32_t snapshotBytes = outSnapshot->size;
+    if ((outSnapshot->version != GX_DEVELOPMENT_RUN_LEGACY_API_VERSION && outSnapshot->version != GX_DEVELOPMENT_RUN_API_VERSION) ||
+        snapshotBytes < GX_DEVELOPMENT_RUN_SNAPSHOT_V1_SIZE || snapshotBytes > sizeof(gx_development_run_snapshot) ||
+        !nativeBufferRangeContains(*context, outSnapshot, snapshotBytes)) return GX_ERROR_INVALID_ARGUMENT;
     const gx_result result = DevelopmentRunService::Poll(*context, handle, outSnapshot);
     NativeAppProcessTable::UpdateFromRuntime(*context);
     return result;

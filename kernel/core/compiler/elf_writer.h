@@ -47,6 +47,14 @@ bool write_bootstrap_elf_for_target(const uint8_t* code,
                                     uint32_t outputCapacity,
                                     ElfLayout* layout);
 
+bool write_bootstrap_elf_for_target_at_base(const uint8_t* code,
+                                            uint32_t codeBytes,
+                                            CompilerTarget target,
+                                            uint64_t imageBase,
+                                            uint8_t* output,
+                                            uint32_t outputCapacity,
+                                            ElfLayout* layout);
+
 bool validate_bootstrap_elf(const uint8_t* image,
                             uint32_t imageBytes,
                             uint64_t expectedImageBase,

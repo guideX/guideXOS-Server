@@ -68,7 +68,14 @@ extern "C" void gxos_kernel_heap_free_aligned(void*);
 extern "C" size_t gxos_kernel_heap_used_bytes();
 
 static const uint64_t kCooperativeTarget = UINT64_C(10000);
+#if defined(GXOS_AARCH64_PHASE12)
+// The full Phase 12 guest proof performs several in-OS compiler builds and
+// runs under QEMU TCG.  Keep its completion window bounded while preserving
+// the unchanged 10,000-preemption scheduler proof for earlier phases.
+static const uint64_t kPreemptionTarget = UINT64_C(1000);
+#else
 static const uint64_t kPreemptionTarget = UINT64_C(10000);
+#endif
 static const char kFixtureText[] = "guideXOS AARCH64 Phase 4 filesystem proof";
 static const char kNestedText[] = "guideXOS AARCH64 Phase 4 nested filesystem proof";
 static const char kScratchText[] = "guideXOS AARCH64 Phase 4 writable proof";
@@ -130,7 +137,11 @@ static kernel::scheduler::Task* g_phase9_app_a_task = nullptr;
 static kernel::scheduler::Task* g_phase9_app_b_task = nullptr;
 static kernel::scheduler::Task* g_phase9_monitor_task = nullptr;
 #endif
-#if defined(GXOS_AARCH64_PHASE11)
+#if defined(GXOS_AARCH64_PHASE12)
+static volatile uint8_t g_phase12_failure = 0;
+static volatile uint8_t g_phase12_complete = 0;
+static kernel::scheduler::Task* g_phase12_app_task = nullptr;
+#elif defined(GXOS_AARCH64_PHASE11)
 static volatile uint8_t g_phase11_failure = 0;
 static volatile uint8_t g_phase11_complete = 0;
 static kernel::scheduler::Task* g_phase11_app_task = nullptr;
@@ -176,7 +187,9 @@ static void fail(const char* reason)
 {
     print("[guideXOS] ");
     print(reason);
-#if defined(GXOS_AARCH64_PHASE11)
+#if defined(GXOS_AARCH64_PHASE12)
+    print("\n[guideXOS] AARCH64_PHASE12_ERROR\n");
+#elif defined(GXOS_AARCH64_PHASE11)
     print("\n[guideXOS] AARCH64_PHASE11_ERROR\n");
 #elif defined(GXOS_AARCH64_PHASE10)
     print("\n[guideXOS] AARCH64_PHASE10_ERROR\n");
@@ -430,7 +443,25 @@ static void completion_task(void*)
 }
 
 #if defined(GXOS_AARCH64_PHASE9)
-#if defined(GXOS_AARCH64_PHASE11)
+#if defined(GXOS_AARCH64_PHASE12)
+static void phase12_app_task(void*)
+{
+    while (!g_graphics_complete && !g_graphics_failure) kernel::scheduler::note_execution();
+    if (!kernel::native_elf::phase12_run_developer_studio()) {
+        g_phase12_failure = 1;
+        g_phase12_complete = 1;
+        g_app_complete = 1;
+        for (;;) kernel::scheduler::note_execution();
+    }
+    print("[guideXOS] Developer Studio in-OS edit/build/run: PASS\n");
+    g_phase12_complete = 1;
+    g_app_complete = 1;
+    for (;;) {
+        phase6_maybe_arm_completion();
+        kernel::scheduler::note_execution();
+    }
+}
+#elif defined(GXOS_AARCH64_PHASE11)
 static void phase11_app_task(void*)
 {
     while (!g_graphics_complete && !g_graphics_failure) kernel::scheduler::note_execution();
@@ -1354,7 +1385,10 @@ extern "C" void phase3_main(const Aarch64Handoff* handoff, uint64_t initial_el)
     kernel::scheduler::Task* graphics = nullptr;
 #endif
 #if defined(GXOS_AARCH64_PHASE5)
-#if defined(GXOS_AARCH64_PHASE11)
+#if defined(GXOS_AARCH64_PHASE12)
+    g_phase12_app_task = kernel::scheduler::create_task(5, "nativeelf-phase12-developer-studio", phase12_app_task, nullptr, false);
+    if (!fs_task || !completion || !g_phase12_app_task || kernel::scheduler::task_count() != 6) fail("thread context: FAIL");
+#elif defined(GXOS_AARCH64_PHASE11)
     g_phase11_app_task = kernel::scheduler::create_task(5, "nativeelf-phase11-developer-studio", phase11_app_task, nullptr, false);
     if (!fs_task || !completion || !g_phase11_app_task || kernel::scheduler::task_count() != 6) fail("thread context: FAIL");
 #elif defined(GXOS_AARCH64_PHASE10)
@@ -1404,7 +1438,9 @@ extern "C" void phase3_main(const Aarch64Handoff* handoff, uint64_t initial_el)
     if (!kernel::scheduler::reset_task(fs_task, filesystem_task, nullptr, true) ||
         !kernel::scheduler::reset_task(completion, completion_task, nullptr, true)) fail("preemption setup: FAIL");
 #if defined(GXOS_AARCH64_PHASE5)
-#if defined(GXOS_AARCH64_PHASE11)
+#if defined(GXOS_AARCH64_PHASE12)
+    if (!kernel::scheduler::reset_task(g_phase12_app_task, phase12_app_task, nullptr, true)) fail("preemption setup: FAIL");
+#elif defined(GXOS_AARCH64_PHASE11)
     if (!kernel::scheduler::reset_task(g_phase11_app_task, phase11_app_task, nullptr, true)) fail("preemption setup: FAIL");
 #elif defined(GXOS_AARCH64_PHASE10)
     if (!kernel::scheduler::reset_task(g_phase10_app_task, phase10_app_task, nullptr, true)) fail("preemption setup: FAIL");
@@ -1460,7 +1496,10 @@ extern "C" void phase3_main(const Aarch64Handoff* handoff, uint64_t initial_el)
         fail("scheduler/VFS integration: FAIL");
     }
 #if defined(GXOS_AARCH64_PHASE5)
-#if defined(GXOS_AARCH64_PHASE11)
+#if defined(GXOS_AARCH64_PHASE12)
+    if (!g_app_complete || g_phase12_failure || !g_phase12_complete) fail("Phase 12 Developer Studio runtime: FAIL");
+    print("[guideXOS] Phase 12 package/runtime accounting: PASS\n");
+#elif defined(GXOS_AARCH64_PHASE11)
     if (!g_app_complete || g_phase11_failure || !g_phase11_complete) fail("Phase 11 Developer Studio runtime: FAIL");
     print("[guideXOS] Phase 11 package/runtime accounting: PASS\n");
 #elif defined(GXOS_AARCH64_PHASE10)
@@ -1501,7 +1540,10 @@ extern "C" void phase3_main(const Aarch64Handoff* handoff, uint64_t initial_el)
     }
     print("[guideXOS] graphics/scheduler integration: PASS\n");
 #endif
-#if defined(GXOS_AARCH64_PHASE11)
+#if defined(GXOS_AARCH64_PHASE12)
+    print("[guideXOS] framebuffer validation: PASS\n");
+    print("AARCH64_PHASE12_PASS\n");
+#elif defined(GXOS_AARCH64_PHASE11)
     print("[guideXOS] framebuffer validation: PASS\n");
     print("AARCH64_PHASE11_PASS\n");
 #elif defined(GXOS_AARCH64_PHASE10)
@@ -1542,7 +1584,9 @@ extern "C" void phase3_main(const Aarch64Handoff* handoff, uint64_t initial_el)
     phase3_serial_dec(phase3_exception_count());
     print(" last-unexpected-irq=");
     phase3_serial_dec(stats.last_unexpected_irq);
-#if defined(GXOS_AARCH64_PHASE11)
+#if defined(GXOS_AARCH64_PHASE12)
+    print("\nAARCH64_PHASE12_PASS\n");
+#elif defined(GXOS_AARCH64_PHASE11)
     print("\nAARCH64_PHASE11_PASS\n");
 #elif defined(GXOS_AARCH64_PHASE10)
     print("\nAARCH64_PHASE10_PASS\n");

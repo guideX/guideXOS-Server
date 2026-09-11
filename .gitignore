@@ -26,6 +26,8 @@
 /tmp/developer-studio-phase-build*.log
 /tmp/native-filesystem-contract-test*
 /tmp/native_abi_layout_test-phase-current.exe
+/tmp/native-abi-layout-test.exe
+/tmp/studio-main-probe.o
 /out/validation/
 /logs
 # Keep the established Mbed TLS vendor tree ignored, but make the exact
@@ -52,6 +54,7 @@
 /out/aarch64-phase9/
 /out/aarch64-phase9-host-tests.exe
 /out/aarch64-phase10/
+/out/aarch64-phase12/
 /out/aarch64-phase10-host-test.exe
 /tools/__pycache__/
 /out/wallpaper-pack/certs/ca-bundle.manifest

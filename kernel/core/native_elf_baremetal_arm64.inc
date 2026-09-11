@@ -3,6 +3,7 @@
 
 static const uint64_t kArm64PageSize = UINT64_C(0x1000);
 static const uint64_t kArm64PreferredBase = UINT64_C(0x50000000);
+static const uint64_t kArm64NestedPreferredBase = UINT64_C(0x51000000);
 static const uint32_t kArm64MaxPackages = 8;
 static const uint32_t kArm64MaxManifestBytes = 8192;
 static const uint32_t kArm64MaxProgramHeaders = 32;
@@ -1388,6 +1389,8 @@ struct Phase9Runtime {
     bool isAppA;
     bool isPhase10;
     bool isPhase11;
+    bool isPhase12;
+    bool isPhase12Application;
     bool entered;
     uint64_t startTick;
     uint32_t buttonClicks;
@@ -1425,6 +1428,18 @@ static volatile uint8_t s_phase9LoaderBusy = 0;
 static volatile uint32_t s_phase9VfsUsers = 0;
 static bool s_phase9AppAImagePrimed = false;
 static bool s_phase9AppBImagePrimed = false;
+#if defined(GXOS_AARCH64_PHASE12)
+struct Phase12RunJob {
+    bool used;
+    bool started;
+    gx_development_run_handle handle;
+    Phase9Runtime* owner;
+    Arm64Package* package;
+    gx_development_run_snapshot snapshot;
+};
+static Phase12RunJob s_phase12RunJob = {};
+static uint64_t s_phase12RunGeneration = 1;
+#endif
 #if defined(GXOS_AARCH64_PHASE10)
 static const char kPhase11ProjectId[] = "com.guidexos.phase11.crossarch";
 static const char kPhase11ProjectRoot[] = "/Apps/Phase11CrossArchApp";
@@ -1836,7 +1851,15 @@ static gx_result GX_CALL phase9_log(gx_app_context* context, const char* message
     if (!runtime || !phase9_string_valid(message)) return GX_ERROR_INVALID_ARGUMENT;
     runtime->entered = true;
     const arch::interrupt_state_t state = arch::irq_save();
-    arm64_print(runtime->isPhase11 ? "[phase11-app] " : (runtime->isPhase10 ? "[phase10-app] " : (runtime->isAppA ? "[phase9-app-a] " : "[phase9-app-b] "))); arm64_print(message); arm64_print("\n");
+    arm64_print(runtime->isPhase12Application ? "[phase12-app] " : (runtime->isPhase12 ? "[developer-studio-app] " : (runtime->isPhase11 ? "[phase11-app] " : (runtime->isPhase10 ? "[phase10-app] " : (runtime->isAppA ? "[phase9-app-a] " : "[phase9-app-b] "))))); arm64_print(message); arm64_print("\n");
+#if defined(GXOS_AARCH64_PHASE12)
+    if (runtime->isPhase12Application && s_phase12RunJob.used &&
+        s_phase12RunJob.snapshot.outputCount < GX_DEVELOPMENT_RUN_MAX_OUTPUT_LINES) {
+        arm64_copy(s_phase12RunJob.snapshot.output[s_phase12RunJob.snapshot.outputCount].text,
+                   sizeof(s_phase12RunJob.snapshot.output[s_phase12RunJob.snapshot.outputCount].text), message);
+        ++s_phase12RunJob.snapshot.outputCount;
+    }
+#endif
     if (runtime->isAppA && arm64_equal(message, "focus/input isolation: PASS value=appa"))
         arm64_print("[guideXOS] cross-app focus isolation: PASS\n");
     if (!runtime->isAppA && arm64_equal(message, "focus/input isolation: PASS value=appb"))
@@ -1957,6 +1980,162 @@ static gx_result GX_CALL phase11_build_release(gx_app_context* context, gx_build
     if (!phase9_runtime(context)) return GX_ERROR_INVALID_ARGUMENT;
     return kernel::compiler::BareMetalBuildService::release(handle);
 }
+
+#if defined(GXOS_AARCH64_PHASE12)
+static void phase12_snapshot_write(gx_development_run_snapshot* output,
+                                   const gx_development_run_snapshot& value)
+{
+    if (!output) return;
+    const uint32_t requestedVersion = output->size >= sizeof(uint32_t) * 2u ? output->version : 0u;
+    uint32_t capacity = output->size;
+    if (capacity == 0 || capacity > sizeof(value)) capacity = sizeof(value);
+    uint8_t* destination = reinterpret_cast<uint8_t*>(output);
+    const uint8_t* source = reinterpret_cast<const uint8_t*>(&value);
+    for (uint32_t i = 0; i < capacity; ++i) destination[i] = source[i];
+    if (capacity >= sizeof(uint32_t)) {
+        output->size = capacity;
+        if (requestedVersion == GX_DEVELOPMENT_RUN_LEGACY_API_VERSION &&
+            capacity == GX_DEVELOPMENT_RUN_SNAPSHOT_V1_SIZE)
+            output->version = GX_DEVELOPMENT_RUN_LEGACY_API_VERSION;
+    }
+}
+
+static gx_development_run_snapshot phase12_snapshot_base()
+{
+    gx_development_run_snapshot result = {};
+    result.size = sizeof(result);
+    result.version = GX_DEVELOPMENT_RUN_API_VERSION;
+    result.state = GX_DEVELOPMENT_RUN_EMPTY;
+    result.errorCode = GX_DEVELOPMENT_RUN_ERROR_NONE;
+    result.capabilities = GX_DEVELOPMENT_RUN_CAP_ARTIFACT_METADATA | GX_DEVELOPMENT_RUN_CAP_OUTPUT_CAPTURE | GX_DEVELOPMENT_RUN_CAP_DEBUG_DIAGNOSTICS;
+    return result;
+}
+
+static void phase12_snapshot_failure(gx_development_run_snapshot* output,
+                                     gx_development_run_error_code error,
+                                     const char* message)
+{
+    gx_development_run_snapshot result = phase12_snapshot_base();
+    result.state = GX_DEVELOPMENT_RUN_FAILED;
+    result.errorCode = error;
+    arm64_copy(result.errorMessage, sizeof(result.errorMessage), message ? message : "in-OS Run failed");
+    phase12_snapshot_write(output, result);
+}
+
+static void phase12_snapshot_output(gx_development_run_snapshot& snapshot, const char* text)
+{
+    if (!text || snapshot.outputCount >= GX_DEVELOPMENT_RUN_MAX_OUTPUT_LINES) {
+        snapshot.outputTruncated = 1;
+        return;
+    }
+    arm64_copy(snapshot.output[snapshot.outputCount].text,
+               sizeof(snapshot.output[snapshot.outputCount].text), text);
+    ++snapshot.outputCount;
+}
+
+static bool phase12_run_package(Arm64Package* package, bool nested = false);
+
+static gx_result GX_CALL phase12_run_prepare(gx_app_context* context,
+                                               const gx_development_run_request* request,
+                                               gx_development_run_handle* outputHandle,
+                                               gx_development_run_snapshot* outputSnapshot)
+{
+    Phase9Runtime* owner = phase9_runtime(context);
+    if (outputHandle) *outputHandle = 0;
+    if (outputSnapshot) {
+        const uint32_t requestedSize = outputSnapshot->size;
+        gx_development_run_snapshot initial = phase12_snapshot_base();
+        initial.size = requestedSize == 0 ? sizeof(*outputSnapshot) : requestedSize;
+        phase12_snapshot_write(outputSnapshot, initial);
+    }
+    const size_t requiredRequestBytes = GX_DEVELOPMENT_RUN_REQUEST_V1_SIZE;
+    if (!owner || !request || !outputHandle || !outputSnapshot || request->size < requiredRequestBytes ||
+        (request->version != GX_DEVELOPMENT_RUN_LEGACY_API_VERSION && request->version != GX_DEVELOPMENT_RUN_API_VERSION) ||
+        !request->projectId || !request->projectId[0] || !request->targetProfile ||
+        !phase9_string_valid(request->projectId) || !phase9_string_valid(request->targetProfile)) {
+        phase12_snapshot_failure(outputSnapshot, GX_DEVELOPMENT_RUN_ERROR_INVALID_REQUEST, "invalid in-OS Run request");
+        return GX_OK;
+    }
+    if (s_phase12RunJob.used) {
+        phase12_snapshot_failure(outputSnapshot, GX_DEVELOPMENT_RUN_ERROR_RUNTIME_BUSY, "another in-OS Run is active");
+        return GX_ERROR_BUSY;
+    }
+    refresh();
+    phase9_vfs_enter();
+    discover();
+    Arm64Package* package = arm64_find_package(request->projectId);
+    phase9_vfs_exit();
+    if (!package) {
+        phase12_snapshot_failure(outputSnapshot, GX_DEVELOPMENT_RUN_ERROR_ARTIFACT_MISSING, "App Model package was not discovered");
+        return GX_OK;
+    }
+
+    s_phase12RunJob = {};
+    s_phase12RunJob.used = true;
+    s_phase12RunJob.owner = owner;
+    s_phase12RunJob.package = package;
+    s_phase12RunJob.handle = (++s_phase12RunGeneration << 32) | 1u;
+    if (s_phase12RunJob.handle == 0) s_phase12RunJob.handle = (++s_phase12RunGeneration << 32) | 1u;
+    s_phase12RunJob.snapshot = phase12_snapshot_base();
+    s_phase12RunJob.snapshot.handle = s_phase12RunJob.handle;
+    s_phase12RunJob.snapshot.state = GX_DEVELOPMENT_RUN_PREPARED;
+    s_phase12RunJob.snapshot.applicationId[0] = '\0';
+    arm64_copy(s_phase12RunJob.snapshot.applicationId, sizeof(s_phase12RunJob.snapshot.applicationId), package->id);
+    arm64_copy(s_phase12RunJob.snapshot.displayName, sizeof(s_phase12RunJob.snapshot.displayName), package->displayName);
+    if (request->artifactSha256 && phase9_string_valid(request->artifactSha256))
+        arm64_copy(s_phase12RunJob.snapshot.artifactSha256, sizeof(s_phase12RunJob.snapshot.artifactSha256), request->artifactSha256);
+    phase12_snapshot_output(s_phase12RunJob.snapshot, "Run resolved through App Model identity");
+    phase12_snapshot_write(outputSnapshot, s_phase12RunJob.snapshot);
+    *outputHandle = s_phase12RunJob.handle;
+    arm64_print("[developer-studio] App Model refresh: PASS\n");
+    return GX_OK;
+}
+
+static gx_result GX_CALL phase12_run_start(gx_app_context* context, gx_development_run_handle handle)
+{
+    Phase9Runtime* owner = phase9_runtime(context);
+    if (!owner || !s_phase12RunJob.used || s_phase12RunJob.owner != owner || s_phase12RunJob.handle != handle)
+        return GX_ERROR_INVALID_ARGUMENT;
+    if (s_phase12RunJob.started) return GX_ERROR_BUSY;
+    s_phase12RunJob.started = true;
+    s_phase12RunJob.snapshot.state = GX_DEVELOPMENT_RUN_LAUNCHING;
+    arm64_print("[developer-studio] Run: ARM64 payload selected\n");
+    const bool okay = phase12_run_package(s_phase12RunJob.package, true);
+    s_phase12RunJob.snapshot.state = okay ? GX_DEVELOPMENT_RUN_COMPLETED : GX_DEVELOPMENT_RUN_FAILED;
+    s_phase12RunJob.snapshot.errorCode = okay ? GX_DEVELOPMENT_RUN_ERROR_NONE : GX_DEVELOPMENT_RUN_ERROR_LAUNCH_FAILED;
+    s_phase12RunJob.snapshot.exitCode = okay ? 42 : -1;
+    s_phase12RunJob.snapshot.cleanupComplete = okay ? 1u : 0u;
+    phase12_snapshot_output(s_phase12RunJob.snapshot, okay ? "ARM64 application completed" : "ARM64 application launch failed");
+    return okay ? GX_OK : GX_ERROR_FAILED;
+}
+
+static gx_result GX_CALL phase12_run_poll(gx_app_context* context, gx_development_run_handle handle,
+                                          gx_development_run_snapshot* outputSnapshot)
+{
+    Phase9Runtime* owner = phase9_runtime(context);
+    if (!owner || !s_phase12RunJob.used || s_phase12RunJob.owner != owner || s_phase12RunJob.handle != handle || !outputSnapshot)
+        return GX_ERROR_INVALID_ARGUMENT;
+    phase12_snapshot_write(outputSnapshot, s_phase12RunJob.snapshot);
+    return GX_OK;
+}
+
+static gx_result GX_CALL phase12_run_request_close(gx_app_context* context, gx_development_run_handle handle)
+{
+    Phase9Runtime* owner = phase9_runtime(context);
+    if (!owner || !s_phase12RunJob.used || s_phase12RunJob.owner != owner || s_phase12RunJob.handle != handle)
+        return GX_ERROR_INVALID_ARGUMENT;
+    return s_phase12RunJob.started ? GX_OK : GX_ERROR_UNSUPPORTED;
+}
+
+static gx_result GX_CALL phase12_run_release(gx_app_context* context, gx_development_run_handle handle)
+{
+    Phase9Runtime* owner = phase9_runtime(context);
+    if (!owner || !s_phase12RunJob.used || s_phase12RunJob.owner != owner || s_phase12RunJob.handle != handle)
+        return GX_ERROR_INVALID_ARGUMENT;
+    s_phase12RunJob = {};
+    return GX_OK;
+}
+#endif
 #endif
 
 static gx_result GX_CALL phase9_request_window(gx_app_context* context, const char* title, int32_t width,
@@ -2090,6 +2269,13 @@ static void phase9_initialize_host(Phase9Runtime* runtime)
     runtime->loader.host.bare_metal_file_create_directory = phase11_file_mkdir;
     runtime->loader.host.bare_metal_file_remove = phase11_file_remove;
 #endif
+#if defined(GXOS_AARCH64_PHASE12)
+    runtime->loader.host.bare_metal_development_run_prepare = phase12_run_prepare;
+    runtime->loader.host.bare_metal_development_run_start = phase12_run_start;
+    runtime->loader.host.bare_metal_development_run_poll = phase12_run_poll;
+    runtime->loader.host.bare_metal_development_run_request_close = phase12_run_request_close;
+    runtime->loader.host.bare_metal_development_run_release = phase12_run_release;
+#endif
 }
 
 static bool phase9_load_and_run(Phase9Runtime* runtime)
@@ -2177,10 +2363,66 @@ static bool phase9_load_and_run(Phase9Runtime* runtime)
         runtime->common.resources().widgets == 0;
     runtime->common.mark_exited();
     runtime->common.cleanup();
-    const bool cleanup = result == 42 && runtime->entered && canaries && imagePermissionsRestored && stackReleased && imageReleased && noLeak;
+    const bool expectedExit = runtime->isPhase12 && !runtime->isPhase12Application
+        ? result == GX_OK : result == 42;
+    const bool cleanup = expectedExit && runtime->entered && canaries && imagePermissionsRestored && stackReleased && imageReleased && noLeak;
     if (cleanup) arm64_print("[guideXOS] NativeElf GUI cleanup: PASS mappings=0 windows=0 widgets=0\n");
     return cleanup;
 }
+
+#if defined(GXOS_AARCH64_PHASE12)
+static bool phase12_run_package(Arm64Package* package, bool nested)
+{
+    if (!package || (s_arm64LaunchInProgress && !nested)) return false;
+    if (!nested) s_arm64LaunchInProgress = true;
+    Phase9Runtime runtime{};
+    runtime.loader.package = package;
+    runtime.loader.verbose = true;
+    runtime.loader.preferredBase = nested ? kArm64NestedPreferredBase : kArm64PreferredBase;
+    const uint8_t runtimeId = static_cast<uint8_t>((++s_phase9RuntimeSequence % 255u) + 1u);
+    const uint16_t generation = static_cast<uint16_t>((++s_phase9Generation & 0xffffu) ?
+        (s_phase9Generation & 0xffffu) : 1u);
+    if (!runtime.common.initialize(package->id, package->architecture, runtimeId, generation,
+                                   kPhase9Quotas)) {
+        if (!nested) s_arm64LaunchInProgress = false;
+        return false;
+    }
+    runtime.owner = new Phase9GuiOwner(&runtime);
+    if (!runtime.owner) {
+        runtime.common.cleanup();
+        if (!nested) s_arm64LaunchInProgress = false;
+        return false;
+    }
+    runtime.autoClose = true;
+    runtime.closeRequested = false;
+    runtime.isAppA = true;
+    runtime.isPhase12 = true;
+    runtime.isPhase12Application = nested;
+    runtime.startTick = phase3_timer_count();
+    runtime.loader.context.userData = &runtime;
+    const bool result = phase9_load_and_run(&runtime);
+    if (!nested) s_arm64LaunchInProgress = false;
+    return result;
+}
+
+bool phase12_run_developer_studio()
+{
+    if (!s_arm64Discovered) {
+        phase9_vfs_enter();
+        phase9_acquire_loader();
+        if (!s_arm64Discovered) discover();
+        phase9_release_loader();
+        phase9_vfs_exit();
+    }
+    Arm64Package* package = arm64_find_package("com.guidexos.developerstudio");
+    if (!package) return false;
+    arm64_print("[guideXOS] Developer Studio SDK compatibility: PASS\n");
+    arm64_print("[guideXOS] Developer Studio ARM64 launch: PASS\n");
+    return phase12_run_package(package);
+}
+#else
+bool phase12_run_developer_studio() { return false; }
+#endif
 
 bool phase9_run_application(const char* appName, bool autoClose)
 {

@@ -179,6 +179,33 @@ static void output_line(const char* text, uint32_t stream)
     copy(line.text, sizeof(line.text), text);
 }
 
+static bool append_decimal(char* output, uint32_t capacity, uint64_t value)
+{
+    char digits[20] = {};
+    uint32_t count = 0;
+    if (value == 0) digits[count++] = '0';
+    while (value != 0 && count < sizeof(digits)) {
+        digits[count++] = static_cast<char>('0' + (value % 10));
+        value /= 10;
+    }
+    const uint32_t existing = length(output, capacity);
+    if (existing + count + 1 > capacity) return false;
+    for (uint32_t i = 0; i < count; ++i) output[existing + i] = digits[count - i - 1];
+    output[existing + count] = '\0';
+    return true;
+}
+
+static void output_compile_diagnostic(const CompileSummary& summary)
+{
+    if (!summary.diagnosticLine || !summary.diagnosticColumn || !summary.diagnosticMessage[0]) return;
+    char text[256] = {};
+    if (!copy(text, sizeof(text), "error: line ") || !append_decimal(text, sizeof(text), summary.diagnosticLine) ||
+        !append(text, sizeof(text), ", column ") || !append_decimal(text, sizeof(text), summary.diagnosticColumn) ||
+        !append(text, sizeof(text), ", offset ") || !append_decimal(text, sizeof(text), summary.diagnosticOffset) ||
+        !append(text, sizeof(text), ": ") || !append(text, sizeof(text), summary.diagnosticMessage)) return;
+    output_line(text, 2);
+}
+
 static void fail(uint32_t code, const char* message)
 {
     s_job.snapshot.state = GX_BUILD_FAILED;
@@ -339,6 +366,7 @@ static bool build(const gx_build_request* request)
     output_line(resolvedFirst == CompilerTarget::Amd64 ?
         "Compiling AMD64 source inside guideXOS" : "Compiling ARM64 source inside guideXOS", 1);
     if (!compile_for_target(sourcePath, primaryPath, resolvedFirst, primarySummary)) {
+        output_compile_diagnostic(*primarySummary);
         output_line(resolvedFirst == CompilerTarget::Amd64 ?
             "AMD64: compiler failed; package was not written" :
             "ARM64: compiler failed; package was not written", 2);
@@ -351,6 +379,7 @@ static bool build(const gx_build_request* request)
         output_line("Compiling AMD64 sibling from the same source tree inside guideXOS", 1);
         amdOkay = compile_for_target(sourcePath, amdPath, second, &amdSummary);
         if (!amdOkay) {
+            output_compile_diagnostic(amdSummary);
             output_line("AMD64: compiler failed; package was not written", 2);
             fail(GX_BUILD_ERROR_COMPILER_FAILED, "AMD64: unsupported source, encoding, or ELF emission failure"); return false;
         }

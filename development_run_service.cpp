@@ -37,6 +37,8 @@ constexpr char kManifestPath[] = "app/app.json";
 constexpr uint32_t kMaxDeployments = 8;
 constexpr uint32_t kMaxManifestBytes = 16u * 1024u;
 constexpr uint64_t kMaxArtifactBytes = 64ull * 1024ull * 1024ull;
+constexpr uint32_t kHostedCapabilities = GX_DEVELOPMENT_RUN_CAP_ARTIFACT_METADATA |
+    GX_DEVELOPMENT_RUN_CAP_DEBUG_DIAGNOSTICS;
 
 struct Deployment {
     gx_development_run_handle handle = 0;
@@ -88,13 +90,38 @@ void copyBounded(char* destination, size_t capacity, const std::string& value) {
     destination[count] = '\0';
 }
 
+uint32_t snapshotCapacity(const gx_development_run_snapshot* snapshot) {
+    if (!snapshot) return 0;
+    const uint32_t requested = snapshot->size;
+    if (requested >= GX_DEVELOPMENT_RUN_SNAPSHOT_V1_SIZE && requested <= sizeof(gx_development_run_snapshot)) return requested;
+    return sizeof(gx_development_run_snapshot);
+}
+
+void writeSnapshot(const gx_development_run_snapshot& value, gx_development_run_snapshot* output) {
+    if (!output) return;
+    const uint32_t requestedVersion = output->size >= sizeof(uint32_t) * 2u ? output->version : 0u;
+    const uint32_t capacity = snapshotCapacity(output);
+    const uint8_t* source = reinterpret_cast<const uint8_t*>(&value);
+    uint8_t* destination = reinterpret_cast<uint8_t*>(output);
+    for (uint32_t i = 0; i < capacity; ++i) destination[i] = source[i];
+    output->size = capacity;
+    if (capacity >= sizeof(uint32_t) * 2u) {
+        output->version = (requestedVersion == GX_DEVELOPMENT_RUN_LEGACY_API_VERSION &&
+                           capacity == GX_DEVELOPMENT_RUN_SNAPSHOT_V1_SIZE)
+            ? GX_DEVELOPMENT_RUN_LEGACY_API_VERSION
+            : value.version;
+    }
+}
+
 void clearSnapshot(gx_development_run_snapshot* snapshot) {
     if (!snapshot) return;
-    *snapshot = gx_development_run_snapshot{};
-    snapshot->size = sizeof(gx_development_run_snapshot);
-    snapshot->version = GX_DEVELOPMENT_RUN_API_VERSION;
-    snapshot->state = GX_DEVELOPMENT_RUN_EMPTY;
-    snapshot->errorCode = GX_DEVELOPMENT_RUN_ERROR_NONE;
+    gx_development_run_snapshot value = {};
+    value.size = sizeof(value);
+    value.version = GX_DEVELOPMENT_RUN_API_VERSION;
+    value.state = GX_DEVELOPMENT_RUN_EMPTY;
+    value.errorCode = GX_DEVELOPMENT_RUN_ERROR_NONE;
+    value.capabilities = kHostedCapabilities;
+    writeSnapshot(value, snapshot);
 }
 
 const char* errorName(gx_development_run_error_code error) {
@@ -127,34 +154,49 @@ const char* errorName(gx_development_run_error_code error) {
     case GX_DEVELOPMENT_RUN_ERROR_RELEASED: return "RELEASED";
     case GX_DEVELOPMENT_RUN_ERROR_SERVICE_UNAVAILABLE: return "SERVICE_UNAVAILABLE";
     case GX_DEVELOPMENT_RUN_ERROR_INTERNAL: return "INTERNAL";
+    case GX_DEVELOPMENT_RUN_ERROR_ARTIFACT_SIZE_CHANGED: return "ARTIFACT_SIZE_CHANGED";
+    case GX_DEVELOPMENT_RUN_ERROR_RUNTIME_BUSY: return "RUNTIME_BUSY";
+    case GX_DEVELOPMENT_RUN_ERROR_CANCEL_UNSUPPORTED: return "CANCEL_UNSUPPORTED";
+    case GX_DEVELOPMENT_RUN_ERROR_CANCELLED: return "CANCELLED";
+    case GX_DEVELOPMENT_RUN_ERROR_CALL_DEPTH_EXCEEDED: return "CALL_DEPTH_EXCEEDED";
+    case GX_DEVELOPMENT_RUN_ERROR_INVALID_POINTER_DEREFERENCE: return "INVALID_POINTER_DEREFERENCE";
+    case GX_DEVELOPMENT_RUN_ERROR_POINTER_OUT_OF_BOUNDS: return "POINTER_OUT_OF_BOUNDS";
     default: return "UNKNOWN";
     }
 }
 
 void setSnapshotFromDeployment(const Deployment& deployment, gx_development_run_snapshot* snapshot) {
     if (!snapshot) return;
-    clearSnapshot(snapshot);
-    snapshot->handle = deployment.handle;
-    snapshot->state = deployment.state;
-    snapshot->errorCode = deployment.error;
-    snapshot->processId = deployment.processId;
-    snapshot->nativeRuntimeId = deployment.nativeRuntimeId;
-    snapshot->windowCount = deployment.windowCount;
-    snapshot->createdWindowCount = deployment.createdWindowCount;
-    snapshot->exitCode = deployment.exitCode;
-    snapshot->cleanupComplete = deployment.cleanupComplete ? 1u : 0u;
-    copyBounded(snapshot->applicationId, sizeof(snapshot->applicationId), deployment.applicationId);
-    copyBounded(snapshot->displayName, sizeof(snapshot->displayName), deployment.displayName);
-    copyBounded(snapshot->artifactSha256, sizeof(snapshot->artifactSha256), deployment.artifactSha256);
-    copyBounded(snapshot->errorMessage, sizeof(snapshot->errorMessage), deployment.errorMessage);
+    gx_development_run_snapshot value = {};
+    value.size = sizeof(value);
+    value.version = GX_DEVELOPMENT_RUN_API_VERSION;
+    value.capabilities = kHostedCapabilities;
+    value.handle = deployment.handle;
+    value.state = deployment.state;
+    value.errorCode = deployment.error;
+    value.processId = deployment.processId;
+    value.nativeRuntimeId = deployment.nativeRuntimeId;
+    value.windowCount = deployment.windowCount;
+    value.createdWindowCount = deployment.createdWindowCount;
+    value.exitCode = deployment.exitCode;
+    value.cleanupComplete = deployment.cleanupComplete ? 1u : 0u;
+    copyBounded(value.applicationId, sizeof(value.applicationId), deployment.applicationId);
+    copyBounded(value.displayName, sizeof(value.displayName), deployment.displayName);
+    copyBounded(value.artifactSha256, sizeof(value.artifactSha256), deployment.artifactSha256);
+    copyBounded(value.errorMessage, sizeof(value.errorMessage), deployment.errorMessage);
+    writeSnapshot(value, snapshot);
 }
 
 void setFailure(gx_development_run_snapshot* snapshot, gx_development_run_error_code error, const std::string& message) {
     if (!snapshot) return;
-    clearSnapshot(snapshot);
-    snapshot->state = GX_DEVELOPMENT_RUN_FAILED;
-    snapshot->errorCode = error;
-    copyBounded(snapshot->errorMessage, sizeof(snapshot->errorMessage), message.empty() ? errorName(error) : message);
+    gx_development_run_snapshot value = {};
+    value.size = sizeof(value);
+    value.version = GX_DEVELOPMENT_RUN_API_VERSION;
+    value.state = GX_DEVELOPMENT_RUN_FAILED;
+    value.errorCode = error;
+    value.capabilities = kHostedCapabilities;
+    copyBounded(value.errorMessage, sizeof(value.errorMessage), message.empty() ? errorName(error) : message);
+    writeSnapshot(value, snapshot);
 }
 
 bool decodeHandle(gx_development_run_handle handle, uint32_t& slot, uint32_t& generation) {
@@ -496,15 +538,18 @@ gx_result Prepare(NativeAppRuntimeContext& owner, const gx_development_run_reque
                   gx_development_run_handle* outHandle, gx_development_run_snapshot* outSnapshot) {
     if (outHandle) *outHandle = 0;
     clearSnapshot(outSnapshot);
-    const size_t requiredRequestBytes = offsetof(gx_development_run_request, artifactSha256) + sizeof(const char*);
-    if (!outHandle || !outSnapshot || request.size < requiredRequestBytes || request.version != GX_DEVELOPMENT_RUN_API_VERSION || owner.runtimeId == 0 || owner.appId != kOwnerAppId) {
+    const size_t requiredRequestBytes = GX_DEVELOPMENT_RUN_REQUEST_V1_SIZE;
+    if (!outHandle || !outSnapshot || request.size < requiredRequestBytes ||
+        (request.version != GX_DEVELOPMENT_RUN_LEGACY_API_VERSION && request.version != GX_DEVELOPMENT_RUN_API_VERSION) ||
+        owner.runtimeId == 0 || owner.appId != kOwnerAppId) {
         setFailure(outSnapshot, owner.appId == kOwnerAppId ? GX_DEVELOPMENT_RUN_ERROR_INVALID_REQUEST : GX_DEVELOPMENT_RUN_ERROR_OWNER_NOT_ALLOWED, "development Run is hosted-only and owner-bound");
         return GX_OK;
     }
 
     Deployment candidate;
     candidate.ownerRuntimeId = owner.runtimeId;
-    candidate.debugControlled = request.size >= sizeof(gx_development_run_request) && (request.flags & GX_DEVELOPMENT_RUN_FLAG_DEBUG_CONTROLLED) != 0;
+    candidate.debugControlled = request.size >= offsetof(gx_development_run_request, flags) + sizeof(request.flags) &&
+        (request.flags & GX_DEVELOPMENT_RUN_FLAG_DEBUG_CONTROLLED) != 0;
     candidate.projectId = request.projectId ? request.projectId : std::string();
     candidate.applicationId = candidate.projectId;
     gx_development_run_error_code error = GX_DEVELOPMENT_RUN_ERROR_NONE;

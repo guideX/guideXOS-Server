@@ -6,7 +6,8 @@
 extern "C" {
 #endif
 
-#define GX_DEVELOPMENT_RUN_API_VERSION 1u
+#define GX_DEVELOPMENT_RUN_API_VERSION 2u
+#define GX_DEVELOPMENT_RUN_LEGACY_API_VERSION 1u
 #define GX_DEVELOPMENT_RUN_MAX_PROJECT_ROOT_BYTES 240u
 #define GX_DEVELOPMENT_RUN_MAX_PROJECT_ID_BYTES 96u
 #define GX_DEVELOPMENT_RUN_MAX_PATH_BYTES 160u
@@ -14,7 +15,17 @@ extern "C" {
 #define GX_DEVELOPMENT_RUN_MAX_APP_ID_BYTES 96u
 #define GX_DEVELOPMENT_RUN_MAX_DISPLAY_NAME_BYTES 96u
 #define GX_DEVELOPMENT_RUN_MAX_ERROR_BYTES 128u
+#define GX_DEVELOPMENT_RUN_MAX_OUTPUT_LINES 16u
+#define GX_DEVELOPMENT_RUN_MAX_OUTPUT_LINE_BYTES 256u
 #define GX_DEVELOPMENT_RUN_FLAG_DEBUG_CONTROLLED 1u
+#define GX_DEVELOPMENT_RUN_REQUEST_V1_SIZE 72u
+#define GX_DEVELOPMENT_RUN_SNAPSHOT_V1_SIZE 448u
+
+/* Append-only capability bits. A consumer must still gate every field by the
+ * request/snapshot size before reading it. */
+#define GX_DEVELOPMENT_RUN_CAP_ARTIFACT_METADATA (1u << 0)
+#define GX_DEVELOPMENT_RUN_CAP_OUTPUT_CAPTURE (1u << 1)
+#define GX_DEVELOPMENT_RUN_CAP_DEBUG_DIAGNOSTICS (1u << 2)
 
 typedef uint64_t gx_development_run_handle;
 
@@ -59,7 +70,15 @@ typedef enum gx_development_run_error_code {
     GX_DEVELOPMENT_RUN_ERROR_LAUNCH_FAILED = 24,
     GX_DEVELOPMENT_RUN_ERROR_RELEASED = 25,
     GX_DEVELOPMENT_RUN_ERROR_SERVICE_UNAVAILABLE = 26,
-    GX_DEVELOPMENT_RUN_ERROR_INTERNAL = 27
+    GX_DEVELOPMENT_RUN_ERROR_INTERNAL = 27,
+    /* Append-only diagnostics used by later debugger/runtime adapters. */
+    GX_DEVELOPMENT_RUN_ERROR_ARTIFACT_SIZE_CHANGED = 28,
+    GX_DEVELOPMENT_RUN_ERROR_RUNTIME_BUSY = 29,
+    GX_DEVELOPMENT_RUN_ERROR_CANCEL_UNSUPPORTED = 30,
+    GX_DEVELOPMENT_RUN_ERROR_CANCELLED = 31,
+    GX_DEVELOPMENT_RUN_ERROR_CALL_DEPTH_EXCEEDED = 32,
+    GX_DEVELOPMENT_RUN_ERROR_INVALID_POINTER_DEREFERENCE = 33,
+    GX_DEVELOPMENT_RUN_ERROR_POINTER_OUT_OF_BOUNDS = 34
 } gx_development_run_error_code;
 
 typedef struct gx_development_run_request {
@@ -74,7 +93,17 @@ typedef struct gx_development_run_request {
     const char* artifactSha256;
     uint32_t flags;
     uint32_t reserved;
+    /* Appended in API v2. API v1 callers remain valid when size is checked. */
+    uint64_t artifactSize;
+    const char* artifactArchitecture;
+    const char* artifactAbi;
+    uint32_t capabilities;
+    uint32_t reservedV2;
 } gx_development_run_request;
+
+typedef struct gx_development_run_output_line {
+    char text[GX_DEVELOPMENT_RUN_MAX_OUTPUT_LINE_BYTES];
+} gx_development_run_output_line;
 
 typedef struct gx_development_run_snapshot {
     uint32_t size;
@@ -92,6 +121,14 @@ typedef struct gx_development_run_snapshot {
     char displayName[GX_DEVELOPMENT_RUN_MAX_DISPLAY_NAME_BYTES];
     char artifactSha256[GX_DEVELOPMENT_RUN_MAX_SHA256_BYTES];
     char errorMessage[GX_DEVELOPMENT_RUN_MAX_ERROR_BYTES];
+    /* Appended in API v2. The alignment word preserves a stable 8-byte
+     * boundary after the legacy variable-width character arrays. */
+    uint32_t reservedOutputAlignment;
+    uint32_t outputCount;
+    uint32_t outputTruncated;
+    gx_development_run_output_line output[GX_DEVELOPMENT_RUN_MAX_OUTPUT_LINES];
+    uint32_t capabilities;
+    uint32_t reservedV2;
 } gx_development_run_snapshot;
 
 #ifdef __cplusplus

@@ -86,6 +86,10 @@ uint32_t phase10_launches();
 bool phase11_run_developer_studio();
 bool phase11_run_application(const char* appName, bool autoClose);
 
+// Phase 12 launches the shipped Developer Studio ARM64 package through the
+// same App Model resolver and exposes the in-OS build/run bridge to it.
+bool phase12_run_developer_studio();
+
 } // namespace native_elf
 } // namespace kernel
 

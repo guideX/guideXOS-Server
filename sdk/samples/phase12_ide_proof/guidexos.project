@@ -1,0 +1,15 @@
+{
+  "formatVersion": 1,
+  "projectId": "com.example.guidexos.phase12.ideproof",
+  "displayName": "Phase 12 Developer Studio IDE Proof",
+  "projectKind": "native-gui-application",
+  "sourceRoot": "src",
+  "applicationManifest": "app/app.json",
+  "defaultTargetProfile": "guidexos.multi.baremetal.bootstrap.native",
+  "entryPoint": "gx_main",
+  "abi": "guidexos-c-abi-v1",
+  "architecture": "multi",
+  "outputName": "app",
+  "sourceEntry": "main.c",
+  "packageRoot": "/Apps/P12Proof"
+}

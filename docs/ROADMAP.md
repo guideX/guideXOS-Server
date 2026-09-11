@@ -1,7 +1,7 @@
 # ??? guideXOSServer Development Roadmap
 
-**Last Updated:** 2026-09-09
-**Current Status:** AARCH64 Phase 11 Developer Studio resident compiler implemented
+**Last Updated:** 2026-09-10
+**Current Status:** AARCH64 Phase 12 Developer Studio in-OS IDE workflow implemented
 **Overall Progress:** ~80% to Production Release
 
 ---
@@ -16,6 +16,7 @@
 ? Phase 9: NativeElf runtime services (ARM64 complete)
 ? Phase 10: Multi-architecture NativeElf packages (AMD64 + ARM64 complete)
 ? Phase 11: Developer Studio resident multi-architecture compiler (complete)
+? Phase 12: Developer Studio SDK convergence and in-OS IDE build/run (complete)
 ?? Phase 10: Ecosystem (Future)
 ```
 
@@ -164,6 +165,19 @@ general C/C++ toolchain, multiple translation units, relocations, EL0
 isolation, or full AMD64 guideXOS boot.
 
 **Details:** See `aarch64/AARCH64_PHASE11_DEVELOPER_STUDIO.md`
+
+### Phase 12: Developer Studio SDK convergence and in-OS IDE build/run (Complete) ✅
+**Status:** Implemented and validated on `AARCH64_SUPPORT`.
+
+The standalone Developer Studio now builds against the canonical server SDK in
+hosted AMD64 and freestanding ARM64 modes. A fresh ARM64 App Model launch
+opens a real project, edits source, builds both ELF architectures with the
+resident compiler, preserves the previous package across invalid source,
+refreshes the canonical package, and runs the ARM64 payload. The append-only
+development-run ABI includes v1 size gates, v2 artifact/output capabilities,
+bounded output capture, explicit lifecycle errors, and bare-metal callbacks.
+
+**Details:** See `aarch64/AARCH64_PHASE12_DEVELOPER_STUDIO_IDE.md`
 
 ---
 

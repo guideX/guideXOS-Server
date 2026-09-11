@@ -12,6 +12,7 @@ namespace compiler {
 
 static const uint32_t COMPILER_MAX_SOURCE_BYTES = 64 * 1024;
 static const uint32_t COMPILER_MAX_OUTPUT_BYTES = 16384;
+static const uint32_t COMPILER_MAX_DIAGNOSTIC_MESSAGE = 192;
 
 struct CompileSummary {
     bool success;
@@ -25,6 +26,10 @@ struct CompileSummary {
     uint64_t sourceHash;
     uint64_t outputHash;
     uint64_t reopenedHash;
+    uint32_t diagnosticLine;
+    uint32_t diagnosticColumn;
+    uint32_t diagnosticOffset;
+    char diagnosticMessage[COMPILER_MAX_DIAGNOSTIC_MESSAGE];
 };
 
 bool compile(const char* sourcePath,

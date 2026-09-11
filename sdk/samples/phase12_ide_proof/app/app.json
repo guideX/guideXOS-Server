@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "id": "com.example.guidexos.phase12.ideproof",
+  "displayName": "Phase 12 Developer Studio IDE Proof",
+  "version": "0.1.0",
+  "publisher": "guideXOS",
+  "description": "A source-built multi-architecture NativeElf proof driven by the in-OS Developer Studio.",
+  "kind": "NativeElf",
+  "runtime": "native-elf",
+  "supportedArchitectures": [ "amd64", "arm64" ],
+  "entries": [
+    {
+      "architecture": "amd64",
+      "path": "bin/amd64/app.elf",
+      "entryPoint": "gx_main",
+      "abi": "guidexos-c-abi-v1",
+      "runtime": "native-elf"
+    },
+    {
+      "architecture": "arm64",
+      "path": "bin/arm64/app.elf",
+      "entryPoint": "gx_main",
+      "abi": "guidexos-c-abi-v1",
+      "runtime": "native-elf"
+    }
+  ],
+  "permissions": [ "log", "window" ],
+  "fileAssociations": []
+}
