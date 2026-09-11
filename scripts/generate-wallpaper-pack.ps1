@@ -5,7 +5,9 @@ param(
     [int]$ImageSizeMB = 64,
     [switch]$SmokeCaFixture,
     [string]$ImageViewerRuntimeSmokePath,
-    [string]$C102ApplicationPath = ""
+    [string]$C102ApplicationPath = "",
+    [string]$C104AppAPath = "",
+    [string]$C104AppBPath = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -1287,6 +1289,20 @@ if (-not [string]::IsNullOrWhiteSpace($C102ApplicationPath)) {
     Copy-Item -LiteralPath $C102ApplicationPath -Destination $c102Target -Force
     $staged += Get-Item $c102Target
     Write-Host "      staged C102 NativeAOT application at /wall/C102.ELF" -ForegroundColor Yellow
+}
+
+foreach ($c104Application in @(
+    [pscustomobject]@{ Source = $C104AppAPath; Name = "C104A.ELF"; Identity = "A" },
+    [pscustomobject]@{ Source = $C104AppBPath; Name = "C104B.ELF"; Identity = "B" }
+)) {
+    if ([string]::IsNullOrWhiteSpace($c104Application.Source)) { continue }
+    if (-not (Test-Path -LiteralPath $c104Application.Source -PathType Leaf)) {
+        throw "C104-$($c104Application.Identity) staging ELF was not found: $($c104Application.Source)"
+    }
+    $c104Target = Join-Path $wallpaperDir $c104Application.Name
+    Copy-Item -LiteralPath $c104Application.Source -Destination $c104Target -Force
+    $staged += Get-Item $c104Target
+    Write-Host "      staged C104-$($c104Application.Identity) NativeAOT application at /wall/$($c104Application.Name)" -ForegroundColor Yellow
 }
 
 # Deterministic large PNG fixture for the bare-metal Image Viewer smoke.

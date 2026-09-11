@@ -16,6 +16,7 @@
     <LangVersion>latest</LangVersion>
     <SelfContained>true</SelfContained>
     <HostLogProofMode Condition="'$(HostLogProofMode)' == ''">NonAllocating</HostLogProofMode>
+    <HostLogProofImageBase Condition="'$(HostLogProofImageBase)' == ''">0x100000000</HostLogProofImageBase>
     <BaseOutputPath>..\..\..\out\dotnet\managed-hostlog\bin\</BaseOutputPath>
     <BaseIntermediateOutputPath>..\..\..\out\dotnet\managed-hostlog\obj\</BaseIntermediateOutputPath>
     <HostLogProofMapPath Condition="'$(HostLogProofMapPath)' == ''">$(MSBuildProjectDirectory)\..\..\..\out\dotnet\managed-hostlog\artifacts\HostLogProof.map</HostLogProofMapPath>
@@ -28,6 +29,21 @@
   <PropertyGroup Condition="'$(HostLogProofMode)' == 'Production'">
     <DefineConstants>$(DefineConstants);HOSTLOGPROOF_PRODUCTION</DefineConstants>
     <EntryPointSymbol>GuideXosNativeAotApplicationEntry</EntryPointSymbol>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(HostLogProofMode)' == 'C104AppA'">
+    <DefineConstants>$(DefineConstants);HOSTLOGPROOF_PRODUCTION;HOSTLOGPROOF_C104_APP_A</DefineConstants>
+    <EntryPointSymbol>GuideXosNativeAotApplicationEntry</EntryPointSymbol>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(HostLogProofMode)' == 'C104AppB'">
+    <DefineConstants>$(DefineConstants);HOSTLOGPROOF_PRODUCTION;HOSTLOGPROOF_C104_APP_B</DefineConstants>
+    <EntryPointSymbol>GuideXosNativeAotApplicationEntry</EntryPointSymbol>
+    <HostLogProofImageBase Condition="'$(HostLogProofImageBase)' == '0x100000000'">0x102000000</HostLogProofImageBase>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(HostLogProofMode)' == 'Production' or '$(HostLogProofMode)' == 'C104AppA' or '$(HostLogProofMode)' == 'C104AppB'">
+    <HostLogProofIsProduction>true</HostLogProofIsProduction>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(HostLogProofMode)' == 'FirstRealAllocation'">
@@ -377,7 +393,7 @@
     <PackageReference Include="Microsoft.DotNet.ILCompiler" Version="9.0.0" PrivateAssets="all" />
   </ItemGroup>
 
-  <Target Name="C102RemoveWindowsImportLibraries" AfterTargets="SetupOSSpecificProps" BeforeTargets="LinkNative" Condition="'$(HostLogProofMode)' == 'Production'">
+  <Target Name="C102RemoveWindowsImportLibraries" AfterTargets="SetupOSSpecificProps" BeforeTargets="LinkNative" Condition="'$(HostLogProofIsProduction)' == 'true'">
     <ItemGroup>
       <SdkNativeLibrary Remove="advapi32.lib;bcrypt.lib;crypt32.lib;iphlpapi.lib;kernel32.lib;mswsock.lib;ncrypt.lib;normaliz.lib;ntdll.lib;ole32.lib;oleaut32.lib;secur32.lib;user32.lib;version.lib;ws2_32.lib" />
       <LinkerArg Remove="&quot;advapi32.lib&quot;; &quot;bcrypt.lib&quot;; &quot;crypt32.lib&quot;; &quot;iphlpapi.lib&quot;; &quot;kernel32.lib&quot;; &quot;mswsock.lib&quot;; &quot;ncrypt.lib&quot;; &quot;normaliz.lib&quot;; &quot;ntdll.lib&quot;; &quot;ole32.lib&quot;; &quot;oleaut32.lib&quot;; &quot;secur32.lib&quot;; &quot;user32.lib&quot;; &quot;version.lib&quot;; &quot;ws2_32.lib&quot;" />
@@ -385,13 +401,13 @@
   </Target>
 
   <ItemGroup>
-    <LinkerArg Include="/fixed /base:0x10000000 /map:&quot;$(HostLogProofMapPath)&quot;" Condition="'$(HostLogProofMode)' != 'Production'" />
-    <LinkerArg Include="/fixed /base:0x100000000 /map:&quot;$(HostLogProofMapPath)&quot;" Condition="'$(HostLogProofMode)' == 'Production'" />
+    <LinkerArg Include="/fixed /base:0x10000000 /map:&quot;$(HostLogProofMapPath)&quot;" Condition="'$(HostLogProofIsProduction)' != 'true'" />
+    <LinkerArg Include="/fixed /base:$(HostLogProofImageBase) /map:&quot;$(HostLogProofMapPath)&quot;" Condition="'$(HostLogProofIsProduction)' == 'true'" />
     <LinkerArg Include="/INCLUDE:ManagedMain" />
-    <LinkerArg Include="/INCLUDE:GuideXosNativeAotApplicationEntry" Condition="'$(HostLogProofMode)' == 'Production'" />
-    <LinkerArg Include="/EXPORT:GuideXosNativeAotApplicationEntry" Condition="'$(HostLogProofMode)' == 'Production'" />
+    <LinkerArg Include="/INCLUDE:GuideXosNativeAotApplicationEntry" Condition="'$(HostLogProofIsProduction)' == 'true'" />
+    <LinkerArg Include="/EXPORT:GuideXosNativeAotApplicationEntry" Condition="'$(HostLogProofIsProduction)' == 'true'" />
     <LinkerArg Include="/EXPORT:guideXosManagedArrayHostLog" Condition="'$(HostLogProofMode)' == 'Allocating'" />
-    <LinkerArg Include="/NODEFAULTLIB:advapi32.lib /NODEFAULTLIB:bcrypt.lib /NODEFAULTLIB:crypt32.lib /NODEFAULTLIB:iphlpapi.lib /NODEFAULTLIB:kernel32.lib /NODEFAULTLIB:mswsock.lib /NODEFAULTLIB:ncrypt.lib /NODEFAULTLIB:normaliz.lib /NODEFAULTLIB:ntdll.lib /NODEFAULTLIB:ole32.lib /NODEFAULTLIB:oleaut32.lib /NODEFAULTLIB:secur32.lib /NODEFAULTLIB:user32.lib /NODEFAULTLIB:version.lib /NODEFAULTLIB:ws2_32.lib /NODEFAULTLIB:ucrt.lib" Condition="'$(HostLogProofMode)' == 'Production'" />
+    <LinkerArg Include="/NODEFAULTLIB:advapi32.lib /NODEFAULTLIB:bcrypt.lib /NODEFAULTLIB:crypt32.lib /NODEFAULTLIB:iphlpapi.lib /NODEFAULTLIB:kernel32.lib /NODEFAULTLIB:mswsock.lib /NODEFAULTLIB:ncrypt.lib /NODEFAULTLIB:normaliz.lib /NODEFAULTLIB:ntdll.lib /NODEFAULTLIB:ole32.lib /NODEFAULTLIB:oleaut32.lib /NODEFAULTLIB:secur32.lib /NODEFAULTLIB:user32.lib /NODEFAULTLIB:version.lib /NODEFAULTLIB:ws2_32.lib /NODEFAULTLIB:ucrt.lib" Condition="'$(HostLogProofIsProduction)' == 'true'" />
   </ItemGroup>
 
   <ItemGroup>

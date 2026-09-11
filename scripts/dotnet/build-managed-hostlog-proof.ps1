@@ -11,6 +11,8 @@
     [string]$AllocationMode = "NonAllocating",
     [string]$RuntimePackOutputRoot = "",
     [switch]$ProductionApplication,
+    [ValidateSet("Production", "C104AppA", "C104AppB")]
+    [string]$ManagedProjectMode = "",
     [ValidateSet("Primary64KiB", "Small4KiB")]
     [string]$HeapConfiguration = "Primary64KiB",
     [switch]$Clean
@@ -357,7 +359,13 @@ try {
         throw "dotnet executable not found."
     }
 
-    $managedProjectMode = if ($ProductionApplication) { "Production" } else { $AllocationMode }
+    $managedProjectMode = if (-not [string]::IsNullOrWhiteSpace($ManagedProjectMode)) {
+        $ManagedProjectMode
+    } elseif ($ProductionApplication) {
+        "Production"
+    } else {
+        $AllocationMode
+    }
     $publishProperties = @(
         "-p:HostLogProofRuntimeSupportObj=$runtimeSupportObj",
         "-p:HostLogProofMapPath=$artifactMap",

@@ -6,6 +6,9 @@ namespace HostLogProof;
 
 public static unsafe class Program
 {
+#if HOSTLOGPROOF_C104_APP_B
+    private static int s_c104AppBState;
+#endif
 #if HOSTLOGPROOF_THREAD_STATIC_PRIMITIVE || HOSTLOGPROOF_THREAD_STATIC_COMBINED
     [ThreadStatic]
     private static int s_threadStaticInt;
@@ -2007,11 +2010,17 @@ public static unsafe class Program
         }
 
 #if HOSTLOGPROOF_PRODUCTION
-        // C102 deliberately uses only the application host-call ABI for
-        // output. The launcher supplies this table; these bytes therefore
-        // originate in managed Main and cross the ordinary native callback
-        // boundary, rather than being emitted by the kernel or a proof hook.
+        // C102 and C104 use only the application host-call ABI for output.
+        // C104-A keeps the C102 calculation while making its module identity
+        // explicit; C104-B deliberately has different managed state and
+        // arithmetic so a same-image relaunch cannot masquerade as A/B/A.
+#if HOSTLOGPROOF_C104_APP_B
+        ReadOnlySpan<byte> entryText = "C104-APP-B-ENTRY"u8;
+#elif HOSTLOGPROOF_C104_APP_A
+        ReadOnlySpan<byte> entryText = "C104-APP-A-ENTRY"u8;
+#else
         ReadOnlySpan<byte> entryText = "C102-MANAGED-ENTRY"u8;
+#endif
         Span<byte> entryBuffer = stackalloc byte[entryText.Length + 1];
         entryText.CopyTo(entryBuffer);
         entryBuffer[entryText.Length] = 0;
@@ -2024,6 +2033,21 @@ public static unsafe class Program
             }
         }
 
+#if HOSTLOGPROOF_C104_APP_B
+        byte[] values = new byte[5];
+        int weighted = 0;
+        for (int index = 0; index < values.Length; index++)
+        {
+            values[index] = (byte)(index * 3 + 2);
+            weighted += values[index] * (index + 1);
+        }
+        bool valid = weighted == 150 && values[0] == 2 && values[4] == 14;
+        if (s_c104AppBState == 0)
+        {
+            s_c104AppBState = valid ? 0xB04B : -1;
+        }
+        valid = valid && s_c104AppBState == 0xB04B;
+#else
         byte[] values = new byte[8];
         int sum = 0;
         for (int index = 0; index < values.Length; index++)
@@ -2032,13 +2056,20 @@ public static unsafe class Program
             sum += values[index];
         }
         bool valid = sum == 36 && values[0] == 1 && values[7] == 8;
+#endif
         GC.KeepAlive(values);
         if (!valid)
         {
             return GxAbi.ErrorInvalidArgument;
         }
 
+#if HOSTLOGPROOF_C104_APP_B
+        ReadOnlySpan<byte> passText = "C104-APP-B-PASS"u8;
+#elif HOSTLOGPROOF_C104_APP_A
+        ReadOnlySpan<byte> passText = "C104-APP-A-PASS"u8;
+#else
         ReadOnlySpan<byte> passText = "C102-MANAGED-PASS"u8;
+#endif
         Span<byte> passBuffer = stackalloc byte[passText.Length + 1];
         passText.CopyTo(passBuffer);
         passBuffer[passText.Length] = 0;

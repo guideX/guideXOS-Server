@@ -183,12 +183,20 @@ alignas(16) uint8_t g_tlsBlock[0x110] = {};
 void* g_tlsVector[1] = {};
 bool g_c102ManagedEntryObserved = false;
 bool g_c102ManagedPassObserved = false;
+bool g_c104ManagedEntryObserved = false;
+bool g_c104ManagedPassObserved = false;
 ResidentApplication g_application = {};
 
 #if defined(GXOS_C103_PRODUCTION_LAUNCH) || defined(GXOS_C103_NEGATIVE_LAUNCH)
 constexpr bool kC103LifecycleEnabled = true;
 #else
 constexpr bool kC103LifecycleEnabled = false;
+#endif
+
+#if defined(GXOS_C104_PRODUCTION_LAUNCH)
+constexpr bool kC104MultipleApplicationProbeEnabled = true;
+#else
+constexpr bool kC104MultipleApplicationProbeEnabled = false;
 #endif
 
 bool boundedRange(uint64_t offset, uint64_t size, uint64_t limit) {
@@ -835,8 +843,18 @@ int32_t GUIDEXOS_NATIVEAOT_PAL_CALL managedLog(void*, uint8_t* message) {
         g_c102ManagedEntryObserved = true;
     } else if (managedMessageEquals(message, "C102-MANAGED-PASS")) {
         g_c102ManagedPassObserved = true;
+    } else if (managedMessageEquals(message, "C104-APP-A-ENTRY") ||
+               managedMessageEquals(message, "C104-APP-B-ENTRY")) {
+        g_c104ManagedEntryObserved = true;
+    } else if (managedMessageEquals(message, "C104-APP-A-PASS") ||
+               managedMessageEquals(message, "C104-APP-B-PASS")) {
+        g_c104ManagedPassObserved = true;
     }
-    serial::puts("[C102-MANAGED-OUTPUT] ");
+    const bool c104Message = managedMessageEquals(message, "C104-APP-A-ENTRY") ||
+        managedMessageEquals(message, "C104-APP-A-PASS") ||
+        managedMessageEquals(message, "C104-APP-B-ENTRY") ||
+        managedMessageEquals(message, "C104-APP-B-PASS");
+    serial::puts(c104Message ? "[C104-MANAGED-OUTPUT] " : "[C102-MANAGED-OUTPUT] ");
     for (uint32_t index = 0; index < 128u && message[index] != 0; ++index) {
         serial::putc(static_cast<char>(message[index]));
     }
@@ -851,6 +869,93 @@ void startupMarker(uint32_t stage) {
 }
 
 void releaseMappedPages();
+
+bool probeElfEnvelope(const uint8_t* bytes, uint64_t size, LaunchReport* report) {
+    if (bytes == nullptr || report == nullptr || size < sizeof(Elf64Header)) return false;
+    const Elf64Header* header = reinterpret_cast<const Elf64Header*>(bytes);
+    if (header->ident[0] != 0x7Fu || header->ident[1] != 'E' ||
+        header->ident[2] != 'L' || header->ident[3] != 'F' ||
+        header->ident[4] != kElfClass64 || header->ident[5] != kElfDataLittle ||
+        header->type != kElfExecutable || header->machine != kElfMachineAmd64 ||
+        header->version != 1u || header->headerSize != sizeof(Elf64Header) ||
+        header->programHeaderSize != sizeof(Elf64ProgramHeader) ||
+        header->programHeaderCount == 0 ||
+        header->programHeaderCount > kMaxProgramHeaders ||
+        !boundedRange(header->programHeaderOffset,
+                      static_cast<uint64_t>(header->programHeaderCount) *
+                          sizeof(Elf64ProgramHeader), size)) return false;
+    const Elf64ProgramHeader* programs = reinterpret_cast<const Elf64ProgramHeader*>(
+        bytes + header->programHeaderOffset);
+    uintptr_t imageLow = UINTPTR_MAX;
+    uintptr_t imageHigh = 0;
+    bool entryValid = false;
+    uint16_t loadCount = 0;
+    for (uint16_t index = 0; index < header->programHeaderCount; ++index) {
+        const Elf64ProgramHeader& program = programs[index];
+        if (program.type == kElfProgramNull || program.type == kElfProgramGnuStack) continue;
+        if (program.type != kElfProgramLoad || program.memorySize == 0 ||
+            program.fileSize > program.memorySize ||
+            !boundedRange(program.offset, program.fileSize, size) ||
+            program.alignment != kPageSize ||
+            (program.offset & (kPageSize - 1u)) !=
+                (program.virtualAddress & (kPageSize - 1u)) ||
+            (program.flags & (kElfFlagWrite | kElfFlagExecute)) ==
+                (kElfFlagWrite | kElfFlagExecute) ||
+            program.virtualAddress > UINTPTR_MAX - program.memorySize) return false;
+        const uintptr_t low = static_cast<uintptr_t>(program.virtualAddress & ~(kPageSize - 1u));
+        const uint64_t end = program.virtualAddress + program.memorySize;
+        const uintptr_t high = static_cast<uintptr_t>((end + kPageSize - 1u) & ~(kPageSize - 1u));
+        if (high <= low || high > UINTPTR_MAX - kPageSize) return false;
+        if (low < imageLow) imageLow = low;
+        if (high > imageHigh) imageHigh = high;
+        if (header->entry >= program.virtualAddress && header->entry < end) {
+            entryValid = (program.flags & kElfFlagExecute) != 0;
+        }
+        ++loadCount;
+    }
+    if (loadCount == 0 || imageLow == UINTPTR_MAX || imageHigh <= imageLow ||
+        !entryValid || imageHigh - imageLow > kMaxArtifactBytes * 2u) return false;
+    report->artifactBase = imageLow;
+    report->artifactSpan = imageHigh - imageLow;
+    report->loadSegmentCount = loadCount;
+    report->entryPoint = header->entry;
+    return true;
+}
+
+bool readAndProbeApplication(const char* path, LaunchReport* report) {
+    const uint8_t handle = vfs::open(path, vfs::OPEN_READ);
+    if (handle == 0xFFu) return false;
+    const int64_t fileSize = vfs::file_size(handle);
+    if (fileSize <= 0 || static_cast<uint64_t>(fileSize) > kMaxArtifactBytes) {
+        (void)vfs::close(handle);
+        return false;
+    }
+    report->artifactBytes = static_cast<uint64_t>(fileSize);
+    uint64_t loaded = 0;
+    while (loaded < report->artifactBytes) {
+        const uint32_t chunk = static_cast<uint32_t>(
+            report->artifactBytes - loaded > 64u * 1024u
+                ? 64u * 1024u : report->artifactBytes - loaded);
+        const int32_t read = vfs::read(handle, g_artifact + loaded, chunk);
+        if (read <= 0 || static_cast<uint32_t>(read) != chunk) {
+            (void)vfs::close(handle);
+            return false;
+        }
+        loaded += static_cast<uint32_t>(read);
+    }
+    (void)vfs::close(handle);
+    return probeElfEnvelope(g_artifact, report->artifactBytes, report);
+}
+
+bool rangesOverlap(uintptr_t leftBase, uintptr_t leftSpan,
+                   uintptr_t rightBase, uintptr_t rightSpan) {
+    if (leftSpan == 0 || rightSpan == 0) return false;
+    const uintptr_t leftEnd = leftBase > UINTPTR_MAX - leftSpan
+        ? UINTPTR_MAX : leftBase + leftSpan;
+    const uintptr_t rightEnd = rightBase > UINTPTR_MAX - rightSpan
+        ? UINTPTR_MAX : rightBase + rightSpan;
+    return leftBase < rightEnd && rightBase < leftEnd;
+}
 
 bool mapElf(const uint8_t* bytes, uint64_t size, LaunchReport* report) {
     if (bytes == nullptr || size < sizeof(Elf64Header)) return false;
@@ -1030,6 +1135,7 @@ const char* launchStatusName(LaunchStatus status) {
         case LaunchStatus::StartupFailed: return "startup-failed";
         case LaunchStatus::ManagedFailed: return "managed-failed";
         case LaunchStatus::Busy: return "busy";
+        case LaunchStatus::BaseCollision: return "base-collision";
     }
     return "unknown";
 }
@@ -1048,6 +1154,46 @@ LaunchStatus launchResident(const char* path, LaunchReport* report) {
     }
     (void)vfs::close(handle);
     if (!sameApplicationPath(path, g_application.path)) {
+#if defined(GXOS_C104_PRODUCTION_LAUNCH)
+        if (kC104MultipleApplicationProbeEnabled) {
+            LaunchReport candidate{};
+            if (!readAndProbeApplication(path, &candidate)) {
+                report->status = LaunchStatus::InvalidElf;
+                serial::puts("[C104-MODULE] identity=candidate placement=invalid-elf path=");
+                serial::puts(path);
+                serial::puts("\n");
+                return report->status;
+            }
+            report->artifactBytes = candidate.artifactBytes;
+            report->artifactBase = candidate.artifactBase;
+            report->artifactSpan = candidate.artifactSpan;
+            report->loadSegmentCount = candidate.loadSegmentCount;
+            report->entryPoint = candidate.entryPoint;
+            report->sequence = g_application.sequence + 1u;
+            report->residentImage = true;
+            report->lifecycleReusable = true;
+            const bool collision = rangesOverlap(
+                g_application.artifactBase, g_application.artifactSpan,
+                candidate.artifactBase, candidate.artifactSpan);
+            report->status = collision ? LaunchStatus::BaseCollision : LaunchStatus::Busy;
+            serial::puts("[C104-MODULE] identity=candidate placement=");
+            serial::puts(collision ? "base-collision" : "non-overlapping-runtime-single-resident");
+            serial::puts(" path=");
+            serial::puts(path);
+            serial::puts(" base=");
+            serial::put_hex64(candidate.artifactBase);
+            serial::puts(" span=");
+            serial::put_hex64(candidate.artifactSpan);
+            serial::puts(" residentBase=");
+            serial::put_hex64(g_application.artifactBase);
+            serial::puts(" residentSpan=");
+            serial::put_hex64(g_application.artifactSpan);
+            serial::puts(" status=");
+            serial::puts(launchStatusName(report->status));
+            serial::puts("\n");
+            return report->status;
+        }
+#endif
         report->status = LaunchStatus::Busy;
         emitC103Lifecycle(g_application.sequence, "resident-different-image", true);
         emitC103Return(g_application.sequence, report->status);
@@ -1118,12 +1264,15 @@ LaunchStatus launchResident(const char* path, LaunchReport* report) {
     using Entry = int32_t (GUIDEXOS_NATIVEAOT_PAL_CALL *)(void*);
     g_c102ManagedEntryObserved = false;
     g_c102ManagedPassObserved = false;
+    g_c104ManagedEntryObserved = false;
+    g_c104ManagedPassObserved = false;
     arch::amd64::disable_interrupts();
     const int32_t managedReturn = reinterpret_cast<Entry>(report->entryPoint)(&startup);
     arch::amd64::enable_interrupts();
     report->managedReturn = managedReturn;
-    report->managedEntryReached = g_c102ManagedEntryObserved;
-    report->managedPassReached = g_c102ManagedPassObserved && managedReturn == 0;
+    report->managedEntryReached = g_c102ManagedEntryObserved || g_c104ManagedEntryObserved;
+    report->managedPassReached = (g_c102ManagedPassObserved || g_c104ManagedPassObserved) &&
+        managedReturn == 0;
     report->launcherRegainedControl = true;
     report->mappingsPersistentByDesign = true;
     g_application.sequence = sequence;
@@ -1293,12 +1442,15 @@ LaunchStatus launch(const char* path, LaunchReport* report) {
     // restored before launch() returns to the main loop.
     g_c102ManagedEntryObserved = false;
     g_c102ManagedPassObserved = false;
+    g_c104ManagedEntryObserved = false;
+    g_c104ManagedPassObserved = false;
     arch::amd64::disable_interrupts();
     const int32_t managedReturn = reinterpret_cast<Entry>(report->entryPoint)(&startup);
     arch::amd64::enable_interrupts();
     report->managedReturn = managedReturn;
-    report->managedEntryReached = g_c102ManagedEntryObserved;
-    report->managedPassReached = g_c102ManagedPassObserved && managedReturn == 0;
+    report->managedEntryReached = g_c102ManagedEntryObserved || g_c104ManagedEntryObserved;
+    report->managedPassReached = (g_c102ManagedPassObserved || g_c104ManagedPassObserved) &&
+        managedReturn == 0;
     report->launcherRegainedControl = true;
     g_application.state = ApplicationLifecycleState::Resident;
     (void)copyApplicationPath(requestedPath, g_application.path);

@@ -18,6 +18,7 @@ enum class LaunchStatus : int32_t {
     StartupFailed = -9,
     ManagedFailed = -10,
     Busy = -11,
+    BaseCollision = -12,
 };
 
 struct LaunchReport {

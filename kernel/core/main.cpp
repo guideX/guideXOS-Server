@@ -977,6 +977,53 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         kernel::serial::put_hex32(c103Second.residentImage ? 1u : 0u);
         kernel::serial::puts("\n");
 #endif
+
+#if defined(GXOS_C104_PRODUCTION_LAUNCH) || defined(GXOS_C104_NEGATIVE_LAUNCH)
+        auto emitC104Report = [](uint32_t ordinal, const char* identity,
+                                 const kernel::nativeaot::LaunchReport& report,
+                                 kernel::nativeaot::LaunchStatus status) {
+            kernel::serial::puts("[C104-LAUNCH] ordinal=");
+            kernel::serial::put_hex32(ordinal);
+            kernel::serial::puts(" identity=");
+            kernel::serial::puts(identity);
+            kernel::serial::puts(" sequence=");
+            kernel::serial::put_hex32(report.sequence);
+            kernel::serial::puts(" status=");
+            kernel::serial::puts(kernel::nativeaot::launchStatusName(status));
+            kernel::serial::puts(" base=");
+            kernel::serial::put_hex64(report.artifactBase);
+            kernel::serial::puts(" span=");
+            kernel::serial::put_hex64(report.artifactSpan);
+            kernel::serial::puts(" entry=");
+            kernel::serial::put_hex64(report.entryPoint);
+            kernel::serial::puts(" managedEntry=");
+            kernel::serial::put_hex32(report.managedEntryReached ? 1u : 0u);
+            kernel::serial::puts(" managedPass=");
+            kernel::serial::put_hex32(report.managedPassReached ? 1u : 0u);
+            kernel::serial::puts(" launcherRegained=");
+            kernel::serial::put_hex32(report.launcherRegainedControl ? 1u : 0u);
+            kernel::serial::puts("\n");
+        };
+        kernel::serial::puts("[C104-LAUNCH] ordinary application discovery A=/system/wall/C104A.ELF B=/system/wall/C104B.ELF proofMode=0\n");
+        auto runC104Launch = [&](uint32_t ordinal, const char* identity,
+                                 const char* path) {
+            kernel::nativeaot::LaunchReport report{};
+            const kernel::nativeaot::LaunchStatus status =
+                kernel::nativeaot::launch(path, &report);
+            emitC104Report(ordinal, identity, report, status);
+        };
+        runC104Launch(1u, "A", "/system/wall/C104A.ELF");
+#if defined(GXOS_C104_NEGATIVE_LAUNCH)
+        runC104Launch(2u, "missing", "/system/wall/MISSING.ELF");
+        constexpr uint32_t c104BOrdinal = 3u;
+        constexpr uint32_t c104ASecondOrdinal = 4u;
+#else
+        constexpr uint32_t c104BOrdinal = 2u;
+        constexpr uint32_t c104ASecondOrdinal = 3u;
+#endif
+        runC104Launch(c104BOrdinal, "B", "/system/wall/C104B.ELF");
+        runC104Launch(c104ASecondOrdinal, "A", "/system/wall/C104A.ELF");
+#endif
         
         kernel::serial::puts("[KERNEL] Entering main loop (waiting for input)...\n");
         
