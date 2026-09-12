@@ -84,7 +84,7 @@ static_assert(offsetof(gx_host_calls, development_debug_evaluate_expression) == 
 static_assert(offsetof(gx_host_calls, bare_metal_development_debug_evaluate_expression) == 440,
               "bare-metal expression slot changed");
 static_assert(sizeof(gx_host_calls) == 448, "gx_host_calls size changed");
-static_assert(sizeof(gx_development_run_request) == 112, "development run request size changed");
+static_assert(sizeof(gx_development_run_request) == 120, "development run request size changed");
 static_assert(offsetof(gx_development_run_request, projectRoot) == 8, "development run request project root offset changed");
 static_assert(offsetof(gx_development_run_request, artifactSha256) == 56, "development run request artifact hash offset changed");
 static_assert(offsetof(gx_development_run_request, flags) == 64, "development run request flags offset changed");
@@ -95,6 +95,7 @@ static_assert(offsetof(gx_development_run_request, artifactAbi) == 88, "developm
 static_assert(offsetof(gx_development_run_request, debugSourcePath) == 96, "development run source path offset changed");
 static_assert(offsetof(gx_development_run_request, debugSourceLine) == 104, "development run source line offset changed");
 static_assert(offsetof(gx_development_run_request, debugSourceColumn) == 108, "development run source column offset changed");
+static_assert(offsetof(gx_development_run_request, debugSourceCondition) == 112, "development run condition offset changed");
 static_assert(sizeof(gx_development_debug_request) == 112, "development debug request size changed");
 static_assert(offsetof(gx_development_debug_request, expression) == 104,
               "watch expression request field must be append-only");
@@ -184,7 +185,11 @@ static_assert(offsetof(gx_development_debug_snapshot, sourceStepOutCallerSourceP
               "source Step Out caller path offset changed");
 static_assert(offsetof(gx_development_debug_snapshot, sourceStepOutOriginalReturnByte) == 1564,
               "source Step Out original byte offset changed");
-static_assert(sizeof(gx_development_debug_snapshot) == 1576, "development debug snapshot size changed");
+static_assert(offsetof(gx_development_debug_snapshot, conditionStatus) == 1572,
+              "conditional breakpoint status must be append-only");
+static_assert(offsetof(gx_development_debug_snapshot, conditionExpressionHash) == 1616,
+              "conditional breakpoint hash offset changed");
+static_assert(sizeof(gx_development_debug_snapshot) == 1624, "development debug snapshot size changed");
 static_assert(offsetof(gx_development_debug_call_stack_frame, instructionPointer) == 8,
               "call stack frame instruction pointer offset changed");
 static_assert(offsetof(gx_development_debug_call_stack_frame, sourcePath) == 112,

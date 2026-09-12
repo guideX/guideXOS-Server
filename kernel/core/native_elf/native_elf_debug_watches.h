@@ -93,5 +93,11 @@ bool native_debug_watch_evaluate(const char* expression,
                                  const NativeDebugWatchFrame& frame,
                                  NativeDebugWatchResult* result);
 
+// Validate only the bounded Phase 28I grammar.  This deliberately does not
+// require a paused frame, so breakpoint setup can reject malformed conditions
+// before installing any target patch.
+bool native_debug_watch_validate_expression(const char* expression,
+                                            NativeDebugWatchResult* result);
+
 } // namespace native_elf
 } // namespace kernel

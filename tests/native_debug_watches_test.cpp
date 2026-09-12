@@ -9,6 +9,7 @@ using kernel::native_elf::NativeDebugWatchResult;
 using kernel::native_elf::NativeDebugWatchStatus;
 using kernel::native_elf::NativeDebugWatchValueType;
 using kernel::native_elf::native_debug_watch_evaluate;
+using kernel::native_elf::native_debug_watch_validate_expression;
 
 bool expect(bool condition, const char* message)
 {
@@ -134,6 +135,27 @@ int main()
                           NativeDebugWatchValueType::SignedInt32, 0), "malformed hex")) return 1;
     if (!expect(evaluates("*ptr", frame, NativeDebugWatchStatus::UnsupportedOperator,
                           NativeDebugWatchValueType::SignedInt32, 0), "pointer dereference rejected")) return 1;
+
+    NativeDebugWatchResult conditionSyntax = {};
+    if (!expect(native_debug_watch_validate_expression("counter - 10", &conditionSyntax) &&
+                    conditionSyntax.status == NativeDebugWatchStatus::Success,
+                "conditional expression uses the Phase 28I grammar")) return 1;
+    if (!expect(evaluates("counter - 10", frame, NativeDebugWatchStatus::Success,
+                          NativeDebugWatchValueType::SignedInt32, 0),
+                "zero conditional result is preserved")) return 1;
+    if (!expect(evaluates("counter - 9", frame, NativeDebugWatchStatus::Success,
+                          NativeDebugWatchValueType::SignedInt32, 1),
+                "nonzero conditional result is preserved")) return 1;
+    NativeDebugWatchResult invalidCondition = {};
+    if (!expect(!native_debug_watch_validate_expression("counter + * 2", &invalidCondition) &&
+                    invalidCondition.status != NativeDebugWatchStatus::Success,
+                "malformed conditional syntax is rejected before a pause")) return 1;
+    char overlongCondition[258] = {};
+    for (uint32_t index = 0; index < 257; ++index) overlongCondition[index] = '1';
+    NativeDebugWatchResult overlongResult = {};
+    if (!expect(!native_debug_watch_validate_expression(overlongCondition, &overlongResult) &&
+                    overlongResult.status == NativeDebugWatchStatus::ExpressionTooLong,
+                "conditional expression length remains bounded")) return 1;
 
     NativeDebugWatchResult staleResult = {};
     NativeDebugWatchFrame stale = frame;

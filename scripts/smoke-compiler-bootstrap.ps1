@@ -55,14 +55,25 @@ param(
     [switch]$Phase28H,
     [switch]$Phase28HOnly,
     [switch]$Phase28I,
-    [switch]$Phase28IOnly
+    [switch]$Phase28IOnly,
+    [switch]$Phase28J,
+    [switch]$Phase28JOnly
 )
 
 $ErrorActionPreference = "Stop"
 # Phase 27G includes the complete earlier integration chain.  The focused M
 # mode deliberately keeps only the baseline C/D route plus the M smoke so a
 # flaky optional earlier IDE repeat cannot mask the recursion proof.
-if ($Phase28IOnly) {
+if ($Phase28JOnly) {
+    $Phase27E = $false; $Phase27F = $false; $Phase27G = $false; $Phase27H = $false
+    $Phase27I = $false; $Phase27J = $false; $Phase27K = $false; $Phase27L = $false
+    $Phase27M = $false; $Phase27N = $false; $Phase27O = $false; $Phase27P = $false
+    $Phase27Q = $false; $Phase27R = $false; $Phase27S = $false; $Phase27T = $false
+    $Phase27U = $false; $Phase27V = $false; $Phase27W = $false; $Phase27X = $false
+    $Phase27Y = $false; $Phase27Z = $false; $Phase28A = $false; $Phase28B = $false
+    $Phase28C = $false; $Phase28D = $false; $Phase28E = $false; $Phase28F = $false; $Phase28G = $false
+    $Phase28H = $false; $Phase28I = $false; $Phase28J = $true
+} elseif ($Phase28IOnly) {
     $Phase27E = $false; $Phase27F = $false; $Phase27G = $false; $Phase27H = $false
     $Phase27I = $false; $Phase27J = $false; $Phase27K = $false; $Phase27L = $false
     $Phase27M = $false; $Phase27N = $false; $Phase27O = $false; $Phase27P = $false
@@ -258,6 +269,7 @@ if ($Phase27X -and $TimeoutSeconds -lt 120) { $TimeoutSeconds = 120 }
 if ($Phase27Y -and $TimeoutSeconds -lt 120) { $TimeoutSeconds = 120 }
 if ($Phase27Z -and $TimeoutSeconds -lt 120) { $TimeoutSeconds = 120 }
 if (($Phase28A -or $Phase28B -or $Phase28C -or $Phase28D -or $Phase28E -or $Phase28F -or $Phase28G -or $Phase28H -or $Phase28I) -and $TimeoutSeconds -lt 120) { $TimeoutSeconds = 120 }
+if ($Phase28J -and $TimeoutSeconds -lt 120) { $TimeoutSeconds = 120 }
 $root = Split-Path -Parent $PSScriptRoot
 $kernelDirectory = Join-Path $root "kernel"
 $espDirectory = Join-Path $root "ESP"
@@ -293,6 +305,7 @@ $phase28eFixtureDirectory = Join-Path $root "scripts/fixtures/phase28e"
 $phase28fFixtureDirectory = Join-Path $root "scripts/fixtures/phase28f"
 $phase28gFixtureDirectory = Join-Path $root "scripts/fixtures/phase28g"
 $phase28hFixtureDirectory = Join-Path $root "scripts/fixtures/phase28h"
+$phase28jFixtureDirectory = Join-Path $root "scripts/fixtures/phase28j"
 $developerStudioRoot = Join-Path (Split-Path -Parent $root) "guideXOS_Developer_Studio"
 $phase27eAppDirectory = Join-Path $root "Apps/DS27E"
 $phase27fAppDirectory = Join-Path $root "Apps/DS27F"
@@ -602,6 +615,13 @@ function Stage-Phase28HProject([string]$target) {
     Copy-Item $phase28hFixtureDirectory $target -Recurse -Force
 }
 
+function Stage-Phase28JProject([string]$target) {
+    if (Test-Path -LiteralPath $target) {
+        Remove-Item -LiteralPath $target -Recurse -Force
+    }
+    Copy-Item $phase28jFixtureDirectory $target -Recurse -Force
+}
+
 function Invoke-QemuProofBoot([int]$runNumber, [string]$qemu) {
     $serialPath = Join-Path $tempDirectory ("boot{0}.serial.log" -f $runNumber)
     $stderrPath = Join-Path $tempDirectory ("boot{0}.stderr.log" -f $runNumber)
@@ -655,6 +675,9 @@ function Invoke-QemuProofBoot([int]$runNumber, [string]$qemu) {
         $process.WaitForExit()
         $stdout = $stdoutTask.GetAwaiter().GetResult()
         $stderr = $stderrTask.GetAwaiter().GetResult()
+        # QEMU can close its serial file handle slightly after WaitForExit;
+        # allow the final guest flush to become visible before auditing it.
+        Start-Sleep -Milliseconds 1000
         $serial = Read-SerialText $serialPath
         if ($stderr) { [System.IO.File]::WriteAllText($stderrPath, $stderr) }
 
@@ -683,7 +706,7 @@ function Invoke-QemuProofBoot([int]$runNumber, [string]$qemu) {
             "phase27d=PASS",
             "ELF Loader: Phase 27D smoke PASS"
         )
-        if ($Phase27VOnly -or $Phase27WOnly -or $Phase27XOnly -or $Phase27YOnly -or $Phase27ZOnly -or $Phase28AOnly -or $Phase28BOnly -or $Phase28COnly -or $Phase28DOnly -or $Phase28EOnly -or $Phase28FOnly -or $Phase28GOnly -or $Phase28HOnly -or $Phase28IOnly) { $requiredMarkers = @() }
+        if ($Phase27VOnly -or $Phase27WOnly -or $Phase27XOnly -or $Phase27YOnly -or $Phase27ZOnly -or $Phase28AOnly -or $Phase28BOnly -or $Phase28COnly -or $Phase28DOnly -or $Phase28EOnly -or $Phase28FOnly -or $Phase28GOnly -or $Phase28HOnly -or $Phase28IOnly -or $Phase28JOnly) { $requiredMarkers = @() }
         if ($Phase27E -or $Phase27F) {
             $requiredMarkers += @(
                 "phase27e_build_backend=PASS",
@@ -1711,6 +1734,38 @@ function Invoke-QemuProofBoot([int]$runNumber, [string]$qemu) {
                 "DEVELOPER_STUDIO_PHASE28I_PASS"
             )
         }
+        if ($Phase28J) {
+            $requiredMarkers += @(
+                "DEVELOPER_STUDIO_PHASE28J_BEGIN",
+                "DEVELOPER_STUDIO_PHASE28J_BUILD_PASS",
+                "DEVELOPER_STUDIO_PHASE28J_BREAKPOINT_CONFIG_PASS",
+                "DEVELOPER_STUDIO_PHASE28J_CONDITION_PARSE_PASS",
+                "DEVELOPER_STUDIO_PHASE28J_FALSE_HIT_1_PASS",
+                "DEVELOPER_STUDIO_PHASE28J_FALSE_CONTINUE_1_PASS",
+                "DEVELOPER_STUDIO_PHASE28J_REARM_1_PASS",
+                "DEVELOPER_STUDIO_PHASE28J_FALSE_HIT_2_PASS",
+                "DEVELOPER_STUDIO_PHASE28J_REARM_2_PASS",
+                "DEVELOPER_STUDIO_PHASE28J_TRUE_HIT_PASS",
+                "DEVELOPER_STUDIO_PHASE28J_CONDITION_VALUE_PASS",
+                "DEVELOPER_STUDIO_PHASE28J_WATCH_EQUIVALENCE_PASS",
+                "DEVELOPER_STUDIO_PHASE28J_PAUSED_PASS",
+                "DEVELOPER_STUDIO_PHASE28J_RESUME_REARM_PASS",
+                "DEVELOPER_STUDIO_PHASE28J_CONSTANT_FALSE_PASS",
+                "DEVELOPER_STUDIO_PHASE28J_CONSTANT_TRUE_PASS",
+                "DEVELOPER_STUDIO_PHASE28J_CONDITION_ERROR_PASS",
+                "DEVELOPER_STUDIO_PHASE28J_STALE_PASS",
+                "DEVELOPER_STUDIO_PHASE28J_READ_ONLY_PASS",
+                "DEVELOPER_STUDIO_PHASE28J_RENDER_PASS",
+                "DEVELOPER_STUDIO_PHASE28J_CLOSE_PASS",
+                "DEVELOPER_STUDIO_PHASE28J_CLEANUP_PASS",
+                "DEVELOPER_STUDIO_PHASE28J_WATCH_REGRESSION_PASS",
+                "DEVELOPER_STUDIO_PHASE28J_LOCALS_REGRESSION_PASS",
+                "DEVELOPER_STUDIO_PHASE28J_CALL_STACK_REGRESSION_PASS",
+                "DEVELOPER_STUDIO_PHASE28J_STEP_REGRESSION_PASS",
+                "DEVELOPER_STUDIO_PHASE28J_RUN_REGRESSION_PASS",
+                "DEVELOPER_STUDIO_PHASE28J_PASS"
+            )
+        }
         $missingMarkers = @($requiredMarkers | Where-Object { $serial -notmatch [regex]::Escape($_) })
         if ($missingMarkers.Count -ne 0) {
             Write-Host "QEMU boot $runNumber missed required compiler/IDE markers: $($missingMarkers -join ', ')" -ForegroundColor Red
@@ -1731,6 +1786,9 @@ function Invoke-QemuProofBoot([int]$runNumber, [string]$qemu) {
             }
             if ($Phase28H -or $Phase28I) {
                 $serial -split "`r?`n" | Where-Object { $_ -match "phase28h|Phase 28H|P28H|DEVELOPER_STUDIO_PHASE28H|phase28i|Phase 28I|P28I|DEVELOPER_STUDIO_PHASE28I|Compiler:.*(build|error|diagnostic)" } | ForEach-Object { Write-Host $_ }
+            }
+            if ($Phase28J) {
+                $serial -split "`r?`n" | Where-Object { $_ -match "phase28j|Phase 28J|P28J|DEVELOPER_STUDIO_PHASE28J|Compiler:.*(build|error|diagnostic)" } | ForEach-Object { Write-Host $_ }
             }
             if ($Phase27V) {
                 $serial -split "`r?`n" | Where-Object { $_ -match "phase27v|Phase 27V|DEVELOPER_STUDIO_PHASE27V" } | ForEach-Object { Write-Host $_ }
@@ -1753,13 +1811,16 @@ function Invoke-QemuProofBoot([int]$runNumber, [string]$qemu) {
             if ($Phase27Y) {
                 $serial -split "`r?`n" | Where-Object { $_ -match "phase27y|Phase 27Y|DEVELOPER_STUDIO_PHASE27Y" } | ForEach-Object { Write-Host $_ }
             }
-            if (-not $Phase27U -and -not $Phase28FOnly -and -not $Phase28HOnly -and -not $Phase28IOnly -and $serial) { Write-Host $serial }
+            if (-not $Phase27U -and -not $Phase28FOnly -and -not $Phase28HOnly -and -not $Phase28IOnly -and -not $Phase28JOnly -and $serial) { Write-Host $serial }
             if ($stderr) { Write-Host $stderr }
             throw "QEMU compiler/IDE proof failed on boot $runNumber (exit $($process.ExitCode))"
         }
 
         Write-Host "--- QEMU bare-metal compiler proof boot $runNumber ---" -ForegroundColor Cyan
-        if ($Phase28IOnly) {
+        if ($Phase28JOnly) {
+            $serial -split "`r?`n" | Where-Object { $_ -match "DEVELOPER_STUDIO_PHASE28J|phase28j|Phase 28J|P28J|NativeElf: artifact_begin" } |
+                ForEach-Object { Write-Host $_ }
+        } elseif ($Phase28IOnly) {
             $serial -split "`r?`n" | Where-Object { $_ -match "DEVELOPER_STUDIO_PHASE28I|phase28i|Phase 28I|P28I|DEVELOPER_STUDIO_PHASE28H|phase28h|Phase 28H|P28H|NativeElf: artifact_begin" } |
                 ForEach-Object { Write-Host $_ }
         } elseif ($Phase28HOnly) {
@@ -1956,10 +2017,11 @@ try {
     if ($Phase28G) { $env:EXTRA_CFLAGS += " -DGXOS_PHASE28G_SMOKE" }
     if ($Phase28H) { $env:EXTRA_CFLAGS += " -DGXOS_PHASE28H_SMOKE" }
     if ($Phase28I) { $env:EXTRA_CFLAGS += " -DGXOS_PHASE28I_SMOKE" }
+    if ($Phase28J) { $env:EXTRA_CFLAGS += " -DGXOS_PHASE28J_SMOKE" }
     Push-Location $kernelDirectory
     try {
         Remove-Item -Force -ErrorAction SilentlyContinue (Join-Path $kernelDirectory "build/amd64/obj/core/main.o")
-        if ($Phase27E -or $Phase27F -or $Phase27M -or $Phase27O -or $Phase27P -or $Phase27Q -or $Phase27R -or $Phase27S -or $Phase27T -or $Phase27U -or $Phase27V -or $Phase27W -or $Phase27X -or $Phase27Y -or $Phase27Z -or $Phase28A -or $Phase28B -or $Phase28C -or $Phase28D -or $Phase28E -or $Phase28F -or $Phase28G -or $Phase28H -or $Phase28I) {
+        if ($Phase27E -or $Phase27F -or $Phase27M -or $Phase27O -or $Phase27P -or $Phase27Q -or $Phase27R -or $Phase27S -or $Phase27T -or $Phase27U -or $Phase27V -or $Phase27W -or $Phase27X -or $Phase27Y -or $Phase27Z -or $Phase28A -or $Phase28B -or $Phase28C -or $Phase28D -or $Phase28E -or $Phase28F -or $Phase28G -or $Phase28H -or $Phase28I -or $Phase28J) {
             Remove-Item -Force -ErrorAction SilentlyContinue (Join-Path $kernelDirectory "build/amd64/obj/core/native_elf/native_elf_smoke.o")
         }
         $savedErrorActionPreference = $ErrorActionPreference
@@ -2341,6 +2403,15 @@ try {
             $directoryBackups["P28H"] = $backup
         }
     }
+    if ($Phase28J) {
+        $target = Join-Path $espDirectory "P28J"
+        if (Test-Path $target -PathType Leaf) { throw "ESP target is a file: $target" }
+        if (Test-Path $target -PathType Container) {
+            $backup = Join-Path $tempDirectory "backup-directory-P28J"
+            Copy-Item $target $backup -Recurse -Force
+            $directoryBackups["P28J"] = $backup
+        }
+    }
     if ($Phase27R) {
         $phase27rEspDirectory = Join-Path $espDirectory "P27R"
         $phase27rEspAppDirectory = Join-Path $espDirectory "Apps/DS27R"
@@ -2528,6 +2599,16 @@ try {
             !(Test-Path -LiteralPath (Join-Path $espDirectory "P28H/src/main.cpp") -PathType Leaf) -or
             !(Test-Path -LiteralPath (Join-Path $espDirectory "P28H/src/helper.cpp") -PathType Leaf)) {
             throw "Phase 28H project fixture was not staged into ESP"
+        }
+    }
+    if ($Phase28J) {
+        $phase28jEspDirectory = Join-Path $espDirectory "P28J"
+        Stage-Phase28JProject $phase28jEspDirectory
+        New-Item -ItemType Directory -Force -Path (Join-Path $espDirectory "P28J/out") | Out-Null
+        if (!(Test-Path -LiteralPath (Join-Path $espDirectory "P28J/guidexos.project") -PathType Leaf) -or
+            !(Test-Path -LiteralPath (Join-Path $espDirectory "P28J/app/app.json") -PathType Leaf) -or
+            !(Test-Path -LiteralPath (Join-Path $espDirectory "P28J/src/main.cpp") -PathType Leaf)) {
+            throw "Phase 28J project fixture was not staged into ESP"
         }
     }
     New-Item -ItemType Directory -Force -Path (Join-Path $espDirectory "EFI/BOOT") | Out-Null
@@ -2906,6 +2987,14 @@ try {
         Stage-Phase28HProject $phase28hRunDirectory
         New-Item -ItemType Directory -Force -Path (Join-Path $phase28hRunDirectory "out") | Out-Null
     }
+    if ($Phase28J -and $run -gt 1) {
+        $phase28jRunDirectory = Join-Path $espDirectory "P28J"
+        if (Test-Path -LiteralPath $phase28jRunDirectory) {
+            Remove-Item -LiteralPath $phase28jRunDirectory -Recurse -Force
+        }
+        Stage-Phase28JProject $phase28jRunDirectory
+        New-Item -ItemType Directory -Force -Path (Join-Path $phase28jRunDirectory "out") | Out-Null
+    }
         # Every QEMU invocation gets its own disposable directory-backed FAT
         # image. Guest writes must not become the input state of the next
         # requested fresh boot.
@@ -2919,7 +3008,7 @@ try {
     # exact generated bytes over serial for independent host-side inspection.
     $finalSerial = Read-SerialText (Join-Path $tempDirectory ("boot{0}.serial.log" -f $BootCount))
     $serialArtifacts = @("r42")
-    foreach ($candidate in @("d27a", "d27b", "d27c", "f28main", "g28main", "h28main")) {
+    foreach ($candidate in @("d27a", "d27b", "d27c", "f28main", "g28main", "h28main", "j28main")) {
         if ($finalSerial -match [regex]::Escape("artifact_begin=$candidate")) {
             $serialArtifacts += $candidate
         }
@@ -3013,6 +3102,9 @@ try {
     }
     if ($Phase28H) {
         Export-SerialArtifact $finalSerial "h28main" (Join-Path $evidenceDirectory "h28main.elf")
+    }
+    if ($Phase28J) {
+        Export-SerialArtifact $finalSerial "j28main" (Join-Path $evidenceDirectory "j28main.elf")
     }
 
     $readelf = Get-RequiredTool "readelf" ""
@@ -3155,6 +3247,13 @@ try {
             --start-address=0x10001000 --stop-address=0x10004000 (Join-Path $evidenceDirectory "h28main.elf")
         if ($LASTEXITCODE -ne 0) { throw "external Phase 28H ELF inspection failed" }
     }
+    if ($Phase28J) {
+        Write-Host "--- external audit of guest-generated j28main.elf ---" -ForegroundColor Cyan
+        & $readelf -h -l (Join-Path $evidenceDirectory "j28main.elf")
+        & $objdump -D -Mintel -b binary -m i386:x86-64 --adjust-vma=0x10000000 `
+            --start-address=0x10001000 --stop-address=0x10004000 (Join-Path $evidenceDirectory "j28main.elf")
+        if ($LASTEXITCODE -ne 0) { throw "external Phase 28J ELF inspection failed" }
+    }
     if ($Phase27N) {
         Write-Host "--- external audit of guest-generated n27primary.elf ---" -ForegroundColor Cyan
         & $readelf -h -l (Join-Path $evidenceDirectory "n27primary.elf")
@@ -3169,7 +3268,9 @@ try {
             --start-address=0x10001000 --stop-address=0x10004000 (Join-Path $evidenceDirectory "o27primary.elf")
         if ($LASTEXITCODE -ne 0) { throw "external Phase 27O ELF inspection failed" }
     }
-    if ($Phase28IOnly) {
+    if ($Phase28JOnly) {
+        Write-Host "Phase 28J focused QEMU proof completed across $BootCount fresh boot(s)." -ForegroundColor Green
+    } elseif ($Phase28IOnly) {
         Write-Host "Phase 28I focused QEMU proof completed across $BootCount fresh boot(s)." -ForegroundColor Green
     } elseif ($Phase28HOnly) {
         Write-Host "Phase 28H focused QEMU proof completed across $BootCount fresh boot(s)." -ForegroundColor Green
@@ -3683,6 +3784,17 @@ finally {
     }
     if ($Phase28H) {
         $relativeDirectory = "P28H"
+        $target = Join-Path $espDirectory $relativeDirectory
+        if (Test-Path -LiteralPath $target -PathType Container) {
+            Remove-Item -LiteralPath $target -Recurse -Force -ErrorAction SilentlyContinue
+        }
+        if ($directoryBackups.ContainsKey($relativeDirectory)) {
+            New-Item -ItemType Directory -Force -Path (Split-Path -Parent $target) | Out-Null
+            Copy-Item $directoryBackups[$relativeDirectory] $target -Recurse -Force
+        }
+    }
+    if ($Phase28J) {
+        $relativeDirectory = "P28J"
         $target = Join-Path $espDirectory $relativeDirectory
         if (Test-Path -LiteralPath $target -PathType Container) {
             Remove-Item -LiteralPath $target -Recurse -Force -ErrorAction SilentlyContinue

@@ -34,10 +34,13 @@ static const char kArchitecture[] = "amd64";
 static const char kManifest[] = "app/app.json";
 static const uint32_t kLegacySnapshotBytes =
     static_cast<uint32_t>(offsetof(gx_development_run_snapshot, outputCount));
+static const uint32_t kConditionRequestOffset =
+    static_cast<uint32_t>(offsetof(gx_development_run_request, debugSourceCondition));
 static const uint32_t kMaxPath = 256U;
 static const uint32_t kMaxProjectBytes = 16U * 1024U;
 static const uint64_t kAmd64TrapFlag = 0x100ULL;
 static const uint32_t kDebugStartBytes = 16U;
+static const uint32_t kDebugConditionBytes = GX_DEVELOPMENT_DEBUG_MAX_EXPRESSION_BYTES + 1U;
 static const uint32_t kStepOverCallBytes = 5U;
 static const uint32_t kStepOverFunctionProbeBytes = 256U;
 static const uint32_t kStepOverNestedReturnLimit = 8U;
@@ -69,6 +72,10 @@ struct Operation {
     bool debugStepOutReturnBreakpointHit;
     bool debugSourceSelected;
     bool debugCurrentSourceMappingValid;
+    bool debugConditionEnabled;
+    bool debugConditionalContinuePending;
+    bool debugConditionalRearmPending;
+    bool debugConditionError;
     uint64_t registrationGeneration;
     uint64_t debugBreakpointAddress;
     uint8_t debugBreakpointOriginalByte;
@@ -100,6 +107,15 @@ struct Operation {
     uint32_t debugSourceInstructionBytes;
     uint32_t debugCodeFileOffset;
     uint32_t debugCodeBytes;
+    uint32_t debugConditionStatus;
+    uint32_t debugConditionErrorCategory;
+    uint32_t debugConditionLength;
+    uint32_t debugConditionResultKind;
+    uint32_t debugConditionFalseHitCount;
+    uint32_t debugConditionTrueHitCount;
+    int64_t debugConditionSignedValue;
+    uint64_t debugConditionUnsignedValue;
+    uint64_t debugConditionExpressionHash;
     uint32_t debugSourceStepResult;
     uint32_t debugSourceStepInstructionCount;
     uint64_t debugSourceStepStartRip;
@@ -137,6 +153,7 @@ struct Operation {
     uint8_t debugStartBytes[kDebugStartBytes];
     NativeElfDebugTrap::BreakpointContext* debugContext;
     char debugSourcePath[GX_DEVELOPMENT_RUN_MAX_PATH_BYTES];
+    char debugCondition[kDebugConditionBytes];
     char debugFunctionName[GX_DEVELOPMENT_DEBUG_MAX_FUNCTION_NAME_BYTES];
     gx_development_debug_snapshot debugSnapshot;
     uint64_t artifactSize;
@@ -323,6 +340,32 @@ static void set_debug_error(gx_development_debug_snapshot* snapshot, const char*
     snapshot->status = GX_DEVELOPMENT_DEBUG_STATUS_REJECTED;
     copy_text(snapshot->errorMessage, sizeof(snapshot->errorMessage),
               message ? message : "NativeElf debug request rejected");
+}
+
+static uint64_t condition_hash(const char* text)
+{
+    uint64_t hash = 1469598103934665603ULL;
+    if (!text) return hash;
+    for (uint32_t index = 0; index < GX_DEVELOPMENT_DEBUG_MAX_EXPRESSION_BYTES && text[index] != '\0'; ++index) {
+        hash ^= static_cast<uint8_t>(text[index]);
+        hash *= 1099511628211ULL;
+    }
+    return hash;
+}
+
+static void set_condition_evidence(const Operation& operation,
+                                   gx_development_debug_snapshot* snapshot)
+{
+    if (!snapshot) return;
+    snapshot->conditionStatus = operation.debugConditionStatus;
+    snapshot->conditionErrorCategory = operation.debugConditionErrorCategory;
+    snapshot->conditionSignedValue = operation.debugConditionSignedValue;
+    snapshot->conditionUnsignedValue = operation.debugConditionUnsignedValue;
+    snapshot->conditionResultKind = operation.debugConditionResultKind;
+    snapshot->conditionFalseHitCount = operation.debugConditionFalseHitCount;
+    snapshot->conditionTrueHitCount = operation.debugConditionTrueHitCount;
+    snapshot->conditionExpressionLength = operation.debugConditionLength;
+    snapshot->conditionExpressionHash = operation.debugConditionExpressionHash;
 }
 
 static void set_debug_identity(const Operation& operation,
@@ -1114,7 +1157,7 @@ static bool validate_identity(Operation& operation) {
 }
 
 static bool validate_request(Operation& operation, const gx_development_run_request& request) {
-    if (request.size < sizeof(gx_development_run_request) || request.version != GX_DEVELOPMENT_RUN_API_VERSION ||
+    if (request.size < kConditionRequestOffset || request.version != GX_DEVELOPMENT_RUN_API_VERSION ||
         !request.projectRoot || !request.projectId || !request.projectKind || !request.targetProfile ||
         !request.manifestPath || !request.artifactPath || !request.artifactSha256 ||
         !request.artifactArchitecture || !request.artifactAbi) {
@@ -1151,6 +1194,31 @@ static bool validate_request(Operation& operation, const gx_development_run_requ
         }
         operation.debugSourceLine = request.debugSourceLine;
         operation.debugSourceColumn = request.debugSourceColumn;
+    }
+    operation.debugConditionEnabled = request.size >= sizeof(gx_development_run_request) &&
+        request.debugSourceCondition != nullptr &&
+        request.debugSourceCondition[0] != '\0';
+    if (operation.debugConditionEnabled) {
+        if (!operation.debugSourceSelected ||
+            !copy_text(operation.debugCondition, sizeof(operation.debugCondition),
+                       request.debugSourceCondition)) {
+            operation.error = GX_DEVELOPMENT_RUN_ERROR_INVALID_REQUEST;
+            copy_text(operation.errorMessage, sizeof(operation.errorMessage),
+                      "Conditional source breakpoint text is invalid or too long");
+            return false;
+        }
+        NativeDebugWatchResult syntax = {};
+        if (!native_debug_watch_validate_expression(operation.debugCondition, &syntax)) {
+            operation.error = GX_DEVELOPMENT_RUN_ERROR_INVALID_REQUEST;
+            copy_text(operation.errorMessage, sizeof(operation.errorMessage),
+                      syntax.diagnostic[0] != '\0' ? syntax.diagnostic
+                                                    : "Conditional source breakpoint syntax is invalid");
+            return false;
+        }
+        operation.debugConditionLength = text_length(operation.debugCondition,
+                                                     sizeof(operation.debugCondition));
+        operation.debugConditionExpressionHash = condition_hash(operation.debugCondition);
+        operation.debugConditionStatus = GX_DEVELOPMENT_DEBUG_CONDITION_STATUS_NONE;
     }
     if (!equal_text(operation.projectKind, kProjectKind) || !equal_text(operation.targetProfile, kTarget) ||
         !equal_text(operation.artifactArchitecture, kArchitecture) || !equal_text(operation.artifactAbi, kAbi) ||
@@ -1795,6 +1863,55 @@ static bool handle_step_out_return_trap(
 #endif
 }
 
+static bool evaluate_current_breakpoint_condition(
+    Operation& operation, gx_development_debug_expression* result)
+{
+    if (!result || !operation.debugConditionEnabled || !operation.debugContext) return false;
+    gx_development_debug_request request = {};
+    request.size = sizeof(request);
+    request.version = GX_DEVELOPMENT_DEBUG_API_VERSION;
+    request.command = GX_DEVELOPMENT_DEBUG_EVALUATE_EXPRESSION;
+    request.handle = operation.handle;
+    request.sessionGeneration = operation.registrationGeneration;
+    request.nativeRuntimeId = operation.registrationGeneration;
+    request.breakpointId = 1;
+    request.targetAddress = operation.debugBreakpointAddress;
+    request.artifactSha256 = operation.artifactSha256;
+    request.threadId = 1;
+    request.stopGeneration = operation.debugStopGeneration;
+    // Conditions are always evaluated against the actual execution frame.
+    request.auxiliaryAddress = 0;
+    request.expression = operation.debugCondition;
+    return evaluate_expression(request, result) == GX_OK;
+}
+
+static bool begin_conditional_instruction_continue(Operation& operation,
+                                                   bool rearm)
+{
+#if defined(__x86_64__)
+    if (!operation.debugContext || operation.debugContext->cs != 0x08 ||
+        operation.debugBreakpointAddress == 0 || operation.debugStepActive ||
+        operation.debugConditionError) return false;
+    operation.debugContext->rip = operation.debugBreakpointAddress;
+    operation.debugStepStartRip = operation.debugContext->rip;
+    operation.debugStepRflagsBefore = operation.debugContext->rflags & ~kAmd64TrapFlag;
+    operation.debugStepRflagsWithTrapFlag = operation.debugStepRflagsBefore | kAmd64TrapFlag;
+    operation.debugContext->rflags = operation.debugStepRflagsWithTrapFlag;
+    ++operation.debugStepToken;
+    if (operation.debugStepToken == 0) operation.debugStepToken = 1;
+    operation.debugStepActive = true;
+    operation.debugStepTrapObserved = false;
+    operation.debugConditionalContinuePending = true;
+    operation.debugConditionalRearmPending = rearm;
+    operation.state = GX_DEVELOPMENT_RUN_RUNNING;
+    return true;
+#else
+    (void)operation;
+    (void)rearm;
+    return false;
+#endif
+}
+
 bool native_elf_debug_breakpoint_exception(
     NativeElfDebugTrap::BreakpointContext* context)
 {
@@ -1905,6 +2022,10 @@ bool native_elf_debug_breakpoint_exception(
     s_operation.debugStepTrapObserved = false;
     capture_debug_start_bytes(s_operation, *runtime,
                               s_operation.debugBreakpointOriginalByte);
+    const uint64_t rawTrapRip = context->rip;
+    // INT3 pushes target+1.  Normalize the trusted paused context before any
+    // frame-0 variable or expression lookup and before the owner can inspect it.
+    context->rip = s_operation.debugBreakpointAddress;
     s_operation.state = GX_DEVELOPMENT_RUN_PAUSED;
     gx_development_debug_snapshot& snapshot = s_operation.debugSnapshot;
     clear_debug_snapshot(&snapshot);
@@ -1912,7 +2033,7 @@ bool native_elf_debug_breakpoint_exception(
     snapshot.trapKind = GX_DEVELOPMENT_DEBUG_TRAP_BREAKPOINT;
     set_debug_identity(s_operation, &snapshot);
     snapshot.instructionPointer = s_operation.debugBreakpointAddress;
-    snapshot.rawTrapRip = context->rip;
+    snapshot.rawTrapRip = rawTrapRip;
     snapshot.pauseReason = s_operation.debugSourceSelected
         ? GX_DEVELOPMENT_DEBUG_PAUSE_REASON_SOURCE_BREAKPOINT
         : GX_DEVELOPMENT_DEBUG_PAUSE_REASON_ENTRY_BREAKPOINT;
@@ -1946,11 +2067,117 @@ bool native_elf_debug_breakpoint_exception(
     snapshot.context.r15 = context->r15;
     copy_debug_start_bytes(s_operation, &snapshot);
     snapshot.rflagsAfterTrapFlagClear = context->rflags & ~kAmd64TrapFlag;
+    set_condition_evidence(s_operation, &snapshot);
+
+    if (s_operation.debugConditionEnabled) {
+        gx_development_debug_expression condition = {};
+        condition.size = sizeof(condition);
+        bool restored = restore_debug_entry_breakpoint();
+        s_operation.debugBreakpointInstalled = !restored;
+        set_debug_identity(s_operation, &snapshot);
+        const bool evaluated = restored &&
+            evaluate_current_breakpoint_condition(s_operation, &condition);
+        if (!evaluated) {
+            s_operation.debugConditionError = true;
+            s_operation.debugConditionStatus = GX_DEVELOPMENT_DEBUG_CONDITION_STATUS_ERROR;
+            s_operation.debugConditionErrorCategory = condition.errorCategory != 0
+                ? static_cast<uint32_t>(condition.errorCategory)
+                : GX_DEVELOPMENT_DEBUG_EXPRESSION_ERROR_INVALID_REQUEST;
+            copy_text(snapshot.errorMessage, sizeof(snapshot.errorMessage),
+                      condition.errorMessage[0] != '\0'
+                          ? condition.errorMessage
+                          : "conditional breakpoint evaluation failed");
+            snapshot.pauseReason = GX_DEVELOPMENT_DEBUG_PAUSE_REASON_CONDITIONAL_SOURCE_BREAKPOINT;
+            set_condition_evidence(s_operation, &snapshot);
+            serial::puts("DEVELOPER_STUDIO_PHASE28J_CONDITION_ERROR_PAUSE category=");
+            serial::put_hex32(s_operation.debugConditionErrorCategory);
+            serial::puts(" message="); serial::puts(snapshot.errorMessage); serial::putc('\n');
+            if (!native_elf_scheduler_yield()) return false;
+            context->rip = s_operation.debugCancelRequested
+                ? reinterpret_cast<uint64_t>(&native_elf_debug_cancel_return)
+                : s_operation.debugBreakpointAddress;
+            return true;
+        }
+
+        s_operation.debugConditionError = false;
+        s_operation.debugConditionResultKind = condition.resultKind;
+        s_operation.debugConditionSignedValue = condition.signedValue;
+        s_operation.debugConditionUnsignedValue = condition.resultKind ==
+            GX_DEVELOPMENT_DEBUG_EXPRESSION_RESULT_POINTER
+                ? condition.pointerValue : condition.unsignedValue;
+        const bool conditionTrue = condition.resultKind ==
+            GX_DEVELOPMENT_DEBUG_EXPRESSION_RESULT_POINTER
+                ? condition.pointerValue != 0
+                : condition.signedValue != 0;
+        s_operation.debugConditionStatus = conditionTrue
+            ? GX_DEVELOPMENT_DEBUG_CONDITION_STATUS_TRUE
+            : GX_DEVELOPMENT_DEBUG_CONDITION_STATUS_FALSE;
+        s_operation.debugConditionErrorCategory = GX_DEVELOPMENT_DEBUG_EXPRESSION_ERROR_NONE;
+        if (conditionTrue) {
+            ++s_operation.debugConditionTrueHitCount;
+            snapshot.pauseReason = GX_DEVELOPMENT_DEBUG_PAUSE_REASON_CONDITIONAL_SOURCE_BREAKPOINT;
+            set_condition_evidence(s_operation, &snapshot);
+            serial_debug_hex("DEVELOPER_STUDIO_PHASE28J_TRUE_HIT target=0x",
+                             s_operation.debugBreakpointAddress);
+            serial::puts(" value="); serial::put_hex64(
+                static_cast<uint64_t>(s_operation.debugConditionSignedValue));
+            serial::puts(" result="); serial::put_hex64(
+                s_operation.debugConditionUnsignedValue);
+            serial::puts(" false_hits="); serial::put_hex32(
+                s_operation.debugConditionFalseHitCount);
+            serial::putc('\n');
+            if (!native_elf_scheduler_yield()) return false;
+            context->rip = s_operation.debugCancelRequested
+                ? reinterpret_cast<uint64_t>(&native_elf_debug_cancel_return)
+                : s_operation.debugBreakpointAddress;
+            if (s_operation.debugStepActive)
+                context->rflags |= kAmd64TrapFlag;
+            else
+                context->rflags &= ~kAmd64TrapFlag;
+            return true;
+        }
+
+        ++s_operation.debugConditionFalseHitCount;
+        if (!begin_conditional_instruction_continue(s_operation, true)) {
+            s_operation.debugConditionError = true;
+            s_operation.debugConditionStatus = GX_DEVELOPMENT_DEBUG_CONDITION_STATUS_ERROR;
+            s_operation.debugConditionErrorCategory = GX_DEVELOPMENT_DEBUG_EXPRESSION_ERROR_INVALID_REQUEST;
+            copy_text(snapshot.errorMessage, sizeof(snapshot.errorMessage),
+                      "conditional breakpoint could not arm its original instruction");
+            snapshot.pauseReason = GX_DEVELOPMENT_DEBUG_PAUSE_REASON_CONDITIONAL_SOURCE_BREAKPOINT;
+            set_condition_evidence(s_operation, &snapshot);
+            if (!native_elf_scheduler_yield()) return false;
+            context->rip = s_operation.debugCancelRequested
+                ? reinterpret_cast<uint64_t>(&native_elf_debug_cancel_return)
+                : s_operation.debugBreakpointAddress;
+            return true;
+        }
+        s_operation.debugBreakpointHit = false;
+        serial_debug_hex("DEVELOPER_STUDIO_PHASE28J_FALSE_HIT target=0x",
+                         s_operation.debugBreakpointAddress);
+        serial::puts(" value="); serial::put_hex64(
+            static_cast<uint64_t>(s_operation.debugConditionSignedValue));
+        serial::puts(" result="); serial::put_hex64(
+            s_operation.debugConditionUnsignedValue);
+        serial::puts(" false_hits="); serial::put_hex32(
+            s_operation.debugConditionFalseHitCount);
+        serial::puts(" decision=false\nDEVELOPER_STUDIO_PHASE28J_FALSE_CONTINUE_ARMED\n");
+        if (!native_elf_scheduler_yield()) return false;
+        if (s_operation.debugCancelRequested) {
+            context->rflags &= ~kAmd64TrapFlag;
+            context->rip = reinterpret_cast<uint64_t>(&native_elf_debug_cancel_return);
+        } else if (s_operation.debugConditionalContinuePending) {
+            context->rflags |= kAmd64TrapFlag;
+        } else {
+            context->rflags &= ~kAmd64TrapFlag;
+        }
+        return true;
+    }
     serial_debug_hex(s_operation.debugSourceSelected
                          ? "DEVELOPER_STUDIO_PHASE28A_BREAKPOINT_HIT target=0x"
                          : "DEVELOPER_STUDIO_PHASE27Z_BREAKPOINT_HIT target=0x",
                      s_operation.debugBreakpointAddress);
-    serial_debug_hex(" raw_rip=0x", context->rip);
+    serial_debug_hex(" raw_rip=0x", rawTrapRip);
     serial::puts(" function=");
     serial::puts(s_operation.debugSourceSelected ? s_operation.debugFunctionName : "gx_main");
     serial::puts(" stop=");
@@ -1964,6 +2191,10 @@ bool native_elf_debug_breakpoint_exception(
     context->rip = s_operation.debugCancelRequested
         ? reinterpret_cast<uint64_t>(&native_elf_debug_cancel_return)
         : s_operation.debugBreakpointAddress;
+    if (s_operation.debugStepActive)
+        context->rflags |= kAmd64TrapFlag;
+    else
+        context->rflags &= ~kAmd64TrapFlag;
     return true;
 #else
     (void)context;
@@ -1976,6 +2207,116 @@ bool native_elf_debug_single_step_exception(
 {
 #if defined(__x86_64__)
     const NativeAppExecutionContext* runtime = native_elf_runtime_context();
+    const bool validConditionalContinue = context && s_operation.used &&
+        s_operation.debugControlled && s_operation.debugConditionalContinuePending &&
+        s_operation.debugStepActive && !s_operation.debugStepTrapObserved &&
+        s_operation.state == GX_DEVELOPMENT_RUN_RUNNING && s_schedulerActive &&
+        s_schedulerInTarget && s_ownerContext && s_targetContext && context->cs == 0x08 &&
+        (context->rflags & kAmd64TrapFlag) != 0 && s_operation.debugStepToken != 0 &&
+        runtime && runtime->state == NativeAppExecutionState::Running &&
+        native_app_pointer_in_range(context->rip, runtime->imageBase, runtime->imageSize) &&
+        context->rsp >= runtime->stackBase &&
+        context->rsp < runtime->stackBase + runtime->stackSize;
+    if (validConditionalContinue) {
+        const uint64_t trapRip = context->rip;
+        s_operation.debugContext = context;
+        s_operation.debugStepTrapRip = trapRip;
+        s_operation.debugStepRflagsAfterClear = context->rflags & ~kAmd64TrapFlag;
+        context->rflags = s_operation.debugStepRflagsAfterClear;
+        bool rearmed = !s_operation.debugConditionalRearmPending ||
+            s_operation.debugCancelRequested;
+        uint8_t conditionalRearmCurrentByte = 0;
+        uint8_t conditionalRearmOriginalByte = 0;
+        bool conditionalRearmInstallAttempt = false;
+        if (s_operation.debugConditionalRearmPending &&
+            !s_operation.debugCancelRequested) {
+            // The conditional false path owns the restored byte. Normalize the
+            // loader's one-breakpoint state before attempting the next INT3 so
+            // a stale loader-installed flag cannot reject a safe rearm.
+            (void)restore_debug_entry_breakpoint();
+            conditionalRearmCurrentByte = *reinterpret_cast<volatile const uint8_t*>(
+                static_cast<uintptr_t>(s_operation.debugBreakpointAddress));
+            const bool byteMatches = conditionalRearmCurrentByte == s_operation.debugBreakpointOriginalByte;
+            const bool alreadyInstalled = debug_entry_breakpoint_installed() && conditionalRearmCurrentByte == 0xCC;
+            conditionalRearmInstallAttempt = alreadyInstalled || (byteMatches && install_debug_breakpoint(
+                s_operation.debugBreakpointAddress, &conditionalRearmOriginalByte));
+            if (alreadyInstalled) conditionalRearmOriginalByte = s_operation.debugBreakpointOriginalByte;
+            const bool installed = conditionalRearmInstallAttempt &&
+                conditionalRearmOriginalByte == s_operation.debugBreakpointOriginalByte;
+            if (!installed) {
+                (void)restore_debug_entry_breakpoint();
+                rearmed = false;
+                serial::puts("DEVELOPER_STUDIO_PHASE28J_REARM_DIAGNOSTIC current=0x");
+                serial::put_hex32(conditionalRearmCurrentByte);
+                serial::puts(" expected=0x"); serial::put_hex32(
+                    s_operation.debugBreakpointOriginalByte);
+                serial::puts(" install="); serial::put_hex32(conditionalRearmInstallAttempt ? 1U : 0U);
+                serial::puts(" returned=0x"); serial::put_hex32(conditionalRearmOriginalByte);
+                serial::putc('\n');
+            } else {
+                s_operation.debugBreakpointInstalled = true;
+                rearmed = true;
+            }
+        }
+        s_operation.debugConditionalContinuePending = false;
+        s_operation.debugConditionalRearmPending = false;
+        s_operation.debugStepActive = false;
+        s_operation.debugStepTrapObserved = false;
+        s_operation.debugBreakpointHit = false;
+        if (!rearmed && !s_operation.debugCancelRequested) {
+            s_operation.debugConditionError = true;
+            s_operation.debugConditionStatus = GX_DEVELOPMENT_DEBUG_CONDITION_STATUS_ERROR;
+            s_operation.debugConditionErrorCategory = GX_DEVELOPMENT_DEBUG_EXPRESSION_ERROR_INVALID_REQUEST;
+            s_operation.state = GX_DEVELOPMENT_RUN_PAUSED;
+            gx_development_debug_snapshot& snapshot = s_operation.debugSnapshot;
+            clear_debug_snapshot(&snapshot);
+            snapshot.status = GX_DEVELOPMENT_DEBUG_STATUS_TRAP;
+            snapshot.trapKind = GX_DEVELOPMENT_DEBUG_TRAP_SINGLE_STEP;
+            snapshot.pauseReason = GX_DEVELOPMENT_DEBUG_PAUSE_REASON_CONDITIONAL_SOURCE_BREAKPOINT;
+            set_debug_identity(s_operation, &snapshot);
+            snapshot.instructionPointer = trapRip;
+            snapshot.rawTrapRip = trapRip;
+            snapshot.context.architecture = GX_DEVELOPMENT_DEBUG_ARCHITECTURE_AMD64;
+            snapshot.context.valid = 1;
+            snapshot.context.nativeRuntimeId = s_operation.registrationGeneration;
+            snapshot.context.threadId = 1;
+            snapshot.context.sessionGeneration = s_operation.registrationGeneration;
+            snapshot.context.stopGeneration = s_operation.debugStopGeneration;
+            snapshot.context.rip = trapRip;
+            snapshot.context.rflags = context->rflags;
+            snapshot.context.rsp = context->rsp;
+            snapshot.context.rbp = context->rbp;
+            copy_text(snapshot.errorMessage, sizeof(snapshot.errorMessage),
+                      "conditional breakpoint could not be reinstalled safely");
+            set_condition_evidence(s_operation, &snapshot);
+            serial::puts("DEVELOPER_STUDIO_PHASE28J_REARM_ERROR_PAUSE current=0x");
+            serial::put_hex32(conditionalRearmCurrentByte);
+            serial::puts(" expected=0x"); serial::put_hex32(
+                s_operation.debugBreakpointOriginalByte);
+            serial::puts(" loader_installed="); serial::put_hex32(
+                debug_entry_breakpoint_installed() ? 1U : 0U);
+            serial::puts(" install="); serial::put_hex32(
+                conditionalRearmInstallAttempt ? 1U : 0U);
+            serial::puts(" returned=0x"); serial::put_hex32(conditionalRearmOriginalByte);
+            serial::putc('\n');
+        } else {
+            s_operation.state = GX_DEVELOPMENT_RUN_RUNNING;
+            serial_debug_hex("DEVELOPER_STUDIO_PHASE28J_REARM_PASS address=0x",
+                             s_operation.debugBreakpointAddress);
+            serial::puts(" original=0x");
+            serial::put_hex32(s_operation.debugBreakpointOriginalByte);
+            serial::puts(" trap_rip=0x"); serial::put_hex64(trapRip);
+            serial::putc('\n');
+        }
+        if (!native_elf_scheduler_yield()) return false;
+        if (s_operation.debugCancelRequested) {
+            context->rflags &= ~kAmd64TrapFlag;
+            context->rip = reinterpret_cast<uint64_t>(&native_elf_debug_cancel_return);
+        } else {
+            context->rflags &= ~kAmd64TrapFlag;
+        }
+        return true;
+    }
     const bool runtimeBoundaryTrap = context && s_operation.debugSourceStepActive && runtime &&
         !native_app_pointer_in_range(context->rip, runtime->imageBase, runtime->imageSize);
     const bool validProvenance = context && s_operation.used && s_operation.debugControlled &&
@@ -2105,8 +2446,10 @@ static bool begin_debug_instruction_step(
     Operation& operation, gx_development_debug_snapshot* outSnapshot,
     bool sourceStep)
 {
+    const bool conditionalPause = operation.debugConditionEnabled &&
+        operation.debugBreakpointHit && !operation.debugConditionError;
     if (operation.state != GX_DEVELOPMENT_RUN_PAUSED ||
-        (!operation.debugBreakpointInstalled && !operation.debugStepTrapObserved) ||
+        (!operation.debugBreakpointInstalled && !operation.debugStepTrapObserved && !conditionalPause) ||
         !operation.debugContext || operation.debugStepActive ||
         operation.debugContext->cs != 0x08) return false;
     if (operation.debugContext->rflags & kAmd64TrapFlag) return false;
@@ -4055,10 +4398,29 @@ gx_result debug(const gx_development_debug_request& request,
         return GX_OK;
 
     case GX_DEVELOPMENT_DEBUG_RESUME:
+        {
+        const bool conditionalResume = s_operation.debugConditionEnabled &&
+            s_operation.debugBreakpointHit && !s_operation.debugBreakpointInstalled &&
+            !s_operation.debugStepTrapObserved;
         if (s_operation.state != GX_DEVELOPMENT_RUN_PAUSED ||
-            (!s_operation.debugBreakpointInstalled && !s_operation.debugStepTrapObserved)) {
+            (!s_operation.debugBreakpointInstalled && !s_operation.debugStepTrapObserved &&
+             !s_operation.debugBreakpointHit)) {
             set_debug_error(outSnapshot, "NativeElf target is not paused at a resumable debug stop");
             return GX_ERROR_BUSY;
+        }
+        if (conditionalResume) {
+            s_operation.debugConditionError = false;
+            if (!begin_conditional_instruction_continue(s_operation, true)) {
+                set_debug_error(outSnapshot,
+                                "NativeElf conditional breakpoint could not arm Resume");
+                return GX_ERROR_FAILED;
+            }
+            set_debug_ready_snapshot(s_operation, outSnapshot);
+            serial::puts("DEVELOPER_STUDIO_PHASE28J_RESUME_REARM_ARMED\n");
+            if (!native_elf_scheduler_pump()) return GX_ERROR_FAILED;
+            if (s_operation.state == GX_DEVELOPMENT_RUN_PAUSED)
+                *outSnapshot = s_operation.debugSnapshot;
+            return GX_OK;
         }
         if (s_operation.debugBreakpointInstalled && !restore_debug_entry_breakpoint()) {
             set_debug_error(outSnapshot, "NativeElf breakpoint could not be restored");
@@ -4095,6 +4457,7 @@ gx_result debug(const gx_development_debug_request& request,
         if (s_operation.state == GX_DEVELOPMENT_RUN_PAUSED)
             *outSnapshot = s_operation.debugSnapshot;
         return GX_OK;
+        }
 
     case GX_DEVELOPMENT_DEBUG_STEP_SOURCE_INTO:
         return source_step_into(outSnapshot);
@@ -4107,8 +4470,11 @@ gx_result debug(const gx_development_debug_request& request,
         return source_step_out(outSnapshot);
 
     case GX_DEVELOPMENT_DEBUG_STEP_INSTRUCTION:
+        {
+        const bool conditionalPause = s_operation.debugConditionEnabled &&
+            s_operation.debugBreakpointHit && !s_operation.debugConditionError;
         if (s_operation.state != GX_DEVELOPMENT_RUN_PAUSED ||
-            (!s_operation.debugBreakpointInstalled && !s_operation.debugStepTrapObserved) ||
+            (!s_operation.debugBreakpointInstalled && !s_operation.debugStepTrapObserved && !conditionalPause) ||
             !s_operation.debugContext || s_operation.debugStepActive ||
             s_operation.debugContext->cs != 0x08) {
             set_debug_error(outSnapshot, "NativeElf Step Into requires a current Paused target context");
@@ -4136,10 +4502,12 @@ gx_result debug(const gx_development_debug_request& request,
         serial::puts("DEVELOPER_STUDIO_PHASE28B_PAUSED_AFTER_STEP_PASS\n");
         serial::puts("DEVELOPER_STUDIO_PHASE28B_TF_CLEAR_PASS\n");
         return GX_OK;
+        }
 
     case GX_DEVELOPMENT_DEBUG_CANCEL_EXECUTION:
         if (s_operation.state != GX_DEVELOPMENT_RUN_PAUSED ||
-            (!s_operation.debugBreakpointInstalled && !s_operation.debugStepTrapObserved)) {
+            (!s_operation.debugBreakpointInstalled && !s_operation.debugStepTrapObserved &&
+             !s_operation.debugBreakpointHit)) {
             set_debug_error(outSnapshot, "NativeElf debug session is not paused");
             return GX_ERROR_BUSY;
         }

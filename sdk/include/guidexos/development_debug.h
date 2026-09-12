@@ -407,6 +407,16 @@ typedef struct gx_development_debug_snapshot {
     uint8_t sourceStepOutOriginalReturnByte;
     uint8_t sourceStepOutOriginalReturnByteValid;
     uint8_t sourceStepOutReserved[6];
+    /* Append-only Phase 28J conditional source-breakpoint evidence. */
+    uint32_t conditionStatus;
+    uint32_t conditionErrorCategory;
+    int64_t conditionSignedValue;
+    uint64_t conditionUnsignedValue;
+    uint32_t conditionResultKind;
+    uint32_t conditionFalseHitCount;
+    uint32_t conditionTrueHitCount;
+    uint32_t conditionExpressionLength;
+    uint64_t conditionExpressionHash;
 } gx_development_debug_snapshot;
 
 enum {
@@ -434,7 +444,15 @@ enum {
     GX_DEVELOPMENT_DEBUG_PAUSE_REASON_SINGLE_STEP = 3,
     GX_DEVELOPMENT_DEBUG_PAUSE_REASON_SOURCE_STEP = 4,
     GX_DEVELOPMENT_DEBUG_PAUSE_REASON_SOURCE_STEP_OVER = 5,
-    GX_DEVELOPMENT_DEBUG_PAUSE_REASON_SOURCE_STEP_OUT = 6
+    GX_DEVELOPMENT_DEBUG_PAUSE_REASON_SOURCE_STEP_OUT = 6,
+    GX_DEVELOPMENT_DEBUG_PAUSE_REASON_CONDITIONAL_SOURCE_BREAKPOINT = 7
+};
+
+enum {
+    GX_DEVELOPMENT_DEBUG_CONDITION_STATUS_NONE = 0,
+    GX_DEVELOPMENT_DEBUG_CONDITION_STATUS_TRUE = 1,
+    GX_DEVELOPMENT_DEBUG_CONDITION_STATUS_FALSE = 2,
+    GX_DEVELOPMENT_DEBUG_CONDITION_STATUS_ERROR = 3
 };
 
 /* A source step is a bounded composite of the Phase 28B instruction step. */

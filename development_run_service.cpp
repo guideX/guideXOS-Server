@@ -37,6 +37,7 @@ constexpr char kManifestPath[] = "app/app.json";
 constexpr uint32_t kMaxDeployments = 8;
 constexpr uint32_t kMaxManifestBytes = 16u * 1024u;
 constexpr uint64_t kMaxArtifactBytes = 64ull * 1024ull * 1024ull;
+constexpr size_t kConditionRequestOffset = offsetof(gx_development_run_request, debugSourceCondition);
 
 struct Deployment {
     gx_development_run_handle handle = 0;
@@ -504,7 +505,8 @@ gx_result Prepare(NativeAppRuntimeContext& owner, const gx_development_run_reque
 
     Deployment candidate;
     candidate.ownerRuntimeId = owner.runtimeId;
-    candidate.debugControlled = request.size >= sizeof(gx_development_run_request) && (request.flags & GX_DEVELOPMENT_RUN_FLAG_DEBUG_CONTROLLED) != 0;
+    candidate.debugControlled = request.size >= kConditionRequestOffset &&
+        (request.flags & GX_DEVELOPMENT_RUN_FLAG_DEBUG_CONTROLLED) != 0;
     candidate.projectId = request.projectId ? request.projectId : std::string();
     candidate.applicationId = candidate.projectId;
     gx_development_run_error_code error = GX_DEVELOPMENT_RUN_ERROR_NONE;

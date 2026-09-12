@@ -102,6 +102,8 @@ typedef struct gx_development_run_request {
     const char* debugSourcePath;
     uint32_t debugSourceLine;
     uint32_t debugSourceColumn;
+    /* Optional bounded read-only condition for the one source breakpoint. */
+    const char* debugSourceCondition;
 } gx_development_run_request;
 
 typedef struct gx_development_run_output_line {

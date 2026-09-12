@@ -36,7 +36,7 @@ static bool s_nxEnabled = false;
 static uint8_t s_file[NATIVE_APP_MAX_ELF_FILE_BYTES];
 static NativeAppExecutionContext s_appRuntime = {};
 static char s_bareBuildStrings[8][768] = {};
-static char s_bareRunStrings[10][768] = {};
+static char s_bareRunStrings[11][768] = {};
 static char s_bareDebugStrings[1][GX_DEVELOPMENT_RUN_MAX_SHA256_BYTES] = {};
 static char s_bareDebugExpression[GX_DEVELOPMENT_DEBUG_MAX_EXPRESSION_BYTES + 1u] = {};
 static const uint64_t NESTED_APPLICATION_STACK_BASE =
@@ -636,17 +636,23 @@ static gx_result GX_CALL host_bare_run_prepare(
     gx_development_run_snapshot* outputSnapshot)
 {
     if (!app_context_valid(context) || !request || !outputHandle || !outputSnapshot ||
-        !app_pointer_range(request, sizeof(*request)) ||
+        !app_pointer_range(request, sizeof(uint32_t) * 2U) ||
         !app_pointer_range(outputHandle, sizeof(*outputHandle)) ||
         !app_pointer_range(outputSnapshot, sizeof(uint32_t))) return GX_ERROR_PERMISSION_DENIED;
-    if (request->size < sizeof(*request) || request->version != GX_DEVELOPMENT_RUN_API_VERSION) return GX_ERROR_INVALID_ARGUMENT;
+    const uint32_t requestBytes = request->size < sizeof(*request)
+        ? request->size : static_cast<uint32_t>(sizeof(*request));
+    if (request->size < static_cast<uint32_t>(offsetof(gx_development_run_request, debugSourceCondition)) ||
+        !app_pointer_range(request, requestBytes) ||
+        request->version != GX_DEVELOPMENT_RUN_API_VERSION) return GX_ERROR_INVALID_ARGUMENT;
     const char* values[9] = { request->projectRoot, request->projectId, request->projectKind,
                               request->targetProfile, request->manifestPath, request->artifactPath,
                               request->artifactSha256, request->artifactArchitecture, request->artifactAbi };
     for (uint32_t i = 0; i < 9; ++i) {
         if (!app_string(values[i], s_bareRunStrings[i], sizeof(s_bareRunStrings[i]))) return GX_ERROR_INVALID_ARGUMENT;
     }
-    gx_development_run_request copied = request[0];
+    gx_development_run_request copied = {};
+    copy_bytes(reinterpret_cast<uint8_t*>(&copied),
+               reinterpret_cast<const uint8_t*>(request), requestBytes);
     copied.projectRoot = s_bareRunStrings[0];
     copied.projectId = s_bareRunStrings[1];
     copied.projectKind = s_bareRunStrings[2];
@@ -661,6 +667,13 @@ static gx_result GX_CALL host_bare_run_prepare(
         if (!app_string(request->debugSourcePath, s_bareRunStrings[9], sizeof(s_bareRunStrings[9])))
             return GX_ERROR_INVALID_ARGUMENT;
         copied.debugSourcePath = s_bareRunStrings[9];
+    }
+    copied.debugSourceCondition = nullptr;
+    if (request->size >= sizeof(*request) && request->debugSourceCondition) {
+        if (!app_string(request->debugSourceCondition, s_bareRunStrings[10],
+                        GX_DEVELOPMENT_DEBUG_MAX_EXPRESSION_BYTES + 1U))
+            return GX_ERROR_INVALID_ARGUMENT;
+        copied.debugSourceCondition = s_bareRunStrings[10];
     }
 
     gx_development_run_snapshot local = {};
@@ -1305,11 +1318,19 @@ static void flush_debug_instruction(uint8_t* address)
 
 bool install_debug_breakpoint(uint64_t targetAddress, uint8_t* originalByte)
 {
-    if (!originalByte || s_debugEntryBreakpointInstalled || targetAddress == 0 ||
+    if (!originalByte || targetAddress == 0 ||
         s_appRuntime.imageBase == 0 ||
         s_appRuntime.imageSize == 0 ||
         !native_app_pointer_in_range(targetAddress, s_appRuntime.imageBase,
                                      s_appRuntime.imageSize)) return false;
+    if (s_debugEntryBreakpointInstalled) {
+        if (targetAddress != s_debugEntryBreakpointAddress) return false;
+        volatile const uint8_t* existing = reinterpret_cast<volatile const uint8_t*>(
+            static_cast<uintptr_t>(targetAddress));
+        if (*existing != 0xCC) return false;
+        *originalByte = s_debugEntryBreakpointOriginalByte;
+        return true;
+    }
 
     const uint64_t page = targetAddress &
         ~(static_cast<uint64_t>(guidexos::native_elf::PAGE_SIZE) - 1ULL);

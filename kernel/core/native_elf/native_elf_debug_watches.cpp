@@ -728,5 +728,35 @@ bool native_debug_watch_evaluate(const char* expression, const NativeDebugWatchF
     return true;
 }
 
+bool native_debug_watch_validate_expression(const char* expression,
+                                            NativeDebugWatchResult* result)
+{
+    if (!result) return false;
+    *result = {};
+    result->status = NativeDebugWatchStatus::SyntaxError;
+    result->type = NativeDebugWatchValueType::SignedInt32;
+    const uint32_t length = text_length(expression, NATIVE_DEBUG_WATCH_MAX_EXPRESSION_BYTES + 1);
+    if (length == 0) {
+        set_failure(result, NativeDebugWatchStatus::SyntaxError, "empty expression");
+        return false;
+    }
+    if (length > NATIVE_DEBUG_WATCH_MAX_EXPRESSION_BYTES) {
+        set_failure(result, NativeDebugWatchStatus::ExpressionTooLong,
+                    "expression length limit exceeded");
+        return false;
+    }
+    Ast ast = {};
+    if (!tokenize(expression, length, &ast, result)) return false;
+    result->tokenCount = ast.tokenCount;
+    Parser parser(expression, &ast, result);
+    const uint16_t root = parser.parse();
+    result->nodeCount = ast.nodeCount;
+    result->operatorCount = ast.operatorCount;
+    if (root == kInvalidIndex) return false;
+    result->status = NativeDebugWatchStatus::Success;
+    result->diagnostic[0] = '\0';
+    return true;
+}
+
 } // namespace native_elf
 } // namespace kernel
