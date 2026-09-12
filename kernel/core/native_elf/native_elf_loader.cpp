@@ -759,11 +759,14 @@ static gx_result GX_CALL host_bare_development_debug(
     gx_development_debug_snapshot* outputSnapshot)
 {
     if (!app_context_valid(context) || !request || !outputSnapshot ||
-        !app_pointer_range(request, sizeof(*request)) ||
+        !app_pointer_range(request, sizeof(gx_development_debug_request)) ||
         !app_pointer_range(outputSnapshot, sizeof(uint32_t))) return GX_ERROR_PERMISSION_DENIED;
-    if (request->size < sizeof(*request) ||
+    if (request->size < sizeof(gx_development_debug_request) ||
         request->version != GX_DEVELOPMENT_DEBUG_API_VERSION) return GX_ERROR_INVALID_ARGUMENT;
-    gx_development_debug_request copied = *request;
+    gx_development_debug_request copied = {};
+    copy_bytes(reinterpret_cast<uint8_t*>(&copied),
+               reinterpret_cast<const uint8_t*>(request),
+               request->size < sizeof(copied) ? request->size : sizeof(copied));
     copied.artifactSha256 = nullptr;
     if (request->artifactSha256) {
         if (!app_string(request->artifactSha256, s_bareDebugStrings[0],
@@ -784,12 +787,15 @@ static gx_result GX_CALL host_bare_development_debug_call_stack(
     gx_development_debug_call_stack* outputResult)
 {
     if (!app_context_valid(context) || !request || !outputResult ||
-        !app_pointer_range(request, sizeof(*request)) ||
+        !app_pointer_range(request, sizeof(gx_development_debug_request)) ||
         !app_pointer_range(outputResult, sizeof(uint32_t))) return GX_ERROR_PERMISSION_DENIED;
-    if (request->size < sizeof(*request) ||
+    if (request->size < sizeof(gx_development_debug_request) ||
         request->version != GX_DEVELOPMENT_DEBUG_API_VERSION ||
         request->command != GX_DEVELOPMENT_DEBUG_CALL_STACK) return GX_ERROR_INVALID_ARGUMENT;
-    gx_development_debug_request copied = *request;
+    gx_development_debug_request copied = {};
+    copy_bytes(reinterpret_cast<uint8_t*>(&copied),
+               reinterpret_cast<const uint8_t*>(request),
+               request->size < sizeof(copied) ? request->size : sizeof(copied));
     copied.artifactSha256 = nullptr;
     if (request->artifactSha256) {
         if (!app_string(request->artifactSha256, s_bareDebugStrings[0],
@@ -810,12 +816,15 @@ static gx_result GX_CALL host_bare_development_debug_inspect_variables(
     gx_development_debug_variables* outputResult)
 {
     if (!app_context_valid(context) || !request || !outputResult ||
-        !app_pointer_range(request, sizeof(*request)) ||
+        !app_pointer_range(request, sizeof(gx_development_debug_request)) ||
         !app_pointer_range(outputResult, sizeof(uint32_t))) return GX_ERROR_PERMISSION_DENIED;
-    if (request->size < sizeof(*request) ||
+    if (request->size < sizeof(gx_development_debug_request) ||
         request->version != GX_DEVELOPMENT_DEBUG_API_VERSION ||
         request->command != GX_DEVELOPMENT_DEBUG_INSPECT_VARIABLES) return GX_ERROR_INVALID_ARGUMENT;
-    gx_development_debug_request copied = *request;
+    gx_development_debug_request copied = {};
+    copy_bytes(reinterpret_cast<uint8_t*>(&copied),
+               reinterpret_cast<const uint8_t*>(request),
+               request->size < sizeof(copied) ? request->size : sizeof(copied));
     copied.artifactSha256 = nullptr;
     if (request->artifactSha256) {
         if (!app_string(request->artifactSha256, s_bareDebugStrings[0],

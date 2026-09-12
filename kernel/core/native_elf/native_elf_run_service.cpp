@@ -3276,7 +3276,7 @@ gx_result call_stack(const gx_development_debug_request& request,
 {
     if (!outResult) return GX_ERROR_INVALID_ARGUMENT;
     clear_call_stack(outResult);
-    if (request.size < sizeof(request) ||
+    if (request.size < sizeof(gx_development_debug_request) ||
         request.version != GX_DEVELOPMENT_DEBUG_API_VERSION ||
         request.command != GX_DEVELOPMENT_DEBUG_CALL_STACK) {
         set_call_stack_error(outResult, GX_DEVELOPMENT_DEBUG_CALL_STACK_STATUS_REJECTED,
@@ -3488,7 +3488,7 @@ gx_result inspect_variables(const gx_development_debug_request& request,
 {
     if (!outResult) return GX_ERROR_INVALID_ARGUMENT;
     clear_debug_variables(outResult);
-    if (request.size < sizeof(request) ||
+    if (request.size < sizeof(gx_development_debug_request) ||
         request.version != GX_DEVELOPMENT_DEBUG_API_VERSION ||
         request.command != GX_DEVELOPMENT_DEBUG_INSPECT_VARIABLES) {
         set_debug_variables_error(outResult, GX_DEVELOPMENT_DEBUG_VARIABLES_STATUS_REJECTED,
@@ -3731,7 +3731,7 @@ gx_result debug(const gx_development_debug_request& request,
 {
     if (!outSnapshot) return GX_ERROR_INVALID_ARGUMENT;
     clear_debug_snapshot(outSnapshot);
-    if (request.size < sizeof(request) ||
+    if (request.size < sizeof(gx_development_debug_request) ||
         request.version != GX_DEVELOPMENT_DEBUG_API_VERSION) {
         set_debug_error(outSnapshot, "NativeElf debug request version or size is invalid");
         return GX_ERROR_INVALID_ARGUMENT;

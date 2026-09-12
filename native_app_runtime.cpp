@@ -1023,7 +1023,9 @@ gx_result hostDevelopmentDebug(NativeGxAppContext* ctx, const gx_development_deb
         outSnapshot->size < sizeof(gx_development_debug_snapshot) || outSnapshot->version != GX_DEVELOPMENT_DEBUG_API_VERSION) {
         return GX_ERROR_INVALID_ARGUMENT;
     }
-    gx_development_debug_request copied = *request;
+    gx_development_debug_request copied = {};
+    std::memcpy(&copied, request,
+                std::min<size_t>(request->size, sizeof(copied)));
     std::string artifact;
     if (request->artifactSha256 && !copyNativeString(*context, request->artifactSha256, GX_DEVELOPMENT_RUN_MAX_SHA256_BYTES, artifact)) return GX_ERROR_INVALID_ARGUMENT;
     copied.artifactSha256 = artifact.empty() ? nullptr : artifact.c_str();
@@ -1046,7 +1048,9 @@ gx_result hostDevelopmentDebugCallStack(NativeGxAppContext* ctx,
         outResult->version != GX_DEVELOPMENT_DEBUG_API_VERSION) {
         return GX_ERROR_INVALID_ARGUMENT;
     }
-    gx_development_debug_request copied = *request;
+    gx_development_debug_request copied = {};
+    std::memcpy(&copied, request,
+                std::min<size_t>(request->size, sizeof(copied)));
     std::string artifact;
     if (request->artifactSha256 &&
         !copyNativeString(*context, request->artifactSha256,
@@ -1073,7 +1077,9 @@ gx_result hostDevelopmentDebugInspectVariables(
         outResult->version != GX_DEVELOPMENT_DEBUG_API_VERSION) {
         return GX_ERROR_INVALID_ARGUMENT;
     }
-    gx_development_debug_request copied = *request;
+    gx_development_debug_request copied = {};
+    std::memcpy(&copied, request,
+                std::min<size_t>(request->size, sizeof(copied)));
     std::string artifact;
     if (request->artifactSha256 &&
         !copyNativeString(*context, request->artifactSha256,

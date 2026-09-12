@@ -8,6 +8,7 @@
 #include "native_elf_development_app_model.h"
 #include "native_elf_loader.h"
 #include "native_elf_run_service.h"
+#include "native_elf_debug_watches.h"
 #include "../compiler/compiler_driver.h"
 #include "../compiler/compiler_build_service.h"
 #include "../compiler/compiler_object.h"
@@ -21,10 +22,10 @@ namespace native_elf {
 namespace {
 
 static uint8_t s_invalidImage[guidexos::native_elf::MAX_ELF_FILE_BYTES];
-#if defined(GXOS_PHASE27G_SMOKE) || defined(GXOS_PHASE27H_SMOKE) || defined(GXOS_PHASE27I_SMOKE) || defined(GXOS_PHASE27J_SMOKE) || defined(GXOS_PHASE27K_SMOKE) || defined(GXOS_PHASE27L_SMOKE) || defined(GXOS_PHASE27M_SMOKE) || defined(GXOS_PHASE27P_SMOKE) || defined(GXOS_PHASE27R_SMOKE) || defined(GXOS_PHASE27S_SMOKE) || defined(GXOS_PHASE27T_SMOKE) || defined(GXOS_PHASE27U_SMOKE) || defined(GXOS_PHASE27V_SMOKE) || defined(GXOS_PHASE27W_SMOKE) || defined(GXOS_PHASE27X_SMOKE) || defined(GXOS_PHASE27Y_SMOKE) || defined(GXOS_PHASE27Z_SMOKE) || defined(GXOS_PHASE28A_SMOKE) || defined(GXOS_PHASE28B_SMOKE) || defined(GXOS_PHASE28C_SMOKE) || defined(GXOS_PHASE28D_SMOKE) || defined(GXOS_PHASE28E_SMOKE) || defined(GXOS_PHASE28F_SMOKE) || defined(GXOS_PHASE28G_SMOKE) || defined(GXOS_PHASE28H_SMOKE)
+#if defined(GXOS_PHASE27G_SMOKE) || defined(GXOS_PHASE27H_SMOKE) || defined(GXOS_PHASE27I_SMOKE) || defined(GXOS_PHASE27J_SMOKE) || defined(GXOS_PHASE27K_SMOKE) || defined(GXOS_PHASE27L_SMOKE) || defined(GXOS_PHASE27M_SMOKE) || defined(GXOS_PHASE27P_SMOKE) || defined(GXOS_PHASE27R_SMOKE) || defined(GXOS_PHASE27S_SMOKE) || defined(GXOS_PHASE27T_SMOKE) || defined(GXOS_PHASE27U_SMOKE) || defined(GXOS_PHASE27V_SMOKE) || defined(GXOS_PHASE27W_SMOKE) || defined(GXOS_PHASE27X_SMOKE) || defined(GXOS_PHASE27Y_SMOKE) || defined(GXOS_PHASE27Z_SMOKE) || defined(GXOS_PHASE28A_SMOKE) || defined(GXOS_PHASE28B_SMOKE) || defined(GXOS_PHASE28C_SMOKE) || defined(GXOS_PHASE28D_SMOKE) || defined(GXOS_PHASE28E_SMOKE) || defined(GXOS_PHASE28F_SMOKE) || defined(GXOS_PHASE28G_SMOKE) || defined(GXOS_PHASE28H_SMOKE) || defined(GXOS_PHASE28I_SMOKE)
 static uint8_t s_compareImage[guidexos::native_elf::MAX_ELF_FILE_BYTES];
 #endif
-#if defined(GXOS_PHASE27Z_SMOKE) || defined(GXOS_PHASE28A_SMOKE) || defined(GXOS_PHASE28B_SMOKE) || defined(GXOS_PHASE28C_SMOKE) || defined(GXOS_PHASE28D_SMOKE) || defined(GXOS_PHASE28E_SMOKE) || defined(GXOS_PHASE28F_SMOKE) || defined(GXOS_PHASE28G_SMOKE) || defined(GXOS_PHASE28H_SMOKE)
+#if defined(GXOS_PHASE27Z_SMOKE) || defined(GXOS_PHASE28A_SMOKE) || defined(GXOS_PHASE28B_SMOKE) || defined(GXOS_PHASE28C_SMOKE) || defined(GXOS_PHASE28D_SMOKE) || defined(GXOS_PHASE28E_SMOKE) || defined(GXOS_PHASE28F_SMOKE) || defined(GXOS_PHASE28G_SMOKE) || defined(GXOS_PHASE28H_SMOKE) || defined(GXOS_PHASE28I_SMOKE)
 static bool equal_text(const char* left, const char* right);
 #endif
 static void print_decimal(uint32_t value);
@@ -2478,7 +2479,7 @@ static bool file_contains_bytes(const char* path, const uint8_t* pattern, uint32
     return false;
 }
 
-#if defined(GXOS_PHASE27M_SMOKE) || defined(GXOS_PHASE27P_SMOKE) || defined(GXOS_PHASE28A_SMOKE) || defined(GXOS_PHASE28B_SMOKE) || defined(GXOS_PHASE28C_SMOKE) || defined(GXOS_PHASE28D_SMOKE) || defined(GXOS_PHASE28E_SMOKE) || defined(GXOS_PHASE28F_SMOKE) || defined(GXOS_PHASE28G_SMOKE) || defined(GXOS_PHASE28H_SMOKE)
+#if defined(GXOS_PHASE27M_SMOKE) || defined(GXOS_PHASE27P_SMOKE) || defined(GXOS_PHASE28A_SMOKE) || defined(GXOS_PHASE28B_SMOKE) || defined(GXOS_PHASE28C_SMOKE) || defined(GXOS_PHASE28D_SMOKE) || defined(GXOS_PHASE28E_SMOKE) || defined(GXOS_PHASE28F_SMOKE) || defined(GXOS_PHASE28G_SMOKE) || defined(GXOS_PHASE28H_SMOKE) || defined(GXOS_PHASE28I_SMOKE)
 static void print_decimal(uint32_t value)
 {
     char digits[10] = {};
@@ -6112,7 +6113,11 @@ auto run_phase28g_normal_session = [&](const gx_build_snapshot& build) -> bool
         "ELF Loader: Phase 28G arguments and locals inspection smoke FAIL\n");
 #endif
 
-#if defined(GXOS_PHASE28H_SMOKE)
+#if defined(GXOS_PHASE28H_SMOKE) || defined(GXOS_PHASE28I_SMOKE)
+#if defined(GXOS_PHASE28I_SMOKE)
+    serial::puts("ELF Loader: Phase 28I selected-frame watches smoke begin\n");
+    serial::puts("DEVELOPER_STUDIO_PHASE28I_BEGIN\n");
+#endif
     serial::puts("ELF Loader: Phase 28H selected-frame variables smoke begin\n");
     serial::puts("DEVELOPER_STUDIO_PHASE28H_BEGIN\n");
     auto phase28h_run_request = [&](const gx_build_snapshot& build,
@@ -6290,6 +6295,19 @@ auto run_phase28g_normal_session = [&](const gx_build_snapshot& build) -> bool
     bool h28Render = false;
     bool h28Complete = false;
     bool h28Clean = false;
+    bool h28WatchFrame0 = false;
+    bool h28WatchFrame1 = false;
+    bool h28WatchFrame2 = false;
+    bool h28WatchCrossFrame = false;
+    bool h28WatchPrecedence = false;
+    bool h28WatchParentheses = false;
+    bool h28WatchPointer = false;
+    bool h28WatchBoolean = false;
+    bool h28WatchStale = false;
+    bool h28WatchInvalidFrame = false;
+    bool h28WatchRunning = false;
+    bool h28WatchReadOnly = false;
+    bool h28WatchReevaluate = false;
     if (h28WarmCachePass) {
         gx_development_run_request runRequest = phase28h_run_request(h28WarmBuild, true);
         gx_development_run_handle handle = 0;
@@ -6406,6 +6424,102 @@ auto run_phase28g_normal_session = [&](const gx_build_snapshot& build) -> bool
         if (h28Frame2) serial::puts("DEVELOPER_STUDIO_PHASE28H_FRAME2_VARIABLES_PASS\n");
         if (h28CallerLiveRange) serial::puts("DEVELOPER_STUDIO_PHASE28H_CALLER_LIVE_RANGE_PASS\n");
 
+#if defined(GXOS_PHASE28I_SMOKE)
+        auto phase28i_frame = [&](uint32_t frameIndex,
+                                  const gx_development_debug_call_stack_frame& identity,
+                                  const gx_development_debug_variables& variables) {
+            NativeDebugWatchFrame frame = {};
+            frame.paused = true;
+            frame.frameIndex = frameIndex;
+            frame.sessionGeneration = generation;
+            frame.stopGeneration = initial.context.stopGeneration;
+            frame.instructionPointer = identity.instructionPointer;
+            frame.framePointer = identity.framePointer;
+            frame.variables = &variables;
+            frame.variableMetadataAvailable = true;
+            return frame;
+        };
+        auto phase28i_value = [&](const char* expression, const NativeDebugWatchFrame& frame,
+                                  NativeDebugWatchValueType type, int64_t expected) {
+            NativeDebugWatchResult result = {};
+            const bool evaluated = native_debug_watch_evaluate(expression, frame, &result);
+            return evaluated && result.status == NativeDebugWatchStatus::Success &&
+                result.type == type && result.signedValue == expected;
+        };
+        auto phase28i_status = [&](const char* expression, const NativeDebugWatchFrame& frame,
+                                   NativeDebugWatchStatus expected) {
+            NativeDebugWatchResult result = {};
+            return !native_debug_watch_evaluate(expression, frame, &result) &&
+                result.status == expected;
+        };
+        const NativeDebugWatchFrame frame0Watch = phase28i_frame(0, initialStack.frames[0], frame0);
+        const NativeDebugWatchFrame frame1Watch = phase28i_frame(1, initialStack.frames[1], frame1);
+        const NativeDebugWatchFrame frame2Watch = phase28i_frame(2, initialStack.frames[2], frame2);
+        gx_development_debug_variables pointerFrame = frame0;
+        pointerFrame.variableCount = 0;
+        gx_development_debug_variable& pointerVariable =
+            pointerFrame.variables[pointerFrame.variableCount];
+        pointerVariable.name[0] = 't';
+        pointerVariable.name[1] = 'a';
+        pointerVariable.name[2] = 'i';
+        pointerVariable.name[3] = 'l';
+        pointerVariable.name[4] = '_';
+        pointerVariable.name[5] = 'p';
+        pointerVariable.name[6] = 't';
+        pointerVariable.name[7] = 'r';
+        pointerVariable.name[8] = '\0';
+        pointerVariable.type = GX_DEVELOPMENT_DEBUG_VARIABLE_TYPE_POINTER;
+        pointerVariable.location = GX_DEVELOPMENT_DEBUG_VARIABLE_LOCATION_RBP_RELATIVE;
+        pointerVariable.flags = GX_DEVELOPMENT_DEBUG_VARIABLE_VALIDATED |
+            GX_DEVELOPMENT_DEBUG_VARIABLE_LIVE |
+            GX_DEVELOPMENT_DEBUG_VARIABLE_VALUE_VALID;
+        pointerVariable.sizeBytes = 8;
+        pointerVariable.availability = GX_DEVELOPMENT_DEBUG_VARIABLE_AVAILABILITY_AVAILABLE;
+        pointerVariable.rawValue = 0x101fff00ULL;
+        pointerVariable.unsignedValue = pointerVariable.rawValue;
+        ++pointerFrame.variableCount;
+        const NativeDebugWatchFrame pointerWatch = phase28i_frame(
+            0, initialStack.frames[0], pointerFrame);
+        h28WatchFrame0 = frame0Query && phase28i_value("tail_value", frame0Watch,
+            NativeDebugWatchValueType::SignedInt32, 33);
+        h28WatchFrame1 = frame1Query && phase28i_value("adjusted", frame1Watch,
+            NativeDebugWatchValueType::SignedInt32, 14);
+        h28WatchFrame2 = frame2Query && phase28i_value("root_value", frame2Watch,
+            NativeDebugWatchValueType::SignedInt32, 100);
+        h28WatchReevaluate = h28WatchFrame0 && h28WatchFrame1 && h28WatchFrame2 &&
+            !phase28i_value("tail_value", frame1Watch, NativeDebugWatchValueType::SignedInt32, 33) &&
+            !phase28i_value("adjusted", frame2Watch, NativeDebugWatchValueType::SignedInt32, 14);
+        h28WatchCrossFrame = frame1Query && phase28i_status("tail_value", frame1Watch,
+            NativeDebugWatchStatus::UnknownIdentifier);
+        h28WatchPrecedence = frame1Query &&
+            phase28i_value("input + delta * 2", frame1Watch,
+                           NativeDebugWatchValueType::SignedInt32, 18);
+        h28WatchParentheses = frame1Query &&
+            phase28i_value("(input + delta) * 2", frame1Watch,
+                           NativeDebugWatchValueType::SignedInt32, 28);
+        h28WatchPointer = frame0Query && phase28i_value("tail_ptr != 0", pointerWatch,
+            NativeDebugWatchValueType::Boolean, 1);
+        h28WatchBoolean = frame1Query && phase28i_value("input > 0 && delta != 0", frame1Watch,
+            NativeDebugWatchValueType::Boolean, 1);
+        NativeDebugWatchFrame invalidWatch = frame0Watch;
+        invalidWatch.frameIndex = GX_DEVELOPMENT_DEBUG_MAX_CALL_STACK_FRAMES;
+        h28WatchInvalidFrame = phase28i_status("tail_value", invalidWatch,
+            NativeDebugWatchStatus::InvalidSelectedFrame);
+        NativeDebugWatchFrame runningWatch = frame0Watch;
+        runningWatch.paused = false;
+        h28WatchRunning = phase28i_status("tail_value", runningWatch,
+            NativeDebugWatchStatus::Running);
+        if (h28WatchFrame0 && h28WatchFrame1 && h28WatchFrame2)
+            serial::puts("DEVELOPER_STUDIO_PHASE28I_WATCH_FRAME0_PASS\nDEVELOPER_STUDIO_PHASE28I_WATCH_FRAME1_PASS\nDEVELOPER_STUDIO_PHASE28I_WATCH_FRAME2_PASS\n");
+        if (h28WatchCrossFrame) serial::puts("DEVELOPER_STUDIO_PHASE28I_CROSS_FRAME_PASS\n");
+        if (h28WatchPrecedence) serial::puts("DEVELOPER_STUDIO_PHASE28I_PRECEDENCE_PASS\n");
+        if (h28WatchParentheses) serial::puts("DEVELOPER_STUDIO_PHASE28I_PARENTHESIS_PASS\n");
+        if (h28WatchPointer) serial::puts("DEVELOPER_STUDIO_PHASE28I_POINTER_PASS\n");
+        if (h28WatchBoolean) serial::puts("DEVELOPER_STUDIO_PHASE28I_BOOLEAN_PASS\n");
+        if (h28WatchInvalidFrame) serial::puts("DEVELOPER_STUDIO_PHASE28I_INVALID_FRAME_PASS\n");
+        if (h28WatchRunning) serial::puts("DEVELOPER_STUDIO_PHASE28I_RUNNING_PASS\n");
+#endif
+
         gx_development_debug_variables frame0Again = {};
         frame0Again.size = sizeof(frame0Again);
         const bool finalFrame0Query = NativeElfRunService::inspect_variables(
@@ -6433,6 +6547,10 @@ auto run_phase28g_normal_session = [&](const gx_build_snapshot& build) -> bool
         h28ReadOnly = frame0Query && frame1Query && frame2Query && finalFrame0Query &&
             pausedRegistersStable() && pausedRegistersStable() && pausedRegistersStable();
         if (h28ReadOnly) serial::puts("DEVELOPER_STUDIO_PHASE28H_READ_ONLY_GPRS_PASS\n");
+#if defined(GXOS_PHASE28I_SMOKE)
+        h28WatchReadOnly = h28ReadOnly && h28StackUnchanged;
+        if (h28WatchReadOnly) serial::puts("DEVELOPER_STUDIO_PHASE28I_READ_ONLY_PASS\n");
+#endif
 
         gx_development_debug_variables invalid = {};
         invalid.size = sizeof(invalid);
@@ -6495,6 +6613,20 @@ auto run_phase28g_normal_session = [&](const gx_build_snapshot& build) -> bool
         if (h28StepOutReset) serial::puts("DEVELOPER_STUDIO_PHASE28H_STEP_OUT_RESET_PASS\nDEVELOPER_STUDIO_PHASE28H_STEP_REGRESSION_PASS\n");
         if (h28Stale) serial::puts("DEVELOPER_STUDIO_PHASE28H_STALE_SELECTION_PASS\n");
 
+#if defined(GXOS_PHASE28I_SMOKE)
+        NativeDebugWatchFrame staleWatch = {};
+        staleWatch.paused = true;
+        staleWatch.frameIndex = 0;
+        staleWatch.sessionGeneration = generation;
+        staleWatch.stopGeneration = afterStepOut.context.stopGeneration;
+        staleWatch.instructionPointer = initialStack.frames[0].instructionPointer;
+        staleWatch.framePointer = initialStack.frames[0].framePointer;
+        staleWatch.variables = &frame0;
+        h28WatchStale = phase28i_status("tail_value", staleWatch,
+            NativeDebugWatchStatus::StaleGeneration);
+        if (h28WatchStale) serial::puts("DEVELOPER_STUDIO_PHASE28I_STALE_PASS\n");
+#endif
+
         gx_development_debug_variables rootAfterStepOut = {};
         rootAfterStepOut.size = sizeof(rootAfterStepOut);
         const bool rootAfterStepOutQuery = stepOutStack && NativeElfRunService::inspect_variables(
@@ -6537,6 +6669,29 @@ auto run_phase28g_normal_session = [&](const gx_build_snapshot& build) -> bool
     const bool h28Primary = h28NestedPause && h28CallStack && h28Frame0 && h28Frame1 && h28Frame2 &&
         h28CallerLiveRange && h28RoundTrip && h28ReadOnly && h28StackUnchanged && h28Invalid &&
         h28StepOutReset && h28Stale && h28Resume && h28Render && h28Complete && h28Clean;
+#if defined(GXOS_PHASE28I_SMOKE)
+    const bool phase28iWatchPass = h28WatchFrame0 && h28WatchFrame1 && h28WatchFrame2 &&
+        h28WatchCrossFrame && h28WatchPrecedence && h28WatchParentheses && h28WatchPointer &&
+        h28WatchBoolean && h28WatchStale && h28WatchInvalidFrame && h28WatchRunning &&
+        h28WatchReadOnly && h28WatchReevaluate;
+    const bool phase28iPassed = h28Primary && phase28iWatchPass;
+    if (h28WatchReevaluate) serial::puts("DEVELOPER_STUDIO_PHASE28I_REEVALUATE_PASS\n");
+    print_marker("phase28i_watch_frame0", h28WatchFrame0);
+    print_marker("phase28i_watch_frame1", h28WatchFrame1);
+    print_marker("phase28i_watch_frame2", h28WatchFrame2);
+    print_marker("phase28i_cross_frame", h28WatchCrossFrame);
+    print_marker("phase28i_precedence", h28WatchPrecedence);
+    print_marker("phase28i_parenthesis", h28WatchParentheses);
+    print_marker("phase28i_pointer", h28WatchPointer);
+    print_marker("phase28i_boolean", h28WatchBoolean);
+    print_marker("phase28i_stale", h28WatchStale);
+    print_marker("phase28i_invalid_frame", h28WatchInvalidFrame);
+    print_marker("phase28i_running", h28WatchRunning);
+    print_marker("phase28i_read_only", h28WatchReadOnly);
+    print_marker("phase28i_reevaluate", h28WatchReevaluate);
+    print_marker("phase28i", phase28iPassed);
+    serial::puts(phase28iPassed ? "DEVELOPER_STUDIO_PHASE28I_PASS\n" : "DEVELOPER_STUDIO_PHASE28I_FAIL\n");
+#endif
     print_marker("phase28h_nested_pause", h28NestedPause);
     print_marker("phase28h_call_stack", h28CallStack);
     print_marker("phase28h_frame0", h28Frame0);

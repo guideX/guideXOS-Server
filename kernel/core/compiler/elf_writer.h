@@ -86,6 +86,14 @@ struct ResolvedDebugVariable {
     uint32_t liveEnd;
 };
 
+enum class DebugVariableLookupStatus : uint8_t {
+    Unknown = 0,
+    Live,
+    DeclaredNotLive,
+    UnsupportedType,
+    MetadataUnavailable
+};
+
 bool write_bootstrap_elf(const uint8_t* code,
                          uint32_t codeBytes,
                          uint8_t* output,
@@ -159,6 +167,14 @@ bool resolve_bootstrap_debug_variables_at_address(
     const char* functionName, ResolvedDebugVariable* variables,
     uint32_t variableCapacity, uint32_t* variableCount, uint32_t* truncated,
     const char** error);
+
+/* Metadata-only lookup used to distinguish an unknown name from a compiler-
+   described variable that is outside its validated live range. It never
+   reads a variable slot. */
+DebugVariableLookupStatus resolve_bootstrap_debug_variable_state(
+    const uint8_t* image, uint32_t imageBytes, uint64_t imageBase,
+    uint32_t codeFileOffset, uint32_t codeBytes, uint64_t address,
+    const char* functionName, const char* variableName, const char** error);
 
 bool validate_bootstrap_elf(const uint8_t* image,
                             uint32_t imageBytes,

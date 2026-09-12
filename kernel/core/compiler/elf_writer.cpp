@@ -655,6 +655,120 @@ bool resolve_bootstrap_debug_variables_at_address(
     return true;
 }
 
+DebugVariableLookupStatus resolve_bootstrap_debug_variable_state(
+    const uint8_t* image, uint32_t imageBytes, uint64_t imageBase,
+    uint32_t codeFileOffset, uint32_t codeBytes, uint64_t address,
+    const char* functionName, const char* variableName, const char** error)
+{
+    if (error) *error = "debug-variable metadata is unavailable";
+    if (!image || !functionName || functionName[0] == '\0' ||
+        !variableName || variableName[0] == '\0' || codeBytes == 0 ||
+        imageBytes < kSourceMapFooterBytes ||
+        imageBase > ~static_cast<uint64_t>(0) - codeFileOffset ||
+        address < imageBase + codeFileOffset ||
+        address - (imageBase + codeFileOffset) >= codeBytes) {
+        if (error) *error = "debug-variable metadata request is incomplete";
+        return DebugVariableLookupStatus::MetadataUnavailable;
+    }
+    const uint32_t footer = imageBytes - kSourceMapFooterBytes;
+    if (get_u32(image, footer) != 0x454D5847U) return DebugVariableLookupStatus::MetadataUnavailable;
+    const uint32_t payload = get_u32(image, footer + 4);
+    if (payload < BOOTSTRAP_SOURCE_MAP_V2_HEADER_BYTES + kSourceMapFooterBytes ||
+        payload > imageBytes) return DebugVariableLookupStatus::MetadataUnavailable;
+    const uint32_t start = imageBytes - payload;
+    if (get_u32(image, start) != 0x4D535847U ||
+        get_u16(image, start + 4) != kSourceMapVersionWithVariables ||
+        get_u16(image, start + 6) != BOOTSTRAP_SOURCE_MAP_V2_HEADER_BYTES ||
+        get_u32(image, start + 24) != payload ||
+        get_u64(image, start + 32) != source_map_hash(image + start, payload, 32, 8))
+        return DebugVariableLookupStatus::MetadataUnavailable;
+
+    const uint32_t fileCount = get_u16(image, start + 8);
+    const uint32_t functionCount = get_u16(image, start + 10);
+    const uint32_t mapCount = get_u32(image, start + 12);
+    const uint32_t trailerCodeOffset = get_u32(image, start + 16);
+    const uint32_t trailerCodeBytes = get_u32(image, start + 20);
+    const uint32_t trailerVariableCount = get_u32(image, start + 40);
+    const uint32_t trailerVariableBytes = get_u32(image, start + 44);
+    if (fileCount == 0 || fileCount > COMPILER_MAX_TRANSLATION_UNITS ||
+        functionCount == 0 || functionCount > COMPILER_MAX_SOURCE_MAP_FUNCTIONS ||
+        mapCount > COMPILER_MAX_LINKED_SOURCE_MAPPINGS ||
+        trailerVariableCount > COMPILER_MAX_DEBUG_VARIABLES * COMPILER_MAX_TRANSLATION_UNITS ||
+        trailerVariableBytes != trailerVariableCount * BOOTSTRAP_SOURCE_MAP_VARIABLE_BYTES ||
+        trailerCodeOffset != codeFileOffset || trailerCodeBytes != codeBytes)
+        return DebugVariableLookupStatus::MetadataUnavailable;
+    const uint64_t expected = static_cast<uint64_t>(BOOTSTRAP_SOURCE_MAP_V2_HEADER_BYTES) +
+        static_cast<uint64_t>(fileCount) * BOOTSTRAP_SOURCE_MAP_FILE_BYTES +
+        static_cast<uint64_t>(functionCount) * BOOTSTRAP_SOURCE_MAP_FUNCTION_BYTES +
+        static_cast<uint64_t>(mapCount) * BOOTSTRAP_SOURCE_MAP_RECORD_BYTES +
+        trailerVariableBytes + kSourceMapFooterBytes;
+    if (expected != payload) return DebugVariableLookupStatus::MetadataUnavailable;
+    const uint32_t fileStart = start + BOOTSTRAP_SOURCE_MAP_V2_HEADER_BYTES;
+    const uint32_t functionStart = fileStart + fileCount * BOOTSTRAP_SOURCE_MAP_FILE_BYTES;
+    const uint32_t mappingStart = functionStart + functionCount * BOOTSTRAP_SOURCE_MAP_FUNCTION_BYTES;
+    const uint32_t variableStart = mappingStart + mapCount * BOOTSTRAP_SOURCE_MAP_RECORD_BYTES;
+    int32_t requestedFunction = -1;
+    for (uint32_t i = 0; i < functionCount; ++i) {
+        const char* current = reinterpret_cast<const char*>(
+            image + functionStart + i * BOOTSTRAP_SOURCE_MAP_FUNCTION_BYTES);
+        if (!fixed_text_valid(current, COMPILER_FUNCTION_NAME_CAPACITY))
+            return DebugVariableLookupStatus::MetadataUnavailable;
+        uint32_t index = 0;
+        while (index < COMPILER_FUNCTION_NAME_CAPACITY && current[index] &&
+               functionName[index] && current[index] == functionName[index]) ++index;
+        if (index < COMPILER_FUNCTION_NAME_CAPACITY && current[index] == '\0' &&
+            functionName[index] == '\0') requestedFunction = static_cast<int32_t>(i);
+    }
+    if (requestedFunction < 0) return DebugVariableLookupStatus::Unknown;
+
+    const uint64_t relativeAddress = address - (imageBase + codeFileOffset);
+    for (uint32_t i = 0; i < trailerVariableCount; ++i) {
+        const uint32_t offset = variableStart + i * BOOTSTRAP_SOURCE_MAP_VARIABLE_BYTES;
+        const uint16_t sourceFileIndex = get_u16(image, offset + 0);
+        const uint16_t functionIndex = get_u16(image, offset + 2);
+        const uint8_t kind = image[offset + 4];
+        const uint8_t type = image[offset + 5];
+        const uint8_t location = image[offset + 6];
+        const uint8_t flags = image[offset + 7];
+        const uint32_t sizeBytes = get_u32(image, offset + 8);
+        const uint32_t declarationLine = get_u32(image, offset + 16);
+        const uint32_t declarationColumn = get_u32(image, offset + 20);
+        const int32_t frameOffset = static_cast<int32_t>(get_u32(image, offset + 24));
+        const uint32_t liveStart = get_u32(image, offset + 28);
+        const uint32_t liveEnd = get_u32(image, offset + 32);
+        const char* name = reinterpret_cast<const char*>(image + offset + 36);
+        if (sourceFileIndex >= fileCount || functionIndex >= functionCount ||
+            !fixed_text_valid(name, COMPILER_DEBUG_VARIABLE_NAME_CAPACITY) ||
+            kind < static_cast<uint8_t>(DebugVariableKind::Parameter) ||
+            kind > static_cast<uint8_t>(DebugVariableKind::Local) ||
+            type < static_cast<uint8_t>(DebugVariableTypeKind::SignedInt32) ||
+            type > static_cast<uint8_t>(DebugVariableTypeKind::Pointer) ||
+            location != static_cast<uint8_t>(DebugVariableLocationKind::RbpRelative) ||
+            sizeBytes != (type == static_cast<uint8_t>(DebugVariableTypeKind::Pointer) ? 8U : 4U) ||
+            declarationLine == 0 || declarationColumn == 0 || frameOffset >= 0 ||
+            liveStart >= liveEnd || liveEnd > codeBytes ||
+            (flags & (COMPILER_DEBUG_VARIABLE_FLAG_INITIALIZED |
+                      COMPILER_DEBUG_VARIABLE_FLAG_STABLE_FRAME_SLOT)) !=
+                (COMPILER_DEBUG_VARIABLE_FLAG_INITIALIZED |
+                 COMPILER_DEBUG_VARIABLE_FLAG_STABLE_FRAME_SLOT))
+            return DebugVariableLookupStatus::MetadataUnavailable;
+        if (functionIndex != static_cast<uint16_t>(requestedFunction)) continue;
+        uint32_t nameIndex = 0;
+        while (nameIndex < COMPILER_DEBUG_VARIABLE_NAME_CAPACITY && name[nameIndex] &&
+               variableName[nameIndex] && name[nameIndex] == variableName[nameIndex]) ++nameIndex;
+        if (nameIndex >= COMPILER_DEBUG_VARIABLE_NAME_CAPACITY || name[nameIndex] != '\0' ||
+            variableName[nameIndex] != '\0') continue;
+        if (relativeAddress < liveStart || relativeAddress >= liveEnd)
+            return DebugVariableLookupStatus::DeclaredNotLive;
+        if (type == static_cast<uint8_t>(DebugVariableTypeKind::Pointer) ||
+            type == static_cast<uint8_t>(DebugVariableTypeKind::SignedInt32))
+            return DebugVariableLookupStatus::Live;
+        return DebugVariableLookupStatus::UnsupportedType;
+    }
+    if (error) *error = "debug-variable name is not declared in the selected frame";
+    return DebugVariableLookupStatus::Unknown;
+}
+
 bool write_bootstrap_elf(const uint8_t* code,
                          uint32_t codeBytes,
                          const uint8_t* readOnlyData,
