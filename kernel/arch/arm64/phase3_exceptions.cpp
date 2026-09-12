@@ -62,7 +62,9 @@ static void fatal(const char* reason)
     phase3_serial_print(" SP=");
     phase3_serial_hex(read_sp());
     phase3_serial_print("\n[guideXOS] ");
-#if defined(GXOS_AARCH64_PHASE4)
+#if defined(GXOS_AARCH64_RPI4_P1)
+    phase3_serial_print("AARCH64_P1_ERROR\n");
+#elif defined(GXOS_AARCH64_PHASE4)
     phase3_serial_print("AARCH64_PHASE4_ERROR\n");
 #else
     phase3_serial_print("AARCH64_PHASE3_ERROR\n");

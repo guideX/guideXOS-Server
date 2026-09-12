@@ -3,6 +3,9 @@
 #include "phase2_memory.h"
 #include "phase2_mmu.h"
 #include "../../../aarch64/phase2/phase2_validation.h"
+#if defined(GXOS_AARCH64_RPI4_P1)
+#include "../../../aarch64/rpi4/rpi4_p1_contract.h"
+#endif
 
 namespace {
 
@@ -110,9 +113,26 @@ static bool append_unprotected(uint64_t start, uint64_t end)
 
 uint8_t phase2_memory_validate_handoff(const gxos_aarch64_phase2_handoff* handoff)
 {
+#if defined(GXOS_AARCH64_RPI4_P1)
+    const gxos_aarch64_rpi4_p1_handoff* physicalHandoff =
+        reinterpret_cast<const gxos_aarch64_rpi4_p1_handoff*>(handoff);
+    if (!physicalHandoff || physicalHandoff->magic != GXOS_AARCH64_RPI4_P1_HANDOFF_MAGIC ||
+        physicalHandoff->version != GXOS_AARCH64_RPI4_P1_HANDOFF_VERSION ||
+        physicalHandoff->size != sizeof(*physicalHandoff)) return 0;
+#else
     if (!handoff || handoff->magic != GXOS_AARCH64_PHASE2_HANDOFF_MAGIC ||
         handoff->version != GXOS_AARCH64_PHASE2_HANDOFF_VERSION ||
         handoff->size != sizeof(*handoff)) return 0;
+#endif
+#if defined(GXOS_AARCH64_RPI4_P1)
+    const uint32_t flags = GXOS_AARCH64_RPI4_P1_FLAG_EBS_COMPLETE |
+                           GXOS_AARCH64_RPI4_P1_FLAG_IDENTITY_LOAD |
+                           GXOS_AARCH64_RPI4_P1_FLAG_MMU_OFF_ON_ENTRY |
+                           GXOS_AARCH64_RPI4_P1_FLAG_STACK_ALLOCATED |
+                           GXOS_AARCH64_RPI4_P1_FLAG_MEMORY_MAP_VALID |
+                           GXOS_AARCH64_RPI4_P1_FLAG_DTB_VALID |
+                           GXOS_AARCH64_RPI4_P1_FLAG_DTB_COPIED;
+#else
     const uint32_t flags = GXOS_AARCH64_PHASE2_FLAG_EBS_COMPLETE |
                            GXOS_AARCH64_PHASE2_FLAG_IDENTITY_LOAD |
                            GXOS_AARCH64_PHASE2_FLAG_MMU_OFF_ON_ENTRY |
@@ -120,13 +140,18 @@ uint8_t phase2_memory_validate_handoff(const gxos_aarch64_phase2_handoff* handof
                            GXOS_AARCH64_PHASE2_FLAG_MEMORY_MAP_VALID |
                            GXOS_AARCH64_PHASE2_FLAG_DTB_VALID |
                            GXOS_AARCH64_PHASE2_FLAG_DTB_COPIED;
+#endif
     if ((handoff->flags & flags) != flags || handoff->kernel_base != GXOS_AARCH64_PHASE2_KERNEL_LOAD_ADDRESS ||
         handoff->kernel_size == 0 || handoff->stack_size == 0 || handoff->stack_top == 0 ||
         !gxos_aarch64_memory_map_layout_valid(handoff->memory_map, handoff->memory_map_size,
                                                handoff->memory_map_descriptor_size,
                                                handoff->memory_map_entry_count) ||
         handoff->dtb_base == 0 || handoff->dtb_size == 0 ||
+#if defined(GXOS_AARCH64_RPI4_P1)
+        handoff->uart_base == 0 || (handoff->uart_base & kPageMask) != 0 ||
+#else
         handoff->uart_base != GXOS_AARCH64_PHASE2_UART_FALLBACK ||
+#endif
         handoff->initial_current_el < 1 || handoff->initial_current_el > 2) return 0;
 
     uint64_t end = 0;

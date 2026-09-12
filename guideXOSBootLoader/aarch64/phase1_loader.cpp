@@ -8,7 +8,24 @@
 #include "../Uefi.h"
 #include "../Protocol/LoadedImage.h"
 #include "../Protocol/SimpleFileSystem.h"
-#if defined(GXOS_AARCH64_PHASE6)
+#if defined(GXOS_AARCH64_RPI4_P1)
+#include "../Protocol/GraphicsOutput.h"
+#include "../../aarch64/rpi4/rpi4_p1_contract.h"
+#include "../../aarch64/phase2/phase2_platform.h"
+using Aarch64Handoff = gxos_aarch64_rpi4_p1_handoff;
+#define GXOS_AARCH64_HANDOFF_MAGIC GXOS_AARCH64_RPI4_P1_HANDOFF_MAGIC
+#define GXOS_AARCH64_HANDOFF_VERSION GXOS_AARCH64_RPI4_P1_HANDOFF_VERSION
+#define GXOS_AARCH64_KERNEL_LOAD_ADDRESS GXOS_AARCH64_RPI4_P1_KERNEL_LOAD_ADDRESS
+#define GXOS_AARCH64_UART_BASE GXOS_AARCH64_RPI4_P1_UART_FALLBACK
+#define GXOS_AARCH64_FLAG_EBS_COMPLETE GXOS_AARCH64_RPI4_P1_FLAG_EBS_COMPLETE
+#define GXOS_AARCH64_FLAG_IDENTITY_LOAD GXOS_AARCH64_RPI4_P1_FLAG_IDENTITY_LOAD
+#define GXOS_AARCH64_FLAG_MMU_OFF_ON_ENTRY GXOS_AARCH64_RPI4_P1_FLAG_MMU_OFF_ON_ENTRY
+#define GXOS_AARCH64_FLAG_STACK_ALLOCATED GXOS_AARCH64_RPI4_P1_FLAG_STACK_ALLOCATED
+#define GXOS_AARCH64_FLAG_MEMORY_MAP_VALID GXOS_AARCH64_RPI4_P1_FLAG_MEMORY_MAP_VALID
+#define GXOS_AARCH64_FLAG_DTB_VALID GXOS_AARCH64_RPI4_P1_FLAG_DTB_VALID
+#define GXOS_AARCH64_FLAG_DTB_COPIED GXOS_AARCH64_RPI4_P1_FLAG_DTB_COPIED
+#define GXOS_AARCH64_FLAG_FRAMEBUFFER_VALID GXOS_AARCH64_RPI4_P1_FLAG_FRAMEBUFFER_VALID
+#elif defined(GXOS_AARCH64_PHASE6)
 #include "../Protocol/GraphicsOutput.h"
 #include "../../aarch64/phase6/phase6_contract.h"
 using Aarch64Handoff = gxos_aarch64_phase6_handoff;
@@ -136,7 +153,7 @@ static const EFI_GUID kSimpleFileSystemProtocolGuid =
 static const EFI_GUID kFileInfoGuid =
     { 0x09576e92, 0x6d3f, 0x11d2, { 0x8e, 0x39, 0x00, 0xa0, 0xc9, 0x69, 0x72, 0x3b } };
 
-#if defined(GXOS_AARCH64_PHASE2) || defined(GXOS_AARCH64_PHASE4) || defined(GXOS_AARCH64_PHASE6)
+#if defined(GXOS_AARCH64_RPI4_P1) || defined(GXOS_AARCH64_PHASE2) || defined(GXOS_AARCH64_PHASE4) || defined(GXOS_AARCH64_PHASE6)
 // EFI_DTB_TABLE_GUID from the UEFI Device Tree Configuration Table protocol.
 static const EFI_GUID kDtbTableGuid =
     { 0xb1b621d5, 0xf19c, 0x41a5, { 0x83, 0x0b, 0xd9, 0x15, 0x2c, 0x69, 0xaa, 0xe0 } };
@@ -149,7 +166,7 @@ static void print_ascii(const char* text);
 static void print_hex_u32(uint32_t value);
 static EFI_STATUS fail(const char* message);
 
-#if defined(GXOS_AARCH64_PHASE6)
+#if defined(GXOS_AARCH64_RPI4_P1) || defined(GXOS_AARCH64_PHASE6)
 struct GopCapture {
     uint64_t base;
     uint64_t size;
@@ -167,12 +184,24 @@ struct GopCapture {
 static EFI_STATUS capture_gop(GopCapture* capture)
 {
     if (!capture || !gSystemTable || !gSystemTable->BootServices ||
-        !gSystemTable->BootServices->LocateProtocol) return fail("GOP protocol unavailable");
+        !gSystemTable->BootServices->LocateProtocol) {
+#if defined(GXOS_AARCH64_RPI4_P1)
+        return EFI_NOT_FOUND;
+#else
+        return fail("GOP protocol unavailable");
+#endif
+    }
     EFI_GUID gopGuid = EFI_GRAPHICS_OUTPUT_PROTOCOL_GUID;
     VOID* interface = nullptr;
     EFI_STATUS status = gSystemTable->BootServices->LocateProtocol(
         &gopGuid, nullptr, &interface);
-    if (EFI_ERROR(status) || !interface) return fail("UEFI GOP not found");
+    if (EFI_ERROR(status) || !interface) {
+#if defined(GXOS_AARCH64_RPI4_P1)
+        return EFI_NOT_FOUND;
+#else
+        return fail("UEFI GOP not found");
+#endif
+    }
 
     EFI_GRAPHICS_OUTPUT_PROTOCOL* gop =
         reinterpret_cast<EFI_GRAPHICS_OUTPUT_PROTOCOL*>(interface);
@@ -557,6 +586,48 @@ static EFI_STATUS load_kernel(const uint8_t* file, UINTN fileSize,
     UINTN imageSize = (UINTN)imageSize64;
     UINTN pages = (imageSize + EFI_PAGE_SIZE - 1) / EFI_PAGE_SIZE;
 
+#if defined(GXOS_AARCH64_RPI4_P1)
+    // AllocateAddress is the reservation operation, but the physical profile
+    // also requires an explicit preflight against the firmware map so a
+    // changed board reservation fails diagnostically instead of relying on a
+    // blind fixed-address assumption.
+    uint64_t requestedEnd = 0;
+    if (!add_u64(GXOS_AARCH64_KERNEL_LOAD_ADDRESS, imageSize64, &requestedEnd)) {
+        return fail("physical kernel range overflows");
+    }
+    EFI_MEMORY_DESCRIPTOR* probeMap = nullptr;
+    const UINTN probeCapacity = kMemoryMapCapacityLimit;
+    EFI_STATUS probeStatus = allocate_pool(probeCapacity, (VOID**)&probeMap);
+    if (EFI_ERROR(probeStatus) || !probeMap) return fail("physical memory-map preflight allocation failed");
+    UINTN probeSize = probeCapacity;
+    UINTN probeKey = 0;
+    UINTN probeDescriptorSize = 0;
+    UINT32 probeDescriptorVersion = 0;
+    probeStatus = gSystemTable->BootServices->GetMemoryMap(
+        &probeSize, probeMap, &probeKey, &probeDescriptorSize, &probeDescriptorVersion);
+    bool rangeAvailable = false;
+    if (!EFI_ERROR(probeStatus) && probeDescriptorSize >= sizeof(EFI_MEMORY_DESCRIPTOR) &&
+        probeDescriptorSize <= probeSize && (probeSize % probeDescriptorSize) == 0) {
+        for (UINTN offset = 0; offset < probeSize; offset += probeDescriptorSize) {
+            const EFI_MEMORY_DESCRIPTOR* descriptor =
+                (const EFI_MEMORY_DESCRIPTOR*)((const uint8_t*)probeMap + offset);
+            uint64_t bytes = 0;
+            uint64_t descriptorEnd = 0;
+            if (descriptor->Type == EfiConventionalMemory &&
+                mul_u64(descriptor->NumberOfPages, EFI_PAGE_SIZE, &bytes) &&
+                add_u64(descriptor->PhysicalStart, bytes, &descriptorEnd) &&
+                descriptor->PhysicalStart <= GXOS_AARCH64_KERNEL_LOAD_ADDRESS &&
+                descriptorEnd >= requestedEnd) {
+                rangeAvailable = true;
+                break;
+            }
+        }
+    }
+    free_pool(probeMap);
+    if (!rangeAvailable) return fail("fixed kernel range is not conventional memory in UEFI map");
+    print_ascii("[A64 UEFI] fixed kernel range: available in UEFI map\r\n");
+#endif
+
     EFI_PHYSICAL_ADDRESS physical = GXOS_AARCH64_KERNEL_LOAD_ADDRESS;
     EFI_STATUS status = gSystemTable->BootServices->AllocatePages(
         AllocateAddress, EfiLoaderCode, pages, &physical);
@@ -647,6 +718,9 @@ static EFI_STATUS exit_boot_services(EFI_HANDLE imageHandle, Aarch64Handoff* han
     EFI_MEMORY_DESCRIPTOR* memoryMap = nullptr;
 
     for (UINTN attempt = 0; attempt < 6; ++attempt) {
+#if defined(GXOS_AARCH64_RPI4_P1)
+        print_ascii("[A64 UEFI] P1-03 memory map capture\r\n");
+#endif
         // Do not call any firmware console/GOP service after GetMemoryMap:
         // PixelBltOnly firmware may allocate while flushing console output,
         // invalidating the map key immediately before ExitBootServices.
@@ -665,6 +739,11 @@ static EFI_STATUS exit_boot_services(EFI_HANDLE imageHandle, Aarch64Handoff* han
         handoff->memory_map_entry_count = mapSize / descriptorSize;
         handoff->flags |= GXOS_AARCH64_FLAG_MEMORY_MAP_VALID;
         *mapBuffer = memoryMap;
+#if defined(GXOS_AARCH64_RPI4_P1)
+        print_ascii("[A64 UEFI] Memory map: captured entries=");
+        print_hex_u32(static_cast<uint32_t>(handoff->memory_map_entry_count));
+        print_ascii("\r\n");
+#endif
 
         status = gSystemTable->BootServices->ExitBootServices(imageHandle, mapKey);
         if (!EFI_ERROR(status)) {
@@ -678,7 +757,7 @@ static EFI_STATUS exit_boot_services(EFI_HANDLE imageHandle, Aarch64Handoff* han
     return fail("ExitBootServices retry limit exceeded");
 }
 
-#if defined(GXOS_AARCH64_PHASE2) || defined(GXOS_AARCH64_PHASE4) || defined(GXOS_AARCH64_PHASE6)
+#if defined(GXOS_AARCH64_RPI4_P1) || defined(GXOS_AARCH64_PHASE2) || defined(GXOS_AARCH64_PHASE4) || defined(GXOS_AARCH64_PHASE6)
 static bool validate_dtb_blob(const uint8_t* blob, uint64_t available, uint32_t* totalSize)
 {
     if (!blob || available < 40 || available > UINT64_C(16) * 1024 * 1024 ||
@@ -729,10 +808,46 @@ static EFI_STATUS copy_dtb_from_configuration_table(Aarch64Handoff* handoff)
 }
 #endif
 
+#if defined(GXOS_AARCH64_RPI4_P1)
+static EFI_STATUS discover_rpi4_platform(Aarch64Handoff* handoff)
+{
+    if (!handoff || handoff->dtb_base == 0 || handoff->dtb_size == 0) {
+        return fail("physical DTB handoff is unavailable");
+    }
+    gxos_aarch64_phase2_platform platform;
+    set_bytes(&platform, sizeof(platform), 0);
+    if (!gxos_aarch64_phase2_parse_dtb((const void*)(UINTN)handoff->dtb_base,
+                                       handoff->dtb_size, &platform) ||
+        platform.platform_kind != GXOS_AARCH64_PLATFORM_RASPBERRY_PI4 ||
+        platform.uart_kind != GXOS_AARCH64_UART_PL011 || platform.uart_base == 0) {
+        return fail("DTB does not identify a supported Raspberry Pi 4 platform");
+    }
+    handoff->uart_base = platform.uart_base;
+    print_ascii("[A64 UEFI] P1-02 platform discovered\r\n");
+    print_ascii("[A64 UEFI] Platform: Raspberry Pi 4 / BCM2711\r\n");
+    print_ascii("[A64 UEFI] Firmware: UEFI\r\n");
+    print_ascii("[A64 UEFI] CPU: AArch64\r\n");
+    print_ascii("[A64 UEFI] DTB: found and validated\r\n");
+    print_ascii("[A64 UEFI] GIC: discovered distributor=");
+    print_hex_u32(static_cast<uint32_t>(platform.gicd_base));
+    print_ascii(" cpu-interface=");
+    print_hex_u32(static_cast<uint32_t>(platform.gicc_base));
+    print_ascii("\r\n");
+    print_ascii("[A64 UEFI] UART: PL011 discovered base=");
+    print_hex_u32(static_cast<uint32_t>(platform.uart_base));
+    print_ascii("\r\n");
+    return EFI_SUCCESS;
+}
+#endif
+
 extern "C" EFI_STATUS efi_main(EFI_HANDLE imageHandle, EFI_SYSTEM_TABLE* systemTable)
 {
     gSystemTable = systemTable;
     print_ascii("[A64 UEFI] entry\r\n");
+#if defined(GXOS_AARCH64_RPI4_P1)
+    print_ascii("[A64 UEFI] P1-01 loader entered\r\n");
+    print_ascii("[A64 UEFI] guideXOS ARM64 physical bring-up\r\n");
+#endif
     if (!gSystemTable || !gSystemTable->BootServices) return EFI_INVALID_PARAMETER;
 
     uint64_t initialEl = read_current_el();
@@ -815,27 +930,45 @@ extern "C" EFI_STATUS efi_main(EFI_HANDLE imageHandle, EFI_SYSTEM_TABLE* systemT
     handoff->flags |= GXOS_AARCH64_FLAG_RAMDISK_VALID;
 #endif
 
-#if defined(GXOS_AARCH64_PHASE6)
-    GopCapture gop{};
+#if defined(GXOS_AARCH64_RPI4_P1) || defined(GXOS_AARCH64_PHASE6)
+    GopCapture gop;
+    set_bytes(&gop, sizeof(gop), 0);
     status = capture_gop(&gop);
-    if (EFI_ERROR(status)) return status;
-    handoff->framebuffer_base = gop.base;
-    handoff->framebuffer_size = gop.size;
-    handoff->framebuffer_width = gop.width;
-    handoff->framebuffer_height = gop.height;
-    handoff->framebuffer_pitch = gop.pitch;
-    handoff->framebuffer_bpp = gop.bpp;
-    handoff->framebuffer_format = gop.format;
-    handoff->framebuffer_red_mask = gop.redMask;
-    handoff->framebuffer_green_mask = gop.greenMask;
-    handoff->framebuffer_blue_mask = gop.blueMask;
-    handoff->framebuffer_reserved_mask = gop.reservedMask;
-    handoff->flags |= GXOS_AARCH64_FLAG_FRAMEBUFFER_VALID;
+    if (!EFI_ERROR(status)) {
+        handoff->framebuffer_base = gop.base;
+        handoff->framebuffer_size = gop.size;
+        handoff->framebuffer_width = gop.width;
+        handoff->framebuffer_height = gop.height;
+        handoff->framebuffer_pitch = gop.pitch;
+        handoff->framebuffer_bpp = gop.bpp;
+        handoff->framebuffer_format = gop.format;
+        handoff->framebuffer_red_mask = gop.redMask;
+        handoff->framebuffer_green_mask = gop.greenMask;
+        handoff->framebuffer_blue_mask = gop.blueMask;
+        handoff->framebuffer_reserved_mask = gop.reservedMask;
+        handoff->flags |= GXOS_AARCH64_FLAG_FRAMEBUFFER_VALID;
+    } else {
+#if defined(GXOS_AARCH64_RPI4_P1)
+        print_ascii("[A64 UEFI] GOP framebuffer: not available\r\n");
+#else
+        return status;
+#endif
+    }
 #endif
 
-#if defined(GXOS_AARCH64_PHASE2) || defined(GXOS_AARCH64_PHASE4) || defined(GXOS_AARCH64_PHASE6)
+#if defined(GXOS_AARCH64_RPI4_P1) || defined(GXOS_AARCH64_PHASE2) || defined(GXOS_AARCH64_PHASE4) || defined(GXOS_AARCH64_PHASE6)
     status = copy_dtb_from_configuration_table(handoff);
     if (EFI_ERROR(status)) return status;
+#endif
+
+#if defined(GXOS_AARCH64_RPI4_P1)
+    status = discover_rpi4_platform(handoff);
+    if (EFI_ERROR(status)) return status;
+    if ((handoff->flags & GXOS_AARCH64_FLAG_FRAMEBUFFER_VALID) != 0) {
+        print_ascii("[A64 UEFI] Framebuffer: discovered\r\n");
+    } else {
+        print_ascii("[A64 UEFI] Framebuffer: not available\r\n");
+    }
 #endif
 
     EFI_MEMORY_DESCRIPTOR* mapBuffer = nullptr;

@@ -15,9 +15,19 @@ extern "C" uint8_t __translation_tables_end[];
 namespace {
 
 static const uint64_t kPageMask = UINT64_C(0xfff);
+#if defined(GXOS_AARCH64_RPI4_P1)
+// P1 deliberately keeps allocation use below 2 GiB, but BCM2711 device
+// windows (including GIC-400) live above that boundary.  The physical profile
+// therefore maps the bounded low-RAM window plus discovered MMIO up to 4 GiB.
+static const uint64_t kMappedPhysicalLimit = UINT64_C(0x100000000);
+static const uint64_t kRamMappingLimit = UINT64_C(0x80000000);
+static const uint32_t kMaxTables = 1056;
+#else
 static const uint64_t kMappedPhysicalLimit = UINT64_C(0x80000000);
-static const uint32_t kTableEntries = 512;
+static const uint64_t kRamMappingLimit = kMappedPhysicalLimit;
 static const uint32_t kMaxTables = 520;
+#endif
+static const uint32_t kTableEntries = 512;
 static const uint64_t kTableDescriptor = UINT64_C(0x3);
 static const uint64_t kPageDescriptor = UINT64_C(0x3);
 static const uint64_t kAttrDevice = 0;
@@ -145,6 +155,21 @@ static bool map_range(uint64_t base, uint64_t size, uint64_t descriptor,
     return true;
 }
 
+static uint64_t make_normal_descriptor();
+
+static bool map_ram_range(uint64_t base, uint64_t size, uint64_t kernelBase,
+                          uint64_t kernelEnd)
+{
+    uint64_t end = 0;
+    if (!range_end(base, size, &end)) return false;
+#if defined(GXOS_AARCH64_RPI4_P1)
+    if (base >= kRamMappingLimit) return true;
+    if (end > kRamMappingLimit) end = kRamMappingLimit;
+#endif
+    return end > base && map_range(base, end - base, make_normal_descriptor(),
+                                   kernelBase, kernelEnd, false);
+}
+
 static uint64_t make_device_descriptor()
 {
     return kPageDescriptor | (kAttrDevice << 2) | kShareInner | kAccessFlag | kPxn | kUxn;
@@ -164,7 +189,7 @@ static uint64_t make_framebuffer_descriptor()
            kAccessFlag | kPxn | kUxn;
 }
 
-#if defined(GXOS_AARCH64_PHASE6)
+#if defined(GXOS_AARCH64_PHASE6) || defined(GXOS_AARCH64_RPI4_P1)
 static bool map_framebuffer_range(uint64_t base, uint64_t size)
 {
     uint64_t end = 0;
@@ -210,9 +235,9 @@ uint8_t phase2_mmu_build(const gxos_aarch64_phase2_platform* platform,
     for (uint32_t i = 0; i < platform->ram_count; ++i) {
         const uint64_t base = platform->ram[i].base;
         uint64_t end = 0;
-        if (!range_end(base, platform->ram[i].size, &end) || base >= kMappedPhysicalLimit || end > kMappedPhysicalLimit ||
+        if (!range_end(base, platform->ram[i].size, &end) || base >= kMappedPhysicalLimit || end > UINT64_C(0x100000000) ||
             (base & kPageMask) != 0 || (platform->ram[i].size & kPageMask) != 0) return 0;
-        if (!map_range(base, platform->ram[i].size, make_normal_descriptor(), kernel_base, kernelEnd, false)) return 0;
+        if (!map_ram_range(base, platform->ram[i].size, kernel_base, kernelEnd)) return 0;
     }
 
     if (!map_range(platform->uart_base, platform->uart_size, make_device_descriptor(), kernel_base, kernelEnd, true) ||
@@ -227,7 +252,7 @@ uint8_t phase2_mmu_build(const gxos_aarch64_phase2_platform* platform,
     return 1;
 }
 
-#if defined(GXOS_AARCH64_PHASE6)
+#if defined(GXOS_AARCH64_PHASE6) || defined(GXOS_AARCH64_RPI4_P1)
 uint8_t phase2_mmu_build_with_framebuffer(const gxos_aarch64_phase2_platform* platform,
                                           uint64_t kernel_base, uint64_t kernel_size,
                                           uint64_t framebuffer_base,
@@ -256,10 +281,9 @@ uint8_t phase2_mmu_build_with_framebuffer(const gxos_aarch64_phase2_platform* pl
         const uint64_t base = platform->ram[i].base;
         uint64_t end = 0;
         if (!range_end(base, platform->ram[i].size, &end) || base >= kMappedPhysicalLimit ||
-            end > kMappedPhysicalLimit || (base & kPageMask) != 0 ||
+            end > UINT64_C(0x100000000) || (base & kPageMask) != 0 ||
             (platform->ram[i].size & kPageMask) != 0) return 0;
-        if (!map_range(base, platform->ram[i].size, make_normal_descriptor(),
-                       kernel_base, kernelEnd, false)) return 0;
+        if (!map_ram_range(base, platform->ram[i].size, kernel_base, kernelEnd)) return 0;
     }
     // This may replace the normal-RAM attribute on pages that contain the
     // GOP scanout, while still mapping a framebuffer outside DTB RAM.
@@ -278,7 +302,7 @@ uint8_t phase2_mmu_build_with_framebuffer(const gxos_aarch64_phase2_platform* pl
 
 void phase2_mmu_enable()
 {
-#if defined(GXOS_AARCH64_PHASE6)
+#if defined(GXOS_AARCH64_PHASE6) || defined(GXOS_AARCH64_RPI4_P1)
     const uint64_t mair = UINT64_C(0x000000000044ff00); // Attr0=device, Attr1=normal WBWA, Attr2=normal NC
 #else
     const uint64_t mair = UINT64_C(0x000000000000ff00); // Attr0=device, Attr1=normal WBWA

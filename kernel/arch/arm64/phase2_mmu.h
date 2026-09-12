@@ -10,7 +10,7 @@
 
 uint8_t phase2_mmu_build(const gxos_aarch64_phase2_platform* platform,
                          uint64_t kernel_base, uint64_t kernel_size);
-#if defined(GXOS_AARCH64_PHASE6)
+#if defined(GXOS_AARCH64_PHASE6) || defined(GXOS_AARCH64_RPI4_P1)
 uint8_t phase2_mmu_build_with_framebuffer(const gxos_aarch64_phase2_platform* platform,
                                           uint64_t kernel_base, uint64_t kernel_size,
                                           uint64_t framebuffer_base,

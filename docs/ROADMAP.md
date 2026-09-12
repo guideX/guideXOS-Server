@@ -1,7 +1,7 @@
 # ??? guideXOSServer Development Roadmap
 
-**Last Updated:** 2026-09-10
-**Current Status:** AARCH64 Phase 12 Developer Studio in-OS IDE workflow implemented
+**Last Updated:** 2026-09-12
+**Current Status:** QEMU ARM64 track mature; Raspberry Pi 4 physical ARM64 P1 active
 **Overall Progress:** ~80% to Production Release
 
 ---
@@ -178,6 +178,20 @@ development-run ABI includes v1 size gates, v2 artifact/output capabilities,
 bounded output capture, explicit lifecycle errors, and bare-metal callbacks.
 
 **Details:** See `aarch64/AARCH64_PHASE12_DEVELOPER_STUDIO_IDE.md`
+
+### AARCH64 physical track: Raspberry Pi 4 P1 (Active)
+**Status:** Preparatory physical-platform path implemented; real BCM2711 validation
+is pending hardware access and three independent cold boots.
+
+The QEMU ARM64 phases remain the mature reference track.  The additive P1 path
+keeps the common ARM64 scheduler, allocator, MMU, exception, GICv2, timer, and
+PL011 services, while adding Raspberry Pi DTB identity/range translation,
+dynamic UART/GIC handoff, fixed-load preflight, optional GOP staging, and
+non-destructive FAT32 boot-tree tooling.  P1 deliberately does not claim USB,
+storage, networking, SMP, or a physical `AARCH64_P1_PASS` until silicon evidence
+exists.
+
+**Details:** See `aarch64/AARCH64_P1_RPI4_FIRST_PHYSICAL_BOOT.md`
 
 ---
 
