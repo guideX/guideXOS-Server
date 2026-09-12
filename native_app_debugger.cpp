@@ -1929,6 +1929,58 @@ gx_result NativeAppDebugger::InspectVariables(
         return GX_ERROR_FAILED;
     }
 
+    const uint64_t selectedFrameIndex = request.auxiliaryAddress;
+    if (selectedFrameIndex >= GX_DEVELOPMENT_DEBUG_MAX_CALL_STACK_FRAMES) {
+        clearVariables(result);
+        result->handle = request.handle;
+        result->sessionGeneration = request.sessionGeneration;
+        setVariablesError(result, GX_DEVELOPMENT_DEBUG_VARIABLES_STATUS_INVALID_FRAME,
+                          "selected Call Stack frame index is outside the bounded capacity");
+        return GX_ERROR_INVALID_ARGUMENT;
+    }
+    gx_development_debug_request callStackRequest = request;
+    callStackRequest.command = GX_DEVELOPMENT_DEBUG_CALL_STACK;
+    callStackRequest.auxiliaryAddress = 0;
+    gx_development_debug_call_stack callStack = {};
+    const gx_result callStackResult = CallStack(callStackRequest, expectedArtifactSha256,
+                                                &callStack);
+    if (callStackResult != GX_OK ||
+        (callStack.status != GX_DEVELOPMENT_DEBUG_CALL_STACK_STATUS_SUCCESS &&
+         callStack.status != GX_DEVELOPMENT_DEBUG_CALL_STACK_STATUS_TRUNCATED)) {
+        const uint32_t status = callStack.status == GX_DEVELOPMENT_DEBUG_CALL_STACK_STATUS_STALE
+            ? GX_DEVELOPMENT_DEBUG_VARIABLES_STATUS_STALE
+            : callStack.status == GX_DEVELOPMENT_DEBUG_CALL_STACK_STATUS_NO_PAUSED_CONTEXT
+                ? GX_DEVELOPMENT_DEBUG_VARIABLES_STATUS_NO_PAUSED_CONTEXT
+                : callStack.status == GX_DEVELOPMENT_DEBUG_CALL_STACK_STATUS_INVALID_FRAME
+                    ? GX_DEVELOPMENT_DEBUG_VARIABLES_STATUS_INVALID_FRAME
+                    : GX_DEVELOPMENT_DEBUG_VARIABLES_STATUS_UNSUPPORTED;
+        clearVariables(result);
+        result->handle = request.handle;
+        result->sessionGeneration = request.sessionGeneration;
+        setVariablesError(result, status, callStack.errorMessage[0] != '\0'
+            ? callStack.errorMessage : "validated Call Stack is unavailable");
+        return callStackResult == GX_OK ? GX_ERROR_FAILED : callStackResult;
+    }
+    if (selectedFrameIndex >= callStack.frameCount) {
+        clearVariables(result);
+        result->handle = request.handle;
+        result->sessionGeneration = request.sessionGeneration;
+        setVariablesError(result, GX_DEVELOPMENT_DEBUG_VARIABLES_STATUS_INVALID_FRAME,
+                          "selected Call Stack frame index does not exist in the current pause");
+        return GX_ERROR_INVALID_ARGUMENT;
+    }
+    const gx_development_debug_call_stack_frame selectedFrame =
+        callStack.frames[selectedFrameIndex];
+    if ((selectedFrame.flags & GX_DEVELOPMENT_DEBUG_CALL_STACK_FRAME_VALIDATED) == 0 ||
+        selectedFrame.framePointer == 0 || selectedFrame.instructionPointer == 0) {
+        clearVariables(result);
+        result->handle = request.handle;
+        result->sessionGeneration = request.sessionGeneration;
+        setVariablesError(result, GX_DEVELOPMENT_DEBUG_VARIABLES_STATUS_INVALID_FRAME,
+                          "selected Call Stack frame is not validated");
+        return GX_ERROR_FAILED;
+    }
+
     std::lock_guard<std::mutex> lock(g_mutex);
     DebugRuntime* runtime = findRuntimeLocked(request.nativeRuntimeId, request.processId);
     if (!runtime) {
@@ -1996,22 +2048,43 @@ gx_result NativeAppDebugger::InspectVariables(
                           "paused instruction is outside executable user code");
         return GX_ERROR_FAILED;
     }
-    const DebugSourceMapping* topMapping = sourceMappingAt(*runtime, normalizedRip);
-    if (!topMapping || topMapping->functionName[0] == '\0') {
+    const uint64_t selectedRip = selectedFrameIndex == 0
+        ? normalizedRip : selectedFrame.instructionPointer;
+    const uint64_t selectedRbp = selectedFrame.framePointer;
+    if (selectedFrameIndex != 0 &&
+        (selectedFrame.flags & GX_DEVELOPMENT_DEBUG_CALL_STACK_FRAME_CALL_SITE_MAPPED) == 0) {
         setVariablesError(result, GX_DEVELOPMENT_DEBUG_VARIABLES_STATUS_UNSUPPORTED,
-                          "paused instruction has no trustworthy user function");
+                          "caller frame has no authoritative logical call-site position");
         return GX_ERROR_UNSUPPORTED;
     }
-    if (!kernel::native_elf::native_elf_frame_shape_valid(context.rsp, context.rbp,
+    const DebugSourceMapping* selectedMapping = sourceMappingAt(*runtime, selectedRip);
+    if (!selectedMapping || selectedMapping->functionName[0] == '\0' ||
+        std::strcmp(selectedMapping->functionName, selectedFrame.functionName) != 0) {
+        setVariablesError(result, GX_DEVELOPMENT_DEBUG_VARIABLES_STATUS_UNSUPPORTED,
+                          "selected frame function identity does not match source metadata");
+        return GX_ERROR_UNSUPPORTED;
+    }
+    if (selectedFrameIndex == 0 &&
+        !kernel::native_elf::native_elf_frame_shape_valid(context.rsp, selectedRbp,
                                                           runtime->stackLow, runtime->stackHigh)) {
         setVariablesError(result, GX_DEVELOPMENT_DEBUG_VARIABLES_STATUS_INVALID_FRAME,
                           "paused frame pointer shape is invalid");
         return GX_ERROR_FAILED;
     }
-    std::strncpy(result->functionName, topMapping->functionName,
+    if (selectedFrameIndex != 0 &&
+        !kernel::native_elf::native_elf_frame_pointer_valid(selectedRbp,
+                                                            runtime->stackLow,
+                                                            runtime->stackHigh)) {
+        setVariablesError(result, GX_DEVELOPMENT_DEBUG_VARIABLES_STATUS_INVALID_FRAME,
+                          "selected caller frame pointer is outside the owned stack");
+        return GX_ERROR_FAILED;
+    }
+    result->instructionPointer = selectedRip;
+    result->framePointer = selectedRbp;
+    std::strncpy(result->functionName, selectedMapping->functionName,
                  sizeof(result->functionName) - 1);
     result->functionName[sizeof(result->functionName) - 1] = '\0';
-    std::strncpy(result->sourcePath, topMapping->sourcePath,
+    std::strncpy(result->sourcePath, selectedMapping->sourcePath,
                  sizeof(result->sourcePath) - 1);
     result->sourcePath[sizeof(result->sourcePath) - 1] = '\0';
 
@@ -2022,7 +2095,7 @@ gx_result NativeAppDebugger::InspectVariables(
     if (!kernel::compiler::resolve_bootstrap_debug_variables_at_address(
             runtime->imageBytes.data(), static_cast<uint32_t>(runtime->imageBytes.size()),
             runtime->imageBase, runtime->debugCodeFileOffset, runtime->debugCodeBytes,
-            normalizedRip, topMapping->functionName, variables,
+            selectedRip, selectedMapping->functionName, variables,
             GX_DEVELOPMENT_DEBUG_MAX_VARIABLES, &variableCount, &truncated,
             &resolverError)) {
         setVariablesError(result, GX_DEVELOPMENT_DEBUG_VARIABLES_STATUS_UNSUPPORTED,
@@ -2050,14 +2123,14 @@ gx_result NativeAppDebugger::InspectVariables(
         target.declarationColumn = source.declaration.column;
         target.frameOffset = source.frameOffset;
         uint64_t magnitude = static_cast<uint64_t>(-(static_cast<int64_t>(source.frameOffset)));
-        if (source.frameOffset >= 0 || context.rbp < magnitude ||
-            !stackAddressRangeContains(*runtime, context.rbp - magnitude, source.sizeBytes)) {
+        if (source.frameOffset >= 0 || selectedRbp < magnitude ||
+            !stackAddressRangeContains(*runtime, selectedRbp - magnitude, source.sizeBytes)) {
             setVariablesError(result, GX_DEVELOPMENT_DEBUG_VARIABLES_STATUS_INVALID_LOCATION,
                               "debug variable location is outside the owned paused frame");
             return GX_ERROR_FAILED;
         }
         uint8_t bytes[sizeof(uint64_t)] = {};
-        if (!readOwnedStackBytes(*runtime, context.rbp - magnitude, source.sizeBytes, bytes)) {
+        if (!readOwnedStackBytes(*runtime, selectedRbp - magnitude, source.sizeBytes, bytes)) {
             setVariablesError(result, GX_DEVELOPMENT_DEBUG_VARIABLES_STATUS_INVALID_LOCATION,
                               "debug variable value could not be read from the owned stack");
             return GX_ERROR_FAILED;

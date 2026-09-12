@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "id": "dev.guidexos.phase28h",
+  "displayName": "Developer Studio Phase 28H Selected Frame Variables",
+  "version": "0.1.0",
+  "publisher": "guideXOS",
+  "description": "Selected Call Stack frame arguments and scalar locals proof.",
+  "category": "Development",
+  "kind": "NativeElf",
+  "icon": "",
+  "minGuideXOSVersion": "0.5.0",
+  "supportedArchitectures": ["amd64"],
+  "entries": [{
+    "architecture": "amd64",
+    "path": "bin/amd64/p28h.elf",
+    "entryPoint": "gx_main",
+    "abi": "guidexos-c-abi-v1",
+    "runtime": "native-elf"
+  }]
+}

@@ -207,6 +207,10 @@ typedef struct gx_development_debug_request {
     uint32_t reserved;
 } gx_development_debug_request;
 
+/* For GX_DEVELOPMENT_DEBUG_INSPECT_VARIABLES, auxiliaryAddress is a
+   query-local validated Call Stack frame index. Zero preserves the Phase 28G
+   top-frame behavior. It is never interpreted as a caller-supplied address. */
+
 typedef struct gx_development_debug_register_context {
     uint32_t architecture;
     uint32_t valid;

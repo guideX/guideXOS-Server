@@ -3297,8 +3297,10 @@ gx_result call_stack(const gx_development_debug_request& request,
         request.threadId == 0 || request.stopGeneration == 0 ||
         !request.artifactSha256 || !equal_text(request.artifactSha256, s_operation.artifactSha256) ||
         !debug_request_identity_matches(s_operation, request)) {
-        set_call_stack_error(outResult, request.sessionGeneration != 0 &&
-                                     request.sessionGeneration != s_operation.registrationGeneration
+        set_call_stack_error(outResult, (request.sessionGeneration != 0 &&
+                                     request.sessionGeneration != s_operation.registrationGeneration) ||
+                                 (request.stopGeneration != 0 &&
+                                     request.stopGeneration != s_operation.debugStopGeneration)
                                  ? GX_DEVELOPMENT_DEBUG_CALL_STACK_STATUS_STALE
                                  : GX_DEVELOPMENT_DEBUG_CALL_STACK_STATUS_REJECTED,
                              "NativeElf Call Stack session identity is stale");
@@ -3508,11 +3510,63 @@ gx_result inspect_variables(const gx_development_debug_request& request,
         !request.artifactSha256 || !equal_text(request.artifactSha256, s_operation.artifactSha256) ||
         !debug_request_identity_matches(s_operation, request)) {
         set_debug_variables_error(outResult,
-                                  request.sessionGeneration != 0 &&
-                                      request.sessionGeneration != s_operation.registrationGeneration
+                                  ((request.sessionGeneration != 0 &&
+                                      request.sessionGeneration != s_operation.registrationGeneration) ||
+                                   (request.stopGeneration != 0 &&
+                                      request.stopGeneration != s_operation.debugStopGeneration))
                                       ? GX_DEVELOPMENT_DEBUG_VARIABLES_STATUS_STALE
                                       : GX_DEVELOPMENT_DEBUG_VARIABLES_STATUS_REJECTED,
                                   "NativeElf variable inspection session identity is stale");
+        return GX_ERROR_FAILED;
+    }
+    const uint64_t selectedFrameIndex = request.auxiliaryAddress;
+    if (selectedFrameIndex >= GX_DEVELOPMENT_DEBUG_MAX_CALL_STACK_FRAMES) {
+        clear_debug_variables(outResult);
+        outResult->handle = request.handle;
+        outResult->sessionGeneration = request.sessionGeneration;
+        set_debug_variables_error(outResult, GX_DEVELOPMENT_DEBUG_VARIABLES_STATUS_INVALID_FRAME,
+                                  "selected Call Stack frame index is outside the bounded capacity");
+        return GX_ERROR_INVALID_ARGUMENT;
+    }
+    gx_development_debug_request callStackRequest = request;
+    callStackRequest.command = GX_DEVELOPMENT_DEBUG_CALL_STACK;
+    callStackRequest.auxiliaryAddress = 0;
+    gx_development_debug_call_stack callStack = {};
+    const gx_result callStackResult = call_stack(callStackRequest, &callStack);
+    if (callStackResult != GX_OK ||
+        (callStack.status != GX_DEVELOPMENT_DEBUG_CALL_STACK_STATUS_SUCCESS &&
+         callStack.status != GX_DEVELOPMENT_DEBUG_CALL_STACK_STATUS_TRUNCATED)) {
+        const uint32_t status = callStack.status == GX_DEVELOPMENT_DEBUG_CALL_STACK_STATUS_STALE
+            ? GX_DEVELOPMENT_DEBUG_VARIABLES_STATUS_STALE
+            : callStack.status == GX_DEVELOPMENT_DEBUG_CALL_STACK_STATUS_NO_PAUSED_CONTEXT
+                ? GX_DEVELOPMENT_DEBUG_VARIABLES_STATUS_NO_PAUSED_CONTEXT
+                : callStack.status == GX_DEVELOPMENT_DEBUG_CALL_STACK_STATUS_INVALID_FRAME
+                    ? GX_DEVELOPMENT_DEBUG_VARIABLES_STATUS_INVALID_FRAME
+                    : GX_DEVELOPMENT_DEBUG_VARIABLES_STATUS_UNSUPPORTED;
+        clear_debug_variables(outResult);
+        outResult->handle = request.handle;
+        outResult->sessionGeneration = request.sessionGeneration;
+        set_debug_variables_error(outResult, status, callStack.errorMessage[0] != '\0'
+            ? callStack.errorMessage : "validated Call Stack is unavailable");
+        return callStackResult == GX_OK ? GX_ERROR_FAILED : callStackResult;
+    }
+    if (selectedFrameIndex >= callStack.frameCount) {
+        clear_debug_variables(outResult);
+        outResult->handle = request.handle;
+        outResult->sessionGeneration = request.sessionGeneration;
+        set_debug_variables_error(outResult, GX_DEVELOPMENT_DEBUG_VARIABLES_STATUS_INVALID_FRAME,
+                                  "selected Call Stack frame index does not exist in the current pause");
+        return GX_ERROR_INVALID_ARGUMENT;
+    }
+    const gx_development_debug_call_stack_frame selectedFrame =
+        callStack.frames[selectedFrameIndex];
+    if ((selectedFrame.flags & GX_DEVELOPMENT_DEBUG_CALL_STACK_FRAME_VALIDATED) == 0 ||
+        selectedFrame.framePointer == 0 || selectedFrame.instructionPointer == 0) {
+        clear_debug_variables(outResult);
+        outResult->handle = request.handle;
+        outResult->sessionGeneration = request.sessionGeneration;
+        set_debug_variables_error(outResult, GX_DEVELOPMENT_DEBUG_VARIABLES_STATUS_INVALID_FRAME,
+                                  "selected Call Stack frame is not validated");
         return GX_ERROR_FAILED;
     }
     if (s_operation.state != GX_DEVELOPMENT_RUN_PAUSED ||
@@ -3556,12 +3610,43 @@ gx_result inspect_variables(const gx_development_debug_request& request,
     outResult->threadId = 1;
     outResult->sessionGeneration = s_operation.registrationGeneration;
     outResult->stopGeneration = s_operation.debugStopGeneration;
-    outResult->instructionPointer = context.rip;
-    outResult->framePointer = context.rbp;
+    const uint64_t selectedRip = selectedFrameIndex == 0
+        ? context.rip : selectedFrame.instructionPointer;
+    const uint64_t selectedRbp = selectedFrame.framePointer;
+    if (selectedFrameIndex != 0 &&
+        (selectedFrame.flags & GX_DEVELOPMENT_DEBUG_CALL_STACK_FRAME_CALL_SITE_MAPPED) == 0) {
+        set_debug_variables_error(outResult, GX_DEVELOPMENT_DEBUG_VARIABLES_STATUS_UNSUPPORTED,
+                                  "caller frame has no authoritative logical call-site position");
+        return GX_ERROR_UNSUPPORTED;
+    }
+    compiler::ResolvedSourceMapping selectedMapping = {};
+    if (!resolve_debug_mapping_at_address(s_operation, selectedRip, &selectedMapping, nullptr) ||
+        selectedMapping.functionName[0] == '\0' ||
+        !equal_text(selectedMapping.functionName, selectedFrame.functionName)) {
+        set_debug_variables_error(outResult, GX_DEVELOPMENT_DEBUG_VARIABLES_STATUS_UNSUPPORTED,
+                                  "selected frame function identity does not match source metadata");
+        return GX_ERROR_UNSUPPORTED;
+    }
+    if (selectedFrameIndex == 0) {
+        if (!step_out_frame_shape_valid(context.rsp, selectedRbp,
+                                        runtime->stackBase, stackHigh)) {
+            set_debug_variables_error(outResult,
+                                      GX_DEVELOPMENT_DEBUG_VARIABLES_STATUS_INVALID_FRAME,
+                                      "NativeElf paused frame pointer shape is invalid");
+            return GX_ERROR_FAILED;
+        }
+    } else if (!native_elf_frame_pointer_valid(selectedRbp, runtime->stackBase, stackHigh)) {
+        set_debug_variables_error(outResult,
+                                  GX_DEVELOPMENT_DEBUG_VARIABLES_STATUS_INVALID_FRAME,
+                                  "selected caller frame pointer is outside the owned stack");
+        return GX_ERROR_FAILED;
+    }
+    outResult->instructionPointer = selectedRip;
+    outResult->framePointer = selectedRbp;
     outResult->stackLow = runtime->stackBase;
     outResult->stackHigh = stackHigh;
-    if (!copy_text(outResult->functionName, sizeof(outResult->functionName), topMapping.functionName) ||
-        !copy_text(outResult->sourcePath, sizeof(outResult->sourcePath), topMapping.sourcePath)) {
+    if (!copy_text(outResult->functionName, sizeof(outResult->functionName), selectedMapping.functionName) ||
+        !copy_text(outResult->sourcePath, sizeof(outResult->sourcePath), selectedMapping.sourcePath)) {
         set_debug_variables_error(outResult, GX_DEVELOPMENT_DEBUG_VARIABLES_STATUS_UNSUPPORTED,
                                   "NativeElf top frame source identity is too long");
         return GX_ERROR_UNSUPPORTED;
@@ -3574,7 +3659,7 @@ gx_result inspect_variables(const gx_development_debug_request& request,
     if (!compiler::resolve_bootstrap_debug_variables_at_address(
             s_artifact, static_cast<uint32_t>(s_operation.artifactSize),
             runtime->imageBase, s_operation.debugCodeFileOffset,
-            s_operation.debugCodeBytes, context.rip, topMapping.functionName,
+            s_operation.debugCodeBytes, selectedRip, selectedMapping.functionName,
             variables, GX_DEVELOPMENT_DEBUG_MAX_VARIABLES, &variableCount,
             &truncated, &resolverError)) {
         set_debug_variables_error(outResult, GX_DEVELOPMENT_DEBUG_VARIABLES_STATUS_UNSUPPORTED,
@@ -3606,16 +3691,16 @@ gx_result inspect_variables(const gx_development_debug_request& request,
         target.frameOffset = source.frameOffset;
         const uint64_t magnitude = static_cast<uint64_t>(
             -(static_cast<int64_t>(source.frameOffset)));
-        if (source.frameOffset >= 0 || context.rbp < magnitude ||
+        if (source.frameOffset >= 0 || selectedRbp < magnitude ||
             !step_out_stack_range_contains(runtime->stackBase, stackHigh,
-                                            context.rbp - magnitude, source.sizeBytes)) {
+                                            selectedRbp - magnitude, source.sizeBytes)) {
             set_debug_variables_error(outResult,
                                       GX_DEVELOPMENT_DEBUG_VARIABLES_STATUS_INVALID_LOCATION,
                                       "NativeElf debug variable location is outside the owned frame");
             return GX_ERROR_FAILED;
         }
         uint8_t bytes[sizeof(uint64_t)] = {};
-        if (!debug_read_stack_bytes(s_operation, context.rbp - magnitude,
+        if (!debug_read_stack_bytes(s_operation, selectedRbp - magnitude,
                                     source.sizeBytes, bytes)) {
             set_debug_variables_error(outResult,
                                       GX_DEVELOPMENT_DEBUG_VARIABLES_STATUS_INVALID_LOCATION,

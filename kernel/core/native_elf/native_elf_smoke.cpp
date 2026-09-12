@@ -21,10 +21,10 @@ namespace native_elf {
 namespace {
 
 static uint8_t s_invalidImage[guidexos::native_elf::MAX_ELF_FILE_BYTES];
-#if defined(GXOS_PHASE27G_SMOKE) || defined(GXOS_PHASE27H_SMOKE) || defined(GXOS_PHASE27I_SMOKE) || defined(GXOS_PHASE27J_SMOKE) || defined(GXOS_PHASE27K_SMOKE) || defined(GXOS_PHASE27L_SMOKE) || defined(GXOS_PHASE27M_SMOKE) || defined(GXOS_PHASE27P_SMOKE) || defined(GXOS_PHASE27R_SMOKE) || defined(GXOS_PHASE27S_SMOKE) || defined(GXOS_PHASE27T_SMOKE) || defined(GXOS_PHASE27U_SMOKE) || defined(GXOS_PHASE27V_SMOKE) || defined(GXOS_PHASE27W_SMOKE) || defined(GXOS_PHASE27X_SMOKE) || defined(GXOS_PHASE27Y_SMOKE) || defined(GXOS_PHASE27Z_SMOKE) || defined(GXOS_PHASE28A_SMOKE) || defined(GXOS_PHASE28B_SMOKE) || defined(GXOS_PHASE28C_SMOKE) || defined(GXOS_PHASE28D_SMOKE) || defined(GXOS_PHASE28E_SMOKE) || defined(GXOS_PHASE28F_SMOKE) || defined(GXOS_PHASE28G_SMOKE)
+#if defined(GXOS_PHASE27G_SMOKE) || defined(GXOS_PHASE27H_SMOKE) || defined(GXOS_PHASE27I_SMOKE) || defined(GXOS_PHASE27J_SMOKE) || defined(GXOS_PHASE27K_SMOKE) || defined(GXOS_PHASE27L_SMOKE) || defined(GXOS_PHASE27M_SMOKE) || defined(GXOS_PHASE27P_SMOKE) || defined(GXOS_PHASE27R_SMOKE) || defined(GXOS_PHASE27S_SMOKE) || defined(GXOS_PHASE27T_SMOKE) || defined(GXOS_PHASE27U_SMOKE) || defined(GXOS_PHASE27V_SMOKE) || defined(GXOS_PHASE27W_SMOKE) || defined(GXOS_PHASE27X_SMOKE) || defined(GXOS_PHASE27Y_SMOKE) || defined(GXOS_PHASE27Z_SMOKE) || defined(GXOS_PHASE28A_SMOKE) || defined(GXOS_PHASE28B_SMOKE) || defined(GXOS_PHASE28C_SMOKE) || defined(GXOS_PHASE28D_SMOKE) || defined(GXOS_PHASE28E_SMOKE) || defined(GXOS_PHASE28F_SMOKE) || defined(GXOS_PHASE28G_SMOKE) || defined(GXOS_PHASE28H_SMOKE)
 static uint8_t s_compareImage[guidexos::native_elf::MAX_ELF_FILE_BYTES];
 #endif
-#if defined(GXOS_PHASE27Z_SMOKE) || defined(GXOS_PHASE28A_SMOKE) || defined(GXOS_PHASE28B_SMOKE) || defined(GXOS_PHASE28C_SMOKE) || defined(GXOS_PHASE28D_SMOKE) || defined(GXOS_PHASE28E_SMOKE) || defined(GXOS_PHASE28F_SMOKE) || defined(GXOS_PHASE28G_SMOKE)
+#if defined(GXOS_PHASE27Z_SMOKE) || defined(GXOS_PHASE28A_SMOKE) || defined(GXOS_PHASE28B_SMOKE) || defined(GXOS_PHASE28C_SMOKE) || defined(GXOS_PHASE28D_SMOKE) || defined(GXOS_PHASE28E_SMOKE) || defined(GXOS_PHASE28F_SMOKE) || defined(GXOS_PHASE28G_SMOKE) || defined(GXOS_PHASE28H_SMOKE)
 static bool equal_text(const char* left, const char* right);
 #endif
 static void print_decimal(uint32_t value);
@@ -2478,7 +2478,7 @@ static bool file_contains_bytes(const char* path, const uint8_t* pattern, uint32
     return false;
 }
 
-#if defined(GXOS_PHASE27M_SMOKE) || defined(GXOS_PHASE27P_SMOKE) || defined(GXOS_PHASE28A_SMOKE) || defined(GXOS_PHASE28B_SMOKE) || defined(GXOS_PHASE28C_SMOKE) || defined(GXOS_PHASE28D_SMOKE) || defined(GXOS_PHASE28E_SMOKE) || defined(GXOS_PHASE28F_SMOKE) || defined(GXOS_PHASE28G_SMOKE)
+#if defined(GXOS_PHASE27M_SMOKE) || defined(GXOS_PHASE27P_SMOKE) || defined(GXOS_PHASE28A_SMOKE) || defined(GXOS_PHASE28B_SMOKE) || defined(GXOS_PHASE28C_SMOKE) || defined(GXOS_PHASE28D_SMOKE) || defined(GXOS_PHASE28E_SMOKE) || defined(GXOS_PHASE28F_SMOKE) || defined(GXOS_PHASE28G_SMOKE) || defined(GXOS_PHASE28H_SMOKE)
 static void print_decimal(uint32_t value)
 {
     char digits[10] = {};
@@ -6110,6 +6110,463 @@ auto run_phase28g_normal_session = [&](const gx_build_snapshot& build) -> bool
     serial::puts(phase28gPassed ?
         "ELF Loader: Phase 28G arguments and locals inspection smoke PASS\nDEVELOPER_STUDIO_PHASE28G_PASS\n" :
         "ELF Loader: Phase 28G arguments and locals inspection smoke FAIL\n");
+#endif
+
+#if defined(GXOS_PHASE28H_SMOKE)
+    serial::puts("ELF Loader: Phase 28H selected-frame variables smoke begin\n");
+    serial::puts("DEVELOPER_STUDIO_PHASE28H_BEGIN\n");
+    auto phase28h_run_request = [&](const gx_build_snapshot& build,
+                                    bool debugControlled) -> gx_development_run_request {
+        gx_development_run_request request = {};
+        request.size = sizeof(request);
+        request.version = GX_DEVELOPMENT_RUN_API_VERSION;
+        request.projectRoot = "/P28H";
+        request.projectId = "dev.guidexos.phase28h";
+        request.projectKind = "native-gui-application";
+        request.targetProfile = "guidexos.amd64.baremetal.bootstrap.native";
+        request.manifestPath = "app/app.json";
+        request.artifactPath = build.artifactPath;
+        request.artifactSha256 = build.artifactSha256;
+        request.flags = debugControlled ? GX_DEVELOPMENT_RUN_FLAG_DEBUG_CONTROLLED : 0;
+        request.artifactSize = build.artifactSize;
+        request.artifactArchitecture = build.artifactArchitecture;
+        request.artifactAbi = "guidexos-c-abi-v1";
+        if (debugControlled) {
+            request.debugSourcePath = "src/helper.cpp";
+            request.debugSourceLine = 4;
+        }
+        return request;
+    };
+
+    auto phase28h_debug_request = [&](const gx_build_snapshot& build,
+                                      gx_development_run_handle handle,
+                                      uint64_t generation, uint32_t command,
+                                      const gx_development_debug_snapshot* stop,
+                                      uint64_t frameIndex = 0) {
+        gx_development_debug_request request = {};
+        request.size = sizeof(request);
+        request.version = GX_DEVELOPMENT_DEBUG_API_VERSION;
+        request.command = command;
+        request.handle = handle;
+        request.sessionGeneration = generation;
+        request.nativeRuntimeId = generation;
+        request.breakpointId = stop ? stop->bindingId : 1;
+        request.targetAddress = stop ? stop->targetAddress : 0;
+        request.artifactSha256 = build.artifactSha256;
+        request.threadId = 1;
+        request.stopGeneration = stop ? stop->context.stopGeneration : 0;
+        request.auxiliaryAddress = frameIndex;
+        return request;
+    };
+
+    auto run_phase28h_build = [&](gx_build_snapshot* snapshot) -> bool {
+        gx_build_request request = {};
+        request.size = sizeof(request);
+        request.version = GX_BUILD_API_VERSION;
+        request.projectRoot = "/P28H";
+        request.projectId = "dev.guidexos.phase28h";
+        request.projectKind = "native-gui-application";
+        request.targetProfile = "guidexos.amd64.baremetal.bootstrap.native";
+        request.buildSystem = "guidexos-native-baremetal-bootstrap-v1";
+        request.expectedArtifact = "build/bin/amd64/p28h.elf";
+        request.configuration = "Debug";
+        gx_build_handle handle = 0;
+        if (compiler::BareMetalBuildService::start(&request, &handle) != GX_OK) return false;
+        gx_build_snapshot local = {};
+        const bool polled = compiler::BareMetalBuildService::poll(handle, &local) == GX_OK;
+        const bool released = compiler::BareMetalBuildService::release(handle) == GX_OK;
+        if (snapshot) *snapshot = local;
+        if (!polled || local.state != GX_BUILD_SUCCEEDED) {
+            serial::puts("Phase28H build diagnostic state=");
+            print_decimal(local.state);
+            serial::puts(" error=");
+            print_decimal(local.errorCode);
+            serial::puts(" message=");
+            serial::puts(local.errorMessage);
+            serial::putc('\n');
+        }
+        return polled && released;
+    };
+
+    auto phase28h_value = [&](const gx_development_debug_variables& result,
+                              const char* name, uint32_t kind, int64_t value) -> bool {
+        for (uint32_t i = 0; i < result.variableCount; ++i) {
+            const gx_development_debug_variable& variable = result.variables[i];
+            if (!equal_text(variable.name, name)) continue;
+            return variable.kind == kind &&
+                variable.type == GX_DEVELOPMENT_DEBUG_VARIABLE_TYPE_SIGNED_INT32 &&
+                variable.location == GX_DEVELOPMENT_DEBUG_VARIABLE_LOCATION_RBP_RELATIVE &&
+                variable.sizeBytes == 4 &&
+                variable.availability == GX_DEVELOPMENT_DEBUG_VARIABLE_AVAILABILITY_AVAILABLE &&
+                (variable.flags & GX_DEVELOPMENT_DEBUG_VARIABLE_VALUE_VALID) != 0 &&
+                variable.signedValue == value;
+        }
+        return false;
+    };
+
+    auto phase28h_has_value = [&](const gx_development_debug_variables& result,
+                                  const char* name) -> bool {
+        for (uint32_t i = 0; i < result.variableCount; ++i)
+            if (equal_text(result.variables[i].name, name)) return true;
+        return false;
+    };
+
+    auto phase28h_same_registers = [](const gx_development_debug_register_context& left,
+                                      const gx_development_debug_register_context& right) {
+        return left.architecture == right.architecture && left.valid == right.valid &&
+            left.processId == right.processId && left.nativeRuntimeId == right.nativeRuntimeId &&
+            left.threadId == right.threadId && left.sessionGeneration == right.sessionGeneration &&
+            left.stopGeneration == right.stopGeneration && left.rip == right.rip &&
+            left.rflags == right.rflags && left.rsp == right.rsp && left.rbp == right.rbp &&
+            left.rax == right.rax && left.rbx == right.rbx && left.rcx == right.rcx &&
+            left.rdx == right.rdx && left.rsi == right.rsi && left.rdi == right.rdi &&
+            left.r8 == right.r8 && left.r9 == right.r9 && left.r10 == right.r10 &&
+            left.r11 == right.r11 && left.r12 == right.r12 && left.r13 == right.r13 &&
+            left.r14 == right.r14 && left.r15 == right.r15;
+    };
+
+    auto phase28h_same_stack = [&](const gx_development_debug_call_stack& left,
+                                   const gx_development_debug_call_stack& right) {
+        if (left.status != right.status || left.frameCount != right.frameCount ||
+            left.truncated != right.truncated || left.stackLow != right.stackLow ||
+            left.stackHigh != right.stackHigh) return false;
+        for (uint32_t i = 0; i < left.frameCount; ++i) {
+            const gx_development_debug_call_stack_frame& a = left.frames[i];
+            const gx_development_debug_call_stack_frame& b = right.frames[i];
+            if (a.depth != b.depth || a.flags != b.flags ||
+                a.instructionPointer != b.instructionPointer || a.stackPointer != b.stackPointer ||
+                a.framePointer != b.framePointer || a.returnAddress != b.returnAddress ||
+                a.sourceLine != b.sourceLine || a.sourceColumn != b.sourceColumn ||
+                !equal_text(a.functionName, b.functionName) ||
+                !equal_text(a.sourcePath, b.sourcePath)) return false;
+        }
+        return true;
+    };
+
+    auto phase28h_same_variables = [&](const gx_development_debug_variables& left,
+                                       const gx_development_debug_variables& right) {
+        if (left.status != right.status || left.variableCount != right.variableCount ||
+            left.truncated != right.truncated || left.instructionPointer != right.instructionPointer ||
+            left.framePointer != right.framePointer || !equal_text(left.functionName, right.functionName) ||
+            !equal_text(left.sourcePath, right.sourcePath)) return false;
+        for (uint32_t i = 0; i < left.variableCount; ++i) {
+            const gx_development_debug_variable& a = left.variables[i];
+            const gx_development_debug_variable& b = right.variables[i];
+            if (!equal_text(a.name, b.name) || a.kind != b.kind || a.type != b.type ||
+                a.location != b.location || a.flags != b.flags || a.sizeBytes != b.sizeBytes ||
+                a.frameOffset != b.frameOffset || a.availability != b.availability ||
+                a.rawValue != b.rawValue || a.signedValue != b.signedValue ||
+                a.unsignedValue != b.unsignedValue) return false;
+        }
+        return true;
+    };
+
+    static gx_build_snapshot h28Build = {};
+    const bool h28BuildPass = run_phase28h_build(&h28Build) &&
+        h28Build.state == GX_BUILD_SUCCEEDED && h28Build.artifactValid != 0 &&
+        h28Build.artifactSize != 0 && equal_text(h28Build.artifactArchitecture, "amd64");
+    print_marker("phase28h_build_pass", h28BuildPass);
+    if (h28BuildPass) serial::puts("DEVELOPER_STUDIO_PHASE28H_BUILD_PASS\n");
+    static gx_build_snapshot h28WarmBuild = {};
+    const bool h28WarmCachePass = h28BuildPass && run_phase28h_build(&h28WarmBuild) &&
+        h28WarmBuild.state == GX_BUILD_SUCCEEDED && h28WarmBuild.artifactValid != 0 &&
+        h28WarmBuild.cachedModuleCount != 0;
+    print_marker("phase28h_warm_cache_pass", h28WarmCachePass);
+    if (h28WarmCachePass) serial::puts("DEVELOPER_STUDIO_PHASE28H_WARM_CACHE_PASS\n");
+
+    bool h28NestedPause = false;
+    bool h28CallStack = false;
+    bool h28Frame0 = false;
+    bool h28Frame1 = false;
+    bool h28Frame2 = false;
+    bool h28CallerLiveRange = false;
+    bool h28RoundTrip = false;
+    bool h28ReadOnly = false;
+    bool h28StackUnchanged = false;
+    bool h28Invalid = false;
+    bool h28StepOutReset = false;
+    bool h28Stale = false;
+    bool h28Resume = false;
+    bool h28Render = false;
+    bool h28Complete = false;
+    bool h28Clean = false;
+    if (h28WarmCachePass) {
+        gx_development_run_request runRequest = phase28h_run_request(h28WarmBuild, true);
+        gx_development_run_handle handle = 0;
+        gx_development_run_snapshot prepared = {};
+        prepared.size = sizeof(prepared);
+        const bool preparedOk = NativeElfRunService::prepare(runRequest, &handle, &prepared) == GX_OK && handle != 0;
+        const uint64_t generation = prepared.generation;
+        set_gui_automation_close(false);
+        const bool started = preparedOk && NativeElfRunService::start(handle) == GX_OK;
+        gx_development_run_snapshot pausedRun = {};
+        pausedRun.size = sizeof(pausedRun);
+        gx_development_debug_snapshot initial = {};
+        h28NestedPause = started && NativeElfRunService::poll(handle, &pausedRun) == GX_OK &&
+            pausedRun.state == GX_DEVELOPMENT_RUN_PAUSED && NativeElfRunService::debug(
+                phase28h_debug_request(h28WarmBuild, handle, generation,
+                                       GX_DEVELOPMENT_DEBUG_POLL, nullptr), &initial) == GX_OK &&
+            initial.sourceMappingValid != 0 && equal_text(initial.functionName, "helper_tail") &&
+            equal_text(initial.sourcePath, "src/helper.cpp");
+        if (h28NestedPause) serial::puts("DEVELOPER_STUDIO_PHASE28H_NESTED_PAUSE_PASS\n");
+
+        gx_development_debug_call_stack initialStack = {};
+        initialStack.size = sizeof(initialStack);
+        h28CallStack = h28NestedPause && NativeElfRunService::call_stack(
+            phase28h_debug_request(h28WarmBuild, handle, generation,
+                                   GX_DEVELOPMENT_DEBUG_CALL_STACK, &initial),
+            &initialStack) == GX_OK && initialStack.status == GX_DEVELOPMENT_DEBUG_CALL_STACK_STATUS_SUCCESS &&
+            initialStack.frameCount == 3 && equal_text(initialStack.frames[0].functionName, "helper_tail") &&
+            equal_text(initialStack.frames[1].functionName, "helper") &&
+            equal_text(initialStack.frames[2].functionName, "gx_main") &&
+            equal_text(initialStack.frames[0].sourcePath, "src/helper.cpp") &&
+            equal_text(initialStack.frames[1].sourcePath, "src/helper.cpp") &&
+            equal_text(initialStack.frames[2].sourcePath, "src/main.cpp") &&
+            (initialStack.frames[1].flags & GX_DEVELOPMENT_DEBUG_CALL_STACK_FRAME_CALL_SITE_MAPPED) != 0 &&
+            (initialStack.frames[2].flags & GX_DEVELOPMENT_DEBUG_CALL_STACK_FRAME_CALL_SITE_MAPPED) != 0;
+        if (h28CallStack) serial::puts("DEVELOPER_STUDIO_PHASE28H_CALL_STACK_PASS\nDEVELOPER_STUDIO_PHASE28H_CALL_STACK_REGRESSION_PASS\n");
+        if (h28CallStack) {
+            serial::puts("DEVELOPER_STUDIO_PHASE28H_FRAME_EVIDENCE frame0_rbp=");
+            serial::put_hex64(initialStack.frames[0].framePointer);
+            serial::puts(" frame0_rip=");
+            serial::put_hex64(initialStack.frames[0].instructionPointer);
+            serial::puts(" frame1_rbp=");
+            serial::put_hex64(initialStack.frames[1].framePointer);
+            serial::puts(" frame1_rip=");
+            serial::put_hex64(initialStack.frames[1].instructionPointer);
+            serial::puts(" frame2_rbp=");
+            serial::put_hex64(initialStack.frames[2].framePointer);
+            serial::puts(" frame2_rip=");
+            serial::put_hex64(initialStack.frames[2].instructionPointer);
+            serial::putc('\n');
+        }
+
+        gx_development_debug_variables frame0 = {};
+        frame0.size = sizeof(frame0);
+        gx_development_debug_request frame0Request = phase28h_debug_request(
+            h28WarmBuild, handle, generation, GX_DEVELOPMENT_DEBUG_INSPECT_VARIABLES, &initial, 0);
+        const bool frame0Query = h28CallStack && NativeElfRunService::inspect_variables(frame0Request, &frame0) == GX_OK;
+        h28Frame0 = frame0Query && frame0.status == GX_DEVELOPMENT_DEBUG_VARIABLES_STATUS_SUCCESS &&
+            equal_text(frame0.functionName, "helper_tail") &&
+            frame0.framePointer == initialStack.frames[0].framePointer &&
+            phase28h_value(frame0, "tail_input", GX_DEVELOPMENT_DEBUG_VARIABLE_KIND_ARGUMENT, 28) &&
+            phase28h_value(frame0, "tail_bonus", GX_DEVELOPMENT_DEBUG_VARIABLE_KIND_ARGUMENT, 5) &&
+            phase28h_value(frame0, "tail_value", GX_DEVELOPMENT_DEBUG_VARIABLE_KIND_LOCAL, 33);
+        if (frame0Query) serial::puts("DEVELOPER_STUDIO_PHASE28H_SELECT_FRAME0_PASS\n");
+        if (frame0Query && !h28Frame0) {
+            serial::puts("Phase28H frame0 values:");
+            for (uint32_t i = 0; i < frame0.variableCount; ++i) {
+                serial::putc(' ');
+                serial::puts(frame0.variables[i].name);
+                serial::putc('=');
+                serial::put_hex64(static_cast<uint64_t>(frame0.variables[i].signedValue));
+            }
+            serial::putc('\n');
+        }
+        if (h28Frame0) serial::puts("DEVELOPER_STUDIO_PHASE28H_FRAME0_VARIABLES_PASS\nDEVELOPER_STUDIO_PHASE28H_LOCALS_REGRESSION_PASS\n");
+
+        gx_development_debug_variables frame1 = {};
+        frame1.size = sizeof(frame1);
+        const bool frame1Query = h28CallStack && NativeElfRunService::inspect_variables(
+            phase28h_debug_request(h28WarmBuild, handle, generation,
+                                   GX_DEVELOPMENT_DEBUG_INSPECT_VARIABLES, &initial, 1), &frame1) == GX_OK;
+        h28Frame1 = frame1Query && frame1.status == GX_DEVELOPMENT_DEBUG_VARIABLES_STATUS_SUCCESS &&
+            equal_text(frame1.functionName, "helper") &&
+            frame1.framePointer == initialStack.frames[1].framePointer &&
+            frame1.instructionPointer == initialStack.frames[1].instructionPointer &&
+            phase28h_value(frame1, "input", GX_DEVELOPMENT_DEBUG_VARIABLE_KIND_ARGUMENT, 10) &&
+            phase28h_value(frame1, "delta", GX_DEVELOPMENT_DEBUG_VARIABLE_KIND_ARGUMENT, 4) &&
+            phase28h_value(frame1, "adjusted", GX_DEVELOPMENT_DEBUG_VARIABLE_KIND_LOCAL, 14) &&
+            phase28h_value(frame1, "doubled", GX_DEVELOPMENT_DEBUG_VARIABLE_KIND_LOCAL, 28);
+        if (frame1Query) serial::puts("DEVELOPER_STUDIO_PHASE28H_SELECT_FRAME1_PASS\n");
+        if (h28Frame1) serial::puts("DEVELOPER_STUDIO_PHASE28H_FRAME1_VARIABLES_PASS\n");
+
+        gx_development_debug_variables frame2 = {};
+        frame2.size = sizeof(frame2);
+        const bool frame2Query = h28CallStack && NativeElfRunService::inspect_variables(
+            phase28h_debug_request(h28WarmBuild, handle, generation,
+                                   GX_DEVELOPMENT_DEBUG_INSPECT_VARIABLES, &initial, 2), &frame2) == GX_OK;
+        h28Frame2 = frame2Query && frame2.status == GX_DEVELOPMENT_DEBUG_VARIABLES_STATUS_SUCCESS &&
+            equal_text(frame2.functionName, "gx_main") &&
+            frame2.framePointer == initialStack.frames[2].framePointer &&
+            phase28h_value(frame2, "root_value", GX_DEVELOPMENT_DEBUG_VARIABLE_KIND_LOCAL, 100) &&
+            phase28h_value(frame2, "before_call", GX_DEVELOPMENT_DEBUG_VARIABLE_KIND_LOCAL, 27);
+        h28CallerLiveRange = h28Frame2 && !phase28h_has_value(frame2, "after_call");
+        if (frame2Query) serial::puts("DEVELOPER_STUDIO_PHASE28H_SELECT_FRAME2_PASS\n");
+        if (frame2Query && !h28CallerLiveRange) {
+            serial::puts("Phase28H root variables:");
+            for (uint32_t i = 0; i < frame2.variableCount; ++i) {
+                serial::putc(' ');
+                serial::puts(frame2.variables[i].name);
+                serial::putc('=');
+                serial::put_hex64(static_cast<uint64_t>(frame2.variables[i].signedValue));
+            }
+            serial::putc('\n');
+        }
+        if (h28Frame2) serial::puts("DEVELOPER_STUDIO_PHASE28H_FRAME2_VARIABLES_PASS\n");
+        if (h28CallerLiveRange) serial::puts("DEVELOPER_STUDIO_PHASE28H_CALLER_LIVE_RANGE_PASS\n");
+
+        gx_development_debug_variables frame0Again = {};
+        frame0Again.size = sizeof(frame0Again);
+        const bool finalFrame0Query = NativeElfRunService::inspect_variables(
+            frame0Request, &frame0Again) == GX_OK;
+        gx_development_debug_call_stack stackAfterSelections = {};
+        stackAfterSelections.size = sizeof(stackAfterSelections);
+        const bool stackAfterQuery = NativeElfRunService::call_stack(
+            phase28h_debug_request(h28WarmBuild, handle, generation,
+                                   GX_DEVELOPMENT_DEBUG_CALL_STACK, &initial),
+            &stackAfterSelections) == GX_OK;
+        h28RoundTrip = finalFrame0Query && frame0Query && phase28h_same_variables(frame0, frame0Again);
+        h28StackUnchanged = stackAfterQuery && phase28h_same_stack(initialStack, stackAfterSelections);
+        if (h28RoundTrip) serial::puts("DEVELOPER_STUDIO_PHASE28H_ROUND_TRIP_PASS\n");
+        if (h28StackUnchanged) serial::puts("DEVELOPER_STUDIO_PHASE28H_STACK_UNCHANGED_PASS\n");
+
+        auto pausedRegistersStable = [&]() {
+            gx_development_debug_snapshot current = {};
+            const bool polled = NativeElfRunService::debug(
+                phase28h_debug_request(h28WarmBuild, handle, generation,
+                                       GX_DEVELOPMENT_DEBUG_POLL, &initial), &current) == GX_OK;
+            return polled && phase28h_same_registers(initial.context, current.context) &&
+                current.context.rip == initial.context.rip && current.context.rsp == initial.context.rsp &&
+                current.context.rbp == initial.context.rbp && current.context.rflags == initial.context.rflags;
+        };
+        h28ReadOnly = frame0Query && frame1Query && frame2Query && finalFrame0Query &&
+            pausedRegistersStable() && pausedRegistersStable() && pausedRegistersStable();
+        if (h28ReadOnly) serial::puts("DEVELOPER_STUDIO_PHASE28H_READ_ONLY_GPRS_PASS\n");
+
+        gx_development_debug_variables invalid = {};
+        invalid.size = sizeof(invalid);
+        const gx_result invalidResult = NativeElfRunService::inspect_variables(
+            phase28h_debug_request(h28WarmBuild, handle, generation,
+                                   GX_DEVELOPMENT_DEBUG_INSPECT_VARIABLES, &initial, 3), &invalid);
+        gx_development_debug_variables invalidCapacity = {};
+        invalidCapacity.size = sizeof(invalidCapacity);
+        const gx_result invalidCapacityResult = NativeElfRunService::inspect_variables(
+            phase28h_debug_request(h28WarmBuild, handle, generation,
+                                   GX_DEVELOPMENT_DEBUG_INSPECT_VARIABLES, &initial, 16), &invalidCapacity);
+        h28Invalid = invalidResult == GX_ERROR_INVALID_ARGUMENT &&
+            invalid.status == GX_DEVELOPMENT_DEBUG_VARIABLES_STATUS_INVALID_FRAME &&
+            invalidCapacityResult == GX_ERROR_INVALID_ARGUMENT &&
+            invalidCapacity.status == GX_DEVELOPMENT_DEBUG_VARIABLES_STATUS_INVALID_FRAME &&
+            pausedRegistersStable();
+        if (h28Invalid) serial::puts("DEVELOPER_STUDIO_PHASE28H_INVALID_FRAME_PASS\n");
+
+        gx_development_debug_snapshot afterStepOut = {};
+        const bool stepOut = NativeElfRunService::debug(
+            phase28h_debug_request(h28WarmBuild, handle, generation,
+                                   GX_DEVELOPMENT_DEBUG_STEP_SOURCE_OUT, &initial),
+            &afterStepOut) == GX_OK && afterStepOut.status == GX_DEVELOPMENT_DEBUG_STATUS_TRAP &&
+            equal_text(afterStepOut.functionName, "helper");
+        gx_development_debug_call_stack steppedStack = {};
+        steppedStack.size = sizeof(steppedStack);
+        const bool stepOutStack = stepOut && NativeElfRunService::call_stack(
+            phase28h_debug_request(h28WarmBuild, handle, generation,
+                                   GX_DEVELOPMENT_DEBUG_CALL_STACK, &afterStepOut),
+            &steppedStack) == GX_OK && steppedStack.status == GX_DEVELOPMENT_DEBUG_CALL_STACK_STATUS_SUCCESS &&
+            steppedStack.frameCount == 2 && equal_text(steppedStack.frames[0].functionName, "helper") &&
+            equal_text(steppedStack.frames[1].functionName, "gx_main");
+        gx_development_debug_variables afterStepOutVariables = {};
+        afterStepOutVariables.size = sizeof(afterStepOutVariables);
+        const bool stepOutVariables = stepOutStack && NativeElfRunService::inspect_variables(
+            phase28h_debug_request(h28WarmBuild, handle, generation,
+                                   GX_DEVELOPMENT_DEBUG_INSPECT_VARIABLES, &afterStepOut),
+            &afterStepOutVariables) == GX_OK && equal_text(afterStepOutVariables.functionName, "helper") &&
+            phase28h_value(afterStepOutVariables, "input", GX_DEVELOPMENT_DEBUG_VARIABLE_KIND_ARGUMENT, 10);
+        gx_development_debug_variables staleSelection = {};
+        staleSelection.size = sizeof(staleSelection);
+        gx_result staleResult = GX_ERROR_FAILED;
+        if (stepOut) staleResult = NativeElfRunService::inspect_variables(
+            phase28h_debug_request(h28WarmBuild, handle, generation,
+                                   GX_DEVELOPMENT_DEBUG_INSPECT_VARIABLES, &initial, 1),
+            &staleSelection);
+        h28StepOutReset = stepOutStack && stepOutVariables && steppedStack.frames[0].framePointer !=
+            initialStack.frames[0].framePointer;
+        h28Stale = staleResult == GX_ERROR_FAILED &&
+            staleSelection.status == GX_DEVELOPMENT_DEBUG_VARIABLES_STATUS_STALE;
+        if (!h28Stale) {
+            serial::puts("Phase28H stale result=");
+            print_decimal(static_cast<uint32_t>(staleResult));
+            serial::puts(" status=");
+            print_decimal(staleSelection.status);
+            serial::puts(" message=");
+            serial::puts(staleSelection.errorMessage);
+            serial::putc('\n');
+        }
+        if (h28StepOutReset) serial::puts("DEVELOPER_STUDIO_PHASE28H_STEP_OUT_RESET_PASS\nDEVELOPER_STUDIO_PHASE28H_STEP_REGRESSION_PASS\n");
+        if (h28Stale) serial::puts("DEVELOPER_STUDIO_PHASE28H_STALE_SELECTION_PASS\n");
+
+        gx_development_debug_variables rootAfterStepOut = {};
+        rootAfterStepOut.size = sizeof(rootAfterStepOut);
+        const bool rootAfterStepOutQuery = stepOutStack && NativeElfRunService::inspect_variables(
+            phase28h_debug_request(h28WarmBuild, handle, generation,
+                                   GX_DEVELOPMENT_DEBUG_INSPECT_VARIABLES, &afterStepOut, 1),
+            &rootAfterStepOut) == GX_OK && equal_text(rootAfterStepOut.functionName, "gx_main") &&
+            phase28h_value(rootAfterStepOut, "before_call", GX_DEVELOPMENT_DEBUG_VARIABLE_KIND_LOCAL, 27);
+        gx_development_debug_snapshot resumed = {};
+        const bool resumedRequest = stepOutVariables && NativeElfRunService::debug(
+            phase28h_debug_request(h28WarmBuild, handle, generation,
+                                   GX_DEVELOPMENT_DEBUG_RESUME, &afterStepOut), &resumed) == GX_OK;
+        gx_development_debug_variables runningVariables = {};
+        runningVariables.size = sizeof(runningVariables);
+        const bool runningRejected = resumedRequest && NativeElfRunService::inspect_variables(
+            phase28h_debug_request(h28WarmBuild, handle, generation,
+                                   GX_DEVELOPMENT_DEBUG_INSPECT_VARIABLES, &afterStepOut, 1),
+            &runningVariables) != GX_OK &&
+            runningVariables.status == GX_DEVELOPMENT_DEBUG_VARIABLES_STATUS_NO_PAUSED_CONTEXT;
+        h28Resume = rootAfterStepOutQuery && resumedRequest && runningRejected;
+        if (h28Resume) serial::puts("DEVELOPER_STUDIO_PHASE28H_RESUME_PASS\n");
+        NativeElfGuiRuntimeSnapshot gui = {};
+        h28Render = resumedRequest && NativeElfRunService::poll(handle, &pausedRun) == GX_OK &&
+            pausedRun.state == GX_DEVELOPMENT_RUN_RUNNING && native_elf_gui_runtime_snapshot(&gui) &&
+            gui.active && gui.rendered && equal_text(gui.content, "28H GUI 61");
+        if (h28Render) serial::puts("DEVELOPER_STUDIO_PHASE28H_RENDER_PASS\n");
+        const bool closeRequested = h28Render && NativeElfRunService::request_close(handle) == GX_OK;
+        gx_development_run_snapshot completed = {};
+        completed.size = sizeof(completed);
+        h28Complete = closeRequested && NativeElfRunService::poll(handle, &completed) == GX_OK &&
+            completed.state == GX_DEVELOPMENT_RUN_COMPLETED && completed.cleanupComplete != 0 &&
+            completed.outputCount == 1 && equal_text(completed.output[0].text,
+                                                      "DEVELOPER_STUDIO_PHASE28H_PRE_BREAKPOINT_ONCE");
+        if (h28Complete) serial::puts("DEVELOPER_STUDIO_PHASE28H_CLOSE_PASS\n");
+        const bool released = NativeElfRunService::release(handle) == GX_OK;
+        set_gui_automation_close(false);
+        h28Clean = released && !NativeElfDevelopmentAppModel::has_active_registration() &&
+            compositor::KernelCompositor::getWindowCount() == 0;
+        if (h28Clean) serial::puts("DEVELOPER_STUDIO_PHASE28H_CLEANUP_PASS\n");
+    }
+    const bool h28Primary = h28NestedPause && h28CallStack && h28Frame0 && h28Frame1 && h28Frame2 &&
+        h28CallerLiveRange && h28RoundTrip && h28ReadOnly && h28StackUnchanged && h28Invalid &&
+        h28StepOutReset && h28Stale && h28Resume && h28Render && h28Complete && h28Clean;
+    print_marker("phase28h_nested_pause", h28NestedPause);
+    print_marker("phase28h_call_stack", h28CallStack);
+    print_marker("phase28h_frame0", h28Frame0);
+    print_marker("phase28h_frame1", h28Frame1);
+    print_marker("phase28h_frame2", h28Frame2);
+    print_marker("phase28h_caller_live_range", h28CallerLiveRange);
+    print_marker("phase28h_round_trip", h28RoundTrip);
+    print_marker("phase28h_read_only_gprs", h28ReadOnly);
+    print_marker("phase28h_stack_unchanged", h28StackUnchanged);
+    print_marker("phase28h_invalid_frame", h28Invalid);
+    print_marker("phase28h_step_out_reset", h28StepOutReset);
+    print_marker("phase28h_stale_selection", h28Stale);
+    print_marker("phase28h_resume", h28Resume);
+    print_marker("phase28h_render", h28Render);
+    print_marker("phase28h_close", h28Complete);
+    print_marker("phase28h_cleanup", h28Clean);
+    print_marker("phase28h_run_regression", h28Render && h28Complete && h28Clean);
+    if (h28Render && h28Complete && h28Clean)
+        serial::puts("DEVELOPER_STUDIO_PHASE28H_RUN_REGRESSION_PASS\n");
+    print_marker("phase28h_debug_pass", h28Primary);
+    print_marker("phase28h", h28Primary);
+    const bool h28Artifact = h28BuildPass && emit_serial_artifact("/P28H/build/bin/amd64/p28h.elf", "h28main");
+    if (h28Artifact) serial::puts("DEVELOPER_STUDIO_PHASE28H_CALL_STACK_REGRESSION_PASS\n");
+    const bool phase28hPassed = h28BuildPass && h28WarmCachePass && h28Primary && h28Artifact &&
+        !NativeElfDevelopmentAppModel::has_active_registration() &&
+        compositor::KernelCompositor::getWindowCount() == 0;
+    print_marker("phase28h", phase28hPassed);
+    serial::puts(phase28hPassed ?
+        "ELF Loader: Phase 28H selected-frame variables smoke PASS\nDEVELOPER_STUDIO_PHASE28H_PASS\n" :
+        "ELF Loader: Phase 28H selected-frame variables smoke FAIL\n");
 #endif
 
 #if defined(GXOS_PHASE27G_SMOKE)
