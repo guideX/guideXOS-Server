@@ -56,7 +56,10 @@
 /out/aarch64-phase10/
 /out/aarch64-phase12/
 /out/aarch64-rpi4-p1/
+/out/aarch64-tab-a8-t0/
 /out/aarch64-phase10-host-test.exe
+/scripts/__pycache__/
+/tests/__pycache__/
 /tools/__pycache__/
 /out/wallpaper-pack/certs/ca-bundle.manifest
 /out/wallpaper-pack/config/certs/ca-bundle.manifest
