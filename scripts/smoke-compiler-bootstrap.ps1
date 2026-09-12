@@ -69,7 +69,7 @@ if ($Phase28IOnly) {
     $Phase27Q = $false; $Phase27R = $false; $Phase27S = $false; $Phase27T = $false
     $Phase27U = $false; $Phase27V = $false; $Phase27W = $false; $Phase27X = $false
     $Phase27Y = $false; $Phase27Z = $false; $Phase28A = $false; $Phase28B = $false
-    $Phase28C = $false; $Phase28D = $false; $Phase28E = $false; $Phase28F = $false; $Phase28G = $false
+    $Phase28C = $false; $Phase28D = $false; $Phase28E = $false; $Phase28F = $false; $Phase28G = $true
     $Phase28H = $true; $Phase28HOnly = $false; $Phase28I = $true
 } elseif ($Phase28HOnly) {
     $Phase27E = $false; $Phase27F = $false; $Phase27G = $false; $Phase27H = $false
@@ -1682,19 +1682,32 @@ function Invoke-QemuProofBoot([int]$runNumber, [string]$qemu) {
         if ($Phase28I) {
             $requiredMarkers += @(
                 "DEVELOPER_STUDIO_PHASE28I_BEGIN",
+                "DEVELOPER_STUDIO_PHASE28I_BUILD_PASS",
+                "DEVELOPER_STUDIO_PHASE28I_PAUSED_PASS",
+                "DEVELOPER_STUDIO_PHASE28I_RESUME_PASS",
+                "DEVELOPER_STUDIO_PHASE28I_CONSTANT_EXPR_PASS",
                 "DEVELOPER_STUDIO_PHASE28I_WATCH_FRAME0_PASS",
                 "DEVELOPER_STUDIO_PHASE28I_WATCH_FRAME1_PASS",
                 "DEVELOPER_STUDIO_PHASE28I_WATCH_FRAME2_PASS",
+                "DEVELOPER_STUDIO_PHASE28I_ARITHMETIC_PASS",
                 "DEVELOPER_STUDIO_PHASE28I_CROSS_FRAME_PASS",
+                "DEVELOPER_STUDIO_PHASE28I_SAME_NAME_PASS",
                 "DEVELOPER_STUDIO_PHASE28I_PRECEDENCE_PASS",
                 "DEVELOPER_STUDIO_PHASE28I_PARENTHESIS_PASS",
-                "DEVELOPER_STUDIO_PHASE28I_POINTER_PASS",
-                "DEVELOPER_STUDIO_PHASE28I_BOOLEAN_PASS",
+                "DEVELOPER_STUDIO_PHASE28I_UNKNOWN_IDENTIFIER_PASS",
+                "DEVELOPER_STUDIO_PHASE28I_DEAD_VARIABLE_PASS",
+                "DEVELOPER_STUDIO_PHASE28I_DIV_ZERO_PASS",
+                "DEVELOPER_STUDIO_PHASE28I_OVERFLOW_PASS",
+                "DEVELOPER_STUDIO_PHASE28I_LIMIT_PASS",
+                "DEVELOPER_STUDIO_PHASE28I_VALUE_CHANGE_PASS",
                 "DEVELOPER_STUDIO_PHASE28I_STALE_PASS",
                 "DEVELOPER_STUDIO_PHASE28I_INVALID_FRAME_PASS",
                 "DEVELOPER_STUDIO_PHASE28I_RUNNING_PASS",
                 "DEVELOPER_STUDIO_PHASE28I_READ_ONLY_PASS",
                 "DEVELOPER_STUDIO_PHASE28I_REEVALUATE_PASS",
+                "DEVELOPER_STUDIO_PHASE28I_RENDER_PASS",
+                "DEVELOPER_STUDIO_PHASE28I_CLOSE_PASS",
+                "DEVELOPER_STUDIO_PHASE28I_CLEANUP_PASS",
                 "DEVELOPER_STUDIO_PHASE28I_PASS"
             )
         }
