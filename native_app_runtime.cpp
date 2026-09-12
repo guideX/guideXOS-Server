@@ -1017,9 +1017,9 @@ gx_result hostDevelopmentDebug(NativeGxAppContext* ctx, const gx_development_deb
                                gx_development_debug_snapshot* outSnapshot) {
     NativeAppRuntimeContext* context = runtimeContextFor(ctx);
     if (!context || !request || !outSnapshot ||
-        !nativeBufferRangeContains(*context, request, sizeof(gx_development_debug_request)) ||
+        !nativeBufferRangeContains(*context, request, GX_DEVELOPMENT_DEBUG_REQUEST_LEGACY_BYTES) ||
         !nativeBufferRangeContains(*context, outSnapshot, sizeof(gx_development_debug_snapshot)) ||
-        request->size < sizeof(gx_development_debug_request) || request->version != GX_DEVELOPMENT_DEBUG_API_VERSION ||
+        request->size < GX_DEVELOPMENT_DEBUG_REQUEST_LEGACY_BYTES || request->version != GX_DEVELOPMENT_DEBUG_API_VERSION ||
         outSnapshot->size < sizeof(gx_development_debug_snapshot) || outSnapshot->version != GX_DEVELOPMENT_DEBUG_API_VERSION) {
         return GX_ERROR_INVALID_ARGUMENT;
     }
@@ -1039,9 +1039,9 @@ gx_result hostDevelopmentDebugCallStack(NativeGxAppContext* ctx,
                                          gx_development_debug_call_stack* outResult) {
     NativeAppRuntimeContext* context = runtimeContextFor(ctx);
     if (!context || !request || !outResult ||
-        !nativeBufferRangeContains(*context, request, sizeof(gx_development_debug_request)) ||
+        !nativeBufferRangeContains(*context, request, GX_DEVELOPMENT_DEBUG_REQUEST_LEGACY_BYTES) ||
         !nativeBufferRangeContains(*context, outResult, sizeof(gx_development_debug_call_stack)) ||
-        request->size < sizeof(gx_development_debug_request) ||
+        request->size < GX_DEVELOPMENT_DEBUG_REQUEST_LEGACY_BYTES ||
         request->version != GX_DEVELOPMENT_DEBUG_API_VERSION ||
         request->command != GX_DEVELOPMENT_DEBUG_CALL_STACK ||
         outResult->size < sizeof(gx_development_debug_call_stack) ||
@@ -1068,9 +1068,9 @@ gx_result hostDevelopmentDebugInspectVariables(
     gx_development_debug_variables* outResult) {
     NativeAppRuntimeContext* context = runtimeContextFor(ctx);
     if (!context || !request || !outResult ||
-        !nativeBufferRangeContains(*context, request, sizeof(gx_development_debug_request)) ||
+        !nativeBufferRangeContains(*context, request, GX_DEVELOPMENT_DEBUG_REQUEST_LEGACY_BYTES) ||
         !nativeBufferRangeContains(*context, outResult, sizeof(gx_development_debug_variables)) ||
-        request->size < sizeof(gx_development_debug_request) ||
+        request->size < GX_DEVELOPMENT_DEBUG_REQUEST_LEGACY_BYTES ||
         request->version != GX_DEVELOPMENT_DEBUG_API_VERSION ||
         request->command != GX_DEVELOPMENT_DEBUG_INSPECT_VARIABLES ||
         outResult->size < sizeof(gx_development_debug_variables) ||
@@ -1088,6 +1088,45 @@ gx_result hostDevelopmentDebugInspectVariables(
     }
     copied.artifactSha256 = artifact.empty() ? nullptr : artifact.c_str();
     const gx_result result = DevelopmentRunService::DebugVariables(*context, copied, outResult);
+    NativeAppProcessTable::UpdateFromRuntime(*context);
+    return result;
+}
+
+gx_result hostDevelopmentDebugEvaluateExpression(
+    NativeGxAppContext* ctx, const gx_development_debug_request* request,
+    gx_development_debug_expression* outResult) {
+    NativeAppRuntimeContext* context = runtimeContextFor(ctx);
+    const size_t expressionFieldEnd =
+        offsetof(gx_development_debug_request, expression) + sizeof(request->expression);
+    if (!context || !request || !outResult ||
+        !nativeBufferRangeContains(*context, request, expressionFieldEnd) ||
+        !nativeBufferRangeContains(*context, outResult, sizeof(gx_development_debug_expression)) ||
+        request->size < expressionFieldEnd ||
+        request->version != GX_DEVELOPMENT_DEBUG_API_VERSION ||
+        request->command != GX_DEVELOPMENT_DEBUG_EVALUATE_EXPRESSION ||
+        !request->expression ||
+        outResult->size < sizeof(gx_development_debug_expression) ||
+        outResult->version != GX_DEVELOPMENT_DEBUG_API_VERSION) {
+        return GX_ERROR_INVALID_ARGUMENT;
+    }
+    gx_development_debug_request copied = {};
+    std::memcpy(&copied, request,
+                std::min<size_t>(request->size, sizeof(copied)));
+    std::string artifact;
+    if (request->artifactSha256 &&
+        !copyNativeString(*context, request->artifactSha256,
+                          GX_DEVELOPMENT_RUN_MAX_SHA256_BYTES, artifact)) {
+        return GX_ERROR_INVALID_ARGUMENT;
+    }
+    std::string expression;
+    if (!copyNativeString(*context, request->expression,
+                          GX_DEVELOPMENT_DEBUG_MAX_EXPRESSION_BYTES + 1u, expression)) {
+        return GX_ERROR_INVALID_ARGUMENT;
+    }
+    copied.artifactSha256 = artifact.empty() ? nullptr : artifact.c_str();
+    copied.expression = expression.c_str();
+    const gx_result result = DevelopmentRunService::DebugEvaluateExpression(
+        *context, copied, outResult);
     NativeAppProcessTable::UpdateFromRuntime(*context);
     return result;
 }
@@ -1868,6 +1907,8 @@ NativeAppRuntimeContext NativeAppRuntime::Prepare(
     context.hostCalls.development_debug = hostDevelopmentDebug;
     context.hostCalls.development_debug_call_stack = hostDevelopmentDebugCallStack;
     context.hostCalls.development_debug_inspect_variables = hostDevelopmentDebugInspectVariables;
+    context.hostCalls.development_debug_evaluate_expression =
+        hostDevelopmentDebugEvaluateExpression;
 
     if (launchDecision.strategy != AppLaunchStrategy::NativeElf) {
         addDiagnostic(context, "Launch decision strategy is not NativeElf");

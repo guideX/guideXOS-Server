@@ -79,7 +79,11 @@ static_assert(offsetof(gx_host_calls, development_debug_inspect_variables) == 41
               "hosted variable inspection slot changed");
 static_assert(offsetof(gx_host_calls, bare_metal_development_debug_inspect_variables) == 424,
               "bare-metal variable inspection slot changed");
-static_assert(sizeof(gx_host_calls) == 432, "gx_host_calls size changed");
+static_assert(offsetof(gx_host_calls, development_debug_evaluate_expression) == 432,
+              "hosted expression slot changed");
+static_assert(offsetof(gx_host_calls, bare_metal_development_debug_evaluate_expression) == 440,
+              "bare-metal expression slot changed");
+static_assert(sizeof(gx_host_calls) == 448, "gx_host_calls size changed");
 static_assert(sizeof(gx_development_run_request) == 112, "development run request size changed");
 static_assert(offsetof(gx_development_run_request, projectRoot) == 8, "development run request project root offset changed");
 static_assert(offsetof(gx_development_run_request, artifactSha256) == 56, "development run request artifact hash offset changed");
@@ -91,7 +95,11 @@ static_assert(offsetof(gx_development_run_request, artifactAbi) == 88, "developm
 static_assert(offsetof(gx_development_run_request, debugSourcePath) == 96, "development run source path offset changed");
 static_assert(offsetof(gx_development_run_request, debugSourceLine) == 104, "development run source line offset changed");
 static_assert(offsetof(gx_development_run_request, debugSourceColumn) == 108, "development run source column offset changed");
-static_assert(sizeof(gx_development_debug_request) == 104, "development debug request size changed");
+static_assert(sizeof(gx_development_debug_request) == 112, "development debug request size changed");
+static_assert(offsetof(gx_development_debug_request, expression) == 104,
+              "watch expression request field must be append-only");
+static_assert(GX_DEVELOPMENT_DEBUG_REQUEST_LEGACY_BYTES == 104,
+              "legacy development debug request prefix changed");
 static_assert(sizeof(gx_development_debug_variable) == 128, "development debug variable size changed");
 static_assert(offsetof(gx_development_debug_variable, kind) == 64, "development debug variable kind offset changed");
 static_assert(offsetof(gx_development_debug_variable, frameOffset) == 92,
@@ -116,6 +124,18 @@ static_assert(offsetof(gx_development_debug_request, threadId) == 72, "developme
 static_assert(offsetof(gx_development_debug_request, stopGeneration) == 80, "development debug stop generation offset changed");
 static_assert(offsetof(gx_development_debug_request, auxiliaryAddress) == 88, "development debug auxiliary address offset changed");
 static_assert(offsetof(gx_development_debug_request, readByteCount) == 96, "development debug read byte count offset changed");
+static_assert(GX_DEVELOPMENT_DEBUG_EVALUATE_EXPRESSION == 21,
+              "watch expression command must be appended after variable inspection");
+static_assert(offsetof(gx_development_debug_expression, functionName) == 104,
+              "watch expression function name offset changed");
+static_assert(offsetof(gx_development_debug_expression, sourcePath) == 168,
+              "watch expression source path offset changed");
+static_assert(offsetof(gx_development_debug_expression, errorMessage) == 328,
+              "watch expression error offset changed");
+static_assert(offsetof(gx_development_debug_expression, signedValue) == 456,
+              "watch expression signed value offset changed");
+static_assert(sizeof(gx_development_debug_expression) == 480,
+              "watch expression result size changed");
 static_assert(sizeof(gx_development_debug_register_context) == 192, "development debug register context size changed");
 static_assert(offsetof(gx_development_debug_snapshot, stackLow) == 456, "development debug stack low offset changed");
 static_assert(offsetof(gx_development_debug_snapshot, stackHigh) == 464, "development debug stack high offset changed");

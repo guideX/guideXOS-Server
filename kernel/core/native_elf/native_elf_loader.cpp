@@ -38,6 +38,7 @@ static NativeAppExecutionContext s_appRuntime = {};
 static char s_bareBuildStrings[8][768] = {};
 static char s_bareRunStrings[10][768] = {};
 static char s_bareDebugStrings[1][GX_DEVELOPMENT_RUN_MAX_SHA256_BYTES] = {};
+static char s_bareDebugExpression[GX_DEVELOPMENT_DEBUG_MAX_EXPRESSION_BYTES + 1u] = {};
 static const uint64_t NESTED_APPLICATION_STACK_BASE =
     APPLICATION_STACK_BASE - APPLICATION_STACK_SIZE;
 static const uint64_t NESTED_SERVICE_STACK_BASE =
@@ -753,15 +754,28 @@ static bool copy_debug_variables_to_app(
     return true;
 }
 
+static bool copy_debug_expression_to_app(
+    const gx_development_debug_expression& source,
+    gx_development_debug_expression* destination)
+{
+    if (!destination || !app_pointer_range(destination, sizeof(uint32_t))) return false;
+    const uint32_t requested = destination->size;
+    if (requested < sizeof(source)) return false;
+    if (!app_pointer_range(destination, sizeof(source))) return false;
+    copy_bytes(reinterpret_cast<uint8_t*>(destination),
+               reinterpret_cast<const uint8_t*>(&source), sizeof(source));
+    return true;
+}
+
 static gx_result GX_CALL host_bare_development_debug(
     gx_app_context* context,
     const gx_development_debug_request* request,
     gx_development_debug_snapshot* outputSnapshot)
 {
     if (!app_context_valid(context) || !request || !outputSnapshot ||
-        !app_pointer_range(request, sizeof(gx_development_debug_request)) ||
+        !app_pointer_range(request, GX_DEVELOPMENT_DEBUG_REQUEST_LEGACY_BYTES) ||
         !app_pointer_range(outputSnapshot, sizeof(uint32_t))) return GX_ERROR_PERMISSION_DENIED;
-    if (request->size < sizeof(gx_development_debug_request) ||
+    if (request->size < GX_DEVELOPMENT_DEBUG_REQUEST_LEGACY_BYTES ||
         request->version != GX_DEVELOPMENT_DEBUG_API_VERSION) return GX_ERROR_INVALID_ARGUMENT;
     gx_development_debug_request copied = {};
     copy_bytes(reinterpret_cast<uint8_t*>(&copied),
@@ -787,9 +801,9 @@ static gx_result GX_CALL host_bare_development_debug_call_stack(
     gx_development_debug_call_stack* outputResult)
 {
     if (!app_context_valid(context) || !request || !outputResult ||
-        !app_pointer_range(request, sizeof(gx_development_debug_request)) ||
+        !app_pointer_range(request, GX_DEVELOPMENT_DEBUG_REQUEST_LEGACY_BYTES) ||
         !app_pointer_range(outputResult, sizeof(uint32_t))) return GX_ERROR_PERMISSION_DENIED;
-    if (request->size < sizeof(gx_development_debug_request) ||
+    if (request->size < GX_DEVELOPMENT_DEBUG_REQUEST_LEGACY_BYTES ||
         request->version != GX_DEVELOPMENT_DEBUG_API_VERSION ||
         request->command != GX_DEVELOPMENT_DEBUG_CALL_STACK) return GX_ERROR_INVALID_ARGUMENT;
     gx_development_debug_request copied = {};
@@ -816,9 +830,9 @@ static gx_result GX_CALL host_bare_development_debug_inspect_variables(
     gx_development_debug_variables* outputResult)
 {
     if (!app_context_valid(context) || !request || !outputResult ||
-        !app_pointer_range(request, sizeof(gx_development_debug_request)) ||
+        !app_pointer_range(request, GX_DEVELOPMENT_DEBUG_REQUEST_LEGACY_BYTES) ||
         !app_pointer_range(outputResult, sizeof(uint32_t))) return GX_ERROR_PERMISSION_DENIED;
-    if (request->size < sizeof(gx_development_debug_request) ||
+    if (request->size < GX_DEVELOPMENT_DEBUG_REQUEST_LEGACY_BYTES ||
         request->version != GX_DEVELOPMENT_DEBUG_API_VERSION ||
         request->command != GX_DEVELOPMENT_DEBUG_INSPECT_VARIABLES) return GX_ERROR_INVALID_ARGUMENT;
     gx_development_debug_request copied = {};
@@ -836,6 +850,41 @@ static gx_result GX_CALL host_bare_development_debug_inspect_variables(
     local.version = GX_DEVELOPMENT_DEBUG_API_VERSION;
     const gx_result result = NativeElfRunService::inspect_variables(copied, &local);
     if (!copy_debug_variables_to_app(local, outputResult)) return GX_ERROR_PERMISSION_DENIED;
+    return result;
+}
+
+static gx_result GX_CALL host_bare_development_debug_evaluate_expression(
+    gx_app_context* context,
+    const gx_development_debug_request* request,
+    gx_development_debug_expression* outputResult)
+{
+    const size_t requestBytes =
+        offsetof(gx_development_debug_request, expression) + sizeof(request->expression);
+    if (!app_context_valid(context) || !request || !outputResult ||
+        !app_pointer_range(request, requestBytes) ||
+        !app_pointer_range(outputResult, sizeof(uint32_t))) return GX_ERROR_PERMISSION_DENIED;
+    if (request->size < requestBytes ||
+        request->version != GX_DEVELOPMENT_DEBUG_API_VERSION ||
+        request->command != GX_DEVELOPMENT_DEBUG_EVALUATE_EXPRESSION ||
+        !request->expression) return GX_ERROR_INVALID_ARGUMENT;
+    gx_development_debug_request copied = {};
+    copy_bytes(reinterpret_cast<uint8_t*>(&copied),
+               reinterpret_cast<const uint8_t*>(request),
+               request->size < sizeof(copied) ? request->size : sizeof(copied));
+    copied.artifactSha256 = nullptr;
+    if (request->artifactSha256) {
+        if (!app_string(request->artifactSha256, s_bareDebugStrings[0],
+                        sizeof(s_bareDebugStrings[0]))) return GX_ERROR_INVALID_ARGUMENT;
+        copied.artifactSha256 = s_bareDebugStrings[0];
+    }
+    if (!app_string(request->expression, s_bareDebugExpression,
+                    sizeof(s_bareDebugExpression))) return GX_ERROR_INVALID_ARGUMENT;
+    copied.expression = s_bareDebugExpression;
+    gx_development_debug_expression local = {};
+    local.size = sizeof(local);
+    local.version = GX_DEVELOPMENT_DEBUG_API_VERSION;
+    const gx_result result = NativeElfRunService::evaluate_expression(copied, &local);
+    if (!copy_debug_expression_to_app(local, outputResult)) return GX_ERROR_PERMISSION_DENIED;
     return result;
 }
 
@@ -949,6 +998,8 @@ static void initialize_app_context()
         host_bare_development_debug_call_stack;
     s_appRuntime.hostCalls.bare_metal_development_debug_inspect_variables =
         host_bare_development_debug_inspect_variables;
+    s_appRuntime.hostCalls.bare_metal_development_debug_evaluate_expression =
+        host_bare_development_debug_evaluate_expression;
 
     s_appRuntime.appContext = {};
     s_appRuntime.appContext.size = sizeof(gx_app_context);

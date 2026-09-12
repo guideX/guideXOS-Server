@@ -3,6 +3,7 @@
 #include "allocator.h"
 #include "kernel/core/compiler/elf_writer.h"
 #include "kernel/core/native_elf/native_elf_call_stack.h"
+#include "kernel/core/native_elf/native_elf_debug_watches.h"
 #include "logger.h"
 
 #include <algorithm>
@@ -181,6 +182,61 @@ void setVariablesError(gx_development_debug_variables* result, uint32_t status,
     if (!message) message = "variable inspection rejected";
     std::strncpy(result->errorMessage, message, sizeof(result->errorMessage) - 1);
     result->errorMessage[sizeof(result->errorMessage) - 1] = '\0';
+}
+
+void clearExpression(gx_development_debug_expression* result) {
+    if (!result) return;
+    *result = gx_development_debug_expression{};
+    result->size = sizeof(gx_development_debug_expression);
+    result->version = GX_DEVELOPMENT_DEBUG_API_VERSION;
+    result->status = GX_DEVELOPMENT_DEBUG_EXPRESSION_STATUS_NONE;
+}
+
+void setExpressionError(gx_development_debug_expression* result, uint32_t status,
+                        uint32_t category, const char* message, uint32_t offset = 0) {
+    if (!result) return;
+    result->status = status;
+    result->errorCategory = category;
+    result->diagnosticOffset = offset;
+    if (!message) message = "watch expression rejected";
+    std::strncpy(result->errorMessage, message, sizeof(result->errorMessage) - 1);
+    result->errorMessage[sizeof(result->errorMessage) - 1] = '\0';
+}
+
+struct NativeDebugWatchMetadataContext {
+    const DebugRuntime* runtime = nullptr;
+    uint64_t address = 0;
+    char functionName[GX_DEVELOPMENT_DEBUG_MAX_FUNCTION_NAME_BYTES] = {};
+};
+
+kernel::native_elf::NativeDebugWatchResolveStatus resolveNativeDebugWatchIdentifier(
+    void* opaque, const char* identifier) {
+    const NativeDebugWatchMetadataContext* context =
+        static_cast<const NativeDebugWatchMetadataContext*>(opaque);
+    if (!context || !context->runtime || !identifier || identifier[0] == '\0')
+        return kernel::native_elf::NativeDebugWatchResolveStatus::MetadataUnavailable;
+    const char* error = nullptr;
+    const kernel::compiler::DebugVariableLookupStatus status =
+        kernel::compiler::resolve_bootstrap_debug_variable_state(
+            context->runtime->imageBytes.data(),
+            static_cast<uint32_t>(context->runtime->imageBytes.size()),
+            context->runtime->imageBase, context->runtime->debugCodeFileOffset,
+            context->runtime->debugCodeBytes, context->address, context->functionName,
+            identifier, &error);
+    (void)error;
+    switch (status) {
+    case kernel::compiler::DebugVariableLookupStatus::Live:
+        return kernel::native_elf::NativeDebugWatchResolveStatus::Available;
+    case kernel::compiler::DebugVariableLookupStatus::DeclaredNotLive:
+        return kernel::native_elf::NativeDebugWatchResolveStatus::NotLive;
+    case kernel::compiler::DebugVariableLookupStatus::UnsupportedType:
+        return kernel::native_elf::NativeDebugWatchResolveStatus::UnsupportedType;
+    case kernel::compiler::DebugVariableLookupStatus::Unknown:
+        return kernel::native_elf::NativeDebugWatchResolveStatus::UnknownIdentifier;
+    case kernel::compiler::DebugVariableLookupStatus::MetadataUnavailable:
+        return kernel::native_elf::NativeDebugWatchResolveStatus::MetadataUnavailable;
+    }
+    return kernel::native_elf::NativeDebugWatchResolveStatus::MetadataUnavailable;
 }
 
 uint16_t sourceMapU16(const std::vector<uint8_t>& bytes, uint32_t offset) {
@@ -1015,7 +1071,7 @@ void NativeAppDebugger::UnregisterRuntime(uint64_t runtimeId) {
 gx_result NativeAppDebugger::Command(const gx_development_debug_request& request,
                                      const std::string& expectedArtifactSha256,
                                      gx_development_debug_snapshot* snapshot) {
-    if (!snapshot || request.size < sizeof(gx_development_debug_request) || request.version != GX_DEVELOPMENT_DEBUG_API_VERSION ||
+    if (!snapshot || request.size < GX_DEVELOPMENT_DEBUG_REQUEST_LEGACY_BYTES || request.version != GX_DEVELOPMENT_DEBUG_API_VERSION ||
         request.handle == 0 || request.sessionGeneration == 0 || request.processId == 0 || request.nativeRuntimeId == 0) return GX_ERROR_INVALID_ARGUMENT;
     clearSnapshot(snapshot);
     if (expectedArtifactSha256.empty() || !request.artifactSha256 || expectedArtifactSha256 != request.artifactSha256) {
@@ -1683,7 +1739,7 @@ gx_result NativeAppDebugger::Command(const gx_development_debug_request& request
 gx_result NativeAppDebugger::CallStack(const gx_development_debug_request& request,
                                        const std::string& expectedArtifactSha256,
                                        gx_development_debug_call_stack* result) {
-    if (!result || request.size < sizeof(gx_development_debug_request) ||
+    if (!result || request.size < GX_DEVELOPMENT_DEBUG_REQUEST_LEGACY_BYTES ||
         request.version != GX_DEVELOPMENT_DEBUG_API_VERSION ||
         request.command != GX_DEVELOPMENT_DEBUG_CALL_STACK || request.handle == 0 ||
         request.sessionGeneration == 0 || request.processId == 0 || request.nativeRuntimeId == 0) {
@@ -1907,7 +1963,7 @@ gx_result NativeAppDebugger::InspectVariables(
     const gx_development_debug_request& request,
     const std::string& expectedArtifactSha256,
     gx_development_debug_variables* result) {
-    if (!result || request.size < sizeof(gx_development_debug_request) ||
+    if (!result || request.size < GX_DEVELOPMENT_DEBUG_REQUEST_LEGACY_BYTES ||
         request.version != GX_DEVELOPMENT_DEBUG_API_VERSION ||
         request.command != GX_DEVELOPMENT_DEBUG_INSPECT_VARIABLES || request.handle == 0 ||
         request.sessionGeneration == 0 || request.processId == 0 ||
@@ -2151,6 +2207,243 @@ gx_result NativeAppDebugger::InspectVariables(
     result->truncated = truncated;
     result->status = truncated ? GX_DEVELOPMENT_DEBUG_VARIABLES_STATUS_TRUNCATED
                                : GX_DEVELOPMENT_DEBUG_VARIABLES_STATUS_SUCCESS;
+    return GX_OK;
+}
+
+gx_result NativeAppDebugger::EvaluateExpression(
+    const gx_development_debug_request& request,
+    const std::string& expectedArtifactSha256,
+    gx_development_debug_expression* result) {
+    if (!result) return GX_ERROR_INVALID_ARGUMENT;
+    clearExpression(result);
+    result->handle = request.handle;
+    result->sessionGeneration = request.sessionGeneration;
+    result->selectedFrameIndex = request.auxiliaryAddress;
+    const size_t requestBytes =
+        offsetof(gx_development_debug_request, expression) + sizeof(request.expression);
+    if (request.size < requestBytes ||
+        request.version != GX_DEVELOPMENT_DEBUG_API_VERSION ||
+        request.command != GX_DEVELOPMENT_DEBUG_EVALUATE_EXPRESSION ||
+        request.handle == 0 || request.sessionGeneration == 0 ||
+        request.processId == 0 || request.nativeRuntimeId == 0 || request.threadId == 0 ||
+        request.stopGeneration == 0 || !request.expression) {
+        setExpressionError(result, GX_DEVELOPMENT_DEBUG_EXPRESSION_STATUS_REJECTED,
+                            GX_DEVELOPMENT_DEBUG_EXPRESSION_ERROR_INVALID_REQUEST,
+                            "watch expression request identity is incomplete");
+        return GX_ERROR_INVALID_ARGUMENT;
+    }
+    if (expectedArtifactSha256.empty() || !request.artifactSha256 ||
+        expectedArtifactSha256 != request.artifactSha256) {
+        setExpressionError(result, GX_DEVELOPMENT_DEBUG_EXPRESSION_STATUS_REJECTED,
+                            GX_DEVELOPMENT_DEBUG_EXPRESSION_ERROR_INVALID_REQUEST,
+                            "artifact identity mismatch");
+        return GX_ERROR_FAILED;
+    }
+    if (request.auxiliaryAddress >= GX_DEVELOPMENT_DEBUG_MAX_CALL_STACK_FRAMES) {
+        setExpressionError(result, GX_DEVELOPMENT_DEBUG_EXPRESSION_STATUS_INVALID_FRAME,
+                            GX_DEVELOPMENT_DEBUG_EXPRESSION_ERROR_INVALID_FRAME,
+                            "selected Call Stack frame index is outside the bounded capacity");
+        return GX_ERROR_INVALID_ARGUMENT;
+    }
+
+    gx_development_debug_request callStackRequest = request;
+    callStackRequest.command = GX_DEVELOPMENT_DEBUG_CALL_STACK;
+    callStackRequest.auxiliaryAddress = 0;
+    gx_development_debug_call_stack callStack = {};
+    const gx_result callStackResult = CallStack(callStackRequest, expectedArtifactSha256,
+                                                &callStack);
+    if (callStackResult != GX_OK ||
+        (callStack.status != GX_DEVELOPMENT_DEBUG_CALL_STACK_STATUS_SUCCESS &&
+         callStack.status != GX_DEVELOPMENT_DEBUG_CALL_STACK_STATUS_TRUNCATED)) {
+        if (callStack.status == GX_DEVELOPMENT_DEBUG_CALL_STACK_STATUS_STALE) {
+            setExpressionError(result, GX_DEVELOPMENT_DEBUG_EXPRESSION_STATUS_STALE,
+                                GX_DEVELOPMENT_DEBUG_EXPRESSION_ERROR_STALE_GENERATION,
+                                callStack.errorMessage);
+        } else if (callStack.status == GX_DEVELOPMENT_DEBUG_CALL_STACK_STATUS_NO_PAUSED_CONTEXT) {
+            setExpressionError(result, GX_DEVELOPMENT_DEBUG_EXPRESSION_STATUS_NO_PAUSED_CONTEXT,
+                                GX_DEVELOPMENT_DEBUG_EXPRESSION_ERROR_TARGET_NOT_PAUSED,
+                                callStack.errorMessage);
+        } else if (callStack.status == GX_DEVELOPMENT_DEBUG_CALL_STACK_STATUS_INVALID_FRAME) {
+            setExpressionError(result, GX_DEVELOPMENT_DEBUG_EXPRESSION_STATUS_INVALID_FRAME,
+                                GX_DEVELOPMENT_DEBUG_EXPRESSION_ERROR_INVALID_FRAME,
+                                callStack.errorMessage);
+        } else if (callStack.status == GX_DEVELOPMENT_DEBUG_CALL_STACK_STATUS_UNSUPPORTED_FRAME) {
+            setExpressionError(result, GX_DEVELOPMENT_DEBUG_EXPRESSION_STATUS_FAILED,
+                                GX_DEVELOPMENT_DEBUG_EXPRESSION_ERROR_VARIABLE_METADATA_UNAVAILABLE,
+                                callStack.errorMessage);
+        } else {
+            setExpressionError(result, GX_DEVELOPMENT_DEBUG_EXPRESSION_STATUS_FAILED,
+                                GX_DEVELOPMENT_DEBUG_EXPRESSION_ERROR_INVALID_REQUEST,
+                                callStack.errorMessage);
+        }
+        return callStackResult == GX_OK ? GX_ERROR_FAILED : callStackResult;
+    }
+    if (request.auxiliaryAddress >= callStack.frameCount) {
+        setExpressionError(result, GX_DEVELOPMENT_DEBUG_EXPRESSION_STATUS_INVALID_FRAME,
+                            GX_DEVELOPMENT_DEBUG_EXPRESSION_ERROR_INVALID_FRAME,
+                            "selected Call Stack frame does not exist in the current pause");
+        return GX_ERROR_INVALID_ARGUMENT;
+    }
+    const gx_development_debug_call_stack_frame selectedFrame =
+        callStack.frames[request.auxiliaryAddress];
+    if ((selectedFrame.flags & GX_DEVELOPMENT_DEBUG_CALL_STACK_FRAME_VALIDATED) == 0 ||
+        selectedFrame.instructionPointer == 0 || selectedFrame.framePointer == 0) {
+        setExpressionError(result, GX_DEVELOPMENT_DEBUG_EXPRESSION_STATUS_INVALID_FRAME,
+                            GX_DEVELOPMENT_DEBUG_EXPRESSION_ERROR_INVALID_FRAME,
+                            "selected Call Stack frame is not validated");
+        return GX_ERROR_FAILED;
+    }
+
+    gx_development_debug_variables variables = {};
+    gx_development_debug_request variablesRequest = request;
+    variablesRequest.command = GX_DEVELOPMENT_DEBUG_INSPECT_VARIABLES;
+    gx_result variablesResultCode = InspectVariables(variablesRequest, expectedArtifactSha256,
+                                                     &variables);
+    bool variableMetadataAvailable = variablesResultCode == GX_OK;
+    if (variablesResultCode != GX_OK) {
+        if (variables.status == GX_DEVELOPMENT_DEBUG_VARIABLES_STATUS_STALE) {
+            setExpressionError(result, GX_DEVELOPMENT_DEBUG_EXPRESSION_STATUS_STALE,
+                                GX_DEVELOPMENT_DEBUG_EXPRESSION_ERROR_STALE_GENERATION,
+                                variables.errorMessage);
+            return variablesResultCode;
+        }
+        if (variables.status == GX_DEVELOPMENT_DEBUG_VARIABLES_STATUS_NO_PAUSED_CONTEXT) {
+            setExpressionError(result, GX_DEVELOPMENT_DEBUG_EXPRESSION_STATUS_NO_PAUSED_CONTEXT,
+                                GX_DEVELOPMENT_DEBUG_EXPRESSION_ERROR_TARGET_NOT_PAUSED,
+                                variables.errorMessage);
+            return variablesResultCode;
+        }
+        if (variables.status == GX_DEVELOPMENT_DEBUG_VARIABLES_STATUS_INVALID_FRAME) {
+            setExpressionError(result, GX_DEVELOPMENT_DEBUG_EXPRESSION_STATUS_INVALID_FRAME,
+                                GX_DEVELOPMENT_DEBUG_EXPRESSION_ERROR_INVALID_FRAME,
+                                variables.errorMessage);
+            return variablesResultCode;
+        }
+        if (variables.status != GX_DEVELOPMENT_DEBUG_VARIABLES_STATUS_UNSUPPORTED) {
+            setExpressionError(result, GX_DEVELOPMENT_DEBUG_EXPRESSION_STATUS_FAILED,
+                                GX_DEVELOPMENT_DEBUG_EXPRESSION_ERROR_INVALID_REQUEST,
+                                variables.errorMessage);
+            return variablesResultCode;
+        }
+        variables = gx_development_debug_variables{};
+        variables.size = sizeof(variables);
+        variables.version = GX_DEVELOPMENT_DEBUG_API_VERSION;
+        variables.status = GX_DEVELOPMENT_DEBUG_VARIABLES_STATUS_SUCCESS;
+        variables.handle = request.handle;
+        variables.processId = callStack.processId;
+        variables.nativeRuntimeId = callStack.nativeRuntimeId;
+        variables.threadId = callStack.threadId;
+        variables.sessionGeneration = callStack.sessionGeneration;
+        variables.stopGeneration = callStack.stopGeneration;
+        variables.instructionPointer = selectedFrame.instructionPointer;
+        variables.framePointer = selectedFrame.framePointer;
+        std::memcpy(variables.functionName, selectedFrame.functionName,
+                    sizeof(variables.functionName));
+        std::memcpy(variables.sourcePath, selectedFrame.sourcePath,
+                    sizeof(variables.sourcePath));
+        variableMetadataAvailable = false;
+    }
+
+    result->processId = callStack.processId;
+    result->nativeRuntimeId = callStack.nativeRuntimeId;
+    result->threadId = callStack.threadId;
+    result->stopGeneration = callStack.stopGeneration;
+    result->instructionPointer = selectedFrame.instructionPointer;
+    result->framePointer = selectedFrame.framePointer;
+    std::memcpy(result->functionName, selectedFrame.functionName,
+                sizeof(result->functionName));
+    std::memcpy(result->sourcePath, selectedFrame.sourcePath,
+                sizeof(result->sourcePath));
+
+    kernel::native_elf::NativeDebugWatchResult watchResult = {};
+    {
+        std::lock_guard<std::mutex> lock(g_mutex);
+        DebugRuntime* runtime = findRuntimeLocked(request.nativeRuntimeId, request.processId);
+        if (!runtime) {
+            setExpressionError(result, GX_DEVELOPMENT_DEBUG_EXPRESSION_STATUS_STALE,
+                                GX_DEVELOPMENT_DEBUG_EXPRESSION_ERROR_STALE_GENERATION,
+                                "target runtime is not registered");
+            return GX_ERROR_FAILED;
+        }
+        if (runtime->sourceMetadataPresent && runtime->sourceMetadataValid)
+            variableMetadataAvailable = true;
+        NativeDebugWatchMetadataContext metadata = {};
+        metadata.runtime = runtime;
+        metadata.address = selectedFrame.instructionPointer;
+        std::memcpy(metadata.functionName, selectedFrame.functionName,
+                    sizeof(metadata.functionName));
+        kernel::native_elf::NativeDebugWatchFrame frame = {};
+        frame.paused = true;
+        frame.frameIndex = static_cast<uint32_t>(request.auxiliaryAddress);
+        frame.sessionGeneration = request.sessionGeneration;
+        frame.stopGeneration = request.stopGeneration;
+        frame.instructionPointer = selectedFrame.instructionPointer;
+        frame.framePointer = selectedFrame.framePointer;
+        frame.variables = &variables;
+        frame.variableMetadataAvailable = variableMetadataAvailable;
+        frame.resolverContext = &metadata;
+        frame.resolveIdentifier = resolveNativeDebugWatchIdentifier;
+        kernel::native_elf::native_debug_watch_evaluate(request.expression, frame, &watchResult);
+    }
+
+    auto expressionCategory = [](kernel::native_elf::NativeDebugWatchStatus status,
+                                 const kernel::native_elf::NativeDebugWatchResult& watch) {
+        switch (status) {
+        case kernel::native_elf::NativeDebugWatchStatus::SyntaxError:
+            return static_cast<uint32_t>(GX_DEVELOPMENT_DEBUG_EXPRESSION_ERROR_SYNTAX);
+        case kernel::native_elf::NativeDebugWatchStatus::UnknownIdentifier:
+            return static_cast<uint32_t>(GX_DEVELOPMENT_DEBUG_EXPRESSION_ERROR_UNKNOWN_IDENTIFIER);
+        case kernel::native_elf::NativeDebugWatchStatus::NotLive:
+            return static_cast<uint32_t>(GX_DEVELOPMENT_DEBUG_EXPRESSION_ERROR_VARIABLE_NOT_LIVE);
+        case kernel::native_elf::NativeDebugWatchStatus::UnsupportedType:
+            return static_cast<uint32_t>(GX_DEVELOPMENT_DEBUG_EXPRESSION_ERROR_UNSUPPORTED_TYPE);
+        case kernel::native_elf::NativeDebugWatchStatus::UnsupportedOperator:
+            return static_cast<uint32_t>(GX_DEVELOPMENT_DEBUG_EXPRESSION_ERROR_UNSUPPORTED_OPERATOR);
+        case kernel::native_elf::NativeDebugWatchStatus::DivideByZero:
+            return static_cast<uint32_t>(GX_DEVELOPMENT_DEBUG_EXPRESSION_ERROR_DIVIDE_BY_ZERO);
+        case kernel::native_elf::NativeDebugWatchStatus::Overflow:
+            return static_cast<uint32_t>(GX_DEVELOPMENT_DEBUG_EXPRESSION_ERROR_OVERFLOW);
+        case kernel::native_elf::NativeDebugWatchStatus::InvalidSelectedFrame:
+            return static_cast<uint32_t>(GX_DEVELOPMENT_DEBUG_EXPRESSION_ERROR_INVALID_FRAME);
+        case kernel::native_elf::NativeDebugWatchStatus::StaleGeneration:
+            return static_cast<uint32_t>(GX_DEVELOPMENT_DEBUG_EXPRESSION_ERROR_STALE_GENERATION);
+        case kernel::native_elf::NativeDebugWatchStatus::Running:
+            return static_cast<uint32_t>(GX_DEVELOPMENT_DEBUG_EXPRESSION_ERROR_TARGET_NOT_PAUSED);
+        case kernel::native_elf::NativeDebugWatchStatus::TooComplex:
+            return static_cast<uint32_t>(watch.diagnosticOffset == 0 &&
+                                         std::strstr(watch.diagnostic, "length") != nullptr
+                ? GX_DEVELOPMENT_DEBUG_EXPRESSION_ERROR_EXPRESSION_TOO_LONG
+                : GX_DEVELOPMENT_DEBUG_EXPRESSION_ERROR_COMPLEXITY_LIMIT);
+        case kernel::native_elf::NativeDebugWatchStatus::ExpressionTooLong:
+            return static_cast<uint32_t>(GX_DEVELOPMENT_DEBUG_EXPRESSION_ERROR_EXPRESSION_TOO_LONG);
+        case kernel::native_elf::NativeDebugWatchStatus::MetadataUnavailable:
+            return static_cast<uint32_t>(GX_DEVELOPMENT_DEBUG_EXPRESSION_ERROR_VARIABLE_METADATA_UNAVAILABLE);
+        case kernel::native_elf::NativeDebugWatchStatus::Success:
+            return static_cast<uint32_t>(GX_DEVELOPMENT_DEBUG_EXPRESSION_ERROR_NONE);
+        }
+        return static_cast<uint32_t>(GX_DEVELOPMENT_DEBUG_EXPRESSION_ERROR_INVALID_REQUEST);
+    };
+    if (watchResult.status != kernel::native_elf::NativeDebugWatchStatus::Success) {
+        const uint32_t status = watchResult.status == kernel::native_elf::NativeDebugWatchStatus::StaleGeneration
+            ? GX_DEVELOPMENT_DEBUG_EXPRESSION_STATUS_STALE
+            : watchResult.status == kernel::native_elf::NativeDebugWatchStatus::InvalidSelectedFrame
+                ? GX_DEVELOPMENT_DEBUG_EXPRESSION_STATUS_INVALID_FRAME
+                : watchResult.status == kernel::native_elf::NativeDebugWatchStatus::Running
+                    ? GX_DEVELOPMENT_DEBUG_EXPRESSION_STATUS_NO_PAUSED_CONTEXT
+                    : GX_DEVELOPMENT_DEBUG_EXPRESSION_STATUS_FAILED;
+        setExpressionError(result, status, expressionCategory(watchResult.status, watchResult),
+                            watchResult.diagnostic, watchResult.diagnosticOffset);
+        return GX_ERROR_FAILED;
+    }
+    result->status = GX_DEVELOPMENT_DEBUG_EXPRESSION_STATUS_SUCCESS;
+    result->resultKind = watchResult.type == kernel::native_elf::NativeDebugWatchValueType::Pointer
+        ? GX_DEVELOPMENT_DEBUG_EXPRESSION_RESULT_POINTER
+        : GX_DEVELOPMENT_DEBUG_EXPRESSION_RESULT_SIGNED_INTEGER;
+    result->errorCategory = GX_DEVELOPMENT_DEBUG_EXPRESSION_ERROR_NONE;
+    result->signedValue = watchResult.signedValue;
+    result->unsignedValue = watchResult.unsignedValue;
+    result->pointerValue = watchResult.type == kernel::native_elf::NativeDebugWatchValueType::Pointer
+        ? watchResult.unsignedValue : 0;
     return GX_OK;
 }
 

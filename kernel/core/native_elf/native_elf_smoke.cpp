@@ -6138,7 +6138,7 @@ auto run_phase28g_normal_session = [&](const gx_build_snapshot& build) -> bool
         request.artifactAbi = "guidexos-c-abi-v1";
         if (debugControlled) {
             request.debugSourcePath = "src/helper.cpp";
-            request.debugSourceLine = 4;
+            request.debugSourceLine = 5;
         }
         return request;
     };
@@ -6298,11 +6298,19 @@ auto run_phase28g_normal_session = [&](const gx_build_snapshot& build) -> bool
     bool h28WatchFrame0 = false;
     bool h28WatchFrame1 = false;
     bool h28WatchFrame2 = false;
+    bool h28WatchConstant = false;
+    bool h28WatchArithmetic = false;
     bool h28WatchCrossFrame = false;
+    bool h28WatchSameName = false;
     bool h28WatchPrecedence = false;
     bool h28WatchParentheses = false;
     bool h28WatchPointer = false;
-    bool h28WatchBoolean = false;
+    bool h28WatchUnknown = false;
+    bool h28WatchDead = false;
+    bool h28WatchDivideByZero = false;
+    bool h28WatchOverflow = false;
+    bool h28WatchLimit = false;
+    bool h28WatchValueChange = false;
     bool h28WatchStale = false;
     bool h28WatchInvalidFrame = false;
     bool h28WatchRunning = false;

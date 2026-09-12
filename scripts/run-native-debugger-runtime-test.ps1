@@ -15,6 +15,7 @@ if (-not $compiler) { throw "g++ was not found." }
 
 $sources = @(
     "native_app_debugger.cpp",
+    "kernel/core/native_elf/native_elf_debug_watches.cpp",
     "executable_memory.cpp",
     "allocator.cpp",
     "logger.cpp"

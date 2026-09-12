@@ -173,6 +173,12 @@ struct NativeHostCallTable {
     gx_result (*bare_metal_development_debug_inspect_variables)(NativeGxAppContext* ctx,
                                                                  const gx_development_debug_request* request,
                                                                  gx_development_debug_variables* result) = nullptr;
+    gx_result (*development_debug_evaluate_expression)(NativeGxAppContext* ctx,
+                                                        const gx_development_debug_request* request,
+                                                        gx_development_debug_expression* result) = nullptr;
+    gx_result (*bare_metal_development_debug_evaluate_expression)(NativeGxAppContext* ctx,
+                                                                   const gx_development_debug_request* request,
+                                                                   gx_development_debug_expression* result) = nullptr;
 };
 
 static_assert(offsetof(NativeHostCallTable, log) == 8, "native ABI log slot changed");
@@ -229,7 +235,11 @@ static_assert(offsetof(NativeHostCallTable, native_window_run) == 376, "native A
               "native ABI hosted variable inspection slot changed");
     static_assert(offsetof(NativeHostCallTable, bare_metal_development_debug_inspect_variables) == 424,
               "native ABI bare-metal variable inspection slot changed");
-    static_assert(sizeof(NativeHostCallTable) == 432, "native ABI host call table size changed");
+    static_assert(offsetof(NativeHostCallTable, development_debug_evaluate_expression) == 432,
+              "native ABI hosted expression slot changed");
+    static_assert(offsetof(NativeHostCallTable, bare_metal_development_debug_evaluate_expression) == 440,
+              "native ABI bare-metal expression slot changed");
+    static_assert(sizeof(NativeHostCallTable) == 448, "native ABI host call table size changed");
 
 enum class NativeAppLifecycleState {
     Created = 0,

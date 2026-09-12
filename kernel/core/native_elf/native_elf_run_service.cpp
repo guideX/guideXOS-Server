@@ -11,6 +11,7 @@
 #include "native_elf_source_step.h"
 #include "native_elf_step_out.h"
 #include "native_elf_call_stack.h"
+#include "native_elf_debug_watches.h"
 #include "../compiler/elf_writer.h"
 #include "../include/kernel/kernel_app.h"
 #include "kernel/serial_debug.h"
@@ -3226,6 +3227,64 @@ static void set_debug_variables_error(gx_development_debug_variables* result,
               message ? message : "NativeElf variable inspection rejected");
 }
 
+static void clear_debug_expression(gx_development_debug_expression* result)
+{
+    if (!result) return;
+    *result = {};
+    result->size = sizeof(*result);
+    result->version = GX_DEVELOPMENT_DEBUG_API_VERSION;
+    result->status = GX_DEVELOPMENT_DEBUG_EXPRESSION_STATUS_NONE;
+}
+
+static void set_debug_expression_error(gx_development_debug_expression* result,
+                                       uint32_t status, uint32_t category,
+                                       const char* message, uint32_t offset = 0)
+{
+    if (!result) return;
+    result->status = status;
+    result->errorCategory = category;
+    result->diagnosticOffset = offset;
+    copy_text(result->errorMessage, sizeof(result->errorMessage),
+              message ? message : "NativeElf watch expression rejected");
+}
+
+struct NativeDebugWatchMetadataContext {
+    uint64_t address;
+    char functionName[GX_DEVELOPMENT_DEBUG_MAX_FUNCTION_NAME_BYTES];
+};
+
+static NativeDebugWatchResolveStatus resolve_native_debug_watch_identifier(
+    void* opaque, const char* identifier)
+{
+    const NativeDebugWatchMetadataContext* context =
+        static_cast<const NativeDebugWatchMetadataContext*>(opaque);
+    const NativeAppExecutionContext* runtime = native_elf_runtime_context();
+    if (!context || !runtime || !identifier || identifier[0] == '\0' ||
+        s_operation.artifactSize == 0)
+        return NativeDebugWatchResolveStatus::MetadataUnavailable;
+    const char* error = nullptr;
+    const compiler::DebugVariableLookupStatus status =
+        compiler::resolve_bootstrap_debug_variable_state(
+            s_artifact, static_cast<uint32_t>(s_operation.artifactSize),
+            runtime->imageBase, s_operation.debugCodeFileOffset,
+            s_operation.debugCodeBytes, context->address, context->functionName,
+            identifier, &error);
+    (void)error;
+    switch (status) {
+    case compiler::DebugVariableLookupStatus::Live:
+        return NativeDebugWatchResolveStatus::Available;
+    case compiler::DebugVariableLookupStatus::DeclaredNotLive:
+        return NativeDebugWatchResolveStatus::NotLive;
+    case compiler::DebugVariableLookupStatus::UnsupportedType:
+        return NativeDebugWatchResolveStatus::UnsupportedType;
+    case compiler::DebugVariableLookupStatus::Unknown:
+        return NativeDebugWatchResolveStatus::UnknownIdentifier;
+    case compiler::DebugVariableLookupStatus::MetadataUnavailable:
+        return NativeDebugWatchResolveStatus::MetadataUnavailable;
+    }
+    return NativeDebugWatchResolveStatus::MetadataUnavailable;
+}
+
 static bool resolve_call_stack_direct_call(
     const Operation& operation, uint64_t returnAddress, const char* expectedCallee,
     uint64_t* callRip, compiler::ResolvedSourceMapping* callerMapping)
@@ -3276,7 +3335,7 @@ gx_result call_stack(const gx_development_debug_request& request,
 {
     if (!outResult) return GX_ERROR_INVALID_ARGUMENT;
     clear_call_stack(outResult);
-    if (request.size < sizeof(gx_development_debug_request) ||
+    if (request.size < GX_DEVELOPMENT_DEBUG_REQUEST_LEGACY_BYTES ||
         request.version != GX_DEVELOPMENT_DEBUG_API_VERSION ||
         request.command != GX_DEVELOPMENT_DEBUG_CALL_STACK) {
         set_call_stack_error(outResult, GX_DEVELOPMENT_DEBUG_CALL_STACK_STATUS_REJECTED,
@@ -3488,7 +3547,7 @@ gx_result inspect_variables(const gx_development_debug_request& request,
 {
     if (!outResult) return GX_ERROR_INVALID_ARGUMENT;
     clear_debug_variables(outResult);
-    if (request.size < sizeof(gx_development_debug_request) ||
+    if (request.size < GX_DEVELOPMENT_DEBUG_REQUEST_LEGACY_BYTES ||
         request.version != GX_DEVELOPMENT_DEBUG_API_VERSION ||
         request.command != GX_DEVELOPMENT_DEBUG_INSPECT_VARIABLES) {
         set_debug_variables_error(outResult, GX_DEVELOPMENT_DEBUG_VARIABLES_STATUS_REJECTED,
@@ -3726,12 +3785,231 @@ gx_result inspect_variables(const gx_development_debug_request& request,
     return GX_OK;
 }
 
+gx_result evaluate_expression(const gx_development_debug_request& request,
+                              gx_development_debug_expression* outResult)
+{
+    if (!outResult) return GX_ERROR_INVALID_ARGUMENT;
+    clear_debug_expression(outResult);
+    outResult->handle = request.handle;
+    outResult->sessionGeneration = request.sessionGeneration;
+    outResult->selectedFrameIndex = request.auxiliaryAddress;
+    const size_t requestBytes =
+        offsetof(gx_development_debug_request, expression) + sizeof(request.expression);
+    if (request.size < requestBytes ||
+        request.version != GX_DEVELOPMENT_DEBUG_API_VERSION ||
+        request.command != GX_DEVELOPMENT_DEBUG_EVALUATE_EXPRESSION ||
+        request.expression == nullptr) {
+        set_debug_expression_error(outResult,
+                                   GX_DEVELOPMENT_DEBUG_EXPRESSION_STATUS_REJECTED,
+                                   GX_DEVELOPMENT_DEBUG_EXPRESSION_ERROR_INVALID_REQUEST,
+                                   "NativeElf watch expression request is invalid");
+        return GX_ERROR_INVALID_ARGUMENT;
+    }
+    if (!decode(request.handle)) {
+        set_debug_expression_error(outResult,
+                                   GX_DEVELOPMENT_DEBUG_EXPRESSION_STATUS_STALE,
+                                   GX_DEVELOPMENT_DEBUG_EXPRESSION_ERROR_STALE_GENERATION,
+                                   "NativeElf watch expression handle is stale");
+        return GX_ERROR_FAILED;
+    }
+    if (!s_operation.debugControlled) {
+        set_debug_expression_error(outResult,
+                                   GX_DEVELOPMENT_DEBUG_EXPRESSION_STATUS_REJECTED,
+                                   GX_DEVELOPMENT_DEBUG_EXPRESSION_ERROR_INVALID_REQUEST,
+                                   "Run generation is not debugger-controlled");
+        return GX_ERROR_UNSUPPORTED;
+    }
+    if (!request.artifactSha256 ||
+        !equal_text(request.artifactSha256, s_operation.artifactSha256) ||
+        !debug_request_identity_matches(s_operation, request)) {
+        set_debug_expression_error(outResult,
+                                   (request.sessionGeneration != 0 &&
+                                    request.sessionGeneration != s_operation.registrationGeneration) ||
+                                   (request.stopGeneration != 0 &&
+                                    request.stopGeneration != s_operation.debugStopGeneration)
+                                       ? GX_DEVELOPMENT_DEBUG_EXPRESSION_STATUS_STALE
+                                       : GX_DEVELOPMENT_DEBUG_EXPRESSION_STATUS_REJECTED,
+                                   (request.sessionGeneration != 0 &&
+                                    request.sessionGeneration != s_operation.registrationGeneration) ||
+                                   (request.stopGeneration != 0 &&
+                                    request.stopGeneration != s_operation.debugStopGeneration)
+                                       ? GX_DEVELOPMENT_DEBUG_EXPRESSION_ERROR_STALE_GENERATION
+                                       : GX_DEVELOPMENT_DEBUG_EXPRESSION_ERROR_INVALID_REQUEST,
+                                   "NativeElf watch expression session identity is stale");
+        return GX_ERROR_FAILED;
+    }
+    if (request.auxiliaryAddress >= GX_DEVELOPMENT_DEBUG_MAX_CALL_STACK_FRAMES) {
+        set_debug_expression_error(outResult,
+                                   GX_DEVELOPMENT_DEBUG_EXPRESSION_STATUS_INVALID_FRAME,
+                                   GX_DEVELOPMENT_DEBUG_EXPRESSION_ERROR_INVALID_FRAME,
+                                   "selected Call Stack frame index is outside the bounded capacity");
+        return GX_ERROR_INVALID_ARGUMENT;
+    }
+    if (s_operation.state != GX_DEVELOPMENT_RUN_PAUSED ||
+        (!s_operation.debugBreakpointHit && !s_operation.debugStepTrapObserved) ||
+        s_operation.debugStepActive || s_operation.debugSourceStepActive ||
+        s_operation.debugStepOverActive || s_operation.debugStepOutActive ||
+        !s_operation.debugContext || s_operation.debugContext->cs != 0x08) {
+        set_debug_expression_error(outResult,
+                                   GX_DEVELOPMENT_DEBUG_EXPRESSION_STATUS_NO_PAUSED_CONTEXT,
+                                   GX_DEVELOPMENT_DEBUG_EXPRESSION_ERROR_TARGET_NOT_PAUSED,
+                                   "NativeElf target has no complete paused user context");
+        return GX_ERROR_BUSY;
+    }
+
+    gx_development_debug_request callStackRequest = request;
+    callStackRequest.command = GX_DEVELOPMENT_DEBUG_CALL_STACK;
+    callStackRequest.auxiliaryAddress = 0;
+    gx_development_debug_call_stack callStack = {};
+    const gx_result callStackCode = call_stack(callStackRequest, &callStack);
+    if (callStackCode != GX_OK ||
+        (callStack.status != GX_DEVELOPMENT_DEBUG_CALL_STACK_STATUS_SUCCESS &&
+         callStack.status != GX_DEVELOPMENT_DEBUG_CALL_STACK_STATUS_TRUNCATED)) {
+        const uint32_t status = callStack.status == GX_DEVELOPMENT_DEBUG_CALL_STACK_STATUS_STALE
+            ? GX_DEVELOPMENT_DEBUG_EXPRESSION_STATUS_STALE
+            : callStack.status == GX_DEVELOPMENT_DEBUG_CALL_STACK_STATUS_NO_PAUSED_CONTEXT
+                ? GX_DEVELOPMENT_DEBUG_EXPRESSION_STATUS_NO_PAUSED_CONTEXT
+                : callStack.status == GX_DEVELOPMENT_DEBUG_CALL_STACK_STATUS_INVALID_FRAME
+                    ? GX_DEVELOPMENT_DEBUG_EXPRESSION_STATUS_INVALID_FRAME
+                    : GX_DEVELOPMENT_DEBUG_EXPRESSION_STATUS_FAILED;
+        const uint32_t category = callStack.status == GX_DEVELOPMENT_DEBUG_CALL_STACK_STATUS_STALE
+            ? GX_DEVELOPMENT_DEBUG_EXPRESSION_ERROR_STALE_GENERATION
+            : callStack.status == GX_DEVELOPMENT_DEBUG_CALL_STACK_STATUS_NO_PAUSED_CONTEXT
+                ? GX_DEVELOPMENT_DEBUG_EXPRESSION_ERROR_TARGET_NOT_PAUSED
+                : callStack.status == GX_DEVELOPMENT_DEBUG_CALL_STACK_STATUS_INVALID_FRAME
+                    ? GX_DEVELOPMENT_DEBUG_EXPRESSION_ERROR_INVALID_FRAME
+                    : GX_DEVELOPMENT_DEBUG_EXPRESSION_ERROR_VARIABLE_METADATA_UNAVAILABLE;
+        set_debug_expression_error(outResult, status, category, callStack.errorMessage);
+        return callStackCode == GX_OK ? GX_ERROR_FAILED : callStackCode;
+    }
+    if (request.auxiliaryAddress >= callStack.frameCount) {
+        set_debug_expression_error(outResult,
+                                   GX_DEVELOPMENT_DEBUG_EXPRESSION_STATUS_INVALID_FRAME,
+                                   GX_DEVELOPMENT_DEBUG_EXPRESSION_ERROR_INVALID_FRAME,
+                                   "selected Call Stack frame does not exist in the current pause");
+        return GX_ERROR_INVALID_ARGUMENT;
+    }
+    const gx_development_debug_call_stack_frame selectedFrame =
+        callStack.frames[request.auxiliaryAddress];
+    if ((selectedFrame.flags & GX_DEVELOPMENT_DEBUG_CALL_STACK_FRAME_VALIDATED) == 0 ||
+        selectedFrame.instructionPointer == 0 || selectedFrame.framePointer == 0) {
+        set_debug_expression_error(outResult,
+                                   GX_DEVELOPMENT_DEBUG_EXPRESSION_STATUS_INVALID_FRAME,
+                                   GX_DEVELOPMENT_DEBUG_EXPRESSION_ERROR_INVALID_FRAME,
+                                   "selected Call Stack frame is not validated");
+        return GX_ERROR_FAILED;
+    }
+
+    gx_development_debug_variables variables = {};
+    gx_development_debug_request variablesRequest = request;
+    variablesRequest.command = GX_DEVELOPMENT_DEBUG_INSPECT_VARIABLES;
+    const gx_result variablesCode = inspect_variables(variablesRequest, &variables);
+    if (variablesCode != GX_OK &&
+        variables.status != GX_DEVELOPMENT_DEBUG_VARIABLES_STATUS_UNSUPPORTED) {
+        const uint32_t status = variables.status == GX_DEVELOPMENT_DEBUG_VARIABLES_STATUS_STALE
+            ? GX_DEVELOPMENT_DEBUG_EXPRESSION_STATUS_STALE
+            : variables.status == GX_DEVELOPMENT_DEBUG_VARIABLES_STATUS_NO_PAUSED_CONTEXT
+                ? GX_DEVELOPMENT_DEBUG_EXPRESSION_STATUS_NO_PAUSED_CONTEXT
+                : variables.status == GX_DEVELOPMENT_DEBUG_VARIABLES_STATUS_INVALID_FRAME
+                    ? GX_DEVELOPMENT_DEBUG_EXPRESSION_STATUS_INVALID_FRAME
+                    : GX_DEVELOPMENT_DEBUG_EXPRESSION_STATUS_FAILED;
+        const uint32_t category = variables.status == GX_DEVELOPMENT_DEBUG_VARIABLES_STATUS_STALE
+            ? GX_DEVELOPMENT_DEBUG_EXPRESSION_ERROR_STALE_GENERATION
+            : variables.status == GX_DEVELOPMENT_DEBUG_VARIABLES_STATUS_NO_PAUSED_CONTEXT
+                ? GX_DEVELOPMENT_DEBUG_EXPRESSION_ERROR_TARGET_NOT_PAUSED
+                : variables.status == GX_DEVELOPMENT_DEBUG_VARIABLES_STATUS_INVALID_FRAME
+                    ? GX_DEVELOPMENT_DEBUG_EXPRESSION_ERROR_INVALID_FRAME
+                    : GX_DEVELOPMENT_DEBUG_EXPRESSION_ERROR_INVALID_REQUEST;
+        set_debug_expression_error(outResult, status, category, variables.errorMessage);
+        return variablesCode;
+    }
+    if (variablesCode != GX_OK) {
+        variables = {};
+        variables.size = sizeof(variables);
+        variables.version = GX_DEVELOPMENT_DEBUG_API_VERSION;
+        variables.status = GX_DEVELOPMENT_DEBUG_VARIABLES_STATUS_SUCCESS;
+        variables.handle = request.handle;
+        variables.nativeRuntimeId = callStack.nativeRuntimeId;
+        variables.threadId = callStack.threadId;
+        variables.sessionGeneration = callStack.sessionGeneration;
+        variables.stopGeneration = callStack.stopGeneration;
+        variables.instructionPointer = selectedFrame.instructionPointer;
+        variables.framePointer = selectedFrame.framePointer;
+        copy_text(variables.functionName, sizeof(variables.functionName), selectedFrame.functionName);
+        copy_text(variables.sourcePath, sizeof(variables.sourcePath), selectedFrame.sourcePath);
+    }
+
+    outResult->processId = callStack.processId;
+    outResult->nativeRuntimeId = callStack.nativeRuntimeId;
+    outResult->threadId = callStack.threadId;
+    outResult->stopGeneration = callStack.stopGeneration;
+    outResult->instructionPointer = selectedFrame.instructionPointer;
+    outResult->framePointer = selectedFrame.framePointer;
+    copy_text(outResult->functionName, sizeof(outResult->functionName), selectedFrame.functionName);
+    copy_text(outResult->sourcePath, sizeof(outResult->sourcePath), selectedFrame.sourcePath);
+
+    NativeDebugWatchMetadataContext metadata = {};
+    metadata.address = selectedFrame.instructionPointer;
+    copy_text(metadata.functionName, sizeof(metadata.functionName), selectedFrame.functionName);
+    NativeDebugWatchFrame frame = {};
+    frame.paused = true;
+    frame.frameIndex = static_cast<uint32_t>(request.auxiliaryAddress);
+    frame.sessionGeneration = request.sessionGeneration;
+    frame.stopGeneration = request.stopGeneration;
+    frame.instructionPointer = selectedFrame.instructionPointer;
+    frame.framePointer = selectedFrame.framePointer;
+    frame.variables = &variables;
+    frame.variableMetadataAvailable = s_operation.artifactSize != 0;
+    frame.resolverContext = &metadata;
+    frame.resolveIdentifier = resolve_native_debug_watch_identifier;
+    NativeDebugWatchResult watch = {};
+    native_debug_watch_evaluate(request.expression, frame, &watch);
+    if (watch.status != NativeDebugWatchStatus::Success) {
+        const uint32_t status = watch.status == NativeDebugWatchStatus::StaleGeneration
+            ? GX_DEVELOPMENT_DEBUG_EXPRESSION_STATUS_STALE
+            : watch.status == NativeDebugWatchStatus::InvalidSelectedFrame
+                ? GX_DEVELOPMENT_DEBUG_EXPRESSION_STATUS_INVALID_FRAME
+                : watch.status == NativeDebugWatchStatus::Running
+                    ? GX_DEVELOPMENT_DEBUG_EXPRESSION_STATUS_NO_PAUSED_CONTEXT
+                    : GX_DEVELOPMENT_DEBUG_EXPRESSION_STATUS_FAILED;
+        uint32_t category = GX_DEVELOPMENT_DEBUG_EXPRESSION_ERROR_INVALID_REQUEST;
+        switch (watch.status) {
+        case NativeDebugWatchStatus::SyntaxError: category = GX_DEVELOPMENT_DEBUG_EXPRESSION_ERROR_SYNTAX; break;
+        case NativeDebugWatchStatus::UnknownIdentifier: category = GX_DEVELOPMENT_DEBUG_EXPRESSION_ERROR_UNKNOWN_IDENTIFIER; break;
+        case NativeDebugWatchStatus::NotLive: category = GX_DEVELOPMENT_DEBUG_EXPRESSION_ERROR_VARIABLE_NOT_LIVE; break;
+        case NativeDebugWatchStatus::UnsupportedType: category = GX_DEVELOPMENT_DEBUG_EXPRESSION_ERROR_UNSUPPORTED_TYPE; break;
+        case NativeDebugWatchStatus::UnsupportedOperator: category = GX_DEVELOPMENT_DEBUG_EXPRESSION_ERROR_UNSUPPORTED_OPERATOR; break;
+        case NativeDebugWatchStatus::DivideByZero: category = GX_DEVELOPMENT_DEBUG_EXPRESSION_ERROR_DIVIDE_BY_ZERO; break;
+        case NativeDebugWatchStatus::Overflow: category = GX_DEVELOPMENT_DEBUG_EXPRESSION_ERROR_OVERFLOW; break;
+        case NativeDebugWatchStatus::InvalidSelectedFrame: category = GX_DEVELOPMENT_DEBUG_EXPRESSION_ERROR_INVALID_FRAME; break;
+        case NativeDebugWatchStatus::StaleGeneration: category = GX_DEVELOPMENT_DEBUG_EXPRESSION_ERROR_STALE_GENERATION; break;
+        case NativeDebugWatchStatus::Running: category = GX_DEVELOPMENT_DEBUG_EXPRESSION_ERROR_TARGET_NOT_PAUSED; break;
+        case NativeDebugWatchStatus::TooComplex: category = GX_DEVELOPMENT_DEBUG_EXPRESSION_ERROR_COMPLEXITY_LIMIT; break;
+        case NativeDebugWatchStatus::ExpressionTooLong: category = GX_DEVELOPMENT_DEBUG_EXPRESSION_ERROR_EXPRESSION_TOO_LONG; break;
+        case NativeDebugWatchStatus::MetadataUnavailable: category = GX_DEVELOPMENT_DEBUG_EXPRESSION_ERROR_VARIABLE_METADATA_UNAVAILABLE; break;
+        case NativeDebugWatchStatus::Success: break;
+        }
+        set_debug_expression_error(outResult, status, category, watch.diagnostic,
+                                   watch.diagnosticOffset);
+        return GX_ERROR_FAILED;
+    }
+    outResult->status = GX_DEVELOPMENT_DEBUG_EXPRESSION_STATUS_SUCCESS;
+    outResult->resultKind = watch.type == NativeDebugWatchValueType::Pointer
+        ? GX_DEVELOPMENT_DEBUG_EXPRESSION_RESULT_POINTER
+        : GX_DEVELOPMENT_DEBUG_EXPRESSION_RESULT_SIGNED_INTEGER;
+    outResult->signedValue = watch.signedValue;
+    outResult->unsignedValue = watch.unsignedValue;
+    outResult->pointerValue = watch.type == NativeDebugWatchValueType::Pointer
+        ? watch.unsignedValue : 0;
+    return GX_OK;
+}
+
 gx_result debug(const gx_development_debug_request& request,
                 gx_development_debug_snapshot* outSnapshot)
 {
     if (!outSnapshot) return GX_ERROR_INVALID_ARGUMENT;
     clear_debug_snapshot(outSnapshot);
-    if (request.size < sizeof(gx_development_debug_request) ||
+    if (request.size < GX_DEVELOPMENT_DEBUG_REQUEST_LEGACY_BYTES ||
         request.version != GX_DEVELOPMENT_DEBUG_API_VERSION) {
         set_debug_error(outSnapshot, "NativeElf debug request version or size is invalid");
         return GX_ERROR_INVALID_ARGUMENT;

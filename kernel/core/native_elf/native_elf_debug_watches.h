@@ -8,11 +8,12 @@ namespace native_elf {
 // These limits are debugger limits, independent of compiler source limits.
 // The evaluator owns no target memory and uses only fixed-size local storage.
 static const uint32_t NATIVE_DEBUG_WATCH_MAX_EXPRESSION_BYTES = 256;
-static const uint32_t NATIVE_DEBUG_WATCH_MAX_TOKENS = 96;
+static const uint32_t NATIVE_DEBUG_WATCH_MAX_TOKENS = 64;
 static const uint32_t NATIVE_DEBUG_WATCH_MAX_IDENTIFIER_BYTES = 64;
 static const uint32_t NATIVE_DEBUG_WATCH_MAX_NUMERIC_LITERAL_BYTES = 32;
 static const uint32_t NATIVE_DEBUG_WATCH_MAX_AST_NODES = 64;
 static const uint32_t NATIVE_DEBUG_WATCH_MAX_PARSE_DEPTH = 16;
+static const uint32_t NATIVE_DEBUG_WATCH_MAX_EVALUATION_DEPTH = 32;
 static const uint32_t NATIVE_DEBUG_WATCH_MAX_OPERATORS = 32;
 static const uint32_t NATIVE_DEBUG_WATCH_MAX_RESULT_BYTES = 64;
 static const uint32_t NATIVE_DEBUG_WATCH_MAX_DIAGNOSTIC_BYTES = 128;
@@ -29,14 +30,14 @@ enum class NativeDebugWatchStatus : uint32_t {
     DivideByZero,
     Overflow,
     TooComplex,
+    ExpressionTooLong,
     Running,
     MetadataUnavailable
 };
 
 enum class NativeDebugWatchValueType : uint32_t {
     SignedInt32 = 1,
-    Pointer = 2,
-    Boolean = 3
+    Pointer = 2
 };
 
 enum class NativeDebugWatchResolveStatus : uint32_t {
@@ -71,7 +72,6 @@ struct NativeDebugWatchResult {
     uint64_t rawValue;
     int64_t signedValue;
     uint64_t unsignedValue;
-    bool booleanValue;
     uint32_t frameIndex;
     uint64_t sessionGeneration;
     uint64_t stopGeneration;

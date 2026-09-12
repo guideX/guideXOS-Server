@@ -10,6 +10,8 @@ extern "C" {
 #define GX_DEVELOPMENT_DEBUG_MAX_ERROR_BYTES 128u
 #define GX_DEVELOPMENT_DEBUG_MAX_FUNCTION_NAME_BYTES 64u
 #define GX_DEVELOPMENT_DEBUG_MAX_SOURCE_PATH_BYTES 160u
+#define GX_DEVELOPMENT_DEBUG_MAX_EXPRESSION_BYTES 256u
+#define GX_DEVELOPMENT_DEBUG_REQUEST_LEGACY_BYTES 104u
 
 typedef enum gx_development_debug_command {
     GX_DEVELOPMENT_DEBUG_BIND_SOFTWARE_BREAKPOINT = 1,
@@ -37,7 +39,9 @@ typedef enum gx_development_debug_command {
     /* Phase 28F: inspect the bounded user frame chain without resuming it. */
     GX_DEVELOPMENT_DEBUG_CALL_STACK = 19,
     /* Phase 28G: inspect validated top-frame arguments and locals. */
-    GX_DEVELOPMENT_DEBUG_INSPECT_VARIABLES = 20
+    GX_DEVELOPMENT_DEBUG_INSPECT_VARIABLES = 20,
+    /* Phase 28I: evaluate one bounded, read-only scalar expression. */
+    GX_DEVELOPMENT_DEBUG_EVALUATE_EXPRESSION = 21
 } gx_development_debug_command;
 
 #define GX_DEVELOPMENT_DEBUG_MAX_CALL_STACK_FRAMES 16u
@@ -205,7 +209,70 @@ typedef struct gx_development_debug_request {
     uint64_t auxiliaryAddress;
     uint32_t readByteCount;
     uint32_t reserved;
+    /* Only used by GX_DEVELOPMENT_DEBUG_EVALUATE_EXPRESSION. The expression
+       is a bounded read-only query; it is never a target address or command. */
+    const char* expression;
 } gx_development_debug_request;
+
+typedef enum gx_development_debug_expression_status {
+    GX_DEVELOPMENT_DEBUG_EXPRESSION_STATUS_NONE = 0,
+    GX_DEVELOPMENT_DEBUG_EXPRESSION_STATUS_SUCCESS = 1,
+    GX_DEVELOPMENT_DEBUG_EXPRESSION_STATUS_REJECTED = 2,
+    GX_DEVELOPMENT_DEBUG_EXPRESSION_STATUS_NO_PAUSED_CONTEXT = 3,
+    GX_DEVELOPMENT_DEBUG_EXPRESSION_STATUS_STALE = 4,
+    GX_DEVELOPMENT_DEBUG_EXPRESSION_STATUS_INVALID_FRAME = 5,
+    GX_DEVELOPMENT_DEBUG_EXPRESSION_STATUS_FAILED = 6
+} gx_development_debug_expression_status;
+
+typedef enum gx_development_debug_expression_result_kind {
+    GX_DEVELOPMENT_DEBUG_EXPRESSION_RESULT_NONE = 0,
+    GX_DEVELOPMENT_DEBUG_EXPRESSION_RESULT_SIGNED_INTEGER = 1,
+    GX_DEVELOPMENT_DEBUG_EXPRESSION_RESULT_POINTER = 2
+} gx_development_debug_expression_result_kind;
+
+typedef enum gx_development_debug_expression_error_category {
+    GX_DEVELOPMENT_DEBUG_EXPRESSION_ERROR_NONE = 0,
+    GX_DEVELOPMENT_DEBUG_EXPRESSION_ERROR_SYNTAX = 1,
+    GX_DEVELOPMENT_DEBUG_EXPRESSION_ERROR_UNKNOWN_IDENTIFIER = 2,
+    GX_DEVELOPMENT_DEBUG_EXPRESSION_ERROR_VARIABLE_NOT_LIVE = 3,
+    GX_DEVELOPMENT_DEBUG_EXPRESSION_ERROR_UNSUPPORTED_TYPE = 4,
+    GX_DEVELOPMENT_DEBUG_EXPRESSION_ERROR_UNSUPPORTED_OPERATOR = 5,
+    GX_DEVELOPMENT_DEBUG_EXPRESSION_ERROR_DIVIDE_BY_ZERO = 6,
+    GX_DEVELOPMENT_DEBUG_EXPRESSION_ERROR_OVERFLOW = 7,
+    GX_DEVELOPMENT_DEBUG_EXPRESSION_ERROR_INVALID_FRAME = 8,
+    GX_DEVELOPMENT_DEBUG_EXPRESSION_ERROR_STALE_GENERATION = 9,
+    GX_DEVELOPMENT_DEBUG_EXPRESSION_ERROR_TARGET_NOT_PAUSED = 10,
+    GX_DEVELOPMENT_DEBUG_EXPRESSION_ERROR_EXPRESSION_TOO_LONG = 11,
+    GX_DEVELOPMENT_DEBUG_EXPRESSION_ERROR_COMPLEXITY_LIMIT = 12,
+    GX_DEVELOPMENT_DEBUG_EXPRESSION_ERROR_VARIABLE_METADATA_UNAVAILABLE = 13,
+    GX_DEVELOPMENT_DEBUG_EXPRESSION_ERROR_INVALID_REQUEST = 14
+} gx_development_debug_expression_error_category;
+
+typedef struct gx_development_debug_expression {
+    uint32_t size;
+    uint32_t version;
+    uint32_t status;
+    uint32_t resultKind;
+    uint32_t errorCategory;
+    uint32_t diagnosticOffset;
+    uint32_t reserved0;
+    uint32_t reserved1;
+    uint64_t handle;
+    uint64_t processId;
+    uint64_t nativeRuntimeId;
+    uint64_t threadId;
+    uint64_t sessionGeneration;
+    uint64_t stopGeneration;
+    uint64_t selectedFrameIndex;
+    uint64_t instructionPointer;
+    uint64_t framePointer;
+    char functionName[GX_DEVELOPMENT_DEBUG_MAX_FUNCTION_NAME_BYTES];
+    char sourcePath[GX_DEVELOPMENT_DEBUG_MAX_SOURCE_PATH_BYTES];
+    char errorMessage[GX_DEVELOPMENT_DEBUG_MAX_ERROR_BYTES];
+    int64_t signedValue;
+    uint64_t unsignedValue;
+    uint64_t pointerValue;
+} gx_development_debug_expression;
 
 /* For GX_DEVELOPMENT_DEBUG_INSPECT_VARIABLES, auxiliaryAddress is a
    query-local validated Call Stack frame index. Zero preserves the Phase 28G

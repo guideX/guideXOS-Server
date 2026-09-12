@@ -21,6 +21,9 @@ gx_result DebugCallStack(NativeAppRuntimeContext& owner, const gx_development_de
                          gx_development_debug_call_stack* outResult);
 gx_result DebugVariables(NativeAppRuntimeContext& owner, const gx_development_debug_request& request,
                          gx_development_debug_variables* outResult);
+gx_result DebugEvaluateExpression(NativeAppRuntimeContext& owner,
+                                   const gx_development_debug_request& request,
+                                   gx_development_debug_expression* outResult);
 
 // Called by NativeAppRuntime owner teardown and Server shutdown. This removes
 // temporary App Model registrations even when the Studio does not release its

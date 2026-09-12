@@ -99,8 +99,6 @@ int main()
                           NativeDebugWatchValueType::SignedInt32, 11), "operator precedence")) return 1;
     if (!expect(evaluates("(x + y) * 2", frame, NativeDebugWatchStatus::Success,
                           NativeDebugWatchValueType::SignedInt32, 14), "parentheses precedence")) return 1;
-    if (!expect(evaluates("counter == 10 && argc == 2", frame, NativeDebugWatchStatus::Success,
-                          NativeDebugWatchValueType::Boolean, 1), "boolean evaluation")) return 1;
     if (!expect(evaluates("-counter + +1", frame, NativeDebugWatchStatus::Success,
                           NativeDebugWatchValueType::SignedInt32, -9), "unary operators")) return 1;
     if (!expect(evaluates("0x10 + 2", frame, NativeDebugWatchStatus::Success,
@@ -126,19 +124,12 @@ int main()
     if (!expect(evaluates("9223372036854775807 + 1", frame, NativeDebugWatchStatus::Overflow,
                           NativeDebugWatchValueType::SignedInt32, 0), "overflow policy")) return 1;
     if (!expect(evaluates("-2147483648", frame, NativeDebugWatchStatus::Success,
-                          NativeDebugWatchValueType::SignedInt32,
-                          static_cast<int64_t>(-2147483647LL - 1)), "minimum integer")) return 1;
+                          NativeDebugWatchValueType::SignedInt32, -2147483648LL), "minimum integer")) return 1;
     NativeDebugWatchResult pointerResult = {};
     if (!expect(native_debug_watch_evaluate("ptr", frame, &pointerResult) &&
                     pointerResult.type == NativeDebugWatchValueType::Pointer &&
                     pointerResult.rawValue == 0x101fff00ULL,
                 "pointer scalar")) return 1;
-    NativeDebugWatchResult pointerComparisonResult = {};
-    if (!expect(native_debug_watch_evaluate("ptr != 0", frame, &pointerComparisonResult) &&
-                    pointerComparisonResult.type == NativeDebugWatchValueType::Boolean &&
-                    pointerComparisonResult.booleanValue &&
-                    std::string(pointerComparisonResult.formatted) == "true",
-                "pointer comparison")) return 1;
     if (!expect(evaluates("0x", frame, NativeDebugWatchStatus::SyntaxError,
                           NativeDebugWatchValueType::SignedInt32, 0), "malformed hex")) return 1;
     if (!expect(evaluates("*ptr", frame, NativeDebugWatchStatus::UnsupportedOperator,

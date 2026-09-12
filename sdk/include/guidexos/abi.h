@@ -188,6 +188,13 @@ typedef struct gx_host_calls {
     gx_result (GX_CALL *bare_metal_development_debug_inspect_variables)(gx_app_context* ctx,
                                                                          const gx_development_debug_request* request,
                                                                          gx_development_debug_variables* result);
+    /* Appended Phase 28I read-only scalar watch evaluation. */
+    gx_result (GX_CALL *development_debug_evaluate_expression)(gx_app_context* ctx,
+                                                                const gx_development_debug_request* request,
+                                                                gx_development_debug_expression* result);
+    gx_result (GX_CALL *bare_metal_development_debug_evaluate_expression)(gx_app_context* ctx,
+                                                                           const gx_development_debug_request* request,
+                                                                           gx_development_debug_expression* result);
 } gx_host_calls;
 
 #ifdef __cplusplus

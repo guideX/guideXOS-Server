@@ -31,6 +31,9 @@ public:
     static gx_result InspectVariables(const gx_development_debug_request& request,
                                       const std::string& expectedArtifactSha256,
                                       gx_development_debug_variables* result);
+    static gx_result EvaluateExpression(const gx_development_debug_request& request,
+                                        const std::string& expectedArtifactSha256,
+                                        gx_development_debug_expression* result);
     static void CancelProcess(uint64_t processId);
 };
 
