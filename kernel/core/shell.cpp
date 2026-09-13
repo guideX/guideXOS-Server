@@ -379,7 +379,7 @@ static void cmd_help() {
     output_string("Network:\n");
     output_string("  ping <ip>      - Send ICMP echo request\n");
     output_string("  ifconfig, ip   - Network interface info\n");
-    output_string("  nicinfo [brief|link|tx [brief|raw [direct|status]]] - NIC diagnostics\n");
+    output_string("  nicinfo [brief|link|tx [brief|owner|reset|raw [direct|status]]] - NIC diagnostics\n");
     output_string("  netdiag         - Bare-metal NIC/DHCP/ARP diagnostics\n");
     output_string("  ipconfig       - Windows-style IP config\n");
     output_string("  ipconfig /all  - Full IP configuration\n");
@@ -2662,6 +2662,84 @@ static void cmd_nicinfo_tx_owner()
     output_string(nic::hw_control_stage_name(control.stage));
     output_string(" failure=");
     output_string(nic::hw_control_failure_reason_name(control.failure));
+    output_string("\n");
+}
+
+// Compact, cache-only reset-boundary evidence for the Phase 19 physical loop.
+// The command never performs the flush or reset; it reports the bounded
+// capture taken by the I219 bring-up path.
+static void cmd_nicinfo_tx_reset()
+{
+    const nic::NICDevice* dev = nic::get_device();
+    char numStr[16];
+    char hexStr[9];
+
+    output_string("NIC TX reset audit\n");
+    if (!dev) {
+        output_string("family=none\n");
+        output_string("reset-count=0\n");
+        output_string("failure=none\n");
+        return;
+    }
+
+    const nic::I219ResetDiagnostics& audit = dev->resetDiagnostics;
+    const nic::I219ResetSnapshot& before = audit.before;
+    const nic::I219ResetSnapshot& after = audit.after;
+    output_string("family=");
+    const nic::DeviceFamily family =
+        nic::device_family_for(dev->vendorId, dev->deviceId);
+    output_string(family == nic::DeviceFamily::I219Pch
+                      ? "I219-SPT" : nic::device_family_name(family));
+    output_string("\nreset-count=");
+    uint_to_str(audit.resetCount, numStr);
+    output_string(numStr);
+    output_string("\ncfg-e4=0x");
+    uint_hex_to_str(before.cfgE4, 4, hexStr);
+    output_string(hexStr);
+    output_string("\ncfg-e4-after=0x");
+    uint_hex_to_str(after.cfgE4, 4, hexStr);
+    output_string(hexStr);
+    output_string("\nflush-required=");
+    output_string(nic::i219_spt_flush_needed(before.cfgE4, before.tdlen)
+                      ? "yes" : "no");
+    output_string("\nTDLEN=0x");
+    uint_hex_to_str(before.tdlen, 8, hexStr);
+    output_string(hexStr);
+    output_string(" TDH/TDT=0x");
+    uint_hex_to_str(before.tdh, 8, hexStr);
+    output_string(hexStr);
+    output_string("/0x");
+    uint_hex_to_str(before.tdt, 8, hexStr);
+    output_string(hexStr);
+    output_string("\nRDLEN=0x");
+    uint_hex_to_str(before.rdlen, 8, hexStr);
+    output_string(hexStr);
+    output_string(" RDH/RDT=0x");
+    uint_hex_to_str(before.rdh, 8, hexStr);
+    output_string(hexStr);
+    output_string("/0x");
+    uint_hex_to_str(before.rdt, 8, hexStr);
+    output_string(hexStr);
+    output_string("\nring-owner=");
+    output_string(nic::i219_ring_owner_name(audit.ringOwner));
+    output_string("\npreflush-needed=");
+    output_string(audit.preflushNeeded ? "yes" : "no");
+    output_string("\npreflush-attempted=");
+    output_string(audit.preflushAttempted ? "yes" : "no");
+    output_string("\npreflush-complete=");
+    output_string(audit.preflushComplete ? "yes" : "no");
+    output_string("\nFEXTNVM11-before=0x");
+    uint_hex_to_str(before.fextnvm11, 8, hexStr);
+    output_string(hexStr);
+    output_string("\nFEXTNVM11-after=0x");
+    uint_hex_to_str(after.fextnvm11, 8, hexStr);
+    output_string(hexStr);
+    output_string("\nreset-performed=");
+    output_string(audit.resetPerformed ? "yes" : "no");
+    output_string("\nreset-completed=");
+    output_string(audit.resetCompleted ? "yes" : "no");
+    output_string("\nfailure=");
+    output_string(nic::i219_reset_failure_reason_name(audit.failure));
     output_string("\n");
 }
 
@@ -5260,6 +5338,9 @@ static void execute_command(const char* cmd) {
         } else if (argCount == 3 && str_eq(arg1, "tx") &&
                    str_eq(args[2], "owner")) {
             nicInfoMode = NICINFO_MODE_TX_OWNER;
+        } else if (argCount == 3 && str_eq(arg1, "tx") &&
+                   str_eq(args[2], "reset")) {
+            nicInfoMode = NICINFO_MODE_TX_RESET;
         } else if (argCount == 3) {
             nicInfoMode = nicinfo_mode_from_args(arg1, args[2], nullptr);
         } else if (argCount == 4) {
@@ -5277,6 +5358,8 @@ static void execute_command(const char* cmd) {
             cmd_nicinfo_tx_brief();
         } else if (nicInfoMode == NICINFO_MODE_TX_OWNER) {
             cmd_nicinfo_tx_owner();
+        } else if (nicInfoMode == NICINFO_MODE_TX_RESET) {
+            cmd_nicinfo_tx_reset();
         } else if (nicInfoMode == NICINFO_MODE_TX_RAW) {
             cmd_nicinfo_tx_raw(false);
         } else if (nicInfoMode == NICINFO_MODE_TX_RAW_DIRECT) {
@@ -5284,12 +5367,13 @@ static void execute_command(const char* cmd) {
         } else if (nicInfoMode == NICINFO_MODE_TX_RAW_STATUS) {
             cmd_nicinfo_tx_raw_status();
         } else {
-            output_string("Usage: nicinfo [brief|link|tx [brief|owner|raw [direct|status]]]\n");
+            output_string("Usage: nicinfo [brief|link|tx [brief|owner|reset|raw [direct|status]]]\n");
             output_string("  brief: recorded NIC initialization/link state only\n");
             output_string("  link: one bounded, read-only current link refresh\n");
             output_string("  tx: one TX descriptor and bounded register snapshot\n");
             output_string("  tx brief: compact one-screen TX evidence\n");
             output_string("  tx owner: CTRL_EXT.DRV_LOAD ownership evidence\n");
+            output_string("  tx reset: I219/SPT pre-reset flush audit\n");
             output_string("  tx raw: one fixed raw Ethernet TX attempt\n");
             output_string("  tx raw direct: same fixture via direct submit\n");
             output_string("  tx raw status: last raw attempt and descriptor bytes\n");

@@ -102,7 +102,10 @@ Require $shellSource 'tx owner: CTRL_EXT\.DRV_LOAD ownership evidence' `
 Require $shellSource 'NICINFO_MODE_TX_OWNER' 'ownership command dispatch is missing'
 
 $ownerStart = $shellSource.IndexOf('static void cmd_nicinfo_tx_owner()')
-$ownerEnd = $shellSource.IndexOf('static void cmd_nicinfo_tx_brief()', $ownerStart)
+$ownerEnd = $shellSource.IndexOf('static void cmd_nicinfo_tx_reset()', $ownerStart)
+if ($ownerEnd -lt 0) {
+    $ownerEnd = $shellSource.IndexOf('static void cmd_nicinfo_tx_brief()', $ownerStart)
+}
 if ($ownerStart -lt 0 -or $ownerEnd -le $ownerStart) { throw 'ownership diagnostic region was not found' }
 $ownerSource = $shellSource.Substring($ownerStart, $ownerEnd - $ownerStart)
 $ownerLineCount = ([regex]::Matches($ownerSource, '\\n')).Count

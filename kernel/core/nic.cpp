@@ -95,6 +95,11 @@ static void mask_nic_interrupts(uint64_t mmioBase);
 static inline void mmio_write32(uint64_t base, uint32_t reg, uint32_t val);
 static inline uint32_t mmio_read32(uint64_t base, uint32_t reg);
 static void select_tx_dma_storage(bool i219);
+static bool capture_i219_reset_boundary(uint64_t mmioBase);
+static bool refresh_i219_reset_boundary(uint64_t mmioBase);
+static bool prepare_i219_reset(uint64_t mmioBase);
+static bool flush_i219_tx_ring(uint64_t mmioBase);
+static bool flush_i219_rx_ring(uint64_t mmioBase);
 
 #if ARCH_HAS_PORT_IO
 static uint16_t pci_read16(uint8_t bus, uint8_t dev, uint8_t func,
@@ -581,11 +586,20 @@ static bool i219_pch_reset(uint64_t mmioBase)
         return false;
     }
 
+    if (!prepare_i219_reset(mmioBase)) {
+        set_init_failure(
+            NIC_INIT_RESET,
+            i219_reset_failure_reason_name(
+                s_device.resetDiagnostics.failure));
+        return false;
+    }
+
     // Preserve the hardware's CTRL state exactly as in the proven candidate;
     // only the reset bit is added.
     s_device.resetCtrlBefore = ctrl;
     s_device.resetCtrlRequest = ctrl | E1000_CTRL_RST;
     s_device.resetAttempted = true;
+    s_device.resetDiagnostics.resetPerformed = true;
     mmio_write32(mmioBase, E1000_CTRL, s_device.resetCtrlRequest);
 
     // Immediate post-reset reads were part of the unsafe generic boundary.
@@ -602,6 +616,9 @@ static bool i219_pch_reset(uint64_t mmioBase)
         s_device.resetPollIterations = i + 1u;
         if (observedCtrl == 0xFFFFFFFFu) {
             s_device.mmioProbePassed = false;
+            s_device.resetDiagnostics.failure =
+                I219ResetFailureReason::RegisterReadFailed;
+            s_device.resetDiagnostics.strongerRecoveryRequired = true;
             serial::puts("[AIDA-I219-P7] reset=FAIL reason=poll-all-ones\n");
             set_init_failure(NIC_INIT_RESET, "I219 reset poll returned all-ones");
             return false;
@@ -613,11 +630,26 @@ static bool i219_pch_reset(uint64_t mmioBase)
     }
     if (!resetComplete) {
         s_device.resetTimedOut = true;
+        s_device.resetDiagnostics.resetTimedOut = true;
+        s_device.resetDiagnostics.failure =
+            I219ResetFailureReason::ResetHangStatePersists;
+        s_device.resetDiagnostics.strongerRecoveryRequired = true;
         serial::puts("[AIDA-I219-P7] reset=FAIL reason=poll-timeout\n");
-        set_init_failure(NIC_INIT_RESET, "I219 PCH reset completion timeout");
+        set_init_failure(
+            NIC_INIT_RESET,
+            i219_reset_failure_reason_name(
+                s_device.resetDiagnostics.failure));
         return false;
     }
     s_device.resetCompleted = true;
+    s_device.resetDiagnostics.resetCompleted = true;
+    if (!refresh_i219_reset_boundary(mmioBase)) {
+        set_init_failure(
+            NIC_INIT_RESET,
+            i219_reset_failure_reason_name(
+                s_device.resetDiagnostics.failure));
+        return false;
+    }
 
     // Linux re-masks and drains causes after the PCH reset. This is the last
     // operation in the permanent reset helper and still never enables IMS.
@@ -696,7 +728,15 @@ static bool run_i219_phase6_micro_stage(uint64_t mmioBase)
                            "Phase 6 CTRL-read diagnostic stop");
     }
     if (stage == 5u) {
+        if (!capture_i219_reset_boundary(mmioBase)) {
+            phase6_stage_failed(stage, "reset boundary capture failed");
+            return phase6_stop(
+                stage, NIC_INIT_RESET,
+                i219_reset_failure_reason_name(
+                    s_device.resetDiagnostics.failure));
+        }
         const uint32_t resetValue = ctrl | E1000_CTRL_RST;
+        s_device.resetDiagnostics.resetPerformed = true;
         phase6_trace_write(mmioBase, E1000_CTRL, resetValue, "ctrl-rst-write");
         s_device.ctrlValue = resetValue;
         phase6_stage_complete(stage);
@@ -724,7 +764,15 @@ static bool run_i219_phase6_micro_stage(uint64_t mmioBase)
                            "Phase 6 reset CTRL read returned all-ones");
     }
 
+    if (!capture_i219_reset_boundary(mmioBase)) {
+        phase6_stage_failed(stage, "reset boundary capture failed");
+        return phase6_stop(
+            stage, NIC_INIT_RESET,
+            i219_reset_failure_reason_name(
+                s_device.resetDiagnostics.failure));
+    }
     const uint32_t resetValue = ctrl | E1000_CTRL_RST;
+    s_device.resetDiagnostics.resetPerformed = true;
     phase6_trace_write(mmioBase, E1000_CTRL, resetValue, "reset-ctrl-rst-write");
     phase6_trace_begin("reset-post-delay-20ms");
     pch_reset_delay_ms(20u);
@@ -738,6 +786,9 @@ static bool run_i219_phase6_micro_stage(uint64_t mmioBase)
         s_device.ctrlValue = ctrl;
         if (ctrl == 0xFFFFFFFFu) {
             phase6_trace_complete("reset-poll");
+            s_device.resetDiagnostics.failure =
+                I219ResetFailureReason::RegisterReadFailed;
+            s_device.resetDiagnostics.strongerRecoveryRequired = true;
             phase6_stage_failed(stage, "reset poll returned all-ones");
             return phase6_stop(stage, NIC_INIT_RESET,
                                "Phase 6 reset poll returned all-ones");
@@ -753,9 +804,22 @@ static bool run_i219_phase6_micro_stage(uint64_t mmioBase)
     serial::put_hex32(iterations);
     serial::putc('\n');
     if (!resetComplete) {
+        s_device.resetDiagnostics.resetTimedOut = true;
+        s_device.resetDiagnostics.failure =
+            I219ResetFailureReason::ResetHangStatePersists;
+        s_device.resetDiagnostics.strongerRecoveryRequired = true;
         phase6_stage_failed(stage, "reset poll timeout");
         return phase6_stop(stage, NIC_INIT_RESET,
                            "Phase 6 PCH reset completion timeout");
+    }
+
+    s_device.resetDiagnostics.resetCompleted = true;
+    if (!refresh_i219_reset_boundary(mmioBase)) {
+        phase6_stage_failed(stage, "reset boundary post-capture failed");
+        return phase6_stop(
+            stage, NIC_INIT_RESET,
+            i219_reset_failure_reason_name(
+                s_device.resetDiagnostics.failure));
     }
 
     // Linux re-masks and drains causes after reset.  Keep this final mask in
@@ -2035,9 +2099,18 @@ static bool init_e1000(uint64_t mmioBase)
             return false;
         }
 
+        if (i219 && !capture_i219_reset_boundary(mmioBase)) {
+            set_init_failure(
+                NIC_INIT_RESET,
+                i219_reset_failure_reason_name(
+                    s_device.resetDiagnostics.failure));
+            return false;
+        }
+
         s_device.resetCtrlBefore = ctrl;
         s_device.resetCtrlRequest = ctrl | E1000_CTRL_RST;
         s_device.resetAttempted = true;
+        if (i219) s_device.resetDiagnostics.resetPerformed = true;
         mmio_write32(mmioBase, E1000_CTRL, s_device.resetCtrlRequest);
         bool resetComplete = false;
         s_device.resetPollIterations = 0;
@@ -2049,6 +2122,11 @@ static bool init_e1000(uint64_t mmioBase)
             if (ctrl == 0xFFFFFFFFu) {
                 s_device.mmioProbePassed = false;
                 if (i219) phase5_stage_failed(3);
+                if (i219) {
+                    s_device.resetDiagnostics.failure =
+                        I219ResetFailureReason::RegisterReadFailed;
+                    s_device.resetDiagnostics.strongerRecoveryRequired = true;
+                }
                 set_init_failure(NIC_INIT_RESET, "reset read returned all-ones");
                 return false;
             }
@@ -2060,6 +2138,10 @@ static bool init_e1000(uint64_t mmioBase)
         if (!resetComplete) {
             s_device.resetTimedOut = true;
             if (i219) {
+                s_device.resetDiagnostics.resetTimedOut = true;
+                s_device.resetDiagnostics.failure =
+                    I219ResetFailureReason::ResetHangStatePersists;
+                s_device.resetDiagnostics.strongerRecoveryRequired = true;
                 serial::puts("[AIDA-I219-P5] reset timeout\n");
                 phase5_stage_failed(3);
             }
@@ -2067,6 +2149,16 @@ static bool init_e1000(uint64_t mmioBase)
             return false;
         }
         s_device.resetCompleted = true;
+        if (i219) {
+            s_device.resetDiagnostics.resetCompleted = true;
+            if (!refresh_i219_reset_boundary(mmioBase)) {
+                set_init_failure(
+                    NIC_INIT_RESET,
+                    i219_reset_failure_reason_name(
+                        s_device.resetDiagnostics.failure));
+                return false;
+            }
+        }
         if (!i219) serial::puts("[NIC] MAC reset: complete (bounded)\n");
 
         // Keep interrupts masked until all state and rings are ready.
@@ -2443,6 +2535,325 @@ static bool scan_pci_nic()
 }
 
 #endif // ARCH_HAS_PORT_IO
+
+// ================================================================
+// I219/SPT descriptor-ring reset audit and bounded flush
+// ================================================================
+
+static bool read_i219_reset_snapshot(uint64_t mmioBase,
+                                     I219ResetSnapshot* snapshot)
+{
+    if (!snapshot || mmioBase == 0u ||
+        !i219_spt_reset_flush_applies(s_device.vendorId,
+                                      s_device.deviceId) ||
+        s_device.mmioSize < E1000_FEXTNVM11 + sizeof(uint32_t)) {
+        return false;
+    }
+
+#if ARCH_HAS_PORT_IO
+    I219ResetSnapshot value = {};
+    value.cfgE4 = pci_read16(s_device.pciBus, s_device.pciSlot,
+                             s_device.pciFunc,
+                             static_cast<uint8_t>(PCI_CONFIG_DESC_RING_STATUS));
+    value.tdbal = mmio_read32(mmioBase, E1000_TDBAL);
+    value.tdbah = mmio_read32(mmioBase, E1000_TDBAH);
+    value.tdlen = mmio_read32(mmioBase, E1000_TDLEN);
+    value.tdh = mmio_read32(mmioBase, E1000_TDH);
+    value.tdt = mmio_read32(mmioBase, E1000_TDT);
+    value.rdbal = mmio_read32(mmioBase, E1000_RDBAL);
+    value.rdbah = mmio_read32(mmioBase, E1000_RDBAH);
+    value.rdlen = mmio_read32(mmioBase, E1000_RDLEN);
+    value.rdh = mmio_read32(mmioBase, E1000_RDH);
+    value.rdt = mmio_read32(mmioBase, E1000_RDT);
+    value.tctl = mmio_read32(mmioBase, E1000_TCTL);
+    value.rctl = mmio_read32(mmioBase, E1000_RCTL);
+    value.fextnvm11 = mmio_read32(mmioBase, E1000_FEXTNVM11);
+    value.ctrl = mmio_read32(mmioBase, E1000_CTRL);
+    value.ctrlExt = mmio_read32(mmioBase, E1000_CTRL_EXT);
+
+    value.valid = value.cfgE4 != 0xFFFFu &&
+                  value.tdbal != 0xFFFFFFFFu &&
+                  value.tdbah != 0xFFFFFFFFu &&
+                  value.tdlen != 0xFFFFFFFFu &&
+                  value.tdh != 0xFFFFFFFFu &&
+                  value.tdt != 0xFFFFFFFFu &&
+                  value.rdbal != 0xFFFFFFFFu &&
+                  value.rdbah != 0xFFFFFFFFu &&
+                  value.rdlen != 0xFFFFFFFFu &&
+                  value.rdh != 0xFFFFFFFFu &&
+                  value.rdt != 0xFFFFFFFFu &&
+                  value.tctl != 0xFFFFFFFFu &&
+                  value.rctl != 0xFFFFFFFFu &&
+                  value.fextnvm11 != 0xFFFFFFFFu &&
+                  value.ctrl != 0xFFFFFFFFu &&
+                  value.ctrlExt != 0xFFFFFFFFu;
+    *snapshot = value;
+    return value.valid;
+#else
+    (void)mmioBase;
+    return false;
+#endif
+}
+
+static bool i219_ring_registers_programmed(const I219ResetSnapshot& snapshot,
+                                           bool tx)
+{
+    if (tx) {
+        return snapshot.tdbal != 0u || snapshot.tdbah != 0u ||
+               snapshot.tdlen != 0u || snapshot.tdh != 0u ||
+               snapshot.tdt != 0u;
+    }
+    return snapshot.rdbal != 0u || snapshot.rdbah != 0u ||
+           snapshot.rdlen != 0u || snapshot.rdh != 0u ||
+           snapshot.rdt != 0u;
+}
+
+static I219RingOwner classify_i219_tx_ring(const I219ResetSnapshot& snapshot)
+{
+    if (!i219_ring_registers_programmed(snapshot, true)) {
+        return I219RingOwner::None;
+    }
+    const uint64_t hardwareRing = dma_address_register_value(
+        snapshot.tdbal, snapshot.tdbah);
+    return s_device.txRingInitialized &&
+           hardwareRing == s_device.tx.descriptorRingAddress &&
+           snapshot.tdlen == tx_ring_length_bytes(NUM_TX_DESC)
+        ? I219RingOwner::Guidexos : I219RingOwner::Unknown;
+}
+
+static I219RingOwner classify_i219_rx_ring(const I219ResetSnapshot& snapshot)
+{
+    if (!i219_ring_registers_programmed(snapshot, false)) {
+        return I219RingOwner::None;
+    }
+    const uint64_t hardwareRing = dma_address_register_value(
+        snapshot.rdbal, snapshot.rdbah);
+    return s_device.rxRingInitialized &&
+           hardwareRing == s_device.tx.rxDescriptorRingAddress &&
+           snapshot.rdlen ==
+               static_cast<uint32_t>(NUM_RX_DESC * sizeof(RxDescriptor))
+        ? I219RingOwner::Guidexos : I219RingOwner::Unknown;
+}
+
+static void classify_i219_ring_ownership(const I219ResetSnapshot& snapshot,
+                                         I219ResetDiagnostics* diagnostics)
+{
+    if (!diagnostics) return;
+    diagnostics->txRingOwner = classify_i219_tx_ring(snapshot);
+    diagnostics->rxRingOwner = classify_i219_rx_ring(snapshot);
+    if (diagnostics->txRingOwner == I219RingOwner::Unknown ||
+        diagnostics->rxRingOwner == I219RingOwner::Unknown) {
+        diagnostics->ringOwner = I219RingOwner::Unknown;
+    } else if (diagnostics->txRingOwner == I219RingOwner::Guidexos ||
+               diagnostics->rxRingOwner == I219RingOwner::Guidexos) {
+        diagnostics->ringOwner = I219RingOwner::Guidexos;
+    } else {
+        diagnostics->ringOwner = I219RingOwner::None;
+    }
+}
+
+static bool capture_i219_reset_boundary(uint64_t mmioBase)
+{
+    I219ResetDiagnostics& diagnostics = s_device.resetDiagnostics;
+    const uint32_t resetCount = diagnostics.resetCount + 1u;
+    diagnostics = {};
+    diagnostics.resetCount = resetCount;
+
+    I219ResetSnapshot snapshot = {};
+    if (!read_i219_reset_snapshot(mmioBase, &snapshot)) {
+        diagnostics.failure = I219ResetFailureReason::RegisterReadFailed;
+        diagnostics.strongerRecoveryRequired = true;
+        return false;
+    }
+
+    diagnostics.before = snapshot;
+    diagnostics.after = snapshot;
+    classify_i219_ring_ownership(snapshot, &diagnostics);
+    diagnostics.preflushNeeded = i219_spt_flush_needed(
+        snapshot.cfgE4, snapshot.tdlen);
+    diagnostics.preflushComplete = !diagnostics.preflushNeeded;
+
+    serial::puts("[AIDA-I219-P19] reset-before cfg-e4=0x");
+    serial::put_hex32(snapshot.cfgE4);
+    serial::puts(" tdlen=0x");
+    serial::put_hex32(snapshot.tdlen);
+    serial::puts(" owner=");
+    serial::puts(i219_ring_owner_name(diagnostics.ringOwner));
+    serial::putc('\n');
+    return true;
+}
+
+static bool refresh_i219_reset_boundary(uint64_t mmioBase)
+{
+    I219ResetDiagnostics& diagnostics = s_device.resetDiagnostics;
+    I219ResetSnapshot snapshot = {};
+    if (!read_i219_reset_snapshot(mmioBase, &snapshot)) {
+        diagnostics.failure = I219ResetFailureReason::RegisterReadFailed;
+        diagnostics.strongerRecoveryRequired = true;
+        return false;
+    }
+    diagnostics.after = snapshot;
+    if (!diagnostics.preflushNeeded ||
+        (diagnostics.preflushAttempted &&
+         !i219_flush_desc_required(snapshot.cfgE4))) {
+        diagnostics.preflushComplete = true;
+    }
+    return true;
+}
+
+static bool flush_i219_tx_ring(uint64_t mmioBase)
+{
+    if (!s_device.txRingInitialized || !s_txDescs ||
+        s_device.tx.descriptorRingAddress == 0u) {
+        return false;
+    }
+
+    const uint32_t tail = mmio_read32(mmioBase, E1000_TDT) & 0xFFFFu;
+    if (tail != s_txCur || s_txCur >= NUM_TX_DESC) {
+        return false;
+    }
+
+    const uint32_t tctl = mmio_read32(mmioBase, E1000_TCTL);
+    if (tctl == 0xFFFFFFFFu) return false;
+    mmio_write32(mmioBase, E1000_TCTL, tctl | E1000_TCTL_EN);
+
+    // Match upstream e1000e's I219 flush descriptor: point it back at the
+    // ring, send a 512-byte legacy fetch with IFCS, and do not request a
+    // completion interrupt or use advanced-descriptor fields.
+    TxDescriptor& descriptor = s_txDescs[s_txCur];
+    descriptor.bufferAddr = s_device.tx.descriptorRingAddress;
+    descriptor.length = 512u;
+    descriptor.cso = 0u;
+    descriptor.cmd = E1000_TXD_CMD_IFCS;
+    descriptor.status = 0u;
+    descriptor.css = 0u;
+    descriptor.special = 0u;
+    dma_publish_barrier();
+
+    const uint16_t next = static_cast<uint16_t>(
+        (s_txCur + 1u) % NUM_TX_DESC);
+    mmio_write32(mmioBase, E1000_TDT, next);
+    const uint32_t observedTail = mmio_read32(mmioBase, E1000_TDT) & 0xFFFFu;
+    if (observedTail != next) return false;
+
+    for (uint32_t i = 0; i < I219_TX_FLUSH_POLL_LIMIT; ++i) {
+        dma_completion_barrier();
+        const uint32_t head = mmio_read32(mmioBase, E1000_TDH) & 0xFFFFu;
+        if (head == next || (descriptor.status & E1000_TXD_STAT_DD) != 0u) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool flush_i219_rx_ring(uint64_t mmioBase)
+{
+    const uint32_t originalRctl = mmio_read32(mmioBase, E1000_RCTL);
+    if (originalRctl == 0xFFFFFFFFu) return false;
+    mmio_write32(mmioBase, E1000_RCTL, originalRctl & ~E1000_RCTL_EN);
+
+    const uint32_t statusAfterDisable =
+        mmio_read32(mmioBase, E1000_STATUS);
+    if (statusAfterDisable == 0xFFFFFFFFu) return false;
+
+    bool receiverDisabled = false;
+    for (uint32_t i = 0; i < I219_RX_FLUSH_POLL_LIMIT; ++i) {
+        if ((mmio_read32(mmioBase, E1000_RCTL) & E1000_RCTL_EN) == 0u) {
+            receiverDisabled = true;
+            break;
+        }
+    }
+    if (!receiverDisabled) return false;
+
+    uint32_t rxdctl = mmio_read32(mmioBase, E1000_RXDCTL);
+    if (rxdctl == 0xFFFFFFFFu) return false;
+    rxdctl &= ~0x3FFFu;
+    rxdctl |= 0x1Fu | (1u << 8) | E1000_RXDCTL_THRESH_UNIT_DESC;
+    mmio_write32(mmioBase, E1000_RXDCTL, rxdctl);
+
+    mmio_write32(mmioBase, E1000_RCTL, originalRctl | E1000_RCTL_EN);
+    const uint32_t statusAfterEnable =
+        mmio_read32(mmioBase, E1000_STATUS);
+    if (statusAfterEnable == 0xFFFFFFFFu) return false;
+
+    bool receiverEnabled = false;
+    for (uint32_t i = 0; i < I219_RX_FLUSH_POLL_LIMIT; ++i) {
+        if ((mmio_read32(mmioBase, E1000_RCTL) & E1000_RCTL_EN) != 0u) {
+            receiverEnabled = true;
+            break;
+        }
+    }
+    mmio_write32(mmioBase, E1000_RCTL, originalRctl & ~E1000_RCTL_EN);
+    mmio_read32(mmioBase, E1000_STATUS);
+    return receiverEnabled;
+}
+
+static bool prepare_i219_reset(uint64_t mmioBase)
+{
+    I219ResetDiagnostics& diagnostics = s_device.resetDiagnostics;
+    if (!capture_i219_reset_boundary(mmioBase)) return false;
+
+    // This is the current upstream e1000e FEXTNVM11 workaround. Preserve all
+    // unrelated bits and record the readback at the post-reset boundary.
+    const uint32_t fextnvm11 = diagnostics.before.fextnvm11;
+    mmio_write32(mmioBase, E1000_FEXTNVM11,
+                 fextnvm11 | E1000_FEXTNVM11_DISABLE_MULR_FIX);
+
+    const I219ResetFlushDecision decision = i219_reset_flush_decision(
+        diagnostics.before.cfgE4, diagnostics.before.tdlen,
+        diagnostics.txRingOwner);
+    if (decision == I219ResetFlushDecision::NotRequired) {
+        diagnostics.preflushComplete = true;
+        return true;
+    }
+    if (decision == I219ResetFlushDecision::OwnershipUnknown ||
+        diagnostics.rxRingOwner == I219RingOwner::Unknown) {
+        diagnostics.failure = I219ResetFailureReason::RingOwnershipUnknown;
+        diagnostics.strongerRecoveryRequired = true;
+        serial::puts("[AIDA-I219-P19] reset=FAIL reason=ring-ownership-unknown\n");
+        return false;
+    }
+
+    diagnostics.preflushAttempted = true;
+    diagnostics.txFlushAttempted = true;
+    if (!flush_i219_tx_ring(mmioBase)) {
+        diagnostics.failure = I219ResetFailureReason::TxFlushTimeout;
+        diagnostics.strongerRecoveryRequired = true;
+        return false;
+    }
+    if (!refresh_i219_reset_boundary(mmioBase)) return false;
+    const bool statusClearedAfterTx = i219_reset_status_transitioned(
+        diagnostics.before.cfgE4, diagnostics.after.cfgE4);
+    if (statusClearedAfterTx ||
+        !i219_flush_desc_required(diagnostics.after.cfgE4)) {
+        diagnostics.preflushComplete = true;
+        return true;
+    }
+
+    if (diagnostics.rxRingOwner != I219RingOwner::Guidexos) {
+        diagnostics.failure = I219ResetFailureReason::RingOwnershipUnknown;
+        diagnostics.strongerRecoveryRequired = true;
+        return false;
+    }
+    diagnostics.rxFlushAttempted = true;
+    if (!flush_i219_rx_ring(mmioBase)) {
+        diagnostics.failure = I219ResetFailureReason::RxFlushTimeout;
+        diagnostics.strongerRecoveryRequired = true;
+        return false;
+    }
+    if (!refresh_i219_reset_boundary(mmioBase)) return false;
+    const bool statusClearedAfterRx = i219_reset_status_transitioned(
+        diagnostics.before.cfgE4, diagnostics.after.cfgE4);
+    if (statusClearedAfterRx ||
+        !i219_flush_desc_required(diagnostics.after.cfgE4)) {
+        diagnostics.preflushComplete = true;
+        return true;
+    }
+
+    diagnostics.failure = I219ResetFailureReason::ResetHangStatePersists;
+    diagnostics.strongerRecoveryRequired = true;
+    return false;
+}
 
 #if !ARCH_HAS_PORT_IO
 uint8_t enumerate_network_controllers(NetworkControllerInfo* out,

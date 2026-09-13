@@ -168,6 +168,7 @@ static const uint32_t E1000_RDBAH    = 0x2804;  // RX Descriptor Base High
 static const uint32_t E1000_RDLEN    = 0x2808;  // RX Descriptor Length
 static const uint32_t E1000_RDH      = 0x2810;  // RX Descriptor Head
 static const uint32_t E1000_RDT      = 0x2818;  // RX Descriptor Tail
+static const uint32_t E1000_RXDCTL   = 0x2828;  // RX Descriptor Control
 static const uint32_t E1000_TDBAL    = 0x3800;  // TX Descriptor Base Low
 static const uint32_t E1000_TDBAH    = 0x3804;  // TX Descriptor Base High
 static const uint32_t E1000_TDLEN    = 0x3808;  // TX Descriptor Length
@@ -178,7 +179,12 @@ static const uint32_t E1000_TXDCTL1  = 0x3928;  // TX Descriptor Control Q1
 static const uint32_t E1000_TARC0    = 0x3840;  // TX Arbitration Counter Q0
 static const uint32_t E1000_TARC1    = 0x3940;  // TX Arbitration Counter Q1
 static const uint32_t E1000_IOSFPC   = 0x0F28;  // I219 TX DMA erratum control
+static const uint32_t E1000_FEXTNVM11 = 0x5BBC; // Future Extended NVM 11
 static const uint32_t E1000_FWSM     = 0x5B54;  // Firmware Semaphore
+static const uint16_t PCI_CONFIG_DESC_RING_STATUS = 0x00E4;
+static const uint16_t PCI_CONFIG_FLUSH_DESC_REQUIRED = 0x0100;
+static const uint32_t E1000_FEXTNVM11_DISABLE_MULR_FIX = 0x00002000u;
+static const uint32_t E1000_RXDCTL_THRESH_UNIT_DESC = 0x01000000u;
 static const uint32_t E1000_MTA      = 0x5200;  // Multicast Table Array (128 dwords)
 static const uint32_t E1000_RAL0     = 0x5400;  // Receive Address Low  (MAC [0])
 static const uint32_t E1000_RAH0     = 0x5404;  // Receive Address High (MAC [0])
@@ -340,6 +346,65 @@ inline const char* device_family_name(DeviceFamily family)
     }
 }
 
+// Current upstream e1000e selects the descriptor-ring reset workaround for
+// e1000_pch_spt and later MAC types.  guideXOS currently binds one exact SPT
+// identity, so keep the production gate exact and leave QEMU E1000 alone.
+inline bool i219_spt_reset_flush_applies(uint16_t vendor, uint16_t device)
+{
+    return device_family_for(vendor, device) == DeviceFamily::I219Pch;
+}
+
+enum class I219RingOwner : uint8_t {
+    None = 0,
+    Guidexos,
+    Unknown,
+};
+
+inline const char* i219_ring_owner_name(I219RingOwner owner)
+{
+    switch (owner) {
+        case I219RingOwner::Guidexos: return "guidexos";
+        case I219RingOwner::Unknown:  return "unknown";
+        default:                      return "none";
+    }
+}
+
+inline bool i219_flush_desc_required(uint16_t cfgE4)
+{
+    return (cfgE4 & PCI_CONFIG_FLUSH_DESC_REQUIRED) != 0u;
+}
+
+inline bool i219_spt_flush_needed(uint16_t cfgE4, uint32_t tdlen)
+{
+    return i219_flush_desc_required(cfgE4) && tdlen != 0u;
+}
+
+enum class I219ResetFlushDecision : uint8_t {
+    NotRequired = 0,
+    TxFlush,
+    OwnershipUnknown,
+};
+
+inline I219ResetFlushDecision i219_reset_flush_decision(
+    uint16_t cfgE4, uint32_t tdlen, I219RingOwner txOwner)
+{
+    if (!i219_spt_flush_needed(cfgE4, tdlen)) {
+        return I219ResetFlushDecision::NotRequired;
+    }
+    return txOwner == I219RingOwner::Guidexos
+        ? I219ResetFlushDecision::TxFlush
+        : I219ResetFlushDecision::OwnershipUnknown;
+}
+
+inline bool i219_reset_status_transitioned(uint16_t before, uint16_t after)
+{
+    return i219_flush_desc_required(before) &&
+           !i219_flush_desc_required(after);
+}
+
+static const uint32_t I219_TX_FLUSH_POLL_LIMIT = 100000u;
+static const uint32_t I219_RX_FLUSH_POLL_LIMIT = 100000u;
+
 // The current upstream e1000e board record for PCI 8086:156F is
 // e1000_pch_spt.  Its relevant flags are FLAG_HAS_AMT and
 // FLAG_HAS_CTRLEXT_ON_LOAD; it does not select the SWSM-on-load mechanism.
@@ -463,6 +528,78 @@ struct I219HwControlDiagnostics {
     uint32_t fwsmFinal;
     HwControlStage stage;
     HwControlFailureReason failure;
+};
+
+enum class I219ResetFailureReason : uint8_t {
+    None = 0,
+    FlushRequired,
+    RingOwnershipUnknown,
+    TxFlushTimeout,
+    RxFlushTimeout,
+    ResetHangStatePersists,
+    RegisterReadFailed,
+};
+
+inline const char* i219_reset_failure_reason_name(
+    I219ResetFailureReason reason)
+{
+    switch (reason) {
+        case I219ResetFailureReason::FlushRequired:
+            return "I219_RESET_FLUSH_REQUIRED";
+        case I219ResetFailureReason::RingOwnershipUnknown:
+            return "I219_RESET_RING_OWNERSHIP_UNKNOWN";
+        case I219ResetFailureReason::TxFlushTimeout:
+            return "I219_TX_FLUSH_TIMEOUT";
+        case I219ResetFailureReason::RxFlushTimeout:
+            return "I219_RX_FLUSH_TIMEOUT";
+        case I219ResetFailureReason::ResetHangStatePersists:
+            return "I219_RESET_HANG_STATE_PERSISTS";
+        case I219ResetFailureReason::RegisterReadFailed:
+            return "I219_RESET_REGISTER_READ_FAILED";
+        default:
+            return "none";
+    }
+}
+
+// The bounded register capture taken immediately before an I219/SPT MAC
+// reset.  `cfgE4` is PCI configuration space, not an MMIO register.
+struct I219ResetSnapshot {
+    uint16_t cfgE4;
+    uint32_t tdbal;
+    uint32_t tdbah;
+    uint32_t tdlen;
+    uint32_t tdh;
+    uint32_t tdt;
+    uint32_t rdbal;
+    uint32_t rdbah;
+    uint32_t rdlen;
+    uint32_t rdh;
+    uint32_t rdt;
+    uint32_t tctl;
+    uint32_t rctl;
+    uint32_t fextnvm11;
+    uint32_t ctrl;
+    uint32_t ctrlExt;
+    bool valid;
+};
+
+struct I219ResetDiagnostics {
+    uint32_t resetCount;
+    I219ResetSnapshot before;
+    I219ResetSnapshot after;
+    I219RingOwner txRingOwner;
+    I219RingOwner rxRingOwner;
+    I219RingOwner ringOwner;
+    bool preflushNeeded;
+    bool preflushAttempted;
+    bool preflushComplete;
+    bool txFlushAttempted;
+    bool rxFlushAttempted;
+    bool strongerRecoveryRequired;
+    bool resetPerformed;
+    bool resetCompleted;
+    bool resetTimedOut;
+    I219ResetFailureReason failure;
 };
 
 enum class PhyAddressSource : uint8_t {
@@ -1350,6 +1487,7 @@ struct NICDevice {
     NetStats    stats;
     TxDiagnostics tx;
     I219HwControlDiagnostics hwControl;
+    I219ResetDiagnostics resetDiagnostics;
     char        name[32];       // e.g. "eth0"
     bool        mmioMapped;     // true if MMIO is mapped by bootloader
     bool        irqRegistered;  // kernel IRQ handler registered
