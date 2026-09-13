@@ -29,7 +29,7 @@ result. Physical Phase 19 validation remains pending.
   selector `4`, constrained-low TX DMA experiment enabled
 - ISO: [`dist\guideXOS-Server-v0.1.0-phase19-aida-i219-reset-flush-amd64.iso`](../dist/guideXOS-Server-v0.1.0-phase19-aida-i219-reset-flush-amd64.iso)
 - Size: `91,293,696` bytes
-- SHA-256: `f99b7cdcb7600fab0b5fbc53bc00ca906aa7763e3d5dfb8c0aebb4aacf6ba019`
+- SHA-256: `8d92f081885247ffce9d7e63400ced8fe3acea074c2db3551322cb4897d61f63`
 - Checksum: `dist\guideXOS-Server-v0.1.0-phase19-aida-i219-reset-flush-amd64.iso.sha256`
 - Manifest: [`dist\guideXOS-Server-v0.1.0-phase19-aida-i219-reset-flush-amd64.manifest.json`](../dist/guideXOS-Server-v0.1.0-phase19-aida-i219-reset-flush-amd64.manifest.json)
 
