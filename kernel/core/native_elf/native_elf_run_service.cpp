@@ -46,6 +46,31 @@ static const uint32_t kStepOverFunctionProbeBytes = 256U;
 static const uint32_t kStepOverNestedReturnLimit = 8U;
 static const uint32_t kStepOutCallerProbeBytes = 256U;
 static const uint32_t kStepOutPrologueProbeBytes = 128U;
+static const uint32_t kInvalidBreakpointSlot = 0xFFFFFFFFU;
+
+struct UserBreakpoint {
+    bool used;
+    bool enabled;
+    bool patchInstalled;
+    bool conditionEnabled;
+    uint64_t id;
+    uint64_t generation;
+    uint64_t address;
+    uint8_t originalByte;
+    bool originalByteValid;
+    uint32_t requestedLine;
+    uint32_t requestedColumn;
+    uint32_t sourceLine;
+    uint32_t sourceColumn;
+    uint32_t hitCount;
+    uint32_t falseHitCount;
+    uint32_t trueHitCount;
+    uint32_t conditionLength;
+    uint64_t conditionExpressionHash;
+    char sourcePath[GX_DEVELOPMENT_DEBUG_MAX_SOURCE_PATH_BYTES];
+    char functionName[GX_DEVELOPMENT_DEBUG_MAX_FUNCTION_NAME_BYTES];
+    char condition[kDebugConditionBytes];
+};
 
 struct Operation {
     bool used;
@@ -76,7 +101,17 @@ struct Operation {
     bool debugConditionalContinuePending;
     bool debugConditionalRearmPending;
     bool debugConditionError;
+    bool debugEntryBreakpoint;
+    bool debugPausedBreakpointRemoved;
+    uint32_t userBreakpointCount;
+    uint32_t debugCurrentBreakpointSlot;
+    uint32_t debugServicingBreakpointSlot;
     uint64_t registrationGeneration;
+    uint64_t debugImageBase;
+    uint64_t debugImageSize;
+    uint64_t nextBreakpointSequence;
+    uint64_t debugCurrentBreakpointId;
+    uint64_t debugServicingBreakpointId;
     uint64_t debugBreakpointAddress;
     uint8_t debugBreakpointOriginalByte;
     uint64_t debugStopGeneration;
@@ -155,6 +190,7 @@ struct Operation {
     char debugSourcePath[GX_DEVELOPMENT_RUN_MAX_PATH_BYTES];
     char debugCondition[kDebugConditionBytes];
     char debugFunctionName[GX_DEVELOPMENT_DEBUG_MAX_FUNCTION_NAME_BYTES];
+    UserBreakpoint userBreakpoints[GX_DEVELOPMENT_DEBUG_MAX_SOURCE_BREAKPOINTS];
     gx_development_debug_snapshot debugSnapshot;
     uint64_t artifactSize;
     char projectRoot[GX_DEVELOPMENT_RUN_MAX_PROJECT_ROOT_BYTES];
@@ -224,6 +260,114 @@ static bool equal_text(const char* left, const char* right) {
         ++i;
     }
     return left[i] == right[i];
+}
+
+static UserBreakpoint* user_breakpoint_at(Operation& operation, uint32_t slot)
+{
+    return slot < GX_DEVELOPMENT_DEBUG_MAX_SOURCE_BREAKPOINTS &&
+        operation.userBreakpoints[slot].used ? &operation.userBreakpoints[slot] : nullptr;
+}
+
+static const UserBreakpoint* user_breakpoint_at(const Operation& operation, uint32_t slot)
+{
+    return slot < GX_DEVELOPMENT_DEBUG_MAX_SOURCE_BREAKPOINTS &&
+        operation.userBreakpoints[slot].used ? &operation.userBreakpoints[slot] : nullptr;
+}
+
+static UserBreakpoint* user_breakpoint_by_id(Operation& operation, uint64_t id)
+{
+    if (id == 0) return nullptr;
+    for (uint32_t i = 0; i < GX_DEVELOPMENT_DEBUG_MAX_SOURCE_BREAKPOINTS; ++i) {
+        if (operation.userBreakpoints[i].used && operation.userBreakpoints[i].id == id)
+            return &operation.userBreakpoints[i];
+    }
+    return nullptr;
+}
+
+static const UserBreakpoint* user_breakpoint_by_id(const Operation& operation, uint64_t id)
+{
+    if (id == 0) return nullptr;
+    for (uint32_t i = 0; i < GX_DEVELOPMENT_DEBUG_MAX_SOURCE_BREAKPOINTS; ++i) {
+        if (operation.userBreakpoints[i].used && operation.userBreakpoints[i].id == id)
+            return &operation.userBreakpoints[i];
+    }
+    return nullptr;
+}
+
+static UserBreakpoint* installed_user_breakpoint_at(Operation& operation,
+                                                    uint64_t address)
+{
+    if (address == 0) return nullptr;
+    for (uint32_t i = 0; i < GX_DEVELOPMENT_DEBUG_MAX_SOURCE_BREAKPOINTS; ++i) {
+        UserBreakpoint& candidate = operation.userBreakpoints[i];
+        if (candidate.used && candidate.enabled && candidate.patchInstalled &&
+            candidate.address == address) return &candidate;
+    }
+    return nullptr;
+}
+
+static UserBreakpoint* current_user_breakpoint(Operation& operation)
+{
+    UserBreakpoint* current = user_breakpoint_by_id(
+        operation, operation.debugCurrentBreakpointId);
+    if (current) return current;
+    return user_breakpoint_at(operation, operation.debugCurrentBreakpointSlot);
+}
+
+static const UserBreakpoint* current_user_breakpoint(const Operation& operation)
+{
+    const UserBreakpoint* current = user_breakpoint_by_id(
+        operation, operation.debugCurrentBreakpointId);
+    if (current) return current;
+    return user_breakpoint_at(operation, operation.debugCurrentBreakpointSlot);
+}
+
+static void mirror_current_user_breakpoint(Operation& operation,
+                                           const UserBreakpoint* breakpoint)
+{
+    if (!breakpoint) return;
+    operation.debugCurrentBreakpointId = breakpoint->id;
+    operation.debugBreakpointAddress = breakpoint->address;
+    operation.debugBreakpointOriginalByte = breakpoint->originalByte;
+    operation.debugBreakpointInstalled = breakpoint->patchInstalled;
+    operation.debugSourceSelected = true;
+    operation.debugCurrentSourceMappingValid = true;
+    operation.debugSourceLine = breakpoint->sourceLine;
+    operation.debugSourceColumn = breakpoint->sourceColumn;
+    operation.debugConditionEnabled = breakpoint->conditionEnabled;
+    operation.debugConditionLength = breakpoint->conditionLength;
+    operation.debugConditionExpressionHash = breakpoint->conditionExpressionHash;
+    operation.debugConditionFalseHitCount = breakpoint->falseHitCount;
+    operation.debugConditionTrueHitCount = breakpoint->trueHitCount;
+    copy_text(operation.debugSourcePath, sizeof(operation.debugSourcePath),
+              breakpoint->sourcePath);
+    copy_text(operation.debugFunctionName, sizeof(operation.debugFunctionName),
+              breakpoint->functionName);
+    copy_text(operation.debugCondition, sizeof(operation.debugCondition),
+              breakpoint->condition);
+}
+
+static void sync_current_user_breakpoint(Operation& operation)
+{
+    UserBreakpoint* current = current_user_breakpoint(operation);
+    if (current) mirror_current_user_breakpoint(operation, current);
+}
+
+static bool restore_current_breakpoint(Operation& operation)
+{
+    UserBreakpoint* current = current_user_breakpoint(operation);
+    if (current) {
+        if (!current->patchInstalled) return true;
+        if (!restore_debug_breakpoint(current->address)) return false;
+        current->patchInstalled = false;
+        mirror_current_user_breakpoint(operation, current);
+        return true;
+    }
+    if (operation.debugEntryBreakpoint && operation.debugBreakpointInstalled) {
+        if (!restore_debug_breakpoint(operation.debugBreakpointAddress)) return false;
+        operation.debugBreakpointInstalled = false;
+    }
+    return true;
 }
 
 static bool starts_with(const char* value, const char* prefix)
@@ -372,7 +516,8 @@ static void set_debug_identity(const Operation& operation,
                                gx_development_debug_snapshot* snapshot)
 {
     if (!snapshot) return;
-    snapshot->bindingId = 1;
+    snapshot->bindingId = operation.debugCurrentBreakpointId != 0
+        ? operation.debugCurrentBreakpointId : (operation.debugEntryBreakpoint ? 1ULL : 0ULL);
     snapshot->processId = 0;
     snapshot->nativeRuntimeId = operation.registrationGeneration;
     snapshot->threadId = 1;
@@ -382,7 +527,12 @@ static void set_debug_identity(const Operation& operation,
     snapshot->installedByte = operation.debugBreakpointInstalled ? 0xCC : operation.debugBreakpointOriginalByte;
     snapshot->originalByteValid = operation.debugBreakpointInstalled || operation.debugBreakpointHit ? 1U : 0U;
     snapshot->bindingInstalled = operation.debugBreakpointInstalled ? 1U : 0U;
-    snapshot->bindingCount = operation.debugBreakpointInstalled ? 1U : 0U;
+    uint32_t installedCount = 0;
+    for (uint32_t i = 0; i < GX_DEVELOPMENT_DEBUG_MAX_SOURCE_BREAKPOINTS; ++i)
+        if (operation.userBreakpoints[i].used && operation.userBreakpoints[i].patchInstalled)
+            ++installedCount;
+    snapshot->bindingCount = installedCount +
+        (operation.debugEntryBreakpoint && operation.debugBreakpointInstalled ? 1U : 0U);
     copy_text(snapshot->functionName, sizeof(snapshot->functionName),
               operation.debugCurrentSourceMappingValid
                   ? operation.debugFunctionName : "gx_main");
@@ -392,6 +542,65 @@ static void set_debug_identity(const Operation& operation,
         snapshot->sourceLine = operation.debugSourceLine;
         snapshot->sourceColumn = operation.debugSourceColumn;
     }
+}
+
+static void set_breakpoint_list(const Operation& operation,
+                                gx_development_debug_snapshot* snapshot)
+{
+    if (!snapshot) return;
+    snapshot->breakpointCount = 0;
+    snapshot->breakpointCapacity = GX_DEVELOPMENT_DEBUG_MAX_SOURCE_BREAKPOINTS;
+    for (uint32_t ordered = 0; ordered < GX_DEVELOPMENT_DEBUG_MAX_SOURCE_BREAKPOINTS; ++ordered) {
+        const UserBreakpoint* selected = nullptr;
+        for (uint32_t i = 0; i < GX_DEVELOPMENT_DEBUG_MAX_SOURCE_BREAKPOINTS; ++i) {
+            const UserBreakpoint& candidate = operation.userBreakpoints[i];
+            if (!candidate.used) continue;
+            bool alreadyEmitted = false;
+            for (uint32_t emitted = 0; emitted < snapshot->breakpointCount; ++emitted) {
+                if (snapshot->breakpoints[emitted].breakpointId == candidate.id) {
+                    alreadyEmitted = true;
+                    break;
+                }
+            }
+            if (alreadyEmitted) continue;
+            if (!selected || candidate.id < selected->id) selected = &candidate;
+        }
+        if (!selected) break;
+        gx_development_debug_breakpoint& record =
+            snapshot->breakpoints[snapshot->breakpointCount++];
+        record.breakpointId = selected->id;
+        record.sessionGeneration = selected->generation;
+        record.targetAddress = selected->address;
+        record.enabled = selected->enabled ? 1U : 0U;
+        record.installed = selected->patchInstalled ? 1U : 0U;
+        record.sourceLine = selected->sourceLine;
+        record.sourceColumn = selected->sourceColumn;
+        record.sourceMappingValid = 1U;
+        record.conditionPresent = selected->conditionEnabled ? 1U : 0U;
+        record.conditionLength = selected->conditionLength;
+        record.hitCount = selected->hitCount;
+        record.falseHitCount = selected->falseHitCount;
+        record.trueHitCount = selected->trueHitCount;
+        record.conditionExpressionHash = selected->conditionExpressionHash;
+        copy_text(record.sourcePath, sizeof(record.sourcePath), selected->sourcePath);
+        copy_text(record.functionName, sizeof(record.functionName), selected->functionName);
+    }
+}
+
+static void serial_debug_breakpoint_state(const char* marker,
+                                          const Operation& operation)
+{
+    if (!marker) return;
+    serial::puts(marker);
+    for (uint32_t i = 0; i < GX_DEVELOPMENT_DEBUG_MAX_SOURCE_BREAKPOINTS; ++i) {
+        const UserBreakpoint& breakpoint = operation.userBreakpoints[i];
+        if (!breakpoint.used) continue;
+        serial::puts(" id="); serial::put_hex64(breakpoint.id);
+        serial::puts(" enabled="); serial::put_hex32(breakpoint.enabled ? 1U : 0U);
+        serial::puts(" installed="); serial::put_hex32(breakpoint.patchInstalled ? 1U : 0U);
+        serial::puts(" hits="); serial::put_hex32(breakpoint.hitCount);
+    }
+    serial::putc('\n');
 }
 
 static void set_source_step_metadata(const Operation& operation,
@@ -885,8 +1094,14 @@ static bool debug_request_identity_matches(const Operation& operation,
     if (request.nativeRuntimeId != 0 &&
         request.nativeRuntimeId != operation.registrationGeneration) return false;
     if (request.threadId != 0 && request.threadId != 1) return false;
-    if (request.breakpointId != 0 && request.breakpointId != 1) return false;
+    if (request.breakpointId != 0 && request.breakpointId != 1 &&
+        request.command != GX_DEVELOPMENT_DEBUG_ADD_SOURCE_BREAKPOINT &&
+        request.command != GX_DEVELOPMENT_DEBUG_REMOVE_SOURCE_BREAKPOINT &&
+        request.command != GX_DEVELOPMENT_DEBUG_ENABLE_SOURCE_BREAKPOINT &&
+        request.command != GX_DEVELOPMENT_DEBUG_DISABLE_SOURCE_BREAKPOINT &&
+        request.breakpointId != operation.debugCurrentBreakpointId) return false;
     if (request.targetAddress != 0 &&
+        request.command != GX_DEVELOPMENT_DEBUG_ADD_SOURCE_BREAKPOINT &&
         request.targetAddress != operation.debugBreakpointAddress) return false;
     if (request.artifactSha256 &&
         !equal_text(request.artifactSha256, operation.artifactSha256)) return false;
@@ -1106,6 +1321,8 @@ static bool validate_identity(Operation& operation) {
         copy_text(operation.errorMessage, sizeof(operation.errorMessage), "Build artifact failed NativeElf validation");
         return false;
     }
+    operation.debugImageBase = validation.imageBase;
+    operation.debugImageSize = validation.mappedBytes;
     if (validation.entryLoadIndex >= validation.loadCount ||
         validation.loads[validation.entryLoadIndex].fileSize < compiler::BOOTSTRAP_CODE_OFFSET ||
         validation.loads[validation.entryLoadIndex].fileSize - compiler::BOOTSTRAP_CODE_OFFSET > 0xFFFFFFFFULL) {
@@ -1286,6 +1503,309 @@ static bool validate_request(Operation& operation, const gx_development_run_requ
     return copy_text(operation.applicationId, sizeof(operation.applicationId), operation.projectId);
 }
 
+static uint64_t make_breakpoint_id(Operation& operation)
+{
+    uint64_t sequence = operation.nextBreakpointSequence++;
+    if (sequence == 0) sequence = operation.nextBreakpointSequence++;
+    uint64_t id = (operation.handle << 32) | (sequence & 0xFFFFFFFFULL);
+    if (id == 0) id = sequence != 0 ? sequence : 1ULL;
+    return id;
+}
+
+static bool source_file_matches_mapping(Operation& operation,
+                                        const char* sourcePath,
+                                        const compiler::ResolvedSourceMapping& mapping)
+{
+    char fullPath[kMaxPath] = {};
+    if (!join_path(operation.projectRoot, sourcePath, fullPath, sizeof(fullPath)) ||
+        !read_bounded(fullPath, s_debugSource, sizeof(s_debugSource))) return false;
+    return fnv1a_bytes(reinterpret_cast<const uint8_t*>(s_debugSource),
+                       text_length(s_debugSource, sizeof(s_debugSource))) == mapping.sourceHash &&
+        text_length(s_debugSource, sizeof(s_debugSource)) == mapping.sourceBytes;
+}
+
+static bool populate_user_breakpoint(Operation& operation,
+                                     UserBreakpoint& breakpoint,
+                                     const char* sourcePath,
+                                     uint32_t sourceLine,
+                                     uint32_t sourceColumn,
+                                     const char* condition,
+                                     uint32_t* status,
+                                     char* errorMessage,
+                                     uint32_t errorCapacity)
+{
+    if (status) *status = GX_DEVELOPMENT_DEBUG_BREAKPOINT_STATUS_INVALID;
+    if (errorMessage && errorCapacity != 0) errorMessage[0] = '\0';
+    if (!sourcePath || sourceLine == 0 || !safe_relative(sourcePath) ||
+        !copy_text(breakpoint.sourcePath, sizeof(breakpoint.sourcePath), sourcePath)) {
+        if (errorMessage) copy_text(errorMessage, errorCapacity, "source breakpoint identity is invalid");
+        return false;
+    }
+    const char* expression = condition && condition[0] != '\0' ? condition : nullptr;
+    if (expression && !copy_text(breakpoint.condition, sizeof(breakpoint.condition), expression)) {
+        if (errorMessage) copy_text(errorMessage, errorCapacity, "source breakpoint condition is too long");
+        return false;
+    }
+    if (expression) {
+        NativeDebugWatchResult syntax = {};
+        if (!native_debug_watch_validate_expression(breakpoint.condition, &syntax)) {
+            if (errorMessage) copy_text(errorMessage, errorCapacity,
+                syntax.diagnostic[0] != '\0' ? syntax.diagnostic : "source breakpoint condition is invalid");
+            return false;
+        }
+        breakpoint.conditionEnabled = true;
+        breakpoint.conditionLength = text_length(breakpoint.condition, sizeof(breakpoint.condition));
+        breakpoint.conditionExpressionHash = condition_hash(breakpoint.condition);
+    }
+
+    compiler::ResolvedSourceMapping mapping = {};
+    const char* mappingError = nullptr;
+    if (!compiler::resolve_bootstrap_source_mapping(
+            s_artifact, static_cast<uint32_t>(operation.artifactSize),
+            operation.debugImageBase, compiler::BOOTSTRAP_CODE_OFFSET,
+            operation.debugCodeBytes, breakpoint.sourcePath, sourceLine, sourceColumn,
+            &mapping, &mappingError)) {
+        if (errorMessage) copy_text(errorMessage, errorCapacity,
+            mappingError ? mappingError : "requested source line is not mapped");
+        return false;
+    }
+    if (!source_file_matches_mapping(operation, breakpoint.sourcePath, mapping)) {
+        if (errorMessage) copy_text(errorMessage, errorCapacity,
+                                    "source breakpoint file differs from artifact identity");
+        return false;
+    }
+    breakpoint.requestedLine = sourceLine;
+    breakpoint.requestedColumn = sourceColumn;
+    breakpoint.sourceLine = mapping.line;
+    breakpoint.sourceColumn = mapping.column;
+    breakpoint.address = mapping.targetAddress;
+    copy_text(breakpoint.sourcePath, sizeof(breakpoint.sourcePath), mapping.sourcePath);
+    copy_text(breakpoint.functionName, sizeof(breakpoint.functionName), mapping.functionName);
+    breakpoint.generation = operation.registrationGeneration != 0
+        ? operation.registrationGeneration : operation.handle;
+    breakpoint.enabled = true;
+    breakpoint.patchInstalled = false;
+    if (status) *status = GX_DEVELOPMENT_DEBUG_BREAKPOINT_STATUS_SUCCESS;
+    return true;
+}
+
+static bool initialize_legacy_user_breakpoint(Operation& operation)
+{
+    if (!operation.debugSourceSelected) return true;
+    UserBreakpoint& breakpoint = operation.userBreakpoints[0];
+    breakpoint = UserBreakpoint();
+    breakpoint.used = true;
+    breakpoint.enabled = true;
+    breakpoint.id = make_breakpoint_id(operation);
+    breakpoint.generation = operation.registrationGeneration != 0
+        ? operation.registrationGeneration : operation.handle;
+    breakpoint.address = operation.debugBreakpointAddress;
+    breakpoint.requestedLine = operation.debugSourceLine;
+    breakpoint.requestedColumn = operation.debugSourceColumn;
+    breakpoint.sourceLine = operation.debugSourceLine;
+    breakpoint.sourceColumn = operation.debugSourceColumn;
+    copy_text(breakpoint.sourcePath, sizeof(breakpoint.sourcePath), operation.debugSourcePath);
+    copy_text(breakpoint.functionName, sizeof(breakpoint.functionName), operation.debugFunctionName);
+    if (operation.debugConditionEnabled) {
+        breakpoint.conditionEnabled = true;
+        copy_text(breakpoint.condition, sizeof(breakpoint.condition), operation.debugCondition);
+        breakpoint.conditionLength = operation.debugConditionLength;
+        breakpoint.conditionExpressionHash = operation.debugConditionExpressionHash;
+    }
+    operation.userBreakpointCount = 1;
+    operation.debugCurrentBreakpointSlot = 0;
+    operation.debugCurrentBreakpointId = breakpoint.id;
+    return true;
+}
+
+static void retire_user_breakpoint(UserBreakpoint& breakpoint)
+{
+    breakpoint = UserBreakpoint();
+}
+
+static void set_breakpoint_operation_snapshot(
+    Operation& operation, gx_development_debug_snapshot* snapshot,
+    uint32_t status, const char* message)
+{
+    clear_debug_snapshot(snapshot);
+    if (!snapshot) return;
+    snapshot->status = status == GX_DEVELOPMENT_DEBUG_BREAKPOINT_STATUS_SUCCESS
+        ? GX_DEVELOPMENT_DEBUG_STATUS_READY : GX_DEVELOPMENT_DEBUG_STATUS_REJECTED;
+    snapshot->breakpointOperationStatus = status;
+    set_breakpoint_list(operation, snapshot);
+    if (message) copy_text(snapshot->errorMessage, sizeof(snapshot->errorMessage), message);
+}
+
+static bool runtime_has_loaded_image(const Operation& operation)
+{
+    return operation.state == GX_DEVELOPMENT_RUN_RUNNING ||
+        operation.state == GX_DEVELOPMENT_RUN_PAUSED ||
+        operation.state == GX_DEVELOPMENT_RUN_STEPPING;
+}
+
+static gx_result add_source_breakpoint(Operation& operation,
+                                       const gx_development_debug_request& request,
+                                       gx_development_debug_snapshot* snapshot)
+{
+    if (operation.state != GX_DEVELOPMENT_RUN_REGISTERED &&
+        !runtime_has_loaded_image(operation)) {
+        set_breakpoint_operation_snapshot(operation, snapshot,
+            GX_DEVELOPMENT_DEBUG_BREAKPOINT_STATUS_STALE,
+            "source breakpoint session is not active");
+        return GX_ERROR_BUSY;
+    }
+    UserBreakpoint candidate = {};
+    uint32_t status = GX_DEVELOPMENT_DEBUG_BREAKPOINT_STATUS_INVALID;
+    char error[GX_DEVELOPMENT_DEBUG_MAX_ERROR_BYTES] = {};
+    if (!populate_user_breakpoint(operation, candidate, request.sourcePath,
+                                  request.sourceLine, request.sourceColumn,
+                                  request.sourceCondition, &status, error, sizeof(error))) {
+        set_breakpoint_operation_snapshot(operation, snapshot, status, error);
+        return GX_ERROR_INVALID_ARGUMENT;
+    }
+    for (uint32_t i = 0; i < GX_DEVELOPMENT_DEBUG_MAX_SOURCE_BREAKPOINTS; ++i) {
+        if (operation.userBreakpoints[i].used &&
+            operation.userBreakpoints[i].address == candidate.address) {
+            set_breakpoint_operation_snapshot(operation, snapshot,
+                GX_DEVELOPMENT_DEBUG_BREAKPOINT_STATUS_DUPLICATE,
+                "source breakpoint address is already owned");
+            return GX_ERROR_INVALID_ARGUMENT;
+        }
+    }
+    if (operation.userBreakpointCount >= GX_DEVELOPMENT_DEBUG_MAX_SOURCE_BREAKPOINTS) {
+        set_breakpoint_operation_snapshot(operation, snapshot,
+            GX_DEVELOPMENT_DEBUG_BREAKPOINT_STATUS_CAPACITY,
+            "source breakpoint capacity is full");
+        return GX_ERROR_BUSY;
+    }
+    uint32_t slot = kInvalidBreakpointSlot;
+    for (uint32_t i = 0; i < GX_DEVELOPMENT_DEBUG_MAX_SOURCE_BREAKPOINTS; ++i) {
+        if (!operation.userBreakpoints[i].used) {
+            slot = i;
+            break;
+        }
+    }
+    if (slot == kInvalidBreakpointSlot) {
+        set_breakpoint_operation_snapshot(operation, snapshot,
+            GX_DEVELOPMENT_DEBUG_BREAKPOINT_STATUS_CAPACITY,
+            "source breakpoint capacity is full");
+        return GX_ERROR_BUSY;
+    }
+    candidate.used = true;
+    candidate.id = make_breakpoint_id(operation);
+    operation.userBreakpoints[slot] = candidate;
+    ++operation.userBreakpointCount;
+    UserBreakpoint& stored = operation.userBreakpoints[slot];
+    if (runtime_has_loaded_image(operation) && stored.enabled) {
+        uint8_t originalByte = 0;
+        if (!install_debug_breakpoint(stored.address, &originalByte)) {
+            retire_user_breakpoint(stored);
+            --operation.userBreakpointCount;
+            set_breakpoint_operation_snapshot(operation, snapshot,
+                GX_DEVELOPMENT_DEBUG_BREAKPOINT_STATUS_PATCH_CONFLICT,
+                "source breakpoint address conflicts with an active patch");
+            return GX_ERROR_FAILED;
+        }
+        stored.originalByte = originalByte;
+        stored.originalByteValid = true;
+        stored.patchInstalled = true;
+    }
+    set_breakpoint_operation_snapshot(operation, snapshot,
+        GX_DEVELOPMENT_DEBUG_BREAKPOINT_STATUS_SUCCESS, nullptr);
+    snapshot->bindingId = stored.id;
+    snapshot->targetAddress = stored.address;
+    serial::puts("DEVELOPER_STUDIO_PHASE28K_ADD_PASS id=");
+    serial::put_hex64(stored.id); serial::puts(" address=0x");
+    serial::put_hex64(stored.address); serial::putc('\n');
+    return GX_OK;
+}
+
+static gx_result remove_source_breakpoint(Operation& operation,
+                                          const gx_development_debug_request& request,
+                                          gx_development_debug_snapshot* snapshot)
+{
+    UserBreakpoint* breakpoint = user_breakpoint_by_id(operation, request.breakpointId);
+    if (!breakpoint) {
+        set_breakpoint_operation_snapshot(operation, snapshot,
+            GX_DEVELOPMENT_DEBUG_BREAKPOINT_STATUS_STALE,
+            "source breakpoint ID is stale or unknown");
+        return GX_ERROR_FAILED;
+    }
+    const uint64_t id = breakpoint->id;
+    const bool currentPaused = operation.state == GX_DEVELOPMENT_RUN_PAUSED &&
+        operation.debugCurrentBreakpointId == id && operation.debugBreakpointHit;
+    if (breakpoint->patchInstalled && !restore_debug_breakpoint(breakpoint->address)) {
+        set_breakpoint_operation_snapshot(operation, snapshot,
+            GX_DEVELOPMENT_DEBUG_BREAKPOINT_STATUS_PATCH_CONFLICT,
+            "source breakpoint could not restore its original byte");
+        return GX_ERROR_FAILED;
+    }
+    breakpoint->patchInstalled = false;
+    if (currentPaused) {
+        operation.debugPausedBreakpointRemoved = true;
+        operation.debugServicingBreakpointId = id;
+        operation.debugServicingBreakpointSlot = kInvalidBreakpointSlot;
+        mirror_current_user_breakpoint(operation, breakpoint);
+    } else if (operation.debugCurrentBreakpointId == id) {
+        operation.debugCurrentBreakpointId = 0;
+        operation.debugCurrentBreakpointSlot = kInvalidBreakpointSlot;
+        operation.debugSourceSelected = false;
+    }
+    retire_user_breakpoint(*breakpoint);
+    --operation.userBreakpointCount;
+    set_breakpoint_operation_snapshot(operation, snapshot,
+        GX_DEVELOPMENT_DEBUG_BREAKPOINT_STATUS_SUCCESS, nullptr);
+    snapshot->bindingId = id;
+    serial::puts("DEVELOPER_STUDIO_PHASE28K_REMOVE_PASS id=");
+    serial::put_hex64(id); serial::putc('\n');
+    return GX_OK;
+}
+
+static gx_result set_source_breakpoint_enabled(
+    Operation& operation, const gx_development_debug_request& request,
+    gx_development_debug_snapshot* snapshot, bool enabled)
+{
+    UserBreakpoint* breakpoint = user_breakpoint_by_id(operation, request.breakpointId);
+    if (!breakpoint) {
+        set_breakpoint_operation_snapshot(operation, snapshot,
+            GX_DEVELOPMENT_DEBUG_BREAKPOINT_STATUS_STALE,
+            "source breakpoint ID is stale or unknown");
+        return GX_ERROR_FAILED;
+    }
+    if (!enabled && breakpoint->patchInstalled) {
+        if (!restore_debug_breakpoint(breakpoint->address)) {
+            set_breakpoint_operation_snapshot(operation, snapshot,
+                GX_DEVELOPMENT_DEBUG_BREAKPOINT_STATUS_PATCH_CONFLICT,
+                "source breakpoint could not be disabled safely");
+            return GX_ERROR_FAILED;
+        }
+        breakpoint->patchInstalled = false;
+    }
+    if (enabled && !breakpoint->enabled && runtime_has_loaded_image(operation)) {
+        uint8_t originalByte = 0;
+        if (!install_debug_breakpoint(breakpoint->address, &originalByte) ||
+            (breakpoint->originalByteValid && originalByte != breakpoint->originalByte)) {
+            (void)restore_debug_breakpoint(breakpoint->address);
+            set_breakpoint_operation_snapshot(operation, snapshot,
+                GX_DEVELOPMENT_DEBUG_BREAKPOINT_STATUS_PATCH_CONFLICT,
+                "source breakpoint could not be enabled for this generation");
+            return GX_ERROR_FAILED;
+        }
+        breakpoint->originalByte = originalByte;
+        breakpoint->originalByteValid = true;
+        breakpoint->patchInstalled = true;
+    }
+    breakpoint->enabled = enabled;
+    if (operation.debugCurrentBreakpointId == breakpoint->id &&
+        operation.state == GX_DEVELOPMENT_RUN_PAUSED) {
+        operation.debugPausedBreakpointRemoved = !enabled;
+    }
+    set_breakpoint_operation_snapshot(operation, snapshot,
+        GX_DEVELOPMENT_DEBUG_BREAKPOINT_STATUS_SUCCESS, nullptr);
+    snapshot->bindingId = breakpoint->id;
+    return GX_OK;
+}
+
 static bool unregister_application(Operation& operation)
 {
     if (!operation.appModelRegistered) {
@@ -1333,7 +1853,14 @@ static gx_development_run_error_code runtime_error_code(const NativeElfRunReport
 
 static void finish_execution(Operation& operation, bool success)
 {
-    const bool debugClean = restore_debug_entry_breakpoint();
+    const bool debugClean = restore_all_debug_breakpoints();
+    for (uint32_t i = 0; i < GX_DEVELOPMENT_DEBUG_MAX_SOURCE_BREAKPOINTS; ++i)
+        operation.userBreakpoints[i] = UserBreakpoint();
+    operation.userBreakpointCount = 0;
+    operation.debugCurrentBreakpointId = 0;
+    operation.debugServicingBreakpointId = 0;
+    operation.debugCurrentBreakpointSlot = kInvalidBreakpointSlot;
+    operation.debugServicingBreakpointSlot = kInvalidBreakpointSlot;
     operation.debugStepOverReturnBreakpointInstalled = false;
     operation.debugStepOverActive = false;
     operation.debugStepOutReturnBreakpointInstalled = false;
@@ -1482,6 +2009,8 @@ gx_result prepare(const gx_development_run_request& request,
         return GX_OK;
     }
     s_operation = Operation();
+    s_operation.debugCurrentBreakpointSlot = kInvalidBreakpointSlot;
+    s_operation.debugServicingBreakpointSlot = kInvalidBreakpointSlot;
     s_operation.used = true;
     s_operation.handle = s_nextHandle++;
     if (s_operation.handle == 0) s_operation.handle = s_nextHandle++;
@@ -1489,6 +2018,17 @@ gx_result prepare(const gx_development_run_request& request,
     s_operation.error = GX_DEVELOPMENT_RUN_ERROR_NONE;
     if (!validate_request(s_operation, request)) {
         s_operation.state = GX_DEVELOPMENT_RUN_FAILED;
+        s_operation.cleanupComplete = true;
+        s_operation.report.teardownComplete = true;
+        snapshot_operation(s_operation, outSnapshot);
+        s_operation = Operation();
+        return GX_OK;
+    }
+    if (!initialize_legacy_user_breakpoint(s_operation)) {
+        s_operation.state = GX_DEVELOPMENT_RUN_FAILED;
+        s_operation.error = GX_DEVELOPMENT_RUN_ERROR_INTERNAL;
+        copy_text(s_operation.errorMessage, sizeof(s_operation.errorMessage),
+                  "source breakpoint manager could not initialize");
         s_operation.cleanupComplete = true;
         s_operation.report.teardownComplete = true;
         snapshot_operation(s_operation, outSnapshot);
@@ -1537,6 +2077,9 @@ gx_result prepare(const gx_development_run_request& request,
     }
     s_operation.appModelRegistered = true;
     s_operation.registrationGeneration = registration.generation;
+    for (uint32_t i = 0; i < GX_DEVELOPMENT_DEBUG_MAX_SOURCE_BREAKPOINTS; ++i)
+        if (s_operation.userBreakpoints[i].used)
+            s_operation.userBreakpoints[i].generation = s_operation.registrationGeneration;
     s_operation.cleanupComplete = false;
     s_operation.state = GX_DEVELOPMENT_RUN_REGISTERED;
     *outHandle = s_operation.handle;
@@ -1724,14 +2267,63 @@ bool native_elf_debug_breakpoint_target(uint64_t* targetAddress)
     return true;
 }
 
+bool native_elf_debug_install_breakpoints(uint64_t entryPoint)
+{
+    if (!s_operation.used || !s_operation.debugControlled || entryPoint == 0) return false;
+    s_operation.debugEntryBreakpoint = false;
+    if (s_operation.userBreakpointCount == 0) {
+        uint8_t originalByte = 0;
+        if (!install_debug_breakpoint(entryPoint, &originalByte)) return false;
+        s_operation.debugEntryBreakpoint = true;
+        s_operation.debugBreakpointAddress = entryPoint;
+        s_operation.debugBreakpointOriginalByte = originalByte;
+        s_operation.debugBreakpointInstalled = true;
+        s_operation.debugCurrentBreakpointId = 0;
+        s_operation.debugCurrentBreakpointSlot = kInvalidBreakpointSlot;
+        serial_debug_hex("DEVELOPER_STUDIO_PHASE27Z_BREAKPOINT_INSTALLED target=0x",
+                         entryPoint);
+        serial::puts(" original=0x"); serial::put_hex32(originalByte); serial::putc('\n');
+        return true;
+    }
+    for (uint32_t i = 0; i < GX_DEVELOPMENT_DEBUG_MAX_SOURCE_BREAKPOINTS; ++i) {
+        UserBreakpoint& breakpoint = s_operation.userBreakpoints[i];
+        if (!breakpoint.used || !breakpoint.enabled) continue;
+        uint8_t originalByte = 0;
+        if (!install_debug_breakpoint(breakpoint.address, &originalByte)) {
+            (void)restore_all_debug_breakpoints();
+            for (uint32_t clear = 0; clear < GX_DEVELOPMENT_DEBUG_MAX_SOURCE_BREAKPOINTS; ++clear)
+                s_operation.userBreakpoints[clear].patchInstalled = false;
+            return false;
+        }
+        breakpoint.originalByte = originalByte;
+        breakpoint.originalByteValid = true;
+        breakpoint.patchInstalled = true;
+        serial::puts("DEVELOPER_STUDIO_PHASE28K_BREAKPOINT_INSTALLED id=");
+        serial::put_hex64(breakpoint.id);
+        serial::puts(" address=0x"); serial::put_hex64(breakpoint.address);
+        serial::puts(" original=0x"); serial::put_hex32(originalByte);
+        serial::puts(" source="); serial::puts(breakpoint.sourcePath);
+        serial::puts(" line="); serial::put_hex32(breakpoint.sourceLine);
+        serial::putc('\n');
+    }
+    sync_current_user_breakpoint(s_operation);
+    return true;
+}
+
 bool native_elf_debug_breakpoint_installed(uint64_t targetAddress,
                                            uint8_t originalByte)
 {
     if (!s_operation.used || !s_operation.debugControlled ||
         s_operation.state != GX_DEVELOPMENT_RUN_RUNNING ||
-        !debug_entry_breakpoint_installed() || targetAddress == 0 ||
-        (s_operation.debugSourceSelected &&
-         targetAddress != s_operation.debugBreakpointAddress)) return false;
+        !debug_breakpoint_installed_at(targetAddress) || targetAddress == 0) return false;
+    UserBreakpoint* user = installed_user_breakpoint_at(s_operation, targetAddress);
+    if (user) {
+        user->patchInstalled = true;
+        user->originalByte = originalByte;
+        user->originalByteValid = true;
+        mirror_current_user_breakpoint(s_operation, user);
+        return true;
+    }
     s_operation.debugBreakpointInstalled = true;
     s_operation.debugBreakpointAddress = targetAddress;
     s_operation.debugBreakpointOriginalByte = originalByte;
@@ -1753,6 +2345,8 @@ void native_elf_debug_breakpoint_install_failed()
     s_operation.debugBreakpointHit = false;
     s_operation.debugBreakpointAddress = 0;
     s_operation.debugBreakpointOriginalByte = 0;
+    for (uint32_t i = 0; i < GX_DEVELOPMENT_DEBUG_MAX_SOURCE_BREAKPOINTS; ++i)
+        s_operation.userBreakpoints[i].patchInstalled = false;
     if (s_operation.used && s_operation.debugControlled)
         serial::puts(s_operation.debugSourceSelected
                          ? "DEVELOPER_STUDIO_PHASE28A_BREAKPOINT_INSTALL_FAIL\n"
@@ -1780,7 +2374,7 @@ static bool handle_step_out_return_trap(
     if (!valid) return false;
 
     const uint64_t rawTrapRip = context->rip;
-    if (!restore_debug_entry_breakpoint()) return false;
+    if (!restore_debug_breakpoint(s_operation.debugStepOutReturnAddress)) return false;
     s_operation.debugStepOutReturnBreakpointInstalled = false;
     s_operation.debugStepOutReturnBreakpointHit = true;
     s_operation.debugStepOutReturnTrapRip = rawTrapRip;
@@ -1874,7 +2468,8 @@ static bool evaluate_current_breakpoint_condition(
     request.handle = operation.handle;
     request.sessionGeneration = operation.registrationGeneration;
     request.nativeRuntimeId = operation.registrationGeneration;
-    request.breakpointId = 1;
+    request.breakpointId = operation.debugCurrentBreakpointId != 0
+        ? operation.debugCurrentBreakpointId : 1;
     request.targetAddress = operation.debugBreakpointAddress;
     request.artifactSha256 = operation.artifactSha256;
     request.threadId = 1;
@@ -1930,7 +2525,7 @@ bool native_elf_debug_breakpoint_exception(
         context->rsp < runtime->stackBase + runtime->stackSize;
     if (stepOverReturnTrap) {
         const uint64_t rawTrapRip = context->rip;
-        if (!restore_debug_entry_breakpoint()) return false;
+        if (!restore_debug_breakpoint(s_operation.debugStepOverReturnAddress)) return false;
         s_operation.debugStepOverReturnBreakpointInstalled = false;
         s_operation.debugStepOverReturnBreakpointHit = true;
         s_operation.debugStepOverReturnTrapRip = rawTrapRip;
@@ -2003,20 +2598,49 @@ bool native_elf_debug_breakpoint_exception(
         return true;
     }
     if (!context || !s_operation.used || !s_operation.debugControlled ||
-        !s_operation.debugBreakpointInstalled || s_operation.debugBreakpointHit ||
-        s_operation.state != GX_DEVELOPMENT_RUN_RUNNING || !s_schedulerActive ||
-        !s_schedulerInTarget || !s_ownerContext || !s_targetContext ||
-        context->cs != 0x08 || context->rip != s_operation.debugBreakpointAddress + 1ULL) {
+        s_operation.debugBreakpointHit || s_operation.state != GX_DEVELOPMENT_RUN_RUNNING ||
+        !s_schedulerActive || !s_schedulerInTarget || !s_ownerContext || !s_targetContext ||
+        context->cs != 0x08 || context->rip == 0) {
         return false;
+    }
+    const uint64_t normalizedAddress = context->rip - 1ULL;
+    UserBreakpoint* hitBreakpoint = installed_user_breakpoint_at(
+        s_operation, normalizedAddress);
+    const bool entryBreakpoint = s_operation.debugEntryBreakpoint &&
+        s_operation.debugBreakpointInstalled &&
+        normalizedAddress == s_operation.debugBreakpointAddress;
+    if (!hitBreakpoint && !entryBreakpoint) return false;
+    if (hitBreakpoint) {
+        s_operation.debugCurrentBreakpointSlot = static_cast<uint32_t>(
+            hitBreakpoint - s_operation.userBreakpoints);
+        mirror_current_user_breakpoint(s_operation, hitBreakpoint);
+        s_operation.debugServicingBreakpointSlot = s_operation.debugCurrentBreakpointSlot;
+        s_operation.debugServicingBreakpointId = hitBreakpoint->id;
+        s_operation.debugSourceSelected = true;
+    } else {
+        s_operation.debugCurrentBreakpointSlot = kInvalidBreakpointSlot;
+        s_operation.debugCurrentBreakpointId = 0;
+        s_operation.debugSourceSelected = false;
     }
     runtime = native_elf_runtime_context();
     if (!runtime || runtime->state != NativeAppExecutionState::Running ||
-        !native_app_pointer_in_range(s_operation.debugBreakpointAddress, runtime->imageBase,
+        !native_app_pointer_in_range(normalizedAddress, runtime->imageBase,
                                      runtime->imageSize)) return false;
+    if (hitBreakpoint) {
+        if (!restore_debug_breakpoint(hitBreakpoint->address)) return false;
+        hitBreakpoint->patchInstalled = false;
+        mirror_current_user_breakpoint(s_operation, hitBreakpoint);
+    }
+    s_operation.debugBreakpointAddress = normalizedAddress;
 
     ++s_operation.debugStopGeneration;
     if (s_operation.debugStopGeneration == 0) s_operation.debugStopGeneration = 1;
     s_operation.debugBreakpointHit = true;
+    if (hitBreakpoint) {
+        ++hitBreakpoint->hitCount;
+        s_operation.debugConditionFalseHitCount = hitBreakpoint->falseHitCount;
+        s_operation.debugConditionTrueHitCount = hitBreakpoint->trueHitCount;
+    }
     s_operation.debugContext = context;
     s_operation.debugStepActive = false;
     s_operation.debugStepTrapObserved = false;
@@ -2072,8 +2696,10 @@ bool native_elf_debug_breakpoint_exception(
     if (s_operation.debugConditionEnabled) {
         gx_development_debug_expression condition = {};
         condition.size = sizeof(condition);
-        bool restored = restore_debug_entry_breakpoint();
-        s_operation.debugBreakpointInstalled = !restored;
+        const uint64_t conditionAddress = s_operation.debugBreakpointAddress;
+        const bool restored = hitBreakpoint &&
+            !debug_breakpoint_installed_at(conditionAddress);
+        s_operation.debugBreakpointInstalled = false;
         set_debug_identity(s_operation, &snapshot);
         const bool evaluated = restored &&
             evaluate_current_breakpoint_condition(s_operation, &condition);
@@ -2115,6 +2741,7 @@ bool native_elf_debug_breakpoint_exception(
         s_operation.debugConditionErrorCategory = GX_DEVELOPMENT_DEBUG_EXPRESSION_ERROR_NONE;
         if (conditionTrue) {
             ++s_operation.debugConditionTrueHitCount;
+            if (hitBreakpoint) ++hitBreakpoint->trueHitCount;
             snapshot.pauseReason = GX_DEVELOPMENT_DEBUG_PAUSE_REASON_CONDITIONAL_SOURCE_BREAKPOINT;
             set_condition_evidence(s_operation, &snapshot);
             serial_debug_hex("DEVELOPER_STUDIO_PHASE28J_TRUE_HIT target=0x",
@@ -2138,6 +2765,7 @@ bool native_elf_debug_breakpoint_exception(
         }
 
         ++s_operation.debugConditionFalseHitCount;
+        if (hitBreakpoint) ++hitBreakpoint->falseHitCount;
         if (!begin_conditional_instruction_continue(s_operation, true)) {
             s_operation.debugConditionError = true;
             s_operation.debugConditionStatus = GX_DEVELOPMENT_DEBUG_CONDITION_STATUS_ERROR;
@@ -2162,6 +2790,8 @@ bool native_elf_debug_breakpoint_exception(
         serial::puts(" false_hits="); serial::put_hex32(
             s_operation.debugConditionFalseHitCount);
         serial::puts(" decision=false\nDEVELOPER_STUDIO_PHASE28J_FALSE_CONTINUE_ARMED\n");
+        serial_debug_breakpoint_state(
+            "DEVELOPER_STUDIO_PHASE28K_FALSE_STATE", s_operation);
         if (!native_elf_scheduler_yield()) return false;
         if (s_operation.debugCancelRequested) {
             context->rflags &= ~kAmd64TrapFlag;
@@ -2214,6 +2844,8 @@ bool native_elf_debug_single_step_exception(
         s_schedulerInTarget && s_ownerContext && s_targetContext && context->cs == 0x08 &&
         (context->rflags & kAmd64TrapFlag) != 0 && s_operation.debugStepToken != 0 &&
         runtime && runtime->state == NativeAppExecutionState::Running &&
+        (s_operation.debugServicingBreakpointId != 0 ||
+         s_operation.debugPausedBreakpointRemoved) &&
         native_app_pointer_in_range(context->rip, runtime->imageBase, runtime->imageSize) &&
         context->rsp >= runtime->stackBase &&
         context->rsp < runtime->stackBase + runtime->stackSize;
@@ -2230,21 +2862,17 @@ bool native_elf_debug_single_step_exception(
         bool conditionalRearmInstallAttempt = false;
         if (s_operation.debugConditionalRearmPending &&
             !s_operation.debugCancelRequested) {
-            // The conditional false path owns the restored byte. Normalize the
-            // loader's one-breakpoint state before attempting the next INT3 so
-            // a stale loader-installed flag cannot reject a safe rearm.
-            (void)restore_debug_entry_breakpoint();
+            // Only the servicing user entry owns this restored byte. Other
+            // user breakpoint patches remain installed during the step.
             conditionalRearmCurrentByte = *reinterpret_cast<volatile const uint8_t*>(
                 static_cast<uintptr_t>(s_operation.debugBreakpointAddress));
             const bool byteMatches = conditionalRearmCurrentByte == s_operation.debugBreakpointOriginalByte;
-            const bool alreadyInstalled = debug_entry_breakpoint_installed() && conditionalRearmCurrentByte == 0xCC;
-            conditionalRearmInstallAttempt = alreadyInstalled || (byteMatches && install_debug_breakpoint(
-                s_operation.debugBreakpointAddress, &conditionalRearmOriginalByte));
-            if (alreadyInstalled) conditionalRearmOriginalByte = s_operation.debugBreakpointOriginalByte;
+            conditionalRearmInstallAttempt = byteMatches && install_debug_breakpoint(
+                s_operation.debugBreakpointAddress, &conditionalRearmOriginalByte);
             const bool installed = conditionalRearmInstallAttempt &&
                 conditionalRearmOriginalByte == s_operation.debugBreakpointOriginalByte;
             if (!installed) {
-                (void)restore_debug_entry_breakpoint();
+                (void)restore_debug_breakpoint(s_operation.debugBreakpointAddress);
                 rearmed = false;
                 serial::puts("DEVELOPER_STUDIO_PHASE28J_REARM_DIAGNOSTIC current=0x");
                 serial::put_hex32(conditionalRearmCurrentByte);
@@ -2255,6 +2883,13 @@ bool native_elf_debug_single_step_exception(
                 serial::putc('\n');
             } else {
                 s_operation.debugBreakpointInstalled = true;
+                UserBreakpoint* servicing = user_breakpoint_by_id(
+                    s_operation, s_operation.debugServicingBreakpointId);
+                if (servicing) {
+                    servicing->originalByte = conditionalRearmOriginalByte;
+                    servicing->originalByteValid = true;
+                    servicing->patchInstalled = true;
+                }
                 rearmed = true;
             }
         }
@@ -2263,6 +2898,10 @@ bool native_elf_debug_single_step_exception(
         s_operation.debugStepActive = false;
         s_operation.debugStepTrapObserved = false;
         s_operation.debugBreakpointHit = false;
+        s_operation.debugServicingBreakpointId = 0;
+        s_operation.debugServicingBreakpointSlot = kInvalidBreakpointSlot;
+        s_operation.debugPausedBreakpointRemoved = false;
+        sync_current_user_breakpoint(s_operation);
         if (!rearmed && !s_operation.debugCancelRequested) {
             s_operation.debugConditionError = true;
             s_operation.debugConditionStatus = GX_DEVELOPMENT_DEBUG_CONDITION_STATUS_ERROR;
@@ -2294,7 +2933,7 @@ bool native_elf_debug_single_step_exception(
             serial::puts(" expected=0x"); serial::put_hex32(
                 s_operation.debugBreakpointOriginalByte);
             serial::puts(" loader_installed="); serial::put_hex32(
-                debug_entry_breakpoint_installed() ? 1U : 0U);
+                debug_breakpoint_installed_at(s_operation.debugBreakpointAddress) ? 1U : 0U);
             serial::puts(" install="); serial::put_hex32(
                 conditionalRearmInstallAttempt ? 1U : 0U);
             serial::puts(" returned=0x"); serial::put_hex32(conditionalRearmOriginalByte);
@@ -2307,6 +2946,8 @@ bool native_elf_debug_single_step_exception(
             serial::put_hex32(s_operation.debugBreakpointOriginalByte);
             serial::puts(" trap_rip=0x"); serial::put_hex64(trapRip);
             serial::putc('\n');
+            serial_debug_breakpoint_state(
+                "DEVELOPER_STUDIO_PHASE28K_REARM_STATE", s_operation);
         }
         if (!native_elf_scheduler_yield()) return false;
         if (s_operation.debugCancelRequested) {
@@ -2354,6 +2995,20 @@ bool native_elf_debug_single_step_exception(
     context->rflags = s_operation.debugStepRflagsAfterClear;
     s_operation.debugStepActive = false;
     s_operation.debugStepTrapObserved = true;
+    UserBreakpoint* steppedBreakpoint = user_breakpoint_by_id(
+        s_operation, s_operation.debugServicingBreakpointId != 0
+            ? s_operation.debugServicingBreakpointId : s_operation.debugCurrentBreakpointId);
+    if (steppedBreakpoint && steppedBreakpoint->used && steppedBreakpoint->enabled &&
+        !steppedBreakpoint->patchInstalled) {
+        uint8_t reinstalledOriginal = 0;
+        if (install_debug_breakpoint(steppedBreakpoint->address, &reinstalledOriginal) &&
+            reinstalledOriginal == steppedBreakpoint->originalByte) {
+            steppedBreakpoint->patchInstalled = true;
+            s_operation.debugBreakpointInstalled = true;
+        } else {
+            (void)restore_debug_breakpoint(steppedBreakpoint->address);
+        }
+    }
     ++s_operation.debugStopGeneration;
     if (s_operation.debugStopGeneration == 0) s_operation.debugStopGeneration = 1;
     s_operation.state = GX_DEVELOPMENT_RUN_PAUSED;
@@ -2449,11 +3104,11 @@ static bool begin_debug_instruction_step(
     const bool conditionalPause = operation.debugConditionEnabled &&
         operation.debugBreakpointHit && !operation.debugConditionError;
     if (operation.state != GX_DEVELOPMENT_RUN_PAUSED ||
-        (!operation.debugBreakpointInstalled && !operation.debugStepTrapObserved && !conditionalPause) ||
+        (!operation.debugBreakpointHit && !operation.debugStepTrapObserved && !conditionalPause) ||
         !operation.debugContext || operation.debugStepActive ||
         operation.debugContext->cs != 0x08) return false;
     if (operation.debugContext->rflags & kAmd64TrapFlag) return false;
-    if (operation.debugBreakpointInstalled && !restore_debug_entry_breakpoint()) return false;
+    if (!restore_current_breakpoint(operation)) return false;
     operation.debugBreakpointInstalled = false;
     operation.debugStepStartRip = operation.debugContext->rip;
     operation.debugStepRflagsBefore = operation.debugContext->rflags;
@@ -2490,9 +3145,9 @@ static bool step_over_caller_frame_matches(
 static bool install_temporary_return_breakpoint(uint64_t returnAddress,
                                                 uint8_t* originalByte)
 {
-    // Both source Step Over and source Step Out deliberately use the loader's
-    // one physical NativeElf breakpoint slot.  The controller owns the
-    // operation-specific provenance; this helper owns only the byte patch.
+    // Source Step Over and source Step Out use bounded temporary patch
+    // ownership alongside persistent user patches. A collision with an
+    // existing persistent address is rejected by the loader patch manager.
     return returnAddress != 0 && install_debug_breakpoint(returnAddress, originalByte);
 }
 
@@ -2598,7 +3253,7 @@ static gx_result source_step_into(gx_development_debug_snapshot* outSnapshot)
 {
     Operation& operation = s_operation;
     if (operation.state != GX_DEVELOPMENT_RUN_PAUSED ||
-        (!operation.debugBreakpointInstalled && !operation.debugStepTrapObserved) ||
+        (!operation.debugBreakpointHit && !operation.debugStepTrapObserved) ||
         !operation.debugContext || operation.debugStepActive ||
         !operation.debugSourceSelected || operation.debugContext->cs != 0x08) {
         set_debug_error(outSnapshot,
@@ -2748,7 +3403,7 @@ static gx_result source_step_over(gx_development_debug_snapshot* outSnapshot)
 {
     Operation& operation = s_operation;
     if (operation.state != GX_DEVELOPMENT_RUN_PAUSED ||
-        (!operation.debugBreakpointInstalled && !operation.debugStepTrapObserved) ||
+        (!operation.debugBreakpointHit && !operation.debugStepTrapObserved) ||
         !operation.debugContext || operation.debugStepActive ||
         !operation.debugSourceSelected || operation.debugContext->cs != 0x08) {
         set_debug_error(outSnapshot,
@@ -2764,7 +3419,7 @@ static gx_result source_step_over(gx_development_debug_snapshot* outSnapshot)
     }
 
     if (operation.debugBreakpointInstalled) {
-        if (!restore_debug_entry_breakpoint()) {
+        if (!restore_current_breakpoint(operation)) {
             set_debug_error(outSnapshot, "NativeElf source breakpoint could not be restored");
             return GX_ERROR_FAILED;
         }
@@ -3145,7 +3800,7 @@ static gx_result source_step_out(gx_development_debug_snapshot* outSnapshot)
     Operation& operation = s_operation;
     const NativeAppExecutionContext* runtime = native_elf_runtime_context();
     if (operation.state != GX_DEVELOPMENT_RUN_PAUSED ||
-        (!operation.debugBreakpointInstalled && !operation.debugStepTrapObserved) ||
+        (!operation.debugBreakpointHit && !operation.debugStepTrapObserved) ||
         !operation.debugContext || operation.debugStepActive ||
         !operation.debugSourceSelected || operation.debugContext->cs != 0x08 || !runtime) {
         set_debug_error(outSnapshot,
@@ -3229,7 +3884,7 @@ static gx_result source_step_out(gx_development_debug_snapshot* outSnapshot)
     // Release it before arming the independent return control point; the
     // saved pause context remains the genuine current callee frame.
     if (operation.debugBreakpointInstalled) {
-        if (!restore_debug_entry_breakpoint()) {
+        if (!restore_current_breakpoint(operation)) {
             set_debug_error(outSnapshot,
                             "NativeElf source breakpoint could not be restored for Step Out");
             outSnapshot->sourceStepOutResult =
@@ -3316,7 +3971,7 @@ static gx_result source_step_out(gx_development_debug_snapshot* outSnapshot)
             : GX_DEVELOPMENT_DEBUG_SOURCE_STEP_OUT_RESULT_TARGET_FAILED;
         operation.debugSourceStepActive = false;
         if (operation.debugStepOutReturnBreakpointInstalled)
-            (void)restore_debug_entry_breakpoint();
+            (void)restore_debug_breakpoint(operation.debugStepOutReturnAddress);
         step_out_clear_state(operation);
         set_source_step_out_result_snapshot(operation, outSnapshot, result,
                                              operation.debugStepOutFinalRip);
@@ -4372,6 +5027,23 @@ gx_result debug(const gx_development_debug_request& request,
 
     const bool debugStepWasObserved = s_operation.debugStepTrapObserved;
     switch (request.command) {
+    case GX_DEVELOPMENT_DEBUG_ADD_SOURCE_BREAKPOINT:
+        return add_source_breakpoint(s_operation, request, outSnapshot);
+
+    case GX_DEVELOPMENT_DEBUG_REMOVE_SOURCE_BREAKPOINT:
+        return remove_source_breakpoint(s_operation, request, outSnapshot);
+
+    case GX_DEVELOPMENT_DEBUG_LIST_SOURCE_BREAKPOINTS:
+        set_breakpoint_operation_snapshot(s_operation, outSnapshot,
+            GX_DEVELOPMENT_DEBUG_BREAKPOINT_STATUS_SUCCESS, nullptr);
+        return GX_OK;
+
+    case GX_DEVELOPMENT_DEBUG_ENABLE_SOURCE_BREAKPOINT:
+        return set_source_breakpoint_enabled(s_operation, request, outSnapshot, true);
+
+    case GX_DEVELOPMENT_DEBUG_DISABLE_SOURCE_BREAKPOINT:
+        return set_source_breakpoint_enabled(s_operation, request, outSnapshot, false);
+
     case GX_DEVELOPMENT_DEBUG_POLL:
         if (s_operation.state == GX_DEVELOPMENT_RUN_PAUSED) {
             *outSnapshot = s_operation.debugSnapshot;
@@ -4399,41 +5071,45 @@ gx_result debug(const gx_development_debug_request& request,
 
     case GX_DEVELOPMENT_DEBUG_RESUME:
         {
-        const bool conditionalResume = s_operation.debugConditionEnabled &&
-            s_operation.debugBreakpointHit && !s_operation.debugBreakpointInstalled &&
-            !s_operation.debugStepTrapObserved;
         if (s_operation.state != GX_DEVELOPMENT_RUN_PAUSED ||
             (!s_operation.debugBreakpointInstalled && !s_operation.debugStepTrapObserved &&
              !s_operation.debugBreakpointHit)) {
             set_debug_error(outSnapshot, "NativeElf target is not paused at a resumable debug stop");
             return GX_ERROR_BUSY;
         }
-        if (conditionalResume) {
+        UserBreakpoint* currentUser = current_user_breakpoint(s_operation);
+        const bool persistentResume = currentUser && s_operation.debugBreakpointHit &&
+            !s_operation.debugStepTrapObserved;
+        if (persistentResume) {
             s_operation.debugConditionError = false;
-            if (!begin_conditional_instruction_continue(s_operation, true)) {
+            if (!restore_current_breakpoint(s_operation) ||
+                !begin_conditional_instruction_continue(
+                    s_operation, !s_operation.debugPausedBreakpointRemoved)) {
                 set_debug_error(outSnapshot,
-                                "NativeElf conditional breakpoint could not arm Resume");
+                                "NativeElf persistent breakpoint could not arm Resume");
                 return GX_ERROR_FAILED;
             }
             set_debug_ready_snapshot(s_operation, outSnapshot);
-            serial::puts("DEVELOPER_STUDIO_PHASE28J_RESUME_REARM_ARMED\n");
+            serial::puts("DEVELOPER_STUDIO_PHASE28K_RESUME_REARM_ARMED id=");
+            serial::put_hex64(currentUser->id); serial::putc('\n');
             if (!native_elf_scheduler_pump()) return GX_ERROR_FAILED;
             if (s_operation.state == GX_DEVELOPMENT_RUN_PAUSED)
                 *outSnapshot = s_operation.debugSnapshot;
             return GX_OK;
         }
-        if (s_operation.debugBreakpointInstalled && !restore_debug_entry_breakpoint()) {
+        if (!s_operation.debugStepTrapObserved &&
+            s_operation.debugBreakpointInstalled && !restore_current_breakpoint(s_operation)) {
             set_debug_error(outSnapshot, "NativeElf breakpoint could not be restored");
             return GX_ERROR_FAILED;
         }
         if (s_operation.debugStepOverReturnBreakpointInstalled &&
-            !restore_debug_entry_breakpoint()) {
+            !restore_debug_breakpoint(s_operation.debugStepOverReturnAddress)) {
             set_debug_error(outSnapshot,
                             "NativeElf Step Over return breakpoint could not be restored");
             return GX_ERROR_FAILED;
         }
         if (s_operation.debugStepOutReturnBreakpointInstalled &&
-            !restore_debug_entry_breakpoint()) {
+            !restore_debug_breakpoint(s_operation.debugStepOutReturnAddress)) {
             set_debug_error(outSnapshot,
                             "NativeElf Step Out return breakpoint could not be restored for cancel");
             return GX_ERROR_FAILED;
@@ -4444,6 +5120,9 @@ gx_result debug(const gx_development_debug_request& request,
         s_operation.debugStepActive = false;
         s_operation.debugStepTrapObserved = false;
         s_operation.debugSourceStepActive = false;
+        s_operation.debugServicingBreakpointId = 0;
+        s_operation.debugServicingBreakpointSlot = kInvalidBreakpointSlot;
+        s_operation.debugPausedBreakpointRemoved = false;
         step_over_clear_state(s_operation);
         step_out_clear_state(s_operation);
         s_operation.state = GX_DEVELOPMENT_RUN_RUNNING;
@@ -4474,7 +5153,7 @@ gx_result debug(const gx_development_debug_request& request,
         const bool conditionalPause = s_operation.debugConditionEnabled &&
             s_operation.debugBreakpointHit && !s_operation.debugConditionError;
         if (s_operation.state != GX_DEVELOPMENT_RUN_PAUSED ||
-            (!s_operation.debugBreakpointInstalled && !s_operation.debugStepTrapObserved && !conditionalPause) ||
+            (!s_operation.debugBreakpointHit && !s_operation.debugStepTrapObserved && !conditionalPause) ||
             !s_operation.debugContext || s_operation.debugStepActive ||
             s_operation.debugContext->cs != 0x08) {
             set_debug_error(outSnapshot, "NativeElf Step Into requires a current Paused target context");
@@ -4506,23 +5185,22 @@ gx_result debug(const gx_development_debug_request& request,
 
     case GX_DEVELOPMENT_DEBUG_CANCEL_EXECUTION:
         if (s_operation.state != GX_DEVELOPMENT_RUN_PAUSED ||
-            (!s_operation.debugBreakpointInstalled && !s_operation.debugStepTrapObserved &&
-             !s_operation.debugBreakpointHit)) {
+            (!s_operation.debugBreakpointHit && !s_operation.debugStepTrapObserved)) {
             set_debug_error(outSnapshot, "NativeElf debug session is not paused");
             return GX_ERROR_BUSY;
         }
-        if (s_operation.debugBreakpointInstalled && !restore_debug_entry_breakpoint()) {
+        if (s_operation.debugBreakpointInstalled && !restore_current_breakpoint(s_operation)) {
             set_debug_error(outSnapshot, "NativeElf breakpoint could not be restored for cancel");
             return GX_ERROR_FAILED;
         }
         if (s_operation.debugStepOverReturnBreakpointInstalled &&
-            !restore_debug_entry_breakpoint()) {
+            !restore_debug_breakpoint(s_operation.debugStepOverReturnAddress)) {
             set_debug_error(outSnapshot,
                             "NativeElf Step Over return breakpoint could not be restored for cancel");
             return GX_ERROR_FAILED;
         }
         if (s_operation.debugStepOutReturnBreakpointInstalled &&
-            !restore_debug_entry_breakpoint()) {
+            !restore_debug_breakpoint(s_operation.debugStepOutReturnAddress)) {
             set_debug_error(outSnapshot,
                             "NativeElf Step Out return breakpoint could not be restored for cancel");
             return GX_ERROR_FAILED;
@@ -4571,7 +5249,7 @@ gx_result release(gx_development_run_handle handle) {
         s_operation.state != GX_DEVELOPMENT_RUN_FAILED &&
         s_operation.state != GX_DEVELOPMENT_RUN_CANCELLED) return GX_ERROR_BUSY;
     (void)unregister_application(s_operation);
-    (void)restore_debug_entry_breakpoint();
+    (void)restore_all_debug_breakpoints();
     step_over_clear_state(s_operation);
     step_out_clear_state(s_operation);
     if (s_operation.debugControlled) NativeElfDebugTrap::uninstall();

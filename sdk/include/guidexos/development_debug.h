@@ -1,5 +1,6 @@
 #pragma once
 
+#include <stddef.h>
 #include "types.h"
 
 #ifdef __cplusplus
@@ -41,8 +42,16 @@ typedef enum gx_development_debug_command {
     /* Phase 28G: inspect validated top-frame arguments and locals. */
     GX_DEVELOPMENT_DEBUG_INSPECT_VARIABLES = 20,
     /* Phase 28I: evaluate one bounded, read-only scalar expression. */
-    GX_DEVELOPMENT_DEBUG_EVALUATE_EXPRESSION = 21
+    GX_DEVELOPMENT_DEBUG_EVALUATE_EXPRESSION = 21,
+    /* Phase 28K: bounded persistent source-breakpoint manager. */
+    GX_DEVELOPMENT_DEBUG_ADD_SOURCE_BREAKPOINT = 22,
+    GX_DEVELOPMENT_DEBUG_REMOVE_SOURCE_BREAKPOINT = 23,
+    GX_DEVELOPMENT_DEBUG_LIST_SOURCE_BREAKPOINTS = 24,
+    GX_DEVELOPMENT_DEBUG_ENABLE_SOURCE_BREAKPOINT = 25,
+    GX_DEVELOPMENT_DEBUG_DISABLE_SOURCE_BREAKPOINT = 26
 } gx_development_debug_command;
+
+#define GX_DEVELOPMENT_DEBUG_MAX_SOURCE_BREAKPOINTS 8u
 
 #define GX_DEVELOPMENT_DEBUG_MAX_CALL_STACK_FRAMES 16u
 
@@ -212,7 +221,49 @@ typedef struct gx_development_debug_request {
     /* Only used by GX_DEVELOPMENT_DEBUG_EVALUATE_EXPRESSION. The expression
        is a bounded read-only query; it is never a target address or command. */
     const char* expression;
+    /* Phase 28K source-breakpoint management fields. Older callers may omit
+       these fields; services must gate them by request->size. */
+    const char* sourcePath;
+    uint32_t sourceLine;
+    uint32_t sourceColumn;
+    const char* sourceCondition;
 } gx_development_debug_request;
+
+#define GX_DEVELOPMENT_DEBUG_REQUEST_BREAKPOINT_BYTES \
+    ((uint32_t)(offsetof(gx_development_debug_request, sourceCondition) + \
+                sizeof(((gx_development_debug_request*)0)->sourceCondition)))
+
+typedef enum gx_development_debug_breakpoint_status {
+    GX_DEVELOPMENT_DEBUG_BREAKPOINT_STATUS_NONE = 0,
+    GX_DEVELOPMENT_DEBUG_BREAKPOINT_STATUS_SUCCESS = 1,
+    GX_DEVELOPMENT_DEBUG_BREAKPOINT_STATUS_INVALID = 2,
+    GX_DEVELOPMENT_DEBUG_BREAKPOINT_STATUS_CAPACITY = 3,
+    GX_DEVELOPMENT_DEBUG_BREAKPOINT_STATUS_DUPLICATE = 4,
+    GX_DEVELOPMENT_DEBUG_BREAKPOINT_STATUS_CONFLICT = 5,
+    GX_DEVELOPMENT_DEBUG_BREAKPOINT_STATUS_NOT_FOUND = 6,
+    GX_DEVELOPMENT_DEBUG_BREAKPOINT_STATUS_STALE = 7,
+    GX_DEVELOPMENT_DEBUG_BREAKPOINT_STATUS_PATCH_CONFLICT = 8
+} gx_development_debug_breakpoint_status;
+
+typedef struct gx_development_debug_breakpoint {
+    uint64_t breakpointId;
+    uint64_t sessionGeneration;
+    uint64_t targetAddress;
+    uint32_t enabled;
+    uint32_t installed;
+    uint32_t sourceLine;
+    uint32_t sourceColumn;
+    uint32_t sourceMappingValid;
+    uint32_t conditionPresent;
+    uint32_t conditionLength;
+    uint32_t hitCount;
+    uint32_t falseHitCount;
+    uint32_t trueHitCount;
+    uint32_t reserved;
+    uint64_t conditionExpressionHash;
+    char sourcePath[GX_DEVELOPMENT_DEBUG_MAX_SOURCE_PATH_BYTES];
+    char functionName[GX_DEVELOPMENT_DEBUG_MAX_FUNCTION_NAME_BYTES];
+} gx_development_debug_breakpoint;
 
 typedef enum gx_development_debug_expression_status {
     GX_DEVELOPMENT_DEBUG_EXPRESSION_STATUS_NONE = 0,
@@ -417,6 +468,12 @@ typedef struct gx_development_debug_snapshot {
     uint32_t conditionTrueHitCount;
     uint32_t conditionExpressionLength;
     uint64_t conditionExpressionHash;
+    /* Append-only Phase 28K bounded source-breakpoint list/operation result. */
+    uint32_t breakpointCount;
+    uint32_t breakpointCapacity;
+    uint32_t breakpointOperationStatus;
+    uint32_t breakpointReserved;
+    gx_development_debug_breakpoint breakpoints[GX_DEVELOPMENT_DEBUG_MAX_SOURCE_BREAKPOINTS];
 } gx_development_debug_snapshot;
 
 enum {

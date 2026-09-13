@@ -96,11 +96,21 @@ static_assert(offsetof(gx_development_run_request, debugSourcePath) == 96, "deve
 static_assert(offsetof(gx_development_run_request, debugSourceLine) == 104, "development run source line offset changed");
 static_assert(offsetof(gx_development_run_request, debugSourceColumn) == 108, "development run source column offset changed");
 static_assert(offsetof(gx_development_run_request, debugSourceCondition) == 112, "development run condition offset changed");
-static_assert(sizeof(gx_development_debug_request) == 112, "development debug request size changed");
+static_assert(sizeof(gx_development_debug_request) == 136, "development debug request size changed");
 static_assert(offsetof(gx_development_debug_request, expression) == 104,
               "watch expression request field must be append-only");
+static_assert(offsetof(gx_development_debug_request, sourcePath) == 112,
+              "source breakpoint path must be append-only");
+static_assert(offsetof(gx_development_debug_request, sourceLine) == 120,
+              "source breakpoint line offset changed");
+static_assert(offsetof(gx_development_debug_request, sourceColumn) == 124,
+              "source breakpoint column offset changed");
+static_assert(offsetof(gx_development_debug_request, sourceCondition) == 128,
+              "source breakpoint condition must be append-only");
 static_assert(GX_DEVELOPMENT_DEBUG_REQUEST_LEGACY_BYTES == 104,
               "legacy development debug request prefix changed");
+static_assert(GX_DEVELOPMENT_DEBUG_REQUEST_BREAKPOINT_BYTES == 136,
+              "source breakpoint request bytes changed");
 static_assert(sizeof(gx_development_debug_variable) == 128, "development debug variable size changed");
 static_assert(offsetof(gx_development_debug_variable, kind) == 64, "development debug variable kind offset changed");
 static_assert(offsetof(gx_development_debug_variable, frameOffset) == 92,
@@ -127,6 +137,18 @@ static_assert(offsetof(gx_development_debug_request, auxiliaryAddress) == 88, "d
 static_assert(offsetof(gx_development_debug_request, readByteCount) == 96, "development debug read byte count offset changed");
 static_assert(GX_DEVELOPMENT_DEBUG_EVALUATE_EXPRESSION == 21,
               "watch expression command must be appended after variable inspection");
+static_assert(GX_DEVELOPMENT_DEBUG_ADD_SOURCE_BREAKPOINT == 22,
+              "source breakpoint add command must be appended after expression evaluation");
+static_assert(GX_DEVELOPMENT_DEBUG_REMOVE_SOURCE_BREAKPOINT == 23,
+              "source breakpoint remove command must be appended after add");
+static_assert(GX_DEVELOPMENT_DEBUG_LIST_SOURCE_BREAKPOINTS == 24,
+              "source breakpoint list command must be appended after remove");
+static_assert(GX_DEVELOPMENT_DEBUG_ENABLE_SOURCE_BREAKPOINT == 25,
+              "source breakpoint enable command must be appended after list");
+static_assert(GX_DEVELOPMENT_DEBUG_DISABLE_SOURCE_BREAKPOINT == 26,
+              "source breakpoint disable command must be appended after enable");
+static_assert(GX_DEVELOPMENT_DEBUG_MAX_SOURCE_BREAKPOINTS == 8u,
+              "source breakpoint capacity changed");
 static_assert(offsetof(gx_development_debug_expression, functionName) == 104,
               "watch expression function name offset changed");
 static_assert(offsetof(gx_development_debug_expression, sourcePath) == 168,
@@ -189,7 +211,21 @@ static_assert(offsetof(gx_development_debug_snapshot, conditionStatus) == 1572,
               "conditional breakpoint status must be append-only");
 static_assert(offsetof(gx_development_debug_snapshot, conditionExpressionHash) == 1616,
               "conditional breakpoint hash offset changed");
-static_assert(sizeof(gx_development_debug_snapshot) == 1624, "development debug snapshot size changed");
+static_assert(sizeof(gx_development_debug_breakpoint) == 304,
+              "development debug breakpoint record size changed");
+static_assert(offsetof(gx_development_debug_breakpoint, sourcePath) == 80,
+              "development debug breakpoint source path offset changed");
+static_assert(offsetof(gx_development_debug_breakpoint, functionName) == 240,
+              "development debug breakpoint function offset changed");
+static_assert(offsetof(gx_development_debug_snapshot, breakpointCount) == 1624,
+              "development debug breakpoint count must be append-only");
+static_assert(offsetof(gx_development_debug_snapshot, breakpointCapacity) == 1628,
+              "development debug breakpoint capacity offset changed");
+static_assert(offsetof(gx_development_debug_snapshot, breakpointOperationStatus) == 1632,
+              "development debug breakpoint status offset changed");
+static_assert(offsetof(gx_development_debug_snapshot, breakpoints) == 1640,
+              "development debug breakpoint list offset changed");
+static_assert(sizeof(gx_development_debug_snapshot) == 4072, "development debug snapshot size changed");
 static_assert(offsetof(gx_development_debug_call_stack_frame, instructionPointer) == 8,
               "call stack frame instruction pointer offset changed");
 static_assert(offsetof(gx_development_debug_call_stack_frame, sourcePath) == 112,

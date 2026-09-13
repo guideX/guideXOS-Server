@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "id": "dev.guidexos.phase28k",
+  "displayName": "Phase 28K Multiple Source Breakpoints",
+  "version": "0.1.0",
+  "publisher": "guideXOS",
+  "description": "Bounded persistent source breakpoint manager proof.",
+  "category": "Development",
+  "kind": "NativeElf",
+  "icon": "",
+  "minGuideXOSVersion": "0.5.0",
+  "supportedArchitectures": ["amd64"],
+  "entries": [{
+    "architecture": "amd64",
+    "path": "bin/amd64/p28k.elf",
+    "entryPoint": "gx_main",
+    "abi": "guidexos-c-abi-v1",
+    "runtime": "native-elf"
+  }]
+}

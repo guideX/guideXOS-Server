@@ -39,6 +39,8 @@ static char s_bareBuildStrings[8][768] = {};
 static char s_bareRunStrings[11][768] = {};
 static char s_bareDebugStrings[1][GX_DEVELOPMENT_RUN_MAX_SHA256_BYTES] = {};
 static char s_bareDebugExpression[GX_DEVELOPMENT_DEBUG_MAX_EXPRESSION_BYTES + 1u] = {};
+static char s_bareDebugSource[GX_DEVELOPMENT_DEBUG_MAX_SOURCE_PATH_BYTES] = {};
+static char s_bareDebugCondition[GX_DEVELOPMENT_DEBUG_MAX_EXPRESSION_BYTES + 1u] = {};
 static const uint64_t NESTED_APPLICATION_STACK_BASE =
     APPLICATION_STACK_BASE - APPLICATION_STACK_SIZE;
 static const uint64_t NESTED_SERVICE_STACK_BASE =
@@ -69,9 +71,18 @@ static uint64_t s_guiContentHash = 0;
 static uint64_t s_guiLastDestroyedWindow = 0;
 static char s_guiContent[256] = {};
 
-static bool s_debugEntryBreakpointInstalled = false;
-static uint64_t s_debugEntryBreakpointAddress = 0;
-static uint8_t s_debugEntryBreakpointOriginalByte = 0;
+// Eight persistent user breakpoints plus temporary Step Over/Out controls.
+// The table is deliberately a loader-owned physical patch boundary: semantic
+// ownership remains in NativeElfRunService, while one address has exactly one
+// saved original byte here.
+static const uint32_t kMaxDebugPatches =
+    GX_DEVELOPMENT_DEBUG_MAX_SOURCE_BREAKPOINTS + 2U;
+struct DebugPatch {
+    bool used;
+    uint64_t address;
+    uint8_t originalByte;
+};
+static DebugPatch s_debugPatches[kMaxDebugPatches] = {};
 
 static uint64_t fnv1a_text(const char* text)
 {
@@ -791,14 +802,31 @@ static gx_result GX_CALL host_bare_development_debug(
     if (request->size < GX_DEVELOPMENT_DEBUG_REQUEST_LEGACY_BYTES ||
         request->version != GX_DEVELOPMENT_DEBUG_API_VERSION) return GX_ERROR_INVALID_ARGUMENT;
     gx_development_debug_request copied = {};
+    const uint32_t requestBytes = request->size < sizeof(copied)
+        ? request->size : static_cast<uint32_t>(sizeof(copied));
+    if (!app_pointer_range(request, requestBytes)) return GX_ERROR_PERMISSION_DENIED;
     copy_bytes(reinterpret_cast<uint8_t*>(&copied),
                reinterpret_cast<const uint8_t*>(request),
-               request->size < sizeof(copied) ? request->size : sizeof(copied));
+               requestBytes);
     copied.artifactSha256 = nullptr;
     if (request->artifactSha256) {
         if (!app_string(request->artifactSha256, s_bareDebugStrings[0],
                         sizeof(s_bareDebugStrings[0]))) return GX_ERROR_INVALID_ARGUMENT;
         copied.artifactSha256 = s_bareDebugStrings[0];
+    }
+    copied.sourcePath = nullptr;
+    copied.sourceCondition = nullptr;
+    if (requestBytes >= offsetof(gx_development_debug_request, sourcePath) + sizeof(request->sourcePath) &&
+        request->sourcePath) {
+        if (!app_string(request->sourcePath, s_bareDebugSource, sizeof(s_bareDebugSource)))
+            return GX_ERROR_INVALID_ARGUMENT;
+        copied.sourcePath = s_bareDebugSource;
+    }
+    if (requestBytes >= offsetof(gx_development_debug_request, sourceCondition) + sizeof(request->sourceCondition) &&
+        request->sourceCondition) {
+        if (!app_string(request->sourceCondition, s_bareDebugCondition, sizeof(s_bareDebugCondition)))
+            return GX_ERROR_INVALID_ARGUMENT;
+        copied.sourceCondition = s_bareDebugCondition;
     }
     gx_development_debug_snapshot local = {};
     local.size = sizeof(local);
@@ -1024,7 +1052,7 @@ static void initialize_app_context()
 static bool teardown_application(NativeElfRunReport* report)
 {
     bool clean = true;
-    if (!restore_debug_entry_breakpoint()) clean = false;
+    if (!restore_all_debug_breakpoints()) clean = false;
     copy_gui_proof(report);
     destroy_native_gui();
     if (s_appRuntime.imageBase != 0 && s_appRuntime.imageSize != 0) {
@@ -1323,14 +1351,18 @@ bool install_debug_breakpoint(uint64_t targetAddress, uint8_t* originalByte)
         s_appRuntime.imageSize == 0 ||
         !native_app_pointer_in_range(targetAddress, s_appRuntime.imageBase,
                                      s_appRuntime.imageSize)) return false;
-    if (s_debugEntryBreakpointInstalled) {
-        if (targetAddress != s_debugEntryBreakpointAddress) return false;
-        volatile const uint8_t* existing = reinterpret_cast<volatile const uint8_t*>(
-            static_cast<uintptr_t>(targetAddress));
-        if (*existing != 0xCC) return false;
-        *originalByte = s_debugEntryBreakpointOriginalByte;
-        return true;
+    for (uint32_t i = 0; i < kMaxDebugPatches; ++i) {
+        if (s_debugPatches[i].used && s_debugPatches[i].address == targetAddress)
+            return false;
     }
+    uint32_t slot = kMaxDebugPatches;
+    for (uint32_t i = 0; i < kMaxDebugPatches; ++i) {
+        if (!s_debugPatches[i].used) {
+            slot = i;
+            break;
+        }
+    }
+    if (slot == kMaxDebugPatches) return false;
 
     const uint64_t page = targetAddress &
         ~(static_cast<uint64_t>(guidexos::native_elf::PAGE_SIZE) - 1ULL);
@@ -1360,11 +1392,66 @@ bool install_debug_breakpoint(uint64_t targetAddress, uint8_t* originalByte)
         return false;
     }
 
-    s_debugEntryBreakpointInstalled = true;
-    s_debugEntryBreakpointAddress = targetAddress;
-    s_debugEntryBreakpointOriginalByte = original;
+    s_debugPatches[slot].used = true;
+    s_debugPatches[slot].address = targetAddress;
+    s_debugPatches[slot].originalByte = original;
     *originalByte = original;
     return true;
+}
+
+bool restore_debug_breakpoint(uint64_t targetAddress)
+{
+    if (targetAddress == 0) return false;
+    uint32_t slot = kMaxDebugPatches;
+    for (uint32_t i = 0; i < kMaxDebugPatches; ++i) {
+        if (s_debugPatches[i].used && s_debugPatches[i].address == targetAddress) {
+            slot = i;
+            break;
+        }
+    }
+    if (slot == kMaxDebugPatches) return true;
+    if (s_appRuntime.imageBase == 0 || s_appRuntime.imageSize == 0 ||
+        !native_app_pointer_in_range(targetAddress, s_appRuntime.imageBase,
+                                     s_appRuntime.imageSize)) return false;
+    const uint64_t page = targetAddress &
+        ~(static_cast<uint64_t>(guidexos::native_elf::PAGE_SIZE) - 1ULL);
+    if (!set_page_permissions(page, page + guidexos::native_elf::PAGE_SIZE,
+                              true, false)) return false;
+    volatile uint8_t* byte = reinterpret_cast<volatile uint8_t*>(
+        static_cast<uintptr_t>(targetAddress));
+    uint8_t* writableByte = reinterpret_cast<uint8_t*>(
+        static_cast<uintptr_t>(targetAddress));
+    const uint8_t current = *byte;
+    if (current != 0xCC && current != s_debugPatches[slot].originalByte) {
+        (void)set_page_permissions(page, page + guidexos::native_elf::PAGE_SIZE,
+                                    false, true);
+        return false;
+    }
+    *byte = s_debugPatches[slot].originalByte;
+    flush_debug_instruction(writableByte);
+    const bool restored = set_page_permissions(page,
+        page + guidexos::native_elf::PAGE_SIZE, false, true);
+    if (restored) s_debugPatches[slot] = {};
+    return restored;
+}
+
+bool debug_breakpoint_installed_at(uint64_t targetAddress)
+{
+    if (targetAddress == 0) return false;
+    for (uint32_t i = 0; i < kMaxDebugPatches; ++i)
+        if (s_debugPatches[i].used && s_debugPatches[i].address == targetAddress)
+            return true;
+    return false;
+}
+
+bool restore_all_debug_breakpoints()
+{
+    bool restored = true;
+    for (uint32_t i = 0; i < kMaxDebugPatches; ++i) {
+        if (s_debugPatches[i].used &&
+            !restore_debug_breakpoint(s_debugPatches[i].address)) restored = false;
+    }
+    return restored;
 }
 
 bool install_debug_entry_breakpoint(uint64_t targetAddress, uint8_t* originalByte)
@@ -1374,34 +1461,14 @@ bool install_debug_entry_breakpoint(uint64_t targetAddress, uint8_t* originalByt
 
 bool restore_debug_entry_breakpoint()
 {
-    if (!s_debugEntryBreakpointInstalled) return true;
-    if (s_appRuntime.imageBase == 0 || s_appRuntime.imageSize == 0 ||
-        !native_app_pointer_in_range(s_debugEntryBreakpointAddress,
-                                     s_appRuntime.imageBase,
-                                     s_appRuntime.imageSize)) return false;
-    const uint64_t page = s_debugEntryBreakpointAddress &
-        ~(static_cast<uint64_t>(guidexos::native_elf::PAGE_SIZE) - 1ULL);
-    if (!set_page_permissions(page, page + guidexos::native_elf::PAGE_SIZE,
-                              true, false)) return false;
-    volatile uint8_t* byte = reinterpret_cast<volatile uint8_t*>(
-        static_cast<uintptr_t>(s_debugEntryBreakpointAddress));
-    uint8_t* writableByte = reinterpret_cast<uint8_t*>(
-        static_cast<uintptr_t>(s_debugEntryBreakpointAddress));
-    *byte = s_debugEntryBreakpointOriginalByte;
-    flush_debug_instruction(writableByte);
-    const bool restored = set_page_permissions(page,
-        page + guidexos::native_elf::PAGE_SIZE, false, true);
-    if (restored) {
-        s_debugEntryBreakpointInstalled = false;
-        s_debugEntryBreakpointAddress = 0;
-        s_debugEntryBreakpointOriginalByte = 0;
-    }
-    return restored;
+    return restore_all_debug_breakpoints();
 }
 
 bool debug_entry_breakpoint_installed()
 {
-    return s_debugEntryBreakpointInstalled;
+    for (uint32_t i = 0; i < kMaxDebugPatches; ++i)
+        if (s_debugPatches[i].used) return true;
+    return false;
 }
 
 static bool run_file_internal(const char* path,
@@ -1506,15 +1573,9 @@ static bool run_file_internal(const char* path,
         s_appRuntime.appContext.userData == &s_appRuntime;
 
     if (NativeElfRunService::native_elf_debug_entry_breakpoint_requested()) {
-        uint64_t breakpointTarget = validation.entryPoint;
-        uint64_t requestedTarget = 0;
-        if (NativeElfRunService::native_elf_debug_breakpoint_target(&requestedTarget) &&
-            requestedTarget != 0) breakpointTarget = requestedTarget;
-        uint8_t originalByte = 0;
-        if (!install_debug_breakpoint(breakpointTarget, &originalByte) ||
-            !NativeElfRunService::native_elf_debug_breakpoint_installed(
-                breakpointTarget, originalByte)) {
-            (void)restore_debug_entry_breakpoint();
+        if (!NativeElfRunService::native_elf_debug_install_breakpoints(
+                validation.entryPoint)) {
+            (void)restore_all_debug_breakpoints();
             s_appRuntime.state = NativeAppExecutionState::Failed;
             (void)teardown_application(report);
             return fail_report(report,
