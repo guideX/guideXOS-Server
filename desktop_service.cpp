@@ -1403,10 +1403,16 @@ namespace gxos {
         }
 
         static void fillLaunchTargetFromMetadata(apps::LaunchTarget& target, const apps::BuiltInAppMetadata& metadata) {
-            target.type = apps::LaunchTargetType::BuiltInApp;
+            const bool managedNativeAot = apps::IsManagedNativeAotApp(metadata);
+            target.type = managedNativeAot
+                ? apps::LaunchTargetType::ManagedNativeAotApp
+                : apps::LaunchTargetType::BuiltInApp;
             target.appId = metadata.appId ? metadata.appId : "";
             target.displayName = metadata.displayName ? metadata.displayName : "";
-            target.dispatchLaunchName = metadata.launchName ? metadata.launchName : "";
+            target.dispatchLaunchName = managedNativeAot ? "" : (metadata.launchName ? metadata.launchName : "");
+            target.managedSelector = managedNativeAot ? metadata.managedSelector : 0u;
+            target.managedImagePath = managedNativeAot && metadata.managedCompositeImagePath
+                ? metadata.managedCompositeImagePath : "";
             target.hostedAvailable = apps::IsBuiltInAppAvailableInHosted(metadata);
             target.bareMetalAvailable = apps::IsBuiltInAppAvailableInBareMetal(metadata);
         }
@@ -3301,6 +3307,10 @@ namespace gxos {
                     return target.dispatchLaunchName;
                 }
                 break;
+            case apps::LaunchTargetType::ManagedNativeAotApp:
+                status = "unsupported";
+                reason = "Managed NativeAOT records are routed by the production App Model boundary, not the hosted legacy dispatch adapter";
+                return "";
             case apps::LaunchTargetType::FileOpen:
                 if (!target.dispatchLaunchName.empty()) {
                     status = "ok";
@@ -4083,6 +4093,7 @@ namespace gxos {
                 apps::LaunchTargetType::ManifestApp,
                 apps::LaunchTargetType::NativeElfApp,
                 apps::LaunchTargetType::GXAppPackage,
+                apps::LaunchTargetType::ManagedNativeAotApp,
                 apps::LaunchTargetType::ShellAction,
                 apps::LaunchTargetType::LegacyAlias,
                 apps::LaunchTargetType::FileOpen,
@@ -4154,6 +4165,7 @@ namespace gxos {
                 apps::LaunchTargetType::ManifestApp,
                 apps::LaunchTargetType::NativeElfApp,
                 apps::LaunchTargetType::GXAppPackage,
+                apps::LaunchTargetType::ManagedNativeAotApp,
                 apps::LaunchTargetType::ShellAction,
                 apps::LaunchTargetType::LegacyAlias,
                 apps::LaunchTargetType::FileOpen,

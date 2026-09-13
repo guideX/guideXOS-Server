@@ -27,6 +27,7 @@
 #include "include/kernel/app_launch_target_resolver.h"
 #include "include/kernel/address_space.h"
 #include "include/kernel/nativeaot_application.h"
+#include "built_in_app_metadata.h"
 
 #if defined(GXOS_NATIVE_THREAD_QEMU_TEST)
 #include "include/kernel/native_thread_qemu_test.h"
@@ -1025,7 +1026,7 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         runC104Launch(c104ASecondOrdinal, "A", "/system/wall/C104A.ELF");
 #endif
 
-#if defined(GXOS_NATIVEAOT_PRODUCTION_COMPOSITE_LAUNCH)
+#if defined(GXOS_NATIVEAOT_PRODUCTION_COMPOSITE_LAUNCH) && !defined(GXOS_NATIVEAOT_C110_APPMODEL_LAUNCH)
         // Exercise the same desktop launch contract used by ordinary icon and
         // start-menu requests. The stable logical IDs are resolved to the one
         // resident composite image by nativeaot::launchLogicalApplication().
@@ -1062,6 +1063,104 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         kernel::serial::puts(productionA1 && productionB1 && !productionInvalid &&
             productionA2 && productionB2 && productionA3 ? "PASS" : "FAIL");
         kernel::serial::puts(" dispatch=A1 PASS -> B1 PASS -> invalid rejected -> A2 PASS -> B2 PASS -> A3 PASS\n");
+#endif
+
+#if defined(GXOS_NATIVEAOT_C110_APPMODEL_LAUNCH)
+        // C110 exercises real shared App Model records.  The test obtains
+        // identities and selectors from the metadata table; production launch
+        // code does not know special proof IDs or selector conditionals.
+        const gxos::apps::BuiltInAppMetadata* managedWorkspace =
+            gxos::apps::FindBuiltInAppMetadataByDisplayName("Managed Workspace");
+        const gxos::apps::BuiltInAppMetadata* managedStatus =
+            gxos::apps::FindBuiltInAppMetadataByDisplayName("Managed Status");
+        const bool workspaceRecordValid = managedWorkspace &&
+            gxos::apps::IsManagedNativeAotRecordValid(*managedWorkspace);
+        const bool statusRecordValid = managedStatus &&
+            gxos::apps::IsManagedNativeAotRecordValid(*managedStatus);
+        const bool catalogValid = gxos::apps::ManagedNativeAotCatalogIsValid() &&
+            workspaceRecordValid && statusRecordValid;
+        kernel::serial::puts("[C110-APPMODEL] catalogValid=");
+        kernel::serial::puts(catalogValid ? "true" : "false");
+        kernel::serial::puts(" workspaceId=");
+        kernel::serial::puts(managedWorkspace ? managedWorkspace->appId : "");
+        kernel::serial::puts(" workspaceSelector=");
+        kernel::serial::put_hex32(managedWorkspace ? managedWorkspace->managedSelector : 0u);
+        kernel::serial::puts(" statusId=");
+        kernel::serial::puts(managedStatus ? managedStatus->appId : "");
+        kernel::serial::puts(" statusSelector=");
+        kernel::serial::put_hex32(managedStatus ? managedStatus->managedSelector : 0u);
+        kernel::serial::puts(" workspaceValid=");
+        kernel::serial::puts(workspaceRecordValid ? "true" : "false");
+        kernel::serial::puts(" statusValid=");
+        kernel::serial::puts(statusRecordValid ? "true" : "false");
+        kernel::serial::puts(" workspaceKind=");
+        kernel::serial::put_hex32(managedWorkspace ? static_cast<uint32_t>(managedWorkspace->launchKind) : 0xFFFFFFFFu);
+        kernel::serial::puts(" workspaceImage=");
+        kernel::serial::puts(managedWorkspace && managedWorkspace->managedCompositeImagePath ? managedWorkspace->managedCompositeImagePath : "");
+        kernel::serial::puts(" workspaceKernel=");
+        kernel::serial::puts(managedWorkspace && managedWorkspace->kernelAppName ? managedWorkspace->kernelAppName : "");
+        kernel::serial::puts("\n");
+
+        const bool nativeRegression = kernel::desktop::launch_app("Notepad");
+        kernel::serial::puts("[C110-NATIVE-REGRESSION] app=Notepad result=");
+        kernel::serial::puts(nativeRegression ? "PASS\n" : "FAIL\n");
+
+        gxos::apps::BuiltInAppMetadata invalidRecord{};
+        if (managedWorkspace) invalidRecord = *managedWorkspace;
+        invalidRecord.appId = "com.guidexos.apps.test.invalid-selector";
+        invalidRecord.managedSelector = 0u;
+        const bool invalidRecordRejected =
+            !gxos::apps::IsManagedNativeAotRecordValid(invalidRecord);
+        kernel::serial::puts("[C110-INVALID-RECORD] selector=0 result=");
+        kernel::serial::puts(invalidRecordRejected ? "PASS\n" : "FAIL\n");
+
+        kernel::nativeaot::LaunchReport missingReport{};
+        const kernel::nativeaot::LaunchStatus missingStatus =
+            kernel::nativeaot::launchLogical("/system/apps/C110-MISSING.ELF", 1u, &missingReport);
+        kernel::serial::puts("[C110-MISSING-IMAGE] status=");
+        kernel::serial::puts(kernel::nativeaot::launchStatusName(missingStatus));
+        kernel::serial::puts(" result=");
+        kernel::serial::puts(missingStatus == kernel::nativeaot::LaunchStatus::NotFound ? "PASS\n" : "FAIL\n");
+
+        const bool unknownId = !kernel::desktop::launch_app("com.guidexos.apps.missing");
+        kernel::serial::puts("[C110-UNKNOWN-ID] result=");
+        kernel::serial::puts(unknownId ? "PASS\n" : "FAIL\n");
+
+        const char* workspaceId = managedWorkspace ? managedWorkspace->appId : "";
+        const char* statusId = managedStatus ? managedStatus->appId : "";
+        auto runC110ManagedLaunch = [](uint32_t ordinal, const char* identity,
+                                       const char* applicationId) {
+            const bool result = kernel::desktop::launch_app(applicationId);
+            kernel::serial::puts("[C110-MANAGED-LAUNCH] ordinal=");
+            kernel::serial::put_hex32(ordinal);
+            kernel::serial::puts(" identity=");
+            kernel::serial::puts(identity);
+            kernel::serial::puts(" applicationId=");
+            kernel::serial::puts(applicationId);
+            kernel::serial::puts(" result=");
+            kernel::serial::puts(result ? "PASS\n" : "FAIL\n");
+            return result;
+        };
+        const bool c110A1 = runC110ManagedLaunch(1u, "ManagedWorkspace1", workspaceId);
+        const bool c110B1 = runC110ManagedLaunch(2u, "ManagedStatus1", statusId);
+        const bool c110A2 = runC110ManagedLaunch(3u, "ManagedWorkspace2", workspaceId);
+        const bool c110B2 = runC110ManagedLaunch(4u, "ManagedStatus2", statusId);
+        const bool c110A3 = runC110ManagedLaunch(5u, "ManagedWorkspace3", workspaceId);
+        kernel::nativeaot::LaunchReport independentReport{};
+        const kernel::nativeaot::LaunchStatus independentStatus =
+            kernel::nativeaot::launchLogical("/system/wall/C104A.ELF", 1u, &independentReport);
+        const bool independentGuard =
+            independentStatus == kernel::nativeaot::LaunchStatus::Busy ||
+            independentStatus == kernel::nativeaot::LaunchStatus::BaseCollision;
+        kernel::serial::puts("[C110-INDEPENDENT-IMAGE] status=");
+        kernel::serial::puts(kernel::nativeaot::launchStatusName(independentStatus));
+        kernel::serial::puts(" result=");
+        kernel::serial::puts(independentGuard ? "PASS\n" : "FAIL\n");
+        kernel::serial::puts("[C110-APPMODEL-RESULT] outcome=");
+        kernel::serial::puts(catalogValid && nativeRegression && invalidRecordRejected &&
+            missingStatus == kernel::nativeaot::LaunchStatus::NotFound && unknownId &&
+            c110A1 && c110B1 && c110A2 && c110B2 && c110A3 && independentGuard ? "PASS" : "FAIL");
+        kernel::serial::puts(" sequence=ManagedWorkspace1 PASS -> ManagedStatus1 PASS -> ManagedWorkspace2 PASS -> ManagedStatus2 PASS -> ManagedWorkspace3 PASS\n");
 #endif
 
 #if defined(GXOS_C107_PRODUCTION_LAUNCH) || defined(GXOS_C108_PRODUCTION_LAUNCH)

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <stdint.h>
+
 #ifdef GXOS_BARE_METAL
 #include <stddef.h>
 #else
@@ -15,6 +17,7 @@ enum class LaunchTargetType {
     ManifestApp,
     NativeElfApp,
     GXAppPackage,
+    ManagedNativeAotApp,
     ShellAction,
     LegacyAlias,
     FileOpen,
@@ -46,6 +49,7 @@ struct LaunchTarget {
     const char* legacyAlias = "";
     const char* shellAction = "";
     const char* pathParameter = "";
+    const char* managedImagePath = "";
 #else
     std::string appId;
     std::string displayName;
@@ -53,7 +57,10 @@ struct LaunchTarget {
     std::string legacyAlias;
     std::string shellAction;
     std::string pathParameter;
+    std::string managedImagePath;
 #endif
+
+    uint32_t managedSelector = 0;
 
     bool hostedAvailable = false;
     bool bareMetalAvailable = false;
@@ -73,6 +80,7 @@ inline const char* ToString(LaunchTargetType type) {
     case LaunchTargetType::ManifestApp: return "ManifestApp";
     case LaunchTargetType::NativeElfApp: return "NativeElfApp";
     case LaunchTargetType::GXAppPackage: return "GXAppPackage";
+    case LaunchTargetType::ManagedNativeAotApp: return "ManagedNativeAotApp";
     case LaunchTargetType::ShellAction: return "ShellAction";
     case LaunchTargetType::LegacyAlias: return "LegacyAlias";
     case LaunchTargetType::FileOpen: return "FileOpen";

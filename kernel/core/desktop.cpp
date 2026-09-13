@@ -1739,6 +1739,8 @@ static StartMenuApp s_startMenuApps[] = {
     {"guideXOS Navigator", true, false, 0xFF4678BE}, // pinned navigator
     {"HDInstaller", true,  false, 0xFFB48C46},  // pinned (orange-brown for installer)
     {"AppModel",    true,  false, 0xFF5587D2},  // pinned app model demo entry
+    {"Managed Workspace", true, false, 0xFF6A8FD1}, // shared resident NativeAOT logical app
+    {"Managed Status",    true, false, 0xFF5C9A88}, // shared resident NativeAOT logical app
     {"Paint",       false, true,  0xFFC87830},  // recent
     {"Clock",       false, true,  0xFF4690C8},  // recent
     {"File Explorer", false, true, 0xFFC8B43C}, // recent
@@ -1759,6 +1761,8 @@ static const char* s_allProgramsList[] = {
     "HDInstaller",
     "ImgViewer",
     "AppModel",
+    "Managed Status",
+    "Managed Workspace",
     "Notepad",
     "Paint",
     "TaskManager",
@@ -8121,6 +8125,61 @@ static const char* select_bare_metal_launch_dispatch(const char* originalAppName
     return selectedDispatch;
 }
 
+enum class ManagedAppModelLaunchResult : uint8_t {
+    NotManaged,
+    Succeeded,
+    Rejected
+};
+
+static ManagedAppModelLaunchResult launch_managed_appmodel_record(const char* appName,
+                                                                  const char* source)
+{
+#if defined(GXOS_NATIVEAOT_PRODUCTION_COMPOSITE_LAUNCH) && defined(GXOS_BARE_METAL)
+    if (!appName || !appName[0]) return ManagedAppModelLaunchResult::NotManaged;
+
+    const gxos::apps::LaunchTarget target = appmodel::resolveLaunchTarget(appName);
+    if (target.type != gxos::apps::LaunchTargetType::ManagedNativeAotApp) {
+        return ManagedAppModelLaunchResult::NotManaged;
+    }
+
+    serial::puts("[APPMODEL-MANAGED-LAUNCH] source=");
+    serial::puts(source ? source : "Desktop");
+    serial::puts(" appId=");
+    serial::puts(target.appId);
+    serial::puts(" selector=");
+    serial::put_hex32(target.managedSelector);
+    serial::puts(" image=");
+    serial::puts(target.managedImagePath);
+    serial::puts(" metadata=");
+    serial::puts(target.bareMetalAvailable ? "valid" : "invalid");
+    serial::puts("\n");
+
+    if (!target.bareMetalAvailable || !target.appId[0] || target.managedSelector == 0 ||
+        !target.managedImagePath[0]) {
+        serial::puts("[APPMODEL-MANAGED-RESULT] status=invalid-app-model-record result=REJECTED\n");
+        return ManagedAppModelLaunchResult::Rejected;
+    }
+
+    nativeaot::LaunchReport report{};
+    const nativeaot::LaunchStatus status =
+        nativeaot::launchLogicalApplication(target.appId, &report);
+    serial::puts("[APPMODEL-MANAGED-RESULT] appId=");
+    serial::puts(target.appId);
+    serial::puts(" status=");
+    serial::puts(nativeaot::launchStatusName(status));
+    serial::puts(" result=");
+    serial::puts(status == nativeaot::LaunchStatus::Success ? "PASS" : "REJECTED");
+    serial::puts("\n");
+    return status == nativeaot::LaunchStatus::Success
+        ? ManagedAppModelLaunchResult::Succeeded
+        : ManagedAppModelLaunchResult::Rejected;
+#else
+    (void)appName;
+    (void)source;
+    return ManagedAppModelLaunchResult::NotManaged;
+#endif
+}
+
 static bool try_launch_kernel_app(const char* appName)
 {
     if (!appName) return false;
@@ -8735,21 +8794,11 @@ bool launch_app(const char* appName)
         return true;
     }
 
-#if defined(GXOS_NATIVEAOT_PRODUCTION_COMPOSITE_LAUNCH)
-    if (nativeaot::isProductionLogicalApplicationId(appName)) {
-        nativeaot::LaunchReport report{};
-        const nativeaot::LaunchStatus status =
-            nativeaot::launchLogicalApplication(appName, &report);
-        serial::puts("[DESKTOP-LAUNCH] logicalApplication=");
-        serial::puts(appName);
-        serial::puts(" status=");
-        serial::puts(nativeaot::launchStatusName(status));
-        serial::puts(" result=");
-        serial::puts(status == nativeaot::LaunchStatus::Success ? "PASS" : "REJECTED");
-        serial::puts("\n");
-        return status == nativeaot::LaunchStatus::Success;
+    const ManagedAppModelLaunchResult managedResult =
+        launch_managed_appmodel_record(appName, "DesktopLaunch");
+    if (managedResult != ManagedAppModelLaunchResult::NotManaged) {
+        return managedResult == ManagedAppModelLaunchResult::Succeeded;
     }
-#endif
     
     // Try to launch as kernel GUI app
     return try_launch_kernel_app(appName);
@@ -11235,6 +11284,21 @@ static void show_start_menu_notification(const char* label)
     // Desktop File Explorer routes to the kernel-side "Files" app in bare-metal
     // mode; hosted/compositor launch plumbing keeps the "FileExplorer" name.
     const char* launchLabel = (desktop_str_eq(label, "File Explorer") || desktop_str_eq(label, "FileExplorer")) ? "Files" : label;
+
+    const ManagedAppModelLaunchResult managedResult =
+        launch_managed_appmodel_record(launchLabel, "StartMenu");
+    if (managedResult != ManagedAppModelLaunchResult::NotManaged) {
+        if (managedResult == ManagedAppModelLaunchResult::Succeeded) {
+            app::AppLogger::logLaunch(launchLabel, app::LaunchResult::Success);
+            return;
+        }
+        s_notification.title = label;
+        s_notification.message = "Managed application launch rejected";
+        s_notification.visible = true;
+        s_notification.showTime = s_tickCounter;
+        app::AppLogger::logLaunch(launchLabel, app::LaunchResult::NotAvailable);
+        return;
+    }
 
 #if defined(GXOS_APPMODEL_LAUNCHSHADOW_SMOKE_ACTIVE) && defined(GXOS_APPMODEL_TYPED_DISPATCH_SHADOW_ONLY) && defined(GXOS_BARE_METAL)
     if (bare_metal_should_suppress_real_branch_launch()) {

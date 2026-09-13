@@ -1,9 +1,22 @@
 #pragma once
 
 #include <stddef.h>
+#include <stdint.h>
 
 namespace gxos {
 namespace apps {
+
+// The shared built-in table is the guideXOS App Model record source used by
+// both the hosted registry and the freestanding kernel resolver.  A managed
+// NativeAOT record describes identity only; it does not carry a function
+// pointer, managed address, TLS value, or other runtime implementation detail.
+enum class BuiltInAppLaunchKind {
+	Native = 0,
+	ManagedNativeAot
+};
+
+static constexpr const char* kManagedNativeAotCompositeImagePath =
+	"/system/apps/GXOSAPP.ELF";
 
 // Shared built-in app metadata for both hosted synthetic manifest registration
 // and bare-metal kernel registration. This table is metadata-only for now; it
@@ -38,6 +51,9 @@ struct BuiltInAppMetadata {
 	bool acceptsFolderTargets = false;
 	bool systemShellObject = false;
 	bool riskyForActiveTypedDispatch = false;
+	BuiltInAppLaunchKind launchKind = BuiltInAppLaunchKind::Native;
+	uint32_t managedSelector = 0;
+	const char* managedCompositeImagePath = nullptr;
 };
 
 namespace detail {
@@ -85,6 +101,16 @@ static const char* const kAppModelAliases[] = {
 	"AppModel"
 };
 
+static const char* const kManagedWorkspaceAliases[] = {
+	// C109 compatibility aliases are intentionally not user-facing records.
+	"com.guidexos.nativeaot.hostlogproof.app-a"
+};
+
+static const char* const kManagedStatusAliases[] = {
+	// C109 compatibility aliases are intentionally not user-facing records.
+	"com.guidexos.nativeaot.hostlogproof.app-b"
+};
+
 static const char* const kOnScreenKeyboardAliases[] = {
 	"On Screen Keyboard"
 };
@@ -115,7 +141,9 @@ static const BuiltInAppMetadata kBuiltInAppMetadata[] = {
 	{ "guidexos.navigator", "guideXOS Navigator", "guideXOS Navigator", "guideXOS Navigator", nullptr, "app.navigator", "Internet", "Native guideXOS Navigator browser bundled with the OS app model.", BuiltInAvailabilityHosted | BuiltInAvailabilityBareMetal, 0xFF4678BEu, 920, 640, false, false, nullptr, 0, true, true, true, false, false, false, false },
 	{ "gxos.builtin.appmodeldemo", "App Model Demo", "App Model Demo", nullptr, nullptr, "app.generic", "Diagnostics", "Built-in guideXOS app-model diagnostics viewer.", BuiltInAvailabilityHosted, 0, 0, 0, false, false, detail::kAppModelAliases, sizeof(detail::kAppModelAliases) / sizeof(detail::kAppModelAliases[0]), true, true, true, false, false, false, false },
 	{ "gxos.builtin.nativeappdebugviewer", "Native App Debug Viewer", "Native App Debug Viewer", nullptr, nullptr, "app.generic", "Diagnostics", "Built-in guideXOS native app diagnostics viewer.", BuiltInAvailabilityHosted, 0, 0, 0, false, false, nullptr, 0, false, false, false, false, false, true, true },
-	{ "gxos.builtin.hdinstaller", "HDInstaller", "HDInstaller", nullptr, nullptr, "app.installer", "Installer", "Built-in guideXOS installer entry for supported runtime targets.", BuiltInAvailabilityHosted, 0, 0, 0, false, false, nullptr, 0, true, false, false, false, false, true, true }
+	{ "gxos.builtin.hdinstaller", "HDInstaller", "HDInstaller", nullptr, nullptr, "app.installer", "Installer", "Built-in guideXOS installer entry for supported runtime targets.", BuiltInAvailabilityHosted, 0, 0, 0, false, false, nullptr, 0, true, false, false, false, false, true, true },
+	{ "com.guidexos.apps.managed.workspace", "Managed Workspace", "Managed Workspace", nullptr, nullptr, "app.generic", "Utilities", "Managed guideXOS application hosted in the resident NativeAOT composite image.", BuiltInAvailabilityBareMetal, 0, 0, 0, false, false, detail::kManagedWorkspaceAliases, sizeof(detail::kManagedWorkspaceAliases) / sizeof(detail::kManagedWorkspaceAliases[0]), true, true, true, false, false, false, false, BuiltInAppLaunchKind::ManagedNativeAot, 1u, kManagedNativeAotCompositeImagePath },
+	{ "com.guidexos.apps.managed.status", "Managed Status", "Managed Status", nullptr, nullptr, "app.generic", "Utilities", "Managed guideXOS status application hosted in the resident NativeAOT composite image.", BuiltInAvailabilityBareMetal, 0, 0, 0, false, false, detail::kManagedStatusAliases, sizeof(detail::kManagedStatusAliases) / sizeof(detail::kManagedStatusAliases[0]), true, true, true, false, false, false, false, BuiltInAppLaunchKind::ManagedNativeAot, 2u, kManagedNativeAotCompositeImagePath }
 };
 
 static const int kBuiltInAppMetadataCount = sizeof(kBuiltInAppMetadata) / sizeof(kBuiltInAppMetadata[0]);
@@ -197,7 +225,53 @@ inline const BuiltInAppMetadata* FindBuiltInAppMetadataByIdentity(const char* id
 	if (metadata) return metadata;
 	metadata = FindBuiltInAppMetadataByKernelAppName(identity);
 	if (metadata) return metadata;
-	return FindBuiltInAppMetadataByKernelLegacyAlias(identity);
+	metadata = FindBuiltInAppMetadataByKernelLegacyAlias(identity);
+	if (metadata) return metadata;
+	return FindBuiltInAppMetadataByKnownAlias(identity);
+}
+
+inline bool IsManagedNativeAotApp(const BuiltInAppMetadata& metadata) {
+	return metadata.launchKind == BuiltInAppLaunchKind::ManagedNativeAot;
+}
+
+inline bool IsManagedNativeAotRecordValid(const BuiltInAppMetadata& metadata) {
+	if (IsManagedNativeAotApp(metadata)) {
+		if (!metadata.appId || !metadata.appId[0] || metadata.managedSelector == 0 ||
+			!metadata.managedCompositeImagePath ||
+			!detail::builtInTextEquals(metadata.managedCompositeImagePath, kManagedNativeAotCompositeImagePath) ||
+			(metadata.kernelAppName && metadata.kernelAppName[0])) {
+			return false;
+		}
+
+		return true;
+	}
+
+	// A native record must not carry managed selector/image metadata by
+	// accident.  This makes malformed test descriptors fail deterministically.
+	return metadata.managedSelector == 0 &&
+		(!metadata.managedCompositeImagePath || !metadata.managedCompositeImagePath[0]);
+}
+
+inline bool ManagedNativeAotCatalogIsValid() {
+	for (size_t i = 0; i < kBuiltInAppMetadataCount; ++i) {
+		const BuiltInAppMetadata& metadata = kBuiltInAppMetadata[i];
+		if (!IsManagedNativeAotApp(metadata)) continue;
+		if (!IsManagedNativeAotRecordValid(metadata)) return false;
+		for (size_t j = i + 1; j < kBuiltInAppMetadataCount; ++j) {
+			const BuiltInAppMetadata& other = kBuiltInAppMetadata[j];
+			if (!IsManagedNativeAotApp(other)) continue;
+			if ((metadata.appId && other.appId && detail::builtInTextEquals(metadata.appId, other.appId)) ||
+				metadata.managedSelector == other.managedSelector) {
+				return false;
+			}
+		}
+	}
+	return true;
+}
+
+inline const BuiltInAppMetadata* FindManagedNativeAotAppByIdentity(const char* identity) {
+	const BuiltInAppMetadata* metadata = FindBuiltInAppMetadataByIdentity(identity);
+	return metadata && IsManagedNativeAotApp(*metadata) ? metadata : nullptr;
 }
 
 } // namespace apps

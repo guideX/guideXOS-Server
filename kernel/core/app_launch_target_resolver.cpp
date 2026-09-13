@@ -92,11 +92,33 @@ static bool is_text_file_path(const char* path)
 
 static void fill_from_metadata(gxos::apps::LaunchTarget& target, const gxos::apps::BuiltInAppMetadata& metadata)
 {
-    target.type = gxos::apps::LaunchTargetType::BuiltInApp;
+    const bool managedNativeAot = gxos::apps::IsManagedNativeAotApp(metadata);
+    target.type = managedNativeAot
+        ? gxos::apps::LaunchTargetType::ManagedNativeAotApp
+        : gxos::apps::LaunchTargetType::BuiltInApp;
     target.appId = metadata.appId ? metadata.appId : "";
     target.displayName = metadata.displayName ? metadata.displayName : "";
     target.dispatchLaunchName = metadata.kernelAppName ? metadata.kernelAppName : (metadata.launchName ? metadata.launchName : "");
+    target.managedSelector = managedNativeAot ? metadata.managedSelector : 0u;
+    target.managedImagePath = managedNativeAot && metadata.managedCompositeImagePath
+        ? metadata.managedCompositeImagePath : "";
     target.hostedAvailable = gxos::apps::IsBuiltInAppAvailableInHosted(metadata);
+    if (managedNativeAot) {
+        // Managed records are selected by App Model metadata, never by the
+        // kernel AppManager factory table.  The bounded catalog validator also
+        // rejects selector zero, duplicates, wrong image identity, and native
+        // records carrying managed fields.
+        target.dispatchLaunchName = "";
+        target.bareMetalAvailable = gxos::apps::IsBuiltInAppAvailableInBareMetal(metadata) &&
+            gxos::apps::ManagedNativeAotCatalogIsValid() &&
+            gxos::apps::IsManagedNativeAotRecordValid(metadata);
+        target.diagnosticStatus = target.bareMetalAvailable ? "resolved-managed-nativeaot" : "invalid-managed-metadata";
+        target.diagnosticReason = target.bareMetalAvailable
+            ? "Shared App Model record selects a bounded logical application in the resident composite image"
+            : "Managed App Model record failed bounded selector/image/catalog validation";
+        return;
+    }
+
     target.bareMetalAvailable = gxos::apps::IsBuiltInAppAvailableInBareMetal(metadata) &&
         target.dispatchLaunchName[0] &&
         app::AppManager::isAppAvailable(target.dispatchLaunchName);
@@ -708,6 +730,10 @@ const char* legacyDispatchStringForLaunchTarget(const gxos::apps::LaunchTarget& 
             localReason = "Adapter returns the resolver dispatchLaunchName used by current bare-metal dispatch surfaces";
             dispatch = target.dispatchLaunchName;
         }
+        break;
+    case gxos::apps::LaunchTargetType::ManagedNativeAotApp:
+        localStatus = "unsupported";
+        localReason = "Managed NativeAOT records use the production App Model logical-selector route, not legacy dispatch";
         break;
     case gxos::apps::LaunchTargetType::FileOpen:
         if (target.dispatchLaunchName && target.dispatchLaunchName[0]) {

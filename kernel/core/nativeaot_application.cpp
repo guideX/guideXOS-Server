@@ -7,6 +7,7 @@
 #include "include/kernel/process.h"
 #include "include/kernel/serial_debug.h"
 #include "include/kernel/vfs.h"
+#include "built_in_app_metadata.h"
 
 #include "runtime/local_storage/guidexos_local_storage.h"
 #include "runtime/memory/guidexos_virtual_memory_region.h"
@@ -52,15 +53,7 @@ constexpr uint32_t kElfFlagRead = 4u;
 constexpr uint32_t kVmemCommit = 0x1000u;
 constexpr uint32_t kVmemRelease = 0x8000u;
 constexpr int32_t kInvalidApplicationIdReturn = -4;
-constexpr const char* kProductionCompositeImage = "/system/apps/GXOSAPP.ELF";
-constexpr const char* kProductionLogicalApplicationPrefix =
-    "com.guidexos.nativeaot.hostlogproof.";
-constexpr const char* kProductionApplicationA =
-    "com.guidexos.nativeaot.hostlogproof.app-a";
-constexpr const char* kProductionApplicationB =
-    "com.guidexos.nativeaot.hostlogproof.app-b";
-constexpr const char* kProductionApplicationInvalid =
-    "com.guidexos.nativeaot.hostlogproof.invalid";
+constexpr const char* kProductionCompositeImage = gxos::apps::kManagedNativeAotCompositeImagePath;
 
 #pragma pack(push, 1)
 struct Elf64Header {
@@ -1685,28 +1678,15 @@ LaunchStatus launchLogical(const char* path, uint32_t logicalAppId,
     return launchInternal(path, logicalAppId, report);
 }
 
-bool textEquals(const char* left, const char* right) {
-    if (left == nullptr || right == nullptr) return false;
-    uint32_t index = 0;
-    while (left[index] != 0 && right[index] != 0) {
-        if (left[index] != right[index]) return false;
-        ++index;
-    }
-    return left[index] == right[index];
-}
-
-bool startsWith(const char* value, const char* prefix) {
-    if (value == nullptr || prefix == nullptr) return false;
-    uint32_t index = 0;
-    while (prefix[index] != 0) {
-        if (value[index] != prefix[index]) return false;
-        ++index;
-    }
-    return true;
-}
-
 bool isProductionLogicalApplicationId(const char* applicationId) {
-    return startsWith(applicationId, kProductionLogicalApplicationPrefix);
+    const gxos::apps::BuiltInAppMetadata* metadata =
+        gxos::apps::FindManagedNativeAotAppByIdentity(applicationId);
+    return metadata != nullptr &&
+        gxos::apps::ManagedNativeAotCatalogIsValid() &&
+        gxos::apps::IsManagedNativeAotRecordValid(*metadata) &&
+        gxos::apps::detail::builtInTextEquals(
+            metadata->managedCompositeImagePath,
+            kProductionCompositeImage);
 }
 
 const char* productionCompositeImagePath() {
@@ -1719,19 +1699,25 @@ LaunchStatus launchLogicalApplication(const char* applicationId,
     if (report == nullptr) report = &local;
     *report = {};
     report->status = LaunchStatus::InvalidApplicationId;
-    if (!isProductionLogicalApplicationId(applicationId)) {
+    const gxos::apps::BuiltInAppMetadata* metadata =
+        gxos::apps::FindManagedNativeAotAppByIdentity(applicationId);
+    if (metadata == nullptr || !gxos::apps::ManagedNativeAotCatalogIsValid() ||
+        !gxos::apps::IsManagedNativeAotRecordValid(*metadata) ||
+        !gxos::apps::detail::builtInTextEquals(
+            metadata->managedCompositeImagePath,
+            kProductionCompositeImage)) {
+        serial::puts("[NATIVEAOT-APPMODEL] applicationId=");
+        serial::puts(applicationId ? applicationId : "");
+        serial::puts(" status=invalid-app-id\n");
         return report->status;
     }
 
-    uint32_t selector = 0u;
-    if (textEquals(applicationId, kProductionApplicationA)) {
-        selector = 1u;
-    } else if (textEquals(applicationId, kProductionApplicationB)) {
-        selector = 2u;
-    }
+    const uint32_t selector = metadata->managedSelector;
 
     serial::puts("[NATIVEAOT-PRODUCTION-LAUNCH] applicationId=");
     serial::puts(applicationId);
+    serial::puts(" recordId=");
+    serial::puts(metadata->appId);
     serial::puts(" image=");
     serial::puts(kProductionCompositeImage);
     serial::puts(" selector=");
