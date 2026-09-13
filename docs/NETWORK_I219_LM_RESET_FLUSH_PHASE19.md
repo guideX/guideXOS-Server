@@ -34,7 +34,7 @@ result. Physical Phase 19 validation remains pending.
 - Manifest: [`dist\guideXOS-Server-v0.1.0-phase19-aida-i219-reset-flush-amd64.manifest.json`](../dist/guideXOS-Server-v0.1.0-phase19-aida-i219-reset-flush-amd64.manifest.json)
 
 The manifest records `bootable=true`, the PyCdlib backend, source commit
-`3a4ad4e5136472c0b3f3f17dced75b5dddc79f9c`, branch
+`8f40e3e84ff3d9bd679f7c4ae9a7a9260a2ef3ba`, branch
 `NAVIGATOR_GENERAL_IMPROVEMENTS`, and the exact Phase 5/6/7 and DMA-placement
 selectors used for this artifact.
 
