@@ -3739,6 +3739,74 @@ static std::string navigatorHostedSmokeDiagnostic() {
         summarizeText(js38AfterReset, 920) + ",error=" +
         gxos::apps::Navigator::SmokeJavaScriptLastError());
 
+    const std::string js39FixtureUrl =
+        "http://127.0.0.1:8080/navigator-smoke/javascript-js39.html";
+    const bool js39Loaded = gxos::apps::Navigator::SmokeNavigateToQuiet(
+        js39FixtureUrl);
+    const std::string js39InitialText =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS39 hosted fixture loads bounded relational selectors",
+        js39Loaded && gxos::apps::Navigator::SmokeCurrentUrl() == js39FixtureUrl &&
+        contains(js39InitialText, "Navigator JavaScript JS39") &&
+        contains(js39InitialText,
+            "initial:descendant=true:child=true:wrapper=true:nested=true:scoped=true:collections=true:identity=true:unsupported=true:click=false:focus=false:submit=false:reset=false:value=direct-seed") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("loaded=") + yesNo(js39Loaded) + ",text=" +
+        summarizeText(js39InitialText, 980) + ",error=" +
+        gxos::apps::Navigator::SmokeJavaScriptLastError());
+
+    const bool js39ClickTrigger =
+        gxos::apps::Navigator::SmokeClickFormControlById("js39-trigger-click");
+    const std::string js39AfterClick =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS39 hosted event delegation uses target.matches and closest",
+        js39ClickTrigger && contains(js39AfterClick,
+            "click:descendant=true:child=true:wrapper=true:nested=true:scoped=true:collections=true:identity=true:unsupported=true:click=true:focus=false:submit=false:reset=false:value=direct-seed") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("click=") + yesNo(js39ClickTrigger) + ",text=" +
+        summarizeText(js39AfterClick, 980) + ",error=" +
+        gxos::apps::Navigator::SmokeJavaScriptLastError());
+
+    const bool js39FocusTrigger =
+        gxos::apps::Navigator::SmokeClickFormControlById("js39-trigger-focus");
+    const std::string js39AfterFocus =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS39 hosted focus preserves relational selector metadata",
+        js39FocusTrigger && contains(js39AfterFocus,
+            "focus-event:descendant=true:child=true:wrapper=true:nested=true:scoped=true:collections=true:identity=true:unsupported=true:click=true:focus=true:submit=false:reset=false:value=direct-seed") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("focus=") + yesNo(js39FocusTrigger) + ",text=" +
+        summarizeText(js39AfterFocus, 980) + ",error=" +
+        gxos::apps::Navigator::SmokeJavaScriptLastError());
+
+    const bool js39SubmitTrigger =
+        gxos::apps::Navigator::SmokeClickFormControlById("js39-trigger-submit");
+    const std::string js39AfterSubmit =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS39 hosted relational submit remains cancelable",
+        js39SubmitTrigger && gxos::apps::Navigator::SmokeCurrentUrl() ==
+            js39FixtureUrl && contains(js39AfterSubmit,
+            "submit:descendant=true:child=true:wrapper=true:nested=true:scoped=true:collections=true:identity=true:unsupported=true:click=true:focus=true:submit=true:reset=false:value=direct-seed") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("submit=") + yesNo(js39SubmitTrigger) + ",url=" +
+        gxos::apps::Navigator::SmokeCurrentUrl() + ",text=" +
+        summarizeText(js39AfterSubmit, 980) + ",error=" +
+        gxos::apps::Navigator::SmokeJavaScriptLastError());
+
+    const bool js39ResetTrigger =
+        gxos::apps::Navigator::SmokeClickFormControlById("js39-trigger-reset");
+    const std::string js39AfterReset =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS39 hosted relational reset restores the default",
+        js39ResetTrigger &&
+        gxos::apps::Navigator::SmokeFormControlValueById("js39-direct") ==
+            "direct-seed" && contains(js39AfterReset,
+            "reset:descendant=true:child=true:wrapper=true:nested=true:scoped=true:collections=true:identity=true:unsupported=true:click=true:focus=true:submit=true:reset=true:value=direct-seed") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("reset=") + yesNo(js39ResetTrigger) + ",text=" +
+        summarizeText(js39AfterReset, 980) + ",error=" +
+        gxos::apps::Navigator::SmokeJavaScriptLastError());
+
     bool cssInlineLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-inline.html");
     std::string cssInlineText = gxos::apps::Navigator::SmokeCurrentDocumentText();
     std::string cssInlineReport = gxos::apps::Navigator::SmokeRuntimeReport();

@@ -42,8 +42,8 @@ function js36Snapshot(label) {
   var items = document.querySelectorAll(".item");
   var scoped = js36Container.querySelectorAll(".item");
   var inputs = document.querySelectorAll("input");
-  var unsupported = document.querySelector("form input") === null &&
-    document.querySelectorAll("form input").length === 0;
+  var unsupported = document.querySelector("form div input") === null &&
+    document.querySelectorAll("form div input").length === 0;
   var identity = js36Form === document.forms["login"] &&
     js36User === js36Form.elements[0];
   js36State.textContent = label + ":id=" + (js36User ===

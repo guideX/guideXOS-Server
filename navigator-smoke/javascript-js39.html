@@ -1,0 +1,121 @@
+<!doctype html>
+<html>
+<head><title>Navigator JavaScript JS39</title></head>
+<body>
+<h1>Navigator JavaScript JS39</h1>
+<div id="js39-outside" class="panel">
+  <input id="js39-outside-input" class="field" type="text" value="outside">
+</div>
+<form id="js39-settings" name="settings" class="panel form">
+  <input id="js39-direct" class="field required" name="direct" type="text" value="direct-seed">
+  <div id="js39-wrapper" class="group">
+    <button id="js39-nested" class="action primary" type="button">Save</button>
+    <input id="js39-wrapped" class="field required" name="wrapped" type="text" value="wrapped-seed">
+  </div>
+  <select id="js39-select" name="choice">
+    <option id="js39-option-a" value="a" selected>A</option>
+    <option id="js39-option-b" value="b">B</option>
+  </select>
+  <button id="js39-submit" type="submit">Submit</button>
+  <button id="js39-reset" type="reset">Reset</button>
+</form>
+<button id="js39-trigger-click" type="button">Delegated click</button>
+<button id="js39-trigger-focus" type="button">Delegated focus</button>
+<button id="js39-trigger-submit" type="button">Delegated submit</button>
+<button id="js39-trigger-reset" type="button">Delegated reset</button>
+<p id="js39-state">initial</p>
+<script>
+var js39State = document.getElementById("js39-state");
+var js39Form = document.querySelector("#js39-settings");
+var js39Direct = document.querySelector("#js39-direct");
+var js39Wrapper = document.querySelector("#js39-wrapper");
+var js39Nested = document.querySelector("#js39-nested");
+var js39Wrapped = document.querySelector("#js39-wrapped");
+var js39Select = document.querySelector("#js39-select");
+var js39Option = document.querySelector("#js39-option-a");
+var js39Submit = document.querySelector("#js39-submit");
+var js39Reset = document.querySelector("#js39-reset");
+var js39ClickSeen = false;
+var js39FocusSeen = false;
+var js39SubmitSeen = false;
+var js39ResetSeen = false;
+function js39Snapshot(label) {
+  var descendant = document.querySelector("form input") === js39Direct &&
+    document.querySelector("form   input") === js39Direct &&
+    document.querySelector("#js39-settings input.required") === js39Direct;
+  var child = document.querySelector("form > input") === js39Direct &&
+    document.querySelector("form>input") === js39Direct;
+  var wrapper = js39Wrapped.matches("form input") &&
+    js39Wrapped.matches("div > input") &&
+    js39Wrapped.matches("form.panel input.required") &&
+    js39Wrapped.matches("form > input") === false;
+  var nested = js39Nested.matches("form button") &&
+    js39Nested.matches(".group > button") &&
+    js39Nested.matches("form.panel button.primary") &&
+    js39Nested.matches("form > button") === false;
+  var scoped = js39Wrapper.querySelector("form input") === js39Wrapped &&
+    js39Wrapper.querySelector("form > input") === null &&
+    js39Form.querySelector("form > input") === js39Direct;
+  var collections = document.querySelectorAll(".panel button").length === 3 &&
+    document.querySelectorAll(".group > button").length === 1 &&
+    document.querySelectorAll("form input")[0] === js39Direct &&
+    document.querySelectorAll("form input")[1] === js39Wrapped;
+  var identity = document.querySelector("select > option") === js39Option &&
+    js39Select.options[0] === js39Option &&
+    js39Nested.closest(".group > button") === js39Nested &&
+    js39Nested.closest("form button") === js39Nested;
+  var unsupported = document.querySelector("form div input") === null &&
+    document.querySelectorAll("form div input").length === 0 &&
+    document.querySelector("a + b") === null &&
+    document.querySelectorAll("[name=x]").length === 0;
+  js39State.textContent = label + ":descendant=" + descendant +
+    ":child=" + child + ":wrapper=" + wrapper + ":nested=" + nested +
+    ":scoped=" + scoped + ":collections=" + collections +
+    ":identity=" + identity + ":unsupported=" + unsupported +
+    ":click=" + js39ClickSeen + ":focus=" + js39FocusSeen +
+    ":submit=" + js39SubmitSeen + ":reset=" + js39ResetSeen +
+    ":value=" + js39Direct.value;
+}
+js39Form.addEventListener("click", function(event) {
+  if (event.target === js39Nested) {
+    js39ClickSeen = event.target.matches(".group > button") &&
+      event.target.closest("form button") === js39Nested &&
+      event.currentTarget === js39Form && event.relatedTarget === null &&
+      event.defaultPrevented === false;
+    js39Snapshot("click-event");
+  }
+});
+js39Nested.addEventListener("focus", function(event) {
+  js39FocusSeen = event.target.matches(".group > button") &&
+    event.target.closest("form button") === js39Nested &&
+    event.target === js39Nested && event.currentTarget === js39Nested &&
+    (event.relatedTarget === null ||
+      event.relatedTarget === document.querySelector("#js39-trigger-focus"));
+  js39Snapshot("focus-event");
+});
+js39Form.addEventListener("submit", function(event) {
+  js39SubmitSeen = event.target === js39Form &&
+    event.currentTarget === js39Form && event.defaultPrevented === false &&
+    document.querySelector("form > button") === js39Submit;
+  event.preventDefault();
+  js39Snapshot("submit-event");
+});
+js39Form.addEventListener("reset", function(event) {
+  js39ResetSeen = event.target === js39Form &&
+    event.currentTarget === js39Form && event.defaultPrevented === false &&
+    document.querySelector("form input") === js39Direct;
+  js39Snapshot("reset-event");
+});
+document.getElementById("js39-trigger-click").addEventListener("click",
+  function() { js39Nested.click(); js39Snapshot("click"); });
+document.getElementById("js39-trigger-focus").addEventListener("click",
+  function() { js39Nested.focus(); js39Snapshot("focus"); });
+document.getElementById("js39-trigger-submit").addEventListener("click",
+  function() { js39Submit.click(); js39Snapshot("submit"); });
+document.getElementById("js39-trigger-reset").addEventListener("click",
+  function() { js39Direct.value = "hosted-changed"; js39Reset.click();
+    js39Snapshot("reset"); });
+js39Snapshot("initial");
+</script>
+</body>
+</html>

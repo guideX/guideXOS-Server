@@ -201,12 +201,12 @@ void testInvalidSelectorsAndReadOnlyCollections()
     const ScriptResult result = harness.execute(R"JS(
 var invalid = document.querySelector("") === null &&
     document.querySelector("   ") === null &&
-    document.querySelector("form input") === null &&
+    document.querySelector("form div input") === null &&
     document.querySelector("input[type=text]") === null &&
     document.querySelector("input, textarea") === null &&
     document.querySelector(":focus") === null;
 var invalidCollections = document.querySelectorAll("").length === 0 &&
-    document.querySelectorAll("form input").length === 0 &&
+    document.querySelectorAll("form div input").length === 0 &&
     document.querySelectorAll("*").length === 0 &&
     document.querySelectorAll("input,textarea").length === 0;
 var empty = document.querySelectorAll(".missing");

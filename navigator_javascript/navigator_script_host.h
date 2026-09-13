@@ -101,18 +101,31 @@ enum class NavigatorScriptSelectorKind : std::uint8_t {
     TagId,
 };
 
-// A selector is retained only as its parsed, bounded components.  The shared
-// storage keeps querySelectorAll live without retaining an arbitrary raw
-// selector string in a host value or creating a second DOM representation.
-struct NavigatorScriptSelectorDescriptor {
+enum class NavigatorScriptSelectorRelation : std::uint8_t {
+    None = 0u,
+    Descendant,
+    Child,
+};
+
+struct NavigatorScriptSimpleSelectorDescriptor {
     NavigatorScriptSelectorKind kind = NavigatorScriptSelectorKind::Invalid;
-    std::array<char, kNavigatorScriptMaxSelectorLength> text{};
     std::uint16_t tagOffset = 0;
     std::uint16_t tagLength = 0;
     std::uint16_t idOffset = 0;
     std::uint16_t idLength = 0;
     std::uint16_t classOffset = 0;
     std::uint16_t classLength = 0;
+};
+
+// A selector is retained only as its parsed, bounded components.  The shared
+// storage keeps querySelectorAll live without retaining an arbitrary raw
+// selector string in a host value or creating a second DOM representation.
+struct NavigatorScriptSelectorDescriptor {
+    NavigatorScriptSelectorRelation relation =
+        NavigatorScriptSelectorRelation::None;
+    std::array<char, kNavigatorScriptMaxSelectorLength> text{};
+    NavigatorScriptSimpleSelectorDescriptor leftSimple;
+    NavigatorScriptSimpleSelectorDescriptor rightSimple;
     std::uint16_t textLength = 0;
 };
 
@@ -358,6 +371,10 @@ private:
     bool selectorDescriptorEquals(
         const NavigatorScriptSelectorDescriptor& left,
         const NavigatorScriptSelectorDescriptor& right) const;
+    bool selectorSimpleElementMatches(
+        const gxos::web::HtmlElementRef& element,
+        const NavigatorScriptSimpleSelectorDescriptor& selector,
+        const NavigatorScriptSelectorDescriptor& storage) const;
     bool selectorElementMatches(const gxos::web::HtmlElementRef& element,
         const NavigatorScriptSelectorDescriptor& selector) const;
     bool selectorClosestMatch(HostInstanceId receiverSerial,

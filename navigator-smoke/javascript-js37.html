@@ -42,10 +42,10 @@ var js37FocusSeen = false;
 var js37SubmitSeen = false;
 var js37ResetSeen = false;
 function js37Snapshot(label) {
-  var unsupported = document.querySelector("form input") === null &&
-    document.querySelectorAll("form input").length === 0 &&
+  var unsupported = document.querySelector("form div input") === null &&
+    document.querySelectorAll("form div input").length === 0 &&
     js37X.matches("[name=x]") === false &&
-    js37X.closest("form input") === null;
+    js37X.closest("form div input") === null;
   var identity = js37Form === document.querySelector("form#js37-settings") &&
     js37Form === document.forms[0] && js37Name === js37Form.elements[0];
   js37State.textContent = label + ":self=" +

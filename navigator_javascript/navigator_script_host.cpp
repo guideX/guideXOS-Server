@@ -173,19 +173,10 @@ bool copySelectorPart(NavigatorScriptSelectorDescriptor& selector,
     return true;
 }
 
-bool parseBoundedSelector(SourceView source,
-    NavigatorScriptSelectorDescriptor& selector)
+bool parseSimpleSelector(SourceView source, std::size_t begin,
+    std::size_t end, NavigatorScriptSelectorDescriptor& storage,
+    NavigatorScriptSimpleSelectorDescriptor& selector)
 {
-    selector = NavigatorScriptSelectorDescriptor();
-    if (source.data == nullptr || source.length == 0u ||
-        source.length > kNavigatorScriptMaxSelectorLength) return false;
-
-    std::size_t begin = 0;
-    std::size_t end = source.length;
-    while (begin < end && isSelectorAsciiWhitespace(source.data[begin]))
-        ++begin;
-    while (end > begin && isSelectorAsciiWhitespace(source.data[end - 1u]))
-        --end;
     if (begin == end) return false;
 
     const char first = source.data[begin];
@@ -194,17 +185,17 @@ bool parseBoundedSelector(SourceView source,
         if (!isSelectorIdentifier(source, partBegin, end)) return false;
         if (first == '#') {
             selector.kind = NavigatorScriptSelectorKind::Id;
-            return copySelectorPart(selector, source, partBegin, end,
+            return copySelectorPart(storage, source, partBegin, end,
                 selector.idOffset, selector.idLength);
         }
         selector.kind = NavigatorScriptSelectorKind::Class;
-        return copySelectorPart(selector, source, partBegin, end,
+        return copySelectorPart(storage, source, partBegin, end,
             selector.classOffset, selector.classLength);
     }
 
     std::size_t specialPosition = end;
     char special = '\0';
-    std::size_t specialCount = 0;
+    std::size_t specialCount = 0u;
     for (std::size_t index = begin; index < end; ++index) {
         if (source.data[index] != '#' && source.data[index] != '.') continue;
         specialPosition = index;
@@ -214,28 +205,87 @@ bool parseBoundedSelector(SourceView source,
     if (specialCount == 0u) {
         if (!isSelectorTagName(source, begin, end)) return false;
         selector.kind = NavigatorScriptSelectorKind::Tag;
-        return copySelectorPart(selector, source, begin, end,
+        return copySelectorPart(storage, source, begin, end,
             selector.tagOffset, selector.tagLength);
     }
     if (specialCount != 1u || !isSelectorTagName(source, begin,
             specialPosition) || !isSelectorIdentifier(source,
             specialPosition + 1u, end)) return false;
-    if (!copySelectorPart(selector, source, begin, specialPosition,
+    if (!copySelectorPart(storage, source, begin, specialPosition,
             selector.tagOffset, selector.tagLength)) return false;
     if (special == '#') {
         selector.kind = NavigatorScriptSelectorKind::TagId;
-        return copySelectorPart(selector, source, specialPosition + 1u, end,
+        return copySelectorPart(storage, source, specialPosition + 1u, end,
             selector.idOffset, selector.idLength);
     }
     selector.kind = NavigatorScriptSelectorKind::TagClass;
-    return copySelectorPart(selector, source, specialPosition + 1u, end,
+    return copySelectorPart(storage, source, specialPosition + 1u, end,
         selector.classOffset, selector.classLength);
 }
 
-SourceView selectorPart(const NavigatorScriptSelectorDescriptor& selector,
+bool parseBoundedSelector(SourceView source,
+    NavigatorScriptSelectorDescriptor& selector)
+{
+    selector = NavigatorScriptSelectorDescriptor();
+    if (source.data == nullptr || source.length == 0u ||
+        source.length > kNavigatorScriptMaxSelectorLength) return false;
+
+    std::size_t begin = 0u;
+    std::size_t end = source.length;
+    while (begin < end && isSelectorAsciiWhitespace(source.data[begin]))
+        ++begin;
+    while (end > begin && isSelectorAsciiWhitespace(source.data[end - 1u]))
+        --end;
+    if (begin == end) return false;
+
+    std::size_t childPosition = end;
+    std::size_t childCount = 0u;
+    for (std::size_t index = begin; index < end; ++index) {
+        if (source.data[index] != '>') continue;
+        childPosition = index;
+        ++childCount;
+    }
+
+    if (childCount > 1u) return false;
+    if (childCount == 1u) {
+        selector.relation = NavigatorScriptSelectorRelation::Child;
+        std::size_t leftEnd = childPosition;
+        while (leftEnd > begin &&
+            isSelectorAsciiWhitespace(source.data[leftEnd - 1u])) --leftEnd;
+        std::size_t rightBegin = childPosition + 1u;
+        while (rightBegin < end &&
+            isSelectorAsciiWhitespace(source.data[rightBegin])) ++rightBegin;
+        return parseSimpleSelector(source, begin, leftEnd, selector,
+                selector.leftSimple) &&
+            parseSimpleSelector(source, rightBegin, end, selector,
+                selector.rightSimple);
+    }
+
+    std::size_t whitespacePosition = end;
+    for (std::size_t index = begin; index < end; ++index) {
+        if (!isSelectorAsciiWhitespace(source.data[index])) continue;
+        whitespacePosition = index;
+        break;
+    }
+    if (whitespacePosition == end) {
+        return parseSimpleSelector(source, begin, end, selector,
+            selector.rightSimple);
+    }
+
+    selector.relation = NavigatorScriptSelectorRelation::Descendant;
+    std::size_t rightBegin = whitespacePosition;
+    while (rightBegin < end &&
+        isSelectorAsciiWhitespace(source.data[rightBegin])) ++rightBegin;
+    return parseSimpleSelector(source, begin, whitespacePosition, selector,
+            selector.leftSimple) &&
+        parseSimpleSelector(source, rightBegin, end, selector,
+            selector.rightSimple);
+}
+
+SourceView selectorPart(const NavigatorScriptSelectorDescriptor& storage,
     std::uint16_t offset, std::uint16_t length)
 {
-    return SourceView(selector.text.data() + offset, length);
+    return SourceView(storage.text.data() + offset, length);
 }
 
 bool selectorTextEquals(SourceView left, SourceView right)
@@ -2177,29 +2227,43 @@ bool NavigatorScriptHostAdapter::selectorDescriptorEquals(
     const NavigatorScriptSelectorDescriptor& left,
     const NavigatorScriptSelectorDescriptor& right) const
 {
-    if (left.kind != right.kind || left.tagLength != right.tagLength ||
-        left.idLength != right.idLength ||
-        left.classLength != right.classLength) return false;
-    return selectorTextEquals(selectorPart(left, left.tagOffset,
-            left.tagLength), selectorPart(right, right.tagOffset,
-            right.tagLength)) &&
-        selectorTextEquals(selectorPart(left, left.idOffset, left.idLength),
-            selectorPart(right, right.idOffset, right.idLength)) &&
-        selectorTextEquals(selectorPart(left, left.classOffset,
-            left.classLength), selectorPart(right, right.classOffset,
-            right.classLength));
+    const auto simpleEqual = [](const NavigatorScriptSelectorDescriptor& left,
+        const NavigatorScriptSimpleSelectorDescriptor& leftSimple,
+        const NavigatorScriptSelectorDescriptor& right,
+        const NavigatorScriptSimpleSelectorDescriptor& rightSimple) {
+        return leftSimple.kind == rightSimple.kind &&
+            leftSimple.tagLength == rightSimple.tagLength &&
+            leftSimple.idLength == rightSimple.idLength &&
+            leftSimple.classLength == rightSimple.classLength &&
+            selectorTextEquals(selectorPart(left, leftSimple.tagOffset,
+                leftSimple.tagLength),
+                selectorPart(right, rightSimple.tagOffset,
+                    rightSimple.tagLength)) &&
+            selectorTextEquals(selectorPart(left, leftSimple.idOffset,
+                leftSimple.idLength),
+                selectorPart(right, rightSimple.idOffset,
+                    rightSimple.idLength)) &&
+            selectorTextEquals(selectorPart(left, leftSimple.classOffset,
+                leftSimple.classLength),
+                selectorPart(right, rightSimple.classOffset,
+                    rightSimple.classLength));
+    };
+    return left.relation == right.relation &&
+        simpleEqual(left, left.leftSimple, right, right.leftSimple) &&
+        simpleEqual(left, left.rightSimple, right, right.rightSimple);
 }
 
-bool NavigatorScriptHostAdapter::selectorElementMatches(
+bool NavigatorScriptHostAdapter::selectorSimpleElementMatches(
     const gxos::web::HtmlElementRef& element,
-    const NavigatorScriptSelectorDescriptor& selector) const
+    const NavigatorScriptSimpleSelectorDescriptor& selector,
+    const NavigatorScriptSelectorDescriptor& storage) const
 {
     if (element.serial == 0u || element.tagName.empty()) return false;
-    const SourceView tag = selectorPart(selector, selector.tagOffset,
+    const SourceView tag = selectorPart(storage, selector.tagOffset,
         selector.tagLength);
-    const SourceView id = selectorPart(selector, selector.idOffset,
+    const SourceView id = selectorPart(storage, selector.idOffset,
         selector.idLength);
-    const SourceView className = selectorPart(selector, selector.classOffset,
+    const SourceView className = selectorPart(storage, selector.classOffset,
         selector.classLength);
     switch (selector.kind) {
     case NavigatorScriptSelectorKind::Id:
@@ -2222,6 +2286,46 @@ bool NavigatorScriptHostAdapter::selectorElementMatches(
     return false;
 }
 
+bool NavigatorScriptHostAdapter::selectorElementMatches(
+    const gxos::web::HtmlElementRef& element,
+    const NavigatorScriptSelectorDescriptor& selector) const
+{
+    if (document_ == nullptr || selector.rightSimple.kind ==
+            NavigatorScriptSelectorKind::Invalid ||
+        !selectorSimpleElementMatches(element, selector.rightSimple, selector))
+        return false;
+    if (selector.relation == NavigatorScriptSelectorRelation::None)
+        return true;
+
+    HostInstanceId parentSerial = 0u;
+    if (!resolveStructuralParentSerial(element.serial, parentSerial) ||
+        parentSerial == 0u) return false;
+    if (selector.relation == NavigatorScriptSelectorRelation::Child) {
+        const gxos::web::HtmlElementRef* parent = findElement(parentSerial);
+        return parent != nullptr && selectorSimpleElementMatches(*parent,
+            selector.leftSimple, selector);
+    }
+
+    // Match the left side against the real structural ancestry. This uses the
+    // same parentSerial resolver and bounded depth as closest(), so malformed
+    // links and cycles fail closed without recursive selector evaluation.
+    const std::size_t depthLimit = std::min(limits_.maxDocumentNodes,
+        document_->structuralElements.size());
+    HostInstanceId ancestorSerial = parentSerial;
+    for (std::size_t depth = 0u; depth < depthLimit && ancestorSerial != 0u;
+            ++depth) {
+        const gxos::web::HtmlElementRef* ancestor = findElement(ancestorSerial);
+        if (ancestor == nullptr) return false;
+        if (selectorSimpleElementMatches(*ancestor, selector.leftSimple,
+                selector)) return true;
+        HostInstanceId nextParentSerial = 0u;
+        if (!resolveStructuralParentSerial(ancestorSerial,
+                nextParentSerial)) break;
+        ancestorSerial = nextParentSerial;
+    }
+    return false;
+}
+
 bool NavigatorScriptHostAdapter::selectorClosestMatch(
     HostInstanceId receiverSerial,
     const NavigatorScriptSelectorDescriptor& selector,
@@ -2229,7 +2333,8 @@ bool NavigatorScriptHostAdapter::selectorClosestMatch(
 {
     matchSerial = 0u;
     if (document_ == nullptr || receiverSerial == 0u ||
-        selector.kind == NavigatorScriptSelectorKind::Invalid) return false;
+        selector.rightSimple.kind == NavigatorScriptSelectorKind::Invalid)
+        return false;
 
     // The structural document-node capacity is also the maximum ancestry
     // walk. A malformed parent cycle therefore terminates without recursion
@@ -2265,7 +2370,7 @@ bool NavigatorScriptHostAdapter::selectorScopeMatches(
 std::size_t NavigatorScriptHostAdapter::selectorMatchCount(
     const SelectorCollectionRecord& record) const
 {
-    if (document_ == nullptr || record.selector.kind ==
+    if (document_ == nullptr || record.selector.rightSimple.kind ==
             NavigatorScriptSelectorKind::Invalid) return 0u;
     const std::size_t count = std::min(limits_.maxDocumentNodes,
         document_->structuralElements.size());
@@ -2284,7 +2389,7 @@ bool NavigatorScriptHostAdapter::selectorMatchAt(
     HostInstanceId& serial) const
 {
     serial = 0u;
-    if (document_ == nullptr || record.selector.kind ==
+    if (document_ == nullptr || record.selector.rightSimple.kind ==
             NavigatorScriptSelectorKind::Invalid) return false;
     const std::size_t count = std::min(limits_.maxDocumentNodes,
         document_->structuralElements.size());

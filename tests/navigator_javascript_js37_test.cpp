@@ -136,7 +136,7 @@ var scopedDifference = inner.querySelector(".inner") === null &&
     inner.closest(".inner") === inner;
 var noMatch = x.closest(".does-not-exist") === null;
 var invalid = x.matches("") === false && x.closest("") === null &&
-    x.matches("form input") === false && x.closest("form input") === null &&
+    x.matches("form div input") === false && x.closest("form div input") === null &&
     x.matches("[name=x]") === false && x.closest("[name=x]") === null &&
     x.matches(":focus") === false && x.closest(":focus") === null &&
     x.matches("a,b") === false && x.closest("a,b") === null;
@@ -144,8 +144,8 @@ var consistency = document.querySelector("button.action") ===
     document.querySelectorAll("button.action")[0] &&
     document.querySelectorAll("button.action")[0].matches("button.action") &&
     document.querySelector("button#x").closest("div#inner") === inner &&
-    document.querySelector("form input") === null &&
-    document.querySelectorAll("form input").length === 0;
+    document.querySelector("form input") === document.querySelector("#name") &&
+    document.querySelectorAll("form input").length === 3;
 var badArguments = x.matches() === false && x.closest() === null &&
     x.matches(1) === false && x.closest(1) === null;
 var receiverOnly = inner.matches(".inner") &&
@@ -413,8 +413,8 @@ var regression = document.querySelector("#x") ===
     regressionForm === document.querySelector("form#settings") &&
     regressionName === document.getElementById("name") &&
     regressionOption === document.querySelector("#mode-a") &&
-    document.querySelector("form input") === null &&
-    document.querySelectorAll("form input").length === 0;
+    document.querySelector("form input") === document.querySelector("#name") &&
+    document.querySelectorAll("form input").length === 3;
 )JS");
     expect(result.succeeded(), "regression: JS36/JS35 surface script");
     expectBoolean(harness, "regression", true,

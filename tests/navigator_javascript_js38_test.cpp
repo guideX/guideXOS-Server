@@ -440,8 +440,8 @@ var regression = document.querySelector("#panel") ===
     document.querySelector("#nested-input").closest("form") ===
         document.forms[0] &&
     document.forms[0].elements[0] === document.querySelector("#nested-input") &&
-    document.querySelector("form input") === null &&
-    document.querySelectorAll("form input").length === 0;
+    document.querySelector("form input") === document.querySelector("#nested-input") &&
+    document.querySelectorAll("form input").length === 2;
 )JS");
     expect(result.succeeded(), "regression: JS34-JS37 script");
     expectBoolean(harness, "regression", true,
