@@ -39,6 +39,9 @@
 #if defined(GXOS_BARE_METAL)
 #include "include/kernel/app_launch_target_resolver.h"
 #endif
+#if defined(GXOS_NATIVEAOT_PRODUCTION_COMPOSITE_LAUNCH)
+#include "include/kernel/nativeaot_application.h"
+#endif
 #if !defined(GXOS_BARE_METAL)
 #include "../../icon_theme_manager.h"
 #endif
@@ -8731,6 +8734,22 @@ bool launch_app(const char* appName)
         record_recent_program("Console");
         return true;
     }
+
+#if defined(GXOS_NATIVEAOT_PRODUCTION_COMPOSITE_LAUNCH)
+    if (nativeaot::isProductionLogicalApplicationId(appName)) {
+        nativeaot::LaunchReport report{};
+        const nativeaot::LaunchStatus status =
+            nativeaot::launchLogicalApplication(appName, &report);
+        serial::puts("[DESKTOP-LAUNCH] logicalApplication=");
+        serial::puts(appName);
+        serial::puts(" status=");
+        serial::puts(nativeaot::launchStatusName(status));
+        serial::puts(" result=");
+        serial::puts(status == nativeaot::LaunchStatus::Success ? "PASS" : "REJECTED");
+        serial::puts("\n");
+        return status == nativeaot::LaunchStatus::Success;
+    }
+#endif
     
     // Try to launch as kernel GUI app
     return try_launch_kernel_app(appName);

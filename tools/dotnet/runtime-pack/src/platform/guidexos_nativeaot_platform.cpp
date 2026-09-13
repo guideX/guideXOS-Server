@@ -32313,6 +32313,11 @@ extern "C" volatile guidexos_nativeaot_thread_static_diagnostics
 uint32_t g_c108ManagedHeapResetCount = 0u;
 bool g_c108ManagedHeapInitialized = false;
 #endif
+#if defined(GUIDEXOS_NATIVEAOT_PERSISTENT_COMPOSITE_LIFECYCLE)
+uint32_t g_persistentManagedHeapResetCount = 0u;
+uint32_t g_persistentManagedHeapPreserveCount = 0u;
+bool g_persistentManagedHeapInitialized = false;
+#endif
 
 [[noreturn]] void guideXosFailFast(gx_uint32 reason) {
 #if defined(GUIDEXOS_NATIVEAOT_MANAGED_ALLOCATION) && defined(GUIDEXOS_NATIVEAOT_REAL_GC_ALLOCATION)
@@ -32460,6 +32465,35 @@ void c108RecordTlsIdentity(
     c108SerialPutHex64(g_c108ManagedHeapResetCount);
 #endif
     c108SerialPutString("\n");
+}
+#endif
+
+#if defined(GUIDEXOS_NATIVEAOT_PERSISTENT_COMPOSITE_LIFECYCLE)
+void persistentSerialPutChar(char value) {
+    if (value == '\n') {
+        while ((__inbyte(0x3FDu) & 0x20u) == 0u) {
+        }
+        __outbyte(0x3F8u, static_cast<unsigned char>('\r'));
+    }
+    while ((__inbyte(0x3FDu) & 0x20u) == 0u) {
+    }
+    __outbyte(0x3F8u, static_cast<unsigned char>(value));
+}
+
+void persistentSerialPutString(const char* value) {
+    if (value == nullptr) {
+        return;
+    }
+    while (*value != '\0') {
+        persistentSerialPutChar(*value++);
+    }
+}
+
+void persistentSerialPutHex64(uintptr_t value) {
+    static const char hex[] = "0123456789ABCDEF";
+    for (int shift = 60; shift >= 0; shift -= 4) {
+        persistentSerialPutChar(hex[(value >> shift) & 0xFu]);
+    }
 }
 #endif
 
@@ -32674,6 +32708,47 @@ void initializeRuntimeState(unsigned char* block) {
         c108SerialPutString(" allocation=");
         c108SerialPutHex64(reinterpret_cast<uintptr_t>(*reinterpret_cast<void**>(runtimeCell(block))));
         c108SerialPutString(" reason=resident-managed-thread\n");
+    }
+#elif defined(GUIDEXOS_NATIVEAOT_PERSISTENT_COMPOSITE_LIFECYCLE)
+    if (!g_persistentManagedHeapInitialized) {
+        ++g_persistentManagedHeapResetCount;
+        persistentSerialPutString("[NATIVEAOT-HEAP] action=initialize count=");
+        persistentSerialPutHex64(g_persistentManagedHeapResetCount);
+        persistentSerialPutString(" base=");
+        persistentSerialPutHex64(reinterpret_cast<uintptr_t>(g_guideXosManagedHeap));
+        persistentSerialPutString(" bytes=");
+        persistentSerialPutHex64(static_cast<uintptr_t>(kManagedHeapBytes));
+        persistentSerialPutString(" reason=initial-managed-thread-attachment\n");
+
+        volatile unsigned char* diagnostics = reinterpret_cast<volatile unsigned char*>(&g_guideXosAllocationDiagnostics);
+        for (gx_size i = 0; i < sizeof(g_guideXosAllocationDiagnostics); ++i) {
+            diagnostics[i] = 0;
+        }
+        for (gx_size i = 0; i < kManagedHeapBytes; ++i) {
+            g_guideXosManagedHeap[i] = 0;
+        }
+        const gx_uintptr heapBase = reinterpret_cast<gx_uintptr>(g_guideXosManagedHeap);
+        const gx_uintptr heapLimit = heapBase + kManagedHeapBytes;
+        *reinterpret_cast<void**>(runtimeCell(block)) = reinterpret_cast<void*>(heapBase);
+        *reinterpret_cast<void**>(runtimeCell(block) + sizeof(void*)) = reinterpret_cast<void*>(heapLimit);
+        g_guideXosAllocationDiagnostics.heapInitialized = 1u;
+        g_guideXosAllocationDiagnostics.heapBase = heapBase;
+        g_guideXosAllocationDiagnostics.heapSize = kManagedHeapBytes;
+        g_guideXosAllocationDiagnostics.initialAllocationPointer = heapBase;
+        g_guideXosAllocationDiagnostics.allocationPointerAfter = heapBase;
+        g_guideXosAllocationDiagnostics.heapExpansionOccurred = 0u;
+        g_persistentManagedHeapInitialized = true;
+    } else {
+        ++g_persistentManagedHeapPreserveCount;
+        persistentSerialPutString("[NATIVEAOT-HEAP] action=preserve count=");
+        persistentSerialPutHex64(g_persistentManagedHeapPreserveCount);
+        persistentSerialPutString(" resetCount=");
+        persistentSerialPutHex64(g_persistentManagedHeapResetCount);
+        persistentSerialPutString(" base=");
+        persistentSerialPutHex64(reinterpret_cast<uintptr_t>(g_guideXosManagedHeap));
+        persistentSerialPutString(" allocation=");
+        persistentSerialPutHex64(reinterpret_cast<uintptr_t>(*reinterpret_cast<void**>(runtimeCell(block))));
+        persistentSerialPutString(" reason=resident-managed-thread\n");
     }
 #else
     // Non-C108 disposable launch modes retain their historical launch-scoped

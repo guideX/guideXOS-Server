@@ -9,7 +9,7 @@ public static unsafe class Program
 #if HOSTLOGPROOF_C104_APP_B
     private static int s_c104AppBState;
 #endif
-#if HOSTLOGPROOF_C107_COMPOSITE
+#if HOSTLOGPROOF_C107_COMPOSITE || HOSTLOGPROOF_PRODUCTION_COMPOSITE
     private static int s_c107AppAInvocationCount;
     private static int s_c107AppBInvocationCount;
     [ThreadStatic]
@@ -1995,7 +1995,7 @@ public static unsafe class Program
     private static extern int GuideXosManagedArrayHostLog(NativeGxAppContext* context, nint arrayObject);
 #endif
 
-#if HOSTLOGPROOF_C107_COMPOSITE
+#if HOSTLOGPROOF_C107_COMPOSITE || HOSTLOGPROOF_PRODUCTION_COMPOSITE
     private static bool LogCompositeText(
         NativeGxAppContext* context,
         ReadOnlySpan<byte> text)
@@ -2148,6 +2148,11 @@ public static unsafe class Program
         {
             return GxAbi.ErrorInvalidArgument;
         }
+#elif HOSTLOGPROOF_PRODUCTION_COMPOSITE
+        if (!allocationValid || invocationCount < 1)
+        {
+            return GxAbi.ErrorInvalidArgument;
+        }
 #else
         // The production bridge reinstalls the current thread's TLS on every
         // resident entry.  The logical application static is the lifecycle
@@ -2199,6 +2204,11 @@ public static unsafe class Program
                 unchecked((uint)threadAfter),
                 unchecked((uint)invocationCount),
                 GxAbi.CompositeAppB) != 0)
+        {
+            return GxAbi.ErrorInvalidArgument;
+        }
+#elif HOSTLOGPROOF_PRODUCTION_COMPOSITE
+        if (!allocationValid || invocationCount < 1)
         {
             return GxAbi.ErrorInvalidArgument;
         }
@@ -2258,7 +2268,7 @@ public static unsafe class Program
         // C104-A keeps the C102 calculation while making its module identity
         // explicit; C104-B deliberately has different managed state and
         // arithmetic so a same-image relaunch cannot masquerade as A/B/A.
-#if HOSTLOGPROOF_C107_COMPOSITE
+#if HOSTLOGPROOF_C107_COMPOSITE || HOSTLOGPROOF_PRODUCTION_COMPOSITE
         // C107 is one NativeAOT image with two logical managed entry methods.
         // The selector is supplied through the existing userData ABI field;
         // the native entrypoint never jumps to an app-specific address.

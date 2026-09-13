@@ -1025,6 +1025,45 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         runC104Launch(c104ASecondOrdinal, "A", "/system/wall/C104A.ELF");
 #endif
 
+#if defined(GXOS_NATIVEAOT_PRODUCTION_COMPOSITE_LAUNCH)
+        // Exercise the same desktop launch contract used by ordinary icon and
+        // start-menu requests. The stable logical IDs are resolved to the one
+        // resident composite image by nativeaot::launchLogicalApplication().
+        constexpr const char* productionAppA =
+            "com.guidexos.nativeaot.hostlogproof.app-a";
+        constexpr const char* productionAppB =
+            "com.guidexos.nativeaot.hostlogproof.app-b";
+        constexpr const char* productionInvalidId =
+            "com.guidexos.nativeaot.hostlogproof.invalid";
+        auto runProductionLaunch = [](uint32_t ordinal, const char* identity,
+                                      const char* applicationId) {
+            const bool result = kernel::desktop::launch_app(applicationId);
+            kernel::serial::puts("[PRODUCTION-LAUNCH] ordinal=");
+            kernel::serial::put_hex32(ordinal);
+            kernel::serial::puts(" identity=");
+            kernel::serial::puts(identity);
+            kernel::serial::puts(" applicationId=");
+            kernel::serial::puts(applicationId);
+            kernel::serial::puts(" result=");
+            kernel::serial::puts(result ? "PASS" : "REJECTED");
+            kernel::serial::puts("\n");
+            return result;
+        };
+        kernel::serial::puts("[PRODUCTION-LAUNCH] interface=desktop.launch_app image=");
+        kernel::serial::puts(kernel::nativeaot::productionCompositeImagePath());
+        kernel::serial::puts(" sequence=A1,B1,invalid,A2,B2,A3\n");
+        const bool productionA1 = runProductionLaunch(1u, "A1", productionAppA);
+        const bool productionB1 = runProductionLaunch(2u, "B1", productionAppB);
+        const bool productionInvalid = runProductionLaunch(3u, "invalid", productionInvalidId);
+        const bool productionA2 = runProductionLaunch(4u, "A2", productionAppA);
+        const bool productionB2 = runProductionLaunch(5u, "B2", productionAppB);
+        const bool productionA3 = runProductionLaunch(6u, "A3", productionAppA);
+        kernel::serial::puts("[PRODUCTION-RESULT] outcome=");
+        kernel::serial::puts(productionA1 && productionB1 && !productionInvalid &&
+            productionA2 && productionB2 && productionA3 ? "PASS" : "FAIL");
+        kernel::serial::puts(" dispatch=A1 PASS -> B1 PASS -> invalid rejected -> A2 PASS -> B2 PASS -> A3 PASS\n");
+#endif
+
 #if defined(GXOS_C107_PRODUCTION_LAUNCH) || defined(GXOS_C108_PRODUCTION_LAUNCH)
         auto emitC107Report = [](uint32_t ordinal, const char* identity,
                                  const kernel::nativeaot::LaunchReport& report,

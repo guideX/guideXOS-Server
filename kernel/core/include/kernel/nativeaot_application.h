@@ -63,6 +63,10 @@ struct LaunchReport {
 LaunchStatus launch(const char* path, LaunchReport* report);
 LaunchStatus launchLogical(const char* path, uint32_t logicalAppId,
                            LaunchReport* report);
+bool isProductionLogicalApplicationId(const char* applicationId);
+LaunchStatus launchLogicalApplication(const char* applicationId,
+                                      LaunchReport* report);
+const char* productionCompositeImagePath();
 const char* launchStatusName(LaunchStatus status);
 
 } // namespace nativeaot

@@ -8,7 +8,8 @@ param(
     [string]$C102ApplicationPath = "",
     [string]$C104AppAPath = "",
     [string]$C104AppBPath = "",
-    [string]$C107CompositePath = ""
+    [string]$C107CompositePath = "",
+    [string]$ProductionCompositeApplicationPath = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -692,6 +693,7 @@ function Write-Fat32Image([string]$ImagePath, [string]$WallpaperDir, [array]$Fil
     $pendingFiles = @()
     $hasCerts = $false
     $hasConfig = $false
+    $hasApps = $false
     $hasConfigCerts = $false
     $hasConfigNavigator = $false
     foreach ($file in $Files) {
@@ -716,6 +718,10 @@ function Write-Fat32Image([string]$ImagePath, [string]$WallpaperDir, [array]$Fil
             '^config/navigator$' {
                 $hasConfig = $true
                 $hasConfigNavigator = $true
+                break
+            }
+            '^apps$' {
+                $hasApps = $true
                 break
             }
             default {
@@ -748,6 +754,7 @@ function Write-Fat32Image([string]$ImagePath, [string]$WallpaperDir, [array]$Fil
 
     $certsCluster = $null
     $configCluster = $null
+    $appsCluster = $null
     $configCertsCluster = $null
     $configNavigatorCluster = $null
     if ($hasCerts) {
@@ -757,6 +764,10 @@ function Write-Fat32Image([string]$ImagePath, [string]$WallpaperDir, [array]$Fil
     if ($hasConfig) {
         $configCluster = $nextCluster++
         $fat[$configCluster] = 0x0FFFFFFF
+    }
+    if ($hasApps) {
+        $appsCluster = $nextCluster++
+        $fat[$appsCluster] = 0x0FFFFFFF
     }
     if ($hasConfigCerts) {
         $configCertsCluster = $nextCluster++
@@ -845,6 +856,9 @@ function Write-Fat32Image([string]$ImagePath, [string]$WallpaperDir, [array]$Fil
         if ($null -ne $configCluster) {
             Add-DirectoryRecord $rootEntries "config" (Get-ShortName "config" $usedRoot) 0x10 $configCluster 0
         }
+        if ($null -ne $appsCluster) {
+            Add-DirectoryRecord $rootEntries "apps" (Get-ShortName "apps" $usedRoot) 0x10 $appsCluster 0
+        }
 
         $wallEntries = New-Object 'System.Collections.Generic.List[byte[]]'
         $usedWall = @{}
@@ -852,6 +866,8 @@ function Write-Fat32Image([string]$ImagePath, [string]$WallpaperDir, [array]$Fil
         $usedCert = @{}
         $configEntries = if ($null -ne $configCluster) { New-Object 'System.Collections.Generic.List[byte[]]' } else { $null }
         $usedConfig = @{}
+        $appsEntries = if ($null -ne $appsCluster) { New-Object 'System.Collections.Generic.List[byte[]]' } else { $null }
+        $usedApps = @{}
         $configCertEntries = if ($null -ne $configCertsCluster) { New-Object 'System.Collections.Generic.List[byte[]]' } else { $null }
         $usedConfigCert = @{}
         $configNavigatorEntries = if ($null -ne $configNavigatorCluster) { New-Object 'System.Collections.Generic.List[byte[]]' } else { $null }
@@ -884,6 +900,10 @@ function Write-Fat32Image([string]$ImagePath, [string]$WallpaperDir, [array]$Fil
                     Add-DirectoryRecord $configNavigatorEntries $record.Name (Get-ShortName $record.Name $usedConfigNavigator) 0x20 $record.Cluster $record.Size
                     break
                 }
+                "apps" {
+                    Add-DirectoryRecord $appsEntries $record.Name (Get-ShortName $record.Name $usedApps) 0x20 $record.Cluster $record.Size
+                    break
+                }
             }
         }
 
@@ -892,6 +912,7 @@ function Write-Fat32Image([string]$ImagePath, [string]$WallpaperDir, [array]$Fil
             @($wallpaperCluster, $wallEntries),
             @($certsCluster, $certEntries),
             @($configCluster, $configEntries),
+            @($appsCluster, $appsEntries),
             @($configCertsCluster, $configCertEntries),
             @($configNavigatorCluster, $configNavigatorEntries)
         )) {
@@ -925,7 +946,8 @@ New-Item -ItemType Directory -Force -Path $OutputDir | Out-Null
 $wallpaperDir = Join-Path $OutputDir "wall"
 $certsDir = Join-Path $OutputDir "certs"
 $configDir = Join-Path $OutputDir "config"
-foreach ($stagingDir in @($wallpaperDir, $certsDir, $configDir)) {
+$appsDir = Join-Path $OutputDir "apps"
+foreach ($stagingDir in @($wallpaperDir, $certsDir, $configDir, $appsDir)) {
     if (-not (Test-Path -LiteralPath $stagingDir)) { continue }
 
     $removeDeadline = (Get-Date).AddSeconds(10)
@@ -942,6 +964,7 @@ foreach ($stagingDir in @($wallpaperDir, $certsDir, $configDir)) {
     } while ($true)
 }
 New-Item -ItemType Directory -Force -Path $wallpaperDir | Out-Null
+New-Item -ItemType Directory -Force -Path $appsDir | Out-Null
 New-Item -ItemType Directory -Force -Path (Split-Path -Parent $OutputImage) | Out-Null
 
 $httpsPolicyToken = if ([string]::IsNullOrWhiteSpace($env:GXOS_NAVIGATOR_HTTPS_POLICY)) { $null } else { $env:GXOS_NAVIGATOR_HTTPS_POLICY.Trim() }
@@ -1314,6 +1337,16 @@ if (-not [string]::IsNullOrWhiteSpace($C107CompositePath)) {
     Copy-Item -LiteralPath $C107CompositePath -Destination $c107Target -Force
     $staged += Get-Item $c107Target
     Write-Host "      staged C107 composite NativeAOT application at /wall/C107.ELF" -ForegroundColor Yellow
+}
+
+if (-not [string]::IsNullOrWhiteSpace($ProductionCompositeApplicationPath)) {
+    if (-not (Test-Path -LiteralPath $ProductionCompositeApplicationPath -PathType Leaf)) {
+        throw "Production composite staging ELF was not found: $ProductionCompositeApplicationPath"
+    }
+    $productionCompositeTarget = Join-Path $appsDir "GXOSAPP.ELF"
+    Copy-Item -LiteralPath $ProductionCompositeApplicationPath -Destination $productionCompositeTarget -Force
+    $staged += Get-Item $productionCompositeTarget
+    Write-Host "      staged production composite NativeAOT application at /apps/GXOSAPP.ELF" -ForegroundColor Yellow
 }
 
 # Deterministic large PNG fixture for the bare-metal Image Viewer smoke.

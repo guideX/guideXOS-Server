@@ -11,8 +11,9 @@
     [string]$AllocationMode = "NonAllocating",
     [string]$RuntimePackOutputRoot = "",
     [switch]$ProductionApplication,
+    [switch]$PersistentCompositeLifecycle,
     [switch]$ThreadStaticLifecycleDiagnostics,
-    [ValidateSet("Production", "C104AppA", "C104AppB", "C107Composite", "C108ThreadStaticLifecycle")]
+    [ValidateSet("Production", "C104AppA", "C104AppB", "C107Composite", "C108ThreadStaticLifecycle", "ProductionComposite")]
     [string]$ManagedProjectMode = "",
     [ValidateSet("Primary64KiB", "Small4KiB")]
     [string]$HeapConfiguration = "Primary64KiB",
@@ -155,6 +156,7 @@ if ($UseGuideXosRuntimePack) {
     if ($AllocationMode -eq "Repeated") { $runtimePackBuildArguments += "-ManagedRepeatedAllocation" }
     elseif ($AllocationMode -eq "Allocating") { $runtimePackBuildArguments += "-ManagedAllocation" }
     if ($ProductionApplication) { $runtimePackBuildArguments += "-ProductionApplication" }
+    if ($PersistentCompositeLifecycle) { $runtimePackBuildArguments += "-PersistentCompositeLifecycle" }
     if ($ThreadStaticLifecycleDiagnostics) { $runtimePackBuildArguments += "-ThreadStaticLifecycleDiagnostics" }
     if ($HeapConfiguration -ne "Primary64KiB") { $runtimePackBuildArguments += @("-HeapConfiguration", $HeapConfiguration) }
     & powershell -ExecutionPolicy Bypass -File $runtimePackBuild @runtimePackBuildArguments
@@ -338,6 +340,7 @@ $toolchainLines = @(
     "ManagedHostShimsObj=$managedHostShimsObj"
     "NativeImportObj=$startupImportsObj"
     "ProductionApplication=$ProductionApplication"
+    "PersistentCompositeLifecycle=$PersistentCompositeLifecycle"
         "UseGuideXosRuntimePack=$UseGuideXosRuntimePack"
         "AllocationMode=$AllocationMode"
     "RuntimePackRoot=$RuntimePackRoot"

@@ -51,7 +51,16 @@ constexpr uint32_t kElfFlagWrite = 2u;
 constexpr uint32_t kElfFlagRead = 4u;
 constexpr uint32_t kVmemCommit = 0x1000u;
 constexpr uint32_t kVmemRelease = 0x8000u;
-constexpr int32_t kC107InvalidApplicationIdReturn = -4;
+constexpr int32_t kInvalidApplicationIdReturn = -4;
+constexpr const char* kProductionCompositeImage = "/system/apps/GXOSAPP.ELF";
+constexpr const char* kProductionLogicalApplicationPrefix =
+    "com.guidexos.nativeaot.hostlogproof.";
+constexpr const char* kProductionApplicationA =
+    "com.guidexos.nativeaot.hostlogproof.app-a";
+constexpr const char* kProductionApplicationB =
+    "com.guidexos.nativeaot.hostlogproof.app-b";
+constexpr const char* kProductionApplicationInvalid =
+    "com.guidexos.nativeaot.hostlogproof.invalid";
 
 #pragma pack(push, 1)
 struct Elf64Header {
@@ -194,6 +203,10 @@ ResidentApplication g_application = {};
 uint32_t g_c108TlsInstallCount = 0;
 uint32_t g_c108ManagedInvocationOrdinal = 0;
 #endif
+#if defined(GXOS_NATIVEAOT_PRODUCTION_COMPOSITE_LAUNCH)
+uint32_t g_productionTlsInstallCount = 0;
+uint32_t g_productionManagedInvocationOrdinal = 0;
+#endif
 
 #if defined(GXOS_C103_PRODUCTION_LAUNCH) || defined(GXOS_C103_NEGATIVE_LAUNCH)
 constexpr bool kC103LifecycleEnabled = true;
@@ -335,6 +348,25 @@ bool installTls() {
     ++g_c108TlsInstallCount;
     serial::puts("[C108-TLS-BRIDGE] install=");
     serial::put_hex32(g_c108TlsInstallCount);
+    serial::puts(" phase=");
+    serial::puts(g_application.state == ApplicationLifecycleState::Resident
+        ? "resident" : "initial");
+    serial::puts(" guideThread=");
+    serial::put_hex64(process::current_thread_id());
+    serial::puts(" gsArea=");
+    serial::put_hex64(reinterpret_cast<uintptr_t>(&g_tlsArea));
+    serial::puts(" tlsVector=");
+    serial::put_hex64(reinterpret_cast<uintptr_t>(g_tlsVector));
+    serial::puts(" tlsBlock=");
+    serial::put_hex64(reinterpret_cast<uintptr_t>(g_tlsBlock));
+    serial::puts(" result=");
+    serial::put_hex32(installed ? 1u : 0u);
+    serial::puts("\n");
+#endif
+#if defined(GXOS_NATIVEAOT_PRODUCTION_COMPOSITE_LAUNCH)
+    ++g_productionTlsInstallCount;
+    serial::puts("[NATIVEAOT-TLS-BRIDGE] install=");
+    serial::put_hex32(g_productionTlsInstallCount);
     serial::puts(" phase=");
     serial::puts(g_application.state == ApplicationLifecycleState::Resident
         ? "resident" : "initial");
@@ -904,6 +936,37 @@ void emitC108GuideIdentity(const char* appName) {
 }
 #endif
 
+#if defined(GXOS_NATIVEAOT_PRODUCTION_COMPOSITE_LAUNCH)
+void emitProductionPersistenceIdentity(const char* appName) {
+    ++g_productionManagedInvocationOrdinal;
+    guidexos::nativeaot::threadstore::ThreadSnapshot snapshot{};
+    const bool snapshotValid =
+        guidexos::nativeaot::threadstore::snapshotCurrentThread(&snapshot);
+    serial::puts("[NATIVEAOT-PERSISTENCE] ordinal=");
+    serial::put_hex32(g_productionManagedInvocationOrdinal);
+    serial::puts(" app=");
+    serial::puts(appName);
+    serial::puts(" guideThread=");
+    serial::put_hex64(process::current_thread_id());
+    serial::puts(" nativeThreadStore=");
+    serial::put_hex64(reinterpret_cast<uintptr_t>(
+        guidexos::nativeaot::threadstore::getCurrentThread()));
+    serial::puts(" nativeThread=");
+    serial::put_hex64(snapshotValid ? snapshot.nativeThreadId : 0u);
+    serial::puts(" attached=");
+    serial::put_hex32(snapshotValid ? snapshot.attached : 0u);
+    serial::puts(" gsArea=");
+    serial::put_hex64(reinterpret_cast<uintptr_t>(&g_tlsArea));
+    serial::puts(" tlsVector=");
+    serial::put_hex64(reinterpret_cast<uintptr_t>(g_tlsVector));
+    serial::puts(" tlsBlock=");
+    serial::put_hex64(reinterpret_cast<uintptr_t>(g_tlsBlock));
+    serial::puts(" tlsInstalls=");
+    serial::put_hex32(g_productionTlsInstallCount);
+    serial::puts("\n");
+}
+#endif
+
 int32_t GUIDEXOS_NATIVEAOT_PAL_CALL managedLog(void*, uint8_t* message) {
     if (message == nullptr) return -1;
     if (managedMessageEquals(message, "C102-MANAGED-ENTRY")) {
@@ -930,6 +993,13 @@ int32_t GUIDEXOS_NATIVEAOT_PAL_CALL managedLog(void*, uint8_t* message) {
         emitC108GuideIdentity("A");
     } else if (managedMessageStartsWith(message, "C107-APP-B-STATE")) {
         emitC108GuideIdentity("B");
+    }
+#endif
+#if defined(GXOS_NATIVEAOT_PRODUCTION_COMPOSITE_LAUNCH)
+    if (managedMessageStartsWith(message, "C107-APP-A-STATE")) {
+        emitProductionPersistenceIdentity("A");
+    } else if (managedMessageStartsWith(message, "C107-APP-B-STATE")) {
+        emitProductionPersistenceIdentity("B");
     }
 #endif
     const bool c104Message = managedMessageEquals(message, "C104-APP-A-ENTRY") ||
@@ -1227,7 +1297,7 @@ const char* launchStatusName(LaunchStatus status) {
 
 LaunchStatus statusForManagedReturn(int32_t managedReturn) {
     if (managedReturn == 0) return LaunchStatus::Success;
-    if (managedReturn == kC107InvalidApplicationIdReturn) {
+    if (managedReturn == kInvalidApplicationIdReturn) {
         return LaunchStatus::InvalidApplicationId;
     }
     return LaunchStatus::ManagedFailed;
@@ -1613,6 +1683,61 @@ LaunchStatus launch(const char* path, LaunchReport* report) {
 LaunchStatus launchLogical(const char* path, uint32_t logicalAppId,
                            LaunchReport* report) {
     return launchInternal(path, logicalAppId, report);
+}
+
+bool textEquals(const char* left, const char* right) {
+    if (left == nullptr || right == nullptr) return false;
+    uint32_t index = 0;
+    while (left[index] != 0 && right[index] != 0) {
+        if (left[index] != right[index]) return false;
+        ++index;
+    }
+    return left[index] == right[index];
+}
+
+bool startsWith(const char* value, const char* prefix) {
+    if (value == nullptr || prefix == nullptr) return false;
+    uint32_t index = 0;
+    while (prefix[index] != 0) {
+        if (value[index] != prefix[index]) return false;
+        ++index;
+    }
+    return true;
+}
+
+bool isProductionLogicalApplicationId(const char* applicationId) {
+    return startsWith(applicationId, kProductionLogicalApplicationPrefix);
+}
+
+const char* productionCompositeImagePath() {
+    return kProductionCompositeImage;
+}
+
+LaunchStatus launchLogicalApplication(const char* applicationId,
+                                      LaunchReport* report) {
+    LaunchReport local{};
+    if (report == nullptr) report = &local;
+    *report = {};
+    report->status = LaunchStatus::InvalidApplicationId;
+    if (!isProductionLogicalApplicationId(applicationId)) {
+        return report->status;
+    }
+
+    uint32_t selector = 0u;
+    if (textEquals(applicationId, kProductionApplicationA)) {
+        selector = 1u;
+    } else if (textEquals(applicationId, kProductionApplicationB)) {
+        selector = 2u;
+    }
+
+    serial::puts("[NATIVEAOT-PRODUCTION-LAUNCH] applicationId=");
+    serial::puts(applicationId);
+    serial::puts(" image=");
+    serial::puts(kProductionCompositeImage);
+    serial::puts(" selector=");
+    serial::put_hex32(selector);
+    serial::puts("\n");
+    return launchLogical(kProductionCompositeImage, selector, report);
 }
 
 } // namespace nativeaot
