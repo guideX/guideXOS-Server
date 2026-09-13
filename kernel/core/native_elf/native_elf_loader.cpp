@@ -41,6 +41,7 @@ static char s_bareDebugStrings[1][GX_DEVELOPMENT_RUN_MAX_SHA256_BYTES] = {};
 static char s_bareDebugExpression[GX_DEVELOPMENT_DEBUG_MAX_EXPRESSION_BYTES + 1u] = {};
 static char s_bareDebugSource[GX_DEVELOPMENT_DEBUG_MAX_SOURCE_PATH_BYTES] = {};
 static char s_bareDebugCondition[GX_DEVELOPMENT_DEBUG_MAX_EXPRESSION_BYTES + 1u] = {};
+static char s_bareDebugLogTemplate[GX_DEVELOPMENT_DEBUG_MAX_LOG_TEMPLATE_BYTES + 1u] = {};
 static const uint64_t NESTED_APPLICATION_STACK_BASE =
     APPLICATION_STACK_BASE - APPLICATION_STACK_SIZE;
 static const uint64_t NESTED_SERVICE_STACK_BASE =
@@ -816,6 +817,7 @@ static gx_result GX_CALL host_bare_development_debug(
     }
     copied.sourcePath = nullptr;
     copied.sourceCondition = nullptr;
+    copied.logTemplate = nullptr;
     if (requestBytes >= offsetof(gx_development_debug_request, sourcePath) + sizeof(request->sourcePath) &&
         request->sourcePath) {
         if (!app_string(request->sourcePath, s_bareDebugSource, sizeof(s_bareDebugSource)))
@@ -827,6 +829,13 @@ static gx_result GX_CALL host_bare_development_debug(
         if (!app_string(request->sourceCondition, s_bareDebugCondition, sizeof(s_bareDebugCondition)))
             return GX_ERROR_INVALID_ARGUMENT;
         copied.sourceCondition = s_bareDebugCondition;
+    }
+    if (requestBytes >= offsetof(gx_development_debug_request, logTemplate) + sizeof(request->logTemplate) &&
+        request->logTemplate) {
+        if (!app_string(request->logTemplate, s_bareDebugLogTemplate,
+                        sizeof(s_bareDebugLogTemplate)))
+            return GX_ERROR_INVALID_ARGUMENT;
+        copied.logTemplate = s_bareDebugLogTemplate;
     }
     gx_development_debug_snapshot local = {};
     local.size = sizeof(local);

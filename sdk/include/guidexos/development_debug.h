@@ -48,10 +48,17 @@ typedef enum gx_development_debug_command {
     GX_DEVELOPMENT_DEBUG_REMOVE_SOURCE_BREAKPOINT = 23,
     GX_DEVELOPMENT_DEBUG_LIST_SOURCE_BREAKPOINTS = 24,
     GX_DEVELOPMENT_DEBUG_ENABLE_SOURCE_BREAKPOINT = 25,
-    GX_DEVELOPMENT_DEBUG_DISABLE_SOURCE_BREAKPOINT = 26
+    GX_DEVELOPMENT_DEBUG_DISABLE_SOURCE_BREAKPOINT = 26,
+    /* Phase 28L: update one bounded breakpoint action/count policy. */
+    GX_DEVELOPMENT_DEBUG_CONFIGURE_SOURCE_BREAKPOINT_POLICY = 27,
+    /* Phase 28L: drain the bounded FIFO debugger-output queue. */
+    GX_DEVELOPMENT_DEBUG_DRAIN_OUTPUT = 28
 } gx_development_debug_command;
 
 #define GX_DEVELOPMENT_DEBUG_MAX_SOURCE_BREAKPOINTS 8u
+#define GX_DEVELOPMENT_DEBUG_MAX_LOG_TEMPLATE_BYTES 256u
+#define GX_DEVELOPMENT_DEBUG_MAX_OUTPUT_RECORDS 32u
+#define GX_DEVELOPMENT_DEBUG_MAX_OUTPUT_TEXT_BYTES 512u
 
 #define GX_DEVELOPMENT_DEBUG_MAX_CALL_STACK_FRAMES 16u
 
@@ -227,11 +234,21 @@ typedef struct gx_development_debug_request {
     uint32_t sourceLine;
     uint32_t sourceColumn;
     const char* sourceCondition;
+    /* Phase 28L policy fields. Older callers may omit these fields; services
+       must gate them by request->size. Zero action means legacy BREAK and
+       zero hit policy means NONE. */
+    uint32_t breakpointAction;
+    uint32_t hitCountPolicy;
+    uint64_t hitCountThreshold;
+    const char* logTemplate;
 } gx_development_debug_request;
 
 #define GX_DEVELOPMENT_DEBUG_REQUEST_BREAKPOINT_BYTES \
     ((uint32_t)(offsetof(gx_development_debug_request, sourceCondition) + \
                 sizeof(((gx_development_debug_request*)0)->sourceCondition)))
+#define GX_DEVELOPMENT_DEBUG_REQUEST_POLICY_BYTES \
+    ((uint32_t)(offsetof(gx_development_debug_request, logTemplate) + \
+                sizeof(((gx_development_debug_request*)0)->logTemplate)))
 
 typedef enum gx_development_debug_breakpoint_status {
     GX_DEVELOPMENT_DEBUG_BREAKPOINT_STATUS_NONE = 0,
@@ -263,7 +280,46 @@ typedef struct gx_development_debug_breakpoint {
     uint64_t conditionExpressionHash;
     char sourcePath[GX_DEVELOPMENT_DEBUG_MAX_SOURCE_PATH_BYTES];
     char functionName[GX_DEVELOPMENT_DEBUG_MAX_FUNCTION_NAME_BYTES];
+    /* Phase 28L append-only action and raw hit-count policy state. */
+    uint64_t rawHitCount;
+    uint32_t action;
+    uint32_t hitCountPolicy;
+    uint64_t hitCountThreshold;
+    uint32_t logTemplateLength;
+    uint32_t logTemplatePresent;
 } gx_development_debug_breakpoint;
+
+typedef enum gx_development_debug_breakpoint_action {
+    GX_DEVELOPMENT_DEBUG_BREAKPOINT_ACTION_NONE = 0,
+    GX_DEVELOPMENT_DEBUG_BREAKPOINT_ACTION_BREAK = 1,
+    GX_DEVELOPMENT_DEBUG_BREAKPOINT_ACTION_LOG = 2
+} gx_development_debug_breakpoint_action;
+
+typedef enum gx_development_debug_hit_count_policy {
+    GX_DEVELOPMENT_DEBUG_HIT_COUNT_POLICY_NONE = 0,
+    GX_DEVELOPMENT_DEBUG_HIT_COUNT_POLICY_EQUAL = 1,
+    GX_DEVELOPMENT_DEBUG_HIT_COUNT_POLICY_MULTIPLE = 2,
+    GX_DEVELOPMENT_DEBUG_HIT_COUNT_POLICY_AT_LEAST = 3
+} gx_development_debug_hit_count_policy;
+
+typedef enum gx_development_debug_output_status {
+    GX_DEVELOPMENT_DEBUG_OUTPUT_STATUS_NONE = 0,
+    GX_DEVELOPMENT_DEBUG_OUTPUT_STATUS_SUCCESS = 1,
+    GX_DEVELOPMENT_DEBUG_OUTPUT_STATUS_INVALID = 2
+} gx_development_debug_output_status;
+
+typedef struct gx_development_debug_output_record {
+    uint64_t breakpointId;
+    uint64_t sessionGeneration;
+    uint64_t rawHitCount;
+    uint64_t targetAddress;
+    uint32_t sourceLine;
+    uint32_t sourceColumn;
+    uint32_t errorCategory;
+    uint32_t reserved;
+    char sourcePath[GX_DEVELOPMENT_DEBUG_MAX_SOURCE_PATH_BYTES];
+    char text[GX_DEVELOPMENT_DEBUG_MAX_OUTPUT_TEXT_BYTES];
+} gx_development_debug_output_record;
 
 typedef enum gx_development_debug_expression_status {
     GX_DEVELOPMENT_DEBUG_EXPRESSION_STATUS_NONE = 0,
@@ -474,6 +530,13 @@ typedef struct gx_development_debug_snapshot {
     uint32_t breakpointOperationStatus;
     uint32_t breakpointReserved;
     gx_development_debug_breakpoint breakpoints[GX_DEVELOPMENT_DEBUG_MAX_SOURCE_BREAKPOINTS];
+    /* Phase 28L append-only bounded FIFO debugger output. A drain advances
+       the queue; all other operations report zero records. */
+    uint32_t outputCount;
+    uint32_t outputCapacity;
+    uint32_t outputDroppedCount;
+    uint32_t outputOperationStatus;
+    gx_development_debug_output_record output[GX_DEVELOPMENT_DEBUG_MAX_OUTPUT_RECORDS];
 } gx_development_debug_snapshot;
 
 enum {

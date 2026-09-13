@@ -12,6 +12,8 @@
 #include "native_elf_step_out.h"
 #include "native_elf_call_stack.h"
 #include "native_elf_debug_watches.h"
+#include "native_elf_debug_output.h"
+#include "native_elf_debug_policies.h"
 #include "../compiler/elf_writer.h"
 #include "../include/kernel/kernel_app.h"
 #include "kernel/serial_debug.h"
@@ -41,6 +43,7 @@ static const uint32_t kMaxProjectBytes = 16U * 1024U;
 static const uint64_t kAmd64TrapFlag = 0x100ULL;
 static const uint32_t kDebugStartBytes = 16U;
 static const uint32_t kDebugConditionBytes = GX_DEVELOPMENT_DEBUG_MAX_EXPRESSION_BYTES + 1U;
+static const uint32_t kDebugLogTemplateBytes = GX_DEVELOPMENT_DEBUG_MAX_LOG_TEMPLATE_BYTES + 1U;
 static const uint32_t kStepOverCallBytes = 5U;
 static const uint32_t kStepOverFunctionProbeBytes = 256U;
 static const uint32_t kStepOverNestedReturnLimit = 8U;
@@ -62,14 +65,18 @@ struct UserBreakpoint {
     uint32_t requestedColumn;
     uint32_t sourceLine;
     uint32_t sourceColumn;
-    uint32_t hitCount;
     uint32_t falseHitCount;
     uint32_t trueHitCount;
     uint32_t conditionLength;
     uint64_t conditionExpressionHash;
+    uint64_t rawHitCount;
+    uint32_t action;
+    uint32_t hitCountPolicy;
+    uint64_t hitCountThreshold;
     char sourcePath[GX_DEVELOPMENT_DEBUG_MAX_SOURCE_PATH_BYTES];
     char functionName[GX_DEVELOPMENT_DEBUG_MAX_FUNCTION_NAME_BYTES];
     char condition[kDebugConditionBytes];
+    char logTemplate[kDebugLogTemplateBytes];
 };
 
 struct Operation {
@@ -191,6 +198,7 @@ struct Operation {
     char debugCondition[kDebugConditionBytes];
     char debugFunctionName[GX_DEVELOPMENT_DEBUG_MAX_FUNCTION_NAME_BYTES];
     UserBreakpoint userBreakpoints[GX_DEVELOPMENT_DEBUG_MAX_SOURCE_BREAKPOINTS];
+    NativeDebugOutputQueue debugOutput;
     gx_development_debug_snapshot debugSnapshot;
     uint64_t artifactSize;
     char projectRoot[GX_DEVELOPMENT_RUN_MAX_PROJECT_ROOT_BYTES];
@@ -260,6 +268,54 @@ static bool equal_text(const char* left, const char* right) {
         ++i;
     }
     return left[i] == right[i];
+}
+
+static uint32_t saturating_increment_u32(uint32_t value)
+{
+    return value == 0xFFFFFFFFU ? value : value + 1U;
+}
+
+static uint32_t saturating_u32(uint64_t value)
+{
+    return value > 0xFFFFFFFFULL ? 0xFFFFFFFFU : static_cast<uint32_t>(value);
+}
+
+static bool validate_breakpoint_policy(
+    uint32_t requestedAction, uint32_t requestedHitPolicy,
+    uint64_t requestedThreshold, const char* requestedTemplate,
+    uint32_t* action, uint32_t* hitPolicy, uint64_t* threshold,
+    char* logTemplate, uint32_t logTemplateCapacity,
+    char* errorMessage, uint32_t errorCapacity)
+{
+    const uint32_t normalizedAction = requestedAction ==
+        GX_DEVELOPMENT_DEBUG_BREAKPOINT_ACTION_NONE
+            ? static_cast<uint32_t>(GX_DEVELOPMENT_DEBUG_BREAKPOINT_ACTION_BREAK) : requestedAction;
+    if (normalizedAction != GX_DEVELOPMENT_DEBUG_BREAKPOINT_ACTION_BREAK &&
+        normalizedAction != GX_DEVELOPMENT_DEBUG_BREAKPOINT_ACTION_LOG) {
+        if (errorMessage) copy_text(errorMessage, errorCapacity,
+                                     "breakpoint action is invalid");
+        return false;
+    }
+    if (!native_debug_hit_count_policy_valid(requestedHitPolicy, requestedThreshold)) {
+        if (errorMessage) copy_text(errorMessage, errorCapacity,
+                                     "breakpoint hit-count policy or threshold is invalid");
+        return false;
+    }
+    if (action) *action = normalizedAction;
+    if (hitPolicy) *hitPolicy = requestedHitPolicy;
+    if (threshold) *threshold = requestedHitPolicy ==
+        GX_DEVELOPMENT_DEBUG_HIT_COUNT_POLICY_NONE ? 0 : requestedThreshold;
+    if (logTemplate && logTemplateCapacity != 0) {
+        logTemplate[0] = '\0';
+        if (normalizedAction == GX_DEVELOPMENT_DEBUG_BREAKPOINT_ACTION_LOG &&
+            requestedTemplate &&
+            !copy_text(logTemplate, logTemplateCapacity, requestedTemplate)) {
+            if (errorMessage) copy_text(errorMessage, errorCapacity,
+                                         "logpoint template is too long");
+            return false;
+        }
+    }
+    return true;
 }
 
 static UserBreakpoint* user_breakpoint_at(Operation& operation, uint32_t slot)
@@ -578,13 +634,63 @@ static void set_breakpoint_list(const Operation& operation,
         record.sourceMappingValid = 1U;
         record.conditionPresent = selected->conditionEnabled ? 1U : 0U;
         record.conditionLength = selected->conditionLength;
-        record.hitCount = selected->hitCount;
+        record.hitCount = saturating_u32(selected->rawHitCount);
         record.falseHitCount = selected->falseHitCount;
         record.trueHitCount = selected->trueHitCount;
         record.conditionExpressionHash = selected->conditionExpressionHash;
         copy_text(record.sourcePath, sizeof(record.sourcePath), selected->sourcePath);
         copy_text(record.functionName, sizeof(record.functionName), selected->functionName);
+        record.rawHitCount = selected->rawHitCount;
+        record.action = selected->action;
+        record.hitCountPolicy = selected->hitCountPolicy;
+        record.hitCountThreshold = selected->hitCountThreshold;
+        record.logTemplateLength = selected->action ==
+            GX_DEVELOPMENT_DEBUG_BREAKPOINT_ACTION_LOG
+                ? text_length(selected->logTemplate, sizeof(selected->logTemplate)) : 0;
+        record.logTemplatePresent = selected->action ==
+            GX_DEVELOPMENT_DEBUG_BREAKPOINT_ACTION_LOG ? 1U : 0U;
     }
+}
+
+static void clear_debug_output_queue(Operation& operation)
+{
+    operation.debugOutput.clear();
+}
+
+static bool enqueue_debug_output(Operation& operation,
+                                 const UserBreakpoint& breakpoint,
+                                 const char* text, uint32_t errorCategory)
+{
+    gx_development_debug_output_record record = {};
+    record.breakpointId = breakpoint.id;
+    record.sessionGeneration = breakpoint.generation;
+    record.rawHitCount = breakpoint.rawHitCount;
+    record.targetAddress = breakpoint.address;
+    record.sourceLine = breakpoint.sourceLine;
+    record.sourceColumn = breakpoint.sourceColumn;
+    record.errorCategory = errorCategory;
+    copy_text(record.sourcePath, sizeof(record.sourcePath), breakpoint.sourcePath);
+    copy_text(record.text, sizeof(record.text), text ? text : "");
+    if (!operation.debugOutput.enqueue(record)) {
+        serial::puts("DEVELOPER_STUDIO_PHASE28L_OUTPUT_DROPPED count=");
+        serial::put_hex32(operation.debugOutput.dropped);
+        serial::putc('\n');
+        return false;
+    }
+    return true;
+}
+
+static void set_output_drain_snapshot(Operation& operation,
+                                      gx_development_debug_snapshot* snapshot)
+{
+    clear_debug_snapshot(snapshot);
+    if (!snapshot) return;
+    snapshot->status = GX_DEVELOPMENT_DEBUG_STATUS_READY;
+    snapshot->outputCapacity = GX_DEVELOPMENT_DEBUG_MAX_OUTPUT_RECORDS;
+    snapshot->outputDroppedCount = operation.debugOutput.dropped;
+    snapshot->outputOperationStatus = GX_DEVELOPMENT_DEBUG_OUTPUT_STATUS_SUCCESS;
+    snapshot->outputCount = operation.debugOutput.drain(
+        snapshot->output, GX_DEVELOPMENT_DEBUG_MAX_OUTPUT_RECORDS);
 }
 
 static void serial_debug_breakpoint_state(const char* marker,
@@ -598,7 +704,10 @@ static void serial_debug_breakpoint_state(const char* marker,
         serial::puts(" id="); serial::put_hex64(breakpoint.id);
         serial::puts(" enabled="); serial::put_hex32(breakpoint.enabled ? 1U : 0U);
         serial::puts(" installed="); serial::put_hex32(breakpoint.patchInstalled ? 1U : 0U);
-        serial::puts(" hits="); serial::put_hex32(breakpoint.hitCount);
+        serial::puts(" raw_hits="); serial::put_hex64(breakpoint.rawHitCount);
+        serial::puts(" action="); serial::put_hex32(breakpoint.action);
+        serial::puts(" hit_policy="); serial::put_hex32(breakpoint.hitCountPolicy);
+        serial::puts(" threshold="); serial::put_hex64(breakpoint.hitCountThreshold);
     }
     serial::putc('\n');
 }
@@ -1099,6 +1208,7 @@ static bool debug_request_identity_matches(const Operation& operation,
         request.command != GX_DEVELOPMENT_DEBUG_REMOVE_SOURCE_BREAKPOINT &&
         request.command != GX_DEVELOPMENT_DEBUG_ENABLE_SOURCE_BREAKPOINT &&
         request.command != GX_DEVELOPMENT_DEBUG_DISABLE_SOURCE_BREAKPOINT &&
+        request.command != GX_DEVELOPMENT_DEBUG_CONFIGURE_SOURCE_BREAKPOINT_POLICY &&
         request.breakpointId != operation.debugCurrentBreakpointId) return false;
     if (request.targetAddress != 0 &&
         request.command != GX_DEVELOPMENT_DEBUG_ADD_SOURCE_BREAKPOINT &&
@@ -1530,12 +1640,22 @@ static bool populate_user_breakpoint(Operation& operation,
                                      uint32_t sourceLine,
                                      uint32_t sourceColumn,
                                      const char* condition,
+                                     uint32_t action,
+                                     uint32_t hitPolicy,
+                                     uint64_t hitThreshold,
+                                     const char* logTemplate,
                                      uint32_t* status,
                                      char* errorMessage,
                                      uint32_t errorCapacity)
 {
     if (status) *status = GX_DEVELOPMENT_DEBUG_BREAKPOINT_STATUS_INVALID;
     if (errorMessage && errorCapacity != 0) errorMessage[0] = '\0';
+    if (!validate_breakpoint_policy(action, hitPolicy, hitThreshold, logTemplate,
+                                   &breakpoint.action, &breakpoint.hitCountPolicy,
+                                   &breakpoint.hitCountThreshold,
+                                   breakpoint.logTemplate,
+                                   sizeof(breakpoint.logTemplate),
+                                   errorMessage, errorCapacity)) return false;
     if (!sourcePath || sourceLine == 0 || !safe_relative(sourcePath) ||
         !copy_text(breakpoint.sourcePath, sizeof(breakpoint.sourcePath), sourcePath)) {
         if (errorMessage) copy_text(errorMessage, errorCapacity, "source breakpoint identity is invalid");
@@ -1599,6 +1719,9 @@ static bool initialize_legacy_user_breakpoint(Operation& operation)
     breakpoint.id = make_breakpoint_id(operation);
     breakpoint.generation = operation.registrationGeneration != 0
         ? operation.registrationGeneration : operation.handle;
+    breakpoint.action = GX_DEVELOPMENT_DEBUG_BREAKPOINT_ACTION_BREAK;
+    breakpoint.hitCountPolicy = GX_DEVELOPMENT_DEBUG_HIT_COUNT_POLICY_NONE;
+    breakpoint.hitCountThreshold = 0;
     breakpoint.address = operation.debugBreakpointAddress;
     breakpoint.requestedLine = operation.debugSourceLine;
     breakpoint.requestedColumn = operation.debugSourceColumn;
@@ -1657,9 +1780,18 @@ static gx_result add_source_breakpoint(Operation& operation,
     UserBreakpoint candidate = {};
     uint32_t status = GX_DEVELOPMENT_DEBUG_BREAKPOINT_STATUS_INVALID;
     char error[GX_DEVELOPMENT_DEBUG_MAX_ERROR_BYTES] = {};
+    const bool policyProvided = request.size >= GX_DEVELOPMENT_DEBUG_REQUEST_POLICY_BYTES;
+    const uint32_t requestedAction = policyProvided
+        ? request.breakpointAction : static_cast<uint32_t>(GX_DEVELOPMENT_DEBUG_BREAKPOINT_ACTION_NONE);
+    const uint32_t requestedHitPolicy = policyProvided
+        ? request.hitCountPolicy : static_cast<uint32_t>(GX_DEVELOPMENT_DEBUG_HIT_COUNT_POLICY_NONE);
+    const uint64_t requestedHitThreshold = policyProvided ? request.hitCountThreshold : 0;
+    const char* requestedLogTemplate = policyProvided ? request.logTemplate : nullptr;
     if (!populate_user_breakpoint(operation, candidate, request.sourcePath,
                                   request.sourceLine, request.sourceColumn,
-                                  request.sourceCondition, &status, error, sizeof(error))) {
+                                  request.sourceCondition, requestedAction,
+                                  requestedHitPolicy, requestedHitThreshold,
+                                  requestedLogTemplate, &status, error, sizeof(error))) {
         set_breakpoint_operation_snapshot(operation, snapshot, status, error);
         return GX_ERROR_INVALID_ARGUMENT;
     }
@@ -1803,6 +1935,51 @@ static gx_result set_source_breakpoint_enabled(
     set_breakpoint_operation_snapshot(operation, snapshot,
         GX_DEVELOPMENT_DEBUG_BREAKPOINT_STATUS_SUCCESS, nullptr);
     snapshot->bindingId = breakpoint->id;
+    return GX_OK;
+}
+
+static gx_result configure_source_breakpoint_policy(
+    Operation& operation, const gx_development_debug_request& request,
+    gx_development_debug_snapshot* snapshot)
+{
+    if (request.size < GX_DEVELOPMENT_DEBUG_REQUEST_POLICY_BYTES) {
+        set_breakpoint_operation_snapshot(operation, snapshot,
+            GX_DEVELOPMENT_DEBUG_BREAKPOINT_STATUS_INVALID,
+            "breakpoint policy request is truncated");
+        return GX_ERROR_INVALID_ARGUMENT;
+    }
+    UserBreakpoint* breakpoint = user_breakpoint_by_id(operation, request.breakpointId);
+    if (!breakpoint) {
+        set_breakpoint_operation_snapshot(operation, snapshot,
+            GX_DEVELOPMENT_DEBUG_BREAKPOINT_STATUS_STALE,
+            "source breakpoint ID is stale or unknown");
+        return GX_ERROR_FAILED;
+    }
+    UserBreakpoint updated = *breakpoint;
+    char error[GX_DEVELOPMENT_DEBUG_MAX_ERROR_BYTES] = {};
+    if (!validate_breakpoint_policy(
+            request.breakpointAction, request.hitCountPolicy,
+            request.hitCountThreshold, request.logTemplate,
+            &updated.action, &updated.hitCountPolicy,
+            &updated.hitCountThreshold, updated.logTemplate,
+            sizeof(updated.logTemplate), error, sizeof(error))) {
+        set_breakpoint_operation_snapshot(operation, snapshot,
+            GX_DEVELOPMENT_DEBUG_BREAKPOINT_STATUS_INVALID, error);
+        return GX_ERROR_INVALID_ARGUMENT;
+    }
+    *breakpoint = updated;
+    if (operation.debugCurrentBreakpointId == breakpoint->id)
+        mirror_current_user_breakpoint(operation, breakpoint);
+    set_breakpoint_operation_snapshot(operation, snapshot,
+        GX_DEVELOPMENT_DEBUG_BREAKPOINT_STATUS_SUCCESS, nullptr);
+    snapshot->bindingId = breakpoint->id;
+    snapshot->targetAddress = breakpoint->address;
+    serial::puts("DEVELOPER_STUDIO_PHASE28L_POLICY_CONFIG_PASS id=");
+    serial::put_hex64(breakpoint->id);
+    serial::puts(" action="); serial::put_hex32(breakpoint->action);
+    serial::puts(" hit_policy="); serial::put_hex32(breakpoint->hitCountPolicy);
+    serial::puts(" threshold="); serial::put_hex64(breakpoint->hitCountThreshold);
+    serial::putc('\n');
     return GX_OK;
 }
 
@@ -2011,6 +2188,7 @@ gx_result prepare(const gx_development_run_request& request,
     s_operation = Operation();
     s_operation.debugCurrentBreakpointSlot = kInvalidBreakpointSlot;
     s_operation.debugServicingBreakpointSlot = kInvalidBreakpointSlot;
+    clear_debug_output_queue(s_operation);
     s_operation.used = true;
     s_operation.handle = s_nextHandle++;
     if (s_operation.handle == 0) s_operation.handle = s_nextHandle++;
@@ -2507,6 +2685,237 @@ static bool begin_conditional_instruction_continue(Operation& operation,
 #endif
 }
 
+static const char* expression_error_name(uint32_t category)
+{
+    switch (category) {
+    case GX_DEVELOPMENT_DEBUG_EXPRESSION_ERROR_SYNTAX: return "SYNTAX";
+    case GX_DEVELOPMENT_DEBUG_EXPRESSION_ERROR_UNKNOWN_IDENTIFIER: return "UNKNOWN_IDENTIFIER";
+    case GX_DEVELOPMENT_DEBUG_EXPRESSION_ERROR_VARIABLE_NOT_LIVE: return "VARIABLE_NOT_LIVE";
+    case GX_DEVELOPMENT_DEBUG_EXPRESSION_ERROR_UNSUPPORTED_TYPE: return "UNSUPPORTED_TYPE";
+    case GX_DEVELOPMENT_DEBUG_EXPRESSION_ERROR_UNSUPPORTED_OPERATOR: return "UNSUPPORTED_OPERATOR";
+    case GX_DEVELOPMENT_DEBUG_EXPRESSION_ERROR_DIVIDE_BY_ZERO: return "DIVIDE_BY_ZERO";
+    case GX_DEVELOPMENT_DEBUG_EXPRESSION_ERROR_OVERFLOW: return "OVERFLOW";
+    case GX_DEVELOPMENT_DEBUG_EXPRESSION_ERROR_INVALID_FRAME: return "INVALID_FRAME";
+    case GX_DEVELOPMENT_DEBUG_EXPRESSION_ERROR_STALE_GENERATION: return "STALE_GENERATION";
+    case GX_DEVELOPMENT_DEBUG_EXPRESSION_ERROR_TARGET_NOT_PAUSED: return "TARGET_NOT_PAUSED";
+    case GX_DEVELOPMENT_DEBUG_EXPRESSION_ERROR_EXPRESSION_TOO_LONG: return "EXPRESSION_TOO_LONG";
+    case GX_DEVELOPMENT_DEBUG_EXPRESSION_ERROR_COMPLEXITY_LIMIT: return "COMPLEXITY_LIMIT";
+    case GX_DEVELOPMENT_DEBUG_EXPRESSION_ERROR_VARIABLE_METADATA_UNAVAILABLE: return "VARIABLE_METADATA_UNAVAILABLE";
+    case GX_DEVELOPMENT_DEBUG_EXPRESSION_ERROR_INVALID_REQUEST: return "INVALID_REQUEST";
+    default: return "EVALUATION_FAILED";
+    }
+}
+
+static bool append_log_text(char* output, uint32_t capacity, uint32_t* length,
+                            const char* text)
+{
+    if (!output || !length || capacity == 0) return false;
+    if (!text) text = "";
+    for (uint32_t index = 0; text[index] != '\0'; ++index) {
+        if (*length + 1U >= capacity) return false;
+        output[(*length)++] = text[index];
+    }
+    output[*length] = '\0';
+    return true;
+}
+
+static bool append_log_char(char* output, uint32_t capacity, uint32_t* length,
+                            char value)
+{
+    if (!output || !length || capacity == 0 || *length + 1U >= capacity) return false;
+    output[(*length)++] = value;
+    output[*length] = '\0';
+    return true;
+}
+
+static bool append_log_signed(char* output, uint32_t capacity, uint32_t* length,
+                             int64_t value)
+{
+    if (value < 0 && !append_log_char(output, capacity, length, '-')) return false;
+    uint64_t magnitude = value < 0
+        ? static_cast<uint64_t>(-(value + 1)) + 1ULL
+        : static_cast<uint64_t>(value);
+    char digits[32] = {};
+    uint32_t count = 0;
+    do {
+        digits[count++] = static_cast<char>('0' + (magnitude % 10ULL));
+        magnitude /= 10ULL;
+    } while (magnitude != 0 && count < sizeof(digits));
+    while (count != 0) {
+        if (!append_log_char(output, capacity, length, digits[--count])) return false;
+    }
+    return true;
+}
+
+static bool append_log_pointer(char* output, uint32_t capacity, uint32_t* length,
+                               uint64_t value)
+{
+    static const char digits[] = "0123456789abcdef";
+    if (!append_log_text(output, capacity, length, "0x")) return false;
+    bool started = false;
+    for (int32_t shift = 60; shift >= 0; shift -= 4) {
+        const uint32_t digit = static_cast<uint32_t>((value >> shift) & 0xFULL);
+        if (digit != 0 || started || shift == 0) {
+            if (!append_log_char(output, capacity, length, digits[digit])) return false;
+            started = true;
+        }
+    }
+    return true;
+}
+
+static void set_log_template_error(char* output, uint32_t outputCapacity,
+                                   uint32_t* outputLength, uint32_t* category,
+                                   uint32_t errorCategory, const char* label)
+{
+    if (category) *category = errorCategory;
+    if (output && outputCapacity != 0) {
+        output[0] = '\0';
+        if (outputLength) *outputLength = 0;
+        append_log_text(output, outputCapacity, outputLength,
+                        label ? label : "[logpoint error]");
+    }
+}
+
+static bool render_log_template(Operation& operation,
+                                const UserBreakpoint& breakpoint,
+                                char* output, uint32_t outputCapacity,
+                                uint32_t* errorCategory)
+{
+    if (!output || outputCapacity == 0 || !errorCategory) return false;
+    output[0] = '\0';
+    *errorCategory = GX_DEVELOPMENT_DEBUG_EXPRESSION_ERROR_NONE;
+    const char* source = breakpoint.logTemplate;
+    const uint32_t sourceLength = text_length(source, sizeof(breakpoint.logTemplate));
+    uint32_t outputLength = 0;
+    uint32_t placeholderCount = 0;
+    for (uint32_t cursor = 0; cursor < sourceLength;) {
+        if (source[cursor] == '}') {
+            set_log_template_error(output, outputCapacity, &outputLength,
+                                   errorCategory,
+                                   GX_DEVELOPMENT_DEBUG_EXPRESSION_ERROR_SYNTAX,
+                                   "[logpoint error: TEMPLATE_SYNTAX]");
+            return false;
+        }
+        if (source[cursor] != '{') {
+            if (!append_log_char(output, outputCapacity, &outputLength, source[cursor])) {
+                set_log_template_error(output, outputCapacity, &outputLength,
+                                       errorCategory,
+                                       GX_DEVELOPMENT_DEBUG_EXPRESSION_ERROR_OVERFLOW,
+                                       "[logpoint error: OUTPUT_TOO_LONG]");
+                return false;
+            }
+            ++cursor;
+            continue;
+        }
+        const uint32_t expressionStart = cursor + 1U;
+        uint32_t expressionEnd = expressionStart;
+        while (expressionEnd < sourceLength && source[expressionEnd] != '}') {
+            if (source[expressionEnd] == '{') {
+                set_log_template_error(output, outputCapacity, &outputLength,
+                                       errorCategory,
+                                       GX_DEVELOPMENT_DEBUG_EXPRESSION_ERROR_SYNTAX,
+                                       "[logpoint error: TEMPLATE_SYNTAX]");
+                return false;
+            }
+            ++expressionEnd;
+        }
+        if (expressionEnd == sourceLength || expressionEnd == expressionStart) {
+            set_log_template_error(output, outputCapacity, &outputLength,
+                                   errorCategory,
+                                   GX_DEVELOPMENT_DEBUG_EXPRESSION_ERROR_SYNTAX,
+                                   "[logpoint error: TEMPLATE_SYNTAX]");
+            return false;
+        }
+        if (++placeholderCount > 4U) {
+            set_log_template_error(output, outputCapacity, &outputLength,
+                                   errorCategory,
+                                   GX_DEVELOPMENT_DEBUG_EXPRESSION_ERROR_COMPLEXITY_LIMIT,
+                                   "[logpoint error: PLACEHOLDER_LIMIT]");
+            return false;
+        }
+        char expression[GX_DEVELOPMENT_DEBUG_MAX_EXPRESSION_BYTES + 1U] = {};
+        const uint32_t expressionLength = expressionEnd - expressionStart;
+        if (expressionLength > GX_DEVELOPMENT_DEBUG_MAX_EXPRESSION_BYTES) {
+            set_log_template_error(output, outputCapacity, &outputLength,
+                                   errorCategory,
+                                   GX_DEVELOPMENT_DEBUG_EXPRESSION_ERROR_EXPRESSION_TOO_LONG,
+                                   "[logpoint error: EXPRESSION_TOO_LONG]");
+            return false;
+        }
+        for (uint32_t index = 0; index < expressionLength; ++index)
+            expression[index] = source[expressionStart + index];
+        expression[expressionLength] = '\0';
+        uint32_t trimStart = 0;
+        while (trimStart < expressionLength &&
+               (expression[trimStart] == ' ' || expression[trimStart] == '\t' ||
+                expression[trimStart] == '\r' || expression[trimStart] == '\n')) ++trimStart;
+        uint32_t trimEnd = expressionLength;
+        while (trimEnd > trimStart &&
+               (expression[trimEnd - 1] == ' ' || expression[trimEnd - 1] == '\t' ||
+                expression[trimEnd - 1] == '\r' || expression[trimEnd - 1] == '\n')) --trimEnd;
+        const uint32_t compactLength = trimEnd - trimStart;
+        for (uint32_t index = 0; index < compactLength; ++index)
+            expression[index] = expression[trimStart + index];
+        expression[compactLength] = '\0';
+        if (compactLength == 0) {
+            set_log_template_error(output, outputCapacity, &outputLength,
+                                   errorCategory,
+                                   GX_DEVELOPMENT_DEBUG_EXPRESSION_ERROR_SYNTAX,
+                                   "[logpoint error: TEMPLATE_SYNTAX]");
+            return false;
+        }
+        gx_development_debug_request request = {};
+        request.size = sizeof(request);
+        request.version = GX_DEVELOPMENT_DEBUG_API_VERSION;
+        request.command = GX_DEVELOPMENT_DEBUG_EVALUATE_EXPRESSION;
+        request.handle = operation.handle;
+        request.sessionGeneration = operation.registrationGeneration;
+        request.nativeRuntimeId = operation.registrationGeneration;
+        request.breakpointId = breakpoint.id;
+        request.targetAddress = breakpoint.address;
+        request.artifactSha256 = operation.artifactSha256;
+        request.threadId = 1;
+        request.stopGeneration = operation.debugStopGeneration;
+        request.auxiliaryAddress = 0;
+        request.expression = expression;
+        gx_development_debug_expression evaluated = {};
+        evaluated.size = sizeof(evaluated);
+        const bool evaluatedOk = evaluate_expression(request, &evaluated) == GX_OK &&
+            evaluated.status == GX_DEVELOPMENT_DEBUG_EXPRESSION_STATUS_SUCCESS;
+        if (!evaluatedOk) {
+            const uint32_t category = evaluated.errorCategory != 0
+                ? evaluated.errorCategory
+                : static_cast<uint32_t>(GX_DEVELOPMENT_DEBUG_EXPRESSION_ERROR_INVALID_REQUEST);
+            *errorCategory = category;
+            if (!append_log_text(output, outputCapacity, &outputLength, "<error:") ||
+                !append_log_text(output, outputCapacity, &outputLength,
+                                  expression_error_name(category)) ||
+                !append_log_char(output, outputCapacity, &outputLength, '>')) {
+                set_log_template_error(output, outputCapacity, &outputLength,
+                                       errorCategory,
+                                       GX_DEVELOPMENT_DEBUG_EXPRESSION_ERROR_OVERFLOW,
+                                       "[logpoint error: OUTPUT_TOO_LONG]");
+            }
+        } else if (evaluated.resultKind == GX_DEVELOPMENT_DEBUG_EXPRESSION_RESULT_POINTER) {
+            if (!append_log_pointer(output, outputCapacity, &outputLength,
+                                    evaluated.pointerValue)) {
+                set_log_template_error(output, outputCapacity, &outputLength,
+                                       errorCategory,
+                                       GX_DEVELOPMENT_DEBUG_EXPRESSION_ERROR_OVERFLOW,
+                                       "[logpoint error: OUTPUT_TOO_LONG]");
+            }
+        } else if (!append_log_signed(output, outputCapacity, &outputLength,
+                                      evaluated.signedValue)) {
+            set_log_template_error(output, outputCapacity, &outputLength,
+                                   errorCategory,
+                                   GX_DEVELOPMENT_DEBUG_EXPRESSION_ERROR_OVERFLOW,
+                                   "[logpoint error: OUTPUT_TOO_LONG]");
+        }
+        cursor = expressionEnd + 1U;
+    }
+    return *errorCategory == GX_DEVELOPMENT_DEBUG_EXPRESSION_ERROR_NONE;
+}
+
 bool native_elf_debug_breakpoint_exception(
     NativeElfDebugTrap::BreakpointContext* context)
 {
@@ -2637,7 +3046,8 @@ bool native_elf_debug_breakpoint_exception(
     if (s_operation.debugStopGeneration == 0) s_operation.debugStopGeneration = 1;
     s_operation.debugBreakpointHit = true;
     if (hitBreakpoint) {
-        ++hitBreakpoint->hitCount;
+        hitBreakpoint->rawHitCount = native_debug_saturating_increment(
+            hitBreakpoint->rawHitCount);
         s_operation.debugConditionFalseHitCount = hitBreakpoint->falseHitCount;
         s_operation.debugConditionTrueHitCount = hitBreakpoint->trueHitCount;
     }
@@ -2693,6 +3103,18 @@ bool native_elf_debug_breakpoint_exception(
     snapshot.rflagsAfterTrapFlagClear = context->rflags & ~kAmd64TrapFlag;
     set_condition_evidence(s_operation, &snapshot);
 
+    s_operation.debugConditionError = false;
+    bool conditionPasses = true;
+    if (!s_operation.debugConditionEnabled) {
+        s_operation.debugConditionStatus = GX_DEVELOPMENT_DEBUG_CONDITION_STATUS_NONE;
+        s_operation.debugConditionErrorCategory = GX_DEVELOPMENT_DEBUG_EXPRESSION_ERROR_NONE;
+        s_operation.debugConditionResultKind = GX_DEVELOPMENT_DEBUG_EXPRESSION_RESULT_NONE;
+        s_operation.debugConditionSignedValue = 0;
+        s_operation.debugConditionUnsignedValue = 0;
+        s_operation.debugConditionLength = 0;
+        s_operation.debugConditionExpressionHash = 0;
+        set_condition_evidence(s_operation, &snapshot);
+    }
     if (s_operation.debugConditionEnabled) {
         gx_development_debug_expression condition = {};
         condition.size = sizeof(condition);
@@ -2708,13 +3130,14 @@ bool native_elf_debug_breakpoint_exception(
             s_operation.debugConditionStatus = GX_DEVELOPMENT_DEBUG_CONDITION_STATUS_ERROR;
             s_operation.debugConditionErrorCategory = condition.errorCategory != 0
                 ? static_cast<uint32_t>(condition.errorCategory)
-                : GX_DEVELOPMENT_DEBUG_EXPRESSION_ERROR_INVALID_REQUEST;
+                : static_cast<uint32_t>(GX_DEVELOPMENT_DEBUG_EXPRESSION_ERROR_INVALID_REQUEST);
             copy_text(snapshot.errorMessage, sizeof(snapshot.errorMessage),
                       condition.errorMessage[0] != '\0'
                           ? condition.errorMessage
                           : "conditional breakpoint evaluation failed");
             snapshot.pauseReason = GX_DEVELOPMENT_DEBUG_PAUSE_REASON_CONDITIONAL_SOURCE_BREAKPOINT;
             set_condition_evidence(s_operation, &snapshot);
+            set_breakpoint_list(s_operation, &snapshot);
             serial::puts("DEVELOPER_STUDIO_PHASE28J_CONDITION_ERROR_PAUSE category=");
             serial::put_hex32(s_operation.debugConditionErrorCategory);
             serial::puts(" message="); serial::puts(snapshot.errorMessage); serial::putc('\n');
@@ -2740,40 +3163,57 @@ bool native_elf_debug_breakpoint_exception(
             : GX_DEVELOPMENT_DEBUG_CONDITION_STATUS_FALSE;
         s_operation.debugConditionErrorCategory = GX_DEVELOPMENT_DEBUG_EXPRESSION_ERROR_NONE;
         if (conditionTrue) {
-            ++s_operation.debugConditionTrueHitCount;
-            if (hitBreakpoint) ++hitBreakpoint->trueHitCount;
-            snapshot.pauseReason = GX_DEVELOPMENT_DEBUG_PAUSE_REASON_CONDITIONAL_SOURCE_BREAKPOINT;
-            set_condition_evidence(s_operation, &snapshot);
-            serial_debug_hex("DEVELOPER_STUDIO_PHASE28J_TRUE_HIT target=0x",
-                             s_operation.debugBreakpointAddress);
-            serial::puts(" value="); serial::put_hex64(
-                static_cast<uint64_t>(s_operation.debugConditionSignedValue));
-            serial::puts(" result="); serial::put_hex64(
-                s_operation.debugConditionUnsignedValue);
-            serial::puts(" false_hits="); serial::put_hex32(
+            s_operation.debugConditionTrueHitCount = saturating_increment_u32(
+                s_operation.debugConditionTrueHitCount);
+            if (hitBreakpoint) hitBreakpoint->trueHitCount = saturating_increment_u32(
+                hitBreakpoint->trueHitCount);
+        } else {
+            conditionPasses = false;
+            s_operation.debugConditionFalseHitCount = saturating_increment_u32(
                 s_operation.debugConditionFalseHitCount);
-            serial::putc('\n');
-            if (!native_elf_scheduler_yield()) return false;
-            context->rip = s_operation.debugCancelRequested
-                ? reinterpret_cast<uint64_t>(&native_elf_debug_cancel_return)
-                : s_operation.debugBreakpointAddress;
-            if (s_operation.debugStepActive)
-                context->rflags |= kAmd64TrapFlag;
-            else
-                context->rflags &= ~kAmd64TrapFlag;
-            return true;
+            if (hitBreakpoint) hitBreakpoint->falseHitCount = saturating_increment_u32(
+                hitBreakpoint->falseHitCount);
         }
+        set_condition_evidence(s_operation, &snapshot);
+    }
 
-        ++s_operation.debugConditionFalseHitCount;
-        if (hitBreakpoint) ++hitBreakpoint->falseHitCount;
+    const uint32_t action = hitBreakpoint
+        ? hitBreakpoint->action : static_cast<uint32_t>(GX_DEVELOPMENT_DEBUG_BREAKPOINT_ACTION_BREAK);
+    const uint32_t hitPolicy = hitBreakpoint
+        ? hitBreakpoint->hitCountPolicy : static_cast<uint32_t>(GX_DEVELOPMENT_DEBUG_HIT_COUNT_POLICY_NONE);
+    const uint64_t hitThreshold = hitBreakpoint ? hitBreakpoint->hitCountThreshold : 0;
+    const bool hitPolicyPasses = !hitBreakpoint ||
+        native_debug_hit_count_policy_matches(hitPolicy, hitThreshold,
+                                              hitBreakpoint->rawHitCount);
+    const bool eligible = conditionPasses && hitPolicyPasses;
+    const bool logAction = hitBreakpoint &&
+        action == GX_DEVELOPMENT_DEBUG_BREAKPOINT_ACTION_LOG;
+    if (eligible && logAction) {
+        char rendered[GX_DEVELOPMENT_DEBUG_MAX_OUTPUT_TEXT_BYTES] = {};
+        uint32_t outputErrorCategory = GX_DEVELOPMENT_DEBUG_EXPRESSION_ERROR_NONE;
+        const bool renderedOk = render_log_template(
+            s_operation, *hitBreakpoint, rendered, sizeof(rendered),
+            &outputErrorCategory);
+        const bool queued = enqueue_debug_output(
+            s_operation, *hitBreakpoint, rendered, outputErrorCategory);
+        serial::puts("DEVELOPER_STUDIO_PHASE28L_LOG_HIT raw_hits=");
+        serial::put_hex64(hitBreakpoint->rawHitCount);
+        serial::puts(" queued="); serial::put_hex32(queued ? 1U : 0U);
+        serial::puts(" rendered="); serial::puts(rendered);
+        serial::puts(" error="); serial::put_hex32(renderedOk ? 0U : outputErrorCategory);
+        serial::putc('\n');
+    }
+
+    if (!eligible || logAction) {
         if (!begin_conditional_instruction_continue(s_operation, true)) {
             s_operation.debugConditionError = true;
             s_operation.debugConditionStatus = GX_DEVELOPMENT_DEBUG_CONDITION_STATUS_ERROR;
             s_operation.debugConditionErrorCategory = GX_DEVELOPMENT_DEBUG_EXPRESSION_ERROR_INVALID_REQUEST;
             copy_text(snapshot.errorMessage, sizeof(snapshot.errorMessage),
-                      "conditional breakpoint could not arm its original instruction");
+                      "breakpoint could not arm its original instruction");
             snapshot.pauseReason = GX_DEVELOPMENT_DEBUG_PAUSE_REASON_CONDITIONAL_SOURCE_BREAKPOINT;
             set_condition_evidence(s_operation, &snapshot);
+            set_breakpoint_list(s_operation, &snapshot);
             if (!native_elf_scheduler_yield()) return false;
             context->rip = s_operation.debugCancelRequested
                 ? reinterpret_cast<uint64_t>(&native_elf_debug_cancel_return)
@@ -2781,17 +3221,31 @@ bool native_elf_debug_breakpoint_exception(
             return true;
         }
         s_operation.debugBreakpointHit = false;
-        serial_debug_hex("DEVELOPER_STUDIO_PHASE28J_FALSE_HIT target=0x",
-                         s_operation.debugBreakpointAddress);
-        serial::puts(" value="); serial::put_hex64(
-            static_cast<uint64_t>(s_operation.debugConditionSignedValue));
-        serial::puts(" result="); serial::put_hex64(
-            s_operation.debugConditionUnsignedValue);
-        serial::puts(" false_hits="); serial::put_hex32(
-            s_operation.debugConditionFalseHitCount);
-        serial::puts(" decision=false\nDEVELOPER_STUDIO_PHASE28J_FALSE_CONTINUE_ARMED\n");
+        if (!conditionPasses) {
+            serial_debug_hex("DEVELOPER_STUDIO_PHASE28J_FALSE_HIT target=0x",
+                             s_operation.debugBreakpointAddress);
+            serial::puts(" value="); serial::put_hex64(
+                static_cast<uint64_t>(s_operation.debugConditionSignedValue));
+            serial::puts(" result="); serial::put_hex64(
+                s_operation.debugConditionUnsignedValue);
+            serial::puts(" false_hits="); serial::put_hex32(
+                s_operation.debugConditionFalseHitCount);
+            serial::puts(" decision=false\nDEVELOPER_STUDIO_PHASE28J_FALSE_CONTINUE_ARMED\n");
+        } else if (!hitPolicyPasses) {
+            serial::puts("DEVELOPER_STUDIO_PHASE28L_HITCOUNT_SKIP raw_hits=");
+            serial::put_hex64(hitBreakpoint ? hitBreakpoint->rawHitCount : 0);
+            serial::puts(" policy="); serial::put_hex32(hitPolicy);
+            serial::puts(" threshold="); serial::put_hex64(hitThreshold);
+            serial::putc('\n');
+        } else {
+            serial::puts("DEVELOPER_STUDIO_PHASE28L_LOG_CONTINUE raw_hits=");
+            serial::put_hex64(hitBreakpoint ? hitBreakpoint->rawHitCount : 0);
+            serial::putc('\n');
+        }
         serial_debug_breakpoint_state(
-            "DEVELOPER_STUDIO_PHASE28K_FALSE_STATE", s_operation);
+            !conditionPasses ? "DEVELOPER_STUDIO_PHASE28K_FALSE_STATE"
+                             : "DEVELOPER_STUDIO_PHASE28L_CONTINUE_STATE",
+            s_operation);
         if (!native_elf_scheduler_yield()) return false;
         if (s_operation.debugCancelRequested) {
             context->rflags &= ~kAmd64TrapFlag;
@@ -2803,19 +3257,24 @@ bool native_elf_debug_breakpoint_exception(
         }
         return true;
     }
-    serial_debug_hex(s_operation.debugSourceSelected
-                         ? "DEVELOPER_STUDIO_PHASE28A_BREAKPOINT_HIT target=0x"
-                         : "DEVELOPER_STUDIO_PHASE27Z_BREAKPOINT_HIT target=0x",
-                     s_operation.debugBreakpointAddress);
-    serial_debug_hex(" raw_rip=0x", rawTrapRip);
-    serial::puts(" function=");
-    serial::puts(s_operation.debugSourceSelected ? s_operation.debugFunctionName : "gx_main");
-    serial::puts(" stop=");
-    serial::put_hex64(s_operation.debugStopGeneration);
-    serial::putc('\n');
-    serial::puts(s_operation.debugSourceSelected
-                     ? "DEVELOPER_STUDIO_PHASE28A_PAUSED\n"
-                     : "DEVELOPER_STUDIO_PHASE27Z_PAUSED\n");
+
+    set_breakpoint_list(s_operation, &snapshot);
+    if (conditionPasses && hitPolicyPasses) {
+        serial_debug_hex(s_operation.debugSourceSelected
+                             ? "DEVELOPER_STUDIO_PHASE28L_BREAK_HIT target=0x"
+                             : "DEVELOPER_STUDIO_PHASE27Z_BREAKPOINT_HIT target=0x",
+                         s_operation.debugBreakpointAddress);
+        serial::puts(" raw_rip=0x"); serial::put_hex64(rawTrapRip);
+        serial::puts(" raw_hits="); serial::put_hex64(
+            hitBreakpoint ? hitBreakpoint->rawHitCount : 0);
+        serial::puts(" function=");
+        serial::puts(s_operation.debugSourceSelected ? s_operation.debugFunctionName : "gx_main");
+        serial::puts(" stop="); serial::put_hex64(s_operation.debugStopGeneration);
+        serial::putc('\n');
+        serial::puts(s_operation.debugSourceSelected
+                         ? "DEVELOPER_STUDIO_PHASE28A_PAUSED\n"
+                         : "DEVELOPER_STUDIO_PHASE27Z_PAUSED\n");
+    }
 
     if (!native_elf_scheduler_yield()) return false;
     context->rip = s_operation.debugCancelRequested
@@ -5043,6 +5502,13 @@ gx_result debug(const gx_development_debug_request& request,
 
     case GX_DEVELOPMENT_DEBUG_DISABLE_SOURCE_BREAKPOINT:
         return set_source_breakpoint_enabled(s_operation, request, outSnapshot, false);
+
+    case GX_DEVELOPMENT_DEBUG_CONFIGURE_SOURCE_BREAKPOINT_POLICY:
+        return configure_source_breakpoint_policy(s_operation, request, outSnapshot);
+
+    case GX_DEVELOPMENT_DEBUG_DRAIN_OUTPUT:
+        set_output_drain_snapshot(s_operation, outSnapshot);
+        return GX_OK;
 
     case GX_DEVELOPMENT_DEBUG_POLL:
         if (s_operation.state == GX_DEVELOPMENT_RUN_PAUSED) {

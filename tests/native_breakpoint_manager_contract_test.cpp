@@ -81,8 +81,8 @@ struct Model {
 int main() {
     static_assert(GX_DEVELOPMENT_DEBUG_MAX_SOURCE_BREAKPOINTS == 8u, "capacity changed");
     static_assert(GX_DEVELOPMENT_DEBUG_REQUEST_LEGACY_BYTES == 104u, "legacy prefix changed");
-    static_assert(GX_DEVELOPMENT_DEBUG_REQUEST_BREAKPOINT_BYTES == sizeof(gx_development_debug_request),
-                  "full breakpoint request must be self-sized");
+    static_assert(GX_DEVELOPMENT_DEBUG_REQUEST_POLICY_BYTES == sizeof(gx_development_debug_request),
+                  "full breakpoint policy request must be self-sized");
 
     Model model;
     uint32_t status = 0;
