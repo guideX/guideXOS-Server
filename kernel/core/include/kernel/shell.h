@@ -35,10 +35,14 @@ static const uint32_t NICINFO_BRIEF_MAX_LINES = 20;
 static const uint32_t NICINFO_BRIEF_EXPECTED_LINES = 19;
 static const uint32_t NICINFO_TX_BRIEF_MAX_LINES = 20;
 static const uint32_t NICINFO_TX_BRIEF_EXPECTED_LINES = 20;
+static const uint32_t NICINFO_TX_OWNER_MAX_LINES = 20;
+static const uint32_t NICINFO_TX_OWNER_EXPECTED_LINES = 14;
 static_assert(NICINFO_BRIEF_EXPECTED_LINES <= NICINFO_BRIEF_MAX_LINES,
               "nicinfo brief expected output must stay within its line bound");
 static_assert(NICINFO_TX_BRIEF_EXPECTED_LINES <= NICINFO_TX_BRIEF_MAX_LINES,
               "nicinfo tx brief expected output must stay within its line bound");
+static_assert(NICINFO_TX_OWNER_EXPECTED_LINES <= NICINFO_TX_OWNER_MAX_LINES,
+              "nicinfo tx owner expected output must stay within its line bound");
 
 enum NicInfoMode : uint8_t {
     NICINFO_MODE_FULL = 0,
@@ -46,6 +50,7 @@ enum NicInfoMode : uint8_t {
     NICINFO_MODE_LINK,
     NICINFO_MODE_TX,
     NICINFO_MODE_TX_BRIEF,
+    NICINFO_MODE_TX_OWNER,
     NICINFO_MODE_TX_RAW,
     NICINFO_MODE_TX_RAW_DIRECT,
     NICINFO_MODE_TX_RAW_STATUS,
@@ -92,16 +97,21 @@ inline bool nicinfo_token_equals(const char* actual, const char* expected)
     return *actual == '\0' && *expected == '\0';
 }
 
-// Parse the bounded multi-token forms used by Phase 17. The empty third
+// Parse the bounded multi-token forms used by the raw-TX and ownership
+// diagnostics. The empty third
 // token is represented by nullptr or an empty string.
 inline NicInfoMode nicinfo_mode_from_args(const char* arg1,
                                           const char* arg2,
                                           const char* arg3)
 {
-    if (!nicinfo_token_equals(arg1, "tx") ||
-        !nicinfo_token_equals(arg2, "raw")) {
+    if (!nicinfo_token_equals(arg1, "tx")) {
         return NICINFO_MODE_INVALID;
     }
+    if (nicinfo_token_equals(arg2, "owner")) {
+        return (!arg3 || *arg3 == '\0')
+            ? NICINFO_MODE_TX_OWNER : NICINFO_MODE_INVALID;
+    }
+    if (!nicinfo_token_equals(arg2, "raw")) return NICINFO_MODE_INVALID;
     if (!arg3 || *arg3 == '\0') return NICINFO_MODE_TX_RAW;
     if (nicinfo_token_equals(arg3, "direct")) {
         return NICINFO_MODE_TX_RAW_DIRECT;

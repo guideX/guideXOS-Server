@@ -81,7 +81,7 @@ function Count-LogicalLines([string]$source, [string]$startToken, [string]$endTo
 $txBriefLines = Count-LogicalLines $shellSource `
     'static void cmd_nicinfo_tx_brief()' 'static void cmd_nicinfo_brief()'
 $rawStatusLines = Count-LogicalLines $shellSource `
-    'static void cmd_nicinfo_tx_raw_status()' 'static void cmd_nicinfo_tx_brief()'
+    'static void cmd_nicinfo_tx_raw_status()' 'static void cmd_nicinfo_tx_owner()'
 if ($txBriefLines -gt 20) {
     throw "nicinfo tx brief source emits $txBriefLines newline sites; maximum is 20"
 }

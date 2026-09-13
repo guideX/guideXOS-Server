@@ -2580,6 +2580,91 @@ static void cmd_nicinfo_tx_raw(bool direct)
     cmd_nicinfo_tx_raw_status();
 }
 
+// Compact, cache-only ownership evidence for the Phase 18 physical loop.
+// This command never writes CTRL_EXT, reads FWSM/SWSM, or repeats the
+// ownership transition.
+static void cmd_nicinfo_tx_owner()
+{
+    const nic::NICDevice* dev = nic::get_device();
+    char hexStr[9];
+
+    output_string("NIC TX owner\n");
+    if (!dev) {
+        output_string("family=none\n");
+        output_string("DriverReady=NO Link=unknown failure=none\n");
+        return;
+    }
+
+    const nic::DeviceFamily family =
+        nic::device_family_for(dev->vendorId, dev->deviceId);
+    const nic::I219HwControlDiagnostics& control = dev->hwControl;
+    const uint32_t currentCtrlExt = control.finalValid
+        ? control.ctrlExtFinal
+        : (control.afterValid ? control.ctrlExtAfter
+                              : (control.afterResetValid
+                                 ? control.ctrlExtAfterReset
+                                 : control.ctrlExtInitial));
+    const uint32_t currentFwsm = control.finalValid
+        ? control.fwsmFinal
+        : (control.afterValid ? control.fwsmAfter
+                              : (control.afterResetValid
+                                 ? control.fwsmAfterReset
+                                 : control.fwsmInitial));
+
+    output_string("family=");
+    output_string(family == nic::DeviceFamily::I219Pch
+                      ? "I219-SPT" : nic::device_family_name(family));
+    output_string("\n");
+    output_string("AMT=");
+    output_string(control.hasAmt ? "yes" : "n/a");
+    output_string("\n");
+    output_string("hw-control=");
+    output_string(control.hasCtrlExtOnLoad ? "CTRL_EXT.DRV_LOAD" : "none");
+    output_string("\n");
+    output_string("CTRL_EXT=0x");
+    uint_hex_to_str(currentCtrlExt, 8, hexStr);
+    output_string(hexStr);
+    output_string("\nDRV_LOAD=");
+    output_string(control.finalValid
+                      ? (control.finalDrvLoad ? "yes" : "no")
+                      : (control.ownershipReadback ? "yes" : "no"));
+    output_string("\n");
+    output_string("ownership-requested=");
+    output_string(control.ownershipRequested ? "yes" : "no");
+    output_string("\n");
+    output_string("ownership-readback=");
+    output_string(control.ownershipReadback ? "yes" : "no");
+    output_string("\n");
+    output_string("before=0x");
+    uint_hex_to_str(control.ctrlExtBefore, 8, hexStr);
+    output_string(hexStr);
+    output_string(" after=0x");
+    uint_hex_to_str(control.ctrlExtAfter, 8, hexStr);
+    output_string(hexStr);
+    output_string("\n");
+    output_string("after-reset=0x");
+    uint_hex_to_str(control.ctrlExtAfterReset, 8, hexStr);
+    output_string(hexStr);
+    output_string(" preserved=");
+    output_string(control.resetPersistenceValid
+                      ? (control.resetPreserved ? "yes" : "no")
+                      : "n/a");
+    output_string("\n");
+    output_string("FWSM=0x");
+    uint_hex_to_str(currentFwsm, 8, hexStr);
+    output_string(hexStr);
+    output_string("\nDriverReady=");
+    output_string(nic::is_driver_ready(*dev) ? "YES" : "NO");
+    output_string(" Link=");
+    output_string(nic::link_state_name(dev->link));
+    output_string("\n");
+    output_string("stage=");
+    output_string(nic::hw_control_stage_name(control.stage));
+    output_string(" failure=");
+    output_string(nic::hw_control_failure_reason_name(control.failure));
+    output_string("\n");
+}
+
 // One-screen TX evidence for the physical bring-up loop. This remains
 // observational and is deliberately capped at the shell contract above.
 static void cmd_nicinfo_tx_brief()
@@ -5172,6 +5257,9 @@ static void execute_command(const char* cmd) {
         } else if (argCount == 3 && str_eq(arg1, "tx") &&
                    str_eq(args[2], "brief")) {
             nicInfoMode = NICINFO_MODE_TX_BRIEF;
+        } else if (argCount == 3 && str_eq(arg1, "tx") &&
+                   str_eq(args[2], "owner")) {
+            nicInfoMode = NICINFO_MODE_TX_OWNER;
         } else if (argCount == 3) {
             nicInfoMode = nicinfo_mode_from_args(arg1, args[2], nullptr);
         } else if (argCount == 4) {
@@ -5187,6 +5275,8 @@ static void execute_command(const char* cmd) {
             cmd_nicinfo_tx();
         } else if (nicInfoMode == NICINFO_MODE_TX_BRIEF) {
             cmd_nicinfo_tx_brief();
+        } else if (nicInfoMode == NICINFO_MODE_TX_OWNER) {
+            cmd_nicinfo_tx_owner();
         } else if (nicInfoMode == NICINFO_MODE_TX_RAW) {
             cmd_nicinfo_tx_raw(false);
         } else if (nicInfoMode == NICINFO_MODE_TX_RAW_DIRECT) {
@@ -5194,11 +5284,12 @@ static void execute_command(const char* cmd) {
         } else if (nicInfoMode == NICINFO_MODE_TX_RAW_STATUS) {
             cmd_nicinfo_tx_raw_status();
         } else {
-            output_string("Usage: nicinfo [brief|link|tx [brief|raw [direct|status]]]\n");
+            output_string("Usage: nicinfo [brief|link|tx [brief|owner|raw [direct|status]]]\n");
             output_string("  brief: recorded NIC initialization/link state only\n");
             output_string("  link: one bounded, read-only current link refresh\n");
             output_string("  tx: one TX descriptor and bounded register snapshot\n");
             output_string("  tx brief: compact one-screen TX evidence\n");
+            output_string("  tx owner: CTRL_EXT.DRV_LOAD ownership evidence\n");
             output_string("  tx raw: one fixed raw Ethernet TX attempt\n");
             output_string("  tx raw direct: same fixture via direct submit\n");
             output_string("  tx raw status: last raw attempt and descriptor bytes\n");

@@ -192,6 +192,170 @@ static void set_init_failure(InitStage stage, const char* reason,
     serial::putc('\n');
 }
 
+static bool i219_phase18_ownership_path_selected()
+{
+    return is_i219_device(s_device.deviceId) &&
+           i219_spt_ownership_path_selected(
+               s_device.phase5Stage, s_device.phase6Stage,
+               s_device.phase7Stage);
+}
+
+static bool read_i219_hw_control_state(uint64_t mmioBase,
+                                       uint32_t* ctrlExtOut,
+                                       uint32_t* fwsmOut)
+{
+    if (!ctrlExtOut || !fwsmOut || mmioBase == 0u) return false;
+    *ctrlExtOut = mmio_read32(mmioBase, E1000_CTRL_EXT);
+    *fwsmOut = mmio_read32(mmioBase, E1000_FWSM);
+    return *ctrlExtOut != 0xFFFFFFFFu;
+}
+
+static bool fail_i219_hw_control(HwControlFailureReason reason)
+{
+    s_device.hwControl.failure = reason;
+    set_init_failure(NIC_INIT_RESET, hw_control_failure_reason_name(reason));
+    return false;
+}
+
+static bool capture_i219_hw_control_initial(uint64_t mmioBase)
+{
+    I219HwControlDiagnostics& control = s_device.hwControl;
+    control.supported = true;
+    control.hasAmt = i219_spt_has_amt(s_device.vendorId, s_device.deviceId);
+    control.hasCtrlExtOnLoad =
+        i219_spt_has_ctrl_ext_on_load(s_device.vendorId, s_device.deviceId);
+
+    uint32_t ctrlExt = 0u;
+    uint32_t fwsm = 0u;
+    if (!read_i219_hw_control_state(mmioBase, &ctrlExt, &fwsm)) {
+        return fail_i219_hw_control(HwControlFailureReason::CtrlExtReadFailed);
+    }
+    control.ctrlExtInitial = ctrlExt;
+    control.fwsmInitial = fwsm;
+    control.initialValid = true;
+    control.stage = HwControlStage::InitialBind;
+    return true;
+}
+
+static bool capture_i219_hw_control_after_reset(uint64_t mmioBase)
+{
+    I219HwControlDiagnostics& control = s_device.hwControl;
+    uint32_t ctrlExt = 0u;
+    uint32_t fwsm = 0u;
+    if (!read_i219_hw_control_state(mmioBase, &ctrlExt, &fwsm)) {
+        return fail_i219_hw_control(HwControlFailureReason::CtrlExtReadFailed);
+    }
+    control.ctrlExtAfterReset = ctrlExt;
+    control.fwsmAfterReset = fwsm;
+    control.afterResetValid = true;
+    control.resetPersistenceValid = control.initialValid;
+    control.resetPreserved = control.initialValid &&
+        ((control.ctrlExtInitial & E1000_CTRL_EXT_DRV_LOAD) ==
+         (control.ctrlExtAfterReset & E1000_CTRL_EXT_DRV_LOAD));
+    control.stage = HwControlStage::AfterReset;
+    return true;
+}
+
+static bool acquire_i219_hw_control(uint64_t mmioBase)
+{
+    I219HwControlDiagnostics& control = s_device.hwControl;
+    control.ownershipRequested = true;
+
+    uint32_t before = 0u;
+    uint32_t fwsmBefore = 0u;
+    if (!read_i219_hw_control_state(mmioBase, &before, &fwsmBefore)) {
+        return fail_i219_hw_control(HwControlFailureReason::CtrlExtReadFailed);
+    }
+    control.ctrlExtBefore = before;
+    control.fwsmBefore = fwsmBefore;
+    control.beforeValid = true;
+
+    // This is the exact upstream operation for FLAG_HAS_CTRLEXT_ON_LOAD:
+    // preserve the complete read value and add only DRV_LOAD.
+    const uint32_t requested = i219_spt_ctrl_ext_request(before);
+    mmio_write32(mmioBase, E1000_CTRL_EXT, requested);
+
+    // The volatile CTRL_EXT readback is both the posted-write observation and
+    // the ownership verification. No FWSM/SWSM or firmware-control write is
+    // performed here.
+    const uint32_t after = mmio_read32(mmioBase, E1000_CTRL_EXT);
+    const uint32_t fwsmAfter = mmio_read32(mmioBase, E1000_FWSM);
+    control.ctrlExtAfter = after;
+    control.fwsmAfter = fwsmAfter;
+    control.afterValid = after != 0xFFFFFFFFu;
+    control.ownershipReadbackAttempted = true;
+    control.ownershipReadback = i219_spt_drv_load_readback_valid(after);
+    control.unrelatedBitsPreserved = control.afterValid &&
+        i219_spt_ctrl_ext_unrelated_bits_preserved(before, after);
+    control.stage = HwControlStage::AfterDrvLoad;
+
+    serial::puts("[AIDA-I219-P18] hw-control=CTRL_EXT.DRV_LOAD before=0x");
+    serial::put_hex32(before);
+    serial::puts(" after=0x");
+    serial::put_hex32(after);
+    serial::puts(" readback=");
+    serial::puts(control.ownershipReadback ? "yes\n" : "no\n");
+
+    if (!control.afterValid) {
+        return fail_i219_hw_control(HwControlFailureReason::CtrlExtReadFailed);
+    }
+    if (!control.ownershipReadback) {
+        return fail_i219_hw_control(
+            HwControlFailureReason::DrvLoadReadbackFailed);
+    }
+    return true;
+}
+
+static void record_i219_hw_control_tx_snapshot(
+    const TxRegisterSnapshot& snapshot, HwControlStage stage)
+{
+    I219HwControlDiagnostics& control = s_device.hwControl;
+    if (!control.supported || !snapshot.valid) return;
+
+    const bool valid = snapshot.ctrlExt != 0xFFFFFFFFu;
+    control.stage = stage;
+    control.finalValid = valid;
+    control.finalDrvLoad = valid &&
+        (snapshot.ctrlExt & E1000_CTRL_EXT_DRV_LOAD) != 0u;
+    control.ctrlExtFinal = snapshot.ctrlExt;
+    control.fwsmFinal = snapshot.fwsm;
+    switch (stage) {
+        case HwControlStage::AfterTxInit:
+            control.afterTxInitValid = valid;
+            control.ctrlExtAfterTxInit = snapshot.ctrlExt;
+            control.fwsmAfterTxInit = snapshot.fwsm;
+            break;
+        case HwControlStage::BeforeRaw:
+            control.beforeRawValid = valid;
+            control.ctrlExtBeforeRaw = snapshot.ctrlExt;
+            control.fwsmBeforeRaw = snapshot.fwsm;
+            break;
+        default:
+            break;
+    }
+}
+
+static bool verify_i219_hw_control_final(uint64_t mmioBase)
+{
+    I219HwControlDiagnostics& control = s_device.hwControl;
+    uint32_t ctrlExt = 0u;
+    uint32_t fwsm = 0u;
+    if (!read_i219_hw_control_state(mmioBase, &ctrlExt, &fwsm)) {
+        return fail_i219_hw_control(HwControlFailureReason::CtrlExtReadFailed);
+    }
+    control.ctrlExtFinal = ctrlExt;
+    control.fwsmFinal = fwsm;
+    control.finalValid = true;
+    control.finalDrvLoad =
+        (ctrlExt & E1000_CTRL_EXT_DRV_LOAD) != 0u;
+    control.stage = HwControlStage::Final;
+    if (!control.finalDrvLoad) {
+        return fail_i219_hw_control(
+            HwControlFailureReason::DrvLoadReadbackFailed);
+    }
+    return true;
+}
+
 static void set_link_failure(const char* reason)
 {
     uint32_t i = 0;
@@ -379,9 +543,10 @@ static bool phase7_stop(InitStage initStage, const char* reason)
     return false;
 }
 
-// Permanent exact-I219 reset path. This is the smallest physically proven
-// PCH repair: it deliberately omits Linux's ownership/SWFLAG/FWSM/PHY-reset
-// machinery until guideXOS has an evidence-backed need for those operations.
+// Permanent exact-I219 reset path. This remains the smallest physically proven
+// PCH reset boundary. Phase 18 performs the separate, post-reset CTRL_EXT
+// ownership transition after this helper returns; this helper itself still
+// omits SWFLAG/FWSM/PHY-reset writes.
 static bool i219_pch_reset(uint64_t mmioBase)
 {
     s_device.initStage = NIC_INIT_RESET;
@@ -1417,6 +1582,8 @@ static bool configure_i219_spt_tx_descriptor_control(uint64_t mmioBase)
 static void snapshot_tx_final_registers()
 {
     snapshot_tx_registers(&s_device.tx.finalRegisters);
+    record_i219_hw_control_tx_snapshot(
+        s_device.tx.finalRegisters, HwControlStage::Final);
     s_device.tx.ringRegistersPersisted =
         tx_ring_registers_persisted(
             s_device.tx.initialRegisters,
@@ -1610,6 +1777,8 @@ static bool init_tx(uint64_t mmioBase)
     s_device.tx.failureReason = TxFailureReason::None;
     s_device.tx.ringPoisoned = false;
     snapshot_tx_registers(&s_device.tx.initialRegisters);
+    record_i219_hw_control_tx_snapshot(
+        s_device.tx.initialRegisters, HwControlStage::AfterTxInit);
     s_device.tx.ringAddressMatches =
         s_device.tx.initialRegisters.valid &&
         dma_address_register_value(s_device.tx.initialRegisters.tdbal,
@@ -1816,10 +1985,20 @@ static bool init_e1000(uint64_t mmioBase)
 
     const bool i219 = is_i219_device(s_device.deviceId);
     const bool i219P7 = i219 && i219_phase7_path_selected();
+    const bool i219P18 = i219P7 && i219_phase18_ownership_path_selected();
     uint32_t ctrl = 0;
 
     if (i219P7) {
+        if (i219P18 && !capture_i219_hw_control_initial(mmioBase)) {
+            return false;
+        }
         if (!i219_pch_reset(mmioBase)) return false;
+        if (i219P18) {
+            if (!capture_i219_hw_control_after_reset(mmioBase) ||
+                !acquire_i219_hw_control(mmioBase)) {
+                return false;
+            }
+        }
         if (GXOS_AIDA_I219_PHASE7_STAGE == 0) {
             // The default I219 production path stops at the physically proven
             // reset boundary until the later hardware stages are qualified.
@@ -2084,6 +2263,13 @@ static bool init_e1000(uint64_t mmioBase)
         }
     }
 
+    if (i219P18 &&
+        (!s_device.hwControl.afterTxInitValid ||
+         !s_device.hwControl.finalDrvLoad)) {
+        return fail_i219_hw_control(
+            HwControlFailureReason::DrvLoadReadbackFailed);
+    }
+
     if (i219P7 && GXOS_AIDA_I219_PHASE7_STAGE >= 4u) {
         // The initial PHY Status sample is retained for the bring-up record,
         // but it is not sufficient as a current-link sample: I219 BMSR link
@@ -2098,6 +2284,10 @@ static bool init_e1000(uint64_t mmioBase)
         serial::puts("/");
         serial::put_hex32(s_device.linkRefreshPollLimit);
         serial::putc('\n');
+    }
+
+    if (i219P18 && !verify_i219_hw_control_final(mmioBase)) {
+        return false;
     }
 
     // Keep NIC interrupt causes masked until the kernel has installed the
@@ -2929,6 +3119,8 @@ static Status submit_frame(const uint8_t* data, uint16_t len)
     s_device.tx.descriptorPublications++;
     dma_publish_barrier();
     snapshot_tx_registers(&s_device.tx.preDoorbellRegisters);
+    record_i219_hw_control_tx_snapshot(
+        s_device.tx.preDoorbellRegisters, HwControlStage::BeforeRaw);
 
     // Advance tail pointer to submit the descriptor
     uint16_t oldTx = s_txCur;

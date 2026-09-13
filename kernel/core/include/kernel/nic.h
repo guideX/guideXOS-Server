@@ -153,6 +153,7 @@ static const uint32_t E1000_STATUS   = 0x0008;  // Device Status
 static const uint32_t E1000_EECD     = 0x0010;  // EEPROM/Flash Control
 static const uint32_t E1000_EERD     = 0x0014;  // EEPROM Read
 static const uint32_t E1000_CTRL_EXT  = 0x0018;  // Extended Device Control
+static const uint32_t E1000_CTRL_EXT_DRV_LOAD = 0x10000000u; // Driver loaded bit for firmware
 static const uint32_t E1000_MDIC     = 0x0020;  // MDI/PHY management
 static const uint32_t E1000_PBA      = 0x1000;  // Packet Buffer Allocation
 static const uint32_t E1000_ICR      = 0x00C0;  // Interrupt Cause Read
@@ -338,6 +339,131 @@ inline const char* device_family_name(DeviceFamily family)
         default:                    return "unsupported";
     }
 }
+
+// The current upstream e1000e board record for PCI 8086:156F is
+// e1000_pch_spt.  Its relevant flags are FLAG_HAS_AMT and
+// FLAG_HAS_CTRLEXT_ON_LOAD; it does not select the SWSM-on-load mechanism.
+// Keep this policy exact-device-only so the generic QEMU E1000 path remains
+// unchanged.
+inline bool i219_spt_hw_control_supported(uint16_t vendor, uint16_t device)
+{
+    return device_family_for(vendor, device) == DeviceFamily::I219Pch;
+}
+
+inline bool i219_spt_has_amt(uint16_t vendor, uint16_t device)
+{
+    return i219_spt_hw_control_supported(vendor, device);
+}
+
+inline bool i219_spt_has_ctrl_ext_on_load(uint16_t vendor, uint16_t device)
+{
+    return i219_spt_hw_control_supported(vendor, device);
+}
+
+inline uint32_t i219_spt_ctrl_ext_request(uint32_t before)
+{
+    return before | E1000_CTRL_EXT_DRV_LOAD;
+}
+
+inline bool i219_spt_drv_load_readback_valid(uint32_t observed)
+{
+    return observed != 0xFFFFFFFFu &&
+           (observed & E1000_CTRL_EXT_DRV_LOAD) != 0u;
+}
+
+inline bool i219_spt_ctrl_ext_unrelated_bits_preserved(uint32_t before,
+                                                       uint32_t after)
+{
+    return (before & ~E1000_CTRL_EXT_DRV_LOAD) ==
+           (after & ~E1000_CTRL_EXT_DRV_LOAD);
+}
+
+inline bool i219_spt_ownership_path_selected(uint8_t phase5Stage,
+                                             uint8_t phase6Stage,
+                                             uint8_t phase7Stage)
+{
+    return phase5Stage == 8u && phase6Stage == 0u && phase7Stage >= 4u;
+}
+
+enum class HwControlStage : uint8_t {
+    None = 0,
+    InitialBind,
+    AfterReset,
+    AfterDrvLoad,
+    AfterTxInit,
+    BeforeRaw,
+    Final,
+};
+
+inline const char* hw_control_stage_name(HwControlStage stage)
+{
+    switch (stage) {
+        case HwControlStage::InitialBind: return "initial-bind";
+        case HwControlStage::AfterReset:  return "after-reset";
+        case HwControlStage::AfterDrvLoad:return "after-drv-load";
+        case HwControlStage::AfterTxInit: return "after-tx-init";
+        case HwControlStage::BeforeRaw:   return "before-raw";
+        case HwControlStage::Final:       return "final";
+        default:                          return "none";
+    }
+}
+
+enum class HwControlFailureReason : uint8_t {
+    None = 0,
+    CtrlExtReadFailed,
+    DrvLoadReadbackFailed,
+};
+
+inline const char* hw_control_failure_reason_name(HwControlFailureReason reason)
+{
+    switch (reason) {
+        case HwControlFailureReason::CtrlExtReadFailed:
+            return "I219_CTRL_EXT_READ_FAILED";
+        case HwControlFailureReason::DrvLoadReadbackFailed:
+            return "I219_DRV_LOAD_READBACK_FAILED";
+        default:
+            return "none";
+    }
+}
+
+// Bounded ownership evidence. Values are snapshots, not a second MMIO
+// control loop; the driver records one value at each meaningful lifecycle
+// boundary and never writes FWSM or SWSM.
+struct I219HwControlDiagnostics {
+    bool supported;
+    bool hasAmt;
+    bool hasCtrlExtOnLoad;
+    bool ownershipRequested;
+    bool ownershipReadbackAttempted;
+    bool ownershipReadback;
+    bool resetPersistenceValid;
+    bool resetPreserved;
+    bool initialValid;
+    bool afterResetValid;
+    bool beforeValid;
+    bool afterValid;
+    bool afterTxInitValid;
+    bool beforeRawValid;
+    bool finalValid;
+    bool finalDrvLoad;
+    bool unrelatedBitsPreserved;
+    uint32_t ctrlExtInitial;
+    uint32_t ctrlExtAfterReset;
+    uint32_t ctrlExtBefore;
+    uint32_t ctrlExtAfter;
+    uint32_t ctrlExtAfterTxInit;
+    uint32_t ctrlExtBeforeRaw;
+    uint32_t ctrlExtFinal;
+    uint32_t fwsmInitial;
+    uint32_t fwsmAfterReset;
+    uint32_t fwsmBefore;
+    uint32_t fwsmAfter;
+    uint32_t fwsmAfterTxInit;
+    uint32_t fwsmBeforeRaw;
+    uint32_t fwsmFinal;
+    HwControlStage stage;
+    HwControlFailureReason failure;
+};
 
 enum class PhyAddressSource : uint8_t {
     None = 0,
@@ -1223,6 +1349,7 @@ struct NICDevice {
     LinkState   link;
     NetStats    stats;
     TxDiagnostics tx;
+    I219HwControlDiagnostics hwControl;
     char        name[32];       // e.g. "eth0"
     bool        mmioMapped;     // true if MMIO is mapped by bootloader
     bool        irqRegistered;  // kernel IRQ handler registered
@@ -1408,9 +1535,21 @@ inline bool hardware_init_complete(const NICDevice& device)
         !device.rxRingInitialized || !device.txRingInitialized) {
         return false;
     }
-    if (device_family_for(device.vendorId, device.deviceId) == DeviceFamily::I219Pch &&
-        (!device.resetAttempted || !device.resetCompleted ||
-         !device.phyProbeAttempted || device.phyAccess != NIC_PHY_OK)) {
+    const bool i219 =
+        device_family_for(device.vendorId, device.deviceId) == DeviceFamily::I219Pch;
+    if (i219 && (!device.resetAttempted || !device.resetCompleted ||
+                 !device.phyProbeAttempted || device.phyAccess != NIC_PHY_OK)) {
+        return false;
+    }
+    if (i219 &&
+        i219_spt_ownership_path_selected(device.phase5Stage,
+                                         device.phase6Stage,
+                                         device.phase7Stage) &&
+        (!device.hwControl.supported ||
+         !device.hwControl.ownershipRequested ||
+         !device.hwControl.ownershipReadback ||
+         !device.hwControl.finalValid ||
+         !device.hwControl.finalDrvLoad)) {
         return false;
     }
     return true;
