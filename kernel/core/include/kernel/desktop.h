@@ -118,6 +118,10 @@ void open_terminal();
 // Returns true if app was launched or is already running
 bool launch_app(const char* appName);
 
+// Launch an App Model application with a bounded UTF-8 launch context.  The
+// context is copied by the NativeAOT launcher for the synchronous invocation.
+bool launch_app_with_context(const char* appName, const char* launchContext);
+
 // Record a successful program launch for Start Menu recent history.
 // In hosted builds this is a no-op; bare-metal persists to a small VFS file.
 void record_recent_program(const char* appName);

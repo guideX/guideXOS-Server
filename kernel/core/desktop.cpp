@@ -8132,7 +8132,9 @@ enum class ManagedAppModelLaunchResult : uint8_t {
 };
 
 static ManagedAppModelLaunchResult launch_managed_appmodel_record(const char* appName,
-                                                                  const char* source)
+                                                                  const char* source,
+                                                                  const char* launchContext,
+                                                                  uint32_t launchContextLength)
 {
 #if defined(GXOS_NATIVEAOT_PRODUCTION_COMPOSITE_LAUNCH) && defined(GXOS_BARE_METAL)
     if (!appName || !appName[0]) return ManagedAppModelLaunchResult::NotManaged;
@@ -8162,7 +8164,8 @@ static ManagedAppModelLaunchResult launch_managed_appmodel_record(const char* ap
 
     nativeaot::LaunchReport report{};
     const nativeaot::LaunchStatus status =
-        nativeaot::launchLogicalApplication(target.appId, &report);
+        nativeaot::launchLogicalApplication(
+            target.appId, &report, launchContext, launchContextLength);
     serial::puts("[APPMODEL-MANAGED-RESULT] appId=");
     serial::puts(target.appId);
     serial::puts(" status=");
@@ -8170,12 +8173,17 @@ static ManagedAppModelLaunchResult launch_managed_appmodel_record(const char* ap
     serial::puts(" result=");
     serial::puts(status == nativeaot::LaunchStatus::Success ? "PASS" : "REJECTED");
     serial::puts("\n");
-    return status == nativeaot::LaunchStatus::Success
-        ? ManagedAppModelLaunchResult::Succeeded
-        : ManagedAppModelLaunchResult::Rejected;
+    if (status == nativeaot::LaunchStatus::Success) {
+        s_shellActive = false;
+        s_shellMinimized = false;
+        return ManagedAppModelLaunchResult::Succeeded;
+    }
+    return ManagedAppModelLaunchResult::Rejected;
 #else
     (void)appName;
     (void)source;
+    (void)launchContext;
+    (void)launchContextLength;
     return ManagedAppModelLaunchResult::NotManaged;
 #endif
 }
@@ -8768,6 +8776,21 @@ void open_terminal()
 
 bool launch_app(const char* appName)
 {
+    return launch_app_with_context(appName, nullptr);
+}
+
+static uint32_t bounded_launch_context_length(const char* launchContext)
+{
+    if (!launchContext) return 0u;
+    constexpr uint32_t kMaxContextBytes = 48u;
+    for (uint32_t index = 0; index <= kMaxContextBytes; ++index) {
+        if (launchContext[index] == '\0') return index;
+    }
+    return kMaxContextBytes + 1u;
+}
+
+bool launch_app_with_context(const char* appName, const char* launchContext)
+{
     if (!appName) return false;
     // Bare-metal File Explorer is the kernel-side "Files" app; hosted/compositor
     // code keeps using the "FileExplorer" launch name through DesktopService.
@@ -8795,7 +8818,9 @@ bool launch_app(const char* appName)
     }
 
     const ManagedAppModelLaunchResult managedResult =
-        launch_managed_appmodel_record(appName, "DesktopLaunch");
+        launch_managed_appmodel_record(
+            appName, "DesktopLaunch", launchContext,
+            bounded_launch_context_length(launchContext));
     if (managedResult != ManagedAppModelLaunchResult::NotManaged) {
         return managedResult == ManagedAppModelLaunchResult::Succeeded;
     }
@@ -11286,7 +11311,7 @@ static void show_start_menu_notification(const char* label)
     const char* launchLabel = (desktop_str_eq(label, "File Explorer") || desktop_str_eq(label, "FileExplorer")) ? "Files" : label;
 
     const ManagedAppModelLaunchResult managedResult =
-        launch_managed_appmodel_record(launchLabel, "StartMenu");
+        launch_managed_appmodel_record(launchLabel, "StartMenu", nullptr, 0u);
     if (managedResult != ManagedAppModelLaunchResult::NotManaged) {
         if (managedResult == ManagedAppModelLaunchResult::Succeeded) {
             app::AppLogger::logLaunch(launchLabel, app::LaunchResult::Success);

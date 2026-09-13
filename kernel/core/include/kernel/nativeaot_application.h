@@ -20,7 +20,13 @@ enum class LaunchStatus : int32_t {
     Busy = -11,
     BaseCollision = -12,
     InvalidApplicationId = -13,
+    InvalidLaunchContext = -14,
 };
+
+// The managed App Model context is deliberately small and synchronous.  The
+// launcher copies exactly this many UTF-8 bytes into the NativeGxAppContext
+// frame before entering the resident composite image.
+static constexpr uint32_t kManagedLaunchContextMaxBytes = 48u;
 
 struct LaunchReport {
     LaunchStatus status;
@@ -62,10 +68,14 @@ struct LaunchReport {
 
 LaunchStatus launch(const char* path, LaunchReport* report);
 LaunchStatus launchLogical(const char* path, uint32_t logicalAppId,
-                           LaunchReport* report);
+                           LaunchReport* report,
+                           const char* launchContext = nullptr,
+                           uint32_t launchContextLength = 0u);
 bool isProductionLogicalApplicationId(const char* applicationId);
 LaunchStatus launchLogicalApplication(const char* applicationId,
-                                      LaunchReport* report);
+                                      LaunchReport* report,
+                                      const char* launchContext = nullptr,
+                                      uint32_t launchContextLength = 0u);
 const char* productionCompositeImagePath();
 const char* launchStatusName(LaunchStatus status);
 

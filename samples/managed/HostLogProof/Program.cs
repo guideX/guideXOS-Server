@@ -2108,6 +2108,269 @@ public static unsafe class Program
         }
     }
 
+    private static bool HostSurfaceAvailable(NativeGxAppContext* context)
+    {
+        return context != null &&
+            context->size >= (uint)sizeof(NativeGxAppContext) &&
+            context->host != null &&
+            context->host->size >= (uint)sizeof(NativeHostCallTable) &&
+            context->host->requestWindow != null &&
+            context->host->drawText != null &&
+            context->host->drawRect != null &&
+            context->host->addButton != null;
+    }
+
+    private static bool TryCopyLaunchContext(
+        NativeGxAppContext* context,
+        out byte[] copy)
+    {
+        copy = Array.Empty<byte>();
+        if (context == null || context->size < (uint)sizeof(NativeGxAppContext) ||
+            context->launchContextLength > GxAbi.MaxLaunchContextBytes ||
+            (context->launchContextLength != 0u && context->launchContext == null))
+        {
+            return false;
+        }
+
+        copy = new byte[(int)context->launchContextLength];
+        for (int index = 0; index < copy.Length; index++)
+        {
+            byte value = context->launchContext[index];
+            if (value == 0u)
+            {
+                return false;
+            }
+            copy[index] = value;
+        }
+        return true;
+    }
+
+    private static void AppendCompositeBytes(
+        Span<byte> buffer,
+        ref int position,
+        ReadOnlySpan<byte> value)
+    {
+        value.CopyTo(buffer[position..]);
+        position += value.Length;
+    }
+
+    private static bool RequestSurfaceWindow(
+        NativeGxAppContext* context,
+        ReadOnlySpan<byte> title,
+        int width,
+        int height,
+        out ulong window)
+    {
+        window = 0u;
+        ulong requestedWindow = 0u;
+        Span<byte> titleBuffer = stackalloc byte[title.Length + 1];
+        title.CopyTo(titleBuffer);
+        titleBuffer[title.Length] = 0;
+        fixed (byte* titlePointer = titleBuffer)
+        {
+            if (context->host->requestWindow(
+                    context, titlePointer, width, height, &requestedWindow) != 0)
+            {
+                return false;
+            }
+        }
+        window = requestedWindow;
+        return true;
+    }
+
+    private static bool DrawSurfaceText(
+        NativeGxAppContext* context,
+        ulong window,
+        int x,
+        int y,
+        ReadOnlySpan<byte> text)
+    {
+        if (text.Length > 63)
+        {
+            return false;
+        }
+        Span<byte> textBuffer = stackalloc byte[text.Length + 1];
+        text.CopyTo(textBuffer);
+        textBuffer[text.Length] = 0;
+        fixed (byte* textPointer = textBuffer)
+        {
+            return context->host->drawText(
+                context, window, x, y, textPointer) == 0;
+        }
+    }
+
+    private static bool DrawSurfaceRect(
+        NativeGxAppContext* context,
+        ulong window,
+        int x,
+        int y,
+        int width,
+        int height,
+        uint color)
+    {
+        return context->host->drawRect(
+            context, window, x, y, width, height, color) == 0;
+    }
+
+    private static bool AddSurfaceButton(
+        NativeGxAppContext* context,
+        ulong window,
+        int x,
+        int y,
+        int width,
+        int height,
+        ReadOnlySpan<byte> text)
+    {
+        if (text.Length > 63)
+        {
+            return false;
+        }
+        Span<byte> textBuffer = stackalloc byte[text.Length + 1];
+        text.CopyTo(textBuffer);
+        textBuffer[text.Length] = 0;
+        int widget = -1;
+        fixed (byte* textPointer = textBuffer)
+        {
+            return context->host->addButton(
+                context, window, x, y, width, height, textPointer, &widget) == 0 &&
+                widget >= 0;
+        }
+    }
+
+    private static bool DrawC111Line(
+        NativeGxAppContext* context,
+        ulong window,
+        int y,
+        ReadOnlySpan<byte> prefix,
+        ReadOnlySpan<byte> suffix)
+    {
+        Span<byte> line = stackalloc byte[64];
+        int position = 0;
+        AppendCompositeBytes(line, ref position, prefix);
+        AppendCompositeBytes(line, ref position, suffix);
+        return DrawSurfaceText(context, window, 20, y, line[..position]);
+    }
+
+    private static bool DrawC111CountLine(
+        NativeGxAppContext* context,
+        ulong window,
+        int y,
+        ReadOnlySpan<byte> prefix,
+        uint value)
+    {
+        Span<byte> line = stackalloc byte[64];
+        int position = 0;
+        AppendCompositeBytes(line, ref position, prefix);
+        AppendCompositeUnsigned(line, ref position, value);
+        return DrawSurfaceText(context, window, 20, y, line[..position]);
+    }
+
+    private static bool DrawC111ContextLine(
+        NativeGxAppContext* context,
+        ulong window,
+        int y,
+        byte[] contextCopy)
+    {
+        Span<byte> line = stackalloc byte[64];
+        int position = 0;
+        AppendCompositeBytes(line, ref position, "Context: "u8);
+        if (contextCopy.Length == 0)
+        {
+            AppendCompositeBytes(line, ref position, "<empty>"u8);
+        }
+        else
+        {
+            AppendCompositeBytes(line, ref position, contextCopy);
+        }
+        return DrawSurfaceText(context, window, 20, y, line[..position]);
+    }
+
+    private static bool LogC111Application(
+        NativeGxAppContext* context,
+        ReadOnlySpan<byte> appName,
+        uint invocationCount,
+        byte[] contextCopy)
+    {
+        Span<byte> line = stackalloc byte[128];
+        int position = 0;
+        AppendCompositeBytes(line, ref position, "C111-"u8);
+        AppendCompositeBytes(line, ref position, appName);
+        AppendCompositeBytes(line, ref position, " count="u8);
+        AppendCompositeUnsigned(line, ref position, invocationCount);
+        AppendCompositeBytes(line, ref position, " context="u8);
+        if (contextCopy.Length == 0)
+        {
+            AppendCompositeBytes(line, ref position, "<empty>"u8);
+        }
+        else
+        {
+            AppendCompositeBytes(line, ref position, contextCopy);
+        }
+        return LogCompositeText(context, line[..position]);
+    }
+
+    private static int RunManagedWorkspace(
+        NativeGxAppContext* context,
+        uint invocationCount)
+    {
+        if (!HostSurfaceAvailable(context) ||
+            !TryCopyLaunchContext(context, out byte[] contextCopy))
+        {
+            return GxAbi.ErrorInvalidArgument;
+        }
+        if (!RequestSurfaceWindow(context, "Managed Workspace"u8, 520, 300, out ulong window) ||
+            !DrawSurfaceRect(context, window, 10, 10, 500, 230, 0x002A4A70u) ||
+            !DrawC111Line(context, window, 24,
+                "Managed Workspace | "u8, "C# NativeAOT"u8) ||
+            !DrawC111CountLine(context, window, 52,
+                "Resident launch count: "u8, invocationCount) ||
+            !DrawC111ContextLine(context, window, 80, contextCopy) ||
+            !DrawC111Line(context, window, 108,
+                "Managed allocation: "u8, "byte[] copied"u8) ||
+            !DrawC111Line(context, window, 136,
+                "State: "u8, "ready for guideXOS"u8) ||
+            !DrawC111Line(context, window, 164,
+                "Use Activate to update this window"u8, ""u8) ||
+            !AddSurfaceButton(context, window, 20, 200, 180, 28,
+                "Activate action"u8) ||
+            !LogC111Application(context, "WORKSPACE"u8, invocationCount, contextCopy))
+        {
+            return GxAbi.ErrorInvalidArgument;
+        }
+        return 0;
+    }
+
+    private static int RunManagedStatus(
+        NativeGxAppContext* context,
+        uint invocationCount)
+    {
+        if (!HostSurfaceAvailable(context) ||
+            !TryCopyLaunchContext(context, out byte[] contextCopy))
+        {
+            return GxAbi.ErrorInvalidArgument;
+        }
+        if (!RequestSurfaceWindow(context, "Managed Status"u8, 520, 300, out ulong window) ||
+            !DrawSurfaceRect(context, window, 10, 10, 500, 230, 0x003A5A42u) ||
+            !DrawC111Line(context, window, 24,
+                "Managed Status | "u8, "resident composite"u8) ||
+            !DrawC111CountLine(context, window, 52,
+                "Status launches: "u8, invocationCount) ||
+            !DrawC111ContextLine(context, window, 80, contextCopy) ||
+            !DrawC111Line(context, window, 108,
+                "Allocation: "u8, "byte[5] verified"u8) ||
+            !DrawC111Line(context, window, 136,
+                "TLS: "u8, "continuing managed thread"u8) ||
+            !DrawC111Line(context, window, 164,
+                "Distinct logical application"u8, ""u8) ||
+            !AddSurfaceButton(context, window, 20, 200, 180, 28,
+                "Refresh status"u8) ||
+            !LogC111Application(context, "STATUS"u8, invocationCount, contextCopy))
+        {
+            return GxAbi.ErrorInvalidArgument;
+        }
+        return 0;
+    }
+
     private static int RunC107AppA(NativeGxAppContext* context)
     {
         int ordinaryBefore = s_c107AppAInvocationCount;
@@ -2153,6 +2416,12 @@ public static unsafe class Program
         {
             return GxAbi.ErrorInvalidArgument;
         }
+#if HOSTLOGPROOF_PRODUCTION_COMPOSITE
+        if (RunManagedWorkspace(context, (uint)invocationCount) != 0)
+        {
+            return GxAbi.ErrorInvalidArgument;
+        }
+#endif
 #else
         // The production bridge reinstalls the current thread's TLS on every
         // resident entry.  The logical application static is the lifecycle
@@ -2212,6 +2481,12 @@ public static unsafe class Program
         {
             return GxAbi.ErrorInvalidArgument;
         }
+#if HOSTLOGPROOF_PRODUCTION_COMPOSITE
+        if (RunManagedStatus(context, (uint)invocationCount) != 0)
+        {
+            return GxAbi.ErrorInvalidArgument;
+        }
+#endif
 #else
         if (!allocationValid || invocationCount < 1 || threadAfter != 1)
         {
@@ -2253,7 +2528,7 @@ public static unsafe class Program
             return GxAbi.ErrorInvalidArgument;
         }
 
-        if (ctx->size < (uint)sizeof(NativeGxAppContext))
+        if (ctx->size < GxAbi.LegacyContextSize)
         {
             return GxAbi.ErrorInvalidArgument;
         }

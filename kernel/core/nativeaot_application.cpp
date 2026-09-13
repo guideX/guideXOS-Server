@@ -3,6 +3,9 @@
 #include "include/kernel/address_space.h"
 #include "include/kernel/arch.h"
 #include "include/kernel/hugepages.h"
+#include "include/kernel/framebuffer.h"
+#include "include/kernel/kernel_app.h"
+#include "include/kernel/kernel_compositor.h"
 #include "include/kernel/pit.h"
 #include "include/kernel/process.h"
 #include "include/kernel/serial_debug.h"
@@ -126,10 +129,26 @@ struct NativeAotTlsGsArea {
     void** vector;
 };
 
+struct NativeGxAppContext;
+
 struct NativeHostCallTable {
     uint32_t size;
     uint32_t version;
-    int32_t (GUIDEXOS_NATIVEAOT_PAL_CALL *log)(void* context, uint8_t* message);
+    int32_t (GUIDEXOS_NATIVEAOT_PAL_CALL *log)(NativeGxAppContext* context, uint8_t* message);
+    int32_t (GUIDEXOS_NATIVEAOT_PAL_CALL *requestWindow)(
+        NativeGxAppContext* context, uint8_t* title, int32_t width, int32_t height,
+        uint64_t* outWindow);
+    int32_t (GUIDEXOS_NATIVEAOT_PAL_CALL *drawText)(
+        NativeGxAppContext* context, uint64_t window, int32_t x, int32_t y,
+        uint8_t* text);
+    int32_t (GUIDEXOS_NATIVEAOT_PAL_CALL *drawRect)(
+        NativeGxAppContext* context, uint64_t window, int32_t x, int32_t y,
+        int32_t width, int32_t height, uint32_t color);
+    int32_t (GUIDEXOS_NATIVEAOT_PAL_CALL *addButton)(
+        NativeGxAppContext* context, uint64_t window, int32_t x, int32_t y,
+        int32_t width, int32_t height, uint8_t* text, int32_t* outWidget);
+    int32_t (GUIDEXOS_NATIVEAOT_PAL_CALL *closeWindow)(
+        NativeGxAppContext* context, uint64_t window);
 };
 
 struct NativeGxAppContext {
@@ -137,6 +156,9 @@ struct NativeGxAppContext {
     uint32_t apiVersion;
     NativeHostCallTable* host;
     void* userData;
+    const uint8_t* launchContext;
+    uint32_t launchContextLength;
+    uint32_t launchFlags;
 };
 
 struct NativeAotStartupContext {
@@ -165,8 +187,8 @@ struct ResidentApplication {
     uint32_t sequence;
 };
 
-static_assert(sizeof(NativeHostCallTable) == 16, "C102 host callback ABI drift");
-static_assert(sizeof(NativeGxAppContext) == 24, "C102 application ABI drift");
+static_assert(sizeof(NativeHostCallTable) == 56, "C111 host callback ABI drift");
+static_assert(sizeof(NativeGxAppContext) == 40, "C111 application ABI drift");
 static_assert(offsetof(NativeAotTlsGsArea, vector) == 0x58,
               "C102 TLS vector offset drift");
 
@@ -192,6 +214,7 @@ bool g_c107ManagedEntryObserved = false;
 bool g_c107ManagedPassObserved = false;
 bool g_c107ManagedInvalidApplicationObserved = false;
 ResidentApplication g_application = {};
+NativeGxAppContext* g_activeManagedContext = nullptr;
 #if defined(GXOS_C108_TLS_LIFECYCLE)
 uint32_t g_c108TlsInstallCount = 0;
 uint32_t g_c108ManagedInvocationOrdinal = 0;
@@ -200,6 +223,144 @@ uint32_t g_c108ManagedInvocationOrdinal = 0;
 uint32_t g_productionTlsInstallCount = 0;
 uint32_t g_productionManagedInvocationOrdinal = 0;
 #endif
+
+struct ManagedSurfaceRect {
+    int32_t x;
+    int32_t y;
+    int32_t width;
+    int32_t height;
+    uint32_t color;
+};
+
+// The managed bridge deliberately reuses the existing bare-metal application
+// and compositor surface.  This adapter owns one logical window at a time;
+// the NativeAOT image remains resident while the window may be closed and
+// recreated on a later logical launch.
+class NativeAotManagedSurface final : public app::KernelApp {
+public:
+    NativeAotManagedSurface() : m_rectCount(0), m_actionButtonId(-1), m_actionCount(0) {
+        const char* name = "Managed NativeAOT";
+        int index = 0;
+        while (name[index] && index < app::MAX_APP_NAME - 1) {
+            m_name[index] = name[index];
+            ++index;
+        }
+        m_name[index] = '\0';
+    }
+
+    bool init() override { return false; }
+    void shutdown() override {}
+
+    void draw(uint32_t windowX, uint32_t clientY,
+              uint32_t, uint32_t) override {
+        for (int index = 0; index < m_rectCount; ++index) {
+            const ManagedSurfaceRect& rect = m_rects[index];
+            framebuffer::fill_rect(
+                windowX + static_cast<uint32_t>(rect.x),
+                clientY + static_cast<uint32_t>(rect.y),
+                static_cast<uint32_t>(rect.width),
+                static_cast<uint32_t>(rect.height),
+                0xFF000000u | (rect.color & 0x00FFFFFFu));
+        }
+    }
+
+    void onWidgetClick(int widgetId) override {
+        if (widgetId != m_actionButtonId) return;
+        ++m_actionCount;
+        setWidgetText(widgetId, "Action complete");
+        serial::puts("[C111-INTERACTION] result=PASS actionCount=");
+        serial::put_hex32(static_cast<uint32_t>(m_actionCount));
+        serial::puts(" window=");
+        serial::put_hex32(m_window ? m_window->id : 0u);
+        serial::puts("\n");
+    }
+
+    void onWindowClose() override {
+        serial::puts("[C111-SURFACE] action=close result=PASS\n");
+    }
+
+    bool open(const char* title, int32_t width, int32_t height) {
+        if (!title || !title[0] || width < compositor::MIN_WINDOW_WIDTH ||
+            height < compositor::MIN_WINDOW_HEIGHT) {
+            return false;
+        }
+        if (m_window) requestClose();
+
+        app::KernelWindow* window = new app::KernelWindow();
+        if (!window) return false;
+        const uint32_t screenWidth = framebuffer::get_width();
+        const uint32_t screenHeight = framebuffer::get_height();
+        window->x = screenWidth > static_cast<uint32_t>(width)
+            ? static_cast<int>((screenWidth - static_cast<uint32_t>(width)) / 2u) : 0;
+        window->y = screenHeight > static_cast<uint32_t>(height)
+            ? static_cast<int>((screenHeight - static_cast<uint32_t>(height)) / 2u) : 0;
+        window->w = width;
+        window->h = height;
+        window->owner = this;
+        if (!compositor::KernelCompositor::registerWindow(window)) {
+            delete window;
+            return false;
+        }
+        m_window = window;
+        m_state = app::AppState::Running;
+        m_window->widgetCount = 0;
+        m_rectCount = 0;
+        m_actionButtonId = -1;
+        setTitle(title);
+        compositor::KernelCompositor::setFocus(m_window->id);
+        return true;
+    }
+
+    bool owns(uint64_t window) const {
+        return m_window != nullptr && m_window->id == static_cast<uint32_t>(window);
+    }
+
+    uint64_t windowId() const {
+        return m_window ? static_cast<uint64_t>(m_window->id) : 0u;
+    }
+
+    bool setText(int32_t x, int32_t y, const char* text) {
+        if (!m_window || !text || x < 0 || y < 0) return false;
+        return addLabel(x, y, 480, 18, text) >= 0;
+    }
+
+    bool addRect(int32_t x, int32_t y, int32_t width, int32_t height, uint32_t color) {
+        if (!m_window || m_rectCount >= static_cast<int>(sizeof(m_rects) / sizeof(m_rects[0]))) {
+            return false;
+        }
+        m_rects[m_rectCount++] = {x, y, width, height, color};
+        invalidate();
+        return true;
+    }
+
+    bool addActionButton(int32_t x, int32_t y, int32_t width, int32_t height,
+                         const char* text, int32_t* outWidget) {
+        if (!m_window || !text || !outWidget) return false;
+        const int id = addButton(x, y, width, height, text);
+        if (id < 0) return false;
+        m_actionButtonId = id;
+        *outWidget = id;
+        return true;
+    }
+
+private:
+    ManagedSurfaceRect m_rects[8] = {};
+    int m_rectCount;
+    int m_actionButtonId;
+    int m_actionCount;
+};
+
+// Bare-metal startup does not run the hosted C++ global-constructor array.
+// Allocate this polymorphic adapter explicitly so KernelWindow::owner has a
+// real vtable before the compositor dispatches draw/input/close callbacks.
+NativeAotManagedSurface* g_managedSurface = nullptr;
+
+NativeAotManagedSurface* managedSurface() {
+    if (!g_managedSurface) {
+        g_managedSurface = new NativeAotManagedSurface();
+    }
+    return g_managedSurface;
+}
 
 #if defined(GXOS_C103_PRODUCTION_LAUNCH) || defined(GXOS_C103_NEGATIVE_LAUNCH)
 constexpr bool kC103LifecycleEnabled = true;
@@ -960,7 +1121,107 @@ void emitProductionPersistenceIdentity(const char* appName) {
 }
 #endif
 
-int32_t GUIDEXOS_NATIVEAOT_PAL_CALL managedLog(void*, uint8_t* message) {
+uint32_t boundedCStringLength(const uint8_t* text, uint32_t maximum) {
+    if (!text) return maximum + 1u;
+    for (uint32_t index = 0; index <= maximum; ++index) {
+        if (text[index] == 0) return index;
+    }
+    return maximum + 1u;
+}
+
+bool activeSurfaceContext(NativeGxAppContext* context) {
+    return context != nullptr && context == g_activeManagedContext &&
+        context->size >= sizeof(NativeGxAppContext) && context->host != nullptr &&
+        context->host->size >= sizeof(NativeHostCallTable);
+}
+
+int32_t GUIDEXOS_NATIVEAOT_PAL_CALL managedRequestWindow(
+    NativeGxAppContext* context, uint8_t* title, int32_t width, int32_t height,
+    uint64_t* outWindow) {
+    if (!activeSurfaceContext(context) || !title || !outWindow ||
+        boundedCStringLength(title, app::MAX_TITLE_LEN - 1u) >= app::MAX_TITLE_LEN ||
+        width < compositor::MIN_WINDOW_WIDTH || height < compositor::MIN_WINDOW_HEIGHT) {
+        return -2;
+    }
+    NativeAotManagedSurface* surface = managedSurface();
+    if (!surface || !surface->open(reinterpret_cast<const char*>(title), width, height)) {
+        return -4;
+    }
+    *outWindow = surface->windowId();
+    serial::puts("[C111-SURFACE] action=create title=");
+    serial::puts(reinterpret_cast<const char*>(title));
+    serial::puts(" window=");
+    serial::put_hex64(*outWindow);
+    serial::puts(" result=PASS\n");
+    return 0;
+}
+
+int32_t GUIDEXOS_NATIVEAOT_PAL_CALL managedDrawText(
+    NativeGxAppContext* context, uint64_t window, int32_t x, int32_t y,
+    uint8_t* text) {
+    NativeAotManagedSurface* surface = managedSurface();
+    if (!activeSurfaceContext(context) || !text || !surface || !surface->owns(window) ||
+        x < 0 || y < 0 || boundedCStringLength(text, 63u) > 63u ||
+        !surface->setText(x, y, reinterpret_cast<const char*>(text))) {
+        return -2;
+    }
+    serial::puts("[C111-SURFACE-TEXT] window=");
+    serial::put_hex64(window);
+    serial::puts(" x=");
+    serial::put_hex32(static_cast<uint32_t>(x));
+    serial::puts(" y=");
+    serial::put_hex32(static_cast<uint32_t>(y));
+    serial::puts(" text=");
+    serial::puts(reinterpret_cast<const char*>(text));
+    serial::puts(" result=PASS\n");
+    return 0;
+}
+
+int32_t GUIDEXOS_NATIVEAOT_PAL_CALL managedDrawRect(
+    NativeGxAppContext* context, uint64_t window, int32_t x, int32_t y,
+    int32_t width, int32_t height, uint32_t color) {
+    NativeAotManagedSurface* surface = managedSurface();
+    if (!activeSurfaceContext(context) || !surface || !surface->owns(window) ||
+        x < 0 || y < 0 || width <= 0 || height <= 0 ||
+        x > 4096 || y > 4096 || width > 4096 || height > 4096 ||
+        !surface->addRect(x, y, width, height, color)) {
+        return -2;
+    }
+    serial::puts("[C111-SURFACE-RECT] window=");
+    serial::put_hex64(window);
+    serial::puts(" result=PASS\n");
+    return 0;
+}
+
+int32_t GUIDEXOS_NATIVEAOT_PAL_CALL managedAddButton(
+    NativeGxAppContext* context, uint64_t window, int32_t x, int32_t y,
+    int32_t width, int32_t height, uint8_t* text, int32_t* outWidget) {
+    NativeAotManagedSurface* surface = managedSurface();
+    if (!activeSurfaceContext(context) || !surface || !surface->owns(window) ||
+        !text || !outWidget || x < 0 || y < 0 || width <= 0 || height <= 0 ||
+        boundedCStringLength(text, 63u) > 63u ||
+        !surface->addActionButton(
+            x, y, width, height, reinterpret_cast<const char*>(text), outWidget)) {
+        return -2;
+    }
+    serial::puts("[C111-SURFACE-WIDGET] window=");
+    serial::put_hex64(window);
+    serial::puts(" widget=");
+    serial::put_hex32(static_cast<uint32_t>(*outWidget));
+    serial::puts(" result=PASS\n");
+    return 0;
+}
+
+int32_t GUIDEXOS_NATIVEAOT_PAL_CALL managedCloseWindow(
+    NativeGxAppContext* context, uint64_t window) {
+    NativeAotManagedSurface* surface = managedSurface();
+    if (!activeSurfaceContext(context) || !surface || !surface->owns(window)) return -2;
+    surface->requestClose();
+    return 0;
+}
+
+int32_t GUIDEXOS_NATIVEAOT_PAL_CALL managedLog(
+    NativeGxAppContext*, uint8_t* message) {
     if (message == nullptr) return -1;
     if (managedMessageEquals(message, "C102-MANAGED-ENTRY")) {
         g_c102ManagedEntryObserved = true;
@@ -1000,7 +1261,9 @@ int32_t GUIDEXOS_NATIVEAOT_PAL_CALL managedLog(void*, uint8_t* message) {
         managedMessageEquals(message, "C104-APP-B-ENTRY") ||
         managedMessageEquals(message, "C104-APP-B-PASS");
     const bool c107Message = managedMessageStartsWith(message, "C107-");
-    serial::puts(c107Message ? "[C107-MANAGED-OUTPUT] " :
+    const bool c111Message = managedMessageStartsWith(message, "C111-");
+    serial::puts(c111Message ? "[C111-MANAGED-OUTPUT] " :
+        c107Message ? "[C107-MANAGED-OUTPUT] " :
         c104Message ? "[C104-MANAGED-OUTPUT] " : "[C102-MANAGED-OUTPUT] ");
     for (uint32_t index = 0; index < 128u && message[index] != 0; ++index) {
         serial::putc(static_cast<char>(message[index]));
@@ -1284,6 +1547,7 @@ const char* launchStatusName(LaunchStatus status) {
         case LaunchStatus::Busy: return "busy";
         case LaunchStatus::BaseCollision: return "base-collision";
         case LaunchStatus::InvalidApplicationId: return "invalid-app-id";
+        case LaunchStatus::InvalidLaunchContext: return "invalid-launch-context";
     }
     return "unknown";
 }
@@ -1297,7 +1561,8 @@ LaunchStatus statusForManagedReturn(int32_t managedReturn) {
 }
 
 LaunchStatus launchResident(const char* path, uint32_t logicalAppId,
-                            LaunchReport* report) {
+                            LaunchReport* report, const char* launchContext,
+                            uint32_t launchContextLength) {
     const uint32_t sequence = g_application.sequence + 1u;
     emitC103Begin(sequence, path, true);
     const uint8_t handle = vfs::open(path, vfs::OPEN_READ);
@@ -1414,10 +1679,13 @@ LaunchStatus launchResident(const char* path, uint32_t logicalAppId,
     fillPalTable(&pal, report->artifactBase, report->artifactSpan);
     guidexos_nativeaot_gc_startup_platform_table_v1 gc{};
     fillGcTable(&gc);
-    NativeHostCallTable host{ sizeof(NativeHostCallTable), 0u, managedLog };
+    NativeHostCallTable host{
+        sizeof(NativeHostCallTable), 0u, managedLog, managedRequestWindow,
+        managedDrawText, managedDrawRect, managedAddButton, managedCloseWindow };
     NativeGxAppContext app{
         sizeof(NativeGxAppContext), 0u, &host,
-        reinterpret_cast<void*>(static_cast<uintptr_t>(logicalAppId))};
+        reinterpret_cast<void*>(static_cast<uintptr_t>(logicalAppId)),
+        reinterpret_cast<const uint8_t*>(launchContext), launchContextLength, 0u};
     NativeAotStartupContext startup{
         &legacy, &pal, &gc, &app, startupInstallTls, startupMarker };
     using Entry = int32_t (GUIDEXOS_NATIVEAOT_PAL_CALL *)(void*);
@@ -1428,9 +1696,11 @@ LaunchStatus launchResident(const char* path, uint32_t logicalAppId,
     g_c107ManagedEntryObserved = false;
     g_c107ManagedPassObserved = false;
     g_c107ManagedInvalidApplicationObserved = false;
+    g_activeManagedContext = &app;
     arch::amd64::disable_interrupts();
     const int32_t managedReturn = reinterpret_cast<Entry>(report->entryPoint)(&startup);
     arch::amd64::enable_interrupts();
+    g_activeManagedContext = nullptr;
     report->managedReturn = managedReturn;
     report->managedEntryReached = g_c102ManagedEntryObserved ||
         g_c104ManagedEntryObserved || g_c107ManagedEntryObserved;
@@ -1468,17 +1738,40 @@ LaunchStatus launchResident(const char* path, uint32_t logicalAppId,
 }
 
 LaunchStatus launchInternal(const char* path, uint32_t logicalAppId,
-                            LaunchReport* report) {
+                            LaunchReport* report, const char* launchContext,
+                            uint32_t launchContextLength) {
     LaunchReport local{};
     if (report == nullptr) report = &local;
     *report = {};
     report->logicalAppId = logicalAppId;
     report->status = LaunchStatus::InvalidPath;
     if (path == nullptr || path[0] != '/') return report->status;
+    if ((launchContextLength != 0u && launchContext == nullptr) ||
+        launchContextLength > kManagedLaunchContextMaxBytes) {
+        report->status = LaunchStatus::InvalidLaunchContext;
+        serial::puts("[NATIVEAOT-CONTEXT] status=invalid length=");
+        serial::put_hex32(launchContextLength);
+        serial::puts("\n");
+        return report->status;
+    }
+    char launchContextCopy[kManagedLaunchContextMaxBytes + 1u] = {};
+    if (launchContextLength != 0u) {
+        for (uint32_t index = 0; index < launchContextLength; ++index) {
+            const uint8_t value = static_cast<uint8_t>(launchContext[index]);
+            if (value == 0u) {
+                report->status = LaunchStatus::InvalidLaunchContext;
+                serial::puts("[NATIVEAOT-CONTEXT] status=invalid embedded-nul\n");
+                return report->status;
+            }
+            launchContextCopy[index] = static_cast<char>(value);
+        }
+    }
     char requestedPath[kMaxApplicationPath] = {};
     if (!copyApplicationPath(path, requestedPath)) return report->status;
     if (g_application.state == ApplicationLifecycleState::Resident) {
-        return launchResident(requestedPath, logicalAppId, report);
+        return launchResident(requestedPath, logicalAppId, report,
+                              launchContextLength == 0u ? nullptr : launchContextCopy,
+                              launchContextLength);
     }
     g_application.state = ApplicationLifecycleState::Loading;
     const uint32_t sequence = 1u;
@@ -1599,10 +1892,15 @@ LaunchStatus launchInternal(const char* path, uint32_t logicalAppId,
     fillPalTable(&pal, report->artifactBase, report->artifactSpan);
     guidexos_nativeaot_gc_startup_platform_table_v1 gc{};
     fillGcTable(&gc);
-    NativeHostCallTable host{ sizeof(NativeHostCallTable), 0u, managedLog };
+    NativeHostCallTable host{
+        sizeof(NativeHostCallTable), 0u, managedLog, managedRequestWindow,
+        managedDrawText, managedDrawRect, managedAddButton, managedCloseWindow };
     NativeGxAppContext app{
         sizeof(NativeGxAppContext), 0u, &host,
-        reinterpret_cast<void*>(static_cast<uintptr_t>(logicalAppId))};
+        reinterpret_cast<void*>(static_cast<uintptr_t>(logicalAppId)),
+        reinterpret_cast<const uint8_t*>(
+            launchContextLength == 0u ? nullptr : launchContextCopy),
+        launchContextLength, 0u};
     NativeAotStartupContext startup{
         &legacy, &pal, &gc, &app, startupInstallTls, startupMarker };
     using Entry = int32_t (GUIDEXOS_NATIVEAOT_PAL_CALL *)(void*);
@@ -1617,9 +1915,11 @@ LaunchStatus launchInternal(const char* path, uint32_t logicalAppId,
     g_c107ManagedEntryObserved = false;
     g_c107ManagedPassObserved = false;
     g_c107ManagedInvalidApplicationObserved = false;
+    g_activeManagedContext = &app;
     arch::amd64::disable_interrupts();
     const int32_t managedReturn = reinterpret_cast<Entry>(report->entryPoint)(&startup);
     arch::amd64::enable_interrupts();
+    g_activeManagedContext = nullptr;
     report->managedReturn = managedReturn;
     report->managedEntryReached = g_c102ManagedEntryObserved ||
         g_c104ManagedEntryObserved || g_c107ManagedEntryObserved;
@@ -1670,12 +1970,14 @@ LaunchStatus launchInternal(const char* path, uint32_t logicalAppId,
 }
 
 LaunchStatus launch(const char* path, LaunchReport* report) {
-    return launchInternal(path, 0u, report);
+    return launchInternal(path, 0u, report, nullptr, 0u);
 }
 
 LaunchStatus launchLogical(const char* path, uint32_t logicalAppId,
-                           LaunchReport* report) {
-    return launchInternal(path, logicalAppId, report);
+                           LaunchReport* report, const char* launchContext,
+                           uint32_t launchContextLength) {
+    return launchInternal(path, logicalAppId, report, launchContext,
+                          launchContextLength);
 }
 
 bool isProductionLogicalApplicationId(const char* applicationId) {
@@ -1694,7 +1996,9 @@ const char* productionCompositeImagePath() {
 }
 
 LaunchStatus launchLogicalApplication(const char* applicationId,
-                                      LaunchReport* report) {
+                                      LaunchReport* report,
+                                      const char* launchContext,
+                                      uint32_t launchContextLength) {
     LaunchReport local{};
     if (report == nullptr) report = &local;
     *report = {};
@@ -1723,7 +2027,8 @@ LaunchStatus launchLogicalApplication(const char* applicationId,
     serial::puts(" selector=");
     serial::put_hex32(selector);
     serial::puts("\n");
-    return launchLogical(kProductionCompositeImage, selector, report);
+    return launchLogical(kProductionCompositeImage, selector, report,
+                         launchContext, launchContextLength);
 }
 
 } // namespace nativeaot

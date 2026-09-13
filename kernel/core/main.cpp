@@ -17,6 +17,7 @@
 #include "include/kernel/process.h"
 #include "include/kernel/desktop.h"
 #include "include/kernel/kernel_apps.h"
+#include "include/kernel/kernel_compositor.h"
 #include "include/kernel/interrupts.h"
 #include "include/kernel/ps2mouse.h"
 #include "include/kernel/ps2keyboard.h"
@@ -1026,7 +1027,9 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         runC104Launch(c104ASecondOrdinal, "A", "/system/wall/C104A.ELF");
 #endif
 
-#if defined(GXOS_NATIVEAOT_PRODUCTION_COMPOSITE_LAUNCH) && !defined(GXOS_NATIVEAOT_C110_APPMODEL_LAUNCH)
+#if defined(GXOS_NATIVEAOT_PRODUCTION_COMPOSITE_LAUNCH) && \
+    !defined(GXOS_NATIVEAOT_C110_APPMODEL_LAUNCH) && \
+    !defined(GXOS_NATIVEAOT_C111_USER_FACING)
         // Exercise the same desktop launch contract used by ordinary icon and
         // start-menu requests. The stable logical IDs are resolved to the one
         // resident composite image by nativeaot::launchLogicalApplication().
@@ -1161,6 +1164,197 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
             missingStatus == kernel::nativeaot::LaunchStatus::NotFound && unknownId &&
             c110A1 && c110B1 && c110A2 && c110B2 && c110A3 && independentGuard ? "PASS" : "FAIL");
         kernel::serial::puts(" sequence=ManagedWorkspace1 PASS -> ManagedStatus1 PASS -> ManagedWorkspace2 PASS -> ManagedStatus2 PASS -> ManagedWorkspace3 PASS\n");
+#endif
+
+#if defined(GXOS_NATIVEAOT_C111_USER_FACING)
+        // C111 uses the production App Model records and the same desktop
+        // activation handler as shell/start-menu launches.  The managed
+        // dispatcher remains the only selector-to-entrypoint boundary.
+        const gxos::apps::BuiltInAppMetadata* c111Workspace =
+            gxos::apps::FindBuiltInAppMetadataByDisplayName("Managed Workspace");
+        const gxos::apps::BuiltInAppMetadata* c111Status =
+            gxos::apps::FindBuiltInAppMetadataByDisplayName("Managed Status");
+        const bool c111WorkspaceValid = c111Workspace &&
+            gxos::apps::IsManagedNativeAotRecordValid(*c111Workspace);
+        const bool c111StatusValid = c111Status &&
+            gxos::apps::IsManagedNativeAotRecordValid(*c111Status);
+        const bool c111CatalogValid = gxos::apps::ManagedNativeAotCatalogIsValid() &&
+            c111WorkspaceValid && c111StatusValid;
+        kernel::serial::puts("[C111-APPMODEL] catalogValid=");
+        kernel::serial::puts(c111CatalogValid ? "true" : "false");
+        kernel::serial::puts(" workspaceId=");
+        kernel::serial::puts(c111Workspace ? c111Workspace->appId : "");
+        kernel::serial::puts(" workspaceSelector=");
+        kernel::serial::put_hex32(c111Workspace ? c111Workspace->managedSelector : 0u);
+        kernel::serial::puts(" statusId=");
+        kernel::serial::puts(c111Status ? c111Status->appId : "");
+        kernel::serial::puts(" statusSelector=");
+        kernel::serial::put_hex32(c111Status ? c111Status->managedSelector : 0u);
+        kernel::serial::puts(" shell=StartMenu,AllPrograms\n");
+
+        auto observeC111Surface = [](const char* title, uint32_t expectedPixel) {
+            auto textEquals = [](const char* left, const char* right) {
+                if (!left || !right) return false;
+                while (*left && *right && *left == *right) {
+                    ++left;
+                    ++right;
+                }
+                return *left == '\0' && *right == '\0';
+            };
+            kernel::compositor::KernelCompositor::drawAllWindows();
+            kernel::app::KernelWindow* window =
+                kernel::compositor::KernelCompositor::getFocusedWindow();
+            const bool titleValid = window && textEquals(window->title, title);
+            const bool framebufferValid = window && kernel::framebuffer::is_available();
+            const uint32_t pixel = framebufferValid
+                ? kernel::framebuffer::get_pixel(
+                    static_cast<uint32_t>(window->x) + 480u,
+                    static_cast<uint32_t>(window->y) +
+                        kernel::compositor::TITLEBAR_HEIGHT + 220u)
+                : 0u;
+            const bool result = titleValid && framebufferValid && pixel == expectedPixel;
+            kernel::serial::puts("[C111-VISIBLE] title=");
+            kernel::serial::puts(title);
+            kernel::serial::puts(" window=");
+            kernel::serial::put_hex32(window ? window->id : 0u);
+            kernel::serial::puts(" widgets=");
+            kernel::serial::put_hex32(window ? static_cast<uint32_t>(window->widgetCount) : 0u);
+            kernel::serial::puts(" pixel=");
+            kernel::serial::put_hex32(pixel);
+            kernel::serial::puts(" result=");
+            kernel::serial::puts(result ? "PASS\n" : "FAIL\n");
+            return result;
+        };
+
+        auto runC111ManagedLaunch = [&](uint32_t ordinal, const char* appName,
+                                        const char* applicationId,
+                                        const char* context, const char* surfaceTitle,
+                                        uint32_t surfacePixel) {
+            const bool launched = kernel::desktop::launch_app_with_context(
+                applicationId, context);
+            const bool visible = launched &&
+                observeC111Surface(surfaceTitle, surfacePixel);
+            kernel::serial::puts("[C111-LAUNCH] ordinal=");
+            kernel::serial::put_hex32(ordinal);
+            kernel::serial::puts(" app=");
+            kernel::serial::puts(appName);
+            kernel::serial::puts(" context=");
+            kernel::serial::puts(context ? context : "");
+            kernel::serial::puts(" result=");
+            kernel::serial::puts(visible ? "PASS\n" : "FAIL\n");
+            return visible;
+        };
+
+        const char* c111WorkspaceId = c111Workspace ? c111Workspace->appId : "";
+        const char* c111StatusId = c111Status ? c111Status->appId : "";
+        const bool c111Workspace1 = runC111ManagedLaunch(
+            1u, "ManagedWorkspace", c111WorkspaceId, "first-launch",
+            "Managed Workspace", 0xFF2A4A70u);
+
+        // Exercise the same compositor input path used by a real pointer
+        // click.  The button is created by managed code and handled by the
+        // existing KernelCompositor widget routing.
+        kernel::app::KernelWindow* interactionWindow =
+            kernel::compositor::KernelCompositor::getFocusedWindow();
+        bool interactionInput = false;
+        if (interactionWindow && interactionWindow->widgetCount > 0) {
+            kernel::app::Widget& widget =
+                interactionWindow->widgets[interactionWindow->widgetCount - 1];
+            if (widget.type == kernel::app::WidgetType::Button) {
+                const int32_t mouseX = interactionWindow->x + widget.x + widget.w / 2;
+                const int32_t mouseY = interactionWindow->y +
+                    kernel::compositor::TITLEBAR_HEIGHT + widget.y + widget.h / 2;
+                kernel::compositor::KernelCompositor::handleMouseDown(mouseX, mouseY, 1u);
+                kernel::compositor::KernelCompositor::handleMouseUp(mouseX, mouseY, 1u);
+                interactionInput = true;
+            }
+        }
+        kernel::serial::puts("[C111-INTERACTION-INPUT] result=");
+        kernel::serial::puts(interactionInput ? "PASS\n" : "FAIL\n");
+        const bool closeAfterInteraction = interactionInput &&
+            interactionWindow && kernel::compositor::KernelCompositor::requestCloseWindow(
+                interactionWindow->id);
+        kernel::serial::puts("[C111-CLOSE] result=");
+        kernel::serial::puts(closeAfterInteraction ? "PASS\n" : "FAIL\n");
+
+        const bool c111Native = kernel::desktop::launch_app("Notepad");
+        kernel::serial::puts("[C111-NATIVE-REGRESSION] app=Notepad result=");
+        kernel::serial::puts(c111Native ? "PASS\n" : "FAIL\n");
+
+        const bool c111Status1 = runC111ManagedLaunch(
+            3u, "ManagedStatus", c111StatusId, "status-after-native",
+            "Managed Status", 0xFF3A5A42u);
+        const bool c111Workspace2 = runC111ManagedLaunch(
+            4u, "ManagedWorkspace", c111WorkspaceId, "return-launch",
+            "Managed Workspace", 0xFF2A4A70u);
+        const bool c111Status2 = runC111ManagedLaunch(
+            5u, "ManagedStatus", c111StatusId, "status-relaunch",
+            "Managed Status", 0xFF3A5A42u);
+        const bool c111Workspace3 = runC111ManagedLaunch(
+            6u, "ManagedWorkspace", c111WorkspaceId, "",
+            "Managed Workspace", 0xFF2A4A70u);
+
+        char c111OversizedContext[50] = {};
+        for (uint32_t index = 0; index < 49u; ++index) c111OversizedContext[index] = 'x';
+        const bool oversizedRejected = !kernel::desktop::launch_app_with_context(
+            c111WorkspaceId, c111OversizedContext);
+        kernel::serial::puts("[C111-INVALID-CONTEXT] case=oversized result=");
+        kernel::serial::puts(oversizedRejected ? "PASS\n" : "FAIL\n");
+
+        kernel::nativeaot::LaunchReport nullContextReport{};
+        const kernel::nativeaot::LaunchStatus nullContextStatus =
+            kernel::nativeaot::launchLogicalApplication(
+                c111WorkspaceId, &nullContextReport, nullptr, 1u);
+        const bool nullContextRejected =
+            nullContextStatus == kernel::nativeaot::LaunchStatus::InvalidLaunchContext;
+        kernel::serial::puts("[C111-INVALID-CONTEXT] case=null-with-length result=");
+        kernel::serial::puts(nullContextRejected ? "PASS\n" : "FAIL\n");
+
+        gxos::apps::BuiltInAppMetadata invalidC111Record{};
+        if (c111Workspace) invalidC111Record = *c111Workspace;
+        invalidC111Record.appId = "com.guidexos.apps.c111.invalid-selector";
+        invalidC111Record.managedSelector = 0u;
+        const bool invalidC111RecordRejected =
+            !gxos::apps::IsManagedNativeAotRecordValid(invalidC111Record);
+        kernel::serial::puts("[C111-INVALID-RECORD] selector=0 result=");
+        kernel::serial::puts(invalidC111RecordRejected ? "PASS\n" : "FAIL\n");
+
+        const bool unknownC111Record = !kernel::desktop::launch_app(
+            "com.guidexos.apps.c111.unknown");
+        kernel::serial::puts("[C111-UNKNOWN-RECORD] result=");
+        kernel::serial::puts(unknownC111Record ? "PASS\n" : "FAIL\n");
+
+        kernel::nativeaot::LaunchReport c111MissingReport{};
+        const kernel::nativeaot::LaunchStatus c111MissingStatus =
+            kernel::nativeaot::launchLogical(
+                "/system/apps/C111-MISSING.ELF", 1u, &c111MissingReport);
+        const bool c111MissingImage =
+            c111MissingStatus == kernel::nativeaot::LaunchStatus::NotFound;
+        kernel::serial::puts("[C111-MISSING-IMAGE] status=");
+        kernel::serial::puts(kernel::nativeaot::launchStatusName(c111MissingStatus));
+        kernel::serial::puts(" result=");
+        kernel::serial::puts(c111MissingImage ? "PASS\n" : "FAIL\n");
+
+        kernel::nativeaot::LaunchReport c111IndependentReport{};
+        const kernel::nativeaot::LaunchStatus c111IndependentStatus =
+            kernel::nativeaot::launchLogical(
+                "/system/wall/C104A.ELF", 1u, &c111IndependentReport);
+        const bool c111IndependentGuard =
+            c111IndependentStatus == kernel::nativeaot::LaunchStatus::Busy ||
+            c111IndependentStatus == kernel::nativeaot::LaunchStatus::BaseCollision;
+        kernel::serial::puts("[C111-INDEPENDENT-IMAGE] status=");
+        kernel::serial::puts(kernel::nativeaot::launchStatusName(c111IndependentStatus));
+        kernel::serial::puts(" result=");
+        kernel::serial::puts(c111IndependentGuard ? "PASS\n" : "FAIL\n");
+
+        const bool c111Outcome = c111CatalogValid && c111Workspace1 && c111Native &&
+            c111Status1 && c111Workspace2 && c111Status2 && c111Workspace3 &&
+            interactionInput && closeAfterInteraction && oversizedRejected &&
+            nullContextRejected && invalidC111RecordRejected && unknownC111Record &&
+            c111MissingImage && c111IndependentGuard;
+        kernel::serial::puts("[C111-RESULT] outcome=");
+        kernel::serial::puts(c111Outcome ? "PASS" : "FAIL");
+        kernel::serial::puts(" sequence=Workspace(first-launch) -> Notepad -> Status(status-after-native) -> Workspace(return-launch) -> Status(status-relaunch) -> Workspace(empty)\n");
 #endif
 
 #if defined(GXOS_C107_PRODUCTION_LAUNCH) || defined(GXOS_C108_PRODUCTION_LAUNCH)
