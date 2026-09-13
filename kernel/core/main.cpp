@@ -1025,7 +1025,7 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         runC104Launch(c104ASecondOrdinal, "A", "/system/wall/C104A.ELF");
 #endif
 
-#if defined(GXOS_C107_PRODUCTION_LAUNCH)
+#if defined(GXOS_C107_PRODUCTION_LAUNCH) || defined(GXOS_C108_PRODUCTION_LAUNCH)
         auto emitC107Report = [](uint32_t ordinal, const char* identity,
                                  const kernel::nativeaot::LaunchReport& report,
                                  kernel::nativeaot::LaunchStatus status) {
@@ -1066,9 +1066,15 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
             kernel::serial::puts("\n");
         };
         constexpr const char* c107Path = "/system/wall/C107.ELF";
+#if defined(GXOS_C108_PRODUCTION_LAUNCH)
+        kernel::serial::puts("[C108-LAUNCH] ordinary application discovery path=");
+        kernel::serial::puts(c107Path);
+        kernel::serial::puts(" sequence=A1,B1,A2,B2,A3,invalid\n");
+#else
         kernel::serial::puts("[C107-LAUNCH] ordinary application discovery path=");
         kernel::serial::puts(c107Path);
         kernel::serial::puts(" sequence=A1,invalid,B1,A2\n");
+#endif
         auto runC107Launch = [&](uint32_t ordinal, const char* identity,
                                  uint32_t appId) {
             kernel::nativeaot::LaunchReport report{};
@@ -1077,6 +1083,30 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
             emitC107Report(ordinal, identity, report, status);
             return status;
         };
+#if defined(GXOS_C108_PRODUCTION_LAUNCH)
+        const kernel::nativeaot::LaunchStatus c108A1 =
+            runC107Launch(1u, "A", 1u);
+        const kernel::nativeaot::LaunchStatus c108B1 =
+            runC107Launch(2u, "B", 2u);
+        const kernel::nativeaot::LaunchStatus c108A2 =
+            runC107Launch(3u, "A", 1u);
+        const kernel::nativeaot::LaunchStatus c108B2 =
+            runC107Launch(4u, "B", 2u);
+        const kernel::nativeaot::LaunchStatus c108A3 =
+            runC107Launch(5u, "A", 1u);
+        const kernel::nativeaot::LaunchStatus c108Invalid =
+            runC107Launch(6u, "invalid", 0u);
+        const bool c108SequencePass =
+            c108A1 == kernel::nativeaot::LaunchStatus::Success &&
+            c108B1 == kernel::nativeaot::LaunchStatus::Success &&
+            c108A2 == kernel::nativeaot::LaunchStatus::Success &&
+            c108B2 == kernel::nativeaot::LaunchStatus::Success &&
+            c108A3 == kernel::nativeaot::LaunchStatus::Success &&
+            c108Invalid == kernel::nativeaot::LaunchStatus::InvalidApplicationId;
+        kernel::serial::puts("[C108-RESULT] outcome=");
+        kernel::serial::puts(c108SequencePass ? "PASS" : "FAIL");
+        kernel::serial::puts(" dispatch=A1 PASS -> B1 PASS -> A2 PASS -> B2 PASS -> A3 PASS -> invalid rejected\n");
+#else
         const kernel::nativeaot::LaunchStatus c107AFirst =
             runC107Launch(1u, "A", 1u);
         const kernel::nativeaot::LaunchStatus c107Invalid =
@@ -1093,6 +1123,7 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         kernel::serial::puts("[C107-RESULT] outcome=");
         kernel::serial::puts(c107SequencePass ? "PASS" : "FAIL");
         kernel::serial::puts(" dispatch=A PASS -> invalid rejected -> B PASS -> A PASS\n");
+#endif
 #endif
         
         kernel::serial::puts("[KERNEL] Entering main loop (waiting for input)...\n");

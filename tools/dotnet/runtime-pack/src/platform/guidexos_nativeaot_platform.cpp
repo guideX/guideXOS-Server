@@ -4,7 +4,7 @@
 #if defined(GUIDEXOS_NATIVEAOT_C011EC21_NATIVE_CONTINUATION) || defined(GUIDEXOS_NATIVEAOT_C011EC97)
 #include "guidexos_nativeaot_gc_startup_platform_contract.h"
 #endif
-#if defined(GUIDEXOS_NATIVEAOT_THREAD_STATIC_PROOF)
+#if defined(GUIDEXOS_NATIVEAOT_THREAD_STATIC_PROOF) || defined(GUIDEXOS_NATIVEAOT_C108_TLS_LIFECYCLE)
 #include "guidexos_nativeaot_thread_static_diagnostics.h"
 #endif
 #if defined(GUIDEXOS_NATIVEAOT_SINGLE_THREAD_SUSPEND_EE_ALLOCATION)
@@ -26,7 +26,7 @@ typedef void* LPVOID;
 #include "MethodTable.h"
 #include "ObjectLayout.h"
 #endif
-#if defined(GUIDEXOS_NATIVEAOT_THREAD_STATIC_PROOF) && !defined(GUIDEXOS_NATIVEAOT_SINGLE_THREAD_SUSPEND_EE_ALLOCATION)
+#if defined(GUIDEXOS_NATIVEAOT_THREAD_STATIC_PROOF) || defined(GUIDEXOS_NATIVEAOT_C108_TLS_LIFECYCLE)
 #include "common.h"
 #include "CommonTypes.h"
 #if !defined(FEATURE_EVENT_TRACE)
@@ -38,6 +38,9 @@ typedef void* LPVOID;
 #include "thread.inl"
 #include "MethodTable.h"
 #include "ObjectLayout.h"
+#if defined(GUIDEXOS_NATIVEAOT_C108_TLS_LIFECYCLE)
+#include "RuntimeInstance.h"
+#endif
 #endif
 #if defined(GUIDEXOS_NATIVEAOT_SEGMENT_BOUNDARY_ALLOCATION)
 #include "guidexos_nativeaot_virtual_memory_adapter.h"
@@ -63,7 +66,6 @@ extern "C" bool RhRegisterOSModule(
     void** pClasslibFunctions,
     uint32_t nClasslibFunctions);
 #endif
-
 #if defined(GUIDEXOS_NATIVEAOT_MANAGED_ALLOCATION)
 extern bool g_guideXosNativeAotCodeManagerRegistered;
 
@@ -32303,9 +32305,13 @@ bool g_guideXosNativeAotCodeManagerRegistered = false;
 void* g_guideXosNativeAotClasslibFunctions[16] = {};
 #endif
 
-#if defined(GUIDEXOS_NATIVEAOT_THREAD_STATIC_PROOF)
+#if defined(GUIDEXOS_NATIVEAOT_THREAD_STATIC_PROOF) || defined(GUIDEXOS_NATIVEAOT_C108_TLS_LIFECYCLE)
 extern "C" volatile guidexos_nativeaot_thread_static_diagnostics
     g_guideXosThreadStaticDiagnostics = { 1u };
+#endif
+#if defined(GUIDEXOS_NATIVEAOT_C108_TLS_LIFECYCLE)
+uint32_t g_c108ManagedHeapResetCount = 0u;
+bool g_c108ManagedHeapInitialized = false;
 #endif
 
 [[noreturn]] void guideXosFailFast(gx_uint32 reason) {
@@ -32356,6 +32362,107 @@ unsigned char* runtimeCell(unsigned char* block) {
     return block + kRuntimeCellOffset;
 }
 
+#if defined(GUIDEXOS_NATIVEAOT_C108_TLS_LIFECYCLE)
+void c108SerialPutChar(char value) {
+    if (value == '\n') {
+        while ((__inbyte(0x3FDu) & 0x20u) == 0u) {
+        }
+        __outbyte(0x3F8u, static_cast<unsigned char>('\r'));
+    }
+    while ((__inbyte(0x3FDu) & 0x20u) == 0u) {
+    }
+    __outbyte(0x3F8u, static_cast<unsigned char>(value));
+}
+
+void c108SerialPutString(const char* value) {
+    if (value == nullptr) {
+        return;
+    }
+    while (*value != '\0') {
+        c108SerialPutChar(*value++);
+    }
+}
+
+void c108SerialPutHex64(uintptr_t value) {
+    static const char hex[] = "0123456789ABCDEF";
+    for (int shift = 60; shift >= 0; shift -= 4) {
+        c108SerialPutChar(hex[(value >> shift) & 0xFu]);
+    }
+}
+
+const char* c108ApplicationName(uint32_t appId) {
+    return appId == 1u ? "A" : appId == 2u ? "B" : "?";
+}
+
+void c108RecordTlsIdentity(
+    uint32_t appId,
+    uint32_t appInvocation,
+    uint32_t ordinaryBefore,
+    uint32_t ordinaryAfter,
+    uint32_t threadBefore,
+    uint32_t threadAfter,
+    uintptr_t appThreadStaticAddress) {
+    Thread* thread = ThreadStore::GetCurrentThreadIfAvailable();
+    unsigned char* block = currentTlsBlock();
+    void** tlsVector = reinterpret_cast<void**>(__readgsqword(kTlsVectorOffset));
+    void** fls = flsCell(block, kGuideXosFlsIndex);
+    InlinedThreadStaticRoot* root = thread == nullptr
+        ? nullptr : thread->GetInlinedThreadStaticList();
+    RuntimeInstance* runtime = GetRuntimeInstance();
+    ICodeManager* codeManager = runtime == nullptr
+        ? nullptr
+        : runtime->GetCodeManagerForAddress(
+            reinterpret_cast<void*>(&__managedcode_a));
+
+    c108SerialPutString("[C108-TLS] app=");
+    c108SerialPutString(c108ApplicationName(appId));
+    c108SerialPutString(" appInvocation=");
+    c108SerialPutHex64(appInvocation);
+    c108SerialPutString(" ordinaryBefore=");
+    c108SerialPutHex64(ordinaryBefore);
+    c108SerialPutString(" ordinaryAfter=");
+    c108SerialPutHex64(ordinaryAfter);
+    c108SerialPutString(" threadBefore=");
+    c108SerialPutHex64(threadBefore);
+    c108SerialPutString(" threadAfter=");
+    c108SerialPutHex64(threadAfter);
+    c108SerialPutString(" appThreadStatic=");
+    c108SerialPutHex64(appThreadStaticAddress);
+    c108SerialPutString(" nativeThread=");
+    c108SerialPutHex64(thread == nullptr ? 0u :
+        reinterpret_cast<uintptr_t>(thread));
+    c108SerialPutString(" nativeOsThread=");
+    c108SerialPutHex64(thread == nullptr ? 0u :
+        static_cast<uintptr_t>(thread->GetPalThreadIdForLogging()));
+    c108SerialPutString(" tlsVector=");
+    c108SerialPutHex64(reinterpret_cast<uintptr_t>(tlsVector));
+    c108SerialPutString(" tlsIndex=");
+    c108SerialPutHex64(static_cast<uintptr_t>(_tls_index));
+    c108SerialPutString(" tlsBlock=");
+    c108SerialPutHex64(reinterpret_cast<uintptr_t>(block));
+    c108SerialPutString(" flsRuntime=");
+    c108SerialPutHex64(fls == nullptr || *fls == nullptr ? 0u :
+        reinterpret_cast<uintptr_t>(*fls));
+    c108SerialPutString(" threadStaticStorage=");
+    c108SerialPutHex64(thread == nullptr ? 0u :
+        reinterpret_cast<uintptr_t>(thread->GetThreadStaticStorage()));
+    c108SerialPutString(" inlinedRoot=");
+    c108SerialPutHex64(reinterpret_cast<uintptr_t>(root));
+    c108SerialPutString(" inlinedStorageBase=");
+    c108SerialPutHex64(root == nullptr || root->m_threadStaticsBase == nullptr ? 0u :
+        reinterpret_cast<uintptr_t>(root->m_threadStaticsBase));
+    c108SerialPutString(" runtime=");
+    c108SerialPutHex64(reinterpret_cast<uintptr_t>(runtime));
+    c108SerialPutString(" codeManager=");
+    c108SerialPutHex64(reinterpret_cast<uintptr_t>(codeManager));
+#if defined(GUIDEXOS_NATIVEAOT_C108_TLS_LIFECYCLE)
+    c108SerialPutString(" heapResets=");
+    c108SerialPutHex64(g_c108ManagedHeapResetCount);
+#endif
+    c108SerialPutString("\n");
+}
+#endif
+
 #if defined(GUIDEXOS_NATIVEAOT_MANAGED_ALLOCATION)
 void initializeNativeAotModules() {
     if (g_guideXosNativeAotModulesInitialized) {
@@ -32383,7 +32490,7 @@ void initializeNativeAotModules() {
     g_guideXosNativeAotClasslibFunctions[9] =
         reinterpret_cast<void*>(reinterpret_cast<void (*)()>(IDynamicCastableGetInterfaceImplementation));
 
-#if defined(GUIDEXOS_NATIVEAOT_THREAD_STATIC_PROOF)
+#if defined(GUIDEXOS_NATIVEAOT_THREAD_STATIC_PROOF) || defined(GUIDEXOS_NATIVEAOT_C108_TLS_LIFECYCLE)
     ++g_guideXosThreadStaticDiagnostics.moduleInitializationRequests;
 #endif
     void* osModule = PalGetModuleHandleFromPointer(
@@ -32448,7 +32555,7 @@ void initializeNativeAotModules() {
 #endif
 
     g_guideXosNativeAotModulesInitialized = true;
-#if defined(GUIDEXOS_NATIVEAOT_THREAD_STATIC_PROOF)
+#if defined(GUIDEXOS_NATIVEAOT_THREAD_STATIC_PROOF) || defined(GUIDEXOS_NATIVEAOT_C108_TLS_LIFECYCLE)
     ++g_guideXosThreadStaticDiagnostics.moduleInitializationEntries;
 #endif
     InitializeModules(
@@ -32457,7 +32564,7 @@ void initializeNativeAotModules() {
         static_cast<int>(__modules_z - __modules_a),
         g_guideXosNativeAotClasslibFunctions,
         16);
-#if defined(GUIDEXOS_NATIVEAOT_THREAD_STATIC_PROOF)
+#if defined(GUIDEXOS_NATIVEAOT_THREAD_STATIC_PROOF) || defined(GUIDEXOS_NATIVEAOT_C108_TLS_LIFECYCLE)
     ++g_guideXosThreadStaticDiagnostics.moduleInitializationCompletions;
 #endif
 }
@@ -32524,10 +32631,53 @@ void initializeRuntimeState(unsigned char* block) {
 
 #if defined(GUIDEXOS_NATIVEAOT_MANAGED_ALLOCATION)
 #if !defined(GUIDEXOS_NATIVEAOT_REAL_GC_ALLOCATION)
-    // Native ELF launch cleanup may recycle the same TLS block for the next
-    // application launch. Allocation state and proof diagnostics are launch
-    // scoped, so the reverse-P/Invoke entry is the explicit fresh-launch
-    // boundary rather than the stale TLS initialized bit.
+    // The C108 resident launcher keeps one NativeAOT managed thread attached
+    // across logical-app dispatches. The fixed diagnostic heap and its
+    // allocation cursor therefore have the same lifetime as that attached
+    // thread. Re-entering through RhpReversePInvoke must not turn a managed
+    // callback into a fresh heap launch: the inlined ThreadStatic base is a
+    // heap object rooted by the continuing NativeAOT Thread.
+#if defined(GUIDEXOS_NATIVEAOT_C108_TLS_LIFECYCLE)
+    if (!g_c108ManagedHeapInitialized) {
+        ++g_c108ManagedHeapResetCount;
+        c108SerialPutString("[C108-HEAP] action=reset count=");
+        c108SerialPutHex64(g_c108ManagedHeapResetCount);
+        c108SerialPutString(" base=");
+        c108SerialPutHex64(reinterpret_cast<uintptr_t>(g_guideXosManagedHeap));
+        c108SerialPutString(" bytes=");
+        c108SerialPutHex64(static_cast<uintptr_t>(kManagedHeapBytes));
+        c108SerialPutString(" reason=initial-managed-thread-attachment\n");
+
+        volatile unsigned char* diagnostics = reinterpret_cast<volatile unsigned char*>(&g_guideXosAllocationDiagnostics);
+        for (gx_size i = 0; i < sizeof(g_guideXosAllocationDiagnostics); ++i) {
+            diagnostics[i] = 0;
+        }
+        for (gx_size i = 0; i < kManagedHeapBytes; ++i) {
+            g_guideXosManagedHeap[i] = 0;
+        }
+        const gx_uintptr heapBase = reinterpret_cast<gx_uintptr>(g_guideXosManagedHeap);
+        const gx_uintptr heapLimit = heapBase + kManagedHeapBytes;
+        *reinterpret_cast<void**>(runtimeCell(block)) = reinterpret_cast<void*>(heapBase);
+        *reinterpret_cast<void**>(runtimeCell(block) + sizeof(void*)) = reinterpret_cast<void*>(heapLimit);
+        g_guideXosAllocationDiagnostics.heapInitialized = 1u;
+        g_guideXosAllocationDiagnostics.heapBase = heapBase;
+        g_guideXosAllocationDiagnostics.heapSize = kManagedHeapBytes;
+        g_guideXosAllocationDiagnostics.initialAllocationPointer = heapBase;
+        g_guideXosAllocationDiagnostics.allocationPointerAfter = heapBase;
+        g_guideXosAllocationDiagnostics.heapExpansionOccurred = 0u;
+        g_c108ManagedHeapInitialized = true;
+    } else {
+        c108SerialPutString("[C108-HEAP] action=preserve count=");
+        c108SerialPutHex64(g_c108ManagedHeapResetCount);
+        c108SerialPutString(" base=");
+        c108SerialPutHex64(reinterpret_cast<uintptr_t>(g_guideXosManagedHeap));
+        c108SerialPutString(" allocation=");
+        c108SerialPutHex64(reinterpret_cast<uintptr_t>(*reinterpret_cast<void**>(runtimeCell(block))));
+        c108SerialPutString(" reason=resident-managed-thread\n");
+    }
+#else
+    // Non-C108 disposable launch modes retain their historical launch-scoped
+    // allocation reset behavior.
     volatile unsigned char* diagnostics = reinterpret_cast<volatile unsigned char*>(&g_guideXosAllocationDiagnostics);
     for (gx_size i = 0; i < sizeof(g_guideXosAllocationDiagnostics); ++i) {
         diagnostics[i] = 0;
@@ -32545,6 +32695,7 @@ void initializeRuntimeState(unsigned char* block) {
     g_guideXosAllocationDiagnostics.initialAllocationPointer = heapBase;
     g_guideXosAllocationDiagnostics.allocationPointerAfter = heapBase;
     g_guideXosAllocationDiagnostics.heapExpansionOccurred = 0u;
+#endif
 #else
     // The real-GC experiment deliberately leaves the EE allocation context
     // at the value established by Thread::Construct.  The first managed
@@ -32615,7 +32766,7 @@ void initializeRuntimeState(unsigned char* block) {
     // substitute descriptor here.
     initializeNativeAotModules();
 #endif
-#if defined(GUIDEXOS_NATIVEAOT_THREAD_STATIC_PROOF)
+#if defined(GUIDEXOS_NATIVEAOT_THREAD_STATIC_PROOF) && !defined(GUIDEXOS_NATIVEAOT_C108_TLS_LIFECYCLE)
     // The disposable direct ELF launcher constructs the current NativeAOT
     // Thread but, unlike the stock bootstrapper's managed-thread entry path,
     // does not link it into the real ThreadStore.  Publish that same current
@@ -32648,7 +32799,7 @@ guideXosNativeAotC011EC31StrongRootRecorded(
 // HostLogProof's generated NativeAOT P/Invoke slot is intentionally bound by
 // the application-scoped runtime pack. The ELF loader does not run the Windows
 // module resolver that would normally populate this slot.
-#if defined(GUIDEXOS_NATIVEAOT_THREAD_STATIC_PROOF)
+#if defined(GUIDEXOS_NATIVEAOT_THREAD_STATIC_PROOF) || defined(GUIDEXOS_NATIVEAOT_C108_TLS_LIFECYCLE)
 extern "C" void* __pinvoke_HostLogProof__Module____Internal__guideXosManagedThreadStaticProofRecord__Ansi;
 extern "C" __declspec(dllexport) int __cdecl guideXosManagedThreadStaticProofRecord(
     uint32_t marker, uint32_t kind, uintptr_t assigned, uintptr_t readback,
@@ -32811,7 +32962,7 @@ extern "C" __declspec(dllexport) int __cdecl guideXosNativeAotC011EC56Finish();
 #endif
 #endif
 
-#if defined(GUIDEXOS_NATIVEAOT_THREAD_STATIC_PROOF)
+#if defined(GUIDEXOS_NATIVEAOT_THREAD_STATIC_PROOF) || defined(GUIDEXOS_NATIVEAOT_C108_TLS_LIFECYCLE)
 namespace {
 
 void captureThreadStaticIdentity() {
@@ -32861,10 +33012,12 @@ void captureThreadStaticIdentity() {
         ++rootCount;
     }
     (void)previousRoot;
+#if defined(GUIDEXOS_NATIVEAOT_THREAD_STATIC_PROOF)
     ThreadStore::Iterator iterator;
     while (iterator.GetNext() != nullptr && threadCount < 64u) {
         ++threadCount;
     }
+#endif
     diagnostics.registeredThreadCount = threadCount;
     diagnostics.duplicateStorageCount = rootCount > 1u ? rootCount - 1u : 0u;
 }
@@ -32922,6 +33075,14 @@ guideXosManagedThreadStaticProofRecord(
         diagnostics.referenceReadback = readback;
         diagnostics.referenceIdentityMatch = identityMatch;
         diagnostics.referenceObjectValid = objectValid;
+    } else if (kind == 3u) {
+#if defined(GUIDEXOS_NATIVEAOT_C108_TLS_LIFECYCLE)
+        const uint32_t ordinaryBefore = static_cast<uint32_t>(readback);
+        const uint32_t ordinaryAfter = static_cast<uint32_t>(readback >> 32);
+        c108RecordTlsIdentity(
+            objectValid, identityMatch, ordinaryBefore, ordinaryAfter,
+            expected, actual, assigned);
+#endif
     }
     return 0;
 }
@@ -34328,7 +34489,7 @@ extern "C" __declspec(noinline) void __cdecl RhpReversePInvoke(void* frame) {
     // Bind the one experimental __Internal P/Invoke slot after the reverse
     // transition has established the current thread state. This is not a
     // general P/Invoke resolver; it is the app-scoped allocation proof hook.
-#if defined(GUIDEXOS_NATIVEAOT_THREAD_STATIC_PROOF)
+#if defined(GUIDEXOS_NATIVEAOT_THREAD_STATIC_PROOF) || defined(GUIDEXOS_NATIVEAOT_C108_TLS_LIFECYCLE)
     using GuideXosManagedThreadStaticProofRecordFn = int (__cdecl*)(
         uint32_t, uint32_t, uintptr_t, uintptr_t, uint32_t, uint32_t,
         uint32_t, uint32_t);

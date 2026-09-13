@@ -27,7 +27,7 @@ public static unsafe class Program
     private static byte[]? s_threadStaticRef;
 #endif
 
-#if HOSTLOGPROOF_THREAD_STATIC_PRIMITIVE || HOSTLOGPROOF_THREAD_STATIC_REFERENCE || HOSTLOGPROOF_THREAD_STATIC_COMBINED
+#if HOSTLOGPROOF_THREAD_STATIC_PRIMITIVE || HOSTLOGPROOF_THREAD_STATIC_REFERENCE || HOSTLOGPROOF_THREAD_STATIC_COMBINED || HOSTLOGPROOF_C108_TLS_LIFECYCLE
     [DllImport("__Internal", EntryPoint = "guideXosManagedThreadStaticProofRecord")]
     private static extern int GuideXosManagedThreadStaticProofRecord(
         uint marker,
@@ -2080,6 +2080,16 @@ public static unsafe class Program
         }
     }
 
+#if HOSTLOGPROOF_C108_TLS_LIFECYCLE
+    private static nint ThreadStaticFieldAddress(ref int field)
+    {
+        fixed (int* address = &field)
+        {
+            return (nint)address;
+        }
+    }
+#endif
+
     private static bool LogCompositeDispatch(
         NativeGxAppContext* context,
         uint appId)
@@ -2100,6 +2110,7 @@ public static unsafe class Program
 
     private static int RunC107AppA(NativeGxAppContext* context)
     {
+        int ordinaryBefore = s_c107AppAInvocationCount;
         int invocationCount = ++s_c107AppAInvocationCount;
         int threadBefore = s_c107AppAThreadInvocationCount;
         int threadAfter = ++s_c107AppAThreadInvocationCount;
@@ -2119,6 +2130,25 @@ public static unsafe class Program
         {
             return GxAbi.ErrorInvalidArgument;
         }
+#if HOSTLOGPROOF_C108_TLS_LIFECYCLE
+        if (!allocationValid || invocationCount < 1)
+        {
+            return GxAbi.ErrorInvalidArgument;
+        }
+        if (GuideXosManagedThreadStaticProofRecord(
+                0xC1080001u,
+                3u,
+                ThreadStaticFieldAddress(ref s_c107AppAThreadInvocationCount),
+                (nint)((nuint)(uint)ordinaryBefore |
+                    ((nuint)(uint)invocationCount << 32)),
+                unchecked((uint)threadBefore),
+                unchecked((uint)threadAfter),
+                unchecked((uint)invocationCount),
+                GxAbi.CompositeAppA) != 0)
+        {
+            return GxAbi.ErrorInvalidArgument;
+        }
+#else
         // The production bridge reinstalls the current thread's TLS on every
         // resident entry.  The logical application static is the lifecycle
         // proof for C107; thread-static persistence is recorded separately and
@@ -2127,12 +2157,14 @@ public static unsafe class Program
         {
             return GxAbi.ErrorInvalidArgument;
         }
+#endif
         return LogCompositeText(context, "C107-APP-A-PASS"u8)
             ? 0 : GxAbi.ErrorInvalidArgument;
     }
 
     private static int RunC107AppB(NativeGxAppContext* context)
     {
+        int ordinaryBefore = s_c107AppBInvocationCount;
         int invocationCount = ++s_c107AppBInvocationCount;
         int threadBefore = s_c107AppBThreadInvocationCount;
         int threadAfter = ++s_c107AppBThreadInvocationCount;
@@ -2152,10 +2184,30 @@ public static unsafe class Program
         {
             return GxAbi.ErrorInvalidArgument;
         }
+#if HOSTLOGPROOF_C108_TLS_LIFECYCLE
+        if (!allocationValid || invocationCount < 1)
+        {
+            return GxAbi.ErrorInvalidArgument;
+        }
+        if (GuideXosManagedThreadStaticProofRecord(
+                0xC1080002u,
+                3u,
+                ThreadStaticFieldAddress(ref s_c107AppBThreadInvocationCount),
+                (nint)((nuint)(uint)ordinaryBefore |
+                    ((nuint)(uint)invocationCount << 32)),
+                unchecked((uint)threadBefore),
+                unchecked((uint)threadAfter),
+                unchecked((uint)invocationCount),
+                GxAbi.CompositeAppB) != 0)
+        {
+            return GxAbi.ErrorInvalidArgument;
+        }
+#else
         if (!allocationValid || invocationCount < 1 || threadAfter != 1)
         {
             return GxAbi.ErrorInvalidArgument;
         }
+#endif
         return LogCompositeText(context, "C107-APP-B-PASS"u8)
             ? 0 : GxAbi.ErrorInvalidArgument;
     }

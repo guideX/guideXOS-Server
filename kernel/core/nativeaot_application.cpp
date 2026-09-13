@@ -190,6 +190,10 @@ bool g_c107ManagedEntryObserved = false;
 bool g_c107ManagedPassObserved = false;
 bool g_c107ManagedInvalidApplicationObserved = false;
 ResidentApplication g_application = {};
+#if defined(GXOS_C108_TLS_LIFECYCLE)
+uint32_t g_c108TlsInstallCount = 0;
+uint32_t g_c108ManagedInvocationOrdinal = 0;
+#endif
 
 #if defined(GXOS_C103_PRODUCTION_LAUNCH) || defined(GXOS_C103_NEGATIVE_LAUNCH)
 constexpr bool kC103LifecycleEnabled = true;
@@ -326,7 +330,27 @@ bool installTls() {
     constexpr uint32_t kGsBaseMsr = 0xC0000101u;
     const uint64_t value = reinterpret_cast<uint64_t>(&g_tlsArea);
     arch::amd64::write_msr(kGsBaseMsr, value);
-    return arch::amd64::read_msr(kGsBaseMsr) == value;
+    const bool installed = arch::amd64::read_msr(kGsBaseMsr) == value;
+#if defined(GXOS_C108_TLS_LIFECYCLE)
+    ++g_c108TlsInstallCount;
+    serial::puts("[C108-TLS-BRIDGE] install=");
+    serial::put_hex32(g_c108TlsInstallCount);
+    serial::puts(" phase=");
+    serial::puts(g_application.state == ApplicationLifecycleState::Resident
+        ? "resident" : "initial");
+    serial::puts(" guideThread=");
+    serial::put_hex64(process::current_thread_id());
+    serial::puts(" gsArea=");
+    serial::put_hex64(reinterpret_cast<uintptr_t>(&g_tlsArea));
+    serial::puts(" tlsVector=");
+    serial::put_hex64(reinterpret_cast<uintptr_t>(g_tlsVector));
+    serial::puts(" tlsBlock=");
+    serial::put_hex64(reinterpret_cast<uintptr_t>(g_tlsBlock));
+    serial::puts(" result=");
+    serial::put_hex32(installed ? 1u : 0u);
+    serial::puts("\n");
+#endif
+    return installed;
 #else
     return false;
 #endif
@@ -849,6 +873,37 @@ bool managedMessageStartsWith(const uint8_t* message, const char* prefix) {
     return true;
 }
 
+#if defined(GXOS_C108_TLS_LIFECYCLE)
+void emitC108GuideIdentity(const char* appName) {
+    ++g_c108ManagedInvocationOrdinal;
+    guidexos::nativeaot::threadstore::ThreadSnapshot snapshot{};
+    const bool snapshotValid =
+        guidexos::nativeaot::threadstore::snapshotCurrentThread(&snapshot);
+    serial::puts("[C108-GUIDE] ordinal=");
+    serial::put_hex32(g_c108ManagedInvocationOrdinal);
+    serial::puts(" app=");
+    serial::puts(appName);
+    serial::puts(" guideThread=");
+    serial::put_hex64(process::current_thread_id());
+    serial::puts(" adapter=");
+    serial::put_hex64(reinterpret_cast<uintptr_t>(
+        guidexos::nativeaot::threadstore::getCurrentThread()));
+    serial::puts(" adapterNativeThread=");
+    serial::put_hex64(snapshotValid ? snapshot.nativeThreadId : 0u);
+    serial::puts(" adapterGeneration=");
+    serial::put_hex32(snapshotValid ? snapshot.generation : 0u);
+    serial::puts(" adapterAttached=");
+    serial::put_hex32(snapshotValid ? snapshot.attached : 0u);
+    serial::puts(" gsArea=");
+    serial::put_hex64(reinterpret_cast<uintptr_t>(&g_tlsArea));
+    serial::puts(" tlsVector=");
+    serial::put_hex64(reinterpret_cast<uintptr_t>(g_tlsVector));
+    serial::puts(" tlsBlock=");
+    serial::put_hex64(reinterpret_cast<uintptr_t>(g_tlsBlock));
+    serial::puts("\n");
+}
+#endif
+
 int32_t GUIDEXOS_NATIVEAOT_PAL_CALL managedLog(void*, uint8_t* message) {
     if (message == nullptr) return -1;
     if (managedMessageEquals(message, "C102-MANAGED-ENTRY")) {
@@ -870,6 +925,13 @@ int32_t GUIDEXOS_NATIVEAOT_PAL_CALL managedLog(void*, uint8_t* message) {
     } else if (managedMessageEquals(message, "C107-INVALID-APP-ID")) {
         g_c107ManagedInvalidApplicationObserved = true;
     }
+#if defined(GXOS_C108_TLS_LIFECYCLE)
+    if (managedMessageStartsWith(message, "C107-APP-A-STATE")) {
+        emitC108GuideIdentity("A");
+    } else if (managedMessageStartsWith(message, "C107-APP-B-STATE")) {
+        emitC108GuideIdentity("B");
+    }
+#endif
     const bool c104Message = managedMessageEquals(message, "C104-APP-A-ENTRY") ||
         managedMessageEquals(message, "C104-APP-A-PASS") ||
         managedMessageEquals(message, "C104-APP-B-ENTRY") ||

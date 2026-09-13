@@ -7,6 +7,7 @@ param(
     [switch]$ManagedAllocation,
     [switch]$ManagedRepeatedAllocation,
     [switch]$ProductionApplication,
+    [switch]$ThreadStaticLifecycleDiagnostics,
     [switch]$NativeAotFpRepair,
     [ValidateSet("Primary64KiB", "Small4KiB")]
     [string]$HeapConfiguration = "Primary64KiB",
@@ -187,12 +188,36 @@ if (-not [string]::IsNullOrWhiteSpace($ExternalRuntimeRoot)) {
 
 $source = Join-Path $RuntimePackRoot $lock.platformObject.source.Replace('/', '\')
 if (-not (Test-Path -LiteralPath $source)) { throw "Runtime-pack platform source not found: $source" }
+$c108Includes = ""
+$c108Defines = ""
+$c108SourceRoot = $null
+if ($ThreadStaticLifecycleDiagnostics) {
+    $c108SourceRoot = Join-Path $OutputRoot "nativeaot-c108-source"
+}
 
 if ($NativeAotFpRepair -and (Test-Path -LiteralPath $OutputRoot) -and -not $Clean) {
     throw "C51 stale-artifact protection: NativeAOT FP repair output already exists. Use -Clean or a fresh isolated OutputRoot: $OutputRoot"
 }
 if ($Clean -and (Test-Path -LiteralPath $OutputRoot)) { Remove-Item -LiteralPath $OutputRoot -Recurse -Force }
 New-Item -ItemType Directory -Force -Path $OutputRoot | Out-Null
+if ($ThreadStaticLifecycleDiagnostics) {
+    New-Item -ItemType Directory -Force -Path $c108SourceRoot | Out-Null
+    $c108SourceArchive = Join-Path $OutputRoot "nativeaot-c108-source.tar"
+    & git -C $lockedExternalRuntimeRoot archive --format=tar --output="$c108SourceArchive" $lock.ilCompiler.commit `
+        "src/coreclr/nativeaot/Runtime" "src/coreclr/inc" "src/coreclr/gc/env" `
+        "src/coreclr/pal/inc" "src/native/minipal"
+    if ($LASTEXITCODE -ne 0) { throw "Unable to archive locked NativeAOT C108 diagnostic sources." }
+    & tar.exe -xf $c108SourceArchive -C $c108SourceRoot
+    if ($LASTEXITCODE -ne 0) { throw "Unable to extract locked NativeAOT C108 diagnostic sources." }
+    $c108CoreclrRoot = Join-Path $c108SourceRoot "src\coreclr"
+    $c108RuntimeRoot = Join-Path $c108CoreclrRoot "nativeaot\Runtime"
+    if (-not (Test-Path -LiteralPath (Join-Path $c108RuntimeRoot "thread.h")) -or
+        -not (Test-Path -LiteralPath (Join-Path $c108SourceRoot "src\native\minipal\utils.h"))) {
+        throw "Locked NativeAOT C108 diagnostic sources were not extracted correctly."
+    }
+    $c108Defines = "/DWIN32 /D_WIN32 /D_WIN64 /DHOST_WINDOWS /DTARGET_WINDOWS /DHOST_AMD64 /DTARGET_AMD64 /DTARGET_64BIT /DHOST_64BIT /DNATIVEAOT /DFEATURE_NATIVEAOT /DFEATURE_HIJACK /DFEATURE_SUSPEND_REDIRECTION /DFEATURE_PERFTRACING /DFEATURE_BASICFREEZE /DFEATURE_CONSERVATIVE_GC /DFEATURE_CUSTOM_IMPORTS /DFEATURE_DYNAMIC_CODE /DFEATURE_CACHED_INTERFACE_DISPATCH /DVERIFY_HEAP /D_LIB /DUSE_GC_INFO_DECODER"
+    $c108Includes = "/I`"$c108RuntimeRoot`" /I`"$c108RuntimeRoot\windows`" /I`"$c108CoreclrRoot`" /I`"$c108CoreclrRoot\native`" /I`"$c108CoreclrRoot\gc`" /I`"$c108CoreclrRoot\gc\env`" /I`"$c108RuntimeRoot\inc`" /I`"$c108RuntimeRoot\eventpipe`" /I`"$c108CoreclrRoot\inc`" /I`"$c108CoreclrRoot\pal\inc`" /I`"$c108SourceRoot\src\native`" /I`"$(Join-Path $RuntimePackRoot 'src\platform')`" /FI`"$c108CoreclrRoot\gc\env\common.h`""
+}
 $object = Join-Path $OutputRoot "guidexos_nativeaot_platform.obj"
 $batch = Join-Path $OutputRoot "build-runtime-pack.bat"
 $sdkOutput = Join-Path $OutputRoot "sdk"
@@ -532,7 +557,7 @@ $lines = @(
     "setlocal",
     "call `"$vcvars`" >nul",
     "if errorlevel 1 exit /b %errorlevel%",
-    "cl.exe /nologo /TP /c /GS- /GR- /EHs-c- /Zl /Oi /O2 /Brepro $(if ($ManagedAllocation) { "/DGUIDEXOS_NATIVEAOT_MANAGED_ALLOCATION /DGUIDEXOS_MANAGED_HEAP_BYTES=$managedHeapBytes $(if ($ManagedRepeatedAllocation) { '/DGUIDEXOS_NATIVEAOT_MANAGED_REPEATED_ALLOCATION' } else { '' }) $(if ($ProductionApplication) { '/DGUIDEXOS_NATIVEAOT_PRODUCTION_APPLICATION' } else { '' })" } else { '' }) /Fo:`"$object`" `"$source`"",
+    "cl.exe /nologo /TP /c /GS- /GR- /EHs-c- /Zl /Oi /O2 /Brepro $(if ($ManagedAllocation) { "/DGUIDEXOS_NATIVEAOT_MANAGED_ALLOCATION /DGUIDEXOS_MANAGED_HEAP_BYTES=$managedHeapBytes $(if ($ManagedRepeatedAllocation) { '/DGUIDEXOS_NATIVEAOT_MANAGED_REPEATED_ALLOCATION' } else { '' }) $(if ($ProductionApplication) { '/DGUIDEXOS_NATIVEAOT_PRODUCTION_APPLICATION' } else { '' }) $(if ($ThreadStaticLifecycleDiagnostics) { '/DGUIDEXOS_NATIVEAOT_C108_TLS_LIFECYCLE' } else { '' })" } else { '' }) $c108Defines $c108Includes /Fo:`"$object`" `"$source`"",
     "exit /b %errorlevel%"
 )
 $lines | Set-Content -LiteralPath $batch -Encoding ASCII
@@ -571,7 +596,7 @@ if ($NativeAotFpRepair) {
 $manifest = [ordered]@{
     schemaVersion = 2
     c51Identifier = if ($NativeAotFpRepair) { "C011EC51" } else { $null }
-    identity = if ($ProductionApplication) { "guidexos-nativeaot-runtime-pack-amd64-production-application-v1" } elseif ($NativeAotFpRepair) { "guidexos-nativeaot-runtime-pack-amd64-workstationgc-fp-repair-v1" } elseif ($ManagedRepeatedAllocation) { "guidexos-nativeaot-runtime-pack-amd64-hostlog-repeated-allocation-nocollection-v1" } elseif ($ManagedAllocation) { "guidexos-nativeaot-runtime-pack-amd64-hostlog-allocating-nocollection-v1" } else { "guidexos-nativeaot-runtime-pack-amd64-hostlog-nonallocating-v1" }
+    identity = if ($ThreadStaticLifecycleDiagnostics) { "guidexos-nativeaot-runtime-pack-amd64-c108-threadstatic-lifecycle-v1" } elseif ($ProductionApplication) { "guidexos-nativeaot-runtime-pack-amd64-production-application-v1" } elseif ($NativeAotFpRepair) { "guidexos-nativeaot-runtime-pack-amd64-workstationgc-fp-repair-v1" } elseif ($ManagedRepeatedAllocation) { "guidexos-nativeaot-runtime-pack-amd64-hostlog-repeated-allocation-nocollection-v1" } elseif ($ManagedAllocation) { "guidexos-nativeaot-runtime-pack-amd64-hostlog-allocating-nocollection-v1" } else { "guidexos-nativeaot-runtime-pack-amd64-hostlog-nonallocating-v1" }
     repository = [ordered]@{ root = $RepoRoot; head = $repoHead; subject = $repoSubject; branch = (& git -C $RepoRoot branch --show-current).Trim(); upstream = $repoUpstream; aheadBehind = $repoAheadBehind }
     runtimeIdentity = [ordered]@{ nativeAot = $lock.ilCompiler.version; architecture = "AMD64"; gc = "Workstation"; gcInterface = "5.3"; eeInterface = "2"; targetFramework = $lock.targetFramework; runtimeIdentifier = $lock.runtimeIdentifier; sourceCommit = $lock.ilCompiler.commit }
     architecture = $lock.architecture
@@ -634,6 +659,7 @@ $manifest = [ordered]@{
     managedExceptions = $false
     managedThreads = $false
     productionApplication = [bool]$ProductionApplication
+    threadStaticLifecycleDiagnostics = [bool]$ThreadStaticLifecycleDiagnostics
 }
 $manifest | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $manifestPath -Encoding ASCII
 

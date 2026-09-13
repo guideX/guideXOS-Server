@@ -11,7 +11,8 @@
     [string]$AllocationMode = "NonAllocating",
     [string]$RuntimePackOutputRoot = "",
     [switch]$ProductionApplication,
-    [ValidateSet("Production", "C104AppA", "C104AppB", "C107Composite")]
+    [switch]$ThreadStaticLifecycleDiagnostics,
+    [ValidateSet("Production", "C104AppA", "C104AppB", "C107Composite", "C108ThreadStaticLifecycle")]
     [string]$ManagedProjectMode = "",
     [ValidateSet("Primary64KiB", "Small4KiB")]
     [string]$HeapConfiguration = "Primary64KiB",
@@ -154,6 +155,7 @@ if ($UseGuideXosRuntimePack) {
     if ($AllocationMode -eq "Repeated") { $runtimePackBuildArguments += "-ManagedRepeatedAllocation" }
     elseif ($AllocationMode -eq "Allocating") { $runtimePackBuildArguments += "-ManagedAllocation" }
     if ($ProductionApplication) { $runtimePackBuildArguments += "-ProductionApplication" }
+    if ($ThreadStaticLifecycleDiagnostics) { $runtimePackBuildArguments += "-ThreadStaticLifecycleDiagnostics" }
     if ($HeapConfiguration -ne "Primary64KiB") { $runtimePackBuildArguments += @("-HeapConfiguration", $HeapConfiguration) }
     & powershell -ExecutionPolicy Bypass -File $runtimePackBuild @runtimePackBuildArguments
     if ($LASTEXITCODE -ne 0) {
@@ -280,6 +282,8 @@ $palContractSource = Join-Path $RuntimePackRoot "src\platform\guidexos_nativeaot
 $palContractObj = Join-Path $artifactRoot "guidexos_nativeaot_pal_contract.obj"
 $gcStartupContractSource = Join-Path $RuntimePackRoot "src\platform\guidexos_nativeaot_gc_startup_platform_contract.cpp"
 $gcStartupContractObj = Join-Path $artifactRoot "guidexos_nativeaot_gc_startup_platform_contract.obj"
+$managedHostShimsSource = Join-Path $RuntimePackRoot "src\probes\guidexos_nativeaot_managed_host_shims.cpp"
+$managedHostShimsObj = Join-Path $artifactRoot "guidexos_nativeaot_managed_host_shims.obj"
 
 if ($Clean) {
     Assert-WithinRoot $OutputRoot $RepoRoot "Output"
@@ -330,6 +334,8 @@ $toolchainLines = @(
     "PalContractObj=$palContractObj"
     "GcStartupContractSource=$gcStartupContractSource"
     "GcStartupContractObj=$gcStartupContractObj"
+    "ManagedHostShimsSource=$managedHostShimsSource"
+    "ManagedHostShimsObj=$managedHostShimsObj"
     "NativeImportObj=$startupImportsObj"
     "ProductionApplication=$ProductionApplication"
         "UseGuideXosRuntimePack=$UseGuideXosRuntimePack"
@@ -384,6 +390,9 @@ try {
         $publishProperties += "-p:HostLogProofPalMinWinObj=$palMinWinObj"
         $publishProperties += "-p:HostLogProofNativeImportObj=$startupImportsObj"
     }
+    if ($ThreadStaticLifecycleDiagnostics) {
+        $publishProperties += "-p:HostLogProofManagedHostShimsObj=$managedHostShimsObj"
+    }
     $publishBatch = @(
         "@echo off"
         "setlocal"
@@ -394,6 +403,7 @@ try {
         "cl.exe /nologo /TC /c /GS- /Zl /Fo:`"$runtimeSupportObj`" `"$runtimeSupportSource`""
         "if errorlevel 1 exit /b %errorlevel%"
         $(if ($ProductionApplication) { "cl.exe /nologo /std:c++17 /TP /c /MT /GS- /GR- /EHs-c- /Zl /Oi /O2 /Zc:inline /Brepro /DWIN32 /D_WIN32 /D_WIN64 /DHOST_WINDOWS /DTARGET_WINDOWS /DHOST_AMD64 /DTARGET_AMD64 /DTARGET_64BIT /DHOST_64BIT /DNATIVEAOT /DFEATURE_NATIVEAOT /DFEATURE_HIJACK /DFEATURE_SUSPEND_REDIRECTION /DFEATURE_PERFTRACING /DFEATURE_BASICFREEZE /DFEATURE_CONSERVATIVE_GC /DFEATURE_CUSTOM_IMPORTS /DFEATURE_DYNAMIC_CODE /DFEATURE_CACHED_INTERFACE_DISPATCH /DVERIFY_HEAP /D_LIB /DGUIDEXOS_NATIVEAOT_RUNTIME_STARTUP /I`"$(Join-Path $RuntimePackRoot 'src\platform')`" /Fo:`"$palMinWinObj`" `"$palMinWinSource`""; "if errorlevel 1 exit /b %errorlevel%"; "cl.exe /nologo /std:c++17 /TP /c /MT /GS- /GR- /EHs-c- /Zl /Oi /O2 /Zc:inline /Brepro /I`"$(Join-Path $RuntimePackRoot 'src\platform')`" /Fo:`"$palContractObj`" `"$palContractSource`""; "if errorlevel 1 exit /b %errorlevel%"; "cl.exe /nologo /std:c++17 /TP /c /MT /GS- /GR- /EHs-c- /Zl /Oi /O2 /Zc:inline /Brepro /I`"$(Join-Path $RuntimePackRoot 'src\platform')`" /Fo:`"$gcStartupContractObj`" `"$gcStartupContractSource`""; "if errorlevel 1 exit /b %errorlevel%" } else { $null })
+        $(if ($ThreadStaticLifecycleDiagnostics) { "cl.exe /nologo /std:c++17 /TP /c /MT /GS- /GR- /EHs-c- /Zl /Oi /O2 /Zc:inline /Brepro /Fo:`"$managedHostShimsObj`" `"$managedHostShimsSource`""; "if errorlevel 1 exit /b %errorlevel%" } else { $null })
         $(if ($ProductionApplication) { "cl.exe /nologo /TC /c /GS- /Zl /Fo:`"$c102StartupObj`" `"$c102StartupSource`""; "if errorlevel 1 exit /b %errorlevel%" } else { $null })
         "`"$dotnetExePath`" publish `"$projectFile`" -c Release -r win-x64 --self-contained true -p:PublishAot=true -p:InvariantGlobalization=true -p:IlcGenerateStackTraceData=false -p:IlcUseEnvironmentalTools=true $($publishProperties -join ' ')"
         "exit /b %errorlevel%"

@@ -47,7 +47,12 @@
     <EntryPointSymbol>GuideXosNativeAotApplicationEntry</EntryPointSymbol>
   </PropertyGroup>
 
-  <PropertyGroup Condition="'$(HostLogProofMode)' == 'Production' or '$(HostLogProofMode)' == 'C104AppA' or '$(HostLogProofMode)' == 'C104AppB' or '$(HostLogProofMode)' == 'C107Composite'">
+  <PropertyGroup Condition="'$(HostLogProofMode)' == 'C108ThreadStaticLifecycle'">
+    <DefineConstants>$(DefineConstants);HOSTLOGPROOF_PRODUCTION;HOSTLOGPROOF_C107_COMPOSITE;HOSTLOGPROOF_C108_TLS_LIFECYCLE</DefineConstants>
+    <EntryPointSymbol>GuideXosNativeAotApplicationEntry</EntryPointSymbol>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(HostLogProofMode)' == 'Production' or '$(HostLogProofMode)' == 'C104AppA' or '$(HostLogProofMode)' == 'C104AppB' or '$(HostLogProofMode)' == 'C107Composite' or '$(HostLogProofMode)' == 'C108ThreadStaticLifecycle'">
     <HostLogProofIsProduction>true</HostLogProofIsProduction>
   </PropertyGroup>
 
@@ -424,5 +429,6 @@
     <NativeLibrary Include="$(HostLogProofGcStartupContractObj)" Condition="'$(HostLogProofGcStartupContractObj)' != '' and Exists('$(HostLogProofGcStartupContractObj)')" />
     <NativeLibrary Include="$(HostLogProofC102StartupObj)" Condition="'$(HostLogProofC102StartupObj)' != '' and Exists('$(HostLogProofC102StartupObj)')" />
     <NativeLibrary Include="$(HostLogProofNativeImportObj)" Condition="'$(HostLogProofNativeImportObj)' != '' and Exists('$(HostLogProofNativeImportObj)')" />
+    <NativeLibrary Include="$(HostLogProofManagedHostShimsObj)" Condition="'$(HostLogProofManagedHostShimsObj)' != '' and Exists('$(HostLogProofManagedHostShimsObj)')" />
   </ItemGroup>
 </Project>
