@@ -5,8 +5,12 @@ namespace HostLogProof;
 public static class GxAbi
 {
     public const uint ApiVersion = 0u;
+    public const uint CompositeAppInvalid = 0u;
+    public const uint CompositeAppA = 1u;
+    public const uint CompositeAppB = 2u;
     public const int ErrorInvalidArgument = -2;
     public const int ErrorUnsupported = -3;
+    public const int ErrorInvalidApplicationId = -4;
 }
 
 [StructLayout(LayoutKind.Sequential)]

@@ -11,7 +11,7 @@
     [string]$AllocationMode = "NonAllocating",
     [string]$RuntimePackOutputRoot = "",
     [switch]$ProductionApplication,
-    [ValidateSet("Production", "C104AppA", "C104AppB")]
+    [ValidateSet("Production", "C104AppA", "C104AppB", "C107Composite")]
     [string]$ManagedProjectMode = "",
     [ValidateSet("Primary64KiB", "Small4KiB")]
     [string]$HeapConfiguration = "Primary64KiB",

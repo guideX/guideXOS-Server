@@ -51,6 +51,7 @@ constexpr uint32_t kElfFlagWrite = 2u;
 constexpr uint32_t kElfFlagRead = 4u;
 constexpr uint32_t kVmemCommit = 0x1000u;
 constexpr uint32_t kVmemRelease = 0x8000u;
+constexpr int32_t kC107InvalidApplicationIdReturn = -4;
 
 #pragma pack(push, 1)
 struct Elf64Header {
@@ -185,6 +186,9 @@ bool g_c102ManagedEntryObserved = false;
 bool g_c102ManagedPassObserved = false;
 bool g_c104ManagedEntryObserved = false;
 bool g_c104ManagedPassObserved = false;
+bool g_c107ManagedEntryObserved = false;
+bool g_c107ManagedPassObserved = false;
+bool g_c107ManagedInvalidApplicationObserved = false;
 ResidentApplication g_application = {};
 
 #if defined(GXOS_C103_PRODUCTION_LAUNCH) || defined(GXOS_C103_NEGATIVE_LAUNCH)
@@ -837,6 +841,14 @@ bool managedMessageEquals(const uint8_t* message, const char* expected) {
     return message[index] == 0;
 }
 
+bool managedMessageStartsWith(const uint8_t* message, const char* prefix) {
+    if (message == nullptr || prefix == nullptr) return false;
+    for (uint32_t index = 0; prefix[index] != 0; ++index) {
+        if (message[index] != static_cast<uint8_t>(prefix[index])) return false;
+    }
+    return true;
+}
+
 int32_t GUIDEXOS_NATIVEAOT_PAL_CALL managedLog(void*, uint8_t* message) {
     if (message == nullptr) return -1;
     if (managedMessageEquals(message, "C102-MANAGED-ENTRY")) {
@@ -849,12 +861,22 @@ int32_t GUIDEXOS_NATIVEAOT_PAL_CALL managedLog(void*, uint8_t* message) {
     } else if (managedMessageEquals(message, "C104-APP-A-PASS") ||
                managedMessageEquals(message, "C104-APP-B-PASS")) {
         g_c104ManagedPassObserved = true;
+    } else if (managedMessageEquals(message, "C107-APP-A-ENTRY") ||
+               managedMessageEquals(message, "C107-APP-B-ENTRY")) {
+        g_c107ManagedEntryObserved = true;
+    } else if (managedMessageEquals(message, "C107-APP-A-PASS") ||
+               managedMessageEquals(message, "C107-APP-B-PASS")) {
+        g_c107ManagedPassObserved = true;
+    } else if (managedMessageEquals(message, "C107-INVALID-APP-ID")) {
+        g_c107ManagedInvalidApplicationObserved = true;
     }
     const bool c104Message = managedMessageEquals(message, "C104-APP-A-ENTRY") ||
         managedMessageEquals(message, "C104-APP-A-PASS") ||
         managedMessageEquals(message, "C104-APP-B-ENTRY") ||
         managedMessageEquals(message, "C104-APP-B-PASS");
-    serial::puts(c104Message ? "[C104-MANAGED-OUTPUT] " : "[C102-MANAGED-OUTPUT] ");
+    const bool c107Message = managedMessageStartsWith(message, "C107-");
+    serial::puts(c107Message ? "[C107-MANAGED-OUTPUT] " :
+        c104Message ? "[C104-MANAGED-OUTPUT] " : "[C102-MANAGED-OUTPUT] ");
     for (uint32_t index = 0; index < 128u && message[index] != 0; ++index) {
         serial::putc(static_cast<char>(message[index]));
     }
@@ -1136,11 +1158,21 @@ const char* launchStatusName(LaunchStatus status) {
         case LaunchStatus::ManagedFailed: return "managed-failed";
         case LaunchStatus::Busy: return "busy";
         case LaunchStatus::BaseCollision: return "base-collision";
+        case LaunchStatus::InvalidApplicationId: return "invalid-app-id";
     }
     return "unknown";
 }
 
-LaunchStatus launchResident(const char* path, LaunchReport* report) {
+LaunchStatus statusForManagedReturn(int32_t managedReturn) {
+    if (managedReturn == 0) return LaunchStatus::Success;
+    if (managedReturn == kC107InvalidApplicationIdReturn) {
+        return LaunchStatus::InvalidApplicationId;
+    }
+    return LaunchStatus::ManagedFailed;
+}
+
+LaunchStatus launchResident(const char* path, uint32_t logicalAppId,
+                            LaunchReport* report) {
     const uint32_t sequence = g_application.sequence + 1u;
     emitC103Begin(sequence, path, true);
     const uint8_t handle = vfs::open(path, vfs::OPEN_READ);
@@ -1258,7 +1290,9 @@ LaunchStatus launchResident(const char* path, LaunchReport* report) {
     guidexos_nativeaot_gc_startup_platform_table_v1 gc{};
     fillGcTable(&gc);
     NativeHostCallTable host{ sizeof(NativeHostCallTable), 0u, managedLog };
-    NativeGxAppContext app{ sizeof(NativeGxAppContext), 0u, &host, nullptr };
+    NativeGxAppContext app{
+        sizeof(NativeGxAppContext), 0u, &host,
+        reinterpret_cast<void*>(static_cast<uintptr_t>(logicalAppId))};
     NativeAotStartupContext startup{
         &legacy, &pal, &gc, &app, startupInstallTls, startupMarker };
     using Entry = int32_t (GUIDEXOS_NATIVEAOT_PAL_CALL *)(void*);
@@ -1266,13 +1300,20 @@ LaunchStatus launchResident(const char* path, LaunchReport* report) {
     g_c102ManagedPassObserved = false;
     g_c104ManagedEntryObserved = false;
     g_c104ManagedPassObserved = false;
+    g_c107ManagedEntryObserved = false;
+    g_c107ManagedPassObserved = false;
+    g_c107ManagedInvalidApplicationObserved = false;
     arch::amd64::disable_interrupts();
     const int32_t managedReturn = reinterpret_cast<Entry>(report->entryPoint)(&startup);
     arch::amd64::enable_interrupts();
     report->managedReturn = managedReturn;
-    report->managedEntryReached = g_c102ManagedEntryObserved || g_c104ManagedEntryObserved;
-    report->managedPassReached = (g_c102ManagedPassObserved || g_c104ManagedPassObserved) &&
+    report->managedEntryReached = g_c102ManagedEntryObserved ||
+        g_c104ManagedEntryObserved || g_c107ManagedEntryObserved;
+    report->managedPassReached = (g_c102ManagedPassObserved ||
+        g_c104ManagedPassObserved || g_c107ManagedPassObserved) &&
         managedReturn == 0;
+    report->managedInvalidApplicationObserved =
+        g_c107ManagedInvalidApplicationObserved;
     report->launcherRegainedControl = true;
     report->mappingsPersistentByDesign = true;
     g_application.sequence = sequence;
@@ -1296,21 +1337,23 @@ LaunchStatus launchResident(const char* path, LaunchReport* report) {
     emitC103Frames("after-return", sequence, after);
     emitC103Frames("after-lifecycle", sequence, after);
     emitC103Lifecycle(sequence, "resident", true);
-    report->status = managedReturn == 0 ? LaunchStatus::Success : LaunchStatus::ManagedFailed;
+    report->status = statusForManagedReturn(managedReturn);
     emitC103Return(sequence, report->status);
     return report->status;
 }
 
-LaunchStatus launch(const char* path, LaunchReport* report) {
+LaunchStatus launchInternal(const char* path, uint32_t logicalAppId,
+                            LaunchReport* report) {
     LaunchReport local{};
     if (report == nullptr) report = &local;
     *report = {};
+    report->logicalAppId = logicalAppId;
     report->status = LaunchStatus::InvalidPath;
     if (path == nullptr || path[0] != '/') return report->status;
     char requestedPath[kMaxApplicationPath] = {};
     if (!copyApplicationPath(path, requestedPath)) return report->status;
     if (g_application.state == ApplicationLifecycleState::Resident) {
-        return launchResident(requestedPath, report);
+        return launchResident(requestedPath, logicalAppId, report);
     }
     g_application.state = ApplicationLifecycleState::Loading;
     const uint32_t sequence = 1u;
@@ -1432,7 +1475,9 @@ LaunchStatus launch(const char* path, LaunchReport* report) {
     guidexos_nativeaot_gc_startup_platform_table_v1 gc{};
     fillGcTable(&gc);
     NativeHostCallTable host{ sizeof(NativeHostCallTable), 0u, managedLog };
-    NativeGxAppContext app{ sizeof(NativeGxAppContext), 0u, &host, nullptr };
+    NativeGxAppContext app{
+        sizeof(NativeGxAppContext), 0u, &host,
+        reinterpret_cast<void*>(static_cast<uintptr_t>(logicalAppId))};
     NativeAotStartupContext startup{
         &legacy, &pal, &gc, &app, startupInstallTls, startupMarker };
     using Entry = int32_t (GUIDEXOS_NATIVEAOT_PAL_CALL *)(void*);
@@ -1444,13 +1489,20 @@ LaunchStatus launch(const char* path, LaunchReport* report) {
     g_c102ManagedPassObserved = false;
     g_c104ManagedEntryObserved = false;
     g_c104ManagedPassObserved = false;
+    g_c107ManagedEntryObserved = false;
+    g_c107ManagedPassObserved = false;
+    g_c107ManagedInvalidApplicationObserved = false;
     arch::amd64::disable_interrupts();
     const int32_t managedReturn = reinterpret_cast<Entry>(report->entryPoint)(&startup);
     arch::amd64::enable_interrupts();
     report->managedReturn = managedReturn;
-    report->managedEntryReached = g_c102ManagedEntryObserved || g_c104ManagedEntryObserved;
-    report->managedPassReached = (g_c102ManagedPassObserved || g_c104ManagedPassObserved) &&
+    report->managedEntryReached = g_c102ManagedEntryObserved ||
+        g_c104ManagedEntryObserved || g_c107ManagedEntryObserved;
+    report->managedPassReached = (g_c102ManagedPassObserved ||
+        g_c104ManagedPassObserved || g_c107ManagedPassObserved) &&
         managedReturn == 0;
+    report->managedInvalidApplicationObserved =
+        g_c107ManagedInvalidApplicationObserved;
     report->launcherRegainedControl = true;
     g_application.state = ApplicationLifecycleState::Resident;
     (void)copyApplicationPath(requestedPath, g_application.path);
@@ -1487,9 +1539,18 @@ LaunchStatus launch(const char* path, LaunchReport* report) {
     emitC103Frames("after-return", sequence, after);
     emitC103Frames("after-lifecycle", sequence, after);
     emitC103Lifecycle(sequence, "resident", false);
-    report->status = managedReturn == 0 ? LaunchStatus::Success : LaunchStatus::ManagedFailed;
+    report->status = statusForManagedReturn(managedReturn);
     emitC103Return(sequence, report->status);
     return report->status;
+}
+
+LaunchStatus launch(const char* path, LaunchReport* report) {
+    return launchInternal(path, 0u, report);
+}
+
+LaunchStatus launchLogical(const char* path, uint32_t logicalAppId,
+                           LaunchReport* report) {
+    return launchInternal(path, logicalAppId, report);
 }
 
 } // namespace nativeaot

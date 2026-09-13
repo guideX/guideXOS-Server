@@ -19,10 +19,12 @@ enum class LaunchStatus : int32_t {
     ManagedFailed = -10,
     Busy = -11,
     BaseCollision = -12,
+    InvalidApplicationId = -13,
 };
 
 struct LaunchReport {
     LaunchStatus status;
+    uint32_t logicalAppId;
     int32_t managedReturn;
     uint64_t artifactBytes;
     uint64_t artifactBase;
@@ -54,10 +56,13 @@ struct LaunchReport {
     bool mappingsPersistentByDesign;
     bool managedEntryReached;
     bool managedPassReached;
+    bool managedInvalidApplicationObserved;
     bool launcherRegainedControl;
 };
 
 LaunchStatus launch(const char* path, LaunchReport* report);
+LaunchStatus launchLogical(const char* path, uint32_t logicalAppId,
+                           LaunchReport* report);
 const char* launchStatusName(LaunchStatus status);
 
 } // namespace nativeaot

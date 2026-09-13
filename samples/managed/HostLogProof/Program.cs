@@ -9,6 +9,14 @@ public static unsafe class Program
 #if HOSTLOGPROOF_C104_APP_B
     private static int s_c104AppBState;
 #endif
+#if HOSTLOGPROOF_C107_COMPOSITE
+    private static int s_c107AppAInvocationCount;
+    private static int s_c107AppBInvocationCount;
+    [ThreadStatic]
+    private static int s_c107AppAThreadInvocationCount;
+    [ThreadStatic]
+    private static int s_c107AppBThreadInvocationCount;
+#endif
 #if HOSTLOGPROOF_THREAD_STATIC_PRIMITIVE || HOSTLOGPROOF_THREAD_STATIC_COMBINED
     [ThreadStatic]
     private static int s_threadStaticInt;
@@ -1987,6 +1995,190 @@ public static unsafe class Program
     private static extern int GuideXosManagedArrayHostLog(NativeGxAppContext* context, nint arrayObject);
 #endif
 
+#if HOSTLOGPROOF_C107_COMPOSITE
+    private static bool LogCompositeText(
+        NativeGxAppContext* context,
+        ReadOnlySpan<byte> text)
+    {
+        if (context == null || context->host == null || context->host->log == null)
+        {
+            return false;
+        }
+
+        Span<byte> buffer = stackalloc byte[text.Length + 1];
+        text.CopyTo(buffer);
+        buffer[text.Length] = 0;
+        fixed (byte* message = buffer)
+        {
+            return context->host->log(context, message) == 0;
+        }
+    }
+
+    private static void AppendCompositeUnsigned(
+        Span<byte> buffer,
+        ref int position,
+        uint value)
+    {
+        Span<byte> digits = stackalloc byte[10];
+        int digitCount = 0;
+        do
+        {
+            digits[digitCount++] = (byte)('0' + (value % 10u));
+            value /= 10u;
+        } while (value != 0u);
+
+        while (digitCount != 0)
+        {
+            buffer[position++] = digits[--digitCount];
+        }
+    }
+
+    private static bool LogCompositeState(
+        NativeGxAppContext* context,
+        ReadOnlySpan<byte> appName,
+        int invocationCount,
+        int threadBefore,
+        int threadAfter,
+        uint calculation,
+        bool allocationValid)
+    {
+        Span<byte> buffer = stackalloc byte[128];
+        int position = 0;
+        ReadOnlySpan<byte> prefix = "C107-"u8;
+        prefix.CopyTo(buffer[position..]);
+        position += prefix.Length;
+        appName.CopyTo(buffer[position..]);
+        position += appName.Length;
+        ReadOnlySpan<byte> state = "-STATE count="u8;
+        state.CopyTo(buffer[position..]);
+        position += state.Length;
+        AppendCompositeUnsigned(buffer, ref position, (uint)invocationCount);
+        ReadOnlySpan<byte> threadBeforeText = " threadBefore="u8;
+        threadBeforeText.CopyTo(buffer[position..]);
+        position += threadBeforeText.Length;
+        AppendCompositeUnsigned(buffer, ref position, (uint)threadBefore);
+        ReadOnlySpan<byte> threadAfterText = " threadAfter="u8;
+        threadAfterText.CopyTo(buffer[position..]);
+        position += threadAfterText.Length;
+        AppendCompositeUnsigned(buffer, ref position, (uint)threadAfter);
+        ReadOnlySpan<byte> allocationText = " allocation="u8;
+        allocationText.CopyTo(buffer[position..]);
+        position += allocationText.Length;
+        ReadOnlySpan<byte> allocationResult = allocationValid ? "PASS"u8 : "FAIL"u8;
+        allocationResult.CopyTo(buffer[position..]);
+        position += allocationResult.Length;
+        ReadOnlySpan<byte> calculationText = " calculation="u8;
+        calculationText.CopyTo(buffer[position..]);
+        position += calculationText.Length;
+        AppendCompositeUnsigned(buffer, ref position, calculation);
+        buffer[position] = 0;
+
+        fixed (byte* message = buffer)
+        {
+            return context != null && context->host != null &&
+                context->host->log != null && context->host->log(context, message) == 0;
+        }
+    }
+
+    private static bool LogCompositeDispatch(
+        NativeGxAppContext* context,
+        uint appId)
+    {
+        Span<byte> buffer = stackalloc byte[32];
+        int position = 0;
+        ReadOnlySpan<byte> prefix = "C107-DISPATCH appId="u8;
+        prefix.CopyTo(buffer);
+        position += prefix.Length;
+        AppendCompositeUnsigned(buffer, ref position, appId);
+        buffer[position] = 0;
+        fixed (byte* message = buffer)
+        {
+            return context != null && context->host != null &&
+                context->host->log != null && context->host->log(context, message) == 0;
+        }
+    }
+
+    private static int RunC107AppA(NativeGxAppContext* context)
+    {
+        int invocationCount = ++s_c107AppAInvocationCount;
+        int threadBefore = s_c107AppAThreadInvocationCount;
+        int threadAfter = ++s_c107AppAThreadInvocationCount;
+        byte[] allocation = new byte[8];
+        int sum = 0;
+        for (int index = 0; index < allocation.Length; index++)
+        {
+            allocation[index] = (byte)(index + 1);
+            sum += allocation[index];
+        }
+        bool allocationValid = allocation.Length == 8 &&
+            allocation[0] == 1 && allocation[7] == 8 && sum == 36;
+        GC.KeepAlive(allocation);
+        if (!LogCompositeText(context, "C107-APP-A-ENTRY"u8) ||
+            !LogCompositeState(context, "APP-A"u8, invocationCount,
+                threadBefore, threadAfter, (uint)sum, allocationValid))
+        {
+            return GxAbi.ErrorInvalidArgument;
+        }
+        // The production bridge reinstalls the current thread's TLS on every
+        // resident entry.  The logical application static is the lifecycle
+        // proof for C107; thread-static persistence is recorded separately and
+        // remains a C108 concern.
+        if (!allocationValid || invocationCount < 1 || threadAfter != 1)
+        {
+            return GxAbi.ErrorInvalidArgument;
+        }
+        return LogCompositeText(context, "C107-APP-A-PASS"u8)
+            ? 0 : GxAbi.ErrorInvalidArgument;
+    }
+
+    private static int RunC107AppB(NativeGxAppContext* context)
+    {
+        int invocationCount = ++s_c107AppBInvocationCount;
+        int threadBefore = s_c107AppBThreadInvocationCount;
+        int threadAfter = ++s_c107AppBThreadInvocationCount;
+        byte[] allocation = new byte[5];
+        uint weighted = 0;
+        for (int index = 0; index < allocation.Length; index++)
+        {
+            allocation[index] = (byte)(index * 3 + 2);
+            weighted += (uint)allocation[index] * (uint)(index + 1);
+        }
+        bool allocationValid = allocation.Length == 5 &&
+            allocation[0] == 2 && allocation[4] == 14 && weighted == 150;
+        GC.KeepAlive(allocation);
+        if (!LogCompositeText(context, "C107-APP-B-ENTRY"u8) ||
+            !LogCompositeState(context, "APP-B"u8, invocationCount,
+                threadBefore, threadAfter, weighted, allocationValid))
+        {
+            return GxAbi.ErrorInvalidArgument;
+        }
+        if (!allocationValid || invocationCount < 1 || threadAfter != 1)
+        {
+            return GxAbi.ErrorInvalidArgument;
+        }
+        return LogCompositeText(context, "C107-APP-B-PASS"u8)
+            ? 0 : GxAbi.ErrorInvalidArgument;
+    }
+
+    private static int DispatchC107Composite(NativeGxAppContext* context)
+    {
+        uint appId = (uint)(nuint)context->userData;
+        if (!LogCompositeDispatch(context, appId))
+        {
+            return GxAbi.ErrorInvalidArgument;
+        }
+
+        return appId switch
+        {
+            GxAbi.CompositeAppA => RunC107AppA(context),
+            GxAbi.CompositeAppB => RunC107AppB(context),
+            _ => LogCompositeText(context, "C107-INVALID-APP-ID"u8)
+                ? GxAbi.ErrorInvalidApplicationId
+                : GxAbi.ErrorInvalidArgument,
+        };
+    }
+#endif
+
     public static void Main()
     {
     }
@@ -2014,6 +2206,12 @@ public static unsafe class Program
         // C104-A keeps the C102 calculation while making its module identity
         // explicit; C104-B deliberately has different managed state and
         // arithmetic so a same-image relaunch cannot masquerade as A/B/A.
+#if HOSTLOGPROOF_C107_COMPOSITE
+        // C107 is one NativeAOT image with two logical managed entry methods.
+        // The selector is supplied through the existing userData ABI field;
+        // the native entrypoint never jumps to an app-specific address.
+        return DispatchC107Composite(ctx);
+#else
 #if HOSTLOGPROOF_C104_APP_B
         ReadOnlySpan<byte> entryText = "C104-APP-B-ENTRY"u8;
 #elif HOSTLOGPROOF_C104_APP_A
@@ -2081,6 +2279,7 @@ public static unsafe class Program
             }
         }
         return 0;
+#endif
 #endif
 
 #if !HOSTLOGPROOF_FIRST_REAL_ALLOCATION && !HOSTLOGPROOF_FIRST_REFILL_ALLOCATION && !HOSTLOGPROOF_SEGMENT_BOUNDARY_ALLOCATION && !HOSTLOGPROOF_SEGMENT_TRANSITION_ALLOCATION && !HOSTLOGPROOF_FIRST_COLLECTION_BOUNDARY_ALLOCATION && !HOSTLOGPROOF_THREAD_STATIC_PRIMITIVE && !HOSTLOGPROOF_THREAD_STATIC_REFERENCE && !HOSTLOGPROOF_THREAD_STATIC_COMBINED

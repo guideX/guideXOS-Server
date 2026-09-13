@@ -7,7 +7,8 @@ param(
     [string]$ImageViewerRuntimeSmokePath,
     [string]$C102ApplicationPath = "",
     [string]$C104AppAPath = "",
-    [string]$C104AppBPath = ""
+    [string]$C104AppBPath = "",
+    [string]$C107CompositePath = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -1303,6 +1304,16 @@ foreach ($c104Application in @(
     Copy-Item -LiteralPath $c104Application.Source -Destination $c104Target -Force
     $staged += Get-Item $c104Target
     Write-Host "      staged C104-$($c104Application.Identity) NativeAOT application at /wall/$($c104Application.Name)" -ForegroundColor Yellow
+}
+
+if (-not [string]::IsNullOrWhiteSpace($C107CompositePath)) {
+    if (-not (Test-Path -LiteralPath $C107CompositePath -PathType Leaf)) {
+        throw "C107 composite staging ELF was not found: $C107CompositePath"
+    }
+    $c107Target = Join-Path $wallpaperDir "C107.ELF"
+    Copy-Item -LiteralPath $C107CompositePath -Destination $c107Target -Force
+    $staged += Get-Item $c107Target
+    Write-Host "      staged C107 composite NativeAOT application at /wall/C107.ELF" -ForegroundColor Yellow
 }
 
 # Deterministic large PNG fixture for the bare-metal Image Viewer smoke.

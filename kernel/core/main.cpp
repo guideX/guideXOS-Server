@@ -1024,6 +1024,76 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         runC104Launch(c104BOrdinal, "B", "/system/wall/C104B.ELF");
         runC104Launch(c104ASecondOrdinal, "A", "/system/wall/C104A.ELF");
 #endif
+
+#if defined(GXOS_C107_PRODUCTION_LAUNCH)
+        auto emitC107Report = [](uint32_t ordinal, const char* identity,
+                                 const kernel::nativeaot::LaunchReport& report,
+                                 kernel::nativeaot::LaunchStatus status) {
+            kernel::serial::puts("[C107-LAUNCH] ordinal=");
+            kernel::serial::put_hex32(ordinal);
+            kernel::serial::puts(" identity=");
+            kernel::serial::puts(identity);
+            kernel::serial::puts(" appId=");
+            kernel::serial::put_hex32(report.logicalAppId);
+            kernel::serial::puts(" sequence=");
+            kernel::serial::put_hex32(report.sequence);
+            kernel::serial::puts(" status=");
+            kernel::serial::puts(kernel::nativeaot::launchStatusName(status));
+            kernel::serial::puts(" managedReturn=");
+            kernel::serial::put_hex32(static_cast<uint32_t>(report.managedReturn));
+            kernel::serial::puts(" base=");
+            kernel::serial::put_hex64(report.artifactBase);
+            kernel::serial::puts(" span=");
+            kernel::serial::put_hex64(report.artifactSpan);
+            kernel::serial::puts(" entry=");
+            kernel::serial::put_hex64(report.entryPoint);
+            kernel::serial::puts(" managedEntry=");
+            kernel::serial::put_hex32(report.managedEntryReached ? 1u : 0u);
+            kernel::serial::puts(" managedPass=");
+            kernel::serial::put_hex32(report.managedPassReached ? 1u : 0u);
+            kernel::serial::puts(" invalidObserved=");
+            kernel::serial::put_hex32(report.managedInvalidApplicationObserved ? 1u : 0u);
+            kernel::serial::puts(" launcherRegained=");
+            kernel::serial::put_hex32(report.launcherRegainedControl ? 1u : 0u);
+            kernel::serial::puts(" mappingsPersistent=");
+            kernel::serial::put_hex32(report.mappingsPersistentByDesign ? 1u : 0u);
+            kernel::serial::puts(" postVmRegion=");
+            kernel::serial::put_hex64(report.postVmRegionFrames);
+            kernel::serial::puts(" postPageTable=");
+            kernel::serial::put_hex64(report.postPageTableFrames);
+            kernel::serial::puts(" ownerResidual=");
+            kernel::serial::put_hex64(report.ownerResidual);
+            kernel::serial::puts("\n");
+        };
+        constexpr const char* c107Path = "/system/wall/C107.ELF";
+        kernel::serial::puts("[C107-LAUNCH] ordinary application discovery path=");
+        kernel::serial::puts(c107Path);
+        kernel::serial::puts(" sequence=A1,invalid,B1,A2\n");
+        auto runC107Launch = [&](uint32_t ordinal, const char* identity,
+                                 uint32_t appId) {
+            kernel::nativeaot::LaunchReport report{};
+            const kernel::nativeaot::LaunchStatus status =
+                kernel::nativeaot::launchLogical(c107Path, appId, &report);
+            emitC107Report(ordinal, identity, report, status);
+            return status;
+        };
+        const kernel::nativeaot::LaunchStatus c107AFirst =
+            runC107Launch(1u, "A", 1u);
+        const kernel::nativeaot::LaunchStatus c107Invalid =
+            runC107Launch(2u, "invalid", 0u);
+        const kernel::nativeaot::LaunchStatus c107B =
+            runC107Launch(3u, "B", 2u);
+        const kernel::nativeaot::LaunchStatus c107ASecond =
+            runC107Launch(4u, "A", 1u);
+        const bool c107SequencePass =
+            c107AFirst == kernel::nativeaot::LaunchStatus::Success &&
+            c107Invalid == kernel::nativeaot::LaunchStatus::InvalidApplicationId &&
+            c107B == kernel::nativeaot::LaunchStatus::Success &&
+            c107ASecond == kernel::nativeaot::LaunchStatus::Success;
+        kernel::serial::puts("[C107-RESULT] outcome=");
+        kernel::serial::puts(c107SequencePass ? "PASS" : "FAIL");
+        kernel::serial::puts(" dispatch=A PASS -> invalid rejected -> B PASS -> A PASS\n");
+#endif
         
         kernel::serial::puts("[KERNEL] Entering main loop (waiting for input)...\n");
         
