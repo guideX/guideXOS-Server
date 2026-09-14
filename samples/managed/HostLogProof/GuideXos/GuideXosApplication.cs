@@ -38,6 +38,7 @@ public static unsafe class GuideXosApplicationRegistry
         new(1u, "Managed Workspace"u8, new Applications.ManagedWorkspace()),
         new(2u, "Managed Status"u8, new Applications.ManagedStatus()),
         new(3u, "Managed Counter"u8, new Applications.ManagedCounter()),
+        new(4u, "Managed Notes"u8, new Applications.ManagedNotes()),
     };
 
     public static bool TryFind(

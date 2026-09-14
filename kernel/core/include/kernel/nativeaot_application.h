@@ -81,6 +81,8 @@ LaunchStatus launchLogicalApplication(const char* applicationId,
 // the production host table used by ordinary App Model launches.
 LaunchStatus probeHostAbiMismatch(LaunchReport* report);
 LaunchStatus probeCapabilityDowngrade(LaunchReport* report);
+LaunchStatus probeFileCapabilityDowngrade(LaunchReport* report);
+LaunchStatus probeFileServiceNegativeTests(LaunchReport* report);
 const char* productionCompositeImagePath();
 const char* launchStatusName(LaunchStatus status);
 

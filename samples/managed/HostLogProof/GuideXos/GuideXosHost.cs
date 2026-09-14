@@ -11,6 +11,8 @@ public sealed unsafe class GuideXosHost
     // NativeHostCallTable v1: two uint32 fields followed by six amd64
     // function pointers. The managed artifact is win-x64 only.
     private const nuint CapabilitiesOffset = 56u;
+    private const nuint FileReadOffset = 72u;
+    private const nuint FileWriteOffset = 80u;
     private readonly NativeGxAppContext* _context;
     private readonly NativeHostCallTable* _host;
 
@@ -57,7 +59,7 @@ public sealed unsafe class GuideXosHost
         }
 
         if (context->host->version != GxAbi.HostAbiVersion ||
-            context->host->size < GxAbi.HostCallTableSize)
+            context->host->size < GxAbi.HostCallTableV1Size)
         {
             result = GuideXosResult.AbiIncompatible;
             return false;
@@ -136,6 +138,100 @@ public sealed unsafe class GuideXosHost
                 ? GuideXosResult.Success
                 : GuideXosResult.InvalidArgument;
         }
+    }
+
+    /// <summary>
+    /// Reads one bounded application-data file.  The returned array is
+    /// managed-owned; the native callback never retains the caller buffer.
+    /// </summary>
+    public GuideXosFileResult TryReadAllBytes(
+        ReadOnlySpan<byte> path,
+        out byte[] data)
+    {
+        data = null;
+        if (!HasCapability(GuideXosCapability.FileRead) ||
+            !HasHostField(FileReadOffset) || _host->fileReadAll == null)
+        {
+            return GuideXosFileResult.CapabilityUnavailable;
+        }
+        if (path.Length == 0 || path.Length > GxAbi.FilePathMaxBytes)
+        {
+            return GuideXosFileResult.InvalidPath;
+        }
+
+        byte[] pathBuffer = new byte[path.Length + 1];
+        path.CopyTo(pathBuffer);
+        uint length = 0u;
+        int nativeResult;
+        fixed (byte* pathPointer = pathBuffer)
+        {
+            nativeResult = _host->fileReadAll(_context, pathPointer,
+                (uint)path.Length, null, 0u, &length);
+        }
+        if (nativeResult == (int)GuideXosFileResult.Success)
+        {
+            data = Array.Empty<byte>();
+            return GuideXosFileResult.Success;
+        }
+        if (nativeResult != (int)GuideXosFileResult.BufferTooSmall ||
+            length > GxAbi.MaxFileBytes)
+        {
+            return (GuideXosFileResult)nativeResult;
+        }
+
+        byte[] buffer = new byte[(int)length];
+        fixed (byte* pathPointer = pathBuffer)
+        fixed (byte* bufferPointer = buffer)
+        {
+            nativeResult = _host->fileReadAll(
+                _context, pathPointer, (uint)path.Length, bufferPointer,
+                (uint)buffer.Length, &length);
+        }
+        if (nativeResult != 0) return (GuideXosFileResult)nativeResult;
+        if (length > GxAbi.MaxFileBytes) return GuideXosFileResult.IoFailure;
+
+        data = new byte[(int)length];
+        for (uint index = 0u; index < length; index++)
+        {
+            data[(int)index] = buffer[(int)index];
+        }
+        return GuideXosFileResult.Success;
+    }
+
+    /// <summary>
+    /// Writes one bounded application-data file. Native code copies the data
+    /// into the VFS before this call returns and retains no managed pointer.
+    /// </summary>
+    public GuideXosFileResult TryWriteAllBytes(
+        ReadOnlySpan<byte> path,
+        ReadOnlySpan<byte> data)
+    {
+        if (!HasCapability(GuideXosCapability.FileWrite) ||
+            !HasHostField(FileWriteOffset) || _host->fileWriteAll == null)
+        {
+            return GuideXosFileResult.CapabilityUnavailable;
+        }
+        if (path.Length == 0 || path.Length > GxAbi.FilePathMaxBytes)
+        {
+            return GuideXosFileResult.InvalidPath;
+        }
+        if (data.Length > GxAbi.MaxFileBytes)
+        {
+            return GuideXosFileResult.FileTooLarge;
+        }
+
+        byte[] pathBuffer = new byte[path.Length + 1];
+        path.CopyTo(pathBuffer);
+        byte[] dataBuffer = data.ToArray();
+        int nativeResult;
+        fixed (byte* pathPointer = pathBuffer)
+        fixed (byte* dataPointer = dataBuffer)
+        {
+            nativeResult = _host->fileWriteAll(
+                _context, pathPointer, (uint)path.Length, dataPointer,
+                (uint)data.Length);
+        }
+        return (GuideXosFileResult)nativeResult;
     }
 
     internal NativeGxAppContext* Context => _context;

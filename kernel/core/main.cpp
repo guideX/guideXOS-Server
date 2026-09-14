@@ -1627,6 +1627,212 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         kernel::serial::puts(" sequence=Workspace(workspace-one) -> Notepad -> Counter(counter-one,Increment) -> Status(status-one) -> Workspace(workspace-two) -> Counter(counter-two,Increment) -> Status(status-two)\n");
 #endif
 
+#if defined(GXOS_NATIVEAOT_C113_MANAGED_FILE_SERVICES)
+        const gxos::apps::BuiltInAppMetadata* c113Workspace =
+            gxos::apps::FindBuiltInAppMetadataByDisplayName("Managed Workspace");
+        const gxos::apps::BuiltInAppMetadata* c113Status =
+            gxos::apps::FindBuiltInAppMetadataByDisplayName("Managed Status");
+        const gxos::apps::BuiltInAppMetadata* c113Counter =
+            gxos::apps::FindBuiltInAppMetadataByDisplayName("Managed Counter");
+        const gxos::apps::BuiltInAppMetadata* c113Notes =
+            gxos::apps::FindBuiltInAppMetadataByDisplayName("Managed Notes");
+        const bool c113CatalogValid = gxos::apps::ManagedNativeAotCatalogIsValid() &&
+            c113Workspace && c113Status && c113Counter && c113Notes &&
+            gxos::apps::IsManagedNativeAotRecordValid(*c113Workspace) &&
+            gxos::apps::IsManagedNativeAotRecordValid(*c113Status) &&
+            gxos::apps::IsManagedNativeAotRecordValid(*c113Counter) &&
+            gxos::apps::IsManagedNativeAotRecordValid(*c113Notes) &&
+            c113Notes->managedSelector == 4u;
+        kernel::serial::puts("[C113-APPMODEL] catalogValid=");
+        kernel::serial::puts(c113CatalogValid ? "true" : "false");
+        kernel::serial::puts(" notesId=");
+        kernel::serial::puts(c113Notes ? c113Notes->appId : "");
+        kernel::serial::puts(" notesSelector=");
+        kernel::serial::put_hex32(c113Notes ? c113Notes->managedSelector : 0u);
+        kernel::serial::puts(" shell=StartMenu,AllPrograms result=");
+        kernel::serial::puts(c113CatalogValid ? "PASS\n" : "FAIL\n");
+
+        auto observeC113Surface = [](const char* title, uint32_t expectedPixel) {
+            auto textEquals = [](const char* left, const char* right) {
+                if (!left || !right) return false;
+                while (*left && *right && *left == *right) {
+                    ++left;
+                    ++right;
+                }
+                return *left == '\0' && *right == '\0';
+            };
+            kernel::compositor::KernelCompositor::drawAllWindows();
+            kernel::app::KernelWindow* window =
+                kernel::compositor::KernelCompositor::getFocusedWindow();
+            const bool titleValid = window && textEquals(window->title, title);
+            const bool framebufferValid = window && kernel::framebuffer::is_available();
+            const uint32_t pixel = framebufferValid
+                ? kernel::framebuffer::get_pixel(
+                    static_cast<uint32_t>(window->x) + 480u,
+                    static_cast<uint32_t>(window->y) +
+                        kernel::compositor::TITLEBAR_HEIGHT + 220u)
+                : 0u;
+            const bool result = titleValid && framebufferValid && pixel == expectedPixel;
+            kernel::serial::puts("[C113-VISIBLE] title=");
+            kernel::serial::puts(title);
+            kernel::serial::puts(" window=");
+            kernel::serial::put_hex32(window ? window->id : 0u);
+            kernel::serial::puts(" widgets=");
+            kernel::serial::put_hex32(window ? static_cast<uint32_t>(window->widgetCount) : 0u);
+            kernel::serial::puts(" pixel=");
+            kernel::serial::put_hex32(pixel);
+            kernel::serial::puts(" result=");
+            kernel::serial::puts(result ? "PASS\n" : "FAIL\n");
+            return result;
+        };
+
+        auto closeFocusedC113Surface = []() {
+            kernel::app::KernelWindow* window =
+                kernel::compositor::KernelCompositor::getFocusedWindow();
+            return window && kernel::compositor::KernelCompositor::requestCloseWindow(window->id);
+        };
+
+        auto clickLastC113Action = []() {
+            kernel::app::KernelWindow* window =
+                kernel::compositor::KernelCompositor::getFocusedWindow();
+            if (!window || window->widgetCount == 0) return false;
+            kernel::app::Widget& widget = window->widgets[window->widgetCount - 1];
+            if (widget.type != kernel::app::WidgetType::Button || !widget.visible || !widget.enabled) {
+                return false;
+            }
+            const int32_t mouseX = window->x + widget.x + widget.w / 2;
+            const int32_t mouseY = window->y + kernel::compositor::TITLEBAR_HEIGHT +
+                widget.y + widget.h / 2;
+            kernel::compositor::KernelCompositor::handleMouseDown(mouseX, mouseY, 1u);
+            kernel::compositor::KernelCompositor::handleMouseUp(mouseX, mouseY, 1u);
+            return true;
+        };
+
+        auto runC113ManagedLaunch = [&](uint32_t ordinal, const char* appName,
+                                        const char* applicationId, const char* context,
+                                        const char* surfaceTitle, uint32_t surfacePixel) {
+            const bool launched = kernel::desktop::launch_app_with_context(
+                applicationId, context);
+            const bool visible = launched && observeC113Surface(surfaceTitle, surfacePixel);
+            kernel::serial::puts("[C113-LAUNCH] ordinal=");
+            kernel::serial::put_hex32(ordinal);
+            kernel::serial::puts(" app=");
+            kernel::serial::puts(appName);
+            kernel::serial::puts(" result=");
+            kernel::serial::puts(visible ? "PASS\n" : "FAIL\n");
+            return visible;
+        };
+
+        auto verifySavedNotes = [&](const char* stage) {
+            static const uint8_t expected[] = "Hello from Managed Notes [edited]";
+            kernel::vfs::FileInfo info{};
+            uint8_t bytes[64] = {};
+            const kernel::vfs::Status statStatus = kernel::vfs::stat(
+                "/system/apps/NOTES.TXT", &info);
+            const int32_t read = statStatus == kernel::vfs::VFS_OK
+                ? kernel::vfs::read_file("/system/apps/NOTES.TXT", bytes, sizeof(bytes))
+                : -1;
+            const uint32_t expectedLength = sizeof(expected) - 1u;
+            bool contentValid = statStatus == kernel::vfs::VFS_OK &&
+                info.type == kernel::vfs::FILE_TYPE_REGULAR &&
+                info.size == expectedLength && read == static_cast<int32_t>(expectedLength);
+            uint32_t hash = 2166136261u;
+            if (contentValid) {
+                for (uint32_t index = 0u; index < expectedLength; ++index) {
+                    contentValid = contentValid && bytes[index] == expected[index];
+                    hash ^= bytes[index];
+                    hash *= 16777619u;
+                }
+            }
+            kernel::serial::puts("[C113-VFS-VERIFY] stage=");
+            kernel::serial::puts(stage);
+            kernel::serial::puts(" bytes=");
+            kernel::serial::put_hex32(read < 0 ? 0u : static_cast<uint32_t>(read));
+            kernel::serial::puts(" hash=");
+            kernel::serial::put_hex32(hash);
+            kernel::serial::puts(" content=Hello from Managed Notes [edited] result=");
+            kernel::serial::puts(contentValid ? "PASS\n" : "FAIL\n");
+            return contentValid;
+        };
+
+        const char* c113WorkspaceId = c113Workspace ? c113Workspace->appId : "";
+        const char* c113StatusId = c113Status ? c113Status->appId : "";
+        const char* c113CounterId = c113Counter ? c113Counter->appId : "";
+        const char* c113NotesId = c113Notes ? c113Notes->appId : "";
+        const bool c113WorkspaceLaunch = runC113ManagedLaunch(
+            1u, "ManagedWorkspace", c113WorkspaceId, "c113-workspace",
+            "Managed Workspace", 0xFF2A4A70u);
+        const bool c113WorkspaceClose = c113WorkspaceLaunch && closeFocusedC113Surface();
+
+        const bool c113NotesFirst = runC113ManagedLaunch(
+            2u, "ManagedNotes", c113NotesId, "c113-notes-first",
+            "Managed Notes", 0xFF7A5A9Au);
+        const bool c113AppendInput = c113NotesFirst && clickLastC113Action();
+        kernel::serial::puts("[C113-INTERACTION] action=append result=");
+        kernel::serial::puts(c113AppendInput ? "PASS\n" : "FAIL\n");
+        const bool c113SaveInput = c113AppendInput && clickLastC113Action();
+        kernel::serial::puts("[C113-INTERACTION] action=save result=");
+        kernel::serial::puts(c113SaveInput ? "PASS\n" : "FAIL\n");
+        const bool c113VfsSaved = c113SaveInput && verifySavedNotes("after-save");
+        const bool c113NotesClose = c113VfsSaved && closeFocusedC113Surface();
+        kernel::serial::puts("[C113-CLOSE] app=Notes result=");
+        kernel::serial::puts(c113NotesClose ? "PASS\n" : "FAIL\n");
+
+        const bool c113Native = kernel::desktop::launch_app("Notepad");
+        kernel::serial::puts("[C113-NATIVE-REGRESSION] app=Notepad result=");
+        kernel::serial::puts(c113Native ? "PASS\n" : "FAIL\n");
+
+        const bool c113CounterLaunch = runC113ManagedLaunch(
+            3u, "ManagedCounter", c113CounterId, "c113-counter",
+            "Managed Counter", 0xFF6A4A2Au);
+        const bool c113CounterInput = c113CounterLaunch && clickLastC113Action();
+        kernel::serial::puts("[C113-COUNTER-ACTION] result=");
+        kernel::serial::puts(c113CounterInput ? "PASS\n" : "FAIL\n");
+        const bool c113CounterClose = c113CounterInput && closeFocusedC113Surface();
+
+        const bool c113StatusLaunch = runC113ManagedLaunch(
+            4u, "ManagedStatus", c113StatusId, "c113-status",
+            "Managed Status", 0xFF3A5A42u);
+        const bool c113StatusClose = c113StatusLaunch && closeFocusedC113Surface();
+
+        const bool c113NotesReloadLaunch = runC113ManagedLaunch(
+            5u, "ManagedNotes", c113NotesId, "c113-notes-reload",
+            "Managed Notes", 0xFF7A5A9Au);
+        const bool c113VfsLoaded = c113NotesReloadLaunch && verifySavedNotes("before-reload");
+        const bool c113ReloadInput = c113VfsLoaded && clickLastC113Action();
+        kernel::serial::puts("[C113-INTERACTION] action=reload result=");
+        kernel::serial::puts(c113ReloadInput ? "PASS\n" : "FAIL\n");
+        const bool c113ReloadClose = c113ReloadInput && closeFocusedC113Surface();
+        kernel::serial::puts("[C113-CLOSE] app=Notes-reload result=");
+        kernel::serial::puts(c113ReloadClose ? "PASS\n" : "FAIL\n");
+
+        const bool c113AbiMismatch = kernel::nativeaot::probeHostAbiMismatch(nullptr) ==
+            kernel::nativeaot::LaunchStatus::Success;
+        kernel::serial::puts("[C113-ABI-MISMATCH] result=");
+        kernel::serial::puts(c113AbiMismatch ? "PASS\n" : "FAIL\n");
+        const bool c113CapabilityDowngrade =
+            kernel::nativeaot::probeFileCapabilityDowngrade(nullptr) ==
+            kernel::nativeaot::LaunchStatus::Success;
+        const bool c113ProbeClose = closeFocusedC113Surface();
+        kernel::serial::puts("[C113-CAPABILITY-CLOSE] result=");
+        kernel::serial::puts(c113ProbeClose ? "PASS\n" : "FAIL\n");
+        const bool c113Negative =
+            kernel::nativeaot::probeFileServiceNegativeTests(nullptr) ==
+            kernel::nativeaot::LaunchStatus::Success;
+
+        const bool c113Outcome = c113CatalogValid && c113WorkspaceLaunch && c113WorkspaceClose &&
+            c113NotesFirst && c113AppendInput && c113SaveInput && c113VfsSaved &&
+            c113NotesClose && c113Native && c113CounterLaunch && c113CounterInput &&
+            c113CounterClose && c113StatusLaunch && c113StatusClose && c113NotesReloadLaunch &&
+            c113VfsLoaded && c113ReloadInput && c113ReloadClose && c113AbiMismatch &&
+            c113CapabilityDowngrade && c113ProbeClose && c113Negative;
+        kernel::serial::puts("[C113-MIXED] sequence=Workspace -> Notes(Append,Save) -> Notepad -> Counter -> Status -> Notes(Reload) result=");
+        kernel::serial::puts(c113Outcome ? "PASS\n" : "FAIL\n");
+        kernel::serial::puts("[C113-RESULT] outcome=");
+        kernel::serial::puts(c113Outcome ? "PASS" : "FAIL");
+        kernel::serial::puts(" sequence=Workspace -> Notes(first,Append,Save) -> Notepad -> Counter -> Status -> Notes(relaunch,Reload)\n");
+#endif
+
 #if defined(GXOS_C107_PRODUCTION_LAUNCH) || defined(GXOS_C108_PRODUCTION_LAUNCH)
         auto emitC107Report = [](uint32_t ordinal, const char* identity,
                                  const kernel::nativeaot::LaunchReport& report,

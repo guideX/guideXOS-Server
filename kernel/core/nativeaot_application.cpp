@@ -58,7 +58,12 @@ constexpr uint32_t kVmemCommit = 0x1000u;
 constexpr uint32_t kVmemRelease = 0x8000u;
 constexpr int32_t kInvalidApplicationIdReturn = -4;
 constexpr const char* kProductionCompositeImage = gxos::apps::kManagedNativeAotCompositeImagePath;
+// C113 appends optional file-service callbacks to the C112 v1 prefix.  The
+// version remains v1 because prefix clients are still valid consumers; the
+// table size and capability bits gate the new fields.
 constexpr uint32_t kManagedHostAbiVersion = 1u;
+constexpr uint32_t kManagedHostAbiV1Size = 72u;
+constexpr uint32_t kManagedHostTableSize = 88u;
 constexpr uint64_t kManagedCapabilitySurface = 1ull << 0;
 constexpr uint64_t kManagedCapabilityText = 1ull << 1;
 constexpr uint64_t kManagedCapabilityPrimitive = 1ull << 2;
@@ -66,11 +71,25 @@ constexpr uint64_t kManagedCapabilityAction = 1ull << 3;
 constexpr uint64_t kManagedCapabilityClose = 1ull << 4;
 constexpr uint64_t kManagedCapabilityLaunchContext = 1ull << 5;
 constexpr uint64_t kManagedCapabilityLog = 1ull << 6;
+constexpr uint64_t kManagedCapabilityFileRead = 1ull << 7;
+constexpr uint64_t kManagedCapabilityFileWrite = 1ull << 8;
 constexpr uint64_t kManagedCapabilities =
     kManagedCapabilitySurface | kManagedCapabilityText |
     kManagedCapabilityPrimitive | kManagedCapabilityAction |
     kManagedCapabilityClose | kManagedCapabilityLaunchContext |
-    kManagedCapabilityLog;
+    kManagedCapabilityLog | kManagedCapabilityFileRead |
+    kManagedCapabilityFileWrite;
+constexpr uint32_t kManagedFilePathMaxBytes = 96u;
+constexpr uint32_t kManagedFileMaxBytes = 16u * 1024u;
+constexpr int32_t kManagedFileSuccess = 0;
+constexpr int32_t kManagedFileNotFound = -10;
+constexpr int32_t kManagedFileInvalidPath = -11;
+constexpr int32_t kManagedFileBufferTooSmall = -12;
+constexpr int32_t kManagedFileTooLarge = -13;
+constexpr int32_t kManagedFileIoFailure = -14;
+constexpr int32_t kManagedFileCapabilityUnavailable = -15;
+constexpr int32_t kManagedFileInvalidArgument = -16;
+constexpr const char* kManagedFileRoot = "/system/apps/";
 constexpr uint32_t kLaunchFlagAction = 0x80000000u;
 constexpr uint32_t kLaunchFlagCapabilityProbe = 0x40000000u;
 constexpr uint32_t kLaunchFlagAbiProbe = 0x20000000u;
@@ -171,6 +190,12 @@ struct NativeHostCallTable {
         NativeGxAppContext* context, uint64_t window, int32_t x, int32_t y,
         int32_t width, int32_t height, uint8_t* text, uint32_t actionId,
         int32_t* outWidget);
+    int32_t (GUIDEXOS_NATIVEAOT_PAL_CALL *fileReadAll)(
+        NativeGxAppContext* context, uint8_t* path, uint32_t pathLength,
+        uint8_t* buffer, uint32_t capacity, uint32_t* outLength);
+    int32_t (GUIDEXOS_NATIVEAOT_PAL_CALL *fileWriteAll)(
+        NativeGxAppContext* context, uint8_t* path, uint32_t pathLength,
+        const uint8_t* data, uint32_t length);
 };
 
 struct NativeGxAppContext {
@@ -209,7 +234,13 @@ struct ResidentApplication {
     uint32_t sequence;
 };
 
-static_assert(sizeof(NativeHostCallTable) == 72, "C112 host callback ABI drift");
+static_assert(sizeof(NativeHostCallTable) == 88, "C113 host callback ABI drift");
+static_assert(kManagedHostTableSize >= kManagedHostAbiV1Size,
+              "C113 host table must retain the C112 v1 prefix");
+static_assert(offsetof(NativeHostCallTable, fileReadAll) == 72,
+              "C113 file-read callback offset drift");
+static_assert(offsetof(NativeHostCallTable, fileWriteAll) == 80,
+              "C113 file-write callback offset drift");
 static_assert(sizeof(NativeGxAppContext) == 40, "C111 application ABI drift");
 static_assert(offsetof(NativeAotTlsGsArea, vector) == 0x58,
               "C102 TLS vector offset drift");
@@ -1184,6 +1215,111 @@ bool activeSurfaceContext(NativeGxAppContext* context) {
         context->host->size >= sizeof(NativeHostCallTable);
 }
 
+bool copyManagedFilePath(const uint8_t* path, uint32_t pathLength,
+                         char* output, uint32_t outputSize) {
+    if (!path || !output || pathLength == 0u ||
+        pathLength > kManagedFilePathMaxBytes ||
+        pathLength + 1u > outputSize) {
+        return false;
+    }
+
+    constexpr const char* root = kManagedFileRoot;
+    uint32_t rootLength = 0u;
+    while (root[rootLength] != '\0') ++rootLength;
+    if (pathLength <= rootLength) return false;
+    for (uint32_t index = 0u; index < pathLength; ++index) {
+        const uint8_t value = path[index];
+        // The initial contract is UTF-8 represented by its canonical printable
+        // ASCII subset. This keeps FAT path interpretation deterministic.
+        if (value < 0x21u || value > 0x7Eu || value == '\\') return false;
+        if (index < rootLength && value != static_cast<uint8_t>(root[index])) {
+            return false;
+        }
+        if (value == '/' && index + 1u < pathLength && path[index + 1u] == '/') {
+            return false;
+        }
+        if (value == '.' && index + 1u < pathLength && path[index + 1u] == '.') {
+            return false;
+        }
+    }
+    for (uint32_t index = 0u; index < pathLength; ++index) {
+        output[index] = static_cast<char>(path[index]);
+    }
+    output[pathLength] = '\0';
+    return true;
+}
+
+int32_t GUIDEXOS_NATIVEAOT_PAL_CALL managedFileReadAll(
+    NativeGxAppContext* context, uint8_t* path, uint32_t pathLength,
+    uint8_t* buffer, uint32_t capacity, uint32_t* outLength) {
+    if (!activeSurfaceContext(context) || !outLength) return kManagedFileInvalidArgument;
+    if ((context->host->capabilities & kManagedCapabilityFileRead) == 0u) {
+        return kManagedFileCapabilityUnavailable;
+    }
+    if ((capacity != 0u && !buffer)) {
+        return kManagedFileInvalidArgument;
+    }
+    *outLength = 0u;
+    char validatedPath[kManagedFilePathMaxBytes + 1u] = {};
+    if (!copyManagedFilePath(path, pathLength, validatedPath,
+                             sizeof(validatedPath))) {
+        return kManagedFileInvalidPath;
+    }
+
+    vfs::FileInfo info{};
+    const vfs::Status statStatus = vfs::stat(validatedPath, &info);
+    if (statStatus == vfs::VFS_ERR_NOT_FOUND) return kManagedFileNotFound;
+    if (statStatus != vfs::VFS_OK || info.type != vfs::FILE_TYPE_REGULAR) {
+        return kManagedFileInvalidPath;
+    }
+    if (info.size > kManagedFileMaxBytes) return kManagedFileTooLarge;
+    if (info.size > capacity) {
+        *outLength = static_cast<uint32_t>(info.size);
+        return kManagedFileBufferTooSmall;
+    }
+    if (info.size != 0u) {
+        const int32_t read = vfs::read_file(validatedPath, buffer, capacity);
+        if (read < 0 || static_cast<uint64_t>(read) != info.size) {
+            return kManagedFileIoFailure;
+        }
+        *outLength = static_cast<uint32_t>(read);
+    }
+    serial::puts("[C113-FILE-READ] path=");
+    serial::puts(validatedPath);
+    serial::puts(" bytes=");
+    serial::put_hex32(*outLength);
+    serial::puts(" result=PASS\n");
+    return kManagedFileSuccess;
+}
+
+int32_t GUIDEXOS_NATIVEAOT_PAL_CALL managedFileWriteAll(
+    NativeGxAppContext* context, uint8_t* path, uint32_t pathLength,
+    const uint8_t* data, uint32_t length) {
+    if (!activeSurfaceContext(context)) return kManagedFileInvalidArgument;
+    if ((context->host->capabilities & kManagedCapabilityFileWrite) == 0u) {
+        return kManagedFileCapabilityUnavailable;
+    }
+    if (length != 0u && !data) {
+        return kManagedFileInvalidArgument;
+    }
+    char validatedPath[kManagedFilePathMaxBytes + 1u] = {};
+    if (!copyManagedFilePath(path, pathLength, validatedPath,
+                             sizeof(validatedPath))) {
+        return kManagedFileInvalidPath;
+    }
+    if (length > kManagedFileMaxBytes) return kManagedFileTooLarge;
+    const int32_t written = vfs::write_file(validatedPath, data, length);
+    if (written < 0 || static_cast<uint32_t>(written) != length) {
+        return kManagedFileIoFailure;
+    }
+    serial::puts("[C113-FILE-WRITE] path=");
+    serial::puts(validatedPath);
+    serial::puts(" bytes=");
+    serial::put_hex32(length);
+    serial::puts(" result=PASS\n");
+    return kManagedFileSuccess;
+}
+
 int32_t GUIDEXOS_NATIVEAOT_PAL_CALL managedRequestWindow(
     NativeGxAppContext* context, uint8_t* title, int32_t width, int32_t height,
     uint64_t* outWindow) {
@@ -1335,7 +1471,9 @@ int32_t GUIDEXOS_NATIVEAOT_PAL_CALL managedLog(
     const bool c107Message = managedMessageStartsWith(message, "C107-");
     const bool c111Message = managedMessageStartsWith(message, "C111-");
     const bool c112Message = managedMessageStartsWith(message, "C112-");
-    serial::puts(c112Message ? "[C112-MANAGED-OUTPUT] " :
+    const bool c113Message = managedMessageStartsWith(message, "C113-");
+    serial::puts(c113Message ? "[C113-MANAGED-OUTPUT] " :
+        c112Message ? "[C112-MANAGED-OUTPUT] " :
         c111Message ? "[C111-MANAGED-OUTPUT] " :
         c107Message ? "[C107-MANAGED-OUTPUT] " :
         c104Message ? "[C104-MANAGED-OUTPUT] " : "[C102-MANAGED-OUTPUT] ");
@@ -1645,11 +1783,15 @@ int32_t invokeManagedWithHostMetadata(
     }
 
     NativeHostCallTable host{
-        sizeof(NativeHostCallTable), hostVersion, managedLog,
+        kManagedHostTableSize, hostVersion, managedLog,
         managedRequestWindow, managedDrawText, managedDrawRect, managedAddButton,
         managedCloseWindow, capabilities,
         (capabilities & kManagedCapabilityAction) != 0u
-            ? managedAddActionButton : nullptr };
+            ? managedAddActionButton : nullptr,
+        (capabilities & kManagedCapabilityFileRead) != 0u
+            ? managedFileReadAll : nullptr,
+        (capabilities & kManagedCapabilityFileWrite) != 0u
+            ? managedFileWriteAll : nullptr };
     NativeGxAppContext context{
         sizeof(NativeGxAppContext), 0u, &host,
         reinterpret_cast<void*>(static_cast<uintptr_t>(selector)),
@@ -1799,9 +1941,10 @@ LaunchStatus launchResident(const char* path, uint32_t logicalAppId,
     guidexos_nativeaot_gc_startup_platform_table_v1 gc{};
     fillGcTable(&gc);
     NativeHostCallTable host{
-        sizeof(NativeHostCallTable), kManagedHostAbiVersion, managedLog,
+        kManagedHostTableSize, kManagedHostAbiVersion, managedLog,
         managedRequestWindow, managedDrawText, managedDrawRect, managedAddButton,
-        managedCloseWindow, kManagedCapabilities, managedAddActionButton };
+        managedCloseWindow, kManagedCapabilities, managedAddActionButton,
+        managedFileReadAll, managedFileWriteAll };
     serial::puts("[C112-HOST] version=");
     serial::put_hex32(kManagedHostAbiVersion);
     serial::puts(" capabilities=");
@@ -2018,9 +2161,10 @@ LaunchStatus launchInternal(const char* path, uint32_t logicalAppId,
     guidexos_nativeaot_gc_startup_platform_table_v1 gc{};
     fillGcTable(&gc);
     NativeHostCallTable host{
-        sizeof(NativeHostCallTable), kManagedHostAbiVersion, managedLog,
+        kManagedHostTableSize, kManagedHostAbiVersion, managedLog,
         managedRequestWindow, managedDrawText, managedDrawRect, managedAddButton,
-        managedCloseWindow, kManagedCapabilities, managedAddActionButton };
+        managedCloseWindow, kManagedCapabilities, managedAddActionButton,
+        managedFileReadAll, managedFileWriteAll };
     serial::puts("[C112-HOST] version=");
     serial::put_hex32(kManagedHostAbiVersion);
     serial::puts(" capabilities=");
@@ -2195,6 +2339,98 @@ LaunchStatus probeCapabilityDowngrade(LaunchReport* report) {
     serial::put_hex32(static_cast<uint32_t>(report->managedReturn));
     serial::puts(" result=");
     serial::puts(report->status == LaunchStatus::Success ? "PASS\n" : "FAIL\n");
+    return report->status;
+}
+
+LaunchStatus probeFileCapabilityDowngrade(LaunchReport* report) {
+    LaunchReport local{};
+    if (report == nullptr) report = &local;
+    *report = {};
+    report->logicalAppId = 4u;
+    const uint64_t downgraded = kManagedCapabilities & ~kManagedCapabilityFileWrite;
+    report->managedReturn = invokeManagedWithHostMetadata(
+        4u, kLaunchFlagCapabilityProbe, kManagedHostAbiVersion, downgraded);
+    report->status = report->managedReturn == 0
+        ? LaunchStatus::Success : LaunchStatus::ManagedFailed;
+    serial::puts("[C113-CAPABILITY-DOWNGRADE] fileWrite=omitted managedReturn=");
+    serial::put_hex32(static_cast<uint32_t>(report->managedReturn));
+    serial::puts(" result=");
+    serial::puts(report->status == LaunchStatus::Success ? "PASS\n" : "FAIL\n");
+    return report->status;
+}
+
+LaunchStatus probeFileServiceNegativeTests(LaunchReport* report) {
+    LaunchReport local{};
+    if (report == nullptr) report = &local;
+    *report = {};
+    report->logicalAppId = 4u;
+    if (g_application.state != ApplicationLifecycleState::Resident ||
+        g_application.entryPoint == 0u) {
+        report->status = LaunchStatus::ManagedFailed;
+        return report->status;
+    }
+
+    NativeHostCallTable host{
+        kManagedHostTableSize, kManagedHostAbiVersion, managedLog,
+        managedRequestWindow, managedDrawText, managedDrawRect, managedAddButton,
+        managedCloseWindow, kManagedCapabilities, managedAddActionButton,
+        managedFileReadAll, managedFileWriteAll };
+    NativeGxAppContext context{
+        sizeof(NativeGxAppContext), 0u, &host,
+        reinterpret_cast<void*>(static_cast<uintptr_t>(4u)), nullptr, 0u, 0u};
+    uint8_t buffer[64] = {};
+    uint32_t outLength = 0u;
+    uint8_t oversizedPath[kManagedFilePathMaxBytes + 1u] = {};
+    for (uint32_t index = 0u; index < kManagedFilePathMaxBytes + 1u; ++index) {
+        oversizedPath[index] = 'x';
+    }
+    const uint8_t emptyPath[1] = {0};
+    const uint8_t missingPath[] = "/system/apps/MISSING.TXT";
+    const uint8_t oversizedFilePath[] = "/system/apps/GXOSAPP.ELF";
+    const uint8_t validPath[] = "/system/apps/NOTES.TXT";
+
+    g_activeManagedContext = &context;
+    const int32_t emptyResult = managedFileReadAll(
+        &context, const_cast<uint8_t*>(emptyPath), 0u,
+        buffer, sizeof(buffer), &outLength);
+    const int32_t oversizedPathResult = managedFileReadAll(
+        &context, oversizedPath, sizeof(oversizedPath),
+        buffer, sizeof(buffer), &outLength);
+    const int32_t missingResult = managedFileReadAll(
+        &context, const_cast<uint8_t*>(missingPath),
+        sizeof(missingPath) - 1u, buffer, sizeof(buffer), &outLength);
+    const int32_t oversizedFileResult = managedFileReadAll(
+        &context, const_cast<uint8_t*>(oversizedFilePath),
+        sizeof(oversizedFilePath) - 1u, buffer, sizeof(buffer), &outLength);
+    const int32_t invalidReadBufferResult = managedFileReadAll(
+        &context, const_cast<uint8_t*>(validPath), sizeof(validPath) - 1u,
+        nullptr, 1u, &outLength);
+    const int32_t invalidWriteDataResult = managedFileWriteAll(
+        &context, const_cast<uint8_t*>(validPath), sizeof(validPath) - 1u,
+        nullptr, 1u);
+    g_activeManagedContext = nullptr;
+
+    const bool passed = emptyResult == kManagedFileInvalidPath &&
+        oversizedPathResult == kManagedFileInvalidPath &&
+        missingResult == kManagedFileNotFound &&
+        oversizedFileResult == kManagedFileTooLarge &&
+        invalidReadBufferResult == kManagedFileInvalidArgument &&
+        invalidWriteDataResult == kManagedFileInvalidArgument;
+    report->status = passed ? LaunchStatus::Success : LaunchStatus::ManagedFailed;
+    serial::puts("[C113-FILE-NEGATIVE] emptyPath=");
+    serial::put_hex32(static_cast<uint32_t>(emptyResult));
+    serial::puts(" oversizedPath=");
+    serial::put_hex32(static_cast<uint32_t>(oversizedPathResult));
+    serial::puts(" missing=");
+    serial::put_hex32(static_cast<uint32_t>(missingResult));
+    serial::puts(" oversizedFile=");
+    serial::put_hex32(static_cast<uint32_t>(oversizedFileResult));
+    serial::puts(" invalidReadBuffer=");
+    serial::put_hex32(static_cast<uint32_t>(invalidReadBufferResult));
+    serial::puts(" invalidWriteData=");
+    serial::put_hex32(static_cast<uint32_t>(invalidWriteDataResult));
+    serial::puts(" result=");
+    serial::puts(passed ? "PASS\n" : "FAIL\n");
     return report->status;
 }
 

@@ -1742,6 +1742,7 @@ static StartMenuApp s_startMenuApps[] = {
     {"Managed Workspace", true, false, 0xFF6A8FD1}, // shared resident NativeAOT logical app
     {"Managed Status",    true, false, 0xFF5C9A88}, // shared resident NativeAOT logical app
     {"Managed Counter",   true, false, 0xFF9A6A42}, // shared resident NativeAOT logical app
+    {"Managed Notes",     true, false, 0xFF7A5A9A}, // shared resident NativeAOT logical app
     {"Paint",       false, true,  0xFFC87830},  // recent
     {"Clock",       false, true,  0xFF4690C8},  // recent
     {"File Explorer", false, true, 0xFFC8B43C}, // recent
@@ -1763,6 +1764,7 @@ static const char* s_allProgramsList[] = {
     "ImgViewer",
     "AppModel",
     "Managed Counter",
+    "Managed Notes",
     "Managed Status",
     "Managed Workspace",
     "Notepad",
@@ -5025,7 +5027,12 @@ void set_wallpaper_image_pack(const void* packBase, uint64_t packSize)
         return;
     }
 
-    uint8_t ramdiskIndex = kernel::ramdisk::create_readonly_at(packBase, (size_t)packSize, "wallimg");
+    // The boot pack is the guideXOS writable system-data image as well as the
+    // wallpaper source.  Keep the same VFS mount and boot-memory ownership,
+    // but allow bounded application-data writes to live in that image for the
+    // resident managed file-service proof.
+    uint8_t ramdiskIndex = kernel::ramdisk::create_at(
+        const_cast<void*>(packBase), (size_t)packSize, "wallimg");
     if (ramdiskIndex == 0xFF) {
         serial::puts("[desktop] failed to attach wallpaper image pack\n");
         return;

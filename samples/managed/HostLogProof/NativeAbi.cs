@@ -6,6 +6,8 @@ namespace HostLogProof;
 public static class GxAbi
 {
     public const uint ApiVersion = 0u;
+    // C113 is an append-only extension of the C112 v1 table.  Keeping the
+    // version stable lets older C112 clients consume the original prefix.
     public const uint HostAbiVersion = 1u;
     public const uint CompositeAppInvalid = 0u;
     public const uint CompositeAppA = 1u;
@@ -14,7 +16,10 @@ public static class GxAbi
     public const uint MaxLaunchContextBytes = 48u;
     public const uint LegacyContextSize = 24u;
     public const uint HostCallTablePrefixSize = 16u;
-    public const uint HostCallTableSize = 72u;
+    public const uint HostCallTableV1Size = 72u;
+    public const uint HostCallTableSize = 88u;
+    public const uint FilePathMaxBytes = 96u;
+    public const uint MaxFileBytes = 16u * 1024u;
     public const uint LaunchFlagAction = 0x80000000u;
     public const uint LaunchFlagCapabilityProbe = 0x40000000u;
     public const uint LaunchFlagAbiProbe = 0x20000000u;
@@ -35,6 +40,8 @@ public enum GuideXosCapability : ulong
     Close = 1ul << 4,
     LaunchContext = 1ul << 5,
     Log = 1ul << 6,
+    FileRead = 1ul << 7,
+    FileWrite = 1ul << 8,
 }
 
 public enum GuideXosResult
@@ -46,6 +53,18 @@ public enum GuideXosResult
     SurfaceCreationFailed = -5,
     InvalidAction = -6,
     AbiIncompatible = -7,
+}
+
+public enum GuideXosFileResult
+{
+    Success = 0,
+    NotFound = -10,
+    InvalidPath = -11,
+    BufferTooSmall = -12,
+    FileTooLarge = -13,
+    IoFailure = -14,
+    CapabilityUnavailable = -15,
+    InvalidArgument = -16,
 }
 
 [StructLayout(LayoutKind.Sequential)]
@@ -61,6 +80,8 @@ public unsafe struct NativeHostCallTable
     public delegate* unmanaged<NativeGxAppContext*, ulong, int> closeWindow;
     public ulong capabilities;
     public delegate* unmanaged<NativeGxAppContext*, ulong, int, int, int, int, byte*, uint, int*, int> addActionButton;
+    public delegate* unmanaged<NativeGxAppContext*, byte*, uint, byte*, uint, uint*, int> fileReadAll;
+    public delegate* unmanaged<NativeGxAppContext*, byte*, uint, byte*, uint, int> fileWriteAll;
 }
 
 [StructLayout(LayoutKind.Sequential)]
