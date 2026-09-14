@@ -28,6 +28,7 @@
 
 namespace kernel {
 namespace nativeaot {
+int32_t invokeManagedAction(uint32_t selector, uint32_t actionId);
 namespace {
 
 constexpr uintptr_t kPageSize = 0x1000u;
@@ -57,6 +58,22 @@ constexpr uint32_t kVmemCommit = 0x1000u;
 constexpr uint32_t kVmemRelease = 0x8000u;
 constexpr int32_t kInvalidApplicationIdReturn = -4;
 constexpr const char* kProductionCompositeImage = gxos::apps::kManagedNativeAotCompositeImagePath;
+constexpr uint32_t kManagedHostAbiVersion = 1u;
+constexpr uint64_t kManagedCapabilitySurface = 1ull << 0;
+constexpr uint64_t kManagedCapabilityText = 1ull << 1;
+constexpr uint64_t kManagedCapabilityPrimitive = 1ull << 2;
+constexpr uint64_t kManagedCapabilityAction = 1ull << 3;
+constexpr uint64_t kManagedCapabilityClose = 1ull << 4;
+constexpr uint64_t kManagedCapabilityLaunchContext = 1ull << 5;
+constexpr uint64_t kManagedCapabilityLog = 1ull << 6;
+constexpr uint64_t kManagedCapabilities =
+    kManagedCapabilitySurface | kManagedCapabilityText |
+    kManagedCapabilityPrimitive | kManagedCapabilityAction |
+    kManagedCapabilityClose | kManagedCapabilityLaunchContext |
+    kManagedCapabilityLog;
+constexpr uint32_t kLaunchFlagAction = 0x80000000u;
+constexpr uint32_t kLaunchFlagCapabilityProbe = 0x40000000u;
+constexpr uint32_t kLaunchFlagAbiProbe = 0x20000000u;
 
 #pragma pack(push, 1)
 struct Elf64Header {
@@ -149,6 +166,11 @@ struct NativeHostCallTable {
         int32_t width, int32_t height, uint8_t* text, int32_t* outWidget);
     int32_t (GUIDEXOS_NATIVEAOT_PAL_CALL *closeWindow)(
         NativeGxAppContext* context, uint64_t window);
+    uint64_t capabilities;
+    int32_t (GUIDEXOS_NATIVEAOT_PAL_CALL *addActionButton)(
+        NativeGxAppContext* context, uint64_t window, int32_t x, int32_t y,
+        int32_t width, int32_t height, uint8_t* text, uint32_t actionId,
+        int32_t* outWidget);
 };
 
 struct NativeGxAppContext {
@@ -187,7 +209,7 @@ struct ResidentApplication {
     uint32_t sequence;
 };
 
-static_assert(sizeof(NativeHostCallTable) == 56, "C111 host callback ABI drift");
+static_assert(sizeof(NativeHostCallTable) == 72, "C112 host callback ABI drift");
 static_assert(sizeof(NativeGxAppContext) == 40, "C111 application ABI drift");
 static_assert(offsetof(NativeAotTlsGsArea, vector) == 0x58,
               "C102 TLS vector offset drift");
@@ -238,7 +260,9 @@ struct ManagedSurfaceRect {
 // recreated on a later logical launch.
 class NativeAotManagedSurface final : public app::KernelApp {
 public:
-    NativeAotManagedSurface() : m_rectCount(0), m_actionButtonId(-1), m_actionCount(0) {
+    NativeAotManagedSurface()
+        : m_rectCount(0), m_actionButtonId(-1), m_actionId(0),
+          m_actionSelector(0), m_actionCount(0) {
         const char* name = "Managed NativeAOT";
         int index = 0;
         while (name[index] && index < app::MAX_APP_NAME - 1) {
@@ -266,6 +290,19 @@ public:
 
     void onWidgetClick(int widgetId) override {
         if (widgetId != m_actionButtonId) return;
+        if (m_actionId != 0u) {
+            const int32_t managedResult = invokeManagedAction(
+                m_actionSelector, m_actionId);
+            serial::puts("[C112-ACTION-DISPATCH] selector=");
+            serial::put_hex32(m_actionSelector);
+            serial::puts(" action=");
+            serial::put_hex32(m_actionId);
+            serial::puts(" managedReturn=");
+            serial::put_hex32(static_cast<uint32_t>(managedResult));
+            serial::puts(" result=");
+            serial::puts(managedResult == 0 ? "PASS\n" : "FAIL\n");
+            return;
+        }
         ++m_actionCount;
         setWidgetText(widgetId, "Action complete");
         serial::puts("[C111-INTERACTION] result=PASS actionCount=");
@@ -306,6 +343,8 @@ public:
         m_window->widgetCount = 0;
         m_rectCount = 0;
         m_actionButtonId = -1;
+        m_actionId = 0;
+        m_actionSelector = 0;
         setTitle(title);
         compositor::KernelCompositor::setFocus(m_window->id);
         return true;
@@ -335,10 +374,18 @@ public:
 
     bool addActionButton(int32_t x, int32_t y, int32_t width, int32_t height,
                          const char* text, int32_t* outWidget) {
+        return addActionButton(x, y, width, height, text, 0u, 0u, outWidget);
+    }
+
+    bool addActionButton(int32_t x, int32_t y, int32_t width, int32_t height,
+                         const char* text, uint32_t actionId,
+                         uint32_t selector, int32_t* outWidget) {
         if (!m_window || !text || !outWidget) return false;
         const int id = addButton(x, y, width, height, text);
         if (id < 0) return false;
         m_actionButtonId = id;
+        m_actionId = actionId;
+        m_actionSelector = selector;
         *outWidget = id;
         return true;
     }
@@ -347,6 +394,8 @@ private:
     ManagedSurfaceRect m_rects[8] = {};
     int m_rectCount;
     int m_actionButtonId;
+    uint32_t m_actionId;
+    uint32_t m_actionSelector;
     int m_actionCount;
 };
 
@@ -1212,6 +1261,29 @@ int32_t GUIDEXOS_NATIVEAOT_PAL_CALL managedAddButton(
     return 0;
 }
 
+int32_t GUIDEXOS_NATIVEAOT_PAL_CALL managedAddActionButton(
+    NativeGxAppContext* context, uint64_t window, int32_t x, int32_t y,
+    int32_t width, int32_t height, uint8_t* text, uint32_t actionId,
+    int32_t* outWidget) {
+    NativeAotManagedSurface* surface = managedSurface();
+    if (!activeSurfaceContext(context) || !surface || !surface->owns(window) ||
+        !text || !outWidget || actionId == 0u ||
+        x < 0 || y < 0 || width <= 0 || height <= 0 ||
+        boundedCStringLength(text, 63u) > 63u ||
+        !surface->addActionButton(
+            x, y, width, height, reinterpret_cast<const char*>(text),
+            actionId, static_cast<uint32_t>(reinterpret_cast<uintptr_t>(context->userData)),
+            outWidget)) {
+        return -2;
+    }
+    serial::puts("[C112-SURFACE-ACTION] window=");
+    serial::put_hex64(window);
+    serial::puts(" action=");
+    serial::put_hex32(actionId);
+    serial::puts(" result=PASS\n");
+    return 0;
+}
+
 int32_t GUIDEXOS_NATIVEAOT_PAL_CALL managedCloseWindow(
     NativeGxAppContext* context, uint64_t window) {
     NativeAotManagedSurface* surface = managedSurface();
@@ -1262,7 +1334,9 @@ int32_t GUIDEXOS_NATIVEAOT_PAL_CALL managedLog(
         managedMessageEquals(message, "C104-APP-B-PASS");
     const bool c107Message = managedMessageStartsWith(message, "C107-");
     const bool c111Message = managedMessageStartsWith(message, "C111-");
-    serial::puts(c111Message ? "[C111-MANAGED-OUTPUT] " :
+    const bool c112Message = managedMessageStartsWith(message, "C112-");
+    serial::puts(c112Message ? "[C112-MANAGED-OUTPUT] " :
+        c111Message ? "[C111-MANAGED-OUTPUT] " :
         c107Message ? "[C107-MANAGED-OUTPUT] " :
         c104Message ? "[C104-MANAGED-OUTPUT] " : "[C102-MANAGED-OUTPUT] ");
     for (uint32_t index = 0; index < 128u && message[index] != 0; ++index) {
@@ -1560,6 +1634,51 @@ LaunchStatus statusForManagedReturn(int32_t managedReturn) {
     return LaunchStatus::ManagedFailed;
 }
 
+int32_t invokeManagedWithHostMetadata(
+    uint32_t selector,
+    uint32_t launchFlags,
+    uint32_t hostVersion,
+    uint64_t capabilities) {
+    if (g_application.state != ApplicationLifecycleState::Resident ||
+        g_application.entryPoint == 0u || selector == 0u) {
+        return kInvalidApplicationIdReturn;
+    }
+
+    NativeHostCallTable host{
+        sizeof(NativeHostCallTable), hostVersion, managedLog,
+        managedRequestWindow, managedDrawText, managedDrawRect, managedAddButton,
+        managedCloseWindow, capabilities,
+        (capabilities & kManagedCapabilityAction) != 0u
+            ? managedAddActionButton : nullptr };
+    NativeGxAppContext context{
+        sizeof(NativeGxAppContext), 0u, &host,
+        reinterpret_cast<void*>(static_cast<uintptr_t>(selector)),
+        nullptr, 0u, launchFlags};
+    // The resident wrapper only needs non-null startup-table addresses on a
+    // re-entry; it does not reinstall the runtime foundations.  The real
+    // managed context remains the only application-facing value.
+    NativeAotStartupContext startup{
+        reinterpret_cast<void*>(static_cast<uintptr_t>(1u)),
+        reinterpret_cast<void*>(static_cast<uintptr_t>(2u)),
+        reinterpret_cast<void*>(static_cast<uintptr_t>(3u)),
+        &context, startupInstallTls, startupMarker};
+    using Entry = int32_t (GUIDEXOS_NATIVEAOT_PAL_CALL *)(void*);
+    g_activeManagedContext = &context;
+    arch::amd64::disable_interrupts();
+    const int32_t managedReturn = reinterpret_cast<Entry>(
+        g_application.entryPoint)(&startup);
+    arch::amd64::enable_interrupts();
+    g_activeManagedContext = nullptr;
+    return managedReturn;
+}
+
+int32_t invokeManagedAction(uint32_t selector, uint32_t actionId) {
+    if (actionId == 0u || actionId > 0x1FFFFFFFu) return -2;
+    return invokeManagedWithHostMetadata(
+        selector, kLaunchFlagAction | actionId,
+        kManagedHostAbiVersion, kManagedCapabilities);
+}
+
 LaunchStatus launchResident(const char* path, uint32_t logicalAppId,
                             LaunchReport* report, const char* launchContext,
                             uint32_t launchContextLength) {
@@ -1680,8 +1799,14 @@ LaunchStatus launchResident(const char* path, uint32_t logicalAppId,
     guidexos_nativeaot_gc_startup_platform_table_v1 gc{};
     fillGcTable(&gc);
     NativeHostCallTable host{
-        sizeof(NativeHostCallTable), 0u, managedLog, managedRequestWindow,
-        managedDrawText, managedDrawRect, managedAddButton, managedCloseWindow };
+        sizeof(NativeHostCallTable), kManagedHostAbiVersion, managedLog,
+        managedRequestWindow, managedDrawText, managedDrawRect, managedAddButton,
+        managedCloseWindow, kManagedCapabilities, managedAddActionButton };
+    serial::puts("[C112-HOST] version=");
+    serial::put_hex32(kManagedHostAbiVersion);
+    serial::puts(" capabilities=");
+    serial::put_hex64(kManagedCapabilities);
+    serial::puts(" result=PASS\n");
     NativeGxAppContext app{
         sizeof(NativeGxAppContext), 0u, &host,
         reinterpret_cast<void*>(static_cast<uintptr_t>(logicalAppId)),
@@ -1893,8 +2018,14 @@ LaunchStatus launchInternal(const char* path, uint32_t logicalAppId,
     guidexos_nativeaot_gc_startup_platform_table_v1 gc{};
     fillGcTable(&gc);
     NativeHostCallTable host{
-        sizeof(NativeHostCallTable), 0u, managedLog, managedRequestWindow,
-        managedDrawText, managedDrawRect, managedAddButton, managedCloseWindow };
+        sizeof(NativeHostCallTable), kManagedHostAbiVersion, managedLog,
+        managedRequestWindow, managedDrawText, managedDrawRect, managedAddButton,
+        managedCloseWindow, kManagedCapabilities, managedAddActionButton };
+    serial::puts("[C112-HOST] version=");
+    serial::put_hex32(kManagedHostAbiVersion);
+    serial::puts(" capabilities=");
+    serial::put_hex64(kManagedCapabilities);
+    serial::puts(" result=PASS\n");
     NativeGxAppContext app{
         sizeof(NativeGxAppContext), 0u, &host,
         reinterpret_cast<void*>(static_cast<uintptr_t>(logicalAppId)),
@@ -2029,6 +2160,42 @@ LaunchStatus launchLogicalApplication(const char* applicationId,
     serial::puts("\n");
     return launchLogical(kProductionCompositeImage, selector, report,
                          launchContext, launchContextLength);
+}
+
+LaunchStatus probeHostAbiMismatch(LaunchReport* report) {
+    LaunchReport local{};
+    if (report == nullptr) report = &local;
+    *report = {};
+    report->logicalAppId = 3u;
+    report->managedReturn = invokeManagedWithHostMetadata(
+        3u, kLaunchFlagAbiProbe, kManagedHostAbiVersion + 99u,
+        kManagedCapabilities);
+    report->status = report->managedReturn == -3
+        ? LaunchStatus::Success : LaunchStatus::ManagedFailed;
+    serial::puts("[C112-ABI-MISMATCH] hostVersion=");
+    serial::put_hex32(kManagedHostAbiVersion + 99u);
+    serial::puts(" managedReturn=");
+    serial::put_hex32(static_cast<uint32_t>(report->managedReturn));
+    serial::puts(" result=");
+    serial::puts(report->status == LaunchStatus::Success ? "PASS\n" : "FAIL\n");
+    return report->status;
+}
+
+LaunchStatus probeCapabilityDowngrade(LaunchReport* report) {
+    LaunchReport local{};
+    if (report == nullptr) report = &local;
+    *report = {};
+    report->logicalAppId = 3u;
+    const uint64_t downgraded = kManagedCapabilities & ~kManagedCapabilityAction;
+    report->managedReturn = invokeManagedWithHostMetadata(
+        3u, kLaunchFlagCapabilityProbe, kManagedHostAbiVersion, downgraded);
+    report->status = report->managedReturn == 0
+        ? LaunchStatus::Success : LaunchStatus::ManagedFailed;
+    serial::puts("[C112-CAPABILITY-DOWNGRADE] action=omitted managedReturn=");
+    serial::put_hex32(static_cast<uint32_t>(report->managedReturn));
+    serial::puts(" result=");
+    serial::puts(report->status == LaunchStatus::Success ? "PASS\n" : "FAIL\n");
+    return report->status;
 }
 
 } // namespace nativeaot

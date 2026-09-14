@@ -2499,6 +2499,11 @@ public static unsafe class Program
 
     private static int DispatchC107Composite(NativeGxAppContext* context)
     {
+#if HOSTLOGPROOF_C112_REUSABLE_APPLICATION
+        // C112 uses the compile-time application model. The legacy C107
+        // selector proof remains below for its dedicated diagnostic builds.
+        return GuideXosApplicationRegistry.Dispatch(context);
+#else
         uint appId = (uint)(nuint)context->userData;
         if (!LogCompositeDispatch(context, appId))
         {
@@ -2513,6 +2518,7 @@ public static unsafe class Program
                 ? GxAbi.ErrorInvalidApplicationId
                 : GxAbi.ErrorInvalidArgument,
         };
+#endif
     }
 #endif
 

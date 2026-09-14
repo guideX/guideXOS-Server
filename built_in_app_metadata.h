@@ -111,6 +111,10 @@ static const char* const kManagedStatusAliases[] = {
 	"com.guidexos.nativeaot.hostlogproof.app-b"
 };
 
+static const char* const kManagedCounterAliases[] = {
+	"Counter"
+};
+
 static const char* const kOnScreenKeyboardAliases[] = {
 	"On Screen Keyboard"
 };
@@ -143,7 +147,8 @@ static const BuiltInAppMetadata kBuiltInAppMetadata[] = {
 	{ "gxos.builtin.nativeappdebugviewer", "Native App Debug Viewer", "Native App Debug Viewer", nullptr, nullptr, "app.generic", "Diagnostics", "Built-in guideXOS native app diagnostics viewer.", BuiltInAvailabilityHosted, 0, 0, 0, false, false, nullptr, 0, false, false, false, false, false, true, true },
 	{ "gxos.builtin.hdinstaller", "HDInstaller", "HDInstaller", nullptr, nullptr, "app.installer", "Installer", "Built-in guideXOS installer entry for supported runtime targets.", BuiltInAvailabilityHosted, 0, 0, 0, false, false, nullptr, 0, true, false, false, false, false, true, true },
 	{ "com.guidexos.apps.managed.workspace", "Managed Workspace", "Managed Workspace", nullptr, nullptr, "app.generic", "Utilities", "Managed guideXOS application hosted in the resident NativeAOT composite image.", BuiltInAvailabilityBareMetal, 0, 0, 0, false, false, detail::kManagedWorkspaceAliases, sizeof(detail::kManagedWorkspaceAliases) / sizeof(detail::kManagedWorkspaceAliases[0]), true, true, true, false, false, false, false, BuiltInAppLaunchKind::ManagedNativeAot, 1u, kManagedNativeAotCompositeImagePath },
-	{ "com.guidexos.apps.managed.status", "Managed Status", "Managed Status", nullptr, nullptr, "app.generic", "Utilities", "Managed guideXOS status application hosted in the resident NativeAOT composite image.", BuiltInAvailabilityBareMetal, 0, 0, 0, false, false, detail::kManagedStatusAliases, sizeof(detail::kManagedStatusAliases) / sizeof(detail::kManagedStatusAliases[0]), true, true, true, false, false, false, false, BuiltInAppLaunchKind::ManagedNativeAot, 2u, kManagedNativeAotCompositeImagePath }
+	{ "com.guidexos.apps.managed.status", "Managed Status", "Managed Status", nullptr, nullptr, "app.generic", "Utilities", "Managed guideXOS status application hosted in the resident NativeAOT composite image.", BuiltInAvailabilityBareMetal, 0, 0, 0, false, false, detail::kManagedStatusAliases, sizeof(detail::kManagedStatusAliases) / sizeof(detail::kManagedStatusAliases[0]), true, true, true, false, false, false, false, BuiltInAppLaunchKind::ManagedNativeAot, 2u, kManagedNativeAotCompositeImagePath },
+	{ "com.guidexos.apps.managed.counter", "Managed Counter", "Managed Counter", nullptr, nullptr, "app.generic", "Utilities", "Managed guideXOS counter application hosted in the resident NativeAOT composite image.", BuiltInAvailabilityBareMetal, 0, 0, 0, false, false, detail::kManagedCounterAliases, sizeof(detail::kManagedCounterAliases) / sizeof(detail::kManagedCounterAliases[0]), true, true, true, false, false, false, false, BuiltInAppLaunchKind::ManagedNativeAot, 3u, kManagedNativeAotCompositeImagePath }
 };
 
 static const int kBuiltInAppMetadataCount = sizeof(kBuiltInAppMetadata) / sizeof(kBuiltInAppMetadata[0]);

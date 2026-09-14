@@ -76,6 +76,11 @@ LaunchStatus launchLogicalApplication(const char* applicationId,
                                       LaunchReport* report,
                                       const char* launchContext = nullptr,
                                       uint32_t launchContextLength = 0u);
+// C112 negative probes execute only after the resident image exists. They
+// exercise the managed contract with bounded test metadata and never alter
+// the production host table used by ordinary App Model launches.
+LaunchStatus probeHostAbiMismatch(LaunchReport* report);
+LaunchStatus probeCapabilityDowngrade(LaunchReport* report);
 const char* productionCompositeImagePath();
 const char* launchStatusName(LaunchStatus status);
 

@@ -1741,6 +1741,7 @@ static StartMenuApp s_startMenuApps[] = {
     {"AppModel",    true,  false, 0xFF5587D2},  // pinned app model demo entry
     {"Managed Workspace", true, false, 0xFF6A8FD1}, // shared resident NativeAOT logical app
     {"Managed Status",    true, false, 0xFF5C9A88}, // shared resident NativeAOT logical app
+    {"Managed Counter",   true, false, 0xFF9A6A42}, // shared resident NativeAOT logical app
     {"Paint",       false, true,  0xFFC87830},  // recent
     {"Clock",       false, true,  0xFF4690C8},  // recent
     {"File Explorer", false, true, 0xFFC8B43C}, // recent
@@ -1761,6 +1762,7 @@ static const char* s_allProgramsList[] = {
     "HDInstaller",
     "ImgViewer",
     "AppModel",
+    "Managed Counter",
     "Managed Status",
     "Managed Workspace",
     "Notepad",

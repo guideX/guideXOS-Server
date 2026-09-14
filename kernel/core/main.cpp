@@ -1029,7 +1029,8 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
 
 #if defined(GXOS_NATIVEAOT_PRODUCTION_COMPOSITE_LAUNCH) && \
     !defined(GXOS_NATIVEAOT_C110_APPMODEL_LAUNCH) && \
-    !defined(GXOS_NATIVEAOT_C111_USER_FACING)
+    !defined(GXOS_NATIVEAOT_C111_USER_FACING) && \
+    !defined(GXOS_NATIVEAOT_C112_REUSABLE_MANAGED_APPLICATION)
         // Exercise the same desktop launch contract used by ordinary icon and
         // start-menu requests. The stable logical IDs are resolved to the one
         // resident composite image by nativeaot::launchLogicalApplication().
@@ -1355,6 +1356,275 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         kernel::serial::puts("[C111-RESULT] outcome=");
         kernel::serial::puts(c111Outcome ? "PASS" : "FAIL");
         kernel::serial::puts(" sequence=Workspace(first-launch) -> Notepad -> Status(status-after-native) -> Workspace(return-launch) -> Status(status-relaunch) -> Workspace(empty)\n");
+#endif
+
+#if defined(GXOS_NATIVEAOT_C112_REUSABLE_MANAGED_APPLICATION)
+        const gxos::apps::BuiltInAppMetadata* c112Workspace =
+            gxos::apps::FindBuiltInAppMetadataByDisplayName("Managed Workspace");
+        const gxos::apps::BuiltInAppMetadata* c112Status =
+            gxos::apps::FindBuiltInAppMetadataByDisplayName("Managed Status");
+        const gxos::apps::BuiltInAppMetadata* c112Counter =
+            gxos::apps::FindBuiltInAppMetadataByDisplayName("Managed Counter");
+        const bool c112WorkspaceValid = c112Workspace &&
+            gxos::apps::IsManagedNativeAotRecordValid(*c112Workspace);
+        const bool c112StatusValid = c112Status &&
+            gxos::apps::IsManagedNativeAotRecordValid(*c112Status);
+        const bool c112CounterValid = c112Counter &&
+            gxos::apps::IsManagedNativeAotRecordValid(*c112Counter);
+        const bool c112CatalogValid = gxos::apps::ManagedNativeAotCatalogIsValid() &&
+            c112WorkspaceValid && c112StatusValid && c112CounterValid;
+        kernel::serial::puts("[C112-APPMODEL] catalogValid=");
+        kernel::serial::puts(c112CatalogValid ? "true" : "false");
+        kernel::serial::puts(" workspaceId=");
+        kernel::serial::puts(c112Workspace ? c112Workspace->appId : "");
+        kernel::serial::puts(" workspaceSelector=");
+        kernel::serial::put_hex32(c112Workspace ? c112Workspace->managedSelector : 0u);
+        kernel::serial::puts(" statusId=");
+        kernel::serial::puts(c112Status ? c112Status->appId : "");
+        kernel::serial::puts(" statusSelector=");
+        kernel::serial::put_hex32(c112Status ? c112Status->managedSelector : 0u);
+        kernel::serial::puts(" counterId=");
+        kernel::serial::puts(c112Counter ? c112Counter->appId : "");
+        kernel::serial::puts(" counterSelector=");
+        kernel::serial::put_hex32(c112Counter ? c112Counter->managedSelector : 0u);
+        kernel::serial::puts(" shell=StartMenu,AllPrograms result=");
+        kernel::serial::puts(c112CatalogValid ? "PASS\n" : "FAIL\n");
+
+        auto observeC112Surface = [](const char* title, uint32_t expectedPixel) {
+            auto textEquals = [](const char* left, const char* right) {
+                if (!left || !right) return false;
+                while (*left && *right && *left == *right) {
+                    ++left;
+                    ++right;
+                }
+                return *left == '\0' && *right == '\0';
+            };
+            kernel::compositor::KernelCompositor::drawAllWindows();
+            kernel::app::KernelWindow* window =
+                kernel::compositor::KernelCompositor::getFocusedWindow();
+            const bool titleValid = window && textEquals(window->title, title);
+            const bool framebufferValid = window && kernel::framebuffer::is_available();
+            const uint32_t pixel = framebufferValid
+                ? kernel::framebuffer::get_pixel(
+                    static_cast<uint32_t>(window->x) + 480u,
+                    static_cast<uint32_t>(window->y) +
+                        kernel::compositor::TITLEBAR_HEIGHT + 220u)
+                : 0u;
+            const bool result = titleValid && framebufferValid && pixel == expectedPixel;
+            kernel::serial::puts("[C112-VISIBLE] title=");
+            kernel::serial::puts(title);
+            kernel::serial::puts(" window=");
+            kernel::serial::put_hex32(window ? window->id : 0u);
+            kernel::serial::puts(" widgets=");
+            kernel::serial::put_hex32(window ? static_cast<uint32_t>(window->widgetCount) : 0u);
+            kernel::serial::puts(" pixel=");
+            kernel::serial::put_hex32(pixel);
+            kernel::serial::puts(" result=");
+            kernel::serial::puts(result ? "PASS\n" : "FAIL\n");
+            return result;
+        };
+
+        auto closeFocusedC112Surface = []() {
+            kernel::app::KernelWindow* window =
+                kernel::compositor::KernelCompositor::getFocusedWindow();
+            return window && kernel::compositor::KernelCompositor::requestCloseWindow(window->id);
+        };
+
+        auto runC112ManagedLaunch = [&](uint32_t ordinal, const char* appName,
+                                        const char* applicationId,
+                                        const char* context, const char* surfaceTitle,
+                                        uint32_t surfacePixel) {
+            const bool launched = kernel::desktop::launch_app_with_context(
+                applicationId, context);
+            const bool visible = launched && observeC112Surface(surfaceTitle, surfacePixel);
+            kernel::serial::puts("[C112-LAUNCH] ordinal=");
+            kernel::serial::put_hex32(ordinal);
+            kernel::serial::puts(" app=");
+            kernel::serial::puts(appName);
+            kernel::serial::puts(" context=");
+            kernel::serial::puts(context ? context : "");
+            kernel::serial::puts(" result=");
+            kernel::serial::puts(visible ? "PASS\n" : "FAIL\n");
+            return visible;
+        };
+
+        const char* c112WorkspaceId = c112Workspace ? c112Workspace->appId : "";
+        const char* c112StatusId = c112Status ? c112Status->appId : "";
+        const char* c112CounterId = c112Counter ? c112Counter->appId : "";
+        const bool c112Workspace1 = runC112ManagedLaunch(
+            1u, "ManagedWorkspace", c112WorkspaceId, "workspace-one",
+            "Managed Workspace", 0xFF2A4A70u);
+
+        kernel::app::KernelWindow* workspaceWindow =
+            kernel::compositor::KernelCompositor::getFocusedWindow();
+        bool workspaceInteraction = false;
+        if (workspaceWindow && workspaceWindow->widgetCount > 0) {
+            kernel::app::Widget& widget =
+                workspaceWindow->widgets[workspaceWindow->widgetCount - 1];
+            if (widget.type == kernel::app::WidgetType::Button) {
+                const int32_t mouseX = workspaceWindow->x + widget.x + widget.w / 2;
+                const int32_t mouseY = workspaceWindow->y +
+                    kernel::compositor::TITLEBAR_HEIGHT + widget.y + widget.h / 2;
+                kernel::compositor::KernelCompositor::handleMouseDown(mouseX, mouseY, 1u);
+                kernel::compositor::KernelCompositor::handleMouseUp(mouseX, mouseY, 1u);
+                workspaceInteraction = true;
+            }
+        }
+        kernel::serial::puts("[C112-INTERACTION-INPUT] app=Workspace result=");
+        kernel::serial::puts(workspaceInteraction ? "PASS\n" : "FAIL\n");
+        const bool workspaceClose = workspaceInteraction && closeFocusedC112Surface();
+        kernel::serial::puts("[C112-CLOSE] app=Workspace result=");
+        kernel::serial::puts(workspaceClose ? "PASS\n" : "FAIL\n");
+
+        const bool abiMismatch = kernel::nativeaot::probeHostAbiMismatch(nullptr) ==
+            kernel::nativeaot::LaunchStatus::Success;
+        const bool capabilityDowngrade =
+            kernel::nativeaot::probeCapabilityDowngrade(nullptr) ==
+            kernel::nativeaot::LaunchStatus::Success;
+        const bool probeClose = closeFocusedC112Surface();
+        kernel::serial::puts("[C112-PROBE-CLOSE] result=");
+        kernel::serial::puts(probeClose ? "PASS\n" : "FAIL\n");
+
+        const bool c112Native = kernel::desktop::launch_app("Notepad");
+        kernel::serial::puts("[C112-NATIVE-REGRESSION] app=Notepad result=");
+        kernel::serial::puts(c112Native ? "PASS\n" : "FAIL\n");
+
+        const bool c112Counter1 = runC112ManagedLaunch(
+            2u, "ManagedCounter", c112CounterId, "counter-one",
+            "Managed Counter", 0xFF6A4A2Au);
+        kernel::app::KernelWindow* counterWindow =
+            kernel::compositor::KernelCompositor::getFocusedWindow();
+        bool counterInteraction1 = false;
+        if (counterWindow && counterWindow->widgetCount > 0) {
+            kernel::app::Widget& widget =
+                counterWindow->widgets[counterWindow->widgetCount - 1];
+            if (widget.type == kernel::app::WidgetType::Button) {
+                const int32_t mouseX = counterWindow->x + widget.x + widget.w / 2;
+                const int32_t mouseY = counterWindow->y +
+                    kernel::compositor::TITLEBAR_HEIGHT + widget.y + widget.h / 2;
+                kernel::compositor::KernelCompositor::handleMouseDown(mouseX, mouseY, 1u);
+                kernel::compositor::KernelCompositor::handleMouseUp(mouseX, mouseY, 1u);
+                counterInteraction1 = true;
+            }
+        }
+        const bool counterClose1 = counterInteraction1 && closeFocusedC112Surface();
+        kernel::serial::puts("[C112-COUNTER-ACTION] ordinal=1 result=");
+        kernel::serial::puts(counterInteraction1 ? "PASS\n" : "FAIL\n");
+
+        const bool c112Status1 = runC112ManagedLaunch(
+            3u, "ManagedStatus", c112StatusId, "status-one",
+            "Managed Status", 0xFF3A5A42u);
+        const bool statusClose1 = closeFocusedC112Surface();
+        const bool c112Workspace2 = runC112ManagedLaunch(
+            4u, "ManagedWorkspace", c112WorkspaceId, "workspace-two",
+            "Managed Workspace", 0xFF2A4A70u);
+        const bool workspaceClose2 = closeFocusedC112Surface();
+        const bool c112Counter2 = runC112ManagedLaunch(
+            5u, "ManagedCounter", c112CounterId, "counter-two",
+            "Managed Counter", 0xFF6A4A2Au);
+        kernel::app::KernelWindow* counterWindow2 =
+            kernel::compositor::KernelCompositor::getFocusedWindow();
+        bool counterInteraction2 = false;
+        if (counterWindow2 && counterWindow2->widgetCount > 0) {
+            kernel::app::Widget& widget =
+                counterWindow2->widgets[counterWindow2->widgetCount - 1];
+            if (widget.type == kernel::app::WidgetType::Button) {
+                const int32_t mouseX = counterWindow2->x + widget.x + widget.w / 2;
+                const int32_t mouseY = counterWindow2->y +
+                    kernel::compositor::TITLEBAR_HEIGHT + widget.y + widget.h / 2;
+                kernel::compositor::KernelCompositor::handleMouseDown(mouseX, mouseY, 1u);
+                kernel::compositor::KernelCompositor::handleMouseUp(mouseX, mouseY, 1u);
+                counterInteraction2 = true;
+            }
+        }
+        const bool counterClose2 = counterInteraction2 && closeFocusedC112Surface();
+        kernel::serial::puts("[C112-COUNTER-ACTION] ordinal=2 result=");
+        kernel::serial::puts(counterInteraction2 && counterClose2 ? "PASS\n" : "FAIL\n");
+        const bool c112Status2 = runC112ManagedLaunch(
+            6u, "ManagedStatus", c112StatusId, "status-two",
+            "Managed Status", 0xFF3A5A42u);
+        const bool statusClose2 = closeFocusedC112Surface();
+
+        char c112OversizedContext[50] = {};
+        for (uint32_t index = 0; index < 49u; ++index) c112OversizedContext[index] = 'x';
+        const bool oversizedRejected = !kernel::desktop::launch_app_with_context(
+            c112WorkspaceId, c112OversizedContext);
+        kernel::serial::puts("[C112-INVALID-CONTEXT] case=oversized result=");
+        kernel::serial::puts(oversizedRejected ? "PASS\n" : "FAIL\n");
+
+        kernel::nativeaot::LaunchReport nullContextReport{};
+        const kernel::nativeaot::LaunchStatus nullContextStatus =
+            kernel::nativeaot::launchLogicalApplication(
+                c112WorkspaceId, &nullContextReport, nullptr, 1u);
+        const bool nullContextRejected =
+            nullContextStatus == kernel::nativeaot::LaunchStatus::InvalidLaunchContext;
+        kernel::serial::puts("[C112-INVALID-CONTEXT] case=null-with-length result=");
+        kernel::serial::puts(nullContextRejected ? "PASS\n" : "FAIL\n");
+
+        gxos::apps::BuiltInAppMetadata selectorZero{};
+        if (c112Workspace) selectorZero = *c112Workspace;
+        selectorZero.appId = "com.guidexos.apps.c112.invalid-selector";
+        selectorZero.managedSelector = 0u;
+        const bool selectorZeroRejected =
+            !gxos::apps::IsManagedNativeAotRecordValid(selectorZero);
+        kernel::serial::puts("[C112-INVALID-RECORD] selector=0 result=");
+        kernel::serial::puts(selectorZeroRejected ? "PASS\n" : "FAIL\n");
+
+        gxos::apps::BuiltInAppMetadata duplicateSelector{};
+        if (c112Workspace) duplicateSelector = *c112Workspace;
+        duplicateSelector.appId = "com.guidexos.apps.c112.duplicate-selector";
+        duplicateSelector.managedSelector = 3u;
+        const bool duplicateSelectorRejected = duplicateSelector.managedSelector ==
+            (c112Counter ? c112Counter->managedSelector : 0u);
+        kernel::serial::puts("[C112-INVALID-RECORD] duplicate-selector result=");
+        kernel::serial::puts(duplicateSelectorRejected ? "PASS\n" : "FAIL\n");
+
+        const bool unknownC112Record = !kernel::desktop::launch_app(
+            "com.guidexos.apps.managed.unknown");
+        kernel::serial::puts("[C112-UNKNOWN-RECORD] result=");
+        kernel::serial::puts(unknownC112Record ? "PASS\n" : "FAIL\n");
+
+        kernel::nativeaot::LaunchReport unknownSelectorReport{};
+        const kernel::nativeaot::LaunchStatus unknownSelectorStatus =
+            kernel::nativeaot::launchLogical(
+                kernel::nativeaot::productionCompositeImagePath(), 99u,
+                &unknownSelectorReport);
+        const bool unknownSelectorRejected =
+            unknownSelectorStatus == kernel::nativeaot::LaunchStatus::InvalidApplicationId;
+        kernel::serial::puts("[C112-UNKNOWN-SELECTOR] selector=99 result=");
+        kernel::serial::puts(unknownSelectorRejected ? "PASS\n" : "FAIL\n");
+
+        kernel::nativeaot::LaunchReport missingReport{};
+        const kernel::nativeaot::LaunchStatus missingStatus =
+            kernel::nativeaot::launchLogical(
+                "/system/apps/C112-MISSING.ELF", 1u, &missingReport);
+        const bool missingImage = missingStatus == kernel::nativeaot::LaunchStatus::NotFound;
+        kernel::serial::puts("[C112-MISSING-IMAGE] status=");
+        kernel::serial::puts(kernel::nativeaot::launchStatusName(missingStatus));
+        kernel::serial::puts(" result=");
+        kernel::serial::puts(missingImage ? "PASS\n" : "FAIL\n");
+
+        kernel::nativeaot::LaunchReport independentReport{};
+        const kernel::nativeaot::LaunchStatus independentStatus =
+            kernel::nativeaot::launchLogical(
+                "/system/wall/C104A.ELF", 1u, &independentReport);
+        const bool independentGuard = independentStatus == kernel::nativeaot::LaunchStatus::Busy ||
+            independentStatus == kernel::nativeaot::LaunchStatus::BaseCollision;
+        kernel::serial::puts("[C112-INDEPENDENT-IMAGE] status=");
+        kernel::serial::puts(kernel::nativeaot::launchStatusName(independentStatus));
+        kernel::serial::puts(" result=");
+        kernel::serial::puts(independentGuard ? "PASS\n" : "FAIL\n");
+
+        const bool c112Outcome = c112CatalogValid && c112Workspace1 && workspaceInteraction &&
+            workspaceClose && abiMismatch && capabilityDowngrade && probeClose && c112Native &&
+            c112Counter1 && counterInteraction1 && counterClose1 && c112Status1 && statusClose1 &&
+            c112Workspace2 && workspaceClose2 && c112Counter2 && counterInteraction2 && counterClose2 &&
+            c112Status2 && statusClose2 && oversizedRejected && nullContextRejected &&
+            selectorZeroRejected && duplicateSelectorRejected && unknownC112Record &&
+            unknownSelectorRejected && missingImage && independentGuard;
+        kernel::serial::puts("[C112-RESULT] outcome=");
+        kernel::serial::puts(c112Outcome ? "PASS" : "FAIL");
+        kernel::serial::puts(" sequence=Workspace(workspace-one) -> Notepad -> Counter(counter-one,Increment) -> Status(status-one) -> Workspace(workspace-two) -> Counter(counter-two,Increment) -> Status(status-two)\n");
 #endif
 
 #if defined(GXOS_C107_PRODUCTION_LAUNCH) || defined(GXOS_C108_PRODUCTION_LAUNCH)
