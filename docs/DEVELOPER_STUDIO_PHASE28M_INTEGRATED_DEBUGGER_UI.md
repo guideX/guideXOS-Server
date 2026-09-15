@@ -207,11 +207,19 @@ computer-use was unavailable (`apps=[]`), which is recorded but is not treated
 as Outcome E. Physical mouse interaction was not required because the real
 keyboard/UI-controller paths were exercised in-guest.
 
-The final commit IDs and final worktree status are added below after the local
-continuation commits. Nothing is pushed, and standalone `main` remains
-unchanged.
+Final local commits and status:
 
-## Repository state and provenance
+- Standalone continuation: `f50ce42`,
+  `developer studio: validate integrated debugger ui`.
+- Server continuation: `b52e48a`,
+  `developer studio: validate integrated debugger ui in guest`.
+- Tracked files are clean after those commits. The server worktree retains
+  untracked disposable QEMU staging/evidence outputs under `ESP/` and
+  `tmp/native-elf-development-app-model-host-test/`; they are intentionally
+  preserved and were not cleaned.
+- Nothing is pushed, and standalone `main` remains unchanged.
+
+## Historical Outcome B repository state and provenance
 
 Server repository:
 
@@ -261,7 +269,7 @@ The staged manifest is `Apps/DeveloperStudio/app.json`; it contains matching
 amd64 and arm64 `NativeElf` entries, `gx_main`, `guidexos-c-abi-v1`, and the
 existing window/filesystem permissions.
 
-## Build and ABI synchronization
+## Historical Outcome B build and ABI snapshot
 
 Build command used for amd64 and arm64:
 
@@ -307,7 +315,7 @@ through the existing controller and current ABI.
 The panel is titled `INTEGRATED DEBUGGER` and exposes seven tabs: Breakpoints,
 Session, Call Stack, Locals, Arguments, Watches, and Output.
 
-## UI evidence and acceptance matrix
+## Historical Outcome B UI evidence snapshot
 
 The following records the requested 54 reporting items. “Source evidence” is
 implementation evidence; it is intentionally not presented as a visible guest
@@ -368,7 +376,7 @@ run.
 53. Standalone main: not rewritten; the work is isolated on `phase28m-integrated-debugger-ui`.
 54. Push status: nothing was pushed.
 
-## Passing host validation
+## Historical host-validation snapshot
 
 ```text
 scripts/run-native-abi-layout-test.ps1
@@ -389,5 +397,70 @@ The standalone normal build also passed its run-controller, project-search,
 debugger-model, source-step, frame-pointer stack, DWARF locals/arguments,
 watch, and conditional-breakpoint model tests before producing both ELFs.
 
-The Phase 28M milestone is therefore implemented and packaged, with the
+The Phase 28M milestone was therefore implemented and packaged, with the
 remaining work precisely bounded at real guest App Model/QEMU UI exercise.
+
+## Current final report
+
+1. Outcome: **A**.
+2. Server: `D:\dev\guideXOSServerV0.5_DEVELOPER_STUDIO`, branch
+   `v0.5_DEVELOPER_STUDIO`, starting HEAD `dbcc2a3daa79344502a26b64f5747f1dacbc7260`,
+   ending commit `b52e48a`.
+3. Standalone: `D:\dev\guideXOS_Developer_Studio`, branch
+   `phase28m-integrated-debugger-ui`, starting HEAD
+   `b91159eb190f18da506ddbcd265be1d50a2bacdb`, ending commit `f50ce42`.
+4. Server upstream was `origin/v0.5_DEVELOPER_STUDIO`; no remote operation or
+   push occurred. Tracked files are clean after the commits; preserved
+   untracked `ESP/` and host-test staging output are documented above.
+5. Standalone `main` remains
+   `33c37e56df6dd70e0963b2caca824e100f5e3d7e`; it was not merged, rewritten,
+   or pushed.
+6. Old Phase 28L failure: `/P28L` emitted `Compiler: build FAIL` before
+   `DEVELOPER_STUDIO_PHASE28L_BUILD_PASS`, before Developer Studio launch, and
+   before debugger assertions. The historical source diagnostic was not
+   preserved, so no narrower root cause is claimed. A current isolated Phase
+   28L rerun passed.
+7. Package changed legitimately after diagnostic source changes and rebuild:
+   amd64 `861,856` bytes / `BC9D35CB1D9582EB0ABD4CD434E05EA8162B1B1C22F030E4A6D376B4C4546DF3`;
+   arm64 `1,015,504` bytes /
+   `DDED73B4B5D9C683CCC051370E1CEBA6FBB9DE30BF6997B7A7B2331DEBAC5A01`.
+8. In-guest architecture: disposable `-Phase28MOnly` QEMU boots stage the
+   real `/Apps/DeveloperStudio` App Model package plus `/P28M`; the packaged
+   app's sentinel-gated diagnostic mode runs the production UI/controller
+   paths. The server smoke harness only verifies package discovery/launch and
+   cleanup.
+9. Marker provenance: app/window/debug-start/pane/watch/breakpoint/step/output/
+   stop/session markers originate in the real Developer Studio binary; package
+   discovery and final cleanup markers originate in the authoritative guest
+   harness/App Model checks.
+10. UI results: launch, window, project, debug start, initial pause, Call Stack
+    (`helper_tail`, `helper`, `gx_main`), caller selection, Locals/Arguments
+    (`input=10`, `delta=4`), Watch (`input + delta = 14`), safe invalid-watch
+    error, breakpoint manager action/policy, Output, Continue, Step Into, Step
+    Over, Step Out, Stop/Cancel, stale clearing, enablement, and second
+    generation all passed.
+11. Breakpoint/output details: entries covered `src/helper.cpp:3`, the
+    `src/helper.cpp:13` LOG point, and `src/main.cpp:15`; output ordering was
+    `input=10 doubled=28` then `input=1 doubled=6`, with no logpoint pause.
+12. Bounds: `watches=8`, `call_stack=16`, `breakpoints=8`, `output=32`.
+13. Screenshot/framebuffer: no screenshot or region hash was captured; the
+    guest reported a live framebuffer and the internal pane/render markers and
+    model assertions are authoritative.
+14. Fresh boots: final-package evidence directories are
+    `2977c7ecab884507a88f6443fedd6392`,
+    `a5400b9214f24a8eab44396a31914bde`, and
+    `0669a8fe585f4e1880abfe0ee43abf57`; all three reached `GUEST_PASS`.
+15. Host validation: standalone amd64/arm64 builds and focused model tests,
+    ABI layout, breakpoint manager/policy, output, watches, debugger runtime,
+    source-step, call stack, NativeElf runtime, App Model, validator,
+    trampoline, compiler-functions, corrected filesystem runner, PowerShell
+    parsing, and `git diff --check` passed.
+16. Filesystem omission: the runner now includes
+    `kernel/core/native_elf/native_elf_debug_watches.cpp`; its corrected test
+    passed.
+17. Physical mouse: not used; the in-guest keyboard/controller path is the
+    deterministic proof. External computer-use remained unavailable
+    (`apps=[]`) and was not treated as an environment blocker.
+18. Remaining limitations: no external screenshot artifact and no physical
+    mouse trace. No production/default diagnostic behavior is enabled without
+    the explicit staged sentinel. Nothing was pushed.
