@@ -38,6 +38,11 @@ public static class GxAbi
     public const uint LaunchFlagInputKeyDown = 0x02000000u;
     public const uint LaunchFlagInputKeyChar = 0x03000000u;
     public const uint LaunchFlagInputPayloadMask = 0x00FFFFFFu;
+    // The high payload bit is reserved for key-event modifier state. Pointer
+    // coordinates remain unchanged and are far below this bit in the current
+    // managed surface geometry.
+    public const uint LaunchFlagInputShift = 0x00800000u;
+    public const uint LaunchFlagInputValueMask = 0x007FFFFFu;
     public const uint LaunchFlagInputCoordinateMask = 0x00000FFFu;
     public const uint LaunchFlagPayloadMask = 0x1FFFFFFFu;
     public const int ErrorInvalidArgument = -2;

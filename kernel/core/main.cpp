@@ -1941,7 +1941,8 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         kernel::serial::puts(" list=PASS stat=PASS truncation=PASS downgrade=PASS abi=PASS\n");
 #endif
 
-#if defined(GXOS_NATIVEAOT_C115_MANAGED_FILE_PICKER)
+#if defined(GXOS_NATIVEAOT_C115_MANAGED_FILE_PICKER) && \
+    !defined(GXOS_NATIVEAOT_C117_MANAGED_TEXT_AREA)
         const gxos::apps::BuiltInAppMetadata* c115Workspace =
             gxos::apps::FindBuiltInAppMetadataByDisplayName("Managed Workspace");
         const gxos::apps::BuiltInAppMetadata* c115Status =
@@ -2083,7 +2084,256 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         kernel::serial::puts(" picker=managed state-machine filter=TXT overwrite=explicit lifecycle=resident\n");
 #endif
 
-#if defined(GXOS_NATIVEAOT_C116_MANAGED_TEXT_INPUT)
+#if defined(GXOS_NATIVEAOT_C117_MANAGED_TEXT_AREA)
+        {
+        const gxos::apps::BuiltInAppMetadata* c117Workspace =
+            gxos::apps::FindBuiltInAppMetadataByDisplayName("Managed Workspace");
+        const gxos::apps::BuiltInAppMetadata* c117Status =
+            gxos::apps::FindBuiltInAppMetadataByDisplayName("Managed Status");
+        const gxos::apps::BuiltInAppMetadata* c117Counter =
+            gxos::apps::FindBuiltInAppMetadataByDisplayName("Managed Counter");
+        const gxos::apps::BuiltInAppMetadata* c117Notes =
+            gxos::apps::FindBuiltInAppMetadataByDisplayName("Managed Notes");
+        const bool c117CatalogValid = gxos::apps::ManagedNativeAotCatalogIsValid() &&
+            c117Workspace && c117Status && c117Counter && c117Notes;
+        kernel::serial::puts("[C117-APPMODEL] catalogValid=");
+        kernel::serial::puts(c117CatalogValid ? "true result=PASS\n" : "false result=FAIL\n");
+
+        auto c117Contains = [](const char* value, const char* needle) {
+            if (!value || !needle || !needle[0]) return false;
+            for (uint32_t start = 0u; value[start] != 0; ++start) {
+                uint32_t offset = 0u;
+                while (needle[offset] != 0 && value[start + offset] == needle[offset]) {
+                    ++offset;
+                }
+                if (needle[offset] == 0) return true;
+            }
+            return false;
+        };
+        auto c117HasLabel = [&](const char* text) {
+            kernel::app::KernelWindow* window =
+                kernel::compositor::KernelCompositor::getFocusedWindow();
+            if (!window || !text) return false;
+            for (int index = 0; index < window->widgetCount; ++index) {
+                kernel::app::Widget& widget = window->widgets[index];
+                if (widget.type == kernel::app::WidgetType::Label &&
+                    widget.visible && c117Contains(widget.text, text)) return true;
+            }
+            return false;
+        };
+        auto c117HasButton = [&](const char* text) {
+            kernel::app::KernelWindow* window =
+                kernel::compositor::KernelCompositor::getFocusedWindow();
+            if (!window || !text) return false;
+            for (int index = 0; index < window->widgetCount; ++index) {
+                kernel::app::Widget& widget = window->widgets[index];
+                if (widget.type == kernel::app::WidgetType::Button &&
+                    widget.visible && c117Contains(widget.text, text)) return true;
+            }
+            return false;
+        };
+        auto c117ClickButton = [&](const char* text) {
+            kernel::app::KernelWindow* window =
+                kernel::compositor::KernelCompositor::getFocusedWindow();
+            if (!window || !text) return false;
+            for (int index = 0; index < window->widgetCount; ++index) {
+                kernel::app::Widget& widget = window->widgets[index];
+                if (widget.type != kernel::app::WidgetType::Button ||
+                    !widget.visible || !widget.enabled ||
+                    !c117Contains(widget.text, text)) continue;
+                const int32_t mouseX = window->x + widget.x + widget.w / 2;
+                const int32_t mouseY = window->y + kernel::compositor::TITLEBAR_HEIGHT +
+                    widget.y + widget.h / 2;
+                kernel::compositor::KernelCompositor::handleMouseDown(mouseX, mouseY, 1u);
+                kernel::compositor::KernelCompositor::handleMouseUp(mouseX, mouseY, 1u);
+                return true;
+            }
+            return false;
+        };
+        auto c117FocusArea = [&]() {
+            kernel::app::KernelWindow* window =
+                kernel::compositor::KernelCompositor::getFocusedWindow();
+            if (!window) return false;
+            const int32_t mouseX = window->x + 21;
+            const int32_t mouseY = window->y + kernel::compositor::TITLEBAR_HEIGHT + 73;
+            kernel::compositor::KernelCompositor::handleMouseDown(mouseX, mouseY, 1u);
+            kernel::compositor::KernelCompositor::handleMouseUp(mouseX, mouseY, 1u);
+            return c117HasLabel("> |First line");
+        };
+        auto c117FocusFilename = [&]() {
+            kernel::app::KernelWindow* window =
+                kernel::compositor::KernelCompositor::getFocusedWindow();
+            if (!window) return false;
+            const int32_t mouseX = window->x + 32;
+            const int32_t mouseY = window->y + kernel::compositor::TITLEBAR_HEIGHT + 92;
+            kernel::compositor::KernelCompositor::handleMouseDown(mouseX, mouseY, 1u);
+            kernel::compositor::KernelCompositor::handleMouseUp(mouseX, mouseY, 1u);
+            return c117HasLabel("Filename: [ ");
+        };
+        auto c117Key = [](uint32_t key) {
+            kernel::compositor::KernelCompositor::handleKeyDown(key);
+            return true;
+        };
+        auto c117ShiftKey = [&](uint32_t key) {
+            return kernel::nativeaot::invokeManagedKeyDownForProof(
+                c117Notes ? c117Notes->managedSelector : 0u, key, true) == 0;
+        };
+        auto c117Char = [](char value) {
+            kernel::compositor::KernelCompositor::handleKeyChar(value);
+            return true;
+        };
+        auto c117Text = [&](const char* text) {
+            if (!text) return false;
+            for (uint32_t index = 0u; text[index] != 0; ++index) {
+                kernel::compositor::KernelCompositor::handleKeyChar(text[index]);
+            }
+            return true;
+        };
+        auto c117Launch = [&](const char* applicationId, const char* context) {
+            return c117CatalogValid && kernel::desktop::launch_app_with_context(
+                applicationId, context);
+        };
+        auto c117Close = []() {
+            kernel::app::KernelWindow* window =
+                kernel::compositor::KernelCompositor::getFocusedWindow();
+            return window && kernel::compositor::KernelCompositor::requestCloseWindow(window->id);
+        };
+        auto c117Verify = [](const char* path, const char* expected,
+                             uint32_t expectedSize, const char* marker) {
+            kernel::vfs::FileInfo info{};
+            uint8_t bytes[256] = {};
+            const kernel::vfs::Status status = kernel::vfs::stat(path, &info);
+            const int32_t read = status == kernel::vfs::VFS_OK
+                ? kernel::vfs::read_file(path, bytes, sizeof(bytes)) : -1;
+            bool pass = status == kernel::vfs::VFS_OK &&
+                info.type == kernel::vfs::FILE_TYPE_REGULAR &&
+                info.size == expectedSize && read == static_cast<int32_t>(expectedSize);
+            for (uint32_t index = 0u; pass && index < expectedSize; ++index) {
+                pass = bytes[index] == static_cast<uint8_t>(expected[index]);
+            }
+            kernel::serial::puts("[C117-VFS-VERIFY] stage=");
+            kernel::serial::puts(marker);
+            kernel::serial::puts(" path=");
+            kernel::serial::puts(path);
+            kernel::serial::puts(" size=");
+            kernel::serial::put_hex32(static_cast<uint32_t>(info.size));
+            kernel::serial::puts(" result=");
+            kernel::serial::puts(pass ? "PASS\n" : "FAIL\n");
+            return pass;
+        };
+
+        const char* c117Expected =
+            "AFirst!\n line\nSecond? ROW\nThird line\nFourth line\nFifth line\nSixth line!";
+        const bool workspace = c117Launch(c117Workspace->appId, "c117-workspace") && c117Close();
+        const bool notesLaunch = workspace && c117Launch(c117Notes->appId, "c117-notes");
+        const bool focus = notesLaunch && c117FocusArea();
+        const bool insertedStart = focus && c117Char('A') && c117HasLabel("A|First line");
+        bool movedMiddle = insertedStart;
+        for (uint32_t index = 0u; movedMiddle && index < 5u; ++index) {
+            movedMiddle = c117Key(0x103u);
+        }
+        const bool insertedMiddle = movedMiddle && c117Char('!') &&
+            c117HasLabel("AFirst!| line");
+        const bool splitLine = insertedMiddle && c117Key(10u) &&
+            c117HasLabel("> | line");
+        const bool downToSecond = splitLine && c117Key(0x101u);
+        bool editedSecond = downToSecond;
+        for (uint32_t index = 0u; editedSecond && index < 6u; ++index) {
+            editedSecond = c117Key(0x103u);
+        }
+        const bool insertedSecond = editedSecond && c117Char('?') &&
+            c117HasLabel("Second?| line");
+        const bool selectionPositioned = insertedSecond && c117Key(0x103u);
+        bool selectionCreated = selectionPositioned;
+        for (uint32_t index = 0u; selectionCreated && index < 4u; ++index) {
+            selectionCreated = c117ShiftKey(0x103u);
+        }
+        const bool selectionVisible = selectionCreated && c117HasLabel("Second? [line]");
+        const bool selectionReplaced = selectionVisible && c117Text("ROW") &&
+            c117HasLabel("Second? ROW");
+        bool movedToEnd = selectionReplaced;
+        for (uint32_t index = 0u; movedToEnd && index < 4u; ++index) {
+            movedToEnd = c117Key(0x101u);
+        }
+        const bool editedLast = movedToEnd && c117Key(0x105u) && c117Char('!') &&
+            c117HasLabel("Sixth line!");
+        const bool scrollDown = editedLast && !c117HasLabel("AFirst!");
+        bool movedBack = editedLast;
+        for (uint32_t index = 0u; movedBack && index < 6u; ++index) {
+            movedBack = c117Key(0x100u);
+        }
+        const bool scrollUp = movedBack && c117HasLabel("AFirst!");
+
+        const bool saveCurrent = scrollUp && c117ClickButton("Save") &&
+            c117Verify("/system/apps/NOTES.TXT", c117Expected, 71u, "save");
+        const bool saveAs = saveCurrent && c117ClickButton("Save As");
+        const bool filenameFocus = saveAs && c117FocusFilename();
+        bool erased = filenameFocus;
+        for (uint32_t index = 0u; erased && index < 9u; ++index) erased = c117Key(8u);
+        const bool typedFilename = erased && c117Text("C117.TXT") &&
+            c117HasLabel("Filename: [ C117.TXT|");
+        const bool c116FilenameKeys = typedFilename && c117Key(0x102u) &&
+            c117Key(0x103u) && c117Key(0x106u) && c117Char('X') &&
+            c117Key(8u) && c117HasLabel("Filename: [ C117.TXT|");
+        const bool submitted = c116FilenameKeys && c117Key(10u);
+        const bool savedAs = submitted && c117Verify(
+            "/system/apps/C117.TXT", c117Expected, 71u, "save-as");
+        const bool c116FilenameRegression = c116FilenameKeys && submitted && savedAs;
+        kernel::serial::puts("[C117-C116-REGRESSION] filename-focus-backspace-delete-left-right-enter=");
+        kernel::serial::puts(c116FilenameRegression ? "PASS\n" : "FAIL\n");
+
+        const bool openPicker = savedAs && c117ClickButton("Open");
+        const bool reopened = openPicker && c117ClickButton("Open") &&
+            c117HasLabel("AFirst!") && c117Verify(
+                "/system/apps/C117.TXT", c117Expected, 71u, "reopen");
+        const bool reload = reopened && c117ClickButton("Reload") &&
+            c117Verify("/system/apps/C117.TXT", c117Expected, 71u, "reload");
+
+        const bool cancelSaveStart = reload && c117ClickButton("Save As") &&
+            c117FocusFilename() && c117Char('P') && c117Key(27u) &&
+            c117HasLabel("Status: Save cancelled");
+        kernel::serial::puts("[C117-FOCUS] transient-picker-isolation=");
+        kernel::serial::puts(cancelSaveStart ? "PASS\n" : "FAIL\n");
+
+        const bool overwriteStart = cancelSaveStart && c117ClickButton("Save As") &&
+            c117FocusFilename() && c117Key(10u) && c117HasButton("Overwrite");
+        const bool overwriteDecline = overwriteStart && c117ClickButton("Decline") &&
+            c117HasLabel("Overwrite declined");
+        const bool overwriteRetry = overwriteDecline && c117ClickButton("Save") &&
+            c117HasButton("Overwrite");
+        const bool overwriteConfirm = overwriteRetry && c117ClickButton("Overwrite") &&
+            c117Verify("/system/apps/C117.TXT", c117Expected, 71u, "overwrite-confirm");
+        const bool openCancel = overwriteConfirm && c117ClickButton("Open") &&
+            c117ClickButton("Cancel");
+        const bool finalNotes = openCancel && c117Launch(c117Notes->appId, "c117-final") &&
+            c117Close();
+        const bool nativeNotepad = finalNotes && kernel::desktop::launch_app("Notepad");
+        kernel::serial::puts("[C117-NATIVE-REGRESSION] app=Notepad result=");
+        kernel::serial::puts(nativeNotepad ? "PASS\n" : "FAIL\n");
+        const bool counterLaunch = nativeNotepad && c117Launch(c117Counter->appId, "c117-counter");
+        const bool counter = counterLaunch && c117ClickButton("Increment") && c117Close();
+        kernel::serial::puts("[C117-REGRESSION] app=Counter result=");
+        kernel::serial::puts(counter ? "PASS\n" : "FAIL\n");
+        const bool status = counter && c117Launch(c117Status->appId, "c117-status") && c117Close();
+        kernel::serial::puts("[C117-REGRESSION] app=Status result=");
+        kernel::serial::puts(status ? "PASS\n" : "FAIL\n");
+        const bool outcome = c117CatalogValid && workspace && notesLaunch && focus &&
+            insertedStart && insertedMiddle && splitLine && insertedSecond &&
+            selectionVisible && selectionReplaced && editedLast && scrollDown &&
+            scrollUp && saveCurrent && saveAs && filenameFocus && typedFilename &&
+            c116FilenameKeys && submitted && savedAs && reopened && reload &&
+            cancelSaveStart && overwriteStart && overwriteDecline && overwriteRetry &&
+            overwriteConfirm && openCancel && finalNotes && nativeNotepad && counter && status;
+        kernel::serial::puts("[C117-MIXED] sequence=Workspace -> Notes(multiline-edit,selection,scroll,Save,SaveAs,reopen,cancel,overwrite) -> Notepad -> Counter -> Status result=");
+        kernel::serial::puts(outcome ? "PASS\n" : "FAIL\n");
+        kernel::serial::puts("[C117-RESULT] outcome=");
+        kernel::serial::puts(outcome ? "PASS" : "FAIL");
+        kernel::serial::puts(" text-area=reusable multiline=managed selection=shift viewport=caret-visible save-reopen=PASS lifecycle=resident\n");
+        }
+#endif
+
+#if defined(GXOS_NATIVEAOT_C116_MANAGED_TEXT_INPUT) && \
+    !defined(GXOS_NATIVEAOT_C117_MANAGED_TEXT_AREA)
         {
         const gxos::apps::BuiltInAppMetadata* c116Workspace =
             gxos::apps::FindBuiltInAppMetadataByDisplayName("Managed Workspace");

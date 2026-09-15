@@ -432,6 +432,354 @@ public sealed class ManagedNotes : GuideXosApplication
         };
     }
 #else
+#if HOSTLOGPROOF_C117_MANAGED_TEXT_AREA
+    private const string C117InitialDocument =
+        "First line\nSecond line\nThird line\nFourth line\nFifth line\nSixth line";
+    private const string C117ExpectedDocument =
+        "AFirst!\n line\nSecond? ROW\nThird line\nFourth line\nFifth line\nSixth line!";
+    private readonly GuideXosFilePicker _picker = new();
+    private readonly GuideXosTextArea _textArea = new(256, 32, 4, 48);
+    private readonly byte[] _fallbackDocument =
+        "First line\nSecond line\nThird line\nFourth line\nFifth line\nSixth line"u8.ToArray();
+    private string _currentPath = "/system/apps/NOTES.TXT";
+    private string _status = "Ready";
+    private ulong _window;
+    private uint _launchCount;
+    private int _saveInvocation;
+    [ThreadStatic]
+    private static uint s_threadLaunchCount;
+
+    public override GuideXosResult Launch(GuideXosHost host)
+    {
+        if (host.IsCapabilityProbe) return GuideXosResult.Success;
+        uint launchCount = ++_launchCount;
+        uint threadLaunchCount = ++s_threadLaunchCount;
+        if (threadLaunchCount != launchCount)
+        {
+            host.TryLog("C117-NOTES threadStatic=FAIL"u8);
+            return GuideXosResult.InvalidArgument;
+        }
+
+        _picker.Reset();
+        _saveInvocation = 0;
+        _currentPath = "/system/apps/NOTES.TXT";
+        GuideXosFileResult loadResult = GuideXosFile.ReadAllTextUtf8(
+            host, Encoding.UTF8.GetBytes(_currentPath), out byte[] loaded);
+        if (loadResult == GuideXosFileResult.Success &&
+            _textArea.SetUtf8(loaded))
+        {
+            _status = "Loaded from VFS";
+        }
+        else if (loadResult == GuideXosFileResult.NotFound &&
+            _textArea.SetText(C117InitialDocument))
+        {
+            _status = "New note";
+        }
+        else
+        {
+            _textArea.SetUtf8(_fallbackDocument);
+            _status = StatusText(loadResult);
+        }
+        _textArea.SetCaretToStart();
+        _textArea.Blur();
+
+        GuideXosResult result = host.TryCreateSurface(
+            "Managed Notes"u8, 600, 360, out GuideXosSurface surface);
+        if (result != GuideXosResult.Success || surface == null) return result;
+        _window = surface.Handle;
+        if (!RenderMain(host, surface, launchCount)) return GuideXosResult.InvalidArgument;
+        host.TryLog("C117-NOTES threadStatic=PASS"u8);
+        host.TryLog(loadResult == GuideXosFileResult.Success
+            ? "C117-NOTES initial=multiline source=VFS result=PASS"u8
+            : "C117-NOTES initial=multiline source=fixture result=PASS"u8);
+        return GuideXosTextAreaTests.Run(host)
+            ? GuideXosResult.Success : GuideXosResult.InvalidArgument;
+    }
+
+    public override GuideXosResult HandleInput(
+        GuideXosHost host, GuideXosInputEvent input)
+    {
+        if (host.TryGetSurface(_window, out GuideXosSurface surface) !=
+                GuideXosResult.Success || surface == null)
+        {
+            return GuideXosResult.SurfaceCreationFailed;
+        }
+        if (_picker.IsActive)
+        {
+            GuideXosFilePickerResult pickerResult = _picker.HandleInput(
+                host, surface, input);
+            return ApplyPickerResult(host, surface, pickerResult);
+        }
+        if (input.Kind == GuideXosInputKind.PointerDown)
+        {
+            GuideXosTextAreaEditResult focus = _textArea.HandlePointerDown(
+                input.X, input.Y, 20, 72, 8, 18);
+            if (focus == GuideXosTextAreaEditResult.Focused)
+            {
+                host.TryLog("C117-TEXT-AREA focus=PASS source=pointer"u8);
+                return RenderMain(host, surface, _launchCount)
+                    ? GuideXosResult.Success : GuideXosResult.InvalidArgument;
+            }
+            return GuideXosResult.Success;
+        }
+
+        int previousFirstLine = _textArea.FirstVisibleLine;
+        GuideXosTextAreaEditResult editResult = input.Kind switch
+        {
+            GuideXosInputKind.KeyChar => _textArea.HandleCharacter(input.Character),
+            GuideXosInputKind.KeyDown => _textArea.HandleKey(
+                (GuideXosTextInputKey)input.KeyCode, input.Shift),
+            _ => GuideXosTextAreaEditResult.Ignored,
+        };
+        if (editResult == GuideXosTextAreaEditResult.Changed)
+        {
+            host.TryLog("C117-TEXT-AREA edit=changed result=PASS"u8);
+        }
+        else if (editResult == GuideXosTextAreaEditResult.Rejected)
+        {
+            host.TryLog("C117-TEXT-AREA edit=rejected result=PASS"u8);
+        }
+        else if (editResult == GuideXosTextAreaEditResult.Moved && input.Shift)
+        {
+            host.TryLog("C117-SELECTION navigation=shift result=PASS"u8);
+        }
+        if (_textArea.FirstVisibleLine != previousFirstLine)
+        {
+            host.TryLog(_textArea.FirstVisibleLine > previousFirstLine
+                ? "C117-VIEWPORT direction=down caret-visible=PASS"u8
+                : "C117-VIEWPORT direction=up caret-visible=PASS"u8);
+        }
+        if (input.Kind == GuideXosInputKind.KeyDown &&
+            (GuideXosTextInputKey)input.KeyCode == GuideXosTextInputKey.Escape)
+        {
+            _status = "Editor cancelled";
+        }
+        if (!RenderMain(host, surface, _launchCount))
+        {
+            return GuideXosResult.InvalidArgument;
+        }
+        return GuideXosResult.Success;
+    }
+
+    public override GuideXosResult HandleAction(GuideXosHost host, uint actionId)
+    {
+        if (host.TryGetSurface(_window, out GuideXosSurface surface) !=
+                GuideXosResult.Success || surface == null)
+        {
+            return GuideXosResult.SurfaceCreationFailed;
+        }
+        if (_picker.IsActive)
+        {
+            return HandlePickerAction(host, surface, actionId);
+        }
+        if (actionId == 20u)
+        {
+            _textArea.Blur();
+            GuideXosFilePickerResult result = _picker.OpenFile(
+                host, surface, GuideXosFilePickerOptions.Open(
+                    "/system/apps", "Open document", ".TXT"));
+            return PickerStartResult(result);
+        }
+        if (actionId == 21u)
+        {
+            _textArea.Blur();
+            host.TryLog("C117-PICKER save=begin"u8);
+            GuideXosFilePickerStatus status = BeginSave(host, surface);
+            return status == GuideXosFilePickerStatus.Pending
+                ? GuideXosResult.Success : GuideXosResult.InvalidArgument;
+        }
+        if (actionId == 22u)
+        {
+            GuideXosFileResult saveResult = SaveCurrent(host);
+            _status = saveResult == GuideXosFileResult.Success
+                ? "Saved to VFS" : StatusText(saveResult);
+            host.TryLog(saveResult == GuideXosFileResult.Success
+                ? "C117-NOTES save=PASS path=/system/apps/NOTES.TXT"u8
+                : "C117-NOTES save=FAIL path=/system/apps/NOTES.TXT"u8);
+            return RenderMain(host, surface, _launchCount)
+                ? GuideXosResult.Success : GuideXosResult.InvalidArgument;
+        }
+        if (actionId == 3u)
+        {
+            return ReloadCurrent(host, surface);
+        }
+        return GuideXosResult.InvalidAction;
+    }
+
+    private GuideXosResult HandlePickerAction(
+        GuideXosHost host, GuideXosSurface surface, uint actionId)
+    {
+        GuideXosFilePickerResult result = _picker.HandleAction(host, surface, actionId);
+        return ApplyPickerResult(host, surface, result);
+    }
+
+    private GuideXosResult ApplyPickerResult(
+        GuideXosHost host, GuideXosSurface surface, GuideXosFilePickerResult result)
+    {
+        if (result.Status == GuideXosFilePickerStatus.Selected)
+        {
+            if (_picker.Mode == GuideXosFilePickerMode.Open)
+            {
+                GuideXosFileResult readResult = GuideXosFile.ReadAllTextUtf8(
+                    host, Encoding.UTF8.GetBytes(result.Path), out byte[] loaded);
+                if (readResult != GuideXosFileResult.Success ||
+                    !_textArea.SetUtf8(loaded))
+                {
+                    _status = StatusText(readResult);
+                    _picker.Reset();
+                    _textArea.Focus();
+                    return RenderMain(host, surface, _launchCount)
+                        ? GuideXosResult.Success : GuideXosResult.InvalidArgument;
+                }
+                _currentPath = result.Path;
+                _textArea.SetCaretToStart();
+                _textArea.Focus();
+                _status = "Opened from picker";
+                bool exact = !result.Path.EndsWith("C117.TXT",
+                    StringComparison.OrdinalIgnoreCase) ||
+                    _textArea.Text == C117ExpectedDocument;
+                host.TryLog(exact
+                    ? "C117-NOTES reopen=PASS source=VFS"u8
+                    : "C117-NOTES reopen=FAIL source=VFS"u8);
+                LogDocument(host, "C117-NOTES actual");
+                host.TryLog("C115-NOTES open=PASS source=picker"u8);
+            }
+            else
+            {
+                GuideXosFileResult writeResult = GuideXosFile.WriteAllTextUtf8(
+                    host, Encoding.UTF8.GetBytes(result.Path), _textArea.ToUtf8());
+                if (writeResult != GuideXosFileResult.Success)
+                {
+                    _status = StatusText(writeResult);
+                    return RenderMain(host, surface, _launchCount)
+                        ? GuideXosResult.Success : GuideXosResult.InvalidArgument;
+                }
+                _currentPath = result.Path;
+                _status = "Saved through picker";
+                host.TryLog(PathLog("C115-NOTES save=PASS path=", result.Path));
+                host.TryLog(PathLog("C116-NOTES typed-save path=", result.Path));
+                LogDocument(host, "C117-NOTES saved");
+            }
+            _picker.Reset();
+            _textArea.Focus();
+            return RenderMain(host, surface, _launchCount)
+                ? GuideXosResult.Success : GuideXosResult.InvalidArgument;
+        }
+        if (result.Status == GuideXosFilePickerStatus.Cancelled)
+        {
+            bool wasSave = _picker.Mode == GuideXosFilePickerMode.Save;
+            _status = wasSave
+                ? "Save cancelled" : "Open cancelled";
+            _picker.Reset();
+            _textArea.Focus();
+            host.TryLog(wasSave
+                ? "C115-NOTES save=cancelled result=PASS"u8
+                : "C115-NOTES open=cancelled result=PASS"u8);
+            return RenderMain(host, surface, _launchCount)
+                ? GuideXosResult.Success : GuideXosResult.InvalidArgument;
+        }
+        if (result.Status == GuideXosFilePickerStatus.OverwriteDeclined)
+        {
+            host.TryLog("C115-NOTES overwrite=declined result=PASS"u8);
+        }
+        return GuideXosResult.Success;
+    }
+
+    private GuideXosFilePickerStatus BeginSave(
+        GuideXosHost host, GuideXosSurface surface)
+    {
+        string suggestion = _saveInvocation++ switch
+        {
+            0 => "THIRD.TXT",
+            1 => "CANCEL.TXT",
+            _ => "C117.TXT",
+        };
+        GuideXosFilePickerResult result = _picker.SaveFile(
+            host, surface, GuideXosFilePickerOptions.Save(
+                "/system/apps", "Save document", ".TXT", suggestion, true, true));
+        return result.Status;
+    }
+
+    private GuideXosResult ReloadCurrent(
+        GuideXosHost host, GuideXosSurface surface)
+    {
+        GuideXosFileResult readResult = GuideXosFile.ReadAllTextUtf8(
+            host, Encoding.UTF8.GetBytes(_currentPath), out byte[] loaded);
+        if (readResult == GuideXosFileResult.Success && _textArea.SetUtf8(loaded))
+        {
+            _textArea.SetCaretToStart();
+            _status = "Reloaded from VFS";
+            LogDocument(host, "C117-NOTES reload");
+        }
+        else
+        {
+            _status = StatusText(readResult);
+        }
+        return RenderMain(host, surface, _launchCount)
+            ? GuideXosResult.Success : GuideXosResult.InvalidArgument;
+    }
+
+    private GuideXosFileResult SaveCurrent(GuideXosHost host)
+    {
+        return GuideXosFile.WriteAllTextUtf8(
+            host, Encoding.UTF8.GetBytes(_currentPath), _textArea.ToUtf8());
+    }
+
+    private bool RenderMain(GuideXosHost host, GuideXosSurface surface, uint launchCount)
+    {
+        return surface.TryFillRect(10, 10, 560, 300, 0x007A5A9Au) ==
+                GuideXosResult.Success &&
+            GuideXosText.Line(surface, 24, "Managed Notes | "u8, "multiline text area"u8) &&
+            GuideXosText.CountLine(surface, 48, "Launches: "u8, launchCount) &&
+            GuideXosText.Line(surface, 66, "Path: "u8, Encoding.UTF8.GetBytes(_currentPath)) &&
+            _textArea.Render(surface, 20, 72, 18) == GuideXosResult.Success &&
+            GuideXosText.Line(surface, 150, "Status: "u8, Encoding.UTF8.GetBytes(_status)) &&
+            GuideXosText.Line(surface, 174, "Editor: "u8, "bounded ASCII; [] selection; | caret"u8) &&
+            surface.TryAddButton(20, 220, 90, 28, "Open"u8, 20u, out _) == GuideXosResult.Success &&
+            surface.TryAddButton(120, 220, 90, 28, "Save"u8, 22u, out _) == GuideXosResult.Success &&
+            surface.TryAddButton(220, 220, 100, 28, "Save As"u8, 21u, out _) == GuideXosResult.Success &&
+            surface.TryAddButton(330, 220, 90, 28, "Reload"u8, 3u, out _) == GuideXosResult.Success;
+    }
+
+    private static GuideXosResult PickerStartResult(GuideXosFilePickerResult result)
+    {
+        return result.Status == GuideXosFilePickerStatus.Pending ||
+            result.Status == GuideXosFilePickerStatus.NoMatchingFiles
+            ? GuideXosResult.Success : GuideXosResult.InvalidArgument;
+    }
+
+    private static string StatusText(GuideXosFileResult result)
+    {
+        return result switch
+        {
+            GuideXosFileResult.InvalidPath => "Invalid path",
+            GuideXosFileResult.NotFound => "Not found",
+            GuideXosFileResult.FileTooLarge => "File too large",
+            GuideXosFileResult.CapabilityUnavailable => "File access unavailable",
+            _ => "File I/O failure",
+        };
+    }
+
+    private static byte[] PathLog(string prefix, string path)
+    {
+        byte[] prefixBytes = Encoding.UTF8.GetBytes(prefix);
+        byte[] pathBytes = Encoding.UTF8.GetBytes(path);
+        byte[] result = new byte[Math.Min(127, prefixBytes.Length + pathBytes.Length)];
+        prefixBytes.AsSpan(0, Math.Min(prefixBytes.Length, result.Length)).CopyTo(result);
+        int copied = Math.Min(prefixBytes.Length, result.Length);
+        if (copied < result.Length)
+        {
+            pathBytes.AsSpan(0, Math.Min(pathBytes.Length, result.Length - copied))
+                .CopyTo(result.AsSpan(copied));
+        }
+        return result;
+    }
+
+    private void LogDocument(GuideXosHost host, string prefix)
+    {
+        host.TryLog(PathLog(prefix + " document=", _textArea.Text.Replace('\n', '|')));
+    }
+#else
     private readonly GuideXosFilePicker _picker = new();
     private readonly byte[] _initial = "Hello from Managed Notes"u8.ToArray();
     private byte[] _note = "Hello from Managed Notes"u8.ToArray();
@@ -852,5 +1200,6 @@ public sealed class ManagedNotes : GuideXosApplication
             _ => "File I/O failure"u8.ToArray(),
         };
     }
+#endif
 #endif
 }

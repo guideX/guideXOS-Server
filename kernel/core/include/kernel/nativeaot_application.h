@@ -76,6 +76,11 @@ LaunchStatus launchLogicalApplication(const char* applicationId,
                                       LaunchReport* report,
                                       const char* launchContext = nullptr,
                                       uint32_t launchContextLength = 0u);
+// C117 proof-only entry to the same managed input bridge used by the
+// compositor surface. It carries the reserved Shift payload bit without
+// changing the Host ABI table.
+int32_t invokeManagedKeyDownForProof(uint32_t selector, uint32_t keyCode,
+                                     bool shift);
 // C112 negative probes execute only after the resident image exists. They
 // exercise the managed contract with bounded test metadata and never alter
 // the production host table used by ordinary App Model launches.

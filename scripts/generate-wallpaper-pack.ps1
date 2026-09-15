@@ -10,7 +10,8 @@ param(
     [string]$C104AppBPath = "",
     [string]$C107CompositePath = "",
     [string]$ProductionCompositeApplicationPath = "",
-    [switch]$C114ManagedDirectoryServices
+    [switch]$C114ManagedDirectoryServices,
+    [switch]$C117ManagedTextArea
 )
 
 $ErrorActionPreference = "Stop"
@@ -974,7 +975,12 @@ if ($C114ManagedDirectoryServices) {
     # image and are discovered by the application through VFS enumeration.
     $notesFixture = Join-Path $appsDir "NOTES.TXT"
     $secondFixture = Join-Path $appsDir "SECOND.TXT"
-    [System.IO.File]::WriteAllText($notesFixture, "Hello from Managed Notes", [System.Text.Encoding]::ASCII)
+    $notesText = if ($C117ManagedTextArea) {
+        "First line`nSecond line`nThird line`nFourth line`nFifth line`nSixth line"
+    } else {
+        "Hello from Managed Notes"
+    }
+    [System.IO.File]::WriteAllText($notesFixture, $notesText, [System.Text.Encoding]::ASCII)
     [System.IO.File]::WriteAllText($secondFixture, "Second managed document", [System.Text.Encoding]::ASCII)
     $staged += Get-Item $notesFixture
     $staged += Get-Item $secondFixture

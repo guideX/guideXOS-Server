@@ -36,8 +36,10 @@ public sealed unsafe class GuideXosLaunchContext
     public uint InputPayload => Flags & GxAbi.LaunchFlagInputPayloadMask;
     public int InputX => (int)(InputPayload & GxAbi.LaunchFlagInputCoordinateMask);
     public int InputY => (int)((InputPayload >> 12) & GxAbi.LaunchFlagInputCoordinateMask);
-    public uint InputKeyCode => InputPayload;
+    public uint InputKeyCode => InputPayload & GxAbi.LaunchFlagInputValueMask;
     public char InputCharacter => (char)(InputPayload & 0xFFu);
+    public bool InputShift => InputKind != GuideXosInputKind.PointerDown &&
+        (InputPayload & GxAbi.LaunchFlagInputShift) != 0u;
 
     internal static bool TryCopy(
         NativeGxAppContext* context,

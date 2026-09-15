@@ -8,6 +8,7 @@
 #include "include/kernel/kernel_compositor.h"
 #include "include/kernel/pit.h"
 #include "include/kernel/process.h"
+#include "include/kernel/ps2keyboard.h"
 #include "include/kernel/serial_debug.h"
 #include "include/kernel/vfs.h"
 #include "built_in_app_metadata.h"
@@ -115,6 +116,10 @@ constexpr uint32_t kLaunchFlagInputKeyDown = 0x02000000u;
 constexpr uint32_t kLaunchFlagInputKeyChar = 0x03000000u;
 constexpr uint32_t kLaunchFlagInputPayloadMask = 0x00FFFFFFu;
 constexpr uint32_t kLaunchFlagInputCoordinateMask = 0x00000FFFu;
+// C117 reserves the high bit of the 24-bit key payload for Shift. This is an
+// input-transport detail, not a host-table or ABI extension.
+constexpr uint32_t kLaunchFlagInputShift = 0x00800000u;
+constexpr uint32_t kLaunchFlagInputValueMask = 0x007FFFFFu;
 
 #pragma pack(push, 1)
 struct Elf64Header {
@@ -428,10 +433,14 @@ public:
 
     void onKeyDown(uint32_t key) override {
         if (m_selector == 0u || key > kLaunchFlagInputPayloadMask) return;
+        uint32_t payload = key & kLaunchFlagInputValueMask;
+        if (ps2keyboard::is_shift_down()) payload |= kLaunchFlagInputShift;
         const int32_t result = invokeManagedInput(
-            m_selector, kLaunchFlagInput | kLaunchFlagInputKeyDown | key);
+            m_selector, kLaunchFlagInput | kLaunchFlagInputKeyDown | payload);
         serial::puts("[C116-NATIVE-INPUT] kind=key-down key=");
         serial::put_hex32(key);
+        serial::puts(" shift=");
+        serial::put_hex32((payload & kLaunchFlagInputShift) != 0u ? 1u : 0u);
         serial::puts(" result=");
         serial::puts(result == 0 ? "PASS\n" : "IGNORED\n");
     }
@@ -440,10 +449,14 @@ public:
         if (m_selector == 0u) return;
         const uint32_t payload = static_cast<uint32_t>(
             static_cast<uint8_t>(c));
+        const uint32_t inputPayload = payload |
+            (ps2keyboard::is_shift_down() ? kLaunchFlagInputShift : 0u);
         const int32_t result = invokeManagedInput(
-            m_selector, kLaunchFlagInput | kLaunchFlagInputKeyChar | payload);
+            m_selector, kLaunchFlagInput | kLaunchFlagInputKeyChar | inputPayload);
         serial::puts("[C116-NATIVE-INPUT] kind=key-char value=");
         serial::put_hex32(payload);
+        serial::puts(" shift=");
+        serial::put_hex32((inputPayload & kLaunchFlagInputShift) != 0u ? 1u : 0u);
         serial::puts(" result=");
         serial::puts(result == 0 ? "PASS\n" : "IGNORED\n");
     }
@@ -1797,7 +1810,9 @@ int32_t GUIDEXOS_NATIVEAOT_PAL_CALL managedLog(
     const bool c114Message = managedMessageStartsWith(message, "C114-");
     const bool c115Message = managedMessageStartsWith(message, "C115-");
     const bool c116Message = managedMessageStartsWith(message, "C116-");
-    serial::puts(c116Message ? "[C116-MANAGED-OUTPUT] " :
+    const bool c117Message = managedMessageStartsWith(message, "C117-");
+    serial::puts(c117Message ? "[C117-MANAGED-OUTPUT] " :
+        c116Message ? "[C116-MANAGED-OUTPUT] " :
         c115Message ? "[C115-MANAGED-OUTPUT] " :
         c114Message ? "[C114-MANAGED-OUTPUT] " :
         c113Message ? "[C113-MANAGED-OUTPUT] " :
@@ -2167,6 +2182,21 @@ int32_t invokeManagedInput(uint32_t selector, uint32_t inputFlags) {
     const int32_t result = invokeManagedWithHostMetadata(
         selector, inputFlags, kManagedHostAbiVersion, kManagedCapabilities);
     g_c116InputDispatchActive = false;
+    return result;
+}
+
+int32_t invokeManagedKeyDownForProof(
+    uint32_t selector, uint32_t keyCode, bool shift) {
+    if (keyCode > kLaunchFlagInputValueMask) return -2;
+    const uint32_t payload = keyCode | (shift ? kLaunchFlagInputShift : 0u);
+    const int32_t result = invokeManagedInput(
+        selector, kLaunchFlagInput | kLaunchFlagInputKeyDown | payload);
+    serial::puts("[C117-TRANSPORT] kind=key-down key=");
+    serial::put_hex32(keyCode);
+    serial::puts(" shift=");
+    serial::put_hex32(shift ? 1u : 0u);
+    serial::puts(" result=");
+    serial::puts(result == 0 ? "PASS\n" : "FAIL\n");
     return result;
 }
 

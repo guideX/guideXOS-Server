@@ -17,13 +17,15 @@ public enum GuideXosInputKind
 public readonly struct GuideXosInputEvent
 {
     private GuideXosInputEvent(
-        GuideXosInputKind kind, int x, int y, uint keyCode, char character)
+        GuideXosInputKind kind, int x, int y, uint keyCode, char character,
+        bool shift)
     {
         Kind = kind;
         X = x;
         Y = y;
         KeyCode = keyCode;
         Character = character;
+        Shift = shift;
     }
 
     public GuideXosInputKind Kind { get; }
@@ -31,12 +33,13 @@ public readonly struct GuideXosInputEvent
     public int Y { get; }
     public uint KeyCode { get; }
     public char Character { get; }
+    public bool Shift { get; }
 
     internal static GuideXosInputEvent From(GuideXosLaunchContext context)
     {
         return new GuideXosInputEvent(
             context.InputKind, context.InputX, context.InputY,
-            context.InputKeyCode, context.InputCharacter);
+            context.InputKeyCode, context.InputCharacter, context.InputShift);
     }
 }
 
@@ -45,8 +48,12 @@ public enum GuideXosTextInputKey : uint
     Backspace = 8u,
     Enter = 10u,
     Escape = 27u,
+    Up = 0x100u,
+    Down = 0x101u,
     Left = 0x102u,
     Right = 0x103u,
+    Home = 0x104u,
+    End = 0x105u,
     Delete = 0x106u,
 }
 
