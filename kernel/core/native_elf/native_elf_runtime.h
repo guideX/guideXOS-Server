@@ -30,13 +30,21 @@ static const uint32_t NATIVE_APP_MAX_LOG_BYTES = 255U;
 static const uint32_t NATIVE_APP_MAX_LOG_LINES = 16U;
 static const uint32_t NATIVE_APP_MAX_LOG_LINE_BYTES = NATIVE_APP_MAX_LOG_BYTES + 1U;
 // Bootstrap compiler output remains capped by MAX_ELF_FILE_BYTES. The
-// Developer Studio proof app is a prelinked NativeElf application and gets a
-// separate bounded loader buffer while still using the same validator and
-// fixed NativeElf region.
-static const uint32_t NATIVE_APP_MAX_ELF_FILE_BYTES = 256U * 1024U;
+// Developer Studio is a prelinked NativeElf application. Its fixed-size
+// debugger/editor storage is intentionally large, so the loader buffer is
+// bounded at 2 MiB while the mapped image remains bounded by REGION_SIZE.
+static const uint32_t NATIVE_APP_MAX_ELF_FILE_BYTES = 2U * 1024U * 1024U;
+// Nested debug execution must restore the active prelinked image, including
+// its zero-filled data segment. Keep that parent snapshot bounded separately
+// from the file buffer; the packaged Developer Studio image is ~14 MiB when
+// mapped and this leaves bounded growth headroom without reserving the full
+// 512 MiB NativeElf window in kernel .bss.
+static const uint32_t NATIVE_APP_MAX_MAPPED_IMAGE_BYTES = 16U * 1024U * 1024U;
 
 static_assert(APPLICATION_STACK_SIZE < guidexos::native_elf::REGION_SIZE,
               "application stack must fit inside the reserved NativeElf window");
+static_assert(NATIVE_APP_MAX_MAPPED_IMAGE_BYTES <= guidexos::native_elf::MAX_MAPPED_BYTES,
+              "nested parent snapshot must fit inside the NativeElf window");
 
 enum class NativeAppExecutionState : uint8_t {
     Empty,
@@ -206,7 +214,15 @@ struct NativeElfRunReport;
 
 bool native_elf_execution_active();
 const NativeAppExecutionContext* native_elf_runtime_context();
+const NativeAppExecutionContext* native_elf_debug_runtime_context();
 bool native_elf_host_call_validation_smoke();
+
+// Interactive nested debugging swaps the paused child image out while the
+// parent NativeElf UI continues to run in the shared fixed image window.
+bool native_elf_nested_prepare_for_scheduler();
+bool native_elf_nested_capture_after_scheduler();
+bool native_elf_nested_enter_for_host();
+bool native_elf_nested_leave_for_host();
 
 // Runs one child NativeElf operation while the active NativeElf host
 // application remains suspended. The child uses a separate stack and the

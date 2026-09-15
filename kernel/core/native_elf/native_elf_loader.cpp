@@ -47,12 +47,23 @@ static const uint64_t NESTED_APPLICATION_STACK_BASE =
 static const uint64_t NESTED_SERVICE_STACK_BASE =
     NESTED_APPLICATION_STACK_BASE - APPLICATION_STACK_SIZE;
 static bool s_nestedExecutionActive = false;
-static uint8_t s_parentImage[guidexos::native_elf::MAX_MAPPED_BYTES] = {};
+// Nested execution only needs to suspend the active target image while the
+// child runs. Keep this kernel-owned snapshot bounded by the artifact file
+// limit instead of mirroring the full 512-MiB guest mapping window in kernel
+// .bss; the mapped image itself remains governed by MAX_MAPPED_BYTES.
+static uint8_t s_parentImage[NATIVE_APP_MAX_MAPPED_IMAGE_BYTES] = {};
 static uint64_t s_parentImageSize = 0;
-static uint64_t s_parentImagePtes[guidexos::native_elf::MAX_MAPPED_BYTES /
+static uint64_t s_parentImagePtes[NATIVE_APP_MAX_MAPPED_IMAGE_BYTES /
                                   guidexos::native_elf::PAGE_SIZE] = {};
 static uint32_t s_parentImagePteCount = 0;
 static NativeAppExecutionContext s_parentRuntime = {};
+static uint8_t s_childImage[NATIVE_APP_MAX_MAPPED_IMAGE_BYTES] = {};
+static uint64_t s_childImageSize = 0;
+static uint64_t s_childImagePtes[NATIVE_APP_MAX_MAPPED_IMAGE_BYTES /
+                                  guidexos::native_elf::PAGE_SIZE] = {};
+static uint32_t s_childImagePteCount = 0;
+static NativeAppExecutionContext s_childRuntime = {};
+static bool s_nestedOwnerRestored = false;
 static uint64_t s_developmentGeneration = 0;
 static char s_developmentApplicationId[GX_DEVELOPMENT_RUN_MAX_APP_ID_BYTES] = {};
 
@@ -298,7 +309,7 @@ static bool app_pointer_range(const void* pointer, uint64_t bytes)
 static bool app_string(const char* pointer, char* output, uint32_t capacity)
 {
     if (!pointer || !output || capacity < 2 || !app_pointer_range(pointer, 1)) return false;
-    for (uint32_t i = 0; i + 1 < capacity; ++i) {
+    for (uint32_t i = 0; i < capacity; ++i) {
         if (!app_pointer_range(pointer + i, 1)) return false;
         output[i] = pointer[i];
         if (output[i] == '\0') return true;
@@ -309,7 +320,13 @@ static bool app_string(const char* pointer, char* output, uint32_t capacity)
 
 static bool app_context_valid(gx_app_context* context)
 {
-    return s_appRuntime.state == NativeAppExecutionState::Running && context &&
+    // During a hosted debug poll the Studio owner remains logically active
+    // while the target image is temporarily restored for the service call.
+    // The owner context and host table retain their authenticated identity,
+    // but the loader's active-runtime slot may represent that nested target.
+    const bool executionActive = s_appRuntime.state == NativeAppExecutionState::Running ||
+        s_nestedExecutionActive;
+    return executionActive && context &&
         context == &s_appRuntime.appContext && context->host == &s_appRuntime.hostCalls &&
         context->userData == &s_appRuntime;
 }
@@ -700,7 +717,8 @@ static gx_result GX_CALL host_bare_run_start(gx_app_context* context,
                                               gx_development_run_handle handle)
 {
     if (!app_context_valid(context)) return GX_ERROR_PERMISSION_DENIED;
-    return NativeElfRunService::start(handle);
+    const gx_result result = NativeElfRunService::start(handle);
+    return result;
 }
 
 static gx_result GX_CALL host_bare_run_poll(gx_app_context* context,
@@ -721,14 +739,20 @@ static gx_result GX_CALL host_bare_run_request_close(gx_app_context* context,
                                                       gx_development_run_handle handle)
 {
     if (!app_context_valid(context)) return GX_ERROR_PERMISSION_DENIED;
-    return NativeElfRunService::request_close(handle);
+    const bool nested = native_elf_nested_enter_for_host();
+    const gx_result result = NativeElfRunService::request_close(handle);
+    if (nested && !native_elf_nested_leave_for_host()) return GX_ERROR_FAILED;
+    return result;
 }
 
 static gx_result GX_CALL host_bare_run_cancel(gx_app_context* context,
                                                gx_development_run_handle handle)
 {
     if (!app_context_valid(context)) return GX_ERROR_PERMISSION_DENIED;
-    return NativeElfRunService::cancel(handle);
+    const bool nested = native_elf_nested_enter_for_host();
+    const gx_result result = NativeElfRunService::cancel(handle);
+    if (nested && !native_elf_nested_leave_for_host()) return GX_ERROR_FAILED;
+    return result;
 }
 
 static gx_result GX_CALL host_bare_run_release(gx_app_context* context,
@@ -809,12 +833,10 @@ static gx_result GX_CALL host_bare_development_debug(
     copy_bytes(reinterpret_cast<uint8_t*>(&copied),
                reinterpret_cast<const uint8_t*>(request),
                requestBytes);
-    copied.artifactSha256 = nullptr;
-    if (request->artifactSha256) {
-        if (!app_string(request->artifactSha256, s_bareDebugStrings[0],
-                        sizeof(s_bareDebugStrings[0]))) return GX_ERROR_INVALID_ARGUMENT;
-        copied.artifactSha256 = s_bareDebugStrings[0];
-    }
+    // The run preparation already copied the authenticated artifact identity
+    // into kernel-owned storage. Reuse it here because the Studio request may
+    // point at parent-image data while the paused child owns the fixed image.
+    copied.artifactSha256 = s_bareRunStrings[6];
     copied.sourcePath = nullptr;
     copied.sourceCondition = nullptr;
     copied.logTemplate = nullptr;
@@ -840,7 +862,11 @@ static gx_result GX_CALL host_bare_development_debug(
     gx_development_debug_snapshot local = {};
     local.size = sizeof(local);
     local.version = GX_DEVELOPMENT_DEBUG_API_VERSION;
+    const bool nested = native_elf_nested_enter_for_host();
     const gx_result result = NativeElfRunService::debug(copied, &local);
+    if (nested) {
+        if (!native_elf_nested_leave_for_host()) return GX_ERROR_FAILED;
+    }
     if (!copy_debug_snapshot_to_app(local, outputSnapshot)) return GX_ERROR_PERMISSION_DENIED;
     return result;
 }
@@ -860,16 +886,13 @@ static gx_result GX_CALL host_bare_development_debug_call_stack(
     copy_bytes(reinterpret_cast<uint8_t*>(&copied),
                reinterpret_cast<const uint8_t*>(request),
                request->size < sizeof(copied) ? request->size : sizeof(copied));
-    copied.artifactSha256 = nullptr;
-    if (request->artifactSha256) {
-        if (!app_string(request->artifactSha256, s_bareDebugStrings[0],
-                        sizeof(s_bareDebugStrings[0]))) return GX_ERROR_INVALID_ARGUMENT;
-        copied.artifactSha256 = s_bareDebugStrings[0];
-    }
+    copied.artifactSha256 = s_bareRunStrings[6];
     gx_development_debug_call_stack local = {};
     local.size = sizeof(local);
     local.version = GX_DEVELOPMENT_DEBUG_API_VERSION;
+    const bool nested = native_elf_nested_enter_for_host();
     const gx_result result = NativeElfRunService::call_stack(copied, &local);
+    if (nested && !native_elf_nested_leave_for_host()) return GX_ERROR_FAILED;
     if (!copy_debug_call_stack_to_app(local, outputResult)) return GX_ERROR_PERMISSION_DENIED;
     return result;
 }
@@ -889,16 +912,13 @@ static gx_result GX_CALL host_bare_development_debug_inspect_variables(
     copy_bytes(reinterpret_cast<uint8_t*>(&copied),
                reinterpret_cast<const uint8_t*>(request),
                request->size < sizeof(copied) ? request->size : sizeof(copied));
-    copied.artifactSha256 = nullptr;
-    if (request->artifactSha256) {
-        if (!app_string(request->artifactSha256, s_bareDebugStrings[0],
-                        sizeof(s_bareDebugStrings[0]))) return GX_ERROR_INVALID_ARGUMENT;
-        copied.artifactSha256 = s_bareDebugStrings[0];
-    }
+    copied.artifactSha256 = s_bareRunStrings[6];
     gx_development_debug_variables local = {};
     local.size = sizeof(local);
     local.version = GX_DEVELOPMENT_DEBUG_API_VERSION;
+    const bool nested = native_elf_nested_enter_for_host();
     const gx_result result = NativeElfRunService::inspect_variables(copied, &local);
+    if (nested && !native_elf_nested_leave_for_host()) return GX_ERROR_FAILED;
     if (!copy_debug_variables_to_app(local, outputResult)) return GX_ERROR_PERMISSION_DENIED;
     return result;
 }
@@ -921,19 +941,16 @@ static gx_result GX_CALL host_bare_development_debug_evaluate_expression(
     copy_bytes(reinterpret_cast<uint8_t*>(&copied),
                reinterpret_cast<const uint8_t*>(request),
                request->size < sizeof(copied) ? request->size : sizeof(copied));
-    copied.artifactSha256 = nullptr;
-    if (request->artifactSha256) {
-        if (!app_string(request->artifactSha256, s_bareDebugStrings[0],
-                        sizeof(s_bareDebugStrings[0]))) return GX_ERROR_INVALID_ARGUMENT;
-        copied.artifactSha256 = s_bareDebugStrings[0];
-    }
+    copied.artifactSha256 = s_bareRunStrings[6];
     if (!app_string(request->expression, s_bareDebugExpression,
                     sizeof(s_bareDebugExpression))) return GX_ERROR_INVALID_ARGUMENT;
     copied.expression = s_bareDebugExpression;
     gx_development_debug_expression local = {};
     local.size = sizeof(local);
     local.version = GX_DEVELOPMENT_DEBUG_API_VERSION;
+    const bool nested = native_elf_nested_enter_for_host();
     const gx_result result = NativeElfRunService::evaluate_expression(copied, &local);
+    if (nested && !native_elf_nested_leave_for_host()) return GX_ERROR_FAILED;
     if (!copy_debug_expression_to_app(local, outputResult)) return GX_ERROR_PERMISSION_DENIED;
     return result;
 }
@@ -1523,6 +1540,7 @@ static bool run_file_internal(const char* path,
     policy.regionBase = s_context.regionBase;
     policy.regionSize = s_context.regionSize;
     policy.maxFileBytes = NATIVE_APP_MAX_ELF_FILE_BYTES;
+    policy.maxMappedBytes = s_context.regionSize;
     NativeElfValidationResult validation = {};
     if (!validate_native_elf(s_file, fileBytes, policy, &validation)) {
         return fail_report(report, validation.error);
@@ -1694,6 +1712,144 @@ static int32_t GX_CALL nested_service_entry(void*)
     return s_nestedInvocation.success ? 1 : 0;
 }
 
+static bool save_image_page_table(uint64_t imageBase, uint64_t imageSize,
+                                  uint64_t* output, uint32_t outputCapacity,
+                                  uint32_t* outputCount)
+{
+    if (outputCount) *outputCount = 0;
+    if (!output || !outputCount || imageSize == 0 ||
+        (imageSize & (guidexos::native_elf::PAGE_SIZE - 1ULL)) != 0) return false;
+    const uint64_t pageCount64 = imageSize / guidexos::native_elf::PAGE_SIZE;
+    if (pageCount64 > outputCapacity) return false;
+    const uint32_t pageCount = static_cast<uint32_t>(pageCount64);
+    for (uint32_t i = 0; i < pageCount; ++i) {
+        volatile uint64_t* pte = nullptr;
+        const uint64_t page = imageBase + static_cast<uint64_t>(i) * guidexos::native_elf::PAGE_SIZE;
+        if (!find_pte(page, &pte)) return false;
+        output[i] = *pte;
+    }
+    *outputCount = pageCount;
+    return true;
+}
+
+static bool restore_image_snapshot(uint64_t imageBase, uint64_t imageSize,
+                                   const uint8_t* image, const uint64_t* ptes,
+                                   uint32_t pteCount)
+{
+    if (!image || !ptes || imageSize == 0 ||
+        pteCount != imageSize / guidexos::native_elf::PAGE_SIZE) return false;
+    const uint64_t imageEnd = imageBase + imageSize;
+    if (imageEnd < imageBase || !set_page_permissions(imageBase, imageEnd, true, false)) return false;
+    copy_bytes(reinterpret_cast<uint8_t*>(static_cast<uintptr_t>(imageBase)), image, imageSize);
+    for (uint32_t i = 0; i < pteCount; ++i) {
+        volatile uint64_t* pte = nullptr;
+        const uint64_t page = imageBase + static_cast<uint64_t>(i) * guidexos::native_elf::PAGE_SIZE;
+        if (!find_pte(page, &pte)) return false;
+        *pte = ptes[i];
+        arch::amd64::invlpg(reinterpret_cast<void*>(static_cast<uintptr_t>(page)));
+    }
+    return true;
+}
+
+static bool save_current_parent_image()
+{
+    if (s_parentRuntime.imageSize == 0 || s_parentRuntime.imageSize > sizeof(s_parentImage)) {
+        return false;
+    }
+    s_parentImageSize = s_parentRuntime.imageSize;
+    copy_bytes(s_parentImage,
+               reinterpret_cast<const uint8_t*>(static_cast<uintptr_t>(s_parentRuntime.imageBase)),
+               s_parentImageSize);
+    const bool saved = save_image_page_table(s_parentRuntime.imageBase, s_parentImageSize,
+                                 s_parentImagePtes,
+                                 sizeof(s_parentImagePtes) / sizeof(s_parentImagePtes[0]),
+                                 &s_parentImagePteCount);
+    return saved;
+}
+
+static bool capture_child_and_restore_parent()
+{
+    if (!s_nestedExecutionActive || s_nestedOwnerRestored) return true;
+    if (s_appRuntime.imageSize == 0 || s_appRuntime.imageSize > sizeof(s_childImage)) {
+        return false;
+    }
+    s_childImageSize = s_appRuntime.imageSize;
+    copy_bytes(s_childImage,
+               reinterpret_cast<const uint8_t*>(static_cast<uintptr_t>(s_appRuntime.imageBase)),
+               s_childImageSize);
+    if (!save_image_page_table(s_appRuntime.imageBase, s_childImageSize,
+                               s_childImagePtes,
+                               sizeof(s_childImagePtes) / sizeof(s_childImagePtes[0]),
+                               &s_childImagePteCount)) {
+        return false;
+    }
+    s_childRuntime = s_appRuntime;
+    if (!restore_image_snapshot(s_parentRuntime.imageBase, s_parentImageSize,
+                                s_parentImage, s_parentImagePtes,
+                                s_parentImagePteCount)) {
+        return false;
+    }
+    s_appRuntime = s_parentRuntime;
+    s_nestedOwnerRestored = true;
+    return true;
+}
+
+static bool restore_child_for_owner()
+{
+    if (!s_nestedExecutionActive || !s_nestedOwnerRestored) return true;
+    if (!save_current_parent_image()) return false;
+    if (!restore_image_snapshot(s_childRuntime.imageBase, s_childImageSize,
+                                s_childImage, s_childImagePtes,
+                                s_childImagePteCount)) {
+        return false;
+    }
+    s_appRuntime = s_childRuntime;
+    s_nestedOwnerRestored = false;
+    return true;
+}
+
+static bool restore_parent_after_cancelled_child()
+{
+    if (!s_nestedExecutionActive || s_nestedOwnerRestored ||
+        s_appRuntime.state == NativeAppExecutionState::Running ||
+        s_parentImageSize == 0 || s_parentImagePteCount == 0) {
+        return false;
+    }
+
+    const bool childClean = s_appRuntime.state == NativeAppExecutionState::Cleaned;
+    if (!restore_image_snapshot(s_parentRuntime.imageBase, s_parentImageSize,
+                                s_parentImage, s_parentImagePtes,
+                                s_parentImagePteCount)) {
+        return false;
+    }
+    s_appRuntime = s_parentRuntime;
+
+    // The cancellation context abandons run_file_nested's service-stack
+    // continuation, so perform the cleanup normally done after that call
+    // returns before allowing the parent UI to resume.
+    clear_bytes(reinterpret_cast<uint8_t*>(static_cast<uintptr_t>(NESTED_SERVICE_STACK_BASE)),
+                APPLICATION_STACK_SIZE);
+    const bool serviceStackClean = set_page_permissions(
+        NESTED_SERVICE_STACK_BASE,
+        NESTED_SERVICE_STACK_BASE + APPLICATION_STACK_SIZE,
+        false, false);
+
+    s_parentRuntime = {};
+    s_parentImageSize = 0;
+    s_parentImagePteCount = 0;
+    s_childRuntime = {};
+    s_childImageSize = 0;
+    s_childImagePteCount = 0;
+    s_nestedOwnerRestored = false;
+    s_nestedExecutionActive = false;
+    s_nestedInvocation.path = nullptr;
+    s_nestedInvocation.returnValue = nullptr;
+    s_nestedInvocation.report = nullptr;
+    s_nestedInvocation.success = false;
+
+    return childClean && serviceStackClean;
+}
+
 bool run_file_nested(const char* path, int32_t* returnValue, NativeElfRunReport* report)
 {
     clear_report(report);
@@ -1721,6 +1877,10 @@ bool run_file_nested(const char* path, int32_t* returnValue, NativeElfRunReport*
     clear_bytes(reinterpret_cast<uint8_t*>(static_cast<uintptr_t>(serviceStack.base)),
                 serviceStack.size);
 
+    if (s_appRuntime.imageSize > sizeof(s_parentImage)) {
+        (void)set_page_permissions(serviceStack.base, serviceStack.top, false, false);
+        return fail_report(report, "nested NativeElf image exceeds parent snapshot bounds");
+    }
     s_parentImageSize = s_appRuntime.imageSize;
     copy_bytes(s_parentImage,
                reinterpret_cast<const uint8_t*>(static_cast<uintptr_t>(s_appRuntime.imageBase)),
@@ -1742,6 +1902,10 @@ bool run_file_nested(const char* path, int32_t* returnValue, NativeElfRunReport*
         s_parentImagePtes[i] = *pte;
     }
     s_parentRuntime = s_appRuntime;
+    s_nestedOwnerRestored = false;
+    s_childRuntime = {};
+    s_childImageSize = 0;
+    s_childImagePteCount = 0;
     s_nestedInvocation.path = path;
     s_nestedInvocation.returnValue = returnValue;
     s_nestedInvocation.report = report;
@@ -1782,6 +1946,10 @@ bool run_file_nested(const char* path, int32_t* returnValue, NativeElfRunReport*
     s_parentRuntime = {};
     s_parentImageSize = 0;
     s_parentImagePteCount = 0;
+    s_childRuntime = {};
+    s_childImageSize = 0;
+    s_childImagePteCount = 0;
+    s_nestedOwnerRestored = false;
     s_nestedExecutionActive = false;
     s_nestedInvocation.path = nullptr;
     s_nestedInvocation.returnValue = nullptr;
@@ -1802,7 +1970,44 @@ bool native_elf_execution_active()
 
 const NativeAppExecutionContext* native_elf_runtime_context()
 {
+    if (s_nestedOwnerRestored && s_childRuntime.state != NativeAppExecutionState::Empty)
+        return &s_childRuntime;
     return &s_appRuntime;
+}
+
+const NativeAppExecutionContext* native_elf_debug_runtime_context()
+{
+    return native_elf_runtime_context();
+}
+
+bool native_elf_nested_prepare_for_scheduler()
+{
+    return restore_child_for_owner();
+}
+
+bool native_elf_nested_capture_after_scheduler()
+{
+    if (s_nestedExecutionActive && !s_nestedOwnerRestored &&
+        s_appRuntime.state != NativeAppExecutionState::Running &&
+        s_appRuntime.imageSize == 0) {
+        return restore_parent_after_cancelled_child();
+    }
+    return capture_child_and_restore_parent();
+}
+
+bool native_elf_nested_enter_for_host()
+{
+    if (!s_nestedExecutionActive) {
+        return false;
+    }
+    const bool restored = restore_child_for_owner();
+    return restored;
+}
+
+bool native_elf_nested_leave_for_host()
+{
+    if (!s_nestedExecutionActive) return true;
+    return capture_child_and_restore_parent();
 }
 
 bool native_elf_host_call_validation_smoke()

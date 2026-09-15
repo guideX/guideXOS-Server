@@ -22,13 +22,13 @@ namespace native_elf {
 namespace {
 
 static uint8_t s_invalidImage[guidexos::native_elf::MAX_ELF_FILE_BYTES];
-#if defined(GXOS_PHASE27G_SMOKE) || defined(GXOS_PHASE27H_SMOKE) || defined(GXOS_PHASE27I_SMOKE) || defined(GXOS_PHASE27J_SMOKE) || defined(GXOS_PHASE27K_SMOKE) || defined(GXOS_PHASE27L_SMOKE) || defined(GXOS_PHASE27M_SMOKE) || defined(GXOS_PHASE27P_SMOKE) || defined(GXOS_PHASE27R_SMOKE) || defined(GXOS_PHASE27S_SMOKE) || defined(GXOS_PHASE27T_SMOKE) || defined(GXOS_PHASE27U_SMOKE) || defined(GXOS_PHASE27V_SMOKE) || defined(GXOS_PHASE27W_SMOKE) || defined(GXOS_PHASE27X_SMOKE) || defined(GXOS_PHASE27Y_SMOKE) || defined(GXOS_PHASE27Z_SMOKE) || defined(GXOS_PHASE28A_SMOKE) || defined(GXOS_PHASE28B_SMOKE) || defined(GXOS_PHASE28C_SMOKE) || defined(GXOS_PHASE28D_SMOKE) || defined(GXOS_PHASE28E_SMOKE) || defined(GXOS_PHASE28F_SMOKE) || defined(GXOS_PHASE28G_SMOKE) || defined(GXOS_PHASE28H_SMOKE) || defined(GXOS_PHASE28I_SMOKE) || defined(GXOS_PHASE28J_SMOKE) || defined(GXOS_PHASE28K_SMOKE) || defined(GXOS_PHASE28L_SMOKE)
+#if defined(GXOS_PHASE27G_SMOKE) || defined(GXOS_PHASE27H_SMOKE) || defined(GXOS_PHASE27I_SMOKE) || defined(GXOS_PHASE27J_SMOKE) || defined(GXOS_PHASE27K_SMOKE) || defined(GXOS_PHASE27L_SMOKE) || defined(GXOS_PHASE27M_SMOKE) || defined(GXOS_PHASE27P_SMOKE) || defined(GXOS_PHASE27R_SMOKE) || defined(GXOS_PHASE27S_SMOKE) || defined(GXOS_PHASE27T_SMOKE) || defined(GXOS_PHASE27U_SMOKE) || defined(GXOS_PHASE27V_SMOKE) || defined(GXOS_PHASE27W_SMOKE) || defined(GXOS_PHASE27X_SMOKE) || defined(GXOS_PHASE27Y_SMOKE) || defined(GXOS_PHASE27Z_SMOKE) || defined(GXOS_PHASE28A_SMOKE) || defined(GXOS_PHASE28B_SMOKE) || defined(GXOS_PHASE28C_SMOKE) || defined(GXOS_PHASE28D_SMOKE) || defined(GXOS_PHASE28E_SMOKE) || defined(GXOS_PHASE28F_SMOKE) || defined(GXOS_PHASE28G_SMOKE) || defined(GXOS_PHASE28H_SMOKE) || defined(GXOS_PHASE28I_SMOKE) || defined(GXOS_PHASE28J_SMOKE) || defined(GXOS_PHASE28K_SMOKE) || defined(GXOS_PHASE28L_SMOKE) || defined(GXOS_PHASE28M_SMOKE)
 static uint8_t s_compareImage[guidexos::native_elf::MAX_ELF_FILE_BYTES];
 #endif
-#if defined(GXOS_PHASE28I_SMOKE)
+#if defined(GXOS_PHASE28I_SMOKE) || defined(GXOS_PHASE28M_SMOKE)
 static bool s_phase28i_value_change = false;
 #endif
-#if defined(GXOS_PHASE27Z_SMOKE) || defined(GXOS_PHASE28A_SMOKE) || defined(GXOS_PHASE28B_SMOKE) || defined(GXOS_PHASE28C_SMOKE) || defined(GXOS_PHASE28D_SMOKE) || defined(GXOS_PHASE28E_SMOKE) || defined(GXOS_PHASE28F_SMOKE) || defined(GXOS_PHASE28G_SMOKE) || defined(GXOS_PHASE28H_SMOKE) || defined(GXOS_PHASE28I_SMOKE) || defined(GXOS_PHASE28J_SMOKE) || defined(GXOS_PHASE28K_SMOKE) || defined(GXOS_PHASE28L_SMOKE)
+#if defined(GXOS_PHASE27Z_SMOKE) || defined(GXOS_PHASE28A_SMOKE) || defined(GXOS_PHASE28B_SMOKE) || defined(GXOS_PHASE28C_SMOKE) || defined(GXOS_PHASE28D_SMOKE) || defined(GXOS_PHASE28E_SMOKE) || defined(GXOS_PHASE28F_SMOKE) || defined(GXOS_PHASE28G_SMOKE) || defined(GXOS_PHASE28H_SMOKE) || defined(GXOS_PHASE28I_SMOKE) || defined(GXOS_PHASE28J_SMOKE) || defined(GXOS_PHASE28K_SMOKE) || defined(GXOS_PHASE28L_SMOKE) || defined(GXOS_PHASE28M_SMOKE)
 static bool equal_text(const char* left, const char* right);
 #endif
 static void print_decimal(uint32_t value);
@@ -7725,6 +7725,46 @@ auto run_phase28g_normal_session = [&](const gx_build_snapshot& build) -> bool
     serial::puts(phase28kPassed ?
         "ELF Loader: Phase 28K multiple source breakpoint smoke PASS\nDEVELOPER_STUDIO_PHASE28K_PASS\n" :
         "ELF Loader: Phase 28K multiple source breakpoint smoke FAIL\n");
+#endif
+
+#if defined(GXOS_PHASE28M_SMOKE)
+{
+    serial::puts("ELF Loader: Phase 28M packaged Developer Studio integrated UI begin\n");
+    serial::puts("DEVELOPER_STUDIO_PHASE28M_GUEST_BEGIN\n");
+    const uint8_t idToken[] = "com.guidexos.developerstudio";
+    const uint8_t elfToken[] = "developerstudio.elf";
+    const uint8_t entryToken[] = "gx_main";
+    const uint8_t abiToken[] = "guidexos-c-abi-v1";
+    const uint8_t runtimeToken[] = "native-elf";
+    vfs::FileInfo manifestInfo = {};
+    vfs::FileInfo artifactInfo = {};
+    const bool manifestPresent = vfs::stat("/Apps/DeveloperStudio/app.json", &manifestInfo) == vfs::VFS_OK &&
+        manifestInfo.type == vfs::FILE_TYPE_REGULAR && manifestInfo.size != 0 && manifestInfo.size < sizeof(s_invalidImage);
+    const bool artifactPresent = vfs::stat("/Apps/DeveloperStudio/bin/amd64/developerstudio.elf", &artifactInfo) == vfs::VFS_OK &&
+        artifactInfo.type == vfs::FILE_TYPE_REGULAR && artifactInfo.size != 0;
+    const bool packageIdentity = manifestPresent && artifactPresent &&
+        file_contains_bytes("/Apps/DeveloperStudio/app.json", idToken, sizeof(idToken) - 1) &&
+        file_contains_bytes("/Apps/DeveloperStudio/app.json", elfToken, sizeof(elfToken) - 1) &&
+        file_contains_bytes("/Apps/DeveloperStudio/app.json", entryToken, sizeof(entryToken) - 1) &&
+        file_contains_bytes("/Apps/DeveloperStudio/app.json", abiToken, sizeof(abiToken) - 1) &&
+        file_contains_bytes("/Apps/DeveloperStudio/app.json", runtimeToken, sizeof(runtimeToken) - 1);
+    print_marker("DEVELOPER_STUDIO_PHASE28M_APP_DISCOVERY_PASS", packageIdentity);
+
+    static int32_t developerStudioReturn = 1;
+    static NativeElfRunReport developerStudioReport = {};
+    const bool launched = packageIdentity &&
+        run_file("/Apps/DeveloperStudio/bin/amd64/developerstudio.elf", &developerStudioReturn,
+                 &developerStudioReport) && developerStudioReturn == 0 && developerStudioReport.teardownComplete;
+    print_marker("DEVELOPER_STUDIO_PHASE28M_GUEST_APP_PASS", launched);
+    const bool cleanup = launched && developerStudioReport.finalState == NativeAppExecutionState::Cleaned &&
+        !NativeElfDevelopmentAppModel::has_active_registration() && compositor::KernelCompositor::getWindowCount() == 0;
+    print_marker("DEVELOPER_STUDIO_PHASE28M_GUEST_CLEANUP_PASS", cleanup);
+    const bool phase28mPassed = packageIdentity && launched && cleanup;
+    print_marker("DEVELOPER_STUDIO_PHASE28M", phase28mPassed);
+    serial::puts(phase28mPassed ?
+        "ELF Loader: Phase 28M packaged Developer Studio integrated UI PASS\nDEVELOPER_STUDIO_PHASE28M_GUEST_PASS\n" :
+        "ELF Loader: Phase 28M packaged Developer Studio integrated UI FAIL\n");
+}
 #endif
 
 #if defined(GXOS_PHASE28L_SMOKE)

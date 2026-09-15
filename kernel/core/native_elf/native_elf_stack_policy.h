@@ -15,7 +15,9 @@
 namespace kernel {
 namespace native_elf {
 
-static const uint64_t NATIVE_ELF_APPLICATION_STACK_SIZE = 64ULL * 1024ULL;
+// The packaged Developer Studio project/debugger path has materially deeper
+// nested model/parser frames than the tiny compiler smoke applications.
+static const uint64_t NATIVE_ELF_APPLICATION_STACK_SIZE = 512ULL * 1024ULL;
 static const uint32_t NATIVE_ELF_RUNTIME_SAFETY_RESERVE_BYTES = 8192U;
 // The trampoline reserves 32-byte Microsoft x64 shadow space and the target
 // entry CALL contributes one return address before gx_main starts.
@@ -60,7 +62,7 @@ static_assert(COMPILER_MAX_GENERATED_FRAME_BYTES ==
                     COMPILER_MAX_LOCAL_STORAGE_BYTES + COMPILER_MAX_TEMPORARY_SLOTS * 4U +
                     15U) & ~15U),
               "compiler frame bound must match the legal IR maxima");
-static_assert(COMPILER_MAX_RUNTIME_CALL_DEPTH == 75U,
+static_assert(COMPILER_MAX_RUNTIME_CALL_DEPTH == 679U,
               "review the recursion limit when stack policy changes");
 static_assert(COMPILER_MAX_RUNTIME_CALL_DEPTH *
                   COMPILER_MAX_GENERATED_ACTIVATION_STACK_COST +

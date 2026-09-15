@@ -469,21 +469,25 @@ static bool test_recursion_and_safety()
                  maximum.frameBytes == COMPILER_MAX_GENERATED_FRAME_BYTES &&
                  maximum.transientBytes == COMPILER_MAX_TRANSIENT_STACK_BYTES &&
                  maximum.activationBytes == COMPILER_MAX_GENERATED_ACTIVATION_STACK_COST &&
-                 COMPILER_MAX_RUNTIME_CALL_DEPTH == 75,
+                 COMPILER_MAX_RUNTIME_CALL_DEPTH == 679,
                  "recursive stack accounting matches the shared safety policy")) return false;
 
-    const char* boundary =
+    const std::string boundary =
         "int recurse(int n) { if (n == 0) { return 42; } return recurse(n - 1); }\n"
-        "int gx_main(gx_app_context* ctx) { return recurse(73); }\n";
-    if (!require(compile_unit(boundary, &g_first, &diagnostics), "safe depth boundary compiles")) return false;
+        "int gx_main(gx_app_context* ctx) { return recurse(" +
+        std::to_string(COMPILER_MAX_RUNTIME_CALL_DEPTH - 2U) + "); }\n";
+    if (!require(compile_unit(boundary.c_str(), &g_first, &diagnostics),
+                 "safe depth boundary compiles")) return false;
     GeneratedCallResult boundaryResult = {};
     if (!require(execute_entry(g_first, 42, &boundaryResult) && boundaryResult.runtimeFailure == 0,
                  "depth below the derived limit succeeds")) return false;
 
-    const char* overBoundary =
+    const std::string overBoundary =
         "int recurse(int n) { if (n == 0) { return 42; } return recurse(n - 1); }\n"
-        "int gx_main(gx_app_context* ctx) { return recurse(74); }\n";
-    if (!require(compile_unit(overBoundary, &g_first, &diagnostics), "excess boundary source compiles")) return false;
+        "int gx_main(gx_app_context* ctx) { return recurse(" +
+        std::to_string(COMPILER_MAX_RUNTIME_CALL_DEPTH - 1U) + "); }\n";
+    if (!require(compile_unit(overBoundary.c_str(), &g_first, &diagnostics),
+                 "excess boundary source compiles")) return false;
     GeneratedCallResult overBoundaryResult = {};
     if (!require(execute_entry(g_first, 0, &overBoundaryResult) && overBoundaryResult.runtimeFailure != 0 &&
                  overBoundaryResult.runtimeDepth == COMPILER_MAX_RUNTIME_CALL_DEPTH,

@@ -21,6 +21,11 @@ $sources = @(
         ForEach-Object { $_.Trim().TrimEnd('^').Trim() } |
         Where-Object { $_ -and $_ -ne "server.cpp" }
 )
+# The filesystem contract test exercises the hosted Native ELF debugger's
+# watch path as part of the application-facing runtime surface.  Keep this
+# kernel-side provider explicit because the legacy experimental source list
+# predates the split debug-watches translation unit.
+$sources += "kernel/core/native_elf/native_elf_debug_watches.cpp"
 
 $output = [IO.Path]::GetFullPath($OutputPath)
 $outputDirectory = Split-Path -Parent $output

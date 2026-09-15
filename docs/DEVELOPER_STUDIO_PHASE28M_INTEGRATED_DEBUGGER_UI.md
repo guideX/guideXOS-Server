@@ -2,19 +2,214 @@
 
 ## Outcome
 
-**Outcome B — UI implemented, packaging/runtime integration boundary remains.**
+**Current result: Outcome A — the packaged Developer Studio debugger UI was
+validated in three fresh guideXOS QEMU boots.**
 
-The editable standalone Developer Studio now contains a bounded integrated
-debugger surface consuming the current server debugger ABI. The resulting
-amd64 and arm64 ELFs were produced by the normal standalone build/staging flow
-and copied into this server repository. The remaining boundary is proof inside
-the real guideXOS guest: the available computer-use surface exposed no QEMU
-application (`apps=[]`), and the existing Phase 28L guest fixture currently
-fails during its fixture build before debugger assertions. No visible QEMU
-Developer Studio launch, pause, or mouse-driven interaction is claimed.
+The earlier Outcome E and Outcome B boundaries are retained below as history.
+This continuation does not treat external computer-use `apps=[]` as guest
+evidence. It adds a dedicated `-Phase28MOnly` QEMU path that stages the exact
+packaged Developer Studio, launches it through the guideXOS App Model/native
+runtime, and drives the production UI/controller handlers in the real app.
+
+The current closure, including the exact old Phase 28L fixture boundary,
+package identities, in-guest markers, host validation, and preserved evidence,
+is in the next section. The later Outcome B matrix is a historical snapshot;
+its provisional values are superseded by this continuation.
 
 This is not an ABI incompatibility. The standalone client compiled against the
-current server headers, and the focused ABI/debugger host contracts passed.
+current server headers, the focused ABI/debugger host contracts passed, and
+the real packaged UI completed its debugger flow in-guest.
+
+## Phase 28M continuation closure — supersedes the provisional Outcome B matrix
+
+### Repositories and package identity
+
+The continuation started from the requested live state:
+
+- Server: `D:\dev\guideXOSServerV0.5_DEVELOPER_STUDIO`, branch
+  `v0.5_DEVELOPER_STUDIO`, HEAD
+  `dbcc2a3daa79344502a26b64f5747f1dacbc7260`.
+- Standalone: `D:\dev\guideXOS_Developer_Studio`, branch
+  `phase28m-integrated-debugger-ui`, HEAD
+  `b91159eb190f18da506ddbcd265be1d50a2bacdb`.
+- Standalone `main` remained at
+  `33c37e56df6dd70e0963b2caca824e100f5e3d7e`.
+- No fetch, pull, merge, rebase, reset, amend, clean, or push was performed.
+
+The standalone source legitimately changed for the diagnostic UI mode,
+diagnostic markers, and one guest-exposed cleanup path, so both packaged
+artifacts were rebuilt through the normal build script. The final staged
+identities are:
+
+```text
+Apps/DeveloperStudio/bin/amd64/developerstudio.elf
+  size: 861,856 bytes
+  SHA256: BC9D35CB1D9582EB0ABD4CD434E05EA8162B1B1C22F030E4A6D376B4C4546DF3
+
+Apps/DeveloperStudio/bin/arm64/developerstudio.elf
+  size: 1,015,504 bytes
+  SHA256: DDED73B4B5D9C683CCC051370E1CEBA6FBB9DE30BF6997B7A7B2331DEBAC5A01
+```
+
+The earlier `1,051,184`/`68C73D…` amd64 and `1,202,984`/`5C2399…` arm64
+identities in the original report are preserved as pre-continuation history;
+they were not edited manually.
+
+### What the guest path proves
+
+The authoritative command was:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\smoke-compiler-bootstrap.ps1 -Phase28MOnly -BootCount 1 -TimeoutSeconds 180
+```
+
+`-Phase28MOnly` creates a fresh disposable FAT/ESP and QEMU instance for each
+boot, stages `P28M`, copies `Apps/DeveloperStudio`, and writes the explicit
+`.phase28m-diagnostic` sentinel. The smoke harness checks package discovery,
+launch, final cleanup, and required markers, but does not print the pane or
+control markers itself.
+
+The actual application contains the bounded diagnostic state machine. It calls
+the same `drawShell`, key handlers, pane refresh paths, watch handlers,
+breakpoint manager handlers, session controller, and Stop/Cancel route used by
+ordinary Developer Studio UI. It is activated only by the staged diagnostic
+sentinel; normal Developer Studio launch remains ordinary. The server smoke
+path contributes package identity/discovery and App Model cleanup markers. The
+UI-originated markers below come from the packaged Developer Studio binary.
+
+The target fixture is `/P28M`, with nested `helper_tail -> helper -> gx_main`
+frames in `src/helper.cpp` and `src/main.cpp`. The real app opens the project,
+adds the initial breakpoint through its UI path, starts the Debug session, and
+waits for the backend pause before refreshing panes.
+
+### UI acceptance evidence
+
+- Launch and initialization: `APP_DISCOVERY_PASS`, `APP_LAUNCH_PASS`,
+  `WINDOW_VISIBLE_PASS`, and `PROJECT_OPEN_PASS` were emitted. The guest
+  framebuffer was also reported available at `1280x800x32`; no external
+  screenshot surface was available or required.
+- Debug start and pause: `DEBUG_START_UI_PASS`, `INITIAL_PAUSE_PASS`, and the
+  real paused backend state were observed.
+- Call Stack: `PANE_CALL_STACK_PASS` and `CALL_STACK_DEPTH_PASS depth=3`.
+  The checked rows were `#0 helper_tail`, `#1 helper`, and `#2 gx_main`.
+  A Down key through the integrated Call Stack handler selected frame 1 while
+  the frame-0 instruction pointer and controller source location stayed
+  unchanged.
+- Locals and Arguments: the selected caller frame displayed the actual
+  arguments `input=10` and `delta=4`; `PANE_LOCALS_PASS` and
+  `PANE_ARGUMENTS_PASS` were emitted after the selection refresh.
+- Watches: the real watch handler added `input + delta` and the backend
+  evaluator returned `14`. It also added `missing_symbol`; the bounded failed
+  expression status/error was retained and `WATCH_INVALID_ERROR_PASS` was
+  emitted.
+- Breakpoints: the pane contained the initial `src/helper.cpp:3` breakpoint,
+  a logpoint at `src/helper.cpp:13`, and a caller breakpoint at
+  `src/main.cpp:15`. The UI disabled and re-enabled the initial breakpoint
+  through the actual manager route. The policy check represented LOG action and
+  an AT_LEAST hit policy with threshold `1`; the required enable/disable and
+  policy markers passed.
+- Stepping and Continue: the actual UI routes passed Step Out from
+  `helper_tail` to `helper`, Step Into, Step Over, final Step Out to the caller,
+  and Continue. Each path produced a fresh paused state/source refresh through
+  the controller.
+- Output/logpoint: the real Output pane drained ordered backend output records
+  containing `input=10 doubled=28` followed by `input=1 doubled=6`. The
+  logpoint did not user-pause the target; execution reached the caller
+  breakpoint and `LOGPOINT_NO_PAUSE_PASS` passed.
+- Stop/Cancel: the real Stop UI handler dispatched the backend cancellation,
+  accepted it, cleared the active session, and emitted `STOP_UI_PASS`.
+- Stale state: after cancellation, stack, variables, and output authority were
+  cleared; `STALE_STATE_CLEAR_PASS` passed.
+- Second generation: a second Debug session got a different generation,
+  selected frame reset to 0, and fresh stack/variables were tied to that
+  generation. `SECOND_SESSION_PASS` passed.
+- Controls and bounds: running/paused/terminal enablement checks passed through
+  `SESSION_CONTROLS_PASS`. The diagnostic bound check recorded
+  `watches=8`, `call_stack=16`, `breakpoints=8`, and `output=32`.
+
+### Three fresh final-package boots
+
+All three runs below used the final amd64 hash shown above and completed the
+same required UI path through `PHASE28M_PASS`, App Model cleanup, and
+`GUEST_PASS`:
+
+1. `C:\Users\guideX\AppData\Local\Temp\guidexos-phase28g-2977c7ecab884507a88f6443fedd6392`
+   — `boot1.serial.log`, full pass.
+2. `C:\Users\guideX\AppData\Local\Temp\guidexos-phase28g-a5400b9214f24a8eab44396a31914bde`
+   — `boot1.serial.log`, full pass.
+3. `C:\Users\guideX\AppData\Local\Temp\guidexos-phase28g-0669a8fe585f4e1880abfe0ee43abf57`
+   — `boot1.serial.log`, full pass.
+
+Earlier attempts are not hidden: one pre-final-package boot stopped at the
+diagnostic DWARF mapper with `SourceNotFound`, and an earlier two-boot attempt
+had a second-boot debug-start timeout. Neither is counted. The three listed
+boots are isolated successful runs of the final package.
+
+### Phase 28L fixture boundary and regression
+
+The historical failing command was the focused three-boot Phase 28L path:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\smoke-compiler-bootstrap.ps1 -Phase28LOnly -BootCount 3 -TimeoutSeconds 180
+```
+
+The first preserved observable boundary was the `/P28L` fixture's
+`Compiler: build FAIL`, before `DEVELOPER_STUDIO_PHASE28L_BUILD_PASS`, runtime
+breakpoint assertions, or Developer Studio launch. The old capture did not
+preserve a source-level compiler diagnostic, so no narrower historical root
+cause can be claimed. It was not a Developer Studio package-discovery or UI
+failure. A current isolated `-Phase28LOnly -BootCount 1` rerun passed the
+fixture build, policy setup, hit-count/logpoint checks, runtime values, and
+cleanup, so the old boundary was not reproduced as a persistent Phase 28M
+regression. The Phase 28L assertions were not weakened.
+
+### Host validation and runner correction
+
+The final standalone amd64 and arm64 builds passed the focused model/debugger
+tests and native ELF package build. The server-side validation sweep passed:
+
+```text
+scripts/run-compiler-functions-host-test.ps1
+scripts/run-native-abi-layout-test.ps1
+scripts/run-native-breakpoint-manager-contract-test.ps1
+scripts/run-native-call-stack-controller-test.ps1
+scripts/run-native-debug-output-contract-test.ps1
+scripts/run-native-debug-policy-contract-test.ps1
+scripts/run-native-debug-watches-test.ps1
+scripts/run-native-debugger-runtime-test.ps1
+scripts/run-native-source-step-controller-test.ps1
+scripts/run-native-elf-host-test.ps1
+scripts/run-native-elf-runtime-host-test.ps1
+scripts/run-native-elf-development-app-model-host-test.ps1
+scripts/run-native-elf-trampoline-host-test.ps1
+scripts/run-native-filesystem-contract-test.ps1
+```
+
+The filesystem-contract runner omission identified in the prior investigation
+was corrected minimally: its source list now includes
+`kernel/core/native_elf/native_elf_debug_watches.cpp`. The corrected runner
+builds and passes. The runtime host test also had a stale `334` depth
+expectation; it now follows the derived `COMPILER_MAX_RUNTIME_CALL_DEPTH`
+policy, and the compiler-functions boundary inputs are derived from that same
+policy.
+
+The nested NativeElf cancellation path was fixed so a cancelled child that has
+already zeroed its image restores the paused parent image/page-table state
+before the host UI pump returns. This is the runtime fix exercised by the
+Stop/Cancel and second-session guest proof.
+
+### Evidence limits and final repository policy
+
+No screenshot/framebuffer image or physical mouse trace was used. Internal
+window creation, framebuffer availability, pane render markers, model counts,
+and controller/action markers are the authoritative UI evidence. External
+computer-use was unavailable (`apps=[]`), which is recorded but is not treated
+as Outcome E. Physical mouse interaction was not required because the real
+keyboard/UI-controller paths were exercised in-guest.
+
+The final commit IDs and final worktree status are added below after the local
+continuation commits. Nothing is pushed, and standalone `main` remains
+unchanged.
 
 ## Repository state and provenance
 

@@ -97,9 +97,11 @@ struct Operation {
     bool debugStepTrapObserved;
     bool debugSourceStepActive;
     bool debugStepOverActive;
+    bool debugStepOverReturnOnly;
     bool debugStepOverReturnBreakpointInstalled;
     bool debugStepOverReturnBreakpointHit;
     bool debugStepOutActive;
+    bool debugStepOutReturnOnly;
     bool debugStepOutReturnBreakpointInstalled;
     bool debugStepOutReturnBreakpointHit;
     bool debugSourceSelected;
@@ -365,14 +367,6 @@ static UserBreakpoint* installed_user_breakpoint_at(Operation& operation,
 static UserBreakpoint* current_user_breakpoint(Operation& operation)
 {
     UserBreakpoint* current = user_breakpoint_by_id(
-        operation, operation.debugCurrentBreakpointId);
-    if (current) return current;
-    return user_breakpoint_at(operation, operation.debugCurrentBreakpointSlot);
-}
-
-static const UserBreakpoint* current_user_breakpoint(const Operation& operation)
-{
-    const UserBreakpoint* current = user_breakpoint_by_id(
         operation, operation.debugCurrentBreakpointId);
     if (current) return current;
     return user_breakpoint_at(operation, operation.debugCurrentBreakpointSlot);
@@ -1099,6 +1093,58 @@ static bool debug_read_code_byte(const Operation& operation, uint64_t address, u
     return true;
 }
 
+static gx_result read_debug_memory(const Operation& operation,
+                                   const gx_development_debug_request& request,
+                                   gx_development_debug_snapshot* outSnapshot)
+{
+    if (!outSnapshot || operation.state != GX_DEVELOPMENT_RUN_PAUSED ||
+        !operation.debugContext || !operation.debugBreakpointHit ||
+        (request.threadId != 0 && request.threadId != 1) ||
+        (request.stopGeneration != 0 &&
+         request.stopGeneration != operation.debugStopGeneration) ||
+        request.targetAddress == 0 || request.readByteCount == 0 ||
+        request.readByteCount > sizeof(outSnapshot->bytes)) {
+        set_debug_error(outSnapshot, "NativeElf memory read requires an exact paused context");
+        return GX_ERROR_BUSY;
+    }
+
+    const NativeAppExecutionContext* runtime = native_elf_runtime_context();
+    const uint64_t end = request.targetAddress >
+        ~static_cast<uint64_t>(0) - request.readByteCount
+        ? 0 : request.targetAddress + request.readByteCount;
+    const bool inCode = end != 0 && debug_code_address(operation, request.targetAddress) &&
+        debug_code_address(operation, end - 1);
+    const bool inStack = runtime && end != 0 && runtime->stackBase != 0 &&
+        runtime->stackSize != 0 && runtime->stackBase <=
+            ~static_cast<uint64_t>(0) - runtime->stackSize &&
+        step_out_stack_range_contains(runtime->stackBase,
+            runtime->stackBase + runtime->stackSize,
+            request.targetAddress, request.readByteCount);
+    if (!inCode && !inStack) {
+        set_debug_error(outSnapshot, "NativeElf memory read is outside code and stack bounds");
+        return GX_ERROR_INVALID_ARGUMENT;
+    }
+
+    for (uint32_t index = 0; index < request.readByteCount; ++index) {
+        uint8_t value = 0;
+        const uint64_t address = request.targetAddress + index;
+        if (inCode) {
+            if (!debug_read_code_byte(operation, address, &value)) {
+                set_debug_error(outSnapshot, "NativeElf code memory read failed");
+                return GX_ERROR_FAILED;
+            }
+        } else if (!debug_read_stack_bytes(operation, address, 1, &value)) {
+            set_debug_error(outSnapshot, "NativeElf stack memory read failed");
+            return GX_ERROR_FAILED;
+        }
+        outSnapshot->bytes[index] = value;
+    }
+    set_debug_ready_snapshot(operation, outSnapshot);
+    outSnapshot->targetAddress = request.targetAddress;
+    outSnapshot->byteCount = request.readByteCount;
+    return GX_OK;
+}
+
 static bool debug_function_at_entry(const Operation& operation, uint64_t address,
                                     const char* callerFunction, char* calleeFunction,
                                     uint32_t calleeCapacity)
@@ -1204,6 +1250,10 @@ static bool debug_request_identity_matches(const Operation& operation,
         request.nativeRuntimeId != operation.registrationGeneration) return false;
     if (request.threadId != 0 && request.threadId != 1) return false;
     if (request.breakpointId != 0 && request.breakpointId != 1 &&
+        request.command != GX_DEVELOPMENT_DEBUG_BIND_SOFTWARE_BREAKPOINT &&
+        request.command != GX_DEVELOPMENT_DEBUG_REMOVE_BREAKPOINT_OWNER &&
+        request.command != GX_DEVELOPMENT_DEBUG_STEP_OVER_CALL &&
+        request.command != GX_DEVELOPMENT_DEBUG_STEP_OUT_RETURN &&
         request.command != GX_DEVELOPMENT_DEBUG_ADD_SOURCE_BREAKPOINT &&
         request.command != GX_DEVELOPMENT_DEBUG_REMOVE_SOURCE_BREAKPOINT &&
         request.command != GX_DEVELOPMENT_DEBUG_ENABLE_SOURCE_BREAKPOINT &&
@@ -1211,6 +1261,11 @@ static bool debug_request_identity_matches(const Operation& operation,
         request.command != GX_DEVELOPMENT_DEBUG_CONFIGURE_SOURCE_BREAKPOINT_POLICY &&
         request.breakpointId != operation.debugCurrentBreakpointId) return false;
     if (request.targetAddress != 0 &&
+        request.command != GX_DEVELOPMENT_DEBUG_BIND_SOFTWARE_BREAKPOINT &&
+        request.command != GX_DEVELOPMENT_DEBUG_READ_MEMORY &&
+        request.command != GX_DEVELOPMENT_DEBUG_REMOVE_BREAKPOINT_OWNER &&
+        request.command != GX_DEVELOPMENT_DEBUG_STEP_OVER_CALL &&
+        request.command != GX_DEVELOPMENT_DEBUG_STEP_OUT_RETURN &&
         request.command != GX_DEVELOPMENT_DEBUG_ADD_SOURCE_BREAKPOINT &&
         request.targetAddress != operation.debugBreakpointAddress) return false;
     if (request.artifactSha256 &&
@@ -2162,6 +2217,7 @@ bool native_elf_scheduler_pump()
 #if defined(__x86_64__)
     if (!s_schedulerActive || s_schedulerTargetComplete || s_schedulerInTarget ||
         !s_targetContext) return false;
+    if (!native_elf_nested_prepare_for_scheduler()) return false;
     // The owner context is a continuation on this individual pump call's
     // stack.  Start() must not leave a later desktop tick resuming through a
     // dead start() frame, so every owner-side pump captures a fresh context.
@@ -2169,7 +2225,7 @@ bool native_elf_scheduler_pump()
     s_schedulerInTarget = true;
     arch::amd64::context::switch_context(&s_ownerContext, s_targetContext);
     s_schedulerInTarget = false;
-    return true;
+    return native_elf_nested_capture_after_scheduler();
 #else
     return false;
 #endif
@@ -4073,6 +4129,16 @@ static gx_result source_step_over(gx_development_debug_snapshot* outSnapshot)
         break;
     }
 
+    // The Developer Studio controller's legacy Step Over command owns the
+    // temporary return breakpoint and consumes this internal trap first. The
+    // production source-step command continues through the caller until the
+    // next source location, so keep that behavior for the source command and
+    // stop at the same validated return trap for the controller adapter.
+    if (operation.debugStepOverReturnOnly) {
+        if (outSnapshot) *outSnapshot = operation.debugSnapshot;
+        return GX_OK;
+    }
+
     for (;;) {
         if (!begin_debug_instruction_step(operation, outSnapshot, true)) {
             operation.debugSourceStepActive = false;
@@ -4340,19 +4406,20 @@ static gx_result source_step_out(gx_development_debug_snapshot* outSnapshot)
     }
 
     // A source breakpoint owns the loader's one physical breakpoint slot.
-    // Release it before arming the independent return control point; the
-    // saved pause context remains the genuine current callee frame.
-    if (operation.debugBreakpointInstalled) {
-        if (!restore_current_breakpoint(operation)) {
-            set_debug_error(outSnapshot,
-                            "NativeElf source breakpoint could not be restored for Step Out");
-            outSnapshot->sourceStepOutResult =
-                GX_DEVELOPMENT_DEBUG_SOURCE_STEP_OUT_RESULT_TARGET_FAILED;
-            return GX_ERROR_FAILED;
-        }
-        operation.debugBreakpointInstalled = false;
-        operation.debugStepTrapObserved = true;
+    // Release any current user breakpoint before arming the independent
+    // return control point; the saved pause context remains the genuine
+    // current callee frame.  The mirrored legacy flag can be stale after a
+    // breakpoint-pane mutation, so the current breakpoint record is the
+    // authoritative ownership check here.
+    if (!restore_current_breakpoint(operation)) {
+        set_debug_error(outSnapshot,
+                        "NativeElf source breakpoint could not be restored for Step Out");
+        outSnapshot->sourceStepOutResult =
+            GX_DEVELOPMENT_DEBUG_SOURCE_STEP_OUT_RESULT_TARGET_FAILED;
+        return GX_ERROR_FAILED;
     }
+    operation.debugBreakpointInstalled = false;
+    operation.debugStepTrapObserved = true;
 
     operation.debugSourceStepActive = true;
     operation.debugSourceStepResult = GX_DEVELOPMENT_DEBUG_SOURCE_STEP_RESULT_PENDING;
@@ -4422,7 +4489,6 @@ static gx_result source_step_out(gx_development_debug_snapshot* outSnapshot)
     operation.debugStepTrapObserved = false;
     serial::puts("DEVELOPER_STUDIO_PHASE28E_TEMP_BREAKPOINT_PASS address=0x");
     serial::put_hex64(operation.debugStepOutReturnAddress); serial::putc('\n');
-
     if (!native_elf_scheduler_pump()) {
         const bool completed = operation.state == GX_DEVELOPMENT_RUN_COMPLETED;
         const uint32_t result = completed
@@ -4437,7 +4503,6 @@ static gx_result source_step_out(gx_development_debug_snapshot* outSnapshot)
         if (!completed && outSnapshot) outSnapshot->status = GX_DEVELOPMENT_DEBUG_STATUS_REJECTED;
         return completed ? GX_OK : GX_ERROR_FAILED;
     }
-
     if (operation.state != GX_DEVELOPMENT_RUN_PAUSED ||
         !operation.debugStepOutReturnBreakpointHit) {
         const bool completed = operation.state == GX_DEVELOPMENT_RUN_COMPLETED;
@@ -4469,6 +4534,21 @@ static gx_result source_step_out(gx_development_debug_snapshot* outSnapshot)
     operation.debugStepOutCallerFrameVerified = 1;
     serial::puts("DEVELOPER_STUDIO_PHASE28E_CALLER_FRAME_PASS rbp=0x");
     serial::put_hex64(operation.debugContext->rbp); serial::putc('\n');
+
+    // The Developer Studio controller's legacy Step Out command consumes the
+    // validated internal return trap and performs the final frame publication
+    // itself. The production source-step command continues through the caller
+    // source mapping below.
+    if (operation.debugStepOutReturnOnly) {
+        // The return trap has already completed the internal source-step
+        // machine. Leave the operation in an ordinary paused state so the
+        // production call-stack and variables providers can inspect the
+        // caller frame after the controller removes its temporary owner.
+        operation.debugSourceStepActive = false;
+        operation.debugStepOutActive = false;
+        if (outSnapshot) *outSnapshot = operation.debugSnapshot;
+        return GX_OK;
+    }
 
     for (;;) {
         if (operation.debugStepOutInstructionCount >= kNativeElfStepOutInstructionLimit) {
@@ -5461,11 +5541,68 @@ gx_result evaluate_expression(const gx_development_debug_request& request,
     return GX_OK;
 }
 
+static gx_result bind_temporary_debug_breakpoint(
+    Operation& operation, const gx_development_debug_request& request,
+    gx_development_debug_snapshot* outSnapshot)
+{
+    if (!outSnapshot || operation.state != GX_DEVELOPMENT_RUN_PAUSED ||
+        request.targetAddress == 0 || !debug_code_address(operation, request.targetAddress)) {
+        set_debug_error(outSnapshot,
+                        "NativeElf temporary breakpoint requires a paused executable address");
+        return GX_ERROR_BUSY;
+    }
+    uint8_t originalByte = 0;
+    if (!install_debug_breakpoint(request.targetAddress, &originalByte)) {
+        set_debug_error(outSnapshot, "NativeElf temporary breakpoint patch was rejected");
+        return GX_ERROR_FAILED;
+    }
+    clear_debug_snapshot(outSnapshot);
+    set_debug_identity(operation, outSnapshot);
+    outSnapshot->status = GX_DEVELOPMENT_DEBUG_STATUS_BOUND;
+    outSnapshot->bindingId = request.breakpointId;
+    outSnapshot->targetAddress = request.targetAddress;
+    outSnapshot->originalByte = originalByte;
+    outSnapshot->installedByte = 0xCC;
+    outSnapshot->originalByteValid = 1;
+    outSnapshot->bindingInstalled = 1;
+    outSnapshot->bindingCount = 1;
+    return GX_OK;
+}
+
+static gx_result remove_temporary_debug_breakpoint(
+    Operation& operation, const gx_development_debug_request& request,
+    gx_development_debug_snapshot* outSnapshot)
+{
+    if (!outSnapshot || request.targetAddress == 0 ||
+        !debug_code_address(operation, request.targetAddress)) {
+        set_debug_error(outSnapshot, "NativeElf temporary breakpoint address is invalid");
+        return GX_ERROR_INVALID_ARGUMENT;
+    }
+    if (debug_breakpoint_installed_at(request.targetAddress) &&
+        !restore_debug_breakpoint(request.targetAddress)) {
+        set_debug_error(outSnapshot, "NativeElf temporary breakpoint could not be restored");
+        return GX_ERROR_FAILED;
+    }
+    clear_debug_snapshot(outSnapshot);
+    set_debug_identity(operation, outSnapshot);
+    outSnapshot->status = GX_DEVELOPMENT_DEBUG_STATUS_RESTORED;
+    outSnapshot->bindingId = request.breakpointId;
+    outSnapshot->targetAddress = request.targetAddress;
+    outSnapshot->bindingInstalled = 0;
+    outSnapshot->bindingCount = 0;
+    return GX_OK;
+}
+
 gx_result debug(const gx_development_debug_request& request,
                 gx_development_debug_snapshot* outSnapshot)
 {
     if (!outSnapshot) return GX_ERROR_INVALID_ARGUMENT;
     clear_debug_snapshot(outSnapshot);
+    if (request.command == GX_DEVELOPMENT_DEBUG_CONTINUE_BREAKPOINT)
+        serial::puts("DEVELOPER_STUDIO_PHASE28M_CONTINUE_COMMAND_ENTRY\n");
+    if (request.command == GX_DEVELOPMENT_DEBUG_RESUME_STEP ||
+        request.command == GX_DEVELOPMENT_DEBUG_RESUME_INTERNAL_TRAP)
+        serial::puts("DEVELOPER_STUDIO_PHASE28M_RESUME_STEP_ENTRY\n");
     if (request.size < GX_DEVELOPMENT_DEBUG_REQUEST_LEGACY_BYTES ||
         request.version != GX_DEVELOPMENT_DEBUG_API_VERSION) {
         set_debug_error(outSnapshot, "NativeElf debug request version or size is invalid");
@@ -5479,13 +5616,73 @@ gx_result debug(const gx_development_debug_request& request,
         set_debug_error(outSnapshot, "Run generation is not debugger-controlled");
         return GX_ERROR_UNSUPPORTED;
     }
+    const bool breakpointContinue =
+        request.command == GX_DEVELOPMENT_DEBUG_CONTINUE_BREAKPOINT;
     if (!debug_request_identity_matches(s_operation, request)) {
+        if (breakpointContinue)
+            serial::puts("DEVELOPER_STUDIO_PHASE28M_CONTINUE_IDENTITY_FAIL\n");
         set_debug_error(outSnapshot, "NativeElf debug session identity is stale");
         return GX_ERROR_FAILED;
     }
+    if (breakpointContinue &&
+        (s_operation.state != GX_DEVELOPMENT_RUN_PAUSED ||
+         !s_operation.debugBreakpointHit || s_operation.debugStepTrapObserved ||
+         !s_operation.debugContext || s_operation.debugContext->cs != 0x08 ||
+         request.breakpointId == 0 ||
+         request.breakpointId != s_operation.debugCurrentBreakpointId ||
+         request.targetAddress == 0 ||
+         request.targetAddress != s_operation.debugBreakpointAddress ||
+         request.threadId != 1 || request.stopGeneration == 0 ||
+         request.stopGeneration != s_operation.debugStopGeneration)) {
+        serial::puts("DEVELOPER_STUDIO_PHASE28M_CONTINUE_STOP_FAIL state=");
+        serial::put_hex32(s_operation.state);
+        serial::puts(" hit="); serial::put_hex32(s_operation.debugBreakpointHit ? 1U : 0U);
+        serial::puts(" step="); serial::put_hex32(s_operation.debugStepTrapObserved ? 1U : 0U);
+        serial::puts(" id="); serial::put_hex64(request.breakpointId);
+        serial::puts("/"); serial::put_hex64(s_operation.debugCurrentBreakpointId);
+        serial::puts(" address="); serial::put_hex64(request.targetAddress);
+        serial::puts("/"); serial::put_hex64(s_operation.debugBreakpointAddress);
+        serial::puts(" stop="); serial::put_hex64(request.stopGeneration);
+        serial::puts("/"); serial::put_hex64(s_operation.debugStopGeneration);
+        serial::putc('\n');
+        set_debug_error(outSnapshot,
+                        "NativeElf breakpoint continuation does not match the current paused stop");
+        return GX_ERROR_BUSY;
+    }
 
-    const bool debugStepWasObserved = s_operation.debugStepTrapObserved;
     switch (request.command) {
+    case GX_DEVELOPMENT_DEBUG_BIND_SOFTWARE_BREAKPOINT:
+        return bind_temporary_debug_breakpoint(s_operation, request, outSnapshot);
+
+    case GX_DEVELOPMENT_DEBUG_REMOVE_BREAKPOINT_OWNER:
+        return remove_temporary_debug_breakpoint(s_operation, request, outSnapshot);
+
+    case GX_DEVELOPMENT_DEBUG_STEP_OUT_RETURN:
+        if (request.auxiliaryAddress != 0 &&
+            debug_breakpoint_installed_at(request.auxiliaryAddress) &&
+            !restore_debug_breakpoint(request.auxiliaryAddress)) {
+            set_debug_error(outSnapshot,
+                            "NativeElf Step Out temporary breakpoint could not be released");
+            return GX_ERROR_FAILED;
+        }
+        s_operation.debugStepOutReturnOnly = true;
+        {
+            const gx_result result = source_step_out(outSnapshot);
+            s_operation.debugStepOutReturnOnly = false;
+            if (result == GX_OK && outSnapshot &&
+                outSnapshot->status == GX_DEVELOPMENT_DEBUG_STATUS_TRAP &&
+                outSnapshot->trapKind == GX_DEVELOPMENT_DEBUG_TRAP_BREAKPOINT &&
+                outSnapshot->internalBreakpointTrap) {
+                outSnapshot->bindingId = request.breakpointId;
+                outSnapshot->bindingInstalled = 1;
+                outSnapshot->bindingCount = 1;
+                s_operation.debugSnapshot.bindingId = request.breakpointId;
+                s_operation.debugSnapshot.bindingInstalled = 1;
+                s_operation.debugSnapshot.bindingCount = 1;
+            }
+            return result;
+        }
+
     case GX_DEVELOPMENT_DEBUG_ADD_SOURCE_BREAKPOINT:
         return add_source_breakpoint(s_operation, request, outSnapshot);
 
@@ -5510,7 +5707,21 @@ gx_result debug(const gx_development_debug_request& request,
         set_output_drain_snapshot(s_operation, outSnapshot);
         return GX_OK;
 
+    case GX_DEVELOPMENT_DEBUG_READ_MEMORY:
+        return read_debug_memory(s_operation, request, outSnapshot);
+
     case GX_DEVELOPMENT_DEBUG_POLL:
+        // A Developer Studio NativeElf window runs its own event loop. While
+        // that loop is active the desktop scheduler cannot provide the next
+        // cooperative slice for this separately controlled target, so advance
+        // the target from the real debugger poll path before publishing state.
+        if (s_operation.state == GX_DEVELOPMENT_RUN_RUNNING &&
+            s_schedulerActive && !s_schedulerInTarget &&
+            !native_elf_scheduler_pump()) {
+            set_debug_error(outSnapshot,
+                            "NativeElf debug target could not be advanced by poll");
+            return GX_ERROR_FAILED;
+        }
         if (s_operation.state == GX_DEVELOPMENT_RUN_PAUSED) {
             *outSnapshot = s_operation.debugSnapshot;
         } else if (s_operation.state == GX_DEVELOPMENT_RUN_STEPPING) {
@@ -5535,6 +5746,10 @@ gx_result debug(const gx_development_debug_request& request,
         }
         return GX_OK;
 
+    case GX_DEVELOPMENT_DEBUG_CONTINUE_BREAKPOINT:
+    case GX_DEVELOPMENT_DEBUG_RELEASE_EXECUTION:
+    case GX_DEVELOPMENT_DEBUG_RESUME_STEP:
+    case GX_DEVELOPMENT_DEBUG_RESUME_INTERNAL_TRAP:
     case GX_DEVELOPMENT_DEBUG_RESUME:
         {
         if (s_operation.state != GX_DEVELOPMENT_RUN_PAUSED ||
@@ -5546,21 +5761,41 @@ gx_result debug(const gx_development_debug_request& request,
         UserBreakpoint* currentUser = current_user_breakpoint(s_operation);
         const bool persistentResume = currentUser && s_operation.debugBreakpointHit &&
             !s_operation.debugStepTrapObserved;
+        if (breakpointContinue && !persistentResume) {
+            serial::puts("DEVELOPER_STUDIO_PHASE28M_CONTINUE_OWNER_FAIL owner=");
+            serial::put_hex64(currentUser ? currentUser->id : 0);
+            serial::puts(" hit="); serial::put_hex32(s_operation.debugBreakpointHit ? 1U : 0U);
+            serial::puts(" step="); serial::put_hex32(s_operation.debugStepTrapObserved ? 1U : 0U);
+            serial::putc('\n');
+            set_debug_error(outSnapshot,
+                            "NativeElf breakpoint continuation has no current user breakpoint owner");
+            return GX_ERROR_BUSY;
+        }
         if (persistentResume) {
             s_operation.debugConditionError = false;
             if (!restore_current_breakpoint(s_operation) ||
                 !begin_conditional_instruction_continue(
-                    s_operation, !s_operation.debugPausedBreakpointRemoved)) {
+                    s_operation, breakpointContinue
+                        ? (request.flags & GX_DEVELOPMENT_DEBUG_FLAG_REINSTALL_BREAKPOINT) != 0
+                        : !s_operation.debugPausedBreakpointRemoved)) {
+                if (breakpointContinue)
+                    serial::puts("DEVELOPER_STUDIO_PHASE28M_CONTINUE_ARM_FAIL\n");
                 set_debug_error(outSnapshot,
                                 "NativeElf persistent breakpoint could not arm Resume");
                 return GX_ERROR_FAILED;
             }
             set_debug_ready_snapshot(s_operation, outSnapshot);
+            if (breakpointContinue)
+                serial::puts("DEVELOPER_STUDIO_PHASE28M_CONTINUE_PUMP_BEGIN\n");
             serial::puts("DEVELOPER_STUDIO_PHASE28K_RESUME_REARM_ARMED id=");
             serial::put_hex64(currentUser->id); serial::putc('\n');
             if (!native_elf_scheduler_pump()) return GX_ERROR_FAILED;
+            if (breakpointContinue)
+                serial::puts("DEVELOPER_STUDIO_PHASE28M_CONTINUE_PUMP_RETURN\n");
             if (s_operation.state == GX_DEVELOPMENT_RUN_PAUSED)
                 *outSnapshot = s_operation.debugSnapshot;
+            if (breakpointContinue)
+                outSnapshot->status = GX_DEVELOPMENT_DEBUG_STATUS_SINGLE_STEP_PENDING;
             return GX_OK;
         }
         if (!s_operation.debugStepTrapObserved &&
@@ -5593,14 +5828,17 @@ gx_result debug(const gx_development_debug_request& request,
         step_out_clear_state(s_operation);
         s_operation.state = GX_DEVELOPMENT_RUN_RUNNING;
         set_debug_ready_snapshot(s_operation, outSnapshot);
-        serial::puts(debugStepWasObserved
-                         ? "DEVELOPER_STUDIO_PHASE28B_RESUME\n"
-                         : s_operation.debugSourceSelected
-                             ? "DEVELOPER_STUDIO_PHASE28A_RESUME\n"
-                             : "DEVELOPER_STUDIO_PHASE27Z_RESUME\n");
-        if (!native_elf_scheduler_pump()) return GX_ERROR_FAILED;
+        const bool pumped = native_elf_scheduler_pump();
+        if (!pumped) return GX_ERROR_FAILED;
         if (s_operation.state == GX_DEVELOPMENT_RUN_PAUSED)
             *outSnapshot = s_operation.debugSnapshot;
+        if (request.command == GX_DEVELOPMENT_DEBUG_RESUME_STEP ||
+            request.command == GX_DEVELOPMENT_DEBUG_RESUME_INTERNAL_TRAP) {
+            // A trap reached by this synchronous pump is delivered by the next
+            // ordinary Debug POLL; the resume call itself reports acceptance.
+            outSnapshot->status = GX_DEVELOPMENT_DEBUG_STATUS_READY;
+            serial::puts("DEVELOPER_STUDIO_PHASE28M_RESUME_STEP_ACK\n");
+        }
         return GX_OK;
         }
 
@@ -5608,6 +5846,30 @@ gx_result debug(const gx_development_debug_request& request,
         return source_step_into(outSnapshot);
 
     case GX_DEVELOPMENT_DEBUG_STEP_OVER_CALL:
+        if (request.auxiliaryAddress != 0 &&
+            debug_breakpoint_installed_at(request.auxiliaryAddress) &&
+            !restore_debug_breakpoint(request.auxiliaryAddress)) {
+            set_debug_error(outSnapshot,
+                            "NativeElf Step Over temporary breakpoint could not be released");
+            return GX_ERROR_FAILED;
+        }
+        s_operation.debugStepOverReturnOnly = true;
+        {
+            const gx_result result = source_step_over(outSnapshot);
+            s_operation.debugStepOverReturnOnly = false;
+            if (result == GX_OK && outSnapshot &&
+                outSnapshot->status == GX_DEVELOPMENT_DEBUG_STATUS_TRAP &&
+                outSnapshot->trapKind == GX_DEVELOPMENT_DEBUG_TRAP_BREAKPOINT &&
+                outSnapshot->internalBreakpointTrap) {
+                outSnapshot->bindingId = request.breakpointId;
+                outSnapshot->bindingInstalled = 1;
+                outSnapshot->bindingCount = 1;
+                s_operation.debugSnapshot.bindingId = request.breakpointId;
+                s_operation.debugSnapshot.bindingInstalled = 1;
+                s_operation.debugSnapshot.bindingCount = 1;
+            }
+            return result;
+        }
     case GX_DEVELOPMENT_DEBUG_STEP_SOURCE_OVER:
         return source_step_over(outSnapshot);
 
@@ -5694,7 +5956,9 @@ gx_result debug(const gx_development_debug_request& request,
             return GX_ERROR_FAILED;
         }
 #endif
-        if (!native_elf_scheduler_pump()) return GX_ERROR_FAILED;
+        if (!native_elf_scheduler_pump()) {
+            return GX_ERROR_FAILED;
+        }
         if (s_operation.state == GX_DEVELOPMENT_RUN_PAUSED) {
             set_debug_error(outSnapshot, "NativeElf paused cancel did not return to the owner");
             return GX_ERROR_FAILED;

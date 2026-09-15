@@ -12,6 +12,8 @@ static const uint16_t ELF_TYPE_EXEC = 2U;
 static const uint16_t ELF_MACHINE_AMD64 = 62U;
 static const uint32_t ELF_VERSION_CURRENT = 1U;
 static const uint32_t PT_LOAD = 1U;
+static const uint32_t PT_PHDR = 6U;
+static const uint32_t PT_GNU_STACK = 0x6474E551U;
 static const uint32_t ELF_HEADER_BYTES = 64U;
 static const uint32_t PROGRAM_HEADER_BYTES = 56U;
 
@@ -138,7 +140,7 @@ bool validate_native_elf(const uint8_t* image,
 
     const uint64_t programHeaderOffset = get_u64(image, 32);
     const uint16_t programHeaderCount = get_u16(image, 56);
-    if (programHeaderCount == 0 || programHeaderCount > policy.maxLoadSegments) {
+    if (programHeaderCount == 0 || programHeaderCount > guidexos::native_elf::MAX_PROGRAM_HEADERS) {
         return fail(result, "ELF program-header count is outside the supported bound");
     }
     if (programHeaderOffset < ELF_HEADER_BYTES || programHeaderOffset > imageBytes) {
@@ -159,6 +161,9 @@ bool validate_native_elf(const uint8_t* image,
     for (uint16_t i = 0; i < programHeaderCount; ++i) {
         const uint64_t headerOffset = programHeaderOffset + static_cast<uint64_t>(i) * PROGRAM_HEADER_BYTES;
         const uint32_t type = get_u32(image, headerOffset + 0);
+        if (type == PT_PHDR || type == PT_GNU_STACK) {
+            continue;
+        }
         if (type != PT_LOAD) {
             return fail(result, "ELF contains an unsupported program-header type");
         }
@@ -189,9 +194,9 @@ bool validate_native_elf(const uint8_t* image,
         if (physicalAddress != virtualAddress) {
             return fail(result, "PT_LOAD physical address differs from fixed virtual address");
         }
-        if ((virtualAddress & (guidexos::native_elf::PAGE_SIZE - 1U)) != 0 ||
-            (fileOffset & (guidexos::native_elf::PAGE_SIZE - 1U)) != 0) {
-            return fail(result, "PT_LOAD is not page aligned for the bootstrap mapper");
+        const uint64_t pageMask = guidexos::native_elf::PAGE_SIZE - 1ULL;
+        if ((fileOffset & pageMask) != (virtualAddress & pageMask)) {
+            return fail(result, "PT_LOAD file and virtual offsets are not page congruent");
         }
         if (alignment > 1) {
             if (!is_power_of_two(alignment) ||
