@@ -409,8 +409,9 @@ remaining work precisely bounded at real guest App Model/QEMU UI exercise.
 3. Standalone: `D:\dev\guideXOS_Developer_Studio`, branch
    `phase28m-integrated-debugger-ui`, starting HEAD
    `b91159eb190f18da506ddbcd265be1d50a2bacdb`, ending commit `f50ce42`.
-4. Server upstream was `origin/v0.5_DEVELOPER_STUDIO`; no remote operation or
-   push occurred. Tracked files are clean after the commits; preserved
+4. Server upstream was `origin/v0.5_DEVELOPER_STUDIO`; final divergence is
+   `2 ahead / 0 behind` (the two local continuation commits), and no remote
+   operation or push occurred. Tracked files are clean after the commits; preserved
    untracked `ESP/` and host-test staging output are documented above.
 5. Standalone `main` remains
    `33c37e56df6dd70e0963b2caca824e100f5e3d7e`; it was not merged, rewritten,
