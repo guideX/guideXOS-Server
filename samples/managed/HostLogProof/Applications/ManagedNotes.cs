@@ -10,6 +10,7 @@ namespace HostLogProof.Applications;
 /// </summary>
 public sealed class ManagedNotes : GuideXosApplication
 {
+#if !HOSTLOGPROOF_C115_MANAGED_FILE_PICKER
     private static readonly byte[] s_path = "/system/apps/NOTES.TXT"u8.ToArray();
     private static readonly byte[] s_initial = "Hello from Managed Notes"u8.ToArray();
     private static byte[] s_note = s_initial;
@@ -430,4 +431,324 @@ public sealed class ManagedNotes : GuideXosApplication
             _ => "File I/O failure"u8.ToArray(),
         };
     }
+#else
+    private readonly GuideXosFilePicker _picker = new();
+    private readonly byte[] _initial = "Hello from Managed Notes"u8.ToArray();
+    private byte[] _note = "Hello from Managed Notes"u8.ToArray();
+    private byte[] _status = "Ready"u8.ToArray();
+    private string _currentPath = "/system/apps/NOTES.TXT";
+    private ulong _window;
+    private uint _launchCount;
+    private uint _saveInvocation;
+    [ThreadStatic]
+    private static uint s_threadLaunchCount;
+
+    public override GuideXosResult Launch(GuideXosHost host)
+    {
+        if (host.IsCapabilityProbe) return RunCapabilityProbe(host);
+        uint launchCount = ++_launchCount;
+        uint threadLaunchCount = ++s_threadLaunchCount;
+        if (threadLaunchCount != launchCount)
+        {
+            host.TryLog("C115-NOTES threadStatic=FAIL"u8);
+            return GuideXosResult.InvalidArgument;
+        }
+        _picker.Reset();
+        _currentPath = "/system/apps/NOTES.TXT";
+        _saveInvocation = 0u;
+        GuideXosFileResult loadResult = GuideXosFile.ReadAllTextUtf8(
+            host, Encoding.UTF8.GetBytes(_currentPath), out byte[] loaded);
+        if (loadResult == GuideXosFileResult.Success)
+        {
+            _note = loaded;
+            _status = "Loaded from VFS"u8.ToArray();
+        }
+        else if (loadResult == GuideXosFileResult.NotFound)
+        {
+            _note = _initial.AsSpan().ToArray();
+            _status = "New note"u8.ToArray();
+        }
+        else
+        {
+            _note = Array.Empty<byte>();
+            _status = StatusText(loadResult);
+        }
+        GuideXosResult result = host.TryCreateSurface(
+            "Managed Notes"u8, 520, 300, out GuideXosSurface surface);
+        if (result != GuideXosResult.Success || surface == null) return result;
+        _window = surface.Handle;
+        if (!RenderMain(host, surface, launchCount)) return GuideXosResult.InvalidArgument;
+        if (host.TryLog("C115-NOTES threadStatic=PASS"u8) != GuideXosResult.Success)
+        {
+            return GuideXosResult.InvalidArgument;
+        }
+        if (IsContext(host, "c115-notes-nomatch"u8))
+        {
+            GuideXosFilePickerResult pickerResult = _picker.OpenFile(
+                host, surface, GuideXosFilePickerOptions.Open(
+                    "/system/apps", "Open document", ".ZZZ"));
+            host.TryLog(pickerResult.Status == GuideXosFilePickerStatus.NoMatchingFiles
+                ? "C115-NOTES no-match=PASS"u8
+                : "C115-NOTES no-match=FAIL"u8);
+            return pickerResult.Status == GuideXosFilePickerStatus.NoMatchingFiles
+                ? GuideXosResult.Success : GuideXosResult.InvalidArgument;
+        }
+        if (IsContext(host, "c115-notes-overwrite"u8))
+        {
+            return BeginSave(host, surface, "NOTES.TXT") ==
+                GuideXosFilePickerStatus.Pending
+                ? GuideXosResult.Success : GuideXosResult.InvalidArgument;
+        }
+        if (IsContext(host, "c115-notes-negative"u8))
+        {
+            return RunNegativeProbe(host);
+        }
+        return GuideXosResult.Success;
+    }
+
+    public override GuideXosResult HandleAction(GuideXosHost host, uint actionId)
+    {
+        if (host.TryGetSurface(_window, out GuideXosSurface surface) !=
+                GuideXosResult.Success || surface == null)
+        {
+            return GuideXosResult.SurfaceCreationFailed;
+        }
+        if (_picker.IsActive)
+        {
+            return HandlePickerAction(host, surface, actionId);
+        }
+        if (actionId == 20u)
+        {
+            GuideXosFilePickerResult result = _picker.OpenFile(
+                host, surface, GuideXosFilePickerOptions.Open(
+                    "/system/apps", "Open document", ".TXT"));
+            return PickerStartResult(result);
+        }
+        if (actionId == 21u)
+        {
+            host.TryLog("C115-PICKER save=begin"u8);
+            GuideXosFilePickerStatus status = BeginSave(
+                host, surface, _saveInvocation++ == 0u ? "THIRD.TXT" : "NOTES.TXT");
+            host.TryLog(status == GuideXosFilePickerStatus.Pending
+                ? "C115-PICKER save=pending"u8
+                : "C115-PICKER save=unexpected"u8);
+            return status == GuideXosFilePickerStatus.Pending
+                ? GuideXosResult.Success : GuideXosResult.InvalidArgument;
+        }
+        if (actionId == 1u)
+        {
+            byte[] edited = new byte[_note.Length + 9];
+            _note.CopyTo(edited, 0);
+            " [edited]"u8.CopyTo(edited.AsSpan(_note.Length));
+            _note = edited;
+            _status = "Edited in managed code"u8.ToArray();
+            if (!RenderMain(host, surface, _launchCount) ||
+                host.TryLog("C115-NOTES action=edit result=PASS"u8) != GuideXosResult.Success)
+            {
+                return GuideXosResult.InvalidArgument;
+            }
+            return GuideXosResult.Success;
+        }
+        if (actionId == 3u)
+        {
+            GuideXosFileResult reloadResult = GuideXosFile.ReadAllTextUtf8(
+                host, Encoding.UTF8.GetBytes(_currentPath), out byte[] reloaded);
+            if (reloadResult == GuideXosFileResult.Success)
+            {
+                _note = reloaded;
+                _status = "Reloaded from VFS"u8.ToArray();
+            }
+            else
+            {
+                _status = StatusText(reloadResult);
+            }
+            return RenderMain(host, surface, _launchCount)
+                ? GuideXosResult.Success : GuideXosResult.InvalidArgument;
+        }
+        return GuideXosResult.InvalidAction;
+    }
+
+    private GuideXosResult HandlePickerAction(
+        GuideXosHost host, GuideXosSurface surface, uint actionId)
+    {
+        GuideXosFilePickerResult result = _picker.HandleAction(host, surface, actionId);
+        if (result.Status == GuideXosFilePickerStatus.Selected)
+        {
+            if (_picker.Mode == GuideXosFilePickerMode.Open)
+            {
+                GuideXosFileResult readResult = GuideXosFile.ReadAllTextUtf8(
+                    host, Encoding.UTF8.GetBytes(result.Path), out byte[] loaded);
+                if (readResult != GuideXosFileResult.Success)
+                {
+                    _status = StatusText(readResult);
+                    return RenderMain(host, surface, _launchCount)
+                        ? GuideXosResult.Success : GuideXosResult.InvalidArgument;
+                }
+                _currentPath = result.Path;
+                _note = loaded;
+                _status = "Opened from picker"u8.ToArray();
+                host.TryLog(PathLog("C115-NOTES open=PASS path=", result.Path));
+            }
+            else
+            {
+                GuideXosFileResult writeResult = GuideXosFile.WriteAllTextUtf8(
+                    host, Encoding.UTF8.GetBytes(result.Path), _note);
+                if (writeResult != GuideXosFileResult.Success)
+                {
+                    _status = StatusText(writeResult);
+                    host.TryLog("C115-NOTES save=REJECTED"u8);
+                    return RenderMain(host, surface, _launchCount)
+                        ? GuideXosResult.Success : GuideXosResult.InvalidArgument;
+                }
+                _currentPath = result.Path;
+                _status = "Saved through picker"u8.ToArray();
+                host.TryLog(PathLog("C115-NOTES save=PASS path=", result.Path));
+            }
+            _picker.Reset();
+            return RenderMain(host, surface, _launchCount)
+                ? GuideXosResult.Success : GuideXosResult.InvalidArgument;
+        }
+        if (result.Status == GuideXosFilePickerStatus.Cancelled)
+        {
+            _status = _picker.Mode == GuideXosFilePickerMode.Save
+                ? "Save cancelled"u8.ToArray() : "Open cancelled"u8.ToArray();
+            _picker.Reset();
+            host.TryLog(_status.AsSpan().SequenceEqual("Save cancelled"u8)
+                ? "C115-NOTES save=cancelled result=PASS"u8
+                : "C115-NOTES open=cancelled result=PASS"u8);
+            return RenderMain(host, surface, _launchCount)
+                ? GuideXosResult.Success : GuideXosResult.InvalidArgument;
+        }
+        if (result.Status == GuideXosFilePickerStatus.OverwriteDeclined)
+        {
+            host.TryLog("C115-NOTES overwrite=declined result=PASS"u8);
+        }
+        return GuideXosResult.Success;
+    }
+
+    private GuideXosFilePickerStatus BeginSave(
+        GuideXosHost host, GuideXosSurface surface, string name)
+    {
+        GuideXosFilePickerResult result = _picker.SaveFile(
+            host, surface, GuideXosFilePickerOptions.Save(
+                "/system/apps", "Save document", ".TXT", name, true));
+        return result.Status;
+    }
+
+    private static GuideXosResult PickerStartResult(GuideXosFilePickerResult result)
+    {
+        return result.Status == GuideXosFilePickerStatus.Pending ||
+            result.Status == GuideXosFilePickerStatus.NoMatchingFiles
+            ? GuideXosResult.Success : GuideXosResult.InvalidArgument;
+    }
+
+    private bool RenderMain(GuideXosHost host, GuideXosSurface surface, uint launchCount)
+    {
+        return surface.TryFillRect(10, 10, 500, 230, 0x007A5A9Au) == GuideXosResult.Success &&
+            GuideXosText.Line(surface, 24, "Managed Notes | "u8, "Open / Save"u8) &&
+            GuideXosText.CountLine(surface, 48, "Launches: "u8, launchCount) &&
+            GuideXosText.Line(surface, 72, "Path: "u8, Encoding.UTF8.GetBytes(_currentPath)) &&
+            NoteLine(surface, 100) &&
+            GuideXosText.Line(surface, 128, "Status: "u8, _status) &&
+            GuideXosText.Line(surface, 156, "Filter: "u8, ".TXT (case-insensitive)"u8) &&
+            surface.TryAddButton(20, 200, 90, 28, "Open"u8, 20u, out _) == GuideXosResult.Success &&
+            surface.TryAddButton(120, 200, 100, 28, "Save As"u8, 21u, out _) == GuideXosResult.Success &&
+            surface.TryAddButton(230, 200, 90, 28, "Edit"u8, 1u, out _) == GuideXosResult.Success &&
+            surface.TryAddButton(330, 200, 100, 28, "Reload"u8, 3u, out _) == GuideXosResult.Success;
+    }
+
+    private bool NoteLine(GuideXosSurface surface, int y)
+    {
+        Span<byte> line = stackalloc byte[64];
+        int position = 0;
+        if (!GuideXosText.Append(line, ref position, "Content: "u8)) return false;
+        int length = Math.Min(_note.Length, line.Length - position);
+        for (int index = 0; index < length; index++) line[position++] = _note[index];
+        return surface.TrySetText(20, y, line[..position]) == GuideXosResult.Success;
+    }
+
+    private static bool IsContext(GuideXosHost host, ReadOnlySpan<byte> expected)
+    {
+        return host.LaunchContext.Utf8.SequenceEqual(expected);
+    }
+
+    private static byte[] PathLog(string prefix, string path)
+    {
+        byte[] prefixBytes = Encoding.UTF8.GetBytes(prefix);
+        byte[] pathBytes = Encoding.UTF8.GetBytes(path);
+        byte[] result = new byte[Math.Min(127, prefixBytes.Length + pathBytes.Length)];
+        int length = Math.Min(prefixBytes.Length, result.Length);
+        prefixBytes.AsSpan(0, length).CopyTo(result);
+        int remaining = result.Length - length;
+        if (remaining > 0) pathBytes.AsSpan(0, Math.Min(remaining, pathBytes.Length))
+            .CopyTo(result.AsSpan(length));
+        return result;
+    }
+
+    private static GuideXosResult RunCapabilityProbe(GuideXosHost host)
+    {
+        bool passed = true;
+        if (!host.HasCapability(GuideXosCapability.DirectoryList))
+        {
+            passed &= GuideXosFile.TryListDirectory(
+                host, "/system/apps"u8, out _) == GuideXosFileResult.CapabilityUnavailable;
+            host.TryLog(passed
+                ? "C115-CAPABILITY-DOWNGRADE directoryList=omitted picker=CapabilityUnavailable result=PASS"u8
+                : "C115-CAPABILITY-DOWNGRADE directoryList=omitted result=FAIL"u8);
+        }
+        if (!host.HasCapability(GuideXosCapability.FileStat))
+        {
+            passed &= GuideXosFile.TryGetInfo(
+                host, "/system/apps"u8, out _) == GuideXosFileResult.CapabilityUnavailable;
+            host.TryLog(passed
+                ? "C115-CAPABILITY-DOWNGRADE fileStat=omitted picker=CapabilityUnavailable result=PASS"u8
+                : "C115-CAPABILITY-DOWNGRADE fileStat=omitted result=FAIL"u8);
+        }
+        if (!host.HasCapability(GuideXosCapability.FileWrite))
+        {
+            passed &= GuideXosFile.WriteAllTextUtf8(
+                host, "/system/apps/NOTES.TXT"u8, "probe"u8) ==
+                GuideXosFileResult.CapabilityUnavailable;
+            host.TryLog(passed
+                ? "C115-CAPABILITY-DOWNGRADE fileWrite=omitted app=rejects-save result=PASS"u8
+                : "C115-CAPABILITY-DOWNGRADE fileWrite=omitted result=FAIL"u8);
+        }
+        return passed ? GuideXosResult.Success : GuideXosResult.InvalidArgument;
+    }
+
+    private static GuideXosResult RunNegativeProbe(GuideXosHost host)
+    {
+        GuideXosPickerPathStatus invalidDirectory =
+            GuideXosPickerPath.TryNormalizeDirectory(
+                "/system/apps/../", out _);
+        GuideXosPickerPathStatus invalidFilename =
+            GuideXosPickerPath.TryBuildPath(
+                "/system/apps", "../BAD.TXT", out _);
+        GuideXosPickerPathStatus overflow =
+            GuideXosPickerPath.TryBuildPath(
+                "/system/apps/" + new string('A', 80), "A.TXT", out _);
+        bool passed = invalidDirectory == GuideXosPickerPathStatus.InvalidDirectory &&
+            invalidFilename == GuideXosPickerPathStatus.InvalidFilename &&
+            overflow == GuideXosPickerPathStatus.PathTooLong &&
+            !GuideXosFilePicker.IsSelectableOpenType(GuideXosEntryType.Directory) &&
+            !GuideXosFilePicker.IsValidSelectionIndex(-1, 0);
+        host.TryLog(passed
+            ? "C115-NEGATIVE directory=PASS filename=PASS overflow=PASS dirType=PASS index=PASS result=PASS"u8
+            : "C115-NEGATIVE result=FAIL"u8);
+        return passed ? GuideXosResult.Success : GuideXosResult.InvalidArgument;
+    }
+
+    private static byte[] StatusText(GuideXosFileResult result)
+    {
+        return result switch
+        {
+            GuideXosFileResult.InvalidPath => "Invalid path"u8.ToArray(),
+            GuideXosFileResult.NotFound => "Not found"u8.ToArray(),
+            GuideXosFileResult.NotDirectory => "Not a directory"u8.ToArray(),
+            GuideXosFileResult.FileTooLarge => "File too large"u8.ToArray(),
+            GuideXosFileResult.CapabilityUnavailable => "File access unavailable"u8.ToArray(),
+            _ => "File I/O failure"u8.ToArray(),
+        };
+    }
+#endif
 }

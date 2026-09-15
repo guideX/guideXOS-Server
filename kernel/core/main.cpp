@@ -1834,7 +1834,8 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         kernel::serial::puts(" sequence=Workspace -> Notes(first,Append,Save) -> Notepad -> Counter -> Status -> Notes(relaunch,Reload)\n");
 #endif
 
-#if defined(GXOS_NATIVEAOT_C114_MANAGED_DIRECTORY_SERVICES)
+#if defined(GXOS_NATIVEAOT_C114_MANAGED_DIRECTORY_SERVICES) && \
+    !defined(GXOS_NATIVEAOT_C115_MANAGED_FILE_PICKER)
         const gxos::apps::BuiltInAppMetadata* c114Workspace =
             gxos::apps::FindBuiltInAppMetadataByDisplayName("Managed Workspace");
         const gxos::apps::BuiltInAppMetadata* c114Status =
@@ -1938,6 +1939,148 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         kernel::serial::puts("[C114-RESULT] outcome=");
         kernel::serial::puts(outcome ? "PASS" : "FAIL");
         kernel::serial::puts(" list=PASS stat=PASS truncation=PASS downgrade=PASS abi=PASS\n");
+#endif
+
+#if defined(GXOS_NATIVEAOT_C115_MANAGED_FILE_PICKER)
+        const gxos::apps::BuiltInAppMetadata* c115Workspace =
+            gxos::apps::FindBuiltInAppMetadataByDisplayName("Managed Workspace");
+        const gxos::apps::BuiltInAppMetadata* c115Status =
+            gxos::apps::FindBuiltInAppMetadataByDisplayName("Managed Status");
+        const gxos::apps::BuiltInAppMetadata* c115Counter =
+            gxos::apps::FindBuiltInAppMetadataByDisplayName("Managed Counter");
+        const gxos::apps::BuiltInAppMetadata* c115Notes =
+            gxos::apps::FindBuiltInAppMetadataByDisplayName("Managed Notes");
+        const bool c115CatalogValid = gxos::apps::ManagedNativeAotCatalogIsValid() &&
+            c115Workspace && c115Status && c115Counter && c115Notes;
+        kernel::serial::puts("[C115-APPMODEL] catalogValid=");
+        kernel::serial::puts(c115CatalogValid ? "true result=PASS\n" : "false result=FAIL\n");
+
+        auto c115ClickWidget = [](uint32_t fromEnd) {
+            kernel::app::KernelWindow* window =
+                kernel::compositor::KernelCompositor::getFocusedWindow();
+            if (!window || window->widgetCount <= fromEnd) return false;
+            kernel::app::Widget& widget = window->widgets[window->widgetCount - 1u - fromEnd];
+            if (widget.type != kernel::app::WidgetType::Button || !widget.visible || !widget.enabled) {
+                return false;
+            }
+            const int32_t mouseX = window->x + widget.x + widget.w / 2;
+            const int32_t mouseY = window->y + kernel::compositor::TITLEBAR_HEIGHT +
+                widget.y + widget.h / 2;
+            kernel::compositor::KernelCompositor::handleMouseDown(mouseX, mouseY, 1u);
+            kernel::compositor::KernelCompositor::handleMouseUp(mouseX, mouseY, 1u);
+            return true;
+        };
+        auto c115Launch = [&](const char* applicationId, const char* context) {
+            return c115CatalogValid && kernel::desktop::launch_app_with_context(
+                applicationId, context);
+        };
+        auto c115Close = []() {
+            kernel::app::KernelWindow* window =
+                kernel::compositor::KernelCompositor::getFocusedWindow();
+            return window && kernel::compositor::KernelCompositor::requestCloseWindow(window->id);
+        };
+        auto c115Verify = [](const char* path, const char* expected,
+                             uint32_t expectedSize, const char* marker) {
+            kernel::vfs::FileInfo info{};
+            uint8_t bytes[128] = {};
+            const kernel::vfs::Status status = kernel::vfs::stat(path, &info);
+            const int32_t read = status == kernel::vfs::VFS_OK
+                ? kernel::vfs::read_file(path, bytes, sizeof(bytes)) : -1;
+            bool pass = status == kernel::vfs::VFS_OK &&
+                info.type == kernel::vfs::FILE_TYPE_REGULAR &&
+                info.size == expectedSize && read == static_cast<int32_t>(expectedSize);
+            for (uint32_t i = 0u; pass && i < expectedSize; ++i) {
+                pass = bytes[i] == static_cast<uint8_t>(expected[i]);
+            }
+            kernel::serial::puts("[C115-VFS-VERIFY] stage=");
+            kernel::serial::puts(marker);
+            kernel::serial::puts(" path=");
+            kernel::serial::puts(path);
+            kernel::serial::puts(" size=");
+            kernel::serial::put_hex32(static_cast<uint32_t>(info.size));
+            kernel::serial::puts(" result=");
+            kernel::serial::puts(pass ? "PASS\n" : "FAIL\n");
+            return pass;
+        };
+
+        const bool workspace = c115Launch(c115Workspace->appId, "c115-workspace") && c115Close();
+        const bool notesLaunch = c115Launch(c115Notes->appId, "c115-notes");
+        const bool openPicker = notesLaunch && c115ClickWidget(3u);
+        const bool firstOpen = openPicker && c115ClickWidget(2u);
+        const bool firstOpened = firstOpen && c115Verify(
+            "/system/apps/NOTES.TXT", "Hello from Managed Notes", 24u, "open-notes");
+        const bool openSecondPicker = firstOpened && c115ClickWidget(3u);
+        const bool selectSecond = openSecondPicker && c115ClickWidget(1u);
+        const bool secondOpen = selectSecond && c115ClickWidget(2u);
+        const bool secondOpened = secondOpen && c115Verify(
+            "/system/apps/SECOND.TXT", "Second managed document", 23u, "open-second");
+        const bool editSecond = secondOpened && c115ClickWidget(1u);
+        const bool saveAsThird = editSecond && c115ClickWidget(2u);
+        const bool saveThird = saveAsThird && c115ClickWidget(1u);
+        const bool thirdSaved = saveThird && c115Verify(
+            "/system/apps/THIRD.TXT", "Second managed document [edited]", 32u, "save-third");
+        const bool reopenThirdPicker = thirdSaved && c115ClickWidget(3u);
+        const bool selectSecondForThird = reopenThirdPicker && c115ClickWidget(1u);
+        const bool selectThird = selectSecondForThird && c115ClickWidget(1u);
+        const bool thirdOpen = selectThird && c115ClickWidget(2u);
+        const bool thirdReopened = thirdOpen && c115Verify(
+            "/system/apps/THIRD.TXT", "Second managed document [edited]", 32u, "reopen-third");
+        const bool editThird = thirdReopened && c115ClickWidget(1u);
+        const bool saveAsExisting = editThird && c115ClickWidget(2u);
+        const bool existingSaveRequest = saveAsExisting && c115ClickWidget(1u);
+        const bool overwriteDecline = existingSaveRequest && c115ClickWidget(0u);
+        const bool preserved = overwriteDecline && c115Verify(
+            "/system/apps/NOTES.TXT", "Hello from Managed Notes", 24u, "overwrite-decline");
+        const bool existingSaveRetry = preserved && c115ClickWidget(1u);
+        const bool overwriteConfirm = existingSaveRetry && c115ClickWidget(1u);
+        const bool overwritten = overwriteConfirm && c115Verify(
+            "/system/apps/NOTES.TXT", "Second managed document [edited] [edited]", 41u, "overwrite-confirm");
+        const bool openCancelPicker = overwritten && c115ClickWidget(3u);
+        const bool openCancel = openCancelPicker && c115ClickWidget(0u);
+        const bool saveCancelPicker = openCancel && c115ClickWidget(2u);
+        const bool saveCancel = saveCancelPicker && c115ClickWidget(0u);
+        const bool noMatchLaunch = saveCancel && c115Launch(c115Notes->appId, "c115-notes-nomatch");
+        const bool noMatchCancel = noMatchLaunch && c115ClickWidget(0u);
+        const bool negativeLaunch = noMatchCancel && c115Launch(c115Notes->appId, "c115-notes-negative");
+        const bool negativeClose = negativeLaunch && c115Close();
+        const bool nativeNotepad = kernel::desktop::launch_app("Notepad");
+        kernel::serial::puts("[C115-NATIVE-REGRESSION] app=Notepad result=");
+        kernel::serial::puts(nativeNotepad ? "PASS\n" : "FAIL\n");
+        const bool counter = c115Launch(c115Counter->appId, "c115-counter") &&
+            c115ClickWidget(0u) && c115Close();
+        kernel::serial::puts("[C115-REGRESSION] app=Counter result=");
+        kernel::serial::puts(counter ? "PASS\n" : "FAIL\n");
+        const bool status = c115Launch(c115Status->appId, "c115-status") && c115Close();
+        kernel::serial::puts("[C115-REGRESSION] app=Status result=");
+        kernel::serial::puts(status ? "PASS\n" : "FAIL\n");
+        const bool downgradeDirectory = kernel::nativeaot::probeDirectoryCapabilityDowngrade(nullptr) ==
+            kernel::nativeaot::LaunchStatus::Success;
+        const bool downgradeStat = kernel::nativeaot::probeFileStatCapabilityDowngrade(nullptr) ==
+            kernel::nativeaot::LaunchStatus::Success;
+        const bool downgradeWrite = kernel::nativeaot::probeFileCapabilityDowngrade(nullptr) ==
+            kernel::nativeaot::LaunchStatus::Success;
+        const bool downgradeClose = c115Close();
+        const bool c115AbiMismatch = kernel::nativeaot::probeHostAbiMismatch(nullptr) ==
+            kernel::nativeaot::LaunchStatus::Success;
+        const bool directoryNegative = kernel::nativeaot::probeDirectoryServiceNegativeTests(nullptr) ==
+            kernel::nativeaot::LaunchStatus::Success;
+        const bool capacity = kernel::nativeaot::probeDirectoryCapacityTests(nullptr) ==
+            kernel::nativeaot::LaunchStatus::Success;
+        const bool outcome = c115CatalogValid && workspace && notesLaunch && openPicker &&
+            firstOpen && firstOpened && openSecondPicker && selectSecond && secondOpen &&
+            secondOpened && editSecond && saveAsThird && saveThird && thirdSaved &&
+            reopenThirdPicker && selectSecondForThird && selectThird && thirdOpen &&
+            thirdReopened && editThird && saveAsExisting && existingSaveRequest &&
+            overwriteDecline && preserved && existingSaveRetry && overwriteConfirm &&
+            overwritten && openCancelPicker && openCancel && saveCancelPicker && saveCancel &&
+            noMatchLaunch && noMatchCancel && negativeLaunch && negativeClose && nativeNotepad &&
+            counter && status && downgradeDirectory && downgradeStat && downgradeWrite &&
+            downgradeClose && c115AbiMismatch && directoryNegative && capacity;
+        kernel::serial::puts("[C115-MIXED] sequence=Workspace -> Notes(Open,Second,SaveAs,Reopen,Overwrite,Cancel,NoMatch) -> Notepad -> Counter -> Status result=");
+        kernel::serial::puts(outcome ? "PASS\n" : "FAIL\n");
+        kernel::serial::puts("[C115-RESULT] outcome=");
+        kernel::serial::puts(outcome ? "PASS" : "FAIL");
+        kernel::serial::puts(" picker=managed state-machine filter=TXT overwrite=explicit lifecycle=resident\n");
 #endif
 
 #if defined(GXOS_C107_PRODUCTION_LAUNCH) || defined(GXOS_C108_PRODUCTION_LAUNCH)

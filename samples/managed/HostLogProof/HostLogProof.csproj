@@ -72,7 +72,12 @@
     <EntryPointSymbol>GuideXosNativeAotApplicationEntry</EntryPointSymbol>
   </PropertyGroup>
 
-  <PropertyGroup Condition="'$(HostLogProofMode)' == 'Production' or '$(HostLogProofMode)' == 'C104AppA' or '$(HostLogProofMode)' == 'C104AppB' or '$(HostLogProofMode)' == 'C107Composite' or '$(HostLogProofMode)' == 'C108ThreadStaticLifecycle' or '$(HostLogProofMode)' == 'ProductionComposite' or '$(HostLogProofMode)' == 'C112Composite' or '$(HostLogProofMode)' == 'C113Composite' or '$(HostLogProofMode)' == 'C114Composite'">
+  <PropertyGroup Condition="'$(HostLogProofMode)' == 'C115Composite'">
+    <DefineConstants>$(DefineConstants);HOSTLOGPROOF_PRODUCTION;HOSTLOGPROOF_PRODUCTION_COMPOSITE;HOSTLOGPROOF_C112_REUSABLE_APPLICATION;HOSTLOGPROOF_C113_MANAGED_FILE_SERVICES;HOSTLOGPROOF_C114_MANAGED_DIRECTORY_SERVICES;HOSTLOGPROOF_C115_MANAGED_FILE_PICKER</DefineConstants>
+    <EntryPointSymbol>GuideXosNativeAotApplicationEntry</EntryPointSymbol>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(HostLogProofMode)' == 'Production' or '$(HostLogProofMode)' == 'C104AppA' or '$(HostLogProofMode)' == 'C104AppB' or '$(HostLogProofMode)' == 'C107Composite' or '$(HostLogProofMode)' == 'C108ThreadStaticLifecycle' or '$(HostLogProofMode)' == 'ProductionComposite' or '$(HostLogProofMode)' == 'C112Composite' or '$(HostLogProofMode)' == 'C113Composite' or '$(HostLogProofMode)' == 'C114Composite' or '$(HostLogProofMode)' == 'C115Composite'">
     <HostLogProofIsProduction>true</HostLogProofIsProduction>
   </PropertyGroup>
 

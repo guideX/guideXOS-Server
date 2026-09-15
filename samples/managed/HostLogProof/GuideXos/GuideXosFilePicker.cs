@@ -1,0 +1,845 @@
+using System;
+using System.Text;
+
+namespace HostLogProof;
+
+public enum GuideXosFilePickerMode
+{
+    Open = 1,
+    Save = 2,
+}
+
+public enum GuideXosFilePickerStatus
+{
+    Pending = 0,
+    Selected = 1,
+    Cancelled = 2,
+    InvalidRequest = 3,
+    CapabilityUnavailable = 4,
+    NoMatchingFiles = 5,
+    InvalidSelectedPath = 6,
+    DirectorySelectionRejected = 7,
+    OverwriteConfirmationRequired = 8,
+    OverwriteDeclined = 9,
+    MetadataFailure = 10,
+    IoFailure = 11,
+}
+
+/// <summary>
+/// Small, platform-neutral Open/Save intent. The current Server UI uses the
+/// suggested name as its bounded Save filename field; a later control can
+/// replace that input without changing the picker contract.
+/// </summary>
+public sealed class GuideXosFilePickerOptions
+{
+    public GuideXosFilePickerOptions(
+        GuideXosFilePickerMode mode,
+        string initialDirectory,
+        string title,
+        string extensionFilter,
+        string suggestedFileName,
+        bool requireExistingFile,
+        bool confirmOverwrite)
+    {
+        Mode = mode;
+        InitialDirectory = initialDirectory;
+        Title = title;
+        ExtensionFilter = extensionFilter;
+        SuggestedFileName = suggestedFileName;
+        RequireExistingFile = requireExistingFile;
+        ConfirmOverwrite = confirmOverwrite;
+    }
+
+    public GuideXosFilePickerMode Mode { get; }
+    public string InitialDirectory { get; }
+    public string Title { get; }
+    public string ExtensionFilter { get; }
+    public string SuggestedFileName { get; }
+    public bool RequireExistingFile { get; }
+    public bool ConfirmOverwrite { get; }
+
+    public static GuideXosFilePickerOptions Open(
+        string initialDirectory,
+        string title,
+        string extensionFilter)
+    {
+        return new GuideXosFilePickerOptions(
+            GuideXosFilePickerMode.Open, initialDirectory, title,
+            extensionFilter, string.Empty, true, true);
+    }
+
+    public static GuideXosFilePickerOptions Save(
+        string initialDirectory,
+        string title,
+        string extensionFilter,
+        string suggestedFileName,
+        bool confirmOverwrite)
+    {
+        return new GuideXosFilePickerOptions(
+            GuideXosFilePickerMode.Save, initialDirectory, title,
+            extensionFilter, suggestedFileName, false, confirmOverwrite);
+    }
+}
+
+public sealed class GuideXosFilePickerCandidate
+{
+    internal GuideXosFilePickerCandidate(
+        string name, GuideXosEntryType type, ulong size)
+    {
+        Name = name;
+        Type = type;
+        Size = size;
+    }
+
+    public string Name { get; }
+    public GuideXosEntryType Type { get; }
+    public ulong Size { get; }
+}
+
+public sealed class GuideXosFilePickerResult
+{
+    internal GuideXosFilePickerResult(
+        GuideXosFilePickerStatus status,
+        string path,
+        GuideXosFileInfo info,
+        GuideXosFileResult fileResult,
+        string message)
+    {
+        Status = status;
+        Path = path;
+        Info = info;
+        FileResult = fileResult;
+        Message = message;
+    }
+
+    public GuideXosFilePickerStatus Status { get; }
+    public string Path { get; }
+    public GuideXosFileInfo Info { get; }
+    public GuideXosFileResult FileResult { get; }
+    public string Message { get; }
+
+    internal static GuideXosFilePickerResult Pending(string message)
+    {
+        return new GuideXosFilePickerResult(
+            GuideXosFilePickerStatus.Pending, null, null,
+            GuideXosFileResult.Success, message);
+    }
+
+    internal static GuideXosFilePickerResult Failure(
+        GuideXosFilePickerStatus status,
+        GuideXosFileResult fileResult,
+        string message)
+    {
+        return new GuideXosFilePickerResult(status, null, null, fileResult, message);
+    }
+
+    internal static GuideXosFilePickerResult Selected(
+        string path, GuideXosFileInfo info, string message)
+    {
+        return new GuideXosFilePickerResult(
+            GuideXosFilePickerStatus.Selected, path, info,
+            GuideXosFileResult.Success, message);
+    }
+}
+
+public enum GuideXosPickerPathStatus
+{
+    Success = 0,
+    InvalidDirectory = 1,
+    InvalidFilename = 2,
+    PathTooLong = 3,
+    InvalidExtension = 4,
+}
+
+/// <summary>
+/// Shared bounded path policy for application-level pickers. It mirrors the
+/// C113/C114 printable absolute /system/apps VFS contract without exposing
+/// VFS implementation details to applications.
+/// </summary>
+public static class GuideXosPickerPath
+{
+    public static GuideXosPickerPathStatus TryNormalizeDirectory(
+        string directory, out string normalized)
+    {
+        normalized = null;
+        if (string.IsNullOrEmpty(directory))
+        {
+            return GuideXosPickerPathStatus.InvalidDirectory;
+        }
+        if (!IsPrintablePath(directory) || directory.IndexOf('\\') >= 0 ||
+            directory.IndexOf("//", StringComparison.Ordinal) >= 0 ||
+            ContainsTraversal(directory))
+        {
+            return GuideXosPickerPathStatus.InvalidDirectory;
+        }
+        if (!directory.StartsWith("/system/apps", StringComparison.Ordinal) ||
+            (directory.Length > 12 && directory[12] != '/'))
+        {
+            return GuideXosPickerPathStatus.InvalidDirectory;
+        }
+        string candidate = directory;
+        while (candidate.Length > "/system/apps".Length &&
+               candidate.EndsWith("/", StringComparison.Ordinal))
+        {
+            candidate = candidate.Substring(0, candidate.Length - 1);
+        }
+        if (Encoding.UTF8.GetByteCount(candidate) > GxAbi.FilePathMaxBytes)
+        {
+            return GuideXosPickerPathStatus.PathTooLong;
+        }
+        normalized = candidate;
+        return GuideXosPickerPathStatus.Success;
+    }
+
+    public static GuideXosPickerPathStatus TryBuildPath(
+        string directory, string fileName, out string path)
+    {
+        path = null;
+        GuideXosPickerPathStatus directoryStatus =
+            TryNormalizeDirectory(directory, out string normalizedDirectory);
+        if (directoryStatus != GuideXosPickerPathStatus.Success)
+        {
+            return directoryStatus;
+        }
+        if (string.IsNullOrEmpty(fileName) || fileName == "." ||
+            fileName == ".." || fileName.IndexOf("..", StringComparison.Ordinal) >= 0 ||
+            fileName.IndexOf('/') >= 0 || fileName.IndexOf('\\') >= 0 ||
+            !IsPrintableFilename(fileName))
+        {
+            return GuideXosPickerPathStatus.InvalidFilename;
+        }
+        string combined = normalizedDirectory + "/" + fileName;
+        if (Encoding.UTF8.GetByteCount(combined) > GxAbi.FilePathMaxBytes)
+        {
+            return GuideXosPickerPathStatus.PathTooLong;
+        }
+        path = combined;
+        return GuideXosPickerPathStatus.Success;
+    }
+
+    public static bool IsExtensionFilterValid(string extension)
+    {
+        if (string.IsNullOrEmpty(extension)) return true;
+        if (extension.Length < 2 || extension.Length > 9 || extension[0] != '.')
+        {
+            return false;
+        }
+        for (int index = 1; index < extension.Length; index++)
+        {
+            char value = extension[index];
+            if (!IsAsciiLetter(value) && !IsAsciiDigit(value)) return false;
+        }
+        return true;
+    }
+
+    public static bool MatchesExtension(string name, string extension)
+    {
+        return string.IsNullOrEmpty(extension) ||
+            (name.Length > extension.Length &&
+             name.EndsWith(extension, StringComparison.OrdinalIgnoreCase));
+    }
+
+    public static GuideXosPickerPathStatus TryApplySaveExtension(
+        string fileName, string extension, out string selectedName)
+    {
+        selectedName = null;
+        if (!IsExtensionFilterValid(extension))
+        {
+            return GuideXosPickerPathStatus.InvalidExtension;
+        }
+        if (string.IsNullOrEmpty(fileName))
+        {
+            return GuideXosPickerPathStatus.InvalidFilename;
+        }
+        if (string.IsNullOrEmpty(extension))
+        {
+            selectedName = fileName;
+            return GuideXosPickerPathStatus.Success;
+        }
+        int lastDot = fileName.LastIndexOf('.');
+        if (lastDot >= 0 &&
+            !fileName.EndsWith(extension, StringComparison.OrdinalIgnoreCase))
+        {
+            return GuideXosPickerPathStatus.InvalidExtension;
+        }
+        selectedName = lastDot < 0 ? fileName + extension : fileName;
+        return GuideXosPickerPathStatus.Success;
+    }
+
+    private static bool IsPrintablePath(string value)
+    {
+        for (int index = 0; index < value.Length; index++)
+        {
+            if (value[index] < 0x20 || value[index] > 0x7E) return false;
+        }
+        return true;
+    }
+
+    private static bool IsPrintableFilename(string value)
+    {
+        return IsPrintablePath(value);
+    }
+
+    private static bool ContainsTraversal(string value)
+    {
+        return value == ".." || value.StartsWith("../", StringComparison.Ordinal) ||
+            value.EndsWith("/..", StringComparison.Ordinal) ||
+            value.IndexOf("/../", StringComparison.Ordinal) >= 0;
+    }
+
+    private static bool IsAsciiLetter(char value)
+    {
+        return (value >= 'A' && value <= 'Z') || (value >= 'a' && value <= 'z');
+    }
+
+    private static bool IsAsciiDigit(char value)
+    {
+        return value >= '0' && value <= '9';
+    }
+}
+
+/// <summary>
+/// Reusable application-owned picker state machine. OpenFile and SaveFile
+/// enumerate immediately and return Pending; compositor actions complete the
+/// operation with a selected path or an explicit status. The picker never
+/// reads or writes document contents.
+/// </summary>
+public sealed class GuideXosFilePicker
+{
+    public const uint OpenAction = 100u;
+    public const uint NextAction = 101u;
+    public const uint SaveAction = 102u;
+    public const uint CancelAction = 103u;
+    public const uint ConfirmOverwriteAction = 104u;
+    public const uint DeclineOverwriteAction = 105u;
+
+    private GuideXosFilePickerOptions _options;
+    private GuideXosDirectorySnapshot _listing;
+    private GuideXosDirectorySnapshot _cachedListing;
+    private string _cachedDirectory;
+    private GuideXosFilePickerCandidate[] _candidates = Array.Empty<GuideXosFilePickerCandidate>();
+    private string _directory;
+    private string _proposedFileName;
+    private int _selectedIndex;
+    private bool _overwritePending;
+    private bool _active;
+    private GuideXosFilePickerResult _result =
+        GuideXosFilePickerResult.Failure(
+            GuideXosFilePickerStatus.Cancelled, GuideXosFileResult.Success,
+            "Picker not started");
+
+    public bool IsActive => _active;
+    public GuideXosFilePickerMode Mode => _options?.Mode ?? 0;
+    public string InitialDirectory => _directory;
+    public string ProposedFileName => _proposedFileName;
+    public int SelectedIndex => _selectedIndex;
+    public bool IsOverwritePending => _overwritePending;
+    public GuideXosFilePickerCandidate[] Candidates => _candidates;
+    public GuideXosFilePickerResult CurrentResult => _result;
+
+    public static bool IsSelectableOpenType(GuideXosEntryType type)
+    {
+        return type == GuideXosEntryType.Regular;
+    }
+
+    public static bool IsValidSelectionIndex(int index, int count)
+    {
+        return index >= 0 && index < count;
+    }
+
+    public GuideXosFilePickerResult OpenFile(
+        GuideXosHost host, GuideXosSurface surface,
+        GuideXosFilePickerOptions options)
+    {
+        return Begin(host, surface, options, GuideXosFilePickerMode.Open);
+    }
+
+    public GuideXosFilePickerResult SaveFile(
+        GuideXosHost host, GuideXosSurface surface,
+        GuideXosFilePickerOptions options)
+    {
+        return Begin(host, surface, options, GuideXosFilePickerMode.Save);
+    }
+
+    public GuideXosFilePickerResult HandleAction(
+        GuideXosHost host, GuideXosSurface surface, uint actionId)
+    {
+        if (!_active || _options == null)
+        {
+            _result = GuideXosFilePickerResult.Failure(
+                GuideXosFilePickerStatus.InvalidRequest,
+                GuideXosFileResult.InvalidArgument, "Picker is not active");
+            return _result;
+        }
+        if (actionId == CancelAction)
+        {
+            _active = false;
+            _overwritePending = false;
+            _result = GuideXosFilePickerResult.Failure(
+                GuideXosFilePickerStatus.Cancelled,
+                GuideXosFileResult.Success, "Cancelled");
+            return _result;
+        }
+        if (actionId == NextAction && _options.Mode == GuideXosFilePickerMode.Open)
+        {
+            if (_candidates.Length == 0)
+            {
+                return SetPickerStatus(
+                    GuideXosFilePickerStatus.NoMatchingFiles,
+                    GuideXosFileResult.Success, "No matching files", host, surface);
+            }
+            _selectedIndex = (_selectedIndex + 1) % _candidates.Length;
+            _result = GuideXosFilePickerResult.Pending("Selection changed");
+            Render(host, surface);
+            return _result;
+        }
+        if (actionId == OpenAction && _options.Mode == GuideXosFilePickerMode.Open)
+        {
+            return CompleteOpen(host, surface);
+        }
+        if (actionId == SaveAction && _options.Mode == GuideXosFilePickerMode.Save)
+        {
+            return BeginOrValidateSave(host, surface);
+        }
+        if (actionId == ConfirmOverwriteAction &&
+            _options.Mode == GuideXosFilePickerMode.Save && _overwritePending)
+        {
+            return ConfirmOverwrite(host, surface);
+        }
+        if (actionId == DeclineOverwriteAction &&
+            _options.Mode == GuideXosFilePickerMode.Save && _overwritePending)
+        {
+            _overwritePending = false;
+            return SetPickerStatus(
+                GuideXosFilePickerStatus.OverwriteDeclined,
+                GuideXosFileResult.Success, "Overwrite declined", host, surface);
+        }
+        return SetPickerStatus(
+            GuideXosFilePickerStatus.InvalidSelectedPath,
+            GuideXosFileResult.InvalidArgument, "Invalid picker action", host, surface);
+    }
+
+    public void Reset()
+    {
+        _options = null;
+        _listing = null;
+        _candidates = Array.Empty<GuideXosFilePickerCandidate>();
+        _directory = null;
+        _proposedFileName = null;
+        _selectedIndex = -1;
+        _overwritePending = false;
+        _active = false;
+        _result = GuideXosFilePickerResult.Failure(
+            GuideXosFilePickerStatus.Cancelled, GuideXosFileResult.Success,
+            "Picker reset");
+    }
+
+    private GuideXosFilePickerResult Begin(
+        GuideXosHost host, GuideXosSurface surface,
+        GuideXosFilePickerOptions options, GuideXosFilePickerMode mode)
+    {
+        Reset();
+        _options = options;
+        _selectedIndex = -1;
+        if (host == null || surface == null || options == null || options.Mode != mode ||
+            string.IsNullOrEmpty(options.Title) || options.Title.Length > 48 ||
+            !GuideXosPickerPath.IsExtensionFilterValid(options.ExtensionFilter))
+        {
+            return SetPickerStatus(
+                GuideXosFilePickerStatus.InvalidRequest,
+                GuideXosFileResult.InvalidArgument, "Invalid picker request", host, surface);
+        }
+        GuideXosPickerPathStatus directoryStatus =
+            GuideXosPickerPath.TryNormalizeDirectory(options.InitialDirectory, out _directory);
+        if (directoryStatus != GuideXosPickerPathStatus.Success)
+        {
+            return SetPickerStatus(
+                GuideXosFilePickerStatus.InvalidRequest,
+                GuideXosFileResult.InvalidPath, PathStatusText(directoryStatus), host, surface);
+        }
+        if (!host.HasCapability(GuideXosCapability.DirectoryList) ||
+            !host.HasCapability(GuideXosCapability.FileStat))
+        {
+            return SetPickerStatus(
+                GuideXosFilePickerStatus.CapabilityUnavailable,
+                GuideXosFileResult.CapabilityUnavailable,
+                "Picker capability unavailable", host, surface);
+        }
+        if (mode == GuideXosFilePickerMode.Save)
+        {
+            if (string.IsNullOrEmpty(options.SuggestedFileName))
+            {
+                return SetPickerStatus(
+                    GuideXosFilePickerStatus.InvalidRequest,
+                    GuideXosFileResult.InvalidArgument,
+                    "Save filename is required", host, surface);
+            }
+            GuideXosPickerPathStatus nameStatus =
+                GuideXosPickerPath.TryApplySaveExtension(
+                    options.SuggestedFileName, options.ExtensionFilter,
+                    out _proposedFileName);
+            if (nameStatus != GuideXosPickerPathStatus.Success)
+            {
+                return SetPickerStatus(
+                    GuideXosFilePickerStatus.InvalidRequest,
+                    GuideXosFileResult.InvalidPath, PathStatusText(nameStatus), host, surface);
+            }
+            host.TryLog("C115-PICKER phase=save-name-ok"u8);
+        }
+        bool useCachedListing =
+            _cachedListing != null &&
+            string.CompareOrdinal(_cachedDirectory, _directory) == 0;
+        GuideXosFileResult listResult = GuideXosFileResult.Success;
+        if (useCachedListing)
+        {
+            _listing = _cachedListing;
+        }
+        else
+        {
+            listResult = GuideXosFile.TryListDirectory(
+                host, Encoding.UTF8.GetBytes(_directory), out _listing);
+            if (listResult == GuideXosFileResult.Success && _listing != null)
+            {
+                _cachedDirectory = _directory;
+                _cachedListing = _listing;
+            }
+        }
+        if (listResult != GuideXosFileResult.Success || _listing == null)
+        {
+            GuideXosFilePickerStatus status = listResult == GuideXosFileResult.CapabilityUnavailable
+                ? GuideXosFilePickerStatus.CapabilityUnavailable
+                : GuideXosFilePickerStatus.InvalidRequest;
+            return SetPickerStatus(status, listResult, "Directory enumeration failed", host, surface);
+        }
+        BuildCandidates();
+        _active = true;
+        _result = _candidates.Length == 0 && mode == GuideXosFilePickerMode.Open
+            ? GuideXosFilePickerResult.Failure(
+                GuideXosFilePickerStatus.NoMatchingFiles,
+                GuideXosFileResult.Success, "No matching files")
+            : GuideXosFilePickerResult.Pending("Picker ready");
+        if (!Render(host, surface))
+        {
+            _result = GuideXosFilePickerResult.Failure(
+                GuideXosFilePickerStatus.IoFailure,
+                GuideXosFileResult.IoFailure, "Picker surface failed");
+        }
+        return _result;
+    }
+
+    private void BuildCandidates()
+    {
+        GuideXosDirectoryEntry[] entries = _listing.Entries;
+        GuideXosFilePickerCandidate[] candidates =
+            new GuideXosFilePickerCandidate[entries.Length];
+        int count = 0;
+        for (int index = 0; index < entries.Length; index++)
+        {
+            GuideXosDirectoryEntry entry = entries[index];
+            if (entry.Type == GuideXosEntryType.Directory ||
+                GuideXosPickerPath.MatchesExtension(entry.Name, _options.ExtensionFilter))
+            {
+                candidates[count++] = new GuideXosFilePickerCandidate(
+                    entry.Name, entry.Type, entry.Size);
+            }
+        }
+        _candidates = new GuideXosFilePickerCandidate[count];
+        for (int index = 0; index < count; index++) _candidates[index] = candidates[index];
+        _selectedIndex = count == 0 ? -1 : 0;
+    }
+
+    private GuideXosFilePickerResult CompleteOpen(
+        GuideXosHost host, GuideXosSurface surface)
+    {
+        if (!IsValidSelectionIndex(_selectedIndex, _candidates.Length))
+        {
+            return SetPickerStatus(
+                GuideXosFilePickerStatus.InvalidSelectedPath,
+                GuideXosFileResult.InvalidArgument, "No file selected", host, surface);
+        }
+        GuideXosFilePickerCandidate candidate = _candidates[_selectedIndex];
+        if (candidate == null || !IsSelectableOpenType(candidate.Type))
+        {
+            return SetPickerStatus(
+                GuideXosFilePickerStatus.DirectorySelectionRejected,
+                GuideXosFileResult.NotDirectory, "A directory is not a file", host, surface);
+        }
+        GuideXosPickerPathStatus pathStatus = GuideXosPickerPath.TryBuildPath(
+            _directory, candidate.Name, out string path);
+        if (pathStatus != GuideXosPickerPathStatus.Success)
+        {
+            return SetPickerStatus(
+                GuideXosFilePickerStatus.InvalidSelectedPath,
+                GuideXosFileResult.InvalidPath, PathStatusText(pathStatus), host, surface);
+        }
+        GuideXosFileResult statResult = GuideXosFile.TryGetInfo(
+            host, Encoding.UTF8.GetBytes(path), out GuideXosFileInfo info);
+        if (statResult != GuideXosFileResult.Success || info == null)
+        {
+            return SetPickerStatus(
+                statResult == GuideXosFileResult.CapabilityUnavailable
+                    ? GuideXosFilePickerStatus.CapabilityUnavailable
+                    : GuideXosFilePickerStatus.MetadataFailure,
+                statResult, "Selected file metadata failed", host, surface);
+        }
+        if (info.Type != GuideXosEntryType.Regular)
+        {
+            return SetPickerStatus(
+                GuideXosFilePickerStatus.DirectorySelectionRejected,
+                GuideXosFileResult.NotDirectory, "A directory is not a file", host, surface);
+        }
+        _active = false;
+        _result = GuideXosFilePickerResult.Selected(path, info, "File selected");
+        return _result;
+    }
+
+    private GuideXosFilePickerResult BeginOrValidateSave(
+        GuideXosHost host, GuideXosSurface surface)
+    {
+        GuideXosPickerPathStatus pathStatus = GuideXosPickerPath.TryBuildPath(
+            _directory, _proposedFileName, out string path);
+        if (pathStatus != GuideXosPickerPathStatus.Success)
+        {
+            return SetPickerStatus(
+                GuideXosFilePickerStatus.InvalidSelectedPath,
+                GuideXosFileResult.InvalidPath, PathStatusText(pathStatus), host, surface);
+        }
+        GuideXosFilePickerCandidate existing = FindCandidate(_proposedFileName);
+        if (existing == null)
+        {
+            AddCachedFile(_proposedFileName);
+            _active = false;
+            _result = GuideXosFilePickerResult.Selected(path, null,
+                "New save destination selected");
+            return _result;
+        }
+        GuideXosFileResult statResult = GuideXosFile.TryGetInfo(
+            host, Encoding.UTF8.GetBytes(path), out GuideXosFileInfo info);
+        if (statResult == GuideXosFileResult.CapabilityUnavailable)
+        {
+            return SetPickerStatus(
+                GuideXosFilePickerStatus.CapabilityUnavailable, statResult,
+                "Save metadata unavailable", host, surface);
+        }
+        if (statResult == GuideXosFileResult.Success && info != null)
+        {
+            if (info.Type != GuideXosEntryType.Regular)
+            {
+                return SetPickerStatus(
+                    GuideXosFilePickerStatus.DirectorySelectionRejected,
+                    GuideXosFileResult.NotDirectory, "Destination is a directory", host, surface);
+            }
+            if (!_options.ConfirmOverwrite)
+            {
+                return SetPickerStatus(
+                    GuideXosFilePickerStatus.OverwriteConfirmationRequired,
+                    GuideXosFileResult.Success, "Overwrite confirmation required", host, surface);
+            }
+            _overwritePending = true;
+            _result = GuideXosFilePickerResult.Failure(
+                GuideXosFilePickerStatus.OverwriteConfirmationRequired,
+                GuideXosFileResult.Success, "Confirm overwrite");
+            Render(host, surface);
+            return _result;
+        }
+        if (statResult != GuideXosFileResult.NotFound)
+        {
+            return SetPickerStatus(
+                GuideXosFilePickerStatus.MetadataFailure, statResult,
+                "Save destination metadata failed", host, surface);
+        }
+        AddCachedFile(_proposedFileName);
+        _active = false;
+        _result = GuideXosFilePickerResult.Selected(path, null, "New save destination selected");
+        return _result;
+    }
+
+    private GuideXosFilePickerResult ConfirmOverwrite(
+        GuideXosHost host, GuideXosSurface surface)
+    {
+        _overwritePending = false;
+        GuideXosPickerPathStatus pathStatus = GuideXosPickerPath.TryBuildPath(
+            _directory, _proposedFileName, out string path);
+        if (pathStatus != GuideXosPickerPathStatus.Success)
+        {
+            return SetPickerStatus(
+                GuideXosFilePickerStatus.InvalidSelectedPath,
+                GuideXosFileResult.InvalidPath, PathStatusText(pathStatus), host, surface);
+        }
+        GuideXosFileResult statResult = GuideXosFile.TryGetInfo(
+            host, Encoding.UTF8.GetBytes(path), out GuideXosFileInfo info);
+        if (statResult == GuideXosFileResult.Success && info != null &&
+            info.Type == GuideXosEntryType.Regular)
+        {
+            _active = false;
+            _result = GuideXosFilePickerResult.Selected(path, info, "Overwrite confirmed");
+            return _result;
+        }
+        if (statResult == GuideXosFileResult.NotFound)
+        {
+            _active = false;
+            _result = GuideXosFilePickerResult.Selected(path, null, "Destination is new");
+            return _result;
+        }
+        return SetPickerStatus(
+            statResult == GuideXosFileResult.CapabilityUnavailable
+                ? GuideXosFilePickerStatus.CapabilityUnavailable
+                : GuideXosFilePickerStatus.MetadataFailure,
+            statResult, "Overwrite metadata failed", host, surface);
+    }
+
+    private GuideXosFilePickerCandidate FindCandidate(string name)
+    {
+        for (int index = 0; index < _candidates.Length; index++)
+        {
+            GuideXosFilePickerCandidate candidate = _candidates[index];
+            if (candidate != null &&
+                candidate.Name.Equals(name, StringComparison.OrdinalIgnoreCase))
+            {
+                return candidate;
+            }
+        }
+        return null;
+    }
+
+    private void AddCachedFile(string name)
+    {
+        if (_cachedListing == null || FindCandidate(name) != null) return;
+        GuideXosDirectoryEntry[] entries = _cachedListing.Entries;
+        if (entries.Length >= GxAbi.MaxDirectoryEntries) return;
+        GuideXosDirectoryEntry[] updated =
+            new GuideXosDirectoryEntry[entries.Length + 1];
+        for (int index = 0; index < entries.Length; index++)
+        {
+            updated[index] = entries[index];
+        }
+        updated[entries.Length] = new GuideXosDirectoryEntry(
+            name, GuideXosEntryType.Regular, 0u);
+        for (int outer = 1; outer < updated.Length; outer++)
+        {
+            GuideXosDirectoryEntry value = updated[outer];
+            int inner = outer - 1;
+            while (inner >= 0 &&
+                string.CompareOrdinal(updated[inner].Name, value.Name) > 0)
+            {
+                updated[inner + 1] = updated[inner];
+                inner--;
+            }
+            updated[inner + 1] = value;
+        }
+        _cachedListing = new GuideXosDirectorySnapshot(updated, false);
+        _listing = _cachedListing;
+    }
+
+    private GuideXosFilePickerResult SetPickerStatus(
+        GuideXosFilePickerStatus status, GuideXosFileResult fileResult,
+        string message, GuideXosHost host, GuideXosSurface surface)
+    {
+        _result = GuideXosFilePickerResult.Failure(status, fileResult, message);
+        _active = status != GuideXosFilePickerStatus.Cancelled &&
+            status != GuideXosFilePickerStatus.Selected;
+        if (host != null && surface != null) Render(host, surface);
+        return _result;
+    }
+
+    private bool Render(GuideXosHost host, GuideXosSurface surface)
+    {
+        if (host == null || surface == null) return false;
+        if (surface.TryFillRect(10, 10, 500, 230, 0x005A6A9Au) != GuideXosResult.Success)
+        {
+            return false;
+        }
+        if (!PickerLine(surface, 24, "Managed Notes | "u8,
+                _options?.Title ?? "File picker") ||
+            !PickerLine(surface, 48, "Directory: "u8,
+                _directory ?? "<invalid>") ||
+            !PickerLine(surface, 70, "Filter: "u8,
+                string.IsNullOrEmpty(_options?.ExtensionFilter)
+                    ? "<all files>" : _options.ExtensionFilter)) return false;
+        if (_options?.Mode == GuideXosFilePickerMode.Save &&
+            !PickerLine(surface, 92, "Proposed: "u8,
+                _proposedFileName ?? "<none>")) return false;
+
+        int firstY = _options?.Mode == GuideXosFilePickerMode.Save ? 116 : 94;
+        int visible = Math.Min(_candidates.Length, 4);
+        Span<byte> line = stackalloc byte[64];
+        for (int index = 0; index < visible; index++)
+        {
+            GuideXosFilePickerCandidate candidate = _candidates[index];
+            int position = 0;
+            if (!GuideXosText.Append(line, ref position,
+                    index == _selectedIndex ? "> "u8 : "  "u8) ||
+                !AppendUtf8Bounded(line, ref position, candidate.Name) ||
+                !GuideXosText.Append(line, ref position,
+                    candidate.Type == GuideXosEntryType.Directory ? " [DIR]"u8 : " [FILE]"u8) ||
+                surface.TrySetText(20, firstY + index * 18, line[..position]) != GuideXosResult.Success)
+            {
+                return false;
+            }
+        }
+        string status = _result?.Message ?? "Ready";
+        if (_candidates.Length == 0 && _options?.Mode == GuideXosFilePickerMode.Save)
+        {
+            status = "No existing match; new file is allowed";
+        }
+        if (_overwritePending) status = "Overwrite existing file?";
+        if (!PickerLine(surface, 190, "Status: "u8, status))
+        {
+            return false;
+        }
+        if (_options?.Mode == GuideXosFilePickerMode.Open)
+        {
+            if (surface.TryAddButton(20, 210, 90, 28, "Open"u8, OpenAction, out _) !=
+                    GuideXosResult.Success) return false;
+            if (surface.TryAddButton(120, 210, 90, 28, "Next"u8, NextAction, out _) !=
+                    GuideXosResult.Success) return false;
+            return surface.TryAddButton(220, 210, 90, 28, "Cancel"u8, CancelAction, out _) ==
+                GuideXosResult.Success;
+        }
+        if (_overwritePending)
+        {
+            if (surface.TryAddButton(20, 210, 110, 28, "Overwrite"u8,
+                    ConfirmOverwriteAction, out _) != GuideXosResult.Success) return false;
+            return surface.TryAddButton(140, 210, 100, 28, "Decline"u8,
+                DeclineOverwriteAction, out _) == GuideXosResult.Success;
+        }
+        if (surface.TryAddButton(20, 210, 90, 28, "Save"u8, SaveAction, out _) !=
+                GuideXosResult.Success) return false;
+        return surface.TryAddButton(120, 210, 90, 28, "Cancel"u8, CancelAction, out _) ==
+            GuideXosResult.Success;
+    }
+
+    private static string PathStatusText(GuideXosPickerPathStatus status)
+    {
+        return status switch
+        {
+            GuideXosPickerPathStatus.InvalidDirectory => "Invalid directory",
+            GuideXosPickerPathStatus.InvalidFilename => "Invalid filename",
+            GuideXosPickerPathStatus.PathTooLong => "Path exceeds 96 bytes",
+            GuideXosPickerPathStatus.InvalidExtension => "Invalid extension",
+            _ => "Invalid path",
+        };
+    }
+
+    private static bool PickerLine(
+        GuideXosSurface surface, int y, ReadOnlySpan<byte> prefix, string value)
+    {
+        Span<byte> line = stackalloc byte[64];
+        int position = 0;
+        return GuideXosText.Append(line, ref position, prefix) &&
+            AppendUtf8Bounded(line, ref position, value) &&
+            surface.TrySetText(20, y, line[..position]) == GuideXosResult.Success;
+    }
+
+    private static bool AppendUtf8Bounded(
+        Span<byte> buffer, ref int position, string value)
+    {
+        if (value == null) return true;
+        byte[] bytes = Encoding.UTF8.GetBytes(value);
+        int length = Math.Min(bytes.Length, buffer.Length - position);
+        if (length < 0) return false;
+        bytes.AsSpan(0, length).CopyTo(buffer[position..]);
+        position += length;
+        return true;
+    }
+}
