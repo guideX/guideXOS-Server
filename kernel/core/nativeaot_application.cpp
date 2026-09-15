@@ -58,12 +58,13 @@ constexpr uint32_t kVmemCommit = 0x1000u;
 constexpr uint32_t kVmemRelease = 0x8000u;
 constexpr int32_t kInvalidApplicationIdReturn = -4;
 constexpr const char* kProductionCompositeImage = gxos::apps::kManagedNativeAotCompositeImagePath;
-// C113 appends optional file-service callbacks to the C112 v1 prefix.  The
-// version remains v1 because prefix clients are still valid consumers; the
-// table size and capability bits gate the new fields.
+// C113 and C114 append optional file-service callbacks to the C112 v1 prefix.
+// The version remains v1 because prefix clients are still valid consumers;
+// table size and capability bits gate each appended field.
 constexpr uint32_t kManagedHostAbiVersion = 1u;
 constexpr uint32_t kManagedHostAbiV1Size = 72u;
-constexpr uint32_t kManagedHostTableSize = 88u;
+constexpr uint32_t kManagedHostC113Size = 88u;
+constexpr uint32_t kManagedHostTableSize = 104u;
 constexpr uint64_t kManagedCapabilitySurface = 1ull << 0;
 constexpr uint64_t kManagedCapabilityText = 1ull << 1;
 constexpr uint64_t kManagedCapabilityPrimitive = 1ull << 2;
@@ -73,14 +74,21 @@ constexpr uint64_t kManagedCapabilityLaunchContext = 1ull << 5;
 constexpr uint64_t kManagedCapabilityLog = 1ull << 6;
 constexpr uint64_t kManagedCapabilityFileRead = 1ull << 7;
 constexpr uint64_t kManagedCapabilityFileWrite = 1ull << 8;
+constexpr uint64_t kManagedCapabilityDirectoryList = 1ull << 9;
+constexpr uint64_t kManagedCapabilityFileStat = 1ull << 10;
 constexpr uint64_t kManagedCapabilities =
     kManagedCapabilitySurface | kManagedCapabilityText |
     kManagedCapabilityPrimitive | kManagedCapabilityAction |
     kManagedCapabilityClose | kManagedCapabilityLaunchContext |
     kManagedCapabilityLog | kManagedCapabilityFileRead |
-    kManagedCapabilityFileWrite;
+    kManagedCapabilityFileWrite | kManagedCapabilityDirectoryList |
+    kManagedCapabilityFileStat;
 constexpr uint32_t kManagedFilePathMaxBytes = 96u;
 constexpr uint32_t kManagedFileMaxBytes = 16u * 1024u;
+constexpr uint32_t kManagedDirectoryMaxEntries = 64u;
+constexpr uint32_t kManagedDirectoryNameMaxBytes = 127u;
+constexpr uint32_t kManagedDirectoryEntryAbiSize = 144u;
+constexpr uint32_t kManagedFileInfoAbiSize = 16u;
 constexpr int32_t kManagedFileSuccess = 0;
 constexpr int32_t kManagedFileNotFound = -10;
 constexpr int32_t kManagedFileInvalidPath = -11;
@@ -89,6 +97,10 @@ constexpr int32_t kManagedFileTooLarge = -13;
 constexpr int32_t kManagedFileIoFailure = -14;
 constexpr int32_t kManagedFileCapabilityUnavailable = -15;
 constexpr int32_t kManagedFileInvalidArgument = -16;
+constexpr int32_t kManagedFileNotDirectory = -17;
+constexpr int32_t kManagedFileEntryNameTooLong = -18;
+constexpr uint32_t kManagedEntryTypeRegular = 1u;
+constexpr uint32_t kManagedEntryTypeDirectory = 2u;
 constexpr const char* kManagedFileRoot = "/system/apps/";
 constexpr uint32_t kLaunchFlagAction = 0x80000000u;
 constexpr uint32_t kLaunchFlagCapabilityProbe = 0x40000000u;
@@ -196,6 +208,26 @@ struct NativeHostCallTable {
     int32_t (GUIDEXOS_NATIVEAOT_PAL_CALL *fileWriteAll)(
         NativeGxAppContext* context, uint8_t* path, uint32_t pathLength,
         const uint8_t* data, uint32_t length);
+    int32_t (GUIDEXOS_NATIVEAOT_PAL_CALL *directoryList)(
+        NativeGxAppContext* context, uint8_t* path, uint32_t pathLength,
+        uint8_t* entries, uint32_t capacity, uint32_t entryStride,
+        uint32_t* outCount, uint32_t* outHasMore);
+    int32_t (GUIDEXOS_NATIVEAOT_PAL_CALL *fileStat)(
+        NativeGxAppContext* context, uint8_t* path, uint32_t pathLength,
+        uint8_t* outInfo, uint32_t infoSize);
+};
+
+struct ManagedDirectoryEntryAbi {
+    uint32_t nameLength;
+    uint32_t type;
+    uint64_t size;
+    uint8_t name[128];
+};
+
+struct ManagedFileInfoAbi {
+    uint32_t type;
+    uint32_t reserved;
+    uint64_t size;
 };
 
 struct NativeGxAppContext {
@@ -234,13 +266,21 @@ struct ResidentApplication {
     uint32_t sequence;
 };
 
-static_assert(sizeof(NativeHostCallTable) == 88, "C113 host callback ABI drift");
+static_assert(sizeof(NativeHostCallTable) == 104, "C114 host callback ABI drift");
 static_assert(kManagedHostTableSize >= kManagedHostAbiV1Size,
               "C113 host table must retain the C112 v1 prefix");
 static_assert(offsetof(NativeHostCallTable, fileReadAll) == 72,
               "C113 file-read callback offset drift");
 static_assert(offsetof(NativeHostCallTable, fileWriteAll) == 80,
               "C113 file-write callback offset drift");
+static_assert(offsetof(NativeHostCallTable, directoryList) == 88,
+              "C114 directory-list callback offset drift");
+static_assert(offsetof(NativeHostCallTable, fileStat) == 96,
+              "C114 file-stat callback offset drift");
+static_assert(sizeof(ManagedDirectoryEntryAbi) == kManagedDirectoryEntryAbiSize,
+              "C114 directory-entry ABI drift");
+static_assert(sizeof(ManagedFileInfoAbi) == kManagedFileInfoAbiSize,
+              "C114 file-info ABI drift");
 static_assert(sizeof(NativeGxAppContext) == 40, "C111 application ABI drift");
 static_assert(offsetof(NativeAotTlsGsArea, vector) == 0x58,
               "C102 TLS vector offset drift");
@@ -320,6 +360,20 @@ public:
     }
 
     void onWidgetClick(int widgetId) override {
+        for (int index = 0; index < m_actionBindingCount; ++index) {
+            if (m_actionBindings[index].widgetId != widgetId) continue;
+            const int32_t managedResult = invokeManagedAction(
+                m_actionBindings[index].selector, m_actionBindings[index].actionId);
+            serial::puts("[C112-ACTION-DISPATCH] selector=");
+            serial::put_hex32(m_actionBindings[index].selector);
+            serial::puts(" action=");
+            serial::put_hex32(m_actionBindings[index].actionId);
+            serial::puts(" managedReturn=");
+            serial::put_hex32(static_cast<uint32_t>(managedResult));
+            serial::puts(" result=");
+            serial::puts(managedResult == 0 ? "PASS\n" : "FAIL\n");
+            return;
+        }
         if (widgetId != m_actionButtonId) return;
         if (m_actionId != 0u) {
             const int32_t managedResult = invokeManagedAction(
@@ -376,6 +430,7 @@ public:
         m_actionButtonId = -1;
         m_actionId = 0;
         m_actionSelector = 0;
+        m_actionBindingCount = 0;
         setTitle(title);
         compositor::KernelCompositor::setFocus(m_window->id);
         return true;
@@ -403,6 +458,18 @@ public:
         return true;
     }
 
+    void beginManagedFrame() {
+        // Every managed render starts with a background rectangle. Reusing
+        // that call as the frame boundary keeps widget/action storage bounded
+        // across redraws without adding another host ABI callback.
+        if (m_window) m_window->widgetCount = 0;
+        m_rectCount = 0;
+        m_actionButtonId = -1;
+        m_actionId = 0;
+        m_actionSelector = 0;
+        m_actionBindingCount = 0;
+    }
+
     bool addActionButton(int32_t x, int32_t y, int32_t width, int32_t height,
                          const char* text, int32_t* outWidget) {
         return addActionButton(x, y, width, height, text, 0u, 0u, outWidget);
@@ -414,6 +481,14 @@ public:
         if (!m_window || !text || !outWidget) return false;
         const int id = addButton(x, y, width, height, text);
         if (id < 0) return false;
+        if (actionId != 0u && m_actionBindingCount >= static_cast<int>(sizeof(m_actionBindings) / sizeof(m_actionBindings[0]))) {
+            // Re-rendered managed surfaces append widgets. Keep only the
+            // bounded set belonging to the newest frame.
+            m_actionBindingCount = 0;
+        }
+        if (actionId != 0u) {
+            m_actionBindings[m_actionBindingCount++] = {id, actionId, selector};
+        }
         m_actionButtonId = id;
         m_actionId = actionId;
         m_actionSelector = selector;
@@ -422,12 +497,19 @@ public:
     }
 
 private:
+    struct ManagedActionBinding {
+        int widgetId;
+        uint32_t actionId;
+        uint32_t selector;
+    };
     ManagedSurfaceRect m_rects[8] = {};
     int m_rectCount;
     int m_actionButtonId;
     uint32_t m_actionId;
     uint32_t m_actionSelector;
     int m_actionCount;
+    ManagedActionBinding m_actionBindings[8] = {};
+    int m_actionBindingCount = 0;
 };
 
 // Bare-metal startup does not run the hosted C++ global-constructor array.
@@ -1249,6 +1331,35 @@ bool copyManagedFilePath(const uint8_t* path, uint32_t pathLength,
     return true;
 }
 
+bool copyManagedDirectoryPath(const uint8_t* path, uint32_t pathLength,
+                              char* output, uint32_t outputSize) {
+    if (!path || !output || pathLength == 0u ||
+        pathLength > kManagedFilePathMaxBytes ||
+        pathLength + 1u > outputSize) {
+        return false;
+    }
+
+    constexpr const char* root = kManagedFileRoot;
+    uint32_t rootLength = 0u;
+    while (root[rootLength] != '\0') ++rootLength;
+    // Directory paths may omit the trailing separator.  Normalize the
+    // approved application root to the spelling used by the VFS.
+    const bool rootWithoutSlash = pathLength + 1u == rootLength;
+    const bool rootWithSlash = pathLength == rootLength &&
+        path[rootLength - 1u] == '/';
+    if (rootWithoutSlash || rootWithSlash) {
+        const uint32_t copyLength = rootLength - 1u;
+        for (uint32_t index = 0u; index < copyLength; ++index) {
+            if (path[index] != static_cast<uint8_t>(root[index])) return false;
+        }
+        for (uint32_t index = 0u; index < copyLength; ++index) output[index] = root[index];
+        output[copyLength] = '\0';
+        return true;
+    }
+
+    return copyManagedFilePath(path, pathLength, output, outputSize);
+}
+
 int32_t GUIDEXOS_NATIVEAOT_PAL_CALL managedFileReadAll(
     NativeGxAppContext* context, uint8_t* path, uint32_t pathLength,
     uint8_t* buffer, uint32_t capacity, uint32_t* outLength) {
@@ -1320,6 +1431,132 @@ int32_t GUIDEXOS_NATIVEAOT_PAL_CALL managedFileWriteAll(
     return kManagedFileSuccess;
 }
 
+int32_t GUIDEXOS_NATIVEAOT_PAL_CALL managedDirectoryList(
+    NativeGxAppContext* context, uint8_t* path, uint32_t pathLength,
+    uint8_t* entries, uint32_t capacity, uint32_t entryStride,
+    uint32_t* outCount, uint32_t* outHasMore) {
+    if (!activeSurfaceContext(context) || !outCount || !outHasMore ||
+        entryStride != kManagedDirectoryEntryAbiSize ||
+        capacity > kManagedDirectoryMaxEntries ||
+        (capacity != 0u && !entries)) {
+        return kManagedFileInvalidArgument;
+    }
+    if ((context->host->capabilities & kManagedCapabilityDirectoryList) == 0u) {
+        return kManagedFileCapabilityUnavailable;
+    }
+    *outCount = 0u;
+    *outHasMore = 0u;
+
+    char validatedPath[kManagedFilePathMaxBytes + 1u] = {};
+    if (!copyManagedDirectoryPath(path, pathLength, validatedPath,
+                                  sizeof(validatedPath))) {
+        return kManagedFileInvalidPath;
+    }
+    vfs::FileInfo directoryInfo{};
+    const vfs::Status statStatus = vfs::stat(validatedPath, &directoryInfo);
+    if (statStatus == vfs::VFS_ERR_NOT_FOUND) return kManagedFileNotFound;
+    if (statStatus != vfs::VFS_OK) return kManagedFileIoFailure;
+    if (directoryInfo.type != vfs::FILE_TYPE_DIRECTORY) {
+        return kManagedFileNotDirectory;
+    }
+
+    const uint8_t iterator = vfs::opendir(validatedPath);
+    if (iterator == 0xFFu) return kManagedFileIoFailure;
+    vfs::DirEntry nativeEntry{};
+    while (vfs::readdir(iterator, &nativeEntry)) {
+        const uint32_t nameLength = boundedCStringLength(
+            reinterpret_cast<const uint8_t*>(nativeEntry.name),
+            kManagedDirectoryNameMaxBytes);
+        if (nameLength > kManagedDirectoryNameMaxBytes) {
+            vfs::closedir(iterator);
+            return kManagedFileEntryNameTooLong;
+        }
+        if (nativeEntry.type != vfs::FILE_TYPE_REGULAR &&
+            nativeEntry.type != vfs::FILE_TYPE_DIRECTORY) {
+            vfs::closedir(iterator);
+            return kManagedFileIoFailure;
+        }
+        const uint32_t index = *outCount;
+        if (index < capacity) {
+            ManagedDirectoryEntryAbi* output = reinterpret_cast<ManagedDirectoryEntryAbi*>(
+                entries + index * entryStride);
+            output->nameLength = nameLength;
+            output->type = nativeEntry.type == vfs::FILE_TYPE_DIRECTORY
+                ? kManagedEntryTypeDirectory : kManagedEntryTypeRegular;
+            output->size = nativeEntry.type == vfs::FILE_TYPE_REGULAR
+                ? nativeEntry.size : 0u;
+            for (uint32_t byte = 0u; byte < nameLength; ++byte) {
+                output->name[byte] = static_cast<uint8_t>(nativeEntry.name[byte]);
+            }
+            output->name[nameLength] = 0u;
+            serial::puts("[C114-DIRECTORY-ENTRY] name=");
+            serial::puts(nativeEntry.name);
+            serial::puts(" type=");
+            serial::put_hex32(output->type);
+            serial::puts(" size=");
+            serial::put_hex64(output->size);
+            serial::puts("\n");
+            ++(*outCount);
+        } else {
+            *outHasMore = 1u;
+            break;
+        }
+    }
+    // If the output filled exactly, probe one more entry so callers can
+    // distinguish an exact fit from a bounded snapshot that was truncated.
+    if (*outCount == capacity && *outHasMore == 0u && capacity != 0u) {
+        if (vfs::readdir(iterator, &nativeEntry)) *outHasMore = 1u;
+    }
+    vfs::closedir(iterator);
+    serial::puts("[C114-DIRECTORY-LIST] path=");
+    serial::puts(validatedPath);
+    serial::puts(" count=");
+    serial::put_hex32(*outCount);
+    serial::puts(" hasMore=");
+    serial::put_hex32(*outHasMore);
+    serial::puts(" result=PASS\n");
+    return kManagedFileSuccess;
+}
+
+int32_t GUIDEXOS_NATIVEAOT_PAL_CALL managedFileStat(
+    NativeGxAppContext* context, uint8_t* path, uint32_t pathLength,
+    uint8_t* outInfo, uint32_t infoSize) {
+    if (!activeSurfaceContext(context) || !outInfo ||
+        infoSize < kManagedFileInfoAbiSize) {
+        return kManagedFileInvalidArgument;
+    }
+    if ((context->host->capabilities & kManagedCapabilityFileStat) == 0u) {
+        return kManagedFileCapabilityUnavailable;
+    }
+    char validatedPath[kManagedFilePathMaxBytes + 1u] = {};
+    if (!copyManagedDirectoryPath(path, pathLength, validatedPath,
+                                  sizeof(validatedPath))) {
+        return kManagedFileInvalidPath;
+    }
+    vfs::FileInfo nativeInfo{};
+    const vfs::Status status = vfs::stat(validatedPath, &nativeInfo);
+    if (status == vfs::VFS_ERR_NOT_FOUND) return kManagedFileNotFound;
+    if (status != vfs::VFS_OK) return kManagedFileIoFailure;
+    if (nativeInfo.type != vfs::FILE_TYPE_REGULAR &&
+        nativeInfo.type != vfs::FILE_TYPE_DIRECTORY) {
+        return kManagedFileIoFailure;
+    }
+    ManagedFileInfoAbi* info = reinterpret_cast<ManagedFileInfoAbi*>(outInfo);
+    info->type = nativeInfo.type == vfs::FILE_TYPE_DIRECTORY
+        ? kManagedEntryTypeDirectory : kManagedEntryTypeRegular;
+    info->reserved = 0u;
+    info->size = nativeInfo.type == vfs::FILE_TYPE_REGULAR
+        ? nativeInfo.size : 0u;
+    serial::puts("[C114-FILE-STAT] path=");
+    serial::puts(validatedPath);
+    serial::puts(" type=");
+    serial::put_hex32(info->type);
+    serial::puts(" size=");
+    serial::put_hex64(info->size);
+    serial::puts(" result=PASS\n");
+    return kManagedFileSuccess;
+}
+
 int32_t GUIDEXOS_NATIVEAOT_PAL_CALL managedRequestWindow(
     NativeGxAppContext* context, uint8_t* title, int32_t width, int32_t height,
     uint64_t* outWindow) {
@@ -1368,10 +1605,11 @@ int32_t GUIDEXOS_NATIVEAOT_PAL_CALL managedDrawRect(
     NativeAotManagedSurface* surface = managedSurface();
     if (!activeSurfaceContext(context) || !surface || !surface->owns(window) ||
         x < 0 || y < 0 || width <= 0 || height <= 0 ||
-        x > 4096 || y > 4096 || width > 4096 || height > 4096 ||
-        !surface->addRect(x, y, width, height, color)) {
+        x > 4096 || y > 4096 || width > 4096 || height > 4096) {
         return -2;
     }
+    surface->beginManagedFrame();
+    if (!surface->addRect(x, y, width, height, color)) return -2;
     serial::puts("[C111-SURFACE-RECT] window=");
     serial::put_hex64(window);
     serial::puts(" result=PASS\n");
@@ -1472,7 +1710,9 @@ int32_t GUIDEXOS_NATIVEAOT_PAL_CALL managedLog(
     const bool c111Message = managedMessageStartsWith(message, "C111-");
     const bool c112Message = managedMessageStartsWith(message, "C112-");
     const bool c113Message = managedMessageStartsWith(message, "C113-");
-    serial::puts(c113Message ? "[C113-MANAGED-OUTPUT] " :
+    const bool c114Message = managedMessageStartsWith(message, "C114-");
+    serial::puts(c114Message ? "[C114-MANAGED-OUTPUT] " :
+        c113Message ? "[C113-MANAGED-OUTPUT] " :
         c112Message ? "[C112-MANAGED-OUTPUT] " :
         c111Message ? "[C111-MANAGED-OUTPUT] " :
         c107Message ? "[C107-MANAGED-OUTPUT] " :
@@ -1791,7 +2031,11 @@ int32_t invokeManagedWithHostMetadata(
         (capabilities & kManagedCapabilityFileRead) != 0u
             ? managedFileReadAll : nullptr,
         (capabilities & kManagedCapabilityFileWrite) != 0u
-            ? managedFileWriteAll : nullptr };
+            ? managedFileWriteAll : nullptr,
+        (capabilities & kManagedCapabilityDirectoryList) != 0u
+            ? managedDirectoryList : nullptr,
+        (capabilities & kManagedCapabilityFileStat) != 0u
+            ? managedFileStat : nullptr };
     NativeGxAppContext context{
         sizeof(NativeGxAppContext), 0u, &host,
         reinterpret_cast<void*>(static_cast<uintptr_t>(selector)),
@@ -1944,7 +2188,8 @@ LaunchStatus launchResident(const char* path, uint32_t logicalAppId,
         kManagedHostTableSize, kManagedHostAbiVersion, managedLog,
         managedRequestWindow, managedDrawText, managedDrawRect, managedAddButton,
         managedCloseWindow, kManagedCapabilities, managedAddActionButton,
-        managedFileReadAll, managedFileWriteAll };
+        managedFileReadAll, managedFileWriteAll, managedDirectoryList,
+        managedFileStat };
     serial::puts("[C112-HOST] version=");
     serial::put_hex32(kManagedHostAbiVersion);
     serial::puts(" capabilities=");
@@ -2164,7 +2409,8 @@ LaunchStatus launchInternal(const char* path, uint32_t logicalAppId,
         kManagedHostTableSize, kManagedHostAbiVersion, managedLog,
         managedRequestWindow, managedDrawText, managedDrawRect, managedAddButton,
         managedCloseWindow, kManagedCapabilities, managedAddActionButton,
-        managedFileReadAll, managedFileWriteAll };
+        managedFileReadAll, managedFileWriteAll, managedDirectoryList,
+        managedFileStat };
     serial::puts("[C112-HOST] version=");
     serial::put_hex32(kManagedHostAbiVersion);
     serial::puts(" capabilities=");
@@ -2374,7 +2620,8 @@ LaunchStatus probeFileServiceNegativeTests(LaunchReport* report) {
         kManagedHostTableSize, kManagedHostAbiVersion, managedLog,
         managedRequestWindow, managedDrawText, managedDrawRect, managedAddButton,
         managedCloseWindow, kManagedCapabilities, managedAddActionButton,
-        managedFileReadAll, managedFileWriteAll };
+        managedFileReadAll, managedFileWriteAll, managedDirectoryList,
+        managedFileStat };
     NativeGxAppContext context{
         sizeof(NativeGxAppContext), 0u, &host,
         reinterpret_cast<void*>(static_cast<uintptr_t>(4u)), nullptr, 0u, 0u};
@@ -2429,6 +2676,182 @@ LaunchStatus probeFileServiceNegativeTests(LaunchReport* report) {
     serial::put_hex32(static_cast<uint32_t>(invalidReadBufferResult));
     serial::puts(" invalidWriteData=");
     serial::put_hex32(static_cast<uint32_t>(invalidWriteDataResult));
+    serial::puts(" result=");
+    serial::puts(passed ? "PASS\n" : "FAIL\n");
+    return report->status;
+}
+
+LaunchStatus probeDirectoryCapabilityDowngrade(LaunchReport* report) {
+    LaunchReport local{};
+    if (report == nullptr) report = &local;
+    *report = {};
+    report->logicalAppId = 4u;
+    const uint64_t downgraded = kManagedCapabilities & ~kManagedCapabilityDirectoryList;
+    report->managedReturn = invokeManagedWithHostMetadata(
+        4u, kLaunchFlagCapabilityProbe, kManagedHostAbiVersion, downgraded);
+    report->status = report->managedReturn == 0
+        ? LaunchStatus::Success : LaunchStatus::ManagedFailed;
+    serial::puts("[C114-CAPABILITY-DOWNGRADE] directoryList=omitted managedReturn=");
+    serial::put_hex32(static_cast<uint32_t>(report->managedReturn));
+    serial::puts(" result=");
+    serial::puts(report->status == LaunchStatus::Success ? "PASS\n" : "FAIL\n");
+    return report->status;
+}
+
+LaunchStatus probeFileStatCapabilityDowngrade(LaunchReport* report) {
+    LaunchReport local{};
+    if (report == nullptr) report = &local;
+    *report = {};
+    report->logicalAppId = 4u;
+    const uint64_t downgraded = kManagedCapabilities & ~kManagedCapabilityFileStat;
+    report->managedReturn = invokeManagedWithHostMetadata(
+        4u, kLaunchFlagCapabilityProbe, kManagedHostAbiVersion, downgraded);
+    report->status = report->managedReturn == 0
+        ? LaunchStatus::Success : LaunchStatus::ManagedFailed;
+    serial::puts("[C114-CAPABILITY-DOWNGRADE] fileStat=omitted managedReturn=");
+    serial::put_hex32(static_cast<uint32_t>(report->managedReturn));
+    serial::puts(" result=");
+    serial::puts(report->status == LaunchStatus::Success ? "PASS\n" : "FAIL\n");
+    return report->status;
+}
+
+LaunchStatus probeDirectoryServiceNegativeTests(LaunchReport* report) {
+    LaunchReport local{};
+    if (report == nullptr) report = &local;
+    *report = {};
+    report->logicalAppId = 4u;
+    NativeHostCallTable host{
+        kManagedHostTableSize, kManagedHostAbiVersion, managedLog,
+        managedRequestWindow, managedDrawText, managedDrawRect, managedAddButton,
+        managedCloseWindow, kManagedCapabilities, managedAddActionButton,
+        managedFileReadAll, managedFileWriteAll, managedDirectoryList,
+        managedFileStat };
+    NativeGxAppContext context{
+        sizeof(NativeGxAppContext), 0u, &host,
+        reinterpret_cast<void*>(static_cast<uintptr_t>(4u)), nullptr, 0u, 0u};
+    ManagedDirectoryEntryAbi entries[2]{};
+    ManagedFileInfoAbi info{};
+    uint32_t count = 0u;
+    uint32_t hasMore = 0u;
+    const uint8_t validPath[] = "/system/apps";
+    const uint8_t oversizedPath[kManagedFilePathMaxBytes + 1u] = {};
+    g_activeManagedContext = &context;
+    const int32_t nullPath = managedDirectoryList(
+        &context, nullptr, sizeof(validPath) - 1u,
+        reinterpret_cast<uint8_t*>(entries), 2u,
+        kManagedDirectoryEntryAbiSize, &count, &hasMore);
+    const int32_t nullDest = managedDirectoryList(
+        &context, const_cast<uint8_t*>(validPath), sizeof(validPath) - 1u,
+        nullptr, 2u, kManagedDirectoryEntryAbiSize, &count, &hasMore);
+    const int32_t badStride = managedDirectoryList(
+        &context, const_cast<uint8_t*>(validPath), sizeof(validPath) - 1u,
+        reinterpret_cast<uint8_t*>(entries), 2u,
+        kManagedDirectoryEntryAbiSize - 1u, &count, &hasMore);
+    const int32_t badCapacity = managedDirectoryList(
+        &context, const_cast<uint8_t*>(validPath), sizeof(validPath) - 1u,
+        reinterpret_cast<uint8_t*>(entries), kManagedDirectoryMaxEntries + 1u,
+        kManagedDirectoryEntryAbiSize, &count, &hasMore);
+    const int32_t nullCount = managedDirectoryList(
+        &context, const_cast<uint8_t*>(validPath), sizeof(validPath) - 1u,
+        reinterpret_cast<uint8_t*>(entries), 2u,
+        kManagedDirectoryEntryAbiSize, nullptr, &hasMore);
+    const int32_t oversized = managedDirectoryList(
+        &context, const_cast<uint8_t*>(oversizedPath), sizeof(oversizedPath),
+        reinterpret_cast<uint8_t*>(entries), 2u,
+        kManagedDirectoryEntryAbiSize, &count, &hasMore);
+    const int32_t nullInfo = managedFileStat(
+        &context, const_cast<uint8_t*>(validPath), sizeof(validPath) - 1u,
+        nullptr, kManagedFileInfoAbiSize);
+    const int32_t shortInfo = managedFileStat(
+        &context, const_cast<uint8_t*>(validPath), sizeof(validPath) - 1u,
+        reinterpret_cast<uint8_t*>(&info), kManagedFileInfoAbiSize - 1u);
+    g_activeManagedContext = nullptr;
+    const bool passed = nullPath == kManagedFileInvalidPath &&
+        nullDest == kManagedFileInvalidArgument &&
+        badStride == kManagedFileInvalidArgument &&
+        badCapacity == kManagedFileInvalidArgument &&
+        nullCount == kManagedFileInvalidArgument &&
+        oversized == kManagedFileInvalidPath &&
+        nullInfo == kManagedFileInvalidArgument &&
+        shortInfo == kManagedFileInvalidArgument;
+    report->status = passed ? LaunchStatus::Success : LaunchStatus::ManagedFailed;
+    serial::puts("[C114-DIRECTORY-NEGATIVE] nullPath=");
+    serial::put_hex32(static_cast<uint32_t>(nullPath));
+    serial::puts(" nullDest=");
+    serial::put_hex32(static_cast<uint32_t>(nullDest));
+    serial::puts(" badStride=");
+    serial::put_hex32(static_cast<uint32_t>(badStride));
+    serial::puts(" badCapacity=");
+    serial::put_hex32(static_cast<uint32_t>(badCapacity));
+    serial::puts(" nullCount=");
+    serial::put_hex32(static_cast<uint32_t>(nullCount));
+    serial::puts(" oversizedPath=");
+    serial::put_hex32(static_cast<uint32_t>(oversized));
+    serial::puts(" nullInfo=");
+    serial::put_hex32(static_cast<uint32_t>(nullInfo));
+    serial::puts(" shortInfo=");
+    serial::put_hex32(static_cast<uint32_t>(shortInfo));
+    serial::puts(" result=");
+    serial::puts(passed ? "PASS\n" : "FAIL\n");
+    return report->status;
+}
+
+LaunchStatus probeDirectoryCapacityTests(LaunchReport* report) {
+    LaunchReport local{};
+    if (report == nullptr) report = &local;
+    *report = {};
+    report->logicalAppId = 4u;
+    NativeHostCallTable host{
+        kManagedHostTableSize, kManagedHostAbiVersion, managedLog,
+        managedRequestWindow, managedDrawText, managedDrawRect, managedAddButton,
+        managedCloseWindow, kManagedCapabilities, managedAddActionButton,
+        managedFileReadAll, managedFileWriteAll, managedDirectoryList,
+        managedFileStat };
+    NativeGxAppContext context{
+        sizeof(NativeGxAppContext), 0u, &host,
+        reinterpret_cast<void*>(static_cast<uintptr_t>(4u)), nullptr, 0u, 0u};
+    ManagedDirectoryEntryAbi one[1]{};
+    ManagedDirectoryEntryAbi all[kManagedDirectoryMaxEntries]{};
+    uint32_t smallCount = 0u;
+    uint32_t smallMore = 0u;
+    uint32_t fullCount = 0u;
+    uint32_t fullMore = 0u;
+    ManagedFileInfoAbi directoryInfo{};
+    ManagedFileInfoAbi missingInfo{};
+    const uint8_t path[] = "/system/apps";
+    g_activeManagedContext = &context;
+    const int32_t smallResult = managedDirectoryList(
+        &context, const_cast<uint8_t*>(path), sizeof(path) - 1u,
+        reinterpret_cast<uint8_t*>(one), 1u, kManagedDirectoryEntryAbiSize,
+        &smallCount, &smallMore);
+    const int32_t fullResult = managedDirectoryList(
+        &context, const_cast<uint8_t*>(path), sizeof(path) - 1u,
+        reinterpret_cast<uint8_t*>(all), kManagedDirectoryMaxEntries,
+        kManagedDirectoryEntryAbiSize, &fullCount, &fullMore);
+    const uint8_t missingPath[] = "/system/apps/MISSING.C114";
+    const int32_t directoryStat = managedFileStat(
+        &context, const_cast<uint8_t*>(path), sizeof(path) - 1u,
+        reinterpret_cast<uint8_t*>(&directoryInfo), kManagedFileInfoAbiSize);
+    const int32_t missingStat = managedFileStat(
+        &context, const_cast<uint8_t*>(missingPath), sizeof(missingPath) - 1u,
+        reinterpret_cast<uint8_t*>(&missingInfo), kManagedFileInfoAbiSize);
+    g_activeManagedContext = nullptr;
+    const bool passed = smallResult == kManagedFileSuccess && smallCount <= 1u &&
+        smallMore == 1u && fullResult == kManagedFileSuccess &&
+        fullCount >= smallCount && fullCount <= kManagedDirectoryMaxEntries &&
+        directoryStat == kManagedFileSuccess && directoryInfo.type == kManagedEntryTypeDirectory &&
+        missingStat == kManagedFileNotFound;
+    report->status = passed ? LaunchStatus::Success : LaunchStatus::ManagedFailed;
+    serial::puts("[C114-CAPACITY] smallCount=");
+    serial::put_hex32(smallCount);
+    serial::puts(" smallHasMore=");
+    serial::put_hex32(smallMore);
+    serial::puts(" fullCount=");
+    serial::put_hex32(fullCount);
+    serial::puts(" directoryType=");
+    serial::put_hex32(directoryInfo.type);
+    serial::puts(" missingStat=");
+    serial::put_hex32(static_cast<uint32_t>(missingStat));
     serial::puts(" result=");
     serial::puts(passed ? "PASS\n" : "FAIL\n");
     return report->status;

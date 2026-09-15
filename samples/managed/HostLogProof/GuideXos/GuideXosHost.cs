@@ -1,4 +1,5 @@
 using System;
+using System.Text;
 
 namespace HostLogProof;
 
@@ -13,6 +14,8 @@ public sealed unsafe class GuideXosHost
     private const nuint CapabilitiesOffset = 56u;
     private const nuint FileReadOffset = 72u;
     private const nuint FileWriteOffset = 80u;
+    private const nuint DirectoryListOffset = 88u;
+    private const nuint FileStatOffset = 96u;
     private readonly NativeGxAppContext* _context;
     private readonly NativeHostCallTable* _host;
 
@@ -232,6 +235,124 @@ public sealed unsafe class GuideXosHost
                 (uint)data.Length);
         }
         return (GuideXosFileResult)nativeResult;
+    }
+
+    /// <summary>Returns one bounded, managed-owned directory snapshot.</summary>
+    public GuideXosFileResult TryListDirectory(
+        ReadOnlySpan<byte> path,
+        out GuideXosDirectorySnapshot snapshot)
+    {
+        snapshot = null;
+        if (!HasCapability(GuideXosCapability.DirectoryList) ||
+            !HasHostField(DirectoryListOffset) || _host->directoryList == null)
+        {
+            return GuideXosFileResult.CapabilityUnavailable;
+        }
+        if (path.Length == 0 || path.Length > GxAbi.FilePathMaxBytes)
+        {
+            return GuideXosFileResult.InvalidPath;
+        }
+
+        const int capacity = (int)GxAbi.MaxDirectoryEntries;
+        byte[] pathBuffer = new byte[path.Length + 1];
+        path.CopyTo(pathBuffer);
+        byte[] entryBuffer = new byte[capacity * (int)GxAbi.DirectoryEntryAbiSize];
+        uint count = 0u;
+        uint hasMore = 0u;
+        int nativeResult;
+        fixed (byte* pathPointer = pathBuffer)
+        fixed (byte* entryPointer = entryBuffer)
+        {
+            nativeResult = _host->directoryList(
+                _context, pathPointer, (uint)path.Length, entryPointer,
+                (uint)capacity, GxAbi.DirectoryEntryAbiSize, &count, &hasMore);
+        }
+        if (nativeResult != 0) return (GuideXosFileResult)nativeResult;
+        if (count > GxAbi.MaxDirectoryEntries || hasMore > 1u)
+        {
+            return GuideXosFileResult.IoFailure;
+        }
+
+        GuideXosDirectoryEntry[] entries = new GuideXosDirectoryEntry[(int)count];
+        fixed (byte* entryPointer = entryBuffer)
+        {
+            for (uint index = 0u; index < count; ++index)
+            {
+                NativeDirectoryEntry* nativeEntry = (NativeDirectoryEntry*)(
+                    entryPointer + index * GxAbi.DirectoryEntryAbiSize);
+                if (nativeEntry->nameLength > GxAbi.MaxDirectoryNameBytes)
+                {
+                    return GuideXosFileResult.EntryNameTooLong;
+                }
+                byte[] nameBytes = new byte[(int)nativeEntry->nameLength];
+                for (uint byteIndex = 0u; byteIndex < nativeEntry->nameLength; ++byteIndex)
+                {
+                    nameBytes[(int)byteIndex] = nativeEntry->name[byteIndex];
+                }
+                entries[(int)index] = new GuideXosDirectoryEntry(
+                    Encoding.UTF8.GetString(nameBytes),
+                    nativeEntry->type == 2u ? GuideXosEntryType.Directory : GuideXosEntryType.Regular,
+                    nativeEntry->size);
+            }
+        }
+        // Keep application behavior independent of FAT on-disk order while
+        // remaining bounded and deterministic.
+        for (int outer = 1; outer < entries.Length; outer++)
+        {
+            GuideXosDirectoryEntry value = entries[outer];
+            int inner = outer - 1;
+            while (inner >= 0 && string.CompareOrdinal(entries[inner].Name, value.Name) > 0)
+            {
+                entries[inner + 1] = entries[inner];
+                inner--;
+            }
+            entries[inner + 1] = value;
+        }
+        snapshot = new GuideXosDirectorySnapshot(entries, hasMore != 0u);
+        return GuideXosFileResult.Success;
+    }
+
+    /// <summary>Reads stable type and regular-file length metadata.</summary>
+    public GuideXosFileResult TryGetInfo(
+        ReadOnlySpan<byte> path,
+        out GuideXosFileInfo info)
+    {
+        info = null;
+        if (!HasCapability(GuideXosCapability.FileStat) ||
+            !HasHostField(FileStatOffset) || _host->fileStat == null)
+        {
+            return GuideXosFileResult.CapabilityUnavailable;
+        }
+        if (path.Length == 0 || path.Length > GxAbi.FilePathMaxBytes)
+        {
+            return GuideXosFileResult.InvalidPath;
+        }
+
+        byte[] pathBuffer = new byte[path.Length + 1];
+        path.CopyTo(pathBuffer);
+        Span<byte> infoBuffer = stackalloc byte[(int)GxAbi.FileInfoAbiSize];
+        int nativeResult;
+        fixed (byte* pathPointer = pathBuffer)
+        fixed (byte* infoPointer = infoBuffer)
+        {
+            nativeResult = _host->fileStat(
+                _context, pathPointer, (uint)path.Length, infoPointer,
+                GxAbi.FileInfoAbiSize);
+        }
+        if (nativeResult != 0) return (GuideXosFileResult)nativeResult;
+        NativeFileInfo nativeInfo;
+        fixed (byte* infoPointer = infoBuffer)
+        {
+            nativeInfo = *(NativeFileInfo*)infoPointer;
+        }
+        if (nativeInfo.type != 1u && nativeInfo.type != 2u)
+        {
+            return GuideXosFileResult.IoFailure;
+        }
+        info = new GuideXosFileInfo(
+            nativeInfo.type == 2u ? GuideXosEntryType.Directory : GuideXosEntryType.Regular,
+            nativeInfo.size);
+        return GuideXosFileResult.Success;
     }
 
     internal NativeGxAppContext* Context => _context;

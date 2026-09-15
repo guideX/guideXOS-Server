@@ -1,4 +1,5 @@
 using System;
+using System.Text;
 
 namespace HostLogProof.Applications;
 
@@ -18,8 +19,31 @@ public sealed class ManagedNotes : GuideXosApplication
     private static uint s_threadLaunchCount;
     private static ulong s_window;
     private static uint s_nextAction;
+    private static bool s_browserMode;
+    private static GuideXosDirectorySnapshot s_directory;
+    private static GuideXosDirectoryEntry s_selectedEntry;
+    private static int s_selectedIndex;
+    private static byte[] s_browserStatus = "Directory ready"u8.ToArray();
 
     public override GuideXosResult Launch(GuideXosHost host)
+    {
+        s_browserMode = IsBrowserContext(host);
+        return s_browserMode ? LaunchBrowser(host) : LaunchLegacy(host);
+    }
+
+    private static bool IsBrowserContext(GuideXosHost host)
+    {
+        ReadOnlySpan<byte> context = host.LaunchContext.Utf8;
+        ReadOnlySpan<byte> prefix = "c114-notes"u8;
+        if (context.Length < prefix.Length) return false;
+        for (int index = 0; index < prefix.Length; index++)
+        {
+            if (context[index] != prefix[index]) return false;
+        }
+        return true;
+    }
+
+    private static GuideXosResult LaunchLegacy(GuideXosHost host)
     {
         uint launchCount = ++s_launchCount;
         uint threadLaunchCount = ++s_threadLaunchCount;
@@ -81,6 +105,7 @@ public sealed class ManagedNotes : GuideXosApplication
 
     public override GuideXosResult HandleAction(GuideXosHost host, uint actionId)
     {
+        if (s_browserMode) return HandleBrowserAction(host, actionId);
         if (host.TryGetSurface(s_window, out GuideXosSurface surface) !=
                 GuideXosResult.Success || surface == null)
         {
@@ -153,6 +178,208 @@ public sealed class ManagedNotes : GuideXosApplication
         return GuideXosResult.InvalidAction;
     }
 
+    private static GuideXosResult LaunchBrowser(GuideXosHost host)
+    {
+        GuideXosFileResult listResult = GuideXosFile.TryListDirectory(
+            host, "/system/apps"u8, out GuideXosDirectorySnapshot listing);
+        if (listResult != GuideXosFileResult.Success || listing == null)
+        {
+            s_browserStatus = StatusText(listResult);
+            s_directory = null;
+            s_selectedEntry = null;
+        }
+        else
+        {
+            s_directory = listing;
+            s_selectedIndex = FindFirstTextFile(listing);
+            s_selectedEntry = s_selectedIndex >= 0 ? listing.Entries[s_selectedIndex] : null;
+            s_browserStatus = listing.HasMore
+                ? "Directory truncated"u8.ToArray() : "Directory ready"u8.ToArray();
+            host.TryLog("C114-NOTES list=PASS source=VFS"u8);
+        }
+        GuideXosResult result = host.TryCreateSurface(
+            "Managed Notes"u8, 520, 300, out GuideXosSurface surface);
+        if (result != GuideXosResult.Success || surface == null) return result;
+        s_window = surface.Handle;
+        if (!RenderBrowser(host, surface)) return GuideXosResult.InvalidArgument;
+        host.TryLog("C114-NOTES threadStatic=PASS"u8);
+        return GuideXosResult.Success;
+    }
+
+    private static int FindFirstTextFile(GuideXosDirectorySnapshot listing)
+    {
+        for (int index = 0; index < listing.Entries.Length; index++)
+        {
+            GuideXosDirectoryEntry entry = listing.Entries[index];
+            if (entry.Type == GuideXosEntryType.Regular &&
+                entry.Name.EndsWith(".TXT", StringComparison.OrdinalIgnoreCase))
+            {
+                return index;
+            }
+        }
+        return listing.Entries.Length == 0 ? -1 : 0;
+    }
+
+    private static GuideXosResult HandleBrowserAction(GuideXosHost host, uint actionId)
+    {
+        if (host.TryGetSurface(s_window, out GuideXosSurface surface) !=
+                GuideXosResult.Success || surface == null)
+        {
+            return GuideXosResult.SurfaceCreationFailed;
+        }
+        if (actionId == 10u && s_selectedEntry != null)
+        {
+            byte[] path = PathForEntry(s_selectedEntry.Name);
+            GuideXosFileResult statResult = GuideXosFile.TryGetInfo(host, path, out GuideXosFileInfo info);
+            if (statResult != GuideXosFileResult.Success || info == null ||
+                info.Type != GuideXosEntryType.Regular)
+            {
+                s_browserStatus = StatusText(statResult);
+                RenderBrowser(host, surface);
+                return GuideXosResult.Success;
+            }
+            GuideXosFileResult readResult = GuideXosFile.ReadAllTextUtf8(host, path, out byte[] loaded);
+            if (readResult != GuideXosFileResult.Success)
+            {
+                s_browserStatus = StatusText(readResult);
+                RenderBrowser(host, surface);
+                return GuideXosResult.Success;
+            }
+            s_note = loaded;
+            s_status = "Opened from VFS"u8.ToArray();
+            s_browserStatus = "Opened selected document"u8.ToArray();
+            host.TryLog("C114-NOTES open=PASS source=directory-list"u8);
+            if (!RenderBrowser(host, surface)) return GuideXosResult.InvalidArgument;
+            return GuideXosResult.Success;
+        }
+        if (actionId == 11u && s_directory != null && s_directory.Entries.Length != 0)
+        {
+            s_selectedIndex = (s_selectedIndex + 1) % s_directory.Entries.Length;
+            s_selectedEntry = s_directory.Entries[s_selectedIndex];
+            s_browserStatus = "Selection advanced"u8.ToArray();
+            return RenderBrowser(host, surface) ? GuideXosResult.Success : GuideXosResult.InvalidArgument;
+        }
+        if (actionId == 12u)
+        {
+            s_browserStatus = "Back to directory list"u8.ToArray();
+            return RenderBrowser(host, surface) ? GuideXosResult.Success : GuideXosResult.InvalidArgument;
+        }
+        if (actionId == 13u && s_selectedEntry != null)
+        {
+            byte[] edited = new byte[s_note.Length + 9];
+            s_note.CopyTo(edited, 0);
+            " [edited]"u8.CopyTo(edited.AsSpan(s_note.Length));
+            s_note = edited;
+            s_browserStatus = "Edited in managed code"u8.ToArray();
+            host.TryLog("C114-NOTES action=edit result=PASS"u8);
+            return RenderBrowser(host, surface) ? GuideXosResult.Success : GuideXosResult.InvalidArgument;
+        }
+        if (actionId == 14u && s_selectedEntry != null)
+        {
+            GuideXosFileResult saveResult = GuideXosFile.WriteAllTextUtf8(
+                host, PathForEntry(s_selectedEntry.Name), s_note);
+            s_browserStatus = saveResult == GuideXosFileResult.Success
+                ? "Saved to VFS"u8.ToArray() : StatusText(saveResult);
+            host.TryLog(saveResult == GuideXosFileResult.Success
+                ? "C114-NOTES action=save result=PASS"u8
+                : "C114-NOTES action=save result=FAIL"u8);
+            return RenderBrowser(host, surface) ? GuideXosResult.Success : GuideXosResult.InvalidArgument;
+        }
+        if (actionId == 15u && s_selectedEntry != null)
+        {
+            GuideXosFileResult reloadResult = GuideXosFile.ReadAllTextUtf8(
+                host, PathForEntry(s_selectedEntry.Name), out byte[] reloaded);
+            if (reloadResult == GuideXosFileResult.Success) s_note = reloaded;
+            s_browserStatus = reloadResult == GuideXosFileResult.Success
+                ? "Reloaded from VFS"u8.ToArray() : StatusText(reloadResult);
+            host.TryLog(reloadResult == GuideXosFileResult.Success
+                ? "C114-NOTES action=reload result=PASS"u8
+                : "C114-NOTES action=reload result=FAIL"u8);
+            return RenderBrowser(host, surface) ? GuideXosResult.Success : GuideXosResult.InvalidArgument;
+        }
+        return GuideXosResult.InvalidAction;
+    }
+
+    private static byte[] PathForEntry(string name)
+    {
+        return Encoding.UTF8.GetBytes("/system/apps/" + name);
+    }
+
+    private static bool RenderBrowser(GuideXosHost host, GuideXosSurface surface)
+    {
+        if (surface.TryFillRect(10, 10, 500, 230, 0x007A5A9Au) != GuideXosResult.Success ||
+            !GuideXosText.Line(surface, 24, "Managed Notes | "u8, "directory browser"u8) ||
+            !GuideXosText.Line(surface, 52, "Directory: "u8, "/system/apps"u8)) return false;
+        if (s_directory != null)
+        {
+            int y = 80;
+            int displayed = 0;
+            for (int index = 0; index < s_directory.Entries.Length && displayed < 3; index++)
+            {
+                GuideXosDirectoryEntry entry = s_directory.Entries[index];
+                byte[] name = Encoding.UTF8.GetBytes(entry.Name);
+                Span<byte> line = stackalloc byte[64];
+                int position = 0;
+                if (!GuideXosText.Append(line, ref position,
+                        index == s_selectedIndex ? "> "u8 : "  "u8) ||
+                    !GuideXosText.Append(line, ref position, name) ||
+                    !GuideXosText.Append(line, ref position, entry.Type == GuideXosEntryType.Directory
+                        ? " [DIR]"u8 : " [FILE]"u8) ||
+                    surface.TrySetText(20, y, line[..position]) != GuideXosResult.Success) return false;
+                y += 24;
+                displayed++;
+            }
+        }
+        if (!RenderContentPreview(surface, 136)) return false;
+        if (!GuideXosText.Line(surface, 160, "Status: "u8, s_browserStatus))
+        {
+            return false;
+        }
+        ReadOnlySpan<byte> selectedLabel = "<none>"u8;
+        byte[] selectedName = null;
+        if (s_selectedEntry != null)
+        {
+            selectedName = Encoding.UTF8.GetBytes(s_selectedEntry.Name);
+            selectedLabel = selectedName;
+        }
+        if (!RenderSelectedInfo(surface, selectedLabel) ||
+            surface.TryAddButton(20, 210, 100, 28, "Open"u8, 10u, out _) != GuideXosResult.Success)
+        {
+            return false;
+        }
+        return surface.TryAddButton(130, 210, 100, 28, "Next"u8, 11u, out _) == GuideXosResult.Success &&
+            surface.TryAddButton(240, 210, 100, 28, "Edit"u8, 13u, out _) == GuideXosResult.Success &&
+            surface.TryAddButton(350, 210, 100, 28, "Save"u8, 14u, out _) == GuideXosResult.Success;
+    }
+
+    private static bool RenderContentPreview(GuideXosSurface surface, int y)
+    {
+        Span<byte> line = stackalloc byte[64];
+        int position = 0;
+        if (!GuideXosText.Append(line, ref position, "Content: "u8)) return false;
+        int length = Math.Min(s_note.Length, line.Length - position);
+        if (length != 0 && !GuideXosText.Append(line, ref position, s_note.AsSpan(0, length))) return false;
+        return surface.TrySetText(20, y, line[..position]) == GuideXosResult.Success;
+    }
+
+    private static bool RenderSelectedInfo(
+        GuideXosSurface surface, ReadOnlySpan<byte> selectedLabel)
+    {
+        Span<byte> line = stackalloc byte[64];
+        int position = 0;
+        if (!GuideXosText.Append(line, ref position, "Selected: "u8) ||
+            !GuideXosText.Append(line, ref position, selectedLabel) ||
+            !GuideXosText.Append(line, ref position, " ("u8)) return false;
+        ReadOnlySpan<byte> type = s_selectedEntry == null ||
+            s_selectedEntry.Type == GuideXosEntryType.Regular ? "FILE"u8 : "DIR"u8;
+        if (!GuideXosText.Append(line, ref position, type) ||
+            !GuideXosText.Append(line, ref position, ", size="u8) ||
+            !GuideXosText.AppendUnsigned(line, ref position,
+                (uint)(s_selectedEntry?.Size ?? 0u)) ||
+            !GuideXosText.Append(line, ref position, ")"u8)) return false;
+        return surface.TrySetText(20, 184, line[..position]) == GuideXosResult.Success;
+    }
+
     private static bool Render(GuideXosHost host, GuideXosSurface surface, uint launchCount)
     {
         return surface.TryFillRect(10, 10, 500, 230, 0x007A5A9Au) == GuideXosResult.Success &&
@@ -194,6 +421,9 @@ public sealed class ManagedNotes : GuideXosApplication
         return result switch
         {
             GuideXosFileResult.InvalidPath => "Invalid path"u8.ToArray(),
+            GuideXosFileResult.NotFound => "Not found"u8.ToArray(),
+            GuideXosFileResult.NotDirectory => "Not a directory"u8.ToArray(),
+            GuideXosFileResult.EntryNameTooLong => "Entry name too long"u8.ToArray(),
             GuideXosFileResult.FileTooLarge => "File too large"u8.ToArray(),
             GuideXosFileResult.BufferTooSmall => "Buffer too small"u8.ToArray(),
             GuideXosFileResult.CapabilityUnavailable => "File access unavailable"u8.ToArray(),

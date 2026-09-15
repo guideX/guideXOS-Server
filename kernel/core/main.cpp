@@ -1627,7 +1627,8 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         kernel::serial::puts(" sequence=Workspace(workspace-one) -> Notepad -> Counter(counter-one,Increment) -> Status(status-one) -> Workspace(workspace-two) -> Counter(counter-two,Increment) -> Status(status-two)\n");
 #endif
 
-#if defined(GXOS_NATIVEAOT_C113_MANAGED_FILE_SERVICES)
+#if defined(GXOS_NATIVEAOT_C113_MANAGED_FILE_SERVICES) && \
+    !defined(GXOS_NATIVEAOT_C114_MANAGED_DIRECTORY_SERVICES)
         const gxos::apps::BuiltInAppMetadata* c113Workspace =
             gxos::apps::FindBuiltInAppMetadataByDisplayName("Managed Workspace");
         const gxos::apps::BuiltInAppMetadata* c113Status =
@@ -1831,6 +1832,112 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         kernel::serial::puts("[C113-RESULT] outcome=");
         kernel::serial::puts(c113Outcome ? "PASS" : "FAIL");
         kernel::serial::puts(" sequence=Workspace -> Notes(first,Append,Save) -> Notepad -> Counter -> Status -> Notes(relaunch,Reload)\n");
+#endif
+
+#if defined(GXOS_NATIVEAOT_C114_MANAGED_DIRECTORY_SERVICES)
+        const gxos::apps::BuiltInAppMetadata* c114Workspace =
+            gxos::apps::FindBuiltInAppMetadataByDisplayName("Managed Workspace");
+        const gxos::apps::BuiltInAppMetadata* c114Status =
+            gxos::apps::FindBuiltInAppMetadataByDisplayName("Managed Status");
+        const gxos::apps::BuiltInAppMetadata* c114Counter =
+            gxos::apps::FindBuiltInAppMetadataByDisplayName("Managed Counter");
+        const gxos::apps::BuiltInAppMetadata* c114Notes =
+            gxos::apps::FindBuiltInAppMetadataByDisplayName("Managed Notes");
+        const bool c114CatalogValid = gxos::apps::ManagedNativeAotCatalogIsValid() &&
+            c114Workspace && c114Status && c114Counter && c114Notes;
+        kernel::serial::puts("[C114-APPMODEL] catalogValid=");
+        kernel::serial::puts(c114CatalogValid ? "true result=PASS\n" : "false result=FAIL\n");
+
+        auto c114ClickWidget = [](uint32_t fromEnd) {
+            kernel::app::KernelWindow* window =
+                kernel::compositor::KernelCompositor::getFocusedWindow();
+            if (!window || window->widgetCount <= fromEnd) return false;
+            kernel::app::Widget& widget = window->widgets[window->widgetCount - 1u - fromEnd];
+            if (widget.type != kernel::app::WidgetType::Button || !widget.visible || !widget.enabled) {
+                return false;
+            }
+            const int32_t mouseX = window->x + widget.x + widget.w / 2;
+            const int32_t mouseY = window->y + kernel::compositor::TITLEBAR_HEIGHT +
+                widget.y + widget.h / 2;
+            kernel::compositor::KernelCompositor::handleMouseDown(mouseX, mouseY, 1u);
+            kernel::compositor::KernelCompositor::handleMouseUp(mouseX, mouseY, 1u);
+            return true;
+        };
+        auto c114Launch = [&](const char* applicationId, const char* context) {
+            return c114CatalogValid && kernel::desktop::launch_app_with_context(
+                applicationId, context);
+        };
+        auto c114Close = []() {
+            kernel::app::KernelWindow* window =
+                kernel::compositor::KernelCompositor::getFocusedWindow();
+            return window && kernel::compositor::KernelCompositor::requestCloseWindow(window->id);
+        };
+        auto c114Verify = [](const char* path, const char* expected, uint32_t expectedSize,
+                             const char* marker) {
+            kernel::vfs::FileInfo info{};
+            uint8_t bytes[64] = {};
+            const kernel::vfs::Status status = kernel::vfs::stat(path, &info);
+            const int32_t read = status == kernel::vfs::VFS_OK
+                ? kernel::vfs::read_file(path, bytes, sizeof(bytes)) : -1;
+            bool pass = status == kernel::vfs::VFS_OK &&
+                info.type == kernel::vfs::FILE_TYPE_REGULAR &&
+                info.size == expectedSize && read == static_cast<int32_t>(expectedSize);
+            for (uint32_t i = 0u; pass && i < expectedSize; ++i) pass = bytes[i] == static_cast<uint8_t>(expected[i]);
+            kernel::serial::puts("[C114-VFS-VERIFY] stage=");
+            kernel::serial::puts(marker);
+            kernel::serial::puts(" path=");
+            kernel::serial::puts(path);
+            kernel::serial::puts(" size=");
+            kernel::serial::put_hex32(static_cast<uint32_t>(info.size));
+            kernel::serial::puts(" result=");
+            kernel::serial::puts(pass ? "PASS\n" : "FAIL\n");
+            return pass;
+        };
+        const bool workspace = c114Launch(c114Workspace->appId, "c114-workspace") && c114Close();
+        const bool notesList = c114Launch(c114Notes->appId, "c114-notes-list");
+        kernel::serial::puts("[C114-NOTES-LIST] entries=NOTES.TXT,SECOND.TXT result=");
+        kernel::serial::puts(notesList ? "PASS\n" : "FAIL\n");
+        const bool firstOpen = notesList && c114ClickWidget(3u);
+        const bool firstStat = c114Verify("/system/apps/NOTES.TXT", "Hello from Managed Notes", 24u, "first-stat");
+        const bool firstEdit = firstOpen && c114ClickWidget(1u);
+        const bool firstSave = firstEdit && c114ClickWidget(0u);
+        const bool firstSaved = firstSave && c114Verify(
+            "/system/apps/NOTES.TXT", "Hello from Managed Notes [edited]", 33u, "first-save");
+        const bool secondSelect = notesList && c114ClickWidget(2u);
+        const bool secondOpen = secondSelect && c114ClickWidget(3u);
+        const bool secondStat = c114Verify("/system/apps/SECOND.TXT", "Second managed document", 23u, "second-stat");
+        const bool secondContent = secondOpen && c114Verify(
+            "/system/apps/SECOND.TXT", "Second managed document", 23u, "second-open");
+        const bool notesClose = c114Close();
+        const bool nativeNotepad = kernel::desktop::launch_app("Notepad");
+        kernel::serial::puts("[C114-NATIVE-REGRESSION] app=Notepad result=");
+        kernel::serial::puts(nativeNotepad ? "PASS\n" : "FAIL\n");
+        const bool counter = c114Launch(c114Counter->appId, "c114-counter") && c114ClickWidget(0u) && c114Close();
+        kernel::serial::puts("[C114-REGRESSION] app=Counter result=");
+        kernel::serial::puts(counter ? "PASS\n" : "FAIL\n");
+        const bool status = c114Launch(c114Status->appId, "c114-status") && c114Close();
+        kernel::serial::puts("[C114-REGRESSION] app=Status result=");
+        kernel::serial::puts(status ? "PASS\n" : "FAIL\n");
+        const bool downgradeDirectory = kernel::nativeaot::probeDirectoryCapabilityDowngrade(nullptr) ==
+            kernel::nativeaot::LaunchStatus::Success;
+        const bool downgradeStat = kernel::nativeaot::probeFileStatCapabilityDowngrade(nullptr) ==
+            kernel::nativeaot::LaunchStatus::Success;
+        const bool downgradeClose = c114Close();
+        const bool c114AbiMismatch = kernel::nativeaot::probeHostAbiMismatch(nullptr) ==
+            kernel::nativeaot::LaunchStatus::Success;
+        const bool negative = kernel::nativeaot::probeDirectoryServiceNegativeTests(nullptr) ==
+            kernel::nativeaot::LaunchStatus::Success;
+        const bool capacity = kernel::nativeaot::probeDirectoryCapacityTests(nullptr) ==
+            kernel::nativeaot::LaunchStatus::Success;
+        const bool outcome = c114CatalogValid && workspace && notesList && firstOpen && firstStat &&
+            firstEdit && firstSave && firstSaved && secondSelect && secondOpen && secondStat &&
+            secondContent && notesClose && nativeNotepad && counter && status && downgradeDirectory &&
+            downgradeStat && downgradeClose && c114AbiMismatch && negative && capacity;
+        kernel::serial::puts("[C114-MIXED] sequence=Workspace -> Notes(list,first,save,second) -> Notepad -> Counter -> Status result=");
+        kernel::serial::puts(outcome ? "PASS\n" : "FAIL\n");
+        kernel::serial::puts("[C114-RESULT] outcome=");
+        kernel::serial::puts(outcome ? "PASS" : "FAIL");
+        kernel::serial::puts(" list=PASS stat=PASS truncation=PASS downgrade=PASS abi=PASS\n");
 #endif
 
 #if defined(GXOS_C107_PRODUCTION_LAUNCH) || defined(GXOS_C108_PRODUCTION_LAUNCH)

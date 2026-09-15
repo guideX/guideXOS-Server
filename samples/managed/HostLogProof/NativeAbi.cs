@@ -17,9 +17,16 @@ public static class GxAbi
     public const uint LegacyContextSize = 24u;
     public const uint HostCallTablePrefixSize = 16u;
     public const uint HostCallTableV1Size = 72u;
-    public const uint HostCallTableSize = 88u;
+    public const uint C113HostCallTableSize = 88u;
+    public const uint HostCallTableSize = 104u;
+    public const uint DirectoryListOffset = 88u;
+    public const uint FileStatOffset = 96u;
     public const uint FilePathMaxBytes = 96u;
     public const uint MaxFileBytes = 16u * 1024u;
+    public const uint MaxDirectoryEntries = 64u;
+    public const uint MaxDirectoryNameBytes = 127u;
+    public const uint DirectoryEntryAbiSize = 144u;
+    public const uint FileInfoAbiSize = 16u;
     public const uint LaunchFlagAction = 0x80000000u;
     public const uint LaunchFlagCapabilityProbe = 0x40000000u;
     public const uint LaunchFlagAbiProbe = 0x20000000u;
@@ -42,6 +49,8 @@ public enum GuideXosCapability : ulong
     Log = 1ul << 6,
     FileRead = 1ul << 7,
     FileWrite = 1ul << 8,
+    DirectoryList = 1ul << 9,
+    FileStat = 1ul << 10,
 }
 
 public enum GuideXosResult
@@ -65,6 +74,8 @@ public enum GuideXosFileResult
     IoFailure = -14,
     CapabilityUnavailable = -15,
     InvalidArgument = -16,
+    NotDirectory = -17,
+    EntryNameTooLong = -18,
 }
 
 [StructLayout(LayoutKind.Sequential)]
@@ -82,6 +93,25 @@ public unsafe struct NativeHostCallTable
     public delegate* unmanaged<NativeGxAppContext*, ulong, int, int, int, int, byte*, uint, int*, int> addActionButton;
     public delegate* unmanaged<NativeGxAppContext*, byte*, uint, byte*, uint, uint*, int> fileReadAll;
     public delegate* unmanaged<NativeGxAppContext*, byte*, uint, byte*, uint, int> fileWriteAll;
+    public delegate* unmanaged<NativeGxAppContext*, byte*, uint, byte*, uint, uint, uint*, uint*, int> directoryList;
+    public delegate* unmanaged<NativeGxAppContext*, byte*, uint, byte*, uint, int> fileStat;
+}
+
+[StructLayout(LayoutKind.Sequential, Pack = 1)]
+public unsafe struct NativeDirectoryEntry
+{
+    public uint nameLength;
+    public uint type;
+    public ulong size;
+    public fixed byte name[128];
+}
+
+[StructLayout(LayoutKind.Sequential, Pack = 1)]
+public struct NativeFileInfo
+{
+    public uint type;
+    public uint reserved;
+    public ulong size;
 }
 
 [StructLayout(LayoutKind.Sequential)]

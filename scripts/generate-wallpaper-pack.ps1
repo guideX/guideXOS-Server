@@ -9,7 +9,8 @@ param(
     [string]$C104AppAPath = "",
     [string]$C104AppBPath = "",
     [string]$C107CompositePath = "",
-    [string]$ProductionCompositeApplicationPath = ""
+    [string]$ProductionCompositeApplicationPath = "",
+    [switch]$C114ManagedDirectoryServices
 )
 
 $ErrorActionPreference = "Stop"
@@ -966,6 +967,19 @@ foreach ($stagingDir in @($wallpaperDir, $certsDir, $configDir, $appsDir)) {
 New-Item -ItemType Directory -Force -Path $wallpaperDir | Out-Null
 New-Item -ItemType Directory -Force -Path $appsDir | Out-Null
 New-Item -ItemType Directory -Force -Path (Split-Path -Parent $OutputImage) | Out-Null
+
+if ($C114ManagedDirectoryServices) {
+    # Deterministic small text fixtures for the managed directory/stat proof.
+    # They live in the same approved application directory as the composite
+    # image and are discovered by the application through VFS enumeration.
+    $notesFixture = Join-Path $appsDir "NOTES.TXT"
+    $secondFixture = Join-Path $appsDir "SECOND.TXT"
+    [System.IO.File]::WriteAllText($notesFixture, "Hello from Managed Notes", [System.Text.Encoding]::ASCII)
+    [System.IO.File]::WriteAllText($secondFixture, "Second managed document", [System.Text.Encoding]::ASCII)
+    $staged += Get-Item $notesFixture
+    $staged += Get-Item $secondFixture
+    Write-Host "      staged C114 managed text fixtures at /apps/NOTES.TXT and /apps/SECOND.TXT" -ForegroundColor Yellow
+}
 
 $httpsPolicyToken = if ([string]::IsNullOrWhiteSpace($env:GXOS_NAVIGATOR_HTTPS_POLICY)) { $null } else { $env:GXOS_NAVIGATOR_HTTPS_POLICY.Trim() }
 $httpsFaultModeToken = if ([string]::IsNullOrWhiteSpace($env:GXOS_NAVIGATOR_HTTPS_FAULT_MODE)) { $null } else { $env:GXOS_NAVIGATOR_HTTPS_FAULT_MODE.Trim() }

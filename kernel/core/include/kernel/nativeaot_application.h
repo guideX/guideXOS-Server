@@ -83,6 +83,10 @@ LaunchStatus probeHostAbiMismatch(LaunchReport* report);
 LaunchStatus probeCapabilityDowngrade(LaunchReport* report);
 LaunchStatus probeFileCapabilityDowngrade(LaunchReport* report);
 LaunchStatus probeFileServiceNegativeTests(LaunchReport* report);
+LaunchStatus probeDirectoryCapabilityDowngrade(LaunchReport* report);
+LaunchStatus probeFileStatCapabilityDowngrade(LaunchReport* report);
+LaunchStatus probeDirectoryServiceNegativeTests(LaunchReport* report);
+LaunchStatus probeDirectoryCapacityTests(LaunchReport* report);
 const char* productionCompositeImagePath();
 const char* launchStatusName(LaunchStatus status);
 
