@@ -18,20 +18,23 @@ output queue, or generation/session lifecycle.
 The standalone implementation was branched from final Phase 28M commit
 `f50ce42a7a9c602f69b86c1a579952b562aa382b` on local branch
 `phase28n-source-debugger-integration`. The implementation commit is
-`591c2fa` (`developer studio: integrate debugger with source editor`).
+`591c2fa` (`developer studio: integrate debugger with source editor`), followed
+by local proof-hardening commit `77d861f` (`developer studio: harden manager
+breakpoint proof`).
 
 The server repository started at `766d89673e191ef34477442bee7435cc4fa00c8a`,
 branch `v0.5_DEVELOPER_STUDIO`, with upstream
 `origin/v0.5_DEVELOPER_STUDIO` and divergence 4 ahead / 0 behind. The server
-integration commit is the local commit containing this document and the
-Phase 28N package/harness changes; it was not pushed.
+package/harness integration is local commit `e839e64` (`developer studio:
+integrate source editor debugging`). This final package/hash update is recorded
+in a separate local closure commit; neither commit was pushed.
 
 The final staged package artifacts are:
 
 | Architecture | Size | SHA-256 | ELF machine |
 | --- | ---: | --- | --- |
-| AMD64 | 870,752 bytes | `E0553AD8B31C30604854C0DC711F09B6F5CD9DCB5D45B54818D5A8DC8F624108` | x86-64 |
-| ARM64 | 1,025,704 bytes | `6743502A88FFD7254DF1D713C83D8430BEF68A8BE19AC3C1465DAA75D74EC7B6` | AArch64 |
+| AMD64 | 870,864 bytes | `2532A8D98044DC9895DC1E0F01327F34DFB1E3F6B515DB5245C0F38CD72B7629` | x86-64 |
+| ARM64 | 1,025,824 bytes | `5B464074A6B9F037E6352C4B25E57984AD2B8104862B388D8E99B25D8098FA68` | AArch64 |
 
 The recorded Phase 28M baseline was AMD64 861,856 bytes,
 `BC9D35CB1D9582EB0ABD4CD434E05EA8162B1B1C22F030E4A6D376B4C4546DF3`, and
@@ -158,7 +161,7 @@ The focused marker set includes:
 The three fresh isolated packaged QEMU boots passed in one invocation. Evidence
 was preserved at:
 
-`C:\Users\guideX\AppData\Local\Temp\guidexos-phase28g-285f61d10c74473b876f2ff72d6fd591`
+`C:\Users\guideX\AppData\Local\Temp\guidexos-phase28g-e58be2f03a44446aa1f5755296b1c10a`
 
 Each boot produced the full Phase 28N and Phase 28M guest pass markers. Serial
 markers provide widget/state evidence for editor readiness, breakpoint add and
