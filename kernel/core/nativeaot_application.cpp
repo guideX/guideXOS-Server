@@ -29,6 +29,7 @@
 namespace kernel {
 namespace nativeaot {
 int32_t invokeManagedAction(uint32_t selector, uint32_t actionId);
+int32_t invokeManagedInput(uint32_t selector, uint32_t inputFlags);
 namespace {
 
 constexpr uintptr_t kPageSize = 0x1000u;
@@ -105,6 +106,15 @@ constexpr const char* kManagedFileRoot = "/system/apps/";
 constexpr uint32_t kLaunchFlagAction = 0x80000000u;
 constexpr uint32_t kLaunchFlagCapabilityProbe = 0x40000000u;
 constexpr uint32_t kLaunchFlagAbiProbe = 0x20000000u;
+// C116 input events reuse the existing launch-flags transport.  The input
+// bridge is append-only at the semantic level: no host-table field is added.
+constexpr uint32_t kLaunchFlagInput = 0x10000000u;
+constexpr uint32_t kLaunchFlagInputKindMask = 0x0F000000u;
+constexpr uint32_t kLaunchFlagInputPointerDown = 0x01000000u;
+constexpr uint32_t kLaunchFlagInputKeyDown = 0x02000000u;
+constexpr uint32_t kLaunchFlagInputKeyChar = 0x03000000u;
+constexpr uint32_t kLaunchFlagInputPayloadMask = 0x00FFFFFFu;
+constexpr uint32_t kLaunchFlagInputCoordinateMask = 0x00000FFFu;
 
 #pragma pack(push, 1)
 struct Elf64Header {
@@ -308,6 +318,7 @@ bool g_c107ManagedPassObserved = false;
 bool g_c107ManagedInvalidApplicationObserved = false;
 ResidentApplication g_application = {};
 NativeGxAppContext* g_activeManagedContext = nullptr;
+bool g_c116InputDispatchActive = false;
 #if defined(GXOS_C108_TLS_LIFECYCLE)
 uint32_t g_c108TlsInstallCount = 0;
 uint32_t g_c108ManagedInvocationOrdinal = 0;
@@ -397,6 +408,46 @@ public:
         serial::puts("\n");
     }
 
+    void onMouseDown(int x, int y, uint8_t button) override {
+        if (button != 1u || m_selector == 0u || x < 0 || y < 0 ||
+            static_cast<uint32_t>(x) > kLaunchFlagInputCoordinateMask ||
+            static_cast<uint32_t>(y) > kLaunchFlagInputCoordinateMask) {
+            return;
+        }
+        const uint32_t payload = static_cast<uint32_t>(x) |
+            (static_cast<uint32_t>(y) << 12);
+        const int32_t result = invokeManagedInput(
+            m_selector, kLaunchFlagInput | kLaunchFlagInputPointerDown | payload);
+        serial::puts("[C116-NATIVE-INPUT] kind=pointer-down x=");
+        serial::put_hex32(static_cast<uint32_t>(x));
+        serial::puts(" y=");
+        serial::put_hex32(static_cast<uint32_t>(y));
+        serial::puts(" result=");
+        serial::puts(result == 0 ? "PASS\n" : "IGNORED\n");
+    }
+
+    void onKeyDown(uint32_t key) override {
+        if (m_selector == 0u || key > kLaunchFlagInputPayloadMask) return;
+        const int32_t result = invokeManagedInput(
+            m_selector, kLaunchFlagInput | kLaunchFlagInputKeyDown | key);
+        serial::puts("[C116-NATIVE-INPUT] kind=key-down key=");
+        serial::put_hex32(key);
+        serial::puts(" result=");
+        serial::puts(result == 0 ? "PASS\n" : "IGNORED\n");
+    }
+
+    void onKeyChar(char c) override {
+        if (m_selector == 0u) return;
+        const uint32_t payload = static_cast<uint32_t>(
+            static_cast<uint8_t>(c));
+        const int32_t result = invokeManagedInput(
+            m_selector, kLaunchFlagInput | kLaunchFlagInputKeyChar | payload);
+        serial::puts("[C116-NATIVE-INPUT] kind=key-char value=");
+        serial::put_hex32(payload);
+        serial::puts(" result=");
+        serial::puts(result == 0 ? "PASS\n" : "IGNORED\n");
+    }
+
     void onWindowClose() override {
         serial::puts("[C111-SURFACE] action=close result=PASS\n");
     }
@@ -436,6 +487,10 @@ public:
         return true;
     }
 
+    void setSelector(uint32_t selector) {
+        m_selector = selector;
+    }
+
     bool owns(uint64_t window) const {
         return m_window != nullptr && m_window->id == static_cast<uint32_t>(window);
     }
@@ -447,6 +502,24 @@ public:
     bool setText(int32_t x, int32_t y, const char* text) {
         if (!m_window || !text || x < 0 || y < 0) return false;
         return addLabel(x, y, 480, 18, text) >= 0;
+    }
+
+    bool updateText(int32_t x, int32_t y, const char* text) {
+        if (!m_window || !text || x < 0 || y < 0) return false;
+        for (int index = 0; index < m_window->widgetCount; ++index) {
+            app::Widget& widget = m_window->widgets[index];
+            if (widget.type != app::WidgetType::Label || widget.x != x ||
+                widget.y != y) continue;
+            int length = 0;
+            while (text[length] && length < 63) {
+                widget.text[length] = text[length];
+                ++length;
+            }
+            widget.text[length] = '\0';
+            invalidate();
+            return true;
+        }
+        return false;
     }
 
     bool addRect(int32_t x, int32_t y, int32_t width, int32_t height, uint32_t color) {
@@ -508,6 +581,7 @@ private:
     uint32_t m_actionId;
     uint32_t m_actionSelector;
     int m_actionCount;
+    uint32_t m_selector = 0;
     ManagedActionBinding m_actionBindings[8] = {};
     int m_actionBindingCount = 0;
 };
@@ -1566,6 +1640,10 @@ int32_t GUIDEXOS_NATIVEAOT_PAL_CALL managedRequestWindow(
         return -2;
     }
     NativeAotManagedSurface* surface = managedSurface();
+    if (surface) {
+        surface->setSelector(static_cast<uint32_t>(
+            reinterpret_cast<uintptr_t>(context->userData)));
+    }
     if (!surface || !surface->open(reinterpret_cast<const char*>(title), width, height)) {
         return -4;
     }
@@ -1584,9 +1662,13 @@ int32_t GUIDEXOS_NATIVEAOT_PAL_CALL managedDrawText(
     NativeAotManagedSurface* surface = managedSurface();
     if (!activeSurfaceContext(context) || !text || !surface || !surface->owns(window) ||
         x < 0 || y < 0 || boundedCStringLength(text, 63u) > 63u ||
-        !surface->setText(x, y, reinterpret_cast<const char*>(text))) {
+        !(g_c116InputDispatchActive
+            ? surface->updateText(x, y, reinterpret_cast<const char*>(text)) ||
+                surface->setText(x, y, reinterpret_cast<const char*>(text))
+            : surface->setText(x, y, reinterpret_cast<const char*>(text)))) {
         return -2;
     }
+    if (g_c116InputDispatchActive) return 0;
     serial::puts("[C111-SURFACE-TEXT] window=");
     serial::put_hex64(window);
     serial::puts(" x=");
@@ -1610,6 +1692,7 @@ int32_t GUIDEXOS_NATIVEAOT_PAL_CALL managedDrawRect(
     }
     surface->beginManagedFrame();
     if (!surface->addRect(x, y, width, height, color)) return -2;
+    if (g_c116InputDispatchActive) return 0;
     serial::puts("[C111-SURFACE-RECT] window=");
     serial::put_hex64(window);
     serial::puts(" result=PASS\n");
@@ -1650,6 +1733,7 @@ int32_t GUIDEXOS_NATIVEAOT_PAL_CALL managedAddActionButton(
             outWidget)) {
         return -2;
     }
+    if (g_c116InputDispatchActive) return 0;
     serial::puts("[C112-SURFACE-ACTION] window=");
     serial::put_hex64(window);
     serial::puts(" action=");
@@ -1712,7 +1796,9 @@ int32_t GUIDEXOS_NATIVEAOT_PAL_CALL managedLog(
     const bool c113Message = managedMessageStartsWith(message, "C113-");
     const bool c114Message = managedMessageStartsWith(message, "C114-");
     const bool c115Message = managedMessageStartsWith(message, "C115-");
-    serial::puts(c115Message ? "[C115-MANAGED-OUTPUT] " :
+    const bool c116Message = managedMessageStartsWith(message, "C116-");
+    serial::puts(c116Message ? "[C116-MANAGED-OUTPUT] " :
+        c115Message ? "[C115-MANAGED-OUTPUT] " :
         c114Message ? "[C114-MANAGED-OUTPUT] " :
         c113Message ? "[C113-MANAGED-OUTPUT] " :
         c112Message ? "[C112-MANAGED-OUTPUT] " :
@@ -2065,6 +2151,23 @@ int32_t invokeManagedAction(uint32_t selector, uint32_t actionId) {
     return invokeManagedWithHostMetadata(
         selector, kLaunchFlagAction | actionId,
         kManagedHostAbiVersion, kManagedCapabilities);
+}
+
+int32_t invokeManagedInput(uint32_t selector, uint32_t inputFlags) {
+    const uint32_t kind = inputFlags & kLaunchFlagInputKindMask;
+    const uint32_t payload = inputFlags & kLaunchFlagInputPayloadMask;
+    if (selector == 0u || (inputFlags & kLaunchFlagInput) == 0u ||
+        (kind != kLaunchFlagInputPointerDown &&
+         kind != kLaunchFlagInputKeyDown &&
+         kind != kLaunchFlagInputKeyChar) ||
+        payload > kLaunchFlagInputPayloadMask) {
+        return -2;
+    }
+    g_c116InputDispatchActive = true;
+    const int32_t result = invokeManagedWithHostMetadata(
+        selector, inputFlags, kManagedHostAbiVersion, kManagedCapabilities);
+    g_c116InputDispatchActive = false;
+    return result;
 }
 
 LaunchStatus launchResident(const char* path, uint32_t logicalAppId,

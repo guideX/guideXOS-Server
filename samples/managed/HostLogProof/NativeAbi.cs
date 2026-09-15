@@ -30,6 +30,15 @@ public static class GxAbi
     public const uint LaunchFlagAction = 0x80000000u;
     public const uint LaunchFlagCapabilityProbe = 0x40000000u;
     public const uint LaunchFlagAbiProbe = 0x20000000u;
+    // C116 reuses the existing launch-flags transport for synchronous input
+    // re-entry.  The host table and its ABI version remain unchanged.
+    public const uint LaunchFlagInput = 0x10000000u;
+    public const uint LaunchFlagInputKindMask = 0x0F000000u;
+    public const uint LaunchFlagInputPointerDown = 0x01000000u;
+    public const uint LaunchFlagInputKeyDown = 0x02000000u;
+    public const uint LaunchFlagInputKeyChar = 0x03000000u;
+    public const uint LaunchFlagInputPayloadMask = 0x00FFFFFFu;
+    public const uint LaunchFlagInputCoordinateMask = 0x00000FFFu;
     public const uint LaunchFlagPayloadMask = 0x1FFFFFFFu;
     public const int ErrorInvalidArgument = -2;
     public const int ErrorUnsupported = -3;

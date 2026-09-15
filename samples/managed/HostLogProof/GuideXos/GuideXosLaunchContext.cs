@@ -24,6 +24,20 @@ public sealed unsafe class GuideXosLaunchContext
     public ReadOnlySpan<byte> Utf8 => _utf8;
     public bool IsAction => (Flags & GxAbi.LaunchFlagAction) != 0;
     public uint ActionId => Flags & GxAbi.LaunchFlagPayloadMask;
+    public bool IsInput => (Flags & GxAbi.LaunchFlagInput) != 0;
+    public GuideXosInputKind InputKind =>
+        (Flags & GxAbi.LaunchFlagInputKindMask) switch
+        {
+            GxAbi.LaunchFlagInputPointerDown => GuideXosInputKind.PointerDown,
+            GxAbi.LaunchFlagInputKeyDown => GuideXosInputKind.KeyDown,
+            GxAbi.LaunchFlagInputKeyChar => GuideXosInputKind.KeyChar,
+            _ => GuideXosInputKind.None,
+        };
+    public uint InputPayload => Flags & GxAbi.LaunchFlagInputPayloadMask;
+    public int InputX => (int)(InputPayload & GxAbi.LaunchFlagInputCoordinateMask);
+    public int InputY => (int)((InputPayload >> 12) & GxAbi.LaunchFlagInputCoordinateMask);
+    public uint InputKeyCode => InputPayload;
+    public char InputCharacter => (char)(InputPayload & 0xFFu);
 
     internal static bool TryCopy(
         NativeGxAppContext* context,

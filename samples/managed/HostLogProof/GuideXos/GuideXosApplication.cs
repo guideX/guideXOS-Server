@@ -9,6 +9,11 @@ public abstract unsafe class GuideXosApplication
     {
         return GuideXosResult.InvalidAction;
     }
+    public virtual GuideXosResult HandleInput(
+        GuideXosHost host, GuideXosInputEvent input)
+    {
+        return GuideXosResult.Success;
+    }
 }
 
 public readonly struct GuideXosApplicationDescriptor
@@ -80,9 +85,11 @@ public static unsafe class GuideXosApplicationRegistry
             return GxAbi.ErrorInvalidApplicationId;
         }
 
-        GuideXosResult result = host.IsAction
-            ? descriptor.Application.HandleAction(host, host.LaunchContext.ActionId)
-            : descriptor.Application.Launch(host);
+        GuideXosResult result = host.LaunchContext.IsInput
+            ? descriptor.Application.HandleInput(host, GuideXosInputEvent.From(host.LaunchContext))
+            : host.IsAction
+                ? descriptor.Application.HandleAction(host, host.LaunchContext.ActionId)
+                : descriptor.Application.Launch(host);
         return (int)result;
     }
 }

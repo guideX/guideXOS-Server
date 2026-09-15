@@ -2083,6 +2083,258 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         kernel::serial::puts(" picker=managed state-machine filter=TXT overwrite=explicit lifecycle=resident\n");
 #endif
 
+#if defined(GXOS_NATIVEAOT_C116_MANAGED_TEXT_INPUT)
+        {
+        const gxos::apps::BuiltInAppMetadata* c116Workspace =
+            gxos::apps::FindBuiltInAppMetadataByDisplayName("Managed Workspace");
+        const gxos::apps::BuiltInAppMetadata* c116Status =
+            gxos::apps::FindBuiltInAppMetadataByDisplayName("Managed Status");
+        const gxos::apps::BuiltInAppMetadata* c116Counter =
+            gxos::apps::FindBuiltInAppMetadataByDisplayName("Managed Counter");
+        const gxos::apps::BuiltInAppMetadata* c116Notes =
+            gxos::apps::FindBuiltInAppMetadataByDisplayName("Managed Notes");
+        const bool c116CatalogValid = gxos::apps::ManagedNativeAotCatalogIsValid() &&
+            c116Workspace && c116Status && c116Counter && c116Notes;
+        kernel::serial::puts("[C116-APPMODEL] catalogValid=");
+        kernel::serial::puts(c116CatalogValid ? "true result=PASS\n" : "false result=FAIL\n");
+
+        auto c116Contains = [](const char* value, const char* needle) {
+            if (!value || !needle || !needle[0]) return false;
+            for (uint32_t start = 0u; value[start] != 0; ++start) {
+                uint32_t offset = 0u;
+                while (needle[offset] != 0 && value[start + offset] == needle[offset]) {
+                    ++offset;
+                }
+                if (needle[offset] == 0) return true;
+            }
+            return false;
+        };
+        auto c116HasLabel = [&](const char* text) {
+            kernel::app::KernelWindow* window =
+                kernel::compositor::KernelCompositor::getFocusedWindow();
+            if (!window || !text) return false;
+            for (int index = 0; index < window->widgetCount; ++index) {
+                kernel::app::Widget& widget = window->widgets[index];
+                if (widget.type == kernel::app::WidgetType::Label &&
+                    widget.visible && c116Contains(widget.text, text)) return true;
+            }
+            return false;
+        };
+        auto c116HasButton = [&](const char* text) {
+            kernel::app::KernelWindow* window =
+                kernel::compositor::KernelCompositor::getFocusedWindow();
+            if (!window || !text) return false;
+            for (int index = 0; index < window->widgetCount; ++index) {
+                kernel::app::Widget& widget = window->widgets[index];
+                if (widget.type == kernel::app::WidgetType::Button &&
+                    widget.visible && c116Contains(widget.text, text)) return true;
+            }
+            return false;
+        };
+        auto c116ClickWidget = [](uint32_t fromEnd) {
+            kernel::app::KernelWindow* window =
+                kernel::compositor::KernelCompositor::getFocusedWindow();
+            if (!window || window->widgetCount <= fromEnd) return false;
+            kernel::app::Widget& widget = window->widgets[window->widgetCount - 1u - fromEnd];
+            if (widget.type != kernel::app::WidgetType::Button ||
+                !widget.visible || !widget.enabled) return false;
+            const int32_t mouseX = window->x + widget.x + widget.w / 2;
+            const int32_t mouseY = window->y + kernel::compositor::TITLEBAR_HEIGHT +
+                widget.y + widget.h / 2;
+            kernel::compositor::KernelCompositor::handleMouseDown(mouseX, mouseY, 1u);
+            kernel::compositor::KernelCompositor::handleMouseUp(mouseX, mouseY, 1u);
+            return true;
+        };
+        auto c116FocusFilename = [&]() {
+            kernel::app::KernelWindow* window =
+                kernel::compositor::KernelCompositor::getFocusedWindow();
+            if (!window) return false;
+            const int32_t mouseX = window->x + 32;
+            const int32_t mouseY = window->y + kernel::compositor::TITLEBAR_HEIGHT + 92;
+            kernel::compositor::KernelCompositor::handleMouseDown(mouseX, mouseY, 1u);
+            kernel::compositor::KernelCompositor::handleMouseUp(mouseX, mouseY, 1u);
+            return c116HasLabel("Filename: [ ");
+        };
+        auto c116Key = [](uint32_t key) {
+            kernel::compositor::KernelCompositor::handleKeyDown(key);
+            return true;
+        };
+        auto c116Char = [](char value) {
+            kernel::compositor::KernelCompositor::handleKeyChar(value);
+            return true;
+        };
+        auto c116Text = [](const char* text) {
+            if (!text) return false;
+            for (uint32_t index = 0u; text[index] != 0; ++index) {
+                kernel::compositor::KernelCompositor::handleKeyChar(text[index]);
+            }
+            return true;
+        };
+        auto c116Verify = [](const char* path, const char* expected,
+                             uint32_t expectedSize, const char* marker) {
+            kernel::vfs::FileInfo info{};
+            uint8_t bytes[128] = {};
+            const kernel::vfs::Status status = kernel::vfs::stat(path, &info);
+            const int32_t read = status == kernel::vfs::VFS_OK
+                ? kernel::vfs::read_file(path, bytes, sizeof(bytes)) : -1;
+            bool pass = status == kernel::vfs::VFS_OK &&
+                info.type == kernel::vfs::FILE_TYPE_REGULAR &&
+                info.size == expectedSize && read == static_cast<int32_t>(expectedSize);
+            for (uint32_t index = 0u; pass && index < expectedSize; ++index) {
+                pass = bytes[index] == static_cast<uint8_t>(expected[index]);
+            }
+            kernel::serial::puts("[C116-VFS-VERIFY] stage=");
+            kernel::serial::puts(marker);
+            kernel::serial::puts(" path=");
+            kernel::serial::puts(path);
+            kernel::serial::puts(" size=");
+            kernel::serial::put_hex32(static_cast<uint32_t>(info.size));
+            kernel::serial::puts(" result=");
+            kernel::serial::puts(pass ? "PASS\n" : "FAIL\n");
+            return pass;
+        };
+        auto c116Launch = [&](const char* applicationId, const char* context) {
+            return c116CatalogValid && kernel::desktop::launch_app_with_context(
+                applicationId, context);
+        };
+        auto c116Close = []() {
+            kernel::app::KernelWindow* window =
+                kernel::compositor::KernelCompositor::getFocusedWindow();
+            return window && kernel::compositor::KernelCompositor::requestCloseWindow(window->id);
+        };
+
+        const bool workspace = c116Launch(c116Workspace->appId, "c116-workspace") && c116Close();
+        const bool notesLaunch = c116Launch(c116Notes->appId, "c116-notes");
+        const bool openPicker = notesLaunch && c116ClickWidget(3u);
+        const bool firstOpen = openPicker && c116ClickWidget(2u);
+        const bool firstOpened = firstOpen && c116Verify(
+            "/system/apps/NOTES.TXT", "Hello from Managed Notes", 24u, "open-notes");
+        const bool openSecondPicker = firstOpened && c116ClickWidget(3u);
+        const bool selectSecond = openSecondPicker && c116ClickWidget(1u);
+        const bool secondOpen = selectSecond && c116ClickWidget(2u);
+        const bool secondOpened = secondOpen && c116Verify(
+            "/system/apps/SECOND.TXT", "Second managed document", 23u, "open-second");
+        const bool editSecond = secondOpened && c116ClickWidget(1u);
+        const bool saveAsThird = editSecond && c116ClickWidget(2u);
+        const bool initialSuggestion = saveAsThird &&
+            c116HasLabel("Filename: [ THIRD.TXT ]");
+        const bool pointerFocus = initialSuggestion && c116FocusFilename() &&
+            c116HasLabel("Filename: [ THIRD.TXT|");
+        bool erasedThird = pointerFocus;
+        for (uint32_t index = 0u; erasedThird && index < 9u; ++index) {
+            erasedThird = c116Key(8u);
+        }
+        const bool backspaceEmpty = erasedThird && c116HasLabel("Filename: [ |");
+        const bool typedCustom = backspaceEmpty && c116Text("CUSTOM.TXT") &&
+            c116HasLabel("Filename: [ CUSTOM.TXT|");
+        const bool submittedCustom = typedCustom && c116Key(10u);
+        const bool customSaved = submittedCustom && c116Verify(
+            "/system/apps/CUSTOM.TXT", "Second managed document [edited]", 32u,
+            "save-custom");
+        const bool openCustomPicker = customSaved && c116ClickWidget(3u);
+        const bool customOpen = openCustomPicker && c116ClickWidget(2u);
+        const bool customReopened = customOpen && c116Verify(
+            "/system/apps/CUSTOM.TXT", "Second managed document [edited]", 32u,
+            "reopen-custom");
+
+        const bool editForOverwrite = customReopened && c116ClickWidget(1u);
+        const bool saveAsExisting = editForOverwrite && c116ClickWidget(2u);
+        const bool focusExisting = saveAsExisting && c116FocusFilename();
+        bool erasedExisting = focusExisting;
+        for (uint32_t index = 0u; erasedExisting && index < 9u; ++index) {
+            erasedExisting = c116Key(8u);
+        }
+        const bool typedExisting = erasedExisting && c116Text("NOTES.TXT") &&
+            c116HasLabel("Filename: [ NOTES.TXT|");
+        const bool overwriteRequest = typedExisting && c116Key(10u) &&
+            c116HasButton("Overwrite");
+        const bool overwriteDecline = overwriteRequest && c116ClickWidget(0u) &&
+            c116HasLabel("Overwrite declined");
+        const bool preserved = overwriteDecline && c116Verify(
+            "/system/apps/NOTES.TXT", "Hello from Managed Notes", 24u,
+            "overwrite-decline");
+        const bool overwriteRetry = preserved && c116ClickWidget(1u);
+        const bool overwriteConfirmPrompt = overwriteRetry && c116HasButton("Overwrite");
+        const bool overwriteConfirm = overwriteConfirmPrompt && c116ClickWidget(1u);
+        const bool overwritten = overwriteConfirm && c116Verify(
+            "/system/apps/NOTES.TXT", "Second managed document [edited] [edited]", 41u,
+            "overwrite-confirm");
+
+        const bool openCancelPicker = overwritten && c116ClickWidget(3u);
+        const bool openCancel = openCancelPicker && c116ClickWidget(0u);
+        const bool saveCancelPicker = openCancel && c116ClickWidget(2u);
+        const bool focusCancel = saveCancelPicker && c116FocusFilename();
+        const bool typedPartial = focusCancel && c116Text("P");
+        const bool saveCancel = typedPartial && c116Key(27u) &&
+            c116HasLabel("Status: Save cancelled");
+        const bool noWriteOnCancel = saveCancel && c116Verify(
+            "/system/apps/NOTES.TXT", "Second managed document [edited] [edited]", 41u,
+            "cancel-no-write");
+
+        const bool negativeLaunch = noWriteOnCancel &&
+            c116Launch(c116Notes->appId, "c116-notes-negative");
+        const bool negativeClose = negativeLaunch && c116Close();
+        const bool nativeNotepad = negativeClose && kernel::desktop::launch_app("Notepad");
+        kernel::serial::puts("[C116-NATIVE-REGRESSION] app=Notepad result=");
+        kernel::serial::puts(nativeNotepad ? "PASS\n" : "FAIL\n");
+        const bool counterLaunch = nativeNotepad &&
+            c116Launch(c116Counter->appId, "c116-counter");
+        const bool typingWithoutPicker = counterLaunch && c116Char('X');
+        const bool counter = counterLaunch && c116ClickWidget(0u) && c116Close();
+        kernel::serial::puts("[C116-REGRESSION] app=Counter result=");
+        kernel::serial::puts(counter ? "PASS\n" : "FAIL\n");
+        const bool status = counter && c116Launch(c116Status->appId, "c116-status") && c116Close();
+        kernel::serial::puts("[C116-REGRESSION] app=Status result=");
+        kernel::serial::puts(status ? "PASS\n" : "FAIL\n");
+
+        const bool returnNotes = status && c116Launch(c116Notes->appId, "c116-return");
+        const bool returnSave = returnNotes && c116ClickWidget(2u);
+        const bool transientReset = returnSave && c116HasLabel("Filename: [ THIRD.TXT ]");
+        kernel::serial::puts("[C116-FOCUS] cancel-reset=");
+        kernel::serial::puts(transientReset ? "PASS\n" : "FAIL\n");
+        const bool focusFinal = transientReset && c116FocusFilename();
+        bool eraseFinal = focusFinal;
+        for (uint32_t index = 0u; eraseFinal && index < 9u; ++index) {
+            eraseFinal = c116Key(8u);
+        }
+        const bool finalTyped = eraseFinal && c116Text("FINAL.TXT") && c116Key(10u);
+        const bool finalSaved = finalTyped && c116Verify(
+            "/system/apps/FINAL.TXT", "Second managed document [edited] [edited]", 41u,
+            "save-final");
+
+        const bool downgradeDirectory = kernel::nativeaot::probeDirectoryCapabilityDowngrade(nullptr) ==
+            kernel::nativeaot::LaunchStatus::Success;
+        const bool downgradeStat = kernel::nativeaot::probeFileStatCapabilityDowngrade(nullptr) ==
+            kernel::nativeaot::LaunchStatus::Success;
+        const bool downgradeWrite = kernel::nativeaot::probeFileCapabilityDowngrade(nullptr) ==
+            kernel::nativeaot::LaunchStatus::Success;
+        const bool downgradeClose = c116Close();
+        const bool c116AbiMismatch = kernel::nativeaot::probeHostAbiMismatch(nullptr) ==
+            kernel::nativeaot::LaunchStatus::Success;
+        const bool directoryNegative = kernel::nativeaot::probeDirectoryServiceNegativeTests(nullptr) ==
+            kernel::nativeaot::LaunchStatus::Success;
+        const bool capacity = kernel::nativeaot::probeDirectoryCapacityTests(nullptr) ==
+            kernel::nativeaot::LaunchStatus::Success;
+        const bool outcome = c116CatalogValid && workspace && notesLaunch && openPicker &&
+            firstOpen && firstOpened && openSecondPicker && selectSecond && secondOpen &&
+            secondOpened && editSecond && saveAsThird && initialSuggestion && pointerFocus &&
+            backspaceEmpty && typedCustom && submittedCustom && customSaved && openCustomPicker &&
+            customOpen && customReopened && editForOverwrite && saveAsExisting && focusExisting &&
+            typedExisting && overwriteRequest && overwriteDecline && preserved && overwriteRetry &&
+            overwriteConfirmPrompt && overwriteConfirm && overwritten && openCancelPicker &&
+            openCancel && saveCancelPicker && focusCancel && typedPartial && saveCancel &&
+            noWriteOnCancel && negativeLaunch && negativeClose && nativeNotepad && counterLaunch &&
+            typingWithoutPicker && counter && status && returnNotes && returnSave && transientReset &&
+            focusFinal && finalTyped && finalSaved && downgradeDirectory && downgradeStat &&
+            downgradeWrite && downgradeClose && c116AbiMismatch && directoryNegative && capacity;
+        kernel::serial::puts("[C116-MIXED] sequence=Workspace -> Notes(pointer-focus,typed-save,reopen,typed-overwrite,cancel,reset) -> Notepad -> Counter -> Status -> Notes result=");
+        kernel::serial::puts(outcome ? "PASS\n" : "FAIL\n");
+        kernel::serial::puts("[C116-RESULT] outcome=");
+        kernel::serial::puts(outcome ? "PASS" : "FAIL");
+        kernel::serial::puts(" text-input=reusable keyboard=managed picker=preserved lifecycle=resident\n");
+        }
+#endif
+
 #if defined(GXOS_C107_PRODUCTION_LAUNCH) || defined(GXOS_C108_PRODUCTION_LAUNCH)
         auto emitC107Report = [](uint32_t ordinal, const char* identity,
                                  const kernel::nativeaot::LaunchReport& report,

@@ -10519,9 +10519,10 @@ void handle_key(uint32_t key)
     if (compositor::KernelCompositor::hasWindows()) {
         app::KernelWindow* focused = compositor::KernelCompositor::getFocusedWindow();
         if (focused) {
-            // Escape closes app window
+            // Give Escape to the focused compositor app. Managed text fields
+            // use it to cancel their active picker without closing the app.
             if (key == 27) {  // ESC
-                compositor::KernelCompositor::closeWindow(focused->id);
+                compositor::KernelCompositor::handleKeyDown(key);
                 draw();
                 return;
             }

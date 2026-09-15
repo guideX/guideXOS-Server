@@ -145,6 +145,8 @@ int KernelApp::addLabel(int x, int y, int w, int h, const char* text) {
     widget.fgColor = 0xFFFFFFFF;
     widget.enabled = true;
     widget.visible = true;
+    widget.hover = false;
+    widget.pressed = false;
     
     return id;
 }
@@ -167,6 +169,8 @@ int KernelApp::addButton(int x, int y, int w, int h, const char* text) {
     widget.fgColor = 0xFFFFFFFF;
     widget.enabled = true;
     widget.visible = true;
+    widget.hover = false;
+    widget.pressed = false;
     
     return id;
 }

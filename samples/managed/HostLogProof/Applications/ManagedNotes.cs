@@ -440,6 +440,7 @@ public sealed class ManagedNotes : GuideXosApplication
     private ulong _window;
     private uint _launchCount;
     private uint _saveInvocation;
+    private bool _useTextInput;
     [ThreadStatic]
     private static uint s_threadLaunchCount;
 
@@ -454,6 +455,7 @@ public sealed class ManagedNotes : GuideXosApplication
             return GuideXosResult.InvalidArgument;
         }
         _picker.Reset();
+        _useTextInput = IsC116Context(host);
         _currentPath = "/system/apps/NOTES.TXT";
         _saveInvocation = 0u;
         GuideXosFileResult loadResult = GuideXosFile.ReadAllTextUtf8(
@@ -503,8 +505,32 @@ public sealed class ManagedNotes : GuideXosApplication
         {
             return RunNegativeProbe(host);
         }
+#if HOSTLOGPROOF_C116_MANAGED_TEXT_INPUT
+        if (IsContext(host, "c116-notes-negative"u8))
+        {
+            return RunTextInputNegativeProbe(host);
+        }
+#endif
         return GuideXosResult.Success;
     }
+
+#if HOSTLOGPROOF_C116_MANAGED_TEXT_INPUT
+    public override GuideXosResult HandleInput(
+        GuideXosHost host, GuideXosInputEvent input)
+    {
+        if (!_picker.IsActive)
+        {
+            return GuideXosResult.Success;
+        }
+        if (host.TryGetSurface(_window, out GuideXosSurface surface) !=
+                GuideXosResult.Success || surface == null)
+        {
+            return GuideXosResult.SurfaceCreationFailed;
+        }
+        GuideXosFilePickerResult result = _picker.HandleInput(host, surface, input);
+        return ApplyPickerResult(host, surface, result);
+    }
+#endif
 
     public override GuideXosResult HandleAction(GuideXosHost host, uint actionId)
     {
@@ -572,6 +598,12 @@ public sealed class ManagedNotes : GuideXosApplication
         GuideXosHost host, GuideXosSurface surface, uint actionId)
     {
         GuideXosFilePickerResult result = _picker.HandleAction(host, surface, actionId);
+        return ApplyPickerResult(host, surface, result);
+    }
+
+    private GuideXosResult ApplyPickerResult(
+        GuideXosHost host, GuideXosSurface surface, GuideXosFilePickerResult result)
+    {
         if (result.Status == GuideXosFilePickerStatus.Selected)
         {
             if (_picker.Mode == GuideXosFilePickerMode.Open)
@@ -603,6 +635,9 @@ public sealed class ManagedNotes : GuideXosApplication
                 _currentPath = result.Path;
                 _status = "Saved through picker"u8.ToArray();
                 host.TryLog(PathLog("C115-NOTES save=PASS path=", result.Path));
+#if HOSTLOGPROOF_C116_MANAGED_TEXT_INPUT
+                host.TryLog(PathLog("C116-NOTES typed-save path=", result.Path));
+#endif
             }
             _picker.Reset();
             return RenderMain(host, surface, _launchCount)
@@ -631,7 +666,8 @@ public sealed class ManagedNotes : GuideXosApplication
     {
         GuideXosFilePickerResult result = _picker.SaveFile(
             host, surface, GuideXosFilePickerOptions.Save(
-                "/system/apps", "Save document", ".TXT", name, true));
+                "/system/apps", "Save document", ".TXT", name, true,
+                _useTextInput));
         return result.Status;
     }
 
@@ -670,6 +706,11 @@ public sealed class ManagedNotes : GuideXosApplication
     private static bool IsContext(GuideXosHost host, ReadOnlySpan<byte> expected)
     {
         return host.LaunchContext.Utf8.SequenceEqual(expected);
+    }
+
+    private static bool IsC116Context(GuideXosHost host)
+    {
+        return host.LaunchContext.Utf8.StartsWith("c116-"u8);
     }
 
     private static byte[] PathLog(string prefix, string path)
@@ -737,6 +778,67 @@ public sealed class ManagedNotes : GuideXosApplication
             : "C115-NEGATIVE result=FAIL"u8);
         return passed ? GuideXosResult.Success : GuideXosResult.InvalidArgument;
     }
+
+#if HOSTLOGPROOF_C116_MANAGED_TEXT_INPUT
+    private static GuideXosResult RunTextInputNegativeProbe(GuideXosHost host)
+    {
+        GuideXosTextInput input = new(5, "filename");
+        bool unfocused = input.HandleCharacter('X') ==
+            GuideXosTextInputEditResult.Ignored && input.Value.Length == 0;
+        input.Focus();
+        bool maximum = true;
+        for (char value = 'A'; value <= 'E'; value++)
+        {
+            maximum &= input.HandleCharacter(value) ==
+                GuideXosTextInputEditResult.Changed;
+        }
+        bool extraRejected = input.HandleCharacter('F') ==
+            GuideXosTextInputEditResult.Rejected && input.Value == "ABCDE";
+        bool backspaceEmpty = true;
+        for (int index = 0; index < 5; index++)
+        {
+            backspaceEmpty &= input.HandleKey(GuideXosTextInputKey.Backspace) ==
+                GuideXosTextInputEditResult.Changed;
+        }
+        backspaceEmpty &= input.Value.Length == 0 && input.CaretIndex == 0 &&
+            input.HandleKey(GuideXosTextInputKey.Backspace) ==
+            GuideXosTextInputEditResult.Ignored;
+        bool unsupportedRejected = input.HandleCharacter('\u0001') ==
+            GuideXosTextInputEditResult.Rejected;
+
+        GuideXosTextInput caret = new(32);
+        bool caretProof = caret.SetValue("MFILE.TXT");
+        caret.Focus();
+        for (int index = 0; index < 8; index++)
+        {
+            caretProof &= caret.HandleKey(GuideXosTextInputKey.Left) !=
+                GuideXosTextInputEditResult.Ignored;
+        }
+        caretProof &= caret.HandleCharacter('Y') ==
+            GuideXosTextInputEditResult.Changed && caret.Value == "MYFILE.TXT";
+
+        GuideXosTextInput cancel = new(16);
+        cancel.Focus();
+        cancel.HandleCharacter('Q');
+        bool escaped = cancel.HandleKey(GuideXosTextInputKey.Escape) ==
+            GuideXosTextInputEditResult.Cancelled && !cancel.IsFocused &&
+            cancel.IsCancelled;
+
+        GuideXosPickerPathStatus emptyFilename =
+            GuideXosPickerPath.TryBuildPath("/system/apps", input.Value, out _);
+        GuideXosPickerPathStatus overflow = GuideXosPickerPath.TryBuildPath(
+            "/system/apps", new string('A', 84), out _);
+        bool pathValidation = emptyFilename == GuideXosPickerPathStatus.InvalidFilename &&
+            overflow == GuideXosPickerPathStatus.PathTooLong;
+
+        bool passed = unfocused && maximum && extraRejected && backspaceEmpty &&
+            unsupportedRejected && caretProof && escaped && pathValidation;
+        host.TryLog(passed
+            ? "C116-NEGATIVE unfocused=PASS max=PASS extra=PASS backspace-empty=PASS caret=PASS escape=PASS path=PASS result=PASS"u8
+            : "C116-NEGATIVE result=FAIL"u8);
+        return passed ? GuideXosResult.Success : GuideXosResult.InvalidArgument;
+    }
+#endif
 
     private static byte[] StatusText(GuideXosFileResult result)
     {

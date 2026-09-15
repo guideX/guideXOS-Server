@@ -612,7 +612,8 @@ void KernelCompositor::handleMouseDown(int32_t mx, int32_t my, uint8_t button) {
             // Check widgets first; bare-metal apps use these for toolbar buttons.
             for (int i = hitWin->widgetCount - 1; i >= 0; --i) {
                 app::Widget* widget = &hitWin->widgets[i];
-                if (!widget->visible || !widget->enabled) continue;
+                if (widget->type != app::WidgetType::Button ||
+                    !widget->visible || !widget->enabled) continue;
                 int localX = mx - hitWin->x;
                 int localY = my - hitWin->y - TITLEBAR_HEIGHT;
                 if (localX >= widget->x && localX < widget->x + widget->w &&
