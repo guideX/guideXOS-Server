@@ -446,8 +446,12 @@ public sealed class ManagedNotes : GuideXosApplication
     private ulong _window;
     private uint _launchCount;
     private int _saveInvocation;
+    private bool _useTextInput;
     [ThreadStatic]
     private static uint s_threadLaunchCount;
+#if HOSTLOGPROOF_C118_MANAGED_LIST_BOX
+    private bool _c118ProofContext;
+#endif
 
     public override GuideXosResult Launch(GuideXosHost host)
     {
@@ -462,6 +466,10 @@ public sealed class ManagedNotes : GuideXosApplication
 
         _picker.Reset();
         _saveInvocation = 0;
+#if HOSTLOGPROOF_C118_MANAGED_LIST_BOX
+        _c118ProofContext = IsC118Context(host);
+        _useTextInput = _c118ProofContext;
+#endif
         _currentPath = "/system/apps/NOTES.TXT";
         GuideXosFileResult loadResult = GuideXosFile.ReadAllTextUtf8(
             host, Encoding.UTF8.GetBytes(_currentPath), out byte[] loaded);
@@ -492,9 +500,36 @@ public sealed class ManagedNotes : GuideXosApplication
         host.TryLog(loadResult == GuideXosFileResult.Success
             ? "C117-NOTES initial=multiline source=VFS result=PASS"u8
             : "C117-NOTES initial=multiline source=fixture result=PASS"u8);
-        return GuideXosTextAreaTests.Run(host)
+        bool textAreaTests = GuideXosTextAreaTests.Run(host);
+#if HOSTLOGPROOF_C118_MANAGED_LIST_BOX
+        bool listBoxTests = GuideXosListBoxTests.Run(host);
+        bool textInputTests = GuideXosTextInputTests.Run(host);
+        if (_c118ProofContext)
+        {
+            host.TryLog(textAreaTests
+                ? "C117-REGRESSION text-area=PASS"u8
+                : "C117-REGRESSION text-area=FAIL"u8);
+            host.TryLog(listBoxTests
+                ? "C118-NOTES initial=multiline list=ready result=PASS"u8
+                : "C118-NOTES initial=multiline list=ready result=FAIL"u8);
+            host.TryLog(textInputTests
+                ? "C116-REGRESSION text-input=PASS"u8
+                : "C116-REGRESSION text-input=FAIL"u8);
+        }
+#endif
+        return textAreaTests
+#if HOSTLOGPROOF_C118_MANAGED_LIST_BOX
+            && listBoxTests && textInputTests
+#endif
             ? GuideXosResult.Success : GuideXosResult.InvalidArgument;
     }
+
+#if HOSTLOGPROOF_C118_MANAGED_LIST_BOX
+    private static bool IsC118Context(GuideXosHost host)
+    {
+        return host.LaunchContext.Utf8.SequenceEqual("c118-notes"u8);
+    }
+#endif
 
     public override GuideXosResult HandleInput(
         GuideXosHost host, GuideXosInputEvent input)
@@ -643,6 +678,24 @@ public sealed class ManagedNotes : GuideXosApplication
                     : "C117-NOTES reopen=FAIL source=VFS"u8);
                 LogDocument(host, "C117-NOTES actual");
                 host.TryLog("C115-NOTES open=PASS source=picker"u8);
+#if HOSTLOGPROOF_C118_MANAGED_LIST_BOX
+                if (_c118ProofContext)
+                {
+                    host.TryLog(PathLog("C118-NOTES open=PASS path=", result.Path));
+                    LogDocument(host, "C118-NOTES actual");
+                    bool loadedExpected = result.Path.EndsWith(
+                        "THIRD.TXT", StringComparison.OrdinalIgnoreCase)
+                        ? _textArea.Text == "Second managed document!"
+                        : _textArea.Text == "Second managed document";
+                    host.TryLog(loadedExpected
+                        ? "C118-NOTES loaded=PASS source=list-box"u8
+                        : "C118-NOTES loaded=FAIL source=list-box"u8);
+                    if (_textArea.Text == "Second managed document!")
+                    {
+                        host.TryLog("C118-NOTES reopened-edited=PASS source=list-box"u8);
+                    }
+                }
+#endif
             }
             else
             {
@@ -688,6 +741,22 @@ public sealed class ManagedNotes : GuideXosApplication
     private GuideXosFilePickerStatus BeginSave(
         GuideXosHost host, GuideXosSurface surface)
     {
+#if HOSTLOGPROOF_C118_MANAGED_LIST_BOX
+        if (_c118ProofContext)
+        {
+            string c118Suggestion = _saveInvocation++ switch
+            {
+                0 => "THIRD.TXT",
+                1 => "CANCEL.TXT",
+                _ => "THIRD.TXT",
+            };
+            GuideXosFilePickerResult c118Result = _picker.SaveFile(
+                host, surface, GuideXosFilePickerOptions.Save(
+                    "/system/apps", "Save document", ".TXT", c118Suggestion,
+                    true, _useTextInput));
+            return c118Result.Status;
+        }
+#endif
         string suggestion = _saveInvocation++ switch
         {
             0 => "THIRD.TXT",
@@ -803,7 +872,11 @@ public sealed class ManagedNotes : GuideXosApplication
             return GuideXosResult.InvalidArgument;
         }
         _picker.Reset();
-        _useTextInput = IsC116Context(host);
+        _useTextInput = IsC116Context(host)
+#if HOSTLOGPROOF_C118_MANAGED_LIST_BOX
+            || IsC118Context(host)
+#endif
+            ;
         _currentPath = "/system/apps/NOTES.TXT";
         _saveInvocation = 0u;
         GuideXosFileResult loadResult = GuideXosFile.ReadAllTextUtf8(
@@ -1055,6 +1128,13 @@ public sealed class ManagedNotes : GuideXosApplication
     {
         return host.LaunchContext.Utf8.SequenceEqual(expected);
     }
+
+#if HOSTLOGPROOF_C118_MANAGED_LIST_BOX
+    private static bool IsC118Context(GuideXosHost host)
+    {
+        return host.LaunchContext.Utf8.SequenceEqual("c118-notes"u8);
+    }
+#endif
 
     private static bool IsC116Context(GuideXosHost host)
     {

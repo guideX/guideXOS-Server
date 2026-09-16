@@ -26,9 +26,8 @@ public enum GuideXosFilePickerStatus
 }
 
 /// <summary>
-/// Small, platform-neutral Open/Save intent. The current Server UI uses the
-/// suggested name as its bounded Save filename field; a later control can
-/// replace that input without changing the picker contract.
+/// Small, platform-neutral Open/Save intent. Open candidates are exposed
+/// through the reusable bounded list box; Save keeps its C116 filename field.
 /// </summary>
 public sealed class GuideXosFilePickerOptions
 {
@@ -320,16 +319,24 @@ public sealed class GuideXosFilePicker
     public const int FilenameFieldY = 78;
     public const int FilenameFieldWidth = 470;
     public const int FilenameFieldHeight = 28;
+    public const int CandidateListX = 20;
+    public const int CandidateListOpenY = 94;
+    public const int CandidateListSaveY = 116;
+    public const int CandidateListLineHeight = 18;
 
     private GuideXosFilePickerOptions _options;
     private GuideXosDirectorySnapshot _listing;
     private GuideXosDirectorySnapshot _cachedListing;
     private string _cachedDirectory;
-    private GuideXosFilePickerCandidate[] _candidates = Array.Empty<GuideXosFilePickerCandidate>();
+    private readonly GuideXosFilePickerCandidate[] _candidates =
+        new GuideXosFilePickerCandidate[GuideXosListBox.MaximumSupportedItemCount];
+    private int _candidateCount;
     private string _directory;
     private string _proposedFileName;
     private GuideXosTextInput _filenameInput;
-    private int _selectedIndex;
+    private readonly GuideXosListBox _candidateList =
+        new(GuideXosListBox.MaximumSupportedItemCount,
+            GuideXosListBox.MaximumSupportedLabelLength, 4, 56);
     private bool _overwritePending;
     private bool _active;
     private GuideXosFilePickerResult _result =
@@ -341,9 +348,12 @@ public sealed class GuideXosFilePicker
     public GuideXosFilePickerMode Mode => _options?.Mode ?? 0;
     public string InitialDirectory => _directory;
     public string ProposedFileName => _filenameInput?.Value ?? _proposedFileName;
-    public int SelectedIndex => _selectedIndex;
+    public int SelectedIndex => _candidateList.SelectedIndex;
+    public string SelectedCandidateLabel => _candidateList.SelectedLabel;
+    public GuideXosListBox CandidateList => _candidateList;
     public bool IsOverwritePending => _overwritePending;
     public GuideXosFilePickerCandidate[] Candidates => _candidates;
+    public int CandidateCount => _candidateCount;
     public GuideXosFilePickerResult CurrentResult => _result;
     public GuideXosTextInput FilenameInput => _filenameInput;
     public int SaveFilenameMaximumLength => _filenameInput?.MaximumLength ?? 0;
@@ -387,6 +397,7 @@ public sealed class GuideXosFilePicker
             _active = false;
             _overwritePending = false;
             _filenameInput?.ResetTransientState();
+            _candidateList.ResetTransientState();
             _result = GuideXosFilePickerResult.Failure(
                 GuideXosFilePickerStatus.Cancelled,
                 GuideXosFileResult.Success, "Cancelled");
@@ -394,13 +405,14 @@ public sealed class GuideXosFilePicker
         }
         if (actionId == NextAction && _options.Mode == GuideXosFilePickerMode.Open)
         {
-            if (_candidates.Length == 0)
+            if (_candidateCount == 0)
             {
                 return SetPickerStatus(
                     GuideXosFilePickerStatus.NoMatchingFiles,
                     GuideXosFileResult.Success, "No matching files", host, surface);
             }
-            _selectedIndex = (_selectedIndex + 1) % _candidates.Length;
+            _candidateList.Focus();
+            _candidateList.HandleKey(GuideXosTextInputKey.Down);
             _result = GuideXosFilePickerResult.Pending("Selection changed");
             Render(host, surface);
             return _result;
@@ -461,8 +473,57 @@ public sealed class GuideXosFilePicker
     public GuideXosFilePickerResult HandleInput(
         GuideXosHost host, GuideXosSurface surface, GuideXosInputEvent input)
     {
-        if (!_active || _options?.Mode != GuideXosFilePickerMode.Save ||
-            _filenameInput == null)
+        if (!_active || _options == null)
+        {
+            return GuideXosFilePickerResult.Pending("Input ignored");
+        }
+
+        if (_options.Mode == GuideXosFilePickerMode.Open)
+        {
+            if (input.Kind == GuideXosInputKind.KeyDown &&
+                (GuideXosTextInputKey)input.KeyCode == GuideXosTextInputKey.Escape)
+            {
+                return HandleAction(host, surface, CancelAction);
+            }
+            GuideXosListBoxResult listResult = input.Kind switch
+            {
+                GuideXosInputKind.PointerDown => _candidateList.HandlePointerDown(
+                    input.X, input.Y, CandidateListX, CandidateListOpenY,
+                    8, CandidateListLineHeight),
+                GuideXosInputKind.KeyDown => _candidateList.HandleKey(
+                    (GuideXosTextInputKey)input.KeyCode),
+                _ => GuideXosListBoxResult.Ignored,
+            };
+            if (listResult == GuideXosListBoxResult.Activated)
+            {
+                return CompleteOpen(host, surface);
+            }
+            if (host != null && listResult == GuideXosListBoxResult.Focused)
+            {
+                host.TryLog("C118-LIST focus=PASS"u8);
+            }
+            else if (host != null &&
+                listResult == GuideXosListBoxResult.SelectionChanged)
+            {
+                host.TryLog("C118-LIST selection=changed result=PASS"u8);
+            }
+            if (listResult == GuideXosListBoxResult.Rejected && host != null)
+            {
+                host.TryLog("C118-LIST input=rejected result=PASS"u8);
+            }
+            _result = GuideXosFilePickerResult.Pending(
+                listResult == GuideXosListBoxResult.Rejected
+                    ? "List input rejected" : "Selection changed");
+            if (!Render(host, surface))
+            {
+                return GuideXosFilePickerResult.Failure(
+                    GuideXosFilePickerStatus.IoFailure,
+                    GuideXosFileResult.IoFailure, "List redraw failed");
+            }
+            return _result;
+        }
+
+        if (_filenameInput == null)
         {
             return GuideXosFilePickerResult.Pending("Input ignored");
         }
@@ -524,11 +585,11 @@ public sealed class GuideXosFilePicker
     {
         _options = null;
         _listing = null;
-        _candidates = Array.Empty<GuideXosFilePickerCandidate>();
+        ClearCandidates();
         _directory = null;
         _proposedFileName = null;
         _filenameInput = null;
-        _selectedIndex = -1;
+        _candidateList.Reset();
         _overwritePending = false;
         _active = false;
         _result = GuideXosFilePickerResult.Failure(
@@ -542,7 +603,6 @@ public sealed class GuideXosFilePicker
     {
         Reset();
         _options = options;
-        _selectedIndex = -1;
         if (host == null || surface == null || options == null || options.Mode != mode ||
             string.IsNullOrEmpty(options.Title) || options.Title.Length > 48 ||
             !GuideXosPickerPath.IsExtensionFilterValid(options.ExtensionFilter))
@@ -639,8 +699,12 @@ public sealed class GuideXosFilePicker
             return SetPickerStatus(status, listResult, "Directory enumeration failed", host, surface);
         }
         BuildCandidates();
+        if (mode == GuideXosFilePickerMode.Open)
+        {
+            _candidateList.Focus();
+        }
         _active = true;
-        _result = _candidates.Length == 0 && mode == GuideXosFilePickerMode.Open
+        _result = _candidateCount == 0 && mode == GuideXosFilePickerMode.Open
             ? GuideXosFilePickerResult.Failure(
                 GuideXosFilePickerStatus.NoMatchingFiles,
                 GuideXosFileResult.Success, "No matching files")
@@ -657,34 +721,49 @@ public sealed class GuideXosFilePicker
     private void BuildCandidates()
     {
         GuideXosDirectoryEntry[] entries = _listing.Entries;
-        GuideXosFilePickerCandidate[] candidates =
-            new GuideXosFilePickerCandidate[entries.Length];
         int count = 0;
+        for (int index = 0; index < _candidateCount; index++)
+        {
+            _candidates[index] = null;
+        }
+        _candidateList.Clear();
         for (int index = 0; index < entries.Length; index++)
         {
             GuideXosDirectoryEntry entry = entries[index];
             if (entry.Type == GuideXosEntryType.Directory ||
                 GuideXosPickerPath.MatchesExtension(entry.Name, _options.ExtensionFilter))
             {
-                candidates[count++] = new GuideXosFilePickerCandidate(
-                    entry.Name, entry.Type, entry.Size);
+                if (_candidateList.TryAdd(entry.Name) ==
+                    GuideXosListBoxPopulationResult.Added)
+                {
+                    _candidates[count++] = new GuideXosFilePickerCandidate(
+                        entry.Name, entry.Type, entry.Size);
+                }
             }
         }
-        _candidates = new GuideXosFilePickerCandidate[count];
-        for (int index = 0; index < count; index++) _candidates[index] = candidates[index];
-        _selectedIndex = count == 0 ? -1 : 0;
+        _candidateCount = count;
+    }
+
+    private void ClearCandidates()
+    {
+        for (int index = 0; index < _candidateCount; index++)
+        {
+            _candidates[index] = null;
+        }
+        _candidateCount = 0;
     }
 
     private GuideXosFilePickerResult CompleteOpen(
         GuideXosHost host, GuideXosSurface surface)
     {
-        if (!IsValidSelectionIndex(_selectedIndex, _candidates.Length))
+        if (!IsValidSelectionIndex(_candidateList.SelectedIndex, _candidateCount))
         {
             return SetPickerStatus(
                 GuideXosFilePickerStatus.InvalidSelectedPath,
                 GuideXosFileResult.InvalidArgument, "No file selected", host, surface);
         }
-        GuideXosFilePickerCandidate candidate = _candidates[_selectedIndex];
+        GuideXosFilePickerCandidate candidate =
+            _candidates[_candidateList.SelectedIndex];
         if (candidate == null || !IsSelectableOpenType(candidate.Type))
         {
             return SetPickerStatus(
@@ -823,7 +902,7 @@ public sealed class GuideXosFilePicker
 
     private GuideXosFilePickerCandidate FindCandidate(string name)
     {
-        for (int index = 0; index < _candidates.Length; index++)
+        for (int index = 0; index < _candidateCount; index++)
         {
             GuideXosFilePickerCandidate candidate = _candidates[index];
             if (candidate != null &&
@@ -903,25 +982,16 @@ public sealed class GuideXosFilePicker
                 _proposedFileName ?? "<none>")) return false;
         }
 
-        int firstY = _options?.Mode == GuideXosFilePickerMode.Save ? 116 : 94;
-        int visible = Math.Min(_candidates.Length, 4);
-        Span<byte> line = stackalloc byte[64];
-        for (int index = 0; index < visible; index++)
+        int firstY = _options?.Mode == GuideXosFilePickerMode.Save
+            ? CandidateListSaveY : CandidateListOpenY;
+        if (_candidateList.Render(
+                surface, CandidateListX, firstY, CandidateListLineHeight) !=
+            GuideXosResult.Success)
         {
-            GuideXosFilePickerCandidate candidate = _candidates[index];
-            int position = 0;
-            if (!GuideXosText.Append(line, ref position,
-                    index == _selectedIndex ? "> "u8 : "  "u8) ||
-                !AppendUtf8Bounded(line, ref position, candidate.Name) ||
-                !GuideXosText.Append(line, ref position,
-                    candidate.Type == GuideXosEntryType.Directory ? " [DIR]"u8 : " [FILE]"u8) ||
-                surface.TrySetText(20, firstY + index * 18, line[..position]) != GuideXosResult.Success)
-            {
-                return false;
-            }
+            return false;
         }
         string status = _result?.Message ?? "Ready";
-        if (_candidates.Length == 0 && _options?.Mode == GuideXosFilePickerMode.Save)
+        if (_candidateCount == 0 && _options?.Mode == GuideXosFilePickerMode.Save)
         {
             status = "No existing match; new file is allowed";
         }

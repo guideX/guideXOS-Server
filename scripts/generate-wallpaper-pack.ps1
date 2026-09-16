@@ -11,7 +11,8 @@ param(
     [string]$C107CompositePath = "",
     [string]$ProductionCompositeApplicationPath = "",
     [switch]$C114ManagedDirectoryServices,
-    [switch]$C117ManagedTextArea
+    [switch]$C117ManagedTextArea,
+    [switch]$C118ManagedListBox
 )
 
 $ErrorActionPreference = "Stop"
@@ -984,6 +985,23 @@ if ($C114ManagedDirectoryServices) {
     [System.IO.File]::WriteAllText($secondFixture, "Second managed document", [System.Text.Encoding]::ASCII)
     $staged += Get-Item $notesFixture
     $staged += Get-Item $secondFixture
+    if ($C118ManagedListBox) {
+        $c118Fixtures = [ordered]@{
+            "01-ALPHA.TXT" = "C118 alpha document"
+            "02-POINT.TXT" = "C118 pointer document"
+            "03-DOWN.TXT" = "C118 down document"
+            "04-VIEW.TXT" = "C118 viewport document"
+            "05-KEY.TXT" = "C118 keyboard document"
+            "06-ZETA.TXT" = "C118 zeta document"
+        }
+        foreach ($fixture in $c118Fixtures.GetEnumerator()) {
+            $fixturePath = Join-Path $appsDir $fixture.Key
+            [System.IO.File]::WriteAllText(
+                $fixturePath, $fixture.Value, [System.Text.Encoding]::ASCII)
+            $staged += Get-Item $fixturePath
+        }
+        Write-Host "      staged C118 list fixtures: six additional TXT candidates" -ForegroundColor Yellow
+    }
     Write-Host "      staged C114 managed text fixtures at /apps/NOTES.TXT and /apps/SECOND.TXT" -ForegroundColor Yellow
 }
 
