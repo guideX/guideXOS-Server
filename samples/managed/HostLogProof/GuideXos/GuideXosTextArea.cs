@@ -132,8 +132,12 @@ public sealed class GuideXosTextArea
     /// </summary>
     public bool SetText(string value)
     {
-        if (value == null || value.Length > MaximumCharacters ||
-            !ValidateText(value.AsSpan(), out int lineCount))
+        if (value == null || value.Length > MaximumCharacters)
+        {
+            return false;
+        }
+        if (!ValidateText(value.AsSpan(), out int lineCount) ||
+            lineCount > _maximumLines)
         {
             return false;
         }
@@ -147,8 +151,12 @@ public sealed class GuideXosTextArea
     /// <summary>Copies bounded ASCII/UTF-8 bytes without using a decoder.</summary>
     public bool SetUtf8(ReadOnlySpan<byte> value)
     {
-        if (value.Length > MaximumCharacters ||
-            !ValidateUtf8(value, out int lineCount))
+        if (value.Length > MaximumCharacters)
+        {
+            return false;
+        }
+        if (!ValidateUtf8(value, out int lineCount) ||
+            lineCount > _maximumLines)
         {
             return false;
         }
@@ -437,6 +445,14 @@ public sealed class GuideXosTextArea
 
     private GuideXosTextAreaEditResult MoveVertical(int direction, bool shift)
     {
+        if (!shift && HasSelection)
+        {
+            _caretIndex = direction < 0 ? SelectionStart : SelectionEnd;
+            _anchorIndex = _caretIndex;
+            _preferredColumn = -1;
+            EnsureCaretVisible();
+            return GuideXosTextAreaEditResult.Moved;
+        }
         int line = GetLineAndColumn(_caretIndex, out int column);
         if (_preferredColumn < 0) _preferredColumn = column;
         int targetLine = line + direction;
@@ -453,6 +469,14 @@ public sealed class GuideXosTextArea
 
     private GuideXosTextAreaEditResult MoveToLineEdge(bool end, bool shift)
     {
+        if (!shift && HasSelection)
+        {
+            _caretIndex = end ? SelectionEnd : SelectionStart;
+            _anchorIndex = _caretIndex;
+            _preferredColumn = -1;
+            EnsureCaretVisible();
+            return GuideXosTextAreaEditResult.Moved;
+        }
         int line = GetLineAndColumn(_caretIndex, out _);
         int target = GetLineStart(line) + (end ? GetLineLength(line) : 0);
         _caretIndex = target;

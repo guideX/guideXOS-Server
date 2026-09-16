@@ -28,8 +28,8 @@ public static class GuideXosTextAreaTests
             if (!bounds) host.TryLog("C117-TEST-GROUP bounds=FAIL"u8);
             if (!viewport) host.TryLog("C117-TEST-GROUP viewport=FAIL"u8);
             host.TryLog(result
-                ? "C117-TESTS cases=35 storage=PASS editing=PASS navigation=PASS selection=PASS bounds=PASS viewport=PASS result=PASS"u8
-                : "C117-TESTS cases=35 result=FAIL"u8);
+                ? "C117-TESTS cases=42 storage=PASS editing=PASS navigation=PASS selection=PASS bounds=PASS viewport=PASS result=PASS"u8
+                : "C117-TESTS cases=42 result=FAIL"u8);
         }
         return result;
     }
@@ -174,6 +174,30 @@ public static class GuideXosTextAreaTests
             delete.HandleKey(GuideXosTextInputKey.Delete) ==
                 GuideXosTextAreaEditResult.Changed && delete.Text == "cdef";
 
+        GuideXosTextArea collapseVertical = New(32, 4, "abc\ndef\nghi");
+        collapseVertical.SetCaretToStart();
+        bool selectionCollapseVertical = Move(collapseVertical,
+                GuideXosTextInputKey.Right, 2, true) &&
+            collapseVertical.HandleKey(GuideXosTextInputKey.Down) ==
+                GuideXosTextAreaEditResult.Moved &&
+            !collapseVertical.HasSelection && collapseVertical.CaretIndex == 2;
+
+        GuideXosTextArea collapseHome = New(32, 4, "abcdef");
+        collapseHome.SetCaretToStart();
+        bool selectionCollapseHome = Move(collapseHome,
+                GuideXosTextInputKey.Right, 3, true) &&
+            collapseHome.HandleKey(GuideXosTextInputKey.Home) ==
+                GuideXosTextAreaEditResult.Moved &&
+            !collapseHome.HasSelection && collapseHome.CaretIndex == 0;
+
+        GuideXosTextArea collapseEnd = New(32, 4, "abcdef");
+        collapseEnd.SetCaretToStart();
+        bool selectionCollapseEnd = Move(collapseEnd,
+                GuideXosTextInputKey.Right, 3, true) &&
+            collapseEnd.HandleKey(GuideXosTextInputKey.End) ==
+                GuideXosTextAreaEditResult.Moved &&
+            !collapseEnd.HasSelection && collapseEnd.CaretIndex == 3;
+
         GuideXosTextArea collapseLeft = New(32, 4, "abcdef");
         collapseLeft.SetCaretToStart();
         bool collapseByLeft = Move(collapseLeft, GuideXosTextInputKey.Right, 2, true) &&
@@ -189,7 +213,8 @@ public static class GuideXosTextAreaTests
 
         return selectionForward && selectionBackward && selectionExpansion &&
             selectionContraction && selectionReversal && selectionReplacement &&
-            selectionBackspace && selectionDelete && collapseByLeft &&
+            selectionBackspace && selectionDelete && selectionCollapseVertical &&
+            selectionCollapseHome && selectionCollapseEnd && collapseByLeft &&
             collapseByRight;
     }
 
@@ -203,6 +228,15 @@ public static class GuideXosTextAreaTests
         GuideXosTextArea lineCapacity = New(16, 2, "a\nb");
         bool rejectedLineOverflow = lineCapacity.HandleKey(GuideXosTextInputKey.Enter) ==
             GuideXosTextAreaEditResult.Rejected && lineCapacity.Text == "a\nb";
+
+        GuideXosTextArea lineLoad = New(32, 2, "a\nb");
+        int lineLoadCaret = lineLoad.CaretIndex;
+        bool rejectedLineLoad = !lineLoad.SetText("a\nb\nc") &&
+            lineLoad.Text == "a\nb" && lineLoad.LineCount == 2 &&
+            lineLoad.CaretIndex == lineLoadCaret && !lineLoad.HasSelection;
+        bool rejectedUtf8LineLoad = !lineLoad.SetUtf8("a\nb\nc"u8) &&
+            lineLoad.Text == "a\nb" && lineLoad.LineCount == 2 &&
+            lineLoad.CaretIndex == lineLoadCaret;
 
         GuideXosTextArea selectionBounds = New(32, 4, "abcdef");
         selectionBounds.SetCaretToStart();
@@ -228,8 +262,9 @@ public static class GuideXosTextAreaTests
         focusIsolation &= focus.HandleKey(GuideXosTextInputKey.Enter) ==
             GuideXosTextAreaEditResult.Ignored && focus.Text.Length == 0;
 
-        return rejectedOverflow && rejectedLineOverflow && boundsAfterSelectionEdit &&
-            caretValid && focusIsolation;
+        return rejectedOverflow && rejectedLineOverflow && rejectedLineLoad &&
+            rejectedUtf8LineLoad && boundsAfterSelectionEdit && caretValid &&
+            focusIsolation;
     }
 
     private static bool Viewport()

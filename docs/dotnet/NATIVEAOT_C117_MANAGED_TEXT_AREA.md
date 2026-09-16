@@ -62,8 +62,10 @@ The default Notes instance is configured as:
 The implementation stores one fixed `char[256]` buffer and uses LF (`0x0A`)
 as the logical line separator. The configured maximums are constructor
 parameters within compile-time supported ceilings (1024 characters, 128
-lines, 16 visible lines, and 56 renderable columns). There is no unbounded
-document growth and no runtime, GC, or VFS change is needed for editing.
+lines, 16 visible lines, and 56 renderable columns). Both whole-document load
+operations validate the character and line limits before copying, so an
+over-line-capacity load is rejected atomically. There is no unbounded document
+growth and no runtime, GC, or VFS change is needed for editing.
 
 The accepted character set is printable ASCII (`0x20` through `0x7E`) plus
 LF. `SetText` and `SetUtf8` validate the complete replacement before copying,
@@ -163,10 +165,12 @@ Sixth line!
 The dedicated runner is
 `scripts/dotnet/run-c117-managed-text-area.ps1`. It stages a fresh ramdisk,
 builds the C117 composite and kernel, and accepts only three fresh QEMU boots
-whose serial evidence contains the C117 control tests, Shift transport,
-selection, viewport, Notes Save/reopen, C116 filename regression, and
-application regressions. Evidence is written under
-`out/dotnet/c011ec117-managed-text-area/`.
+whose serial evidence contains the 42 focused control assertions, Shift
+transport, selection, viewport, Notes Save/reopen, C116 filename regression,
+and application regressions. Evidence is written under
+`out/dotnet/c011ec117-managed-text-area/`; the audited run recorded three
+PASS boots and final document SHA-256
+`D05C2780A4EBF864254E8A1B0DEEA2669DF79299B2319F024418581AF71D32A3`.
 
 ## Runtime, ABI, and boundedness impact
 

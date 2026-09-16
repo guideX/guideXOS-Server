@@ -138,7 +138,7 @@ function Assert-C117Serial([string]$Serial) {
         '^\[C112-RESULT\] outcome=PASS',
         '^\[C112-MISSING-IMAGE\] status=not-found result=PASS',
         '^\[C112-INDEPENDENT-IMAGE\] status=busy result=PASS',
-        '^\[C117-MANAGED-OUTPUT\] C117-TESTS cases=35 .*result=PASS',
+        '^\[C117-MANAGED-OUTPUT\] C117-TESTS cases=42 .*result=PASS',
         '^\[C117-MANAGED-OUTPUT\] C117-NOTES initial=multiline .*result=PASS',
         '^\[C117-MANAGED-OUTPUT\] C117-TEXT-AREA focus=PASS source=pointer',
         '^\[C117-MANAGED-OUTPUT\] C117-TEXT-AREA edit=changed result=PASS',
