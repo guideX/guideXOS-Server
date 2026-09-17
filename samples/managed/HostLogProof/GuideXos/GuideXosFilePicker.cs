@@ -382,6 +382,47 @@ public sealed class GuideXosFilePicker
         return Begin(host, surface, options, GuideXosFilePickerMode.Save);
     }
 
+    /// <summary>
+    /// Prepares one bounded directory snapshot before an input callback needs
+    /// to open the picker. This keeps the pointer/key dispatch path free of
+    /// filesystem enumeration while preserving the picker-owned cache.
+    /// </summary>
+    public GuideXosFileResult PrimeDirectory(
+        GuideXosHost host, string directory)
+    {
+        if (host == null || string.IsNullOrEmpty(directory))
+        {
+            return GuideXosFileResult.InvalidArgument;
+        }
+        GuideXosPickerPathStatus directoryStatus =
+            GuideXosPickerPath.TryNormalizeDirectory(
+                directory, out string normalizedDirectory);
+        if (directoryStatus != GuideXosPickerPathStatus.Success)
+        {
+            return GuideXosFileResult.InvalidPath;
+        }
+        if (_cachedListing != null &&
+            string.Equals(_cachedDirectory, normalizedDirectory,
+                StringComparison.Ordinal))
+        {
+            return GuideXosFileResult.Success;
+        }
+        if (!host.HasCapability(GuideXosCapability.DirectoryList) ||
+            !host.HasCapability(GuideXosCapability.FileStat))
+        {
+            return GuideXosFileResult.CapabilityUnavailable;
+        }
+        GuideXosFileResult result = GuideXosFile.TryListDirectory(
+            host, Encoding.UTF8.GetBytes(normalizedDirectory),
+            out GuideXosDirectorySnapshot snapshot);
+        if (result == GuideXosFileResult.Success && snapshot != null)
+        {
+            _cachedDirectory = normalizedDirectory;
+            _cachedListing = snapshot;
+        }
+        return result;
+    }
+
     public GuideXosFilePickerResult HandleAction(
         GuideXosHost host, GuideXosSurface surface, uint actionId)
     {

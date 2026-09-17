@@ -1812,7 +1812,9 @@ int32_t GUIDEXOS_NATIVEAOT_PAL_CALL managedLog(
     const bool c116Message = managedMessageStartsWith(message, "C116-");
     const bool c117Message = managedMessageStartsWith(message, "C117-");
     const bool c118Message = managedMessageStartsWith(message, "C118-");
-    serial::puts(c118Message ? "[C118-MANAGED-OUTPUT] " :
+    const bool c119Message = managedMessageStartsWith(message, "C119-");
+    serial::puts(c119Message ? "[C119-MANAGED-OUTPUT] " :
+        c118Message ? "[C118-MANAGED-OUTPUT] " :
         c117Message ? "[C117-MANAGED-OUTPUT] " :
         c116Message ? "[C116-MANAGED-OUTPUT] " :
         c115Message ? "[C115-MANAGED-OUTPUT] " :

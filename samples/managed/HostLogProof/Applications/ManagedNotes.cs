@@ -452,6 +452,16 @@ public sealed class ManagedNotes : GuideXosApplication
 #if HOSTLOGPROOF_C118_MANAGED_LIST_BOX
     private bool _c118ProofContext;
 #endif
+#if HOSTLOGPROOF_C119_MANAGED_BUTTON
+    private readonly GuideXosButton _openButton =
+        new(20, 220, 90, 28, "Open");
+    private readonly GuideXosButton _saveButton =
+        new(120, 220, 90, 28, "Save");
+    private readonly GuideXosButton _saveAsButton =
+        new(220, 220, 100, 28, "Save As");
+    private bool _c119ProofContext;
+    private bool _c119ButtonTestsRun;
+#endif
 
     public override GuideXosResult Launch(GuideXosHost host)
     {
@@ -466,11 +476,37 @@ public sealed class ManagedNotes : GuideXosApplication
 
         _picker.Reset();
         _saveInvocation = 0;
+#if HOSTLOGPROOF_C119_MANAGED_BUTTON
+        _c119ProofContext = IsC119Context(host);
+        _openButton.Reset();
+        _saveButton.Reset();
+        _saveAsButton.Reset();
+        if (host.LaunchContext.Utf8.SequenceEqual("c119-disabled"u8))
+        {
+            _saveButton.SetEnabled(false);
+        }
+#endif
 #if HOSTLOGPROOF_C118_MANAGED_LIST_BOX
         _c118ProofContext = IsC118Context(host);
+#if HOSTLOGPROOF_C119_MANAGED_BUTTON
+        _c118ProofContext = _c118ProofContext || _c119ProofContext;
+#endif
         _useTextInput = _c118ProofContext;
 #endif
         _currentPath = "/system/apps/NOTES.TXT";
+#if HOSTLOGPROOF_C119_MANAGED_BUTTON
+        if (_c119ProofContext)
+        {
+            GuideXosFileResult directoryCache = _picker.PrimeDirectory(
+                host, "/system/apps");
+            if (directoryCache != GuideXosFileResult.Success)
+            {
+                host.TryLog("C119-NOTES directory-cache=FAIL"u8);
+                return GuideXosResult.InvalidArgument;
+            }
+            host.TryLog("C119-NOTES directory-cache=PASS"u8);
+        }
+#endif
         GuideXosFileResult loadResult = GuideXosFile.ReadAllTextUtf8(
             host, Encoding.UTF8.GetBytes(_currentPath), out byte[] loaded);
         if (loadResult == GuideXosFileResult.Success &&
@@ -500,10 +536,17 @@ public sealed class ManagedNotes : GuideXosApplication
         host.TryLog(loadResult == GuideXosFileResult.Success
             ? "C117-NOTES initial=multiline source=VFS result=PASS"u8
             : "C117-NOTES initial=multiline source=fixture result=PASS"u8);
-        bool textAreaTests = GuideXosTextAreaTests.Run(host);
+        bool runFocusedProofTests = true;
+#if HOSTLOGPROOF_C119_MANAGED_BUTTON
+        runFocusedProofTests = !_c119ProofContext || !_c119ButtonTestsRun;
+#endif
+        bool textAreaTests = runFocusedProofTests
+            ? GuideXosTextAreaTests.Run(host) : true;
 #if HOSTLOGPROOF_C118_MANAGED_LIST_BOX
-        bool listBoxTests = GuideXosListBoxTests.Run(host);
-        bool textInputTests = GuideXosTextInputTests.Run(host);
+        bool listBoxTests = runFocusedProofTests
+            ? GuideXosListBoxTests.Run(host) : true;
+        bool textInputTests = runFocusedProofTests
+            ? GuideXosTextInputTests.Run(host) : true;
         if (_c118ProofContext)
         {
             host.TryLog(textAreaTests
@@ -517,9 +560,23 @@ public sealed class ManagedNotes : GuideXosApplication
                 : "C116-REGRESSION text-input=FAIL"u8);
         }
 #endif
+#if HOSTLOGPROOF_C119_MANAGED_BUTTON
+        bool buttonTests = runFocusedProofTests
+            ? GuideXosButtonTests.Run(host, surface) : true;
+        if (_c119ProofContext)
+        {
+            _c119ButtonTestsRun = true;
+            host.TryLog(buttonTests
+                ? "C119-NOTES initial=managed-buttons result=PASS"u8
+                : "C119-NOTES initial=managed-buttons result=FAIL"u8);
+        }
+#endif
         return textAreaTests
 #if HOSTLOGPROOF_C118_MANAGED_LIST_BOX
             && listBoxTests && textInputTests
+#endif
+#if HOSTLOGPROOF_C119_MANAGED_BUTTON
+            && buttonTests
 #endif
             ? GuideXosResult.Success : GuideXosResult.InvalidArgument;
     }
@@ -528,6 +585,124 @@ public sealed class ManagedNotes : GuideXosApplication
     private static bool IsC118Context(GuideXosHost host)
     {
         return host.LaunchContext.Utf8.SequenceEqual("c118-notes"u8);
+    }
+#endif
+
+#if HOSTLOGPROOF_C119_MANAGED_BUTTON
+    private static bool IsC119Context(GuideXosHost host)
+    {
+        return host.LaunchContext.Utf8.SequenceEqual("c119-notes"u8) ||
+            host.LaunchContext.Utf8.SequenceEqual("c119-disabled"u8);
+    }
+
+    private void BlurButtons()
+    {
+        _openButton.Blur();
+        _saveButton.Blur();
+        _saveAsButton.Blur();
+    }
+
+    private GuideXosButton FocusedButton()
+    {
+        if (_openButton.IsFocused) return _openButton;
+        if (_saveButton.IsFocused) return _saveButton;
+        if (_saveAsButton.IsFocused) return _saveAsButton;
+        return null;
+    }
+
+    private uint ButtonAction(GuideXosButton button)
+    {
+        return button == null ? 0u :
+            button == _openButton ? 20u :
+            button == _saveButton ? 22u : 21u;
+    }
+
+    private GuideXosResult HandleManagedButtonInput(
+        GuideXosHost host,
+        GuideXosSurface surface,
+        GuideXosInputEvent input,
+        out bool consumed)
+    {
+        consumed = false;
+        if (input.Kind == GuideXosInputKind.PointerDown)
+        {
+            GuideXosButton button = null;
+            GuideXosButtonResult result = _openButton.HandlePointerDown(
+                input.X, input.Y);
+            if (result != GuideXosButtonResult.Ignored)
+            {
+                button = _openButton;
+            }
+            else
+            {
+                result = _saveButton.HandlePointerDown(
+                    input.X, input.Y);
+                if (result != GuideXosButtonResult.Ignored)
+                {
+                    button = _saveButton;
+                }
+            }
+            if (button == null)
+            {
+                result = _saveAsButton.HandlePointerDown(input.X, input.Y);
+                if (result != GuideXosButtonResult.Ignored)
+                {
+                    button = _saveAsButton;
+                }
+            }
+            if (button == null) return GuideXosResult.Success;
+
+            consumed = true;
+            if (result == GuideXosButtonResult.Disabled)
+            {
+                host.TryLog("C119-BUTTON pointer=disabled result=PASS"u8);
+                return RenderMain(host, surface, _launchCount)
+                    ? GuideXosResult.Success : GuideXosResult.InvalidArgument;
+            }
+
+            BlurButtons();
+            _textArea.Blur();
+            button.Focus();
+            uint actionId = ButtonAction(button);
+            host.TryLog(actionId == 20u
+                ? "C119-BUTTON pointer=Open activation=PASS"u8
+                : actionId == 22u
+                    ? "C119-BUTTON pointer=Save activation=PASS"u8
+                    : "C119-BUTTON pointer=SaveAs activation=PASS"u8);
+            return HandleAction(host, actionId);
+        }
+
+        if (input.Kind != GuideXosInputKind.KeyDown &&
+            input.Kind != GuideXosInputKind.KeyChar)
+        {
+            return GuideXosResult.Success;
+        }
+
+        GuideXosButton focused = FocusedButton();
+        if (focused == null) return GuideXosResult.Success;
+        consumed = true;
+        GuideXosButtonResult keyResult = input.Kind == GuideXosInputKind.KeyDown
+            ? focused.HandleKey((GuideXosTextInputKey)input.KeyCode)
+            : focused.HandleCharacter(input.Character);
+        if (keyResult == GuideXosButtonResult.Activated)
+        {
+            uint actionId = ButtonAction(focused);
+            if (input.Kind == GuideXosInputKind.KeyChar && input.Character == ' ')
+            {
+                host.TryLog("C119-SPACE button=Save activation=PASS count=1"u8);
+            }
+            else
+            {
+                host.TryLog(actionId == 20u
+                    ? "C119-BUTTON key=Enter button=Open activation=PASS"u8
+                    : actionId == 22u
+                        ? "C119-BUTTON key=Enter button=Save activation=PASS"u8
+                        : "C119-BUTTON key=Enter button=SaveAs activation=PASS"u8);
+            }
+            return HandleAction(host, actionId);
+        }
+        return RenderMain(host, surface, _launchCount)
+            ? GuideXosResult.Success : GuideXosResult.InvalidArgument;
     }
 #endif
 
@@ -545,12 +720,20 @@ public sealed class ManagedNotes : GuideXosApplication
                 host, surface, input);
             return ApplyPickerResult(host, surface, pickerResult);
         }
+#if HOSTLOGPROOF_C119_MANAGED_BUTTON
+        GuideXosResult buttonResult = HandleManagedButtonInput(
+            host, surface, input, out bool buttonConsumed);
+        if (buttonConsumed) return buttonResult;
+#endif
         if (input.Kind == GuideXosInputKind.PointerDown)
         {
             GuideXosTextAreaEditResult focus = _textArea.HandlePointerDown(
                 input.X, input.Y, 20, 72, 8, 18);
             if (focus == GuideXosTextAreaEditResult.Focused)
             {
+#if HOSTLOGPROOF_C119_MANAGED_BUTTON
+                BlurButtons();
+#endif
                 host.TryLog("C117-TEXT-AREA focus=PASS source=pointer"u8);
                 return RenderMain(host, surface, _launchCount)
                     ? GuideXosResult.Success : GuideXosResult.InvalidArgument;
@@ -609,6 +792,9 @@ public sealed class ManagedNotes : GuideXosApplication
         }
         if (actionId == 20u)
         {
+#if HOSTLOGPROOF_C119_MANAGED_BUTTON
+            BlurButtons();
+#endif
             _textArea.Blur();
             GuideXosFilePickerResult result = _picker.OpenFile(
                 host, surface, GuideXosFilePickerOptions.Open(
@@ -617,6 +803,9 @@ public sealed class ManagedNotes : GuideXosApplication
         }
         if (actionId == 21u)
         {
+#if HOSTLOGPROOF_C119_MANAGED_BUTTON
+            BlurButtons();
+#endif
             _textArea.Blur();
             host.TryLog("C117-PICKER save=begin"u8);
             GuideXosFilePickerStatus status = BeginSave(host, surface);
@@ -631,6 +820,11 @@ public sealed class ManagedNotes : GuideXosApplication
             host.TryLog(saveResult == GuideXosFileResult.Success
                 ? "C117-NOTES save=PASS path=/system/apps/NOTES.TXT"u8
                 : "C117-NOTES save=FAIL path=/system/apps/NOTES.TXT"u8);
+#if HOSTLOGPROOF_C119_MANAGED_BUTTON
+            host.TryLog(saveResult == GuideXosFileResult.Success
+                ? "C119-NOTES managed-save=PASS source=button"u8
+                : "C119-NOTES managed-save=FAIL source=button"u8);
+#endif
             return RenderMain(host, surface, _launchCount)
                 ? GuideXosResult.Success : GuideXosResult.InvalidArgument;
         }
@@ -662,12 +856,18 @@ public sealed class ManagedNotes : GuideXosApplication
                 {
                     _status = StatusText(readResult);
                     _picker.Reset();
+#if HOSTLOGPROOF_C119_MANAGED_BUTTON
+                    BlurButtons();
+#endif
                     _textArea.Focus();
                     return RenderMain(host, surface, _launchCount)
                         ? GuideXosResult.Success : GuideXosResult.InvalidArgument;
                 }
                 _currentPath = result.Path;
                 _textArea.SetCaretToStart();
+#if HOSTLOGPROOF_C119_MANAGED_BUTTON
+                BlurButtons();
+#endif
                 _textArea.Focus();
                 _status = "Opened from picker";
                 bool exact = !result.Path.EndsWith("C117.TXT",
@@ -709,11 +909,27 @@ public sealed class ManagedNotes : GuideXosApplication
                 }
                 _currentPath = result.Path;
                 _status = "Saved through picker";
-                host.TryLog(PathLog("C115-NOTES save=PASS path=", result.Path));
-                host.TryLog(PathLog("C116-NOTES typed-save path=", result.Path));
-                LogDocument(host, "C117-NOTES saved");
+#if HOSTLOGPROOF_C119_MANAGED_BUTTON
+                bool c119FixedSave = _c119ProofContext &&
+                    result.Path == "/system/apps/THIRD.TXT";
+                if (c119FixedSave)
+                {
+                    host.TryLog("C115-NOTES save=PASS path=/system/apps/THIRD.TXT"u8);
+                    host.TryLog("C116-NOTES typed-save path=/system/apps/THIRD.TXT"u8);
+                    host.TryLog("C117-NOTES saved document=Second managed document!"u8);
+                }
+                else
+#endif
+                {
+                    host.TryLog(PathLog("C115-NOTES save=PASS path=", result.Path));
+                    host.TryLog(PathLog("C116-NOTES typed-save path=", result.Path));
+                    LogDocument(host, "C117-NOTES saved");
+                }
             }
             _picker.Reset();
+#if HOSTLOGPROOF_C119_MANAGED_BUTTON
+            BlurButtons();
+#endif
             _textArea.Focus();
             return RenderMain(host, surface, _launchCount)
                 ? GuideXosResult.Success : GuideXosResult.InvalidArgument;
@@ -724,6 +940,9 @@ public sealed class ManagedNotes : GuideXosApplication
             _status = wasSave
                 ? "Save cancelled" : "Open cancelled";
             _picker.Reset();
+#if HOSTLOGPROOF_C119_MANAGED_BUTTON
+            BlurButtons();
+#endif
             _textArea.Focus();
             host.TryLog(wasSave
                 ? "C115-NOTES save=cancelled result=PASS"u8
@@ -804,9 +1023,15 @@ public sealed class ManagedNotes : GuideXosApplication
             _textArea.Render(surface, 20, 72, 18) == GuideXosResult.Success &&
             GuideXosText.Line(surface, 150, "Status: "u8, Encoding.UTF8.GetBytes(_status)) &&
             GuideXosText.Line(surface, 174, "Editor: "u8, "bounded ASCII; [] selection; | caret"u8) &&
+#if HOSTLOGPROOF_C119_MANAGED_BUTTON
+            _openButton.Render(surface) == GuideXosResult.Success &&
+            _saveButton.Render(surface) == GuideXosResult.Success &&
+            _saveAsButton.Render(surface) == GuideXosResult.Success &&
+#else
             surface.TryAddButton(20, 220, 90, 28, "Open"u8, 20u, out _) == GuideXosResult.Success &&
             surface.TryAddButton(120, 220, 90, 28, "Save"u8, 22u, out _) == GuideXosResult.Success &&
             surface.TryAddButton(220, 220, 100, 28, "Save As"u8, 21u, out _) == GuideXosResult.Success &&
+#endif
             surface.TryAddButton(330, 220, 90, 28, "Reload"u8, 3u, out _) == GuideXosResult.Success;
     }
 

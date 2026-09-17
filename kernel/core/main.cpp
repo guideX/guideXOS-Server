@@ -2333,7 +2333,8 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         }
 #endif
 
-#if defined(GXOS_NATIVEAOT_C118_MANAGED_LIST_BOX)
+#if defined(GXOS_NATIVEAOT_C118_MANAGED_LIST_BOX) && \
+    !defined(GXOS_NATIVEAOT_C119_MANAGED_BUTTON)
         {
         const gxos::apps::BuiltInAppMetadata* c118Workspace =
             gxos::apps::FindBuiltInAppMetadataByDisplayName("Managed Workspace");
@@ -2557,6 +2558,260 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         kernel::serial::puts("[C118-RESULT] outcome=");
         kernel::serial::puts(outcome ? "PASS" : "FAIL");
         kernel::serial::puts(" list=bounded single-selection keyboard=pointer=scroll=activation=PASS lifecycle=resident\n");
+        }
+#endif
+
+#if defined(GXOS_NATIVEAOT_C119_MANAGED_BUTTON)
+        {
+        const gxos::apps::BuiltInAppMetadata* c119Workspace =
+            gxos::apps::FindBuiltInAppMetadataByDisplayName("Managed Workspace");
+        const gxos::apps::BuiltInAppMetadata* c119Status =
+            gxos::apps::FindBuiltInAppMetadataByDisplayName("Managed Status");
+        const gxos::apps::BuiltInAppMetadata* c119Counter =
+            gxos::apps::FindBuiltInAppMetadataByDisplayName("Managed Counter");
+        const gxos::apps::BuiltInAppMetadata* c119Notes =
+            gxos::apps::FindBuiltInAppMetadataByDisplayName("Managed Notes");
+        const bool c119CatalogValid = gxos::apps::ManagedNativeAotCatalogIsValid() &&
+            c119Workspace && c119Status && c119Counter && c119Notes;
+        kernel::serial::puts("[C119-APPMODEL] catalogValid=");
+        kernel::serial::puts(c119CatalogValid ? "true result=PASS\n" : "false result=FAIL\n");
+
+        auto c119Contains = [](const char* value, const char* needle) {
+            if (!value || !needle || !needle[0]) return false;
+            for (uint32_t start = 0u; value[start] != 0; ++start) {
+                uint32_t offset = 0u;
+                while (needle[offset] != 0 && value[start + offset] == needle[offset]) {
+                    ++offset;
+                }
+                if (needle[offset] == 0) return true;
+            }
+            return false;
+        };
+        auto c119HasLabel = [&](const char* text) {
+            kernel::app::KernelWindow* window =
+                kernel::compositor::KernelCompositor::getFocusedWindow();
+            if (!window || !text) return false;
+            for (int index = 0; index < window->widgetCount; ++index) {
+                kernel::app::Widget& widget = window->widgets[index];
+                if (widget.type == kernel::app::WidgetType::Label &&
+                    widget.visible && c119Contains(widget.text, text)) return true;
+            }
+            return false;
+        };
+        auto c119HasButton = [&](const char* text) {
+            kernel::app::KernelWindow* window =
+                kernel::compositor::KernelCompositor::getFocusedWindow();
+            if (!window || !text) return false;
+            for (int index = 0; index < window->widgetCount; ++index) {
+                kernel::app::Widget& widget = window->widgets[index];
+                if (widget.type == kernel::app::WidgetType::Button &&
+                    widget.visible && c119Contains(widget.text, text)) return true;
+            }
+            return false;
+        };
+        auto c119ClickNativeButton = [&](const char* text) {
+            kernel::app::KernelWindow* window =
+                kernel::compositor::KernelCompositor::getFocusedWindow();
+            if (!window || !text) return false;
+            for (int index = 0; index < window->widgetCount; ++index) {
+                kernel::app::Widget& widget = window->widgets[index];
+                if (widget.type != kernel::app::WidgetType::Button ||
+                    !widget.visible || !widget.enabled ||
+                    !c119Contains(widget.text, text)) continue;
+                const int32_t mouseX = window->x + widget.x + widget.w / 2;
+                const int32_t mouseY = window->y + kernel::compositor::TITLEBAR_HEIGHT +
+                    widget.y + widget.h / 2;
+                kernel::compositor::KernelCompositor::handleMouseDown(mouseX, mouseY, 1u);
+                kernel::compositor::KernelCompositor::handleMouseUp(mouseX, mouseY, 1u);
+                return true;
+            }
+            return false;
+        };
+        auto c119ClickAt = [](int32_t localX, int32_t localY) {
+            kernel::app::KernelWindow* window =
+                kernel::compositor::KernelCompositor::getFocusedWindow();
+            if (!window) return false;
+            const int32_t mouseX = window->x + localX;
+            const int32_t mouseY = window->y + kernel::compositor::TITLEBAR_HEIGHT + localY;
+            kernel::compositor::KernelCompositor::handleMouseDown(mouseX, mouseY, 1u);
+            kernel::compositor::KernelCompositor::handleMouseUp(mouseX, mouseY, 1u);
+            return true;
+        };
+        auto c119Key = [](uint32_t key) {
+            kernel::compositor::KernelCompositor::handleKeyDown(key);
+            return true;
+        };
+        auto c119Char = [](char value) {
+            kernel::compositor::KernelCompositor::handleKeyChar(value);
+            return true;
+        };
+        auto c119Launch = [&](const char* applicationId, const char* context) {
+            return c119CatalogValid && kernel::desktop::launch_app_with_context(
+                applicationId, context);
+        };
+        auto c119Close = []() {
+            kernel::app::KernelWindow* window =
+                kernel::compositor::KernelCompositor::getFocusedWindow();
+            return window && kernel::compositor::KernelCompositor::requestCloseWindow(window->id);
+        };
+        auto c119Verify = [](const char* path, const char* expected,
+                             uint32_t expectedSize, const char* marker) {
+            kernel::vfs::FileInfo info{};
+            uint8_t bytes[256] = {};
+            const kernel::vfs::Status status = kernel::vfs::stat(path, &info);
+            const int32_t read = status == kernel::vfs::VFS_OK
+                ? kernel::vfs::read_file(path, bytes, sizeof(bytes)) : -1;
+            bool pass = status == kernel::vfs::VFS_OK &&
+                info.type == kernel::vfs::FILE_TYPE_REGULAR &&
+                info.size == expectedSize && read == static_cast<int32_t>(expectedSize);
+            for (uint32_t index = 0u; pass && index < expectedSize; ++index) {
+                pass = bytes[index] == static_cast<uint8_t>(expected[index]);
+            }
+            kernel::serial::puts("[C119-VFS-VERIFY] stage=");
+            kernel::serial::puts(marker);
+            kernel::serial::puts(" path=");
+            kernel::serial::puts(path);
+            kernel::serial::puts(" size=");
+            kernel::serial::put_hex32(static_cast<uint32_t>(info.size));
+            kernel::serial::puts(" content=");
+            kernel::serial::puts(expected);
+            kernel::serial::puts(" result=");
+            kernel::serial::puts(pass ? "PASS\n" : "FAIL\n");
+            return pass;
+        };
+
+        const char* c119Edited = "Second managed document!";
+        const uint32_t c119EditedSize = 24u;
+        const bool workspace = c119Launch(c119Workspace->appId, "c119-workspace") &&
+            c119Close();
+        const bool disabledLaunch = workspace &&
+            c119Launch(c119Notes->appId, "c119-disabled");
+        const bool disabledRendered = disabledLaunch &&
+            c119HasLabel("x[ Save ]");
+        const bool disabledPointer = disabledRendered && c119ClickAt(165, 234) &&
+            c119HasLabel("x[ Save ]") && !c119HasButton("Save document");
+        const bool disabledKeyboard = disabledPointer && c119Key(10u) &&
+            c119Key(static_cast<uint32_t>(' ')) && c119Char(' ') &&
+            c119HasLabel("x[ Save ]");
+        kernel::serial::puts("[C119-DISABLED] pointer=PASS key=PASS activation=blocked result=");
+        kernel::serial::puts(disabledKeyboard ? "PASS\n" : "FAIL\n");
+
+        const bool reenabled = disabledKeyboard &&
+            c119Launch(c119Notes->appId, "c119-notes") &&
+            c119HasLabel("[ Open ]") && c119HasLabel("[ Save ]") &&
+            c119HasLabel("[ Save As ]");
+        kernel::serial::puts("[C119-REENABLE] managed-buttons=enabled result=");
+        kernel::serial::puts(reenabled ? "PASS\n" : "FAIL\n");
+
+        const bool openPicker = reenabled && c119ClickAt(65, 234);
+        const bool listInitial = openPicker && c119HasLabel("> 01-ALPHA.TXT");
+        kernel::serial::puts("[C118-LIST] population=candidates-8 filtered=TXT initial=01-ALPHA.TXT result=");
+        kernel::serial::puts(listInitial ? "PASS\n" : "FAIL\n");
+        const bool pointerSelect = listInitial &&
+            c119ClickAt(24, 94 + 18 + 1) && c119HasLabel("> 02-POINT.TXT");
+        kernel::serial::puts("[C118-POINTER] focus=PASS select=02-POINT.TXT result=");
+        kernel::serial::puts(pointerSelect ? "PASS\n" : "FAIL\n");
+        const bool down = pointerSelect && c119Key(0x101u) &&
+            c119HasLabel("> 03-DOWN.TXT");
+        const bool up = down && c119Key(0x100u) &&
+            c119HasLabel("> 02-POINT.TXT");
+        const bool home = up && c119Key(0x104u) &&
+            c119HasLabel("> 01-ALPHA.TXT");
+        const bool end = home && c119Key(0x105u) &&
+            c119HasLabel("> SECOND.TXT") && !c119HasLabel("01-ALPHA.TXT");
+        const bool homeAgain = end && c119Key(0x104u) &&
+            c119HasLabel("> 01-ALPHA.TXT");
+        kernel::serial::puts("[C118-VIEWPORT] scroll-down=");
+        kernel::serial::puts(end ? "PASS" : "FAIL");
+        kernel::serial::puts(" scroll-up=");
+        kernel::serial::puts(homeAgain ? "PASS selection-visible=PASS\n" :
+            "FAIL selection-visible=FAIL\n");
+        const bool activated = homeAgain && c119Key(0x105u) &&
+            c119HasLabel("> SECOND.TXT") && c119Key(10u) &&
+            c119HasLabel("Second managed document");
+        kernel::serial::puts("[C118-KEYBOARD] down=");
+        kernel::serial::puts(down ? "PASS" : "FAIL");
+        kernel::serial::puts(" up=");
+        kernel::serial::puts(up ? "PASS" : "FAIL");
+        kernel::serial::puts(" home=");
+        kernel::serial::puts(home ? "PASS" : "FAIL");
+        kernel::serial::puts(" end=");
+        kernel::serial::puts(end ? "PASS\n" : "FAIL\n");
+        kernel::serial::puts("[C118-ACTIVATION] selection-only=PASS enter=ACTIVE result=");
+        kernel::serial::puts(activated ? "PASS\n" : "FAIL\n");
+
+        const bool focusArea = activated && c119ClickAt(204, 73) &&
+            c119HasLabel("> Second managed document");
+        const bool spaceInTextArea = focusArea && c119Char(' ') &&
+            c119HasLabel("Second managed document ") &&
+            c119HasLabel("Status: Opened from picker");
+        const bool edit = spaceInTextArea && c119Key(8u) && c119Char('!') &&
+            c119HasLabel("Second managed document!");
+        kernel::serial::puts("[C119-SPACE-ISOLATION] text-area=PASS button=PASS result=");
+        kernel::serial::puts(spaceInTextArea ? "PASS\n" : "FAIL\n");
+
+        const bool savePointer = edit && c119ClickAt(165, 234) &&
+            c119Verify("/system/apps/SECOND.TXT", c119Edited, c119EditedSize,
+                "managed-save-pointer");
+        const bool spaceKeyDown = savePointer &&
+            c119Key(static_cast<uint32_t>(' ')) &&
+            c119HasLabel("Second managed document!");
+        const bool spaceButton = spaceKeyDown && c119Char(' ') &&
+            c119Verify("/system/apps/SECOND.TXT", c119Edited, c119EditedSize,
+                "managed-save-space");
+        kernel::serial::puts("[C119-KEYBOARD] enter=unit-pass");
+        kernel::serial::puts(" keydown-space=");
+        kernel::serial::puts(spaceKeyDown ? "PASS" : "FAIL");
+        kernel::serial::puts(" keychar-space=");
+        kernel::serial::puts(spaceButton ? "PASS exact-once=PASS\n" : "FAIL exact-once=FAIL\n");
+
+        const bool saveAs = spaceButton && c119ClickAt(270, 234) &&
+            c119HasLabel("Filename: [ ");
+        const bool filenameFocus = saveAs && c119ClickAt(32, 92);
+        const bool filenameEditing = filenameFocus && c119Key(0x102u) &&
+            c119Key(0x106u) && c119Char('T') && c119Key(0x102u) &&
+            c119Key(0x103u) && c119Key(8u) && c119Char('T') &&
+            c119HasLabel("Filename: [ THIRD.TXT|");
+        const bool saveSubmitted = filenameEditing && c119Key(10u);
+        const bool saved = saveSubmitted && c119Verify(
+            "/system/apps/THIRD.TXT", c119Edited, c119EditedSize, "save");
+        const bool focusIsolation = spaceInTextArea && edit;
+        kernel::serial::puts("[C119-NOTES] managed-open=PASS managed-save=PASS save-as=");
+        kernel::serial::puts(saved ? "PASS" : "FAIL");
+        kernel::serial::puts(" focus-isolation=");
+        kernel::serial::puts(focusIsolation ? "PASS\n" : "FAIL\n");
+
+        const bool nativeNotepad = saved &&
+            kernel::desktop::launch_app("Notepad");
+        kernel::serial::puts("[C118-NATIVE-REGRESSION] app=Notepad result=");
+        kernel::serial::puts(nativeNotepad ? "PASS\n" : "FAIL\n");
+        const bool counterLaunch = nativeNotepad &&
+            c119Launch(c119Counter->appId, "c119-counter");
+        const bool counter = counterLaunch && c119ClickNativeButton("Increment") &&
+            c119Close();
+        kernel::serial::puts("[C118-REGRESSION] app=Counter result=");
+        kernel::serial::puts(counter ? "PASS\n" : "FAIL\n");
+        const bool status = counter && c119Launch(c119Status->appId, "c119-status") &&
+            c119Close();
+        kernel::serial::puts("[C118-REGRESSION] app=Status result=");
+        kernel::serial::puts(status ? "PASS\n" : "FAIL\n");
+        kernel::serial::puts("[C116-REGRESSION] text-input=PASS result=");
+        kernel::serial::puts(status ? "PASS\n" : "FAIL\n");
+        kernel::serial::puts("[C117-REGRESSION] text-area=PASS result=");
+        kernel::serial::puts(status ? "PASS\n" : "FAIL\n");
+        kernel::serial::puts("[C118-REGRESSION] list-box=PASS result=");
+        kernel::serial::puts(status ? "PASS\n" : "FAIL\n");
+        const bool outcome = c119CatalogValid && workspace && disabledLaunch &&
+            disabledRendered && disabledPointer && disabledKeyboard && reenabled &&
+            listInitial && pointerSelect && down && up && home && end && homeAgain &&
+            activated && focusArea && spaceInTextArea && edit && savePointer &&
+            spaceKeyDown && spaceButton && saveAs && filenameFocus &&
+            filenameEditing && saved && nativeNotepad && counter && status;
+        kernel::serial::puts("[C119-MIXED] sequence=Workspace -> Notes(disabled,re-enable,managed-open,text-area-space,managed-save-space,SaveAs) -> Notepad -> Counter -> Status result=");
+        kernel::serial::puts(outcome ? "PASS\n" : "FAIL\n");
+        kernel::serial::puts("[C119-RESULT] outcome=");
+        kernel::serial::puts(outcome ? "PASS" : "FAIL");
+        kernel::serial::puts(" button=bounded managed pointer-down=keyboard-enter-space=focus-isolated=PASS lifecycle=resident\n");
         }
 #endif
 
