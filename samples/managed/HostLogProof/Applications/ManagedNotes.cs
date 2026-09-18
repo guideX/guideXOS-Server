@@ -462,6 +462,15 @@ public sealed class ManagedNotes : GuideXosApplication
     private bool _c119ProofContext;
     private bool _c119ButtonTestsRun;
 #endif
+#if HOSTLOGPROOF_C120_MANAGED_CONTROL_HOST
+    private const int C120OpenControlId = 1;
+    private const int C120SaveControlId = 2;
+    private const int C120SaveAsControlId = 3;
+    private const int C120DocumentControlId = 4;
+    private GuideXosControlHost _mainControlHost;
+    private bool _c120ProofContext;
+    private bool _c120HostTestsRun;
+#endif
 
     public override GuideXosResult Launch(GuideXosHost host)
     {
@@ -486,10 +495,33 @@ public sealed class ManagedNotes : GuideXosApplication
             _saveButton.SetEnabled(false);
         }
 #endif
+#if HOSTLOGPROOF_C120_MANAGED_CONTROL_HOST
+        _c120ProofContext = IsC120Context(host);
+        if (_c120ProofContext)
+        {
+            _mainControlHost = new GuideXosControlHost(4);
+            _mainControlHost.Reset();
+            _mainControlHost.TryRegisterButton(C120OpenControlId, _openButton);
+            _mainControlHost.TryRegisterButton(C120SaveControlId, _saveButton);
+            _mainControlHost.TryRegisterButton(C120SaveAsControlId, _saveAsButton);
+            _mainControlHost.TryRegisterTextArea(C120DocumentControlId, _textArea);
+            if (host.LaunchContext.Utf8.SequenceEqual("c120-disabled"u8))
+            {
+                _saveButton.SetEnabled(false);
+            }
+            host.TryLog(_mainControlHost.RegistrationCount == 4 &&
+                _mainControlHost.ActiveIndex == -1
+                ? "C120-HOST registration=4 initial=no-focus result=PASS"u8
+                : "C120-HOST registration=FAIL initial=FAIL result=FAIL"u8);
+        }
+#endif
 #if HOSTLOGPROOF_C118_MANAGED_LIST_BOX
         _c118ProofContext = IsC118Context(host);
 #if HOSTLOGPROOF_C119_MANAGED_BUTTON
         _c118ProofContext = _c118ProofContext || _c119ProofContext;
+#endif
+#if HOSTLOGPROOF_C120_MANAGED_CONTROL_HOST
+        _c118ProofContext = _c118ProofContext || _c120ProofContext;
 #endif
         _useTextInput = _c118ProofContext;
 #endif
@@ -571,12 +603,26 @@ public sealed class ManagedNotes : GuideXosApplication
                 : "C119-NOTES initial=managed-buttons result=FAIL"u8);
         }
 #endif
+#if HOSTLOGPROOF_C120_MANAGED_CONTROL_HOST
+        bool controlHostTests = _c120ProofContext && !_c120HostTestsRun
+            ? GuideXosControlHostTests.Run(host) : true;
+        if (_c120ProofContext)
+        {
+            _c120HostTestsRun = true;
+            host.TryLog(controlHostTests
+                ? "C120-HOST tests=PASS"u8
+                : "C120-HOST tests=FAIL"u8);
+        }
+#endif
         return textAreaTests
 #if HOSTLOGPROOF_C118_MANAGED_LIST_BOX
             && listBoxTests && textInputTests
 #endif
 #if HOSTLOGPROOF_C119_MANAGED_BUTTON
             && buttonTests
+#endif
+#if HOSTLOGPROOF_C120_MANAGED_CONTROL_HOST
+            && controlHostTests
 #endif
             ? GuideXosResult.Success : GuideXosResult.InvalidArgument;
     }
@@ -592,8 +638,18 @@ public sealed class ManagedNotes : GuideXosApplication
     private static bool IsC119Context(GuideXosHost host)
     {
         return host.LaunchContext.Utf8.SequenceEqual("c119-notes"u8) ||
-            host.LaunchContext.Utf8.SequenceEqual("c119-disabled"u8);
+            host.LaunchContext.Utf8.SequenceEqual("c119-disabled"u8) ||
+            host.LaunchContext.Utf8.SequenceEqual("c120-notes"u8) ||
+            host.LaunchContext.Utf8.SequenceEqual("c120-disabled"u8);
     }
+
+#if HOSTLOGPROOF_C120_MANAGED_CONTROL_HOST
+    private static bool IsC120Context(GuideXosHost host)
+    {
+        return host.LaunchContext.Utf8.SequenceEqual("c120-notes"u8) ||
+            host.LaunchContext.Utf8.SequenceEqual("c120-disabled"u8);
+    }
+#endif
 
     private void BlurButtons()
     {
@@ -706,6 +762,110 @@ public sealed class ManagedNotes : GuideXosApplication
     }
 #endif
 
+#if HOSTLOGPROOF_C120_MANAGED_CONTROL_HOST
+    private GuideXosResult HandleC120Input(
+        GuideXosHost host, GuideXosSurface surface, GuideXosInputEvent input)
+    {
+        if (_picker.IsActive)
+        {
+            GuideXosFilePickerResult pickerResult = _picker.HandleInput(
+                host, surface, input);
+            return ApplyPickerResult(host, surface, pickerResult);
+        }
+
+        if (input.Kind == GuideXosInputKind.PointerDown)
+        {
+            int controlId = C120HitTest(input.X, input.Y);
+            if (controlId == 0) return GuideXosResult.Success;
+            GuideXosControlHostResult pointerResult = controlId == C120DocumentControlId
+                ? _mainControlHost.FocusAndRoutePointer(
+                    controlId, input.X, input.Y, 20, 72, 8, 18)
+                : _mainControlHost.FocusAndRoutePointer(
+                    controlId, input.X, input.Y);
+            if (pointerResult == GuideXosControlHostResult.Activated)
+            {
+                host.TryLog(C120ControlLabel(controlId));
+                return HandleAction(host, C120ActionForControl(controlId));
+            }
+            host.TryLog(pointerResult == GuideXosControlHostResult.Disabled
+                ? "C120-POINTER target=disabled result=PASS"u8
+                : controlId == C120DocumentControlId &&
+                    pointerResult == GuideXosControlHostResult.Focused
+                    ? "C120-POINTER target=document result=PASS"u8
+                    : "C120-POINTER result=FAIL"u8);
+            return RenderMain(host, surface, _launchCount)
+                ? GuideXosResult.Success : GuideXosResult.InvalidArgument;
+        }
+
+        GuideXosControlHostResult routeResult = _mainControlHost.HandleInput(input);
+        if (input.Kind == GuideXosInputKind.KeyDown &&
+            (GuideXosTextInputKey)input.KeyCode == GuideXosTextInputKey.Tab)
+        {
+            host.TryLog(input.Shift
+                ? "C120-SHIFT-TAB traversal=PASS"u8
+                : "C120-TAB traversal=PASS"u8);
+        }
+        if (routeResult == GuideXosControlHostResult.Activated)
+        {
+            int controlId = _mainControlHost.ActiveControlId;
+            host.TryLog(C120ControlLabel(controlId));
+            return HandleAction(host, C120ActionForControl(controlId));
+        }
+        if (routeResult == GuideXosControlHostResult.Changed ||
+            routeResult == GuideXosControlHostResult.Moved)
+        {
+            host.TryLog(_mainControlHost.ActiveControlId == C120DocumentControlId
+                ? "C120-ROUTING active=document result=PASS"u8
+                : "C120-ROUTING active=control result=PASS"u8);
+        }
+        return RenderMain(host, surface, _launchCount)
+            ? GuideXosResult.Success : GuideXosResult.InvalidArgument;
+    }
+
+    private static int C120HitTest(int x, int y)
+    {
+        if (x >= 20 && x < 110 && y >= 220 && y < 248)
+        {
+            return C120OpenControlId;
+        }
+        if (x >= 120 && x < 210 && y >= 220 && y < 248)
+        {
+            return C120SaveControlId;
+        }
+        if (x >= 220 && x < 320 && y >= 220 && y < 248)
+        {
+            return C120SaveAsControlId;
+        }
+        if (x >= 20 && x < 20 + 48 * 8 && y >= 72 && y < 72 + 4 * 18)
+        {
+            return C120DocumentControlId;
+        }
+        return 0;
+    }
+
+    private static uint C120ActionForControl(int controlId)
+    {
+        return controlId switch
+        {
+            C120OpenControlId => 20u,
+            C120SaveControlId => 22u,
+            C120SaveAsControlId => 21u,
+            _ => 0u,
+        };
+    }
+
+    private static ReadOnlySpan<byte> C120ControlLabel(int controlId)
+    {
+        return controlId switch
+        {
+            C120OpenControlId => "C120-ACTIVATE control=Open result=PASS"u8,
+            C120SaveControlId => "C120-ACTIVATE control=Save result=PASS"u8,
+            C120SaveAsControlId => "C120-ACTIVATE control=SaveAs result=PASS"u8,
+            _ => "C120-ACTIVATE control=Document result=FAIL"u8,
+        };
+    }
+#endif
+
     public override GuideXosResult HandleInput(
         GuideXosHost host, GuideXosInputEvent input)
     {
@@ -714,6 +874,12 @@ public sealed class ManagedNotes : GuideXosApplication
         {
             return GuideXosResult.SurfaceCreationFailed;
         }
+#if HOSTLOGPROOF_C120_MANAGED_CONTROL_HOST
+        if (_c120ProofContext)
+        {
+            return HandleC120Input(host, surface, input);
+        }
+#endif
         if (_picker.IsActive)
         {
             GuideXosFilePickerResult pickerResult = _picker.HandleInput(
@@ -792,6 +958,21 @@ public sealed class ManagedNotes : GuideXosApplication
         }
         if (actionId == 20u)
         {
+#if HOSTLOGPROOF_C120_MANAGED_CONTROL_HOST
+            if (_c120ProofContext)
+            {
+                GuideXosFilePickerResult c120PickerResult = _picker.OpenFile(
+                    host, surface, GuideXosFilePickerOptions.Open(
+                        "/system/apps", "Open document", ".TXT", true));
+                if (c120PickerResult.Status == GuideXosFilePickerStatus.Pending ||
+                    c120PickerResult.Status == GuideXosFilePickerStatus.NoMatchingFiles)
+                {
+                    _mainControlHost.EnterModal(_picker.FocusHost);
+                    host.TryLog("C120-MODAL entry=open result=PASS"u8);
+                }
+                return PickerStartResult(c120PickerResult);
+            }
+#endif
 #if HOSTLOGPROOF_C119_MANAGED_BUTTON
             BlurButtons();
 #endif
@@ -803,6 +984,20 @@ public sealed class ManagedNotes : GuideXosApplication
         }
         if (actionId == 21u)
         {
+#if HOSTLOGPROOF_C120_MANAGED_CONTROL_HOST
+            if (_c120ProofContext)
+            {
+                host.TryLog("C117-PICKER save=begin"u8);
+                GuideXosFilePickerStatus c120SaveStatus = BeginSave(host, surface);
+                if (c120SaveStatus == GuideXosFilePickerStatus.Pending)
+                {
+                    _mainControlHost.EnterModal(_picker.FocusHost);
+                    host.TryLog("C120-MODAL entry=save-as result=PASS"u8);
+                }
+                return c120SaveStatus == GuideXosFilePickerStatus.Pending
+                    ? GuideXosResult.Success : GuideXosResult.InvalidArgument;
+            }
+#endif
 #if HOSTLOGPROOF_C119_MANAGED_BUTTON
             BlurButtons();
 #endif
@@ -856,19 +1051,38 @@ public sealed class ManagedNotes : GuideXosApplication
                 {
                     _status = StatusText(readResult);
                     _picker.Reset();
-#if HOSTLOGPROOF_C119_MANAGED_BUTTON
-                    BlurButtons();
+#if HOSTLOGPROOF_C120_MANAGED_CONTROL_HOST
+                    if (_c120ProofContext)
+                    {
+                        _mainControlHost.ExitModal();
+                    }
+                    else
 #endif
-                    _textArea.Focus();
+                    {
+#if HOSTLOGPROOF_C119_MANAGED_BUTTON
+                        BlurButtons();
+#endif
+                        _textArea.Focus();
+                    }
                     return RenderMain(host, surface, _launchCount)
                         ? GuideXosResult.Success : GuideXosResult.InvalidArgument;
                 }
                 _currentPath = result.Path;
                 _textArea.SetCaretToStart();
-#if HOSTLOGPROOF_C119_MANAGED_BUTTON
-                BlurButtons();
+#if HOSTLOGPROOF_C120_MANAGED_CONTROL_HOST
+                if (_c120ProofContext)
+                {
+                    _mainControlHost.ExitModal();
+                    host.TryLog("C120-MODAL exit=restore-open result=PASS"u8);
+                }
+                else
 #endif
-                _textArea.Focus();
+                {
+#if HOSTLOGPROOF_C119_MANAGED_BUTTON
+                    BlurButtons();
+#endif
+                    _textArea.Focus();
+                }
                 _status = "Opened from picker";
                 bool exact = !result.Path.EndsWith("C117.TXT",
                     StringComparison.OrdinalIgnoreCase) ||
@@ -927,10 +1141,20 @@ public sealed class ManagedNotes : GuideXosApplication
                 }
             }
             _picker.Reset();
-#if HOSTLOGPROOF_C119_MANAGED_BUTTON
-            BlurButtons();
+#if HOSTLOGPROOF_C120_MANAGED_CONTROL_HOST
+            if (_c120ProofContext)
+            {
+                _mainControlHost.ExitModal();
+                host.TryLog("C120-MODAL exit=restore-save-as result=PASS"u8);
+            }
+            else
 #endif
-            _textArea.Focus();
+            {
+#if HOSTLOGPROOF_C119_MANAGED_BUTTON
+                BlurButtons();
+#endif
+                _textArea.Focus();
+            }
             return RenderMain(host, surface, _launchCount)
                 ? GuideXosResult.Success : GuideXosResult.InvalidArgument;
         }
@@ -940,10 +1164,22 @@ public sealed class ManagedNotes : GuideXosApplication
             _status = wasSave
                 ? "Save cancelled" : "Open cancelled";
             _picker.Reset();
-#if HOSTLOGPROOF_C119_MANAGED_BUTTON
-            BlurButtons();
+#if HOSTLOGPROOF_C120_MANAGED_CONTROL_HOST
+            if (_c120ProofContext)
+            {
+                _mainControlHost.ExitModal();
+                host.TryLog(wasSave
+                    ? "C120-MODAL exit=restore-save-as result=PASS"u8
+                    : "C120-MODAL exit=restore-open result=PASS"u8);
+            }
+            else
 #endif
-            _textArea.Focus();
+            {
+#if HOSTLOGPROOF_C119_MANAGED_BUTTON
+                BlurButtons();
+#endif
+                _textArea.Focus();
+            }
             host.TryLog(wasSave
                 ? "C115-NOTES save=cancelled result=PASS"u8
                 : "C115-NOTES open=cancelled result=PASS"u8);
@@ -972,7 +1208,7 @@ public sealed class ManagedNotes : GuideXosApplication
             GuideXosFilePickerResult c118Result = _picker.SaveFile(
                 host, surface, GuideXosFilePickerOptions.Save(
                     "/system/apps", "Save document", ".TXT", c118Suggestion,
-                    true, _useTextInput));
+                    true, _useTextInput, _c120ProofContext));
             return c118Result.Status;
         }
 #endif

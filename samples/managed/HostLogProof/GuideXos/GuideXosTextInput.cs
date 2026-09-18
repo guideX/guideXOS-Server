@@ -47,6 +47,7 @@ public enum GuideXosTextInputKey : uint
 {
     Backspace = 8u,
     Enter = 10u,
+    Tab = 9u,
     Escape = 27u,
     Up = 0x100u,
     Down = 0x101u,

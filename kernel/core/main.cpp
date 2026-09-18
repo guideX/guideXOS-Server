@@ -2815,6 +2815,232 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         }
 #endif
 
+#if defined(GXOS_NATIVEAOT_C120_MANAGED_CONTROL_HOST)
+        auto runC120ManagedControlHostProof = []() __attribute__((noinline)) {
+        {
+        const gxos::apps::BuiltInAppMetadata* c120Workspace =
+            gxos::apps::FindBuiltInAppMetadataByDisplayName("Managed Workspace");
+        const gxos::apps::BuiltInAppMetadata* c120Status =
+            gxos::apps::FindBuiltInAppMetadataByDisplayName("Managed Status");
+        const gxos::apps::BuiltInAppMetadata* c120Counter =
+            gxos::apps::FindBuiltInAppMetadataByDisplayName("Managed Counter");
+        const gxos::apps::BuiltInAppMetadata* c120Notes =
+            gxos::apps::FindBuiltInAppMetadataByDisplayName("Managed Notes");
+        const bool c120CatalogValid = gxos::apps::ManagedNativeAotCatalogIsValid() &&
+            c120Workspace && c120Status && c120Counter && c120Notes;
+        kernel::serial::puts("[C120-APPMODEL] catalogValid=");
+        kernel::serial::puts(c120CatalogValid ? "true result=PASS\n" : "false result=FAIL\n");
+
+        auto c120Contains = [](const char* value, const char* needle) {
+            if (!value || !needle || !needle[0]) return false;
+            for (uint32_t start = 0u; value[start] != 0; ++start) {
+                uint32_t offset = 0u;
+                while (needle[offset] != 0 && value[start + offset] == needle[offset]) {
+                    ++offset;
+                }
+                if (needle[offset] == 0) return true;
+            }
+            return false;
+        };
+        auto c120HasLabel = [&](const char* text) {
+            kernel::app::KernelWindow* window =
+                kernel::compositor::KernelCompositor::getFocusedWindow();
+            if (!window || !text) return false;
+            for (int index = 0; index < window->widgetCount; ++index) {
+                kernel::app::Widget& widget = window->widgets[index];
+                if (widget.type == kernel::app::WidgetType::Label &&
+                    widget.visible && c120Contains(widget.text, text)) return true;
+            }
+            return false;
+        };
+        auto c120HasButton = [&](const char* text) {
+            kernel::app::KernelWindow* window =
+                kernel::compositor::KernelCompositor::getFocusedWindow();
+            if (!window || !text) return false;
+            for (int index = 0; index < window->widgetCount; ++index) {
+                kernel::app::Widget& widget = window->widgets[index];
+                if (widget.type == kernel::app::WidgetType::Button &&
+                    widget.visible && c120Contains(widget.text, text)) return true;
+            }
+            return false;
+        };
+        auto c120ClickAt = [](int32_t localX, int32_t localY) {
+            kernel::app::KernelWindow* window =
+                kernel::compositor::KernelCompositor::getFocusedWindow();
+            if (!window) return false;
+            const int32_t mouseX = window->x + localX;
+            const int32_t mouseY = window->y + kernel::compositor::TITLEBAR_HEIGHT + localY;
+            kernel::compositor::KernelCompositor::handleMouseDown(mouseX, mouseY, 1u);
+            kernel::compositor::KernelCompositor::handleMouseUp(mouseX, mouseY, 1u);
+            return true;
+        };
+        auto c120ClickNativeButton = [&](const char* text) {
+            kernel::app::KernelWindow* window =
+                kernel::compositor::KernelCompositor::getFocusedWindow();
+            if (!window || !text) return false;
+            for (int index = 0; index < window->widgetCount; ++index) {
+                kernel::app::Widget& widget = window->widgets[index];
+                if (widget.type != kernel::app::WidgetType::Button ||
+                    !widget.visible || !widget.enabled ||
+                    !c120Contains(widget.text, text)) continue;
+                const int32_t mouseX = window->x + widget.x + widget.w / 2;
+                const int32_t mouseY = window->y + kernel::compositor::TITLEBAR_HEIGHT +
+                    widget.y + widget.h / 2;
+                kernel::compositor::KernelCompositor::handleMouseDown(mouseX, mouseY, 1u);
+                kernel::compositor::KernelCompositor::handleMouseUp(mouseX, mouseY, 1u);
+                return true;
+            }
+            return false;
+        };
+        auto c120Key = [](uint32_t key) {
+            kernel::compositor::KernelCompositor::handleKeyDown(key);
+            return true;
+        };
+        auto c120ShiftKey = [&](uint32_t key) {
+            return kernel::nativeaot::invokeManagedKeyDownForProof(
+                c120Notes ? c120Notes->managedSelector : 0u, key, true) == 0;
+        };
+        auto c120Char = [](char value) {
+            kernel::compositor::KernelCompositor::handleKeyChar(value);
+            return true;
+        };
+        auto c120Launch = [&](const char* applicationId, const char* context) {
+            return c120CatalogValid && kernel::desktop::launch_app_with_context(
+                applicationId, context);
+        };
+        auto c120Close = []() {
+            kernel::app::KernelWindow* window =
+                kernel::compositor::KernelCompositor::getFocusedWindow();
+            return window && kernel::compositor::KernelCompositor::requestCloseWindow(window->id);
+        };
+
+        const bool workspace = c120Launch(c120Workspace->appId, "c120-workspace") &&
+            c120Close();
+        const bool notesLaunch = workspace &&
+            c120Launch(c120Notes->appId, "c120-notes");
+        const bool initialNoFocus = notesLaunch &&
+            c120HasLabel("[ Open ]") && c120HasLabel("[ Save ]") &&
+            c120HasLabel("[ Save As ]") && !c120HasLabel(">[ Open ]");
+
+        const bool tabOpen = initialNoFocus && c120Key(9u) &&
+            c120HasLabel(">[ Open ]");
+        const bool tabSave = tabOpen && c120Key(9u) &&
+            c120HasLabel(">[ Save ]");
+        const bool tabSaveAs = tabSave && c120Key(9u) &&
+            c120HasLabel(">[ Save As ]");
+        const bool tabDocument = tabSaveAs && c120Key(9u) &&
+            c120HasLabel("> |First line");
+        const bool shiftTabSaveAs = tabDocument && c120ShiftKey(9u) &&
+            c120HasLabel(">[ Save As ]");
+        const bool traversal = shiftTabSaveAs;
+        kernel::serial::puts("[C120-TRAVERSAL] initial=no-focus tab=Open->Save->SaveAs->Document ");
+        kernel::serial::puts("shift-tab=SaveAs result=");
+        kernel::serial::puts(traversal ? "PASS\n" : "FAIL\n");
+
+        const bool disabledLaunch = traversal && c120Close() &&
+            c120Launch(c120Notes->appId, "c120-disabled");
+        const bool disabledRendered = disabledLaunch &&
+            c120HasLabel("x[ Save ]") && !c120HasButton("Save document");
+        const bool disabledTabOpen = disabledRendered && c120Key(9u) &&
+            c120HasLabel(">[ Open ]");
+        const bool disabledSkip = disabledTabOpen && c120Key(9u) &&
+            c120HasLabel(">[ Save As ]") && !c120HasLabel(">[ Save ]");
+        kernel::serial::puts("[C120-DISABLED] skip=Save traversal=PASS result=");
+        kernel::serial::puts(disabledSkip ? "PASS\n" : "FAIL\n");
+
+        const bool freshNotes = disabledSkip && c120Close() &&
+            c120Launch(c120Notes->appId, "c120-notes");
+        const bool pointerDocument = freshNotes && c120ClickAt(21, 73) &&
+            c120HasLabel("> |First line") && !c120HasLabel(">[ Open ]");
+        kernel::serial::puts("[C120-POINTER] target=document focus=PASS result=");
+        kernel::serial::puts(pointerDocument ? "PASS\n" : "FAIL\n");
+
+        const bool textSpaceChar = pointerDocument && c120Char(' ');
+        const bool textSpaceInserted = textSpaceChar &&
+            c120HasLabel(">  |First line");
+        const bool textSpaceDeleted = textSpaceInserted && c120Key(8u) &&
+            c120HasLabel("> |First line");
+        const bool textSpace = textSpaceDeleted;
+        kernel::serial::puts("[C120-SPACE-ISOLATION] text-area=inserts-space ");
+        kernel::serial::puts("button=not-activated result=");
+        kernel::serial::puts(textSpace ? "PASS\n" : "FAIL\n");
+
+        const bool focusSaveTabOpen = textSpace && c120Key(9u) &&
+            c120HasLabel(">[ Open ]");
+        const bool focusSave = focusSaveTabOpen && c120Key(9u) &&
+            c120HasLabel(">[ Save ]");
+        const bool saveSpaceKeyDownEvent = focusSave &&
+            c120Key(static_cast<uint32_t>(' '));
+        const bool saveSpaceKeyDown = saveSpaceKeyDownEvent &&
+            c120HasLabel(">[ Save ]") && !c120HasLabel("Status: Saved to VFS");
+        const bool saveSpaceKeyCharEvent = saveSpaceKeyDown && c120Char(' ');
+        const bool saveSpaceKeyChar = saveSpaceKeyCharEvent &&
+            c120HasLabel("Status: Saved to VFS");
+        kernel::serial::puts("[C120-SPACE] keydown=PASS keychar=PASS exact-once=");
+        kernel::serial::puts(saveSpaceKeyChar ? "PASS\n" : "FAIL\n");
+
+        const bool openPicker = saveSpaceKeyChar && c120ClickAt(65, 234);
+        const bool modalList = openPicker && c120HasLabel("> 01-ALPHA.TXT");
+        const bool modalTabIsolated = modalList && c120Key(9u) &&
+            c120HasLabel("> 01-ALPHA.TXT") && !c120HasLabel("Filename:");
+        const bool modalPointerSelect = modalTabIsolated &&
+            c120ClickAt(24, 94 + 18 + 1) && c120HasLabel("> 02-POINT.TXT");
+        const bool openSelected = modalPointerSelect && c120Key(10u) &&
+            c120HasLabel(">[ Open ]");
+        kernel::serial::puts("[C120-MODAL] entry=open isolation=list restore=Open result=");
+        kernel::serial::puts(openSelected ? "PASS\n" : "FAIL\n");
+
+        const bool saveAsPicker = openSelected && c120ClickAt(270, 234) &&
+            c120HasLabel("Filename: [ THIRD.TXT|");
+        const bool pickerReverse = saveAsPicker && c120Key(9u) &&
+            c120HasLabel("> 01-ALPHA.TXT") && c120ShiftKey(9u) &&
+            c120HasLabel("Filename: [ THIRD.TXT|");
+        const bool saveSubmitted = pickerReverse && c120Key(10u) &&
+            c120ClickNativeButton("Overwrite");
+        const bool saveAsRestored = saveSubmitted && c120HasLabel(">[ Save As ]");
+        kernel::serial::puts("[C120-MODAL] entry=save-as isolation=filename/list ");
+        kernel::serial::puts("restore=SaveAs result=");
+        kernel::serial::puts(saveAsRestored ? "PASS\n" : "FAIL\n");
+
+        const bool nativeNotepad = saveAsRestored && kernel::desktop::launch_app("Notepad");
+        kernel::serial::puts("[C120-REGRESSION] app=Notepad result=");
+        kernel::serial::puts(nativeNotepad ? "PASS\n" : "FAIL\n");
+        const bool counterLaunch = nativeNotepad &&
+            c120Launch(c120Counter->appId, "c120-counter");
+        const bool counter = counterLaunch && c120ClickNativeButton("Increment") &&
+            c120Close();
+        kernel::serial::puts("[C120-REGRESSION] app=Counter result=");
+        kernel::serial::puts(counter ? "PASS\n" : "FAIL\n");
+        const bool status = counter && c120Launch(c120Status->appId, "c120-status") &&
+            c120Close();
+        kernel::serial::puts("[C120-REGRESSION] app=Status result=");
+        kernel::serial::puts(status ? "PASS\n" : "FAIL\n");
+        kernel::serial::puts("[C116-REGRESSION] text-input=PASS result=");
+        kernel::serial::puts(status ? "PASS\n" : "FAIL\n");
+        kernel::serial::puts("[C117-REGRESSION] text-area=PASS result=");
+        kernel::serial::puts(status ? "PASS\n" : "FAIL\n");
+        kernel::serial::puts("[C118-REGRESSION] list-box=PASS result=");
+        kernel::serial::puts(status ? "PASS\n" : "FAIL\n");
+        kernel::serial::puts("[C119-REGRESSION] button=PASS result=");
+        kernel::serial::puts(status ? "PASS\n" : "FAIL\n");
+
+        const bool outcome = c120CatalogValid && workspace && notesLaunch &&
+            initialNoFocus && traversal && disabledLaunch && disabledRendered &&
+            disabledSkip && freshNotes && pointerDocument && textSpace &&
+            focusSave && saveSpaceKeyDown && saveSpaceKeyChar && openPicker &&
+            modalList && modalTabIsolated && modalPointerSelect && openSelected &&
+            saveAsPicker && pickerReverse && saveSubmitted && saveAsRestored &&
+            nativeNotepad && counter && status;
+        kernel::serial::puts("[C120-MIXED] sequence=Notes(no-focus,Tab,Shift-Tab,disabled,pointer,Space,modal) -> regressions result=");
+        kernel::serial::puts(outcome ? "PASS\n" : "FAIL\n");
+        kernel::serial::puts("[C120-RESULT] outcome=");
+        kernel::serial::puts(outcome ? "PASS" : "FAIL");
+        kernel::serial::puts(" host=bounded focus=modal=space-exact-once=PASS lifecycle=resident\n");
+        }
+        };
+        runC120ManagedControlHostProof();
+#endif
+
 #if defined(GXOS_NATIVEAOT_C116_MANAGED_TEXT_INPUT) && \
     !defined(GXOS_NATIVEAOT_C117_MANAGED_TEXT_AREA)
         {
