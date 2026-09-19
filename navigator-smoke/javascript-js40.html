@@ -1,0 +1,99 @@
+<!doctype html>
+<html>
+<head><title>Navigator JavaScript JS40</title></head>
+<body>
+<h1>Navigator JavaScript JS40</h1>
+<div id="toolbar">
+  <span id="marker" class="marker"></span>
+  <button id="save" class="action primary" type="button">Save</button>
+  <span id="separator"></span>
+  <button id="cancel" class="action" type="button">Cancel</button>
+</div>
+<div id="foreign-parent"><span id="foreign-left"></span></div>
+<div id="foreign-target-parent"><button id="foreign-target" type="button">Foreign</button></div>
+<h2 id="title">Sibling heading</h2>
+<div id="gap"></div>
+<p id="first-note" class="note">First note</p>
+<p id="second-note" class="note">Second note</p>
+<button id="js40-trigger" type="button">Run JS40</button>
+<p id="js40-state">initial</p>
+<script>
+var js40State = document.querySelector("#js40-state");
+var js40Toolbar = document.querySelector("#toolbar");
+var js40Marker = document.querySelector("#marker");
+var js40Save = document.querySelector("#save");
+var js40Cancel = document.querySelector("#cancel");
+var js40First = document.querySelector("#first-note");
+var js40Second = document.querySelector("#second-note");
+var js40AdjacentEvent = false;
+var js40GeneralEvent = false;
+var js40ClosestEvent = false;
+var js40TargetPreserved = false;
+var js40CurrentPreserved = false;
+var js40RelatedPreserved = false;
+var js40DefaultPreserved = false;
+var js40NestedDispatch = false;
+function js40Snapshot(label) {
+  var adjacent = js40Save.matches(".marker + button") &&
+    !js40Cancel.matches(".marker + button") &&
+    document.querySelector(".marker + button") === js40Save;
+  var general = js40Save.matches(".marker ~ button") &&
+    js40Cancel.matches(".marker ~ button") &&
+    document.querySelector(".marker ~ button") === js40Save;
+  var generalOrder = document.querySelectorAll(".marker ~ button").length === 2 &&
+    document.querySelectorAll(".marker ~ button")[0] === js40Save &&
+    document.querySelectorAll(".marker ~ button")[1] === js40Cancel;
+  var whitespace = js40Save.matches(".marker+button") &&
+    js40Save.matches(".marker+ button") &&
+    js40Save.matches(".marker +button") &&
+    js40Save.matches("  .marker + button  ");
+  var compounds = js40Save.matches("SPAN.marker + BUTTON.primary") &&
+    js40Cancel.matches("span.marker ~ button.action");
+  var scoped = js40Toolbar.querySelector(".marker + button") === js40Save &&
+    js40Toolbar.querySelectorAll(".marker ~ button").length === 2;
+  var identity = js40Save.previousElementSibling === js40Marker &&
+    js40Cancel.previousElementSibling === document.querySelector("#separator");
+  var backward = js40First.matches("h2 ~ p") &&
+    js40Second.matches("h2 ~ p") && !document.querySelector("#title").matches("p ~ h2");
+  var sameParent = document.querySelector("#foreign-target").matches("span ~ button") === false;
+  var malformed = document.querySelector(".marker +") === null &&
+    document.querySelector(".marker + button + button") === null &&
+    document.querySelectorAll(".marker ~ button ~ button").length === 0;
+  js40State.textContent = label + ":adjacent=" + adjacent +
+    ":general=" + general + ":order=" + generalOrder +
+    ":whitespace=" + whitespace + ":compounds=" + compounds +
+    ":scoped=" + scoped + ":identity=" + identity +
+    ":backward=" + backward + ":same-parent=" + sameParent +
+    ":malformed=" + malformed + ":event-adjacent=" + js40AdjacentEvent +
+    ":event-general=" + js40GeneralEvent + ":event-closest=" + js40ClosestEvent +
+    ":target=" + js40TargetPreserved + ":current=" + js40CurrentPreserved +
+    ":related=" + js40RelatedPreserved + ":default=" + js40DefaultPreserved +
+    ":nested=" + js40NestedDispatch;
+}
+js40Toolbar.addEventListener("click", function(event) {
+  if (event.target === js40Save) {
+    js40AdjacentEvent = event.target.matches(".marker + button");
+    js40ClosestEvent = event.target.closest(".marker + button") === js40Save;
+    js40TargetPreserved = event.target === js40Save;
+    js40CurrentPreserved = event.currentTarget === js40Toolbar;
+    js40RelatedPreserved = event.relatedTarget === null;
+    js40DefaultPreserved = event.defaultPrevented === false;
+  }
+  if (event.target === js40Cancel)
+    js40GeneralEvent = event.target.matches(".marker ~ button") &&
+      event.target.closest(".marker ~ button") === js40Cancel;
+  js40Snapshot("event");
+});
+js40Save.addEventListener("click", function(event) {
+  js40NestedDispatch = event.target.matches(".marker + button") &&
+    event.target.closest(".marker + button") === js40Save;
+  js40Cancel.click();
+});
+document.querySelector("#js40-trigger").addEventListener("click", function() {
+  js40Save.click();
+  js40Snapshot("click");
+});
+js40Snapshot("initial");
+</script>
+</body>
+</html>

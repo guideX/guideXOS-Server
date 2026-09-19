@@ -3807,6 +3807,52 @@ static std::string navigatorHostedSmokeDiagnostic() {
         summarizeText(js39AfterReset, 980) + ",error=" +
         gxos::apps::Navigator::SmokeJavaScriptLastError());
 
+    const std::string js40FixtureUrl =
+        "http://127.0.0.1:8080/navigator-smoke/javascript-js40.html";
+    const bool js40Loaded = gxos::apps::Navigator::SmokeNavigateToQuiet(
+        js40FixtureUrl);
+    const std::string js40InitialText =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS40 hosted fixture loads sibling selectors",
+        js40Loaded && gxos::apps::Navigator::SmokeCurrentUrl() == js40FixtureUrl &&
+        contains(js40InitialText, "Navigator JavaScript JS40") &&
+        contains(js40InitialText,
+            "initial:adjacent=true:general=true:order=true:whitespace=true:compounds=true:scoped=true:identity=true:backward=true:same-parent=true:malformed=true:event-adjacent=false:event-general=false:event-closest=false:target=false:current=false:related=false:default=false:nested=false") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("loaded=") + yesNo(js40Loaded) + ",text=" +
+        summarizeText(js40InitialText, 1100) + ",error=" +
+        gxos::apps::Navigator::SmokeJavaScriptLastError());
+
+    const bool js40ClickTrigger =
+        gxos::apps::Navigator::SmokeClickFormControlById("js40-trigger");
+    const std::string js40AfterClick =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS40 hosted querySelector and querySelectorAll preserve sibling order",
+        js40ClickTrigger && contains(js40AfterClick,
+            "click:adjacent=true:general=true:order=true:whitespace=true:compounds=true:scoped=true:identity=true:backward=true:same-parent=true:malformed=true") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("click=") + yesNo(js40ClickTrigger) + ",text=" +
+        summarizeText(js40AfterClick, 1100) + ",error=" +
+        gxos::apps::Navigator::SmokeJavaScriptLastError());
+    add("JS40 hosted event.target.matches covers adjacent and general siblings",
+        js40ClickTrigger && contains(js40AfterClick,
+            ":event-adjacent=true:event-general=true:event-closest=true") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        "event-target sibling matches");
+    add("JS40 hosted closest returns the right-side candidate",
+        js40ClickTrigger && contains(js40AfterClick, ":event-closest=true") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        "closest returned button B");
+    add("JS40 hosted event metadata survives sibling evaluation",
+        js40ClickTrigger && contains(js40AfterClick,
+            ":target=true:current=true:related=true:default=true") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        "target/currentTarget/relatedTarget/defaultPrevented preserved");
+    add("JS40 hosted nested selector dispatch remains safe",
+        js40ClickTrigger && contains(js40AfterClick, ":nested=true") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        "nested save.click and selector calls");
+
     bool cssInlineLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-inline.html");
     std::string cssInlineText = gxos::apps::Navigator::SmokeCurrentDocumentText();
     std::string cssInlineReport = gxos::apps::Navigator::SmokeRuntimeReport();

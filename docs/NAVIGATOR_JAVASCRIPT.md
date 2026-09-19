@@ -3961,11 +3961,11 @@ Outer ASCII whitespace is trimmed. Internal ASCII spaces, tabs, carriage
 returns, newlines, and form feeds between two simple selectors mean
 `Descendant`; whitespace around `>` is ignored, so `A>B`, `A > B`, `A> B`, and
 `A >B` all mean `Child`. A simple selector containing only outer whitespace,
-such as `  input  `, remains a simple selector. Leading/trailing `>`, repeated
-`>`, internal whitespace that would create a second relation, sibling
-combinators, lists, attributes, pseudo-classes, pseudo-elements, universal
-selectors, escapes, and all multi-combinator chains fail closed. JS39 does not
-interpret `A B C`, `A > B > C`, `A B > C`, or `A > B C` partially.
+such as `  input  `, remains a simple selector. Leading/trailing or repeated
+relation characters, internal whitespace that would create a second relation,
+lists, attributes, pseudo-classes, pseudo-elements, universal selectors,
+escapes, and all multi-combinator chains fail closed. JS39 does not interpret
+`A B C`, `A > B > C`, `A B > C`, or `A > B C` partially.
 
 The right side is always tested against the candidate first. For `Descendant`,
 the matcher then walks structural ancestors iteratively and accepts any
@@ -4010,6 +4010,72 @@ event metadata.
 JS39 remains deliberately short of full CSS compatibility. It does not add
 `+`, `~`, selector lists, attribute selectors, pseudo-classes,
 pseudo-elements, `*`, CSS escaping, multiple combinators, Node APIs, DOM
-mutation, or asynchronous/browser APIs. The next bounded direction is JS40:
-only add another explicitly justified structural capability after preserving
-the fixed JS39 grammar and generation-safe matcher.
+mutation, or asynchronous/browser APIs.
+
+## JS40: bounded adjacent and general sibling selectors
+
+JS40 extends the same fixed, one-relation descriptor with two additional
+relation kinds:
+
+```javascript
+simple + simple
+simple ~ simple
+```
+
+Both sides retain the JS36 simple forms: `#id`, `.class`, `tag`, `tag.class`,
+and `tag#id`. The descriptor now contains `None`, `Descendant`, `Child`,
+`AdjacentSibling`, or `GeneralSibling`; it still stores only the two simple
+selectors in the existing 256-byte bounded storage. There is no recursive AST,
+relation vector, second parser, or general CSS parser.
+
+`A + B` tests the candidate B first and then asks the JS38
+`elementSiblingAt(candidate, false, ...)` helper for exactly the immediate
+previous structural element sibling. `A ~ B` also tests B first, then walks
+backward through that same helper until it finds a matching A or reaches the
+finite `min(maxDocumentNodes, structuralElements.size())` sibling bound. Both
+relations require the same structural `parentSerial`; form ownership,
+`form.elements`, `select.options` indexing, layout, visual order, and source
+text do not substitute for sibling structure. Self-returning or invalid sibling
+metadata fails closed, and a previous-sibling walk never considers a future
+sibling or crosses a parent boundary.
+
+Whitespace around `+` and `~` is ignored, so `A+B`, `A + B`, `A+ B`, and
+`A +B` (and the corresponding `~` forms) are equivalent. The existing
+descendant and child forms remain `A B` and `A > B`. Only one relation is
+accepted: malformed leading/trailing/repeated relations and chains such as
+`A + B + C`, `A ~ B ~ C`, `A > B + C`, and `A B ~ C` fail closed rather than
+being partially parsed. Unsupported selector lists, attribute selectors,
+pseudo-classes, pseudo-elements, `:not()`, `:is()`, `:where()`, `:has()`,
+structural pseudo-classes, universal selectors, CSS escapes, namespaces,
+mutation APIs, and asynchronous/browser APIs remain out of scope.
+
+The shared matcher powers `querySelector()`, `querySelectorAll()`,
+`matches()`, and `closest()`. Queries scan canonical structural elements in
+document order; scoped queries retain the strict JS36 candidate boundary.
+`matches()` uses the receiver as B without a document scan, and `closest()`
+tests the receiver before walking ancestors, returning the matching B rather
+than the left-side A. Selector collections remain read-only, generation-safe,
+live-on-read, and capped at 128 collection records/results as established by
+the earlier phases. Stale receivers return `false`/`null`, and stale sibling
+collections retain the existing failure behavior. The 256-byte selector cap is
+unchanged.
+
+The focused proof is `tests/navigator_javascript_js40_test.cpp`, run by
+`scripts/smoke-navigator-javascript-js40.ps1`. The hosted proof is
+`navigator-smoke/javascript-js40.html` and is included in the production
+hosted aggregate. It covers adjacent immediate-only matching, general
+backward-only matching, same-parent enforcement, compound selectors, options
+and form-ownership distinctions, query order and scope, `matches()`/`closest()`,
+event delegation, nested dispatch, event metadata, stale generations,
+malformed chains, and the selector/collection bounds.
+
+The JS40 source and hosted lanes do not modify TLS configuration. In the JS40
+verification run, `build-kernel.bat` reached the kernel lane but remained
+blocked by the existing Mbed TLS diagnostics at
+`mbedtls_check_config.h:51` (unsupported partial ECC acceleration) and
+`mbedtls_check_config.h:64` (missing ECDHE-RSA prerequisites). No TLS changes
+were made, and no QEMU proof is claimed because no fresh kernel image was
+produced.
+
+The next bounded direction is JS41: preserve this fixed grammar and structural
+matcher while adding only one explicitly justified capability.

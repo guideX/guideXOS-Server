@@ -238,21 +238,29 @@ bool parseBoundedSelector(SourceView source,
         --end;
     if (begin == end) return false;
 
-    std::size_t childPosition = end;
-    std::size_t childCount = 0u;
+    std::size_t relationPosition = end;
+    char relationCharacter = '\0';
+    std::size_t relationCount = 0u;
     for (std::size_t index = begin; index < end; ++index) {
-        if (source.data[index] != '>') continue;
-        childPosition = index;
-        ++childCount;
+        const char character = source.data[index];
+        if (character != '>' && character != '+' && character != '~')
+            continue;
+        relationPosition = index;
+        relationCharacter = character;
+        ++relationCount;
     }
 
-    if (childCount > 1u) return false;
-    if (childCount == 1u) {
-        selector.relation = NavigatorScriptSelectorRelation::Child;
-        std::size_t leftEnd = childPosition;
+    if (relationCount > 1u) return false;
+    if (relationCount == 1u) {
+        selector.relation = relationCharacter == '>'
+            ? NavigatorScriptSelectorRelation::Child
+            : relationCharacter == '+'
+                ? NavigatorScriptSelectorRelation::AdjacentSibling
+                : NavigatorScriptSelectorRelation::GeneralSibling;
+        std::size_t leftEnd = relationPosition;
         while (leftEnd > begin &&
             isSelectorAsciiWhitespace(source.data[leftEnd - 1u])) --leftEnd;
-        std::size_t rightBegin = childPosition + 1u;
+        std::size_t rightBegin = relationPosition + 1u;
         while (rightBegin < end &&
             isSelectorAsciiWhitespace(source.data[rightBegin])) ++rightBegin;
         return parseSimpleSelector(source, begin, leftEnd, selector,
@@ -2137,7 +2145,8 @@ bool NavigatorScriptHostAdapter::elementSiblingAt(
              position < count; ++position) {
             const gxos::web::HtmlElementRef& candidate =
                 document_->structuralElements[position];
-            if (candidate.serial != 0u && candidate.parentSerial == parentSerial) {
+            if (candidate.serial != 0u && candidate.serial != serial &&
+                candidate.parentSerial == parentSerial) {
                 siblingSerial = candidate.serial;
                 return true;
             }
@@ -2148,7 +2157,8 @@ bool NavigatorScriptHostAdapter::elementSiblingAt(
             --position;
             const gxos::web::HtmlElementRef& candidate =
                 document_->structuralElements[position];
-            if (candidate.serial != 0u && candidate.parentSerial == parentSerial) {
+            if (candidate.serial != 0u && candidate.serial != serial &&
+                candidate.parentSerial == parentSerial) {
                 siblingSerial = candidate.serial;
                 return true;
             }
@@ -2304,6 +2314,36 @@ bool NavigatorScriptHostAdapter::selectorElementMatches(
         const gxos::web::HtmlElementRef* parent = findElement(parentSerial);
         return parent != nullptr && selectorSimpleElementMatches(*parent,
             selector.leftSimple, selector);
+    }
+
+    if (selector.relation == NavigatorScriptSelectorRelation::AdjacentSibling) {
+        HostInstanceId previousSerial = 0u;
+        if (!elementSiblingAt(element.serial, false, previousSerial) ||
+            previousSerial == 0u || previousSerial == element.serial)
+            return false;
+        const gxos::web::HtmlElementRef* previous = findElement(previousSerial);
+        return previous != nullptr && selectorSimpleElementMatches(*previous,
+            selector.leftSimple, selector);
+    }
+
+    if (selector.relation == NavigatorScriptSelectorRelation::GeneralSibling) {
+        const std::size_t siblingLimit = std::min(limits_.maxDocumentNodes,
+            document_->structuralElements.size());
+        HostInstanceId currentSerial = element.serial;
+        for (std::size_t step = 0u; step < siblingLimit; ++step) {
+            HostInstanceId previousSerial = 0u;
+            if (!elementSiblingAt(currentSerial, false, previousSerial) ||
+                previousSerial == 0u || previousSerial == currentSerial ||
+                previousSerial == element.serial)
+                return false;
+            const gxos::web::HtmlElementRef* previous =
+                findElement(previousSerial);
+            if (previous == nullptr) return false;
+            if (selectorSimpleElementMatches(*previous, selector.leftSimple,
+                    selector)) return true;
+            currentSerial = previousSerial;
+        }
+        return false;
     }
 
     // Match the left side against the real structural ancestry. This uses the

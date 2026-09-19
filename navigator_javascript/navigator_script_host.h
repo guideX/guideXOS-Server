@@ -105,6 +105,8 @@ enum class NavigatorScriptSelectorRelation : std::uint8_t {
     None = 0u,
     Descendant,
     Child,
+    AdjacentSibling,
+    GeneralSibling,
 };
 
 struct NavigatorScriptSimpleSelectorDescriptor {
