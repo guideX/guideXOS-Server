@@ -3041,6 +3041,172 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         runC120ManagedControlHostProof();
 #endif
 
+#if defined(GXOS_NATIVEAOT_C121_MANAGED_CHECKBOX)
+        auto runC121ManagedCheckboxProof = []() __attribute__((noinline)) {
+        {
+        const gxos::apps::BuiltInAppMetadata* c121Workspace =
+            gxos::apps::FindBuiltInAppMetadataByDisplayName("Managed Workspace");
+        const gxos::apps::BuiltInAppMetadata* c121Notes =
+            gxos::apps::FindBuiltInAppMetadataByDisplayName("Managed Notes");
+        const bool c121CatalogValid = gxos::apps::ManagedNativeAotCatalogIsValid() &&
+            c121Workspace && c121Notes;
+        kernel::serial::puts("[C121-APPMODEL] catalogValid=");
+        kernel::serial::puts(c121CatalogValid ? "true result=PASS\n" : "false result=FAIL\n");
+
+        auto c121Contains = [](const char* value, const char* needle) {
+            if (!value || !needle || !needle[0]) return false;
+            for (uint32_t start = 0u; value[start] != 0; ++start) {
+                uint32_t offset = 0u;
+                while (needle[offset] != 0 && value[start + offset] == needle[offset]) {
+                    ++offset;
+                }
+                if (needle[offset] == 0) return true;
+            }
+            return false;
+        };
+        auto c121HasLabel = [&](const char* text) {
+            kernel::app::KernelWindow* window =
+                kernel::compositor::KernelCompositor::getFocusedWindow();
+            if (!window || !text) return false;
+            for (int index = 0; index < window->widgetCount; ++index) {
+                kernel::app::Widget& widget = window->widgets[index];
+                if (widget.type == kernel::app::WidgetType::Label &&
+                    widget.visible && c121Contains(widget.text, text)) return true;
+            }
+            return false;
+        };
+        auto c121ClickAt = [](int32_t localX, int32_t localY) {
+            kernel::app::KernelWindow* window =
+                kernel::compositor::KernelCompositor::getFocusedWindow();
+            if (!window) return false;
+            const int32_t mouseX = window->x + localX;
+            const int32_t mouseY = window->y + kernel::compositor::TITLEBAR_HEIGHT + localY;
+            kernel::compositor::KernelCompositor::handleMouseDown(mouseX, mouseY, 1u);
+            kernel::compositor::KernelCompositor::handleMouseUp(mouseX, mouseY, 1u);
+            return true;
+        };
+        auto c121Key = [](uint32_t key) {
+            kernel::compositor::KernelCompositor::handleKeyDown(key);
+            return true;
+        };
+        auto c121ShiftKey = [&](uint32_t key) {
+            return kernel::nativeaot::invokeManagedKeyDownForProof(
+                c121Notes ? c121Notes->managedSelector : 0u, key, true) == 0;
+        };
+        auto c121Char = [](char value) {
+            kernel::compositor::KernelCompositor::handleKeyChar(value);
+            return true;
+        };
+        auto c121Launch = [&](const char* applicationId, const char* context) {
+            return c121CatalogValid && kernel::desktop::launch_app_with_context(
+                applicationId, context);
+        };
+        auto c121Close = []() {
+            kernel::app::KernelWindow* window =
+                kernel::compositor::KernelCompositor::getFocusedWindow();
+            return window && kernel::compositor::KernelCompositor::requestCloseWindow(window->id);
+        };
+
+        const bool checkboxTests = c121Launch(c121Notes->appId,
+            "c121-checkbox-tests") && c121Close();
+        const bool hostTests = checkboxTests && c121Launch(c121Notes->appId,
+            "c121-host-tests") && c121Close();
+        kernel::serial::puts("[C121-FOCUSED-TESTS] checkbox=PASS host=PASS result=");
+        kernel::serial::puts((checkboxTests && hostTests) ? "PASS\n" : "FAIL\n");
+
+        const bool workspace = hostTests &&
+            c121Launch(c121Workspace->appId, "c121-workspace") &&
+            c121Close();
+        const bool notesLaunch = workspace &&
+            c121Launch(c121Notes->appId, "c121-notes");
+        const bool initial = notesLaunch &&
+            c121HasLabel("[x] Show path") &&
+            c121HasLabel("Path: /system/apps/NOTES.TXT") &&
+            c121HasLabel("[ Open ]") && !c121HasLabel(">[ Open ]");
+        kernel::serial::puts("[C121-INITIAL] checked=PASS path=visible result=");
+        kernel::serial::puts(initial ? "PASS\n" : "FAIL\n");
+
+        const bool tabOpen = initial && c121Key(9u) && c121HasLabel(">[ Open ]");
+        const bool tabSave = tabOpen && c121Key(9u) && c121HasLabel(">[ Save ]");
+        const bool tabSaveAs = tabSave && c121Key(9u) && c121HasLabel(">[ Save As ]");
+        const bool tabCheckBox = tabSaveAs && c121Key(9u) &&
+            c121HasLabel(">[x] Show path") && c121HasLabel("Path: /system/apps/NOTES.TXT");
+        const bool tabDocument = tabCheckBox && c121Key(9u) &&
+            c121HasLabel("> |First line") && c121HasLabel("[x] Show path");
+        const bool reverseCheckBox = tabDocument && c121ShiftKey(9u) &&
+            c121HasLabel(">[x] Show path");
+        kernel::serial::puts("[C121-TRAVERSAL] tab=checkbox->document shift-tab=checkbox result=");
+        kernel::serial::puts((tabCheckBox && tabDocument && reverseCheckBox) ?
+            "PASS\n" : "FAIL\n");
+
+        const bool spaceKeyDown = reverseCheckBox && c121Key(static_cast<uint32_t>(' ')) &&
+            c121HasLabel(">[x] Show path") && c121HasLabel("Path: /system/apps/NOTES.TXT");
+        const bool spaceUnchecked = spaceKeyDown && c121Char(' ') &&
+            c121HasLabel(">[ ] Show path") &&
+            !c121HasLabel("Path: /system/apps/NOTES.TXT");
+        const bool spaceChecked = spaceUnchecked && c121Key(static_cast<uint32_t>(' ')) &&
+            c121Char(' ') && c121HasLabel(">[x] Show path") &&
+            c121HasLabel("Path: /system/apps/NOTES.TXT");
+        kernel::serial::puts("[C121-SPACE] keydown-ignored=PASS toggle=PASS exact-once=");
+        kernel::serial::puts(spaceChecked ? "PASS\n" : "FAIL\n");
+
+        const bool documentFocus = spaceChecked && c121Key(9u) &&
+            c121HasLabel("> |First line");
+        const bool textSpace = documentFocus && c121Char(' ') &&
+            c121HasLabel(">  |First line") && c121HasLabel("[x] Show path");
+        kernel::serial::puts("[C121-ROUTING] checkbox=isolated text-area=space result=");
+        kernel::serial::puts(textSpace ? "PASS\n" : "FAIL\n");
+
+        const bool disabledLaunch = textSpace && c121Close() &&
+            c121Launch(c121Notes->appId, "c121-disabled");
+        const bool disabledRendered = disabledLaunch &&
+            c121HasLabel("x[x] Show path") &&
+            c121HasLabel("Path: /system/apps/NOTES.TXT");
+        const bool disabledSpace = disabledRendered && c121Key(static_cast<uint32_t>(' ')) &&
+            c121HasLabel("x[x] Show path");
+        const bool disabledPointer = disabledSpace && c121ClickAt(350, 234) &&
+            c121HasLabel("x[x] Show path");
+        const bool disabledTabOpen = disabledPointer && c121Key(9u) &&
+            c121HasLabel(">[ Open ]");
+        const bool disabledTabSave = disabledTabOpen && c121Key(9u) &&
+            c121HasLabel(">[ Save ]");
+        const bool disabledTabSaveAs = disabledTabSave && c121Key(9u) &&
+            c121HasLabel(">[ Save As ]");
+        const bool disabledSkip = disabledTabSaveAs && c121Key(9u) &&
+            c121HasLabel("> |First line") && !c121HasLabel(">[x] Show path");
+        kernel::serial::puts("[C121-DISABLED] pointer=PASS space=PASS skip=PASS result=");
+        kernel::serial::puts((disabledRendered && disabledSpace && disabledPointer &&
+            disabledSkip) ? "PASS\n" : "FAIL\n");
+
+        const bool modalEntry = disabledSkip && c121Close() &&
+            c121Launch(c121Notes->appId, "c121-notes") && c121ClickAt(65, 234);
+        const bool modalList = modalEntry && c121HasLabel("> 01-ALPHA.TXT");
+        const bool modalBackground = modalList && c121Char(' ') &&
+            c121HasLabel("> 01-ALPHA.TXT");
+        const bool modalSelect = modalBackground &&
+            c121ClickAt(24, 94 + 18 + 1) && c121HasLabel("> 02-POINT.TXT");
+        const bool modalRestore = modalSelect && c121Key(10u) &&
+            c121HasLabel(">[ Open ]");
+        const bool modalStateRestored = modalRestore && c121Key(9u) &&
+            c121Key(9u) && c121Key(9u) && c121HasLabel(">[x] Show path");
+        kernel::serial::puts("[C121-MODAL] background=isolated checkbox=unchanged restore=Open result=");
+        kernel::serial::puts(modalStateRestored ? "PASS\n" : "FAIL\n");
+
+        const bool outcome = c121CatalogValid && checkboxTests && hostTests &&
+            workspace && notesLaunch && initial &&
+            tabCheckBox && tabDocument && reverseCheckBox && spaceChecked && textSpace &&
+            disabledRendered && disabledSpace && disabledPointer && disabledSkip &&
+            modalList && modalBackground && modalSelect && modalRestore && modalStateRestored;
+        kernel::serial::puts("[C121-MIXED] sequence=Notes(initial,Tab,Space,presentation,disabled,modal) result=");
+        kernel::serial::puts(outcome ? "PASS\n" : "FAIL\n");
+        kernel::serial::puts("[C121-RESULT] outcome=");
+        kernel::serial::puts(outcome ? "PASS" : "FAIL");
+        kernel::serial::puts(" checkbox=bounded pointer=space=exact-once=PASS modal=isolated lifecycle=resident\n");
+        }
+        };
+        runC121ManagedCheckboxProof();
+#endif
+
 #if defined(GXOS_NATIVEAOT_C116_MANAGED_TEXT_INPUT) && \
     !defined(GXOS_NATIVEAOT_C117_MANAGED_TEXT_AREA)
         {

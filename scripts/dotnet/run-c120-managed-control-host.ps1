@@ -5,6 +5,8 @@ param(
     [string]$PythonExe = "",
     [int]$FreshBootCount = 3,
     [int]$TimeoutSeconds = 360,
+    [ValidateSet("C120", "C121")]
+    [string]$ProofPhase = "C120",
     [switch]$SkipManagedBuild,
     [switch]$SkipKernelBuild,
     [switch]$SkipQemu
@@ -14,6 +16,8 @@ $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 if ($FreshBootCount -lt 3) { throw "C120 requires at least three fresh boots." }
 if ($TimeoutSeconds -lt 10) { throw "TimeoutSeconds must be at least 10." }
+$isC121 = $ProofPhase -eq "C121"
+$phaseLower = $ProofPhase.ToLowerInvariant()
 
 $RepoRoot = [System.IO.Path]::GetFullPath($RepoRoot)
 $startHead = (& git -C $RepoRoot rev-parse HEAD).Trim()
@@ -24,7 +28,11 @@ $startAheadBehind = if ($startUpstream) {
     (& git -C $RepoRoot rev-list --left-right --count "HEAD...$startUpstream").Trim()
 } else { "" }
 if ([string]::IsNullOrWhiteSpace($EvidenceRoot)) {
-    $EvidenceRoot = Join-Path $RepoRoot "out\dotnet\c011ec120-managed-control-host"
+    $EvidenceRoot = if ($isC121) {
+        Join-Path $RepoRoot "out\dotnet\c011ec121-managed-checkbox"
+    } else {
+        Join-Path $RepoRoot "out\dotnet\c011ec120-managed-control-host"
+    }
 }
 $EvidenceRoot = [System.IO.Path]::GetFullPath($EvidenceRoot)
 $allowedRoot = [System.IO.Path]::GetFullPath((Join-Path $RepoRoot "out\dotnet")).TrimEnd('\', '/') + [System.IO.Path]::DirectorySeparatorChar
@@ -36,7 +44,7 @@ $buildRoot = Join-Path $EvidenceRoot "build"
 $compositeBuildRoot = Join-Path $buildRoot "composite"
 $runtimePackOutputRoot = Join-Path $buildRoot "runtime-pack"
 $stagingRoot = Join-Path $EvidenceRoot "staging\wallpaper-pack"
-$stagingImage = Join-Path $EvidenceRoot "staging\ramdisk-c120.img"
+$stagingImage = Join-Path $EvidenceRoot ("staging\ramdisk-{0}.img" -f $phaseLower)
 $buildScript = Join-Path $RepoRoot "scripts\dotnet\build-managed-hostlog-proof.ps1"
 $stagingScript = Join-Path $RepoRoot "scripts\generate-wallpaper-pack.ps1"
 $kernelPath = Join-Path $RepoRoot "kernel\build\amd64\bin\kernel.elf"
@@ -104,7 +112,12 @@ function Invoke-C120Boot([string]$Esp, [string]$Serial, [string]$Stdout,
             Start-Sleep -Milliseconds 250
             if (Test-Path -LiteralPath $Serial) {
                 $partial = Get-Content -LiteralPath $Serial -Raw -ErrorAction SilentlyContinue
-                if ($partial -match '(?m)^\[C120-RESULT\] outcome=(?:PASS|FAIL)') { break }
+                $resultPattern = if ($isC121) {
+                    '(?m)^\[C121-RESULT\] outcome=(?:PASS|FAIL)'
+                } else {
+                    '(?m)^\[C120-RESULT\] outcome=(?:PASS|FAIL)'
+                }
+                if ($partial -match $resultPattern) { break }
             }
             $process.Refresh()
             if ($process.HasExited) { break }
@@ -129,9 +142,7 @@ function Assert-C120Serial([string]$Serial) {
         '^\[C120-APPMODEL\] catalogValid=true result=PASS',
         '^\[C120-RESULT\] outcome=PASS',
         '^\[C120-MIXED\].*result=PASS',
-        '^\[C102-MANAGED-OUTPUT\] C120-TESTS cases=50 result=PASS',
         '^\[C102-MANAGED-OUTPUT\] C120-HOST registration=4 initial=no-focus result=PASS',
-        '^\[C102-MANAGED-OUTPUT\] C120-HOST tests=PASS',
         '^\[C120-TRAVERSAL\].*result=PASS',
         '^\[C120-DISABLED\] skip=Save traversal=PASS result=PASS',
         '^\[C120-POINTER\] target=document focus=PASS result=PASS',
@@ -153,6 +164,28 @@ function Assert-C120Serial([string]$Serial) {
         '^\[NATIVEAOT-TLS-BRIDGE\] install=.*result=00000001',
         '^\[NATIVEAOT-HEAP\] action=initialize',
         '^\[NATIVEAOT-HEAP\] action=preserve')
+    if (-not $isC121) {
+        $required += @(
+            '^\[C102-MANAGED-OUTPUT\] C120-TESTS cases=50 result=PASS',
+            '^\[C102-MANAGED-OUTPUT\] C120-HOST tests=PASS')
+    }
+    if ($isC121) {
+        $required += @(
+            '^\[C121-APPMODEL\] catalogValid=true result=PASS',
+            '^\[C121-RESULT\] outcome=PASS',
+            '^\[C121-MIXED\].*result=PASS',
+            '^\[C121-FOCUSED-TESTS\].*result=PASS',
+            '^\[C102-MANAGED-OUTPUT\] C121-CHECKBOX-TESTS cases=50 result=PASS',
+            '^\[C102-MANAGED-OUTPUT\] C121-CHECKBOX-HOST-TESTS cases=17 result=PASS',
+            '^\[C102-MANAGED-OUTPUT\] C121-HOST registration=5 initial=no-focus result=PASS',
+            '^\[C102-MANAGED-OUTPUT\] C121-HOST tests=PASS',
+            '^\[C121-INITIAL\].*result=PASS',
+            '^\[C121-TRAVERSAL\].*result=PASS',
+            '^\[C121-SPACE\].*exact-once=PASS',
+            '^\[C121-ROUTING\].*result=PASS',
+            '^\[C121-DISABLED\].*result=PASS',
+            '^\[C121-MODAL\].*result=PASS')
+    }
     foreach ($pattern in $required) {
         if ($Serial -notmatch "(?m)$pattern") { throw "C120 missing serial marker: $pattern" }
     }
@@ -162,7 +195,7 @@ function Assert-C120Serial([string]$Serial) {
     $saveActivation = @([regex]::Matches($Serial,
         '(?m)^\[C102-MANAGED-OUTPUT\] C120-ACTIVATE control=Save result=PASS\r?$')).Count
     if ($saveActivation -ne 1) { throw "C120 expected one managed Save activation, got $saveActivation." }
-    if ($Serial -match '(?m)^\[C120-[^\r\n]*FAIL|PageFault|triple.?fault|FAIL_FAST|fatal kernel failure|boot failure') {
+    if ($Serial -match '(?m)^\[(?:C120|C121)-[^\r\n]*FAIL|PageFault|triple.?fault|FAIL_FAST|fatal kernel failure|boot failure') {
         throw "C120 serial output contains a failure or fault marker."
     }
     [pscustomobject]@{ outcome = "PASS"; spaceMarkers = $spaceMarker; saveActivations = $saveActivation }
@@ -187,7 +220,8 @@ if (-not $SkipManagedBuild -and -not $providedComposite) {
         "-RuntimePackRoot", (Join-Path $RepoRoot "tools\dotnet\runtime-pack"),
         "-RuntimePackOutputRoot", $runtimePackOutputRoot,
         "-UseGuideXosRuntimePack", "-ProductionApplication", "-PersistentCompositeLifecycle",
-        "-AllocationMode", "Allocating", "-ManagedProjectMode", "C120Composite",
+        "-AllocationMode", "Allocating", "-ManagedProjectMode",
+        $(if ($isC121) { "C121Composite" } else { "C120Composite" }),
         "-PythonExe", $PythonExe)
 }
 $compositeElf = if ($providedComposite) { $CompositeElfPath } else {
@@ -203,6 +237,7 @@ Invoke-Checked "powershell" @(
     "-C114ManagedDirectoryServices", "-C117ManagedTextArea", "-C118ManagedListBox")
 
 $kernelFlags = "-DGXOS_NATIVEAOT_PRODUCTION_APPLICATION -DGXOS_NATIVEAOT_PRODUCTION_COMPOSITE_LAUNCH -DGXOS_NATIVEAOT_C112_REUSABLE_MANAGED_APPLICATION -DGXOS_NATIVEAOT_C113_MANAGED_FILE_SERVICES -DGXOS_NATIVEAOT_C114_MANAGED_DIRECTORY_SERVICES -DGXOS_NATIVEAOT_C115_MANAGED_FILE_PICKER -DGXOS_NATIVEAOT_C116_MANAGED_TEXT_INPUT -DGXOS_NATIVEAOT_C117_MANAGED_TEXT_AREA -DGXOS_NATIVEAOT_C118_MANAGED_LIST_BOX -DGXOS_NATIVEAOT_C119_MANAGED_BUTTON -DGXOS_NATIVEAOT_C120_MANAGED_CONTROL_HOST"
+if ($isC121) { $kernelFlags += " -DGXOS_NATIVEAOT_C121_MANAGED_CHECKBOX" }
 if (-not $SkipKernelBuild) {
     Invoke-Checked "mingw32-make" @(
         "-C", (Join-Path $RepoRoot "kernel"), "-B", "ARCH=amd64",
@@ -260,17 +295,17 @@ if (-not $SkipQemu) {
             serialPath = $boot.serialPath; serialSha256 = $boot.serialSha256
             stdoutPath = $boot.stdoutPath; stderrPath = $boot.stderrPath; qemuExitCode = $boot.qemuExitCode
         }) | Out-Null
-        Write-Host ("[C120] boot={0} outcome={1} serial={2}" -f $index, $classification.outcome, $serial)
-        if ($classification.outcome -ne "PASS") { throw "C120 fresh boot $index failed: $($classification.error)" }
+        Write-Host ("[{0}] boot={1} outcome={2} serial={3}" -f $ProofPhase, $index, $classification.outcome, $serial)
+        if ($classification.outcome -ne "PASS") { throw "$ProofPhase fresh boot $index failed: $($classification.error)" }
     }
 }
 
 $evidenceSerial = if ($bootResults.Count -gt 0) {
     Get-Content -LiteralPath (Join-Path $EvidenceRoot "boot-01\serial.log")
 } else { @("QEMU not executed; build-only evidence.") }
-$evidenceSerial | Where-Object { $_ -match '^\[(?:C120|C119|C118|C117|C116|C115)-' } |
+$evidenceSerial | Where-Object { $_ -match '^\[(?:C121|C120|C119|C118|C117|C116|C115)-' } |
     Set-Content -LiteralPath (Join-Path $EvidenceRoot "managed-control-host-output.txt") -Encoding ASCII
-$evidenceSerial | Where-Object { $_ -match '^\[C120-' } |
+$evidenceSerial | Where-Object { $_ -match '^\[(?:C121|C120)-' } |
     Set-Content -LiteralPath (Join-Path $EvidenceRoot "control-host-evidence.txt") -Encoding ASCII
 $evidenceSerial | Where-Object { $_ -match '^\[(?:C116|C117|C118|C119)-' } |
     Set-Content -LiteralPath (Join-Path $EvidenceRoot "regression-evidence.txt") -Encoding ASCII
@@ -281,6 +316,9 @@ $sourceFiles = @(
     "kernel\core\main.cpp", "kernel\core\nativeaot_application.cpp",
     "samples\managed\HostLogProof\GuideXos\GuideXosControlHost.cs",
     "samples\managed\HostLogProof\GuideXos\GuideXosControlHostTests.cs",
+    "samples\managed\HostLogProof\GuideXos\GuideXosCheckBox.cs",
+    "samples\managed\HostLogProof\GuideXos\GuideXosCheckBoxTests.cs",
+    "samples\managed\HostLogProof\GuideXos\GuideXosCheckBoxHostTests.cs",
     "samples\managed\HostLogProof\GuideXos\GuideXosButton.cs",
     "samples\managed\HostLogProof\GuideXos\GuideXosTextInput.cs",
     "samples\managed\HostLogProof\GuideXos\GuideXosTextArea.cs",
@@ -312,17 +350,17 @@ endAheadBehind=$aheadBehind
 "@ | Set-Content -LiteralPath (Join-Path $EvidenceRoot "repository-state.txt") -Encoding ASCII
 
 $manifest = [ordered]@{
-    schemaVersion = 1; phase = "C120"; outcome = if ($SkipQemu) { "BUILD_ONLY" } else { "PASS" }
+    schemaVersion = 1; phase = $ProofPhase; outcome = if ($SkipQemu) { "BUILD_ONLY" } else { "PASS" }
     repository = [ordered]@{ root = $RepoRoot; branch = $repoBranch; head = $repoHead; subject = $repoSubject; upstream = $repoUpstream; aheadBehind = $aheadBehind }
     hostAbi = [ordered]@{ version = 1; tableSize = 104; changed = $false; capabilityChanges = "none"; inputTransport = "existing pointer-down, KeyDown, KeyChar and Shift payload" }
-    controlHost = [ordered]@{ api = "GuideXosControlHost"; capacity = 8; pickerCapacity = 2; tests = 50; modal = "one shallow picker scope with saved-ID restoration and forward fallback" }
-    notes = [ordered]@{ order = "Open, Save, Save As, Document"; initialFocus = "none"; commands = "managed Open/Save/Save As; native Reload retained"; space = "exactly one Save activation from KeyChar Space" }
+    controlHost = [ordered]@{ api = "GuideXosControlHost"; capacity = 8; pickerCapacity = 2; tests = if($isC121){17}else{50}; legacyC120HostSuite = if($isC121){"separate C120 runner"}else{"same image"}; modal = "one shallow picker scope with saved-ID restoration and forward fallback" }
+    notes = [ordered]@{ order = if ($isC121) { "Open, Save, Save As, Show Path, Document" } else { "Open, Save, Save As, Document" }; initialFocus = "none"; commands = if ($isC121) { "managed Open/Save/Save As; checkbox controls Path presentation; native Reload retained" } else { "managed Open/Save/Save As; native Reload retained" }; space = if ($isC121) { "checkbox toggles only from KeyChar Space; text/button/list/input routing remains isolated" } else { "exactly one Save activation from KeyChar Space" } }
     regressions = [ordered]@{ c116 = $true; c117 = $true; c118 = $true; c119 = $true; nativeNotepad = $true; counter = $true; status = $true }
     runtime = [ordered]@{ nativeAotSourceChanges = $false; gcChanges = $false; vfsChanges = $false; lifecycle = "resident managed image; runtime/PAL/GC/code manager/modules/mapping/heap preserve path" }
     freshBootCount = $FreshBootCount; qemuExecuted = -not $SkipQemu
     inputs = $inputs; sourceHashes = $sourceHashes; boots = @($bootResults)
     evidence = [ordered]@{ serial = "boot-01\serial.log"; managed = "managed-control-host-output.txt"; controlHost = "control-host-evidence.txt"; regressions = "regression-evidence.txt"; lifecycle = "lifecycle-evidence.txt" }
-    documentation = "docs\dotnet\NATIVEAOT_C120_MANAGED_CONTROL_HOST.md"
+    documentation = if ($isC121) { "docs\dotnet\NATIVEAOT_C121_MANAGED_CHECKBOX.md" } else { "docs\dotnet\NATIVEAOT_C120_MANAGED_CONTROL_HOST.md" }
 }
-$manifest | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath (Join-Path $EvidenceRoot "c120.manifest.json") -Encoding ASCII
-Write-Host "C120 outcome=$($manifest.outcome) evidence=$EvidenceRoot" -ForegroundColor Green
+$manifest | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath (Join-Path $EvidenceRoot ("{0}.manifest.json" -f $phaseLower)) -Encoding ASCII
+Write-Host "$ProofPhase outcome=$($manifest.outcome) evidence=$EvidenceRoot" -ForegroundColor Green

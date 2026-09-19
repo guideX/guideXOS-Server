@@ -7,6 +7,7 @@ public enum GuideXosManagedControlKind
     TextInput = 2,
     TextArea = 3,
     ListBox = 4,
+    CheckBox = 5,
 }
 
 public enum GuideXosControlHostResult
@@ -22,6 +23,7 @@ public enum GuideXosControlHostResult
     Cancelled = 8,
     Rejected = 9,
     Disabled = 10,
+    Toggled = 11,
 }
 
 /// <summary>
@@ -96,6 +98,12 @@ public sealed class GuideXosControlHost
         return TryRegister(id, GuideXosManagedControlKind.ListBox, control, focusable);
     }
 
+    public GuideXosControlHostResult TryRegisterCheckBox(
+        int id, GuideXosCheckBox control, bool focusable = true)
+    {
+        return TryRegister(id, GuideXosManagedControlKind.CheckBox, control, focusable);
+    }
+
     public GuideXosControlHostResult TrySetFocusable(int id, bool focusable)
     {
         if (!TryFindIndex(id, out int index))
@@ -119,7 +127,7 @@ public sealed class GuideXosControlHost
         }
         if (!IsEligible(index))
         {
-            return IsButtonDisabled(index)
+            return IsControlDisabled(index)
                 ? GuideXosControlHostResult.Disabled
                 : GuideXosControlHostResult.Rejected;
         }
@@ -146,7 +154,7 @@ public sealed class GuideXosControlHost
         }
         if (!IsEligible(index))
         {
-            return IsButtonDisabled(index)
+            return IsControlDisabled(index)
                 ? GuideXosControlHostResult.Disabled
                 : GuideXosControlHostResult.Rejected;
         }
@@ -370,6 +378,8 @@ public sealed class GuideXosControlHost
             GuideXosManagedControlKind.ListBox => Map(
                 ((GuideXosListBox)_entries[index].Control).HandlePointerDown(
                     x, y, originX, originY, characterWidth, lineHeight)),
+            GuideXosManagedControlKind.CheckBox => Map(
+                ((GuideXosCheckBox)_entries[index].Control).HandlePointerDown(x, y)),
             _ => GuideXosControlHostResult.Rejected,
         };
     }
@@ -387,6 +397,8 @@ public sealed class GuideXosControlHost
                 ((GuideXosTextArea)_entries[index].Control).HandleKey(key)),
             GuideXosManagedControlKind.ListBox => Map(
                 ((GuideXosListBox)_entries[index].Control).HandleKey(key)),
+            GuideXosManagedControlKind.CheckBox => Map(
+                ((GuideXosCheckBox)_entries[index].Control).HandleKey(key)),
             _ => GuideXosControlHostResult.Rejected,
         };
     }
@@ -401,6 +413,8 @@ public sealed class GuideXosControlHost
                 ((GuideXosTextInput)_entries[index].Control).HandleCharacter(character)),
             GuideXosManagedControlKind.TextArea => Map(
                 ((GuideXosTextArea)_entries[index].Control).HandleCharacter(character)),
+            GuideXosManagedControlKind.CheckBox => Map(
+                ((GuideXosCheckBox)_entries[index].Control).HandleCharacter(character)),
             _ => GuideXosControlHostResult.Ignored,
         };
     }
@@ -408,13 +422,19 @@ public sealed class GuideXosControlHost
     private bool IsEligible(int index)
     {
         return index >= 0 && index < _registrationCount &&
-            _entries[index].Focusable && !IsButtonDisabled(index);
+            _entries[index].Focusable && !IsControlDisabled(index);
     }
 
-    private bool IsButtonDisabled(int index)
+    private bool IsControlDisabled(int index)
     {
-        return _entries[index].Kind == GuideXosManagedControlKind.Button &&
-            !((GuideXosButton)_entries[index].Control).Enabled;
+        return _entries[index].Kind switch
+        {
+            GuideXosManagedControlKind.Button =>
+                !((GuideXosButton)_entries[index].Control).Enabled,
+            GuideXosManagedControlKind.CheckBox =>
+                !((GuideXosCheckBox)_entries[index].Control).Enabled,
+            _ => false,
+        };
     }
 
     private bool IsControlFocused(int index)
@@ -429,6 +449,8 @@ public sealed class GuideXosControlHost
                 ((GuideXosTextArea)_entries[index].Control).IsFocused,
             GuideXosManagedControlKind.ListBox =>
                 ((GuideXosListBox)_entries[index].Control).IsFocused,
+            GuideXosManagedControlKind.CheckBox =>
+                ((GuideXosCheckBox)_entries[index].Control).IsFocused,
             _ => false,
         };
     }
@@ -449,6 +471,9 @@ public sealed class GuideXosControlHost
             case GuideXosManagedControlKind.ListBox:
                 ((GuideXosListBox)_entries[index].Control).Focus();
                 break;
+            case GuideXosManagedControlKind.CheckBox:
+                ((GuideXosCheckBox)_entries[index].Control).Focus();
+                break;
         }
     }
 
@@ -467,6 +492,9 @@ public sealed class GuideXosControlHost
                 break;
             case GuideXosManagedControlKind.ListBox:
                 ((GuideXosListBox)_entries[index].Control).Blur();
+                break;
+            case GuideXosManagedControlKind.CheckBox:
+                ((GuideXosCheckBox)_entries[index].Control).Blur();
                 break;
         }
     }
@@ -499,6 +527,7 @@ public sealed class GuideXosControlHost
             GuideXosManagedControlKind.TextInput => control is GuideXosTextInput,
             GuideXosManagedControlKind.TextArea => control is GuideXosTextArea,
             GuideXosManagedControlKind.ListBox => control is GuideXosListBox,
+            GuideXosManagedControlKind.CheckBox => control is GuideXosCheckBox,
             _ => false,
         };
     }
@@ -511,6 +540,18 @@ public sealed class GuideXosControlHost
             GuideXosButtonResult.Disabled => GuideXosControlHostResult.Disabled,
             GuideXosButtonResult.Ignored => GuideXosControlHostResult.Ignored,
             _ => GuideXosControlHostResult.Rejected,
+        };
+    }
+
+    private static GuideXosControlHostResult Map(GuideXosCheckBoxResult result)
+    {
+        return result switch
+        {
+            GuideXosCheckBoxResult.Toggled => GuideXosControlHostResult.Toggled,
+            GuideXosCheckBoxResult.Focused => GuideXosControlHostResult.Focused,
+            GuideXosCheckBoxResult.Disabled => GuideXosControlHostResult.Disabled,
+            GuideXosCheckBoxResult.Rejected => GuideXosControlHostResult.Rejected,
+            _ => GuideXosControlHostResult.Ignored,
         };
     }
 
