@@ -486,6 +486,15 @@ public sealed class ManagedNotes : GuideXosApplication
     private bool _c121CheckboxTestsRun;
     private bool _c121HostTestsRun;
 #endif
+#if HOSTLOGPROOF_C122_MANAGED_LABEL
+    private readonly GuideXosLabel _pathLabel =
+        new(20, 66, 480, string.Empty, GuideXosLabel.DefaultMaximumTextLength);
+    private bool _c122ProofContext;
+    private bool _c122LabelTestContext;
+    private bool _c122LabelHostTestContext;
+    private bool _c122LabelTestsRun;
+    private bool _c122LabelHostTestsRun;
+#endif
 #endif
 
     public override GuideXosResult Launch(GuideXosHost host)
@@ -517,6 +526,15 @@ public sealed class ManagedNotes : GuideXosApplication
         _c121ProofContext = IsC121Context(host);
         _c121CheckboxTestContext = IsC121CheckboxTestContext(host);
         _c121HostTestContext = IsC121HostTestContext(host);
+#endif
+#if HOSTLOGPROOF_C122_MANAGED_LABEL
+        _c122ProofContext = IsC122Context(host);
+        _c122LabelTestContext = IsC122LabelTestContext(host);
+        _c122LabelHostTestContext = IsC122LabelHostTestContext(host);
+        if (_c122ProofContext || _c122LabelTestContext || _c122LabelHostTestContext)
+        {
+            _pathLabel.Reset();
+        }
 #endif
         if (_c120ProofContext)
         {
@@ -584,6 +602,13 @@ public sealed class ManagedNotes : GuideXosApplication
         _useTextInput = _c118ProofContext;
 #endif
         _currentPath = "/system/apps/NOTES.TXT";
+#if HOSTLOGPROOF_C122_MANAGED_LABEL
+        if ((_c122ProofContext || _c122LabelTestContext || _c122LabelHostTestContext) &&
+            !UpdatePathLabel())
+        {
+            return GuideXosResult.InvalidArgument;
+        }
+#endif
 #if HOSTLOGPROOF_C119_MANAGED_BUTTON
         if (_c119ProofContext)
         {
@@ -631,7 +656,17 @@ public sealed class ManagedNotes : GuideXosApplication
         runFocusedProofTests = !_c119ProofContext || !_c119ButtonTestsRun;
 #endif
 #if HOSTLOGPROOF_C121_MANAGED_CHECKBOX
-        if (_c121CheckboxTestContext || _c121HostTestContext)
+        if (_c121CheckboxTestContext || _c121HostTestContext
+#if HOSTLOGPROOF_C122_MANAGED_LABEL
+            || _c122LabelTestContext || _c122LabelHostTestContext
+#endif
+            )
+        {
+            runFocusedProofTests = false;
+        }
+#endif
+#if HOSTLOGPROOF_C122_MANAGED_LABEL
+        if (_c122ProofContext)
         {
             runFocusedProofTests = false;
         }
@@ -706,6 +741,20 @@ public sealed class ManagedNotes : GuideXosApplication
             _c121CheckboxTestsRun = true;
         }
 #endif
+#if HOSTLOGPROOF_C122_MANAGED_LABEL
+        bool labelHostTests = _c122LabelHostTestContext && !_c122LabelHostTestsRun
+            ? GuideXosLabelHostTests.Run(host, surface) : true;
+        bool labelTests = _c122LabelTestContext && !_c122LabelTestsRun
+            ? GuideXosLabelTests.Run(host, surface) : true;
+        if (_c122LabelHostTestContext)
+        {
+            _c122LabelHostTestsRun = true;
+        }
+        if (_c122LabelTestContext)
+        {
+            _c122LabelTestsRun = true;
+        }
+#endif
 #endif
         return textAreaTests
 #if HOSTLOGPROOF_C118_MANAGED_LIST_BOX
@@ -719,6 +768,9 @@ public sealed class ManagedNotes : GuideXosApplication
 #endif
 #if HOSTLOGPROOF_C121_MANAGED_CHECKBOX
             && checkBoxTests && checkBoxHostTests
+#endif
+#if HOSTLOGPROOF_C122_MANAGED_LABEL
+            && labelTests && labelHostTests
 #endif
             ? GuideXosResult.Success : GuideXosResult.InvalidArgument;
     }
@@ -738,7 +790,12 @@ public sealed class ManagedNotes : GuideXosApplication
             host.LaunchContext.Utf8.SequenceEqual("c120-notes"u8) ||
             host.LaunchContext.Utf8.SequenceEqual("c120-disabled"u8) ||
             host.LaunchContext.Utf8.SequenceEqual("c121-notes"u8) ||
-            host.LaunchContext.Utf8.SequenceEqual("c121-disabled"u8);
+            host.LaunchContext.Utf8.SequenceEqual("c121-disabled"u8)
+#if HOSTLOGPROOF_C122_MANAGED_LABEL
+            || host.LaunchContext.Utf8.SequenceEqual("c122-notes"u8) ||
+            host.LaunchContext.Utf8.SequenceEqual("c122-disabled"u8)
+#endif
+            ;
     }
 
 #if HOSTLOGPROOF_C120_MANAGED_CONTROL_HOST
@@ -747,13 +804,22 @@ public sealed class ManagedNotes : GuideXosApplication
         return host.LaunchContext.Utf8.SequenceEqual("c120-notes"u8) ||
             host.LaunchContext.Utf8.SequenceEqual("c120-disabled"u8) ||
             host.LaunchContext.Utf8.SequenceEqual("c121-notes"u8) ||
-            host.LaunchContext.Utf8.SequenceEqual("c121-disabled"u8);
+            host.LaunchContext.Utf8.SequenceEqual("c121-disabled"u8)
+#if HOSTLOGPROOF_C122_MANAGED_LABEL
+            || host.LaunchContext.Utf8.SequenceEqual("c122-notes"u8) ||
+            host.LaunchContext.Utf8.SequenceEqual("c122-disabled"u8)
+#endif
+            ;
     }
 #if HOSTLOGPROOF_C121_MANAGED_CHECKBOX
     private static bool IsC121Context(GuideXosHost host)
     {
         return host.LaunchContext.Utf8.SequenceEqual("c121-notes"u8) ||
-            host.LaunchContext.Utf8.SequenceEqual("c121-disabled"u8);
+            host.LaunchContext.Utf8.SequenceEqual("c121-disabled"u8)
+#if HOSTLOGPROOF_C122_MANAGED_LABEL
+            || IsC122Context(host)
+#endif
+            ;
     }
     private static bool IsC121CheckboxTestContext(GuideXosHost host)
     {
@@ -762,6 +828,23 @@ public sealed class ManagedNotes : GuideXosApplication
     private static bool IsC121HostTestContext(GuideXosHost host)
     {
         return host.LaunchContext.Utf8.SequenceEqual("c121-host-tests"u8);
+    }
+#endif
+#if HOSTLOGPROOF_C122_MANAGED_LABEL
+    private static bool IsC122Context(GuideXosHost host)
+    {
+        return host.LaunchContext.Utf8.SequenceEqual("c122-notes"u8) ||
+            host.LaunchContext.Utf8.SequenceEqual("c122-disabled"u8);
+    }
+
+    private static bool IsC122LabelTestContext(GuideXosHost host)
+    {
+        return host.LaunchContext.Utf8.SequenceEqual("c122-label-tests"u8);
+    }
+
+    private static bool IsC122LabelHostTestContext(GuideXosHost host)
+    {
+        return host.LaunchContext.Utf8.SequenceEqual("c122-label-host-tests"u8);
     }
 #endif
 #endif
@@ -1224,6 +1307,12 @@ public sealed class ManagedNotes : GuideXosApplication
                         ? GuideXosResult.Success : GuideXosResult.InvalidArgument;
                 }
                 _currentPath = result.Path;
+#if HOSTLOGPROOF_C122_MANAGED_LABEL
+                if (_c122ProofContext && !UpdatePathLabel())
+                {
+                    return GuideXosResult.InvalidArgument;
+                }
+#endif
                 _textArea.SetCaretToStart();
 #if HOSTLOGPROOF_C120_MANAGED_CONTROL_HOST
                 if (_c120ProofContext)
@@ -1278,6 +1367,12 @@ public sealed class ManagedNotes : GuideXosApplication
                         ? GuideXosResult.Success : GuideXosResult.InvalidArgument;
                 }
                 _currentPath = result.Path;
+#if HOSTLOGPROOF_C122_MANAGED_LABEL
+                if (_c122ProofContext && !UpdatePathLabel())
+                {
+                    return GuideXosResult.InvalidArgument;
+                }
+#endif
                 _status = "Saved through picker";
 #if HOSTLOGPROOF_C119_MANAGED_BUTTON
                 bool c119FixedSave = _c119ProofContext &&
@@ -1405,6 +1500,27 @@ public sealed class ManagedNotes : GuideXosApplication
             host, Encoding.UTF8.GetBytes(_currentPath), _textArea.ToUtf8());
     }
 
+#if HOSTLOGPROOF_C122_MANAGED_LABEL
+    private bool UpdatePathLabel()
+    {
+        Span<char> line = stackalloc char[GuideXosLabel.DefaultMaximumTextLength];
+        ReadOnlySpan<char> prefix = "Path: ".AsSpan();
+        if (_currentPath.Length > line.Length - prefix.Length)
+        {
+            return false;
+        }
+        prefix.CopyTo(line);
+        _currentPath.AsSpan().CopyTo(line[prefix.Length..]);
+        return _pathLabel.SetText(line[..(prefix.Length + _currentPath.Length)]);
+    }
+
+    private bool RenderPathLabel(GuideXosSurface surface)
+    {
+        _pathLabel.SetVisible(_showPathCheckBox.Checked);
+        return _pathLabel.Render(surface) == GuideXosResult.Success;
+    }
+#endif
+
     private bool RenderMain(GuideXosHost host, GuideXosSurface surface, uint launchCount)
     {
         return surface.TryFillRect(10, 10, 560, 300, 0x007A5A9Au) ==
@@ -1412,9 +1528,13 @@ public sealed class ManagedNotes : GuideXosApplication
             GuideXosText.Line(surface, 24, "Managed Notes | "u8, "multiline text area"u8) &&
             GuideXosText.CountLine(surface, 48, "Launches: "u8, launchCount) &&
 #if HOSTLOGPROOF_C121_MANAGED_CHECKBOX
+#if HOSTLOGPROOF_C122_MANAGED_LABEL
+            (!_c122ProofContext || RenderPathLabel(surface)) &&
+#else
             (!_c121ProofContext || !_showPathCheckBox.Checked ||
                 GuideXosText.Line(surface, 66, "Path: "u8,
                     Encoding.UTF8.GetBytes(_currentPath))) &&
+#endif
 #else
             GuideXosText.Line(surface, 66, "Path: "u8, Encoding.UTF8.GetBytes(_currentPath)) &&
 #endif

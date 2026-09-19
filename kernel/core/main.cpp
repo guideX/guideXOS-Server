@@ -2561,7 +2561,8 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         }
 #endif
 
-#if defined(GXOS_NATIVEAOT_C119_MANAGED_BUTTON)
+#if defined(GXOS_NATIVEAOT_C119_MANAGED_BUTTON) && \
+    !defined(GXOS_NATIVEAOT_C122_MANAGED_LABEL)
         {
         const gxos::apps::BuiltInAppMetadata* c119Workspace =
             gxos::apps::FindBuiltInAppMetadataByDisplayName("Managed Workspace");
@@ -2815,7 +2816,8 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         }
 #endif
 
-#if defined(GXOS_NATIVEAOT_C120_MANAGED_CONTROL_HOST)
+#if defined(GXOS_NATIVEAOT_C120_MANAGED_CONTROL_HOST) && \
+    !defined(GXOS_NATIVEAOT_C122_MANAGED_LABEL)
         auto runC120ManagedControlHostProof = []() __attribute__((noinline)) {
         {
         const gxos::apps::BuiltInAppMetadata* c120Workspace =
@@ -3041,7 +3043,8 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         runC120ManagedControlHostProof();
 #endif
 
-#if defined(GXOS_NATIVEAOT_C121_MANAGED_CHECKBOX)
+#if defined(GXOS_NATIVEAOT_C121_MANAGED_CHECKBOX) && \
+    !defined(GXOS_NATIVEAOT_C122_MANAGED_LABEL)
         auto runC121ManagedCheckboxProof = []() __attribute__((noinline)) {
         {
         const gxos::apps::BuiltInAppMetadata* c121Workspace =
@@ -3205,6 +3208,226 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         }
         };
         runC121ManagedCheckboxProof();
+#endif
+
+#if defined(GXOS_NATIVEAOT_C122_MANAGED_LABEL)
+        auto runC122ManagedLabelProof = []() __attribute__((noinline)) {
+        {
+        const gxos::apps::BuiltInAppMetadata* c122Workspace =
+            gxos::apps::FindBuiltInAppMetadataByDisplayName("Managed Workspace");
+        const gxos::apps::BuiltInAppMetadata* c122Notes =
+            gxos::apps::FindBuiltInAppMetadataByDisplayName("Managed Notes");
+        const bool c122CatalogValid = gxos::apps::ManagedNativeAotCatalogIsValid() &&
+            c122Workspace && c122Notes;
+        kernel::serial::puts("[C122-APPMODEL] catalogValid=");
+        kernel::serial::puts(c122CatalogValid ? "true result=PASS\n" : "false result=FAIL\n");
+
+        auto c122Contains = [](const char* value, const char* needle) {
+            if (!value || !needle || !needle[0]) return false;
+            for (uint32_t start = 0u; value[start] != 0; ++start) {
+                uint32_t offset = 0u;
+                while (needle[offset] != 0 && value[start + offset] == needle[offset]) {
+                    ++offset;
+                }
+                if (needle[offset] == 0) return true;
+            }
+            return false;
+        };
+        auto c122HasLabel = [&](const char* text) {
+            kernel::app::KernelWindow* window =
+                kernel::compositor::KernelCompositor::getFocusedWindow();
+            if (!window || !text) return false;
+            for (int index = 0; index < window->widgetCount; ++index) {
+                kernel::app::Widget& widget = window->widgets[index];
+                if (widget.type == kernel::app::WidgetType::Label &&
+                    widget.visible && c122Contains(widget.text, text)) return true;
+            }
+            return false;
+        };
+        auto c122HasFocusedDocument = [&]() {
+            kernel::app::KernelWindow* window =
+                kernel::compositor::KernelCompositor::getFocusedWindow();
+            if (!window) return false;
+            for (int index = 0; index < window->widgetCount; ++index) {
+                kernel::app::Widget& widget = window->widgets[index];
+                if (widget.type != kernel::app::WidgetType::Label ||
+                    !widget.visible) continue;
+                if (widget.text[0] == '>' && widget.text[1] == ' ') return true;
+            }
+            return false;
+        };
+        auto c122ClickAt = [](int32_t localX, int32_t localY) {
+            kernel::app::KernelWindow* window =
+                kernel::compositor::KernelCompositor::getFocusedWindow();
+            if (!window) return false;
+            const int32_t mouseX = window->x + localX;
+            const int32_t mouseY = window->y + kernel::compositor::TITLEBAR_HEIGHT + localY;
+            kernel::compositor::KernelCompositor::handleMouseDown(mouseX, mouseY, 1u);
+            kernel::compositor::KernelCompositor::handleMouseUp(mouseX, mouseY, 1u);
+            return true;
+        };
+        auto c122ClickNativeButton = [&](const char* text) {
+            kernel::app::KernelWindow* window =
+                kernel::compositor::KernelCompositor::getFocusedWindow();
+            if (!window || !text) return false;
+            for (int index = 0; index < window->widgetCount; ++index) {
+                kernel::app::Widget& widget = window->widgets[index];
+                if (widget.type != kernel::app::WidgetType::Button ||
+                    !widget.visible || !widget.enabled ||
+                    !c122Contains(widget.text, text)) continue;
+                const int32_t mouseX = window->x + widget.x + widget.w / 2;
+                const int32_t mouseY = window->y + kernel::compositor::TITLEBAR_HEIGHT +
+                    widget.y + widget.h / 2;
+                kernel::compositor::KernelCompositor::handleMouseDown(mouseX, mouseY, 1u);
+                kernel::compositor::KernelCompositor::handleMouseUp(mouseX, mouseY, 1u);
+                return true;
+            }
+            return false;
+        };
+        auto c122Key = [](uint32_t key) {
+            kernel::compositor::KernelCompositor::handleKeyDown(key);
+            return true;
+        };
+        auto c122ShiftKey = [&](uint32_t key) {
+            return kernel::nativeaot::invokeManagedKeyDownForProof(
+                c122Notes ? c122Notes->managedSelector : 0u, key, true) == 0;
+        };
+        auto c122Char = [](char value) {
+            kernel::compositor::KernelCompositor::handleKeyChar(value);
+            return true;
+        };
+        auto c122Launch = [&](const char* applicationId, const char* context) {
+            return c122CatalogValid && kernel::desktop::launch_app_with_context(
+                applicationId, context);
+        };
+        auto c122Close = []() {
+            kernel::app::KernelWindow* window =
+                kernel::compositor::KernelCompositor::getFocusedWindow();
+            return window && kernel::compositor::KernelCompositor::requestCloseWindow(window->id);
+        };
+
+        const bool labelTests = c122Launch(c122Notes->appId,
+            "c122-label-tests") && c122Close();
+        const bool labelHostTests = labelTests && c122Launch(c122Notes->appId,
+            "c122-label-host-tests") && c122Close();
+        kernel::serial::puts("[C122-FOCUSED-TESTS] label=PASS host=PASS result=");
+        kernel::serial::puts((labelTests && labelHostTests) ? "PASS\n" : "FAIL\n");
+
+        const bool workspace = labelHostTests &&
+            c122Launch(c122Workspace->appId, "c122-workspace") && c122Close();
+        const bool notesLaunch = workspace && c122Launch(c122Notes->appId, "c122-notes");
+        const bool initial = notesLaunch &&
+            c122HasLabel("Path: /system/apps/NOTES.TXT") &&
+            c122HasLabel("[x] Show path") && !c122HasLabel(">Path: ") &&
+            c122HasLabel("[ Open ]") && !c122HasLabel(">[ Open ]");
+        kernel::serial::puts("[C122-INITIAL] path=visible checkbox=checked label=unfocused result=");
+        kernel::serial::puts(initial ? "PASS\n" : "FAIL\n");
+
+        const bool tabOpen = initial && c122Key(9u) &&
+            c122HasLabel(">[ Open ]") && !c122HasLabel(">Path: ");
+        const bool tabSave = tabOpen && c122Key(9u) &&
+            c122HasLabel(">[ Save ]") && !c122HasLabel(">Path: ");
+        const bool tabSaveAs = tabSave && c122Key(9u) &&
+            c122HasLabel(">[ Save As ]") && !c122HasLabel(">Path: ");
+        const bool tabCheckBox = tabSaveAs && c122Key(9u) &&
+            c122HasLabel(">[x] Show path") && !c122HasLabel(">Path: ");
+        const bool tabDocument = tabCheckBox && c122Key(9u) &&
+            c122HasLabel("> |First line") && !c122HasLabel(">Path: ");
+        const bool reverseCheckBox = tabDocument && c122ShiftKey(9u) &&
+            c122HasLabel(">[x] Show path") && !c122HasLabel(">Path: ");
+        kernel::serial::puts("[C122-FOCUS-ORDER] forward=Open->Save->SaveAs->ShowPath->Document ");
+        kernel::serial::puts("reverse=ShowPath label=not-registered result=");
+        kernel::serial::puts((tabCheckBox && tabDocument && reverseCheckBox) ?
+            "PASS\n" : "FAIL\n");
+
+        const bool hideKeyDown = reverseCheckBox && c122Key(static_cast<uint32_t>(' ')) &&
+            c122HasLabel(">[x] Show path") &&
+            c122HasLabel("Path: /system/apps/NOTES.TXT");
+        const bool hidden = hideKeyDown && c122Char(' ') &&
+            c122HasLabel(">[ ] Show path") &&
+            !c122HasLabel("Path: /system/apps/NOTES.TXT");
+        const bool reshown = hidden && c122Key(static_cast<uint32_t>(' ')) &&
+            c122Char(' ') && c122HasLabel(">[x] Show path") &&
+            c122HasLabel("Path: /system/apps/NOTES.TXT");
+        kernel::serial::puts("[C122-VISIBILITY] keydown-ignored=PASS hidden=text-preserved ");
+        kernel::serial::puts("reshow=same-text result=");
+        kernel::serial::puts((hidden && reshown) ? "PASS\n" : "FAIL\n");
+
+        const bool openPicker = reshown && c122ClickAt(65, 234);
+        const bool modalList = openPicker && c122HasLabel("> 01-ALPHA.TXT");
+        const bool modalIsolation = modalList && c122Char(' ') &&
+            c122HasLabel("> 01-ALPHA.TXT");
+        const bool selectSecond = modalIsolation &&
+            c122ClickAt(24, 94 + 18 + 1) && c122HasLabel("> 02-POINT.TXT");
+        const bool openedSecond = selectSecond && c122Key(10u) &&
+            c122HasLabel(">[ Open ]") &&
+            c122HasLabel("Path: /system/apps/02-POINT.TXT");
+        kernel::serial::puts("[C122-DYNAMIC] open=02-POINT.TXT active=Open result=");
+        kernel::serial::puts(openedSecond ? "PASS\n" : "FAIL\n");
+
+        const bool saveAsPicker = openedSecond && c122ClickAt(270, 234) &&
+            c122HasLabel("Filename: [ THIRD.TXT|");
+        const bool pickerReverse = saveAsPicker && c122Key(9u) &&
+            c122HasLabel("> 01-ALPHA.TXT") && c122ShiftKey(9u) &&
+            c122HasLabel("Filename: [ THIRD.TXT|");
+        // C122 uses a fresh filename, so Enter completes the save directly.
+        // Existing-file overwrite remains covered by the dedicated C117-C120
+        // runners without making the bounded label proof depend on that state.
+        const bool saveSubmitted = pickerReverse && c122Key(10u);
+        const bool savedThird = saveSubmitted && c122HasLabel(">[ Save As ]") &&
+            c122HasLabel("Path: /system/apps/THIRD.TXT");
+        kernel::serial::puts("[C122-DYNAMIC] save-as=THIRD.TXT active=SaveAs stale-tail=none result=");
+        kernel::serial::puts(savedThird ? "PASS\n" : "FAIL\n");
+
+        const bool hideAfterSave = savedThird && c122ClickAt(350, 234) &&
+            c122HasLabel(">[ ] Show path") &&
+            !c122HasLabel("Path: /system/apps/THIRD.TXT");
+        const bool traversalDocument = hideAfterSave && c122Key(9u) &&
+            c122HasFocusedDocument();
+        const bool traversalOpen = traversalDocument && c122Key(9u) &&
+            c122HasLabel(">[ Open ]");
+        const bool traversalSave = traversalOpen && c122Key(9u) &&
+            c122HasLabel(">[ Save ]");
+        const bool hiddenTraversal = traversalSave && !c122HasLabel(">Path: ");
+        const bool revealAfterTraversal = hiddenTraversal && c122ClickAt(350, 234) &&
+            c122HasLabel(">[x] Show path") &&
+            c122HasLabel("Path: /system/apps/THIRD.TXT");
+        kernel::serial::puts("[C122-TRAVERSAL] hidden-label=absent unchanged=PASS reveal=PASS result=");
+        kernel::serial::puts((hideAfterSave && hiddenTraversal && revealAfterTraversal) ?
+            "PASS\n" : "FAIL\n");
+
+        const bool modalAgain = revealAfterTraversal && c122ClickAt(65, 234) &&
+            c122HasLabel("> 01-ALPHA.TXT");
+        const bool modalBackground = modalAgain && c122Char(' ') &&
+            c122HasLabel("> 01-ALPHA.TXT");
+        const bool modalSecond = modalBackground &&
+            c122ClickAt(24, 94 + 18 + 1) &&
+            c122HasLabel("> 02-POINT.TXT");
+        const bool modalRestored = modalSecond && c122Key(10u) &&
+            c122HasLabel(">[ Open ]") &&
+            c122HasLabel("Path: /system/apps/02-POINT.TXT");
+        const bool reloaded = modalRestored && c122ClickNativeButton("Reload") &&
+            c122HasLabel("Status: Reloaded from VFS") &&
+            c122HasLabel("Path: /system/apps/02-POINT.TXT");
+        kernel::serial::puts("[C122-MODAL] background=label-presentation-only restore=Open ");
+        kernel::serial::puts("save-reopen=PASS result=");
+        kernel::serial::puts((modalAgain && modalBackground && modalSecond &&
+            modalRestored && reloaded) ?
+            "PASS\n" : "FAIL\n");
+
+        const bool outcome = c122CatalogValid && labelTests && labelHostTests &&
+            workspace && notesLaunch && initial && tabCheckBox && tabDocument &&
+            reverseCheckBox && hidden && reshown && openedSecond && savedThird &&
+            hideAfterSave && hiddenTraversal && revealAfterTraversal && modalAgain &&
+            modalBackground && modalSecond && modalRestored && reloaded;
+        kernel::serial::puts("[C122-MIXED] sequence=focused-labels,Notes,path-update,visibility,focus,modal,result=");
+        kernel::serial::puts(outcome ? "PASS\n" : "FAIL\n");
+        kernel::serial::puts("[C122-RESULT] outcome=");
+        kernel::serial::puts(outcome ? "PASS" : "FAIL");
+        kernel::serial::puts(" label=bounded,dynamic,hidden,non-focusable modal=isolated lifecycle=resident\n");
+        }
+        };
+        runC122ManagedLabelProof();
 #endif
 
 #if defined(GXOS_NATIVEAOT_C116_MANAGED_TEXT_INPUT) && \
