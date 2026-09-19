@@ -929,6 +929,80 @@ static bool make_short_name(const char* name, char out[11])
     return true;
 }
 
+static char hex_digit(uint8_t value)
+{
+    return value < 10 ? static_cast<char>('0' + value) : static_cast<char>('A' + value - 10);
+}
+
+static bool make_generated_short_name(uint8_t volumeIndex, uint32_t dirCluster,
+                                      char outName[11], char outText[32])
+{
+    if (!outName || !outText) return false;
+
+    // LFN entries still require a valid short alias.  Keep the alias
+    // deterministic, bounded, and out of the way of normal source names.
+    for (uint32_t serial = 1; serial < 0x01000000u; ++serial) {
+        memfill(outName, ' ', 11);
+        outName[0] = 'G';
+        outName[1] = 'X';
+        for (uint32_t i = 0; i < 6; ++i) {
+            const uint32_t shift = (5u - i) * 4u;
+            outName[2 + i] = hex_digit(static_cast<uint8_t>((serial >> shift) & 0x0Fu));
+        }
+        outName[8] = 'C';
+        outName[9] = 'F';
+        outName[10] = 'G';
+        short_name_to_string(outName, outText);
+
+        DirEntry existing;
+        uint32_t sector = 0;
+        uint32_t offset = 0;
+        if (!find_in_directory_at(volumeIndex, dirCluster, outText, &existing, &sector, &offset)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+static uint8_t short_name_checksum(const char name[11])
+{
+    uint8_t checksum = 0;
+    for (uint32_t i = 0; i < 11; ++i) {
+        checksum = static_cast<uint8_t>(((checksum & 1u) ? 0x80u : 0u) +
+            (checksum >> 1) + static_cast<uint8_t>(name[i]));
+    }
+    return checksum;
+}
+
+static void fill_lfn_entry(FAT32_LFNEntry* out, const char* name, uint32_t nameLength,
+                           uint32_t sequence, uint32_t sequenceCount, uint8_t checksum)
+{
+    memfill(out, 0xFF, sizeof(FAT32_LFNEntry));
+    out->order = static_cast<uint8_t>(sequence | (sequence == sequenceCount ? 0x40u : 0u));
+    out->attr = ATTR_LFN;
+    out->type = 0;
+    out->checksum = checksum;
+    out->firstClusterLo = 0;
+
+    uint16_t* slots[] = { out->name1, out->name2, out->name3 };
+    const uint32_t slotCounts[] = { 5, 6, 2 };
+    uint32_t slotIndex = 0;
+    const uint32_t base = (sequence - 1u) * 13u;
+    for (uint32_t group = 0; group < 3; ++group) {
+        for (uint32_t i = 0; i < slotCounts[group]; ++i, ++slotIndex) {
+            const uint32_t nameIndex = base + slotIndex;
+            if (nameIndex < nameLength) {
+                slots[group][i] = static_cast<uint16_t>(static_cast<uint8_t>(name[nameIndex]));
+            } else if (nameIndex == nameLength) {
+                slots[group][i] = 0x0000;
+            } else {
+                slots[group][i] = 0xFFFF;
+            }
+        }
+    }
+}
+
 static bool split_parent_and_name(uint8_t volumeIndex, const char* path, uint32_t* outParentCluster, char* outName, uint32_t outNameSize)
 {
     if (!path || !outParentCluster || !outName || outNameSize == 0) return false;
@@ -1012,6 +1086,56 @@ static bool find_free_dir_entry(uint8_t volumeIndex, uint32_t dirCluster, uint32
             }
         }
 
+        cluster = next_cluster(vol, cluster);
+    }
+
+    return false;
+}
+
+static bool find_free_dir_entries(uint8_t volumeIndex, uint32_t dirCluster, uint32_t count,
+                                  uint32_t* outSectors, uint32_t* outOffsets)
+{
+    if (count == 0 || !outSectors || !outOffsets) return false;
+
+    FATVolume& vol = s_volumes[volumeIndex];
+    const uint32_t entriesPerSector = vol.bytesPerSector / 32;
+    uint32_t runCount = 0;
+    bool directoryEnd = false;
+
+    const auto inspectSector = [&](uint32_t sector) -> bool {
+        if (read_volume_sector(vol, sector, s_secBuf) != block::BLOCK_OK) return false;
+        for (uint32_t entryIndex = 0; entryIndex < entriesPerSector; ++entryIndex) {
+            const uint32_t offset = entryIndex * 32;
+            const FAT32_DirEntry* de = reinterpret_cast<const FAT32_DirEntry*>(&s_secBuf[offset]);
+            const uint8_t firstByte = static_cast<uint8_t>(de->name[0]);
+            if (firstByte == 0x00) directoryEnd = true;
+            const bool freeEntry = directoryEnd || firstByte == 0xE5;
+            if (!freeEntry) {
+                runCount = 0;
+                continue;
+            }
+
+            if (runCount >= count) return true;
+            outSectors[runCount] = sector;
+            outOffsets[runCount] = offset;
+            ++runCount;
+            if (runCount == count) return true;
+        }
+        return false;
+    };
+
+    if (is_fat16_root_dir(vol, dirCluster)) {
+        for (uint32_t sectorIndex = 0; sectorIndex < vol.rootDirSectors; ++sectorIndex) {
+            if (inspectSector(vol.rootDirFirstSector + sectorIndex)) return true;
+        }
+        return false;
+    }
+
+    uint32_t cluster = dirCluster;
+    while (!is_end_of_chain(vol, cluster)) {
+        for (uint32_t sectorInCluster = 0; sectorInCluster < vol.sectorsPerCluster; ++sectorInCluster) {
+            if (inspectSector(cluster_to_sector(vol, cluster) + sectorInCluster)) return true;
+        }
         cluster = next_cluster(vol, cluster);
     }
 
@@ -1368,7 +1492,23 @@ bool create_file_path(uint8_t volumeIndex, const char* path, const void* buffer,
     }
 
     char shortName[11];
+    char shortNameText[32] = {};
+    const uint32_t fileNameLength = str_len(fileName);
+    uint32_t lfnCount = 0;
     if (!make_short_name(fileName, shortName)) {
+        if (fileNameLength == 0 || fileNameLength > 255) return false;
+        lfnCount = (fileNameLength + 12u) / 13u;
+        if (lfnCount >= 20u || !make_generated_short_name(volumeIndex, parentCluster,
+                                                           shortName, shortNameText)) {
+            return false;
+        }
+    }
+
+    uint32_t entrySectors[20] = {};
+    uint32_t entryOffsets[20] = {};
+    const uint32_t entryCount = lfnCount + 1u;
+    if (!find_free_dir_entries(volumeIndex, parentCluster, entryCount,
+                               entrySectors, entryOffsets)) {
         return false;
     }
 
@@ -1381,26 +1521,34 @@ bool create_file_path(uint8_t volumeIndex, const char* path, const void* buffer,
         return false;
     }
 
-    uint32_t sector = 0;
-    uint32_t offset = 0;
-    if (!find_free_dir_entry(volumeIndex, parentCluster, &sector, &offset)) {
-        return false;
+    const uint8_t checksum = short_name_checksum(shortName);
+    for (uint32_t index = 0; index < lfnCount; ++index) {
+        FAT32_LFNEntry lfn = {};
+        const uint32_t sequence = lfnCount - index;
+        fill_lfn_entry(&lfn, fileName, fileNameLength, sequence, lfnCount, checksum);
+        if (read_volume_sector(vol, entrySectors[index], s_secBuf) != block::BLOCK_OK) {
+            return false;
+        }
+        memcopy(&s_secBuf[entryOffsets[index]], &lfn, sizeof(lfn));
+        if (write_volume_sector(vol, entrySectors[index], s_secBuf) != block::BLOCK_OK) {
+            return false;
+        }
     }
 
-    if (read_volume_sector(vol, sector, s_secBuf) != block::BLOCK_OK) {
+    FAT32_DirEntry de = {};
+    memzero(&de, sizeof(de));
+    memcopy(de.name, shortName, 11);
+    de.attr = ATTR_ARCHIVE;
+    de.firstClusterHi = static_cast<uint16_t>((firstCluster >> 16) & 0xFFFF);
+    de.firstClusterLo = static_cast<uint16_t>(firstCluster & 0xFFFF);
+    de.fileSize = len;
+
+    const uint32_t finalIndex = lfnCount;
+    if (read_volume_sector(vol, entrySectors[finalIndex], s_secBuf) != block::BLOCK_OK) {
         return false;
     }
-
-    FAT32_DirEntry* de = reinterpret_cast<FAT32_DirEntry*>(&s_secBuf[offset]);
-    memzero(de, sizeof(FAT32_DirEntry));
-    memcopy(de->name, shortName, 11);
-    de->attr = ATTR_ARCHIVE;
-    de->firstClusterHi = static_cast<uint16_t>((firstCluster >> 16) & 0xFFFF);
-    de->firstClusterLo = static_cast<uint16_t>(firstCluster & 0xFFFF);
-    de->fileSize = len;
-
-    const bool created = write_volume_sector(vol, sector, s_secBuf) == block::BLOCK_OK;
-    return created;
+    memcopy(&s_secBuf[entryOffsets[finalIndex]], &de, sizeof(de));
+    return write_volume_sector(vol, entrySectors[finalIndex], s_secBuf) == block::BLOCK_OK;
 }
 
 bool create_directory_path(uint8_t volumeIndex, const char* path)

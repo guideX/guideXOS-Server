@@ -1959,7 +1959,11 @@ static gx_result set_source_breakpoint_enabled(
             "source breakpoint ID is stale or unknown");
         return GX_ERROR_FAILED;
     }
-    if (!enabled && breakpoint->patchInstalled) {
+    // A paused trap may already have cleared patchInstalled while the loader's
+    // patch table still owns the address until the debug command completes.
+    // Restore unconditionally so disable is idempotent and a following enable
+    // cannot be rejected as a duplicate patch.
+    if (!enabled) {
         if (!restore_debug_breakpoint(breakpoint->address)) {
             set_breakpoint_operation_snapshot(operation, snapshot,
                 GX_DEVELOPMENT_DEBUG_BREAKPOINT_STATUS_PATCH_CONFLICT,
