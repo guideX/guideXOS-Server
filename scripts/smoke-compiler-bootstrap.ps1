@@ -2008,12 +2008,15 @@ function Invoke-QemuProofBoot([int]$runNumber, [string]$qemu) {
             )
         }
         if ($Phase28POnly) {
+            # phase28pHoverToken emits HOVER_FRAME0_PASS only after it has
+            # asserted the popup value and selected frame. Keep this gate
+            # tied to the existing stable in-guest proof marker.
             $requiredMarkers += @(
                 "DEVELOPER_STUDIO_PHASE28P_BEGIN",
                 "DEVELOPER_STUDIO_PHASE28P_APP_LAUNCH_PASS",
                 "DEVELOPER_STUDIO_PHASE28P_INITIAL_HOVER_PASS",
                 "DEVELOPER_STUDIO_PHASE28P_TOKEN_HITTEST_PASS",
-                "DEVELOPER_STUDIO_PHASE28P_HOVER_VALUE_PASS",
+                "DEVELOPER_STUDIO_PHASE28P_HOVER_FRAME0_PASS",
                 "DEVELOPER_STUDIO_PHASE28P_TIP_INVALIDATION_PASS",
                 "DEVELOPER_STUDIO_PHASE28P_CALLER_HOVER_PASS",
                 "DEVELOPER_STUDIO_PHASE28P_LOCALS_WATCH_EQUIVALENCE_PASS",
