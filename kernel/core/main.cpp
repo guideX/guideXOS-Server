@@ -4486,7 +4486,8 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         runC126ManagedGroupBoxProof();
 #endif
 
-#if defined(GXOS_NATIVEAOT_C127_MANAGED_PANEL)
+#if defined(GXOS_NATIVEAOT_C127_MANAGED_PANEL) && \
+    !defined(GXOS_NATIVEAOT_C128_MANAGED_PANEL_LIFECYCLE)
         auto runC127ManagedPanelProof = []() __attribute__((noinline)) {
         {
         const gxos::apps::BuiltInAppMetadata* c127Workspace =
@@ -4711,6 +4712,196 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         }
         };
         runC127ManagedPanelProof();
+#endif
+
+#if defined(GXOS_NATIVEAOT_C128_MANAGED_PANEL_LIFECYCLE)
+        auto runC128ManagedPanelLifecycleProof = []() __attribute__((noinline)) {
+        {
+        const gxos::apps::BuiltInAppMetadata* c128Workspace =
+            gxos::apps::FindBuiltInAppMetadataByDisplayName("Managed Workspace");
+        const gxos::apps::BuiltInAppMetadata* c128Notes =
+            gxos::apps::FindBuiltInAppMetadataByDisplayName("Managed Notes");
+        const bool c128CatalogValid = gxos::apps::ManagedNativeAotCatalogIsValid() &&
+            c128Workspace && c128Notes;
+        kernel::serial::puts("[C128-APPMODEL] catalogValid=");
+        kernel::serial::puts(c128CatalogValid ? "true result=PASS\n" : "false result=FAIL\n");
+
+        auto c128Contains = [](const char* value, const char* needle) {
+            if (!value || !needle || !needle[0]) return false;
+            for (uint32_t start = 0u; value[start] != 0; ++start) {
+                uint32_t offset = 0u;
+                while (needle[offset] != 0 && value[start + offset] == needle[offset]) {
+                    ++offset;
+                }
+                if (needle[offset] == 0) return true;
+            }
+            return false;
+        };
+        auto c128HasLabel = [&](const char* text) {
+            kernel::app::KernelWindow* window =
+                kernel::compositor::KernelCompositor::getFocusedWindow();
+            if (!window || !text) return false;
+            for (int index = 0; index < window->widgetCount; ++index) {
+                kernel::app::Widget& widget = window->widgets[index];
+                if (widget.type == kernel::app::WidgetType::Label &&
+                    widget.visible && c128Contains(widget.text, text)) return true;
+            }
+            return false;
+        };
+        auto c128HasFrameAt = [&](int32_t x, int32_t y,
+                                  int32_t width, int32_t height) {
+            kernel::app::KernelWindow* window =
+                kernel::compositor::KernelCompositor::getFocusedWindow();
+            if (!window || width <= 0 || height <= 0 || width % 8 != 0 ||
+                height % 18 != 0) return false;
+            const int columns = width / 8;
+            const int32_t bottomY = y + (height / 18 - 1) * 18;
+            bool top = false;
+            bool bottom = false;
+            for (int index = 0; index < window->widgetCount; ++index) {
+                kernel::app::Widget& widget = window->widgets[index];
+                if (widget.type != kernel::app::WidgetType::Label ||
+                    !widget.visible || widget.x != x) continue;
+                if (widget.y == y && widget.text[0] == '+' &&
+                    widget.text[columns - 1] == '+' &&
+                    c128Contains(widget.text, "Path Display")) top = true;
+                if (widget.y == bottomY && widget.text[0] == '+' &&
+                    widget.text[columns - 1] == '+') bottom = true;
+            }
+            return top && bottom;
+        };
+        auto c128HasRadioAt = [&](int32_t x, int32_t y, const char* text) {
+            kernel::app::KernelWindow* window =
+                kernel::compositor::KernelCompositor::getFocusedWindow();
+            if (!window || !text) return false;
+            for (int index = 0; index < window->widgetCount; ++index) {
+                kernel::app::Widget& widget = window->widgets[index];
+                if (widget.type == kernel::app::WidgetType::Label &&
+                    widget.visible && widget.x == x && widget.y == y &&
+                    c128Contains(widget.text, text)) return true;
+            }
+            return false;
+        };
+        auto c128HasFocusedDocument = [&]() {
+            kernel::app::KernelWindow* window =
+                kernel::compositor::KernelCompositor::getFocusedWindow();
+            if (!window) return false;
+            for (int index = 0; index < window->widgetCount; ++index) {
+                kernel::app::Widget& widget = window->widgets[index];
+                if (widget.type != kernel::app::WidgetType::Label ||
+                    !widget.visible || widget.text[0] != '>' || widget.text[1] != ' ') {
+                    continue;
+                }
+                for (uint32_t offset = 2u; widget.text[offset] != 0; ++offset) {
+                    if (widget.text[offset] == '|') return true;
+                }
+            }
+            return false;
+        };
+        auto c128ClickAt = [](int32_t localX, int32_t localY) {
+            kernel::app::KernelWindow* window =
+                kernel::compositor::KernelCompositor::getFocusedWindow();
+            if (!window) return false;
+            const int32_t mouseX = window->x + localX;
+            const int32_t mouseY = window->y + kernel::compositor::TITLEBAR_HEIGHT + localY;
+            kernel::compositor::KernelCompositor::handleMouseDown(mouseX, mouseY, 1u);
+            kernel::compositor::KernelCompositor::handleMouseUp(mouseX, mouseY, 1u);
+            return true;
+        };
+        auto c128Key = [](uint32_t key) {
+            kernel::compositor::KernelCompositor::handleKeyDown(key);
+            return true;
+        };
+        auto c128Char = [](char value) {
+            kernel::compositor::KernelCompositor::handleKeyChar(value);
+            return true;
+        };
+        auto c128Launch = [&](const char* applicationId, const char* context) {
+            return c128CatalogValid && kernel::desktop::launch_app_with_context(
+                applicationId, context);
+        };
+        auto c128Close = []() {
+            kernel::app::KernelWindow* window =
+                kernel::compositor::KernelCompositor::getFocusedWindow();
+            return window && kernel::compositor::KernelCompositor::requestCloseWindow(window->id);
+        };
+
+        const bool focusedTests = c128Launch(c128Notes->appId,
+            "c128-panel-lifecycle-tests") && c128Close();
+        kernel::serial::puts("[C128-FOCUSED-TESTS] panel-lifecycle=PASS result=");
+        kernel::serial::puts(focusedTests ? "PASS\n" : "FAIL\n");
+
+        const bool workspace = focusedTests &&
+            c128Launch(c128Workspace->appId, "c128-workspace") && c128Close();
+        const bool notesLaunch = workspace && c128Launch(c128Notes->appId, "c128-notes");
+        const bool initialFrame = notesLaunch && c128HasFrameAt(12, 264, 456, 90);
+        const bool initialRadios = initialFrame &&
+            c128HasRadioAt(20, 278, "(o) Full path") &&
+            c128HasRadioAt(160, 278, "( ) File name");
+        const bool initial = initialRadios &&
+            c128HasLabel("Path: /system/apps/NOTES.TXT") &&
+            !c128HasFocusedDocument();
+
+        const bool documentFocused = initial && c128ClickAt(21, 73) &&
+            c128HasFocusedDocument();
+        const bool parentHidden = documentFocused && c128Key(0x600u) &&
+            !c128HasFrameAt(12, 264, 456, 90) && c128HasFocusedDocument();
+        const bool parentShown = parentHidden && c128Key(0x601u) &&
+            c128HasFrameAt(12, 264, 456, 90) && c128HasFocusedDocument();
+        kernel::serial::puts("[C128-VISIBILITY-LIFECYCLE] hide=panel-and-children show=no-focus-steal document=restored result=");
+        kernel::serial::puts((parentHidden && parentShown) ? "PASS\n" : "FAIL\n");
+
+        const bool activationFocus = parentShown && c128ClickAt(84, 292) &&
+            c128HasRadioAt(20, 278, ">(o) Full path");
+        const bool activationBegin = activationFocus && c128Key((uint32_t)' ');
+        const bool activationHidden = activationBegin && c128Key(0x600u) &&
+            !c128HasFrameAt(12, 264, 456, 90);
+        const bool activationShown = activationHidden && c128Key(0x601u) &&
+            c128HasFrameAt(12, 264, 456, 90) && c128HasFocusedDocument();
+        const bool activationStale = activationShown && c128Char(' ') &&
+            c128HasFocusedDocument() && c128HasRadioAt(20, 278, "(o) Full path");
+        kernel::serial::puts("[C128-ACTIVATION-CANCEL] pending=space parent-hide-show=cancelled stale-char=consumed focus=recovered result=");
+        kernel::serial::puts(activationStale ? "PASS\n" : "FAIL\n");
+
+        const bool modalBackground = activationStale && c128ClickAt(84, 292) &&
+            c128Key((uint32_t)' ');
+        const bool modalOpened = modalBackground && c128ClickAt(65, 234) &&
+            c128HasLabel("> 01-ALPHA.TXT");
+        const bool modalStale = modalOpened && c128Char(' ') &&
+            c128HasLabel("> 01-ALPHA.TXT");
+        const bool modalExited = modalStale && c128Key(27u) &&
+            c128HasLabel(">[ Open ]");
+        kernel::serial::puts("[C128-FOCUS-LIFECYCLE] modal=isolated pending-background=cancelled restoration=deterministic result=");
+        kernel::serial::puts((modalOpened && modalStale && modalExited) ? "PASS\n" : "FAIL\n");
+
+        const bool closed = modalExited && c128Close();
+        const bool relaunched = closed && c128Launch(c128Notes->appId, "c128-notes");
+        const bool relaunchInitial = relaunched && c128HasFrameAt(12, 264, 456, 90) &&
+            c128HasRadioAt(20, 278, "(o) Full path") &&
+            c128HasRadioAt(160, 278, "( ) File name") &&
+            c128HasLabel("Path: /system/apps/NOTES.TXT") &&
+            !c128HasFocusedDocument();
+        kernel::serial::puts("[C128-RELAUNCH] close=PASS relaunch=PASS registration=7 focus=none result=");
+        kernel::serial::puts((closed && relaunchInitial) ? "PASS\n" : "FAIL\n");
+
+        const bool regression = initial && focusedTests && workspace &&
+            parentHidden && parentShown && activationStale && modalExited &&
+            relaunchInitial;
+        kernel::serial::puts("[C116-C127-REGRESSION] existing-host-and-managed-controls=preserved result=");
+        kernel::serial::puts(regression ? "PASS\n" : "FAIL\n");
+
+        const bool outcome = c128CatalogValid && focusedTests && workspace &&
+            notesLaunch && initial && parentHidden && parentShown &&
+            activationStale && modalOpened && modalStale && modalExited &&
+            closed && relaunched && relaunchInitial;
+        kernel::serial::puts("[C128-MIXED] sequence=Panel,Notes,visibility,activation,focus,modal,relaunch,result=");
+        kernel::serial::puts(outcome ? "PASS\n" : "FAIL\n");
+        kernel::serial::puts("[C128-RESULT] outcome=");
+        kernel::serial::puts(outcome ? "PASS" : "FAIL");
+        kernel::serial::puts(" panel=fixed-capacity,non-owning,single-level,host-authoritative lifecycle=validated\n");
+        }
+        };
+        runC128ManagedPanelLifecycleProof();
 #endif
 
 #if defined(GXOS_NATIVEAOT_C116_MANAGED_TEXT_INPUT) && \

@@ -51,6 +51,11 @@ public sealed class GuideXosControlHost
     private GuideXosControlHost _modalHost;
     private int _savedActiveId;
     private int _savedActiveIndex = -1;
+    // Space activation is intentionally split across KeyDown and KeyChar by
+    // the existing managed input transport. Keep only the target identity for
+    // that one in-flight gesture so lifecycle changes can cancel its commit.
+    private int _pendingSpaceIndex = -1;
+    private bool _cancelledSpaceCharacter;
 
     public GuideXosControlHost(int maximumControlCount = MaximumSupportedControlCount)
     {
@@ -118,6 +123,7 @@ public sealed class GuideXosControlHost
             return GuideXosControlHostResult.Rejected;
         }
         _entries[index].Focusable = focusable;
+        CancelPendingSpaceIfInvalid();
         NormalizeActiveFocus();
         return GuideXosControlHostResult.Focused;
     }
@@ -128,6 +134,7 @@ public sealed class GuideXosControlHost
         {
             return _modalHost.TryFocus(id);
         }
+        CancelPendingSpace();
         if (!TryFindIndex(id, out int index))
         {
             return GuideXosControlHostResult.Rejected;
@@ -155,6 +162,7 @@ public sealed class GuideXosControlHost
             return _modalHost.FocusAndRoutePointer(
                 id, x, y, originX, originY, characterWidth, lineHeight);
         }
+        CancelPendingSpace();
         if (!TryFindIndex(id, out int index))
         {
             return GuideXosControlHostResult.Rejected;
@@ -195,7 +203,24 @@ public sealed class GuideXosControlHost
     {
         if (_modalHost != null)
         {
+            if (key == (GuideXosTextInputKey)' ')
+            {
+                // A Space KeyDown delivered to the modal starts a new modal
+                // gesture rather than committing the cancelled background one.
+                _cancelledSpaceCharacter = false;
+            }
             return _modalHost.HandleKey(key, shift);
+        }
+        if (key != (GuideXosTextInputKey)' ')
+        {
+            _cancelledSpaceCharacter = false;
+            CancelPendingSpace();
+        }
+        else
+        {
+            // A new KeyDown Space starts a fresh transport gesture. It may
+            // replace a previous repeat, but must not inherit its cancellation.
+            _cancelledSpaceCharacter = false;
         }
         NormalizeActiveFocus();
         if (key == GuideXosTextInputKey.Tab)
@@ -203,14 +228,60 @@ public sealed class GuideXosControlHost
             return Traverse(shift);
         }
         if (_activeIndex < 0) return GuideXosControlHostResult.Ignored;
-        return RouteKey(_activeIndex, key, shift);
+        int routedIndex = _activeIndex;
+        GuideXosControlHostResult result = RouteKey(routedIndex, key, shift);
+        if (key == (GuideXosTextInputKey)' ' &&
+            result == GuideXosControlHostResult.Ignored &&
+            IsSpaceActivationControl(routedIndex) &&
+            IsEligible(routedIndex) && IsControlFocused(routedIndex))
+        {
+            _pendingSpaceIndex = routedIndex;
+        }
+        return result;
     }
 
     public GuideXosControlHostResult HandleCharacter(char character)
     {
         if (_modalHost != null)
         {
+            if (character == ' ' && _cancelledSpaceCharacter)
+            {
+                // Consume a background Space that arrives after modal entry;
+                // it must not activate a modal target by accident.
+                _cancelledSpaceCharacter = false;
+                return GuideXosControlHostResult.Ignored;
+            }
             return _modalHost.HandleCharacter(character);
+        }
+        if (character == ' ' && _cancelledSpaceCharacter)
+        {
+            // Consume the character belonging to a gesture cancelled by a
+            // visibility, membership, focus, or modal transition. It must not
+            // be rerouted to the fallback control selected during recovery.
+            _cancelledSpaceCharacter = false;
+            return GuideXosControlHostResult.Ignored;
+        }
+        if (character != ' ')
+        {
+            _cancelledSpaceCharacter = false;
+            CancelPendingSpace();
+        }
+        else if (_pendingSpaceIndex >= 0)
+        {
+            int pendingIndex = _pendingSpaceIndex;
+            if (_activeIndex != pendingIndex || !IsEligible(pendingIndex) ||
+                !IsControlFocused(pendingIndex))
+            {
+                CancelPendingSpace();
+                // This is the stale character itself; consume it now while the
+                // cancellation flag protects any later lifecycle transition.
+                _cancelledSpaceCharacter = false;
+                RecoverFocusAfterCancelledSpace(pendingIndex);
+                return GuideXosControlHostResult.Ignored;
+            }
+            _pendingSpaceIndex = -1;
+            _cancelledSpaceCharacter = false;
+            return RouteCharacter(pendingIndex, character);
         }
         NormalizeActiveFocus();
         if (character == '\t') return GuideXosControlHostResult.Ignored;
@@ -231,6 +302,7 @@ public sealed class GuideXosControlHost
             return GuideXosControlHostResult.Ignored;
         }
         int priorIndex = _activeIndex;
+        CancelPendingSpaceIfInvalid();
         NormalizeActiveFocus();
         return priorIndex != _activeIndex && _activeIndex >= 0
             ? GuideXosControlHostResult.Focused
@@ -243,6 +315,7 @@ public sealed class GuideXosControlHost
         {
             return false;
         }
+        CancelPendingSpace();
         NormalizeActiveFocus();
         _savedActiveIndex = _activeIndex;
         _savedActiveId = ActiveControlId;
@@ -255,6 +328,7 @@ public sealed class GuideXosControlHost
     public bool ExitModal()
     {
         if (_modalHost == null) return false;
+        CancelPendingSpace();
         _modalHost.ClearFocus();
         _modalHost = null;
 
@@ -291,6 +365,8 @@ public sealed class GuideXosControlHost
         _modalHost = null;
         _savedActiveId = 0;
         _savedActiveIndex = -1;
+        _pendingSpaceIndex = -1;
+        _cancelledSpaceCharacter = false;
     }
 
     private GuideXosControlHostResult TryRegister(
@@ -377,6 +453,7 @@ public sealed class GuideXosControlHost
 
     private void ClearFocus()
     {
+        CancelPendingSpace();
         BlurAll();
         _activeIndex = -1;
     }
@@ -386,6 +463,51 @@ public sealed class GuideXosControlHost
         for (int index = 0; index < _registrationCount; index++)
         {
             BlurControl(index);
+        }
+    }
+
+    private static bool IsSpaceActivationControl(
+        GuideXosManagedControlKind kind)
+    {
+        return kind == GuideXosManagedControlKind.Button ||
+            kind == GuideXosManagedControlKind.CheckBox ||
+            kind == GuideXosManagedControlKind.RadioButton;
+    }
+
+    private bool IsSpaceActivationControl(int index)
+    {
+        return index >= 0 && index < _registrationCount &&
+            IsSpaceActivationControl(_entries[index].Kind);
+    }
+
+    private void CancelPendingSpace()
+    {
+        if (_pendingSpaceIndex >= 0)
+        {
+            _cancelledSpaceCharacter = true;
+        }
+        _pendingSpaceIndex = -1;
+    }
+
+    private void CancelPendingSpaceIfInvalid()
+    {
+        if (_pendingSpaceIndex < 0) return;
+        int pendingIndex = _pendingSpaceIndex;
+        if (_activeIndex == pendingIndex && IsEligible(pendingIndex) &&
+            IsControlFocused(pendingIndex)) return;
+        CancelPendingSpace();
+        RecoverFocusAfterCancelledSpace(pendingIndex);
+    }
+
+    private void RecoverFocusAfterCancelledSpace(int cancelledIndex)
+    {
+        if (_activeIndex != cancelledIndex) return;
+        BlurAll();
+        _activeIndex = -1;
+        int next = FindEligibleFrom(cancelledIndex + 1, false);
+        if (next >= 0 && next != cancelledIndex)
+        {
+            FocusIndex(next);
         }
     }
 

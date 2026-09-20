@@ -558,6 +558,11 @@ public sealed class ManagedNotes : GuideXosApplication
     private bool _c127ProofContext;
     private bool _c127PanelTestContext;
     private bool _c127PanelTestsRun;
+#if HOSTLOGPROOF_C128_MANAGED_PANEL_LIFECYCLE
+    private bool _c128ProofContext;
+    private bool _c128PanelLifecycleTestContext;
+    private bool _c128PanelLifecycleTestsRun;
+#endif
 #endif
 #endif
 #endif
@@ -619,6 +624,12 @@ public sealed class ManagedNotes : GuideXosApplication
         _c127ProofContext = IsC127NotesContext(host);
         _c127PanelTestContext = IsC127PanelTestContext(host);
         _c125ProofContext = _c125ProofContext || _c127ProofContext;
+#if HOSTLOGPROOF_C128_MANAGED_PANEL_LIFECYCLE
+        _c128ProofContext = IsC128NotesContext(host);
+        _c128PanelLifecycleTestContext =
+            IsC128PanelLifecycleTestContext(host);
+        _c125ProofContext = _c125ProofContext || _c128ProofContext;
+#endif
 #endif
 #endif
         _c124ProofContext = _c124ProofContext || _c125ProofContext;
@@ -891,6 +902,18 @@ public sealed class ManagedNotes : GuideXosApplication
                 ? "C127-NOTES initial=PathDisplay panel=bounds=12,264,456,90 children=2 registration=7 result=PASS"u8
                 : "C127-NOTES initial=FAIL result=FAIL"u8);
         }
+#if HOSTLOGPROOF_C128_MANAGED_PANEL_LIFECYCLE
+        if (_c128ProofContext)
+        {
+            bool lifecycleInitial = _mainControlHost.RegistrationCount == 7 &&
+                _pathDisplayPanel.ChildCount == 2 &&
+                _pathDisplayPanel.Visible &&
+                !_fullPathRadio.IsFocused && !_fileNameRadio.IsFocused;
+            host.TryLog(lifecycleInitial
+                ? "C128-NOTES initial=registration=7 result=PASS"u8
+                : "C128-NOTES initial=FAIL result=FAIL"u8);
+        }
+#endif
 #endif
 #endif
 #endif
@@ -940,6 +963,12 @@ public sealed class ManagedNotes : GuideXosApplication
         {
             runFocusedProofTests = false;
         }
+#if HOSTLOGPROOF_C128_MANAGED_PANEL_LIFECYCLE
+        if (_c128PanelLifecycleTestContext)
+        {
+            runFocusedProofTests = false;
+        }
+#endif
 #endif
 #endif
         bool textAreaTests = runFocusedProofTests
@@ -1067,6 +1096,15 @@ public sealed class ManagedNotes : GuideXosApplication
             !_c127PanelTestsRun
             ? GuideXosPanelTests.Run(host, surface) : true;
         if (_c127PanelTestContext) _c127PanelTestsRun = true;
+#if HOSTLOGPROOF_C128_MANAGED_PANEL_LIFECYCLE
+        bool panelLifecycleTests = _c128PanelLifecycleTestContext &&
+            !_c128PanelLifecycleTestsRun
+            ? GuideXosPanelLifecycleTests.Run(host) : true;
+        if (_c128PanelLifecycleTestContext)
+        {
+            _c128PanelLifecycleTestsRun = true;
+        }
+#endif
 #endif
 #endif
 #endif
@@ -1101,6 +1139,9 @@ public sealed class ManagedNotes : GuideXosApplication
             && groupBoxTests
 #if HOSTLOGPROOF_C127_MANAGED_PANEL
             && panelTests
+#if HOSTLOGPROOF_C128_MANAGED_PANEL_LIFECYCLE
+            && panelLifecycleTests
+#endif
 #endif
 #endif
 #endif
@@ -1139,6 +1180,9 @@ public sealed class ManagedNotes : GuideXosApplication
             || host.LaunchContext.Utf8.SequenceEqual("c126-notes"u8)
 #if HOSTLOGPROOF_C127_MANAGED_PANEL
             || host.LaunchContext.Utf8.SequenceEqual("c127-notes"u8)
+#if HOSTLOGPROOF_C128_MANAGED_PANEL_LIFECYCLE
+            || host.LaunchContext.Utf8.SequenceEqual("c128-notes"u8)
+#endif
 #endif
 #endif
 #endif
@@ -1170,6 +1214,9 @@ public sealed class ManagedNotes : GuideXosApplication
             || host.LaunchContext.Utf8.SequenceEqual("c126-notes"u8)
 #if HOSTLOGPROOF_C127_MANAGED_PANEL
             || host.LaunchContext.Utf8.SequenceEqual("c127-notes"u8)
+#if HOSTLOGPROOF_C128_MANAGED_PANEL_LIFECYCLE
+            || host.LaunchContext.Utf8.SequenceEqual("c128-notes"u8)
+#endif
 #endif
 #endif
 #endif
@@ -1246,6 +1293,9 @@ public sealed class ManagedNotes : GuideXosApplication
             || host.LaunchContext.Utf8.SequenceEqual("c126-notes"u8)
 #if HOSTLOGPROOF_C127_MANAGED_PANEL
             || host.LaunchContext.Utf8.SequenceEqual("c127-notes"u8)
+#if HOSTLOGPROOF_C128_MANAGED_PANEL_LIFECYCLE
+            || host.LaunchContext.Utf8.SequenceEqual("c128-notes"u8)
+#endif
 #endif
 #endif
 #endif
@@ -1269,6 +1319,9 @@ public sealed class ManagedNotes : GuideXosApplication
             || host.LaunchContext.Utf8.SequenceEqual("c126-notes"u8)
 #if HOSTLOGPROOF_C127_MANAGED_PANEL
             || host.LaunchContext.Utf8.SequenceEqual("c127-notes"u8)
+#if HOSTLOGPROOF_C128_MANAGED_PANEL_LIFECYCLE
+            || host.LaunchContext.Utf8.SequenceEqual("c128-notes"u8)
+#endif
 #endif
 #endif
             ;
@@ -1291,13 +1344,29 @@ public sealed class ManagedNotes : GuideXosApplication
 #if HOSTLOGPROOF_C127_MANAGED_PANEL
     private static bool IsC127NotesContext(GuideXosHost host)
     {
-        return host.LaunchContext.Utf8.SequenceEqual("c127-notes"u8);
+        return host.LaunchContext.Utf8.SequenceEqual("c127-notes"u8)
+#if HOSTLOGPROOF_C128_MANAGED_PANEL_LIFECYCLE
+            || IsC128NotesContext(host)
+#endif
+            ;
     }
 
     private static bool IsC127PanelTestContext(GuideXosHost host)
     {
         return host.LaunchContext.Utf8.SequenceEqual("c127-panel-tests"u8);
     }
+#if HOSTLOGPROOF_C128_MANAGED_PANEL_LIFECYCLE
+    private static bool IsC128NotesContext(GuideXosHost host)
+    {
+        return host.LaunchContext.Utf8.SequenceEqual("c128-notes"u8);
+    }
+
+    private static bool IsC128PanelLifecycleTestContext(GuideXosHost host)
+    {
+        return host.LaunchContext.Utf8.SequenceEqual(
+            "c128-panel-lifecycle-tests"u8);
+    }
+#endif
 #endif
 #endif
 #endif
