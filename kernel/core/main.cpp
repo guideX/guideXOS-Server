@@ -3914,7 +3914,8 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         runC124ManagedRadioProof();
 #endif
 
-#if defined(GXOS_NATIVEAOT_C125_MANAGED_PROGRESS_BAR)
+#if defined(GXOS_NATIVEAOT_C125_MANAGED_PROGRESS_BAR) && \
+    !defined(GXOS_NATIVEAOT_C126_MANAGED_GROUP_BOX)
         auto runC125ManagedProgressProof = []() __attribute__((noinline)) {
         {
         const gxos::apps::BuiltInAppMetadata* c125Workspace =
@@ -4179,6 +4180,310 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         }
         };
         runC125ManagedProgressProof();
+#endif
+
+#if defined(GXOS_NATIVEAOT_C126_MANAGED_GROUP_BOX)
+        auto runC126ManagedGroupBoxProof = []() __attribute__((noinline)) {
+        {
+        const gxos::apps::BuiltInAppMetadata* c126Workspace =
+            gxos::apps::FindBuiltInAppMetadataByDisplayName("Managed Workspace");
+        const gxos::apps::BuiltInAppMetadata* c126Notes =
+            gxos::apps::FindBuiltInAppMetadataByDisplayName("Managed Notes");
+        const bool c126CatalogValid = gxos::apps::ManagedNativeAotCatalogIsValid() &&
+            c126Workspace && c126Notes;
+        kernel::serial::puts("[C126-APPMODEL] catalogValid=");
+        kernel::serial::puts(c126CatalogValid ? "true result=PASS\n" : "false result=FAIL\n");
+
+        auto c126Contains = [](const char* value, const char* needle) {
+            if (!value || !needle || !needle[0]) return false;
+            for (uint32_t start = 0u; value[start] != 0; ++start) {
+                uint32_t offset = 0u;
+                while (needle[offset] != 0 && value[start + offset] == needle[offset]) {
+                    ++offset;
+                }
+                if (needle[offset] == 0) return true;
+            }
+            return false;
+        };
+        auto c126HasLabel = [&](const char* text) {
+            kernel::app::KernelWindow* window =
+                kernel::compositor::KernelCompositor::getFocusedWindow();
+            if (!window || !text) return false;
+            for (int index = 0; index < window->widgetCount; ++index) {
+                kernel::app::Widget& widget = window->widgets[index];
+                if (widget.type == kernel::app::WidgetType::Label &&
+                    widget.visible && c126Contains(widget.text, text)) return true;
+            }
+            return false;
+        };
+        auto c126HasFrameAt = [&](int32_t x, int32_t y,
+                                  int32_t width, int32_t height) {
+            kernel::app::KernelWindow* window =
+                kernel::compositor::KernelCompositor::getFocusedWindow();
+            if (!window || width <= 0 || height <= 0 || width % 8 != 0 ||
+                height % 18 != 0) return false;
+            const int columns = width / 8;
+            const int32_t bottomY = y + (height / 18 - 1) * 18;
+            bool top = false;
+            bool bottom = false;
+            for (int index = 0; index < window->widgetCount; ++index) {
+                kernel::app::Widget& widget = window->widgets[index];
+                if (widget.type != kernel::app::WidgetType::Label ||
+                    !widget.visible || widget.x != x) continue;
+                if (widget.y == y && widget.text[0] == '+' &&
+                    widget.text[columns - 1] == '+' &&
+                    c126Contains(widget.text, "Path Display")) top = true;
+                if (widget.y == bottomY && widget.text[0] == '+' &&
+                    widget.text[columns - 1] == '+') bottom = true;
+            }
+            return top && bottom;
+        };
+        auto c126HasBorderAt = [&](int32_t x, int32_t y) {
+            kernel::app::KernelWindow* window =
+                kernel::compositor::KernelCompositor::getFocusedWindow();
+            if (!window) return false;
+            for (int index = 0; index < window->widgetCount; ++index) {
+                kernel::app::Widget& widget = window->widgets[index];
+                if (widget.type == kernel::app::WidgetType::Label &&
+                    widget.visible && widget.x == x && widget.y == y &&
+                    widget.text[0] == '+') return true;
+            }
+            return false;
+        };
+        auto c126HasRadioAt = [&](int32_t x, int32_t y, const char* text) {
+            kernel::app::KernelWindow* window =
+                kernel::compositor::KernelCompositor::getFocusedWindow();
+            if (!window || !text) return false;
+            for (int index = 0; index < window->widgetCount; ++index) {
+                kernel::app::Widget& widget = window->widgets[index];
+                if (widget.type == kernel::app::WidgetType::Label &&
+                    widget.visible && widget.x == x && widget.y == y &&
+                    c126Contains(widget.text, text)) return true;
+            }
+            return false;
+        };
+        auto c126HasFocusedDocument = [&]() {
+            kernel::app::KernelWindow* window =
+                kernel::compositor::KernelCompositor::getFocusedWindow();
+            if (!window) return false;
+            for (int index = 0; index < window->widgetCount; ++index) {
+                kernel::app::Widget& widget = window->widgets[index];
+                if (widget.type != kernel::app::WidgetType::Label || !widget.visible ||
+                    widget.text[0] != '>' || widget.text[1] != ' ') continue;
+                for (uint32_t offset = 2u; widget.text[offset] != 0; ++offset) {
+                    if (widget.text[offset] == '|') return true;
+                }
+            }
+            return false;
+        };
+        auto c126ClickAt = [](int32_t localX, int32_t localY) {
+            kernel::app::KernelWindow* window =
+                kernel::compositor::KernelCompositor::getFocusedWindow();
+            if (!window) return false;
+            const int32_t mouseX = window->x + localX;
+            const int32_t mouseY = window->y + kernel::compositor::TITLEBAR_HEIGHT + localY;
+            kernel::compositor::KernelCompositor::handleMouseDown(mouseX, mouseY, 1u);
+            kernel::compositor::KernelCompositor::handleMouseUp(mouseX, mouseY, 1u);
+            return true;
+        };
+        auto c126ClickNativeButton = [&](const char* text) {
+            kernel::app::KernelWindow* window =
+                kernel::compositor::KernelCompositor::getFocusedWindow();
+            if (!window || !text) return false;
+            for (int index = 0; index < window->widgetCount; ++index) {
+                kernel::app::Widget& widget = window->widgets[index];
+                if (widget.type != kernel::app::WidgetType::Button ||
+                    !widget.visible || !widget.enabled ||
+                    !c126Contains(widget.text, text)) continue;
+                const int32_t mouseX = window->x + widget.x + widget.w / 2;
+                const int32_t mouseY = window->y + kernel::compositor::TITLEBAR_HEIGHT +
+                    widget.y + widget.h / 2;
+                kernel::compositor::KernelCompositor::handleMouseDown(mouseX, mouseY, 1u);
+                kernel::compositor::KernelCompositor::handleMouseUp(mouseX, mouseY, 1u);
+                return true;
+            }
+            return false;
+        };
+        auto c126FocusDocument = [&]() {
+            kernel::app::KernelWindow* window =
+                kernel::compositor::KernelCompositor::getFocusedWindow();
+            if (!window) return false;
+            const int32_t mouseX = window->x + 21;
+            const int32_t mouseY = window->y + kernel::compositor::TITLEBAR_HEIGHT + 73;
+            kernel::compositor::KernelCompositor::handleMouseDown(mouseX, mouseY, 1u);
+            kernel::compositor::KernelCompositor::handleMouseUp(mouseX, mouseY, 1u);
+            return c126HasFocusedDocument();
+        };
+        auto c126Key = [](uint32_t key) {
+            kernel::compositor::KernelCompositor::handleKeyDown(key);
+            return true;
+        };
+        auto c126ShiftKey = [&](uint32_t key) {
+            return kernel::nativeaot::invokeManagedKeyDownForProof(
+                c126Notes ? c126Notes->managedSelector : 0u, key, true) == 0;
+        };
+        auto c126Char = [](char value) {
+            kernel::compositor::KernelCompositor::handleKeyChar(value);
+            return true;
+        };
+        auto c126Text = [](const char* text) {
+            if (!text) return false;
+            for (uint32_t index = 0u; text[index] != 0; ++index) {
+                kernel::compositor::KernelCompositor::handleKeyChar(text[index]);
+            }
+            return true;
+        };
+        auto c126Launch = [&](const char* applicationId, const char* context) {
+            return c126CatalogValid && kernel::desktop::launch_app_with_context(
+                applicationId, context);
+        };
+        auto c126Close = []() {
+            kernel::app::KernelWindow* window =
+                kernel::compositor::KernelCompositor::getFocusedWindow();
+            return window && kernel::compositor::KernelCompositor::requestCloseWindow(window->id);
+        };
+
+        const bool focusedTests = c126Launch(c126Notes->appId,
+            "c126-group-box-tests") && c126Close();
+        kernel::serial::puts("[C126-FOCUSED-TESTS] group-box=PASS result=");
+        kernel::serial::puts(focusedTests ? "PASS\n" : "FAIL\n");
+
+        const bool workspace = focusedTests &&
+            c126Launch(c126Workspace->appId, "c126-workspace") && c126Close();
+        const bool notesLaunch = workspace && c126Launch(c126Notes->appId, "c126-notes");
+        const bool initialFrame = notesLaunch &&
+            c126HasFrameAt(12, 264, 456, 90);
+        const bool initialRadios = initialFrame &&
+            c126HasRadioAt(20, 278, "(o) Full path") &&
+            c126HasRadioAt(160, 278, "( ) File name");
+        const bool initial = initialRadios &&
+            c126HasLabel("[########------------------------] 26%") &&
+            c126HasLabel("Path: /system/apps/NOTES.TXT") &&
+            !c126HasFocusedDocument();
+        kernel::serial::puts("[C126-INITIAL] caption=PathDisplay bounds=12,264,456,90 radios=inside progress=independent result=");
+        kernel::serial::puts(initial ? "PASS\n" : "FAIL\n");
+
+        const bool tabOpen = initial && c126Key(9u) && c126HasLabel(">[ Open ]");
+        const bool tabSave = tabOpen && c126Key(9u) && c126HasLabel(">[ Save ]");
+        const bool tabSaveAs = tabSave && c126Key(9u) && c126HasLabel(">[ Save As ]");
+        const bool tabShow = tabSaveAs && c126Key(9u) && c126HasLabel(">[x] Show path");
+        const bool tabFull = tabShow && c126Key(9u) && c126HasLabel(">(o) Full path");
+        const bool tabFile = tabFull && c126Key(9u) && c126HasLabel(">( ) File name");
+        const bool tabDocument = tabFile && c126Key(9u) && c126HasFocusedDocument();
+        const bool reverseFile = tabDocument && c126ShiftKey(9u) &&
+            c126HasLabel(">( ) File name");
+        const bool reverseFull = reverseFile && c126ShiftKey(9u) &&
+            c126HasLabel(">(o) Full path");
+        kernel::serial::puts("[C126-FOCUS-ORDER] forward=Open->Save->SaveAs->ShowPath->FullPath->FileName->Document reverse=Document<-FileName<-FullPath group-box=absent result=");
+        kernel::serial::puts((tabDocument && reverseFile && reverseFull) ? "PASS\n" : "FAIL\n");
+
+        const bool focused = reverseFull && c126FocusDocument();
+        const bool hidden = focused && c126Key(0x500u) &&
+            !c126HasFrameAt(12, 264, 456, 90) &&
+            c126HasRadioAt(20, 278, "(o) Full path") &&
+            c126HasFocusedDocument();
+        const bool shown = hidden && c126Key(0x501u) &&
+            c126HasFrameAt(12, 264, 456, 90) && c126HasFocusedDocument();
+        kernel::serial::puts("[C126-VISIBILITY] hidden=no-structure radios=independent shown=restored focus=document result=");
+        kernel::serial::puts((hidden && shown) ? "PASS\n" : "FAIL\n");
+
+        const bool moved = shown && c126Key(0x504u) &&
+            c126HasFrameAt(40, 264, 456, 90) &&
+            c126HasRadioAt(48, 278, "Full path") &&
+            c126HasRadioAt(188, 278, "File name");
+        const bool movedSelection = moved && c126ClickAt(252, 292) &&
+            c126HasLabel("Path: NOTES.TXT");
+        const bool restored = movedSelection && c126Key(0x505u) &&
+            c126HasFrameAt(12, 264, 456, 90) &&
+            c126HasRadioAt(160, 278, "File name");
+        kernel::serial::puts("[C126-MOVE] relative=applied radios=repositioned selection=independent result=");
+        kernel::serial::puts((moved && movedSelection && restored) ? "PASS\n" : "FAIL\n");
+
+        const bool grown = restored && c126Key(0x502u) &&
+            c126HasFrameAt(12, 264, 480, 108) &&
+            c126HasLabel("Path Display");
+        const bool shrunk = grown && c126Key(0x503u) &&
+            c126HasFrameAt(12, 264, 320, 72) &&
+            !c126HasBorderAt(12, 354) &&
+            c126HasRadioAt(160, 278, "File name");
+        const bool resized = shrunk && c126Key(0x505u) &&
+            c126HasFrameAt(12, 264, 456, 90);
+        kernel::serial::puts("[C126-RESIZE] grow=480x108 shrink=320x72 stale-border=none caption=recomputed result=");
+        kernel::serial::puts((grown && shrunk && resized) ? "PASS\n" : "FAIL\n");
+
+        const bool fileName = resized && c126ClickAt(220, 292) &&
+            c126HasLabel("Path: NOTES.TXT");
+        const bool fullPath = fileName && c126ClickAt(84, 292) &&
+            c126HasLabel("Path: /system/apps/NOTES.TXT");
+        const bool pathHidden = fullPath && c126ClickAt(350, 234) &&
+            !c126HasLabel("Path: /system/apps/NOTES.TXT") &&
+            c126HasFrameAt(12, 264, 456, 90);
+        const bool pathShown = pathHidden && c126ClickAt(350, 234) &&
+            c126HasLabel("Path: /system/apps/NOTES.TXT");
+        kernel::serial::puts("[C124-REGRESSION] radio=exclusive path=full show-path=independent result=");
+        kernel::serial::puts((fileName && fullPath && pathHidden && pathShown) ? "PASS\n" : "FAIL\n");
+
+        const bool editFocus = pathShown && c126FocusDocument();
+        const bool edited = editFocus && c126Char('A') &&
+            c126HasLabel("[########------------------------] 26%");
+        const bool shifted = edited && c126ShiftKey(0x103u) &&
+            c126Char('Z') && c126HasLabel("[########------------------------] 26%");
+        kernel::serial::puts("[C125-REGRESSION] progress=independent shift-routing=preserved shift-right=PASS result=");
+        kernel::serial::puts((edited && shifted) ? "PASS\n" : "FAIL\n");
+
+        const bool openPicker = shifted && c126ClickAt(65, 234) &&
+            c126HasLabel("> 01-ALPHA.TXT");
+        const bool modalPassive = openPicker && c126Char(' ') &&
+            c126HasLabel("> 01-ALPHA.TXT");
+        const bool selectSecond = modalPassive && c126ClickAt(24, 113) &&
+            c126HasLabel("> 02-POINT.TXT");
+        const bool openedSecond = selectSecond && c126Key(10u) &&
+            c126HasLabel("Path: /system/apps/02-POINT.TXT") &&
+            c126HasLabel("[##------------------------------] 8%");
+        const bool saveAsPicker = openedSecond && c126ClickAt(270, 234) &&
+            c126HasLabel("Filename: [ THIRD.TXT|");
+        const bool pickerTraverse = saveAsPicker && c126Key(9u) &&
+            c126ShiftKey(9u) && c126HasLabel("Filename: [ THIRD.TXT|");
+        const bool savedAs = pickerTraverse && c126Key(10u) &&
+            c126HasLabel("Path: /system/apps/THIRD.TXT") &&
+            c126HasFrameAt(12, 264, 456, 90);
+        kernel::serial::puts("[C126-MODAL] picker=isolated focus-restored=SaveAs group-box=passive result=");
+        kernel::serial::puts((openPicker && modalPassive && openedSecond && savedAs) ? "PASS\n" : "FAIL\n");
+
+        bool toDocument = savedAs;
+        for (uint32_t index = 0u; toDocument && index < 4u; ++index) {
+            toDocument = c126Key(9u);
+        }
+        const bool capacity = toDocument && c126HasFocusedDocument() &&
+            c126Key(0x402u) && c126HasLabel("[################################] 100%");
+        const bool overflow = capacity && c126Char('!') &&
+            c126HasLabel("[################################] 100%") &&
+            c126HasFrameAt(12, 264, 456, 90);
+        kernel::serial::puts("[C125-REGRESSION] capacity=256 overflow=rejected progress=100 group-box=unchanged result=");
+        kernel::serial::puts((capacity && overflow) ? "PASS\n" : "FAIL\n");
+
+        const bool saved = overflow && c126ClickAt(165, 234) &&
+            c126HasLabel("[################################] 100%");
+        const bool reopened = saved && c126ClickNativeButton("Reload") &&
+            c126HasLabel("Status: Reloaded from VFS") &&
+            c126HasLabel("[################################] 100%") &&
+            c126HasFrameAt(12, 264, 456, 90);
+        kernel::serial::puts("[C116-C125-REGRESSION] notes=save-reopen progress=preserved modal=restored lifecycle=resident result=");
+        kernel::serial::puts((saved && reopened) ? "PASS\n" : "FAIL\n");
+
+        const bool outcome = c126CatalogValid && focusedTests && workspace && notesLaunch &&
+            initial && tabDocument && reverseFile && reverseFull && focused && hidden &&
+            shown && moved && movedSelection && restored && grown && shrunk && resized &&
+            fileName && fullPath && pathHidden && pathShown && edited && shifted &&
+            openedSecond && savedAs && capacity && overflow && saved && reopened;
+        kernel::serial::puts("[C126-MIXED] sequence=GroupBox,Notes,focus,visibility,move,resize,radio,progress,modal,regression,result=");
+        kernel::serial::puts(outcome ? "PASS\n" : "FAIL\n");
+        kernel::serial::puts("[C126-RESULT] outcome=");
+        kernel::serial::puts(outcome ? "PASS" : "FAIL");
+        kernel::serial::puts(" group-box=bounded,captioned,structural,non-focusable,no-child-ownership lifecycle=resident\n");
+        }
+        };
+        runC126ManagedGroupBoxProof();
 #endif
 
 #if defined(GXOS_NATIVEAOT_C116_MANAGED_TEXT_INPUT) && \
