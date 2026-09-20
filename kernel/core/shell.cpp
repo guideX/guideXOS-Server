@@ -2743,7 +2743,7 @@ static void cmd_nicinfo_tx_reset()
     output_string("\n");
 }
 
-static bool nicinfo_tx_ring_present(const nic::TxRegisterSnapshot& snapshot)
+static bool nicinfo_tx_ring_present(const nic::I219ResetSnapshot& snapshot)
 {
     return snapshot.tdbal != 0u || snapshot.tdbah != 0u ||
            snapshot.tdlen != 0u || snapshot.tdh != 0u || snapshot.tdt != 0u;
@@ -2773,10 +2773,7 @@ static void cmd_nicinfo_tx_reset_brief()
     output_string("\nflush-required=");
     output_string(nic::i219_flush_desc_required(before.cfgE4) ? "yes" : "no");
     output_string("\ntx-ring-present=");
-    output_string(dev && nicinfo_tx_ring_present(
-        dev->tx.finalRegisters.valid ? dev->tx.finalRegisters
-                                     : dev->tx.initialRegisters)
-                      ? "yes" : "no");
+    output_string(nicinfo_tx_ring_present(before) ? "yes" : "no");
     output_string("\nrx-ring-present=");
     output_string(nicinfo_rx_ring_present(before) ? "yes" : "no");
     output_string("\nring-owner=");
