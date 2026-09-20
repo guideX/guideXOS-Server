@@ -36,6 +36,9 @@ public sealed class GuideXosCheckBox
     private bool _checked;
     private bool _enabled = true;
     private bool _isFocused;
+    private bool _visible = true;
+    private bool _panelVisible = true;
+    private GuideXosPanel _panelOwner;
     private uint _rejectedInputCount;
 
     public GuideXosCheckBox(
@@ -75,6 +78,9 @@ public sealed class GuideXosCheckBox
     public bool Checked => _checked;
     public bool Enabled => _enabled;
     public bool IsFocused => _isFocused;
+    public bool Visible => _visible;
+    public bool EffectiveVisible => _visible && _panelVisible;
+    public GuideXosPanel ParentPanel => _panelOwner;
     public uint RejectedInputCount => _rejectedInputCount;
 
     public bool SetLabel(string label)
@@ -95,6 +101,21 @@ public sealed class GuideXosCheckBox
 
     public bool TrySetBounds(int x, int y, int width, int height)
     {
+        if (_panelOwner != null)
+        {
+            ++_rejectedInputCount;
+            return false;
+        }
+        return TrySetBoundsCore(x, y, width, height);
+    }
+
+    internal bool TrySetPanelBounds(int x, int y, int width, int height)
+    {
+        return TrySetBoundsCore(x, y, width, height);
+    }
+
+    private bool TrySetBoundsCore(int x, int y, int width, int height)
+    {
         if (x < 0 || y < 0 ||
             width < MinimumSupportedWidth || width > MaximumSupportedWidth ||
             height < MinimumSupportedHeight || height > MaximumSupportedHeight ||
@@ -110,6 +131,12 @@ public sealed class GuideXosCheckBox
         _width = width;
         _height = height;
         return true;
+    }
+
+    public void SetVisible(bool visible)
+    {
+        _visible = visible;
+        if (!visible) _isFocused = false;
     }
 
     public void SetChecked(bool isChecked)
@@ -133,7 +160,7 @@ public sealed class GuideXosCheckBox
 
     public void Focus()
     {
-        if (_enabled) _isFocused = true;
+        if (_enabled && EffectiveVisible) _isFocused = true;
     }
 
     public void Blur()
@@ -146,11 +173,14 @@ public sealed class GuideXosCheckBox
     {
         _enabled = true;
         _isFocused = false;
+        _visible = true;
+        if (_panelOwner == null) _panelVisible = true;
         _rejectedInputCount = 0u;
     }
 
     public GuideXosCheckBoxResult HandlePointerDown(int x, int y)
     {
+        if (!EffectiveVisible) return GuideXosCheckBoxResult.Ignored;
         if (x < _x || y < _y ||
             x >= _x + _width || y >= _y + _height)
         {
@@ -165,6 +195,7 @@ public sealed class GuideXosCheckBox
 
     public GuideXosCheckBoxResult HandleKey(GuideXosTextInputKey key)
     {
+        if (!EffectiveVisible) return GuideXosCheckBoxResult.Ignored;
         if (!_enabled) return GuideXosCheckBoxResult.Disabled;
         if (!_isFocused) return GuideXosCheckBoxResult.Ignored;
         // Space is committed only by KeyChar, matching GuideXosButton's
@@ -174,6 +205,7 @@ public sealed class GuideXosCheckBox
 
     public GuideXosCheckBoxResult HandleCharacter(char character)
     {
+        if (!EffectiveVisible) return GuideXosCheckBoxResult.Ignored;
         if (!_enabled) return GuideXosCheckBoxResult.Disabled;
         if (!_isFocused) return GuideXosCheckBoxResult.Ignored;
         if (character != ' ') return GuideXosCheckBoxResult.Ignored;
@@ -184,6 +216,7 @@ public sealed class GuideXosCheckBox
     public GuideXosResult Render(GuideXosSurface surface)
     {
         if (surface == null) return GuideXosResult.InvalidArgument;
+        if (!EffectiveVisible) return GuideXosResult.Success;
 
         Span<byte> line = stackalloc byte[64];
         line.Clear();
@@ -219,6 +252,28 @@ public sealed class GuideXosCheckBox
             }
         }
         return surface.TrySetText(_x, _y, line[..position]);
+    }
+
+    internal bool TryAttachToPanel(GuideXosPanel panel)
+    {
+        if (panel == null || _panelOwner != null) return false;
+        _panelOwner = panel;
+        _panelVisible = panel.Visible;
+        if (!_panelVisible) _isFocused = false;
+        return true;
+    }
+
+    internal void SetPanelVisible(bool visible)
+    {
+        _panelVisible = visible;
+        if (!visible) _isFocused = false;
+    }
+
+    internal void DetachFromPanel()
+    {
+        _panelOwner = null;
+        _panelVisible = true;
+        _isFocused = false;
     }
 
     private bool IsValidLabel(string label)

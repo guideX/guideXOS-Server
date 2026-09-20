@@ -21,6 +21,8 @@ public sealed class GuideXosSeparator
     private int _y;
     private int _width;
     private bool _visible = true;
+    private bool _panelVisible = true;
+    private GuideXosPanel _panelOwner;
     private uint _rejectedInputCount;
 
     public GuideXosSeparator(int x, int y, int width)
@@ -37,6 +39,8 @@ public sealed class GuideXosSeparator
     public int Height => TextRowHeight;
     public int RenderWidth => _width / CharacterWidth;
     public bool Visible => _visible;
+    public bool EffectiveVisible => _visible && _panelVisible;
+    public GuideXosPanel ParentPanel => _panelOwner;
     public uint RejectedInputCount => _rejectedInputCount;
 
     public void SetVisible(bool visible)
@@ -50,6 +54,21 @@ public sealed class GuideXosSeparator
     }
 
     public bool TrySetBounds(int x, int y, int width)
+    {
+        if (_panelOwner != null)
+        {
+            ++_rejectedInputCount;
+            return false;
+        }
+        return TrySetBoundsCore(x, y, width);
+    }
+
+    internal bool TrySetPanelBounds(int x, int y, int width)
+    {
+        return TrySetBoundsCore(x, y, width);
+    }
+
+    private bool TrySetBoundsCore(int x, int y, int width)
     {
         if (x < MinimumSupportedCoordinate ||
             y < MinimumSupportedCoordinate ||
@@ -73,6 +92,7 @@ public sealed class GuideXosSeparator
     public void Reset()
     {
         _visible = true;
+        if (_panelOwner == null) _panelVisible = true;
         _rejectedInputCount = 0u;
     }
 
@@ -85,7 +105,7 @@ public sealed class GuideXosSeparator
     public GuideXosResult Render(GuideXosSurface surface)
     {
         if (surface == null) return GuideXosResult.InvalidArgument;
-        if (!_visible) return GuideXosResult.Success;
+        if (!EffectiveVisible) return GuideXosResult.Success;
 
         Span<byte> line = stackalloc byte[MaximumRenderWidth + 1];
         for (int index = 0; index < RenderWidth; index++)
@@ -93,5 +113,24 @@ public sealed class GuideXosSeparator
             line[index] = SeparatorGlyph;
         }
         return surface.TrySetText(_x, _y, line[..RenderWidth]);
+    }
+
+    internal bool TryAttachToPanel(GuideXosPanel panel)
+    {
+        if (panel == null || _panelOwner != null) return false;
+        _panelOwner = panel;
+        _panelVisible = panel.Visible;
+        return true;
+    }
+
+    internal void SetPanelVisible(bool visible)
+    {
+        _panelVisible = visible;
+    }
+
+    internal void DetachFromPanel()
+    {
+        _panelOwner = null;
+        _panelVisible = true;
     }
 }

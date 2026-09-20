@@ -25,6 +25,8 @@ public sealed class GuideXosLabel
     private int _y;
     private int _width;
     private bool _visible = true;
+    private bool _panelVisible = true;
+    private GuideXosPanel _panelOwner;
     private uint _rejectedInputCount;
 
     public GuideXosLabel(
@@ -58,6 +60,8 @@ public sealed class GuideXosLabel
     public int Length => _textLength;
     public string Text => new string(_textStorage, 0, _textLength);
     public bool Visible => _visible;
+    public bool EffectiveVisible => _visible && _panelVisible;
+    public GuideXosPanel ParentPanel => _panelOwner;
     public uint RejectedInputCount => _rejectedInputCount;
 
     /// <summary>
@@ -98,6 +102,21 @@ public sealed class GuideXosLabel
 
     public bool TrySetBounds(int x, int y, int width)
     {
+        if (_panelOwner != null)
+        {
+            ++_rejectedInputCount;
+            return false;
+        }
+        return TrySetBoundsCore(x, y, width);
+    }
+
+    internal bool TrySetPanelBounds(int x, int y, int width)
+    {
+        return TrySetBoundsCore(x, y, width);
+    }
+
+    private bool TrySetBoundsCore(int x, int y, int width)
+    {
         if (x < MinimumSupportedCoordinate ||
             y < MinimumSupportedCoordinate ||
             width < CharacterWidth ||
@@ -120,6 +139,7 @@ public sealed class GuideXosLabel
     public void Reset()
     {
         _visible = true;
+        if (_panelOwner == null) _panelVisible = true;
         _rejectedInputCount = 0u;
     }
 
@@ -130,7 +150,7 @@ public sealed class GuideXosLabel
     public GuideXosResult Render(GuideXosSurface surface)
     {
         if (surface == null) return GuideXosResult.InvalidArgument;
-        if (!_visible || _textLength == 0) return GuideXosResult.Success;
+        if (!EffectiveVisible || _textLength == 0) return GuideXosResult.Success;
 
         Span<byte> line = stackalloc byte[MaximumRenderWidth + 1];
         int renderLength = Math.Min(_textLength, RenderWidth);
@@ -139,6 +159,25 @@ public sealed class GuideXosLabel
             line[index] = (byte)_textStorage[index];
         }
         return surface.TrySetText(_x, _y, line[..renderLength]);
+    }
+
+    internal bool TryAttachToPanel(GuideXosPanel panel)
+    {
+        if (panel == null || _panelOwner != null) return false;
+        _panelOwner = panel;
+        _panelVisible = panel.Visible;
+        return true;
+    }
+
+    internal void SetPanelVisible(bool visible)
+    {
+        _panelVisible = visible;
+    }
+
+    internal void DetachFromPanel()
+    {
+        _panelOwner = null;
+        _panelVisible = true;
     }
 
     private bool IsValidText(ReadOnlySpan<char> text)

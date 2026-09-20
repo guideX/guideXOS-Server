@@ -218,6 +218,25 @@ public sealed class GuideXosControlHost
         return RouteCharacter(_activeIndex, character);
     }
 
+    /// <summary>
+    /// Reconciles focus after an application-owned visibility or membership
+    /// change. The host remains the only focus authority; showing a control
+    /// never selects it automatically.
+    /// </summary>
+    public GuideXosControlHostResult RefreshVisibility()
+    {
+        if (_modalHost != null)
+        {
+            _modalHost.RefreshVisibility();
+            return GuideXosControlHostResult.Ignored;
+        }
+        int priorIndex = _activeIndex;
+        NormalizeActiveFocus();
+        return priorIndex != _activeIndex && _activeIndex >= 0
+            ? GuideXosControlHostResult.Focused
+            : GuideXosControlHostResult.Ignored;
+    }
+
     public bool EnterModal(GuideXosControlHost modalHost)
     {
         if (modalHost == null || modalHost == this || _modalHost != null)
@@ -329,7 +348,8 @@ public sealed class GuideXosControlHost
 
     private void NormalizeActiveFocus()
     {
-        if (_activeIndex < 0 || IsEligible(_activeIndex)) return;
+        if (_activeIndex < 0) return;
+        if (IsEligible(_activeIndex) && IsControlFocused(_activeIndex)) return;
         int next = FindEligibleFrom(_activeIndex + 1, false);
         if (next >= 0) FocusIndex(next);
         else
@@ -460,7 +480,22 @@ public sealed class GuideXosControlHost
     private bool IsEligible(int index)
     {
         return index >= 0 && index < _registrationCount &&
-            _entries[index].Focusable && !IsControlDisabled(index);
+            _entries[index].Focusable && IsControlVisible(index) &&
+            !IsControlDisabled(index);
+    }
+
+    private bool IsControlVisible(int index)
+    {
+        return _entries[index].Kind switch
+        {
+            GuideXosManagedControlKind.Button =>
+                ((GuideXosButton)_entries[index].Control).EffectiveVisible,
+            GuideXosManagedControlKind.CheckBox =>
+                ((GuideXosCheckBox)_entries[index].Control).EffectiveVisible,
+            GuideXosManagedControlKind.RadioButton =>
+                ((GuideXosRadioButton)_entries[index].Control).EffectiveVisible,
+            _ => true,
+        };
     }
 
     private bool IsControlDisabled(int index)

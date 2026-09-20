@@ -37,6 +37,9 @@ public sealed class GuideXosRadioButton
     private bool _selected;
     private bool _enabled = true;
     private bool _isFocused;
+    private bool _visible = true;
+    private bool _panelVisible = true;
+    private GuideXosPanel _panelOwner;
     private uint _rejectedInputCount;
     private GuideXosRadioGroup _group;
     private int _groupIndex = -1;
@@ -75,6 +78,9 @@ public sealed class GuideXosRadioButton
     public bool Selected => _selected;
     public bool Enabled => _enabled;
     public bool IsFocused => _isFocused;
+    public bool Visible => _visible;
+    public bool EffectiveVisible => _visible && _panelVisible;
+    public GuideXosPanel ParentPanel => _panelOwner;
     public uint RejectedInputCount => _rejectedInputCount;
     public GuideXosRadioGroup Group => _group;
     public int GroupIndex => _groupIndex;
@@ -98,6 +104,21 @@ public sealed class GuideXosRadioButton
 
     public bool TrySetBounds(int x, int y, int width, int height)
     {
+        if (_panelOwner != null)
+        {
+            ++_rejectedInputCount;
+            return false;
+        }
+        return TrySetBoundsCore(x, y, width, height);
+    }
+
+    internal bool TrySetPanelBounds(int x, int y, int width, int height)
+    {
+        return TrySetBoundsCore(x, y, width, height);
+    }
+
+    private bool TrySetBoundsCore(int x, int y, int width, int height)
+    {
         if (x < 0 || y < 0 ||
             width < MinimumSupportedWidth || width > MaximumSupportedWidth ||
             height < MinimumSupportedHeight || height > MaximumSupportedHeight ||
@@ -115,10 +136,16 @@ public sealed class GuideXosRadioButton
         return true;
     }
 
+    public void SetVisible(bool visible)
+    {
+        _visible = visible;
+        if (!visible) _isFocused = false;
+    }
+
     /// <summary>Requests selection through the group, or selects an ungrouped instance.</summary>
     public bool TrySelect()
     {
-        if (!_enabled) return false;
+        if (!_enabled || !EffectiveVisible) return false;
         return _group == null ? SelectInternal() : _group.TrySelect(this);
     }
 
@@ -134,7 +161,7 @@ public sealed class GuideXosRadioButton
 
     public void Focus()
     {
-        if (_enabled) _isFocused = true;
+        if (_enabled && EffectiveVisible) _isFocused = true;
     }
 
     public void Blur()
@@ -149,13 +176,16 @@ public sealed class GuideXosRadioButton
         _selected = false;
         _enabled = true;
         _isFocused = false;
+        _visible = true;
+        if (_panelOwner == null) _panelVisible = true;
         _rejectedInputCount = 0u;
         _requestedGroupIndex = -1;
     }
 
     public bool ContainsPoint(int x, int y)
     {
-        return x >= _x && y >= _y && x < _x + _width && y < _y + _height;
+        return EffectiveVisible && x >= _x && y >= _y &&
+            x < _x + _width && y < _y + _height;
     }
 
     public GuideXosRadioButtonResult HandlePointerDown(int x, int y)
@@ -172,6 +202,7 @@ public sealed class GuideXosRadioButton
     public GuideXosRadioButtonResult HandleKey(GuideXosTextInputKey key)
     {
         _requestedGroupIndex = -1;
+        if (!EffectiveVisible) return GuideXosRadioButtonResult.Ignored;
         if (!_enabled) return GuideXosRadioButtonResult.Disabled;
         if (!_isFocused) return GuideXosRadioButtonResult.Ignored;
 
@@ -198,6 +229,7 @@ public sealed class GuideXosRadioButton
 
     public GuideXosRadioButtonResult HandleCharacter(char character)
     {
+        if (!EffectiveVisible) return GuideXosRadioButtonResult.Ignored;
         if (!_enabled) return GuideXosRadioButtonResult.Disabled;
         if (!_isFocused || character != ' ')
         {
@@ -211,6 +243,7 @@ public sealed class GuideXosRadioButton
     public GuideXosResult Render(GuideXosSurface surface)
     {
         if (surface == null) return GuideXosResult.InvalidArgument;
+        if (!EffectiveVisible) return GuideXosResult.Success;
 
         Span<byte> line = stackalloc byte[64];
         int position = 0;
@@ -228,6 +261,28 @@ public sealed class GuideXosRadioButton
             line[position++] = (byte)_labelStorage[index];
         }
         return surface.TrySetText(_x, _y, line[..position]);
+    }
+
+    internal bool TryAttachToPanel(GuideXosPanel panel)
+    {
+        if (panel == null || _panelOwner != null) return false;
+        _panelOwner = panel;
+        _panelVisible = panel.Visible;
+        if (!_panelVisible) _isFocused = false;
+        return true;
+    }
+
+    internal void SetPanelVisible(bool visible)
+    {
+        _panelVisible = visible;
+        if (!visible) _isFocused = false;
+    }
+
+    internal void DetachFromPanel()
+    {
+        _panelOwner = null;
+        _panelVisible = true;
+        _isFocused = false;
     }
 
     internal void AttachGroup(GuideXosRadioGroup group, int index)

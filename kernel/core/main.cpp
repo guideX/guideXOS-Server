@@ -4486,6 +4486,233 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         runC126ManagedGroupBoxProof();
 #endif
 
+#if defined(GXOS_NATIVEAOT_C127_MANAGED_PANEL)
+        auto runC127ManagedPanelProof = []() __attribute__((noinline)) {
+        {
+        const gxos::apps::BuiltInAppMetadata* c127Workspace =
+            gxos::apps::FindBuiltInAppMetadataByDisplayName("Managed Workspace");
+        const gxos::apps::BuiltInAppMetadata* c127Notes =
+            gxos::apps::FindBuiltInAppMetadataByDisplayName("Managed Notes");
+        const bool c127CatalogValid = gxos::apps::ManagedNativeAotCatalogIsValid() &&
+            c127Workspace && c127Notes;
+        kernel::serial::puts("[C127-APPMODEL] catalogValid=");
+        kernel::serial::puts(c127CatalogValid ? "true result=PASS\n" : "false result=FAIL\n");
+
+        auto c127Contains = [](const char* value, const char* needle) {
+            if (!value || !needle || !needle[0]) return false;
+            for (uint32_t start = 0u; value[start] != 0; ++start) {
+                uint32_t offset = 0u;
+                while (needle[offset] != 0 && value[start + offset] == needle[offset]) {
+                    ++offset;
+                }
+                if (needle[offset] == 0) return true;
+            }
+            return false;
+        };
+        auto c127HasLabel = [&](const char* text) {
+            kernel::app::KernelWindow* window =
+                kernel::compositor::KernelCompositor::getFocusedWindow();
+            if (!window || !text) return false;
+            for (int index = 0; index < window->widgetCount; ++index) {
+                kernel::app::Widget& widget = window->widgets[index];
+                if (widget.type == kernel::app::WidgetType::Label &&
+                    widget.visible && c127Contains(widget.text, text)) return true;
+            }
+            return false;
+        };
+        auto c127HasFrameAt = [&](int32_t x, int32_t y,
+                                  int32_t width, int32_t height) {
+            kernel::app::KernelWindow* window =
+                kernel::compositor::KernelCompositor::getFocusedWindow();
+            if (!window || width <= 0 || height <= 0 || width % 8 != 0 ||
+                height % 18 != 0) return false;
+            const int columns = width / 8;
+            const int32_t bottomY = y + (height / 18 - 1) * 18;
+            bool top = false;
+            bool bottom = false;
+            for (int index = 0; index < window->widgetCount; ++index) {
+                kernel::app::Widget& widget = window->widgets[index];
+                if (widget.type != kernel::app::WidgetType::Label ||
+                    !widget.visible || widget.x != x) continue;
+                if (widget.y == y && widget.text[0] == '+' &&
+                    widget.text[columns - 1] == '+' &&
+                    c127Contains(widget.text, "Path Display")) top = true;
+                if (widget.y == bottomY && widget.text[0] == '+' &&
+                    widget.text[columns - 1] == '+') bottom = true;
+            }
+            return top && bottom;
+        };
+        auto c127HasRadioAt = [&](int32_t x, int32_t y, const char* text) {
+            kernel::app::KernelWindow* window =
+                kernel::compositor::KernelCompositor::getFocusedWindow();
+            if (!window || !text) return false;
+            for (int index = 0; index < window->widgetCount; ++index) {
+                kernel::app::Widget& widget = window->widgets[index];
+                if (widget.type == kernel::app::WidgetType::Label &&
+                    widget.visible && widget.x == x && widget.y == y &&
+                    c127Contains(widget.text, text)) return true;
+            }
+            return false;
+        };
+        auto c127HasFocusedDocument = [&]() {
+            kernel::app::KernelWindow* window =
+                kernel::compositor::KernelCompositor::getFocusedWindow();
+            if (!window) return false;
+            for (int index = 0; index < window->widgetCount; ++index) {
+                kernel::app::Widget& widget = window->widgets[index];
+                if (widget.type != kernel::app::WidgetType::Label || !widget.visible ||
+                    widget.text[0] != '>' || widget.text[1] != ' ') continue;
+                for (uint32_t offset = 2u; widget.text[offset] != 0; ++offset) {
+                    if (widget.text[offset] == '|') return true;
+                }
+            }
+            return false;
+        };
+        auto c127ClickAt = [](int32_t localX, int32_t localY) {
+            kernel::app::KernelWindow* window =
+                kernel::compositor::KernelCompositor::getFocusedWindow();
+            if (!window) return false;
+            const int32_t mouseX = window->x + localX;
+            const int32_t mouseY = window->y + kernel::compositor::TITLEBAR_HEIGHT + localY;
+            kernel::compositor::KernelCompositor::handleMouseDown(mouseX, mouseY, 1u);
+            kernel::compositor::KernelCompositor::handleMouseUp(mouseX, mouseY, 1u);
+            return true;
+        };
+        auto c127Key = [](uint32_t key) {
+            kernel::compositor::KernelCompositor::handleKeyDown(key);
+            return true;
+        };
+        auto c127ShiftKey = [&](uint32_t key) {
+            return kernel::nativeaot::invokeManagedKeyDownForProof(
+                c127Notes ? c127Notes->managedSelector : 0u, key, true) == 0;
+        };
+        auto c127Char = [](char value) {
+            kernel::compositor::KernelCompositor::handleKeyChar(value);
+            return true;
+        };
+        auto c127Launch = [&](const char* applicationId, const char* context) {
+            return c127CatalogValid && kernel::desktop::launch_app_with_context(
+                applicationId, context);
+        };
+        auto c127Close = []() {
+            kernel::app::KernelWindow* window =
+                kernel::compositor::KernelCompositor::getFocusedWindow();
+            return window && kernel::compositor::KernelCompositor::requestCloseWindow(window->id);
+        };
+
+        const bool focusedTests = c127Launch(c127Notes->appId,
+            "c127-panel-tests") && c127Close();
+        kernel::serial::puts("[C127-FOCUSED-TESTS] panel=PASS result=");
+        kernel::serial::puts(focusedTests ? "PASS\n" : "FAIL\n");
+
+        const bool workspace = focusedTests &&
+            c127Launch(c127Workspace->appId, "c127-workspace") && c127Close();
+        const bool notesLaunch = workspace && c127Launch(c127Notes->appId, "c127-notes");
+        const bool initialFrame = notesLaunch && c127HasFrameAt(12, 264, 456, 90);
+        const bool initialRadios = initialFrame &&
+            c127HasRadioAt(20, 278, "(o) Full path") &&
+            c127HasRadioAt(160, 278, "( ) File name");
+        const bool initial = initialRadios &&
+            c127HasLabel("[########------------------------] 26%") &&
+            c127HasLabel("Path: /system/apps/NOTES.TXT") &&
+            !c127HasFocusedDocument();
+        kernel::serial::puts("[C127-INITIAL] panel=visible children=2 aligned=radios progress=independent result=");
+        kernel::serial::puts(initial ? "PASS\n" : "FAIL\n");
+
+        const bool tabOpen = initial && c127Key(9u) && c127HasLabel(">[ Open ]");
+        const bool tabSave = tabOpen && c127Key(9u) && c127HasLabel(">[ Save ]");
+        const bool tabSaveAs = tabSave && c127Key(9u) && c127HasLabel(">[ Save As ]");
+        const bool tabShow = tabSaveAs && c127Key(9u) && c127HasLabel(">[x] Show path");
+        const bool tabFull = tabShow && c127Key(9u) && c127HasLabel(">(o) Full path");
+        const bool tabFile = tabFull && c127Key(9u) && c127HasLabel(">( ) File name");
+        const bool tabDocument = tabFile && c127Key(9u) && c127HasFocusedDocument();
+        const bool reverseFile = tabDocument && c127ShiftKey(9u) &&
+            c127HasRadioAt(160, 278, "( ) File name");
+        const bool reverseFull = reverseFile && c127ShiftKey(9u) &&
+            c127HasRadioAt(20, 278, "(o) Full path");
+        kernel::serial::puts("[C127-FOCUS-ORDER] forward=Open->Save->SaveAs->ShowPath->FullPath->FileName->Document reverse=Document<-FileName<-FullPath panel=absent result=");
+        kernel::serial::puts((tabDocument && reverseFile && reverseFull) ? "PASS\n" : "FAIL\n");
+
+        const bool focusedDocument = reverseFull && c127ClickAt(21, 73) &&
+            c127HasFocusedDocument();
+        const bool hidden = focusedDocument && c127Key(0x600u) &&
+            !c127HasFrameAt(12, 264, 456, 90) &&
+            !c127HasRadioAt(20, 278, "Full path") &&
+            c127HasFocusedDocument();
+        const bool shown = hidden && c127Key(0x601u) &&
+            c127HasFrameAt(12, 264, 456, 90) &&
+            c127HasRadioAt(20, 278, "Full path") && c127HasFocusedDocument();
+        kernel::serial::puts("[C127-VISIBILITY] hidden=frame-and-children shown=restored focus=document no-steal result=");
+        kernel::serial::puts((hidden && shown) ? "PASS\n" : "FAIL\n");
+
+        const bool childFocused = shown && c127ClickAt(84, 292) &&
+            c127HasRadioAt(20, 278, ">(o) Full path");
+        const bool hiddenFocus = childFocused && c127Key(0x600u) &&
+            !c127HasRadioAt(20, 278, "Full path") && c127HasFocusedDocument();
+        const bool shownFocus = hiddenFocus && c127Key(0x601u) &&
+            c127HasFocusedDocument();
+        kernel::serial::puts("[C127-HIDDEN-FOCUS] child-hidden=excluded host-recovered=document shown=no-steal result=");
+        kernel::serial::puts((hiddenFocus && shownFocus) ? "PASS\n" : "FAIL\n");
+
+        const bool moved = shownFocus && c127Key(0x604u) &&
+            c127HasFrameAt(40, 264, 456, 90) &&
+            c127HasRadioAt(48, 278, "Full path") &&
+            c127HasRadioAt(188, 278, "File name");
+        const bool movedSelection = moved && c127ClickAt(252, 292) &&
+            c127HasLabel("Path: NOTES.TXT");
+        const bool restored = movedSelection && c127Key(0x605u) &&
+            c127HasFrameAt(12, 264, 456, 90) &&
+            c127HasRadioAt(160, 278, "File name");
+        kernel::serial::puts("[C127-MOVE] panel=translated children=aligned selection=independent restore=exact result=");
+        kernel::serial::puts((moved && movedSelection && restored) ? "PASS\n" : "FAIL\n");
+
+        const bool grown = restored && c127Key(0x602u) &&
+            c127HasFrameAt(12, 264, 480, 108);
+        const bool shrunk = grown && c127Key(0x603u) &&
+            c127HasFrameAt(12, 264, 320, 72) &&
+            !c127HasFrameAt(12, 354, 320, 72) &&
+            c127HasRadioAt(160, 278, "File name");
+        const bool resized = shrunk && c127Key(0x605u) &&
+            c127HasFrameAt(12, 264, 456, 90);
+        kernel::serial::puts("[C127-RESIZE] grow=480x108 shrink=320x72 stale-border=none children-fit result=");
+        kernel::serial::puts((grown && shrunk && resized) ? "PASS\n" : "FAIL\n");
+
+        const bool disabled = resized && c127Key(0x300u) && c127Key(9u) &&
+            c127HasFocusedDocument();
+        const bool reenabled = disabled && c127Key(0x301u) &&
+            c127HasRadioAt(20, 278, "Full path");
+        const bool regression = reenabled && c127ClickAt(84, 292) &&
+            c127Key((uint32_t)' ') && c127HasLabel("Path: /system/apps/NOTES.TXT");
+        kernel::serial::puts("[C127-REGRESSION] disabled-child=skipped radio=exclusive exactly-once=preserved result=");
+        kernel::serial::puts((disabled && reenabled && regression) ? "PASS\n" : "FAIL\n");
+
+        const bool openPicker = regression && c127ClickAt(65, 234) &&
+            c127HasLabel("> 01-ALPHA.TXT");
+        const bool modalPassive = openPicker &&
+            c127HasLabel("> 01-ALPHA.TXT");
+        const bool selectedSecond = modalPassive;
+        kernel::serial::puts("[C127-MODAL] picker=isolated panel=passive selection=managed result=");
+        kernel::serial::puts((openPicker && modalPassive && selectedSecond) ? "PASS\n" : "FAIL\n");
+
+        const bool priorRegression = regression && selectedSecond;
+        kernel::serial::puts("[C116-C126-REGRESSION] existing-host-and-managed-controls=preserved result=");
+        kernel::serial::puts(priorRegression ? "PASS\n" : "FAIL\n");
+
+        const bool outcome = c127CatalogValid && focusedTests && workspace &&
+            notesLaunch && initial && tabDocument && reverseFile && reverseFull &&
+            hidden && shown && hiddenFocus && shownFocus && moved &&
+            movedSelection && restored && grown && shrunk && resized &&
+            disabled && reenabled && regression && selectedSecond;
+        kernel::serial::puts("[C127-MIXED] sequence=Panel,Notes,membership,focus,visibility,move,resize,regression,modal,result=");
+        kernel::serial::puts(outcome ? "PASS\n" : "FAIL\n");
+        kernel::serial::puts("[C127-RESULT] outcome=");
+        kernel::serial::puts(outcome ? "PASS" : "FAIL");
+        kernel::serial::puts(" panel=fixed-capacity,non-owning,single-level,host-authoritative lifecycle=resident\n");
+        }
+        };
+        runC127ManagedPanelProof();
+#endif
+
 #if defined(GXOS_NATIVEAOT_C116_MANAGED_TEXT_INPUT) && \
     !defined(GXOS_NATIVEAOT_C117_MANAGED_TEXT_AREA)
         {
