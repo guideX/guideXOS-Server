@@ -33,6 +33,16 @@ $Samples = @(
         Manifest = 'app.json'
         StagedAppId = 'com.guidexos.resourceviewer'
         Resources = @('resources/about.txt')
+    },
+    [ordered]@{
+        Name = 'MissileCommand'
+        SourceDir = Join-Path $SdkRoot 'samples/missilecommand'
+        Source = 'main.cpp'
+        OutputDir = Join-Path $AppsRoot 'MissileCommand'
+        ElfRelativePath = 'bin/amd64/missilecommand.elf'
+        Manifest = 'app.json'
+        StagedAppId = 'com.guidexos.missilecommand'
+        Resources = @()
     }
 )
 
