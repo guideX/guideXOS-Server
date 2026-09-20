@@ -11,7 +11,7 @@ Status: implementation and host/QEMU evidence complete; AIDA_LPT physical result
 - Upstream: origin/NAVIGATOR_GENERAL_IMPROVEMENTS
 - Ahead/behind at preflight: 0/0
 - Implementation commits: 031ff74b0b78c13ad7142569aef1fb6b8d4184d4,
-  047bf37e9b4b4b2268d27c4f56d0a51e57598d4
+  047bf37efa8951bcb4908fcad787b813645d28d2
 - Build-identity commit: ddf1e1e41edca08a4a2bf454d29b156f93979e52
 - Artifact source commit: ddf1e1e41edca08a4a2bf454d29b156f93979e52
 - Push status: not pushed
