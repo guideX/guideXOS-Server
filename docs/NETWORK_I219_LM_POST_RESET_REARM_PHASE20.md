@@ -10,9 +10,10 @@ Status: implementation and host/QEMU evidence complete; AIDA_LPT physical result
 - Clean start: yes
 - Upstream: origin/NAVIGATOR_GENERAL_IMPROVEMENTS
 - Ahead/behind at preflight: 0/0
-- Implementation commit: 031ff74b0b78c13ad7142569aef1fb6b8d4184d4
-- Build-identity commit: b4d2a83ea9ea08df1e491f3d7be23cece78754e2
-- Artifact source commit: b4d2a83ea9ea08df1e491f3d7be23cece78754e2
+- Implementation commits: 031ff74b0b78c13ad7142569aef1fb6b8d4184d4,
+  047bf37e9b4b4b2268d27c4f56d0a51e57598d4
+- Build-identity commit: ddf1e1e41edca08a4a2bf454d29b156f93979e52
+- Artifact source commit: ddf1e1e41edca08a4a2bf454d29b156f93979e52
 - Push status: not pushed
 - Packaging start: clean
 
@@ -225,7 +226,7 @@ QEMU is regression evidence only; it does not prove Intel I219-LM behavior.
   dist\guideXOS-Server-v0.1.0-phase20-aida-i219-post-reset-rearm-amd64.iso
 - Size: 91,293,696 bytes
 - SHA-256:
-  48553b51bcd170e209e5e49b3eaba774a8d92d88785b67f9895b6c851e1a38cf
+  1db406528cb21421c7f48407cba2acdc33ab8e4014ebd4249ee5099480b5bac6
 - Sidecar:
   dist\guideXOS-Server-v0.1.0-phase20-aida-i219-post-reset-rearm-amd64.iso.sha256
 - Manifest:
