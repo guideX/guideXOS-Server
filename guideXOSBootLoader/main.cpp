@@ -691,6 +691,175 @@ static bool PhysicalRangeValid(uint64_t base, uint64_t size)
     return base != 0u && size != 0u && base <= (~0ULL - (size - 1u));
 }
 
+#pragma pack(push, 1)
+typedef struct {
+    char Signature[4];
+    UINT32 Length;
+    UINT8 Revision;
+    UINT8 Checksum;
+    char OEMID[6];
+    char OEMTableID[8];
+    UINT32 OEMRevision;
+    UINT32 CreatorID;
+    UINT32 CreatorRevision;
+} AcpiSdtHeader;
+#pragma pack(pop)
+
+struct AcpiIdentityMapPlan {
+    UINTN count;
+    EFI_PHYSICAL_ADDRESS bases[80];
+    UINTN sizes[80];
+    UINTN vtdCount;
+    EFI_PHYSICAL_ADDRESS vtdBases[16];
+    bool valid;
+};
+
+static UINT16 AcpiReadLe16(const UINT8* bytes)
+{
+    return (UINT16)bytes[0] | (UINT16)((UINT16)bytes[1] << 8);
+}
+
+static UINT32 AcpiReadLe32(const UINT8* bytes)
+{
+    return (UINT32)bytes[0] |
+           ((UINT32)bytes[1] << 8) |
+           ((UINT32)bytes[2] << 16) |
+           ((UINT32)bytes[3] << 24);
+}
+
+static UINT64 AcpiReadLe64(const UINT8* bytes)
+{
+    return (UINT64)AcpiReadLe32(bytes) |
+           ((UINT64)AcpiReadLe32(bytes + 4) << 32);
+}
+
+static bool AcpiSignatureEquals(const UINT8* bytes, const char* signature)
+{
+    if (!bytes || !signature) return false;
+    for (UINTN i = 0; i < 4; ++i) {
+        if (bytes[i] != (UINT8)signature[i]) return false;
+    }
+    return true;
+}
+
+static bool AcpiChecksumValid(const UINT8* bytes, UINT32 length)
+{
+    if (!bytes || length == 0u) return false;
+    UINT8 sum = 0u;
+    for (UINT32 i = 0; i < length; ++i) sum = (UINT8)(sum + bytes[i]);
+    return sum == 0u;
+}
+
+static bool AcpiAddIdentityRange(AcpiIdentityMapPlan* plan,
+                                 EFI_PHYSICAL_ADDRESS base, UINTN size)
+{
+    if (!plan || !PhysicalRangeValid(base, size) || plan->count >= 80u) {
+        return false;
+    }
+    const EFI_PHYSICAL_ADDRESS alignedBase = base & ~0xFFFull;
+    const UINTN alignedSize = (UINTN)((base - alignedBase + size + 0xFFFu) &
+                                      ~0xFFFu);
+    for (UINTN i = 0; i < plan->count; ++i) {
+        if (plan->bases[i] == alignedBase && plan->sizes[i] == alignedSize) {
+            return true;
+        }
+    }
+    plan->bases[plan->count] = alignedBase;
+    plan->sizes[plan->count] = alignedSize;
+    ++plan->count;
+    return true;
+}
+
+static bool AcpiAddVtdRange(AcpiIdentityMapPlan* plan,
+                            EFI_PHYSICAL_ADDRESS registerBase)
+{
+    if (!plan || registerBase == 0u || (registerBase & 0xFFFu) != 0u) {
+        return false;
+    }
+    for (UINTN i = 0; i < plan->vtdCount; ++i) {
+        if (plan->vtdBases[i] == registerBase) return true;
+    }
+    if (plan->vtdCount >= 16u ||
+        !AcpiAddIdentityRange(plan, registerBase, 0x10000u)) {
+        return false;
+    }
+    plan->vtdBases[plan->vtdCount++] = registerBase;
+    return true;
+}
+
+// Retain the complete bounded ACPI root/DMAR mapping plan needed after
+// ExitBootServices. This is a read-only audit plan: it does not touch VT-d
+// GCMD, RTADDR, fault status, or any DMA context memory.
+static bool CollectAcpiIdentityMapPlan(const RSDPDescriptor20* rsdp,
+                                       AcpiIdentityMapPlan* plan)
+{
+    if (!rsdp || !plan) return false;
+    *plan = {};
+
+    const bool useXsdt = rsdp->Revision >= 2u && rsdp->XsdtAddress != 0u;
+    const EFI_PHYSICAL_ADDRESS rootAddress = useXsdt
+        ? (EFI_PHYSICAL_ADDRESS)rsdp->XsdtAddress
+        : (EFI_PHYSICAL_ADDRESS)rsdp->RsdtAddress;
+    const UINTN entrySize = useXsdt ? 8u : 4u;
+    if (!PhysicalRangeValid(rootAddress, sizeof(AcpiSdtHeader))) return false;
+
+    const UINT8* rootBytes = (const UINT8*)(UINTN)rootAddress;
+    if (!AcpiSignatureEquals(rootBytes, useXsdt ? "XSDT" : "RSDT")) {
+        return false;
+    }
+    const UINT32 rootLength = AcpiReadLe32(rootBytes + 4u);
+    if (rootLength < sizeof(AcpiSdtHeader) || rootLength > (1024u * 1024u) ||
+        !PhysicalRangeValid(rootAddress, rootLength) ||
+        !AcpiChecksumValid(rootBytes, rootLength) ||
+        ((rootLength - sizeof(AcpiSdtHeader)) % entrySize) != 0u) {
+        return false;
+    }
+    const UINTN entryCount =
+        (rootLength - sizeof(AcpiSdtHeader)) / entrySize;
+    if (entryCount > 64u || !AcpiAddIdentityRange(plan, rootAddress, rootLength)) {
+        return false;
+    }
+
+    for (UINTN index = 0; index < entryCount; ++index) {
+        const UINT8* entry = rootBytes + sizeof(AcpiSdtHeader) + index * entrySize;
+        const EFI_PHYSICAL_ADDRESS tableAddress = useXsdt
+            ? (EFI_PHYSICAL_ADDRESS)AcpiReadLe64(entry)
+            : (EFI_PHYSICAL_ADDRESS)AcpiReadLe32(entry);
+        if (tableAddress == 0u ||
+            !PhysicalRangeValid(tableAddress, sizeof(AcpiSdtHeader))) {
+            continue;
+        }
+        const UINT8* tableBytes = (const UINT8*)(UINTN)tableAddress;
+        const UINT32 tableLength = AcpiReadLe32(tableBytes + 4u);
+        if (tableLength < sizeof(AcpiSdtHeader) ||
+            tableLength > (1024u * 1024u) ||
+            !PhysicalRangeValid(tableAddress, tableLength)) {
+            continue;
+        }
+        if (!AcpiAddIdentityRange(plan, tableAddress, tableLength)) return false;
+
+        if (!AcpiSignatureEquals(tableBytes, "DMAR") ||
+            tableLength < 48u) {
+            continue;
+        }
+        UINT32 cursor = 48u;
+        while (cursor < tableLength) {
+            if (tableLength - cursor < 4u) break;
+            const UINT16 type = AcpiReadLe16(tableBytes + cursor);
+            const UINT16 length = AcpiReadLe16(tableBytes + cursor + 2u);
+            if (length < 4u || cursor + length > tableLength) break;
+            if (type == 0u && length >= 16u) {
+                const EFI_PHYSICAL_ADDRESS registerBase =
+                    (EFI_PHYSICAL_ADDRESS)AcpiReadLe64(tableBytes + cursor + 8u);
+                if (!AcpiAddVtdRange(plan, registerBase)) return false;
+            }
+            cursor += length;
+        }
+    }
+    plan->valid = true;
+    return true;
+}
+
 static bool PhysicalRangesOverlap(uint64_t firstBase, uint64_t firstSize,
                                   uint64_t secondBase, uint64_t secondSize)
 {
@@ -1207,9 +1376,10 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE* SystemTable) {
     const EFI_PHYSICAL_ADDRESS kernelPhysBase = (EFI_PHYSICAL_ADDRESS)kernelBase;
     const UINTN kernelSpanBytes = (kernelTotalSize != 0) ? (UINTN)kernelTotalSize : (64u * 1024u * 1024u);
 
-    // Use a dynamic array for ranges (max 20 should be plenty)
-    EFI_PHYSICAL_ADDRESS ranges[20];
-    UINTN sizes[20];
+    // ACPI root/table bodies plus all discovered DRHD register windows are
+    // retained in the identity map for the Phase 21 read-only audit.
+    EFI_PHYSICAL_ADDRESS ranges[96];
+    UINTN sizes[96];
     UINTN rangeCount = 0;
 
     // 1. Low 1MB for legacy compatibility
@@ -1279,6 +1449,22 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE* SystemTable) {
         sizes[rangeCount] = EFI_PAGE_SIZE * 4; // Map a few pages for RSDP + nearby tables
         rangeCount++;
         Print(L"Mapping ACPI RSDP region: %p\n", (VOID*)(UINTN)rsdp);
+    }
+
+    AcpiIdentityMapPlan acpiMapPlan = {};
+    if (rsdp != nullptr && CollectAcpiIdentityMapPlan(rsdp, &acpiMapPlan)) {
+        for (UINTN i = 0; i < acpiMapPlan.count; ++i) {
+            if (rangeCount >= 96u) return EFI_OUT_OF_RESOURCES;
+            ranges[rangeCount] = acpiMapPlan.bases[i];
+            sizes[rangeCount] = acpiMapPlan.sizes[i];
+            ++rangeCount;
+        }
+        Print(L"Mapping ACPI audit root/tables: %u ranges, DRHD units: %u\n",
+              (UINT32)acpiMapPlan.count, (UINT32)acpiMapPlan.vtdCount);
+    } else if (rsdp != nullptr) {
+        // Preserve bootability and let the kernel report the precise bounded
+        // ACPI/DMAR failure; do not invent a VT-d mapping from bad metadata.
+        Print(L"ACPI audit map plan unavailable; VT-d audit will report unavailable\n");
     }
 
     // 10. CRITICAL: Map the bootloader/trampoline code region
@@ -1376,6 +1562,17 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE* SystemTable) {
             SystemTable, pt.Pml4Phys, nicMmioMapBase, nicMmioMapSize);
         if (EFI_ERROR(st)) {
             Print(L"Failed to apply uncached NIC MMIO mapping\n");
+            return st;
+        }
+    }
+
+    // VT-d units are PCI-like MMIO. Keep their register windows uncached,
+    // while the ACPI table bodies remain ordinary read-only identity RAM.
+    for (UINTN i = 0; i < acpiMapPlan.vtdCount; ++i) {
+        EFI_STATUS st = guideXOS::paging::MapUncachedIdentityRange(
+            SystemTable, pt.Pml4Phys, acpiMapPlan.vtdBases[i], 0x10000u);
+        if (EFI_ERROR(st)) {
+            Print(L"Failed to apply uncached VT-d MMIO mapping\n");
             return st;
         }
     }

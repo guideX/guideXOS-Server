@@ -43,6 +43,12 @@ static const uint32_t NICINFO_TX_RESET_BRIEF_MAX_LINES = 12;
 static const uint32_t NICINFO_TX_RESET_BRIEF_EXPECTED_LINES = 12;
 static const uint32_t NICINFO_TX_LIFECYCLE_MAX_LINES = 20;
 static const uint32_t NICINFO_TX_LIFECYCLE_EXPECTED_LINES = 20;
+static const uint32_t NICINFO_DMA_MAX_LINES = 32;
+static const uint32_t NICINFO_DMA_EXPECTED_LINES = 24;
+static const uint32_t NICINFO_DMA_BRIEF_MAX_LINES = 20;
+static const uint32_t NICINFO_DMA_BRIEF_EXPECTED_LINES = 12;
+static const uint32_t NICINFO_TX_IOMMU_MAX_LINES = 28;
+static const uint32_t NICINFO_TX_IOMMU_EXPECTED_LINES = 25;
 static_assert(NICINFO_BRIEF_EXPECTED_LINES <= NICINFO_BRIEF_MAX_LINES,
               "nicinfo brief expected output must stay within its line bound");
 static_assert(NICINFO_TX_BRIEF_EXPECTED_LINES <= NICINFO_TX_BRIEF_MAX_LINES,
@@ -55,6 +61,12 @@ static_assert(NICINFO_TX_RESET_BRIEF_EXPECTED_LINES <= NICINFO_TX_RESET_BRIEF_MA
               "nicinfo tx reset brief output must stay within its line bound");
 static_assert(NICINFO_TX_LIFECYCLE_EXPECTED_LINES <= NICINFO_TX_LIFECYCLE_MAX_LINES,
               "nicinfo tx lifecycle output must stay within its line bound");
+static_assert(NICINFO_DMA_EXPECTED_LINES <= NICINFO_DMA_MAX_LINES,
+              "nicinfo dma expected output must stay within its line bound");
+static_assert(NICINFO_DMA_BRIEF_EXPECTED_LINES <= NICINFO_DMA_BRIEF_MAX_LINES,
+              "nicinfo dma brief output must stay within its line bound");
+static_assert(NICINFO_TX_IOMMU_EXPECTED_LINES <= NICINFO_TX_IOMMU_MAX_LINES,
+              "nicinfo tx iommu expected output must stay within its line bound");
 
 enum NicInfoMode : uint8_t {
     NICINFO_MODE_FULL = 0,
@@ -71,6 +83,9 @@ enum NicInfoMode : uint8_t {
     NICINFO_MODE_TX_RAW,
     NICINFO_MODE_TX_RAW_DIRECT,
     NICINFO_MODE_TX_RAW_STATUS,
+    NICINFO_MODE_DMA,
+    NICINFO_MODE_DMA_BRIEF,
+    NICINFO_MODE_TX_IOMMU,
     NICINFO_MODE_INVALID,
 };
 
@@ -81,6 +96,7 @@ inline NicInfoMode nicinfo_mode_from_arg(const char* arg)
     const char* brief = "brief";
     const char* link = "link";
     const char* tx = "tx";
+    const char* dma = "dma";
     const char* original = arg;
     while (*arg && *brief && *arg == *brief) {
         ++arg;
@@ -100,8 +116,15 @@ inline NicInfoMode nicinfo_mode_from_arg(const char* arg)
         ++arg;
         ++tx;
     }
-    return (*arg == '\0' && *tx == '\0')
-        ? NICINFO_MODE_TX : NICINFO_MODE_INVALID;
+    if (*arg == '\0' && *tx == '\0') return NICINFO_MODE_TX;
+
+    arg = original;
+    while (*arg && *dma && *arg == *dma) {
+        ++arg;
+        ++dma;
+    }
+    return (*arg == '\0' && *dma == '\0')
+        ? NICINFO_MODE_DMA : NICINFO_MODE_INVALID;
 }
 
 inline bool nicinfo_token_equals(const char* actual, const char* expected)
@@ -121,8 +144,17 @@ inline NicInfoMode nicinfo_mode_from_args(const char* arg1,
                                           const char* arg2,
                                           const char* arg3)
 {
+    if (nicinfo_token_equals(arg1, "dma")) {
+        return nicinfo_token_equals(arg2, "brief") &&
+                       (!arg3 || *arg3 == '\0')
+            ? NICINFO_MODE_DMA_BRIEF : NICINFO_MODE_INVALID;
+    }
     if (!nicinfo_token_equals(arg1, "tx")) {
         return NICINFO_MODE_INVALID;
+    }
+    if (nicinfo_token_equals(arg2, "iommu")) {
+        return (!arg3 || *arg3 == '\0')
+            ? NICINFO_MODE_TX_IOMMU : NICINFO_MODE_INVALID;
     }
     if (nicinfo_token_equals(arg2, "owner")) {
         return (!arg3 || *arg3 == '\0')

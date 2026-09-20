@@ -22,6 +22,7 @@
 
 #include "kernel/types.h"
 #include "kernel/arch.h"
+#include "kernel/vtd.h"
 
 // Phase 5 physical isolation selector.  The UEFI loader is built with the
 // same value.  Only the exact I219-LM device uses it; existing NIC paths keep
@@ -1446,6 +1447,43 @@ struct TxDiagnostics {
     TxRegisterSnapshot finalRegisters;
 };
 
+// Phase 21 is a single-attempt, read-only VT-d observation around the
+// already-proven Phase 20 normal raw-TX fixture.  The structure intentionally
+// retains both PCI/NIC and VT-d snapshots so a physical result can distinguish
+// a source/ring/buffer fault from a driver-side timeout without replaying DMA.
+struct I219IommuDiagnostics {
+    bool attempted;
+    bool singleAttempt;
+    bool freshStateRequired;
+    bool freshStateValid;
+    bool beforeValid;
+    bool afterValid;
+    bool translationEnabledBefore;
+    bool translationEnabledAfter;
+    bool sourceIdMatches;
+    bool newFault;
+    bool ringAddressFault;
+    bool bufferAddressFault;
+    bool poisonPreserved;
+    bool noRetry;
+    Status result;
+    vtd::Classification classification;
+    const char* failure;
+    vtd::VtdRegisterSnapshot beforeVtd;
+    vtd::VtdRegisterSnapshot afterVtd;
+    TxRegisterSnapshot txBefore;
+    TxRegisterSnapshot txAfter;
+    uint64_t descriptorRaw0Before;
+    uint64_t descriptorRaw1Before;
+    uint64_t descriptorRaw0After;
+    uint64_t descriptorRaw1After;
+    uint64_t descriptorRaw0Final;
+    uint64_t descriptorRaw1Final;
+    uint16_t faultSourceId;
+    uint8_t faultReason;
+    uint64_t faultAddress;
+};
+
 inline bool tx_ring_registers_match(const TxRegisterSnapshot& snapshot,
                                     uint64_t ringPhysicalAddress,
                                     uint32_t ringLength)
@@ -1535,6 +1573,7 @@ struct NICDevice {
     LinkState   link;
     NetStats    stats;
     TxDiagnostics tx;
+    I219IommuDiagnostics iommu;
     I219HwControlDiagnostics hwControl;
     I219ResetDiagnostics resetDiagnostics;
     char        name[32];       // e.g. "eth0"
@@ -1822,6 +1861,11 @@ Status send_raw_diagnostic_frame(TxRawPath path);
 // the generic production transmit path.
 bool run_i219_reset_and_rearm();
 bool run_i219_post_reset_rearm();
+
+// Perform one explicit, read-only VT-d audit around one existing normal raw
+// TX attempt. Refuses to run unless the caller has completed the Phase 20
+// reset/rearm boundary; never retries a poisoned or timed-out descriptor.
+bool run_i219_iommu_tx_observation();
 
 // Receive a raw Ethernet frame into 'buffer'.
 // On success, writes the frame (including 14-byte header, excluding

@@ -45,6 +45,7 @@
 
 // Network subsystem
 #include "include/kernel/nic.h"
+#include "include/kernel/vtd.h"
 #include "include/kernel/ethernet.h"
 #include "include/kernel/ipv4.h"
 #include "include/kernel/icmp.h"
@@ -746,6 +747,7 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
             kernel::serial::puts("[KERNEL] Boot method: UEFI BootInfo\n");
             kernel::mmio::set_kernel_physical_base(bootinfo->KernelPhysicalBase);
             kernel::nic::set_kernel_physical_base(bootinfo->KernelPhysicalBase);
+            kernel::vtd::set_acpi_rsdp(bootinfo->AcpiRsdp);
             kernel::nic::set_tx_dma_region(
                 bootinfo->TxDmaRegion.Base,
                 bootinfo->TxDmaRegion.Size,

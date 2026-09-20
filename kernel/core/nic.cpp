@@ -3920,6 +3920,144 @@ Status send_raw_diagnostic_frame(TxRawPath path)
     return result;
 }
 
+bool run_i219_iommu_tx_observation()
+{
+    I219IommuDiagnostics& diagnostics = s_device.iommu;
+    diagnostics = {};
+    diagnostics.freshStateRequired = true;
+    diagnostics.noRetry = true;
+    diagnostics.classification = vtd::Classification::Unavailable;
+    diagnostics.failure = "TX_IOMMU_DIAGNOSTIC_UNAVAILABLE";
+
+    if (!s_initialised || !s_device.active ||
+        !is_i219_device(s_device.deviceId) || !s_device.mmioMapped ||
+        s_device.mmioBase == 0u) {
+        diagnostics.failure = "I219 device is not active and ready";
+        return false;
+    }
+
+    const vtd::PciBdf target = { 0u, s_device.pciBus, s_device.pciSlot,
+                                 s_device.pciFunc };
+    if (!vtd::discover(target)) {
+        const vtd::Audit* audit = vtd::get_audit();
+        if (audit) {
+            diagnostics.classification = audit->classification;
+            diagnostics.failure = audit->failure
+                ? audit->failure : diagnostics.failure;
+        }
+        return false;
+    }
+
+    const vtd::Audit* audit = vtd::get_audit();
+    if (!audit || !audit->registersReadable) {
+        diagnostics.failure = "matching VT-d DRHD registers are unreadable";
+        return false;
+    }
+    diagnostics.beforeVtd = audit->registers;
+    diagnostics.beforeValid = diagnostics.beforeVtd.valid;
+    diagnostics.translationEnabledBefore =
+        diagnostics.beforeVtd.translationEnabled;
+
+    if (!tx_dma_experiment_active(s_txDmaMode) ||
+        !s_txDmaRegionHandoffValid || !s_device.txRingInitialized ||
+        !s_device.resetDiagnostics.resetCompleted ||
+        !s_device.resetDiagnostics.rearmCompleted) {
+        diagnostics.failure =
+            "Phase 20 reset/rearm and constrained-low TX prerequisites are incomplete";
+        diagnostics.classification = audit->classification;
+        return false;
+    }
+    if (s_txPoisoned || s_device.tx.ringPoisoned) {
+        diagnostics.failure = "TX ring is already poisoned; no retry permitted";
+        diagnostics.classification = audit->classification;
+        return false;
+    }
+
+    diagnostics.freshStateValid = true;
+    diagnostics.txBefore = read_tx_registers();
+    if (s_txDescs && s_txCur < NUM_TX_DESC) {
+        capture_tx_descriptor_raw(
+            s_txDescs[s_txCur], &diagnostics.descriptorRaw0Before,
+            &diagnostics.descriptorRaw1Before);
+    }
+
+    // This is intentionally the one existing normal raw-TX boundary. The
+    // experiment never calls it again after a timeout or any other failure.
+    diagnostics.singleAttempt = true;
+    const Status result = send_raw_diagnostic_frame(TxRawPath::Normal);
+    diagnostics.attempted = true;
+    diagnostics.result = result;
+    diagnostics.poisonPreserved = result != NIC_OK
+        ? s_txPoisoned && s_device.tx.ringPoisoned
+        : !s_txPoisoned;
+    diagnostics.txAfter = read_tx_registers();
+    diagnostics.afterValid = vtd::capture_registers(&diagnostics.afterVtd);
+    if (diagnostics.afterValid) {
+        diagnostics.translationEnabledAfter =
+            diagnostics.afterVtd.translationEnabled;
+        diagnostics.faultSourceId = diagnostics.afterVtd.faultSourceId;
+        diagnostics.faultReason = diagnostics.afterVtd.faultReason;
+        diagnostics.faultAddress = diagnostics.afterVtd.faultAddress;
+        diagnostics.sourceIdMatches = diagnostics.afterVtd.faultPresent &&
+            diagnostics.afterVtd.faultSourceId == vtd::pci_source_id(target);
+        const bool faultChanged =
+            diagnostics.afterVtd.faultPresent &&
+            (!diagnostics.beforeVtd.faultPresent ||
+             diagnostics.afterVtd.faultSourceId !=
+                 diagnostics.beforeVtd.faultSourceId ||
+             diagnostics.afterVtd.faultReason !=
+                 diagnostics.beforeVtd.faultReason ||
+             diagnostics.afterVtd.faultAddress !=
+                 diagnostics.beforeVtd.faultAddress ||
+             (!diagnostics.beforeVtd.primaryFaultPending &&
+              diagnostics.afterVtd.primaryFaultPending));
+        diagnostics.newFault = faultChanged;
+        diagnostics.ringAddressFault =
+            vtd::classify_fault_address(
+                diagnostics.afterVtd.faultAddress,
+                s_device.tx.descriptorRingAddress,
+                tx_ring_length_bytes(NUM_TX_DESC),
+                s_device.tx.lastBufferAddress,
+                s_device.tx.raw.frameLength != 0u
+                    ? s_device.tx.raw.frameLength : TX_RAW_FRAME_LENGTH)
+            == vtd::FaultAddressClass::Ring;
+        diagnostics.bufferAddressFault =
+            vtd::classify_fault_address(
+                diagnostics.afterVtd.faultAddress,
+                s_device.tx.descriptorRingAddress,
+                tx_ring_length_bytes(NUM_TX_DESC),
+                s_device.tx.lastBufferAddress,
+                s_device.tx.raw.frameLength != 0u
+                    ? s_device.tx.raw.frameLength : TX_RAW_FRAME_LENGTH)
+            == vtd::FaultAddressClass::Buffer;
+    }
+
+    diagnostics.descriptorRaw0After = s_device.tx.raw.descriptorRaw0AfterTdt;
+    diagnostics.descriptorRaw1After = s_device.tx.raw.descriptorRaw1AfterTdt;
+    diagnostics.descriptorRaw0Final = s_device.tx.raw.descriptorRaw0Final;
+    diagnostics.descriptorRaw1Final = s_device.tx.raw.descriptorRaw1Final;
+
+    if (diagnostics.newFault && diagnostics.sourceIdMatches &&
+        diagnostics.ringAddressFault) {
+        diagnostics.classification = vtd::Classification::RingAddressFault;
+    } else if (diagnostics.newFault && diagnostics.sourceIdMatches &&
+               diagnostics.bufferAddressFault) {
+        diagnostics.classification = vtd::Classification::BufferAddressFault;
+    } else if (diagnostics.newFault && diagnostics.sourceIdMatches) {
+        diagnostics.classification = vtd::Classification::SourceMatch;
+    } else if (diagnostics.newFault) {
+        diagnostics.classification = vtd::Classification::DmaFault;
+    } else if (diagnostics.afterValid &&
+               diagnostics.translationEnabledAfter) {
+        diagnostics.classification = vtd::Classification::TranslationActive;
+    } else {
+        diagnostics.classification = vtd::Classification::TranslationDisabled;
+    }
+    diagnostics.failure = result == NIC_OK
+        ? "none" : tx_failure_reason_name(s_device.tx.failureReason);
+    return true;
+}
+
 // ================================================================
 // receive_frame - read the next pending Ethernet frame
 // ================================================================

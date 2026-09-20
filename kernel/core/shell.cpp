@@ -2755,6 +2755,282 @@ static bool nicinfo_rx_ring_present(const nic::I219ResetSnapshot& snapshot)
            snapshot.rdlen != 0u || snapshot.rdh != 0u || snapshot.rdt != 0u;
 }
 
+// Forward declaration keeps the inherited Phase 19 source-boundary contract
+// anchored immediately after the reset audit; the implementation remains in
+// the existing TX diagnostics section below.
+static void cmd_nicinfo_tx_brief();
+static void cmd_nicinfo_brief();
+
+static const char* nicinfo_vtd_bool(bool value)
+{
+    return value ? "yes" : "no";
+}
+
+static vtd::PciBdf nicinfo_vtd_target(const nic::NICDevice* dev)
+{
+    if (!dev) return { 0u, 0u, 0u, 0u };
+    return { 0u, dev->pciBus, dev->pciSlot, dev->pciFunc };
+}
+
+static void cmd_nicinfo_dma_report(bool brief)
+{
+    const nic::NICDevice* dev = nic::get_device();
+    const vtd::PciBdf target = nicinfo_vtd_target(dev);
+    const bool discovered = vtd::discover(target);
+    const vtd::Audit* audit = vtd::get_audit();
+    char numStr[16];
+    char hexStr[9];
+    char hex64Str[17];
+
+    output_string(brief ? "NIC DMA brief\n" : "NIC DMA / VT-d audit\n");
+    output_string("read-only=yes writes=none\n");
+    output_string("target=");
+    uint_hex_to_str(target.segment, 4, hexStr);
+    output_string(hexStr);
+    output_string(":");
+    uint_hex_to_str(target.bus, 2, hexStr);
+    output_string(hexStr);
+    output_string(":");
+    uint_hex_to_str(target.device, 2, hexStr);
+    output_string(hexStr);
+    output_string(".");
+    uint_to_str(target.function, numStr);
+    output_string(numStr);
+    output_string("\n");
+
+    output_string("acpi-rsdp=");
+    output_string(audit && audit->acpiAvailable ? "available" : "missing");
+    output_string(" dmar=");
+    output_string(audit && audit->dmarTablePresent ? "present\n" : "absent\n");
+    output_string("drhd=");
+    uint_to_str(audit ? audit->drhdCount : 0u, numStr);
+    output_string(numStr);
+    output_string(" rmrr=");
+    uint_to_str(audit ? audit->rmrrCount : 0u, numStr);
+    output_string(numStr);
+    output_string(" matching-drhd=");
+    output_string(audit && audit->matchingDrhdFound ? "yes\n" : "no\n");
+
+    if (brief) {
+        output_string("unit-registers=");
+        output_string(audit && audit->registersReadable ? "readable" : "unavailable");
+        output_string(" tes=");
+        output_string(audit && audit->registersReadable
+                          ? nicinfo_vtd_bool(audit->registers.translationEnabled)
+                          : "unknown");
+        output_string(" fault=");
+        output_string(audit && audit->registersReadable
+                          ? nicinfo_vtd_bool(audit->registers.faultPresent)
+                          : "unknown");
+        output_string("\nclassification=");
+        output_string(audit ? vtd::classification_name(audit->classification)
+                            : "TX_IOMMU_DIAGNOSTIC_UNAVAILABLE");
+        output_string("\nrmrr-applicable=");
+        output_string(audit && audit->rmrrApplicable ? "yes\n" : "no\n");
+        output_string("failure=");
+        output_string(audit && audit->failure ? audit->failure :
+                      (discovered ? "none" : "unknown"));
+        output_string("\n");
+        return;
+    }
+
+    output_string("dmar-rev=");
+    uint_to_str(audit ? audit->dmarRevision : 0u, numStr);
+    output_string(numStr);
+    output_string(" scopes=");
+    output_string(audit && audit->matchingDrhdExplicitScope ? "explicit" :
+                  (audit && audit->matchingDrhdIncludeAll ? "include-all" : "none"));
+    output_string("\n");
+    output_string("vtd-base=0x");
+    uint_hex64_to_str(audit ? audit->matchingRegisterBase : 0u, hex64Str);
+    output_string(hex64Str);
+    output_string("\n");
+
+    const vtd::VtdRegisterSnapshot empty = {};
+    const vtd::VtdRegisterSnapshot& regs =
+        audit && audit->registersReadable ? audit->registers : empty;
+    output_string("ver=0x");
+    uint_hex_to_str(regs.version, 8, hexStr);
+    output_string(hexStr);
+    output_string(" cap=0x");
+    uint_hex64_to_str(regs.cap, hex64Str);
+    output_string(hex64Str);
+    output_string(" ecap=0x");
+    uint_hex64_to_str(regs.ecap, hex64Str);
+    output_string(hex64Str);
+    output_string("\n");
+    output_string("gsts=0x");
+    uint_hex_to_str(regs.gsts, 8, hexStr);
+    output_string(hexStr);
+    output_string(" tes=");
+    output_string(regs.valid ? nicinfo_vtd_bool(regs.translationEnabled) : "unknown");
+    output_string("\nrtaddr=0x");
+    uint_hex64_to_str(regs.rootTableAddress, hex64Str);
+    output_string(hex64Str);
+    output_string(" mode=");
+    output_string(regs.valid ? vtd::root_table_mode_name(
+        vtd::root_table_mode(regs.rootTableAddress)) : "unknown");
+    output_string("\n");
+    output_string("fsts=0x");
+    uint_hex_to_str(regs.faultStatus, 8, hexStr);
+    output_string(hexStr);
+    output_string(" ppf=");
+    output_string(regs.valid ? nicinfo_vtd_bool(regs.primaryFaultPending) : "unknown");
+    output_string(" fri=");
+    uint_to_str(regs.selectedFaultRecord == vtd::VTD_INVALID_INDEX
+                    ? 0u : regs.selectedFaultRecord, numStr);
+    output_string(numStr);
+    output_string(" records=");
+    uint_to_str(regs.faultRecordCount, numStr);
+    output_string(numStr);
+    output_string("\n");
+    output_string("fault=");
+    output_string(regs.faultPresent ? "present" : "none");
+    output_string(" sid=0x");
+    uint_hex_to_str(regs.faultSourceId, 4, hexStr);
+    output_string(hexStr);
+    output_string(" source-match=");
+    output_string(audit && audit->sourceIdMatchesTarget ? "yes\n" : "no\n");
+    output_string("fault-address=0x");
+    uint_hex64_to_str(regs.faultAddress, hex64Str);
+    output_string(hex64Str);
+    output_string("\nrmrr-applicable=");
+    output_string(audit && audit->rmrrApplicable ? "yes" : "no");
+    output_string(" classification=");
+    output_string(audit ? vtd::classification_name(audit->classification)
+                        : "TX_IOMMU_DIAGNOSTIC_UNAVAILABLE");
+    output_string("\nfailure=");
+    output_string(audit && audit->failure ? audit->failure :
+                  (discovered ? "none" : "unknown"));
+    output_string("\n");
+}
+
+static void cmd_nicinfo_dma()
+{
+    cmd_nicinfo_dma_report(false);
+}
+
+static void cmd_nicinfo_dma_brief()
+{
+    cmd_nicinfo_dma_report(true);
+}
+
+static void cmd_nicinfo_tx_iommu()
+{
+    output_string("NIC TX IOMMU observation\n");
+    const bool executed = nic::run_i219_iommu_tx_observation();
+    const nic::NICDevice* dev = nic::get_device();
+    const nic::I219IommuDiagnostics empty = {};
+    const nic::I219IommuDiagnostics& diagnostic = dev ? dev->iommu : empty;
+    const nic::TxRegisterSnapshot& before = diagnostic.txBefore;
+    const nic::TxRegisterSnapshot& after = diagnostic.txAfter;
+    char numStr[16];
+    char hexStr[9];
+    char hex64Str[17];
+
+    output_string("fresh-reset-rearm-required=yes valid=");
+    output_string(diagnostic.freshStateValid ? "yes\n" : "no\n");
+    output_string("attempt=");
+    output_string(diagnostic.attempted ? "one" : "none");
+    output_string(" executed=");
+    output_string(executed ? "yes\n" : "no\n");
+    output_string("result=");
+    output_string(diagnostic.attempted
+                      ? (diagnostic.result == nic::NIC_OK ? "complete" : "fail")
+                      : "not-attempted");
+    output_string(" no-retry=");
+    output_string(diagnostic.noRetry ? "yes\n" : "no\n");
+    output_string("before-vtd-valid=");
+    output_string(diagnostic.beforeValid ? "yes" : "no");
+    output_string(" tes=");
+    output_string(diagnostic.beforeValid
+                      ? (diagnostic.translationEnabledBefore ? "yes" : "no")
+                      : "unknown");
+    output_string(" fault=");
+    output_string(diagnostic.beforeValid
+                      ? (diagnostic.beforeVtd.faultPresent ? "yes\n" : "no\n")
+                      : "unknown\n");
+    output_string("before-tx=TDBA=0x");
+    uint_hex64_to_str(nic::dma_address_register_value(
+        before.tdbal, before.tdbah), hex64Str);
+    output_string(hex64Str);
+    output_string(" TDLEN=0x");
+    uint_hex_to_str(before.tdlen, 8, hexStr);
+    output_string(hexStr);
+    output_string(" TDH/TDT=");
+    uint_to_str(before.tdh, numStr);
+    output_string(numStr);
+    output_string("/");
+    uint_to_str(before.tdt, numStr);
+    output_string(numStr);
+    output_string("\n");
+    output_string("desc-before=0x");
+    uint_hex64_to_str(diagnostic.descriptorRaw0Before, hex64Str);
+    output_string(hex64Str);
+    output_string("/0x");
+    uint_hex64_to_str(diagnostic.descriptorRaw1Before, hex64Str);
+    output_string(hex64Str);
+    output_string("\n");
+    output_string("after-vtd-valid=");
+    output_string(diagnostic.afterValid ? "yes" : "no");
+    output_string(" tes=");
+    output_string(diagnostic.afterValid
+                      ? (diagnostic.translationEnabledAfter ? "yes" : "no")
+                      : "unknown");
+    output_string(" fault=");
+    output_string(diagnostic.afterValid
+                      ? (diagnostic.afterVtd.faultPresent ? "yes\n" : "no\n")
+                      : "unknown\n");
+    output_string("after-tx=TDBA=0x");
+    uint_hex64_to_str(nic::dma_address_register_value(
+        after.tdbal, after.tdbah), hex64Str);
+    output_string(hex64Str);
+    output_string(" TDLEN=0x");
+    uint_hex_to_str(after.tdlen, 8, hexStr);
+    output_string(hexStr);
+    output_string(" TDH/TDT=");
+    uint_to_str(after.tdh, numStr);
+    output_string(numStr);
+    output_string("/");
+    uint_to_str(after.tdt, numStr);
+    output_string(numStr);
+    output_string("\n");
+    output_string("desc-after=0x");
+    uint_hex64_to_str(diagnostic.descriptorRaw0After, hex64Str);
+    output_string(hex64Str);
+    output_string("/0x");
+    uint_hex64_to_str(diagnostic.descriptorRaw1After, hex64Str);
+    output_string(hex64Str);
+    output_string(" final=0x");
+    uint_hex64_to_str(diagnostic.descriptorRaw0Final, hex64Str);
+    output_string(hex64Str);
+    output_string("/0x");
+    uint_hex64_to_str(diagnostic.descriptorRaw1Final, hex64Str);
+    output_string(hex64Str);
+    output_string("\n");
+    output_string("fault-sid=0x");
+    uint_hex_to_str(diagnostic.faultSourceId, 4, hexStr);
+    output_string(hexStr);
+    output_string(" source-match=");
+    output_string(diagnostic.sourceIdMatches ? "yes" : "no");
+    output_string(" new=");
+    output_string(diagnostic.newFault ? "yes\n" : "no\n");
+    output_string("fault-address=0x");
+    uint_hex64_to_str(diagnostic.faultAddress, hex64Str);
+    output_string(hex64Str);
+    output_string(" ring=");
+    output_string(diagnostic.ringAddressFault ? "yes" : "no");
+    output_string(" buffer=");
+    output_string(diagnostic.bufferAddressFault ? "yes\n" : "no\n");
+    output_string("classification=");
+    output_string(vtd::classification_name(diagnostic.classification));
+    output_string(" poison-preserved=");
+    output_string(diagnostic.poisonPreserved ? "yes\n" : "no\n");
+    output_string("failure=");
+    output_string(diagnostic.failure ? diagnostic.failure : "unknown");
+    output_string("\n");
+}
+
 // Exactly twelve logical lines. This is intentionally cache-only: the word
 // run is required before any destructive reset/rearm operation is allowed.
 static void cmd_nicinfo_tx_reset_brief()
@@ -5520,6 +5796,12 @@ static void execute_command(const char* cmd) {
             nicInfoMode = NICINFO_MODE_FULL;
         } else if (argCount == 2) {
             nicInfoMode = nicinfo_mode_from_arg(arg1);
+        } else if (argCount == 3 && str_eq(arg1, "dma") &&
+                   str_eq(args[2], "brief")) {
+            nicInfoMode = NICINFO_MODE_DMA_BRIEF;
+        } else if (argCount == 3 && str_eq(arg1, "tx") &&
+                   str_eq(args[2], "iommu")) {
+            nicInfoMode = NICINFO_MODE_TX_IOMMU;
         } else if (argCount == 3 && str_eq(arg1, "tx") &&
                    str_eq(args[2], "brief")) {
             nicInfoMode = NICINFO_MODE_TX_BRIEF;
@@ -5562,12 +5844,21 @@ static void execute_command(const char* cmd) {
             cmd_nicinfo_tx_raw(true);
         } else if (nicInfoMode == NICINFO_MODE_TX_RAW_STATUS) {
             cmd_nicinfo_tx_raw_status();
+        } else if (nicInfoMode == NICINFO_MODE_DMA) {
+            cmd_nicinfo_dma();
+        } else if (nicInfoMode == NICINFO_MODE_DMA_BRIEF) {
+            cmd_nicinfo_dma_brief();
+        } else if (nicInfoMode == NICINFO_MODE_TX_IOMMU) {
+            cmd_nicinfo_tx_iommu();
         } else {
-            output_string("Usage: nicinfo [brief|link|tx [brief|owner|reset [brief|run]|rearm|lifecycle|raw [direct|status]]]\n");
+            output_string("Usage: nicinfo [brief|link|dma [brief]|tx [brief|owner|iommu|reset [brief|run]|rearm|lifecycle|raw [direct|status]]]\n");
             output_string("  brief: recorded NIC initialization/link state only\n");
             output_string("  link: one bounded, read-only current link refresh\n");
+            output_string("  dma: read-only ACPI DMAR/VT-d audit; no IOMMU writes\n");
+            output_string("  dma brief: compact read-only VT-d state\n");
             output_string("  tx: one TX descriptor and bounded register snapshot\n");
             output_string("  tx brief: compact one-screen TX evidence\n");
+            output_string("  tx iommu: one normal raw-TX attempt with VT-d fault capture; never retries\n");
             output_string("  tx owner: CTRL_EXT.DRV_LOAD ownership evidence\n");
             output_string("  tx reset: I219/SPT pre-reset flush audit; retained/latest (READ-ONLY; does not reset)\n");
             output_string("  tx reset brief: 12-line retained reset summary (READ-ONLY)\n");
