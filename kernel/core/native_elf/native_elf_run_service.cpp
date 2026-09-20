@@ -236,6 +236,12 @@ static uint8_t s_schedulerStack[kSchedulerStackBytes] __attribute__((aligned(16)
 using SchedulerContext = arch::amd64::context::SwitchContext;
 static SchedulerContext* s_ownerContext = nullptr;
 static SchedulerContext* s_targetContext = nullptr;
+// When the target yields, this points at the complete register frame kept on
+// the target stack while the owner services the debugger.  A user pause can
+// arrive during that parked interval; capture it directly instead of blindly
+// resuming a short-lived target and losing the requested stop.
+static NativeElfDebugTrap::BreakpointContext* s_schedulerYieldContext = nullptr;
+static bool s_schedulerPollBoundaryPending = false;
 static bool s_schedulerActive = false;
 static bool s_schedulerInTarget = false;
 static bool s_schedulerTargetComplete = false;
@@ -2256,10 +2262,14 @@ extern "C" bool native_elf_scheduler_yield_dispatch(
     if (!s_schedulerActive || !s_schedulerInTarget || !s_ownerContext || !s_targetContext) {
         return false;
     }
-    (void)capture_user_pause(context);
+    s_schedulerYieldContext = context;
+    const bool captured = capture_user_pause(context);
+    s_schedulerPollBoundaryPending = !captured;
     s_schedulerInTarget = false;
     arch::amd64::context::switch_context(&s_targetContext, s_ownerContext);
     s_schedulerInTarget = true;
+    s_schedulerYieldContext = nullptr;
+    s_schedulerPollBoundaryPending = false;
     return true;
 }
 
@@ -2348,6 +2358,7 @@ static void scheduled_task_entry(void*)
     s_schedulerTargetComplete = true;
     s_schedulerInTarget = false;
     s_schedulerActive = false;
+    s_schedulerPollBoundaryPending = false;
     arch::amd64::context::switch_context(&s_targetContext, s_ownerContext);
     for (;;) arch::amd64::halt();
 }
@@ -2362,6 +2373,7 @@ static void scheduled_debug_cancel_entry()
     s_schedulerTargetComplete = true;
     s_schedulerInTarget = false;
     s_schedulerActive = false;
+    s_schedulerPollBoundaryPending = false;
     arch::amd64::context::switch_context(&s_targetContext, s_ownerContext);
     for (;;) arch::halt();
 }
@@ -2411,6 +2423,10 @@ bool native_elf_scheduler_pump()
 #if defined(__x86_64__)
     if (!s_schedulerActive || s_schedulerTargetComplete || s_schedulerInTarget ||
         !s_targetContext) return false;
+    // An explicit pump is a request to advance the target.  A debug poll may
+    // publish one parked running boundary first, but it must not defer an
+    // explicit Continue, step, or lifecycle pump.
+    s_schedulerPollBoundaryPending = false;
     if (!native_elf_nested_prepare_for_scheduler()) return false;
     // The owner context is a continuation on this individual pump call's
     // stack.  Start() must not leave a later desktop tick resuming through a
@@ -2564,12 +2580,15 @@ gx_result start(gx_development_run_handle handle) {
     s_schedulerInTarget = false;
     s_schedulerTargetComplete = false;
     s_ownerContext = nullptr;
+    s_schedulerYieldContext = nullptr;
+    s_schedulerPollBoundaryPending = false;
     s_targetContext = arch::amd64::context::init_context(
         reinterpret_cast<uint64_t>(s_schedulerStack + sizeof(s_schedulerStack)),
         &scheduled_task_entry,
         &s_operation);
     if (!s_targetContext) {
         s_schedulerActive = false;
+        s_schedulerYieldContext = nullptr;
         fail_and_cleanup(s_operation, GX_DEVELOPMENT_RUN_ERROR_LAUNCH_UNAVAILABLE,
                          "NativeElf execution context could not be created");
         return GX_OK;
@@ -2580,6 +2599,7 @@ gx_result start(gx_development_run_handle handle) {
         native_elf_debug_breakpoint_install_failed();
         s_schedulerActive = false;
         s_targetContext = nullptr;
+        s_schedulerYieldContext = nullptr;
         fail_and_cleanup(s_operation, GX_DEVELOPMENT_RUN_ERROR_LAUNCH_UNAVAILABLE,
                          "NativeElf debug trap could not be installed");
         return GX_OK;
@@ -2587,6 +2607,7 @@ gx_result start(gx_development_run_handle handle) {
     if (!native_elf_scheduler_pump()) {
         s_schedulerActive = false;
         s_targetContext = nullptr;
+        s_schedulerYieldContext = nullptr;
         fail_and_cleanup(s_operation, GX_DEVELOPMENT_RUN_ERROR_LAUNCH_UNAVAILABLE,
                          "NativeElf execution owner could not be scheduled");
     }
@@ -5870,6 +5891,19 @@ gx_result debug(const gx_development_debug_request& request,
         serial::puts("DEVELOPER_STUDIO_PHASE28Q_PAUSE_REQUEST_ACCEPTED generation=");
         serial::put_hex64(s_operation.debugPauseRequestGeneration);
         serial::putc('\n');
+        // The target may already be parked at a cooperative boundary while
+        // the owner handles this request.  Capture that exact frame now so a
+        // following poll cannot resume a short fixture past its final yield.
+#if defined(__x86_64__)
+        if (s_schedulerYieldContext && s_schedulerActive && !s_schedulerInTarget &&
+            !s_schedulerTargetComplete && capture_user_pause(s_schedulerYieldContext)) {
+            outSnapshot->status = GX_DEVELOPMENT_DEBUG_STATUS_PAUSE_REQUESTED;
+            copy_text(outSnapshot->errorMessage, sizeof(outSnapshot->errorMessage),
+                      "NativeElf user pause request accepted at parked boundary");
+            set_breakpoint_list(s_operation, outSnapshot);
+            serial::puts("DEVELOPER_STUDIO_PHASE28S_PARKED_PAUSE_CAPTURE_PASS\n");
+        }
+#endif
         return GX_OK;
     }
     if (breakpointContinue &&
@@ -5959,12 +5993,25 @@ gx_result debug(const gx_development_debug_request& request,
         return read_debug_memory(s_operation, request, outSnapshot);
 
     case GX_DEVELOPMENT_DEBUG_POLL:
+        {
         // A Developer Studio NativeElf window runs its own event loop. While
         // that loop is active the desktop scheduler cannot provide the next
-        // cooperative slice for this separately controlled target, so advance
-        // the target from the real debugger poll path before publishing state.
+        // cooperative slice for this separately controlled target. Publish one
+        // parked running boundary before advancing it so a UI Pause request
+        // can capture that exact safe context instead of racing the target's
+        // next short slice.
+        bool publishParkedBoundary = false;
+#if defined(__x86_64__)
+        publishParkedBoundary = s_schedulerPollBoundaryPending &&
+            s_schedulerActive && !s_schedulerInTarget &&
+            !s_operation.debugPauseRequested;
+        if (publishParkedBoundary) {
+            s_schedulerPollBoundaryPending = false;
+        }
+#endif
         if (s_operation.state == GX_DEVELOPMENT_RUN_RUNNING &&
             s_schedulerActive && !s_schedulerInTarget &&
+            !publishParkedBoundary &&
             !native_elf_scheduler_pump()) {
             set_debug_error(outSnapshot,
                             "NativeElf debug target could not be advanced by poll");
@@ -5993,6 +6040,7 @@ gx_result debug(const gx_development_debug_request& request,
             return GX_ERROR_FAILED;
         }
         return GX_OK;
+        }
 
     case GX_DEVELOPMENT_DEBUG_CONTINUE_BREAKPOINT:
     case GX_DEVELOPMENT_DEBUG_RELEASE_EXECUTION:
@@ -6258,6 +6306,8 @@ gx_result release(gx_development_run_handle handle) {
     s_schedulerTargetComplete = false;
     s_ownerContext = nullptr;
     s_targetContext = nullptr;
+    s_schedulerYieldContext = nullptr;
+    s_schedulerPollBoundaryPending = false;
 #endif
     s_operation = Operation();
     return GX_OK;
