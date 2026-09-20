@@ -196,9 +196,11 @@ static const uint32_t E1000_CTRL_SLU   = (1u << 6);   // Set Link Up
 static const uint32_t E1000_CTRL_RST   = (1u << 26);  // Device Reset
 static const uint32_t E1000_CTRL_ASDE  = (1u << 5);   // Auto-Speed Detection Enable
 static const uint32_t E1000_CTRL_FD    = (1u << 0);   // Full Duplex
+static const uint32_t E1000_CTRL_GIO_MASTER_DISABLE = 0x00000004u;
 
 // STATUS register bits
 static const uint32_t E1000_STATUS_LU  = (1u << 1);   // Link Up
+static const uint32_t E1000_STATUS_GIO_MASTER_ENABLE = 0x00080000u;
 static const uint32_t E1000_STATUS_SPEED_MASK = (3u << 6);
 static const uint32_t E1000_STATUS_SPEED_10   = (0u << 6);
 static const uint32_t E1000_STATUS_SPEED_100  = (1u << 6);
@@ -540,6 +542,43 @@ enum class I219ResetFailureReason : uint8_t {
     RegisterReadFailed,
 };
 
+enum class I219RearmFailureReason : uint8_t {
+    None = 0,
+    ResetNotCompleted,
+    PciMasterDisabled,
+    HwControlNotRestored,
+    DmaUnavailable,
+    RxRearmFailed,
+    TxRearmFailed,
+    RingReadbackFailed,
+    RegisterDrift,
+};
+
+inline const char* i219_rearm_failure_reason_name(
+    I219RearmFailureReason reason)
+{
+    switch (reason) {
+        case I219RearmFailureReason::ResetNotCompleted:
+            return "TX_POST_RESET_RESET_NOT_COMPLETED";
+        case I219RearmFailureReason::PciMasterDisabled:
+            return "TX_PCI_MASTER_DISABLED";
+        case I219RearmFailureReason::HwControlNotRestored:
+            return "TX_HW_CONTROL_NOT_RESTORED";
+        case I219RearmFailureReason::DmaUnavailable:
+            return "TX_POST_RESET_DMA_UNAVAILABLE";
+        case I219RearmFailureReason::RxRearmFailed:
+            return "TX_POST_RESET_RX_REARM_FAILED";
+        case I219RearmFailureReason::TxRearmFailed:
+            return "TX_POST_RESET_REARM_FAILED";
+        case I219RearmFailureReason::RingReadbackFailed:
+            return "TX_RING_REARM_READBACK_FAILED";
+        case I219RearmFailureReason::RegisterDrift:
+            return "TX_POST_RESET_REGISTER_DRIFT";
+        default:
+            return "none";
+    }
+}
+
 inline const char* i219_reset_failure_reason_name(
     I219ResetFailureReason reason)
 {
@@ -565,6 +604,7 @@ inline const char* i219_reset_failure_reason_name(
 // reset.  `cfgE4` is PCI configuration space, not an MMIO register.
 struct I219ResetSnapshot {
     uint16_t cfgE4;
+    uint32_t status;
     uint32_t tdbal;
     uint32_t tdbah;
     uint32_t tdlen;
@@ -599,6 +639,14 @@ struct I219ResetDiagnostics {
     bool resetPerformed;
     bool resetCompleted;
     bool resetTimedOut;
+    bool rearmAttempted;
+    bool rearmCompleted;
+    bool rearmPciDmaVerified;
+    bool rearmOwnershipRestored;
+    bool rearmRegisterReadback;
+    bool rearmRxRestored;
+    bool rearmTxDisabledBeforeBuild;
+    I219RearmFailureReason rearmFailure;
     I219ResetFailureReason failure;
 };
 
@@ -1304,6 +1352,7 @@ struct TxRawDiagnostics {
 };
 
 struct TxRegisterSnapshot {
+    uint32_t status;
     uint32_t tdbal;
     uint32_t tdbah;
     uint32_t tdlen;
@@ -1766,6 +1815,13 @@ Status send_frame(const uint8_t* data, uint16_t len);
 // primitive without the generic wrapper. Both paths require the constrained-
 // low Phase 16 DMA handoff and never retry a poisoned ring.
 Status send_raw_diagnostic_frame(TxRawPath path);
+
+// Explicit I219/SPT lifecycle experiments. The first operation is destructive
+// and performs one MAC reset followed by the bounded post-reset rearm. The
+// second operation only re-arms the already-reset device. Neither is part of
+// the generic production transmit path.
+bool run_i219_reset_and_rearm();
+bool run_i219_post_reset_rearm();
 
 // Receive a raw Ethernet frame into 'buffer'.
 // On success, writes the frame (including 14-byte header, excluding

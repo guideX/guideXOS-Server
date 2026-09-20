@@ -39,6 +39,10 @@ static const uint32_t NICINFO_TX_OWNER_MAX_LINES = 20;
 static const uint32_t NICINFO_TX_OWNER_EXPECTED_LINES = 14;
 static const uint32_t NICINFO_TX_RESET_MAX_LINES = 20;
 static const uint32_t NICINFO_TX_RESET_EXPECTED_LINES = 19;
+static const uint32_t NICINFO_TX_RESET_BRIEF_MAX_LINES = 12;
+static const uint32_t NICINFO_TX_RESET_BRIEF_EXPECTED_LINES = 12;
+static const uint32_t NICINFO_TX_LIFECYCLE_MAX_LINES = 20;
+static const uint32_t NICINFO_TX_LIFECYCLE_EXPECTED_LINES = 20;
 static_assert(NICINFO_BRIEF_EXPECTED_LINES <= NICINFO_BRIEF_MAX_LINES,
               "nicinfo brief expected output must stay within its line bound");
 static_assert(NICINFO_TX_BRIEF_EXPECTED_LINES <= NICINFO_TX_BRIEF_MAX_LINES,
@@ -47,6 +51,10 @@ static_assert(NICINFO_TX_OWNER_EXPECTED_LINES <= NICINFO_TX_OWNER_MAX_LINES,
               "nicinfo tx owner expected output must stay within its line bound");
 static_assert(NICINFO_TX_RESET_EXPECTED_LINES <= NICINFO_TX_RESET_MAX_LINES,
               "nicinfo tx reset expected output must stay within its line bound");
+static_assert(NICINFO_TX_RESET_BRIEF_EXPECTED_LINES <= NICINFO_TX_RESET_BRIEF_MAX_LINES,
+              "nicinfo tx reset brief output must stay within its line bound");
+static_assert(NICINFO_TX_LIFECYCLE_EXPECTED_LINES <= NICINFO_TX_LIFECYCLE_MAX_LINES,
+              "nicinfo tx lifecycle output must stay within its line bound");
 
 enum NicInfoMode : uint8_t {
     NICINFO_MODE_FULL = 0,
@@ -56,6 +64,10 @@ enum NicInfoMode : uint8_t {
     NICINFO_MODE_TX_BRIEF,
     NICINFO_MODE_TX_OWNER,
     NICINFO_MODE_TX_RESET,
+    NICINFO_MODE_TX_RESET_BRIEF,
+    NICINFO_MODE_TX_RESET_RUN,
+    NICINFO_MODE_TX_REARM,
+    NICINFO_MODE_TX_LIFECYCLE,
     NICINFO_MODE_TX_RAW,
     NICINFO_MODE_TX_RAW_DIRECT,
     NICINFO_MODE_TX_RAW_STATUS,
@@ -117,8 +129,22 @@ inline NicInfoMode nicinfo_mode_from_args(const char* arg1,
             ? NICINFO_MODE_TX_OWNER : NICINFO_MODE_INVALID;
     }
     if (nicinfo_token_equals(arg2, "reset")) {
+        if (!arg3 || *arg3 == '\0') return NICINFO_MODE_TX_RESET;
+        if (nicinfo_token_equals(arg3, "brief")) {
+            return NICINFO_MODE_TX_RESET_BRIEF;
+        }
+        if (nicinfo_token_equals(arg3, "run")) {
+            return NICINFO_MODE_TX_RESET_RUN;
+        }
+        return NICINFO_MODE_INVALID;
+    }
+    if (nicinfo_token_equals(arg2, "rearm")) {
         return (!arg3 || *arg3 == '\0')
-            ? NICINFO_MODE_TX_RESET : NICINFO_MODE_INVALID;
+            ? NICINFO_MODE_TX_REARM : NICINFO_MODE_INVALID;
+    }
+    if (nicinfo_token_equals(arg2, "lifecycle")) {
+        return (!arg3 || *arg3 == '\0')
+            ? NICINFO_MODE_TX_LIFECYCLE : NICINFO_MODE_INVALID;
     }
     if (!nicinfo_token_equals(arg2, "raw")) return NICINFO_MODE_INVALID;
     if (!arg3 || *arg3 == '\0') return NICINFO_MODE_TX_RAW;

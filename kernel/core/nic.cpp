@@ -100,6 +100,7 @@ static bool refresh_i219_reset_boundary(uint64_t mmioBase);
 static bool prepare_i219_reset(uint64_t mmioBase);
 static bool flush_i219_tx_ring(uint64_t mmioBase);
 static bool flush_i219_rx_ring(uint64_t mmioBase);
+static bool rearm_i219_after_reset(uint64_t mmioBase);
 
 #if ARCH_HAS_PORT_IO
 static uint16_t pci_read16(uint8_t bus, uint8_t dev, uint8_t func,
@@ -111,6 +112,7 @@ static TxRegisterSnapshot read_tx_registers()
     TxRegisterSnapshot snapshot = {};
 #if ARCH_HAS_PORT_IO
     if (!s_device.mmioMapped) return snapshot;
+    snapshot.status = mmio_read32(s_device.mmioBase, E1000_STATUS);
     snapshot.tdbal = mmio_read32(s_device.mmioBase, E1000_TDBAL);
     snapshot.tdbah = mmio_read32(s_device.mmioBase, E1000_TDBAH);
     snapshot.tdlen = mmio_read32(s_device.mmioBase, E1000_TDLEN);
@@ -1729,8 +1731,28 @@ static void retain_raw_tx_submission(Status result)
     raw.descriptorRaw1Final = s_device.tx.lastDescriptorRaw1Final;
 }
 
-static bool init_tx(uint64_t mmioBase)
+static bool init_tx(uint64_t mmioBase, bool postResetRearm = false)
 {
+    if (postResetRearm) {
+        const uint32_t currentTctl = mmio_read32(mmioBase, E1000_TCTL);
+        if (currentTctl == 0xFFFFFFFFu) {
+            s_device.resetDiagnostics.rearmFailure =
+                I219RearmFailureReason::RegisterDrift;
+            return false;
+        }
+        mmio_write32(mmioBase, E1000_TCTL,
+                     currentTctl & ~E1000_TCTL_EN);
+        const uint32_t disabledTctl = mmio_read32(mmioBase, E1000_TCTL);
+        s_device.resetDiagnostics.rearmTxDisabledBeforeBuild =
+            disabledTctl != 0xFFFFFFFFu &&
+            (disabledTctl & E1000_TCTL_EN) == 0u;
+        if (!s_device.resetDiagnostics.rearmTxDisabledBeforeBuild) {
+            s_device.resetDiagnostics.rearmFailure =
+                I219RearmFailureReason::RegisterDrift;
+            return false;
+        }
+    }
+
     s_device.tx.dmaMode = s_txDmaMode;
     s_device.tx.dmaRegionFlags = s_txDmaRegionFlags;
     s_device.tx.dmaRegionMemoryType = s_txDmaRegionMemoryType;
@@ -1875,6 +1897,26 @@ static bool init_tx(uint64_t mmioBase)
             s_device.tx.failureReason = TxFailureReason::RingInvalid;
         }
         return false;
+    }
+    if (postResetRearm) {
+        const TxRegisterSnapshot& readback = s_device.tx.initialRegisters;
+        const bool readbackValid =
+            readback.valid &&
+            tx_ring_registers_match(
+                readback, txDescPhys, tx_ring_length_bytes(NUM_TX_DESC)) &&
+            (readback.tdh & 0xFFFFu) == 0u &&
+            (readback.tdt & 0xFFFFu) == 0u &&
+            tx_engine_enabled(readback.tctl) &&
+            i219_spt_txdctl_configuration_valid(readback.txdctl) &&
+            i219_spt_txdctl_configuration_valid(readback.txdctl1) &&
+            readback.tipg == E1000_TIPG_DEFAULT &&
+            pci_dma_access_enabled(readback.pciCommand);
+        s_device.resetDiagnostics.rearmRegisterReadback = readbackValid;
+        if (!readbackValid) {
+            s_device.resetDiagnostics.rearmFailure =
+                I219RearmFailureReason::RingReadbackFailed;
+            return false;
+        }
     }
     s_device.txRingInitialized = true;
     return true;
@@ -2555,6 +2597,7 @@ static bool read_i219_reset_snapshot(uint64_t mmioBase,
     value.cfgE4 = pci_read16(s_device.pciBus, s_device.pciSlot,
                              s_device.pciFunc,
                              static_cast<uint8_t>(PCI_CONFIG_DESC_RING_STATUS));
+    value.status = mmio_read32(mmioBase, E1000_STATUS);
     value.tdbal = mmio_read32(mmioBase, E1000_TDBAL);
     value.tdbah = mmio_read32(mmioBase, E1000_TDBAH);
     value.tdlen = mmio_read32(mmioBase, E1000_TDLEN);
@@ -2853,6 +2896,202 @@ static bool prepare_i219_reset(uint64_t mmioBase)
     diagnostics.failure = I219ResetFailureReason::ResetHangStatePersists;
     diagnostics.strongerRecoveryRequired = true;
     return false;
+}
+
+static bool fail_i219_rearm(I219RearmFailureReason reason,
+                            const char* message)
+{
+    s_device.resetDiagnostics.rearmFailure = reason;
+    s_device.resetDiagnostics.rearmCompleted = false;
+    s_device.tx.ringPoisoned = true;
+    s_txPoisoned = true;
+    set_init_failure(NIC_INIT_TX_RING,
+                     i219_rearm_failure_reason_name(reason));
+    if (message) serial::puts(message);
+    return false;
+}
+
+// Rebuild the normal RX state at its existing static placement and then run
+// the explicit TX rearm. RX placement is intentionally not selected or
+// changed here; this is only the post-reset recovery prerequisite that keeps
+// the device from being published with a zeroed RX ring after a MAC reset.
+static bool rearm_i219_after_reset(uint64_t mmioBase)
+{
+    I219ResetDiagnostics& diagnostics = s_device.resetDiagnostics;
+    diagnostics.rearmAttempted = true;
+    diagnostics.rearmCompleted = false;
+    diagnostics.rearmPciDmaVerified = false;
+    diagnostics.rearmOwnershipRestored = false;
+    diagnostics.rearmRegisterReadback = false;
+    diagnostics.rearmRxRestored = false;
+    diagnostics.rearmTxDisabledBeforeBuild = false;
+    diagnostics.rearmFailure = I219RearmFailureReason::None;
+
+    if (!diagnostics.resetCompleted) {
+        return fail_i219_rearm(
+            I219RearmFailureReason::ResetNotCompleted,
+            "[AIDA-I219-P20] rearm=FAIL reset-not-completed\n");
+    }
+
+    const TxRegisterSnapshot before = read_tx_registers();
+    if (!before.valid || !pci_dma_access_enabled(before.pciCommand)) {
+        return fail_i219_rearm(
+            I219RearmFailureReason::PciMasterDisabled,
+            "[AIDA-I219-P20] rearm=FAIL pci-memory-or-bus-master-disabled\n");
+    }
+    diagnostics.rearmPciDmaVerified = true;
+
+    if (!tx_dma_experiment_active(s_txDmaMode) ||
+        !s_txDmaRegionHandoffValid) {
+        return fail_i219_rearm(
+            I219RearmFailureReason::DmaUnavailable,
+            "[AIDA-I219-P20] rearm=FAIL constrained-dma-unavailable\n");
+    }
+
+    // MAC reset is not permission to invent a new station-address write.
+    // Re-read the NVM-loaded RAR state and require the already-established
+    // physical MAC to survive before publishing either ring.
+    uint8_t resetMac[ETH_ALEN] = {};
+    s_device.macReadAttempted = true;
+    if (!read_mac_address(mmioBase, resetMac)) {
+        s_device.macValid = false;
+        return fail_i219_rearm(
+            I219RearmFailureReason::RegisterDrift,
+            "[AIDA-I219-P20] rearm=FAIL mac-readback\n");
+    }
+    bool macPreserved = true;
+    for (uint8_t i = 0; i < ETH_ALEN; ++i) {
+        if (resetMac[i] != s_device.macAddress[i]) {
+            macPreserved = false;
+            break;
+        }
+    }
+    if (!macPreserved) {
+        s_device.macValid = false;
+        return fail_i219_rearm(
+            I219RearmFailureReason::RegisterDrift,
+            "[AIDA-I219-P20] rearm=FAIL mac-drift\n");
+    }
+    s_device.macValid = true;
+
+    // Reassert the already-established SPT ownership mechanism before any
+    // ring programming. This preserves all unrelated CTRL_EXT bits and never
+    // writes FWSM or seizes SWFLAG.
+    if (i219_phase18_ownership_path_selected()) {
+        if (!acquire_i219_hw_control(mmioBase)) {
+            return fail_i219_rearm(
+                I219RearmFailureReason::HwControlNotRestored,
+                "[AIDA-I219-P20] rearm=FAIL drv-load-not-restored\n");
+        }
+        diagnostics.rearmOwnershipRestored =
+            s_device.hwControl.afterValid &&
+            s_device.hwControl.ownershipReadback &&
+            (s_device.hwControl.ctrlExtAfter & E1000_CTRL_EXT_DRV_LOAD) != 0u;
+        if (!diagnostics.rearmOwnershipRestored) {
+            return fail_i219_rearm(
+                I219RearmFailureReason::HwControlNotRestored,
+                "[AIDA-I219-P20] rearm=FAIL drv-load-readback\n");
+        }
+    } else {
+        diagnostics.rearmOwnershipRestored = true;
+    }
+
+    // A MAC reset clears the hardware ring programming. Make the software
+    // ownership state agree before reconstructing the unchanged RX ring and
+    // the constrained-low TX ring.
+    s_device.rxRingInitialized = false;
+    s_device.txRingInitialized = false;
+    s_device.tx.finalRegisters = {};
+    s_device.tx.beforeRegisters = {};
+    s_device.tx.preDoorbellRegisters = {};
+    s_device.tx.afterDoorbellRegisters = {};
+
+    s_device.initStage = NIC_INIT_RX_RING;
+    if (!init_rx(mmioBase)) {
+        diagnostics.rearmFailure = I219RearmFailureReason::RxRearmFailed;
+        return fail_i219_rearm(
+            I219RearmFailureReason::RxRearmFailed,
+            "[AIDA-I219-P20] rearm=FAIL rx-ring-rearm\n");
+    }
+    diagnostics.rearmRxRestored = true;
+
+    s_device.initStage = NIC_INIT_TX_RING;
+    if (!init_tx(mmioBase, true)) {
+        if (diagnostics.rearmFailure == I219RearmFailureReason::None) {
+            diagnostics.rearmFailure = I219RearmFailureReason::TxRearmFailed;
+        }
+        return fail_i219_rearm(
+            diagnostics.rearmFailure == I219RearmFailureReason::None
+                ? I219RearmFailureReason::TxRearmFailed
+                : diagnostics.rearmFailure,
+            "[AIDA-I219-P20] rearm=FAIL tx-ring-rearm\n");
+    }
+
+    if (i219_phase18_ownership_path_selected() &&
+        !verify_i219_hw_control_final(mmioBase)) {
+        return fail_i219_rearm(
+            I219RearmFailureReason::HwControlNotRestored,
+            "[AIDA-I219-P20] rearm=FAIL ownership-drift\n");
+    }
+
+    diagnostics.rearmCompleted = true;
+    diagnostics.rearmFailure = I219RearmFailureReason::None;
+    s_device.initStage = NIC_INIT_READY;
+    s_device.tx.ringPoisoned = false;
+    s_txPoisoned = false;
+    serial::puts("[AIDA-I219-P20] rearm=PASS rx-same-placement tx-complete\n");
+    return true;
+}
+
+bool run_i219_post_reset_rearm()
+{
+    if (!s_initialised || !is_i219_device(s_device.deviceId) ||
+        !s_device.mmioMapped || s_device.mmioBase == 0u) {
+        return false;
+    }
+    const bool wasActive = s_device.active;
+    const bool wasReady = s_device.driverReady;
+    const bool wasRegistered = s_device.nicRegistered;
+    const bool wasPolling = s_device.pollingEnabled;
+    const bool result = rearm_i219_after_reset(s_device.mmioBase);
+    if (result) {
+        s_device.active = wasActive;
+        s_device.driverReady = wasReady;
+        s_device.nicRegistered = wasRegistered;
+        s_device.pollingEnabled = wasPolling;
+    }
+    return result;
+}
+
+bool run_i219_reset_and_rearm()
+{
+    if (!s_initialised || !is_i219_device(s_device.deviceId) ||
+        !s_device.mmioMapped || s_device.mmioBase == 0u ||
+        !i219_phase7_path_selected()) {
+        return false;
+    }
+
+    const bool wasActive = s_device.active;
+    const bool wasReady = s_device.driverReady;
+    const bool wasRegistered = s_device.nicRegistered;
+    const bool wasPolling = s_device.pollingEnabled;
+    if (!i219_pch_reset(s_device.mmioBase)) return false;
+
+    if (i219_phase18_ownership_path_selected()) {
+        if (!capture_i219_hw_control_after_reset(s_device.mmioBase) ||
+            !acquire_i219_hw_control(s_device.mmioBase)) {
+            return false;
+        }
+    }
+
+    const bool result = rearm_i219_after_reset(s_device.mmioBase);
+    if (result) {
+        s_device.active = wasActive;
+        s_device.driverReady = wasReady;
+        s_device.nicRegistered = wasRegistered;
+        s_device.pollingEnabled = wasPolling;
+    }
+    return result;
 }
 
 #if !ARCH_HAS_PORT_IO
