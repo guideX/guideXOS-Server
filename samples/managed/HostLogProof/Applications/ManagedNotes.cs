@@ -468,7 +468,13 @@ public sealed class ManagedNotes : GuideXosApplication
     private const int C120SaveAsControlId = 3;
 #if HOSTLOGPROOF_C121_MANAGED_CHECKBOX
     private const int C121ShowPathControlId = 4;
+#if HOSTLOGPROOF_C124_MANAGED_RADIO_BUTTON
+    private const int C124FullPathControlId = 5;
+    private const int C124FileNameControlId = 6;
+    private const int C120DocumentControlId = 7;
+#else
     private const int C120DocumentControlId = 5;
+#endif
 #else
     private const int C120DocumentControlId = 4;
 #endif
@@ -506,6 +512,20 @@ public sealed class ManagedNotes : GuideXosApplication
     private bool _c123SeparatorHostTestContext;
     private bool _c123SeparatorTestsRun;
     private bool _c123SeparatorHostTestsRun;
+#if HOSTLOGPROOF_C124_MANAGED_RADIO_BUTTON
+    private const uint C124DisableFileNameKey = 0x300u;
+    private const uint C124EnableFileNameKey = 0x301u;
+    private readonly GuideXosRadioGroup _pathDisplayGroup = new(2);
+    private readonly GuideXosRadioButton _fullPathRadio =
+        new(20, 256, 128, 28, "Full path");
+    private readonly GuideXosRadioButton _fileNameRadio =
+        new(160, 256, 128, 28, "File name");
+    private bool _c124ProofContext;
+    private bool _c124RadioTestContext;
+    private bool _c124RadioHostTestContext;
+    private bool _c124RadioTestsRun;
+    private bool _c124RadioHostTestsRun;
+#endif
 #endif
 #endif
 #endif
@@ -548,6 +568,12 @@ public sealed class ManagedNotes : GuideXosApplication
         _c123ProofContext = IsC123Context(host);
         _c123SeparatorTestContext = IsC123SeparatorTestContext(host);
         _c123SeparatorHostTestContext = IsC123SeparatorHostTestContext(host);
+#if HOSTLOGPROOF_C124_MANAGED_RADIO_BUTTON
+        _c124ProofContext = IsC124Context(host);
+        _c124RadioTestContext = IsC124RadioTestContext(host);
+        _c124RadioHostTestContext = IsC124RadioHostTestContext(host);
+        _c123ProofContext = _c123ProofContext || _c124ProofContext;
+#endif
         _c122ProofContext = _c122ProofContext || _c123ProofContext;
 #endif
         if (_c122ProofContext || _c122LabelTestContext || _c122LabelHostTestContext)
@@ -559,6 +585,18 @@ public sealed class ManagedNotes : GuideXosApplication
             _c123SeparatorHostTestContext)
         {
             _separator.Reset();
+        }
+#endif
+#if HOSTLOGPROOF_C124_MANAGED_RADIO_BUTTON
+        if (_c124ProofContext || _c124RadioTestContext ||
+            _c124RadioHostTestContext)
+        {
+            _pathDisplayGroup.Reset();
+            _fullPathRadio.Reset();
+            _fileNameRadio.Reset();
+            _pathDisplayGroup.TryRegister(_fullPathRadio);
+            _pathDisplayGroup.TryRegister(_fileNameRadio);
+            _pathDisplayGroup.TrySelect(_fullPathRadio);
         }
 #endif
 #endif
@@ -573,10 +611,13 @@ public sealed class ManagedNotes : GuideXosApplication
             }
 #endif
             _mainControlHost = new GuideXosControlHost(
+#if HOSTLOGPROOF_C124_MANAGED_RADIO_BUTTON
+                _c124ProofContext ? 7 :
+#endif
 #if HOSTLOGPROOF_C121_MANAGED_CHECKBOX
                 _c121ProofContext ? 5 : 4);
 #else
-                4);
+            4);
 #endif
             _mainControlHost.Reset();
             _mainControlHost.TryRegisterButton(C120OpenControlId, _openButton);
@@ -589,20 +630,37 @@ public sealed class ManagedNotes : GuideXosApplication
                     C121ShowPathControlId, _showPathCheckBox);
             }
 #endif
+#if HOSTLOGPROOF_C124_MANAGED_RADIO_BUTTON
+            if (_c124ProofContext)
+            {
+                _mainControlHost.TryRegisterRadioButton(
+                    C124FullPathControlId, _fullPathRadio);
+                _mainControlHost.TryRegisterRadioButton(
+                    C124FileNameControlId, _fileNameRadio);
+            }
+#endif
             _mainControlHost.TryRegisterTextArea(C120DocumentControlId, _textArea);
             if (host.LaunchContext.Utf8.SequenceEqual("c120-disabled"u8))
             {
                 _saveButton.SetEnabled(false);
             }
-            bool hostRegistration = _mainControlHost.RegistrationCount ==
-#if HOSTLOGPROOF_C121_MANAGED_CHECKBOX
-                (_c121ProofContext ? 5 : 4) &&
-#else
-                4 &&
+            int expectedHostRegistration =
+#if HOSTLOGPROOF_C124_MANAGED_RADIO_BUTTON
+                _c124ProofContext ? 7 :
 #endif
-                _mainControlHost.ActiveIndex == -1;
 #if HOSTLOGPROOF_C121_MANAGED_CHECKBOX
-            if (_c121ProofContext)
+                _c121ProofContext ? 5 : 4;
+#else
+                4;
+#endif
+            bool hostRegistration = _mainControlHost.RegistrationCount ==
+                expectedHostRegistration && _mainControlHost.ActiveIndex == -1;
+#if HOSTLOGPROOF_C121_MANAGED_CHECKBOX
+            if (_c121ProofContext
+#if HOSTLOGPROOF_C124_MANAGED_RADIO_BUTTON
+                && !_c124ProofContext
+#endif
+                )
             {
                 host.TryLog(hostRegistration
                     ? "C121-HOST registration=5 initial=no-focus result=PASS"u8
@@ -616,11 +674,24 @@ public sealed class ManagedNotes : GuideXosApplication
                     : "C120-HOST registration=FAIL initial=FAIL result=FAIL"u8);
             }
 #if HOSTLOGPROOF_C123_MANAGED_SEPARATOR
-            if (_c123ProofContext)
+            if (_c123ProofContext
+#if HOSTLOGPROOF_C124_MANAGED_RADIO_BUTTON
+                && !_c124ProofContext
+#endif
+                )
             {
                 host.TryLog(hostRegistration
                     ? "C123-HOST registration=5 initial=no-focus result=PASS"u8
                     : "C123-HOST registration=FAIL initial=FAIL result=FAIL"u8);
+            }
+#endif
+#if HOSTLOGPROOF_C124_MANAGED_RADIO_BUTTON
+            if (_c124ProofContext)
+            {
+                host.TryLog(hostRegistration &&
+                    _mainControlHost.RegistrationCount == 7
+                    ? "C124-HOST registration=7 initial=no-focus result=PASS"u8
+                    : "C124-HOST registration=FAIL initial=FAIL result=FAIL"u8);
             }
 #endif
         }
@@ -695,6 +766,9 @@ public sealed class ManagedNotes : GuideXosApplication
             || _c122LabelTestContext || _c122LabelHostTestContext
 #if HOSTLOGPROOF_C123_MANAGED_SEPARATOR
             || _c123SeparatorTestContext || _c123SeparatorHostTestContext
+#if HOSTLOGPROOF_C124_MANAGED_RADIO_BUTTON
+            || _c124RadioTestContext || _c124RadioHostTestContext
+#endif
 #endif
 #endif
             )
@@ -806,6 +880,19 @@ public sealed class ManagedNotes : GuideXosApplication
         {
             _c123SeparatorTestsRun = true;
         }
+#if HOSTLOGPROOF_C124_MANAGED_RADIO_BUTTON
+        bool radioHostTests = _c124RadioHostTestContext &&
+            !_c124RadioHostTestsRun
+            ? GuideXosRadioButtonHostTests.Run(host) : true;
+        bool radioButtonTests = _c124RadioTestContext &&
+            !_c124RadioTestsRun
+            ? GuideXosRadioButtonTests.Run(host, surface) : true;
+        bool radioGroupTests = _c124RadioTestContext &&
+            !_c124RadioTestsRun
+            ? GuideXosRadioGroupTests.Run(host) : true;
+        if (_c124RadioHostTestContext) _c124RadioHostTestsRun = true;
+        if (_c124RadioTestContext) _c124RadioTestsRun = true;
+#endif
 #endif
 #endif
 #endif
@@ -827,6 +914,9 @@ public sealed class ManagedNotes : GuideXosApplication
 #endif
 #if HOSTLOGPROOF_C123_MANAGED_SEPARATOR
             && separatorTests && separatorHostTests
+#endif
+#if HOSTLOGPROOF_C124_MANAGED_RADIO_BUTTON
+            && radioButtonTests && radioGroupTests && radioHostTests
 #endif
             ? GuideXosResult.Success : GuideXosResult.InvalidArgument;
     }
@@ -853,6 +943,10 @@ public sealed class ManagedNotes : GuideXosApplication
 #if HOSTLOGPROOF_C123_MANAGED_SEPARATOR
             || host.LaunchContext.Utf8.SequenceEqual("c123-notes"u8) ||
             host.LaunchContext.Utf8.SequenceEqual("c123-disabled"u8)
+#if HOSTLOGPROOF_C124_MANAGED_RADIO_BUTTON
+            || host.LaunchContext.Utf8.SequenceEqual("c124-notes"u8) ||
+            host.LaunchContext.Utf8.SequenceEqual("c124-disabled"u8)
+#endif
 #endif
 #endif
             ;
@@ -871,6 +965,10 @@ public sealed class ManagedNotes : GuideXosApplication
 #if HOSTLOGPROOF_C123_MANAGED_SEPARATOR
             || host.LaunchContext.Utf8.SequenceEqual("c123-notes"u8) ||
             host.LaunchContext.Utf8.SequenceEqual("c123-disabled"u8)
+#if HOSTLOGPROOF_C124_MANAGED_RADIO_BUTTON
+            || host.LaunchContext.Utf8.SequenceEqual("c124-notes"u8) ||
+            host.LaunchContext.Utf8.SequenceEqual("c124-disabled"u8)
+#endif
 #endif
 #endif
             ;
@@ -884,6 +982,9 @@ public sealed class ManagedNotes : GuideXosApplication
             || IsC122Context(host)
 #if HOSTLOGPROOF_C123_MANAGED_SEPARATOR
             || IsC123Context(host)
+#if HOSTLOGPROOF_C124_MANAGED_RADIO_BUTTON
+            || IsC124Context(host)
+#endif
 #endif
 #endif
             ;
@@ -929,6 +1030,23 @@ public sealed class ManagedNotes : GuideXosApplication
     {
         return host.LaunchContext.Utf8.SequenceEqual("c123-separator-host-tests"u8);
     }
+#if HOSTLOGPROOF_C124_MANAGED_RADIO_BUTTON
+    private static bool IsC124Context(GuideXosHost host)
+    {
+        return host.LaunchContext.Utf8.SequenceEqual("c124-notes"u8) ||
+            host.LaunchContext.Utf8.SequenceEqual("c124-disabled"u8);
+    }
+
+    private static bool IsC124RadioTestContext(GuideXosHost host)
+    {
+        return host.LaunchContext.Utf8.SequenceEqual("c124-radio-tests"u8);
+    }
+
+    private static bool IsC124RadioHostTestContext(GuideXosHost host)
+    {
+        return host.LaunchContext.Utf8.SequenceEqual("c124-radio-host-tests"u8);
+    }
+#endif
 #endif
 #endif
 #endif
@@ -1063,6 +1181,14 @@ public sealed class ManagedNotes : GuideXosApplication
                 ? GuideXosResult.Success : GuideXosResult.InvalidArgument;
         }
 #endif
+#if HOSTLOGPROOF_C124_MANAGED_RADIO_BUTTON
+        if (_c124ProofContext && input.Kind == GuideXosInputKind.KeyDown &&
+            HandleC124RadioProofKey(input.KeyCode))
+        {
+            return RenderMain(host, surface, _launchCount)
+                ? GuideXosResult.Success : GuideXosResult.InvalidArgument;
+        }
+#endif
 
         if (input.Kind == GuideXosInputKind.PointerDown)
         {
@@ -1086,6 +1212,20 @@ public sealed class ManagedNotes : GuideXosApplication
                     ? "C121-POINTER state=checked result=PASS"u8
                     : "C121-POINTER state=unchecked result=PASS"u8);
                 return RenderMain(host, surface, _launchCount)
+                    ? GuideXosResult.Success : GuideXosResult.InvalidArgument;
+            }
+#endif
+#if HOSTLOGPROOF_C124_MANAGED_RADIO_BUTTON
+            if (_c124ProofContext &&
+                (controlId == C124FullPathControlId ||
+                    controlId == C124FileNameControlId) &&
+                pointerResult == GuideXosControlHostResult.Changed)
+            {
+                bool labelUpdated = UpdatePathLabel();
+                host.TryLog(labelUpdated
+                    ? "C124-POINTER selection=PASS exact-once=PASS"u8
+                    : "C124-POINTER selection=FAIL exact-once=FAIL"u8);
+                return labelUpdated && RenderMain(host, surface, _launchCount)
                     ? GuideXosResult.Success : GuideXosResult.InvalidArgument;
             }
 #endif
@@ -1137,6 +1277,21 @@ public sealed class ManagedNotes : GuideXosApplication
                 ? GuideXosResult.Success : GuideXosResult.InvalidArgument;
         }
 #endif
+#if HOSTLOGPROOF_C124_MANAGED_RADIO_BUTTON
+        if (_c124ProofContext &&
+            (_mainControlHost.ActiveControlId == C124FullPathControlId ||
+                _mainControlHost.ActiveControlId == C124FileNameControlId) &&
+            (routeResult == GuideXosControlHostResult.Changed ||
+                routeResult == GuideXosControlHostResult.Moved))
+        {
+            bool labelUpdated = UpdatePathLabel();
+            host.TryLog(input.Kind == GuideXosInputKind.KeyChar
+                ? "C124-SPACE selection=PASS exact-once=PASS"u8
+                : "C124-ARROW selection=PASS host-focus=PASS"u8);
+            return labelUpdated && RenderMain(host, surface, _launchCount)
+                ? GuideXosResult.Success : GuideXosResult.InvalidArgument;
+        }
+#endif
         if (routeResult == GuideXosControlHostResult.Changed ||
             routeResult == GuideXosControlHostResult.Moved)
         {
@@ -1166,6 +1321,16 @@ public sealed class ManagedNotes : GuideXosApplication
         if (x >= 330 && x < 458 && y >= 220 && y < 248)
         {
             return C121ShowPathControlId;
+        }
+#endif
+#if HOSTLOGPROOF_C124_MANAGED_RADIO_BUTTON
+        if (x >= 20 && x < 148 && y >= 256 && y < 284)
+        {
+            return C124FullPathControlId;
+        }
+        if (x >= 160 && x < 288 && y >= 256 && y < 284)
+        {
+            return C124FileNameControlId;
         }
 #endif
         if (x >= 20 && x < 20 + 48 * 8 && y >= 72 && y < 72 + 4 * 18)
@@ -1215,6 +1380,26 @@ public sealed class ManagedNotes : GuideXosApplication
     {
         _separator.SetVisible(visible);
         return true;
+    }
+#endif
+#if HOSTLOGPROOF_C124_MANAGED_RADIO_BUTTON
+    private bool HandleC124RadioProofKey(uint keyCode)
+    {
+        if (keyCode == C124DisableFileNameKey)
+        {
+            _fileNameRadio.SetEnabled(false);
+            _mainControlHost.TryFocus(C124FullPathControlId);
+            UpdatePathLabel();
+            return true;
+        }
+        if (keyCode == C124EnableFileNameKey)
+        {
+            _fileNameRadio.SetEnabled(true);
+            _mainControlHost.TryFocus(C124FullPathControlId);
+            UpdatePathLabel();
+            return true;
+        }
+        return false;
     }
 #endif
 #endif
@@ -1577,7 +1762,12 @@ public sealed class ManagedNotes : GuideXosApplication
             GuideXosFilePickerResult c118Result = _picker.SaveFile(
                 host, surface, GuideXosFilePickerOptions.Save(
                     "/system/apps", "Save document", ".TXT", c118Suggestion,
-                    true, _useTextInput, _c120ProofContext));
+                    true, _useTextInput,
+#if HOSTLOGPROOF_C120_MANAGED_CONTROL_HOST
+                    _c120ProofContext));
+#else
+                    false));
+#endif
             return c118Result.Status;
         }
 #endif
@@ -1623,14 +1813,31 @@ public sealed class ManagedNotes : GuideXosApplication
     {
         Span<char> line = stackalloc char[GuideXosLabel.DefaultMaximumTextLength];
         ReadOnlySpan<char> prefix = "Path: ".AsSpan();
-        if (_currentPath.Length > line.Length - prefix.Length)
+        ReadOnlySpan<char> displayPath =
+#if HOSTLOGPROOF_C124_MANAGED_RADIO_BUTTON
+            DisplayPath();
+#else
+            _currentPath.AsSpan();
+#endif
+        if (displayPath.Length > line.Length - prefix.Length)
         {
             return false;
         }
         prefix.CopyTo(line);
-        _currentPath.AsSpan().CopyTo(line[prefix.Length..]);
-        return _pathLabel.SetText(line[..(prefix.Length + _currentPath.Length)]);
+        displayPath.CopyTo(line[prefix.Length..]);
+        return _pathLabel.SetText(line[..(prefix.Length + displayPath.Length)]);
     }
+
+#if HOSTLOGPROOF_C124_MANAGED_RADIO_BUTTON
+    private ReadOnlySpan<char> DisplayPath()
+    {
+        if (_fullPathRadio.Selected) return _currentPath.AsSpan();
+        int separator = _currentPath.LastIndexOf('/');
+        return separator >= 0
+            ? _currentPath.AsSpan(separator + 1)
+            : _currentPath.AsSpan();
+    }
+#endif
 
     private bool RenderPathLabel(GuideXosSurface surface)
     {
@@ -1669,6 +1876,12 @@ public sealed class ManagedNotes : GuideXosApplication
 #if HOSTLOGPROOF_C121_MANAGED_CHECKBOX
             (!_c121ProofContext || _showPathCheckBox.Render(surface) ==
                 GuideXosResult.Success) &&
+#if HOSTLOGPROOF_C124_MANAGED_RADIO_BUTTON
+            (!_c124ProofContext || _fullPathRadio.Render(surface) ==
+                GuideXosResult.Success) &&
+            (!_c124ProofContext || _fileNameRadio.Render(surface) ==
+                GuideXosResult.Success) &&
+#endif
 #endif
 #else
             surface.TryAddButton(20, 220, 90, 28, "Open"u8, 20u, out _) == GuideXosResult.Success &&

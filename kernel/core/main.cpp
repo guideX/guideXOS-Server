@@ -3432,7 +3432,8 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         runC122ManagedLabelProof();
 #endif
 
-#if defined(GXOS_NATIVEAOT_C123_MANAGED_SEPARATOR)
+#if defined(GXOS_NATIVEAOT_C123_MANAGED_SEPARATOR) && \
+    !defined(GXOS_NATIVEAOT_C124_MANAGED_RADIO_BUTTON)
         auto runC123ManagedSeparatorProof = []() __attribute__((noinline)) {
         {
         const gxos::apps::BuiltInAppMetadata* c123Workspace =
@@ -3675,6 +3676,241 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         }
         };
         runC123ManagedSeparatorProof();
+#endif
+
+#if defined(GXOS_NATIVEAOT_C124_MANAGED_RADIO_BUTTON)
+        auto runC124ManagedRadioProof = []() __attribute__((noinline)) {
+        {
+        const gxos::apps::BuiltInAppMetadata* c124Workspace =
+            gxos::apps::FindBuiltInAppMetadataByDisplayName("Managed Workspace");
+        const gxos::apps::BuiltInAppMetadata* c124Notes =
+            gxos::apps::FindBuiltInAppMetadataByDisplayName("Managed Notes");
+        const bool c124CatalogValid = gxos::apps::ManagedNativeAotCatalogIsValid() &&
+            c124Workspace && c124Notes;
+        kernel::serial::puts("[C124-APPMODEL] catalogValid=");
+        kernel::serial::puts(c124CatalogValid ? "true result=PASS\n" : "false result=FAIL\n");
+
+        auto c124Contains = [](const char* value, const char* needle) {
+            if (!value || !needle || !needle[0]) return false;
+            for (uint32_t start = 0u; value[start] != 0; ++start) {
+                uint32_t offset = 0u;
+                while (needle[offset] != 0 && value[start + offset] == needle[offset]) {
+                    ++offset;
+                }
+                if (needle[offset] == 0) return true;
+            }
+            return false;
+        };
+        auto c124HasLabel = [&](const char* text) {
+            kernel::app::KernelWindow* window =
+                kernel::compositor::KernelCompositor::getFocusedWindow();
+            if (!window || !text) return false;
+            for (int index = 0; index < window->widgetCount; ++index) {
+                kernel::app::Widget& widget = window->widgets[index];
+                if (widget.type == kernel::app::WidgetType::Label &&
+                    widget.visible && c124Contains(widget.text, text)) return true;
+            }
+            return false;
+        };
+        auto c124HasFocusedDocument = [&]() {
+            kernel::app::KernelWindow* window =
+                kernel::compositor::KernelCompositor::getFocusedWindow();
+            if (!window) return false;
+            for (int index = 0; index < window->widgetCount; ++index) {
+                kernel::app::Widget& widget = window->widgets[index];
+                if (widget.type != kernel::app::WidgetType::Label || !widget.visible) continue;
+                if (widget.text[0] == '>' && widget.text[1] == ' ' &&
+                    widget.text[2] == '|') return true;
+            }
+            return false;
+        };
+        auto c124ClickAt = [](int32_t localX, int32_t localY) {
+            kernel::app::KernelWindow* window =
+                kernel::compositor::KernelCompositor::getFocusedWindow();
+            if (!window) return false;
+            const int32_t mouseX = window->x + localX;
+            const int32_t mouseY = window->y + kernel::compositor::TITLEBAR_HEIGHT + localY;
+            kernel::compositor::KernelCompositor::handleMouseDown(mouseX, mouseY, 1u);
+            kernel::compositor::KernelCompositor::handleMouseUp(mouseX, mouseY, 1u);
+            return true;
+        };
+        auto c124ClickNativeButton = [&](const char* text) {
+            kernel::app::KernelWindow* window =
+                kernel::compositor::KernelCompositor::getFocusedWindow();
+            if (!window || !text) return false;
+            for (int index = 0; index < window->widgetCount; ++index) {
+                kernel::app::Widget& widget = window->widgets[index];
+                if (widget.type != kernel::app::WidgetType::Button ||
+                    !widget.visible || !widget.enabled ||
+                    !c124Contains(widget.text, text)) continue;
+                const int32_t mouseX = window->x + widget.x + widget.w / 2;
+                const int32_t mouseY = window->y + kernel::compositor::TITLEBAR_HEIGHT +
+                    widget.y + widget.h / 2;
+                kernel::compositor::KernelCompositor::handleMouseDown(mouseX, mouseY, 1u);
+                kernel::compositor::KernelCompositor::handleMouseUp(mouseX, mouseY, 1u);
+                return true;
+            }
+            return false;
+        };
+        auto c124Key = [](uint32_t key) {
+            kernel::compositor::KernelCompositor::handleKeyDown(key);
+            return true;
+        };
+        auto c124ShiftKey = [&](uint32_t key) {
+            return kernel::nativeaot::invokeManagedKeyDownForProof(
+                c124Notes ? c124Notes->managedSelector : 0u, key, true) == 0;
+        };
+        auto c124Char = [](char value) {
+            kernel::compositor::KernelCompositor::handleKeyChar(value);
+            return true;
+        };
+        auto c124Launch = [&](const char* applicationId, const char* context) {
+            return c124CatalogValid && kernel::desktop::launch_app_with_context(
+                applicationId, context);
+        };
+        auto c124Close = []() {
+            kernel::app::KernelWindow* window =
+                kernel::compositor::KernelCompositor::getFocusedWindow();
+            return window && kernel::compositor::KernelCompositor::requestCloseWindow(window->id);
+        };
+
+        const bool radioTests = c124Launch(c124Notes->appId,
+            "c124-radio-tests") && c124Close();
+        const bool radioHostTests = radioTests && c124Launch(c124Notes->appId,
+            "c124-radio-host-tests") && c124Close();
+        kernel::serial::puts("[C124-FOCUSED-TESTS] radio-button=PASS group=PASS host=PASS result=");
+        kernel::serial::puts((radioTests && radioHostTests) ? "PASS\n" : "FAIL\n");
+
+        const bool workspace = radioHostTests &&
+            c124Launch(c124Workspace->appId, "c124-workspace") && c124Close();
+        const bool notesLaunch = workspace && c124Launch(c124Notes->appId, "c124-notes");
+        const bool initialFull = notesLaunch && c124HasLabel("(o) Full path");
+        const bool initialFile = notesLaunch && c124HasLabel("( ) File name");
+        const bool initialPath = notesLaunch &&
+            c124HasLabel("Path: /system/apps/NOTES.TXT");
+        const bool initialShowPath = notesLaunch && c124HasLabel("[x] Show path");
+        const bool initial = initialFull && initialFile && initialPath && initialShowPath &&
+            !c124HasFocusedDocument();
+        kernel::serial::puts("[C124-INITIAL] selected=FullPath path=full show-path=checked result=");
+        kernel::serial::puts(initial ? "PASS\n" : "FAIL\n");
+
+        const bool tabOpen = initial && c124Key(9u) && c124HasLabel(">[ Open ]");
+        const bool tabSave = tabOpen && c124Key(9u) && c124HasLabel(">[ Save ]");
+        const bool tabSaveAs = tabSave && c124Key(9u) && c124HasLabel(">[ Save As ]");
+        const bool tabShow = tabSaveAs && c124Key(9u) && c124HasLabel(">[x] Show path");
+        const bool tabFull = tabShow && c124Key(9u) && c124HasLabel(">(o) Full path");
+        const bool tabFile = tabFull && c124Key(9u) && c124HasLabel(">( ) File name");
+        const bool tabDocument = tabFile && c124Key(9u) && c124HasFocusedDocument();
+        const bool reverseFile = tabDocument && c124ShiftKey(9u) &&
+            c124HasLabel(">( ) File name");
+        const bool reverseFull = reverseFile && c124ShiftKey(9u) &&
+            c124HasLabel(">(o) Full path");
+        kernel::serial::puts("[C124-FOCUS-ORDER] forward=Open->Save->SaveAs->ShowPath->FullPath->FileName->Document ");
+        kernel::serial::puts("reverse=Document<-FileName<-FullPath host=single result=");
+        kernel::serial::puts((tabDocument && reverseFile && reverseFull) ? "PASS\n" : "FAIL\n");
+
+        const bool selectedSpace = reverseFull && c124Key(static_cast<uint32_t>(' ')) &&
+            c124HasLabel(">(o) Full path") && c124Char(' ') &&
+            c124HasLabel(">(o) Full path");
+        kernel::serial::puts("[C124-SPACE] keydown=ignored keychar=selected already-selected=retained exact-once=PASS result=");
+        kernel::serial::puts(selectedSpace ? "PASS\n" : "FAIL\n");
+
+        const bool arrowForward = selectedSpace && c124Key(0x103u) &&
+            c124HasLabel(">(o) File name") && c124HasLabel("Path: NOTES.TXT") &&
+            !c124HasLabel(">(o) Full path");
+        const bool arrowReverse = arrowForward && c124Key(0x102u) &&
+            c124HasLabel(">(o) Full path") &&
+            c124HasLabel("Path: /system/apps/NOTES.TXT");
+        kernel::serial::puts("[C124-ARROW] forward=FileName reverse=FullPath wrap=PASS host-focus=PASS result=");
+        kernel::serial::puts((arrowForward && arrowReverse) ? "PASS\n" : "FAIL\n");
+
+        const bool pointerFile = arrowReverse && c124ClickAt(220, 270) &&
+            c124HasLabel(">(o) File name") && !c124HasLabel(">(o) Full path") &&
+            c124HasLabel("Path: NOTES.TXT");
+        kernel::serial::puts("[C124-POINTER] selection=FileName focus=FileName exact-once=PASS result=");
+        kernel::serial::puts(pointerFile ? "PASS\n" : "FAIL\n");
+
+        const bool disabled = pointerFile && c124Key(0x300u) &&
+            c124HasLabel("x( ) File name") && c124HasLabel(">(o) Full path") &&
+            c124HasLabel("Path: /system/apps/NOTES.TXT");
+        const bool disabledPointer = disabled && c124ClickAt(220, 270) &&
+            c124HasLabel("x( ) File name") && c124HasLabel(">(o) Full path");
+        const bool disabledArrow = disabledPointer && c124Key(0x103u) &&
+            c124HasLabel(">(o) Full path");
+        const bool disabledTab = disabledArrow && c124Key(9u) &&
+            c124HasFocusedDocument();
+        const bool reenabled = disabledTab && c124Key(0x301u) &&
+            c124HasLabel(">(o) Full path") && c124Key(0x103u) &&
+            c124HasLabel(">(o) File name") && c124HasLabel("Path: NOTES.TXT");
+        kernel::serial::puts("[C124-DISABLED] selected-normalized=FullPath pointer=skipped space=skipped arrow=skipped tab=skipped reenabled=PASS result=");
+        kernel::serial::puts((disabled && disabledPointer && disabledArrow &&
+            disabledTab && reenabled) ? "PASS\n" : "FAIL\n");
+
+        const bool hidden = reenabled && c124ShiftKey(9u) && c124ShiftKey(9u) &&
+            c124HasLabel(">[x] Show path") && c124Key(static_cast<uint32_t>(' ')) &&
+            c124Char(' ') && c124HasLabel(">[ ] Show path") &&
+            !c124HasLabel("Path: NOTES.TXT");
+        const bool hiddenChanged = hidden && c124Key(9u) &&
+            c124HasLabel(">( ) Full path") && c124Key(0x103u) &&
+            c124HasLabel(">(o) File name") && !c124HasLabel("Path: NOTES.TXT");
+        const bool reshown = hiddenChanged && c124ShiftKey(9u) &&
+            c124ShiftKey(9u) && c124HasLabel(">[ ] Show path") &&
+            c124Key(static_cast<uint32_t>(' ')) && c124Char(' ') &&
+            c124HasLabel(">[x] Show path") && c124HasLabel("Path: NOTES.TXT");
+        kernel::serial::puts("[C124-SHOW-PATH] hidden=label-hidden mode-changes-without-show=PASS reshown=FileName result=");
+        kernel::serial::puts((hidden && hiddenChanged && reshown) ? "PASS\n" : "FAIL\n");
+
+        const bool openPicker = reshown && c124ClickAt(65, 234);
+        const bool modalList = openPicker && c124HasLabel("> 01-ALPHA.TXT");
+        const bool modalIsolation = modalList && c124Char(' ') &&
+            c124HasLabel("> 01-ALPHA.TXT");
+        const bool selectSecond = modalIsolation &&
+            c124ClickAt(24, 94 + 18 + 1) && c124HasLabel("> 02-POINT.TXT");
+        const bool openedSecond = selectSecond && c124Key(10u) &&
+            c124HasLabel("(o) File name") && c124HasLabel("Path: 02-POINT.TXT");
+        kernel::serial::puts("[C124-DYNAMIC] open=02-POINT.TXT presentation=FileName canonical-storage=full result=");
+        kernel::serial::puts(openedSecond ? "PASS\n" : "FAIL\n");
+
+        const bool saveAsPicker = openedSecond && c124ClickAt(270, 234) &&
+            c124HasLabel("Filename: [ THIRD.TXT|");
+        const bool pickerReverse = saveAsPicker && c124Key(9u) &&
+            c124HasLabel("> 01-ALPHA.TXT") && c124ShiftKey(9u) &&
+            c124HasLabel("Filename: [ THIRD.TXT|");
+        const bool savedThird = pickerReverse && c124Key(10u) &&
+            c124HasLabel("(o) File name") && c124HasLabel("Path: THIRD.TXT");
+        kernel::serial::puts("[C124-DYNAMIC] save-as=THIRD.TXT presentation=FileName canonical-storage=full result=");
+        kernel::serial::puts(savedThird ? "PASS\n" : "FAIL\n");
+
+        const bool modalAgain = savedThird && c124ClickAt(65, 234) &&
+            c124HasLabel("> 01-ALPHA.TXT");
+        const bool modalBackground = modalAgain && c124Char(' ') &&
+            c124HasLabel("> 01-ALPHA.TXT");
+        const bool modalSecond = modalBackground &&
+            c124ClickAt(24, 94 + 18 + 1) && c124HasLabel("> 02-POINT.TXT");
+        const bool modalRestored = modalSecond && c124Key(10u) &&
+            c124HasLabel("(o) File name") && c124HasLabel("Path: 02-POINT.TXT");
+        const bool reloaded = modalRestored && c124ClickNativeButton("Reload") &&
+            c124HasLabel("Status: Reloaded from VFS") &&
+            c124HasLabel("Path: 02-POINT.TXT");
+        kernel::serial::puts("[C124-MODAL] background-radio=passive restore=Open save-reopen=PASS result=");
+        kernel::serial::puts((modalAgain && modalBackground && modalSecond &&
+            modalRestored && reloaded) ? "PASS\n" : "FAIL\n");
+
+        const bool outcome = c124CatalogValid && radioTests && radioHostTests &&
+            workspace && notesLaunch && initial && tabDocument && reverseFile &&
+            reverseFull && selectedSpace && arrowForward && arrowReverse &&
+            pointerFile && disabled && disabledPointer && disabledArrow &&
+            disabledTab && reenabled && hidden && hiddenChanged && reshown &&
+            openedSecond && savedThird && modalAgain && modalBackground &&
+            modalSecond && modalRestored && reloaded;
+        kernel::serial::puts("[C124-MIXED] sequence=radio,Notes,focus,selection,disabled,visibility,path,modal,result=");
+        kernel::serial::puts(outcome ? "PASS\n" : "FAIL\n");
+        kernel::serial::puts("[C124-RESULT] outcome=");
+        kernel::serial::puts(outcome ? "PASS" : "FAIL");
+        kernel::serial::puts(" radio=bounded,exclusive,arrow,disabled-skip notes=path-presentation modal=isolated lifecycle=resident\n");
+        }
+        };
+        runC124ManagedRadioProof();
 #endif
 
 #if defined(GXOS_NATIVEAOT_C116_MANAGED_TEXT_INPUT) && \

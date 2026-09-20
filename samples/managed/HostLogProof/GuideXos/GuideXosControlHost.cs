@@ -8,6 +8,7 @@ public enum GuideXosManagedControlKind
     TextArea = 3,
     ListBox = 4,
     CheckBox = 5,
+    RadioButton = 6,
 }
 
 public enum GuideXosControlHostResult
@@ -104,6 +105,12 @@ public sealed class GuideXosControlHost
         return TryRegister(id, GuideXosManagedControlKind.CheckBox, control, focusable);
     }
 
+    public GuideXosControlHostResult TryRegisterRadioButton(
+        int id, GuideXosRadioButton control, bool focusable = true)
+    {
+        return TryRegister(id, GuideXosManagedControlKind.RadioButton, control, focusable);
+    }
+
     public GuideXosControlHostResult TrySetFocusable(int id, bool focusable)
     {
         if (!TryFindIndex(id, out int index))
@@ -151,6 +158,11 @@ public sealed class GuideXosControlHost
         if (!TryFindIndex(id, out int index))
         {
             return GuideXosControlHostResult.Rejected;
+        }
+        if (_entries[index].Kind == GuideXosManagedControlKind.RadioButton &&
+            !((GuideXosRadioButton)_entries[index].Control).ContainsPoint(x, y))
+        {
+            return GuideXosControlHostResult.Ignored;
         }
         if (!IsEligible(index))
         {
@@ -380,6 +392,8 @@ public sealed class GuideXosControlHost
                     x, y, originX, originY, characterWidth, lineHeight)),
             GuideXosManagedControlKind.CheckBox => Map(
                 ((GuideXosCheckBox)_entries[index].Control).HandlePointerDown(x, y)),
+            GuideXosManagedControlKind.RadioButton => Map(
+                ((GuideXosRadioButton)_entries[index].Control).HandlePointerDown(x, y)),
             _ => GuideXosControlHostResult.Rejected,
         };
     }
@@ -387,6 +401,27 @@ public sealed class GuideXosControlHost
     private GuideXosControlHostResult RouteKey(
         int index, GuideXosTextInputKey key)
     {
+        if (_entries[index].Kind == GuideXosManagedControlKind.RadioButton)
+        {
+            GuideXosRadioButton radio =
+                (GuideXosRadioButton)_entries[index].Control;
+            GuideXosRadioButtonResult result = radio.HandleKey(key);
+            if (result == GuideXosRadioButtonResult.Moved)
+            {
+                GuideXosRadioButton target = radio.Group?.GetMember(
+                    radio.RequestedGroupIndex);
+                if (target == null || !TryFindControlReference(target,
+                        out int targetHostIndex))
+                {
+                    return GuideXosControlHostResult.Rejected;
+                }
+                return FocusIndex(targetHostIndex) ==
+                    GuideXosControlHostResult.Focused
+                    ? GuideXosControlHostResult.Moved
+                    : GuideXosControlHostResult.Rejected;
+            }
+            return Map(result);
+        }
         return _entries[index].Kind switch
         {
             GuideXosManagedControlKind.Button => Map(
@@ -399,6 +434,7 @@ public sealed class GuideXosControlHost
                 ((GuideXosListBox)_entries[index].Control).HandleKey(key)),
             GuideXosManagedControlKind.CheckBox => Map(
                 ((GuideXosCheckBox)_entries[index].Control).HandleKey(key)),
+            GuideXosManagedControlKind.RadioButton => GuideXosControlHostResult.Rejected,
             _ => GuideXosControlHostResult.Rejected,
         };
     }
@@ -415,6 +451,8 @@ public sealed class GuideXosControlHost
                 ((GuideXosTextArea)_entries[index].Control).HandleCharacter(character)),
             GuideXosManagedControlKind.CheckBox => Map(
                 ((GuideXosCheckBox)_entries[index].Control).HandleCharacter(character)),
+            GuideXosManagedControlKind.RadioButton => Map(
+                ((GuideXosRadioButton)_entries[index].Control).HandleCharacter(character)),
             _ => GuideXosControlHostResult.Ignored,
         };
     }
@@ -433,6 +471,8 @@ public sealed class GuideXosControlHost
                 !((GuideXosButton)_entries[index].Control).Enabled,
             GuideXosManagedControlKind.CheckBox =>
                 !((GuideXosCheckBox)_entries[index].Control).Enabled,
+            GuideXosManagedControlKind.RadioButton =>
+                !((GuideXosRadioButton)_entries[index].Control).Enabled,
             _ => false,
         };
     }
@@ -451,6 +491,8 @@ public sealed class GuideXosControlHost
                 ((GuideXosListBox)_entries[index].Control).IsFocused,
             GuideXosManagedControlKind.CheckBox =>
                 ((GuideXosCheckBox)_entries[index].Control).IsFocused,
+            GuideXosManagedControlKind.RadioButton =>
+                ((GuideXosRadioButton)_entries[index].Control).IsFocused,
             _ => false,
         };
     }
@@ -474,6 +516,9 @@ public sealed class GuideXosControlHost
             case GuideXosManagedControlKind.CheckBox:
                 ((GuideXosCheckBox)_entries[index].Control).Focus();
                 break;
+            case GuideXosManagedControlKind.RadioButton:
+                ((GuideXosRadioButton)_entries[index].Control).Focus();
+                break;
         }
     }
 
@@ -495,6 +540,9 @@ public sealed class GuideXosControlHost
                 break;
             case GuideXosManagedControlKind.CheckBox:
                 ((GuideXosCheckBox)_entries[index].Control).Blur();
+                break;
+            case GuideXosManagedControlKind.RadioButton:
+                ((GuideXosRadioButton)_entries[index].Control).Blur();
                 break;
         }
     }
@@ -528,6 +576,7 @@ public sealed class GuideXosControlHost
             GuideXosManagedControlKind.TextArea => control is GuideXosTextArea,
             GuideXosManagedControlKind.ListBox => control is GuideXosListBox,
             GuideXosManagedControlKind.CheckBox => control is GuideXosCheckBox,
+            GuideXosManagedControlKind.RadioButton => control is GuideXosRadioButton,
             _ => false,
         };
     }
@@ -551,6 +600,19 @@ public sealed class GuideXosControlHost
             GuideXosCheckBoxResult.Focused => GuideXosControlHostResult.Focused,
             GuideXosCheckBoxResult.Disabled => GuideXosControlHostResult.Disabled,
             GuideXosCheckBoxResult.Rejected => GuideXosControlHostResult.Rejected,
+            _ => GuideXosControlHostResult.Ignored,
+        };
+    }
+
+    private static GuideXosControlHostResult Map(GuideXosRadioButtonResult result)
+    {
+        return result switch
+        {
+            GuideXosRadioButtonResult.Selected => GuideXosControlHostResult.Changed,
+            GuideXosRadioButtonResult.Moved => GuideXosControlHostResult.Moved,
+            GuideXosRadioButtonResult.Focused => GuideXosControlHostResult.Focused,
+            GuideXosRadioButtonResult.Disabled => GuideXosControlHostResult.Disabled,
+            GuideXosRadioButtonResult.Rejected => GuideXosControlHostResult.Rejected,
             _ => GuideXosControlHostResult.Ignored,
         };
     }
@@ -594,5 +656,20 @@ public sealed class GuideXosControlHost
             GuideXosListBoxResult.Rejected => GuideXosControlHostResult.Rejected,
             _ => GuideXosControlHostResult.Ignored,
         };
+    }
+
+    private bool TryFindControlReference(
+        GuideXosRadioButton target, out int index)
+    {
+        for (int candidate = 0; candidate < _registrationCount; candidate++)
+        {
+            if (ReferenceEquals(_entries[candidate].Control, target))
+            {
+                index = candidate;
+                return true;
+            }
+        }
+        index = -1;
+        return false;
     }
 }
