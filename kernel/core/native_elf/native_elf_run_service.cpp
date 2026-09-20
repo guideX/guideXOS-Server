@@ -2253,8 +2253,9 @@ static bool capture_user_pause(NativeElfDebugTrap::BreakpointContext* context)
 extern "C" bool native_elf_scheduler_yield_dispatch(
     NativeElfDebugTrap::BreakpointContext* context)
 {
-    if (!s_schedulerActive || !s_schedulerInTarget || !s_ownerContext || !s_targetContext)
+    if (!s_schedulerActive || !s_schedulerInTarget || !s_ownerContext || !s_targetContext) {
         return false;
+    }
     (void)capture_user_pause(context);
     s_schedulerInTarget = false;
     arch::amd64::context::switch_context(&s_targetContext, s_ownerContext);
@@ -2306,6 +2307,9 @@ asm(
     "    lea 32(%rsp), %rdi\n"
     "    call native_elf_scheduler_yield_dispatch\n"
 #endif
+    // Preserve the dispatch result separately; restoring the target's RAX
+    // below must not turn a successful scheduler handoff into a false return.
+    "    mov %rax, 24(%rsp)\n"
     "    pushq 176(%rsp)\n"
     "    popfq\n"
     "    mov 40(%rsp), %rax\n"
@@ -2323,6 +2327,7 @@ asm(
     "    mov 136(%rsp), %r13\n"
     "    mov 144(%rsp), %r14\n"
     "    mov 152(%rsp), %r15\n"
+    "    mov 24(%rsp), %rax\n"
     "    add $184, %rsp\n"
     "    ret\n"
 #if defined(__ELF__)
@@ -3284,6 +3289,12 @@ bool native_elf_debug_breakpoint_exception(
         if (!restore_debug_breakpoint(hitBreakpoint->address)) return false;
         hitBreakpoint->patchInstalled = false;
         mirror_current_user_breakpoint(s_operation, hitBreakpoint);
+    } else if (entryBreakpoint && s_operation.debugBreakpointInstalled) {
+        // The entry breakpoint is a one-shot bootstrap trap.  Restore its
+        // original byte before yielding to the owner so Continue cannot
+        // re-enter the trap after the breakpoint has already been consumed.
+        if (!restore_debug_breakpoint(normalizedAddress)) return false;
+        s_operation.debugBreakpointInstalled = false;
     }
     s_operation.debugBreakpointAddress = normalizedAddress;
 

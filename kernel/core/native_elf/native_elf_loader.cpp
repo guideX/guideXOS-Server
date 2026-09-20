@@ -560,7 +560,13 @@ static gx_result GX_CALL host_native_window_set_text(gx_app_context* context,
     if (!native_window_valid(context, window) || !text) return GX_ERROR_INVALID_ARGUMENT;
     char localText[256] = {};
     if (!app_string(text, localText, sizeof(localText))) return GX_ERROR_INVALID_ARGUMENT;
-    return s_guiApplication->setContent(localText) ? GX_OK : GX_ERROR_FAILED;
+    if (!s_guiApplication->setContent(localText)) return GX_ERROR_FAILED;
+    // GUI host calls are cooperative execution boundaries for an asynchronous
+    // NativeElf target.  The legacy direct-loader route has no scheduler owner
+    // and therefore retains its synchronous behavior.
+    if (NativeElfRunService::native_elf_scheduler_in_target() &&
+        !NativeElfRunService::native_elf_scheduler_yield()) return GX_ERROR_FAILED;
+    return GX_OK;
 }
 
 static gx_result GX_CALL host_native_window_destroy(gx_app_context* context,

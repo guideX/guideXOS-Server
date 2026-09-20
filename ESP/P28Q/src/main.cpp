@@ -14,14 +14,22 @@ int gx_main(gx_app_context* ctx)
     {
         accumulator = accumulator + helper(counter, 3);
         counter = counter + 1;
-        if ((counter & 4095) == 0)
+        if (counter == 500000)
+        {
+            gx_window_set_text(window, "Phase 28Q running");
+        }
+        if (counter == 1500000)
         {
             gx_window_set_text(window, "Phase 28Q running");
         }
     }
 
-    const int expected = 1389447424;
-    const int result = counter == 2000000 && accumulator == expected ? 0 : -4;
+    int expected = 1389447424;
+    int result = -4;
+    if (counter == 2000000 && accumulator == expected)
+    {
+        result = 0;
+    }
     if (gx_window_destroy(window) != 0) return -3;
     return result;
 }
