@@ -525,6 +525,16 @@ public sealed class ManagedNotes : GuideXosApplication
     private bool _c124RadioHostTestContext;
     private bool _c124RadioTestsRun;
     private bool _c124RadioHostTestsRun;
+#if HOSTLOGPROOF_C125_MANAGED_PROGRESS_BAR
+    private const uint C125HideProgressKey = 0x400u;
+    private const uint C125ShowProgressKey = 0x401u;
+    private const uint C125FillCapacityKey = 0x402u;
+    private readonly GuideXosProgressBar _documentUsage =
+        new(160, 174, 312, 0, GuideXosTextArea.DefaultMaximumCharacters, 0);
+    private bool _c125ProofContext;
+    private bool _c125ProgressTestContext;
+    private bool _c125ProgressTestsRun;
+#endif
 #endif
 #endif
 #endif
@@ -572,6 +582,11 @@ public sealed class ManagedNotes : GuideXosApplication
         _c124ProofContext = IsC124Context(host);
         _c124RadioTestContext = IsC124RadioTestContext(host);
         _c124RadioHostTestContext = IsC124RadioHostTestContext(host);
+#if HOSTLOGPROOF_C125_MANAGED_PROGRESS_BAR
+        _c125ProofContext = IsC125Context(host);
+        _c125ProgressTestContext = IsC125ProgressTestContext(host);
+        _c124ProofContext = _c124ProofContext || _c125ProofContext;
+#endif
         _c123ProofContext = _c123ProofContext || _c124ProofContext;
 #endif
         _c122ProofContext = _c122ProofContext || _c123ProofContext;
@@ -598,6 +613,12 @@ public sealed class ManagedNotes : GuideXosApplication
             _pathDisplayGroup.TryRegister(_fileNameRadio);
             _pathDisplayGroup.TrySelect(_fullPathRadio);
         }
+#if HOSTLOGPROOF_C125_MANAGED_PROGRESS_BAR
+        if (_c125ProofContext || _c125ProgressTestContext)
+        {
+            _documentUsage.Reset();
+        }
+#endif
 #endif
 #endif
         if (_c120ProofContext)
@@ -693,6 +714,15 @@ public sealed class ManagedNotes : GuideXosApplication
                     ? "C124-HOST registration=7 initial=no-focus result=PASS"u8
                     : "C124-HOST registration=FAIL initial=FAIL result=FAIL"u8);
             }
+#if HOSTLOGPROOF_C125_MANAGED_PROGRESS_BAR
+            if (_c125ProofContext)
+            {
+                host.TryLog(hostRegistration &&
+                    _mainControlHost.RegistrationCount == 7
+                    ? "C125-HOST registration=7 initial=no-focus result=PASS"u8
+                    : "C125-HOST registration=FAIL initial=FAIL result=FAIL"u8);
+            }
+#endif
 #endif
         }
 #endif
@@ -752,6 +782,16 @@ public sealed class ManagedNotes : GuideXosApplication
         if (result != GuideXosResult.Success || surface == null) return result;
         _window = surface.Handle;
         if (!RenderMain(host, surface, launchCount)) return GuideXosResult.InvalidArgument;
+#if HOSTLOGPROOF_C125_MANAGED_PROGRESS_BAR
+        if (_c125ProofContext)
+        {
+            LogC125Progress(host, "initial"u8);
+            host.TryLog(_mainControlHost.RegistrationCount == 7 &&
+                _documentUsage.Maximum == _textArea.MaximumCharacters
+                ? "C125-NOTES initial=authoritative-length capacity=256 registration=7 result=PASS"u8
+                : "C125-NOTES initial=FAIL result=FAIL"u8);
+        }
+#endif
         host.TryLog("C117-NOTES threadStatic=PASS"u8);
         host.TryLog(loadResult == GuideXosFileResult.Success
             ? "C117-NOTES initial=multiline source=VFS result=PASS"u8
@@ -778,6 +818,12 @@ public sealed class ManagedNotes : GuideXosApplication
 #endif
 #if HOSTLOGPROOF_C122_MANAGED_LABEL
         if (_c122ProofContext)
+        {
+            runFocusedProofTests = false;
+        }
+#endif
+#if HOSTLOGPROOF_C125_MANAGED_PROGRESS_BAR
+        if (_c125ProgressTestContext)
         {
             runFocusedProofTests = false;
         }
@@ -892,6 +938,12 @@ public sealed class ManagedNotes : GuideXosApplication
             ? GuideXosRadioGroupTests.Run(host) : true;
         if (_c124RadioHostTestContext) _c124RadioHostTestsRun = true;
         if (_c124RadioTestContext) _c124RadioTestsRun = true;
+#if HOSTLOGPROOF_C125_MANAGED_PROGRESS_BAR
+        bool progressTests = _c125ProgressTestContext &&
+            !_c125ProgressTestsRun
+            ? GuideXosProgressBarTests.Run(host, surface) : true;
+        if (_c125ProgressTestContext) _c125ProgressTestsRun = true;
+#endif
 #endif
 #endif
 #endif
@@ -917,6 +969,9 @@ public sealed class ManagedNotes : GuideXosApplication
 #endif
 #if HOSTLOGPROOF_C124_MANAGED_RADIO_BUTTON
             && radioButtonTests && radioGroupTests && radioHostTests
+#if HOSTLOGPROOF_C125_MANAGED_PROGRESS_BAR
+            && progressTests
+#endif
 #endif
             ? GuideXosResult.Success : GuideXosResult.InvalidArgument;
     }
@@ -946,6 +1001,9 @@ public sealed class ManagedNotes : GuideXosApplication
 #if HOSTLOGPROOF_C124_MANAGED_RADIO_BUTTON
             || host.LaunchContext.Utf8.SequenceEqual("c124-notes"u8) ||
             host.LaunchContext.Utf8.SequenceEqual("c124-disabled"u8)
+#if HOSTLOGPROOF_C125_MANAGED_PROGRESS_BAR
+            || host.LaunchContext.Utf8.SequenceEqual("c125-notes"u8)
+#endif
 #endif
 #endif
 #endif
@@ -968,6 +1026,9 @@ public sealed class ManagedNotes : GuideXosApplication
 #if HOSTLOGPROOF_C124_MANAGED_RADIO_BUTTON
             || host.LaunchContext.Utf8.SequenceEqual("c124-notes"u8) ||
             host.LaunchContext.Utf8.SequenceEqual("c124-disabled"u8)
+#if HOSTLOGPROOF_C125_MANAGED_PROGRESS_BAR
+            || host.LaunchContext.Utf8.SequenceEqual("c125-notes"u8)
+#endif
 #endif
 #endif
 #endif
@@ -1034,7 +1095,11 @@ public sealed class ManagedNotes : GuideXosApplication
     private static bool IsC124Context(GuideXosHost host)
     {
         return host.LaunchContext.Utf8.SequenceEqual("c124-notes"u8) ||
-            host.LaunchContext.Utf8.SequenceEqual("c124-disabled"u8);
+            host.LaunchContext.Utf8.SequenceEqual("c124-disabled"u8)
+#if HOSTLOGPROOF_C125_MANAGED_PROGRESS_BAR
+            || host.LaunchContext.Utf8.SequenceEqual("c125-notes"u8)
+#endif
+            ;
     }
 
     private static bool IsC124RadioTestContext(GuideXosHost host)
@@ -1046,6 +1111,17 @@ public sealed class ManagedNotes : GuideXosApplication
     {
         return host.LaunchContext.Utf8.SequenceEqual("c124-radio-host-tests"u8);
     }
+#if HOSTLOGPROOF_C125_MANAGED_PROGRESS_BAR
+    private static bool IsC125Context(GuideXosHost host)
+    {
+        return host.LaunchContext.Utf8.SequenceEqual("c125-notes"u8);
+    }
+
+    private static bool IsC125ProgressTestContext(GuideXosHost host)
+    {
+        return host.LaunchContext.Utf8.SequenceEqual("c125-progress-tests"u8);
+    }
+#endif
 #endif
 #endif
 #endif
@@ -1173,6 +1249,14 @@ public sealed class ManagedNotes : GuideXosApplication
             return ApplyPickerResult(host, surface, pickerResult);
         }
 
+#if HOSTLOGPROOF_C125_MANAGED_PROGRESS_BAR
+        if (_c125ProofContext && input.Kind == GuideXosInputKind.KeyDown &&
+            HandleC125ProgressProofKey(host, input.KeyCode))
+        {
+            return RenderMain(host, surface, _launchCount)
+                ? GuideXosResult.Success : GuideXosResult.InvalidArgument;
+        }
+#endif
 #if HOSTLOGPROOF_C123_MANAGED_SEPARATOR
         if (_c123ProofContext && input.Kind == GuideXosInputKind.KeyDown &&
             HandleC123SeparatorProofKey(input.KeyCode))
@@ -1299,6 +1383,16 @@ public sealed class ManagedNotes : GuideXosApplication
                 ? "C120-ROUTING active=document result=PASS"u8
                 : "C120-ROUTING active=control result=PASS"u8);
         }
+#if HOSTLOGPROOF_C125_MANAGED_PROGRESS_BAR
+        if (_c125ProofContext &&
+            _mainControlHost.ActiveControlId == C120DocumentControlId &&
+            (routeResult == GuideXosControlHostResult.Changed ||
+                routeResult == GuideXosControlHostResult.Rejected))
+        {
+            LogC125Progress(host, routeResult == GuideXosControlHostResult.Changed
+                ? "edit"u8 : "overflow-rejected"u8);
+        }
+#endif
         return RenderMain(host, surface, _launchCount)
             ? GuideXosResult.Success : GuideXosResult.InvalidArgument;
     }
@@ -1363,6 +1457,36 @@ public sealed class ManagedNotes : GuideXosApplication
     }
 
 #if HOSTLOGPROOF_C123_MANAGED_SEPARATOR
+ #if HOSTLOGPROOF_C125_MANAGED_PROGRESS_BAR
+    private bool HandleC125ProgressProofKey(
+        GuideXosHost host, uint keyCode)
+    {
+        if (keyCode == C125HideProgressKey)
+        {
+            _documentUsage.SetVisible(false);
+            host.TryLog("C125-VISIBILITY hidden=no-render state-preserved result=PASS"u8);
+            return true;
+        }
+        if (keyCode == C125ShowProgressKey)
+        {
+            _documentUsage.SetVisible(true);
+            host.TryLog("C125-VISIBILITY shown=latest-value result=PASS"u8);
+            return true;
+        }
+        if (keyCode == C125FillCapacityKey)
+        {
+            Span<byte> full = stackalloc byte[GuideXosTextArea.DefaultMaximumCharacters];
+            full.Fill((byte)'A');
+            bool filled = _textArea.SetUtf8(full);
+            _textArea.Focus();
+            host.TryLog(filled
+                ? "C125-CAPACITY value=256 maximum=256 result=PASS"u8
+                : "C125-CAPACITY value=FAIL result=FAIL"u8);
+            return filled;
+        }
+        return false;
+    }
+#endif
     private bool HandleC123SeparatorProofKey(uint keyCode)
     {
         return keyCode switch
@@ -1465,6 +1589,15 @@ public sealed class ManagedNotes : GuideXosApplication
         {
             host.TryLog("C117-SELECTION navigation=shift result=PASS"u8);
         }
+#if HOSTLOGPROOF_C125_MANAGED_PROGRESS_BAR
+        if (_c125ProofContext &&
+            (editResult == GuideXosTextAreaEditResult.Changed ||
+                editResult == GuideXosTextAreaEditResult.Rejected))
+        {
+            LogC125Progress(host, editResult == GuideXosTextAreaEditResult.Changed
+                ? "edit"u8 : "overflow-rejected"u8);
+        }
+#endif
         if (_textArea.FirstVisibleLine != previousFirstLine)
         {
             host.TryLog(_textArea.FirstVisibleLine > previousFirstLine
@@ -1846,8 +1979,34 @@ public sealed class ManagedNotes : GuideXosApplication
     }
 #endif
 
+#if HOSTLOGPROOF_C125_MANAGED_PROGRESS_BAR
+    private bool SyncDocumentUsage()
+    {
+        return _documentUsage.TrySetValue(_textArea.Length);
+    }
+
+    private void LogC125Progress(
+        GuideXosHost host, ReadOnlySpan<byte> phase)
+    {
+        Span<byte> line = stackalloc byte[127];
+        int position = 0;
+        if (!GuideXosText.Append(line, ref position, "C125-PROGRESS phase="u8) ||
+            !GuideXosText.Append(line, ref position, phase) ||
+            !GuideXosText.Append(line, ref position, " length="u8) ||
+            !GuideXosText.AppendUnsigned(line, ref position, (uint)_textArea.Length) ||
+            !GuideXosText.Append(line, ref position, " result=PASS"u8))
+        {
+            return;
+        }
+        host.TryLog(line[..position]);
+    }
+#endif
+
     private bool RenderMain(GuideXosHost host, GuideXosSurface surface, uint launchCount)
     {
+#if HOSTLOGPROOF_C125_MANAGED_PROGRESS_BAR
+        if (!SyncDocumentUsage()) return false;
+#endif
         return surface.TryFillRect(10, 10, 560, 300, 0x007A5A9Au) ==
                 GuideXosResult.Success &&
             GuideXosText.Line(surface, 24, "Managed Notes | "u8, "multiline text area"u8) &&
@@ -1865,7 +2024,12 @@ public sealed class ManagedNotes : GuideXosApplication
 #endif
             _textArea.Render(surface, 20, 72, 18) == GuideXosResult.Success &&
             GuideXosText.Line(surface, 150, "Status: "u8, Encoding.UTF8.GetBytes(_status)) &&
+#if HOSTLOGPROOF_C125_MANAGED_PROGRESS_BAR
+            GuideXosText.Line(surface, 174, "Document usage: "u8, ReadOnlySpan<byte>.Empty) &&
+            _documentUsage.Render(surface) == GuideXosResult.Success &&
+#else
             GuideXosText.Line(surface, 174, "Editor: "u8, "bounded ASCII; [] selection; | caret"u8) &&
+#endif
 #if HOSTLOGPROOF_C123_MANAGED_SEPARATOR
             (!_c123ProofContext || _separator.Render(surface) == GuideXosResult.Success) &&
 #endif

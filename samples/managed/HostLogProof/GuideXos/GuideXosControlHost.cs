@@ -203,7 +203,7 @@ public sealed class GuideXosControlHost
             return Traverse(shift);
         }
         if (_activeIndex < 0) return GuideXosControlHostResult.Ignored;
-        return RouteKey(_activeIndex, key);
+        return RouteKey(_activeIndex, key, shift);
     }
 
     public GuideXosControlHostResult HandleCharacter(char character)
@@ -399,7 +399,7 @@ public sealed class GuideXosControlHost
     }
 
     private GuideXosControlHostResult RouteKey(
-        int index, GuideXosTextInputKey key)
+        int index, GuideXosTextInputKey key, bool shift)
     {
         if (_entries[index].Kind == GuideXosManagedControlKind.RadioButton)
         {
@@ -429,7 +429,7 @@ public sealed class GuideXosControlHost
             GuideXosManagedControlKind.TextInput => Map(
                 ((GuideXosTextInput)_entries[index].Control).HandleKey(key)),
             GuideXosManagedControlKind.TextArea => Map(
-                ((GuideXosTextArea)_entries[index].Control).HandleKey(key)),
+                ((GuideXosTextArea)_entries[index].Control).HandleKey(key, shift)),
             GuideXosManagedControlKind.ListBox => Map(
                 ((GuideXosListBox)_entries[index].Control).HandleKey(key)),
             GuideXosManagedControlKind.CheckBox => Map(

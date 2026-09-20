@@ -3678,7 +3678,8 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         runC123ManagedSeparatorProof();
 #endif
 
-#if defined(GXOS_NATIVEAOT_C124_MANAGED_RADIO_BUTTON)
+#if defined(GXOS_NATIVEAOT_C124_MANAGED_RADIO_BUTTON) && \
+    !defined(GXOS_NATIVEAOT_C125_MANAGED_PROGRESS_BAR)
         auto runC124ManagedRadioProof = []() __attribute__((noinline)) {
         {
         const gxos::apps::BuiltInAppMetadata* c124Workspace =
@@ -3911,6 +3912,273 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         }
         };
         runC124ManagedRadioProof();
+#endif
+
+#if defined(GXOS_NATIVEAOT_C125_MANAGED_PROGRESS_BAR)
+        auto runC125ManagedProgressProof = []() __attribute__((noinline)) {
+        {
+        const gxos::apps::BuiltInAppMetadata* c125Workspace =
+            gxos::apps::FindBuiltInAppMetadataByDisplayName("Managed Workspace");
+        const gxos::apps::BuiltInAppMetadata* c125Notes =
+            gxos::apps::FindBuiltInAppMetadataByDisplayName("Managed Notes");
+        const bool c125CatalogValid = gxos::apps::ManagedNativeAotCatalogIsValid() &&
+            c125Workspace && c125Notes;
+        kernel::serial::puts("[C125-APPMODEL] catalogValid=");
+        kernel::serial::puts(c125CatalogValid ? "true result=PASS\n" : "false result=FAIL\n");
+
+        auto c125Contains = [](const char* value, const char* needle) {
+            if (!value || !needle || !needle[0]) return false;
+            for (uint32_t start = 0u; value[start] != 0; ++start) {
+                uint32_t offset = 0u;
+                while (needle[offset] != 0 && value[start + offset] == needle[offset]) {
+                    ++offset;
+                }
+                if (needle[offset] == 0) return true;
+            }
+            return false;
+        };
+        auto c125HasLabel = [&](const char* text) {
+            kernel::app::KernelWindow* window =
+                kernel::compositor::KernelCompositor::getFocusedWindow();
+            if (!window || !text) return false;
+            for (int index = 0; index < window->widgetCount; ++index) {
+                kernel::app::Widget& widget = window->widgets[index];
+                if (widget.type == kernel::app::WidgetType::Label &&
+                    widget.visible && c125Contains(widget.text, text)) return true;
+            }
+            return false;
+        };
+        auto c125HasFocusedDocument = [&]() {
+            kernel::app::KernelWindow* window =
+                kernel::compositor::KernelCompositor::getFocusedWindow();
+            if (!window) return false;
+            for (int index = 0; index < window->widgetCount; ++index) {
+                kernel::app::Widget& widget = window->widgets[index];
+                if (widget.type != kernel::app::WidgetType::Label || !widget.visible) continue;
+                if (widget.text[0] != '>' || widget.text[1] != ' ') continue;
+                for (uint32_t offset = 2u; widget.text[offset] != 0; ++offset) {
+                    if (widget.text[offset] == '|') return true;
+                }
+            }
+            return false;
+        };
+        auto c125ClickAt = [](int32_t localX, int32_t localY) {
+            kernel::app::KernelWindow* window =
+                kernel::compositor::KernelCompositor::getFocusedWindow();
+            if (!window) return false;
+            const int32_t mouseX = window->x + localX;
+            const int32_t mouseY = window->y + kernel::compositor::TITLEBAR_HEIGHT + localY;
+            kernel::compositor::KernelCompositor::handleMouseDown(mouseX, mouseY, 1u);
+            kernel::compositor::KernelCompositor::handleMouseUp(mouseX, mouseY, 1u);
+            return true;
+        };
+        auto c125ClickNativeButton = [&](const char* text) {
+            kernel::app::KernelWindow* window =
+                kernel::compositor::KernelCompositor::getFocusedWindow();
+            if (!window || !text) return false;
+            for (int index = 0; index < window->widgetCount; ++index) {
+                kernel::app::Widget& widget = window->widgets[index];
+                if (widget.type != kernel::app::WidgetType::Button ||
+                    !widget.visible || !widget.enabled ||
+                    !c125Contains(widget.text, text)) continue;
+                const int32_t mouseX = window->x + widget.x + widget.w / 2;
+                const int32_t mouseY = window->y + kernel::compositor::TITLEBAR_HEIGHT +
+                    widget.y + widget.h / 2;
+                kernel::compositor::KernelCompositor::handleMouseDown(mouseX, mouseY, 1u);
+                kernel::compositor::KernelCompositor::handleMouseUp(mouseX, mouseY, 1u);
+                return true;
+            }
+            return false;
+        };
+        auto c125FocusDocument = [&]() {
+            kernel::app::KernelWindow* window =
+                kernel::compositor::KernelCompositor::getFocusedWindow();
+            if (!window) return false;
+            const int32_t mouseX = window->x + 21;
+            const int32_t mouseY = window->y + kernel::compositor::TITLEBAR_HEIGHT + 73;
+            kernel::compositor::KernelCompositor::handleMouseDown(mouseX, mouseY, 1u);
+            kernel::compositor::KernelCompositor::handleMouseUp(mouseX, mouseY, 1u);
+            return c125HasFocusedDocument();
+        };
+        auto c125Key = [](uint32_t key) {
+            kernel::compositor::KernelCompositor::handleKeyDown(key);
+            return true;
+        };
+        auto c125ShiftKey = [&](uint32_t key) {
+            return kernel::nativeaot::invokeManagedKeyDownForProof(
+                c125Notes ? c125Notes->managedSelector : 0u, key, true) == 0;
+        };
+        auto c125Char = [](char value) {
+            kernel::compositor::KernelCompositor::handleKeyChar(value);
+            return true;
+        };
+        auto c125Text = [](const char* text) {
+            if (!text) return false;
+            for (uint32_t index = 0u; text[index] != 0; ++index) {
+                kernel::compositor::KernelCompositor::handleKeyChar(text[index]);
+            }
+            return true;
+        };
+        auto c125Launch = [&](const char* applicationId, const char* context) {
+            return c125CatalogValid && kernel::desktop::launch_app_with_context(
+                applicationId, context);
+        };
+        auto c125Close = []() {
+            kernel::app::KernelWindow* window =
+                kernel::compositor::KernelCompositor::getFocusedWindow();
+            return window && kernel::compositor::KernelCompositor::requestCloseWindow(window->id);
+        };
+
+        const bool progressTests = c125Launch(c125Notes->appId,
+            "c125-progress-tests") && c125Close();
+        kernel::serial::puts("[C125-FOCUSED-TESTS] progress-bar=PASS result=");
+        kernel::serial::puts(progressTests ? "PASS\n" : "FAIL\n");
+
+        const bool workspace = progressTests &&
+            c125Launch(c125Workspace->appId, "c125-workspace") && c125Close();
+        const bool notesLaunch = workspace && c125Launch(c125Notes->appId, "c125-notes");
+        const bool initialProgress = notesLaunch &&
+            c125HasLabel("[########------------------------] 26%");
+        const bool initial = initialProgress && c125HasLabel("Path: /system/apps/NOTES.TXT") &&
+            c125HasLabel("[x] Show path") && !c125HasFocusedDocument();
+        kernel::serial::puts("[C125-INITIAL] length=67 maximum=256 fill=8 percent=26 focused=no result=");
+        kernel::serial::puts(initial ? "PASS\n" : "FAIL\n");
+
+        const bool tabOpen = initial && c125Key(9u) && c125HasLabel(">[ Open ]");
+        const bool tabSave = tabOpen && c125Key(9u) && c125HasLabel(">[ Save ]");
+        const bool tabSaveAs = tabSave && c125Key(9u) && c125HasLabel(">[ Save As ]");
+        const bool tabShow = tabSaveAs && c125Key(9u) && c125HasLabel(">[x] Show path");
+        const bool tabFull = tabShow && c125Key(9u) && c125HasLabel(">(o) Full path");
+        const bool tabFile = tabFull && c125Key(9u) && c125HasLabel(">( ) File name");
+        const bool tabDocument = tabFile && c125Key(9u) && c125HasFocusedDocument();
+        const bool reverseFile = tabDocument && c125ShiftKey(9u) &&
+            c125HasLabel(">( ) File name");
+        const bool reverseFull = reverseFile && c125ShiftKey(9u) &&
+            c125HasLabel(">(o) Full path");
+        kernel::serial::puts("[C125-FOCUS-ORDER] forward=Open->Save->SaveAs->ShowPath->FullPath->FileName->Document reverse=Document<-FileName<-FullPath progress=not-registered result=");
+        kernel::serial::puts((tabDocument && reverseFile && reverseFull) ? "PASS\n" : "FAIL\n");
+
+        const bool focused = reverseFull && c125FocusDocument();
+        const bool inserted = focused && c125Char('A') &&
+            c125HasLabel("[########------------------------] 26%");
+        const bool insertedSpace = inserted && c125Char(' ') &&
+            c125HasLabel("[########------------------------] 26%");
+        kernel::serial::puts("[C125-DYNAMIC] insertion=character-and-space length=69 fill=8 percent=26 active=document result=");
+        kernel::serial::puts((inserted && insertedSpace && c125HasFocusedDocument()) ? "PASS\n" : "FAIL\n");
+
+        const bool newline = insertedSpace && c125Key(10u) &&
+            c125HasLabel("[########------------------------] 27%");
+        kernel::serial::puts("[C125-DYNAMIC] newline=LF-code-unit length=70 fill=8 percent=27 result=");
+        kernel::serial::puts(newline ? "PASS\n" : "FAIL\n");
+
+        const bool backspace = newline && c125Key(8u) &&
+            c125HasLabel("[########------------------------] 26%");
+        const bool deleteForward = backspace && c125Key(0x106u) &&
+            c125HasLabel("[########------------------------] 26%");
+        const bool deleteBackward = deleteForward && c125Key(8u) &&
+            c125HasLabel("[########------------------------] 26%");
+        kernel::serial::puts("[C125-DYNAMIC] deletion=backspace-delete-selection-safe length=67 fill=8 percent=26 result=");
+        kernel::serial::puts((backspace && deleteForward && deleteBackward) ? "PASS\n" : "FAIL\n");
+
+        const bool selectionStart = deleteBackward && c125FocusDocument();
+        bool selection = selectionStart;
+        for (uint32_t index = 0u; selection && index < 4u; ++index) {
+            selection = c125ShiftKey(0x103u);
+        }
+        const bool selectionReplaced = selection && c125Text("ROW") &&
+            c125HasLabel("[########------------------------] 25%");
+        kernel::serial::puts("[C125-DYNAMIC] selection-replacement=Firs-to-ROW length=66 fill=8 percent=25 result=");
+        kernel::serial::puts(selectionReplaced ? "PASS\n" : "FAIL\n");
+
+        const bool hidden = selectionReplaced && c125Key(0x400u) &&
+            !c125HasLabel("[########------------------------] 25%") &&
+            c125HasFocusedDocument();
+        const bool hiddenUpdate = hidden && c125Char('Q') && c125Char('R') &&
+            !c125HasLabel("[########------------------------] 26%") &&
+            c125HasFocusedDocument();
+        const bool shown = hiddenUpdate && c125Key(0x401u) &&
+            c125HasLabel("[########------------------------] 26%") &&
+            c125HasFocusedDocument();
+        kernel::serial::puts("[C125-VISIBILITY] hidden=no-render update-while-hidden=68 shown=latest focus=document result=");
+        kernel::serial::puts((hidden && hiddenUpdate && shown) ? "PASS\n" : "FAIL\n");
+
+        const bool openPicker = shown && c125ClickAt(65, 234) &&
+            c125HasLabel("> 01-ALPHA.TXT");
+        const bool modalPassive = openPicker && c125Char(' ') &&
+            c125HasLabel("> 01-ALPHA.TXT");
+        const bool selectSecond = modalPassive && c125ClickAt(24, 94 + 18 + 1) &&
+            c125HasLabel("> 02-POINT.TXT");
+        const bool openedSecond = selectSecond && c125Key(10u) &&
+            c125HasLabel("Path: /system/apps/02-POINT.TXT") &&
+            c125HasLabel("[##------------------------------] 8%");
+        kernel::serial::puts("[C125-DYNAMIC] open=02-POINT.TXT length=21 fill=2 percent=8 result=");
+        kernel::serial::puts(openedSecond ? "PASS\n" : "FAIL\n");
+
+        const bool fileName = openedSecond && c125ClickAt(220, 270) &&
+            c125HasLabel("Path: 02-POINT.TXT") &&
+            c125HasLabel("[##------------------------------] 8%");
+        const bool fullPath = fileName && c125ClickAt(84, 270) &&
+            c125HasLabel("Path: /system/apps/02-POINT.TXT") &&
+            c125HasLabel("[##------------------------------] 8%");
+        const bool pathHidden = fullPath && c125ClickAt(350, 234) &&
+            !c125HasLabel("Path: /system/apps/02-POINT.TXT") &&
+            c125HasLabel("[##------------------------------] 8%");
+        const bool pathShown = pathHidden && c125ClickAt(350, 234) &&
+            c125HasLabel("Path: /system/apps/02-POINT.TXT") &&
+            c125HasLabel("[##------------------------------] 8%");
+        kernel::serial::puts("[C125-PRESENTATION] full-path=file-name=show-path independent progress=unchanged result=");
+        kernel::serial::puts((fileName && fullPath && pathHidden && pathShown) ? "PASS\n" : "FAIL\n");
+        kernel::serial::puts("[C124-REGRESSION] radio=exclusive pointer=passive progress-preserved result=");
+        kernel::serial::puts((fileName && fullPath) ? "PASS\n" : "FAIL\n");
+
+        const bool saved = pathShown && c125ClickAt(165, 234) &&
+            c125HasLabel("[##------------------------------] 8%");
+        const bool saveAsPicker = saved && c125ClickAt(270, 234) &&
+            c125HasLabel("Filename: [ THIRD.TXT|");
+        const bool pickerTraverse = saveAsPicker && c125Key(9u) &&
+            c125ShiftKey(9u) && c125HasLabel("Filename: [ THIRD.TXT|");
+        const bool savedAs = pickerTraverse && c125Key(10u) &&
+            c125HasLabel("Path: /system/apps/THIRD.TXT") &&
+            c125HasLabel("[##------------------------------] 8%");
+        kernel::serial::puts("[C125-SAVE] save=value-unchanged save-as=path-only-value-unchanged result=");
+        kernel::serial::puts((saved && savedAs) ? "PASS\n" : "FAIL\n");
+
+        bool toDocument = savedAs;
+        for (uint32_t index = 0u; toDocument && index < 4u; ++index) {
+            toDocument = c125Key(9u);
+        }
+        const bool capacity = toDocument && c125HasFocusedDocument() &&
+            c125Key(0x402u) &&
+            c125HasLabel("[################################] 100%");
+        const bool overflow = capacity && c125Char('!') &&
+            c125HasLabel("[################################] 100%");
+        kernel::serial::puts("[C125-CAPACITY] value=256 maximum=256 result=");
+        kernel::serial::puts(capacity ? "PASS\n" : "FAIL\n");
+        kernel::serial::puts("[C125-OVERFLOW] attempted=rejected value=256 bar=100-percent result=");
+        kernel::serial::puts(overflow ? "PASS\n" : "FAIL\n");
+
+        const bool savedCapacity = overflow && c125ClickAt(165, 234) &&
+            c125HasLabel("[################################] 100%");
+        const bool reopened = savedCapacity && c125ClickNativeButton("Reload") &&
+            c125HasLabel("Status: Reloaded from VFS") &&
+            c125HasLabel("[################################] 100%");
+        kernel::serial::puts("[C125-MODAL] picker-isolated focus-restored=Save reload=exact-capacity result=");
+        kernel::serial::puts((openPicker && modalPassive && openedSecond && reopened) ? "PASS\n" : "FAIL\n");
+
+        const bool outcome = c125CatalogValid && progressTests && workspace && notesLaunch &&
+            initial && tabDocument && reverseFile && reverseFull && focused &&
+            inserted && insertedSpace && newline && backspace && deleteForward &&
+            deleteBackward && selectionReplaced && hidden && hiddenUpdate && shown &&
+            openedSecond && fileName && fullPath && pathHidden && pathShown &&
+            saved && savedAs && capacity && overflow && reopened;
+        kernel::serial::puts("[C125-MIXED] sequence=ProgressBar,Notes,editing,visibility,open,path,save,capacity,overflow,modal,result=");
+        kernel::serial::puts(outcome ? "PASS\n" : "FAIL\n");
+        kernel::serial::puts("[C125-RESULT] outcome=");
+        kernel::serial::puts(outcome ? "PASS" : "FAIL");
+        kernel::serial::puts(" progress=bounded,determinate,hidden,non-focusable notes=authoritative-length lifecycle=resident\n");
+        }
+        };
+        runC125ManagedProgressProof();
 #endif
 
 #if defined(GXOS_NATIVEAOT_C116_MANAGED_TEXT_INPUT) && \

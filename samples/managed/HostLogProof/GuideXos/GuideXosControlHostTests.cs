@@ -214,6 +214,14 @@ public static class GuideXosControlHostTests
             GuideXosControlHostResult.Changed && area.Text == "doc " &&
             areaHost.HandleKey(GuideXosTextInputKey.Enter) ==
                 GuideXosControlHostResult.Changed && area.Text == "doc \n";
+        area.SetText("doc");
+        area.SetCaretToStart();
+        areaHost.TryFocus(1);
+        bool shiftedTextArea = areaHost.HandleKey(
+                GuideXosTextInputKey.Right, true) ==
+                GuideXosControlHostResult.Moved && area.HasSelection &&
+            areaHost.HandleCharacter('X') == GuideXosControlHostResult.Changed &&
+            area.Text == "Xoc";
 
         GuideXosControlHost listHost = new(2);
         GuideXosListBox list = new(4, 12, 3, 16);
@@ -226,8 +234,8 @@ public static class GuideXosControlHostTests
             listHost.HandleKey(GuideXosTextInputKey.Enter) ==
                 GuideXosControlHostResult.Activated;
 
-        return Check(buttonActivation) && Check(textInput) && Check(textArea) &&
-            Check(listBox);
+        return Check(buttonActivation) && Check(textInput) &&
+            Check(textArea && shiftedTextArea) && Check(listBox);
     }
 
     private static bool PointerSynchronization()
