@@ -153,3 +153,19 @@ dist/guideXOS-Server-v0.1.0-phase21-aida-i219-vtd-dma-audit-amd64.manifest.txt
 QEMU is a regression check for bootability and unchanged non-I219 behavior; it
 cannot prove physical I219 VT-d behavior. Physical evidence is therefore
 explicitly a follow-up to this artifact, not silently substituted by QEMU.
+
+The packaged artifact was structurally verified with these recorded values:
+
+- ISO size: `91,293,696` bytes
+- SHA-256: `c40b952d71b133c92d6cdb2512ab40f30dd8b025073aea41f95f6b103ae9b88d`
+- source commit: `9e9942fe3d39604b239ff568493812be0d48d529`
+- source branch: `NAVIGATOR_GENERAL_IMPROVEMENTS`
+- unique build ID: `GXOS-P7-4-9e9942fe3d39-5223253a-303c-460a-8c65-25d6e46961c7`
+- manifest status: packaging began with only the generated `ESP/build-identity.txt`
+  modified by the build step; the manifest records this explicitly.
+
+The release verifier reported a bootable UEFI no-emulation ISO and a valid
+FAT32 ESP image. The repository QEMU harness reached firmware boot entry,
+bootloader, kernel-loaded, ramdisk-loaded, desktop-ready, and kernel-main-loop
+markers. This remains VM evidence only; no physical VT-d classification is
+claimed here.
