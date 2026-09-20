@@ -494,6 +494,19 @@ public sealed class ManagedNotes : GuideXosApplication
     private bool _c122LabelHostTestContext;
     private bool _c122LabelTestsRun;
     private bool _c122LabelHostTestsRun;
+#if HOSTLOGPROOF_C123_MANAGED_SEPARATOR
+    private const uint C123HideSeparatorKey = 0x200u;
+    private const uint C123ShowSeparatorKey = 0x201u;
+    private const uint C123ExpandSeparatorKey = 0x202u;
+    private const uint C123ContractSeparatorKey = 0x203u;
+    private const uint C123RestoreSeparatorKey = 0x204u;
+    private readonly GuideXosSeparator _separator = new(20, 200, 480);
+    private bool _c123ProofContext;
+    private bool _c123SeparatorTestContext;
+    private bool _c123SeparatorHostTestContext;
+    private bool _c123SeparatorTestsRun;
+    private bool _c123SeparatorHostTestsRun;
+#endif
 #endif
 #endif
 
@@ -531,10 +544,23 @@ public sealed class ManagedNotes : GuideXosApplication
         _c122ProofContext = IsC122Context(host);
         _c122LabelTestContext = IsC122LabelTestContext(host);
         _c122LabelHostTestContext = IsC122LabelHostTestContext(host);
+#if HOSTLOGPROOF_C123_MANAGED_SEPARATOR
+        _c123ProofContext = IsC123Context(host);
+        _c123SeparatorTestContext = IsC123SeparatorTestContext(host);
+        _c123SeparatorHostTestContext = IsC123SeparatorHostTestContext(host);
+        _c122ProofContext = _c122ProofContext || _c123ProofContext;
+#endif
         if (_c122ProofContext || _c122LabelTestContext || _c122LabelHostTestContext)
         {
             _pathLabel.Reset();
         }
+#if HOSTLOGPROOF_C123_MANAGED_SEPARATOR
+        if (_c123ProofContext || _c123SeparatorTestContext ||
+            _c123SeparatorHostTestContext)
+        {
+            _separator.Reset();
+        }
+#endif
 #endif
         if (_c120ProofContext)
         {
@@ -589,6 +615,14 @@ public sealed class ManagedNotes : GuideXosApplication
                     ? "C120-HOST registration=4 initial=no-focus result=PASS"u8
                     : "C120-HOST registration=FAIL initial=FAIL result=FAIL"u8);
             }
+#if HOSTLOGPROOF_C123_MANAGED_SEPARATOR
+            if (_c123ProofContext)
+            {
+                host.TryLog(hostRegistration
+                    ? "C123-HOST registration=5 initial=no-focus result=PASS"u8
+                    : "C123-HOST registration=FAIL initial=FAIL result=FAIL"u8);
+            }
+#endif
         }
 #endif
 #if HOSTLOGPROOF_C118_MANAGED_LIST_BOX
@@ -659,6 +693,9 @@ public sealed class ManagedNotes : GuideXosApplication
         if (_c121CheckboxTestContext || _c121HostTestContext
 #if HOSTLOGPROOF_C122_MANAGED_LABEL
             || _c122LabelTestContext || _c122LabelHostTestContext
+#if HOSTLOGPROOF_C123_MANAGED_SEPARATOR
+            || _c123SeparatorTestContext || _c123SeparatorHostTestContext
+#endif
 #endif
             )
         {
@@ -754,6 +791,22 @@ public sealed class ManagedNotes : GuideXosApplication
         {
             _c122LabelTestsRun = true;
         }
+#if HOSTLOGPROOF_C123_MANAGED_SEPARATOR
+        bool separatorHostTests = _c123SeparatorHostTestContext &&
+            !_c123SeparatorHostTestsRun
+            ? GuideXosSeparatorHostTests.Run(host) : true;
+        bool separatorTests = _c123SeparatorTestContext &&
+            !_c123SeparatorTestsRun
+            ? GuideXosSeparatorTests.Run(host, surface) : true;
+        if (_c123SeparatorHostTestContext)
+        {
+            _c123SeparatorHostTestsRun = true;
+        }
+        if (_c123SeparatorTestContext)
+        {
+            _c123SeparatorTestsRun = true;
+        }
+#endif
 #endif
 #endif
         return textAreaTests
@@ -771,6 +824,9 @@ public sealed class ManagedNotes : GuideXosApplication
 #endif
 #if HOSTLOGPROOF_C122_MANAGED_LABEL
             && labelTests && labelHostTests
+#endif
+#if HOSTLOGPROOF_C123_MANAGED_SEPARATOR
+            && separatorTests && separatorHostTests
 #endif
             ? GuideXosResult.Success : GuideXosResult.InvalidArgument;
     }
@@ -794,6 +850,10 @@ public sealed class ManagedNotes : GuideXosApplication
 #if HOSTLOGPROOF_C122_MANAGED_LABEL
             || host.LaunchContext.Utf8.SequenceEqual("c122-notes"u8) ||
             host.LaunchContext.Utf8.SequenceEqual("c122-disabled"u8)
+#if HOSTLOGPROOF_C123_MANAGED_SEPARATOR
+            || host.LaunchContext.Utf8.SequenceEqual("c123-notes"u8) ||
+            host.LaunchContext.Utf8.SequenceEqual("c123-disabled"u8)
+#endif
 #endif
             ;
     }
@@ -808,6 +868,10 @@ public sealed class ManagedNotes : GuideXosApplication
 #if HOSTLOGPROOF_C122_MANAGED_LABEL
             || host.LaunchContext.Utf8.SequenceEqual("c122-notes"u8) ||
             host.LaunchContext.Utf8.SequenceEqual("c122-disabled"u8)
+#if HOSTLOGPROOF_C123_MANAGED_SEPARATOR
+            || host.LaunchContext.Utf8.SequenceEqual("c123-notes"u8) ||
+            host.LaunchContext.Utf8.SequenceEqual("c123-disabled"u8)
+#endif
 #endif
             ;
     }
@@ -818,6 +882,9 @@ public sealed class ManagedNotes : GuideXosApplication
             host.LaunchContext.Utf8.SequenceEqual("c121-disabled"u8)
 #if HOSTLOGPROOF_C122_MANAGED_LABEL
             || IsC122Context(host)
+#if HOSTLOGPROOF_C123_MANAGED_SEPARATOR
+            || IsC123Context(host)
+#endif
 #endif
             ;
     }
@@ -846,6 +913,23 @@ public sealed class ManagedNotes : GuideXosApplication
     {
         return host.LaunchContext.Utf8.SequenceEqual("c122-label-host-tests"u8);
     }
+#if HOSTLOGPROOF_C123_MANAGED_SEPARATOR
+    private static bool IsC123Context(GuideXosHost host)
+    {
+        return host.LaunchContext.Utf8.SequenceEqual("c123-notes"u8) ||
+            host.LaunchContext.Utf8.SequenceEqual("c123-disabled"u8);
+    }
+
+    private static bool IsC123SeparatorTestContext(GuideXosHost host)
+    {
+        return host.LaunchContext.Utf8.SequenceEqual("c123-separator-tests"u8);
+    }
+
+    private static bool IsC123SeparatorHostTestContext(GuideXosHost host)
+    {
+        return host.LaunchContext.Utf8.SequenceEqual("c123-separator-host-tests"u8);
+    }
+#endif
 #endif
 #endif
 
@@ -970,6 +1054,15 @@ public sealed class ManagedNotes : GuideXosApplication
                 host, surface, input);
             return ApplyPickerResult(host, surface, pickerResult);
         }
+
+#if HOSTLOGPROOF_C123_MANAGED_SEPARATOR
+        if (_c123ProofContext && input.Kind == GuideXosInputKind.KeyDown &&
+            HandleC123SeparatorProofKey(input.KeyCode))
+        {
+            return RenderMain(host, surface, _launchCount)
+                ? GuideXosResult.Success : GuideXosResult.InvalidArgument;
+        }
+#endif
 
         if (input.Kind == GuideXosInputKind.PointerDown)
         {
@@ -1103,6 +1196,27 @@ public sealed class ManagedNotes : GuideXosApplication
             _ => "C120-ACTIVATE control=Document result=FAIL"u8,
         };
     }
+
+#if HOSTLOGPROOF_C123_MANAGED_SEPARATOR
+    private bool HandleC123SeparatorProofKey(uint keyCode)
+    {
+        return keyCode switch
+        {
+            C123HideSeparatorKey => SetSeparatorVisible(false),
+            C123ShowSeparatorKey => SetSeparatorVisible(true),
+            C123ExpandSeparatorKey => _separator.SetWidth(504),
+            C123ContractSeparatorKey => _separator.SetWidth(96),
+            C123RestoreSeparatorKey => _separator.SetWidth(480),
+            _ => false,
+        };
+    }
+
+    private bool SetSeparatorVisible(bool visible)
+    {
+        _separator.SetVisible(visible);
+        return true;
+    }
+#endif
 #endif
 
     public override GuideXosResult HandleInput(
@@ -1338,7 +1452,11 @@ public sealed class ManagedNotes : GuideXosApplication
                 LogDocument(host, "C117-NOTES actual");
                 host.TryLog("C115-NOTES open=PASS source=picker"u8);
 #if HOSTLOGPROOF_C118_MANAGED_LIST_BOX
-                if (_c118ProofContext)
+                if (_c118ProofContext
+#if HOSTLOGPROOF_C123_MANAGED_SEPARATOR
+                    && !_c123ProofContext
+#endif
+                    )
                 {
                     host.TryLog(PathLog("C118-NOTES open=PASS path=", result.Path));
                     LogDocument(host, "C118-NOTES actual");
@@ -1541,6 +1659,9 @@ public sealed class ManagedNotes : GuideXosApplication
             _textArea.Render(surface, 20, 72, 18) == GuideXosResult.Success &&
             GuideXosText.Line(surface, 150, "Status: "u8, Encoding.UTF8.GetBytes(_status)) &&
             GuideXosText.Line(surface, 174, "Editor: "u8, "bounded ASCII; [] selection; | caret"u8) &&
+#if HOSTLOGPROOF_C123_MANAGED_SEPARATOR
+            (!_c123ProofContext || _separator.Render(surface) == GuideXosResult.Success) &&
+#endif
 #if HOSTLOGPROOF_C119_MANAGED_BUTTON
             _openButton.Render(surface) == GuideXosResult.Success &&
             _saveButton.Render(surface) == GuideXosResult.Success &&

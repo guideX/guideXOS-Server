@@ -3210,7 +3210,8 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         runC121ManagedCheckboxProof();
 #endif
 
-#if defined(GXOS_NATIVEAOT_C122_MANAGED_LABEL)
+#if defined(GXOS_NATIVEAOT_C122_MANAGED_LABEL) && \
+    !defined(GXOS_NATIVEAOT_C123_MANAGED_SEPARATOR)
         auto runC122ManagedLabelProof = []() __attribute__((noinline)) {
         {
         const gxos::apps::BuiltInAppMetadata* c122Workspace =
@@ -3252,7 +3253,8 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
                 kernel::app::Widget& widget = window->widgets[index];
                 if (widget.type != kernel::app::WidgetType::Label ||
                     !widget.visible) continue;
-                if (widget.text[0] == '>' && widget.text[1] == ' ') return true;
+                if (widget.text[0] == '>' && widget.text[1] == ' ' &&
+                    c122Contains(widget.text, "|")) return true;
             }
             return false;
         };
@@ -3428,6 +3430,251 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         }
         };
         runC122ManagedLabelProof();
+#endif
+
+#if defined(GXOS_NATIVEAOT_C123_MANAGED_SEPARATOR)
+        auto runC123ManagedSeparatorProof = []() __attribute__((noinline)) {
+        {
+        const gxos::apps::BuiltInAppMetadata* c123Workspace =
+            gxos::apps::FindBuiltInAppMetadataByDisplayName("Managed Workspace");
+        const gxos::apps::BuiltInAppMetadata* c123Notes =
+            gxos::apps::FindBuiltInAppMetadataByDisplayName("Managed Notes");
+        const bool c123CatalogValid = gxos::apps::ManagedNativeAotCatalogIsValid() &&
+            c123Workspace && c123Notes;
+        kernel::serial::puts("[C123-APPMODEL] catalogValid=");
+        kernel::serial::puts(c123CatalogValid ? "true result=PASS\n" : "false result=FAIL\n");
+
+        auto c123Contains = [](const char* value, const char* needle) {
+            if (!value || !needle || !needle[0]) return false;
+            for (uint32_t start = 0u; value[start] != 0; ++start) {
+                uint32_t offset = 0u;
+                while (needle[offset] != 0 && value[start + offset] == needle[offset]) {
+                    ++offset;
+                }
+                if (needle[offset] == 0) return true;
+            }
+            return false;
+        };
+        auto c123HasLabel = [&](const char* text) {
+            kernel::app::KernelWindow* window =
+                kernel::compositor::KernelCompositor::getFocusedWindow();
+            if (!window || !text) return false;
+            for (int index = 0; index < window->widgetCount; ++index) {
+                kernel::app::Widget& widget = window->widgets[index];
+                if (widget.type == kernel::app::WidgetType::Label &&
+                    widget.visible && c123Contains(widget.text, text)) return true;
+            }
+            return false;
+        };
+        auto c123HasSeparator = [&](uint32_t expectedWidth) {
+            kernel::app::KernelWindow* window =
+                kernel::compositor::KernelCompositor::getFocusedWindow();
+            if (!window || expectedWidth == 0u || expectedWidth > 63u) return false;
+            for (int index = 0; index < window->widgetCount; ++index) {
+                kernel::app::Widget& widget = window->widgets[index];
+                if (widget.type != kernel::app::WidgetType::Label || !widget.visible ||
+                    widget.text[0] != '-') continue;
+                uint32_t count = 0u;
+                while (count < 63u && widget.text[count] == '-') ++count;
+                if (count == expectedWidth && widget.text[count] == 0) return true;
+            }
+            return false;
+        };
+        auto c123HasFocusedDocument = [&]() {
+            kernel::app::KernelWindow* window =
+                kernel::compositor::KernelCompositor::getFocusedWindow();
+            if (!window) return false;
+            for (int index = 0; index < window->widgetCount; ++index) {
+                kernel::app::Widget& widget = window->widgets[index];
+                if (widget.type != kernel::app::WidgetType::Label || !widget.visible) continue;
+                if (widget.text[0] == '>' && widget.text[1] == ' ' &&
+                    widget.text[2] == '|') return true;
+            }
+            return false;
+        };
+        auto c123ClickAt = [](int32_t localX, int32_t localY) {
+            kernel::app::KernelWindow* window =
+                kernel::compositor::KernelCompositor::getFocusedWindow();
+            if (!window) return false;
+            const int32_t mouseX = window->x + localX;
+            const int32_t mouseY = window->y + kernel::compositor::TITLEBAR_HEIGHT + localY;
+            kernel::compositor::KernelCompositor::handleMouseDown(mouseX, mouseY, 1u);
+            kernel::compositor::KernelCompositor::handleMouseUp(mouseX, mouseY, 1u);
+            return true;
+        };
+        auto c123ClickNativeButton = [&](const char* text) {
+            kernel::app::KernelWindow* window =
+                kernel::compositor::KernelCompositor::getFocusedWindow();
+            if (!window || !text) return false;
+            for (int index = 0; index < window->widgetCount; ++index) {
+                kernel::app::Widget& widget = window->widgets[index];
+                if (widget.type != kernel::app::WidgetType::Button ||
+                    !widget.visible || !widget.enabled ||
+                    !c123Contains(widget.text, text)) continue;
+                const int32_t mouseX = window->x + widget.x + widget.w / 2;
+                const int32_t mouseY = window->y + kernel::compositor::TITLEBAR_HEIGHT +
+                    widget.y + widget.h / 2;
+                kernel::compositor::KernelCompositor::handleMouseDown(mouseX, mouseY, 1u);
+                kernel::compositor::KernelCompositor::handleMouseUp(mouseX, mouseY, 1u);
+                return true;
+            }
+            return false;
+        };
+        auto c123Key = [](uint32_t key) {
+            kernel::compositor::KernelCompositor::handleKeyDown(key);
+            return true;
+        };
+        auto c123ShiftKey = [&](uint32_t key) {
+            return kernel::nativeaot::invokeManagedKeyDownForProof(
+                c123Notes ? c123Notes->managedSelector : 0u, key, true) == 0;
+        };
+        auto c123Char = [](char value) {
+            kernel::compositor::KernelCompositor::handleKeyChar(value);
+            return true;
+        };
+        auto c123Launch = [&](const char* applicationId, const char* context) {
+            return c123CatalogValid && kernel::desktop::launch_app_with_context(
+                applicationId, context);
+        };
+        auto c123Close = []() {
+            kernel::app::KernelWindow* window =
+                kernel::compositor::KernelCompositor::getFocusedWindow();
+            return window && kernel::compositor::KernelCompositor::requestCloseWindow(window->id);
+        };
+
+        const bool separatorTests = c123Launch(c123Notes->appId,
+            "c123-separator-tests") && c123Close();
+        const bool separatorHostTests = separatorTests && c123Launch(c123Notes->appId,
+            "c123-separator-host-tests") && c123Close();
+        kernel::serial::puts("[C123-FOCUSED-TESTS] separator=PASS host=PASS result=");
+        kernel::serial::puts((separatorTests && separatorHostTests) ? "PASS\n" : "FAIL\n");
+
+        const bool workspace = separatorHostTests &&
+            c123Launch(c123Workspace->appId, "c123-workspace") && c123Close();
+        const bool notesLaunch = workspace && c123Launch(c123Notes->appId, "c123-notes");
+        const bool initialSeparator = notesLaunch && c123HasSeparator(60u);
+        const bool initialPath = notesLaunch &&
+            c123HasLabel("Path: /system/apps/NOTES.TXT");
+        const bool initialShowPath = notesLaunch && c123HasLabel("[x] Show path");
+        const bool initialOpen = notesLaunch && c123HasLabel("[ Open ]");
+        const bool initialFocused = notesLaunch && c123HasFocusedDocument();
+        const bool initial = initialSeparator && initialPath && initialShowPath &&
+            initialOpen && !initialFocused;
+        kernel::serial::puts("[C123-INITIAL-DETAIL] separator=");
+        kernel::serial::puts(initialSeparator ? "yes" : "no");
+        kernel::serial::puts(" path=");
+        kernel::serial::puts(initialPath ? "yes" : "no");
+        kernel::serial::puts(" show-path=");
+        kernel::serial::puts(initialShowPath ? "yes" : "no");
+        kernel::serial::puts(" open=");
+        kernel::serial::puts(initialOpen ? "yes" : "no");
+        kernel::serial::puts(" focused=");
+        kernel::serial::puts(initialFocused ? "yes" : "no");
+        kernel::serial::puts("\n");
+        kernel::serial::puts("[C123-INITIAL] separator=visible width=60 path=visible result=");
+        kernel::serial::puts(initial ? "PASS\n" : "FAIL\n");
+
+        const bool tabOpen = initial && c123Key(9u) && c123HasLabel(">[ Open ]") &&
+            c123HasSeparator(60u);
+        const bool tabSave = tabOpen && c123Key(9u) && c123HasLabel(">[ Save ]");
+        const bool tabSaveAs = tabSave && c123Key(9u) && c123HasLabel(">[ Save As ]");
+        const bool tabCheckBox = tabSaveAs && c123Key(9u) &&
+            c123HasLabel(">[x] Show path") && c123HasSeparator(60u);
+        const bool tabDocument = tabCheckBox && c123Key(9u) &&
+            c123HasFocusedDocument() && c123HasSeparator(60u);
+        const bool reverseCheckBox = tabDocument && c123ShiftKey(9u) &&
+            c123HasLabel(">[x] Show path") && c123HasSeparator(60u);
+        const bool reverseSaveAs = reverseCheckBox && c123ShiftKey(9u) &&
+            c123HasLabel(">[ Save As ]");
+        kernel::serial::puts("[C123-FOCUS-ORDER] forward=Open->Save->SaveAs->ShowPath->Document ");
+        kernel::serial::puts("reverse=Document<-ShowPath<-SaveAs separator=not-registered result=");
+        kernel::serial::puts((tabCheckBox && tabDocument && reverseCheckBox && reverseSaveAs) ?
+            "PASS\n" : "FAIL\n");
+
+        const bool focusDocument = reverseSaveAs && c123Key(9u) &&
+            c123HasLabel(">[x] Show path") && c123Key(9u) &&
+            c123HasFocusedDocument();
+        const bool hidden = focusDocument && c123Key(0x200u) &&
+            !c123HasSeparator(60u) && c123HasFocusedDocument();
+        const bool shown = hidden && c123Key(0x201u) &&
+            c123HasSeparator(60u) && c123HasFocusedDocument();
+        kernel::serial::puts("[C123-VISIBILITY] hidden=no-render shown=same-geometry active=document result=");
+        kernel::serial::puts((hidden && shown) ? "PASS\n" : "FAIL\n");
+
+        const bool expanded = shown && c123Key(0x202u) &&
+            c123HasSeparator(63u) && c123HasFocusedDocument();
+        const bool contracted = expanded && c123Key(0x203u) &&
+            c123HasSeparator(12u) && !c123HasSeparator(13u) &&
+            c123HasFocusedDocument();
+        const bool restored = contracted && c123Key(0x204u) &&
+            c123HasSeparator(60u) && c123HasFocusedDocument();
+        kernel::serial::puts("[C123-RESIZE] expand=63 contract=12 stale-tail=none result=");
+        kernel::serial::puts((expanded && contracted && restored) ? "PASS\n" : "FAIL\n");
+
+        const bool unchecked = restored && c123ShiftKey(9u) &&
+            c123HasLabel(">[x] Show path") && c123Key(static_cast<uint32_t>(' ')) &&
+            c123Char(' ') && c123HasLabel(">[ ] Show path") &&
+            !c123HasLabel("Path: /system/apps/NOTES.TXT") && c123HasSeparator(60u);
+        const bool checked = unchecked && c123Key(static_cast<uint32_t>(' ')) &&
+            c123Char(' ') && c123HasLabel(">[x] Show path") &&
+            c123HasLabel("Path: /system/apps/NOTES.TXT") && c123HasSeparator(60u);
+        kernel::serial::puts("[C123-SHOW-PATH] unchecked=label-hidden separator-visible checked=label-visible result=");
+        kernel::serial::puts((unchecked && checked) ? "PASS\n" : "FAIL\n");
+
+        const bool openPicker = checked && c123ClickAt(65, 234);
+        const bool modalList = openPicker && c123HasLabel("> 01-ALPHA.TXT") &&
+            !c123HasSeparator(60u);
+        const bool modalIsolation = modalList && c123Char(' ') &&
+            c123HasLabel("> 01-ALPHA.TXT");
+        const bool selectSecond = modalIsolation &&
+            c123ClickAt(24, 94 + 18 + 1) && c123HasLabel("> 02-POINT.TXT");
+        const bool openedSecond = selectSecond && c123Key(10u) &&
+            c123HasLabel(">[ Open ]") &&
+            c123HasLabel("Path: /system/apps/02-POINT.TXT") &&
+            c123HasSeparator(60u);
+        kernel::serial::puts("[C123-DYNAMIC] open=02-POINT.TXT active=Open separator=visible result=");
+        kernel::serial::puts(openedSecond ? "PASS\n" : "FAIL\n");
+
+        const bool saveAsPicker = openedSecond && c123ClickAt(270, 234) &&
+            c123HasLabel("Filename: [ THIRD.TXT|") && !c123HasSeparator(60u);
+        const bool pickerReverse = saveAsPicker && c123Key(9u) &&
+            c123HasLabel("> 01-ALPHA.TXT") && c123ShiftKey(9u) &&
+            c123HasLabel("Filename: [ THIRD.TXT|");
+        const bool saveSubmitted = pickerReverse && c123Key(10u);
+        const bool savedThird = saveSubmitted && c123HasLabel(">[ Save As ]") &&
+            c123HasLabel("Path: /system/apps/THIRD.TXT") &&
+            c123HasSeparator(60u);
+        kernel::serial::puts("[C123-DYNAMIC] save-as=THIRD.TXT active=SaveAs separator=visible result=");
+        kernel::serial::puts(savedThird ? "PASS\n" : "FAIL\n");
+
+        const bool modalAgain = savedThird && c123ClickAt(65, 234) &&
+            c123HasLabel("> 01-ALPHA.TXT") && !c123HasSeparator(60u);
+        const bool modalBackground = modalAgain && c123Char(' ') &&
+            c123HasLabel("> 01-ALPHA.TXT");
+        const bool modalSecond = modalBackground &&
+            c123ClickAt(24, 94 + 18 + 1) && c123HasLabel("> 02-POINT.TXT");
+        const bool modalRestored = modalSecond && c123Key(10u) &&
+            c123HasLabel(">[ Open ]") && c123HasSeparator(60u);
+        const bool reloaded = modalRestored && c123ClickNativeButton("Reload") &&
+            c123HasLabel("Status: Reloaded from VFS") && c123HasSeparator(60u);
+        kernel::serial::puts("[C123-MODAL] background=separator-passive restore=Open save-reopen=PASS result=");
+        kernel::serial::puts((modalAgain && modalBackground && modalSecond &&
+            modalRestored && reloaded) ? "PASS\n" : "FAIL\n");
+
+        const bool outcome = c123CatalogValid && separatorTests && separatorHostTests &&
+            workspace && notesLaunch && initial && tabCheckBox && tabDocument &&
+            reverseCheckBox && reverseSaveAs && hidden && shown && expanded &&
+            contracted && restored && unchecked && checked && openedSecond &&
+            savedThird && modalAgain && modalBackground && modalSecond &&
+            modalRestored && reloaded;
+        kernel::serial::puts("[C123-MIXED] sequence=separator,Notes,focus,visibility,resize,path,modal,result=");
+        kernel::serial::puts(outcome ? "PASS\n" : "FAIL\n");
+        kernel::serial::puts("[C123-RESULT] outcome=");
+        kernel::serial::puts(outcome ? "PASS" : "FAIL");
+        kernel::serial::puts(" separator=bounded,horizontal,hidden,non-focusable modal=isolated lifecycle=resident\n");
+        }
+        };
+        runC123ManagedSeparatorProof();
 #endif
 
 #if defined(GXOS_NATIVEAOT_C116_MANAGED_TEXT_INPUT) && \

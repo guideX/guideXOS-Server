@@ -112,7 +112,12 @@
     <EntryPointSymbol>GuideXosNativeAotApplicationEntry</EntryPointSymbol>
   </PropertyGroup>
 
-  <PropertyGroup Condition="'$(HostLogProofMode)' == 'Production' or '$(HostLogProofMode)' == 'C104AppA' or '$(HostLogProofMode)' == 'C104AppB' or '$(HostLogProofMode)' == 'C107Composite' or '$(HostLogProofMode)' == 'C108ThreadStaticLifecycle' or '$(HostLogProofMode)' == 'ProductionComposite' or '$(HostLogProofMode)' == 'C112Composite' or '$(HostLogProofMode)' == 'C113Composite' or '$(HostLogProofMode)' == 'C114Composite' or '$(HostLogProofMode)' == 'C115Composite' or '$(HostLogProofMode)' == 'C116Composite' or '$(HostLogProofMode)' == 'C117Composite' or '$(HostLogProofMode)' == 'C118Composite' or '$(HostLogProofMode)' == 'C119Composite' or '$(HostLogProofMode)' == 'C120Composite' or '$(HostLogProofMode)' == 'C121Composite' or '$(HostLogProofMode)' == 'C122Composite'">
+  <PropertyGroup Condition="'$(HostLogProofMode)' == 'C123Composite'">
+    <DefineConstants>$(DefineConstants);HOSTLOGPROOF_PRODUCTION;HOSTLOGPROOF_PRODUCTION_COMPOSITE;HOSTLOGPROOF_C112_REUSABLE_APPLICATION;HOSTLOGPROOF_C113_MANAGED_FILE_SERVICES;HOSTLOGPROOF_C114_MANAGED_DIRECTORY_SERVICES;HOSTLOGPROOF_C115_MANAGED_FILE_PICKER;HOSTLOGPROOF_C116_MANAGED_TEXT_INPUT;HOSTLOGPROOF_C117_MANAGED_TEXT_AREA;HOSTLOGPROOF_C118_MANAGED_LIST_BOX;HOSTLOGPROOF_C119_MANAGED_BUTTON;HOSTLOGPROOF_C120_MANAGED_CONTROL_HOST;HOSTLOGPROOF_C121_MANAGED_CHECKBOX;HOSTLOGPROOF_C122_MANAGED_LABEL;HOSTLOGPROOF_C123_MANAGED_SEPARATOR</DefineConstants>
+    <EntryPointSymbol>GuideXosNativeAotApplicationEntry</EntryPointSymbol>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(HostLogProofMode)' == 'Production' or '$(HostLogProofMode)' == 'C104AppA' or '$(HostLogProofMode)' == 'C104AppB' or '$(HostLogProofMode)' == 'C107Composite' or '$(HostLogProofMode)' == 'C108ThreadStaticLifecycle' or '$(HostLogProofMode)' == 'ProductionComposite' or '$(HostLogProofMode)' == 'C112Composite' or '$(HostLogProofMode)' == 'C113Composite' or '$(HostLogProofMode)' == 'C114Composite' or '$(HostLogProofMode)' == 'C115Composite' or '$(HostLogProofMode)' == 'C116Composite' or '$(HostLogProofMode)' == 'C117Composite' or '$(HostLogProofMode)' == 'C118Composite' or '$(HostLogProofMode)' == 'C119Composite' or '$(HostLogProofMode)' == 'C120Composite' or '$(HostLogProofMode)' == 'C121Composite' or '$(HostLogProofMode)' == 'C122Composite' or '$(HostLogProofMode)' == 'C123Composite'">
     <HostLogProofIsProduction>true</HostLogProofIsProduction>
   </PropertyGroup>
 

@@ -5,7 +5,7 @@ param(
     [string]$PythonExe = "",
     [int]$FreshBootCount = 3,
     [int]$TimeoutSeconds = 360,
-    [ValidateSet("C120", "C121", "C122")]
+    [ValidateSet("C120", "C121", "C122", "C123")]
     [string]$ProofPhase = "C120",
     [switch]$SkipManagedBuild,
     [switch]$SkipKernelBuild,
@@ -18,6 +18,7 @@ if ($FreshBootCount -lt 3) { throw "Managed control proof requires at least thre
 if ($TimeoutSeconds -lt 10) { throw "TimeoutSeconds must be at least 10." }
 $isC121 = $ProofPhase -eq "C121"
 $isC122 = $ProofPhase -eq "C122"
+$isC123 = $ProofPhase -eq "C123"
 $phaseLower = $ProofPhase.ToLowerInvariant()
 
 $RepoRoot = [System.IO.Path]::GetFullPath($RepoRoot)
@@ -29,7 +30,9 @@ $startAheadBehind = if ($startUpstream) {
     (& git -C $RepoRoot rev-list --left-right --count "HEAD...$startUpstream").Trim()
 } else { "" }
 if ([string]::IsNullOrWhiteSpace($EvidenceRoot)) {
-    $EvidenceRoot = if ($isC122) {
+    $EvidenceRoot = if ($isC123) {
+        Join-Path $RepoRoot "out\dotnet\c011ec123-managed-separator"
+    } elseif ($isC122) {
         Join-Path $RepoRoot "out\dotnet\c011ec122-managed-label"
     } elseif ($isC121) {
         Join-Path $RepoRoot "out\dotnet\c011ec121-managed-checkbox"
@@ -115,7 +118,9 @@ function Invoke-C120Boot([string]$Esp, [string]$Serial, [string]$Stdout,
             Start-Sleep -Milliseconds 250
             if (Test-Path -LiteralPath $Serial) {
                 $partial = Get-Content -LiteralPath $Serial -Raw -ErrorAction SilentlyContinue
-                $resultPattern = if ($isC122) {
+                $resultPattern = if ($isC123) {
+                    '(?m)^\[C123-RESULT\] outcome=(?:PASS|FAIL)'
+                } elseif ($isC122) {
                     '(?m)^\[C122-RESULT\] outcome=(?:PASS|FAIL)'
                 } elseif ($isC121) {
                     '(?m)^\[C121-RESULT\] outcome=(?:PASS|FAIL)'
@@ -149,7 +154,7 @@ function Assert-C120Serial([string]$Serial) {
         '^\[NATIVEAOT-TLS-BRIDGE\] install=.*result=00000001',
         '^\[NATIVEAOT-HEAP\] action=initialize',
         '^\[NATIVEAOT-HEAP\] action=preserve')
-    if (-not $isC121 -and -not $isC122) {
+    if (-not $isC121 -and -not $isC122 -and -not $isC123) {
         $required += @(
             '^\[C120-APPMODEL\] catalogValid=true result=PASS',
             '^\[C120-RESULT\] outcome=PASS',
@@ -208,16 +213,33 @@ function Assert-C120Serial([string]$Serial) {
             '^\[C122-TRAVERSAL\].*result=PASS',
             '^\[C122-MODAL\].*result=PASS')
     }
+    if ($isC123) {
+        $required += @(
+            '^\[C123-APPMODEL\] catalogValid=true result=PASS',
+            '^\[C123-RESULT\] outcome=PASS',
+            '^\[C123-MIXED\].*result=PASS',
+            '^\[C123-FOCUSED-TESTS\] separator=PASS host=PASS result=PASS',
+            '^\[C102-MANAGED-OUTPUT\] C123-SEPARATOR-TESTS cases=48 result=PASS',
+            '^\[C102-MANAGED-OUTPUT\] C123-SEPARATOR-HOST-TESTS cases=33 result=PASS',
+            '^\[C102-MANAGED-OUTPUT\] C123-HOST registration=5 initial=no-focus result=PASS',
+            '^\[C123-INITIAL\].*result=PASS',
+            '^\[C123-FOCUS-ORDER\].*result=PASS',
+            '^\[C123-VISIBILITY\].*result=PASS',
+            '^\[C123-RESIZE\] expand=63 contract=12 stale-tail=none result=PASS',
+            '^\[C123-DYNAMIC\] open=02-POINT\.TXT active=Open separator=visible result=PASS',
+            '^\[C123-DYNAMIC\] save-as=THIRD\.TXT active=SaveAs separator=visible result=PASS',
+            '^\[C123-MODAL\].*result=PASS')
+    }
     foreach ($pattern in $required) {
         if ($Serial -notmatch "(?m)$pattern") { throw "Managed control proof missing serial marker: $pattern" }
     }
     $spaceMarker = @([regex]::Matches($Serial,
         '(?m)^\[C120-SPACE\] keydown=PASS keychar=PASS exact-once=PASS\r?$')).Count
-    if (-not $isC121 -and -not $isC122 -and $spaceMarker -ne 1) { throw "C120 expected one exact-once Space marker, got $spaceMarker." }
+    if (-not $isC121 -and -not $isC122 -and -not $isC123 -and $spaceMarker -ne 1) { throw "C120 expected one exact-once Space marker, got $spaceMarker." }
     $saveActivation = @([regex]::Matches($Serial,
         '(?m)^\[C102-MANAGED-OUTPUT\] C120-ACTIVATE control=Save result=PASS\r?$')).Count
-    if (-not $isC121 -and -not $isC122 -and $saveActivation -ne 1) { throw "C120 expected one managed Save activation, got $saveActivation." }
-    if ($Serial -match '(?m)^\[(?:C120|C121|C122)-[^\r\n]*FAIL|PageFault|triple.?fault|FAIL_FAST|fatal kernel failure|boot failure') {
+    if (-not $isC121 -and -not $isC122 -and -not $isC123 -and $saveActivation -ne 1) { throw "C120 expected one managed Save activation, got $saveActivation." }
+    if ($Serial -match '(?m)^\[(?:C120|C121|C122|C123)-[^\r\n]*FAIL|PageFault|triple.?fault|FAIL_FAST|fatal kernel failure|boot failure') {
         throw "Managed control proof serial output contains a failure or fault marker."
     }
     [pscustomobject]@{ outcome = "PASS"; spaceMarkers = $spaceMarker; saveActivations = $saveActivation }
@@ -243,7 +265,7 @@ if (-not $SkipManagedBuild -and -not $providedComposite) {
         "-RuntimePackOutputRoot", $runtimePackOutputRoot,
         "-UseGuideXosRuntimePack", "-ProductionApplication", "-PersistentCompositeLifecycle",
         "-AllocationMode", "Allocating", "-ManagedProjectMode",
-        $(if ($isC122) { "C122Composite" } elseif ($isC121) { "C121Composite" } else { "C120Composite" }),
+         $(if ($isC123) { "C123Composite" } elseif ($isC122) { "C122Composite" } elseif ($isC121) { "C121Composite" } else { "C120Composite" }),
         "-PythonExe", $PythonExe)
 }
 $compositeElf = if ($providedComposite) { $CompositeElfPath } else {
@@ -259,7 +281,8 @@ Invoke-Checked "powershell" @(
     "-C114ManagedDirectoryServices", "-C117ManagedTextArea", "-C118ManagedListBox")
 
 $kernelFlags = "-DGXOS_NATIVEAOT_PRODUCTION_APPLICATION -DGXOS_NATIVEAOT_PRODUCTION_COMPOSITE_LAUNCH -DGXOS_NATIVEAOT_C112_REUSABLE_MANAGED_APPLICATION -DGXOS_NATIVEAOT_C113_MANAGED_FILE_SERVICES -DGXOS_NATIVEAOT_C114_MANAGED_DIRECTORY_SERVICES -DGXOS_NATIVEAOT_C115_MANAGED_FILE_PICKER -DGXOS_NATIVEAOT_C116_MANAGED_TEXT_INPUT -DGXOS_NATIVEAOT_C117_MANAGED_TEXT_AREA -DGXOS_NATIVEAOT_C118_MANAGED_LIST_BOX -DGXOS_NATIVEAOT_C119_MANAGED_BUTTON -DGXOS_NATIVEAOT_C120_MANAGED_CONTROL_HOST"
-if ($isC122) { $kernelFlags += " -DGXOS_NATIVEAOT_C121_MANAGED_CHECKBOX -DGXOS_NATIVEAOT_C122_MANAGED_LABEL" }
+if ($isC123) { $kernelFlags += " -DGXOS_NATIVEAOT_C121_MANAGED_CHECKBOX -DGXOS_NATIVEAOT_C122_MANAGED_LABEL -DGXOS_NATIVEAOT_C123_MANAGED_SEPARATOR" }
+elseif ($isC122) { $kernelFlags += " -DGXOS_NATIVEAOT_C121_MANAGED_CHECKBOX -DGXOS_NATIVEAOT_C122_MANAGED_LABEL" }
 elseif ($isC121) { $kernelFlags += " -DGXOS_NATIVEAOT_C121_MANAGED_CHECKBOX" }
 if (-not $SkipKernelBuild) {
     Invoke-Checked "mingw32-make" @(
@@ -280,8 +303,8 @@ $inputs.runtimePackManifestSha256 = Get-Hash $inputs.runtimePackManifest
 $inputs | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $EvidenceRoot "inputs.json") -Encoding ASCII
 @"
 abi=GuideXos Host ABI v1/table 104; no capability changes; no input transport changes
-host=GuideXosControlHost fixed capacity 8; picker capacity 2; explicit kind dispatch; no reflection; C122 label is deliberately not registered
-focus=one active control or no focus; C122 registration order Open, Save, Save As, Show path, Document; label absent from Tab/Shift-Tab
+host=GuideXosControlHost fixed capacity 8; picker capacity 2; explicit kind dispatch; no reflection; C122 label and C123 separator are deliberately not registered
+focus=one active control or no focus; C123 registration order Open, Save, Save As, Show path, Document; label and separator absent from Tab/Shift-Tab
 space=KeyDown Space ignored by button; one KeyChar Space activates Save exactly once; text-area Space is routed as text
 modal=picker focus is isolated; main focus restores to Open or Save As after completion
 runtime=NativeAOT resident image; allocation/GC/VFS/runtime seams unchanged
@@ -326,9 +349,9 @@ if (-not $SkipQemu) {
 $evidenceSerial = if ($bootResults.Count -gt 0) {
     Get-Content -LiteralPath (Join-Path $EvidenceRoot "boot-01\serial.log")
 } else { @("QEMU not executed; build-only evidence.") }
-$evidenceSerial | Where-Object { $_ -match '^\[(?:C122|C121|C120|C119|C118|C117|C116|C115)-' } |
+$evidenceSerial | Where-Object { $_ -match '^\[(?:C123|C122|C121|C120|C119|C118|C117|C116|C115)-' } |
     Set-Content -LiteralPath (Join-Path $EvidenceRoot "managed-control-host-output.txt") -Encoding ASCII
-$evidenceSerial | Where-Object { $_ -match '^\[(?:C122|C121|C120)-' } |
+$evidenceSerial | Where-Object { $_ -match '^\[(?:C123|C122|C121|C120)-' } |
     Set-Content -LiteralPath (Join-Path $EvidenceRoot "control-host-evidence.txt") -Encoding ASCII
 $evidenceSerial | Where-Object { $_ -match '^\[(?:C116|C117|C118|C119)-' } |
     Set-Content -LiteralPath (Join-Path $EvidenceRoot "regression-evidence.txt") -Encoding ASCII
@@ -345,6 +368,9 @@ $sourceFiles = @(
     "samples\managed\HostLogProof\GuideXos\GuideXosLabel.cs",
     "samples\managed\HostLogProof\GuideXos\GuideXosLabelTests.cs",
     "samples\managed\HostLogProof\GuideXos\GuideXosLabelHostTests.cs",
+    "samples\managed\HostLogProof\GuideXos\GuideXosSeparator.cs",
+    "samples\managed\HostLogProof\GuideXos\GuideXosSeparatorTests.cs",
+    "samples\managed\HostLogProof\GuideXos\GuideXosSeparatorHostTests.cs",
     "samples\managed\HostLogProof\GuideXos\GuideXosButton.cs",
     "samples\managed\HostLogProof\GuideXos\GuideXosTextInput.cs",
     "samples\managed\HostLogProof\GuideXos\GuideXosTextArea.cs",
@@ -355,7 +381,9 @@ $sourceFiles = @(
     "scripts\dotnet\build-managed-hostlog-proof.ps1",
     "scripts\dotnet\run-c120-managed-control-host.ps1",
     "scripts\dotnet\run-c122-managed-label.ps1",
-    "docs\dotnet\NATIVEAOT_C122_MANAGED_LABEL.md")
+    "scripts\dotnet\run-c123-managed-separator.ps1",
+    "docs\dotnet\NATIVEAOT_C122_MANAGED_LABEL.md",
+    "docs\dotnet\NATIVEAOT_C123_MANAGED_SEPARATOR.md")
 $sourceHashes = [ordered]@{}
 foreach ($sourceFile in $sourceFiles) { $sourceHashes[$sourceFile] = Get-Hash (Join-Path $RepoRoot $sourceFile) }
 
@@ -381,14 +409,15 @@ $manifest = [ordered]@{
     schemaVersion = 1; phase = $ProofPhase; outcome = if ($SkipQemu) { "BUILD_ONLY" } else { "PASS" }
     repository = [ordered]@{ root = $RepoRoot; branch = $repoBranch; head = $repoHead; subject = $repoSubject; upstream = $repoUpstream; aheadBehind = $aheadBehind }
     hostAbi = [ordered]@{ version = 1; tableSize = 104; changed = $false; capabilityChanges = "none"; inputTransport = "existing pointer-down, KeyDown, KeyChar and Shift payload" }
-    controlHost = [ordered]@{ api = "GuideXosControlHost"; capacity = 8; pickerCapacity = 2; tests = if($isC122){22}elseif($isC121){17}else{50}; legacyC120HostSuite = if($isC121 -or $isC122){"separate C120 runner"}else{"same image"}; modal = "one shallow picker scope with saved-ID restoration and forward fallback" }
-    notes = [ordered]@{ order = if ($isC121 -or $isC122) { "Open, Save, Save As, Show Path, Document; label is not registered" } else { "Open, Save, Save As, Document" }; initialFocus = "none"; commands = if ($isC122) { "managed Open/Save/Save As; GuideXosLabel controls Path presentation; native Reload retained" } elseif ($isC121) { "managed Open/Save/Save As; checkbox controls Path presentation; native Reload retained" } else { "managed Open/Save/Save As; native Reload retained" }; space = if ($isC122) { "checkbox toggles label visibility only from KeyChar Space; label has no input API" } elseif ($isC121) { "checkbox toggles only from KeyChar Space; text/button/list/input routing remains isolated" } else { "exactly one Save activation from KeyChar Space" } }
+    controlHost = [ordered]@{ api = "GuideXosControlHost"; capacity = 8; pickerCapacity = 2; tests = if($isC123){33}elseif($isC122){22}elseif($isC121){17}else{50}; legacyC120HostSuite = if($isC121 -or $isC122 -or $isC123){"separate C120 runner"}else{"same image"}; modal = "one shallow picker scope with saved-ID restoration and forward fallback" }
+    separator = [ordered]@{ api = "GuideXosSeparator"; orientation = "horizontal"; minimumWidth = 8; maximumWidth = 504; configuredNotesWidth = 480; renderColumns = 63; focusedTests = 48; hostTests = 33; controlHostRegistration = "absent" }
+    notes = [ordered]@{ order = if ($isC121 -or $isC122 -or $isC123) { "Open, Save, Save As, Show Path, Document; label and separator are not registered" } else { "Open, Save, Save As, Document" }; initialFocus = "none"; commands = if ($isC123) { "managed Open/Save/Save As; GuideXosLabel controls Path presentation; GuideXosSeparator divides content/status from command controls; native Reload retained" } elseif ($isC122) { "managed Open/Save/Save As; GuideXosLabel controls Path presentation; native Reload retained" } elseif ($isC121) { "managed Open/Save/Save As; checkbox controls Path presentation; native Reload retained" } else { "managed Open/Save/Save As; native Reload retained" }; space = if ($isC123 -or $isC122) { "checkbox toggles label visibility only from KeyChar Space; label and separator have no input API" } elseif ($isC121) { "checkbox toggles only from KeyChar Space; text/button/list/input routing remains isolated" } else { "exactly one Save activation from KeyChar Space" } }
     regressions = [ordered]@{ c116 = $true; c117 = $true; c118 = $true; c119 = $true; nativeNotepad = $true; counter = $true; status = $true }
     runtime = [ordered]@{ nativeAotSourceChanges = $false; gcChanges = $false; vfsChanges = $false; lifecycle = "resident managed image; runtime/PAL/GC/code manager/modules/mapping/heap preserve path" }
     freshBootCount = $FreshBootCount; qemuExecuted = -not $SkipQemu
     inputs = $inputs; sourceHashes = $sourceHashes; boots = @($bootResults)
     evidence = [ordered]@{ serial = "boot-01\serial.log"; managed = "managed-control-host-output.txt"; controlHost = "control-host-evidence.txt"; regressions = "regression-evidence.txt"; lifecycle = "lifecycle-evidence.txt" }
-    documentation = if ($isC122) { "docs\dotnet\NATIVEAOT_C122_MANAGED_LABEL.md" } elseif ($isC121) { "docs\dotnet\NATIVEAOT_C121_MANAGED_CHECKBOX.md" } else { "docs\dotnet\NATIVEAOT_C120_MANAGED_CONTROL_HOST.md" }
+    documentation = if ($isC123) { "docs\dotnet\NATIVEAOT_C123_MANAGED_SEPARATOR.md" } elseif ($isC122) { "docs\dotnet\NATIVEAOT_C122_MANAGED_LABEL.md" } elseif ($isC121) { "docs\dotnet\NATIVEAOT_C121_MANAGED_CHECKBOX.md" } else { "docs\dotnet\NATIVEAOT_C120_MANAGED_CONTROL_HOST.md" }
 }
 $manifest | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath (Join-Path $EvidenceRoot ("{0}.manifest.json" -f $phaseLower)) -Encoding ASCII
 Write-Host "$ProofPhase outcome=$($manifest.outcome) evidence=$EvidenceRoot" -ForegroundColor Green
