@@ -52,7 +52,9 @@ typedef enum gx_development_debug_command {
     /* Phase 28L: update one bounded breakpoint action/count policy. */
     GX_DEVELOPMENT_DEBUG_CONFIGURE_SOURCE_BREAKPOINT_POLICY = 27,
     /* Phase 28L: drain the bounded FIFO debugger-output queue. */
-    GX_DEVELOPMENT_DEBUG_DRAIN_OUTPUT = 28
+    GX_DEVELOPMENT_DEBUG_DRAIN_OUTPUT = 28,
+    /* Phase 28Q: request a cooperative pause at the next safe boundary. */
+    GX_DEVELOPMENT_DEBUG_PAUSE = 29
 } gx_development_debug_command;
 
 #define GX_DEVELOPMENT_DEBUG_MAX_SOURCE_BREAKPOINTS 8u
@@ -196,7 +198,9 @@ typedef enum gx_development_debug_status {
     GX_DEVELOPMENT_DEBUG_STATUS_TRAP = 3,
     GX_DEVELOPMENT_DEBUG_STATUS_RESTORED = 4,
     GX_DEVELOPMENT_DEBUG_STATUS_REJECTED = 5,
-    GX_DEVELOPMENT_DEBUG_STATUS_SINGLE_STEP_PENDING = 6
+    GX_DEVELOPMENT_DEBUG_STATUS_SINGLE_STEP_PENDING = 6,
+    /* The pause request was accepted and awaits the next scheduler boundary. */
+    GX_DEVELOPMENT_DEBUG_STATUS_PAUSE_REQUESTED = 7
 } gx_development_debug_status;
 
 #define GX_DEVELOPMENT_DEBUG_FLAG_REINSTALL_BREAKPOINT 1u
@@ -565,7 +569,9 @@ enum {
     GX_DEVELOPMENT_DEBUG_PAUSE_REASON_SOURCE_STEP = 4,
     GX_DEVELOPMENT_DEBUG_PAUSE_REASON_SOURCE_STEP_OVER = 5,
     GX_DEVELOPMENT_DEBUG_PAUSE_REASON_SOURCE_STEP_OUT = 6,
-    GX_DEVELOPMENT_DEBUG_PAUSE_REASON_CONDITIONAL_SOURCE_BREAKPOINT = 7
+    GX_DEVELOPMENT_DEBUG_PAUSE_REASON_CONDITIONAL_SOURCE_BREAKPOINT = 7,
+    /* Phase 28Q: execution was paused by an explicit user request. */
+    GX_DEVELOPMENT_DEBUG_PAUSE_REASON_USER_PAUSE = 8
 };
 
 enum {

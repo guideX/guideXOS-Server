@@ -45,6 +45,11 @@ bool native_elf_debug_breakpoint_exception(NativeElfDebugTrap::BreakpointContext
 bool native_elf_debug_single_step_exception(NativeElfDebugTrap::BreakpointContext* context);
 void native_elf_debug_breakpoint_install_failed();
 
+// Cooperative execution boundary used by the debugger pause request.  The
+// AMD64 implementation is an assembly shim so the saved context includes all
+// target GPRs, RIP, CS, RFLAGS, and the logical post-yield RSP.
+extern "C" bool native_elf_scheduler_yield();
+
 } // namespace NativeElfRunService
 } // namespace native_elf
 } // namespace kernel

@@ -157,6 +157,12 @@ static_assert(GX_DEVELOPMENT_DEBUG_ENABLE_SOURCE_BREAKPOINT == 25,
               "source breakpoint enable command must be appended after list");
 static_assert(GX_DEVELOPMENT_DEBUG_DISABLE_SOURCE_BREAKPOINT == 26,
               "source breakpoint disable command must be appended after enable");
+static_assert(GX_DEVELOPMENT_DEBUG_PAUSE == 29,
+              "user Pause command must be append-only after the Phase 28L command set");
+static_assert(GX_DEVELOPMENT_DEBUG_STATUS_PAUSE_REQUESTED == 7,
+              "PauseRequested status must be append-only");
+static_assert(GX_DEVELOPMENT_DEBUG_PAUSE_REASON_USER_PAUSE == 8,
+              "USER_PAUSE reason must be append-only");
 static_assert(GX_DEVELOPMENT_DEBUG_MAX_SOURCE_BREAKPOINTS == 8u,
               "source breakpoint capacity changed");
 static_assert(offsetof(gx_development_debug_expression, functionName) == 104,

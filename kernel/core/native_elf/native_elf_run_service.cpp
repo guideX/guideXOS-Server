@@ -92,6 +92,8 @@ struct Operation {
     bool debugControlled;
     bool debugBreakpointInstalled;
     bool debugBreakpointHit;
+    bool debugPauseRequested;
+    bool debugPauseCaptured;
     bool debugCancelRequested;
     bool debugStepActive;
     bool debugStepTrapObserved;
@@ -116,6 +118,7 @@ struct Operation {
     uint32_t debugCurrentBreakpointSlot;
     uint32_t debugServicingBreakpointSlot;
     uint64_t registrationGeneration;
+    uint64_t debugPauseRequestGeneration;
     uint64_t debugImageBase;
     uint64_t debugImageSize;
     uint64_t nextBreakpointSequence;
@@ -1098,7 +1101,8 @@ static gx_result read_debug_memory(const Operation& operation,
                                    gx_development_debug_snapshot* outSnapshot)
 {
     if (!outSnapshot || operation.state != GX_DEVELOPMENT_RUN_PAUSED ||
-        !operation.debugContext || !operation.debugBreakpointHit ||
+        !operation.debugContext ||
+        (!operation.debugBreakpointHit && !operation.debugPauseCaptured) ||
         (request.threadId != 0 && request.threadId != 1) ||
         (request.stopGeneration != 0 &&
          request.stopGeneration != operation.debugStopGeneration) ||
@@ -2089,6 +2093,8 @@ static gx_development_run_error_code runtime_error_code(const NativeElfRunReport
 
 static void finish_execution(Operation& operation, bool success)
 {
+    operation.debugPauseRequested = false;
+    operation.debugPauseCaptured = false;
     const bool debugClean = restore_all_debug_breakpoints();
     for (uint32_t i = 0; i < GX_DEVELOPMENT_DEBUG_MAX_SOURCE_BREAKPOINTS; ++i)
         operation.userBreakpoints[i] = UserBreakpoint();
@@ -2138,6 +2144,192 @@ static void finish_execution(Operation& operation, bool success)
 }
 
 #if defined(__x86_64__)
+static bool capture_user_pause(NativeElfDebugTrap::BreakpointContext* context)
+{
+    const NativeAppExecutionContext* runtime = native_elf_runtime_context();
+    if (!context || !s_operation.used || !s_operation.debugControlled ||
+        !s_operation.debugPauseRequested ||
+        s_operation.debugPauseRequestGeneration != s_operation.registrationGeneration ||
+        s_operation.state != GX_DEVELOPMENT_RUN_RUNNING ||
+        s_operation.debugStepActive || s_operation.debugSourceStepActive ||
+        s_operation.debugStepOverActive || s_operation.debugStepOutActive ||
+        !runtime || runtime->state != NativeAppExecutionState::Running ||
+        context->cs != 0x08 || context->rip == 0) return false;
+
+    const uint64_t logicalRsp = context->rsp > ~static_cast<uint64_t>(0) - 8ULL
+        ? 0 : context->rsp + 8ULL;
+    const uint64_t stackHigh = runtime->stackBase <=
+        ~static_cast<uint64_t>(0) - runtime->stackSize
+            ? runtime->stackBase + runtime->stackSize : 0;
+    if (logicalRsp == 0 || runtime->stackBase > logicalRsp ||
+        stackHigh == 0 || logicalRsp >= stackHigh) return false;
+
+    // native_elf_scheduler_yield is entered by a normal target call. The
+    // assembly shim records the call-entry RSP; debugger consumers need the
+    // logical post-return stack pointer, just like an exception frame.
+    context->rsp = logicalRsp;
+    s_operation.debugContext = context;
+    s_operation.debugPauseRequested = false;
+    s_operation.debugPauseCaptured = true;
+    s_operation.debugBreakpointHit = false;
+    s_operation.debugStepTrapObserved = false;
+    s_operation.debugStepActive = false;
+    s_operation.debugSourceStepActive = false;
+    s_operation.debugStepOverActive = false;
+    s_operation.debugStepOutActive = false;
+    s_operation.debugBreakpointInstalled = false;
+    s_operation.debugCurrentBreakpointId = 0;
+    s_operation.debugCurrentBreakpointSlot = kInvalidBreakpointSlot;
+    s_operation.debugBreakpointAddress = 0;
+    s_operation.debugBreakpointOriginalByte = 0;
+    ++s_operation.debugStopGeneration;
+    if (s_operation.debugStopGeneration == 0) s_operation.debugStopGeneration = 1;
+    s_operation.state = GX_DEVELOPMENT_RUN_PAUSED;
+
+    gx_development_debug_snapshot& snapshot = s_operation.debugSnapshot;
+    clear_debug_snapshot(&snapshot);
+    snapshot.status = GX_DEVELOPMENT_DEBUG_STATUS_TRAP;
+    snapshot.trapKind = GX_DEVELOPMENT_DEBUG_TRAP_NONE;
+    snapshot.pauseReason = GX_DEVELOPMENT_DEBUG_PAUSE_REASON_USER_PAUSE;
+    set_debug_identity(s_operation, &snapshot);
+    // A user pause is not owned by any software breakpoint. Keep the
+    // persistent breakpoint list in the snapshot, but clear the current-stop
+    // binding so Continue cannot accidentally rearm the wrong owner.
+    snapshot.bindingId = 0;
+    // A cooperative yield may be reached from the NativeElf runtime helper,
+    // whose return address is outside the application ELF. Keep the raw RIP
+    // and full register context, but do not expose that runtime address as a
+    // source/breakpoint target or invent a source mapping for it.
+    snapshot.targetAddress = debug_code_address(s_operation, context->rip)
+        ? context->rip : 0;
+    snapshot.originalByte = 0;
+    snapshot.installedByte = 0;
+    snapshot.originalByteValid = 0;
+    snapshot.bindingInstalled = 0;
+    snapshot.instructionPointer = context->rip;
+    snapshot.rawTrapRip = context->rip;
+    snapshot.stackLow = runtime->stackBase;
+    snapshot.stackHigh = stackHigh;
+    snapshot.context.architecture = GX_DEVELOPMENT_DEBUG_ARCHITECTURE_AMD64;
+    snapshot.context.valid = 1;
+    snapshot.context.processId = 0;
+    snapshot.context.nativeRuntimeId = s_operation.registrationGeneration;
+    snapshot.context.threadId = 1;
+    snapshot.context.sessionGeneration = s_operation.registrationGeneration;
+    snapshot.context.stopGeneration = s_operation.debugStopGeneration;
+    snapshot.context.rip = context->rip;
+    snapshot.context.rflags = context->rflags;
+    snapshot.context.rsp = context->rsp;
+    snapshot.context.rbp = context->rbp;
+    snapshot.context.rax = context->rax;
+    snapshot.context.rbx = context->rbx;
+    snapshot.context.rcx = context->rcx;
+    snapshot.context.rdx = context->rdx;
+    snapshot.context.rsi = context->rsi;
+    snapshot.context.rdi = context->rdi;
+    snapshot.context.r8 = context->r8;
+    snapshot.context.r9 = context->r9;
+    snapshot.context.r10 = context->r10;
+    snapshot.context.r11 = context->r11;
+    snapshot.context.r12 = context->r12;
+    snapshot.context.r13 = context->r13;
+    snapshot.context.r14 = context->r14;
+    snapshot.context.r15 = context->r15;
+    compiler::ResolvedSourceMapping mapping = {};
+    if (resolve_debug_mapping_at_address(s_operation, context->rip, &mapping, nullptr))
+        set_debug_source_mapping(s_operation, &snapshot, mapping);
+    else
+        clear_unmapped_source_identity(&snapshot);
+    set_breakpoint_list(s_operation, &snapshot);
+    serial::puts("DEVELOPER_STUDIO_PHASE28Q_PAUSE_CAPTURED stop=");
+    serial::put_hex64(s_operation.debugStopGeneration);
+    serial::puts(" rip=0x"); serial::put_hex64(context->rip);
+    serial::puts(" rsp=0x"); serial::put_hex64(context->rsp);
+    serial::putc('\n');
+    serial::puts("DEVELOPER_STUDIO_PHASE28Q_PAUSE_CAPTURE_PASS\n");
+    return true;
+}
+
+extern "C" bool native_elf_scheduler_yield_dispatch(
+    NativeElfDebugTrap::BreakpointContext* context)
+{
+    if (!s_schedulerActive || !s_schedulerInTarget || !s_ownerContext || !s_targetContext)
+        return false;
+    (void)capture_user_pause(context);
+    s_schedulerInTarget = false;
+    arch::amd64::context::switch_context(&s_targetContext, s_ownerContext);
+    s_schedulerInTarget = true;
+    return true;
+}
+
+// Capture the cooperative call boundary as the same complete register image
+// used by the vector-1/vector-3 debugger gates. The frame is kept on the
+// target stack while the owner services the paused debugger session.
+asm(
+    ".global native_elf_scheduler_yield\n"
+#if defined(__ELF__)
+    ".type native_elf_scheduler_yield, @function\n"
+#endif
+    "native_elf_scheduler_yield:\n"
+    "    sub $184, %rsp\n"
+    "    mov %r11, 120(%rsp)\n"
+    "    lea 184(%rsp), %r11\n"
+    "    mov %r11, 32(%rsp)\n"
+    "    mov %rax, 40(%rsp)\n"
+    "    mov %rbx, 48(%rsp)\n"
+    "    mov %rcx, 56(%rsp)\n"
+    "    mov %rdx, 64(%rsp)\n"
+    "    mov %rsi, 72(%rsp)\n"
+    "    mov %rdi, 80(%rsp)\n"
+    "    mov %rbp, 88(%rsp)\n"
+    "    mov %r8, 96(%rsp)\n"
+    "    mov %r9, 104(%rsp)\n"
+    "    mov %r10, 112(%rsp)\n"
+    "    mov %r12, 128(%rsp)\n"
+    "    mov %r13, 136(%rsp)\n"
+    "    mov %r14, 144(%rsp)\n"
+    "    mov %r15, 152(%rsp)\n"
+    "    mov 184(%rsp), %rax\n"
+    "    mov %rax, 160(%rsp)\n"
+    "    mov %cs, %ax\n"
+    "    movzwq %ax, %rax\n"
+    "    mov %rax, 168(%rsp)\n"
+    "    pushfq\n"
+    "    pop %rax\n"
+    "    mov %rax, 176(%rsp)\n"
+#if defined(__MINGW32__) || defined(__MINGW64__) || defined(_WIN64)
+    "    sub $40, %rsp\n"
+    "    lea 72(%rsp), %rcx\n"
+    "    call native_elf_scheduler_yield_dispatch\n"
+    "    add $40, %rsp\n"
+#else
+    "    lea 32(%rsp), %rdi\n"
+    "    call native_elf_scheduler_yield_dispatch\n"
+#endif
+    "    pushq 176(%rsp)\n"
+    "    popfq\n"
+    "    mov 40(%rsp), %rax\n"
+    "    mov 48(%rsp), %rbx\n"
+    "    mov 56(%rsp), %rcx\n"
+    "    mov 64(%rsp), %rdx\n"
+    "    mov 72(%rsp), %rsi\n"
+    "    mov 80(%rsp), %rdi\n"
+    "    mov 88(%rsp), %rbp\n"
+    "    mov 96(%rsp), %r8\n"
+    "    mov 104(%rsp), %r9\n"
+    "    mov 112(%rsp), %r10\n"
+    "    mov 120(%rsp), %r11\n"
+    "    mov 128(%rsp), %r12\n"
+    "    mov 136(%rsp), %r13\n"
+    "    mov 144(%rsp), %r14\n"
+    "    mov 152(%rsp), %r15\n"
+    "    add $184, %rsp\n"
+    "    ret\n"
+#if defined(__ELF__)
+    ".size native_elf_scheduler_yield, .-native_elf_scheduler_yield\n"
+#endif
+);
+
 static void scheduled_task_entry(void*)
 {
     s_schedulerInTarget = true;
@@ -2202,19 +2394,12 @@ bool native_elf_scheduler_in_target()
 #endif
 }
 
-bool native_elf_scheduler_yield()
+#if !defined(__x86_64__)
+extern "C" bool native_elf_scheduler_yield()
 {
-#if defined(__x86_64__)
-    if (!s_schedulerActive || !s_schedulerInTarget || !s_ownerContext || !s_targetContext)
-        return false;
-    s_schedulerInTarget = false;
-    arch::amd64::context::switch_context(&s_targetContext, s_ownerContext);
-    s_schedulerInTarget = true;
-    return true;
-#else
     return false;
-#endif
 }
+#endif
 
 bool native_elf_scheduler_pump()
 {
@@ -3623,7 +3808,8 @@ static bool begin_debug_instruction_step(
     const bool conditionalPause = operation.debugConditionEnabled &&
         operation.debugBreakpointHit && !operation.debugConditionError;
     if (operation.state != GX_DEVELOPMENT_RUN_PAUSED ||
-        (!operation.debugBreakpointHit && !operation.debugStepTrapObserved && !conditionalPause) ||
+        (!operation.debugBreakpointHit && !operation.debugStepTrapObserved &&
+         !operation.debugPauseCaptured && !conditionalPause) ||
         !operation.debugContext || operation.debugStepActive ||
         operation.debugContext->cs != 0x08) return false;
     if (operation.debugContext->rflags & kAmd64TrapFlag) return false;
@@ -3772,7 +3958,8 @@ static gx_result source_step_into(gx_development_debug_snapshot* outSnapshot)
 {
     Operation& operation = s_operation;
     if (operation.state != GX_DEVELOPMENT_RUN_PAUSED ||
-        (!operation.debugBreakpointHit && !operation.debugStepTrapObserved) ||
+        (!operation.debugBreakpointHit && !operation.debugStepTrapObserved &&
+         !operation.debugPauseCaptured) ||
         !operation.debugContext || operation.debugStepActive ||
         !operation.debugSourceSelected || operation.debugContext->cs != 0x08) {
         set_debug_error(outSnapshot,
@@ -3922,7 +4109,8 @@ static gx_result source_step_over(gx_development_debug_snapshot* outSnapshot)
 {
     Operation& operation = s_operation;
     if (operation.state != GX_DEVELOPMENT_RUN_PAUSED ||
-        (!operation.debugBreakpointHit && !operation.debugStepTrapObserved) ||
+        (!operation.debugBreakpointHit && !operation.debugStepTrapObserved &&
+         !operation.debugPauseCaptured) ||
         !operation.debugContext || operation.debugStepActive ||
         !operation.debugSourceSelected || operation.debugContext->cs != 0x08) {
         set_debug_error(outSnapshot,
@@ -4329,7 +4517,8 @@ static gx_result source_step_out(gx_development_debug_snapshot* outSnapshot)
     Operation& operation = s_operation;
     const NativeAppExecutionContext* runtime = native_elf_runtime_context();
     if (operation.state != GX_DEVELOPMENT_RUN_PAUSED ||
-        (!operation.debugBreakpointHit && !operation.debugStepTrapObserved) ||
+        (!operation.debugBreakpointHit && !operation.debugStepTrapObserved &&
+         !operation.debugPauseCaptured) ||
         !operation.debugContext || operation.debugStepActive ||
         !operation.debugSourceSelected || operation.debugContext->cs != 0x08 || !runtime) {
         set_debug_error(outSnapshot,
@@ -4907,7 +5096,8 @@ gx_result call_stack(const gx_development_debug_request& request,
         return GX_ERROR_FAILED;
     }
     if (s_operation.state != GX_DEVELOPMENT_RUN_PAUSED ||
-        (!s_operation.debugBreakpointHit && !s_operation.debugStepTrapObserved) ||
+        (!s_operation.debugBreakpointHit && !s_operation.debugStepTrapObserved &&
+         !s_operation.debugPauseCaptured) ||
         s_operation.debugStepActive || s_operation.debugSourceStepActive ||
         s_operation.debugStepOverActive || s_operation.debugStepOutActive ||
         !s_operation.debugContext || s_operation.debugContext->cs != 0x08) {
@@ -5170,7 +5360,8 @@ gx_result inspect_variables(const gx_development_debug_request& request,
         return GX_ERROR_FAILED;
     }
     if (s_operation.state != GX_DEVELOPMENT_RUN_PAUSED ||
-        (!s_operation.debugBreakpointHit && !s_operation.debugStepTrapObserved) ||
+        (!s_operation.debugBreakpointHit && !s_operation.debugStepTrapObserved &&
+         !s_operation.debugPauseCaptured) ||
         s_operation.debugStepActive || s_operation.debugSourceStepActive ||
         s_operation.debugStepOverActive || s_operation.debugStepOutActive ||
         !s_operation.debugContext || s_operation.debugContext->cs != 0x08) {
@@ -5387,7 +5578,8 @@ gx_result evaluate_expression(const gx_development_debug_request& request,
         return GX_ERROR_INVALID_ARGUMENT;
     }
     if (s_operation.state != GX_DEVELOPMENT_RUN_PAUSED ||
-        (!s_operation.debugBreakpointHit && !s_operation.debugStepTrapObserved) ||
+        (!s_operation.debugBreakpointHit && !s_operation.debugStepTrapObserved &&
+         !s_operation.debugPauseCaptured) ||
         s_operation.debugStepActive || s_operation.debugSourceStepActive ||
         s_operation.debugStepOverActive || s_operation.debugStepOutActive ||
         !s_operation.debugContext || s_operation.debugContext->cs != 0x08) {
@@ -5628,6 +5820,47 @@ gx_result debug(const gx_development_debug_request& request,
         set_debug_error(outSnapshot, "NativeElf debug session identity is stale");
         return GX_ERROR_FAILED;
     }
+    if (request.command == GX_DEVELOPMENT_DEBUG_PAUSE) {
+        if (s_operation.state == GX_DEVELOPMENT_RUN_PAUSED &&
+            s_operation.debugPauseCaptured) {
+            *outSnapshot = s_operation.debugSnapshot;
+            copy_text(outSnapshot->errorMessage, sizeof(outSnapshot->errorMessage),
+                      "NativeElf target is already paused by a user pause");
+            return GX_OK;
+        }
+        if (s_operation.state != GX_DEVELOPMENT_RUN_RUNNING) {
+            set_debug_error(outSnapshot,
+                            "NativeElf user pause requires a running target");
+            return GX_ERROR_BUSY;
+        }
+        if (s_operation.debugPauseRequested) {
+            clear_debug_snapshot(outSnapshot);
+            outSnapshot->status = GX_DEVELOPMENT_DEBUG_STATUS_PAUSE_REQUESTED;
+            set_debug_identity(s_operation, outSnapshot);
+            copy_text(outSnapshot->errorMessage, sizeof(outSnapshot->errorMessage),
+                      "NativeElf user pause request is already pending");
+            set_breakpoint_list(s_operation, outSnapshot);
+            return GX_OK;
+        }
+        if (s_operation.debugStepActive || s_operation.debugSourceStepActive ||
+            s_operation.debugStepOverActive || s_operation.debugStepOutActive) {
+            set_debug_error(outSnapshot,
+                            "NativeElf user pause is busy during active execution control");
+            return GX_ERROR_BUSY;
+        }
+        s_operation.debugPauseRequested = true;
+        s_operation.debugPauseRequestGeneration = s_operation.registrationGeneration;
+        clear_debug_snapshot(outSnapshot);
+        outSnapshot->status = GX_DEVELOPMENT_DEBUG_STATUS_PAUSE_REQUESTED;
+        set_debug_identity(s_operation, outSnapshot);
+        copy_text(outSnapshot->errorMessage, sizeof(outSnapshot->errorMessage),
+                  "NativeElf user pause request accepted");
+        set_breakpoint_list(s_operation, outSnapshot);
+        serial::puts("DEVELOPER_STUDIO_PHASE28Q_PAUSE_REQUEST_ACCEPTED generation=");
+        serial::put_hex64(s_operation.debugPauseRequestGeneration);
+        serial::putc('\n');
+        return GX_OK;
+    }
     if (breakpointContinue &&
         (s_operation.state != GX_DEVELOPMENT_RUN_PAUSED ||
          !s_operation.debugBreakpointHit || s_operation.debugStepTrapObserved ||
@@ -5758,9 +5991,26 @@ gx_result debug(const gx_development_debug_request& request,
         {
         if (s_operation.state != GX_DEVELOPMENT_RUN_PAUSED ||
             (!s_operation.debugBreakpointInstalled && !s_operation.debugStepTrapObserved &&
-             !s_operation.debugBreakpointHit)) {
+             !s_operation.debugBreakpointHit && !s_operation.debugPauseCaptured)) {
             set_debug_error(outSnapshot, "NativeElf target is not paused at a resumable debug stop");
             return GX_ERROR_BUSY;
+        }
+        if (s_operation.debugPauseCaptured) {
+            s_operation.debugPauseCaptured = false;
+            s_operation.debugPauseRequested = false;
+            s_operation.debugBreakpointHit = false;
+            s_operation.debugStepTrapObserved = false;
+            s_operation.debugStepActive = false;
+            s_operation.debugSourceStepActive = false;
+            s_operation.state = GX_DEVELOPMENT_RUN_RUNNING;
+            set_debug_ready_snapshot(s_operation, outSnapshot);
+            serial::puts("DEVELOPER_STUDIO_PHASE28Q_CONTINUE_REQUESTED\n");
+            const bool pumped = native_elf_scheduler_pump();
+            if (!pumped) return GX_ERROR_FAILED;
+            if (s_operation.state == GX_DEVELOPMENT_RUN_PAUSED)
+                *outSnapshot = s_operation.debugSnapshot;
+            serial::puts("DEVELOPER_STUDIO_PHASE28Q_CONTINUE_PASS\n");
+            return GX_OK;
         }
         UserBreakpoint* currentUser = current_user_breakpoint(s_operation);
         const bool persistentResume = currentUser && s_operation.debugBreakpointHit &&
@@ -5885,7 +6135,8 @@ gx_result debug(const gx_development_debug_request& request,
         const bool conditionalPause = s_operation.debugConditionEnabled &&
             s_operation.debugBreakpointHit && !s_operation.debugConditionError;
         if (s_operation.state != GX_DEVELOPMENT_RUN_PAUSED ||
-            (!s_operation.debugBreakpointHit && !s_operation.debugStepTrapObserved && !conditionalPause) ||
+            (!s_operation.debugBreakpointHit && !s_operation.debugStepTrapObserved &&
+             !s_operation.debugPauseCaptured && !conditionalPause) ||
             !s_operation.debugContext || s_operation.debugStepActive ||
             s_operation.debugContext->cs != 0x08) {
             set_debug_error(outSnapshot, "NativeElf Step Into requires a current Paused target context");
@@ -5917,7 +6168,8 @@ gx_result debug(const gx_development_debug_request& request,
 
     case GX_DEVELOPMENT_DEBUG_CANCEL_EXECUTION:
         if (s_operation.state != GX_DEVELOPMENT_RUN_PAUSED ||
-            (!s_operation.debugBreakpointHit && !s_operation.debugStepTrapObserved)) {
+            (!s_operation.debugBreakpointHit && !s_operation.debugStepTrapObserved &&
+             !s_operation.debugPauseCaptured)) {
             set_debug_error(outSnapshot, "NativeElf debug session is not paused");
             return GX_ERROR_BUSY;
         }
@@ -5940,6 +6192,8 @@ gx_result debug(const gx_development_debug_request& request,
         if (s_operation.debugContext) s_operation.debugContext->rflags &= ~kAmd64TrapFlag;
         s_operation.debugBreakpointInstalled = false;
         s_operation.debugBreakpointHit = false;
+        s_operation.debugPauseRequested = false;
+        s_operation.debugPauseCaptured = false;
         s_operation.debugStepActive = false;
         s_operation.debugSourceStepActive = false;
         step_over_clear_state(s_operation);
