@@ -30,7 +30,15 @@ function Assert-WithinRoot([string]$Path, [string]$Root, [string]$Label) {
 }
 
 function Get-FileHashHex([string]$Path) {
-    return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToUpperInvariant()
+    $sha256 = [System.Security.Cryptography.SHA256]::Create()
+    $stream = [System.IO.File]::OpenRead($Path)
+    try {
+        return ([System.BitConverter]::ToString($sha256.ComputeHash($stream)) -replace '-', '').ToUpperInvariant()
+    }
+    finally {
+        $stream.Dispose()
+        $sha256.Dispose()
+    }
 }
 
 function Read-GuideXosRuntimePack([string]$Root, [bool]$ManagedAllocation, [string]$OutputRootOverride, [bool]$RepeatedAllocation) {

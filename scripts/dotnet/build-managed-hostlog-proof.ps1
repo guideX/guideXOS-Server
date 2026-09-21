@@ -28,6 +28,18 @@ function Resolve-AbsolutePath([string]$Path) {
     return (Resolve-Path -LiteralPath $Path).Path
 }
 
+function Get-Sha256Hex([string]$Path) {
+    $sha256 = [System.Security.Cryptography.SHA256]::Create()
+    $stream = [System.IO.File]::OpenRead($Path)
+    try {
+        return ([System.BitConverter]::ToString($sha256.ComputeHash($stream)) -replace '-', '').ToUpperInvariant()
+    }
+    finally {
+        $stream.Dispose()
+        $sha256.Dispose()
+    }
+}
+
 function Assert-WithinRoot([string]$Path, [string]$Root, [string]$Label) {
     $resolvedPath = [System.IO.Path]::GetFullPath($Path)
     $resolvedRoot = [System.IO.Path]::GetFullPath($Root.TrimEnd('\', '/'))
@@ -172,7 +184,7 @@ if ($UseGuideXosRuntimePack) {
     if ([string]::IsNullOrWhiteSpace($runtimePackObject) -or -not (Test-Path -LiteralPath $runtimePackObject)) {
         throw "GuideXOS runtime-pack object not found: $runtimePackObject"
     }
-    $runtimePackObjectHash = Get-FileHash -LiteralPath $runtimePackObject -Algorithm SHA256 | Select-Object -ExpandProperty Hash
+    $runtimePackObjectHash = Get-Sha256Hex $runtimePackObject
     if ($runtimePackObjectHash.ToUpperInvariant() -ne [string]$runtimePackManifestObject.objectSha256.ToUpperInvariant()) {
         throw "GuideXOS runtime-pack object hash does not match its manifest."
     }
@@ -180,7 +192,7 @@ if ($UseGuideXosRuntimePack) {
     if ([string]::IsNullOrWhiteSpace($runtimePackSdkPath) -or -not (Test-Path -LiteralPath $runtimePackSdkPath)) {
         throw "GuideXOS runtime-pack SDK path is missing: $runtimePackSdkPath"
     }
-    $runtimePackManifestHash = (Get-FileHash -LiteralPath $runtimePackManifest -Algorithm SHA256).Hash.ToUpperInvariant()
+    $runtimePackManifestHash = Get-Sha256Hex $runtimePackManifest
     if ($ProductionApplication) {
         $startupImportsObj = Join-Path $runtimePackOutputRoot "guidexos_nativeaot_startup_imports.production.obj"
         if (-not (Test-Path -LiteralPath $startupImportsObj)) {
@@ -208,7 +220,7 @@ if (-not (Test-Path -LiteralPath $PeToElfScript)) {
 }
 
 $expectedPeToElfSha256 = "5BED5BBE8883EDD700ED2406FA43A7B26F762212D06898BB75B540E07B2F5621"
-$actualPeToElfSha256 = (Get-FileHash -LiteralPath $PeToElfScript -Algorithm SHA256).Hash.ToUpperInvariant()
+$actualPeToElfSha256 = Get-Sha256Hex $PeToElfScript
 if ($actualPeToElfSha256 -ne $expectedPeToElfSha256) {
     throw "PE-to-ELF converter hash mismatch. Expected $expectedPeToElfSha256, got ${actualPeToElfSha256}: $PeToElfScript"
 }
