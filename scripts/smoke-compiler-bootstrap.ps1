@@ -2052,7 +2052,9 @@ function Invoke-QemuProofBoot([int]$runNumber, [string]$qemu) {
                 "DEVELOPER_STUDIO_PHASE28Q_PROJECT_OPEN_PASS",
                 "DEVELOPER_STUDIO_PHASE28Q_DEBUG_START_PASS",
                 "DEVELOPER_STUDIO_PHASE28Q_RUNNING_PASS",
-                "DEVELOPER_STUDIO_PHASE28Q_PAUSE_UI_REQUEST_PASS",
+                # The product marker is UI_PAUSE_REQUEST_PASS. Keep the
+                # acceptance gate aligned with the emitted lifecycle event.
+                "DEVELOPER_STUDIO_PHASE28Q_UI_PAUSE_REQUEST_PASS",
                 "DEVELOPER_STUDIO_PHASE28Q_PAUSE_REQUEST_ACCEPT_PASS",
                 "DEVELOPER_STUDIO_PHASE28Q_USER_PAUSE_PASS",
                 "DEVELOPER_STUDIO_PHASE28Q_CONTEXT_CAPTURE_PASS",
@@ -2060,7 +2062,10 @@ function Invoke-QemuProofBoot([int]$runNumber, [string]$qemu) {
                 "DEVELOPER_STUDIO_PHASE28Q_CONTINUE_PASS",
                 "DEVELOPER_STUDIO_PHASE28Q_RUNNING_AFTER_CONTINUE_PASS",
                 "DEVELOPER_STUDIO_PHASE28Q_SECOND_PAUSE_PASS",
-                "DEVELOPER_STUDIO_PHASE28Q_PROGRESS_PASS",
+                # Phase 28S established that live progress is unavailable in
+                # this freestanding proof environment; require the truthful
+                # capability marker rather than manufacturing a PASS.
+                "DEVELOPER_STUDIO_PHASE28Q_PROGRESS_NOT_LIVE",
                 "DEVELOPER_STUDIO_PHASE28Q_NEW_STOP_PASS",
                 "DEVELOPER_STUDIO_PHASE28Q_CONTINUE_SECOND_PASS",
                 "DEVELOPER_STUDIO_PHASE28Q_FINAL_RESULT_PASS",

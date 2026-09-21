@@ -26,7 +26,7 @@ if not defined CXX (
 )
 
 echo Using compiler: %CXX%
-set CXXFLAGS=-std=c++17 -Wall -O2 -iquote . -Ithird_party/mbedtls/include -Ithird_party/mbedtls/tf-psa-crypto/include -Ithird_party/mbedtls/tf-psa-crypto/drivers/builtin/include -Ithird_party/mbedtls/tf-psa-crypto/drivers/builtin/src -Ithird_party/mbedtls/tf-psa-crypto/dispatch -Ithird_party/mbedtls/tf-psa-crypto/extras -Ithird_party/mbedtls/tf-psa-crypto/platform -Ithird_party/mbedtls/tf-psa-crypto/utilities -DMBEDTLS_CONFIG_FILE=\"third_party/mbedtls/guidexos/mbedtls_config.h\" -DTF_PSA_CRYPTO_CONFIG_FILE=\"third_party/mbedtls/guidexos/crypto_config.h\" -DGX_ENABLE_EXPERIMENTAL_NATIVE_ELF_EXECUTION
+set CXXFLAGS=-std=c++17 -Wall -O2 -iquote . -iquote kernel/core/include -Ithird_party/mbedtls/include -Ithird_party/mbedtls/tf-psa-crypto/include -Ithird_party/mbedtls/tf-psa-crypto/drivers/builtin/include -Ithird_party/mbedtls/tf-psa-crypto/drivers/builtin/src -Ithird_party/mbedtls/tf-psa-crypto/dispatch -Ithird_party/mbedtls/tf-psa-crypto/extras -Ithird_party/mbedtls/tf-psa-crypto/platform -Ithird_party/mbedtls/tf-psa-crypto/utilities -DMBEDTLS_CONFIG_FILE=\"third_party/mbedtls/guidexos/mbedtls_config.h\" -DTF_PSA_CRYPTO_CONFIG_FILE=\"third_party/mbedtls/guidexos/crypto_config.h\" -DGX_ENABLE_EXPERIMENTAL_NATIVE_ELF_EXECUTION
 set LDFLAGS=-lws2_32 -lsecur32 -lcrypt32 -lbcrypt -lgdi32 -luser32 -lmsimg32
 
 REM Source files (exclude kernel)
@@ -73,6 +73,8 @@ ipc_bus.cpp ^
 guide_web_html_parser.cpp ^
 guide_web_http.cpp ^
 kernel/core/architecture_detector.cpp ^
+kernel/core/compiler/elf_writer.cpp ^
+kernel/core/native_elf/native_elf_debug_watches.cpp ^
 kernel/core/system_font.cpp ^
 lifecycle.cpp ^
 logger.cpp ^
