@@ -563,6 +563,11 @@ public sealed class ManagedNotes : GuideXosApplication
     private bool _c128PanelLifecycleTestContext;
     private bool _c128PanelLifecycleTestsRun;
 #endif
+#if HOSTLOGPROOF_C129_SHIFT_TAB_TRANSPORT
+    private bool _c129ProofContext;
+    private bool _c129ShiftTabTestContext;
+    private int _c129ProofStage;
+#endif
 #endif
 #endif
 #endif
@@ -629,6 +634,11 @@ public sealed class ManagedNotes : GuideXosApplication
         _c128PanelLifecycleTestContext =
             IsC128PanelLifecycleTestContext(host);
         _c125ProofContext = _c125ProofContext || _c128ProofContext;
+#endif
+#if HOSTLOGPROOF_C129_SHIFT_TAB_TRANSPORT
+        _c129ProofContext = IsC129Context(host);
+        _c129ShiftTabTestContext = IsC129ShiftTabTestContext(host);
+        _c129ProofStage = 0;
 #endif
 #endif
 #endif
@@ -804,6 +814,16 @@ public sealed class ManagedNotes : GuideXosApplication
                     : "C127-HOST registration=FAIL panel=registered-or-focusable result=FAIL"u8);
             }
 #endif
+#if HOSTLOGPROOF_C129_SHIFT_TAB_TRANSPORT
+            if (_c129ProofContext)
+            {
+                host.TryLog(hostRegistration &&
+                    _mainControlHost.RegistrationCount == 4 &&
+                    _mainControlHost.ActiveIndex == -1
+                    ? "C129-MANAGED proof-started initial-focus=none registration=4 tab=key-down-only result=PASS"u8
+                    : "C129-MANAGED proof-started result=FAIL"u8);
+            }
+#endif
 #endif
 #endif
 #endif
@@ -971,6 +991,12 @@ public sealed class ManagedNotes : GuideXosApplication
 #endif
 #endif
 #endif
+#if HOSTLOGPROOF_C129_SHIFT_TAB_TRANSPORT
+        if (_c129ShiftTabTestContext)
+        {
+            runFocusedProofTests = false;
+        }
+#endif
         bool textAreaTests = runFocusedProofTests
             ? GuideXosTextAreaTests.Run(host) : true;
 #if HOSTLOGPROOF_C118_MANAGED_LIST_BOX
@@ -1105,6 +1131,12 @@ public sealed class ManagedNotes : GuideXosApplication
             _c128PanelLifecycleTestsRun = true;
         }
 #endif
+#if HOSTLOGPROOF_C129_SHIFT_TAB_TRANSPORT
+        bool c129ShiftTabTests = _c129ShiftTabTestContext
+            ? GuideXosShiftTabTransportTests.Run(host) : true;
+#else
+        bool c129ShiftTabTests = true;
+#endif
 #endif
 #endif
 #endif
@@ -1142,6 +1174,9 @@ public sealed class ManagedNotes : GuideXosApplication
 #if HOSTLOGPROOF_C128_MANAGED_PANEL_LIFECYCLE
             && panelLifecycleTests
 #endif
+#endif
+#if HOSTLOGPROOF_C129_SHIFT_TAB_TRANSPORT
+            && c129ShiftTabTests
 #endif
 #endif
 #endif
@@ -1216,6 +1251,9 @@ public sealed class ManagedNotes : GuideXosApplication
             || host.LaunchContext.Utf8.SequenceEqual("c127-notes"u8)
 #if HOSTLOGPROOF_C128_MANAGED_PANEL_LIFECYCLE
             || host.LaunchContext.Utf8.SequenceEqual("c128-notes"u8)
+#if HOSTLOGPROOF_C129_SHIFT_TAB_TRANSPORT
+            || host.LaunchContext.Utf8.SequenceEqual("c129-shift-tab-proof"u8)
+#endif
 #endif
 #endif
 #endif
@@ -1366,6 +1404,19 @@ public sealed class ManagedNotes : GuideXosApplication
         return host.LaunchContext.Utf8.SequenceEqual(
             "c128-panel-lifecycle-tests"u8);
     }
+#if HOSTLOGPROOF_C129_SHIFT_TAB_TRANSPORT
+    private static bool IsC129Context(GuideXosHost host)
+    {
+        return host.LaunchContext.Utf8.SequenceEqual(
+            "c129-shift-tab-proof"u8);
+    }
+
+    private static bool IsC129ShiftTabTestContext(GuideXosHost host)
+    {
+        return host.LaunchContext.Utf8.SequenceEqual(
+            "c129-shift-tab-tests"u8);
+    }
+#endif
 #endif
 #endif
 #endif
@@ -1588,6 +1639,57 @@ public sealed class ManagedNotes : GuideXosApplication
         }
 
         GuideXosControlHostResult routeResult = _mainControlHost.HandleInput(input);
+#if HOSTLOGPROOF_C129_SHIFT_TAB_TRANSPORT
+        if (_c129ProofContext)
+        {
+            if (input.Kind == GuideXosInputKind.KeyChar &&
+                input.Character == '\t')
+            {
+                host.TryLog("C129-RESULT outcome=FAIL reason=phantom-tab-character"u8);
+            }
+            else if (input.Kind == GuideXosInputKind.KeyDown &&
+                (GuideXosTextInputKey)input.KeyCode == GuideXosTextInputKey.Tab)
+            {
+                bool reverse = input.Shift && _c129ProofStage == 0 &&
+                    _mainControlHost.ActiveControlId == C120DocumentControlId &&
+                    routeResult == GuideXosControlHostResult.Traversed;
+                bool forward = !input.Shift && _c129ProofStage == 1 &&
+                    _mainControlHost.ActiveControlId == C120OpenControlId &&
+                    routeResult == GuideXosControlHostResult.Traversed;
+                if (reverse)
+                {
+                    _c129ProofStage = 1;
+                    host.TryLog("C129-MANAGED reverse=Document count=1 modifier=shift keychar=none result=PASS"u8);
+                }
+                else if (forward)
+                {
+                    _c129ProofStage = 2;
+                    host.TryLog("C129-MANAGED plain-tab=Document->Open count=1 modifier=none result=PASS"u8);
+                }
+                else
+                {
+                    host.TryLog("C129-RESULT outcome=FAIL reason=tab-sequence"u8);
+                }
+            }
+            else if (input.Kind == GuideXosInputKind.KeyChar &&
+                input.Character == 'a')
+            {
+                bool ordinary = _c129ProofStage == 2 && !input.Shift &&
+                    _mainControlHost.ActiveControlId == C120OpenControlId &&
+                    routeResult == GuideXosControlHostResult.Ignored;
+                if (ordinary)
+                {
+                    _c129ProofStage = 3;
+                    host.TryLog("C129-MANAGED ordinary-char=a focused=Open activation=none result=PASS"u8);
+                    host.TryLog("C129-RESULT outcome=PASS transport=production"u8);
+                }
+                else
+                {
+                    host.TryLog("C129-RESULT outcome=FAIL reason=ordinary-character"u8);
+                }
+            }
+        }
+#endif
         if (input.Kind == GuideXosInputKind.KeyDown &&
             (GuideXosTextInputKey)input.KeyCode == GuideXosTextInputKey.Tab)
         {

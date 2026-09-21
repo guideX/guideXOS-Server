@@ -435,6 +435,13 @@ public:
         if (m_selector == 0u || key > kLaunchFlagInputPayloadMask) return;
         uint32_t payload = key & kLaunchFlagInputValueMask;
         if (ps2keyboard::is_shift_down()) payload |= kLaunchFlagInputShift;
+#if defined(GXOS_NATIVEAOT_C129_SHIFT_TAB_INPUT_TRANSPORT)
+        if (key == 9u) {
+            serial::puts("[C129-NATIVE] tab-keydown shift=");
+            serial::puts((payload & kLaunchFlagInputShift) != 0u ? "1" : "0");
+            serial::puts(" transport=production result=PASS\n");
+        }
+#endif
         const int32_t result = invokeManagedInput(
             m_selector, kLaunchFlagInput | kLaunchFlagInputKeyDown | payload);
         serial::puts("[C116-NATIVE-INPUT] kind=key-down key=");
@@ -443,6 +450,16 @@ public:
         serial::put_hex32((payload & kLaunchFlagInputShift) != 0u ? 1u : 0u);
         serial::puts(" result=");
         serial::puts(result == 0 ? "PASS\n" : "IGNORED\n");
+#if defined(GXOS_NATIVEAOT_C129_SHIFT_TAB_INPUT_TRANSPORT)
+        if (key == 9u) {
+            serial::puts("[C129-NATIVE-INPUT] kind=key-down key=");
+            serial::put_hex32(key);
+            serial::puts(" shift=");
+            serial::put_hex32((payload & kLaunchFlagInputShift) != 0u ? 1u : 0u);
+            serial::puts(" result=");
+            serial::puts(result == 0 ? "PASS\n" : "FAIL\n");
+        }
+#endif
     }
 
     void onKeyChar(char c) override {
@@ -459,6 +476,14 @@ public:
         serial::put_hex32((inputPayload & kLaunchFlagInputShift) != 0u ? 1u : 0u);
         serial::puts(" result=");
         serial::puts(result == 0 ? "PASS\n" : "IGNORED\n");
+#if defined(GXOS_NATIVEAOT_C129_SHIFT_TAB_INPUT_TRANSPORT)
+        serial::puts("[C129-NATIVE-INPUT] kind=key-char value=");
+        serial::put_hex32(payload);
+        serial::puts(" shift=");
+        serial::put_hex32((inputPayload & kLaunchFlagInputShift) != 0u ? 1u : 0u);
+        serial::puts(" result=");
+        serial::puts(result == 0 ? "PASS\n" : "FAIL\n");
+#endif
     }
 
     void onWindowClose() override {

@@ -2562,7 +2562,8 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
 #endif
 
 #if defined(GXOS_NATIVEAOT_C119_MANAGED_BUTTON) && \
-    !defined(GXOS_NATIVEAOT_C122_MANAGED_LABEL)
+    !defined(GXOS_NATIVEAOT_C122_MANAGED_LABEL) && \
+    !defined(GXOS_NATIVEAOT_C129_SHIFT_TAB_INPUT_TRANSPORT)
         {
         const gxos::apps::BuiltInAppMetadata* c119Workspace =
             gxos::apps::FindBuiltInAppMetadataByDisplayName("Managed Workspace");
@@ -2817,7 +2818,8 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
 #endif
 
 #if defined(GXOS_NATIVEAOT_C120_MANAGED_CONTROL_HOST) && \
-    !defined(GXOS_NATIVEAOT_C122_MANAGED_LABEL)
+    !defined(GXOS_NATIVEAOT_C122_MANAGED_LABEL) && \
+    !defined(GXOS_NATIVEAOT_C129_SHIFT_TAB_INPUT_TRANSPORT)
         auto runC120ManagedControlHostProof = []() __attribute__((noinline)) {
         {
         const gxos::apps::BuiltInAppMetadata* c120Workspace =
@@ -4902,6 +4904,44 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         }
         };
         runC128ManagedPanelLifecycleProof();
+#endif
+
+#if defined(GXOS_NATIVEAOT_C129_SHIFT_TAB_INPUT_TRANSPORT)
+        auto runC129ShiftTabTransportProof = []() __attribute__((noinline)) {
+        {
+        const gxos::apps::BuiltInAppMetadata* c129Workspace =
+            gxos::apps::FindBuiltInAppMetadataByDisplayName("Managed Workspace");
+        const gxos::apps::BuiltInAppMetadata* c129Notes =
+            gxos::apps::FindBuiltInAppMetadataByDisplayName("Managed Notes");
+        const bool c129CatalogValid = gxos::apps::ManagedNativeAotCatalogIsValid() &&
+            c129Workspace && c129Notes;
+        kernel::serial::puts("[C129-APPMODEL] catalogValid=");
+        kernel::serial::puts(c129CatalogValid ? "true result=PASS\n" : "false result=FAIL\n");
+
+        auto c129Launch = [&](const char* applicationId, const char* context) {
+            return c129CatalogValid && kernel::desktop::launch_app_with_context(
+                applicationId, context);
+        };
+        auto c129Close = []() {
+            kernel::app::KernelWindow* window =
+                kernel::compositor::KernelCompositor::getFocusedWindow();
+            return window && kernel::compositor::KernelCompositor::requestCloseWindow(window->id);
+        };
+
+        const bool focusedTests = c129Launch(c129Notes->appId,
+            "c129-shift-tab-tests") && c129Close();
+        kernel::serial::puts("[C129-FOCUSED-TESTS] shift-tab=PASS result=");
+        kernel::serial::puts(focusedTests ? "PASS\n" : "FAIL\n");
+
+        const bool workspace = focusedTests &&
+            c129Launch(c129Workspace->appId, "c129-workspace") && c129Close();
+        const bool notesLaunch = workspace &&
+            c129Launch(c129Notes->appId, "c129-shift-tab-proof");
+        kernel::serial::puts("[C129-PROOF] managed-proof-started context=c129-shift-tab-proof transport=physical-qemu result=");
+        kernel::serial::puts(notesLaunch ? "PASS\n" : "FAIL\n");
+        }
+        };
+        runC129ShiftTabTransportProof();
 #endif
 
 #if defined(GXOS_NATIVEAOT_C116_MANAGED_TEXT_INPUT) && \

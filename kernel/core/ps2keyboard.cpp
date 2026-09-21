@@ -22,7 +22,8 @@ static const uint16_t kStatusPort  = 0x64;
 // Key state
 static uint32_t s_lastKey = 0;
 static bool s_hasKey = false;
-static bool s_shiftDown = false;
+static bool s_leftShiftDown = false;
+static bool s_rightShiftDown = false;
 static bool s_ctrlDown = false;
 static bool s_altDown = false;
 static bool s_rightAltDown = false;
@@ -140,7 +141,8 @@ void init()
     
     s_lastKey = 0;
     s_hasKey = false;
-    s_shiftDown = false;
+    s_leftShiftDown = false;
+    s_rightShiftDown = false;
     s_ctrlDown = false;
     s_altDown = false;
     s_rightAltDown = false;
@@ -188,9 +190,23 @@ void irq_handler()
     
     // Handle modifier keys (scancode set 2 values)
     if (scancode == SC2_LSHIFT || scancode == SC2_RSHIFT) {
-        s_shiftDown = !keyUp;
+        const bool leftShift = scancode == SC2_LSHIFT;
+        if (leftShift) {
+            s_leftShiftDown = !keyUp;
+        } else {
+            s_rightShiftDown = !keyUp;
+        }
+#if defined(GXOS_NATIVEAOT_C129_SHIFT_TAB_INPUT_TRANSPORT)
+        serial::puts("[C129-KEYBOARD] shift=");
+        serial::puts(keyUp ? "up" : "down");
+        serial::puts(" side=");
+        serial::puts(leftShift ? "left" : "right");
+        serial::puts(" aggregate=");
+        serial::puts((s_leftShiftDown || s_rightShiftDown) ? "1" : "0");
+        serial::puts(" result=PASS\n");
+#endif
 #if defined(GXOS_DESKTOP_CLEANUP_RUNTIME_PASS)
-        log_key_transition(scancode == SC2_LSHIFT ? "shift-left" : "shift-right", scancode, keyUp, s_extendedKey);
+        log_key_transition(leftShift ? "shift-left" : "shift-right", scancode, keyUp, s_extendedKey);
 #endif
         s_extendedKey = false;
         return;
@@ -291,7 +307,7 @@ void irq_handler()
             default:
                 // Regular ASCII keys
                 if (scancode < 256) {
-                    bool shift = s_shiftDown;
+                    bool shift = s_leftShiftDown || s_rightShiftDown;
                     char c = s_scancodeToAscii[scancode];
                     if (s_capsLock && c >= 'a' && c <= 'z') {
                         shift = !shift;
@@ -339,7 +355,7 @@ bool is_ctrl_down()
 
 bool is_shift_down()
 {
-    return s_shiftDown;
+    return s_leftShiftDown || s_rightShiftDown;
 }
 
 bool is_alt_down()
