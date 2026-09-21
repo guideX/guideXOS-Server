@@ -1,10 +1,10 @@
 {
     "schemaVersion":  1,
     "id":  "com.guidexos.missilecommand",
-    "displayName":  "Missile Command (MC2)",
-    "version":  "0.2.0",
+    "displayName":  "Missile Command (MC3)",
+    "version":  "0.3.0",
     "publisher":  "guideXOS",
-    "description":  "MC2 first playable defense loop for the Missile Command port: L1 hostile bombs, central-battery defensive fire, square interception, city loss, win/lose with restart.",
+    "description":  "MC3 L1-L3 campaign for the Missile Command port: runtime DD.ini, level progression, natural smart bombs, square interception, city persistence, win/lose/game-complete with restart.",
     "category":  "Games",
     "kind":  "NativeElf",
     "icon":  "",
@@ -24,7 +24,8 @@
     "permissions":  [
                         "log",
                         "window",
-                        "draw"
+                        "draw",
+                        "file.read"
                     ],
     "fileAssociations":  [
 

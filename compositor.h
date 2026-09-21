@@ -292,6 +292,12 @@ namespace gxos { namespace gui {
         static uint64_t g_modalWindow;
         static bool g_dragActive; static int g_dragOffX; static int g_dragOffY; static uint64_t g_dragWin; static int g_dragStartX; static int g_dragStartY;
         static bool g_dragPending; static uint64_t g_dragPendingWin;
+        // Held pointer-button mask for move-event propagation (MC3 fix).
+        // Bits: 1=left, 2=right, 4=middle (see compositor_pointer_buttons.h).
+        // Updated on button down/up; pointer moves expose the held buttons
+        // instead of always reporting button 0. Cleared on capture loss,
+        // window close/minimize, and focus loss so no stuck state survives.
+        static int g_pointerHeldMask;
         // Last compositor-space pointer position. In synthetic Extend this
         // is virtual-desktop space; hosted paint may only expose the primary
         // viewport until real multi-output presentation exists.

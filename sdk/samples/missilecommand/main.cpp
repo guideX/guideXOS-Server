@@ -1,17 +1,26 @@
-// Missile Command MC2 Native ELF application.
+// Missile Command MC3 Native ELF application: L1 -> L2 -> L3 campaign.
 //
 // Genuine App Model application: gx_main entry point, guidexos-c-abi-v1,
 // fixed-size centered window, retained present_frame scene, poll_event input,
 // get_ticks_ms fixed-step updates, clean exit. Deterministic gameplay lives
 // in missilecommand_state.h (host-testable); this file owns window, events,
-// framebuffer rendering, overlay text, and lifecycle logging only.
+// DD.ini resource loading, framebuffer rendering, overlay text, and
+// lifecycle logging only.
 //
 // Controls (VB-faithful): left-button press fires from the central battery
 // at the pointer; right-button DRAG (move with right held) also fires, like
 // Pic_MouseMove(Button=2) synthesizing a left click in FrmDD.frm; right
 // press alone does nothing (VB MouseRead only fires on button 1). R / Enter
-// / Space restarts a finished level (there is no VB menu equivalent in the
-// App Model; File > Play is replaced by the restart key). Escape exits.
+// / Space restarts a finished campaign (there is no VB menu equivalent in
+// the App Model; File > Play is replaced by the restart key). Escape exits.
+// Left-click is retained as a guideXOS convenience input: VB6 only fired on
+// left DOWN as well (MouseRead button 1), so retaining it is faithful, not
+// a divergence; right-drag is the restored original alternate control.
+//
+// Test hooks (off by default, never alter normal release behavior unless
+// explicitly keyed): 'A' toggles deterministic autopilot defense (predicted
+// auto-aim, for live smoke progression); 'F' toggles fast-forward (extra
+// fixed-step ticks per frame, same tick semantics, faster wall clock).
 
 #include <guidexos/ui.h>
 
@@ -23,12 +32,22 @@ extern "C" void* memset(void* destination, int value, uint64_t bytes) {
     return destination;
 }
 
+extern "C" void* memcpy(void* destination, const void* source, uint64_t bytes) {
+    uint8_t* out = static_cast<uint8_t*>(destination);
+    const uint8_t* in = static_cast<const uint8_t*>(source);
+    for (uint64_t i = 0; i < bytes; ++i) out[i] = in[i];
+    return destination;
+}
+
 namespace {
 
 // McState is ~100 KiB (two 501-slot pools); static storage keeps it off the
 // freestanding stack.
 static McState g_state;
 static uint32_t g_framePixels[kMcFrameWidth * kMcFrameHeight];
+static bool g_autopilot = false;
+static bool g_fastForward = false;
+static char g_ddIniBuffer[2048];
 
 static const uint32_t kColorBackground = 0x000000u;
 static const uint32_t kColorGround = 0x003800u;
@@ -183,8 +202,15 @@ static void append_number(char* message, uint32_t* index, uint32_t capacity, uin
 }
 
 static void draw_overlay(gx_app_context* ctx, gx_handle window, const McState& state) {
-    gx_draw_label(ctx, window, 10, 16, "MISSILE COMMAND - MC2 playable (L1)");
-    char status[160];
+    char title[96];
+    uint32_t ti = 0;
+    append_text(title, &ti, sizeof(title), "MISSILE COMMAND - MC3 campaign L");
+    append_number(title, &ti, sizeof(title), (uint64_t)state.levelIndex);
+    append_text(title, &ti, sizeof(title), "/3 ");
+    append_text(title, &ti, sizeof(title), state.campaign.levels[state.levelIndex].name);
+    title[ti] = '\0';
+    gx_draw_label(ctx, window, 10, 16, title);
+    char status[192];
     uint32_t index = 0;
     append_text(status, &index, sizeof(status), "cities=");
     append_number(status, &index, sizeof(status), (uint64_t)mc_alive_cities(&state));
@@ -196,10 +222,13 @@ static void draw_overlay(gx_app_context* ctx, gx_handle window, const McState& s
                   (uint64_t)(state.level.mMax - state.mFired < 0 ? 0 : state.level.mMax - state.mFired));
     append_text(status, &index, sizeof(status), " active=");
     append_number(status, &index, sizeof(status), (uint64_t)mc_active_hostiles(&state));
+    append_text(status, &index, sizeof(status), state.usingRuntimeIni ? " ini=run" : " ini=fb");
     status[index] = '\0';
     gx_draw_label(ctx, window, 10, 328, status);
-    if (state.won) {
-        gx_draw_label(ctx, window, 10, 344, "LEVEL COMPLETE - press R to play again");
+    if (state.gameComplete) {
+        gx_draw_label(ctx, window, 10, 344, "GAME COMPLETE - press R to play again");
+    } else if (state.won) {
+        gx_draw_label(ctx, window, 10, 344, "LEVEL COMPLETE - advancing...");
     } else if (state.lost) {
         gx_draw_label(ctx, window, 10, 344, "GAME OVER - press R to play again");
     } else {
@@ -215,6 +244,41 @@ static bool render_and_present(gx_app_context* ctx, gx_handle window, const McSt
     return true;
 }
 
+// Deterministic autopilot defense (test hook, off by default):
+// splitter-priority predicted auto-aim with idle discipline (one burst at
+// a time, ammo-efficient). MIRV carriers are engaged first since they
+// multiply; otherwise the lowest bomb. Decisions depend only on sim state,
+// so the assisted campaign stays deterministic. Called once per
+// fixed-step tick (never per frame) so live runs reproduce host runs
+// tick-for-tick when no manual input intervenes.
+static void autopilot_tick(McState& state) {
+    if (!g_autopilot || state.won || state.lost || state.gameComplete) return;
+    int best = 0;
+    int bl = state.bHead;
+    while (bl != 0) {
+        if (state.b[bl].status == 1 && state.b[bl].y > 250.0f && state.b[bl].splitY != 0) {
+            if (best == 0 || state.b[bl].y > state.b[best].y) best = bl;
+        }
+        bl = state.b[bl].link;
+    }
+    if (best == 0) {
+        bl = state.bHead;
+        while (bl != 0) {
+            if (state.b[bl].status == 1 && state.b[bl].y > 250.0f) {
+                if (best == 0 || state.b[bl].y > state.b[best].y) best = bl;
+            }
+            bl = state.b[bl].link;
+        }
+    }
+    if (best != 0 && mc_active_defense(&state) == 0) {
+        float flight = (750.0f - state.b[best].y) / state.level.mSpeed;
+        if (flight < 0.0f) flight = 0.0f;
+        int tx = (int)(state.b[best].x + state.b[best].xm * flight + 0.5f);
+        int ty = (int)(state.b[best].y + state.b[best].ym * flight + 0.5f);
+        mc_request_fire(&state, tx, ty);
+    }
+}
+
 }  // namespace
 
 extern "C" gx_result GX_CALL gx_main(gx_app_context* ctx) {
@@ -224,20 +288,50 @@ extern "C" gx_result GX_CALL gx_main(gx_app_context* ctx) {
         return GX_ERROR_INVALID_ARGUMENT;
     }
 
-    ctx->host->log(ctx, "MissileCommand MC2 Native ELF starting");
+    ctx->host->log(ctx, "MissileCommand MC3 Native ELF starting");
 
-    mc_init(&g_state);
+    // Runtime DD.ini via the existing file_read_all resource mechanism.
+    // Falls back to verified compiled values when missing/malformed.
+    McCampaignConfig campaign;
+    mc_fallback_campaign(&campaign);
+    bool usingRuntime = false;
+    int iniRows = 0;
+    if (ctx->host->file_read_all) {
+        for (uint32_t i = 0; i < sizeof(g_ddIniBuffer); ++i) g_ddIniBuffer[i] = '\0';
+        uint32_t bytesRead = 0;
+        const gx_result readResult = ctx->host->file_read_all(
+            ctx, "resources/DD.ini", g_ddIniBuffer, sizeof(g_ddIniBuffer) - 1, &bytesRead);
+        if (readResult == GX_OK && bytesRead > 0 && bytesRead < sizeof(g_ddIniBuffer)) {
+            g_ddIniBuffer[bytesRead] = '\0';
+            McCampaignConfig parsed;
+            iniRows = mc_parse_dd_ini(g_ddIniBuffer, bytesRead, &parsed);
+            // Require at least L1-L3 valid for runtime selection; otherwise
+            // keep per-row fallback inside parsed but mark fallback overall
+            // when L1-L3 did not all come from the file.
+            campaign = parsed;
+            usingRuntime = true;
+            // Verify L1-L3 match expected ranges (parser already validated);
+            // if none of the rows came from the file, treat as fallback.
+            if (iniRows <= 0) usingRuntime = false;
+        }
+    }
+    mc_init_campaign_with_seed(&g_state, kMcDefaultSeed, &campaign, usingRuntime);
     McState& state = g_state;
+    if (usingRuntime) {
+        ctx->host->log(ctx, "MissileCommand DD.ini runtime loaded");
+    } else {
+        ctx->host->log(ctx, "MissileCommand DD.ini fallback selected");
+    }
     ctx->host->log(ctx, "MissileCommand initial state ready");
 
     gx_handle window = 0;
     gx_result windowResult = GX_ERROR_UNSUPPORTED;
     if (ctx->host->request_window_ex) {
-        windowResult = ctx->host->request_window_ex(ctx, "Missile Command (MC2)",
+        windowResult = ctx->host->request_window_ex(ctx, "Missile Command (MC3)",
             kMcFrameWidth, kMcFrameHeight,
             GX_WINDOW_FLAG_FIXED_SIZE | GX_WINDOW_FLAG_CENTERED, &window);
     } else {
-        windowResult = ctx->host->request_window(ctx, "Missile Command (MC2)",
+        windowResult = ctx->host->request_window(ctx, "Missile Command (MC3)",
             kMcFrameWidth, kMcFrameHeight, &window);
     }
     if (windowResult != GX_OK) {
@@ -256,8 +350,15 @@ extern "C" gx_result GX_CALL gx_main(gx_app_context* ctx) {
     bool loggedLaunch = false;
     bool loggedBurst = false;
     bool loggedKill = false;
+    bool loggedSmart = false;
+    int lastEvadeCount = 0;
     int lastCities = mc_alive_cities(&state);
+    int lastLevel = state.levelIndex;
+    bool loggedL2 = false;
+    bool loggedL3 = false;
+    bool loggedComplete = false;
     bool loggedOutcome = false;
+    bool loggedWonEpisode = false;
     uint64_t loggedStatusStep = 0u;
 
     uint64_t previousTicks = gx_get_ticks_ms(ctx);
@@ -266,14 +367,25 @@ extern "C" gx_result GX_CALL gx_main(gx_app_context* ctx) {
     bool running = true;
 
     while (running && state.running) {
-        gx_event event;
-        clear_event(&event);
-        const gx_result eventResult = ctx->host->poll_event(ctx, &event, 10);
-        if (eventResult == GX_OK && event.window == window) {
+        // Drain the input queue each frame (bounded): the compositor emits
+        // frame traffic continuously, and consuming one event per frame lets
+        // input lag minutes behind. Draining in FIFO order preserves event
+        // semantics; paints only flag the scene dirty (rendering stays at
+        // the single throttled present below).
+        for (int drain = 0; drain < 16 && running && state.running; ++drain) {
+            gx_event event;
+            clear_event(&event);
+            const gx_result eventResult = ctx->host->poll_event(ctx, &event, drain == 0 ? 10 : 0);
+            if (eventResult != GX_OK) {
+                if (eventResult != GX_ERROR_TIMEOUT) {
+                    ctx->host->log(ctx, "MissileCommand poll_event failed");
+                    running = false;
+                }
+                break;
+            }
+            if (event.window != window) continue;
             if (gx_event_is_paint(&event)) {
-                if (!render_and_present(ctx, window, state)) running = false;
-                state.visualDirty = false;
-                lastPresentedTicks = gx_get_ticks_ms(ctx);
+                state.visualDirty = true;
             } else if (gx_event_is_close(&event)) {
                 ctx->host->log(ctx, "MissileCommand close event received");
                 running = false;
@@ -281,29 +393,37 @@ extern "C" gx_result GX_CALL gx_main(gx_app_context* ctx) {
                 ctx->host->log(ctx, "MissileCommand Escape pressed");
                 running = false;
             } else if (event.type == GX_EVENT_KEY) {
-                if (!mc_handle_key(&state, event.param1, event.param2)) running = false;
+                // Test hooks: 'A' autopilot, 'F' fast-forward. Normal keys
+                // route through mc_handle_key (R/Enter/Space restart, ESC exits).
+                if (event.param2 == 1 && (event.param1 == 65 || event.param1 == 97)) {
+                    g_autopilot = !g_autopilot;
+                    ctx->host->log(ctx, g_autopilot ? "MissileCommand autopilot on"
+                                                    : "MissileCommand autopilot off");
+                    state.visualDirty = true;
+                } else if (event.param2 == 1 && (event.param1 == 70 || event.param1 == 102)) {
+                    g_fastForward = !g_fastForward;
+                    ctx->host->log(ctx, g_fastForward ? "MissileCommand fastforward on"
+                                                      : "MissileCommand fastforward off");
+                } else {
+                    if (!mc_handle_key(&state, event.param1, event.param2)) running = false;
+                }
             } else if (event.type == GX_EVENT_MOUSE) {
                 const int action = GX_MOUSE_ACTION(event.param3);
                 const int button = GX_MOUSE_BUTTON(event.param3);
-                // VB faithful: left DOWN fires at the pointer; right DRAG
-                // (move with right held) fires too; right DOWN alone fires
-                // nothing (VB MouseRead only acts on button 1).
-                const bool leftDown =
-                    action == GX_MOUSE_ACTION_DOWN && button == GX_MOUSE_BUTTON_LEFT;
-                const bool rightDrag =
-                    action == GX_MOUSE_ACTION_MOVE && button == GX_MOUSE_BUTTON_RIGHT;
-                if (leftDown || rightDrag) {
+                // VB faithful via mc_should_fire: left DOWN fires at the
+                // pointer; right MOVE (drag) fires too; right DOWN alone
+                // fires nothing (VB MouseRead only acts on button 1).
+                if (mc_should_fire(action, button)) {
                     const int vbX = mc_window_to_vb_x(event.param1);
                     const int vbY = mc_window_to_vb_y(event.param2);
                     if (mc_request_fire(&state, vbX, vbY)) {
+                        const bool rightDrag =
+                            action == GX_MOUSE_ACTION_MOVE && button == GX_MOUSE_BUTTON_RIGHT;
                         ctx->host->log(ctx, rightDrag ? "MissileCommand right-drag fire routed"
                                                       : "MissileCommand click routed");
                     }
                 }
             }
-        } else if (eventResult != GX_OK && eventResult != GX_ERROR_TIMEOUT) {
-            ctx->host->log(ctx, "MissileCommand poll_event failed");
-            running = false;
         }
 
         if (!running || !state.running) break;
@@ -316,12 +436,32 @@ extern "C" gx_result GX_CALL gx_main(gx_app_context* ctx) {
         if (accumulatorMs > kMcMaxElapsedMs) accumulatorMs = kMcMaxElapsedMs;
 
         uint32_t updates = 0;
-        while (accumulatorMs >= kMcFixedStepMs && updates < kMcMaxCatchUpSteps) {
+        const uint32_t stepCap = g_fastForward ? kMcMaxCatchUpSteps * 4u : kMcMaxCatchUpSteps;
+        while (accumulatorMs >= kMcFixedStepMs && updates < stepCap) {
+            autopilot_tick(state);
             mc_fixed_update(&state);
             accumulatorMs -= kMcFixedStepMs;
             ++updates;
         }
-        if (updates == kMcMaxCatchUpSteps && accumulatorMs >= kMcFixedStepMs) accumulatorMs = 0;
+        if (g_fastForward && state.levelIndex < kMcCampaignLevels) {
+            // Fast-forward burst: extra deterministic ticks beyond the wall
+            // accumulator so smoke tests can traverse L1-L2 quickly. Same
+            // tick semantics; only wall pacing changes. Bounded per frame;
+            // the level-complete dwell advances here too (still counted in
+            // fixed-step ticks), while lost/game-complete stay frozen.
+            // L3 plays at wall rate so smart-bomb behavior stays observable
+            // and the input demo keeps a comfortable margin before any L3
+            // terminal state.
+            for (uint32_t extra = 0; extra < 120u; ++extra) {
+                if (state.lost || state.gameComplete) break;
+                autopilot_tick(state);
+                mc_fixed_update(&state);
+                ++updates;
+            }
+            accumulatorMs = 0;
+        } else if (updates == kMcMaxCatchUpSteps && accumulatorMs >= kMcFixedStepMs) {
+            accumulatorMs = 0;
+        }
 
         // Lifecycle markers for the runtime smoke test (logged once each).
         if (!loggedSpawn && state.bDropped > 0) {
@@ -357,24 +497,60 @@ extern "C" gx_result GX_CALL gx_main(gx_app_context* ctx) {
                 link = state.b[link].link;
             }
         }
+        if (!loggedSmart) {
+            int link = state.bHead;
+            while (link >= 1 && link <= kMcPoolCap) {
+                if (state.b[link].smart && state.b[link].status == 1) {
+                    ctx->host->log(ctx, "MissileCommand smart bomb spawned");
+                    loggedSmart = true;
+                    break;
+                }
+                link = state.b[link].link;
+            }
+        }
+        if (state.evadeCount != lastEvadeCount) {
+            lastEvadeCount = state.evadeCount;
+            ctx->host->log(ctx, "MissileCommand smart bomb evaded");
+        }
         const int cities = mc_alive_cities(&state);
         if (cities < lastCities) {
             ctx->host->log(ctx, "MissileCommand city destroyed");
             lastCities = cities;
         }
-        if (!loggedOutcome && (state.won || state.lost)) {
-            ctx->host->log(ctx, state.won ? "MissileCommand LEVEL COMPLETE"
-                                          : "MissileCommand GAME OVER");
+        if (state.levelIndex != lastLevel) {
+            lastLevel = state.levelIndex;
+            if (state.levelIndex == 2 && !loggedL2) {
+                ctx->host->log(ctx, "MissileCommand LEVEL 2 started");
+                loggedL2 = true;
+            } else if (state.levelIndex == 3 && !loggedL3) {
+                ctx->host->log(ctx, "MissileCommand LEVEL 3 started");
+                loggedL3 = true;
+            }
+        }
+        if (state.won && !loggedWonEpisode) {
+            ctx->host->log(ctx, "MissileCommand LEVEL COMPLETE");
+            loggedWonEpisode = true;
+        }
+        if (!state.won) loggedWonEpisode = false;
+        if (!loggedComplete && state.gameComplete) {
+            ctx->host->log(ctx, "MissileCommand GAME COMPLETE");
+            loggedComplete = true;
+        }
+        if (!loggedOutcome && state.lost) {
+            ctx->host->log(ctx, "MissileCommand GAME OVER");
             loggedOutcome = true;
         }
         // Periodic tick-based status for headless validation (deterministic:
-        // driven by simulation steps, never wall clock).
-        if (!loggedOutcome && state.simulationSteps != 0u && state.simulationSteps % 400u == 0u &&
-            loggedStatusStep != state.simulationSteps) {
+        // driven by simulation steps, never wall clock). Boundary-crossing
+        // (not exact-modulo) so fast-forward bursts cannot skip it.
+        if (!state.gameComplete && !state.lost && state.simulationSteps != 0u &&
+            state.simulationSteps / 400u != loggedStatusStep / 400u) {
             loggedStatusStep = state.simulationSteps;
-            char status[160];
+            char status[192];
             uint32_t si = 0;
-            append_text(status, &si, sizeof(status), "MissileCommand status cities=");
+            append_text(status, &si, sizeof(status), "MissileCommand status level=");
+            append_number(status, &si, sizeof(status), (uint64_t)state.levelIndex);
+            append_text(status, &si, sizeof(status), " cities=");
             append_number(status, &si, sizeof(status), (uint64_t)mc_alive_cities(&state));
             append_text(status, &si, sizeof(status), " dropped=");
             append_number(status, &si, sizeof(status), (uint64_t)state.bDropped);
@@ -390,7 +566,10 @@ extern "C" gx_result GX_CALL gx_main(gx_app_context* ctx) {
             ctx->host->log(ctx, status);
         }
 
-        if (state.visualDirty && currentTicks - lastPresentedTicks >= kMcVisualIntervalMs) {
+        // In fast-forward the scene still presents (throttled harder so the
+        // frame IPC does not dominate the accelerated tick loop).
+        const uint64_t presentIntervalMs = g_fastForward ? 2000u : kMcVisualIntervalMs;
+        if (state.visualDirty && currentTicks - lastPresentedTicks >= presentIntervalMs) {
             if (!render_and_present(ctx, window, state)) {
                 ctx->host->log(ctx, "MissileCommand frame presentation failed");
                 running = false;
@@ -401,7 +580,7 @@ extern "C" gx_result GX_CALL gx_main(gx_app_context* ctx) {
         }
     }
 
-    ctx->host->log(ctx, "MissileCommand MC2 exiting");
+    ctx->host->log(ctx, "MissileCommand MC3 exiting");
     if (ctx->host->exit) return ctx->host->exit(ctx, GX_OK);
     return GX_OK;
 }

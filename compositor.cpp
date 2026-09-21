@@ -1,4 +1,5 @@
 #include "compositor.h"
+#include "compositor_pointer_buttons.h"
 #include "allocator.h"
 #include "built_in_app_metadata.h"
 #include "desktop_state.h"
@@ -1150,6 +1151,7 @@ namespace gxos {
         uint64_t Compositor::g_modalWindow = 0;
         bool Compositor::g_dragActive = false; int Compositor::g_dragOffX = 0; int Compositor::g_dragOffY = 0; uint64_t Compositor::g_dragWin = 0; int Compositor::g_dragStartX = 0; int Compositor::g_dragStartY = 0;
         bool Compositor::g_dragPending = false; uint64_t Compositor::g_dragPendingWin = 0;
+        int Compositor::g_pointerHeldMask = 0;
         int Compositor::g_virtualMouseX = 0; int Compositor::g_virtualMouseY = 0;
         bool Compositor::g_resizeActive = false; int Compositor::g_resizeStartW = 0; int Compositor::g_resizeStartH = 0; int Compositor::g_resizeStartMX = 0; int Compositor::g_resizeStartMY = 0; uint64_t Compositor::g_resizeWin = 0;
         bool Compositor::g_resizePreviewActive = false; int Compositor::g_resizePreviewW = 0; int Compositor::g_resizePreviewH = 0;
@@ -5385,6 +5387,7 @@ namespace gxos {
 #else
                 (void)capture;
 #endif
+                { std::lock_guard<std::mutex> lk(g_lock); gxos::gui::pointerbuttons::OnDown(g_pointerHeldMask, gxos::gui::pointerbuttons::kButtonLeft); }
                 publishOut(MsgType::MT_InputMouse, Compositor::packMousePayloadForTarget(mx, my, 1, "down", ownerPid, targetWindow), ownerPid);
 #if defined(_WIN32) && !defined(GXOS_BARE_METAL)
                 hostedInputDiagnostic(std::string("WM_LBUTTONDOWN return ") + hostedInputWindowContext(h) +
@@ -5492,6 +5495,7 @@ namespace gxos {
                     
                     // If right-click is on a window, forward the event to the application
                     if (hitWin) {
+                        { std::lock_guard<std::mutex> lk(g_lock); gxos::gui::pointerbuttons::OnDown(g_pointerHeldMask, gxos::gui::pointerbuttons::kButtonRight); }
                         publishOut(MsgType::MT_InputMouse, Compositor::packMousePayloadForTarget(mx, my, 2, "down", ownerPid, hitWin->id), ownerPid);
                         requestRepaint();
                         return 0;
@@ -5504,6 +5508,20 @@ namespace gxos {
                     requestRepaint( );
                     return 0;
                 }
+            } break;
+            case WM_RBUTTONUP: {
+                int mx = GET_X_LPARAM(l); int my = GET_Y_LPARAM(l);
+                RECT cr; GetClientRect(h, &cr);
+                const DisplayVirtualDesktop desktop = buildDisplayVirtualDesktop(g_cfg);
+                const DisplayViewport viewport = hostedViewportForWindow(h, desktop, cr.right - cr.left, cr.bottom - cr.top);
+                mapHostedInputPointToVirtual(mx, my, desktop, viewport);
+                { std::lock_guard<std::mutex> lk(g_lock); if (blockInputBehindModal(mx, my)) { requestRepaint( ); return 0; } }
+                uint64_t ownerPid = 0; uint64_t targetWindow = 0; { std::lock_guard<std::mutex> lk(g_lock); WinInfo* hitWin = hitWindowAt(mx, my); if (hitWin) { ownerPid = hitWin->ownerPid; targetWindow = hitWin->id; } else { ownerPid = inputOwnerPid( ); targetWindow = g_modalWindow ? g_modalWindow : g_focus; } }
+                Compositor::handleMouse(mx, my, false, true, &viewport);
+                { std::lock_guard<std::mutex> lk(g_lock); gxos::gui::pointerbuttons::OnUp(g_pointerHeldMask, gxos::gui::pointerbuttons::kButtonRight); }
+                publishOut(MsgType::MT_InputMouse, Compositor::packMousePayloadForTarget(mx, my, 2, "up", ownerPid, targetWindow), ownerPid);
+                requestRepaint( );
+                return 0;
             } break;
             case WM_LBUTTONUP: {
                 int mx = GET_X_LPARAM(l); int my = GET_Y_LPARAM(l);
@@ -5558,6 +5576,7 @@ namespace gxos {
 #else
                 (void)captureAfterUp;
 #endif
+                { std::lock_guard<std::mutex> lk(g_lock); gxos::gui::pointerbuttons::OnUp(g_pointerHeldMask, gxos::gui::pointerbuttons::kButtonLeft); }
                 publishOut(MsgType::MT_InputMouse, Compositor::packMousePayloadForTarget(mx, my, 1, "up", ownerPid, targetWindow), ownerPid);
 #if defined(_WIN32) && !defined(GXOS_BARE_METAL)
                 if (GetCapture( ) == h) {
@@ -5605,7 +5624,29 @@ namespace gxos {
                 if (g_iconDragActive && g_iconDragIndex >= 0 && g_iconDragIndex < (int)g_items.size( )) { int nx = mx - g_iconDragOffX; int ny = my - g_iconDragOffY; clampDesktopIconPosition(nx, ny); g_items[g_iconDragIndex].ix = nx; g_items[g_iconDragIndex].iy = ny; requestRepaint( ); break; }
                 if (g_iconDragPending) { break; } // Skip handleMouse while drag is pending
                 uint64_t ownerPid = 0; uint64_t targetWindow = 0; { std::lock_guard<std::mutex> lk(g_lock); WinInfo* hitWin = hitWindowAt(mx, my); if (hitWin) { ownerPid = hitWin->ownerPid; targetWindow = hitWin->id; } else { ownerPid = inputOwnerPid( ); targetWindow = g_modalWindow ? g_modalWindow : g_focus; } }
-                Compositor::handleMouse(mx, my, false, false, &viewport); publishOut(MsgType::MT_InputMouse, Compositor::packMousePayloadForTarget(mx, my, 0, "move", ownerPid, targetWindow), ownerPid);
+                Compositor::handleMouse(mx, my, false, false, &viewport);
+                // MC3 fix: expose held buttons on move. wParam carries the
+                // Win32 button state (MK_LBUTTON/MK_RBUTTON/MK_MBUTTON); it
+                // is the source of truth for hosted drags and resyncs the
+                // tracked mask so a missed down/up cannot stick forever.
+                {
+                    const bool leftHeld = (w & MK_LBUTTON) != 0;
+                    const bool rightHeld = (w & MK_RBUTTON) != 0;
+                    const bool middleHeld = (w & MK_MBUTTON) != 0;
+                    int buttons[3];
+                    int count = 0;
+                    {
+                        std::lock_guard<std::mutex> lk(g_lock);
+                        g_pointerHeldMask = 0;
+                        if (leftHeld) g_pointerHeldMask |= gxos::gui::pointerbuttons::kHeldLeft;
+                        if (rightHeld) g_pointerHeldMask |= gxos::gui::pointerbuttons::kHeldRight;
+                        if (middleHeld) g_pointerHeldMask |= gxos::gui::pointerbuttons::kHeldMiddle;
+                        count = gxos::gui::pointerbuttons::MoveButtonsForMask(g_pointerHeldMask, buttons, 3);
+                    }
+                    for (int i = 0; i < count; ++i) {
+                        publishOut(MsgType::MT_InputMouse, Compositor::packMousePayloadForTarget(mx, my, buttons[i], "move", ownerPid, targetWindow), ownerPid);
+                    }
+                }
             } break;
             case WM_MOUSEWHEEL: {
                 int mx = GET_X_LPARAM(l);
@@ -5803,6 +5844,8 @@ namespace gxos {
                 if (previous != g_windows.end()) previousOwnerPid = previous->second.ownerPid;
                 auto next = g_windows.find(nextWindow);
                 if (next != g_windows.end()) nextOwnerPid = next->second.ownerPid;
+                // Focus loss must not leave a stuck drag button behind.
+                gxos::gui::pointerbuttons::Clear(g_pointerHeldMask);
             }
             if (previousWindow != 0 && previousOwnerPid != 0) {
                 publishOut(MsgType::MT_ClearFocus, std::to_string(previousWindow), previousOwnerPid);
@@ -6275,7 +6318,7 @@ namespace gxos {
         void Compositor::handleMouseCaptureLost( ) {
             std::lock_guard<std::mutex> lk(g_lock);
             bool changed = g_dragActive || g_dragPending || g_resizeActive || g_resizePreviewActive ||
-                g_iconDragActive || g_iconDragPending;
+                g_iconDragActive || g_iconDragPending || g_pointerHeldMask != 0;
             g_dragActive = false;
             g_dragWin = 0;
             g_dragPending = false;
@@ -6287,6 +6330,7 @@ namespace gxos {
             g_iconDragActive = false;
             g_iconDragPending = false;
             g_iconDragIndex = -1;
+            gxos::gui::pointerbuttons::Clear(g_pointerHeldMask);
 #if defined(_WIN32) && !defined(GXOS_BARE_METAL)
             g_iconSelectionDragPending = false;
             g_iconSelectionDragActive = false;
@@ -6526,6 +6570,9 @@ namespace gxos {
                     if (it != g_z.end()) g_z.erase(it);
                     if (g_modalWindow == id) g_modalWindow = 0;
                     if (g_focus == id) g_focus = 0;
+                    // Held-button cleanup: a destroyed window must not leave
+                    // a permanently stuck drag button behind.
+                    gxos::gui::pointerbuttons::Clear(g_pointerHeldMask);
                 }
                 if (boundsChanged) saveDesktopConfig();
                 publishOut(MsgType::MT_Close, std::to_string(id), ownerPid ? ownerPid : m.srcPid);
@@ -6675,7 +6722,7 @@ namespace gxos {
             } break;
             case MsgType::MT_WindowList: { std::ostringstream oss; bool first = true; { std::lock_guard<std::mutex> lk(g_lock); for (uint64_t id : g_z) { auto it = g_windows.find(id); if (it == g_windows.end( )) continue; if (!first) oss << ";"; first = false; oss << it->first << "|" << it->second.title << "|" << (it->second.minimized ? 1 : 0); } } const std::string diag = hostedFreezeDiagnosticsCompactSummary( ); if (!diag.empty()) { if (!first) oss << ";"; oss << diag; } publishOut(MsgType::MT_WindowList, oss.str( ), m.srcPid); } break;
             case MsgType::MT_Activate: { uint64_t id = 0; try { id = std::stoull(s); } catch (...) {} uint64_t previousFocus = 0; { std::lock_guard<std::mutex> lk(g_lock); if (g_modalWindow != 0 && id != g_modalWindow) id = g_modalWindow; previousFocus = g_focus; for (auto it = g_z.begin( ); it != g_z.end( ); ++it) { if (*it == id) { g_z.erase(it); break; } } auto wit = g_windows.find(id); if (wit != g_windows.end( )) { wit->second.minimized = false; wit->second.tombstoned = false; } g_z.push_back(id); g_focus = id; } sendFocusChange(previousFocus, id); invalidate(id); } break;
-            case MsgType::MT_Minimize: { uint64_t id = 0; try { id = std::stoull(s); } catch (...) {} { std::lock_guard<std::mutex> lk(g_lock); if (g_modalWindow != 0 && id != g_modalWindow) break; auto wit = g_windows.find(id); if (wit != g_windows.end( )) { wit->second.minimized = true; wit->second.tombstoned = true; if (g_modalWindow == id) g_modalWindow = 0; if (g_focus == id) g_focus = 0; } } invalidate(id); } break;
+            case MsgType::MT_Minimize: { uint64_t id = 0; try { id = std::stoull(s); } catch (...) {} { std::lock_guard<std::mutex> lk(g_lock); if (g_modalWindow != 0 && id != g_modalWindow) break; auto wit = g_windows.find(id); if (wit != g_windows.end( )) { wit->second.minimized = true; wit->second.tombstoned = true; if (g_modalWindow == id) g_modalWindow = 0; if (g_focus == id) g_focus = 0; } gxos::gui::pointerbuttons::Clear(g_pointerHeldMask); } invalidate(id); } break;
             case MsgType::MT_ShowDesktopToggle: { { std::lock_guard<std::mutex> lk(g_lock); if (g_modalWindow != 0) { for (auto it = g_z.begin( ); it != g_z.end( ); ++it) { if (*it == g_modalWindow) { g_z.erase(it); break; } } g_z.push_back(g_modalWindow); g_focus = g_modalWindow; invalidate(g_modalWindow); break; } } if (!g_showDesktopActive) { g_showDesktopMinimized.clear( ); for (uint64_t id : g_z) { auto it = g_windows.find(id); if (it != g_windows.end( ) && !it->second.minimized) { it->second.minimized = true; it->second.tombstoned = true; g_showDesktopMinimized.push_back(id); } } g_focus = 0; g_showDesktopActive = true; } else { for (uint64_t id : g_showDesktopMinimized) { auto it = g_windows.find(id); if (it != g_windows.end( )) { it->second.minimized = false; it->second.tombstoned = false; } } g_showDesktopMinimized.clear( ); g_showDesktopActive = false; } invalidate(0); } break;
             case MsgType::MT_StateSave: { std::string path = s; std::vector<SavedWindow> sw; { std::lock_guard<std::mutex> lk(g_lock); for (size_t i = 0; i < g_z.size( ); ++i) { uint64_t id = g_z[i]; auto it = g_windows.find(id); if (it == g_windows.end( )) continue; const WinInfo& w = it->second; SavedWindow rec; rec.id = w.id; rec.title = w.title; rec.x = w.x; rec.y = w.y; rec.w = w.w; rec.h = w.h; rec.minimized = w.minimized; rec.maximized = w.maximized; rec.z = (int)i; rec.focused = (g_focus == w.id); rec.snap = w.snapState; rec.restoreX = w.prevX; rec.restoreY = w.prevY; rec.restoreW = w.prevW; rec.restoreH = w.prevH; sw.push_back(rec); } } std::string err; if (!DesktopState::Save(path, sw, err)) publishOut(MsgType::MT_WidgetEvt, std::string("STATE_SAVE_ERR|") + err); else publishOut(MsgType::MT_WidgetEvt, std::string("STATE_SAVE_OK|") + path); } break;
             case MsgType::MT_StateLoad: {
@@ -6823,6 +6870,10 @@ namespace gxos {
                     }
                     
                     // Handle based on button and action
+                    // MC3: track held buttons so button-0 moves expose the
+                    // active drag button(s); explicit button moves (e.g. the
+                    // gui.mouse test harness sending "2 move") are forwarded
+                    // directly. Existing down/up values are unchanged.
                     if (button == 1) { // Left button
                         if (action == "down") {
                             if (handleStartMenuLeftClick(mx, my)) {
@@ -6842,6 +6893,7 @@ namespace gxos {
                                 }
                             }
                             handleMouse(mx, my, true, false);
+                            { std::lock_guard<std::mutex> lk(g_lock); gxos::gui::pointerbuttons::OnDown(g_pointerHeldMask, gxos::gui::pointerbuttons::kButtonLeft); }
                             publishOut(MsgType::MT_InputMouse, Compositor::packMousePayloadForTarget(mx, my, 1, "down", ownerPid, targetWindow), ownerPid);
                         } else if (action == "up") {
                             uint64_t ownerPid = 0;
@@ -6852,7 +6904,24 @@ namespace gxos {
                                 targetWindow = g_modalWindow ? g_modalWindow : g_focus;
                             }
                             handleMouse(mx, my, false, true);
+                            { std::lock_guard<std::mutex> lk(g_lock); gxos::gui::pointerbuttons::OnUp(g_pointerHeldMask, gxos::gui::pointerbuttons::kButtonLeft); }
                             publishOut(MsgType::MT_InputMouse, Compositor::packMousePayloadForTarget(mx, my, 1, "up", ownerPid, targetWindow), ownerPid);
+                        } else if (action == "move") {
+                            uint64_t ownerPid = 0;
+                            uint64_t targetWindow = 0;
+                            {
+                                std::lock_guard<std::mutex> lk(g_lock);
+                                WinInfo* hitWin = hitWindowAt(mx, my);
+                                if (hitWin) {
+                                    ownerPid = hitWin->ownerPid;
+                                    targetWindow = hitWin->id;
+                                } else {
+                                    ownerPid = inputOwnerPid();
+                                    targetWindow = g_modalWindow ? g_modalWindow : g_focus;
+                                }
+                            }
+                            handleMouse(mx, my, false, false);
+                            publishOut(MsgType::MT_InputMouse, Compositor::packMousePayloadForTarget(mx, my, 1, "move", ownerPid, targetWindow), ownerPid);
                         }
                     } else if (button == 2) { // Right button
                         if (action == "down") {
@@ -6892,6 +6961,7 @@ namespace gxos {
                             
                             // If right-click is on a window, forward the event to the application
                             if (targetWindow != 0) {
+                                { std::lock_guard<std::mutex> lk(g_lock); gxos::gui::pointerbuttons::OnDown(g_pointerHeldMask, gxos::gui::pointerbuttons::kButtonRight); }
                                 publishOut(MsgType::MT_InputMouse, Compositor::packMousePayloadForTarget(mx, my, 2, "down", ownerPid, targetWindow), ownerPid);
                                 invalidate(0);
                             } else {
@@ -6906,6 +6976,70 @@ namespace gxos {
                                 }
                                 invalidate(0);
                             }
+                        } else if (action == "up") {
+                            uint64_t ownerPid = 0;
+                            uint64_t targetWindow = 0;
+                            {
+                                std::lock_guard<std::mutex> lk(g_lock);
+                                WinInfo* hitWin = hitWindowAt(mx, my);
+                                if (hitWin) {
+                                    ownerPid = hitWin->ownerPid;
+                                    targetWindow = hitWin->id;
+                                } else {
+                                    ownerPid = inputOwnerPid();
+                                    targetWindow = g_modalWindow ? g_modalWindow : g_focus;
+                                }
+                            }
+                            handleMouse(mx, my, false, true);
+                            { std::lock_guard<std::mutex> lk(g_lock); gxos::gui::pointerbuttons::OnUp(g_pointerHeldMask, gxos::gui::pointerbuttons::kButtonRight); }
+                            if (targetWindow != 0) {
+                                publishOut(MsgType::MT_InputMouse, Compositor::packMousePayloadForTarget(mx, my, 2, "up", ownerPid, targetWindow), ownerPid);
+                            }
+                            invalidate(0);
+                        } else if (action == "move") {
+                            uint64_t ownerPid = 0;
+                            uint64_t targetWindow = 0;
+                            {
+                                std::lock_guard<std::mutex> lk(g_lock);
+                                WinInfo* hitWin = hitWindowAt(mx, my);
+                                if (hitWin) {
+                                    ownerPid = hitWin->ownerPid;
+                                    targetWindow = hitWin->id;
+                                } else {
+                                    ownerPid = inputOwnerPid();
+                                    targetWindow = g_modalWindow ? g_modalWindow : g_focus;
+                                }
+                            }
+                            handleMouse(mx, my, false, false);
+                            publishOut(MsgType::MT_InputMouse, Compositor::packMousePayloadForTarget(mx, my, 2, "move", ownerPid, targetWindow), ownerPid);
+                        }
+                    } else if (button == 3) { // Middle button
+                        if (action == "down" || action == "up" || action == "move") {
+                            uint64_t ownerPid = 0;
+                            uint64_t targetWindow = 0;
+                            {
+                                std::lock_guard<std::mutex> lk(g_lock);
+                                WinInfo* hitWin = hitWindowAt(mx, my);
+                                if (hitWin) {
+                                    ownerPid = hitWin->ownerPid;
+                                    targetWindow = hitWin->id;
+                                } else {
+                                    ownerPid = inputOwnerPid();
+                                    targetWindow = g_modalWindow ? g_modalWindow : g_focus;
+                                }
+                            }
+                            if (action == "down") {
+                                handleMouse(mx, my, true, false);
+                                std::lock_guard<std::mutex> lk(g_lock);
+                                gxos::gui::pointerbuttons::OnDown(g_pointerHeldMask, gxos::gui::pointerbuttons::kButtonMiddle);
+                            } else if (action == "up") {
+                                handleMouse(mx, my, false, true);
+                                std::lock_guard<std::mutex> lk(g_lock);
+                                gxos::gui::pointerbuttons::OnUp(g_pointerHeldMask, gxos::gui::pointerbuttons::kButtonMiddle);
+                            } else {
+                                handleMouse(mx, my, false, false);
+                            }
+                            publishOut(MsgType::MT_InputMouse, Compositor::packMousePayloadForTarget(mx, my, 3, action, ownerPid, targetWindow), ownerPid);
                         }
                     } else if (button == 0) { // Mouse move
                         if (action == "move") {
@@ -6923,7 +7057,18 @@ namespace gxos {
                                 }
                             }
                             handleMouse(mx, my, false, false);
-                            publishOut(MsgType::MT_InputMouse, Compositor::packMousePayloadForTarget(mx, my, 0, "move", ownerPid, targetWindow), ownerPid);
+                            // Substitute the tracked held buttons so a
+                            // button-0 synthetic move during a drag reaches
+                            // the app with the correct button value.
+                            int buttons[3];
+                            int count = 0;
+                            {
+                                std::lock_guard<std::mutex> lk(g_lock);
+                                count = gxos::gui::pointerbuttons::MoveButtonsForMask(g_pointerHeldMask, buttons, 3);
+                            }
+                            for (int i = 0; i < count; ++i) {
+                                publishOut(MsgType::MT_InputMouse, Compositor::packMousePayloadForTarget(mx, my, buttons[i], "move", ownerPid, targetWindow), ownerPid);
+                            }
                         }
                     }
                 } catch (const std::exception& e) {
@@ -6968,7 +7113,16 @@ namespace gxos {
                     
                     // Forward to the explicit target when provided; the
                     // legacy form continues to use the compositor focus.
-                    publishOut(MsgType::MT_InputKey, std::to_string(keyCode) + "|" + action + "|" + modifiers, ownerPid);
+                    // MC3: preserve the validated target window as the
+                    // trailing payload field (keyCode|action|modifiers|window,
+                    // the same convention as mouse payloads). The runtime
+                    // parser already accepts this form and attributes the
+                    // event to the explicit window; without it every targeted
+                    // key degrades to focus attribution and is dropped by
+                    // apps whose window is not focused.
+                    std::string forward = std::to_string(keyCode) + "|" + action + "|" + modifiers;
+                    if (targeted && targetWindow != 0) forward += "|" + std::to_string(targetWindow);
+                    publishOut(MsgType::MT_InputKey, forward, ownerPid);
                 } catch (const std::exception& e) {
                     Logger::write(LogLevel::Error, std::string("Compositor: Failed to parse MT_InputKey: ") + e.what());
                 }
