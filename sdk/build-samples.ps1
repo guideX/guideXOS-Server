@@ -42,7 +42,7 @@ $Samples = @(
         ElfRelativePath = 'bin/amd64/missilecommand.elf'
         Manifest = 'app.json'
         StagedAppId = 'com.guidexos.missilecommand'
-        Resources = @('resources/DD.ini')
+        Resources = @('resources/DD.ini', 'resources/city.gximg')
     }
 )
 

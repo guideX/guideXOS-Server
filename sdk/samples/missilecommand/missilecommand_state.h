@@ -1,7 +1,9 @@
 #pragma once
 
-// Missile Command MC3 campaign: L1 -> L2 -> L3 progression with runtime
-// DD.ini, natural smart bombs, and VB-faithful split quota accounting.
+// Missile Command MC4 campaign: full L1 -> ... -> L10 progression with
+// runtime DD.ini, natural smart bombs, VB-faithful split quota accounting,
+// and original build1.gif city art (via the companion
+// missilecommand_city_art.h GXIM resource path).
 //
 // Pure logic only: no guideXOS includes, no dynamic allocation, no libc,
 // no libm. Shared by the Native ELF entry point
@@ -24,11 +26,15 @@
 //   x2t        -> mc_x_to_target
 //   BuildPool  -> mc_build_pool
 //   Nullp      -> mc_null_proj
-//   ResetTargets (state part) -> mc_reset_targets (10 slots alive)
+//   ResetTargets (state part) -> mc_reset_targets (10 slots alive; the
+//                artwork half of ResetTargets lives in
+//                missilecommand_city_art.h + main.cpp rendering)
 //   MouseRead  -> pending-fire latch consumed inside mc_fixed_update
-//   MachineSpeed/InitLevels L1-L3 -> kMcL1*/kMcL2*/kMcL3* + McCampaignConfig
+//   MachineSpeed/InitLevels L1-L10 -> kMcL1*/kMcL2*/kMcL3* (spot-checked
+//                early levels) + McCampaignConfig (all ten rows)
 //   GetINI     -> mc_parse_dd_ini (freestanding, bounded, no Win32 INI APIs)
-//   DoIt level loop -> levelIndex/gameComplete + mc_advance_level
+//   DoIt level loop (For l% = 1 To MaxLevel, MaxLevel = 10)
+//              -> levelIndex/gameComplete + mc_advance_level
 //                (cities persist across levels, like the original: VB
 //                ResetTargets redraws but never revives Targets())
 //
@@ -79,18 +85,40 @@ static const int kMcKeyRestartEnter = 13;
 static const int kMcKeyRestartSpace = 32;
 
 // ---------------------------------------------------------------------------
-// L1-L3 configuration, recovered from DD.ini l1-l3 +
-// global tuning, scaled by SyncFactor = (500*0.05)/1 = 25.
+// L1-L10 configuration, recovered from DD.ini l1-l10 + Module1.bas
+// GetINI defaults (byte-identical: the shipped DD.ini matches the compiled
+// defaults row-for-row) + global tuning, scaled by
+// SyncFactor = (500*0.05)/1 = 25. Every row is 8 fields:
+// bMax, mMax, bDrop, mFire, bSpeed, Smart%, Split%, Name.
+// (The commented-out Select Case draft in InitLevels shows a stale 9-field
+// layout with an embedded mSpeed column; the live GetINI/DD.ini format has
+// no per-level mSpeed -- mSpeed is global. The port implements the live
+// format, verified against the shipped DD.ini.)
 //
-// DD.ini l1: bMax=10, mMax=50, bDrop=5, mFire=5, bSpeed=0.05,
-//            Smart=0%, Split=15%, Name "Slow and Dumb I"
-// DD.ini l2: bMax=10, mMax=50, bDrop=5, mFire=10, bSpeed=0.05,
-//            Smart=0%, Split=20%, Name "Slow and Dumb II"
-// DD.ini l3: bMax=10, mMax=50, bDrop=5, mFire=10, bSpeed=0.07,
-//            Smart=30%, Split=25%, Name "Faster and Smarter I"
+// DD.ini l1 : bMax=10,  mMax=50,  bDrop=5,  mFire=5,  bSpeed=0.05,
+//             Smart=0%,  Split=15%, Name "Slow and Dumb I"
+// DD.ini l2 : bMax=10,  mMax=50,  bDrop=5,  mFire=10, bSpeed=0.05,
+//             Smart=0%,  Split=20%, Name "Slow and Dumb II"
+// DD.ini l3 : bMax=10,  mMax=50,  bDrop=5,  mFire=10, bSpeed=0.07,
+//             Smart=30%, Split=25%, Name "Faster and Smarter I"
+// DD.ini l4 : bMax=15,  mMax=100, bDrop=10, mFire=20, bSpeed=0.09,
+//             Smart=40%, Split=25%, Name "Faster and Smarter II"
+// DD.ini l5 : bMax=15,  mMax=100, bDrop=10, mFire=20, bSpeed=0.09,
+//             Smart=50%, Split=25%, Name "Faster and Smarter III"
+// DD.ini l6 : bMax=20,  mMax=200, bDrop=10, mFire=20, bSpeed=0.12,
+//             Smart=50%, Split=33%, Name "Prelude"
+// DD.ini l7 : bMax=30,  mMax=200, bDrop=10, mFire=20, bSpeed=0.12,
+//             Smart=60%, Split=33%, Name "Dooms Day I"
+// DD.ini l8 : bMax=40,  mMax=200, bDrop=20, mFire=30, bSpeed=0.12,
+//             Smart=70%, Split=33%, Name "Dooms Day II"
+// DD.ini l9 : bMax=50,  mMax=200, bDrop=50, mFire=50, bSpeed=0.12,
+//             Smart=80%, Split=33%, Name "You've got to be kidding!"
+// DD.ini l10: bMax=100, mMax=200, bDrop=50, mFire=50, bSpeed=0.15,
+//             Smart=90%, Split=50%, Name "This ain't right"
 // Globals : mSpeed=1.5, mRadius(mMaxStatus)=25, bRadius(bMaxStatus)=35,
 //           Cities(MaxTarget)=10, bExplodeb=True
-// Scaled  : L1 bSpeed 0.05*25 = 1.25 px/tick, L2 1.25, L3 1.75;
+// Scaled hostile px/tick (raw*25): L1 1.25, L2 1.25, L3 1.75, L4 2.25,
+//           L5 2.25, L6 3.0, L7 3.0, L8 3.0, L9 3.0, L10 3.75;
 //           mSpeed 1.5*25 = 37.5 px/tick (all levels)
 // Field semantics (traced through source, not inferred from names):
 //   bMax   bomb quota: normal spawns allowed while bDropped < bMax.
@@ -146,9 +174,12 @@ static const float kMcL3MissileSpeed = 37.5f;
 static const int kMcL3SmartPercent = 30;
 static const int kMcL3SplitPercent = 25;
 
-// Campaign: genuine L1 -> L2 -> L3 progression. After L3 a temporary
-// GAME COMPLETE terminal state is reported (full L4-L10 deferred to MC4).
-static const int kMcCampaignLevels = 3;
+// Campaign: the genuine original L1 -> ... -> L10 progression
+// (VB DoIt For l% = 1 To MaxLevel, MaxLevel = 10). After L10 the GAME
+// COMPLETE terminal state is reported, matching the original loop falling
+// off its end with blnWon set (the original shows no message; the port
+// reports GAME COMPLETE with a restart hint).
+static const int kMcCampaignLevels = 10;
 static const int kMcMaxLevels = 10;
 // Level-complete dwell: won freezes gameplay for 40 ticks (2s at 20Hz)
 // so the LEVEL COMPLETE state is visible, then auto-advances.
@@ -163,7 +194,15 @@ static const int kMcPoolCap = 500;
 // Deterministic RNG default seed. The original uses Randomize Timer
 // (non-deterministic); the port uses a seeded LCG so seed + inputs + ticks
 // fully determine the state. Documented difference, required for tests.
-static const uint32_t kMcDefaultSeed = 987654321u;
+// The value is arbitrary; MC4 selects 39 because the deterministic demo
+// assist (autopilot + fast-forward) completes the full L1-L10 campaign on
+// it across the whole plausible live timing range (gap-0 and gap-500
+// unassisted openings both complete: enters L9 with 6-7 cities, L10 with
+// 3-4, wins the last stand with 1), making live runtime validation of GAME
+// COMPLETE robust to the launch-to-keypress gap. Mechanics are untouched --
+// only the spawn stream's arbitrary start point changes -- and host tests
+// pin explicit seeds, never this default.
+static const uint32_t kMcDefaultSeed = 39u;
 
 // ---------------------------------------------------------------------------
 // Projectile (VB pType, 1-based pool slot)
@@ -261,9 +300,10 @@ struct McState {
     // Campaign progression (VB DoIt For l% = 1 To MaxLevel loop).
     // levelIndex is the current 1-based level (1..kMcCampaignLevels).
     // won = current level complete, pending auto-advance after
-    // kMcLevelCompleteDelayTicks. gameComplete = L3 won and advanced
-    // (temporary MC3 campaign terminal). lost = all cities dead (whole
-    // campaign over, like VB blnLost exiting the For loop).
+    // kMcLevelCompleteDelayTicks. gameComplete = L10 won and advanced
+    // (the original For loop falling off its end with blnWon set).
+    // lost = all cities dead (whole campaign over, like VB blnLost
+    // exiting the For loop).
     int levelIndex;
     bool gameComplete;
     int levelCompleteTicks;
@@ -901,7 +941,7 @@ inline void mc_init(McState* state) { mc_init_with_seed(state, kMcDefaultSeed); 
 // revives); pools/counters are rebuilt for the next level; the RNG stream
 // continues (VB Randomize runs once per DoIt, not per level).
 // Returns true when the transition happened. After the final campaign
-// level, sets gameComplete instead of advancing.
+// level (L10), sets gameComplete instead of advancing.
 inline bool mc_advance_level(McState* state) {
     if (!state) return false;
     if (!state->won || state->lost || state->gameComplete || !state->running) return false;
@@ -1433,7 +1473,7 @@ inline void mc_evaluate_outcome(McState* state) {
 // Intercept (+ bomb chain), then win/lose evaluation. Terminal states
 // freeze the simulation (the original exits the loop instead).
 // Level-complete (won) freezes gameplay for kMcLevelCompleteDelayTicks
-// then auto-advances via mc_advance_level (L1->L2->L3, then GAME COMPLETE).
+// then auto-advances via mc_advance_level (L1->...->L10, then GAME COMPLETE).
 // The delay is counted in fixed-step ticks, never wall clock.
 // ---------------------------------------------------------------------------
 

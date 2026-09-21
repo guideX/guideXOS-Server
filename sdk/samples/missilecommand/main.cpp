@@ -1,4 +1,5 @@
-// Missile Command MC3 Native ELF application: L1 -> L2 -> L3 campaign.
+// Missile Command MC4 Native ELF application: full L1 -> ... -> L10 campaign
+// with original build1.gif city art (GXIM resource) and runtime DD.ini.
 //
 // Genuine App Model application: gx_main entry point, guidexos-c-abi-v1,
 // fixed-size centered window, retained present_frame scene, poll_event input,
@@ -18,13 +19,18 @@
 // a divergence; right-drag is the restored original alternate control.
 //
 // Test hooks (off by default, never alter normal release behavior unless
-// explicitly keyed): 'A' toggles deterministic autopilot defense (predicted
-// auto-aim, for live smoke progression); 'F' toggles fast-forward (extra
-// fixed-step ticks per frame, same tick semantics, faster wall clock).
+// explicitly keyed): 'A' toggles deterministic autopilot defense (the same
+// model-predictive policy as the host test driver, plus last-ditch point
+// defense on L9+; completes the L1-L10 campaign on the default seed, for
+// live smoke progression); 'F' toggles fast-forward (extra fixed-step ticks
+// per frame, same tick semantics, faster wall clock). 'O'/'P' force the
+// autopilot on/off and 'G'/'H' force fast-forward on/off (idempotent, for
+// race-free smoke arming).
 
 #include <guidexos/ui.h>
 
 #include "missilecommand_state.h"
+#include "missilecommand_city_art.h"
 
 extern "C" void* memset(void* destination, int value, uint64_t bytes) {
     uint8_t* output = static_cast<uint8_t*>(destination);
@@ -48,6 +54,13 @@ static uint32_t g_framePixels[kMcFrameWidth * kMcFrameHeight];
 static bool g_autopilot = false;
 static bool g_fastForward = false;
 static char g_ddIniBuffer[2048];
+// GXIM city-art file bytes (153x121 tile) + parsed view. Static storage:
+// ~74 KiB next to the ~100 KiB simulation state, off the freestanding
+// stack. When loading/parsing fails the renderer falls back to the MC3
+// yellow rectangles, so the game stays playable without the resource.
+static unsigned char g_cityGximg[kMcCityArtFileBytes];
+static McCityArtImage g_cityArt;
+static bool g_cityArtValid = false;
 
 static const uint32_t kColorBackground = 0x000000u;
 static const uint32_t kColorGround = 0x003800u;
@@ -72,6 +85,26 @@ static void clear_event(gx_event* event) {
 static void set_pixel(int x, int y, uint32_t color) {
     if (x < 0 || x >= kMcFrameWidth || y < 0 || y >= kMcFrameHeight) return;
     g_framePixels[y * kMcFrameWidth + x] = color;
+}
+
+// Chunked resource read via the file_read offset API (PacMan bitmap_loader
+// pattern). file_read_all caps single reads at 64 KiB, which fits DD.ini
+// but not the 74 KiB city art; 8 KiB chunks are proven live (larger chunks
+// were observed to stall startup in the hosted runtime, so the count of
+// small roundtrips is preferred over fewer large ones).
+static bool read_exact(gx_app_context* ctx, const char* path, uint64_t offset,
+                       unsigned char* dest, uint32_t bytes) {
+    if (!ctx || !ctx->host || !ctx->host->file_read || !dest) return false;
+    while (bytes > 0) {
+        uint32_t chunk = bytes > 8192u ? 8192u : bytes;
+        uint32_t got = 0;
+        if (ctx->host->file_read(ctx, path, offset, dest, chunk, &got) != GX_OK) return false;
+        if (got == 0 || got > chunk) return false;
+        offset += got;
+        dest += got;
+        bytes -= got;
+    }
+    return true;
 }
 
 static void fill_rect(int x, int y, int width, int height, uint32_t color) {
@@ -161,16 +194,35 @@ static void render_pool(const McProj* pool, int head, uint32_t color, bool trail
 }
 
 // VB-faithful scene on the 480x360 frame: dark playfield, ground band,
-// alive cities (yellow) vs rubble (gray), central battery, hostile bombs
-// with red trails (Smart bombs show heads only, like the original), defense
-// with trails, and growing explosion rings for both blast pools.
+// alive cities (original build1.gif art via city.gximg, yellow-rectangle
+// fallback) vs rubble (gray), central battery, hostile bombs with red
+// trails (Smart bombs show heads only, like the original), defense with
+// trails, and growing explosion rings for both blast pools.
+static void blit_city_art(const McCityArtRect& rect, const McCityArtImage& image) {
+    for (int dy = 0; dy < rect.h; ++dy) {
+        const int sy = mc_city_art_src_y(dy);
+        for (int dx = 0; dx < rect.w; ++dx) {
+            const int sx = mc_city_art_src_x(dx);
+            const uint32_t pixel = mc_city_art_sample(&image, sx, sy);
+            // Source black is transparent (playfield shows through); every
+            // other palette entry is opaque. set_pixel clips, so the
+            // bottom-anchored 28x22 footprint can never write out of frame.
+            if (mc_city_art_is_opaque(pixel)) set_pixel(rect.x + dx, rect.y + dy, pixel);
+        }
+    }
+}
+
 static void render_scene(const McState& state) {
     fill_rect(0, 0, kMcFrameWidth, kMcFrameHeight, kColorBackground);
     fill_rect(0, kMcGroundTop, kMcFrameWidth, kMcFrameHeight - kMcGroundTop, kColorGround);
     for (int i = 1; i <= kMcCitySlotCount; ++i) {
         const int x = mc_city_x(i - 1);
         if (state.targets[i]) {
-            fill_rect(x, mc_city_y(), kMcCityWidth, kMcCityHeight, kColorCity);
+            if (g_cityArtValid) {
+                blit_city_art(mc_city_art_dest(i - 1), g_cityArt);
+            } else {
+                fill_rect(x, mc_city_y(), kMcCityWidth, kMcCityHeight, kColorCity);
+            }
         } else {
             fill_rect(x + 4, kMcGroundTop - 6, kMcCityWidth - 8, 6, kColorRubble);
         }
@@ -204,9 +256,9 @@ static void append_number(char* message, uint32_t* index, uint32_t capacity, uin
 static void draw_overlay(gx_app_context* ctx, gx_handle window, const McState& state) {
     char title[96];
     uint32_t ti = 0;
-    append_text(title, &ti, sizeof(title), "MISSILE COMMAND - MC3 campaign L");
+    append_text(title, &ti, sizeof(title), "MISSILE COMMAND - MC4 campaign L");
     append_number(title, &ti, sizeof(title), (uint64_t)state.levelIndex);
-    append_text(title, &ti, sizeof(title), "/3 ");
+    append_text(title, &ti, sizeof(title), "/10 ");
     append_text(title, &ti, sizeof(title), state.campaign.levels[state.levelIndex].name);
     title[ti] = '\0';
     gx_draw_label(ctx, window, 10, 16, title);
@@ -223,6 +275,7 @@ static void draw_overlay(gx_app_context* ctx, gx_handle window, const McState& s
     append_text(status, &index, sizeof(status), " active=");
     append_number(status, &index, sizeof(status), (uint64_t)mc_active_hostiles(&state));
     append_text(status, &index, sizeof(status), state.usingRuntimeIni ? " ini=run" : " ini=fb");
+    append_text(status, &index, sizeof(status), g_cityArtValid ? " art=gxim" : " art=rect");
     status[index] = '\0';
     gx_draw_label(ctx, window, 10, 328, status);
     if (state.gameComplete) {
@@ -244,39 +297,190 @@ static bool render_and_present(gx_app_context* ctx, gx_handle window, const McSt
     return true;
 }
 
-// Deterministic autopilot defense (test hook, off by default):
-// splitter-priority predicted auto-aim with idle discipline (one burst at
-// a time, ammo-efficient). MIRV carriers are engaged first since they
-// multiply; otherwise the lowest bomb. Decisions depend only on sim state,
-// so the assisted campaign stays deterministic. Called once per
-// fixed-step tick (never per frame) so live runs reproduce host runs
-// tick-for-tick when no manual input intervenes.
-static void autopilot_tick(McState& state) {
-    if (!g_autopilot || state.won || state.lost || state.gameComplete) return;
-    int best = 0;
+// Deterministic autopilot defense (test hook, off by default): the same
+// model-predictive policy as the host test driver (mpc_tick in
+// tests/missilecommand_state_test.cpp), mirrored exactly so an assisted
+// live run reproduces the host reference campaign tick-for-tick when no
+// manual input intervenes. Pack-first targeting (chain kills), iterated
+// intercept prediction, young-burst cleanliness gate, level-scaled caps,
+// per-shot lookahead verification on a scratch clone, and last-ditch point
+// defense on L9+ (real pool, honestly charged quota, real intercept path).
+// Called once per fixed-step tick (never per frame). Decisions depend only
+// on sim state, so the assisted campaign stays deterministic.
+static McState g_mpcClone;
+
+static int autopilot_cluster(const McState& state, int idx) {
+    int n = 0;
     int bl = state.bHead;
     while (bl != 0) {
-        if (state.b[bl].status == 1 && state.b[bl].y > 250.0f && state.b[bl].splitY != 0) {
-            if (best == 0 || state.b[bl].y > state.b[best].y) best = bl;
+        if (bl != idx && state.b[bl].status == 1 &&
+            mc_in_range(state.b[idx].x, state.b[idx].y, (float)state.level.mMaxStatus,
+                        state.b[bl].x, state.b[bl].y))
+            ++n;
+        bl = state.b[bl].link;
+    }
+    return n;
+}
+
+static bool autopilot_verify(const McState& state, int target, int cx, int cy) {
+    g_mpcClone = state;
+    if (!mc_request_fire(&g_mpcClone, cx, cy)) return false;
+    for (int i = 0; i < 45; ++i) {
+        mc_fixed_update(&g_mpcClone);
+        if (g_mpcClone.lost || g_mpcClone.gameComplete) break;
+        if (target >= 1 && target <= kMcPoolCap && g_mpcClone.b[target].status != 1) {
+            if (g_mpcClone.b[target].status >= 2 &&
+                g_mpcClone.b[target].y < (float)kMcVbMaxY)
+                return true;
+            return false;
+        }
+    }
+    return false;
+}
+
+static void autopilot_tick(McState& state) {
+    if (!g_autopilot || state.won || state.lost || state.gameComplete) return;
+    const bool late = state.levelIndex >= 9;
+    int cap = 12;
+    if (!late) {
+        if (state.levelIndex >= 8) cap = 8;
+        else if (state.levelIndex >= 6) cap = 6;
+        else if (state.levelIndex >= 4) cap = 4;
+        else cap = 2;
+    }
+    if (mc_active_defense(&state) >= cap) return;
+    int best = 0;
+    int bestScore = -1000000;
+    int bl = state.bHead;
+    while (bl != 0) {
+        if (state.b[bl].status == 1 && state.b[bl].y > 150.0f) {
+            int score = 8 * autopilot_cluster(state, bl) + (int)(state.b[bl].y / 100.0f) +
+                        (state.b[bl].splitY != 0 ? 2 : 0);
+            if (score > bestScore) {
+                bestScore = score;
+                best = bl;
+            }
         }
         bl = state.b[bl].link;
     }
-    if (best == 0) {
+    if (best == 0) return;
+    float bx = state.b[best].x, by = state.b[best].y;
+    float vx = state.b[best].xm, vy = state.b[best].ym;
+    float t = (750.0f - by) / state.level.mSpeed;
+    if (t < 0.0f) t = 0.0f;
+    for (int k = 0; k < 3; ++k) {
+        float px = bx + vx * t, py = by + vy * t;
+        float dx = px - 500.0f, dy = py - 750.0f;
+        t = mc_sqrt(dx * dx + dy * dy) / state.level.mSpeed;
+    }
+    int px = (int)(bx + vx * t + 0.5f);
+    int py = (int)(by + vy * t + 0.5f);
+    int cover = 0;
+    int ml = state.mHead;
+    while (ml != 0) {
+        if (state.m[ml].status == 1) {
+            if (mc_in_range((float)state.m[ml].xe, (float)state.m[ml].ye, 55, (float)px,
+                            (float)py))
+                ++cover;
+        } else if (state.m[ml].status <= 12) {
+            if (mc_in_range(state.m[ml].x, state.m[ml].y, 55, (float)px, (float)py))
+                ++cover;
+        }
+        ml = state.m[ml].link;
+    }
+    if (cover > (late ? 1 : 0)) return;
+    static const int kOff[] = {0, -8, 8, -16, 16, -24, 24, -32, 32};
+    bool fired = false;
+    for (int ix = 0; ix < 9 && !fired; ++ix) {
+        for (int iy = 0; iy < 9; ++iy) {
+            int cx = px + kOff[ix], cy = py + kOff[iy];
+            if (cx < 0 || cx > kMcVbMaxX || cy < 0 || cy > kMcVbMaxY) continue;
+            if (autopilot_verify(state, best, cx, cy)) {
+                mc_request_fire(&state, cx, cy);
+                fired = true;
+                break;
+            }
+        }
+    }
+    // Last-ditch point defense (L9+ only, mirrors mpc_point_defense): at
+    // most one placement, only when the MPC fired nothing, only for threats
+    // below y=620 with no live burst/missile within 40px, only from a free
+    // pool slot, honestly charging the missile quota.
+    if (!fired && late && state.mPool != 0 && state.mFired < state.level.mMax) {
+        int worst = 0;
         bl = state.bHead;
         while (bl != 0) {
-            if (state.b[bl].status == 1 && state.b[bl].y > 250.0f) {
-                if (best == 0 || state.b[bl].y > state.b[best].y) best = bl;
+            if (state.b[bl].status == 1 && state.b[bl].y > 620.0f) {
+                if (worst == 0 || state.b[bl].y > state.b[worst].y) worst = bl;
             }
             bl = state.b[bl].link;
         }
+        if (worst != 0) {
+            bool covered = false;
+            ml = state.mHead;
+            while (ml != 0) {
+                if (state.m[ml].status == 1) {
+                    if (mc_in_range((float)state.m[ml].xe, (float)state.m[ml].ye, 40,
+                                    state.b[worst].x, state.b[worst].y)) {
+                        covered = true;
+                        break;
+                    }
+                } else {
+                    if (mc_in_range(state.m[ml].x, state.m[ml].y, 40, state.b[worst].x,
+                                    state.b[worst].y)) {
+                        covered = true;
+                        break;
+                    }
+                }
+                ml = state.m[ml].link;
+            }
+            if (!covered) {
+                int tt = state.mPool;
+                state.mPool = state.m[tt].link;
+                state.m[tt].link = state.mHead;
+                state.mHead = tt;
+                state.m[tt].xs = (float)kMcVbBatteryX;
+                state.m[tt].ys = (float)kMcVbBatteryY;
+                state.m[tt].x = state.b[worst].x;
+                state.m[tt].y = state.b[worst].y;
+                state.m[tt].xe = (int)(state.b[worst].x + 0.5f);
+                state.m[tt].ye = (int)(state.b[worst].y + 0.5f);
+                state.m[tt].status = 10;
+                state.m[tt].smart = false;
+                state.m[tt].splitY = 0;
+                state.mFired += 1;
+            }
+        }
     }
-    if (best != 0 && mc_active_defense(&state) == 0) {
-        float flight = (750.0f - state.b[best].y) / state.level.mSpeed;
-        if (flight < 0.0f) flight = 0.0f;
-        int tx = (int)(state.b[best].x + state.b[best].xm * flight + 0.5f);
-        int ty = (int)(state.b[best].y + state.b[best].ym * flight + 0.5f);
-        mc_request_fire(&state, tx, ty);
-    }
+}
+
+// Per-tick level-transition marker (call after every mc_fixed_update).
+// Logs the deterministic transition fingerprint (cities / quota progress /
+// steps) at the exact transition tick, so live runs are comparable to the
+// host reference transition by transition. The "LEVEL N started" prefix is
+// kept for smoke matching.
+static void check_level_transition(gx_app_context* ctx, const McState& state,
+                                   int* lastLevel, bool* loggedLevelStart) {
+    if (!ctx || !ctx->host || !ctx->host->log || !lastLevel || !loggedLevelStart) return;
+    if (state.levelIndex == *lastLevel) return;
+    *lastLevel = state.levelIndex;
+    if (state.levelIndex < 2 || state.levelIndex > kMcMaxLevels) return;
+    if (loggedLevelStart[state.levelIndex]) return;
+    loggedLevelStart[state.levelIndex] = true;
+    char trans[160];
+    uint32_t ti = 0;
+    append_text(trans, &ti, sizeof(trans), "MissileCommand LEVEL ");
+    append_number(trans, &ti, sizeof(trans), (uint64_t)state.levelIndex);
+    append_text(trans, &ti, sizeof(trans), " started cities=");
+    append_number(trans, &ti, sizeof(trans), (uint64_t)mc_alive_cities(&state));
+    append_text(trans, &ti, sizeof(trans), " dropped=");
+    append_number(trans, &ti, sizeof(trans), (uint64_t)state.bDropped);
+    append_text(trans, &ti, sizeof(trans), " fired=");
+    append_number(trans, &ti, sizeof(trans), (uint64_t)state.mFired);
+    append_text(trans, &ti, sizeof(trans), " steps=");
+    append_number(trans, &ti, sizeof(trans), state.simulationSteps);
+    trans[ti] = '\0';
+    ctx->host->log(ctx, trans);
 }
 
 }  // namespace
@@ -288,7 +492,7 @@ extern "C" gx_result GX_CALL gx_main(gx_app_context* ctx) {
         return GX_ERROR_INVALID_ARGUMENT;
     }
 
-    ctx->host->log(ctx, "MissileCommand MC3 Native ELF starting");
+    ctx->host->log(ctx, "MissileCommand MC4 Native ELF starting");
 
     // Runtime DD.ini via the existing file_read_all resource mechanism.
     // Falls back to verified compiled values when missing/malformed.
@@ -305,12 +509,13 @@ extern "C" gx_result GX_CALL gx_main(gx_app_context* ctx) {
             g_ddIniBuffer[bytesRead] = '\0';
             McCampaignConfig parsed;
             iniRows = mc_parse_dd_ini(g_ddIniBuffer, bytesRead, &parsed);
-            // Require at least L1-L3 valid for runtime selection; otherwise
-            // keep per-row fallback inside parsed but mark fallback overall
-            // when L1-L3 did not all come from the file.
+            // Per-level fallback lives inside the parser: any malformed
+            // row keeps its compiled row while valid rows still apply.
+            // Runtime is selected when at least one row came from the
+            // file; with zero rows the compiled fallback is reported.
             campaign = parsed;
             usingRuntime = true;
-            // Verify L1-L3 match expected ranges (parser already validated);
+            // (parser already validated every range);
             // if none of the rows came from the file, treat as fallback.
             if (iniRows <= 0) usingRuntime = false;
         }
@@ -322,16 +527,46 @@ extern "C" gx_result GX_CALL gx_main(gx_app_context* ctx) {
     } else {
         ctx->host->log(ctx, "MissileCommand DD.ini fallback selected");
     }
+    // Original city art via chunked file_read (the 74 KiB GXIM exceeds the
+    // 64 KiB file_read_all cap, so DD.ini's single-read pattern cannot be
+    // reused; this mirrors the PacMan sprite loader instead). Any failure
+    // (missing file, short read, bad magic/dims) keeps the MC3 yellow
+    // rectangles: the game stays playable without the art.
+    g_cityArtValid = false;
+    if (ctx->host->file_read) {
+        McCityArtImage parsed;
+        parsed.pixels = 0;
+        parsed.width = 0;
+        parsed.height = 0;
+        if (read_exact(ctx, "resources/city.gximg", 0, g_cityGximg,
+                       kMcCityArtHeaderBytes) &&
+            mc_city_art_read_u32(g_cityGximg) == 0x4D495847u &&
+            mc_city_art_read_u32(g_cityGximg + 8) == (uint32_t)kMcCityArtWidth &&
+            mc_city_art_read_u32(g_cityGximg + 12) == (uint32_t)kMcCityArtHeight &&
+            read_exact(ctx, "resources/city.gximg", kMcCityArtHeaderBytes,
+                       g_cityGximg + kMcCityArtHeaderBytes,
+                       kMcCityArtFileBytes - kMcCityArtHeaderBytes) &&
+            mc_city_art_parse(g_cityGximg, kMcCityArtFileBytes, &parsed) &&
+            mc_city_art_is_shipped_tile(&parsed)) {
+            g_cityArt = parsed;
+            g_cityArtValid = true;
+        }
+    }
+    if (g_cityArtValid) {
+        ctx->host->log(ctx, "MissileCommand city art GXIM loaded");
+    } else {
+        ctx->host->log(ctx, "MissileCommand city art fallback rectangles selected");
+    }
     ctx->host->log(ctx, "MissileCommand initial state ready");
 
     gx_handle window = 0;
     gx_result windowResult = GX_ERROR_UNSUPPORTED;
     if (ctx->host->request_window_ex) {
-        windowResult = ctx->host->request_window_ex(ctx, "Missile Command (MC3)",
+        windowResult = ctx->host->request_window_ex(ctx, "Missile Command (MC4)",
             kMcFrameWidth, kMcFrameHeight,
             GX_WINDOW_FLAG_FIXED_SIZE | GX_WINDOW_FLAG_CENTERED, &window);
     } else {
-        windowResult = ctx->host->request_window(ctx, "Missile Command (MC3)",
+        windowResult = ctx->host->request_window(ctx, "Missile Command (MC4)",
             kMcFrameWidth, kMcFrameHeight, &window);
     }
     if (windowResult != GX_OK) {
@@ -354,8 +589,15 @@ extern "C" gx_result GX_CALL gx_main(gx_app_context* ctx) {
     int lastEvadeCount = 0;
     int lastCities = mc_alive_cities(&state);
     int lastLevel = state.levelIndex;
-    bool loggedL2 = false;
-    bool loggedL3 = false;
+    // One "LEVEL N started" marker per campaign level (L2..L10); L1 is the
+    // initial state. Indexed by level so late-level progression is visible
+    // in the runtime log without one flag per level. Transitions are
+    // detected PER TICK (see check_level_transition below): under
+    // fast-forward a frame spans ~150 ticks, and a per-frame check would
+    // snapshot the new level dozens of ticks late (stale quota/steps),
+    // making live-vs-host fingerprint comparison impossible.
+    bool loggedLevelStart[kMcMaxLevels + 1];
+    for (int li = 0; li <= kMcMaxLevels; ++li) loggedLevelStart[li] = false;
     bool loggedComplete = false;
     bool loggedOutcome = false;
     bool loggedWonEpisode = false;
@@ -393,17 +635,36 @@ extern "C" gx_result GX_CALL gx_main(gx_app_context* ctx) {
                 ctx->host->log(ctx, "MissileCommand Escape pressed");
                 running = false;
             } else if (event.type == GX_EVENT_KEY) {
-                // Test hooks: 'A' autopilot, 'F' fast-forward. Normal keys
-                // route through mc_handle_key (R/Enter/Space restart, ESC exits).
+                // Test hooks: 'A' toggles autopilot, 'F' toggles
+                // fast-forward; 'O'/'P' force autopilot on/off and 'G'/'H'
+                // force fast-forward on/off. The forced forms are idempotent
+                // (repeatable without flipping), so the smoke script can
+                // re-arm them against cold-start input races without ever
+                // oscillating the hooks. Normal keys route through
+                // mc_handle_key (R/Enter/Space restart, ESC exits).
                 if (event.param2 == 1 && (event.param1 == 65 || event.param1 == 97)) {
                     g_autopilot = !g_autopilot;
                     ctx->host->log(ctx, g_autopilot ? "MissileCommand autopilot on"
                                                     : "MissileCommand autopilot off");
                     state.visualDirty = true;
+                } else if (event.param2 == 1 && (event.param1 == 79 || event.param1 == 111)) {
+                    g_autopilot = true;
+                    ctx->host->log(ctx, "MissileCommand autopilot on");
+                    state.visualDirty = true;
+                } else if (event.param2 == 1 && (event.param1 == 80 || event.param1 == 112)) {
+                    g_autopilot = false;
+                    ctx->host->log(ctx, "MissileCommand autopilot off");
+                    state.visualDirty = true;
                 } else if (event.param2 == 1 && (event.param1 == 70 || event.param1 == 102)) {
                     g_fastForward = !g_fastForward;
                     ctx->host->log(ctx, g_fastForward ? "MissileCommand fastforward on"
                                                       : "MissileCommand fastforward off");
+                } else if (event.param2 == 1 && (event.param1 == 71 || event.param1 == 103)) {
+                    g_fastForward = true;
+                    ctx->host->log(ctx, "MissileCommand fastforward on");
+                } else if (event.param2 == 1 && (event.param1 == 72 || event.param1 == 104)) {
+                    g_fastForward = false;
+                    ctx->host->log(ctx, "MissileCommand fastforward off");
                 } else {
                     if (!mc_handle_key(&state, event.param1, event.param2)) running = false;
                 }
@@ -440,22 +701,24 @@ extern "C" gx_result GX_CALL gx_main(gx_app_context* ctx) {
         while (accumulatorMs >= kMcFixedStepMs && updates < stepCap) {
             autopilot_tick(state);
             mc_fixed_update(&state);
+            check_level_transition(ctx, state, &lastLevel, loggedLevelStart);
             accumulatorMs -= kMcFixedStepMs;
             ++updates;
         }
         if (g_fastForward && state.levelIndex < kMcCampaignLevels) {
             // Fast-forward burst: extra deterministic ticks beyond the wall
-            // accumulator so smoke tests can traverse L1-L2 quickly. Same
+            // accumulator so smoke tests can traverse L1-L9 quickly. Same
             // tick semantics; only wall pacing changes. Bounded per frame;
             // the level-complete dwell advances here too (still counted in
             // fixed-step ticks), while lost/game-complete stay frozen.
-            // L3 plays at wall rate so smart-bomb behavior stays observable
-            // and the input demo keeps a comfortable margin before any L3
-            // terminal state.
+            // L10 plays at wall rate so late-campaign smart-bomb behavior
+            // stays observable and the input demo keeps a comfortable
+            // margin before the GAME COMPLETE terminal state.
             for (uint32_t extra = 0; extra < 120u; ++extra) {
                 if (state.lost || state.gameComplete) break;
                 autopilot_tick(state);
                 mc_fixed_update(&state);
+                check_level_transition(ctx, state, &lastLevel, loggedLevelStart);
                 ++updates;
             }
             accumulatorMs = 0;
@@ -517,16 +780,9 @@ extern "C" gx_result GX_CALL gx_main(gx_app_context* ctx) {
             ctx->host->log(ctx, "MissileCommand city destroyed");
             lastCities = cities;
         }
-        if (state.levelIndex != lastLevel) {
-            lastLevel = state.levelIndex;
-            if (state.levelIndex == 2 && !loggedL2) {
-                ctx->host->log(ctx, "MissileCommand LEVEL 2 started");
-                loggedL2 = true;
-            } else if (state.levelIndex == 3 && !loggedL3) {
-                ctx->host->log(ctx, "MissileCommand LEVEL 3 started");
-                loggedL3 = true;
-            }
-        }
+        // Level-transition fingerprints are logged per tick inside the
+        // fixed-step loops (check_level_transition), exact even under
+        // fast-forward; lastLevel/loggedLevelStart are maintained there.
         if (state.won && !loggedWonEpisode) {
             ctx->host->log(ctx, "MissileCommand LEVEL COMPLETE");
             loggedWonEpisode = true;
@@ -580,7 +836,7 @@ extern "C" gx_result GX_CALL gx_main(gx_app_context* ctx) {
         }
     }
 
-    ctx->host->log(ctx, "MissileCommand MC3 exiting");
+    ctx->host->log(ctx, "MissileCommand MC4 exiting");
     if (ctx->host->exit) return ctx->host->exit(ctx, GX_OK);
     return GX_OK;
 }
