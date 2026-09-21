@@ -6,7 +6,7 @@
   "desktop.taskbar.position": "bottom",
   "desktop.clock.timeZoneId": "pacific",
   "desktop.clock.use24HourTime": false,
-  "pinned": ["App Model Demo","Future GXApp Package","Hello World","HelloWorld ELF","Native App Debug Viewer","Resource Viewer","Nexgen PacMan","Nexgen PacMan Danger Validation","guideXOS Developer Studio"],
+  "pinned": ["App Model Demo","Future GXApp Package","Hello World","HelloWorld ELF","Native App Debug Viewer","Resource Viewer","Nexgen PacMan","Nexgen PacMan Danger Validation","guideXOS Developer Studio","Phase 27N Multi-File Compilation and Internal Linker","Phase 27O Cross-File Global Data","Phase 27P Persistent Objects"],
   "recent": ["guideXOS Developer Studio","Notepad","File Explorer","DisplayOptions","ControlPanel","Nexgen PacMan","Resource Viewer","Image Viewer","guideXOS Navigator"],
   "desktopShortcuts": [
   ],
@@ -17,6 +17,8 @@
   "smallLiveDesktopFolderIcons": true,
   "autoArrangeDesktopIcons": false,
   "windows": [
+    {"id": 1000, "title": "guideXOS Developer Studio", "x": 24, "y": 0, "w": 960, "h": 700, "minimized": false, "maximized": false, "z": 0, "focused": false, "snap": 0},
+    {"id": 1001, "title": "Debugger Phase 3B Fixture", "x": 184, "y": 164, "w": 640, "h": 360, "minimized": false, "maximized": false, "z": 1, "focused": true, "snap": 0}
   ],
   "iconPositions": [
   ]

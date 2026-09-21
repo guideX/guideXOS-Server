@@ -51,6 +51,20 @@ static const uint32_t kStepOutCallerProbeBytes = 256U;
 static const uint32_t kStepOutPrologueProbeBytes = 128U;
 static const uint32_t kInvalidBreakpointSlot = 0xFFFFFFFFU;
 
+static bool is_terminal_state(gx_development_run_state state)
+{
+    return state == GX_DEVELOPMENT_RUN_EXITED ||
+        state == GX_DEVELOPMENT_RUN_COMPLETED ||
+        state == GX_DEVELOPMENT_RUN_FAILED ||
+        state == GX_DEVELOPMENT_RUN_CANCELLED;
+}
+
+static bool is_successful_terminal_state(gx_development_run_state state)
+{
+    return state == GX_DEVELOPMENT_RUN_EXITED ||
+        state == GX_DEVELOPMENT_RUN_COMPLETED;
+}
+
 struct UserBreakpoint {
     bool used;
     bool enabled;
@@ -244,10 +258,30 @@ static NativeElfDebugTrap::BreakpointContext* s_schedulerYieldContext = nullptr;
 static bool s_schedulerPollBoundaryPending = false;
 static bool s_schedulerActive = false;
 static bool s_schedulerInTarget = false;
+static bool s_schedulerPumpInProgress = false;
 static bool s_schedulerTargetComplete = false;
 static void scheduled_debug_cancel_entry();
 static SchedulerContext* make_debug_cancel_context();
 #endif
+static uint32_t s_phase28uTraceCount = 0;
+
+static void phase28u_trace(const char* event)
+{
+    if (!event || s_phase28uTraceCount >= 256U) return;
+    ++s_phase28uTraceCount;
+    serial::puts("DEVELOPER_STUDIO_PHASE28U_TRACE ");
+    serial::puts(event);
+    serial::puts(" state=");
+    serial::put_hex32(static_cast<uint32_t>(s_operation.state));
+#if defined(__x86_64__)
+    serial::puts(" active="); serial::put_hex32(s_schedulerActive ? 1U : 0U);
+    serial::puts(" in_target="); serial::put_hex32(s_schedulerInTarget ? 1U : 0U);
+    serial::puts(" target_complete="); serial::put_hex32(s_schedulerTargetComplete ? 1U : 0U);
+    serial::puts(" owner="); serial::put_hex32(s_ownerContext ? 1U : 0U);
+    serial::puts(" target="); serial::put_hex32(s_targetContext ? 1U : 0U);
+#endif
+    serial::putc('\n');
+}
 
 static uint32_t text_length(const char* text, uint32_t capacity) {
     if (!text) return 0;
@@ -2129,8 +2163,13 @@ static void finish_execution(Operation& operation, bool success)
         return;
     }
 
+    // EXITED is the durable observation boundary.  The target and its
+    // NativeElf image are already torn down here, but the launch record must
+    // remain available until the owner polls the lifecycle metadata and the
+    // release callback reaps this generation.  Advancing directly to
+    // COMPLETED made a late debugger poll indistinguishable from an already
+    // reaped operation and allowed terminal/debug ownership to race.
     operation.state = GX_DEVELOPMENT_RUN_EXITED;
-    operation.state = GX_DEVELOPMENT_RUN_CLEANING_UP;
     const bool registrationClean = unregister_application(operation);
     const bool runtimeClean = operation.report.teardownComplete;
     operation.cleanupComplete = registrationClean && runtimeClean;
@@ -2146,7 +2185,7 @@ static void finish_execution(Operation& operation, bool success)
     operation.error = operation.cancellationRequested
         ? GX_DEVELOPMENT_RUN_ERROR_CANCELLED : GX_DEVELOPMENT_RUN_ERROR_NONE;
     operation.state = operation.cancellationRequested
-        ? GX_DEVELOPMENT_RUN_CANCELLED : GX_DEVELOPMENT_RUN_COMPLETED;
+        ? GX_DEVELOPMENT_RUN_CANCELLED : GX_DEVELOPMENT_RUN_EXITED;
 }
 
 #if defined(__x86_64__)
@@ -2259,17 +2298,21 @@ static bool capture_user_pause(NativeElfDebugTrap::BreakpointContext* context)
 extern "C" bool native_elf_scheduler_yield_dispatch(
     NativeElfDebugTrap::BreakpointContext* context)
 {
+    phase28u_trace("YIELD_ENTRY");
     if (!s_schedulerActive || !s_schedulerInTarget || !s_ownerContext || !s_targetContext) {
+        phase28u_trace("YIELD_REJECT");
         return false;
     }
     s_schedulerYieldContext = context;
     const bool captured = capture_user_pause(context);
     s_schedulerPollBoundaryPending = !captured;
     s_schedulerInTarget = false;
+    phase28u_trace("YIELD_TO_OWNER");
     arch::amd64::context::switch_context(&s_targetContext, s_ownerContext);
     s_schedulerInTarget = true;
     s_schedulerYieldContext = nullptr;
     s_schedulerPollBoundaryPending = false;
+    phase28u_trace("YIELD_RESUME_TARGET");
     return true;
 }
 
@@ -2347,18 +2390,21 @@ asm(
 
 static void scheduled_task_entry(void*)
 {
+    phase28u_trace("TARGET_ENTRY");
     s_schedulerInTarget = true;
     s_operation.nativeRuntimeStarted = true;
     int32_t exitCode = 0;
     const bool success = native_elf_execution_active()
         ? run_file_nested(s_operation.resolvedArtifact, &exitCode, &s_operation.report)
         : run_file(s_operation.resolvedArtifact, &exitCode, &s_operation.report);
+    phase28u_trace("TARGET_RETURNED");
     s_operation.exitCode = exitCode;
     finish_execution(s_operation, success);
     s_schedulerTargetComplete = true;
     s_schedulerInTarget = false;
     s_schedulerActive = false;
     s_schedulerPollBoundaryPending = false;
+    phase28u_trace("TARGET_TO_OWNER");
     arch::amd64::context::switch_context(&s_targetContext, s_ownerContext);
     for (;;) arch::amd64::halt();
 }
@@ -2421,8 +2467,12 @@ extern "C" bool native_elf_scheduler_yield()
 bool native_elf_scheduler_pump()
 {
 #if defined(__x86_64__)
-    if (!s_schedulerActive || s_schedulerTargetComplete || s_schedulerInTarget ||
-        !s_targetContext) return false;
+    phase28u_trace("PUMP_ENTRY");
+    if (!s_schedulerActive || s_schedulerTargetComplete || !s_targetContext) return false;
+    if (s_schedulerInTarget || s_schedulerPumpInProgress) {
+        phase28u_trace("PUMP_REJECT_REENTRANT");
+        return false;
+    }
     // An explicit pump is a request to advance the target.  A debug poll may
     // publish one parked running boundary first, but it must not defer an
     // explicit Continue, step, or lifecycle pump.
@@ -2433,9 +2483,15 @@ bool native_elf_scheduler_pump()
     // dead start() frame, so every owner-side pump captures a fresh context.
     s_ownerContext = nullptr;
     s_schedulerInTarget = true;
+    s_schedulerPumpInProgress = true;
+    phase28u_trace("PUMP_TO_TARGET");
     arch::amd64::context::switch_context(&s_ownerContext, s_targetContext);
     s_schedulerInTarget = false;
-    return native_elf_nested_capture_after_scheduler();
+    phase28u_trace("PUMP_FROM_TARGET");
+    const bool captured = native_elf_nested_capture_after_scheduler();
+    s_schedulerPumpInProgress = false;
+    phase28u_trace(captured ? "PUMP_CAPTURED" : "PUMP_CAPTURE_FAILED");
+    return captured;
 #else
     return false;
 #endif
@@ -2532,6 +2588,7 @@ gx_result prepare(const gx_development_run_request& request,
 }
 
 gx_result start(gx_development_run_handle handle) {
+    phase28u_trace("START_ENTRY");
     if (!decode(handle)) return GX_ERROR_FAILED;
     if (s_operation.state != GX_DEVELOPMENT_RUN_REGISTERED) return GX_ERROR_BUSY;
     if (s_operation.closeRequested) {
@@ -2611,6 +2668,7 @@ gx_result start(gx_development_run_handle handle) {
         fail_and_cleanup(s_operation, GX_DEVELOPMENT_RUN_ERROR_LAUNCH_UNAVAILABLE,
                          "NativeElf execution owner could not be scheduled");
     }
+    phase28u_trace("START_RETURN");
 #else
     fail_and_cleanup(s_operation,
                      s_operation.debugControlled
@@ -2625,9 +2683,7 @@ gx_result start(gx_development_run_handle handle) {
 
 gx_result pump(gx_development_run_handle handle) {
     if (!decode(handle)) return GX_ERROR_FAILED;
-    if (s_operation.state == GX_DEVELOPMENT_RUN_COMPLETED ||
-        s_operation.state == GX_DEVELOPMENT_RUN_FAILED ||
-        s_operation.state == GX_DEVELOPMENT_RUN_CANCELLED) return GX_OK;
+    if (is_terminal_state(s_operation.state)) return GX_OK;
     if (s_operation.state != GX_DEVELOPMENT_RUN_RUNNING &&
         s_operation.state != GX_DEVELOPMENT_RUN_CLOSING &&
         s_operation.state != GX_DEVELOPMENT_RUN_LAUNCHING) return GX_ERROR_BUSY;
@@ -2636,6 +2692,7 @@ gx_result pump(gx_development_run_handle handle) {
 }
 
 gx_result poll(gx_development_run_handle handle, gx_development_run_snapshot* outSnapshot) {
+    phase28u_trace("RUN_POLL_ENTRY");
     if (!outSnapshot || snapshot_capacity(outSnapshot) < kLegacySnapshotBytes) return GX_ERROR_INVALID_ARGUMENT;
     if (!decode(handle)) return GX_ERROR_FAILED;
     snapshot_operation(s_operation, outSnapshot);
@@ -2644,9 +2701,7 @@ gx_result poll(gx_development_run_handle handle, gx_development_run_snapshot* ou
 
 gx_result request_close(gx_development_run_handle handle) {
     if (!decode(handle)) return GX_ERROR_FAILED;
-    if (s_operation.state == GX_DEVELOPMENT_RUN_COMPLETED ||
-        s_operation.state == GX_DEVELOPMENT_RUN_FAILED ||
-        s_operation.state == GX_DEVELOPMENT_RUN_CANCELLED) return GX_OK;
+    if (is_terminal_state(s_operation.state)) return GX_OK;
     if (s_operation.state == GX_DEVELOPMENT_RUN_REGISTERED) {
         s_operation.closeRequested = true;
         fail_and_cleanup(s_operation, GX_DEVELOPMENT_RUN_ERROR_CANCELLED,
@@ -2670,9 +2725,7 @@ gx_result request_close(gx_development_run_handle handle) {
 
 gx_result cancel(gx_development_run_handle handle) {
     if (!decode(handle)) return GX_ERROR_FAILED;
-    if (s_operation.state == GX_DEVELOPMENT_RUN_COMPLETED ||
-        s_operation.state == GX_DEVELOPMENT_RUN_FAILED ||
-        s_operation.state == GX_DEVELOPMENT_RUN_CANCELLED) return GX_OK;
+    if (is_terminal_state(s_operation.state)) return GX_OK;
     if (s_operation.state == GX_DEVELOPMENT_RUN_REGISTERED) {
         s_operation.cancellationRequested = true;
         fail_and_cleanup(s_operation, GX_DEVELOPMENT_RUN_ERROR_CANCELLED,
@@ -2699,18 +2752,14 @@ gx_result cancel(gx_development_run_handle handle) {
 bool native_elf_debug_entry_breakpoint_requested()
 {
     return s_operation.used && s_operation.debugControlled &&
-        s_operation.state != GX_DEVELOPMENT_RUN_COMPLETED &&
-        s_operation.state != GX_DEVELOPMENT_RUN_FAILED &&
-        s_operation.state != GX_DEVELOPMENT_RUN_CANCELLED;
+        !is_terminal_state(s_operation.state);
 }
 
 bool native_elf_debug_breakpoint_target(uint64_t* targetAddress)
 {
     if (targetAddress) *targetAddress = 0;
     if (!s_operation.used || !s_operation.debugControlled ||
-        s_operation.state == GX_DEVELOPMENT_RUN_COMPLETED ||
-        s_operation.state == GX_DEVELOPMENT_RUN_FAILED ||
-        s_operation.state == GX_DEVELOPMENT_RUN_CANCELLED) return false;
+        is_terminal_state(s_operation.state)) return false;
     if (targetAddress && s_operation.debugSourceSelected)
         *targetAddress = s_operation.debugBreakpointAddress;
     return true;
@@ -4046,7 +4095,7 @@ static gx_result source_step_into(gx_development_debug_snapshot* outSnapshot)
             return GX_ERROR_FAILED;
         }
         if (!complete_debug_instruction_step(operation, outSnapshot)) {
-            const bool completed = operation.state == GX_DEVELOPMENT_RUN_COMPLETED;
+            const bool completed = is_successful_terminal_state(operation.state);
             const bool failed = operation.state == GX_DEVELOPMENT_RUN_FAILED;
             operation.debugSourceStepActive = false;
             operation.debugSourceStepResult = completed
@@ -4303,7 +4352,7 @@ static gx_result source_step_over(gx_development_debug_snapshot* outSnapshot)
     for (;;) {
         if (operation.state != GX_DEVELOPMENT_RUN_PAUSED ||
             !operation.debugStepOverReturnBreakpointHit) {
-            const bool completed = operation.state == GX_DEVELOPMENT_RUN_COMPLETED;
+            const bool completed = is_successful_terminal_state(operation.state);
             const bool failed = operation.state == GX_DEVELOPMENT_RUN_FAILED;
             operation.debugSourceStepActive = false;
             operation.debugSourceStepResult = completed
@@ -4375,7 +4424,7 @@ static gx_result source_step_over(gx_development_debug_snapshot* outSnapshot)
         }
         ++operation.debugStepOverInternalMachineStepCount;
         if (!complete_debug_instruction_step(operation, outSnapshot)) {
-            const bool completed = operation.state == GX_DEVELOPMENT_RUN_COMPLETED;
+            const bool completed = is_successful_terminal_state(operation.state);
             const bool failed = operation.state == GX_DEVELOPMENT_RUN_FAILED;
             operation.debugSourceStepActive = false;
             operation.debugSourceStepResult = completed
@@ -4715,7 +4764,7 @@ static gx_result source_step_out(gx_development_debug_snapshot* outSnapshot)
     serial::puts("DEVELOPER_STUDIO_PHASE28E_TEMP_BREAKPOINT_PASS address=0x");
     serial::put_hex64(operation.debugStepOutReturnAddress); serial::putc('\n');
     if (!native_elf_scheduler_pump()) {
-        const bool completed = operation.state == GX_DEVELOPMENT_RUN_COMPLETED;
+        const bool completed = is_successful_terminal_state(operation.state);
         const uint32_t result = completed
             ? GX_DEVELOPMENT_DEBUG_SOURCE_STEP_OUT_RESULT_TARGET_COMPLETED
             : GX_DEVELOPMENT_DEBUG_SOURCE_STEP_OUT_RESULT_TARGET_FAILED;
@@ -4730,7 +4779,7 @@ static gx_result source_step_out(gx_development_debug_snapshot* outSnapshot)
     }
     if (operation.state != GX_DEVELOPMENT_RUN_PAUSED ||
         !operation.debugStepOutReturnBreakpointHit) {
-        const bool completed = operation.state == GX_DEVELOPMENT_RUN_COMPLETED;
+        const bool completed = is_successful_terminal_state(operation.state);
         const uint32_t result = completed
             ? GX_DEVELOPMENT_DEBUG_SOURCE_STEP_OUT_RESULT_TARGET_COMPLETED
             : GX_DEVELOPMENT_DEBUG_SOURCE_STEP_OUT_RESULT_TARGET_FAILED;
@@ -4802,7 +4851,7 @@ static gx_result source_step_out(gx_development_debug_snapshot* outSnapshot)
         }
         ++operation.debugStepOutInternalMachineStepCount;
         if (!complete_debug_instruction_step(operation, outSnapshot)) {
-            const bool completed = operation.state == GX_DEVELOPMENT_RUN_COMPLETED;
+            const bool completed = is_successful_terminal_state(operation.state);
             const uint32_t result = completed
                 ? GX_DEVELOPMENT_DEBUG_SOURCE_STEP_OUT_RESULT_TARGET_COMPLETED
                 : GX_DEVELOPMENT_DEBUG_SOURCE_STEP_OUT_RESULT_TARGET_FAILED;
@@ -5824,6 +5873,7 @@ static gx_result remove_temporary_debug_breakpoint(
 gx_result debug(const gx_development_debug_request& request,
                 gx_development_debug_snapshot* outSnapshot)
 {
+    phase28u_trace("DEBUG_ENTRY");
     if (!outSnapshot) return GX_ERROR_INVALID_ARGUMENT;
     clear_debug_snapshot(outSnapshot);
     if (request.command == GX_DEVELOPMENT_DEBUG_CONTINUE_BREAKPOINT)
@@ -5994,6 +6044,7 @@ gx_result debug(const gx_development_debug_request& request,
 
     case GX_DEVELOPMENT_DEBUG_POLL:
         {
+        phase28u_trace("DEBUG_POLL_ENTRY");
         // A Developer Studio NativeElf window runs its own event loop. While
         // that loop is active the desktop scheduler cannot provide the next
         // cooperative slice for this separately controlled target. Publish one
@@ -6013,11 +6064,21 @@ gx_result debug(const gx_development_debug_request& request,
             s_schedulerActive && !s_schedulerInTarget &&
             !publishParkedBoundary &&
             !native_elf_scheduler_pump()) {
+            phase28u_trace("DEBUG_POLL_PUMP_FAILED");
             set_debug_error(outSnapshot,
                             "NativeElf debug target could not be advanced by poll");
             return GX_ERROR_FAILED;
         }
-        if (s_operation.state == GX_DEVELOPMENT_RUN_PAUSED) {
+        phase28u_trace("DEBUG_POLL_AFTER_PUMP");
+        if (s_operation.state == GX_DEVELOPMENT_RUN_EXITED) {
+            // The target has already returned and its execution context has
+            // been torn down.  A late debugger poll acknowledges that durable
+            // lifecycle fact; it must not pump the scheduler or require the
+            // dead target to be entered again.
+            set_debug_ready_snapshot(s_operation, outSnapshot);
+            copy_text(outSnapshot->errorMessage, sizeof(outSnapshot->errorMessage),
+                      "NativeElf target exited");
+        } else if (s_operation.state == GX_DEVELOPMENT_RUN_PAUSED) {
             *outSnapshot = s_operation.debugSnapshot;
         } else if (s_operation.state == GX_DEVELOPMENT_RUN_STEPPING) {
             set_debug_ready_snapshot(s_operation, outSnapshot);
@@ -6036,8 +6097,21 @@ gx_result debug(const gx_development_debug_request& request,
                    s_operation.state == GX_DEVELOPMENT_RUN_REGISTERED) {
             set_debug_ready_snapshot(s_operation, outSnapshot);
         } else {
+            phase28u_trace("DEBUG_POLL_TERMINAL_STATE");
             set_debug_error(outSnapshot, "NativeElf debug session is no longer active");
             return GX_ERROR_FAILED;
+        }
+        if (s_phase28uTraceCount < 256U) {
+            ++s_phase28uTraceCount;
+            serial::puts("DEVELOPER_STUDIO_PHASE28U_TRACE DEBUG_POLL_RESULT status=");
+            serial::put_hex32(outSnapshot->status);
+            serial::puts(" trap="); serial::put_hex32(outSnapshot->trapKind);
+            serial::puts(" pause="); serial::put_hex32(outSnapshot->pauseReason);
+            serial::puts(" binding="); serial::put_hex64(outSnapshot->bindingId);
+            serial::puts(" stop="); serial::put_hex64(outSnapshot->context.stopGeneration);
+            serial::puts(" session="); serial::put_hex64(outSnapshot->context.sessionGeneration);
+            serial::puts(" state="); serial::put_hex32(static_cast<uint32_t>(s_operation.state));
+            serial::putc('\n');
         }
         return GX_OK;
         }
@@ -6292,9 +6366,7 @@ gx_result debug(const gx_development_debug_request& request,
 
 gx_result release(gx_development_run_handle handle) {
     if (!decode(handle)) return GX_ERROR_FAILED;
-    if (s_operation.state != GX_DEVELOPMENT_RUN_COMPLETED &&
-        s_operation.state != GX_DEVELOPMENT_RUN_FAILED &&
-        s_operation.state != GX_DEVELOPMENT_RUN_CANCELLED) return GX_ERROR_BUSY;
+    if (!is_terminal_state(s_operation.state)) return GX_ERROR_BUSY;
     (void)unregister_application(s_operation);
     (void)restore_all_debug_breakpoints();
     step_over_clear_state(s_operation);
@@ -6303,6 +6375,7 @@ gx_result release(gx_development_run_handle handle) {
 #if defined(__x86_64__)
     s_schedulerActive = false;
     s_schedulerInTarget = false;
+    s_schedulerPumpInProgress = false;
     s_schedulerTargetComplete = false;
     s_ownerContext = nullptr;
     s_targetContext = nullptr;

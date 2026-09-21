@@ -467,11 +467,20 @@ void closeOwnedWindows(uint64_t processId) {
     }
 }
 
-uint64_t findNativeRuntimeId(uint64_t processId) {
-    if (processId == 0) return 0;
+uint64_t findNativeRuntimeId(uint64_t processId, const std::string& applicationId) {
+    if (processId == 0 && applicationId.empty()) return 0;
     const std::vector<NativeAppProcessInfo> processes = NativeAppProcessTable::List();
     for (const NativeAppProcessInfo& process : processes) {
         if (process.processId == processId) return process.runtimeId;
+        // A debug-controlled NativeElf executor registers its runtime before
+        // it waits on the execution gate.  At that boundary the runtime has a
+        // stable app/generation identity but deliberately has not adopted the
+        // spawned process id yet.  Matching that prepared record lets the
+        // deployment authenticate the gate without starting execution merely
+        // to discover the runtime it is supposed to control.
+        if (process.processId == 0 && process.lifecycleState == NativeAppLifecycleState::Prepared &&
+            !applicationId.empty() && process.appId == applicationId)
+            return process.runtimeId;
     }
     return 0;
 }
@@ -715,7 +724,11 @@ gx_result Poll(NativeAppRuntimeContext& owner, gx_development_run_handle handle,
             setFailure(outSnapshot, GX_DEVELOPMENT_RUN_ERROR_STALE_DEPLOYMENT, errorName(GX_DEVELOPMENT_RUN_ERROR_STALE_DEPLOYMENT));
             return GX_ERROR_FAILED;
         }
-        if (slot->deployment.state == GX_DEVELOPMENT_RUN_REGISTERED || slot->deployment.state == GX_DEVELOPMENT_RUN_FAILED || slot->deployment.state == GX_DEVELOPMENT_RUN_COMPLETED) {
+        if (slot->deployment.state == GX_DEVELOPMENT_RUN_REGISTERED ||
+            slot->deployment.state == GX_DEVELOPMENT_RUN_EXITED ||
+            slot->deployment.state == GX_DEVELOPMENT_RUN_FAILED ||
+            slot->deployment.state == GX_DEVELOPMENT_RUN_COMPLETED ||
+            slot->deployment.state == GX_DEVELOPMENT_RUN_CANCELLED) {
             setSnapshotFromDeployment(slot->deployment, outSnapshot);
             return GX_OK;
         }
@@ -737,7 +750,7 @@ gx_result Poll(NativeAppRuntimeContext& owner, gx_development_run_handle handle,
     }
     refreshWindowCounts(slot->deployment);
     const uint64_t previousNativeRuntimeId = slot->deployment.nativeRuntimeId;
-    slot->deployment.nativeRuntimeId = findNativeRuntimeId(processId);
+    slot->deployment.nativeRuntimeId = findNativeRuntimeId(processId, slot->deployment.applicationId);
     if (previousNativeRuntimeId == 0 && slot->deployment.nativeRuntimeId != 0) {
         Logger::write(LogLevel::Info, "[DevelopmentRun] target-created appId=" + slot->deployment.applicationId +
             " handle=" + std::to_string(slot->deployment.handle) + " processId=" + std::to_string(processId) +
@@ -750,7 +763,11 @@ gx_result Poll(NativeAppRuntimeContext& owner, gx_development_run_handle handle,
         slot->deployment.cleanupComplete = true;
         slot->deployment.error = exitCode == GX_OK ? GX_DEVELOPMENT_RUN_ERROR_NONE : GX_DEVELOPMENT_RUN_ERROR_LAUNCH_FAILED;
         slot->deployment.errorMessage = exitCode == GX_OK ? std::string() : "native application exited with failure";
-        slot->deployment.state = exitCode == GX_OK ? GX_DEVELOPMENT_RUN_COMPLETED : GX_DEVELOPMENT_RUN_FAILED;
+        // EXITED is the durable observation boundary.  The deployment record
+        // remains owned by this handle until the caller consumes the terminal
+        // metadata and invokes Release; completion publication must not require
+        // another process/debugger poll or destroy the identity early.
+        slot->deployment.state = exitCode == GX_OK ? GX_DEVELOPMENT_RUN_EXITED : GX_DEVELOPMENT_RUN_FAILED;
         Logger::write(LogLevel::Info, "[DevelopmentRun] application exited appId=" + slot->deployment.applicationId + " exitCode=" + std::to_string(exitCode) + " cleanup=PASS");
     } else if (slot->deployment.windowCount > 0 || (slot->deployment.debugControlled &&
                                                         slot->deployment.debugExecutionReleased &&
@@ -769,7 +786,10 @@ gx_result RequestClose(NativeAppRuntimeContext& owner, gx_development_run_handle
         std::lock_guard<std::mutex> lock(g_mutex);
         Slot* slot = findOwnedLocked(handle, owner.runtimeId);
         if (!slot) return GX_ERROR_FAILED;
-        if (slot->deployment.state == GX_DEVELOPMENT_RUN_COMPLETED || slot->deployment.state == GX_DEVELOPMENT_RUN_FAILED) return GX_OK;
+        if (slot->deployment.state == GX_DEVELOPMENT_RUN_EXITED ||
+            slot->deployment.state == GX_DEVELOPMENT_RUN_COMPLETED ||
+            slot->deployment.state == GX_DEVELOPMENT_RUN_FAILED ||
+            slot->deployment.state == GX_DEVELOPMENT_RUN_CANCELLED) return GX_OK;
         slot->deployment.closeRequested = true;
         processId = slot->deployment.processId;
     }
@@ -782,7 +802,10 @@ gx_result Release(NativeAppRuntimeContext& owner, gx_development_run_handle hand
     std::lock_guard<std::mutex> lock(g_mutex);
     Slot* slot = findOwnedLocked(handle, owner.runtimeId);
     if (!slot) return GX_ERROR_FAILED;
-    if (slot->deployment.state != GX_DEVELOPMENT_RUN_COMPLETED && slot->deployment.state != GX_DEVELOPMENT_RUN_FAILED) return GX_ERROR_BUSY;
+    if (slot->deployment.state != GX_DEVELOPMENT_RUN_EXITED &&
+        slot->deployment.state != GX_DEVELOPMENT_RUN_COMPLETED &&
+        slot->deployment.state != GX_DEVELOPMENT_RUN_FAILED &&
+        slot->deployment.state != GX_DEVELOPMENT_RUN_CANCELLED) return GX_ERROR_BUSY;
     unregisterDeployment(slot->deployment);
     slot->used = false;
     slot->deployment = Deployment();

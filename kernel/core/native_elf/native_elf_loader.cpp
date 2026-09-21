@@ -66,6 +66,20 @@ static NativeAppExecutionContext s_childRuntime = {};
 static bool s_nestedOwnerRestored = false;
 static uint64_t s_developmentGeneration = 0;
 static char s_developmentApplicationId[GX_DEVELOPMENT_RUN_MAX_APP_ID_BYTES] = {};
+static uint32_t s_phase28uLoaderTraceCount = 0;
+
+static void phase28u_loader_trace(const char* event)
+{
+    if (!event || s_phase28uLoaderTraceCount >= 256U) return;
+    ++s_phase28uLoaderTraceCount;
+    serial::puts("DEVELOPER_STUDIO_PHASE28U_LOADER ");
+    serial::puts(event);
+    serial::puts(" nested="); serial::put_hex32(s_nestedExecutionActive ? 1U : 0U);
+    serial::puts(" owner_restored="); serial::put_hex32(s_nestedOwnerRestored ? 1U : 0U);
+    serial::puts(" runtime_state="); serial::put_hex32(static_cast<uint32_t>(s_appRuntime.state));
+    serial::puts(" image="); serial::put_hex64(s_appRuntime.imageSize);
+    serial::putc('\n');
+}
 
 static bool s_guiApplicationCreated = false;
 static bool s_guiWindowCreated = false;
@@ -723,7 +737,9 @@ static gx_result GX_CALL host_bare_run_start(gx_app_context* context,
                                               gx_development_run_handle handle)
 {
     if (!app_context_valid(context)) return GX_ERROR_PERMISSION_DENIED;
+    phase28u_loader_trace("HOST_RUN_START_ENTRY");
     const gx_result result = NativeElfRunService::start(handle);
+    phase28u_loader_trace("HOST_RUN_START_RETURN");
     return result;
 }
 
@@ -733,10 +749,12 @@ static gx_result GX_CALL host_bare_run_poll(gx_app_context* context,
 {
     if (!app_context_valid(context) || !outputSnapshot ||
         !app_pointer_range(outputSnapshot, sizeof(uint32_t))) return GX_ERROR_PERMISSION_DENIED;
+    phase28u_loader_trace("HOST_RUN_POLL_ENTRY");
     gx_development_run_snapshot local = {};
     local.size = sizeof(local);
     local.version = GX_DEVELOPMENT_RUN_API_VERSION;
     const gx_result result = NativeElfRunService::poll(handle, &local);
+    phase28u_loader_trace("HOST_RUN_POLL_RETURN");
     if (!copy_run_snapshot_to_app(local, outputSnapshot)) return GX_ERROR_PERMISSION_DENIED;
     return result;
 }
@@ -868,8 +886,10 @@ static gx_result GX_CALL host_bare_development_debug(
     gx_development_debug_snapshot local = {};
     local.size = sizeof(local);
     local.version = GX_DEVELOPMENT_DEBUG_API_VERSION;
+    phase28u_loader_trace("HOST_DEBUG_ENTRY");
     const bool nested = native_elf_nested_enter_for_host();
     const gx_result result = NativeElfRunService::debug(copied, &local);
+    phase28u_loader_trace("HOST_DEBUG_RETURN");
     if (nested) {
         if (!native_elf_nested_leave_for_host()) return GX_ERROR_FAILED;
     }
@@ -1775,6 +1795,7 @@ static bool save_current_parent_image()
 
 static bool capture_child_and_restore_parent()
 {
+    phase28u_loader_trace("CAPTURE_CHILD_ENTRY");
     if (!s_nestedExecutionActive || s_nestedOwnerRestored) return true;
     if (s_appRuntime.imageSize == 0 || s_appRuntime.imageSize > sizeof(s_childImage)) {
         return false;
@@ -1797,11 +1818,13 @@ static bool capture_child_and_restore_parent()
     }
     s_appRuntime = s_parentRuntime;
     s_nestedOwnerRestored = true;
+    phase28u_loader_trace("CAPTURE_CHILD_RETURN");
     return true;
 }
 
 static bool restore_child_for_owner()
 {
+    phase28u_loader_trace("RESTORE_CHILD_ENTRY");
     if (!s_nestedExecutionActive || !s_nestedOwnerRestored) return true;
     if (!save_current_parent_image()) return false;
     if (!restore_image_snapshot(s_childRuntime.imageBase, s_childImageSize,
@@ -1811,6 +1834,7 @@ static bool restore_child_for_owner()
     }
     s_appRuntime = s_childRuntime;
     s_nestedOwnerRestored = false;
+    phase28u_loader_trace("RESTORE_CHILD_RETURN");
     return true;
 }
 
@@ -1858,6 +1882,7 @@ static bool restore_parent_after_cancelled_child()
 
 bool run_file_nested(const char* path, int32_t* returnValue, NativeElfRunReport* report)
 {
+    phase28u_loader_trace("RUN_NESTED_ENTRY");
     clear_report(report);
     if (returnValue) *returnValue = 0;
     if (!s_contextConfigured || !path || path[0] == '\0' || !returnValue) {
@@ -1917,6 +1942,7 @@ bool run_file_nested(const char* path, int32_t* returnValue, NativeElfRunReport*
     s_nestedInvocation.report = report;
     s_nestedInvocation.success = false;
     s_nestedExecutionActive = true;
+    phase28u_loader_trace("RUN_NESTED_ACTIVE");
 
     NativeElfTrampolineResult trampoline = {};
     const bool invoked = invoke_native_entry_on_stack(
@@ -1924,6 +1950,7 @@ bool run_file_nested(const char* path, int32_t* returnValue, NativeElfRunReport*
         &s_nestedInvocation,
         serviceStack.top,
         &trampoline);
+    phase28u_loader_trace("RUN_NESTED_INVOKED");
 
     bool restored = true;
     const uint64_t parentEnd = guidexos::native_elf::IMAGE_BASE + s_parentImageSize;
@@ -1960,6 +1987,7 @@ bool run_file_nested(const char* path, int32_t* returnValue, NativeElfRunReport*
     s_nestedInvocation.path = nullptr;
     s_nestedInvocation.returnValue = nullptr;
     s_nestedInvocation.report = nullptr;
+    phase28u_loader_trace("RUN_NESTED_RETURN");
 
     if (!invoked || !restored) {
         return fail_report(report, !invoked
@@ -1988,11 +2016,13 @@ const NativeAppExecutionContext* native_elf_debug_runtime_context()
 
 bool native_elf_nested_prepare_for_scheduler()
 {
+    phase28u_loader_trace("NESTED_PREPARE_SCHEDULER");
     return restore_child_for_owner();
 }
 
 bool native_elf_nested_capture_after_scheduler()
 {
+    phase28u_loader_trace("NESTED_CAPTURE_SCHEDULER");
     if (s_nestedExecutionActive && !s_nestedOwnerRestored &&
         s_appRuntime.state != NativeAppExecutionState::Running &&
         s_appRuntime.imageSize == 0) {
@@ -2003,6 +2033,7 @@ bool native_elf_nested_capture_after_scheduler()
 
 bool native_elf_nested_enter_for_host()
 {
+    phase28u_loader_trace("NESTED_ENTER_HOST");
     if (!s_nestedExecutionActive) {
         return false;
     }
@@ -2012,6 +2043,7 @@ bool native_elf_nested_enter_for_host()
 
 bool native_elf_nested_leave_for_host()
 {
+    phase28u_loader_trace("NESTED_LEAVE_HOST");
     if (!s_nestedExecutionActive) return true;
     return capture_child_and_restore_parent();
 }
