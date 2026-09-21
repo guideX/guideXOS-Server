@@ -471,9 +471,19 @@ public sealed class ManagedNotes : GuideXosApplication
 #if HOSTLOGPROOF_C124_MANAGED_RADIO_BUTTON
     private const int C124FullPathControlId = 5;
     private const int C124FileNameControlId = 6;
+#if HOSTLOGPROOF_C131_REUSABLE_CHECKBOX
+    private const int C131ShowStatusControlId = 7;
+    private const int C120DocumentControlId = 8;
+#else
     private const int C120DocumentControlId = 7;
+#endif
+#else
+#if HOSTLOGPROOF_C131_REUSABLE_CHECKBOX
+    private const int C131ShowStatusControlId = 5;
+    private const int C120DocumentControlId = 6;
 #else
     private const int C120DocumentControlId = 5;
+#endif
 #endif
 #else
     private const int C120DocumentControlId = 4;
@@ -568,6 +578,18 @@ public sealed class ManagedNotes : GuideXosApplication
     private bool _c129ShiftTabTestContext;
     private int _c129ProofStage;
 #endif
+#if HOSTLOGPROOF_C131_REUSABLE_CHECKBOX
+    private const uint C131HideStatusKey = 0x700u;
+    private const uint C131ShowStatusKey = 0x701u;
+    private readonly GuideXosCheckBox _showStatusCheckBox =
+        new(330, 184, 128, 28, "Show status", true);
+    private bool _showStatusVisible = true;
+    private bool _c131ProofContext;
+    private bool _c131CheckBoxTestContext;
+    private bool _c131HostTestContext;
+    private bool _c131CheckBoxTestsRun;
+    private bool _c131HostTestsRun;
+#endif
 #endif
 #endif
 #endif
@@ -640,6 +662,11 @@ public sealed class ManagedNotes : GuideXosApplication
         _c129ShiftTabTestContext = IsC129ShiftTabTestContext(host);
         _c129ProofStage = 0;
 #endif
+#if HOSTLOGPROOF_C131_REUSABLE_CHECKBOX
+        _c131ProofContext = IsC131NotesContext(host);
+        _c131CheckBoxTestContext = IsC131CheckBoxTestContext(host);
+        _c131HostTestContext = IsC131HostTestContext(host);
+#endif
 #endif
 #endif
         _c124ProofContext = _c124ProofContext || _c125ProofContext;
@@ -703,11 +730,27 @@ public sealed class ManagedNotes : GuideXosApplication
                 _showPathCheckBox.SetEnabled(false);
             }
 #endif
+#if HOSTLOGPROOF_C131_REUSABLE_CHECKBOX
+            _showStatusVisible = true;
+            _showStatusCheckBox.Reset();
+            _showStatusCheckBox.Changed = OnShowStatusChanged;
+            _showStatusCheckBox.Checked = true;
+            if (host.LaunchContext.Utf8.SequenceEqual("c131-disabled"u8))
+            {
+                _showStatusCheckBox.SetEnabled(false);
+            }
+#endif
             _mainControlHost = new GuideXosControlHost(
 #if HOSTLOGPROOF_C124_MANAGED_RADIO_BUTTON
+#if HOSTLOGPROOF_C131_REUSABLE_CHECKBOX
+                _c131ProofContext ? 8 :
+#endif
                 _c124ProofContext ? 7 :
 #endif
 #if HOSTLOGPROOF_C121_MANAGED_CHECKBOX
+#if HOSTLOGPROOF_C131_REUSABLE_CHECKBOX
+                _c131ProofContext ? 8 :
+#endif
                 _c121ProofContext ? 5 : 4);
 #else
             4);
@@ -732,6 +775,13 @@ public sealed class ManagedNotes : GuideXosApplication
                     C124FileNameControlId, _fileNameRadio);
             }
 #endif
+#if HOSTLOGPROOF_C131_REUSABLE_CHECKBOX
+            if (_c131ProofContext)
+            {
+                _mainControlHost.TryRegisterCheckBox(
+                    C131ShowStatusControlId, _showStatusCheckBox);
+            }
+#endif
             _mainControlHost.TryRegisterTextArea(C120DocumentControlId, _textArea);
             if (host.LaunchContext.Utf8.SequenceEqual("c120-disabled"u8))
             {
@@ -739,9 +789,15 @@ public sealed class ManagedNotes : GuideXosApplication
             }
             int expectedHostRegistration =
 #if HOSTLOGPROOF_C124_MANAGED_RADIO_BUTTON
+#if HOSTLOGPROOF_C131_REUSABLE_CHECKBOX
+                _c131ProofContext ? 8 :
+#endif
                 _c124ProofContext ? 7 :
 #endif
 #if HOSTLOGPROOF_C121_MANAGED_CHECKBOX
+#if HOSTLOGPROOF_C131_REUSABLE_CHECKBOX
+                _c131ProofContext ? 8 :
+#endif
                 _c121ProofContext ? 5 : 4;
 #else
                 4;
@@ -785,6 +841,14 @@ public sealed class ManagedNotes : GuideXosApplication
                     _mainControlHost.RegistrationCount == 7
                     ? "C124-HOST registration=7 initial=no-focus result=PASS"u8
                     : "C124-HOST registration=FAIL initial=FAIL result=FAIL"u8);
+            }
+#if HOSTLOGPROOF_C131_REUSABLE_CHECKBOX
+            if (_c131ProofContext)
+            {
+                host.TryLog(hostRegistration &&
+                    _mainControlHost.RegistrationCount == 8
+                    ? "C131-HOST registration=8 initial=no-focus result=PASS"u8
+                    : "C131-HOST registration=FAIL initial=no-focus result=FAIL"u8);
             }
 #if HOSTLOGPROOF_C125_MANAGED_PROGRESS_BAR
             if (_c125ProofContext)
@@ -937,6 +1001,17 @@ public sealed class ManagedNotes : GuideXosApplication
 #endif
 #endif
 #endif
+#if HOSTLOGPROOF_C131_REUSABLE_CHECKBOX
+        if (_c131ProofContext)
+        {
+            bool c131Initial = _mainControlHost.RegistrationCount == 8 &&
+                _showStatusCheckBox.Checked && _showStatusCheckBox.Visible &&
+                _showStatusVisible && !_showStatusCheckBox.IsFocused;
+            host.TryLog(c131Initial
+                ? "C131-NOTES initial=registration=8 show-status=checked result=PASS"u8
+                : "C131-NOTES initial=FAIL result=FAIL"u8);
+        }
+#endif
         host.TryLog("C117-NOTES threadStatic=PASS"u8);
         host.TryLog(loadResult == GuideXosFileResult.Success
             ? "C117-NOTES initial=multiline source=VFS result=PASS"u8
@@ -993,6 +1068,12 @@ public sealed class ManagedNotes : GuideXosApplication
 #endif
 #if HOSTLOGPROOF_C129_SHIFT_TAB_TRANSPORT
         if (_c129ShiftTabTestContext)
+        {
+            runFocusedProofTests = false;
+        }
+#endif
+#if HOSTLOGPROOF_C131_REUSABLE_CHECKBOX
+        if (_c131CheckBoxTestContext || _c131HostTestContext)
         {
             runFocusedProofTests = false;
         }
@@ -1065,6 +1146,24 @@ public sealed class ManagedNotes : GuideXosApplication
         if (_c121CheckboxTestContext)
         {
             _c121CheckboxTestsRun = true;
+        }
+#endif
+#if HOSTLOGPROOF_C131_REUSABLE_CHECKBOX
+        bool c131HostTests = _c131HostTestContext && !_c131HostTestsRun
+            ? GuideXosCheckBoxC131HostTests.Run(host) : true;
+        bool c131CheckBoxTests = _c131CheckBoxTestContext &&
+            !_c131CheckBoxTestsRun
+            ? GuideXosCheckBoxC131Tests.Run(host, surface) : true;
+        if (_c131HostTestContext)
+        {
+            _c131HostTestsRun = true;
+            host.TryLog(c131HostTests
+                ? "C131-HOST tests=PASS"u8
+                : "C131-HOST tests=FAIL"u8);
+        }
+        if (_c131CheckBoxTestContext)
+        {
+            _c131CheckBoxTestsRun = true;
         }
 #endif
 #if HOSTLOGPROOF_C122_MANAGED_LABEL
@@ -1157,6 +1256,9 @@ public sealed class ManagedNotes : GuideXosApplication
 #if HOSTLOGPROOF_C121_MANAGED_CHECKBOX
             && checkBoxTests && checkBoxHostTests
 #endif
+#if HOSTLOGPROOF_C131_REUSABLE_CHECKBOX
+            && c131CheckBoxTests && c131HostTests
+#endif
 #if HOSTLOGPROOF_C122_MANAGED_LABEL
             && labelTests && labelHostTests
 #endif
@@ -1217,6 +1319,9 @@ public sealed class ManagedNotes : GuideXosApplication
             || host.LaunchContext.Utf8.SequenceEqual("c127-notes"u8)
 #if HOSTLOGPROOF_C128_MANAGED_PANEL_LIFECYCLE
             || host.LaunchContext.Utf8.SequenceEqual("c128-notes"u8)
+#if HOSTLOGPROOF_C131_REUSABLE_CHECKBOX
+            || IsC131NotesContext(host)
+#endif
 #endif
 #endif
 #endif
@@ -1253,6 +1358,9 @@ public sealed class ManagedNotes : GuideXosApplication
             || host.LaunchContext.Utf8.SequenceEqual("c128-notes"u8)
 #if HOSTLOGPROOF_C129_SHIFT_TAB_TRANSPORT
             || host.LaunchContext.Utf8.SequenceEqual("c129-shift-tab-proof"u8)
+#endif
+#if HOSTLOGPROOF_C131_REUSABLE_CHECKBOX
+            || IsC131NotesContext(host)
 #endif
 #endif
 #endif
@@ -1333,6 +1441,9 @@ public sealed class ManagedNotes : GuideXosApplication
             || host.LaunchContext.Utf8.SequenceEqual("c127-notes"u8)
 #if HOSTLOGPROOF_C128_MANAGED_PANEL_LIFECYCLE
             || host.LaunchContext.Utf8.SequenceEqual("c128-notes"u8)
+#if HOSTLOGPROOF_C131_REUSABLE_CHECKBOX
+            || IsC131NotesContext(host)
+#endif
 #endif
 #endif
 #endif
@@ -1359,6 +1470,9 @@ public sealed class ManagedNotes : GuideXosApplication
             || host.LaunchContext.Utf8.SequenceEqual("c127-notes"u8)
 #if HOSTLOGPROOF_C128_MANAGED_PANEL_LIFECYCLE
             || host.LaunchContext.Utf8.SequenceEqual("c128-notes"u8)
+#if HOSTLOGPROOF_C131_REUSABLE_CHECKBOX
+            || IsC131NotesContext(host)
+#endif
 #endif
 #endif
 #endif
@@ -1385,6 +1499,9 @@ public sealed class ManagedNotes : GuideXosApplication
         return host.LaunchContext.Utf8.SequenceEqual("c127-notes"u8)
 #if HOSTLOGPROOF_C128_MANAGED_PANEL_LIFECYCLE
             || IsC128NotesContext(host)
+#if HOSTLOGPROOF_C131_REUSABLE_CHECKBOX
+            || IsC131NotesContext(host)
+#endif
 #endif
             ;
     }
@@ -1396,7 +1513,11 @@ public sealed class ManagedNotes : GuideXosApplication
 #if HOSTLOGPROOF_C128_MANAGED_PANEL_LIFECYCLE
     private static bool IsC128NotesContext(GuideXosHost host)
     {
-        return host.LaunchContext.Utf8.SequenceEqual("c128-notes"u8);
+        return host.LaunchContext.Utf8.SequenceEqual("c128-notes"u8)
+#if HOSTLOGPROOF_C131_REUSABLE_CHECKBOX
+            || IsC131NotesContext(host)
+#endif
+            ;
     }
 
     private static bool IsC128PanelLifecycleTestContext(GuideXosHost host)
@@ -1417,6 +1538,24 @@ public sealed class ManagedNotes : GuideXosApplication
             "c129-shift-tab-tests"u8);
     }
 #endif
+#if HOSTLOGPROOF_C131_REUSABLE_CHECKBOX
+    private static bool IsC131NotesContext(GuideXosHost host)
+    {
+        return host.LaunchContext.Utf8.SequenceEqual("c131-notes"u8) ||
+            host.LaunchContext.Utf8.SequenceEqual("c131-disabled"u8);
+    }
+
+    private static bool IsC131CheckBoxTestContext(GuideXosHost host)
+    {
+        return host.LaunchContext.Utf8.SequenceEqual(
+            "c131-checkbox-tests"u8);
+    }
+
+    private static bool IsC131HostTestContext(GuideXosHost host)
+    {
+        return host.LaunchContext.Utf8.SequenceEqual(
+            "c131-checkbox-host-tests"u8);
+    }
 #endif
 #endif
 #endif
@@ -1424,6 +1563,31 @@ public sealed class ManagedNotes : GuideXosApplication
 #endif
 #endif
 #endif
+#endif
+#endif
+
+#if HOSTLOGPROOF_C131_REUSABLE_CHECKBOX
+    private void OnShowStatusChanged(bool isChecked)
+    {
+        _showStatusVisible = isChecked;
+    }
+
+    private bool HandleC131CheckboxProofKey(uint keyCode)
+    {
+        if (keyCode == C131HideStatusKey)
+        {
+            _showStatusCheckBox.SetVisible(false);
+            _mainControlHost.RefreshVisibility();
+            return true;
+        }
+        if (keyCode == C131ShowStatusKey)
+        {
+            _showStatusCheckBox.SetVisible(true);
+            _mainControlHost.RefreshVisibility();
+            return true;
+        }
+        return false;
+    }
 #endif
 
     private void BlurButtons()
@@ -1548,6 +1712,14 @@ public sealed class ManagedNotes : GuideXosApplication
             return ApplyPickerResult(host, surface, pickerResult);
         }
 
+#if HOSTLOGPROOF_C131_REUSABLE_CHECKBOX
+        if (_c131ProofContext && input.Kind == GuideXosInputKind.KeyDown &&
+            HandleC131CheckboxProofKey(input.KeyCode))
+        {
+            return RenderMain(host, surface, _launchCount)
+                ? GuideXosResult.Success : GuideXosResult.InvalidArgument;
+        }
+#endif
 #if HOSTLOGPROOF_C125_MANAGED_PROGRESS_BAR
         if (_c125ProofContext && input.Kind == GuideXosInputKind.KeyDown &&
             HandleC125ProgressProofKey(host, input.KeyCode))
@@ -1610,6 +1782,17 @@ public sealed class ManagedNotes : GuideXosApplication
                 host.TryLog(_showPathCheckBox.Checked
                     ? "C121-POINTER state=checked result=PASS"u8
                     : "C121-POINTER state=unchecked result=PASS"u8);
+                return RenderMain(host, surface, _launchCount)
+                    ? GuideXosResult.Success : GuideXosResult.InvalidArgument;
+            }
+#endif
+#if HOSTLOGPROOF_C131_REUSABLE_CHECKBOX
+            if (_c131ProofContext && controlId == C131ShowStatusControlId &&
+                pointerResult == GuideXosControlHostResult.Toggled)
+            {
+                host.TryLog(_showStatusCheckBox.Checked
+                    ? "C131-POINTER state=checked callback=PASS result=PASS"u8
+                    : "C131-POINTER state=unchecked callback=PASS result=PASS"u8);
                 return RenderMain(host, surface, _launchCount)
                     ? GuideXosResult.Success : GuideXosResult.InvalidArgument;
             }
@@ -1727,6 +1910,21 @@ public sealed class ManagedNotes : GuideXosApplication
                 ? GuideXosResult.Success : GuideXosResult.InvalidArgument;
         }
 #endif
+#if HOSTLOGPROOF_C131_REUSABLE_CHECKBOX
+        if (_c131ProofContext &&
+            routeResult == GuideXosControlHostResult.Toggled &&
+            _mainControlHost.ActiveControlId == C131ShowStatusControlId)
+        {
+            if (input.Kind == GuideXosInputKind.KeyChar && input.Character == ' ')
+            {
+                host.TryLog(_showStatusCheckBox.Checked
+                    ? "C131-SPACE state=checked exact-once=PASS callback=PASS"u8
+                    : "C131-SPACE state=unchecked exact-once=PASS callback=PASS"u8);
+            }
+            return RenderMain(host, surface, _launchCount)
+                ? GuideXosResult.Success : GuideXosResult.InvalidArgument;
+        }
+#endif
 #if HOSTLOGPROOF_C124_MANAGED_RADIO_BUTTON
         if (_c124ProofContext &&
             (_mainControlHost.ActiveControlId == C124FullPathControlId ||
@@ -1781,6 +1979,12 @@ public sealed class ManagedNotes : GuideXosApplication
         if (x >= 330 && x < 458 && y >= 220 && y < 248)
         {
             return C121ShowPathControlId;
+        }
+#endif
+#if HOSTLOGPROOF_C131_REUSABLE_CHECKBOX
+        if (x >= 330 && x < 458 && y >= 184 && y < 212)
+        {
+            return C131ShowStatusControlId;
         }
 #endif
 #if HOSTLOGPROOF_C124_MANAGED_RADIO_BUTTON
@@ -2512,7 +2716,15 @@ public sealed class ManagedNotes : GuideXosApplication
             GuideXosText.Line(surface, 66, "Path: "u8, Encoding.UTF8.GetBytes(_currentPath)) &&
 #endif
             _textArea.Render(surface, 20, 72, 18) == GuideXosResult.Success &&
-            GuideXosText.Line(surface, 150, "Status: "u8, Encoding.UTF8.GetBytes(_status)) &&
+#if HOSTLOGPROOF_C131_REUSABLE_CHECKBOX
+            (!_c131ProofContext || _showStatusVisible
+                ? GuideXosText.Line(surface, 150, "Status: "u8,
+                    Encoding.UTF8.GetBytes(_status))
+                : true) &&
+#else
+            GuideXosText.Line(surface, 150, "Status: "u8,
+                Encoding.UTF8.GetBytes(_status)) &&
+#endif
 #if HOSTLOGPROOF_C125_MANAGED_PROGRESS_BAR
             GuideXosText.Line(surface, 174, "Document usage: "u8, ReadOnlySpan<byte>.Empty) &&
             _documentUsage.Render(surface) == GuideXosResult.Success &&
@@ -2541,6 +2753,10 @@ public sealed class ManagedNotes : GuideXosApplication
 #if HOSTLOGPROOF_C121_MANAGED_CHECKBOX
             (!_c121ProofContext || _showPathCheckBox.Render(surface) ==
                 GuideXosResult.Success) &&
+#if HOSTLOGPROOF_C131_REUSABLE_CHECKBOX
+            (!_c131ProofContext || _showStatusCheckBox.Render(surface) ==
+                GuideXosResult.Success) &&
+#endif
 #if HOSTLOGPROOF_C124_MANAGED_RADIO_BUTTON
             ((!_c124ProofContext
 #if HOSTLOGPROOF_C127_MANAGED_PANEL
@@ -3042,6 +3258,7 @@ public sealed class ManagedNotes : GuideXosApplication
             _ => "File I/O failure"u8.ToArray(),
         };
     }
+#endif
 #endif
 #endif
 }

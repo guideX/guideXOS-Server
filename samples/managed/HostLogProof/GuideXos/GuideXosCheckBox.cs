@@ -38,6 +38,7 @@ public sealed class GuideXosCheckBox
     private bool _isFocused;
     private bool _visible = true;
     private bool _panelVisible = true;
+    private bool _dispatchingChanged;
     private GuideXosPanel _panelOwner;
     private uint _rejectedInputCount;
 
@@ -75,13 +76,33 @@ public sealed class GuideXosCheckBox
     public int Height => _height;
     public int MaximumLabelLength => _maximumLabelLength;
     public string Label => new string(_labelStorage, 0, _labelLength);
-    public bool Checked => _checked;
-    public bool Enabled => _enabled;
+    public string Text => Label;
+    public bool Checked
+    {
+        get => _checked;
+        set => SetChecked(value);
+    }
+    public bool Enabled
+    {
+        get => _enabled;
+        set => SetEnabled(value);
+    }
     public bool IsFocused => _isFocused;
-    public bool Visible => _visible;
+    public bool Visible
+    {
+        get => _visible;
+        set => SetVisible(value);
+    }
     public bool EffectiveVisible => _visible && _panelVisible;
     public GuideXosPanel ParentPanel => _panelOwner;
     public uint RejectedInputCount => _rejectedInputCount;
+
+    /// <summary>
+    /// One bounded callback invoked after a real value transition. Reentrant
+    /// assignments update the value but do not recursively invoke the same
+    /// callback, keeping callback-driven state changes bounded.
+    /// </summary>
+    public Action<bool> Changed { get; set; }
 
     public bool SetLabel(string label)
     {
@@ -97,6 +118,11 @@ public sealed class GuideXosCheckBox
         }
         _labelLength = label.Length;
         return true;
+    }
+
+    public bool TrySetText(string text)
+    {
+        return SetLabel(text);
     }
 
     public bool TrySetBounds(int x, int y, int width, int height)
@@ -141,14 +167,27 @@ public sealed class GuideXosCheckBox
 
     public void SetChecked(bool isChecked)
     {
+        if (_checked == isChecked) return;
         _checked = isChecked;
+        Action<bool> changed = Changed;
+        if (changed == null || _dispatchingChanged) return;
+
+        _dispatchingChanged = true;
+        try
+        {
+            changed(_checked);
+        }
+        finally
+        {
+            _dispatchingChanged = false;
+        }
     }
 
     public GuideXosCheckBoxResult Toggle()
     {
         if (!_enabled) return GuideXosCheckBoxResult.Disabled;
         if (!_isFocused) return GuideXosCheckBoxResult.Ignored;
-        _checked = !_checked;
+        SetChecked(!_checked);
         return GuideXosCheckBoxResult.Toggled;
     }
 
@@ -189,7 +228,7 @@ public sealed class GuideXosCheckBox
         if (!_enabled) return GuideXosCheckBoxResult.Disabled;
 
         _isFocused = true;
-        _checked = !_checked;
+        SetChecked(!_checked);
         return GuideXosCheckBoxResult.Toggled;
     }
 
@@ -209,7 +248,7 @@ public sealed class GuideXosCheckBox
         if (!_enabled) return GuideXosCheckBoxResult.Disabled;
         if (!_isFocused) return GuideXosCheckBoxResult.Ignored;
         if (character != ' ') return GuideXosCheckBoxResult.Ignored;
-        _checked = !_checked;
+        SetChecked(!_checked);
         return GuideXosCheckBoxResult.Toggled;
     }
 

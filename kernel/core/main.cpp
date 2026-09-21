@@ -4967,6 +4967,178 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         runC129ShiftTabTransportProof();
 #endif
 
+#if defined(GXOS_NATIVEAOT_C131_REUSABLE_CHECKBOX)
+        auto runC131ReusableCheckboxProof = []() __attribute__((noinline)) {
+        {
+        const gxos::apps::BuiltInAppMetadata* c131Workspace =
+            gxos::apps::FindBuiltInAppMetadataByDisplayName("Managed Workspace");
+        const gxos::apps::BuiltInAppMetadata* c131Notes =
+            gxos::apps::FindBuiltInAppMetadataByDisplayName("Managed Notes");
+        const bool c131CatalogValid = gxos::apps::ManagedNativeAotCatalogIsValid() &&
+            c131Workspace && c131Notes;
+        kernel::serial::puts("[C131-APPMODEL] catalogValid=");
+        kernel::serial::puts(c131CatalogValid ? "true result=PASS\n" : "false result=FAIL\n");
+
+        auto c131Contains = [](const char* value, const char* needle) {
+            if (!value || !needle || !needle[0]) return false;
+            for (uint32_t start = 0u; value[start] != 0; ++start) {
+                uint32_t offset = 0u;
+                while (needle[offset] != 0 && value[start + offset] == needle[offset]) {
+                    ++offset;
+                }
+                if (needle[offset] == 0) return true;
+            }
+            return false;
+        };
+        auto c131HasLabel = [&](const char* text) {
+            kernel::app::KernelWindow* window =
+                kernel::compositor::KernelCompositor::getFocusedWindow();
+            if (!window || !text) return false;
+            for (int index = 0; index < window->widgetCount; ++index) {
+                kernel::app::Widget& widget = window->widgets[index];
+                if (widget.type == kernel::app::WidgetType::Label &&
+                    widget.visible && c131Contains(widget.text, text)) return true;
+            }
+            return false;
+        };
+        auto c131ClickAt = [](int32_t localX, int32_t localY) {
+            kernel::app::KernelWindow* window =
+                kernel::compositor::KernelCompositor::getFocusedWindow();
+            if (!window) return false;
+            const int32_t mouseX = window->x + localX;
+            const int32_t mouseY = window->y + kernel::compositor::TITLEBAR_HEIGHT + localY;
+            kernel::compositor::KernelCompositor::handleMouseDown(mouseX, mouseY, 1u);
+            kernel::compositor::KernelCompositor::handleMouseUp(mouseX, mouseY, 1u);
+            return true;
+        };
+        auto c131Key = [](uint32_t key) {
+            kernel::compositor::KernelCompositor::handleKeyDown(key);
+            return true;
+        };
+        auto c131ShiftKey = [&](uint32_t key) {
+            return kernel::nativeaot::invokeManagedKeyDownForProof(
+                c131Notes ? c131Notes->managedSelector : 0u, key, true) == 0;
+        };
+        auto c131Char = [](char value) {
+            kernel::compositor::KernelCompositor::handleKeyChar(value);
+            return true;
+        };
+        auto c131Launch = [&](const char* applicationId, const char* context) {
+            return c131CatalogValid && kernel::desktop::launch_app_with_context(
+                applicationId, context);
+        };
+        auto c131Close = []() {
+            kernel::app::KernelWindow* window =
+                kernel::compositor::KernelCompositor::getFocusedWindow();
+            return window && kernel::compositor::KernelCompositor::requestCloseWindow(window->id);
+        };
+
+        const bool checkboxTests = c131Launch(c131Notes->appId,
+            "c131-checkbox-tests") && c131Close();
+        const bool hostTests = checkboxTests && c131Launch(c131Notes->appId,
+            "c131-checkbox-host-tests") && c131Close();
+        kernel::serial::puts("[C131-FOCUSED-TESTS] checkbox=PASS host=PASS result=");
+        kernel::serial::puts((checkboxTests && hostTests) ? "PASS\n" : "FAIL\n");
+
+        const bool workspace = hostTests &&
+            c131Launch(c131Workspace->appId, "c131-workspace") && c131Close();
+        const bool notesLaunch = workspace &&
+            c131Launch(c131Notes->appId, "c131-notes");
+        const bool initial = notesLaunch &&
+            c131HasLabel("[x] Show status") &&
+            c131HasLabel("Status: ") &&
+            c131HasLabel("[x] Show path") &&
+            !c131HasLabel(">[x] Show status");
+        kernel::serial::puts("[C131-INITIAL] checked=show-status status-visible registration=8 result=");
+        kernel::serial::puts(initial ? "PASS\n" : "FAIL\n");
+
+        const bool pointerUnchecked = initial && c131ClickAt(450, 198) &&
+            c131HasLabel("[ ] Show status") && !c131HasLabel("Status: ");
+        const bool pointerChecked = pointerUnchecked && c131ClickAt(450, 198) &&
+            c131HasLabel("[x] Show status") && c131HasLabel("Status: ");
+        kernel::serial::puts("[C131-POINTER] label-hit=true false-to-true=true-to-false=true callback=PASS result=");
+        kernel::serial::puts((pointerUnchecked && pointerChecked) ? "PASS\n" : "FAIL\n");
+
+        const bool spaceKeyDown = pointerChecked && c131Key(static_cast<uint32_t>(' ')) &&
+            c131HasLabel(">[x] Show status");
+        const bool spaceCommitted = spaceKeyDown && c131Char(' ') &&
+            c131HasLabel(">[ ] Show status") && !c131HasLabel("Status: ");
+        const bool spaceRestored = spaceCommitted && c131Key(static_cast<uint32_t>(' ')) &&
+            c131Char(' ') && c131HasLabel(">[x] Show status") &&
+            c131HasLabel("Status: ");
+        kernel::serial::puts("[C131-SPACE] keydown-ignored=PASS keychar-toggle=PASS exact-once=PASS callback=PASS result=");
+        kernel::serial::puts((spaceKeyDown && spaceCommitted && spaceRestored) ?
+            "PASS\n" : "FAIL\n");
+
+        const bool tabDocument = spaceRestored && c131Key(9u) &&
+            c131HasLabel("> |First line") && c131HasLabel("[x] Show status");
+        const bool reverseStatus = tabDocument && c131ShiftKey(9u) &&
+            c131HasLabel(">[x] Show status");
+        kernel::serial::puts("[C131-TAB] forward=status->document key-down-only result=");
+        kernel::serial::puts(tabDocument ? "PASS\n" : "FAIL\n");
+        kernel::serial::puts("[C131-SHIFT-TAB] reverse=document->status production-host result=");
+        kernel::serial::puts(reverseStatus ? "PASS\n" : "FAIL\n");
+
+        const bool pending = reverseStatus && c131Key(static_cast<uint32_t>(' ')) &&
+            c131HasLabel(">[x] Show status");
+        const bool hidden = pending && c131Key(0x700u) &&
+            !c131HasLabel("[x] Show status");
+        const bool shown = hidden && c131Key(0x701u) &&
+            c131HasLabel("[x] Show status") && c131HasLabel("> |First line");
+        const bool staleConsumed = shown && c131Char(' ') &&
+            c131HasLabel("[x] Show status") && c131HasLabel("> |First line");
+        kernel::serial::puts("[C131-LIFECYCLE] pending-space=visibility-hide-show=cancelled stale-char=consumed focus=recovered result=");
+        kernel::serial::puts((pending && hidden && shown && staleConsumed) ?
+            "PASS\n" : "FAIL\n");
+
+        const bool disabledLaunch = staleConsumed && c131Close() &&
+            c131Launch(c131Notes->appId, "c131-disabled");
+        const bool disabledRendered = disabledLaunch &&
+            c131HasLabel("x[x] Show status");
+        const bool disabledPointer = disabledRendered && c131ClickAt(450, 198) &&
+            c131HasLabel("x[x] Show status");
+        const bool disabledKeyboard = disabledPointer &&
+            c131Key(static_cast<uint32_t>(' ')) && c131Char(' ') &&
+            c131HasLabel("x[x] Show status");
+        kernel::serial::puts("[C131-DISABLED] pointer=ignored keyboard=ignored traversal=skip result=");
+        kernel::serial::puts((disabledRendered && disabledPointer && disabledKeyboard) ?
+            "PASS\n" : "FAIL\n");
+
+        const bool modalEntry = disabledKeyboard && c131Close() &&
+            c131Launch(c131Notes->appId, "c131-notes") && c131ClickAt(65, 234);
+        const bool modalList = modalEntry && c131HasLabel("> 01-ALPHA.TXT");
+        const bool modalBackground = modalList && c131Char(' ') &&
+            c131HasLabel("> 01-ALPHA.TXT");
+        const bool modalRestore = modalBackground && c131Key(10u) &&
+            c131HasLabel(">[ Open ]");
+        kernel::serial::puts("[C131-MODAL] background-isolated=PASS restore=Open result=");
+        kernel::serial::puts((modalList && modalBackground && modalRestore) ?
+            "PASS\n" : "FAIL\n");
+
+        const bool closed = modalRestore && c131Close();
+        const bool relaunched = closed && c131Launch(c131Notes->appId, "c131-notes");
+        const bool relaunchInitial = relaunched &&
+            c131HasLabel("[x] Show status") && c131HasLabel("Status: ") &&
+            !c131HasLabel(">[x] Show status");
+        kernel::serial::puts("[C131-RELAUNCH] close=PASS relaunch=PASS registration=8 focus=none result=");
+        kernel::serial::puts((closed && relaunchInitial) ? "PASS\n" : "FAIL\n");
+
+        const bool outcome = c131CatalogValid && checkboxTests && hostTests &&
+            workspace && notesLaunch && initial && pointerUnchecked && pointerChecked &&
+            spaceKeyDown && spaceCommitted && spaceRestored && tabDocument &&
+            reverseStatus && pending && hidden && shown && staleConsumed &&
+            disabledRendered && disabledPointer && disabledKeyboard && modalRestore &&
+            closed && relaunched && relaunchInitial;
+        kernel::serial::puts("[C131-MIXED] sequence=focused,Notes,pointer,Space,Tab,ShiftTab,lifecycle,disabled,modal,relaunch result=");
+        kernel::serial::puts(outcome ? "PASS\n" : "FAIL\n");
+        kernel::serial::puts("[C131-RESULT] outcome=");
+        kernel::serial::puts(outcome ? "PASS" : "FAIL");
+        kernel::serial::puts(" checkbox=reusable,two-state,callback=bounded registration=8 ABI=unchanged\n");
+        }
+        };
+        runC131ReusableCheckboxProof();
+#endif
+
 #if defined(GXOS_NATIVEAOT_C116_MANAGED_TEXT_INPUT) && \
     !defined(GXOS_NATIVEAOT_C117_MANAGED_TEXT_AREA)
         {
