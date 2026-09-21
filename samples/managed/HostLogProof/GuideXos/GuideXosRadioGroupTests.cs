@@ -70,7 +70,7 @@ public static class GuideXosRadioGroupTests
         group.TryRegister(fourth);
         group.TrySelect(second);
         second.SetEnabled(false);
-        bool normalize = group.SelectedIndex == 2 && third.Selected;
+        bool preserve = group.SelectedIndex == 1 && second.Selected;
         third.SetEnabled(false);
         fourth.SetEnabled(false);
         bool skipForward = group.TryMoveNext(first, out int forward) &&
@@ -78,9 +78,9 @@ public static class GuideXosRadioGroupTests
         bool reverseWrap = group.TryMovePrevious(first, out int reverse) &&
             reverse == 0 && group.SelectedIndex == 0;
         first.SetEnabled(false);
-        bool allDisabled = group.SelectedIndex == -1 && !group.HasSelection &&
+        bool allDisabled = group.SelectedIndex == 0 && first.Selected &&
             !group.TryMoveNext(first, out _);
-        return normalize && skipForward && reverseWrap && allDisabled;
+        return preserve && skipForward && reverseWrap && allDisabled;
     }
 
     private static bool IndependenceAndReset()

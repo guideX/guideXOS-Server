@@ -44,6 +44,7 @@ public sealed class GuideXosRadioButton
     private GuideXosRadioGroup _group;
     private int _groupIndex = -1;
     private int _requestedGroupIndex = -1;
+    private bool _dispatchingChanged;
 
     public GuideXosRadioButton(
         int x,
@@ -51,6 +52,7 @@ public sealed class GuideXosRadioButton
         int width,
         int height,
         string label,
+        bool isChecked = false,
         int maximumLabelLength = DefaultMaximumLabelLength)
     {
         if (maximumLabelLength < 1 ||
@@ -65,8 +67,18 @@ public sealed class GuideXosRadioButton
         _y = 0;
         _width = MinimumSupportedWidth;
         _height = MinimumSupportedHeight;
+        _selected = isChecked;
         TrySetBounds(x, y, width, height);
         SetLabel(label);
+    }
+
+    // C124 compatibility overload: the sixth positional argument was the
+    // label limit before C132 added an initial checked state.
+    public GuideXosRadioButton(
+        int x, int y, int width, int height, string label,
+        int maximumLabelLength)
+        : this(x, y, width, height, label, false, maximumLabelLength)
+    {
     }
 
     public int X => _x;
@@ -75,7 +87,14 @@ public sealed class GuideXosRadioButton
     public int Height => _height;
     public int MaximumLabelLength => _maximumLabelLength;
     public string Label => new string(_labelStorage, 0, _labelLength);
-    public bool Selected => _selected;
+    public string Text => Label;
+    public bool Checked
+    {
+        get => _selected;
+        set => SetChecked(value);
+    }
+    // C124 compatibility name. C132 applications should use Checked.
+    public bool Selected => Checked;
     public bool Enabled => _enabled;
     public bool IsFocused => _isFocused;
     public bool Visible => _visible;
@@ -85,6 +104,13 @@ public sealed class GuideXosRadioButton
     public GuideXosRadioGroup Group => _group;
     public int GroupIndex => _groupIndex;
     public int RequestedGroupIndex => _requestedGroupIndex;
+
+    /// <summary>
+    /// One bounded callback for each real Checked transition. Reentrant
+    /// assignments on this control update state without recursively invoking
+    /// the same callback; cross-member requests are queued by the group.
+    /// </summary>
+    public Action<bool> Changed { get; set; }
 
     public bool SetLabel(string label)
     {
@@ -142,6 +168,19 @@ public sealed class GuideXosRadioButton
         if (!visible) _isFocused = false;
     }
 
+    public void SetChecked(bool isChecked)
+    {
+        if (isChecked)
+        {
+            if (_group != null) _group.SetCheckedProgrammatically(this);
+            else SetSelectedInternal(true);
+            return;
+        }
+
+        if (_group != null) _group.ClearSelectionFor(this);
+        else SetSelectedInternal(false);
+    }
+
     /// <summary>Requests selection through the group, or selects an ungrouped instance.</summary>
     public bool TrySelect()
     {
@@ -155,7 +194,6 @@ public sealed class GuideXosRadioButton
         if (!enabled)
         {
             _isFocused = false;
-            _group?.HandleMemberDisabled(this);
         }
     }
 
@@ -172,8 +210,8 @@ public sealed class GuideXosRadioButton
     /// <summary>Restores the transient button state and clears this member's selection.</summary>
     public void Reset()
     {
-        _group?.ClearSelectionFor(this);
-        _selected = false;
+        _group?.ClearSelectionFor(this, false);
+        SetSelectedInternal(false, false);
         _enabled = true;
         _isFocused = false;
         _visible = true;
@@ -289,7 +327,6 @@ public sealed class GuideXosRadioButton
     {
         _group = group;
         _groupIndex = index;
-        _selected = false;
         _requestedGroupIndex = -1;
     }
 
@@ -301,14 +338,32 @@ public sealed class GuideXosRadioButton
         _requestedGroupIndex = -1;
     }
 
-    internal void SetSelectedInternal(bool selected)
+    internal void SetGroupIndex(int index)
     {
+        _groupIndex = index;
+    }
+
+    internal void SetSelectedInternal(bool selected, bool notify = true)
+    {
+        if (_selected == selected) return;
         _selected = selected;
+        if (!notify) return;
+        Action<bool> changed = Changed;
+        if (changed == null || _dispatchingChanged) return;
+        _dispatchingChanged = true;
+        try
+        {
+            changed(_selected);
+        }
+        finally
+        {
+            _dispatchingChanged = false;
+        }
     }
 
     private bool SelectInternal()
     {
-        _selected = true;
+        SetSelectedInternal(true);
         return true;
     }
 

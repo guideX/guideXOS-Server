@@ -1,21 +1,25 @@
-using System;
-
 namespace HostLogProof;
 
 /// <summary>
-/// Explicitly bounded mutually-exclusive membership for radio buttons.
-/// Registration order is the deterministic order used by arrow navigation.
+/// Fixed-capacity mutually-exclusive membership for independent radio
+/// buttons. Registration order is the deterministic order used by optional
+/// arrow navigation; the group is not a Panel owner or a second UI registry.
 /// </summary>
 public sealed class GuideXosRadioGroup
 {
     public const int DefaultMaximumMemberCount = 4;
     public const int MaximumSupportedMemberCount = 4;
+    private const int MaximumSelectionTransactions = 8;
 
     private readonly GuideXosRadioButton[] _members;
     private readonly int _capacity;
     private int _memberCount;
     private int _selectedIndex = -1;
     private uint _rejectedOperationCount;
+    private uint _selectionTransactionCount;
+    private bool _applyingSelection;
+    private bool _hasPendingSelection;
+    private int _pendingSelectionIndex = -1;
 
     public GuideXosRadioGroup(int maximumMemberCount = DefaultMaximumMemberCount)
     {
@@ -35,6 +39,7 @@ public sealed class GuideXosRadioGroup
     public GuideXosRadioButton SelectedMember =>
         _selectedIndex >= 0 ? _members[_selectedIndex] : null;
     public uint RejectedOperationCount => _rejectedOperationCount;
+    public uint SelectionTransactionCount => _selectionTransactionCount;
 
     public bool TryRegister(GuideXosRadioButton button)
     {
@@ -45,34 +50,56 @@ public sealed class GuideXosRadioGroup
             return false;
         }
 
-        _members[_memberCount] = button;
-        button.AttachGroup(this, _memberCount);
+        int index = _memberCount;
+        _members[index] = button;
+        button.AttachGroup(this, index);
         ++_memberCount;
+
+        // Last registered initially checked member wins. This policy is
+        // deterministic and goes through the same ordered callback path as a
+        // later programmatic or input selection.
+        if (button.Checked) RequestSelection(index);
+        return true;
+    }
+
+    public bool TryUnregister(GuideXosRadioButton button)
+    {
+        if (!TryGetMemberIndex(button, out int index))
+        {
+            ++_rejectedOperationCount;
+            return false;
+        }
+
+        if (_selectedIndex == index) RequestSelection(-1);
+        button.DetachGroup();
+        for (int move = index + 1; move < _memberCount; move++)
+        {
+            _members[move - 1] = _members[move];
+            _members[move - 1].SetGroupIndex(move - 1);
+        }
+        _members[--_memberCount] = null;
+        if (_selectedIndex > index) --_selectedIndex;
         return true;
     }
 
     public bool TrySelect(GuideXosRadioButton button)
     {
-        if (!TryGetMemberIndex(button, out int index) ||
-            !button.Enabled)
+        if (!TryGetMemberIndex(button, out int index) || !button.Enabled)
         {
             ++_rejectedOperationCount;
             return false;
         }
-        SelectIndexInternal(index);
-        return true;
+        return RequestSelection(index);
     }
 
     public bool TrySelectIndex(int index)
     {
-        if (index < 0 || index >= _memberCount ||
-            !_members[index].Enabled)
+        if (index < 0 || index >= _memberCount || !_members[index].Enabled)
         {
             ++_rejectedOperationCount;
             return false;
         }
-        SelectIndexInternal(index);
-        return true;
+        return RequestSelection(index);
     }
 
     public GuideXosRadioButton GetMember(int index)
@@ -100,17 +127,29 @@ public sealed class GuideXosRadioGroup
         _memberCount = 0;
         _selectedIndex = -1;
         _rejectedOperationCount = 0u;
+        _selectionTransactionCount = 0u;
+        _applyingSelection = false;
+        _hasPendingSelection = false;
+        _pendingSelectionIndex = -1;
     }
 
     internal bool TryMove(
         GuideXosRadioButton current, bool reverse, out int targetIndex)
     {
         targetIndex = -1;
-        if (!TryGetMemberIndex(current, out int currentIndex))
+        if (!TryGetMoveTarget(current, reverse, out targetIndex))
         {
             ++_rejectedOperationCount;
             return false;
         }
+        return RequestSelection(targetIndex);
+    }
+
+    internal bool TryGetMoveTarget(
+        GuideXosRadioButton current, bool reverse, out int targetIndex)
+    {
+        targetIndex = -1;
+        if (!TryGetMemberIndex(current, out int currentIndex)) return false;
 
         int index = currentIndex;
         for (int count = 0; count < _memberCount; count++)
@@ -118,9 +157,9 @@ public sealed class GuideXosRadioGroup
             index += reverse ? -1 : 1;
             if (index < 0) index = _memberCount - 1;
             if (index >= _memberCount) index = 0;
-            if (_members[index].Enabled)
+            GuideXosRadioButton candidate = _members[index];
+            if (candidate.Enabled && candidate.EffectiveVisible)
             {
-                SelectIndexInternal(index);
                 targetIndex = index;
                 return true;
             }
@@ -128,56 +167,100 @@ public sealed class GuideXosRadioGroup
         return false;
     }
 
-    internal void HandleMemberDisabled(GuideXosRadioButton button)
+    internal void SetCheckedProgrammatically(GuideXosRadioButton button)
     {
-        if (!TryGetMemberIndex(button, out int index) ||
-            _selectedIndex != index)
-        {
-            return;
-        }
-
-        int next = FindEnabledFrom(index, false);
-        if (next >= 0) SelectIndexInternal(next);
-        else ClearSelectionInternal();
+        if (TryGetMemberIndex(button, out int index)) RequestSelection(index);
     }
 
-    internal void ClearSelectionFor(GuideXosRadioButton button)
+    internal void ClearSelectionFor(
+        GuideXosRadioButton button, bool notify = true)
     {
-        if (TryGetMemberIndex(button, out int index) &&
-            _selectedIndex == index)
+        if (!TryGetMemberIndex(button, out int index)) return;
+        if (_selectedIndex == index)
         {
-            ClearSelectionInternal();
+            if (notify) RequestSelection(-1);
+            else
+            {
+                _selectedIndex = -1;
+                _members[index].SetSelectedInternal(false, false);
+            }
         }
     }
 
-    private int FindEnabledFrom(int start, bool reverse)
+    private bool RequestSelection(int index)
     {
-        for (int count = 0; count < _memberCount; count++)
+        if (index < -1 || index >= _memberCount)
         {
-            int index = start + (reverse ? -count : count);
-            while (index < 0) index += _memberCount;
-            while (index >= _memberCount) index -= _memberCount;
-            if (_members[index].Enabled) return index;
+            ++_rejectedOperationCount;
+            return false;
         }
-        return -1;
+        if (_applyingSelection)
+        {
+            _pendingSelectionIndex = index;
+            _hasPendingSelection = true;
+            return true;
+        }
+
+        _applyingSelection = true;
+        try
+        {
+            int requested = index;
+            for (int transaction = 0;
+                 transaction < MaximumSelectionTransactions;
+                 transaction++)
+            {
+                _hasPendingSelection = false;
+                if (!(requested == _selectedIndex &&
+                    IsOnlySelected(requested)))
+                {
+                    ++_selectionTransactionCount;
+                    ApplySelectionOnce(requested);
+                }
+                if (!_hasPendingSelection) break;
+                requested = _pendingSelectionIndex;
+            }
+            _hasPendingSelection = false;
+            return true;
+        }
+        finally
+        {
+            _applyingSelection = false;
+            _pendingSelectionIndex = -1;
+        }
     }
 
-    private void SelectIndexInternal(int index)
+    private void ApplySelectionOnce(int index)
+    {
+        int previous = _selectedIndex;
+        _selectedIndex = -1;
+        if (previous >= 0 && previous < _memberCount)
+        {
+            _members[previous].SetSelectedInternal(false);
+        }
+        for (int memberIndex = 0; memberIndex < _memberCount; memberIndex++)
+        {
+            if (memberIndex != index && _members[memberIndex].Checked)
+            {
+                _members[memberIndex].SetSelectedInternal(false);
+            }
+        }
+        if (index >= 0)
+        {
+            _selectedIndex = index;
+            _members[index].SetSelectedInternal(true);
+        }
+    }
+
+    private bool IsOnlySelected(int index)
     {
         for (int memberIndex = 0; memberIndex < _memberCount; memberIndex++)
         {
-            _members[memberIndex].SetSelectedInternal(memberIndex == index);
+            if (memberIndex != index && _members[memberIndex].Checked)
+            {
+                return false;
+            }
         }
-        _selectedIndex = index;
-    }
-
-    private void ClearSelectionInternal()
-    {
-        for (int index = 0; index < _memberCount; index++)
-        {
-            _members[index].SetSelectedInternal(false);
-        }
-        _selectedIndex = -1;
+        return index < 0 || _members[index].Checked;
     }
 
     private bool Contains(GuideXosRadioButton button)
@@ -189,7 +272,8 @@ public sealed class GuideXosRadioGroup
         return false;
     }
 
-    private bool TryGetMemberIndex(GuideXosRadioButton button, out int index)
+    private bool TryGetMemberIndex(
+        GuideXosRadioButton button, out int index)
     {
         for (int candidate = 0; candidate < _memberCount; candidate++)
         {

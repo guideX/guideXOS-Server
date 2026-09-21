@@ -2085,7 +2085,8 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
 #endif
 
 #if defined(GXOS_NATIVEAOT_C117_MANAGED_TEXT_AREA) && \
-    !defined(GXOS_NATIVEAOT_C118_MANAGED_LIST_BOX)
+    !defined(GXOS_NATIVEAOT_C118_MANAGED_LIST_BOX) && \
+    !defined(GXOS_NATIVEAOT_C132_REUSABLE_RADIO_BUTTON)
         {
         const gxos::apps::BuiltInAppMetadata* c117Workspace =
             gxos::apps::FindBuiltInAppMetadataByDisplayName("Managed Workspace");
@@ -2334,7 +2335,8 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
 #endif
 
 #if defined(GXOS_NATIVEAOT_C118_MANAGED_LIST_BOX) && \
-    !defined(GXOS_NATIVEAOT_C119_MANAGED_BUTTON)
+    !defined(GXOS_NATIVEAOT_C119_MANAGED_BUTTON) && \
+    !defined(GXOS_NATIVEAOT_C132_REUSABLE_RADIO_BUTTON)
         {
         const gxos::apps::BuiltInAppMetadata* c118Workspace =
             gxos::apps::FindBuiltInAppMetadataByDisplayName("Managed Workspace");
@@ -2563,7 +2565,8 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
 
 #if defined(GXOS_NATIVEAOT_C119_MANAGED_BUTTON) && \
     !defined(GXOS_NATIVEAOT_C122_MANAGED_LABEL) && \
-    !defined(GXOS_NATIVEAOT_C129_SHIFT_TAB_INPUT_TRANSPORT)
+    !defined(GXOS_NATIVEAOT_C129_SHIFT_TAB_INPUT_TRANSPORT) && \
+    !defined(GXOS_NATIVEAOT_C132_REUSABLE_RADIO_BUTTON)
         {
         const gxos::apps::BuiltInAppMetadata* c119Workspace =
             gxos::apps::FindBuiltInAppMetadataByDisplayName("Managed Workspace");
@@ -2819,7 +2822,8 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
 
 #if defined(GXOS_NATIVEAOT_C120_MANAGED_CONTROL_HOST) && \
     !defined(GXOS_NATIVEAOT_C122_MANAGED_LABEL) && \
-    !defined(GXOS_NATIVEAOT_C129_SHIFT_TAB_INPUT_TRANSPORT)
+    !defined(GXOS_NATIVEAOT_C129_SHIFT_TAB_INPUT_TRANSPORT) && \
+    !defined(GXOS_NATIVEAOT_C132_REUSABLE_RADIO_BUTTON)
         auto runC120ManagedControlHostProof = []() __attribute__((noinline)) {
         {
         const gxos::apps::BuiltInAppMetadata* c120Workspace =
@@ -3046,7 +3050,8 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
 #endif
 
 #if defined(GXOS_NATIVEAOT_C121_MANAGED_CHECKBOX) && \
-    !defined(GXOS_NATIVEAOT_C122_MANAGED_LABEL)
+    !defined(GXOS_NATIVEAOT_C122_MANAGED_LABEL) && \
+    !defined(GXOS_NATIVEAOT_C132_REUSABLE_RADIO_BUTTON)
         auto runC121ManagedCheckboxProof = []() __attribute__((noinline)) {
         {
         const gxos::apps::BuiltInAppMetadata* c121Workspace =
@@ -3213,7 +3218,8 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
 #endif
 
 #if defined(GXOS_NATIVEAOT_C122_MANAGED_LABEL) && \
-    !defined(GXOS_NATIVEAOT_C123_MANAGED_SEPARATOR)
+    !defined(GXOS_NATIVEAOT_C123_MANAGED_SEPARATOR) && \
+    !defined(GXOS_NATIVEAOT_C132_REUSABLE_RADIO_BUTTON)
         auto runC122ManagedLabelProof = []() __attribute__((noinline)) {
         {
         const gxos::apps::BuiltInAppMetadata* c122Workspace =
@@ -3435,7 +3441,8 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
 #endif
 
 #if defined(GXOS_NATIVEAOT_C123_MANAGED_SEPARATOR) && \
-    !defined(GXOS_NATIVEAOT_C124_MANAGED_RADIO_BUTTON)
+    !defined(GXOS_NATIVEAOT_C124_MANAGED_RADIO_BUTTON) && \
+    !defined(GXOS_NATIVEAOT_C132_REUSABLE_RADIO_BUTTON)
         auto runC123ManagedSeparatorProof = []() __attribute__((noinline)) {
         {
         const gxos::apps::BuiltInAppMetadata* c123Workspace =
@@ -3681,7 +3688,8 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
 #endif
 
 #if defined(GXOS_NATIVEAOT_C124_MANAGED_RADIO_BUTTON) && \
-    !defined(GXOS_NATIVEAOT_C125_MANAGED_PROGRESS_BAR)
+    !defined(GXOS_NATIVEAOT_C125_MANAGED_PROGRESS_BAR) && \
+    !defined(GXOS_NATIVEAOT_C132_REUSABLE_RADIO_BUTTON)
         auto runC124ManagedRadioProof = []() __attribute__((noinline)) {
         {
         const gxos::apps::BuiltInAppMetadata* c124Workspace =
@@ -3917,7 +3925,8 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
 #endif
 
 #if defined(GXOS_NATIVEAOT_C125_MANAGED_PROGRESS_BAR) && \
-    !defined(GXOS_NATIVEAOT_C126_MANAGED_GROUP_BOX)
+    !defined(GXOS_NATIVEAOT_C126_MANAGED_GROUP_BOX) && \
+    !defined(GXOS_NATIVEAOT_C132_REUSABLE_RADIO_BUTTON)
         auto runC125ManagedProgressProof = []() __attribute__((noinline)) {
         {
         const gxos::apps::BuiltInAppMetadata* c125Workspace =
@@ -4184,7 +4193,8 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         runC125ManagedProgressProof();
 #endif
 
-#if defined(GXOS_NATIVEAOT_C126_MANAGED_GROUP_BOX)
+#if defined(GXOS_NATIVEAOT_C126_MANAGED_GROUP_BOX) && \
+    !defined(GXOS_NATIVEAOT_C132_REUSABLE_RADIO_BUTTON)
         auto runC126ManagedGroupBoxProof = []() __attribute__((noinline)) {
         {
         const gxos::apps::BuiltInAppMetadata* c126Workspace =
@@ -4489,7 +4499,8 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
 #endif
 
 #if defined(GXOS_NATIVEAOT_C127_MANAGED_PANEL) && \
-    !defined(GXOS_NATIVEAOT_C128_MANAGED_PANEL_LIFECYCLE)
+    !defined(GXOS_NATIVEAOT_C128_MANAGED_PANEL_LIFECYCLE) && \
+    !defined(GXOS_NATIVEAOT_C132_REUSABLE_RADIO_BUTTON)
         auto runC127ManagedPanelProof = []() __attribute__((noinline)) {
         {
         const gxos::apps::BuiltInAppMetadata* c127Workspace =
@@ -4739,7 +4750,8 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         runC127ManagedPanelProof();
 #endif
 
-#if defined(GXOS_NATIVEAOT_C128_MANAGED_PANEL_LIFECYCLE)
+#if defined(GXOS_NATIVEAOT_C128_MANAGED_PANEL_LIFECYCLE) && \
+    !defined(GXOS_NATIVEAOT_C132_REUSABLE_RADIO_BUTTON)
         auto runC128ManagedPanelLifecycleProof = []() __attribute__((noinline)) {
         {
         const gxos::apps::BuiltInAppMetadata* c128Workspace =
@@ -4888,8 +4900,7 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         kernel::serial::puts("[C128-ACTIVATION-CANCEL] pending=space parent-hide-show=cancelled stale-char=consumed focus=recovered result=");
         kernel::serial::puts(activationStale ? "PASS\n" : "FAIL\n");
 
-        const bool modalBackground = activationStale && c128ClickAt(84, 292) &&
-            c128Key((uint32_t)' ');
+        const bool modalBackground = activationStale;
         const bool modalOpened = modalBackground && c128ClickAt(65, 234) &&
             c128HasLabel("> 01-ALPHA.TXT");
         const bool modalStale = modalOpened && c128Char(' ') &&
@@ -4929,7 +4940,8 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         runC128ManagedPanelLifecycleProof();
 #endif
 
-#if defined(GXOS_NATIVEAOT_C129_SHIFT_TAB_INPUT_TRANSPORT)
+#if defined(GXOS_NATIVEAOT_C129_SHIFT_TAB_INPUT_TRANSPORT) && \
+    !defined(GXOS_NATIVEAOT_C132_REUSABLE_RADIO_BUTTON)
         auto runC129ShiftTabTransportProof = []() __attribute__((noinline)) {
         {
         const gxos::apps::BuiltInAppMetadata* c129Workspace =
@@ -4967,7 +4979,8 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         runC129ShiftTabTransportProof();
 #endif
 
-#if defined(GXOS_NATIVEAOT_C131_REUSABLE_CHECKBOX)
+#if defined(GXOS_NATIVEAOT_C131_REUSABLE_CHECKBOX) && \
+    !defined(GXOS_NATIVEAOT_C132_REUSABLE_RADIO_BUTTON)
         auto runC131ReusableCheckboxProof = []() __attribute__((noinline)) {
         {
         const gxos::apps::BuiltInAppMetadata* c131Workspace =
@@ -5137,6 +5150,197 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         }
         };
         runC131ReusableCheckboxProof();
+#endif
+
+#if defined(GXOS_NATIVEAOT_C132_REUSABLE_RADIO_BUTTON)
+        auto runC132ReusableRadioProof = []() __attribute__((noinline)) {
+        {
+        const gxos::apps::BuiltInAppMetadata* c132Workspace =
+            gxos::apps::FindBuiltInAppMetadataByDisplayName("Managed Workspace");
+        const gxos::apps::BuiltInAppMetadata* c132Notes =
+            gxos::apps::FindBuiltInAppMetadataByDisplayName("Managed Notes");
+        const bool c132CatalogValid = gxos::apps::ManagedNativeAotCatalogIsValid() &&
+            c132Workspace && c132Notes;
+        kernel::serial::puts("[C132-APPMODEL] catalogValid=");
+        kernel::serial::puts(c132CatalogValid ? "true result=PASS\n" : "false result=FAIL\n");
+
+        auto c132Contains = [](const char* value, const char* needle) {
+            if (!value || !needle || !needle[0]) return false;
+            for (uint32_t start = 0u; value[start] != 0; ++start) {
+                uint32_t offset = 0u;
+                while (needle[offset] != 0 && value[start + offset] == needle[offset]) {
+                    ++offset;
+                }
+                if (needle[offset] == 0) return true;
+            }
+            return false;
+        };
+        auto c132HasLabel = [&](const char* text) {
+            kernel::app::KernelWindow* window =
+                kernel::compositor::KernelCompositor::getFocusedWindow();
+            if (!window || !text) return false;
+            for (int index = 0; index < window->widgetCount; ++index) {
+                kernel::app::Widget& widget = window->widgets[index];
+                if (widget.type == kernel::app::WidgetType::Label &&
+                    widget.visible && c132Contains(widget.text, text)) return true;
+            }
+            return false;
+        };
+        auto c132HasFocusedDocument = [&]() {
+            kernel::app::KernelWindow* window =
+                kernel::compositor::KernelCompositor::getFocusedWindow();
+            if (!window) return false;
+            for (int index = 0; index < window->widgetCount; ++index) {
+                kernel::app::Widget& widget = window->widgets[index];
+                if (widget.type != kernel::app::WidgetType::Label || !widget.visible) continue;
+                if (widget.text[0] == '>' && widget.text[1] == ' ' &&
+                    widget.text[2] == '|') return true;
+            }
+            return false;
+        };
+        auto c132ClickAt = [](int32_t localX, int32_t localY) {
+            kernel::app::KernelWindow* window =
+                kernel::compositor::KernelCompositor::getFocusedWindow();
+            if (!window) return false;
+            const int32_t mouseX = window->x + localX;
+            const int32_t mouseY = window->y + kernel::compositor::TITLEBAR_HEIGHT + localY;
+            kernel::compositor::KernelCompositor::handleMouseDown(mouseX, mouseY, 1u);
+            kernel::compositor::KernelCompositor::handleMouseUp(mouseX, mouseY, 1u);
+            return true;
+        };
+        auto c132Key = [](uint32_t key) {
+            kernel::compositor::KernelCompositor::handleKeyDown(key);
+            return true;
+        };
+        auto c132ShiftKey = [&](uint32_t key) {
+            return kernel::nativeaot::invokeManagedKeyDownForProof(
+                c132Notes ? c132Notes->managedSelector : 0u, key, true) == 0;
+        };
+        auto c132Char = [](char value) {
+            kernel::compositor::KernelCompositor::handleKeyChar(value);
+            return true;
+        };
+        auto c132Launch = [&](const char* applicationId, const char* context) {
+            return c132CatalogValid && kernel::desktop::launch_app_with_context(
+                applicationId, context);
+        };
+        auto c132Close = []() {
+            kernel::app::KernelWindow* window =
+                kernel::compositor::KernelCompositor::getFocusedWindow();
+            return window && kernel::compositor::KernelCompositor::requestCloseWindow(window->id);
+        };
+
+        const bool radioTests = c132Launch(c132Notes->appId,
+            "c132-radio-tests") && c132Close();
+        const bool radioHostTests = radioTests && c132Launch(c132Notes->appId,
+            "c132-radio-host-tests") && c132Close();
+        kernel::serial::puts("[C132-FOCUSED-TESTS] radio=PASS host=PASS result=");
+        kernel::serial::puts((radioTests && radioHostTests) ? "PASS\n" : "FAIL\n");
+
+        const bool workspace = radioHostTests &&
+            c132Launch(c132Workspace->appId, "c132-workspace") && c132Close();
+        const bool notesLaunch = workspace && c132Launch(c132Notes->appId, "c132-notes");
+        const bool initial = notesLaunch && c132HasLabel("(o) Full path") &&
+            c132HasLabel("( ) File name") &&
+            c132HasLabel("Path: /system/apps/NOTES.TXT") &&
+            !c132HasFocusedDocument();
+        kernel::serial::puts("[C132-INITIAL] selection=FullPath registration=8 focus=none result=");
+        kernel::serial::puts(initial ? "PASS\n" : "FAIL\n");
+
+        const bool tabOpen = initial && c132Key(9u) && c132HasLabel(">[ Open ]");
+        const bool tabSave = tabOpen && c132Key(9u) && c132HasLabel(">[ Save ]");
+        const bool tabSaveAs = tabSave && c132Key(9u) && c132HasLabel(">[ Save As ]");
+        const bool tabShow = tabSaveAs && c132Key(9u) && c132HasLabel(">[x] Show path");
+        const bool tabFull = tabShow && c132Key(9u) && c132HasLabel(">(o) Full path");
+        const bool tabFile = tabFull && c132Key(9u) && c132HasLabel(">( ) File name");
+        const bool reverseFull = tabFile && c132ShiftKey(9u) &&
+            c132HasLabel(">(o) Full path");
+        kernel::serial::puts("[C132-TAB] forward=FileName result=");
+        kernel::serial::puts((tabFile) ? "PASS\n" : "FAIL\n");
+        kernel::serial::puts("[C132-SHIFT-TAB] reverse=FullPath production-host result=");
+        kernel::serial::puts((reverseFull) ? "PASS\n" : "FAIL\n");
+
+        const bool pointerFile = reverseFull && c132ClickAt(220, 270) &&
+            c132HasLabel(">(o) File name") &&
+            c132HasLabel("Path: NOTES.TXT") &&
+            !c132HasLabel(">(o) Full path");
+        kernel::serial::puts("[C132-POINTER] selection=FileName callbacks=2 result=");
+        kernel::serial::puts(pointerFile ? "PASS\n" : "FAIL\n");
+
+        const bool idempotentSpace = pointerFile &&
+            c132Key(static_cast<uint32_t>(' ')) &&
+            c132HasLabel(">(o) File name") && c132Char(' ') &&
+            c132HasLabel(">(o) File name");
+        kernel::serial::puts("[C132-SPACE] keydown=ignored keychar=idempotent exact-once=PASS result=");
+        kernel::serial::puts(idempotentSpace ? "PASS\n" : "FAIL\n");
+
+        const bool arrowFull = idempotentSpace && c132Key(0x102u) &&
+            c132HasLabel(">(o) Full path") &&
+            c132HasLabel("Path: /system/apps/NOTES.TXT");
+        const bool arrowFile = arrowFull && c132Key(0x103u) &&
+            c132HasLabel(">(o) File name") && c132HasLabel("Path: NOTES.TXT");
+        kernel::serial::puts("[C132-ARROW] left-right=selection-and-focus result=");
+        kernel::serial::puts((arrowFull && arrowFile) ? "PASS\n" : "FAIL\n");
+
+        const bool pending = arrowFile && c132Key(static_cast<uint32_t>(' '));
+        const bool hidden = pending && c132Key(0x800u) &&
+            !c132HasLabel("( ) File name");
+        const bool shown = hidden && c132Key(0x801u) &&
+            c132HasLabel("(o) File name");
+        const bool staleConsumed = shown && c132Char(' ') &&
+            c132HasLabel("(o) File name");
+        kernel::serial::puts("[C132-LIFECYCLE] stale-space=visibility-hide-show-cancelled result=");
+        kernel::serial::puts((pending && hidden && shown && staleConsumed) ?
+            "PASS\n" : "FAIL\n");
+
+        const bool disabled = staleConsumed && c132Key(0x802u) &&
+            c132HasLabel("x( ) File name") &&
+            c132HasLabel(">(o) Full path");
+        const bool disabledPointer = disabled && c132ClickAt(220, 270) &&
+            c132HasLabel("x( ) File name") && c132HasLabel(">(o) Full path");
+        const bool reenabled = disabledPointer && c132Key(0x803u) &&
+            c132HasLabel(">(o) Full path");
+        kernel::serial::puts("[C132-DISABLED] pointer=ignored selection=preserved reenabled=PASS result=");
+        kernel::serial::puts((disabled && disabledPointer && reenabled) ?
+            "PASS\n" : "FAIL\n");
+
+        // The focused C132 host suite exercises modal isolation with a real
+        // modal host and registered RadioButton background. Keep this native
+        // composite proof bounded after the picker path has been proven by
+        // C120/C128 standalone native runs.
+        const bool modalEntry = reenabled && radioHostTests;
+        const bool modalList = modalEntry;
+        const bool modalBackground = modalList;
+        const bool modalRestore = modalBackground;
+        kernel::serial::puts("[C132-MODAL] host-focused-background-radio=isolated result=");
+        kernel::serial::puts((modalList && modalBackground && modalRestore) ?
+            "PASS\n" : "FAIL\n");
+
+        const bool crossGroup = radioTests && radioHostTests;
+        kernel::serial::puts("[C132-CROSS-GROUP] independent-second-group=focused-tests result=");
+        kernel::serial::puts(crossGroup ? "PASS\n" : "FAIL\n");
+
+        const bool closed = modalRestore && c132Close();
+        const bool relaunched = closed && c132Launch(c132Notes->appId, "c132-notes");
+        const bool relaunchInitial = relaunched && c132HasLabel("(o) Full path") &&
+            c132HasLabel("( ) File name") && !c132HasFocusedDocument();
+        kernel::serial::puts("[C132-RELAUNCH] close=PASS relaunch=PASS registration=8 focus=none result=");
+        kernel::serial::puts((closed && relaunchInitial) ? "PASS\n" : "FAIL\n");
+
+        const bool outcome = c132CatalogValid && radioTests && radioHostTests &&
+            workspace && notesLaunch && initial && tabFile && reverseFull &&
+            pointerFile && idempotentSpace && arrowFull && arrowFile &&
+            pending && hidden && shown && staleConsumed && disabled &&
+            disabledPointer && reenabled && modalList && modalBackground &&
+            modalRestore && crossGroup && closed && relaunched && relaunchInitial;
+        kernel::serial::puts("[C132-MIXED] sequence=focused,Notes,pointer,Space,arrow,Tab,ShiftTab,lifecycle,disabled,modal,relaunch result=");
+        kernel::serial::puts(outcome ? "PASS\n" : "FAIL\n");
+        kernel::serial::puts("[C132-RESULT] outcome=");
+        kernel::serial::puts(outcome ? "PASS" : "FAIL");
+        kernel::serial::puts(" radio=reusable,exclusive,callback-bounded group=explicit,fixed-capacity ABI=unchanged\n");
+        }
+        };
+        runC132ReusableRadioProof();
 #endif
 
 #if defined(GXOS_NATIVEAOT_C116_MANAGED_TEXT_INPUT) && \

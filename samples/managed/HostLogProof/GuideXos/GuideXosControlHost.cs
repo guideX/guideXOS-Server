@@ -25,6 +25,7 @@ public enum GuideXosControlHostResult
     Rejected = 9,
     Disabled = 10,
     Toggled = 11,
+    Unregistered = 12,
 }
 
 /// <summary>
@@ -114,6 +115,47 @@ public sealed class GuideXosControlHost
         int id, GuideXosRadioButton control, bool focusable = true)
     {
         return TryRegister(id, GuideXosManagedControlKind.RadioButton, control, focusable);
+    }
+
+    /// <summary>
+    /// Removes one registered control and, for a radio member, removes its
+    /// logical group membership too. This keeps a closed or stale host entry
+    /// from participating in a later selection transaction.
+    /// </summary>
+    public GuideXosControlHostResult TryUnregister(int id)
+    {
+        if (_modalHost != null) return _modalHost.TryUnregister(id);
+        CancelPendingSpace();
+        if (!TryFindIndex(id, out int index))
+        {
+            return GuideXosControlHostResult.Rejected;
+        }
+
+        int priorActiveIndex = _activeIndex;
+        BlurControl(index);
+        if (_entries[index].Kind == GuideXosManagedControlKind.RadioButton)
+        {
+            GuideXosRadioButton radio =
+                (GuideXosRadioButton)_entries[index].Control;
+            radio.Group?.TryUnregister(radio);
+        }
+        for (int move = index + 1; move < _registrationCount; move++)
+        {
+            _entries[move - 1] = _entries[move];
+        }
+        _entries[--_registrationCount] = default;
+
+        if (priorActiveIndex == index)
+        {
+            _activeIndex = -1;
+            int next = FindEligibleFrom(index, false);
+            if (next >= 0) FocusIndex(next);
+        }
+        else if (priorActiveIndex > index)
+        {
+            _activeIndex = priorActiveIndex - 1;
+        }
+        return GuideXosControlHostResult.Unregistered;
     }
 
     public GuideXosControlHostResult TrySetFocusable(int id, bool focusable)
@@ -235,7 +277,16 @@ public sealed class GuideXosControlHost
             IsSpaceActivationControl(routedIndex) &&
             IsEligible(routedIndex) && IsControlFocused(routedIndex))
         {
-            _pendingSpaceIndex = routedIndex;
+            // An already-selected RadioButton is idempotent. There is no
+            // delayed selection to protect in that case, so do not retain a
+            // pending gesture that a later lifecycle transition would need
+            // to cancel.
+            if (_entries[routedIndex].Kind !=
+                    GuideXosManagedControlKind.RadioButton ||
+                !((GuideXosRadioButton)_entries[routedIndex].Control).Checked)
+            {
+                _pendingSpaceIndex = routedIndex;
+            }
         }
         return result;
     }
@@ -356,6 +407,15 @@ public sealed class GuideXosControlHost
     {
         if (_modalHost != null) _modalHost.Reset();
         BlurAll();
+        for (int index = 0; index < _registrationCount; index++)
+        {
+            if (_entries[index].Kind == GuideXosManagedControlKind.RadioButton)
+            {
+                GuideXosRadioButton radio =
+                    (GuideXosRadioButton)_entries[index].Control;
+                radio.Group?.TryUnregister(radio);
+            }
+        }
         for (int index = 0; index < _entries.Length; index++)
         {
             _entries[index] = default;
@@ -547,6 +607,38 @@ public sealed class GuideXosControlHost
         {
             GuideXosRadioButton radio =
                 (GuideXosRadioButton)_entries[index].Control;
+            bool isArrow = key == GuideXosTextInputKey.Left ||
+                key == GuideXosTextInputKey.Up ||
+                key == GuideXosTextInputKey.Right ||
+                key == GuideXosTextInputKey.Down;
+            if (isArrow && radio.Group != null)
+            {
+                bool reverse = key == GuideXosTextInputKey.Left ||
+                    key == GuideXosTextInputKey.Up;
+                if (!radio.Group.TryGetMoveTarget(radio, reverse,
+                        out int targetGroupIndex))
+                {
+                    return GuideXosControlHostResult.Ignored;
+                }
+                GuideXosRadioButton target =
+                    radio.Group.GetMember(targetGroupIndex);
+                if (target == null || !TryFindControlReference(target,
+                        out int targetHostIndex))
+                {
+                    // A group member not registered in this host is never an
+                    // eligible arrow-navigation target.
+                    return GuideXosControlHostResult.Ignored;
+                }
+                GuideXosRadioButtonResult moved = radio.HandleKey(key);
+                if (moved != GuideXosRadioButtonResult.Moved)
+                {
+                    return Map(moved);
+                }
+                return FocusIndex(targetHostIndex) ==
+                    GuideXosControlHostResult.Focused
+                    ? GuideXosControlHostResult.Moved
+                    : GuideXosControlHostResult.Rejected;
+            }
             GuideXosRadioButtonResult result = radio.HandleKey(key);
             if (result == GuideXosRadioButtonResult.Moved)
             {
