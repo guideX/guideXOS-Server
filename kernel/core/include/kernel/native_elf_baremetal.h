@@ -28,6 +28,9 @@ struct PackageInfo {
     char abi[64];
     uint64_t executableBytes;
     bool startMenuVisible;
+    // Whether the manifest grants "audio.output". Parsed boundedly at
+    // discovery; gates the play_pcm host call like the hosted runtime.
+    bool hasAudioOutput;
 };
 
 // Scan the mounted /Apps tree for supported NativeElf packages.

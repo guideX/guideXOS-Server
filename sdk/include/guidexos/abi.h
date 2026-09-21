@@ -138,6 +138,16 @@ typedef struct gx_host_calls {
     /* Hosted-development software breakpoint operations. This is appended to
      * preserve every existing host-call slot and is not a bare-metal ABI. */
     gx_result (GX_CALL *development_debug)(gx_app_context* ctx, const gx_development_debug_request* request, gx_development_debug_snapshot* outSnapshot);
+    /* Application audio output (MC5). Appended after development_debug so
+     * every existing slot keeps its offset. Fire-and-forget playback of one
+     * short decoded PCM sound effect; overlapping calls mix when the host
+     * backend supports it. The PCM format contract lives in
+     * sdk/include/guidexos/audio.h (GX_AUDIO_* constants). Hosts without an
+     * audio backend return GX_ERROR_NOT_IMPLEMENTED or GX_ERROR_UNSUPPORTED
+     * after argument/permission validation; callers must remain fully
+     * functional without audio. Requires the "audio.output" manifest
+     * permission, otherwise GX_ERROR_PERMISSION_DENIED. */
+    gx_result (GX_CALL *play_pcm)(gx_app_context* ctx, const void* pcmData, uint32_t pcmBytes, uint32_t sampleRateHz, uint32_t channels, uint32_t bitsPerSample);
 } gx_host_calls;
 
 #ifdef __cplusplus

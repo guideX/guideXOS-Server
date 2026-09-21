@@ -35,6 +35,16 @@ $Samples = @(
         Resources = @('resources/about.txt')
     },
     [ordered]@{
+        Name = 'AudioBeep'
+        SourceDir = Join-Path $SdkRoot 'samples/audiobeep'
+        Source = 'main.cpp'
+        OutputDir = Join-Path $AppsRoot 'AudioBeep'
+        ElfRelativePath = 'bin/amd64/audiobeep.elf'
+        Manifest = 'app.json'
+        StagedAppId = 'com.guidexos.audiobeep'
+        Resources = @()
+    },
+    [ordered]@{
         Name = 'MissileCommand'
         SourceDir = Join-Path $SdkRoot 'samples/missilecommand'
         Source = 'main.cpp'
@@ -42,7 +52,7 @@ $Samples = @(
         ElfRelativePath = 'bin/amd64/missilecommand.elf'
         Manifest = 'app.json'
         StagedAppId = 'com.guidexos.missilecommand'
-        Resources = @('resources/DD.ini', 'resources/city.gximg')
+        Resources = @('resources/DD.ini', 'resources/city.gximg', 'resources/audio/alarm.wav', 'resources/audio/empty.wav', 'resources/audio/explode.wav', 'resources/audio/split.wav', 'resources/audio/ohno.wav', 'resources/audio/swoosh.wav')
     }
 )
 

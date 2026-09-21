@@ -1,10 +1,10 @@
 {
     "schemaVersion":  1,
     "id":  "com.guidexos.missilecommand",
-    "displayName":  "Missile Command (MC4)",
-    "version":  "0.4.0",
+    "displayName":  "Missile Command (MC5)",
+    "version":  "0.5.0",
     "publisher":  "guideXOS",
-    "description":  "MC4 L1-L10 campaign for the Missile Command port: runtime DD.ini, full level progression, original build1.gif city art (GXIM resource with rectangle fallback), natural smart bombs, square interception, city persistence, win/lose/game-complete with restart. Audio scoped as platform proposal (no audio ABI).",
+    "description":  "MC5 L1-L10 campaign for the Missile Command port: runtime DD.ini, full level progression, original build1.gif city art (GXIM resource with rectangle fallback), natural smart bombs, square interception, city persistence, win/lose/game-complete with restart, original WAV voices via the App Model play_pcm audio call (side effects only).",
     "category":  "Games",
     "kind":  "NativeElf",
     "icon":  "",
@@ -25,7 +25,8 @@
                         "log",
                         "window",
                         "draw",
-                        "file.read"
+                        "file.read",
+                        "audio.output"
                     ],
     "fileAssociations":  [
 

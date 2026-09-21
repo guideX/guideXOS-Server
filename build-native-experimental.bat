@@ -29,7 +29,7 @@ echo Using compiler: %CXX%
 powershell -NoProfile -ExecutionPolicy Bypass -File "scripts\verify-mbedtls-profile.ps1"
 if errorlevel 1 exit /b 1
 set CXXFLAGS=-std=c++17 -Wall -O2 -iquote . -Ithird_party/mbedtls/include -Ithird_party/mbedtls/tf-psa-crypto/include -Ithird_party/mbedtls/tf-psa-crypto/drivers/builtin/include -Ithird_party/mbedtls/tf-psa-crypto/drivers/builtin/src -Ithird_party/mbedtls/tf-psa-crypto/dispatch -Ithird_party/mbedtls/tf-psa-crypto/extras -Ithird_party/mbedtls/tf-psa-crypto/platform -Ithird_party/mbedtls/tf-psa-crypto/utilities -DMBEDTLS_CONFIG_FILE=\"guidexos/mbedtls_config.h\" -DTF_PSA_CRYPTO_CONFIG_FILE=\"guidexos/crypto_config.h\" -DGX_ENABLE_EXPERIMENTAL_NATIVE_ELF_EXECUTION
-set LDFLAGS=-lws2_32 -lsecur32 -lcrypt32 -lbcrypt -lgdi32 -luser32 -lmsimg32
+set LDFLAGS=-lws2_32 -lsecur32 -lcrypt32 -lbcrypt -lgdi32 -luser32 -lmsimg32 -lwinmm
 
 REM Source files (exclude kernel)
 set SOURCES=^
@@ -88,6 +88,7 @@ navigator_html_parser.cpp ^
 native_app_debug_log.cpp ^
 native_app_process_table.cpp ^
 native_app_debugger.cpp ^
+native_app_audio.cpp ^
 native_app_runtime.cpp ^
 native_build_service.cpp ^
 native_elf_executor.cpp ^

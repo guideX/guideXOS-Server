@@ -1,5 +1,6 @@
-// Missile Command MC4 Native ELF application: full L1 -> ... -> L10 campaign
-// with original build1.gif city art (GXIM resource) and runtime DD.ini.
+// Missile Command MC5 Native ELF application: full L1 -> ... -> L10 campaign
+// with original build1.gif city art (GXIM resource), runtime DD.ini, and
+// first-client App Model audio (play_pcm side effects, original WAVs).
 //
 // Genuine App Model application: gx_main entry point, guidexos-c-abi-v1,
 // fixed-size centered window, retained present_frame scene, poll_event input,
@@ -28,9 +29,11 @@
 // race-free smoke arming).
 
 #include <guidexos/ui.h>
+#include <guidexos/audio.h>
 
 #include "missilecommand_state.h"
 #include "missilecommand_city_art.h"
+#include "missilecommand_audio.h"
 
 extern "C" void* memset(void* destination, int value, uint64_t bytes) {
     uint8_t* output = static_cast<uint8_t*>(destination);
@@ -61,6 +64,30 @@ static char g_ddIniBuffer[2048];
 static unsigned char g_cityGximg[kMcCityArtFileBytes];
 static McCityArtImage g_cityArt;
 static bool g_cityArtValid = false;
+
+// MC5 audio voices: one persistent S16 buffer per verified sound, decoded
+// once at startup from the staged WAV resources. Missing/mismatched files
+// stay silent (upstream sndPlaySound semantics); the game never depends on
+// audio. Sizes are the exact staged frame counts from missilecommand_audio.h.
+static int16_t g_sndAlarm[kMcSoundFramesAlarm];
+static int16_t g_sndSwoosh[kMcSoundFramesSwoosh];
+static int16_t g_sndEmpty[kMcSoundFramesEmpty];
+static int16_t g_sndExplode[kMcSoundFramesExplode];
+static int16_t g_sndSplit[kMcSoundFramesSplit];
+static int16_t g_sndOhNo[kMcSoundFramesOhNo];
+
+struct McLoadedVoice {
+    const int16_t* frames;
+    uint32_t frameCount;
+    uint32_t rate;
+    bool valid;
+};
+
+static McLoadedVoice g_voices[kMcSoundCount];
+static uint32_t g_audioFailLogs = 0;
+// Largest staged audio file (ohno.wav, 74100 bytes): shared sequential file
+// buffer, reused per sound at load time only.
+static unsigned char g_sndFile[74100];
 
 static const uint32_t kColorBackground = 0x000000u;
 static const uint32_t kColorGround = 0x003800u;
@@ -105,6 +132,85 @@ static bool read_exact(gx_app_context* ctx, const char* path, uint64_t offset,
         bytes -= got;
     }
     return true;
+}
+
+// MC5 audio loader: chunked file_read (WAVs exceed no cap individually but
+// ohno.wav exceeds the 64 KiB file_read_all limit, so reuse the read_exact
+// pattern), strict WAV validation, expected spec match. Any failure leaves
+// the voice invalid and the game silently playable.
+static int16_t* voice_frames(int id) {
+    switch (id) {
+        case kMcSoundAlarm: return g_sndAlarm;
+        case kMcSoundSwoosh: return g_sndSwoosh;
+        case kMcSoundEmpty: return g_sndEmpty;
+        case kMcSoundExplode: return g_sndExplode;
+        case kMcSoundSplit: return g_sndSplit;
+        case kMcSoundOhNo: return g_sndOhNo;
+        default: return 0;
+    }
+}
+
+static bool load_one_voice(gx_app_context* ctx, const McSoundResource* res) {
+    if (!ctx || !res || res->id <= 0 || res->id >= kMcSoundCount) return false;
+    int16_t* frames = voice_frames(res->id);
+    uint32_t capacity = mc_sound_frame_capacity(res->id);
+    if (!frames || capacity == 0) return false;
+    // Read up to the largest plausible staged file; stop at short reads.
+    uint32_t total = 0;
+    const uint32_t fileCap = sizeof(g_sndFile);
+    while (total < fileCap) {
+        uint32_t chunk = fileCap - total > 8192u ? 8192u : fileCap - total;
+        uint32_t got = 0;
+        if (!ctx->host || !ctx->host->file_read) break;
+        if (ctx->host->file_read(ctx, res->path, total, g_sndFile + total, chunk, &got) != GX_OK) break;
+        if (got == 0 || got > chunk) break;
+        total += got;
+        if (got < chunk) break;
+    }
+    McWavPcm pcm;
+    pcm.sampleRate = 0;
+    pcm.bitsPerSample = 0;
+    pcm.frameCount = 0;
+    if (!mc_wav_decode(g_sndFile, total, frames, capacity, &pcm)) return false;
+    if (pcm.sampleRate != res->expectRate || pcm.bitsPerSample != res->expectBits) return false;
+    McLoadedVoice voice;
+    voice.frames = frames;
+    voice.frameCount = pcm.frameCount;
+    voice.rate = pcm.sampleRate;
+    voice.valid = true;
+    g_voices[res->id] = voice;
+    return true;
+}
+
+static uint32_t load_all_voices(gx_app_context* ctx) {
+    for (int i = 0; i < kMcSoundCount; ++i) {
+        g_voices[i].frames = 0;
+        g_voices[i].frameCount = 0;
+        g_voices[i].rate = 0;
+        g_voices[i].valid = false;
+    }
+    uint32_t loaded = 0;
+    for (uint32_t i = 0; i < kMcSoundResourceCount; ++i) {
+        if (load_one_voice(ctx, &kMcSoundResources[i])) ++loaded;
+    }
+    return loaded;
+}
+
+// Fire-and-forget playback of one verified voice. Missing voices are the
+// upstream missing-file no-op (silence). Host absence (old ABI without the
+// appended slot), denial, busy mixer, or no backend all return non-OK and
+// are absorbed here after a few diagnostic logs: gameplay never depends on
+// the result, and playback timing never feeds back into simulation.
+static void mc_play(gx_app_context* ctx, int id) {
+    if (!ctx || id <= 0 || id >= kMcSoundCount) return;
+    const McLoadedVoice* voice = &g_voices[id];
+    if (!voice->valid || !voice->frames || voice->frameCount == 0) return;
+    const gx_result result = gx_play_pcm(ctx, voice->frames,
+        voice->frameCount * 2u, voice->rate, 1u, 16u);
+    if (result != GX_OK && g_audioFailLogs < 4u) {
+        ++g_audioFailLogs;
+        if (ctx->host && ctx->host->log) ctx->host->log(ctx, "MissileCommand audio request not played");
+    }
 }
 
 static void fill_rect(int x, int y, int width, int height, uint32_t color) {
@@ -253,10 +359,12 @@ static void append_number(char* message, uint32_t* index, uint32_t capacity, uin
     while (length > 0 && *index + 1u < capacity) message[(*index)++] = digits[--length];
 }
 
+static uint32_t g_soundsLoaded = 0;
+
 static void draw_overlay(gx_app_context* ctx, gx_handle window, const McState& state) {
     char title[96];
     uint32_t ti = 0;
-    append_text(title, &ti, sizeof(title), "MISSILE COMMAND - MC4 campaign L");
+    append_text(title, &ti, sizeof(title), "MISSILE COMMAND - MC5 campaign L");
     append_number(title, &ti, sizeof(title), (uint64_t)state.levelIndex);
     append_text(title, &ti, sizeof(title), "/10 ");
     append_text(title, &ti, sizeof(title), state.campaign.levels[state.levelIndex].name);
@@ -276,6 +384,9 @@ static void draw_overlay(gx_app_context* ctx, gx_handle window, const McState& s
     append_number(status, &index, sizeof(status), (uint64_t)mc_active_hostiles(&state));
     append_text(status, &index, sizeof(status), state.usingRuntimeIni ? " ini=run" : " ini=fb");
     append_text(status, &index, sizeof(status), g_cityArtValid ? " art=gxim" : " art=rect");
+    append_text(status, &index, sizeof(status), " snd=");
+    append_number(status, &index, sizeof(status), (uint64_t)g_soundsLoaded);
+    append_text(status, &index, sizeof(status), "/6");
     status[index] = '\0';
     gx_draw_label(ctx, window, 10, 328, status);
     if (state.gameComplete) {
@@ -338,7 +449,7 @@ static bool autopilot_verify(const McState& state, int target, int cx, int cy) {
     return false;
 }
 
-static void autopilot_tick(McState& state) {
+static void autopilot_tick(gx_app_context* ctx, McState& state) {
     if (!g_autopilot || state.won || state.lost || state.gameComplete) return;
     const bool late = state.levelIndex >= 9;
     int cap = 12;
@@ -449,6 +560,9 @@ static void autopilot_tick(McState& state) {
                 state.m[tt].smart = false;
                 state.m[tt].splitY = 0;
                 state.mFired += 1;
+                // Fresh defensive burst (test-hook snap shot): the Explode
+                // voice, like any MyShow missile-arm detonation.
+                mc_play(ctx, kMcSoundExplode);
             }
         }
     }
@@ -492,7 +606,7 @@ extern "C" gx_result GX_CALL gx_main(gx_app_context* ctx) {
         return GX_ERROR_INVALID_ARGUMENT;
     }
 
-    ctx->host->log(ctx, "MissileCommand MC4 Native ELF starting");
+    ctx->host->log(ctx, "MissileCommand MC5 Native ELF starting");
 
     // Runtime DD.ini via the existing file_read_all resource mechanism.
     // Falls back to verified compiled values when missing/malformed.
@@ -557,16 +671,27 @@ extern "C" gx_result GX_CALL gx_main(gx_app_context* ctx) {
     } else {
         ctx->host->log(ctx, "MissileCommand city art fallback rectangles selected");
     }
+    // Original WAV voices (side-effect only). Missing/mismatched files stay
+    // silent; the campaign never depends on them.
+    g_soundsLoaded = 0;
+    if (ctx->host->file_read) {
+        g_soundsLoaded = load_all_voices(ctx);
+    }
+    if (g_soundsLoaded == kMcSoundResourceCount) {
+        ctx->host->log(ctx, "MissileCommand audio voices loaded");
+    } else {
+        ctx->host->log(ctx, "MissileCommand audio partial (silent voices skipped)");
+    }
     ctx->host->log(ctx, "MissileCommand initial state ready");
 
     gx_handle window = 0;
     gx_result windowResult = GX_ERROR_UNSUPPORTED;
     if (ctx->host->request_window_ex) {
-        windowResult = ctx->host->request_window_ex(ctx, "Missile Command (MC4)",
+        windowResult = ctx->host->request_window_ex(ctx, "Missile Command (MC5)",
             kMcFrameWidth, kMcFrameHeight,
             GX_WINDOW_FLAG_FIXED_SIZE | GX_WINDOW_FLAG_CENTERED, &window);
     } else {
-        windowResult = ctx->host->request_window(ctx, "Missile Command (MC4)",
+        windowResult = ctx->host->request_window(ctx, "Missile Command (MC5)",
             kMcFrameWidth, kMcFrameHeight, &window);
     }
     if (windowResult != GX_OK) {
@@ -579,6 +704,9 @@ extern "C" gx_result GX_CALL gx_main(gx_app_context* ctx) {
         return GX_ERROR_FAILED;
     }
     ctx->host->log(ctx, "MissileCommand initial frame presented");
+    // VB DoIt plays Alarm() at every level start, including the first: the
+    // campaign entering L1 is a level start.
+    mc_play(ctx, kMcSoundAlarm);
     state.visualDirty = false;
 
     bool loggedSpawn = false;
@@ -666,7 +794,15 @@ extern "C" gx_result GX_CALL gx_main(gx_app_context* ctx) {
                     g_fastForward = false;
                     ctx->host->log(ctx, "MissileCommand fastforward off");
                 } else {
+                    // Restart (R/Enter/Space after GAME OVER/COMPLETE) enters
+                    // a fresh L1: a level start, so the Alarm voice (VB
+                    // DoIt plays Alarm() per level, restart included).
+                    const bool wasTerminal = state.lost || state.gameComplete;
                     if (!mc_handle_key(&state, event.param1, event.param2)) running = false;
+                    if (wasTerminal && !state.lost && !state.gameComplete &&
+                        state.levelIndex == 1) {
+                        mc_play(ctx, kMcSoundAlarm);
+                    }
                 }
             } else if (event.type == GX_EVENT_MOUSE) {
                 const int action = GX_MOUSE_ACTION(event.param3);
@@ -699,8 +835,18 @@ extern "C" gx_result GX_CALL gx_main(gx_app_context* ctx) {
         uint32_t updates = 0;
         const uint32_t stepCap = g_fastForward ? kMcMaxCatchUpSteps * 4u : kMcMaxCatchUpSteps;
         while (accumulatorMs >= kMcFixedStepMs && updates < stepCap) {
-            autopilot_tick(state);
+            // Audio is a side effect of the tick, never simulation input:
+            // snapshot, advance, then request voices for verified events.
+            autopilot_tick(ctx, state);
+            const McTickPre pre = mc_tick_pre(&state);
             mc_fixed_update(&state);
+            const McTickSounds sounds = mc_tick_sounds(pre, &state);
+            if (sounds.launches) mc_play(ctx, kMcSoundSwoosh);
+            if (sounds.refused) mc_play(ctx, kMcSoundEmpty);
+            for (int si = 0; si < sounds.bursts; ++si) mc_play(ctx, kMcSoundExplode);
+            for (int si = 0; si < sounds.splits; ++si) mc_play(ctx, kMcSoundSplit);
+            if (sounds.alarm) mc_play(ctx, kMcSoundAlarm);
+            if (sounds.ohno) mc_play(ctx, kMcSoundOhNo);
             check_level_transition(ctx, state, &lastLevel, loggedLevelStart);
             accumulatorMs -= kMcFixedStepMs;
             ++updates;
@@ -716,8 +862,16 @@ extern "C" gx_result GX_CALL gx_main(gx_app_context* ctx) {
             // margin before the GAME COMPLETE terminal state.
             for (uint32_t extra = 0; extra < 120u; ++extra) {
                 if (state.lost || state.gameComplete) break;
-                autopilot_tick(state);
+                autopilot_tick(ctx, state);
+                const McTickPre pre = mc_tick_pre(&state);
                 mc_fixed_update(&state);
+                const McTickSounds sounds = mc_tick_sounds(pre, &state);
+                if (sounds.launches) mc_play(ctx, kMcSoundSwoosh);
+                if (sounds.refused) mc_play(ctx, kMcSoundEmpty);
+                for (int si = 0; si < sounds.bursts; ++si) mc_play(ctx, kMcSoundExplode);
+                for (int si = 0; si < sounds.splits; ++si) mc_play(ctx, kMcSoundSplit);
+                if (sounds.alarm) mc_play(ctx, kMcSoundAlarm);
+                if (sounds.ohno) mc_play(ctx, kMcSoundOhNo);
                 check_level_transition(ctx, state, &lastLevel, loggedLevelStart);
                 ++updates;
             }
@@ -836,7 +990,7 @@ extern "C" gx_result GX_CALL gx_main(gx_app_context* ctx) {
         }
     }
 
-    ctx->host->log(ctx, "MissileCommand MC4 exiting");
+    ctx->host->log(ctx, "MissileCommand MC5 exiting");
     if (ctx->host->exit) return ctx->host->exit(ctx, GX_OK);
     return GX_OK;
 }

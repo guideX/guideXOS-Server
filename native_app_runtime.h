@@ -139,6 +139,9 @@ struct NativeHostCallTable {
     gx_result (*development_run_request_close)(NativeGxAppContext* ctx, gx_development_run_handle handle) = nullptr;
     gx_result (*development_run_release)(NativeGxAppContext* ctx, gx_development_run_handle handle) = nullptr;
     gx_result (*development_debug)(NativeGxAppContext* ctx, const gx_development_debug_request* request, gx_development_debug_snapshot* outSnapshot) = nullptr;
+    // App Model audio output (MC5, appended: every existing slot keeps its
+    // offset). Fire-and-forget short PCM playback, "audio.output"-gated.
+    gx_result (*play_pcm)(NativeGxAppContext* ctx, const void* pcmData, uint32_t pcmBytes, uint32_t sampleRateHz, uint32_t channels, uint32_t bitsPerSample) = nullptr;
 };
 
 static_assert(offsetof(NativeHostCallTable, log) == 8, "native ABI log slot changed");
@@ -165,7 +168,8 @@ static_assert(offsetof(NativeHostCallTable, development_run_poll) == 208, "nativ
 static_assert(offsetof(NativeHostCallTable, development_run_request_close) == 216, "native ABI development run close slot changed");
 static_assert(offsetof(NativeHostCallTable, development_run_release) == 224, "native ABI development run release slot changed");
 static_assert(offsetof(NativeHostCallTable, development_debug) == 232, "native ABI development debug slot changed");
-static_assert(sizeof(NativeHostCallTable) == 240, "native ABI host call table size changed");
+static_assert(offsetof(NativeHostCallTable, play_pcm) == 240, "native ABI play_pcm slot must be appended after development_debug");
+static_assert(sizeof(NativeHostCallTable) == 248, "native ABI host call table size changed");
 
 enum class NativeAppLifecycleState {
     Created = 0,
@@ -260,6 +264,10 @@ struct NativeAppRuntimeContext {
     uint32_t lastFileReadBytes = 0;
     gx_result lastFileIoResult = GX_OK;
     uint64_t lastFileReadOffset = 0;
+    uint32_t audioPlayCallCount = 0;
+    gx_result lastAudioResult = GX_OK;
+    std::string lastAudioBackend;
+    uint64_t lastAudioAcceptedId = 0;
     uint32_t presentFrameCallCount = 0;
     gx_handle lastPresentFrameWindow = 0;
     int lastPresentFrameX = 0;

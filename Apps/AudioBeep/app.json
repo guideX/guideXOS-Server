@@ -1,0 +1,36 @@
+{
+    "schemaVersion":  1,
+    "id":  "com.guidexos.audiobeep",
+    "displayName":  "Audio Beep",
+    "version":  "0.1.0",
+    "publisher":  "guideXOS SDK",
+    "description":  "Minimal App Model audio sample: synthesizes a short PCM beep and plays it twice overlapped via play_pcm. Independent proof of the MC5 audio API.",
+    "category":  "Samples",
+    "kind":  "NativeElf",
+    "icon":  "",
+    "minGuideXOSVersion":  "0.1.0",
+    "supportedArchitectures":  [
+                                   "amd64"
+                               ],
+    "entries":  [
+                    {
+                        "architecture":  "amd64",
+                        "path":  "bin/amd64/audiobeep.elf",
+                        "entryPoint":  "gx_main",
+                        "abi":  "guidexos-c-abi-v1",
+                        "runtime":  "native-elf"
+                    }
+                ],
+    "permissions":  [
+                        "log",
+                        "audio.output"
+                    ],
+    "fileAssociations":  [
+
+                         ],
+    "defaultWindow":  {
+                          "width":  480,
+                          "height":  320,
+                          "resizable":  true
+                      }
+}

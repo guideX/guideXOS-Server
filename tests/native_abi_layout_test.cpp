@@ -11,7 +11,16 @@ static_assert(offsetof(gx_event, type) == 4, "gx_event.type offset changed");
 static_assert(offsetof(gx_event, window) == 8, "gx_event.window offset changed");
 static_assert(offsetof(gx_event, param1) == 16, "gx_event.param1 offset changed");
 static_assert(offsetof(gx_event, param4) == 28, "gx_event.param4 offset changed");
-static_assert(sizeof(gx_host_calls) == 120, "gx_host_calls size must remain 120 bytes on amd64");
+// ABI history (append-only, backwards compatible by construction):
+//   v1 base era: size/version + log .. get_ticks_ms occupied 120 bytes.
+//     The old "sizeof == 120" pin below went stale the moment the workspace
+//     file_stat slot was appended at offset 120 and was never updated, which
+//     is why this test failed to compile from MC2 through MC4. It is removed
+//     here, not bumped blindly: what compatibility actually requires is that
+//     every historical slot keeps its offset (pinned individually below) and
+//     that growth happens only by appending (pinned by ordering asserts).
+//   workspace/build/dev-run/dev-debug eras: 120 -> 240 bytes.
+//   MC5 audio era: play_pcm appended at 240 -> 248 bytes.
 static_assert(offsetof(gx_host_calls, get_ticks_ms) > offsetof(gx_host_calls, present_frame),
               "get_ticks_ms must be appended to the ABI table");
 static_assert(sizeof(uint64_t) == 8, "Native ABI ticks must remain 64-bit");
@@ -32,6 +41,11 @@ static_assert(sizeof(gx_file_entry) == 144, "gx_file_entry size changed");
 static_assert(offsetof(gx_host_calls, log) == 8, "log slot changed");
 static_assert(offsetof(gx_host_calls, get_api_version) == 16, "get_api_version slot changed");
 static_assert(offsetof(gx_host_calls, request_window) == 24, "request_window slot changed");
+static_assert(offsetof(gx_host_calls, draw_text) == 32, "draw_text slot changed");
+static_assert(offsetof(gx_host_calls, draw_rect) == 40, "draw_rect slot changed");
+static_assert(offsetof(gx_host_calls, wait_for_close) == 48, "wait_for_close slot changed");
+static_assert(offsetof(gx_host_calls, poll_event) == 56, "poll_event slot changed");
+static_assert(offsetof(gx_host_calls, exit) == 64, "exit slot changed");
 static_assert(offsetof(gx_host_calls, file_read_all) == 72, "file_read_all slot changed");
 static_assert(offsetof(gx_host_calls, file_exists) == 80, "file_exists slot changed");
 static_assert(offsetof(gx_host_calls, request_window_ex) == 88, "request_window_ex slot changed");
@@ -61,7 +75,11 @@ static_assert(offsetof(gx_host_calls, development_run_poll) == 208, "development
 static_assert(offsetof(gx_host_calls, development_run_request_close) == 216, "development run close slot changed");
 static_assert(offsetof(gx_host_calls, development_run_release) == 224, "development run release slot changed");
 static_assert(offsetof(gx_host_calls, development_debug) == 232, "development debug slot changed");
-static_assert(sizeof(gx_host_calls) == 240, "gx_host_calls size changed");
+// MC5 audio era: exactly one appended slot, nothing reordered.
+static_assert(offsetof(gx_host_calls, play_pcm) > offsetof(gx_host_calls, development_debug),
+              "play_pcm must be appended after development_debug");
+static_assert(offsetof(gx_host_calls, play_pcm) == 240, "play_pcm slot changed");
+static_assert(sizeof(gx_host_calls) == 248, "gx_host_calls size changed");
 static_assert(sizeof(gx_development_run_request) == 72, "development run request size changed");
 static_assert(offsetof(gx_development_run_request, projectRoot) == 8, "development run request project root offset changed");
 static_assert(offsetof(gx_development_run_request, artifactSha256) == 56, "development run request artifact hash offset changed");
@@ -107,7 +125,9 @@ int main() {
                                offsetof(gx_host_calls, file_remove);
     const bool runAppended = offsetof(gx_host_calls, development_run_prepare) >
                              offsetof(gx_host_calls, build_project_release);
-    if (!appended || !workspaceAppended || !buildAppended || !runAppended) return 1;
+    const bool audioAppended = offsetof(gx_host_calls, play_pcm) >
+                               offsetof(gx_host_calls, development_debug);
+    if (!appended || !workspaceAppended || !buildAppended || !runAppended || !audioAppended) return 1;
     std::cout << "Native ABI layout test PASS\n";
     return 0;
 }

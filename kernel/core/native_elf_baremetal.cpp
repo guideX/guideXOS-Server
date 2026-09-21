@@ -410,6 +410,33 @@ static const char* find_text(const char* text, const char* needle) {
     return nullptr;
 }
 
+static bool json_array_contains(const char* json, const char* key, const char* token) {
+    // Bounded exact-token scan of a JSON string array (used for the
+    // manifest "permissions" list). No allocation, no nesting: find the key,
+    // then match the exact quoted token before the closing bracket.
+    if (!json || !key || !token) return false;
+    const char* cursor = json;
+    while ((cursor = find_text(cursor, key)) != nullptr) {
+        cursor += text_length(key);
+        while (*cursor && *cursor != '[') {
+            if (*cursor == '{' || *cursor == '"') break;
+            ++cursor;
+        }
+        if (*cursor != '[') continue;
+        ++cursor;
+        const uint32_t tokenLength = text_length(token);
+        while (*cursor && *cursor != ']') {
+            if (*cursor == '"') {
+                uint32_t i = 0;
+                while (i < tokenLength && cursor[1u + i] == token[i]) ++i;
+                if (i == tokenLength && cursor[1u + tokenLength] == '"') return true;
+            }
+            ++cursor;
+        }
+    }
+    return false;
+}
+
 static bool json_string(const char* json, const char* key, char* output, uint32_t capacity) {
     const char* cursor = json;
     while ((cursor = find_text(cursor, key)) != nullptr) {
@@ -604,6 +631,7 @@ static bool parse_package(const char* directory, Package* package) {
         package->startMenuVisible = !text_equal(startMenuVisible, "false");
     }
     if (!text_equal(package->entryPoint, "gx_main") || !text_equal(package->abi, GX_ABI_NAME)) return false;
+    package->hasAudioOutput = json_array_contains(s_manifest, "\"permissions\"", "audio.output");
     char executablePath[256];
     if (!package_path(package, package->executable, executablePath, sizeof(executablePath))) return false;
     vfs::FileInfo info;
@@ -1268,6 +1296,26 @@ static gx_result GX_CALL host_present_frame(gx_app_context* context, gx_handle w
     return abi_result(runtime, NativeAbiOperation::PresentFrame, GX_OK);
 }
 
+static gx_result GX_CALL host_play_pcm(gx_app_context* context, const void* pcmData, uint32_t pcmBytes,
+                                        uint32_t sampleRateHz, uint32_t channels, uint32_t bitsPerSample) {
+    // Bare-metal App Model audio (MC5): arguments and the "audio.output"
+    // permission are validated exactly like the hosted runtime, but there is
+    // no PCM submit path from the mixer to the HDA/USB DMA engines yet, so a
+    // well-formed permitted request still fails explicitly with
+    // NOT_IMPLEMENTED instead of pretending success. Applications must stay
+    // fully playable without audio.
+    Runtime* runtime = runtime_from(context);
+    if (!runtime || !pcmData || pcmBytes == 0 || pcmBytes > 262144u) return GX_ERROR_INVALID_ARGUMENT;
+    if (channels != 1u || (bitsPerSample != 8u && bitsPerSample != 16u)) return GX_ERROR_INVALID_ARGUMENT;
+    if (sampleRateHz < 8000u || sampleRateHz > 48000u) return GX_ERROR_INVALID_ARGUMENT;
+    if (bitsPerSample == 16u && (pcmBytes & 1u) != 0u) return GX_ERROR_INVALID_ARGUMENT;
+    if (!runtime->package || !runtime->package->hasAudioOutput) return GX_ERROR_PERMISSION_DENIED;
+    serial::puts("[NATIVE-ELF] play_pcm app=");
+    serial::puts(runtime->package ? runtime->package->displayName : "(none)");
+    serial::puts(" backend=none(serial-only) result=NOT_IMPLEMENTED\n");
+    return GX_ERROR_NOT_IMPLEMENTED;
+}
+
 static uint64_t GX_CALL host_get_ticks_ms(gx_app_context* context) {
     Runtime* runtime = runtime_from(context);
     if (runtime) abi_begin(runtime, NativeAbiOperation::GetTicks);
@@ -1436,6 +1484,7 @@ static void initialize_host_table(Runtime* runtime) {
     runtime->host.file_read = host_file_read;
     runtime->host.present_frame = host_present_frame;
     runtime->host.get_ticks_ms = host_get_ticks_ms;
+    runtime->host.play_pcm = host_play_pcm;
 }
 
 static bool run_package(Package* package) {

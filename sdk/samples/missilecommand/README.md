@@ -1,17 +1,20 @@
-# guideXOS Native ELF Missile Command (MC4 campaign)
+# guideXOS Native ELF Missile Command (MC5 campaign + audio)
 
-MC4 full L1-L10 campaign for the VB6 Missile Command port, with original
-`build1.gif` city art. The VB6
+MC5 full L1-L10 campaign for the VB6 Missile Command port, with original
+`build1.gif` city art and original WAV voices through the App Model audio
+call. The VB6
 original (`DD.vbp`, `FrmDD.frm`, `Module1.bas`, `DD.ini`, `build1.gif`, WAVs)
 stays the behavioral/artistic reference; this directory is the native
 implementation. Foundation details live in
 `docs/MISSILE_COMMAND_MC1_ARCHITECTURE.md`, the L1 loop in
 `docs/MISSILE_COMMAND_MC2_DEFENSE_LOOP.md`, the L1-L3 campaign in
-`docs/MISSILE_COMMAND_MC3_CAMPAIGN_SMARTBOMBS.md`, and the full campaign,
+`docs/MISSILE_COMMAND_MC3_CAMPAIGN_SMARTBOMBS.md`, the full campaign,
 city art, and audio findings in
-`docs/MISSILE_COMMAND_MC4_CAMPAIGN_CITYART_AUDIO.md`.
+`docs/MISSILE_COMMAND_MC4_CAMPAIGN_CITYART_AUDIO.md`, and the reusable App
+Model audio implementation in
+`docs/MISSILE_COMMAND_MC5_APP_MODEL_AUDIO.md`.
 
-## What MC4 proves
+## What MC5 proves
 
 - Genuine L1 -> ... -> L10 progression with per-level data, deterministic
   40-tick LEVEL COMPLETE dwell, GAME COMPLETE terminal after L10, and
@@ -40,10 +43,15 @@ city art, and audio findings in
   trails (Smart heads only, like the original), growing blast rings, and a
   status overlay (level/name, cities, bombs/missiles remaining, actives, INI
   source, outcome + hints).
-- Audio: not implemented (Outcome C). The App Model exposes no audio host
-  call, so there is no correct application-visible playback path yet; the
-  MC4 doc records the full original WAV inventory, the platform findings,
-  and the smallest reusable `audio.output` host-call proposal for MC5.
+- Audio: first App Model audio client. The six verified voices
+  (`resources/audio/*.wav`: alarm/empty/explode/split PCM8 11025 Hz,
+  ohno PCM16 22050 Hz, swoosh converted from ADPCM stereo to PCM16 mono
+  22050 Hz) play through the appended `play_pcm` host call as pure side
+  effects of verified `sndPlaySound` events (launch, refused, detonation,
+  split, level start, campaign lost). Missing upstream files
+  (Thunder/Error) and the commented-out win jingle stay silent, exactly
+  like the original. Identical seed + inputs + ticks fingerprint
+  identically with audio enabled, unavailable, or denied.
 
 ## Layout
 
@@ -51,22 +59,29 @@ city art, and audio findings in
 sdk/samples/missilecommand/
   missilecommand_state.h     pure deterministic campaign (host-testable, no ABI)
   missilecommand_city_art.h  GXIM parse + city blit sampling (host-testable)
-  main.cpp                   gx_main: DD.ini/city.gximg load, window, events,
-                             fixed-step ticks, framebuffer rendering
+  missilecommand_audio.h     WAV decode + tick-event sound mapping (host-testable)
+  main.cpp                   gx_main: DD.ini/city.gximg/audio load, window,
+                             events, fixed-step ticks, framebuffer rendering,
+                             play_pcm side effects
   resources/DD.ini           original level configuration (staged resource)
   resources/city.gximg       converted build1.gif city art (staged resource)
+  resources/audio/*.wav      original voices + converted swoosh (staged)
   app.json                   source manifest (com.guidexos.samples.*)
   CMakeLists.txt
 ```
 
-Pure logic lives in `missilecommand_state.h` (plus `missilecommand_city_art.h`)
+Pure logic lives in `missilecommand_state.h` (plus `missilecommand_city_art.h`
+and `missilecommand_audio.h`)
 so `tests/missilecommand_state_test.cpp` can verify it with host g++.
 Run it with `scripts/run-missilecommand-state-test.ps1`; run the pointer
 fix test with `scripts/run-compositor-pointer-buttons-test.ps1`; run the
-live campaign smoke with `scripts/smoke-missilecommand-mc4.ps1`.
+mixer/platform audio tests with `scripts/run-app-audio-mixer-test.ps1`.
 The city art conversion is `scripts/convert-missilecommand-city.ps1`
 (GIF -> app-format GXIM, deterministic, verified against a pure
-byte-level decode of the original).
+byte-level decode of the original); the swoosh conversion is
+`scripts/convert-missilecommand-swoosh.py` (MS-ADPCM stereo -> PCM16 mono,
+deterministic, sample-verified) staged by
+`scripts/stage-missilecommand-audio.ps1`.
 
 ## Build
 

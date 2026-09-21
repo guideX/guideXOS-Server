@@ -4,6 +4,7 @@
 #include "gui_protocol.h"
 #include "ipc_bus.h"
 #include "logger.h"
+#include "native_app_audio.h"
 #include "native_app_debug_log.h"
 #include "native_app_process_table.h"
 #include "development_run_service.h"
@@ -717,6 +718,86 @@ uint64_t hostGetTicksMs(NativeGxAppContext* ctx) {
     static const std::chrono::steady_clock::time_point epoch = std::chrono::steady_clock::now();
     const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - epoch).count();
     return elapsed < 0 ? 0u : static_cast<uint64_t>(elapsed);
+}
+
+// App Model audio output (MC5): fire-and-forget short PCM playback through
+// the shared mixer/backend. Validation order mirrors the file host calls:
+// context/buffer sanity, then "audio.output" permission, then PCM format,
+// then mixer/backend capacity. Audio never blocks and never feeds back into
+// the caller; every failure keeps the application fully functional (silent).
+gx_result hostPlayPcm(NativeGxAppContext* ctx, const void* pcmData, uint32_t pcmBytes,
+                      uint32_t sampleRateHz, uint32_t channels, uint32_t bitsPerSample) {
+    NativeAppRuntimeContext* context = runtimeContextFor(ctx);
+    if (!context) {
+        Logger::write(LogLevel::Warn, "[NativeAppHost] play_pcm rejected: invalid app context or host table");
+        return GX_ERROR_INVALID_ARGUMENT;
+    }
+
+    ++context->audioPlayCallCount;
+    context->lastAudioResult = GX_ERROR_INVALID_ARGUMENT;
+    context->lastAudioBackend.clear();
+    context->lastAudioAcceptedId = 0;
+
+    if (!pcmData || pcmBytes == 0 || !nativeBufferRangeContains(*context, pcmData, pcmBytes)) {
+        Logger::write(LogLevel::Warn, "[NativeAppHost] App: " + appLabel(context) + " play_pcm rejected: PCM buffer outside native memory");
+        NativeAppDebugLog::Add(context->runtimeId, context->appId, "warn", "play_pcm failed: invalid PCM buffer");
+        NativeAppProcessTable::UpdateFromRuntime(*context);
+        return context->lastAudioResult;
+    }
+
+    if (!hasPermission(*context, "audio.output")) {
+        context->lastAudioResult = GX_ERROR_PERMISSION_DENIED;
+        Logger::write(LogLevel::Warn, "[NativeAppHost] App: " + appLabel(context) + " play_pcm denied: missing permission audio.output");
+        NativeAppDebugLog::Add(context->runtimeId, context->appId, "warn", "play_pcm failed: missing permission audio.output");
+        NativeAppProcessTable::UpdateFromRuntime(*context);
+        return context->lastAudioResult;
+    }
+
+    const audio::ValidationResult validation =
+        audio::ValidatePlayRequest(pcmData, pcmBytes, sampleRateHz, channels, bitsPerSample);
+    if (validation.error != audio::RequestError::Ok) {
+        context->lastAudioResult = validation.error == audio::RequestError::Unsupported
+            ? GX_ERROR_UNSUPPORTED
+            : GX_ERROR_INVALID_ARGUMENT;
+        Logger::write(LogLevel::Warn, "[NativeAppHost] App: " + appLabel(context) + " play_pcm rejected: " + validation.reason);
+        NativeAppDebugLog::Add(context->runtimeId, context->appId, "warn", std::string("play_pcm failed: ") + validation.reason);
+        NativeAppProcessTable::UpdateFromRuntime(*context);
+        return context->lastAudioResult;
+    }
+
+    std::vector<int16_t> mixFrames;
+    if (!audio::ConvertToMixFormat(pcmData, pcmBytes, sampleRateHz, bitsPerSample, mixFrames)) {
+        context->lastAudioResult = GX_ERROR_UNSUPPORTED;
+        Logger::write(LogLevel::Warn, "[NativeAppHost] App: " + appLabel(context) + " play_pcm rejected: voice-too-long");
+        NativeAppDebugLog::Add(context->runtimeId, context->appId, "warn", "play_pcm failed: voice-too-long");
+        NativeAppProcessTable::UpdateFromRuntime(*context);
+        return context->lastAudioResult;
+    }
+
+    audio::RequestError backendError = audio::RequestError::Ok;
+    std::string backend;
+    const uint64_t owner = context->runtimeId != 0 ? context->runtimeId : 1u;
+    const uint64_t accepted = audio::BackendPlay(owner, mixFrames.data(),
+        static_cast<uint32_t>(mixFrames.size()), &backendError, &backend);
+    context->lastAudioBackend = backend;
+    if (backendError == audio::RequestError::Busy || accepted == 0) {
+        context->lastAudioResult = GX_ERROR_BUSY;
+        Logger::write(LogLevel::Warn, "[NativeAppHost] App: " + appLabel(context) + " play_pcm busy: mixer voice limit reached");
+        NativeAppDebugLog::Add(context->runtimeId, context->appId, "warn", "play_pcm busy: voice limit reached");
+        NativeAppProcessTable::UpdateFromRuntime(*context);
+        return context->lastAudioResult;
+    }
+
+    context->lastAudioAcceptedId = accepted;
+    context->lastAudioResult = GX_OK;
+    NativeAppProcessTable::UpdateFromRuntime(*context);
+    NativeAppDebugLog::Add(context->runtimeId, context->appId, "info",
+        "play_pcm bytes=" + std::to_string(pcmBytes) + " rate=" + std::to_string(sampleRateHz) +
+        " backend=" + backend + " id=" + std::to_string(accepted));
+    Logger::write(LogLevel::Info, "[NativeAppHost] App: " + appLabel(context) + " play_pcm bytes=" +
+        std::to_string(pcmBytes) + " rate=" + std::to_string(sampleRateHz) + " backend=" + backend +
+        " id=" + std::to_string(accepted));
+    return GX_OK;
 }
 
 bool hasWorkspaceReadPermission(const NativeAppRuntimeContext& context) {
@@ -1765,6 +1846,7 @@ NativeAppRuntimeContext NativeAppRuntime::Prepare(
     context.hostCalls.development_run_request_close = hostDevelopmentRunRequestClose;
     context.hostCalls.development_run_release = hostDevelopmentRunRelease;
     context.hostCalls.development_debug = hostDevelopmentDebug;
+    context.hostCalls.play_pcm = hostPlayPcm;
 
     if (launchDecision.strategy != AppLaunchStrategy::NativeElf) {
         addDiagnostic(context, "Launch decision strategy is not NativeElf");
@@ -1844,6 +1926,9 @@ void NativeAppRuntime::Cleanup(NativeAppRuntimeContext& context, NativeAppLifecy
          * releasing the runtime's windows. */
         NativeBuildService::CancelForRuntime(context.runtimeId);
         DevelopmentRunService::ReleaseOwner(context.runtimeId);
+        // Audio voices belong to the launching runtime: an exiting app must
+        // leave no stale ownership, and a relaunch starts cleanly.
+        audio::BackendStopOwner(context.runtimeId);
 
         Logger::write(LogLevel::Info, "[NativeAppRuntime] Cleanup begin app=" + appLabel(&context) + " runtimeId=" + std::to_string(context.runtimeId) + " processId=" + std::to_string(context.processId) + " ownedWindows=" + std::to_string(context.createdWindowHandles.size()));
         NativeAppDebugLog::Add(context.runtimeId, context.appId, "info", "cleanup started ownedWindows=" + std::to_string(context.createdWindowHandles.size()));

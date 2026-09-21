@@ -5,6 +5,7 @@
 
 #include "../sdk/samples/missilecommand/missilecommand_state.h"
 #include "../sdk/samples/missilecommand/missilecommand_city_art.h"
+#include "../sdk/samples/missilecommand/missilecommand_audio.h"
 
 #include <cstdio>
 #include <iostream>
@@ -1679,6 +1680,229 @@ int main() {
                 }
             }
         }
+    }
+
+    // ------------------------------------------------ MC5 audio mapping
+    {
+        // WAV decoder unit vectors (synthetic buffers, no files).
+        unsigned char wav8[48] = {
+            'R', 'I', 'F', 'F', 40, 0, 0, 0, 'W', 'A', 'V', 'E',
+            'f', 'm', 't', ' ', 16, 0, 0, 0, 1, 0, 1, 0,
+            0x11, 0x2B, 0, 0, 0x11, 0x2B, 0, 0, 1, 0, 8, 0,
+            'd', 'a', 't', 'a', 4, 0, 0, 0, 0x00, 0x80, 0xFF, 0x80
+        };
+        int16_t frames[8] = {0};
+        McWavPcm pcm = {0, 0, 0};
+        ok &= expect(mc_wav_decode(wav8, sizeof(wav8), frames, 8, &pcm),
+                     "audio: pcm8 mono decodes");
+        ok &= expect(pcm.sampleRate == 11025u && pcm.bitsPerSample == 8u && pcm.frameCount == 4u,
+                     "audio: pcm8 spec parsed");
+        ok &= expect(frames[0] == -32768 && frames[1] == 0 && frames[2] == 32512,
+                     "audio: pcm8 widened");
+        unsigned char wav16[48] = {
+            'R', 'I', 'F', 'F', 40, 0, 0, 0, 'W', 'A', 'V', 'E',
+            'f', 'm', 't', ' ', 16, 0, 0, 0, 1, 0, 1, 0,
+            0x22, 0x56, 0, 0, 0x44, 0xAC, 0, 0, 2, 0, 16, 0,
+            'd', 'a', 't', 'a', 4, 0, 0, 0, 0x00, 0x80, 0xFF, 0x7F
+        };
+        ok &= expect(mc_wav_decode(wav16, sizeof(wav16), frames, 8, &pcm),
+                     "audio: pcm16 mono decodes");
+        ok &= expect(pcm.sampleRate == 22050u && pcm.frameCount == 2u && frames[0] == -32768 &&
+                     frames[1] == 32767,
+                     "audio: pcm16 passthrough");
+        // Rejections: bad magic, ADPCM tag, stereo, odd rate, truncation.
+        unsigned char bad[48];
+        for (unsigned i = 0; i < sizeof(bad); ++i) bad[i] = wav8[i];
+        bad[0] = 'X';
+        ok &= expect(!mc_wav_decode(bad, sizeof(bad), frames, 8, &pcm), "audio: bad magic rejected");
+        for (unsigned i = 0; i < sizeof(bad); ++i) bad[i] = wav8[i];
+        bad[20] = 2;
+        ok &= expect(!mc_wav_decode(bad, sizeof(bad), frames, 8, &pcm), "audio: ADPCM rejected");
+        for (unsigned i = 0; i < sizeof(bad); ++i) bad[i] = wav8[i];
+        bad[22] = 2;
+        ok &= expect(!mc_wav_decode(bad, sizeof(bad), frames, 8, &pcm), "audio: stereo rejected");
+        for (unsigned i = 0; i < sizeof(bad); ++i) bad[i] = wav8[i];
+        bad[24] = 0xFF;
+        bad[25] = 0x13;  // 0x13FF = 5119 Hz, below the 8000 Hz floor
+        ok &= expect(!mc_wav_decode(bad, sizeof(bad), frames, 8, &pcm), "audio: odd rate rejected");
+        ok &= expect(!mc_wav_decode(wav8, 40, frames, 8, &pcm), "audio: truncated rejected");
+        ok &= expect(!mc_wav_decode(nullptr, 48, frames, 8, &pcm), "audio: null bytes rejected");
+        ok &= expect(!mc_wav_decode(wav8, sizeof(wav8), nullptr, 8, &pcm),
+                     "audio: null frames rejected");
+        ok &= expect(mc_sound_frame_capacity(999) == 0, "audio: unknown sound has no capacity");
+
+        // Staged asset inventory: the six verified voices decode to their
+        // archaeology specs. Thunder/Error/OnNo have no staged file and no
+        // sound identity (upstream silence).
+        struct StagedExpect {
+            const char* path;
+            uint32_t rate;
+            uint32_t bits;
+            uint32_t frames;
+        };
+        static const StagedExpect staged[6] = {
+            {"sdk/samples/missilecommand/resources/audio/alarm.wav", 11025u, 8u, 7498u},
+            {"sdk/samples/missilecommand/resources/audio/swoosh.wav", 22050u, 16u, 6656u},
+            {"sdk/samples/missilecommand/resources/audio/empty.wav", 11025u, 8u, 2862u},
+            {"sdk/samples/missilecommand/resources/audio/explode.wav", 11025u, 8u, 23540u},
+            {"sdk/samples/missilecommand/resources/audio/split.wav", 11025u, 8u, 1380u},
+            {"sdk/samples/missilecommand/resources/audio/ohno.wav", 22050u, 16u, 36992u},
+        };
+        static int16_t stagedFrames[kMcSoundFramesOhNo];
+        for (int s = 0; s < 6; ++s) {
+            std::FILE* f = std::fopen(staged[s].path, "rb");
+            char label[128];
+            std::snprintf(label, sizeof(label), "audio: staged %s present", staged[s].path);
+            ok &= expect(f != 0, label);
+            if (f == 0) continue;
+            std::fseek(f, 0, SEEK_END);
+            long size = std::ftell(f);
+            std::fseek(f, 0, SEEK_SET);
+            static unsigned char fileBytes[80 * 1024];
+            unsigned read = 0;
+            if (size > 0 && size < (long)sizeof(fileBytes)) {
+                read = (unsigned)std::fread(fileBytes, 1, (size_t)size, f);
+            }
+            std::fclose(f);
+            std::snprintf(label, sizeof(label), "audio: staged %s reads whole", staged[s].path);
+            ok &= expect(read == (unsigned)size, label);
+            McWavPcm sp = {0, 0, 0};
+            bool decoded = read == (unsigned)size &&
+                           mc_wav_decode(fileBytes, read, stagedFrames, kMcSoundFramesOhNo, &sp);
+            std::snprintf(label, sizeof(label), "audio: staged %s decodes", staged[s].path);
+            ok &= expect(decoded, label);
+            if (decoded) {
+                std::snprintf(label, sizeof(label), "audio: staged %s spec exact", staged[s].path);
+                ok &= expect(sp.sampleRate == staged[s].rate &&
+                             sp.bitsPerSample == staged[s].bits &&
+                             sp.frameCount == staged[s].frames,
+                             label);
+            }
+        }
+        // Missing-source silence: exactly the six verified voices exist; no
+        // thunder/error/onno identity can ever be requested.
+        ok &= expect(kMcSoundCount == 7, "audio: seven identities incl. none");
+        ok &= expect(kMcSoundResourceCount == 6u, "audio: six staged resources");
+        for (uint32_t i = 0; i < kMcSoundResourceCount; ++i) {
+            const char* p = kMcSoundResources[i].path;
+            bool clean = true;
+            const char* banned[3] = {"thunder", "error", "onno"};
+            for (int b = 0; b < 3; ++b) {
+                const char* q = p;
+                while (*q) {
+                    const char* r = q;
+                    const char* t = banned[b];
+                    while (*r && *t && (*r == *t)) {
+                        ++r;
+                        ++t;
+                    }
+                    if (!*t) clean = false;
+                    ++q;
+                }
+            }
+            ok &= expect(clean, "audio: no missing-source resource staged");
+        }
+
+        // LaunchM gate unit: latched fire + pool + quota -> swoosh (1);
+        // pool/quota refusal -> empty (-1); anything else -> silence (0).
+        McTickPre gate;
+        gate.mFired = 0;
+        gate.mPool = 3;
+        gate.levelMMax = 50;
+        gate.levelIndex = 1;
+        gate.pendingFire = true;
+        gate.running = true;
+        gate.won = false;
+        gate.lost = false;
+        gate.gameComplete = false;
+        ok &= expect(mc_detect_launch(gate) == 1, "audio: launch success detected");
+        gate.mPool = 0;
+        ok &= expect(mc_detect_launch(gate) == -1, "audio: pool refusal detected");
+        gate.mPool = 3;
+        gate.mFired = 50;
+        ok &= expect(mc_detect_launch(gate) == -1, "audio: quota refusal detected");
+        gate.mFired = 0;
+        gate.pendingFire = false;
+        ok &= expect(mc_detect_launch(gate) == 0, "audio: no latch is silence");
+        gate.pendingFire = true;
+        gate.won = true;
+        ok &= expect(mc_detect_launch(gate) == 0, "audio: dwell tick is silence");
+
+        // Fresh-burst scan: exactly status == 2 counts (older blasts read 3+).
+        McState burstState;
+        mc_init_with_seed(&burstState, 7u);
+        burstState.mHead = 0;
+        ok &= expect(mc_count_fresh_bursts(&burstState) == 0, "audio: no bursts at init");
+        int slot = burstState.mPool;
+        burstState.mPool = burstState.m[slot].link;
+        burstState.m[slot].link = 0;
+        burstState.mHead = slot;
+        burstState.m[slot].status = 2;
+        ok &= expect(mc_count_fresh_bursts(&burstState) == 1, "audio: fresh burst counted");
+        burstState.m[slot].status = 3;
+        ok &= expect(mc_count_fresh_bursts(&burstState) == 0, "audio: aged blast not recounted");
+
+        // Split/quota algebra + transitions on crafted states.
+        McState pre, post;
+        mc_init_with_seed(&pre, 11u);
+        mc_init_with_seed(&post, 11u);
+        pre.pendingFire = true;
+        pre.mPool = 2;
+        post.mFired = pre.mFired + 1;
+        McTickPre pp = mc_tick_pre(&pre);
+        McTickSounds ts = mc_tick_sounds(pp, &post);
+        ok &= expect(ts.launches == 1 && ts.refused == 0 && ts.splits == 0,
+                     "audio: clean launch has no split");
+        post.mFired = pre.mFired + 2;
+        ts = mc_tick_sounds(pp, &post);
+        ok &= expect(ts.launches == 1 && ts.splits == 1, "audio: split child counted");
+        post.mFired = pre.mFired;
+        post.levelIndex = pre.levelIndex + 1;
+        ts = mc_tick_sounds(pp, &post);
+        ok &= expect(ts.alarm == 1 && ts.launches == 1, "audio: level start alarms");
+        post.levelIndex = pre.levelIndex;
+        post.lost = true;
+        ts = mc_tick_sounds(pp, &post);
+        ok &= expect(ts.ohno == 1, "audio: campaign lost plays ohno");
+        ts = mc_tick_sounds(pp, nullptr);
+        ok &= expect(ts.launches == 0 && ts.ohno == 0, "audio: null post is silence");
+        McTickPre nullPre = mc_tick_pre(nullptr);
+        ok &= expect(mc_detect_launch(nullPre) == 0, "audio: null pre is silence");
+
+        // Determinism boundary: the same seed + input stream + ticks
+        // fingerprints identically whether tick sounds are collected
+        // (audio enabled) or skipped (audio unavailable/denied). The sink
+        // below stands in for the platform playback layer.
+        const int fireTick[3] = {3, 7, 15};
+        const int fireX[3] = {100, 900, 500};
+        const int fireY[3] = {200, 150, 400};
+        McState a, b;
+        mc_init_with_seed(&a, 0x12345678u);
+        mc_init_with_seed(&b, 0x12345678u);
+        long launches = 0, refused = 0, bursts = 0, splits = 0;
+        for (int t = 1; t <= 500; ++t) {
+            for (int k = 0; k < 3; ++k) {
+                if (t == fireTick[k]) {
+                    mc_request_fire(&a, fireX[k], fireY[k]);
+                    mc_request_fire(&b, fireX[k], fireY[k]);
+                }
+            }
+            McTickPre pa = mc_tick_pre(&a);
+            mc_fixed_update(&a);
+            McTickSounds sa = mc_tick_sounds(pa, &a);
+            launches += sa.launches;
+            refused += sa.refused;
+            bursts += sa.bursts;
+            splits += sa.splits;
+            mc_fixed_update(&b);
+        }
+        ok &= expect(hash_state(a) == hash_state(b), "audio: sink does not perturb state");
+        ok &= expect(a.mFired == 3 && b.mFired == 3, "audio: three shots consumed both runs");
+        ok &= expect(launches == 3 && refused == 0, "audio: three launches mapped to swoosh");
+        ok &= expect(bursts >= 3, "audio: detonations mapped to explode");
+        ok &= expect(bursts < 500, "audio: repeated bursts stay bounded");
+        std::cout << "INFO: audio launches=" << launches << " bursts=" << bursts
+                  << " splits=" << splits << "\n";
     }
 
     // ------------------------------------------------ null safety
