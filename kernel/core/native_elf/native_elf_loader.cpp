@@ -489,6 +489,17 @@ static gx_result GX_CALL host_bare_present_frame(gx_app_context* context, gx_han
 static gx_result GX_CALL host_bare_poll_event(gx_app_context* context, gx_event* output, int)
 {
     if (!app_context_valid(context) || !output || !app_pointer_range(output, sizeof(*output))) return GX_ERROR_INVALID_ARGUMENT;
+    static uint32_t phase28vSecondPausePollTrace = 0;
+    const bool tracePhase28vSecondPause = s_appRuntime.hostLogCount != 0 &&
+        s_appRuntime.hostLogCount <= NATIVE_APP_MAX_LOG_LINES &&
+        s_appRuntime.hostLog[s_appRuntime.hostLogCount - 1][0] != '\0' &&
+        __builtin_strcmp(s_appRuntime.hostLog[s_appRuntime.hostLogCount - 1],
+                         "DEVELOPER_STUDIO_PHASE28V_EVENT_PHASE28Q_SECOND_PAUSE_STAGE_SET") == 0 &&
+        phase28vSecondPausePollTrace < 4;
+    if (tracePhase28vSecondPause) {
+        ++phase28vSecondPausePollTrace;
+        serial::puts("DEVELOPER_STUDIO_PHASE28V_BARE_POLL_ENTRY\n");
+    }
     *output = {};
     output->size = sizeof(*output);
     output->window = 1;
@@ -500,6 +511,8 @@ static gx_result GX_CALL host_bare_poll_event(gx_app_context* context, gx_event*
         output->param3 = (ps2keyboard::is_shift_down() ? GX_KEY_MOD_SHIFT : 0) |
                          (ps2keyboard::is_ctrl_down() ? GX_KEY_MOD_CTRL : 0) |
                          (ps2keyboard::is_alt_down() ? GX_KEY_MOD_ALT : 0);
+        if (NativeElfRunService::native_elf_scheduler_in_target())
+            (void)NativeElfRunService::native_elf_scheduler_yield();
         return GX_OK;
     }
     if (input::mouse_dirty()) {
@@ -508,9 +521,16 @@ static gx_result GX_CALL host_bare_poll_event(gx_app_context* context, gx_event*
         output->param2 = input::mouse_y();
         output->param3 = GX_MOUSE_PACK(input::mouse_buttons() ? GX_MOUSE_BUTTON_LEFT : GX_MOUSE_BUTTON_NONE, GX_MOUSE_ACTION_MOVE);
         input::mouse_clear_dirty();
+        if (NativeElfRunService::native_elf_scheduler_in_target())
+            (void)NativeElfRunService::native_elf_scheduler_yield();
         return GX_OK;
     }
+    if (tracePhase28vSecondPause) serial::puts("DEVELOPER_STUDIO_PHASE28V_BARE_POLL_AFTER_INPUT\n");
     framebuffer::present();
+    if (tracePhase28vSecondPause) serial::puts("DEVELOPER_STUDIO_PHASE28V_BARE_POLL_AFTER_PRESENT\n");
+    if (NativeElfRunService::native_elf_scheduler_in_target())
+        (void)NativeElfRunService::native_elf_scheduler_yield();
+    if (tracePhase28vSecondPause) serial::puts("DEVELOPER_STUDIO_PHASE28V_BARE_POLL_RETURN_TIMEOUT\n");
     return GX_ERROR_TIMEOUT;
 }
 
@@ -684,6 +704,7 @@ static gx_result GX_CALL host_bare_run_prepare(
     gx_development_run_handle* outputHandle,
     gx_development_run_snapshot* outputSnapshot)
 {
+    phase28u_loader_trace("HOST_RUN_PREPARE_ENTRY");
     if (!app_context_valid(context) || !request || !outputHandle || !outputSnapshot ||
         !app_pointer_range(request, sizeof(uint32_t) * 2U) ||
         !app_pointer_range(outputHandle, sizeof(*outputHandle)) ||
@@ -725,10 +746,15 @@ static gx_result GX_CALL host_bare_run_prepare(
         copied.debugSourceCondition = s_bareRunStrings[10];
     }
 
-    gx_development_run_snapshot local = {};
+    phase28u_loader_trace("HOST_RUN_PREPARE_REQUEST_COPIED");
+
+    static gx_development_run_snapshot local = {};
+    __builtin_memset(&local, 0, sizeof(local));
     local.size = sizeof(local);
     local.version = GX_DEVELOPMENT_RUN_API_VERSION;
+    phase28u_loader_trace("HOST_RUN_PREPARE_SERVICE_ENTRY");
     const gx_result result = NativeElfRunService::prepare(copied, outputHandle, &local);
+    phase28u_loader_trace("HOST_RUN_PREPARE_SERVICE_RETURN");
     if (!copy_run_snapshot_to_app(local, outputSnapshot)) return GX_ERROR_PERMISSION_DENIED;
     return result;
 }
@@ -750,7 +776,8 @@ static gx_result GX_CALL host_bare_run_poll(gx_app_context* context,
     if (!app_context_valid(context) || !outputSnapshot ||
         !app_pointer_range(outputSnapshot, sizeof(uint32_t))) return GX_ERROR_PERMISSION_DENIED;
     phase28u_loader_trace("HOST_RUN_POLL_ENTRY");
-    gx_development_run_snapshot local = {};
+    static gx_development_run_snapshot local = {};
+    __builtin_memset(&local, 0, sizeof(local));
     local.size = sizeof(local);
     local.version = GX_DEVELOPMENT_RUN_API_VERSION;
     const gx_result result = NativeElfRunService::poll(handle, &local);
@@ -883,7 +910,12 @@ static gx_result GX_CALL host_bare_development_debug(
             return GX_ERROR_INVALID_ARGUMENT;
         copied.logTemplate = s_bareDebugLogTemplate;
     }
-    gx_development_debug_snapshot local = {};
+    // A full debug snapshot is large enough to exhaust the nested NativeElf
+    // callback stack when a first Continue returns through the host bridge.
+    // Keep callback storage owned by the loader and clear it before each
+    // command instead of materializing it on the nested app stack.
+    static gx_development_debug_snapshot local = {};
+    __builtin_memset(&local, 0, sizeof(local));
     local.size = sizeof(local);
     local.version = GX_DEVELOPMENT_DEBUG_API_VERSION;
     phase28u_loader_trace("HOST_DEBUG_ENTRY");
@@ -892,8 +924,10 @@ static gx_result GX_CALL host_bare_development_debug(
     phase28u_loader_trace("HOST_DEBUG_RETURN");
     if (nested) {
         if (!native_elf_nested_leave_for_host()) return GX_ERROR_FAILED;
+        phase28u_loader_trace("HOST_DEBUG_NESTED_LEAVE_RETURN");
     }
     if (!copy_debug_snapshot_to_app(local, outputSnapshot)) return GX_ERROR_PERMISSION_DENIED;
+    phase28u_loader_trace("HOST_DEBUG_SNAPSHOT_COPY_RETURN");
     return result;
 }
 
@@ -913,7 +947,8 @@ static gx_result GX_CALL host_bare_development_debug_call_stack(
                reinterpret_cast<const uint8_t*>(request),
                request->size < sizeof(copied) ? request->size : sizeof(copied));
     copied.artifactSha256 = s_bareRunStrings[6];
-    gx_development_debug_call_stack local = {};
+    static gx_development_debug_call_stack local = {};
+    __builtin_memset(&local, 0, sizeof(local));
     local.size = sizeof(local);
     local.version = GX_DEVELOPMENT_DEBUG_API_VERSION;
     const bool nested = native_elf_nested_enter_for_host();
@@ -939,7 +974,8 @@ static gx_result GX_CALL host_bare_development_debug_inspect_variables(
                reinterpret_cast<const uint8_t*>(request),
                request->size < sizeof(copied) ? request->size : sizeof(copied));
     copied.artifactSha256 = s_bareRunStrings[6];
-    gx_development_debug_variables local = {};
+    static gx_development_debug_variables local = {};
+    __builtin_memset(&local, 0, sizeof(local));
     local.size = sizeof(local);
     local.version = GX_DEVELOPMENT_DEBUG_API_VERSION;
     const bool nested = native_elf_nested_enter_for_host();
@@ -971,7 +1007,8 @@ static gx_result GX_CALL host_bare_development_debug_evaluate_expression(
     if (!app_string(request->expression, s_bareDebugExpression,
                     sizeof(s_bareDebugExpression))) return GX_ERROR_INVALID_ARGUMENT;
     copied.expression = s_bareDebugExpression;
-    gx_development_debug_expression local = {};
+    static gx_development_debug_expression local = {};
+    __builtin_memset(&local, 0, sizeof(local));
     local.size = sizeof(local);
     local.version = GX_DEVELOPMENT_DEBUG_API_VERSION;
     const bool nested = native_elf_nested_enter_for_host();

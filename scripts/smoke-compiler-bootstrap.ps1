@@ -2397,7 +2397,8 @@ try {
     }
 
     & $msbuild (Join-Path $root "guideXOSBootLoader/guideXOSBootLoader.vcxproj") `
-        /p:Configuration=Release /p:Platform=x64 /t:Rebuild /m /nologo /verbosity:minimal
+        /p:Configuration=Release /p:Platform=x64 /t:Rebuild /m /nologo /verbosity:minimal `
+        /p:TrackFileAccess=false
     if ($LASTEXITCODE -ne 0) { throw "bootloader build failed" }
 
     $kernelBinary = Join-Path $kernelDirectory "build/amd64/bin/kernel.elf"

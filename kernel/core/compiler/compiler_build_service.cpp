@@ -55,6 +55,20 @@ static char s_manifestText[kMaxProjectText + 1];
 static uint8_t s_artifact[COMPILER_MAX_OUTPUT_BYTES];
 static const uint32_t kBuildServiceStackSize = 128u * 1024u;
 alignas(16) static uint8_t s_buildServiceStack[kBuildServiceStackSize];
+static uint32_t s_phase28vBuildTraceCount = 0;
+
+static void phase28v_build_trace(const char* event)
+{
+    if (!event || s_phase28vBuildTraceCount >= 512U) return;
+    ++s_phase28vBuildTraceCount;
+    serial::puts("DEVELOPER_STUDIO_PHASE28V_BUILD ");
+    serial::puts(event);
+    serial::puts(" handle=");
+    serial::put_hex64(s_job.handle);
+    serial::puts(" state=");
+    serial::put_hex32(static_cast<uint32_t>(s_job.snapshot.state));
+    serial::putc('\n');
+}
 
 static uint32_t text_length(const char* value, uint32_t capacity)
 {
@@ -503,6 +517,7 @@ static bool metadata_matches(const char* root, const gx_build_request* request,
 
 static void run_build_core(const gx_build_request* request)
 {
+    phase28v_build_trace("CORE_ENTRY");
     s_job.snapshot.state = GX_BUILD_PREPARING;
     output_line("Bare-metal build backend: kernel VFS compiler", 1);
     output_line("No host process or external toolchain is used", 1);
@@ -516,6 +531,7 @@ static void run_build_core(const gx_build_request* request)
             : "project metadata is not a supported bare-metal bootstrap target");
         return;
     }
+    phase28v_build_trace("METADATA_READY");
     if (!ensure_output_directory(request->projectRoot)) {
         failure(GX_BUILD_ERROR_INVALID_PROJECT_ROOT, "project build output directories could not be created");
         return;
@@ -529,6 +545,7 @@ static void run_build_core(const gx_build_request* request)
         }
     }
     s_job.snapshot.state = GX_BUILD_RUNNING;
+    phase28v_build_trace("COMPILE_ENTRY");
     const char* sourcePaths[kMaxProjectSources] = {};
     const char* sourceIdentityPaths[kMaxProjectSources] = {};
     const char* objectPaths[kMaxProjectSources] = {};
@@ -541,6 +558,7 @@ static void run_build_core(const gx_build_request* request)
     summary = {};
     const bool compiled = compile_project_incremental(sourcePaths, sourceIdentityPaths, objectPaths,
                                                       selection.count, artifactPath, &summary);
+    phase28v_build_trace(compiled ? "COMPILE_RETURN_PASS" : "COMPILE_RETURN_FAIL");
     for (uint32_t i = 0; i < selection.count; ++i) {
         if (summary.moduleStatus[i] == COMPILE_MODULE_CACHE_HIT) {
             char line[GX_BUILD_MAX_OUTPUT_LINE_BYTES] = {};
@@ -587,6 +605,7 @@ static void run_build_core(const gx_build_request* request)
         return;
     }
     s_job.snapshot.state = GX_BUILD_VALIDATING_ARTIFACT;
+    phase28v_build_trace("ARTIFACT_VALIDATION_ENTRY");
     vfs::FileInfo info = {};
     const bool artifactRead = vfs::stat(artifactPath, &info) == vfs::VFS_OK && info.type == vfs::FILE_TYPE_REGULAR && info.size <= sizeof(s_artifact);
     const uint32_t bytes = artifactRead ? static_cast<uint32_t>(info.size) : 0;
@@ -615,6 +634,7 @@ static void run_build_core(const gx_build_request* request)
     }
     output_line(successLine, 1);
     s_job.snapshot.processExitCode = 0;
+    phase28v_build_trace("CORE_COMPLETE");
 }
 
 static int32_t GX_CALL build_service_entry(void* context)
@@ -640,6 +660,7 @@ static void run_build(const gx_build_request* request)
 
 gx_result start(const gx_build_request* request, gx_build_handle* outHandle)
 {
+    phase28v_build_trace("START_ENTRY");
     if (!request || !outHandle || request->size < sizeof(gx_build_request) || request->version != GX_BUILD_API_VERSION) return GX_ERROR_INVALID_ARGUMENT;
     *outHandle = 0;
     if (s_job.used) return GX_ERROR_BUSY;
@@ -649,6 +670,7 @@ gx_result start(const gx_build_request* request, gx_build_handle* outHandle)
     clear_snapshot(&s_job.snapshot, s_job.handle);
     *outHandle = s_job.handle;
     run_build(request);
+    phase28v_build_trace("START_RETURN");
     serial::puts(s_job.snapshot.state == GX_BUILD_SUCCEEDED ? "BareMetalBuild: PASS\n" : "BareMetalBuild: FAIL\n");
     return GX_OK;
 }

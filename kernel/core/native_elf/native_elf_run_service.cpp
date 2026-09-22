@@ -106,6 +106,11 @@ struct Operation {
     bool debugControlled;
     bool debugBreakpointInstalled;
     bool debugBreakpointHit;
+    // Initial debugger release publishes a durable running state before the
+    // first scheduler dispatch.  The application must be able to publish its
+    // ready boundary and issue the first command without a synchronous pump
+    // running a short target to completion.
+    bool debugStartupDispatchHeld;
     bool debugPauseRequested;
     bool debugPauseCaptured;
     bool debugCancelRequested;
@@ -264,6 +269,32 @@ static void scheduled_debug_cancel_entry();
 static SchedulerContext* make_debug_cancel_context();
 #endif
 static uint32_t s_phase28uTraceCount = 0;
+static uint32_t s_phase28vTraceCount = 0;
+
+// Operation and NativeElfRunReport contain bounded diagnostic buffers and are
+// kept in static storage for the lifetime of the service.  Do not reset them
+// with `T()`: that creates a full-size temporary on the caller's stack and
+// makes first-launch behavior depend on the available kernel stack.  Both
+// types are intentionally trivial storage aggregates, so clear them in place.
+static void clear_trivial_storage(void* storage, uint32_t bytes)
+{
+    uint8_t* bytesView = reinterpret_cast<uint8_t*>(storage);
+    for (uint32_t i = 0; i < bytes; ++i) bytesView[i] = 0;
+}
+
+static void reset_operation()
+{
+    clear_trivial_storage(&s_operation,
+                          static_cast<uint32_t>(sizeof(s_operation)));
+    s_operation.debugCurrentBreakpointSlot = kInvalidBreakpointSlot;
+    s_operation.debugServicingBreakpointSlot = kInvalidBreakpointSlot;
+}
+
+static void reset_run_report(NativeElfRunReport& report)
+{
+    clear_trivial_storage(&report,
+                          static_cast<uint32_t>(sizeof(report)));
+}
 
 static void phase28u_trace(const char* event)
 {
@@ -279,6 +310,29 @@ static void phase28u_trace(const char* event)
     serial::puts(" target_complete="); serial::put_hex32(s_schedulerTargetComplete ? 1U : 0U);
     serial::puts(" owner="); serial::put_hex32(s_ownerContext ? 1U : 0U);
     serial::puts(" target="); serial::put_hex32(s_targetContext ? 1U : 0U);
+#endif
+    serial::putc('\n');
+}
+
+static void phase28v_trace(const char* event)
+{
+    if (!event || s_phase28vTraceCount >= 256U) return;
+    ++s_phase28vTraceCount;
+    serial::puts("DEVELOPER_STUDIO_PHASE28V_SERVICE ");
+    serial::puts(event);
+    serial::puts(" state=");
+    serial::put_hex32(static_cast<uint32_t>(s_operation.state));
+    serial::puts(" handle=");
+    serial::put_hex64(s_operation.handle);
+    serial::puts(" generation=");
+    serial::put_hex64(s_operation.registrationGeneration);
+#if defined(__x86_64__)
+    serial::puts(" scheduler=");
+    serial::put_hex32(s_schedulerActive ? 1U : 0U);
+    serial::puts(" in_target=");
+    serial::put_hex32(s_schedulerInTarget ? 1U : 0U);
+    serial::puts(" complete=");
+    serial::put_hex32(s_schedulerTargetComplete ? 1U : 0U);
 #endif
     serial::putc('\n');
 }
@@ -2290,6 +2344,8 @@ static bool capture_user_pause(NativeElfDebugTrap::BreakpointContext* context)
     serial::put_hex64(s_operation.debugStopGeneration);
     serial::puts(" rip=0x"); serial::put_hex64(context->rip);
     serial::puts(" rsp=0x"); serial::put_hex64(context->rsp);
+    serial::puts(" rbp=0x"); serial::put_hex64(context->rbp);
+    serial::puts(" session="); serial::put_hex64(s_operation.registrationGeneration);
     serial::putc('\n');
     serial::puts("DEVELOPER_STUDIO_PHASE28Q_PAUSE_CAPTURE_PASS\n");
     return true;
@@ -2391,6 +2447,7 @@ asm(
 static void scheduled_task_entry(void*)
 {
     phase28u_trace("TARGET_ENTRY");
+    phase28v_trace("TARGET_ENTRY_REACHED");
     s_schedulerInTarget = true;
     s_operation.nativeRuntimeStarted = true;
     int32_t exitCode = 0;
@@ -2500,6 +2557,7 @@ bool native_elf_scheduler_pump()
 gx_result prepare(const gx_development_run_request& request,
                   gx_development_run_handle* outHandle,
                   gx_development_run_snapshot* outSnapshot) {
+    phase28v_trace("PREPARE_ENTRY");
     if (!outHandle || !outSnapshot || snapshot_capacity(outSnapshot) < kLegacySnapshotBytes) return GX_ERROR_INVALID_ARGUMENT;
     *outHandle = 0;
     clear_snapshot(outSnapshot);
@@ -2507,9 +2565,7 @@ gx_result prepare(const gx_development_run_request& request,
         set_failure(outSnapshot, GX_DEVELOPMENT_RUN_ERROR_RUNTIME_BUSY, "Bare-metal NativeElf runtime is busy");
         return GX_OK;
     }
-    s_operation = Operation();
-    s_operation.debugCurrentBreakpointSlot = kInvalidBreakpointSlot;
-    s_operation.debugServicingBreakpointSlot = kInvalidBreakpointSlot;
+    reset_operation();
     clear_debug_output_queue(s_operation);
     s_operation.used = true;
     s_operation.handle = s_nextHandle++;
@@ -2521,7 +2577,7 @@ gx_result prepare(const gx_development_run_request& request,
         s_operation.cleanupComplete = true;
         s_operation.report.teardownComplete = true;
         snapshot_operation(s_operation, outSnapshot);
-        s_operation = Operation();
+        reset_operation();
         return GX_OK;
     }
     if (!initialize_legacy_user_breakpoint(s_operation)) {
@@ -2532,7 +2588,7 @@ gx_result prepare(const gx_development_run_request& request,
         s_operation.cleanupComplete = true;
         s_operation.report.teardownComplete = true;
         snapshot_operation(s_operation, outSnapshot);
-        s_operation = Operation();
+        reset_operation();
         return GX_OK;
     }
     s_operation.debugControlled =
@@ -2545,7 +2601,7 @@ gx_result prepare(const gx_development_run_request& request,
         s_operation.cleanupComplete = true;
         s_operation.report.teardownComplete = true;
         snapshot_operation(s_operation, outSnapshot);
-        s_operation = Operation();
+        reset_operation();
         return GX_OK;
     }
     NativeElfDevelopmentAppModel::RegistrationRequest registrationRequest = {};
@@ -2572,7 +2628,7 @@ gx_result prepare(const gx_development_run_request& request,
         s_operation.cleanupComplete = !NativeElfDevelopmentAppModel::has_active_registration();
         s_operation.report.teardownComplete = s_operation.cleanupComplete;
         snapshot_operation(s_operation, outSnapshot);
-        s_operation = Operation();
+        reset_operation();
         return GX_OK;
     }
     s_operation.appModelRegistered = true;
@@ -2582,6 +2638,7 @@ gx_result prepare(const gx_development_run_request& request,
             s_operation.userBreakpoints[i].generation = s_operation.registrationGeneration;
     s_operation.cleanupComplete = false;
     s_operation.state = GX_DEVELOPMENT_RUN_REGISTERED;
+    phase28v_trace("APP_MODEL_REGISTERED");
     *outHandle = s_operation.handle;
     snapshot_operation(s_operation, outSnapshot);
     return GX_OK;
@@ -2589,6 +2646,7 @@ gx_result prepare(const gx_development_run_request& request,
 
 gx_result start(gx_development_run_handle handle) {
     phase28u_trace("START_ENTRY");
+    phase28v_trace("START_ENTRY");
     if (!decode(handle)) return GX_ERROR_FAILED;
     if (s_operation.state != GX_DEVELOPMENT_RUN_REGISTERED) return GX_ERROR_BUSY;
     if (s_operation.closeRequested) {
@@ -2625,7 +2683,8 @@ gx_result start(gx_development_run_handle handle) {
         return GX_OK;
     }
     s_operation.state = GX_DEVELOPMENT_RUN_RUNNING;
-    s_operation.report = NativeElfRunReport();
+    phase28v_trace("PROCESS_RUNNING");
+    reset_run_report(s_operation.report);
     s_operation.exitCode = 0;
 
 #if defined(__x86_64__)
@@ -2639,6 +2698,7 @@ gx_result start(gx_development_run_handle handle) {
     s_ownerContext = nullptr;
     s_schedulerYieldContext = nullptr;
     s_schedulerPollBoundaryPending = false;
+    phase28v_trace("SCHEDULER_REGISTERED");
     s_targetContext = arch::amd64::context::init_context(
         reinterpret_cast<uint64_t>(s_schedulerStack + sizeof(s_schedulerStack)),
         &scheduled_task_entry,
@@ -2650,6 +2710,7 @@ gx_result start(gx_development_run_handle handle) {
                          "NativeElf execution context could not be created");
         return GX_OK;
     }
+    phase28v_trace("PROCESS_CONTEXT_ALLOCATED");
     if (s_operation.debugControlled &&
         !NativeElfDebugTrap::install(native_elf_debug_breakpoint_exception,
                                      native_elf_debug_single_step_exception)) {
@@ -2668,6 +2729,7 @@ gx_result start(gx_development_run_handle handle) {
         fail_and_cleanup(s_operation, GX_DEVELOPMENT_RUN_ERROR_LAUNCH_UNAVAILABLE,
                          "NativeElf execution owner could not be scheduled");
     }
+    phase28v_trace("FIRST_DISPATCH_RETURNED");
     phase28u_trace("START_RETURN");
 #else
     fail_and_cleanup(s_operation,
@@ -5402,7 +5464,12 @@ gx_result inspect_variables(const gx_development_debug_request& request,
     gx_development_debug_request callStackRequest = request;
     callStackRequest.command = GX_DEVELOPMENT_DEBUG_CALL_STACK;
     callStackRequest.auxiliaryAddress = 0;
-    gx_development_debug_call_stack callStack = {};
+    // Variable inspection is reached from a nested NativeElf host callback.
+    // Keep the bounded call-stack response out of that callback's stack.
+    static gx_development_debug_call_stack callStack = {};
+    __builtin_memset(&callStack, 0, sizeof(callStack));
+    callStack.size = sizeof(callStack);
+    callStack.version = GX_DEVELOPMENT_DEBUG_API_VERSION;
     const gx_result callStackResult = call_stack(callStackRequest, &callStack);
     if (callStackResult != GX_OK ||
         (callStack.status != GX_DEVELOPMENT_DEBUG_CALL_STACK_STATUS_SUCCESS &&
@@ -5674,7 +5741,12 @@ gx_result evaluate_expression(const gx_development_debug_request& request,
     gx_development_debug_request callStackRequest = request;
     callStackRequest.command = GX_DEVELOPMENT_DEBUG_CALL_STACK;
     callStackRequest.auxiliaryAddress = 0;
-    gx_development_debug_call_stack callStack = {};
+    // Expression inspection can be invoked from the same nested callback
+    // chain; own both intermediate responses instead of stacking them.
+    static gx_development_debug_call_stack callStack = {};
+    __builtin_memset(&callStack, 0, sizeof(callStack));
+    callStack.size = sizeof(callStack);
+    callStack.version = GX_DEVELOPMENT_DEBUG_API_VERSION;
     const gx_result callStackCode = call_stack(callStackRequest, &callStack);
     if (callStackCode != GX_OK ||
         (callStack.status != GX_DEVELOPMENT_DEBUG_CALL_STACK_STATUS_SUCCESS &&
@@ -5714,7 +5786,10 @@ gx_result evaluate_expression(const gx_development_debug_request& request,
         return GX_ERROR_FAILED;
     }
 
-    gx_development_debug_variables variables = {};
+    static gx_development_debug_variables variables = {};
+    __builtin_memset(&variables, 0, sizeof(variables));
+    variables.size = sizeof(variables);
+    variables.version = GX_DEVELOPMENT_DEBUG_API_VERSION;
     gx_development_debug_request variablesRequest = request;
     variablesRequest.command = GX_DEVELOPMENT_DEBUG_INSPECT_VARIABLES;
     const gx_result variablesCode = inspect_variables(variablesRequest, &variables);
@@ -5878,6 +5953,8 @@ gx_result debug(const gx_development_debug_request& request,
     clear_debug_snapshot(outSnapshot);
     if (request.command == GX_DEVELOPMENT_DEBUG_CONTINUE_BREAKPOINT)
         serial::puts("DEVELOPER_STUDIO_PHASE28M_CONTINUE_COMMAND_ENTRY\n");
+    if (request.command == GX_DEVELOPMENT_DEBUG_RESUME)
+        serial::puts("DEVELOPER_STUDIO_PHASE28V_RESUME_COMMAND_ENTRY\n");
     if (request.command == GX_DEVELOPMENT_DEBUG_RESUME_STEP ||
         request.command == GX_DEVELOPMENT_DEBUG_RESUME_INTERNAL_TRAP)
         serial::puts("DEVELOPER_STUDIO_PHASE28M_RESUME_STEP_ENTRY\n");
@@ -5930,7 +6007,9 @@ gx_result debug(const gx_development_debug_request& request,
                             "NativeElf user pause is busy during active execution control");
             return GX_ERROR_BUSY;
         }
+        const bool startupGateWasHeld = s_operation.debugStartupDispatchHeld;
         s_operation.debugPauseRequested = true;
+        s_operation.debugStartupDispatchHeld = false;
         s_operation.debugPauseRequestGeneration = s_operation.registrationGeneration;
         clear_debug_snapshot(outSnapshot);
         outSnapshot->status = GX_DEVELOPMENT_DEBUG_STATUS_PAUSE_REQUESTED;
@@ -5945,8 +6024,9 @@ gx_result debug(const gx_development_debug_request& request,
         // the owner handles this request.  Capture that exact frame now so a
         // following poll cannot resume a short fixture past its final yield.
 #if defined(__x86_64__)
-        if (s_schedulerYieldContext && s_schedulerActive && !s_schedulerInTarget &&
-            !s_schedulerTargetComplete && capture_user_pause(s_schedulerYieldContext)) {
+        if (!startupGateWasHeld && s_schedulerYieldContext && s_schedulerActive &&
+            !s_schedulerInTarget && !s_schedulerTargetComplete &&
+            capture_user_pause(s_schedulerYieldContext)) {
             outSnapshot->status = GX_DEVELOPMENT_DEBUG_STATUS_PAUSE_REQUESTED;
             copy_text(outSnapshot->errorMessage, sizeof(outSnapshot->errorMessage),
                       "NativeElf user pause request accepted at parked boundary");
@@ -6061,6 +6141,13 @@ gx_result debug(const gx_development_debug_request& request,
         }
 #endif
         if (s_operation.state == GX_DEVELOPMENT_RUN_RUNNING &&
+            s_operation.debugStartupDispatchHeld && !s_operation.debugPauseRequested) {
+            // Keep the first launch runnable but parked until the owner has
+            // observed the explicit startup-ready state and issued its first
+            // debugger command.  This is a durable generation-local state,
+            // not a timing delay or a lost scheduler notification.
+            set_debug_ready_snapshot(s_operation, outSnapshot);
+        } else if (s_operation.state == GX_DEVELOPMENT_RUN_RUNNING &&
             s_schedulerActive && !s_schedulerInTarget &&
             !publishParkedBoundary &&
             !native_elf_scheduler_pump()) {
@@ -6128,6 +6215,17 @@ gx_result debug(const gx_development_debug_request& request,
             set_debug_error(outSnapshot, "NativeElf target is not paused at a resumable debug stop");
             return GX_ERROR_BUSY;
         }
+        if (request.command == GX_DEVELOPMENT_DEBUG_RELEASE_EXECUTION) {
+            s_operation.state = GX_DEVELOPMENT_RUN_RUNNING;
+            // Keep the first launch runnable but parked until the owner has
+            // observed the durable startup-ready state and issued its first
+            // debugger command.  This is a generation-local state boundary,
+            // not a timing delay or a lost scheduler notification.
+            s_operation.debugStartupDispatchHeld = true;
+            set_debug_ready_snapshot(s_operation, outSnapshot);
+            serial::puts("DEVELOPER_STUDIO_PHASE28V_NATIVE_STARTUP_READY\n");
+            return GX_OK;
+        }
         if (s_operation.debugPauseCaptured) {
             s_operation.debugPauseCaptured = false;
             s_operation.debugPauseRequested = false;
@@ -6140,7 +6238,15 @@ gx_result debug(const gx_development_debug_request& request,
             serial::puts("DEVELOPER_STUDIO_PHASE28Q_CONTINUE_REQUESTED\n");
             const bool pumped = native_elf_scheduler_pump();
             if (!pumped) return GX_ERROR_FAILED;
-            if (s_operation.state == GX_DEVELOPMENT_RUN_PAUSED)
+            if (s_operation.state == GX_DEVELOPMENT_RUN_EXITED) {
+                // A short target can complete during the same scheduler
+                // dispatch that services Continue. Publish the durable
+                // terminal fact immediately so the owner cannot mistake the
+                // completed generation for a still-running target.
+                set_debug_ready_snapshot(s_operation, outSnapshot);
+                copy_text(outSnapshot->errorMessage, sizeof(outSnapshot->errorMessage),
+                          "NativeElf target exited");
+            } else if (s_operation.state == GX_DEVELOPMENT_RUN_PAUSED)
                 *outSnapshot = s_operation.debugSnapshot;
             serial::puts("DEVELOPER_STUDIO_PHASE28Q_CONTINUE_PASS\n");
             return GX_OK;
@@ -6382,7 +6488,7 @@ gx_result release(gx_development_run_handle handle) {
     s_schedulerYieldContext = nullptr;
     s_schedulerPollBoundaryPending = false;
 #endif
-    s_operation = Operation();
+    reset_operation();
     return GX_OK;
 }
 

@@ -17,8 +17,6 @@
   "smallLiveDesktopFolderIcons": true,
   "autoArrangeDesktopIcons": false,
   "windows": [
-    {"id": 1000, "title": "guideXOS Developer Studio", "x": 24, "y": 0, "w": 960, "h": 700, "minimized": false, "maximized": false, "z": 0, "focused": false, "snap": 0},
-    {"id": 1001, "title": "Debugger Phase 3B Fixture", "x": 184, "y": 164, "w": 640, "h": 360, "minimized": false, "maximized": false, "z": 1, "focused": true, "snap": 0}
   ],
   "iconPositions": [
   ]
