@@ -609,6 +609,20 @@ public sealed class ManagedNotes : GuideXosApplication
 #endif
 #endif
 #endif
+#if HOSTLOGPROOF_C133_REUSABLE_COMBOBOX
+    private const uint C133HideComboKey = 0x900u;
+    private const uint C133ShowComboKey = 0x901u;
+    private const uint C133DisableComboKey = 0x902u;
+    private const uint C133EnableComboKey = 0x903u;
+    private const int C133ComboControlId = 5;
+    private readonly GuideXosComboBox _pathDisplayCombo =
+        new(20, 278, 268, 28, 16, 48, 4);
+    private bool _c133ProofContext;
+    private bool _c133ComboTestContext;
+    private bool _c133HostTestContext;
+    private bool _c133ComboTestsRun;
+    private bool _c133HostTestsRun;
+#endif
 
     public override GuideXosResult Launch(GuideXosHost host)
     {
@@ -623,6 +637,12 @@ public sealed class ManagedNotes : GuideXosApplication
 
         _picker.Reset();
         _saveInvocation = 0;
+#if HOSTLOGPROOF_C133_REUSABLE_COMBOBOX
+        _c133ProofContext = host.LaunchContext.Utf8.SequenceEqual("c133"u8) ||
+            host.LaunchContext.Utf8.SequenceEqual("c133-host"u8);
+        _c133ComboTestContext = host.LaunchContext.Utf8.SequenceEqual("c133-api"u8);
+        _c133HostTestContext = host.LaunchContext.Utf8.SequenceEqual("c133-host"u8);
+#endif
 #if HOSTLOGPROOF_C119_MANAGED_BUTTON
         _c119ProofContext = IsC119Context(host);
         _openButton.Reset();
@@ -634,7 +654,17 @@ public sealed class ManagedNotes : GuideXosApplication
         }
 #endif
 #if HOSTLOGPROOF_C120_MANAGED_CONTROL_HOST
-        _c120ProofContext = IsC120Context(host);
+        _c120ProofContext = IsC120Context(host)
+#if HOSTLOGPROOF_C133_REUSABLE_COMBOBOX
+            || host.LaunchContext.Utf8.SequenceEqual("c133-notes"u8) ||
+            host.LaunchContext.Utf8.SequenceEqual("c133-disabled"u8) ||
+            host.LaunchContext.Utf8.SequenceEqual("c133-combo-tests"u8) ||
+            host.LaunchContext.Utf8.SequenceEqual("c133-combo-host-tests"u8) ||
+            host.LaunchContext.Utf8.SequenceEqual("c133"u8) ||
+            host.LaunchContext.Utf8.SequenceEqual("c133-api"u8) ||
+            host.LaunchContext.Utf8.SequenceEqual("c133-host"u8)
+#endif
+            ;
 #if HOSTLOGPROOF_C121_MANAGED_CHECKBOX
         _c121ProofContext = IsC121Context(host);
         _c121CheckboxTestContext = IsC121CheckboxTestContext(host);
@@ -687,6 +717,20 @@ public sealed class ManagedNotes : GuideXosApplication
         _c132RadioTestContext = IsC132RadioTestContext(host);
         _c132HostTestContext = IsC132HostTestContext(host);
 #endif
+#if HOSTLOGPROOF_C133_REUSABLE_COMBOBOX
+        _c133ProofContext = IsC133NotesContext(host) ||
+            IsC133ComboTestContext(host) ||
+            IsC133HostTestContext(host) ||
+            host.LaunchContext.Utf8.SequenceEqual("c133-notes"u8) ||
+            host.LaunchContext.Utf8.SequenceEqual("c133-disabled"u8) ||
+            host.LaunchContext.Utf8.SequenceEqual("c133"u8);
+        _c133ComboTestContext = IsC133ComboTestContext(host) ||
+            host.LaunchContext.Utf8.SequenceEqual("c133-combo-tests"u8) ||
+            host.LaunchContext.Utf8.SequenceEqual("c133-api"u8);
+        _c133HostTestContext = IsC133HostTestContext(host) ||
+            host.LaunchContext.Utf8.SequenceEqual("c133-combo-host-tests"u8) ||
+            host.LaunchContext.Utf8.SequenceEqual("c133-host"u8);
+#endif
 #endif
 #endif
 #endif
@@ -695,11 +739,29 @@ public sealed class ManagedNotes : GuideXosApplication
         _c121ProofContext = _c121ProofContext || _c132ProofContext;
         _c122ProofContext = _c122ProofContext || _c132ProofContext;
 #endif
+#if HOSTLOGPROOF_C133_REUSABLE_COMBOBOX
+        _c120ProofContext = _c120ProofContext || _c133ProofContext;
+        _c121ProofContext = _c121ProofContext || _c133ProofContext;
+        _c131ProofContext = _c131ProofContext || _c133ProofContext;
+        _c122ProofContext = _c122ProofContext || _c133ProofContext;
+#endif
         _c124ProofContext = _c124ProofContext || _c125ProofContext;
 #endif
         _c123ProofContext = _c123ProofContext || _c124ProofContext;
 #endif
         _c122ProofContext = _c122ProofContext || _c123ProofContext;
+#endif
+#if HOSTLOGPROOF_C133_REUSABLE_COMBOBOX
+        if (_c133HostTestContext &&
+            !_c133HostTestsRun)
+        {
+            bool earlyC133HostTests =
+                GuideXosComboBoxC133HostTests.Run(host);
+            _c133HostTestsRun = true;
+            host.TryLog(earlyC133HostTests
+                ? "C133-HOST tests=PASS"u8
+                : "C133-HOST tests=FAIL"u8);
+        }
 #endif
         if (_c122ProofContext || _c122LabelTestContext || _c122LabelHostTestContext)
         {
@@ -742,6 +804,26 @@ public sealed class ManagedNotes : GuideXosApplication
 #endif
         }
 #if HOSTLOGPROOF_C125_MANAGED_PROGRESS_BAR
+#if HOSTLOGPROOF_C133_REUSABLE_COMBOBOX
+        if (_c133ProofContext)
+        {
+            _pathDisplayCombo.Reset();
+            _pathDisplayCombo.ClearItems();
+            _pathDisplayCombo.TryAddItem("Full Path");
+            _pathDisplayCombo.TryAddItem("File Name");
+            _pathDisplayCombo.Changed = OnC133ComboChanged;
+            _pathDisplayCombo.SelectedIndex = 0;
+#if HOSTLOGPROOF_C127_MANAGED_PANEL
+            _pathDisplayPanel.Reset();
+            _pathDisplayPanel.Clear();
+            if (_pathDisplayPanel.TryAddChild(_pathDisplayCombo, 8, 14) !=
+                    GuideXosPanelResult.Added)
+            {
+                return GuideXosResult.InvalidArgument;
+            }
+#endif
+        }
+#endif
         if (_c125ProofContext || _c125ProgressTestContext)
         {
             _documentUsage.Reset();
@@ -786,6 +868,9 @@ public sealed class ManagedNotes : GuideXosApplication
 #endif
             _mainControlHost = new GuideXosControlHost(
 #if HOSTLOGPROOF_C124_MANAGED_RADIO_BUTTON
+#if HOSTLOGPROOF_C133_REUSABLE_COMBOBOX
+                _c133ProofContext ? 7 :
+#endif
 #if HOSTLOGPROOF_C131_REUSABLE_CHECKBOX
                 _c131ProofContext ? 8 :
 #endif
@@ -814,7 +899,12 @@ public sealed class ManagedNotes : GuideXosApplication
             }
 #endif
 #if HOSTLOGPROOF_C124_MANAGED_RADIO_BUTTON
-            if (_c124ProofContext
+            if (_c133ProofContext)
+            {
+                _mainControlHost.TryRegisterComboBox(
+                    C133ComboControlId, _pathDisplayCombo);
+            }
+            else if (_c124ProofContext
 #if HOSTLOGPROOF_C132_REUSABLE_RADIO_BUTTON
                 || _c132ProofContext
 #endif
@@ -840,6 +930,9 @@ public sealed class ManagedNotes : GuideXosApplication
             }
             int expectedHostRegistration =
 #if HOSTLOGPROOF_C124_MANAGED_RADIO_BUTTON
+#if HOSTLOGPROOF_C133_REUSABLE_COMBOBOX
+                _c133ProofContext ? 7 :
+#endif
 #if HOSTLOGPROOF_C131_REUSABLE_CHECKBOX
                 _c131ProofContext ? 8 :
 #endif
@@ -855,6 +948,15 @@ public sealed class ManagedNotes : GuideXosApplication
 #endif
             bool hostRegistration = _mainControlHost.RegistrationCount ==
                 expectedHostRegistration && _mainControlHost.ActiveIndex == -1;
+#if HOSTLOGPROOF_C133_REUSABLE_COMBOBOX
+            if (_c133ProofContext)
+            {
+                host.TryLog(hostRegistration &&
+                    _mainControlHost.RegistrationCount == 7
+                    ? "C133-HOST registration=7 combo=path-display initial=no-focus result=PASS"u8
+                    : "C133-HOST registration=FAIL initial=no-focus result=FAIL"u8);
+            }
+#endif
 #if HOSTLOGPROOF_C121_MANAGED_CHECKBOX
             if (_c121ProofContext
 #if HOSTLOGPROOF_C124_MANAGED_RADIO_BUTTON
@@ -904,7 +1006,7 @@ public sealed class ManagedNotes : GuideXosApplication
             }
 #endif
 #if HOSTLOGPROOF_C131_REUSABLE_CHECKBOX
-            if (_c131ProofContext)
+            if (_c131ProofContext && !_c133ProofContext)
             {
                 host.TryLog(hostRegistration &&
                     _mainControlHost.RegistrationCount == 8
@@ -1062,7 +1164,11 @@ public sealed class ManagedNotes : GuideXosApplication
 #endif
 #endif
 #if HOSTLOGPROOF_C131_REUSABLE_CHECKBOX
-        if (_c131ProofContext)
+        if (_c131ProofContext
+#if HOSTLOGPROOF_C133_REUSABLE_COMBOBOX
+            && !_c133ProofContext
+#endif
+            )
         {
             bool c131Initial = _mainControlHost.RegistrationCount == 8 &&
                 _showStatusCheckBox.Checked && _showStatusCheckBox.Visible &&
@@ -1085,6 +1191,18 @@ public sealed class ManagedNotes : GuideXosApplication
                 : "C132-NOTES initial=FAIL result=FAIL"u8);
         }
 #endif
+#if HOSTLOGPROOF_C133_REUSABLE_COMBOBOX
+        if (_c133ProofContext)
+        {
+            bool c133Initial = _mainControlHost.RegistrationCount == 7 &&
+                _pathDisplayCombo.SelectedIndex == 0 &&
+                _pathDisplayCombo.ItemCount == 2 &&
+                !_pathDisplayCombo.IsOpen && _c133ProofContext;
+            host.TryLog(c133Initial
+                ? "C133-NOTES initial=registration=7 selection=full-path callbacks=0 result=PASS"u8
+                : "C133-NOTES initial=FAIL result=FAIL"u8);
+        }
+#endif
 #endif
         host.TryLog("C117-NOTES threadStatic=PASS"u8);
         host.TryLog(loadResult == GuideXosFileResult.Success
@@ -1105,6 +1223,9 @@ public sealed class ManagedNotes : GuideXosApplication
 #endif
 #if HOSTLOGPROOF_C132_REUSABLE_RADIO_BUTTON
             || _c132RadioTestContext || _c132HostTestContext
+#endif
+#if HOSTLOGPROOF_C133_REUSABLE_COMBOBOX
+            || _c133ComboTestContext || _c133HostTestContext
 #endif
 #endif
 #endif
@@ -1258,6 +1379,29 @@ public sealed class ManagedNotes : GuideXosApplication
         if (_c132RadioTestContext)
         {
             _c132RadioTestsRun = true;
+        }
+#endif
+#if HOSTLOGPROOF_C133_REUSABLE_COMBOBOX
+        bool c133ApiContext = host.LaunchContext.Utf8.SequenceEqual("c133-api"u8);
+        bool c133HostContext = host.LaunchContext.Utf8.SequenceEqual("c133-host"u8);
+        bool c133ComboTests = (_c133ComboTestContext || c133ApiContext) && !_c133ComboTestsRun
+            ? GuideXosComboBoxC133Tests.Run(host) : true;
+        bool c133HostTests = (_c133HostTestContext || c133HostContext) &&
+            !_c133HostTestsRun
+            ? GuideXosComboBoxC133HostTests.Run(host) : true;
+        if (_c133HostTestContext || c133HostContext)
+        {
+            _c133HostTestsRun = true;
+            host.TryLog(c133HostTests
+                ? "C133-HOST tests=PASS"u8
+                : "C133-HOST tests=FAIL"u8);
+        }
+        if (_c133ComboTestContext || c133ApiContext)
+        {
+            _c133ComboTestsRun = true;
+            host.TryLog(c133ComboTests
+                ? "C133-COMBO-TESTS cases=44 result=PASS"u8
+                : "C133-COMBO-TESTS cases=44 result=FAIL"u8);
         }
 #endif
 #if HOSTLOGPROOF_C122_MANAGED_LABEL
@@ -1416,6 +1560,9 @@ public sealed class ManagedNotes : GuideXosApplication
 #if HOSTLOGPROOF_C131_REUSABLE_CHECKBOX
             || IsC131NotesContext(host)
 #endif
+#if HOSTLOGPROOF_C133_REUSABLE_COMBOBOX
+            || IsC133NotesContext(host)
+#endif
 #if HOSTLOGPROOF_C132_REUSABLE_RADIO_BUTTON
 #endif
 #endif
@@ -1457,6 +1604,9 @@ public sealed class ManagedNotes : GuideXosApplication
 #endif
 #if HOSTLOGPROOF_C131_REUSABLE_CHECKBOX
             || IsC131NotesContext(host)
+#endif
+#if HOSTLOGPROOF_C133_REUSABLE_COMBOBOX
+            || IsC133NotesContext(host)
 #endif
 #endif
 #endif
@@ -1540,6 +1690,9 @@ public sealed class ManagedNotes : GuideXosApplication
 #if HOSTLOGPROOF_C131_REUSABLE_CHECKBOX
             || IsC131NotesContext(host)
 #endif
+#if HOSTLOGPROOF_C133_REUSABLE_COMBOBOX
+            || IsC133NotesContext(host)
+#endif
 #endif
 #endif
 #endif
@@ -1568,6 +1721,9 @@ public sealed class ManagedNotes : GuideXosApplication
             || host.LaunchContext.Utf8.SequenceEqual("c128-notes"u8)
 #if HOSTLOGPROOF_C131_REUSABLE_CHECKBOX
             || IsC131NotesContext(host)
+#endif
+#if HOSTLOGPROOF_C133_REUSABLE_COMBOBOX
+            || IsC133NotesContext(host)
 #endif
 #endif
 #endif
@@ -1670,6 +1826,27 @@ public sealed class ManagedNotes : GuideXosApplication
             "c132-radio-host-tests"u8);
     }
 #endif
+#if HOSTLOGPROOF_C133_REUSABLE_COMBOBOX
+    private static bool IsC133NotesContext(GuideXosHost host)
+    {
+        return host.LaunchContext.Utf8.SequenceEqual("c133-notes"u8) ||
+            host.LaunchContext.Utf8.SequenceEqual("c133-disabled"u8) ||
+            host.LaunchContext.Utf8.SequenceEqual("c133"u8);
+    }
+
+    private static bool IsC133ComboTestContext(GuideXosHost host)
+    {
+        return host.LaunchContext.Utf8.SequenceEqual("c133-combo-tests"u8) ||
+            host.LaunchContext.Utf8.SequenceEqual("c133-api"u8);
+    }
+
+    private static bool IsC133HostTestContext(GuideXosHost host)
+    {
+        return host.LaunchContext.Utf8.SequenceEqual(
+            "c133-combo-host-tests"u8) ||
+            host.LaunchContext.Utf8.SequenceEqual("c133-host"u8);
+    }
+#endif
 #endif
 #endif
 #endif
@@ -1739,6 +1916,41 @@ public sealed class ManagedNotes : GuideXosApplication
     {
         ++_c132RadioChangedCount;
         if (_c132ProofContext) UpdatePathLabel();
+    }
+#endif
+#if HOSTLOGPROOF_C133_REUSABLE_COMBOBOX
+    private bool HandleC133ComboProofKey(uint keyCode)
+    {
+        if (keyCode == C133HideComboKey)
+        {
+            _pathDisplayCombo.SetVisible(false);
+            _mainControlHost.RefreshVisibility();
+            return true;
+        }
+        if (keyCode == C133ShowComboKey)
+        {
+            _pathDisplayCombo.SetVisible(true);
+            _mainControlHost.RefreshVisibility();
+            return true;
+        }
+        if (keyCode == C133DisableComboKey)
+        {
+            _pathDisplayCombo.SetEnabled(false);
+            _mainControlHost.RefreshVisibility();
+            return true;
+        }
+        if (keyCode == C133EnableComboKey)
+        {
+            _pathDisplayCombo.SetEnabled(true);
+            _mainControlHost.TryFocus(C133ComboControlId);
+            return true;
+        }
+        return false;
+    }
+
+    private void OnC133ComboChanged(int selectedIndex)
+    {
+        if (_c133ProofContext) UpdatePathLabel();
     }
 #endif
 
@@ -1880,6 +2092,14 @@ public sealed class ManagedNotes : GuideXosApplication
                 ? GuideXosResult.Success : GuideXosResult.InvalidArgument;
         }
 #endif
+#if HOSTLOGPROOF_C133_REUSABLE_COMBOBOX
+        if (_c133ProofContext && input.Kind == GuideXosInputKind.KeyDown &&
+            HandleC133ComboProofKey(input.KeyCode))
+        {
+            return RenderMain(host, surface, _launchCount)
+                ? GuideXosResult.Success : GuideXosResult.InvalidArgument;
+        }
+#endif
 #if HOSTLOGPROOF_C125_MANAGED_PROGRESS_BAR
         if (_c125ProofContext && input.Kind == GuideXosInputKind.KeyDown &&
             HandleC125ProgressProofKey(host, input.KeyCode))
@@ -1923,14 +2143,24 @@ public sealed class ManagedNotes : GuideXosApplication
 
         if (input.Kind == GuideXosInputKind.PointerDown)
         {
-            int controlId = C120HitTest(input.X, input.Y);
+            int controlId =
+#if HOSTLOGPROOF_C133_REUSABLE_COMBOBOX
+                _c133ProofContext && _pathDisplayCombo.IsOpen
+                    ? C133ComboControlId
+                    :
+#endif
+                C120HitTest(input.X, input.Y);
             if (controlId == 0) return GuideXosResult.Success;
             GuideXosControlHostResult pointerResult = controlId == C120DocumentControlId
                 ? _mainControlHost.FocusAndRoutePointer(
                     controlId, input.X, input.Y, 20, 72, 8, 18)
                 : _mainControlHost.FocusAndRoutePointer(
                     controlId, input.X, input.Y);
-            if (pointerResult == GuideXosControlHostResult.Activated)
+            if (pointerResult == GuideXosControlHostResult.Activated
+#if HOSTLOGPROOF_C133_REUSABLE_COMBOBOX
+                && !(_c133ProofContext && controlId == C133ComboControlId)
+#endif
+                )
             {
                 host.TryLog(C120ControlLabel(controlId));
                 return HandleAction(host, C120ActionForControl(controlId));
@@ -1953,6 +2183,21 @@ public sealed class ManagedNotes : GuideXosApplication
                 host.TryLog(_showStatusCheckBox.Checked
                     ? "C131-POINTER state=checked callback=PASS result=PASS"u8
                     : "C131-POINTER state=unchecked callback=PASS result=PASS"u8);
+                return RenderMain(host, surface, _launchCount)
+                    ? GuideXosResult.Success : GuideXosResult.InvalidArgument;
+            }
+#endif
+#if HOSTLOGPROOF_C133_REUSABLE_COMBOBOX
+            if (_c133ProofContext && controlId == C133ComboControlId)
+            {
+                if (pointerResult == GuideXosControlHostResult.Changed)
+                {
+                    host.TryLog("C133-POINTER selection=changed callback=PASS result=PASS"u8);
+                }
+                else if (pointerResult == GuideXosControlHostResult.Activated)
+                {
+                    host.TryLog("C133-POINTER open=PASS result=PASS"u8);
+                }
                 return RenderMain(host, surface, _launchCount)
                     ? GuideXosResult.Success : GuideXosResult.InvalidArgument;
             }
@@ -2067,6 +2312,15 @@ public sealed class ManagedNotes : GuideXosApplication
             }
             else
 #endif
+#if HOSTLOGPROOF_C133_REUSABLE_COMBOBOX
+            if (_c133ProofContext)
+            {
+                host.TryLog(input.Shift
+                    ? "C133-SHIFT-TAB traversal=PASS result=PASS"u8
+                    : "C133-TAB traversal=PASS result=PASS"u8);
+            }
+            else
+#endif
 #if HOSTLOGPROOF_C121_MANAGED_CHECKBOX
             if (_c121ProofContext)
             {
@@ -2080,12 +2334,49 @@ public sealed class ManagedNotes : GuideXosApplication
                 ? "C120-SHIFT-TAB traversal=PASS"u8
                 : "C120-TAB traversal=PASS"u8);
         }
-        if (routeResult == GuideXosControlHostResult.Activated)
+        if (routeResult == GuideXosControlHostResult.Activated
+#if HOSTLOGPROOF_C133_REUSABLE_COMBOBOX
+            && !(_c133ProofContext &&
+                _mainControlHost.ActiveControlId == C133ComboControlId)
+#endif
+            )
         {
             int controlId = _mainControlHost.ActiveControlId;
             host.TryLog(C120ControlLabel(controlId));
             return HandleAction(host, C120ActionForControl(controlId));
         }
+#if HOSTLOGPROOF_C133_REUSABLE_COMBOBOX
+        if (_c133ProofContext &&
+            _mainControlHost.ActiveControlId == C133ComboControlId &&
+            (routeResult == GuideXosControlHostResult.Activated ||
+                routeResult == GuideXosControlHostResult.Changed ||
+                routeResult == GuideXosControlHostResult.Moved ||
+                routeResult == GuideXosControlHostResult.Cancelled))
+        {
+            if (routeResult == GuideXosControlHostResult.Activated)
+            {
+                host.TryLog(input.Kind == GuideXosInputKind.KeyDown &&
+                    (GuideXosTextInputKey)input.KeyCode == GuideXosTextInputKey.Enter
+                    ? "C133-ENTER open=PASS result=PASS"u8
+                    : "C133-SPACE open=PASS result=PASS"u8);
+            }
+            else if (routeResult == GuideXosControlHostResult.Changed)
+            {
+                host.TryLog("C133-ENTER selection=commit callback=PASS result=PASS"u8);
+            }
+            else if (routeResult == GuideXosControlHostResult.Moved)
+            {
+                host.TryLog("C133-ARROW highlight=PASS committed=unchanged result=PASS"u8);
+            }
+            else if (input.Kind == GuideXosInputKind.KeyDown &&
+                (GuideXosTextInputKey)input.KeyCode == GuideXosTextInputKey.Escape)
+            {
+                host.TryLog("C133-ESCAPE cancel=PASS committed=preserved result=PASS"u8);
+            }
+            return RenderMain(host, surface, _launchCount)
+                ? GuideXosResult.Success : GuideXosResult.InvalidArgument;
+        }
+#endif
 #if HOSTLOGPROOF_C121_MANAGED_CHECKBOX
         if (_c121ProofContext &&
             routeResult == GuideXosControlHostResult.Toggled &&
@@ -2206,6 +2497,12 @@ public sealed class ManagedNotes : GuideXosApplication
         if (x >= 330 && x < 458 && y >= 184 && y < 212)
         {
             return C131ShowStatusControlId;
+        }
+#endif
+#if HOSTLOGPROOF_C133_REUSABLE_COMBOBOX
+        if (_c133ProofContext && _pathDisplayCombo.ContainsPoint(x, y))
+        {
+            return C133ComboControlId;
         }
 #endif
 #if HOSTLOGPROOF_C124_MANAGED_RADIO_BUTTON
@@ -2876,9 +3173,18 @@ public sealed class ManagedNotes : GuideXosApplication
         return _pathLabel.SetText(line[..(prefix.Length + displayPath.Length)]);
     }
 
-#if HOSTLOGPROOF_C124_MANAGED_RADIO_BUTTON
+#if HOSTLOGPROOF_C124_MANAGED_RADIO_BUTTON || HOSTLOGPROOF_C133_REUSABLE_COMBOBOX
     private ReadOnlySpan<char> DisplayPath()
     {
+#if HOSTLOGPROOF_C133_REUSABLE_COMBOBOX
+        if (_c133ProofContext && _pathDisplayCombo.SelectedIndex == 1)
+        {
+            int comboSeparator = _currentPath.LastIndexOf('/');
+            return comboSeparator >= 0
+                ? _currentPath.AsSpan(comboSeparator + 1)
+                : _currentPath.AsSpan();
+        }
+#endif
         if (_fullPathRadio.Checked) return _currentPath.AsSpan();
         int separator = _currentPath.LastIndexOf('/');
         return separator >= 0
@@ -2961,10 +3267,17 @@ public sealed class ManagedNotes : GuideXosApplication
 #if HOSTLOGPROOF_C127_MANAGED_PANEL
                 && !_c127ProofContext && !_c127PanelTestContext
 #endif
+#if HOSTLOGPROOF_C133_REUSABLE_COMBOBOX
+                && !_c133ProofContext
+#endif
                 ) ||
                 _pathDisplayBox.Render(surface) == GuideXosResult.Success) &&
 #if HOSTLOGPROOF_C127_MANAGED_PANEL
-            ((!_c127ProofContext && !_c127PanelTestContext) ||
+            ((!_c127ProofContext && !_c127PanelTestContext
+#if HOSTLOGPROOF_C133_REUSABLE_COMBOBOX
+                && !_c133ProofContext
+#endif
+                ) ||
                 _pathDisplayPanel.Render(surface) == GuideXosResult.Success) &&
 #endif
 #endif
@@ -2999,6 +3312,10 @@ public sealed class ManagedNotes : GuideXosApplication
                 || _c127ProofContext
 #endif
                 ) || _fileNameRadio.Render(surface) ==
+                GuideXosResult.Success) &&
+#endif
+#if HOSTLOGPROOF_C133_REUSABLE_COMBOBOX
+            (!_c133ProofContext || _pathDisplayCombo.Render(surface) ==
                 GuideXosResult.Success) &&
 #endif
 #endif

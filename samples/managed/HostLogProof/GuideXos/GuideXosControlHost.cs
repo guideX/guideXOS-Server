@@ -9,6 +9,7 @@ public enum GuideXosManagedControlKind
     ListBox = 4,
     CheckBox = 5,
     RadioButton = 6,
+    ComboBox = 7,
 }
 
 public enum GuideXosControlHostResult
@@ -117,6 +118,12 @@ public sealed class GuideXosControlHost
         return TryRegister(id, GuideXosManagedControlKind.RadioButton, control, focusable);
     }
 
+    public GuideXosControlHostResult TryRegisterComboBox(
+        int id, GuideXosComboBox control, bool focusable = true)
+    {
+        return TryRegister(id, GuideXosManagedControlKind.ComboBox, control, focusable);
+    }
+
     /// <summary>
     /// Removes one registered control and, for a radio member, removes its
     /// logical group membership too. This keeps a closed or stale host entry
@@ -205,6 +212,14 @@ public sealed class GuideXosControlHost
                 id, x, y, originX, originY, characterWidth, lineHeight);
         }
         CancelPendingSpace();
+        if (TryFindOpenComboBox(out int openComboIndex))
+        {
+            // The transient drop-down owns the complete pointer gesture. An
+            // outside click closes and is consumed; it cannot fall through to
+            // the control whose rectangle was hit underneath the popup.
+            return RoutePointer(openComboIndex, x, y, originX, originY,
+                characterWidth, lineHeight);
+        }
         if (!TryFindIndex(id, out int index))
         {
             return GuideXosControlHostResult.Rejected;
@@ -267,6 +282,10 @@ public sealed class GuideXosControlHost
         NormalizeActiveFocus();
         if (key == GuideXosTextInputKey.Tab)
         {
+            if (_activeIndex >= 0 && IsComboBoxOpen(_activeIndex))
+            {
+                ((GuideXosComboBox)_entries[_activeIndex].Control).Close();
+            }
             return Traverse(shift);
         }
         if (_activeIndex < 0) return GuideXosControlHostResult.Ignored;
@@ -531,7 +550,8 @@ public sealed class GuideXosControlHost
     {
         return kind == GuideXosManagedControlKind.Button ||
             kind == GuideXosManagedControlKind.CheckBox ||
-            kind == GuideXosManagedControlKind.RadioButton;
+            kind == GuideXosManagedControlKind.RadioButton ||
+            kind == GuideXosManagedControlKind.ComboBox;
     }
 
     private bool IsSpaceActivationControl(int index)
@@ -596,6 +616,8 @@ public sealed class GuideXosControlHost
                 ((GuideXosCheckBox)_entries[index].Control).HandlePointerDown(x, y)),
             GuideXosManagedControlKind.RadioButton => Map(
                 ((GuideXosRadioButton)_entries[index].Control).HandlePointerDown(x, y)),
+            GuideXosManagedControlKind.ComboBox => Map(
+                ((GuideXosComboBox)_entries[index].Control).HandlePointerDown(x, y)),
             _ => GuideXosControlHostResult.Rejected,
         };
     }
@@ -669,6 +691,8 @@ public sealed class GuideXosControlHost
             GuideXosManagedControlKind.CheckBox => Map(
                 ((GuideXosCheckBox)_entries[index].Control).HandleKey(key)),
             GuideXosManagedControlKind.RadioButton => GuideXosControlHostResult.Rejected,
+            GuideXosManagedControlKind.ComboBox => Map(
+                ((GuideXosComboBox)_entries[index].Control).HandleKey(key)),
             _ => GuideXosControlHostResult.Rejected,
         };
     }
@@ -687,6 +711,8 @@ public sealed class GuideXosControlHost
                 ((GuideXosCheckBox)_entries[index].Control).HandleCharacter(character)),
             GuideXosManagedControlKind.RadioButton => Map(
                 ((GuideXosRadioButton)_entries[index].Control).HandleCharacter(character)),
+            GuideXosManagedControlKind.ComboBox => Map(
+                ((GuideXosComboBox)_entries[index].Control).HandleCharacter(character)),
             _ => GuideXosControlHostResult.Ignored,
         };
     }
@@ -708,6 +734,8 @@ public sealed class GuideXosControlHost
                 ((GuideXosCheckBox)_entries[index].Control).EffectiveVisible,
             GuideXosManagedControlKind.RadioButton =>
                 ((GuideXosRadioButton)_entries[index].Control).EffectiveVisible,
+            GuideXosManagedControlKind.ComboBox =>
+                ((GuideXosComboBox)_entries[index].Control).EffectiveVisible,
             _ => true,
         };
     }
@@ -722,6 +750,8 @@ public sealed class GuideXosControlHost
                 !((GuideXosCheckBox)_entries[index].Control).Enabled,
             GuideXosManagedControlKind.RadioButton =>
                 !((GuideXosRadioButton)_entries[index].Control).Enabled,
+            GuideXosManagedControlKind.ComboBox =>
+                !((GuideXosComboBox)_entries[index].Control).Enabled,
             _ => false,
         };
     }
@@ -742,6 +772,8 @@ public sealed class GuideXosControlHost
                 ((GuideXosCheckBox)_entries[index].Control).IsFocused,
             GuideXosManagedControlKind.RadioButton =>
                 ((GuideXosRadioButton)_entries[index].Control).IsFocused,
+            GuideXosManagedControlKind.ComboBox =>
+                ((GuideXosComboBox)_entries[index].Control).IsFocused,
             _ => false,
         };
     }
@@ -768,6 +800,9 @@ public sealed class GuideXosControlHost
             case GuideXosManagedControlKind.RadioButton:
                 ((GuideXosRadioButton)_entries[index].Control).Focus();
                 break;
+            case GuideXosManagedControlKind.ComboBox:
+                ((GuideXosComboBox)_entries[index].Control).Focus();
+                break;
         }
     }
 
@@ -792,6 +827,9 @@ public sealed class GuideXosControlHost
                 break;
             case GuideXosManagedControlKind.RadioButton:
                 ((GuideXosRadioButton)_entries[index].Control).Blur();
+                break;
+            case GuideXosManagedControlKind.ComboBox:
+                ((GuideXosComboBox)_entries[index].Control).Blur();
                 break;
         }
     }
@@ -826,6 +864,7 @@ public sealed class GuideXosControlHost
             GuideXosManagedControlKind.ListBox => control is GuideXosListBox,
             GuideXosManagedControlKind.CheckBox => control is GuideXosCheckBox,
             GuideXosManagedControlKind.RadioButton => control is GuideXosRadioButton,
+            GuideXosManagedControlKind.ComboBox => control is GuideXosComboBox,
             _ => false,
         };
     }
@@ -862,6 +901,22 @@ public sealed class GuideXosControlHost
             GuideXosRadioButtonResult.Focused => GuideXosControlHostResult.Focused,
             GuideXosRadioButtonResult.Disabled => GuideXosControlHostResult.Disabled,
             GuideXosRadioButtonResult.Rejected => GuideXosControlHostResult.Rejected,
+            _ => GuideXosControlHostResult.Ignored,
+        };
+    }
+
+    private static GuideXosControlHostResult Map(GuideXosComboBoxResult result)
+    {
+        return result switch
+        {
+            GuideXosComboBoxResult.Opened => GuideXosControlHostResult.Activated,
+            GuideXosComboBoxResult.Moved => GuideXosControlHostResult.Moved,
+            GuideXosComboBoxResult.SelectionChanged => GuideXosControlHostResult.Changed,
+            GuideXosComboBoxResult.Closed => GuideXosControlHostResult.Cancelled,
+            GuideXosComboBoxResult.Cancelled => GuideXosControlHostResult.Cancelled,
+            GuideXosComboBoxResult.Disabled => GuideXosControlHostResult.Disabled,
+            GuideXosComboBoxResult.Focused => GuideXosControlHostResult.Focused,
+            GuideXosComboBoxResult.Rejected => GuideXosControlHostResult.Rejected,
             _ => GuideXosControlHostResult.Ignored,
         };
     }
@@ -920,5 +975,27 @@ public sealed class GuideXosControlHost
         }
         index = -1;
         return false;
+    }
+
+    private bool TryFindOpenComboBox(out int index)
+    {
+        for (int candidate = 0; candidate < _registrationCount; candidate++)
+        {
+            if (_entries[candidate].Kind == GuideXosManagedControlKind.ComboBox &&
+                ((GuideXosComboBox)_entries[candidate].Control).IsOpen)
+            {
+                index = candidate;
+                return true;
+            }
+        }
+        index = -1;
+        return false;
+    }
+
+    private bool IsComboBoxOpen(int index)
+    {
+        return index >= 0 && index < _registrationCount &&
+            _entries[index].Kind == GuideXosManagedControlKind.ComboBox &&
+            ((GuideXosComboBox)_entries[index].Control).IsOpen;
     }
 }

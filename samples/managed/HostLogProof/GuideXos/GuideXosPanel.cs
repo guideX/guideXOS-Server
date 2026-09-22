@@ -45,6 +45,7 @@ public sealed class GuideXosPanel
         Separator = 4,
         RadioButton = 5,
         ProgressBar = 6,
+        ComboBox = 7,
     }
 
     private struct ChildEntry
@@ -386,6 +387,7 @@ public sealed class GuideXosPanel
             GuideXosSeparator => ChildKind.Separator,
             GuideXosRadioButton => ChildKind.RadioButton,
             GuideXosProgressBar => ChildKind.ProgressBar,
+            GuideXosComboBox => ChildKind.ComboBox,
             _ => ChildKind.None,
         };
         return kind != ChildKind.None;
@@ -401,6 +403,7 @@ public sealed class GuideXosPanel
             ChildKind.Separator => ((GuideXosSeparator)child).ParentPanel,
             ChildKind.RadioButton => ((GuideXosRadioButton)child).ParentPanel,
             ChildKind.ProgressBar => ((GuideXosProgressBar)child).ParentPanel,
+            ChildKind.ComboBox => ((GuideXosComboBox)child).ParentPanel,
             _ => null,
         };
     }
@@ -434,6 +437,10 @@ public sealed class GuideXosPanel
                 width = ((GuideXosProgressBar)child).Width;
                 height = ((GuideXosProgressBar)child).Height;
                 break;
+            case ChildKind.ComboBox:
+                width = ((GuideXosComboBox)child).Width;
+                height = ((GuideXosComboBox)child).Height;
+                break;
             default:
                 width = 0;
                 height = 0;
@@ -461,6 +468,9 @@ public sealed class GuideXosPanel
                 ((GuideXosRadioButton)child).Height),
             ChildKind.ProgressBar => ((GuideXosProgressBar)child).TrySetPanelBounds(
                 x, y, ((GuideXosProgressBar)child).Width),
+            ChildKind.ComboBox => ((GuideXosComboBox)child).TrySetPanelBounds(
+                x, y, ((GuideXosComboBox)child).Width,
+                ((GuideXosComboBox)child).Height),
             _ => false,
         };
     }
@@ -476,6 +486,7 @@ public sealed class GuideXosPanel
             ChildKind.Separator => ((GuideXosSeparator)child).TryAttachToPanel(panel),
             ChildKind.RadioButton => ((GuideXosRadioButton)child).TryAttachToPanel(panel),
             ChildKind.ProgressBar => ((GuideXosProgressBar)child).TryAttachToPanel(panel),
+            ChildKind.ComboBox => ((GuideXosComboBox)child).TryAttachToPanel(panel),
             _ => false,
         };
     }
@@ -503,6 +514,9 @@ public sealed class GuideXosPanel
             case ChildKind.ProgressBar:
                 ((GuideXosProgressBar)child).SetPanelVisible(visible);
                 break;
+            case ChildKind.ComboBox:
+                ((GuideXosComboBox)child).SetPanelVisible(visible);
+                break;
         }
     }
 
@@ -528,6 +542,9 @@ public sealed class GuideXosPanel
             case ChildKind.ProgressBar:
                 ((GuideXosProgressBar)child).DetachFromPanel();
                 break;
+            case ChildKind.ComboBox:
+                ((GuideXosComboBox)child).DetachFromPanel();
+                break;
         }
     }
 
@@ -542,6 +559,7 @@ public sealed class GuideXosPanel
             ChildKind.Separator => ((GuideXosSeparator)child).Render(surface),
             ChildKind.RadioButton => ((GuideXosRadioButton)child).Render(surface),
             ChildKind.ProgressBar => ((GuideXosProgressBar)child).Render(surface),
+            ChildKind.ComboBox => ((GuideXosComboBox)child).Render(surface),
             _ => GuideXosResult.InvalidArgument,
         };
     }
