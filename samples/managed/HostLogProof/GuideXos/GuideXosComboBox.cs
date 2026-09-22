@@ -54,6 +54,7 @@ public sealed class GuideXosComboBox
     private GuideXosPanel _panelOwner;
     private uint _rejectedInputCount;
     private bool _dispatchingChanged;
+    private bool _popupRowsRendered;
 
     public GuideXosComboBox(
         int x,
@@ -387,6 +388,7 @@ public sealed class GuideXosComboBox
                 GuideXosResult.InvalidArgument;
         }
         int first = VisibleRowStart();
+        _popupRowsRendered = true;
         for (int row = 0; row < _visibleRowCount; row++)
         {
             line.Clear();
@@ -425,6 +427,7 @@ public sealed class GuideXosComboBox
 
     private bool ClearPopupRows(GuideXosSurface surface)
     {
+        if (!_popupRowsRendered) return true;
         for (int row = 0; row < _visibleRowCount; row++)
         {
             if (surface.TrySetText(_x, PopupY + row * PopupRowHeight,
@@ -433,6 +436,7 @@ public sealed class GuideXosComboBox
                 return false;
             }
         }
+        _popupRowsRendered = false;
         return true;
     }
 

@@ -53,6 +53,9 @@ public sealed class GuideXosControlHost
     private GuideXosControlHost _modalHost;
     private int _savedActiveId;
     private int _savedActiveIndex = -1;
+    // One bounded transient owner. The registered control remains focused;
+    // this lease only gives its open transient state first refusal of input.
+    private int _transientCaptureIndex = -1;
     // Space activation is intentionally split across KeyDown and KeyChar by
     // the existing managed input transport. Keep only the target identity for
     // that one in-flight gesture so lifecycle changes can cancel its commit.
@@ -81,6 +84,55 @@ public sealed class GuideXosControlHost
             ? _entries[_activeIndex].Kind : GuideXosManagedControlKind.None;
     public bool IsModalActive => _modalHost != null;
     public GuideXosControlHost ActiveScopeHost => _modalHost ?? this;
+    public bool HasTransientInputCapture
+    {
+        get
+        {
+            ReconcileTransientCapture();
+            return _transientCaptureIndex >= 0;
+        }
+    }
+    public int TransientInputCaptureOwnerId
+    {
+        get
+        {
+            ReconcileTransientCapture();
+            return _transientCaptureIndex >= 0
+                ? _entries[_transientCaptureIndex].Id : 0;
+        }
+    }
+    public GuideXosManagedControlKind TransientInputCaptureKind
+    {
+        get
+        {
+            ReconcileTransientCapture();
+            return _transientCaptureIndex >= 0
+                ? _entries[_transientCaptureIndex].Kind
+                : GuideXosManagedControlKind.None;
+        }
+    }
+
+    /// <summary>
+    /// Acquires the single transient-input lease for an already-open,
+    /// registered ComboBox. A second owner is rejected; ownership never
+    /// transfers implicitly and there is no capture stack.
+    /// </summary>
+    public bool TryAcquireTransientInputCapture(int id)
+    {
+        if (_modalHost != null)
+        {
+            return _modalHost.TryAcquireTransientInputCapture(id);
+        }
+        if (!TryFindIndex(id, out int index) ||
+            !IsOpenTransientCandidate(index)) return false;
+        ReconcileTransientCapture();
+        if (_transientCaptureIndex >= 0 && _transientCaptureIndex != index)
+        {
+            return false;
+        }
+        _transientCaptureIndex = index;
+        return true;
+    }
 
     public GuideXosControlHostResult TryRegisterButton(
         int id, GuideXosButton control, bool focusable = true)
@@ -138,6 +190,14 @@ public sealed class GuideXosControlHost
             return GuideXosControlHostResult.Rejected;
         }
 
+        if (_transientCaptureIndex == index)
+        {
+            ReleaseTransientCapture();
+        }
+        else if (_transientCaptureIndex > index)
+        {
+            _transientCaptureIndex--;
+        }
         int priorActiveIndex = _activeIndex;
         BlurControl(index);
         if (_entries[index].Kind == GuideXosManagedControlKind.RadioButton)
@@ -174,6 +234,7 @@ public sealed class GuideXosControlHost
         _entries[index].Focusable = focusable;
         CancelPendingSpaceIfInvalid();
         NormalizeActiveFocus();
+        ReconcileTransientCapture();
         return GuideXosControlHostResult.Focused;
     }
 
@@ -212,12 +273,12 @@ public sealed class GuideXosControlHost
                 id, x, y, originX, originY, characterWidth, lineHeight);
         }
         CancelPendingSpace();
-        if (TryFindOpenComboBox(out int openComboIndex))
+        if (TryGetTransientCaptureIndex(out int capturedIndex))
         {
             // The transient drop-down owns the complete pointer gesture. An
             // outside click closes and is consumed; it cannot fall through to
             // the control whose rectangle was hit underneath the popup.
-            return RoutePointer(openComboIndex, x, y, originX, originY,
+            return RoutePointerAndCapture(capturedIndex, x, y, originX, originY,
                 characterWidth, lineHeight);
         }
         if (!TryFindIndex(id, out int index))
@@ -240,7 +301,7 @@ public sealed class GuideXosControlHost
         {
             return focusResult;
         }
-        return RoutePointer(index, x, y, originX, originY,
+        return RoutePointerAndCapture(index, x, y, originX, originY,
             characterWidth, lineHeight);
     }
 
@@ -279,18 +340,35 @@ public sealed class GuideXosControlHost
             // replace a previous repeat, but must not inherit its cancellation.
             _cancelledSpaceCharacter = false;
         }
-        NormalizeActiveFocus();
         if (key == GuideXosTextInputKey.Tab)
         {
-            if (_activeIndex >= 0 && IsComboBoxOpen(_activeIndex))
+            if (TryGetTransientCaptureIndex(out int transientIndex))
             {
-                ((GuideXosComboBox)_entries[_activeIndex].Control).Close();
+                ((GuideXosComboBox)_entries[transientIndex].Control).Close();
+                ReleaseTransientCapture();
             }
+            NormalizeActiveFocus();
             return Traverse(shift);
         }
+        if (TryGetTransientCaptureIndex(out int capturedIndex))
+        {
+            GuideXosControlHostResult capturedResult =
+                RouteKey(capturedIndex, key, shift);
+            ReconcileTransientCapture();
+            if (key == (GuideXosTextInputKey)' ' &&
+                capturedResult == GuideXosControlHostResult.Ignored &&
+                IsSpaceActivationControl(capturedIndex) &&
+                IsEligible(capturedIndex) && IsControlFocused(capturedIndex))
+            {
+                _pendingSpaceIndex = capturedIndex;
+            }
+            return capturedResult;
+        }
+        NormalizeActiveFocus();
         if (_activeIndex < 0) return GuideXosControlHostResult.Ignored;
         int routedIndex = _activeIndex;
         GuideXosControlHostResult result = RouteKey(routedIndex, key, shift);
+        CaptureIfOpen(routedIndex);
         if (key == (GuideXosTextInputKey)' ' &&
             result == GuideXosControlHostResult.Ignored &&
             IsSpaceActivationControl(routedIndex) &&
@@ -336,6 +414,13 @@ public sealed class GuideXosControlHost
             _cancelledSpaceCharacter = false;
             CancelPendingSpace();
         }
+        if (TryGetTransientCaptureIndex(out int capturedIndex))
+        {
+            GuideXosControlHostResult capturedResult =
+                RouteCharacter(capturedIndex, character);
+            ReconcileTransientCapture();
+            return capturedResult;
+        }
         else if (_pendingSpaceIndex >= 0)
         {
             int pendingIndex = _pendingSpaceIndex;
@@ -351,12 +436,17 @@ public sealed class GuideXosControlHost
             }
             _pendingSpaceIndex = -1;
             _cancelledSpaceCharacter = false;
-            return RouteCharacter(pendingIndex, character);
+            GuideXosControlHostResult pendingResult =
+                RouteCharacter(pendingIndex, character);
+            CaptureIfOpen(pendingIndex);
+            return pendingResult;
         }
         NormalizeActiveFocus();
         if (character == '\t') return GuideXosControlHostResult.Ignored;
         if (_activeIndex < 0) return GuideXosControlHostResult.Ignored;
-        return RouteCharacter(_activeIndex, character);
+        GuideXosControlHostResult result = RouteCharacter(_activeIndex, character);
+        CaptureIfOpen(_activeIndex);
+        return result;
     }
 
     /// <summary>
@@ -374,6 +464,7 @@ public sealed class GuideXosControlHost
         int priorIndex = _activeIndex;
         CancelPendingSpaceIfInvalid();
         NormalizeActiveFocus();
+        ReconcileTransientCapture();
         return priorIndex != _activeIndex && _activeIndex >= 0
             ? GuideXosControlHostResult.Focused
             : GuideXosControlHostResult.Ignored;
@@ -446,6 +537,7 @@ public sealed class GuideXosControlHost
         _savedActiveIndex = -1;
         _pendingSpaceIndex = -1;
         _cancelledSpaceCharacter = false;
+        ReleaseTransientCapture();
     }
 
     private GuideXosControlHostResult TryRegister(
@@ -543,6 +635,7 @@ public sealed class GuideXosControlHost
         {
             BlurControl(index);
         }
+        ReleaseTransientCapture();
     }
 
     private static bool IsSpaceActivationControl(
@@ -977,12 +1070,12 @@ public sealed class GuideXosControlHost
         return false;
     }
 
-    private bool TryFindOpenComboBox(out int index)
+    private bool TryFindControlReference(
+        GuideXosComboBox target, out int index)
     {
         for (int candidate = 0; candidate < _registrationCount; candidate++)
         {
-            if (_entries[candidate].Kind == GuideXosManagedControlKind.ComboBox &&
-                ((GuideXosComboBox)_entries[candidate].Control).IsOpen)
+            if (ReferenceEquals(_entries[candidate].Control, target))
             {
                 index = candidate;
                 return true;
@@ -990,6 +1083,84 @@ public sealed class GuideXosControlHost
         }
         index = -1;
         return false;
+    }
+
+    private bool IsOpenTransientCandidate(int index)
+    {
+        return IsComboBoxOpen(index) && IsEligible(index) &&
+            IsControlFocused(index);
+    }
+
+    private bool TryGetTransientCaptureIndex(out int index)
+    {
+        ReconcileTransientCapture();
+        if (_transientCaptureIndex >= 0)
+        {
+            index = _transientCaptureIndex;
+            return true;
+        }
+        // A control may have opened itself programmatically. Acquire its
+        // lease at the next host event, in registration order, without ever
+        // creating a capture stack or transferring an existing lease.
+        for (int candidate = 0; candidate < _registrationCount; candidate++)
+        {
+            if (IsOpenTransientCandidate(candidate))
+            {
+                _transientCaptureIndex = candidate;
+                index = candidate;
+                return true;
+            }
+        }
+        index = -1;
+        return false;
+    }
+
+    private void CaptureIfOpen(int index)
+    {
+        if (index >= 0 && index < _registrationCount &&
+            IsOpenTransientCandidate(index))
+        {
+            // The opening event establishes the lease before it returns to
+            // native input. A second owner is never implicitly transferred.
+            if (_transientCaptureIndex < 0 ||
+                _transientCaptureIndex == index)
+            {
+                _transientCaptureIndex = index;
+            }
+        }
+        else
+        {
+            ReconcileTransientCapture();
+        }
+    }
+
+    private GuideXosControlHostResult RoutePointerAndCapture(
+        int index,
+        int x,
+        int y,
+        int originX,
+        int originY,
+        int characterWidth,
+        int lineHeight)
+    {
+        GuideXosControlHostResult result = RoutePointer(
+            index, x, y, originX, originY, characterWidth, lineHeight);
+        CaptureIfOpen(index);
+        return result;
+    }
+
+    private void ReconcileTransientCapture()
+    {
+        if (_transientCaptureIndex < 0) return;
+        if (!IsOpenTransientCandidate(_transientCaptureIndex))
+        {
+            ReleaseTransientCapture();
+        }
+    }
+
+    private void ReleaseTransientCapture()
+    {
+        _transientCaptureIndex = -1;
     }
 
     private bool IsComboBoxOpen(int index)

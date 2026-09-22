@@ -622,6 +622,10 @@ public sealed class ManagedNotes : GuideXosApplication
     private bool _c133HostTestContext;
     private bool _c133ComboTestsRun;
     private bool _c133HostTestsRun;
+#if HOSTLOGPROOF_C134_TRANSIENT_POPUP_ROUTING
+    private bool _c134HostTestContext;
+    private bool _c134HostTestsRun;
+#endif
 #endif
 
     public override GuideXosResult Launch(GuideXosHost host)
@@ -642,6 +646,10 @@ public sealed class ManagedNotes : GuideXosApplication
             host.LaunchContext.Utf8.SequenceEqual("c133-host"u8);
         _c133ComboTestContext = host.LaunchContext.Utf8.SequenceEqual("c133-api"u8);
         _c133HostTestContext = host.LaunchContext.Utf8.SequenceEqual("c133-host"u8);
+#if HOSTLOGPROOF_C134_TRANSIENT_POPUP_ROUTING
+        _c134HostTestContext =
+            host.LaunchContext.Utf8.SequenceEqual("c134-host-tests"u8);
+#endif
 #endif
 #if HOSTLOGPROOF_C119_MANAGED_BUTTON
         _c119ProofContext = IsC119Context(host);
@@ -663,6 +671,10 @@ public sealed class ManagedNotes : GuideXosApplication
             host.LaunchContext.Utf8.SequenceEqual("c133"u8) ||
             host.LaunchContext.Utf8.SequenceEqual("c133-api"u8) ||
             host.LaunchContext.Utf8.SequenceEqual("c133-host"u8)
+#if HOSTLOGPROOF_C134_TRANSIENT_POPUP_ROUTING
+            || host.LaunchContext.Utf8.SequenceEqual("c134"u8) ||
+            host.LaunchContext.Utf8.SequenceEqual("c134-host-tests"u8)
+#endif
 #endif
             ;
 #if HOSTLOGPROOF_C121_MANAGED_CHECKBOX
@@ -724,12 +736,21 @@ public sealed class ManagedNotes : GuideXosApplication
             host.LaunchContext.Utf8.SequenceEqual("c133-notes"u8) ||
             host.LaunchContext.Utf8.SequenceEqual("c133-disabled"u8) ||
             host.LaunchContext.Utf8.SequenceEqual("c133"u8);
+#if HOSTLOGPROOF_C134_TRANSIENT_POPUP_ROUTING
+        _c133ProofContext = _c133ProofContext ||
+            host.LaunchContext.Utf8.SequenceEqual("c134"u8) ||
+            host.LaunchContext.Utf8.SequenceEqual("c134-host-tests"u8);
+#endif
         _c133ComboTestContext = IsC133ComboTestContext(host) ||
             host.LaunchContext.Utf8.SequenceEqual("c133-combo-tests"u8) ||
             host.LaunchContext.Utf8.SequenceEqual("c133-api"u8);
         _c133HostTestContext = IsC133HostTestContext(host) ||
             host.LaunchContext.Utf8.SequenceEqual("c133-combo-host-tests"u8) ||
             host.LaunchContext.Utf8.SequenceEqual("c133-host"u8);
+#if HOSTLOGPROOF_C134_TRANSIENT_POPUP_ROUTING
+        _c134HostTestContext =
+            host.LaunchContext.Utf8.SequenceEqual("c134-host-tests"u8);
+#endif
 #endif
 #endif
 #endif
@@ -762,6 +783,26 @@ public sealed class ManagedNotes : GuideXosApplication
                 ? "C133-HOST tests=PASS"u8
                 : "C133-HOST tests=FAIL"u8);
         }
+#if HOSTLOGPROOF_C134_HOST_TESTS
+        if (_c134HostTestContext && !_c134HostTestsRun)
+        {
+            bool c134HostTests =
+                GuideXosComboBoxC134HostTests.Run(host);
+            _c134HostTestsRun = true;
+            host.TryLog(c134HostTests
+                ? "C134-HOST tests=PASS"u8
+                : "C134-HOST tests=FAIL"u8);
+        }
+        if (_c133ProofContext && !_c134HostTestsRun)
+        {
+            bool c134HostTests =
+                GuideXosComboBoxC134HostTests.Run(host);
+            _c134HostTestsRun = true;
+            host.TryLog(c134HostTests
+                ? "C134-HOST tests=PASS"u8
+                : "C134-HOST tests=FAIL"u8);
+        }
+#endif
 #endif
         if (_c122ProofContext || _c122LabelTestContext || _c122LabelHostTestContext)
         {
@@ -2198,8 +2239,10 @@ public sealed class ManagedNotes : GuideXosApplication
                 {
                     host.TryLog("C133-POINTER open=PASS result=PASS"u8);
                 }
-                return RenderMain(host, surface, _launchCount)
+                GuideXosResult comboRenderResult = RenderMain(
+                    host, surface, _launchCount)
                     ? GuideXosResult.Success : GuideXosResult.InvalidArgument;
+                return comboRenderResult;
             }
 #endif
 #if HOSTLOGPROOF_C132_REUSABLE_RADIO_BUTTON
@@ -3156,6 +3199,14 @@ public sealed class ManagedNotes : GuideXosApplication
 #if HOSTLOGPROOF_C122_MANAGED_LABEL
     private bool UpdatePathLabel()
     {
+#if HOSTLOGPROOF_C134_TRANSIENT_POPUP_ROUTING
+        if (_c133ProofContext)
+        {
+            return _pathLabel.SetText(_pathDisplayCombo.SelectedIndex == 1
+                ? "Path: NOTES.TXT"
+                : "Path: /system/apps/NOTES.TXT");
+        }
+#endif
         Span<char> line = stackalloc char[GuideXosLabel.DefaultMaximumTextLength];
         ReadOnlySpan<char> prefix = "Path: ".AsSpan();
         ReadOnlySpan<char> displayPath =

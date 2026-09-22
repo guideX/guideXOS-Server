@@ -8,20 +8,21 @@ namespace HostLogProof;
 /// </summary>
 public sealed unsafe class GuideXosLaunchContext
 {
-    private readonly byte[] _utf8;
+    private readonly byte[] _utf8 =
+        new byte[(int)GxAbi.MaxLaunchContextBytes];
+    private int _length;
+    private uint _selector;
+    private uint _flags;
 
-    internal GuideXosLaunchContext(uint selector, uint flags, byte[] utf8)
+    internal GuideXosLaunchContext()
     {
-        Selector = selector;
-        Flags = flags;
-        _utf8 = utf8;
     }
 
-    public uint Selector { get; }
-    public uint Flags { get; }
-    public bool HasText => _utf8.Length != 0;
-    public int Length => _utf8.Length;
-    public ReadOnlySpan<byte> Utf8 => _utf8;
+    public uint Selector => _selector;
+    public uint Flags => _flags;
+    public bool HasText => _length != 0;
+    public int Length => _length;
+    public ReadOnlySpan<byte> Utf8 => _utf8.AsSpan(0, _length);
     public bool IsAction => (Flags & GxAbi.LaunchFlagAction) != 0;
     public uint ActionId => Flags & GxAbi.LaunchFlagPayloadMask;
     public bool IsInput => (Flags & GxAbi.LaunchFlagInput) != 0;
@@ -41,7 +42,7 @@ public sealed unsafe class GuideXosLaunchContext
     public bool InputShift => InputKind != GuideXosInputKind.PointerDown &&
         (InputPayload & GxAbi.LaunchFlagInputShift) != 0u;
 
-    internal static bool TryCopy(
+    internal bool TryCopy(
         NativeGxAppContext* context,
         uint selector,
         out GuideXosLaunchContext result)
@@ -54,15 +55,17 @@ public sealed unsafe class GuideXosLaunchContext
             return false;
         }
 
-        byte[] bytes = new byte[(int)context->launchContextLength];
-        for (int index = 0; index < bytes.Length; index++)
+        _selector = selector;
+        _flags = context->launchFlags;
+        _length = (int)context->launchContextLength;
+        for (int index = 0; index < context->launchContextLength; index++)
         {
             byte value = context->launchContext[index];
             if (value == 0u) return false;
-            bytes[index] = value;
+            _utf8[index] = value;
         }
 
-        result = new GuideXosLaunchContext(selector, context->launchFlags, bytes);
+        result = this;
         return true;
     }
 }

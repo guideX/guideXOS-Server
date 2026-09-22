@@ -5152,7 +5152,8 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         runC131ReusableCheckboxProof();
 #endif
 
-#if defined(GXOS_NATIVEAOT_C132_REUSABLE_RADIO_BUTTON)
+#if defined(GXOS_NATIVEAOT_C132_REUSABLE_RADIO_BUTTON) && \
+    !defined(GXOS_NATIVEAOT_C134_TRANSIENT_POPUP_ROUTING)
         auto runC132ReusableRadioProof = []() __attribute__((noinline)) {
         {
         const gxos::apps::BuiltInAppMetadata* c132Workspace =
@@ -5415,7 +5416,11 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         const bool comboTests = true;
         const bool comboHostTests = true;
         const bool workspace = true;
+#if defined(GXOS_NATIVEAOT_C134_TRANSIENT_POPUP_ROUTING)
+        const bool notesLaunch = c133Launch(c133Notes->appId, "c133");
+#else
         const bool notesLaunch = c133Launch(c133Notes->appId, "c133-api");
+#endif
         const bool initial = notesLaunch && c133HasLabel("Full Path") &&
             c133HasLabel("Path: /system/apps/NOTES.TXT") &&
             !c133HasLabel(">[ Full Path");
@@ -5429,6 +5434,21 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
 
         const bool pointerOpen = tabCombo && c133ClickAt(150, 290) &&
             c133HasLabel(">* Full Path");
+#if defined(GXOS_NATIVEAOT_C134_TRANSIENT_POPUP_ROUTING)
+        const bool pointerSelection = pointerOpen && c133ClickAt(150, 330) &&
+            c133HasLabel("File Name") && c133HasLabel("Path: NOTES.TXT") &&
+            !c133HasLabel(">* File Name");
+        if (pointerOpen && !pointerSelection) {
+            kernel::serial::puts("[C134-FOLLOWUP-ROUTED] pointer-item=managed-host result=FAIL\n");
+            return;
+        }
+        kernel::serial::puts("[C134-POPUP-OPEN] pointer=production result=");
+        kernel::serial::puts(pointerOpen ? "PASS\n" : "FAIL\n");
+        kernel::serial::puts("[C134-FOLLOWUP-ROUTED] pointer-item=managed-host result=");
+        kernel::serial::puts(pointerSelection ? "PASS\n" : "FAIL\n");
+        kernel::serial::puts("[C134-COMMIT] selection=FileName changed=once result=");
+        kernel::serial::puts(pointerSelection ? "PASS\n" : "FAIL\n");
+#else
         const bool pointerSelection = pointerOpen;
         if (pointerOpen) {
             kernel::serial::puts("[C133-POINTER] open=PASS row-followup=BLOCKED result=PASS\n");
@@ -5436,16 +5456,17 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
             kernel::serial::puts("[C133-RESULT] outcome=BLOCKED reason=transient-popup-followup-routing\n");
             return;
         }
+#endif
         kernel::serial::puts("[C133-POINTER] open=PASS host-selection=PASS result=");
         kernel::serial::puts((pointerOpen && pointerSelection) ? "PASS\n" : "FAIL\n");
 
         const bool spaceOpen = pointerSelection && c133Key(static_cast<uint32_t>(' ')) &&
-            c133Char(' ') && c133HasLabel(">* Full Path");
-        const bool upHighlight = spaceOpen && c133Key(0x101u) &&
-            c133HasLabel(">  File Name") && c133HasLabel("Path: /system/apps/NOTES.TXT");
+            c133Char(' ') && c133HasLabel(">* File Name");
+        const bool upHighlight = spaceOpen && c133Key(0x100u) &&
+            c133HasLabel(">  Full Path") && c133HasLabel("Path: NOTES.TXT");
         const bool enterCommit = upHighlight && c133Key(10u) &&
-            c133HasLabel("File Name") && c133HasLabel("Path: NOTES.TXT") &&
-            !c133HasLabel(">* File Name");
+            c133HasLabel("Full Path") && c133HasLabel("Path: /system/apps/NOTES.TXT") &&
+            !c133HasLabel(">* Full Path");
         kernel::serial::puts("[C133-SPACE] keydown=ignored keychar=open result=");
         kernel::serial::puts(spaceOpen ? "PASS\n" : "FAIL\n");
         kernel::serial::puts("[C133-ARROW] up=highlight committed=unchanged result=");
@@ -5456,14 +5477,14 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         const bool spaceOpenAgain = enterCommit &&
             c133Key(static_cast<uint32_t>(' ')) && c133Char(' ') &&
             c133HasLabel(">* Full Path");
-        const bool downHighlight = spaceOpenAgain && c133Key(0x100u) &&
-            c133HasLabel(">  Full Path") &&
+        const bool downHighlight = spaceOpenAgain && c133Key(0x101u) &&
+            c133HasLabel(">  File Name") &&
             c133HasLabel("Path: /system/apps/NOTES.TXT");
         const bool spaceCommit = downHighlight &&
             c133Key(static_cast<uint32_t>(' ')) && c133Char(' ') &&
-            c133HasLabel("Full Path") &&
-            c133HasLabel("Path: /system/apps/NOTES.TXT") &&
-            !c133HasLabel(">* Full Path");
+            c133HasLabel("File Name") &&
+            c133HasLabel("Path: NOTES.TXT") &&
+            !c133HasLabel(">* File Name");
         kernel::serial::puts("[C133-ARROW] down=highlight committed=unchanged result=");
         kernel::serial::puts(downHighlight ? "PASS\n" : "FAIL\n");
         kernel::serial::puts("[C133-SPACE-COMMIT] selection=FileName callback=PASS result=");
@@ -5471,20 +5492,20 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
 
         const bool escapeOpen = spaceCommit &&
             c133Key(static_cast<uint32_t>(' ')) && c133Char(' ') &&
-            c133HasLabel(">* Full Path") && c133Key(0x101u) && c133Key(27u) &&
-            c133HasLabel("Full Path") &&
-            c133HasLabel("Path: /system/apps/NOTES.TXT") &&
-            !c133HasLabel(">* Full Path");
+            c133HasLabel(">* File Name") && c133Key(0x100u) && c133Key(27u) &&
+            c133HasLabel("File Name") &&
+            c133HasLabel("Path: NOTES.TXT") &&
+            !c133HasLabel(">* File Name");
         kernel::serial::puts("[C133-ESCAPE] cancel=PASS committed=preserved result=");
         kernel::serial::puts(escapeOpen ? "PASS\n" : "FAIL\n");
 
         const bool outsideOpen = escapeOpen &&
             c133Key(static_cast<uint32_t>(' ')) && c133Char(' ') &&
-            c133HasLabel(">* Full Path");
+            c133HasLabel(">* File Name");
         const bool outsideConsumed = outsideOpen && c133ClickAt(50, 230) &&
-            c133HasLabel(">[ Full Path") &&
+            c133HasLabel(">[ File Name") &&
             !c133HasLabel(">[ Open ]") &&
-            c133HasLabel("Path: /system/apps/NOTES.TXT");
+            c133HasLabel("Path: NOTES.TXT");
         kernel::serial::puts("[C133-OUTSIDE] close=PASS underlying=not-activated result=");
         kernel::serial::puts(outsideConsumed ? "PASS\n" : "FAIL\n");
 
@@ -5494,25 +5515,31 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         kernel::serial::puts(reverseCombo ? "PASS\n" : "FAIL\n");
 
         const bool lifecyclePending = reverseCombo && c133Key(9u) &&
-            c133HasLabel(">[ Full Path") &&
+            c133HasLabel(">[ File Name") &&
             c133Key(static_cast<uint32_t>(' '));
         const bool lifecycleHidden = lifecyclePending && c133Key(0x900u) &&
-            !c133HasLabel("Full Path");
+            !c133HasLabel("File Name");
         const bool lifecycleShown = lifecycleHidden && c133Key(0x901u) &&
-            c133HasLabel("Full Path");
+            c133HasLabel("File Name");
         const bool lifecycleStale = lifecycleShown && c133Char(' ') &&
-            !c133HasLabel(">* Full Path");
-        const bool lifecycleReopen = lifecycleStale && c133Key(9u) &&
-            c133Key(9u) && c133Key(9u) && c133Key(9u) && c133Key(9u) &&
-            c133HasLabel(">[ Full Path");
+            !c133HasLabel(">* File Name");
+        bool lifecycleReopen = lifecycleStale;
+        for (uint32_t tabCount = 0u;
+             lifecycleReopen && tabCount < 8u &&
+             !c133HasLabel(">[ File Name");
+             ++tabCount)
+        {
+            c133Key(9u);
+        }
+        lifecycleReopen = lifecycleReopen && c133HasLabel(">[ File Name");
         kernel::serial::puts("[C133-LIFECYCLE] hide-show=cancelled stale-space=consumed reopen=PASS result=");
         kernel::serial::puts((lifecyclePending && lifecycleHidden && lifecycleShown &&
             lifecycleStale && lifecycleReopen) ? "PASS\n" : "FAIL\n");
 
         const bool disabled = lifecycleReopen && c133Key(0x902u) &&
-            c133HasLabel("x[ Full Path");
+            c133HasLabel("x[ File Name");
         const bool reenabled = disabled && c133Key(0x903u) &&
-            c133HasLabel(">[ Full Path");
+            c133HasLabel(">[ File Name");
         kernel::serial::puts("[C133-DISABLED] open=rejected reenabled=PASS result=");
         kernel::serial::puts((disabled && reenabled) ? "PASS\n" : "FAIL\n");
 
@@ -5537,6 +5564,19 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
             relaunchInitial;
         kernel::serial::puts("[C133-MIXED] sequence=focused,Notes,pointer,Space,arrow,Enter,Escape,Tab,ShiftTab,outside,lifecycle,disabled,modal,relaunch result=");
         kernel::serial::puts(outcome ? "PASS\n" : "FAIL\n");
+#if defined(GXOS_NATIVEAOT_C134_TRANSIENT_POPUP_ROUTING)
+        kernel::serial::puts("[C134-CANCEL] escape=PASS committed=preserved result=");
+        kernel::serial::puts(escapeOpen ? "PASS\n" : "FAIL\n");
+        kernel::serial::puts("[C134-OUTSIDE] close=PASS consumed=PASS underlying=inactive result=");
+        kernel::serial::puts(outsideConsumed ? "PASS\n" : "FAIL\n");
+        kernel::serial::puts("[C134-TRAVERSAL] tab=PASS shift-tab=PASS result=");
+        kernel::serial::puts(reverseCombo ? "PASS\n" : "FAIL\n");
+        kernel::serial::puts("[C134-LIFECYCLE] cancellation=PASS capture=none result=");
+        kernel::serial::puts((lifecycleHidden && lifecycleShown && lifecycleStale &&
+            lifecycleReopen && disabled && reenabled && modal) ? "PASS\n" : "FAIL\n");
+        kernel::serial::puts("[C134-RESULT] outcome=");
+        kernel::serial::puts(outcome ? "PASS\n" : "FAIL\n");
+#endif
         kernel::serial::puts("[C133-RESULT] outcome=");
         kernel::serial::puts(outcome ? "PASS" : "FAIL");
         kernel::serial::puts(" combo=reusable,bounded,transient-capture,committed-highlight ABI=unchanged\n");

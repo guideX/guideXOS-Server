@@ -16,20 +16,18 @@ public sealed unsafe class GuideXosHost
     private const nuint FileWriteOffset = 80u;
     private const nuint DirectoryListOffset = 88u;
     private const nuint FileStatOffset = 96u;
-    private readonly NativeGxAppContext* _context;
-    private readonly NativeHostCallTable* _host;
+    private NativeGxAppContext* _context;
+    private NativeHostCallTable* _host;
+    private static readonly GuideXosLaunchContext s_dispatchContext =
+        new();
+    private static readonly GuideXosHost s_dispatchHost =
+        new();
 
-    private GuideXosHost(
-        NativeGxAppContext* context,
-        NativeHostCallTable* host,
-        GuideXosLaunchContext launchContext)
+    private GuideXosHost()
     {
-        _context = context;
-        _host = host;
-        LaunchContext = launchContext;
     }
 
-    public GuideXosLaunchContext LaunchContext { get; }
+    public GuideXosLaunchContext LaunchContext { get; private set; }
     public uint Selector => LaunchContext.Selector;
     public GuideXosCapability Capabilities =>
         HasHostField(CapabilitiesOffset)
@@ -68,13 +66,17 @@ public sealed unsafe class GuideXosHost
             return false;
         }
 
-        if (!GuideXosLaunchContext.TryCopy(context, selector, out GuideXosLaunchContext launchContext) ||
+        if (!s_dispatchContext.TryCopy(context, selector,
+                out GuideXosLaunchContext launchContext) ||
             launchContext == null)
         {
             return false;
         }
 
-        host = new GuideXosHost(context, context->host, launchContext);
+        s_dispatchHost._context = context;
+        s_dispatchHost._host = context->host;
+        s_dispatchHost.LaunchContext = launchContext;
+        host = s_dispatchHost;
         result = GuideXosResult.Success;
         return true;
     }
