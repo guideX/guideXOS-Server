@@ -1,4 +1,4 @@
-// PCI Audio Driver — Implementation
+// PCI Audio Driver ï¿½ Implementation
 //
 // Intel HDA controller discovery, CORB/RIRB initialisation, codec
 // enumeration, and PCM stream management.
@@ -21,6 +21,25 @@ namespace pci_audio {
 
 static AudioController s_controllers[MAX_AUDIO_CONTROLLERS];
 static uint8_t         s_controllerCount = 0;
+
+// Kernel physical base for DMA address translation. The kernel links at
+// 0x100000 but the bootloader loads it at an arbitrary physical base
+// (BootInfo.KernelPhysicalBase); device-visible addresses are
+// base + (virt - 0x100000). Set via set_kernel_physical_base() at boot
+// (default identity preserves historic behavior when unset).
+static uint64_t s_kernelPhysicalBase = 0x100000ULL;
+
+static uint64_t kernel_virt_to_phys(uintptr_t virt)
+{
+    const uint64_t v = static_cast<uint64_t>(virt);
+    if (v < 0x100000ULL) return 0;
+    return s_kernelPhysicalBase + (v - 0x100000ULL);
+}
+
+void set_kernel_physical_base(uint64_t physicalBase)
+{
+    if (physicalBase != 0) s_kernelPhysicalBase = physicalBase;
+}
 
 // ================================================================
 // Helpers
@@ -199,16 +218,17 @@ static bool hda_reset(AudioController* ctrl)
 }
 
 // ================================================================
-// CORB/RIRB initialisation (simplified — uses 256-entry rings)
+// CORB/RIRB initialisation (simplified ï¿½ uses 256-entry rings)
 // ================================================================
 
-// NOTE: In a real kernel, CORB and RIRB buffers would be allocated
-// from a DMA-capable physical memory allocator.  Here we use a
-// static buffer for demonstration — a proper implementation would
-// call the kernel memory allocator.
+// NOTE: HDA requires CORB/RIRB bases to be 128-byte aligned. These were
+// historically only word-aligned (MC6 audit finding); misalignment is
+// undefined behavior on real hardware and breaks DMA on strict engines,
+// so they are now explicitly 128-byte aligned like the streaming BDL.
 
-static uint32_t s_corbBuf[256 * MAX_AUDIO_CONTROLLERS];
-static uint64_t s_rirbBuf[256 * MAX_AUDIO_CONTROLLERS]; // response + solicited flag
+// MC6: 128-byte aligned per the HDA specification (was word-aligned).
+alignas(128) static uint32_t s_corbBuf[256 * MAX_AUDIO_CONTROLLERS];
+alignas(128) static uint64_t s_rirbBuf[256 * MAX_AUDIO_CONTROLLERS]; // response + solicited flag
 
 static bool hda_init_corb_rirb(AudioController* ctrl, uint8_t ctrlIdx)
 {
@@ -219,8 +239,11 @@ static bool hda_init_corb_rirb(AudioController* ctrl, uint8_t ctrlIdx)
     // Zero buffers
     for (int i = 0; i < 256; ++i) { corb[i] = 0; rirb[i] = 0; }
 
-    ctrl->corbPhysAddr = reinterpret_cast<uintptr_t>(corb);
-    ctrl->rirbPhysAddr = reinterpret_cast<uintptr_t>(rirb);
+    // Device-visible addresses use the kernel slide translation, not the
+    // raw virtual address (MC6: raw pointers fault/misdirect DMA whenever
+    // the load base differs from the link base).
+    ctrl->corbPhysAddr = kernel_virt_to_phys(reinterpret_cast<uintptr_t>(corb));
+    ctrl->rirbPhysAddr = kernel_virt_to_phys(reinterpret_cast<uintptr_t>(rirb));
     ctrl->corbSize = 256;
     ctrl->rirbSize = 256;
 
@@ -310,7 +333,7 @@ bool hda_send_verb(uint8_t ctrlIndex, uint8_t codecAddr,
 
     // Poll RIRB for response
     uint64_t* rirb = &s_rirbBuf[ctrlIndex * 256];
-    for (int timeout = 0; timeout < 10000; ++timeout) {
+    for (int timeout = 0; timeout < 100000; ++timeout) {
         uint16_t rirbWp = hda_read16(ctrl, HDA_RIRBWP);
         if (rirbWp != ctrl->rirbReadPtr) {
             ctrl->rirbReadPtr = (ctrl->rirbReadPtr + 1) % ctrl->rirbSize;
@@ -318,6 +341,10 @@ bool hda_send_verb(uint8_t ctrlIndex, uint8_t codecAddr,
             if (response) {
                 *response = static_cast<uint32_t>(resp);
             }
+            // Spec-mandated: clear the Response Interrupt flag so the
+            // controller keeps producing responses (QEMU's engine stalls
+            // with RINTFL pending; real hardware treats it as status).
+            hda_write8(ctrl, HDA_RIRBSTS, 0x05);
             return true;
         }
         spin_delay(100);
@@ -364,7 +391,8 @@ static void hda_enumerate_codecs(AudioController* ctrl, uint8_t ctrlIdx)
             hda_send_verb(ctrlIdx, addr, n, HDA_VERB_GET_PARAM | HDA_PARAM_FUNC_GROUP_TYPE, &fgType);
 
             if ((fgType & 0xFF) == 0x01) {
-                // Audio function group — get its sub-nodes
+                // Audio function group ï¿½ get its sub-nodes
+                if (codec->afgNode == 0) codec->afgNode = n;
                 uint32_t afg_sub = 0;
                 hda_send_verb(ctrlIdx, addr, n, HDA_VERB_GET_PARAM | HDA_PARAM_SUB_NODE_COUNT, &afg_sub);
                 uint8_t startWidget = static_cast<uint8_t>((afg_sub >> 16) & 0xFF);
@@ -382,7 +410,7 @@ static void hda_enumerate_codecs(AudioController* ctrl, uint8_t ctrlIdx)
                         codec->adcNode = w; // Audio Input (ADC)
                     }
                     else if (widgetType == 0x4) {
-                        // Pin widget — check config default
+                        // Pin widget ï¿½ check config default
                         uint32_t pinCaps = 0;
                         hda_send_verb(ctrlIdx, addr, w, HDA_VERB_GET_PARAM | HDA_PARAM_PIN_CAPS, &pinCaps);
                         if ((pinCaps & 0x10) && codec->pinOutNode == 0) {
@@ -405,7 +433,7 @@ static void hda_enumerate_codecs(AudioController* ctrl, uint8_t ctrlIdx)
 // HDA stream format register encoding
 // ================================================================
 
-static uint16_t encode_hda_format(uint16_t sampleRate, uint8_t bits, uint8_t channels)
+static uint16_t encode_hda_format(uint32_t sampleRate, uint8_t bits, uint8_t channels)
 {
     uint16_t fmt = 0;
 
@@ -454,18 +482,24 @@ static bool configure_stream(AudioController* ctrl, PCMStream* stream,
     stream->bitsPerSample = bits;
     stream->channels      = channels;
 
-    // Determine stream descriptor index
+    // Determine stream descriptor index. Per the HDA specification the
+    // descriptors are ordered input-first: SD0..ISS-1 are capture, the
+    // next OSS are playback (output n lives at index ISS+n), then
+    // bidirectional. MC6 audit finding: this driver historically used
+    // index 0 for playback, which programs a *capture* descriptor on any
+    // controller with input streams (e.g. ICH6: 4 in + 4 out) â€” the DMA
+    // engine for the intended direction never runs.
     // GCAP tells us the number of input/output streams
     uint16_t gcap = hda_read16(ctrl, HDA_GCAP);
     uint8_t numOutputSD = static_cast<uint8_t>((gcap >> 12) & 0x0F);
     uint8_t numInputSD  = static_cast<uint8_t>((gcap >> 8) & 0x0F);
-    (void)numInputSD;
+    (void)numOutputSD;
 
     if (isOutput) {
-        stream->streamIndex = 0; // first output SD
+        stream->streamIndex = numInputSD; // first output SD
         stream->streamTag   = 1;
     } else {
-        stream->streamIndex = numOutputSD; // first input SD
+        stream->streamIndex = 0; // first input SD
         stream->streamTag   = 2;
     }
 
@@ -765,7 +799,7 @@ bool submit_playback_buffer(uint8_t ctrlIndex, uint64_t physAddr, uint32_t lengt
 
     // Update stream descriptor BDL pointer and LVI
     uint32_t sdBase = HDA_SD_BASE + s->streamIndex * HDA_SD_INTERVAL;
-    uint64_t bdlAddr = reinterpret_cast<uintptr_t>(s->bdl);
+    uint64_t bdlAddr = kernel_virt_to_phys(reinterpret_cast<uintptr_t>(s->bdl));
     hda_write32(ctrl, sdBase + HDA_SD_BDPL, static_cast<uint32_t>(bdlAddr));
     hda_write32(ctrl, sdBase + HDA_SD_BDPU, static_cast<uint32_t>(bdlAddr >> 32));
     hda_write16(ctrl, sdBase + HDA_SD_LVI, static_cast<uint16_t>(s->bdlCount - 1));
@@ -792,7 +826,7 @@ bool submit_capture_buffer(uint8_t ctrlIndex, uint64_t physAddr, uint32_t length
     s->bdlCount++;
 
     uint32_t sdBase = HDA_SD_BASE + s->streamIndex * HDA_SD_INTERVAL;
-    uint64_t bdlAddr = reinterpret_cast<uintptr_t>(s->bdl);
+    uint64_t bdlAddr = kernel_virt_to_phys(reinterpret_cast<uintptr_t>(s->bdl));
     hda_write32(ctrl, sdBase + HDA_SD_BDPL, static_cast<uint32_t>(bdlAddr));
     hda_write32(ctrl, sdBase + HDA_SD_BDPU, static_cast<uint32_t>(bdlAddr >> 32));
     hda_write16(ctrl, sdBase + HDA_SD_LVI, static_cast<uint16_t>(s->bdlCount - 1));
@@ -812,6 +846,76 @@ uint32_t get_playback_position(uint8_t ctrlIndex)
 
     uint32_t sdBase = HDA_SD_BASE + ctrl->playback.streamIndex * HDA_SD_INTERVAL;
     return hda_read32(ctrl, sdBase + HDA_SD_LPIB);
+}
+
+uint16_t hda_rirb_wp(uint8_t ctrlIndex)
+{
+    if (ctrlIndex >= s_controllerCount) return 0;
+    AudioController* ctrl = &s_controllers[ctrlIndex];
+    if (!ctrl->active || ctrl->type != AUDIO_HDA) return 0;
+    return hda_read16(ctrl, HDA_RIRBWP);
+}
+
+bool hda_rirb_entry(uint8_t ctrlIndex, uint16_t index, uint64_t* out)
+{
+    if (ctrlIndex >= s_controllerCount) return false;
+    if (index >= 256) return false;
+    AudioController* ctrl = &s_controllers[ctrlIndex];
+    if (!ctrl->active || ctrl->type != AUDIO_HDA) return false;
+    uint64_t* rirb = &s_rirbBuf[ctrlIndex * 256];
+    if (out) *out = rirb[index % (ctrl->rirbSize ? ctrl->rirbSize : 1)];
+    return true;
+}
+
+uint16_t hda_rirb_size(uint8_t ctrlIndex)
+{
+    if (ctrlIndex >= s_controllerCount) return 0;
+    AudioController* ctrl = &s_controllers[ctrlIndex];
+    if (!ctrl->active || ctrl->type != AUDIO_HDA) return 0;
+    return ctrl->rirbSize;
+}
+
+uint64_t hda_corb_base(uint8_t ctrlIndex)
+{
+    if (ctrlIndex >= s_controllerCount) return 0;
+    AudioController* ctrl = &s_controllers[ctrlIndex];
+    if (!ctrl->active || ctrl->type != AUDIO_HDA) return 0;
+    return ctrl->corbPhysAddr;
+}
+
+uint64_t hda_rirb_base(uint8_t ctrlIndex)
+{
+    if (ctrlIndex >= s_controllerCount) return 0;
+    AudioController* ctrl = &s_controllers[ctrlIndex];
+    if (!ctrl->active || ctrl->type != AUDIO_HDA) return 0;
+    return ctrl->rirbPhysAddr;
+}
+
+// Immediate Command register offsets (no DMA; direct MMIO doorbell).
+static const uint32_t HDA_IC  = 0x60;
+static const uint32_t HDA_IR  = 0x64;
+static const uint32_t HDA_IRS = 0x68;
+static const uint16_t HDA_IRS_BUSY  = 0x01;
+static const uint16_t HDA_IRS_VALID = 0x02;
+
+bool hda_immediate_verb(uint8_t ctrlIndex, uint32_t verb, uint32_t* response)
+{
+    if (ctrlIndex >= s_controllerCount) return false;
+    AudioController* ctrl = &s_controllers[ctrlIndex];
+    if (!ctrl->active || ctrl->type != AUDIO_HDA) return false;
+
+    hda_write32(ctrl, HDA_IC, verb);
+    // Bounded poll: busy clears, then valid must set.
+    for (int timeout = 0; timeout < 100000; ++timeout) {
+        const uint16_t irs = hda_read16(ctrl, HDA_IRS);
+        if ((irs & HDA_IRS_BUSY) == 0) {
+            if ((irs & HDA_IRS_VALID) == 0) return false;
+            if (response) *response = hda_read32(ctrl, HDA_IR);
+            return true;
+        }
+        spin_delay(100);
+    }
+    return false;
 }
 
 } // namespace pci_audio

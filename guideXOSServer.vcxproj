@@ -278,6 +278,7 @@
     <ClInclude Include="kernel\core\include\kernel\nic.h" />
     <ClInclude Include="kernel\core\include\kernel\nvme.h" />
     <ClInclude Include="kernel\core\include\kernel\pci_audio.h" />
+    <ClInclude Include="kernel\core\include\kernel\app_audio_stream.h" />
     <ClInclude Include="kernel\core\include\kernel\pit.h" />
     <ClInclude Include="kernel\core\include\kernel\process.h" />
     <ClInclude Include="kernel\core\include\kernel\ps2keyboard.h" />
@@ -543,6 +544,7 @@
     <ClCompile Include="kernel\core\nic.cpp" />
     <ClCompile Include="kernel\core\nvme.cpp" />
     <ClCompile Include="kernel\core\pci_audio.cpp" />
+    <ClCompile Include="kernel\core\app_audio_stream.cpp" />
     <ClCompile Include="kernel\core\pit.cpp" />
     <ClCompile Include="kernel\core\process.cpp">
       <ObjectFileName>$(IntDir)process_kernel.obj</ObjectFileName>

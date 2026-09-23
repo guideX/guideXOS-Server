@@ -1004,6 +1004,28 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE* SystemTable) {
     }
     Print(L"=========================\n\n");
 
+    // --- MC6: HDA audio controller discovery (MMIO mapping only) ---
+    // The kernel re-discovers the controller with its own PCI scan; the
+    // bootloader only identity-maps BAR0 (like the NIC MMIO range below)
+    // so HDA register access cannot fault on UEFI boot. No BootInfo change.
+    EFI_PHYSICAL_ADDRESS hdaMmioPhys = 0;
+    UINTN hdaMmioSize = 0;
+    {
+        guideXOS::pci::HdaBootInfo hda{};
+        if (guideXOS::pci::FindHdaController(&hda) && hda.found) {
+            Print(L"*** Using HDA audio at [%02x:%02x.%x] ***\n",
+                  (UINTN)hda.bus, (UINTN)hda.device, (UINTN)hda.function);
+            Print(L"    Vendor: %04x  Device: %04x\n", (UINTN)hda.vendorId, (UINTN)hda.deviceId);
+            Print(L"    MMIO Phys: %016lx  Size: %lx\n", hda.bar0Phys, hda.bar0Size);
+            hdaMmioPhys = (EFI_PHYSICAL_ADDRESS)hda.bar0Phys;
+            hdaMmioSize = (UINTN)hda.bar0Size;
+            guideXOS::pci::EnablePciDevice(hda.bus, hda.device, hda.function);
+            Print(L"    PCI bus mastering enabled\n");
+        } else {
+            Print(L"No HDA audio controller found for MMIO mapping\n");
+        }
+    }
+
     // --- Build identity-mapped page tables BEFORE ExitBootServices ---
     // We must build page tables while BootServices are still available.
     
@@ -1166,6 +1188,19 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE* SystemTable) {
         
         Print(L"NIC MMIO mapped: Phys=%016lx Virt=%016lx\n",
               v1BootInfo->Nic.MmioPhys, v1BootInfo->Nic.MmioVirt);
+    }
+
+    // 13b. HDA audio MMIO region (MC6, see discovery above): identity-map
+    // the controller BAR0 so kernel HDA register/DMA programming cannot
+    // fault on UEFI boot. Guarded against range-table overflow.
+    if (hdaMmioPhys != 0 && hdaMmioSize != 0 && rangeCount < 20) {
+        EFI_PHYSICAL_ADDRESS hdaMmioAligned = hdaMmioPhys & ~0xFFFull;
+        UINTN hdaMmioAlignedSize = ((hdaMmioPhys - hdaMmioAligned) + hdaMmioSize + 0xFFF) & ~0xFFFull;
+
+        ranges[rangeCount] = hdaMmioAligned;
+        sizes[rangeCount] = hdaMmioAlignedSize;
+        rangeCount++;
+        Print(L"Mapping HDA audio MMIO: %016lx size %lx\n", hdaMmioAligned, (UINT64)hdaMmioAlignedSize);
     }
 
     Print(L"Building identity page tables with %u ranges...\n", (UINT32)rangeCount);

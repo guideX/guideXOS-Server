@@ -203,6 +203,7 @@
     <ClInclude Include="kernel\core\include\kernel\usb_video.h" />
     <ClInclude Include="kernel\core\include\kernel\usb_video_uvc.h" />
     <ClInclude Include="kernel\core\include\kernel\pci_audio.h" />
+    <ClInclude Include="kernel\core\include\kernel\app_audio_stream.h" />
     <ClInclude Include="kernel\core\include\kernel\ata.h" />
     <ClInclude Include="kernel\core\include\kernel\nvme.h" />
     <ClInclude Include="kernel\core\include\kernel\block_device.h" />
@@ -287,6 +288,9 @@
     <ClCompile Include="kernel\core\usb_video_uvc.cpp" />
     <ClCompile Include="kernel\core\pci_audio.cpp">
       <ObjectFileName>$(IntDir)pci_audio_core.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="kernel\core\app_audio_stream.cpp">
+      <ObjectFileName>$(IntDir)app_audio_stream_core.obj</ObjectFileName>
     </ClCompile>
     <ClCompile Include="kernel\core\ata.cpp" />
     <ClCompile Include="kernel\core\nvme.cpp" />

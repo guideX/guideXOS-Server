@@ -295,5 +295,59 @@ void PrintPciDevice(EFI_SYSTEM_TABLE* ST, const PciDevice* dev)
     }
 }
 
+bool FindHdaController(HdaBootInfo* out)
+{
+    if (!out) return false;
+    out->found = false;
+    out->bar0Phys = 0;
+    out->bar0Size = 0;
+
+    // Same bounded walk as EnumeratePci (buses 0-7, functions per header
+    // type), matching class 04/subclass 03 instead of the NIC class.
+    for (uint8_t bus = 0; bus < 8; bus++) {
+        for (uint8_t dev = 0; dev < 32; dev++) {
+            uint32_t id = PciRead32(bus, dev, 0, 0x00);
+            if (id == 0xFFFFFFFF || id == 0) continue;
+
+            uint8_t headerType = PciRead8(bus, dev, 0, 0x0E);
+            uint8_t maxFunc = (headerType & 0x80) ? 8 : 1;
+
+            for (uint8_t func = 0; func < maxFunc; func++) {
+                if (func > 0) {
+                    id = PciRead32(bus, dev, func, 0x00);
+                    if (id == 0xFFFFFFFF || id == 0) continue;
+                }
+
+                uint32_t classReg = PciRead32(bus, dev, func, 0x08);
+                uint8_t classCode = (uint8_t)(classReg >> 24);
+                uint8_t subclass = (uint8_t)(classReg >> 16);
+                if (classCode != PCI_CLASS_MULTIMEDIA || subclass != PCI_SUBCLASS_HDA) {
+                    continue;
+                }
+
+                uint64_t phys = 0;
+                uint64_t size = 0;
+                bool is64bit = false;
+                if (!GetBar0Info(bus, dev, func, &phys, &size, &is64bit)) {
+                    continue; // I/O BAR: not usable for HDA MMIO
+                }
+                if (phys == 0) continue;
+                if (size < 0x4000) size = 0x4000; // HDA registers need 16 KiB
+
+                out->vendorId = (uint16_t)(id & 0xFFFF);
+                out->deviceId = (uint16_t)(id >> 16);
+                out->bus = bus;
+                out->device = dev;
+                out->function = func;
+                out->bar0Phys = phys;
+                out->bar0Size = size;
+                out->found = true;
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 } // namespace pci
 } // namespace guideXOS

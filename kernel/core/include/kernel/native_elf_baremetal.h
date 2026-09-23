@@ -52,6 +52,24 @@ const PackageInfo* lookup_package(const char* appName);
 uint32_t package_count();
 const PackageInfo* package_at(uint32_t index);
 
+// Kernel main-loop audio pump (MC6, always available, safe when idle).
+void app_audio_pump();
+
+// Kernel slide base for App Model audio DMA translation
+// (base + (virt - 0x100000), same convention as nic/virtio/mmio).
+void audio_set_kernel_physical_base(uint64_t physicalBase);
+
+#if defined(GXOS_AUDIO_BOOT_SELFTEST)
+// Opt-in bare-metal audio proof (MC6): runs the app-audio backend
+// self-test against real hardware at boot and reports PASS/FAIL over
+// serial. Defined in kernel/core/native_elf_baremetal.cpp; enabled via
+// EXTRA_CFLAGS=-DGXOS_AUDIO_BOOT_SELFTEST (QEMU proof builds only).
+void app_audio_boot_selftest();
+// Opt-in app-level proof (MC6, same flag): launches the real AudioBeep
+// sample and its permission-denied twin through the production path.
+void app_audio_app_proof();
+#endif
+
 } // namespace native_elf
 } // namespace kernel
 

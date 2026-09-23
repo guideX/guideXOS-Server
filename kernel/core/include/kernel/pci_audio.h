@@ -1,4 +1,4 @@
-// PCI Audio Driver — Intel HDA (High Definition Audio) and AC'97
+// PCI Audio Driver ï¿½ Intel HDA (High Definition Audio) and AC'97
 //
 // Supports:
 //   - Intel HD Audio controller (ICH6+, vendor 8086h)
@@ -192,6 +192,7 @@ struct HDACodec {
     uint32_t revisionId;
     uint8_t  startNode;
     uint8_t  nodeCount;
+    uint8_t  afgNode;       // audio function group node (power/widgets)
     uint8_t  dacNode;       // first output DAC widget found
     uint8_t  adcNode;       // first input ADC widget found
     uint8_t  pinOutNode;    // line out / headphone pin
@@ -255,6 +256,12 @@ static const uint8_t MAX_AUDIO_CONTROLLERS = 4;
 // Scan PCI for audio controllers and initialise them.
 void init();
 
+// Set the kernel physical base for virtual-to-physical DMA translation.
+// The kernel links at 0x100000 but loads at an arbitrary physical base;
+// CORB/RIRB/BDL addresses programmed to the device must be translated
+// with base + (virt - 0x100000). Mirrors nic/virtio set_kernel_physical_base.
+void set_kernel_physical_base(uint64_t physicalBase);
+
 // Return number of discovered audio controllers.
 uint8_t controller_count();
 
@@ -270,6 +277,22 @@ const AudioController* get_controller(uint8_t index);
 bool hda_send_verb(uint8_t ctrlIndex, uint8_t codecAddr,
                    uint8_t nodeId, uint32_t verb,
                    uint32_t* response);
+
+// Diagnostic accessors for the CORB/RIRB rings (MC6 bring-up triage).
+// No behavior change: they expose the raw write pointer and entries so a
+// boot probe can verify response alignment without guessing conventions.
+uint16_t hda_rirb_wp(uint8_t ctrlIndex);
+bool hda_rirb_entry(uint8_t ctrlIndex, uint16_t index, uint64_t* out);
+uint16_t hda_rirb_size(uint8_t ctrlIndex);
+// Programmed DMA bases (for cross-checking against register readbacks).
+uint64_t hda_corb_base(uint8_t ctrlIndex);
+uint64_t hda_rirb_base(uint8_t ctrlIndex);
+
+// Immediate Command interface (IC/IR/IRS, no CORB/RIRB DMA involved).
+// Diagnostic and fallback verb transport: writes the 32-bit verb to IC,
+// polls IRS busy/valid with a bounded timeout, reads IR on success.
+// Returns true with *response valid, false on timeout.
+bool hda_immediate_verb(uint8_t ctrlIndex, uint32_t verb, uint32_t* response);
 
 // ----------------------------------------------------------------
 // Volume control

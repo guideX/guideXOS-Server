@@ -21,6 +21,7 @@
 #include "include/kernel/ps2keyboard.h"
 #include "include/kernel/input_manager.h"
 #include "include/kernel/pit.h"
+#include "include/kernel/pci_audio.h"
 #include "include/kernel/serial_debug.h"
 #include "include/kernel/desktop_capabilities.h"
 #include "include/kernel/app_launch_target_resolver.h"
@@ -877,7 +878,30 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         kernel::pit::init(100);
         kernel::interrupts::register_irq(0, kernel::pit::irq_handler);
         kernel::serial::puts("[KERNEL] PIT timer initialized, IRQ0 registered\n");
-        
+
+        // MC6: detect HDA audio controllers once at boot (bounded PCI
+        // scan + CORB/RIRB + codec enumeration; no DMA here). The desktop
+        // volume UI and the lazy app-audio bring-up share this discovery.
+        // The kernel slide base must be set first on UEFI boot: CORB/RIRB
+        // DMA addresses are translated with it (raw virtual addresses
+        // misdirect DMA whenever the load base differs from the link
+        // base). On Multiboot the load base equals the link base, so the
+        // identity default stands.
+        if (is_bootinfo && bootinfo) {
+            kernel::pci_audio::set_kernel_physical_base(bootinfo->KernelPhysicalBase);
+            kernel::native_elf::audio_set_kernel_physical_base(bootinfo->KernelPhysicalBase);
+        }
+        kernel::pci_audio::init();
+        kernel::serial::puts("[KERNEL] Audio controllers detected: ");
+        kernel::serial::put_hex8(kernel::pci_audio::controller_count());
+        kernel::serial::puts("\n");
+#if defined(GXOS_AUDIO_BOOT_SELFTEST)
+        // Opt-in full DMA proof (QEMU proof builds only, never default:
+        // it audibly exercises the hardware). See
+        // kernel::native_elf::app_audio_boot_selftest.
+        kernel::native_elf::app_audio_boot_selftest();
+#endif
+
         // ============================================================
         // Storage Subsystem Initialization
         // ============================================================
@@ -1147,6 +1171,14 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         kernel::desktop::run_imageviewer_runtime_smoke();
         kernel::serial::puts("[IMAGEVIEWER-RUNTIME-SMOKE] done\n");
 #endif
+#ifdef GXOS_AUDIO_BOOT_SELFTEST
+        // MC6 app-level proof (proof builds only): launch the real AudioBeep
+        // sample (permitted) and its permission-denied twin through the
+        // production play_pcm path on real hardware. AudioBeep exits on its
+        // own; the twin stays silent. Missile Command is exercised in a
+        // follow-up run with monitor-driven input (it needs Escape to exit).
+        kernel::native_elf::app_audio_app_proof();
+#endif
         kernel::serial::puts("[KERNEL] Entering main loop (waiting for input)...\n");
         
         
@@ -1238,6 +1270,13 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
             }
 
             kernel::desktop::tick();
+
+            // MC6: sustain the bare-metal audio pump on the desktop cadence
+            // even when no application is running. Without this, mixer
+            // voices queued just before app exit would never complete and
+            // the DMA ring would loop stale content instead of decaying to
+            // silence. Bounded, non-blocking, never sleeps.
+            kernel::native_elf::app_audio_pump();
 
             // Check if any other source triggered a redraw
             if (kernel::desktop::needs_redraw()) {

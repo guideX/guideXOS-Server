@@ -12,6 +12,8 @@
 #include "include/kernel/ps2keyboard.h"
 #include "include/kernel/serial_debug.h"
 #include "include/kernel/vfs.h"
+#include "include/kernel/pci_audio.h"
+#include "include/kernel/app_audio_stream.h"
 
 #include "bitmap_font.h"
 #include "sdk/include/guidexos/abi.h"
@@ -332,6 +334,10 @@ struct Runtime {
     uint64_t faultRsp;
     uint64_t faultRbp;
     uint64_t faultCr2;
+    // App Model audio owner id (MC6): the runtime sequence value active
+    // while this app runs. Voices are tagged with it so exit cleanup
+    // (StopOwner) reclaims exactly this app's sounds.
+    uint64_t audioOwner;
 };
 
 void NativeWindowOwner::record_frame_guard_failure() {
@@ -1120,6 +1126,10 @@ static void pump_desktop(Runtime* runtime) {
     if (wheel != 0) desktop::handle_mouse_wheel(input::mouse_x(), input::mouse_y(), wheel);
     desktop::draw();
     desktop::draw_cursor(input::mouse_x(), input::mouse_y());
+    // MC6: feed the bare-metal audio pump at the existing app cadence
+    // (frame present / event poll). Bounded, non-blocking, never sleeps;
+    // keeps mixer lifetimes real-time and DMA descriptors refilled.
+    app_audio::backend_instance().pump();
     (void)runtime;
 }
 
@@ -1296,24 +1306,332 @@ static gx_result GX_CALL host_present_frame(gx_app_context* context, gx_handle w
     return abi_result(runtime, NativeAbiOperation::PresentFrame, GX_OK);
 }
 
+namespace {
+
+// ================================================================
+// MC6 bare-metal App Model audio glue.
+//
+// Same play_pcm signature and error behavior as the hosted runtime; the
+// mixer + streaming backend live in kernel::app_audio (see
+// include/kernel/app_audio_stream.h). No ABI change, no game-specific
+// path: permitted applications simply start producing sound on
+// supported HDA hardware, and degrade to mixer-only silence (like the
+// hosted null sink) when no backend is available.
+// ================================================================
+
+// Staging buffer: validated requests are converted here before queueing.
+// Static (never stack: the largest voice is 176 KiB; never app memory:
+// the device only ever sees backend-owned ring buffers).
+int16_t s_audioStage[app_audio::kMaxVoiceFrames];
+
+bool s_audioScanDone = false;
+uint64_t s_audioPhysBase = 0x100000ULL;
+
+uint8_t audio_mmio_read8(uint64_t mmioBase, uint32_t offset) {
+    const volatile uint8_t* reg = reinterpret_cast<volatile uint8_t*>(
+        static_cast<uintptr_t>(mmioBase + offset));
+    return *reg;
+}
+
+uint16_t audio_mmio_read16(uint64_t mmioBase, uint32_t offset) {
+    const volatile uint16_t* reg = reinterpret_cast<volatile uint16_t*>(
+        static_cast<uintptr_t>(mmioBase + offset));
+    return *reg;
+}
+
+uint32_t audio_mmio_read32(uint64_t mmioBase, uint32_t offset) {
+    const volatile uint32_t* reg = reinterpret_cast<volatile uint32_t*>(
+        static_cast<uintptr_t>(mmioBase + offset));
+    return *reg;
+}
+
+void audio_mmio_write8(uint64_t mmioBase, uint32_t offset, uint8_t value) {
+    volatile uint8_t* reg = reinterpret_cast<volatile uint8_t*>(
+        static_cast<uintptr_t>(mmioBase + offset));
+    *reg = value;
+}
+
+void audio_mmio_write16(uint64_t mmioBase, uint32_t offset, uint16_t value) {
+    volatile uint16_t* reg = reinterpret_cast<volatile uint16_t*>(
+        static_cast<uintptr_t>(mmioBase + offset));
+    *reg = value;
+}
+
+void audio_mmio_write32(uint64_t mmioBase, uint32_t offset, uint32_t value) {
+    volatile uint32_t* reg = reinterpret_cast<volatile uint32_t*>(
+        static_cast<uintptr_t>(mmioBase + offset));
+    *reg = value;
+}
+
+bool audio_send_verb(uint8_t ctrlIndex, uint8_t codecAddr, uint8_t nodeId,
+                     uint32_t verb, uint32_t* response) {
+    return pci_audio::hda_send_verb(ctrlIndex, codecAddr, nodeId, verb, response);
+}
+
+uint64_t audio_virt_to_phys(const void* ptr) {
+    // Kernel slide translation (MC6 root-cause fix): the kernel links at
+    // 0x100000 but loads at BootInfo.KernelPhysicalBase, so device-visible
+    // addresses are base + (virt - 0x100000). Raw virtual addresses
+    // misdirect DMA whenever the bases differ (proven on QEMU: CORB verbs
+    // read back as zero). Same formula as nic/virtio/mmio.
+    const uint64_t virt = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(ptr));
+    if (virt < 0x100000ULL) return 0;
+    return s_audioPhysBase + (virt - 0x100000ULL);
+}
+
+uint64_t audio_ticks_ms() { return pit::ticks() * 10u; }
+
+void audio_log_puts(const char* text) { serial::puts(text); }
+void audio_log_hex32(uint32_t value) { serial::put_hex32(value); }
+void audio_log_hex64(uint64_t value) { serial::put_hex64(value); }
+
+// Bounded controller/codec diagnostic dump (MC6 triage): controller
+// identity, per-codec enumeration results, and raw RIRB state so response
+// alignment can be verified from serial logs without guessing.
+void report_audio_controller() {
+    if (pci_audio::controller_count() == 0) {
+        serial::puts("[APP-AUDIO] diag: no controllers\n");
+        return;
+    }
+    const pci_audio::AudioController* ctrl = pci_audio::get_controller(0);
+    if (!ctrl) {
+        serial::puts("[APP-AUDIO] diag: controller 0 unreadable\n");
+        return;
+    }
+    serial::puts("[APP-AUDIO] diag: pci=");
+    serial::put_hex8(ctrl->pciBus);
+    serial::putc(':');
+    serial::put_hex8(ctrl->pciDev);
+    serial::putc('.');
+    serial::put_hex8(ctrl->pciFun);
+    serial::puts(" ven=0x");
+    serial::put_hex16(ctrl->vendorId);
+    serial::puts(" dev=0x");
+    serial::put_hex16(ctrl->deviceId);
+    serial::puts(" mmio=0x");
+    serial::put_hex64(ctrl->mmioBase);
+    serial::puts(" codecs=0x");
+    serial::put_hex32(ctrl->codecCount);
+    serial::putc('\n');
+    // Raw controller register snapshot (offsets from pci_audio.h).
+    {
+        const uint64_t mmio = ctrl->mmioBase;
+        serial::puts("[APP-AUDIO] diag: gcap=0x");
+        serial::put_hex16(audio_mmio_read16(mmio, pci_audio::HDA_GCAP));
+        serial::puts(" gctl=0x");
+        serial::put_hex32(audio_mmio_read32(mmio, pci_audio::HDA_GCTL));
+        serial::puts(" statests=0x");
+        serial::put_hex16(audio_mmio_read16(mmio, pci_audio::HDA_STATESTS));
+        serial::puts(" intsts=0x");
+        serial::put_hex32(audio_mmio_read32(mmio, pci_audio::HDA_INTSTS));
+        serial::puts(" corbwp=0x");
+        serial::put_hex16(audio_mmio_read16(mmio, pci_audio::HDA_CORBWP));
+        serial::puts(" corbrp=0x");
+        serial::put_hex16(audio_mmio_read16(mmio, pci_audio::HDA_CORBRP));
+        serial::puts(" corbctl=0x");
+        serial::put_hex8(audio_mmio_read8(mmio, pci_audio::HDA_CORBCTL));
+        serial::puts(" corbsts=0x");
+        serial::put_hex8(audio_mmio_read8(mmio, pci_audio::HDA_CORBSTS));
+        serial::puts(" corbsize=0x");
+        serial::put_hex8(audio_mmio_read8(mmio, pci_audio::HDA_CORBSIZE));
+        serial::puts(" rirbwp=0x");
+        serial::put_hex16(audio_mmio_read16(mmio, pci_audio::HDA_RIRBWP));
+        serial::puts(" rirbctl=0x");
+        serial::put_hex8(audio_mmio_read8(mmio, pci_audio::HDA_RIRBCTL));
+        serial::puts(" rirbsts=0x");
+        serial::put_hex8(audio_mmio_read8(mmio, pci_audio::HDA_RIRBSTS));
+        serial::puts(" rirbsize=0x");
+        serial::put_hex8(audio_mmio_read8(mmio, pci_audio::HDA_RIRBSIZE));
+        serial::puts(" corbbase=0x");
+        serial::put_hex64(pci_audio::hda_corb_base(0));
+        serial::puts(" rirbbase=0x");
+        serial::put_hex64(pci_audio::hda_rirb_base(0));
+        serial::puts(" corbreg=0x");
+        serial::put_hex32(audio_mmio_read32(mmio, pci_audio::HDA_CORBLBASE));
+        serial::put_hex32(audio_mmio_read32(mmio, pci_audio::HDA_CORBUBASE));
+        serial::puts(" rirbreg=0x");
+        serial::put_hex32(audio_mmio_read32(mmio, pci_audio::HDA_RIRBLBASE));
+        serial::put_hex32(audio_mmio_read32(mmio, pci_audio::HDA_RIRBUBASE));
+        serial::putc('\n');
+    }
+    for (uint8_t i = 0; i < ctrl->codecCount && i < 4; ++i) {
+        const pci_audio::HDACodec& codec = ctrl->codecs[i];
+        serial::puts("[APP-AUDIO] diag: codec addr=0x");
+        serial::put_hex8(codec.address);
+        serial::puts(" vendor=0x");
+        serial::put_hex32(codec.vendorId);
+        serial::puts(" rev=0x");
+        serial::put_hex32(codec.revisionId);
+        serial::puts(" nodes=0x");
+        serial::put_hex8(codec.startNode);
+        serial::putc('+');
+        serial::put_hex8(codec.nodeCount);
+        serial::puts(" afg=0x");
+        serial::put_hex8(codec.afgNode);
+        serial::puts(" dac=0x");
+        serial::put_hex8(codec.dacNode);
+        serial::puts(" adc=0x");
+        serial::put_hex8(codec.adcNode);
+        serial::puts(" pinOut=0x");
+        serial::put_hex8(codec.pinOutNode);
+        serial::puts(" pinIn=0x");
+        serial::put_hex8(codec.pinInNode);
+        serial::putc('\n');
+        // Raw RIRB probe: send one GET vendor verb, then dump the write
+        // pointer and the first entries to verify response alignment.
+        const uint16_t wpBefore = pci_audio::hda_rirb_wp(0);
+        uint32_t resp = 0;
+        const bool ok = pci_audio::hda_send_verb(0, codec.address, 0,
+            pci_audio::HDA_VERB_GET_PARAM | pci_audio::HDA_PARAM_VENDOR_ID, &resp);
+        const uint16_t wpAfter = pci_audio::hda_rirb_wp(0);
+        serial::puts(ok ? "[APP-AUDIO] diag: rirb probe ok resp=0x"
+                        : "[APP-AUDIO] diag: rirb probe TIMEOUT resp=0x");
+        serial::put_hex32(resp);
+        serial::puts(" wpBefore=0x");
+        serial::put_hex16(wpBefore);
+        serial::puts(" wpAfter=0x");
+        serial::put_hex16(wpAfter);
+        for (uint16_t e = 0; e < 4; ++e) {
+            uint64_t entry = 0;
+            pci_audio::hda_rirb_entry(0, e, &entry);
+            serial::puts(" rirb[");
+            serial::put_hex16(e);
+            serial::puts("]=0x");
+            serial::put_hex64(entry);
+        }
+        serial::putc('\n');
+        // AFG-power probe (diagnostic): node 1 is the audio function group
+        // by HDA convention. If the codec answers zeros from D3, powering
+        // it should change subsequent responses. Bounded, logged, harmless
+        // when node 1 is not the AFG.
+        {
+            uint32_t powerResp = 0;
+            const bool powerOk = pci_audio::hda_send_verb(
+                0, codec.address, 1,
+                pci_audio::HDA_VERB_SET_POWER_STATE | 0x00u, &powerResp);
+            uint32_t vendorAfter = 0;
+            const bool vendorOk = pci_audio::hda_send_verb(
+                0, codec.address, 0,
+                pci_audio::HDA_VERB_GET_PARAM | pci_audio::HDA_PARAM_VENDOR_ID,
+                &vendorAfter);
+            serial::puts("[APP-AUDIO] diag: afg-power ");
+            serial::puts(powerOk ? "ok" : "TIMEOUT");
+            serial::puts(" vendor-after ");
+            serial::puts(vendorOk ? "ok" : "TIMEOUT");
+            serial::puts(" resp=0x");
+            serial::put_hex32(vendorAfter);
+            serial::putc('\n');
+        }
+        // Immediate-command probe (diagnostic): same GET vendor verb via
+        // IC/IR (no CORB/RIRB DMA). Nonzero here + zero via CORB/RIRB
+        // isolates the fault to the ring/DMA path; zero here too isolates
+        // it to the codec/model side.
+        {
+            uint32_t icResp = 0;
+            const bool icOk = pci_audio::hda_immediate_verb(
+                0, (static_cast<uint32_t>(codec.address) << 28) |
+                   pci_audio::HDA_VERB_GET_PARAM | pci_audio::HDA_PARAM_VENDOR_ID,
+                &icResp);
+            serial::puts("[APP-AUDIO] diag: icir-vendor ");
+            serial::puts(icOk ? "ok" : "TIMEOUT");
+            serial::puts(" resp=0x");
+            serial::put_hex32(icResp);
+            serial::putc('\n');
+        }
+    }
+}
+
+// Lazy backend bring-up: runs once per boot at most for discovery, then
+// once for the DMA stream. Failure degrades to mixer-only silence (never
+// an application error).
+bool ensure_audio_backend() {
+    using namespace kernel::app_audio;
+    Backend& backend = backend_instance();
+    if (backend.state() == BackendState::Ready) return true;
+    if (backend.state() == BackendState::Failed) return false;
+    if (!s_audioScanDone) {
+        s_audioScanDone = true;
+        if (pci_audio::controller_count() == 0) pci_audio::init();
+    }
+    if (pci_audio::controller_count() == 0) return false;
+    const pci_audio::AudioController* ctrl = pci_audio::get_controller(0);
+    if (!ctrl || ctrl->type != pci_audio::AUDIO_HDA || ctrl->mmioBase == 0 ||
+        ctrl->codecCount == 0) {
+        return false;
+    }
+    const pci_audio::HDACodec& codec = ctrl->codecs[0];
+    // NOTE: dac/pin endpoints may be zero when codec verbs return no usable
+    // data (observed with QEMU's hda-duplex: all-zero responses). The path
+    // is still passed through: the backend attempts the full codec
+    // bring-up when endpoints exist and otherwise a default-route stream
+    // start verified by LPIB motion. Only a missing codec degrades here.
+    if (!codec.present) {
+        serial::puts("[NATIVE-ELF] play_pcm: codec not present\n");
+        return false;
+    }
+    HdaOps ops;
+    ops.read8 = audio_mmio_read8;
+    ops.read16 = audio_mmio_read16;
+    ops.read32 = audio_mmio_read32;
+    ops.write8 = audio_mmio_write8;
+    ops.write16 = audio_mmio_write16;
+    ops.write32 = audio_mmio_write32;
+    ops.send_verb = audio_send_verb;
+    ops.virt_to_phys = audio_virt_to_phys;
+    ops.ticks_ms = audio_ticks_ms;
+    ops.log_puts = audio_log_puts;
+    ops.log_hex32 = audio_log_hex32;
+    ops.log_hex64 = audio_log_hex64;
+    backend.bind_ops(&ops, ctrl->mmioBase, 0);
+    OutputPath path;
+    path.codecAddr = codec.address;
+    path.afgNode = codec.afgNode;
+    path.dacNode = codec.dacNode;
+    path.pinNode = codec.pinOutNode;
+    path.valid = true;
+    return backend.ensure_ready(&path);
+}
+
+} // namespace
+
 static gx_result GX_CALL host_play_pcm(gx_app_context* context, const void* pcmData, uint32_t pcmBytes,
                                         uint32_t sampleRateHz, uint32_t channels, uint32_t bitsPerSample) {
-    // Bare-metal App Model audio (MC5): arguments and the "audio.output"
-    // permission are validated exactly like the hosted runtime, but there is
-    // no PCM submit path from the mixer to the HDA/USB DMA engines yet, so a
-    // well-formed permitted request still fails explicitly with
-    // NOT_IMPLEMENTED instead of pretending success. Applications must stay
-    // fully playable without audio.
+    // Bare-metal App Model audio (MC6): same contract as the hosted
+    // runtime (native_app_runtime.cpp::hostPlayPcm). Permission is checked
+    // first, then the request is validated and converted exactly like the
+    // hosted mixer path, then queued for the HDA streaming backend. When
+    // no backend is available the mixer still queues, mixes, and reclaims
+    // (explicit null-sink degrade), so applications stay fully playable
+    // without audio; only malformed/denied/busy requests report errors.
     Runtime* runtime = runtime_from(context);
-    if (!runtime || !pcmData || pcmBytes == 0 || pcmBytes > 262144u) return GX_ERROR_INVALID_ARGUMENT;
-    if (channels != 1u || (bitsPerSample != 8u && bitsPerSample != 16u)) return GX_ERROR_INVALID_ARGUMENT;
-    if (sampleRateHz < 8000u || sampleRateHz > 48000u) return GX_ERROR_INVALID_ARGUMENT;
-    if (bitsPerSample == 16u && (pcmBytes & 1u) != 0u) return GX_ERROR_INVALID_ARGUMENT;
-    if (!runtime->package || !runtime->package->hasAudioOutput) return GX_ERROR_PERMISSION_DENIED;
-    serial::puts("[NATIVE-ELF] play_pcm app=");
-    serial::puts(runtime->package ? runtime->package->displayName : "(none)");
-    serial::puts(" backend=none(serial-only) result=NOT_IMPLEMENTED\n");
-    return GX_ERROR_NOT_IMPLEMENTED;
+    if (!runtime) return GX_ERROR_INVALID_ARGUMENT;
+    if (!runtime->package || !runtime->package->hasAudioOutput) {
+        return GX_ERROR_PERMISSION_DENIED;
+    }
+    const app_audio::ValidationResult vr = app_audio::validate_play_request(
+        pcmData, pcmBytes, sampleRateHz, channels, bitsPerSample);
+    if (vr.error != app_audio::ErrorOk) {
+        if (vr.error == app_audio::ErrorUnsupported) return GX_ERROR_UNSUPPORTED;
+        return GX_ERROR_INVALID_ARGUMENT;
+    }
+    uint32_t mixFrames = 0;
+    if (!app_audio::convert_to_mix_format(pcmData, pcmBytes, sampleRateHz, bitsPerSample,
+                                          s_audioStage, app_audio::kMaxVoiceFrames,
+                                          &mixFrames) ||
+        mixFrames == 0) {
+        return GX_ERROR_UNSUPPORTED;
+    }
+    // Best-effort streaming start; failure degrades (never fails the app).
+    ensure_audio_backend();
+    app_audio::Backend& backend = app_audio::backend_instance();
+    if (!backend.play(runtime->audioOwner, s_audioStage, mixFrames)) {
+        return GX_ERROR_BUSY;
+    }
+    // Pump once so the first sound starts with bounded latency even if the
+    // application never presents another frame; the regular pump_desktop()
+    // cadence sustains it afterwards.
+    backend.pump();
+    return GX_OK;
 }
 
 static uint64_t GX_CALL host_get_ticks_ms(gx_app_context* context) {
@@ -1492,6 +1810,7 @@ static bool run_package(Package* package) {
     runtime.package = package;
     runtime.exitCode = GX_OK;
     ++s_runtimeSequence;
+    runtime.audioOwner = s_runtimeSequence;
     initialize_host_table(&runtime);
     runtime.context.size = sizeof(runtime.context);
     runtime.context.apiVersion = GX_API_VERSION;
@@ -1541,6 +1860,10 @@ static bool run_package(Package* package) {
     serial::putc('\n');
 
     log_breadcrumb(&runtime, "22 RUNTIME_CLEANUP");
+    // MC6: reclaim this app's audio voices (mirrors hosted Cleanup ->
+    // BackendStopOwner). In-flight DMA completes its bounded ring; the
+    // stream itself stays up for the next application.
+    app_audio::backend_instance().stop_owner(runtime.audioOwner);
     if (runtime.owner) {
         abi_begin(&runtime, NativeAbiOperation::CloseWindow);
         if (runtime.owner->window()) runtime.owner->requestClose();
@@ -1569,6 +1892,72 @@ bool launch(const char* appName) {
     return result;
 }
 
+// Kernel slide base for audio DMA translation (see audio_virt_to_phys).
+// Wired from BootInfo alongside nic/virtio/mmio.
+void audio_set_kernel_physical_base(uint64_t physicalBase) {
+    if (physicalBase != 0) s_audioPhysBase = physicalBase;
+}
+
+// Kernel main-loop audio pump (MC6, always available): keeps mixer voice
+// lifetimes real-time and the DMA ring refilled (or decaying to silence)
+// when no application task pump is running. Safe to call when the backend
+// was never initialized (pump drains the idle mixer and returns).
+void app_audio_pump() {
+    app_audio::backend_instance().pump();
+}
+
+#if defined(GXOS_AUDIO_BOOT_SELFTEST)
+void app_audio_boot_selftest() {
+    serial::puts("[APP-AUDIO] boot self-test start (GXOS_AUDIO_BOOT_SELFTEST)\n");
+    report_audio_controller();
+    if (!ensure_audio_backend()) {
+        serial::puts("[APP-AUDIO] boot self-test SKIP: no usable HDA backend\n");
+        return;
+    }
+    app_audio::Backend& backend = app_audio::backend_instance();
+    app_audio::Backend::SelfTestReport report;
+    const bool pass = backend.self_test(true, &report);
+    backend.report_status();
+    if (pass) backend.reset_stream_silence();
+    serial::puts(pass ? "[APP-AUDIO] boot self-test PASS\n"
+                      : "[APP-AUDIO] boot self-test FAIL\n");
+}
+
+// App-level proof (MC6, proof builds only): run the REAL AudioBeep sample
+// package (manifest grants audio.output) and a permission-denied twin
+// (same ELF bytes, manifest without audio.output) through the production
+// launch + play_pcm + DMA path. AudioBeep synthesizes two overlapping
+// beeps and exits on its own; the twin must stay silent with explicit
+// permission-denied results. Results are reported over serial; the
+// backend status line distinguishes hardware rendering ("hda-...") from
+// mixer-only degrade ("none").
+void app_audio_app_proof() {
+    serial::puts("[APP-AUDIO] app proof start\n");
+    const bool beep = launch("com.guidexos.audiobeep");
+    serial::puts("[APP-AUDIO] app proof audiobeep launch=");
+    serial::puts(beep ? "PASS\n" : "FAIL(package missing or app error)\n");
+    app_audio::backend_instance().report_status();
+    const bool denied = launch("com.guidexos.audiobeep.denied");
+    serial::puts("[APP-AUDIO] app proof denied-twin launch=");
+    serial::puts(denied ? "PASS(app exited silently as designed)\n"
+                        : "FAIL(package missing or app error)\n");
+    app_audio::backend_instance().report_status();
+#if defined(GXOS_AUDIO_MC_PROOF)
+    // Missile Command (MC5 integration, unchanged): needs Escape to exit,
+    // which the proof harness injects via the QEMU monitor. Without input
+    // the game still plays its startup Alarm and ambient combat sounds.
+    // Separate flag so the canonical fast proof (beep + denied) stays
+    // non-interactive.
+    serial::puts("[APP-AUDIO] app proof missilecommand launch begin\n");
+    const bool mc = launch("com.guidexos.missilecommand");
+    serial::puts("[APP-AUDIO] app proof missilecommand launch=");
+    serial::puts(mc ? "PASS(app exited)\n" : "FAIL(package missing or app error)\n");
+    app_audio::backend_instance().report_status();
+#endif
+    serial::puts("[APP-AUDIO] app proof done\n");
+}
+#endif
+
 #else
 
 void discover() {}
@@ -1577,6 +1966,8 @@ bool is_available(const char*) { return false; }
 const PackageInfo* lookup_package(const char*) { return nullptr; }
 uint32_t package_count() { return 0; }
 const PackageInfo* package_at(uint32_t) { return nullptr; }
+void app_audio_pump() {}
+void audio_set_kernel_physical_base(uint64_t) {}
 
 #endif
 

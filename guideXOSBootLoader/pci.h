@@ -28,6 +28,11 @@ static const uint16_t PCI_CONFIG_DATA = 0x0CFC;
 static const uint8_t PCI_CLASS_NETWORK    = 0x02;
 static const uint8_t PCI_SUBCLASS_ETH     = 0x00;
 
+// Multimedia / audio class codes (MC6: HDA controller discovery so the
+// bootloader can identity-map the audio MMIO BAR for the kernel driver).
+static const uint8_t PCI_CLASS_MULTIMEDIA = 0x04;
+static const uint8_t PCI_SUBCLASS_HDA     = 0x03;
+
 // Intel vendor and device IDs
 static const uint16_t PCI_VENDOR_INTEL    = 0x8086;
 static const uint16_t PCI_DEVICE_E1000    = 0x100E;  // 82540EM (QEMU default)
@@ -121,6 +126,30 @@ bool GetBar0Info(uint8_t bus, uint8_t dev, uint8_t func,
 
 // Enable PCI bus mastering and memory space access
 void EnablePciDevice(uint8_t bus, uint8_t dev, uint8_t func);
+
+// ================================================================
+// HDA Audio Controller Info (for MMIO mapping; MC6)
+// ================================================================
+
+// Minimal discovery record for an Intel HDA controller (PCI class 0x04,
+// subclass 0x03). The kernel re-discovers the controller with its own PCI
+// scan; the bootloader only needs the BAR0 range for identity mapping, so
+// (unlike the NIC) there is deliberately no BootInfo coupling here.
+struct HdaBootInfo {
+    uint16_t vendorId;
+    uint16_t deviceId;
+    uint8_t  bus;
+    uint8_t  device;
+    uint8_t  function;
+    uint64_t bar0Phys;      // BAR0 physical address (MMIO)
+    uint64_t bar0Size;      // BAR0 size (min 16 KiB per HDA spec)
+    bool     found;
+};
+
+// Find the first HDA audio controller with a memory BAR0.
+// Returns true and fills *out on success. Does not enable the device;
+// the caller enables bus mastering like the NIC path.
+bool FindHdaController(HdaBootInfo* out);
 
 // Check if device is a supported NIC
 bool IsSupportedNic(uint16_t vendorId, uint16_t deviceId);
