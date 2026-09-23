@@ -37,6 +37,9 @@ public static class GxAbi
     public const uint LaunchFlagInputPointerDown = 0x01000000u;
     public const uint LaunchFlagInputKeyDown = 0x02000000u;
     public const uint LaunchFlagInputKeyChar = 0x03000000u;
+    public const uint LaunchFlagInputPointerUp = 0x04000000u;
+    public const uint LaunchFlagInputSecondaryPointerDown = 0x05000000u;
+    public const uint LaunchFlagInputSecondaryPointerUp = 0x06000000u;
     public const uint LaunchFlagInputPayloadMask = 0x00FFFFFFu;
     // The high payload bit is reserved for key-event modifier state. Pointer
     // coordinates remain unchanged and are far below this bit in the current

@@ -5345,7 +5345,12 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
 #endif
 
 #if defined(GXOS_NATIVEAOT_C133_REUSABLE_COMBOBOX)
-        auto runC133ReusableComboBoxProof = []() __attribute__((noinline)) {
+ #if defined(GXOS_NATIVEAOT_C136_SECONDARY_POINTER_CONTEXT_MENU)
+        const bool c136PhysicalProof = true;
+ #else
+        const bool c136PhysicalProof = false;
+ #endif
+        auto runC133ReusableComboBoxProof = [c136PhysicalProof]() __attribute__((noinline)) {
         {
         const gxos::apps::BuiltInAppMetadata* c133Workspace =
             gxos::apps::FindBuiltInAppMetadataByDisplayName("Managed Workspace");
@@ -5410,8 +5415,53 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
             return window && kernel::compositor::KernelCompositor::requestCloseWindow(window->id);
         };
 
+#if defined(GXOS_NATIVEAOT_C136_SECONDARY_POINTER_CONTEXT_MENU)
+        auto runC136SecondaryPointerProof = [&]() __attribute__((noinline)) {
+        {
+        const gxos::apps::BuiltInAppMetadata* c136Notes =
+            gxos::apps::FindBuiltInAppMetadataByDisplayName("Managed Notes");
+        const bool c136CatalogValid = gxos::apps::ManagedNativeAotCatalogIsValid() &&
+            c136Notes;
+        kernel::serial::puts("[C136-APPMODEL] catalogValid=");
+        kernel::serial::puts(c136CatalogValid ? "true result=PASS\n" : "false result=FAIL\n");
+        const bool notesLaunch = c136CatalogValid &&
+            kernel::desktop::launch_app_with_context(
+                c136Notes->appId, "c136-native");
+        kernel::app::KernelWindow* window =
+            kernel::compositor::KernelCompositor::getFocusedWindow();
+        const int32_t localX = 80;
+        const int32_t localY = 100;
+        const int32_t menuItemX = 100;
+        const int32_t menuItemY = 127;
+        const int32_t screenX = window
+            ? window->x + localX : -1;
+        const int32_t screenY = window
+            ? window->y + kernel::compositor::TITLEBAR_HEIGHT + localY : -1;
+        kernel::serial::puts("[C136-PROOF] managed-proof-started context=c136-native transport=physical-qemu result=");
+        kernel::serial::puts(notesLaunch ? "PASS\n" : "FAIL\n");
+        kernel::serial::puts("[C136-TARGET] localX=");
+        kernel::serial::put_hex32(static_cast<uint32_t>(localX));
+        kernel::serial::puts(" localY=");
+        kernel::serial::put_hex32(static_cast<uint32_t>(localY));
+        kernel::serial::puts(" screenX=");
+        kernel::serial::put_hex32(static_cast<uint32_t>(screenX));
+        kernel::serial::puts(" screenY=");
+        kernel::serial::put_hex32(static_cast<uint32_t>(screenY));
+        kernel::serial::puts(" menuItemX=");
+        kernel::serial::put_hex32(static_cast<uint32_t>(window ? window->x + menuItemX : -1));
+        kernel::serial::puts(" menuItemY=");
+        kernel::serial::put_hex32(static_cast<uint32_t>(window
+            ? window->y + kernel::compositor::TITLEBAR_HEIGHT + menuItemY : -1));
+        kernel::serial::puts(" result=");
+        kernel::serial::puts(notesLaunch && window ? "PASS\n" : "FAIL\n");
+        }
+        };
+        runC136SecondaryPointerProof();
+#endif
+
 #if defined(GXOS_NATIVEAOT_C135_REUSABLE_POPUP_MENU)
         if (c133CatalogValid) {
+        if (!c136PhysicalProof) {
 #if defined(GXOS_NATIVEAOT_C135_FOCUSED_API)
             const bool launched = c133Launch(c133Notes->appId, "c135-api");
             const bool closed = launched && c133Close();
@@ -5526,6 +5576,7 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         }
 #endif
 
+        if (!c136PhysicalProof) {
         // The focused API and host suites are run in independent fresh
         // managed proof boots. This production boot reserves the resident
         // heap for compositor/input validation and the real Notes launch.
@@ -5696,6 +5747,8 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         kernel::serial::puts("[C133-RESULT] outcome=");
         kernel::serial::puts(outcome ? "PASS" : "FAIL");
         kernel::serial::puts(" combo=reusable,bounded,transient-capture,committed-highlight ABI=unchanged\n");
+        }
+        }
         }
         };
         runC133ReusableComboBoxProof();

@@ -85,8 +85,19 @@ public static unsafe class GuideXosApplicationRegistry
             return GxAbi.ErrorInvalidApplicationId;
         }
 
+        GuideXosInputEvent input = default;
+        if (host.LaunchContext.IsInput)
+        {
+            input = GuideXosInputEvent.From(host.LaunchContext);
+            if (input.Button == GuideXosPointerButton.Secondary &&
+                (input.Kind == GuideXosInputKind.PointerDown ||
+                    input.Kind == GuideXosInputKind.PointerUp))
+            {
+                host.TryLog("C136-BRIDGE secondary=recognized result=PASS"u8);
+            }
+        }
         GuideXosResult result = host.LaunchContext.IsInput
-            ? descriptor.Application.HandleInput(host, GuideXosInputEvent.From(host.LaunchContext))
+            ? descriptor.Application.HandleInput(host, input)
             : host.IsAction
                 ? descriptor.Application.HandleAction(host, host.LaunchContext.ActionId)
                 : descriptor.Application.Launch(host);

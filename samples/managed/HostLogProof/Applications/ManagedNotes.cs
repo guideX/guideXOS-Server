@@ -648,6 +648,13 @@ public sealed class ManagedNotes : GuideXosApplication
     private bool _c135MenuTestsPassed;
     private bool _c135HostTestsPassed;
     private uint _c135PendingCommand;
+#if HOSTLOGPROOF_C136_SECONDARY_POINTER_CONTEXT_MENU
+    private bool _c136ProofContext;
+    private bool _c136TestsRun;
+    private bool _c136TestsPassed;
+    private uint _c136CommandCount;
+    private uint _c136InputTraceCount;
+#endif
 #endif
 #endif
 #endif
@@ -675,9 +682,17 @@ public sealed class ManagedNotes : GuideXosApplication
             host.LaunchContext.Utf8.SequenceEqual("c134-host-tests"u8);
 #if HOSTLOGPROOF_C135_REUSABLE_POPUP_MENU
         _c135ProofContext = host.LaunchContext.Utf8.SequenceEqual("c135"u8) ||
-            host.LaunchContext.Utf8.SequenceEqual("c135-host-tests"u8);
+            host.LaunchContext.Utf8.SequenceEqual("c135-host-tests"u8) ||
+            host.LaunchContext.Utf8.SequenceEqual("c136"u8) ||
+            host.LaunchContext.Utf8.SequenceEqual("c136-native"u8);
         _c135MenuTestContext = host.LaunchContext.Utf8.SequenceEqual("c135-api"u8);
         _c135HostTestContext = host.LaunchContext.Utf8.SequenceEqual("c135-host-tests"u8);
+#if HOSTLOGPROOF_C136_SECONDARY_POINTER_CONTEXT_MENU
+        _c136ProofContext = host.LaunchContext.Utf8.SequenceEqual("c136"u8) ||
+            host.LaunchContext.Utf8.SequenceEqual("c136-native"u8) ||
+            host.LaunchContext.Utf8.SequenceEqual("c136-api"u8) ||
+            host.LaunchContext.Utf8.SequenceEqual("c136-host-tests"u8);
+#endif
 #endif
 #endif
 #endif
@@ -708,6 +723,12 @@ public sealed class ManagedNotes : GuideXosApplication
             || host.LaunchContext.Utf8.SequenceEqual("c135"u8) ||
             host.LaunchContext.Utf8.SequenceEqual("c135-api"u8) ||
             host.LaunchContext.Utf8.SequenceEqual("c135-host-tests"u8)
+#if HOSTLOGPROOF_C136_SECONDARY_POINTER_CONTEXT_MENU
+            || host.LaunchContext.Utf8.SequenceEqual("c136"u8) ||
+            host.LaunchContext.Utf8.SequenceEqual("c136-api"u8) ||
+            host.LaunchContext.Utf8.SequenceEqual("c136-host-tests"u8) ||
+            host.LaunchContext.Utf8.SequenceEqual("c136-native"u8)
+#endif
 #endif
 #endif
 #endif
@@ -779,7 +800,14 @@ public sealed class ManagedNotes : GuideXosApplication
         _c133ProofContext = _c133ProofContext ||
             host.LaunchContext.Utf8.SequenceEqual("c135"u8) ||
             host.LaunchContext.Utf8.SequenceEqual("c135-api"u8) ||
-            host.LaunchContext.Utf8.SequenceEqual("c135-host-tests"u8);
+            host.LaunchContext.Utf8.SequenceEqual("c135-host-tests"u8)
+#if HOSTLOGPROOF_C136_SECONDARY_POINTER_CONTEXT_MENU
+            || host.LaunchContext.Utf8.SequenceEqual("c136"u8) ||
+            host.LaunchContext.Utf8.SequenceEqual("c136-api"u8) ||
+            host.LaunchContext.Utf8.SequenceEqual("c136-host-tests"u8) ||
+            host.LaunchContext.Utf8.SequenceEqual("c136-native"u8)
+#endif
+            ;
 #endif
 #endif
         _c133ComboTestContext = IsC133ComboTestContext(host) ||
@@ -794,7 +822,14 @@ public sealed class ManagedNotes : GuideXosApplication
 #if HOSTLOGPROOF_C135_REUSABLE_POPUP_MENU
         _c135ProofContext = host.LaunchContext.Utf8.SequenceEqual("c135"u8) ||
             host.LaunchContext.Utf8.SequenceEqual("c135-api"u8) ||
-            host.LaunchContext.Utf8.SequenceEqual("c135-host-tests"u8);
+            host.LaunchContext.Utf8.SequenceEqual("c135-host-tests"u8)
+#if HOSTLOGPROOF_C136_SECONDARY_POINTER_CONTEXT_MENU
+            || host.LaunchContext.Utf8.SequenceEqual("c136"u8) ||
+            host.LaunchContext.Utf8.SequenceEqual("c136-api"u8) ||
+            host.LaunchContext.Utf8.SequenceEqual("c136-host-tests"u8) ||
+            host.LaunchContext.Utf8.SequenceEqual("c136-native"u8)
+#endif
+            ;
         _c135MenuTestContext = host.LaunchContext.Utf8.SequenceEqual("c135-api"u8);
         _c135HostTestContext = host.LaunchContext.Utf8.SequenceEqual("c135-host-tests"u8);
 #endif
@@ -935,6 +970,10 @@ public sealed class ManagedNotes : GuideXosApplication
             _c135Menu.TryAddItem("Reload", 3u);
             _c135Menu.CommandInvoked = OnC135MenuCommand;
             _c135PendingCommand = 0u;
+#if HOSTLOGPROOF_C136_SECONDARY_POINTER_CONTEXT_MENU
+            _c136CommandCount = 0u;
+            _c136InputTraceCount = 0u;
+#endif
         }
 #endif
 #endif
@@ -1367,6 +1406,18 @@ public sealed class ManagedNotes : GuideXosApplication
                 ? "C135-NOTES initial=registration=8 items=4 capture=none result=PASS"u8
                 : "C135-NOTES initial=result=FAIL"u8);
         }
+#if HOSTLOGPROOF_C136_SECONDARY_POINTER_CONTEXT_MENU
+        if (_c136ProofContext)
+        {
+            bool c136Initial = _mainControlHost.RegistrationCount == 8 &&
+                !_c135Menu.IsOpen &&
+                _mainControlHost.TransientInputCaptureKind ==
+                    GuideXosManagedControlKind.None;
+            host.TryLog(c136Initial
+                ? "C136-NOTES initial=registration=8 target=document menu=reused result=PASS"u8
+                : "C136-NOTES initial=result=FAIL"u8);
+        }
+#endif
 #endif
 #endif
         host.TryLog("C117-NOTES threadStatic=PASS"u8);
@@ -1595,6 +1646,22 @@ public sealed class ManagedNotes : GuideXosApplication
             host.TryLog(_c135MenuTestsPassed && _c135HostTestsPassed
                 ? "C135-FOCUSED-TESTS menu=PASS host=PASS result=PASS"u8
                 : "C135-FOCUSED-TESTS menu=FAIL host=FAIL result=FAIL"u8);
+        }
+#endif
+#if HOSTLOGPROOF_C136_SECONDARY_POINTER_CONTEXT_MENU
+        bool c136Tests = (_c136ProofContext ||
+            host.LaunchContext.Utf8.SequenceEqual("c136-api"u8) ||
+            host.LaunchContext.Utf8.SequenceEqual("c136-host-tests"u8)) &&
+            !_c136TestsRun
+            ? GuideXosSecondaryPointerC136Tests.Run(host) : true;
+        if (_c136ProofContext || host.LaunchContext.Utf8.SequenceEqual("c136-api"u8) ||
+            host.LaunchContext.Utf8.SequenceEqual("c136-host-tests"u8))
+        {
+            _c136TestsRun = true;
+            _c136TestsPassed = c136Tests;
+            host.TryLog(c136Tests
+                ? "C136-POINTER-TESTS cases=36 result=PASS"u8
+                : "C136-POINTER-TESTS cases=36 result=FAIL"u8);
         }
 #endif
 #endif
@@ -2161,9 +2228,10 @@ public sealed class ManagedNotes : GuideXosApplication
     }
 
     private GuideXosResult OpenC135Menu(
-        GuideXosHost host, GuideXosSurface surface)
+        GuideXosHost host, GuideXosSurface surface,
+        int x = 400, int y = 280, bool secondaryInvocation = false)
     {
-        GuideXosPopupMenuResult opened = _c135Menu.Open(400, 280);
+        GuideXosPopupMenuResult opened = _c135Menu.Open(x, y);
         if (opened != GuideXosPopupMenuResult.Opened)
         {
             return RenderMain(host, surface, _launchCount)
@@ -2177,7 +2245,9 @@ public sealed class ManagedNotes : GuideXosApplication
             return RenderMain(host, surface, _launchCount)
                 ? GuideXosResult.Success : GuideXosResult.InvalidArgument;
         }
-        host.TryLog("C135-POPUP-OPEN invoke=Options capture=PASS popup=open result=PASS"u8);
+        host.TryLog(secondaryInvocation
+            ? "C136-CONTEXT-OPEN invoke=Secondary target=Document capture=PASS popup=open result=PASS"u8
+            : "C135-POPUP-OPEN invoke=Options capture=PASS popup=open result=PASS"u8);
         return RenderMain(host, surface, _launchCount)
             ? GuideXosResult.Success : GuideXosResult.InvalidArgument;
     }
@@ -2413,7 +2483,7 @@ public sealed class ManagedNotes : GuideXosApplication
 #endif
                 C120HitTest(input.X, input.Y);
 #if HOSTLOGPROOF_C135_REUSABLE_POPUP_MENU
-            if (_c135ProofContext && controlId == 0 &&
+            if (_c135ProofContext &&
                 _mainControlHost.HasTransientInputCapture)
             {
                 controlId = _mainControlHost.TransientInputCaptureOwnerId;
@@ -3092,6 +3162,12 @@ public sealed class ManagedNotes : GuideXosApplication
         {
             return GuideXosResult.SurfaceCreationFailed;
         }
+#if HOSTLOGPROOF_C136_SECONDARY_POINTER_CONTEXT_MENU
+        if (_c136ProofContext && input.Button == GuideXosPointerButton.Secondary)
+        {
+            return HandleC136SecondaryPointerInput(host, surface, input);
+        }
+#endif
 #if HOSTLOGPROOF_C120_MANAGED_CONTROL_HOST
         if (_c120ProofContext)
         {
@@ -3172,6 +3248,64 @@ public sealed class ManagedNotes : GuideXosApplication
         return GuideXosResult.Success;
     }
 
+#if HOSTLOGPROOF_C136_SECONDARY_POINTER_CONTEXT_MENU
+    private GuideXosResult HandleC136SecondaryPointerInput(
+        GuideXosHost host, GuideXosSurface surface, GuideXosInputEvent input)
+    {
+        if ((input.Kind == GuideXosInputKind.PointerDown ||
+                input.Kind == GuideXosInputKind.PointerUp) &&
+            _c136InputTraceCount < 4u)
+        {
+            ++_c136InputTraceCount;
+            host.TryLog("C136-DISPATCH button=secondary result=PASS"u8);
+        }
+        if (input.Kind == GuideXosInputKind.PointerDown)
+        {
+            int targetId = C120HitTest(input.X, input.Y);
+            GuideXosControlHostResult secondaryDown =
+                _mainControlHost.BeginSecondaryPointerGesture(
+                    targetId == C120DocumentControlId ? targetId : 0,
+                    input.X, input.Y);
+            if (secondaryDown == GuideXosControlHostResult.Pending)
+            {
+                host.TryLog("C136-SECONDARY-DOWN target=Document pending=PASS result=PASS"u8);
+            }
+            else if (secondaryDown == GuideXosControlHostResult.Cancelled)
+            {
+                host.TryLog("C136-SECONDARY-DOWN capture=authoritative consumed=PASS result=PASS"u8);
+            }
+            else
+            {
+                host.TryLog(targetId == 0
+                    ? "C136-SECONDARY-DOWN outside=ignored result=PASS"u8
+                    : "C136-SECONDARY-DOWN target=ineligible result=PASS"u8);
+            }
+            return RenderMain(host, surface, _launchCount)
+                ? GuideXosResult.Success : GuideXosResult.InvalidArgument;
+        }
+        if (input.Kind == GuideXosInputKind.PointerUp)
+        {
+            GuideXosControlHostResult secondaryUp =
+                _mainControlHost.CompleteSecondaryPointerGesture(
+                    out int targetId, out int menuX, out int menuY);
+            bool targetStillHit = targetId == C120DocumentControlId &&
+                C120HitTest(input.X, input.Y) == C120DocumentControlId;
+            if (secondaryUp == GuideXosControlHostResult.Released && targetStillHit)
+            {
+                host.TryLog("C136-SECONDARY-UP target=Document release=PASS result=PASS"u8);
+                return OpenC135Menu(host, surface, menuX, menuY, true);
+            }
+            host.TryLog(secondaryUp == GuideXosControlHostResult.Cancelled ||
+                (secondaryUp == GuideXosControlHostResult.Released && !targetStillHit)
+                ? "C136-SECONDARY-UP stale=cancelled menu=none capture=none result=PASS"u8
+                : "C136-SECONDARY-UP target=invalid menu=none result=PASS"u8);
+            return RenderMain(host, surface, _launchCount)
+                ? GuideXosResult.Success : GuideXosResult.InvalidArgument;
+        }
+        return GuideXosResult.Success;
+    }
+#endif
+
     public override GuideXosResult HandleAction(GuideXosHost host, uint actionId)
     {
         if (host.TryGetSurface(_window, out GuideXosSurface surface) !=
@@ -3248,6 +3382,17 @@ public sealed class ManagedNotes : GuideXosApplication
             host.TryLog(saveResult == GuideXosFileResult.Success
                 ? "C117-NOTES save=PASS path=/system/apps/NOTES.TXT"u8
                 : "C117-NOTES save=FAIL path=/system/apps/NOTES.TXT"u8);
+#if HOSTLOGPROOF_C136_SECONDARY_POINTER_CONTEXT_MENU
+            if (_c136ProofContext)
+            {
+                ++_c136CommandCount;
+                host.TryLog(saveResult == GuideXosFileResult.Success
+                    ? (_c136CommandCount == 1u
+                        ? "C136-COMMAND command=Save count=1 result=PASS"u8
+                        : "C136-COMMAND command=Save count=2 result=PASS"u8)
+                    : "C136-COMMAND command=Save result=FAIL"u8);
+            }
+#endif
 #if HOSTLOGPROOF_C119_MANAGED_BUTTON
             host.TryLog(saveResult == GuideXosFileResult.Success
                 ? "C119-NOTES managed-save=PASS source=button"u8

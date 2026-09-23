@@ -4169,6 +4169,22 @@ namespace gxos {
                 uint64_t ownerPid = 0; uint64_t targetWindow = 0; { std::lock_guard<std::mutex> lk(g_lock); ownerPid = inputOwnerPid( ); targetWindow = g_modalWindow ? g_modalWindow : g_focus; }
                 Compositor::handleMouse(mx, my, false, true); publishOut(MsgType::MT_InputMouse, Compositor::packMousePayloadForTarget(mx, my, 1, "up", ownerPid, targetWindow), ownerPid);
             } break;
+            case WM_RBUTTONUP: {
+                int mx = GET_X_LPARAM(l); int my = GET_Y_LPARAM(l);
+                uint64_t ownerPid = 0; uint64_t targetWindow = 0;
+                {
+                    std::lock_guard<std::mutex> lk(g_lock);
+                    ownerPid = inputOwnerPid();
+                    targetWindow = g_modalWindow ? g_modalWindow : g_focus;
+                }
+                // Secondary release completes the same native pointer
+                // lifecycle as primary release.  It is forwarded only; the
+                // managed target decides whether a pending gesture is still
+                // valid, so a stale release cannot invoke a new target.
+                publishOut(MsgType::MT_InputMouse,
+                    Compositor::packMousePayloadForTarget(
+                        mx, my, 2, "up", ownerPid, targetWindow), ownerPid);
+            } break;
             case WM_MOUSEMOVE: {
                 int mx = GET_X_LPARAM(l); int my = GET_Y_LPARAM(l);
                 if (Compositor::isDesktopFolderRenameActive()) {
@@ -4782,6 +4798,18 @@ namespace gxos {
                                 }
                                 invalidate(0);
                             }
+                        } else if (action == "up") {
+                            uint64_t ownerPid = 0;
+                            uint64_t targetWindow = 0;
+                            {
+                                std::lock_guard<std::mutex> lk(g_lock);
+                                ownerPid = inputOwnerPid();
+                                targetWindow = g_modalWindow ? g_modalWindow : g_focus;
+                            }
+                            publishOut(MsgType::MT_InputMouse,
+                                Compositor::packMousePayloadForTarget(
+                                    mx, my, 2, "up", ownerPid, targetWindow), ownerPid);
+                            invalidate(0);
                         }
                     } else if (button == 0) { // Mouse move
                         if (action == "move") {

@@ -5,7 +5,7 @@ param(
     [string]$PythonExe = "",
     [int]$FreshBootCount = 3,
     [int]$TimeoutSeconds = 360,
-    [ValidateSet("C120", "C121", "C122", "C123", "C124", "C125", "C126", "C127", "C128", "C129", "C130", "C131", "C132", "C133", "C134", "C135")]
+    [ValidateSet("C120", "C121", "C122", "C123", "C124", "C125", "C126", "C127", "C128", "C129", "C130", "C131", "C132", "C133", "C134", "C135", "C136")]
     [string]$ProofPhase = "C120",
     [ValidateSet("Production", "FocusedApi", "FocusedHost")]
     [string]$C135ProofMode = "Production",
@@ -36,6 +36,7 @@ $isC132 = $ProofPhase -eq "C132"
 $isC133 = $ProofPhase -eq "C133"
 $isC134 = $ProofPhase -eq "C134"
 $isC135 = $ProofPhase -eq "C135"
+$isC136 = $ProofPhase -eq "C136"
 $isC135FocusedApi = $isC135 -and $C135ProofMode -eq "FocusedApi"
 $isC135FocusedHost = $isC135 -and $C135ProofMode -eq "FocusedHost"
 if (-not $isC135 -and $C135ProofMode -ne "Production") {
@@ -52,7 +53,9 @@ $startAheadBehind = if ($startUpstream) {
     (& git -C $RepoRoot rev-list --left-right --count "HEAD...$startUpstream").Trim()
 } else { "" }
 if ([string]::IsNullOrWhiteSpace($EvidenceRoot)) {
-    $EvidenceRoot = if ($isC135) {
+    $EvidenceRoot = if ($isC136) {
+        Join-Path $RepoRoot "out\dotnet\c136-secondary-pointer-context-menu"
+    } elseif ($isC135) {
         Join-Path $RepoRoot "out\dotnet\c135-managed-popup-menu"
     } elseif ($isC134) {
         Join-Path $RepoRoot "out\dotnet\c134-transient-popup-routing"
@@ -177,7 +180,13 @@ function Invoke-C120Boot([string]$Esp, [string]$Serial, [string]$Stdout,
             Start-Sleep -Milliseconds 250
             if (Test-Path -LiteralPath $Serial) {
                 $partial = Get-Content -LiteralPath $Serial -Raw -ErrorAction SilentlyContinue
-                $resultPattern = if ($isC135FocusedApi -or $isC135FocusedHost) {
+                $resultPattern = if ($isC136) {
+                    # C136 drives the proof from QMP and terminates after the
+                    # bounded event sequence.  The stale-release marker is
+                    # the final serial acknowledgement; there is no direct
+                    # managed result shortcut.
+                    '(?m)^\[C102-MANAGED-OUTPUT\].*C136-SECONDARY-UP stale=cancelled menu=none capture=none result=PASS'
+                } elseif ($isC135FocusedApi -or $isC135FocusedHost) {
                     '(?m)^\[C135-FOCUSED-RESULT\] mode=(?:api|host) outcome=(?:PASS|FAIL)'
                 } elseif ($isC135 -or $isC133 -or $isC134) {
                     '(?m)^\[C133-RESULT\] outcome=(?:PASS|FAIL)'
@@ -239,6 +248,7 @@ function Read-C129QmpResponse([System.IO.Stream]$Stream, [int]$Seconds = 2) {
             $count = $Stream.Read($buffer, 0, $buffer.Length)
             if ($count -gt 0) {
                 [void]$builder.Append([System.Text.Encoding]::ASCII.GetString($buffer, 0, $count))
+                if ($builder.ToString().TrimEnd().EndsWith('}')) { break }
             }
         } else {
             Start-Sleep -Milliseconds 50
@@ -292,6 +302,264 @@ function Send-C129QmpEvent([int]$Port, [string]$QCode, [bool]$Down, [string]$Log
         Start-Sleep -Milliseconds 250
     }
     throw "C129 QEMU input event failed: qcode=$QCode down=$Down ($lastError)"
+}
+
+function Send-C136QmpEvents([int]$Port, [object[]]$Events, [string]$LogPath) {
+    $lastError = $null
+    for ($attempt = 0; $attempt -lt 20; $attempt++) {
+        $client = New-Object System.Net.Sockets.TcpClient
+        try {
+            $client.Connect("127.0.0.1", $Port)
+            $stream = $client.GetStream()
+            $stream.ReadTimeout = 100
+            $greeting = Read-C129QmpResponse $stream 2
+            $capabilities = '{"execute":"qmp_capabilities"}' + "`n"
+            $capabilityBytes = [System.Text.Encoding]::ASCII.GetBytes($capabilities)
+            $stream.Write($capabilityBytes, 0, $capabilityBytes.Length)
+            $stream.Flush()
+            $capabilityResponse = Read-C129QmpResponse $stream 2
+            foreach ($event in $Events) {
+                $eventPayloadList = [System.Collections.Generic.List[object]]::new()
+                if ($event -is [System.Array]) {
+                    foreach ($nestedEvent in $event) { $eventPayloadList.Add($nestedEvent) }
+                } else {
+                    $eventPayloadList.Add($event)
+                }
+                $request = [ordered]@{
+                    execute = "input-send-event"
+                    arguments = [ordered]@{ events = $eventPayloadList.ToArray() }
+                } | ConvertTo-Json -Compress -Depth 10
+                $bytes = [System.Text.Encoding]::ASCII.GetBytes($request + "`n")
+                $stream.Write($bytes, 0, $bytes.Length)
+                $stream.Flush()
+                $response = Read-C129QmpResponse $stream 2
+                Add-Content -LiteralPath $LogPath -Value ("events={0}`ngreeting={1}`ncapabilities={2}`nresponse={3}" -f $request, $greeting, $capabilityResponse, $response) -Encoding ASCII
+                if ($response -match '"error"') {
+                    throw "QMP input-send-event returned an error: $response"
+                }
+                # Let the guest service each explicit PS/2 packet before the
+                # next bounded event arrives. Without this small yield, a
+                # long calibration move can be coalesced by QEMU before IRQ12
+                # reaches the production input path.
+                Start-Sleep -Milliseconds 100
+            }
+            return
+        }
+        catch {
+            $lastError = $_.Exception.Message
+        }
+        finally {
+            if ($client) { $client.Dispose() }
+        }
+        Start-Sleep -Milliseconds 250
+    }
+    throw "C136 QEMU input event failed ($lastError)"
+}
+
+function Convert-C136ScreenCoordinate([int]$Value, [int]$Maximum) {
+    if ($Value -lt 0) { throw "C136 screen coordinate is invalid: $Value" }
+    return [int][Math]::Round(($Value * 65535.0) / [Math]::Max(1, $Maximum - 1))
+}
+
+function New-C136RelativeMove([int]$DeltaX, [int]$DeltaY) {
+    $events = [System.Collections.Generic.List[object]]::new()
+    while ($DeltaX -ne 0) {
+        $step = [Math]::Sign($DeltaX) * [Math]::Min([Math]::Abs($DeltaX), 40)
+        $events.Add([ordered]@{
+                type = "rel"; data = [ordered]@{ axis = "x"; value = $step } })
+        $DeltaX -= $step
+    }
+    while ($DeltaY -ne 0) {
+        $step = [Math]::Sign($DeltaY) * [Math]::Min([Math]::Abs($DeltaY), 40)
+        $events.Add([ordered]@{
+                type = "rel"; data = [ordered]@{ axis = "y"; value = $step } })
+        $DeltaY -= $step
+    }
+    return $events.ToArray()
+}
+
+function New-C136Button([string]$Button, [bool]$Down) {
+    return [ordered]@{ type = "btn"; data = [ordered]@{ button = $Button; down = $Down } }
+}
+
+function New-C136Key([string]$QCode, [bool]$Down) {
+    return [ordered]@{ type = "key"; data = [ordered]@{ down = $Down; key = [ordered]@{ type = "qcode"; data = $QCode } } }
+}
+
+function Get-C136HexField([string]$Serial, [string]$Field) {
+    $match = [regex]::Match($Serial, "(?m)^\[C136-TARGET\].*\b$Field=([0-9A-Fa-f]+)")
+    if (-not $match.Success) { throw "C136 target marker did not contain $Field." }
+    return [Convert]::ToInt32($match.Groups[1].Value, 16)
+}
+
+function Get-C136NativePointer([string]$Serial) {
+    $matches = [regex]::Matches(
+        $Serial,
+        "(?m)^\[C136-NATIVE-INPUT\] button=secondary phase=down x=([0-9A-Fa-f]+) y=([0-9A-Fa-f]+)")
+    if ($matches.Count -eq 0) { throw "C136 secondary native pointer marker was not observed." }
+    $match = $matches[$matches.Count - 1]
+    return [pscustomobject]@{
+        x = [Convert]::ToInt32($match.Groups[1].Value, 16)
+        y = [Convert]::ToInt32($match.Groups[2].Value, 16)
+    }
+}
+
+function Invoke-C136Boot([string]$Esp, [string]$Serial, [string]$Stdout,
+                          [string]$Stderr, [string]$MonitorLog, [int]$MonitorPort,
+                          [string]$Qemu, [string]$Ovmf) {
+    $arguments = @(
+        "-accel", "tcg,thread=single", "-machine", "pc", "-smp", "1",
+        "-drive", ("if=pflash,format=raw,readonly=on,file=" + (Quote-QemuValue $Ovmf)),
+        "-drive", ("file=fat:rw:" + (Quote-QemuValue $Esp) + ",format=raw,if=ide,index=0"),
+        "-m", "1024M", "-vga", "std", "-display", "none",
+        "-serial", ("file:" + (Quote-QemuValue $Serial)),
+        "-qmp", ("tcp:127.0.0.1:{0},server,nowait" -f $MonitorPort),
+        "-boot", "order=c", "-no-reboot", "-no-shutdown", "-rtc", "base=utc,clock=host")
+    $process = Start-Process -FilePath $Qemu -ArgumentList $arguments -WorkingDirectory $RepoRoot `
+        -RedirectStandardOutput $Stdout -RedirectStandardError $Stderr -WindowStyle Hidden -PassThru
+    $commandIndex = 0
+    $previousMarker = ""
+    $proofStarted = $false
+    $targetReady = $false
+    $commandList = $null
+    $previousSerialLength = 0
+    $c136CalibrationAttempt = 0
+    $timedOut = $false
+    try {
+        $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+        while ((Get-Date) -lt $deadline) {
+            Start-Sleep -Milliseconds 150
+            $partial = if (Test-Path -LiteralPath $Serial) {
+                Get-Content -LiteralPath $Serial -Raw -ErrorAction SilentlyContinue
+            } else { "" }
+            if (-not $proofStarted -and $partial -match '(?m)^\[C136-PROOF\].*transport=physical-qemu result=PASS') {
+                $proofStarted = $true
+            }
+            if ($proofStarted -and -not $targetReady -and $partial -match '(?m)^\[C136-TARGET\].*result=PASS') {
+                $targetReady = $true
+            }
+            if ($proofStarted -and $targetReady -and $commandIndex -eq 0 -and
+                    $null -eq $commandList) {
+                # Native pointer acknowledgements are window-local, while
+                # QMP relative packets move the same pointer in screen
+                # space.  Relative deltas are invariant under the window
+                # origin, so keep the proof geometry in local coordinates.
+                $targetLocalX = Get-C136HexField $partial "localX"
+                $targetLocalY = Get-C136HexField $partial "localY"
+                $menuOffsetX = (Get-C136HexField $partial "menuItemX") -
+                    (Get-C136HexField $partial "screenX")
+                $menuOffsetY = (Get-C136HexField $partial "menuItemY") -
+                    (Get-C136HexField $partial "screenY")
+                $outsideX = $targetLocalX + 50
+                $outsideY = $targetLocalY + 80
+                $commands = @(
+                    # A short explicit relative move is reliable on this
+                    # QEMU PS/2 source. The first secondary click observes
+                    # the resulting guest coordinate; later attempts correct
+                    # from that observed coordinate rather than assuming the
+                    # host cursor starts at framebuffer center.
+                    [pscustomobject]@{ events = (New-C136RelativeMove -92 -40); marker = ''; phase = 'calibration-move' },
+                    [pscustomobject]@{ events = @(New-C136Button "right" $true); marker = '(?m)^\[C136-NATIVE-INPUT\] button=secondary phase=down.*result=PASS'; phase = 'calibration-down' },
+                    [pscustomobject]@{ events = @(New-C136Button "right" $false); marker = '(?m)^\[C102-MANAGED-OUTPUT\].*C136-SECONDARY-UP.*result=PASS'; phase = 'calibration-up' })
+                $commandList = $commands
+            }
+            if ($proofStarted -and $targetReady -and $null -ne $commandList -and $commandIndex -lt $commandList.Count) {
+                $command = $commandList[$commandIndex]
+                $markerSatisfied = [string]::IsNullOrEmpty($previousMarker)
+                if (-not $markerSatisfied) {
+                    if ($isC136) {
+                        if ($partial.Length -gt $previousSerialLength) {
+                            $newSerial = $partial.Substring($previousSerialLength)
+                            $markerSatisfied = $newSerial -match $previousMarker
+                        }
+                    } else {
+                        $markerSatisfied = $partial -match $previousMarker
+                    }
+                }
+                if ($markerSatisfied) {
+                    Send-C136QmpEvents $MonitorPort $command.events $MonitorLog
+                    $previousMarker = $command.marker
+                    $previousSerialLength = $partial.Length
+                    $commandIndex++
+
+                    if ($isC136 -and $command.phase -eq 'calibration-up') {
+                        $afterInput = ""
+                        for ($ackWait = 0; $ackWait -lt 12; $ackWait++) {
+                            $afterInput = if (Test-Path -LiteralPath $Serial) {
+                                Get-Content -LiteralPath $Serial -Raw -ErrorAction SilentlyContinue
+                            } else { "" }
+                            if ($afterInput -match
+                                    '(?m)^\[C102-MANAGED-OUTPUT\].*C136-CONTEXT-OPEN invoke=Secondary.*result=PASS') {
+                                break
+                            }
+                            Start-Sleep -Milliseconds 100
+                        }
+                        $pointer = Get-C136NativePointer $afterInput
+                        $contextOpen = $afterInput -match
+                            '(?m)^\[C102-MANAGED-OUTPUT\].*C136-CONTEXT-OPEN invoke=Secondary.*result=PASS'
+                        if ($contextOpen) {
+                            $commandList = @(
+                                [pscustomobject]@{ events = (New-C136RelativeMove $menuOffsetX $menuOffsetY); marker = ''; phase = 'menu-move' },
+                                 [pscustomobject]@{ events = @(New-C136Button "left" $true); marker = '(?m)^\[C102-MANAGED-OUTPUT\].*C136-COMMAND command=Save count=1 result=PASS'; phase = 'menu-down' },
+                                [pscustomobject]@{ events = @(New-C136Button "left" $false); marker = '(?m)^\[C136-NATIVE-INPUT\] button=primary phase=up.*result=PASS'; phase = 'menu-up' },
+                                [pscustomobject]@{ events = (New-C136RelativeMove (-$menuOffsetX) (-$menuOffsetY)); marker = ''; phase = 'return-target' },
+                                [pscustomobject]@{ events = @(New-C136Button "right" $true); marker = '(?m)^\[C136-NATIVE-INPUT\] button=secondary phase=down.*result=PASS'; phase = 'target-down' },
+                                 [pscustomobject]@{ events = @(New-C136Button "right" $false); marker = '(?m)^\[C102-MANAGED-OUTPUT\].*C136-CONTEXT-OPEN invoke=Secondary.*result=PASS'; phase = 'target-up' },
+                                 [pscustomobject]@{ events = @(New-C136Key "down" $true); marker = '(?m)^\[C102-MANAGED-OUTPUT\].*C135-KEYBOARD.*highlight=PASS disabled-skipped=PASS result=PASS'; phase = 'keyboard-down' },
+                                [pscustomobject]@{ events = @(New-C136Key "down" $false); marker = ''; phase = 'keyboard-up' },
+                                 [pscustomobject]@{ events = @(New-C136Key "ret" $true); marker = '(?m)^\[C102-MANAGED-OUTPUT\].*C136-COMMAND command=Save count=2 result=PASS'; phase = 'keyboard-commit' },
+                                 [pscustomobject]@{ events = @(New-C136Key "ret" $false); marker = ''; phase = 'keyboard-release' },
+                                [pscustomobject]@{ events = @(New-C136Button "right" $true); marker = '(?m)^\[C136-NATIVE-INPUT\] button=secondary phase=down.*result=PASS'; phase = 'escape-down' },
+                                 [pscustomobject]@{ events = @(New-C136Button "right" $false); marker = '(?m)^\[C102-MANAGED-OUTPUT\].*C136-CONTEXT-OPEN invoke=Secondary.*result=PASS'; phase = 'escape-open' },
+                                 [pscustomobject]@{ events = @(New-C136Key "esc" $true); marker = '(?m)^\[C102-MANAGED-OUTPUT\].*C135-ESCAPE.*cancel=PASS capture=none result=PASS'; phase = 'escape' },
+                                 [pscustomobject]@{ events = @(New-C136Key "esc" $false); marker = ''; phase = 'escape-release' },
+                                [pscustomobject]@{ events = @(New-C136Button "right" $true); marker = '(?m)^\[C136-NATIVE-INPUT\] button=secondary phase=down.*result=PASS'; phase = 'outside-down' },
+                                 [pscustomobject]@{ events = @(New-C136Button "right" $false); marker = '(?m)^\[C102-MANAGED-OUTPUT\].*C136-CONTEXT-OPEN invoke=Secondary.*result=PASS'; phase = 'outside-open' },
+                                [pscustomobject]@{ events = (New-C136RelativeMove ($outsideX - $targetLocalX) ($outsideY - $targetLocalY)); marker = ''; phase = 'outside-move' },
+                                 [pscustomobject]@{ events = @(New-C136Button "left" $true); marker = '(?m)^\[C102-MANAGED-OUTPUT\].*C135-OUTSIDE.*close=PASS consumed=PASS underlying=inactive result=PASS'; phase = 'outside-primary-down' },
+                                [pscustomobject]@{ events = @(New-C136Button "left" $false); marker = '(?m)^\[C136-NATIVE-INPUT\] button=primary phase=up.*result=PASS'; phase = 'outside-primary-up' },
+                                 [pscustomobject]@{ events = (New-C136RelativeMove ($targetLocalX - $outsideX) ($targetLocalY - $outsideY)); marker = ''; phase = 'stale-return' },
+                                 [pscustomobject]@{ events = @(New-C136Button "right" $true); marker = '(?m)^\[C136-NATIVE-INPUT\] button=secondary phase=down.*result=PASS'; phase = 'stale-down' },
+                                 [pscustomobject]@{ events = (New-C136RelativeMove ($outsideX - $targetLocalX) ($outsideY - $targetLocalY)); marker = ''; phase = 'stale-move' },
+                                 [pscustomobject]@{ events = @(New-C136Button "right" $false); marker = '(?m)^\[C102-MANAGED-OUTPUT\].*C136-SECONDARY-UP stale=cancelled menu=none capture=none result=PASS'; phase = 'stale-up' })
+                            $commandIndex = 0
+                            $previousMarker = ''
+                            $previousSerialLength = $afterInput.Length
+                        } elseif ($c136CalibrationAttempt -lt 6) {
+                            $c136CalibrationAttempt++
+                            $commandList = @(
+                                [pscustomobject]@{ events = (New-C136RelativeMove ($targetLocalX - $pointer.x) ($targetLocalY - $pointer.y)); marker = ''; phase = 'target-move' },
+                                [pscustomobject]@{ events = @(New-C136Button "right" $true); marker = '(?m)^\[C136-NATIVE-INPUT\] button=secondary phase=down.*result=PASS'; phase = 'target-down' },
+                                 [pscustomobject]@{ events = @(New-C136Button "right" $false); marker = '(?m)^\[C102-MANAGED-OUTPUT\].*C136-SECONDARY-UP.*result=PASS'; phase = 'target-up' })
+                            $previousMarker = ''
+                            $previousSerialLength = $afterInput.Length
+                            $commandIndex = 0
+                        } else {
+                            throw "C136 QMP could not calibrate a secondary pointer position inside the Notes target."
+                        }
+                    }
+                }
+            }
+            if ($null -ne $commandList -and $commandIndex -ge $commandList.Count) { break }
+            $process.Refresh()
+            if ($process.HasExited) { break }
+        }
+        $timedOut = -not $process.HasExited -and (Get-Date) -ge $deadline
+    }
+    finally {
+        $process.Refresh()
+        if (-not $process.HasExited) {
+            Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+            Wait-Process -Id $process.Id -Timeout 5 -ErrorAction SilentlyContinue
+        }
+    }
+    $process.Refresh()
+    [pscustomobject]@{
+        serial = if (Test-Path -LiteralPath $Serial) { Get-Content -LiteralPath $Serial -Raw } else { "" }
+        serialPath = $Serial; serialSha256 = Get-Hash $Serial
+        stdoutPath = $Stdout; stderrPath = $Stderr; monitorPath = $MonitorLog
+        qemuExitCode = $process.ExitCode; monitorPort = $MonitorPort; timedOut = $timedOut
+    }
 }
 
 function Invoke-C129Boot([string]$Esp, [string]$Serial, [string]$Stdout,
@@ -404,7 +672,7 @@ function Assert-C120Serial([string]$Serial) {
         '^\[NATIVEAOT-TLS-BRIDGE\] install=.*result=00000001',
         '^\[NATIVEAOT-HEAP\] action=initialize',
         '^\[NATIVEAOT-HEAP\] action=preserve')
-    if (-not $isC121 -and -not $isC122 -and -not $isC123 -and -not $isC124 -and -not $isC125 -and -not $isC126 -and -not $isC127 -and -not $isC128 -and -not $isC129 -and -not $isC130 -and -not $isC131 -and -not $isC132 -and -not $isC133 -and -not $isC134 -and -not $isC135) {
+    if (-not $isC121 -and -not $isC122 -and -not $isC123 -and -not $isC124 -and -not $isC125 -and -not $isC126 -and -not $isC127 -and -not $isC128 -and -not $isC129 -and -not $isC130 -and -not $isC131 -and -not $isC132 -and -not $isC133 -and -not $isC134 -and -not $isC135 -and -not $isC136) {
         $required += @(
             '^\[C120-APPMODEL\] catalogValid=true result=PASS',
             '^\[C120-RESULT\] outcome=PASS',
@@ -480,7 +748,26 @@ function Assert-C120Serial([string]$Serial) {
             '^\[C123-DYNAMIC\] save-as=THIRD\.TXT active=SaveAs separator=visible result=PASS',
             '^\[C123-MODAL\].*result=PASS')
     }
-    if ($isC135) {
+    if ($isC136) {
+        $required += @(
+            '^\[C136-APPMODEL\] catalogValid=true result=PASS',
+            '^\[C102-MANAGED-OUTPUT\].*C136-POINTER-TESTS cases=36 result=PASS',
+            '^\[C102-MANAGED-OUTPUT\].*C136-NOTES initial=registration=8 target=document menu=reused result=PASS',
+            '^\[C136-PROOF\] managed-proof-started context=c136-native transport=physical-qemu result=PASS',
+            '^\[C136-TARGET\].*result=PASS',
+            '^\[C136-NATIVE-INPUT\] button=secondary phase=down.*result=PASS',
+            '^\[C136-NATIVE-INPUT\] button=secondary phase=up.*result=PASS',
+            '^\[C102-MANAGED-OUTPUT\].*C136-SECONDARY-DOWN target=Document pending=PASS result=PASS',
+            '^\[C102-MANAGED-OUTPUT\].*C136-SECONDARY-UP target=Document release=PASS result=PASS',
+            '^\[C102-MANAGED-OUTPUT\].*C136-CONTEXT-OPEN invoke=Secondary target=Document capture=PASS popup=open result=PASS',
+            '^\[C102-MANAGED-OUTPUT\].*C136-COMMAND command=Save count=1 result=PASS',
+            '^\[C102-MANAGED-OUTPUT\].*C136-COMMAND command=Save count=2 result=PASS',
+            '^\[C102-MANAGED-OUTPUT\].*C135-KEYBOARD highlight=PASS disabled-skipped=PASS result=PASS',
+            '^\[C102-MANAGED-OUTPUT\].*C135-ENTER command=PASS callback=PASS result=PASS',
+            '^\[C102-MANAGED-OUTPUT\].*C135-ESCAPE cancel=PASS capture=none result=PASS',
+            '^\[C102-MANAGED-OUTPUT\].*C135-OUTSIDE close=PASS consumed=PASS underlying=inactive result=PASS',
+            '^\[C102-MANAGED-OUTPUT\].*C136-SECONDARY-UP stale=cancelled menu=none capture=none result=PASS')
+    } elseif ($isC135) {
         if ($isC135FocusedApi) {
             $required += @(
                 '^\[C133-APPMODEL\] catalogValid=true result=PASS',
@@ -723,11 +1010,11 @@ function Assert-C120Serial([string]$Serial) {
     }
     $spaceMarker = @([regex]::Matches($Serial,
         '(?m)^\[C120-SPACE\] keydown=PASS keychar=PASS exact-once=PASS\r?$')).Count
-    if (-not $isC121 -and -not $isC122 -and -not $isC123 -and -not $isC124 -and -not $isC125 -and -not $isC126 -and -not $isC127 -and -not $isC128 -and -not $isC129 -and -not $isC130 -and -not $isC131 -and -not $isC132 -and -not $isC133 -and -not $isC134 -and -not $isC135 -and $spaceMarker -ne 1) { throw "C120 expected one exact-once Space marker, got $spaceMarker." }
+    if (-not $isC136 -and -not $isC121 -and -not $isC122 -and -not $isC123 -and -not $isC124 -and -not $isC125 -and -not $isC126 -and -not $isC127 -and -not $isC128 -and -not $isC129 -and -not $isC130 -and -not $isC131 -and -not $isC132 -and -not $isC133 -and -not $isC134 -and -not $isC135 -and $spaceMarker -ne 1) { throw "C120 expected one exact-once Space marker, got $spaceMarker." }
     $saveActivation = @([regex]::Matches($Serial,
         '(?m)^\[C102-MANAGED-OUTPUT\] C120-ACTIVATE control=Save result=PASS\r?$')).Count
-    if (-not $isC121 -and -not $isC122 -and -not $isC123 -and -not $isC124 -and -not $isC125 -and -not $isC126 -and -not $isC127 -and -not $isC128 -and -not $isC129 -and -not $isC130 -and -not $isC131 -and -not $isC132 -and -not $isC133 -and -not $isC134 -and -not $isC135 -and $saveActivation -ne 1) { throw "C120 expected one managed Save activation, got $saveActivation." }
-    if ($Serial -match '(?m)^\[(?:C134|C132|C131|C130|C129|C120|C121|C122|C123|C124|C125|C126|C127|C128)-[^\r\n]*FAIL|PageFault|triple.?fault|FAIL_FAST|fatal kernel failure|boot failure') {
+    if (-not $isC136 -and -not $isC121 -and -not $isC122 -and -not $isC123 -and -not $isC124 -and -not $isC125 -and -not $isC126 -and -not $isC127 -and -not $isC128 -and -not $isC129 -and -not $isC130 -and -not $isC131 -and -not $isC132 -and -not $isC133 -and -not $isC134 -and -not $isC135 -and $saveActivation -ne 1) { throw "C120 expected one managed Save activation, got $saveActivation." }
+    if ($Serial -match '(?m)^\[(?:C136|C135|C134|C132|C131|C130|C129|C120|C121|C122|C123|C124|C125|C126|C127|C128)-[^\r\n]*FAIL|PageFault|triple.?fault|FAIL_FAST|fatal kernel failure|boot failure') {
         throw "Managed control proof serial output contains a failure or fault marker."
     }
     [pscustomobject]@{
@@ -756,10 +1043,11 @@ if (-not $SkipManagedBuild -and -not $providedComposite) {
         "-RuntimePackOutputRoot", $runtimePackOutputRoot,
         "-UseGuideXosRuntimePack", "-ProductionApplication", "-PersistentCompositeLifecycle",
         "-AllocationMode", "Allocating", "-ManagedProjectMode",
-        $(if ($isC135) { "C135Composite" } elseif ($isC134) { "C134Composite" } elseif ($isC133) { "C133Composite" } elseif ($isC132) { "C132Composite" } elseif ($isC131) { "C131Composite" } elseif ($isC129) { "C129Composite" } elseif ($isC128) { "C128Composite" } elseif ($isC130 -or $isC127) { "C127Composite" } elseif ($isC126) { "C126Composite" } elseif ($isC125) { "C125Composite" } elseif ($isC124) { "C124Composite" } elseif ($isC123) { "C123Composite" } elseif ($isC122) { "C122Composite" } elseif ($isC121) { "C121Composite" } else { "C120Composite" }),
+        $(if ($isC136) { "C136Composite" } elseif ($isC135) { "C135Composite" } elseif ($isC134) { "C134Composite" } elseif ($isC133) { "C133Composite" } elseif ($isC132) { "C132Composite" } elseif ($isC131) { "C131Composite" } elseif ($isC129) { "C129Composite" } elseif ($isC128) { "C128Composite" } elseif ($isC130 -or $isC127) { "C127Composite" } elseif ($isC126) { "C126Composite" } elseif ($isC125) { "C125Composite" } elseif ($isC124) { "C124Composite" } elseif ($isC123) { "C123Composite" } elseif ($isC122) { "C122Composite" } elseif ($isC121) { "C121Composite" } else { "C120Composite" }),
         "-PythonExe", $PythonExe)
     if ($isC134) { $managedBuildArguments += "-IncludeC134FocusedTests" }
     if ($isC135) { $managedBuildArguments += "-IncludeC135FocusedTests" }
+    if ($isC136) { $managedBuildArguments += "-IncludeC136FocusedTests" }
     Invoke-Checked "powershell" $managedBuildArguments
 }
 $compositeElf = if ($providedComposite) { $CompositeElfPath } else {
@@ -775,7 +1063,10 @@ Invoke-Checked "powershell" @(
     "-C114ManagedDirectoryServices", "-C117ManagedTextArea", "-C118ManagedListBox")
 
 $kernelFlags = "-DGXOS_NATIVEAOT_PRODUCTION_APPLICATION -DGXOS_NATIVEAOT_PRODUCTION_COMPOSITE_LAUNCH -DGXOS_NATIVEAOT_C112_REUSABLE_MANAGED_APPLICATION -DGXOS_NATIVEAOT_C113_MANAGED_FILE_SERVICES -DGXOS_NATIVEAOT_C114_MANAGED_DIRECTORY_SERVICES -DGXOS_NATIVEAOT_C115_MANAGED_FILE_PICKER -DGXOS_NATIVEAOT_C116_MANAGED_TEXT_INPUT -DGXOS_NATIVEAOT_C117_MANAGED_TEXT_AREA -DGXOS_NATIVEAOT_C118_MANAGED_LIST_BOX -DGXOS_NATIVEAOT_C119_MANAGED_BUTTON -DGXOS_NATIVEAOT_C120_MANAGED_CONTROL_HOST"
-if ($isC135) {
+if ($isC136) {
+    $kernelFlags += " -DGXOS_NATIVEAOT_C121_MANAGED_CHECKBOX -DGXOS_NATIVEAOT_C122_MANAGED_LABEL -DGXOS_NATIVEAOT_C123_MANAGED_SEPARATOR -DGXOS_NATIVEAOT_C124_MANAGED_RADIO_BUTTON -DGXOS_NATIVEAOT_C125_MANAGED_PROGRESS_BAR -DGXOS_NATIVEAOT_C126_MANAGED_GROUP_BOX -DGXOS_NATIVEAOT_C127_MANAGED_PANEL -DGXOS_NATIVEAOT_C128_MANAGED_PANEL_LIFECYCLE -DGXOS_NATIVEAOT_C131_REUSABLE_CHECKBOX -DGXOS_NATIVEAOT_C132_REUSABLE_RADIO_BUTTON -DGXOS_NATIVEAOT_C133_REUSABLE_COMBOBOX -DGXOS_NATIVEAOT_C134_TRANSIENT_POPUP_ROUTING -DGXOS_NATIVEAOT_C135_REUSABLE_POPUP_MENU -DGXOS_NATIVEAOT_C136_SECONDARY_POINTER_CONTEXT_MENU"
+}
+elseif ($isC135) {
     $kernelFlags += " -DGXOS_NATIVEAOT_C121_MANAGED_CHECKBOX -DGXOS_NATIVEAOT_C122_MANAGED_LABEL -DGXOS_NATIVEAOT_C123_MANAGED_SEPARATOR -DGXOS_NATIVEAOT_C124_MANAGED_RADIO_BUTTON -DGXOS_NATIVEAOT_C125_MANAGED_PROGRESS_BAR -DGXOS_NATIVEAOT_C126_MANAGED_GROUP_BOX -DGXOS_NATIVEAOT_C127_MANAGED_PANEL -DGXOS_NATIVEAOT_C128_MANAGED_PANEL_LIFECYCLE -DGXOS_NATIVEAOT_C131_REUSABLE_CHECKBOX -DGXOS_NATIVEAOT_C132_REUSABLE_RADIO_BUTTON -DGXOS_NATIVEAOT_C133_REUSABLE_COMBOBOX -DGXOS_NATIVEAOT_C134_TRANSIENT_POPUP_ROUTING -DGXOS_NATIVEAOT_C135_REUSABLE_POPUP_MENU"
     if ($isC135FocusedApi) { $kernelFlags += " -DGXOS_NATIVEAOT_C135_FOCUSED_API" }
     if ($isC135FocusedHost) { $kernelFlags += " -DGXOS_NATIVEAOT_C135_FOCUSED_HOST" }
@@ -835,6 +1126,9 @@ c134=GuideXosControlHost owns one bounded transient-input lease; the registered 
 if ($isC135) {
     Add-Content -LiteralPath (Join-Path $EvidenceRoot "input-contract.txt") -Value "c135=GuideXosPopupMenu is a fixed-capacity non-focusable registered transient owner using the same one-owner lease; Options invokes it through the existing production action path; secondary-click remains deferred because current transport proves pointer-down only"
 }
+if ($isC136) {
+    Add-Content -LiteralPath (Join-Path $EvidenceRoot "input-contract.txt") -Value "c136=physical QEMU secondary button down/up uses the existing launch-flags field with new semantic event kinds; coordinates remain the existing 12-bit x/y payload; no host-table or ABI expansion"
+}
 
 $bootResults = [System.Collections.Generic.List[object]]::new()
 if (-not $SkipQemu) {
@@ -860,7 +1154,9 @@ if (-not $SkipQemu) {
         foreach ($stale in @($serial, $stdout, $stderr, $monitorLog)) {
             if (Test-Path -LiteralPath $stale -PathType Leaf) { Remove-Item -LiteralPath $stale -Force }
         }
-        $boot = if ($isC129) {
+        $boot = if ($isC136) {
+            Invoke-C136Boot $esp $serial $stdout $stderr $monitorLog $monitorPort $qemu $ovmf
+        } elseif ($isC129) {
             Invoke-C129Boot $esp $serial $stdout $stderr $monitorLog $monitorPort $qemu $ovmf
         } else {
             Invoke-C120Boot $esp $serial $stdout $stderr $qemu $ovmf
@@ -891,9 +1187,9 @@ if (-not $SkipQemu) {
 $evidenceSerial = if ($bootResults.Count -gt 0) {
     Get-Content -LiteralPath (Join-Path $EvidenceRoot "boot-01\serial.log")
 } else { @("QEMU not executed; build-only evidence.") }
-$evidenceSerial | Where-Object { $_ -match '^\[(?:C135|C134|C133|C132|C131|C130|C129|C128|C127|C126|C125|C124|C123|C122|C121|C120|C119|C118|C117|C116|C115)-' } |
+$evidenceSerial | Where-Object { $_ -match '^\[(?:C136|C135|C134|C133|C132|C131|C130|C129|C128|C127|C126|C125|C124|C123|C122|C121|C120|C119|C118|C117|C116|C115)-' } |
     Set-Content -LiteralPath (Join-Path $EvidenceRoot "managed-control-host-output.txt") -Encoding ASCII
-$evidenceSerial | Where-Object { $_ -match '^\[(?:C135|C134|C133|C132|C131|C130|C129|C128|C127|C126|C124|C123|C122|C121|C120)-' } |
+$evidenceSerial | Where-Object { $_ -match '^\[(?:C136|C135|C134|C133|C132|C131|C130|C129|C128|C127|C126|C124|C123|C122|C121|C120)-' } |
     Set-Content -LiteralPath (Join-Path $EvidenceRoot "control-host-evidence.txt") -Encoding ASCII
 $evidenceSerial | Where-Object { $_ -match '^\[(?:C116|C117|C118|C119)-' } |
     Set-Content -LiteralPath (Join-Path $EvidenceRoot "regression-evidence.txt") -Encoding ASCII
@@ -902,6 +1198,7 @@ $evidenceSerial | Where-Object { $_ -match '^\[(?:C102|C103|C112|C118|C119|NATIV
 
 $sourceFiles = @(
     "kernel\core\main.cpp", "kernel\core\nativeaot_application.cpp",
+    "kernel\core\kernel_compositor.cpp", "compositor.cpp",
     "kernel\core\ps2keyboard.cpp",
     "samples\managed\HostLogProof\GuideXos\GuideXosControlHost.cs",
     "samples\managed\HostLogProof\GuideXos\GuideXosRadioButton.cs",
@@ -925,6 +1222,8 @@ $sourceFiles = @(
     "samples\managed\HostLogProof\GuideXos\GuideXosPopupMenuC135Tests.cs",
     "samples\managed\HostLogProof\GuideXos\GuideXosPopupMenuC135HostTests.cs",
     "samples\managed\HostLogProof\GuideXos\GuideXosLaunchContext.cs",
+    "samples\managed\HostLogProof\GuideXos\GuideXosTextInput.cs",
+    "samples\managed\HostLogProof\GuideXos\GuideXosSecondaryPointerC136Tests.cs",
     "samples\managed\HostLogProof\GuideXos\GuideXosHost.cs",
     "samples\managed\HostLogProof\GuideXos\GuideXosLabel.cs",
     "samples\managed\HostLogProof\GuideXos\GuideXosLabelTests.cs",
@@ -961,6 +1260,7 @@ $sourceFiles = @(
     "scripts\dotnet\run-c132-managed-radiobutton.ps1",
     "scripts\dotnet\run-c133-managed-combobox.ps1",
     "scripts\dotnet\run-c135-managed-popup-menu.ps1",
+    "scripts\dotnet\run-c136-secondary-pointer-context-menu.ps1",
     "docs\dotnet\NATIVEAOT_C122_MANAGED_LABEL.md",
     "docs\dotnet\NATIVEAOT_C123_MANAGED_SEPARATOR.md",
     "docs\dotnet\NATIVEAOT_C124_MANAGED_RADIO_BUTTON.md",
@@ -974,7 +1274,8 @@ $sourceFiles = @(
     "docs\dotnet\NATIVEAOT_C132_MANAGED_RADIOBUTTON.md",
     "docs\dotnet\NATIVEAOT_C133_MANAGED_COMBOBOX.md",
     "docs\dotnet\NATIVEAOT_C134_TRANSIENT_POPUP_ROUTING.md",
-    "docs\dotnet\NATIVEAOT_C135_MANAGED_POPUP_MENU.md")
+    "docs\dotnet\NATIVEAOT_C135_MANAGED_POPUP_MENU.md",
+    "docs\dotnet\NATIVEAOT_C136_SECONDARY_POINTER_CONTEXT_MENU.md")
 $sourceHashes = [ordered]@{}
 foreach ($sourceFile in $sourceFiles) { $sourceHashes[$sourceFile] = Get-Hash (Join-Path $RepoRoot $sourceFile) }
 
@@ -1032,6 +1333,14 @@ if ($isC135) {
     $manifest.notes.commands = "Options invokes a fixed four-row managed popup with Open, Save, separator, and Reload; pointer selection, Down/Up navigation, Enter/Space activation, Escape, outside-click consumption, Tab/Shift+Tab close-and-traverse, lifecycle cancellation, and close/relaunch are proven"
     $manifest.notes.space = "Popup Space activation is KeyDown-only; no synthetic KeyChar is required; Tab remains KeyDown-only and no popup child focus target is added"
     $manifest.documentation = "docs\dotnet\NATIVEAOT_C135_MANAGED_POPUP_MENU.md"
+}
+if ($isC136) {
+    $manifest.hostAbi.inputTransport = "existing launchFlags field; PointerDown/PointerUp and Primary/Secondary identity are semantic event kinds; ABI v1/table 104 preserved"
+    $manifest.controlHost.tests = "C136 secondary-pointer host lifecycle: 36 focused cases; C135 popup 40 API/40 host and C134 transient capture 30 retained"
+    $manifest.notes.order = "Open, Save, Save As, Status display, Full Path/File Name ComboBox, Document, one reused Options popup; registration remains 8"
+    $manifest.notes.commands = "secondary down records the Notes Document target; secondary up opens the existing popup at the pointer with bounded clamping; Save is activated by primary follow-up, Down/Enter, Escape, outside primary, and outside secondary"
+    $manifest.notes.space = "C135 keyboard semantics remain unchanged; context invocation does not add focus targets, a capture stack, or synthetic Tab KeyChar"
+    $manifest.documentation = "docs\dotnet\NATIVEAOT_C136_SECONDARY_POINTER_CONTEXT_MENU.md"
 }
 $manifest | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath (Join-Path $EvidenceRoot ("{0}.manifest.json" -f $phaseLower)) -Encoding ASCII
 Write-Host "$ProofPhase outcome=$($manifest.outcome) evidence=$EvidenceRoot" -ForegroundColor Green

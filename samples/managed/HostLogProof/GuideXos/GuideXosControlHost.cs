@@ -28,6 +28,8 @@ public enum GuideXosControlHostResult
     Disabled = 10,
     Toggled = 11,
     Unregistered = 12,
+    Pending = 13,
+    Released = 14,
 }
 
 /// <summary>
@@ -62,6 +64,12 @@ public sealed class GuideXosControlHost
     // that one in-flight gesture so lifecycle changes can cancel its commit.
     private int _pendingSpaceIndex = -1;
     private bool _cancelledSpaceCharacter;
+    // Secondary context gestures are split across native button down/up.
+    // Store the stable control ID and press coordinates, never a mutable
+    // registration index, so membership changes cannot retarget the release.
+    private int _pendingSecondaryControlId;
+    private int _pendingSecondaryX;
+    private int _pendingSecondaryY;
 
     public GuideXosControlHost(int maximumControlCount = MaximumSupportedControlCount)
     {
@@ -111,6 +119,93 @@ public sealed class GuideXosControlHost
                 ? _entries[_transientCaptureIndex].Kind
                 : GuideXosManagedControlKind.None;
         }
+    }
+
+    public bool HasPendingSecondaryPointer => _pendingSecondaryControlId != 0;
+    public int PendingSecondaryPointerTargetId => _pendingSecondaryControlId;
+
+    /// <summary>
+    /// Starts a secondary-button gesture without changing managed focus. An
+    /// existing transient owner gets first refusal and consumes the gesture.
+    /// </summary>
+    public GuideXosControlHostResult BeginSecondaryPointerGesture(
+        int id, int x, int y)
+    {
+        if (_modalHost != null)
+        {
+            return _modalHost.BeginSecondaryPointerGesture(id, x, y);
+        }
+        CancelPendingSpace();
+        CancelPendingSecondaryPointer();
+        if (TryGetTransientCaptureIndex(out int capturedIndex))
+        {
+            return RoutePointerAndCapture(capturedIndex, x, y, 0, 0, 8, 18);
+        }
+        if (!TryFindIndex(id, out int index))
+        {
+            return GuideXosControlHostResult.Rejected;
+        }
+        if (!IsEligible(index))
+        {
+            return IsControlDisabled(index)
+                ? GuideXosControlHostResult.Disabled
+                : GuideXosControlHostResult.Rejected;
+        }
+        _pendingSecondaryControlId = id;
+        _pendingSecondaryX = x;
+        _pendingSecondaryY = y;
+        return GuideXosControlHostResult.Pending;
+    }
+
+    /// <summary>
+    /// Completes the pending secondary gesture only for the original target.
+    /// Coordinates from the press are returned for deterministic menu
+    /// placement; a stale or invalid release is consumed and cannot fall
+    /// through to another control.
+    /// </summary>
+    public GuideXosControlHostResult CompleteSecondaryPointerGesture(
+        out int targetId, out int x, out int y)
+    {
+        targetId = _pendingSecondaryControlId;
+        x = _pendingSecondaryX;
+        y = _pendingSecondaryY;
+        if (_modalHost != null)
+        {
+            _modalHost.CancelPendingSecondaryPointer();
+            targetId = 0;
+            x = 0;
+            y = 0;
+            return GuideXosControlHostResult.Cancelled;
+        }
+        if (targetId == 0)
+        {
+            return GuideXosControlHostResult.Ignored;
+        }
+        _pendingSecondaryControlId = 0;
+        _pendingSecondaryX = 0;
+        _pendingSecondaryY = 0;
+        if (TryGetTransientCaptureIndex(out _))
+        {
+            targetId = 0;
+            x = 0;
+            y = 0;
+            return GuideXosControlHostResult.Cancelled;
+        }
+        if (!TryFindIndex(targetId, out int index) || !IsEligible(index))
+        {
+            targetId = 0;
+            x = 0;
+            y = 0;
+            return GuideXosControlHostResult.Cancelled;
+        }
+        return GuideXosControlHostResult.Released;
+    }
+
+    public void CancelPendingSecondaryPointer()
+    {
+        _pendingSecondaryControlId = 0;
+        _pendingSecondaryX = 0;
+        _pendingSecondaryY = 0;
     }
 
     /// <summary>
@@ -192,6 +287,10 @@ public sealed class GuideXosControlHost
     {
         if (_modalHost != null) return _modalHost.TryUnregister(id);
         CancelPendingSpace();
+        if (_pendingSecondaryControlId == id)
+        {
+            CancelPendingSecondaryPointer();
+        }
         if (!TryFindIndex(id, out int index))
         {
             return GuideXosControlHostResult.Rejected;
@@ -240,6 +339,7 @@ public sealed class GuideXosControlHost
         }
         _entries[index].Focusable = focusable;
         CancelPendingSpaceIfInvalid();
+        CancelPendingSecondaryIfInvalid();
         NormalizeActiveFocus();
         ReconcileTransientCapture();
         return GuideXosControlHostResult.Focused;
@@ -252,6 +352,7 @@ public sealed class GuideXosControlHost
             return _modalHost.TryFocus(id);
         }
         CancelPendingSpace();
+        CancelPendingSecondaryPointer();
         if (!TryFindIndex(id, out int index))
         {
             return GuideXosControlHostResult.Rejected;
@@ -280,6 +381,7 @@ public sealed class GuideXosControlHost
                 id, x, y, originX, originY, characterWidth, lineHeight);
         }
         CancelPendingSpace();
+        CancelPendingSecondaryPointer();
         if (TryGetTransientCaptureIndex(out int capturedIndex))
         {
             // The transient drop-down owns the complete pointer gesture. An
@@ -470,6 +572,7 @@ public sealed class GuideXosControlHost
         }
         int priorIndex = _activeIndex;
         CancelPendingSpaceIfInvalid();
+        CancelPendingSecondaryIfInvalid();
         NormalizeActiveFocus();
         ReconcileTransientCapture();
         return priorIndex != _activeIndex && _activeIndex >= 0
@@ -484,6 +587,7 @@ public sealed class GuideXosControlHost
             return false;
         }
         CancelPendingSpace();
+        CancelPendingSecondaryPointer();
         NormalizeActiveFocus();
         _savedActiveIndex = _activeIndex;
         _savedActiveId = ActiveControlId;
@@ -497,6 +601,7 @@ public sealed class GuideXosControlHost
     {
         if (_modalHost == null) return false;
         CancelPendingSpace();
+        CancelPendingSecondaryPointer();
         _modalHost.ClearFocus();
         _modalHost = null;
 
@@ -544,6 +649,7 @@ public sealed class GuideXosControlHost
         _savedActiveIndex = -1;
         _pendingSpaceIndex = -1;
         _cancelledSpaceCharacter = false;
+        CancelPendingSecondaryPointer();
         ReleaseTransientCapture();
     }
 
@@ -632,6 +738,7 @@ public sealed class GuideXosControlHost
     private void ClearFocus()
     {
         CancelPendingSpace();
+        CancelPendingSecondaryPointer();
         BlurAll();
         _activeIndex = -1;
     }
@@ -677,6 +784,14 @@ public sealed class GuideXosControlHost
             IsControlFocused(pendingIndex)) return;
         CancelPendingSpace();
         RecoverFocusAfterCancelledSpace(pendingIndex);
+    }
+
+    private void CancelPendingSecondaryIfInvalid()
+    {
+        if (_pendingSecondaryControlId == 0) return;
+        if (TryFindIndex(_pendingSecondaryControlId, out int index) &&
+            IsEligible(index)) return;
+        CancelPendingSecondaryPointer();
     }
 
     private void RecoverFocusAfterCancelledSpace(int cancelledIndex)

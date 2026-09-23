@@ -114,6 +114,12 @@ constexpr uint32_t kLaunchFlagInputKindMask = 0x0F000000u;
 constexpr uint32_t kLaunchFlagInputPointerDown = 0x01000000u;
 constexpr uint32_t kLaunchFlagInputKeyDown = 0x02000000u;
 constexpr uint32_t kLaunchFlagInputKeyChar = 0x03000000u;
+// C136 keeps the v1 launch-flags transport and spends two unused semantic
+// kind values on pointer-up and secondary-button events.  Coordinates remain
+// the existing 24-bit payload; button identity is carried by the event kind.
+constexpr uint32_t kLaunchFlagInputPointerUp = 0x04000000u;
+constexpr uint32_t kLaunchFlagInputSecondaryPointerDown = 0x05000000u;
+constexpr uint32_t kLaunchFlagInputSecondaryPointerUp = 0x06000000u;
 constexpr uint32_t kLaunchFlagInputPayloadMask = 0x00FFFFFFu;
 constexpr uint32_t kLaunchFlagInputCoordinateMask = 0x00000FFFu;
 // C117 reserves the high bit of the 24-bit key payload for Shift. This is an
@@ -414,21 +420,73 @@ public:
     }
 
     void onMouseDown(int x, int y, uint8_t button) override {
-        if (button != 1u || m_selector == 0u || x < 0 || y < 0 ||
+        if ((button != 1u && button != 2u) || m_selector == 0u || x < 0 || y < 0 ||
             static_cast<uint32_t>(x) > kLaunchFlagInputCoordinateMask ||
             static_cast<uint32_t>(y) > kLaunchFlagInputCoordinateMask) {
             return;
         }
         const uint32_t payload = static_cast<uint32_t>(x) |
             (static_cast<uint32_t>(y) << 12);
+        const uint32_t kind = button == 2u
+            ? kLaunchFlagInputSecondaryPointerDown
+            : kLaunchFlagInputPointerDown;
         const int32_t result = invokeManagedInput(
-            m_selector, kLaunchFlagInput | kLaunchFlagInputPointerDown | payload);
+            m_selector, kLaunchFlagInput | kind | payload);
+        if (button == 2u) {
+            serial::puts("[C136-NATIVE-INPUT] button=secondary phase=down x=");
+            serial::put_hex32(static_cast<uint32_t>(x));
+            serial::puts(" y=");
+            serial::put_hex32(static_cast<uint32_t>(y));
+            serial::puts(" result=");
+            serial::puts(result == 0 ? "PASS\n" : "FAIL\n");
+            return;
+        }
         serial::puts("[C116-NATIVE-INPUT] kind=pointer-down x=");
         serial::put_hex32(static_cast<uint32_t>(x));
         serial::puts(" y=");
         serial::put_hex32(static_cast<uint32_t>(y));
         serial::puts(" result=");
         serial::puts(result == 0 ? "PASS\n" : "IGNORED\n");
+#if defined(GXOS_NATIVEAOT_C136_SECONDARY_POINTER_CONTEXT_MENU)
+        serial::puts("[C136-NATIVE-INPUT] button=primary phase=down x=");
+        serial::put_hex32(static_cast<uint32_t>(x));
+        serial::puts(" y=");
+        serial::put_hex32(static_cast<uint32_t>(y));
+        serial::puts(" result=");
+        serial::puts(result == 0 ? "PASS\n" : "FAIL\n");
+#endif
+    }
+
+    void onMouseUp(int x, int y, uint8_t button) override {
+        if ((button != 1u && button != 2u) || m_selector == 0u || x < 0 || y < 0 ||
+            static_cast<uint32_t>(x) > kLaunchFlagInputCoordinateMask ||
+            static_cast<uint32_t>(y) > kLaunchFlagInputCoordinateMask) {
+            return;
+        }
+        const uint32_t payload = static_cast<uint32_t>(x) |
+            (static_cast<uint32_t>(y) << 12);
+        const uint32_t kind = button == 2u
+            ? kLaunchFlagInputSecondaryPointerUp
+            : kLaunchFlagInputPointerUp;
+        const int32_t result = invokeManagedInput(
+            m_selector, kLaunchFlagInput | kind | payload);
+        if (button == 2u) {
+            serial::puts("[C136-NATIVE-INPUT] button=secondary phase=up x=");
+            serial::put_hex32(static_cast<uint32_t>(x));
+            serial::puts(" y=");
+            serial::put_hex32(static_cast<uint32_t>(y));
+            serial::puts(" result=");
+            serial::puts(result == 0 ? "PASS\n" : "FAIL\n");
+        } else {
+#if defined(GXOS_NATIVEAOT_C136_SECONDARY_POINTER_CONTEXT_MENU)
+            serial::puts("[C136-NATIVE-INPUT] button=primary phase=up x=");
+            serial::put_hex32(static_cast<uint32_t>(x));
+            serial::puts(" y=");
+            serial::put_hex32(static_cast<uint32_t>(y));
+            serial::puts(" result=");
+            serial::puts(result == 0 ? "PASS\n" : "FAIL\n");
+#endif
+        }
     }
 
     void onKeyDown(uint32_t key) override {
@@ -2202,8 +2260,11 @@ int32_t invokeManagedInput(uint32_t selector, uint32_t inputFlags) {
     const uint32_t payload = inputFlags & kLaunchFlagInputPayloadMask;
     if (selector == 0u || (inputFlags & kLaunchFlagInput) == 0u ||
         (kind != kLaunchFlagInputPointerDown &&
+         kind != kLaunchFlagInputPointerUp &&
          kind != kLaunchFlagInputKeyDown &&
-         kind != kLaunchFlagInputKeyChar) ||
+         kind != kLaunchFlagInputKeyChar &&
+         kind != kLaunchFlagInputSecondaryPointerDown &&
+         kind != kLaunchFlagInputSecondaryPointerUp) ||
         payload > kLaunchFlagInputPayloadMask) {
         return -2;
     }

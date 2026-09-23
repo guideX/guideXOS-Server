@@ -32,6 +32,7 @@ DragState KernelCompositor::s_dragState;
 uint32_t KernelCompositor::s_hoverWindowId = 0;
 HitTestResult KernelCompositor::s_hoverResult = HitTestResult::None;
 bool KernelCompositor::s_buttonPressActive = false;
+static uint8_t s_buttonPressButtons = 0;
 bool KernelCompositor::s_initialized = false;
 uint32_t KernelCompositor::s_showDesktopMinimized[MAX_WINDOWS];
 int KernelCompositor::s_showDesktopMinimizedCount = 0;
@@ -176,6 +177,7 @@ void KernelCompositor::init(uint32_t screenW, uint32_t screenH, uint32_t taskbar
     s_hoverWindowId = 0;
     s_hoverResult = HitTestResult::None;
     s_dragState = DragState();
+    s_buttonPressButtons = 0;
     s_buttonPressActive = false;  // Ensure button press tracking is reset
     s_showDesktopMinimizedCount = 0;
     s_initialized = true;
@@ -555,8 +557,10 @@ void KernelCompositor::handleMouseMove(int32_t mx, int32_t my) {
 void KernelCompositor::handleMouseDown(int32_t mx, int32_t my, uint8_t button) {
     if (!s_initialized) return;
     
-    // Track that we have an active button press
-    s_buttonPressActive = true;
+    // Track each button independently.  A secondary cycle must not clear a
+    // primary press which is still held (or vice versa).
+    s_buttonPressButtons |= button;
+    s_buttonPressActive = s_buttonPressButtons != 0;
     
     app::KernelWindow* hitWin = nullptr;
     HitTestResult hit = hitTest(mx, my, &hitWin);
@@ -567,27 +571,34 @@ void KernelCompositor::handleMouseDown(int32_t mx, int32_t my, uint8_t button) {
     
     if (!hitWin) return;
     
-    // Focus this window
-    setFocus(hitWin->id);
+    // Secondary invocation does not move managed control focus.  Primary
+    // clicks retain the established window-focus behavior.
+    if (button == 1u) setFocus(hitWin->id);
     
     switch (hit) {
         case HitTestResult::CloseButton:
-            hitWin->closeBtnPressed = true;
-            hitWin->dirty = true;
+            if (button == 1u) {
+                hitWin->closeBtnPressed = true;
+                hitWin->dirty = true;
+            }
             break;
             
         case HitTestResult::MaximizeButton:
-            hitWin->maxBtnPressed = true;
-            hitWin->dirty = true;
+            if (button == 1u) {
+                hitWin->maxBtnPressed = true;
+                hitWin->dirty = true;
+            }
             break;
             
         case HitTestResult::MinimizeButton:
-            hitWin->minBtnPressed = true;
-            hitWin->dirty = true;
+            if (button == 1u) {
+                hitWin->minBtnPressed = true;
+                hitWin->dirty = true;
+            }
             break;
             
         case HitTestResult::Titlebar:
-            if (!(hitWin->flags & app::WF_MAXIMIZED)) {
+            if (button == 1u && !(hitWin->flags & app::WF_MAXIMIZED)) {
                 s_dragState.active = true;
                 s_dragState.windowId = hitWin->id;
                 s_dragState.startX = mx;
@@ -599,6 +610,7 @@ void KernelCompositor::handleMouseDown(int32_t mx, int32_t my, uint8_t button) {
             break;
             
         case HitTestResult::ResizeCorner:
+            if (button != 1u) break;
             s_dragState.active = true;
             s_dragState.windowId = hitWin->id;
             s_dragState.startX = mx;
@@ -610,7 +622,7 @@ void KernelCompositor::handleMouseDown(int32_t mx, int32_t my, uint8_t button) {
             
         case HitTestResult::Client:
             // Check widgets first; bare-metal apps use these for toolbar buttons.
-            for (int i = hitWin->widgetCount - 1; i >= 0; --i) {
+            for (int i = hitWin->widgetCount - 1; button == 1u && i >= 0; --i) {
                 app::Widget* widget = &hitWin->widgets[i];
                 if (widget->type != app::WidgetType::Button ||
                     !widget->visible || !widget->enabled) continue;
@@ -640,8 +652,8 @@ void KernelCompositor::handleMouseDown(int32_t mx, int32_t my, uint8_t button) {
 void KernelCompositor::handleMouseUp(int32_t mx, int32_t my, uint8_t button) {
     if (!s_initialized) return;
     
-    // Clear button press tracking
-    s_buttonPressActive = false;
+    s_buttonPressButtons &= static_cast<uint8_t>(~button);
+    s_buttonPressActive = s_buttonPressButtons != 0;
     
     // End drag
     if (s_dragState.active) {
@@ -695,7 +707,7 @@ void KernelCompositor::handleMouseUp(int32_t mx, int32_t my, uint8_t button) {
             if (!widget->pressed) continue;
             widget->pressed = false;
             hitWin->dirty = true;
-            if (widget->visible && widget->enabled &&
+            if (button == 1u && widget->visible && widget->enabled &&
                 localX >= widget->x && localX < widget->x + widget->w &&
                 localY >= widget->y && localY < widget->y + widget->h) {
                 hitWin->owner->onWidgetClick(widget->id);
