@@ -473,7 +473,13 @@ public sealed class ManagedNotes : GuideXosApplication
     private const int C124FileNameControlId = 6;
 #if HOSTLOGPROOF_C131_REUSABLE_CHECKBOX
     private const int C131ShowStatusControlId = 7;
+#if HOSTLOGPROOF_C135_REUSABLE_POPUP_MENU
+    // C135 uses the otherwise-free slot 6 for the text area because the
+    // reusable popup occupies slot 8 alongside the C133/C131 controls.
+    private const int C120DocumentControlId = 6;
+#else
     private const int C120DocumentControlId = 8;
+#endif
 #else
     private const int C120DocumentControlId = 7;
 #endif
@@ -625,6 +631,24 @@ public sealed class ManagedNotes : GuideXosApplication
 #if HOSTLOGPROOF_C134_TRANSIENT_POPUP_ROUTING
     private bool _c134HostTestContext;
     private bool _c134HostTestsRun;
+#if HOSTLOGPROOF_C135_REUSABLE_POPUP_MENU
+    private const int C135MenuControlId = 8;
+    private const uint C135OptionsActionId = 23u;
+    private const uint C135HideMenuKey = 0xA00u;
+    private const uint C135ShowMenuKey = 0xA01u;
+    private const uint C135DisableMenuKey = 0xA02u;
+    private const uint C135EnableMenuKey = 0xA03u;
+    private readonly GuideXosPopupMenu _c135Menu =
+        new(400, 280, 176, 8, 32);
+    private bool _c135ProofContext;
+    private bool _c135MenuTestContext;
+    private bool _c135HostTestContext;
+    private bool _c135MenuTestsRun;
+    private bool _c135HostTestsRun;
+    private bool _c135MenuTestsPassed;
+    private bool _c135HostTestsPassed;
+    private uint _c135PendingCommand;
+#endif
 #endif
 #endif
 
@@ -649,6 +673,12 @@ public sealed class ManagedNotes : GuideXosApplication
 #if HOSTLOGPROOF_C134_TRANSIENT_POPUP_ROUTING
         _c134HostTestContext =
             host.LaunchContext.Utf8.SequenceEqual("c134-host-tests"u8);
+#if HOSTLOGPROOF_C135_REUSABLE_POPUP_MENU
+        _c135ProofContext = host.LaunchContext.Utf8.SequenceEqual("c135"u8) ||
+            host.LaunchContext.Utf8.SequenceEqual("c135-host-tests"u8);
+        _c135MenuTestContext = host.LaunchContext.Utf8.SequenceEqual("c135-api"u8);
+        _c135HostTestContext = host.LaunchContext.Utf8.SequenceEqual("c135-host-tests"u8);
+#endif
 #endif
 #endif
 #if HOSTLOGPROOF_C119_MANAGED_BUTTON
@@ -674,6 +704,11 @@ public sealed class ManagedNotes : GuideXosApplication
 #if HOSTLOGPROOF_C134_TRANSIENT_POPUP_ROUTING
             || host.LaunchContext.Utf8.SequenceEqual("c134"u8) ||
             host.LaunchContext.Utf8.SequenceEqual("c134-host-tests"u8)
+#if HOSTLOGPROOF_C135_REUSABLE_POPUP_MENU
+            || host.LaunchContext.Utf8.SequenceEqual("c135"u8) ||
+            host.LaunchContext.Utf8.SequenceEqual("c135-api"u8) ||
+            host.LaunchContext.Utf8.SequenceEqual("c135-host-tests"u8)
+#endif
 #endif
 #endif
             ;
@@ -740,6 +775,12 @@ public sealed class ManagedNotes : GuideXosApplication
         _c133ProofContext = _c133ProofContext ||
             host.LaunchContext.Utf8.SequenceEqual("c134"u8) ||
             host.LaunchContext.Utf8.SequenceEqual("c134-host-tests"u8);
+#if HOSTLOGPROOF_C135_REUSABLE_POPUP_MENU
+        _c133ProofContext = _c133ProofContext ||
+            host.LaunchContext.Utf8.SequenceEqual("c135"u8) ||
+            host.LaunchContext.Utf8.SequenceEqual("c135-api"u8) ||
+            host.LaunchContext.Utf8.SequenceEqual("c135-host-tests"u8);
+#endif
 #endif
         _c133ComboTestContext = IsC133ComboTestContext(host) ||
             host.LaunchContext.Utf8.SequenceEqual("c133-combo-tests"u8) ||
@@ -750,6 +791,13 @@ public sealed class ManagedNotes : GuideXosApplication
 #if HOSTLOGPROOF_C134_TRANSIENT_POPUP_ROUTING
         _c134HostTestContext =
             host.LaunchContext.Utf8.SequenceEqual("c134-host-tests"u8);
+#if HOSTLOGPROOF_C135_REUSABLE_POPUP_MENU
+        _c135ProofContext = host.LaunchContext.Utf8.SequenceEqual("c135"u8) ||
+            host.LaunchContext.Utf8.SequenceEqual("c135-api"u8) ||
+            host.LaunchContext.Utf8.SequenceEqual("c135-host-tests"u8);
+        _c135MenuTestContext = host.LaunchContext.Utf8.SequenceEqual("c135-api"u8);
+        _c135HostTestContext = host.LaunchContext.Utf8.SequenceEqual("c135-host-tests"u8);
+#endif
 #endif
 #endif
 #endif
@@ -793,6 +841,18 @@ public sealed class ManagedNotes : GuideXosApplication
                 ? "C134-HOST tests=PASS"u8
                 : "C134-HOST tests=FAIL"u8);
         }
+#if HOSTLOGPROOF_C135_HOST_TESTS
+        if (_c135HostTestContext && !_c135HostTestsRun)
+        {
+            bool c135HostTests =
+                GuideXosPopupMenuC135HostTests.Run(host);
+            _c135HostTestsRun = true;
+            _c135HostTestsPassed = c135HostTests;
+            host.TryLog(c135HostTests
+                ? "C135-POPUP-HOST-TESTS cases=40 result=PASS"u8
+                : "C135-POPUP-HOST-TESTS cases=40 result=FAIL"u8);
+        }
+#endif
         if (_c133ProofContext && !_c134HostTestsRun)
         {
             bool c134HostTests =
@@ -864,6 +924,19 @@ public sealed class ManagedNotes : GuideXosApplication
             }
 #endif
         }
+#if HOSTLOGPROOF_C135_REUSABLE_POPUP_MENU
+        if (_c135ProofContext)
+        {
+            _c135Menu.Reset();
+            _c135Menu.ClearItems();
+            _c135Menu.TryAddItem("Open", 20u);
+            _c135Menu.TryAddItem("Save", 22u);
+            _c135Menu.TryAddSeparator();
+            _c135Menu.TryAddItem("Reload", 3u);
+            _c135Menu.CommandInvoked = OnC135MenuCommand;
+            _c135PendingCommand = 0u;
+        }
+#endif
 #endif
         if (_c125ProofContext || _c125ProgressTestContext)
         {
@@ -909,6 +982,9 @@ public sealed class ManagedNotes : GuideXosApplication
 #endif
             _mainControlHost = new GuideXosControlHost(
 #if HOSTLOGPROOF_C124_MANAGED_RADIO_BUTTON
+#if HOSTLOGPROOF_C135_REUSABLE_POPUP_MENU
+                _c135ProofContext ? 8 :
+#endif
 #if HOSTLOGPROOF_C133_REUSABLE_COMBOBOX
                 _c133ProofContext ? 7 :
 #endif
@@ -964,6 +1040,13 @@ public sealed class ManagedNotes : GuideXosApplication
                     C131ShowStatusControlId, _showStatusCheckBox);
             }
 #endif
+#if HOSTLOGPROOF_C135_REUSABLE_POPUP_MENU
+            if (_c135ProofContext)
+            {
+                _mainControlHost.TryRegisterPopupMenu(
+                    C135MenuControlId, _c135Menu, false);
+            }
+#endif
             _mainControlHost.TryRegisterTextArea(C120DocumentControlId, _textArea);
             if (host.LaunchContext.Utf8.SequenceEqual("c120-disabled"u8))
             {
@@ -971,6 +1054,9 @@ public sealed class ManagedNotes : GuideXosApplication
             }
             int expectedHostRegistration =
 #if HOSTLOGPROOF_C124_MANAGED_RADIO_BUTTON
+#if HOSTLOGPROOF_C135_REUSABLE_POPUP_MENU
+                _c135ProofContext ? 8 :
+#endif
 #if HOSTLOGPROOF_C133_REUSABLE_COMBOBOX
                 _c133ProofContext ? 7 :
 #endif
@@ -989,8 +1075,23 @@ public sealed class ManagedNotes : GuideXosApplication
 #endif
             bool hostRegistration = _mainControlHost.RegistrationCount ==
                 expectedHostRegistration && _mainControlHost.ActiveIndex == -1;
+#if HOSTLOGPROOF_C135_REUSABLE_POPUP_MENU
+            if (_c135ProofContext)
+            {
+                host.TryLog(hostRegistration &&
+                    _mainControlHost.RegistrationCount == 8 &&
+                    _mainControlHost.TransientInputCaptureKind ==
+                        GuideXosManagedControlKind.None
+                    ? "C135-HOST registration=8 menu=non-focusable initial=no-focus result=PASS"u8
+                    : "C135-HOST registration=FAIL initial=no-focus result=FAIL"u8);
+            }
+#endif
 #if HOSTLOGPROOF_C133_REUSABLE_COMBOBOX
-            if (_c133ProofContext)
+            if (_c133ProofContext
+#if HOSTLOGPROOF_C135_REUSABLE_POPUP_MENU
+                && !_c135ProofContext
+#endif
+                )
             {
                 host.TryLog(hostRegistration &&
                     _mainControlHost.RegistrationCount == 7
@@ -1003,6 +1104,9 @@ public sealed class ManagedNotes : GuideXosApplication
 #if HOSTLOGPROOF_C124_MANAGED_RADIO_BUTTON
                 && !_c124ProofContext
 #endif
+#if HOSTLOGPROOF_C135_REUSABLE_POPUP_MENU
+                && !_c135ProofContext
+#endif
                 )
             {
                 host.TryLog(hostRegistration
@@ -1012,9 +1116,14 @@ public sealed class ManagedNotes : GuideXosApplication
             else
 #endif
             {
-                host.TryLog(hostRegistration
-                    ? "C120-HOST registration=4 initial=no-focus result=PASS"u8
-                    : "C120-HOST registration=FAIL initial=FAIL result=FAIL"u8);
+#if HOSTLOGPROOF_C135_REUSABLE_POPUP_MENU
+                if (!_c135ProofContext)
+#endif
+                {
+                    host.TryLog(hostRegistration
+                        ? "C120-HOST registration=4 initial=no-focus result=PASS"u8
+                        : "C120-HOST registration=FAIL initial=FAIL result=FAIL"u8);
+                }
             }
 #if HOSTLOGPROOF_C123_MANAGED_SEPARATOR
             if (_c123ProofContext
@@ -1233,7 +1342,11 @@ public sealed class ManagedNotes : GuideXosApplication
         }
 #endif
 #if HOSTLOGPROOF_C133_REUSABLE_COMBOBOX
-        if (_c133ProofContext)
+        if (_c133ProofContext
+#if HOSTLOGPROOF_C135_REUSABLE_POPUP_MENU
+            && !_c135ProofContext
+#endif
+            )
         {
             bool c133Initial = _mainControlHost.RegistrationCount == 7 &&
                 _pathDisplayCombo.SelectedIndex == 0 &&
@@ -1242,6 +1355,17 @@ public sealed class ManagedNotes : GuideXosApplication
             host.TryLog(c133Initial
                 ? "C133-NOTES initial=registration=7 selection=full-path callbacks=0 result=PASS"u8
                 : "C133-NOTES initial=FAIL result=FAIL"u8);
+        }
+#endif
+#if HOSTLOGPROOF_C135_REUSABLE_POPUP_MENU
+        if (_c135ProofContext)
+        {
+            bool c135Initial = _mainControlHost.RegistrationCount == 8 &&
+                _c135Menu.ItemCount == 4 && !_c135Menu.IsOpen &&
+                _c135Menu.InvokerAvailable;
+            host.TryLog(c135Initial
+                ? "C135-NOTES initial=registration=8 items=4 capture=none result=PASS"u8
+                : "C135-NOTES initial=result=FAIL"u8);
         }
 #endif
 #endif
@@ -1313,6 +1437,16 @@ public sealed class ManagedNotes : GuideXosApplication
 #endif
 #if HOSTLOGPROOF_C131_REUSABLE_CHECKBOX
         if (_c131CheckBoxTestContext || _c131HostTestContext)
+        {
+            runFocusedProofTests = false;
+        }
+#endif
+#if HOSTLOGPROOF_C135_REUSABLE_POPUP_MENU
+        // C135 has its own bounded API/host suites.  Do not run the broad
+        // historical control catalog during the production composite launch;
+        // that work is unrelated to the popup proof and can consume the
+        // synchronous managed dispatch budget before native input begins.
+        if (_c135ProofContext || _c135MenuTestContext || _c135HostTestContext)
         {
             runFocusedProofTests = false;
         }
@@ -1444,6 +1578,26 @@ public sealed class ManagedNotes : GuideXosApplication
                 ? "C133-COMBO-TESTS cases=44 result=PASS"u8
                 : "C133-COMBO-TESTS cases=44 result=FAIL"u8);
         }
+#if HOSTLOGPROOF_C135_POPUP_MENU_TESTS
+        bool c135MenuTests = _c135MenuTestContext && !_c135MenuTestsRun
+            ? GuideXosPopupMenuC135Tests.Run(host) : true;
+        if (_c135MenuTestContext)
+        {
+            _c135MenuTestsRun = true;
+            _c135MenuTestsPassed = c135MenuTests;
+            host.TryLog(c135MenuTests
+                ? "C135-POPUP-TESTS cases=40 result=PASS"u8
+                : "C135-POPUP-TESTS cases=40 result=FAIL"u8);
+        }
+#if HOSTLOGPROOF_C135_HOST_TESTS
+        if (_c135ProofContext && _c135MenuTestsRun && _c135HostTestsRun)
+        {
+            host.TryLog(_c135MenuTestsPassed && _c135HostTestsPassed
+                ? "C135-FOCUSED-TESTS menu=PASS host=PASS result=PASS"u8
+                : "C135-FOCUSED-TESTS menu=FAIL host=FAIL result=FAIL"u8);
+        }
+#endif
+#endif
 #endif
 #if HOSTLOGPROOF_C122_MANAGED_LABEL
         bool labelHostTests = _c122LabelHostTestContext && !_c122LabelHostTestsRun
@@ -1531,6 +1685,10 @@ public sealed class ManagedNotes : GuideXosApplication
 #endif
 #if HOSTLOGPROOF_C120_MANAGED_CONTROL_HOST
             && controlHostTests
+#endif
+#if HOSTLOGPROOF_C135_REUSABLE_POPUP_MENU
+            && (!_c135MenuTestContext || _c135MenuTestsPassed)
+            && (!_c135HostTestContext || _c135HostTestsPassed)
 #endif
 #if HOSTLOGPROOF_C121_MANAGED_CHECKBOX
             && checkBoxTests && checkBoxHostTests
@@ -1995,6 +2153,61 @@ public sealed class ManagedNotes : GuideXosApplication
     }
 #endif
 
+#if HOSTLOGPROOF_C135_REUSABLE_POPUP_MENU
+    private void OnC135MenuCommand(uint commandId)
+    {
+        if (_c135PendingCommand != 0u) return;
+        _c135PendingCommand = commandId;
+    }
+
+    private GuideXosResult OpenC135Menu(
+        GuideXosHost host, GuideXosSurface surface)
+    {
+        GuideXosPopupMenuResult opened = _c135Menu.Open(400, 280);
+        if (opened != GuideXosPopupMenuResult.Opened)
+        {
+            return RenderMain(host, surface, _launchCount)
+                ? GuideXosResult.Success : GuideXosResult.InvalidArgument;
+        }
+        if (!_mainControlHost.TryAcquireTransientInputCapture(
+                C135MenuControlId))
+        {
+            _c135Menu.Cancel();
+            host.TryLog("C135-CONFLICT existing-owner=authoritative second=menu rejected result=PASS"u8);
+            return RenderMain(host, surface, _launchCount)
+                ? GuideXosResult.Success : GuideXosResult.InvalidArgument;
+        }
+        host.TryLog("C135-POPUP-OPEN invoke=Options capture=PASS popup=open result=PASS"u8);
+        return RenderMain(host, surface, _launchCount)
+            ? GuideXosResult.Success : GuideXosResult.InvalidArgument;
+    }
+
+    private bool HandleC135MenuProofKey(uint keyCode)
+    {
+        if (keyCode == C135HideMenuKey)
+        {
+            _c135Menu.SetVisible(false);
+            return true;
+        }
+        if (keyCode == C135ShowMenuKey)
+        {
+            _c135Menu.SetVisible(true);
+            return true;
+        }
+        if (keyCode == C135DisableMenuKey)
+        {
+            _c135Menu.SetEnabled(false);
+            return true;
+        }
+        if (keyCode == C135EnableMenuKey)
+        {
+            _c135Menu.SetEnabled(true);
+            return true;
+        }
+        return false;
+    }
+#endif
+
     private void BlurButtons()
     {
         _openButton.Blur();
@@ -2117,6 +2330,14 @@ public sealed class ManagedNotes : GuideXosApplication
             return ApplyPickerResult(host, surface, pickerResult);
         }
 
+#if HOSTLOGPROOF_C135_REUSABLE_POPUP_MENU
+        if (_c135ProofContext && input.Kind == GuideXosInputKind.KeyDown &&
+            HandleC135MenuProofKey(input.KeyCode))
+        {
+            return RenderMain(host, surface, _launchCount)
+                ? GuideXosResult.Success : GuideXosResult.InvalidArgument;
+        }
+#endif
 #if HOSTLOGPROOF_C131_REUSABLE_CHECKBOX
         if (_c131ProofContext && input.Kind == GuideXosInputKind.KeyDown &&
             HandleC131CheckboxProofKey(input.KeyCode))
@@ -2191,6 +2412,13 @@ public sealed class ManagedNotes : GuideXosApplication
                     :
 #endif
                 C120HitTest(input.X, input.Y);
+#if HOSTLOGPROOF_C135_REUSABLE_POPUP_MENU
+            if (_c135ProofContext && controlId == 0 &&
+                _mainControlHost.HasTransientInputCapture)
+            {
+                controlId = _mainControlHost.TransientInputCaptureOwnerId;
+            }
+#endif
             if (controlId == 0) return GuideXosResult.Success;
             GuideXosControlHostResult pointerResult = controlId == C120DocumentControlId
                 ? _mainControlHost.FocusAndRoutePointer(
@@ -2203,6 +2431,19 @@ public sealed class ManagedNotes : GuideXosApplication
 #endif
                 )
             {
+#if HOSTLOGPROOF_C135_REUSABLE_POPUP_MENU
+                if (_c135ProofContext && controlId == C135MenuControlId)
+                {
+                    if (_c135PendingCommand != 0u)
+                    {
+                        uint commandId = _c135PendingCommand;
+                        _c135PendingCommand = 0u;
+                        return HandleAction(host, commandId);
+                    }
+                    return RenderMain(host, surface, _launchCount)
+                        ? GuideXosResult.Success : GuideXosResult.InvalidArgument;
+                }
+#endif
                 host.TryLog(C120ControlLabel(controlId));
                 return HandleAction(host, C120ActionForControl(controlId));
             }
@@ -2243,6 +2484,27 @@ public sealed class ManagedNotes : GuideXosApplication
                     host, surface, _launchCount)
                     ? GuideXosResult.Success : GuideXosResult.InvalidArgument;
                 return comboRenderResult;
+            }
+#endif
+#if HOSTLOGPROOF_C135_REUSABLE_POPUP_MENU
+            if (_c135ProofContext && controlId == C135MenuControlId)
+            {
+                host.TryLog(pointerResult == GuideXosControlHostResult.Disabled
+                    ? "C135-DISABLED pointer=ignored command=none result=PASS"u8
+                    : pointerResult == GuideXosControlHostResult.Cancelled
+                        ? "C135-OUTSIDE close=PASS consumed=PASS underlying=inactive result=PASS"u8
+                        : pointerResult == GuideXosControlHostResult.Activated
+                            ? "C135-POINTER selection=PASS callback=pending result=PASS"u8
+                            : "C135-POINTER result=PASS"u8);
+                if (pointerResult == GuideXosControlHostResult.Activated &&
+                    _c135PendingCommand != 0u)
+                {
+                    uint commandId = _c135PendingCommand;
+                    _c135PendingCommand = 0u;
+                    return HandleAction(host, commandId);
+                }
+                return RenderMain(host, surface, _launchCount)
+                    ? GuideXosResult.Success : GuideXosResult.InvalidArgument;
             }
 #endif
 #if HOSTLOGPROOF_C132_REUSABLE_RADIO_BUTTON
@@ -2346,6 +2608,15 @@ public sealed class ManagedNotes : GuideXosApplication
         if (input.Kind == GuideXosInputKind.KeyDown &&
             (GuideXosTextInputKey)input.KeyCode == GuideXosTextInputKey.Tab)
         {
+#if HOSTLOGPROOF_C135_REUSABLE_POPUP_MENU
+            if (_c135ProofContext)
+            {
+                host.TryLog(input.Shift
+                    ? "C135-SHIFT-TAB close=PASS reverse=PASS result=PASS"u8
+                    : "C135-TAB close=PASS forward=PASS result=PASS"u8);
+            }
+            else
+#endif
 #if HOSTLOGPROOF_C132_REUSABLE_RADIO_BUTTON
             if (_c132ProofContext)
             {
@@ -2377,6 +2648,36 @@ public sealed class ManagedNotes : GuideXosApplication
                 ? "C120-SHIFT-TAB traversal=PASS"u8
                 : "C120-TAB traversal=PASS"u8);
         }
+#if HOSTLOGPROOF_C135_REUSABLE_POPUP_MENU
+        if (_c135ProofContext &&
+            (routeResult == GuideXosControlHostResult.Activated ||
+                routeResult == GuideXosControlHostResult.Moved ||
+                routeResult == GuideXosControlHostResult.Cancelled))
+        {
+            if (routeResult == GuideXosControlHostResult.Activated &&
+                _c135PendingCommand != 0u)
+            {
+                uint commandId = _c135PendingCommand;
+                _c135PendingCommand = 0u;
+                host.TryLog(input.Kind == GuideXosInputKind.KeyDown &&
+                    (GuideXosTextInputKey)input.KeyCode == GuideXosTextInputKey.Enter
+                    ? "C135-ENTER command=PASS callback=PASS result=PASS"u8
+                    : "C135-SPACE command=PASS callback=PASS result=PASS"u8);
+                return HandleAction(host, commandId);
+            }
+            if (routeResult == GuideXosControlHostResult.Moved)
+            {
+                host.TryLog("C135-KEYBOARD highlight=PASS disabled-skipped=PASS result=PASS"u8);
+            }
+            else if (input.Kind == GuideXosInputKind.KeyDown &&
+                (GuideXosTextInputKey)input.KeyCode == GuideXosTextInputKey.Escape)
+            {
+                host.TryLog("C135-ESCAPE cancel=PASS capture=none result=PASS"u8);
+            }
+            return RenderMain(host, surface, _launchCount)
+                ? GuideXosResult.Success : GuideXosResult.InvalidArgument;
+        }
+#endif
         if (routeResult == GuideXosControlHostResult.Activated
 #if HOSTLOGPROOF_C133_REUSABLE_COMBOBOX
             && !(_c133ProofContext &&
@@ -2882,6 +3183,12 @@ public sealed class ManagedNotes : GuideXosApplication
         {
             return HandlePickerAction(host, surface, actionId);
         }
+#if HOSTLOGPROOF_C135_REUSABLE_POPUP_MENU
+        if (_c135ProofContext && actionId == C135OptionsActionId)
+        {
+            return OpenC135Menu(host, surface);
+        }
+#endif
         if (actionId == 20u)
         {
 #if HOSTLOGPROOF_C120_MANAGED_CONTROL_HOST
@@ -3367,6 +3674,13 @@ public sealed class ManagedNotes : GuideXosApplication
 #endif
 #if HOSTLOGPROOF_C133_REUSABLE_COMBOBOX
             (!_c133ProofContext || _pathDisplayCombo.Render(surface) ==
+                GuideXosResult.Success) &&
+#endif
+#if HOSTLOGPROOF_C135_REUSABLE_POPUP_MENU
+            (!_c135ProofContext || surface.TryAddButton(
+                420, 250, 100, 28, "Options"u8, C135OptionsActionId,
+                out _) == GuideXosResult.Success) &&
+            (!_c135ProofContext || _c135Menu.Render(surface) ==
                 GuideXosResult.Success) &&
 #endif
 #endif

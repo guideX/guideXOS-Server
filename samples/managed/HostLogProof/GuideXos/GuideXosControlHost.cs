@@ -10,6 +10,7 @@ public enum GuideXosManagedControlKind
     CheckBox = 5,
     RadioButton = 6,
     ComboBox = 7,
+    PopupMenu = 8,
 }
 
 public enum GuideXosControlHostResult
@@ -114,7 +115,7 @@ public sealed class GuideXosControlHost
 
     /// <summary>
     /// Acquires the single transient-input lease for an already-open,
-    /// registered ComboBox. A second owner is rejected; ownership never
+    /// registered transient popup. A second owner is rejected; ownership never
     /// transfers implicitly and there is no capture stack.
     /// </summary>
     public bool TryAcquireTransientInputCapture(int id)
@@ -174,6 +175,12 @@ public sealed class GuideXosControlHost
         int id, GuideXosComboBox control, bool focusable = true)
     {
         return TryRegister(id, GuideXosManagedControlKind.ComboBox, control, focusable);
+    }
+
+    public GuideXosControlHostResult TryRegisterPopupMenu(
+        int id, GuideXosPopupMenu control, bool focusable = false)
+    {
+        return TryRegister(id, GuideXosManagedControlKind.PopupMenu, control, focusable);
     }
 
     /// <summary>
@@ -344,7 +351,7 @@ public sealed class GuideXosControlHost
         {
             if (TryGetTransientCaptureIndex(out int transientIndex))
             {
-                ((GuideXosComboBox)_entries[transientIndex].Control).Close();
+                CloseTransientControl(transientIndex);
                 ReleaseTransientCapture();
             }
             NormalizeActiveFocus();
@@ -711,6 +718,8 @@ public sealed class GuideXosControlHost
                 ((GuideXosRadioButton)_entries[index].Control).HandlePointerDown(x, y)),
             GuideXosManagedControlKind.ComboBox => Map(
                 ((GuideXosComboBox)_entries[index].Control).HandlePointerDown(x, y)),
+            GuideXosManagedControlKind.PopupMenu => Map(
+                ((GuideXosPopupMenu)_entries[index].Control).HandlePointerDown(x, y)),
             _ => GuideXosControlHostResult.Rejected,
         };
     }
@@ -786,6 +795,8 @@ public sealed class GuideXosControlHost
             GuideXosManagedControlKind.RadioButton => GuideXosControlHostResult.Rejected,
             GuideXosManagedControlKind.ComboBox => Map(
                 ((GuideXosComboBox)_entries[index].Control).HandleKey(key)),
+            GuideXosManagedControlKind.PopupMenu => Map(
+                ((GuideXosPopupMenu)_entries[index].Control).HandleKey(key)),
             _ => GuideXosControlHostResult.Rejected,
         };
     }
@@ -806,6 +817,8 @@ public sealed class GuideXosControlHost
                 ((GuideXosRadioButton)_entries[index].Control).HandleCharacter(character)),
             GuideXosManagedControlKind.ComboBox => Map(
                 ((GuideXosComboBox)_entries[index].Control).HandleCharacter(character)),
+            GuideXosManagedControlKind.PopupMenu => Map(
+                ((GuideXosPopupMenu)_entries[index].Control).HandleCharacter(character)),
             _ => GuideXosControlHostResult.Ignored,
         };
     }
@@ -829,6 +842,8 @@ public sealed class GuideXosControlHost
                 ((GuideXosRadioButton)_entries[index].Control).EffectiveVisible,
             GuideXosManagedControlKind.ComboBox =>
                 ((GuideXosComboBox)_entries[index].Control).EffectiveVisible,
+            GuideXosManagedControlKind.PopupMenu =>
+                ((GuideXosPopupMenu)_entries[index].Control).EffectiveVisible,
             _ => true,
         };
     }
@@ -845,6 +860,8 @@ public sealed class GuideXosControlHost
                 !((GuideXosRadioButton)_entries[index].Control).Enabled,
             GuideXosManagedControlKind.ComboBox =>
                 !((GuideXosComboBox)_entries[index].Control).Enabled,
+            GuideXosManagedControlKind.PopupMenu =>
+                !((GuideXosPopupMenu)_entries[index].Control).Enabled,
             _ => false,
         };
     }
@@ -924,6 +941,9 @@ public sealed class GuideXosControlHost
             case GuideXosManagedControlKind.ComboBox:
                 ((GuideXosComboBox)_entries[index].Control).Blur();
                 break;
+            case GuideXosManagedControlKind.PopupMenu:
+                ((GuideXosPopupMenu)_entries[index].Control).Blur();
+                break;
         }
     }
 
@@ -958,6 +978,7 @@ public sealed class GuideXosControlHost
             GuideXosManagedControlKind.CheckBox => control is GuideXosCheckBox,
             GuideXosManagedControlKind.RadioButton => control is GuideXosRadioButton,
             GuideXosManagedControlKind.ComboBox => control is GuideXosComboBox,
+            GuideXosManagedControlKind.PopupMenu => control is GuideXosPopupMenu,
             _ => false,
         };
     }
@@ -1010,6 +1031,21 @@ public sealed class GuideXosControlHost
             GuideXosComboBoxResult.Disabled => GuideXosControlHostResult.Disabled,
             GuideXosComboBoxResult.Focused => GuideXosControlHostResult.Focused,
             GuideXosComboBoxResult.Rejected => GuideXosControlHostResult.Rejected,
+            _ => GuideXosControlHostResult.Ignored,
+        };
+    }
+
+    private static GuideXosControlHostResult Map(GuideXosPopupMenuResult result)
+    {
+        return result switch
+        {
+            GuideXosPopupMenuResult.Opened => GuideXosControlHostResult.Activated,
+            GuideXosPopupMenuResult.Moved => GuideXosControlHostResult.Moved,
+            GuideXosPopupMenuResult.Activated => GuideXosControlHostResult.Activated,
+            GuideXosPopupMenuResult.Closed => GuideXosControlHostResult.Cancelled,
+            GuideXosPopupMenuResult.Cancelled => GuideXosControlHostResult.Cancelled,
+            GuideXosPopupMenuResult.Disabled => GuideXosControlHostResult.Disabled,
+            GuideXosPopupMenuResult.Rejected => GuideXosControlHostResult.Rejected,
             _ => GuideXosControlHostResult.Ignored,
         };
     }
@@ -1087,6 +1123,14 @@ public sealed class GuideXosControlHost
 
     private bool IsOpenTransientCandidate(int index)
     {
+        if (index < 0 || index >= _registrationCount) return false;
+        if (_entries[index].Kind == GuideXosManagedControlKind.PopupMenu)
+        {
+            GuideXosPopupMenu menu =
+                (GuideXosPopupMenu)_entries[index].Control;
+            return menu.IsOpen && menu.EffectiveVisible && menu.Enabled &&
+                menu.InvokerAvailable;
+        }
         return IsComboBoxOpen(index) && IsEligible(index) &&
             IsControlFocused(index);
     }
@@ -1168,5 +1212,19 @@ public sealed class GuideXosControlHost
         return index >= 0 && index < _registrationCount &&
             _entries[index].Kind == GuideXosManagedControlKind.ComboBox &&
             ((GuideXosComboBox)_entries[index].Control).IsOpen;
+    }
+
+    private void CloseTransientControl(int index)
+    {
+        if (index < 0 || index >= _registrationCount) return;
+        switch (_entries[index].Kind)
+        {
+            case GuideXosManagedControlKind.ComboBox:
+                ((GuideXosComboBox)_entries[index].Control).Close();
+                break;
+            case GuideXosManagedControlKind.PopupMenu:
+                ((GuideXosPopupMenu)_entries[index].Control).Cancel();
+                break;
+        }
     }
 }

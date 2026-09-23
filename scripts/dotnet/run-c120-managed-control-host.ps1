@@ -5,10 +5,13 @@ param(
     [string]$PythonExe = "",
     [int]$FreshBootCount = 3,
     [int]$TimeoutSeconds = 360,
-    [ValidateSet("C120", "C121", "C122", "C123", "C124", "C125", "C126", "C127", "C128", "C129", "C130", "C131", "C132", "C133", "C134")]
+    [ValidateSet("C120", "C121", "C122", "C123", "C124", "C125", "C126", "C127", "C128", "C129", "C130", "C131", "C132", "C133", "C134", "C135")]
     [string]$ProofPhase = "C120",
+    [ValidateSet("Production", "FocusedApi", "FocusedHost")]
+    [string]$C135ProofMode = "Production",
     [switch]$SkipManagedBuild,
     [switch]$SkipKernelBuild,
+    [switch]$IncrementalKernelBuild,
     [switch]$SkipFocusedTests,
     [switch]$AllowBoundedHostDefect,
     [switch]$SkipQemu
@@ -32,6 +35,12 @@ $isC131 = $ProofPhase -eq "C131"
 $isC132 = $ProofPhase -eq "C132"
 $isC133 = $ProofPhase -eq "C133"
 $isC134 = $ProofPhase -eq "C134"
+$isC135 = $ProofPhase -eq "C135"
+$isC135FocusedApi = $isC135 -and $C135ProofMode -eq "FocusedApi"
+$isC135FocusedHost = $isC135 -and $C135ProofMode -eq "FocusedHost"
+if (-not $isC135 -and $C135ProofMode -ne "Production") {
+    throw "C135ProofMode applies only to ProofPhase C135."
+}
 $phaseLower = $ProofPhase.ToLowerInvariant()
 
 $RepoRoot = [System.IO.Path]::GetFullPath($RepoRoot)
@@ -43,7 +52,9 @@ $startAheadBehind = if ($startUpstream) {
     (& git -C $RepoRoot rev-list --left-right --count "HEAD...$startUpstream").Trim()
 } else { "" }
 if ([string]::IsNullOrWhiteSpace($EvidenceRoot)) {
-    $EvidenceRoot = if ($isC134) {
+    $EvidenceRoot = if ($isC135) {
+        Join-Path $RepoRoot "out\dotnet\c135-managed-popup-menu"
+    } elseif ($isC134) {
         Join-Path $RepoRoot "out\dotnet\c134-transient-popup-routing"
     } elseif ($isC133) {
         Join-Path $RepoRoot "out\dotnet\c133-managed-combobox"
@@ -166,7 +177,9 @@ function Invoke-C120Boot([string]$Esp, [string]$Serial, [string]$Stdout,
             Start-Sleep -Milliseconds 250
             if (Test-Path -LiteralPath $Serial) {
                 $partial = Get-Content -LiteralPath $Serial -Raw -ErrorAction SilentlyContinue
-                $resultPattern = if ($isC133 -or $isC134) {
+                $resultPattern = if ($isC135FocusedApi -or $isC135FocusedHost) {
+                    '(?m)^\[C135-FOCUSED-RESULT\] mode=(?:api|host) outcome=(?:PASS|FAIL)'
+                } elseif ($isC135 -or $isC133 -or $isC134) {
                     '(?m)^\[C133-RESULT\] outcome=(?:PASS|FAIL)'
                 } elseif ($isC132) {
                     '(?m)^\[C132-RESULT\] outcome=(?:PASS|FAIL)'
@@ -391,7 +404,7 @@ function Assert-C120Serial([string]$Serial) {
         '^\[NATIVEAOT-TLS-BRIDGE\] install=.*result=00000001',
         '^\[NATIVEAOT-HEAP\] action=initialize',
         '^\[NATIVEAOT-HEAP\] action=preserve')
-    if (-not $isC121 -and -not $isC122 -and -not $isC123 -and -not $isC124 -and -not $isC125 -and -not $isC126 -and -not $isC127 -and -not $isC128 -and -not $isC129 -and -not $isC130 -and -not $isC131 -and -not $isC132 -and -not $isC133 -and -not $isC134) {
+    if (-not $isC121 -and -not $isC122 -and -not $isC123 -and -not $isC124 -and -not $isC125 -and -not $isC126 -and -not $isC127 -and -not $isC128 -and -not $isC129 -and -not $isC130 -and -not $isC131 -and -not $isC132 -and -not $isC133 -and -not $isC134 -and -not $isC135) {
         $required += @(
             '^\[C120-APPMODEL\] catalogValid=true result=PASS',
             '^\[C120-RESULT\] outcome=PASS',
@@ -467,7 +480,40 @@ function Assert-C120Serial([string]$Serial) {
             '^\[C123-DYNAMIC\] save-as=THIRD\.TXT active=SaveAs separator=visible result=PASS',
             '^\[C123-MODAL\].*result=PASS')
     }
-    if ($isC134) {
+    if ($isC135) {
+        if ($isC135FocusedApi) {
+            $required += @(
+                '^\[C133-APPMODEL\] catalogValid=true result=PASS',
+                '^\[C102-MANAGED-OUTPUT\] C135-POPUP-TESTS cases=40 result=PASS',
+                '^\[C102-MANAGED-OUTPUT\] C134-TRANSIENT-HOST-TESTS cases=30 result=PASS',
+                '^\[C135-FOCUSED-RESULT\] mode=api outcome=PASS')
+        } elseif ($isC135FocusedHost) {
+            $required += @(
+                '^\[C133-APPMODEL\] catalogValid=true result=PASS',
+                '^\[C102-MANAGED-OUTPUT\] C135-POPUP-HOST-TESTS cases=40 result=PASS',
+                '^\[C102-MANAGED-OUTPUT\] C134-TRANSIENT-HOST-TESTS cases=30 result=PASS',
+                '^\[C135-FOCUSED-RESULT\] mode=host outcome=PASS')
+        } else {
+            $required += @(
+            '^\[C133-APPMODEL\] catalogValid=true result=PASS',
+            '^\[C135-INITIAL\].*result=PASS',
+            '^\[C135-POPUP\].*result=PASS',
+            '^\[C135-POINTER\].*result=PASS',
+            '^\[C135-KEYBOARD\].*result=PASS',
+            '^\[C135-ESCAPE\].*result=PASS',
+            '^\[C135-OUTSIDE\].*result=PASS',
+            '^\[C135-TRAVERSAL\].*result=PASS',
+            '^\[C135-LIFECYCLE\].*result=PASS',
+            '^\[C135-RELAUNCH\].*result=PASS',
+            '^\[C134-POPUP-OPEN\].*result=PASS',
+            '^\[C134-FOLLOWUP-ROUTED\].*result=PASS',
+            '^\[C134-COMMIT\].*result=PASS',
+            '^\[C135-MIXED\].*result=PASS',
+            '^\[C135-RESULT\] outcome=PASS',
+            '^\[C133-MIXED\].*result=PASS',
+            '^\[C133-RESULT\] outcome=PASS')
+        }
+    } elseif ($isC134) {
         $required += @(
             '^\[C133-APPMODEL\] catalogValid=true result=PASS',
             '^\[C133-RESULT\] outcome=PASS',
@@ -677,10 +723,10 @@ function Assert-C120Serial([string]$Serial) {
     }
     $spaceMarker = @([regex]::Matches($Serial,
         '(?m)^\[C120-SPACE\] keydown=PASS keychar=PASS exact-once=PASS\r?$')).Count
-    if (-not $isC121 -and -not $isC122 -and -not $isC123 -and -not $isC124 -and -not $isC125 -and -not $isC126 -and -not $isC127 -and -not $isC128 -and -not $isC129 -and -not $isC130 -and -not $isC131 -and -not $isC132 -and -not $isC133 -and -not $isC134 -and $spaceMarker -ne 1) { throw "C120 expected one exact-once Space marker, got $spaceMarker." }
+    if (-not $isC121 -and -not $isC122 -and -not $isC123 -and -not $isC124 -and -not $isC125 -and -not $isC126 -and -not $isC127 -and -not $isC128 -and -not $isC129 -and -not $isC130 -and -not $isC131 -and -not $isC132 -and -not $isC133 -and -not $isC134 -and -not $isC135 -and $spaceMarker -ne 1) { throw "C120 expected one exact-once Space marker, got $spaceMarker." }
     $saveActivation = @([regex]::Matches($Serial,
         '(?m)^\[C102-MANAGED-OUTPUT\] C120-ACTIVATE control=Save result=PASS\r?$')).Count
-    if (-not $isC121 -and -not $isC122 -and -not $isC123 -and -not $isC124 -and -not $isC125 -and -not $isC126 -and -not $isC127 -and -not $isC128 -and -not $isC129 -and -not $isC130 -and -not $isC131 -and -not $isC132 -and -not $isC133 -and -not $isC134 -and $saveActivation -ne 1) { throw "C120 expected one managed Save activation, got $saveActivation." }
+    if (-not $isC121 -and -not $isC122 -and -not $isC123 -and -not $isC124 -and -not $isC125 -and -not $isC126 -and -not $isC127 -and -not $isC128 -and -not $isC129 -and -not $isC130 -and -not $isC131 -and -not $isC132 -and -not $isC133 -and -not $isC134 -and -not $isC135 -and $saveActivation -ne 1) { throw "C120 expected one managed Save activation, got $saveActivation." }
     if ($Serial -match '(?m)^\[(?:C134|C132|C131|C130|C129|C120|C121|C122|C123|C124|C125|C126|C127|C128)-[^\r\n]*FAIL|PageFault|triple.?fault|FAIL_FAST|fatal kernel failure|boot failure') {
         throw "Managed control proof serial output contains a failure or fault marker."
     }
@@ -710,9 +756,10 @@ if (-not $SkipManagedBuild -and -not $providedComposite) {
         "-RuntimePackOutputRoot", $runtimePackOutputRoot,
         "-UseGuideXosRuntimePack", "-ProductionApplication", "-PersistentCompositeLifecycle",
         "-AllocationMode", "Allocating", "-ManagedProjectMode",
-        $(if ($isC134) { "C134Composite" } elseif ($isC133) { "C133Composite" } elseif ($isC132) { "C132Composite" } elseif ($isC131) { "C131Composite" } elseif ($isC129) { "C129Composite" } elseif ($isC128) { "C128Composite" } elseif ($isC130 -or $isC127) { "C127Composite" } elseif ($isC126) { "C126Composite" } elseif ($isC125) { "C125Composite" } elseif ($isC124) { "C124Composite" } elseif ($isC123) { "C123Composite" } elseif ($isC122) { "C122Composite" } elseif ($isC121) { "C121Composite" } else { "C120Composite" }),
+        $(if ($isC135) { "C135Composite" } elseif ($isC134) { "C134Composite" } elseif ($isC133) { "C133Composite" } elseif ($isC132) { "C132Composite" } elseif ($isC131) { "C131Composite" } elseif ($isC129) { "C129Composite" } elseif ($isC128) { "C128Composite" } elseif ($isC130 -or $isC127) { "C127Composite" } elseif ($isC126) { "C126Composite" } elseif ($isC125) { "C125Composite" } elseif ($isC124) { "C124Composite" } elseif ($isC123) { "C123Composite" } elseif ($isC122) { "C122Composite" } elseif ($isC121) { "C121Composite" } else { "C120Composite" }),
         "-PythonExe", $PythonExe)
     if ($isC134) { $managedBuildArguments += "-IncludeC134FocusedTests" }
+    if ($isC135) { $managedBuildArguments += "-IncludeC135FocusedTests" }
     Invoke-Checked "powershell" $managedBuildArguments
 }
 $compositeElf = if ($providedComposite) { $CompositeElfPath } else {
@@ -728,7 +775,12 @@ Invoke-Checked "powershell" @(
     "-C114ManagedDirectoryServices", "-C117ManagedTextArea", "-C118ManagedListBox")
 
 $kernelFlags = "-DGXOS_NATIVEAOT_PRODUCTION_APPLICATION -DGXOS_NATIVEAOT_PRODUCTION_COMPOSITE_LAUNCH -DGXOS_NATIVEAOT_C112_REUSABLE_MANAGED_APPLICATION -DGXOS_NATIVEAOT_C113_MANAGED_FILE_SERVICES -DGXOS_NATIVEAOT_C114_MANAGED_DIRECTORY_SERVICES -DGXOS_NATIVEAOT_C115_MANAGED_FILE_PICKER -DGXOS_NATIVEAOT_C116_MANAGED_TEXT_INPUT -DGXOS_NATIVEAOT_C117_MANAGED_TEXT_AREA -DGXOS_NATIVEAOT_C118_MANAGED_LIST_BOX -DGXOS_NATIVEAOT_C119_MANAGED_BUTTON -DGXOS_NATIVEAOT_C120_MANAGED_CONTROL_HOST"
-if ($isC134) { $kernelFlags += " -DGXOS_NATIVEAOT_C121_MANAGED_CHECKBOX -DGXOS_NATIVEAOT_C122_MANAGED_LABEL -DGXOS_NATIVEAOT_C123_MANAGED_SEPARATOR -DGXOS_NATIVEAOT_C124_MANAGED_RADIO_BUTTON -DGXOS_NATIVEAOT_C125_MANAGED_PROGRESS_BAR -DGXOS_NATIVEAOT_C126_MANAGED_GROUP_BOX -DGXOS_NATIVEAOT_C127_MANAGED_PANEL -DGXOS_NATIVEAOT_C128_MANAGED_PANEL_LIFECYCLE -DGXOS_NATIVEAOT_C131_REUSABLE_CHECKBOX -DGXOS_NATIVEAOT_C132_REUSABLE_RADIO_BUTTON -DGXOS_NATIVEAOT_C133_REUSABLE_COMBOBOX -DGXOS_NATIVEAOT_C134_TRANSIENT_POPUP_ROUTING" }
+if ($isC135) {
+    $kernelFlags += " -DGXOS_NATIVEAOT_C121_MANAGED_CHECKBOX -DGXOS_NATIVEAOT_C122_MANAGED_LABEL -DGXOS_NATIVEAOT_C123_MANAGED_SEPARATOR -DGXOS_NATIVEAOT_C124_MANAGED_RADIO_BUTTON -DGXOS_NATIVEAOT_C125_MANAGED_PROGRESS_BAR -DGXOS_NATIVEAOT_C126_MANAGED_GROUP_BOX -DGXOS_NATIVEAOT_C127_MANAGED_PANEL -DGXOS_NATIVEAOT_C128_MANAGED_PANEL_LIFECYCLE -DGXOS_NATIVEAOT_C131_REUSABLE_CHECKBOX -DGXOS_NATIVEAOT_C132_REUSABLE_RADIO_BUTTON -DGXOS_NATIVEAOT_C133_REUSABLE_COMBOBOX -DGXOS_NATIVEAOT_C134_TRANSIENT_POPUP_ROUTING -DGXOS_NATIVEAOT_C135_REUSABLE_POPUP_MENU"
+    if ($isC135FocusedApi) { $kernelFlags += " -DGXOS_NATIVEAOT_C135_FOCUSED_API" }
+    if ($isC135FocusedHost) { $kernelFlags += " -DGXOS_NATIVEAOT_C135_FOCUSED_HOST" }
+}
+elseif ($isC134) { $kernelFlags += " -DGXOS_NATIVEAOT_C121_MANAGED_CHECKBOX -DGXOS_NATIVEAOT_C122_MANAGED_LABEL -DGXOS_NATIVEAOT_C123_MANAGED_SEPARATOR -DGXOS_NATIVEAOT_C124_MANAGED_RADIO_BUTTON -DGXOS_NATIVEAOT_C125_MANAGED_PROGRESS_BAR -DGXOS_NATIVEAOT_C126_MANAGED_GROUP_BOX -DGXOS_NATIVEAOT_C127_MANAGED_PANEL -DGXOS_NATIVEAOT_C128_MANAGED_PANEL_LIFECYCLE -DGXOS_NATIVEAOT_C131_REUSABLE_CHECKBOX -DGXOS_NATIVEAOT_C132_REUSABLE_RADIO_BUTTON -DGXOS_NATIVEAOT_C133_REUSABLE_COMBOBOX -DGXOS_NATIVEAOT_C134_TRANSIENT_POPUP_ROUTING" }
 elseif ($isC133) { $kernelFlags += " -DGXOS_NATIVEAOT_C121_MANAGED_CHECKBOX -DGXOS_NATIVEAOT_C122_MANAGED_LABEL -DGXOS_NATIVEAOT_C123_MANAGED_SEPARATOR -DGXOS_NATIVEAOT_C124_MANAGED_RADIO_BUTTON -DGXOS_NATIVEAOT_C125_MANAGED_PROGRESS_BAR -DGXOS_NATIVEAOT_C126_MANAGED_GROUP_BOX -DGXOS_NATIVEAOT_C127_MANAGED_PANEL -DGXOS_NATIVEAOT_C128_MANAGED_PANEL_LIFECYCLE -DGXOS_NATIVEAOT_C131_REUSABLE_CHECKBOX -DGXOS_NATIVEAOT_C132_REUSABLE_RADIO_BUTTON -DGXOS_NATIVEAOT_C133_REUSABLE_COMBOBOX" }
 elseif ($isC132) { $kernelFlags += " -DGXOS_NATIVEAOT_C121_MANAGED_CHECKBOX -DGXOS_NATIVEAOT_C122_MANAGED_LABEL -DGXOS_NATIVEAOT_C123_MANAGED_SEPARATOR -DGXOS_NATIVEAOT_C124_MANAGED_RADIO_BUTTON -DGXOS_NATIVEAOT_C125_MANAGED_PROGRESS_BAR -DGXOS_NATIVEAOT_C126_MANAGED_GROUP_BOX -DGXOS_NATIVEAOT_C127_MANAGED_PANEL -DGXOS_NATIVEAOT_C128_MANAGED_PANEL_LIFECYCLE -DGXOS_NATIVEAOT_C131_REUSABLE_CHECKBOX -DGXOS_NATIVEAOT_C132_REUSABLE_RADIO_BUTTON" }
 elseif ($isC131) { $kernelFlags += " -DGXOS_NATIVEAOT_C121_MANAGED_CHECKBOX -DGXOS_NATIVEAOT_C122_MANAGED_LABEL -DGXOS_NATIVEAOT_C123_MANAGED_SEPARATOR -DGXOS_NATIVEAOT_C124_MANAGED_RADIO_BUTTON -DGXOS_NATIVEAOT_C125_MANAGED_PROGRESS_BAR -DGXOS_NATIVEAOT_C126_MANAGED_GROUP_BOX -DGXOS_NATIVEAOT_C127_MANAGED_PANEL -DGXOS_NATIVEAOT_C128_MANAGED_PANEL_LIFECYCLE -DGXOS_NATIVEAOT_C131_REUSABLE_CHECKBOX" }
@@ -743,9 +795,13 @@ elseif ($isC123) { $kernelFlags += " -DGXOS_NATIVEAOT_C121_MANAGED_CHECKBOX -DGX
 elseif ($isC122) { $kernelFlags += " -DGXOS_NATIVEAOT_C121_MANAGED_CHECKBOX -DGXOS_NATIVEAOT_C122_MANAGED_LABEL" }
 elseif ($isC121) { $kernelFlags += " -DGXOS_NATIVEAOT_C121_MANAGED_CHECKBOX" }
 if (-not $SkipKernelBuild) {
-    Invoke-Checked "mingw32-make" @(
-        "-C", (Join-Path $RepoRoot "kernel"), "-B", "ARCH=amd64",
+    $kernelBuildArguments = @(
+        "-C", (Join-Path $RepoRoot "kernel"), "ARCH=amd64",
         "EXTRA_CFLAGS=$kernelFlags")
+    if (-not $IncrementalKernelBuild) {
+        $kernelBuildArguments += "-B"
+    }
+    Invoke-Checked "mingw32-make" $kernelBuildArguments
 }
 if (-not (Test-Path -LiteralPath $kernelPath -PathType Leaf)) { throw "Kernel is missing: $kernelPath" }
 if (-not (Test-Path -LiteralPath $bootloaderPath -PathType Leaf)) { throw "Bootloader is missing: $bootloaderPath" }
@@ -776,6 +832,9 @@ c131=GuideXosCheckBox uses the existing host registration, pointer-down, KeyDown
 c133=GuideXosComboBox uses fixed item storage, retains host focus while its transient below-control list is open, captures outside clicks, commits only on Enter/Space or item pointer selection, and cancels on Escape/lifecycle interruption; Notes replaces the two path RadioButtons with one registration
 c134=GuideXosControlHost owns one bounded transient-input lease; the registered ComboBox remains focused while the open popup receives first refusal for pointer and keyboard follow-up events, returns consumed/not-consumed deterministically, and releases capture on commit, cancel, lifecycle, modal, membership, unregister, application close, or callback mutation
 "@ | Set-Content -LiteralPath (Join-Path $EvidenceRoot "input-contract.txt") -Encoding ASCII
+if ($isC135) {
+    Add-Content -LiteralPath (Join-Path $EvidenceRoot "input-contract.txt") -Value "c135=GuideXosPopupMenu is a fixed-capacity non-focusable registered transient owner using the same one-owner lease; Options invokes it through the existing production action path; secondary-click remains deferred because current transport proves pointer-down only"
+}
 
 $bootResults = [System.Collections.Generic.List[object]]::new()
 if (-not $SkipQemu) {
@@ -832,9 +891,9 @@ if (-not $SkipQemu) {
 $evidenceSerial = if ($bootResults.Count -gt 0) {
     Get-Content -LiteralPath (Join-Path $EvidenceRoot "boot-01\serial.log")
 } else { @("QEMU not executed; build-only evidence.") }
-$evidenceSerial | Where-Object { $_ -match '^\[(?:C132|C131|C130|C129|C128|C127|C126|C125|C124|C123|C122|C121|C120|C119|C118|C117|C116|C115)-' } |
+$evidenceSerial | Where-Object { $_ -match '^\[(?:C135|C134|C133|C132|C131|C130|C129|C128|C127|C126|C125|C124|C123|C122|C121|C120|C119|C118|C117|C116|C115)-' } |
     Set-Content -LiteralPath (Join-Path $EvidenceRoot "managed-control-host-output.txt") -Encoding ASCII
-$evidenceSerial | Where-Object { $_ -match '^\[(?:C132|C131|C130|C129|C128|C127|C126|C124|C123|C122|C121|C120)-' } |
+$evidenceSerial | Where-Object { $_ -match '^\[(?:C135|C134|C133|C132|C131|C130|C129|C128|C127|C126|C124|C123|C122|C121|C120)-' } |
     Set-Content -LiteralPath (Join-Path $EvidenceRoot "control-host-evidence.txt") -Encoding ASCII
 $evidenceSerial | Where-Object { $_ -match '^\[(?:C116|C117|C118|C119)-' } |
     Set-Content -LiteralPath (Join-Path $EvidenceRoot "regression-evidence.txt") -Encoding ASCII
@@ -862,6 +921,9 @@ $sourceFiles = @(
     "samples\managed\HostLogProof\GuideXos\GuideXosComboBoxC133Tests.cs",
     "samples\managed\HostLogProof\GuideXos\GuideXosComboBoxC133HostTests.cs",
     "samples\managed\HostLogProof\GuideXos\GuideXosComboBoxC134HostTests.cs",
+    "samples\managed\HostLogProof\GuideXos\GuideXosPopupMenu.cs",
+    "samples\managed\HostLogProof\GuideXos\GuideXosPopupMenuC135Tests.cs",
+    "samples\managed\HostLogProof\GuideXos\GuideXosPopupMenuC135HostTests.cs",
     "samples\managed\HostLogProof\GuideXos\GuideXosLaunchContext.cs",
     "samples\managed\HostLogProof\GuideXos\GuideXosHost.cs",
     "samples\managed\HostLogProof\GuideXos\GuideXosLabel.cs",
@@ -898,6 +960,7 @@ $sourceFiles = @(
     "scripts\dotnet\run-c131-managed-checkbox.ps1",
     "scripts\dotnet\run-c132-managed-radiobutton.ps1",
     "scripts\dotnet\run-c133-managed-combobox.ps1",
+    "scripts\dotnet\run-c135-managed-popup-menu.ps1",
     "docs\dotnet\NATIVEAOT_C122_MANAGED_LABEL.md",
     "docs\dotnet\NATIVEAOT_C123_MANAGED_SEPARATOR.md",
     "docs\dotnet\NATIVEAOT_C124_MANAGED_RADIO_BUTTON.md",
@@ -910,7 +973,8 @@ $sourceFiles = @(
     "docs\dotnet\NATIVEAOT_C131_MANAGED_CHECKBOX.md",
     "docs\dotnet\NATIVEAOT_C132_MANAGED_RADIOBUTTON.md",
     "docs\dotnet\NATIVEAOT_C133_MANAGED_COMBOBOX.md",
-    "docs\dotnet\NATIVEAOT_C134_TRANSIENT_POPUP_ROUTING.md")
+    "docs\dotnet\NATIVEAOT_C134_TRANSIENT_POPUP_ROUTING.md",
+    "docs\dotnet\NATIVEAOT_C135_MANAGED_POPUP_MENU.md")
 $sourceHashes = [ordered]@{}
 foreach ($sourceFile in $sourceFiles) { $sourceHashes[$sourceFile] = Get-Hash (Join-Path $RepoRoot $sourceFile) }
 
@@ -933,14 +997,14 @@ endAheadBehind=$aheadBehind
 "@ | Set-Content -LiteralPath (Join-Path $EvidenceRoot "repository-state.txt") -Encoding ASCII
 
 $manifest = [ordered]@{
-    schemaVersion = 1; phase = $ProofPhase; outcome = if ($SkipQemu) { "BUILD_ONLY" } elseif ($AllowBoundedHostDefect) { "BOUNDED-HOST-DEFECT" } else { "PASS" }
+    schemaVersion = 1; phase = $ProofPhase; c135ProofMode = if ($isC135) { $C135ProofMode } else { "Production" }; outcome = if ($SkipQemu) { "BUILD_ONLY" } elseif ($AllowBoundedHostDefect) { "BOUNDED-HOST-DEFECT" } else { "PASS" }
     repository = [ordered]@{ root = $RepoRoot; branch = $repoBranch; head = $repoHead; subject = $repoSubject; upstream = $repoUpstream; aheadBehind = $aheadBehind }
     hostAbi = [ordered]@{ version = 1; tableSize = 104; changed = $false; capabilityChanges = "none"; inputTransport = "existing pointer-down, KeyDown, KeyChar and Shift payload" }
-    controlHost = [ordered]@{ api = "GuideXosControlHost"; capacity = 8; pickerCapacity = 2; tests = if($isC134){"C134 transient-capture contract: 30 focused host cases plus production ComboBox routing"}elseif($isC133){"C133 ComboBox API, transient capture, lifecycle, Panel, modal, and host routing"}elseif($isC132){"C132 RadioButton API, group coordination, callbacks, Panel, lifecycle, modal, and host routing"}elseif($isC131){"C131 checkbox API, callback, Panel, lifecycle, modal, and host routing"}elseif($isC129){"C129 direct Shift/Tab transport fixture plus existing host coverage"}elseif($isC130){"C127 Panel wrapper with obsolete direct-managed reverse helper retired"}elseif($isC128){"C128 Panel visibility, membership, activation cancellation, modal, and relaunch lifecycle"}elseif($isC127){"C127 Panel visibility/focus integration plus C126 and earlier regressions"}elseif($isC126){"C126 GroupBox passive integration plus C124/C125 regressions"}elseif($isC125){"C124 interoperability plus passive progress"}elseif($isC124){"radio host focused suite"}elseif($isC123){33}elseif($isC122){22}elseif($isC121){17}else{50}; legacyC120HostSuite = if($isC121 -or $isC122 -or $isC123 -or $isC124 -or $isC125 -or $isC126 -or $isC127 -or $isC128 -or $isC129 -or $isC130 -or $isC131 -or $isC132 -or $isC133 -or $isC134){"separate C120 runner"}else{"same image"}; modal = "one shallow picker scope with saved-ID restoration and forward fallback" }
-    comboBox = [ordered]@{ api = "GuideXosComboBox"; maximumItemCount = 16; maximumItemTextLength = 48; visibleRows = 4; popup = "transient below-control state; no child registration"; focusedTests = if($isC134){"C133 retained: 44"}elseif($isC133){44}else{"not part of this phase"}; hostTests = if($isC134){"C134: 30; C133 retained: 24"}elseif($isC133){24}else{"not part of this phase"} }
+    controlHost = [ordered]@{ api = "GuideXosControlHost"; capacity = 8; pickerCapacity = 2; tests = if($isC135){"C135 popup menu: 40 API cases, 40 host cases, shared one-owner capture, and retained C134 routing"}elseif($isC134){"C134 transient-capture contract: 30 focused host cases plus production ComboBox routing"}elseif($isC133){"C133 ComboBox API, transient capture, lifecycle, Panel, modal, and host routing"}elseif($isC132){"C132 RadioButton API, group coordination, callbacks, Panel, lifecycle, modal, and host routing"}elseif($isC131){"C131 checkbox API, callback, Panel, lifecycle, modal, and host routing"}elseif($isC129){"C129 direct Shift/Tab transport fixture plus existing host coverage"}elseif($isC130){"C127 Panel wrapper with obsolete direct-managed reverse helper retired"}elseif($isC128){"C128 Panel visibility, membership, activation cancellation, modal, and relaunch lifecycle"}elseif($isC127){"C127 Panel visibility/focus integration plus C126 and earlier regressions"}elseif($isC126){"C126 GroupBox passive integration plus C124/C125 regressions"}elseif($isC125){"C124 interoperability plus passive progress"}elseif($isC124){"radio host focused suite"}elseif($isC123){33}elseif($isC122){22}elseif($isC121){17}else{50}; legacyC120HostSuite = if($isC121 -or $isC122 -or $isC123 -or $isC124 -or $isC125 -or $isC126 -or $isC127 -or $isC128 -or $isC129 -or $isC130 -or $isC131 -or $isC132 -or $isC133 -or $isC134 -or $isC135){"separate C120 runner"}else{"same image"}; modal = "one shallow picker scope with saved-ID restoration and forward fallback" }
+    comboBox = [ordered]@{ api = "GuideXosComboBox"; maximumItemCount = 16; maximumItemTextLength = 48; visibleRows = 4; popup = "transient below-control state; no child registration"; focusedTests = if($isC135){"C133 retained: 44"}elseif($isC134){"C133 retained: 44"}elseif($isC133){44}else{"not part of this phase"}; hostTests = if($isC135){"C135 retains C134: 30 and C133: 24"}elseif($isC134){"C134: 30; C133 retained: 24"}elseif($isC133){24}else{"not part of this phase"} }
     progressBar = [ordered]@{ api = "GuideXosProgressBar"; minimum = 0; maximum = 65535; notesMinimum = 0; notesMaximum = 256; notesWidth = 312; maximumFillCells = 48; rendering = "bounded text-backed [fill-empty] percentage; floor integer arithmetic"; focusable = $false; controlHostRegistration = "absent"; focusedTests = if($isC125){50}elseif($isC126){"C125 regression in C126 image"}else{"not part of this phase"} }
     groupBox = [ordered]@{ api = "GuideXosGroupBox"; x = 12; y = 264; width = 456; height = 90; minimumWidth = 64; maximumWidth = 504; minimumHeight = 54; maximumHeight = 288; maximumCaptionLength = 48; caption = "Path Display"; render = "bounded text frame with clipped caption"; containment = "half-open"; relativeCoordinates = "TryResolvePoint"; focusable = $false; input = "none"; childOwnership = "none"; focusedTests = if($isC126){60}elseif($isC130 -or $isC127){"C126 regression image"}else{"not part of this phase"} }
-    panel = [ordered]@{ api = "GuideXosPanel"; x = 12; y = 264; width = 456; height = 90; capacity = 4; supportedChildren = "Button, CheckBox, Label, Separator, RadioButton, ProgressBar, ComboBox"; membership = "fixed non-owning single-level insertion array; duplicate and cross-panel membership rejected"; coordinates = "local pixel positions; complete child rectangle must remain inside half-open panel bounds"; visibility = "panel visibility AND child-local visibility; hidden child is not focusable or activatable"; rendering = "delegates existing child renderers; no clipping claimed"; focusable = $false; controlHostRegistration = "absent"; focusedTests = if($isC134){"C133 retained Panel semantics; C134 lifecycle and membership termination"}elseif($isC133){"C133 ComboBox membership, popup cancellation, and recovery"}elseif($isC128){"C127 membership plus C128 lifecycle cancellation and recovery"}elseif($isC130){"C127 managed Panel membership plus bounded wrapper retirement"}elseif($isC127){"managed panel membership and host integration"}else{"not part of this phase"}; interruptedActivation = if($isC134){"open ComboBox capture is cancelled on panel visibility, membership, enabled, focus, modal, unregister, and close transitions; stale input is consumed"}elseif($isC133){"open ComboBox popup is cancelled on panel visibility, membership, enabled, focus, and modal transitions; stale input is consumed"}elseif($isC128){"pending Space target is cancelled on visibility, membership, enabled, focus, and modal transitions; stale KeyChar is consumed exactly once"}else{"not part of this phase"} }
+    panel = [ordered]@{ api = "GuideXosPanel"; x = 12; y = 264; width = 456; height = 90; capacity = 4; supportedChildren = "Button, CheckBox, Label, Separator, RadioButton, ProgressBar, ComboBox"; membership = "fixed non-owning single-level insertion array; duplicate and cross-panel membership rejected"; coordinates = "local pixel positions; complete child rectangle must remain inside half-open panel bounds"; visibility = "panel visibility AND child-local visibility; hidden child is not focusable or activatable"; rendering = "delegates existing child renderers; no clipping claimed"; focusable = $false; controlHostRegistration = "absent"; focusedTests = if($isC135){"C135 retains C133 Panel semantics; menu is not a Panel child"}elseif($isC134){"C133 retained Panel semantics; C134 lifecycle and membership termination"}elseif($isC133){"C133 ComboBox membership, popup cancellation, and recovery"}elseif($isC128){"C127 membership plus C128 lifecycle cancellation and recovery"}elseif($isC130){"C127 managed Panel membership plus bounded wrapper retirement"}elseif($isC127){"managed panel membership and host integration"}else{"not part of this phase"}; interruptedActivation = if($isC135){"menu invoker invalidation, hide, disable, modal, unregister, and close release the shared lease; menu is outside Panel ownership"}elseif($isC134){"open ComboBox capture is cancelled on panel visibility, membership, enabled, focus, modal, unregister, and close transitions; stale input is consumed"}elseif($isC133){"open ComboBox popup is cancelled on panel visibility, membership, enabled, focus, and modal transitions; stale input is consumed"}elseif($isC128){"pending Space target is cancelled on visibility, membership, enabled, focus, and modal transitions; stale KeyChar is consumed exactly once"}else{"not part of this phase"} }
     radio = [ordered]@{ button = "GuideXosRadioButton"; group = "GuideXosRadioGroup"; labelMaximum = 48; groupCapacity = 4; focusedTests = "button, group, host"; registration = "explicit fixed array; duplicate and overflow rejected"; noSelection = -1; navigation = "Left/Up previous, Right/Down next, enabled-only, wrapping" }
     separator = [ordered]@{ api = "GuideXosSeparator"; orientation = "horizontal"; minimumWidth = 8; maximumWidth = 504; configuredNotesWidth = 480; renderColumns = 63; focusedTests = 48; hostTests = 33; controlHostRegistration = "absent" }
     notes = [ordered]@{ order = if ($isC132) { "Open, Save, Save As, Show Path, Full Path, File Name, Show Status, Document; C132 reuses the existing Full Path/File Name radio pair and keeps registration at 8" } elseif ($isC131) { "Open, Save, Save As, Show Path, Full Path, File Name, Show Status, Document; status checkbox is registered and controls only the existing status presentation" } elseif ($isC129) { "Open, Save, Save As, Document; C129 proof uses the existing four-control host and keeps presentation-only controls out of transport" } elseif ($isC130 -or $isC128 -or $isC127 -or $isC126 -or $isC125 -or $isC124) { "Open, Save, Save As, Show Path, Full Path, File Name, Document; Panel, GroupBox, label, separator, and progress bar are not registered" } elseif ($isC121 -or $isC122 -or $isC123) { "Open, Save, Save As, Show Path, Document; label and separator are not registered" } else { "Open, Save, Save As, Document" }; initialFocus = "none"; commands = if ($isC132) { "managed Notes Full Path/File Name radio pair uses pointer activation, KeyDown/KeyChar Space, Left/Right/Up/Down group navigation, forward Tab, reverse Shift+Tab, lifecycle cancellation, callback-driven path rendering, modal isolation, and close/relaunch checks" } elseif ($isC131) { "managed Notes Show status checkbox uses pointer activation, KeyDown/KeyChar Space, forward Tab, reverse Shift+Tab, callback-driven status rendering, and close/relaunch registration checks" } elseif ($isC129) { "physical QEMU QMP input-send-event Shift/Tab transitions, then plain tab, then printable a; Tab is KeyDown-only and the managed proof requires the production native-to-managed acknowledgements" } elseif ($isC130) { "managed C127 Panel fixture; obsolete direct-managed reverse helper is retired and C129 production Shift+Tab owns keyboard transport proof; native Reload retained" } elseif ($isC128) { "C128 repeats Notes hide/show and closes/relaunches Notes while preserving seven registrations and path display; C127 Panel remains non-owning and native Reload retained" } elseif ($isC127) { "managed Open/Save/Save As; Path Display Panel owns two radio memberships while GroupBox remains decorative; progress mirrors GuideXosTextArea.Length; native Reload retained" } elseif ($isC126) { "managed Open/Save/Save As; Path Display GroupBox is presentation-only around explicit C124 radios; progress mirrors GuideXosTextArea.Length; native Reload retained" } elseif ($isC125) { "managed Open/Save/Save As; progress mirrors GuideXosTextArea.Length; checkbox and radio presentation remain independent; native Reload retained" } elseif ($isC124) { "managed Open/Save/Save As; checkbox controls path-label visibility; radio group controls full-path/file-name presentation; native Reload retained" } elseif ($isC123) { "managed Open/Save/Save As; GuideXosLabel controls Path presentation; GuideXosSeparator divides content/status from command controls; native Reload retained" } elseif ($isC122) { "managed Open/Save/Save As; GuideXosLabel controls Path presentation; native Reload retained" } elseif ($isC121) { "managed Open/Save/Save As; checkbox controls Path presentation; native Reload retained" } else { "managed Open/Save/Save As; native Reload retained" }; space = if ($isC132) { "RadioButton selects only on KeyChar Space; KeyDown Space is ignored and pending gestures are cancelled by visibility, enabled, focus, Panel membership, and modal transitions" } elseif ($isC131) { "Show status toggles only on KeyChar Space; KeyDown Space is ignored and pending gestures are cancelled by visibility, enabled, focus, Panel membership, and modal transitions" } elseif ($isC129) { "not part of C129; existing C128 split-Space lifecycle behavior remains covered by the C128 fixture" } elseif ($isC130 -or $isC128 -or $isC127 -or $isC126 -or $isC125 -or $isC124) { "radio selection commits only on KeyChar Space; cancelled lifecycle gestures do not activate a recovered target; Panel and GroupBox remain outside the host" } elseif ($isC123 -or $isC122) { "checkbox toggles label visibility only from KeyChar Space; label and separator have no input API" } elseif ($isC121) { "checkbox toggles only from KeyChar Space; text/button/list/input routing remains isolated" } else { "exactly one Save activation from KeyChar Space" } }
@@ -949,7 +1013,7 @@ $manifest = [ordered]@{
     freshBootCount = $FreshBootCount; qemuExecuted = -not $SkipQemu
     inputs = $inputs; sourceHashes = $sourceHashes; boots = @($bootResults)
     evidence = [ordered]@{ serial = "boot-01\serial.log"; managed = "managed-control-host-output.txt"; controlHost = "control-host-evidence.txt"; regressions = "regression-evidence.txt"; lifecycle = "lifecycle-evidence.txt" }
-    documentation = if ($isC134) { "docs\dotnet\NATIVEAOT_C134_TRANSIENT_POPUP_ROUTING.md" } elseif ($isC132) { "docs\dotnet\NATIVEAOT_C132_MANAGED_RADIOBUTTON.md" } elseif ($isC131) { "docs\dotnet\NATIVEAOT_C131_MANAGED_CHECKBOX.md" } elseif ($isC130) { "docs\dotnet\NATIVEAOT_C130_C127_WRAPPER_STALL.md" } elseif ($isC129) { "docs\dotnet\NATIVEAOT_C129_SHIFT_TAB_INPUT_TRANSPORT.md" } elseif ($isC128) { "docs\dotnet\NATIVEAOT_C128_MANAGED_PANEL_LIFECYCLE.md" } elseif ($isC127) { "docs\dotnet\NATIVEAOT_C127_MANAGED_PANEL.md" } elseif ($isC126) { "docs\dotnet\NATIVEAOT_C126_MANAGED_GROUP_BOX.md" } elseif ($isC125) { "docs\dotnet\NATIVEAOT_C125_MANAGED_PROGRESS_BAR.md" } elseif ($isC124) { "docs\dotnet\NATIVEAOT_C124_MANAGED_RADIO_BUTTON.md" } elseif ($isC123) { "docs\dotnet\NATIVEAOT_C123_MANAGED_SEPARATOR.md" } elseif ($isC122) { "docs\dotnet\NATIVEAOT_C122_MANAGED_LABEL.md" } elseif ($isC121) { "docs\dotnet\NATIVEAOT_C121_MANAGED_CHECKBOX.md" } else { "docs\dotnet\NATIVEAOT_C120_MANAGED_CONTROL_HOST.md" }
+    documentation = if ($isC135) { "docs\dotnet\NATIVEAOT_C135_MANAGED_POPUP_MENU.md" } elseif ($isC134) { "docs\dotnet\NATIVEAOT_C134_TRANSIENT_POPUP_ROUTING.md" } elseif ($isC132) { "docs\dotnet\NATIVEAOT_C132_MANAGED_RADIOBUTTON.md" } elseif ($isC131) { "docs\dotnet\NATIVEAOT_C131_MANAGED_CHECKBOX.md" } elseif ($isC130) { "docs\dotnet\NATIVEAOT_C130_C127_WRAPPER_STALL.md" } elseif ($isC129) { "docs\dotnet\NATIVEAOT_C129_SHIFT_TAB_INPUT_TRANSPORT.md" } elseif ($isC128) { "docs\dotnet\NATIVEAOT_C128_MANAGED_PANEL_LIFECYCLE.md" } elseif ($isC127) { "docs\dotnet\NATIVEAOT_C127_MANAGED_PANEL.md" } elseif ($isC126) { "docs\dotnet\NATIVEAOT_C126_MANAGED_GROUP_BOX.md" } elseif ($isC125) { "docs\dotnet\NATIVEAOT_C125_MANAGED_PROGRESS_BAR.md" } elseif ($isC124) { "docs\dotnet\NATIVEAOT_C124_MANAGED_RADIO_BUTTON.md" } elseif ($isC123) { "docs\dotnet\NATIVEAOT_C123_MANAGED_SEPARATOR.md" } elseif ($isC122) { "docs\dotnet\NATIVEAOT_C122_MANAGED_LABEL.md" } elseif ($isC121) { "docs\dotnet\NATIVEAOT_C121_MANAGED_CHECKBOX.md" } else { "docs\dotnet\NATIVEAOT_C120_MANAGED_CONTROL_HOST.md" }
 }
 if ($isC133) {
     $manifest.notes.order = "Open, Save, Save As, Show Path, Status display ComboBox, Document; C133 replaces the Full Path/File Name radio pair with one registered non-editable ComboBox and changes registration from 8 to 7"
@@ -962,6 +1026,12 @@ if ($isC134) {
     $manifest.notes.commands = "production pointer opens the ComboBox, pointer item selection commits File Name, keyboard Down/Up/Enter/Space/Escape route through transient capture, outside clicks are consumed, Tab/Shift+Tab restore normal routing, lifecycle and modal transitions cancel capture, and close/relaunch restores seven registrations"
     $manifest.notes.space = "ComboBox opens from KeyDown/KeyChar Space; Down/Up move highlight; Enter/KeyChar Space commit; Escape, outside click, Tab, Shift+Tab, lifecycle, modal, and close cancel and release the single capture lease; no synthetic Tab KeyChar"
     $manifest.documentation = "docs\dotnet\NATIVEAOT_C134_TRANSIENT_POPUP_ROUTING.md"
+}
+if ($isC135) {
+    $manifest.notes.order = "Open, Save, Save As, Status display, Full Path/File Name ComboBox, Document, Options popup; popup is one non-focusable registered transient owner"
+    $manifest.notes.commands = "Options invokes a fixed four-row managed popup with Open, Save, separator, and Reload; pointer selection, Down/Up navigation, Enter/Space activation, Escape, outside-click consumption, Tab/Shift+Tab close-and-traverse, lifecycle cancellation, and close/relaunch are proven"
+    $manifest.notes.space = "Popup Space activation is KeyDown-only; no synthetic KeyChar is required; Tab remains KeyDown-only and no popup child focus target is added"
+    $manifest.documentation = "docs\dotnet\NATIVEAOT_C135_MANAGED_POPUP_MENU.md"
 }
 $manifest | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath (Join-Path $EvidenceRoot ("{0}.manifest.json" -f $phaseLower)) -Encoding ASCII
 Write-Host "$ProofPhase outcome=$($manifest.outcome) evidence=$EvidenceRoot" -ForegroundColor Green

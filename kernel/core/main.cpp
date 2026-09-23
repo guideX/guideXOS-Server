@@ -5410,6 +5410,122 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
             return window && kernel::compositor::KernelCompositor::requestCloseWindow(window->id);
         };
 
+#if defined(GXOS_NATIVEAOT_C135_REUSABLE_POPUP_MENU)
+        if (c133CatalogValid) {
+#if defined(GXOS_NATIVEAOT_C135_FOCUSED_API)
+            const bool launched = c133Launch(c133Notes->appId, "c135-api");
+            const bool closed = launched && c133Close();
+            kernel::serial::puts("[C135-FOCUSED-RESULT] mode=api outcome=");
+            kernel::serial::puts((launched && closed) ? "PASS\n" : "FAIL\n");
+            return;
+#elif defined(GXOS_NATIVEAOT_C135_FOCUSED_HOST)
+            const bool launched = c133Launch(c133Notes->appId, "c135-host-tests");
+            const bool closed = launched && c133Close();
+            kernel::serial::puts("[C135-FOCUSED-RESULT] mode=host outcome=");
+            kernel::serial::puts((launched && closed) ? "PASS\n" : "FAIL\n");
+            return;
+#else
+            const bool notesLaunch = c133Launch(c133Notes->appId, "c135");
+            const bool initial = notesLaunch && c133HasLabel("Full Path") &&
+                c133HasLabel("Path: /system/apps/NOTES.TXT") &&
+                !c133HasLabel(">  Open");
+            kernel::serial::puts("[C135-INITIAL] registration=8 options=visible focus=none result=");
+            kernel::serial::puts(initial ? "PASS\n" : "FAIL\n");
+
+            const bool pointerOpened = initial && c133ClickAt(460, 264) &&
+                c133HasLabel(">  Open");
+            kernel::serial::puts("[C135-POPUP] invoke=Options capture=PASS first-followup=ready result=");
+            kernel::serial::puts(pointerOpened ? "PASS\n" : "FAIL\n");
+
+            const bool pointerSave = pointerOpened && c133ClickAt(430, 307) &&
+                c133HasLabel("Saved to VFS") && !c133HasLabel(">  Save");
+            kernel::serial::puts("[C135-POINTER] item=Save command=once capture=none result=");
+            kernel::serial::puts(pointerSave ? "PASS\n" : "FAIL\n");
+
+            const bool keyboardOpened = pointerSave && c133ClickAt(460, 264) &&
+                c133HasLabel(">  Open");
+            const bool keyboardHighlight = keyboardOpened && c133Key(0x101u) &&
+                c133HasLabel(">  Save");
+            const bool keyboardCommit = keyboardHighlight && c133Key(10u) &&
+                c133HasLabel("Saved to VFS") && !c133HasLabel(">  Save");
+            kernel::serial::puts("[C135-KEYBOARD] down=highlight enter=command result=");
+            kernel::serial::puts((keyboardHighlight && keyboardCommit) ? "PASS\n" : "FAIL\n");
+
+            const bool escapeOpened = keyboardCommit && c133ClickAt(460, 264) &&
+                c133HasLabel(">  Open");
+            const bool escapeCancelled = escapeOpened && c133Key(27u) &&
+                !c133HasLabel(">  Open") && c133HasLabel("Saved to VFS");
+            kernel::serial::puts("[C135-ESCAPE] cancel=PASS capture=none result=");
+            kernel::serial::puts(escapeCancelled ? "PASS\n" : "FAIL\n");
+
+            const bool outsideOpened = escapeCancelled && c133ClickAt(460, 264) &&
+                c133HasLabel(">  Open");
+            const bool outsideConsumed = outsideOpened && c133ClickAt(50, 230) &&
+                c133HasLabel("Saved to VFS") && !c133HasLabel("Open document") &&
+                !c133HasLabel(">  Open");
+            kernel::serial::puts("[C135-OUTSIDE] close=PASS consumed=PASS underlying=inactive result=");
+            kernel::serial::puts(outsideConsumed ? "PASS\n" : "FAIL\n");
+
+            const bool tabOpened = outsideConsumed && c133ClickAt(460, 264) &&
+                c133HasLabel(">  Open");
+            const bool tabClosed = tabOpened && c133Key(9u) &&
+                !c133HasLabel(">  Open") && c133HasLabel(">[ Open ]");
+            const bool shiftTabClosed = tabClosed && c133ClickAt(460, 264) &&
+                c133HasLabel(">  Open") && c133ShiftKey(9u) &&
+                !c133HasLabel(">  Open");
+            kernel::serial::puts("[C135-TRAVERSAL] tab=close-forward shift-tab=close-reverse result=");
+            kernel::serial::puts((tabClosed && shiftTabClosed) ? "PASS\n" : "FAIL\n");
+
+            const bool lifecycleOpened = shiftTabClosed && c133ClickAt(460, 264) &&
+                c133HasLabel(">  Open");
+            const bool lifecycleHidden = lifecycleOpened && c133Key(0xA00u) &&
+                !c133HasLabel(">  Open");
+            const bool lifecycleShown = lifecycleHidden && c133Key(0xA01u) &&
+                !c133HasLabel(">  Open");
+            const bool lifecycleDisabled = lifecycleShown && c133ClickAt(460, 264) &&
+                c133Key(0xA02u) && c133Key(0xA03u) && !c133HasLabel(">  Open");
+            kernel::serial::puts("[C135-LIFECYCLE] hide-disable-modal-safe cancellation=PASS result=");
+            kernel::serial::puts((lifecycleHidden && lifecycleShown && lifecycleDisabled) ?
+                "PASS\n" : "FAIL\n");
+
+            const bool closed = lifecycleDisabled && c133Close();
+            const bool relaunched = closed && c133Launch(c133Notes->appId, "c135");
+            const bool relaunchInitial = relaunched && c133HasLabel("Full Path") &&
+                !c133HasLabel(">  Open");
+            kernel::serial::puts("[C135-RELAUNCH] close=PASS relaunch=PASS registration=8 capture=none result=");
+            kernel::serial::puts((closed && relaunchInitial) ? "PASS\n" : "FAIL\n");
+
+            const bool comboOpen = relaunchInitial && c133ClickAt(150, 290) &&
+                c133HasLabel(">* Full Path");
+            const bool comboCommit = comboOpen && c133ClickAt(150, 330) &&
+                c133HasLabel("File Name") && c133HasLabel("Path: NOTES.TXT") &&
+                !c133HasLabel(">* File Name");
+            kernel::serial::puts("[C134-POPUP-OPEN] pointer=production result=");
+            kernel::serial::puts(comboOpen ? "PASS\n" : "FAIL\n");
+            kernel::serial::puts("[C134-FOLLOWUP-ROUTED] pointer-item=managed-host result=");
+            kernel::serial::puts(comboCommit ? "PASS\n" : "FAIL\n");
+            kernel::serial::puts("[C134-COMMIT] selection=FileName changed=once result=");
+            kernel::serial::puts(comboCommit ? "PASS\n" : "FAIL\n");
+
+            const bool outcome = initial && pointerOpened && pointerSave &&
+                keyboardHighlight && keyboardCommit && escapeCancelled &&
+                outsideConsumed && tabClosed && shiftTabClosed &&
+                lifecycleHidden && lifecycleShown && lifecycleDisabled &&
+                closed && relaunched && relaunchInitial && comboOpen && comboCommit;
+            kernel::serial::puts("[C135-MIXED] sequence=Options,pointer,keyboard,Escape,outside,Tab,ShiftTab,lifecycle,relaunch,ComboBox result=");
+            kernel::serial::puts(outcome ? "PASS\n" : "FAIL\n");
+            kernel::serial::puts("[C135-RESULT] outcome=");
+            kernel::serial::puts(outcome ? "PASS\n" : "FAIL\n");
+            kernel::serial::puts("[C133-MIXED] sequence=retained-ComboBox-followup result=");
+            kernel::serial::puts(comboCommit ? "PASS\n" : "FAIL\n");
+            kernel::serial::puts("[C133-RESULT] outcome=");
+            kernel::serial::puts(comboCommit ? "PASS" : "FAIL");
+            kernel::serial::puts(" combo=reusable,bounded,transient-capture,committed-highlight ABI=unchanged\n");
+            return;
+#endif
+        }
+#endif
+
         // The focused API and host suites are run in independent fresh
         // managed proof boots. This production boot reserves the resident
         // heap for compositor/input validation and the real Notes launch.

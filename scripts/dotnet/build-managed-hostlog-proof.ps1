@@ -14,7 +14,8 @@
     [switch]$PersistentCompositeLifecycle,
     [switch]$ThreadStaticLifecycleDiagnostics,
     [switch]$IncludeC134FocusedTests,
-    [ValidateSet("Production", "C104AppA", "C104AppB", "C107Composite", "C108ThreadStaticLifecycle", "ProductionComposite", "C112Composite", "C113Composite", "C114Composite", "C115Composite", "C116Composite", "C117Composite", "C118Composite", "C119Composite", "C120Composite", "C121Composite", "C122Composite", "C123Composite", "C124Composite", "C125Composite", "C126Composite", "C127Composite", "C128Composite", "C129Composite", "C131Composite", "C132Composite", "C133Composite", "C134Composite")]
+    [switch]$IncludeC135FocusedTests,
+    [ValidateSet("Production", "C104AppA", "C104AppB", "C107Composite", "C108ThreadStaticLifecycle", "ProductionComposite", "C112Composite", "C113Composite", "C114Composite", "C115Composite", "C116Composite", "C117Composite", "C118Composite", "C119Composite", "C120Composite", "C121Composite", "C122Composite", "C123Composite", "C124Composite", "C125Composite", "C126Composite", "C127Composite", "C128Composite", "C129Composite", "C131Composite", "C132Composite", "C133Composite", "C134Composite", "C135Composite")]
     [string]$ManagedProjectMode = "",
     [ValidateSet("Primary64KiB", "Small4KiB")]
     [string]$HeapConfiguration = "Primary64KiB",
@@ -411,6 +412,9 @@ try {
     }
     if ($IncludeC134FocusedTests) {
         $publishProperties += "-p:HostLogProofC134IncludeFocusedTests=true"
+    }
+    if ($IncludeC135FocusedTests) {
+        $publishProperties += "-p:HostLogProofC135IncludeFocusedTests=true"
     }
     $publishBatch = @(
         "@echo off"
