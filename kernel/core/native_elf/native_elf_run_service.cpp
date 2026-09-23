@@ -1373,6 +1373,34 @@ static bool debug_request_identity_matches(const Operation& operation,
     return true;
 }
 
+static bool debug_command_is_continue(uint32_t command)
+{
+    return command == GX_DEVELOPMENT_DEBUG_CONTINUE_BREAKPOINT ||
+        command == GX_DEVELOPMENT_DEBUG_RELEASE_EXECUTION ||
+        command == GX_DEVELOPMENT_DEBUG_RESUME_STEP ||
+        command == GX_DEVELOPMENT_DEBUG_RESUME_INTERNAL_TRAP ||
+        command == GX_DEVELOPMENT_DEBUG_RESUME;
+}
+
+static gx_result resolve_continue_from_terminal(const Operation& operation,
+                                                const gx_development_debug_request& request,
+                                                gx_development_debug_snapshot* outSnapshot)
+{
+    // EXITED is authoritative.  A late Continue is a completed lifecycle
+    // command, not a request to re-enter the scheduler or await target-side
+    // acknowledgement from an execution context that no longer exists.
+    set_debug_ready_snapshot(operation, outSnapshot);
+    copy_text(outSnapshot->errorMessage, sizeof(outSnapshot->errorMessage),
+              "NativeElf target exited");
+    phase28u_trace("CONTINUE_TERMINAL_EARLY");
+    serial::puts("DEVELOPER_STUDIO_PHASE28W_CONTINUE_EXIT_RESOLVED command=");
+    serial::put_hex32(request.command);
+    serial::puts(" generation=");
+    serial::put_hex64(operation.registrationGeneration);
+    serial::putc('\n');
+    return GX_OK;
+}
+
 static void serial_debug_hex(const char* prefix, uint64_t value)
 {
     serial::puts(prefix);
@@ -5979,6 +6007,8 @@ gx_result debug(const gx_development_debug_request& request,
         set_debug_error(outSnapshot, "NativeElf debug session identity is stale");
         return GX_ERROR_FAILED;
     }
+    if (is_terminal_state(s_operation.state) && debug_command_is_continue(request.command))
+        return resolve_continue_from_terminal(s_operation, request, outSnapshot);
     if (request.command == GX_DEVELOPMENT_DEBUG_PAUSE) {
         if (s_operation.state == GX_DEVELOPMENT_RUN_PAUSED &&
             s_operation.debugPauseCaptured) {
@@ -6246,6 +6276,7 @@ gx_result debug(const gx_development_debug_request& request,
                 set_debug_ready_snapshot(s_operation, outSnapshot);
                 copy_text(outSnapshot->errorMessage, sizeof(outSnapshot->errorMessage),
                           "NativeElf target exited");
+                phase28u_trace("CONTINUE_TERMINAL_AFTER_PUMP");
             } else if (s_operation.state == GX_DEVELOPMENT_RUN_PAUSED)
                 *outSnapshot = s_operation.debugSnapshot;
             serial::puts("DEVELOPER_STUDIO_PHASE28Q_CONTINUE_PASS\n");
@@ -6285,9 +6316,14 @@ gx_result debug(const gx_development_debug_request& request,
             if (!native_elf_scheduler_pump()) return GX_ERROR_FAILED;
             if (breakpointContinue)
                 serial::puts("DEVELOPER_STUDIO_PHASE28M_CONTINUE_PUMP_RETURN\n");
-            if (s_operation.state == GX_DEVELOPMENT_RUN_PAUSED)
+            if (s_operation.state == GX_DEVELOPMENT_RUN_EXITED) {
+                set_debug_ready_snapshot(s_operation, outSnapshot);
+                copy_text(outSnapshot->errorMessage, sizeof(outSnapshot->errorMessage),
+                          "NativeElf target exited");
+                phase28u_trace("CONTINUE_TERMINAL_AFTER_PUMP");
+            } else if (s_operation.state == GX_DEVELOPMENT_RUN_PAUSED)
                 *outSnapshot = s_operation.debugSnapshot;
-            if (breakpointContinue)
+            if (breakpointContinue && s_operation.state != GX_DEVELOPMENT_RUN_EXITED)
                 outSnapshot->status = GX_DEVELOPMENT_DEBUG_STATUS_SINGLE_STEP_PENDING;
             return GX_OK;
         }
@@ -6323,7 +6359,12 @@ gx_result debug(const gx_development_debug_request& request,
         set_debug_ready_snapshot(s_operation, outSnapshot);
         const bool pumped = native_elf_scheduler_pump();
         if (!pumped) return GX_ERROR_FAILED;
-        if (s_operation.state == GX_DEVELOPMENT_RUN_PAUSED)
+        if (s_operation.state == GX_DEVELOPMENT_RUN_EXITED) {
+            set_debug_ready_snapshot(s_operation, outSnapshot);
+            copy_text(outSnapshot->errorMessage, sizeof(outSnapshot->errorMessage),
+                      "NativeElf target exited");
+            phase28u_trace("CONTINUE_TERMINAL_AFTER_PUMP");
+        } else if (s_operation.state == GX_DEVELOPMENT_RUN_PAUSED)
             *outSnapshot = s_operation.debugSnapshot;
         if (request.command == GX_DEVELOPMENT_DEBUG_RESUME_STEP ||
             request.command == GX_DEVELOPMENT_DEBUG_RESUME_INTERNAL_TRAP) {
