@@ -6227,6 +6227,13 @@ gx_result debug(const gx_development_debug_request& request,
             serial::puts(" binding="); serial::put_hex64(outSnapshot->bindingId);
             serial::puts(" stop="); serial::put_hex64(outSnapshot->context.stopGeneration);
             serial::puts(" session="); serial::put_hex64(outSnapshot->context.sessionGeneration);
+            serial::puts(" valid="); serial::put_hex32(outSnapshot->context.valid);
+            serial::puts(" arch="); serial::put_hex32(outSnapshot->context.architecture);
+            serial::puts(" native="); serial::put_hex64(outSnapshot->context.nativeRuntimeId);
+            serial::puts(" thread="); serial::put_hex64(outSnapshot->context.threadId);
+            serial::puts(" rip=0x"); serial::put_hex64(outSnapshot->context.rip);
+            serial::puts(" rsp=0x"); serial::put_hex64(outSnapshot->context.rsp);
+            serial::puts(" rbp=0x"); serial::put_hex64(outSnapshot->context.rbp);
             serial::puts(" state="); serial::put_hex32(static_cast<uint32_t>(s_operation.state));
             serial::putc('\n');
         }
