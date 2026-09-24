@@ -5415,6 +5415,55 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
             return window && kernel::compositor::KernelCompositor::requestCloseWindow(window->id);
         };
 
+#if defined(GXOS_NATIVEAOT_C137_MOUSE_WHEEL_SCROLLING)
+        auto runC137MouseWheelProof = [&]() __attribute__((noinline)) {
+        {
+        const gxos::apps::BuiltInAppMetadata* c137Notes =
+            gxos::apps::FindBuiltInAppMetadataByDisplayName("Managed Notes");
+        const bool c137CatalogValid =
+            gxos::apps::ManagedNativeAotCatalogIsValid() && c137Notes;
+        kernel::serial::puts("[C137-APPMODEL] catalogValid=");
+        kernel::serial::puts(c137CatalogValid
+            ? "true result=PASS\n" : "false result=FAIL\n");
+        const bool notesLaunch = c137CatalogValid &&
+            kernel::desktop::launch_app_with_context(
+                c137Notes->appId, "c137-native");
+        kernel::app::KernelWindow* window =
+            kernel::compositor::KernelCompositor::getFocusedWindow();
+        const int32_t textLocalX = 100;
+        const int32_t textLocalY = 100;
+        const int32_t listLocalX = 340;
+        const int32_t listLocalY = 100;
+        kernel::serial::puts("[C137-PROOF] managed-proof-started context=c137-native transport=physical-qemu result=");
+        kernel::serial::puts(notesLaunch ? "PASS\n" : "FAIL\n");
+        kernel::serial::puts("[C137-TARGET] textLocalX=");
+        kernel::serial::put_hex32(static_cast<uint32_t>(textLocalX));
+        kernel::serial::puts(" textLocalY=");
+        kernel::serial::put_hex32(static_cast<uint32_t>(textLocalY));
+        kernel::serial::puts(" listLocalX=");
+        kernel::serial::put_hex32(static_cast<uint32_t>(listLocalX));
+        kernel::serial::puts(" listLocalY=");
+        kernel::serial::put_hex32(static_cast<uint32_t>(listLocalY));
+        kernel::serial::puts(" screenTextX=");
+        kernel::serial::put_hex32(static_cast<uint32_t>(window
+            ? window->x + textLocalX : -1));
+        kernel::serial::puts(" screenTextY=");
+        kernel::serial::put_hex32(static_cast<uint32_t>(window
+            ? window->y + kernel::compositor::TITLEBAR_HEIGHT + textLocalY : -1));
+        kernel::serial::puts(" screenListX=");
+        kernel::serial::put_hex32(static_cast<uint32_t>(window
+            ? window->x + listLocalX : -1));
+        kernel::serial::puts(" screenListY=");
+        kernel::serial::put_hex32(static_cast<uint32_t>(window
+            ? window->y + kernel::compositor::TITLEBAR_HEIGHT + listLocalY : -1));
+        kernel::serial::puts(" result=");
+        kernel::serial::puts(notesLaunch && window ? "PASS\n" : "FAIL\n");
+        }
+        };
+        runC137MouseWheelProof();
+        return;
+#endif
+
 #if defined(GXOS_NATIVEAOT_C136_SECONDARY_POINTER_CONTEXT_MENU)
         auto runC136SecondaryPointerProof = [&]() __attribute__((noinline)) {
         {

@@ -32,7 +32,10 @@ static const uint8_t kGetDeviceId        = 0xF2;
 static int32_t  s_mouseX    = 0;
 static int32_t  s_mouseY    = 0;
 static uint8_t  s_buttons   = 0;
-static int8_t   s_scrollZ   = 0;
+// Keep a bounded accumulator so a short interrupt burst cannot overwrite a
+// wheel event before the main loop polls it. The public accessor still
+// exposes one signed byte at a time.
+static int16_t  s_scrollAccum = 0;
 static bool     s_dirty     = false;
 
 static int      s_phase     = 0;     // packet assembly phase
@@ -44,7 +47,7 @@ static int32_t  s_screenH   = 768;
 
 // Touchpad filtering
 // kNoiseThreshold = 0 disables filtering (important for QEMU where
-// small deltas of ±1 are common and must not be discarded)
+// small deltas of +/-1 are common and must not be discarded)
 static const int kNoiseThreshold   = 0;
 static const int kMaxDeltaPerPacket = 50;
 
@@ -132,6 +135,9 @@ void init(uint32_t screen_width, uint32_t screen_height)
     s_mouseX  = s_screenW / 2;
     s_mouseY  = s_screenH / 2;
     s_phase   = 0;
+    s_buttons = 0;
+    s_scrollAccum = 0;
+    s_dirty = false;
 
     serial::puts("[PS2] Starting PS/2 mouse init\n");
 
@@ -227,7 +233,7 @@ void irq_handler()
     uint8_t status = arch::inb(kCommandPort);
     if ((status & 0x01) == 0) return;  // no data available
     if ((status & 0x20) == 0) {
-        // Data is from keyboard, not mouse — read and discard to clear buffer
+        // Data is from keyboard, not mouse -- read and discard to clear buffer
         arch::inb(kDataPort);
         return;
     }
@@ -256,7 +262,7 @@ void irq_handler()
     } else if (s_phase == 2) {
         s_packet[2] = d;
         if (!s_hasWheel) {
-            // 3-byte standard mouse — process now
+            // 3-byte standard mouse -- process now
             s_phase = 0;
         } else {
             s_phase = 3; // wait for 4th byte (scroll)
@@ -274,11 +280,19 @@ void irq_handler()
     if (s_phase != 0) return;
 
     // Validate: bit 3 of byte 0 must be set
-    if ((s_packet[0] & 0x08) == 0) return;
+    if ((s_packet[0] & 0x08) == 0 || (s_packet[0] & 0xC0) != 0) {
+        s_phase = 0;
+        return;
+    }
 
     // Extract sign bits
     bool xSign = (s_packet[0] & 0x10) != 0;
     bool ySign = (s_packet[0] & 0x20) != 0;
+    if (xSign != ((s_packet[1] & 0x80) != 0) ||
+        ySign != ((s_packet[2] & 0x80) != 0)) {
+        s_phase = 0;
+        return;
+    }
 
     // Buttons
     uint8_t oldButtons = s_buttons;
@@ -300,24 +314,54 @@ void irq_handler()
     if (iabs(dx) < kNoiseThreshold) dx = 0;
     if (iabs(dy) < kNoiseThreshold) dy = 0;
 
-    // Discard corrupted packets
-    if (iabs(dx) >= kMaxDeltaPerPacket && iabs(dy) >= kMaxDeltaPerPacket) return;
+    // Discard corrupted packets. Overflow packets are not pointer motion;
+    // dropping them also gives the next byte a clean synchronization point.
+    if ((s_packet[0] & 0xC0) != 0) {
+        s_phase = 0;
+        return;
+    }
+    if (iabs(dx) >= kMaxDeltaPerPacket && iabs(dy) >= kMaxDeltaPerPacket) {
+        s_phase = 0;
+        return;
+    }
 
     // Update position
     if (dx != 0 || dy != 0 || s_buttons != oldButtons) s_dirty = true;
     s_mouseX = clamp(s_mouseX + dx, 0, s_screenW - 1);
     s_mouseY = clamp(s_mouseY + dy, 0, s_screenH - 1);
 
-    // Scroll wheel (4th byte, signed)
+    // IntelliMouse encodes the vertical wheel as a signed four-bit value in
+    // the low nibble of byte four. Normalize it here; no raw PS/2 nibble
+    // representation crosses the driver boundary.
     if (s_hasWheel) {
-        s_scrollZ = static_cast<int8_t>(s_packet[3]);
+        int32_t wheel = static_cast<int32_t>(s_packet[3] & 0x0Fu);
+        if (wheel >= 8) wheel -= 16;
+        if (wheel != 0) {
+            s_scrollAccum += static_cast<int16_t>(wheel);
+            if (s_scrollAccum > 1024) s_scrollAccum = 1024;
+            if (s_scrollAccum < -1024) s_scrollAccum = -1024;
+            s_dirty = true;
+        }
     }
 }
 
 int32_t get_x()       { return s_mouseX; }
 int32_t get_y()       { return s_mouseY; }
 uint8_t get_buttons() { return s_buttons; }
-int8_t  get_scroll_delta() { int8_t z = s_scrollZ; s_scrollZ = 0; return z; }
+int8_t  get_scroll_delta()
+{
+    if (s_scrollAccum > 127) {
+        s_scrollAccum -= 127;
+        return 127;
+    }
+    if (s_scrollAccum < -128) {
+        s_scrollAccum += 128;
+        return -128;
+    }
+    int8_t result = static_cast<int8_t>(s_scrollAccum);
+    s_scrollAccum = 0;
+    return result;
+}
 bool    is_dirty()    { return s_dirty; }
 void    clear_dirty() { s_dirty = false; }
 

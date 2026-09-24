@@ -11,6 +11,7 @@ public enum GuideXosTextAreaEditResult
     Submitted = 4,
     Cancelled = 5,
     Rejected = 6,
+    Scrolled = 7,
 }
 
 /// <summary>
@@ -40,6 +41,8 @@ public sealed class GuideXosTextArea
     private int _firstVisibleLine;
     private int _preferredColumn = -1;
     private bool _isFocused;
+    private bool _isVisible = true;
+    private bool _isEnabled = true;
     private bool _isSubmitted;
     private bool _isCancelled;
     private uint _rejectedInputCount;
@@ -86,6 +89,9 @@ public sealed class GuideXosTextArea
     public int SelectionEnd => Math.Max(_anchorIndex, _caretIndex);
     public bool HasSelection => _anchorIndex != _caretIndex;
     public bool IsFocused => _isFocused;
+    public bool Visible => _isVisible;
+    public bool Enabled => _isEnabled;
+    public bool EffectiveVisible => _isVisible;
     public bool IsSubmitted => _isSubmitted;
     public bool IsCancelled => _isCancelled;
     public int FirstVisibleLine => _firstVisibleLine;
@@ -107,6 +113,7 @@ public sealed class GuideXosTextArea
 
     public void Focus()
     {
+        if (!_isVisible || !_isEnabled) return;
         _isFocused = true;
         _isSubmitted = false;
         _isCancelled = false;
@@ -118,12 +125,49 @@ public sealed class GuideXosTextArea
         _isFocused = false;
     }
 
+    public void SetVisible(bool visible)
+    {
+        _isVisible = visible;
+        if (!visible) _isFocused = false;
+    }
+
+    public void SetEnabled(bool enabled)
+    {
+        _isEnabled = enabled;
+        if (!enabled) _isFocused = false;
+    }
+
     public void ResetTransientState()
     {
         _isFocused = false;
         _isSubmitted = false;
         _isCancelled = false;
         _rejectedInputCount = 0u;
+    }
+
+    /// <summary>
+    /// Scrolls the logical line viewport without moving the caret. Positive
+    /// wheel values move toward earlier lines; negative values move later.
+    /// One normalized wheel notch is three logical lines.
+    /// </summary>
+    public GuideXosTextAreaEditResult HandleWheel(int wheelDelta)
+    {
+        if (!_isVisible) return GuideXosTextAreaEditResult.Ignored;
+        if (!_isEnabled) return GuideXosTextAreaEditResult.Rejected;
+        if (wheelDelta == 0) return GuideXosTextAreaEditResult.Ignored;
+
+        int boundedDelta = wheelDelta;
+        if (boundedDelta > 8) boundedDelta = 8;
+        if (boundedDelta < -8) boundedDelta = -8;
+        int prior = _firstVisibleLine;
+        int next = prior - boundedDelta * 3;
+        int maximumFirst = Math.Max(0, _lineCount - _visibleLineCount);
+        if (next < 0) next = 0;
+        if (next > maximumFirst) next = maximumFirst;
+        _firstVisibleLine = next;
+        return prior == next
+            ? GuideXosTextAreaEditResult.Ignored
+            : GuideXosTextAreaEditResult.Scrolled;
     }
 
     /// <summary>
@@ -213,6 +257,8 @@ public sealed class GuideXosTextArea
         int characterWidth = 8,
         int lineHeight = 18)
     {
+        if (!_isVisible) return GuideXosTextAreaEditResult.Ignored;
+        if (!_isEnabled) return GuideXosTextAreaEditResult.Rejected;
         if (characterWidth < 1 || lineHeight < 1 || x < originX || y < originY ||
             x >= originX + _maximumRenderableColumns * characterWidth ||
             y >= originY + _visibleLineCount * lineHeight)

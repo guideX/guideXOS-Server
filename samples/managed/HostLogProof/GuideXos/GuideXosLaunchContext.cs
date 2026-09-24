@@ -26,22 +26,44 @@ public sealed unsafe class GuideXosLaunchContext
     public bool IsAction => (Flags & GxAbi.LaunchFlagAction) != 0;
     public uint ActionId => Flags & GxAbi.LaunchFlagPayloadMask;
     public bool IsInput => (Flags & GxAbi.LaunchFlagInput) != 0;
-    public GuideXosInputKind InputKind =>
-        (Flags & GxAbi.LaunchFlagInputKindMask) switch
+    public GuideXosInputKind InputKind
+    {
+        get
         {
-            GxAbi.LaunchFlagInputPointerDown => GuideXosInputKind.PointerDown,
-            GxAbi.LaunchFlagInputPointerUp => GuideXosInputKind.PointerUp,
-            GxAbi.LaunchFlagInputSecondaryPointerDown => GuideXosInputKind.PointerDown,
-            GxAbi.LaunchFlagInputSecondaryPointerUp => GuideXosInputKind.PointerUp,
-            GxAbi.LaunchFlagInputKeyDown => GuideXosInputKind.KeyDown,
-            GxAbi.LaunchFlagInputKeyChar => GuideXosInputKind.KeyChar,
-            _ => GuideXosInputKind.None,
-        };
+            uint kind = Flags & GxAbi.LaunchFlagInputKindMask;
+            if (kind >= GxAbi.LaunchFlagInputWheel &&
+                kind <= GxAbi.LaunchFlagInputWheelLast)
+            {
+                return GuideXosInputKind.Wheel;
+            }
+            return kind switch
+            {
+                GxAbi.LaunchFlagInputPointerDown => GuideXosInputKind.PointerDown,
+                GxAbi.LaunchFlagInputPointerUp => GuideXosInputKind.PointerUp,
+                GxAbi.LaunchFlagInputSecondaryPointerDown => GuideXosInputKind.PointerDown,
+                GxAbi.LaunchFlagInputSecondaryPointerUp => GuideXosInputKind.PointerUp,
+                GxAbi.LaunchFlagInputKeyDown => GuideXosInputKind.KeyDown,
+                GxAbi.LaunchFlagInputKeyChar => GuideXosInputKind.KeyChar,
+                _ => GuideXosInputKind.None,
+            };
+        }
+    }
     public uint InputPayload => Flags & GxAbi.LaunchFlagInputPayloadMask;
     public int InputX => (int)(InputPayload & GxAbi.LaunchFlagInputCoordinateMask);
     public int InputY => (int)((InputPayload >> 12) & GxAbi.LaunchFlagInputCoordinateMask);
     public uint InputKeyCode => InputPayload & GxAbi.LaunchFlagInputValueMask;
     public char InputCharacter => (char)(InputPayload & 0xFFu);
+    public int InputWheelDelta
+    {
+        get
+        {
+            uint kind = Flags & GxAbi.LaunchFlagInputKindMask;
+            return kind >= GxAbi.LaunchFlagInputWheel &&
+                kind <= GxAbi.LaunchFlagInputWheelLast
+                ? (int)((kind - GxAbi.LaunchFlagInputWheel) >> 24) - 4
+                : 0;
+        }
+    }
     public GuideXosPointerButton InputButton =>
         (Flags & GxAbi.LaunchFlagInputKindMask) switch
         {
@@ -53,6 +75,7 @@ public sealed unsafe class GuideXosLaunchContext
         };
     public bool InputShift => InputKind != GuideXosInputKind.PointerDown &&
         InputKind != GuideXosInputKind.PointerUp &&
+        InputKind != GuideXosInputKind.Wheel &&
         (InputPayload & GxAbi.LaunchFlagInputShift) != 0u;
 
     internal bool TryCopy(

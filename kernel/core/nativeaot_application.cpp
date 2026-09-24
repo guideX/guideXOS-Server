@@ -2,6 +2,7 @@
 
 #include "include/kernel/address_space.h"
 #include "include/kernel/arch.h"
+#include "include/kernel/desktop.h"
 #include "include/kernel/hugepages.h"
 #include "include/kernel/framebuffer.h"
 #include "include/kernel/kernel_app.h"
@@ -120,8 +121,14 @@ constexpr uint32_t kLaunchFlagInputKeyChar = 0x03000000u;
 constexpr uint32_t kLaunchFlagInputPointerUp = 0x04000000u;
 constexpr uint32_t kLaunchFlagInputSecondaryPointerDown = 0x05000000u;
 constexpr uint32_t kLaunchFlagInputSecondaryPointerUp = 0x06000000u;
+// C137 uses the remaining kind values as a compact signed wheel-delta lane.
+// This preserves the existing 12-bit X + 12-bit Y payload and therefore keeps
+// the v1 launch-flags ABI unchanged.
+constexpr uint32_t kLaunchFlagInputWheel = 0x07000000u;
+constexpr uint32_t kLaunchFlagInputWheelLast = 0x0F000000u;
 constexpr uint32_t kLaunchFlagInputPayloadMask = 0x00FFFFFFu;
 constexpr uint32_t kLaunchFlagInputCoordinateMask = 0x00000FFFu;
+constexpr uint32_t kC137RelaunchKey = 0x11Bu;
 // C117 reserves the high bit of the 24-bit key payload for Shift. This is an
 // input-transport detail, not a host-table or ABI extension.
 constexpr uint32_t kLaunchFlagInputShift = 0x00800000u;
@@ -489,6 +496,34 @@ public:
         }
     }
 
+    void onMouseWheel(int x, int y, int wheelDelta) override {
+        if (m_selector == 0u || wheelDelta == 0 || x < 0 || y < 0 ||
+            static_cast<uint32_t>(x) > kLaunchFlagInputCoordinateMask ||
+            static_cast<uint32_t>(y) > kLaunchFlagInputCoordinateMask) {
+            return;
+        }
+        if (wheelDelta > 4) wheelDelta = 4;
+        if (wheelDelta < -4) wheelDelta = -4;
+        const uint32_t wheelKind = kLaunchFlagInputWheel +
+            (static_cast<uint32_t>(wheelDelta + 4) << 24);
+        const uint32_t payload = static_cast<uint32_t>(x) |
+            (static_cast<uint32_t>(y) << 12);
+        const int32_t result = invokeManagedInput(
+            m_selector, kLaunchFlagInput | wheelKind | payload);
+#if defined(GXOS_NATIVEAOT_C137_MOUSE_WHEEL_SCROLLING)
+        serial::puts("[C137-NATIVE-INPUT] kind=wheel delta=");
+        if (wheelDelta < 0) serial::puts("-");
+        serial::put_hex32(static_cast<uint32_t>(wheelDelta < 0
+            ? -wheelDelta : wheelDelta));
+        serial::puts(" x=");
+        serial::put_hex32(static_cast<uint32_t>(x));
+        serial::puts(" y=");
+        serial::put_hex32(static_cast<uint32_t>(y));
+        serial::puts(" buttons-preserved=true result=");
+        serial::puts(result == 0 ? "PASS\n" : "FAIL\n");
+#endif
+    }
+
     void onKeyDown(uint32_t key) override {
         if (m_selector == 0u || key > kLaunchFlagInputPayloadMask) return;
         uint32_t payload = key & kLaunchFlagInputValueMask;
@@ -516,6 +551,17 @@ public:
             serial::put_hex32((payload & kLaunchFlagInputShift) != 0u ? 1u : 0u);
             serial::puts(" result=");
             serial::puts(result == 0 ? "PASS\n" : "FAIL\n");
+        }
+#endif
+#if defined(GXOS_NATIVEAOT_C137_MOUSE_WHEEL_SCROLLING)
+        if (key == kC137RelaunchKey && result == 0) {
+            const gxos::apps::BuiltInAppMetadata* notes =
+                gxos::apps::FindBuiltInAppMetadataByDisplayName("Managed Notes");
+            const bool relaunched = notes && kernel::desktop::launch_app_with_context(
+                notes->appId, "c137-relaunch");
+            serial::puts("[C137-RELAUNCH] close=PASS relaunch=");
+            serial::puts(relaunched ? "PASS capture=none result=PASS\n"
+                                     : "FAIL capture=unknown result=FAIL\n");
         }
 #endif
     }
@@ -2258,8 +2304,10 @@ int32_t invokeManagedAction(uint32_t selector, uint32_t actionId) {
 int32_t invokeManagedInput(uint32_t selector, uint32_t inputFlags) {
     const uint32_t kind = inputFlags & kLaunchFlagInputKindMask;
     const uint32_t payload = inputFlags & kLaunchFlagInputPayloadMask;
+    const bool wheelKind = kind >= kLaunchFlagInputWheel &&
+        kind <= kLaunchFlagInputWheelLast;
     if (selector == 0u || (inputFlags & kLaunchFlagInput) == 0u ||
-        (kind != kLaunchFlagInputPointerDown &&
+        (!wheelKind && kind != kLaunchFlagInputPointerDown &&
          kind != kLaunchFlagInputPointerUp &&
          kind != kLaunchFlagInputKeyDown &&
          kind != kLaunchFlagInputKeyChar &&

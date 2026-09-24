@@ -438,7 +438,12 @@ public sealed class ManagedNotes : GuideXosApplication
     private const string C117ExpectedDocument =
         "AFirst!\n line\nSecond? ROW\nThird line\nFourth line\nFifth line\nSixth line!";
     private readonly GuideXosFilePicker _picker = new();
-    private readonly GuideXosTextArea _textArea = new(256, 32, 4, 48);
+    private readonly GuideXosTextArea _textArea = new(256, 32, 4,
+#if HOSTLOGPROOF_C137_MOUSE_WHEEL_SCROLLING
+        32);
+#else
+        48);
+#endif
     private readonly byte[] _fallbackDocument =
         "First line\nSecond line\nThird line\nFourth line\nFifth line\nSixth line"u8.ToArray();
     private string _currentPath = "/system/apps/NOTES.TXT";
@@ -655,6 +660,15 @@ public sealed class ManagedNotes : GuideXosApplication
     private uint _c136CommandCount;
     private uint _c136InputTraceCount;
 #endif
+#if HOSTLOGPROOF_C137_MOUSE_WHEEL_SCROLLING
+    private const uint C137RelaunchKey = 0x11Bu;
+    private const int C137ListControlId = 9;
+    private readonly GuideXosListBox _c137ListBox =
+        new(16, 32, 4, 24);
+    private bool _c137ProofContext;
+    private bool _c137TestsRun;
+    private bool _c137TestsPassed;
+#endif
 #endif
 #endif
 #endif
@@ -691,7 +705,15 @@ public sealed class ManagedNotes : GuideXosApplication
         _c136ProofContext = host.LaunchContext.Utf8.SequenceEqual("c136"u8) ||
             host.LaunchContext.Utf8.SequenceEqual("c136-native"u8) ||
             host.LaunchContext.Utf8.SequenceEqual("c136-api"u8) ||
-            host.LaunchContext.Utf8.SequenceEqual("c136-host-tests"u8);
+            host.LaunchContext.Utf8.SequenceEqual("c136-host-tests"u8)
+#if HOSTLOGPROOF_C137_MOUSE_WHEEL_SCROLLING
+            || host.LaunchContext.Utf8.SequenceEqual("c137"u8) ||
+            host.LaunchContext.Utf8.SequenceEqual("c137-native"u8) ||
+            host.LaunchContext.Utf8.SequenceEqual("c137-api"u8) ||
+            host.LaunchContext.Utf8.SequenceEqual("c137-host-tests"u8) ||
+            host.LaunchContext.Utf8.SequenceEqual("c137-relaunch"u8)
+#endif
+            ;
 #endif
 #endif
 #endif
@@ -829,6 +851,13 @@ public sealed class ManagedNotes : GuideXosApplication
             host.LaunchContext.Utf8.SequenceEqual("c136-host-tests"u8) ||
             host.LaunchContext.Utf8.SequenceEqual("c136-native"u8)
 #endif
+#if HOSTLOGPROOF_C137_MOUSE_WHEEL_SCROLLING
+            || host.LaunchContext.Utf8.SequenceEqual("c137"u8) ||
+            host.LaunchContext.Utf8.SequenceEqual("c137-native"u8) ||
+            host.LaunchContext.Utf8.SequenceEqual("c137-api"u8) ||
+            host.LaunchContext.Utf8.SequenceEqual("c137-host-tests"u8) ||
+            host.LaunchContext.Utf8.SequenceEqual("c137-relaunch"u8)
+#endif
             ;
         _c135MenuTestContext = host.LaunchContext.Utf8.SequenceEqual("c135-api"u8);
         _c135HostTestContext = host.LaunchContext.Utf8.SequenceEqual("c135-host-tests"u8);
@@ -837,6 +866,13 @@ public sealed class ManagedNotes : GuideXosApplication
 #endif
 #endif
 #endif
+#endif
+#if HOSTLOGPROOF_C137_MOUSE_WHEEL_SCROLLING
+        _c137ProofContext = host.LaunchContext.Utf8.SequenceEqual("c137"u8) ||
+            host.LaunchContext.Utf8.SequenceEqual("c137-native"u8) ||
+            host.LaunchContext.Utf8.SequenceEqual("c137-api"u8) ||
+            host.LaunchContext.Utf8.SequenceEqual("c137-host-tests"u8) ||
+            host.LaunchContext.Utf8.SequenceEqual("c137-relaunch"u8);
 #endif
 #if HOSTLOGPROOF_C132_REUSABLE_RADIO_BUTTON
         _c120ProofContext = _c120ProofContext || _c132ProofContext;
@@ -848,6 +884,11 @@ public sealed class ManagedNotes : GuideXosApplication
         _c121ProofContext = _c121ProofContext || _c133ProofContext;
         _c131ProofContext = _c131ProofContext || _c133ProofContext;
         _c122ProofContext = _c122ProofContext || _c133ProofContext;
+#endif
+#if HOSTLOGPROOF_C137_MOUSE_WHEEL_SCROLLING
+        _c120ProofContext = _c120ProofContext || _c137ProofContext;
+        _c121ProofContext = _c121ProofContext || _c137ProofContext;
+        _c131ProofContext = _c131ProofContext || _c137ProofContext;
 #endif
         _c124ProofContext = _c124ProofContext || _c125ProofContext;
 #endif
@@ -1086,7 +1127,24 @@ public sealed class ManagedNotes : GuideXosApplication
                     C135MenuControlId, _c135Menu, false);
             }
 #endif
+#if HOSTLOGPROOF_C137_MOUSE_WHEEL_SCROLLING
+            if (_c137ProofContext)
+            {
+                _c137ListBox.Reset();
+                for (int index = 0; index < 12; index++)
+                {
+                    _c137ListBox.TryAdd(C137FixtureLabel(index));
+                }
+                _c137ListBox.Blur();
+            }
+#endif
             _mainControlHost.TryRegisterTextArea(C120DocumentControlId, _textArea);
+#if HOSTLOGPROOF_C137_MOUSE_WHEEL_SCROLLING
+            if (_c137ProofContext)
+            {
+                _mainControlHost.TryRegisterListBox(C137ListControlId, _c137ListBox);
+            }
+#endif
             if (host.LaunchContext.Utf8.SequenceEqual("c120-disabled"u8))
             {
                 _saveButton.SetEnabled(false);
@@ -1094,6 +1152,9 @@ public sealed class ManagedNotes : GuideXosApplication
             int expectedHostRegistration =
 #if HOSTLOGPROOF_C124_MANAGED_RADIO_BUTTON
 #if HOSTLOGPROOF_C135_REUSABLE_POPUP_MENU
+#if HOSTLOGPROOF_C137_MOUSE_WHEEL_SCROLLING
+                _c137ProofContext ? 8 :
+#endif
                 _c135ProofContext ? 8 :
 #endif
 #if HOSTLOGPROOF_C133_REUSABLE_COMBOBOX
@@ -1115,7 +1176,11 @@ public sealed class ManagedNotes : GuideXosApplication
             bool hostRegistration = _mainControlHost.RegistrationCount ==
                 expectedHostRegistration && _mainControlHost.ActiveIndex == -1;
 #if HOSTLOGPROOF_C135_REUSABLE_POPUP_MENU
-            if (_c135ProofContext)
+            if (_c135ProofContext
+#if HOSTLOGPROOF_C137_MOUSE_WHEEL_SCROLLING
+                && !_c137ProofContext
+#endif
+                )
             {
                 host.TryLog(hostRegistration &&
                     _mainControlHost.RegistrationCount == 8 &&
@@ -1123,6 +1188,17 @@ public sealed class ManagedNotes : GuideXosApplication
                         GuideXosManagedControlKind.None
                     ? "C135-HOST registration=8 menu=non-focusable initial=no-focus result=PASS"u8
                     : "C135-HOST registration=FAIL initial=no-focus result=FAIL"u8);
+            }
+#endif
+#if HOSTLOGPROOF_C137_MOUSE_WHEEL_SCROLLING
+            if (_c137ProofContext)
+            {
+                host.TryLog(hostRegistration &&
+                    _mainControlHost.RegistrationCount == 8 &&
+                    _mainControlHost.TransientInputCaptureKind ==
+                        GuideXosManagedControlKind.None
+                    ? "C137-HOST registration=8 list=registered initial=viewport-zero result=PASS"u8
+                    : "C137-HOST registration=FAIL initial=viewport-zero result=FAIL"u8);
             }
 #endif
 #if HOSTLOGPROOF_C133_REUSABLE_COMBOBOX
@@ -1292,8 +1368,32 @@ public sealed class ManagedNotes : GuideXosApplication
             _textArea.SetUtf8(_fallbackDocument);
             _status = StatusText(loadResult);
         }
+#if HOSTLOGPROOF_C137_MOUSE_WHEEL_SCROLLING
+        if (_c137ProofContext)
+        {
+            _textArea.SetText(
+                "Line 00\nLine 01\nLine 02\nLine 03\nLine 04\nLine 05\n" +
+                "Line 06\nLine 07\nLine 08\nLine 09\nLine 10\nLine 11");
+            _status = "C137 wheel fixture";
+        }
+#endif
         _textArea.SetCaretToStart();
         _textArea.Blur();
+#if HOSTLOGPROOF_C137_MOUSE_WHEEL_SCROLLING
+        if (_c137ProofContext &&
+            host.LaunchContext.Utf8.SequenceEqual("c137-relaunch"u8))
+        {
+            host.TryLog(_mainControlHost.RegistrationCount == 8 &&
+                _mainControlHost.ActiveIndex == -1 &&
+                _textArea.FirstVisibleLine == 0 &&
+                _c137ListBox.FirstVisibleIndex == 0 &&
+                _c137ListBox.SelectedIndex == 0 &&
+                _mainControlHost.TransientInputCaptureKind ==
+                    GuideXosManagedControlKind.None
+                ? "C137-RELAUNCH registration=8 text-viewport=0 list-viewport=0 selection=0 capture=none result=PASS"u8
+                : "C137-RELAUNCH registration=FAIL capture=unknown result=FAIL"u8);
+        }
+#endif
 
         GuideXosResult result = host.TryCreateSurface(
             "Managed Notes"u8, 600, 360, out GuideXosSurface surface);
@@ -1662,6 +1762,22 @@ public sealed class ManagedNotes : GuideXosApplication
             host.TryLog(c136Tests
                 ? "C136-POINTER-TESTS cases=36 result=PASS"u8
                 : "C136-POINTER-TESTS cases=36 result=FAIL"u8);
+        }
+#endif
+#if HOSTLOGPROOF_C137_MOUSE_WHEEL_SCROLLING
+        bool c137Tests = (_c137ProofContext ||
+            host.LaunchContext.Utf8.SequenceEqual("c137-api"u8) ||
+            host.LaunchContext.Utf8.SequenceEqual("c137-host-tests"u8)) &&
+            !_c137TestsRun
+            ? GuideXosMouseWheelC137Tests.Run(host) : true;
+        if (_c137ProofContext || host.LaunchContext.Utf8.SequenceEqual("c137-api"u8) ||
+            host.LaunchContext.Utf8.SequenceEqual("c137-host-tests"u8))
+        {
+            _c137TestsRun = true;
+            _c137TestsPassed = c137Tests;
+            host.TryLog(c137Tests
+                ? "C137-TESTS transport=12 text-area=16 list-box=18 cases=46 result=PASS"u8
+                : "C137-TESTS transport=12 text-area=16 list-box=18 cases=46 result=FAIL"u8);
         }
 #endif
 #endif
@@ -2493,6 +2609,11 @@ public sealed class ManagedNotes : GuideXosApplication
             GuideXosControlHostResult pointerResult = controlId == C120DocumentControlId
                 ? _mainControlHost.FocusAndRoutePointer(
                     controlId, input.X, input.Y, 20, 72, 8, 18)
+#if HOSTLOGPROOF_C137_MOUSE_WHEEL_SCROLLING
+                : controlId == C137ListControlId
+                    ? _mainControlHost.FocusAndRoutePointer(
+                        controlId, input.X, input.Y, 300, 72, 8, 18)
+#endif
                 : _mainControlHost.FocusAndRoutePointer(
                     controlId, input.X, input.Y);
             if (pointerResult == GuideXosControlHostResult.Activated
@@ -2577,6 +2698,14 @@ public sealed class ManagedNotes : GuideXosApplication
                     ? GuideXosResult.Success : GuideXosResult.InvalidArgument;
             }
 #endif
+#if HOSTLOGPROOF_C137_MOUSE_WHEEL_SCROLLING
+            if (_c137ProofContext && controlId == C137ListControlId)
+            {
+                LogC137ListPointer(host, pointerResult);
+                return RenderMain(host, surface, _launchCount)
+                    ? GuideXosResult.Success : GuideXosResult.InvalidArgument;
+            }
+#endif
 #if HOSTLOGPROOF_C132_REUSABLE_RADIO_BUTTON
             if (_c132ProofContext &&
                 (controlId == C124FullPathControlId ||
@@ -2622,6 +2751,56 @@ public sealed class ManagedNotes : GuideXosApplication
             return RenderMain(host, surface, _launchCount)
                 ? GuideXosResult.Success : GuideXosResult.InvalidArgument;
         }
+
+#if HOSTLOGPROOF_C137_MOUSE_WHEEL_SCROLLING
+        if (_c137ProofContext && input.Kind == GuideXosInputKind.KeyDown &&
+            input.KeyCode == C137RelaunchKey)
+        {
+            GuideXosResult closeResult = surface.TryClose();
+            host.TryLog(closeResult == GuideXosResult.Success
+                ? "C137-CLOSE request=PASS capture=none result=PASS"u8
+                : "C137-CLOSE request=FAIL capture=unknown result=FAIL"u8);
+            return closeResult;
+        }
+        if (_c137ProofContext && input.Kind == GuideXosInputKind.Wheel)
+        {
+            int targetId = C120HitTest(input.X, input.Y);
+            int beforeTextLine = _textArea.FirstVisibleLine;
+            int beforeListIndex = _c137ListBox.FirstVisibleIndex;
+            GuideXosControlHostResult wheelResult = targetId ==
+                C120DocumentControlId
+                ? _mainControlHost.HandleWheel(
+                    targetId, input.X, input.Y, input.WheelDelta,
+                    20, 72, 8, 18)
+                : targetId == C137ListControlId
+                    ? _mainControlHost.HandleWheel(
+                        targetId, input.X, input.Y, input.WheelDelta,
+                        300, 72, 8, 18)
+                    : GuideXosControlHostResult.Ignored;
+            if (targetId == C120DocumentControlId)
+            {
+                LogC137Wheel(host, "TextArea"u8, input.WheelDelta,
+                    beforeTextLine, _textArea.FirstVisibleLine, -1,
+                    wheelResult);
+            }
+            else if (targetId == C137ListControlId)
+            {
+                LogC137Wheel(host, "ListBox"u8, input.WheelDelta,
+                    beforeListIndex, _c137ListBox.FirstVisibleIndex,
+                    _c137ListBox.SelectedIndex, wheelResult);
+            }
+            else if (_mainControlHost.HasTransientInputCapture)
+            {
+                host.TryLog("C137-WHEEL capture=swallowed target=background result=PASS"u8);
+            }
+            else
+            {
+                host.TryLog("C137-WHEEL target=none result=IGNORED"u8);
+            }
+            return RenderMain(host, surface, _launchCount)
+                ? GuideXosResult.Success : GuideXosResult.InvalidArgument;
+        }
+#endif
 
         GuideXosControlHostResult routeResult = _mainControlHost.HandleInput(input);
 #if HOSTLOGPROOF_C129_SHIFT_TAB_TRANSPORT
@@ -2940,7 +3119,19 @@ public sealed class ManagedNotes : GuideXosApplication
         }
 #endif
 #endif
-        if (x >= 20 && x < 20 + 48 * 8 && y >= 72 && y < 72 + 4 * 18)
+#if HOSTLOGPROOF_C137_MOUSE_WHEEL_SCROLLING
+        if (_c137ProofContext && x >= 300 && x < 300 + 24 * 8 &&
+            y >= 72 && y < 72 + 4 * 18)
+        {
+            return C137ListControlId;
+        }
+#endif
+        int documentColumns = 48;
+#if HOSTLOGPROOF_C137_MOUSE_WHEEL_SCROLLING
+        if (_c137ProofContext) documentColumns = 32;
+#endif
+        if (x >= 20 && x < 20 + documentColumns * 8 &&
+            y >= 72 && y < 72 + 4 * 18)
         {
             return C120DocumentControlId;
         }
@@ -3726,6 +3917,90 @@ public sealed class ManagedNotes : GuideXosApplication
     }
 #endif
 
+#if HOSTLOGPROOF_C137_MOUSE_WHEEL_SCROLLING
+    private void LogC137ListPointer(
+        GuideXosHost host, GuideXosControlHostResult result)
+    {
+        Span<byte> line = stackalloc byte[127];
+        int position = 0;
+        bool written = GuideXosText.Append(line, ref position,
+                "C137-LIST-POINTER selected="u8) &&
+            GuideXosText.AppendUnsigned(line, ref position,
+                (uint)Math.Max(0, _c137ListBox.SelectedIndex)) &&
+            GuideXosText.Append(line, ref position, " viewport="u8) &&
+            GuideXosText.AppendUnsigned(line, ref position,
+                (uint)_c137ListBox.FirstVisibleIndex) &&
+            GuideXosText.Append(line, ref position,
+                result == GuideXosControlHostResult.Changed
+                    ? " result=PASS"u8 : " result=FAIL"u8);
+        if (written) host.TryLog(line[..position]);
+    }
+
+    private static void LogC137Wheel(
+        GuideXosHost host,
+        ReadOnlySpan<byte> target,
+        int delta,
+        int before,
+        int after,
+        int selection,
+        GuideXosControlHostResult result)
+    {
+        Span<byte> line = stackalloc byte[127];
+        int position = 0;
+        bool written = GuideXosText.Append(line, ref position,
+                "C137-WHEEL target="u8) &&
+            GuideXosText.Append(line, ref position, target) &&
+            GuideXosText.Append(line, ref position, " delta="u8);
+        if (written && delta < 0)
+        {
+            written = GuideXosText.Append(line, ref position, "-"u8);
+        }
+        if (written && !GuideXosText.AppendUnsigned(line, ref position,
+                (uint)(delta < 0 ? -delta : delta))) written = false;
+        if (written && !GuideXosText.Append(line, ref position, " before="u8))
+            written = false;
+        if (written && !GuideXosText.AppendUnsigned(line, ref position,
+                (uint)before)) written = false;
+        if (written && !GuideXosText.Append(line, ref position, " after="u8))
+            written = false;
+        if (written && !GuideXosText.AppendUnsigned(line, ref position,
+                (uint)after)) written = false;
+        if (written && selection >= 0)
+        {
+            written = GuideXosText.Append(line, ref position, " selection="u8) &&
+                GuideXosText.AppendUnsigned(line, ref position,
+                    (uint)selection);
+        }
+        ReadOnlySpan<byte> outcome = result == GuideXosControlHostResult.Scrolled
+            ? " result=PASS"u8
+            : result == GuideXosControlHostResult.Ignored
+                ? " result=IGNORED"u8
+                : " result=FAIL"u8;
+        if (written && !GuideXosText.Append(line, ref position, outcome))
+            written = false;
+        if (written) host.TryLog(line[..position]);
+    }
+
+    private static string C137FixtureLabel(int index)
+    {
+        return index switch
+        {
+            0 => "Row 00 selected",
+            1 => "Row 01 visible",
+            2 => "Row 02 visible",
+            3 => "Row 03 visible",
+            4 => "Row 04 visible",
+            5 => "Row 05 visible",
+            6 => "Row 06 visible",
+            7 => "Row 07 visible",
+            8 => "Row 08 visible",
+            9 => "Row 09 visible",
+            10 => "Row 10 visible",
+            _ => "Row 11 visible",
+        };
+    }
+#endif
+
     private bool RenderMain(GuideXosHost host, GuideXosSurface surface, uint launchCount)
     {
 #if HOSTLOGPROOF_C125_MANAGED_PROGRESS_BAR
@@ -3747,6 +4022,10 @@ public sealed class ManagedNotes : GuideXosApplication
             GuideXosText.Line(surface, 66, "Path: "u8, Encoding.UTF8.GetBytes(_currentPath)) &&
 #endif
             _textArea.Render(surface, 20, 72, 18) == GuideXosResult.Success &&
+#if HOSTLOGPROOF_C137_MOUSE_WHEEL_SCROLLING
+            (!_c137ProofContext || _c137ListBox.Render(surface, 300, 72, 18) ==
+                GuideXosResult.Success) &&
+#endif
 #if HOSTLOGPROOF_C131_REUSABLE_CHECKBOX
             (!_c131ProofContext || _showStatusVisible
                 ? GuideXosText.Line(surface, 150, "Status: "u8,

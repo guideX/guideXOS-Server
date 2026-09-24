@@ -195,6 +195,9 @@ try {
         $boot = Invoke-OrdinaryBoot $bootEsp $serialPath $stdoutPath $stderrPath $qemuPath $ovmfPath
         $bootResults.Add($boot) | Out-Null
         Write-Host ("[C51 ordinary] boot={0} result={1} mainLoop={2} navigator={3}" -f $index, $boot.result, $boot.mainLoopMarker, $boot.navigatorPassMarker)
+        if ($index -lt $FreshBootCount) {
+            Start-Sleep -Seconds 5
+        }
     }
     $afterHashes = [ordered]@{
         kernel = Get-Hash $kernelPath

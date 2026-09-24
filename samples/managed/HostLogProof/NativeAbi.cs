@@ -40,6 +40,10 @@ public static class GxAbi
     public const uint LaunchFlagInputPointerUp = 0x04000000u;
     public const uint LaunchFlagInputSecondaryPointerDown = 0x05000000u;
     public const uint LaunchFlagInputSecondaryPointerUp = 0x06000000u;
+    // C137 keeps X/Y in the existing 24-bit payload. Wheel values -4..+4 are
+    // encoded by the nine remaining four-bit input-kind values.
+    public const uint LaunchFlagInputWheel = 0x07000000u;
+    public const uint LaunchFlagInputWheelLast = 0x0F000000u;
     public const uint LaunchFlagInputPayloadMask = 0x00FFFFFFu;
     // The high payload bit is reserved for key-event modifier state. Pointer
     // coordinates remain unchanged and are far below this bit in the current

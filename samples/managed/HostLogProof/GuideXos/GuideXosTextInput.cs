@@ -9,6 +9,7 @@ public enum GuideXosInputKind
     KeyDown = 2,
     KeyChar = 3,
     PointerUp = 4,
+    Wheel = 5,
 }
 
 public enum GuideXosPointerButton
@@ -26,7 +27,7 @@ public readonly struct GuideXosInputEvent
 {
     private GuideXosInputEvent(
         GuideXosInputKind kind, int x, int y, uint keyCode, char character,
-        bool shift, GuideXosPointerButton button)
+        bool shift, GuideXosPointerButton button, int wheelDelta)
     {
         Kind = kind;
         X = x;
@@ -35,6 +36,7 @@ public readonly struct GuideXosInputEvent
         Character = character;
         Shift = shift;
         Button = button;
+        WheelDelta = wheelDelta;
     }
 
     public GuideXosInputKind Kind { get; }
@@ -44,19 +46,27 @@ public readonly struct GuideXosInputEvent
     public char Character { get; }
     public bool Shift { get; }
     public GuideXosPointerButton Button { get; }
+    public int WheelDelta { get; }
 
     internal static GuideXosInputEvent From(GuideXosLaunchContext context)
     {
         return new GuideXosInputEvent(
             context.InputKind, context.InputX, context.InputY,
             context.InputKeyCode, context.InputCharacter, context.InputShift,
-            context.InputButton);
+            context.InputButton, context.InputWheelDelta);
     }
 
     internal static GuideXosInputEvent ForPointer(
         GuideXosInputKind kind, GuideXosPointerButton button, int x, int y)
     {
-        return new GuideXosInputEvent(kind, x, y, 0u, '\0', false, button);
+        return new GuideXosInputEvent(kind, x, y, 0u, '\0', false, button, 0);
+    }
+
+    internal static GuideXosInputEvent ForWheel(int x, int y, int delta)
+    {
+        return new GuideXosInputEvent(
+            GuideXosInputKind.Wheel, x, y, 0u, '\0', false,
+            GuideXosPointerButton.None, delta);
     }
 }
 

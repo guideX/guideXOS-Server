@@ -30,6 +30,7 @@ public enum GuideXosControlHostResult
     Unregistered = 12,
     Pending = 13,
     Released = 14,
+    Scrolled = 15,
 }
 
 /// <summary>
@@ -405,7 +406,14 @@ public sealed class GuideXosControlHost
                 ? GuideXosControlHostResult.Disabled
                 : GuideXosControlHostResult.Rejected;
         }
-        GuideXosControlHostResult focusResult = FocusIndex(index);
+        // A pointer hit is already expressed in the control's current
+        // viewport. Preserve a scrolled ListBox viewport while assigning host
+        // focus; ordinary keyboard/programmatic focus still reconciles the
+        // selected row through FocusIndex.
+        GuideXosControlHostResult focusResult =
+            _entries[index].Kind == GuideXosManagedControlKind.ListBox
+                ? FocusIndexForPointer(index)
+                : FocusIndex(index);
         if (focusResult != GuideXosControlHostResult.Focused)
         {
             return focusResult;
@@ -423,6 +431,47 @@ public sealed class GuideXosControlHost
             GuideXosInputKind.KeyChar => HandleCharacter(input.Character),
             _ => GuideXosControlHostResult.Ignored,
         };
+    }
+
+    /// <summary>
+    /// Routes a wheel event to the eligible control under the pointer. A
+    /// transient owner gets first refusal; an open popup therefore swallows
+    /// the event instead of allowing wheel-through to a background control.
+    /// Wheel never changes focus or selection by itself.
+    /// </summary>
+    public GuideXosControlHostResult HandleWheel(
+        int id,
+        int x,
+        int y,
+        int wheelDelta,
+        int originX = 0,
+        int originY = 0,
+        int characterWidth = 8,
+        int lineHeight = 18)
+    {
+        if (_modalHost != null)
+        {
+            return _modalHost.HandleWheel(
+                id, x, y, wheelDelta, originX, originY,
+                characterWidth, lineHeight);
+        }
+        if (wheelDelta == 0) return GuideXosControlHostResult.Ignored;
+        if (TryGetTransientCaptureIndex(out _))
+        {
+            return GuideXosControlHostResult.Ignored;
+        }
+        if (!TryFindIndex(id, out int index))
+        {
+            return GuideXosControlHostResult.Rejected;
+        }
+        if (!IsEligible(index))
+        {
+            return IsControlDisabled(index)
+                ? GuideXosControlHostResult.Disabled
+                : GuideXosControlHostResult.Rejected;
+        }
+        return RouteWheel(index, x, y, wheelDelta, originX, originY,
+            characterWidth, lineHeight);
     }
 
     public GuideXosControlHostResult HandleKey(
@@ -735,6 +784,22 @@ public sealed class GuideXosControlHost
         return GuideXosControlHostResult.Focused;
     }
 
+    private GuideXosControlHostResult FocusIndexForPointer(int index)
+    {
+        if (index < 0 || index >= _registrationCount || !IsEligible(index))
+        {
+            return GuideXosControlHostResult.Rejected;
+        }
+        if (_activeIndex == index && IsControlFocused(index))
+        {
+            return GuideXosControlHostResult.Focused;
+        }
+        BlurAll();
+        _activeIndex = index;
+        ((GuideXosListBox)_entries[index].Control).Focus(false);
+        return GuideXosControlHostResult.Focused;
+    }
+
     private void ClearFocus()
     {
         CancelPendingSpace();
@@ -916,6 +981,28 @@ public sealed class GuideXosControlHost
         };
     }
 
+    private GuideXosControlHostResult RouteWheel(
+        int index,
+        int x,
+        int y,
+        int wheelDelta,
+        int originX,
+        int originY,
+        int characterWidth,
+        int lineHeight)
+    {
+        return _entries[index].Kind switch
+        {
+            GuideXosManagedControlKind.TextArea => Map(
+                ((GuideXosTextArea)_entries[index].Control).HandleWheel(
+                    wheelDelta)),
+            GuideXosManagedControlKind.ListBox => Map(
+                ((GuideXosListBox)_entries[index].Control).HandleWheel(
+                    wheelDelta)),
+            _ => GuideXosControlHostResult.Ignored,
+        };
+    }
+
     private GuideXosControlHostResult RouteCharacter(int index, char character)
     {
         return _entries[index].Kind switch
@@ -959,6 +1046,10 @@ public sealed class GuideXosControlHost
                 ((GuideXosComboBox)_entries[index].Control).EffectiveVisible,
             GuideXosManagedControlKind.PopupMenu =>
                 ((GuideXosPopupMenu)_entries[index].Control).EffectiveVisible,
+            GuideXosManagedControlKind.TextArea =>
+                ((GuideXosTextArea)_entries[index].Control).EffectiveVisible,
+            GuideXosManagedControlKind.ListBox =>
+                ((GuideXosListBox)_entries[index].Control).EffectiveVisible,
             _ => true,
         };
     }
@@ -977,6 +1068,10 @@ public sealed class GuideXosControlHost
                 !((GuideXosComboBox)_entries[index].Control).Enabled,
             GuideXosManagedControlKind.PopupMenu =>
                 !((GuideXosPopupMenu)_entries[index].Control).Enabled,
+            GuideXosManagedControlKind.TextArea =>
+                !((GuideXosTextArea)_entries[index].Control).Enabled,
+            GuideXosManagedControlKind.ListBox =>
+                !((GuideXosListBox)_entries[index].Control).Enabled,
             _ => false,
         };
     }
@@ -1190,6 +1285,7 @@ public sealed class GuideXosControlHost
             GuideXosTextAreaEditResult.Submitted => GuideXosControlHostResult.Submitted,
             GuideXosTextAreaEditResult.Cancelled => GuideXosControlHostResult.Cancelled,
             GuideXosTextAreaEditResult.Rejected => GuideXosControlHostResult.Rejected,
+            GuideXosTextAreaEditResult.Scrolled => GuideXosControlHostResult.Scrolled,
             _ => GuideXosControlHostResult.Ignored,
         };
     }
@@ -1202,6 +1298,7 @@ public sealed class GuideXosControlHost
             GuideXosListBoxResult.SelectionChanged => GuideXosControlHostResult.Changed,
             GuideXosListBoxResult.Activated => GuideXosControlHostResult.Activated,
             GuideXosListBoxResult.Rejected => GuideXosControlHostResult.Rejected,
+            GuideXosListBoxResult.Scrolled => GuideXosControlHostResult.Scrolled,
             _ => GuideXosControlHostResult.Ignored,
         };
     }

@@ -15,6 +15,7 @@ public enum GuideXosListBoxResult
     SelectionChanged = 2,
     Activated = 3,
     Rejected = 4,
+    Scrolled = 5,
 }
 
 /// <summary>
@@ -42,6 +43,8 @@ public sealed class GuideXosListBox
     private int _selectedIndex = -1;
     private int _firstVisibleIndex;
     private bool _isFocused;
+    private bool _isVisible = true;
+    private bool _isEnabled = true;
     private uint _rejectedOperationCount;
 
     public GuideXosListBox(
@@ -85,6 +88,9 @@ public sealed class GuideXosListBox
     public string SelectedLabel => HasSelection
         ? GetItemLabel(_selectedIndex) : string.Empty;
     public bool IsFocused => _isFocused;
+    public bool Visible => _isVisible;
+    public bool Enabled => _isEnabled;
+    public bool EffectiveVisible => _isVisible;
     public int FirstVisibleIndex => _firstVisibleIndex;
     public uint RejectedOperationCount => _rejectedOperationCount;
 
@@ -134,10 +140,11 @@ public sealed class GuideXosListBox
         _firstVisibleIndex = 0;
     }
 
-    public void Focus()
+    public void Focus(bool reconcileSelection = true)
     {
+        if (!_isVisible || !_isEnabled) return;
         _isFocused = true;
-        EnsureSelectionVisible();
+        if (reconcileSelection) EnsureSelectionVisible();
     }
 
     public void Blur()
@@ -145,10 +152,46 @@ public sealed class GuideXosListBox
         _isFocused = false;
     }
 
+    public void SetVisible(bool visible)
+    {
+        _isVisible = visible;
+        if (!visible) _isFocused = false;
+    }
+
+    public void SetEnabled(bool enabled)
+    {
+        _isEnabled = enabled;
+        if (!enabled) _isFocused = false;
+    }
+
     public void ResetTransientState()
     {
         _isFocused = false;
         _rejectedOperationCount = 0u;
+    }
+
+    /// <summary>Moves only the bounded viewport; selection is unchanged.</summary>
+    public GuideXosListBoxResult HandleWheel(int wheelDelta)
+    {
+        if (!_isVisible) return GuideXosListBoxResult.Ignored;
+        if (!_isEnabled) return GuideXosListBoxResult.Rejected;
+        if (wheelDelta == 0 || _itemCount <= _visibleRowCount)
+        {
+            return GuideXosListBoxResult.Ignored;
+        }
+
+        int boundedDelta = wheelDelta;
+        if (boundedDelta > 8) boundedDelta = 8;
+        if (boundedDelta < -8) boundedDelta = -8;
+        int prior = _firstVisibleIndex;
+        int maximumFirst = Math.Max(0, _itemCount - _visibleRowCount);
+        int next = prior - boundedDelta * 3;
+        if (next < 0) next = 0;
+        if (next > maximumFirst) next = maximumFirst;
+        _firstVisibleIndex = next;
+        return prior == next
+            ? GuideXosListBoxResult.Ignored
+            : GuideXosListBoxResult.Scrolled;
     }
 
     public void Reset()
@@ -208,6 +251,8 @@ public sealed class GuideXosListBox
         int characterWidth = 8,
         int lineHeight = 18)
     {
+        if (!_isVisible) return GuideXosListBoxResult.Ignored;
+        if (!_isEnabled) return GuideXosListBoxResult.Rejected;
         if (characterWidth < 1 || lineHeight < 1 || originX < 0 || originY < 0 ||
             x < originX || y < originY ||
             x >= originX + _renderWidth * characterWidth ||
@@ -216,7 +261,10 @@ public sealed class GuideXosListBox
             return GuideXosListBoxResult.Ignored;
         }
 
-        Focus();
+        // Pointer focus must not reconcile the selection back to the old
+        // selected row: the click is intentionally mapped within the current
+        // scrolled viewport.
+        _isFocused = true;
         int row = (y - originY) / lineHeight;
         int index = _firstVisibleIndex + row;
         if (!IsValidIndex(index)) return GuideXosListBoxResult.Focused;
