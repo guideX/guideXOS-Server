@@ -10,6 +10,7 @@ public enum GuideXosInputKind
     KeyChar = 3,
     PointerUp = 4,
     Wheel = 5,
+    PointerMove = 6,
 }
 
 public enum GuideXosPointerButton
@@ -67,6 +68,13 @@ public readonly struct GuideXosInputEvent
         return new GuideXosInputEvent(
             GuideXosInputKind.Wheel, x, y, 0u, '\0', false,
             GuideXosPointerButton.None, delta);
+    }
+
+    internal static GuideXosInputEvent ForPointerMove(int x, int y)
+    {
+        return new GuideXosInputEvent(
+            GuideXosInputKind.PointerMove, x, y, 0u, '\0', false,
+            GuideXosPointerButton.None, 0);
     }
 }
 

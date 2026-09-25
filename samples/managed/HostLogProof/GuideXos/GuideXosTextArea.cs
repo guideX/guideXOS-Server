@@ -95,6 +95,8 @@ public sealed class GuideXosTextArea
     public bool IsSubmitted => _isSubmitted;
     public bool IsCancelled => _isCancelled;
     public int FirstVisibleLine => _firstVisibleLine;
+    public int MaximumFirstVisibleLine =>
+        Math.Max(0, _lineCount - _visibleLineCount);
     public int CaretLine => GetLineAndColumn(_caretIndex, out _);
     public int CaretColumn
     {
@@ -243,6 +245,20 @@ public sealed class GuideXosTextArea
         _anchorIndex = 0;
         _preferredColumn = -1;
         EnsureCaretVisible();
+    }
+
+    /// <summary>
+    /// Sets only the authoritative vertical viewport.  The caret and logical
+    /// selection remain untouched so a scrollbar cannot change editor state.
+    /// </summary>
+    public bool SetFirstVisibleLine(int line)
+    {
+        int maximum = MaximumFirstVisibleLine;
+        if (line < 0) line = 0;
+        if (line > maximum) line = maximum;
+        if (_firstVisibleLine == line) return false;
+        _firstVisibleLine = line;
+        return true;
     }
 
     /// <summary>

@@ -92,6 +92,8 @@ public sealed class GuideXosListBox
     public bool Enabled => _isEnabled;
     public bool EffectiveVisible => _isVisible;
     public int FirstVisibleIndex => _firstVisibleIndex;
+    public int MaximumFirstVisibleIndex =>
+        Math.Max(0, _itemCount - _visibleRowCount);
     public uint RejectedOperationCount => _rejectedOperationCount;
 
     public bool IsValidIndex(int index)
@@ -168,6 +170,20 @@ public sealed class GuideXosListBox
     {
         _isFocused = false;
         _rejectedOperationCount = 0u;
+    }
+
+    /// <summary>
+    /// Sets only the authoritative vertical viewport.  Selection is preserved
+    /// so a scrollbar drag cannot select an item as a side effect.
+    /// </summary>
+    public bool SetFirstVisibleIndex(int index)
+    {
+        int maximum = MaximumFirstVisibleIndex;
+        if (index < 0) index = 0;
+        if (index > maximum) index = maximum;
+        if (_firstVisibleIndex == index) return false;
+        _firstVisibleIndex = index;
+        return true;
     }
 
     /// <summary>Moves only the bounded viewport; selection is unchanged.</summary>

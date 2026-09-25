@@ -668,6 +668,18 @@ public sealed class ManagedNotes : GuideXosApplication
     private bool _c137ProofContext;
     private bool _c137TestsRun;
     private bool _c137TestsPassed;
+#if HOSTLOGPROOF_C138_REUSABLE_SCROLLBAR
+    private const int C138TextScrollControlId = 10;
+    private const int C138ListScrollControlId = 11;
+    private readonly GuideXosScrollBar _c138TextScrollBar =
+        new(274, 72, 16, 96);
+    private readonly GuideXosScrollBar _c138ListScrollBar =
+        new(500, 72, 16, 72);
+    private bool _c138ProofContext;
+    private bool _c138TestsRun;
+    private bool _c138TestsPassed;
+    private bool _c138BindingsInstalled;
+#endif
 #endif
 #endif
 #endif
@@ -873,6 +885,20 @@ public sealed class ManagedNotes : GuideXosApplication
             host.LaunchContext.Utf8.SequenceEqual("c137-api"u8) ||
             host.LaunchContext.Utf8.SequenceEqual("c137-host-tests"u8) ||
             host.LaunchContext.Utf8.SequenceEqual("c137-relaunch"u8);
+#if HOSTLOGPROOF_C138_REUSABLE_SCROLLBAR
+        _c138ProofContext = host.LaunchContext.Utf8.SequenceEqual("c138"u8) ||
+            host.LaunchContext.Utf8.SequenceEqual("c138-native"u8) ||
+            host.LaunchContext.Utf8.SequenceEqual("c138-api"u8) ||
+            host.LaunchContext.Utf8.SequenceEqual("c138-host-tests"u8) ||
+            host.LaunchContext.Utf8.SequenceEqual("c138-relaunch"u8);
+        _c137ProofContext = _c137ProofContext || _c138ProofContext;
+#if HOSTLOGPROOF_C135_REUSABLE_POPUP_MENU
+        _c135ProofContext = _c135ProofContext || _c138ProofContext;
+#if HOSTLOGPROOF_C136_SECONDARY_POINTER_CONTEXT_MENU
+        _c136ProofContext = _c136ProofContext || _c138ProofContext;
+#endif
+#endif
+#endif
 #endif
 #if HOSTLOGPROOF_C132_REUSABLE_RADIO_BUTTON
         _c120ProofContext = _c120ProofContext || _c132ProofContext;
@@ -1061,6 +1087,9 @@ public sealed class ManagedNotes : GuideXosApplication
             }
 #endif
             _mainControlHost = new GuideXosControlHost(
+#if HOSTLOGPROOF_C138_REUSABLE_SCROLLBAR
+                10);
+#else
 #if HOSTLOGPROOF_C124_MANAGED_RADIO_BUTTON
 #if HOSTLOGPROOF_C135_REUSABLE_POPUP_MENU
                 _c135ProofContext ? 8 :
@@ -1083,6 +1112,7 @@ public sealed class ManagedNotes : GuideXosApplication
                 _c121ProofContext ? 5 : 4);
 #else
             4);
+#endif
 #endif
             _mainControlHost.Reset();
             _mainControlHost.TryRegisterButton(C120OpenControlId, _openButton);
@@ -1144,6 +1174,16 @@ public sealed class ManagedNotes : GuideXosApplication
             {
                 _mainControlHost.TryRegisterListBox(C137ListControlId, _c137ListBox);
             }
+#if HOSTLOGPROOF_C138_REUSABLE_SCROLLBAR
+            if (_c138ProofContext)
+            {
+                EnsureC138Bindings();
+                _mainControlHost.TryRegisterScrollBar(
+                    C138TextScrollControlId, _c138TextScrollBar);
+                _mainControlHost.TryRegisterScrollBar(
+                    C138ListScrollControlId, _c138ListScrollBar);
+            }
+#endif
 #endif
             if (host.LaunchContext.Utf8.SequenceEqual("c120-disabled"u8))
             {
@@ -1152,6 +1192,11 @@ public sealed class ManagedNotes : GuideXosApplication
             int expectedHostRegistration =
 #if HOSTLOGPROOF_C124_MANAGED_RADIO_BUTTON
 #if HOSTLOGPROOF_C135_REUSABLE_POPUP_MENU
+#if HOSTLOGPROOF_C138_REUSABLE_SCROLLBAR
+#if HOSTLOGPROOF_C137_MOUSE_WHEEL_SCROLLING
+                _c138ProofContext ? 10 :
+#endif
+#endif
 #if HOSTLOGPROOF_C137_MOUSE_WHEEL_SCROLLING
                 _c137ProofContext ? 8 :
 #endif
@@ -1175,6 +1220,18 @@ public sealed class ManagedNotes : GuideXosApplication
 #endif
             bool hostRegistration = _mainControlHost.RegistrationCount ==
                 expectedHostRegistration && _mainControlHost.ActiveIndex == -1;
+#if HOSTLOGPROOF_C138_REUSABLE_SCROLLBAR
+            if (_c138ProofContext)
+            {
+                host.TryLog(hostRegistration &&
+                    _mainControlHost.RegistrationCount == 10 &&
+                    _mainControlHost.TransientInputCaptureKind ==
+                        GuideXosManagedControlKind.None &&
+                    !_mainControlHost.HasPointerDragCapture
+                    ? "C138-HOST registration=10 scrollbars=2 initial=no-focus drag=none result=PASS"u8
+                    : "C138-HOST registration=FAIL initial=no-focus result=FAIL"u8);
+            }
+#endif
 #if HOSTLOGPROOF_C135_REUSABLE_POPUP_MENU
             if (_c135ProofContext
 #if HOSTLOGPROOF_C137_MOUSE_WHEEL_SCROLLING
@@ -1191,7 +1248,11 @@ public sealed class ManagedNotes : GuideXosApplication
             }
 #endif
 #if HOSTLOGPROOF_C137_MOUSE_WHEEL_SCROLLING
-            if (_c137ProofContext)
+            if (_c137ProofContext
+#if HOSTLOGPROOF_C138_REUSABLE_SCROLLBAR
+                && !_c138ProofContext
+#endif
+                )
             {
                 host.TryLog(hostRegistration &&
                     _mainControlHost.RegistrationCount == 8 &&
@@ -1274,7 +1335,12 @@ public sealed class ManagedNotes : GuideXosApplication
             if (_c131ProofContext && !_c133ProofContext)
             {
                 host.TryLog(hostRegistration &&
-                    _mainControlHost.RegistrationCount == 8
+                    _mainControlHost.RegistrationCount ==
+#if HOSTLOGPROOF_C138_REUSABLE_SCROLLBAR
+                        (_c138ProofContext ? 10 : 8)
+#else
+                        8
+#endif
                     ? "C131-HOST registration=8 initial=no-focus result=PASS"u8
                     : "C131-HOST registration=FAIL initial=no-focus result=FAIL"u8);
             }
@@ -1379,7 +1445,33 @@ public sealed class ManagedNotes : GuideXosApplication
 #endif
         _textArea.SetCaretToStart();
         _textArea.Blur();
+#if HOSTLOGPROOF_C138_REUSABLE_SCROLLBAR
+        if (_c138ProofContext)
+        {
+            _c138TextScrollBar.ResetTransientState();
+            _c138ListScrollBar.ResetTransientState();
+            EnsureC138Bindings();
+        }
+#endif
 #if HOSTLOGPROOF_C137_MOUSE_WHEEL_SCROLLING
+#if HOSTLOGPROOF_C138_REUSABLE_SCROLLBAR
+        if (_c138ProofContext &&
+            host.LaunchContext.Utf8.SequenceEqual("c138-relaunch"u8))
+        {
+            host.TryLog(_mainControlHost.RegistrationCount == 10 &&
+                _mainControlHost.ActiveIndex == -1 &&
+                _textArea.FirstVisibleLine == 0 &&
+                _c137ListBox.FirstVisibleIndex == 0 &&
+                _c137ListBox.SelectedIndex == 0 &&
+                _c138TextScrollBar.Value == 0 &&
+                _c138ListScrollBar.Value == 0 &&
+                _mainControlHost.TransientInputCaptureKind ==
+                    GuideXosManagedControlKind.None &&
+                !_mainControlHost.HasPointerDragCapture
+                ? "C138-RELAUNCH registration=10 text-viewport=0 list-viewport=0 selection=0 scrollbar-text=0 scrollbar-list=0 capture=none drag=none result=PASS"u8
+                : "C138-RELAUNCH registration=FAIL capture=unknown drag=unknown result=FAIL"u8);
+        }
+#endif
         if (_c137ProofContext &&
             host.LaunchContext.Utf8.SequenceEqual("c137-relaunch"u8))
         {
@@ -1399,6 +1491,13 @@ public sealed class ManagedNotes : GuideXosApplication
             "Managed Notes"u8, 600, 360, out GuideXosSurface surface);
         if (result != GuideXosResult.Success || surface == null) return result;
         _window = surface.Handle;
+#if HOSTLOGPROOF_C138_REUSABLE_SCROLLBAR
+        if (_c138ProofContext && !_c138TestsRun)
+        {
+            _c138TestsPassed = GuideXosScrollBarC138Tests.Run(host);
+            _c138TestsRun = true;
+        }
+#endif
         if (!RenderMain(host, surface, launchCount)) return GuideXosResult.InvalidArgument;
 #if HOSTLOGPROOF_C125_MANAGED_PROGRESS_BAR
         if (_c125ProofContext)
@@ -1459,7 +1558,12 @@ public sealed class ManagedNotes : GuideXosApplication
 #endif
             )
         {
-            bool c131Initial = _mainControlHost.RegistrationCount == 8 &&
+            bool c131Initial = _mainControlHost.RegistrationCount ==
+#if HOSTLOGPROOF_C138_REUSABLE_SCROLLBAR
+                (_c138ProofContext ? 10 : 8) &&
+#else
+                8 &&
+#endif
                 _showStatusCheckBox.Checked && _showStatusCheckBox.Visible &&
                 _showStatusVisible && !_showStatusCheckBox.IsFocused;
             host.TryLog(c131Initial
@@ -1499,7 +1603,12 @@ public sealed class ManagedNotes : GuideXosApplication
 #if HOSTLOGPROOF_C135_REUSABLE_POPUP_MENU
         if (_c135ProofContext)
         {
-            bool c135Initial = _mainControlHost.RegistrationCount == 8 &&
+            bool c135Initial = _mainControlHost.RegistrationCount ==
+#if HOSTLOGPROOF_C138_REUSABLE_SCROLLBAR
+                (_c138ProofContext ? 10 : 8) &&
+#else
+                8 &&
+#endif
                 _c135Menu.ItemCount == 4 && !_c135Menu.IsOpen &&
                 _c135Menu.InvokerAvailable;
             host.TryLog(c135Initial
@@ -1509,7 +1618,12 @@ public sealed class ManagedNotes : GuideXosApplication
 #if HOSTLOGPROOF_C136_SECONDARY_POINTER_CONTEXT_MENU
         if (_c136ProofContext)
         {
-            bool c136Initial = _mainControlHost.RegistrationCount == 8 &&
+            bool c136Initial = _mainControlHost.RegistrationCount ==
+#if HOSTLOGPROOF_C138_REUSABLE_SCROLLBAR
+                (_c138ProofContext ? 10 : 8) &&
+#else
+                8 &&
+#endif
                 !_c135Menu.IsOpen &&
                 _mainControlHost.TransientInputCaptureKind ==
                     GuideXosManagedControlKind.None;
@@ -1749,7 +1863,11 @@ public sealed class ManagedNotes : GuideXosApplication
         }
 #endif
 #if HOSTLOGPROOF_C136_SECONDARY_POINTER_CONTEXT_MENU
-        bool c136Tests = (_c136ProofContext ||
+        bool c136Tests = ((_c136ProofContext
+#if HOSTLOGPROOF_C138_REUSABLE_SCROLLBAR
+            && !_c138ProofContext
+#endif
+            ) ||
             host.LaunchContext.Utf8.SequenceEqual("c136-api"u8) ||
             host.LaunchContext.Utf8.SequenceEqual("c136-host-tests"u8)) &&
             !_c136TestsRun
@@ -1765,7 +1883,11 @@ public sealed class ManagedNotes : GuideXosApplication
         }
 #endif
 #if HOSTLOGPROOF_C137_MOUSE_WHEEL_SCROLLING
-        bool c137Tests = (_c137ProofContext ||
+        bool c137Tests = ((_c137ProofContext
+#if HOSTLOGPROOF_C138_REUSABLE_SCROLLBAR
+            && !_c138ProofContext
+#endif
+            ) ||
             host.LaunchContext.Utf8.SequenceEqual("c137-api"u8) ||
             host.LaunchContext.Utf8.SequenceEqual("c137-host-tests"u8)) &&
             !_c137TestsRun
@@ -1779,6 +1901,16 @@ public sealed class ManagedNotes : GuideXosApplication
                 ? "C137-TESTS transport=12 text-area=16 list-box=18 cases=46 result=PASS"u8
                 : "C137-TESTS transport=12 text-area=16 list-box=18 cases=46 result=FAIL"u8);
         }
+#if HOSTLOGPROOF_C138_REUSABLE_SCROLLBAR
+        bool c138Tests = _c138ProofContext && _c138TestsRun
+            ? _c138TestsPassed : true;
+        if (_c138ProofContext)
+        {
+            host.TryLog(c138Tests
+                ? "C138-TESTS api=22 drag-host=20 textarea=10 listbox=10 cases=62 result=PASS"u8
+                : "C138-TESTS api=FAIL drag-host=FAIL binding=FAIL result=FAIL"u8);
+        }
+#endif
 #endif
 #endif
 #endif
@@ -1860,6 +1992,9 @@ public sealed class ManagedNotes : GuideXosApplication
 #endif
 #endif
         return textAreaTests
+#if HOSTLOGPROOF_C138_REUSABLE_SCROLLBAR
+            && c138Tests
+#endif
 #if HOSTLOGPROOF_C118_MANAGED_LIST_BOX
             && listBoxTests && textInputTests
 #endif
@@ -2423,6 +2558,53 @@ public sealed class ManagedNotes : GuideXosApplication
         out bool consumed)
     {
         consumed = false;
+        if (input.Kind == GuideXosInputKind.PointerMove)
+        {
+            GuideXosControlHostResult dragResult =
+                _mainControlHost.HandlePointerMove(input.X, input.Y);
+#if HOSTLOGPROOF_C138_REUSABLE_SCROLLBAR
+            if (_c138ProofContext &&
+                (dragResult == GuideXosControlHostResult.Dragged ||
+                    dragResult == GuideXosControlHostResult.Ignored))
+            {
+                SyncC138ScrollBars();
+                host.TryLog(dragResult == GuideXosControlHostResult.Dragged
+                    ? "C138-DRAG move=PASS capture=owned result=PASS"u8
+                    : "C138-DRAG move=IGNORED result=PASS"u8);
+                return RenderMain(host, surface, _launchCount)
+                    ? GuideXosResult.Success : GuideXosResult.InvalidArgument;
+            }
+#endif
+            return GuideXosResult.Success;
+        }
+        if (input.Kind == GuideXosInputKind.PointerUp &&
+            input.Button == GuideXosPointerButton.Primary)
+        {
+            int dragOwner = _mainControlHost.PointerDragCaptureOwnerId;
+            GuideXosControlHostResult releaseResult =
+                _mainControlHost.HandlePointerUp(input.X, input.Y);
+#if HOSTLOGPROOF_C138_REUSABLE_SCROLLBAR
+            if (_c138ProofContext)
+            {
+                SyncC138ScrollBars();
+                if (releaseResult == GuideXosControlHostResult.DragEnded &&
+                    dragOwner == C138ListScrollControlId)
+                {
+                    host.TryLog(_c137ListBox.FirstVisibleIndex ==
+                        _c137ListBox.MaximumFirstVisibleIndex &&
+                        _c137ListBox.SelectedIndex == 0
+                        ? "C138-LIST-DRAG release=PASS viewport=bottom selection=preserved result=PASS"u8
+                        : "C138-LIST-DRAG release=FAIL result=FAIL"u8);
+                }
+                host.TryLog(releaseResult == GuideXosControlHostResult.DragEnded
+                    ? "C138-DRAG release=PASS capture=none result=PASS"u8
+                    : "C138-DRAG release=IGNORED capture=none result=PASS"u8);
+                return RenderMain(host, surface, _launchCount)
+                    ? GuideXosResult.Success : GuideXosResult.InvalidArgument;
+            }
+#endif
+            return GuideXosResult.Success;
+        }
         if (input.Kind == GuideXosInputKind.PointerDown)
         {
             GuideXosButton button = null;
@@ -2516,6 +2698,54 @@ public sealed class ManagedNotes : GuideXosApplication
             return ApplyPickerResult(host, surface, pickerResult);
         }
 
+#if HOSTLOGPROOF_C138_REUSABLE_SCROLLBAR
+        if (input.Kind == GuideXosInputKind.PointerMove)
+        {
+            GuideXosControlHostResult dragResult =
+                _mainControlHost.HandlePointerMove(input.X, input.Y);
+            if (_c138ProofContext &&
+                (dragResult == GuideXosControlHostResult.Dragged ||
+                    _mainControlHost.HasPointerDragCapture &&
+                    dragResult == GuideXosControlHostResult.Ignored))
+            {
+                SyncC138ScrollBars();
+                host.TryLog(dragResult == GuideXosControlHostResult.Dragged
+                    ? "C138-DRAG move=PASS capture=owned result=PASS"u8
+                    : "C138-DRAG move=IGNORED result=PASS"u8);
+                return RenderMain(host, surface, _launchCount)
+                    ? GuideXosResult.Success : GuideXosResult.InvalidArgument;
+            }
+            return GuideXosResult.Success;
+        }
+
+        if (input.Kind == GuideXosInputKind.PointerUp &&
+            input.Button == GuideXosPointerButton.Primary)
+        {
+            int dragOwner = _mainControlHost.PointerDragCaptureOwnerId;
+            GuideXosControlHostResult releaseResult =
+                _mainControlHost.HandlePointerUp(input.X, input.Y);
+            if (_c138ProofContext)
+            {
+                SyncC138ScrollBars();
+                if (releaseResult == GuideXosControlHostResult.DragEnded &&
+                    dragOwner == C138ListScrollControlId)
+                {
+                    host.TryLog(_c137ListBox.FirstVisibleIndex ==
+                        _c137ListBox.MaximumFirstVisibleIndex &&
+                        _c137ListBox.SelectedIndex == 0
+                        ? "C138-LIST-DRAG release=PASS viewport=bottom selection=preserved result=PASS"u8
+                        : "C138-LIST-DRAG release=FAIL result=FAIL"u8);
+                }
+                host.TryLog(releaseResult == GuideXosControlHostResult.DragEnded
+                    ? "C138-DRAG release=PASS capture=none result=PASS"u8
+                    : "C138-DRAG release=IGNORED capture=none result=PASS"u8);
+                return RenderMain(host, surface, _launchCount)
+                    ? GuideXosResult.Success : GuideXosResult.InvalidArgument;
+            }
+            return GuideXosResult.Success;
+        }
+#endif
+
 #if HOSTLOGPROOF_C135_REUSABLE_POPUP_MENU
         if (_c135ProofContext && input.Kind == GuideXosInputKind.KeyDown &&
             HandleC135MenuProofKey(input.KeyCode))
@@ -2591,13 +2821,14 @@ public sealed class ManagedNotes : GuideXosApplication
 
         if (input.Kind == GuideXosInputKind.PointerDown)
         {
+            int hitControlId = C120HitTest(input.X, input.Y);
             int controlId =
 #if HOSTLOGPROOF_C133_REUSABLE_COMBOBOX
                 _c133ProofContext && _pathDisplayCombo.IsOpen
                     ? C133ComboControlId
                     :
 #endif
-                C120HitTest(input.X, input.Y);
+                hitControlId;
 #if HOSTLOGPROOF_C135_REUSABLE_POPUP_MENU
             if (_c135ProofContext &&
                 _mainControlHost.HasTransientInputCapture)
@@ -2616,6 +2847,16 @@ public sealed class ManagedNotes : GuideXosApplication
 #endif
                 : _mainControlHost.FocusAndRoutePointer(
                     controlId, input.X, input.Y);
+#if HOSTLOGPROOF_C138_REUSABLE_SCROLLBAR
+            if (_c138ProofContext &&
+                (hitControlId == C138TextScrollControlId ||
+                    hitControlId == C138ListScrollControlId) &&
+                controlId != hitControlId &&
+                pointerResult == GuideXosControlHostResult.Cancelled)
+            {
+                host.TryLog("C138-POPUP blocked=PASS scrollbar=inactive result=PASS"u8);
+            }
+#endif
             if (pointerResult == GuideXosControlHostResult.Activated
 #if HOSTLOGPROOF_C133_REUSABLE_COMBOBOX
                 && !(_c133ProofContext && controlId == C133ComboControlId)
@@ -2638,6 +2879,21 @@ public sealed class ManagedNotes : GuideXosApplication
                 host.TryLog(C120ControlLabel(controlId));
                 return HandleAction(host, C120ActionForControl(controlId));
             }
+#if HOSTLOGPROOF_C138_REUSABLE_SCROLLBAR
+            if (_c138ProofContext &&
+                (controlId == C138TextScrollControlId ||
+                    controlId == C138ListScrollControlId))
+            {
+                SyncC138ScrollBars();
+                host.TryLog(pointerResult == GuideXosControlHostResult.DragStarted
+                    ? "C138-DRAG press=PASS capture=owned result=PASS"u8
+                    : pointerResult == GuideXosControlHostResult.Paged
+                        ? "C138-TRACK page=PASS result=PASS"u8
+                        : "C138-SCROLL pointer=PASS result=PASS"u8);
+                return RenderMain(host, surface, _launchCount)
+                    ? GuideXosResult.Success : GuideXosResult.InvalidArgument;
+            }
+#endif
 #if HOSTLOGPROOF_C121_MANAGED_CHECKBOX
             if (_c121ProofContext && controlId == C121ShowPathControlId &&
                 pointerResult == GuideXosControlHostResult.Toggled)
@@ -2701,6 +2957,9 @@ public sealed class ManagedNotes : GuideXosApplication
 #if HOSTLOGPROOF_C137_MOUSE_WHEEL_SCROLLING
             if (_c137ProofContext && controlId == C137ListControlId)
             {
+#if HOSTLOGPROOF_C138_REUSABLE_SCROLLBAR
+                if (_c138ProofContext) SyncC138ScrollBars();
+#endif
                 LogC137ListPointer(host, pointerResult);
                 return RenderMain(host, surface, _launchCount)
                     ? GuideXosResult.Success : GuideXosResult.InvalidArgument;
@@ -2753,6 +3012,25 @@ public sealed class ManagedNotes : GuideXosApplication
         }
 
 #if HOSTLOGPROOF_C137_MOUSE_WHEEL_SCROLLING
+#if HOSTLOGPROOF_C138_REUSABLE_SCROLLBAR
+        if (_c138ProofContext && input.Kind == GuideXosInputKind.Wheel)
+        {
+            int scrollBarId = C120HitTest(input.X, input.Y);
+            if (scrollBarId == C138TextScrollControlId ||
+                scrollBarId == C138ListScrollControlId)
+            {
+                GuideXosControlHostResult scrollResult =
+                    _mainControlHost.HandleWheel(
+                        scrollBarId, input.X, input.Y, input.WheelDelta);
+                SyncC138ScrollBars();
+                host.TryLog(scrollResult == GuideXosControlHostResult.Changed
+                    ? "C138-WHEEL direct=PASS result=PASS"u8
+                    : "C138-WHEEL direct=IGNORED result=PASS"u8);
+                return RenderMain(host, surface, _launchCount)
+                    ? GuideXosResult.Success : GuideXosResult.InvalidArgument;
+            }
+        }
+#endif
         if (_c137ProofContext && input.Kind == GuideXosInputKind.KeyDown &&
             input.KeyCode == C137RelaunchKey)
         {
@@ -2777,6 +3055,12 @@ public sealed class ManagedNotes : GuideXosApplication
                         targetId, input.X, input.Y, input.WheelDelta,
                         300, 72, 8, 18)
                     : GuideXosControlHostResult.Ignored;
+#if HOSTLOGPROOF_C138_REUSABLE_SCROLLBAR
+            if (_c138ProofContext)
+            {
+                SyncC138ScrollBars();
+            }
+#endif
             if (targetId == C120DocumentControlId)
             {
                 LogC137Wheel(host, "TextArea"u8, input.WheelDelta,
@@ -3062,6 +3346,12 @@ public sealed class ManagedNotes : GuideXosApplication
                 ? "edit"u8 : "overflow-rejected"u8);
         }
 #endif
+#if HOSTLOGPROOF_C138_REUSABLE_SCROLLBAR
+        if (_c138ProofContext)
+        {
+            SyncC138ScrollBars();
+        }
+#endif
         return RenderMain(host, surface, _launchCount)
             ? GuideXosResult.Success : GuideXosResult.InvalidArgument;
     }
@@ -3120,6 +3410,16 @@ public sealed class ManagedNotes : GuideXosApplication
 #endif
 #endif
 #if HOSTLOGPROOF_C137_MOUSE_WHEEL_SCROLLING
+#if HOSTLOGPROOF_C138_REUSABLE_SCROLLBAR
+        if (_c138ProofContext && _c138TextScrollBar.ContainsPoint(x, y))
+        {
+            return C138TextScrollControlId;
+        }
+        if (_c138ProofContext && _c138ListScrollBar.ContainsPoint(x, y))
+        {
+            return C138ListScrollControlId;
+        }
+#endif
         if (_c137ProofContext && x >= 300 && x < 300 + 24 * 8 &&
             y >= 72 && y < 72 + 4 * 18)
         {
@@ -3999,6 +4299,39 @@ public sealed class ManagedNotes : GuideXosApplication
             _ => "Row 11 visible",
         };
     }
+#if HOSTLOGPROOF_C138_REUSABLE_SCROLLBAR
+    private void EnsureC138Bindings()
+    {
+        if (!_c138BindingsInstalled)
+        {
+            _c138TextScrollBar.Changed += value =>
+                _textArea.SetFirstVisibleLine(value);
+            _c138ListScrollBar.Changed += value =>
+                _c137ListBox.SetFirstVisibleIndex(value);
+            _c138BindingsInstalled = true;
+        }
+        SyncC138ScrollBars();
+    }
+
+    private void SyncC138ScrollBars()
+    {
+        _c138TextScrollBar.Minimum = 0;
+        _c138TextScrollBar.Maximum = _textArea.MaximumFirstVisibleLine;
+        _c138TextScrollBar.PageSize = _textArea.VisibleLineCount;
+        _c138TextScrollBar.SmallChange = 1;
+        _c138TextScrollBar.LargeChange =
+            Math.Max(1, _textArea.VisibleLineCount - 1);
+        _c138TextScrollBar.Value = _textArea.FirstVisibleLine;
+
+        _c138ListScrollBar.Minimum = 0;
+        _c138ListScrollBar.Maximum = _c137ListBox.MaximumFirstVisibleIndex;
+        _c138ListScrollBar.PageSize = _c137ListBox.VisibleRowCount;
+        _c138ListScrollBar.SmallChange = 1;
+        _c138ListScrollBar.LargeChange =
+            Math.Max(1, _c137ListBox.VisibleRowCount - 1);
+        _c138ListScrollBar.Value = _c137ListBox.FirstVisibleIndex;
+    }
+#endif
 #endif
 
     private bool RenderMain(GuideXosHost host, GuideXosSurface surface, uint launchCount)
@@ -4025,6 +4358,12 @@ public sealed class ManagedNotes : GuideXosApplication
 #if HOSTLOGPROOF_C137_MOUSE_WHEEL_SCROLLING
             (!_c137ProofContext || _c137ListBox.Render(surface, 300, 72, 18) ==
                 GuideXosResult.Success) &&
+#if HOSTLOGPROOF_C138_REUSABLE_SCROLLBAR
+            (!_c138ProofContext || _c138TextScrollBar.Render(surface) ==
+                GuideXosResult.Success) &&
+            (!_c138ProofContext || _c138ListScrollBar.Render(surface) ==
+                GuideXosResult.Success) &&
+#endif
 #endif
 #if HOSTLOGPROOF_C131_REUSABLE_CHECKBOX
             (!_c131ProofContext || _showStatusVisible

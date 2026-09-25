@@ -38,6 +38,7 @@ public sealed unsafe class GuideXosLaunchContext
             }
             return kind switch
             {
+                0u => GuideXosInputKind.PointerMove,
                 GxAbi.LaunchFlagInputPointerDown => GuideXosInputKind.PointerDown,
                 GxAbi.LaunchFlagInputPointerUp => GuideXosInputKind.PointerUp,
                 GxAbi.LaunchFlagInputSecondaryPointerDown => GuideXosInputKind.PointerDown,

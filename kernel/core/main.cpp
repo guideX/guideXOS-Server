@@ -5415,6 +5415,74 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
             return window && kernel::compositor::KernelCompositor::requestCloseWindow(window->id);
         };
 
+#if defined(GXOS_NATIVEAOT_C138_REUSABLE_SCROLLBAR)
+        auto runC138ManagedScrollbarProof = [&]() __attribute__((noinline)) {
+        {
+        const gxos::apps::BuiltInAppMetadata* c138Notes =
+            gxos::apps::FindBuiltInAppMetadataByDisplayName("Managed Notes");
+        const bool c138CatalogValid = gxos::apps::ManagedNativeAotCatalogIsValid() &&
+            c138Notes;
+        kernel::serial::puts("[C138-APPMODEL] catalogValid=");
+        kernel::serial::puts(c138CatalogValid
+            ? "true result=PASS\n" : "false result=FAIL\n");
+        const bool notesLaunch = c138CatalogValid &&
+            kernel::desktop::launch_app_with_context(
+                c138Notes->appId, "c138-native");
+        kernel::app::KernelWindow* window =
+            kernel::compositor::KernelCompositor::getFocusedWindow();
+        // These are client-local coordinates in the C138 Managed Notes
+        // layout.  The first two points are inside the initial thumbs; the
+        // outside point proves that host capture continues after leaving the
+        // scrollbar bounds.
+        const int32_t textBarX = 282;
+        const int32_t textBarPressY = 90;
+        const int32_t listBarX = 508;
+        const int32_t listBarPressY = 90;
+        const int32_t documentX = 80;
+        const int32_t documentY = 100;
+        const int32_t outsideY = 220;
+        kernel::serial::puts("[C138-PROOF] managed-proof-started context=c138-native transport=physical-qemu result=");
+        kernel::serial::puts(notesLaunch ? "PASS\n" : "FAIL\n");
+        kernel::serial::puts("[C138-TARGET] textBarX=");
+        kernel::serial::put_hex32(static_cast<uint32_t>(textBarX));
+        kernel::serial::puts(" textBarPressY=");
+        kernel::serial::put_hex32(static_cast<uint32_t>(textBarPressY));
+        kernel::serial::puts(" listBarX=");
+        kernel::serial::put_hex32(static_cast<uint32_t>(listBarX));
+        kernel::serial::puts(" listBarPressY=");
+        kernel::serial::put_hex32(static_cast<uint32_t>(listBarPressY));
+        kernel::serial::puts(" documentX=");
+        kernel::serial::put_hex32(static_cast<uint32_t>(documentX));
+        kernel::serial::puts(" documentY=");
+        kernel::serial::put_hex32(static_cast<uint32_t>(documentY));
+        kernel::serial::puts(" outsideY=");
+        kernel::serial::put_hex32(static_cast<uint32_t>(outsideY));
+        kernel::serial::puts(" screenTextBarX=");
+        kernel::serial::put_hex32(static_cast<uint32_t>(window
+            ? window->x + textBarX : -1));
+        kernel::serial::puts(" screenTextBarY=");
+        kernel::serial::put_hex32(static_cast<uint32_t>(window
+            ? window->y + kernel::compositor::TITLEBAR_HEIGHT + textBarPressY : -1));
+        kernel::serial::puts(" screenListBarX=");
+        kernel::serial::put_hex32(static_cast<uint32_t>(window
+            ? window->x + listBarX : -1));
+        kernel::serial::puts(" screenListBarY=");
+        kernel::serial::put_hex32(static_cast<uint32_t>(window
+            ? window->y + kernel::compositor::TITLEBAR_HEIGHT + listBarPressY : -1));
+        kernel::serial::puts(" screenDocumentX=");
+        kernel::serial::put_hex32(static_cast<uint32_t>(window
+            ? window->x + documentX : -1));
+        kernel::serial::puts(" screenDocumentY=");
+        kernel::serial::put_hex32(static_cast<uint32_t>(window
+            ? window->y + kernel::compositor::TITLEBAR_HEIGHT + documentY : -1));
+        kernel::serial::puts(" result=");
+        kernel::serial::puts(notesLaunch && window ? "PASS\n" : "FAIL\n");
+        }
+        };
+        runC138ManagedScrollbarProof();
+        return;
+#endif
+
 #if defined(GXOS_NATIVEAOT_C137_MOUSE_WHEEL_SCROLLING)
         auto runC137MouseWheelProof = [&]() __attribute__((noinline)) {
         {

@@ -115,6 +115,12 @@ constexpr uint32_t kLaunchFlagInputKindMask = 0x0F000000u;
 constexpr uint32_t kLaunchFlagInputPointerDown = 0x01000000u;
 constexpr uint32_t kLaunchFlagInputKeyDown = 0x02000000u;
 constexpr uint32_t kLaunchFlagInputKeyChar = 0x03000000u;
+#if defined(GXOS_NATIVEAOT_C138_REUSABLE_SCROLLBAR)
+// C138 uses the zero semantic kind for pointer motion.  The existing input
+// payload already has the complete 12-bit X + 12-bit Y coordinate pair, so
+// motion needs no new host-table callback or ABI field.
+constexpr uint32_t kLaunchFlagInputPointerMove = 0x00000000u;
+#endif
 // C136 keeps the v1 launch-flags transport and spends two unused semantic
 // kind values on pointer-up and secondary-button events.  Coordinates remain
 // the existing 24-bit payload; button identity is carried by the event kind.
@@ -464,6 +470,26 @@ public:
 #endif
     }
 
+#if defined(GXOS_NATIVEAOT_C138_REUSABLE_SCROLLBAR)
+    void onMouseMove(int x, int y) override {
+        if (m_selector == 0u || x < 0 || y < 0 ||
+            static_cast<uint32_t>(x) > kLaunchFlagInputCoordinateMask ||
+            static_cast<uint32_t>(y) > kLaunchFlagInputCoordinateMask) {
+            return;
+        }
+        const uint32_t payload = static_cast<uint32_t>(x) |
+            (static_cast<uint32_t>(y) << 12);
+        const int32_t result = invokeManagedInput(
+            m_selector, kLaunchFlagInput | kLaunchFlagInputPointerMove | payload);
+        serial::puts("[C138-NATIVE-INPUT] kind=pointer-move x=");
+        serial::put_hex32(static_cast<uint32_t>(x));
+        serial::puts(" y=");
+        serial::put_hex32(static_cast<uint32_t>(y));
+        serial::puts(" result=");
+        serial::puts(result == 0 ? "PASS\n" : "IGNORED\n");
+    }
+#endif
+
     void onMouseUp(int x, int y, uint8_t button) override {
         if ((button != 1u && button != 2u) || m_selector == 0u || x < 0 || y < 0 ||
             static_cast<uint32_t>(x) > kLaunchFlagInputCoordinateMask ||
@@ -557,11 +583,18 @@ public:
         if (key == kC137RelaunchKey && result == 0) {
             const gxos::apps::BuiltInAppMetadata* notes =
                 gxos::apps::FindBuiltInAppMetadataByDisplayName("Managed Notes");
+#if defined(GXOS_NATIVEAOT_C138_REUSABLE_SCROLLBAR)
+            const bool relaunched = notes && kernel::desktop::launch_app_with_context(
+                notes->appId, "c138-relaunch");
+            serial::puts("[C138-RELAUNCH] close=PASS relaunch=");
+            serial::puts(relaunched ? "PASS result=PASS\n" : "FAIL result=FAIL\n");
+#else
             const bool relaunched = notes && kernel::desktop::launch_app_with_context(
                 notes->appId, "c137-relaunch");
             serial::puts("[C137-RELAUNCH] close=PASS relaunch=");
             serial::puts(relaunched ? "PASS capture=none result=PASS\n"
                                      : "FAIL capture=unknown result=FAIL\n");
+#endif
         }
 #endif
     }
@@ -2306,8 +2339,15 @@ int32_t invokeManagedInput(uint32_t selector, uint32_t inputFlags) {
     const uint32_t payload = inputFlags & kLaunchFlagInputPayloadMask;
     const bool wheelKind = kind >= kLaunchFlagInputWheel &&
         kind <= kLaunchFlagInputWheelLast;
+#if defined(GXOS_NATIVEAOT_C138_REUSABLE_SCROLLBAR)
+    const bool pointerMoveKind = kind == kLaunchFlagInputPointerMove;
+#endif
     if (selector == 0u || (inputFlags & kLaunchFlagInput) == 0u ||
+#if defined(GXOS_NATIVEAOT_C138_REUSABLE_SCROLLBAR)
+        (!wheelKind && !pointerMoveKind && kind != kLaunchFlagInputPointerDown &&
+#else
         (!wheelKind && kind != kLaunchFlagInputPointerDown &&
+#endif
          kind != kLaunchFlagInputPointerUp &&
          kind != kLaunchFlagInputKeyDown &&
          kind != kLaunchFlagInputKeyChar &&

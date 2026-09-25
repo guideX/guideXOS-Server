@@ -11,6 +11,7 @@ public enum GuideXosManagedControlKind
     RadioButton = 6,
     ComboBox = 7,
     PopupMenu = 8,
+    ScrollBar = 9,
 }
 
 public enum GuideXosControlHostResult
@@ -31,6 +32,10 @@ public enum GuideXosControlHostResult
     Pending = 13,
     Released = 14,
     Scrolled = 15,
+    DragStarted = 16,
+    Dragged = 17,
+    DragEnded = 18,
+    Paged = 19,
 }
 
 /// <summary>
@@ -40,7 +45,8 @@ public enum GuideXosControlHostResult
 /// </summary>
 public sealed class GuideXosControlHost
 {
-    public const int MaximumSupportedControlCount = 8;
+    public const int MaximumSupportedControlCount = 10;
+    public const int DefaultMaximumControlCount = 8;
 
     private struct ControlEntry
     {
@@ -60,6 +66,9 @@ public sealed class GuideXosControlHost
     // One bounded transient owner. The registered control remains focused;
     // this lease only gives its open transient state first refusal of input.
     private int _transientCaptureIndex = -1;
+    // One bounded primary-pointer drag owner. This lease is separate from,
+    // and mutually exclusive with, transient popup capture.
+    private int _pointerDragIndex = -1;
     // Space activation is intentionally split across KeyDown and KeyChar by
     // the existing managed input transport. Keep only the target identity for
     // that one in-flight gesture so lifecycle changes can cancel its commit.
@@ -72,12 +81,12 @@ public sealed class GuideXosControlHost
     private int _pendingSecondaryX;
     private int _pendingSecondaryY;
 
-    public GuideXosControlHost(int maximumControlCount = MaximumSupportedControlCount)
+    public GuideXosControlHost(int maximumControlCount = DefaultMaximumControlCount)
     {
         if (maximumControlCount < 1 ||
             maximumControlCount > MaximumSupportedControlCount)
         {
-            maximumControlCount = MaximumSupportedControlCount;
+            maximumControlCount = DefaultMaximumControlCount;
         }
         _capacity = maximumControlCount;
         _entries = new ControlEntry[maximumControlCount];
@@ -118,6 +127,34 @@ public sealed class GuideXosControlHost
             ReconcileTransientCapture();
             return _transientCaptureIndex >= 0
                 ? _entries[_transientCaptureIndex].Kind
+                : GuideXosManagedControlKind.None;
+        }
+    }
+
+    public bool HasPointerDragCapture
+    {
+        get
+        {
+            ReconcilePointerDrag();
+            return _pointerDragIndex >= 0;
+        }
+    }
+    public int PointerDragCaptureOwnerId
+    {
+        get
+        {
+            ReconcilePointerDrag();
+            return _pointerDragIndex >= 0
+                ? _entries[_pointerDragIndex].Id : 0;
+        }
+    }
+    public GuideXosManagedControlKind PointerDragCaptureKind
+    {
+        get
+        {
+            ReconcilePointerDrag();
+            return _pointerDragIndex >= 0
+                ? _entries[_pointerDragIndex].Kind
                 : GuideXosManagedControlKind.None;
         }
     }
@@ -220,6 +257,7 @@ public sealed class GuideXosControlHost
         {
             return _modalHost.TryAcquireTransientInputCapture(id);
         }
+        if (HasPointerDragCapture) return false;
         if (!TryFindIndex(id, out int index) ||
             !IsOpenTransientCandidate(index)) return false;
         ReconcileTransientCapture();
@@ -279,6 +317,51 @@ public sealed class GuideXosControlHost
         return TryRegister(id, GuideXosManagedControlKind.PopupMenu, control, focusable);
     }
 
+    public GuideXosControlHostResult TryRegisterScrollBar(
+        int id, GuideXosScrollBar control, bool focusable = true)
+    {
+        return TryRegister(id, GuideXosManagedControlKind.ScrollBar, control, focusable);
+    }
+
+    /// <summary>Routes motion to the single active primary-pointer drag owner.</summary>
+    public GuideXosControlHostResult HandlePointerMove(int x, int y)
+    {
+        if (_modalHost != null || !TryGetPointerDragIndex(out int index))
+        {
+            return GuideXosControlHostResult.Ignored;
+        }
+        GuideXosScrollBarResult result =
+            ((GuideXosScrollBar)_entries[index].Control).HandlePointerMove(x, y);
+        ReconcilePointerDrag();
+        return Map(result);
+    }
+
+    /// <summary>Completes the active primary-button drag, if any.</summary>
+    public GuideXosControlHostResult HandlePointerUp(
+        int x, int y, GuideXosPointerButton button = GuideXosPointerButton.Primary)
+    {
+        if (button != GuideXosPointerButton.Primary ||
+            !TryGetPointerDragIndex(out int index))
+        {
+            return GuideXosControlHostResult.Ignored;
+        }
+        GuideXosScrollBarResult result =
+            ((GuideXosScrollBar)_entries[index].Control).HandlePointerUp(x, y, button);
+        _pointerDragIndex = -1;
+        return Map(result);
+    }
+
+    public void CancelPointerDrag()
+    {
+        if (_pointerDragIndex >= 0 &&
+            _pointerDragIndex < _registrationCount &&
+            _entries[_pointerDragIndex].Kind == GuideXosManagedControlKind.ScrollBar)
+        {
+            ((GuideXosScrollBar)_entries[_pointerDragIndex].Control).CancelDrag();
+        }
+        _pointerDragIndex = -1;
+    }
+
     /// <summary>
     /// Removes one registered control and, for a radio member, removes its
     /// logical group membership too. This keeps a closed or stale host entry
@@ -304,6 +387,14 @@ public sealed class GuideXosControlHost
         else if (_transientCaptureIndex > index)
         {
             _transientCaptureIndex--;
+        }
+        if (_pointerDragIndex == index)
+        {
+            CancelPointerDrag();
+        }
+        else if (_pointerDragIndex > index)
+        {
+            _pointerDragIndex--;
         }
         int priorActiveIndex = _activeIndex;
         BlurControl(index);
@@ -343,6 +434,7 @@ public sealed class GuideXosControlHost
         CancelPendingSecondaryIfInvalid();
         NormalizeActiveFocus();
         ReconcileTransientCapture();
+        ReconcilePointerDrag();
         return GuideXosControlHostResult.Focused;
     }
 
@@ -381,6 +473,7 @@ public sealed class GuideXosControlHost
             return _modalHost.FocusAndRoutePointer(
                 id, x, y, originX, originY, characterWidth, lineHeight);
         }
+        if (HasPointerDragCapture) return GuideXosControlHostResult.Ignored;
         CancelPendingSpace();
         CancelPendingSecondaryPointer();
         if (TryGetTransientCaptureIndex(out int capturedIndex))
@@ -456,6 +549,7 @@ public sealed class GuideXosControlHost
                 characterWidth, lineHeight);
         }
         if (wheelDelta == 0) return GuideXosControlHostResult.Ignored;
+        if (HasPointerDragCapture) return GuideXosControlHostResult.Ignored;
         if (TryGetTransientCaptureIndex(out _))
         {
             return GuideXosControlHostResult.Ignored;
@@ -624,6 +718,7 @@ public sealed class GuideXosControlHost
         CancelPendingSecondaryIfInvalid();
         NormalizeActiveFocus();
         ReconcileTransientCapture();
+        ReconcilePointerDrag();
         return priorIndex != _activeIndex && _activeIndex >= 0
             ? GuideXosControlHostResult.Focused
             : GuideXosControlHostResult.Ignored;
@@ -637,6 +732,7 @@ public sealed class GuideXosControlHost
         }
         CancelPendingSpace();
         CancelPendingSecondaryPointer();
+        CancelPointerDrag();
         NormalizeActiveFocus();
         _savedActiveIndex = _activeIndex;
         _savedActiveId = ActiveControlId;
@@ -651,6 +747,7 @@ public sealed class GuideXosControlHost
         if (_modalHost == null) return false;
         CancelPendingSpace();
         CancelPendingSecondaryPointer();
+        CancelPointerDrag();
         _modalHost.ClearFocus();
         _modalHost = null;
 
@@ -699,6 +796,7 @@ public sealed class GuideXosControlHost
         _pendingSpaceIndex = -1;
         _cancelledSpaceCharacter = false;
         CancelPendingSecondaryPointer();
+        CancelPointerDrag();
         ReleaseTransientCapture();
     }
 
@@ -900,6 +998,8 @@ public sealed class GuideXosControlHost
                 ((GuideXosComboBox)_entries[index].Control).HandlePointerDown(x, y)),
             GuideXosManagedControlKind.PopupMenu => Map(
                 ((GuideXosPopupMenu)_entries[index].Control).HandlePointerDown(x, y)),
+            GuideXosManagedControlKind.ScrollBar => Map(
+                ((GuideXosScrollBar)_entries[index].Control).HandlePointerDown(x, y)),
             _ => GuideXosControlHostResult.Rejected,
         };
     }
@@ -977,6 +1077,8 @@ public sealed class GuideXosControlHost
                 ((GuideXosComboBox)_entries[index].Control).HandleKey(key)),
             GuideXosManagedControlKind.PopupMenu => Map(
                 ((GuideXosPopupMenu)_entries[index].Control).HandleKey(key)),
+            GuideXosManagedControlKind.ScrollBar => Map(
+                ((GuideXosScrollBar)_entries[index].Control).HandleKey(key)),
             _ => GuideXosControlHostResult.Rejected,
         };
     }
@@ -998,6 +1100,9 @@ public sealed class GuideXosControlHost
                     wheelDelta)),
             GuideXosManagedControlKind.ListBox => Map(
                 ((GuideXosListBox)_entries[index].Control).HandleWheel(
+                    wheelDelta)),
+            GuideXosManagedControlKind.ScrollBar => Map(
+                ((GuideXosScrollBar)_entries[index].Control).HandleWheel(
                     wheelDelta)),
             _ => GuideXosControlHostResult.Ignored,
         };
@@ -1046,6 +1151,8 @@ public sealed class GuideXosControlHost
                 ((GuideXosComboBox)_entries[index].Control).EffectiveVisible,
             GuideXosManagedControlKind.PopupMenu =>
                 ((GuideXosPopupMenu)_entries[index].Control).EffectiveVisible,
+            GuideXosManagedControlKind.ScrollBar =>
+                ((GuideXosScrollBar)_entries[index].Control).EffectiveVisible,
             GuideXosManagedControlKind.TextArea =>
                 ((GuideXosTextArea)_entries[index].Control).EffectiveVisible,
             GuideXosManagedControlKind.ListBox =>
@@ -1072,6 +1179,8 @@ public sealed class GuideXosControlHost
                 !((GuideXosTextArea)_entries[index].Control).Enabled,
             GuideXosManagedControlKind.ListBox =>
                 !((GuideXosListBox)_entries[index].Control).Enabled,
+            GuideXosManagedControlKind.ScrollBar =>
+                !((GuideXosScrollBar)_entries[index].Control).Enabled,
             _ => false,
         };
     }
@@ -1094,6 +1203,8 @@ public sealed class GuideXosControlHost
                 ((GuideXosRadioButton)_entries[index].Control).IsFocused,
             GuideXosManagedControlKind.ComboBox =>
                 ((GuideXosComboBox)_entries[index].Control).IsFocused,
+            GuideXosManagedControlKind.ScrollBar =>
+                ((GuideXosScrollBar)_entries[index].Control).IsFocused,
             _ => false,
         };
     }
@@ -1122,6 +1233,9 @@ public sealed class GuideXosControlHost
                 break;
             case GuideXosManagedControlKind.ComboBox:
                 ((GuideXosComboBox)_entries[index].Control).Focus();
+                break;
+            case GuideXosManagedControlKind.ScrollBar:
+                ((GuideXosScrollBar)_entries[index].Control).Focus();
                 break;
         }
     }
@@ -1153,6 +1267,9 @@ public sealed class GuideXosControlHost
                 break;
             case GuideXosManagedControlKind.PopupMenu:
                 ((GuideXosPopupMenu)_entries[index].Control).Blur();
+                break;
+            case GuideXosManagedControlKind.ScrollBar:
+                ((GuideXosScrollBar)_entries[index].Control).Blur();
                 break;
         }
     }
@@ -1189,6 +1306,7 @@ public sealed class GuideXosControlHost
             GuideXosManagedControlKind.RadioButton => control is GuideXosRadioButton,
             GuideXosManagedControlKind.ComboBox => control is GuideXosComboBox,
             GuideXosManagedControlKind.PopupMenu => control is GuideXosPopupMenu,
+            GuideXosManagedControlKind.ScrollBar => control is GuideXosScrollBar,
             _ => false,
         };
     }
@@ -1303,6 +1421,25 @@ public sealed class GuideXosControlHost
         };
     }
 
+    private static GuideXosControlHostResult Map(GuideXosScrollBarResult result)
+    {
+        return result switch
+        {
+            GuideXosScrollBarResult.Changed => GuideXosControlHostResult.Changed,
+            GuideXosScrollBarResult.Focused => GuideXosControlHostResult.Focused,
+            GuideXosScrollBarResult.Disabled => GuideXosControlHostResult.Disabled,
+            GuideXosScrollBarResult.Rejected => GuideXosControlHostResult.Rejected,
+            GuideXosScrollBarResult.DragStarted => GuideXosControlHostResult.DragStarted,
+            GuideXosScrollBarResult.Dragged => GuideXosControlHostResult.Dragged,
+            GuideXosScrollBarResult.DragEnded => GuideXosControlHostResult.DragEnded,
+            GuideXosScrollBarResult.Cancelled => GuideXosControlHostResult.Cancelled,
+            GuideXosScrollBarResult.Paged => GuideXosControlHostResult.Paged,
+            GuideXosScrollBarResult.Stepped => GuideXosControlHostResult.Changed,
+            GuideXosScrollBarResult.Scrolled => GuideXosControlHostResult.Scrolled,
+            _ => GuideXosControlHostResult.Ignored,
+        };
+    }
+
     private bool TryFindControlReference(
         GuideXosRadioButton target, out int index)
     {
@@ -1401,8 +1538,38 @@ public sealed class GuideXosControlHost
     {
         GuideXosControlHostResult result = RoutePointer(
             index, x, y, originX, originY, characterWidth, lineHeight);
+        if (result == GuideXosControlHostResult.DragStarted &&
+            _entries[index].Kind == GuideXosManagedControlKind.ScrollBar)
+        {
+            _pointerDragIndex = index;
+        }
         CaptureIfOpen(index);
         return result;
+    }
+
+    private bool TryGetPointerDragIndex(out int index)
+    {
+        ReconcilePointerDrag();
+        index = _pointerDragIndex;
+        return index >= 0;
+    }
+
+    private void ReconcilePointerDrag()
+    {
+        if (_pointerDragIndex < 0) return;
+        if (_modalHost != null ||
+            _pointerDragIndex >= _registrationCount ||
+            _entries[_pointerDragIndex].Kind != GuideXosManagedControlKind.ScrollBar)
+        {
+            CancelPointerDrag();
+            return;
+        }
+        GuideXosScrollBar bar =
+            (GuideXosScrollBar)_entries[_pointerDragIndex].Control;
+        if (!bar.IsDragging || !bar.Visible || !bar.Enabled)
+        {
+            CancelPointerDrag();
+        }
     }
 
     private void ReconcileTransientCapture()
