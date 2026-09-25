@@ -11,6 +11,7 @@
 #include "process.h"
 
 #include <algorithm>
+#include <atomic>
 #include <array>
 #include <cctype>
 #include <chrono>
@@ -74,6 +75,13 @@ struct Slot {
 
 std::array<Slot, kMaxDeployments> g_slots;
 std::mutex g_mutex;
+std::atomic<uint32_t> g_phase28yTraceCount{0};
+
+void phase28yTrace(const char* event, const std::string& detail = std::string()) {
+    if (!event || g_phase28yTraceCount.fetch_add(1, std::memory_order_relaxed) >= 128) return;
+    Logger::write(LogLevel::Info, std::string("P28Y STARTUP ") + event +
+        (detail.empty() ? std::string() : std::string(" ") + detail));
+}
 
 uint32_t textLength(const char* value, uint32_t limit) {
     if (!value) return 0;
@@ -504,6 +512,7 @@ void unregisterDeployment(Deployment& deployment) {
 
 gx_result Prepare(NativeAppRuntimeContext& owner, const gx_development_run_request& request,
                   gx_development_run_handle* outHandle, gx_development_run_snapshot* outSnapshot) {
+    phase28yTrace("21_prepare_entry", "ownerRuntimeId=" + std::to_string(owner.runtimeId));
     if (outHandle) *outHandle = 0;
     clearSnapshot(outSnapshot);
     const size_t requiredRequestBytes = offsetof(gx_development_run_request, artifactSha256) + sizeof(const char*);
@@ -523,6 +532,7 @@ gx_result Prepare(NativeAppRuntimeContext& owner, const gx_development_run_reque
     if (!validateProjectAndArtifact(request, candidate, error, message)) {
         setFailure(outSnapshot, error, message);
         Logger::write(LogLevel::Warn, std::string("[DevelopmentRun] prepare failed reason=") + errorName(error));
+        phase28yTrace("22_prepare_rejected", errorName(error));
         return GX_OK;
     }
 
@@ -577,11 +587,14 @@ gx_result Prepare(NativeAppRuntimeContext& owner, const gx_development_run_reque
     slot.used = true;
     *outHandle = candidate.handle;
     setSnapshotFromDeployment(slot.deployment, outSnapshot);
+    phase28yTrace("23_deployment_registered", "handle=" + std::to_string(candidate.handle) +
+        " generation=" + std::to_string(candidate.generation));
     Logger::write(LogLevel::Info, "[DevelopmentRun] deployment prepared appId=" + candidate.applicationId + " handle=" + std::to_string(candidate.handle));
     return GX_OK;
 }
 
 gx_result Start(NativeAppRuntimeContext& owner, gx_development_run_handle handle) {
+    phase28yTrace("24_start_entry", "handle=" + std::to_string(handle));
     std::string appId;
     uint32_t generation = 0;
     {
@@ -599,6 +612,8 @@ gx_result Start(NativeAppRuntimeContext& owner, gx_development_run_handle handle
         slot->deployment.state = GX_DEVELOPMENT_RUN_LAUNCHING;
         appId = slot->deployment.applicationId;
         generation = slot->deployment.generation;
+        phase28yTrace("25_start_launch_requested", "appId=" + appId +
+            " generation=" + std::to_string(generation));
     }
 
     std::string error;
@@ -613,6 +628,7 @@ gx_result Start(NativeAppRuntimeContext& owner, gx_development_run_handle handle
     }
     if (!gui::DesktopService::LaunchDevelopmentApp(appId, owner.runtimeId, generation, debugControlled, error, processId)) {
         Logger::write(LogLevel::Warn, "[DevelopmentRun] launch failed appId=" + appId + " reason=" + error);
+        phase28yTrace("26_start_launch_failed", "appId=" + appId + " reason=" + error);
         std::lock_guard<std::mutex> lock(g_mutex);
         Slot* slot = findOwnedLocked(handle, owner.runtimeId);
         if (slot) {
@@ -632,6 +648,8 @@ gx_result Start(NativeAppRuntimeContext& owner, gx_development_run_handle handle
         return GX_ERROR_FAILED;
     }
     slot->deployment.processId = processId;
+    phase28yTrace("27_start_launch_returned", "appId=" + appId +
+        " processId=" + std::to_string(processId));
     if (slot->deployment.closeRequested) closeOwnedWindows(processId);
     return GX_OK;
 }

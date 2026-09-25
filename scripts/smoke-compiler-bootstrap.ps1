@@ -3463,6 +3463,13 @@ try {
         # requested fresh boot.
         $activeEspDirectory = Join-Path $tempDirectory ("esp-boot{0}" -f $run)
         Copy-Item $espDirectory $activeEspDirectory -Recurse -Force
+        if ($Phase28QOnly) {
+            $activePhase28QSentinel = Join-Path $activeEspDirectory "Apps/DeveloperStudio/.phase28q-diagnostic"
+            if (!(Test-Path -LiteralPath $activePhase28QSentinel -PathType Leaf)) {
+                throw "P28Y STARTUP staging failed on fresh boot ${run}: Phase 28Q launch request sentinel missing from active ESP"
+            }
+            Write-Host ("P28Y STARTUP boot={0} launch_request_staged=present" -f $run)
+        }
         Invoke-QemuProofBoot $run $qemu
     }
 

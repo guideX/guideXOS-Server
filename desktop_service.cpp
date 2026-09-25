@@ -38,6 +38,7 @@
 #include "trash.h"
 #include "package_manager.h"
 #include <algorithm>
+#include <atomic>
 #include <cctype>
 #include <exception>
 #include <filesystem>
@@ -69,6 +70,13 @@ namespace gxos {
             static bool s_appModelActiveTypedDispatchCandidateEnabled = false;
             static AppModelActiveTypedDispatchStateSource s_appModelActiveTypedDispatchStateSource =
                 AppModelActiveTypedDispatchStateSource::ProductDefault;
+            static std::atomic<uint32_t> s_phase28yTraceCount{0};
+
+            static void phase28yTrace(const char* event, const std::string& detail = std::string()) {
+                if (!event || s_phase28yTraceCount.fetch_add(1, std::memory_order_relaxed) >= 128) return;
+                Logger::write(LogLevel::Info, std::string("P28Y STARTUP ") + event +
+                    (detail.empty() ? std::string() : std::string(" ") + detail));
+            }
 
             static bool appModelActiveTypedDispatchStateUsesForceOverride(AppModelActiveTypedDispatchStateSource source) {
                 return source == AppModelActiveTypedDispatchStateSource::ForceOn ||
@@ -208,6 +216,14 @@ namespace gxos {
         static LaunchDispatchUsageCounters s_launchDispatchUsageCounters;
 
         namespace {
+            static std::atomic<uint32_t> s_phase28yGuiTraceCount{0};
+
+            static void phase28yTrace(const char* event, const std::string& detail = std::string()) {
+                if (!event || s_phase28yGuiTraceCount.fetch_add(1, std::memory_order_relaxed) >= 128) return;
+                Logger::write(LogLevel::Info, std::string("P28Y STARTUP ") + event +
+                    (detail.empty() ? std::string() : std::string(" ") + detail));
+            }
+
             static std::string lowerCopy(std::string value);
             static std::string filesystemEntryExtension(const std::string& path);
 
@@ -1317,10 +1333,13 @@ namespace gxos {
         }
 
         static uint64_t launchNativeElfProcess(const apps::RegisteredApp& registryApp, const apps::LaunchDecision& launchDecision, bool debugControlled = false) {
+            phase28yTrace("31_nativeelf_process_spawn_requested", "appId=" + registryApp.manifest.id +
+                " debugControlled=" + (debugControlled ? std::string("true") : std::string("false")));
             ProcessSpec spec;
             spec.name = std::string("nativeelf:") + (registryApp.manifest.id.empty() ? registryApp.manifest.displayName : registryApp.manifest.id);
             spec.appId = registryApp.manifest.id;
             spec.entry = [registryApp, launchDecision, debugControlled](int, char**) -> int {
+                phase28yTrace("32_nativeelf_process_entry", "appId=" + registryApp.manifest.id);
                 apps::NativeElfLaunchResult nativeElfResult = apps::NativeElfLaunchPipeline::PrepareLaunch(registryApp, launchDecision);
                 if (!nativeElfResult.success) {
                     std::string message = std::string("Native app launch failed: ") + (nativeElfResult.validationErrors.empty() ? nativeElfResult.message : joinMessages(nativeElfResult.validationErrors));
@@ -1328,6 +1347,7 @@ namespace gxos {
                     NotificationManager::Add(message, NotificationLevel::Error);
                     return apps::GX_ERROR_FAILED;
                 }
+                phase28yTrace("33_nativeelf_executable_validated", "appId=" + registryApp.manifest.id);
 
                 apps::NativeElfImage nativeElfImage = apps::NativeElfImageLoader::LoadImage(nativeElfResult);
                 if (!nativeElfImage.success) {
@@ -1336,6 +1356,7 @@ namespace gxos {
                     NotificationManager::Add(message, NotificationLevel::Error);
                     return apps::GX_ERROR_FAILED;
                 }
+                phase28yTrace("34_nativeelf_image_loaded", "appId=" + registryApp.manifest.id);
 
                 apps::NativeAppRuntimeContext runtimeContext = apps::NativeAppRuntime::Prepare(registryApp, launchDecision, nativeElfResult, nativeElfImage);
                 if (!runtimeContext.success) {
@@ -1344,6 +1365,7 @@ namespace gxos {
                     NotificationManager::Add(message, NotificationLevel::Error);
                     return apps::GX_ERROR_FAILED;
                 }
+                phase28yTrace("35_nativeelf_runtime_prepared", "runtimeId=" + std::to_string(runtimeContext.runtimeId));
                 runtimeContext.debugLaunchGate = debugControlled;
 
                 std::string executorReason;
@@ -1353,6 +1375,7 @@ namespace gxos {
                     NotificationManager::Add(message, NotificationLevel::Error);
                     return apps::GX_ERROR_FAILED;
                 }
+                phase28yTrace("36_nativeelf_executor_ready", "runtimeId=" + std::to_string(runtimeContext.runtimeId));
 
                 apps::NativeElfExecutionResult executionResult = apps::NativeElfExecutor::Execute(nativeElfResult, nativeElfImage, runtimeContext);
                 if (!executionResult.success) {
@@ -1366,7 +1389,9 @@ namespace gxos {
                 return executionResult.exitCode;
             };
 
-            return ProcessTable::spawn(spec, { spec.name });
+            const uint64_t processId = ProcessTable::spawn(spec, { spec.name });
+            phase28yTrace("37_nativeelf_process_spawn_returned", "processId=" + std::to_string(processId));
+            return processId;
         }
 
         static void ensureDefaultAppsRegistered() {
@@ -5920,6 +5945,8 @@ namespace gxos {
         }
 
         bool DesktopService::LaunchDevelopmentApp(const std::string& appId, uint64_t ownerRuntimeId, uint64_t generation, bool debugControlled, std::string& error, uint64_t& outProcessId) {
+            phase28yTrace("28_desktop_launch_entry", "appId=" + appId +
+                " generation=" + std::to_string(generation));
             error.clear();
             outProcessId = 0;
             ensureDefaultAppsRegistered();
@@ -5941,6 +5968,7 @@ namespace gxos {
                 error = launchDecision.reason.empty() ? "LAUNCH_UNAVAILABLE" : launchDecision.reason;
                 return false;
             }
+            phase28yTrace("29_desktop_launch_resolved", "appId=" + appId + " strategy=NativeElf");
             if (!apps::NativeElfExecutor::ExperimentalExecutionEnabled()) {
                 error = "LAUNCH_UNAVAILABLE";
                 return false;
@@ -5963,6 +5991,8 @@ namespace gxos {
                 error = "LAUNCH_FAILED";
                 return false;
             }
+            phase28yTrace("30_desktop_launch_returned", "appId=" + appId +
+                " processId=" + std::to_string(outProcessId));
             Logger::write(LogLevel::Info, "Development App Model launch: appId=" + appId + " processId=" + std::to_string(outProcessId));
             return true;
         }

@@ -341,6 +341,9 @@ NativeElfExecutionResult NativeElfExecutor::Execute(
     runtimeContext.activeGxContext = &appContext;
     runtimeContext.processId = Allocator::currentPid();
     std::string debuggerError;
+    Logger::write(LogLevel::Info, "P28Y STARTUP 38_nativeelf_debug_service_entry runtimeId=" +
+        std::to_string(runtimeContext.runtimeId) + " debugControlled=" +
+        (runtimeContext.debugLaunchGate ? "true" : "false"));
     if (runtimeContext.debugLaunchGate && !NativeAppDebugger::RegisterRuntime(runtimeContext, mapping, image, true, debuggerError)) {
         addDiagnostic(result, "Hosted debugger registration failed: " + debuggerError);
         runtimeContext.activeGxContext = nullptr;
@@ -348,7 +351,12 @@ NativeElfExecutionResult NativeElfExecutor::Execute(
         LogDecision(result.appId, result.architecture, false, result.message, "failure");
         return result;
     }
+    if (runtimeContext.debugLaunchGate)
+        Logger::write(LogLevel::Info, "P28Y STARTUP 39_debugger_service_ready runtimeId=" + std::to_string(runtimeContext.runtimeId));
     NativeAppProcessTable::RegisterPrepared(runtimeContext, true, hostArchitecture());
+    Logger::write(LogLevel::Info, "P28Y STARTUP 40_target_runtime_registered runtimeId=" + std::to_string(runtimeContext.runtimeId));
+    if (runtimeContext.debugLaunchGate)
+        Logger::write(LogLevel::Info, "P28Y STARTUP 41_debug_launch_gate_wait_entry runtimeId=" + std::to_string(runtimeContext.runtimeId));
     if (runtimeContext.debugLaunchGate && !NativeAppDebugger::WaitForExecutionGate(runtimeContext.runtimeId)) {
         NativeAppDebugger::UnregisterRuntime(runtimeContext.runtimeId);
         addDiagnostic(result, "Hosted debugger launch gate was cancelled before execution");
@@ -357,6 +365,8 @@ NativeElfExecutionResult NativeElfExecutor::Execute(
         LogDecision(result.appId, result.architecture, false, result.message, "failure");
         return result;
     }
+    if (runtimeContext.debugLaunchGate)
+        Logger::write(LogLevel::Info, "P28Y STARTUP 42_debug_launch_gate_released runtimeId=" + std::to_string(runtimeContext.runtimeId));
     NativeAppRuntime::BeginHostCallDispatch(runtimeContext);
     NativeAppProcessTable::MarkRunning(runtimeContext.runtimeId);
     bool executionFailed = false;
