@@ -68,13 +68,15 @@ param(
     [switch]$Phase28NOnly,
     [switch]$Phase28OOnly,
     [switch]$Phase28POnly,
-    [switch]$Phase28QOnly
+    [switch]$Phase28QOnly,
+    [switch]$Phase29COnly
 )
 
 $ErrorActionPreference = "Stop"
 # Phase 27G includes the complete earlier integration chain.  The focused M
 # mode deliberately keeps only the baseline C/D route plus the M smoke so a
 # flaky optional earlier IDE repeat cannot mask the recursion proof.
+if ($Phase29COnly) { $Phase28QOnly = $true }
 if ($Phase28QOnly) {
     $Phase27E = $false; $Phase27F = $false; $Phase27G = $false; $Phase27H = $false
     $Phase27I = $false; $Phase27J = $false; $Phase27K = $false; $Phase27L = $false
@@ -351,7 +353,7 @@ if ($Phase27Y -and $TimeoutSeconds -lt 120) { $TimeoutSeconds = 120 }
 if ($Phase27Z -and $TimeoutSeconds -lt 120) { $TimeoutSeconds = 120 }
 if (($Phase28A -or $Phase28B -or $Phase28C -or $Phase28D -or $Phase28E -or $Phase28F -or $Phase28G -or $Phase28H -or $Phase28I) -and $TimeoutSeconds -lt 120) { $TimeoutSeconds = 120 }
 if (($Phase28J -or $Phase28K) -and $TimeoutSeconds -lt 120) { $TimeoutSeconds = 120 }
-if (($Phase28L -or $Phase28M -or $Phase28N -or $Phase28OOnly -or $Phase28POnly -or $Phase28QOnly) -and $TimeoutSeconds -lt 120) { $TimeoutSeconds = 120 }
+if (($Phase28L -or $Phase28M -or $Phase28N -or $Phase28OOnly -or $Phase28POnly -or $Phase28QOnly -or $Phase29COnly) -and $TimeoutSeconds -lt 120) { $TimeoutSeconds = 120 }
 $root = Split-Path -Parent $PSScriptRoot
 $kernelDirectory = Join-Path $root "kernel"
 $espDirectory = Join-Path $root "ESP"
@@ -816,7 +818,9 @@ function Invoke-QemuProofBoot([int]$runNumber, [string]$qemu) {
             if (Test-Path -LiteralPath $serialPath) {
                 try {
                     $serialProbe = Get-Content -LiteralPath $serialPath -Raw -ErrorAction Stop
-                    if ($serialProbe -and $serialProbe.Contains("[KERNEL] Entering main loop (waiting for input)...")) {
+                    if ($serialProbe -and (($Phase29COnly -and
+                            $serialProbe.Contains("DEVELOPER_STUDIO_PHASE29C_PROJECT_LOAD_READY")) -or
+                        $serialProbe.Contains("[KERNEL] Entering main loop (waiting for input)..."))) {
                         $process.Kill()
                         break
                     }
@@ -2070,7 +2074,7 @@ function Invoke-QemuProofBoot([int]$runNumber, [string]$qemu) {
                 "DEVELOPER_STUDIO_PHASE28P_PASS"
             )
         }
-        if ($Phase28QOnly) {
+        if ($Phase29COnly) {
             $requiredMarkers += @(
                 "P28Z BOOT 01 native_loader_entered",
                 "P28Z BOOT 02 kernel_entry",
@@ -2087,6 +2091,42 @@ function Invoke-QemuProofBoot([int]$runNumber, [string]$qemu) {
                 "P28Z PROJECT state=loaded",
                 "P28Z PROJECT state=refresh_started",
                 "P28Z PROJECT state=ready",
+                "DEVELOPER_STUDIO_PHASE29C_PROJECT_LOAD_REQUEST_ACCEPTED",
+                "DEVELOPER_STUDIO_PHASE29C_PROJECT_LOAD_FILES_LOADED",
+                "DEVELOPER_STUDIO_PHASE29C_PROJECT_LOAD_CANDIDATE_ALLOCATED",
+                "DEVELOPER_STUDIO_PHASE29C_PROJECT_LOAD_REFRESH_STARTED",
+                "DEVELOPER_STUDIO_PHASE29C_PROJECT_LOAD_VALIDATED",
+                "DEVELOPER_STUDIO_PHASE29C_PROJECT_LOAD_COMMIT_STARTED",
+                "DEVELOPER_STUDIO_PHASE29C_PROJECT_LOAD_ACTIVE_PUBLISHED",
+                "DEVELOPER_STUDIO_PHASE29C_PROJECT_LOAD_READY",
+                "P28Z APP 05 project_open_return",
+                "P28Z APP 06 project_ready"
+            )
+        } elseif ($Phase28QOnly) {
+            $requiredMarkers += @(
+                "P28Z BOOT 01 native_loader_entered",
+                "P28Z BOOT 02 kernel_entry",
+                "P28Z BOOT 03 early_kernel_init_complete",
+                "P28Z BOOT 04 runtime_scheduler_ready",
+                "P28Z BOOT 05 gx_main_invoke",
+                "P28Z BOOT 06 desktop_init_complete",
+                "P28Z APP 01 gx_main_entered",
+                "P28Z APP 00 gx_main_entry_raw",
+                "P28Z APP 02 initial_render_pass",
+                "P28Z APP 03 project_open_request_observed",
+                "P28Z APP 04 project_open_entry",
+                "P28Z PROJECT state=load_started",
+                "P28Z PROJECT state=loaded",
+                "P28Z PROJECT state=refresh_started",
+                "P28Z PROJECT state=ready",
+                "DEVELOPER_STUDIO_PHASE29C_PROJECT_LOAD_REQUEST_ACCEPTED",
+                "DEVELOPER_STUDIO_PHASE29C_PROJECT_LOAD_FILES_LOADED",
+                "DEVELOPER_STUDIO_PHASE29C_PROJECT_LOAD_CANDIDATE_ALLOCATED",
+                "DEVELOPER_STUDIO_PHASE29C_PROJECT_LOAD_REFRESH_STARTED",
+                "DEVELOPER_STUDIO_PHASE29C_PROJECT_LOAD_VALIDATED",
+                "DEVELOPER_STUDIO_PHASE29C_PROJECT_LOAD_COMMIT_STARTED",
+                "DEVELOPER_STUDIO_PHASE29C_PROJECT_LOAD_ACTIVE_PUBLISHED",
+                "DEVELOPER_STUDIO_PHASE29C_PROJECT_LOAD_READY",
                 "P28Z APP 05 project_open_return",
                 "P28Z APP 06 project_ready",
                 "P28Z APP 07 debugger_launch_request",
@@ -2138,7 +2178,7 @@ function Invoke-QemuProofBoot([int]$runNumber, [string]$qemu) {
             Write-Host "QEMU boot $runNumber missed required compiler/IDE markers: $($missingMarkers -join ', ')" -ForegroundColor Red
             if ($Phase28QOnly) {
                 $finalState = @($serial -split "`r?`n" |
-                    Where-Object { $_ -match '^P28Z BOOT_IMAGE |^P28Z BOOT |^P28Z APP |^P28Z PROJECT |^P28Z FS |^P28Y STARTUP |^DEVELOPER_STUDIO_PHASE28Q_' } |
+                    Where-Object { $_ -match '^P28Z BOOT_IMAGE |^P28Z BOOT |^P28Z APP |^P28Z PROJECT |^P28Z FS |^P28Y STARTUP |^DEVELOPER_STUDIO_PHASE29C_PROJECT_LOAD_|^DEVELOPER_STUDIO_PHASE28Q_' } |
                     Select-Object -Last 16)
                 Write-Host ("P28Z FINAL_STATE boot={0} bounded_entries={1}" -f $runNumber, $finalState.Count) -ForegroundColor Yellow
                 $finalState | ForEach-Object { Write-Host $_ }
@@ -2205,7 +2245,7 @@ function Invoke-QemuProofBoot([int]$runNumber, [string]$qemu) {
 
         Write-Host "--- QEMU bare-metal compiler proof boot $runNumber ---" -ForegroundColor Cyan
         if ($Phase28OOnly -or $Phase28POnly -or $Phase28QOnly) {
-            $serial -split "`r?`n" | Where-Object { $_ -match "DEVELOPER_STUDIO_PHASE28O|DEVELOPER_STUDIO_PHASE28N|DEVELOPER_STUDIO_PHASE28M|phase28o|phase28n|phase28m|Phase 28O|Phase 28N|Phase 28M|P28O|P28M|DeveloperStudio|NativeElf: artifact_begin" } |
+            $serial -split "`r?`n" | Where-Object { $_ -match "DEVELOPER_STUDIO_PHASE29C_PROJECT_LOAD_|DEVELOPER_STUDIO_PHASE28O|DEVELOPER_STUDIO_PHASE28N|DEVELOPER_STUDIO_PHASE28M|phase28o|phase28n|phase28m|Phase 28O|Phase 28N|Phase 28M|P28O|P28M|DeveloperStudio|NativeElf: artifact_begin" } |
                 ForEach-Object { Write-Host $_ }
         } elseif ($Phase28NOnly) {
             $serial -split "`r?`n" | Where-Object { $_ -match "DEVELOPER_STUDIO_PHASE28N|DEVELOPER_STUDIO_PHASE28M|phase28n|phase28m|Phase 28N|Phase 28M|P28M|DeveloperStudio|NativeElf: artifact_begin" } |
@@ -4415,8 +4455,8 @@ finally {
             Copy-Item $directoryBackups[$relativeDirectory] $target -Recurse -Force
         }
     }
-    if ($Phase28LOnly -or $Phase28MOnly -or $Phase28NOnly -or $Phase28OOnly -or $Phase28POnly -or $Phase28QOnly) {
-        $proofLabel = if ($Phase28QOnly) { "Phase 28Q" } elseif ($Phase28POnly) { "Phase 28P" } elseif ($Phase28OOnly) { "Phase 28O" } elseif ($Phase28NOnly) { "Phase 28N" } elseif ($Phase28MOnly) { "Phase 28M" } else { "Phase 28L" }
+    if ($Phase28LOnly -or $Phase28MOnly -or $Phase28NOnly -or $Phase28OOnly -or $Phase28POnly -or $Phase28QOnly -or $Phase29COnly) {
+        $proofLabel = if ($Phase29COnly) { "Phase 29C" } elseif ($Phase28QOnly) { "Phase 28Q" } elseif ($Phase28POnly) { "Phase 28P" } elseif ($Phase28OOnly) { "Phase 28O" } elseif ($Phase28NOnly) { "Phase 28N" } elseif ($Phase28MOnly) { "Phase 28M" } else { "Phase 28L" }
         Write-Host "$proofLabel evidence preserved at: $tempDirectory"
     } elseif (Test-Path $tempDirectory) {
         Remove-Item -LiteralPath $tempDirectory -Recurse -Force -ErrorAction SilentlyContinue

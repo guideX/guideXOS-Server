@@ -267,6 +267,30 @@ static uint64_t read_stack_pointer()
 #endif
 }
 
+static bool native_app_log_pointer_range_for_runtime(uint64_t pointer,
+                                                     uint32_t* maximumReadableBytes)
+{
+    if (!maximumReadableBytes) return false;
+    if (native_app_log_pointer_range(pointer, s_appRuntime.readOnlyDataBase,
+                                     s_appRuntime.readOnlyDataSize,
+                                     maximumReadableBytes)) {
+        return true;
+    }
+    // Developer Studio formats bounded diagnostic fields into its own
+    // writable image scratch buffer. The host copies the string immediately,
+    // so accepting an in-image pointer preserves the bounded validation
+    // contract without permitting arbitrary kernel memory.
+    if (!native_app_pointer_in_range(pointer, s_appRuntime.imageBase,
+                                     s_appRuntime.imageSize)) return false;
+    const uint64_t remaining = s_appRuntime.imageSize - (pointer - s_appRuntime.imageBase);
+    if (remaining == 0) return false;
+    *maximumReadableBytes = static_cast<uint32_t>(
+        remaining < (static_cast<uint64_t>(NATIVE_APP_MAX_LOG_BYTES) + 1ULL)
+            ? remaining
+            : (static_cast<uint64_t>(NATIVE_APP_MAX_LOG_BYTES) + 1ULL));
+    return *maximumReadableBytes != 0;
+}
+
 static gx_result GX_CALL host_log(gx_app_context* context, const char* message)
 {
     if (s_appRuntime.state != NativeAppExecutionState::Running ||
@@ -277,10 +301,8 @@ static gx_result GX_CALL host_log(gx_app_context* context, const char* message)
     }
 
     uint32_t maximumReadableBytes = 0;
-    if (!native_app_log_pointer_range(reinterpret_cast<uint64_t>(message),
-                                      s_appRuntime.readOnlyDataBase,
-                                      s_appRuntime.readOnlyDataSize,
-                                      &maximumReadableBytes)) {
+    if (!native_app_log_pointer_range_for_runtime(reinterpret_cast<uint64_t>(message),
+                                                  &maximumReadableBytes)) {
         return GX_ERROR_INVALID_ARGUMENT;
     }
 
