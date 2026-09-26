@@ -5,7 +5,7 @@ param(
     [string]$PythonExe = "",
     [int]$FreshBootCount = 3,
     [int]$TimeoutSeconds = 360,
-    [ValidateSet("C120", "C121", "C122", "C123", "C124", "C125", "C126", "C127", "C128", "C129", "C130", "C131", "C132", "C133", "C134", "C135", "C136", "C137", "C138", "C139", "C140")]
+    [ValidateSet("C120", "C121", "C122", "C123", "C124", "C125", "C126", "C127", "C128", "C129", "C130", "C131", "C132", "C133", "C134", "C135", "C136", "C137", "C138", "C139", "C140", "C141")]
     [string]$ProofPhase = "C120",
     [ValidateSet("Production", "FocusedApi", "FocusedHost")]
     [string]$C135ProofMode = "Production",
@@ -39,6 +39,7 @@ $isC135 = $ProofPhase -eq "C135"
 $isC136 = $ProofPhase -eq "C136"
 $isC137 = $ProofPhase -eq "C137"
 $isC140 = $ProofPhase -eq "C140"
+$isC141 = $ProofPhase -eq "C141"
 $isC139 = $ProofPhase -eq "C139"
 $isC138 = $ProofPhase -eq "C138" -or $isC139
 $isC135FocusedApi = $isC135 -and $C135ProofMode -eq "FocusedApi"
@@ -57,7 +58,9 @@ $startAheadBehind = if ($startUpstream) {
     (& git -C $RepoRoot rev-list --left-right --count "HEAD...$startUpstream").Trim()
 } else { "" }
 if ([string]::IsNullOrWhiteSpace($EvidenceRoot)) {
-    $EvidenceRoot = if ($isC140) {
+    $EvidenceRoot = if ($isC141) {
+        Join-Path $RepoRoot "out\dotnet\c141-managed-vertical-stack"
+    } elseif ($isC140) {
         Join-Path $RepoRoot "out\dotnet\c140-managed-scrollview"
     } elseif ($isC139) {
         Join-Path $RepoRoot "out\dotnet\c139-shared-scroll-viewport"
@@ -192,7 +195,9 @@ function Invoke-C120Boot([string]$Esp, [string]$Serial, [string]$Stdout,
             Start-Sleep -Milliseconds 250
             if (Test-Path -LiteralPath $Serial) {
                 $partial = Get-Content -LiteralPath $Serial -Raw -ErrorAction SilentlyContinue
-                $resultPattern = if ($isC140) {
+                $resultPattern = if ($isC141) {
+                    '(?m)^\[C102-MANAGED-OUTPUT\] C141-TESTS .*result=PASS'
+                } elseif ($isC140) {
                     '(?m)^\[C102-MANAGED-OUTPUT\] C140-TESTS .*result=PASS'
                 } elseif ($isC136) {
                     # C136 drives the proof from QMP and terminates after the
@@ -858,6 +863,136 @@ function Get-C140HexField([string]$Serial, [string]$Field) {
     return [Convert]::ToInt32($match.Groups[1].Value, 16)
 }
 
+function Get-C141HexField([string]$Serial, [string]$Field) {
+    $match = [regex]::Match($Serial, "(?m)^\[C141-TARGET\].*\b$Field=([0-9A-Fa-f]+)")
+    if (-not $match.Success) { throw "C141 target marker did not contain $Field." }
+    return [Convert]::ToInt32($match.Groups[1].Value, 16)
+}
+
+function Invoke-C141Boot([string]$Esp, [string]$Serial, [string]$Stdout,
+                          [string]$Stderr, [string]$MonitorLog, [int]$MonitorPort,
+                          [string]$Qemu, [string]$Ovmf) {
+    $arguments = @(
+        "-accel", "tcg,thread=single", "-machine", "pc", "-smp", "1",
+        "-drive", ("if=pflash,format=raw,readonly=on,file=" + (Quote-QemuValue $Ovmf)),
+        "-drive", ("file=fat:rw:" + (Quote-QemuValue $Esp) + ",format=raw,if=ide,index=0"),
+        "-m", "1024M", "-vga", "std", "-display", "none",
+        "-serial", ("file:" + (Quote-QemuValue $Serial)),
+        "-qmp", ("tcp:127.0.0.1:{0},server,nowait" -f $MonitorPort),
+        "-boot", "order=c", "-no-reboot", "-no-shutdown", "-rtc", "base=utc,clock=host")
+    $process = Start-Process -FilePath $Qemu -ArgumentList $arguments -WorkingDirectory $RepoRoot `
+        -RedirectStandardOutput $Stdout -RedirectStandardError $Stderr -WindowStyle Hidden -PassThru
+    $commandIndex = 0
+    $previousMarker = ""
+    $previousSerialLength = 0
+    $proofStarted = $false
+    $targetReady = $false
+    $commandList = $null
+    $calibrating = $false
+    $timedOut = $false
+    try {
+        $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+        while ((Get-Date) -lt $deadline) {
+            Start-Sleep -Milliseconds 150
+            $partial = if (Test-Path -LiteralPath $Serial) {
+                Get-Content -LiteralPath $Serial -Raw -ErrorAction SilentlyContinue
+            } else { "" }
+            if (-not $proofStarted -and $partial -match
+                    '(?m)^\[C141-PROOF\].*transport=physical-qemu result=PASS') {
+                $proofStarted = $true
+            }
+            if ($proofStarted -and -not $targetReady -and $partial -match
+                    '(?m)^\[C141-TARGET\].*result=PASS') {
+                $targetReady = $true
+            }
+            if ($proofStarted -and $targetReady -and $null -eq $commandList) {
+                $viewX = Get-C141HexField $partial "viewX"
+                $viewY = Get-C141HexField $partial "viewY"
+                $barX = Get-C141HexField $partial "scrollBarX"
+                $barY = Get-C141HexField $partial "scrollBarY"
+                $comboX = $viewX + 80
+                $comboY = $viewY + 60
+                $checkX = $viewX + 80
+                $checkY = $viewY + 38
+                $barTargetX = $barX + 8
+                $barTargetY = $barY + 20
+                $buttonX = $viewX + 80
+                $buttonY = $viewY + 118
+                $tabEvents = [System.Collections.Generic.List[object]]::new()
+                for ($tab = 0; $tab -lt 5; $tab++) {
+                    $tabEvents.Add((New-C136Key 'tab' $true))
+                    $tabEvents.Add((New-C136Key 'tab' $false))
+                }
+                $commandList = @(
+                    [pscustomobject]@{ events = (New-C136RelativeMove 1 1); marker = ''; phase = 'c141-calibration' },
+                    [pscustomobject]@{ events = @(New-C136Button 'left' $true); marker = '(?m)^\[C102-MANAGED-OUTPUT\] C141-POPUP open=PASS arranged-geometry=PASS capture=none result=PASS'; phase = 'combo-down' },
+                    [pscustomobject]@{ events = @(New-C136Button 'left' $false); marker = ''; phase = 'combo-up' },
+                    [pscustomobject]@{ events = (New-C136RelativeMove 0 18); marker = ''; phase = 'popup-row-move' },
+                    [pscustomobject]@{ events = @(New-C136Button 'left' $true); marker = '(?m)^\[C102-MANAGED-OUTPUT\] C141-POPUP follow-up=PASS capture=none result=PASS'; phase = 'popup-down' },
+                    [pscustomobject]@{ events = @(New-C136Button 'left' $false); marker = ''; phase = 'popup-up' },
+                    [pscustomobject]@{ events = (New-C136RelativeMove ($checkX - $comboX) ($checkY - ($comboY + 18))); marker = ''; phase = 'checkbox-move' },
+                    [pscustomobject]@{ events = @(New-C136Button 'left' $true); marker = '(?m)^\[C102-MANAGED-OUTPUT\] C141-VISIBILITY checkbox=PASS progress=hidden relayout=PASS result=PASS'; phase = 'checkbox-down' },
+                    [pscustomobject]@{ events = @(New-C136Button 'left' $false); marker = ''; phase = 'checkbox-up' },
+                    [pscustomobject]@{ events = @(New-C137Wheel -1); marker = '(?m)^\[C102-MANAGED-OUTPUT\] C141-WHEEL viewport=changed stack-translated=PASS result=PASS'; phase = 'wheel-down' },
+                    [pscustomobject]@{ events = (New-C136RelativeMove ($barTargetX - $checkX) ($barTargetY - $checkY)); marker = ''; phase = 'scrollbar-move' },
+                    [pscustomobject]@{ events = @(New-C136Button 'left' $true); marker = '(?m)^\[C102-MANAGED-OUTPUT\] C141-DRAG press=PASS owner=scrollbar result=PASS'; phase = 'scrollbar-down' },
+                    [pscustomobject]@{ events = (New-C136RelativeMove 0 70); marker = ''; phase = 'scrollbar-drag' },
+                    [pscustomobject]@{ events = @(New-C136Button 'left' $false); marker = '(?m)^\[C102-MANAGED-OUTPUT\] C141-DRAG release=PASS owner=none result=PASS'; phase = 'scrollbar-up' },
+                    [pscustomobject]@{ events = (New-C136RelativeMove ($buttonX - $barTargetX) ($buttonY - ($barTargetY + 70))); marker = ''; phase = 'moved-button-move' },
+                    [pscustomobject]@{ events = @(New-C136Button 'left' $true); marker = '(?m)^\[C102-MANAGED-OUTPUT\] C141-POINTER moved-button=PASS translated=PASS result=PASS'; phase = 'moved-button-down' },
+                    [pscustomobject]@{ events = @(New-C136Button 'left' $false); marker = ''; phase = 'moved-button-up' },
+                    [pscustomobject]@{ events = $tabEvents.ToArray(); marker = '(?m)^\[C102-MANAGED-OUTPUT\] C141-FOCUS tab=revealed result=PASS'; phase = 'tab-sequence' })
+                $calibrating = $true
+            }
+            if ($calibrating -and $commandIndex -ge 1) {
+                $start = [Math]::Min($previousSerialLength, $partial.Length)
+                $newSerial = $partial.Substring($start)
+                if ($newSerial -match '(?m)^\[C138-NATIVE-INPUT\] kind=pointer-move .*result=PASS') {
+                    $pointer = Get-C138NativePointer $partial
+                    $commandList[0].events = New-C136RelativeMove ($comboX - $pointer.x) ($comboY - $pointer.y)
+                    $commandIndex = 0
+                    $previousMarker = ''
+                    $previousSerialLength = $partial.Length
+                    $calibrating = $false
+                }
+            }
+            if ($null -ne $commandList -and $commandIndex -lt $commandList.Count) {
+                $command = $commandList[$commandIndex]
+                $markerSatisfied = [string]::IsNullOrEmpty($previousMarker)
+                if (-not $markerSatisfied) {
+                    $start = [Math]::Min($previousSerialLength, $partial.Length)
+                    $markerSatisfied = $partial.Substring($start) -match $previousMarker
+                }
+                if ($markerSatisfied) {
+                    Send-C136QmpEvents $MonitorPort $command.events $MonitorLog
+                    $previousMarker = $command.marker
+                    $previousSerialLength = $partial.Length
+                    $commandIndex++
+                }
+            }
+            if ($null -ne $commandList -and -not $calibrating -and
+                    $commandIndex -ge $commandList.Count) { break }
+            $process.Refresh()
+            if ($process.HasExited) { break }
+        }
+        $timedOut = -not $process.HasExited -and (Get-Date) -ge $deadline
+    }
+    finally {
+        $process.Refresh()
+        if (-not $process.HasExited) {
+            Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+            Wait-Process -Id $process.Id -Timeout 5 -ErrorAction SilentlyContinue
+        }
+    }
+    $process.Refresh()
+    [pscustomobject]@{
+        serial = if (Test-Path -LiteralPath $Serial) { Get-Content -LiteralPath $Serial -Raw } else { "" }
+        serialPath = $Serial; serialSha256 = Get-Hash $Serial
+        stdoutPath = $Stdout; stderrPath = $Stderr; monitorPath = $MonitorLog
+        qemuExitCode = $process.ExitCode; monitorPort = $MonitorPort; timedOut = $timedOut
+    }
+}
+
 function Invoke-C140Boot([string]$Esp, [string]$Serial, [string]$Stdout,
                           [string]$Stderr, [string]$MonitorLog, [int]$MonitorPort,
                           [string]$Qemu, [string]$Ovmf) {
@@ -1077,7 +1212,7 @@ function Assert-C120Serial([string]$Serial) {
         '^\[NATIVEAOT-TLS-BRIDGE\] install=.*result=00000001',
         '^\[NATIVEAOT-HEAP\] action=initialize',
         '^\[NATIVEAOT-HEAP\] action=preserve')
-    if (-not $isC140 -and -not $isC121 -and -not $isC122 -and -not $isC123 -and -not $isC124 -and -not $isC125 -and -not $isC126 -and -not $isC127 -and -not $isC128 -and -not $isC129 -and -not $isC130 -and -not $isC131 -and -not $isC132 -and -not $isC133 -and -not $isC134 -and -not $isC135 -and -not $isC136 -and -not $isC137 -and -not $isC138) {
+    if (-not $isC140 -and -not $isC141 -and -not $isC121 -and -not $isC122 -and -not $isC123 -and -not $isC124 -and -not $isC125 -and -not $isC126 -and -not $isC127 -and -not $isC128 -and -not $isC129 -and -not $isC130 -and -not $isC131 -and -not $isC132 -and -not $isC133 -and -not $isC134 -and -not $isC135 -and -not $isC136 -and -not $isC137 -and -not $isC138) {
         $required += @(
             '^\[C120-APPMODEL\] catalogValid=true result=PASS',
             '^\[C120-RESULT\] outcome=PASS',
@@ -1101,6 +1236,24 @@ function Assert-C120Serial([string]$Serial) {
             '^\[C118-NATIVE-REGRESSION\] app=Notepad result=PASS',
             '^\[C102-MANAGED-OUTPUT\] C120-TESTS cases=50 result=PASS',
             '^\[C102-MANAGED-OUTPUT\] C120-HOST tests=PASS')
+    }
+    if ($isC141) {
+        $required += @(
+            '^\[C141-APPMODEL\] catalogValid=true result=PASS',
+            '^\[C141-PROOF\] managed-proof-started context=c141-native transport=physical-qemu result=PASS',
+            '^\[C141-TARGET\].*result=PASS',
+            '^\[C102-MANAGED-OUTPUT\] C141-TESTS core=20 visibility=10 scrollview=10 focus=10 popup=6 total=56 result=PASS',
+            '^\[C102-MANAGED-OUTPUT\] C141-PROOF launch=PASS registration=2 members=8 layout=valid result=PASS',
+            '^\[C102-MANAGED-OUTPUT\] C141-LAYOUT initial=PASS content-taller-than-viewport=PASS',
+            '^\[C102-MANAGED-OUTPUT\] C141-POPUP open=PASS arranged-geometry=PASS capture=none result=PASS',
+            '^\[C102-MANAGED-OUTPUT\] C141-POPUP follow-up=PASS capture=none result=PASS',
+            '^\[C102-MANAGED-OUTPUT\] C141-VISIBILITY checkbox=PASS progress=hidden relayout=PASS result=PASS',
+            '^\[C102-MANAGED-OUTPUT\] C141-WHEEL viewport=changed stack-translated=PASS result=PASS',
+            '^\[C102-MANAGED-OUTPUT\] C141-DRAG press=PASS owner=scrollbar result=PASS',
+            '^\[C102-MANAGED-OUTPUT\] C141-DRAG release=PASS owner=none result=PASS',
+            '^\[C102-MANAGED-OUTPUT\] C141-POINTER moved-button=PASS translated=PASS result=PASS',
+            '^\[C102-MANAGED-OUTPUT\] C141-FOCUS tab=revealed result=PASS',
+            '^\[C102-MANAGED-OUTPUT\] C141-FINAL viewport=valid layout=valid capture=none drag=none result=PASS')
     }
     if ($isC140) {
         $required += @(
@@ -1468,11 +1621,11 @@ function Assert-C120Serial([string]$Serial) {
     }
     $spaceMarker = @([regex]::Matches($Serial,
         '(?m)^\[C120-SPACE\] keydown=PASS keychar=PASS exact-once=PASS\r?$')).Count
-    if (-not $isC140 -and -not $isC136 -and -not $isC137 -and -not $isC138 -and -not $isC121 -and -not $isC122 -and -not $isC123 -and -not $isC124 -and -not $isC125 -and -not $isC126 -and -not $isC127 -and -not $isC128 -and -not $isC129 -and -not $isC130 -and -not $isC131 -and -not $isC132 -and -not $isC133 -and -not $isC134 -and -not $isC135 -and $spaceMarker -ne 1) { throw "C120 expected one exact-once Space marker, got $spaceMarker." }
+    if (-not $isC140 -and -not $isC141 -and -not $isC136 -and -not $isC137 -and -not $isC138 -and -not $isC121 -and -not $isC122 -and -not $isC123 -and -not $isC124 -and -not $isC125 -and -not $isC126 -and -not $isC127 -and -not $isC128 -and -not $isC129 -and -not $isC130 -and -not $isC131 -and -not $isC132 -and -not $isC133 -and -not $isC134 -and -not $isC135 -and $spaceMarker -ne 1) { throw "C120 expected one exact-once Space marker, got $spaceMarker." }
     $saveActivation = @([regex]::Matches($Serial,
         '(?m)^\[C102-MANAGED-OUTPUT\] C120-ACTIVATE control=Save result=PASS\r?$')).Count
-    if (-not $isC140 -and -not $isC136 -and -not $isC137 -and -not $isC138 -and -not $isC121 -and -not $isC122 -and -not $isC123 -and -not $isC124 -and -not $isC125 -and -not $isC126 -and -not $isC127 -and -not $isC128 -and -not $isC129 -and -not $isC130 -and -not $isC131 -and -not $isC132 -and -not $isC133 -and -not $isC134 -and -not $isC135 -and $saveActivation -ne 1) { throw "C120 expected one managed Save activation, got $saveActivation." }
-    if ($Serial -match '(?m)^\[(?:C140|C138|C137|C136|C135|C134|C132|C131|C130|C129|C120|C121|C122|C123|C124|C125|C126|C127|C128)-[^\r\n]*FAIL|PageFault|triple.?fault|FAIL_FAST|fatal kernel failure|boot failure') {
+    if (-not $isC140 -and -not $isC141 -and -not $isC136 -and -not $isC137 -and -not $isC138 -and -not $isC121 -and -not $isC122 -and -not $isC123 -and -not $isC124 -and -not $isC125 -and -not $isC126 -and -not $isC127 -and -not $isC128 -and -not $isC129 -and -not $isC130 -and -not $isC131 -and -not $isC132 -and -not $isC133 -and -not $isC134 -and -not $isC135 -and $saveActivation -ne 1) { throw "C120 expected one managed Save activation, got $saveActivation." }
+    if ($Serial -match '(?m)^\[(?:C141|C140|C138|C137|C136|C135|C134|C132|C131|C130|C129|C120|C121|C122|C123|C124|C125|C126|C127|C128)-[^\r\n]*FAIL|PageFault|triple.?fault|FAIL_FAST|fatal kernel failure|boot failure') {
         throw "Managed control proof serial output contains a failure or fault marker."
     }
     [pscustomobject]@{
@@ -1501,7 +1654,7 @@ if (-not $SkipManagedBuild -and -not $providedComposite) {
         "-RuntimePackOutputRoot", $runtimePackOutputRoot,
         "-UseGuideXosRuntimePack", "-ProductionApplication", "-PersistentCompositeLifecycle",
         "-AllocationMode", "Allocating", "-ManagedProjectMode",
-        $(if ($isC140) { "C140Composite" } elseif ($isC139) { "C139Composite" } elseif ($isC138) { "C138Composite" } elseif ($isC137) { "C137Composite" } elseif ($isC136) { "C136Composite" } elseif ($isC135) { "C135Composite" } elseif ($isC134) { "C134Composite" } elseif ($isC133) { "C133Composite" } elseif ($isC132) { "C132Composite" } elseif ($isC131) { "C131Composite" } elseif ($isC129) { "C129Composite" } elseif ($isC128) { "C128Composite" } elseif ($isC130 -or $isC127) { "C127Composite" } elseif ($isC126) { "C126Composite" } elseif ($isC125) { "C125Composite" } elseif ($isC124) { "C124Composite" } elseif ($isC123) { "C123Composite" } elseif ($isC122) { "C122Composite" } elseif ($isC121) { "C121Composite" } else { "C120Composite" }),
+        $(if ($isC141) { "C141Composite" } elseif ($isC140) { "C140Composite" } elseif ($isC139) { "C139Composite" } elseif ($isC138) { "C138Composite" } elseif ($isC137) { "C137Composite" } elseif ($isC136) { "C136Composite" } elseif ($isC135) { "C135Composite" } elseif ($isC134) { "C134Composite" } elseif ($isC133) { "C133Composite" } elseif ($isC132) { "C132Composite" } elseif ($isC131) { "C131Composite" } elseif ($isC129) { "C129Composite" } elseif ($isC128) { "C128Composite" } elseif ($isC130 -or $isC127) { "C127Composite" } elseif ($isC126) { "C126Composite" } elseif ($isC125) { "C125Composite" } elseif ($isC124) { "C124Composite" } elseif ($isC123) { "C123Composite" } elseif ($isC122) { "C122Composite" } elseif ($isC121) { "C121Composite" } else { "C120Composite" }),
         "-PythonExe", $PythonExe)
     if ($isC134) { $managedBuildArguments += "-IncludeC134FocusedTests" }
     if ($isC135) { $managedBuildArguments += "-IncludeC135FocusedTests" }
@@ -1521,7 +1674,10 @@ Invoke-Checked "powershell" @(
     "-C114ManagedDirectoryServices", "-C117ManagedTextArea", "-C118ManagedListBox")
 
 $kernelFlags = "-DGXOS_NATIVEAOT_PRODUCTION_APPLICATION -DGXOS_NATIVEAOT_PRODUCTION_COMPOSITE_LAUNCH -DGXOS_NATIVEAOT_C112_REUSABLE_MANAGED_APPLICATION -DGXOS_NATIVEAOT_C113_MANAGED_FILE_SERVICES -DGXOS_NATIVEAOT_C114_MANAGED_DIRECTORY_SERVICES -DGXOS_NATIVEAOT_C115_MANAGED_FILE_PICKER -DGXOS_NATIVEAOT_C116_MANAGED_TEXT_INPUT -DGXOS_NATIVEAOT_C117_MANAGED_TEXT_AREA -DGXOS_NATIVEAOT_C118_MANAGED_LIST_BOX -DGXOS_NATIVEAOT_C119_MANAGED_BUTTON -DGXOS_NATIVEAOT_C120_MANAGED_CONTROL_HOST"
-if ($isC140) {
+if ($isC141) {
+    $kernelFlags += " -DGXOS_NATIVEAOT_C121_MANAGED_CHECKBOX -DGXOS_NATIVEAOT_C122_MANAGED_LABEL -DGXOS_NATIVEAOT_C123_MANAGED_SEPARATOR -DGXOS_NATIVEAOT_C124_MANAGED_RADIO_BUTTON -DGXOS_NATIVEAOT_C125_MANAGED_PROGRESS_BAR -DGXOS_NATIVEAOT_C126_MANAGED_GROUP_BOX -DGXOS_NATIVEAOT_C127_MANAGED_PANEL -DGXOS_NATIVEAOT_C128_MANAGED_PANEL_LIFECYCLE -DGXOS_NATIVEAOT_C131_REUSABLE_CHECKBOX -DGXOS_NATIVEAOT_C132_REUSABLE_RADIO_BUTTON -DGXOS_NATIVEAOT_C133_REUSABLE_COMBOBOX -DGXOS_NATIVEAOT_C134_TRANSIENT_POPUP_ROUTING -DGXOS_NATIVEAOT_C135_REUSABLE_POPUP_MENU -DGXOS_NATIVEAOT_C136_SECONDARY_POINTER_CONTEXT_MENU -DGXOS_NATIVEAOT_C137_MOUSE_WHEEL_SCROLLING -DGXOS_NATIVEAOT_C138_REUSABLE_SCROLLBAR -DGXOS_NATIVEAOT_C141_MANAGED_VERTICAL_STACK"
+}
+elseif ($isC140) {
     $kernelFlags += " -DGXOS_NATIVEAOT_C121_MANAGED_CHECKBOX -DGXOS_NATIVEAOT_C122_MANAGED_LABEL -DGXOS_NATIVEAOT_C123_MANAGED_SEPARATOR -DGXOS_NATIVEAOT_C124_MANAGED_RADIO_BUTTON -DGXOS_NATIVEAOT_C125_MANAGED_PROGRESS_BAR -DGXOS_NATIVEAOT_C126_MANAGED_GROUP_BOX -DGXOS_NATIVEAOT_C127_MANAGED_PANEL -DGXOS_NATIVEAOT_C128_MANAGED_PANEL_LIFECYCLE -DGXOS_NATIVEAOT_C131_REUSABLE_CHECKBOX -DGXOS_NATIVEAOT_C132_REUSABLE_RADIO_BUTTON -DGXOS_NATIVEAOT_C133_REUSABLE_COMBOBOX -DGXOS_NATIVEAOT_C134_TRANSIENT_POPUP_ROUTING -DGXOS_NATIVEAOT_C135_REUSABLE_POPUP_MENU -DGXOS_NATIVEAOT_C136_SECONDARY_POINTER_CONTEXT_MENU -DGXOS_NATIVEAOT_C137_MOUSE_WHEEL_SCROLLING -DGXOS_NATIVEAOT_C138_REUSABLE_SCROLLBAR -DGXOS_NATIVEAOT_C140_MANAGED_SCROLL_VIEW"
 }
 elseif ($isC138) {
@@ -1623,7 +1779,9 @@ if (-not $SkipQemu) {
         foreach ($stale in @($serial, $stdout, $stderr, $monitorLog)) {
             if (Test-Path -LiteralPath $stale -PathType Leaf) { Remove-Item -LiteralPath $stale -Force }
         }
-        $boot = if ($isC140) {
+        $boot = if ($isC141) {
+            Invoke-C141Boot $esp $serial $stdout $stderr $monitorLog $monitorPort $qemu $ovmf
+        } elseif ($isC140) {
             Invoke-C140Boot $esp $serial $stdout $stderr $monitorLog $monitorPort $qemu $ovmf
         } elseif ($isC138) {
             Invoke-C138Boot $esp $serial $stdout $stderr $monitorLog $monitorPort $qemu $ovmf
@@ -1665,9 +1823,9 @@ if (-not $SkipQemu) {
 $evidenceSerial = if ($bootResults.Count -gt 0) {
     Get-Content -LiteralPath (Join-Path $EvidenceRoot "boot-01\serial.log")
 } else { @("QEMU not executed; build-only evidence.") }
-$evidenceSerial | Where-Object { $_ -match '^\[(?:C140|C138|C137|C136|C135|C134|C133|C132|C131|C130|C129|C128|C127|C126|C125|C124|C123|C122|C121|C120|C119|C118|C117|C116|C115)-' } |
+$evidenceSerial | Where-Object { $_ -match '^\[(?:C141|C140|C138|C137|C136|C135|C134|C133|C132|C131|C130|C129|C128|C127|C126|C125|C124|C123|C122|C121|C120|C119|C118|C117|C116|C115)-' } |
     Set-Content -LiteralPath (Join-Path $EvidenceRoot "managed-control-host-output.txt") -Encoding ASCII
-$evidenceSerial | Where-Object { $_ -match '^\[(?:C140|C138|C137|C136|C135|C134|C133|C132|C131|C130|C129|C128|C127|C126|C124|C123|C122|C121|C120)-' } |
+$evidenceSerial | Where-Object { $_ -match '^\[(?:C141|C140|C138|C137|C136|C135|C134|C133|C132|C131|C130|C129|C128|C127|C126|C124|C123|C122|C121|C120)-' } |
     Set-Content -LiteralPath (Join-Path $EvidenceRoot "control-host-evidence.txt") -Encoding ASCII
 $evidenceSerial | Where-Object { $_ -match '^\[(?:C116|C117|C118|C119)-' } |
     Set-Content -LiteralPath (Join-Path $EvidenceRoot "regression-evidence.txt") -Encoding ASCII
@@ -1728,11 +1886,15 @@ $sourceFiles = @(
     "samples\managed\HostLogProof\GuideXos\GuideXosSharedScrollViewportC139Tests.cs",
     "samples\managed\HostLogProof\GuideXos\GuideXosScrollView.cs",
     "samples\managed\HostLogProof\GuideXos\GuideXosScrollViewC140Tests.cs",
+    "samples\managed\HostLogProof\GuideXos\GuideXosVerticalStackMember.cs",
+    "samples\managed\HostLogProof\GuideXos\GuideXosVerticalStack.cs",
+    "samples\managed\HostLogProof\GuideXos\GuideXosVerticalStackC141Tests.cs",
     "samples\managed\HostLogProof\GuideXos\GuideXosSurface.cs",
     "samples\managed\HostLogProof\GuideXos\GuideXosMouseWheelC137Tests.cs",
     "samples\managed\HostLogProof\GuideXos\GuideXosFilePicker.cs",
     "samples\managed\HostLogProof\Applications\ManagedNotes.cs",
     "samples\managed\HostLogProof\Applications\ManagedScrollViewDemo.cs",
+    "samples\managed\HostLogProof\Applications\ManagedVerticalStackDemo.cs",
     "samples\managed\HostLogProof\HostLogProof.csproj",
     "samples\managed\HostLogProof\NativeAbi.cs",
     "scripts\dotnet\build-managed-hostlog-proof.ps1",
@@ -1769,7 +1931,8 @@ $sourceFiles = @(
     "docs\dotnet\NATIVEAOT_C137_MOUSE_WHEEL_SCROLLING.md",
     "docs\dotnet\NATIVEAOT_C138_MANAGED_SCROLLBAR.md",
     "docs\dotnet\NATIVEAOT_C139_SHARED_SCROLL_VIEWPORT.md",
-    "docs\dotnet\NATIVEAOT_C140_MANAGED_SCROLLVIEW.md")
+    "docs\dotnet\NATIVEAOT_C140_MANAGED_SCROLLVIEW.md",
+    "docs\dotnet\NATIVEAOT_C141_MANAGED_VERTICAL_STACK_LAYOUT.md")
 $sourceHashes = [ordered]@{}
 foreach ($sourceFile in $sourceFiles) { $sourceHashes[$sourceFile] = Get-Hash (Join-Path $RepoRoot $sourceFile) }
 
@@ -1795,7 +1958,7 @@ $manifest = [ordered]@{
     schemaVersion = 1; phase = $ProofPhase; c135ProofMode = if ($isC135) { $C135ProofMode } else { "Production" }; outcome = if ($SkipQemu) { "BUILD_ONLY" } elseif ($AllowBoundedHostDefect) { "BOUNDED-HOST-DEFECT" } else { "PASS" }
     repository = [ordered]@{ root = $RepoRoot; branch = $repoBranch; head = $repoHead; subject = $repoSubject; upstream = $repoUpstream; aheadBehind = $aheadBehind }
     hostAbi = [ordered]@{ version = 1; tableSize = 104; changed = $false; capabilityChanges = "none"; inputTransport = "existing pointer-down, KeyDown, KeyChar and Shift payload" }
-    controlHost = [ordered]@{ api = "GuideXosControlHost"; capacity = 8; pickerCapacity = 2; tests = if($isC137){"C137 wheel transport: 46 focused API/host cases; TextArea/ListBox routing, capture, modal, lifecycle, and burst coverage"}elseif($isC135){"C135 popup menu: 40 API cases, 40 host cases, shared one-owner capture, and retained C134 routing"}elseif($isC134){"C134 transient-capture contract: 30 focused host cases plus production ComboBox routing"}elseif($isC133){"C133 ComboBox API, transient capture, lifecycle, Panel, modal, and host routing"}elseif($isC132){"C132 RadioButton API, group coordination, callbacks, Panel, lifecycle, modal, and host routing"}elseif($isC131){"C131 checkbox API, callback, Panel, lifecycle, modal, and host routing"}elseif($isC129){"C129 direct Shift/Tab transport fixture plus existing host coverage"}elseif($isC130){"C127 Panel wrapper with obsolete direct-managed reverse helper retired"}elseif($isC128){"C128 Panel visibility, membership, activation cancellation, modal, and relaunch lifecycle"}elseif($isC127){"C127 Panel visibility/focus integration plus C126 and earlier regressions"}elseif($isC126){"C126 GroupBox passive integration plus C124/C125 regressions"}elseif($isC125){"C124 interoperability plus passive progress"}elseif($isC124){"radio host focused suite"}elseif($isC123){33}elseif($isC122){22}elseif($isC121){17}else{50}; legacyC120HostSuite = if($isC121 -or $isC122 -or $isC123 -or $isC124 -or $isC125 -or $isC126 -or $isC127 -or $isC128 -or $isC129 -or $isC130 -or $isC131 -or $isC132 -or $isC133 -or $isC134 -or $isC135 -or $isC137){"separate C120 runner"}else{"same image"}; modal = "one shallow picker scope with saved-ID restoration and forward fallback" }
+    controlHost = [ordered]@{ api = "GuideXosControlHost"; capacity = 8; pickerCapacity = 2; tests = if($isC141){"C141 production stack host: registration 2; direct ScrollView members 8; C141 focused layout/visibility/ScrollView/focus/popup suite total 56"}elseif($isC137){"C137 wheel transport: 46 focused API/host cases; TextArea/ListBox routing, capture, modal, lifecycle, and burst coverage"}elseif($isC135){"C135 popup menu: 40 API cases, 40 host cases, shared one-owner capture, and retained C134 routing"}elseif($isC134){"C134 transient-capture contract: 30 focused host cases plus production ComboBox routing"}elseif($isC133){"C133 ComboBox API, transient capture, lifecycle, Panel, modal, and host routing"}elseif($isC132){"C132 RadioButton API, group coordination, callbacks, Panel, lifecycle, modal, and host routing"}elseif($isC131){"C131 checkbox API, callback, Panel, lifecycle, modal, and host routing"}elseif($isC129){"C129 direct Shift/Tab transport fixture plus existing host coverage"}elseif($isC130){"C127 Panel wrapper with obsolete direct-managed reverse helper retired"}elseif($isC128){"C128 Panel visibility, membership, activation cancellation, modal, and relaunch lifecycle"}elseif($isC127){"C127 Panel visibility/focus integration plus C126 and earlier regressions"}elseif($isC126){"C126 GroupBox passive integration plus C124/C125 regressions"}elseif($isC125){"C124 interoperability plus passive progress"}elseif($isC124){"radio host focused suite"}elseif($isC123){33}elseif($isC122){22}elseif($isC121){17}else{50}; legacyC120HostSuite = if($isC121 -or $isC122 -or $isC123 -or $isC124 -or $isC125 -or $isC126 -or $isC127 -or $isC128 -or $isC129 -or $isC130 -or $isC131 -or $isC132 -or $isC133 -or $isC134 -or $isC135 -or $isC137){"separate C120 runner"}else{"same image"}; modal = "one shallow picker scope with saved-ID restoration and forward fallback" }
     comboBox = [ordered]@{ api = "GuideXosComboBox"; maximumItemCount = 16; maximumItemTextLength = 48; visibleRows = 4; popup = "transient below-control state; no child registration"; focusedTests = if($isC135){"C133 retained: 44"}elseif($isC134){"C133 retained: 44"}elseif($isC133){44}else{"not part of this phase"}; hostTests = if($isC135){"C135 retains C134: 30 and C133: 24"}elseif($isC134){"C134: 30; C133 retained: 24"}elseif($isC133){24}else{"not part of this phase"} }
     progressBar = [ordered]@{ api = "GuideXosProgressBar"; minimum = 0; maximum = 65535; notesMinimum = 0; notesMaximum = 256; notesWidth = 312; maximumFillCells = 48; rendering = "bounded text-backed [fill-empty] percentage; floor integer arithmetic"; focusable = $false; controlHostRegistration = "absent"; focusedTests = if($isC125){50}elseif($isC126){"C125 regression in C126 image"}else{"not part of this phase"} }
     groupBox = [ordered]@{ api = "GuideXosGroupBox"; x = 12; y = 264; width = 456; height = 90; minimumWidth = 64; maximumWidth = 504; minimumHeight = 54; maximumHeight = 288; maximumCaptionLength = 48; caption = "Path Display"; render = "bounded text frame with clipped caption"; containment = "half-open"; relativeCoordinates = "TryResolvePoint"; focusable = $false; input = "none"; childOwnership = "none"; focusedTests = if($isC126){60}elseif($isC130 -or $isC127){"C126 regression image"}else{"not part of this phase"} }
@@ -1808,7 +1971,7 @@ $manifest = [ordered]@{
     freshBootCount = $FreshBootCount; qemuExecuted = -not $SkipQemu
     inputs = $inputs; sourceHashes = $sourceHashes; boots = @($bootResults)
     evidence = [ordered]@{ serial = "boot-01\serial.log"; managed = "managed-control-host-output.txt"; controlHost = "control-host-evidence.txt"; regressions = "regression-evidence.txt"; lifecycle = "lifecycle-evidence.txt" }
-    documentation = if ($isC140) { "docs\dotnet\NATIVEAOT_C140_MANAGED_SCROLLVIEW.md" } elseif ($isC135) { "docs\dotnet\NATIVEAOT_C135_MANAGED_POPUP_MENU.md" } elseif ($isC134) { "docs\dotnet\NATIVEAOT_C134_TRANSIENT_POPUP_ROUTING.md" } elseif ($isC132) { "docs\dotnet\NATIVEAOT_C132_MANAGED_RADIOBUTTON.md" } elseif ($isC131) { "docs\dotnet\NATIVEAOT_C131_MANAGED_CHECKBOX.md" } elseif ($isC130) { "docs\dotnet\NATIVEAOT_C130_C127_WRAPPER_STALL.md" } elseif ($isC129) { "docs\dotnet\NATIVEAOT_C129_SHIFT_TAB_INPUT_TRANSPORT.md" } elseif ($isC128) { "docs\dotnet\NATIVEAOT_C128_MANAGED_PANEL_LIFECYCLE.md" } elseif ($isC127) { "docs\dotnet\NATIVEAOT_C127_MANAGED_PANEL.md" } elseif ($isC126) { "docs\dotnet\NATIVEAOT_C126_MANAGED_GROUP_BOX.md" } elseif ($isC125) { "docs\dotnet\NATIVEAOT_C125_MANAGED_PROGRESS_BAR.md" } elseif ($isC124) { "docs\dotnet\NATIVEAOT_C124_MANAGED_RADIO_BUTTON.md" } elseif ($isC123) { "docs\dotnet\NATIVEAOT_C123_MANAGED_SEPARATOR.md" } elseif ($isC122) { "docs\dotnet\NATIVEAOT_C122_MANAGED_LABEL.md" } elseif ($isC121) { "docs\dotnet\NATIVEAOT_C121_MANAGED_CHECKBOX.md" } else { "docs\dotnet\NATIVEAOT_C120_MANAGED_CONTROL_HOST.md" }
+    documentation = if ($isC141) { "docs\dotnet\NATIVEAOT_C141_MANAGED_VERTICAL_STACK_LAYOUT.md" } elseif ($isC140) { "docs\dotnet\NATIVEAOT_C140_MANAGED_SCROLLVIEW.md" } elseif ($isC135) { "docs\dotnet\NATIVEAOT_C135_MANAGED_POPUP_MENU.md" } elseif ($isC134) { "docs\dotnet\NATIVEAOT_C134_TRANSIENT_POPUP_ROUTING.md" } elseif ($isC132) { "docs\dotnet\NATIVEAOT_C132_MANAGED_RADIOBUTTON.md" } elseif ($isC131) { "docs\dotnet\NATIVEAOT_C131_MANAGED_CHECKBOX.md" } elseif ($isC130) { "docs\dotnet\NATIVEAOT_C130_C127_WRAPPER_STALL.md" } elseif ($isC129) { "docs\dotnet\NATIVEAOT_C129_SHIFT_TAB_INPUT_TRANSPORT.md" } elseif ($isC128) { "docs\dotnet\NATIVEAOT_C128_MANAGED_PANEL_LIFECYCLE.md" } elseif ($isC127) { "docs\dotnet\NATIVEAOT_C127_MANAGED_PANEL.md" } elseif ($isC126) { "docs\dotnet\NATIVEAOT_C126_MANAGED_GROUP_BOX.md" } elseif ($isC125) { "docs\dotnet\NATIVEAOT_C125_MANAGED_PROGRESS_BAR.md" } elseif ($isC124) { "docs\dotnet\NATIVEAOT_C124_MANAGED_RADIO_BUTTON.md" } elseif ($isC123) { "docs\dotnet\NATIVEAOT_C123_MANAGED_SEPARATOR.md" } elseif ($isC122) { "docs\dotnet\NATIVEAOT_C122_MANAGED_LABEL.md" } elseif ($isC121) { "docs\dotnet\NATIVEAOT_C121_MANAGED_CHECKBOX.md" } else { "docs\dotnet\NATIVEAOT_C120_MANAGED_CONTROL_HOST.md" }
 }
 if ($isC133) {
     $manifest.notes.order = "Open, Save, Save As, Show Path, Status display ComboBox, Document; C133 replaces the Full Path/File Name radio pair with one registered non-editable ComboBox and changes registration from 8 to 7"
@@ -1876,6 +2039,33 @@ if ($isC140) {
     $manifest.notes.commands = "physical QEMU wheel, translated member pointer activation, ScrollBar thumb drag, Tab focus reveal, three fresh launches, and managed relaunch/reset checks"
     $manifest.notes.capture = "final pointer drag owner none; ScrollView has no transient popup lease"
     $manifest.documentation = "docs\dotnet\NATIVEAOT_C140_MANAGED_SCROLLVIEW.md"
+}
+if ($isC141) {
+    $manifest.hostAbi.inputTransport = "existing pointer, wheel, button, keyboard, and Shift payload transport; ABI v1/table 104 unchanged"
+    $manifest.controlHost.capacity = 8
+    $manifest.controlHost.tests = "C141 core layout 20; visibility 10; ScrollView integration 10; focus 10; popup 6; total 56; C140 58/C139 54/C138 62/C137 46 retained"
+    $manifest.verticalStack = [ordered]@{
+        api = "GuideXosVerticalStack"
+        capacity = 8
+        membership = "fixed insertion-order references; non-owning; duplicate, overflow, unsupported type, Panel conflict, and second-stack conflict rejected"
+        supportedMembers = "Button, CheckBox, Label, Separator, RadioButton, ProgressBar, ComboBox"
+        rejectedMembers = "TextArea, ListBox, Panel, ScrollView, nested GuideXosVerticalStack"
+        widthPolicy = "Stretch or KeepWidth; character-aligned controls round stretched width down to 8-pixel cells"
+        heightPolicy = "existing control height is preserved"
+        padding = "bounded Top/Bottom/Left/Right integer padding"
+        spacing = "bounded non-negative integer between visible members only"
+        visibility = "hidden members consume no space; disabled members retain space"
+        contentHeight = "arranged visible member bottoms plus bottom padding, measured from Stack.Y"
+        relayout = "explicit PerformLayout(); add/remove also relayout; visibility callback calls PerformLayout(scrollView)"
+        composition = "same direct controls may be registered with ScrollView and referenced by one stack; Stack has no registration or viewport"
+        focus = "ScrollView remains authoritative for traversal and reveal; stack is not focusable"
+        popup = "ComboBox popup reads current arranged bounds; popup/capture state remains outside the stack"
+    }
+    $manifest.notes.order = "C141 production ScrollView: Label, CheckBox, ComboBox, Separator, two RadioButtons, ProgressBar, Button; all eight are direct ScrollView members and one non-owning stack reference"
+    $manifest.notes.commands = "physical QEMU ComboBox open/follow-up, checkbox visibility relayout, wheel, ScrollBar drag, translated moved-button activation, five forward Tab events, and relaunch/reset"
+    $manifest.notes.space = "stack changes geometry only; no synthetic Tab KeyChar, capture stack, second focus system, recursive ownership, or wheel handling"
+    $manifest.notes.capture = "final ComboBox transient capture none; final ScrollBar pointer drag owner none"
+    $manifest.documentation = "docs\dotnet\NATIVEAOT_C141_MANAGED_VERTICAL_STACK_LAYOUT.md"
 }
 $manifest | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath (Join-Path $EvidenceRoot ("{0}.manifest.json" -f $phaseLower)) -Encoding ASCII
 Write-Host "$ProofPhase outcome=$($manifest.outcome) evidence=$EvidenceRoot" -ForegroundColor Green

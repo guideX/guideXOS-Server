@@ -44,7 +44,9 @@ public static unsafe class GuideXosApplicationRegistry
         new(2u, "Managed Status"u8, new Applications.ManagedStatus()),
         new(3u, "Managed Counter"u8, new Applications.ManagedCounter()),
         new(4u, "Managed Notes"u8, new Applications.ManagedNotes()),
-#if HOSTLOGPROOF_C140_MANAGED_SCROLL_VIEW
+#if HOSTLOGPROOF_C141_MANAGED_VERTICAL_STACK
+        new(5u, "Managed Vertical Stack"u8, new Applications.ManagedVerticalStackDemo()),
+#elif HOSTLOGPROOF_C140_MANAGED_SCROLL_VIEW
         new(5u, "Managed ScrollView"u8, new Applications.ManagedScrollViewDemo()),
 #endif
     };

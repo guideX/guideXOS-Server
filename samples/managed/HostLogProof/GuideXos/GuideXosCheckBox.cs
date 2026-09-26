@@ -16,7 +16,7 @@ public enum GuideXosCheckBoxResult
 /// meaning of the value; this control owns only label, bounds, state, focus,
 /// pointer-down, keyboard, and text rendering.
 /// </summary>
-public sealed class GuideXosCheckBox
+public sealed class GuideXosCheckBox : IGuideXosVerticalStackMember
 {
     public const int DefaultMaximumLabelLength = 32;
     public const int MaximumSupportedLabelLength = 48;
@@ -41,6 +41,7 @@ public sealed class GuideXosCheckBox
     private bool _dispatchingChanged;
     private GuideXosPanel _panelOwner;
     private GuideXosScrollView _scrollViewOwner;
+    private GuideXosVerticalStack _verticalStackOwner;
     private uint _rejectedInputCount;
 
     public GuideXosCheckBox(
@@ -97,6 +98,7 @@ public sealed class GuideXosCheckBox
     public bool EffectiveVisible => _visible && _panelVisible;
     public GuideXosPanel ParentPanel => _panelOwner;
     public GuideXosScrollView ParentScrollView => _scrollViewOwner;
+    internal GuideXosVerticalStack VerticalStackOwner => _verticalStackOwner;
     public uint RejectedInputCount => _rejectedInputCount;
 
     /// <summary>
@@ -129,7 +131,8 @@ public sealed class GuideXosCheckBox
 
     public bool TrySetBounds(int x, int y, int width, int height)
     {
-        if (_panelOwner != null || _scrollViewOwner != null)
+        if (_panelOwner != null || _scrollViewOwner != null ||
+            _verticalStackOwner != null)
         {
             ++_rejectedInputCount;
             return false;
@@ -145,6 +148,50 @@ public sealed class GuideXosCheckBox
     internal bool TrySetScrollViewBounds(int x, int y, int width, int height)
     {
         return TrySetBoundsCore(x, y, width, height);
+    }
+
+    bool IGuideXosVerticalStackMember.Visible => Visible;
+    GuideXosPanel IGuideXosVerticalStackMember.ParentPanel => _panelOwner;
+    GuideXosVerticalStack IGuideXosVerticalStackMember.VerticalStackOwner =>
+        _verticalStackOwner;
+    int IGuideXosVerticalStackMember.MinimumWidth => MinimumSupportedWidth;
+    int IGuideXosVerticalStackMember.MaximumWidth => MaximumSupportedWidth;
+    bool IGuideXosVerticalStackMember.WidthRequiresCharacterAlignment => false;
+    bool IGuideXosVerticalStackMember.TrySetVerticalStackBounds(
+        int x, int y, int width) => TrySetBoundsCore(x, y, width, _height);
+    bool IGuideXosVerticalStackMember.TrySetVerticalStackBounds(
+        int x, int y, int width, int height) => TrySetBoundsCore(x, y, width, height);
+
+    internal bool TrySetVerticalStackBoundsCore(int x, int y, int width)
+        => TrySetBoundsCore(x, y, width, _height);
+
+    internal bool TrySetVerticalStackBoundsCore(
+        int x, int y, int width, int height)
+        => TrySetBoundsCore(x, y, width, height);
+    bool IGuideXosVerticalStackMember.TryAttachToVerticalStack(
+        GuideXosVerticalStack stack)
+    {
+        return TryAttachToVerticalStackCore(stack);
+    }
+    void IGuideXosVerticalStackMember.DetachFromVerticalStack(
+        GuideXosVerticalStack stack)
+    {
+        if (ReferenceEquals(_verticalStackOwner, stack))
+            _verticalStackOwner = null;
+    }
+
+    internal bool TryAttachToVerticalStackCore(GuideXosVerticalStack stack)
+    {
+        if (stack == null || _panelOwner != null || _verticalStackOwner != null)
+            return false;
+        _verticalStackOwner = stack;
+        return true;
+    }
+
+    internal void DetachFromVerticalStackCore(GuideXosVerticalStack stack)
+    {
+        if (ReferenceEquals(_verticalStackOwner, stack))
+            _verticalStackOwner = null;
     }
 
     private bool TrySetBoundsCore(int x, int y, int width, int height)
@@ -302,7 +349,8 @@ public sealed class GuideXosCheckBox
 
     internal bool TryAttachToPanel(GuideXosPanel panel)
     {
-        if (panel == null || _panelOwner != null || _scrollViewOwner != null) return false;
+        if (panel == null || _panelOwner != null || _scrollViewOwner != null ||
+            _verticalStackOwner != null) return false;
         _panelOwner = panel;
         _panelVisible = panel.Visible;
         if (!_panelVisible) _isFocused = false;

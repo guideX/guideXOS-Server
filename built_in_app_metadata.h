@@ -125,6 +125,13 @@ static const char* const kManagedScrollViewAliases[] = {
 };
 #endif
 
+#if defined(GXOS_NATIVEAOT_C141_MANAGED_VERTICAL_STACK)
+static const char* const kManagedVerticalStackAliases[] = {
+	"Vertical Stack",
+	"Stack"
+};
+#endif
+
 static const char* const kOnScreenKeyboardAliases[] = {
 	"On Screen Keyboard"
 };
@@ -162,6 +169,9 @@ static const BuiltInAppMetadata kBuiltInAppMetadata[] = {
 	{ "com.guidexos.apps.managed.notes", "Managed Notes", "Managed Notes", nullptr, nullptr, "app.generic", "Utilities", "Managed guideXOS notes application using the bounded managed file service.", BuiltInAvailabilityBareMetal, 0, 0, 0, false, false, detail::kManagedNotesAliases, sizeof(detail::kManagedNotesAliases) / sizeof(detail::kManagedNotesAliases[0]), true, true, true, false, false, false, false, BuiltInAppLaunchKind::ManagedNativeAot, 4u, kManagedNativeAotCompositeImagePath }
 #if defined(GXOS_NATIVEAOT_C140_MANAGED_SCROLL_VIEW)
 ,	{ "com.guidexos.apps.managed.scrollview", "Managed ScrollView", "Managed ScrollView", nullptr, nullptr, "app.generic", "Utilities", "Managed guideXOS bounded vertical ScrollView proof application.", BuiltInAvailabilityBareMetal, 0, 0, 0, false, false, detail::kManagedScrollViewAliases, sizeof(detail::kManagedScrollViewAliases) / sizeof(detail::kManagedScrollViewAliases[0]), true, true, true, false, false, false, false, BuiltInAppLaunchKind::ManagedNativeAot, 5u, kManagedNativeAotCompositeImagePath }
+#endif
+#if defined(GXOS_NATIVEAOT_C141_MANAGED_VERTICAL_STACK)
+,	{ "com.guidexos.apps.managed.verticalstack", "Managed Vertical Stack", "Managed Vertical Stack", nullptr, nullptr, "app.generic", "Utilities", "Managed guideXOS bounded non-owning vertical stack proof application.", BuiltInAvailabilityBareMetal, 0, 0, 0, false, false, detail::kManagedVerticalStackAliases, sizeof(detail::kManagedVerticalStackAliases) / sizeof(detail::kManagedVerticalStackAliases[0]), true, true, true, false, false, false, false, BuiltInAppLaunchKind::ManagedNativeAot, 5u, kManagedNativeAotCompositeImagePath }
 #endif
 };
 

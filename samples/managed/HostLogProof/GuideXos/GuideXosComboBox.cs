@@ -19,7 +19,7 @@ public enum GuideXosComboBoxResult
 /// A bounded, non-editable managed selector. The drop-down is transient state
 /// owned by this control; it is not a second registered control or Panel.
 /// </summary>
-public sealed class GuideXosComboBox
+public sealed class GuideXosComboBox : IGuideXosVerticalStackMember
 {
     public const int DefaultMaximumItemCount = GuideXosListBox.DefaultMaximumItemCount;
     public const int MaximumSupportedItemCount = GuideXosListBox.MaximumSupportedItemCount;
@@ -53,6 +53,7 @@ public sealed class GuideXosComboBox
     private bool _panelVisible = true;
     private GuideXosPanel _panelOwner;
     private GuideXosScrollView _scrollViewOwner;
+    private GuideXosVerticalStack _verticalStackOwner;
     private uint _rejectedInputCount;
     private bool _dispatchingChanged;
     private bool _popupRowsRendered;
@@ -115,6 +116,7 @@ public sealed class GuideXosComboBox
     public bool EffectiveVisible => _visible && _panelVisible;
     public GuideXosPanel ParentPanel => _panelOwner;
     public GuideXosScrollView ParentScrollView => _scrollViewOwner;
+    internal GuideXosVerticalStack VerticalStackOwner => _verticalStackOwner;
     public uint RejectedInputCount => _rejectedInputCount;
 
     /// <summary>One bounded callback for each real committed selection change.</summary>
@@ -444,7 +446,8 @@ public sealed class GuideXosComboBox
 
     internal bool TryAttachToPanel(GuideXosPanel panel)
     {
-        if (panel == null || _panelOwner != null || _scrollViewOwner != null) return false;
+        if (panel == null || _panelOwner != null || _scrollViewOwner != null ||
+            _verticalStackOwner != null) return false;
         _panelOwner = panel;
         _panelVisible = panel.Visible;
         if (!_panelVisible)
@@ -582,7 +585,8 @@ public sealed class GuideXosComboBox
 
     public bool TrySetBounds(int x, int y, int width, int height)
     {
-        if (_panelOwner != null || _scrollViewOwner != null)
+        if (_panelOwner != null || _scrollViewOwner != null ||
+            _verticalStackOwner != null)
         {
             ++_rejectedInputCount;
             return false;
@@ -600,6 +604,64 @@ public sealed class GuideXosComboBox
     {
         CloseDropDown();
         return TrySetBoundsCore(x, y, width, height);
+    }
+
+    bool IGuideXosVerticalStackMember.Visible => Visible;
+    GuideXosPanel IGuideXosVerticalStackMember.ParentPanel => _panelOwner;
+    GuideXosVerticalStack IGuideXosVerticalStackMember.VerticalStackOwner =>
+        _verticalStackOwner;
+    int IGuideXosVerticalStackMember.MinimumWidth => MinimumSupportedWidth;
+    int IGuideXosVerticalStackMember.MaximumWidth => MaximumSupportedWidth;
+    bool IGuideXosVerticalStackMember.WidthRequiresCharacterAlignment => false;
+    bool IGuideXosVerticalStackMember.TrySetVerticalStackBounds(
+        int x, int y, int width)
+    {
+        CloseDropDown();
+        return TrySetBoundsCore(x, y, width, _height);
+    }
+    bool IGuideXosVerticalStackMember.TrySetVerticalStackBounds(
+        int x, int y, int width, int height)
+    {
+        CloseDropDown();
+        return TrySetBoundsCore(x, y, width, height);
+    }
+
+    internal bool TrySetVerticalStackBoundsCore(int x, int y, int width)
+    {
+        CloseDropDown();
+        return TrySetBoundsCore(x, y, width, _height);
+    }
+
+    internal bool TrySetVerticalStackBoundsCore(
+        int x, int y, int width, int height)
+    {
+        CloseDropDown();
+        return TrySetBoundsCore(x, y, width, height);
+    }
+    bool IGuideXosVerticalStackMember.TryAttachToVerticalStack(
+        GuideXosVerticalStack stack)
+    {
+        return TryAttachToVerticalStackCore(stack);
+    }
+    void IGuideXosVerticalStackMember.DetachFromVerticalStack(
+        GuideXosVerticalStack stack)
+    {
+        if (ReferenceEquals(_verticalStackOwner, stack))
+            _verticalStackOwner = null;
+    }
+
+    internal bool TryAttachToVerticalStackCore(GuideXosVerticalStack stack)
+    {
+        if (stack == null || _panelOwner != null || _verticalStackOwner != null)
+            return false;
+        _verticalStackOwner = stack;
+        return true;
+    }
+
+    internal void DetachFromVerticalStackCore(GuideXosVerticalStack stack)
+    {
+        if (ReferenceEquals(_verticalStackOwner, stack))
+            _verticalStackOwner = null;
     }
 
     private bool IsValidItemText(string text)

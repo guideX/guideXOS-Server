@@ -472,6 +472,26 @@ public sealed class GuideXosScrollView
 
     public void RecalculateContentExtent()
     {
+        SynchronizeMemberLogicalBounds();
+        RecalculateContentExtentCore(0);
+    }
+
+    /// <summary>
+    /// Refreshes the existing derived extent after a non-owning C141 stack
+    /// moved its members. The ScrollView stores no layout or duplicate bounds.
+    /// </summary>
+    public bool TryRecalculateContentExtent(GuideXosVerticalStack layout)
+    {
+        if (layout == null || !layout.ContainsAllMembersIn(this)) return false;
+        SynchronizeMemberLogicalBounds();
+        long stackBottom = (long)layout.ContentBottom - InnerY;
+        if (stackBottom < 0 || stackBottom > int.MaxValue) return false;
+        RecalculateContentExtentCore((int)stackBottom);
+        return true;
+    }
+
+    private void RecalculateContentExtentCore(int additionalExtent)
+    {
         int extent = 0;
         for (int index = 0; index < _memberCount; index++)
         {
@@ -481,8 +501,29 @@ public sealed class GuideXosScrollView
             int bottom = entry.LogicalY + height;
             if (bottom > extent) extent = bottom;
         }
+        if (additionalExtent > extent) extent = additionalExtent;
         _viewport.VisibleExtent = InnerHeight;
         _viewport.ContentExtent = extent;
+    }
+
+    private void SynchronizeMemberLogicalBounds()
+    {
+        for (int index = 0; index < _memberCount; index++)
+        {
+            MemberEntry entry = _members[index];
+            GetMemberBounds(entry.Kind, entry.Member, out int x, out int y,
+                out _, out _);
+            int logicalX = x - InnerX;
+            int logicalY = y - InnerY;
+            if (logicalX >= 0 && logicalY >= 0 &&
+                logicalX <= MaximumSupportedCoordinate &&
+                logicalY <= MaximumSupportedCoordinate)
+            {
+                entry.LogicalX = logicalX;
+                entry.LogicalY = logicalY;
+                _members[index] = entry;
+            }
+        }
     }
 
     /// <summary>
@@ -710,6 +751,45 @@ public sealed class GuideXosScrollView
                 break;
             default:
                 width = height = 0;
+                break;
+        }
+    }
+
+    private static void GetMemberBounds(MemberKind kind, object member,
+        out int x, out int y, out int width, out int height)
+    {
+        switch (kind)
+        {
+            case MemberKind.Button:
+                GuideXosButton button = (GuideXosButton)member;
+                x = button.X; y = button.Y; width = button.Width; height = button.Height;
+                break;
+            case MemberKind.CheckBox:
+                GuideXosCheckBox checkBox = (GuideXosCheckBox)member;
+                x = checkBox.X; y = checkBox.Y; width = checkBox.Width; height = checkBox.Height;
+                break;
+            case MemberKind.Label:
+                GuideXosLabel label = (GuideXosLabel)member;
+                x = label.X; y = label.Y; width = label.Width; height = label.Height;
+                break;
+            case MemberKind.Separator:
+                GuideXosSeparator separator = (GuideXosSeparator)member;
+                x = separator.X; y = separator.Y; width = separator.Width; height = separator.Height;
+                break;
+            case MemberKind.RadioButton:
+                GuideXosRadioButton radio = (GuideXosRadioButton)member;
+                x = radio.X; y = radio.Y; width = radio.Width; height = radio.Height;
+                break;
+            case MemberKind.ProgressBar:
+                GuideXosProgressBar progress = (GuideXosProgressBar)member;
+                x = progress.X; y = progress.Y; width = progress.Width; height = progress.Height;
+                break;
+            case MemberKind.ComboBox:
+                GuideXosComboBox combo = (GuideXosComboBox)member;
+                x = combo.X; y = combo.Y; width = combo.Width; height = combo.Height;
+                break;
+            default:
+                x = y = width = height = 0;
                 break;
         }
     }
