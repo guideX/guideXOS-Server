@@ -127,6 +127,7 @@ struct Operation {
     bool debugStepOutReturnBreakpointHit;
     bool debugSourceSelected;
     bool debugCurrentSourceMappingValid;
+    uint64_t debugMappedUserAddress;
     bool debugConditionEnabled;
     bool debugConditionalContinuePending;
     bool debugConditionalRearmPending;
@@ -1097,6 +1098,45 @@ static bool resolve_debug_mapping_forward_address(
             if (mapping) *mapping = nearby;
             return true;
         }
+    }
+    return false;
+}
+
+// A cooperative scheduler yield can capture the runtime helper's return RIP
+// rather than the application call site that invoked that helper.  Recover a
+// source-bearing application address only from a bounded, validated stack
+// scan.  The raw register context remains authoritative for ownership and
+// resume; this address is used solely for source/frame mapping.
+static bool resolve_debug_user_callsite(
+    const Operation& operation,
+    const NativeElfDebugTrap::BreakpointContext& context,
+    uint64_t* address,
+    compiler::ResolvedSourceMapping* mapping)
+{
+    if (address) *address = 0;
+    if (mapping) *mapping = {};
+    const NativeAppExecutionContext* runtime = native_elf_runtime_context();
+    if (!runtime || runtime->stackBase == 0 || runtime->stackSize == 0 ||
+        runtime->stackBase > ~static_cast<uint64_t>(0) - runtime->stackSize ||
+        context.rsp == 0) return false;
+    const uint64_t stackHigh = runtime->stackBase + runtime->stackSize;
+    const uint64_t maxScanBytes = 4096;
+    for (uint64_t offset = 0; offset <= maxScanBytes; offset += sizeof(uint64_t)) {
+        if (context.rsp > ~static_cast<uint64_t>(0) - offset) break;
+        const uint64_t slot = context.rsp + offset;
+        if (slot > stackHigh || stackHigh - slot < sizeof(uint64_t)) break;
+        uint64_t candidate = 0;
+        if (!debug_read_stack_u64(operation, slot, &candidate) ||
+            candidate == 0 || candidate == context.rip ||
+            !debug_code_address(operation, candidate)) continue;
+        compiler::ResolvedSourceMapping candidateMapping = {};
+        if (!resolve_debug_mapping_near_address(operation, candidate,
+                                                &candidateMapping, nullptr) ||
+            candidateMapping.targetAddress == 0 || candidateMapping.sourcePath[0] == '\0' ||
+            candidateMapping.line == 0 || candidateMapping.functionName[0] == '\0') continue;
+        if (address) *address = candidateMapping.targetAddress;
+        if (mapping) *mapping = candidateMapping;
+        return true;
     }
     return false;
 }
@@ -2324,11 +2364,18 @@ static bool capture_user_pause(NativeElfDebugTrap::BreakpointContext* context)
     // binding so Continue cannot accidentally rearm the wrong owner.
     snapshot.bindingId = 0;
     // A cooperative yield may be reached from the NativeElf runtime helper,
-    // whose return address is outside the application ELF. Keep the raw RIP
-    // and full register context, but do not expose that runtime address as a
-    // source/breakpoint target or invent a source mapping for it.
+    // whose return address is outside the application ELF. Keep that raw RIP
+    // and full register context for ownership/resume, but publish a bounded
+    // application call-site when the stack contains one with authoritative
+    // source/DWARF mapping.
+    compiler::ResolvedSourceMapping userCallsiteMapping = {};
+    uint64_t userCallsiteAddress = 0;
+    const bool userCallsiteMapped = !debug_code_address(s_operation, context->rip) &&
+        resolve_debug_user_callsite(s_operation, *context, &userCallsiteAddress,
+                                    &userCallsiteMapping);
+    s_operation.debugMappedUserAddress = userCallsiteMapped ? userCallsiteAddress : 0;
     snapshot.targetAddress = debug_code_address(s_operation, context->rip)
-        ? context->rip : 0;
+        ? context->rip : (userCallsiteMapped ? userCallsiteAddress : 0);
     snapshot.originalByte = 0;
     snapshot.installedByte = 0;
     snapshot.originalByteValid = 0;
@@ -2363,8 +2410,11 @@ static bool capture_user_pause(NativeElfDebugTrap::BreakpointContext* context)
     snapshot.context.r14 = context->r14;
     snapshot.context.r15 = context->r15;
     compiler::ResolvedSourceMapping mapping = {};
-    if (resolve_debug_mapping_at_address(s_operation, context->rip, &mapping, nullptr))
+    if (debug_code_address(s_operation, context->rip) &&
+        resolve_debug_mapping_at_address(s_operation, context->rip, &mapping, nullptr))
         set_debug_source_mapping(s_operation, &snapshot, mapping);
+    else if (userCallsiteMapped)
+        set_debug_source_mapping(s_operation, &snapshot, userCallsiteMapping);
     else
         clear_unmapped_source_identity(&snapshot);
     set_breakpoint_list(s_operation, &snapshot);
@@ -2373,6 +2423,9 @@ static bool capture_user_pause(NativeElfDebugTrap::BreakpointContext* context)
     serial::puts(" rip=0x"); serial::put_hex64(context->rip);
     serial::puts(" rsp=0x"); serial::put_hex64(context->rsp);
     serial::puts(" rbp=0x"); serial::put_hex64(context->rbp);
+    serial::puts(" mapped=0x"); serial::put_hex64(snapshot.targetAddress);
+    serial::puts(" mapping="); serial::puts(userCallsiteMapped || debug_code_address(s_operation, context->rip)
+        ? "PASS" : "NONE");
     serial::puts(" session="); serial::put_hex64(s_operation.registrationGeneration);
     serial::putc('\n');
     serial::puts("DEVELOPER_STUDIO_PHASE28Q_PAUSE_CAPTURE_PASS\n");
@@ -5287,14 +5340,18 @@ gx_result call_stack(const gx_development_debug_request& request,
     }
     set_call_stack_identity(s_operation, outResult, *runtime);
     const NativeElfDebugTrap::BreakpointContext& context = *s_operation.debugContext;
-    if (!debug_code_address(s_operation, context.rip)) {
+    const uint64_t mappedStopAddress = debug_code_address(s_operation, context.rip)
+        ? context.rip : s_operation.debugMappedUserAddress;
+    const bool sourceOnlyPause = !debug_code_address(s_operation, context.rip) &&
+        mappedStopAddress != 0;
+    if (!debug_code_address(s_operation, mappedStopAddress)) {
         set_call_stack_error(outResult,
                              GX_DEVELOPMENT_DEBUG_CALL_STACK_STATUS_INVALID_RETURN_ADDRESS,
                              "NativeElf paused RIP is outside the user image");
         return GX_ERROR_FAILED;
     }
     compiler::ResolvedSourceMapping topMapping = {};
-    if (!resolve_debug_mapping_at_address(s_operation, context.rip, &topMapping, nullptr) ||
+    if (!resolve_debug_mapping_at_address(s_operation, mappedStopAddress, &topMapping, nullptr) ||
         topMapping.functionName[0] == '\0') {
         set_call_stack_error(outResult,
                              GX_DEVELOPMENT_DEBUG_CALL_STACK_STATUS_UNSUPPORTED_FRAME,
@@ -5302,8 +5359,9 @@ gx_result call_stack(const gx_development_debug_request& request,
         return GX_ERROR_UNSUPPORTED;
     }
     const uint64_t stackHigh = runtime->stackBase + runtime->stackSize;
-    if (!step_out_frame_shape_valid(context.rsp, context.rbp,
-                                    runtime->stackBase, stackHigh)) {
+    const bool frameShapeValid = step_out_frame_shape_valid(context.rsp, context.rbp,
+                                                            runtime->stackBase, stackHigh);
+    if (!frameShapeValid && !sourceOnlyPause) {
         set_call_stack_error(outResult, GX_DEVELOPMENT_DEBUG_CALL_STACK_STATUS_INVALID_FRAME,
                              "NativeElf paused frame pointer shape is invalid");
         return GX_ERROR_FAILED;
@@ -5311,9 +5369,9 @@ gx_result call_stack(const gx_development_debug_request& request,
 
     gx_development_debug_call_stack_frame& top = outResult->frames[0];
     top.depth = 0;
-    top.flags = GX_DEVELOPMENT_DEBUG_CALL_STACK_FRAME_VALIDATED |
-        GX_DEVELOPMENT_DEBUG_CALL_STACK_FRAME_POINTER_VALID;
-    top.instructionPointer = context.rip;
+    top.flags = GX_DEVELOPMENT_DEBUG_CALL_STACK_FRAME_VALIDATED;
+    if (frameShapeValid) top.flags |= GX_DEVELOPMENT_DEBUG_CALL_STACK_FRAME_POINTER_VALID;
+    top.instructionPointer = mappedStopAddress;
     top.stackPointer = context.rsp;
     top.framePointer = context.rbp;
     if (!set_call_stack_mapping(&top, topMapping, true)) {
@@ -5323,6 +5381,13 @@ gx_result call_stack(const gx_development_debug_request& request,
         return GX_ERROR_UNSUPPORTED;
     }
     outResult->frameCount = 1;
+    // The raw helper context has no trustworthy application frame-pointer
+    // chain. Return the mapped frame as a bounded source-only stack instead
+    // of rejecting a valid current stop or inventing caller frames.
+    if (sourceOnlyPause) {
+        outResult->status = GX_DEVELOPMENT_DEBUG_CALL_STACK_STATUS_SUCCESS;
+        return GX_OK;
+    }
     uint64_t seen[GX_DEVELOPMENT_DEBUG_MAX_CALL_STACK_FRAMES] = {};
     seen[0] = context.rbp;
     if (equal_text(topMapping.functionName, "gx_main")) {
