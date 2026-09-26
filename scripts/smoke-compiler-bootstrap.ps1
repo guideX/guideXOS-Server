@@ -819,7 +819,7 @@ function Invoke-QemuProofBoot([int]$runNumber, [string]$qemu) {
                 try {
                     $serialProbe = Get-Content -LiteralPath $serialPath -Raw -ErrorAction Stop
                     if ($serialProbe -and (($Phase29COnly -and
-                            $serialProbe.Contains("DEVELOPER_STUDIO_PHASE29C_PROJECT_LOAD_READY")) -or
+                            $serialProbe.Contains("P28Z APP 05 project_open_return")) -or
                         $serialProbe.Contains("[KERNEL] Entering main loop (waiting for input)..."))) {
                         $process.Kill()
                         break
@@ -2160,7 +2160,57 @@ function Invoke-QemuProofBoot([int]$runNumber, [string]$qemu) {
                 "DEVELOPER_STUDIO_PHASE28Q_PASS"
             )
         }
+        if ($Phase29COnly -or $Phase28QOnly) {
+            $requiredMarkers += @(
+                "DEVELOPER_STUDIO_PHASE29D_STARTUP_APPLICATION_CREATED",
+                "DEVELOPER_STUDIO_PHASE29D_STARTUP_GENERATION_INITIALIZED",
+                "DEVELOPER_STUDIO_PHASE29D_STARTUP_SENTINEL_DECISION",
+                "DEVELOPER_STUDIO_PHASE29D_STARTUP_DIAGNOSTIC_MODE_DECIDED",
+                "DEVELOPER_STUDIO_PHASE29D_STARTUP_WORKSPACE_CONTROLLER_READY",
+                "DEVELOPER_STUDIO_PHASE29D_STARTUP_OUTPUT_SERVICE_READY",
+                "DEVELOPER_STUDIO_PHASE29D_STARTUP_FIRST_FRAME_RENDERED",
+                "DEVELOPER_STUDIO_PHASE29D_STARTUP_EVENT_LOOP_ENTERED",
+                "DEVELOPER_STUDIO_PHASE29D_STARTUP_EVENT_LOOP_FIRST_ITERATION",
+                "DEVELOPER_STUDIO_PHASE29D_STARTUP_STARTUP_PUMP_ENTERED",
+                "DEVELOPER_STUDIO_PHASE29D_STARTUP_REQUEST_CREATED",
+                "DEVELOPER_STUDIO_PHASE29D_STARTUP_REQUEST_SUBMITTED",
+                "DEVELOPER_STUDIO_PHASE29D_STARTUP_PHASE29C_ACCEPTED",
+                "DEVELOPER_STUDIO_PHASE29D_STARTUP_REQUEST_HANDOFF_COMPLETE"
+            )
+        }
         $missingMarkers = @($requiredMarkers | Where-Object { $serial -notmatch [regex]::Escape($_) })
+        if ($Phase29COnly -or $Phase28QOnly) {
+            $startupRequestMarkers = @($serial -split "`r?`n" | Where-Object {
+                $_ -match 'DEVELOPER_STUDIO_PHASE29D_STARTUP_(REQUEST_CREATED|REQUEST_SUBMITTED|PHASE29C_ACCEPTED|REQUEST_HANDOFF_COMPLETE) '
+            })
+            $startupRequestCreated = @($startupRequestMarkers | Where-Object { $_ -match 'STARTUP_REQUEST_CREATED ' })
+            $startupRequestSubmitted = @($startupRequestMarkers | Where-Object { $_ -match 'STARTUP_REQUEST_SUBMITTED ' })
+            $phase29cAccepted = @($startupRequestMarkers | Where-Object { $_ -match 'STARTUP_PHASE29C_ACCEPTED ' })
+            $startupHandoffComplete = @($startupRequestMarkers | Where-Object { $_ -match 'STARTUP_REQUEST_HANDOFF_COMPLETE ' })
+            if ($startupRequestCreated.Count -ne 1 -or $startupRequestSubmitted.Count -ne 1 -or
+                $phase29cAccepted.Count -ne 1 -or $startupHandoffComplete.Count -ne 1) {
+                $missingMarkers += "Phase29D one-shot request count created=$($startupRequestCreated.Count) submitted=$($startupRequestSubmitted.Count) accepted=$($phase29cAccepted.Count) handed_off=$($startupHandoffComplete.Count)"
+            } else {
+                $identityLines = @($serial -split "`r?`n" | Where-Object {
+                    $_ -match 'DEVELOPER_STUDIO_PHASE29D_STARTUP_(APPLICATION_CREATED|GENERATION_INITIALIZED|SENTINEL_DECISION|FIRST_FRAME_RENDERED|EVENT_LOOP_FIRST_ITERATION|STARTUP_PUMP_ENTERED|REQUEST_CREATED|REQUEST_SUBMITTED|PHASE29C_ACCEPTED|REQUEST_HANDOFF_COMPLETE) '
+                })
+                $identities = @($identityLines | ForEach-Object {
+                    if ($_ -match 'app=(\d+) generation=(\d+)') { "$($Matches[1]):$($Matches[2])" }
+                } | Sort-Object -Unique)
+                $requestGeneration = $null
+                if ($startupRequestCreated[0] -match 'request=(\d+)') { $requestGeneration = [int64]$Matches[1] }
+                if ($identities.Count -ne 1 -or !$requestGeneration -or
+                    $startupRequestCreated[0] -notmatch 'fixture=present' -or
+                    $startupRequestCreated[0] -notmatch 'path=/P28Q' -or
+                    $requestGeneration -ne [int64]$identities[0].Split(':')[1] -or
+                    $phase29cAccepted[0] -notmatch 'project_request=\d+') {
+                    $missingMarkers += "Phase29D owner/generation/request handoff identity mismatch"
+                }
+            }
+            if ($serial -match 'DEVELOPER_STUDIO_PHASE29D_STARTUP_REENTRY_REJECTED') {
+                $missingMarkers += "Phase29D rejected a live startup re-entry"
+            }
+        }
         if ($missingMarkers.Count -ne 0) {
             if ($Phase28QOnly -and $serial -notmatch [regex]::Escape("P28Z APP 00 gx_main_entry_raw") -and
                 $serial -notmatch [regex]::Escape("P28Z BOOT 05 gx_main_invoke")) {
@@ -2171,15 +2221,15 @@ function Invoke-QemuProofBoot([int]$runNumber, [string]$qemu) {
                 $lastBootMilestone = ($serial -split "`r?`n" | Where-Object { $_ -match "^P28Z BOOT |^\[KERNEL\]" } | Select-Object -Last 1)
                 Write-Host ("P28Z CLASSIFICATION boot={0} domain=loader-invoked-app-entry-unconfirmed last_milestone={1}" -f $runNumber, $lastBootMilestone) -ForegroundColor Yellow
             } elseif ($Phase28QOnly) {
-                $lastProjectMilestone = ($serial -split "`r?`n" | Where-Object { $_ -match "^P28Z APP |^P28Z PROJECT |^P28Z FS " } | Select-Object -Last 1)
+                $lastProjectMilestone = ($serial -split "`r?`n" | Where-Object { $_ -match "^P28Z APP |^P28Z PROJECT |^P28Z FS |DEVELOPER_STUDIO_PHASE29D_STARTUP_" } | Select-Object -Last 1)
                 if (!$lastProjectMilestone) { $lastProjectMilestone = "no project-open milestone" }
                 Write-Host ("P28Z CLASSIFICATION boot={0} domain=post-render-project-open last_milestone={1}" -f $runNumber, $lastProjectMilestone) -ForegroundColor Yellow
             }
             Write-Host "QEMU boot $runNumber missed required compiler/IDE markers: $($missingMarkers -join ', ')" -ForegroundColor Red
             if ($Phase28QOnly) {
                 $finalState = @($serial -split "`r?`n" |
-                    Where-Object { $_ -match '^P28Z BOOT_IMAGE |^P28Z BOOT |^P28Z APP |^P28Z PROJECT |^P28Z FS |^P28Y STARTUP |^DEVELOPER_STUDIO_PHASE29C_PROJECT_LOAD_|^DEVELOPER_STUDIO_PHASE28Q_' } |
-                    Select-Object -Last 16)
+                    Where-Object { $_ -match '^P28Z BOOT_IMAGE |^P28Z BOOT |^P28Z APP |^P28Z PROJECT |^P28Z FS |^P28Y STARTUP |^DEVELOPER_STUDIO_PHASE29C_PROJECT_LOAD_|^DEVELOPER_STUDIO_PHASE29D_STARTUP_|^DEVELOPER_STUDIO_PHASE28Q_' } |
+                    Select-Object -Last 24)
                 Write-Host ("P28Z FINAL_STATE boot={0} bounded_entries={1}" -f $runNumber, $finalState.Count) -ForegroundColor Yellow
                 $finalState | ForEach-Object { Write-Host $_ }
             }
