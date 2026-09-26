@@ -14,6 +14,7 @@
 #include "include/kernel/vfs.h"
 #include "include/kernel/pci_audio.h"
 #include "include/kernel/app_audio_stream.h"
+#include "include/kernel/native_present_validation.h"
 
 #include "bitmap_font.h"
 #include "sdk/include/guidexos/abi.h"
@@ -38,6 +39,13 @@ static const uint32_t kMaxLoadedImageBytes = 512u * 1024u * 1024u;
 static const uint32_t kMaxLoadedImageBytes = 32u * 1024u * 1024u;
 #endif
 static const uint32_t kMaxFrameBytes = 16u * 1024u * 1024u;
+// MC7: keep the ABI-entry validation header tied to this TU's constants.
+static_assert(native_present::kMaxFrameBytes == 16ull * 1024ull * 1024ull,
+              "present validation frame cap changed");
+static_assert(native_present::kPixelFormatXrgb8888 == GX_PIXEL_FORMAT_XRGB8888,
+              "present validation pixel format changed");
+static_assert(native_present::kMaxDimension == 4096,
+              "present validation dimension cap changed");
 
 using Package = PackageInfo;
 
@@ -181,11 +189,18 @@ public:
     }
 
     bool present(const void* pixels, uint32_t width, uint32_t height, uint32_t strideBytes) {
-        if (!pixels || width == 0 || height == 0 || strideBytes < width * 4u ||
-            (strideBytes & 3u) != 0u || height > 0xFFFFFFFFu / strideBytes) return false;
-        release_pixels();
+        if (!pixels || width == 0 || height == 0) return false;
+        // MC7 hardening: 64-bit minimum-stride math (no `width * 4u`
+        // 32-bit overflow) plus the retained uint32_t staging alignment
+        // rule. Dimension caps themselves are enforced by validate_frame
+        // at the ABI entry; this stays as defense-in-depth.
+        const uint64_t minStride = static_cast<uint64_t>(width) *
+            native_present::kBytesPerPixel;
+        if ((strideBytes & 3u) != 0u ||
+            static_cast<uint64_t>(strideBytes) < minStride) return false;
         const uint64_t bytes64 = static_cast<uint64_t>(strideBytes) * height;
         if (bytes64 > kMaxFrameBytes || (bytes64 & 3u) != 0u) return false;
+        release_pixels();
         const uint32_t bytes = static_cast<uint32_t>(bytes64);
         const uint32_t words = bytes / 4u;
         if (words > 0xFFFFFFFFu - 2u) return false;
@@ -1281,14 +1296,26 @@ static gx_result GX_CALL host_present_frame(gx_app_context* context, gx_handle w
     Runtime* runtime = runtime_from(context);
     if (!runtime) return GX_ERROR_INVALID_ARGUMENT;
     abi_begin(runtime, NativeAbiOperation::PresentFrame);
-    const uint64_t requiredBytes = static_cast<uint64_t>(strideBytes) *
-        static_cast<uint64_t>(height > 0 ? height : 0);
+    // Window ownership first (unchanged): only the owning app's window.
     if (!runtime->owner || !runtime->owner->window() ||
-        window != runtime->owner->window()->id || !pixels || x != 0 || y != 0 ||
-        width != 448 || height != 553 || strideBytes != 1792u ||
-        pixelFormat != GX_PIXEL_FORMAT_XRGB8888 || requiredBytes > 0xFFFFFFFFull ||
-        pixelBytes < static_cast<uint32_t>(requiredBytes) || pixelBytes > kMaxFrameBytes) {
+        window != runtime->owner->window()->id) {
         return abi_result(runtime, NativeAbiOperation::PresentFrame, GX_ERROR_INVALID_ARGUMENT);
+    }
+    // MC7 generic frame contract (no app-specific cases, no new ABI):
+    // any 1..4096-per-axis XRGB8888 frame with 4-aligned stride,
+    // stride >= width*4 (overflow-safe), and exactly stride*height bytes
+    // (<= 16 MiB). Matches the hosted compositor limits; the old path
+    // accepted only 448x553/1792 here while present()/draw() below were
+    // already generic.
+    const native_present::ValidationOutcome frameValidation =
+        native_present::validate_frame(x, y, width, height, strideBytes, pixelFormat,
+                                       pixels != nullptr, pixelBytes);
+    if (frameValidation.result != native_present::ValidationResult::Ok) {
+        const gx_result mapped =
+            (frameValidation.result == native_present::ValidationResult::TooLarge ||
+             frameValidation.result == native_present::ValidationResult::ByteCountMismatch)
+            ? GX_ERROR_UNSUPPORTED : GX_ERROR_INVALID_ARGUMENT;
+        return abi_result(runtime, NativeAbiOperation::PresentFrame, mapped);
     }
     ++runtime->appFrameSequence;
     serial::puts("[NATIVE-ELF] frame copy begin bytes=0x"); serial::put_hex32(pixelBytes); serial::putc('\n');
@@ -1302,7 +1329,11 @@ static gx_result GX_CALL host_present_frame(gx_app_context* context, gx_handle w
     }
     serial::puts("[NATIVE-ELF] frame PASS app="); serial::puts(runtime->package->displayName);
     serial::puts(" window=0x"); serial::put_hex64(window);
-    serial::puts(" size=448x553 stride=1792 bytes=990976 pixelFormat=XRGB8888\n");
+    serial::puts(" size="); serial_put_u32_decimal(static_cast<uint32_t>(width)); serial::putc('x');
+    serial_put_u32_decimal(static_cast<uint32_t>(height));
+    serial::puts(" stride="); serial_put_u32_decimal(strideBytes);
+    serial::puts(" bytes="); serial_put_u32_decimal(pixelBytes);
+    serial::puts(" pixelFormat=XRGB8888\n");
     return abi_result(runtime, NativeAbiOperation::PresentFrame, GX_OK);
 }
 

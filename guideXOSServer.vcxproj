@@ -279,6 +279,7 @@
     <ClInclude Include="kernel\core\include\kernel\nvme.h" />
     <ClInclude Include="kernel\core\include\kernel\pci_audio.h" />
     <ClInclude Include="kernel\core\include\kernel\app_audio_stream.h" />
+    <ClInclude Include="kernel\core\include\kernel\native_present_validation.h" />
     <ClInclude Include="kernel\core\include\kernel\pit.h" />
     <ClInclude Include="kernel\core\include\kernel\process.h" />
     <ClInclude Include="kernel\core\include\kernel\ps2keyboard.h" />

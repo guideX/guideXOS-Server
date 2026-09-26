@@ -198,6 +198,9 @@
     <ClInclude Include="kernel\core\include\kernel\app_audio_stream.h">
       <Filter>Header Files\Kernel</Filter>
     </ClInclude>
+    <ClInclude Include="kernel\core\include\kernel\native_present_validation.h">
+      <Filter>Header Files\Kernel</Filter>
+    </ClInclude>
     <ClInclude Include="kernel\core\include\kernel\ata.h">
       <Filter>Header Files\Kernel</Filter>
     </ClInclude>

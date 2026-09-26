@@ -204,6 +204,7 @@
     <ClInclude Include="kernel\core\include\kernel\usb_video_uvc.h" />
     <ClInclude Include="kernel\core\include\kernel\pci_audio.h" />
     <ClInclude Include="kernel\core\include\kernel\app_audio_stream.h" />
+    <ClInclude Include="kernel\core\include\kernel\native_present_validation.h" />
     <ClInclude Include="kernel\core\include\kernel\ata.h" />
     <ClInclude Include="kernel\core\include\kernel\nvme.h" />
     <ClInclude Include="kernel\core\include\kernel\block_device.h" />

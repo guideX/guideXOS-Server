@@ -315,6 +315,9 @@
     <ClInclude Include="kernel\core\include\kernel\app_audio_stream.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="kernel\core\include\kernel\native_present_validation.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="kernel\arch\amd64\include\arch\pci_audio.h">
       <Filter>Header Files</Filter>
     </ClInclude>
