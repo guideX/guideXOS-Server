@@ -404,7 +404,8 @@ bool NavigatorScriptHostAdapter::allowsReentrantCall(
         methodId == kNavigatorQuerySelectorMethod ||
         methodId == kNavigatorQuerySelectorAllMethod ||
         methodId == kNavigatorMatchesMethod ||
-        methodId == kNavigatorClosestMethod;
+        methodId == kNavigatorClosestMethod ||
+        methodId == kNavigatorContainsMethod;
 }
 
 bool NavigatorScriptHostAdapter::allowsStaleHostProperty(
@@ -413,6 +414,7 @@ bool NavigatorScriptHostAdapter::allowsStaleHostProperty(
     return object.kind == kNavigatorElementHostKind &&
         (textEquals(property, "matches") ||
             textEquals(property, "closest") ||
+            textEquals(property, "contains") ||
             textEquals(property, "parentElement") ||
             textEquals(property, "children") ||
             textEquals(property, "childElementCount") ||
@@ -426,7 +428,14 @@ bool NavigatorScriptHostAdapter::allowsStaleHostMethod(
     std::uint32_t methodId) const
 {
     return methodId == kNavigatorMatchesMethod ||
-        methodId == kNavigatorClosestMethod;
+        methodId == kNavigatorClosestMethod ||
+        methodId == kNavigatorContainsMethod;
+}
+
+bool NavigatorScriptHostAdapter::allowsStaleHostMethodArgument(
+    std::uint32_t methodId) const
+{
+    return methodId == kNavigatorContainsMethod;
 }
 
 std::size_t NavigatorScriptHostAdapter::callbackLimit() const
@@ -2207,8 +2216,25 @@ HostInstanceId NavigatorScriptHostAdapter::activeElementSerial() const
 bool NavigatorScriptHostAdapter::isDescendantOrSelf(
     std::uint64_t serial, std::uint64_t ancestorSerial) const
 {
-    return document_ != nullptr && isDescendantInDocument(*document_, serial,
-        ancestorSerial, limits_.maxDocumentNodes);
+    if (document_ == nullptr || serial == 0u || ancestorSerial == 0u ||
+        findElement(serial) == nullptr || findElement(ancestorSerial) == nullptr)
+        return false;
+    if (serial == ancestorSerial) return true;
+
+    // The structural node capacity is the maximum number of parent links
+    // examined. resolveStructuralParentSerial rejects missing and self-parent
+    // metadata; a longer cycle is bounded by this same document limit.
+    const std::size_t depthLimit = std::min(limits_.maxDocumentNodes,
+        document_->structuralElements.size());
+    HostInstanceId currentSerial = serial;
+    for (std::size_t depth = 0u; depth < depthLimit; ++depth) {
+        HostInstanceId parentSerial = 0u;
+        if (!resolveStructuralParentSerial(currentSerial, parentSerial) ||
+            parentSerial == 0u) return false;
+        if (parentSerial == ancestorSerial) return true;
+        currentSerial = parentSerial;
+    }
+    return false;
 }
 
 const NavigatorScriptHostAdapter::SelectorCollectionRecord*
@@ -2403,8 +2429,7 @@ bool NavigatorScriptHostAdapter::selectorScopeMatches(
 {
     if (scopeSerial == 0u) return true;
     if (element.serial == scopeSerial) return false;
-    return isDescendantInDocument(*document_, element.serial, scopeSerial,
-        limits_.maxDocumentNodes);
+    return isDescendantOrSelf(element.serial, scopeSerial);
 }
 
 std::size_t NavigatorScriptHostAdapter::selectorMatchCount(
@@ -2563,7 +2588,7 @@ HostResult NavigatorScriptHostAdapter::validate(
 HostResult NavigatorScriptHostAdapter::getProperty(
     const HostObjectReference& object, SourceView property, HostValue& result)
 {
-    // Keep the two pure selector predicates fail-closed for an already-held
+    // Keep the pure element predicates fail-closed for an already-held
     // Element handle after a navigation-generation change. The method value
     // itself was obtained in the old realm, so exposing the same bounded
     // method here lets callInternal return false/null without dereferencing
@@ -2571,9 +2596,12 @@ HostResult NavigatorScriptHostAdapter::getProperty(
     if (object.kind == kNavigatorElementHostKind &&
         object.generation != generation_ &&
         (textEquals(property, "matches") ||
-            textEquals(property, "closest"))) {
-        result = HostValue::method(textEquals(property, "matches")
-            ? kNavigatorMatchesMethod : kNavigatorClosestMethod, true, true);
+            textEquals(property, "closest") ||
+            textEquals(property, "contains"))) {
+        const std::uint32_t methodId = textEquals(property, "matches")
+            ? kNavigatorMatchesMethod : textEquals(property, "closest")
+                ? kNavigatorClosestMethod : kNavigatorContainsMethod;
+        result = HostValue::method(methodId, true, true);
         return HostResult();
     }
     if (object.kind == kNavigatorElementHostKind &&
@@ -2833,6 +2861,10 @@ HostResult NavigatorScriptHostAdapter::getProperty(
     }
     if (textEquals(property, "closest")) {
         result = HostValue::method(kNavigatorClosestMethod, true, true);
+        return HostResult();
+    }
+    if (textEquals(property, "contains")) {
+        result = HostValue::method(kNavigatorContainsMethod, true, true);
         return HostResult();
     }
     if (textEquals(property, "options")) {
@@ -3461,12 +3493,13 @@ HostResult NavigatorScriptHostAdapter::callInternal(
 {
     if (receiver == nullptr) return HostResult{HostResultCode::InvalidObject};
     if ((methodId == kNavigatorMatchesMethod ||
-            methodId == kNavigatorClosestMethod) &&
+            methodId == kNavigatorClosestMethod ||
+            methodId == kNavigatorContainsMethod) &&
         receiver->kind == kNavigatorElementHostKind &&
         (receiver->generation != generation_ ||
             findElement(receiver->instanceId) == nullptr)) {
-        result = methodId == kNavigatorMatchesMethod
-            ? HostValue::boolean(false) : HostValue::nullValue();
+        result = methodId == kNavigatorClosestMethod
+            ? HostValue::nullValue() : HostValue::boolean(false);
         return HostResult();
     }
     const HostResult receiverResult = validate(*receiver);
@@ -3481,6 +3514,29 @@ HostResult NavigatorScriptHostAdapter::callInternal(
         return methodId == kNavigatorQuerySelectorMethod
             ? querySelector(scopeSerial, arguments, argumentCount, result)
             : querySelectorAll(scopeSerial, arguments, argumentCount, result);
+    }
+    if (methodId == kNavigatorContainsMethod) {
+        if (receiver->kind != kNavigatorElementHostKind)
+            return HostResult{HostResultCode::InvalidValue};
+
+        // Only a live Element from this document generation can participate.
+        // Both identities are generation + canonical structural serial; the
+        // candidate is walked upward through the shared bounded parent model.
+        bool contained = false;
+        if (arguments != nullptr && argumentCount == 1u &&
+            arguments[0].type == HostValueType::HostObject) {
+            const HostObjectReference& candidate = arguments[0].hostObject;
+            if (candidate.valid() &&
+                candidate.kind == kNavigatorElementHostKind &&
+                candidate.generation == generation_ &&
+                findElement(candidate.instanceId) != nullptr) {
+                contained = candidate.instanceId == receiver->instanceId ||
+                    isDescendantOrSelf(candidate.instanceId,
+                        receiver->instanceId);
+            }
+        }
+        result = HostValue::boolean(contained);
+        return HostResult();
     }
     if (methodId == kNavigatorMatchesMethod ||
         methodId == kNavigatorClosestMethod) {

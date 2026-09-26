@@ -1,0 +1,88 @@
+<!doctype html>
+<html>
+<head><title>Navigator JavaScript JS41</title></head>
+<body>
+<h1>Navigator JavaScript JS41</h1>
+<div id="panel" class="panel">
+  <div id="toolbar">
+    <button id="save" class="action" type="button">Save</button>
+  </div>
+  <div id="content"><input id="name" class="field" value="seed"></div>
+  <button id="first" type="button">First</button>
+  <button id="second" type="button">Second</button>
+</div>
+<div id="outside"><button id="outside-button" type="button">Outside</button></div>
+<button id="js41-trigger" type="button">Test descendant target</button>
+<button id="js41-self-trigger" type="button">Test panel target</button>
+<p id="js41-state">initial</p>
+<script>
+var js41Panel = document.querySelector("#panel");
+var js41Toolbar = document.querySelector("#toolbar");
+var js41Save = document.querySelector("#save");
+var js41Name = document.querySelector("#name");
+var js41First = document.querySelector("#first");
+var js41Second = document.querySelector("#second");
+var js41Outside = document.querySelector("#outside-button");
+var js41State = document.querySelector("#js41-state");
+var js41EventTarget = false;
+var js41EventSelf = false;
+var js41EventOutside = false;
+var js41EventMetadata = false;
+var js41Nested = false;
+function js41Snapshot(label) {
+  var self = js41Panel.contains(js41Panel);
+  var direct = js41Panel.contains(js41Toolbar) &&
+    js41Toolbar.contains(js41Save);
+  var deep = js41Panel.contains(js41Save) &&
+    js41Panel.contains(js41Name);
+  var direction = !js41Save.contains(js41Panel);
+  var unrelated = !js41Panel.contains(document.querySelector("#outside"));
+  var scoped = js41Panel.querySelector(".action") === js41Save &&
+    js41Panel.contains(js41Panel.querySelector(".action"));
+  var traversal = js41Save.parentElement === js41Toolbar &&
+    js41Save.closest("#panel") === js41Panel;
+  var siblings = js41First.nextElementSibling === js41Second &&
+    !js41First.contains(js41Second);
+  js41State.textContent = label + ":self=" + self + ":direct=" + direct +
+    ":deep=" + deep + ":direction=" + direction +
+    ":unrelated=" + unrelated + ":scoped=" + scoped +
+    ":traversal=" + traversal + ":siblings=" + siblings +
+    ":event-target=" + js41EventTarget +
+    ":event-self=" + js41EventSelf +
+    ":event-outside=" + js41EventOutside +
+    ":event-meta=" + js41EventMetadata + ":nested=" + js41Nested;
+}
+js41Panel.addEventListener("click", function(event) {
+  var targetBefore = event.target;
+  var currentBefore = event.currentTarget;
+  var phaseBefore = event.eventPhase;
+  var relatedBefore = event.relatedTarget;
+  var defaultBefore = event.defaultPrevented;
+  var contained = js41Panel.contains(event.target);
+  js41EventMetadata = event.target === targetBefore &&
+    event.currentTarget === currentBefore && event.currentTarget === js41Panel &&
+    event.eventPhase === phaseBefore && event.relatedTarget === relatedBefore &&
+    event.defaultPrevented === defaultBefore;
+  if (event.target === js41Save) js41EventTarget = contained;
+  if (event.target === js41Panel) js41EventSelf = contained;
+  js41Snapshot("event");
+});
+document.addEventListener("click", function(event) {
+  if (event.target === js41Outside)
+    js41EventOutside = js41Panel.contains(event.target) === false;
+});
+js41Save.addEventListener("click", function(event) {
+  js41Outside.click();
+  js41Nested = event.target === js41Save &&
+    js41Panel.contains(event.target);
+});
+document.querySelector("#js41-trigger").addEventListener("click", function() {
+  js41Save.click();
+});
+document.querySelector("#js41-self-trigger").addEventListener("click", function() {
+  js41Panel.click();
+});
+js41Snapshot("initial");
+</script>
+</body>
+</html>

@@ -227,6 +227,15 @@ public:
         (void)methodId;
         return false;
     }
+
+    // A fail-closed predicate may accept an already-held stale host argument
+    // so the adapter can return its safe sentinel instead of surfacing a
+    // stale-object exception from runtime argument conversion.
+    virtual bool allowsStaleHostMethodArgument(std::uint32_t methodId) const
+    {
+        (void)methodId;
+        return false;
+    }
 };
 
 const char* hostValueTypeName(HostValueType type);

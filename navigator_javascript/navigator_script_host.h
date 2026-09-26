@@ -36,6 +36,7 @@ constexpr std::uint32_t kNavigatorQuerySelectorMethod = 9u;
 constexpr std::uint32_t kNavigatorQuerySelectorAllMethod = 10u;
 constexpr std::uint32_t kNavigatorMatchesMethod = 11u;
 constexpr std::uint32_t kNavigatorClosestMethod = 12u;
+constexpr std::uint32_t kNavigatorContainsMethod = 13u;
 
 constexpr std::size_t kNavigatorScriptMaxDocumentIdLength = 256u;
 constexpr std::size_t kNavigatorScriptMaxTextContentAssignment = 64u * 1024u;
@@ -179,6 +180,7 @@ public:
     bool allowsStaleHostProperty(const HostObjectReference& object,
         SourceView property) const override;
     bool allowsStaleHostMethod(std::uint32_t methodId) const override;
+    bool allowsStaleHostMethodArgument(std::uint32_t methodId) const override;
 
     // Navigator calls this only after its normal hit test has selected a
     // document element serial. The callback is invoked in the supplied,

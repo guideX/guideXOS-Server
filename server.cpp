@@ -3853,6 +3853,51 @@ static std::string navigatorHostedSmokeDiagnostic() {
         gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
         "nested save.click and selector calls");
 
+    const std::string js41FixtureUrl =
+        "http://127.0.0.1:8080/navigator-smoke/javascript-js41.html";
+    const bool js41Loaded = gxos::apps::Navigator::SmokeNavigateToQuiet(
+        js41FixtureUrl);
+    const std::string js41InitialText =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS41 hosted fixture loads structural containment",
+        js41Loaded && gxos::apps::Navigator::SmokeCurrentUrl() == js41FixtureUrl &&
+        contains(js41InitialText, "Navigator JavaScript JS41") &&
+        contains(js41InitialText,
+            "initial:self=true:direct=true:deep=true:direction=true:unrelated=true:scoped=true:traversal=true:siblings=true:event-target=false:event-self=false:event-outside=false:event-meta=false:nested=false") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("loaded=") + yesNo(js41Loaded) + ",text=" +
+        summarizeText(js41InitialText, 1000) + ",error=" +
+        gxos::apps::Navigator::SmokeJavaScriptLastError());
+
+    const bool js41SaveClick =
+        gxos::apps::Navigator::SmokeClickFormControlById("js41-trigger");
+    const std::string js41AfterSave =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS41 hosted real descendant click uses panel.contains(event.target)",
+        js41SaveClick && contains(js41AfterSave,
+            "event:self=true:direct=true:deep=true:direction=true:unrelated=true:scoped=true:traversal=true:siblings=true:event-target=true:event-self=false:event-outside=true:event-meta=true:nested=true") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("click=") + yesNo(js41SaveClick) + ",text=" +
+        summarizeText(js41AfterSave, 1000) + ",error=" +
+        gxos::apps::Navigator::SmokeJavaScriptLastError());
+    add("JS41 hosted nested event preserves containment and metadata",
+        js41SaveClick && contains(js41AfterSave,
+            ":event-target=true:event-self=false:event-outside=true:event-meta=true:nested=true") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        "save target contained; outside nested target excluded; event metadata retained");
+
+    const bool js41SelfTrigger =
+        gxos::apps::Navigator::SmokeClickFormControlById("js41-self-trigger");
+    const std::string js41AfterSelf =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS41 hosted event target equal to panel is contained",
+        js41SelfTrigger && contains(js41AfterSelf,
+            ":event-target=true:event-self=true:event-outside=true:event-meta=true:nested=true") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("trigger=") + yesNo(js41SelfTrigger) + ",text=" +
+        summarizeText(js41AfterSelf, 1000) + ",error=" +
+        gxos::apps::Navigator::SmokeJavaScriptLastError());
+
     bool cssInlineLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-inline.html");
     std::string cssInlineText = gxos::apps::Navigator::SmokeCurrentDocumentText();
     std::string cssInlineReport = gxos::apps::Navigator::SmokeRuntimeReport();

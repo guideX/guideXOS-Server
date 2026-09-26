@@ -4077,5 +4077,99 @@ blocked by the existing Mbed TLS diagnostics at
 were made, and no QEMU proof is claimed because no fresh kernel image was
 produced.
 
-The next bounded direction is JS41: preserve this fixed grammar and structural
-matcher while adding only one explicitly justified capability.
+## JS41: bounded structural `Element.contains()`
+
+JS41 exposes `Element.contains(otherElement)` as a pure Boolean query. It is
+self-inclusive: an Element contains itself, as well as any live Element reached
+by walking the candidate's structural ancestors. Direction is candidate-upward;
+ancestors, siblings, and unrelated Elements are not contained. The exposed
+`html` root contains its represented `body` and descendants, while Navigator
+does not invent a parent above that represented root.
+
+The adapter resolves both host values as current-generation Element references
+and identifies them by the existing canonical `(document generation,
+structural serial)` pair. The candidate serial is walked upward through
+`resolveStructuralParentSerial()` and the shared bounded `isDescendantOrSelf()`
+helper; it does not scan receiver descendants or use pointer/wrapper identity.
+The exact parent-hop limit is
+`min(maxDocumentNodes, structuralElements.size())`, using the configured
+structural-node capacity (1024 by default). The same helper also supplies
+element-scoped query ancestry. `closest()` continues to use the same one-step
+parent resolver and document-node traversal bound.
+
+Self-comparison is checked after both Elements are proven live, so
+`element.contains(element)` remains true even if unrelated parent metadata is
+malformed. Missing, self-parented, invalid, or cyclic ancestry fails closed for
+other relationships; self-parent links are rejected by the common parent
+resolver and cycles terminate at the node bound. Stale receivers return
+`false`. Stale arguments are passed only to this fail-closed predicate and
+return `false`; neither side can resolve a serial from an old generation into a
+new document. Other argument counts, `null`, booleans, numbers, strings,
+ordinary objects, collections, and non-Element host references return `false`
+without WebIDL coercion or an exception. The method is exposed on Element
+handles only, not on `document`, collection hosts, or Events.
+
+Structural `parentSerial` ancestry is authoritative. Form ownership metadata
+and `form.elements` remain independent projections and cannot substitute for
+containment; a control whose synthetic owner metadata differs from its tree
+position still follows its actual ancestors. Likewise, `select.children[i]`
+and `select.options[i]` share their existing canonical option Element, and
+containment follows the option's structural parent without a shortcut.
+`querySelector()`/`querySelectorAll()` results, `parentElement`, `closest()`,
+and sibling traversal return the same structural identities; a sibling edge
+does not imply containment.
+
+The predicate is read-only: it does not change focus, form state, document
+generation, layout dirtiness/revision, selector collections, or event dispatch
+state. Event delegation can therefore use
+`panel.contains(event.target)`, including a click whose target is the panel
+itself. Focus listeners and `document.activeElement` can use the same query;
+submit/reset listeners do not affect their default-action decision. Calls are
+reentrant and keep ancestry cursors on the call stack, so repeated, nested, and
+nested-dispatch calls do not share mutable traversal scratch.
+
+The JS41 focused test is `tests/navigator_javascript_js41_test.cpp`, run by
+`scripts/smoke-navigator-javascript-js41.ps1`. Its coverage includes positive
+and negative directionality, deep/root structure, form-owner separation,
+options, selector/traversal identity, argument sentinels, generation reuse,
+malformed ancestry, event metadata, focus/default actions, nested dispatch,
+and purity. The hosted proof is
+`navigator-smoke/javascript-js41.html`, included in the production hosted
+aggregate; it drives a real descendant click, an unrelated nested click, and a
+self-target event through the ordinary event path.
+
+The JS41 retrieval audit found that tag and class matching already exist in the
+JS36 simple-selector descriptor and use the existing selector collection
+engine. Direct `getElementsByTagName()` and `getElementsByClassName()` surfaces
+are deferred: their scoped collection methods, class-token input boundary, and
+live collection lifecycle would add API behavior beyond a thin method alias in
+this milestone. No second walker or collection type was added. The current
+bounded selector APIs remain the supported retrieval surface.
+
+JS41 does not add general Node containment or Node APIs such as `parentNode`,
+`childNodes`, `compareDocumentPosition()`, `isSameNode()`, or `isEqualNode()`,
+nor DOM mutation, named collections, asynchronous/browser APIs, or broader
+selector grammar.
+
+The final JS41 focused suite passes 220 checks. Focused JS36–JS40 regressions
+pass 99, 180, 152, 218, and 155 checks, respectively. The complete JavaScript
+matrix passes 39/39 lanes (lexer, parser, runtime, and JS6–JS41). The hosted
+production aggregate reports 514 passed and 7 failed; every failure is in the
+existing unrelated CSS 3C, 3G, 6A, CSS 6B (three checks), and 6C cases. All four
+hosted JS41 containment/event checks pass.
+
+`build.bat` and the strict adapter/runtime syntax lane pass. `build-kernel.bat`
+could not launch its PowerShell Core wrapper because `pwsh.exe` is unavailable
+in the environment. Running its underlying kernel make lane directly with
+`mingw32-make ARCH=amd64 EXTRA_CFLAGS=` reproduced the existing Mbed TLS errors
+at `mbedtls_check_config.h:51` (unsupported partial ECC acceleration) and
+`:64` (missing ECDHE-RSA prerequisites). No TLS files were changed. No QEMU
+proof is claimed because no fresh kernel was produced.
+
+`ESP/ramdisk.img`, `out/wallpaper-pack/`, and
+`out/wallpaper-pack/Apps/PacMan/` remained unmodified and are excluded from the
+JS41 source change.
+
+The next bounded direction is JS42: add document/element tag and single-token
+class retrieval only if it remains a thin view over the JS36 matcher and
+generation-safe selector collection machinery.

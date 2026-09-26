@@ -3376,8 +3376,19 @@ bool RuntimeContext::invokeHostMethod(const FunctionRecord& function,
         for (const Value& argument : arguments) {
             HostValue hostArgument;
             if (!convertValueToHost(argument, hostArgument, error, location)) {
-                setRuntimeError(error, location);
-                return false;
+                if (error != RuntimeErrorCode::StaleHostObject ||
+                    !argument.isHostObject() || hostAdapter_ == nullptr ||
+                    !hostAdapter_->allowsStaleHostMethodArgument(
+                        function.hostMethod)) {
+                    setRuntimeError(error, location);
+                    return false;
+                }
+                // The slot for a stale handle may already identify a new
+                // generation's object. Never recover its serial from that
+                // reused slot; pass an invalid host reference so the adapter
+                // can return the predicate's safe false sentinel.
+                hostArgument = HostValue::fromHostObject(HostObjectReference());
+                error = RuntimeErrorCode::None;
             }
             hostArguments.push_back(hostArgument);
         }
