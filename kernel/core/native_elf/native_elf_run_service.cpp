@@ -106,10 +106,8 @@ struct Operation {
     bool debugControlled;
     bool debugBreakpointInstalled;
     bool debugBreakpointHit;
-    // Initial debugger release publishes a durable running state before the
-    // first scheduler dispatch.  The application must be able to publish its
-    // ready boundary and issue the first command without a synchronous pump
-    // running a short target to completion.
+    // Initial debugger release owns the first scheduler dispatch and only
+    // publishes its durable running boundary after that dispatch returns.
     bool debugStartupDispatchHeld;
     bool debugPauseRequested;
     bool debugPauseCaptured;
@@ -271,6 +269,7 @@ static SchedulerContext* make_debug_cancel_context();
 #endif
 static uint32_t s_phase28uTraceCount = 0;
 static uint32_t s_phase28vTraceCount = 0;
+static uint32_t s_phase29bTraceCount = 0;
 
 // Operation and NativeElfRunReport contain bounded diagnostic buffers and are
 // kept in static storage for the lifetime of the service.  Do not reset them
@@ -334,6 +333,25 @@ static void phase28v_trace(const char* event)
     serial::put_hex32(s_schedulerInTarget ? 1U : 0U);
     serial::puts(" complete=");
     serial::put_hex32(s_schedulerTargetComplete ? 1U : 0U);
+#endif
+    serial::putc('\n');
+}
+
+static void phase29b_trace(const char* event)
+{
+    if (!event || s_phase29bTraceCount >= 128U) return;
+    ++s_phase29bTraceCount;
+    serial::puts("DEVELOPER_STUDIO_PHASE29B_SERVICE ");
+    serial::puts(event);
+    serial::puts(" state="); serial::put_hex32(static_cast<uint32_t>(s_operation.state));
+    serial::puts(" handle="); serial::put_hex64(s_operation.handle);
+    serial::puts(" target_gen="); serial::put_hex64(s_operation.registrationGeneration);
+    serial::puts(" stop="); serial::put_hex64(s_operation.debugStopGeneration);
+#if defined(__x86_64__)
+    serial::puts(" scheduler="); serial::put_hex32(s_schedulerActive ? 1U : 0U);
+    serial::puts(" in_target="); serial::put_hex32(s_schedulerInTarget ? 1U : 0U);
+    serial::puts(" yield_context="); serial::put_hex32(s_schedulerYieldContext ? 1U : 0U);
+    serial::puts(" complete="); serial::put_hex32(s_schedulerTargetComplete ? 1U : 0U);
 #endif
     serial::putc('\n');
 }
@@ -2352,6 +2370,7 @@ static bool capture_user_pause(NativeElfDebugTrap::BreakpointContext* context)
     ++s_operation.debugStopGeneration;
     if (s_operation.debugStopGeneration == 0) s_operation.debugStopGeneration = 1;
     s_operation.state = GX_DEVELOPMENT_RUN_PAUSED;
+    phase29b_trace("STOPPED_CONTEXT_CAPTURED");
 
     gx_development_debug_snapshot& snapshot = s_operation.debugSnapshot;
     clear_debug_snapshot(&snapshot);
@@ -2429,6 +2448,7 @@ static bool capture_user_pause(NativeElfDebugTrap::BreakpointContext* context)
     serial::puts(" session="); serial::put_hex64(s_operation.registrationGeneration);
     serial::putc('\n');
     serial::puts("DEVELOPER_STUDIO_PHASE28Q_PAUSE_CAPTURE_PASS\n");
+    phase29b_trace("STOPPED_PUBLISHED");
     return true;
 }
 
@@ -2529,6 +2549,7 @@ static void scheduled_task_entry(void*)
 {
     phase28u_trace("TARGET_ENTRY");
     phase28v_trace("TARGET_ENTRY_REACHED");
+    phase29b_trace("EXECUTION_OWNER_ENTERED");
     s_schedulerInTarget = true;
     s_operation.nativeRuntimeStarted = true;
     int32_t exitCode = 0;
@@ -2536,6 +2557,7 @@ static void scheduled_task_entry(void*)
         ? run_file_nested(s_operation.resolvedArtifact, &exitCode, &s_operation.report)
         : run_file(s_operation.resolvedArtifact, &exitCode, &s_operation.report);
     phase28u_trace("TARGET_RETURNED");
+    phase29b_trace("EXECUTION_OWNER_RETURNED");
     s_operation.exitCode = exitCode;
     finish_execution(s_operation, success);
     s_schedulerTargetComplete = true;
@@ -2727,6 +2749,7 @@ gx_result prepare(const gx_development_run_request& request,
 
 gx_result start(gx_development_run_handle handle) {
     phase28u_trace("START_ENTRY");
+    phase29b_trace("START_COMMAND_CONSUMED");
     phase28v_trace("START_ENTRY");
     if (!decode(handle)) return GX_ERROR_FAILED;
     if (s_operation.state != GX_DEVELOPMENT_RUN_REGISTERED) return GX_ERROR_BUSY;
@@ -2765,6 +2788,7 @@ gx_result start(gx_development_run_handle handle) {
     }
     s_operation.state = GX_DEVELOPMENT_RUN_RUNNING;
     phase28v_trace("PROCESS_RUNNING");
+    phase29b_trace("TARGET_RUNNING_STATE_PUBLISHED");
     reset_run_report(s_operation.report);
     s_operation.exitCode = 0;
 
@@ -2792,6 +2816,7 @@ gx_result start(gx_development_run_handle handle) {
         return GX_OK;
     }
     phase28v_trace("PROCESS_CONTEXT_ALLOCATED");
+    phase29b_trace("EXECUTION_OWNER_CREATED");
     if (s_operation.debugControlled &&
         !NativeElfDebugTrap::install(native_elf_debug_breakpoint_exception,
                                      native_elf_debug_single_step_exception)) {
@@ -2803,7 +2828,9 @@ gx_result start(gx_development_run_handle handle) {
                          "NativeElf debug trap could not be installed");
         return GX_OK;
     }
+    phase29b_trace("FIRST_DISPATCH_BEGIN");
     if (!native_elf_scheduler_pump()) {
+        phase29b_trace("FIRST_DISPATCH_FAILED");
         s_schedulerActive = false;
         s_targetContext = nullptr;
         s_schedulerYieldContext = nullptr;
@@ -2811,6 +2838,7 @@ gx_result start(gx_development_run_handle handle) {
                          "NativeElf execution owner could not be scheduled");
     }
     phase28v_trace("FIRST_DISPATCH_RETURNED");
+    phase29b_trace("FIRST_DISPATCH_RETURNED");
     phase28u_trace("START_RETURN");
 #else
     fail_and_cleanup(s_operation,
@@ -6075,6 +6103,7 @@ gx_result debug(const gx_development_debug_request& request,
     if (is_terminal_state(s_operation.state) && debug_command_is_continue(request.command))
         return resolve_continue_from_terminal(s_operation, request, outSnapshot);
     if (request.command == GX_DEVELOPMENT_DEBUG_PAUSE) {
+        phase29b_trace("PAUSE_COMMAND_CONSUMED");
         if (s_operation.state == GX_DEVELOPMENT_RUN_PAUSED &&
             s_operation.debugPauseCaptured) {
             *outSnapshot = s_operation.debugSnapshot;
@@ -6319,12 +6348,30 @@ gx_result debug(const gx_development_debug_request& request,
         }
         if (request.command == GX_DEVELOPMENT_DEBUG_RELEASE_EXECUTION) {
             s_operation.state = GX_DEVELOPMENT_RUN_RUNNING;
-            // Keep the first launch runnable but parked until the owner has
-            // observed the durable startup-ready state and issued its first
-            // debugger command.  This is a generation-local state boundary,
-            // not a timing delay or a lost scheduler notification.
-            s_operation.debugStartupDispatchHeld = true;
+            // Release owns the first real scheduler dispatch. RUNNING is
+            // published only after the target has crossed its first
+            // cooperative boundary, so the externally visible state cannot
+            // get ahead of the execution owner.
+            s_operation.debugStartupDispatchHeld = false;
             set_debug_ready_snapshot(s_operation, outSnapshot);
+            phase29b_trace("EXECUTION_OWNER_RELEASED");
+            phase29b_trace("FIRST_EXECUTION_DISPATCH_BEGIN");
+            if (!native_elf_scheduler_pump()) {
+                phase29b_trace("FIRST_EXECUTION_DISPATCH_FAILED");
+                set_debug_error(outSnapshot,
+                                "NativeElf first execution dispatch could not be completed");
+                return GX_ERROR_FAILED;
+            }
+            phase29b_trace("FIRST_EXECUTION_DISPATCH_RETURN");
+            if (s_operation.state == GX_DEVELOPMENT_RUN_EXITED ||
+                s_operation.state == GX_DEVELOPMENT_RUN_FAILED ||
+                s_schedulerTargetComplete) {
+                copy_text(outSnapshot->errorMessage,
+                          sizeof(outSnapshot->errorMessage),
+                          "NativeElf target exited before RUNNING publication");
+                phase29b_trace("START_EXITED_BEFORE_RUNNING");
+                return GX_ERROR_FAILED;
+            }
             serial::puts("DEVELOPER_STUDIO_PHASE28V_NATIVE_STARTUP_READY\n");
             return GX_OK;
         }
