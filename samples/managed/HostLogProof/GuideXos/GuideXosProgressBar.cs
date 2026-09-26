@@ -34,6 +34,7 @@ public sealed class GuideXosProgressBar
     private bool _visible = true;
     private bool _panelVisible = true;
     private GuideXosPanel _panelOwner;
+    private GuideXosScrollView _scrollViewOwner;
     private uint _rejectedInputCount;
 
     public GuideXosProgressBar(
@@ -78,6 +79,7 @@ public sealed class GuideXosProgressBar
         _value, _minimum, _maximum, FillCellCount);
     public bool EffectiveVisible => _visible && _panelVisible;
     public GuideXosPanel ParentPanel => _panelOwner;
+    public GuideXosScrollView ParentScrollView => _scrollViewOwner;
 
     /// <summary>
     /// Replaces the inclusive range only when it is valid and still contains
@@ -127,7 +129,7 @@ public sealed class GuideXosProgressBar
     /// </summary>
     public bool TrySetBounds(int x, int y, int width)
     {
-        if (_panelOwner != null)
+        if (_panelOwner != null || _scrollViewOwner != null)
         {
             ++_rejectedInputCount;
             return false;
@@ -136,6 +138,11 @@ public sealed class GuideXosProgressBar
     }
 
     internal bool TrySetPanelBounds(int x, int y, int width)
+    {
+        return TrySetBoundsCore(x, y, width);
+    }
+
+    internal bool TrySetScrollViewBounds(int x, int y, int width)
     {
         return TrySetBoundsCore(x, y, width);
     }
@@ -195,7 +202,7 @@ public sealed class GuideXosProgressBar
 
     internal bool TryAttachToPanel(GuideXosPanel panel)
     {
-        if (panel == null || _panelOwner != null) return false;
+        if (panel == null || _panelOwner != null || _scrollViewOwner != null) return false;
         _panelOwner = panel;
         _panelVisible = panel.Visible;
         return true;
@@ -210,6 +217,19 @@ public sealed class GuideXosProgressBar
     {
         _panelOwner = null;
         _panelVisible = true;
+    }
+
+    internal bool TryAttachToScrollView(GuideXosScrollView scrollView)
+    {
+        if (scrollView == null || _panelOwner != null || _scrollViewOwner != null)
+            return false;
+        _scrollViewOwner = scrollView;
+        return true;
+    }
+
+    internal void DetachFromScrollView()
+    {
+        _scrollViewOwner = null;
     }
 
     private static bool IsValidRange(int minimum, int maximum)

@@ -52,6 +52,7 @@ public sealed class GuideXosComboBox
     private bool _isOpen;
     private bool _panelVisible = true;
     private GuideXosPanel _panelOwner;
+    private GuideXosScrollView _scrollViewOwner;
     private uint _rejectedInputCount;
     private bool _dispatchingChanged;
     private bool _popupRowsRendered;
@@ -113,6 +114,7 @@ public sealed class GuideXosComboBox
     public bool IsOpen => _isOpen;
     public bool EffectiveVisible => _visible && _panelVisible;
     public GuideXosPanel ParentPanel => _panelOwner;
+    public GuideXosScrollView ParentScrollView => _scrollViewOwner;
     public uint RejectedInputCount => _rejectedInputCount;
 
     /// <summary>One bounded callback for each real committed selection change.</summary>
@@ -442,7 +444,7 @@ public sealed class GuideXosComboBox
 
     internal bool TryAttachToPanel(GuideXosPanel panel)
     {
-        if (panel == null || _panelOwner != null) return false;
+        if (panel == null || _panelOwner != null || _scrollViewOwner != null) return false;
         _panelOwner = panel;
         _panelVisible = panel.Visible;
         if (!_panelVisible)
@@ -469,6 +471,22 @@ public sealed class GuideXosComboBox
         _panelVisible = true;
         _isFocused = false;
         CloseDropDown();
+    }
+
+    internal bool TryAttachToScrollView(GuideXosScrollView scrollView)
+    {
+        if (scrollView == null || _panelOwner != null || _scrollViewOwner != null)
+            return false;
+        _scrollViewOwner = scrollView;
+        _isFocused = false;
+        return true;
+    }
+
+    internal void DetachFromScrollView()
+    {
+        CloseDropDown();
+        _scrollViewOwner = null;
+        _isFocused = false;
     }
 
     private GuideXosComboBoxResult MoveActive(int delta)
@@ -564,7 +582,7 @@ public sealed class GuideXosComboBox
 
     public bool TrySetBounds(int x, int y, int width, int height)
     {
-        if (_panelOwner != null)
+        if (_panelOwner != null || _scrollViewOwner != null)
         {
             ++_rejectedInputCount;
             return false;
@@ -573,6 +591,12 @@ public sealed class GuideXosComboBox
     }
 
     internal bool TrySetPanelBounds(int x, int y, int width, int height)
+    {
+        CloseDropDown();
+        return TrySetBoundsCore(x, y, width, height);
+    }
+
+    internal bool TrySetScrollViewBounds(int x, int y, int width, int height)
     {
         CloseDropDown();
         return TrySetBoundsCore(x, y, width, height);

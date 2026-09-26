@@ -27,6 +27,7 @@ public sealed class GuideXosLabel
     private bool _visible = true;
     private bool _panelVisible = true;
     private GuideXosPanel _panelOwner;
+    private GuideXosScrollView _scrollViewOwner;
     private uint _rejectedInputCount;
 
     public GuideXosLabel(
@@ -62,6 +63,7 @@ public sealed class GuideXosLabel
     public bool Visible => _visible;
     public bool EffectiveVisible => _visible && _panelVisible;
     public GuideXosPanel ParentPanel => _panelOwner;
+    public GuideXosScrollView ParentScrollView => _scrollViewOwner;
     public uint RejectedInputCount => _rejectedInputCount;
 
     /// <summary>
@@ -102,7 +104,7 @@ public sealed class GuideXosLabel
 
     public bool TrySetBounds(int x, int y, int width)
     {
-        if (_panelOwner != null)
+        if (_panelOwner != null || _scrollViewOwner != null)
         {
             ++_rejectedInputCount;
             return false;
@@ -111,6 +113,11 @@ public sealed class GuideXosLabel
     }
 
     internal bool TrySetPanelBounds(int x, int y, int width)
+    {
+        return TrySetBoundsCore(x, y, width);
+    }
+
+    internal bool TrySetScrollViewBounds(int x, int y, int width)
     {
         return TrySetBoundsCore(x, y, width);
     }
@@ -163,7 +170,7 @@ public sealed class GuideXosLabel
 
     internal bool TryAttachToPanel(GuideXosPanel panel)
     {
-        if (panel == null || _panelOwner != null) return false;
+        if (panel == null || _panelOwner != null || _scrollViewOwner != null) return false;
         _panelOwner = panel;
         _panelVisible = panel.Visible;
         return true;
@@ -178,6 +185,19 @@ public sealed class GuideXosLabel
     {
         _panelOwner = null;
         _panelVisible = true;
+    }
+
+    internal bool TryAttachToScrollView(GuideXosScrollView scrollView)
+    {
+        if (scrollView == null || _panelOwner != null || _scrollViewOwner != null)
+            return false;
+        _scrollViewOwner = scrollView;
+        return true;
+    }
+
+    internal void DetachFromScrollView()
+    {
+        _scrollViewOwner = null;
     }
 
     private bool IsValidText(ReadOnlySpan<char> text)

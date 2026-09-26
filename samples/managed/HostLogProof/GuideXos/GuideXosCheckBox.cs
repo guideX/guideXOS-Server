@@ -40,6 +40,7 @@ public sealed class GuideXosCheckBox
     private bool _panelVisible = true;
     private bool _dispatchingChanged;
     private GuideXosPanel _panelOwner;
+    private GuideXosScrollView _scrollViewOwner;
     private uint _rejectedInputCount;
 
     public GuideXosCheckBox(
@@ -95,6 +96,7 @@ public sealed class GuideXosCheckBox
     }
     public bool EffectiveVisible => _visible && _panelVisible;
     public GuideXosPanel ParentPanel => _panelOwner;
+    public GuideXosScrollView ParentScrollView => _scrollViewOwner;
     public uint RejectedInputCount => _rejectedInputCount;
 
     /// <summary>
@@ -127,7 +129,7 @@ public sealed class GuideXosCheckBox
 
     public bool TrySetBounds(int x, int y, int width, int height)
     {
-        if (_panelOwner != null)
+        if (_panelOwner != null || _scrollViewOwner != null)
         {
             ++_rejectedInputCount;
             return false;
@@ -136,6 +138,11 @@ public sealed class GuideXosCheckBox
     }
 
     internal bool TrySetPanelBounds(int x, int y, int width, int height)
+    {
+        return TrySetBoundsCore(x, y, width, height);
+    }
+
+    internal bool TrySetScrollViewBounds(int x, int y, int width, int height)
     {
         return TrySetBoundsCore(x, y, width, height);
     }
@@ -295,7 +302,7 @@ public sealed class GuideXosCheckBox
 
     internal bool TryAttachToPanel(GuideXosPanel panel)
     {
-        if (panel == null || _panelOwner != null) return false;
+        if (panel == null || _panelOwner != null || _scrollViewOwner != null) return false;
         _panelOwner = panel;
         _panelVisible = panel.Visible;
         if (!_panelVisible) _isFocused = false;
@@ -312,6 +319,21 @@ public sealed class GuideXosCheckBox
     {
         _panelOwner = null;
         _panelVisible = true;
+        _isFocused = false;
+    }
+
+    internal bool TryAttachToScrollView(GuideXosScrollView scrollView)
+    {
+        if (scrollView == null || _panelOwner != null || _scrollViewOwner != null)
+            return false;
+        _scrollViewOwner = scrollView;
+        _isFocused = false;
+        return true;
+    }
+
+    internal void DetachFromScrollView()
+    {
+        _scrollViewOwner = null;
         _isFocused = false;
     }
 

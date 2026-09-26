@@ -119,6 +119,12 @@ static const char* const kManagedNotesAliases[] = {
 	"Notes"
 };
 
+#if defined(GXOS_NATIVEAOT_C140_MANAGED_SCROLL_VIEW)
+static const char* const kManagedScrollViewAliases[] = {
+	"ScrollView"
+};
+#endif
+
 static const char* const kOnScreenKeyboardAliases[] = {
 	"On Screen Keyboard"
 };
@@ -154,6 +160,9 @@ static const BuiltInAppMetadata kBuiltInAppMetadata[] = {
 	{ "com.guidexos.apps.managed.status", "Managed Status", "Managed Status", nullptr, nullptr, "app.generic", "Utilities", "Managed guideXOS status application hosted in the resident NativeAOT composite image.", BuiltInAvailabilityBareMetal, 0, 0, 0, false, false, detail::kManagedStatusAliases, sizeof(detail::kManagedStatusAliases) / sizeof(detail::kManagedStatusAliases[0]), true, true, true, false, false, false, false, BuiltInAppLaunchKind::ManagedNativeAot, 2u, kManagedNativeAotCompositeImagePath },
 	{ "com.guidexos.apps.managed.counter", "Managed Counter", "Managed Counter", nullptr, nullptr, "app.generic", "Utilities", "Managed guideXOS counter application hosted in the resident NativeAOT composite image.", BuiltInAvailabilityBareMetal, 0, 0, 0, false, false, detail::kManagedCounterAliases, sizeof(detail::kManagedCounterAliases) / sizeof(detail::kManagedCounterAliases[0]), true, true, true, false, false, false, false, BuiltInAppLaunchKind::ManagedNativeAot, 3u, kManagedNativeAotCompositeImagePath },
 	{ "com.guidexos.apps.managed.notes", "Managed Notes", "Managed Notes", nullptr, nullptr, "app.generic", "Utilities", "Managed guideXOS notes application using the bounded managed file service.", BuiltInAvailabilityBareMetal, 0, 0, 0, false, false, detail::kManagedNotesAliases, sizeof(detail::kManagedNotesAliases) / sizeof(detail::kManagedNotesAliases[0]), true, true, true, false, false, false, false, BuiltInAppLaunchKind::ManagedNativeAot, 4u, kManagedNativeAotCompositeImagePath }
+#if defined(GXOS_NATIVEAOT_C140_MANAGED_SCROLL_VIEW)
+,	{ "com.guidexos.apps.managed.scrollview", "Managed ScrollView", "Managed ScrollView", nullptr, nullptr, "app.generic", "Utilities", "Managed guideXOS bounded vertical ScrollView proof application.", BuiltInAvailabilityBareMetal, 0, 0, 0, false, false, detail::kManagedScrollViewAliases, sizeof(detail::kManagedScrollViewAliases) / sizeof(detail::kManagedScrollViewAliases[0]), true, true, true, false, false, false, false, BuiltInAppLaunchKind::ManagedNativeAot, 5u, kManagedNativeAotCompositeImagePath }
+#endif
 };
 
 static const int kBuiltInAppMetadataCount = sizeof(kBuiltInAppMetadata) / sizeof(kBuiltInAppMetadata[0]);

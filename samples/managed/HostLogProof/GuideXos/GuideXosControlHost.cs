@@ -12,6 +12,7 @@ public enum GuideXosManagedControlKind
     ComboBox = 7,
     PopupMenu = 8,
     ScrollBar = 9,
+    ScrollView = 10,
 }
 
 public enum GuideXosControlHostResult
@@ -323,6 +324,12 @@ public sealed class GuideXosControlHost
         return TryRegister(id, GuideXosManagedControlKind.ScrollBar, control, focusable);
     }
 
+    public GuideXosControlHostResult TryRegisterScrollView(
+        int id, GuideXosScrollView control, bool focusable = true)
+    {
+        return TryRegister(id, GuideXosManagedControlKind.ScrollView, control, focusable);
+    }
+
     /// <summary>Routes motion to the single active primary-pointer drag owner.</summary>
     public GuideXosControlHostResult HandlePointerMove(int x, int y)
     {
@@ -600,6 +607,12 @@ public sealed class GuideXosControlHost
                 ReleaseTransientCapture();
             }
             NormalizeActiveFocus();
+            if (_activeIndex >= 0 &&
+                _entries[_activeIndex].Kind == GuideXosManagedControlKind.ScrollView &&
+                ((GuideXosScrollView)_entries[_activeIndex].Control).TryMoveFocus(shift))
+            {
+                return GuideXosControlHostResult.Traversed;
+            }
             return Traverse(shift);
         }
         if (TryGetTransientCaptureIndex(out int capturedIndex))
@@ -1000,6 +1013,8 @@ public sealed class GuideXosControlHost
                 ((GuideXosPopupMenu)_entries[index].Control).HandlePointerDown(x, y)),
             GuideXosManagedControlKind.ScrollBar => Map(
                 ((GuideXosScrollBar)_entries[index].Control).HandlePointerDown(x, y)),
+            GuideXosManagedControlKind.ScrollView => Map(
+                ((GuideXosScrollView)_entries[index].Control).HandlePointerDown(x, y)),
             _ => GuideXosControlHostResult.Rejected,
         };
     }
@@ -1079,6 +1094,8 @@ public sealed class GuideXosControlHost
                 ((GuideXosPopupMenu)_entries[index].Control).HandleKey(key)),
             GuideXosManagedControlKind.ScrollBar => Map(
                 ((GuideXosScrollBar)_entries[index].Control).HandleKey(key)),
+            GuideXosManagedControlKind.ScrollView => Map(
+                ((GuideXosScrollView)_entries[index].Control).HandleKey(key, shift)),
             _ => GuideXosControlHostResult.Rejected,
         };
     }
@@ -1104,6 +1121,8 @@ public sealed class GuideXosControlHost
             GuideXosManagedControlKind.ScrollBar => Map(
                 ((GuideXosScrollBar)_entries[index].Control).HandleWheel(
                     wheelDelta)),
+            GuideXosManagedControlKind.ScrollView => Map(
+                ((GuideXosScrollView)_entries[index].Control).HandleWheel(x, y, wheelDelta)),
             _ => GuideXosControlHostResult.Ignored,
         };
     }
@@ -1126,6 +1145,8 @@ public sealed class GuideXosControlHost
                 ((GuideXosComboBox)_entries[index].Control).HandleCharacter(character)),
             GuideXosManagedControlKind.PopupMenu => Map(
                 ((GuideXosPopupMenu)_entries[index].Control).HandleCharacter(character)),
+            GuideXosManagedControlKind.ScrollView => Map(
+                ((GuideXosScrollView)_entries[index].Control).HandleCharacter(character)),
             _ => GuideXosControlHostResult.Ignored,
         };
     }
@@ -1153,6 +1174,8 @@ public sealed class GuideXosControlHost
                 ((GuideXosPopupMenu)_entries[index].Control).EffectiveVisible,
             GuideXosManagedControlKind.ScrollBar =>
                 ((GuideXosScrollBar)_entries[index].Control).EffectiveVisible,
+            GuideXosManagedControlKind.ScrollView =>
+                ((GuideXosScrollView)_entries[index].Control).EffectiveVisible,
             GuideXosManagedControlKind.TextArea =>
                 ((GuideXosTextArea)_entries[index].Control).EffectiveVisible,
             GuideXosManagedControlKind.ListBox =>
@@ -1181,6 +1204,8 @@ public sealed class GuideXosControlHost
                 !((GuideXosListBox)_entries[index].Control).Enabled,
             GuideXosManagedControlKind.ScrollBar =>
                 !((GuideXosScrollBar)_entries[index].Control).Enabled,
+            GuideXosManagedControlKind.ScrollView =>
+                !((GuideXosScrollView)_entries[index].Control).Enabled,
             _ => false,
         };
     }
@@ -1205,6 +1230,8 @@ public sealed class GuideXosControlHost
                 ((GuideXosComboBox)_entries[index].Control).IsFocused,
             GuideXosManagedControlKind.ScrollBar =>
                 ((GuideXosScrollBar)_entries[index].Control).IsFocused,
+            GuideXosManagedControlKind.ScrollView =>
+                ((GuideXosScrollView)_entries[index].Control).HasFocus,
             _ => false,
         };
     }
@@ -1236,6 +1263,9 @@ public sealed class GuideXosControlHost
                 break;
             case GuideXosManagedControlKind.ScrollBar:
                 ((GuideXosScrollBar)_entries[index].Control).Focus();
+                break;
+            case GuideXosManagedControlKind.ScrollView:
+                ((GuideXosScrollView)_entries[index].Control).Focus();
                 break;
         }
     }
@@ -1270,6 +1300,9 @@ public sealed class GuideXosControlHost
                 break;
             case GuideXosManagedControlKind.ScrollBar:
                 ((GuideXosScrollBar)_entries[index].Control).Blur();
+                break;
+            case GuideXosManagedControlKind.ScrollView:
+                ((GuideXosScrollView)_entries[index].Control).Blur();
                 break;
         }
     }
@@ -1307,6 +1340,7 @@ public sealed class GuideXosControlHost
             GuideXosManagedControlKind.ComboBox => control is GuideXosComboBox,
             GuideXosManagedControlKind.PopupMenu => control is GuideXosPopupMenu,
             GuideXosManagedControlKind.ScrollBar => control is GuideXosScrollBar,
+            GuideXosManagedControlKind.ScrollView => control is GuideXosScrollView,
             _ => false,
         };
     }
@@ -1436,6 +1470,22 @@ public sealed class GuideXosControlHost
             GuideXosScrollBarResult.Paged => GuideXosControlHostResult.Paged,
             GuideXosScrollBarResult.Stepped => GuideXosControlHostResult.Changed,
             GuideXosScrollBarResult.Scrolled => GuideXosControlHostResult.Scrolled,
+            _ => GuideXosControlHostResult.Ignored,
+        };
+    }
+
+    private static GuideXosControlHostResult Map(GuideXosScrollViewResult result)
+    {
+        return result switch
+        {
+            GuideXosScrollViewResult.Added => GuideXosControlHostResult.Registered,
+            GuideXosScrollViewResult.Focused => GuideXosControlHostResult.Focused,
+            GuideXosScrollViewResult.Activated => GuideXosControlHostResult.Activated,
+            GuideXosScrollViewResult.Toggled => GuideXosControlHostResult.Toggled,
+            GuideXosScrollViewResult.Selected => GuideXosControlHostResult.Changed,
+            GuideXosScrollViewResult.Scrolled => GuideXosControlHostResult.Scrolled,
+            GuideXosScrollViewResult.Disabled => GuideXosControlHostResult.Disabled,
+            GuideXosScrollViewResult.Paged => GuideXosControlHostResult.Paged,
             _ => GuideXosControlHostResult.Ignored,
         };
     }

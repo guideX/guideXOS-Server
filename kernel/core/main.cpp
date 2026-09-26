@@ -5415,6 +5415,55 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
             return window && kernel::compositor::KernelCompositor::requestCloseWindow(window->id);
         };
 
+#if defined(GXOS_NATIVEAOT_C140_MANAGED_SCROLL_VIEW)
+        auto runC140ManagedScrollViewProof = [&]() __attribute__((noinline)) {
+        {
+        const gxos::apps::BuiltInAppMetadata* c140ScrollView =
+            gxos::apps::FindBuiltInAppMetadataByDisplayName("Managed ScrollView");
+        const bool c140CatalogValid = gxos::apps::ManagedNativeAotCatalogIsValid() &&
+            c140ScrollView;
+        kernel::serial::puts("[C140-APPMODEL] catalogValid=");
+        kernel::serial::puts(c140CatalogValid
+            ? "true result=PASS\n" : "false result=FAIL\n");
+        const bool launch = c140CatalogValid &&
+            kernel::desktop::launch_app_with_context(
+                c140ScrollView->appId, "c140-native");
+        kernel::app::KernelWindow* window =
+            kernel::compositor::KernelCompositor::getFocusedWindow();
+        const int32_t viewX = 24;
+        const int32_t viewY = 72;
+        const int32_t viewWidth = 300;
+        const int32_t viewHeight = 120;
+        const int32_t scrollBarX = 336;
+        const int32_t scrollBarY = 72;
+        kernel::serial::puts("[C140-PROOF] managed-proof-started context=c140-native transport=physical-qemu result=");
+        kernel::serial::puts(launch ? "PASS\n" : "FAIL\n");
+        kernel::serial::puts("[C140-TARGET] viewX=");
+        kernel::serial::put_hex32(static_cast<uint32_t>(viewX));
+        kernel::serial::puts(" viewY=");
+        kernel::serial::put_hex32(static_cast<uint32_t>(viewY));
+        kernel::serial::puts(" viewWidth=");
+        kernel::serial::put_hex32(static_cast<uint32_t>(viewWidth));
+        kernel::serial::puts(" viewHeight=");
+        kernel::serial::put_hex32(static_cast<uint32_t>(viewHeight));
+        kernel::serial::puts(" scrollBarX=");
+        kernel::serial::put_hex32(static_cast<uint32_t>(scrollBarX));
+        kernel::serial::puts(" scrollBarY=");
+        kernel::serial::put_hex32(static_cast<uint32_t>(scrollBarY));
+        kernel::serial::puts(" screenViewX=");
+        kernel::serial::put_hex32(static_cast<uint32_t>(window
+            ? window->x + viewX : -1));
+        kernel::serial::puts(" screenViewY=");
+        kernel::serial::put_hex32(static_cast<uint32_t>(window
+            ? window->y + kernel::compositor::TITLEBAR_HEIGHT + viewY : -1));
+        kernel::serial::puts(" result=");
+        kernel::serial::puts(launch && window ? "PASS\n" : "FAIL\n");
+        }
+        };
+        runC140ManagedScrollViewProof();
+        return;
+#endif
+
 #if defined(GXOS_NATIVEAOT_C138_REUSABLE_SCROLLBAR)
         auto runC138ManagedScrollbarProof = [&]() __attribute__((noinline)) {
         {
