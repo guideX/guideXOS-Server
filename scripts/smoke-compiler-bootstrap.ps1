@@ -437,6 +437,31 @@ function Read-SerialText([string]$path) {
     return [System.IO.File]::ReadAllText($path)
 }
 
+function Get-Phase28ZHash([string]$path, [string]$label) {
+    if (!(Test-Path -LiteralPath $path -PathType Leaf)) {
+        throw "P28Z BOOT_IMAGE staging failed: required $label is missing at $path"
+    }
+    return (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToUpperInvariant()
+}
+
+function Assert-Phase28ZBootImage([int]$runNumber, [string]$imageRoot) {
+    $kernelHash = Get-Phase28ZHash (Join-Path $imageRoot "kernel.elf") "kernel artifact"
+    $studioHash = Get-Phase28ZHash (Join-Path $imageRoot "Apps/DeveloperStudio/bin/amd64/developerstudio.elf") "Developer Studio AMD64 payload"
+    $projectHash = Get-Phase28ZHash (Join-Path $imageRoot "P28Q/guidexos.project") "diagnostic project"
+    $configHash = Get-Phase28ZHash (Join-Path $imageRoot "Apps/DeveloperStudio/app.json") "Developer Studio configuration"
+    $sentinel = Join-Path $imageRoot "Apps/DeveloperStudio/.phase28q-diagnostic"
+    if (!(Test-Path -LiteralPath $sentinel -PathType Leaf)) {
+        throw "P28Z BOOT_IMAGE staging failed on boot ${runNumber}: .phase28q-diagnostic is absent"
+    }
+    foreach ($fixture in @("P28Q/CMakeLists.txt", "P28Q/build.ps1", "P28Q/README.md", "P28Q/app/app.json", "P28Q/src/main.cpp", "P28Q/src/helper.cpp")) {
+        if (!(Test-Path -LiteralPath (Join-Path $imageRoot $fixture) -PathType Leaf)) {
+            throw "P28Z BOOT_IMAGE staging failed on boot ${runNumber}: fixture file is absent: $fixture"
+        }
+    }
+    Write-Host ("P28Z BOOT_IMAGE boot={0} arch=amd64 kernel={1} developer_studio={2} project={3} config={4} sentinel=present project_fixture=present isolated=present" -f
+        $runNumber, $kernelHash, $studioHash, $projectHash, $configHash) -ForegroundColor DarkCyan
+}
+
 function Export-SerialArtifact([string]$serial, [string]$name, [string]$destination) {
     $escapedName = [regex]::Escape($name)
     $pattern = "(?s)NativeElf: artifact_begin=$escapedName bytes=([0-9A-Fa-f]{8})\r?\nNativeElf: artifact_hex=([0-9A-Fa-f]+)\r?\nNativeElf: artifact_end=$escapedName"
@@ -2047,6 +2072,25 @@ function Invoke-QemuProofBoot([int]$runNumber, [string]$qemu) {
         }
         if ($Phase28QOnly) {
             $requiredMarkers += @(
+                "P28Z BOOT 01 native_loader_entered",
+                "P28Z BOOT 02 kernel_entry",
+                "P28Z BOOT 03 early_kernel_init_complete",
+                "P28Z BOOT 04 runtime_scheduler_ready",
+                "P28Z BOOT 05 gx_main_invoke",
+                "P28Z BOOT 06 desktop_init_complete",
+                "P28Z APP 01 gx_main_entered",
+                "P28Z APP 00 gx_main_entry_raw",
+                "P28Z APP 02 initial_render_pass",
+                "P28Z APP 03 project_open_request_observed",
+                "P28Z APP 04 project_open_entry",
+                "P28Z PROJECT state=load_started",
+                "P28Z PROJECT state=loaded",
+                "P28Z PROJECT state=refresh_started",
+                "P28Z PROJECT state=ready",
+                "P28Z APP 05 project_open_return",
+                "P28Z APP 06 project_ready",
+                "P28Z APP 07 debugger_launch_request",
+                "P28Z APP 08 debugger_launch_processed",
                 "DEVELOPER_STUDIO_PHASE28Q_BEGIN",
                 "DEVELOPER_STUDIO_PHASE28Q_APP_LAUNCH_PASS",
                 "DEVELOPER_STUDIO_PHASE28Q_PROJECT_OPEN_PASS",
@@ -2077,7 +2121,27 @@ function Invoke-QemuProofBoot([int]$runNumber, [string]$qemu) {
         }
         $missingMarkers = @($requiredMarkers | Where-Object { $serial -notmatch [regex]::Escape($_) })
         if ($missingMarkers.Count -ne 0) {
+            if ($Phase28QOnly -and $serial -notmatch [regex]::Escape("P28Z APP 00 gx_main_entry_raw") -and
+                $serial -notmatch [regex]::Escape("P28Z BOOT 05 gx_main_invoke")) {
+                $lastBootMilestone = ($serial -split "`r?`n" | Where-Object { $_ -match "^P28Z BOOT |^\[KERNEL\]" } | Select-Object -Last 1)
+                if (!$lastBootMilestone) { $lastBootMilestone = "no kernel/loader milestone" }
+                Write-Host ("P28Z CLASSIFICATION boot={0} domain=pre-Developer-Studio last_milestone={1}" -f $runNumber, $lastBootMilestone) -ForegroundColor Yellow
+            } elseif ($Phase28QOnly -and $serial -notmatch [regex]::Escape("P28Z APP 00 gx_main_entry_raw")) {
+                $lastBootMilestone = ($serial -split "`r?`n" | Where-Object { $_ -match "^P28Z BOOT |^\[KERNEL\]" } | Select-Object -Last 1)
+                Write-Host ("P28Z CLASSIFICATION boot={0} domain=loader-invoked-app-entry-unconfirmed last_milestone={1}" -f $runNumber, $lastBootMilestone) -ForegroundColor Yellow
+            } elseif ($Phase28QOnly) {
+                $lastProjectMilestone = ($serial -split "`r?`n" | Where-Object { $_ -match "^P28Z APP |^P28Z PROJECT |^P28Z FS " } | Select-Object -Last 1)
+                if (!$lastProjectMilestone) { $lastProjectMilestone = "no project-open milestone" }
+                Write-Host ("P28Z CLASSIFICATION boot={0} domain=post-render-project-open last_milestone={1}" -f $runNumber, $lastProjectMilestone) -ForegroundColor Yellow
+            }
             Write-Host "QEMU boot $runNumber missed required compiler/IDE markers: $($missingMarkers -join ', ')" -ForegroundColor Red
+            if ($Phase28QOnly) {
+                $finalState = @($serial -split "`r?`n" |
+                    Where-Object { $_ -match '^P28Z BOOT_IMAGE |^P28Z BOOT |^P28Z APP |^P28Z PROJECT |^P28Z FS |^P28Y STARTUP |^DEVELOPER_STUDIO_PHASE28Q_' } |
+                    Select-Object -Last 16)
+                Write-Host ("P28Z FINAL_STATE boot={0} bounded_entries={1}" -f $runNumber, $finalState.Count) -ForegroundColor Yellow
+                $finalState | ForEach-Object { Write-Host $_ }
+            }
             if ($Phase27E -or $Phase27F) {
                 $serial -split "`r?`n" | Where-Object { $_ -match "phase27e|phase27f|phase27g|phase27h|phase27i|phase27j|phase27k|phase27l|phase27m|phase27n|phase27o|phase27p|phase27q|phase27r|Phase 27E|Phase 27F|Phase 27G|Phase 27H|Phase 27I|Phase 27J|Phase 27K|Phase 27L|Phase 27M|Phase 27N|Phase 27O|Phase 27P|Phase 27Q|Phase 27R" } | ForEach-Object { Write-Host $_ }
             }
@@ -3462,6 +3526,14 @@ try {
         # image. Guest writes must not become the input state of the next
         # requested fresh boot.
         $activeEspDirectory = Join-Path $tempDirectory ("esp-boot{0}" -f $run)
+        $resolvedTempDirectory = [IO.Path]::GetFullPath($tempDirectory).TrimEnd([IO.Path]::DirectorySeparatorChar)
+        $resolvedActiveEspDirectory = [IO.Path]::GetFullPath($activeEspDirectory).TrimEnd([IO.Path]::DirectorySeparatorChar)
+        if (!$resolvedActiveEspDirectory.StartsWith($resolvedTempDirectory + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
+            throw "P28Z BOOT_IMAGE safety check rejected active ESP path: $activeEspDirectory"
+        }
+        if (Test-Path -LiteralPath $activeEspDirectory) {
+            Remove-Item -LiteralPath $activeEspDirectory -Recurse -Force
+        }
         Copy-Item $espDirectory $activeEspDirectory -Recurse -Force
         if ($Phase28QOnly) {
             $activePhase28QSentinel = Join-Path $activeEspDirectory "Apps/DeveloperStudio/.phase28q-diagnostic"
@@ -3469,6 +3541,7 @@ try {
                 throw "P28Y STARTUP staging failed on fresh boot ${run}: Phase 28Q launch request sentinel missing from active ESP"
             }
             Write-Host ("P28Y STARTUP boot={0} launch_request_staged=present" -f $run)
+            Assert-Phase28ZBootImage $run $activeEspDirectory
         }
         Invoke-QemuProofBoot $run $qemu
     }

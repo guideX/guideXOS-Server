@@ -1679,6 +1679,8 @@ static bool run_file_internal(const char* path,
     serial::put_hex64(s_appRuntime.stackTop);
     serial::putc('\n');
     serial::puts("ELF Loader: invoking gx_main with gx_app_context\n");
+    serial::puts("P28Z BOOT 01 native_loader_entered\n");
+    serial::puts("P28Z BOOT 05 gx_main_invoke\n");
     s_appRuntime.kernelRspBefore = read_stack_pointer();
     s_appRuntime.state = NativeAppExecutionState::Running;
     NativeElfTrampolineResult trampoline = {};
@@ -1727,6 +1729,7 @@ static bool run_file_internal(const char* path,
     serial::puts("ELF Loader: gx_main returned ");
     put_decimal_i32(s_appRuntime.result);
     serial::putc('\n');
+    serial::puts("P28Z BOOT 08 gx_main_returned\n");
     const bool runtimeSucceeded = s_appRuntime.runtimeStatus == NativeRuntimeStatus::None;
     if (!runtimeSucceeded) {
         serial::puts(s_appRuntime.runtimeStatus == NativeRuntimeStatus::ArrayBoundsExceeded

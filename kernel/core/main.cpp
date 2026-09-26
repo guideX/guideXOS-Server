@@ -227,6 +227,7 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
     // Initialize serial debug output early
     kernel::serial::init();
     kernel::serial::puts("[KERNEL] guideXOS kernel_main entered\n");
+    kernel::serial::puts("P28Z BOOT 02 kernel_entry\n");
 #if defined(GXOS_DESKTOP_CLEANUP_RUNTIME_PASS)
     kernel::serial::puts("[KERNEL] desktopCleanupRuntimePass=2\n");
 #endif
@@ -256,6 +257,7 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         kernel::serial::puts("[KERNEL] ERROR: No valid boot method detected, halting\n");
         while(1) { }
     }
+    kernel::serial::puts("P28Z BOOT 03 early_kernel_init_complete\n");
     
     // Initialize framebuffer for graphics mode
     bool has_fb = false;
@@ -281,6 +283,7 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         kernel::desktop::init();
         kernel::desktop::draw();
         kernel::serial::puts("[KERNEL] Desktop drawn\n");
+        kernel::serial::puts("P28Z BOOT 06 desktop_init_complete\n");
         
         // Set up IDT, remap PIC, enable interrupts
         kernel::interrupts::init();
@@ -373,6 +376,7 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
             nativeElfContext.regionSize = bootinfo->NativeElfRegionSize;
             if (kernel::native_elf::configure_execution_context(nativeElfContext)) {
                 kernel::serial::puts("[KERNEL] NativeElf execution context configured\n");
+                kernel::serial::puts("P28Z BOOT 04 runtime_scheduler_ready\n");
             } else {
                 kernel::serial::puts("[KERNEL] WARNING: NativeElf execution context unavailable\n");
             }
