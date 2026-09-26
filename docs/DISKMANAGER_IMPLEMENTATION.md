@@ -1,406 +1,46 @@
-# DiskManager Implementation - Complete Summary
+# Disk Manager: Current Implementation Status
 
-## ? **IMPLEMENTATION COMPLETE**
+This document describes the implementation as audited on 2026-09-26. It supersedes historical completion claims in this file. A UI control, data structure, probe, or method name does not prove that a storage operation is implemented or safe.
 
-The DiskManager application has been successfully ported from guideXOS Legacy (C#) to guideXOS Server (C++).
+## Current behavior
 
----
+There are two distinct Disk Manager implementations:
 
-## ?? Files Created/Modified
+- The hosted desktop process in `disk_manager.cpp` draws a disk list, volume rows, an MBR-derived partition map, mount suggestions, and image controls. Its Windows refresh path creates a synthetic disk; it does not enumerate physical Windows disks. The hosted image library reads `.img` files for inspection and does not write them.
+- The bare-metal kernel app in `kernel/core/kernel_apps.cpp` enumerates the shared block-device registry, reads sector zero, displays up to four MBR primary entries, and probes a few filesystem signatures. Its only storage UI action is refresh.
 
-### **New Files:**
-1. **`disk_manager.h`** (150 lines)
-   - Complete class definition
-   - Data structures for disks and partitions
-   - Method declarations
+The shared block layer and drivers determine which devices the bare-metal app can see. Driver enums or UI labels do not imply that a transport is registered and operational. In particular, AHCI is not implemented by the legacy ATA initialization path, and USB mass-storage code is not registered with the shared block layer.
 
-2. **`disk_manager.cpp`** (600+ lines)
-   - Full implementation of all methods
-   - Kernel integration
-   - UI rendering
-   - Input handling
+## Capability status
 
-### **Modified Files:**
-3. **`desktop_service.cpp`**
-   - Added DiskManager to app registry
-   - Added launch handler
-   - Registered with "harddisk" icon
+| Capability | Current status |
+|---|---|
+| Disk enumeration | Bare-metal app reads active block descriptors with a slot/count iteration issue when registry holes exist. Hosted Windows mode displays a synthetic descriptor. |
+| Device selection | UI selection is by current list position/block slot, not stable physical identity. |
+| Partition table | MBR sector signature and four primary entries only; structure and bounds are not fully validated. Extended/logical partitions are not traversed. |
+| GPT | No GPT header or entry parser was found. |
+| Filesystem detection | Signature/probe paths exist for some FAT, exFAT, ext, and Tar-like data. Probing is not equivalent to mounting or health validation. |
+| Mount state | The hosted UI suggests mount points and attempts a weak lookup; it does not reliably establish that a specific partition is mounted. Partition-aware VFS mount is a stub. |
+| Image attachment | Hosted `.img` inspection is read-only. A non-Windows source branch can attach small images through a read-only RAM disk; that path is not the actual bare-metal Disk Manager app. |
+| Partition creation | Disabled/no-op UI handler. No Disk Manager partition-table write is performed. |
+| Formatting | Disabled/no-op UI handler. There is no in-repository FAT/exFAT mkfs implementation suitable for Disk Manager. |
+| Delete/resize/initialize | Not implemented in Disk Manager. |
+| Mount/unmount actions | Not implemented in Disk Manager. |
 
-4. **`guideXOSServer.vcxproj`**
-   - Added disk_manager.h
-   - Added disk_manager.cpp
+The kernel block API has read and write callbacks, but write support varies by driver. `flush()` treats a missing callback as success; NVMe has no flush callback. The current API and drivers do not establish a reliable durability guarantee for destructive workflows. Disk Manager itself does not write sectors.
 
-5. **`guideXOSServer.vcxproj.filters`**
-   - Categorized files in Header/Source groups
+## Important limitations
 
----
+- Disk Manager reads fixed 512-byte buffers and assumes 512-byte logical sectors in MBR and filesystem probing. Several filesystem paths also use fixed-size buffers or sector arithmetic that is unsafe or incorrect for 4Kn devices.
+- The shared descriptor lacks durable device identity, read-only/removable flags, controller path, and media-generation state. A block index is transient and must not be used alone to target future writes.
+- `isSystem`, `Boot/System`, partition health, free-space gaps, and suggested mount paths are heuristic UI labels. They are not authoritative boot provenance, filesystem-health, or mount-state results.
+- `vfs::mount_partition()` is a planning stub. Existing filesystem mounts do not provide a general partition-offset adapter and the mount table does not retain a partition identity/offset.
+- FAT file-write paths exist for mounted FAT volumes, but that is not filesystem creation. No Disk Manager formatting capability is present.
 
-## ?? Features Implemented
+## Verification and next work
 
-### ? **Core Functionality**
+The detailed architecture, transport and filesystem matrices, source references, test/build results, risks, operation design, and phase roadmap are in [Disk Manager Phase DM1 Audit](DISK_MANAGER_PHASE_DM1_AUDIT.md).
 
-| Feature | Status | Details |
-|---------|--------|---------|
-| **Multi-Disk Enumeration** | ? Complete | IDE/SATA, NVMe, USB Mass Storage |
-| **MBR Reading** | ? Complete | Reads 4 primary partitions per disk |
-| **Filesystem Detection** | ? Complete | FAT, EXT2/EXT4, TarFS |
-| **Partition Information** | ? Complete | LBA start, size, type, boot flag |
-| **Disk Selection** | ? Complete | Click to select from list |
-| **Size Formatting** | ? Complete | B/KB/MB/GB human-readable |
-| **Status Display** | ? Complete | Current driver and media info |
+DM1 did not write to disks or images. A hosted syntax-only check and a bare-metal syntax-only check passed. The full build stopped before compilation because `third_party/mbedtls` is missing. No relevant storage test suite was found, and QEMU was unavailable in the environment. These checks do not prove hardware transport behavior.
 
-### ? **UI Components**
-
-| Component | Status | Implementation |
-|-----------|--------|----------------|
-| **Left Pane** | ? Complete | Disk list with selection highlight |
-| **Volumes Grid** | ? Complete | 7-column table with partition details |
-| **Partition Map** | ? Complete | Visual bar chart showing disk layout |
-| **Action Buttons** | ? Complete | 8 buttons in 2-column layout |
-| **Header Cells** | ? Complete | Styled table headers |
-| **Data Cells** | ? Complete | Clipped text rendering |
-| **Button Rendering** | ? Complete | Hover state support |
-
-### ? **Operations**
-
-| Operation | Status | Implementation |
-|-----------|--------|----------------|
-| **Detect Media** | ? Complete | Probes boot sector for filesystem |
-| **Refresh Disks** | ? Complete | Re-enumerates all block devices |
-| **Set FS: Auto** | ?? Stub | Ready for VFS integration |
-| **Set FS: FAT** | ?? Stub | Ready for driver switching |
-| **Set FS: TarFS** | ?? Stub | Ready for driver switching |
-| **Set FS: EXT2** | ?? Stub | Ready for driver switching |
-| **Format as FAT** | ?? Stub | Ready for format implementation |
-| **Create Partition** | ?? Stub | Ready for MBR write logic |
-
----
-
-## ??? Architecture
-
-```
-???????????????????????????????????????????????????
-?              Desktop Service                    ?
-?  LaunchApp("DiskManager") ? DiskManager::show()?
-???????????????????????????????????????????????????
-                  ?
-                  v
-???????????????????????????????????????????????????
-?              DiskManager                         ?
-?  ?????????????????????????????????????????????  ?
-?  ?  refreshDisks()                           ?  ?
-?  ?  ?? kernel::block::device_count()        ?  ?
-?  ?  ?? kernel::block::get_device(i)         ?  ?
-?  ?  ?? For each device:                     ?  ?
-?  ?     ?? readMBRForEntry()                 ?  ?
-?  ?     ?? detectFsAtLBA()                   ?  ?
-?  ?????????????????????????????????????????????  ?
-?  ?????????????????????????????????????????????  ?
-?  ?  draw()                                   ?  ?
-?  ?  ?? drawLeftPane()        (disk list)    ?  ?
-?  ?  ?? drawVolumesGrid()     (partition tbl)?  ?
-?  ?  ?? drawPartitionMap()    (visual bar)   ?  ?
-?  ?  ?? drawActions()         (buttons)      ?  ?
-?  ?????????????????????????????????????????????  ?
-?  ?????????????????????????????????????????????  ?
-?  ?  handleInput()                            ?  ?
-?  ?  ?? Disk selection clicks                ?  ?
-?  ?  ?? Button activation                    ?  ?
-?  ?????????????????????????????????????????????  ?
-???????????????????????????????????????????????????
-                  ?
-                  v
-???????????????????????????????????????????????????
-?         Kernel Block Device Layer               ?
-?  ????????????????????????????????????????????   ?
-?  ?  kernel::block::read_sectors()          ?   ?
-?  ?  ?? Read MBR (LBA 0)                    ?   ?
-?  ?  ?? Read boot sector (LBA n)            ?   ?
-?  ?  ?? Read superblock (LBA n+2)           ?   ?
-?  ????????????????????????????????????????????   ?
-?  ????????????????????????????????????????????   ?
-?  ?  Hardware Drivers                        ?   ?
-?  ?  ?? ATA/SATA (BDEV_ATA_PIO, BDEV_AHCI) ?   ?
-?  ?  ?? NVMe     (BDEV_NVME)                ?   ?
-?  ?  ?? USB MSC  (BDEV_USB_MASS)            ?   ?
-?  ????????????????????????????????????????????   ?
-???????????????????????????????????????????????????
-```
-
----
-
-## ?? UI Layout
-
-```
-??????????????????????????????????????????????????????????????????
-?  Disk Management                                          [_][?][X] ?
-??????????????????????????????????????????????????????????????????
-? Disks        ? Volumes                                          ?
-?              ??????????????????????????????????????????????????
-? ? Disk 0     ?Volume?Layo?Type?Status  ?Capacity ?Free  ?%Free?
-?   (System)   ??????????????????????????????????????????????????
-?              ?Disk 0?Simp?FAT ?Healthy ?  50 GB  ? N/A  ? N/A ?
-?   Disk 1     ?Part 1?le  ?    ?(Active)?         ?      ?     ?
-?   (USB)      ??????????????????????????????????????????????????
-?              ?
-?              ? Disk 0 (System)
-?              ?????????????????????????????????????????????????????
-?              ?????????????????????????????????                   ?
-?              ?FAT, 50 GB                                         ?
-?              ?Total: 100 GB                                      ?
-?              ?
-?              ? Actions
-?              ?????????????????????????????????????????????????????
-?              ?[Detect media    ]?[Format as FAT                 ]?
-?              ?[Set FS: Auto    ]?[Create partition (largest free]?
-?              ?[Set FS: FAT     ]?[Refresh                        ]?
-? Driver: FAT  ?[Set FS: TarFS   ]?                                ?
-? Detected:    ?[Set FS: EXT2    ]?                                ?
-? FAT (boot)   ?????????????????????????????????????????????????????
-????????????????????????????????????????????????????????????????????
-```
-
----
-
-## ?? Code Highlights
-
-### **Disk Enumeration**
-```cpp
-void DiskManager::refreshDisks() {
-    s_disks.clear();
-    uint8_t devCount = kernel::block::device_count();
-    
-    for (uint8_t i = 0; i < devCount; i++) {
-        const kernel::block::BlockDevice* dev = kernel::block::get_device(i);
-        if (!dev || !dev->active) continue;
-        
-        DiskEntry entry;
-        entry.bytesPerSector = dev->sectorSize;
-        entry.totalSectors = dev->totalSectors;
-        entry.haveInfo = true;
-        
-        // Classify disk type
-        if (dev->type == kernel::block::BDEV_ATA_PIO || 
-            dev->type == kernel::block::BDEV_AHCI) {
-            entry.name = "Disk " + std::to_string(i) + " (System)";
-            entry.isSystem = true;
-        }
-        // ... etc
-        
-        readMBRForEntry(entry);
-        s_disks.push_back(entry);
-    }
-}
-```
-
-### **Filesystem Detection**
-```cpp
-std::string DiskManager::detectFsAtLBA(uint32_t lbaStart) {
-    uint8_t sec[512];
-    kernel::block::read_sectors(0, lbaStart, 1, sec);
-    
-    // TAR signature at offset 257
-    if (sec[257] == 'u' && sec[258] == 's' && sec[259] == 't' &&
-        sec[260] == 'a' && sec[261] == 'r') {
-        return "TarFS";
-    }
-    
-    // FAT boot sector (0x55AA signature + valid BPB)
-    if (sec[510] == 0x55 && sec[511] == 0xAA) {
-        uint16_t bytesPerSec = sec[11] | (sec[12] << 8);
-        uint8_t secPerClus = sec[13];
-        if ((bytesPerSec == 512 || ...) && secPerClus != 0) {
-            return "FAT";
-        }
-    }
-    
-    // EXT2/4 superblock magic (0xEF53 at offset 56 in superblock)
-    uint8_t sb[1024];
-    kernel::block::read_sectors(0, lbaStart + 2, 2, sb);
-    uint16_t magic = sb[56] | (sb[57] << 8);
-    if (magic == 0xEF53) {
-        return "EXT2/EXT4";
-    }
-    
-    return "Unknown";
-}
-```
-
-### **MBR Parsing**
-```cpp
-void DiskManager::readMBRForEntry(DiskEntry& entry) {
-    uint8_t mbr[512];
-    kernel::block::read_sectors(devIndex, 0, 1, mbr);
-    
-    if (mbr[510] == 0x55 && mbr[511] == 0xAA) {
-        // Parse partition table (offset 446)
-        for (int i = 0; i < 4; i++) {
-            int off = 446 + i * 16;
-            entry.parts[i].status = mbr[off + 0];      // Boot flag
-            entry.parts[i].type = mbr[off + 4];        // Partition type
-            entry.parts[i].lbaStart = mbr[off+8] | ... // LBA start
-            entry.parts[i].lbaCount = mbr[off+12]| ... // Size
-            entry.parts[i].fs = detectFsAtLBA(entry.parts[i].lbaStart);
-        }
-    }
-}
-```
-
----
-
-## ?? How to Launch
-
-### **From Start Menu:**
-1. Click **Start** button (bottom-left)
-2. Click **All Programs**
-3. Scroll to **DiskManager**
-4. Click to launch
-
-### **From Code:**
-```cpp
-#include "desktop_service.h"
-
-std::string error;
-DesktopService::LaunchApp("DiskManager", error);
-```
-
-### **Direct Call:**
-```cpp
-#include "disk_manager.h"
-
-DiskManager::show(100, 100); // x=100, y=100
-```
-
----
-
-## ?? Completion Status
-
-| Component | Status | Completion % |
-|-----------|--------|-------------|
-| **Core Logic** | ? Complete | 100% |
-| **Kernel Integration** | ? Complete | 100% |
-| **UI Structure** | ? Complete | 100% |
-| **Rendering** | ?? Framework | 80% |
-| **Input Handling** | ? Complete | 100% |
-| **Operations (Stubs)** | ?? Partial | 40% |
-| **Project Integration** | ? Complete | 100% |
-| **Documentation** | ? Complete | 100% |
-
-**Overall: ~85% Complete**
-
----
-
-## ?? TODO: Text Rendering
-
-The only missing piece is actual text rendering. All draw methods have `// TODO:` comments where text should be rendered. To complete:
-
-1. **Include BitmapFont header:**
-   ```cpp
-   #include "bitmap_font.h"
-   ```
-
-2. **Replace TODO comments with:**
-   ```cpp
-   BitmapFont::DrawString(x, y, text, color);
-   ```
-
-3. **Example from Legacy:**
-   ```cpp
-   WindowManager.font.DrawString(x, y, text);
-   ```
-
-   **Server equivalent:**
-   ```cpp
-   // TODO: Use the actual BitmapFont API from Server
-   // BitmapFont::DrawStringToBuffer(pixels, pitch, w, h, x, y, text, len, color);
-   ```
-
----
-
-## ?? Next Steps to Make Fully Functional
-
-### **1. Complete Text Rendering** (2-4 hours)
-- Integrate BitmapFont API
-- Replace all `// TODO: Draw text` comments
-- Test text display
-
-### **2. Implement Format Operation** (4-6 hours)
-```cpp
-void DiskManager::tryFormatFAT() {
-    DiskEntry* sel = getSelected();
-    if (!sel) return;
-    
-    // Create FAT filesystem
-    // kernel::fs_fat::format(devIndex, partitionIndex);
-    
-    s_status = "Formatted successfully";
-    refreshDisks();
-}
-```
-
-### **3. Implement Partition Creation** (6-8 hours)
-```cpp
-void DiskManager::tryCreatePartitionLargestFree() {
-    // Find largest free space
-    // Write MBR with new partition entry
-    // Update partition table
-    // kernel::block::write_sectors(devIndex, 0, 1, mbr);
-}
-```
-
-### **4. Implement FS Driver Switching** (2-4 hours)
-```cpp
-void DiskManager::trySetFS_FAT() {
-    // kernel::vfs::setDriver(kernel::vfs::DriverType::FAT);
-    s_status = "Switched to FAT driver";
-}
-```
-
----
-
-## ?? Achievements
-
-? **Faithful Port** - Matches Legacy C# implementation structure  
-? **Clean C++14** - Modern C++ with proper RAII  
-? **Kernel Integration** - Uses Server's block device API  
-? **Multi-Platform** - Windows host + bare-metal support  
-? **Complete UI** - All panels and layouts implemented  
-? **Production Ready** - Proper error handling and logging  
-
----
-
-## ?? Testing Checklist
-
-- [ ] Build project successfully
-- [ ] Launch from Start Menu
-- [ ] Verify disk list displays
-- [ ] Select different disks
-- [ ] View partition information
-- [ ] Check partition map visualization
-- [ ] Click all action buttons
-- [ ] Verify status messages
-- [ ] Test with USB drives
-- [ ] Test with multiple partitions
-
----
-
-## ?? Related Files
-
-- **Legacy Reference:** `../guideXOS.Legacy/guideXOS/DefaultApps/DiskManager.cs`
-- **Kernel Block API:** `kernel/core/include/kernel/block_device.h`
-- **Compositor:** `compositor.h`, `compositor.cpp`
-- **Desktop Service:** `desktop_service.cpp`, `desktop_service.h`
-
----
-
-## ?? Documentation
-
-See implementation comments in:
-- `disk_manager.h` - Class definition and structure
-- `disk_manager.cpp` - Full implementation with inline docs
-- `kernel/core/include/kernel/block_device.h` - Block device API
-
----
-
-**Last Updated:** 2026-01-15  
-**Status:** ? **Phase 1 Complete - Ready for Testing**
+The next phase should establish a safe block-operation foundation: geometry-correct bounded sector I/O, honest flush support, explicit device identity and writability, registry synchronization/removal rules, target revalidation, and deterministic failure reporting. Disk initialization and other writes should remain unavailable until those prerequisites and disposable-media tests are in place.
