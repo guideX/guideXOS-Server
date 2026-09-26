@@ -34,6 +34,12 @@ public sealed class GuideXosButton : IGuideXosVerticalStackMember
     private int _y;
     private int _width;
     private int _height;
+    private int _marginLeft;
+    private int _marginTop;
+    private int _marginRight;
+    private int _marginBottom;
+    private GuideXosVerticalStackHorizontalAlignment _horizontalAlignment =
+        GuideXosVerticalStackHorizontalAlignment.Stretch;
     private bool _enabled = true;
     private bool _isFocused;
     private bool _visible = true;
@@ -74,6 +80,35 @@ public sealed class GuideXosButton : IGuideXosVerticalStackMember
     public int Y => _y;
     public int Width => _width;
     public int Height => _height;
+    public int MarginLeft
+    {
+        get => _marginLeft;
+        set => _marginLeft = GuideXosVerticalStackMemberLayoutRules.ClampMargin(value);
+    }
+    public int MarginTop
+    {
+        get => _marginTop;
+        set => _marginTop = GuideXosVerticalStackMemberLayoutRules.ClampMargin(value);
+    }
+    public int MarginRight
+    {
+        get => _marginRight;
+        set => _marginRight = GuideXosVerticalStackMemberLayoutRules.ClampMargin(value);
+    }
+    public int MarginBottom
+    {
+        get => _marginBottom;
+        set => _marginBottom = GuideXosVerticalStackMemberLayoutRules.ClampMargin(value);
+    }
+    public GuideXosVerticalStackHorizontalAlignment HorizontalAlignment
+    {
+        get => _horizontalAlignment;
+        set
+        {
+            if (GuideXosVerticalStackMemberLayoutRules.IsValidAlignment(value))
+                _horizontalAlignment = value;
+        }
+    }
     public int MaximumLabelLength => _maximumLabelLength;
     public string Label => new string(_labelStorage, 0, _labelLength);
     public bool Enabled => _enabled;
@@ -84,6 +119,35 @@ public sealed class GuideXosButton : IGuideXosVerticalStackMember
     public GuideXosScrollView ParentScrollView => _scrollViewOwner;
     internal GuideXosVerticalStack VerticalStackOwner => _verticalStackOwner;
     public uint RejectedInputCount => _rejectedInputCount;
+
+    public bool TrySetMargins(int left, int top, int right, int bottom)
+    {
+        if (!GuideXosVerticalStackMemberLayoutRules.IsValidMargin(left) ||
+            !GuideXosVerticalStackMemberLayoutRules.IsValidMargin(top) ||
+            !GuideXosVerticalStackMemberLayoutRules.IsValidMargin(right) ||
+            !GuideXosVerticalStackMemberLayoutRules.IsValidMargin(bottom))
+        {
+            ++_rejectedInputCount;
+            return false;
+        }
+        _marginLeft = left;
+        _marginTop = top;
+        _marginRight = right;
+        _marginBottom = bottom;
+        return true;
+    }
+
+    public bool TrySetHorizontalAlignment(
+        GuideXosVerticalStackHorizontalAlignment alignment)
+    {
+        if (!GuideXosVerticalStackMemberLayoutRules.IsValidAlignment(alignment))
+        {
+            ++_rejectedInputCount;
+            return false;
+        }
+        _horizontalAlignment = alignment;
+        return true;
+    }
 
     public bool SetLabel(string label)
     {
@@ -129,6 +193,12 @@ public sealed class GuideXosButton : IGuideXosVerticalStackMember
     int IGuideXosVerticalStackMember.MinimumWidth => MinimumSupportedWidth;
     int IGuideXosVerticalStackMember.MaximumWidth => MaximumSupportedWidth;
     bool IGuideXosVerticalStackMember.WidthRequiresCharacterAlignment => false;
+    int IGuideXosVerticalStackMember.MarginLeft => MarginLeft;
+    int IGuideXosVerticalStackMember.MarginTop => MarginTop;
+    int IGuideXosVerticalStackMember.MarginRight => MarginRight;
+    int IGuideXosVerticalStackMember.MarginBottom => MarginBottom;
+    GuideXosVerticalStackHorizontalAlignment
+        IGuideXosVerticalStackMember.HorizontalAlignment => HorizontalAlignment;
     bool IGuideXosVerticalStackMember.TrySetVerticalStackBounds(
         int x, int y, int width) => TrySetBoundsCore(x, y, width, _height);
     bool IGuideXosVerticalStackMember.TrySetVerticalStackBounds(

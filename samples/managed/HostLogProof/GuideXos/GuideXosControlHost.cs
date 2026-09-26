@@ -510,10 +510,29 @@ public sealed class GuideXosControlHost
         // viewport. Preserve a scrolled ListBox viewport while assigning host
         // focus; ordinary keyboard/programmatic focus still reconciles the
         // selected row through FocusIndex.
-        GuideXosControlHostResult focusResult =
-            _entries[index].Kind == GuideXosManagedControlKind.ListBox
-                ? FocusIndexForPointer(index)
-                : FocusIndex(index);
+        GuideXosControlHostResult focusResult;
+        if (_entries[index].Kind == GuideXosManagedControlKind.ListBox)
+        {
+            focusResult = FocusIndexForPointer(index);
+        }
+        else if (_entries[index].Kind == GuideXosManagedControlKind.ScrollView &&
+            ((GuideXosScrollView)_entries[index].Control).TryHitTest(
+                x, y, out object pointerMember))
+        {
+            GuideXosScrollView view =
+                (GuideXosScrollView)_entries[index].Control;
+            if (_activeIndex != index || !IsControlFocused(index))
+            {
+                BlurAll();
+                _activeIndex = index;
+            }
+            view.TryFocusMember(pointerMember);
+            focusResult = GuideXosControlHostResult.Focused;
+        }
+        else
+        {
+            focusResult = FocusIndex(index);
+        }
         if (focusResult != GuideXosControlHostResult.Focused)
         {
             return focusResult;

@@ -125,7 +125,7 @@ static const char* const kManagedScrollViewAliases[] = {
 };
 #endif
 
-#if defined(GXOS_NATIVEAOT_C141_MANAGED_VERTICAL_STACK)
+#if defined(GXOS_NATIVEAOT_C141_MANAGED_VERTICAL_STACK) || defined(GXOS_NATIVEAOT_C142_MANAGED_VERTICAL_STACK)
 static const char* const kManagedVerticalStackAliases[] = {
 	"Vertical Stack",
 	"Stack"
@@ -170,7 +170,7 @@ static const BuiltInAppMetadata kBuiltInAppMetadata[] = {
 #if defined(GXOS_NATIVEAOT_C140_MANAGED_SCROLL_VIEW)
 ,	{ "com.guidexos.apps.managed.scrollview", "Managed ScrollView", "Managed ScrollView", nullptr, nullptr, "app.generic", "Utilities", "Managed guideXOS bounded vertical ScrollView proof application.", BuiltInAvailabilityBareMetal, 0, 0, 0, false, false, detail::kManagedScrollViewAliases, sizeof(detail::kManagedScrollViewAliases) / sizeof(detail::kManagedScrollViewAliases[0]), true, true, true, false, false, false, false, BuiltInAppLaunchKind::ManagedNativeAot, 5u, kManagedNativeAotCompositeImagePath }
 #endif
-#if defined(GXOS_NATIVEAOT_C141_MANAGED_VERTICAL_STACK)
+#if defined(GXOS_NATIVEAOT_C141_MANAGED_VERTICAL_STACK) || defined(GXOS_NATIVEAOT_C142_MANAGED_VERTICAL_STACK)
 ,	{ "com.guidexos.apps.managed.verticalstack", "Managed Vertical Stack", "Managed Vertical Stack", nullptr, nullptr, "app.generic", "Utilities", "Managed guideXOS bounded non-owning vertical stack proof application.", BuiltInAvailabilityBareMetal, 0, 0, 0, false, false, detail::kManagedVerticalStackAliases, sizeof(detail::kManagedVerticalStackAliases) / sizeof(detail::kManagedVerticalStackAliases[0]), true, true, true, false, false, false, false, BuiltInAppLaunchKind::ManagedNativeAot, 5u, kManagedNativeAotCompositeImagePath }
 #endif
 };

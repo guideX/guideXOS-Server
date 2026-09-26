@@ -45,7 +45,11 @@ public sealed class GuideXosVerticalStack
         new IGuideXosVerticalStackMember[MaximumSupportedMemberCount];
     private readonly int[] _computedWidths =
         new int[MaximumSupportedMemberCount];
+    private readonly int[] _computedXs =
+        new int[MaximumSupportedMemberCount];
     private readonly int[] _computedYs =
+        new int[MaximumSupportedMemberCount];
+    private readonly int[] _desiredWidths =
         new int[MaximumSupportedMemberCount];
     private readonly int _capacity;
     private int _memberCount;
@@ -157,6 +161,7 @@ public sealed class GuideXosVerticalStack
         if (!TryAttachMember(member, this))
             return GuideXosVerticalStackResult.MembershipConflict;
 
+        _desiredWidths[_memberCount] = GetMemberWidth(member);
         _members[_memberCount++] = stackMember;
         GuideXosVerticalStackResult result = PerformLayout();
         if (result == GuideXosVerticalStackResult.LaidOut)
@@ -174,8 +179,12 @@ public sealed class GuideXosVerticalStack
         IGuideXosVerticalStackMember removed = _members[index];
         DetachMember(removed, this);
         for (int move = index + 1; move < _memberCount; move++)
+        {
             _members[move - 1] = _members[move];
+            _desiredWidths[move - 1] = _desiredWidths[move];
+        }
         _members[--_memberCount] = null;
+        _desiredWidths[_memberCount] = 0;
         GuideXosVerticalStackResult result = PerformLayout();
         return result == GuideXosVerticalStackResult.LaidOut
             ? GuideXosVerticalStackResult.Removed
@@ -188,6 +197,7 @@ public sealed class GuideXosVerticalStack
         for (int index = 0; index < _memberCount; index++)
             DetachMember(_members[index], this);
         Array.Clear(_members, 0, _memberCount);
+        Array.Clear(_desiredWidths, 0, _memberCount);
         _memberCount = 0;
         RecomputeEmptyHeight();
         return GuideXosVerticalStackResult.Cleared;
@@ -206,7 +216,7 @@ public sealed class GuideXosVerticalStack
     /// </summary>
     public GuideXosVerticalStackResult PerformLayout()
     {
-        if (!TryComputeLayout(out int[] widths, out int[] ys,
+        if (!TryComputeLayout(out int[] xs, out int[] widths, out int[] ys,
                 out int computedHeight))
             return GuideXosVerticalStackResult.LayoutFailed;
 
@@ -216,7 +226,7 @@ public sealed class GuideXosVerticalStack
             object member = _members[index];
             if (!IsMemberVisible(member)) continue;
             if (!TrySetMemberBounds(member,
-                    _x + _leftPadding, ys[visibleIndex], widths[visibleIndex]))
+                    xs[visibleIndex], ys[visibleIndex], widths[visibleIndex]))
                 return GuideXosVerticalStackResult.LayoutFailed;
             visibleIndex++;
         }
@@ -247,9 +257,10 @@ public sealed class GuideXosVerticalStack
         return true;
     }
 
-    private bool TryComputeLayout(out int[] widths, out int[] ys,
+    private bool TryComputeLayout(out int[] xs, out int[] widths, out int[] ys,
         out int computedHeight)
     {
+        xs = _computedXs;
         widths = _computedWidths;
         ys = _computedYs;
         computedHeight = 0;
@@ -259,23 +270,44 @@ public sealed class GuideXosVerticalStack
         {
             object member = _members[index];
             if (!IsMemberVisible(member)) continue;
-            int width = WidthPolicy == GuideXosVerticalStackWidthPolicy.KeepWidth
-                ? GetMemberWidth(member) : ComputeStretchWidth(member);
+            GuideXosVerticalStackHorizontalAlignment alignment =
+                GetEffectiveAlignment(member);
+            int desiredWidth = _desiredWidths[index];
+            if (desiredWidth < 1) desiredWidth = GetMemberWidth(member);
+            int width = alignment == GuideXosVerticalStackHorizontalAlignment.Stretch
+                ? ComputeStretchWidth(member)
+                : desiredWidth;
+            if (WidthPolicy == GuideXosVerticalStackWidthPolicy.KeepWidth &&
+                GetMemberAlignment(member) ==
+                    GuideXosVerticalStackHorizontalAlignment.Stretch)
+                width = GetMemberWidth(member);
             if (width < GetMemberMinimumWidth(member) ||
                 width > GetMemberMaximumWidth(member) ||
                 (RequiresCharacterAlignment(member) && width % 8 != 0))
                 return false;
+
+            long innerLeft = (long)_x + _leftPadding;
+            long innerRight = (long)_x + _width - _rightPadding;
+            long memberLeft = innerLeft + GetMemberMarginLeft(member);
+            long memberRight = innerRight - GetMemberMarginRight(member);
+            long usableWidth = memberRight - memberLeft;
+            long memberX = ComputeMemberX(alignment, memberLeft, memberRight,
+                usableWidth, width);
+            currentY += GetMemberMarginTop(member);
             long y = currentY;
-            long right = (long)_x + _leftPadding + width;
+            long right = memberX + width;
             long bottom = y + GetMemberHeight(member);
-            if (y < 0 || y > MaximumSupportedCoordinate ||
+            if (memberX < 0 || memberX > MaximumSupportedCoordinate ||
+                y < 0 || y > MaximumSupportedCoordinate ||
                 right > MaximumSupportedCoordinate + 1L ||
                 bottom > MaximumSupportedCoordinate + 1L ||
+                memberX < int.MinValue || memberX > int.MaxValue ||
                 y > MaximumSupportedCoordinate - GetMemberHeight(member))
                 return false;
+            xs[visibleCount] = (int)memberX;
             widths[visibleCount] = width;
             ys[visibleCount] = (int)y;
-            currentY = bottom;
+            currentY = bottom + GetMemberMarginBottom(member);
             ++visibleCount;
             if (HasVisibleMemberAfter(index))
                 currentY += _spacing;
@@ -292,12 +324,47 @@ public sealed class GuideXosVerticalStack
 
     private int ComputeStretchWidth(object member)
     {
-        long available = (long)_width - _leftPadding - _rightPadding;
-        if (available > int.MaxValue) return 0;
+        long available = (long)_width - _leftPadding - _rightPadding -
+            GetMemberMarginLeft(member) - GetMemberMarginRight(member);
+        if (available < 0) return 0;
+        if (available > int.MaxValue) return int.MaxValue;
         int width = (int)available;
         if (RequiresCharacterAlignment(member))
             width -= width % 8;
         return width;
+    }
+
+    private GuideXosVerticalStackHorizontalAlignment GetEffectiveAlignment(
+        object member)
+    {
+        GuideXosVerticalStackHorizontalAlignment alignment =
+            GetMemberAlignment(member);
+        return WidthPolicy == GuideXosVerticalStackWidthPolicy.KeepWidth &&
+            alignment == GuideXosVerticalStackHorizontalAlignment.Stretch
+            ? GuideXosVerticalStackHorizontalAlignment.Left : alignment;
+    }
+
+    private static long ComputeMemberX(
+        GuideXosVerticalStackHorizontalAlignment alignment,
+        long innerLeft, long innerRight, long usableWidth, int width)
+    {
+        long left = innerLeft;
+        switch (alignment)
+        {
+            case GuideXosVerticalStackHorizontalAlignment.Center:
+                left += FloorDivideByTwo(usableWidth - width);
+                break;
+            case GuideXosVerticalStackHorizontalAlignment.Right:
+                left = innerRight - width;
+                break;
+        }
+        return left;
+    }
+
+    private static long FloorDivideByTwo(long value)
+    {
+        if (value >= 0) return value / 2;
+        return -((-value + 1) / 2);
     }
 
     private bool HasVisibleMemberAfter(int index)
@@ -352,6 +419,82 @@ public sealed class GuideXosVerticalStack
             GuideXosProgressBar progress => progress.Width,
             GuideXosComboBox combo => combo.Width,
             _ => 0,
+        };
+    }
+
+    private static int GetMemberMarginLeft(object member)
+    {
+        return member switch
+        {
+            GuideXosButton button => button.MarginLeft,
+            GuideXosCheckBox checkBox => checkBox.MarginLeft,
+            GuideXosLabel label => label.MarginLeft,
+            GuideXosSeparator separator => separator.MarginLeft,
+            GuideXosRadioButton radio => radio.MarginLeft,
+            GuideXosProgressBar progress => progress.MarginLeft,
+            GuideXosComboBox combo => combo.MarginLeft,
+            _ => 0,
+        };
+    }
+
+    private static int GetMemberMarginTop(object member)
+    {
+        return member switch
+        {
+            GuideXosButton button => button.MarginTop,
+            GuideXosCheckBox checkBox => checkBox.MarginTop,
+            GuideXosLabel label => label.MarginTop,
+            GuideXosSeparator separator => separator.MarginTop,
+            GuideXosRadioButton radio => radio.MarginTop,
+            GuideXosProgressBar progress => progress.MarginTop,
+            GuideXosComboBox combo => combo.MarginTop,
+            _ => 0,
+        };
+    }
+
+    private static int GetMemberMarginRight(object member)
+    {
+        return member switch
+        {
+            GuideXosButton button => button.MarginRight,
+            GuideXosCheckBox checkBox => checkBox.MarginRight,
+            GuideXosLabel label => label.MarginRight,
+            GuideXosSeparator separator => separator.MarginRight,
+            GuideXosRadioButton radio => radio.MarginRight,
+            GuideXosProgressBar progress => progress.MarginRight,
+            GuideXosComboBox combo => combo.MarginRight,
+            _ => 0,
+        };
+    }
+
+    private static int GetMemberMarginBottom(object member)
+    {
+        return member switch
+        {
+            GuideXosButton button => button.MarginBottom,
+            GuideXosCheckBox checkBox => checkBox.MarginBottom,
+            GuideXosLabel label => label.MarginBottom,
+            GuideXosSeparator separator => separator.MarginBottom,
+            GuideXosRadioButton radio => radio.MarginBottom,
+            GuideXosProgressBar progress => progress.MarginBottom,
+            GuideXosComboBox combo => combo.MarginBottom,
+            _ => 0,
+        };
+    }
+
+    private static GuideXosVerticalStackHorizontalAlignment GetMemberAlignment(
+        object member)
+    {
+        return member switch
+        {
+            GuideXosButton button => button.HorizontalAlignment,
+            GuideXosCheckBox checkBox => checkBox.HorizontalAlignment,
+            GuideXosLabel label => label.HorizontalAlignment,
+            GuideXosSeparator separator => separator.HorizontalAlignment,
+            GuideXosRadioButton radio => radio.HorizontalAlignment,
+            GuideXosProgressBar progress => progress.HorizontalAlignment,
+            GuideXosComboBox combo => combo.HorizontalAlignment,
+            _ => GuideXosVerticalStackHorizontalAlignment.Stretch,
         };
     }
 

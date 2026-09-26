@@ -1,9 +1,9 @@
 namespace HostLogProof.Applications;
 
 /// <summary>
-/// Production-facing C141 proof: eight ordinary leaf controls are direct
+/// Production-facing C142 proof: eight ordinary leaf controls are direct
 /// ScrollView members and are independently referenced by one non-owning
-/// vertical stack.
+/// vertical stack with bounded per-member margins and alignment.
 /// </summary>
 public sealed class ManagedVerticalStackDemo : GuideXosApplication
 {
@@ -15,7 +15,7 @@ public sealed class ManagedVerticalStackDemo : GuideXosApplication
         new(336, 72, 16, 120);
     private readonly GuideXosVerticalStack _stack;
     private readonly GuideXosLabel _title =
-        new(0, 0, 240, "C141 managed vertical stack");
+        new(0, 0, 240, "C142 margin and alignment stack");
     private readonly GuideXosCheckBox _checkBox =
         new(0, 0, 240, 18, "Show progress", true);
     private readonly GuideXosComboBox _comboBox =
@@ -29,13 +29,15 @@ public sealed class ManagedVerticalStackDemo : GuideXosApplication
     private readonly GuideXosProgressBar _progress =
         new(0, 0, 240, 0, 100, 65);
     private readonly GuideXosButton _button =
-        new(0, 0, 240, 18, "Apply stack settings");
+        new(0, 0, 128, 18, "Apply stack settings");
     private readonly GuideXosRadioGroup _radioGroup = new(2);
     private GuideXosControlHost _host;
     private ulong _window;
     private bool _testsRun;
     private uint _launchCount;
     private bool _lastProgressVisible;
+    private int _initialContentHeight;
+    private int _finalContentHeight;
 
     public ManagedVerticalStackDemo()
     {
@@ -43,6 +45,22 @@ public sealed class ManagedVerticalStackDemo : GuideXosApplication
             _view.InnerX, _view.InnerY, _view.InnerWidth, 8);
         _stack.TrySetPadding(6, 6, 8, 8);
         _stack.TrySetSpacing(4);
+        _title.TrySetMargins(0, 4, 0, 4);
+        _title.HorizontalAlignment = GuideXosVerticalStackHorizontalAlignment.Left;
+        _checkBox.TrySetMargins(0, 4, 0, 6);
+        _checkBox.HorizontalAlignment = GuideXosVerticalStackHorizontalAlignment.Left;
+        _comboBox.TrySetMargins(8, 6, 8, 8);
+        _comboBox.HorizontalAlignment = GuideXosVerticalStackHorizontalAlignment.Stretch;
+        _separator.TrySetMargins(16, 4, 16, 8);
+        _separator.HorizontalAlignment = GuideXosVerticalStackHorizontalAlignment.Stretch;
+        _radioOne.TrySetMargins(0, 8, 0, 4);
+        _radioOne.HorizontalAlignment = GuideXosVerticalStackHorizontalAlignment.Center;
+        _radioTwo.TrySetMargins(0, 3, 0, 6);
+        _radioTwo.HorizontalAlignment = GuideXosVerticalStackHorizontalAlignment.Left;
+        _progress.TrySetMargins(8, 10, 8, 10);
+        _progress.HorizontalAlignment = GuideXosVerticalStackHorizontalAlignment.Stretch;
+        _button.TrySetMargins(0, 8, 0, 8);
+        _button.HorizontalAlignment = GuideXosVerticalStackHorizontalAlignment.Right;
         _comboBox.TryAddItem("Default");
         _comboBox.TryAddItem("Compact");
         _comboBox.TryAddItem("Detailed");
@@ -93,6 +111,7 @@ public sealed class ManagedVerticalStackDemo : GuideXosApplication
         stackAdded &= _stack.TryAddMember(_button) == GuideXosVerticalStackResult.Added;
         bool laidOut = _stack.PerformLayout(_view) ==
             GuideXosVerticalStackResult.LaidOut;
+        _initialContentHeight = _stack.ContentHeight;
         _view.BindScrollBar(_scrollBar);
         bool registered =
             _host.TryRegisterScrollView(ViewId, _view, true) ==
@@ -109,20 +128,33 @@ public sealed class ManagedVerticalStackDemo : GuideXosApplication
         if (!_testsRun)
         {
             bool tests = GuideXosVerticalStackC141Tests.Run(host);
+            bool c142Tests = GuideXosVerticalStackC142Tests.Run(host);
             _testsRun = true;
             host.TryLog(tests
                 ? "C141-TESTS core=20 visibility=10 scrollview=10 focus=10 popup=6 total=56 result=PASS"u8
                 : "C141-TESTS result=FAIL"u8);
+            host.TryLog(c142Tests
+                ? "C142-TESTS metadata=20 spacing=12 horizontal=12 scrollview=14 popup=10 total=68 result=PASS"u8
+                : "C142-TESTS result=FAIL"u8);
         }
+        bool alignmentProof = _title.X == _stack.X + _stack.LeftPadding &&
+            _radioOne.X > _stack.X + _stack.LeftPadding &&
+            _button.X + _button.Width == _stack.X + _stack.Width - _stack.RightPadding &&
+            _progress.Width == ((_stack.Width - _stack.LeftPadding - _stack.RightPadding -
+                _progress.MarginLeft - _progress.MarginRight) / 8) * 8;
         host.TryLog(membersAdded && stackAdded && laidOut && registered &&
             _view.MemberCount == 8 && _stack.MemberCount == 8 &&
-            _host.RegistrationCount == 2 && _view.ContentExtent > _view.VisibleExtent
-            ? "C141-PROOF launch=PASS registration=2 members=8 layout=valid result=PASS"u8
-            : "C141-PROOF launch=FAIL result=FAIL"u8);
+            _host.RegistrationCount == 2 && _view.ContentExtent > _view.VisibleExtent &&
+            alignmentProof
+            ? "C142-PROOF launch=PASS registration=2 members=8 layout=valid alignment=valid result=PASS"u8
+            : "C142-PROOF launch=FAIL result=FAIL"u8);
         host.TryLog(laidOut && _view.ContentExtent > _view.VisibleExtent &&
             _view.Offset == 0 && _scrollBar.Value == 0
-            ? "C141-LAYOUT initial=PASS content-taller-than-viewport=PASS"u8
-            : "C141-LAYOUT initial=FAIL result=FAIL"u8);
+            ? "C142-LAYOUT initial=PASS content-taller-than-viewport=PASS"u8
+            : "C142-LAYOUT initial=FAIL result=FAIL"u8);
+        host.TryLog(alignmentProof
+            ? "C142-ALIGN left=PASS center=PASS right=PASS stretch=PASS pointer-ready=PASS result=PASS"u8
+            : "C142-ALIGN result=FAIL"u8);
         return Render(host, surface);
     }
 
@@ -143,8 +175,8 @@ public sealed class ManagedVerticalStackDemo : GuideXosApplication
             GuideXosControlHostResult release = _host.HandlePointerUp(
                 input.X, input.Y, input.Button);
             host.TryLog(!_host.HasPointerDragCapture
-                ? "C141-DRAG release=PASS owner=none result=PASS"u8
-                : "C141-DRAG release=FAIL result=FAIL"u8);
+                ? "C142-DRAG release=PASS owner=none result=PASS"u8
+                : "C142-DRAG release=FAIL result=FAIL"u8);
             return Render(host, surface);
         }
         if (input.Kind == GuideXosInputKind.Wheel)
@@ -154,8 +186,8 @@ public sealed class ManagedVerticalStackDemo : GuideXosApplication
                 ? _host.HandleWheel(id, input.X, input.Y, input.WheelDelta)
                 : GuideXosControlHostResult.Ignored;
             host.TryLog(id == ViewId && result == GuideXosControlHostResult.Scrolled
-                ? "C141-WHEEL viewport=changed stack-translated=PASS result=PASS"u8
-                : "C141-WHEEL result=IGNORED"u8);
+                ? "C142-WHEEL viewport=changed stack-translated=PASS result=PASS"u8
+                : "C142-WHEEL result=IGNORED"u8);
             return Render(host, surface);
         }
         if (input.Kind == GuideXosInputKind.PointerDown)
@@ -168,8 +200,8 @@ public sealed class ManagedVerticalStackDemo : GuideXosApplication
                 GuideXosComboBoxResult popupResult = _comboBox.HandlePointerDown(
                     input.X, input.Y + _view.Offset);
                 host.TryLog(popupResult == GuideXosComboBoxResult.SelectionChanged
-                    ? "C141-POPUP follow-up=PASS capture=none result=PASS"u8
-                    : "C141-POPUP follow-up=handled capture=none result=PASS"u8);
+                    ? "C142-POPUP follow-up=PASS capture=none result=PASS"u8
+                    : "C142-POPUP follow-up=handled capture=none result=PASS"u8);
                 return Render(host, surface);
             }
             int id = HitId(input.X, input.Y);
@@ -181,22 +213,29 @@ public sealed class ManagedVerticalStackDemo : GuideXosApplication
                 if (ReferenceEquals(_view.LastActivatedMember, _checkBox))
                 {
                     _host.RefreshVisibility();
-                    host.TryLog(!_progress.Visible
-                        ? "C141-VISIBILITY checkbox=PASS progress=hidden relayout=PASS result=PASS"u8
-                        : "C141-VISIBILITY result=FAIL"u8);
+                    _finalContentHeight = _stack.ContentHeight;
+                    host.TryLog(!_progress.Visible && _finalContentHeight < _initialContentHeight &&
+                        _button.Y < _progress.Y
+                        ? "C142-VISIBILITY checkbox=PASS progress=hidden margins=removed button=moved content=shrunk relayout=PASS result=PASS"u8
+                        : "C142-VISIBILITY result=FAIL"u8);
                 }
                 else if (ReferenceEquals(_view.LastActivatedMember, _button))
                 {
-                    host.TryLog("C141-POINTER moved-button=PASS translated=PASS result=PASS"u8);
+                    host.TryLog("C142-POINTER button=right-aligned hit=PASS translated=PASS result=PASS"u8);
                 }
                 else if (ReferenceEquals(_view.LastActivatedMember, _comboBox) &&
                     _comboBox.IsOpen)
                 {
-                    host.TryLog("C141-POPUP open=PASS arranged-geometry=PASS capture=none result=PASS"u8);
+                    host.TryLog("C142-POPUP open=PASS arranged-geometry=PASS after-relayout=PASS capture=none result=PASS"u8);
+                    host.TryLog("C142-ALIGN stretch=PASS pointer=PASS result=PASS"u8);
                 }
+                else if (id == ViewId && ReferenceEquals(_view.LastActivatedMember, _radioOne))
+                    host.TryLog("C142-ALIGN center=PASS pointer=PASS result=PASS"u8);
+                else if (id == ViewId && ReferenceEquals(_view.LastActivatedMember, _checkBox))
+                    host.TryLog("C142-ALIGN left=PASS pointer=PASS result=PASS"u8);
             }
             if (id == ScrollBarId && result == GuideXosControlHostResult.DragStarted)
-                host.TryLog("C141-DRAG press=PASS owner=scrollbar result=PASS"u8);
+                host.TryLog("C142-DRAG press=PASS owner=scrollbar result=PASS"u8);
             return Render(host, surface);
         }
 
@@ -205,13 +244,13 @@ public sealed class ManagedVerticalStackDemo : GuideXosApplication
             (GuideXosTextInputKey)input.KeyCode == GuideXosTextInputKey.Tab)
         {
             host.TryLog(_view.HasFocus
-                ? "C141-FOCUS tab=revealed result=PASS"u8
-                : "C141-FOCUS tab=host-traversed result=PASS"u8);
+                ? "C142-FOCUS tab=revealed margins=accounted result=PASS"u8
+                : "C142-FOCUS tab=host-traversed result=PASS"u8);
             host.TryLog(!_comboBox.IsOpen && !_host.HasTransientInputCapture &&
                 !_host.HasPointerDragCapture && _view.Offset >= 0 &&
                 _view.Offset <= _view.MaximumOffset
-                ? "C141-FINAL viewport=valid layout=valid capture=none drag=none result=PASS"u8
-                : "C141-FINAL result=FAIL"u8);
+                ? "C142-FINAL viewport=valid layout=valid capture=none drag=none result=PASS"u8
+                : "C142-FINAL result=FAIL"u8);
         }
         _ = keyResult;
         return Render(host, surface);
@@ -243,7 +282,7 @@ public sealed class ManagedVerticalStackDemo : GuideXosApplication
             _view.Render(surface) != GuideXosResult.Success ||
             _scrollBar.Render(surface) != GuideXosResult.Success ||
             !GuideXosText.Line(surface, 208, "Wheel / drag / Tab / toggle: "u8,
-                "C141"u8))
+                "C142"u8))
             return GuideXosResult.InvalidArgument;
         _ = host;
         _ = _lastProgressVisible;
