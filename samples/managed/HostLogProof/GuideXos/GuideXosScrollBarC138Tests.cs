@@ -375,37 +375,27 @@ public static class GuideXosScrollBarC138Tests
     private static void BindTextArea(
         GuideXosTextArea area, GuideXosScrollBar bar)
     {
-        bar.Changed += value => area.SetFirstVisibleLine(value);
-        SyncTextArea(area, bar);
+        bar.BindViewport(area.VerticalViewport);
+        bar.SynchronizeViewport();
     }
 
     private static void SyncTextArea(
         GuideXosTextArea area, GuideXosScrollBar bar)
     {
-        bar.Minimum = 0;
-        bar.Maximum = area.MaximumFirstVisibleLine;
-        bar.PageSize = area.VisibleLineCount;
-        bar.SmallChange = 1;
-        bar.LargeChange = Math.Max(1, area.VisibleLineCount - 1);
-        bar.Value = area.FirstVisibleLine;
+        bar.SynchronizeViewport();
     }
 
     private static void BindListBox(
         GuideXosListBox list, GuideXosScrollBar bar)
     {
-        bar.Changed += value => list.SetFirstVisibleIndex(value);
-        SyncListBox(list, bar);
+        bar.BindViewport(list.VerticalViewport);
+        bar.SynchronizeViewport();
     }
 
     private static void SyncListBox(
         GuideXosListBox list, GuideXosScrollBar bar)
     {
-        bar.Minimum = 0;
-        bar.Maximum = list.MaximumFirstVisibleIndex;
-        bar.PageSize = list.VisibleRowCount;
-        bar.SmallChange = 1;
-        bar.LargeChange = Math.Max(1, list.VisibleRowCount - 1);
-        bar.Value = list.FirstVisibleIndex;
+        bar.SynchronizeViewport();
     }
 
     private static GuideXosTextArea NewTextArea(int lineCount)

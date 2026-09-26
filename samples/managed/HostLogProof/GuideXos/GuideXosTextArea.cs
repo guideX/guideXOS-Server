@@ -34,11 +34,11 @@ public sealed class GuideXosTextArea
     private readonly int _maximumLines;
     private readonly int _maximumRenderableColumns;
     private readonly int _visibleLineCount;
+    private readonly GuideXosVerticalViewport _viewport;
     private int _length;
     private int _lineCount = 1;
     private int _caretIndex;
     private int _anchorIndex;
-    private int _firstVisibleLine;
     private int _preferredColumn = -1;
     private bool _isFocused;
     private bool _isVisible = true;
@@ -75,6 +75,7 @@ public sealed class GuideXosTextArea
         _maximumLines = maximumLines;
         _visibleLineCount = visibleLineCount;
         _maximumRenderableColumns = maximumRenderableColumns;
+        _viewport = new GuideXosVerticalViewport(_lineCount, _visibleLineCount);
     }
 
     public int MaximumCharacters => _buffer.Length;
@@ -94,9 +95,9 @@ public sealed class GuideXosTextArea
     public bool EffectiveVisible => _isVisible;
     public bool IsSubmitted => _isSubmitted;
     public bool IsCancelled => _isCancelled;
-    public int FirstVisibleLine => _firstVisibleLine;
-    public int MaximumFirstVisibleLine =>
-        Math.Max(0, _lineCount - _visibleLineCount);
+    public int FirstVisibleLine => _viewport.Offset;
+    public int MaximumFirstVisibleLine => _viewport.MaximumOffset;
+    public GuideXosVerticalViewport VerticalViewport => _viewport;
     public int CaretLine => GetLineAndColumn(_caretIndex, out _);
     public int CaretColumn
     {
@@ -161,13 +162,8 @@ public sealed class GuideXosTextArea
         int boundedDelta = wheelDelta;
         if (boundedDelta > 8) boundedDelta = 8;
         if (boundedDelta < -8) boundedDelta = -8;
-        int prior = _firstVisibleLine;
-        int next = prior - boundedDelta * 3;
-        int maximumFirst = Math.Max(0, _lineCount - _visibleLineCount);
-        if (next < 0) next = 0;
-        if (next > maximumFirst) next = maximumFirst;
-        _firstVisibleLine = next;
-        return prior == next
+        bool changed = _viewport.ScrollSmall(-boundedDelta * 3);
+        return !changed
             ? GuideXosTextAreaEditResult.Ignored
             : GuideXosTextAreaEditResult.Scrolled;
     }
@@ -190,6 +186,7 @@ public sealed class GuideXosTextArea
         value.AsSpan().CopyTo(_buffer);
         _length = value.Length;
         _lineCount = lineCount;
+        _viewport.ContentExtent = _lineCount;
         ResetCaretToEnd();
         return true;
     }
@@ -212,6 +209,7 @@ public sealed class GuideXosTextArea
         }
         _length = value.Length;
         _lineCount = lineCount;
+        _viewport.ContentExtent = _lineCount;
         ResetCaretToEnd();
         return true;
     }
@@ -253,12 +251,7 @@ public sealed class GuideXosTextArea
     /// </summary>
     public bool SetFirstVisibleLine(int line)
     {
-        int maximum = MaximumFirstVisibleLine;
-        if (line < 0) line = 0;
-        if (line > maximum) line = maximum;
-        if (_firstVisibleLine == line) return false;
-        _firstVisibleLine = line;
-        return true;
+        return _viewport.SetOffset(line);
     }
 
     /// <summary>
@@ -283,7 +276,7 @@ public sealed class GuideXosTextArea
         }
 
         int row = (y - originY) / lineHeight;
-        int line = _firstVisibleLine + row;
+        int line = _viewport.Offset + row;
         if (line >= _lineCount) line = _lineCount - 1;
         int column = (x - originX) / characterWidth;
         int lineLength = GetLineLength(line);
@@ -359,7 +352,7 @@ public sealed class GuideXosTextArea
         Span<byte> rendered = stackalloc byte[64];
         for (int row = 0; row < _visibleLineCount; row++)
         {
-            int line = _firstVisibleLine + row;
+            int line = _viewport.Offset + row;
             rendered.Clear();
             int position = 0;
             if (!AppendByte(rendered, ref position,
@@ -478,6 +471,7 @@ public sealed class GuideXosTextArea
         _buffer[_caretIndex++] = value;
         _length++;
         _lineCount = newLineCount;
+        _viewport.ContentExtent = _lineCount;
         _anchorIndex = _caretIndex;
         _preferredColumn = -1;
         EnsureCaretVisible();
@@ -558,6 +552,7 @@ public sealed class GuideXosTextArea
         }
         _length -= count;
         _lineCount -= removedNewlines;
+        _viewport.ContentExtent = _lineCount;
         _anchorIndex = Math.Min(_anchorIndex, _length);
         _caretIndex = Math.Min(_caretIndex, _length);
         _preferredColumn = -1;
@@ -574,7 +569,7 @@ public sealed class GuideXosTextArea
     {
         _caretIndex = _length;
         _anchorIndex = _length;
-        _firstVisibleLine = 0;
+        _viewport.Offset = 0;
         _preferredColumn = -1;
         _isSubmitted = false;
         _isCancelled = false;
@@ -584,14 +579,7 @@ public sealed class GuideXosTextArea
     private void EnsureCaretVisible()
     {
         int line = CaretLine;
-        if (line < _firstVisibleLine) _firstVisibleLine = line;
-        if (line >= _firstVisibleLine + _visibleLineCount)
-        {
-            _firstVisibleLine = line - _visibleLineCount + 1;
-        }
-        int maximumFirst = Math.Max(0, _lineCount - _visibleLineCount);
-        if (_firstVisibleLine > maximumFirst) _firstVisibleLine = maximumFirst;
-        if (_firstVisibleLine < 0) _firstVisibleLine = 0;
+        _viewport.EnsureVisible(line);
     }
 
     private int GetLineAndColumn(int index, out int column)

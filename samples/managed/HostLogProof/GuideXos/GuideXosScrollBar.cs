@@ -50,6 +50,7 @@ public sealed class GuideXosScrollBar
     private int _dragStartThumbOffset;
     private int _dragStartValue;
     private bool _notifying;
+    private GuideXosVerticalViewport _boundViewport;
 
     public GuideXosScrollBar(
         int x,
@@ -126,6 +127,55 @@ public sealed class GuideXosScrollBar
     public bool IsScrollable => _maximum > _minimum;
     public event Action<int> Changed;
 
+    /// <summary>
+    /// Binds the bar to one authoritative logical vertical viewport.  The bar
+    /// derives its range, page, and step values from the viewport; it never
+    /// recomputes content-minus-visible mathematics itself.
+    /// </summary>
+    public void BindViewport(GuideXosVerticalViewport viewport)
+    {
+        if (ReferenceEquals(_boundViewport, viewport))
+        {
+            SynchronizeViewport();
+            return;
+        }
+
+        if (_boundViewport != null)
+        {
+            _boundViewport.StateChanged -= OnBoundViewportStateChanged;
+            Changed -= OnBoundScrollBarChanged;
+        }
+
+        _boundViewport = viewport;
+        if (_boundViewport == null) return;
+
+        _boundViewport.StateChanged += OnBoundViewportStateChanged;
+        Changed += OnBoundScrollBarChanged;
+        SynchronizeViewport();
+    }
+
+    public void UnbindViewport()
+    {
+        if (_boundViewport == null) return;
+        _boundViewport.StateChanged -= OnBoundViewportStateChanged;
+        Changed -= OnBoundScrollBarChanged;
+        _boundViewport = null;
+    }
+
+    public bool HasViewportBinding => _boundViewport != null;
+
+    /// <summary>Refreshes range/page/value after external model replacement.</summary>
+    public void SynchronizeViewport()
+    {
+        if (_boundViewport == null) return;
+        Minimum = 0;
+        Maximum = _boundViewport.MaximumOffset;
+        PageSize = _boundViewport.VisibleExtent;
+        SmallChange = _boundViewport.SmallChange;
+        LargeChange = _boundViewport.LargeChange;
+        Value = _boundViewport.Offset;
+    }
+
     public int TrackTop => _y + TrackArrowPixels;
     public int TrackLength => Math.Max(0, _height - TrackArrowPixels * 2);
     public int ThumbHeight => CalculateThumbHeight();
@@ -134,6 +184,16 @@ public sealed class GuideXosScrollBar
 
     private int TrackArrowPixels => _height >= ArrowPixels * 2 + 1
         ? ArrowPixels : 0;
+
+    private void OnBoundViewportStateChanged()
+    {
+        SynchronizeViewport();
+    }
+
+    private void OnBoundScrollBarChanged(int value)
+    {
+        if (_boundViewport != null) _boundViewport.Offset = value;
+    }
 
     public void Focus()
     {

@@ -5,7 +5,7 @@ param(
     [string]$PythonExe = "",
     [int]$FreshBootCount = 3,
     [int]$TimeoutSeconds = 360,
-    [ValidateSet("C120", "C121", "C122", "C123", "C124", "C125", "C126", "C127", "C128", "C129", "C130", "C131", "C132", "C133", "C134", "C135", "C136", "C137", "C138")]
+    [ValidateSet("C120", "C121", "C122", "C123", "C124", "C125", "C126", "C127", "C128", "C129", "C130", "C131", "C132", "C133", "C134", "C135", "C136", "C137", "C138", "C139")]
     [string]$ProofPhase = "C120",
     [ValidateSet("Production", "FocusedApi", "FocusedHost")]
     [string]$C135ProofMode = "Production",
@@ -38,7 +38,8 @@ $isC134 = $ProofPhase -eq "C134"
 $isC135 = $ProofPhase -eq "C135"
 $isC136 = $ProofPhase -eq "C136"
 $isC137 = $ProofPhase -eq "C137"
-$isC138 = $ProofPhase -eq "C138"
+$isC139 = $ProofPhase -eq "C139"
+$isC138 = $ProofPhase -eq "C138" -or $isC139
 $isC135FocusedApi = $isC135 -and $C135ProofMode -eq "FocusedApi"
 $isC135FocusedHost = $isC135 -and $C135ProofMode -eq "FocusedHost"
 if (-not $isC135 -and $C135ProofMode -ne "Production") {
@@ -55,7 +56,9 @@ $startAheadBehind = if ($startUpstream) {
     (& git -C $RepoRoot rev-list --left-right --count "HEAD...$startUpstream").Trim()
 } else { "" }
 if ([string]::IsNullOrWhiteSpace($EvidenceRoot)) {
-    $EvidenceRoot = if ($isC138) {
+    $EvidenceRoot = if ($isC139) {
+        Join-Path $RepoRoot "out\dotnet\c139-shared-scroll-viewport"
+    } elseif ($isC138) {
         Join-Path $RepoRoot "out\dotnet\c138-managed-scrollbar"
     } elseif ($isC137) {
         Join-Path $RepoRoot "out\dotnet\c137-mouse-wheel-scrolling"
@@ -996,6 +999,10 @@ function Assert-C120Serial([string]$Serial) {
             '^\[C102-MANAGED-OUTPUT\] C138-LIST-DRAG release=PASS viewport=bottom selection=preserved result=PASS',
             '^\[C102-MANAGED-OUTPUT\].*C136-CONTEXT-OPEN invoke=Secondary.*result=PASS',
             '^\[C138-RELAUNCH\] close=PASS relaunch=PASS result=PASS')
+        if ($isC139) {
+            $required += @(
+                '^\[C102-MANAGED-OUTPUT\] C139-TESTS viewport=30 textarea=10 listbox=10 cross=4 cases=54 result=PASS')
+        }
     } elseif ($isC137) {
         $required += @(
             '^\[C137-APPMODEL\] catalogValid=true result=PASS',
@@ -1363,7 +1370,7 @@ if (-not $SkipManagedBuild -and -not $providedComposite) {
         "-RuntimePackOutputRoot", $runtimePackOutputRoot,
         "-UseGuideXosRuntimePack", "-ProductionApplication", "-PersistentCompositeLifecycle",
         "-AllocationMode", "Allocating", "-ManagedProjectMode",
-        $(if ($isC138) { "C138Composite" } elseif ($isC137) { "C137Composite" } elseif ($isC136) { "C136Composite" } elseif ($isC135) { "C135Composite" } elseif ($isC134) { "C134Composite" } elseif ($isC133) { "C133Composite" } elseif ($isC132) { "C132Composite" } elseif ($isC131) { "C131Composite" } elseif ($isC129) { "C129Composite" } elseif ($isC128) { "C128Composite" } elseif ($isC130 -or $isC127) { "C127Composite" } elseif ($isC126) { "C126Composite" } elseif ($isC125) { "C125Composite" } elseif ($isC124) { "C124Composite" } elseif ($isC123) { "C123Composite" } elseif ($isC122) { "C122Composite" } elseif ($isC121) { "C121Composite" } else { "C120Composite" }),
+        $(if ($isC139) { "C139Composite" } elseif ($isC138) { "C138Composite" } elseif ($isC137) { "C137Composite" } elseif ($isC136) { "C136Composite" } elseif ($isC135) { "C135Composite" } elseif ($isC134) { "C134Composite" } elseif ($isC133) { "C133Composite" } elseif ($isC132) { "C132Composite" } elseif ($isC131) { "C131Composite" } elseif ($isC129) { "C129Composite" } elseif ($isC128) { "C128Composite" } elseif ($isC130 -or $isC127) { "C127Composite" } elseif ($isC126) { "C126Composite" } elseif ($isC125) { "C125Composite" } elseif ($isC124) { "C124Composite" } elseif ($isC123) { "C123Composite" } elseif ($isC122) { "C122Composite" } elseif ($isC121) { "C121Composite" } else { "C120Composite" }),
         "-PythonExe", $PythonExe)
     if ($isC134) { $managedBuildArguments += "-IncludeC134FocusedTests" }
     if ($isC135) { $managedBuildArguments += "-IncludeC135FocusedTests" }
@@ -1580,6 +1587,8 @@ $sourceFiles = @(
     "samples\managed\HostLogProof\GuideXos\GuideXosListBox.cs",
     "samples\managed\HostLogProof\GuideXos\GuideXosScrollBar.cs",
     "samples\managed\HostLogProof\GuideXos\GuideXosScrollBarC138Tests.cs",
+    "samples\managed\HostLogProof\GuideXos\GuideXosVerticalViewport.cs",
+    "samples\managed\HostLogProof\GuideXos\GuideXosSharedScrollViewportC139Tests.cs",
     "samples\managed\HostLogProof\GuideXos\GuideXosMouseWheelC137Tests.cs",
     "samples\managed\HostLogProof\GuideXos\GuideXosFilePicker.cs",
     "samples\managed\HostLogProof\Applications\ManagedNotes.cs",
@@ -1600,6 +1609,7 @@ $sourceFiles = @(
     "scripts\dotnet\run-c133-managed-combobox.ps1",
     "scripts\dotnet\run-c135-managed-popup-menu.ps1",
     "scripts\dotnet\run-c136-secondary-pointer-context-menu.ps1",
+    "scripts\dotnet\run-c139-shared-scroll-viewport.ps1",
     "docs\dotnet\NATIVEAOT_C122_MANAGED_LABEL.md",
     "docs\dotnet\NATIVEAOT_C123_MANAGED_SEPARATOR.md",
     "docs\dotnet\NATIVEAOT_C124_MANAGED_RADIO_BUTTON.md",
@@ -1616,7 +1626,8 @@ $sourceFiles = @(
     "docs\dotnet\NATIVEAOT_C135_MANAGED_POPUP_MENU.md",
     "docs\dotnet\NATIVEAOT_C136_SECONDARY_POINTER_CONTEXT_MENU.md",
     "docs\dotnet\NATIVEAOT_C137_MOUSE_WHEEL_SCROLLING.md",
-    "docs\dotnet\NATIVEAOT_C138_MANAGED_SCROLLBAR.md")
+    "docs\dotnet\NATIVEAOT_C138_MANAGED_SCROLLBAR.md",
+    "docs\dotnet\NATIVEAOT_C139_SHARED_SCROLL_VIEWPORT.md")
 $sourceHashes = [ordered]@{}
 foreach ($sourceFile in $sourceFiles) { $sourceHashes[$sourceFile] = Get-Hash (Join-Path $RepoRoot $sourceFile) }
 
@@ -1705,6 +1716,14 @@ if ($isC138) {
     $manifest.notes.commands = "physical QEMU pointer motion/down/up proves TextArea thumb drag outside bounds, track paging, popup blocking, ListBox drag with selection preservation, pointer row mapping, wheel after drag, and close/relaunch"
     $manifest.notes.capture = "final transient popup capture none; final pointer drag owner none"
     $manifest.documentation = "docs\dotnet\NATIVEAOT_C138_MANAGED_SCROLLBAR.md"
+}
+if ($isC139) {
+    $manifest.controlHost.tests = "C139 viewport 30; TextArea migration 10; ListBox migration 10; cross-control 4; total 54; C138 62 and C137 46 retained"
+    $manifest.scrollViewport = [ordered]@{ api = "GuideXosVerticalViewport"; invariants = "ContentExtent >= 0; VisibleExtent >= 0; 0 <= Offset <= MaximumOffset; MaximumOffset=max(0, ContentExtent-VisibleExtent)"; smallChange = 1; largeChange = "max(1, VisibleExtent-1)"; notification = "Changed fires once only for effective Offset changes; bounded reentrant dispatch"; binding = "ScrollBar derives range/page/value from the shared viewport" }
+    $manifest.notes.order = "Open, Save, Save As, Show Path, Status display, Document, C139 TextArea, C137 ListBox, C139 TextArea ScrollBar, C139 ListBox ScrollBar; registration remains 10"
+    $manifest.notes.commands = "C139 reuses the C138 physical wheel, ScrollBar drag, track paging, popup conflict, ListBox selection, pointer mapping, and close/relaunch proof while exercising shared viewport state"
+    $manifest.notes.capture = "final transient popup capture none; final pointer drag owner none"
+    $manifest.documentation = "docs\dotnet\NATIVEAOT_C139_SHARED_SCROLL_VIEWPORT.md"
 }
 $manifest | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath (Join-Path $EvidenceRoot ("{0}.manifest.json" -f $phaseLower)) -Encoding ASCII
 Write-Host "$ProofPhase outcome=$($manifest.outcome) evidence=$EvidenceRoot" -ForegroundColor Green

@@ -679,6 +679,11 @@ public sealed class ManagedNotes : GuideXosApplication
     private bool _c138TestsRun;
     private bool _c138TestsPassed;
     private bool _c138BindingsInstalled;
+#if HOSTLOGPROOF_C139_SHARED_SCROLL_VIEWPORT
+    private bool _c139ProofContext;
+    private bool _c139TestsRun;
+    private bool _c139TestsPassed;
+#endif
 #endif
 #endif
 #endif
@@ -891,6 +896,19 @@ public sealed class ManagedNotes : GuideXosApplication
             host.LaunchContext.Utf8.SequenceEqual("c138-api"u8) ||
             host.LaunchContext.Utf8.SequenceEqual("c138-host-tests"u8) ||
             host.LaunchContext.Utf8.SequenceEqual("c138-relaunch"u8);
+#if HOSTLOGPROOF_C139_SHARED_SCROLL_VIEWPORT
+        _c139ProofContext = host.LaunchContext.Utf8.SequenceEqual("c139"u8) ||
+            host.LaunchContext.Utf8.SequenceEqual("c139-native"u8) ||
+            host.LaunchContext.Utf8.SequenceEqual("c139-api"u8) ||
+            host.LaunchContext.Utf8.SequenceEqual("c139-host-tests"u8) ||
+            host.LaunchContext.Utf8.SequenceEqual("c139-relaunch"u8) ||
+            host.LaunchContext.Utf8.SequenceEqual("c138"u8) ||
+            host.LaunchContext.Utf8.SequenceEqual("c138-native"u8) ||
+            host.LaunchContext.Utf8.SequenceEqual("c138-api"u8) ||
+            host.LaunchContext.Utf8.SequenceEqual("c138-host-tests"u8) ||
+            host.LaunchContext.Utf8.SequenceEqual("c138-relaunch"u8);
+        _c138ProofContext = _c138ProofContext || _c139ProofContext;
+#endif
         _c137ProofContext = _c137ProofContext || _c138ProofContext;
 #if HOSTLOGPROOF_C135_REUSABLE_POPUP_MENU
         _c135ProofContext = _c135ProofContext || _c138ProofContext;
@@ -1910,6 +1928,18 @@ public sealed class ManagedNotes : GuideXosApplication
                 ? "C138-TESTS api=22 drag-host=20 textarea=10 listbox=10 cases=62 result=PASS"u8
                 : "C138-TESTS api=FAIL drag-host=FAIL binding=FAIL result=FAIL"u8);
         }
+#if HOSTLOGPROOF_C139_SHARED_SCROLL_VIEWPORT
+        bool c139Tests = _c139ProofContext && !_c139TestsRun
+            ? GuideXosSharedScrollViewportC139Tests.Run(host) : true;
+        if (_c139ProofContext)
+        {
+            _c139TestsRun = true;
+            _c139TestsPassed = c139Tests;
+            host.TryLog(c139Tests
+                ? "C139-TESTS viewport=30 textarea=10 listbox=10 cross=4 cases=54 result=PASS"u8
+                : "C139-TESTS result=FAIL"u8);
+        }
+#endif
 #endif
 #endif
 #endif
@@ -4304,10 +4334,8 @@ public sealed class ManagedNotes : GuideXosApplication
     {
         if (!_c138BindingsInstalled)
         {
-            _c138TextScrollBar.Changed += value =>
-                _textArea.SetFirstVisibleLine(value);
-            _c138ListScrollBar.Changed += value =>
-                _c137ListBox.SetFirstVisibleIndex(value);
+            _c138TextScrollBar.BindViewport(_textArea.VerticalViewport);
+            _c138ListScrollBar.BindViewport(_c137ListBox.VerticalViewport);
             _c138BindingsInstalled = true;
         }
         SyncC138ScrollBars();
@@ -4315,21 +4343,8 @@ public sealed class ManagedNotes : GuideXosApplication
 
     private void SyncC138ScrollBars()
     {
-        _c138TextScrollBar.Minimum = 0;
-        _c138TextScrollBar.Maximum = _textArea.MaximumFirstVisibleLine;
-        _c138TextScrollBar.PageSize = _textArea.VisibleLineCount;
-        _c138TextScrollBar.SmallChange = 1;
-        _c138TextScrollBar.LargeChange =
-            Math.Max(1, _textArea.VisibleLineCount - 1);
-        _c138TextScrollBar.Value = _textArea.FirstVisibleLine;
-
-        _c138ListScrollBar.Minimum = 0;
-        _c138ListScrollBar.Maximum = _c137ListBox.MaximumFirstVisibleIndex;
-        _c138ListScrollBar.PageSize = _c137ListBox.VisibleRowCount;
-        _c138ListScrollBar.SmallChange = 1;
-        _c138ListScrollBar.LargeChange =
-            Math.Max(1, _c137ListBox.VisibleRowCount - 1);
-        _c138ListScrollBar.Value = _c137ListBox.FirstVisibleIndex;
+        _c138TextScrollBar.SynchronizeViewport();
+        _c138ListScrollBar.SynchronizeViewport();
     }
 #endif
 #endif

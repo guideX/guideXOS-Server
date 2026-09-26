@@ -39,9 +39,9 @@ public sealed class GuideXosListBox
     private readonly int _maximumLabelLength;
     private readonly int _visibleRowCount;
     private readonly int _renderWidth;
+    private readonly GuideXosVerticalViewport _viewport;
     private int _itemCount;
     private int _selectedIndex = -1;
-    private int _firstVisibleIndex;
     private bool _isFocused;
     private bool _isVisible = true;
     private bool _isEnabled = true;
@@ -76,6 +76,7 @@ public sealed class GuideXosListBox
         _maximumLabelLength = maximumLabelLength;
         _visibleRowCount = visibleRowCount;
         _renderWidth = renderWidth;
+        _viewport = new GuideXosVerticalViewport(0, _visibleRowCount);
     }
 
     public int MaximumItemCount => _labelLengths.Length;
@@ -91,9 +92,9 @@ public sealed class GuideXosListBox
     public bool Visible => _isVisible;
     public bool Enabled => _isEnabled;
     public bool EffectiveVisible => _isVisible;
-    public int FirstVisibleIndex => _firstVisibleIndex;
-    public int MaximumFirstVisibleIndex =>
-        Math.Max(0, _itemCount - _visibleRowCount);
+    public int FirstVisibleIndex => _viewport.Offset;
+    public int MaximumFirstVisibleIndex => _viewport.MaximumOffset;
+    public GuideXosVerticalViewport VerticalViewport => _viewport;
     public uint RejectedOperationCount => _rejectedOperationCount;
 
     public bool IsValidIndex(int index)
@@ -127,6 +128,7 @@ public sealed class GuideXosListBox
         }
         _labelLengths[_itemCount] = label.Length;
         ++_itemCount;
+        _viewport.ContentExtent = _itemCount;
         if (_selectedIndex < 0)
         {
             _selectedIndex = 0;
@@ -139,7 +141,8 @@ public sealed class GuideXosListBox
     {
         _itemCount = 0;
         _selectedIndex = -1;
-        _firstVisibleIndex = 0;
+        _viewport.ContentExtent = 0;
+        _viewport.Offset = 0;
     }
 
     public void Focus(bool reconcileSelection = true)
@@ -178,12 +181,7 @@ public sealed class GuideXosListBox
     /// </summary>
     public bool SetFirstVisibleIndex(int index)
     {
-        int maximum = MaximumFirstVisibleIndex;
-        if (index < 0) index = 0;
-        if (index > maximum) index = maximum;
-        if (_firstVisibleIndex == index) return false;
-        _firstVisibleIndex = index;
-        return true;
+        return _viewport.SetOffset(index);
     }
 
     /// <summary>Moves only the bounded viewport; selection is unchanged.</summary>
@@ -199,13 +197,8 @@ public sealed class GuideXosListBox
         int boundedDelta = wheelDelta;
         if (boundedDelta > 8) boundedDelta = 8;
         if (boundedDelta < -8) boundedDelta = -8;
-        int prior = _firstVisibleIndex;
-        int maximumFirst = Math.Max(0, _itemCount - _visibleRowCount);
-        int next = prior - boundedDelta * 3;
-        if (next < 0) next = 0;
-        if (next > maximumFirst) next = maximumFirst;
-        _firstVisibleIndex = next;
-        return prior == next
+        bool changed = _viewport.ScrollSmall(-boundedDelta * 3);
+        return !changed
             ? GuideXosListBoxResult.Ignored
             : GuideXosListBoxResult.Scrolled;
     }
@@ -282,7 +275,7 @@ public sealed class GuideXosListBox
         // scrolled viewport.
         _isFocused = true;
         int row = (y - originY) / lineHeight;
-        int index = _firstVisibleIndex + row;
+        int index = _viewport.Offset + row;
         if (!IsValidIndex(index)) return GuideXosListBoxResult.Focused;
         GuideXosListBoxResult result = SelectIndexInternal(index);
         return result == GuideXosListBoxResult.Ignored
@@ -310,7 +303,7 @@ public sealed class GuideXosListBox
         {
             line.Clear();
             int position = 0;
-            int index = _firstVisibleIndex + row;
+            int index = _viewport.Offset + row;
             if (!AppendByte(line, ref position,
                     index == _selectedIndex ? (byte)'>' : (byte)' ') ||
                 !AppendByte(line, ref position, (byte)' '))
@@ -358,21 +351,11 @@ public sealed class GuideXosListBox
     {
         if (_itemCount == 0)
         {
-            _firstVisibleIndex = 0;
+            _viewport.Offset = 0;
             return;
         }
         if (_selectedIndex < 0) _selectedIndex = 0;
-        if (_selectedIndex < _firstVisibleIndex)
-        {
-            _firstVisibleIndex = _selectedIndex;
-        }
-        else if (_selectedIndex >= _firstVisibleIndex + _visibleRowCount)
-        {
-            _firstVisibleIndex = _selectedIndex - _visibleRowCount + 1;
-        }
-        int maximumFirst = Math.Max(0, _itemCount - _visibleRowCount);
-        if (_firstVisibleIndex > maximumFirst) _firstVisibleIndex = maximumFirst;
-        if (_firstVisibleIndex < 0) _firstVisibleIndex = 0;
+        _viewport.EnsureVisible(_selectedIndex);
     }
 
     private GuideXosListBoxResult RejectOperation()
