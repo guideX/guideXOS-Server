@@ -177,5 +177,21 @@ the next question.
 
 ## Artifact
 
-The ISO path, size, SHA-256, manifest, QEMU smoke result, source commit, and
-push status are recorded in the Phase 23 completion report after packaging.
+Packaged artifact:
+
+- ISO: `dist/guideXOS-Server-v0.1.0-phase23-aida-i219-dma-fetch-audit-amd64.iso`
+- Size: `91,293,696` bytes
+- SHA-256: `206cde13aba26ea86b6ad0eb878cfbb381a26422beaccbdc3216680d953e5d47`
+- Manifest: `dist/guideXOS-Server-v0.1.0-phase23-aida-i219-dma-fetch-audit-amd64.manifest.json`
+- Source commit used for the image: `eac39c031d8c370b2f92fcd5af8438271e9bcaac`
+- Build identity: `GXOS-P7-4-eac39c031d8c-4861ed26-3ddc-4741-ac90-17f83ea33766`
+
+The ISO passed structural UEFI boot-image verification and the repository
+QEMU release smoke. The smoke reached firmware boot entry, bootloader, kernel,
+ramdisk, desktop readiness, and kernel main loop. This is an emulated boot
+check, not a physical I219 result. Its serial log is under
+`out/release-iso/qemu-test-e9aa9e45053547b3a0547270c782fd0b/serial.log`.
+
+The DMA diagnostic code and image inputs were committed with the source commit
+above. A documentation-only completion update follows in the local history;
+the final push status is reported with that commit.
