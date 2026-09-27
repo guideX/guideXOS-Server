@@ -32,7 +32,10 @@ enum : gx_result {
     GX_ERROR_PERMISSION_DENIED = -5,
     GX_ERROR_INTERNAL = -6,
     GX_ERROR_TIMEOUT = -7,
-    GX_ERROR_BUSY = -8
+    GX_ERROR_BUSY = -8,
+    GX_ERROR_NOT_FOUND = -9,
+    GX_ERROR_NOT_MOUNTED = -10,
+    GX_ERROR_IO = -11
 };
 
 typedef uint64_t gx_handle;

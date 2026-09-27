@@ -72,6 +72,7 @@ param(
     [switch]$Phase29GBeginDebugReturnOnly,
     [switch]$Phase29FDebugStartOnly,
     [switch]$Phase29COnly,
+    [switch]$Phase29ISentinelOnly,
     [switch]$Phase29EManifestOnly
 )
 
@@ -82,6 +83,7 @@ $ErrorActionPreference = "Stop"
 if ($Phase29EManifestOnly) { $Phase29COnly = $true }
 if ($Phase29GBeginDebugReturnOnly) { $Phase29FDebugStartOnly = $true }
 if ($Phase29FDebugStartOnly) { $Phase28QOnly = $true }
+if ($Phase29ISentinelOnly) { $Phase28QOnly = $true }
 if ($Phase29COnly) { $Phase28QOnly = $true }
 if ($Phase28QOnly) {
     $Phase27E = $false; $Phase27F = $false; $Phase27G = $false; $Phase27H = $false
@@ -359,7 +361,7 @@ if ($Phase27Y -and $TimeoutSeconds -lt 120) { $TimeoutSeconds = 120 }
 if ($Phase27Z -and $TimeoutSeconds -lt 120) { $TimeoutSeconds = 120 }
 if (($Phase28A -or $Phase28B -or $Phase28C -or $Phase28D -or $Phase28E -or $Phase28F -or $Phase28G -or $Phase28H -or $Phase28I) -and $TimeoutSeconds -lt 120) { $TimeoutSeconds = 120 }
 if (($Phase28J -or $Phase28K) -and $TimeoutSeconds -lt 120) { $TimeoutSeconds = 120 }
-if (($Phase28L -or $Phase28M -or $Phase28N -or $Phase28OOnly -or $Phase28POnly -or $Phase28QOnly -or $Phase29COnly -or $Phase29EManifestOnly) -and $TimeoutSeconds -lt 120) { $TimeoutSeconds = 120 }
+if (($Phase28L -or $Phase28M -or $Phase28N -or $Phase28OOnly -or $Phase28POnly -or $Phase28QOnly -or $Phase29COnly -or $Phase29ISentinelOnly -or $Phase29EManifestOnly) -and $TimeoutSeconds -lt 120) { $TimeoutSeconds = 120 }
 $root = Split-Path -Parent $PSScriptRoot
 $kernelDirectory = Join-Path $root "kernel"
 $espDirectory = Join-Path $root "ESP"
@@ -402,6 +404,18 @@ $phase28mFixtureDirectory = Join-Path $root "scripts/fixtures/phase28m"
 $phase28oFixtureDirectory = Join-Path $root "ESP/P28O"
 $phase28qFixtureDirectory = Join-Path $root "ESP/P28Q"
 $developerStudioRoot = Join-Path (Split-Path -Parent $root) "guideXOS_Developer_Studio"
+$diagnosticSentinelDefinition = Join-Path $developerStudioRoot "src/developer_studio_diagnostic_sentinel.h"
+$diagnosticSentinelGuestPath = $null
+$diagnosticSentinelContent = $null
+if (Test-Path -LiteralPath $diagnosticSentinelDefinition -PathType Leaf) {
+    $sentinelDefinitionText = [IO.File]::ReadAllText($diagnosticSentinelDefinition)
+    $pathMatch = [regex]::Match($sentinelDefinitionText, '(?m)^#define GUIDEXOS_PHASE28Q_DIAGNOSTIC_SENTINEL_PATH "([^"]+)"\s*$')
+    $contentMatch = [regex]::Match($sentinelDefinitionText, '(?m)^#define GUIDEXOS_PHASE28Q_DIAGNOSTIC_SENTINEL_CONTENT "([^"]+)"\s*$')
+    if ($pathMatch.Success -and $contentMatch.Success) {
+        $diagnosticSentinelGuestPath = $pathMatch.Groups[1].Value
+        $diagnosticSentinelContent = $contentMatch.Groups[1].Value
+    }
+}
 $developerStudioPackageDirectory = Join-Path $root "Apps/DeveloperStudio"
 $phase27eAppDirectory = Join-Path $root "Apps/DS27E"
 $phase27fAppDirectory = Join-Path $root "Apps/DS27F"
@@ -464,20 +478,56 @@ function Get-Fnv1a64Hex([string]$path) {
     return ('0x{0:X16}' -f [uint64]$hash)
 }
 
-function Assert-Phase28ZBootImage([int]$runNumber, [string]$imageRoot) {
+function Get-Phase29IBootTreeIdentity([string]$imageRoot) {
+    $rows = New-Object 'System.Collections.Generic.List[string]'
+    $resolvedRoot = [IO.Path]::GetFullPath($imageRoot).TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
+    foreach ($file in Get-ChildItem -LiteralPath $imageRoot -Recurse -File | Sort-Object FullName) {
+        $relativePath = $file.FullName.Substring($resolvedRoot.Length).Replace('\', '/')
+        $hash = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToUpperInvariant()
+        $rows.Add("$relativePath|$($file.Length)|$hash")
+    }
+    $manifest = [Text.Encoding]::UTF8.GetBytes(($rows -join "`n"))
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try { return ([BitConverter]::ToString($sha.ComputeHash($manifest))).Replace('-', '') }
+    finally { $sha.Dispose() }
+}
+
+function Assert-Phase28ZBootImage([int]$runNumber, [string]$imageRoot, [string]$stageId) {
+    if (!$diagnosticSentinelGuestPath -or !$diagnosticSentinelContent) {
+        throw "P29I canonical sentinel definition is missing or invalid: $diagnosticSentinelDefinition"
+    }
+    $sentinelRelativePath = $diagnosticSentinelGuestPath.TrimStart('/').Replace('/', [IO.Path]::DirectorySeparatorChar)
+    $sentinel = Join-Path $imageRoot $sentinelRelativePath
     $kernelHash = Get-Phase28ZHash (Join-Path $imageRoot "kernel.elf") "kernel artifact"
     $studioHash = Get-Phase28ZHash (Join-Path $imageRoot "Apps/DeveloperStudio/bin/amd64/developerstudio.elf") "Developer Studio AMD64 payload"
     $projectHash = Get-Phase28ZHash (Join-Path $imageRoot "P28Q/guidexos.project") "diagnostic project"
     $configHash = Get-Phase28ZHash (Join-Path $imageRoot "Apps/DeveloperStudio/app.json") "Developer Studio configuration"
-    $sentinel = Join-Path $imageRoot "Apps/DeveloperStudio/.phase28q-diagnostic"
     if (!(Test-Path -LiteralPath $sentinel -PathType Leaf)) {
-        throw "P28Z BOOT_IMAGE staging failed on boot ${runNumber}: .phase28q-diagnostic is absent"
+        throw "P29I BOOT_IMAGE staging failed on boot ${runNumber}: canonical sentinel is absent at $sentinel"
+    }
+    $sentinelBytes = [IO.File]::ReadAllBytes($sentinel)
+    $sentinelText = [Text.Encoding]::UTF8.GetString($sentinelBytes)
+    if ($sentinelText -cne $diagnosticSentinelContent) {
+        throw "P29I BOOT_IMAGE staging failed on boot ${runNumber}: sentinel content mismatch at $sentinel"
     }
     foreach ($fixture in @("P28Q/CMakeLists.txt", "P28Q/build.ps1", "P28Q/README.md", "P28Q/app/app.json", "P28Q/src/main.cpp", "P28Q/src/helper.cpp")) {
         if (!(Test-Path -LiteralPath (Join-Path $imageRoot $fixture) -PathType Leaf)) {
             throw "P28Z BOOT_IMAGE staging failed on boot ${runNumber}: fixture file is absent: $fixture"
         }
     }
+    $sentinelHash = (Get-FileHash -LiteralPath $sentinel -Algorithm SHA256).Hash.ToUpperInvariant()
+    $treeHash = Get-Phase29IBootTreeIdentity $imageRoot
+    $identityBytes = [Text.Encoding]::UTF8.GetBytes("$stageId|$([IO.Path]::GetFullPath($imageRoot))|$treeHash")
+    $identitySha = [Security.Cryptography.SHA256]::Create()
+    try { $espIdentity = ([BitConverter]::ToString($identitySha.ComputeHash($identityBytes))).Replace('-', '') }
+    finally { $identitySha.Dispose() }
+    Write-Host ("P29I HOST_STAGE boot={0} stage_id={1} filesystem=qemu-vvfat-directory-backed-fat esp_path={2} esp_identity={3} tree_sha256={4}" -f
+        $runNumber, $stageId, [IO.Path]::GetFullPath($imageRoot), $espIdentity, $treeHash) -ForegroundColor DarkCyan
+    Write-Host ("P29I HOST_SENTINEL boot={0} host_path={1} guest_path={2} relative_path={3} exists=1 bytes={4} content={5} sha256={6}" -f
+        $runNumber, [IO.Path]::GetFullPath($sentinel), $diagnosticSentinelGuestPath, $sentinelRelativePath.Replace('\', '/'),
+        $sentinelBytes.Length, $sentinelText, $sentinelHash) -ForegroundColor DarkCyan
+    Write-Host ("P29I HOST_BOOT_IMAGE boot={0} kernel_path={1} kernel_sha256={2}" -f
+        $runNumber, [IO.Path]::GetFullPath((Join-Path $imageRoot "kernel.elf")), $kernelHash) -ForegroundColor DarkCyan
     Write-Host ("P28Z BOOT_IMAGE boot={0} arch=amd64 kernel={1} developer_studio={2} project={3} config={4} sentinel=present project_fixture=present isolated=present" -f
         $runNumber, $kernelHash, $studioHash, $projectHash, $configHash) -ForegroundColor DarkCyan
 }
@@ -814,6 +864,10 @@ function Invoke-QemuProofBoot([int]$runNumber, [string]$qemu) {
         "-no-reboot",
         "-no-shutdown"
     )
+    if ($Phase28QOnly) {
+        Write-Host ("P29I QEMU_ATTACH boot={0} qemu={1} drive0_backend=fat-rw-directory drive0_path={2} drive0_format=raw drive0_if=ide index=0" -f
+            $runNumber, [IO.Path]::GetFullPath($qemu), [IO.Path]::GetFullPath($activeEspDirectory)) -ForegroundColor DarkCyan
+    }
 
     $startInfo = New-Object System.Diagnostics.ProcessStartInfo
     $startInfo.FileName = $qemu
@@ -841,9 +895,13 @@ function Invoke-QemuProofBoot([int]$runNumber, [string]$qemu) {
                         ($Phase29FDebugStartOnly -and -not $Phase29GBeginDebugReturnOnly -and
                             ($serialProbe.Contains("DEVELOPER_STUDIO_PHASE28Q_RUNNING_PASS") -or
                              $serialProbe.Contains("DEVELOPER_STUDIO_PHASE28Q_FAILURE"))) -or
+                        ($Phase29ISentinelOnly -and
+                            (($serialProbe -match 'DEVELOPER_STUDIO_PHASE29C_PROJECT_LOAD_REQUEST_ACCEPTED .*state=load_started') -or
+                             ($serialProbe -match 'DEVELOPER_STUDIO_PHASE29I_SENTINEL_(FS_NOT_READY|FILE_NOT_FOUND|LOOKUP_ERROR|PATH_NORMALIZATION_ERROR)'))) -or
                         ($Phase29GBeginDebugReturnOnly -and
                             (($serialProbe.Contains("DEVELOPER_STUDIO_PHASE29D_STARTUP_SENTINEL_DECISION") -and
-                              $serialProbe -match 'DEVELOPER_STUDIO_PHASE29D_STARTUP_SENTINEL_DECISION .*fixture=absent') -or
+                              ($serialProbe -match 'DEVELOPER_STUDIO_PHASE29D_STARTUP_SENTINEL_DECISION .*fixture=absent' -or
+                               $serialProbe -match 'DEVELOPER_STUDIO_PHASE29I_SENTINEL_LOOKUP_ERROR')) -or
                              $serialProbe.Contains("DEVELOPER_STUDIO_PHASE29A_STOP_MAPPING_PASS") -or
                              $serialProbe.Contains("DEVELOPER_STUDIO_PHASE29A_STOP_MAPPING_FAIL") -or
                              $serialProbe.Contains("DEVELOPER_STUDIO_PHASE28Q_FAILURE"))) -or
@@ -2134,7 +2192,7 @@ function Invoke-QemuProofBoot([int]$runNumber, [string]$qemu) {
                 "P28Z APP 05 project_open_return",
                 "P28Z APP 06 project_ready"
             )
-        } elseif ($Phase28QOnly) {
+        } elseif ($Phase28QOnly -and -not $Phase29ISentinelOnly) {
             $requiredMarkers += @(
                 "P28Z BOOT 01 native_loader_entered",
                 "P28Z BOOT 02 kernel_entry",
@@ -2262,10 +2320,30 @@ function Invoke-QemuProofBoot([int]$runNumber, [string]$qemu) {
                 )
             }
         }
+        if ($Phase29ISentinelOnly) {
+            $requiredMarkers += @(
+                'P28Z BOOT 01 native_loader_entered',
+                'P28Z BOOT 02 kernel_entry',
+                'P28Z BOOT 03 early_kernel_init_complete',
+                'P28Z BOOT 04 runtime_scheduler_ready',
+                'P28Z BOOT 05 gx_main_invoke',
+                'P28Z BOOT 06 desktop_init_complete',
+                'DEVELOPER_STUDIO_PHASE29I_SENTINEL_FS_READY readiness=ready boundary=loaded_application_image expected_mount=/',
+                'DEVELOPER_STUDIO_PHASE29I_SENTINEL_MOUNT_READY mount=/ identity=containing_loaded_application_volume status=authoritative',
+                'DEVELOPER_STUDIO_PHASE29I_SENTINEL_PATH_NORMALIZED result=valid path=/Apps/DeveloperStudio/.phase28q-diagnostic',
+                'DEVELOPER_STUDIO_PHASE29I_SENTINEL_STAT result=found gx_result=0 path=/Apps/DeveloperStudio/.phase28q-diagnostic',
+                'DEVELOPER_STUDIO_PHASE29I_SENTINEL_READ result=found gx_result=0 path=/Apps/DeveloperStudio/.phase28q-diagnostic',
+                'DEVELOPER_STUDIO_PHASE29I_SENTINEL_FILE_FOUND result=found type=regular content=exact',
+                'DEVELOPER_STUDIO_PHASE29I_SENTINEL_ACCEPTED reason=SENTINEL_PRESENT',
+                'DEVELOPER_STUDIO_PHASE29I_SENTINEL_DIAGNOSTIC_MODE enabled=1 result=accepted',
+                'DEVELOPER_STUDIO_PHASE29D_STARTUP_SENTINEL_DECISION app=1 generation=1 fixture=present',
+                'DEVELOPER_STUDIO_PHASE29C_PROJECT_LOAD_REQUEST_ACCEPTED worker=sync state=load_started'
+            )
+        }
         if ($Phase29EManifestOnly) {
             $requiredMarkers += "DEVELOPER_STUDIO_PHASE28V_EVENT_DEBUG_START_REQUEST_ISSUED"
         }
-        if ($Phase29COnly -or $Phase28QOnly) {
+        if ($Phase29COnly -or $Phase28QOnly -or $Phase29ISentinelOnly) {
             $requiredMarkers += @(
                 "DEVELOPER_STUDIO_PHASE29D_STARTUP_APPLICATION_CREATED",
                 "DEVELOPER_STUDIO_PHASE29D_STARTUP_GENERATION_INITIALIZED",
@@ -2284,7 +2362,18 @@ function Invoke-QemuProofBoot([int]$runNumber, [string]$qemu) {
             )
         }
         $missingMarkers = @($requiredMarkers | Where-Object { $serial -notmatch [regex]::Escape($_) })
-        if ($Phase29COnly -or $Phase28QOnly) {
+        if ($Phase29ISentinelOnly) {
+            $loadStartedLines = @($serial -split "`r?`n" | Where-Object {
+                $_ -match 'DEVELOPER_STUDIO_PHASE29C_PROJECT_LOAD_REQUEST_ACCEPTED .*state=load_started .*path=/P28Q'
+            })
+            if ($loadStartedLines.Count -ne 1) {
+                $missingMarkers += "Phase29C project load_started count=$($loadStartedLines.Count)"
+            }
+            if ($serial -match 'DEVELOPER_STUDIO_PHASE29I_SENTINEL_(FS_NOT_READY|FILE_NOT_FOUND|LOOKUP_ERROR|PATH_NORMALIZATION_ERROR)') {
+                $missingMarkers += "Phase29I sentinel decision did not enable diagnostic mode"
+            }
+        }
+        if ($Phase29COnly -or $Phase28QOnly -or $Phase29ISentinelOnly) {
             $startupRequestMarkers = @($serial -split "`r?`n" | Where-Object {
                 $_ -match 'DEVELOPER_STUDIO_PHASE29D_STARTUP_(REQUEST_CREATED|REQUEST_SUBMITTED|PHASE29C_ACCEPTED|REQUEST_HANDOFF_COMPLETE) '
             })
@@ -2316,7 +2405,7 @@ function Invoke-QemuProofBoot([int]$runNumber, [string]$qemu) {
                 $missingMarkers += "Phase29D rejected a live startup re-entry"
             }
 
-            if ($Phase28QOnly) {
+            if ($Phase28QOnly -and -not $Phase29ISentinelOnly) {
                 $phase29fMarkers = @($serial -split "`r?`n" | Where-Object {
                     $_ -match 'DEVELOPER_STUDIO_PHASE29F_DEBUG_START (event=intent|event=request_validation|event=build_submission|event=request_ownership|event=artifact_validation|event=service_lookup|event=service_handoff|event=startup_handshake|event=client_running_observed|event=running_publication|event=phase28q_running_observed) ' -or
                     $_ -match 'DEVELOPER_STUDIO_PHASE29F_DEBUG_START_SERVER event=(service_registration|start_api_entry|server_admission|target_creation|first_dispatch|release_command_consumed|first_execution_dispatch|running_publication) '
@@ -3345,7 +3434,7 @@ try {
             $directoryBackups["P28L"] = $backup
         }
     }
-    if ($Phase28M) {
+    if ($Phase28M -or $Phase28QOnly) {
         $target = Join-Path $espDirectory "Apps/DeveloperStudio"
         if (Test-Path $target -PathType Leaf) { throw "Developer Studio ESP target is a file: $target" }
         if (Test-Path $target -PathType Container) {
@@ -3598,8 +3687,13 @@ try {
         if (Test-Path -LiteralPath $phase28mEspPackage) { Remove-Item -LiteralPath $phase28mEspPackage -Recurse -Force }
         Copy-Item $developerStudioPackageDirectory $phase28mEspPackage -Recurse -Force
         if ($Phase28QOnly) {
-            [IO.File]::WriteAllText((Join-Path $phase28mEspPackage ".phase28q-diagnostic"), "guideXOS-phase28q")
-            if (!(Test-Path -LiteralPath (Join-Path $phase28mEspPackage ".phase28q-diagnostic") -PathType Leaf)) {
+            if (!$diagnosticSentinelGuestPath -or !$diagnosticSentinelContent) {
+                throw "P29I canonical sentinel definition is missing or invalid: $diagnosticSentinelDefinition"
+            }
+            $sentinelFileName = Split-Path -Leaf $diagnosticSentinelGuestPath
+            $sentinelPackagePath = Join-Path $phase28mEspPackage $sentinelFileName
+            [IO.File]::WriteAllText($sentinelPackagePath, $diagnosticSentinelContent, [Text.Encoding]::ASCII)
+            if (!(Test-Path -LiteralPath $sentinelPackagePath -PathType Leaf)) {
                 throw "Phase 28Q Developer Studio diagnostic sentinel was not staged"
             }
         } elseif ($Phase28OOnly) {
@@ -4038,7 +4132,8 @@ try {
         # Every QEMU invocation gets its own disposable directory-backed FAT
         # image. Guest writes must not become the input state of the next
         # requested fresh boot.
-        $activeEspDirectory = Join-Path $tempDirectory ("esp-boot{0}" -f $run)
+        $activeEspStageId = [guid]::NewGuid().ToString('N')
+        $activeEspDirectory = Join-Path $tempDirectory ("esp-boot{0}-{1}" -f $run, $activeEspStageId)
         $resolvedTempDirectory = [IO.Path]::GetFullPath($tempDirectory).TrimEnd([IO.Path]::DirectorySeparatorChar)
         $resolvedActiveEspDirectory = [IO.Path]::GetFullPath($activeEspDirectory).TrimEnd([IO.Path]::DirectorySeparatorChar)
         if (!$resolvedActiveEspDirectory.StartsWith($resolvedTempDirectory + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
@@ -4049,12 +4144,20 @@ try {
         }
         Copy-Item $espDirectory $activeEspDirectory -Recurse -Force
         if ($Phase28QOnly) {
-            $activePhase28QSentinel = Join-Path $activeEspDirectory "Apps/DeveloperStudio/.phase28q-diagnostic"
+            if (!$diagnosticSentinelGuestPath -or !$diagnosticSentinelContent) {
+                throw "P29I canonical sentinel definition is missing or invalid: $diagnosticSentinelDefinition"
+            }
+            $sentinelRelativePath = $diagnosticSentinelGuestPath.TrimStart('/').Replace('/', [IO.Path]::DirectorySeparatorChar)
+            $activePhase28QSentinel = Join-Path $activeEspDirectory $sentinelRelativePath
             if (!(Test-Path -LiteralPath $activePhase28QSentinel -PathType Leaf)) {
                 throw "P28Y STARTUP staging failed on fresh boot ${run}: Phase 28Q launch request sentinel missing from active ESP"
             }
+            $activeSentinelText = [IO.File]::ReadAllText($activePhase28QSentinel)
+            if ($activeSentinelText -cne $diagnosticSentinelContent) {
+                throw "P29I final staging verification failed on fresh boot ${run}: canonical sentinel content mismatch"
+            }
             Write-Host ("P28Y STARTUP boot={0} launch_request_staged=present" -f $run)
-            Assert-Phase28ZBootImage $run $activeEspDirectory
+            Assert-Phase28ZBootImage $run $activeEspDirectory $activeEspStageId
         }
         Invoke-QemuProofBoot $run $qemu
     }
@@ -4346,6 +4449,8 @@ try {
     }
     if ($Phase29EManifestOnly) {
         Write-Host "Phase 29E manifest identity validation completed across $BootCount fresh boot(s) through debugger-start issuance." -ForegroundColor Green
+    } elseif ($Phase29ISentinelOnly) {
+        Write-Host "Phase 29I guest diagnostic sentinel detection completed across $BootCount fresh boot(s) through Phase 29C load_started." -ForegroundColor Green
     } elseif ($Phase29GBeginDebugReturnOnly) {
         Write-Host "Phase 29G beginDebugSession return and first-stop mapping proof completed across $BootCount fresh boot(s)." -ForegroundColor Green
     } elseif ($Phase29FDebugStartOnly) {
@@ -4757,7 +4862,7 @@ finally {
             Copy-Item $directoryBackups[$relativeDirectory] $target -Recurse -Force
         }
     }
-    if ($Phase28M) {
+    if ($Phase28M -or $Phase28QOnly) {
         $relativeDirectory = "Apps/DeveloperStudio"
         $target = Join-Path $espDirectory $relativeDirectory
         if (Test-Path -LiteralPath $target -PathType Container) {
@@ -4933,8 +5038,8 @@ finally {
             Copy-Item $directoryBackups[$relativeDirectory] $target -Recurse -Force
         }
     }
-    if ($Phase28LOnly -or $Phase28MOnly -or $Phase28NOnly -or $Phase28OOnly -or $Phase28POnly -or $Phase28QOnly -or $Phase29COnly -or $Phase29EManifestOnly) {
-        $proofLabel = if ($Phase29EManifestOnly) { "Phase 29E manifest identity" } elseif ($Phase29COnly) { "Phase 29C" } elseif ($Phase28QOnly) { "Phase 28Q" } elseif ($Phase28POnly) { "Phase 28P" } elseif ($Phase28OOnly) { "Phase 28O" } elseif ($Phase28NOnly) { "Phase 28N" } elseif ($Phase28MOnly) { "Phase 28M" } else { "Phase 28L" }
+    if ($Phase28LOnly -or $Phase28MOnly -or $Phase28NOnly -or $Phase28OOnly -or $Phase28POnly -or $Phase28QOnly -or $Phase29COnly -or $Phase29ISentinelOnly -or $Phase29EManifestOnly) {
+        $proofLabel = if ($Phase29EManifestOnly) { "Phase 29E manifest identity" } elseif ($Phase29ISentinelOnly) { "Phase 29I sentinel" } elseif ($Phase29COnly) { "Phase 29C" } elseif ($Phase28QOnly) { "Phase 28Q" } elseif ($Phase28POnly) { "Phase 28P" } elseif ($Phase28OOnly) { "Phase 28O" } elseif ($Phase28NOnly) { "Phase 28N" } elseif ($Phase28MOnly) { "Phase 28M" } else { "Phase 28L" }
         Write-Host "$proofLabel evidence preserved at: $tempDirectory"
     } elseif (Test-Path $tempDirectory) {
         Remove-Item -LiteralPath $tempDirectory -Recurse -Force -ErrorAction SilentlyContinue

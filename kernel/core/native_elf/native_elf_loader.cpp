@@ -409,13 +409,27 @@ static bool app_context_valid(gx_app_context* context)
         context->userData == &s_appRuntime;
 }
 
+static gx_result vfs_error_to_gx_result(vfs::Status status)
+{
+    switch (status) {
+    case vfs::VFS_OK: return GX_OK;
+    case vfs::VFS_ERR_NOT_FOUND: return GX_ERROR_NOT_FOUND;
+    case vfs::VFS_ERR_NOT_MOUNT: return GX_ERROR_NOT_MOUNTED;
+    case vfs::VFS_ERR_INVALID: return GX_ERROR_INVALID_ARGUMENT;
+    case vfs::VFS_ERR_IO: return GX_ERROR_IO;
+    case vfs::VFS_ERR_NOT_SUPPORTED: return GX_ERROR_UNSUPPORTED;
+    default: return GX_ERROR_FAILED;
+    }
+}
+
 static gx_result GX_CALL host_bare_file_stat(gx_app_context* context, const char* path, gx_file_info* output)
 {
     if (!app_context_valid(context) || !output || !app_pointer_range(output, sizeof(*output))) return GX_ERROR_PERMISSION_DENIED;
     char localPath[vfs::VFS_MAX_PATH] = {};
     if (!app_string(path, localPath, sizeof(localPath))) return GX_ERROR_INVALID_ARGUMENT;
     vfs::FileInfo info = {};
-    if (vfs::stat(localPath, &info) != vfs::VFS_OK) return GX_ERROR_FAILED;
+    const vfs::Status statStatus = vfs::stat(localPath, &info);
+    if (statStatus != vfs::VFS_OK) return vfs_error_to_gx_result(statStatus);
     output->type = info.type == vfs::FILE_TYPE_DIRECTORY ? GX_FILE_TYPE_DIRECTORY :
         (info.type == vfs::FILE_TYPE_REGULAR ? GX_FILE_TYPE_REGULAR : GX_FILE_TYPE_UNKNOWN);
     output->reserved = 0;
@@ -432,7 +446,7 @@ static gx_result GX_CALL host_bare_file_read_workspace(gx_app_context* context, 
     char localPath[vfs::VFS_MAX_PATH] = {};
     if (!app_string(path, localPath, sizeof(localPath))) return GX_ERROR_INVALID_ARGUMENT;
     const int32_t bytes = bufferSize == 0 ? 0 : vfs::read_file(localPath, buffer, bufferSize);
-    if (bytes < 0) return GX_ERROR_FAILED;
+    if (bytes < 0) return vfs_error_to_gx_result(static_cast<vfs::Status>(bytes));
     *outBytes = static_cast<uint32_t>(bytes);
     return GX_OK;
 }

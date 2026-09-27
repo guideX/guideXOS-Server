@@ -436,7 +436,14 @@ uint8_t mount_type(const char* path, uint8_t blockDevIndex, FSType fsType)
     serial::puts(fs_type_name(fsType));
     serial::puts(" at '");
     serial::puts(path);
-    serial::puts("'\n");
+    serial::puts("' device_index=");
+    serial::put_hex8(blockDevIndex);
+    serial::puts(" volume_id=");
+    serial::put_hex32(static_cast<uint32_t>(fsVolume));
+    const block::BlockDevice* device = block::get_device(blockDevIndex);
+    serial::puts(" device=");
+    serial::puts(device ? device->name : "unknown");
+    serial::puts("\n");
 #endif
     
     return index;
