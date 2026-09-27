@@ -51,6 +51,10 @@ enum PartitionError : uint8_t {
 };
 
 struct PartitionEntry {
+    // One-based slot in the on-disk partition table (MBR primary slot or GPT
+    // entry slot). Presentation may sort entries by physical LBA while keeping
+    // this number stable for Properties.
+    uint16_t partitionNumber;
     uint8_t mbrType;
     bool isGpt;
     bool bootable;

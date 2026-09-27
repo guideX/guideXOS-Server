@@ -40,9 +40,7 @@ uint64_t DiskManager::s_windowId = 0;
 std::vector<DiskManager::DiskEntry> DiskManager::s_disks;
 int DiskManager::s_selectedDiskIndex = 0;
 std::string DiskManager::s_status = "";
-std::string DiskManager::s_detected = "Unknown";
 bool DiskManager::s_clickLock = false;
-std::string DiskManager::s_cachedTotalCaption = "";
 int DiskManager::s_mouseX = 0;
 int DiskManager::s_mouseY = 0;
 bool DiskManager::s_mouseDown = false;
@@ -50,13 +48,6 @@ std::vector<DiskManager::HostImageEntry> DiskManager::s_hostImages;
 int DiskManager::s_selectedHostImageIndex = 0;
 
 // Button positions
-int DiskManager::s_bxDetectX = 0, DiskManager::s_bxDetectY = 0;
-int DiskManager::s_bxAutoX = 0, DiskManager::s_bxAutoY = 0;
-int DiskManager::s_bxSwitchFatX = 0, DiskManager::s_bxSwitchFatY = 0;
-int DiskManager::s_bxSwitchTarX = 0, DiskManager::s_bxSwitchTarY = 0;
-int DiskManager::s_bxSwitchExtX = 0, DiskManager::s_bxSwitchExtY = 0;
-int DiskManager::s_bxFormatExfatX = 0, DiskManager::s_bxFormatExfatY = 0;
-int DiskManager::s_bxCreatePartX = 0, DiskManager::s_bxCreatePartY = 0;
 int DiskManager::s_bxRefreshX = 0, DiskManager::s_bxRefreshY = 0;
 int DiskManager::s_bxAttachImageX = 0, DiskManager::s_bxAttachImageY = 0;
 int DiskManager::s_bxPrevImageX = 0, DiskManager::s_bxPrevImageY = 0;
@@ -204,15 +195,22 @@ int DiskManager::main(int argc, char** argv) {
 std::string DiskManager::buildStatus() {
 #ifdef _WIN32
     Logger::write(LogLevel::Info, "DiskManager running in Windows host mode - host .img attachment enabled");
-    return "Mode: Windows Host (.img attach)\nDetected media: " + s_detected;
+    return "Mode: Windows Host | Attached .img inspection only";
 #else
     Logger::write(LogLevel::Info, "DiskManager running in guideXOS baremetal mode - using kernel::block API");
     std::string driver = "kernel::block";
-    return "Mode: guideXOS Baremetal\nDriver: " + driver + "\nDetected media: " + s_detected;
+    return "Mode: guideXOS Baremetal\nDriver: " + driver;
 #endif
 }
 
 void DiskManager::refreshDisks() {
+    bool hadSelectedImage = false;
+    std::string selectedImagePath;
+    if (s_selectedDiskIndex >= 0 && s_selectedDiskIndex < static_cast<int>(s_disks.size())) {
+        const DiskEntry& oldSelected = s_disks[s_selectedDiskIndex];
+        hadSelectedImage = oldSelected.isHostImage;
+        if (hadSelectedImage) selectedImagePath = oldSelected.backingPath;
+    }
     s_disks.clear();
     s_disks.reserve(16);
     
@@ -251,24 +249,8 @@ void DiskManager::refreshDisks() {
         s_disks.push_back(entry);
     }
     
-    if (s_disks.empty()) {
-        DiskEntry sysDisk;
-        sysDisk.name = "No Disks Detected";
-        sysDisk.transportLabel = "unknown";
-        sysDisk.devIndex = 0;
-        sysDisk.haveInfo = false;
-        s_disks.push_back(sysDisk);
-    }
 #else
     refreshHostImageLibrary();
-
-    DiskEntry sysDisk;
-    sysDisk.name = "Host physical disks are not enumerated";
-    sysDisk.transportLabel = "host";
-    sysDisk.devIndex = 0;
-    sysDisk.haveInfo = false;
-    sysDisk.mbrStatus = MBR_UNREADABLE;
-    s_disks.push_back(sysDisk);
 
     for (size_t i = 0; i < s_hostImages.size(); ++i) {
         if (!s_hostImages[i].attached) continue;
@@ -280,34 +262,22 @@ void DiskManager::refreshDisks() {
     }
 #endif
     
-    if (s_selectedDiskIndex >= static_cast<int>(s_disks.size())) {
+    if (hadSelectedImage) {
+        s_selectedDiskIndex = -1;
+        for (size_t i = 0; i < s_disks.size(); ++i) {
+            if (s_disks[i].isHostImage && s_disks[i].backingPath == selectedImagePath) {
+                s_selectedDiskIndex = static_cast<int>(i);
+                break;
+            }
+        }
+    } else if (s_disks.empty()) {
+        s_selectedDiskIndex = -1;
+    } else if (s_selectedDiskIndex >= static_cast<int>(s_disks.size())) {
         s_selectedDiskIndex = static_cast<int>(s_disks.size()) - 1;
-    }
-    if (s_selectedDiskIndex < 0) {
+    } else if (s_selectedDiskIndex < 0) {
         s_selectedDiskIndex = 0;
     }
     
-    DiskEntry* sel = getSelected();
-    if (sel && sel->haveInfo) {
-        uint64_t totalBytes = sel->totalSectors * sel->bytesPerSector;
-        s_cachedTotalCaption = "Total: " + fmtSize(totalBytes);
-    } else {
-        s_cachedTotalCaption = "";
-    }
-}
-
-void DiskManager::probeOnce() {
-#ifndef _WIN32
-    kernel::storage::PartitionTableModel table;
-    if (kernel::storage::parse_partition_table(0, table)) {
-        s_detected = kernel::storage::disk_state_name(table.state);
-    } else {
-        s_detected = "Unreadable";
-    }
-#else
-    s_detected = "Host physical disks are not enumerated";
-#endif
-    s_status = buildStatus();
 }
 
 void DiskManager::refreshHostImageLibrary() {
@@ -513,36 +483,6 @@ void DiskManager::selectNextHostImage() {
     }
 }
 
-bool DiskManager::readHostSectors(const std::string& path, uint64_t lba, uint32_t count, void* buffer, uint32_t sectorSize) {
-#ifdef _WIN32
-    if (!buffer || sectorSize == 0 || count == 0) return false;
-
-    std::ifstream file(path, std::ios::binary);
-    if (!file) {
-        return false;
-    }
-
-    uint64_t offset = lba * sectorSize;
-    uint64_t bytes = static_cast<uint64_t>(count) * sectorSize;
-    file.seekg(0, std::ios::end);
-    std::streamoff fileSize = file.tellg();
-    if (fileSize < 0 || offset + bytes > static_cast<uint64_t>(fileSize)) {
-        return false;
-    }
-
-    file.seekg(static_cast<std::streamoff>(offset), std::ios::beg);
-    file.read(static_cast<char*>(buffer), static_cast<std::streamsize>(bytes));
-    return file.good() || file.gcount() == static_cast<std::streamsize>(bytes);
-#else
-    (void)path;
-    (void)lba;
-    (void)count;
-    (void)buffer;
-    (void)sectorSize;
-    return false;
-#endif
-}
-
 bool DiskManager::buildHostDiskEntryFromImage(const HostImageEntry& image, uint8_t devIndex, DiskEntry& entry) {
 #ifdef _WIN32
     std::ifstream file(image.path, std::ios::binary);
@@ -565,18 +505,21 @@ bool DiskManager::buildHostDiskEntryFromImage(const HostImageEntry& image, uint8
     }
 
     entry = DiskEntry();
-    entry.name = "Disk " + std::to_string(devIndex) + " (USB)";
-    entry.transportLabel = "USB";
+    entry.name.clear();
+    entry.transportLabel = "Host image";
     entry.isHostImage = true;
     entry.devIndex = devIndex;
     entry.haveInfo = true;
     entry.bytesPerSector = 512;
     entry.totalSectors = static_cast<uint64_t>(fileSize) / entry.bytesPerSector;
     entry.backingPath = image.path;
-    entry.mbrStatus = MBR_UNREADABLE;
+    entry.mbrStatus = MBR_PREVIEW_NO_SIGNATURE;
 
     if (mbr[510] == 0x55 && mbr[511] == 0xAA) {
-        entry.mbrStatus = MBR_VALID;
+        bool hasProtectiveMbr = false;
+        bool validPreview = (static_cast<uint64_t>(fileSize) % entry.bytesPerSector) == 0;
+        uint64_t starts[4] = {};
+        uint64_t ends[4] = {};
         for (int i = 0; i < 4; ++i) {
             int off = 446 + i * 16;
             PartitionEntry& part = entry.parts[i];
@@ -593,16 +536,46 @@ bool DiskManager::buildHostDiskEntryFromImage(const HostImageEntry& image, uint8
                 (static_cast<uint32_t>(mbr[off + 14]) << 16) |
                 (static_cast<uint32_t>(mbr[off + 15]) << 24);
 
-            if (part.type != 0 && part.lbaCount != 0) {
-                part.fs = detectFsAtLBAFromImage(image.path, part.lbaStart);
-                part.mountPoint = suggestMountPoint(entry, part, i);
+            const uint64_t start = part.lbaStart;
+            const uint64_t count = part.lbaCount;
+            if (part.type == 0 && count == 0 && start == 0 && part.status == 0) continue;
+            if (part.type == 0xEE) hasProtectiveMbr = true;
+            if ((part.status != 0 && part.status != 0x80) || part.type == 0 ||
+                count == 0 || start == 0 || start >= entry.totalSectors ||
+                count > entry.totalSectors - start) {
+                validPreview = false;
+                continue;
+            }
+            starts[i] = start;
+            ends[i] = start + count;
+        }
+        for (int i = 0; i < 4; ++i) {
+            if (starts[i] == 0) continue;
+            for (int j = i + 1; j < 4; ++j) {
+                if (starts[j] != 0 && starts[i] < ends[j] && starts[j] < ends[i])
+                    validPreview = false;
             }
         }
+        if (validPreview) {
+            for (int i = 0; i < 4; ++i) {
+                PartitionEntry& part = entry.parts[i];
+                if (part.lbaCount == 0) continue;
+                part.fs = part.type == 0x05 || part.type == 0x0F || part.type == 0x85
+                    ? "Not probed" : "Unknown";
+            }
+        }
+        if (hasProtectiveMbr) {
+            entry.mbrStatus = DISK_GPT_UNSUPPORTED;
+        } else if (validPreview) {
+            entry.mbrStatus = MBR_PREVIEW_VALID;
+        } else {
+            entry.mbrStatus = MBR_INVALID;
+        }
     } else {
-        entry.mbrStatus = MBR_INVALID;
+        entry.mbrStatus = MBR_PREVIEW_NO_SIGNATURE;
     }
 
-    entry.name = "Disk " + std::to_string(devIndex) + " (USB: " + image.displayName + ")";
+    entry.name = "Image: " + image.displayName;
     return true;
 #else
     (void)image;
@@ -610,52 +583,6 @@ bool DiskManager::buildHostDiskEntryFromImage(const HostImageEntry& image, uint8
     (void)entry;
     return false;
 #endif
-}
-
-std::string DiskManager::detectFsAtLBAFromImage(const std::string& path, uint32_t lbaStart) {
-#ifdef _WIN32
-    if (lbaStart == 0) return "<empty>";
-
-    uint8_t sec[512];
-    std::memset(sec, 0, sizeof(sec));
-    if (!readHostSectors(path, lbaStart, 1, sec, 512)) {
-        return "Unknown";
-    }
-
-    if (sec[3] == 'E' && sec[4] == 'X' && sec[5] == 'F' && sec[6] == 'A' && sec[7] == 'T') {
-        return "exFAT";
-    }
-    if (sec[257] == 'u' && sec[258] == 's' && sec[259] == 't' && sec[260] == 'a' && sec[261] == 'r') {
-        return "TarFS";
-    }
-    if (sec[510] == 0x55 && sec[511] == 0xAA) {
-        if (sec[82] == 'F' && sec[83] == 'A' && sec[84] == 'T' && sec[85] == '3' && sec[86] == '2') {
-            return "FAT32";
-        }
-        if (sec[54] == 'F' && sec[55] == 'A' && sec[56] == 'T') {
-            return "FAT";
-        }
-        uint16_t bytesPerSec = sec[11] | (sec[12] << 8);
-        uint8_t secPerClus = sec[13];
-        if ((bytesPerSec == 512 || bytesPerSec == 1024 || bytesPerSec == 2048 || bytesPerSec == 4096) && secPerClus != 0) {
-            return "FAT";
-        }
-    }
-
-    uint8_t sb[1024];
-    std::memset(sb, 0, sizeof(sb));
-    if (readHostSectors(path, static_cast<uint64_t>(lbaStart) + 2, 2, sb, 512)) {
-        uint16_t magic = sb[56] | (sb[57] << 8);
-        if (magic == 0xEF53) {
-            return "EXT2/EXT4";
-        }
-    }
-#else
-    (void)path;
-    (void)lbaStart;
-#endif
-
-    return "Unknown";
 }
 
 bool DiskManager::isImgName(const char* name) {
@@ -702,6 +629,13 @@ void DiskManager::readMBRForEntry(DiskEntry& entry) {
             return;
     }
 
+    const bool parsedEntriesAvailable =
+        table.state == kernel::storage::DISK_STATE_VALID_MBR ||
+        table.state == kernel::storage::DISK_STATE_VALID_GPT ||
+        table.state == kernel::storage::DISK_STATE_GPT_DEGRADED ||
+        table.extendedPartitionsPresent;
+    if (!parsedEntriesAvailable) return;
+
     for (uint16_t i = 0; i < table.partitionCount && i < 4; ++i) {
         const kernel::storage::PartitionEntry& source = table.partitions[i];
         if (source.startLba > UINT32_MAX || source.sectorCount > UINT32_MAX) continue;
@@ -715,10 +649,8 @@ void DiskManager::readMBRForEntry(DiskEntry& entry) {
                 (source.mbrType == 0x05 || source.mbrType == 0x0F ||
                  source.mbrType == 0x85)) {
                 part.fs = "Extended (unsupported)";
-                part.mountPoint = "No suggestion";
             } else {
-                part.fs = detectFsAtLBA(entry.devIndex, part.lbaStart, part.lbaCount);
-                part.mountPoint = suggestMountPoint(entry, part, i);
+                part.fs = "Unknown";
             }
         }
     }
@@ -751,112 +683,21 @@ std::string DiskManager::fmtHexByte(uint8_t value) {
 
 std::string DiskManager::mbrStatusText(MbrStatus status) {
     switch (status) {
-        case MBR_VALID: return "MBR";
+        case MBR_PREVIEW_VALID: return "MBR preview (validated)";
+        case MBR_VALID: return "Valid MBR";
         case DISK_NOT_INITIALIZED: return "Not Initialized";
-        case DISK_GPT_VALID: return "GPT";
+        case DISK_GPT_UNSUPPORTED: return "GPT image preview unsupported";
+        case DISK_GPT_VALID: return "Valid GPT";
         case DISK_GPT_DEGRADED: return "GPT Degraded";
         case DISK_UNSUPPORTED: return "Unsupported Partition Scheme";
         case MBR_INVALID: return "Invalid Partition Table";
+        case MBR_PREVIEW_NO_SIGNATURE: return "No MBR signature (raw state unknown)";
         default: return "Unreadable";
     }
 }
 
-std::string DiskManager::partitionStatusText(const PartitionEntry& part, int partIndex) {
-    (void)partIndex;
-    return part.status == 0x80 ? "Active MBR flag" : "Partition entry";
-}
-
-std::string DiskManager::suggestMountPoint(const DiskEntry& disk,
-                                           const PartitionEntry& part,
-                                           int partIndex) {
-    (void)disk;
-    (void)partIndex;
-    if (part.lbaCount == 0 || part.fs == "Unknown" || part.fs == "<empty>")
-        return "No suggestion";
-    if (part.type == 0x83 || part.type == 0x82) return "/users (suggested)";
-    if (part.type == 0x0B || part.type == 0x0C || part.type == 0x07 ||
-        part.fs == "FAT" || part.fs == "FAT32" || part.fs == "exFAT")
-        return "/shared (suggested)";
-    return "No suggestion";
-}
-
 bool DiskManager::hit(int mx, int my, int x, int y, int w, int h) {
     return mx >= x && mx <= x + w && my >= y && my <= y + h;
-}
-
-std::string DiskManager::detectFsAtLBA(uint8_t devIndex, uint32_t lbaStart,
-                                       uint32_t sectorCount) {
-    if (lbaStart == 0 || sectorCount == 0) return "Unknown";
-
-#ifndef _WIN32
-    kernel::storage::DeviceCapabilities caps;
-    if (!kernel::storage::query_device_capabilities(devIndex, caps) ||
-        !caps.geometryValid || !caps.capacityValid ||
-        lbaStart >= caps.totalLogicalSectors ||
-        static_cast<uint64_t>(sectorCount) > caps.totalLogicalSectors - lbaStart)
-        return "Unknown";
-    alignas(4096) uint8_t sector[kernel::storage::MAX_LOGICAL_SECTOR_SIZE];
-    if (kernel::storage::read_logical_sector(devIndex, lbaStart, sector,
-            sizeof(sector)) != kernel::block::BLOCK_OK) return "Unknown";
-
-    if (sector[3] == 'E' && sector[4] == 'X' && sector[5] == 'F' &&
-        sector[6] == 'A' && sector[7] == 'T') return "exFAT";
-    if (sector[257] == 'u' && sector[258] == 's' && sector[259] == 't' &&
-        sector[260] == 'a' && sector[261] == 'r') return "TarFS";
-    if (sector[510] == 0x55 && sector[511] == 0xAA) {
-        const uint16_t bps = static_cast<uint16_t>(sector[11]) |
-                             (static_cast<uint16_t>(sector[12]) << 8);
-        if (bps == caps.logicalSectorSize && sector[13] != 0) return "FAT";
-    }
-
-    const uint64_t superblockOffset = 1024;
-    const uint64_t sectorOffset = superblockOffset / caps.logicalSectorSize;
-    const uint32_t byteOffset = static_cast<uint32_t>(superblockOffset % caps.logicalSectorSize);
-    if (sectorOffset >= sectorCount || lbaStart > UINT64_MAX - sectorOffset)
-        return "Unknown";
-    alignas(4096) uint8_t superblock[kernel::storage::MAX_LOGICAL_SECTOR_SIZE];
-    if (kernel::storage::read_logical_sector(devIndex, lbaStart + sectorOffset,
-            superblock, sizeof(superblock)) == kernel::block::BLOCK_OK) {
-        const uint16_t magic = static_cast<uint16_t>(superblock[byteOffset + 56]) |
-            (static_cast<uint16_t>(superblock[byteOffset + 57]) << 8);
-        if (magic == 0xEF53) return "EXT2/EXT4";
-    }
-#else
-    (void)devIndex;
-#endif
-    return "Unknown";
-}
-
-void DiskManager::trySetFS_Auto() {
-    refreshDisks();
-    s_status = "Read-only scan refreshed; no filesystem changes were made.";
-    Logger::write(LogLevel::Info, "DiskManager: read-only auto scan requested");
-}
-
-void DiskManager::trySetFS_FAT() {
-    s_status = "Set FS is disabled: DiskManager only detects filesystems in read-only mode.";
-    Logger::write(LogLevel::Warn, "DiskManager: FAT switch requested while disabled");
-}
-
-void DiskManager::trySetFS_TAR() {
-    s_status = "Set FS is disabled: DiskManager only detects filesystems in read-only mode.";
-    Logger::write(LogLevel::Warn, "DiskManager: TarFS switch requested while disabled");
-}
-
-void DiskManager::trySetFS_EXT2() {
-    s_status = "Set FS is disabled: DiskManager only detects filesystems in read-only mode.";
-    Logger::write(LogLevel::Warn, "DiskManager: EXT2 switch requested while disabled");
-}
-
-void DiskManager::tryFormatFAT() {
-    s_status = "Format is disabled: write support must be intentionally enabled first.";
-    Logger::write(LogLevel::Warn, "DiskManager: Format FAT requested while disabled");
-}
-
-void DiskManager::tryCreatePartitionLargestFree() {
-    DiskEntry* sel = getSelected();
-    s_status = "Create Partition is disabled: MBR writes are read-only in this build.";
-    Logger::write(LogLevel::Warn, "DiskManager: Create partition requested while disabled");
 }
 
 void DiskManager::handleMouseMove(int mx, int my) {
@@ -879,66 +720,20 @@ void DiskManager::handleMouseDown(int mx, int my) {
             s_selectedDiskIndex = i;
             s_clickLock = true;
             
-            DiskEntry* sel = getSelected();
-            if (sel && sel->haveInfo) {
-                uint64_t totalBytes = sel->totalSectors * sel->bytesPerSector;
-                s_cachedTotalCaption = "Total: " + fmtSize(totalBytes);
-            }
             render();
             return;
         }
     }
     
-    // Check buttons
-    if (hit(mx, my, s_bxDetectX, s_bxDetectY, 180, BTN_H)) {
-        probeOnce();
-        s_clickLock = true;
-        render();
-        return;
-    }
-    if (hit(mx, my, s_bxAutoX, s_bxAutoY, 180, BTN_H)) {
-        trySetFS_Auto();
-        s_clickLock = true;
-        render();
-        return;
-    }
-    if (hit(mx, my, s_bxSwitchFatX, s_bxSwitchFatY, 180, BTN_H)) {
-        trySetFS_FAT();
-        s_clickLock = true;
-        render();
-        return;
-    }
-    if (hit(mx, my, s_bxSwitchTarX, s_bxSwitchTarY, 180, BTN_H)) {
-        trySetFS_TAR();
-        s_clickLock = true;
-        render();
-        return;
-    }
-    if (hit(mx, my, s_bxSwitchExtX, s_bxSwitchExtY, 180, BTN_H)) {
-        trySetFS_EXT2();
-        s_clickLock = true;
-        render();
-        return;
-    }
-    if (hit(mx, my, s_bxFormatExfatX, s_bxFormatExfatY, 200, BTN_H)) {
-        tryFormatFAT();
-        s_clickLock = true;
-        render();
-        return;
-    }
-    if (hit(mx, my, s_bxCreatePartX, s_bxCreatePartY, 220, BTN_H)) {
-        tryCreatePartitionLargestFree();
-        s_clickLock = true;
-        render();
-        return;
-    }
-    if (hit(mx, my, s_bxRefreshX, s_bxRefreshY, 160, BTN_H)) {
+    // Hosted mode only attaches read-only images and refreshes its preview.
+    if (hit(mx, my, s_bxRefreshX, s_bxRefreshY, 108, BTN_H)) {
         refreshDisks();
+        s_status = "Disk list refreshed.";
         s_clickLock = true;
         render();
         return;
     }
-    if (hit(mx, my, s_bxAttachImageX, s_bxAttachImageY, 160, BTN_H)) {
+    if (hit(mx, my, s_bxAttachImageX, s_bxAttachImageY, 112, BTN_H)) {
         attachSelectedHostImage();
         s_clickLock = true;
         render();
@@ -956,7 +751,7 @@ void DiskManager::handleMouseDown(int mx, int my) {
         render();
         return;
     }
-    if (hit(mx, my, s_bxRescanImagesX, s_bxRescanImagesY, 160, BTN_H)) {
+    if (hit(mx, my, s_bxRescanImagesX, s_bxRescanImagesY, 112, BTN_H)) {
         refreshHostImageLibrary();
         refreshDisks();
 #ifdef _WIN32
@@ -987,21 +782,11 @@ void DiskManager::handleKey(int keyCode, bool down) {
     if (keyCode == 38) {  // VK_UP
         if (s_selectedDiskIndex > 0) {
             s_selectedDiskIndex--;
-            DiskEntry* sel = getSelected();
-            if (sel && sel->haveInfo) {
-                uint64_t totalBytes = sel->totalSectors * sel->bytesPerSector;
-                s_cachedTotalCaption = "Total: " + fmtSize(totalBytes);
-            }
             render();
         }
     } else if (keyCode == 40) {  // VK_DOWN
         if (s_selectedDiskIndex < static_cast<int>(s_disks.size()) - 1) {
             s_selectedDiskIndex++;
-            DiskEntry* sel = getSelected();
-            if (sel && sel->haveInfo) {
-                uint64_t totalBytes = sel->totalSectors * sel->bytesPerSector;
-                s_cachedTotalCaption = "Total: " + fmtSize(totalBytes);
-            }
             render();
         }
     }
@@ -1027,16 +812,9 @@ void DiskManager::render() {
     int rightW = 920 - rightX - PAD;
     if (rightW < 100) rightW = 100;
     
-    int topH = 170;
-    int mountsY = PAD + topH + GAP;
-    int mountsH = 110;
-    int bottomY = mountsY + mountsH + GAP;
-    int bottomH = 104;
-    
-    drawVolumesGrid(rightX, PAD, rightW, topH);
-    drawMountsSection(rightX, mountsY, rightW, mountsH);
-    drawPartitionMap(rightX, bottomY, rightW, bottomH);
-    drawActions(rightX, 560 - (PAD + 160), rightW, 160);
+    drawVolumesGrid(rightX, PAD, rightW, 252);
+    drawPartitionMap(rightX, 276, rightW, 112);
+    drawActions(rightX, 408, rightW, 132);
     
     // Request compositor to paint
     ipc::Message paintMsg;
@@ -1047,6 +825,8 @@ void DiskManager::render() {
 }
 
 void DiskManager::drawLeftPane(int winX, int winY, int winW, int winH) {
+    (void)winX;
+    (void)winY;
     int lx = PAD;
     int ly = PAD;
     
@@ -1112,457 +892,282 @@ void DiskManager::drawLeftPane(int winX, int winY, int winW, int winH) {
         }
     }
     
-    // Status text at bottom
-    int statusY = winH - (PAD + 40);
-    ipc::Message statusMsg;
-    statusMsg.type = (uint32_t)MsgType::MT_DrawText;
-    std::ostringstream statusOss;
-    statusOss << s_windowId << "|" << lx << "|" << statusY << "|" << s_status << "|255|255|255";
-    std::string statusPayload = statusOss.str();
-    statusMsg.data.assign(statusPayload.begin(), statusPayload.end());
-    ipc::Bus::publish("gui.input", std::move(statusMsg), false);
+    if (s_disks.empty()) {
+        ipc::Message emptyMsg;
+        emptyMsg.type = (uint32_t)MsgType::MT_DrawText;
+        std::ostringstream emptyOss;
+#ifdef _WIN32
+        emptyOss << s_windowId << "|" << rowX << "|" << listY
+                 << "|No attached images. Host disks are not enumerated.|190|190|190";
+#else
+        emptyOss << s_windowId << "|" << rowX << "|" << listY
+                 << "|No block devices detected.|190|190|190";
+#endif
+        std::string emptyPayload = emptyOss.str();
+        emptyMsg.data.assign(emptyPayload.begin(), emptyPayload.end());
+        ipc::Bus::publish("gui.input", std::move(emptyMsg), false);
+    }
+    (void)winH;
 }
 
 void DiskManager::drawVolumesGrid(int x, int y, int w, int h) {
-    // Title
-    ipc::Message msg;
-    msg.type = (uint32_t)MsgType::MT_DrawText;
-    std::ostringstream oss;
-    oss << s_windowId << "|" << x << "|" << y << "|Volumes|255|255|255";
-    std::string payload = oss.str();
-    msg.data.assign(payload.begin(), payload.end());
-    ipc::Bus::publish("gui.input", std::move(msg), false);
-    
-    DiskEntry* sel = getSelected();
-    int gridY = y + HEADER_H;
-    if (sel && sel->haveInfo) {
-        uint64_t totalBytes = sel->totalSectors * sel->bytesPerSector;
-        std::string info = "Disk " + std::to_string(sel->devIndex) + "  " + sel->transportLabel +
-            "  Sector " + std::to_string(sel->bytesPerSector) + " B" +
-            "  Sectors " + std::to_string(sel->totalSectors) +
-            "  Size " + fmtSize(totalBytes) +
-            "  " + mbrStatusText(sel->mbrStatus);
-        ipc::Message infoMsg;
-        infoMsg.type = (uint32_t)MsgType::MT_DrawText;
-        std::ostringstream infoOss;
-        infoOss << s_windowId << "|" << x << "|" << (y + 16) << "|" << info << "|210|210|210";
-        std::string infoPayload = infoOss.str();
-        infoMsg.data.assign(infoPayload.begin(), infoPayload.end());
-        ipc::Bus::publish("gui.input", std::move(infoMsg), false);
-        gridY += 18;
-    }
-    
-    // Column widths
-    int cw[] = { 124, 42, 44, 70, 124, 52, 80, 72, 78, 74, 68 };
-    int sum = 0;
-    for (int i = 0; i < 11; i++) sum += cw[i];
-    
-    if (sum != w) {
-        if (sum > w) {
-            float scale = static_cast<float>(w) / static_cast<float>(sum);
-            int newsum = 0;
-            for (int i = 0; i < 11; i++) {
-                cw[i] = static_cast<int>(cw[i] * scale);
-                if (cw[i] < 40) cw[i] = 40;
-                newsum += cw[i];
-            }
-            cw[10] += w - newsum;
-        } else {
-            cw[10] += w - sum;
-        }
-    }
-    
-    // Draw headers
-    int cx = x;
-    const char* headers[] = { "Volume", "Dev", "Part", "FS", "Status", "Type", "Capacity", "MBR", "Start", "Sectors", "Sector" };
-    for (int i = 0; i < 11; i++) {
-        drawHeaderCell(cx, gridY, cw[i], ROW_H, headers[i]);
-        cx += cw[i];
-    }
-    
-    // Draw partition rows
-    int rowY = gridY + ROW_H;
-    if (sel && sel->haveInfo) {
-        for (int i = 0; i < 4; i++) {
-            const PartitionEntry& p = sel->parts[i];
-            if (p.lbaCount == 0) continue;
-            
-            cx = x;
-            
-            std::string vol = "Disk " + std::to_string(sel->devIndex) + " Part " + std::to_string(i + 1);
-            drawCell(cx, rowY, cw[0], ROW_H, vol.c_str());
-            cx += cw[0];
-            
-            std::string dev = std::to_string(sel->devIndex);
-            drawCell(cx, rowY, cw[1], ROW_H, dev.c_str());
-            cx += cw[1];
-            
-            std::string partNo = std::to_string(i + 1);
-            drawCell(cx, rowY, cw[2], ROW_H, partNo.c_str());
-            cx += cw[2];
-            
-            drawCell(cx, rowY, cw[3], ROW_H, p.fs.c_str());
-            cx += cw[3];
-
-            std::string status = partitionStatusText(p, i);
-            drawCell(cx, rowY, cw[4], ROW_H, status.c_str());
-            cx += cw[4];
-
-            std::string type = fmtHexByte(p.type);
-            drawCell(cx, rowY, cw[5], ROW_H, type.c_str());
-            cx += cw[5];
-            
-            std::string cap = sel->bytesPerSector == 0
-                ? "Unknown" : fmtSize(static_cast<uint64_t>(p.lbaCount) *
-                                      sel->bytesPerSector);
-            drawCell(cx, rowY, cw[6], ROW_H, cap.c_str());
-            cx += cw[6];
-            
-            std::string mbr = mbrStatusText(sel->mbrStatus);
-            drawCell(cx, rowY, cw[7], ROW_H, mbr.c_str());
-            cx += cw[7];
-            
-            std::string start = std::to_string(p.lbaStart);
-            drawCell(cx, rowY, cw[8], ROW_H, start.c_str());
-            cx += cw[8];
-
-            std::string sectors = std::to_string(p.lbaCount);
-            drawCell(cx, rowY, cw[9], ROW_H, sectors.c_str());
-            cx += cw[9];
-
-            std::string sectorSize = std::to_string(sel->bytesPerSector);
-            drawCell(cx, rowY, cw[10], ROW_H, sectorSize.c_str());
-            
-            rowY += ROW_H;
-            if (rowY > y + h - ROW_H) break;
-        }
-    }
-}
-
-void DiskManager::drawMountsSection(int x, int y, int w, int h) {
-    ipc::Message msg;
-    msg.type = (uint32_t)MsgType::MT_DrawText;
-    std::ostringstream oss;
-    oss << s_windowId << "|" << x << "|" << y << "|Mounts|255|255|255";
-    std::string payload = oss.str();
-    msg.data.assign(payload.begin(), payload.end());
-    ipc::Bus::publish("gui.input", std::move(msg), false);
-
-    int gridY = y + HEADER_H;
-    int cw[] = { 72, 78, 130, 170, 92 };
-    int sum = 0;
-    for (int i = 0; i < 5; i++) sum += cw[i];
-    if (sum > w) {
-        int over = sum - w;
-        if (cw[3] > over + 80) {
-            cw[3] -= over;
-        } else {
-            cw[4] -= over;
-        }
-    } else {
-        cw[4] += w - sum;
-    }
-
-    const char* headers[] = { "Device", "Partition", "Filesystem", "Suggested mount", "Mount state" };
-    int cx = x;
-    for (int i = 0; i < 5; i++) {
-        drawHeaderCell(cx, gridY, cw[i], ROW_H, headers[i]);
-        cx += cw[i];
-    }
+    ipc::Message title;
+    title.type = (uint32_t)MsgType::MT_DrawText;
+    std::ostringstream titleText;
+    titleText << s_windowId << "|" << x << "|" << y << "|Partitions|255|255|255";
+    std::string titlePayload = titleText.str();
+    title.data.assign(titlePayload.begin(), titlePayload.end());
+    ipc::Bus::publish("gui.input", std::move(title), false);
 
     DiskEntry* sel = getSelected();
-    int rowY = gridY + ROW_H;
-    if (!sel || !sel->haveInfo) return;
+    int infoY = y + HEADER_H;
+    if (!sel || !sel->haveInfo) {
+        ipc::Message empty;
+        empty.type = (uint32_t)MsgType::MT_DrawText;
+        std::ostringstream emptyText;
+        emptyText << s_windowId << "|" << x << "|" << infoY
+                  << "|No attached disk image. Select an image below and attach it read-only.|190|190|190";
+        std::string emptyPayload = emptyText.str();
+        empty.data.assign(emptyPayload.begin(), emptyPayload.end());
+        ipc::Bus::publish("gui.input", std::move(empty), false);
+        return;
+    }
 
-    for (int i = 0; i < 4; i++) {
-        const PartitionEntry& p = sel->parts[i];
-        if (p.lbaCount == 0) continue;
+    const uint64_t capacity = sel->totalSectors * sel->bytesPerSector;
+    std::string info = sel->name + " | " + sel->transportLabel + " | " +
+        fmtSize(capacity) + " | " + std::to_string(sel->bytesPerSector) + " B sectors | " +
+        mbrStatusText(sel->mbrStatus);
+    if (sel->isHostImage) info += " | read-only image preview";
+    ipc::Message infoMsg;
+    infoMsg.type = (uint32_t)MsgType::MT_DrawText;
+    std::ostringstream infoText;
+    infoText << s_windowId << "|" << x << "|" << infoY << "|" << info << "|210|210|210";
+    std::string infoPayload = infoText.str();
+    infoMsg.data.assign(infoPayload.begin(), infoPayload.end());
+    ipc::Bus::publish("gui.input", std::move(infoMsg), false);
 
+    if (sel->isHostImage && sel->mbrStatus != MBR_PREVIEW_VALID) {
+        const char* notes[] = {
+            "No validated MBR partition list is available.",
+            "GPT image parsing is unsupported in hosted mode.",
+            "Unallocated ranges are not inferred."
+        };
+        for (int i = 0; i < 3; ++i) {
+            ipc::Message note;
+            note.type = (uint32_t)MsgType::MT_DrawText;
+            std::ostringstream noteText;
+            noteText << s_windowId << "|" << x << "|" << (infoY + 24 + i * 18)
+                     << "|" << notes[i] << "|190|190|190";
+            std::string notePayload = noteText.str();
+            note.data.assign(notePayload.begin(), notePayload.end());
+            ipc::Bus::publish("gui.input", std::move(note), false);
+        }
+        return;
+    }
+
+    int widths[7] = { 64, 70, 102, 102, 108, 100, 0 };
+    int used = 0;
+    for (int i = 0; i < 6; ++i) used += widths[i];
+    widths[6] = w - used;
+    if (widths[6] < 80) widths[6] = 80;
+    int headerY = infoY + 20;
+    const char* headers[7] = { "Part", "Type", "Start LBA", "Sectors", "Capacity", "FS", "Status" };
+    int cx = x;
+    for (int i = 0; i < 7; ++i) {
+        drawHeaderCell(cx, headerY, widths[i], ROW_H, headers[i]);
+        cx += widths[i];
+    }
+
+    int rowY = headerY + ROW_H;
+    bool any = false;
+    for (int i = 0; i < 4; ++i) {
+        const PartitionEntry& part = sel->parts[i];
+        if (part.lbaCount == 0) continue;
+        any = true;
         cx = x;
-        std::string dev = std::to_string(sel->devIndex);
-        std::string part = std::to_string(i + 1);
-        std::string mounted = "unknown";
-        std::string mp = p.mountPoint.empty() ? "No suggestion" : p.mountPoint;
-
-        drawCell(cx, rowY, cw[0], ROW_H, dev.c_str());
-        cx += cw[0];
-        drawCell(cx, rowY, cw[1], ROW_H, part.c_str());
-        cx += cw[1];
-        drawCell(cx, rowY, cw[2], ROW_H, p.fs.c_str());
-        cx += cw[2];
-        drawCell(cx, rowY, cw[3], ROW_H, mp.c_str());
-        cx += cw[3];
-        drawCell(cx, rowY, cw[4], ROW_H, mounted.c_str());
-
+        const std::string values[7] = {
+            std::to_string(i + 1), fmtHexByte(part.type),
+            std::to_string(part.lbaStart), std::to_string(part.lbaCount),
+            fmtSize(static_cast<uint64_t>(part.lbaCount) * sel->bytesPerSector),
+            part.fs.empty() ? "Unknown" : part.fs,
+            (part.type == 0x05 || part.type == 0x0F || part.type == 0x85)
+                ? "Extended; logical omitted"
+                : (part.status == 0x80 ? "Active MBR flag" : "Primary entry")
+        };
+        for (int col = 0; col < 7; ++col) {
+            drawCell(cx, rowY, widths[col], ROW_H, values[col].c_str());
+            cx += widths[col];
+        }
         rowY += ROW_H;
-        if (rowY > y + h - ROW_H) break;
+        if (rowY + ROW_H > y + h) break;
+    }
+    if (!any) {
+        ipc::Message none;
+        none.type = (uint32_t)MsgType::MT_DrawText;
+        std::ostringstream noneText;
+        noneText << s_windowId << "|" << x << "|" << rowY
+                 << "|No primary MBR partitions were previewed.|190|190|190";
+        std::string nonePayload = noneText.str();
+        none.data.assign(nonePayload.begin(), nonePayload.end());
+        ipc::Bus::publish("gui.input", std::move(none), false);
     }
 }
-
 void DiskManager::drawPartitionMap(int x, int y, int w, int h) {
     DiskEntry* sel = getSelected();
     if (!sel) return;
-    
-    // Title
-    ipc::Message msg;
-    msg.type = (uint32_t)MsgType::MT_DrawText;
-    std::ostringstream oss;
-    oss << s_windowId << "|" << x << "|" << y << "|" << sel->name << "|255|255|255";
-    std::string payload = oss.str();
-    msg.data.assign(payload.begin(), payload.end());
-    ipc::Bus::publish("gui.input", std::move(msg), false);
-    
-    int barY = y + HEADER_H;
-    int barH = 34;
-    
-    // Background bar
-    ipc::Message barMsg;
-    barMsg.type = (uint32_t)MsgType::MT_DrawRect;
-    std::ostringstream barOss;
-    barOss << s_windowId << "|" << x << "|" << barY << "|" << w << "|" << barH << "|30|30|30";
-    std::string barPayload = barOss.str();
-    barMsg.data.assign(barPayload.begin(), barPayload.end());
-    ipc::Bus::publish("gui.input", std::move(barMsg), false);
-    
-    if (!sel->haveInfo) return;
-    
-    uint64_t total = sel->totalSectors;
-    if (total == 0) return;
-    
+
+    ipc::Message title;
+    title.type = (uint32_t)MsgType::MT_DrawText;
+    std::ostringstream titleText;
+    titleText << s_windowId << "|" << x << "|" << y << "|Disk map — validated MBR ranges only|255|255|255";
+    std::string titlePayload = titleText.str();
+    title.data.assign(titlePayload.begin(), titlePayload.end());
+    ipc::Bus::publish("gui.input", std::move(title), false);
+
+    const int barY = y + HEADER_H;
+    const int barH = 30;
+    ipc::Message bar;
+    bar.type = (uint32_t)MsgType::MT_DrawRect;
+    std::ostringstream barText;
+    barText << s_windowId << "|" << x << "|" << barY << "|" << w << "|" << barH << "|30|30|30";
+    std::string barPayload = barText.str();
+    bar.data.assign(barPayload.begin(), barPayload.end());
+    ipc::Bus::publish("gui.input", std::move(bar), false);
+
+    const bool hasValidatedMbr = sel->mbrStatus == MBR_PREVIEW_VALID || sel->mbrStatus == MBR_VALID;
+    if (!sel->haveInfo || sel->totalSectors == 0 || !hasValidatedMbr) {
+        ipc::Message note;
+        note.type = (uint32_t)MsgType::MT_DrawText;
+        std::ostringstream noteText;
+        noteText << s_windowId << "|" << x << "|" << (barY + barH + 6)
+                 << "|No validated MBR layout is available; unallocated space is not inferred.|190|190|190";
+        std::string notePayload = noteText.str();
+        note.data.assign(notePayload.begin(), notePayload.end());
+        ipc::Bus::publish("gui.input", std::move(note), false);
+        return;
+    }
+
     bool drawn[4] = { false, false, false, false };
-    uint64_t cursor = 0;
-    for (int pass = 0; pass < 4; pass++) {
+    for (int pass = 0; pass < 4; ++pass) {
         int next = -1;
         uint64_t nextStart = UINT64_MAX;
-        for (int i = 0; i < 4; i++) {
-            const PartitionEntry& p = sel->parts[i];
-            if (drawn[i] || p.lbaCount == 0 || p.lbaStart >= total) continue;
-            if (p.lbaStart < nextStart) {
-                nextStart = p.lbaStart;
-                next = i;
-            }
+        for (int i = 0; i < 4; ++i) {
+            const PartitionEntry& part = sel->parts[i];
+            if (drawn[i] || part.lbaCount == 0 || part.lbaStart >= sel->totalSectors ||
+                static_cast<uint64_t>(part.lbaCount) > sel->totalSectors - part.lbaStart)
+                continue;
+            if (part.lbaStart < nextStart) { nextStart = part.lbaStart; next = i; }
         }
         if (next < 0) break;
 
-        const PartitionEntry& p = sel->parts[next];
-        uint64_t start = p.lbaStart;
-        uint64_t count = p.lbaCount;
-        if (start + count > total) count = total - start;
+        const PartitionEntry& part = sel->parts[next];
+        const uint64_t start = part.lbaStart;
+        const uint64_t count = part.lbaCount;
+        const int left = x + static_cast<int>((start * static_cast<uint64_t>(w)) / sel->totalSectors);
+        const int right = x + static_cast<int>(((start + count) * static_cast<uint64_t>(w)) / sel->totalSectors);
+        const int segmentW = right > left ? right - left : 1;
 
-        if (start > cursor) {
-            uint64_t freeCount = start - cursor;
-            int freeX = x + static_cast<int>((cursor * w) / total);
-            int freeW = static_cast<int>((freeCount * w) / total);
-            if (freeW <= 0) freeW = 1;
-            ipc::Message freeMsg;
-            freeMsg.type = (uint32_t)MsgType::MT_DrawRect;
-            std::ostringstream freeOss;
-            freeOss << s_windowId << "|" << freeX << "|" << barY << "|" << freeW << "|" << barH << "|58|58|58";
-            std::string freePayload = freeOss.str();
-            freeMsg.data.assign(freePayload.begin(), freePayload.end());
-            ipc::Bus::publish("gui.input", std::move(freeMsg), false);
-            if (freeW > 70) {
-                std::string freeLbl = "Unallocated";
-                if (sel->bytesPerSector != 0)
-                    freeLbl += " " + fmtSize(freeCount * sel->bytesPerSector);
-                ipc::Message lblMsg;
-                lblMsg.type = (uint32_t)MsgType::MT_DrawText;
-                std::ostringstream lblOss;
-                lblOss << s_windowId << "|" << (freeX + 4) << "|" << (barY + 10) << "|" << freeLbl << "|210|210|210";
-                std::string lblPayload = lblOss.str();
-                lblMsg.data.assign(lblPayload.begin(), lblPayload.end());
-                ipc::Bus::publish("gui.input", std::move(lblMsg), false);
-            }
+        ipc::Message segment;
+        segment.type = (uint32_t)MsgType::MT_DrawRect;
+        std::ostringstream segmentText;
+        segmentText << s_windowId << "|" << left << "|" << barY << "|" << segmentW
+                    << "|" << barH << "|76|139|245";
+        std::string segmentPayload = segmentText.str();
+        segment.data.assign(segmentPayload.begin(), segmentPayload.end());
+        ipc::Bus::publish("gui.input", std::move(segment), false);
+
+        if (segmentW > 64) {
+            std::string label = "P" + std::to_string(next + 1) + " " + fmtSize(count * sel->bytesPerSector);
+            ipc::Message labelMsg;
+            labelMsg.type = (uint32_t)MsgType::MT_DrawText;
+            std::ostringstream labelText;
+            labelText << s_windowId << "|" << (left + 4) << "|" << (barY + 8) << "|" << label << "|255|255|255";
+            std::string labelPayload = labelText.str();
+            labelMsg.data.assign(labelPayload.begin(), labelPayload.end());
+            ipc::Bus::publish("gui.input", std::move(labelMsg), false);
         }
-
-        int segX = x + static_cast<int>((start * w) / total);
-        int segW = static_cast<int>((count * w) / total);
-        if (segW <= 0) segW = 1;
-
-        ipc::Message segMsg;
-        segMsg.type = (uint32_t)MsgType::MT_DrawRect;
-        std::ostringstream segOss;
-        segOss << s_windowId << "|" << segX << "|" << barY << "|" << segW << "|" << barH << "|76|139|245";
-        std::string segPayload = segOss.str();
-        segMsg.data.assign(segPayload.begin(), segPayload.end());
-        ipc::Bus::publish("gui.input", std::move(segMsg), false);
-
-        std::string lbl = "P" + std::to_string(next + 1) + " " + p.fs + " " + fmtHexByte(p.type);
-        if (p.status == 0x80) lbl += " Active flag";
-        if (sel->bytesPerSector != 0)
-            lbl += " " + fmtSize(static_cast<uint64_t>(p.lbaCount) * sel->bytesPerSector);
-        if (segW > 40) {
-            ipc::Message lblMsg;
-            lblMsg.type = (uint32_t)MsgType::MT_DrawText;
-            std::ostringstream lblOss;
-            lblOss << s_windowId << "|" << (segX + 4) << "|" << (barY + 10) << "|" << lbl << "|255|255|255";
-            std::string lblPayload = lblOss.str();
-            lblMsg.data.assign(lblPayload.begin(), lblPayload.end());
-            ipc::Bus::publish("gui.input", std::move(lblMsg), false);
-        }
-
-        uint64_t end = start + count;
-        if (end > cursor) cursor = end;
         drawn[next] = true;
     }
 
-    if (cursor < total) {
-        uint64_t freeCount = total - cursor;
-        int freeX = x + static_cast<int>((cursor * w) / total);
-        int freeW = w - (freeX - x);
-        if (freeW <= 0) freeW = 1;
-        ipc::Message freeMsg;
-        freeMsg.type = (uint32_t)MsgType::MT_DrawRect;
-        std::ostringstream freeOss;
-        freeOss << s_windowId << "|" << freeX << "|" << barY << "|" << freeW << "|" << barH << "|58|58|58";
-        std::string freePayload = freeOss.str();
-        freeMsg.data.assign(freePayload.begin(), freePayload.end());
-        ipc::Bus::publish("gui.input", std::move(freeMsg), false);
-        if (freeW > 70) {
-            std::string freeLbl = "Unallocated";
-            if (sel->bytesPerSector != 0)
-                freeLbl += " " + fmtSize(freeCount * sel->bytesPerSector);
-            ipc::Message lblMsg;
-            lblMsg.type = (uint32_t)MsgType::MT_DrawText;
-            std::ostringstream lblOss;
-            lblOss << s_windowId << "|" << (freeX + 4) << "|" << (barY + 10) << "|" << freeLbl << "|210|210|210";
-            std::string lblPayload = lblOss.str();
-            lblMsg.data.assign(lblPayload.begin(), lblPayload.end());
-            ipc::Bus::publish("gui.input", std::move(lblMsg), false);
-        }
-    }
-    
-    // Total capacity
-    if (!s_cachedTotalCaption.empty()) {
-        ipc::Message capMsg;
-        capMsg.type = (uint32_t)MsgType::MT_DrawText;
-            std::ostringstream capOss;
-            std::string info = "Device " + std::to_string(sel->devIndex) + ", " + s_cachedTotalCaption + ", sector " + std::to_string(sel->bytesPerSector) + " B, sectors " + std::to_string(sel->totalSectors) + ", " + mbrStatusText(sel->mbrStatus);
-            capOss << s_windowId << "|" << x << "|" << (barY + barH + 6) << "|" << info << "|255|255|255";
-        std::string capPayload = capOss.str();
-        capMsg.data.assign(capPayload.begin(), capPayload.end());
-        ipc::Bus::publish("gui.input", std::move(capMsg), false);
-    }
+    ipc::Message note;
+    note.type = (uint32_t)MsgType::MT_DrawText;
+    std::ostringstream noteText;
+    noteText << s_windowId << "|" << x << "|" << (barY + barH + 6)
+             << "|Blue ranges are MBR partitions. Remaining disk area is not classified as free.|190|190|190";
+    std::string notePayload = noteText.str();
+    note.data.assign(notePayload.begin(), notePayload.end());
+    ipc::Bus::publish("gui.input", std::move(note), false);
 }
-
 void DiskManager::drawActions(int x, int y, int w, int h) {
-    // Title
-    ipc::Message msg;
-    msg.type = (uint32_t)MsgType::MT_DrawText;
-    std::ostringstream oss;
-    oss << s_windowId << "|" << x << "|" << y << "|Actions|255|255|255";
-    std::string payload = oss.str();
-    msg.data.assign(payload.begin(), payload.end());
-    ipc::Bus::publish("gui.input", std::move(msg), false);
-    
-    int colGap = 16;
-    int half = (w - colGap) / 2;
-    if (half < 100) half = 100;
-    
-    int leftX = x;
-    int rightX = x + half + colGap;
-    int btnWLeft = half - 20;
-    int btnWRight = half - 20;
-    if (btnWLeft < 120) btnWLeft = 120;
-    if (btnWRight < 120) btnWRight = 120;
-    
-    int byL = y + HEADER_H;
-    int byR = y + HEADER_H;
-    
-    // Left column
-    s_bxDetectX = leftX; s_bxDetectY = byL;
-    drawButton(s_bxDetectX, s_bxDetectY, btnWLeft, BTN_H, "Detect media", 
-               hit(s_mouseX, s_mouseY, s_bxDetectX, s_bxDetectY, btnWLeft, BTN_H));
-    byL += BTN_H + GAP;
-    
-    s_bxAutoX = leftX; s_bxAutoY = byL;
-    drawButton(s_bxAutoX, s_bxAutoY, btnWLeft, BTN_H, "Set FS: Auto",
-               hit(s_mouseX, s_mouseY, s_bxAutoX, s_bxAutoY, btnWLeft, BTN_H));
-    byL += BTN_H + GAP;
-    
-    s_bxSwitchFatX = leftX; s_bxSwitchFatY = byL;
-    drawDisabledButton(s_bxSwitchFatX, s_bxSwitchFatY, btnWLeft, BTN_H, "Set FS: FAT");
-    byL += BTN_H + GAP;
-    
-    s_bxSwitchTarX = leftX; s_bxSwitchTarY = byL;
-    drawDisabledButton(s_bxSwitchTarX, s_bxSwitchTarY, btnWLeft, BTN_H, "Set FS: TarFS");
-    byL += BTN_H + GAP;
-    
-    s_bxSwitchExtX = leftX; s_bxSwitchExtY = byL;
-    drawDisabledButton(s_bxSwitchExtX, s_bxSwitchExtY, btnWLeft, BTN_H, "Set FS: EXT2");
-    
-    // Right column
-    s_bxFormatExfatX = rightX; s_bxFormatExfatY = byR;
-    drawDisabledButton(s_bxFormatExfatX, s_bxFormatExfatY, btnWRight, BTN_H, "Format as FAT");
-    byR += BTN_H + GAP;
-    
-    s_bxCreatePartX = rightX; s_bxCreatePartY = byR;
-    drawDisabledButton(s_bxCreatePartX, s_bxCreatePartY, btnWRight, BTN_H, "Create partition");
-    byR += BTN_H + GAP;
-    
-    s_bxRefreshX = rightX; s_bxRefreshY = byR;
-    drawButton(s_bxRefreshX, s_bxRefreshY, btnWRight, BTN_H, "Refresh",
-               hit(s_mouseX, s_mouseY, s_bxRefreshX, s_bxRefreshY, btnWRight, BTN_H));
+    ipc::Message title;
+    title.type = (uint32_t)MsgType::MT_DrawText;
+    std::ostringstream titleText;
+    titleText << s_windowId << "|" << x << "|" << y << "|Image and refresh controls|255|255|255";
+    std::string titlePayload = titleText.str();
+    title.data.assign(titlePayload.begin(), titlePayload.end());
+    ipc::Bus::publish("gui.input", std::move(title), false);
 
-    int noteY = byR + BTN_H + GAP;
-    ipc::Message noteMsg;
-    noteMsg.type = (uint32_t)MsgType::MT_DrawText;
-    std::ostringstream noteOss;
-    noteOss << s_windowId << "|" << rightX << "|" << noteY << "|Dangerous actions disabled: read-only disk inspection mode.|180|180|180";
-    std::string notePayload = noteOss.str();
-    noteMsg.data.assign(notePayload.begin(), notePayload.end());
-    ipc::Bus::publish("gui.input", std::move(noteMsg), false);
+    const int controlsY = y + HEADER_H;
+    s_bxRefreshX = x;
+    s_bxRefreshY = controlsY;
+    drawButton(s_bxRefreshX, s_bxRefreshY, 108, BTN_H, "Refresh", hit(s_mouseX, s_mouseY, s_bxRefreshX, s_bxRefreshY, 108, BTN_H));
 
-    int hostY = noteY + 24;
-    ipc::Message hostMsg;
-    hostMsg.type = (uint32_t)MsgType::MT_DrawText;
-    std::ostringstream hostOss;
-#ifdef _WIN32
-    hostOss << s_windowId << "|" << rightX << "|" << hostY << "|Attach image from disks/ (.img, read-only)|210|210|210";
-#else
-    hostOss << s_windowId << "|" << rightX << "|" << hostY << "|Attach .img from VFS /disks or / as read-only RAM disk|210|210|210";
-#endif
-    std::string hostPayload = hostOss.str();
-    hostMsg.data.assign(hostPayload.begin(), hostPayload.end());
-    ipc::Bus::publish("gui.input", std::move(hostMsg), false);
-
-    int navY = hostY + 18;
-    s_bxPrevImageX = rightX;
-    s_bxPrevImageY = navY;
-    drawButton(s_bxPrevImageX, s_bxPrevImageY, 32, BTN_H, "<",
-               hit(s_mouseX, s_mouseY, s_bxPrevImageX, s_bxPrevImageY, 32, BTN_H));
+    s_bxPrevImageX = x + 120;
+    s_bxPrevImageY = controlsY;
+    drawButton(s_bxPrevImageX, s_bxPrevImageY, 32, BTN_H, "<", hit(s_mouseX, s_mouseY, s_bxPrevImageX, s_bxPrevImageY, 32, BTN_H));
+    s_bxNextImageX = x + 160;
+    s_bxNextImageY = controlsY;
+    drawButton(s_bxNextImageX, s_bxNextImageY, 32, BTN_H, ">", hit(s_mouseX, s_mouseY, s_bxNextImageX, s_bxNextImageY, 32, BTN_H));
 
     std::string currentImage = "No .img files found";
-    if (!s_hostImages.empty() && s_selectedHostImageIndex >= 0 && s_selectedHostImageIndex < static_cast<int>(s_hostImages.size())) {
+    if (!s_hostImages.empty() && s_selectedHostImageIndex >= 0 &&
+        s_selectedHostImageIndex < static_cast<int>(s_hostImages.size())) {
         currentImage = s_hostImages[s_selectedHostImageIndex].displayName;
-        if (s_hostImages[s_selectedHostImageIndex].attached) {
-            currentImage += " [attached]";
-        }
+        if (s_hostImages[s_selectedHostImageIndex].attached) currentImage += " [attached]";
     }
-    ipc::Message curMsg;
-    curMsg.type = (uint32_t)MsgType::MT_DrawText;
-    std::ostringstream curOss;
-    curOss << s_windowId << "|" << (rightX + 40) << "|" << (navY + 8) << "|" << currentImage << "|255|255|255";
-    std::string curPayload = curOss.str();
-    curMsg.data.assign(curPayload.begin(), curPayload.end());
-    ipc::Bus::publish("gui.input", std::move(curMsg), false);
+    if (currentImage.size() > 25) currentImage = currentImage.substr(0, 22) + "...";
+    ipc::Message image;
+    image.type = (uint32_t)MsgType::MT_DrawText;
+    std::ostringstream imageText;
+    imageText << s_windowId << "|" << (x + 202) << "|" << (controlsY + 8) << "|" << currentImage << "|220|220|220";
+    std::string imagePayload = imageText.str();
+    image.data.assign(imagePayload.begin(), imagePayload.end());
+    ipc::Bus::publish("gui.input", std::move(image), false);
 
-    s_bxNextImageX = rightX + 220;
-    s_bxNextImageY = navY;
-    drawButton(s_bxNextImageX, s_bxNextImageY, 32, BTN_H, ">",
-               hit(s_mouseX, s_mouseY, s_bxNextImageX, s_bxNextImageY, 32, BTN_H));
+    s_bxAttachImageX = x + 364;
+    s_bxAttachImageY = controlsY;
+    drawButton(s_bxAttachImageX, s_bxAttachImageY, 112, BTN_H, "Attach image", hit(s_mouseX, s_mouseY, s_bxAttachImageX, s_bxAttachImageY, 112, BTN_H));
+    s_bxRescanImagesX = x + 488;
+    s_bxRescanImagesY = controlsY;
+    drawButton(s_bxRescanImagesX, s_bxRescanImagesY, 112, BTN_H, "Rescan images", hit(s_mouseX, s_mouseY, s_bxRescanImagesX, s_bxRescanImagesY, 112, BTN_H));
 
-    s_bxAttachImageX = rightX + 264;
-    s_bxAttachImageY = navY;
-    drawButton(s_bxAttachImageX, s_bxAttachImageY, 160, BTN_H, "Attach image",
-               hit(s_mouseX, s_mouseY, s_bxAttachImageX, s_bxAttachImageY, 160, BTN_H));
+    ipc::Message note;
+    note.type = (uint32_t)MsgType::MT_DrawText;
+    std::ostringstream noteText;
+#ifdef _WIN32
+    noteText << s_windowId << "|" << x << "|" << (controlsY + BTN_H + 8)
+             << "|Hosted mode previews attached .img files only; no host disks are enumerated.|190|190|190";
+#else
+    noteText << s_windowId << "|" << x << "|" << (controlsY + BTN_H + 8)
+             << "|Images attach as read-only RAM disks; only supported image data is shown.|190|190|190";
+#endif
+    std::string notePayload = noteText.str();
+    note.data.assign(notePayload.begin(), notePayload.end());
+    ipc::Bus::publish("gui.input", std::move(note), false);
 
-    s_bxRescanImagesX = rightX + 436;
-    s_bxRescanImagesY = navY;
-    drawButton(s_bxRescanImagesX, s_bxRescanImagesY, 160, BTN_H, "Rescan images",
-               hit(s_mouseX, s_mouseY, s_bxRescanImagesX, s_bxRescanImagesY, 160, BTN_H));
+    if (!s_status.empty()) {
+        ipc::Message status;
+        status.type = (uint32_t)MsgType::MT_DrawText;
+        std::ostringstream statusText;
+        statusText << s_windowId << "|" << x << "|" << (controlsY + BTN_H + 27)
+                   << "|" << s_status << "|220|220|220";
+        std::string statusPayload = statusText.str();
+        status.data.assign(statusPayload.begin(), statusPayload.end());
+        ipc::Bus::publish("gui.input", std::move(status), false);
+    }
+    (void)w;
+    (void)h;
 }
-
 void DiskManager::drawHeaderCell(int x, int y, int w, int h, const char* text) {
     // Background
     ipc::Message bgMsg;
@@ -1623,24 +1228,6 @@ void DiskManager::drawButton(int x, int y, int w, int h, const char* text, bool 
     textMsg.type = (uint32_t)MsgType::MT_DrawText;
     std::ostringstream textOss;
     textOss << s_windowId << "|" << (x + 10) << "|" << (y + 8) << "|" << text << "|255|255|255";
-    std::string textPayload = textOss.str();
-    textMsg.data.assign(textPayload.begin(), textPayload.end());
-    ipc::Bus::publish("gui.input", std::move(textMsg), false);
-}
-
-void DiskManager::drawDisabledButton(int x, int y, int w, int h, const char* text) {
-    ipc::Message bgMsg;
-    bgMsg.type = (uint32_t)MsgType::MT_DrawRect;
-    std::ostringstream bgOss;
-    bgOss << s_windowId << "|" << x << "|" << y << "|" << w << "|" << h << "|38|38|38";
-    std::string bgPayload = bgOss.str();
-    bgMsg.data.assign(bgPayload.begin(), bgPayload.end());
-    ipc::Bus::publish("gui.input", std::move(bgMsg), false);
-
-    ipc::Message textMsg;
-    textMsg.type = (uint32_t)MsgType::MT_DrawText;
-    std::ostringstream textOss;
-    textOss << s_windowId << "|" << (x + 10) << "|" << (y + 8) << "|" << text << "|120|120|120";
     std::string textPayload = textOss.str();
     textMsg.data.assign(textPayload.begin(), textPayload.end());
     ipc::Bus::publish("gui.input", std::move(textMsg), false);

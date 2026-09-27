@@ -1,8 +1,8 @@
 //
 // Disk Manager - guideXOS Server Port
 //
-// A read-only Disk Manager UI for registered disks and host image files,
-// left disk list, right volumes grid, and partition map. Buttons to switch filesystem drivers.
+// Hosted Disk Manager: read-only .img preview. Bare-metal authoritative block
+// device management is implemented by kernel::apps::DiskManagerApp.
 //
 // Ported from guideXOS.Legacy/DefaultApps/DiskManager.cs
 //
@@ -39,8 +39,7 @@ private:
         uint8_t type;          // Partition type
         uint32_t lbaStart;     // Starting LBA
         uint32_t lbaCount;     // Size in sectors
-        std::string fs;        // Detected filesystem ("FAT", "EXT2", "TarFS", "Unknown")
-        std::string mountPoint; // Suggested mount point; not mount state.
+        std::string fs;        // Read-only signature probe result.
         
         PartitionEntry() : status(0), type(0), lbaStart(0), lbaCount(0) {}
     };
@@ -48,11 +47,14 @@ private:
     enum MbrStatus : uint8_t {
         MBR_UNREADABLE = 0,
         MBR_INVALID = 1,
-        MBR_VALID = 2,
+        MBR_PREVIEW_VALID = 2,
         DISK_NOT_INITIALIZED = 3,
-        DISK_GPT_VALID = 4,
-        DISK_GPT_DEGRADED = 5,
-        DISK_UNSUPPORTED = 6,
+        DISK_GPT_UNSUPPORTED = 4,
+        DISK_UNSUPPORTED = 5,
+        MBR_PREVIEW_NO_SIGNATURE = 6,
+        MBR_VALID = 7,
+        DISK_GPT_VALID = 8,
+        DISK_GPT_DEGRADED = 9,
     };
     
     // Disk entry
@@ -66,7 +68,7 @@ private:
         uint32_t bytesPerSector;           // Bytes per sector (usually 512)
         MbrStatus mbrStatus;               // Partition table parse state
         std::string backingPath;           // Optional source path in host mode
-        PartitionEntry parts[4];           // MBR primary partitions
+        PartitionEntry parts[4];           // MBR primary preview entries only
         
         DiskEntry() : isHostImage(false), devIndex(0), haveInfo(false),
                       totalSectors(0), bytesPerSector(512), mbrStatus(MBR_UNREADABLE) {}
@@ -96,22 +98,13 @@ private:
     static std::vector<DiskEntry> s_disks;
     static int s_selectedDiskIndex;
     static std::string s_status;
-    static std::string s_detected;
     static bool s_clickLock;
-    static std::string s_cachedTotalCaption;
     static int s_mouseX, s_mouseY;
     static bool s_mouseDown;
     static std::vector<HostImageEntry> s_hostImages;
     static int s_selectedHostImageIndex;
     
     // Button positions (for hit testing)
-    static int s_bxDetectX, s_bxDetectY;
-    static int s_bxAutoX, s_bxAutoY;
-    static int s_bxSwitchFatX, s_bxSwitchFatY;
-    static int s_bxSwitchTarX, s_bxSwitchTarY;
-    static int s_bxSwitchExtX, s_bxSwitchExtY;
-    static int s_bxFormatExfatX, s_bxFormatExfatY;
-    static int s_bxCreatePartX, s_bxCreatePartY;
     static int s_bxRefreshX, s_bxRefreshY;
     static int s_bxAttachImageX, s_bxAttachImageY;
     static int s_bxPrevImageX, s_bxPrevImageY;
@@ -120,38 +113,24 @@ private:
     
     // Core operations
     static void refreshDisks();
-    static void probeOnce();
     static void readMBRForEntry(DiskEntry& entry);
     static DiskEntry* getSelected();
     static void refreshHostImageLibrary();
     static void attachSelectedHostImage();
     static void selectPrevHostImage();
     static void selectNextHostImage();
-    static bool readHostSectors(const std::string& path, uint64_t lba, uint32_t count, void* buffer, uint32_t sectorSize);
     static bool buildHostDiskEntryFromImage(const HostImageEntry& image, uint8_t devIndex, DiskEntry& entry);
-    static std::string detectFsAtLBAFromImage(const std::string& path, uint32_t lbaStart);
     static bool isImgName(const char* name);
-    
-    // Filesystem operations
-    static std::string detectFsAtLBA(uint8_t devIndex, uint32_t lbaStart, uint32_t sectorCount);
-    static void trySetFS_Auto();
-    static void trySetFS_FAT();
-    static void trySetFS_TAR();
-    static void trySetFS_EXT2();
-    static void tryFormatFAT();
-    static void tryCreatePartitionLargestFree();
     
     // UI rendering
     static void render();
     static void drawLeftPane(int winX, int winY, int winW, int winH);
     static void drawVolumesGrid(int x, int y, int w, int h);
-    static void drawMountsSection(int x, int y, int w, int h);
     static void drawPartitionMap(int x, int y, int w, int h);
     static void drawActions(int x, int y, int w, int h);
     static void drawHeaderCell(int x, int y, int w, int h, const char* text);
     static void drawCell(int x, int y, int w, int h, const char* text);
     static void drawButton(int x, int y, int w, int h, const char* text, bool hover);
-    static void drawDisabledButton(int x, int y, int w, int h, const char* text);
     
     // Input handling
     static void handleMouseMove(int mx, int my);
@@ -164,8 +143,6 @@ private:
     static std::string fmtSize(uint64_t bytes);
     static std::string fmtHexByte(uint8_t value);
     static std::string mbrStatusText(MbrStatus status);
-    static std::string partitionStatusText(const PartitionEntry& part, int partIndex);
-    static std::string suggestMountPoint(const DiskEntry& disk, const PartitionEntry& part, int partIndex);
     static std::string buildStatus();
 };
 

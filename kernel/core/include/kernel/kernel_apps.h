@@ -15,6 +15,7 @@
 #include "kernel/block_device.h"
 #include "kernel/storage_manager.h"
 #include "kernel/disk_initialization.h"
+#include "kernel/disk_manager_model.h"
 #include "kernel/desktop.h"
 #include "kernel/image_adapter.h"
 #include "kernel/navigator_scrollbar.h"
@@ -1178,13 +1179,35 @@ public:
     virtual void draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) override;
 
     virtual void onMouseDown(int x, int y, uint8_t button) override;
+    virtual void onMouseWheel(int x, int y, int wheelDelta) override;
+    virtual void onKeyDown(uint32_t key) override;
     virtual void onWidgetClick(int widgetId) override;
 
     static app::KernelApp* create() { return new DiskManagerApp(); }
 
 private:
     static const int MAX_DISKS = 16;
-    static const int MAX_PARTS = 16; // Bounded UI list; parser retains up to 128.
+    static const int MAX_PARTS = storage::MAX_PARSED_PARTITIONS;
+    static const int MAX_REGIONS = storage::MAX_UNALLOCATED_REGIONS;
+    static const int MAX_LIST_ITEMS = MAX_PARTS + MAX_REGIONS;
+
+    enum SelectedObject : uint8_t {
+        SELECTED_DISK = 0,
+        SELECTED_PARTITION,
+        SELECTED_UNALLOCATED,
+    };
+
+    enum DetailsMode : uint8_t {
+        DETAILS_PROPERTIES = 0,
+        DETAILS_DIAGNOSTICS,
+    };
+
+    enum KeyboardPane : uint8_t {
+        KEYBOARD_DISKS = 0,
+        KEYBOARD_PARTITIONS,
+        KEYBOARD_ACTIONS,
+        KEYBOARD_DETAILS,
+    };
 
     enum InitializeDialogState : uint8_t {
         INITIALIZE_DIALOG_CLOSED = 0,
@@ -1195,31 +1218,48 @@ private:
     };
 
     struct PartEntry {
-        uint64_t startLba;
-        uint64_t sectorCount;
-        char typeLabel[20];
-        char name[64];
-        char fsLabel[16];
+        storage::PartitionEntry parsed;
+        char fsLabel[20];
+    };
+
+    struct ListItem {
+        uint16_t sourceIndex;
+        bool unallocated;
     };
 
     struct DiskEntry {
         char     name[40];
         uint8_t  devIndex;
-        uint64_t totalSectors;
-        uint32_t sectorSize;
         bool     haveInfo;
-        bool     readable;
-        bool     writable;
-        bool     flushSupported;
-        storage::PersistenceClass persistence;
+        storage::DeviceCapabilities capabilities;
         storage::BootSafety bootSafety;
         storage::MountSafety mountSafety;
+        char mountPath[128];
+        uint8_t mountCount;
         storage::DiskState state;
+        storage::PartitionScheme scheme;
+        storage::PartitionError parserError;
+        uint64_t firstUsableLba;
+        uint64_t lastUsableLba;
+        bool protectiveMbr;
+        bool hybridMbr;
+        bool extendedPartitionsPresent;
+        bool primaryGptValid;
+        bool backupGptValid;
+        bool gptCopiesAgree;
+        uint8_t primaryDiskGuid[16];
+        uint8_t backupDiskGuid[16];
+        uint32_t mbrDiskSignature;
         storage::InitializeDiskStatus initializeStatus;
         bool initializeAvailable;
         uint16_t totalPartitionCount;
         PartEntry parts[MAX_PARTS];
         int       partCount;
+        storage::UnallocatedRegion regions[MAX_REGIONS];
+        uint16_t regionCount;
+        bool unallocatedModelValid;
+        ListItem items[MAX_LIST_ITEMS];
+        uint16_t itemCount;
         storage::TargetIdentity identity;
     };
 
@@ -1228,6 +1268,8 @@ private:
     int       m_selectedDisk;
 
     int m_refreshBtnId;
+    int m_propertiesBtnId;
+    int m_diagnosticsBtnId;
     int m_initializeBtnId;
     int m_gptBtnId;
     int m_mbrBtnId;
@@ -1238,12 +1280,42 @@ private:
     storage::InitializeDiskPlan m_initializePlan;
     storage::InitializeDiskResult m_initializeResult;
     char m_initializeMessage[128];
+    char m_statusMessage[128];
+    SelectedObject m_selectedObject;
+    DetailsMode m_detailsMode;
+    KeyboardPane m_keyboardPane;
+    int m_selectedPart;
+    int m_selectedRegion;
+    int m_selectedListItem;
+    int m_diskScroll;
+    int m_partitionScroll;
+    int m_detailScroll;
+    int m_actionFocus;
+    int m_diskRowsTop;
+    int m_diskRowsBottom;
+    int m_diskVisibleRows;
+    int m_partitionRowsTop;
+    int m_partitionRowsBottom;
+    int m_partitionVisibleRows;
+    int m_mapX;
+    int m_mapY;
+    int m_mapW;
+    int m_footerY;
 
     void        scanDisks();
     void        readPartitionTable(DiskEntry& disk);
     const char* detectFs(uint8_t devIndex, uint64_t lbaStart, uint64_t sectorCount);
     void        formatSize(uint64_t bytes, char* out, int outSize) const;
+    void        updateResponsiveControls(uint32_t w, uint32_t h);
     void        updateInitializeControls();
+    void        selectDisk(int index);
+    void        selectPartition(int index);
+    void        selectRegion(int index);
+    void        selectListItem(int index);
+    void        moveKeyboardSelection(int delta);
+    void        activateKeyboardAction();
+    void        drawDetails(uint32_t x, uint32_t y, uint32_t w, uint32_t h,
+                           const DiskEntry& disk);
     void        beginInitializeConfirmation(storage::PartitionScheme scheme);
     void        runInitializeOperation();
     void        closeInitializeDialog();

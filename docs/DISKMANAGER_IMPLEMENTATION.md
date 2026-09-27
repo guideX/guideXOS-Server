@@ -1,12 +1,12 @@
 # Disk Manager: Current Implementation Status
 
-This describes the current implementation after DM4. Historical phase details are in the [DM1 audit](DISK_MANAGER_PHASE_DM1_AUDIT.md), [DM2 safety foundation report](DISK_MANAGER_PHASE_DM2_SAFETY_FOUNDATION.md), [DM3 initialization report](DISK_MANAGER_PHASE_DM3_INITIALIZE_DISK.md), and [DM4 boot provenance and transport safety report](DISK_MANAGER_PHASE_DM4_BOOT_PROVENANCE.md).
+This describes the current implementation after DM5. Historical phase details are in the [DM1 audit](DISK_MANAGER_PHASE_DM1_AUDIT.md), [DM2 safety foundation report](DISK_MANAGER_PHASE_DM2_SAFETY_FOUNDATION.md), [DM3 initialization report](DISK_MANAGER_PHASE_DM3_INITIALIZE_DISK.md), [DM4 boot provenance and transport safety report](DISK_MANAGER_PHASE_DM4_BOOT_PROVENANCE.md), and [DM5 UI and diagnostics report](DISK_MANAGER_PHASE_DM5_UI_AND_DIAGNOSTICS.md).
 
 ## Current behavior
 
-The bare-metal Disk Manager enumerates registered block devices, parses normalized MBR/GPT state, and offers **Initialize Disk...** for eligible raw disks. It defaults to GPT and retains MBR as a compatibility choice. The UI displays the selected device's capacity, sector size, read/write and durability summary, registry identity details, boot provenance, mount/root state, model, serial, and initialization rejection reason where available.
+The bare-metal Disk Manager enumerates registered block devices without adding a synthetic disk, parses normalized MBR/GPT state, and presents up to 128 validated partition entries plus bounded unallocated regions. The resizable view has a scrollable device pane, partition/unallocated list, proportional map, selected-object Properties, and Storage diagnostics. Disk, GPT/MBR partition, and gap selection follow stable identity across refresh. It offers **Initialize Disk...** only for raw eligible disks, defaults to GPT, and retains MBR as a compatibility choice. The DM2–DM4 storage safety services remain authoritative.
 
-The hosted Windows viewer inspects attached `.img` files and does not enumerate host physical disks. The test suite registers only in-memory fake disks. Image-backed RAM disks are read-only and volatile.
+The hosted Windows viewer labels attached `.img` files as images and does not enumerate host physical disks. It previews validated 512-byte MBR ranges only; it does not parse GPT or classify remaining image space as unallocated. Image-backed RAM disks are read-only and volatile. Its current window remains fixed at 920×560. Mount paths are reported at device level because VFS does not associate a mount with a partition identity.
 
 Initialization creates an empty partition table only. It does not create or delete partitions, format, repair, resize, wipe, convert, or mount a device.
 
@@ -30,10 +30,12 @@ The parser and initializer validate geometry and checked ranges and support 512-
 
 ## Verification and build status
 
-The deterministic storage-manager/parser/initializer suite passed **155 checks, 0 failures**. It covers MBR/GPT layout and CRCs, both supported test sector sizes, boot provenance and legacy fallback, registry pins and slot reuse, removal during flush/read-back, RAM-disk lifetime, durability disagreement, and fake-port ATA flush command/readiness/error/timeout behavior. The tests use only in-memory storage.
+The deterministic storage-manager/parser/initializer and Disk Manager model suite passed **188 checks, 0 failures**. It covers MBR/GPT layout and CRCs, both supported test sector sizes, bounded free-space computation, GPT usable-range and degraded-copy behavior, contextual action availability, boot provenance and legacy fallback, stable selection and slot reuse, registry pins, removal during flush/read-back, RAM-disk lifetime, durability disagreement, and fake-port ATA flush command/readiness/error/timeout behavior. The tests use only in-memory storage.
 
-Targeted C++14 syntax-only compilation passed for the block/storage/parser/initializer/RAM-disk/ATA/NVMe sources and the UEFI loader/GUID definitions. BootInfo static checks passed. The bare-metal `kernel_apps.cpp` change was not validated by the available host compiler: MinGW's Windows headers and target configuration collide with the bare-metal types, and MSVC `cl` is unavailable. The normal build stopped at `verify-mbedtls-profile.ps1` because `third_party/mbedtls` is missing; dependency policy was not changed. QEMU is not installed, so no disposable-image proof was run.
+`git diff --check` passed. The normal `cmd /c build.bat` stopped before C++ compilation because `third_party/mbedtls` is missing; dependency policy was not changed. The available MinGW compiler cannot provide a valid bare-metal UI compile because it targets Windows and collides with the kernel headers; MSVC `cl` and QEMU are unavailable. No visual/runtime smoke test was performed.
+
+The hosted `disk_manager.cpp` translation unit did pass MinGW C++17 syntax-only validation; its only warning was the existing misleading-indentation warning in `gui_protocol.h:96`.
 
 ## Current outcome and next work
 
-DM4 completes the boot-provenance, registry-coordination, and persistence-testing foundation. ATA PIO can become eligible through the existing common safety engine under supported legacy-path and valid-flush conditions; this is not a claim of physical-hardware validation. Recommended next work is AHCI registration and flush, NVMe per-controller queues plus checked Flush, USB shared registration plus SYNCHRONIZE CACHE, transport detach integration, and a two-disk QEMU or disposable-hardware proof. See the [DM4 report](DISK_MANAGER_PHASE_DM4_BOOT_PROVENANCE.md) for the full matrix and exact blockers.
+DM5 completes the authoritative read-only UI and diagnostics groundwork. The remaining VFS partition-mount identity limitation is documented, and hosted image viewing remains deliberately limited. Recommended DM6 work is a new Create Partition operation built on the storage lease, exact target identity, validated unallocated extents, alignment and table-specific bounds, durable write/read-back verification, rollback, and fake-media tests. No such operation is implemented in DM5. See the [DM5 report](DISK_MANAGER_PHASE_DM5_UI_AND_DIAGNOSTICS.md) for the UI behavior and build/runtime limits.

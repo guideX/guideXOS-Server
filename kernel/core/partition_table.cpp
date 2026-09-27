@@ -313,6 +313,7 @@ static bool parse_gpt_array(uint8_t deviceIndex, const GptHeader& header,
                 if (output) {
                     PartitionEntry& part = output[outputCount++];
                     clear_bytes(&part, sizeof(part));
+                    part.partitionNumber = static_cast<uint16_t>(entriesCompleted);
                     part.isGpt = true;
                     copy_bytes(part.typeGuid, typeGuid, 16);
                     copy_bytes(part.uniqueGuid, uniqueGuid, 16);
@@ -442,6 +443,7 @@ static bool parse_mbr(const uint8_t* sector, uint64_t totalSectors,
         if (is_extended_type(type)) model.extendedPartitionsPresent = true;
         PartitionEntry& part = model.partitions[model.partitionCount++];
         clear_bytes(&part, sizeof(part));
+        part.partitionNumber = static_cast<uint16_t>(i + 1);
         part.mbrType = type;
         part.bootable = status == 0x80;
         part.startLba = start;

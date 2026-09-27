@@ -4,6 +4,7 @@
 #include "../kernel/core/include/kernel/partition_table.h"
 #include "../kernel/core/include/kernel/storage_manager.h"
 #include "../kernel/core/include/kernel/disk_initialization.h"
+#include "../kernel/core/include/kernel/disk_manager_model.h"
 #include "../kernel/core/include/kernel/ramdisk.h"
 #include "../kernel/core/include/kernel/vfs.h"
 #include "../kernel/core/include/kernel/ata.h"
@@ -272,6 +273,7 @@ enum class GptFixture {
     BothArrayCrcBad,
     OutOfUsableRange,
     OverlappingPartitions,
+    CopiesDisagree,
     TooManyEntries,
 };
 
@@ -345,6 +347,10 @@ void build_gpt(FakeDisk& disk, GptFixture fixture = GptFixture::Valid)
                      primaryArrayLba, entryCount, entriesCrc);
     write_gpt_header(disk, backupHeaderLba, 1, firstUsable, lastUsable,
                      backupArrayLba, entryCount, entriesCrc);
+    if (fixture == GptFixture::CopiesDisagree) {
+        write_gpt_header(disk, backupHeaderLba, 1, firstUsable + 1, lastUsable,
+                         backupArrayLba, entryCount, entriesCrc);
+    }
 
     set_mbr_signature(disk);
     const uint32_t protectiveCount = disk.sectorCount - 1 > 0xFFFFFFFFull
@@ -356,6 +362,35 @@ void build_gpt(FakeDisk& disk, GptFixture fixture = GptFixture::Valid)
     if (fixture == GptFixture::PrimaryArrayCrcBad ||
         fixture == GptFixture::BothArrayCrcBad) sector(disk, primaryArrayLba)[150] ^= 0x01;
     if (fixture == GptFixture::BothArrayCrcBad) sector(disk, backupArrayLba)[150] ^= 0x01;
+}
+
+void build_empty_gpt(FakeDisk& disk)
+{
+    std::fill(disk.bytes.begin(), disk.bytes.end(), 0);
+    const uint32_t entryCount = 128;
+    const uint64_t arrayBytes = static_cast<uint64_t>(entryCount) * 128;
+    const uint64_t arraySectors = (arrayBytes + disk.sectorSize - 1) / disk.sectorSize;
+    const uint64_t backupHeaderLba = disk.sectorCount - 1;
+    const uint64_t backupArrayLba = backupHeaderLba - arraySectors;
+    const uint64_t firstUsable = 2 + arraySectors;
+    const uint64_t lastUsable = backupArrayLba - 1;
+    std::vector<uint8_t> entries(static_cast<size_t>(arrayBytes), 0);
+    const uint32_t entriesCrc = storage::crc32(entries.data(), entries.size());
+    for (uint64_t i = 0; i < arraySectors; ++i) {
+        const size_t offset = static_cast<size_t>(i * disk.sectorSize);
+        const size_t amount = entries.size() - offset < disk.sectorSize
+            ? entries.size() - offset : disk.sectorSize;
+        std::memcpy(sector(disk, 2 + i), entries.data() + offset, amount);
+        std::memcpy(sector(disk, backupArrayLba + i), entries.data() + offset, amount);
+    }
+    write_gpt_header(disk, 1, backupHeaderLba, firstUsable, lastUsable,
+                     2, entryCount, entriesCrc);
+    write_gpt_header(disk, backupHeaderLba, 1, firstUsable, lastUsable,
+                     backupArrayLba, entryCount, entriesCrc);
+    set_mbr_signature(disk);
+    set_mbr_partition(disk, 0, 0, 0xEE, 1,
+        disk.sectorCount - 1 > 0xFFFFFFFFull
+            ? 0xFFFFFFFFu : static_cast<uint32_t>(disk.sectorCount - 1));
 }
 
 storage::PartitionTableModel parse_fixture(FakeDisk& disk, bool& parsed)
@@ -679,6 +714,16 @@ int main()
     check(parsed && model.state == storage::DISK_STATE_VALID_MBR &&
           model.partitions[0].startLba == 4,
           "4096-byte logical sector MBR parsed without a 512-byte read buffer");
+    storage::UnallocatedRegion fourKnGaps[storage::MAX_UNALLOCATED_REGIONS] = {};
+    uint16_t fourKnGapCount = 0;
+    check(storage::compute_unallocated_regions(model, fourKnMbr.sectorCount,
+              fourKnMbr.sectorSize, fourKnGaps,
+              storage::MAX_UNALLOCATED_REGIONS, fourKnGapCount) &&
+          fourKnGapCount == 2 && fourKnGaps[0].startLba == 1 &&
+          fourKnGaps[0].endLba == 3 && fourKnGaps[0].capacityBytes == 3u * 4096u &&
+          fourKnGaps[0].alignmentSectors == 256 &&
+          !fourKnGaps[0].startAlignedTo1MiB,
+          "4Kn MBR gaps report correct byte size and 1 MiB alignment");
 
     FakeDisk fourKnGpt(4096, 256);
     build_gpt(fourKnGpt);
@@ -686,6 +731,235 @@ int main()
     check(parsed && model.state == storage::DISK_STATE_VALID_GPT &&
           model.primaryGptValid && model.backupGptValid,
           "4096-byte logical sector GPT parsed with both copies");
+
+    FakeDisk disagreeingGpt(512, 4096);
+    build_gpt(disagreeingGpt, GptFixture::CopiesDisagree);
+    model = parse_fixture(disagreeingGpt, parsed);
+    storage::UnallocatedRegion disagreeingGaps[storage::MAX_UNALLOCATED_REGIONS] = {};
+    uint16_t disagreeingGapCount = 0;
+    check(parsed && model.state == storage::DISK_STATE_GPT_DEGRADED &&
+          model.primaryGptValid && model.backupGptValid && !model.gptCopiesAgree &&
+          !storage::compute_unallocated_regions(model, disagreeingGpt.sectorCount,
+              disagreeingGpt.sectorSize, disagreeingGaps,
+              storage::MAX_UNALLOCATED_REGIONS, disagreeingGapCount) &&
+          disagreeingGapCount == 0,
+          "disagreeing valid GPT copies do not produce unallocated-space claims");
+
+    storage::UnallocatedRegion gaps[storage::MAX_UNALLOCATED_REGIONS] = {};
+    uint16_t gapCount = 0;
+    check(!storage::compute_unallocated_regions(
+              parse_fixture(raw, parsed), raw.sectorCount, raw.sectorSize,
+              gaps, storage::MAX_UNALLOCATED_REGIONS, gapCount) && gapCount == 0,
+          "raw media does not invent validated unallocated regions");
+
+    model = parse_fixture(emptyMbr, parsed);
+    check(storage::compute_unallocated_regions(model, emptyMbr.sectorCount,
+              emptyMbr.sectorSize, gaps, storage::MAX_UNALLOCATED_REGIONS,
+              gapCount) && gapCount == 1 && gaps[0].startLba == 1 &&
+          gaps[0].endLba == 127 && gaps[0].sectorCount == 127 &&
+          gaps[0].capacityBytes == 127u * 512u,
+          "empty valid MBR exposes only sectors after the partition-table sector");
+
+    model = parse_fixture(oneMbr, parsed);
+    check(storage::compute_unallocated_regions(model, oneMbr.sectorCount,
+              oneMbr.sectorSize, gaps, storage::MAX_UNALLOCATED_REGIONS,
+              gapCount) && gapCount == 2 && gaps[0].startLba == 1 &&
+          gaps[0].endLba == 7 && gaps[1].startLba == 18 &&
+          gaps[1].endLba == 127,
+          "MBR gap calculation bounds both sides of the validated partition");
+
+    FakeDisk emptyGpt(512, 4096);
+    build_empty_gpt(emptyGpt);
+    model = parse_fixture(emptyGpt, parsed);
+    check(parsed && model.state == storage::DISK_STATE_VALID_GPT &&
+          model.partitionCount == 0 &&
+          storage::compute_unallocated_regions(model, emptyGpt.sectorCount,
+              emptyGpt.sectorSize, gaps, storage::MAX_UNALLOCATED_REGIONS,
+              gapCount) && gapCount == 1 && gaps[0].startLba == 34 &&
+          gaps[0].endLba == 4062 && gaps[0].insideUsableRange,
+          "empty GPT free extent is clipped to its validated usable LBA range");
+
+    model = parse_fixture(validGpt, parsed);
+    check(storage::compute_unallocated_regions(model, validGpt.sectorCount,
+              validGpt.sectorSize, gaps, storage::MAX_UNALLOCATED_REGIONS,
+              gapCount) && gapCount == 2 && gaps[0].startLba == 34 &&
+          gaps[0].endLba == 37 && gaps[1].startLba == 99 &&
+          gaps[1].endLba == 4062,
+          "populated GPT extents leave metadata outside the usable map");
+
+    model = parse_fixture(badHeader, parsed);
+    check(model.state == storage::DISK_STATE_GPT_DEGRADED &&
+          storage::compute_unallocated_regions(model, badHeader.sectorCount,
+              badHeader.sectorSize, gaps, storage::MAX_UNALLOCATED_REGIONS,
+              gapCount) && gapCount == 2,
+          "degraded GPT read-only extent model uses its valid backup copy");
+
+    model = parse_fixture(overlapMbr, parsed);
+    check(model.state == storage::DISK_STATE_INVALID_PARTITION_TABLE &&
+          !storage::compute_unallocated_regions(model, overlapMbr.sectorCount,
+              overlapMbr.sectorSize, gaps, storage::MAX_UNALLOCATED_REGIONS,
+              gapCount) && gapCount == 0,
+          "overlapping MBR entries cannot create false free-space gaps");
+
+    storage::UnallocatedRegion clipped[1] = {};
+    model = parse_fixture(validGpt, parsed);
+    check(!storage::compute_unallocated_regions(model, validGpt.sectorCount,
+              validGpt.sectorSize, clipped, 1, gapCount) && gapCount == 0,
+          "unallocated extent output bound fails closed without truncation");
+
+    check(std::strcmp(storage::disk_manager_state_summary(
+              storage::DISK_STATE_NOT_INITIALIZED, false, false),
+              "Not Initialized") == 0 &&
+          std::strcmp(storage::disk_manager_state_summary(
+              storage::DISK_STATE_INVALID_PARTITION_TABLE, false, false),
+              "Invalid Partition Table") == 0 &&
+          std::strcmp(storage::disk_manager_state_summary(
+              storage::DISK_STATE_GPT_DEGRADED, true, false),
+              "GPT | Primary valid, backup invalid") == 0 &&
+          std::strcmp(storage::disk_manager_state_summary(
+              storage::DISK_STATE_GPT_DEGRADED, false, true),
+              "GPT | Primary invalid, backup valid") == 0 &&
+          std::strcmp(storage::disk_manager_state_summary(
+              storage::DISK_STATE_UNREADABLE, false, false), "Unreadable") == 0 &&
+          std::strcmp(storage::disk_manager_state_summary(
+              storage::DISK_STATE_VALID_MBR, false, false), "Online | MBR") == 0 &&
+          std::strcmp(storage::disk_manager_state_summary(
+              storage::DISK_STATE_VALID_GPT, true, true), "Online | GPT") == 0,
+          "state summary separates raw, invalid, and both GPT degraded directions");
+
+    check(std::strcmp(storage::disk_manager_boot_summary(
+              storage::BOOT_DEVICE_IS_TARGET), "Boot device; protected") == 0 &&
+          std::strcmp(storage::disk_manager_boot_summary(
+              storage::BOOT_DEVICE_DEFINITELY_NOT_TARGET),
+              "Definitely not boot device") == 0 &&
+          std::strcmp(storage::disk_manager_boot_summary(
+              storage::BOOT_DEVICE_IDENTITY_UNKNOWN),
+              "Boot identity unknown") == 0,
+          "boot presentation distinguishes protected, definitely-not-boot, and unknown");
+
+    int dm5WriteActions = 0;
+    for (uint8_t action = 0; action < storage::DISK_MANAGER_ACTION_COUNT; ++action)
+        if (storage::disk_manager_action_is_write(
+                static_cast<storage::DiskManagerAction>(action))) ++dm5WriteActions;
+    check(dm5WriteActions == 1 && storage::disk_manager_action_is_write(
+              storage::DISK_MANAGER_ACTION_INITIALIZE),
+          "Initialize Disk is the only DM5 contextual write action");
+    check(storage::disk_manager_action_enabled(
+              storage::DISK_MANAGER_ACTION_INITIALIZE, true,
+              storage::DISK_STATE_NOT_INITIALIZED, true, true) &&
+          !storage::disk_manager_action_enabled(
+              storage::DISK_MANAGER_ACTION_INITIALIZE, true,
+              storage::DISK_STATE_NOT_INITIALIZED, false, true) &&
+          !storage::disk_manager_action_enabled(
+              storage::DISK_MANAGER_ACTION_INITIALIZE, true,
+              storage::DISK_STATE_INVALID_PARTITION_TABLE, true, true) &&
+          !storage::disk_manager_action_enabled(
+              storage::DISK_MANAGER_ACTION_INITIALIZE, true,
+              storage::DISK_STATE_VALID_GPT, true, true),
+          "Initialize Disk action is enabled only for storage-approved raw state");
+    check(!storage::disk_manager_action_enabled(
+              storage::DISK_MANAGER_ACTION_PROPERTIES, false,
+              storage::DISK_STATE_UNREADABLE, false, true) &&
+          storage::disk_manager_action_enabled(
+              storage::DISK_MANAGER_ACTION_REFRESH, false,
+              storage::DISK_STATE_UNREADABLE, false, true) &&
+          !storage::disk_manager_action_enabled(
+              storage::DISK_MANAGER_ACTION_REFRESH, true,
+              storage::DISK_STATE_VALID_GPT, false, false),
+          "contextual read-only actions require selection and closed dialogs as appropriate");
+
+    check(std::strcmp(storage::disk_manager_mount_summary(
+              storage::DEVICE_ROOT_BACKING), "Root backing device") == 0 &&
+          std::strcmp(storage::disk_manager_mount_summary(
+              storage::DEVICE_MOUNTED), "Mounted on device") == 0 &&
+          std::strcmp(storage::disk_manager_mount_summary(
+              storage::DEVICE_IDENTITY_UNKNOWN),
+              "Mount relationship unknown") == 0,
+          "mount presentation stays at device level when partition identity is unknown");
+
+    uint16_t visibleFirst = 0, visibleCount = 0;
+    storage::disk_manager_visible_range(0, 0, 5, visibleFirst, visibleCount);
+    check(visibleFirst == 0 && visibleCount == 0,
+          "bounded list displays a truthful empty state for zero entries");
+    storage::disk_manager_visible_range(1, 0, 5, visibleFirst, visibleCount);
+    check(visibleFirst == 0 && visibleCount == 1,
+          "bounded list displays one item without fabricating rows");
+    storage::disk_manager_visible_range(4, 0, 4, visibleFirst, visibleCount);
+    check(visibleFirst == 0 && visibleCount == 4,
+          "bounded list includes all four entries when they fit");
+    storage::disk_manager_visible_range(16, 7, 5, visibleFirst, visibleCount);
+    check(visibleFirst == 7 && visibleCount == 5,
+          "16-entry device list pages from a stable offset");
+    storage::disk_manager_visible_range(42, 30, 8, visibleFirst, visibleCount);
+    check(visibleFirst == 30 && visibleCount == 8,
+          "32-plus partition pages show bounded rows without dropping the total");
+    storage::disk_manager_visible_range(128, 120, 16, visibleFirst, visibleCount);
+    check(visibleFirst == 120 && visibleCount == 8,
+          "maximum parser partition count remains navigable at the final page");
+
+    storage::PartitionEntry guidBefore = {};
+    guidBefore.isGpt = true;
+    guidBefore.uniqueGuid[0] = 0x42;
+    guidBefore.startLba = 100;
+    guidBefore.endLba = 199;
+    storage::PartitionEntry guidAfter = guidBefore;
+    guidAfter.startLba = 120;
+    guidAfter.endLba = 219;
+    check(storage::disk_manager_same_partition(guidBefore, guidAfter),
+          "GPT selection follows its unique GUID across a moved table row");
+    guidAfter.uniqueGuid[0] = 0x43;
+    check(!storage::disk_manager_same_partition(guidBefore, guidAfter),
+          "GPT selection clears when the unique GUID changes");
+    storage::PartitionEntry mbrBefore = {};
+    mbrBefore.mbrType = 0x83;
+    mbrBefore.startLba = 8;
+    mbrBefore.endLba = 17;
+    storage::PartitionEntry mbrAfter = mbrBefore;
+    check(storage::disk_manager_same_partition(mbrBefore, mbrAfter),
+          "MBR selection matches validated location and type identity");
+    mbrAfter.bootable = !mbrBefore.bootable;
+    check(storage::disk_manager_same_partition(mbrBefore, mbrAfter),
+          "MBR selection survives an active-flag change to the same location/type");
+    mbrAfter = mbrBefore;
+    ++mbrAfter.startLba;
+    check(!storage::disk_manager_same_partition(mbrBefore, mbrAfter),
+          "MBR selection clears when partition bounds change");
+
+    storage::UnallocatedRegion regionBefore = {};
+    regionBefore.startLba = 1000;
+    regionBefore.endLba = 1999;
+    storage::UnallocatedRegion regionAfter = regionBefore;
+    check(storage::disk_manager_same_region(regionBefore, regionAfter),
+          "unallocated-space selection follows exact LBA bounds on refresh");
+    ++regionAfter.endLba;
+    check(!storage::disk_manager_same_region(regionBefore, regionAfter),
+          "unallocated-space selection clears when its bounds change");
+
+    FakeDisk dm5IdentityDisk(512, 128);
+    FakeDisk dm5UnrelatedDisk(512, 128);
+    const uint8_t dm5IdentityIndex = register_fake(dm5IdentityDisk);
+    storage::TargetIdentity oldIdentity = {};
+    storage::TargetIdentity refreshedIdentity = {};
+    storage::capture_target_identity(dm5IdentityIndex, oldIdentity);
+    const uint8_t dm5UnrelatedIndex = register_fake(dm5UnrelatedDisk);
+    storage::capture_target_identity(dm5IdentityIndex, refreshedIdentity);
+    check(oldIdentity.registryGeneration != refreshedIdentity.registryGeneration &&
+          oldIdentity.registrationId == refreshedIdentity.registrationId &&
+          storage::disk_manager_same_disk_incarnation(oldIdentity, refreshedIdentity),
+          "disk selection survives safe refresh after an unrelated registry change");
+    check(unregister_fake(dm5IdentityIndex, dm5IdentityDisk),
+          "selection fixture unregisters its original target");
+    FakeDisk dm5SlotReplacement(512, 128);
+    const uint8_t dm5ReplacementIndex = register_fake(dm5SlotReplacement);
+    storage::TargetIdentity dm5ReplacementIdentity = {};
+    storage::capture_target_identity(dm5ReplacementIndex, dm5ReplacementIdentity);
+    check(dm5ReplacementIndex == dm5IdentityIndex &&
+          !storage::disk_manager_same_disk_incarnation(oldIdentity,
+                                                        dm5ReplacementIdentity),
+          "slot reuse cannot retain stale disk selection");
+    check(unregister_fake(dm5ReplacementIndex, dm5SlotReplacement) &&
+          unregister_fake(dm5UnrelatedIndex, dm5UnrelatedDisk),
+          "identity fixtures release all registered devices");
 
     FakeDisk unreadable(512, 128);
     unreadable.failReads = true;
